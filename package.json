@@ -2,8 +2,7 @@
   "name": "krig-note-v2",
   "version": "0.1.0",
   "description": "KRIG-Note V2 — 自上而下分层重构",
-  "type": "module",
-  "main": ".vite/build/main.js",
+  "main": ".vite/build/index.js",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
