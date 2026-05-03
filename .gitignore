@@ -1,0 +1,10 @@
+node_modules/
+.vite/
+dist/
+out/
+.DS_Store
+*.log
+tmp/
+debug/
+.env
+.env.local
