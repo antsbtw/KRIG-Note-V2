@@ -527,7 +527,7 @@ V1 教训:**过度细拆 → 每阶段"小修小补" → 推进归零**。V2 反
 
 ### 6.4 阶段间拍板
 
-- 每层完成后,Claude 写一份 `docs/<阶段名>-completion-report.md` 描述"用户应该能看到什么"
+- 每层完成后,Claude 写一份 `docs/RefactorV2/stages/L<n>-<name>-completion.md` 描述"用户应该能看到什么"(详见 `docs/RefactorV2/README.md`)
 - 用户实际跑 `npm start` 验证 → 看到符合预期则确认通过 → 进下一层
 - 用户验证失败则当场调试,直到验证通过才进下一层
 

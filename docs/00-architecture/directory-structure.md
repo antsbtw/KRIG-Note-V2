@@ -204,34 +204,54 @@ overrides: [
 
 ---
 
-## 5. 子目录设计原则(分层写)
+## 5. 子目录设计原则(分层写 + 文档与代码同位)
 
 第一层目录冻结后,**各目录内部子结构在真要实现那一层时再设计**。
 
-### 5.1 子目录文档命名约定
+### 5.1 文档归位原则
 
-每个第一层目录有自己的子目录设计文档,命名 `directory-structure-<目录名>.md`,放在 `docs/00-architecture/` 下。
+按"文档与代码同位"原则,V2 不同类型文档分别归位到不同位置:
 
-例:
-- `directory-structure-platform.md`(L0 阶段实现时写)
-- `directory-structure-shell.md`(L2 阶段实现时写)
-- `directory-structure-views.md`(实现具体视图时写,如 NoteView 阶段)
-- `directory-structure-capabilities.md`(每个能力实现时,可分别写 `directory-structure-capability-text-editing.md` 等)
+| 文档类型 | 归位 | 理由 |
+|---|---|---|
+| **跨层纲领**(charter / vision / directory-structure 等) | `docs/00-architecture/` | 不属于任何单一层 |
+| **业务领域设计**(note / block / graph 等业务概念) | `docs/10-business-design/` | 跨层,按业务组织 |
+| **V1 历史归档** | `docs/99-archive-v1/` | 不动 |
+| **阶段实施报告**(L0~L5 完成报告) | `docs/RefactorV2/stages/` | 按时间序,不按层 |
+| **每层 README**(快速说明) | `src/<层>/README.md` | 与代码同位 |
+| **每层 DESIGN**(详细设计) | `src/<层>/DESIGN.md` | 与代码同位,改代码时强制同步 |
+| **每个模块 DESIGN**(NoteView / 某能力等) | `src/<层>/<模块>/DESIGN.md` | 同上 |
 
-### 5.2 子目录文档内容要求
+**核心命题**:**架构性文档 → docs/(跨层、跨时间)** + **代码相关文档 → src/(与代码同位)**。
 
-- 该目录的子目录划分(及理由)
+### 5.2 src/<层>/README.md 内容要求
+
+每个第一层目录至少有 README,内容:
+- 该层做什么(职责契约)
+- 屏障约束
+- 子目录划分(指向 DESIGN.md 详述)
+- 当前状态 + 下一步什么时候扩展
+
+### 5.3 src/<层>/DESIGN.md 内容要求
+
+那一层真要实现时写:
+- 子目录详细划分(及理由)
 - 文件命名约定(如有特殊约定)
 - 内部模块依赖关系
-- 与其他目录的接口契约
+- 与其他层的接口契约
 - 屏障约束的具体落地(如有)
 
-### 5.3 第一层目录强制要求
+### 5.4 src/<层>/<模块>/DESIGN.md(可选)
 
-每个第一层目录**至少**有:
-- `README.md` — 简要说明"这一层做什么 + 当前状态 + 下一步什么时候扩展"
+具体模块实现时写,如:
+- `src/views/note/DESIGN.md` — NoteView 详细设计(在 L5 NoteView 阶段写)
+- `src/capabilities/text-editing/DESIGN.md` — text-editing 能力详细设计(实现该能力时写)
 
-`README.md` 在第一层冻结时就写好,后期内部子结构变化时可更新但不必频繁。
+### 5.5 阶段实施报告
+
+每个 L 阶段(L0~L5)完成时,在 `docs/RefactorV2/stages/` 内写一份 `L<n>-<name>-completion.md`,内容详见 `docs/RefactorV2/README.md`。
+
+不与 src/<层>/DESIGN.md 重复——前者是"实施过程记录"(用户可感知验证 / 完成判据 / 遗留问题),后者是"架构设计稳定文档"(那一层的设计契约)。
 
 ---
 
@@ -265,6 +285,7 @@ overrides: [
 |---|---|---|---|
 | 2026-05-03 | v0.1 | 初稿;详细描述 9 个第一层 + 各目录内部子结构(views / capabilities 3 类 / semantic / storage / platform / shell / workspace / slot / shared 各自 sub-tree)+ 与 V1 目录详细对应 — 备份为 `_archive_directory-structure-v0.1-detailed.md` 供未来真实现时参考 | wenwu + Claude |
 | 2026-05-03 | v0.2 | 重写,大幅简化;采用"分层写"原则——本文档仅定义第一层 9 目录 + 职责契约 + 屏障 + 命名 + path alias + ESLint;子目录细节移到独立 `directory-structure-<x>.md`(那一层真实现时再写);v0.1 详细子结构归档为 `_archive_` 文件 | wenwu + Claude |
+| 2026-05-03 | v0.3 | § 5 重构;采用"文档与代码同位 + 阶段记录单独存放"混合方案;层级 README/DESIGN 改放 `src/<层>/` 内(与代码同位),取代之前"放 docs/00-architecture/" 的安排;新建 `docs/RefactorV2/stages/` 存放阶段实施报告 | wenwu + Claude |
 
 ---
 
