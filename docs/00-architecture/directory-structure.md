@@ -1,30 +1,34 @@
-# KRIG-Note V2 目录结构
+# KRIG-Note V2 目录结构(顶层)
 
-> v0.1 · 2026-05-03 · 草稿
+> v0.2 · 2026-05-03
 >
 > 配套文档:[charter.md](./charter.md)
 >
-> 设计决策:对话 2026-05-03 用户拍板"先纵向 4 层 + 后横向 L0~L5 + 能力内分 3 类 + 第一层不分 main/renderer"
+> **设计原则**:分层写。本文档仅定义 src/ 第一层(9 目录)及其职责契约——**冻结不变**。
+> 各目录内部子结构在那一层真实现时再详细设计(单独文档,如 `directory-structure-platform.md`)。
 
 ---
 
-## 0. 设计原则
+## 0. 为什么分层写
 
-本目录结构按 [charter.md § 1.1 分层原则](./charter.md) 落地:
+V1 教训:目录设计如果一次性把所有细节定下来,会"为不存在的未来需求过度规划"。等真做时,大部分子结构需要修订,文档反复返工。
 
-1. **第一层(顶层目录)按职责分**——纵向 4 层 + 横向 L0~L4 + 共享层(shared)
-2. **第二层(子目录)按业务/进程分**——能力按 3 类分组,跨进程能力内部分 main/renderer
-3. **横向 L0~L5 不强制每层独立目录**——L0/L1 合并为 platform/,L2~L4 各自独立,L5 在 views/(纵向)+ capabilities/(支撑)
-4. **屏障原则强制**——views / shell / workspace / slot 不允许 import 业务 npm,ESLint 自检
+V2 改用**分层写 + 决策延迟**:
+- **第一层(本文档)**:9 个顶层目录 + 职责契约 + 屏障约束 — 冻结不变
+- **第二层及以下**(各目录内部):那一层真要实现时才设计,写在独立 `directory-structure-<目录名>.md`
+
+这样:
+- 第一层的契约保持稳定 — 屏障原则、注册原则、分层原则物理落地
+- 子目录细化跟随 [charter.md § 6 节奏规则](./charter.md) — 一层一阶段,完成才进下一层
 
 ---
 
-## 1. 顶层结构(src/ 之下 9 个第一层目录)
+## 1. 第一层目录(9 个,冻结不变)
 
 ```
 src/
 ├── views/          ← 纵向:可视化层(L5 视图主体)
-├── capabilities/   ← 纵向:能力层(npm 屏障,3 类内分)
+├── capabilities/   ← 纵向:能力层(npm 屏障)
 ├── semantic/       ← 纵向:语义层(纯类型)
 ├── storage/        ← 纵向:存储层(SurrealDB)
 ├── platform/       ← 横向:L0 应用层 + L1 窗口层(Electron 进程入口)
@@ -34,355 +38,61 @@ src/
 └── shared/         ← 跨进程共享(IPC 契约 + 共享类型)
 ```
 
-### 第一层目录的纵向 / 横向归属
+### 1.1 各目录职责契约
 
-| 目录 | 纵向类目 | 横向 L 层 |
-|---|---|---|
-| `views/` | 可视化层 | L5(视图主体) |
-| `capabilities/` | 能力层 | 跨 L0~L5(被各层调用) |
-| `semantic/` | 语义层 | 跨 L0~L5(纯类型,任何层可用) |
-| `storage/` | 存储层 | L0(主进程持久化) |
-| `platform/` | 跨纵向(平台基础) | L0 + L1 |
-| `shell/` | 可视化层 | L2 |
-| `workspace/` | 能力层(状态管理) | L3 |
-| `slot/` | 能力层(Registry 基础) | L4 |
-| `shared/` | 跨纵向(共享类型) | 跨 L0~L5 |
+| 目录 | 纵向类目 | 横向 L 层 | 职责 |
+|---|---|---|---|
+| `views/` | 可视化层 | L5 | 视图主体,纯声明,通过 install 列表使用能力 |
+| `capabilities/` | 能力层 | 跨 L0~L5 | 互操作能力的抽象,封装外部 npm 依赖 |
+| `semantic/` | 语义层 | 跨 L0~L5 | Atom + block + intents 等纯类型,跨进程共享 |
+| `storage/` | 存储层 | L0(主进程) | SurrealDB 持久化,IPC handlers |
+| `platform/` | 跨纵向(基础) | L0 + L1 | Electron 进程入口,主窗口管理,IPC 总线 |
+| `shell/` | 可视化层 | L2 | 三栏布局骨架,Slot 容器机制 |
+| `workspace/` | 能力层(状态) | L3 | WorkMode 实例,Workspace 状态(activeViewId / pluginStates) |
+| `slot/` | 能力层(Registry) | L4 | ViewType / Capability / Command / 五大交互 Registry |
+| `shared/` | 跨纵向(共享) | 跨 L0~L5 | main / renderer 共享类型,IPC channel 名,常量 |
+
+### 1.2 屏障原则的物理体现
+
+```
+═══════════ npm 业务依赖屏障 ═══════════
+   views/      ← 0 处业务 npm
+   shell/      ← 0 处业务 npm
+   workspace/  ← 0 处业务 npm
+   slot/       ← 0 处业务 npm
+═══════════ npm 业务依赖屏障 ═══════════
+   capabilities/  ← 唯一允许业务 npm 的位置
+   storage/       ← 唯一允许 SurrealDB SDK
+   platform/      ← 唯一允许 Electron 主进程 / renderer 入口 API
+   semantic/      ← 0 npm 业务包(纯类型)
+   shared/        ← 0 npm 业务包(纯类型 + 常量)
+```
+
+**ESLint 自检规则按这 4+5 层级编写**(详见 § 4)。
 
 ---
 
-## 2. 各目录详细结构
+## 2. 文件命名规范
 
-### 2.1 `src/views/` — 可视化层(L5 视图主体)
-
-```
-src/views/
-├── note/                     ← NoteView(V2 第一个落地视图)
-│   ├── index.ts              (registerView 声明)
-│   ├── components/           (内部 React 组件)
-│   ├── styles.css
-│   └── README.md             (链回 docs/10-business-design/note/)
-├── (graph/ ebook/ web/ 后续添加)
-└── README.md
-```
-
-**职责**:用户感知 + 视图本地状态。
-
-**屏障约束**(ESLint 强制):
-- ❌ 禁止 import 业务 npm 包(prosemirror / three / pdfjs / epubjs / foliate-js / electron)
-- ❌ 禁止 import `src/capabilities/*/main/*` 或 `src/capabilities/*/renderer/*` 的内部细节(只能 import `src/capabilities/<name>/index.ts` 入口)
-- ✅ 允许 import:react / clsx / nanoid / 等纯函数白名单
-- ✅ 允许 import:`src/capabilities/`(通过入口)/ `src/semantic/` / `src/shared/`
-
----
-
-### 2.2 `src/capabilities/` — 能力层(npm 屏障,3 类分组)
+### 2.1 目录命名 — kebab-case
 
 ```
-src/capabilities/
-├── representation/                 ← 类 1:表征类能力(渲染方法)
-│   ├── text-editing/
-│   │   ├── main/                   (主进程实现,如有)
-│   │   ├── renderer/               (renderer 实现:PM 封装)
-│   │   ├── index.ts                (统一对外入口)
-│   │   └── README.md
-│   ├── canvas-rendering/
-│   │   ├── renderer/               (Three.js 封装)
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── pdf-rendering/
-│   │   ├── renderer/               (pdfjs-dist)
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── epub-rendering/
-│   │   ├── renderer/               (epubjs / foliate-js)
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── web-rendering/
-│   │   ├── main/                   (WebContentsView 创建 + 控制)
-│   │   ├── renderer/               (React Wrapper)
-│   │   ├── index.ts
-│   │   └── README.md
-│   └── README.md
-│
-├── interop/                        ← 类 2:互操作类能力(动作抽象)
-│   ├── browser-capability/
-│   │   ├── main/                   (electron session / webContents)
-│   │   ├── renderer/               (调用主进程 API)
-│   │   ├── index.ts
-│   │   └── README.md               (链回 docs/10-business-design/web/browser-capability/)
-│   ├── content-extraction/
-│   │   ├── main/                   (内容提取主进程)
-│   │   ├── renderer/
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── ai-conversation/
-│   │   ├── main/                   (AI SDK 调用,API key 管理)
-│   │   ├── renderer/               (UI 调用)
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── elk-layout/
-│   │   ├── renderer/               (elkjs 调用)
-│   │   ├── index.ts
-│   │   └── README.md
-│   └── README.md
-│
-├── system-service/                 ← 类 3:系统服务类能力
-│   ├── history/
-│   │   ├── renderer/               (撤销/重做)
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── find-replace/
-│   │   ├── renderer/
-│   │   ├── index.ts
-│   │   └── README.md
-│   ├── copy-paste/
-│   │   ├── main/                   (剪贴板主进程操作)
-│   │   ├── renderer/
-│   │   ├── index.ts
-│   │   └── README.md
-│   └── README.md
-│
-└── README.md                       (能力层总览 + 注册机制说明)
-```
-
-**职责**:互操作能力的抽象,封装外部 npm 依赖,跨视图复用动作。
-
-**3 类分组依据**:
-- **representation/**:把语义投影成视图特定形态(渲染方法)
-- **interop/**:跨视图通用的动作抽象,与"投影"无关
-- **system-service/**:系统级跨视图通用功能
-
-**跨进程内部约定(每个能力的 main/ + renderer/ 子目录)**:
-- `main/`:能力的主进程实现(如有 IPC handlers / WebContents 操作 / 文件系统访问)
-- `renderer/`:能力的 renderer 实现(如有 React Wrapper / DOM 操作 / 浏览器 API 调用)
-- `index.ts`:**唯一对外入口**,根据消费方所在进程动态选择 main 或 renderer 实现
-- 视图(`src/views/`)只 import `index.ts` 入口,不接触 main/ 或 renderer/ 内部
-
-**屏障约束**(ESLint 强制):
-- ✅ 唯一允许 import 业务 npm 包的位置
-- ❌ 禁止能力之间互相 install(避免依赖图)
-- ❌ 禁止从能力外暴露内部细节(只能通过 `index.ts` 暴露)
-
----
-
-### 2.3 `src/semantic/` — 语义层(纯类型)
-
-```
-src/semantic/
-├── atom/
-│   ├── atom-types.ts            (Atom 类型定义)
-│   ├── atom-validators.ts       (Atom 校验逻辑)
-│   └── README.md                (链回 docs/10-business-design/ai/KRIG-Atom体系设计文档.md)
-├── block/
-│   ├── block-types.ts           (block 概念定义,自身可嵌套)
-│   ├── block-tree-utils.ts      (block 树操作纯函数)
-│   └── README.md                (链回 docs/10-business-design/block/)
-├── intents/
-│   ├── intent-events.ts         (IntentEvent 类型)
-│   └── README.md
-├── ids/
-│   ├── id-types.ts              (各类 ID 类型 + 命名规范)
-│   └── README.md
-└── README.md
-```
-
-**职责**:内容本体,与可视化无关。Atom + block 在这里定义。
-
-**屏障约束**:
-- ❌ 0 处 npm 业务包 import
-- ✅ 纯类型 + 纯逻辑,不持有状态
-- ✅ 跨视图通用(任何视图都能消费)
-
----
-
-### 2.4 `src/storage/` — 存储层(SurrealDB)
-
-```
-src/storage/
-├── surreal-client/
-│   ├── connection.ts            (SurrealDB 连接管理)
-│   ├── schema.ts                (数据库 schema 定义)
-│   └── README.md
-├── ipc-handlers/
-│   ├── atom-handlers.ts         (Atom 读写 IPC handler)
-│   ├── workspace-handlers.ts    (Workspace 状态持久化)
-│   └── README.md
-└── README.md
-```
-
-**职责**:持久化,SurrealDB SDK 调用。
-
-**屏障约束**:
-- ✅ 唯一允许 import SurrealDB SDK 的位置
-- ✅ 通过 IPC 提供给能力层(主进程 / renderer 隔离)
-- ❌ 禁止其他纵向层直接 import SurrealDB SDK
-
----
-
-### 2.5 `src/platform/` — L0 应用层 + L1 窗口层
-
-```
-src/platform/
-├── main/                        ← Electron 主进程入口
-│   ├── index.ts                 (app.whenReady + 启动主流程)
-│   ├── window/
-│   │   ├── main-window.ts       (主 BrowserWindow 创建)
-│   │   ├── window-manager.ts    (多窗口管理)
-│   │   └── README.md
-│   ├── ipc/
-│   │   ├── ipc-bus.ts           (IPC 总线)
-│   │   ├── ipc-router.ts        (handler 路由)
-│   │   └── README.md
-│   ├── diagnostics/
-│   │   ├── L0-alive.ts          (L0 自我诊断信号)
-│   │   ├── L1-alive.ts          (L1 自我诊断信号)
-│   │   └── README.md
-│   └── README.md
-├── renderer/                    ← Electron renderer 进程入口
-│   ├── index.tsx                (React mount 到 #root)
-│   ├── diagnostics/
-│   │   └── renderer-alive.ts    (renderer 自我诊断信号)
-│   └── README.md
-└── README.md
-```
-
-**职责**:Electron 进程入口,L0 应用启动 + L1 窗口管理。
-
-**屏障约束**:
-- ✅ main/ 允许 import Electron API
-- ✅ renderer/ 允许 import React 等浏览器 API
-- ❌ main/ 不能 import renderer 代码(进程隔离)
-
----
-
-### 2.6 `src/shell/` — L2 Shell 层(三栏布局 + Slot 容器)
-
-```
-src/shell/
-├── three-column-layout/
-│   ├── ShellLayout.tsx          (三栏布局 React 组件)
-│   ├── ResizableDivider.tsx     (可拖拽分隔线)
-│   └── README.md
-├── slot-system/
-│   ├── SlotContainer.tsx        (Slot 容器组件)
-│   ├── SlotRouter.tsx           (Slot 内容路由)
-│   └── README.md
-└── README.md
-```
-
-**职责**:三栏布局骨架 + Slot 容器机制。
-
-**屏障约束**(同 views):
-- ❌ 禁止 import 业务 npm 包
-- ✅ 允许 import react / clsx 等纯函数
-
----
-
-### 2.7 `src/workspace/` — L3 Workspace 层
-
-```
-src/workspace/
-├── workmode-registry/
-│   ├── workmode-types.ts        (WorkMode 类型定义)
-│   ├── workmode-registry.ts     (WorkMode 实例管理)
-│   └── README.md
-├── state/
-│   ├── workspace-state.ts       (Workspace 状态)
-│   ├── plugin-states.ts         (pluginStates 字典)
-│   ├── persistence.ts           (状态持久化协议,调用 storage 层)
-│   └── README.md
-└── README.md
-```
-
-**职责**:WorkMode 实例管理 + Workspace 状态(activeViewId / activeResource / pluginStates)。
-
-**屏障约束**:
-- ❌ 禁止 import 业务 npm 包
-- ✅ 允许调用 `src/storage/`(通过 IPC)
-
----
-
-### 2.8 `src/slot/` — L4 Slot 层(Registry 基础设施)
-
-```
-src/slot/
-├── view-type-registry/
-│   ├── view-registry.ts         (ViewType 注册中心)
-│   ├── register-view.ts         (registerView API)
-│   └── README.md
-├── capability-registry/
-│   ├── capability-registry.ts   (Capability 注册中心)
-│   ├── register-capability.ts   (registerCapability API)
-│   └── README.md
-├── command-registry/
-│   ├── command-registry.ts      (CommandRegistry — 命令字符串引用实现)
-│   ├── command-handler.ts       (CommandHandler 类型)
-│   └── README.md
-├── interaction-registries/
-│   ├── context-menu-registry.ts (ContextMenu 五大交互之一)
-│   ├── toolbar-registry.ts
-│   ├── slash-registry.ts
-│   ├── handle-registry.ts
-│   ├── floating-toolbar-registry.ts
-│   └── README.md
-└── README.md
-```
-
-**职责**:5 大 Registry 基础设施(ViewType / Capability / Command + 五大交互)。
-
-**屏障约束**:
-- ❌ 禁止 import 业务 npm 包
-- ✅ 允许 import `src/semantic/` / `src/shared/`
-
----
-
-### 2.9 `src/shared/` — 跨进程共享
-
-```
-src/shared/
-├── ipc/
-│   ├── channel-names.ts         (IPC channel 名常量)
-│   ├── message-types.ts         (IPC 消息类型契约)
-│   └── README.md
-├── types/
-│   ├── common-types.ts          (跨进程共享类型)
-│   └── README.md
-├── constants/
-│   ├── app-constants.ts         (应用级常量)
-│   └── README.md
-└── README.md
-```
-
-**职责**:main / renderer 进程共享的纯类型 + IPC 契约 + 常量。
-
-**屏障约束**:
-- ❌ 0 处 npm 业务包 import
-- ✅ 纯类型 + 纯常量,不持有运行时状态
-- ✅ 任何进程任何层都能 import
-
----
-
-## 3. 文件命名规范
-
-### 3.1 目录命名 — kebab-case
-
-```
-✅ src/capabilities/representation/text-editing/
+✅ src/capabilities/text-editing/
 ✅ src/views/note/
 ✅ src/storage/surreal-client/
 
-❌ src/capabilities/Representation/TextEditing/
+❌ src/capabilities/TextEditing/
 ❌ src/views/Note/
 ```
 
-### 3.2 文件命名
+### 2.2 文件命名
 
 - **TypeScript 模块**:`kebab-case.ts`(如 `atom-types.ts`)
 - **React 组件**:`PascalCase.tsx`(如 `ShellLayout.tsx`)
 - **类型纯文件**:`kebab-case.types.ts`(可选,推荐)
 - **索引/入口**:`index.ts` / `index.tsx`
 
-### 3.3 函数 / 类型命名 — camelCase / PascalCase
+### 2.3 函数 / 类型命名 — camelCase / PascalCase
 
 ```ts
 // camelCase 函数 / 变量
@@ -396,7 +106,7 @@ export class CapabilityRegistry {}
 
 ---
 
-## 4. TypeScript Path Alias
+## 3. TypeScript Path Alias
 
 `tsconfig.json`:
 
@@ -425,12 +135,11 @@ export class CapabilityRegistry {}
 // src/views/note/index.ts
 import { registerView } from '@slot/view-type-registry/register-view';
 import type { Atom } from '@semantic/atom/atom-types';
-import { textEditing } from '@capabilities/representation/text-editing';
 ```
 
 ---
 
-## 5. ESLint 屏障规则
+## 4. ESLint 屏障规则
 
 `eslint.config.js` 关键 overrides:
 
@@ -442,10 +151,10 @@ overrides: [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['prosemirror-*'], message: '使用 capability.text-editing' },
-          { group: ['three', 'three/*'], message: '使用 capability.canvas-rendering' },
-          { group: ['pdfjs-dist'], message: '使用 capability.pdf-rendering' },
-          { group: ['epubjs', 'foliate-js'], message: '使用 capability.epub-rendering' },
+          { group: ['prosemirror-*'], message: '使用 capability(具体哪个能力等真实现时定)' },
+          { group: ['three', 'three/*'], message: '使用 capability(具体哪个能力等真实现时定)' },
+          { group: ['pdfjs-dist'], message: '使用 capability' },
+          { group: ['epubjs', 'foliate-js'], message: '使用 capability' },
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
         ],
       }],
@@ -475,6 +184,18 @@ overrides: [
       }],
     },
   },
+  // 语义 / 共享层只允许纯类型
+  {
+    files: ['src/semantic/**', 'src/shared/**'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['*'],
+            message: '语义层 / 共享层只允许 import 同层内部模块,不允许任何 npm 包' },
+        ],
+      }],
+    },
+  },
   // capabilities 是唯一允许业务 npm 的位置(无限制)
 ];
 ```
@@ -483,31 +204,58 @@ overrides: [
 
 ---
 
-## 6. 与 V1 目录的对应关系
+## 5. 子目录设计原则(分层写)
 
-| V1 目录 | V2 目录 | 说明 |
-|---|---|---|
-| `src/main/index.ts` | `src/platform/main/index.ts` | 入口迁移 |
-| `src/main/window/` | `src/platform/main/window/` | 窗口管理 |
-| `src/renderer/index.tsx` | `src/platform/renderer/index.tsx` | renderer 入口 |
-| `src/renderer/shell/` | `src/shell/` | Shell 提升为顶层 |
-| `src/main/workspace/` | `src/workspace/` | Workspace 提升为顶层 |
-| `src/renderer/ui-primitives/` | `src/slot/` | Registry 基础设施提升为顶层 |
-| `src/plugins/note/` | `src/views/note/` + `src/capabilities/representation/text-editing/` | 纯视图与能力分离 |
-| `src/plugins/graph/` | `src/views/graph/` + `src/capabilities/representation/canvas-rendering/` + `src/capabilities/representation/text-editing/`(节点 label) | 拆分到能力层 |
-| `src/plugins/ebook/` | `src/views/ebook/` + `src/capabilities/representation/pdf-rendering/` + `src/capabilities/representation/epub-rendering/` | 同上 |
-| `src/plugins/web/` | `src/views/web/` + `src/capabilities/representation/web-rendering/` + `src/capabilities/interop/browser-capability/` + `...` | 同上 |
-| `src/shared/` | `src/shared/` + `src/semantic/` | 拆分:共享类型 vs 语义类型 |
+第一层目录冻结后,**各目录内部子结构在真要实现那一层时再设计**。
+
+### 5.1 子目录文档命名约定
+
+每个第一层目录有自己的子目录设计文档,命名 `directory-structure-<目录名>.md`,放在 `docs/00-architecture/` 下。
+
+例:
+- `directory-structure-platform.md`(L0 阶段实现时写)
+- `directory-structure-shell.md`(L2 阶段实现时写)
+- `directory-structure-views.md`(实现具体视图时写,如 NoteView 阶段)
+- `directory-structure-capabilities.md`(每个能力实现时,可分别写 `directory-structure-capability-text-editing.md` 等)
+
+### 5.2 子目录文档内容要求
+
+- 该目录的子目录划分(及理由)
+- 文件命名约定(如有特殊约定)
+- 内部模块依赖关系
+- 与其他目录的接口契约
+- 屏障约束的具体落地(如有)
+
+### 5.3 第一层目录强制要求
+
+每个第一层目录**至少**有:
+- `README.md` — 简要说明"这一层做什么 + 当前状态 + 下一步什么时候扩展"
+
+`README.md` 在第一层冻结时就写好,后期内部子结构变化时可更新但不必频繁。
+
+---
+
+## 6. 与 V1 目录的对应(简略,详细对应等迁移时定)
+
+| V1 → V2 主要映射 |
+|---|
+| V1 `src/main/` → V2 `src/platform/main/` + `src/storage/`(部分迁移) |
+| V1 `src/renderer/` → V2 `src/platform/renderer/` + `src/views/`(部分迁移) |
+| V1 `src/renderer/shell/` → V2 `src/shell/` |
+| V1 `src/main/workspace/` → V2 `src/workspace/` |
+| V1 `src/renderer/ui-primitives/` → V2 `src/slot/` |
+| V1 `src/plugins/<X>/` → V2 `src/views/<x>/` + `src/capabilities/<x-related>/`(每个 plugin 拆分到能力层) |
+| V1 `src/shared/` → V2 `src/shared/` + `src/semantic/`(纯类型迁移到 semantic) |
+
+详细映射在每个 V2 目录实现时,在对应 `directory-structure-<x>.md` 中给出。
 
 ---
 
 ## 7. 待拍板
 
-- [ ] capabilities 内的 3 类分组(representation/interop/system-service)是否需要再细分?
-- [ ] views 是否需要按 plugin 来源分子目录?(目前是 `views/note/`,V1 plugin 概念是否还存在)
-- [ ] storage 是否需要分 main/renderer 子目录?
-- [ ] semantic 内 atom 与 block 的实际目录耦合(block 引用 atom 类型)
-- [ ] 跨进程共享的"运行时状态"放哪里?(目前 shared/ 仅纯类型 + 常量)
+无(第一层 9 目录已冻结)。
+
+各子目录的待拍板项,在对应 `directory-structure-<x>.md` 真要写时再列。
 
 ---
 
@@ -515,4 +263,18 @@ overrides: [
 
 | 日期 | 版本 | 内容 | 作者 |
 |---|---|---|---|
-| 2026-05-03 | v0.1 | 初稿;按 charter v0.2 落地;9 个第一层目录(纵向 4 层 + 横向 L0~L4 部分独立 + shared)+ capabilities 内 3 类分组 + 能力跨进程内部 main/renderer 子目录 + ESLint 屏障规则 | wenwu + Claude |
+| 2026-05-03 | v0.1 | 初稿;详细描述 9 个第一层 + 各目录内部子结构(views / capabilities 3 类 / semantic / storage / platform / shell / workspace / slot / shared 各自 sub-tree)+ 与 V1 目录详细对应 — 备份为 `_archive_directory-structure-v0.1-detailed.md` 供未来真实现时参考 | wenwu + Claude |
+| 2026-05-03 | v0.2 | 重写,大幅简化;采用"分层写"原则——本文档仅定义第一层 9 目录 + 职责契约 + 屏障 + 命名 + path alias + ESLint;子目录细节移到独立 `directory-structure-<x>.md`(那一层真实现时再写);v0.1 详细子结构归档为 `_archive_` 文件 | wenwu + Claude |
+
+---
+
+## 附录:v0.1 详细版归档
+
+v0.1 含详细子目录设计,**已归档** `_archive_directory-structure-v0.1-detailed.md`。
+
+参考用途:
+- 等真实现某一层时,可查阅 v0.1 对应章节作起点参考
+- 不强制照抄(v0.1 是猜测,真实现时按当时需求定)
+- v0.1 中提及的 18+ block / N 个 shape / line / substance 不一定全做,按需选
+
+**v0.1 → 当前层级实现的决策延迟到那时**。
