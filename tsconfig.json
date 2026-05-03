@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "outDir": ".vite/build",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@views/*":        ["src/views/*"],
+      "@capabilities/*": ["src/capabilities/*"],
+      "@semantic/*":     ["src/semantic/*"],
+      "@storage/*":      ["src/storage/*"],
+      "@platform/*":     ["src/platform/*"],
+      "@shell/*":        ["src/shell/*"],
+      "@workspace/*":    ["src/workspace/*"],
+      "@slot/*":         ["src/slot/*"],
+      "@shared/*":       ["src/shared/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", ".vite", "docs"]
+}
