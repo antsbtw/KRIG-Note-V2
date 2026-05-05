@@ -1,9 +1,11 @@
 /**
- * SlashMenuFrame — Slash 命令菜单容器(式样)
+ * SlashMenuFrame — Slash 菜单 frame
  *
- * L3 阶段:占位(等 L4 slashRegistry)
+ * L4 阶段:接入 SlashMenuBinding
  */
 
+import { SlashMenuBinding } from '@slot/frame-bindings/SlashMenuBinding';
+
 export function SlashMenuFrame() {
-  return null;
+  return <SlashMenuBinding />;
 }

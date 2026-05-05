@@ -1,9 +1,11 @@
 /**
- * HandleMenuFrame — Handle 菜单容器(式样)
+ * HandleMenuFrame — Handle 菜单 frame
  *
- * L3 阶段:占位(等 L4 handleRegistry)
+ * L4 阶段:接入 HandleMenuBinding
  */
 
+import { HandleMenuBinding } from '@slot/frame-bindings/HandleMenuBinding';
+
 export function HandleMenuFrame() {
-  return null;
+  return <HandleMenuBinding />;
 }

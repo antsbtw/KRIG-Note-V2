@@ -1,9 +1,11 @@
 /**
- * FloatingToolbarFrame — 选区上方浮动工具条容器(式样)
+ * FloatingToolbarFrame — 选区上方浮动工具条 frame
  *
- * L3 阶段:占位(等 L4 floatingToolbarRegistry)
+ * L4 阶段:接入 FloatingToolbarBinding
  */
 
+import { FloatingToolbarBinding } from '@slot/frame-bindings/FloatingToolbarBinding';
+
 export function FloatingToolbarFrame() {
-  return null;
+  return <FloatingToolbarBinding />;
 }

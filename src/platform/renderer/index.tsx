@@ -13,6 +13,7 @@ import { reportL2Alive } from '@shell/diagnostics/L2-alive';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { localStoragePersistence } from '@workspace/persistence/local-storage';
 import { reportL3Alive } from '@workspace/diagnostics/L3-alive';
+import { reportL4Alive } from '@slot/diagnostics/L4-alive';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import './app.css';
 
@@ -37,4 +38,5 @@ if (rootEl) {
   reportRendererAlive();
   reportL2Alive();
   reportL3Alive(workspaceManager.count, workspaceManager.getActiveId());
+  reportL4Alive();
 }

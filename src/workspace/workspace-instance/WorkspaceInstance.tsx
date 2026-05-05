@@ -26,22 +26,26 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
     workspaceManager.update(state.id, { dividerRatio: ratio });
   };
 
+  // L4 阶段:取当前活跃 view ID(优先 left slot)— 用作 NavSide / Toolbar / Overlay 的过滤参考
+  // L5 view 注册后 slotBinding 会包含具体 viewId
+  const activeViewId = state.slotBinding.left ?? state.slotBinding.right ?? null;
+
   return (
     <div
       className="krig-workspace-instance"
       style={{ display: isActive ? 'flex' : 'none' }}
       data-workspace-id={state.id}
     >
-      {!state.navSideCollapsed && <NavSideFrame width={state.navSideWidth} />}
+      {!state.navSideCollapsed && <NavSideFrame width={state.navSideWidth} viewId={activeViewId} />}
       <div className="krig-workspace-main">
-        <ToolbarFrame />
+        <ToolbarFrame viewId={activeViewId} />
         <SlotArea
           slotBinding={state.slotBinding}
           dividerRatio={state.dividerRatio}
           onDividerChange={handleDividerChange}
         />
       </div>
-      <OverlayFrames />
+      <OverlayFrames viewId={activeViewId} />
     </div>
   );
 }
