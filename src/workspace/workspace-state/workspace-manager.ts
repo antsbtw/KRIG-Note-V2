@@ -15,13 +15,23 @@
 import type { WorkspaceState, WorkspaceManagerState } from './workspace-state';
 import { createDefaultWorkspaceState, DIVIDER_RATIO_MIN, DIVIDER_RATIO_MAX } from './default-state';
 import type { PersistenceAPI } from '../persistence/persistence-api';
+import type { SlotUpdateSource } from '@slot/workspace-bus/bus-types';
+import { WorkspaceBus } from '@slot/workspace-bus/workspace-bus';
 
-class WorkspaceManager {
+/** WorkspaceManager.update 可选元数据 */
+export interface UpdateMeta {
+  /** slotBinding 修改来源(诊断 / 审计用)*/
+  source?: SlotUpdateSource;
+}
+
+export class WorkspaceManager {
   private workspaces: Map<string, WorkspaceState> = new Map();
   private activeId: string | null = null;
   private counter = 0;
   private listeners: Set<() => void> = new Set();
   private persistence: PersistenceAPI | null = null;
+  /** 每 Workspace 一个 bus 实例(L3.5,lazy 创建)*/
+  private buses: Map<string, WorkspaceBus> = new Map();
 
   /**
    * 缓存 getAll() 结果(用于 useSyncExternalStore getSnapshot 稳定引用)
@@ -100,8 +110,17 @@ class WorkspaceManager {
     return this.cachedAll;
   }
 
-  /** 部分更新 Workspace(id 不可变,触发 notify) */
-  update(id: string, partial: Partial<WorkspaceState>): WorkspaceState | undefined {
+  /**
+   * 部分更新 Workspace(id 不可变,触发 notify)
+   *
+   * @param meta 可选元数据 — `source` 标记 slotBinding 修改来源(L3.5):
+   *   'navside' / 'bus' / 'frame'。诊断 / 审计用,manager 不据此分支。
+   */
+  update(
+    id: string,
+    partial: Partial<WorkspaceState>,
+    _meta?: UpdateMeta,
+  ): WorkspaceState | undefined {
     const ws = this.workspaces.get(id);
     if (!ws) return undefined;
 
@@ -117,6 +136,27 @@ class WorkspaceManager {
     return updated;
   }
 
+  /**
+   * 获取 Workspace 的 bus 实例(L3.5)
+   *
+   * lazy 创建,每 Workspace 一个,跨 Workspace 不通(铁律 2)。
+   * Workspace 不存在返回 undefined。
+   */
+  getBus(id: string): WorkspaceBus | undefined {
+    if (!this.workspaces.has(id)) return undefined;
+    let bus = this.buses.get(id);
+    if (!bus) {
+      bus = new WorkspaceBus(id, this);
+      this.buses.set(id, bus);
+    }
+    return bus;
+  }
+
+  /** 已创建的 bus 实例数(诊断用)*/
+  get busCount(): number {
+    return this.buses.size;
+  }
+
   /** NavSide Toggle 助手(L2 WorkspaceBar 调用) */
   toggleNavSide(id: string): void {
     const ws = this.get(id);
@@ -126,6 +166,13 @@ class WorkspaceManager {
   /** 关闭 Workspace */
   close(id: string): string | null {
     if (!this.workspaces.has(id)) return null;
+
+    // L3.5:释放 bus 实例(channel listeners / request handlers / lastValues 全清)
+    const bus = this.buses.get(id);
+    if (bus) {
+      bus.dispose();
+      this.buses.delete(id);
+    }
 
     this.workspaces.delete(id);
 

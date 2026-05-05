@@ -16,8 +16,12 @@
 export interface SlotBinding {
   /** Workspace 左 Slot 装的 view ID(null = 空 Slot)*/
   left: string | null;
+  /** 左 Slot 装载时的 payload(view mount 时作 prop 传入,可选)*/
+  leftPayload?: unknown;
   /** Workspace 右 Slot 装的 view ID(null = 单视图模式)*/
   right: string | null;
+  /** 右 Slot 装载时的 payload */
+  rightPayload?: unknown;
 }
 
 /** 单 Workspace 完整状态 */

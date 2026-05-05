@@ -1,20 +1,43 @@
+/* SlotArea L3.5 — Grid Layout(view 实例不重建机制依赖)*/
+
 .krig-slot-area {
   flex: 1;
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-rows: 1fr;
+  /* grid-template-columns 由 inline style 提供(ratio 动态)*/
   background-color: #1e1e1e;
   overflow: hidden;
   min-height: 0;
 }
 
-.krig-slot-wrapper {
-  display: flex;
-  min-width: 0;
+/*
+ * view 实例 — 扁平列表 + grid-column 决定位置。
+ * 左右切换 = grid-column 变,React 实例不重建(同一 key 在同一 children 序列)。
+ * left=1, divider=2, right=3。
+ */
+.krig-slot-view {
   overflow: hidden;
+  border-radius: 4px;
+  margin: 4px;
 }
 
-.krig-slot {
-  flex: 1;
+.krig-slot-view[data-slot='left'] {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.krig-slot-view[data-slot='right'] {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.krig-slot-view[data-slot='hidden'] {
+  display: none;
+}
+
+/* Slot 框架装饰(占位文字 + 关闭按钮)— 与 view 实例叠加在同一 grid area,view 之上 */
+.krig-slot-frame {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -23,30 +46,67 @@
   margin: 4px;
   color: #555;
   overflow: hidden;
+  grid-row: 1;
+  /*
+   * frame 的 z-index 高于 view 这部分故意如此 — 关闭按钮始终可点(右上角)。
+   * L5 view component 真渲染时,占位文字 .krig-slot-empty 不显示(条件渲染),
+   * frame 只剩透明背景 + 关闭按钮,不挡 view 内容(view margin 与 frame margin 一致)。
+   */
 }
 
+.krig-slot-frame--left {
+  grid-column: 1;
+}
+
+.krig-slot-frame--right {
+  grid-column: 3;
+}
+
+/* Slot 关闭按钮 */
+.krig-slot-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #888;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.krig-slot-close:hover:not(:disabled) {
+  background-color: #3a3a3a;
+  color: #ddd;
+}
+
+.krig-slot-close:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Slot 空占位文字 */
 .krig-slot-empty {
   font-size: 13px;
   font-style: italic;
   text-align: center;
   padding: 16px;
-}
-
-.krig-slot-left {
-  /* 风格:与 right 同 */
-}
-
-.krig-slot-right {
-  /* 风格:与 left 同 */
+  color: #555;
 }
 
 /* 拖拽分隔线 */
 .krig-divider {
   flex: none;
-  width: 4px;
   background-color: #2a2a2a;
   cursor: col-resize;
   transition: background-color 0.15s;
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .krig-divider:hover {
