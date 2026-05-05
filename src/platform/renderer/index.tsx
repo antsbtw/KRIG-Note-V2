@@ -28,6 +28,18 @@ workspaceManager.ensureMinimum();
 const _activeId = workspaceManager.getActiveId();
 if (_activeId) workspaceManager.getBus(_activeId);
 
+// dev-only:DevTools 调试钩子 — 让 `window.__krig.bus` / `__krig.wm` 直接可用
+// Vite 在 prod build 时会 dead-code eliminate 整段(import.meta.env.DEV === false)。
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__krig = {
+    wm: workspaceManager,
+    get bus() {
+      const id = workspaceManager.getActiveId();
+      return id ? workspaceManager.getBus(id) : undefined;
+    },
+  };
+}
+
 function App() {
   return (
     <div className="krig-app">
