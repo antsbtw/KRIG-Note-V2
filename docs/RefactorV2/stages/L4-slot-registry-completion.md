@@ -280,7 +280,7 @@ L5 范围:
 **说明**:不算债,见 § 4.4 取舍说明。
 
 ### 9.2 应用图标显示 Electron 默认
-**状态**:未变(留打包阶段)。
+**状态**:✅ 已修(`feature/L4-fix-menu-dock`,见 § 12 后续修复)。
 
 ### 9.3 窗口尺寸 / 位置持久化
 **状态**:未做(留后续)。
@@ -327,3 +327,37 @@ L5 范围(charter § 1.4 view 是能力组合声明):
 - 至少 1 个 capability 完整实现(text-editing 最小集)
 - 验证:view 注册后 NavSide / Toolbar / ContextMenu 真实出现内容
 - L5 alive 诊断
+
+---
+
+## 12. 后续修复(L4 阶段后追加)
+
+### 12.1 feature/L4-fix-navside(2026-05-05 合并)
+
+合并 commit:`1f98db5`
+
+**修复内容**:
+- ViewSwitcher(Logo + view tab 条 + searchPlaceholder)— L4 设计漏掉的 NavSide 三段架构
+- WorkspaceInstance 挂 ContextMenu trigger(选项 A — 4 大触发器统一在 Workspace 根 DOM)
+- 4 大 menu 浮层 viewport 边界碰撞检测(`useCollisionPosition`,flip + clamp)
+
+**对应 commit**:`8063e37` / `bc4c2f8` / `8c7d81d`
+
+### 12.2 feature/L4-fix-menu-dock(2026-05-05 合并)
+
+合并 commit:`fd90ac9`
+
+**修复内容**:
+- macOS 应用菜单首项 'Electron' → 'KRIG Note'(postinstall 钩子改 Electron.app 的 Info.plist `CFBundleName`,V1 同款 trick)
+- Dock 图标 → KRIG logo(替换 Electron.app 的 `electron.icns`)
+- About / Quit / 窗口标题 / `package.json` `productName` / `forge.config` `name` `executableName` `icon` 全部对齐 'KRIG Note'
+- 资源:`docs/logo.png`(1024×1024)+ `build/icon.png`(dev dock)+ `build/icon.icns`(prod 包用)
+- `scripts/patch-electron-dev.sh` + `package.json` `postinstall` 钩子(`npm install` 自动运行)
+
+**关键学习**:macOS 应用菜单首项粗体名取自 `Info.plist` 的 `CFBundleName`,**`app.setName()` 改不了**。dev mode 必须直接 patch `node_modules/electron/dist/Electron.app/Contents/Info.plist`。
+
+**对应 commit**:`40360b3` / `df9b669`
+
+### 12.3 ViewDefinition 字段扩展(L3.5 顺手加)
+
+L3.5 阶段为支持 SlotArea 按 viewId 缓存机制,`ViewDefinition` 加 `component?: ComponentType<ViewComponentProps>` 字段(L5 view 注册时填)。详见 [L3.5 完成报告](./L3.5-workspace-bus-completion.md) § 2.5。
