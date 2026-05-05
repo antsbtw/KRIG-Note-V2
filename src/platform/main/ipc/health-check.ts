@@ -35,10 +35,12 @@ export function registerHealthCheckHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.HEALTH_L0, () => buildHealthResponse('L0'));
   ipcMain.handle(IPC_CHANNELS.HEALTH_L1, () => buildHealthResponse('L1'));
   ipcMain.handle(IPC_CHANNELS.HEALTH_L2, () => buildHealthResponse('L2'));
+  ipcMain.handle(IPC_CHANNELS.HEALTH_L3, () => buildHealthResponse('L3'));
   ipcMain.handle(IPC_CHANNELS.HEALTH_PLATFORM, () => {
     const l0 = getLayerState('L0');
     const l1 = getLayerState('L1');
     const l2 = getLayerState('L2');
+    const l3 = getLayerState('L3');
     return {
       alive: !!l0 && !!l1 && l0.errors.length === 0 && l1.errors.length === 0,
       since: l0?.since ?? 0,
@@ -46,11 +48,13 @@ export function registerHealthCheckHandlers(): void {
         ...(l0?.errors ?? []),
         ...(l1?.errors ?? []),
         ...(l2?.errors ?? []),
+        ...(l3?.errors ?? []),
       ],
       details: {
         L0: l0 ? 'alive' : 'not started',
         L1: l1 ? 'alive' : 'not started',
         L2: l2 ? 'alive' : 'not started',
+        L3: l3 ? 'alive' : 'not started',
       },
     } satisfies HealthCheckResponse;
   });

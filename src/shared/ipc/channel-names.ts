@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   HEALTH_L0: 'health.L0',
   HEALTH_L1: 'health.L1',
   HEALTH_L2: 'health.L2',
+  HEALTH_L3: 'health.L3',
   HEALTH_PLATFORM: 'health.platform',
   HEALTH_RENDERER: 'health.renderer',
 

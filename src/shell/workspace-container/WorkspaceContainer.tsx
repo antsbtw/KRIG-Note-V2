@@ -1,19 +1,40 @@
 /**
  * Workspace Container — 全屏容器
  *
- * 按 src/shell/DESIGN.md v0.3:
- * - L2 阶段:占位空容器
- * - L3 阶段:从 WorkspaceManager 拿活跃 Workspace 实例,mount 对应 Workspace React 组件树
+ * 按 charter § 1.4 + view-hierarchy-v2.md:
+ * - 渲染所有 Workspace 实例
+ * - 通过 visibility 切换显示活跃 Workspace
+ * - 非活跃 Workspace 状态保留(不销毁不重建)
+ *
+ * L3 阶段:接入 WorkspaceManager,渲染所有 Workspace 实例
  */
 
+import { useAllWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { WorkspaceInstance } from '@workspace/workspace-instance/WorkspaceInstance';
 import './workspace-container.css';
 
 export function WorkspaceContainer() {
+  const workspaces = useAllWorkspaces();
+  const activeId = useActiveWorkspaceId();
+
+  if (workspaces.length === 0) {
+    // 应该不会出现(WorkspaceManager.ensureMinimum 保证至少一个)
+    return (
+      <div className="krig-workspace-container krig-workspace-container--empty">
+        <div className="krig-workspace-container-empty">No workspace</div>
+      </div>
+    );
+  }
+
   return (
     <div className="krig-workspace-container">
-      <div className="krig-workspace-container-empty">
-        Workspace Container (待 L3 挂载 Workspace 实例)
-      </div>
+      {workspaces.map((ws) => (
+        <WorkspaceInstance
+          key={ws.id}
+          state={ws}
+          isActive={ws.id === activeId}
+        />
+      ))}
     </div>
   );
 }

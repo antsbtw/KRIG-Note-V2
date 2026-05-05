@@ -1,21 +1,21 @@
-/**
- * Workspace Container 样式
- *
- * L2 阶段:占位 — 撑满剩余高度,显示居中占位文字
- */
-
 .krig-workspace-container {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.krig-workspace-container--empty {
   align-items: center;
   justify-content: center;
-  background-color: #252525;
   color: #555;
+  font-style: italic;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  overflow: hidden;
 }
 
 .krig-workspace-container-empty {
-  font-style: italic;
+  padding: 16px;
 }

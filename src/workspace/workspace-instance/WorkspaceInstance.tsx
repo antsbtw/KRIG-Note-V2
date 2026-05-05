@@ -1,0 +1,47 @@
+/**
+ * WorkspaceInstance — 单 Workspace 完整 React 组件树
+ *
+ * 按 charter § 1.4 + view-hierarchy-v2.md:
+ * - 应用级 UI 全在 Workspace Container 内(NavSide / Toolbar / Slot / 5 大交互浮层 / 通用 Overlay)
+ * - view 平等(所有 Workspace 共享同一套式样)
+ *
+ * 切 Workspace 时:旧实例 hide(visibility),新实例 show — 状态保留(不销毁不重建)
+ */
+
+import { NavSideFrame } from './nav-side-frame/NavSideFrame';
+import { ToolbarFrame } from './toolbar-frame/ToolbarFrame';
+import { SlotArea } from './slot-area/SlotArea';
+import { OverlayFrames } from './overlay-frames';
+import { workspaceManager } from '../workspace-state/workspace-manager';
+import type { WorkspaceState } from '../workspace-state/workspace-state';
+import './workspace-instance.css';
+
+interface WorkspaceInstanceProps {
+  state: WorkspaceState;
+  isActive: boolean;
+}
+
+export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
+  const handleDividerChange = (ratio: number) => {
+    workspaceManager.update(state.id, { dividerRatio: ratio });
+  };
+
+  return (
+    <div
+      className="krig-workspace-instance"
+      style={{ display: isActive ? 'flex' : 'none' }}
+      data-workspace-id={state.id}
+    >
+      {!state.navSideCollapsed && <NavSideFrame width={state.navSideWidth} />}
+      <div className="krig-workspace-main">
+        <ToolbarFrame />
+        <SlotArea
+          slotBinding={state.slotBinding}
+          dividerRatio={state.dividerRatio}
+          onDividerChange={handleDividerChange}
+        />
+      </div>
+      <OverlayFrames />
+    </div>
+  );
+}
