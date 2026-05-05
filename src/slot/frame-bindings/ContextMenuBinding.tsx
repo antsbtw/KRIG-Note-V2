@@ -5,8 +5,9 @@
  *         contextMenuController 控制(显示/隐藏 + 位置 + 当前 items)。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useContextMenuVersion } from './use-registry';
+import { useCollisionPosition } from './use-collision-position';
 import { contextMenuRegistry } from '../interaction-registries/context-menu-registry/context-menu-registry';
 import { contextMenuController } from '../triggers/context-menu-controller';
 import { commandRegistry } from '../command-registry/command-registry';
@@ -16,6 +17,8 @@ export function ContextMenuBinding() {
   // 订阅 Registry 变化(L4 阶段防御性 — 注册项变化时刷新)
   useContextMenuVersion();
   const [state, setState] = useState(contextMenuController.getState());
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const { x, y } = useCollisionPosition(menuRef, state.x, state.y);
 
   useEffect(() => {
     return contextMenuController.subscribe(() => {
@@ -30,8 +33,9 @@ export function ContextMenuBinding() {
 
   return (
     <div
+      ref={menuRef}
       className="krig-context-menu"
-      style={{ left: state.x, top: state.y }}
+      style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {items.map((item) => (
