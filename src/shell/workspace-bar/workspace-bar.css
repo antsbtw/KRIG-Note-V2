@@ -121,7 +121,7 @@
   flex: none;
   width: 24px;
   height: 22px;
-  margin-left: 4px;
+  /* margin-left 从 4px 改 0 — 现在在 Tabs 容器内,由 gap: 2px 决定与最后 Tab 的间距 */
   border: none;
   background: transparent;
   color: #888;

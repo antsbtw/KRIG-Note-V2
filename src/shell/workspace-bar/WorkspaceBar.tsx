@@ -38,8 +38,9 @@ export function WorkspaceBar() {
             />
           ))
         )}
+        {/* [+] 按钮紧贴最后一个 Tab,不再靠最右端 */}
+        <AddWorkspaceButton />
       </div>
-      <AddWorkspaceButton />
     </div>
   );
 }
