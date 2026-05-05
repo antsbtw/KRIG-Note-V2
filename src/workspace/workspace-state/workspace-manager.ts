@@ -23,6 +23,16 @@ class WorkspaceManager {
   private listeners: Set<() => void> = new Set();
   private persistence: PersistenceAPI | null = null;
 
+  /**
+   * 缓存 getAll() 结果(用于 useSyncExternalStore getSnapshot 稳定引用)
+   *
+   * React useSyncExternalStore 要求 getSnapshot 返回稳定引用(===),
+   * 否则触发"Maximum update depth exceeded"无限循环。
+   *
+   * 缓存在数据变化时(notify 内)失效。
+   */
+  private cachedAll: WorkspaceState[] | null = null;
+
   /** 注入持久化实现(允许测试 / 未来切 SurrealDB) */
   setPersistence(persistence: PersistenceAPI | null): void {
     this.persistence = persistence;
@@ -77,9 +87,17 @@ class WorkspaceManager {
     return this.workspaces.get(id);
   }
 
-  /** 获取所有 Workspace(按创建顺序) */
+  /**
+   * 获取所有 Workspace(按创建顺序)
+   *
+   * 返回缓存数组 — 数据未变时返回同一引用(useSyncExternalStore 要求)。
+   * 缓存在 notify() 时失效。
+   */
   getAll(): WorkspaceState[] {
-    return Array.from(this.workspaces.values());
+    if (this.cachedAll === null) {
+      this.cachedAll = Array.from(this.workspaces.values());
+    }
+    return this.cachedAll;
   }
 
   /** 部分更新 Workspace(id 不可变,触发 notify) */
@@ -147,8 +165,9 @@ class WorkspaceManager {
     };
   }
 
-  /** 内部通知所有订阅者 + 自动持久化 */
+  /** 内部通知所有订阅者 + 自动持久化 + 失效缓存 */
   private notify(): void {
+    this.cachedAll = null; // 数据变化,失效缓存(下次 getAll 重建)
     this.listeners.forEach((l) => l());
     this.saveToPersistence();
   }
