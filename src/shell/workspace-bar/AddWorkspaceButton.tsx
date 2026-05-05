@@ -6,7 +6,11 @@
  * - 触发时调 workspaceManager.create()(L3 提供)
  *
  * L2 阶段:占位按钮,触发暂不工作(等 L3 接入 WorkspaceManager)
+ *
+ * 图标:Lucide Plus(outline 风格,与 NavSideToggle 视觉统一)
  */
+
+import { Plus } from 'lucide-react';
 
 export function AddWorkspaceButton() {
   const handleClick = () => {
@@ -21,7 +25,7 @@ export function AddWorkspaceButton() {
       title="新建 Workspace(L3 待接入)"
       aria-label="Add Workspace"
     >
-      +
+      <Plus size={14} />
     </button>
   );
 }

@@ -7,7 +7,11 @@
  * - 触发时调 workspaceManager.toggleNavSide(activeId)(L3 提供)
  *
  * L2 阶段:占位按钮,触发暂不工作(等 L3 接入 WorkspaceManager)
+ *
+ * 图标:Lucide PanelLeft(类似 SF Symbols sidebar.left,outline 风格)
  */
+
+import { PanelLeft } from 'lucide-react';
 
 export function NavSideToggle() {
   const handleClick = () => {
@@ -23,7 +27,7 @@ export function NavSideToggle() {
       title="折叠/展开 NavSide(L3 待接入)"
       aria-label="Toggle NavSide"
     >
-      ≡
+      <PanelLeft size={16} />
     </button>
   );
 }
