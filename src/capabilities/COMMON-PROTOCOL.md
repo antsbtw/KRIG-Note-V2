@@ -1,524 +1,511 @@
-# 通用 Capability 协议规程 v0.1
+# 通用 Capability 协议规程 v0.2
 
-> **本文是 V2 通用交互 capability 的根协议** — 5 大通用 capability(selection / clipboard / undo-redo / drag-and-drop / insertion)的接口、注册、协作规则,先于实现确立。
+> **本文是 V2 通用交互 capability 的根协议**。
 >
-> **位置**:本文档放 `src/capabilities/COMMON-PROTOCOL.md` — 与 `src/slot/workspace-bus/PROTOCOL.md` 平级,都是 V2 基础设施层的协议规程。
+> v0.2 是对 v0.1 的根本性重写 — 用户在 4 轮讨论中(动作类型 / block-operations / 5 基础动作 / block 自由演化)逐步揭示出 V2 capability 模型的真正形态:**5 个动作 capability 是协议地基,每个 block 是独立自治模块,可自由演化**。
 >
-> **相关研究**:[V1-function-mapping.md](../../docs/RefactorV2/research/V1-function-mapping.md) § 4 双轴矩阵 + § 5 边界白皮书 是本文的输入。
+> v0.1 把通用 capability 当成"统一动作执行者"是错的(会撞车 — 满足 B block 就坏 A block)。v0.2 让 capability 退到协议层,把动作执行权下放给每个 block 自治模块。
 >
-> 文档版本:v0.1
+> **位置**:`src/capabilities/COMMON-PROTOCOL.md` — 与 `src/slot/workspace-bus/PROTOCOL.md` 平级。
+>
+> **相关研究**:[V1-function-mapping.md](../../docs/RefactorV2/research/V1-function-mapping.md)(双轴矩阵)+ [V1-block-operations.md](../../docs/RefactorV2/research/V1-block-operations.md)(BlockSpec 接口设计)。
+>
+> 文档版本:v0.2(整体重写)
 > 编写日期:2026-05-05
-> 上下文:L5-A 阶段,5 通用 capability 实施前必须先定本协议
+> 上下文:L5-A 阶段,5 通用 capability + text-editing 实施前必须先定本协议
 
 ---
 
-## 0. 为什么要协议规程
+## 0. 设计哲学
 
-V2 立项的差异化承诺(charter § 1.4):**view 是能力组合声明,capability 是横切复用**。
+### 0.1 V2 立项的差异化承诺(charter § 1.4)
 
-如果 V2 只立"text-editing / graph-editing"这种领域大模块,capability 层就成了"V1 plugins/note plugins/graph 改个名字",V2 的设计目标失败。
+view 是能力组合声明,capability 是横切复用。
 
-**V2 的灵魂在通用 capability 这一层** — 把 selection / clipboard / undo-redo / drag-and-drop / insertion 这种**任何内容形态都用得上的用户基础动作**抽到独立 capability,让 NoteView / GraphView / FileExplorer / 等 view 都能复用同一套接口。这是 V2 不同于 V1 的根本。
+**但** capability 不是"统一动作执行者" — 它是**协议**(让具体动作在统一形态下可观察、可订阅、可注册)。
 
-V1 病例反向证明本协议必要([V1-function-mapping.md § 3](../../docs/RefactorV2/research/V1-function-mapping.md#3-v1-病例反向警示7-条)):
+### 0.2 v0.1 的错误反思
 
-| V1 病例 | 反映的协议缺失 |
-|---|---|
-| selection 散落三处 | 没有统一 selection 概念 |
-| clipboard 散落四处 | 没有 envelope 抽象 + handler 注册 |
-| undo/redo 在 NoteEditor 和 GraphEditor 各装一份 | 没有 undo capability 统一接口 |
-| viewAPI 全局窗口接口 | 没有 capability registry,跨边界靠 window 后门 |
-| sendToOtherSlot 字符串协议路由 | (workspace-bus 已根治,本协议不重述) |
+v0.1 把通用 capability 设计成"统一动作 API + BlockSpec 字段上交":
+- selection capability 提供 `selectAll() / selectBlock()` 之类动作 API
+- BlockSpec 字段(selectionBehavior 等)上交给 selection,由 selection 内部综合执行
+- 隐含假设:**统一抽象能正确处理所有 block**
 
-**协议先于实现是 V2 的范式**(workspace-bus PROTOCOL.md / L4 DESIGN.md 都是这条路径)。本协议落定后才能写 capability 实现代码 + view DESIGN。
+这个假设在 V1 验证下站不住:
+
+> **场景**:用户按 Cmd+A
+> - textBlock:选段落内 inline → TextSelection
+> - codeBlock:走 CodeMirror 内部全选 → 不能进 PM 选区
+> - mathBlock:NodeSelection(无内部内容)
+> - table:cell 全选?整表全选?语义本身分歧
+> - toggleList 折叠态:整体选(内部不可见)
+>
+> **没有任何统一抽象能同时正确处理这 5 种** — 满足 textBlock 必坏 codeBlock,反之亦然。
+
+### 0.3 v0.2 的根本调整
+
+```
+错误形态:
+  capability = 动作执行者
+  block = 注册接口的实现者(BlockSpec 字段填空)
+  
+正确形态:
+  capability = 协议地基(channel + 注册 + 纯读 API,没有 set/do)
+  block = 自治模块(完整自己定义所有行为,可自由演化)
+```
+
+**block 是 V2 capability 模型的核心** — 用户体验的细节都在 block 上。每种 block 必须能独立演化(codeBlock 接 Monaco / mathBlock 接 AI / table 加嵌套等),互不影响。
+
+### 0.4 4 轮讨论的最终结论(用户拍板)
+
+| 轮次 | 用户洞察 | 最终设计 |
+|---|---|---|
+| 1 | "block 操作不一致时怎么办?满足 B 改坏 A 怎么办?" | capability 不再"统一执行动作" |
+| 2 | "block 内编辑必须有根据体验不断迭代优化的能力" | 每个 block 是独立 src 目录,自由演化 |
+| 3 | "5 个基本操作 → block 编辑 → 多块操作 → view 编辑" | 没有"多块协调器"作为预设结构,多块行为由具体 block 协议性涌现 |
+| 4 | Q-Y1~5 拍板 | 5 capability 协议化(Q-Y1=A)/ block 独立目录(Q-Y2=C 自适应)/ block UI 混合(Q-Y3=C)/ 纯读 API 不含动作(Q-Y4=A)/ view 在最外层捕获键盘分发(Q-Y5=B) |
 
 ---
 
-## 1. 协议核心
+## 1. V2 Capability 架构
 
-### 1.1 两类 capability(charter § 1.4)
+### 1.1 整体架构图
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  view 层(NoteView / GraphView / FileExplorer)            │
-│  - 通过 install 列表声明依赖哪些 capability                 │
+│ 第 0 层:5 个动作 capability(地基,纯协议)              │
+│   selection / clipboard / undo-redo / dnd / insertion    │
+│                                                          │
+│   每个 capability 只暴露:                                │
+│   - channel(让任何人 emit / 订阅)                       │
+│   - 协议(payload 形态,discriminated union)             │
+│   - 注册接口(让 block 注册自己怎么参与)                  │
+│   - 纯读 API(getCurrent / isEmpty / getText 等)         │
+│                                                          │
+│   ❌ 没有任何 set/do API(没有 selectAll / copy 之类调用) │
+│   ❌ 不知道任何 block 的存在,只知道协议                  │
+│   ❌ 不"统一执行"任何动作                                │
 └─────────────────────────────────────────────────────────┘
-            ↓ install
+              ↑
+              │ 注册 + emit + 订阅
+              │
 ┌─────────────────────────────────────────────────────────┐
-│  通用交互 capability(本协议覆盖)                           │
-│  selection / clipboard / undo-redo / drag-and-drop /     │
-│  insertion                                               │
+│ 第 1 层:block 自治模块(每个 block 一个独立 src 目录)  │
+│                                                          │
+│   src/capabilities/text-editing/blocks/                  │
+│   ├── text-block/                                        │
+│   │   ├── spec.ts            (PM nodeSpec,必需)         │
+│   │   ├── node-view.ts       (NodeView,可选)            │
+│   │   ├── selection.ts       (selection 行为,可选)       │
+│   │   ├── clipboard.ts       (copy/paste/serialize,可选) │
+│   │   ├── ...                                            │
+│   │   └── README.md          (设计 + 演化记录)            │
+│   │                                                      │
+│   ├── math-block/(独立目录,独立演化)                   │
+│   ├── code-block/(独立目录,独立演化)                   │
+│   ├── table/(独立目录,独立演化)                        │
+│   └── ...                                                │
+│                                                          │
+│   每个 block 模块:                                      │
+│   - 完整定义自己的所有行为(没有"BlockSpec 统一接口"约束) │
+│   - 自由演化(改一个 block 不影响其他)                  │
+│   - 自适应文件数(简单 block 1-2 个文件,复杂 block 多文件)│
+│   - 通过协议向 5 capability 注册自己的参与方式            │
+│   - 通过 text-editing 容器注册 nodeSpec(PM schema 拼装)  │
 └─────────────────────────────────────────────────────────┘
-            ↓ install
+              ↑
+              │ block 自我注册 (import side-effect 或 init 调用)
+              │
 ┌─────────────────────────────────────────────────────────┐
-│  内容特定 capability(各自 PROTOCOL.md / DESIGN.md)         │
-│  text-editing / graph-editing / file-management /        │
-│  web-rendering / ebook-rendering / ...                   │
+│ 第 2 层:text-editing capability(轻量组装容器)         │
+│                                                          │
+│   - 加载所有 block 模块(import side-effect 触发自注册)   │
+│   - 拼装 PM Schema(收集所有 block 的 nodeSpec)          │
+│   - 装配 PM EditorView(收集所有 block 的 plugin)        │
+│   - 提供 ProseMirrorHost React 组件                      │
+│                                                          │
+│   ❌ 不知道任何具体 block 的细节                         │
+│   ❌ 不实现任何"统一动作"                                │
+│   ❌ 不内置"多块协调器"                                  │
+│                                                          │
+│   text-editing 是"组装工具",不是"层级系统"              │
 └─────────────────────────────────────────────────────────┘
-            ↓ uses
+              ↑
+              │ install
+              │
 ┌─────────────────────────────────────────────────────────┐
-│  shared/(底层 utility,不是 capability)                    │
-│  data-transfer 抽象 / position helpers / etc.            │
-└─────────────────────────────────────────────────────────┘
-            ↓ uses
-┌─────────────────────────────────────────────────────────┐
-│  浏览器 / OS API(Selection API / Clipboard API / dnd)    │
+│ 第 3 层:NoteView                                        │
+│                                                          │
+│   - install: ['text-editing', 'selection', 'clipboard',  │
+│               'undo-redo', 'dnd', 'insertion']           │
+│   - 通过 ProseMirrorHost 渲染编辑器                      │
+│   - 通过 capability channel 订阅状态                     │
+│   - 在 view 最外层捕获键盘 → 通过 commandRegistry 分发到 │
+│     当前焦点 block 的 command 实现                       │
+│   - view 业务(笔记列表 / 持久化 / Toolbar)              │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 5 通用 capability 的共同 API 形态
+### 1.2 跟 v0.1 的根本差异
 
-每个通用 capability 暴露一致的接口形态:
+| 维度 | v0.1 (错) | v0.2 (对) |
+|---|---|---|
+| capability 角色 | 动作执行者 + 协议总线 | **纯协议**(channel + register + 纯读 API)|
+| block 形态 | BlockSpec 统一接口字段 | **独立 src 目录 + 自由演化** |
+| 多块协调 | text-editing 内置协调器 | **协议性涌现**,具体 block 自己处理 |
+| 改一个 block 的影响 | 改 BlockSpec → 影响所有 block | **完全隔离**(改一个目录不影响其他)|
+| 演化空间 | 受 BlockSpec 字段限制 | **完全自由** |
+| 键盘事件 | block 各自监听 | view 最外层捕获 → commandRegistry 分发 |
 
-```ts
-interface GenericCapability {
-  // 元信息
-  readonly id: string;
-  readonly version: string;
-  
-  // 注册接口(让"提供者"注册自己的能力)
-  registerSpec?(spec: ...): Result<void>;  // selection 注册 selection source
-                                            // clipboard 注册 serializer/handler
-                                            // dnd 注册 dropTarget
-                                            // insertion 注册 safeguard
-                                            // undo-redo 注册 undoCommand
-  
-  // 通信接口(让"消费者"订阅状态 / 调用动作)
-  channel?: ChannelSpec[];   // emit 的 channel 列表
-  request?: RequestSpec[];   // 接受的 request 列表
-  
-  // public API(直接调用,不走 bus)
-  api?: { ... };  // 仅 view / 内容特定 capability 调用
-}
-```
+### 1.3 核心反模式警示
 
-**消费者(view + 内容特定 capability)**通过两条路径用 capability:
-1. **bus channel / request**(动态状态 / 动作)
-2. **registerSpec**(静态扩展点 — 注册自己的内容形态)
+> ⚠️ **不要让 capability "统一执行动作"**
+>
+> 错误模式:`selection.api.selectAll()` / `clipboard.api.copy()` / `dnd.api.startDrag()` 等"调用就动作"的 API。
+>
+> **为什么错**:不同 block 对同一动作有不同语义(Cmd+A 例),统一执行必撞车。
+>
+> **正确**:capability 只提供 channel + 注册 + 纯读 API。**动作由 block 自己执行**,执行后 emit channel 让旁观者知道。
 
-**capability 之间永远不互相 import 代码**(铁律 5)。
+> ⚠️ **不要把"多块协调"作为预设结构**
+>
+> 错误模式:text-editing 内置"多块协调器"(`MultiBlockCoordinator`),封装"多块选区扩展 / 跨块拷贝 / 跨容器拖动"等通用逻辑。
+>
+> **为什么错**:多块协调的具体规则因 block 类型组合而异。table+textBlock 的多选 vs callout+codeBlock 的多选,语义不同;预设协调器必然漏 case。
+>
+> **正确**:多块行为是**协议层规定的形态**(selection.changed kind=multi-block / clipboard envelope 等),具体执行由参与的 block 各自处理。
 
-### 1.3 反模式警示(Q-D6 用户拍板)
+> ⚠️ **不要把 capability registry 当 service locator**(承袭 v0.1)
+>
+> capability 之间零代码 import。共享逻辑下沉 `src/shared/`。
 
-> ⚠️ **不要把 capability registry 当 service locator**
-> 
-> 错误模式:dnd capability 通过 `capabilityRegistry.get('clipboard').api.writeToDataTransfer(...)` 调 clipboard 的 helper。
-> 
-> **为什么错**:
-> - service locator 让依赖关系**隐式化**(代码里不显式说依赖,运行时却调)
-> - capability 之间产生**逻辑耦合**,只是 import 路径绕了一圈
-> - 测试时难以替换(mock 也要走 registry)
-> - 长期会破坏 capability 边界
-> 
-> **正确做法**:
-> - 共享逻辑下沉到 `src/shared/`(承认它**本来就不是 capability**)
-> - 跨 capability 状态通信走 bus channel
-> - 跨 capability 触发动作走 bus request
-> - capability 之间**真零代码依赖**
-
-> ⚠️ **不要把共享 utility 误抽成 capability**
-> 
-> 错误模式:发现 clipboard 和 drag-and-drop 都需要操作 DataTransfer,把 DataTransfer 抽象抽成 `data-transfer` capability,让两者依赖它。
-> 
-> **为什么错**:
-> - capability 是用户感知的能力(动作 / 状态),不是实现细节
-> - DataTransfer 抽象是浏览器 API 封装,用户不感知
-> - 抽成 capability 会让 capability 数量爆炸,边界模糊
-> 
-> **正确做法**:
-> - 共享 utility 放 `src/shared/data-transfer.ts`
-> - clipboard 和 dnd 都 import 它(import shared/ 不违反铁律 5)
-> - 同时在两个 capability 的 README 里说明用了同一个 shared utility(可读性)
+> ⚠️ **不要把共享 utility 误抽成 capability**(承袭 v0.1)
+>
+> DataTransfer 抽象 / 位置计算 helper 等浏览器 API 封装放 `src/shared/`,不是 capability。
 
 ---
 
 ## 2. 协议铁律
 
-### 2.1 6 条 capability 特有铁律
+### 2.1 8 条 capability 特有铁律
 
-> 这些铁律是 V2 capability 模型独有的,本协议立。
+#### 铁律 1:capability 是协议,不是动作执行者
 
-#### 铁律 1:协议先于实现
-新 capability 落地前先写 PROTOCOL / DESIGN,通过用户审阅后才写代码。
-
-实施铁律:
-- 通用 capability 协议在本文 § 3-§ 7
-- 内容特定 capability 各自 `src/capabilities/<id>/PROTOCOL.md`(可选)+ `DESIGN.md`(必需)
-
-#### 铁律 2:capability 不持有"业务数据"
-capability 只持有**协议状态**(注册表 / 当前选区 / 剪贴板 envelope 等运行时态),**不持有用户的业务数据**(笔记内容 / 笔记列表 / 文件夹树 / 等)。
-
-业务数据归 view 自管,通过 `WorkspaceState.pluginStates`(L3 已建)持久化。
+capability 暴露 channel / register / 纯读 API 三类接口。**没有任何 set/do API**。所有动作由 block / view 自己执行,执行完 emit channel。
 
 例:
-- ✅ selection capability 持有"当前选区状态"(`{ from, to, kind }`)— 协议状态
-- ❌ clipboard capability 持有"用户最近复制的笔记 doc fragment" — 业务数据,不持久化只在内存
-- ✅ clipboard capability 内存里有最近一次复制的 envelope(为 paste 时取用)— 协议状态(刷新即丢)
+- ✅ `selection.api.getCurrent()` — 纯读
+- ✅ `selection.channel.emit('changed', payload)` — block 主动 emit
+- ❌ `selection.api.selectAll()` — 这是动作,不该在 capability
 
-#### 铁律 3:统一注册形态
-每个 capability 暴露 `register*Spec` API,内容特定 capability / view 通过此 API 注册自己的能力到通用 capability。
+#### 铁律 2:每个 block 是独立自治模块
 
-例:
-- text-editing 注册到 selection:`selection.registerSource(textEditingSelectionSource)`
-- text-editing 注册到 clipboard:`clipboard.registerSerializer({ contentType: 'text-editing/pm-doc', format: 'markdown', serialize: ... })`
-- text-editing 注册到 undo-redo:`undoRedo.registerScope({ scope: 'note-pm', undo: ..., redo: ... })`
+block 不通过统一字段接口注册,而是通过**独立 src 目录**实现完整行为。block 之间不互相依赖。
 
-注册形态一致 → 学一个用一片。
+物理形态(Q-Y2=C 自适应):
+- 简单 block(textBlock):`spec.ts + README.md`
+- 中等 block(image / blockquote):`spec.ts + node-view.ts + selection.ts + README.md`
+- 复杂 block(mathBlock / codeBlock / table):`spec.ts + node-view.ts + popover-editor.tsx + selection.ts + clipboard.ts + ... + README.md`
 
-#### 铁律 4:内容特定 capability 通过通用 capability "上交能力"
-当内容特定 capability 注册一个 BlockSpec(例:text-editing 的 mathBlock 注册时)时,**自动把 BlockSpec 中的相关字段上交给对应通用 capability**:
+block 目录唯一约束:**`spec.ts` 必须存在**(导出 PM nodeSpec)。其他文件按需开,缺失则走"default 行为"(见 § 5)。
 
-| BlockSpec 字段 | 上交给 |
-|---|---|
-| selectionBehavior + getSelectionState | selection capability |
-| pasteGuard + parsers.fromX | clipboard capability(作为 PasteHandler 注册数据) |
-| serializers.toX | clipboard capability(作为 Serializer 注册数据) |
-| dropAccepts | drag-and-drop capability(作为 DropTarget 注册数据)|
-| (undo 实现固定走 PM history) | undo-redo capability |
+#### 铁律 3:5 个 capability 是地基,block 是消费者 + 提供者
 
-意义:**单一注册入口** → **多通用 capability 自动收编**,每加一个 block 不需要改通用 capability 内部代码。
+block 既消费 capability(订阅 channel / 调纯读 API),又提供 capability(emit / register)。
+
+view 主要消费 capability(订阅 + 纯读),不直接执行动作 — 通过 commandRegistry 分发到 block。
+
+text-editing capability 是**轻量容器**,不消费也不提供 — 只组装 block 模块。
+
+#### 铁律 4:没有"多块协调器"作为预设结构
+
+多块行为是**协议形态规定** + **具体 block 协议性涌现**:
+- selection 协议规定 `kind: 'multi-block'` 形态,具体多块选区由 block 协作 emit
+- clipboard 协议规定 envelope 多格式,具体多块如何序列化由各 block 独立提供 serializer
+- 跨 block 拖动由 dnd 协议(MIME / DataTransfer)规定,具体 source / target 由 block 注册
+
+text-editing **不内置**统一的"多块协调器"。
 
 #### 铁律 5:capability 之间零代码 import
-**capability 之间不互相 import 代码,不调用对方 public API**。共享逻辑只能通过两条路径:
-1. **下沉到 `src/shared/`**(承认是底层 utility)
-2. **通过 bus channel / request 通信**(workspace-bus L3.5)
 
-违反此铁律的最常见诱惑(避免):
-- service locator(用 capability registry 拿对方 API)
+跨 capability 通信:
+1. **下沉到 `src/shared/`**(共享 utility)
+2. **bus channel / request**(workspace-bus L3.5)
+
+违反此铁律的常见诱惑:
+- service locator(`capabilityRegistry.get('clipboard').api.xxx`)
 - 抽出"中间 capability"作为共享层
-- 在 capability A 直接 `import { something } from '@capabilities/B'`
+- 直接 `import { something } from '@capabilities/clipboard'`
 
 #### 铁律 6:命名空间保留前缀
-capability 注册的 channel / request / spec ID 必须以 capability ID 为命名空间前缀。
 
-例:
-- ✅ `selection.changed`(selection capability 的 channel)
-- ✅ `clipboard.copy`(clipboard capability 的 request)
-- ✅ `clipboard.text-editing-pm-doc`(clipboard 的 serializer ID,以 contentType 限定)
-- ❌ `text-changed`(无前缀,可能与他人冲突)
+capability 注册的 channel / register spec 必须以 capability ID 为前缀。
 
-保留前缀(view / capability 不可用):
-- `selection.*` / `clipboard.*` / `undo-redo.*` / `dnd.*` / `insertion.*`(本协议各 capability 保留)
-- `slot.*`(workspace-bus L3.5 保留)
+保留前缀(view / block 不可用):
+- `selection.*` / `clipboard.*` / `undo-redo.*` / `history.*` / `dnd.*` / `insertion.*`
+- `slot.*`(workspace-bus 保留)
+
+#### 铁律 7:键盘事件由 view 在最外层捕获 → commandRegistry 分发
+
+block 不直接监听全局键盘事件。所有键盘动作走:
+1. view 最外层捕获 keydown(在 ProseMirrorHost 之外的 React 层)
+2. 根据当前焦点(view 知道当前 view,通过 selection capability 知道当前 block)分发
+3. 调 commandRegistry 找对应 command,执行
+
+例:Cmd+C 在笔记中
+- view captures Cmd+C
+- view 调 commandRegistry.execute('clipboard.copy')
+- 'clipboard.copy' command 找当前焦点 block,调 block 自己的 copy 实现
+- block 执行 copy + emit `clipboard.changed`
+
+PM 内部的键盘行为(如 Enter 在段落 splitBlock,Tab 在列表缩进)**仍然走 PM keymap plugin** — 因为它们是"块内编辑"细节,不是 view 级动作。view 级捕获 Cmd+C / Cmd+V / Cmd+Z 等"对 block 整体的动作"。
+
+#### 铁律 8:演化能力优先
+
+新需求来时,首选**加新 block 模块或扩展某 block 内部**,不要改协议。
+
+只有以下情况才改本协议:
+- 新增整个 capability(罕见,本协议覆盖的 5 个已经够)
+- 协议形态发现错误(channel payload 形状漏 case 等)
+- 添加跨 capability 的新协作模式
+
+绝大多数迭代(改 codeBlock 行为 / 改 mathBlock 渲染 / 加新 block / 等)都是 block 模块内部的事,**不动协议**。
 
 ### 2.2 4 条继承自 workspace-bus 的铁律
 
-> 这些铁律 workspace-bus PROTOCOL.md 已立,capability 协议**继承不重述**。
+> workspace-bus PROTOCOL.md 已立,继承不重述。
 
-#### 铁律 7:Workspace scope only(对齐 bus 铁律 2)
-capability 实例**每个 Workspace 一个**,跨 Workspace 不通。bus 已经物理隔离 Workspace,capability 跟随。
-
-跨 Workspace 通信(罕见)走主进程 IPC,不在本协议范围。
-
-#### 铁律 8:dev mode typeof 校验(对齐 bus 铁律 3)
-- TypeScript 类型 + 编译期校验
-- dev mode 对 register* / channel emit 的 payload 顶层字段做 `typeof` 检查,不符 console.warn
-- prod 0 开销
-- **不引入** zod / valibot 等运行时校验库(charter § 1.3)
-
-#### 铁律 9:Result<T> 不抛错(对齐 bus 风格)
-所有 capability 操作返回 `Result<T>`,不抛错。调用方 if 判断,不写 try/catch。
-
-```ts
-type Result<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: string; detail?: unknown };
-```
-
-承袭自 [workspace-bus/bus-types.ts](../slot/workspace-bus/bus-types.ts)。
-
-#### 铁律 10:错误隔离(对齐 bus channel 行为)
-- 一个 listener / handler 抛错不影响其他
-- 注册的 spec 抛错时 console.error + 跳过该 spec,不破坏整个 capability
+- **铁律 9**:Workspace scope only(对齐 bus 铁律 2)
+- **铁律 10**:dev mode typeof 校验(对齐 bus 铁律 3)
+- **铁律 11**:Result<T> 不抛错(对齐 bus 风格)
+- **铁律 12**:错误隔离(一个 listener / handler 抛错不影响其他)
 
 ---
 
-## 3. capability 1:selection
+## 3. 5 capability 协议接口
 
-### 3.1 责任 / 不责任
+每个 capability 给出:
+- 责任 / 不责任
+- channel(emit 形态)
+- 注册接口(供 block 注册自己的参与)
+- 纯读 API(从 channel lastValue / 内部状态读取)
 
-**这层做什么**:
-- 统一"用户选中了什么"的概念,提供单一 channel 让 UI / 动作订阅
-- 覆盖多种选择模式(字符 / 块 / 多块 / 跨内容形态)
-- emit 选区变化事件,提供 helper API(getText / isEmpty / 等)
+注意:**没有 set/do API**(铁律 1)。
 
-**这层不做什么**:
-- 不持有具体内容(选区只是位置 / 范围概念,不含数据)
-- 不序列化(走 clipboard)
-- 不响应键盘(由内容特定 capability 自己捕获 + 包装 + emit)
-
-### 3.2 协议接口
-
-#### channel(emit 的事件)
-
-```ts
-// 'selection.changed'
-// payload: discriminated union by `kind`
-type SelectionPayload = {
-  source: string;      // 'text-editing' / 'graph-editing' / 等
-  isEmpty: boolean;
-  kind: 'text' | 'block' | 'multi-block' | 'graph-nodes' | 'tree-nodes' | 'empty';
-  // text 模式
-  from?: number; to?: number; anchor?: number; head?: number;
-  // block / multi-block 模式
-  positions?: number[];
-  // graph-nodes 模式(L6+)
-  nodeIds?: string[];
-  // tree-nodes 模式(NavSide 树等)
-  treeNodeIds?: string[];
-};
-```
-
-lastValue 自动开启(订阅者后挂载时立即拿到当前选区,L3.5 ChannelHub 已支持)。
-
-#### registerSpec(让内容特定 capability 注册"selection source")
-
-```ts
-interface SelectionSourceSpec {
-  // capability ID('text-editing' / 'graph-editing' / 等)
-  source: string;
-  // 当 selection source 自己的 selection 改变时,调用此函数转换为 SelectionPayload 并 emit
-  // 由内容特定 capability 在 mount 时主动调,capability 不轮询
-  emit: (payload: SelectionPayload) => void;
-}
-
-selection.registerSource(spec): Result<void>;
-selection.unregisterSource(source: string): void;
-```
-
-#### public API(view / 内容特定 capability 调用)
-
-```ts
-selection.api: {
-  // 取当前选区(从 lastValue,等价于读 channel.getLastValue)
-  getCurrent(): SelectionPayload | null;
-  
-  // 取当前选区的"文本表示"(若 kind 支持,如 text/block 模式)
-  // 跨内容形态返回 null(如 graph-nodes 不能转字符串)
-  getText(): string | null;
-  
-  // 是否为空选区
-  isEmpty(): boolean;
-};
-```
-
-### 3.3 实施深度
-
-| 阶段 | 范围 |
-|---|---|
-| L5-A | text-editing 注册一个 source,emit 字符级 selection.changed,测 channel 订阅 + lastValue + getCurrent / isEmpty |
-| L5-B | text-editing 加块级 selection 模式(blockSelection plugin 包装)+ 多块模式 |
-| L5-C | text-editing 加 inline atom 选中(noteLink 等)|
-| L6 | graph-editing 注册自己的 source,emit graph-nodes selection,验证 UI 跨内容统一订阅 |
-
----
-
-## 4. capability 2:clipboard
-
-### 4.1 责任 / 不责任
+### 3.1 selection capability
 
 **这层做什么**:
-- 多 envelope copy(原生 PM JSON / Markdown / HTML / 纯文本同时写)
-- paste dispatcher + handler 注册制
-- 提供 DataTransfer 读写 helper(给 dnd capability 复用 — 但 dnd 是从 `src/shared/data-transfer.ts` import,不是从 clipboard import)
+- 提供"当前选区"的统一概念(channel + lastValue)
+- 跨 block 协议性观察(任何 block 都可 emit)
+- 纯读 API 让旁观者(FloatingToolbar / ContextMenu / AskAIPanel)取当前选区
 
 **这层不做什么**:
-- 不知道"选了什么"(走 selection)
-- 不知道"怎么序列化"(各内容特定 capability 注册 serializer)
-- 不知道"怎么理解粘贴源"(各 view / 业务 capability 注册 PasteHandler)
-- 不持有用户业务数据(铁律 2)
-
-### 4.2 协议接口
-
-#### request(请求-响应)
-
-```ts
-// 'clipboard.copy'
-type ClipboardCopyInput = {
-  format?: 'auto' | 'pm-json' | 'markdown' | 'html' | 'plain';
-  // 默认 'auto' = 多 envelope 同时写
-  selection?: SelectionPayload;
-  // 若不传,从 selection capability 取 lastValue
-};
-
-// 'clipboard.paste'
-type ClipboardPasteInput = {
-  dataTransfer?: DataTransfer;
-  target?: { pos: number; node?: PMNode };  // 落点(若不传从 selection 取光标)
-};
-```
-
-#### registerSpec
-
-```ts
-// 序列化注册(各内容特定 capability 注册"我的内容怎么转 markdown / html")
-interface SerializerSpec {
-  contentType: string;           // 'text-editing/pm-doc' / 'graph-editing/fragment'
-  format: 'markdown' | 'html' | 'plain';
-  serialize: (data: unknown) => string;
-}
-clipboard.registerSerializer(spec): Result<void>;
-
-// paste handler 注册(各 view / 业务 capability 注册"我能理解什么源")
-interface PasteHandlerSpec {
-  id: string;                    // 'note-paste-chatgpt' / 'note-paste-word'
-  detect: (dataTransfer: DataTransfer) => boolean;
-  parse: (dataTransfer: DataTransfer) => Promise<{ markdown?: string; pmDoc?: unknown }> | { markdown?: string; pmDoc?: unknown };
-  priority?: number;             // 越大优先级越高
-}
-clipboard.registerPasteHandler(spec): Result<void>;
-```
-
-#### channel(状态广播)
-
-```ts
-'clipboard.changed': {
-  source: 'internal' | 'external';
-  envelopes: ('pm-json' | 'markdown' | 'html' | 'plain')[];
-};
-```
-
-### 4.3 实施深度
-
-| 阶段 | 范围 |
-|---|---|
-| L5-A | text-editing 注册 'pm-json' / 'markdown' / 'plain' serializer;走 PM 默认 paste(暂不 dispatcher) |
-| L5-B | 加 dispatcher,迁移 V1 smart-paste source handler(chatgpt / claude / gemini / generic) |
-| L5-C | 支持跨 view 复制粘贴(笔记选区粘到 thought) |
-| L6 | graph-editing 注册自己的 serializer(图谱节点 → markdown 表示) |
-
----
-
-## 5. capability 3:undo-redo
-
-### 5.1 责任 / 不责任
-
-**这层做什么**:
-- 提供 undo / redo 标准 request
-- 维护 per-view 栈(每个 view 一个 scope)
-- emit 状态 channel(canUndo / canRedo)
-
-**这层不做什么**:
-- 不知道具体怎么 undo(各 scope 注册自己的 undo 实现)
-- 不强求全局栈跨 view(per-view 即可,见 § 11 开放问题)
-- 不持久化栈(刷新即丢)
-
-### 5.2 协议接口
-
-#### request
-
-```ts
-// 'undo-redo.undo'
-type UndoInput = { scope?: string };  // 不传 = 当前焦点 scope
-
-// 'undo-redo.redo'
-type RedoInput = { scope?: string };
-```
-
-#### registerSpec
-
-```ts
-interface UndoScopeSpec {
-  scope: string;                 // 'note-pm' / 'graph-canvas' / 等
-  undo: () => boolean;           // 调用,返回是否成功(false = 没东西可 undo)
-  redo: () => boolean;
-  canUndo: () => boolean;        // 状态查询,emit 时调
-  canRedo: () => boolean;
-}
-undoRedo.registerScope(spec): Result<void>;
-undoRedo.unregisterScope(scope: string): void;
-```
+- 不"做"选中(每个 block 自己实现 select 动作)
+- 不持有具体内容(选区只是位置 / 范围)
+- 不响应键盘
 
 #### channel
 
 ```ts
-'history.changed': {
-  scope: string;
+// 'selection.changed'
+type SelectionPayload = {
+  source: string;       // 'text-editing.text-block' / 'text-editing.math-block' / 'graph-editing.node' / etc.
+  isEmpty: boolean;
+  kind: 'text' | 'block' | 'multi-block' | 'graph-nodes' | 'tree-nodes' | 'empty';
+  // kind 决定后续字段
+  // text: from / to / anchor / head
+  // block / multi-block: positions
+  // graph-nodes: nodeIds
+  // tree-nodes: treeNodeIds
+  from?: number; to?: number; anchor?: number; head?: number;
+  positions?: number[];
+  nodeIds?: string[];
+  treeNodeIds?: string[];
+};
+```
+
+lastValue 自动开启(L3.5 ChannelHub 已支持)。
+
+#### 注册接口
+
+```ts
+// block 注册自己怎么"成为选区源"
+interface SelectionSourceRegistration {
+  source: string;       // 'text-editing.text-block'
+  // block 在 init 时调,告诉 selection capability "我可能 emit 这个 source 的选区"
+  // 实际 emit 在 block 内部完成(通过下面 emit API)
+}
+
+selection.registerSource(reg): Result<void>;
+selection.unregisterSource(source: string): void;
+selection.emit(payload: SelectionPayload): void;  // block 主动调
+```
+
+#### 纯读 API
+
+```ts
+selection.api: {
+  getCurrent(): SelectionPayload | null;
+  isEmpty(): boolean;
+  getText(): string | null;       // 跨形态时:text/block 类型可转字符串,其他返 null
+}
+```
+
+### 3.2 clipboard capability
+
+**这层做什么**:
+- 提供"剪贴板内容"的统一形态(envelope 多格式)
+- channel emit 复制 / 粘贴事件
+- 注册接口让 block 提供自己的 serializer / paste handler
+
+**这层不做什么**:
+- 不"做"copy / paste(每个 block 自己的 copy / paste 实现)
+- 不知道具体怎么序列化
+- 不知道具体怎么解析粘贴源
+
+#### channel
+
+```ts
+// 'clipboard.copied'
+type ClipboardCopiedPayload = {
+  source: string;
+  envelopes: ('pm-json' | 'markdown' | 'html' | 'plain' | string)[];
+  selectionKind: SelectionPayload['kind'];
+};
+
+// 'clipboard.pasted'
+type ClipboardPastedPayload = {
+  target: string;       // 落点 block source
+  envelope: 'pm-json' | 'markdown' | 'html' | 'plain' | string;
+  source: 'internal' | 'external';   // 内部 KRIG 通道还是外部应用
+};
+```
+
+#### 注册接口
+
+```ts
+// block 注册"我能把自己的内容序列化成什么格式"
+interface SerializerRegistration {
+  contentType: string;            // 'text-editing.text-block.pm-fragment'
+  format: 'markdown' | 'html' | 'plain' | string;
+  serialize: (data: unknown) => string;
+}
+
+clipboard.registerSerializer(reg): Result<void>;
+
+// view / 业务 capability 注册"我能识别什么粘贴源"
+interface PasteHandlerRegistration {
+  id: string;
+  detect: (dataTransfer: DataTransfer) => boolean;
+  parse: (dataTransfer: DataTransfer) => Promise<unknown> | unknown;
+  priority?: number;
+}
+
+clipboard.registerPasteHandler(reg): Result<void>;
+```
+
+#### 纯读 API
+
+```ts
+clipboard.api: {
+  // 当前剪贴板有哪些 envelope(从最近一次 emit 推断)
+  getCurrentEnvelopes(): string[];
+  // 检查是否有内部 KRIG envelope(供 block 决定走 PM JSON 还是 markdown)
+  hasInternalEnvelope(): boolean;
+}
+```
+
+### 3.3 undo-redo capability
+
+**这层做什么**:
+- 提供 per-view scope 的 undo / redo 注册
+- channel emit 状态变化
+- 纯读 API 查 canUndo / canRedo
+
+**这层不做什么**:
+- 不"做"undo / redo(具体执行由各 scope 注册的实现完成)
+- 不维护跨 view 全局栈
+
+#### channel
+
+```ts
+// 'history.changed'
+type HistoryChangedPayload = {
+  scope: string;        // 'note-pm' / 'graph-canvas'
   canUndo: boolean;
   canRedo: boolean;
 };
 ```
 
-#### public API
+#### 注册接口
+
+```ts
+interface UndoScopeRegistration {
+  scope: string;
+  // 调时返回是否成功(false = 没东西可 undo)
+  undo: () => boolean;
+  redo: () => boolean;
+  // 状态查询(给 channel emit 用)
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+}
+
+undoRedo.registerScope(reg): Result<void>;
+undoRedo.unregisterScope(scope: string): void;
+
+// scope 内部状态变化时,主动调
+undoRedo.notifyChanged(scope: string): void;  // 触发 history.changed emit
+```
+
+#### 纯读 API
 
 ```ts
 undoRedo.api: {
-  setActiveScope(scope: string | null): void;  // 焦点 scope,影响"不传 scope 时调谁"
-  getActiveScope(): string | null;
-};
+  getActiveScope(): string | null;     // 当前焦点 scope
+  setActiveScope(scope: string | null): void;   // 给 view 切焦点用
+  canUndo(scope?: string): boolean;
+  canRedo(scope?: string): boolean;
+  // 注:undo() / redo() 不在 api 里 —— 那是动作,通过 commandRegistry 调
+}
 ```
 
-### 5.3 实施深度
+注:`commandRegistry` 提供的命令(如 `'undo-redo.undo'`)调用时:
+1. 找 active scope 的注册项
+2. 调 `reg.undo()`
+3. 成功后调 `notifyChanged(scope)` 触发 channel emit
 
-| 阶段 | 范围 |
-|---|---|
-| L5-A | text-editing 注册 'note-pm' scope(包装 prosemirror-history 的 undo/redo);Cmd+Z / Cmd+Shift+Z keymap 调 capability |
-| L5-B/C | 稳定运行,跨 block / 跨 capability 操作的 undo 验证 |
-| L6 | graph-editing 注册 'graph-canvas' scope(自己的 undo 栈)|
+但**这个分发逻辑在 commandRegistry 命令里,不在 capability 上**。
 
----
-
-## 6. capability 4:drag-and-drop
-
-### 6.1 责任 / 不责任
+### 3.4 drag-and-drop capability
 
 **这层做什么**:
-- 拖动生命周期(start / over / drop)
-- 落点解析框架(给定鼠标位置,问每个注册的 dropTarget)
-- DataTransfer 协议(从 `src/shared/data-transfer.ts` import,不依赖 clipboard)
+- 拖动生命周期协议(start / over / drop)
+- 注册接口让 block 提供自己的 dropTarget
+- channel emit 候选目标 / 完成事件
+- 纯读 API 查当前拖动状态
 
 **这层不做什么**:
-- 不知道"接什么 drop"(内容特定 capability 注册 dropTarget)
-- 不知道"具体落地动作"(注册时给 onDrop 回调)
-- 不与 clipboard 互相 import 代码(铁律 5)— 共享 DataTransfer 抽象在 shared/
-
-### 6.2 协议接口
-
-#### request
-
-```ts
-// 'dnd.startDrag'
-type StartDragInput = {
-  source: { type: string; data: unknown };
-  // type 命名空间:'text-editing/block' / 'graph-editing/node' / 等
-};
-
-// 'dnd.drop'
-type DropInput = {
-  target: { type: string; pos?: number };
-  dataTransfer: DataTransfer;
-};
-```
-
-#### registerSpec
-
-```ts
-interface DropTargetSpec {
-  id: string;
-  // 接受什么 source.type(精确匹配或 namespace 前缀)
-  accepts: string[];             // ['text-editing/block', 'image/*']
-  // 给定鼠标坐标,返回是否可作为 drop 目标 + 具体目标位置
-  computeDropPoint: (
-    coords: { x: number; y: number },
-    view: unknown,
-  ) => { pos: number; valid: boolean } | null;
-  // 落地回调
-  onDrop: (input: { source: unknown; target: { pos: number }; dataTransfer: DataTransfer }) => void;
-}
-dnd.registerDropTarget(spec): Result<void>;
-```
+- 不"做"drag(每个 block 自己启动拖动 + 处理 drop)
+- 不与 clipboard 互相 import — DataTransfer 抽象在 `src/shared/data-transfer.ts`
 
 #### channel
 
 ```ts
-'dnd.over': {
+// 'dnd.started'
+type DndStartedPayload = {
+  source: { type: string; data?: unknown };  // type = 'text-editing.block.text-block' 等
+};
+
+// 'dnd.over'
+type DndOverPayload = {
   mouseX: number;
   mouseY: number;
   candidateTargetId: string | null;
   valid: boolean;
 };
 
-'dnd.completed': {
+// 'dnd.completed'
+type DndCompletedPayload = {
   sourceType: string;
   targetId: string | null;
   mode: 'move' | 'copy';
@@ -526,333 +513,357 @@ dnd.registerDropTarget(spec): Result<void>;
 };
 ```
 
-### 6.3 实施深度
-
-| 阶段 | 范围 |
-|---|---|
-| L5-A | 不实施(单 NoteView 没拖动需求) |
-| L5-B | NavSide 文件夹树拖放笔记(view 业务用 dnd capability,但 NavSide UI 是 view 业务,见 § 1.3 反模式)|
-| L5-C | 笔记内块拖动重排(迁移 V1 block-handle) |
-| L6+ | 跨 view 拖放(笔记块拖到 GraphView 当节点) |
-
----
-
-## 7. capability 5:insertion
-
-### 7.1 责任 / 不责任
-
-**这层做什么**:
-- 框架级"安全插入"协议(光标祖先守卫 / position 解析 / 批量原子操作)
-- 提供 `safeInsert(target, content)` 通用接口
-- safeguard 注册(允许业务 capability 加额外守卫)
-
-**这层不做什么**:
-- 不知道"插什么"(内容特定 capability 提供节点 / 内容工厂)
-- 不知道"插哪里"(由调用方提供 / 从 selection 拿光标)
-- 不与 clipboard 重叠(insertion 处理"插入语义 + 守卫",clipboard 处理"内容来源 + 序列化")
-
-### 7.2 协议接口
-
-#### request
+#### 注册接口
 
 ```ts
-// 'insertion.insert'
-type InsertInput = {
-  target: { pos: number; mode?: 'replace' | 'before' | 'after' };
-  content: unknown;
-  contentType: string;           // 'text-editing/pm-fragment' 等
-  safeMode?: boolean;            // 默认 true(走 safeguard)
+interface DropTargetRegistration {
+  id: string;
+  // 接受什么 source.type(精确或前缀,如 'text-editing.block.*')
+  accepts: string[];
+  // 给定鼠标坐标,返回是否可作为目标
+  computeDropPoint: (
+    coords: { x: number; y: number },
+    view: unknown
+  ) => { pos: number; valid: boolean } | null;
+  // 落地回调
+  onDrop: (input: { source: unknown; target: { pos: number }; dataTransfer: DataTransfer }) => void;
+}
+
+dnd.registerDropTarget(reg): Result<void>;
+dnd.unregisterDropTarget(id: string): void;
+```
+
+#### 纯读 API
+
+```ts
+dnd.api: {
+  getCurrentSource(): { type: string; data?: unknown } | null;
+  isActive(): boolean;
+}
+```
+
+### 3.5 insertion capability
+
+**这层做什么**:
+- 框架级"安全插入"协议(光标祖先守卫)
+- 注册接口让 block 提供 safeguard
+- 纯读 API 查目前注册的 safeguard
+
+**这层不做什么**:
+- 不"做"insert(各 block 自己执行,但走 insertion 的 safeInsert helper)
+- 不知道"插什么"或"插哪里"
+
+#### channel
+
+```ts
+// 'insertion.inserted'
+type InsertedPayload = {
+  target: { type: string; pos: number };
+  contentType: string;
+  success: boolean;
 };
 ```
 
-#### registerSpec
+#### 注册接口
 
 ```ts
-interface SafeguardSpec {
+interface SafeguardRegistration {
   id: string;
-  // 给定要插入的内容 + 目标 + 当前文档状态,判断是否安全
   check: (input: {
-    target: { pos: number };
+    target: { pos: number; type: string };
     content: unknown;
     contentType: string;
-    docContext: unknown;         // PM doc / graph state / etc.
+    docContext: unknown;
   }) => { safe: boolean; reason?: string };
 }
-insertion.registerSafeguard(spec): Result<void>;
+
+insertion.registerSafeguard(reg): Result<void>;
 ```
 
-#### public API
+#### 纯读 API + safeInsert helper
 
 ```ts
 insertion.api: {
-  // 直接调用,不走 request(给 capability 内部用)
-  safeInsert(input: InsertInput): Result<void>;
-};
+  // 直接调用,blocks 用它来"安全插入"
+  // 注:这看起来像 set/do API,但本质是"调用 safeguard 链 + 委托到调用方提供的 do 函数"
+  // capability 不知道具体如何插入,只调用注册的 safeguard 检查
+  safeInsert<T>(input: {
+    target: { pos: number; type: string };
+    content: unknown;
+    contentType: string;
+    docContext: unknown;
+    // 调用方提供"实际怎么插"的实现 — capability 不知道
+    perform: () => Result<T>;
+  }): Result<T>;
+  
+  listSafeguards(): SafeguardRegistration[];
+}
 ```
 
-### 7.3 实施深度
-
-| 阶段 | 范围 |
-|---|---|
-| L5-A | 不实施(单 view 不需要框架级守卫) |
-| L5-B | 迁移 V1 pasteIsSafe 守卫(text-editing 注册祖先链守卫) |
-| L5-C | slash 命令 + AI Sync 走同一接口 |
-| L6+ | 跨 view 插入(把 graph 节点 fragment 插到笔记) |
+**关键区别**:`safeInsert` 是个**协议守卫包装器**,不是"执行插入"。capability 调注册的所有 safeguard.check,全部通过才调用方提供的 `perform()`。这符合铁律 1 — capability 只跑协议(safeguard 检查链),具体动作由调用方实现。
 
 ---
 
-## 8. 跨 capability 协作场景(3 个内容操作场景)
+## 4. block 自治模块的 default 行为
 
-把研究文档里典型的"组合操作"落地到 capability 协议层面。**全部聚焦内容操作,NavSide 等 view 业务不在本节**(Q-D5' 用户拍板)。
+铁律 2 提到"缺失文件走 default 行为"。本节定义 default。
 
-### 8.1 场景 A:多块选中 → 拷贝 → 同笔记内粘贴
+### 4.1 没提供 selection.ts → default
 
-**用户视角**:在笔记里多块选中 3 个段落 → Cmd+C → 光标移到另一处 → Cmd+V → 3 段落粘贴到光标处。
+block 的 PM nodeSpec 决定 default:
+- `atom: true`(leaf 节点)→ default 是 NodeSelection,emit `kind: 'block'`
+- `inline: true`(inline 节点)→ default 不 emit selection(由父级 textBlock 管)
+- 其他 block(`content: 'inline*'` 或 `'block+'`)→ default emit `kind: 'text'` 用 PM TextSelection
 
-**capability 协作流**:
+### 4.2 没提供 clipboard.ts → default
 
-```
-用户 ESC 进入块选模式(text-editing 内部)
-  ↓
-text-editing 调 selection.registerSource('text-editing').emit({
-  source: 'text-editing', kind: 'multi-block', positions: [12, 47, 89], isEmpty: false
-})
-  ↓ channel 'selection.changed' 广播 + lastValue 缓存
-  
-用户 Cmd+C(text-editing keymap 触发,bus.requests.request('clipboard.copy', { format: 'auto' }))
-  ↓
-clipboard 内部:
-  1. 从 selection.api.getCurrent() 拿 lastValue → SelectionPayload(multi-block)
-  2. 找已注册 serializer 中匹配 contentType='text-editing/pm-doc' 的所有 format
-  3. 调 serializer 把多块 selection → pm-json + markdown + html + plain
-  4. 写多 envelope 到 navigator.clipboard
-  5. emit 'clipboard.changed' { source: 'internal', envelopes: ['pm-json', 'markdown', 'html', 'plain'] }
-  ↓ Result<void> ok=true 返回
-  
-用户移动光标 → text-editing 再次 emit selection.changed(kind='text', empty position)
-  
-用户 Cmd+V(text-editing keymap 触发,bus.requests.request('clipboard.paste'))
-  ↓
-clipboard 内部:
-  1. 从 navigator.clipboard 读 dataTransfer
-  2. 走 PasteHandler dispatcher(按 priority 试 detect/parse)
-  3. text-editing 的 'pm-json' parser 命中(因为 envelope 含 pm-json marker)
-  4. 反序列化得到 pm fragment
-  5. 调 insertion.api.safeInsert({ target: 当前光标, content: fragment, contentType: 'text-editing/pm-fragment' })
-  ↓
-insertion 内部:
-  1. 调所有注册的 safeguard.check
-  2. text-editing 注册的"祖先链守卫"检查:粘贴后光标祖先链不破坏
-  3. 全部通过 → 调 PM tr.replaceSelectionWith(fragment) → view.dispatch(tr)
-  4. PM history 自动记录(undo-redo 不需要单独动作)
-  ↓ Result<void> ok=true
-  
-用户视觉:3 段落粘贴到光标处
-```
+- copy:走 PM 默认 DOMSerializer(toDOM)生成 HTML
+- toMarkdown:从 textContent 生成纯文本(降级)
+- paste:走父级容器或 view 级 dispatcher 处理
 
-**关键观察**:
-- selection / clipboard / insertion 三个 capability 协作完成,每个只管自己的责任
-- text-editing 是"提供者"(注册 serializer / safeguard),不是"消费者"
-- bus channel(selection.changed / clipboard.changed)让旁观者(如 FloatingToolbar)知道发生了什么,不参与协作
+### 4.3 没提供 undo.ts → default
 
-### 8.2 场景 B:笔记选段 → AI 总结 → 结果在 right slot 显示
+走 text-editing capability 的 'note-pm' scope(prosemirror-history),不需要 block 显式注册。
 
-**用户视角**:笔记里选一段 → 右键"问 AI 总结" → AI 在 right slot 弹一个总结结果 view。
+### 4.4 没提供 dnd.ts → default
 
-**capability 协作流**:
+block **不可拖动**(不参与 dnd capability)。要拖动必须显式提供 dnd.ts。
 
-```
-用户选中文字(text-editing emit selection.changed kind='text')
-  
-用户右键 → V2 ContextMenu(L4)弹出,选"AI 总结"项
-  ↓
-该项的 command 处理函数(NoteView 注册到 commandRegistry):
-  1. selection.api.getText() 拿当前选区文本
-  2. selection.api.getCurrent() 拿选区元数据(用于回填位置)
-  3. bus.requests.request('ai.summarize', { text, sourceNoteId })
-     → AI capability(L6+,业务 capability)处理,返回 summary
-  4. bus.slot.openRight('ai-summary-view', { summary, anchor: { noteId, range } })
-     → workspace-bus L3.5 切右 slot 装载新 view
-  
-right slot 加载 ai-summary-view:
-  - 读 payload.summary 渲染
-  - 读 payload.anchor 用于"跳回笔记位置"按钮
-  
-用户 Cmd+S 笔记 → 不影响 right slot(各 view 独立)
-```
+### 4.5 没提供 insertion.ts → default
 
-**关键观察**:
-- 跨 capability + 跨 § 1 § 2 边界(selection 是 § 1.a 文档内,bus.slot.openRight 是 § 2.b 跨文档)
-- selection capability 提供"读当前选区",AI capability(L6+)提供"业务能力",workspace-bus 提供"跨 view 切换"
-- 通用 capability 之间仍**零代码 import**(selection 不知道 AI 存在,AI 不知道 workspace-bus 存在,各自独立)
-- view 是装配点 — NoteView 的 commandRegistry handler 拼起整条流程
+走 text-editing 的标准 safeguard(光标祖先链不破坏),不需要 block 显式注册。
 
-### 8.3 场景 C:笔记内块拖动重排
+### 4.6 没提供 keymap.ts → default
 
-**用户视角**:笔记里 hover 块手柄 → 拖动 → 落到另一段下方 → 块被移到新位置。
+走 PM baseKeymap(标准 Enter / Backspace / 光标移动)。
 
-**capability 协作流**:
+### 4.7 没提供 input-rules.ts → default
 
-```
-鼠标 hover 块手柄 → text-editing block-handle plugin 显示手柄
-  
-用户 mousedown 手柄拖动 → text-editing 调 bus.requests.request('dnd.startDrag', {
-  source: { type: 'text-editing/block', data: { sourcePos, blockNode } }
-})
-  ↓
-dnd 内部:
-  1. 接管 dragstart 事件
-  2. 把 source.data 写入 DataTransfer(走 src/shared/data-transfer.ts 抽象)
-  3. emit 'dnd.over' channel(实时报告候选 dropTarget)
+无 input-rule(不参与自动语法转换)。
 
-鼠标移动 → dnd 内部不断:
-  1. 调每个注册的 DropTargetSpec.computeDropPoint(coords, view)
-  2. 找到第一个 valid=true 的目标 → emit 'dnd.over' { candidateTargetId: 't1', valid: true }
-  3. text-editing 的 dropTarget(注册时 accepts=['text-editing/block'])命中,返回 pos=87
-  
-鼠标 mouseup 落下 → dnd 调 DropTargetSpec.onDrop:
-  1. text-editing 的 onDrop:
-     a. 调 insertion.api.safeInsert({ target: { pos: 87 }, content: blockNode, contentType: 'text-editing/pm-block' })
-     b. insertion safeguard 检查通过 → PM tr.insert(87, blockNode)
-     c. text-editing 自己再删原位置(sourcePos 处),用 PM tr.delete(sourcePos, sourcePos + nodeSize)
-     d. PM history 自动记录(可 undo)
-  2. emit 'dnd.completed' { sourceType: 'text-editing/block', targetId: 't1', mode: 'move', success: true }
-  ↓ Result<void> ok=true
-  
-用户视觉:块从原位置消失,出现在新位置
-用户 Cmd+Z → undo-redo.api.api.undo({ scope: 'note-pm' }) → PM history 还原 doc
-```
+### 4.8 没提供 node-view.ts → default
 
-**关键观察**:
-- dnd / insertion / undo-redo 三个 capability 协作 + text-editing 注册 source/target/safeguard
-- DataTransfer 抽象是 `src/shared/data-transfer.ts` 提供的(铁律 5,dnd 不 import clipboard)
-- "移动"语义 = "插入 + 删除"两步(text-editing 自己组合,不在 dnd 协议里)— 因为不同内容形态的"移动"语义可能不同(graph 移动节点不删除原 node,只改 position)
-- undo 走 PM history scope(text-editing L5-A 注册的)
+走 PM 默认渲染(toDOM)。
 
 ---
 
-## 9. 与 charter / workspace-bus 协议的对照
+## 5. 跨 capability 协作场景(2 个内容操作场景)
 
-### 9.1 charter § 1.4 的归属规则 → 本协议如何遵守
+剔除"统一动作执行"的设想,看真实流程。
+
+### 5.1 场景 A:多块拷贝粘贴
+
+**用户视角**:笔记里 ESC 进块选模式,选中 3 个段落,Cmd+C,光标移动到另一处,Cmd+V → 3 段粘贴。
+
+**capability 协作流**:
+
+```
+用户 ESC 进入块选模式(text-editing 内某 plugin 接管)
+  ↓
+text-block / blockquote / list 等参与块选模式的 block 都通过 selection.emit 发:
+  selection.emit({
+    source: 'text-editing.block-selection',
+    kind: 'multi-block',
+    positions: [12, 47, 89],
+    isEmpty: false
+  })
+  ↓ 'selection.changed' channel + lastValue 缓存
+  
+旁观者 FloatingToolbar 订阅 selection.changed → 显示"3 块已选"
+
+用户 Cmd+C
+  ↓ view 最外层捕获(铁律 7)
+  ↓ view.commandRegistry.execute('clipboard.copy')
+  ↓ 该 command 实现:
+    1. 调 selection.api.getCurrent() 拿 multi-block payload
+    2. 找当前焦点 view 类型(NoteView)的 block 类型(text-editing)
+    3. 调 text-editing 提供的 multi-block-copy 命令
+    4. multi-block-copy 内部:
+       a. 遍历每个 position 的 block
+       b. 调每个 block 自己的 copy.ts 提供的 serialize 函数
+       c. 拼接多块 PM JSON / Markdown / HTML
+       d. 写多 envelope 到 navigator.clipboard
+       e. emit 'clipboard.copied'
+  
+用户移动光标 → 当前 block 重新 emit selection.changed kind='text' empty position
+  
+用户 Cmd+V
+  ↓ view 捕获 → commandRegistry.execute('clipboard.paste')
+  ↓ command 实现:
+    1. 读 navigator.clipboard
+    2. 走 clipboard 注册的 PasteHandler dispatcher(按 priority)
+    3. text-editing 注册的 PM JSON handler 命中(因有 KRIG marker)
+    4. 反序列化得到 PM fragment
+    5. 调 insertion.api.safeInsert({
+         target: { pos: 当前光标, type: 'text-editing.text-block' },
+         content: fragment,
+         contentType: 'text-editing.pm-fragment',
+         docContext: pmDoc,
+         perform: () => { 
+           view.dispatch(view.state.tr.replaceSelectionWith(fragment));
+           return ok(undefined);
+         }
+       })
+    6. insertion 调所有 safeguard,通过则调 perform
+    7. emit 'insertion.inserted' + 'clipboard.pasted'
+    8. PM history 自动记录(undo-redo capability 下次 query 知道 canUndo=true)
+```
+
+**关键观察**:
+- 5 capability 协作完成,**每个只跑自己的协议**(emit channel / 调注册项)
+- **真正"做事"的是 block 的代码 + view 的 command 实现**
+- capability 既没有 `selection.selectAll`,也没有 `clipboard.copy`(指动作)— 它们只有 channel 和注册
+- text-editing 的 multi-block-copy 命令是个**普通 command**,不是 capability API
+- insertion.safeInsert 看起来像动作,本质是"协议守卫 + 委托" — capability 不知道怎么 insert,调用方提供 perform()
+
+### 5.2 场景 B:用户在 mathBlock 上点击进入编辑
+
+**用户视角**:笔记里点击数学公式 → 弹出 LaTeX 编辑面板 → 编辑 → 点击外部退出 → 重新渲染 KaTeX。
+
+**capability 协作流**:
+
+```
+用户单击 mathBlock 的 DOM
+  ↓ math-block 的 NodeView mousedown 监听:
+    1. e.preventDefault()
+    2. view.dispatch(setSelection(NodeSelection.create(doc, pos)))
+    3. selection.emit({
+         source: 'text-editing.math-block',
+         kind: 'block',
+         positions: [pos],
+         isEmpty: false
+       })
+       
+旁观者 FloatingToolbar 订阅 → 检测 kind=block + source=math-block,显示 mathBlock 专用 toolbar(LaTeX 模板等)
+
+用户双击 mathBlock 进入编辑模式
+  ↓ math-block 的 NodeView dblclick 监听:
+    1. 内部 state editing=true
+    2. 调 ../popover/help-panel.showMathPanel(...)  // 共享 UI 组件
+    3. 注册全局 mousedown 监听(math-block 自己管,不用 capability)
+    
+用户在 popover 里编辑 LaTeX
+  ↓ math-block 内部更新 attrs.latex(走 view.dispatch transaction)
+  ↓ PM history 自动记录(undo-redo 可撤销)
+
+用户点击外部
+  ↓ math-block 全局 mousedown 监听检测点击在 popover 外
+  ↓ math-block 内部退出编辑模式:
+    1. state editing=false
+    2. 调 ../popover.hideMathPanel()
+    3. 重新渲染 KaTeX
+```
+
+**关键观察**:
+- mathBlock 完全自己管"编辑模式生命周期"(全局监听 / popover / KaTeX 渲染)
+- mathBlock 通过 selection.emit 通知 capability 形态变化(给 toolbar 看)
+- mathBlock 不污染其他 block(textBlock / codeBlock 不知道 mathBlock 的存在)
+- mathBlock 演化(将来加 AI 自动补全 / OCR 识别等)只改 math-block/ 目录,其他都不动 — 这正是铁律 8 的实现
+
+---
+
+## 6. 与 charter / workspace-bus 协议的对照
+
+### 6.1 charter § 1.4 → 本协议如何遵守
 
 | § 1.4 规则 | 本协议如何遵守 |
 |---|---|
-| 应用级 UI 在 Workspace Container(L3) | capability 不渲染 UI(view 渲染,通过订阅 capability channel + 调 capability API)|
-| 能力 UI 在 Capability(L4) | capability 暴露 API(selection.api / clipboard.api / 等),view 通过 install 拿到 |
-| View 是能力组合声明(L5) | view.install: ['text-editing', 'selection', 'clipboard', ...] 显式声明依赖 |
-| view 平等,无 variant | capability 协议没有 variant 字段,所有 view 平等使用 |
-| view 文件极轻 | view 通过 capability 注册自己的扩展(不内置实现)|
+| 应用级 UI 在 Workspace Container(L3) | capability 不渲染 UI |
+| 能力 UI 在 Capability(L4) | capability 暴露 channel + register + 纯读 API,view 装配 |
+| View 是能力组合声明(L5) | view.install 列表显式声明依赖 |
+| view 平等,无 variant | capability 协议无 variant 字段 |
+| view 文件极轻 | view 通过 capability 注册扩展(实际逻辑在 block 模块) |
 
-### 9.2 workspace-bus § 9 铁律 → 本协议如何继承
+### 6.2 workspace-bus § 9 铁律 → 本协议状态
 
-| workspace-bus 铁律 | 本协议状态 |
-|---|---|
-| 1. 三类管道 | 本协议**不引入新管道**,继续走 workspace-bus 的 channel/request/slot |
-| 2. Workspace scope only | 本协议铁律 7(继承)|
-| 3. dev mode typeof 校验 | 本协议铁律 8(继承)|
-| 4. Manifest 分散 | 本协议铁律 3 是更具体的形式(register*Spec 在各 view / 内容特定 capability) |
-| 5. 主 view 锁 | 本协议不涉及(workspace-bus 自己管)|
-| 6. Slot Control 框架级 | 本协议不涉及(workspace-bus 自己管)|
-| 7-9. slot 升级 / last view / NavSide 切换 | 本协议不涉及(workspace-bus 自己管)|
+承袭(铁律 9-12 见 § 2.2)。本协议没有引入新管道形态,继续走 workspace-bus 的 channel/request/slot。
 
-### 9.3 边界明确:capability ≠ bus
-
-容易混淆的两个概念:
+### 6.3 capability ≠ bus 的边界
 
 | | workspace-bus | 通用 capability |
 |---|---|---|
-| 本质 | 消息通道 | 动作能力 |
-| 形态 | channel + request + slot | register + emit + api |
-| 范围 | 跨 view 实例 | 内容操作 |
-| 持有 | listener 集合 + lastValue | 注册的 spec 集合 + 协议状态 |
-| 持续 | 长生命周期(workspace 级) | 长生命周期(capability 级) |
-| 例 | "笔记选区变化" 事件 | "选区"概念本身 |
+| 本质 | 跨 view 实例消息通道 | 协议 + 状态聚合 + 注册中心 |
+| 形态 | channel + request + slot | channel + register + 纯读 API |
+| 范围 | 跨 view 实例 | 内容操作(view 内或 view 之间) |
+| 持有 | listener + lastValue | 注册项集合 + 协议状态 |
+| 例 | "笔记被打开" 事件 | "选区"概念本身 |
 
-bus 是 capability 之间通信的工具(铁律 5);capability 是 view 用的能力。两者不冲突 — capability 用 bus 来 emit channel / 接受 request,但 capability 本身**不是** bus 的一部分。
+capability 用 bus 来 emit channel,但 capability 本身**不是** bus 的一部分。
 
 ---
 
-## 10. 留位:未来内容特定 capability(L6+)
+## 7. 留位:未来 capability(L6+)
 
-本协议是通用 capability 的根协议。未来内容特定 capability 各自立 PROTOCOL.md,继承本协议的:
-- 铁律(全部 10 条)
-- 注册形态(铁律 3)
-- 命名空间(铁律 6 — 各内容特定 capability 用自己的 ID 作前缀)
+本协议是通用 capability 的根协议。未来内容特定 capability 各自立 PROTOCOL.md / DESIGN.md,继承本协议的:
+- 12 条铁律
+- 注册形态
+- 命名空间(自己 ID 作前缀)
 
-L6+ 候选内容特定 capability:
-- `text-editing`(L5-A 起,见 [src/capabilities/text-editing/DESIGN.md](text-editing/DESIGN.md))
+候选:
+- `text-editing`(L5-A 起)
 - `graph-editing`(L6+,V1 部分实现)
-- `file-management`(L6+,文件 CRUD)
-- `web-rendering`(L6+,浏览器内嵌)
-- `ebook-rendering`(L6+,PDF / EPUB)
-- `media-rendering`(L6+,图片 / 视频 / 音频通用)
-- `ai-augment`(L6+,业务 capability,跨多 view)
+- `file-management` / `web-rendering` / `ebook-rendering` / `media-rendering` / `ai-augment`
 
 ---
 
-## 11. 风险 + 开放问题
+## 8. 风险 + 开放问题
 
-每个开放问题给推荐答案。
+### 8.1 selection 跨内容形态时,payload 形状如何统一?
 
-### 11.1 selection 跨内容形态时,payload 形状如何统一?
+**推荐**:discriminated union by `kind`(已在 § 3.1)。
 
-text 是 from/to 数字,graph 是 nodeIds 数组,差异极大。
+### 8.2 clipboard envelope 跨内容形态降级?
 
-**推荐**:**discriminated union by `kind`**(已在 § 3.2 协议)。订阅者按 kind 决定怎么读。常见动作(getText / isEmpty)由 capability 提供 helper。
+**推荐**:多 envelope copy + paste 端按目标 block 接受度选最高格式。具体接受度由 PasteHandler.detect 决定。
 
-### 11.2 clipboard 跨内容形态粘贴时的"语义降级"规则?
+### 8.3 dnd 与 clipboard 共享 DataTransfer?
 
-笔记选区(含 image / math / table)粘到代码块,图谱节点粘到笔记,该怎么办?
+**推荐**:`src/shared/data-transfer.ts` 底层 utility,两者都 import 它(铁律 5)。
 
-**推荐**:**多 envelope copy + paste 端按目标内容类型选最高格式**。降级链由 PasteHandler 的 priority 字段表达;clipboard dispatcher 按 priority 顺序试 detect/parse,目标 view 接受得了的最高格式胜出。
+### 8.4 undo-redo 跨 capability 操作时栈策略?
 
-### 11.3 drag-drop 与 clipboard 的 DataTransfer 共享如何抽象?
+**推荐**:per-view 栈,焦点决定撤销目标。不强求全局栈。
 
-V2 严格遵守"capability 间零 import"(铁律 5),但两者都需要 DataTransfer 操作。
+### 8.5 insertion safeInsert 跨 target 形态接口?
 
-**推荐**:**`src/shared/data-transfer.ts`** 作为底层 utility,提供 `writeMultiEnvelope / readEnvelope / etc.` API。clipboard 和 dnd 都 import 它(import shared/ 不违反铁律 5)。
+**推荐**:target 用 `{ pos, type }` 形态,type 字段让 safeguard 区分。具体 target 类型扩展由 block 在 docContext 里自描述。
 
-### 11.4 undo-redo 跨 capability 操作时栈策略
+### 8.6 block 模块自注册时机?
 
-用户在 NoteView 改一段(走 'note-pm' scope)+ 在 GraphView 改节点连线(走 'graph-canvas' scope),Cmd+Z 撤销哪步?
+**推荐**:启动时一次性 import 触发 side-effect 自注册。运行时不动态加载(L7+ 用户扩展插件再考虑)。
 
-**推荐**:**per-view 栈,焦点决定撤销目标**(已在 § 5.2)。view 切换时调 `undoRedo.api.setActiveScope(scope)`,Cmd+Z 撤销当前焦点 scope 的栈顶。L7+ 出现"全局栈"需求时再讨论合并。
+### 8.7 block 卸载 / 销毁?
 
-### 11.5 insertion safeInsert 在多种 target 形态下如何统一接口?
+**推荐**:v1 不支持运行时卸载(static block list)。L7+ 真有插件市场再设计。
 
-文本 target 是 pos:number,graph target 是 (x,y) 坐标,文件 target 是路径。
+### 8.8 block 之间的"数据流"如何处理?
 
-**推荐**:**target 用 discriminated union**:
-```ts
-type InsertTarget = 
-  | { type: 'text'; pos: number; mode?: 'replace' | 'before' | 'after' }
-  | { type: 'graph'; x: number; y: number }
-  | { type: 'file-tree'; parentId: string; index: number };
-```
-safeguard 按 type 分别处理。L5-A/B 只有 text 类型;L6+ 加 graph 时补。
+例:noteLink 块需要查询其他笔记的 title。
 
-### 11.6 capability 命名空间的规约?
+**推荐**:**通过 view 业务路径,不在 capability 协议层**。noteLink block 通过 commandRegistry 发出 `note.queryTitle` command,NoteView 的 command handler 实现该查询。block 不直接拿 NoteView 的笔记数据。
 
-是 `selection.changed` 还是 `selection.event.changed` 还是 `capability.selection.changed`?
+### 8.9 capability registry 里的"capability 元信息"够用吗?
 
-**推荐**:**`<capability-id>.<topic>.<verb>`**(2 段或 3 段)。bus channel 命名:`selection.changed` / `clipboard.changed` / `dnd.over` / `dnd.completed` / `insertion.inserted` / `history.changed`(undo-redo 的 channel 用 history. 因为 history 是更准确的概念)。bus request 命名:`<capability-id>.<verb>`(`clipboard.copy` / `clipboard.paste` / `undo-redo.undo`/ `undo-redo.redo` / `dnd.startDrag` / `dnd.drop` / `insertion.insert`)。
+L4 capabilityRegistry(Q5=B 极简)只存 id/version 等。本协议要求 capability 暴露 channel/register/api,这些**对象引用**怎么存?
 
-### 11.7 capability 自定义(用户扩展 / 第三方 plugin)
+**推荐**:capability 模块 export singleton(`export const selection = ...`),view / block 直接 import singleton 用。capabilityRegistry 只用于"声明依赖关系 + 检查 install 完整性",不用作运行时查询。
 
-L7+ 真有用户/插件扩展 capability 时如何注册?
+这跟"capability 之间不互相 import"不冲突 — capability 之间不互相 import,view 和 block 可以 import capability。
 
-**推荐**:**v1 不实施,接口预留**。本协议不强制"capability 可被运行时注入"。L7+ 真有需求时(如插件市场),设计 capability 注册中心(类似 view-type-registry),但不在 v1 范围。
+### 8.10 协议演化(本文件 v0.3 / v0.4)?
 
-### 11.8 capability 卸载 / 销毁?
+**推荐**:每次重大调整加 v0.X,旧版本作为历史保留。本协议的演化主要在:
+- 加新 capability(罕见)
+- 协议形态修正(channel payload 形状漏 case)
+- 跨 capability 协作模式新增
 
-view 关闭时,该不该卸载 selection capability 中该 view 注册的 source?
-
-**推荐**:**自动随 view 生命周期**。view register 时返回 unregister 函数,view unmount 时自动调用。具体实施:capability 内部维护 source/spec → view 关联,view 卸载时清理。
+绝大多数 V2 迭代不动本协议(由 block 模块内部改 + view 业务改)。
 
 ---
 
-## 12. 修订记录
+## 9. 修订记录
 
 | 日期 | 版本 | 内容 |
 |---|---|---|
-| 2026-05-05 | v0.1 | 初稿;6 capability 特有铁律 + 4 条继承自 workspace-bus 的铁律(总 10 条);5 通用 capability 协议(每个含责任 / 不责任 / channel/request/registerSpec/api/实施深度)+ 3 个跨 capability 协作场景 + 8 个开放问题带推荐答案;Q-D1=A / Q-D2'=A / Q-D3'=A / Q-D4=C / Q-D5'=A / Q-D6=A 用户拍板固化 |
+| 2026-05-05 | v0.1 | 初稿(动作类型分类,统一接口) |
+| 2026-05-05 | v0.2 | **整体重写** — 用户在 4 轮讨论中揭示真正形态:5 capability 是协议地基,每个 block 是独立自治模块,没有"多块协调器"作为预设结构。Q-Y1~5 用户拍板固化。架构图 / 铁律 / capability 协议 / 协作场景全部按"block 自治"重写。文档体量从 v0.1 的 858 行降到本版预计 600-700 行(因为去掉了"多块协调器"等预设结构)。 |
