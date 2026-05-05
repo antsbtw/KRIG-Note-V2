@@ -1,25 +1,29 @@
 # src/shell — 详细设计
 
-> v0.1 · 2026-05-03 · 草稿,等用户审阅
+> v0.2 · 2026-05-05 · 草稿,等用户审阅
 >
-> 配套:[charter.md § 2.2 L2 Shell](../../docs/00-architecture/charter.md) + [directory-structure.md v0.3](../../docs/00-architecture/directory-structure.md)
+> 配套:[charter.md v0.4 § 1.4 + § 2.2](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md](../../docs/RefactorV2/view-hierarchy-v2.md)
+>
+> v0.1 → v0.2:经过深度讨论(2026-05-05),纠正 v0.1 把 NavSide / Toolbar / 浮层归 Shell 的错误。V2 Shell 极轻,只做 WorkspaceBar + Workspace Container 容器。所有应用级 UI(NavSide / Toolbar / 浮层)归 L3 Workspace Container。
 
 ---
 
-## 1. 本层范围
+## 1. 本层范围(L2 Shell — 极轻)
 
-L2 Shell 层提供**三栏布局骨架** + **Slot 容器机制**。
+L2 Shell 只做两件事:
 
-**只做骨架,不挂内容**:
-- 三个 Slot(`<LeftSlot>` + `<MainSlot>` + `<RightSlot>`)是空容器
-- L4 Slot Registry / L5 视图实例化在后续阶段往 Slot 内挂载
-- 本阶段 Slot 内显示占位文字(`Left slot empty` / 等)
+```
+src/shell/
+├── workspace-bar/       ← 顶部 28px,Workspace Tab 切换器
+└── workspace-container/ ← 全屏容器,挂载当前活跃 Workspace 实例
+```
 
-**不在本阶段做**:
-- ❌ Toggle 折叠按钮(L3 Workspace 状态相关)
-- ❌ TopBar / WorkspaceBar(L3 Workspace 切换器)
-- ❌ NavSide(L4 NavSide Registry)
-- ❌ 视图实例化进 Slot(L4 + L5)
+**Shell 不包含**(与 V1 重大差异,详见 view-hierarchy-v2.md § 0):
+- ❌ NavSide(归 L3 Workspace Container)
+- ❌ Toolbar(归 L3 Workspace Container)
+- ❌ 任何浮层(ContextMenu / Slash / Handle / FloatingToolbar / 通用 Overlay 全部归 L3)
+
+L2 阶段的 Workspace Container **是空容器**——等 L3 阶段实施 Workspace 实例(NavSide frame + Slot Area + Overlay frames 等)。
 
 ---
 
@@ -27,152 +31,142 @@ L2 Shell 层提供**三栏布局骨架** + **Slot 容器机制**。
 
 ### 2.1 V1 Shell 现状盘点
 
-V1 Shell 实现散布在多个文件:
+V1 Shell 实现散布:
 - `src/main/window/shell.ts` 652 行(主进程,创建 5 个 WebContentsView 用 setBounds 摆位)
-- `src/main/slot/layout.ts` 100 行(布局算法 — 计算 5 区块 Bounds)
-- `src/renderer/shell/renderer.tsx` + `WorkspaceBar.tsx` + `GlobalProgressOverlay.tsx`(WorkspaceBar React 组件)
+- `src/main/slot/layout.ts` 100 行(布局算法)
+- `src/renderer/shell/`(WorkspaceBar.tsx 等 React 组件)
 
-**5 个区块**(V1 实际架构):
-- Toggle(NavSide 折叠按钮)
-- WorkspaceBar(顶部栏)
-- NavSide(左导航 — 文件树)
-- LeftSlot(主内容区,单视图全宽)
-- RightSlot + Divider(右侧 — 双视图模式时显示)
-
-**实现方式**:每个区块都是独立 `WebContentsView`(Electron 子视图,有自己的 webContents),通过主进程 `setBounds()` 摆位。
+V1 Shell 包含 5 个区块:
+- **Toggle**(NavSide 折叠按钮)
+- **WorkspaceBar**(顶部栏)
+- **NavSide**(左导航 — 文件树)← V1 错误归属(应在 Workspace)
+- **LeftSlot**(主内容区)← V1 在 Workspace,但结构混乱
+- **RightSlot + Divider**(右侧 + 分隔)← 同上
 
 ### 2.2 V1 教训(必须避免)
 
-#### 教训 1:多 WebContentsView 过度复杂
+#### 教训 1:Shell 太重(职责越界)
 
-V1 用 5 个 WebContentsView 实现一个三栏布局,引入了:
-- 5 个独立 renderer 进程(内存翻 5 倍)
-- 5 套 preload + IPC 通信
-- 跨视图 DOM 事件无法直接传(必须 IPC 中转)
-- 主进程必须 `setBounds()` 精确摆位(窗口 resize 时 5 处计算)
+V1 Shell 把 NavSide / 5 个 WebContentsView / 布局计算 / Slot 切换全部塞进去。Shell 应该轻,不应该管业务结构。
 
-**根因**:V1 早期为了"每个区块独立 dev tools 调试"做的决定,但代价过大。
+V2 改进:**Shell 极轻**,只做 Tab 切换 + Workspace 容器挂载。
 
-**V2 改进**:用**单一 BrowserWindow + 单 renderer 进程 + React Flexbox 布局**。三栏只是三个 `<div>`,不需要多 WebContentsView。
+#### 教训 2:NavSide 归 Shell → Workspace 隔离失败
 
-#### 教训 2:布局计算与 React 渲染脱节
+V1 NavSide 是全局共享的 WebContentsView,Workspace 之间共享 NavSide 状态(展开 / 选中等)。这违反"Workspace 完全隔离"原则。
 
-V1 主进程 `calculateLayout()` 计算 Bounds,通过 `setBounds()` 摆 WebContentsView。React 组件不知道布局变化,反向需要主进程 IPC 通知。
+V2 改进:**NavSide 归 Workspace Container**,每个 Workspace 自己持有 NavSide 实例。
 
-**V2 改进**:布局完全在 React Flexbox + CSS 内完成,主进程零参与。窗口 resize → CSS 自动响应,不需要 IPC。
+#### 教训 3:多 WebContentsView 过度复杂
 
-#### 教训 3:Slot 内容耦合
+V1 用 5 个独立 renderer 进程做布局,内存翻 5 倍 + IPC 通信复杂 + DOM 事件无法直接传。
 
-V1 Slot 知道自己挂什么 view(workspace 切换时,主进程切 LeftSlot 的 WebContentsView)。Slot 不"中立"。
+V2 改进:**单 BrowserWindow + 单 renderer 进程 + React 组件**。所有 UI 是 React 组件树。
 
-**V2 改进**:Slot 是**纯容器**,不知道挂什么。L4 Slot Registry + L5 视图通过 React Children 注入,Slot 自己只管渲染容器边界。
+#### 教训 4:布局计算与 React 渲染脱节
+
+V1 主进程 `calculateLayout()` 100 行 JS 计算 + `setBounds()` 摆位。React 组件不知道布局变化。
+
+V2 改进:**布局完全由 CSS Flexbox 处理**,主进程零参与。
 
 ### 2.3 V1 可复用的部分
 
-#### 三栏布局算法的核心思路
+#### Workspace Tab 切换的 UX 思路
 
-V1 `calculateLayout()` 核心思路是**比例分配**:
-- 单视图时 LeftSlot 全宽
-- 双视图时 LeftSlot + Divider + RightSlot 按 `dividerRatio` 分
+V1 WorkspaceBar 显示标签 + [+] 按钮,这个 UX 模式 V2 沿用。
 
-V2 沿用这个思路,但用 CSS Flexbox + `flex-grow` 实现,不写 JS 计算。
+#### dev / prod URL 区分套路
 
-#### Divider 拖拽算法
-
-V1 `divider.ts` 实现拖拽时更新 `dividerRatio`。V2 沿用思路,但实现为纯 React 组件(mousedown / mousemove / mouseup 处理)。
+V1 的 Vite HMR + 生产构建逻辑 V2 沿用(L0 阶段已落地)。
 
 ---
 
 ## 3. V2 shell 子目录设计
 
+### 3.1 顶层结构
+
 ```
 src/shell/
 ├── README.md
 ├── DESIGN.md(本文件)
-├── three-column-layout/
-│   ├── ShellLayout.tsx          (三栏布局根组件)
-│   ├── LeftSlot.tsx             (左 Slot 容器)
-│   ├── MainSlot.tsx             (主 Slot 容器)
-│   ├── RightSlot.tsx            (右 Slot 容器)
-│   ├── ResizableDivider.tsx     (可拖拽分隔线)
-│   ├── shell-layout.css
+├── workspace-bar/
+│   ├── WorkspaceBar.tsx           (顶部 28px Tab 切换器)
+│   ├── WorkspaceTab.tsx            (单个 Tab 组件)
+│   ├── workspace-bar.css
 │   └── README.md
-├── slot-system/
-│   ├── slot-types.ts            (Slot ID / SlotState 类型)
+├── workspace-container/
+│   ├── WorkspaceContainer.tsx     (全屏容器,根据 active workspace 切显示)
+│   ├── workspace-container.css
 │   └── README.md
 └── diagnostics/
-    └── L2-alive.ts              (L2 自我诊断)
+    └── L2-alive.ts                 (L2 自我诊断,通过 IPC 上报)
 ```
 
-### 3.1 子模块职责
+### 3.2 各子模块职责
 
-#### `three-column-layout/ShellLayout.tsx`
+#### `workspace-bar/`
 
+**作用**:渲染顶部 28px Tab 切换器,显示所有 Workspace 标签 + [+]。
+
+**接口**:
+- 数据来源:WorkspaceManager(L3)— 但 L2 阶段 WorkspaceManager 还没落地,**L2 阶段 WorkspaceBar 显示空**(无 Workspace 标签)
+- 切 Workspace:点击 Tab → 调 WorkspaceManager.setActive()(L3 阶段实现)
+
+**L2 阶段实现**:
 ```tsx
-// 三栏布局根组件
-import { LeftSlot } from './LeftSlot';
-import { MainSlot } from './MainSlot';
-import { RightSlot } from './RightSlot';
-import { ResizableDivider } from './ResizableDivider';
-
-export function ShellLayout() {
-  const [leftRatio, setLeftRatio] = useState(0.5);
-  const [showRight, setShowRight] = useState(true); // L2 阶段默认显示双栏
-
+// 简化版,无 WorkspaceManager 依赖
+export function WorkspaceBar() {
+  // L2 阶段:静态空 Tab 列表(等 L3 接入)
   return (
-    <div className="krig-shell">
-      <LeftSlot flex={leftRatio} />
-      {showRight && (
-        <>
-          <ResizableDivider onDrag={(delta) => setLeftRatio(...)} />
-          <RightSlot flex={1 - leftRatio} />
-        </>
-      )}
+    <div className="krig-workspace-bar">
+      <div className="krig-workspace-bar-empty">Workspace Bar (待 L3 实施)</div>
+      <button className="krig-add-workspace">+</button>
     </div>
   );
 }
 ```
 
-#### `three-column-layout/{Left,Main,Right}Slot.tsx`
+**L3 阶段升级**:接入 WorkspaceManager,显示真实 Workspace 列表。
 
+#### `workspace-container/`
+
+**作用**:全屏容器,挂载当前活跃 Workspace 实例。
+
+**接口**:
+- 接收 prop `activeWorkspaceId`(L3 提供)
+- 内部根据 ID 找到对应 Workspace 实例并 mount
+
+**L2 阶段实现**:
 ```tsx
-// 各 Slot 都是占位组件 — L4/L5 才往里挂内容
-export function LeftSlot({ flex }: { flex: number }) {
+// 简化版,L3 阶段才接入 Workspace 实例
+export function WorkspaceContainer() {
   return (
-    <div className="krig-slot krig-slot-left" style={{ flex }}>
-      <div className="krig-slot-placeholder">Left Slot (empty)</div>
+    <div className="krig-workspace-container">
+      <div className="krig-workspace-container-empty">
+        Workspace Container (待 L3 挂载 Workspace 实例)
+      </div>
     </div>
   );
 }
 ```
 
-注:L2 阶段命名 "MainSlot" 仅作占位 — 实际 V1 是"LeftSlot"(主内容)+ "RightSlot"(可选). 待 L4 阶段定义 Slot Registry 时再确定 slot 命名。
-
-#### `slot-system/slot-types.ts`
-
-```ts
-// L2 阶段先定义 Slot ID 类型 + 状态枚举,L4 完整 Slot Registry 时扩展
-export type SlotId = 'left' | 'main' | 'right';
-export interface SlotState {
-  id: SlotId;
-  visible: boolean;
-}
-```
+**L3 阶段升级**:从 WorkspaceManager 拿活跃 Workspace,mount 对应 Workspace React 组件树。
 
 #### `diagnostics/L2-alive.ts`
 
+**作用**:L2 启动后通过 IPC 上报 alive 信号到主进程 diagnostics-bus。
+
 ```ts
-// 按 charter § 5.1:[L2] Shell alive | layout: 3-column, slots: ...
-import { markAlive } from '@platform/main/diagnostics/diagnostics-bus';
+// 通过 IPC 调主进程的 diagnostics.report-alive channel
+import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 
 export function reportL2Alive() {
-  markAlive('L2', { layout: '3-column', slots: 'left/main/right' });
+  // L2 在 renderer 进程,通过 IPC 上报到主进程
+  // 实现方式:依赖 L0 阶段已建的 diagnostics-bus + 新增 IPC channel
 }
 ```
 
-注:L2 在 renderer 进程,但 diagnostics-bus 在 main 进程。
-**实现方式**:L2 alive 通过 IPC 上报到主进程的 diagnostics-bus。
-具体实现:`src/shell/diagnostics/L2-alive.ts` 调 `ipcRenderer.invoke('diagnostics.report-alive', { layer: 'L2', ... })`。
+**注**:L0 阶段没建"renderer 上报诊断"的 IPC channel。L2 阶段需扩展 shared/ipc/。
 
 ---
 
@@ -180,115 +174,110 @@ export function reportL2Alive() {
 
 | 维度 | V1 | V2 |
 |---|---|---|
-| **架构** | 5 个 WebContentsView 独立进程 | 单 BrowserWindow + React 组件 |
-| **布局计算** | 主进程 `calculateLayout()` 100 行 + `setBounds()` 摆位 | CSS Flexbox 自动布局 |
-| **Resize 响应** | 窗口 resize → 主进程重算 → IPC 通知 → setBounds | CSS 自动响应,0 JS 介入 |
-| **Slot 内容** | 主进程切 WebContentsView | React children 注入(L4+L5 处理) |
-| **Divider 拖拽** | 主进程监听 mouse + IPC | React 组件 mousedown/move/up |
-| **代码量** | shell.ts 652 + layout.ts 100 + slot/ + 多 preload + 多 css = ~2000+ 行 | 预计 ~250 行(根组件 + 3 Slot + Divider + types + diagnostics) |
-| **DevTools** | 5 个独立 dev tools | 1 个 renderer dev tools(+ main 一个) |
+| **架构** | 5 个 WebContentsView 独立进程 | 单 BrowserWindow + 单 renderer + React 组件 |
+| **Shell 职责** | NavSide + Toolbar + 5 区块布局 + Slot 切换 + 状态恢复 | **只做 Tab 切换 + Workspace 容器挂载** |
+| **NavSide 归属** | Shell(全局共享) | **Workspace Container**(每 Workspace 自带) |
+| **Toolbar 归属** | View 自带 | **Workspace Container 管式样,view 注册内容** |
+| **浮层归属** | View 自带 / Shell.overlays(空) | **Workspace Container 管式样,view 注册内容** |
+| **布局计算** | 主进程 calculateLayout 100 行 + setBounds | CSS Flexbox 自动响应 |
+| **代码量** | shell.ts 652 + layout.ts 100 + slot/ + 多 preload + 多 css ≈ 2000+ 行 | shell/ 预计 ~150 行 |
+| **DevTools** | 5 个独立 dev tools | 1 个 renderer dev tools |
 | **内存占用** | 5 个 renderer 进程 | 1 个 renderer 进程 |
+| **加新 Workspace** | 涉及多 WebContentsView 创建 + 切 setBounds | React 组件 mount/hide |
 
 ---
 
-## 5. 调用关系(纵向架构验证)
-
-```
-src/platform/renderer/index.tsx (L1 renderer 入口)
-    ↓ 当前:渲染占位组件 "L0+L1 alive"
-    ↓ L2 完成后:渲染 ShellLayout
-
-src/shell/three-column-layout/ShellLayout.tsx (L2 三栏布局)
-    └── LeftSlot / MainSlot / RightSlot (L2 Slot 容器,内容空)
-        ↓ L4 完成后:Slot 内容由 SlotRegistry 注入
-        ↓ L5 完成后:具体 view 渲染在 Slot 内
-
-src/shell/diagnostics/L2-alive.ts (L2 自诊断)
-    ↓ 通过 IPC 上报
-src/platform/main/diagnostics/diagnostics-bus.ts (统一诊断输出)
-```
-
-**调用方向单向**:L2 → L1 入口 → L0 主进程,无逆向依赖。
-
----
-
-## 6. L2 阶段实施目标
+## 5. L2 阶段实施目标
 
 按 charter § 6.3 完成定义:
 
-### 6.1 完成判据
+### 5.1 完成判据
 
-- [ ] `npm start` 跑得起来(L0 + L1 不回归)
-- [ ] 屏幕看到**三栏布局**(三个 Slot 各占一定宽度)
-- [ ] **可拖拽分隔线**(鼠标拖动改变 LeftSlot vs RightSlot 宽度比例)
+- [ ] `npm start` 跑得起来(L0+L1 不回归)
+- [ ] 屏幕看到**顶部 WorkspaceBar 占位** + **下方 Workspace Container 占位**
 - [ ] 主进程 console 打印 `[L0] alive` + `[L1] alive` + `[L2] alive`
 - [ ] L2 alive 通过 IPC 从 renderer 上报到主进程
 
-### 6.2 实施清单
+### 5.2 实施清单
 
-#### shell/three-column-layout/(6 文件)
-- `ShellLayout.tsx`(根组件)
-- `LeftSlot.tsx` + `MainSlot.tsx` + `RightSlot.tsx`(三个占位 Slot)
-- `ResizableDivider.tsx`(可拖拽分隔线)
-- `shell-layout.css`
+#### shell/workspace-bar/(3 文件)
+- `WorkspaceBar.tsx`(占位 Tab 列表)
+- `workspace-bar.css`
+- `README.md`
 
-#### shell/slot-system/(2 文件)
-- `slot-types.ts`(Slot ID 类型)
+#### shell/workspace-container/(3 文件)
+- `WorkspaceContainer.tsx`(占位容器)
+- `workspace-container.css`
 - `README.md`
 
 #### shell/diagnostics/(1 文件)
 - `L2-alive.ts`(L2 自我诊断,通过 IPC 上报)
 
-#### platform/renderer/index.tsx(修改)
-- 移除占位组件 "L0+L1 alive"
-- 改为渲染 `<ShellLayout />`
-
 #### shared/ipc/(扩展)
 - 新增 channel `diagnostics.report-alive`(让 renderer 上报诊断)
+- 主进程 ipc-bus 增加该 handler,接收并转发给 diagnostics-bus
 
-### 6.3 不做的事(L2 范围严格限制)
+#### platform/main/diagnostics/diagnostics-bus.ts(扩展)
+- 接收 IPC channel 转发,调用 markAlive
 
-- ❌ Toggle 折叠按钮(L3)
-- ❌ TopBar / WorkspaceBar(L3)
-- ❌ NavSide(L4)
-- ❌ Slot 内挂载真实 view(L4 + L5)
-- ❌ Workspace 状态管理(L3)
-- ❌ 引入业务 npm 包
+#### platform/renderer/index.tsx(修改)
+- 移除 L0+L1 alive 占位组件
+- 改为渲染 `<App />` → 内部:
+  ```tsx
+  <div>
+    <WorkspaceBar />
+    <WorkspaceContainer />
+  </div>
+  ```
 
-### 6.4 自我诊断输出预期
+### 5.3 不做的事(严格 L2 范围)
+
+- ❌ NavSide 实现(L3)
+- ❌ Toolbar 实现(L3)
+- ❌ 任何浮层 frame 实现(L3)
+- ❌ Slot Area 实现(L3 Workspace 内)
+- ❌ Workspace Manager(L3)
+- ❌ Workspace 状态(L3)
+- ❌ Application Menu(留给 L4 Slot 阶段做 menuRegistry 后)
+- ❌ 任何业务 npm 包
+
+### 5.4 自我诊断输出预期
 
 主进程 console:
 ```
-[L0] alive | electron: 40.9.3, node: ..., platform: darwin, ready: true
+[L0] alive | electron: 40.9.3, node: 24.14.1, platform: darwin, ready: true
 [L1] alive | window id: 1, size: 1200x800
-[L2] alive | layout: 3-column, slots: left/main/right
+[L2] alive | shell rendered, workspace-bar + workspace-container
 ```
 
 ---
 
-## 7. 与 charter 原则的对照
+## 6. 与 charter 原则的对照
 
 | charter 原则 | 本设计如何遵守 |
 |---|---|
-| § 1.1 分层(纵向 4 + 横向 L0~L5)| L2 Shell 仅做布局骨架,不超越 L0/L1 责任,不进 L3 状态 / L4 Slot Registry / L5 视图 |
-| § 1.2 注册原则 | L2 不直接 import view 实现;Slot 是空容器,等 L4 Registry 注入 children |
-| § 1.3 抽象原则(npm 屏障)| L2 不 import 业务 npm,只用 React + clsx 等纯函数白名单 |
-| § 5 自我诊断 | `[L2] alive` 输出 + IPC 上报机制 |
-| § 6 节奏规则 | 一层一阶段,L2 完成才进 L3 |
+| § 1.1 分层(纵向 4 + 横向 L0~L5)| L2 Shell 仅做框架 + 容器,不超越职责 |
+| § 1.2 注册原则 | L2 不直接 import view 实现 |
+| § 1.3 抽象原则(npm 屏障)| L2 不 import 业务 npm,只用 react 等纯函数白名单 |
+| **§ 1.4 视图与实现归属** | **Shell 不管 NavSide / Toolbar / 浮层,这些归 L3 Workspace Container 管式样** |
+| § 5 自我诊断 | `[L2] alive` IPC 上报机制 |
+| § 6 节奏规则 | L2 完成才进 L3,不细拆 |
 
 ---
 
-## 8. 待拍板
+## 7. 待拍板
 
-- [ ] L2 阶段是否引入 IPC 上报(让 renderer 诊断进主进程 console)?— 我倾向是,框架性基础设施
-- [ ] Slot 命名是 `left/main/right` 还是 `left/right`(V1 风格)?— 我倾向 `left/main/right` 三栏更直观
-- [ ] Divider 默认位置(50/50 还是 60/40)?— 我倾向 50/50
-- [ ] 三栏配色(深色主题各栏背景色不同便于看出三栏边界)?— 我倾向是
+- [ ] L2 阶段是否引入"renderer → main IPC 上报诊断"机制?— 我倾向是,框架性基础设施
+- [ ] WorkspaceBar 占位文字 — 显示什么?(我倾向 "Workspace Bar (待 L3)")
+- [ ] Workspace Container 占位文字 — 显示什么?(我倾向 "Workspace Container (待 L3)")
+- [ ] 顶部 WorkspaceBar 与底部 Workspace Container 之间是否需要分隔线?
+- [ ] L2 阶段是否引入 React Router / Zustand / 等状态库?— 我倾向不引入(L2 占位无需复杂状态)
 
 ---
 
-## 9. 修订记录
+## 8. 修订记录
 
 | 日期 | 版本 | 内容 |
 |---|---|---|
-| 2026-05-03 | v0.1 | 初稿;V1 学习(652 行 shell.ts 等)+ 3 条 V1 教训(多 WebContentsView / 布局计算脱节 / Slot 耦合)+ V2 单 BrowserWindow + React Flexbox 改进 + L2 阶段实施目标 + 4 个待拍板 |
+| 2026-05-03 | v0.1 | 初稿;V1 学习 + 三栏布局思路 — **被 v0.2 完全推翻** |
+| 2026-05-05 | v0.2 | 完全重写;反映"NavSide / Toolbar / 浮层全归 L3 Workspace Container"修正;Shell 只做 WorkspaceBar + Workspace Container 容器极简版;子目录从 three-column-layout 改为 workspace-bar / workspace-container |

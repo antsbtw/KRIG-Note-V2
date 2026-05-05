@@ -178,27 +178,106 @@ ContextMenuRegistry / ToolbarRegistry / SlashRegistry / HandleRegistry / Floatin
 
 ---
 
+### 1.4 视图与实现归属(V2 设计纪律核心)
+
+KRIG-Note V2 严格区分**应用级 UI / 能力 UI / 视图声明**三层归属。这是"换底层零成本"承诺的物理实现机制。
+
+#### 三层归属规则
+
+**1. 应用级 UI 在 Workspace Container(L3)**
+- Toolbar / NavSide / 5 大交互浮层(ContextMenu / Slash / Handle / FloatingToolbar)/ 通用 Overlay
+- 所有 view 共享**完全相同**的式样(view 平等,**无 variant 机制**)
+- 内容由 view 通过 Registry 注册(L4),式样由 Workspace Container 提供
+- 加新式样**只在所有 view 共同需要时**才扩展,绝不为单个 view 定制
+
+**2. 能力 UI 在 Capability(L4)**
+- 任何"能力内部交互 UI"(画板缩放 / 网格切换 / PDF 翻页 / 文本字号选择 等)归对应 capability
+- 由能力的 createInstance 自带,view 通过 install 列表自动获得
+- 同一能力对所有 install 它的 view 完全一致
+
+**3. View 是能力组合声明(L5)**
+- View **不存在独立实现**——只是"install 一组能力 + 注册一些菜单/命令"的轻声明
+- View 文件极轻(20~50 行),0 UI 实现代码
+- 加新 view = 写新声明 + 选择能力组合,**不写新代码**
+
+#### View 的本质
+
+> View 不是业务模块,View 是能力组合的命名引用。
+> 业务模块在能力层(capability),View 是能力的客户端组合。
+
+例:
+```ts
+// "graph-canvas" view = 画板能力 + shape 资源 + 文本编辑(节点 label) 的组合
+registerView({
+  id: 'graph-canvas',
+  install: ['canvas-rendering', 'shape-library', 'text-editing', 'history'],
+  contextMenu: [...],
+  toolbar: [...],
+});
+// 不存在"GraphView 模块",graph-canvas 只是这个能力组合的标签
+```
+
+#### 命名约定
+
+View 命名应反映**能力组合的本质**而非"虚构的 view 类型":
+
+| ✅ 推荐(描述能力组合) | ❌ 不推荐(虚构 view 类型) |
+|---|---|
+| `note` | `NoteView` |
+| `graph-canvas` | `GraphView` |
+| `ebook-pdf` | `PDFView` / `EBookView` |
+| `web-browser` | `WebView` |
+| `family-tree` | `FamilyTreeView` |
+
+#### 物理保证
+
+这种归属让"换底层零成本"成立:
+- 切 prosemirror → Lexical:**只改 capability.text-editing 内部**,所有 install 它的 view 一行不改
+- 切 three → Babylon:**只改 capability.canvas-rendering 内部**,所有画板 view 一行不改
+- 改主题 / 视觉 token:**只改 Workspace Container 式样**,所有 view 自动跟随
+
+不存在"view 阻碍切底层"的可能,因为 view 几乎没代码。
+
+#### 强制规则
+
+- L5 view 不写任何 UI 实现(应用级 UI 来自 Workspace Container,能力级 UI 来自能力)
+- L5 view 不能要求 Workspace Container 提供"个性化式样"(view 平等,无 variant)
+- 能力 UI 是能力的内部职责,不归 view
+- view 文件长度通常 20~50 行,**超过 100 行需要审查**(可能违反原则)
+
+---
+
 ## 2. 两套分层细则
 
 ### 2.1 纵向 4 层
 
 #### 可视化层(View)
 
-**职责**:用户感知 + 视图本地状态。
+**职责**:能力组合的声明 + 注册菜单/命令。**view 不存在独立实现**(详见 § 1.4)。
 
-**包含**:
-- 视图 React 组件(NoteView / GraphView / EBookView / WebView)
-- 视图本地状态(光标 / 选区 / 滚动 / 缩放)
-- 视图独有交互项(contextMenu / toolbar 等的视图特定项)
+**包含**(每个 view 是极轻声明,通常 20~50 行):
+- `install` 列表(声明依赖的能力组合)
+- 注册到 Registry(ContextMenu / Toolbar / Slash 等内容)
+- 注册命令实现(commandRegistry)
+- 视图 ID + 元数据
+
+**不包含**:
+- ❌ UI 渲染实现(应用级 UI 在 Workspace Container,能力级 UI 在 Capability)
+- ❌ 业务逻辑(全部在能力层)
+- ❌ 状态管理(在 Workspace state)
 
 **调用关系**:View 注册到 Capability Registry,**不直接 import 能力实现**。能力调用通过 install 列表 + Registry 间接路由。
 
 **目录**:`src/views/<view-name>/`
 
+**命名约定**:反映能力组合(如 `note` / `graph-canvas` / `ebook-pdf`),不用 V1 风格的 `NoteView` / `GraphView`(详见 § 1.4)。
+
 **强制约束**:
 - 0 处业务 npm 包 import
 - 0 处 `import 'electron'`(电子相关走能力层)
 - 0 处直接 import `src/capabilities/<x>/internal/...`(只能 import `src/capabilities` 入口)
+- 0 处 UI 渲染实现(违反 § 1.4)
+- view 文件通常 20~50 行,超过 100 行需审查
 
 #### 能力层(Capability)
 
@@ -574,10 +653,10 @@ V2 修正 V1 术语:
 
 ## 8. 待拍板
 
-- [ ] L0 起点具体范围:仅 Electron 启动 + 主窗口 + 写"L0 alive"? 还是含 IPC + 数据目录?
-- [ ] V2 何时算"达到 V1 等价可替代"(NoteView 等价就行 / 全部视图等价 / 不替代)
+- [x] ~~L0 起点范围~~ — 已落地 L0 阶段(2026-05-03 完成)
+- [x] ~~自我诊断输出形式~~ — 已定 L0 仅 console,日志文件后期加
+- [ ] V2 何时算"达到 V1 等价可替代"(note view 等价就行 / 全部视图等价 / 不替代)
 - [ ] V1 是否继续维护(完全停止 / 仅修 bug)
-- [ ] 自我诊断输出形式(只 console? 加 GUI 状态栏? 加日志文件?)
 - [ ] L4 Slot 层与 V1 现有 Slot 系统的关系(继承 V1 实现 / 重新设计)
 
 ---
@@ -588,3 +667,4 @@ V2 修正 V1 术语:
 |---|---|---|---|
 | 2026-05-03 | v0.1 | 初稿;承袭 V1 § 1.1/1.2/1.3 + 引入"L0~L5 自下而上工程顺序" | wenwu + Claude |
 | 2026-05-03 | v0.2 | 完全重写;**修正 v0.1 把横向应用栈与纵向数据流混为一谈的错误**;明确两套分层正交;引入"取消表征层 + 能力层是唯一中间层 + 屏障"理解;引入 atom / block / blockView 三层精确定位 | wenwu + Claude |
+| 2026-05-05 | v0.4 | 加 § 1.4 "视图与实现归属"作为 V2 设计纪律核心(三层归属:应用级 UI 在 Workspace Container / 能力 UI 在 Capability / View 是能力组合声明);明确"view 不存在独立实现"+ "无 variant + view 平等"+ "命名反映能力组合";修订 § 2.1 可视化层定义反映新理解;待拍板列表标记 L0 已落地 | wenwu + Claude |
