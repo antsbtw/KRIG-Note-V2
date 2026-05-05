@@ -7,12 +7,12 @@
  * V1 学习参考:V1 createShell()(652 行)混合了 L1+L2+L4+L5,V2 拆开。
  */
 
+import path from 'node:path';
 import { BrowserWindow } from 'electron';
 import { reportL1Alive } from '../diagnostics/L1-alive';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
-declare const MAIN_WINDOW_PRELOAD_VITE_ENTRY: string;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -29,7 +29,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     trafficLightPosition: { x: 12, y: 10 },
     backgroundColor: '#1e1e1e',
     webPreferences: {
-      preload: MAIN_WINDOW_PRELOAD_VITE_ENTRY,
+      // forge-vite 把 preload 输出到主进程构建目录(.vite/build/),
+      // entry 'src/platform/main/preload/main-window-preload.ts' → 'main-window-preload.js'
+      preload: path.join(__dirname, 'main-window-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -39,7 +41,6 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     await win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    const path = await import('node:path');
     await win.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
 
