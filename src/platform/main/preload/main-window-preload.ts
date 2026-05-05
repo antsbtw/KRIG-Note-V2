@@ -32,4 +32,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }[layer];
     return ipcRenderer.invoke(channel);
   },
+
+  /** 订阅窗口全屏状态变化 — 返回取消订阅函数 */
+  onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void {
+    const handler = (_event: unknown, isFullscreen: boolean) => callback(isFullscreen);
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, handler);
+  },
 });

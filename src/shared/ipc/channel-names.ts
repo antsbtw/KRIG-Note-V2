@@ -18,6 +18,9 @@ export const IPC_CHANNELS = {
 
   // 诊断上报(renderer → main,L2 阶段引入)
   DIAGNOSTICS_REPORT_ALIVE: 'diagnostics.report-alive',
+
+  // 窗口状态变化(main → renderer,L2 阶段引入)
+  WINDOW_FULLSCREEN_CHANGED: 'window.fullscreen-changed',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

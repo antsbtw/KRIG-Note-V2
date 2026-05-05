@@ -11,11 +11,15 @@
 
 import { NavSideToggle } from './NavSideToggle';
 import { AddWorkspaceButton } from './AddWorkspaceButton';
+import { useFullscreen } from './use-fullscreen';
 import './workspace-bar.css';
 
 export function WorkspaceBar() {
+  const isFullscreen = useFullscreen();
+  const className = `krig-workspace-bar ${isFullscreen ? 'krig-workspace-bar--fullscreen' : ''}`;
+
   return (
-    <div className="krig-workspace-bar" role="toolbar" aria-label="Workspace Bar">
+    <div className={className} role="toolbar" aria-label="Workspace Bar">
       <NavSideToggle />
       <div className="krig-workspace-tabs">
         {/* L2 阶段:占位文字。L3 阶段:从 WorkspaceManager 拿列表渲染 WorkspaceTab */}

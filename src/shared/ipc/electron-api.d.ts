@@ -14,6 +14,8 @@ declare global {
     electronAPI: {
       reportAlive(payload: DiagnosticsReportPayload): void;
       health(layer: 'L0' | 'L1' | 'L2' | 'platform'): Promise<HealthCheckResponse>;
+      /** 订阅窗口全屏状态变化,返回取消订阅函数 */
+      onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void;
     };
   }
 }

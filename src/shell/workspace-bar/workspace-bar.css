@@ -33,7 +33,7 @@
   flex: none;
   width: 28px;
   height: 22px;
-  margin-left: 72px;  /* macOS 红绿灯预留 */
+  margin-left: 72px;  /* 默认:非全屏时让位 macOS 红绿灯 */
   margin-right: 4px;
   border: none;
   background: transparent;
@@ -44,6 +44,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 全屏时:Toggle 紧贴最左(红绿灯隐藏,无需让位) */
+.krig-workspace-bar--fullscreen .krig-navside-toggle {
+  margin-left: 0;
 }
 
 .krig-navside-toggle:hover {
