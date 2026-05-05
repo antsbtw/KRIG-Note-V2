@@ -14,6 +14,7 @@ import { app, BrowserWindow } from 'electron';
 import { createMainWindow } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
+import { registerFrameworkMenus } from './menu/framework-menus';
 
 app.whenReady().then(async () => {
   // L0 — 平台层就绪
@@ -21,6 +22,9 @@ app.whenReady().then(async () => {
 
   // L0 — IPC 总线(含健康检查 handlers)
   initIpcBus();
+
+  // L4 — 框架级 Application Menu(取代 Electron 默认 File/Edit/View/Window)
+  registerFrameworkMenus();
 
   // L1 — 主窗口
   await createMainWindow();

@@ -1,0 +1,170 @@
+/**
+ * Overlay Bindings 样式 — 5 大交互浮层 + 通用 Overlay
+ *
+ * 按 charter § 1.4:统一式样,view 平等(无 variant)。
+ */
+
+/* 通用浮层基础(右键 / Slash / Handle 等) */
+.krig-context-menu,
+.krig-slash-menu,
+.krig-handle-menu,
+.krig-floating-toolbar {
+  position: fixed;
+  z-index: 1000;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  min-width: 160px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  color: #ddd;
+}
+
+/* FloatingToolbar 横向 */
+.krig-floating-toolbar {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  padding: 4px;
+  min-width: auto;
+}
+
+/* 菜单项按钮 */
+.krig-context-menu-item,
+.krig-slash-menu-item,
+.krig-handle-menu-item,
+.krig-floating-toolbar-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.krig-floating-toolbar-item {
+  width: auto;
+  padding: 4px 8px;
+}
+
+.krig-context-menu-item:hover,
+.krig-slash-menu-item:hover,
+.krig-handle-menu-item:hover,
+.krig-floating-toolbar-item:hover {
+  background-color: #3a3a3a;
+}
+
+/* 通用 Overlay(帮助 / dialog)— 全屏 backdrop */
+.krig-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.krig-overlay-content {
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  padding: 24px;
+  min-width: 320px;
+  max-width: 80vw;
+  max-height: 80vh;
+  overflow: auto;
+  color: #ddd;
+}
+
+/* NavSide Binding */
+.krig-nav-side-binding {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.krig-nav-side-header {
+  flex: none;
+  padding: 12px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.krig-nav-side-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ddd;
+}
+
+.krig-nav-side-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.krig-nav-side-action {
+  background: transparent;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.krig-nav-side-action:hover {
+  background-color: #2a2a2a;
+}
+
+.krig-nav-side-content {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+}
+
+/* Toolbar Binding */
+.krig-toolbar-binding {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 100%;
+}
+
+.krig-toolbar-group {
+  display: flex;
+  gap: 2px;
+}
+
+.krig-toolbar-group--center {
+  flex: 1;
+  justify-content: center;
+}
+
+.krig-toolbar-group--right {
+  margin-left: auto;
+}
+
+.krig-toolbar-item {
+  background: transparent;
+  border: none;
+  color: #ccc;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.krig-toolbar-item:hover {
+  background-color: #2a2a2a;
+}
