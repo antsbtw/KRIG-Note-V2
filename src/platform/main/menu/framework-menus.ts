@@ -29,19 +29,19 @@ export function registerFrameworkMenus(): void {
   });
   menuRegistry.registerCommand('help.about', () => {
     // L4 阶段占位,L5 / 后续可加 About 对话框
-    console.log('[L4] About KRIG Note V2 (placeholder)');
+    console.log('[L4] About KRIG Note (placeholder)');
   });
 
-  // KRIG Note V2(macOS 应用菜单)
+  // KRIG Note(macOS 应用菜单)
   if (process.platform === 'darwin') {
     menuRegistry.register({
       id: 'app',
-      label: app.name || 'KRIG Note V2',
+      label: app.name || 'KRIG Note',
       order: 0,
       items: [
-        { id: 'about', label: 'About KRIG Note V2', command: 'help.about' },
+        { id: 'about', label: 'About KRIG Note', command: 'help.about' },
         { id: 'sep1', label: '', separator: true },
-        { id: 'quit', label: 'Quit KRIG Note V2', command: 'app.quit', accelerator: 'Cmd+Q' },
+        { id: 'quit', label: 'Quit KRIG Note', command: 'app.quit', accelerator: 'Cmd+Q' },
       ],
     });
   }
@@ -87,7 +87,7 @@ export function registerFrameworkMenus(): void {
     label: 'Help',
     order: 5,
     items: [
-      { id: 'about', label: 'About KRIG Note V2', command: 'help.about' },
+      { id: 'about', label: 'About KRIG Note', command: 'help.about' },
     ],
   });
 

@@ -6,8 +6,9 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    name: 'KRIG Note V2',
-    executableName: 'KRIG Note V2',
+    name: 'KRIG Note',
+    executableName: 'KRIG Note',
+    icon: 'build/icon',  // forge 自动加平台后缀:macOS=.icns / Windows=.ico / Linux=.png
   },
   makers: [
     new MakerSquirrel({}),
