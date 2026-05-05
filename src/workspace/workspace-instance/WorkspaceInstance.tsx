@@ -15,6 +15,7 @@ import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
 import { workspaceManager } from '../workspace-state/workspace-manager';
 import { useContextMenuTrigger } from '@slot/triggers/use-context-menu-trigger';
+import { WorkspaceBusContext } from '@slot/workspace-bus/use-workspace-bus';
 import type { WorkspaceState } from '../workspace-state/workspace-state';
 import './workspace-instance.css';
 
@@ -38,25 +39,31 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
   // viewId 为 null 时 hook 不挂监听器(待 view 注册后自动激活)。
   useContextMenuTrigger(rootRef, activeViewId);
 
+  // L3.5:Workspace bus(每 Workspace 一实例,跨 Workspace 不通)
+  const bus = workspaceManager.getBus(state.id) ?? null;
+
   return (
-    <div
-      ref={rootRef}
-      className="krig-workspace-instance"
-      style={{ display: isActive ? 'flex' : 'none' }}
-      data-workspace-id={state.id}
-    >
-      {!state.navSideCollapsed && (
-        <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
-      )}
-      <div className="krig-workspace-main">
-        <ToolbarFrame viewId={activeViewId} />
-        <SlotArea
-          slotBinding={state.slotBinding}
-          dividerRatio={state.dividerRatio}
-          onDividerChange={handleDividerChange}
-        />
+    <WorkspaceBusContext.Provider value={bus}>
+      <div
+        ref={rootRef}
+        className="krig-workspace-instance"
+        style={{ display: isActive ? 'flex' : 'none' }}
+        data-workspace-id={state.id}
+      >
+        {!state.navSideCollapsed && (
+          <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
+        )}
+        <div className="krig-workspace-main">
+          <ToolbarFrame viewId={activeViewId} />
+          <SlotArea
+            workspaceId={state.id}
+            slotBinding={state.slotBinding}
+            dividerRatio={state.dividerRatio}
+            onDividerChange={handleDividerChange}
+          />
+        </div>
+        <OverlayFrames viewId={activeViewId} />
       </div>
-      <OverlayFrames viewId={activeViewId} />
-    </div>
+    </WorkspaceBusContext.Provider>
   );
 }

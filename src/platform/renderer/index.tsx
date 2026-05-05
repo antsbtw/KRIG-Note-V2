@@ -13,6 +13,7 @@ import { reportL2Alive } from '@shell/diagnostics/L2-alive';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { localStoragePersistence } from '@workspace/persistence/local-storage';
 import { reportL3Alive } from '@workspace/diagnostics/L3-alive';
+import { reportL3_5Alive } from '@slot/workspace-bus/L3.5-alive';
 import { reportL4Alive } from '@slot/diagnostics/L4-alive';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import './app.css';
@@ -21,6 +22,23 @@ import './app.css';
 workspaceManager.setPersistence(localStoragePersistence);
 workspaceManager.loadFromPersistence();
 workspaceManager.ensureMinimum();
+
+// L3.5 启动:为活跃 Workspace 创建 bus(lazy 创建,首个 getBus 调用触发)
+// 这里主动调一次,让 alive 计数 >= 1
+const _activeId = workspaceManager.getActiveId();
+if (_activeId) workspaceManager.getBus(_activeId);
+
+// dev-only:DevTools 调试钩子 — 让 `window.__krig.bus` / `__krig.wm` 直接可用
+// Vite 在 prod build 时会 dead-code eliminate 整段(import.meta.env.DEV === false)。
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__krig = {
+    wm: workspaceManager,
+    get bus() {
+      const id = workspaceManager.getActiveId();
+      return id ? workspaceManager.getBus(id) : undefined;
+    },
+  };
+}
 
 function App() {
   return (
@@ -38,5 +56,6 @@ if (rootEl) {
   reportRendererAlive();
   reportL2Alive();
   reportL3Alive(workspaceManager.count, workspaceManager.getActiveId());
+  reportL3_5Alive(workspaceManager.busCount);
   reportL4Alive();
 }

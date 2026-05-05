@@ -29,9 +29,20 @@ export function ViewSwitcherFrame({ workspaceId, activeViewId }: ViewSwitcherFra
   const handleSwitch = (viewId: string) => {
     const ws = workspaceManager.get(workspaceId);
     if (!ws) return;
-    workspaceManager.update(workspaceId, {
-      slotBinding: { ...ws.slotBinding, left: viewId },
-    });
+    // 铁律 9:NavSide 切主 view 时自动关 right(memory navside_switch_closes_right_slot)
+    // 实施:同一 update 调用一次性把 left + right + payload 全置好,标记 source='navside'
+    workspaceManager.update(
+      workspaceId,
+      {
+        slotBinding: {
+          left: viewId,
+          leftPayload: undefined,
+          right: null,
+          rightPayload: undefined,
+        },
+      },
+      { source: 'navside' },
+    );
   };
 
   return (
