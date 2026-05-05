@@ -1,29 +1,76 @@
 # src/shell — 详细设计
 
-> v0.2 · 2026-05-05 · 草稿,等用户审阅
+> v0.3 · 2026-05-05 · 草稿,等用户审阅
 >
 > 配套:[charter.md v0.4 § 1.4 + § 2.2](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md](../../docs/RefactorV2/view-hierarchy-v2.md)
 >
-> v0.1 → v0.2:经过深度讨论(2026-05-05),纠正 v0.1 把 NavSide / Toolbar / 浮层归 Shell 的错误。V2 Shell 极轻,只做 WorkspaceBar + Workspace Container 容器。所有应用级 UI(NavSide / Toolbar / 浮层)归 L3 Workspace Container。
+> v0.1 → v0.2:经过深度讨论(2026-05-05),纠正 v0.1 把 NavSide / Toolbar / 浮层归 Shell 的错误。Shell 极轻,只做 WorkspaceBar + Workspace Container 容器。所有应用级 UI(NavSide / Toolbar / 浮层)归 L3 Workspace Container。
+>
+> v0.2 → v0.3(2026-05-05):明确 WorkspaceBar 内含 NavSide Toggle / Workspace Tabs / [+] 按钮三类控件,Toggle 视觉在 L2 但状态归 L3 WorkspaceState。
 
 ---
 
-## 1. 本层范围(L2 Shell — 极轻)
+## 1. 本层范围(L2 Shell — 极轻 + WorkspaceBar 控件)
 
-L2 Shell 只做两件事:
+L2 Shell 做两件事:
 
 ```
 src/shell/
-├── workspace-bar/       ← 顶部 28px,Workspace Tab 切换器
+├── workspace-bar/       ← 顶部 28px:NavSide Toggle + Workspace Tabs + [+] 按钮
 └── workspace-container/ ← 全屏容器,挂载当前活跃 Workspace 实例
 ```
 
 **Shell 不包含**(与 V1 重大差异,详见 view-hierarchy-v2.md § 0):
-- ❌ NavSide(归 L3 Workspace Container)
+- ❌ NavSide(归 L3 Workspace Container,Toggle 控制 L3 状态)
 - ❌ Toolbar(归 L3 Workspace Container)
 - ❌ 任何浮层(ContextMenu / Slash / Handle / FloatingToolbar / 通用 Overlay 全部归 L3)
 
-L2 阶段的 Workspace Container **是空容器**——等 L3 阶段实施 Workspace 实例(NavSide frame + Slot Area + Overlay frames 等)。
+### WorkspaceBar 内的三类控件
+
+```
+┌─ WorkspaceBar(28px)──────────────────────────────────────────────┐
+│ [≡] │ [WS-1] [WS-2] [WS-3 ×] [+]                                  │
+└────────────────────────────────────────────────────────────────────┘
+  ↑      ↑       ↑           ↑
+  │      └ Workspace Tabs    └ [+] 新建 Workspace
+  └ NavSide Toggle(影响当前活跃 Workspace 的 NavSide)
+```
+
+| 控件 | 视觉位置 | UI 实现 | 状态归属 | 触发逻辑 |
+|---|---|---|---|---|
+| **NavSide Toggle** | L2 WorkspaceBar 左端 | L2 渲染 | **L3 WorkspaceState.navSideCollapsed** | 调当前 Workspace API 切状态 |
+| **Workspace Tabs** | L2 WorkspaceBar 中间 | L2 渲染 | L3 WorkspaceManager(列表) | 调 workspaceManager.setActive(id) |
+| **[+] 新建按钮** | L2 WorkspaceBar 右端 | L2 渲染 | — | 调 workspaceManager.create() |
+
+**模式**:**L2 提供 UI 入口,L3 处理状态**。L2 不持有任何 Workspace 业务状态。
+
+L2 阶段实施时,WorkspaceManager 还没落地 → 按钮触发**暂时不工作**(L3 接入后生效)。
+
+### Toggle 归属(详细说明)
+
+按 charter § 1.4 "应用级 UI 在 Workspace Container,view 平等,无 variant" 原则审视:
+
+NavSide Toggle 是控制 NavSide 显示/隐藏的开关 → **逻辑上归 NavSide → 归 L3 Workspace**。
+
+但**视觉位置**在 WorkspaceBar 上(顶部栏左端,V1 风格)。
+
+**采用方案 C(折中,工程实践标准)**:
+- WorkspaceBar 渲染 Toggle UI(L2 实现)
+- Toggle 触发时调 `workspaceManager.toggleNavSide(activeId)`(L3 提供 API)
+- Toggle 状态在 `WorkspaceState.navSideCollapsed`(L3 持久化)
+
+**与 charter § 1.4 的关系**:
+- 严格说 Toggle UI 也是应用级 UI 一致性的一部分(每个 Workspace 看到的 Toggle 形状一致)
+- 但 Toggle 是 WorkspaceBar 的一部分(L2 整体一致),不会因 view 不同而变
+- → 不违反 view 平等
+
+### Workspace 隔离的 NavSide 折叠状态
+
+按 view-hierarchy-v2.md "Workspace 真正隔离":
+- **每个 Workspace 持有自己的 navSideCollapsed 状态**
+- 切 Workspace A → B 时,B 的 NavSide 显示 B 自己的折叠状态(可能与 A 不同)
+
+实现:WorkspaceState.navSideCollapsed 是 Workspace 实例的字段(L3)。
 
 ---
 
@@ -90,8 +137,10 @@ src/shell/
 ├── README.md
 ├── DESIGN.md(本文件)
 ├── workspace-bar/
-│   ├── WorkspaceBar.tsx           (顶部 28px Tab 切换器)
-│   ├── WorkspaceTab.tsx            (单个 Tab 组件)
+│   ├── WorkspaceBar.tsx           (顶部 28px 容器,布局 Toggle + Tabs + [+])
+│   ├── NavSideToggle.tsx           (左端 ≡ 按钮,触发 L3 toggleNavSide)
+│   ├── WorkspaceTab.tsx            (中间 — 单个 Tab 组件,可关闭)
+│   ├── AddWorkspaceButton.tsx     (右端 [+] 按钮)
 │   ├── workspace-bar.css
 │   └── README.md
 ├── workspace-container/
@@ -106,27 +155,31 @@ src/shell/
 
 #### `workspace-bar/`
 
-**作用**:渲染顶部 28px Tab 切换器,显示所有 Workspace 标签 + [+]。
+**作用**:渲染顶部 28px,含 NavSide Toggle / Workspace Tabs / [+] 三类控件。
 
 **接口**:
-- 数据来源:WorkspaceManager(L3)— 但 L2 阶段 WorkspaceManager 还没落地,**L2 阶段 WorkspaceBar 显示空**(无 Workspace 标签)
-- 切 Workspace:点击 Tab → 调 WorkspaceManager.setActive()(L3 阶段实现)
+- 数据来源:WorkspaceManager(L3,L2 阶段未落地 → 显示占位)
+- Toggle 触发:调 `workspaceManager.toggleNavSide(activeId)`(L3 实现)
+- 切 Workspace:调 `workspaceManager.setActive(id)`(L3 实现)
+- 新建 Workspace:调 `workspaceManager.create()`(L3 实现)
 
-**L2 阶段实现**:
+**L2 阶段实现**(占位 — 触发暂不工作):
 ```tsx
-// 简化版,无 WorkspaceManager 依赖
 export function WorkspaceBar() {
-  // L2 阶段:静态空 Tab 列表(等 L3 接入)
   return (
     <div className="krig-workspace-bar">
-      <div className="krig-workspace-bar-empty">Workspace Bar (待 L3 实施)</div>
-      <button className="krig-add-workspace">+</button>
+      <NavSideToggle />               {/* L2 阶段:占位按钮,触发不工作 */}
+      <div className="krig-workspace-tabs">
+        {/* L2 阶段:占位"Workspace Bar (待 L3)" */}
+        <div className="krig-tabs-empty">Workspace Bar (待 L3)</div>
+      </div>
+      <AddWorkspaceButton />          {/* L2 阶段:占位 [+],触发不工作 */}
     </div>
   );
 }
 ```
 
-**L3 阶段升级**:接入 WorkspaceManager,显示真实 Workspace 列表。
+**L3 阶段升级**:接入 WorkspaceManager,Toggle / Tabs / [+] 全部生效。
 
 #### `workspace-container/`
 
@@ -200,8 +253,11 @@ export function reportL2Alive() {
 
 ### 5.2 实施清单
 
-#### shell/workspace-bar/(3 文件)
-- `WorkspaceBar.tsx`(占位 Tab 列表)
+#### shell/workspace-bar/(6 文件)
+- `WorkspaceBar.tsx`(顶部 28px 容器,布局 3 类控件)
+- `NavSideToggle.tsx`(左端 ≡ 按钮 — 占位,触发暂不工作)
+- `WorkspaceTab.tsx`(中间 Tab 组件 — L2 阶段不渲染,等 L3)
+- `AddWorkspaceButton.tsx`(右端 [+] 按钮 — 占位,触发暂不工作)
 - `workspace-bar.css`
 - `README.md`
 
@@ -267,11 +323,13 @@ export function reportL2Alive() {
 
 ## 7. 待拍板
 
-- [ ] L2 阶段是否引入"renderer → main IPC 上报诊断"机制?— 我倾向是,框架性基础设施
-- [ ] WorkspaceBar 占位文字 — 显示什么?(我倾向 "Workspace Bar (待 L3)")
-- [ ] Workspace Container 占位文字 — 显示什么?(我倾向 "Workspace Container (待 L3)")
-- [ ] 顶部 WorkspaceBar 与底部 Workspace Container 之间是否需要分隔线?
-- [ ] L2 阶段是否引入 React Router / Zustand / 等状态库?— 我倾向不引入(L2 占位无需复杂状态)
+- [ ] L2 阶段是否引入"renderer → main IPC 上报诊断"机制?— 默认是
+- [ ] WorkspaceBar 占位文字 — 默认 "Workspace Bar (待 L3)"
+- [ ] Workspace Container 占位文字 — 默认 "Workspace Container (待 L3)"
+- [ ] 顶部 WorkspaceBar 与底部 Workspace Container 之间是否需要分隔线?— 默认是
+- [ ] L2 阶段是否引入 React Router / Zustand / 等状态库?— 默认不引入
+- [ ] NavSide Toggle 图标用什么?— 默认 `≡`(三横线 / hamburger)
+- [ ] [+] 按钮图标 — 默认 `+`(简单加号)
 
 ---
 
@@ -281,3 +339,4 @@ export function reportL2Alive() {
 |---|---|---|
 | 2026-05-03 | v0.1 | 初稿;V1 学习 + 三栏布局思路 — **被 v0.2 完全推翻** |
 | 2026-05-05 | v0.2 | 完全重写;反映"NavSide / Toolbar / 浮层全归 L3 Workspace Container"修正;Shell 只做 WorkspaceBar + Workspace Container 容器极简版;子目录从 three-column-layout 改为 workspace-bar / workspace-container |
+| 2026-05-05 | v0.3 | 修正 v0.2 漏掉的 WorkspaceBar 内控件;明确 WorkspaceBar 含 NavSide Toggle / Workspace Tabs / [+] 三类控件(方案 C 折中:UI 在 L2,状态归 L3 WorkspaceState.navSideCollapsed);加 NavSideToggle.tsx + AddWorkspaceButton.tsx 实施清单 |
