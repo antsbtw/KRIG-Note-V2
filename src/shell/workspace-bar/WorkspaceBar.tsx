@@ -3,27 +3,41 @@
  *
  * 按 src/shell/DESIGN.md v0.3:
  * - 左端:NavSide Toggle(≡)
- * - 中间:Workspace Tabs(L2 阶段空,L3 接入 WorkspaceManager)
+ * - 中间:Workspace Tabs(L3 阶段:从 WorkspaceManager 渲染列表)
  * - 右端:[+] 新建 Workspace 按钮
  *
- * L2 阶段:渲染 3 类控件占位,触发暂不工作(等 L3)
+ * L3 阶段(2026-05-05):接入 WorkspaceManager,3 类控件全生效
  */
 
 import { NavSideToggle } from './NavSideToggle';
 import { AddWorkspaceButton } from './AddWorkspaceButton';
+import { WorkspaceTab } from './WorkspaceTab';
 import { useFullscreen } from './use-fullscreen';
+import { useAllWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
 import './workspace-bar.css';
 
 export function WorkspaceBar() {
   const isFullscreen = useFullscreen();
+  const workspaces = useAllWorkspaces();
+  const activeId = useActiveWorkspaceId();
   const className = `krig-workspace-bar ${isFullscreen ? 'krig-workspace-bar--fullscreen' : ''}`;
 
   return (
     <div className={className} role="toolbar" aria-label="Workspace Bar">
       <NavSideToggle />
       <div className="krig-workspace-tabs">
-        {/* L2 阶段:占位文字。L3 阶段:从 WorkspaceManager 拿列表渲染 WorkspaceTab */}
-        <div className="krig-workspace-tabs-empty">Workspace Bar (待 L3)</div>
+        {workspaces.length === 0 ? (
+          <div className="krig-workspace-tabs-empty">No workspace</div>
+        ) : (
+          workspaces.map((ws) => (
+            <WorkspaceTab
+              key={ws.id}
+              id={ws.id}
+              label={ws.label}
+              active={ws.id === activeId}
+            />
+          ))
+        )}
       </div>
       <AddWorkspaceButton />
     </div>

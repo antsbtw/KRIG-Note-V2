@@ -4,19 +4,22 @@
  * 按 src/shell/DESIGN.md v0.3 § 1:
  * - UI 渲染在 L2 WorkspaceBar(本组件)
  * - 状态归 L3 WorkspaceState.navSideCollapsed
- * - 触发时调 workspaceManager.toggleNavSide(activeId)(L3 提供)
+ * - 触发时调 workspaceManager.toggleNavSide(activeId)
  *
- * L2 阶段:占位按钮,触发暂不工作(等 L3 接入 WorkspaceManager)
- *
- * 图标:Lucide PanelLeft(类似 SF Symbols sidebar.left,outline 风格)
+ * L3 阶段(2026-05-05):接入 WorkspaceManager,实际生效
  */
 
 import { PanelLeft } from 'lucide-react';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
 
 export function NavSideToggle() {
+  const activeId = useActiveWorkspaceId();
+
   const handleClick = () => {
-    // L2 阶段:无操作。L3 阶段接入 workspaceManager.toggleNavSide(activeId)
-    console.log('[L2] NavSide toggle clicked (L3 待接入)');
+    if (activeId) {
+      workspaceManager.toggleNavSide(activeId);
+    }
   };
 
   return (
@@ -24,8 +27,9 @@ export function NavSideToggle() {
       type="button"
       className="krig-navside-toggle"
       onClick={handleClick}
-      title="折叠/展开 NavSide(L3 待接入)"
+      title="折叠/展开 NavSide"
       aria-label="Toggle NavSide"
+      disabled={!activeId}
     >
       <PanelLeft size={16} />
     </button>
