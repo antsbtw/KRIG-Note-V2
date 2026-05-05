@@ -1,5 +1,5 @@
 /**
- * KRIG-Note V2 主进程入口
+ * KRIG Note 主进程入口
  *
  * L0 平台层 + L1 窗口层。仅做 L0+L1 责任,其他层通过 boot hooks 注入(后期)。
  *
@@ -8,6 +8,14 @@
  * 2. 初始化 IPC 总线(健康检查 handlers)
  * 3. 创建主窗口 → L1 alive 诊断
  * 4. 监听 lifecycle 事件
+ *
+ * 应用名 / dock 图标:
+ * - dev:scripts/patch-electron-dev.sh(postinstall 钩子)直接改 node_modules 的
+ *   Electron.app/Contents/Info.plist + 替换 electron.icns。一次性,重装 electron 时自动重跑。
+ * - prod:forge.config packagerConfig.name + icon(.icns)
+ *
+ * V1 教训:macOS 应用菜单首项 Bold 名取自 Info.plist 的 CFBundleName,
+ * 不是 app.setName()。dev 必须 patch Info.plist 才能改首项。
  */
 
 import { app, BrowserWindow } from 'electron';
