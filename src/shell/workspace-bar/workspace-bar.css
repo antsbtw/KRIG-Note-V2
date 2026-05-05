@@ -1,0 +1,134 @@
+/**
+ * WorkspaceBar 样式
+ *
+ * 按 src/shell/DESIGN.md v0.3:
+ * - 高度 28px
+ * - 深色背景(对齐 L0 占位组件 #1e1e1e)
+ * - 左 ≡ + 中间 Tabs + 右 [+]
+ */
+
+.krig-workspace-bar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  background-color: #1e1e1e;
+  border-bottom: 1px solid #333;
+  padding: 0 4px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  color: #ccc;
+  user-select: none;
+  -webkit-app-region: drag;  /* macOS 整个 bar 可拖窗 */
+}
+
+/* 控件区域不可拖窗 */
+.krig-navside-toggle,
+.krig-add-workspace,
+.krig-workspace-tab {
+  -webkit-app-region: no-drag;
+}
+
+/* NavSide Toggle ≡ */
+.krig-navside-toggle {
+  flex: none;
+  width: 28px;
+  height: 22px;
+  margin-left: 72px;  /* macOS 红绿灯预留 */
+  margin-right: 4px;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-navside-toggle:hover {
+  background-color: #2a2a2a;
+  color: #ccc;
+}
+
+/* Workspace Tabs 区域(中间) */
+.krig-workspace-tabs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px;
+}
+
+.krig-workspace-tabs-empty {
+  color: #555;
+  font-style: italic;
+  padding-left: 8px;
+}
+
+/* 单个 Tab(L3 阶段才会渲染) */
+.krig-workspace-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  background-color: #252525;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #aaa;
+}
+
+.krig-workspace-tab:hover {
+  background-color: #2e2e2e;
+  color: #ddd;
+}
+
+.krig-workspace-tab--active {
+  background-color: #333;
+  color: #fff;
+}
+
+.krig-workspace-tab-close {
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.krig-workspace-tab-close:hover {
+  background-color: #444;
+  color: #fff;
+}
+
+/* [+] 按钮 */
+.krig-add-workspace {
+  flex: none;
+  width: 24px;
+  height: 22px;
+  margin-left: 4px;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-add-workspace:hover {
+  background-color: #2a2a2a;
+  color: #ccc;
+}

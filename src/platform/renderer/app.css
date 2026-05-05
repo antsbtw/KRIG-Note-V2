@@ -1,0 +1,22 @@
+/**
+ * App 根布局
+ *
+ * L2 阶段:垂直 flex(WorkspaceBar 顶部 + WorkspaceContainer 撑满剩余)
+ */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background-color: #1e1e1e;
+}
+
+#root {
+  height: 100%;
+}
+
+.krig-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}

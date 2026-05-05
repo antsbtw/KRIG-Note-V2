@@ -66,14 +66,19 @@ export default [
     },
   },
 
-  // 语义 / 共享层只允许纯类型
+  // 语义 / 共享层只允许纯类型 + 同层相对路径
+  // 禁所有 npm 业务包(屏障)和跨层 alias(@views / @capabilities / @platform 等)
   {
     files: ['src/semantic/**/*.{ts,tsx}', 'src/shared/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['*'],
-            message: '语义层 / 共享层只允许 import 同层内部模块,不允许任何 npm 包' },
+          // 禁业务 npm 包
+          { group: ['prosemirror-*', 'three', 'three/*', 'pdfjs-dist', 'epubjs', 'foliate-js', 'electron', 'react', 'react-dom'],
+            message: '语义层 / 共享层只允许纯类型,不允许 import npm 包' },
+          // 禁跨层 alias(只允许同层相对路径)
+          { group: ['@views/*', '@capabilities/*', '@storage/*', '@platform/*', '@shell/*', '@workspace/*', '@slot/*'],
+            message: '语义层 / 共享层只允许 import 同层内部模块(相对路径)' },
         ],
       }],
     },

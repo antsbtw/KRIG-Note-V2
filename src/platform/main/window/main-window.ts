@@ -12,6 +12,7 @@ import { reportL1Alive } from '../diagnostics/L1-alive';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
+declare const MAIN_WINDOW_PRELOAD_VITE_ENTRY: string;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -28,6 +29,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     trafficLightPosition: { x: 12, y: 10 },
     backgroundColor: '#1e1e1e',
     webPreferences: {
+      preload: MAIN_WINDOW_PRELOAD_VITE_ENTRY,
       contextIsolation: true,
       nodeIntegration: false,
     },
