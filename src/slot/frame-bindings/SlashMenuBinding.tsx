@@ -2,8 +2,9 @@
  * SlashMenu Binding — 渲染 / 命令菜单
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSlashVersion } from './use-registry';
+import { useCollisionPosition } from './use-collision-position';
 import { slashRegistry } from '../interaction-registries/slash-registry/slash-registry';
 import { slashMenuController } from '../triggers/slash-menu-controller';
 import { commandRegistry } from '../command-registry/command-registry';
@@ -11,6 +12,8 @@ import { commandRegistry } from '../command-registry/command-registry';
 export function SlashMenuBinding() {
   useSlashVersion();
   const [state, setState] = useState(slashMenuController.getState());
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const { x, y } = useCollisionPosition(menuRef, state.x, state.y);
 
   useEffect(() => {
     return slashMenuController.subscribe(() => setState(slashMenuController.getState()));
@@ -22,8 +25,9 @@ export function SlashMenuBinding() {
 
   return (
     <div
+      ref={menuRef}
       className="krig-slash-menu"
-      style={{ left: state.x, top: state.y }}
+      style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {items.map((item) => (

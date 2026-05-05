@@ -14,11 +14,11 @@ import type { ContextInfo } from '../interaction-registries/context-menu-registr
 
 export function useContextMenuTrigger(
   elementRef: RefObject<HTMLElement | null>,
-  viewId: string,
+  viewId: string | null,
 ): void {
   useEffect(() => {
     const el = elementRef.current;
-    if (!el) return;
+    if (!el || !viewId) return;
 
     const handleContextMenu = (e: MouseEvent) => {
       // 检测当前选区状态

@@ -2,8 +2,9 @@
  * FloatingToolbar Binding — 渲染选区上方浮动工具条
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFloatingToolbarVersion } from './use-registry';
+import { useCollisionPosition } from './use-collision-position';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { floatingToolbarController } from '../triggers/floating-toolbar-controller';
 import { commandRegistry } from '../command-registry/command-registry';
@@ -11,6 +12,8 @@ import { commandRegistry } from '../command-registry/command-registry';
 export function FloatingToolbarBinding() {
   useFloatingToolbarVersion();
   const [state, setState] = useState(floatingToolbarController.getState());
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const { x, y } = useCollisionPosition(toolbarRef, state.x, state.y);
 
   useEffect(() => {
     return floatingToolbarController.subscribe(() => setState(floatingToolbarController.getState()));
@@ -22,8 +25,9 @@ export function FloatingToolbarBinding() {
 
   return (
     <div
+      ref={toolbarRef}
       className="krig-floating-toolbar"
-      style={{ left: state.x, top: state.y }}
+      style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {items.map((item) => (
