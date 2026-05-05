@@ -12,8 +12,15 @@ export const IPC_CHANNELS = {
   // 健康检查(各层暴露自己的 alive 状态)
   HEALTH_L0: 'health.L0',
   HEALTH_L1: 'health.L1',
+  HEALTH_L2: 'health.L2',
   HEALTH_PLATFORM: 'health.platform',
   HEALTH_RENDERER: 'health.renderer',
+
+  // 诊断上报(renderer → main,L2 阶段引入)
+  DIAGNOSTICS_REPORT_ALIVE: 'diagnostics.report-alive',
+
+  // 窗口状态变化(main → renderer,L2 阶段引入)
+  WINDOW_FULLSCREEN_CHANGED: 'window.fullscreen-changed',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

@@ -21,6 +21,11 @@ const config: ForgeConfig = {
           config: 'vite.main.config.mts',
           target: 'main',
         },
+        {
+          entry: 'src/platform/main/preload/main-window-preload.ts',
+          config: 'vite.preload.config.mts',
+          target: 'preload',
+        },
       ],
       renderer: [
         {

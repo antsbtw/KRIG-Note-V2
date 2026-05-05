@@ -13,3 +13,11 @@ export interface HealthCheckResponse {
   /** 可选额外信息 */
   details?: Record<string, unknown>;
 }
+
+/** 诊断上报载荷(renderer → main) */
+export interface DiagnosticsReportPayload {
+  /** 上报的层名(如 'L2', 'Renderer') */
+  layer: string;
+  /** 可选详情(如 size / version / 等) */
+  details?: Record<string, unknown>;
+}

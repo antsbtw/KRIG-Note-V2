@@ -151,7 +151,7 @@ ContextMenuRegistry / ToolbarRegistry / SlashRegistry / HandleRegistry / Floatin
 
 **规则 B(例外)**:纯函数工具(无状态 / 无生命周期 / 无 UI / 调用即返回)允许任何文件 import,白名单维护。
 
-初版白名单:`react / lodash / dayjs / date-fns / clsx / classnames / nanoid / uuid / zod / zustand / jotai / @types/*`
+初版白名单:`react / react-dom / lodash / dayjs / date-fns / clsx / classnames / nanoid / uuid / zod / zustand / jotai / lucide-react / @types/*`
 
 **规则 C(颗粒度)**:能力颗粒度按"未来可扩展"原则设计。即便当前只一个视图消费,只要符合"有状态封装"特征,也建立独立 Capability,为未来跨视图复用预留接口。
 

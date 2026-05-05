@@ -7,8 +7,10 @@
  * V1 学习参考:V1 createShell()(652 行)混合了 L1+L2+L4+L5,V2 拆开。
  */
 
+import path from 'node:path';
 import { BrowserWindow } from 'electron';
 import { reportL1Alive } from '../diagnostics/L1-alive';
+import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -28,6 +30,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     trafficLightPosition: { x: 12, y: 10 },
     backgroundColor: '#1e1e1e',
     webPreferences: {
+      // forge-vite 把 preload 输出到主进程构建目录(.vite/build/),
+      // entry 'src/platform/main/preload/main-window-preload.ts' → 'main-window-preload.js'
+      preload: path.join(__dirname, 'main-window-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -37,9 +42,16 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     await win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    const path = await import('node:path');
     await win.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
+
+  // 窗口全屏状态变化 → 通知 renderer(用于 UI 自适应,如 NavSide Toggle 位置)
+  win.on('enter-full-screen', () => {
+    win.webContents.send(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, true);
+  });
+  win.on('leave-full-screen', () => {
+    win.webContents.send(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, false);
+  });
 
   // 窗口关闭时清理引用
   win.on('closed', () => {
