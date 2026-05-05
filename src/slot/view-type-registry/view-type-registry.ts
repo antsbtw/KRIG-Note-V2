@@ -19,6 +19,8 @@ class ViewTypeRegistry {
   private listeners: Set<() => void> = new Set();
   /** ViewSwitcher 用的有序快照缓存(useSyncExternalStore 稳定引用)*/
   private cachedNavSideTabs: ViewDefinition[] | null = null;
+  /** SlotArea 用的全集快照缓存(同上,L3.5 加)*/
+  private cachedAll: ViewDefinition[] | null = null;
 
   /**
    * 注册 view + 自动拆分子字段到对应 Registry
@@ -47,8 +49,16 @@ class ViewTypeRegistry {
     return this.views.get(id);
   }
 
+  /**
+   * 全集 — useSyncExternalStore 稳定引用(L3.5 SlotArea 用)。
+   *
+   * 数据未变时返回同一数组引用;notify() 时失效缓存。
+   */
   getAll(): ViewDefinition[] {
-    return Array.from(this.views.values());
+    if (this.cachedAll === null) {
+      this.cachedAll = Array.from(this.views.values());
+    }
+    return this.cachedAll;
   }
 
   /**
@@ -74,6 +84,7 @@ class ViewTypeRegistry {
 
   private notify(): void {
     this.cachedNavSideTabs = null;
+    this.cachedAll = null;
     this.listeners.forEach((l) => l());
   }
 
