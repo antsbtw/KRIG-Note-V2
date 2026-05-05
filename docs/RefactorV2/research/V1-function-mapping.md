@@ -530,7 +530,29 @@ insertion.registerSafeguard({ id, check });
 
 **L6+**:表格 / 数学 / 图片 / 代码块 / Mermaid / 拖动手柄(注册 drag-and-drop)/ 等富节点
 
-### 5.7 留位(L6+ 内容特定 capability)
+### 5.7 特殊 block 接口规约(独立深入文档)
+
+> **承接用户洞察**:本研究 § 4 矩阵的"列(capability)"那一轴本身有层次 — text-editing 内部还分**基础 block 操作**(textBlock / paragraph)和**特殊 block 操作**(数学块 / 代码块 / 列表 / 表格 / 图片 / ...)。后者是基础之上的延伸约定,不抽象出来 V2 会重蹈 V1 的覆辙。
+>
+> **V1 教训**:V1 的不稳定症状大量集中在 block 操作的不一致 — **嵌套容器 + 节点位置计算**是返工重灾区。每种特殊 block 都有自己的"光标进入怎么办 / 选区怎么算 / 粘贴接受什么 / Enter 怎么响应 / 序列化怎么做",V1 散落在 30+ 块定义里没有统一接口。
+>
+> **V2 思路**:把每个特殊 block 视为"小 capability"— 实现一组标准接口(BlockSpec),由 text-editing capability 通过 `registerBlock` 装配。这样每加一个特殊 block 是注册行为,不是改 text-editing 内部代码。
+
+**接口点(初步 8 个)**:
+1. schema spec(nodeSpec)
+2. NodeView 渲染
+3. keymap(块内特殊键盘)
+4. 选区行为(TextSelection / NodeSelection / 自定义)
+5. 粘贴守卫(块内只接受什么)
+6. 序列化(toMarkdown / toHTML / toAtom)
+7. input-rules(自动转换语法 → 节点)
+8. 容器规则(containerRule / cascadeBoundary)
+
+**示例 block(覆盖 5 种典型模式)**:textBlock(基础)/ mathBlock(leaf 内嵌编辑器)/ codeBlock(textarea-like)/ table(嵌套容器)/ bulletList(同族列表)。
+
+**详细研究**:见独立文档 [`V1-block-operations.md`](./V1-block-operations.md)(单独立项,因为细节量大且 V1 病例多;研究新文档不阻塞 § 4 矩阵的使用)。
+
+### 5.8 留位(L6+ 内容特定 capability)
 
 - `graph-editing` — V1 部分实现(GraphEditor.ts),关键观察:graph 文字编辑共享 80% PM plugin → GraphView 也 install text-editing,只在 graph-editing 加图谱专属(连线 / 节点形状 / 布局)
 - `file-management` / `web-rendering` / `ebook-rendering` / `media-rendering` / `ai-augment` 等
