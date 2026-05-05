@@ -26,19 +26,31 @@ export function NavSideBinding({ viewId }: NavSideBindingProps) {
   return (
     <div className="krig-nav-side-binding">
       <div className="krig-nav-side-header">
-        <h3 className="krig-nav-side-title">{content.title}</h3>
-        {content.actions && content.actions.length > 0 && (
-          <div className="krig-nav-side-actions">
-            {content.actions.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                className="krig-nav-side-action"
-                onClick={() => commandRegistry.execute(a.command)}
-              >
-                {a.label}
-              </button>
-            ))}
+        <div className="krig-nav-side-title-row">
+          <h3 className="krig-nav-side-title">{content.title}</h3>
+          {content.actions && content.actions.length > 0 && (
+            <div className="krig-nav-side-actions">
+              {content.actions.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="krig-nav-side-action"
+                  onClick={() => commandRegistry.execute(a.command)}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {content.searchPlaceholder !== undefined && (
+          <div className="krig-nav-side-search">
+            <input
+              type="search"
+              className="krig-nav-side-search-input"
+              placeholder={content.searchPlaceholder}
+              onChange={(e) => content.onSearch?.(e.target.value)}
+            />
           </div>
         )}
       </div>

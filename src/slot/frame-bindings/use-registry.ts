@@ -13,9 +13,11 @@ import { useSyncExternalStore } from 'react';
 import { overlayRegistry } from '../interaction-registries/overlay-registry/overlay-registry';
 import { navSideRegistry } from '../nav-side-registry/nav-side-registry';
 import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
+import { viewTypeRegistry } from '../view-type-registry/view-type-registry';
 import type { OverlayDefinition } from '../interaction-registries/overlay-registry/overlay-types';
 import type { NavSideContent } from '../nav-side-registry/nav-side-types';
 import type { ToolbarItem } from '../toolbar-registry/toolbar-types';
+import type { ViewDefinition } from '../view-type-registry/view-definition';
 
 /**
  * 订阅 NavSide 内容变化(触发重渲)
@@ -85,6 +87,18 @@ export function useFloatingToolbarVersion(): number {
   return useSyncExternalStore(
     (cb) => floatingToolbarRegistry.subscribe(cb),
     () => floatingToolbarRegistry.count,
+  );
+}
+
+/**
+ * 订阅 ViewSwitcher 用 view 列表(已声明 navSideTab 的 view)
+ *
+ * 订阅 viewTypeRegistry,getAllForNavSide 返回缓存数组(稳定引用)。
+ */
+export function useNavSideTabs(): ViewDefinition[] {
+  return useSyncExternalStore(
+    (cb) => viewTypeRegistry.subscribe(cb),
+    () => viewTypeRegistry.getAllForNavSide(),
   );
 }
 

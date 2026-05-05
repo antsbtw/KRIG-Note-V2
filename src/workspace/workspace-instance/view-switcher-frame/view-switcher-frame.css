@@ -1,0 +1,32 @@
+/* ViewSwitcherFrame — NavSide 顶部固定区(应用级骨架)*/
+
+.krig-view-switcher-frame {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+/* Logo + 标题区 */
+.krig-view-switcher-brand {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.krig-view-switcher-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  flex: none;
+  object-fit: cover;
+}
+
+.krig-view-switcher-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ddd;
+  letter-spacing: 0.5px;
+}

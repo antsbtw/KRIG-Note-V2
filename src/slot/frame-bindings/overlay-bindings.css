@@ -99,37 +99,129 @@
   border-bottom: 1px solid #2a2a2a;
 }
 
+.krig-nav-side-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .krig-nav-side-title {
   margin: 0;
   font-size: 13px;
-  font-weight: 500;
-  color: #ddd;
+  font-weight: 600;
+  color: #d4a040;
+  flex: none;
 }
 
 .krig-nav-side-actions {
   display: flex;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 8px;
 }
 
 .krig-nav-side-action {
   background: transparent;
-  border: 1px solid #3a3a3a;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  color: #aaa;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: #d4a040;
   cursor: pointer;
 }
 
 .krig-nav-side-action:hover {
-  background-color: #2a2a2a;
+  color: #f0c060;
 }
 
 .krig-nav-side-content {
   flex: 1;
   overflow: auto;
   padding: 8px;
+}
+
+/* ViewSwitcher Binding(NavSide 顶部 view 切换条)*/
+.krig-view-switcher {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.krig-view-switcher-empty {
+  flex: none;
+  padding: 16px 8px;
+  font-size: 11px;
+  font-style: italic;
+  color: #555;
+  text-align: center;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.krig-view-switcher-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #aaa;
+  cursor: pointer;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.krig-view-switcher-tab:hover {
+  background-color: #2a2a2a;
+}
+
+.krig-view-switcher-tab--active {
+  background-color: #2a2a2a;
+  border-color: #3a3a3a;
+  color: #ddd;
+}
+
+.krig-view-switcher-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.krig-view-switcher-label {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* NavSide Search box(navSideRegistry.searchPlaceholder 驱动)*/
+.krig-nav-side-search {
+  margin-top: 8px;
+}
+
+.krig-nav-side-search-input {
+  width: 100%;
+  background-color: #1f1f1f;
+  border: 1px solid #2f2f2f;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #ddd;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.krig-nav-side-search-input:focus {
+  outline: none;
+  border-color: #4a4a4a;
+}
+
+.krig-nav-side-search-input::placeholder {
+  color: #555;
 }
 
 /* Toolbar Binding */

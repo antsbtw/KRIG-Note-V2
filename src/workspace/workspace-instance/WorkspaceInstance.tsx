@@ -36,7 +36,9 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
       style={{ display: isActive ? 'flex' : 'none' }}
       data-workspace-id={state.id}
     >
-      {!state.navSideCollapsed && <NavSideFrame width={state.navSideWidth} viewId={activeViewId} />}
+      {!state.navSideCollapsed && (
+        <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
+      )}
       <div className="krig-workspace-main">
         <ToolbarFrame viewId={activeViewId} />
         <SlotArea

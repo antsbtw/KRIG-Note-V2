@@ -16,6 +16,9 @@ import { floatingToolbarRegistry } from '../interaction-registries/floating-tool
 
 class ViewTypeRegistry {
   private views: Map<string, ViewDefinition> = new Map();
+  private listeners: Set<() => void> = new Set();
+  /** ViewSwitcher 用的有序快照缓存(useSyncExternalStore 稳定引用)*/
+  private cachedNavSideTabs: ViewDefinition[] | null = null;
 
   /**
    * 注册 view + 自动拆分子字段到对应 Registry
@@ -29,6 +32,7 @@ class ViewTypeRegistry {
     this.views.set(def.id, def);
     // 自动拆分到对应 Registry
     this.distributeToRegistries(def);
+    this.notify();
   }
 
   /** 取消注册 view + 清理所有 Registry 子项 */
@@ -36,6 +40,7 @@ class ViewTypeRegistry {
     if (!this.views.has(id)) return;
     this.unregisterRegistries(id);
     this.views.delete(id);
+    this.notify();
   }
 
   get(id: string): ViewDefinition | undefined {
@@ -44,6 +49,32 @@ class ViewTypeRegistry {
 
   getAll(): ViewDefinition[] {
     return Array.from(this.views.values());
+  }
+
+  /**
+   * ViewSwitcher 用 — 取所有声明 navSideTab 的 view,按 order 升序。
+   *
+   * 返回缓存数组(useSyncExternalStore 稳定引用),notify() 失效。
+   */
+  getAllForNavSide(): ViewDefinition[] {
+    if (this.cachedNavSideTabs === null) {
+      this.cachedNavSideTabs = Array.from(this.views.values())
+        .filter((v) => v.navSideTab !== undefined)
+        .sort((a, b) => (a.navSideTab!.order - b.navSideTab!.order));
+    }
+    return this.cachedNavSideTabs;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notify(): void {
+    this.cachedNavSideTabs = null;
+    this.listeners.forEach((l) => l());
   }
 
   get count(): number {
