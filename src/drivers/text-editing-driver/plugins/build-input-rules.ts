@@ -13,7 +13,7 @@
  */
 
 import { inputRules, InputRule, wrappingInputRule } from 'prosemirror-inputrules';
-import type { Plugin } from 'prosemirror-state';
+import { TextSelection, type Plugin } from 'prosemirror-state';
 import { Fragment } from 'prosemirror-model';
 import type { Schema, MarkType, NodeType } from 'prosemirror-model';
 
@@ -104,23 +104,27 @@ function wrapInListRule(
     const blockStart = $start.before($start.depth);
     const node = state.doc.nodeAt(blockStart);
     if (!node || node.type.name !== 'text-block') return null;
-    // 不在已有 list 里(避免在 list-item 内再触发)
+    // 不在已有 list 里(避免在 listItem 内再触发)
     if ($start.depth > 1) {
       const parent = $start.node($start.depth - 1);
-      if (parent.type.name === 'list-item') return null;
+      if (parent.type.name === 'listItem' || parent.type.name === 'taskItem') return null;
     }
     const tr = state.tr.delete(start, end); // 删触发字符
-    // 当前 text-block 不变,把它包进 list-item 再包进 list
+    // 当前 text-block 不变,把它包进 listItem 再包进 list
     const updated = tr.doc.nodeAt(blockStart);
     if (!updated) return null;
     const item = listItemType.create(null, [updated.copy(updated.content)]);
     const list = listType.create(getAttrs?.(match) ?? null, Fragment.from(item));
     tr.replaceWith(blockStart, blockStart + updated.nodeSize, list);
+    // 把光标放进 list > listItem > textBlock 内
+    // 路径偏移:list 起点 (blockStart) + 1(进入 list)+ 1(进入 listItem)+ 1(进入 textBlock)= +3
+    const cursorPos = blockStart + 3;
+    tr.setSelection(TextSelection.near(tr.doc.resolve(cursorPos)));
     return tr;
   });
 }
 
-/** wrapInTaskRule — `[]` / `[ ]` / `[x]` → task-list > task-item > text-block */
+/** wrapInTaskRule — `[]` / `[ ]` / `[x]` → taskList > taskItem > textBlock */
 function wrapInTaskRule(
   regex: RegExp,
   taskListType: NodeType,
@@ -132,17 +136,23 @@ function wrapInTaskRule(
     const blockStart = $start.before($start.depth);
     const node = state.doc.nodeAt(blockStart);
     if (!node || node.type.name !== 'text-block') return null;
+    if ($start.depth > 1) {
+      const parent = $start.node($start.depth - 1);
+      if (parent.type.name === 'listItem' || parent.type.name === 'taskItem') return null;
+    }
     const tr = state.tr.delete(start, end);
     const updated = tr.doc.nodeAt(blockStart);
     if (!updated) return null;
     const item = taskItemType.create({ checked }, [updated.copy(updated.content)]);
     const list = taskListType.create(null, Fragment.from(item));
     tr.replaceWith(blockStart, blockStart + updated.nodeSize, list);
+    const cursorPos = blockStart + 3;
+    tr.setSelection(TextSelection.near(tr.doc.resolve(cursorPos)));
     return tr;
   });
 }
 
-/** `---` 行首 → 替换为 horizontalRule + 新空 textBlock */
+/** `---` 行首 → 替换为 horizontalRule + 新空 textBlock,光标进 textBlock */
 function horizontalRuleRule(hrType: NodeType): InputRule {
   return new InputRule(/^---$/, (state, _match, start) => {
     const $start = state.doc.resolve(start);
@@ -150,17 +160,23 @@ function horizontalRuleRule(hrType: NodeType): InputRule {
     const blockEnd = $start.after($start.depth);
     const textBlock = state.schema.nodes['text-block'];
     if (!textBlock) return null;
-    return state.tr.replaceWith(blockStart, blockEnd, [hrType.create(), textBlock.create()]);
+    const tr = state.tr.replaceWith(blockStart, blockEnd, [hrType.create(), textBlock.create()]);
+    // 光标移到新 textBlock 内(跳过 hr 占的位置)
+    const newPos = blockStart + hrType.create().nodeSize + 1;
+    tr.setSelection(TextSelection.near(tr.doc.resolve(newPos)));
+    return tr;
   });
 }
 
-/** ``` 触发(无空格 / 无 lang)→ 换成 codeBlock */
+/** ``` 触发(无空格 / 无 lang)→ 换成 codeBlock,光标进 codeBlock */
 function codeBlockRule(codeBlockType: NodeType): InputRule {
   return new InputRule(/^```$/, (state, _match, start) => {
     const $start = state.doc.resolve(start);
     const blockStart = $start.before($start.depth);
     const blockEnd = $start.after($start.depth);
-    return state.tr.replaceWith(blockStart, blockEnd, codeBlockType.create());
+    const tr = state.tr.replaceWith(blockStart, blockEnd, codeBlockType.create());
+    tr.setSelection(TextSelection.near(tr.doc.resolve(blockStart + 1)));
+    return tr;
   });
 }
 
