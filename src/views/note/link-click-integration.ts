@@ -17,6 +17,7 @@
 import { setLinkClickHandler } from '@drivers/text-editing-driver';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { setActiveNote, getNoteWsState } from './data-model';
+import { setWebUrl } from '@views/web/data-model';
 import {
   setCurrentNoteId,
   navigateToNote,
@@ -51,6 +52,29 @@ export function registerLinkClickIntegration(): void {
       const ws = workspaceManager.get(wsId);
       if (!ws) return null;
       return getNoteWsState(ws).activeNoteId;
+    },
+    /**
+     * L5-B4:点 http(s):// 链接 → 当前 ws 右栏开 web view + 设 url
+     *
+     * 路径:
+     * 1. setWebUrl(wsId, url):写 pluginStates['web'].currentUrl(WebView 订阅会刷新)
+     * 2. workspaceManager.update slotBinding.right = 'web-view':切右栏到 web view
+     *
+     * 跨 ws 跳转留 ActiveResourceManager 抽象后(同 onOpenNote 降级)
+     */
+    onOpenWebUrl(url) {
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) return;
+      const ws = workspaceManager.get(wsId);
+      if (!ws) return;
+      // 1. 写 web view 的 currentUrl(per-ws 持久化)
+      setWebUrl(wsId, url);
+      // 2. 把右栏切到 web view(若已是 web-view 则 update 不会触发额外重渲)
+      if (ws.slotBinding.right !== 'web-view') {
+        workspaceManager.update(wsId, {
+          slotBinding: { ...ws.slotBinding, right: 'web-view' },
+        });
+      }
     },
   });
 
