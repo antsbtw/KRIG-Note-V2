@@ -130,15 +130,16 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         currentBlockType = blockNode.type.name;
 
         // 定位 handle:position: fixed 用 viewport 坐标
-        // V1 模式:handle 在 view.dom 内的 padding-left 区(左 padding 48-72px 都是 gutter)
-        //   - 鼠标移到 handle 上仍在 view.dom 内 → mousemove 持续触发,handle 不消失
-        //   - handle 离 block 文字近(距离 ≈ block 行 padding-left - handle 宽度 - 2)
         const blockRect = blockDom.getBoundingClientRect();
-        const top = blockRect.top + 2;
-        // 编辑区文字左边缘 = editorRect.left + padding-left(我们设 48)
-        // handle 紧靠文字左侧,离文字约 4px
-        const PM_PADDING_LEFT = 48;
+        const HANDLE_HEIGHT = 22;
         const HANDLE_WIDTH = 22;
+        const PM_PADDING_LEFT = 48;
+        // 垂直居中对齐 block 行(对齐 V1)
+        // 多行 block(段落跨多行)时,跟第一行 line-height 中心对齐 — 用 line-height 估算
+        // 简化:跟整个 block rect 中心对齐(视觉够好;V1 也是这样)
+        const lineHeightApprox = Math.min(blockRect.height, 36); // 估算单行高度
+        const top = blockRect.top + (lineHeightApprox - HANDLE_HEIGHT) / 2;
+        // handle 紧靠文字左侧 4px
         const left = editorRect.left + PM_PADDING_LEFT - HANDLE_WIDTH - 4;
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
@@ -146,23 +147,45 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         dom.style.pointerEvents = 'auto';
       };
 
-      const onMouseLeave = (e: MouseEvent) => {
-        if (isDragging) return;
-        // 鼠标移到 handle 自己上 → 不 hide(handle 跟 view.dom 视觉相邻但 DOM 上是兄弟)
-        const related = e.relatedTarget as Node | null;
-        if (related && (related === dom || dom.contains(related))) return;
-        dom.style.opacity = '0';
-        dom.style.pointerEvents = 'none';
-        currentPos = -1;
+      // 用 setTimeout 延迟 hide,handle 自己 mouseenter 时取消 — 解决 handle 跟 view.dom
+      // DOM 上是兄弟、鼠标过渡到 handle 时 mouseleave 先触发的问题
+      let hideTimer: ReturnType<typeof setTimeout> | null = null;
+      const scheduleHide = () => {
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          dom.style.opacity = '0';
+          dom.style.pointerEvents = 'none';
+          currentPos = -1;
+          hideTimer = null;
+        }, 80);
       };
+      const cancelHide = () => {
+        if (hideTimer) {
+          clearTimeout(hideTimer);
+          hideTimer = null;
+        }
+      };
+
+      const onMouseLeave = () => {
+        if (isDragging) return;
+        scheduleHide();
+      };
+
+      // handle 自己:mouseenter 取消 hide / mouseleave 重新调度 hide
+      dom.addEventListener('mouseenter', cancelHide);
+      dom.addEventListener('mouseleave', scheduleHide);
 
       editorView.dom.addEventListener('mousemove', onMouseMove);
       editorView.dom.addEventListener('mouseleave', onMouseLeave);
+      // mousemove 时也取消 hide(用户回到编辑区)
+      editorView.dom.addEventListener('mouseenter', cancelHide);
 
       return {
         destroy() {
           editorView.dom.removeEventListener('mousemove', onMouseMove);
           editorView.dom.removeEventListener('mouseleave', onMouseLeave);
+          editorView.dom.removeEventListener('mouseenter', cancelHide);
+          if (hideTimer) clearTimeout(hideTimer);
           dom.remove();
         },
       };
