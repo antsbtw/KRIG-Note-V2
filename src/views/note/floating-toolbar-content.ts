@@ -61,11 +61,13 @@ export function registerFloatingToolbar(): void {
       order: 45,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
     },
-    // L5-B3.3:文字色 / 高亮(循环 6 色;完整 ColorPicker UI 留 L5-B3.4)
+    // L5-B3.4:文字色 / 高亮 — popup-trigger 弹 ColorPickerPanel(完整 10 色 swatch)
+    // 注:cycle 命令(L5-B3.3 缩水版)保留作快捷键备份(本阶段不绑;后续 Cmd+Shift+H 之类可绑)
     {
       id: 'note-view.ft.text-color',
       label: 'A',
-      command: 'note-view.cycle-text-color',
+      kind: 'popup-trigger',
+      popupId: 'note-view.popup.color',
       view: VIEW,
       order: 50,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
@@ -73,7 +75,8 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.highlight',
       label: 'A̲',
-      command: 'note-view.cycle-highlight',
+      kind: 'popup-trigger',
+      popupId: 'note-view.popup.color',
       view: VIEW,
       order: 60,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),

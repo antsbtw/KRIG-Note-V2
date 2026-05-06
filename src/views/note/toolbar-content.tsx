@@ -116,13 +116,13 @@ export function registerToolbar(): void {
       order: 33.5,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
     },
-    // L5-B3.3:文字色 / 高亮循环按钮
+    // L5-B3.4:文字色 / 高亮 — popup-trigger 弹 ColorPickerPanel
     {
       id: 'note-view.text-color',
       view: VIEW,
-      kind: 'button',
+      kind: 'popup-trigger',
       label: 'A',
-      command: 'note-view.cycle-text-color',
+      popupId: 'note-view.popup.color',
       group: 'left',
       order: 34,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
@@ -130,9 +130,9 @@ export function registerToolbar(): void {
     {
       id: 'note-view.highlight',
       view: VIEW,
-      kind: 'button',
+      kind: 'popup-trigger',
       label: 'A̲',
-      command: 'note-view.cycle-highlight',
+      popupId: 'note-view.popup.color',
       group: 'left',
       order: 35,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),

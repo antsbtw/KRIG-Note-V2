@@ -230,3 +230,47 @@
 .krig-link-panel__remove-btn:hover {
   text-decoration: underline;
 }
+
+/* ── L5-B3.4:ColorPickerPanel(对齐 V1 swatch 网格)── */
+
+.krig-color-picker {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 10px 8px;
+  min-width: 220px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.krig-color-picker__section-label {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.krig-color-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.krig-color-picker__swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.krig-color-picker__swatch:hover {
+  transform: scale(1.1);
+  border-color: #8ab4f8;
+}
+
+.krig-color-picker__swatch.active {
+  border-color: #8ab4f8;
+  box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.4);
+}
