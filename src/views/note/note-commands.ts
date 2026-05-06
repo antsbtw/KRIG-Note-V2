@@ -8,6 +8,8 @@
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { textEditingDriverApi, type MarkName } from '@drivers/text-editing-driver';
+import { handleMenuController } from '@slot/triggers/handle-menu-controller';
+import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import {
   createNote,
   deleteNote,
@@ -157,4 +159,85 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.redo', withInstance((instanceId) => {
     textEditingDriverApi.redo(instanceId);
   }));
+
+  // ── L5-B3.1:slash menu 命令(选中后清 / 与 query,然后 setHeading)──
+
+  function registerSlashSet(commandId: string, level: number | null): void {
+    commandRegistry.register(commandId, withInstance((instanceId) => {
+      textEditingDriverApi.clearSlashTrigger(instanceId);
+      textEditingDriverApi.setHeading(instanceId, level);
+    }));
+  }
+  registerSlashSet('note-view.slash-set-paragraph', null);
+  registerSlashSet('note-view.slash-set-h1', 1);
+  registerSlashSet('note-view.slash-set-h2', 2);
+  registerSlashSet('note-view.slash-set-h3', 3);
+
+  // ── L5-B3.1:handle menu 命令(从 handleMenuController.state.pos 取 pos)──
+
+  function getHandlePos(): { instanceId: string; pos: number } | null {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return null;
+    const state = handleMenuController.getState();
+    if (typeof state.pos !== 'number') return null;
+    return { instanceId: wsId, pos: state.pos };
+  }
+
+  function registerHandleSetHeading(commandId: string, level: number | null): void {
+    commandRegistry.register(commandId, () => {
+      const ctx = getHandlePos();
+      if (!ctx) return;
+      textEditingDriverApi.setHeadingAt(ctx.instanceId, ctx.pos, level);
+      handleMenuController.hide();
+    });
+  }
+  registerHandleSetHeading('note-view.handle-set-paragraph', null);
+  registerHandleSetHeading('note-view.handle-set-h1', 1);
+  registerHandleSetHeading('note-view.handle-set-h2', 2);
+  registerHandleSetHeading('note-view.handle-set-h3', 3);
+
+  commandRegistry.register('note-view.handle-copy-block', () => {
+    const ctx = getHandlePos();
+    if (!ctx) return;
+    textEditingDriverApi.copyBlockAt(ctx.instanceId, ctx.pos);
+    handleMenuController.hide();
+  });
+
+  commandRegistry.register('note-view.handle-delete-block', () => {
+    const ctx = getHandlePos();
+    if (!ctx) return;
+    textEditingDriverApi.deleteBlockAt(ctx.instanceId, ctx.pos);
+    handleMenuController.hide();
+  });
+
+  // ── L5-B3.1:context menu 命令(从 contextMenuController state 取鼠标坐标)──
+
+  function getCmBlockPos(): { instanceId: string; pos: number } | null {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return null;
+    const state = contextMenuController.getState();
+    const result = textEditingDriverApi.resolveBlockAt(wsId, { x: state.x, y: state.y });
+    if (!result) return null;
+    return { instanceId: wsId, pos: result.pos };
+  }
+
+  function registerCmSetHeading(commandId: string, level: number | null): void {
+    commandRegistry.register(commandId, () => {
+      const ctx = getCmBlockPos();
+      if (!ctx) return;
+      textEditingDriverApi.setHeadingAt(ctx.instanceId, ctx.pos, level);
+      contextMenuController.hide();
+    });
+  }
+  registerCmSetHeading('note-view.cm-set-paragraph', null);
+  registerCmSetHeading('note-view.cm-set-h1', 1);
+  registerCmSetHeading('note-view.cm-set-h2', 2);
+  registerCmSetHeading('note-view.cm-set-h3', 3);
+
+  commandRegistry.register('note-view.cm-delete-block', () => {
+    const ctx = getCmBlockPos();
+    if (!ctx) return;
+    textEditingDriverApi.deleteBlockAt(ctx.instanceId, ctx.pos);
+    contextMenuController.hide();
+  });
 }

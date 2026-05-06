@@ -65,14 +65,17 @@ export function NoteView({ workspaceId }: NoteViewProps) {
 
   return (
     <div className="krig-note-view">
-      <textEditingDriver.Host
-        config={{
-          instanceId: workspaceId,
-          undoScope: 'note-view.pm',
-        }}
-        doc={activeNote.doc}
-        onChange={handleDocChange}
-      />
+      <div className="krig-note-view-content">
+        <textEditingDriver.Host
+          config={{
+            instanceId: workspaceId,
+            undoScope: 'note-view.pm',
+            viewId: 'note-view',
+          }}
+          doc={activeNote.doc}
+          onChange={handleDocChange}
+        />
+      </div>
     </div>
   );
 }

@@ -51,6 +51,8 @@ export interface TextEditingConfig {
   instanceId: string;
   /** view 提供的 undo scope 名(铁律 6b)— 如 'note-view.pm' */
   undoScope: string;
+  /** view ID(L5-B3.1 — driver 通过此把 controller 事件 attribute 给具体 view)*/
+  viewId: string;
 }
 
 // ── Driver 主接口(DESIGN.md v0.2.1 § 1.1)──

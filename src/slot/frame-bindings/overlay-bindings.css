@@ -51,7 +51,10 @@
 
 .krig-floating-toolbar-item {
   width: auto;
-  padding: 4px 8px;
+  padding: 4px 10px;
+  min-width: 28px;
+  text-align: center;
+  font-weight: 500;
 }
 
 .krig-context-menu-item:hover,
@@ -59,6 +62,45 @@
 .krig-handle-menu-item:hover,
 .krig-floating-toolbar-item:hover {
   background-color: #3a3a3a;
+}
+
+/* L5-B3.1 — floating-toolbar active 高亮 */
+.krig-floating-toolbar-item.active {
+  background-color: rgba(74, 144, 226, 0.25);
+  color: #fff;
+}
+
+/* L5-B3.1 — slash menu 选中态 */
+.krig-slash-menu-item.selected {
+  background-color: rgba(74, 144, 226, 0.25);
+  color: #fff;
+}
+
+/* L5-B3.1 — block handle(driver 内部浮动 DOM,跟随 mouse 定位)*/
+.krig-block-handle {
+  /* position / opacity / left / top 由 driver inline-style 动态设置 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: #888;
+  cursor: grab;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  user-select: none;
+  border-radius: 3px;
+  background-color: transparent;
+}
+
+.krig-block-handle:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #e8eaed;
+}
+
+.krig-block-handle:active {
+  cursor: grabbing;
 }
 
 /* 通用 Overlay(帮助 / dialog)— 全屏 backdrop */

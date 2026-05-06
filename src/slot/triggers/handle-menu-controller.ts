@@ -6,14 +6,16 @@ interface HandleMenuState {
   y: number;
   viewId: string;
   blockType?: string;
+  /** L5-B3.1:命令需要知道作用于哪个 block(PM doc 中的 pos) */
+  pos?: number;
 }
 
 class HandleMenuController {
   private state: HandleMenuState = { visible: false, x: 0, y: 0, viewId: '' };
   private listeners: Set<() => void> = new Set();
 
-  show(x: number, y: number, viewId: string, blockType?: string): void {
-    this.state = { visible: true, x, y, viewId, blockType };
+  show(x: number, y: number, viewId: string, blockType?: string, pos?: number): void {
+    this.state = { visible: true, x, y, viewId, blockType, pos };
     this.notify();
   }
 

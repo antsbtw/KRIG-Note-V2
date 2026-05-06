@@ -12,6 +12,10 @@ import { registerNoteCommands } from './note-commands';
 import { registerNavSide } from './nav-side-content';
 import { registerContextMenuItems } from './context-menu-registrations';
 import { registerToolbar } from './toolbar-content';
+import { registerFloatingToolbar } from './floating-toolbar-content';
+import { registerSlashMenu } from './slash-menu-content';
+import { registerHandleMenu } from './handle-menu-content';
+import { registerContextMenu } from './context-menu-content';
 
 registerView({
   id: 'note-view',
@@ -35,3 +39,7 @@ registerNoteCommands();
 registerNavSide();
 registerContextMenuItems();
 registerToolbar();
+registerFloatingToolbar();
+registerSlashMenu();
+registerHandleMenu();
+registerContextMenu();
