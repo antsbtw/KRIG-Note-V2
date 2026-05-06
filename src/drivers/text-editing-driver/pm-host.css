@@ -270,6 +270,38 @@
   font-size: inherit;
 }
 
+/* toggleList — 对齐 V1(箭头 + 内容,closed 时仅显第一行) */
+.krig-pm-host .ProseMirror div.krig-toggle-list {
+  margin: 0.2em 0;
+}
+
+.krig-pm-host .ProseMirror .krig-toggle-list__arrow {
+  display: inline-block;
+  width: 20px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  color: #e8eaed;
+  vertical-align: top;
+  margin-top: 4px;
+  text-align: center;
+}
+
+.krig-pm-host .ProseMirror .krig-toggle-list__arrow:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.krig-pm-host .ProseMirror .krig-toggle-list__content {
+  display: inline-block;
+  width: calc(100% - 24px);
+  vertical-align: top;
+}
+
+/* closed 状态:子内容仅显示第一个(标题行)*/
+.krig-pm-host .ProseMirror div.krig-toggle-list.closed .krig-toggle-list__content > *:not(:first-child) {
+  display: none;
+}
+
 /* callout — 对齐 V1(emoji + 内容包裹背景) */
 .krig-pm-host .ProseMirror div.krig-callout {
   display: flex;

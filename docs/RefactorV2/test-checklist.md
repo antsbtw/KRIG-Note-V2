@@ -723,6 +723,64 @@
 
 ---
 
+### 6.6 toggleList block(折叠列表) — 对齐 V1
+
+> V1 spec:content: 'block+',attrs.open 默认 true
+> 行为:open=true 显 ▼ + 完整内容;open=false 显 ▶ + 仅首行(folded)
+> V2 落地:1:1(spec + node-view + arrow + CSS `:not(:first-child) { display: none; }`)
+
+#### 创建
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.1 | slash menu 输 `/toggle` Enter | 当前段变 toggleList(▼ 箭头 + 当前段为首行,光标在内) | ⏳ |
+| 6.6.2 | 普通段点 ⋮⋮ → "Turn into Toggle List" | 段变 toggleList | ⏳ |
+| 6.6.3 | 普通段右键 → "Turn into Toggle List" | 段变 toggleList | ⏳ |
+
+#### 折叠行为(关键)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.4 | toggleList 内首行末尾按 Enter | 新建第二行(在 toggleList 内,展开态时可见)| ⏳ |
+| 6.6.5 | 点 ▼ 箭头 | 切到 ▶,**首行之后所有子节点 display: none(视觉隐藏)** | ⏳ |
+| 6.6.6 | 已折叠状态再点 ▶ | 切回 ▼,所有内容重现 | ⏳ |
+| 6.6.7 | 折叠时 PM doc 内容不变 | open attr 切换,子节点仍在 doc 中 | ⏳ |
+| 6.6.8 | 折叠态点击隐藏区域 | 不可见所以点不到(预期)| ⏳ |
+
+#### 视觉对齐 V1
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.9 | 箭头宽 20px | 是,vertical-align: top + margin-top: 4px 跟首行对齐 | ⏳ |
+| 6.6.10 | hover 箭头 | 浅色 hover 背景 rgba(255,255,255,0.1) | ⏳ |
+| 6.6.11 | content 占用宽度 | calc(100% - 24px) 给箭头让位 | ⏳ |
+| 6.6.12 | toggleList margin | 0.2em 上下 | ⏳ |
+
+#### 内嵌内容(content: block+)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.13 | toggleList 内 H2 作首行 | 折叠时仅显 H2 首行 | ⏳ |
+| 6.6.14 | toggleList 内嵌 bulletList | 展开正常,折叠时整个 list 隐藏 | ⏳ |
+| 6.6.15 | toggleList 内嵌 callout | 嵌套合理 | ⏳ |
+| 6.6.16 | toggleList 内 mark / heading 都可用 | 是 | ⏳ |
+
+#### handle / 拖拽
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.17 | 悬停 toggleList | ⋮⋮ handle 显示 | ⏳ |
+| 6.6.18 | 折叠态拖整个 toggleList | 整块移动,open attr 保留 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.19 | toggleList + undo/redo(含折叠切换)| history 正常 | ⏳ |
+| 6.6.20 | 粘贴 V1 toggle-list HTML | parseDOM div.krig-toggle-list 不接受 V1 div.toggle-list 命名 — 兼容性留 L5-B3.4 | ⏳ ⚠️ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
@@ -733,3 +791,4 @@
 | 2026-05-06 | § 6.2 textStyle(10 条)+ § 6.3 highlight(9 条)审计;Plan C-1 缩水(完整 ColorPicker UI 留 L5-B3.4) |
 | 2026-05-06 | § 6.4 hardBreak(10 条)审计 |
 | 2026-05-06 | § 6.5 callout(19 条)审计 |
+| 2026-05-06 | § 6.6 toggleList(20 条)审计 |

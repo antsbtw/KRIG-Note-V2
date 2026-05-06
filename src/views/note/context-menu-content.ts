@@ -28,6 +28,8 @@ export function registerContextMenu(): void {
       view: VIEW, enabledWhen: 'is-editable', order: 18 },
     { id: 'note-view.cm.turn-callout', label: 'Turn into Callout', command: 'note-view.cm-turn-callout',
       view: VIEW, enabledWhen: 'is-editable', order: 19 },
+    { id: 'note-view.cm.turn-toggle', label: 'Turn into Toggle List', command: 'note-view.cm-turn-toggle',
+      view: VIEW, enabledWhen: 'is-editable', order: 20 },
     { id: 'note-view.cm.delete', label: 'Delete block', command: 'note-view.cm-delete-block',
       view: VIEW, enabledWhen: 'is-editable', order: 30 },
   ]);

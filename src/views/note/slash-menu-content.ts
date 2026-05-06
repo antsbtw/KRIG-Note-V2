@@ -32,5 +32,7 @@ export function registerSlashMenu(): void {
       keywords: ['divider', 'hr', 'horizontal', 'rule', 'separator'], view: VIEW, order: 100 },
     { id: 'note-view.slash.callout', label: 'Callout', command: 'note-view.slash-turn-callout',
       keywords: ['callout', 'tip', 'warning', 'note', 'admonition'], view: VIEW, order: 110 },
+    { id: 'note-view.slash.toggle', label: 'Toggle List', command: 'note-view.slash-turn-toggle',
+      keywords: ['toggle', 'fold', 'collapse', 'expand', 'detail'], view: VIEW, order: 120 },
   ]);
 }

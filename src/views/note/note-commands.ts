@@ -203,7 +203,7 @@ export function registerNoteCommands(): void {
     | 'paragraph' | 'h1' | 'h2' | 'h3'
     | 'bullet-list' | 'ordered-list' | 'task-list'
     | 'blockquote' | 'code-block' | 'horizontal-rule'
-    | 'callout';
+    | 'callout' | 'toggle-list';
 
   // ── slash:作用于光标当前 block(setHeading 走 selection)──
   function registerSlashTurn(commandId: string, target: TurnTarget): void {
@@ -231,6 +231,7 @@ export function registerNoteCommands(): void {
   registerSlashTurn('note-view.slash-turn-code', 'code-block');
   registerSlashTurn('note-view.slash-turn-divider', 'horizontal-rule');
   registerSlashTurn('note-view.slash-turn-callout', 'callout');
+  registerSlashTurn('note-view.slash-turn-toggle', 'toggle-list');
 
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
@@ -259,6 +260,7 @@ export function registerNoteCommands(): void {
   registerHandleTurn('note-view.handle-turn-quote', 'blockquote');
   registerHandleTurn('note-view.handle-turn-code', 'code-block');
   registerHandleTurn('note-view.handle-turn-callout', 'callout');
+  registerHandleTurn('note-view.handle-turn-toggle', 'toggle-list');
 
   commandRegistry.register('note-view.handle-copy-block', () => {
     const ctx = getHandlePos();
@@ -302,6 +304,7 @@ export function registerNoteCommands(): void {
   registerCmTurn('note-view.cm-turn-quote', 'blockquote');
   registerCmTurn('note-view.cm-turn-code', 'code-block');
   registerCmTurn('note-view.cm-turn-callout', 'callout');
+  registerCmTurn('note-view.cm-turn-toggle', 'toggle-list');
 
   commandRegistry.register('note-view.cm-delete-block', () => {
     const ctx = getCmBlockPos();

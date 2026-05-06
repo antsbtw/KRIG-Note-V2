@@ -28,6 +28,8 @@ export function registerHandleMenu(): void {
       view: VIEW, order: 18 },
     { id: 'note-view.h.turn-callout', label: 'Turn into Callout', command: 'note-view.handle-turn-callout',
       view: VIEW, order: 19 },
+    { id: 'note-view.h.turn-toggle', label: 'Turn into Toggle List', command: 'note-view.handle-turn-toggle',
+      view: VIEW, order: 20 },
     // 复制 + 删除
     { id: 'note-view.h.copy', label: 'Duplicate', command: 'note-view.handle-copy-block',
       view: VIEW, order: 30 },

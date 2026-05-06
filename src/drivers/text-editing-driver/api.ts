@@ -290,7 +290,8 @@ export const textEditingDriverApi = {
       | 'blockquote'
       | 'code-block'
       | 'horizontal-rule'
-      | 'callout',
+      | 'callout'
+      | 'toggle-list',
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
@@ -378,6 +379,20 @@ export const textEditingDriverApi = {
       view.focus();
       return;
     }
+
+    if (target === 'toggle-list') {
+      const tl = schema.nodes.toggleList;
+      if (!tl) return;
+      // toggleList content: 'block+',首行作为折叠标题(默认 open=true)
+      const tr = view.state.tr.replaceWith(
+        pos,
+        pos + node.nodeSize,
+        tl.create(null, [node.copy(node.content)]),
+      );
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
   },
 
   /** wrapInList — 当前 selection block 包成 list(slash 或 keymap 用)*/
@@ -409,7 +424,8 @@ export const textEditingDriverApi = {
       | 'blockquote'
       | 'code-block'
       | 'horizontal-rule'
-      | 'callout',
+      | 'callout'
+      | 'toggle-list',
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
