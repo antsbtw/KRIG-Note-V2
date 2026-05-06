@@ -51,6 +51,16 @@ export function registerFloatingToolbar(): void {
       order: 40,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
     },
+    // L5-B3.4:link mark — popup-trigger 弹 LinkPanel
+    {
+      id: 'note-view.ft.link',
+      label: '🔗',
+      kind: 'popup-trigger',
+      popupId: 'note-view.popup.link',
+      view: VIEW,
+      order: 45,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
+    },
     // L5-B3.3:文字色 / 高亮(循环 6 色;完整 ColorPicker UI 留 L5-B3.4)
     {
       id: 'note-view.ft.text-color',

@@ -105,6 +105,17 @@ export function registerToolbar(): void {
       order: 33,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
     },
+    // L5-B3.4:link mark — popup-trigger 弹 LinkPanel
+    {
+      id: 'note-view.link',
+      view: VIEW,
+      kind: 'popup-trigger',
+      label: '🔗',
+      popupId: 'note-view.popup.link',
+      group: 'left',
+      order: 33.5,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
+    },
     // L5-B3.3:文字色 / 高亮循环按钮
     {
       id: 'note-view.text-color',

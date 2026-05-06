@@ -7,7 +7,7 @@ export interface ToolbarItemContext {
   selection: SelectionPayload | null;
 }
 
-export type ToolbarKind = 'button' | 'dropdown' | 'separator';
+export type ToolbarKind = 'button' | 'dropdown' | 'separator' | 'popup-trigger';
 
 export interface DropdownOption {
   id: string;
@@ -40,4 +40,6 @@ export interface ToolbarItem {
   options?: DropdownOption[];
   /** dropdown 当前显示 label(动态 — 例如 "Paragraph" / "H2")*/
   currentLabel?: (ctx: ToolbarItemContext) => string;
+  /** kind='popup-trigger' 时必填,指向 popupRegistry 已注册的 popup ID */
+  popupId?: string;
 }

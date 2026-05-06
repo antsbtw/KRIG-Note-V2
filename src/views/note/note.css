@@ -91,3 +91,142 @@
   color: #777;
   margin-top: 2px;
 }
+
+/* ── L5-B3.4:LinkPanel 弹层样式(对齐 V1)── */
+
+.krig-link-panel {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 280px;
+  max-width: 350px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  color: #e8eaed;
+}
+
+.krig-link-panel__tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #444;
+  padding-bottom: 6px;
+}
+
+.krig-link-panel__tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.krig-link-panel__tab.active {
+  background: #3a3a3a;
+  color: #e8eaed;
+}
+
+.krig-link-panel__input {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1e1e1e;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.krig-link-panel__hint {
+  font-size: 11px;
+  color: #888;
+  padding: 6px 4px 0;
+}
+
+.krig-link-panel__list {
+  margin-top: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.krig-link-panel__item {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.krig-link-panel__item.active {
+  background: #3a3a3a;
+}
+
+.krig-link-panel__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.krig-link-panel__heading-tag {
+  margin-right: 6px;
+  font-size: 11px;
+  color: #888;
+  min-width: 20px;
+}
+
+.krig-link-panel__drill-btn {
+  font-size: 10px;
+  color: #888;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.krig-link-panel__drill-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eaed;
+}
+
+.krig-link-panel__back-row {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  font-size: 13px;
+  color: #8ab4f8;
+  cursor: pointer;
+  border-bottom: 1px solid #444;
+  margin-bottom: 4px;
+}
+
+.krig-link-panel__empty {
+  font-size: 12px;
+  color: #888;
+  padding: 8px;
+  text-align: center;
+}
+
+.krig-link-panel__remove-row {
+  margin-top: 6px;
+  border-top: 1px solid #444;
+  padding-top: 6px;
+}
+
+.krig-link-panel__remove-btn {
+  background: transparent;
+  border: none;
+  color: #f28b82;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.krig-link-panel__remove-btn:hover {
+  text-decoration: underline;
+}
