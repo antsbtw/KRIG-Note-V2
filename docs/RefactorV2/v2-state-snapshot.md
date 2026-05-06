@@ -22,6 +22,7 @@
 | 10 | L5-B3.2 | 6 个 block 类型(bullet/ordered/task/blockquote/codeBlock/hr)+ 修 8 bug | d8773ba | 2026-05-06 |
 | 11 | L5-B3.3 | marks 扩展(underline/textStyle/highlight)+ 3 简单 block(hardBreak/callout/toggleList) | 70c039a | 2026-05-06 |
 | 12 | L5-B3.4 | link mark 全栈 + popup 基础设施 + ColorPicker 完整 UI | 159548f | 2026-05-06 |
+| 13 | L5-B4 | web view 基础形态(webviewTag + WebView + per-ws state + 简化右键菜单 + link 跨 view 路由) | (待 merge) | 2026-05-06 |
 
 ---
 
@@ -83,7 +84,7 @@
 
 | epic | V1 代码量 | 优先级 | 依赖 | 备注 |
 |---|---|---|---|---|
-| **web view**(WebView + WebToolbar + 上下文菜单)| ~5800 行(web/) | **🔵 当前候选(L5-B4)** | electron `<webview>` tag | 解锁 link 跨 view 路由验证;后续 Note↔Web 交互测试床 |
+| **web view 基础形态**(WebView + WebToolbar + 简化右键菜单)| ~700 行迁(L5-B4)| ✅ 已迁(本批) | electron `<webview>` tag(已启) | link 跨 view 路由验证落地;书签/历史/翻译/AI 留 L5-B4.x |
 | **web-bridge**(注入 + extraction + 协议)| ~7600 行(web-bridge/) | 中 | web view | 比 web view 更复杂,Note 内容提取 / AI 工作流依赖 |
 | ebook view | 未统计 | 中 | PDF / EPUB 渲染 | KRIG 业务 |
 | graph view(canvas) | 未统计 | 低-中 | three.js 等 | KRIG 知识图谱 view |
@@ -122,6 +123,13 @@ audio / video / file-block / math-block / table 等。
 **当前用户选择(2026-05-06):A — L5-B4 web view 迁移**
 理由:为 Note 与 web 内容交互的未来 epic 提供测试床;link 跨 view 路由可以借此真实验证
 
+**已落地(2026-05-06):L5-B4 web view 基础形态**
+- platform 启 webviewTag + 安全拦截
+- WebView + WebToolbar + per-ws state(google.com 默认主页)
+- link 跨 view 路由生效(NoteView 内点 https:// → 当前 ws 右栏 web view)
+- 简化版右键菜单 4 项
+- 7 commits ~700 行代码
+
 ---
 
 ## 5. 修订记录
@@ -129,3 +137,4 @@ audio / video / file-block / math-block / table 等。
 | 日期 | 改动 |
 |---|---|
 | 2026-05-06 | 初稿;L5-B3.4 merge 后状态盘点;V1 → V2 epic 全景清单;下一步候选 A 拍板 |
+| 2026-05-06 | L5-B4 web view 基础形态完成;link 跨 view 路由验证落地 |
