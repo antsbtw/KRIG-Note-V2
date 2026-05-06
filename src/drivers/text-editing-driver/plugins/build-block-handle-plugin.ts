@@ -36,12 +36,15 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dom.textContent = '⋮⋮';
       dom.title = '拖动以重排,点击打开菜单';
       // position: absolute 锚 .krig-pm-host(view.dom 父容器) — V1 同款模式
-      // 跟 view.dom 在同一 DOM 树 / 同一 stacking 层级,不会被 stacking context 困住
+      // **关键**:用 opacity 控显隐而非 visibility — opacity:0 元素仍接事件,
+      // visibility:hidden 元素不接事件 → 不接事件就无法触发 handle mouseenter →
+      // 鼠标过渡到 handle 时无法 cancel hide,handle 永久消失。
       dom.style.cssText = `
         position: absolute;
-        visibility: hidden;
+        opacity: 0;
         pointer-events: auto;
         z-index: 10;
+        transition: opacity 0.15s;
       `;
       const hostContainer = editorView.dom.parentElement;
       if (hostContainer) {
@@ -97,7 +100,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           e.clientY < editorRect.top ||
           e.clientY > editorRect.bottom
         ) {
-          dom.style.visibility = 'hidden';
+          dom.style.opacity = '0';
           currentPos = -1;
           return;
         }
@@ -108,7 +111,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         const result = view.posAtCoords({ left: probeX, top: e.clientY });
         if (!result) {
-          dom.style.visibility = 'hidden';
+          dom.style.opacity = '0';
           return;
         }
 
@@ -129,7 +132,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         }
 
         if (blockStart < 0 || !blockNode || !blockDom) {
-          dom.style.visibility = 'hidden';
+          dom.style.opacity = '0';
           return;
         }
 
@@ -156,7 +159,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
-        dom.style.visibility = 'visible';
+        dom.style.opacity = '1';
 
         // 诊断(前 5 次)
         if (handlePositionLogCount < 5) {
@@ -178,45 +181,50 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         }
       };
 
+      // V1 模式:isHovered 标志 + 100ms 延迟 hide
+      // - handle.mouseenter 时 isHovered=true,清 timer
+      // - handle.mouseleave 时 isHovered=false,300ms 后 hide
+      // - view.dom.mouseleave(hideHandle)只在 !isHovered 时才 schedule 100ms hide
+      // 关键:opacity:0 期间 handle 仍接事件(visibility:hidden 不接),
+      //   鼠标过渡到 handle 时 mouseenter 触发 → 取消 hide
+      let isHovered = false;
       let hideTimer: ReturnType<typeof setTimeout> | null = null;
-      const scheduleHide = (source: string) => {
-        console.log('[block-handle] scheduleHide from', source);
-        if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          console.log('[block-handle] hide fired (no cancel within 200ms)');
-          dom.style.visibility = 'hidden';
-          currentPos = -1;
-          hideTimer = null;
-        }, 200); // 增加到 200ms,鼠标过渡更充裕
-      };
-      const cancelHide = (source: string) => {
+
+      dom.addEventListener('mouseenter', () => {
+        isHovered = true;
         if (hideTimer) {
-          console.log('[block-handle] cancelHide from', source);
           clearTimeout(hideTimer);
           hideTimer = null;
         }
-      };
+        dom.style.opacity = '1';
+      });
+      dom.addEventListener('mouseleave', () => {
+        isHovered = false;
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          if (!isHovered) {
+            dom.style.opacity = '0';
+            currentPos = -1;
+          }
+          hideTimer = null;
+        }, 300);
+      });
 
-      const onMouseLeave = (e: MouseEvent) => {
+      const onMouseLeave = () => {
         if (isDragging) return;
-        // 诊断:看 relatedTarget 是什么(鼠标接下来去哪)
-        const related = e.relatedTarget as Element | null;
-        console.log('[block-handle] view.dom mouseleave', {
-          relatedTag: related?.tagName,
-          relatedClass: related?.className,
-          isHandle: related === dom || (related && dom.contains(related)),
-          mouseAt: { x: e.clientX, y: e.clientY },
-        });
-        scheduleHide('view.dom mouseleave');
+        if (isHovered) return; // 鼠标在 handle 上,不 hide
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          if (!isHovered) {
+            dom.style.opacity = '0';
+            currentPos = -1;
+          }
+          hideTimer = null;
+        }, 100);
       };
-
-      // handle 自己:mouseenter 取消 hide / mouseleave 重新调度 hide
-      dom.addEventListener('mouseenter', () => cancelHide('handle mouseenter'));
-      dom.addEventListener('mouseleave', () => scheduleHide('handle mouseleave'));
 
       editorView.dom.addEventListener('mousemove', onMouseMove);
       editorView.dom.addEventListener('mouseleave', onMouseLeave);
-      editorView.dom.addEventListener('mouseenter', () => cancelHide('view.dom mouseenter'));
 
       return {
         destroy() {
