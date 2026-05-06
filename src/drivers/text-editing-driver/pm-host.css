@@ -330,6 +330,24 @@
   min-width: 0;
 }
 
+/* link mark(L5-B3.4) — `<a href>` 的基本视觉,鼠标 hover 区分 */
+.krig-pm-host .ProseMirror a[href] {
+  color: #8ab4f8;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror a[href]:hover {
+  color: #aac4f8;
+}
+
+/* link 跳转后目标 block 短暂高亮(scrollToBlockAnchor 加的临时 class)*/
+.krig-pm-host .ProseMirror .krig-block-link-highlight {
+  background: rgba(138, 180, 248, 0.18);
+  transition: background 0.5s;
+  border-radius: 4px;
+}
+
 /* horizontal rule — 对齐 V1 #444 / 1.5em margin */
 .krig-pm-host .ProseMirror hr.krig-horizontal-rule {
   border: none;
