@@ -35,17 +35,25 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dom.draggable = true;
       dom.textContent = '⋮⋮';
       dom.title = '拖动以重排,点击打开菜单';
-      // position: fixed + 高 z-index;visibility 控制显隐(不用 opacity transition,避免
-      // 半透明阶段 pointer-events 行为不一致)
+      // position: absolute 锚 .krig-pm-host(view.dom 父容器) — V1 同款模式
+      // 跟 view.dom 在同一 DOM 树 / 同一 stacking 层级,不会被 stacking context 困住
       dom.style.cssText = `
-        position: fixed;
+        position: absolute;
         visibility: hidden;
         pointer-events: auto;
-        z-index: 10000;
+        z-index: 10;
       `;
-      // 挂到 view.dom 父级链上的最早 stacking-friendly 父元素(html.body)
-      // body 是最干净的容器,不会有 transform/opacity 创建的 stacking context 困住
-      document.body.appendChild(dom);
+      const hostContainer = editorView.dom.parentElement;
+      if (hostContainer) {
+        // 确保父容器是 stacking 锚点
+        const cs = window.getComputedStyle(hostContainer);
+        if (cs.position === 'static') {
+          hostContainer.style.position = 'relative';
+        }
+        hostContainer.appendChild(dom);
+      } else {
+        document.body.appendChild(dom);
+      }
 
       // ── handle 事件 ──
       dom.addEventListener('click', (e) => {
@@ -128,22 +136,23 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         currentPos = blockStart;
         currentBlockType = blockNode.type.name;
 
-        // 定位 handle:position: fixed 用 viewport 坐标
-        // 用 block DOM 计算 line-height(从 computed style 真实读)
+        // 定位 handle:position: absolute 锚 .krig-pm-host(view.dom 父)
+        // top/left 是相对 hostContainer 的偏移,所以减去 hostContainer 起点
         const blockComputed = window.getComputedStyle(blockDom);
         const blockRect = blockDom.getBoundingClientRect();
         const lineHeight = parseFloat(blockComputed.lineHeight) || parseFloat(blockComputed.fontSize) * 1.7;
         const paddingTop = parseFloat(blockComputed.paddingTop);
+        const hostRect = hostContainer?.getBoundingClientRect() ?? { top: 0, left: 0 };
 
         const HANDLE_HEIGHT = 22;
         const HANDLE_WIDTH = 22;
         const PM_PADDING_LEFT = 48;
-        // 垂直对齐:让 handle 中心 = 第一行文字基线中心
-        // 第一行起点 = blockRect.top + paddingTop
-        // 第一行文字垂直中心 ≈ paddingTop + lineHeight/2
-        // handle top = block top + 第一行文字中心 - HANDLE_HEIGHT/2
-        const top = blockRect.top + paddingTop + lineHeight / 2 - HANDLE_HEIGHT / 2;
-        const left = editorRect.left + PM_PADDING_LEFT - HANDLE_WIDTH - 4;
+        // 垂直对齐:第一行文字基线中心
+        const topAbs = blockRect.top + paddingTop + lineHeight / 2 - HANDLE_HEIGHT / 2;
+        const leftAbs = editorRect.left + PM_PADDING_LEFT - HANDLE_WIDTH - 4;
+        // 相对 hostContainer 的偏移
+        const top = topAbs - hostRect.top;
+        const left = leftAbs - hostRect.left;
 
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
