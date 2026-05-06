@@ -14,8 +14,8 @@ import type { Plugin, Command } from 'prosemirror-state';
 import type { Schema } from 'prosemirror-model';
 
 export function buildListKeymap(schema: Schema): Plugin {
-  const listItem = schema.nodes['list-item'];
-  const taskItem = schema.nodes['task-item'];
+  const listItem = schema.nodes.listItem;
+  const taskItem = schema.nodes.taskItem;
 
   const km: Record<string, Command> = {};
 

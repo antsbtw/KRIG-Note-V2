@@ -38,7 +38,7 @@ export const taskItemNodeView: NodeViewConstructor = (node, view, getPos) => {
     dom,
     contentDOM: content,
     update(updatedNode) {
-      if (updatedNode.type.name !== 'task-item') return false;
+      if (updatedNode.type.name !== 'taskItem') return false;
       checkbox.checked = !!updatedNode.attrs.checked;
       dom.setAttribute('data-checked', String(updatedNode.attrs.checked));
       dom.className = `krig-task-item${updatedNode.attrs.checked ? ' checked' : ''}`;

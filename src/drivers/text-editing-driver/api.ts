@@ -222,10 +222,16 @@ export const textEditingDriverApi = {
       return;
     }
 
-    // lists — wrap text-block into list > list-item > text-block
+    // lists — wrap text-block into list > listItem(taskItem) > text-block
+    // 注意:节点 id 是驼峰('bulletList' / 'orderedList' / 'taskList' / 'listItem' / 'taskItem')
     if (target === 'bullet-list' || target === 'ordered-list' || target === 'task-list') {
-      const listType = schema.nodes[target];
-      const itemType = target === 'task-list' ? schema.nodes['task-item'] : schema.nodes['list-item'];
+      const listNodeName =
+        target === 'bullet-list' ? 'bulletList'
+        : target === 'ordered-list' ? 'orderedList'
+        : 'taskList';
+      const itemNodeName = target === 'task-list' ? 'taskItem' : 'listItem';
+      const listType = schema.nodes[listNodeName];
+      const itemType = schema.nodes[itemNodeName];
       if (!listType || !itemType || node.type.name !== 'text-block') return;
       const item = itemType.create(
         target === 'task-list' ? { checked: false } : null,
@@ -238,7 +244,6 @@ export const textEditingDriverApi = {
       return;
     }
 
-    // blockquote — wrap current block in blockquote
     if (target === 'blockquote') {
       const bq = schema.nodes.blockquote;
       if (!bq) return;
@@ -252,11 +257,9 @@ export const textEditingDriverApi = {
       return;
     }
 
-    // code-block — replace with empty code block(content 是 text-block 的文字内容)
     if (target === 'code-block') {
-      const cb = schema.nodes['code-block'];
+      const cb = schema.nodes.codeBlock;
       if (!cb) return;
-      // 提取 text-block 内的纯文本
       const text = node.textContent;
       const newNode = text ? cb.create(null, schema.text(text)) : cb.create();
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, newNode);
@@ -265,9 +268,8 @@ export const textEditingDriverApi = {
       return;
     }
 
-    // horizontal-rule — replace with hr + new text-block(光标进新 block)
     if (target === 'horizontal-rule') {
-      const hr = schema.nodes['horizontal-rule'];
+      const hr = schema.nodes.horizontalRule;
       const tb = schema.nodes['text-block'];
       if (!hr || !tb) return;
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, [hr.create(), tb.create()]);
@@ -282,7 +284,11 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     const schema = inst.view.state.schema;
-    const listType = schema.nodes[kind];
+    const nodeName =
+      kind === 'bullet-list' ? 'bulletList'
+      : kind === 'ordered-list' ? 'orderedList'
+      : 'taskList';
+    const listType = schema.nodes[nodeName];
     if (!listType) return;
     wrapInList(listType)(inst.view.state, inst.view.dispatch);
     inst.view.focus();

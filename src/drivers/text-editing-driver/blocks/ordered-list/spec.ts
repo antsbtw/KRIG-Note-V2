@@ -1,15 +1,12 @@
 /**
  * orderedList — 有序列表
- *
- * content: 'list-item+'
- * attrs: { start: 1 } — 起始序号
  */
 
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 
 const orderedListNodeSpec: NodeSpec = {
-  content: 'list-item+',
+  content: 'listItem+',
   group: 'block',
   attrs: { start: { default: 1 } },
   parseDOM: [
@@ -30,7 +27,7 @@ const orderedListNodeSpec: NodeSpec = {
 };
 
 export const orderedListSpec: BlockSpec = {
-  id: 'ordered-list',
+  id: 'orderedList',
   displayName: 'Numbered List',
   spec: orderedListNodeSpec,
   containerRule: 'block+',

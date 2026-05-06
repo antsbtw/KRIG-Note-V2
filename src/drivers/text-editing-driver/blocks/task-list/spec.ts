@@ -1,8 +1,7 @@
 /**
- * taskList — 任务列表
+ * taskList / taskItem — 任务列表
  *
- * content: 'task-item+'
- * 视觉:每项前 checkbox(NodeView 渲染,可点击)
+ * id 驼峰(避免 PM content 表达式短横线非法)
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -10,7 +9,7 @@ import type { BlockSpec } from '../../types';
 import { taskItemNodeView } from './node-view';
 
 const taskListNodeSpec: NodeSpec = {
-  content: 'task-item+',
+  content: 'taskItem+',
   group: 'block',
   parseDOM: [{ tag: 'ul[data-type="task-list"]' }],
   toDOM() {
@@ -19,7 +18,7 @@ const taskListNodeSpec: NodeSpec = {
 };
 
 const taskItemNodeSpec: NodeSpec = {
-  content: 'text-block block*',
+  content: 'block+',
   defining: true,
   attrs: { checked: { default: false } },
   parseDOM: [
@@ -46,7 +45,7 @@ const taskItemNodeSpec: NodeSpec = {
 };
 
 export const taskListSpec: BlockSpec = {
-  id: 'task-list',
+  id: 'taskList',
   displayName: 'Task List',
   spec: taskListNodeSpec,
   containerRule: 'block+',
@@ -54,7 +53,7 @@ export const taskListSpec: BlockSpec = {
 };
 
 export const taskItemSpec: BlockSpec = {
-  id: 'task-item',
+  id: 'taskItem',
   displayName: 'Task Item',
   spec: taskItemNodeSpec,
   containerRule: 'block+',

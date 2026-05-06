@@ -44,14 +44,15 @@ export function buildInputRules(schema: Schema): Plugin {
   }
 
   // ── Lists / Quote / HR / CodeBlock (block-level wrapping)──
-  const bulletList = schema.nodes['bullet-list'];
-  const orderedList = schema.nodes['ordered-list'];
-  const taskList = schema.nodes['task-list'];
-  const taskItem = schema.nodes['task-item'];
-  const blockquote = schema.nodes['blockquote'];
-  const horizontalRule = schema.nodes['horizontal-rule'];
-  const codeBlock = schema.nodes['code-block'];
-  const listItem = schema.nodes['list-item'];
+  // 节点 id 用驼峰(PM content expression 不支持短横线;textBlock 例外因为 L5-A 既存)
+  const bulletList = schema.nodes.bulletList;
+  const orderedList = schema.nodes.orderedList;
+  const taskList = schema.nodes.taskList;
+  const taskItem = schema.nodes.taskItem;
+  const blockquote = schema.nodes.blockquote;
+  const horizontalRule = schema.nodes.horizontalRule;
+  const codeBlock = schema.nodes.codeBlock;
+  const listItem = schema.nodes.listItem;
 
   if (bulletList && listItem) {
     rules.push(wrapInListRule(/^\s*([-*])\s$/, bulletList, listItem));

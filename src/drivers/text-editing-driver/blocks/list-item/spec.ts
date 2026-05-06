@@ -1,15 +1,15 @@
 /**
  * listItem — bullet-list / ordered-list 内部的列表项
  *
- * content: 'text-block block*' — 一个 listItem 必须以 text-block 起头(可见文字行),
- * 后续可装嵌套 list / blockquote 等 block。
+ * id 用驼峰(`listItem`)— PM content 表达式不支持节点 name 含短横线。
+ * content: 'block+' — 用 group 'block' 引用,而非直接 ref text-block(避免短横线问题)。
  */
 
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 
 const listItemNodeSpec: NodeSpec = {
-  content: 'text-block block*',
+  content: 'block+',
   defining: true,
   parseDOM: [{ tag: 'li' }],
   toDOM() {
@@ -18,7 +18,7 @@ const listItemNodeSpec: NodeSpec = {
 };
 
 export const listItemSpec: BlockSpec = {
-  id: 'list-item',
+  id: 'listItem',
   displayName: 'List Item',
   spec: listItemNodeSpec,
   containerRule: 'block+',

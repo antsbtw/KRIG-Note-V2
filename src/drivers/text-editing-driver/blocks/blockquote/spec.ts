@@ -1,7 +1,5 @@
 /**
- * blockquote — 引用块
- *
- * content: 'block+' — 可装段落 / 嵌套引用 / list 等
+ * blockquote — 引用块(单字 id,无短横线)
  */
 
 import type { NodeSpec } from 'prosemirror-model';

@@ -1,7 +1,5 @@
 /**
- * horizontalRule — 水平分隔线
- *
- * 自闭合 leaf 节点,无 content
+ * horizontalRule — 水平分隔线(id 驼峰)
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -16,7 +14,7 @@ const horizontalRuleNodeSpec: NodeSpec = {
 };
 
 export const horizontalRuleSpec: BlockSpec = {
-  id: 'horizontal-rule',
+  id: 'horizontalRule',
   displayName: 'Divider',
   spec: horizontalRuleNodeSpec,
   containerRule: 'leaf',
