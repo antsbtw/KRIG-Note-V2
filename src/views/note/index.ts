@@ -26,14 +26,8 @@ registerView({
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },
-  contextMenu: [
-    {
-      id: 'note-view.create-note',
-      label: '新建笔记',
-      command: 'note-view.create-note',
-      enabledWhen: 'always',
-    },
-  ],
+  // L5-B1:NavSide 右键由 folderTreeContextMenuRegistry 管;view 全局 contextMenu 暂无
+  // L5-B2 真有 PM 编辑区菜单需求时(粘贴/格式化等)在此重新注册
 });
 
 registerNoteCommands();

@@ -218,6 +218,7 @@ export function FolderTree({
   if (visibleRows.length === 0) {
     return (
       <div
+        data-krig-context-menu-handled
         style={styles.container}
         onContextMenu={(e) => handleContextMenu(null, e)}
         onDragOver={(e) => handleDragOverFolder(null, e)}
@@ -233,6 +234,7 @@ export function FolderTree({
   return (
     <div
       ref={containerRef}
+      data-krig-context-menu-handled
       style={styles.container}
       tabIndex={0}
       onKeyDown={handleKeyDown}

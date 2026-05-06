@@ -20,3 +20,24 @@
   padding: 16px;
   text-align: center;
 }
+
+/* NavSideBinding 撑满 NavSide 剩余高度,让内容区(如 FolderTree)真的能 100% 高度 */
+.krig-nav-side-binding {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.krig-nav-side-header {
+  flex: none;
+}
+
+.krig-nav-side-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
