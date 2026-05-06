@@ -21,6 +21,11 @@ const handleKey = new PluginKey('text-editing-driver:block-handle');
 const HANDLE_CLASS = 'krig-block-handle';
 export const HANDLE_DRAG_MIME = 'application/krig-block-source';
 
+// 模块级 drag 状态:dragstart 时存,drop/dragend 时读 + 清
+// 浏览器 drag-and-drop "protected mode" 会清空自定义 MIME 在 drop 阶段的 dataTransfer
+// 所以不能依赖 dataTransfer.getData(MIME) 跨 dragstart→drop 传递业务数据 — 用模块级变量
+let activeDrag: { instanceId: string; fromPos: number } | null = null;
+
 export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plugin {
   return new Plugin({
     // 截获 drop:plugin.props.handleDrop 在 PM 默认 drop 处理之前调用,
@@ -29,23 +34,18 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
     // 是冒泡阶段,PM 默认 handler 已先把 dataTransfer.text/plain 当文字插入了)
     props: {
       handleDrop(view, event) {
-        const dt = event.dataTransfer;
-        if (!dt) return false;
-        const raw = dt.getData(HANDLE_DRAG_MIME);
-        if (!raw) return false; // 不是我们的 block 拖拽,让 PM 默认处理
+        // 用模块级 activeDrag(dataTransfer.getData 在 drop 阶段被浏览器清空)
+        if (!activeDrag) return false; // 不是我们的 block 拖拽
+        if (activeDrag.instanceId !== instanceId) return false;
+        const fromPos = activeDrag.fromPos;
         try {
-          const parsed = JSON.parse(raw) as { instanceId: string; fromPos: number };
-          if (parsed.instanceId !== instanceId) return false;
-          // 算 drop 位置(用 PM posAtCoords + dropPoint 标准做法)
           const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
-          if (!result) return true; // 阻止 PM 默认但不做事(防误粘贴)
+          if (!result) return true;
           const $pos = view.state.doc.resolve(result.pos);
           if ($pos.depth === 0) return true;
-          // 落到顶层 block 边界
           const blockStart = $pos.before(1);
           const block = view.state.doc.nodeAt(blockStart);
           if (!block) return true;
-          // 鼠标 y 决定插在 block 之前还是之后
           let dropPos = blockStart;
           try {
             const nodeDom = view.nodeDOM(blockStart);
@@ -56,25 +56,20 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
                 dropPos = blockStart + block.nodeSize;
               }
             }
-          } catch {
-            /* fallback to blockStart */
-          }
-          // 移动 block(删源 + 插目标)
-          const fromPos = parsed.fromPos;
+          } catch { /* fallback */ }
           if (fromPos === dropPos) return true;
           const sourceNode = view.state.doc.nodeAt(fromPos);
           if (!sourceNode) return true;
           const tr = view.state.tr;
           let actualDrop = dropPos;
-          if (dropPos > fromPos) {
-            actualDrop = dropPos - sourceNode.nodeSize;
-          }
+          if (dropPos > fromPos) actualDrop = dropPos - sourceNode.nodeSize;
           tr.delete(fromPos, fromPos + sourceNode.nodeSize);
           tr.insert(actualDrop, sourceNode.copy(sourceNode.content));
           view.dispatch(tr);
           dnd.emit('dnd.completed', { source: null });
-          return true; // 截获 drop
-        } catch {
+          return true;
+        } catch (err) {
+          console.warn('[block-handle] drop exception', err);
           return false;
         }
       },
@@ -129,9 +124,11 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const node = editorView.state.doc.nodeAt(currentPos);
         if (!node) return;
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData(HANDLE_DRAG_MIME, JSON.stringify({ instanceId, fromPos: currentPos }));
-        // 注意:不再设 text/plain — 之前导致 PM 默认 drop 把 plain text 当文字插入
-        // (现 plugin.handleDrop 截获,但 text/plain 仍是潜在干扰;保险移除)
+        // 模块级 activeDrag 存业务数据(dataTransfer 在 drop 阶段被清,不可靠)
+        activeDrag = { instanceId, fromPos: currentPos };
+        // dataTransfer 仍设一个 MIME 让浏览器认为是有效拖拽(否则 effectAllowed 不生效);
+        // 内容空字符串不重要,业务读 activeDrag
+        e.dataTransfer.setData(HANDLE_DRAG_MIME, '1');
         dnd.emit('dnd.started', {
           source: { type: 'block', data: { fromPos: currentPos, instanceId } },
         });
@@ -140,6 +137,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
       dom.addEventListener('dragend', () => {
         isDragging = false;
+        activeDrag = null;
         dnd.emit('dnd.completed', { source: null });
       });
 
