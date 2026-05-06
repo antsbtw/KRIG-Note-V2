@@ -34,30 +34,43 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
     // 是冒泡阶段,PM 默认 handler 已先把 dataTransfer.text/plain 当文字插入了)
     props: {
       handleDrop(view, event) {
-        // 用模块级 activeDrag(dataTransfer.getData 在 drop 阶段被浏览器清空)
-        if (!activeDrag) return false; // 不是我们的 block 拖拽
+        if (!activeDrag) return false;
         if (activeDrag.instanceId !== instanceId) return false;
         const fromPos = activeDrag.fromPos;
         try {
           const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
           if (!result) return true;
+
+          // 计算 dropPos:
+          // - depth ≥ 1:鼠标在某 block 内,用 block 上半/下半判定插入边界
+          // - depth = 0:鼠标在 block 间隙(doc 顶层),用 result.pos 自身
+          let dropPos: number;
           const $pos = view.state.doc.resolve(result.pos);
-          if ($pos.depth === 0) return true;
-          const blockStart = $pos.before(1);
-          const block = view.state.doc.nodeAt(blockStart);
-          if (!block) return true;
-          let dropPos = blockStart;
-          try {
-            const nodeDom = view.nodeDOM(blockStart);
-            const el = nodeDom instanceof HTMLElement ? nodeDom : null;
-            if (el) {
-              const r = el.getBoundingClientRect();
-              if (event.clientY > r.top + r.height / 2) {
-                dropPos = blockStart + block.nodeSize;
-              }
+          if ($pos.depth >= 1) {
+            const blockStart = $pos.before(1);
+            const block = view.state.doc.nodeAt(blockStart);
+            if (block) {
+              dropPos = blockStart;
+              try {
+                const nodeDom = view.nodeDOM(blockStart);
+                const el = nodeDom instanceof HTMLElement ? nodeDom : null;
+                if (el) {
+                  const r = el.getBoundingClientRect();
+                  if (event.clientY > r.top + r.height / 2) {
+                    dropPos = blockStart + block.nodeSize;
+                  }
+                }
+              } catch { /* fallback */ }
+            } else {
+              dropPos = result.pos;
             }
-          } catch { /* fallback */ }
+          } else {
+            // doc 顶层间隙
+            dropPos = result.pos;
+          }
+
           if (fromPos === dropPos) return true;
+
           const sourceNode = view.state.doc.nodeAt(fromPos);
           if (!sourceNode) return true;
           const tr = view.state.tr;
@@ -124,10 +137,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const node = editorView.state.doc.nodeAt(currentPos);
         if (!node) return;
         e.dataTransfer.effectAllowed = 'move';
-        // 模块级 activeDrag 存业务数据(dataTransfer 在 drop 阶段被清,不可靠)
         activeDrag = { instanceId, fromPos: currentPos };
-        // dataTransfer 仍设一个 MIME 让浏览器认为是有效拖拽(否则 effectAllowed 不生效);
-        // 内容空字符串不重要,业务读 activeDrag
         e.dataTransfer.setData(HANDLE_DRAG_MIME, '1');
         dnd.emit('dnd.started', {
           source: { type: 'block', data: { fromPos: currentPos, instanceId } },
