@@ -25,9 +25,13 @@ import { taskListSpec, taskItemSpec } from './blocks/task-list/spec';
 import { blockquoteSpec } from './blocks/blockquote/spec';
 import { codeBlockSpec } from './blocks/code-block/spec';
 import { horizontalRuleSpec } from './blocks/horizontal-rule/spec';
+import { hardBreakSpec } from './blocks/hard-break/spec';
+import { calloutSpec } from './blocks/callout/spec';
+import { toggleListSpec } from './blocks/toggle-list/spec';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
 // L5-B3.2:全部启用的 block 列表(textBlock + 6 新类 + 2 项 list-item/task-item)
+// L5-B3.3:+ hardBreak(inline)
 const ENABLED_BLOCKS: BlockSpec[] = [
   textBlockSpec,
   listItemSpec,
@@ -38,6 +42,9 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   blockquoteSpec,
   codeBlockSpec,
   horizontalRuleSpec,
+  hardBreakSpec,
+  calloutSpec,
+  toggleListSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

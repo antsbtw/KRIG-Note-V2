@@ -142,6 +142,7 @@ export function registerNoteCommands(): void {
 
   registerToggleMark('note-view.toggle-bold', 'bold');
   registerToggleMark('note-view.toggle-italic', 'italic');
+  registerToggleMark('note-view.toggle-underline', 'underline');
   registerToggleMark('note-view.toggle-strike', 'strike');
   registerToggleMark('note-view.toggle-code', 'code');
 
@@ -151,6 +152,42 @@ export function registerNoteCommands(): void {
     const lvl = typeof level === 'number' ? level : null;
     textEditingDriverApi.setHeading(wsId, lvl);
   });
+
+  // ── L5-B3.3:文字颜色 / 背景高亮(Plan C-1 缩水版 — 6 色循环;完整 ColorPicker UI 留 L5-B3.4)──
+
+  // 对齐 V1 ColorPicker 文字色板(6 个常用色,covers 90% 用例;V1 完整 10 色留 L5-B3.4)
+  const TEXT_COLOR_CYCLE = [
+    '',           // default(移除色)
+    '#9aa0a6',    // gray
+    '#f5c518',    // yellow
+    '#8ab4f8',    // blue
+    '#ea4335',    // red
+    '#34a853',    // green
+  ];
+
+  // 对齐 V1 highlight 色板(rgba 半透明,看着柔和)
+  const HIGHLIGHT_COLOR_CYCLE = [
+    '',                                  // default
+    'rgba(154, 160, 166, 0.2)',          // gray
+    'rgba(245, 197, 24, 0.2)',           // yellow
+    'rgba(138, 180, 248, 0.2)',          // blue
+    'rgba(234, 67, 53, 0.2)',            // red
+    'rgba(52, 168, 83, 0.2)',            // green
+  ];
+
+  commandRegistry.register('note-view.cycle-text-color', withInstance((instanceId) => {
+    const cur = textEditingDriverApi.getActiveTextColor(instanceId);
+    const idx = TEXT_COLOR_CYCLE.indexOf(cur ?? '');
+    const next = TEXT_COLOR_CYCLE[(idx + 1) % TEXT_COLOR_CYCLE.length];
+    textEditingDriverApi.setTextColor(instanceId, next);
+  }));
+
+  commandRegistry.register('note-view.cycle-highlight', withInstance((instanceId) => {
+    const cur = textEditingDriverApi.getActiveHighlight(instanceId);
+    const idx = HIGHLIGHT_COLOR_CYCLE.indexOf(cur ?? '');
+    const next = HIGHLIGHT_COLOR_CYCLE[(idx + 1) % HIGHLIGHT_COLOR_CYCLE.length];
+    textEditingDriverApi.setHighlight(instanceId, next);
+  }));
 
   commandRegistry.register('note-view.undo', withInstance((instanceId) => {
     textEditingDriverApi.undo(instanceId);
@@ -165,7 +202,8 @@ export function registerNoteCommands(): void {
   type TurnTarget =
     | 'paragraph' | 'h1' | 'h2' | 'h3'
     | 'bullet-list' | 'ordered-list' | 'task-list'
-    | 'blockquote' | 'code-block' | 'horizontal-rule';
+    | 'blockquote' | 'code-block' | 'horizontal-rule'
+    | 'callout' | 'toggle-list';
 
   // ── slash:作用于光标当前 block(setHeading 走 selection)──
   function registerSlashTurn(commandId: string, target: TurnTarget): void {
@@ -192,6 +230,8 @@ export function registerNoteCommands(): void {
   registerSlashTurn('note-view.slash-turn-quote', 'blockquote');
   registerSlashTurn('note-view.slash-turn-code', 'code-block');
   registerSlashTurn('note-view.slash-turn-divider', 'horizontal-rule');
+  registerSlashTurn('note-view.slash-turn-callout', 'callout');
+  registerSlashTurn('note-view.slash-turn-toggle', 'toggle-list');
 
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
@@ -219,6 +259,8 @@ export function registerNoteCommands(): void {
   registerHandleTurn('note-view.handle-turn-task', 'task-list');
   registerHandleTurn('note-view.handle-turn-quote', 'blockquote');
   registerHandleTurn('note-view.handle-turn-code', 'code-block');
+  registerHandleTurn('note-view.handle-turn-callout', 'callout');
+  registerHandleTurn('note-view.handle-turn-toggle', 'toggle-list');
 
   commandRegistry.register('note-view.handle-copy-block', () => {
     const ctx = getHandlePos();
@@ -261,6 +303,8 @@ export function registerNoteCommands(): void {
   registerCmTurn('note-view.cm-turn-task', 'task-list');
   registerCmTurn('note-view.cm-turn-quote', 'blockquote');
   registerCmTurn('note-view.cm-turn-code', 'code-block');
+  registerCmTurn('note-view.cm-turn-callout', 'callout');
+  registerCmTurn('note-view.cm-turn-toggle', 'toggle-list');
 
   commandRegistry.register('note-view.cm-delete-block', () => {
     const ctx = getCmBlockPos();

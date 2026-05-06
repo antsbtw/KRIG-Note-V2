@@ -506,9 +506,289 @@
 
 ---
 
+## 6. Marks 扩展 + 简单 block(L5-B3.3,逐项对照 V1)
+
+> 阶段:替代被阻塞的 codeBlock 全量迁移
+> 分支:`feature/L5B3.3-marks-and-simple-blocks`
+> 跟踪文档:[v1-block-migration-checklist.md](./v1-block-migration-checklist.md)
+
+### 6.1 underline mark — 对齐 V1
+
+> V1 spec:`<u>` 标签 + `text-decoration=underline` style 反解。无 markdown input rule。
+> V2 落地:marks/underline.ts + Mod-u keymap + 顶部 toolbar U 按钮 + floating-toolbar U 按钮
+
+#### Schema / 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.1 | 选中文字按 Cmd+U | 文字加下划线(`<u>` 渲染) | ⏳ |
+| 6.1.2 | 已下划线文字按 Cmd+U | 取消下划线(toggle) | ⏳ |
+| 6.1.3 | 粘贴含 `<u>foo</u>` 的 HTML | 解析为 underline mark | ⏳ |
+| 6.1.4 | 粘贴含 `style="text-decoration: underline"` 的 span | 解析为 underline mark | ⏳ |
+
+#### 顶部 toolbar
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.5 | 顶部 toolbar 显示 "U" 按钮(B/I 之间)| 是,顺序 B → I → **U** → S → `<>` | ⏳ |
+| 6.1.6 | 选中下划线文字时,toolbar U 按钮高亮 | 蓝色 active 态 | ⏳ |
+| 6.1.7 | 点 toolbar U | 选区 toggle underline | ⏳ |
+
+#### floating-toolbar(选中文字浮起)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.8 | 选中文字 → 浮条出现 | 含 5 按钮:B / I / **U** / S / `<>` | ⏳ |
+| 6.1.9 | 选区在 underline 内时,浮条 U 按钮高亮 | 是 | ⏳ |
+| 6.1.10 | 点浮条 U | toggle underline | ⏳ |
+
+#### 跟其他 mark 共存
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.11 | 同一段文字加 bold + underline | 渲染 `<u><strong>...</strong></u>` 或 `<strong><u>...</u></strong>`(顺序由 schema 装载次序定) | ⏳ |
+| 6.1.12 | 选中 bold + underline 文字按 Cmd+B | 仅取消 bold,保留 underline | ⏳ |
+| 6.1.13 | underline 内 italic | italic 生效,下划线保留 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.14 | underline + undo/redo | history 正常 | ⏳ |
+| 6.1.15 | underline 在 bullet list / heading 内 | 都生效 | ⏳ |
+
+---
+
+### 6.2 textStyle mark(文字色) — 对齐 V1 (Plan C-1 缩水)
+
+> V1 spec:textStyle attrs.color(默认 null)+ `<span style="color:..."`>渲染
+> V2 落地:mark spec 完全对齐 V1,**UI 缩水**为 6 色循环按钮(完整 10 色 ColorPicker 留 L5-B3.4)
+> 6 色循环顺序:default(无)→ gray → yellow → blue → red → green → 回 default
+
+#### Schema / 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.2.1 | 选中文字点 toolbar A 按钮 1 次 | 文字变 gray #9aa0a6 | ⏳ |
+| 6.2.2 | 同选区点 A 第 2 次 | 变 yellow #f5c518 | ⏳ |
+| 6.2.3 | 连点 6 次 | gray → yellow → blue → red → green → default(无色) | ⏳ |
+| 6.2.4 | 选区已有 textStyle 时 A 按钮高亮 | 是 | ⏳ |
+| 6.2.5 | 粘贴 `<span style="color: #ea4335">red</span>` | 解析为 textStyle mark + color attr 保留 | ⏳ |
+
+#### floating-toolbar
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.2.6 | 选中文字浮条出现 | 含 A 按钮(顺序:B/I/U/S/`<>`/A/A̲) | ⏳ |
+| 6.2.7 | 浮条 A 按钮点击 | 走 cycle 同上 | ⏳ |
+
+#### 共存
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.2.8 | bold + textStyle 共存 | 可同时存在(两个 mark 独立) | ⏳ |
+| 6.2.9 | 取消 textStyle(循环回 default)| 移除 mark,文字回默认色 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.2.10 | textStyle + undo/redo | history 正常 | ⏳ |
+
+---
+
+### 6.3 highlight mark(背景高亮) — 对齐 V1 (Plan C-1 缩水)
+
+> V1 spec:highlight attrs.color(默认 'yellow')+ `<mark data-color="...">` 渲染
+> V2 落地:mark spec 完全对齐 V1,UI 缩水同 6.2(6 色 rgba 半透明循环)
+> 6 色循环:default → gray → yellow → blue → red → green → 回 default
+
+#### Schema / 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.3.1 | 选中文字点 toolbar A̲ 按钮 1 次 | 背景 gray rgba(154,160,166,0.2) | ⏳ |
+| 6.3.2 | 连点 6 次 | gray → yellow → blue → red → green → default | ⏳ |
+| 6.3.3 | 已有 highlight 时按钮高亮 | 是 | ⏳ |
+| 6.3.4 | 粘贴 `<mark data-color="yellow">` | 解析为 highlight mark + color attr | ⏳ |
+
+#### floating-toolbar
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.3.5 | 浮条 A̲ 按钮 | 顺序最末(B/I/U/S/`<>`/A/A̲) | ⏳ |
+| 6.3.6 | 点浮条 A̲ | cycle highlight | ⏳ |
+
+#### 跟 textStyle 同时
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.3.7 | 同段文字加 textStyle red + highlight yellow | 红字黄底,两个 mark 独立 | ⏳ |
+| 6.3.8 | cycle textStyle 不影响 highlight | 是 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.3.9 | highlight + undo/redo | history 正常 | ⏳ |
+
+---
+
+### 6.4 hardBreak block(行内软换行) — 对齐 V1
+
+> V1 spec:inline node + selectable: false + `<br>` 渲染
+> V2 落地:1:1(inline group / parseDOM br / toDOM br)+ Shift-Enter keymap
+
+#### 触发
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.4.1 | 段落中按 Shift-Enter | 当前位置插入 `<br>` 软换行,光标在换行后 | ⏳ |
+| 6.4.2 | 段落末尾按 Shift-Enter | 同上(不出段) | ⏳ |
+| 6.4.3 | 普通 Enter(不 Shift) | 仍正常分段(走 PM 默认),不触发 hardBreak | ⏳ |
+| 6.4.4 | heading 内 Shift-Enter | 同段插换行(标题不分裂) | ⏳ |
+| 6.4.5 | bullet/ordered list 项内 Shift-Enter | 项内换行(不新建项) | ⏳ |
+
+#### 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.4.6 | DOM 输出 | 同段内出现 `<br>` 标签 | ⏳ |
+| 6.4.7 | hardBreak 不可选中 | 鼠标点 br 位置不进入选中态 | ⏳ |
+| 6.4.8 | 粘贴 `<p>a<br>b</p>` HTML | 解析成 paragraph 含 hardBreak | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.4.9 | hardBreak + undo/redo | history 正常 | ⏳ |
+| 6.4.10 | hardBreak 后输入文字带 mark | mark 正常生效 | ⏳ |
+
+---
+
+### 6.5 callout block(提示框) — 对齐 V1
+
+> V1 spec:content: 'block+' + attrs.emoji 默认 💡,点 emoji 循环 10 个表情
+> V2 落地:1:1(spec + node-view + emoji 循环 + 灰底)
+> emoji 列表(对齐 V1):💡 ⚠️ ❌ ✅ ℹ️ 🔥 📌 💬 🎯 ⭐
+
+#### 创建
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.1 | slash menu 输 `/callout` Enter | 当前段变 callout(💡 emoji + 灰底,光标在内容区) | ⏳ |
+| 6.5.2 | 普通段点 ⋮⋮ → "Turn into Callout" | 段变 callout | ⏳ |
+| 6.5.3 | 普通段右键 → "Turn into Callout" | 段变 callout | ⏳ |
+| 6.5.4 | callout → paragraph Turn Into | 内容拆出为顶层段 | ⏳ |
+
+#### 视觉对齐 V1
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.5 | callout 默认渲染 | 灰底 #252525 + 边框 #333 + 圆角 6px + padding 12/16 | ⏳ |
+| 6.5.6 | emoji 字号 + flex 布局 | 20px,左侧固定不缩,跟内容并列 | ⏳ |
+| 6.5.7 | hover emoji | 透明度 0.7 + cursor pointer | ⏳ |
+
+#### emoji 循环
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.8 | 点 callout emoji 1 次 | 切到下一个表情(💡→⚠️) | ⏳ |
+| 6.5.9 | 连点 10 次 | 循环回 💡 | ⏳ |
+| 6.5.10 | 点击 emoji 时不污染 selection | 光标不偏(mousedown preventDefault) | ⏳ |
+| 6.5.11 | emoji 不可编辑 | contentEditable=false 不能 focus | ⏳ |
+
+#### 内嵌内容(content: block+)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.12 | callout 内多段 paragraph | 都在灰底内,emoji 仍在最左 | ⏳ |
+| 6.5.13 | callout 内 H1/H2/H3 | heading 字号生效 | ⏳ |
+| 6.5.14 | callout 内嵌 bulletList | bullet 工作正常 | ⏳ |
+| 6.5.15 | callout 内 mark(Cmd+B / Cmd+U / 颜色) | 都生效 | ⏳ |
+
+#### handle / 拖拽
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.16 | 悬停 callout | ⋮⋮ handle 显示在 callout 行(顶层 block) | ⏳ |
+| 6.5.17 | 拖 callout 整体 | 整块移动 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.18 | callout + undo/redo(含 emoji 切换)| history 正常 | ⏳ |
+| 6.5.19 | 粘贴 V1 callout HTML(`<div class="callout">`)| 仍解析(parseDOM data-emoji)| ⏳ ⚠️ V1 用 div.callout,V2 改 div.krig-callout — V1→V2 文档兼容性留 L5-B3.4 验证 |
+
+---
+
+### 6.6 toggleList block(折叠列表) — 对齐 V1
+
+> V1 spec:content: 'block+',attrs.open 默认 true
+> 行为:open=true 显 ▼ + 完整内容;open=false 显 ▶ + 仅首行(folded)
+> V2 落地:1:1(spec + node-view + arrow + CSS `:not(:first-child) { display: none; }`)
+
+#### 创建
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.1 | slash menu 输 `/toggle` Enter | 当前段变 toggleList(▼ 箭头 + 当前段为首行,光标在内) | ⏳ |
+| 6.6.2 | 普通段点 ⋮⋮ → "Turn into Toggle List" | 段变 toggleList | ⏳ |
+| 6.6.3 | 普通段右键 → "Turn into Toggle List" | 段变 toggleList | ⏳ |
+
+#### 折叠行为(关键)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.4 | toggleList 内首行末尾按 Enter | 新建第二行(在 toggleList 内,展开态时可见)| ⏳ |
+| 6.6.5 | 点 ▼ 箭头 | 切到 ▶,**首行之后所有子节点 display: none(视觉隐藏)** | ⏳ |
+| 6.6.6 | 已折叠状态再点 ▶ | 切回 ▼,所有内容重现 | ⏳ |
+| 6.6.7 | 折叠时 PM doc 内容不变 | open attr 切换,子节点仍在 doc 中 | ⏳ |
+| 6.6.8 | 折叠态点击隐藏区域 | 不可见所以点不到(预期)| ⏳ |
+
+#### 视觉对齐 V1
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.9 | 箭头宽 20px | 是,vertical-align: top + margin-top: 4px 跟首行对齐 | ⏳ |
+| 6.6.10 | hover 箭头 | 浅色 hover 背景 rgba(255,255,255,0.1) | ⏳ |
+| 6.6.11 | content 占用宽度 | calc(100% - 24px) 给箭头让位 | ⏳ |
+| 6.6.12 | toggleList margin | 0.2em 上下 | ⏳ |
+
+#### 内嵌内容(content: block+)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.13 | toggleList 内 H2 作首行 | 折叠时仅显 H2 首行 | ⏳ |
+| 6.6.14 | toggleList 内嵌 bulletList | 展开正常,折叠时整个 list 隐藏 | ⏳ |
+| 6.6.15 | toggleList 内嵌 callout | 嵌套合理 | ⏳ |
+| 6.6.16 | toggleList 内 mark / heading 都可用 | 是 | ⏳ |
+
+#### handle / 拖拽
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.17 | 悬停 toggleList | ⋮⋮ handle 显示 | ⏳ |
+| 6.6.18 | 折叠态拖整个 toggleList | 整块移动,open attr 保留 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.6.19 | toggleList + undo/redo(含折叠切换)| history 正常 | ⏳ |
+| 6.6.20 | 粘贴 V1 toggle-list HTML | parseDOM div.krig-toggle-list 不接受 V1 div.toggle-list 命名 — 兼容性留 L5-B3.4 | ⏳ ⚠️ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
 |---|---|
 | 2026-05-06 | 初稿;5.1 bulletList 对照 V1 审计 + 29 测试条目 |
 | 2026-05-06 | 5.1 追加 A/B/C 三块:A(5.1.30-36 PM 健全性补丁,⏳ 待验证)+ B(5.1.37-42 Notion 对标,⏸️ B 阶段)+ C(5.1.C1-C3 KRIG 范围外,N/A) |
+| 2026-05-06 | § 6 新章节 L5-B3.3 marks 扩展 + 简单 block;6.1 underline mark 15 条审计 |
+| 2026-05-06 | § 6.2 textStyle(10 条)+ § 6.3 highlight(9 条)审计;Plan C-1 缩水(完整 ColorPicker UI 留 L5-B3.4) |
+| 2026-05-06 | § 6.4 hardBreak(10 条)审计 |
+| 2026-05-06 | § 6.5 callout(19 条)审计 |
+| 2026-05-06 | § 6.6 toggleList(20 条)审计 |

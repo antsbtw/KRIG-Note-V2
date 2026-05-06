@@ -15,7 +15,7 @@ import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 
-export type MarkName = 'bold' | 'italic' | 'strike' | 'code';
+export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
 
 export interface ActiveBlockType {
   name: string;
@@ -31,6 +31,92 @@ export const textEditingDriverApi = {
     if (!markType) return;
     toggleMark(markType)(inst.view.state, inst.view.dispatch);
     inst.view.focus();
+  },
+
+  /**
+   * 给选区设置文字颜色(textStyle mark);color 为空字符串时移除。
+   * 对齐 V1 applyTextColor。
+   */
+  setTextColor(instanceId: string, color: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const markType = inst.view.state.schema.marks.textStyle;
+    if (!markType) return;
+    const { from, to } = inst.view.state.selection;
+    if (from >= to) return;
+    const tr = inst.view.state.tr;
+    if (!color) {
+      tr.removeMark(from, to, markType);
+    } else {
+      tr.removeMark(from, to, markType); // 先清旧色,避免叠加
+      tr.addMark(from, to, markType.create({ color }));
+    }
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /**
+   * 给选区设置背景高亮色(highlight mark);color 为空字符串时移除。
+   * 对齐 V1 applyHighlight。
+   */
+  setHighlight(instanceId: string, color: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const markType = inst.view.state.schema.marks.highlight;
+    if (!markType) return;
+    const { from, to } = inst.view.state.selection;
+    if (from >= to) return;
+    const tr = inst.view.state.tr;
+    if (!color) {
+      tr.removeMark(from, to, markType);
+    } else {
+      tr.removeMark(from, to, markType);
+      tr.addMark(from, to, markType.create({ color }));
+    }
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /** 取选区第一个 textStyle mark 的 color attr(无则 null)*/
+  getActiveTextColor(instanceId: string): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const markType = inst.view.state.schema.marks.textStyle;
+    if (!markType) return null;
+    const { from, to, $from } = inst.view.state.selection;
+    if (from >= to) {
+      const m = markType.isInSet($from.marks());
+      return (m?.attrs.color as string | null) ?? null;
+    }
+    let found: string | null = null;
+    inst.view.state.doc.nodesBetween(from, to, (node) => {
+      if (found) return false;
+      const m = markType.isInSet(node.marks);
+      if (m) found = (m.attrs.color as string | null) ?? null;
+      return true;
+    });
+    return found;
+  },
+
+  /** 取选区第一个 highlight mark 的 color attr(无则 null)*/
+  getActiveHighlight(instanceId: string): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const markType = inst.view.state.schema.marks.highlight;
+    if (!markType) return null;
+    const { from, to, $from } = inst.view.state.selection;
+    if (from >= to) {
+      const m = markType.isInSet($from.marks());
+      return (m?.attrs.color as string | null) ?? null;
+    }
+    let found: string | null = null;
+    inst.view.state.doc.nodesBetween(from, to, (node) => {
+      if (found) return false;
+      const m = markType.isInSet(node.marks);
+      if (m) found = (m.attrs.color as string | null) ?? null;
+      return true;
+    });
+    return found;
   },
 
   /** set current block to heading level (or null = paragraph) */
@@ -203,7 +289,9 @@ export const textEditingDriverApi = {
       | 'task-list'
       | 'blockquote'
       | 'code-block'
-      | 'horizontal-rule',
+      | 'horizontal-rule'
+      | 'callout'
+      | 'toggle-list',
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
@@ -277,6 +365,34 @@ export const textEditingDriverApi = {
       view.focus();
       return;
     }
+
+    if (target === 'callout') {
+      const co = schema.nodes.callout;
+      if (!co) return;
+      // callout content: 'block+',把当前 block 整体包进去(保留所有 marks/attrs)
+      const tr = view.state.tr.replaceWith(
+        pos,
+        pos + node.nodeSize,
+        co.create(null, [node.copy(node.content)]),
+      );
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    if (target === 'toggle-list') {
+      const tl = schema.nodes.toggleList;
+      if (!tl) return;
+      // toggleList content: 'block+',首行作为折叠标题(默认 open=true)
+      const tr = view.state.tr.replaceWith(
+        pos,
+        pos + node.nodeSize,
+        tl.create(null, [node.copy(node.content)]),
+      );
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
   },
 
   /** wrapInList — 当前 selection block 包成 list(slash 或 keymap 用)*/
@@ -307,7 +423,9 @@ export const textEditingDriverApi = {
       | 'task-list'
       | 'blockquote'
       | 'code-block'
-      | 'horizontal-rule',
+      | 'horizontal-rule'
+      | 'callout'
+      | 'toggle-list',
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;

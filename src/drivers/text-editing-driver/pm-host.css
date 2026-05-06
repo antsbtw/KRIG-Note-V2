@@ -270,6 +270,66 @@
   font-size: inherit;
 }
 
+/* toggleList — 对齐 V1(箭头 + 内容,closed 时仅显第一行) */
+.krig-pm-host .ProseMirror div.krig-toggle-list {
+  margin: 0.2em 0;
+}
+
+.krig-pm-host .ProseMirror .krig-toggle-list__arrow {
+  display: inline-block;
+  width: 20px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  color: #e8eaed;
+  vertical-align: top;
+  margin-top: 4px;
+  text-align: center;
+}
+
+.krig-pm-host .ProseMirror .krig-toggle-list__arrow:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.krig-pm-host .ProseMirror .krig-toggle-list__content {
+  display: inline-block;
+  width: calc(100% - 24px);
+  vertical-align: top;
+}
+
+/* closed 状态:子内容仅显示第一个(标题行)*/
+.krig-pm-host .ProseMirror div.krig-toggle-list.closed .krig-toggle-list__content > *:not(:first-child) {
+  display: none;
+}
+
+/* callout — 对齐 V1(emoji + 内容包裹背景) */
+.krig-pm-host .ProseMirror div.krig-callout {
+  display: flex;
+  gap: 12px;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 0.5em 0;
+}
+
+.krig-pm-host .ProseMirror .krig-callout__emoji {
+  font-size: 20px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+.krig-pm-host .ProseMirror .krig-callout__emoji:hover {
+  opacity: 0.7;
+}
+
+.krig-pm-host .ProseMirror .krig-callout__content {
+  flex: 1;
+  min-width: 0;
+}
+
 /* horizontal rule — 对齐 V1 #444 / 1.5em margin */
 .krig-pm-host .ProseMirror hr.krig-horizontal-rule {
   border: none;

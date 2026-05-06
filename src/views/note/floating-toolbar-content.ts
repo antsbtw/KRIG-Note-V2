@@ -28,6 +28,14 @@ export function registerFloatingToolbar(): void {
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('italic'),
     },
     {
+      id: 'note-view.ft.underline',
+      label: 'U',
+      command: 'note-view.toggle-underline',
+      view: VIEW,
+      order: 25,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('underline'),
+    },
+    {
       id: 'note-view.ft.strike',
       label: 'S',
       command: 'note-view.toggle-strike',
@@ -42,6 +50,23 @@ export function registerFloatingToolbar(): void {
       view: VIEW,
       order: 40,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
+    },
+    // L5-B3.3:文字色 / 高亮(循环 6 色;完整 ColorPicker UI 留 L5-B3.4)
+    {
+      id: 'note-view.ft.text-color',
+      label: 'A',
+      command: 'note-view.cycle-text-color',
+      view: VIEW,
+      order: 50,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
+    },
+    {
+      id: 'note-view.ft.highlight',
+      label: 'A̲',
+      command: 'note-view.cycle-highlight',
+      view: VIEW,
+      order: 60,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),
     },
   ];
   floatingToolbarRegistry.register(items);
