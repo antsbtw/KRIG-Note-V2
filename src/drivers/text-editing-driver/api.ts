@@ -10,6 +10,8 @@
 import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
+import { wrapInList } from 'prosemirror-schema-list';
+import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 
@@ -174,6 +176,139 @@ export const textEditingDriverApi = {
     if (!inst) return;
     const tr = inst.view.state.tr.setSelection(TextSelection.near(inst.view.state.doc.resolve(pos)));
     inst.view.dispatch(tr);
+  },
+
+  // ── L5-B3.2:Turn Into 新 block 类型 ──
+
+  /**
+   * 把当前光标所在 block(或指定 pos block)Turn Into 指定类型
+   *
+   * 支持:
+   * - 'paragraph' / 'h1' / 'h2' / 'h3' — text-block 改 attrs.level
+   * - 'bullet-list' / 'ordered-list' / 'task-list' — 包成 list > list-item > text-block
+   * - 'blockquote' — 包成 blockquote > 当前 block
+   * - 'code-block' — 替换为 code-block(纯文本)
+   * - 'horizontal-rule' — 替换为 hr + 新空 text-block
+   */
+  turnIntoAt(
+    instanceId: string,
+    pos: number,
+    target:
+      | 'paragraph'
+      | 'h1'
+      | 'h2'
+      | 'h3'
+      | 'bullet-list'
+      | 'ordered-list'
+      | 'task-list'
+      | 'blockquote'
+      | 'code-block'
+      | 'horizontal-rule',
+  ): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const view = inst.view;
+    const schema = view.state.schema;
+    const node = view.state.doc.nodeAt(pos);
+    if (!node) return;
+
+    // headings / paragraph — text-block attrs
+    if (target === 'paragraph' || target === 'h1' || target === 'h2' || target === 'h3') {
+      if (node.type.name !== 'text-block') return;
+      const level = target === 'paragraph' ? null : parseInt(target.slice(1), 10);
+      const tr = view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, level });
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    // lists — wrap text-block into list > list-item > text-block
+    if (target === 'bullet-list' || target === 'ordered-list' || target === 'task-list') {
+      const listType = schema.nodes[target];
+      const itemType = target === 'task-list' ? schema.nodes['task-item'] : schema.nodes['list-item'];
+      if (!listType || !itemType || node.type.name !== 'text-block') return;
+      const item = itemType.create(
+        target === 'task-list' ? { checked: false } : null,
+        [node.copy(node.content)],
+      );
+      const list = listType.create(null, Fragment.from(item));
+      const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, list);
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    // blockquote — wrap current block in blockquote
+    if (target === 'blockquote') {
+      const bq = schema.nodes.blockquote;
+      if (!bq) return;
+      const tr = view.state.tr.replaceWith(
+        pos,
+        pos + node.nodeSize,
+        bq.create(null, [node.copy(node.content)]),
+      );
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    // code-block — replace with empty code block(content 是 text-block 的文字内容)
+    if (target === 'code-block') {
+      const cb = schema.nodes['code-block'];
+      if (!cb) return;
+      // 提取 text-block 内的纯文本
+      const text = node.textContent;
+      const newNode = text ? cb.create(null, schema.text(text)) : cb.create();
+      const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, newNode);
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    // horizontal-rule — replace with hr + new text-block(光标进新 block)
+    if (target === 'horizontal-rule') {
+      const hr = schema.nodes['horizontal-rule'];
+      const tb = schema.nodes['text-block'];
+      if (!hr || !tb) return;
+      const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, [hr.create(), tb.create()]);
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+  },
+
+  /** wrapInList — 当前 selection block 包成 list(slash 或 keymap 用)*/
+  wrapCurrentInList(instanceId: string, kind: 'bullet-list' | 'ordered-list' | 'task-list'): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const schema = inst.view.state.schema;
+    const listType = schema.nodes[kind];
+    if (!listType) return;
+    wrapInList(listType)(inst.view.state, inst.view.dispatch);
+    inst.view.focus();
+  },
+
+  /** turnIntoSelection — slash menu 用:对光标当前 block 应用 Turn Into */
+  turnIntoSelection(
+    instanceId: string,
+    target:
+      | 'paragraph'
+      | 'h1'
+      | 'h2'
+      | 'h3'
+      | 'bullet-list'
+      | 'ordered-list'
+      | 'task-list'
+      | 'blockquote'
+      | 'code-block'
+      | 'horizontal-rule',
+  ): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const $from = inst.view.state.selection.$from;
+    if ($from.depth === 0) return;
+    const blockPos = $from.before(1);
+    this.turnIntoAt(instanceId, blockPos, target);
   },
 };
 

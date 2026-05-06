@@ -18,10 +18,27 @@ import { registerDropTargets } from './capability-integrations/dnd-targets';
 import { registerInsertionSafeguards } from './capability-integrations/insertion-safeguards';
 import { setupFloatingToolbarTrigger } from './floating-toolbar-source';
 import { textBlockSpec } from './blocks/text-block/spec';
+import { listItemSpec } from './blocks/list-item/spec';
+import { bulletListSpec } from './blocks/bullet-list/spec';
+import { orderedListSpec } from './blocks/ordered-list/spec';
+import { taskListSpec, taskItemSpec } from './blocks/task-list/spec';
+import { blockquoteSpec } from './blocks/blockquote/spec';
+import { codeBlockSpec } from './blocks/code-block/spec';
+import { horizontalRuleSpec } from './blocks/horizontal-rule/spec';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
-// L5-A 启用的 block 列表(单 block)
-const ENABLED_BLOCKS: BlockSpec[] = [textBlockSpec];
+// L5-B3.2:全部启用的 block 列表(textBlock + 6 新类 + 2 项 list-item/task-item)
+const ENABLED_BLOCKS: BlockSpec[] = [
+  textBlockSpec,
+  listItemSpec,
+  bulletListSpec,
+  orderedListSpec,
+  taskItemSpec,
+  taskListSpec,
+  blockquoteSpec,
+  codeBlockSpec,
+  horizontalRuleSpec,
+];
 
 export function Host(props: TextEditingHostProps) {
   const { config, doc, onChange } = props;

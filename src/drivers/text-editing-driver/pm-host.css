@@ -72,3 +72,101 @@
 .krig-pm-host .ProseMirror:focus {
   outline: none;
 }
+
+/* ── L5-B3.2:lists / quote / code / hr ── */
+
+/* 列表通用 */
+.krig-pm-host .ProseMirror ul,
+.krig-pm-host .ProseMirror ol {
+  margin: 1px 0;
+  padding-left: 28px;
+}
+
+.krig-pm-host .ProseMirror li {
+  margin: 1px 0;
+}
+
+.krig-pm-host .ProseMirror ul.krig-bullet-list {
+  list-style-type: disc;
+}
+.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list {
+  list-style-type: circle;
+}
+.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list ul.krig-bullet-list {
+  list-style-type: square;
+}
+
+.krig-pm-host .ProseMirror ol.krig-ordered-list {
+  list-style-type: decimal;
+}
+
+/* task list */
+.krig-pm-host .ProseMirror ul.krig-task-list {
+  list-style: none;
+  padding-left: 4px;
+}
+
+.krig-pm-host .ProseMirror li.krig-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0;
+}
+
+.krig-pm-host .ProseMirror .krig-task-item__checkbox {
+  flex-shrink: 0;
+  margin-top: 0.4em;
+  cursor: pointer;
+  accent-color: #4a90e2;
+  width: 16px;
+  height: 16px;
+}
+
+.krig-pm-host .ProseMirror .krig-task-item__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.krig-pm-host .ProseMirror li.krig-task-item.checked > .krig-task-item__content {
+  color: #888;
+  text-decoration: line-through;
+}
+
+/* blockquote */
+.krig-pm-host .ProseMirror blockquote.krig-blockquote {
+  border-left: 3px solid #4a90e2;
+  padding-left: 16px;
+  margin: 8px 0;
+  color: #c8c8c8;
+  font-style: italic;
+}
+
+/* code block */
+.krig-pm-host .ProseMirror pre.krig-code-block {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e8eaed;
+  white-space: pre;
+}
+
+.krig-pm-host .ProseMirror pre.krig-code-block code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* horizontal rule */
+.krig-pm-host .ProseMirror hr.krig-horizontal-rule {
+  border: none;
+  height: 1px;
+  background: #3a3a3a;
+  margin: 16px 0;
+}
