@@ -289,7 +289,8 @@ export const textEditingDriverApi = {
       | 'task-list'
       | 'blockquote'
       | 'code-block'
-      | 'horizontal-rule',
+      | 'horizontal-rule'
+      | 'callout',
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
@@ -363,6 +364,20 @@ export const textEditingDriverApi = {
       view.focus();
       return;
     }
+
+    if (target === 'callout') {
+      const co = schema.nodes.callout;
+      if (!co) return;
+      // callout content: 'block+',把当前 block 整体包进去(保留所有 marks/attrs)
+      const tr = view.state.tr.replaceWith(
+        pos,
+        pos + node.nodeSize,
+        co.create(null, [node.copy(node.content)]),
+      );
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
   },
 
   /** wrapInList — 当前 selection block 包成 list(slash 或 keymap 用)*/
@@ -393,7 +408,8 @@ export const textEditingDriverApi = {
       | 'task-list'
       | 'blockquote'
       | 'code-block'
-      | 'horizontal-rule',
+      | 'horizontal-rule'
+      | 'callout',
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;

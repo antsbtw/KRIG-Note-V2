@@ -30,5 +30,7 @@ export function registerSlashMenu(): void {
       keywords: ['code', 'codeblock', 'pre'], view: VIEW, order: 90 },
     { id: 'note-view.slash.divider', label: 'Divider', command: 'note-view.slash-turn-divider',
       keywords: ['divider', 'hr', 'horizontal', 'rule', 'separator'], view: VIEW, order: 100 },
+    { id: 'note-view.slash.callout', label: 'Callout', command: 'note-view.slash-turn-callout',
+      keywords: ['callout', 'tip', 'warning', 'note', 'admonition'], view: VIEW, order: 110 },
   ]);
 }

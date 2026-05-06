@@ -202,7 +202,8 @@ export function registerNoteCommands(): void {
   type TurnTarget =
     | 'paragraph' | 'h1' | 'h2' | 'h3'
     | 'bullet-list' | 'ordered-list' | 'task-list'
-    | 'blockquote' | 'code-block' | 'horizontal-rule';
+    | 'blockquote' | 'code-block' | 'horizontal-rule'
+    | 'callout';
 
   // ── slash:作用于光标当前 block(setHeading 走 selection)──
   function registerSlashTurn(commandId: string, target: TurnTarget): void {
@@ -229,6 +230,7 @@ export function registerNoteCommands(): void {
   registerSlashTurn('note-view.slash-turn-quote', 'blockquote');
   registerSlashTurn('note-view.slash-turn-code', 'code-block');
   registerSlashTurn('note-view.slash-turn-divider', 'horizontal-rule');
+  registerSlashTurn('note-view.slash-turn-callout', 'callout');
 
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
@@ -256,6 +258,7 @@ export function registerNoteCommands(): void {
   registerHandleTurn('note-view.handle-turn-task', 'task-list');
   registerHandleTurn('note-view.handle-turn-quote', 'blockquote');
   registerHandleTurn('note-view.handle-turn-code', 'code-block');
+  registerHandleTurn('note-view.handle-turn-callout', 'callout');
 
   commandRegistry.register('note-view.handle-copy-block', () => {
     const ctx = getHandlePos();
@@ -298,6 +301,7 @@ export function registerNoteCommands(): void {
   registerCmTurn('note-view.cm-turn-task', 'task-list');
   registerCmTurn('note-view.cm-turn-quote', 'blockquote');
   registerCmTurn('note-view.cm-turn-code', 'code-block');
+  registerCmTurn('note-view.cm-turn-callout', 'callout');
 
   commandRegistry.register('note-view.cm-delete-block', () => {
     const ctx = getCmBlockPos();

@@ -37,7 +37,7 @@
 | # | V1 block | 工作量 | 优先级 | 备注 |
 |---|---|---|---|---|
 | 7 | hard-break | 极小 | ✅ L5-B3.3 | `<br>` inline node + Shift-Enter keymap |
-| 8 | callout | 小 | **A 方案** | content: block+ + emoji + 颜色,Notion 同款 |
+| 8 | callout | 小 | ✅ L5-B3.3 | content: block+ + emoji 循环 + 灰底 + Turn Into 三处注册 |
 | 9 | toggle-list | 中 | **A 方案** | open/closed attr + 折叠交互 |
 | 10 | page-anchor | 小 | 后续 | PDF 页码锚点(KRIG 业务) |
 | 11 | file-link | 小 | 后续 | 本地文件链接 |
@@ -121,7 +121,7 @@
 | 3 | textStyle mark(color) | mark | ✅ Plan C-1 | (本批 commit) |
 | 4 | highlight mark(背景色) | mark | ✅ Plan C-1 | (合并 #3 同 commit) |
 | 5 | hard-break block | block(inline)| ✅ | (本批 commit) |
-| 6 | callout block | block | ⏳ | — |
+| 6 | callout block | block | ✅ | (本批 commit) |
 | 7 | toggle-list block | block | ⏳ | — |
 
 ### 3.2 完成判据(对齐 charter § 6.3)

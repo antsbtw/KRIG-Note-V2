@@ -26,6 +26,8 @@ export function registerHandleMenu(): void {
       view: VIEW, order: 17 },
     { id: 'note-view.h.turn-code', label: 'Turn into Code Block', command: 'note-view.handle-turn-code',
       view: VIEW, order: 18 },
+    { id: 'note-view.h.turn-callout', label: 'Turn into Callout', command: 'note-view.handle-turn-callout',
+      view: VIEW, order: 19 },
     // 复制 + 删除
     { id: 'note-view.h.copy', label: 'Duplicate', command: 'note-view.handle-copy-block',
       view: VIEW, order: 30 },

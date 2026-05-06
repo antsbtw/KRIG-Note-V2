@@ -270,6 +270,34 @@
   font-size: inherit;
 }
 
+/* callout — 对齐 V1(emoji + 内容包裹背景) */
+.krig-pm-host .ProseMirror div.krig-callout {
+  display: flex;
+  gap: 12px;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 0.5em 0;
+}
+
+.krig-pm-host .ProseMirror .krig-callout__emoji {
+  font-size: 20px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+.krig-pm-host .ProseMirror .krig-callout__emoji:hover {
+  opacity: 0.7;
+}
+
+.krig-pm-host .ProseMirror .krig-callout__content {
+  flex: 1;
+  min-width: 0;
+}
+
 /* horizontal rule — 对齐 V1 #444 / 1.5em margin */
 .krig-pm-host .ProseMirror hr.krig-horizontal-rule {
   border: none;

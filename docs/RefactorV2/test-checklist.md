@@ -666,6 +666,63 @@
 
 ---
 
+### 6.5 callout block(提示框) — 对齐 V1
+
+> V1 spec:content: 'block+' + attrs.emoji 默认 💡,点 emoji 循环 10 个表情
+> V2 落地:1:1(spec + node-view + emoji 循环 + 灰底)
+> emoji 列表(对齐 V1):💡 ⚠️ ❌ ✅ ℹ️ 🔥 📌 💬 🎯 ⭐
+
+#### 创建
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.1 | slash menu 输 `/callout` Enter | 当前段变 callout(💡 emoji + 灰底,光标在内容区) | ⏳ |
+| 6.5.2 | 普通段点 ⋮⋮ → "Turn into Callout" | 段变 callout | ⏳ |
+| 6.5.3 | 普通段右键 → "Turn into Callout" | 段变 callout | ⏳ |
+| 6.5.4 | callout → paragraph Turn Into | 内容拆出为顶层段 | ⏳ |
+
+#### 视觉对齐 V1
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.5 | callout 默认渲染 | 灰底 #252525 + 边框 #333 + 圆角 6px + padding 12/16 | ⏳ |
+| 6.5.6 | emoji 字号 + flex 布局 | 20px,左侧固定不缩,跟内容并列 | ⏳ |
+| 6.5.7 | hover emoji | 透明度 0.7 + cursor pointer | ⏳ |
+
+#### emoji 循环
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.8 | 点 callout emoji 1 次 | 切到下一个表情(💡→⚠️) | ⏳ |
+| 6.5.9 | 连点 10 次 | 循环回 💡 | ⏳ |
+| 6.5.10 | 点击 emoji 时不污染 selection | 光标不偏(mousedown preventDefault) | ⏳ |
+| 6.5.11 | emoji 不可编辑 | contentEditable=false 不能 focus | ⏳ |
+
+#### 内嵌内容(content: block+)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.12 | callout 内多段 paragraph | 都在灰底内,emoji 仍在最左 | ⏳ |
+| 6.5.13 | callout 内 H1/H2/H3 | heading 字号生效 | ⏳ |
+| 6.5.14 | callout 内嵌 bulletList | bullet 工作正常 | ⏳ |
+| 6.5.15 | callout 内 mark(Cmd+B / Cmd+U / 颜色) | 都生效 | ⏳ |
+
+#### handle / 拖拽
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.16 | 悬停 callout | ⋮⋮ handle 显示在 callout 行(顶层 block) | ⏳ |
+| 6.5.17 | 拖 callout 整体 | 整块移动 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.5.18 | callout + undo/redo(含 emoji 切换)| history 正常 | ⏳ |
+| 6.5.19 | 粘贴 V1 callout HTML(`<div class="callout">`)| 仍解析(parseDOM data-emoji)| ⏳ ⚠️ V1 用 div.callout,V2 改 div.krig-callout — V1→V2 文档兼容性留 L5-B3.4 验证 |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
@@ -675,3 +732,4 @@
 | 2026-05-06 | § 6 新章节 L5-B3.3 marks 扩展 + 简单 block;6.1 underline mark 15 条审计 |
 | 2026-05-06 | § 6.2 textStyle(10 条)+ § 6.3 highlight(9 条)审计;Plan C-1 缩水(完整 ColorPicker UI 留 L5-B3.4) |
 | 2026-05-06 | § 6.4 hardBreak(10 条)审计 |
+| 2026-05-06 | § 6.5 callout(19 条)审计 |
