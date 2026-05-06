@@ -845,13 +845,20 @@
 
 ### 7.6 笔记导航历史栈
 
+> **重要:历史栈只跟 link 跳转挂钩,NavSide 切笔记不进栈**(本阶段降级)
+> - 历史栈推进入口:link-click-integration.ts 的 onOpenNote → navigateToNote
+> - NavSide / 命令切笔记走 setActiveNote(只更新 current,不推 back 栈)
+> - 跟 V1 行为差异:V1 noteOpenInEditor 是统一入口(NavSide 切也进栈);
+>   V2 当前简化为只 link 跳转进栈。后续可补 NavSide 切笔记也走 navigateToNote。
+
 | # | 操作 | 期望 | 状态 |
 |---|---|---|---|
-| 7.6.1 | NavSide 选 A → 选 B → 按 Cmd+[ | 切回 A | ⏳ |
-| 7.6.2 | 切回 A 后按 Cmd+] | 前进到 B | ⏳ |
-| 7.6.3 | A → B → C → 后退 → 选 D | forward 栈被清空(C 不可前进到) | ⏳ |
-| 7.6.4 | 历史栈空时按 Cmd+[ | 静默(canGoBack 为 false) | ⏳ |
-| 7.6.5 | 点击 link 跳转 | 推 back 栈,清 forward | ⏳ |
+| 7.6.1 | 编辑器内点击 link A → 跳到笔记 X → 再点 link B → 跳到笔记 Y | 此时 back 栈含 X | ⏳ |
+| 7.6.2 | 7.6.1 之后按 Cmd+[ | 切回笔记 X | ⏳ |
+| 7.6.3 | 7.6.2 之后按 Cmd+] | 前进到笔记 Y | ⏳ |
+| 7.6.4 | A → B(link)→ C(link)→ 后退到 B → 点新 link D | forward 栈被清空(C 不可前进到) | ⏳ |
+| 7.6.5 | 历史栈空时按 Cmd+[ | 静默(canGoBack 为 false) | ⏳ |
+| 7.6.6 | NavSide 直接点笔记 A → 切 B → 按 Cmd+[ | **静默无响应**(NavSide 切不进栈,设计如此) | ⏳ |
 
 ### 7.7 Cmd+K 触发
 
