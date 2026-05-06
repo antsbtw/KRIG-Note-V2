@@ -74,6 +74,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         dnd.emit('dnd.completed', { source: null });
       });
 
+      let handlePositionLogCount = 0;
       // ── view.dom 监听 mousemove → 定位 handle ──
       const onMouseMove = (e: MouseEvent) => {
         if (isDragging) return;
@@ -130,37 +131,56 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         currentBlockType = blockNode.type.name;
 
         // 定位 handle:position: fixed 用 viewport 坐标
+        // 用 block DOM 计算 line-height(从 computed style 真实读)
+        const blockComputed = window.getComputedStyle(blockDom);
         const blockRect = blockDom.getBoundingClientRect();
+        const lineHeight = parseFloat(blockComputed.lineHeight) || parseFloat(blockComputed.fontSize) * 1.7;
+        const fontSize = parseFloat(blockComputed.fontSize);
+        const paddingTop = parseFloat(blockComputed.paddingTop);
+
         const HANDLE_HEIGHT = 22;
         const HANDLE_WIDTH = 22;
         const PM_PADDING_LEFT = 48;
-        // 垂直居中对齐 block 行(对齐 V1)
-        // 多行 block(段落跨多行)时,跟第一行 line-height 中心对齐 — 用 line-height 估算
-        // 简化:跟整个 block rect 中心对齐(视觉够好;V1 也是这样)
-        const lineHeightApprox = Math.min(blockRect.height, 36); // 估算单行高度
-        const top = blockRect.top + (lineHeightApprox - HANDLE_HEIGHT) / 2;
-        // handle 紧靠文字左侧 4px
+        // 垂直对齐:让 handle 中心 = 第一行文字基线中心
+        // 第一行起点 = blockRect.top + paddingTop
+        // 第一行文字垂直中心 ≈ paddingTop + lineHeight/2
+        // handle top = block top + 第一行文字中心 - HANDLE_HEIGHT/2
+        const top = blockRect.top + paddingTop + lineHeight / 2 - HANDLE_HEIGHT / 2;
         const left = editorRect.left + PM_PADDING_LEFT - HANDLE_WIDTH - 4;
+
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
         dom.style.opacity = '1';
         dom.style.pointerEvents = 'auto';
+
+        // 诊断(前 5 次)
+        if (handlePositionLogCount < 5) {
+          console.log('[block-handle][fix v2] positioned', {
+            blockType: blockNode.type.name,
+            fontSize, lineHeight, paddingTop,
+            blockRect: { top: blockRect.top, height: blockRect.height },
+            handle: { top, left },
+            handleAfterRender: dom.getBoundingClientRect(),
+          });
+          handlePositionLogCount++;
+        }
       };
 
-      // 用 setTimeout 延迟 hide,handle 自己 mouseenter 时取消 — 解决 handle 跟 view.dom
-      // DOM 上是兄弟、鼠标过渡到 handle 时 mouseleave 先触发的问题
       let hideTimer: ReturnType<typeof setTimeout> | null = null;
-      const scheduleHide = () => {
+      const scheduleHide = (source: string) => {
+        console.log('[block-handle] scheduleHide from', source);
         if (hideTimer) clearTimeout(hideTimer);
         hideTimer = setTimeout(() => {
+          console.log('[block-handle] hide fired (no cancel within 200ms)');
           dom.style.opacity = '0';
           dom.style.pointerEvents = 'none';
           currentPos = -1;
           hideTimer = null;
-        }, 80);
+        }, 200); // 增加到 200ms,鼠标过渡更充裕
       };
-      const cancelHide = () => {
+      const cancelHide = (source: string) => {
         if (hideTimer) {
+          console.log('[block-handle] cancelHide from', source);
           clearTimeout(hideTimer);
           hideTimer = null;
         }
@@ -168,23 +188,21 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
       const onMouseLeave = () => {
         if (isDragging) return;
-        scheduleHide();
+        scheduleHide('view.dom mouseleave');
       };
 
       // handle 自己:mouseenter 取消 hide / mouseleave 重新调度 hide
-      dom.addEventListener('mouseenter', cancelHide);
-      dom.addEventListener('mouseleave', scheduleHide);
+      dom.addEventListener('mouseenter', () => cancelHide('handle mouseenter'));
+      dom.addEventListener('mouseleave', () => scheduleHide('handle mouseleave'));
 
       editorView.dom.addEventListener('mousemove', onMouseMove);
       editorView.dom.addEventListener('mouseleave', onMouseLeave);
-      // mousemove 时也取消 hide(用户回到编辑区)
-      editorView.dom.addEventListener('mouseenter', cancelHide);
+      editorView.dom.addEventListener('mouseenter', () => cancelHide('view.dom mouseenter'));
 
       return {
         destroy() {
           editorView.dom.removeEventListener('mousemove', onMouseMove);
           editorView.dom.removeEventListener('mouseleave', onMouseLeave);
-          editorView.dom.removeEventListener('mouseenter', cancelHide);
           if (hideTimer) clearTimeout(hideTimer);
           dom.remove();
         },
