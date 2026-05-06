@@ -19,10 +19,66 @@ import { dnd } from '@capabilities/drag-and-drop';
 const handleKey = new PluginKey('text-editing-driver:block-handle');
 
 const HANDLE_CLASS = 'krig-block-handle';
-const HANDLE_DRAG_MIME = 'application/krig-block-source';
+export const HANDLE_DRAG_MIME = 'application/krig-block-source';
 
 export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plugin {
   return new Plugin({
+    // 截获 drop:plugin.props.handleDrop 在 PM 默认 drop 处理之前调用,
+    // 返回 true 即告诉 PM "这条 drop 我处理了,你别管"
+    // 这是修"拖动变复制"bug 的关键(之前用 view.dom.addEventListener('drop')
+    // 是冒泡阶段,PM 默认 handler 已先把 dataTransfer.text/plain 当文字插入了)
+    props: {
+      handleDrop(view, event) {
+        const dt = event.dataTransfer;
+        if (!dt) return false;
+        const raw = dt.getData(HANDLE_DRAG_MIME);
+        if (!raw) return false; // 不是我们的 block 拖拽,让 PM 默认处理
+        try {
+          const parsed = JSON.parse(raw) as { instanceId: string; fromPos: number };
+          if (parsed.instanceId !== instanceId) return false;
+          // 算 drop 位置(用 PM posAtCoords + dropPoint 标准做法)
+          const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          if (!result) return true; // 阻止 PM 默认但不做事(防误粘贴)
+          const $pos = view.state.doc.resolve(result.pos);
+          if ($pos.depth === 0) return true;
+          // 落到顶层 block 边界
+          const blockStart = $pos.before(1);
+          const block = view.state.doc.nodeAt(blockStart);
+          if (!block) return true;
+          // 鼠标 y 决定插在 block 之前还是之后
+          let dropPos = blockStart;
+          try {
+            const nodeDom = view.nodeDOM(blockStart);
+            const el = nodeDom instanceof HTMLElement ? nodeDom : null;
+            if (el) {
+              const r = el.getBoundingClientRect();
+              if (event.clientY > r.top + r.height / 2) {
+                dropPos = blockStart + block.nodeSize;
+              }
+            }
+          } catch {
+            /* fallback to blockStart */
+          }
+          // 移动 block(删源 + 插目标)
+          const fromPos = parsed.fromPos;
+          if (fromPos === dropPos) return true;
+          const sourceNode = view.state.doc.nodeAt(fromPos);
+          if (!sourceNode) return true;
+          const tr = view.state.tr;
+          let actualDrop = dropPos;
+          if (dropPos > fromPos) {
+            actualDrop = dropPos - sourceNode.nodeSize;
+          }
+          tr.delete(fromPos, fromPos + sourceNode.nodeSize);
+          tr.insert(actualDrop, sourceNode.copy(sourceNode.content));
+          view.dispatch(tr);
+          dnd.emit('dnd.completed', { source: null });
+          return true; // 截获 drop
+        } catch {
+          return false;
+        }
+      },
+    },
     key: handleKey,
     view(editorView) {
       let currentPos = -1;
@@ -74,7 +130,8 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         if (!node) return;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData(HANDLE_DRAG_MIME, JSON.stringify({ instanceId, fromPos: currentPos }));
-        e.dataTransfer.setData('text/plain', node.textContent);
+        // 注意:不再设 text/plain — 之前导致 PM 默认 drop 把 plain text 当文字插入
+        // (现 plugin.handleDrop 截获,但 text/plain 仍是潜在干扰;保险移除)
         dnd.emit('dnd.started', {
           source: { type: 'block', data: { fromPos: currentPos, instanceId } },
         });
