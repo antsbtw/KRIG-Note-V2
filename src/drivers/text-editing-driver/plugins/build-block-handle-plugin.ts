@@ -35,24 +35,16 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dom.draggable = true;
       dom.textContent = '⋮⋮';
       dom.title = '拖动以重排,点击打开菜单';
+      // position: fixed 用 viewport 坐标 — 不管父容器是 maxWidth/居中/transform 都不影响
       dom.style.cssText = `
-        position: absolute;
+        position: fixed;
         opacity: 0;
         pointer-events: none;
-        z-index: 10;
+        z-index: 10000;
         transition: opacity 0.15s;
       `;
-
-      // 把 handle 插到 view.dom 的父容器(让它跟编辑区同坐标系)
-      const parent = editorView.dom.parentElement;
-      if (parent) {
-        // 父容器需要 position: relative 才能让 handle absolute 锚定到它
-        const computed = window.getComputedStyle(parent);
-        if (computed.position === 'static') {
-          parent.style.position = 'relative';
-        }
-        parent.appendChild(dom);
-      }
+      // 直接挂 body,避免父容器(maxWidth 居中 / transform / overflow:hidden)干扰
+      document.body.appendChild(dom);
 
       // ── handle 事件 ──
       dom.addEventListener('click', (e) => {
@@ -137,14 +129,10 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         currentPos = blockStart;
         currentBlockType = blockNode.type.name;
 
-        // 定位 handle:相对于 view.dom 父容器
-        const parentRect = parent?.getBoundingClientRect();
-        if (!parentRect) return;
+        // 定位 handle:position: fixed 用 viewport 坐标,直接对齐 block 屏幕坐标
         const blockRect = blockDom.getBoundingClientRect();
-        // handle 顶部跟 block 顶部对齐(微调:对齐第一行 baseline)
-        const top = blockRect.top - parentRect.top + 4;
-        // handle 在编辑区左侧 gutter 内(view.dom 左边 - handle 自身宽度 - 2px)
-        const left = editorRect.left - parentRect.left - 26;
+        const top = blockRect.top + 4;       // 跟 block 顶部对齐(微调 +4 给 caret 让位)
+        const left = editorRect.left - 26;   // 编辑区左侧 26px(handle 宽度 22 + 4 间距)
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
         dom.style.opacity = '1';
