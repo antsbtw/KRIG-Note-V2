@@ -29,8 +29,20 @@ export interface NotePluginState {
 
 const STORE_KEY = 'note';
 
+/**
+ * 默认状态(冻结的常量引用,避免 useSyncExternalStore 死循环)
+ *
+ * 关键:必须返回稳定引用,否则 React 每次 getSnapshot 都看到新对象,
+ * 触发 "Maximum update depth exceeded"(memory 已记 L3/L4/L3.5 同款 bug)。
+ */
+const DEFAULT_STATE: NotePluginState = Object.freeze({
+  notes: Object.freeze({}) as Record<string, Note>,
+  activeNoteId: null,
+  counter: 0,
+}) as NotePluginState;
+
 function defaultState(): NotePluginState {
-  return { notes: {}, activeNoteId: null, counter: 0 };
+  return DEFAULT_STATE;
 }
 
 export function getNotePluginState(ws: WorkspaceState): NotePluginState {
