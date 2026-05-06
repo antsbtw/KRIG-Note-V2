@@ -97,9 +97,9 @@
 | # | V1 mark | 工作量 | 状态 | 备注 |
 |---|---|---|---|---|
 | 5 | underline | 极小 | ✅ L5-B3.3 | `<u>` + Cmd+U + 顶部 toolbar U + floating-toolbar U |
-| 6 | link | 大 | ⏸️ L5-B3.4 | linkMark spec 简单,但联动 LinkPanel 三 Tab(笔记/文件/网页)+ link-click 5 协议路由 + 历史栈 + viewAPI IPC,实质是大工程,升格独立阶段 |
-| 7 | textStyle | 小 | ✅ L5-B3.3 (Plan C-1 缩水) | mark spec 全量 + cycle 命令(6 色循环);完整 ColorPicker UI 留 L5-B3.4 |
-| 8 | highlight | 小 | ✅ L5-B3.3 (Plan C-1 缩水) | mark spec 全量 + cycle 命令(6 半透明色);完整 ColorPicker UI 留 L5-B3.4 |
+| 6 | link | 大 | ✅ L5-B3.4 | linkMark spec + 2 Tab LinkPanel(笔记+网页)+ link-click 5 协议路由(http/https/file/krig://note/krig://block)+ 笔记历史栈(Cmd+[/Cmd+])+ Cmd+K + 跨文档 anchor 滚动 |
+| 7 | textStyle | 小 | ✅ L5-B3.4 (升级) | mark spec(L5-B3.3)+ ColorPickerPanel 完整 10 swatch UI(L5-B3.4),替换 cycle 按钮 |
+| 8 | highlight | 小 | ✅ L5-B3.4 (升级) | mark spec(L5-B3.3)+ ColorPickerPanel 完整 10 swatch UI(L5-B3.4),替换 cycle 按钮 |
 
 ---
 
@@ -116,13 +116,13 @@
 
 | 顺序 | 项 | 类型 | 状态 | commit |
 |---|---|---|---|---|
-| 1 | underline mark | mark | ✅ | f33314a |
-| 2 | ~~link mark + URL 编辑 popup~~ | mark | ⏸️ **升格 L5-B3.4** | 跨 view 路由系统 + viewAPI 大工程 |
-| 3 | textStyle mark(color) | mark | ✅ Plan C-1 | (本批 commit) |
-| 4 | highlight mark(背景色) | mark | ✅ Plan C-1 | (合并 #3 同 commit) |
-| 5 | hard-break block | block(inline)| ✅ | (本批 commit) |
-| 6 | callout block | block | ✅ | (本批 commit) |
-| 7 | toggle-list block | block | ✅ | (本批 commit) |
+| 1 | underline mark | mark | ✅ L5-B3.3 | f33314a |
+| 2 | link mark + LinkPanel popup | mark | ✅ L5-B3.4 | 7 commits(见 stages/L5B3.4-...) |
+| 3 | textStyle mark(color) | mark | ✅ L5-B3.3 + L5-B3.4 升级 | spec L5-B3.3,完整 UI L5-B3.4 |
+| 4 | highlight mark(背景色) | mark | ✅ L5-B3.3 + L5-B3.4 升级 | 同 #3 |
+| 5 | hard-break block | block(inline)| ✅ L5-B3.3 | 21d0733 |
+| 6 | callout block | block | ✅ L5-B3.3 | 53944dc |
+| 7 | toggle-list block | block | ✅ L5-B3.3 | 7176732 |
 
 ### 3.2 完成判据(对齐 charter § 6.3)
 
@@ -140,3 +140,5 @@
 | 日期 | 改动 |
 |---|---|
 | 2026-05-06 | 初稿;V1 28 block + 8 mark 全量盘点;A 方案 7 项工作单元定义 |
+| 2026-05-06 | L5-B3.3 完成 6 项(underline / textStyle 缩水 / highlight 缩水 / hard-break / callout / toggle-list);link 升格 L5-B3.4 |
+| 2026-05-06 | L5-B3.4 完成:link mark 全栈(LinkPanel + 5 协议路由 + 历史栈 + Cmd+K)+ ColorPicker 完整 UI 升级(替换 L5-B3.3 cycle);8 mark 全部 ✅ |
