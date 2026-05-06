@@ -1,47 +1,72 @@
-/* text-editing-driver Host 样式 */
+/* text-editing-driver Host 样式 — L5-B3.1 对齐 V1 typography */
 
 .krig-pm-host {
   height: 100%;
   width: 100%;
   overflow: auto;
-  padding: 16px 24px;
   background-color: #1e1e1e;
-  color: #ddd;
+  color: #e8eaed;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.7;
 }
 
 .krig-pm-host .ProseMirror {
   outline: none;
   min-height: 200px;
-  /* PM 官方推荐:white-space: pre-wrap 保留输入空格 + 换行 */
+  /* PM 推荐:white-space: pre-wrap 保留输入空格 + 换行 */
   white-space: pre-wrap;
+  /* 对齐 V1:左 padding 给 block-handle 留 gutter / 上下右适中 */
+  padding: 24px 24px 24px 48px;
+  caret-color: #e8eaed;
+  /* 让 handle 父容器(driver 自动加 position:relative)能正确锚定 */
+  position: relative;
+}
+
+/* Block 统一行间距(对齐 V1)*/
+.krig-pm-host .ProseMirror > * {
+  margin: 1px 0;
+  padding: 3px 2px;
 }
 
 .krig-pm-host .ProseMirror p {
-  margin: 0 0 0.6em 0;
+  margin: 1px 0;
+  padding: 3px 2px;
 }
 
+/* Headings(对齐 V1:38 / 28 / 22)*/
 .krig-pm-host .ProseMirror h1 {
-  font-size: 28px;
+  font-size: 38px;
   font-weight: 700;
-  margin: 0.6em 0 0.4em 0;
-  color: #f0f0f0;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #e8eaed;
 }
 
 .krig-pm-host .ProseMirror h2 {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
-  margin: 0.6em 0 0.4em 0;
-  color: #f0f0f0;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #e8eaed;
 }
 
 .krig-pm-host .ProseMirror h3 {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 600;
-  margin: 0.6em 0 0.4em 0;
-  color: #e8e8e8;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #e8eaed;
+}
+
+/* Inline code(对齐 V1)*/
+.krig-pm-host .ProseMirror code {
+  background: #2a2a2a;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.9em;
+  color: #f78c6c;
 }
 
 .krig-pm-host .ProseMirror:focus {

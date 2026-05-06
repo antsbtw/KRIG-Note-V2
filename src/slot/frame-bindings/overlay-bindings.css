@@ -76,45 +76,30 @@
   color: #fff;
 }
 
-/* L5-B3.1 — block handle widget(driver 内部 widget decoration 渲染)*/
+/* L5-B3.1 — block handle(driver 内部浮动 DOM,跟随 mouse 定位)*/
 .krig-block-handle {
-  position: absolute;
-  left: -22px;
-  top: 4px;
-  display: inline-flex;
+  /* position / opacity / left / top 由 driver inline-style 动态设置 */
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   color: #555;
   cursor: grab;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
   user-select: none;
   border-radius: 3px;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, background-color 0.12s;
-  pointer-events: auto;
-}
-
-.krig-block-handle:active {
-  cursor: grabbing;
-}
-
-/* hover 父行(text-block / heading)时 handle 显出 */
-.krig-pm-host .ProseMirror > * {
-  position: relative;
-}
-
-.krig-pm-host .ProseMirror > *:hover > .krig-block-handle,
-.krig-block-handle:hover {
-  opacity: 1;
-  color: #888;
+  background-color: transparent;
 }
 
 .krig-block-handle:hover {
   background-color: rgba(255, 255, 255, 0.06);
   color: #ccc;
+}
+
+.krig-block-handle:active {
+  cursor: grabbing;
 }
 
 /* 通用 Overlay(帮助 / dialog)— 全屏 backdrop */
