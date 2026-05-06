@@ -17,6 +17,7 @@ import { registerSlashMenu } from './slash-menu-content';
 import { registerHandleMenu } from './handle-menu-content';
 import { registerContextMenu } from './context-menu-content';
 import { registerNotePopups } from './popup-registrations';
+import { registerLinkClickIntegration } from './link-click-integration';
 
 registerView({
   id: 'note-view',
@@ -45,3 +46,4 @@ registerSlashMenu();
 registerHandleMenu();
 registerContextMenu();
 registerNotePopups();
+registerLinkClickIntegration();

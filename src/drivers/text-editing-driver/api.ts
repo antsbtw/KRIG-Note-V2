@@ -14,6 +14,7 @@ import { wrapInList } from 'prosemirror-schema-list';
 import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
+import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
 
 export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
 
@@ -511,6 +512,18 @@ export const textEditingDriverApi = {
     if ($from.depth === 0) return;
     const blockPos = $from.before(1);
     this.turnIntoAt(instanceId, blockPos, target);
+  },
+
+  /**
+   * 滚动到 block anchor(L5-B3.4)
+   *
+   * 笔记加载完成后,view 调本方法把 pendingAnchor 滚到位。
+   * anchor 格式见 build-link-click-plugin 的 scrollToBlockAnchor。
+   */
+  scrollToAnchor(instanceId: string, anchor: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    scrollToBlockAnchor(inst.view, anchor);
   },
 };
 
