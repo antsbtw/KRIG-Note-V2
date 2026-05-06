@@ -1,20 +1,14 @@
 /**
  * NoteView 命令注册
  *
- * 见 DESIGN.md v0.2.2 § 6。
- *
- * 注册 view 命名空间命令('note-view.*'),符合 driver 协议铁律 6b。
- * capability 命名空间命令('clipboard.copy' 等)由 driver 注册。
+ * 见 DESIGN.md v0.2.3 § 6。
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { createNote, deleteNote, setActiveNote, getNotePluginState } from './data-model';
+import { createNote, deleteNote, setActiveNote, getNoteWsState } from './data-model';
 
-/**
- * 确保 slotBinding.left = 'note-view'(用户可能从 NavSide 点 "+ 笔记" 但还没切到 NoteView)。
- * 不破坏其他字段。
- */
+/** 确保 slotBinding.left = 'note-view'(用户从 NavSide 点动作时可能没切到 NoteView)*/
 function ensureNoteViewActive(wsId: string): void {
   const ws = workspaceManager.get(wsId);
   if (!ws) return;
@@ -29,7 +23,7 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     createNote(wsId);
-    ensureNoteViewActive(wsId);   // 自动切到 NoteView
+    ensureNoteViewActive(wsId);
   });
 
   commandRegistry.register('note-view.delete-active', () => {
@@ -37,8 +31,8 @@ export function registerNoteCommands(): void {
     if (!wsId) return;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
-    const state = getNotePluginState(ws);
-    if (state.activeNoteId) deleteNote(wsId, state.activeNoteId);
+    const state = getNoteWsState(ws);
+    if (state.activeNoteId) deleteNote(state.activeNoteId);
   });
 
   commandRegistry.register('note-view.set-active', (noteId: unknown) => {
@@ -46,6 +40,6 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     setActiveNote(wsId, noteId);
-    ensureNoteViewActive(wsId);   // 自动切到 NoteView(用户可能从其他 view 来)
+    ensureNoteViewActive(wsId);
   });
 }

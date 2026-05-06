@@ -1,16 +1,19 @@
 /**
  * NoteView — view 主组件
  *
- * 见 DESIGN.md v0.2.2 § 4。
+ * 见 DESIGN.md v0.2.3 § 4。
  *
- * 装配 textEditingDriver.Host(driver 必经),通过 onChange 写回 pluginStates。
+ * 订阅两层:
+ * - workspaceManager:取当前 ws.activeNoteId(per-workspace)
+ * - noteStore:取笔记数据(全局共享)
  */
 
 import { useSyncExternalStore, useCallback } from 'react';
 import { textEditingDriver } from '@drivers/text-editing-driver';
 import type { DriverSerialized } from '@drivers/text-editing-driver';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { getNotePluginState, updateNote, deriveTitle } from './data-model';
+import { noteStore } from './note-store';
+import { getNoteWsState, updateNote, deriveTitle } from './data-model';
 import './note.css';
 
 interface NoteViewProps {
@@ -19,32 +22,36 @@ interface NoteViewProps {
 }
 
 export function NoteView({ workspaceId }: NoteViewProps) {
-  // 订阅 workspaceManager 取笔记状态
-  const noteState = useSyncExternalStore(
+  // 订阅当前 ws 的 activeNoteId(per-workspace)
+  const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
     () => {
       const ws = workspaceManager.get(workspaceId);
-      return ws ? getNotePluginState(ws) : null;
+      return ws ? getNoteWsState(ws) : null;
     },
   );
+
+  // 订阅 noteStore — 任何笔记内容改了都触发重渲(其他 Workspace 改也广播过来)
+  useSyncExternalStore(
+    (cb) => noteStore.subscribe(cb),
+    () => noteStore.count, // 数字稳定,容器变化触发重渲
+  );
+
+  // 取当前活跃笔记
+  const activeNote = wsState?.activeNoteId ? noteStore.get(wsState.activeNoteId) : null;
 
   const handleDocChange = useCallback(
     (newDoc: DriverSerialized) => {
-      if (!noteState?.activeNoteId) return;
+      if (!wsState?.activeNoteId) return;
       const newTitle = deriveTitle(newDoc);
-      updateNote(workspaceId, noteState.activeNoteId, {
-        doc: newDoc,
-        title: newTitle,
-      });
+      updateNote(wsState.activeNoteId, { doc: newDoc, title: newTitle });
     },
-    [noteState?.activeNoteId, workspaceId],
+    [wsState?.activeNoteId],
   );
 
-  if (!noteState) {
+  if (!wsState) {
     return <div className="krig-note-empty">Workspace 未就绪</div>;
   }
-
-  const activeNote = noteState.activeNoteId ? noteState.notes[noteState.activeNoteId] : null;
 
   if (!activeNote) {
     return (
@@ -60,8 +67,8 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     <div className="krig-note-view">
       <textEditingDriver.Host
         config={{
-          instanceId: workspaceId,        // P1.3 实例隔离
-          undoScope: 'note-view.pm',      // 铁律 6b
+          instanceId: workspaceId,
+          undoScope: 'note-view.pm',
         }}
         doc={activeNote.doc}
         onChange={handleDocChange}

@@ -1,12 +1,16 @@
 /**
  * 笔记列表 — NavSide 内容渲染组件
  *
- * 见 DESIGN.md v0.2.2 § 5.2。
+ * 见 DESIGN.md v0.2.3 § 5.2。
+ *
+ * 数据源:全局 noteStore(跨 Workspace 共享)+ 当前 ws activeNoteId(per-workspace 高亮)
  */
 
+import { useSyncExternalStore } from 'react';
 import { useActiveWorkspaceId, useWorkspace } from '@workspace/workspace-instance/use-workspace';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { getNotePluginState, deleteNote } from './data-model';
+import { noteStore } from './note-store';
+import { getNoteWsState, deleteNote } from './data-model';
 
 function formatTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -21,12 +25,21 @@ function formatTime(ts: number): string {
 }
 
 export function NoteList() {
+  // 订阅全局 noteStore(NavSide 显所有笔记,跨 Workspace 共享)
+  const allNotes = useSyncExternalStore(
+    (cb) => noteStore.subscribe(cb),
+    () => noteStore.getAll(),
+  );
+
+  // 订阅当前 ws 的 activeNoteId(per-workspace 高亮)
   const wsId = useActiveWorkspaceId();
   const ws = useWorkspace(wsId);
-  if (!ws || !wsId) return null;
+  const wsState = ws ? getNoteWsState(ws) : null;
+  const activeId = wsState?.activeNoteId ?? null;
 
-  const state = getNotePluginState(ws);
-  const sortedNotes = Object.values(state.notes).sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!wsId) return null;
+
+  const sortedNotes = [...allNotes].sort((a, b) => b.updatedAt - a.updatedAt);
 
   if (sortedNotes.length === 0) {
     return (
@@ -42,13 +55,13 @@ export function NoteList() {
       {sortedNotes.map((note) => (
         <li
           key={note.id}
-          className={`krig-note-list-item${note.id === state.activeNoteId ? ' active' : ''}`}
+          className={`krig-note-list-item${note.id === activeId ? ' active' : ''}`}
           onClick={() => commandRegistry.execute('note-view.set-active', note.id)}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
             if (window.confirm(`删除"${note.title}"?`)) {
-              deleteNote(wsId, note.id);
+              deleteNote(note.id);
             }
           }}
         >
