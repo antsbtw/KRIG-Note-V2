@@ -1,9 +1,10 @@
 /**
  * EditorView 装配
  *
- * 见 DESIGN.md v0.2.1 § 4。
+ * 见 DESIGN.md v0.2.1 § 4 + L5B2 设计 § 3.3。
  *
- * L5-A:最小集 — keymap(baseKeymap) only。L5-B+ 加 history / inputRules / etc.
+ * L5-A:最小集 — keymap(baseKeymap) only。
+ * L5-B2:加 history / input-rules / mark-keymap / heading-keymap。
  */
 
 import { EditorState, type Plugin, type Transaction } from 'prosemirror-state';
@@ -12,6 +13,10 @@ import type { Schema, Node as PMNode } from 'prosemirror-model';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
 import type { BlockSpec } from './types';
+import { buildHistoryPlugins } from './plugins/build-history-plugin';
+import { buildInputRules } from './plugins/build-input-rules';
+import { buildMarkKeymap } from './plugins/build-mark-keymap';
+import { buildHeadingKeymap } from './plugins/build-heading-keymap';
 
 /**
  * 装配 EditorView
@@ -45,11 +50,15 @@ export function buildEditorView(
     else if (result) blockPlugins.push(result);
   }
 
-  // L5-A 装配清单(最小集)
+  // L5-B2 装配清单 — history 最前(覆盖所有后续动作);keymap 顺序:
+  // mark/heading(view 级)→ baseKeymap(PM 标准兜底)
   const plugins: Plugin[] = [
+    ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y
     ...blockPlugins,
-    keymap(baseKeymap), // PM 标准键盘(Enter / Backspace / 光标)
-    // L5-B+ 加:history / dropCursor / gapCursor / markKeymap / etc.
+    buildInputRules(schema),     // headings + 4 mark markdown
+    buildMarkKeymap(schema),     // Mod-b / Mod-i / Mod-Shift-x / Mod-e
+    buildHeadingKeymap(schema),  // Mod-Alt-0/1/2/3
+    keymap(baseKeymap),          // PM 标准键盘(Enter / Backspace / 光标)兜底
   ];
 
   const state = EditorState.create({ doc, plugins });

@@ -7,6 +7,7 @@
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { textEditingDriverApi, type MarkName } from '@drivers/text-editing-driver';
 import {
   createNote,
   deleteNote,
@@ -119,4 +120,41 @@ export function registerNoteCommands(): void {
     const key = typeof folderKey === 'string' ? folderKey : '__root__';
     cycleSortByDate(wsId, key);
   });
+
+  // ── L5-B2:marks / heading / undo-redo(走 driver instance-registry) ──
+
+  function withInstance(fn: (instanceId: string) => void): () => void {
+    return () => {
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) return;
+      // L5-A 约定:driver instanceId == workspaceId(一 workspace 一 NoteView)
+      fn(wsId);
+    };
+  }
+
+  function registerToggleMark(commandId: string, markName: MarkName): void {
+    commandRegistry.register(commandId, withInstance((instanceId) => {
+      textEditingDriverApi.toggleMark(instanceId, markName);
+    }));
+  }
+
+  registerToggleMark('note-view.toggle-bold', 'bold');
+  registerToggleMark('note-view.toggle-italic', 'italic');
+  registerToggleMark('note-view.toggle-strike', 'strike');
+  registerToggleMark('note-view.toggle-code', 'code');
+
+  commandRegistry.register('note-view.set-heading-level', (level: unknown) => {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const lvl = typeof level === 'number' ? level : null;
+    textEditingDriverApi.setHeading(wsId, lvl);
+  });
+
+  commandRegistry.register('note-view.undo', withInstance((instanceId) => {
+    textEditingDriverApi.undo(instanceId);
+  }));
+
+  commandRegistry.register('note-view.redo', withInstance((instanceId) => {
+    textEditingDriverApi.redo(instanceId);
+  }));
 }
