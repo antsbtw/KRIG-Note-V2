@@ -55,7 +55,8 @@ export function buildInputRules(schema: Schema): Plugin {
   const listItem = schema.nodes.listItem;
 
   if (bulletList && listItem) {
-    rules.push(wrapInListRule(/^\s*([-*])\s$/, bulletList, listItem));
+    // 严格行首(V1 同款):不允许前导空格
+    rules.push(wrapInListRule(/^[-*]\s$/, bulletList, listItem));
   }
   if (orderedList && listItem) {
     rules.push(

@@ -75,29 +75,86 @@
 
 /* ── L5-B3.2:lists / quote / code / hr ── */
 
-/* 列表通用 */
+/* 列表通用(对齐 V1:顶层不缩进,嵌套时 24px) */
 .krig-pm-host .ProseMirror ul,
 .krig-pm-host .ProseMirror ol {
   margin: 1px 0;
-  padding-left: 28px;
+  padding-left: 0;
+  list-style: none;
+}
+
+/* 嵌套层 — 缩进 24px(对齐 V1) */
+.krig-pm-host .ProseMirror ul ul,
+.krig-pm-host .ProseMirror ul ol,
+.krig-pm-host .ProseMirror ol ul,
+.krig-pm-host .ProseMirror ol ol {
+  padding-left: 24px;
 }
 
 .krig-pm-host .ProseMirror li {
   margin: 1px 0;
+  position: relative;
+  padding-left: 24px;  /* 给 ::before 标记留位 */
 }
 
-.krig-pm-host .ProseMirror ul.krig-bullet-list {
-  list-style-type: disc;
-}
-.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list {
-  list-style-type: circle;
-}
-.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list ul.krig-bullet-list {
-  list-style-type: square;
+/* ── bulletList 标记:CSS ::before(对齐 V1)── */
+.krig-pm-host .ProseMirror ul.krig-bullet-list > li::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: calc(3px + 1.7em / 2);
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
+/* 嵌套 2 级 → 空心圆 */
+.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list > li::before {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  width: 5px;
+  height: 5px;
+}
+
+/* 嵌套 3 级 → 实心方块 */
+.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list ul.krig-bullet-list > li::before {
+  background: currentColor;
+  border: none;
+  border-radius: 1px;
+  width: 5px;
+  height: 5px;
+}
+
+/* ── orderedList 标记:CSS counter ── */
 .krig-pm-host .ProseMirror ol.krig-ordered-list {
-  list-style-type: decimal;
+  counter-reset: ordered-item;
+}
+
+.krig-pm-host .ProseMirror ol.krig-ordered-list > li {
+  counter-increment: ordered-item;
+}
+
+.krig-pm-host .ProseMirror ol.krig-ordered-list > li::before {
+  content: counter(ordered-item) '.';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 20px;
+  text-align: right;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 嵌套 2 级 → a. b. c. */
+.krig-pm-host .ProseMirror ol.krig-ordered-list ol.krig-ordered-list > li::before {
+  content: counter(ordered-item, lower-alpha) '.';
+}
+
+/* 嵌套 3 级 → i. ii. iii. */
+.krig-pm-host .ProseMirror ol.krig-ordered-list ol.krig-ordered-list ol.krig-ordered-list > li::before {
+  content: counter(ordered-item, lower-roman) '.';
 }
 
 /* task list */
