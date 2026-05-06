@@ -1,0 +1,117 @@
+/* Toolbar 视觉(L5-B2 — Q6=A 简陋暗主题)*/
+
+.krig-toolbar-binding {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #2a2a2a;
+  height: 36px;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.krig-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.krig-toolbar-group--left {
+  flex: 0 0 auto;
+}
+.krig-toolbar-group--center {
+  flex: 1;
+  justify-content: center;
+}
+.krig-toolbar-group--right {
+  flex: 0 0 auto;
+}
+
+.krig-toolbar-button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0 8px;
+  font-size: 13px;
+  font-family: inherit;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  outline: none;
+}
+
+.krig-toolbar-button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.krig-toolbar-button.active {
+  background: rgba(74, 144, 226, 0.25);
+  color: #fff;
+}
+
+.krig-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: #444;
+  margin: 0 4px;
+  flex: 0 0 auto;
+}
+
+/* dropdown */
+.krig-toolbar-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.krig-toolbar-dropdown-trigger {
+  min-width: 90px;
+  justify-content: space-between;
+  padding: 0 6px 0 10px;
+}
+
+.krig-toolbar-dropdown-caret {
+  margin-left: 6px;
+  font-size: 9px;
+  color: #888;
+}
+
+.krig-toolbar-dropdown-menu {
+  position: fixed;
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid #444;
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+  min-width: 120px;
+  z-index: 2000;
+  font-size: 13px;
+}
+
+.krig-toolbar-dropdown-option {
+  padding: 5px 12px;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.krig-toolbar-dropdown-option:hover {
+  background: #3a3a3a;
+}
+
+.krig-toolbar-dropdown-option.active {
+  background: rgba(74, 144, 226, 0.25);
+  color: #fff;
+}
+
+.krig-toolbar-empty {
+  flex: 1;
+  font-style: italic;
+  font-size: 12px;
+  color: #666;
+  padding: 0 8px;
+}

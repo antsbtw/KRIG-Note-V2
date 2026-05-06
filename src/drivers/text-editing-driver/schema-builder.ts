@@ -1,13 +1,15 @@
 /**
- * Schema 拼装 — 收集所有 block.spec 拼装 PM Schema
+ * Schema 拼装 — 收集所有 block.spec + marks 拼装 PM Schema
  *
- * 见 DESIGN.md v0.2.1 § 3。
+ * 见 DESIGN.md v0.2.1 § 3 + L5B2 设计 § 3.1。
  *
  * L5-A:只 textBlock + 无 marks
+ * L5-B2:加 4 marks(bold/italic/strike/code)
  */
 
 import { Schema, Node as PMNode, type NodeSpec } from 'prosemirror-model';
 import type { BlockSpec, DriverSerialized } from './types';
+import { MARKS } from './marks';
 
 /** 框架强制 attrs(注入到所有 group='block' 节点) */
 function injectFrameworkAttrs(spec: NodeSpec): NodeSpec {
@@ -38,7 +40,7 @@ export function buildSchema(blocks: BlockSpec[]): Schema {
     nodes[block.id] = injectFrameworkAttrs(block.spec);
   }
 
-  return new Schema({ nodes, marks: {} }); // L5-A 无 marks
+  return new Schema({ nodes, marks: MARKS });
 }
 
 /**

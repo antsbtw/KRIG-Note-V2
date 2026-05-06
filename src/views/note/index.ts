@@ -11,6 +11,7 @@ import { NoteView } from './NoteView';
 import { registerNoteCommands } from './note-commands';
 import { registerNavSide } from './nav-side-content';
 import { registerContextMenuItems } from './context-menu-registrations';
+import { registerToolbar } from './toolbar-content';
 
 registerView({
   id: 'note-view',
@@ -33,3 +34,4 @@ registerView({
 registerNoteCommands();
 registerNavSide();
 registerContextMenuItems();
+registerToolbar();
