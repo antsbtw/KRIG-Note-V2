@@ -25,6 +25,10 @@ export const IPC_CHANNELS = {
 
   // 窗口状态变化(main → renderer,L2 阶段引入)
   WINDOW_FULLSCREEN_CHANGED: 'window.fullscreen-changed',
+
+  // L5-B3.4:外部链接 / 文件打开(给 link-click plugin 用)
+  SHELL_OPEN_EXTERNAL: 'shell.open-external',
+  SHELL_OPEN_PATH: 'shell.open-path',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

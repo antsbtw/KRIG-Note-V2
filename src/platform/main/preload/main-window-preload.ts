@@ -45,4 +45,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, handler);
   },
+
+  /** L5-B3.4:打开外部 URL(http/https/mailto)— 走 Electron shell.openExternal */
+  async openExternal(url: string): Promise<{ ok: boolean; reason?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, url);
+  },
+
+  /** L5-B3.4:打开文件路径(系统默认应用)— 走 Electron shell.openPath */
+  async openPath(filePath: string): Promise<{ ok: boolean; reason?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.SHELL_OPEN_PATH, filePath);
+  },
 });

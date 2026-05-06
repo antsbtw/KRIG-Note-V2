@@ -781,6 +781,119 @@
 
 ---
 
+## 7. L5-B3.4 link mark + popup 基础设施 + ColorPicker 升级
+
+> 阶段:link 全栈 + popup 基础设施 + ColorPicker 完整 UI 升级
+> 跟踪:[stages/L5B3.4-link-and-popup-design.md](stages/L5B3.4-link-and-popup-design.md)
+
+### 7.1 popup 基础设施(slot 维度,跨 view 复用)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.1.1 | popup-controller / registry 模块加载 | 启动 console 不报错 | ⏳ |
+| 7.1.2 | floating-toolbar popup-trigger 类型按钮 click | 走 popupController.toggle 弹 popup | ⏳ |
+| 7.1.3 | 同一时刻只允许一个 popup 可见 | 打开第二个 popup 时,前一个自动关 | ⏳ |
+| 7.1.4 | 点 popup 外部 | 自动关闭 | ⏳ |
+| 7.1.5 | 按 Esc | 关 popup | ⏳ |
+| 7.1.6 | 再点同一 anchor 按钮 | toggle 关闭 popup | ⏳ |
+| 7.1.7 | popup 位置 | anchor 下方水平居中,viewport 溢出时夹紧/翻边 | ⏳ |
+
+### 7.2 link mark schema / 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.2.1 | LinkPanel 网页 Tab 输入 URL Enter | 选区文字变蓝 + 下划线(`<a href>`) | ⏳ |
+| 7.2.2 | 链接末尾光标输新字符 | **不延长链接**(inclusive: false 生效) | ⏳ |
+| 7.2.3 | 粘贴含 `<a href="...">x</a>` 的 HTML | 解析为 link mark + href 保留 | ⏳ |
+| 7.2.4 | link 视觉 | #8ab4f8 蓝色 + 下划线,hover 变浅 | ⏳ |
+
+### 7.3 LinkPanel 笔记 Tab
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.3.1 | 选中文字 → floating-toolbar 🔗 → 弹 LinkPanel | 默认在笔记 Tab,搜索框聚焦 | ⏳ |
+| 7.3.2 | 输关键词 | filter 笔记列表(top 8 命中) | ⏳ |
+| 7.3.3 | ↑↓ 键导航笔记列表 | 蓝色高亮跟随,Enter 应用 | ⏳ |
+| 7.3.4 | 点笔记标题 | 选区文字变 link,href = krig://note/{id} | ⏳ |
+| 7.3.5 | 点笔记右侧 ▶ | 进入 drill 视图,显示该笔记的标题列表 | ⏳ |
+| 7.3.6 | drill 内 ↑↓ + Enter | 应用 krig://block/{id}/{anchor 编码标题} | ⏳ |
+| 7.3.7 | drill 内 Esc | 返回一级笔记列表 | ⏳ |
+| 7.3.8 | 输入 `krig://note/abc` 直接 Enter | 直接 apply(粘贴的完整链接) | ⏳ |
+
+### 7.4 LinkPanel 网页 Tab
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.4.1 | 切到网页 Tab | 输入框聚焦,placeholder "输入网页地址..." | ⏳ |
+| 7.4.2 | 输 example.com Enter | 自动补 https://,链接生效 | ⏳ |
+| 7.4.3 | 输 https://krig.dev Enter | 直接 apply(已有协议不重复补) | ⏳ |
+| 7.4.4 | 已有 link 时打开 LinkPanel | 自动选中匹配的 Tab(http → 网页 / krig:// → 笔记) | ⏳ |
+| 7.4.5 | 已有 link 时显"移除链接"按钮 | 是 | ⏳ |
+| 7.4.6 | 点"移除链接" | 取消选区 link mark | ⏳ |
+
+### 7.5 link 点击路由(5 协议)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.5.1 | 点击编辑器内 https:// 链接 | 系统默认浏览器打开 | ⏳ |
+| 7.5.2 | 点击 file:// 链接 | 系统默认应用打开文件 | ⏳ |
+| 7.5.3 | 点击 javascript: 链接 | shell 拒绝(allowed schemes 检查),console.warn | ⏳ |
+| 7.5.4 | 点 krig://note/{id} | 切当前 ws 左栏 activeNoteId 到目标(降级路径)| ⏳ |
+| 7.5.5 | 点 krig://block/{id}/{anchor}(同文档) | 当场 PM 滚动到 heading + 蓝色高亮 2 秒 | ⏳ |
+| 7.5.6 | 点 krig://block/{id}/{anchor}(跨文档) | 切笔记 + 加载完成后滚动 anchor | ⏳ |
+| 7.5.7 | 点 media:// 链接 | console.warn(本阶段不支持) | ⏳ |
+
+### 7.6 笔记导航历史栈
+
+> **重要:历史栈只跟 link 跳转挂钩,NavSide 切笔记不进栈**(本阶段降级)
+> - 历史栈推进入口:link-click-integration.ts 的 onOpenNote → navigateToNote
+> - NavSide / 命令切笔记走 setActiveNote(只更新 current,不推 back 栈)
+> - 跟 V1 行为差异:V1 noteOpenInEditor 是统一入口(NavSide 切也进栈);
+>   V2 当前简化为只 link 跳转进栈。后续可补 NavSide 切笔记也走 navigateToNote。
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.6.1 | 编辑器内点击 link A → 跳到笔记 X → 再点 link B → 跳到笔记 Y | 此时 back 栈含 X | ⏳ |
+| 7.6.2 | 7.6.1 之后按 Cmd+[ | 切回笔记 X | ⏳ |
+| 7.6.3 | 7.6.2 之后按 Cmd+] | 前进到笔记 Y | ⏳ |
+| 7.6.4 | A → B(link)→ C(link)→ 后退到 B → 点新 link D | forward 栈被清空(C 不可前进到) | ⏳ |
+| 7.6.5 | 历史栈空时按 Cmd+[ | 静默(canGoBack 为 false) | ⏳ |
+| 7.6.6 | NavSide 直接点笔记 A → 切 B → 按 Cmd+[ | **静默无响应**(NavSide 切不进栈,设计如此) | ⏳ |
+
+### 7.7 Cmd+K 触发
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.7.1 | 选中文字按 Cmd+K | 弹 LinkPanel(anchor 在 floating-toolbar 🔗 / 选区下方) | ⏳ |
+| 7.7.2 | 光标态(空选区)按 Cmd+K | **不弹**(对齐 Q7=A 必须有选区) | ⏳ |
+| 7.7.3 | 已弹 LinkPanel 按 Cmd+K | 不重复弹(Esc 关闭 / 点外关闭) | ⏳ |
+
+### 7.8 ColorPickerPanel 完整 UI
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.8.1 | floating-toolbar A 按钮 click | 弹 ColorPickerPanel | ⏳ |
+| 7.8.2 | floating-toolbar A̲ 按钮 click | 弹同一个 ColorPickerPanel(共享 popup)| ⏳ |
+| 7.8.3 | 顶部 toolbar A / A̲ click | 同上 | ⏳ |
+| 7.8.4 | popup 显示 10 文字色 + 10 背景色 swatch | 5×2 grid 布局 | ⏳ |
+| 7.8.5 | 当前选区已有 textStyle 红色 | 红色 swatch 高亮(蓝边框 + ring) | ⏳ |
+| 7.8.6 | 点击红色 swatch | 选区变红,popup 关闭 | ⏳ |
+| 7.8.7 | 点 default(灰底)swatch | 移除 textStyle / highlight mark | ⏳ |
+| 7.8.8 | hover swatch | scale 1.1 + 蓝边框 transition | ⏳ |
+
+### 7.9 不回归(已有功能)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 7.9.1 | 现有 8 floating-toolbar 按钮(B/I/U/S/`<>`)| 全部仍工作 | ⏳ |
+| 7.9.2 | 顶部 toolbar 现有按钮 | 全部仍工作 | ⏳ |
+| 7.9.3 | undo/redo link 添加/移除 | history 正常 | ⏳ |
+| 7.9.4 | undo/redo 颜色应用 | history 正常 | ⏳ |
+| 7.9.5 | bold/italic/underline + link 共存 | 链接文字可同时加 mark | ⏳ |
+| 7.9.6 | typecheck + lint 全过 | 实施末验证 | ⏳ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
@@ -792,3 +905,4 @@
 | 2026-05-06 | § 6.4 hardBreak(10 条)审计 |
 | 2026-05-06 | § 6.5 callout(19 条)审计 |
 | 2026-05-06 | § 6.6 toggleList(20 条)审计 |
+| 2026-05-06 | § 7 新章节 L5-B3.4(7.1-7.9 共 ~50 条)审计:popup 基础设施 / link mark / LinkPanel 笔记+网页 Tab / 5 协议路由 / 历史栈 / Cmd+K / ColorPickerPanel 升级 / 不回归 |

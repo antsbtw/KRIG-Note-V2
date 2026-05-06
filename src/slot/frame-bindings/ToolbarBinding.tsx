@@ -11,6 +11,7 @@ import { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { useToolbarVersion } from './use-registry';
 import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
 import { commandRegistry } from '../command-registry/command-registry';
+import { popupController } from '../triggers/popup-controller';
 import { selection, type SelectionPayload } from '@capabilities/selection';
 import type {
   ToolbarItem,
@@ -69,16 +70,19 @@ function renderItem(item: ToolbarItem, ctx: ToolbarItemContext) {
   if (item.kind === 'dropdown') {
     return <ToolbarDropdown key={item.id} item={item} ctx={ctx} />;
   }
-  // 默认 button
+  // 默认 button(含 'popup-trigger' 分支)
   const active = item.activeWhen?.(ctx) ?? false;
+  const isPopupTrigger = item.kind === 'popup-trigger';
   return (
     <button
       key={item.id}
       type="button"
       className={`krig-toolbar-button${active ? ' active' : ''}`}
       onMouseDown={(e) => e.preventDefault()} // 不抢编辑器焦点
-      onClick={() => {
-        if (item.command) {
+      onClick={(e) => {
+        if (isPopupTrigger && item.popupId) {
+          popupController.toggle(item.popupId, e.currentTarget);
+        } else if (item.command) {
           commandRegistry.execute(item.command, item.commandArg);
         }
       }}

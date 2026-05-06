@@ -1,0 +1,65 @@
+/**
+ * link-click view 集成(L5-B3.4)
+ *
+ * driver 的 link-click plugin 需要 view 注入 onOpenNote / getCurrentNoteId,
+ * 因为"如何切笔记"是 view 业务,driver 不该知道。
+ *
+ * 路由策略(对齐 V2 当前能力,降级 V1):
+ * - V1:点 krig://note → 当前 ws 右栏 NoteView + 切右栏 activeNoteId(不动左栏)
+ * - V2 当前:**没有 rightActiveNoteId 字段**(V2 故意暂缺,等 ActiveResourceManager 层)
+ *   → 降级:点 krig://note → 切当前 ws activeNoteId(覆盖左栏当前笔记)
+ *
+ * 跨 ws 跳转 / 真右栏 routing 留 ActiveResourceManager 抽象到位后补。
+ *
+ * 同文档 anchor 滚动由 driver 内部处理(scrollToBlockAnchor),view 不参与。
+ */
+
+import { setLinkClickHandler } from '@drivers/text-editing-driver';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { setActiveNote, getNoteWsState } from './data-model';
+import {
+  setCurrentNoteId,
+  navigateToNote,
+} from './note-navigation-history';
+
+let pendingAnchor: string | null = null;
+
+/**
+ * 取当前待执行的 anchor(笔记加载完成后由 NoteView 调 flushPendingAnchor 滚到位)
+ */
+export function takePendingAnchor(): string | null {
+  const a = pendingAnchor;
+  pendingAnchor = null;
+  return a;
+}
+
+export function registerLinkClickIntegration(): void {
+  setLinkClickHandler({
+    onOpenNote(noteId, blockAnchor) {
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) return;
+      // 历史栈推进
+      navigateToNote(noteId);
+      // 切当前 ws 的活跃笔记(V2 当前能力 — 覆盖左栏)
+      setActiveNote(wsId, noteId);
+      // 留待笔记加载完成后由 NoteView 滚动 anchor
+      pendingAnchor = blockAnchor ?? null;
+    },
+    getCurrentNoteId() {
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) return null;
+      const ws = workspaceManager.get(wsId);
+      if (!ws) return null;
+      return getNoteWsState(ws).activeNoteId;
+    },
+  });
+
+  // 当前 active note id 同步到历史栈(初始化时取一次,后续靠 navigateToNote 更新)
+  const wsId = workspaceManager.getActiveId();
+  if (wsId) {
+    const ws = workspaceManager.get(wsId);
+    if (ws) {
+      setCurrentNoteId(getNoteWsState(ws).activeNoteId);
+    }
+  }
+}

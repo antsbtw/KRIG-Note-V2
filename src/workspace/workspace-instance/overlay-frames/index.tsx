@@ -9,6 +9,7 @@ import { SlashMenuFrame } from './SlashMenuFrame';
 import { HandleMenuFrame } from './HandleMenuFrame';
 import { FloatingToolbarFrame } from './FloatingToolbarFrame';
 import { GenericOverlayFrame } from './GenericOverlayFrame';
+import { PopupFrame } from './PopupFrame';
 
 interface OverlayFramesProps {
   /** 当前活跃 view ID(传给 OverlayBinding 用于过滤 view-specific overlay)*/
@@ -22,6 +23,7 @@ export function OverlayFrames({ viewId }: OverlayFramesProps) {
       <SlashMenuFrame />
       <HandleMenuFrame />
       <FloatingToolbarFrame />
+      <PopupFrame />
       <GenericOverlayFrame viewId={viewId} />
     </>
   );

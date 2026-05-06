@@ -14,6 +14,7 @@ import { wrapInList } from 'prosemirror-schema-list';
 import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
+import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
 
 export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
 
@@ -93,6 +94,84 @@ export const textEditingDriverApi = {
       if (found) return false;
       const m = markType.isInSet(node.marks);
       if (m) found = (m.attrs.color as string | null) ?? null;
+      return true;
+    });
+    return found;
+  },
+
+  /**
+   * 给选区添加 link mark(对齐 V1 applyLink)
+   * - href 为空字符串:no-op(不允许空 link)
+   * - selection 为光标(from === to):no-op(必须有选区,对齐 V1 + 简单)
+   * - 已有 link 时先移除再加(避免叠加 / attr 失效)
+   */
+  setLink(instanceId: string, href: string, title?: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    if (!href) return;
+    const markType = inst.view.state.schema.marks.link;
+    if (!markType) return;
+    const { from, to } = inst.view.state.selection;
+    if (from >= to) return;
+    const tr = inst.view.state.tr;
+    tr.removeMark(from, to, markType);
+    tr.addMark(from, to, markType.create({ href, title: title ?? null }));
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /**
+   * 移除选区 link mark(对齐 V1 removeLink)
+   * - 选区非空:移除选区范围内的 link
+   * - 光标态:找到光标所在 link 的完整范围 + 移除
+   */
+  removeLink(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const markType = inst.view.state.schema.marks.link;
+    if (!markType) return;
+    const { from, to } = inst.view.state.selection;
+    if (from < to) {
+      inst.view.dispatch(inst.view.state.tr.removeMark(from, to, markType));
+      inst.view.focus();
+      return;
+    }
+    // 光标态:扩展到 link 范围
+    const $pos = inst.view.state.doc.resolve(from);
+    const parent = $pos.parent;
+    const parentStart = $pos.start();
+    let linkFrom = from;
+    let linkTo = from;
+    parent.forEach((node, offset) => {
+      const nodeStart = parentStart + offset;
+      const nodeEnd = nodeStart + node.nodeSize;
+      if (nodeStart <= from && from <= nodeEnd && markType.isInSet(node.marks)) {
+        linkFrom = nodeStart;
+        linkTo = nodeEnd;
+      }
+    });
+    if (linkFrom < linkTo) {
+      inst.view.dispatch(inst.view.state.tr.removeMark(linkFrom, linkTo, markType));
+      inst.view.focus();
+    }
+  },
+
+  /** 取选区/光标处 link mark 的 href(无则 null)*/
+  getActiveLinkHref(instanceId: string): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const markType = inst.view.state.schema.marks.link;
+    if (!markType) return null;
+    const { from, to, $from } = inst.view.state.selection;
+    if (from >= to) {
+      const m = markType.isInSet($from.marks());
+      return (m?.attrs.href as string | null) ?? null;
+    }
+    let found: string | null = null;
+    inst.view.state.doc.nodesBetween(from, to, (node) => {
+      if (found) return false;
+      const m = markType.isInSet(node.marks);
+      if (m) found = (m.attrs.href as string | null) ?? null;
       return true;
     });
     return found;
@@ -433,6 +512,18 @@ export const textEditingDriverApi = {
     if ($from.depth === 0) return;
     const blockPos = $from.before(1);
     this.turnIntoAt(instanceId, blockPos, target);
+  },
+
+  /**
+   * 滚动到 block anchor(L5-B3.4)
+   *
+   * 笔记加载完成后,view 调本方法把 pendingAnchor 滚到位。
+   * anchor 格式见 build-link-click-plugin 的 scrollToBlockAnchor。
+   */
+  scrollToAnchor(instanceId: string, anchor: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    scrollToBlockAnchor(inst.view, anchor);
   },
 };
 

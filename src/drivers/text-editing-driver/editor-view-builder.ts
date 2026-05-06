@@ -23,6 +23,7 @@ import { buildBlockHandlePlugin } from './plugins/build-block-handle-plugin';
 import { buildListKeymap } from './plugins/build-list-keymap';
 import { buildCodeBlockKeymap } from './plugins/build-code-block-keymap';
 import { buildHardBreakKeymap } from './plugins/build-hard-break-keymap';
+import { buildLinkClickPlugin } from './plugins/build-link-click-plugin';
 
 /**
  * 装配 EditorView
@@ -71,6 +72,7 @@ export function buildEditorView(
     buildListKeymap(schema),     // L5-B3.2 list 内 Tab/Shift-Tab/Enter
     buildCodeBlockKeymap(schema), // L5-B3.2 codeBlock Enter 换行 / 双 Enter 跳出 / Tab 缩进
     buildHardBreakKeymap(schema), // L5-B3.3 Shift-Enter 插入 hardBreak 软换行
+    buildLinkClickPlugin(),       // L5-B3.4 link 点击分发(5 协议路由)
     buildMarkKeymap(schema),     // Mod-b / Mod-i / Mod-Shift-x / Mod-e
     buildHeadingKeymap(schema),  // Mod-Alt-0/1/2/3
     keymap(baseKeymap),          // PM 标准键盘(Enter / Backspace / 光标)兜底
