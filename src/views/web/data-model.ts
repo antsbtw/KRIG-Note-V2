@@ -28,15 +28,30 @@ const DEFAULT_WS_STATE: WebWorkspaceState = Object.freeze({
   currentUrl: WEBVIEW_DEFAULT_URL,
 });
 
-/** hydrate:WorkspaceState.pluginStates['web'] → WebWorkspaceState(默认填充) */
+/**
+ * hydrate cache(避免 useSyncExternalStore 死循环 — 必须返回稳定引用)
+ *
+ * key: workspaceId, value: 上次返回的对象
+ * 当持久化数据没变时返回同一对象,React 才不会判定 state 变化触发重渲。
+ *
+ * 见 src/slot/frame-bindings/use-registry.ts 顶部教训注释。
+ */
+const wsStateCache = new Map<string, WebWorkspaceState>();
+
+/** hydrate:WorkspaceState.pluginStates['web'] → WebWorkspaceState(稳定引用)*/
 export function getWebWsState(ws: WorkspaceState): WebWorkspaceState {
   const persisted = (ws.pluginStates?.[STORE_KEY] as Partial<PersistedWebWsState> | undefined) ?? {};
-  return {
-    currentUrl:
-      typeof persisted.currentUrl === 'string' && persisted.currentUrl
-        ? persisted.currentUrl
-        : DEFAULT_WS_STATE.currentUrl,
-  };
+  const currentUrl =
+    typeof persisted.currentUrl === 'string' && persisted.currentUrl
+      ? persisted.currentUrl
+      : DEFAULT_WS_STATE.currentUrl;
+  const cached = wsStateCache.get(ws.id);
+  if (cached && cached.currentUrl === currentUrl) {
+    return cached;
+  }
+  const next: WebWorkspaceState = { currentUrl };
+  wsStateCache.set(ws.id, next);
+  return next;
 }
 
 /** 写 currentUrl 到 pluginStates(用户导航 / 输 URL bar 时触发)*/

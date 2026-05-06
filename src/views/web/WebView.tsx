@@ -46,6 +46,8 @@ interface WebviewElement extends HTMLElement {
 
 export function WebView({ workspaceId }: WebViewProps) {
   const webviewRef = useRef<WebviewElement | null>(null);
+  /** webview dom-ready 才允许调 getURL / loadURL 等;前期通过 src 属性初始化 URL */
+  const domReadyRef = useRef(false);
 
   // 订阅 per-ws state 取持久化的 currentUrl
   const wsState = useSyncExternalStore(
@@ -119,26 +121,45 @@ export function WebView({ workspaceId }: WebViewProps) {
         });
       };
 
+      // dom-ready 后才允许调 getURL / loadURL 等(对齐 Electron webview 生命周期)
+      const handleDomReady = () => {
+        domReadyRef.current = true;
+        // ready 后 displayUrl 同步实际 URL
+        try {
+          setDisplayUrl(wv.getURL());
+        } catch {
+          /* ignore */
+        }
+      };
+
       wv.addEventListener('did-start-loading', handleStartLoading);
       wv.addEventListener('did-stop-loading', handleStopLoading);
       wv.addEventListener('did-navigate', handleDidNavigate);
       wv.addEventListener('did-navigate-in-page', handleDidNavigateInPage);
       wv.addEventListener('context-menu', handleContextMenu);
+      wv.addEventListener('dom-ready', handleDomReady);
     },
     [workspaceId],
   );
 
   // 切 ws / 外部改 currentUrl(如 link 路由)→ 同步到 webview
+  // 关键:webview 未 dom-ready 时不能调 getURL;此时初始 URL 已通过 src 属性加载,无需介入
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv || !wsState?.currentUrl) return;
-    if (wv.getURL() === wsState.currentUrl) return;
-    // 只在 wsState.currentUrl 跟实际 webview URL 不同时才 loadURL,避免循环
+    if (!domReadyRef.current) return; // webview 还没就绪 — 跳过(初始 src 已带 URL)
+    let actualUrl = '';
+    try {
+      actualUrl = wv.getURL();
+    } catch {
+      return; // 防御:依然失败就跳过
+    }
+    if (actualUrl === wsState.currentUrl) return;
     try {
       wv.loadURL(wsState.currentUrl);
       setDisplayUrl(wsState.currentUrl);
     } catch {
-      // webview 未就绪 — 等下次切 ref 时通过 src 属性加载(下方 src=)
+      /* ignore — webview 不响应,下次 navigate 事件会同步 */
     }
   }, [wsState?.currentUrl]);
 
