@@ -634,6 +634,38 @@
 
 ---
 
+### 6.4 hardBreak block(行内软换行) — 对齐 V1
+
+> V1 spec:inline node + selectable: false + `<br>` 渲染
+> V2 落地:1:1(inline group / parseDOM br / toDOM br)+ Shift-Enter keymap
+
+#### 触发
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.4.1 | 段落中按 Shift-Enter | 当前位置插入 `<br>` 软换行,光标在换行后 | ⏳ |
+| 6.4.2 | 段落末尾按 Shift-Enter | 同上(不出段) | ⏳ |
+| 6.4.3 | 普通 Enter(不 Shift) | 仍正常分段(走 PM 默认),不触发 hardBreak | ⏳ |
+| 6.4.4 | heading 内 Shift-Enter | 同段插换行(标题不分裂) | ⏳ |
+| 6.4.5 | bullet/ordered list 项内 Shift-Enter | 项内换行(不新建项) | ⏳ |
+
+#### 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.4.6 | DOM 输出 | 同段内出现 `<br>` 标签 | ⏳ |
+| 6.4.7 | hardBreak 不可选中 | 鼠标点 br 位置不进入选中态 | ⏳ |
+| 6.4.8 | 粘贴 `<p>a<br>b</p>` HTML | 解析成 paragraph 含 hardBreak | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.4.9 | hardBreak + undo/redo | history 正常 | ⏳ |
+| 6.4.10 | hardBreak 后输入文字带 mark | mark 正常生效 | ⏳ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
@@ -642,3 +674,4 @@
 | 2026-05-06 | 5.1 追加 A/B/C 三块:A(5.1.30-36 PM 健全性补丁,⏳ 待验证)+ B(5.1.37-42 Notion 对标,⏸️ B 阶段)+ C(5.1.C1-C3 KRIG 范围外,N/A) |
 | 2026-05-06 | § 6 新章节 L5-B3.3 marks 扩展 + 简单 block;6.1 underline mark 15 条审计 |
 | 2026-05-06 | § 6.2 textStyle(10 条)+ § 6.3 highlight(9 条)审计;Plan C-1 缩水(完整 ColorPicker UI 留 L5-B3.4) |
+| 2026-05-06 | § 6.4 hardBreak(10 条)审计 |
