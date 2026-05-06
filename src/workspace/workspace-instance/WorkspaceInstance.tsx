@@ -15,6 +15,9 @@ import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
 import { workspaceManager } from '../workspace-state/workspace-manager';
 import { useContextMenuTrigger } from '@slot/triggers/use-context-menu-trigger';
+import { useSlashTrigger } from '@slot/triggers/use-slash-trigger';
+import { useHandleTrigger } from '@slot/triggers/use-handle-trigger';
+import { useFloatingToolbarTrigger } from '@slot/triggers/use-floating-toolbar-trigger';
 import { WorkspaceBusContext } from '@slot/workspace-bus/use-workspace-bus';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import type { WorkspaceState } from '../workspace-state/workspace-state';
@@ -47,6 +50,9 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
   // 4 大交互触发器统一在 WorkspaceInstance 挂(选项 A)— 范围 = Workspace 根 DOM,自然按 Workspace 隔离。
   // viewId 为 null 时 hook 不挂监听器(待 view 注册后自动激活)。
   useContextMenuTrigger(rootRef, activeViewId);
+  useSlashTrigger(rootRef, activeViewId);          // L5-B3.1
+  useHandleTrigger(rootRef, activeViewId);         // L5-B3.1
+  useFloatingToolbarTrigger(activeViewId);         // L5-B3.1
 
   // L3.5:Workspace bus(每 Workspace 一实例,跨 Workspace 不通)
   const bus = workspaceManager.getBus(state.id) ?? null;

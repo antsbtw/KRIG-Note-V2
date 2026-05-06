@@ -5,6 +5,19 @@
   width: 100%;
   display: flex;
   flex-direction: column;
+  overflow: auto;
+}
+
+/* 编辑区限宽居中(对齐 V1 视觉:maxWidth 900 + margin 0 auto)*/
+.krig-note-view-content {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  box-sizing: border-box;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .krig-note-empty {

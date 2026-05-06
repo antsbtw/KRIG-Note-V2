@@ -1,7 +1,7 @@
 /**
  * driver API — view command handler 通过此调 driver
  *
- * 见 L5B2 设计 § 3.4。
+ * 见 L5B2 设计 § 3.4 + L5B3.1 设计 § 3.5。
  *
  * 边界:view 不持有 EditorView,通过 instanceId 路由到具体实例。
  *       view 不接触 PM 内部对象 — driver api 是 driver 的对外契约。
@@ -9,7 +9,9 @@
 
 import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { undo, redo } from 'prosemirror-history';
+import { TextSelection } from 'prosemirror-state';
 import { instanceRegistry } from './instance-registry';
+import { clearSlashTrigger } from './plugins/build-slash-plugin';
 
 export type MarkName = 'bold' | 'italic' | 'strike' | 'code';
 
@@ -72,6 +74,106 @@ export const textEditingDriverApi = {
       name: node.type.name,
       level: (node.attrs.level as number | null) ?? null,
     };
+  },
+
+  // ── L5-B3.1:handle / context-menu / slash 用 ──
+
+  /** 清除 slash menu 触发的 / 跟 query(slash 命令调用前)*/
+  clearSlashTrigger(instanceId: string): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return false;
+    return clearSlashTrigger(inst.view);
+  },
+
+  /** 改特定 block 的 heading level(handle / context-menu Turn Into 用)*/
+  setHeadingAt(instanceId: string, pos: number, level: number | null): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(pos);
+    if (!node || node.type.name !== 'text-block') return;
+    const tr = inst.view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, level });
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /** 复制 block(在原 block 之后插入复本)*/
+  copyBlockAt(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(pos);
+    if (!node) return;
+    const insertPos = pos + node.nodeSize;
+    const tr = inst.view.state.tr.insert(insertPos, node.copy(node.content));
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /** 删除 block */
+  deleteBlockAt(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(pos);
+    if (!node) return;
+    // doc 至少留一个 block(防 schema content: 'block+' 报错)
+    if (inst.view.state.doc.childCount === 1) {
+      // 改成空 paragraph 而非删除
+      const empty = inst.view.state.schema.nodes['text-block']?.create();
+      if (!empty) return;
+      const tr = inst.view.state.tr.replaceWith(pos, pos + node.nodeSize, empty);
+      inst.view.dispatch(tr);
+      return;
+    }
+    const tr = inst.view.state.tr.delete(pos, pos + node.nodeSize);
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /** 移动 block(dnd 拖拽完成时调)*/
+  moveBlock(instanceId: string, fromPos: number, toPos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    if (fromPos === toPos) return;
+    const node = inst.view.state.doc.nodeAt(fromPos);
+    if (!node) return;
+    const tr = inst.view.state.tr;
+    // 先记下要插入的目标 pos(删除后位置可能变)
+    let actualToPos = toPos;
+    if (toPos > fromPos) {
+      actualToPos = toPos - node.nodeSize;
+    }
+    tr.delete(fromPos, fromPos + node.nodeSize);
+    tr.insert(actualToPos, node.copy(node.content));
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /** 解析屏幕坐标 → block pos + type(context-menu 鼠标位置用)*/
+  resolveBlockAt(
+    instanceId: string,
+    coords: { x: number; y: number },
+  ): { pos: number; type: string; level: number | null } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const result = inst.view.posAtCoords({ left: coords.x, top: coords.y });
+    if (!result) return null;
+    const $pos = inst.view.state.doc.resolve(result.pos);
+    if ($pos.depth === 0) return null;
+    const blockPos = $pos.before(1);
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    return {
+      pos: blockPos,
+      type: node.type.name,
+      level: (node.attrs.level as number | null) ?? null,
+    };
+  },
+
+  /** 把光标设到 pos(需要时使用,如 setHeading 后 ContextMenu 期望保持光标)*/
+  setSelectionAt(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const tr = inst.view.state.tr.setSelection(TextSelection.near(inst.view.state.doc.resolve(pos)));
+    inst.view.dispatch(tr);
   },
 };
 

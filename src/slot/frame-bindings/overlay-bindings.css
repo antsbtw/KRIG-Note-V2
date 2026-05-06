@@ -51,7 +51,10 @@
 
 .krig-floating-toolbar-item {
   width: auto;
-  padding: 4px 8px;
+  padding: 4px 10px;
+  min-width: 28px;
+  text-align: center;
+  font-weight: 500;
 }
 
 .krig-context-menu-item:hover,
@@ -59,6 +62,59 @@
 .krig-handle-menu-item:hover,
 .krig-floating-toolbar-item:hover {
   background-color: #3a3a3a;
+}
+
+/* L5-B3.1 — floating-toolbar active 高亮 */
+.krig-floating-toolbar-item.active {
+  background-color: rgba(74, 144, 226, 0.25);
+  color: #fff;
+}
+
+/* L5-B3.1 — slash menu 选中态 */
+.krig-slash-menu-item.selected {
+  background-color: rgba(74, 144, 226, 0.25);
+  color: #fff;
+}
+
+/* L5-B3.1 — block handle widget(driver 内部 widget decoration 渲染)*/
+.krig-block-handle {
+  position: absolute;
+  left: -22px;
+  top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #555;
+  cursor: grab;
+  font-size: 11px;
+  font-weight: 700;
+  user-select: none;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background-color 0.12s;
+  pointer-events: auto;
+}
+
+.krig-block-handle:active {
+  cursor: grabbing;
+}
+
+/* hover 父行(text-block / heading)时 handle 显出 */
+.krig-pm-host .ProseMirror > * {
+  position: relative;
+}
+
+.krig-pm-host .ProseMirror > *:hover > .krig-block-handle,
+.krig-block-handle:hover {
+  opacity: 1;
+  color: #888;
+}
+
+.krig-block-handle:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ccc;
 }
 
 /* 通用 Overlay(帮助 / dialog)— 全屏 backdrop */

@@ -16,6 +16,7 @@ import { registerSelectionSource, emitSelectionChanged } from './capability-inte
 import { registerUndoScope } from './capability-integrations/undo-scope';
 import { registerDropTargets } from './capability-integrations/dnd-targets';
 import { registerInsertionSafeguards } from './capability-integrations/insertion-safeguards';
+import { setupFloatingToolbarTrigger } from './floating-toolbar-source';
 import { textBlockSpec } from './blocks/text-block/spec';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
@@ -42,16 +43,24 @@ export function Host(props: TextEditingHostProps) {
       return;
     }
 
-    const view = buildEditorView(container, schema, ENABLED_BLOCKS, initialDoc, (tr, v) => {
-      // doc 变化:封装回 DriverSerialized,触发 onChange
-      if (tr.docChanged) {
-        const serialized = serializeDoc(v.state.doc);
-        onChangeRef.current?.(serialized);
-      }
-      // selection 变化:emit 到 selection capability(带实例 source)
-      // L5-A:每次 transaction 都 emit(L5-B 优化为 selection 真变才 emit)
-      emitSelectionChanged(v, config.instanceId);
-    });
+    const view = buildEditorView(
+      container,
+      schema,
+      ENABLED_BLOCKS,
+      initialDoc,
+      (tr, v) => {
+        // doc 变化:封装回 DriverSerialized,触发 onChange
+        if (tr.docChanged) {
+          const serialized = serializeDoc(v.state.doc);
+          onChangeRef.current?.(serialized);
+        }
+        // selection 变化:emit 到 selection capability(带实例 source)
+        // L5-B2:Snapshot diff 真变才 emit
+        emitSelectionChanged(v, config.instanceId);
+      },
+      config.viewId,
+      config.instanceId,
+    );
 
     viewRef.current = view;
 
@@ -66,18 +75,21 @@ export function Host(props: TextEditingHostProps) {
     const unregisterUndo = registerUndoScope(config.undoScope);
     const unregisterDnd = registerDropTargets(config.instanceId);
     const unregisterInsertion = registerInsertionSafeguards(config.instanceId);
+    // L5-B3.1:floating-toolbar 监听 selection capability
+    const unregisterFt = setupFloatingToolbarTrigger(view, config.viewId, config.instanceId);
 
     return () => {
       unregisterSource();
       unregisterUndo();
       unregisterDnd();
       unregisterInsertion();
+      unregisterFt();
       instanceRegistry.delete(config.instanceId);
       view.destroy();
       viewRef.current = null;
     };
     // 依赖 instanceId / undoScope —— 实例 ID 变化时必须重建(doc 在另一个 useEffect 处理)
-  }, [config.instanceId, config.undoScope]);
+  }, [config.instanceId, config.undoScope, config.viewId]);
 
   // 外部 doc 变化(view 切笔记)→ 替换 PM doc
   useEffect(() => {
