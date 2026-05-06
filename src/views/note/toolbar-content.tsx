@@ -105,6 +105,27 @@ export function registerToolbar(): void {
       order: 33,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
     },
+    // L5-B3.3:文字色 / 高亮循环按钮
+    {
+      id: 'note-view.text-color',
+      view: VIEW,
+      kind: 'button',
+      label: 'A',
+      command: 'note-view.cycle-text-color',
+      group: 'left',
+      order: 34,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
+    },
+    {
+      id: 'note-view.highlight',
+      view: VIEW,
+      kind: 'button',
+      label: 'A̲',
+      command: 'note-view.cycle-highlight',
+      group: 'left',
+      order: 35,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),
+    },
   ];
   toolbarRegistry.register(items);
 }

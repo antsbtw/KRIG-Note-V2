@@ -97,9 +97,9 @@
 | # | V1 mark | 工作量 | 状态 | 备注 |
 |---|---|---|---|---|
 | 5 | underline | 极小 | ✅ L5-B3.3 | `<u>` + Cmd+U + 顶部 toolbar U + floating-toolbar U |
-| 6 | link | 小 | ⏳ | href + title attr,核心能力,需要 popover 编辑 URL |
-| 7 | textStyle | 小 | ⏳ | color attr(`<span style>`) |
-| 8 | highlight | 小 | ⏳ | 背景色 attr(`<mark>`),含 color picker UI |
+| 6 | link | 大 | ⏸️ L5-B3.4 | linkMark spec 简单,但联动 LinkPanel 三 Tab(笔记/文件/网页)+ link-click 5 协议路由 + 历史栈 + viewAPI IPC,实质是大工程,升格独立阶段 |
+| 7 | textStyle | 小 | ✅ L5-B3.3 (Plan C-1 缩水) | mark spec 全量 + cycle 命令(6 色循环);完整 ColorPicker UI 留 L5-B3.4 |
+| 8 | highlight | 小 | ✅ L5-B3.3 (Plan C-1 缩水) | mark spec 全量 + cycle 命令(6 半透明色);完整 ColorPicker UI 留 L5-B3.4 |
 
 ---
 
@@ -116,10 +116,10 @@
 
 | 顺序 | 项 | 类型 | 状态 | commit |
 |---|---|---|---|---|
-| 1 | underline mark | mark | ✅ | (本批 commit) |
-| 2 | link mark + URL 编辑 popup | mark | ⏳ | — |
-| 3 | textStyle mark(color) | mark | ⏳ | — |
-| 4 | highlight mark(背景色 + color picker)| mark | ⏳ | — |
+| 1 | underline mark | mark | ✅ | f33314a |
+| 2 | ~~link mark + URL 编辑 popup~~ | mark | ⏸️ **升格 L5-B3.4** | 跨 view 路由系统 + viewAPI 大工程 |
+| 3 | textStyle mark(color) | mark | ✅ Plan C-1 | (本批 commit) |
+| 4 | highlight mark(背景色) | mark | ✅ Plan C-1 | (合并 #3 同 commit) |
 | 5 | hard-break block | block | ⏳ | — |
 | 6 | callout block | block | ⏳ | — |
 | 7 | toggle-list block | block | ⏳ | — |

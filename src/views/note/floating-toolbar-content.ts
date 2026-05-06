@@ -51,6 +51,23 @@ export function registerFloatingToolbar(): void {
       order: 40,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
     },
+    // L5-B3.3:文字色 / 高亮(循环 6 色;完整 ColorPicker UI 留 L5-B3.4)
+    {
+      id: 'note-view.ft.text-color',
+      label: 'A',
+      command: 'note-view.cycle-text-color',
+      view: VIEW,
+      order: 50,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
+    },
+    {
+      id: 'note-view.ft.highlight',
+      label: 'A̲',
+      command: 'note-view.cycle-highlight',
+      view: VIEW,
+      order: 60,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),
+    },
   ];
   floatingToolbarRegistry.register(items);
 }

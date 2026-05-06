@@ -153,6 +153,42 @@ export function registerNoteCommands(): void {
     textEditingDriverApi.setHeading(wsId, lvl);
   });
 
+  // ── L5-B3.3:文字颜色 / 背景高亮(Plan C-1 缩水版 — 6 色循环;完整 ColorPicker UI 留 L5-B3.4)──
+
+  // 对齐 V1 ColorPicker 文字色板(6 个常用色,covers 90% 用例;V1 完整 10 色留 L5-B3.4)
+  const TEXT_COLOR_CYCLE = [
+    '',           // default(移除色)
+    '#9aa0a6',    // gray
+    '#f5c518',    // yellow
+    '#8ab4f8',    // blue
+    '#ea4335',    // red
+    '#34a853',    // green
+  ];
+
+  // 对齐 V1 highlight 色板(rgba 半透明,看着柔和)
+  const HIGHLIGHT_COLOR_CYCLE = [
+    '',                                  // default
+    'rgba(154, 160, 166, 0.2)',          // gray
+    'rgba(245, 197, 24, 0.2)',           // yellow
+    'rgba(138, 180, 248, 0.2)',          // blue
+    'rgba(234, 67, 53, 0.2)',            // red
+    'rgba(52, 168, 83, 0.2)',            // green
+  ];
+
+  commandRegistry.register('note-view.cycle-text-color', withInstance((instanceId) => {
+    const cur = textEditingDriverApi.getActiveTextColor(instanceId);
+    const idx = TEXT_COLOR_CYCLE.indexOf(cur ?? '');
+    const next = TEXT_COLOR_CYCLE[(idx + 1) % TEXT_COLOR_CYCLE.length];
+    textEditingDriverApi.setTextColor(instanceId, next);
+  }));
+
+  commandRegistry.register('note-view.cycle-highlight', withInstance((instanceId) => {
+    const cur = textEditingDriverApi.getActiveHighlight(instanceId);
+    const idx = HIGHLIGHT_COLOR_CYCLE.indexOf(cur ?? '');
+    const next = HIGHLIGHT_COLOR_CYCLE[(idx + 1) % HIGHLIGHT_COLOR_CYCLE.length];
+    textEditingDriverApi.setHighlight(instanceId, next);
+  }));
+
   commandRegistry.register('note-view.undo', withInstance((instanceId) => {
     textEditingDriverApi.undo(instanceId);
   }));
