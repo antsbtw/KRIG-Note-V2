@@ -33,12 +33,18 @@ export function setupFloatingToolbarTrigger(
     }
     if (view.isDestroyed) return;
     // 计算选区屏幕坐标(选区上方居中)
+    // FLOATING_TOOLBAR_HEIGHT 跟 overlay-bindings.css .krig-floating-toolbar 实际高度一致(行高+padding+border)
+    // 用估算值是因为浮条 mount 前算不出真实高度,微调 ±2px 用户感知不到
+    const FLOATING_TOOLBAR_HEIGHT = 38;
+    const GAP = 8;
     try {
       const sel = view.state.selection;
       const fromCoords = view.coordsAtPos(sel.from);
       const toCoords = view.coordsAtPos(sel.to);
       const x = (fromCoords.left + toCoords.right) / 2;
-      const y = Math.min(fromCoords.top, toCoords.top) - 8;
+      const selectionTop = Math.min(fromCoords.top, toCoords.top);
+      // 浮条 top = 选区 top - 浮条高度 - 间距(让浮条**底部**在选区上方 GAP px)
+      const y = selectionTop - FLOATING_TOOLBAR_HEIGHT - GAP;
       floatingToolbarController.show(x, y, viewId);
     } catch {
       // 坐标算不出来时静默(选区跨多行可能瞬态)
