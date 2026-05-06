@@ -186,8 +186,16 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         }
       };
 
-      const onMouseLeave = () => {
+      const onMouseLeave = (e: MouseEvent) => {
         if (isDragging) return;
+        // 诊断:看 relatedTarget 是什么(鼠标接下来去哪)
+        const related = e.relatedTarget as Element | null;
+        console.log('[block-handle] view.dom mouseleave', {
+          relatedTag: related?.tagName,
+          relatedClass: related?.className,
+          isHandle: related === dom || (related && dom.contains(related)),
+          mouseAt: { x: e.clientX, y: e.clientY },
+        });
         scheduleHide('view.dom mouseleave');
       };
 
