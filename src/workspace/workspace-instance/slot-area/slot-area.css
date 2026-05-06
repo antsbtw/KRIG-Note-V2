@@ -35,23 +35,29 @@
   display: none;
 }
 
-/* Slot 框架装饰(占位文字 + 关闭按钮)— 与 view 实例叠加在同一 grid area,view 之上 */
+/* Slot 框架装饰(占位文字 + 关闭按钮)— 与 view 实例叠加在同一 grid area
+ *
+ * ⚠️ frame 必须 background:transparent 不能挡 view 内容!
+ * 关闭按钮自己有 background + z-index 显示。
+ * 占位文字(.krig-slot-empty)只在没 view 时显示(条件渲染)。
+ * pointer-events:none 让点击穿透到下层 view,只有按钮(pointer-events:auto)可点。
+ */
 .krig-slot-frame {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #252525;
-  border-radius: 4px;
+  background-color: transparent;
   margin: 4px;
   color: #555;
-  overflow: hidden;
+  overflow: visible;
   grid-row: 1;
-  /*
-   * frame 的 z-index 高于 view 这部分故意如此 — 关闭按钮始终可点(右上角)。
-   * L5 view component 真渲染时,占位文字 .krig-slot-empty 不显示(条件渲染),
-   * frame 只剩透明背景 + 关闭按钮,不挡 view 内容(view margin 与 frame margin 一致)。
-   */
+  pointer-events: none;
+}
+
+.krig-slot-frame .krig-slot-close,
+.krig-slot-frame .krig-slot-empty {
+  pointer-events: auto;
 }
 
 .krig-slot-frame--left {

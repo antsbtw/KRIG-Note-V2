@@ -5,7 +5,8 @@
  */
 
 import { useActiveWorkspaceId, useWorkspace } from '@workspace/workspace-instance/use-workspace';
-import { getNotePluginState, setActiveNote, deleteNote } from './data-model';
+import { commandRegistry } from '@slot/command-registry/command-registry';
+import { getNotePluginState, deleteNote } from './data-model';
 
 function formatTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -42,7 +43,7 @@ export function NoteList() {
         <li
           key={note.id}
           className={`krig-note-list-item${note.id === state.activeNoteId ? ' active' : ''}`}
-          onClick={() => setActiveNote(wsId, note.id)}
+          onClick={() => commandRegistry.execute('note-view.set-active', note.id)}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();

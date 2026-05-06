@@ -11,10 +11,25 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { createNote, deleteNote, setActiveNote, getNotePluginState } from './data-model';
 
+/**
+ * 确保 slotBinding.left = 'note-view'(用户可能从 NavSide 点 "+ 笔记" 但还没切到 NoteView)。
+ * 不破坏其他字段。
+ */
+function ensureNoteViewActive(wsId: string): void {
+  const ws = workspaceManager.get(wsId);
+  if (!ws) return;
+  if (ws.slotBinding.left === 'note-view') return;
+  workspaceManager.update(wsId, {
+    slotBinding: { ...ws.slotBinding, left: 'note-view' },
+  });
+}
+
 export function registerNoteCommands(): void {
   commandRegistry.register('note-view.create-note', () => {
     const wsId = workspaceManager.getActiveId();
-    if (wsId) createNote(wsId);
+    if (!wsId) return;
+    createNote(wsId);
+    ensureNoteViewActive(wsId);   // 自动切到 NoteView
   });
 
   commandRegistry.register('note-view.delete-active', () => {
@@ -29,6 +44,8 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.set-active', (noteId: unknown) => {
     if (typeof noteId !== 'string') return;
     const wsId = workspaceManager.getActiveId();
-    if (wsId) setActiveNote(wsId, noteId);
+    if (!wsId) return;
+    setActiveNote(wsId, noteId);
+    ensureNoteViewActive(wsId);   // 自动切到 NoteView(用户可能从其他 view 来)
   });
 }
