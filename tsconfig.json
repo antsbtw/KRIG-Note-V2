@@ -17,6 +17,7 @@
     "paths": {
       "@views/*":        ["src/views/*"],
       "@capabilities/*": ["src/capabilities/*"],
+      "@drivers/*":      ["src/drivers/*"],
       "@semantic/*":     ["src/semantic/*"],
       "@storage/*":      ["src/storage/*"],
       "@platform/*":     ["src/platform/*"],

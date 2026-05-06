@@ -10,6 +10,7 @@ export default defineConfig({
     alias: {
       '@views':        fileURLToPath(new URL('./src/views', import.meta.url)),
       '@capabilities': fileURLToPath(new URL('./src/capabilities', import.meta.url)),
+      '@drivers':      fileURLToPath(new URL('./src/drivers', import.meta.url)),
       '@semantic':     fileURLToPath(new URL('./src/semantic', import.meta.url)),
       '@storage':      fileURLToPath(new URL('./src/storage', import.meta.url)),
       '@platform':     fileURLToPath(new URL('./src/platform', import.meta.url)),
