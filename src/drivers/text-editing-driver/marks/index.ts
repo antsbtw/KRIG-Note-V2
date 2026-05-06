@@ -3,7 +3,7 @@
  *
  * L5-B2:bold / italic / strike / code(4 个)
  * L5-B3.3:+ underline / textStyle / highlight(7 个)
- * L5-B3.4(待):+ link
+ * L5-B3.4:+ link(8 个)
  */
 
 import type { MarkSpec } from 'prosemirror-model';
@@ -14,6 +14,7 @@ import { codeMark } from './code';
 import { underlineMark } from './underline';
 import { textStyleMark } from './text-style';
 import { highlightMark } from './highlight';
+import { linkMark } from './link';
 
 export const MARKS: Record<string, MarkSpec> = {
   bold: boldMark,
@@ -23,6 +24,7 @@ export const MARKS: Record<string, MarkSpec> = {
   code: codeMark,
   textStyle: textStyleMark,
   highlight: highlightMark,
+  link: linkMark,
 };
 
 /** schema 装载顺序(影响 toDOM 输出嵌套)— 由约定保证稳定 */
@@ -34,4 +36,5 @@ export const ENABLED_MARK_NAMES = [
   'code',
   'textStyle',
   'highlight',
+  'link',
 ] as const;
