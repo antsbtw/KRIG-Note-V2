@@ -61,6 +61,7 @@ import { contextMenuRegistry } from '../interaction-registries/context-menu-regi
 import { slashRegistry } from '../interaction-registries/slash-registry/slash-registry';
 import { handleRegistry } from '../interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
+import { popupRegistry } from '../interaction-registries/popup-registry/popup-registry';
 
 export function useContextMenuVersion(): number {
   return useSyncExternalStore(
@@ -87,6 +88,13 @@ export function useFloatingToolbarVersion(): number {
   return useSyncExternalStore(
     (cb) => floatingToolbarRegistry.subscribe(cb),
     () => floatingToolbarRegistry.count,
+  );
+}
+
+export function usePopupVersion(): number {
+  return useSyncExternalStore(
+    (cb) => popupRegistry.subscribe(cb),
+    () => popupRegistry.count,
   );
 }
 

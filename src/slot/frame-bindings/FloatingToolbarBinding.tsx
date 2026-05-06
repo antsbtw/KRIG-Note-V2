@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useFloatingToolbarVersion } from './use-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { floatingToolbarController } from '../triggers/floating-toolbar-controller';
+import { popupController } from '../triggers/popup-controller';
 import { commandRegistry } from '../command-registry/command-registry';
 import { selection, type SelectionPayload } from '@capabilities/selection';
 import type { ToolbarItemContext } from '../toolbar-registry/toolbar-types';
@@ -84,13 +85,20 @@ export function FloatingToolbarBinding() {
     >
       {items.map((item) => {
         const active = item.activeWhen?.(ctx) ?? false;
+        const isPopupTrigger = item.kind === 'popup-trigger';
         return (
           <button
             key={item.id}
             type="button"
             className={`krig-floating-toolbar-item${active ? ' active' : ''}`}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => commandRegistry.execute(item.command, item.commandArg)}
+            onClick={(e) => {
+              if (isPopupTrigger && item.popupId) {
+                popupController.toggle(item.popupId, e.currentTarget);
+              } else if (item.command) {
+                commandRegistry.execute(item.command, item.commandArg);
+              }
+            }}
             title={item.label}
           >
             {item.icon ?? item.label}
