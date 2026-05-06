@@ -129,18 +129,28 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         currentPos = blockStart;
         currentBlockType = blockNode.type.name;
 
-        // 定位 handle:position: fixed 用 viewport 坐标,直接对齐 block 屏幕坐标
+        // 定位 handle:position: fixed 用 viewport 坐标
+        // V1 模式:handle 在 view.dom 内的 padding-left 区(左 padding 48-72px 都是 gutter)
+        //   - 鼠标移到 handle 上仍在 view.dom 内 → mousemove 持续触发,handle 不消失
+        //   - handle 离 block 文字近(距离 ≈ block 行 padding-left - handle 宽度 - 2)
         const blockRect = blockDom.getBoundingClientRect();
-        const top = blockRect.top + 4;       // 跟 block 顶部对齐(微调 +4 给 caret 让位)
-        const left = editorRect.left - 26;   // 编辑区左侧 26px(handle 宽度 22 + 4 间距)
+        const top = blockRect.top + 2;
+        // 编辑区文字左边缘 = editorRect.left + padding-left(我们设 48)
+        // handle 紧靠文字左侧,离文字约 4px
+        const PM_PADDING_LEFT = 48;
+        const HANDLE_WIDTH = 22;
+        const left = editorRect.left + PM_PADDING_LEFT - HANDLE_WIDTH - 4;
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
         dom.style.opacity = '1';
         dom.style.pointerEvents = 'auto';
       };
 
-      const onMouseLeave = () => {
+      const onMouseLeave = (e: MouseEvent) => {
         if (isDragging) return;
+        // 鼠标移到 handle 自己上 → 不 hide(handle 跟 view.dom 视觉相邻但 DOM 上是兄弟)
+        const related = e.relatedTarget as Node | null;
+        if (related && (related === dom || dom.contains(related))) return;
         dom.style.opacity = '0';
         dom.style.pointerEvents = 'none';
         currentPos = -1;
