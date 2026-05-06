@@ -12,6 +12,7 @@ import { EditorView, type NodeViewConstructor } from 'prosemirror-view';
 import type { Schema, Node as PMNode } from 'prosemirror-model';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
+import { dropCursor } from 'prosemirror-dropcursor';
 import type { BlockSpec } from './types';
 import { buildHistoryPlugins } from './plugins/build-history-plugin';
 import { buildInputRules } from './plugins/build-input-rules';
@@ -63,6 +64,7 @@ export function buildEditorView(
     buildInputRules(schema),     // headings + 4 mark markdown
     buildSlashPlugin(viewId),    // / 触发 slashMenuController(L5-B3.1)
     buildBlockHandlePlugin(viewId, instanceId), // ⋮⋮ 手柄 + drag source(L5-B3.1)
+    dropCursor({ color: '#4a90e2', width: 2 }), // L5-B3.1 拖拽时显蓝线指示插入位置
     buildMarkKeymap(schema),     // Mod-b / Mod-i / Mod-Shift-x / Mod-e
     buildHeadingKeymap(schema),  // Mod-Alt-0/1/2/3
     keymap(baseKeymap),          // PM 标准键盘(Enter / Backspace / 光标)兜底
