@@ -6,7 +6,7 @@
 >
 > **协议依据**:
 > - [drivers/COMMON-DRIVER-PROTOCOL.md](../../drivers/COMMON-DRIVER-PROTOCOL.md) v0.2(driver 协议)
-> - [drivers/text-editing-driver/DESIGN.md](../../drivers/text-editing-driver/DESIGN.md) v0.1(driver 实施设计)
+> - [drivers/text-editing-driver/DESIGN.md](../../drivers/text-editing-driver/DESIGN.md) v0.2(driver 实施设计)
 > - [drivers/text-editing-driver/BLOCK-SPEC.md](../../drivers/text-editing-driver/BLOCK-SPEC.md) v0.1(block 子协议)
 > - [capabilities/COMMON-PROTOCOL.md](../../capabilities/COMMON-PROTOCOL.md) v0.3(5 capability 协议)
 >
@@ -598,3 +598,4 @@ L5-A 实施时建 `src/views/L5-alive.ts`(类似 L4-alive.ts 模式)。
 | 2026-05-05 | v0.1 | 初稿;按"动作类型 capability"思路设计;后被 v0.5 driver 架构调整推翻。 |
 | 2026-05-05 | v0.2 | **整体重写**(driver 架构落地后):view 装 5 capability + driver(install 列表显式)/ data-model 用 DriverSerialized 信封 / commandRegistry 用 view 命名空间(note-view.*)/ NoteView 完整 CRUD + NavSide 列表 + 切换(Q-N4=A)/ 实施清单 ~405 行 / 完成判据 15 条。Q-N1~5 用户拍板固化。 |
 | 2026-05-05 | v0.2.1 | **AI 审计 P1.3 同步修复**:Host props 加 `instanceId: workspaceId`(driver 用此实现多实例 selection source 隔离 — driver DESIGN v0.2 同步修订)。 |
+| 2026-05-05 | v0.2.2 | **AI 复审 P2 跨文档版本对齐**:协议依据引用 `drivers/text-editing-driver/DESIGN.md v0.1` → `v0.2`(driver DESIGN 已升级到 v0.2,本文引用未同步)。 |

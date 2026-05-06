@@ -677,7 +677,7 @@ L4 capabilityRegistry(Q5=B 极简)只存 id/version。本协议要求 capability
 
 这跟"capability 之间不互相 import"不冲突 — capability 之间不互相 import,view 和 driver 可以 import capability。
 
-### 6.8 协议演化(本文件 v0.4 / v0.5)?
+### 6.8 协议演化(未来版本升级)?
 
 **推荐**:每次重大调整加 v0.X,旧版本作为历史保留。本协议的演化主要在:
 - 加新 capability(罕见)
