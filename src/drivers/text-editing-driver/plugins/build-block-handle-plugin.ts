@@ -135,7 +135,6 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const blockComputed = window.getComputedStyle(blockDom);
         const blockRect = blockDom.getBoundingClientRect();
         const lineHeight = parseFloat(blockComputed.lineHeight) || parseFloat(blockComputed.fontSize) * 1.7;
-        const fontSize = parseFloat(blockComputed.fontSize);
         const paddingTop = parseFloat(blockComputed.paddingTop);
 
         const HANDLE_HEIGHT = 22;
@@ -153,14 +152,19 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         dom.style.opacity = '1';
         dom.style.pointerEvents = 'auto';
 
-        // 诊断(前 5 次)
+        // 诊断(前 5 次)— v3:对比 view.dom 实际矩形 vs handle 矩形
         if (handlePositionLogCount < 5) {
-          console.log('[block-handle][fix v2] positioned', {
-            blockType: blockNode.type.name,
-            fontSize, lineHeight, paddingTop,
-            blockRect: { top: blockRect.top, height: blockRect.height },
-            handle: { top, left },
-            handleAfterRender: dom.getBoundingClientRect(),
+          const viewRect = view.dom.getBoundingClientRect();
+          const handleRect = dom.getBoundingClientRect();
+          console.log('[block-handle][fix v3] positioned', {
+            lineHeight, paddingTop,
+            viewDomRect: { left: viewRect.left, right: viewRect.right },
+            handleRect: { left: handleRect.left, top: handleRect.top, w: handleRect.width, h: handleRect.height },
+            handleInsideViewDom: handleRect.left >= viewRect.left && handleRect.right <= viewRect.right,
+            elementAtHandleCenter: document.elementFromPoint(
+              handleRect.left + handleRect.width / 2,
+              handleRect.top + handleRect.height / 2
+            )?.outerHTML?.slice(0, 100),
           });
           handlePositionLogCount++;
         }
