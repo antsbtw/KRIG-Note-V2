@@ -35,15 +35,16 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dom.draggable = true;
       dom.textContent = '⋮⋮';
       dom.title = '拖动以重排,点击打开菜单';
-      // position: fixed 用 viewport 坐标 — 不管父容器是 maxWidth/居中/transform 都不影响
+      // position: fixed + 高 z-index;visibility 控制显隐(不用 opacity transition,避免
+      // 半透明阶段 pointer-events 行为不一致)
       dom.style.cssText = `
         position: fixed;
-        opacity: 0;
-        pointer-events: none;
+        visibility: hidden;
+        pointer-events: auto;
         z-index: 10000;
-        transition: opacity 0.15s;
       `;
-      // 直接挂 body,避免父容器(maxWidth 居中 / transform / overflow:hidden)干扰
+      // 挂到 view.dom 父级链上的最早 stacking-friendly 父元素(html.body)
+      // body 是最干净的容器,不会有 transform/opacity 创建的 stacking context 困住
       document.body.appendChild(dom);
 
       // ── handle 事件 ──
@@ -88,8 +89,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           e.clientY < editorRect.top ||
           e.clientY > editorRect.bottom
         ) {
-          dom.style.opacity = '0';
-          dom.style.pointerEvents = 'none';
+          dom.style.visibility = 'hidden';
           currentPos = -1;
           return;
         }
@@ -100,8 +100,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         const result = view.posAtCoords({ left: probeX, top: e.clientY });
         if (!result) {
-          dom.style.opacity = '0';
-          dom.style.pointerEvents = 'none';
+          dom.style.visibility = 'hidden';
           return;
         }
 
@@ -122,8 +121,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         }
 
         if (blockStart < 0 || !blockNode || !blockDom) {
-          dom.style.opacity = '0';
-          dom.style.pointerEvents = 'none';
+          dom.style.visibility = 'hidden';
           return;
         }
 
@@ -149,22 +147,23 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
-        dom.style.opacity = '1';
-        dom.style.pointerEvents = 'auto';
+        dom.style.visibility = 'visible';
 
-        // 诊断(前 5 次)— v3:对比 view.dom 实际矩形 vs handle 矩形
+        // 诊断(前 5 次)
         if (handlePositionLogCount < 5) {
-          const viewRect = view.dom.getBoundingClientRect();
-          const handleRect = dom.getBoundingClientRect();
-          console.log('[block-handle][fix v3] positioned', {
-            lineHeight, paddingTop,
-            viewDomRect: { left: viewRect.left, right: viewRect.right },
-            handleRect: { left: handleRect.left, top: handleRect.top, w: handleRect.width, h: handleRect.height },
-            handleInsideViewDom: handleRect.left >= viewRect.left && handleRect.right <= viewRect.right,
-            elementAtHandleCenter: document.elementFromPoint(
-              handleRect.left + handleRect.width / 2,
-              handleRect.top + handleRect.height / 2
-            )?.outerHTML?.slice(0, 100),
+          // 等下一帧让 visibility 生效再测
+          requestAnimationFrame(() => {
+            const r2 = dom.getBoundingClientRect();
+            const stack = document.elementsFromPoint(
+              r2.left + r2.width / 2,
+              r2.top + r2.height / 2,
+            );
+            console.log('[block-handle][fix v4] positioned', {
+              handleVisible: window.getComputedStyle(dom).visibility,
+              handleZ: window.getComputedStyle(dom).zIndex,
+              stack: stack.slice(0, 5).map((e) => `${e.tagName}.${e.className?.toString().slice(0, 30) || ''}`),
+              handleAtTop: stack[0] === dom,
+            });
           });
           handlePositionLogCount++;
         }
@@ -176,8 +175,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         if (hideTimer) clearTimeout(hideTimer);
         hideTimer = setTimeout(() => {
           console.log('[block-handle] hide fired (no cancel within 200ms)');
-          dom.style.opacity = '0';
-          dom.style.pointerEvents = 'none';
+          dom.style.visibility = 'hidden';
           currentPos = -1;
           hideTimer = null;
         }, 200); // 增加到 200ms,鼠标过渡更充裕
