@@ -290,10 +290,11 @@ export function NoteView({ workspaceId }: ViewComponentProps) {
     <div className="krig-note-view">
       <textEditingDriver.Host
         config={{
+          instanceId: workspaceId,    // P1.3:实例隔离 — driver 用此区分多 Host 实例
           undoScope: 'note-view.pm',  // 铁律 6b:view-id.purpose
         }}
-        doc={activeNote.doc}
-        onChange={handleDocChange}
+        doc={activeNote.doc}                            // DriverSerialized 信封(P1.1 修复后契约一致)
+        onChange={handleDocChange}                      // (newDoc: DriverSerialized) => void
       />
     </div>
   );
@@ -596,3 +597,4 @@ L5-A 实施时建 `src/views/L5-alive.ts`(类似 L4-alive.ts 模式)。
 |---|---|---|
 | 2026-05-05 | v0.1 | 初稿;按"动作类型 capability"思路设计;后被 v0.5 driver 架构调整推翻。 |
 | 2026-05-05 | v0.2 | **整体重写**(driver 架构落地后):view 装 5 capability + driver(install 列表显式)/ data-model 用 DriverSerialized 信封 / commandRegistry 用 view 命名空间(note-view.*)/ NoteView 完整 CRUD + NavSide 列表 + 切换(Q-N4=A)/ 实施清单 ~405 行 / 完成判据 15 条。Q-N1~5 用户拍板固化。 |
+| 2026-05-05 | v0.2.1 | **AI 审计 P1.3 同步修复**:Host props 加 `instanceId: workspaceId`(driver 用此实现多实例 selection source 隔离 — driver DESIGN v0.2 同步修订)。 |
