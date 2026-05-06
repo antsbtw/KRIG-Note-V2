@@ -41,13 +41,29 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
           if (!result) return true;
 
-          // 计算 dropPos:
-          // - depth ≥ 1:鼠标在某 block 内,用 block 上半/下半判定插入边界
-          // - depth = 0:鼠标在 block 间隙(doc 顶层),用 result.pos 自身
+          // 拖拽源类型决定目标深度:
+          // - source 是 listItem/taskItem → 找目标位置同款层级
+          // - 否则 → 顶层 block 边界
+          const sourceNode = view.state.doc.nodeAt(fromPos);
+          if (!sourceNode) return true;
+          const sourceIsListItem =
+            sourceNode.type.name === 'listItem' || sourceNode.type.name === 'taskItem';
+
           let dropPos: number;
           const $pos = view.state.doc.resolve(result.pos);
           if ($pos.depth >= 1) {
-            const blockStart = $pos.before(1);
+            // 找跟 source 同类型的目标层级
+            let targetDepth = 1;
+            if (sourceIsListItem) {
+              for (let d = $pos.depth; d >= 1; d--) {
+                const nodeAt = $pos.node(d);
+                if (nodeAt.type.name === sourceNode.type.name) {
+                  targetDepth = d;
+                  break;
+                }
+              }
+            }
+            const blockStart = $pos.before(targetDepth);
             const block = view.state.doc.nodeAt(blockStart);
             if (block) {
               dropPos = blockStart;
@@ -65,14 +81,11 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
               dropPos = result.pos;
             }
           } else {
-            // doc 顶层间隙
             dropPos = result.pos;
           }
 
           if (fromPos === dropPos) return true;
 
-          const sourceNode = view.state.doc.nodeAt(fromPos);
-          if (!sourceNode) return true;
           const tr = view.state.tr;
           let actualDrop = dropPos;
           if (dropPos > fromPos) actualDrop = dropPos - sourceNode.nodeSize;
@@ -180,15 +193,26 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           return;
         }
 
-        // 解析顶层 block
+        // 解析"最具体可拖动 block":
+        // - 鼠标在 list 内 → 取 listItem / taskItem 层(每项独立 handle)
+        // - 否则 → 取顶层 block(textBlock / blockquote / codeBlock 等)
         let blockStart = -1;
         let blockNode = null;
         let blockDom: HTMLElement | null = null;
         try {
           const $pos = view.state.doc.resolve(result.pos);
           if ($pos.depth >= 1) {
-            blockStart = $pos.before(1);
-            blockNode = $pos.node(1);
+            // 从最深向外找:第一个 listItem/taskItem 优先;没有则用 depth=1
+            let targetDepth = 1;
+            for (let d = $pos.depth; d >= 1; d--) {
+              const nodeAt = $pos.node(d);
+              if (nodeAt.type.name === 'listItem' || nodeAt.type.name === 'taskItem') {
+                targetDepth = d;
+                break;
+              }
+            }
+            blockStart = $pos.before(targetDepth);
+            blockNode = $pos.node(targetDepth);
             const nd = view.nodeDOM(blockStart);
             blockDom = nd instanceof HTMLElement ? nd : (nd as Node)?.parentElement as HTMLElement | null;
           }

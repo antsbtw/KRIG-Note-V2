@@ -72,3 +72,215 @@
 .krig-pm-host .ProseMirror:focus {
   outline: none;
 }
+
+/* ── L5-B3.2:lists / quote / code / hr ── */
+
+/* 列表通用(对齐 V1:顶层不缩进,嵌套时 24px) */
+.krig-pm-host .ProseMirror ul,
+.krig-pm-host .ProseMirror ol {
+  margin: 1px 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+/* 嵌套层 — 缩进 24px(对齐 V1) */
+.krig-pm-host .ProseMirror ul ul,
+.krig-pm-host .ProseMirror ul ol,
+.krig-pm-host .ProseMirror ol ul,
+.krig-pm-host .ProseMirror ol ol {
+  padding-left: 24px;
+}
+
+.krig-pm-host .ProseMirror li {
+  margin: 1px 0;
+  position: relative;
+  padding-left: 24px;  /* 给 ::before 标记留位 */
+}
+
+/* ── bulletList 标记:CSS ::before(对齐 V1)── */
+.krig-pm-host .ProseMirror ul.krig-bullet-list > li::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: calc(3px + 1.7em / 2);
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 嵌套 2 级 → 空心圆 */
+.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list > li::before {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  width: 5px;
+  height: 5px;
+}
+
+/* 嵌套 3 级 → 实心方块 */
+.krig-pm-host .ProseMirror ul.krig-bullet-list ul.krig-bullet-list ul.krig-bullet-list > li::before {
+  background: currentColor;
+  border: none;
+  border-radius: 1px;
+  width: 5px;
+  height: 5px;
+}
+
+/* ── orderedList 标记:CSS counter ── */
+.krig-pm-host .ProseMirror ol.krig-ordered-list {
+  counter-reset: ordered-item;
+}
+
+.krig-pm-host .ProseMirror ol.krig-ordered-list > li {
+  counter-increment: ordered-item;
+}
+
+.krig-pm-host .ProseMirror ol.krig-ordered-list > li::before {
+  content: counter(ordered-item) '.';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 20px;
+  text-align: right;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 嵌套 2 级 → a. b. c. */
+.krig-pm-host .ProseMirror ol.krig-ordered-list ol.krig-ordered-list > li::before {
+  content: counter(ordered-item, lower-alpha) '.';
+}
+
+/* 嵌套 3 级 → i. ii. iii. */
+.krig-pm-host .ProseMirror ol.krig-ordered-list ol.krig-ordered-list ol.krig-ordered-list > li::before {
+  content: counter(ordered-item, lower-roman) '.';
+}
+
+/* task list */
+.krig-pm-host .ProseMirror ul.krig-task-list {
+  list-style: none;
+  padding-left: 4px;
+}
+
+/* task-item flex 布局 — 覆盖通用 li 的 padding-left:24px(checkbox 自占位置) */
+.krig-pm-host .ProseMirror li.krig-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0;
+  padding-left: 0;
+  position: relative;
+}
+
+/* 嵌套 task-list:checkbox 自带 24px 占位,无需再叠 24px(对齐 V1)
+ * 覆盖通用 ul ul / ul ol 的 24px 嵌套缩进规则 */
+.krig-pm-host .ProseMirror ul.krig-task-list ul.krig-task-list {
+  padding-left: 0;
+}
+
+.krig-pm-host .ProseMirror .krig-task-item__checkbox {
+  flex-shrink: 0;
+  margin-top: 0.4em;
+  cursor: pointer;
+  accent-color: #8ab4f8;
+  width: 16px;
+  height: 16px;
+}
+
+.krig-pm-host .ProseMirror .krig-task-item__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.krig-pm-host .ProseMirror li.krig-task-item.checked > .krig-task-item__content {
+  color: #9aa0a6;
+  text-decoration: line-through;
+}
+
+/* 时间标签:hover 显示,点击弹 date picker */
+.krig-pm-host .ProseMirror .krig-task-item__time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-top: 0.4em;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror li.krig-task-item:hover .krig-task-item__time {
+  opacity: 1;
+  cursor: pointer;
+}
+
+/* 已设 deadline 的项 — 时间标签常显(不仅 hover) */
+.krig-pm-host .ProseMirror li.krig-task-item[data-deadline] .krig-task-item__time {
+  opacity: 1;
+}
+
+/* 超期红字 */
+.krig-pm-host .ProseMirror li.krig-task-item.overdue .krig-task-item__time {
+  color: #f28b82;
+}
+
+/* 隐藏 date input(仅供 showPicker 用) */
+.krig-pm-host .ProseMirror .krig-task-item__date-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* blockquote — 对齐 V1 灰色基线(原 V2 蓝色 #4a90e2 已弃用) */
+.krig-pm-host .ProseMirror blockquote.krig-blockquote {
+  border-left: 3px solid #555;
+  padding-left: 16px;
+  margin: 0.3em 0;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* 嵌套二级 blockquote — 竖线更深灰(对齐 V1) */
+.krig-pm-host .ProseMirror blockquote.krig-blockquote blockquote.krig-blockquote {
+  border-left-color: #444;
+}
+
+/* code block */
+.krig-pm-host .ProseMirror pre.krig-code-block {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e8eaed;
+  white-space: pre;
+}
+
+.krig-pm-host .ProseMirror pre.krig-code-block code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* horizontal rule — 对齐 V1 #444 / 1.5em margin */
+.krig-pm-host .ProseMirror hr.krig-horizontal-rule {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 1.5em 0;
+  /* atom 节点选中态 */
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror hr.krig-horizontal-rule.ProseMirror-selectednode {
+  border-top-color: #6cb6ff;
+  outline: 1px dashed #6cb6ff;
+  outline-offset: 2px;
+}

@@ -160,21 +160,40 @@ export function registerNoteCommands(): void {
     textEditingDriverApi.redo(instanceId);
   }));
 
-  // ── L5-B3.1:slash menu 命令(选中后清 / 与 query,然后 setHeading)──
+  // ── L5-B3.2:Turn Into 9 种类型(slash / handle / cm 三套命令)──
 
-  function registerSlashSet(commandId: string, level: number | null): void {
+  type TurnTarget =
+    | 'paragraph' | 'h1' | 'h2' | 'h3'
+    | 'bullet-list' | 'ordered-list' | 'task-list'
+    | 'blockquote' | 'code-block' | 'horizontal-rule';
+
+  // ── slash:作用于光标当前 block(setHeading 走 selection)──
+  function registerSlashTurn(commandId: string, target: TurnTarget): void {
     commandRegistry.register(commandId, withInstance((instanceId) => {
       textEditingDriverApi.clearSlashTrigger(instanceId);
-      textEditingDriverApi.setHeading(instanceId, level);
+      // slash 没有 pos 参数,作用于光标所在 block
+      const ws = workspaceManager.get(instanceId);
+      if (!ws) return;
+      const result = textEditingDriverApi.resolveBlockAt(instanceId, { x: 0, y: 0 });
+      // 用光标位置(driver api 没暴露 cursor pos,用 turnIntoSelection 替代)
+      // 简化:直接走 driver api 内部 — 通过 setSelection 之前 PM state.selection.$from
+      textEditingDriverApi.turnIntoSelection(instanceId, target);
+      void ws;
+      void result;
     }));
   }
-  registerSlashSet('note-view.slash-set-paragraph', null);
-  registerSlashSet('note-view.slash-set-h1', 1);
-  registerSlashSet('note-view.slash-set-h2', 2);
-  registerSlashSet('note-view.slash-set-h3', 3);
+  registerSlashTurn('note-view.slash-turn-paragraph', 'paragraph');
+  registerSlashTurn('note-view.slash-turn-h1', 'h1');
+  registerSlashTurn('note-view.slash-turn-h2', 'h2');
+  registerSlashTurn('note-view.slash-turn-h3', 'h3');
+  registerSlashTurn('note-view.slash-turn-bullet', 'bullet-list');
+  registerSlashTurn('note-view.slash-turn-ordered', 'ordered-list');
+  registerSlashTurn('note-view.slash-turn-task', 'task-list');
+  registerSlashTurn('note-view.slash-turn-quote', 'blockquote');
+  registerSlashTurn('note-view.slash-turn-code', 'code-block');
+  registerSlashTurn('note-view.slash-turn-divider', 'horizontal-rule');
 
-  // ── L5-B3.1:handle menu 命令(从 handleMenuController.state.pos 取 pos)──
-
+  // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return null;
@@ -183,18 +202,23 @@ export function registerNoteCommands(): void {
     return { instanceId: wsId, pos: state.pos };
   }
 
-  function registerHandleSetHeading(commandId: string, level: number | null): void {
+  function registerHandleTurn(commandId: string, target: TurnTarget): void {
     commandRegistry.register(commandId, () => {
       const ctx = getHandlePos();
       if (!ctx) return;
-      textEditingDriverApi.setHeadingAt(ctx.instanceId, ctx.pos, level);
+      textEditingDriverApi.turnIntoAt(ctx.instanceId, ctx.pos, target);
       handleMenuController.hide();
     });
   }
-  registerHandleSetHeading('note-view.handle-set-paragraph', null);
-  registerHandleSetHeading('note-view.handle-set-h1', 1);
-  registerHandleSetHeading('note-view.handle-set-h2', 2);
-  registerHandleSetHeading('note-view.handle-set-h3', 3);
+  registerHandleTurn('note-view.handle-turn-paragraph', 'paragraph');
+  registerHandleTurn('note-view.handle-turn-h1', 'h1');
+  registerHandleTurn('note-view.handle-turn-h2', 'h2');
+  registerHandleTurn('note-view.handle-turn-h3', 'h3');
+  registerHandleTurn('note-view.handle-turn-bullet', 'bullet-list');
+  registerHandleTurn('note-view.handle-turn-ordered', 'ordered-list');
+  registerHandleTurn('note-view.handle-turn-task', 'task-list');
+  registerHandleTurn('note-view.handle-turn-quote', 'blockquote');
+  registerHandleTurn('note-view.handle-turn-code', 'code-block');
 
   commandRegistry.register('note-view.handle-copy-block', () => {
     const ctx = getHandlePos();
@@ -210,8 +234,7 @@ export function registerNoteCommands(): void {
     handleMenuController.hide();
   });
 
-  // ── L5-B3.1:context menu 命令(从 contextMenuController state 取鼠标坐标)──
-
+  // ── context menu:从鼠标位置 resolveBlockAt ──
   function getCmBlockPos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return null;
@@ -221,18 +244,23 @@ export function registerNoteCommands(): void {
     return { instanceId: wsId, pos: result.pos };
   }
 
-  function registerCmSetHeading(commandId: string, level: number | null): void {
+  function registerCmTurn(commandId: string, target: TurnTarget): void {
     commandRegistry.register(commandId, () => {
       const ctx = getCmBlockPos();
       if (!ctx) return;
-      textEditingDriverApi.setHeadingAt(ctx.instanceId, ctx.pos, level);
+      textEditingDriverApi.turnIntoAt(ctx.instanceId, ctx.pos, target);
       contextMenuController.hide();
     });
   }
-  registerCmSetHeading('note-view.cm-set-paragraph', null);
-  registerCmSetHeading('note-view.cm-set-h1', 1);
-  registerCmSetHeading('note-view.cm-set-h2', 2);
-  registerCmSetHeading('note-view.cm-set-h3', 3);
+  registerCmTurn('note-view.cm-turn-paragraph', 'paragraph');
+  registerCmTurn('note-view.cm-turn-h1', 'h1');
+  registerCmTurn('note-view.cm-turn-h2', 'h2');
+  registerCmTurn('note-view.cm-turn-h3', 'h3');
+  registerCmTurn('note-view.cm-turn-bullet', 'bullet-list');
+  registerCmTurn('note-view.cm-turn-ordered', 'ordered-list');
+  registerCmTurn('note-view.cm-turn-task', 'task-list');
+  registerCmTurn('note-view.cm-turn-quote', 'blockquote');
+  registerCmTurn('note-view.cm-turn-code', 'code-block');
 
   commandRegistry.register('note-view.cm-delete-block', () => {
     const ctx = getCmBlockPos();
