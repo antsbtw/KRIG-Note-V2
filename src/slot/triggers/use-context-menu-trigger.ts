@@ -21,10 +21,14 @@ export function useContextMenuTrigger(
     if (!el || !viewId) return;
 
     const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+
+      // 自治区域:某些容器自己处理右键(如 FolderTree),L4 不接管
+      if (target?.closest('[data-krig-context-menu-handled]')) return;
+
       // 检测当前选区状态
       const selection = window.getSelection();
       const hasSelection = !!selection && !selection.isCollapsed;
-      const target = e.target as HTMLElement | null;
       const isEditable = !!target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
       const context: ContextInfo = {

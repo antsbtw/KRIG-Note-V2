@@ -18,6 +18,8 @@ export interface Note {
   id: string;
   title: string;
   doc: DriverSerialized;
+  /** 所属文件夹 id;null = 根级。L5-B1 加,旧笔记 hydrate 时填 null */
+  folderId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -54,7 +56,12 @@ class NoteStore {
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && parsed.notes && typeof parsed.counter === 'number') {
-        this.state = parsed as NoteStoreData;
+        // L5-B1 加 folderId:旧 store 已存的笔记没这字段 → hydrate 时补 null
+        const hydrated: Record<string, Note> = {};
+        for (const [id, note] of Object.entries(parsed.notes as Record<string, Note>)) {
+          hydrated[id] = { ...note, folderId: note.folderId ?? null };
+        }
+        this.state = { notes: hydrated, counter: parsed.counter };
       }
     } catch (err) {
       console.warn('[note-store] load failed:', err);
@@ -85,7 +92,8 @@ class NoteStore {
         if (!noteData?.notes) continue;
         for (const [id, note] of Object.entries(noteData.notes)) {
           if (!collectedNotes[id]) {
-            collectedNotes[id] = note as Note;
+            const n = note as Note;
+            collectedNotes[id] = { ...n, folderId: n.folderId ?? null };
             migratedCount++;
           }
         }
@@ -146,13 +154,14 @@ class NoteStore {
 
   // ── 写 API ──
 
-  create(doc: DriverSerialized, title = '未命名'): string {
+  create(doc: DriverSerialized, title = '未命名', folderId: string | null = null): string {
     const newCounter = this.state.counter + 1;
     const id = `note-${newCounter}`;
     const newNote: Note = {
       id,
       title,
       doc,
+      folderId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

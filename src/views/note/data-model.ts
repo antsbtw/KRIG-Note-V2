@@ -1,79 +1,254 @@
 /**
- * NoteView per-workspace 工作位状态(activeNoteId)管理
+ * NoteView per-workspace 工作位状态管理
  *
- * 见 DESIGN.md v0.2.3 § 3。
+ * 见 docs/RefactorV2/stages/L5B1-folder-tree-design.md § 2.3。
  *
- * 用户数据(笔记池)走全局 [`note-store.ts`](./note-store.ts);
- * 本文件只管 **当前 Workspace 看哪条笔记** 这个 per-workspace 状态。
+ * 用户数据(笔记/文件夹)走全局 noteStore / folderStore;
+ * 本文件管理 **当前 Workspace 的工作位状态**(看哪条笔记 / 折哪些文件夹 / 选了什么 / 排序 / 剪贴板)。
  *
- * 这是 v0.2.2 → v0.2.3 的根本调整:笔记从 pluginStates 提到全局 store,
- * pluginStates 只剩 activeNoteId(指针)。
+ * **持久化字段**(写 pluginStates):activeNoteId / expandedFolders / folderSortMap / clipboard
+ * **Transient 字段**(只内存,Q8=B):selectedIds — 关闭重启后清空,避免干扰新操作
+ *
+ * Set 字段持久化策略:Set ↔ string[] 编/解码在 hydrate/encode 内做,view 业务无感。
  */
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
 import { noteStore } from './note-store';
+import { folderStore } from './folder-store';
 import { createEmptyDoc, extractFirstParagraphText } from '@drivers/text-editing-driver';
 import type { DriverSerialized } from '@drivers/text-editing-driver';
 
-/** per-workspace 工作位状态 */
+export type SortState = 'title-asc' | 'title-desc' | 'date-asc' | 'date-desc' | null;
+
+/** per-workspace 工作位状态(persistent + transient 合并视图)*/
 export interface NoteWorkspaceState {
   activeNoteId: string | null;
+  expandedFolders: Set<string>;
+  folderSortMap: Record<string, SortState>;
+  clipboard: { type: 'note' | 'folder'; id: string } | null;
+  /** Transient — 不持久化(Q8=B)*/
+  selectedIds: Set<string>;
 }
 
 const STORE_KEY = 'note';
 
-/** 冻结常量(避免 useSyncExternalStore 死循环 — L5-A 已踩过这条 bug)*/
-const DEFAULT_WS_STATE: NoteWorkspaceState = Object.freeze({
-  activeNoteId: null,
-}) as NoteWorkspaceState;
-
-export function getNoteWsState(ws: WorkspaceState): NoteWorkspaceState {
-  return (ws.pluginStates[STORE_KEY] as NoteWorkspaceState | undefined) ?? DEFAULT_WS_STATE;
+/** 持久化的形态(pluginStates['note'] 真实存的格式)— Set 序列化为 string[] */
+interface PersistedNoteWsState {
+  activeNoteId: string | null;
+  expandedFolders: string[];
+  folderSortMap: Record<string, SortState>;
+  clipboard: { type: 'note' | 'folder'; id: string } | null;
 }
 
-function writeWsState(workspaceId: string, ws: WorkspaceState, newState: NoteWorkspaceState): void {
+/** 冻结常量(避免 useSyncExternalStore 死循环)*/
+const DEFAULT_WS_STATE: NoteWorkspaceState = {
+  activeNoteId: null,
+  expandedFolders: new Set<string>(),
+  folderSortMap: {},
+  clipboard: null,
+  selectedIds: new Set<string>(),
+};
+Object.freeze(DEFAULT_WS_STATE);
+Object.freeze(DEFAULT_WS_STATE.expandedFolders);
+Object.freeze(DEFAULT_WS_STATE.folderSortMap);
+Object.freeze(DEFAULT_WS_STATE.selectedIds);
+
+/** Transient selectedIds(每 ws 独立)— 关闭重启后清空 */
+const transientSelected: Map<string, Set<string>> = new Map();
+const transientListeners: Set<() => void> = new Set();
+let transientVersion = 0;
+
+/** 缓存 hydrated state(避免 useSyncExternalStore 每次 ws 变化都新建对象 → 死循环)*/
+const hydratedCache: WeakMap<WorkspaceState, NoteWorkspaceState> = new WeakMap();
+
+function hydrate(ws: WorkspaceState): NoteWorkspaceState {
+  const cached = hydratedCache.get(ws);
+  if (cached) {
+    // 但 selectedIds 是 transient,可能在缓存外变化 — 重新拉
+    const sel = transientSelected.get(ws.id) ?? DEFAULT_WS_STATE.selectedIds;
+    if (cached.selectedIds === sel) return cached;
+    const fresh = { ...cached, selectedIds: sel };
+    hydratedCache.set(ws, fresh);
+    return fresh;
+  }
+  const raw = ws.pluginStates[STORE_KEY] as PersistedNoteWsState | undefined;
+  const result: NoteWorkspaceState = {
+    activeNoteId: raw?.activeNoteId ?? null,
+    expandedFolders: new Set(raw?.expandedFolders ?? []),
+    folderSortMap: raw?.folderSortMap ?? {},
+    clipboard: raw?.clipboard ?? null,
+    selectedIds: transientSelected.get(ws.id) ?? new Set<string>(),
+  };
+  hydratedCache.set(ws, result);
+  return result;
+}
+
+export function getNoteWsState(ws: WorkspaceState): NoteWorkspaceState {
+  return hydrate(ws);
+}
+
+/** 写持久化字段(activeNoteId / expandedFolders / folderSortMap / clipboard)*/
+function writePersistent(workspaceId: string, patch: Partial<PersistedNoteWsState>): void {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const current = (ws.pluginStates[STORE_KEY] as PersistedNoteWsState | undefined) ?? {
+    activeNoteId: null,
+    expandedFolders: [],
+    folderSortMap: {},
+    clipboard: null,
+  };
+  const merged: PersistedNoteWsState = { ...current, ...patch };
   workspaceManager.update(workspaceId, {
-    pluginStates: {
-      ...ws.pluginStates,
-      [STORE_KEY]: newState,
-    },
+    pluginStates: { ...ws.pluginStates, [STORE_KEY]: merged },
   });
 }
 
-/** 标题派生:从 doc 第一段提取,空则 '未命名' */
+/** 写 transient selectedIds + 触发本地监听器(useSyncExternalStore 用)*/
+function writeTransientSelected(workspaceId: string, ids: Set<string>): void {
+  transientSelected.set(workspaceId, ids);
+  transientVersion++;
+  // 同时让 hydratedCache 失效(下次 hydrate 拿新 selectedIds)
+  const ws = workspaceManager.get(workspaceId);
+  if (ws) hydratedCache.delete(ws);
+  transientListeners.forEach((l) => l());
+}
+
+export function subscribeTransient(listener: () => void): () => void {
+  transientListeners.add(listener);
+  return () => {
+    transientListeners.delete(listener);
+  };
+}
+
+export function getTransientVersion(): number {
+  return transientVersion;
+}
+
+// ── 业务 API ──
+
 export function deriveTitle(doc: DriverSerialized): string {
   const text = extractFirstParagraphText(doc);
   return text || '未命名';
 }
 
-/** 创建笔记(全局 store)+ 当前 ws 的 activeNoteId 设到新笔记 */
-export function createNote(workspaceId: string): string | null {
+/** 创建笔记(全局 store)+ 当前 ws activeNoteId */
+export function createNote(workspaceId: string, folderId: string | null = null): string | null {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return null;
-
-  const id = noteStore.create(createEmptyDoc(), '未命名');
-  writeWsState(workspaceId, ws, { activeNoteId: id });
+  const id = noteStore.create(createEmptyDoc(), '未命名', folderId);
+  writePersistent(workspaceId, { activeNoteId: id });
+  // 创建到 folder 时自动展开它
+  if (folderId) {
+    const cur = hydrate(ws).expandedFolders;
+    if (!cur.has(folderId)) {
+      const next = new Set(cur);
+      next.add(folderId);
+      writePersistent(workspaceId, { expandedFolders: Array.from(next) });
+    }
+  }
   return id;
 }
 
-/** 更新笔记内容 / 标题(全局 store)*/
-export function updateNote(noteId: string, patch: { doc?: DriverSerialized; title?: string }): void {
+export function updateNote(
+  noteId: string,
+  patch: { doc?: DriverSerialized; title?: string; folderId?: string | null },
+): void {
   noteStore.update(noteId, patch);
 }
 
-/** 删除笔记(全局 store)+ 各 Workspace activeNoteId 自动 fallback(Q-S4=A)*/
 export function deleteNote(noteId: string): void {
   noteStore.delete(noteId);
-  // 各 Workspace 如果当前活跃笔记是这条,清掉(NoteView 自动检测显占位)
-  // L5-A 简化:不主动清,NoteView render 时检测 noteStore.has(activeNoteId) 处理
 }
 
-/** 设置当前 Workspace 的活跃笔记 */
 export function setActiveNote(workspaceId: string, noteId: string | null): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
-  const state = getNoteWsState(ws);
+  const state = hydrate(ws);
   if (state.activeNoteId === noteId) return;
-  writeWsState(workspaceId, ws, { activeNoteId: noteId });
+  writePersistent(workspaceId, { activeNoteId: noteId });
+}
+
+// ── 文件夹 ──
+
+export function createFolder(workspaceId: string, parentId: string | null = null): string {
+  const id = folderStore.create('新建文件夹', parentId);
+  // 父文件夹自动展开
+  if (parentId) {
+    const ws = workspaceManager.get(workspaceId);
+    if (ws) {
+      const cur = hydrate(ws).expandedFolders;
+      if (!cur.has(parentId)) {
+        const next = new Set(cur);
+        next.add(parentId);
+        writePersistent(workspaceId, { expandedFolders: Array.from(next) });
+      }
+    }
+  }
+  return id;
+}
+
+/** 删 folder + 级联:子 folder 一起删,内含笔记 folderId → null */
+export function deleteFolder(folderId: string): void {
+  const deletedIds = folderStore.delete(folderId);
+  if (deletedIds.length === 0) return;
+  // 笔记 folderId 落根
+  for (const note of noteStore.getAll()) {
+    if (note.folderId && deletedIds.includes(note.folderId)) {
+      noteStore.update(note.id, { folderId: null });
+    }
+  }
+}
+
+export function setFolderExpanded(workspaceId: string, folderId: string, expanded: boolean): void {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const cur = hydrate(ws).expandedFolders;
+  const next = new Set(cur);
+  if (expanded) next.add(folderId);
+  else next.delete(folderId);
+  writePersistent(workspaceId, { expandedFolders: Array.from(next) });
+}
+
+// ── 选中(transient)──
+
+export function setSelectedIds(workspaceId: string, ids: Set<string>): void {
+  writeTransientSelected(workspaceId, ids);
+}
+
+export function getSelectedIds(workspaceId: string): Set<string> {
+  return transientSelected.get(workspaceId) ?? new Set();
+}
+
+// ── 排序 ──
+
+export function setFolderSort(workspaceId: string, folderKey: string, sort: SortState): void {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const cur = hydrate(ws).folderSortMap;
+  writePersistent(workspaceId, {
+    folderSortMap: { ...cur, [folderKey]: sort },
+  });
+}
+
+export function cycleSortByTitle(workspaceId: string, folderKey: string): void {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const cur = hydrate(ws).folderSortMap[folderKey];
+  const next: SortState = cur === 'title-asc' ? 'title-desc' : 'title-asc';
+  setFolderSort(workspaceId, folderKey, next);
+}
+
+export function cycleSortByDate(workspaceId: string, folderKey: string): void {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const cur = hydrate(ws).folderSortMap[folderKey];
+  const next: SortState = cur === 'date-asc' ? 'date-desc' : 'date-asc';
+  setFolderSort(workspaceId, folderKey, next);
+}
+
+// ── 剪贴板 ──
+
+export function setClipboard(workspaceId: string, clip: { type: 'note' | 'folder'; id: string } | null): void {
+  writePersistent(workspaceId, { clipboard: clip });
 }
