@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** 健康检查查询(renderer → main → 同步返回) */
   async health(
-    layer: 'L0' | 'L1' | 'L2' | 'L3' | 'L3.5' | 'L4' | 'platform',
+    layer: 'L0' | 'L1' | 'L2' | 'L3' | 'L3.5' | 'L4' | 'L5' | 'platform',
   ): Promise<HealthCheckResponse> {
     const channel = {
       L0: IPC_CHANNELS.HEALTH_L0,
@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       L3: IPC_CHANNELS.HEALTH_L3,
       'L3.5': IPC_CHANNELS.HEALTH_L3_5,
       L4: IPC_CHANNELS.HEALTH_L4,
+      L5: IPC_CHANNELS.HEALTH_L5,
       platform: IPC_CHANNELS.HEALTH_PLATFORM,
     }[layer];
     return ipcRenderer.invoke(channel);

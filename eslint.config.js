@@ -25,15 +25,32 @@ export default [
   },
 
   // 屏障层 1:可视化相关层(views / shell)零业务 npm import
+  // V2 架构(v0.5):view 通过 driver(@drivers/*)间接使用 PM 等底层工具
   {
     files: ['src/views/**/*.{ts,tsx}', 'src/shell/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['prosemirror-*'], message: '使用 capability(具体哪个能力等真实现时定)' },
-          { group: ['three', 'three/*'], message: '使用 capability(具体哪个能力等真实现时定)' },
-          { group: ['pdfjs-dist'], message: '使用 capability' },
-          { group: ['epubjs', 'foliate-js'], message: '使用 capability' },
+          { group: ['prosemirror-*'], message: 'view 通过 driver(@drivers/text-editing-driver) 间接用 PM,禁止直接 import' },
+          { group: ['three', 'three/*'], message: 'view 通过 driver(@drivers/graph-editing-driver) 间接用 Three.js' },
+          { group: ['pdfjs-dist'], message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用' },
+          { group: ['epubjs', 'foliate-js'], message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用' },
+          { group: ['electron'], message: 'Electron API 必须经能力层封装' },
+        ],
+      }],
+    },
+  },
+
+  // drivers 层:driver 封装底层工具(PM / Three.js / etc.),允许 import 对应 npm 包
+  // 这是 v0.5 架构的核心 — driver 是必经的业务驱动层,负责把底层工具编织成 view 可用形态
+  {
+    files: ['src/drivers/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          // driver 之间零代码 import(driver 协议铁律 5)
+          { group: ['@drivers/*'], message: 'driver 之间零代码 import — 共享逻辑下沉 src/shared/ 或 bus channel' },
+          // electron 仍受限
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
         ],
       }],

@@ -15,7 +15,9 @@ import { localStoragePersistence } from '@workspace/persistence/local-storage';
 import { reportL3Alive } from '@workspace/diagnostics/L3-alive';
 import { reportL3_5Alive } from '@slot/workspace-bus/L3.5-alive';
 import { reportL4Alive } from '@slot/diagnostics/L4-alive';
+import { reportL5Alive } from '@views/L5-alive';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
+import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import './app.css';
 
 // L3 启动:配置持久化 + 加载已存的 Workspaces + 确保至少一个
@@ -58,4 +60,5 @@ if (rootEl) {
   reportL3Alive(workspaceManager.count, workspaceManager.getActiveId());
   reportL3_5Alive(workspaceManager.busCount);
   reportL4Alive();
+  reportL5Alive();
 }
