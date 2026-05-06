@@ -20,6 +20,7 @@ import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from '
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import { getWebWsState, setWebUrl } from './data-model';
+import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
 import './web.css';
 
@@ -93,10 +94,36 @@ export function WebView({ workspaceId }: WebViewProps) {
         handleDidNavigate(e);
       };
 
+      // L5-B4 #11:右键菜单 — webview 内的 context-menu 事件
+      // Electron webview 'context-menu' 事件 params 含 linkURL / srcURL / selectionText / x / y
+      const handleContextMenu = (e: Event) => {
+        const ev = e as Event & {
+          params?: {
+            linkURL?: string;
+            srcURL?: string;
+            selectionText?: string;
+            x?: number;
+            y?: number;
+          };
+        };
+        const params = ev.params;
+        if (!params) return;
+        // params.x/y 是 webview 内坐标;转 viewport 坐标(加 webview 自身 left/top)
+        const rect = wv.getBoundingClientRect();
+        showWebContextMenu({
+          linkURL: params.linkURL ?? '',
+          srcURL: params.srcURL ?? '',
+          selectionText: params.selectionText ?? '',
+          x: rect.left + (params.x ?? 0),
+          y: rect.top + (params.y ?? 0),
+        });
+      };
+
       wv.addEventListener('did-start-loading', handleStartLoading);
       wv.addEventListener('did-stop-loading', handleStopLoading);
       wv.addEventListener('did-navigate', handleDidNavigate);
       wv.addEventListener('did-navigate-in-page', handleDidNavigateInPage);
+      wv.addEventListener('context-menu', handleContextMenu);
     },
     [workspaceId],
   );
