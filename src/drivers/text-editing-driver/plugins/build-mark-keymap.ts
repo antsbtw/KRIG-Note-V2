@@ -13,6 +13,7 @@ export function buildMarkKeymap(schema: Schema): Plugin {
   const km: Record<string, Command> = {};
   if (schema.marks.bold) km['Mod-b'] = toggleMark(schema.marks.bold);
   if (schema.marks.italic) km['Mod-i'] = toggleMark(schema.marks.italic);
+  if (schema.marks.underline) km['Mod-u'] = toggleMark(schema.marks.underline);
   if (schema.marks.strike) km['Mod-Shift-x'] = toggleMark(schema.marks.strike);
   if (schema.marks.code) km['Mod-e'] = toggleMark(schema.marks.code);
   return keymap(km);

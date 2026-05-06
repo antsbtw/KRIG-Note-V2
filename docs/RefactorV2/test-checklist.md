@@ -506,9 +506,63 @@
 
 ---
 
+## 6. Marks 扩展 + 简单 block(L5-B3.3,逐项对照 V1)
+
+> 阶段:替代被阻塞的 codeBlock 全量迁移
+> 分支:`feature/L5B3.3-marks-and-simple-blocks`
+> 跟踪文档:[v1-block-migration-checklist.md](./v1-block-migration-checklist.md)
+
+### 6.1 underline mark — 对齐 V1
+
+> V1 spec:`<u>` 标签 + `text-decoration=underline` style 反解。无 markdown input rule。
+> V2 落地:marks/underline.ts + Mod-u keymap + 顶部 toolbar U 按钮 + floating-toolbar U 按钮
+
+#### Schema / 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.1 | 选中文字按 Cmd+U | 文字加下划线(`<u>` 渲染) | ⏳ |
+| 6.1.2 | 已下划线文字按 Cmd+U | 取消下划线(toggle) | ⏳ |
+| 6.1.3 | 粘贴含 `<u>foo</u>` 的 HTML | 解析为 underline mark | ⏳ |
+| 6.1.4 | 粘贴含 `style="text-decoration: underline"` 的 span | 解析为 underline mark | ⏳ |
+
+#### 顶部 toolbar
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.5 | 顶部 toolbar 显示 "U" 按钮(B/I 之间)| 是,顺序 B → I → **U** → S → `<>` | ⏳ |
+| 6.1.6 | 选中下划线文字时,toolbar U 按钮高亮 | 蓝色 active 态 | ⏳ |
+| 6.1.7 | 点 toolbar U | 选区 toggle underline | ⏳ |
+
+#### floating-toolbar(选中文字浮起)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.8 | 选中文字 → 浮条出现 | 含 5 按钮:B / I / **U** / S / `<>` | ⏳ |
+| 6.1.9 | 选区在 underline 内时,浮条 U 按钮高亮 | 是 | ⏳ |
+| 6.1.10 | 点浮条 U | toggle underline | ⏳ |
+
+#### 跟其他 mark 共存
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.11 | 同一段文字加 bold + underline | 渲染 `<u><strong>...</strong></u>` 或 `<strong><u>...</u></strong>`(顺序由 schema 装载次序定) | ⏳ |
+| 6.1.12 | 选中 bold + underline 文字按 Cmd+B | 仅取消 bold,保留 underline | ⏳ |
+| 6.1.13 | underline 内 italic | italic 生效,下划线保留 | ⏳ |
+
+#### 不回归
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 6.1.14 | underline + undo/redo | history 正常 | ⏳ |
+| 6.1.15 | underline 在 bullet list / heading 内 | 都生效 | ⏳ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
 |---|---|
 | 2026-05-06 | 初稿;5.1 bulletList 对照 V1 审计 + 29 测试条目 |
 | 2026-05-06 | 5.1 追加 A/B/C 三块:A(5.1.30-36 PM 健全性补丁,⏳ 待验证)+ B(5.1.37-42 Notion 对标,⏸️ B 阶段)+ C(5.1.C1-C3 KRIG 范围外,N/A) |
+| 2026-05-06 | § 6 新章节 L5-B3.3 marks 扩展 + 简单 block;6.1 underline mark 15 条审计 |

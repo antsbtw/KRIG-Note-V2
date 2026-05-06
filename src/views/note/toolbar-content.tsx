@@ -76,6 +76,16 @@ export function registerToolbar(): void {
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('italic'),
     },
     {
+      id: 'note-view.underline',
+      view: VIEW,
+      kind: 'button',
+      label: 'U',
+      command: 'note-view.toggle-underline',
+      group: 'left',
+      order: 31.5,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('underline'),
+    },
+    {
       id: 'note-view.strike',
       view: VIEW,
       kind: 'button',

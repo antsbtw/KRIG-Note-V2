@@ -28,6 +28,14 @@ export function registerFloatingToolbar(): void {
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('italic'),
     },
     {
+      id: 'note-view.ft.underline',
+      label: 'U',
+      command: 'note-view.toggle-underline',
+      view: VIEW,
+      order: 25,
+      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('underline'),
+    },
+    {
       id: 'note-view.ft.strike',
       label: 'S',
       command: 'note-view.toggle-strike',

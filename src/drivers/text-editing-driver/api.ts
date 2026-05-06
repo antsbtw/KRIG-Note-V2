@@ -15,7 +15,7 @@ import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 
-export type MarkName = 'bold' | 'italic' | 'strike' | 'code';
+export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
 
 export interface ActiveBlockType {
   name: string;

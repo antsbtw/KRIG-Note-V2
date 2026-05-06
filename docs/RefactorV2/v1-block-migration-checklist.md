@@ -94,12 +94,12 @@
 
 ### 2.2 待迁 ⏳(A 方案本批做完)
 
-| # | V1 mark | 工作量 | 备注 |
-|---|---|---|---|
-| 5 | underline | 极小 | `<u>` 标签 + Cmd+U |
-| 6 | link | 小 | href + title attr,核心能力,需要 popover 编辑 URL |
-| 7 | textStyle | 小 | color attr(`<span style>`) |
-| 8 | highlight | 小 | 背景色 attr(`<mark>`),含 color picker UI |
+| # | V1 mark | 工作量 | 状态 | 备注 |
+|---|---|---|---|---|
+| 5 | underline | 极小 | ✅ L5-B3.3 | `<u>` + Cmd+U + 顶部 toolbar U + floating-toolbar U |
+| 6 | link | 小 | ⏳ | href + title attr,核心能力,需要 popover 编辑 URL |
+| 7 | textStyle | 小 | ⏳ | color attr(`<span style>`) |
+| 8 | highlight | 小 | ⏳ | 背景色 attr(`<mark>`),含 color picker UI |
 
 ---
 
@@ -116,7 +116,7 @@
 
 | 顺序 | 项 | 类型 | 状态 | commit |
 |---|---|---|---|---|
-| 1 | underline mark | mark | ⏳ | — |
+| 1 | underline mark | mark | ✅ | (本批 commit) |
 | 2 | link mark + URL 编辑 popup | mark | ⏳ | — |
 | 3 | textStyle mark(color) | mark | ⏳ | — |
 | 4 | highlight mark(背景色 + color picker)| mark | ⏳ | — |

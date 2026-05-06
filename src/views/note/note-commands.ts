@@ -142,6 +142,7 @@ export function registerNoteCommands(): void {
 
   registerToggleMark('note-view.toggle-bold', 'bold');
   registerToggleMark('note-view.toggle-italic', 'italic');
+  registerToggleMark('note-view.toggle-underline', 'underline');
   registerToggleMark('note-view.toggle-strike', 'strike');
   registerToggleMark('note-view.toggle-code', 'code');
 
