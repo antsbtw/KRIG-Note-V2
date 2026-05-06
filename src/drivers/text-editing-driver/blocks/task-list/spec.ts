@@ -20,27 +20,43 @@ const taskListNodeSpec: NodeSpec = {
 const taskItemNodeSpec: NodeSpec = {
   content: 'block+',
   defining: true,
-  attrs: { checked: { default: false } },
+  attrs: {
+    checked: { default: false },
+    // V1 兼容:创建/完成/截止时间(ISO 字符串 | null)
+    createdAt: { default: null },
+    completedAt: { default: null },
+    deadline: { default: null },
+  },
   parseDOM: [
     {
       tag: 'li[data-type="task-item"]',
       getAttrs(node) {
-        const checked = (node as HTMLElement).getAttribute('data-checked') === 'true';
-        return { checked };
+        const el = node as HTMLElement;
+        return {
+          checked: el.getAttribute('data-checked') === 'true',
+          createdAt: el.getAttribute('data-created-at') || null,
+          completedAt: el.getAttribute('data-completed-at') || null,
+          deadline: el.getAttribute('data-deadline') || null,
+        };
       },
     },
   ],
   toDOM(node) {
     const checked = node.attrs.checked as boolean;
-    return [
-      'li',
-      {
-        'data-type': 'task-item',
-        'data-checked': String(checked),
-        class: `krig-task-item${checked ? ' checked' : ''}`,
-      },
-      0,
-    ];
+    const overdue =
+      !checked && node.attrs.deadline && new Date(node.attrs.deadline as string) < new Date();
+    const cls = ['krig-task-item'];
+    if (checked) cls.push('checked');
+    if (overdue) cls.push('overdue');
+    const attrs: Record<string, string> = {
+      'data-type': 'task-item',
+      'data-checked': String(checked),
+      class: cls.join(' '),
+    };
+    if (node.attrs.createdAt) attrs['data-created-at'] = node.attrs.createdAt as string;
+    if (node.attrs.completedAt) attrs['data-completed-at'] = node.attrs.completedAt as string;
+    if (node.attrs.deadline) attrs['data-deadline'] = node.attrs.deadline as string;
+    return ['li', attrs, 0];
   },
 };
 

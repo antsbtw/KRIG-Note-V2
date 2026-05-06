@@ -163,18 +163,27 @@
   padding-left: 4px;
 }
 
+/* task-item flex 布局 — 覆盖通用 li 的 padding-left:24px(checkbox 自占位置) */
 .krig-pm-host .ProseMirror li.krig-task-item {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   margin: 2px 0;
+  padding-left: 0;
+  position: relative;
+}
+
+/* 嵌套 task-list:checkbox 自带 24px 占位,无需再叠 24px(对齐 V1)
+ * 覆盖通用 ul ul / ul ol 的 24px 嵌套缩进规则 */
+.krig-pm-host .ProseMirror ul.krig-task-list ul.krig-task-list {
+  padding-left: 0;
 }
 
 .krig-pm-host .ProseMirror .krig-task-item__checkbox {
   flex-shrink: 0;
   margin-top: 0.4em;
   cursor: pointer;
-  accent-color: #4a90e2;
+  accent-color: #8ab4f8;
   width: 16px;
   height: 16px;
 }
@@ -185,17 +194,58 @@
 }
 
 .krig-pm-host .ProseMirror li.krig-task-item.checked > .krig-task-item__content {
-  color: #888;
+  color: #9aa0a6;
   text-decoration: line-through;
 }
 
-/* blockquote */
+/* 时间标签:hover 显示,点击弹 date picker */
+.krig-pm-host .ProseMirror .krig-task-item__time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-top: 0.4em;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror li.krig-task-item:hover .krig-task-item__time {
+  opacity: 1;
+  cursor: pointer;
+}
+
+/* 已设 deadline 的项 — 时间标签常显(不仅 hover) */
+.krig-pm-host .ProseMirror li.krig-task-item[data-deadline] .krig-task-item__time {
+  opacity: 1;
+}
+
+/* 超期红字 */
+.krig-pm-host .ProseMirror li.krig-task-item.overdue .krig-task-item__time {
+  color: #f28b82;
+}
+
+/* 隐藏 date input(仅供 showPicker 用) */
+.krig-pm-host .ProseMirror .krig-task-item__date-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* blockquote — 对齐 V1 灰色基线(原 V2 蓝色 #4a90e2 已弃用) */
 .krig-pm-host .ProseMirror blockquote.krig-blockquote {
-  border-left: 3px solid #4a90e2;
+  border-left: 3px solid #555;
   padding-left: 16px;
-  margin: 8px 0;
-  color: #c8c8c8;
+  margin: 0.3em 0;
+  color: #aaa;
   font-style: italic;
+}
+
+/* 嵌套二级 blockquote — 竖线更深灰(对齐 V1) */
+.krig-pm-host .ProseMirror blockquote.krig-blockquote blockquote.krig-blockquote {
+  border-left-color: #444;
 }
 
 /* code block */
@@ -220,10 +270,17 @@
   font-size: inherit;
 }
 
-/* horizontal rule */
+/* horizontal rule — 对齐 V1 #444 / 1.5em margin */
 .krig-pm-host .ProseMirror hr.krig-horizontal-rule {
   border: none;
-  height: 1px;
-  background: #3a3a3a;
-  margin: 16px 0;
+  border-top: 1px solid #444;
+  margin: 1.5em 0;
+  /* atom 节点选中态 */
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror hr.krig-horizontal-rule.ProseMirror-selectednode {
+  border-top-color: #6cb6ff;
+  outline: 1px dashed #6cb6ff;
+  outline-offset: 2px;
 }

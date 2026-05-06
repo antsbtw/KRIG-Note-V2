@@ -20,9 +20,21 @@ const orderedListNodeSpec: NodeSpec = {
   ],
   toDOM(node) {
     const start = node.attrs.start as number;
-    return start === 1
-      ? ['ol', { class: 'krig-ordered-list' }, 0]
-      : ['ol', { class: 'krig-ordered-list', start: String(start) }, 0];
+    if (start === 1) {
+      return ['ol', { class: 'krig-ordered-list' }, 0];
+    }
+    // counter-reset 注入 inline style:CSS counter 默认从 0 起,
+    // 设为 start-1 让首项 counter-increment 后正好等于 start。
+    // HTML start 属性同时保留(parseDOM 反解 + a11y)。
+    return [
+      'ol',
+      {
+        class: 'krig-ordered-list',
+        start: String(start),
+        style: `counter-reset: ordered-item ${start - 1}`,
+      },
+      0,
+    ];
   },
 };
 
