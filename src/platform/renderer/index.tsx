@@ -18,6 +18,7 @@ import { reportL4Alive } from '@slot/diagnostics/L4-alive';
 import { reportL5Alive } from '@views/L5-alive';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
+import '@views/web';    // L5-B4:WebView self-register
 import './app.css';
 
 // L3 启动:配置持久化 + 加载已存的 Workspaces + 确保至少一个

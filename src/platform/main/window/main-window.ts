@@ -35,7 +35,17 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       preload: path.join(__dirname, 'main-window-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // L5-B4:启用 <webview> tag(给 web view 嵌网页用)
+      webviewTag: true,
     },
+  });
+
+  // L5-B4:拦截 webview 的 attach,强制安全配置(对齐 V1 will-attach-webview)
+  // - contextIsolation: true / nodeIntegration: false 保证 guest 不能访问 Node
+  // - 不设 preload(本阶段 webview 内不需要 IPC;后续 web-bridge epic 时再补)
+  win.webContents.on('will-attach-webview', (_event, webPreferences) => {
+    webPreferences.contextIsolation = true;
+    webPreferences.nodeIntegration = false;
   });
 
   // 加载 renderer
