@@ -16,6 +16,7 @@ import { popupController } from '../triggers/popup-controller';
 import { commandRegistry } from '../command-registry/command-registry';
 import { selection, type SelectionPayload } from '@capabilities/selection';
 import type { ToolbarItemContext } from '../toolbar-registry/toolbar-types';
+import { groupWithDividers, isDivider } from './group-with-dividers';
 
 const VIEWPORT_MARGIN = 8;
 
@@ -83,7 +84,10 @@ export function FloatingToolbarBinding() {
       }}
       onMouseDown={(e) => e.preventDefault()} // 不抢编辑器焦点
     >
-      {items.map((item) => {
+      {groupWithDividers(items).map((item) => {
+        if (isDivider(item)) {
+          return <div key={item.key} className="krig-floating-toolbar-divider" />;
+        }
         const active = item.activeWhen?.(ctx) ?? false;
         const isPopupTrigger = item.kind === 'popup-trigger';
         return (
