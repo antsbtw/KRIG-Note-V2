@@ -7,6 +7,36 @@
   flex-direction: column;
   color: #888;
   overflow: hidden;
+  position: relative; /* L5-B3.8:给 divider 做 anchor */
+}
+
+/* L5-B3.8:右边缘 divider — 横跨整个高度 4px 宽,hover 蓝色高亮 */
+.krig-nav-side-frame__divider {
+  position: absolute;
+  top: 0;
+  right: -2px; /* 横跨边线 — 让点击区域更宽,跟内容不重叠 */
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 10;
+  transition: background 0.1s ease 0.1s; /* 延迟 hover 高亮避免误触发 */
+}
+
+.krig-nav-side-frame__divider:hover {
+  background: rgba(138, 180, 248, 0.4);
+}
+
+/* 拖拽中:全局光标 col-resize + 禁文本选中(避免拖拽时选到内容)*/
+body.krig-navside-resizing,
+body.krig-navside-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* 拖拽中 divider 始终高亮 */
+body.krig-navside-resizing .krig-nav-side-frame__divider {
+  background: rgba(138, 180, 248, 0.6);
 }
 
 .krig-nav-side-empty {
