@@ -108,6 +108,12 @@ export function WebToolbar({
           spellCheck={false}
         />
       </div>
+
+      {/*
+        L5-B4 占位:右侧 actions 区(对齐 V1 翻译/书签/SlotToggle/× 位置)
+        当前为空,留 L5-B4.x 后续 sub-stage 填入按钮(translate / bookmark / close-slot)
+      */}
+      <div className="krig-web-toolbar__actions" />
     </div>
   );
 }

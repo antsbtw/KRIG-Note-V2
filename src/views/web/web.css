@@ -90,3 +90,17 @@
 .krig-web-toolbar__url-input:focus {
   border-color: #8ab4f8;
 }
+
+/*
+ * L5-B4 占位:右侧 actions 区(对齐 V1 翻译 / 书签 / SlotToggle / × 位置)
+ * 当前为空,固定最小宽度让右侧留白,未来填入按钮(L5-B4.x sub-stage)
+ */
+.krig-web-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  /* 占位最小宽度 — 留出 ~4 个按钮位置(每个 28px + gap)*/
+  min-width: 120px;
+  justify-content: flex-end;
+}
