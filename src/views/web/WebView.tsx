@@ -22,6 +22,9 @@ import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import { getWebWsState, setWebUrl } from './data-model';
 import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
+import { SyncDriver } from './sync/sync-driver';
+import { SYNC_ACTION, WEB_TRANSLATE_PROTOCOL } from './sync/sync-protocol';
+import { slotBus } from './slot-bus';
 import './web.css';
 
 interface WebViewProps {
@@ -42,12 +45,20 @@ interface WebviewElement extends HTMLElement {
   canGoForward(): boolean;
   getURL(): string;
   getTitle(): string;
+  /** L5-B4.2 加(SyncDriver 用)*/
+  isLoading(): boolean;
+  /** L5-B4.2 加(SyncDriver / TranslateDriver 注入用)*/
+  executeJavaScript(code: string): Promise<unknown>;
 }
 
 export function WebView({ workspaceId }: WebViewProps) {
   const webviewRef = useRef<WebviewElement | null>(null);
   /** webview dom-ready 才允许调 getURL / loadURL 等;前期通过 src 属性初始化 URL */
   const domReadyRef = useRef(false);
+  /** L5-B4.2:左侧 SyncDriver(仅当右栏是 web-translate-view 时 active)*/
+  const syncDriverRef = useRef<SyncDriver | null>(null);
+  /** L5-B4.2:右栏 NAVIGATE 触发的导航时间窗(防回环)*/
+  const remoteNavUntilRef = useRef(0);
 
   // 订阅 per-ws state 取持久化的 currentUrl
   const wsState = useSyncExternalStore(
@@ -55,6 +66,15 @@ export function WebView({ workspaceId }: WebViewProps) {
     () => {
       const ws = workspaceManager.get(workspaceId);
       return ws ? getWebWsState(ws) : null;
+    },
+  );
+
+  /** 订阅 slotBinding.right 判断是否在双栏翻译模式 */
+  const isTranslateMode = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => {
+      const ws = workspaceManager.get(workspaceId);
+      return ws?.slotBinding.right === 'web-translate-view';
     },
   );
 
@@ -88,8 +108,26 @@ export function WebView({ workspaceId }: WebViewProps) {
         setDisplayUrl(newUrl);
         setCanGoBack(wv.canGoBack());
         setCanGoForward(wv.canGoForward());
-        // 持久化到 per-ws state
-        setWebUrl(workspaceId, newUrl);
+        // 持久化到 per-ws state(about:blank 不持久化,避免被 reset 状态覆盖)
+        if (newUrl && newUrl !== 'about:blank') {
+          setWebUrl(workspaceId, newUrl);
+        }
+
+        // L5-B4.2:翻译模式下导航 → reinject sync 脚本 + 通知对面(防回环)
+        const driver = syncDriverRef.current;
+        if (driver) {
+          driver.reinject();
+          if (Date.now() < remoteNavUntilRef.current) {
+            // 时间窗内 — 对面触发的,不回发
+          } else {
+            driver.takeControl();
+            slotBus.sendFromSide('left', {
+              protocol: WEB_TRANSLATE_PROTOCOL,
+              action: SYNC_ACTION.NAVIGATE,
+              payload: { url: newUrl },
+            });
+          }
+        }
       };
       const handleDidNavigateInPage = (e: Event) => {
         // SPA 路由变化(如 google search 翻页),也持久化
@@ -130,6 +168,15 @@ export function WebView({ workspaceId }: WebViewProps) {
         } catch {
           /* ignore */
         }
+        // L5-B4.2:翻译模式下首次 ready → 启动 SyncDriver
+        if (syncDriverRef.current && !wv.isLoading()) {
+          syncDriverRef.current.start();
+        }
+      };
+
+      // L5-B4.2:did-finish-load 时(导航后页面就绪)reinject sync 脚本
+      const handleFinishLoad = () => {
+        syncDriverRef.current?.reinject();
       };
 
       wv.addEventListener('did-start-loading', handleStartLoading);
@@ -138,9 +185,77 @@ export function WebView({ workspaceId }: WebViewProps) {
       wv.addEventListener('did-navigate-in-page', handleDidNavigateInPage);
       wv.addEventListener('context-menu', handleContextMenu);
       wv.addEventListener('dom-ready', handleDomReady);
+      wv.addEventListener('did-finish-load', handleFinishLoad);
     },
     [workspaceId],
   );
+
+  // L5-B4.2:SyncDriver 生命周期 — 双栏翻译模式启用,离开销毁
+  useEffect(() => {
+    if (!isTranslateMode) {
+      // 退出翻译模式,销毁 driver
+      syncDriverRef.current?.destroy();
+      syncDriverRef.current = null;
+      return;
+    }
+    const wv = webviewRef.current;
+    if (!wv) return;
+
+    // 创建左侧 SyncDriver
+    const driver = new SyncDriver('left');
+    driver.bind(wv);
+    syncDriverRef.current = driver;
+
+    // 订阅 slot-bus 接收右栏消息
+    const unsub = slotBus.subscribe('left', (msg) => {
+      if (msg.protocol !== WEB_TRANSLATE_PROTOCOL) return;
+      switch (msg.action) {
+        case SYNC_ACTION.TAKE_CONTROL:
+          driver.yield();
+          break;
+        case SYNC_ACTION.SYNC_EVENTS: {
+          const p = msg.payload as { events: unknown[]; fromSide: 'left' | 'right' };
+          driver.handleRemoteEvents(p.events as Parameters<typeof driver.handleRemoteEvents>[0], p.fromSide);
+          break;
+        }
+        case SYNC_ACTION.NAVIGATE: {
+          const url = (msg.payload as { url: string }).url;
+          // 忽略 about:blank(右栏初始加载误发,会把左栏冲成空白)
+          if (!url || url === 'about:blank') break;
+          if (wv && domReadyRef.current) {
+            remoteNavUntilRef.current = Date.now() + 2000;
+            wv.loadURL(url);
+          }
+          break;
+        }
+        case SYNC_ACTION.REQUEST_URL: {
+          // 右栏初始化时请求左栏发当前 URL
+          const ready = !!wv && domReadyRef.current;
+          const url = ready ? wv.getURL() : '';
+          // 只在左栏真有页面(非 about:blank)时回发,避免误把右栏冲空
+          if (ready && url && url !== 'about:blank') {
+            slotBus.sendFromSide('left', {
+              protocol: WEB_TRANSLATE_PROTOCOL,
+              action: SYNC_ACTION.NAVIGATE,
+              payload: { url },
+            });
+          }
+          break;
+        }
+      }
+    });
+
+    // 当前已加载 → 立刻 start 同步
+    if (domReadyRef.current && !wv.isLoading()) {
+      driver.start();
+    }
+
+    return () => {
+      unsub();
+      driver.destroy();
+      syncDriverRef.current = null;
+    };
+  }, [isTranslateMode]);
 
   // 切 ws / 外部改 currentUrl(如 link 路由)→ 同步到 webview
   // 关键:webview 未 dom-ready 时不能调 getURL;此时初始 URL 已通过 src 属性加载,无需介入
@@ -183,6 +298,17 @@ export function WebView({ workspaceId }: WebViewProps) {
     else wv.reload();
   }, [loading]);
 
+  // L5-B4.2:toggle 双栏翻译模式
+  const handleToggleTranslate = useCallback(() => {
+    const ws = workspaceManager.get(workspaceId);
+    if (!ws) return;
+    const next: 'web-translate-view' | null =
+      ws.slotBinding.right === 'web-translate-view' ? null : 'web-translate-view';
+    workspaceManager.update(workspaceId, {
+      slotBinding: { ...ws.slotBinding, right: next },
+    });
+  }, [workspaceId]);
+
   if (!wsState) {
     return <div className="krig-web-view__empty">Workspace 未就绪</div>;
   }
@@ -194,10 +320,12 @@ export function WebView({ workspaceId }: WebViewProps) {
         loading={loading}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
+        translateActive={isTranslateMode}
         onNavigate={handleNavigate}
         onGoBack={handleGoBack}
         onGoForward={handleGoForward}
         onReload={handleReload}
+        onToggleTranslate={handleToggleTranslate}
       />
       {(() => {
         // webview tag:TS 不识别 partition/allowpopups,用 cast 一个匹配 props 类型的方式声明

@@ -29,6 +29,9 @@ export const IPC_CHANNELS = {
   // L5-B3.4:外部链接 / 文件打开(给 link-click plugin 用)
   SHELL_OPEN_EXTERNAL: 'shell.open-external',
   SHELL_OPEN_PATH: 'shell.open-path',
+
+  // L5-B4.2:Google Translate element.js fetch(避 CSP block,main 进程取后注入)
+  WEB_TRANSLATE_FETCH_ELEMENT_JS: 'web-translate.fetch-element-js',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

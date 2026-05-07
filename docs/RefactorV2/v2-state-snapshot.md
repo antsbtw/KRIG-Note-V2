@@ -22,7 +22,8 @@
 | 10 | L5-B3.2 | 6 个 block 类型(bullet/ordered/task/blockquote/codeBlock/hr)+ 修 8 bug | d8773ba | 2026-05-06 |
 | 11 | L5-B3.3 | marks 扩展(underline/textStyle/highlight)+ 3 简单 block(hardBreak/callout/toggleList) | 70c039a | 2026-05-06 |
 | 12 | L5-B3.4 | link mark 全栈 + popup 基础设施 + ColorPicker 完整 UI | 159548f | 2026-05-06 |
-| 13 | L5-B4 | web view 基础形态(webviewTag + WebView + per-ws state + 简化右键菜单 + link 跨 view 路由) | (待 merge) | 2026-05-06 |
+| 13 | L5-B4 | web view 基础形态(webviewTag + WebView + per-ws state + 简化右键菜单 + link 跨 view 路由) | 68cb7c3 | 2026-05-06 |
+| 14 | L5-B4.2 | web 双屏同步翻译(slot-bus + sync driver 7 事件 + Google Translate 注入 + 4 语言切换) | (待 merge) | 2026-05-06 |
 
 ---
 
@@ -138,3 +139,4 @@ audio / video / file-block / math-block / table 等。
 |---|---|
 | 2026-05-06 | 初稿;L5-B3.4 merge 后状态盘点;V1 → V2 epic 全景清单;下一步候选 A 拍板 |
 | 2026-05-06 | L5-B4 web view 基础形态完成;link 跨 view 路由验证落地 |
+| 2026-05-06 | L5-B4.2 web 双屏同步翻译完成;slot-bus(免 IPC)+ sync driver + Google Translate |

@@ -977,6 +977,89 @@
 
 ---
 
+## 9. L5-B4.2 Web 双屏同步翻译
+
+> 阶段:双 web view 同步导航 + 右侧 Google Translate 注入翻译
+> 跟踪:[stages/L5B4.2-web-translate-design.md](stages/L5B4.2-web-translate-design.md) /
+>      [stages/L5B4.2-web-translate-completion.md](stages/L5B4.2-web-translate-completion.md)
+
+### 9.1 触发翻译模式
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.1.1 | 切到 Web Tab,WebToolbar 右侧出现翻译按钮(SVG icon) | 视觉 | ⏳ |
+| 9.1.2 | 点翻译按钮 → 右栏出现 TranslateWebView,加载相同 URL | slotBinding.right = 'web-translate-view' | ⏳ |
+| 9.1.3 | 翻译激活时按钮蓝色高亮 | active 样式 | ⏳ |
+| 9.1.4 | 再点翻译按钮 → 关闭翻译模式 | slotBinding.right = null,SyncDriver 销毁 | ⏳ |
+
+### 9.2 Google Translate 注入
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.2.1 | 激活翻译模式,加载英文页面(如 anthropic.com)| 右栏自动翻译为中文 | ⏳ |
+| 9.2.2 | 顶部语言选择器显示 4 种(中/日/韩/英)| 视觉 | ⏳ |
+| 9.2.3 | 切目标语言为日文 | 重新注入,内容变日文 | ⏳ |
+| 9.2.4 | 网络无法访问 translate.googleapis.com | 静默不翻译,sync 同步仍工作 | ⏳ |
+
+### 9.3 同步导航(NAVIGATE)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.3.1 | 左栏 URL bar 输入新 URL Enter | 右栏同步导航到相同 URL | ⏳ |
+| 9.3.2 | 左栏点链接跳转 | 右栏同步跳转 | ⏳ |
+| 9.3.3 | 左栏返回 / 前进 | 右栏同步 | ⏳ |
+| 9.3.4 | 防回环:右栏导航不触发左栏再发 NAVIGATE | console 无重复消息 | ⏳ |
+
+### 9.4 滚动同步
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.4.1 | 左栏鼠标滚轮向下 | 右栏同步向下滚动 1:1 | ⏳ |
+| 9.4.2 | 滚动停止 200ms 后 → 锚点定位修正 | smooth scrollTo 到锚点 | ⏳ |
+| 9.4.3 | 右栏滚动 → 控制权切换 → 左栏跟随 | 单向同步,无抖动 | ⏳ |
+
+### 9.5 点击同步
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.5.1 | 左栏点 [展开/折叠] 按钮 | 右栏同步切换状态 | ⏳ |
+| 9.5.2 | toggle 状态判断:已经一致时不重复触发 | console 无重复 click | ⏳ |
+| 9.5.3 | 左栏点链接 | 走 navigation sync,不走 click sync(防双重导航)| ⏳ |
+
+### 9.6 输入同步
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.6.1 | 左栏在搜索框输文字(input 事件)| 右栏同步到相同输入框 | ⏳ |
+| 9.6.2 | 左栏选择 select 项 | 右栏同步选择 | ⏳ |
+| 9.6.3 | 左栏勾选 checkbox | 右栏同步 | ⏳ |
+| 9.6.4 | 右栏输入 → 不同步左栏(单向)| L5-B4.2 input 仅 left → right | ⏳ |
+
+### 9.7 选区高亮同步
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.7.1 | 左栏选中段落文字 | 右栏对应段落出现蓝色 outline 高亮 | ⏳ |
+| 9.7.2 | 选区清空 | 右栏高亮消失 | ⏳ |
+
+### 9.8 控制权模型
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.8.1 | 用户左栏滚动 → 左侧自动 takeControl | console "→ CONTROLLER" | ⏳ |
+| 9.8.2 | 之后右栏滚动 → 控制权切回右侧 | 左侧 yield | ⏳ |
+| 9.8.3 | 翻译注入期间(translateDriver.injecting=true)| SyncDriver 跳过 poll | ⏳ |
+
+### 9.9 不回归 + typecheck
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 9.9.1 | npm run typecheck + lint | 全过 | ⏳ |
+| 9.9.2 | 关闭翻译后 WebView 单栏正常工作 | 不回归 | ⏳ |
+| 9.9.3 | NoteView / 其他 view 不受影响 | 不回归 | ⏳ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
@@ -990,3 +1073,4 @@
 | 2026-05-06 | § 6.6 toggleList(20 条)审计 |
 | 2026-05-06 | § 7 新章节 L5-B3.4(7.1-7.9 共 ~50 条)审计:popup 基础设施 / link mark / LinkPanel 笔记+网页 Tab / 5 协议路由 / 历史栈 / Cmd+K / ColorPickerPanel 升级 / 不回归 |
 | 2026-05-06 | § 8 新章节 L5-B4 web view(8.1-8.8 共 ~30 条)审计:platform webviewTag / ViewSwitcher Tab / URL bar / 前进后退 / per-ws 持久化 / link 跨 view 路由验证 / 简化右键菜单 / 不回归 |
+| 2026-05-06 | § 9 新章节 L5-B4.2 双屏同步翻译(9.1-9.9 共 ~30 条)审计:翻译模式触发 / Google Translate 注入 / NAVIGATE 同步 / 滚动同步 / 点击同步 / 输入同步 / 选区高亮 / 控制权模型 / 不回归 |

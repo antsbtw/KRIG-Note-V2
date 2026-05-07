@@ -20,6 +20,8 @@ declare global {
       openExternal(url: string): Promise<{ ok: boolean; reason?: string }>;
       /** L5-B3.4:打开文件路径(系统默认应用)— shell.openPath */
       openPath(filePath: string): Promise<{ ok: boolean; reason?: string }>;
+      /** L5-B4.2:fetch Google Translate element.js(main 取后注入 webview,避 CSP)*/
+      translateFetchElementJs(): Promise<string | null>;
     };
   }
 }
