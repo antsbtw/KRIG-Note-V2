@@ -59,21 +59,28 @@ export class TranslateDriver {
     let elementJsCode: string | null = null;
     try {
       elementJsCode = await window.electronAPI.translateFetchElementJs();
-    } catch {
+    } catch (err) {
+      console.warn('[translate-driver] fetchElementJs threw:', err);
       this.injecting = false;
       return;
     }
     if (!elementJsCode) {
+      console.warn(
+        '[translate-driver] fetchElementJs returned null — Google Translate CDN unreachable? 检查 main 进程能否访问 translate.googleapis.com',
+      );
       this.injecting = false;
       return;
     }
+    console.log('[translate-driver] element.js fetched,', elementJsCode.length, 'bytes — 开始注入');
 
     // 检查 await 期间是否被新 inject 覆盖(页面导航了)
     if (this.injectId !== myId) {
+      console.log('[translate-driver] inject 被新的覆盖,放弃');
       this.injecting = false;
       return;
     }
     if (webview.isLoading()) {
+      console.log('[translate-driver] webview 仍在加载,放弃');
       this.injecting = false;
       return;
     }
@@ -87,11 +94,13 @@ export class TranslateDriver {
     webview
       .executeJavaScript(script)
       .then(() => {
+        console.log('[translate-driver] Step 3 注入器 OK');
         // Step 4:执行 element.js
         if (this.injectId !== myId) return;
         return webview.executeJavaScript(elementJsCode!);
       })
       .then(() => {
+        console.log('[translate-driver] Step 4 element.js OK — Google Translate widget 应该已激活');
         // Step 5:暗色模式 meta 注入
         if (this.injectId !== myId) return;
         return webview.executeJavaScript(`
@@ -110,7 +119,8 @@ export class TranslateDriver {
       .then(() => {
         if (this.injectId === myId) this.injecting = false;
       })
-      .catch(() => {
+      .catch((err) => {
+        console.warn('[translate-driver] inject 链路抛错:', err);
         if (this.injectId === myId) this.injecting = false;
       });
   }

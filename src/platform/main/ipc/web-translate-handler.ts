@@ -26,14 +26,19 @@ export function registerWebTranslateHandlers(): void {
       return cachedElementJs;
     }
     try {
+      console.log('[web-translate] fetching', ELEMENT_JS_URL);
       const resp = await net.fetch(ELEMENT_JS_URL);
-      if (!resp.ok) return null;
+      if (!resp.ok) {
+        console.warn('[web-translate] fetch element.js HTTP', resp.status, resp.statusText);
+        return null;
+      }
       const text = await resp.text();
+      console.log('[web-translate] element.js fetched OK,', text.length, 'bytes');
       cachedElementJs = text;
       cacheExpireAt = now + CACHE_TTL_MS;
       return text;
     } catch (err) {
-      console.warn('[web-translate] fetch element.js failed:', err);
+      console.warn('[web-translate] fetch element.js failed (网络不通?):', err);
       return null;
     }
   });
