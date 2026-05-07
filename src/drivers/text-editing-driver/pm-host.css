@@ -533,3 +533,175 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* L5-B3.6 mathBlock — 两态 KaTeX 渲染 */
+
+.krig-pm-host .ProseMirror .krig-math-block {
+  display: block;
+  margin: 8px 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.krig-pm-host .ProseMirror .krig-math-block--editing {
+  cursor: default;
+  background: none;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__rendered {
+  min-height: 32px;
+  padding: 8px;
+  text-align: center;
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__rendered .katex {
+  font-size: 1.4em;
+  color: inherit;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__editor {
+  padding: 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  background: #1f1f1f;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__label {
+  font-size: 12px;
+  color: #888;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__editor pre {
+  margin: 0;
+  padding: 8px;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__preview {
+  margin-top: 8px;
+  padding: 8px;
+  text-align: center;
+  border-top: 1px dashed #2a2a2a;
+  min-height: 32px;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__preview .katex {
+  font-size: 1.3em;
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__empty {
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+  padding: 8px;
+}
+
+.krig-pm-host .ProseMirror .krig-math-block__error {
+  color: #f28b82;
+  font-size: 12px;
+  padding: 8px;
+}
+
+/* L5-B3.6 mathInline — 行内公式 + 弹窗编辑器 */
+
+.krig-pm-host .ProseMirror .krig-math-inline {
+  display: inline-block;
+  padding: 0 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-math-inline:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-pm-host .ProseMirror .krig-math-inline.ProseMirror-selectednode {
+  outline: 2px solid #8ab4f8;
+  outline-offset: 1px;
+}
+
+.krig-pm-host .ProseMirror .krig-math-inline--empty {
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  padding: 1px 6px;
+  border: 1px dashed rgba(138, 180, 248, 0.3);
+}
+
+/* mathInline 编辑弹窗(挂在 body,不在 .ProseMirror 容器内,所以 selector 不带前缀)*/
+.krig-math-inline-editor {
+  position: fixed;
+  z-index: 1000;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 8px;
+  min-width: 280px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.krig-math-inline-editor__input {
+  display: block;
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  padding: 6px 10px;
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.krig-math-inline-editor__input:focus {
+  border-color: #8ab4f8;
+}
+
+.krig-math-inline-editor__preview {
+  margin-top: 8px;
+  padding: 8px;
+  text-align: center;
+  background: #1f1f1f;
+  border-radius: 4px;
+  min-height: 36px;
+  color: #e8eaed;
+}
+
+.krig-math-inline-editor__preview .katex {
+  font-size: 1.2em;
+}
+
+.krig-math-inline-editor__hint {
+  color: #666;
+  font-size: 12px;
+  font-style: italic;
+}

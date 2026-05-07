@@ -578,6 +578,82 @@ export const textEditingDriverApi = {
     }
     inst.view.focus();
   },
+
+  /**
+   * 在光标当前 block 位置插入空 mathBlock(L5-B3.6)
+   *
+   * - 空段落 → 替换;非空段落 → 之后插入
+   * - mathBlock content='text*',无文本时 NodeView 自动进入 edit 态(用户直接写 LaTeX)
+   * - 光标进 mathBlock 内(LaTeX 源码区)
+   */
+  insertMathBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const mathType = schema.nodes.mathBlock;
+    if (!mathType) return;
+
+    const mathNode = mathType.create();
+    if (!mathNode) return;
+
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      dispatch(state.tr.insert(state.selection.from, mathNode));
+    } else {
+      const blockNode = $from.node(1);
+      const blockStart = $from.before(1);
+      const blockEnd = $from.after(1);
+      const isEmptyParagraph =
+        blockNode.type.name === 'text-block' &&
+        blockNode.content.size === 0 &&
+        blockNode.attrs.level == null;
+      let tr = state.tr;
+      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+      if (isEmptyParagraph) {
+        tr = tr.replaceWith(blockStart, blockEnd, mathNode);
+      } else {
+        tr = tr.insert(blockEnd, mathNode);
+      }
+      // 光标进 mathBlock 内(insertPos + 1 = mathBlock 内 text 位置)
+      const sel = TextSelection.create(tr.doc, insertPos + 1);
+      tr = tr.setSelection(sel).scrollIntoView();
+      dispatch(tr);
+    }
+    inst.view.focus();
+  },
+
+  /**
+   * 插入 mathInline atom(L5-B3.6)
+   *
+   * 行为:
+   * - 有选区 → 选中文本作 latex 源码,替换为 mathInline(floating toolbar 主入口语义)
+   *   例:选 "x^2 + y^2" → 转成 mathInline latex="x^2 + y^2"
+   * - 无选区 → 插入空 mathInline,用户单击触发编辑弹窗
+   *
+   * mathInline 是 inline atom,只能插在 text-block 等 inline 容器里。
+   */
+  insertMathInlineAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const mathType = schema.nodes.mathInline;
+    if (!mathType) return;
+
+    const { from, to, empty } = state.selection;
+    let latex = '';
+    if (!empty) {
+      // 选中文本作 LaTeX 源码
+      latex = state.doc.textBetween(from, to, ' ', ' ');
+    }
+    const mathNode = mathType.create({ latex });
+    if (!mathNode) return;
+
+    const tr = state.tr.replaceSelectionWith(mathNode, false).scrollIntoView();
+    dispatch(tr);
+    inst.view.focus();
+  },
 };
 
 /**

@@ -81,6 +81,15 @@ export function registerFloatingToolbar(): void {
       order: 60,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),
     },
+    // L5-B3.6:行内公式 — 选中文字(LaTeX 源码)→ 转 mathInline atom 渲染
+    //   选区为空时 insert 空 atom,用户单击触发编辑弹窗(备份路径)
+    {
+      id: 'note-view.ft.math-inline',
+      label: '∑',
+      command: 'note-view.insert-math-inline',
+      view: VIEW,
+      order: 70,
+    },
   ];
   floatingToolbarRegistry.register(items);
 }

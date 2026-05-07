@@ -241,6 +241,18 @@ export function registerNoteCommands(): void {
     textEditingDriverApi.insertImageAtSelection(instanceId);
   }));
 
+  // L5-B3.6:slash insert-math-block — 插入 mathBlock(空,自动进 edit 态)
+  commandRegistry.register('note-view.slash-insert-math-block', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertMathBlockAtSelection(instanceId);
+  }));
+
+  // L5-B3.6:行内公式入口在 floating toolbar(选中文字 → 转 mathInline)
+  // 选区为空时也允许插入(备份路径,弹编辑器)
+  commandRegistry.register('note-view.insert-math-inline', withInstance((instanceId) => {
+    textEditingDriverApi.insertMathInlineAtSelection(instanceId);
+  }));
+
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();
