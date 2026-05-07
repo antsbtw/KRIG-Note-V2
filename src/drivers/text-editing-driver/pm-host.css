@@ -842,3 +842,89 @@
   pointer-events: none;
   position: absolute;
 }
+
+/* L5-B3.12 noteLink — 双链 inline atom + 搜索面板 */
+
+.krig-pm-host .ProseMirror .krig-note-link {
+  display: inline-block;
+  padding: 1px 4px;
+  margin: 0 1px;
+  border-radius: 3px;
+  background: rgba(138, 180, 248, 0.12);
+  color: #8ab4f8;
+  cursor: pointer;
+  transition: background 0.1s;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-note-link:hover {
+  background: rgba(138, 180, 248, 0.22);
+}
+
+.krig-pm-host .ProseMirror .krig-note-link.ProseMirror-selectednode {
+  outline: 2px solid #8ab4f8;
+  outline-offset: 1px;
+}
+
+.krig-pm-host .ProseMirror .krig-note-link--missing {
+  background: rgba(244, 81, 81, 0.12);
+  color: #f45151;
+}
+
+.krig-pm-host .ProseMirror .krig-note-link--missing:hover {
+  background: rgba(244, 81, 81, 0.22);
+}
+
+/* note-link 搜索面板 — 挂在 popup 内,样式不带 .krig-pm-host 前缀 */
+.krig-note-link-search {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  min-width: 240px;
+  max-width: 360px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.krig-note-link-search__empty {
+  padding: 12px 14px;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  text-align: center;
+}
+
+.krig-note-link-search__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.krig-note-link-search__item--active,
+.krig-note-link-search__item:hover {
+  background: #3a3a3a;
+}
+
+.krig-note-link-search__icon {
+  flex-shrink: 0;
+  font-size: 15px;
+  width: 20px;
+  text-align: center;
+}
+
+.krig-note-link-search__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

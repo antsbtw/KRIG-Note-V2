@@ -29,7 +29,12 @@
 | 16 | L5-B4.3.1 | AI ↔ Note 闭环前置基建:mediaStore + md-to-pm(V2 schema 适配)+ ai-service-types | 55a01a7 | 2026-05-07 |
 | 17 | L5-B3.5 | NoteEditor schema Phase A #1:image block(三态 placeholder/普通图/SVG + Upload/Embed/Resize + SVG 安全清洗 + mediaStore 集成 + slash /image)| e9e1475 | 2026-05-07 |
 | 18 | L5-B3.6 | NoteEditor schema Phase A #2:mathBlock + mathInline(KaTeX 渲染 + 共享 IntersectionObserver / 缓存优化 + 双态编辑 + 反向驱动 ✅)| 04ffc8c | 2026-05-07 |
-| 19 | L5-B3.7 | NoteEditor schema Phase A #3 收官:table 4 节点(prosemirror-tables 库 + 简版 NodeView + 完整业务 commands + 反向驱动 ✅)— **B+ 路径**:UX 装饰留 sub-stage,扩展性 100% 保留 | (待 merge) | 2026-05-07 |
+| 19 | L5-B3.7 | NoteEditor schema Phase A #3 收官:table 4 节点(prosemirror-tables 库 + 简版 NodeView + 完整业务 commands + 反向驱动 ✅)— **B+ 路径**:UX 装饰留 sub-stage,扩展性 100% 保留 | 2e63d61 | 2026-05-07 |
+| 20 | L5-B3.8 | NavSide divider 拖拽改宽 + per-ws 持久化;V1 → V2 NoteEditor 迁移盘点 + Phase B 优先级 | 7e30579 | 2026-05-07 |
+| 21 | L5-B3.9 | handle / context menu 重组(Turn Into 移到 handle;context = Cut/Copy/Paste/Select All/Delete;按钮 + 菜单分组 + 分隔符) | 0035d20 | 2026-05-07 |
+| 22 | L5-B3.10 | floating toolbar 顺序对齐 V1 + group 分隔符(B/I/U/S/code → ∑ → 🔗 → 颜色) | 6335e95 | 2026-05-07 |
+| 23 | L5-B3.11 | note title(text-block.isTitle + title-guard plugin)+ 单 'A' 综合按钮 + handle 菜单 submenu(对齐 V1 11 项 Turn Into + 4 占位 submenu)+ visibleWhen | 77a9d5b | 2026-05-07 |
+| 24 | L5-B3.12 | **Phase B1 KRIG 知识图谱基础**:noteLink 双链 `[[note-title]]`(inline atom + leafText / `[[` 触发 popup 搜索面板 / krig://note 协议路由 / mount-once title 同步 / 失效红色态)— V1 → V2 直迁 | (待 merge) | 2026-05-07 |
 
 ---
 
@@ -151,3 +156,5 @@ audio / video / file-block / math-block / table 等。
 | 2026-05-07 | L5-B4.3 暂停推进 — note schema 不齐导致 AI 提取无法验证;改 Phase A 优先补 schema(L5-B3.5 image / L5-B3.6 math / L5-B3.7 table)。L5-B3.5 image block 完成(unknown → image 反向驱动证明) |
 | 2026-05-07 | L5-B3.6 mathBlock + mathInline 完成(KaTeX 渲染,V1 性能优化全部直迁:渲染缓存 / 共享 IntersectionObserver / 共享 mousedown listener;砍 LaTeX 速查面板留 L5-B+ / 砍 thoughtMark 集成);反向驱动证明再次验证 |
 | 2026-05-07 | L5-B3.7 table 4 节点完成(prosemirror-tables 库 + B+ 路径:schema + 完整业务 commands + 简版 NodeView + 必要插件;砍 hover 指示器 / 自建 DOM 菜单 / CellSelection 浮动 toolbar 留 L5-B3.7.1 接 V2 注册系统);Phase A 收官,反向驱动第三次证明 ✅ |
+| 2026-05-07 | L5-B3.8 - 3.11 UX 对齐 V1 完成:NavSide divider / handle context 菜单重组 / floating toolbar 顺序对齐 / note title(isTitle + title-guard)+ handle submenu 框架 |
+| 2026-05-07 | **L5-B3.12 noteLink 双链完成 — Phase B1 KRIG 知识图谱基础落地** ✅:V1 → V2 直迁(~500 LOC + 90 CSS)。inline atom + leafText 复制还原 / `[[` handleTextInput 触发 popup / `]]` 自动关 / krig://note 协议路由(复用 link-click handler 加 resolveNoteTitle)/ mount-once title 同步 / 删除目标显红色"未找到"态;5 决策点全 A 默认 |
