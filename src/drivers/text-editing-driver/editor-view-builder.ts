@@ -24,6 +24,7 @@ import { buildListKeymap } from './plugins/build-list-keymap';
 import { buildCodeBlockKeymap } from './plugins/build-code-block-keymap';
 import { buildHardBreakKeymap } from './plugins/build-hard-break-keymap';
 import { buildLinkClickPlugin } from './plugins/build-link-click-plugin';
+import { buildTitleGuardPlugin } from './plugins/build-title-guard-plugin';
 
 /**
  * 装配 EditorView
@@ -65,6 +66,7 @@ export function buildEditorView(
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y
     ...blockPlugins,
+    buildTitleGuardPlugin(),     // L5-B3.11 维护 doc 首块为 isTitle text-block(handlePaste + appendTransaction)
     buildInputRules(schema),     // headings + 4 mark markdown
     buildSlashPlugin(viewId),    // / 触发 slashMenuController(L5-B3.1)
     buildBlockHandlePlugin(viewId, instanceId), // ⋮⋮ 手柄 + drag source(L5-B3.1)

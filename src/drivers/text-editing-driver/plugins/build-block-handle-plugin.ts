@@ -204,7 +204,17 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         e.stopPropagation();
         if (currentPos < 0) return;
         const rect = dragBtn.getBoundingClientRect();
-        handleMenuController.show(rect.right + 4, rect.top, viewId, currentBlockType, currentPos);
+        // L5-B3.11:把 block.attrs 一起传,给 HandleItem.visibleWhen 判断(isTitle/level/indent 等)
+        const node = editorView.state.doc.nodeAt(currentPos);
+        const blockAttrs = node ? { ...node.attrs } : undefined;
+        handleMenuController.show(
+          rect.right + 4,
+          rect.top,
+          viewId,
+          currentBlockType,
+          currentPos,
+          blockAttrs,
+        );
       });
 
       dragBtn.addEventListener('dragstart', (e) => {
@@ -285,6 +295,14 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         if (blockStart < 0 || !blockNode || !blockDom) {
           dom.style.opacity = '0';
+          return;
+        }
+
+        // L5-B3.11:title 块上不显示 handle(title 不能 turnInto / 删除 / 拖拽 /
+        // + 按钮在 title 上插段落语义不准 — title 应该是独立顶部条)
+        if (blockNode.type.name === 'text-block' && blockNode.attrs.isTitle) {
+          dom.style.opacity = '0';
+          currentPos = -1;
           return;
         }
 

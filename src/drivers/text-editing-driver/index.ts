@@ -37,10 +37,14 @@ export const textEditingDriver: TextEditingDriver = {
   },
 };
 
-/** 创建空 doc(供 view 创建笔记时用)*/
+/** 创建空 doc(供 view 创建笔记时用)
+ *
+ * L5-B3.11:首块带 isTitle:true(对齐 title-guard 约束 — doc 必须以 isTitle 开头)
+ */
 export function createEmptyDoc(): DriverSerialized {
   const schema = buildSchema([textBlockSpec]);
-  const emptyDoc = schema.node('doc', null, [schema.node('text-block', null, [])]);
+  const titleNode = schema.node('text-block', { isTitle: true, level: null }, []);
+  const emptyDoc = schema.node('doc', null, [titleNode]);
   return serializeDoc(emptyDoc);
 }
 

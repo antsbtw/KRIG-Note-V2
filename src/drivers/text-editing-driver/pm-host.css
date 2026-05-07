@@ -817,3 +817,28 @@
   background: rgba(138, 180, 248, 0.1);
   color: #8ab4f8;
 }
+
+/* L5-B3.11:note title — doc 首块,大字号,对齐 V1 视觉(48px / 700)*/
+.krig-pm-host .ProseMirror .krig-note-title,
+.krig-pm-host .ProseMirror p[data-is-title="true"] {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 8px 0 1.2em 0;
+  padding: 0 2px;
+  color: #e8eaed;
+  position: relative; /* 给 placeholder ::before 做 anchor */
+}
+
+/* 空 title 占位提示("Untitled")
+ *
+ * PM 给空 block 自动插 <br class="ProseMirror-trailingBreak">,所以 :empty 不匹配。
+ * 用 :has(br:only-child) 匹配"只有一个 trailingBreak 的空 title"。
+ * Electron Chromium 119+ 已支持 :has。
+ */
+.krig-pm-host .ProseMirror p[data-is-title="true"]:has(br.ProseMirror-trailingBreak:only-child)::before {
+  content: 'Untitled';
+  color: #555;
+  pointer-events: none;
+  position: absolute;
+}
