@@ -23,7 +23,9 @@
 | 11 | L5-B3.3 | marks 扩展(underline/textStyle/highlight)+ 3 简单 block(hardBreak/callout/toggleList) | 70c039a | 2026-05-06 |
 | 12 | L5-B3.4 | link mark 全栈 + popup 基础设施 + ColorPicker 完整 UI | 159548f | 2026-05-06 |
 | 13 | L5-B4 | web view 基础形态(webviewTag + WebView + per-ws state + 简化右键菜单 + link 跨 view 路由) | 68cb7c3 | 2026-05-06 |
-| 14 | L5-B4.2 | web 双屏同步翻译(slot-bus + sync driver 7 事件 + Google Translate 注入 + 4 语言切换) | (待 merge) | 2026-05-06 |
+| 14 | L5-B4.2 | web 双屏同步翻译(slot-bus + sync driver 7 事件 + Google Translate 注入 + 中文翻译 OK,切语言留 L5-B4.2.2) | f79168c | 2026-05-06 |
+| 14.1 | L5-B4.2.1 | URL 路径方案调研(Google translate.goog 替代 widget 注入) | 归档不 merge(`feature/L5B4.2.1-google-url-translate`) | 2026-05-07 |
+| 15 | L5-B4.2.2 | 翻译目标语言 per-ws 持久化 + navigator.language 默认 + 切语言重启 banner + sync-driver 防 crash | (待 merge) | 2026-05-07 |
 
 ---
 
@@ -140,3 +142,4 @@ audio / video / file-block / math-block / table 等。
 | 2026-05-06 | 初稿;L5-B3.4 merge 后状态盘点;V1 → V2 epic 全景清单;下一步候选 A 拍板 |
 | 2026-05-06 | L5-B4 web view 基础形态完成;link 跨 view 路由验证落地 |
 | 2026-05-06 | L5-B4.2 web 双屏同步翻译完成;slot-bus(免 IPC)+ sync driver + Google Translate |
+| 2026-05-07 | L5-B4.2.1 URL 路径方案归档(体验降级未 merge);L5-B4.2.2 切语言走"持久化 + 重启 banner"UX 兜底完成 |
