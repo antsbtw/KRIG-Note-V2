@@ -118,6 +118,30 @@ export class TranslateDriver {
       })
       .then(() => {
         if (this.injectId === myId) this.injecting = false;
+        // 1.5 秒后诊断:Google Translate widget 是否生效
+        setTimeout(() => {
+          webview
+            .executeJavaScript(`
+              (function() {
+                var sel = document.querySelector('#google_translate_element select');
+                var lang = window.__krigCurrentLang || null;
+                var hasGoog = typeof google !== 'undefined' && google.translate;
+                var bodyClass = document.body ? document.body.className : '';
+                var hasTranslated = !!document.querySelector('font[style*="vertical-align"]');
+                return JSON.stringify({
+                  hasSelect: !!sel,
+                  selectValue: sel ? sel.value : null,
+                  selectOptions: sel ? sel.options.length : 0,
+                  krigLang: lang,
+                  hasGoogleTranslate: hasGoog,
+                  bodyClass: bodyClass,
+                  hasTranslatedNodes: hasTranslated,
+                });
+              })();
+            `)
+            .then((r) => console.log('[translate-driver] 1.5s 后 widget 状态:', r))
+            .catch(() => {});
+        }, 1500);
       })
       .catch((err) => {
         console.warn('[translate-driver] inject 链路抛错:', err);

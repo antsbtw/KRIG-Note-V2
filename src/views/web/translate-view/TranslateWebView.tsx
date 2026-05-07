@@ -65,10 +65,11 @@ export function TranslateWebView() {
           const url = (msg.payload as { url: string }).url;
           if (!url) break;
           if (webviewRef.current && domReadyRef.current) {
+            console.log('[translate-view] NAVIGATE 立即 loadURL:', url);
             remoteNavUntilRef.current = Date.now() + 2000;
             webviewRef.current.loadURL(url);
           } else {
-            // webview 还没 dom-ready,暂存 URL 等 ready 后由 handleDomReady 加载
+            console.log('[translate-view] NAVIGATE 暂存(dom 未 ready):', url);
             pendingNavigateUrlRef.current = url;
           }
           break;
@@ -103,10 +104,13 @@ export function TranslateWebView() {
     syncDriverRef.current = driver;
 
     const handleDomReady = () => {
+      const wasReady = domReadyRef.current;
       domReadyRef.current = true;
+      console.log('[translate-view] dom-ready, 当前 URL:', wv.getURL(), 'wasReady:', wasReady);
       // 处理 dom-ready 之前收到的 NAVIGATE(REQUEST_URL → 左侧 NAVIGATE 抢先到达)
       const pending = pendingNavigateUrlRef.current;
       if (pending) {
+        console.log('[translate-view] flush pending NAVIGATE → loadURL:', pending);
         pendingNavigateUrlRef.current = null;
         remoteNavUntilRef.current = Date.now() + 2000;
         wv.loadURL(pending);
@@ -116,7 +120,15 @@ export function TranslateWebView() {
     // did-finish-load:启动同步 + 异步注入翻译
     const handleFinishLoad = () => {
       const url = wv.getURL();
+      console.log('[translate-view] did-finish-load,URL:', url);
       if (!url || url === 'about:blank') return;
+      // 诊断:确认 webview 关键属性是否生效
+      console.log(
+        '[translate-view] webview attrs — disablewebsecurity:',
+        wv.getAttribute('disablewebsecurity'),
+        ', partition:',
+        wv.getAttribute('partition'),
+      );
       driver.start();
       slotBus.sendFromSide('right', {
         protocol: WEB_TRANSLATE_PROTOCOL,
