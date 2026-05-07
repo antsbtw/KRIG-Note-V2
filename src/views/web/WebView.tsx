@@ -19,12 +19,13 @@
 import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { WEBVIEW_PARTITION } from '@shared/constants/webview';
-import { getWebWsState, setWebUrl } from './data-model';
+import { getWebWsState, setWebUrl, setWebTargetLang } from './data-model';
 import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
 import { SyncDriver } from './sync/sync-driver';
 import { SYNC_ACTION, WEB_TRANSLATE_PROTOCOL } from './sync/sync-protocol';
 import { slotBus } from './slot-bus';
+import { getLangLabel } from './translate-view/lang-defaults';
 import './web.css';
 
 interface WebViewProps {
@@ -83,6 +84,23 @@ export function WebView({ workspaceId }: WebViewProps) {
   const [canGoForward, setCanGoForward] = useState(false);
   // 当前显示给 UI 的 URL(实时同步,可能跟 wsState.currentUrl 短暂不一致)
   const [displayUrl, setDisplayUrl] = useState(wsState?.currentUrl ?? 'about:blank');
+  /**
+   * L5-B4.2.2:切语言后到重启 app 前的 banner 标志(transient,不持久化)
+   *
+   * mount 时锁定的 lang(给 TranslateDriver 用)和 wsState.targetLang(用户选的)不一致时,
+   * 表示用户切了语言但还没重启 — 显示 banner。重启后 mount lang = wsState lang,banner 不显。
+   * 切 ws 也会重置(useState 跟 workspaceId 走)
+   */
+  const [pendingRestartLang, setPendingRestartLang] = useState<string | null>(null);
+  /**
+   * webview ref bind tick — 每次 setupWebview 拿到新 el 就 bump
+   *
+   * 用途:让 SyncDriver useEffect 在 webview ref 就绪后重跑(否则首次 mount 时 isTranslateMode
+   * 已经是 true,但 webviewRef.current 还没绑,useEffect 直接 return,driver 永远不创建)。
+   * reload 后 slotBinding.right 持久化恢复 = web-translate-view → isTranslateMode 初始 true,
+   * 触发了上述时序 bug — bump 这个 tick 修复。
+   */
+  const [webviewTick, setWebviewTick] = useState(0);
 
   // ── webview 事件绑定 ──
 
@@ -95,6 +113,8 @@ export function WebView({ workspaceId }: WebViewProps) {
       const wv = el as WebviewElement;
       if (webviewRef.current === wv) return;
       webviewRef.current = wv;
+      // bump 让 SyncDriver useEffect 重跑(此时 ref 已绑,driver 才能 bind)
+      setWebviewTick((v) => v + 1);
 
       const handleStartLoading = () => setLoading(true);
       const handleStopLoading = () => {
@@ -168,7 +188,7 @@ export function WebView({ workspaceId }: WebViewProps) {
         } catch {
           /* ignore */
         }
-        // L5-B4.2:翻译模式下首次 ready → 启动 SyncDriver
+        // L5-B4.2:翻译模式下首次 ready → 启动 SyncDriver(兜底,主路径在 SyncDriver useEffect 内)
         if (syncDriverRef.current && !wv.isLoading()) {
           syncDriverRef.current.start();
         }
@@ -199,7 +219,9 @@ export function WebView({ workspaceId }: WebViewProps) {
       return;
     }
     const wv = webviewRef.current;
-    if (!wv) return;
+    if (!wv) {
+      return;
+    }
 
     // 创建左侧 SyncDriver
     const driver = new SyncDriver('left');
@@ -245,9 +267,16 @@ export function WebView({ workspaceId }: WebViewProps) {
       }
     });
 
-    // 当前已加载 → 立刻 start 同步
-    if (domReadyRef.current && !wv.isLoading()) {
+    // 尝试立即 start。webview 还没 dom-ready 时 executeJavaScript 会 throw,
+    // 用 try/catch 兜住 — handleDomReady 会在 ready 后兜底再 start。
+    //
+    // 教训:reload 路径下 dom-ready 事件可能在 listener 注册之前就发了,
+    // 单靠 handleDomReady 不可靠;两路并行(立即 start try/catch + handleDomReady)最稳。
+    try {
       driver.start();
+    } catch (err) {
+      // webview 还没 dom-ready — handleDomReady 兜底
+      console.warn('[WebView] driver.start failed (likely webview not ready), waiting for dom-ready', err);
     }
 
     return () => {
@@ -255,7 +284,9 @@ export function WebView({ workspaceId }: WebViewProps) {
       driver.destroy();
       syncDriverRef.current = null;
     };
-  }, [isTranslateMode]);
+    // webviewTick:每次 webview ref 重新绑定时 bump,让此 effect 重跑(否则首次 mount 时
+    // webviewRef.current 是 null,driver 永远不创建)— L5-B4.2.2 reload 路径修复
+  }, [isTranslateMode, webviewTick]);
 
   // 切 ws / 外部改 currentUrl(如 link 路由)→ 同步到 webview
   // 关键:webview 未 dom-ready 时不能调 getURL;此时初始 URL 已通过 src 属性加载,无需介入
@@ -309,6 +340,35 @@ export function WebView({ workspaceId }: WebViewProps) {
     });
   }, [workspaceId]);
 
+  // L5-B4.2.2:用户选语言
+  // - 翻译已开 → 写 per-ws state + 显示 banner(需重启)
+  // - 翻译未开 → 静默写 per-ws state(下次开翻译用)
+  const handleSelectLang = useCallback(
+    (lang: string) => {
+      if (lang === wsState?.targetLang) return; // 选的同一个,不动
+      setWebTargetLang(workspaceId, lang);
+      if (isTranslateMode) {
+        setPendingRestartLang(lang);
+      }
+    },
+    [workspaceId, wsState?.targetLang, isTranslateMode],
+  );
+
+  // 重启 app — 触发 main 进程 app.relaunch + app.exit
+  const handleRestartApp = useCallback(() => {
+    window.electronAPI.restartApp();
+  }, []);
+
+  // 关闭 banner(只是不显示了,持久化的 lang 还在,下次启动应用)
+  const handleDismissBanner = useCallback(() => {
+    setPendingRestartLang(null);
+  }, []);
+
+  // 切 workspace → 重置 banner state(避免 ws-A 切的 lang 在 ws-B 显 banner)
+  useEffect(() => {
+    setPendingRestartLang(null);
+  }, [workspaceId]);
+
   if (!wsState) {
     return <div className="krig-web-view__empty">Workspace 未就绪</div>;
   }
@@ -321,12 +381,37 @@ export function WebView({ workspaceId }: WebViewProps) {
         canGoBack={canGoBack}
         canGoForward={canGoForward}
         translateActive={isTranslateMode}
+        currentTargetLang={wsState.targetLang}
         onNavigate={handleNavigate}
         onGoBack={handleGoBack}
         onGoForward={handleGoForward}
         onReload={handleReload}
         onToggleTranslate={handleToggleTranslate}
+        onSelectLang={handleSelectLang}
       />
+      {pendingRestartLang && (
+        <div className="krig-web-view__restart-banner">
+          <span className="krig-web-view__restart-msg">
+            ⚠ 已选 <strong>{getLangLabel(pendingRestartLang)}</strong>,需重启 app 才生效
+          </span>
+          <button
+            type="button"
+            className="krig-web-view__restart-btn"
+            onClick={handleRestartApp}
+          >
+            立即重启
+          </button>
+          <button
+            type="button"
+            className="krig-web-view__restart-dismiss"
+            onClick={handleDismissBanner}
+            title="稍后(关闭提示,下次启动应用)"
+            aria-label="关闭提示"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {(() => {
         // webview tag:TS 不识别 partition/allowpopups,用 cast 一个匹配 props 类型的方式声明
         const props = {

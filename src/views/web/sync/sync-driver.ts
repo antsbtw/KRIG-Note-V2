@@ -173,6 +173,7 @@ export class SyncDriver {
     const translated = await this.onInputEnter(event.value, event.selector);
     const finalValue = translated || event.value;
 
+    try {
     this.webviewEl.executeJavaScript(`
       (function() {
         window.__krigInputLock = true;
@@ -192,6 +193,7 @@ export class SyncDriver {
         setTimeout(function() { window.__krigInputLock = false; }, 200);
       })();
     `).catch(() => {});
+    } catch { /* webview 未就绪 */ }
   }
 
   // ── Private ──
@@ -201,13 +203,26 @@ export class SyncDriver {
     // 注意:用 /regex/g 全局替换 — replace(string,string) 只替换第一个匹配,inject 文件
     // 里 __KRIG_SIDE__ 出现 2 处(注释+真实变量),只替换第一个会让 sync 行为异常
     const script = (syncInjectRaw as unknown as string).replace(/__KRIG_SIDE__/g, this.side);
-    this.webviewEl.executeJavaScript(script).catch(() => {});
+    // Electron webview.executeJavaScript 在 webview 未 attached / dom-ready 时**同步 throw**
+    // (不是返回 rejected promise),必须 try/catch — 否则上调用层(start / reinject)崩
+    // 引发 React 组件异常 → 白屏。
+    // 失败无所谓:start 路径的 dom-ready 兜底会重 inject;poll 路径下次 80ms 再试。
+    try {
+      this.webviewEl.executeJavaScript(script).catch(() => {});
+    } catch {
+      /* webview 未就绪,等下次重试 */
+    }
   }
 
   /** 清空 guest 的事件队列(passive 时丢弃) */
   private drainQueue(): void {
     if (!this.webviewEl || this.webviewEl.isLoading()) return;
-    this.webviewEl.executeJavaScript(`window.__krigSyncQueue = [];`).catch(() => {});
+    // 同 injectSyncScript:executeJavaScript 在 webview 未就绪时同步 throw,必须 try/catch
+    try {
+      this.webviewEl.executeJavaScript(`window.__krigSyncQueue = [];`).catch(() => {});
+    } catch {
+      /* webview 未就绪 */
+    }
   }
 
   private poll(): void {
@@ -218,83 +233,99 @@ export class SyncDriver {
 
     this.polling = true;
 
-    this.webviewEl.executeJavaScript(`
-      (function() {
-        var q = window.__krigSyncQueue || [];
-        window.__krigSyncQueue = [];
-        return q.length > 0 ? q : null;
-      })();
-    `).then((events) => {
-      this.polling = false;
-      if (!events || (events as unknown[]).length === 0) return;
+    // 同 injectSyncScript:executeJavaScript 在未就绪时同步 throw,必须 try/catch
+    try {
+      this.webviewEl.executeJavaScript(`
+        (function() {
+          var q = window.__krigSyncQueue || [];
+          window.__krigSyncQueue = [];
+          return q.length > 0 ? q : null;
+        })();
+      `).then((events) => {
+        this.polling = false;
+        if (!events || (events as unknown[]).length === 0) return;
 
-      // 有用户事件 → 自动抢占控制权
-      if (this.role !== 'controller') {
-        this.role = 'controller';
+        // 有用户事件 → 自动抢占控制权
+        if (this.role !== 'controller') {
+          this.role = 'controller';
+          this.sendToOther({
+            action: SYNC_ACTION.TAKE_CONTROL,
+            payload: { fromSide: this.side },
+          });
+        }
+
         this.sendToOther({
-          action: SYNC_ACTION.TAKE_CONTROL,
-          payload: { fromSide: this.side },
+          action: SYNC_ACTION.SYNC_EVENTS,
+          payload: { events, fromSide: this.side },
         });
-      }
-
-      this.sendToOther({
-        action: SYNC_ACTION.SYNC_EVENTS,
-        payload: { events, fromSide: this.side },
+      }).catch(() => {
+        this.polling = false;
       });
-    }).catch(() => {
+    } catch {
+      // webview 未就绪 — 重置 polling flag,下次 80ms 再试
       this.polling = false;
-    });
+    }
   }
 
   // ── Apply methods(从 V1 直迁,改命名空间) ──
 
   private applyScrollDelta(deltaY: number): void {
-    this.webviewEl?.executeJavaScript(`
-      (function() {
-        var targetY = Math.round(window.scrollY + ${deltaY});
-        window.__krigProgramScrollY = targetY;
-        window.scrollBy(0, ${deltaY});
-      })();
-    `).catch(() => {});
+    if (!this.webviewEl) return;
+    try {
+      this.webviewEl.executeJavaScript(`
+        (function() {
+          var targetY = Math.round(window.scrollY + ${deltaY});
+          window.__krigProgramScrollY = targetY;
+          window.scrollBy(0, ${deltaY});
+        })();
+      `).catch(() => {});
+    } catch { /* webview 未就绪 */ }
   }
 
   private applyScrollAnchor(event: ScrollAnchorEvent): void {
+    if (!this.webviewEl) return;
     if (event.anchor) {
       const anchorJSON = JSON.stringify(event.anchor);
-      this.webviewEl?.executeJavaScript(`
-        (function() {
-          try {
-            var anchor = ${anchorJSON};
-            var els = document.getElementsByTagName(anchor.tag);
-            var el = els[anchor.index];
-            if (el) {
-              var rect = el.getBoundingClientRect();
-              var targetY = window.scrollY + rect.top + (anchor.offsetRatio * rect.height);
-              window.__krigSmoothScrolling = true;
-              window.scrollTo({ top: targetY, behavior: 'smooth' });
-              setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
-            }
-          } catch(e) {}
-        })();
-      `).catch(() => {});
+      try {
+        this.webviewEl.executeJavaScript(`
+          (function() {
+            try {
+              var anchor = ${anchorJSON};
+              var els = document.getElementsByTagName(anchor.tag);
+              var el = els[anchor.index];
+              if (el) {
+                var rect = el.getBoundingClientRect();
+                var targetY = window.scrollY + rect.top + (anchor.offsetRatio * rect.height);
+                window.__krigSmoothScrolling = true;
+                window.scrollTo({ top: targetY, behavior: 'smooth' });
+                setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
+              }
+            } catch(e) {}
+          })();
+        `).catch(() => {});
+      } catch { /* webview 未就绪 */ }
     } else if (event.pctY !== undefined) {
-      this.webviewEl?.executeJavaScript(`
-        (function() {
-          var maxY = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-          window.__krigSmoothScrolling = true;
-          window.scrollTo({ top: ${event.pctY} * maxY, behavior: 'smooth' });
-          setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
-        })();
-      `).catch(() => {});
+      try {
+        this.webviewEl.executeJavaScript(`
+          (function() {
+            var maxY = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+            window.__krigSmoothScrolling = true;
+            window.scrollTo({ top: ${event.pctY} * maxY, behavior: 'smooth' });
+            setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
+          })();
+        `).catch(() => {});
+      } catch { /* webview 未就绪 */ }
     }
   }
 
   private applyClickSync(event: ClickEvent): void {
     if (this.clickSyncLock) return;
+    if (!this.webviewEl) return;
     this.clickSyncLock = true;
 
     const toggleStateJSON = JSON.stringify(event.toggleState || null);
-    this.webviewEl?.executeJavaScript(`
+    try {
+    this.webviewEl.executeJavaScript(`
       (function() {
         window.__krigClickLock = true;
         try {
@@ -321,12 +352,15 @@ export class SyncDriver {
         setTimeout(function() { window.__krigClickLock = false; }, 100);
       })();
     `).catch(() => {});
+    } catch { /* webview 未就绪 */ }
 
     setTimeout(() => { this.clickSyncLock = false; }, 100);
   }
 
   private applyInputSync(event: InputSyncEvent): void {
-    this.webviewEl?.executeJavaScript(`
+    if (!this.webviewEl) return;
+    try {
+    this.webviewEl.executeJavaScript(`
       (function() {
         window.__krigInputLock = true;
         try {
@@ -352,10 +386,13 @@ export class SyncDriver {
         setTimeout(function() { window.__krigInputLock = false; }, 50);
       })();
     `).catch(() => {});
+    } catch { /* webview 未就绪 */ }
   }
 
   private applySubmitSync(event: SubmitFormEvent): void {
-    this.webviewEl?.executeJavaScript(`
+    if (!this.webviewEl) return;
+    try {
+    this.webviewEl.executeJavaScript(`
       (function() {
         window.__krigInputLock = true;
         try {
@@ -376,31 +413,35 @@ export class SyncDriver {
         setTimeout(function() { window.__krigInputLock = false; }, 200);
       })();
     `).catch(() => {});
+    } catch { /* webview 未就绪 */ }
   }
 
   private applySelectionHighlight(event: SelectionEvent): void {
+    if (!this.webviewEl) return;
     const blocksJSON = JSON.stringify(event.blocks);
-    this.webviewEl?.executeJavaScript(`
-      (function() {
-        if (!document.getElementById('__krigHighlightStyle')) {
-          var style = document.createElement('style');
-          style.id = '__krigHighlightStyle';
-          style.textContent = '.__krig-highlight { background-color: rgba(138,180,248,0.15) !important; outline: 2px solid rgba(138,180,248,0.5) !important; outline-offset: 2px !important; border-radius: 4px !important; }';
-          document.head.appendChild(style);
-        }
-        var old = document.querySelectorAll('.__krig-highlight');
-        for (var i = 0; i < old.length; i++) old[i].classList.remove('__krig-highlight');
-        var blocks = ${blocksJSON};
-        if (!blocks) return;
-        for (var j = 0; j < blocks.length; j++) {
-          try {
-            var els = document.getElementsByTagName(blocks[j].tag);
-            var el = els[blocks[j].index];
-            if (el) el.classList.add('__krig-highlight');
-          } catch(e) {}
-        }
-      })();
-    `).catch(() => {});
+    try {
+      this.webviewEl.executeJavaScript(`
+        (function() {
+          if (!document.getElementById('__krigHighlightStyle')) {
+            var style = document.createElement('style');
+            style.id = '__krigHighlightStyle';
+            style.textContent = '.__krig-highlight { background-color: rgba(138,180,248,0.15) !important; outline: 2px solid rgba(138,180,248,0.5) !important; outline-offset: 2px !important; border-radius: 4px !important; }';
+            document.head.appendChild(style);
+          }
+          var old = document.querySelectorAll('.__krig-highlight');
+          for (var i = 0; i < old.length; i++) old[i].classList.remove('__krig-highlight');
+          var blocks = ${blocksJSON};
+          if (!blocks) return;
+          for (var j = 0; j < blocks.length; j++) {
+            try {
+              var els = document.getElementsByTagName(blocks[j].tag);
+              var el = els[blocks[j].index];
+              if (el) el.classList.add('__krig-highlight');
+            } catch(e) {}
+          }
+        })();
+      `).catch(() => {});
+    } catch { /* webview 未就绪 */ }
   }
 }
 
