@@ -65,16 +65,19 @@ class SlotBus {
     const toSide: Side = fromSide === 'left' ? 'right' : 'left';
     const set = this.listeners.get(toSide);
     const now = Date.now();
+    console.log(
+      `[slot-bus] send ${fromSide}→${toSide}: ${message.action} (listeners: ${set?.size ?? 0})`,
+    );
 
     // 若 toSide 暂无订阅者 → 缓冲(等订阅时 flush)
     if (!set || set.size === 0) {
       const buf = this.pending.get(toSide);
       if (buf) {
         buf.push({ message, fromSide, ts: now });
-        // 清理过期消息
         const cutoff = now - PENDING_TTL_MS;
         while (buf.length > 0 && buf[0].ts < cutoff) buf.shift();
       }
+      console.log(`[slot-bus] no listener,push pending → size ${this.pending.get(toSide)?.length}`);
       return;
     }
 
@@ -99,6 +102,9 @@ class SlotBus {
     const set = this.listeners.get(toSide);
     if (!set) return () => {};
     set.add(listener);
+    console.log(
+      `[slot-bus] subscribe ${toSide} (total listeners: ${set.size}, pending: ${this.pending.get(toSide)?.length ?? 0})`,
+    );
 
     // flush 缓冲消息(给新 listener)
     const buf = this.pending.get(toSide);
@@ -107,6 +113,7 @@ class SlotBus {
       const cutoff = now - PENDING_TTL_MS;
       const valid = buf.filter((m) => m.ts >= cutoff);
       this.pending.set(toSide, []); // 清空(只 flush 一次,后续新订阅者不再收旧消息)
+      console.log(`[slot-bus] flush ${valid.length} pending messages to ${toSide}`);
       queueMicrotask(() => {
         for (const pm of valid) {
           try {
