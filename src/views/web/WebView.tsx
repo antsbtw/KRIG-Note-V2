@@ -204,9 +204,12 @@ export function WebView({ workspaceId }: WebViewProps) {
     driver.bind(wv);
     syncDriverRef.current = driver;
 
+    console.log('[web-view-left] isTranslateMode 激活,挂 slot-bus 监听');
+
     // 订阅 slot-bus 接收右栏消息
     const unsub = slotBus.subscribe('left', (msg) => {
       if (msg.protocol !== WEB_TRANSLATE_PROTOCOL) return;
+      console.log('[web-view-left] 收到对面消息:', msg.action);
       switch (msg.action) {
         case SYNC_ACTION.TAKE_CONTROL:
           driver.yield();
@@ -226,11 +229,19 @@ export function WebView({ workspaceId }: WebViewProps) {
         }
         case SYNC_ACTION.REQUEST_URL: {
           // 右栏初始化时请求左栏发当前 URL
-          if (wv && domReadyRef.current) {
+          const ready = !!wv && domReadyRef.current;
+          const url = ready ? wv.getURL() : '';
+          console.log(
+            '[web-view-left] REQUEST_URL 处理 — domReady:',
+            domReadyRef.current,
+            ', url:',
+            url,
+          );
+          if (ready && url) {
             slotBus.sendFromSide('left', {
               protocol: WEB_TRANSLATE_PROTOCOL,
               action: SYNC_ACTION.NAVIGATE,
-              payload: { url: wv.getURL() },
+              payload: { url },
             });
           }
           break;

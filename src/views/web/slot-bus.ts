@@ -25,6 +25,26 @@ export type Side = 'left' | 'right';
 
 type Listener = (message: SlotMessage, fromSide: Side) => void;
 
+/**
+ * 待送达消息缓冲(来自 fromSide,toSide 还无订阅者时暂存)
+ *
+ * 解决时序竞态:用户点翻译 → React 同帧内左/右 view useEffect 都会跑,
+ * 但顺序不保证。右栏 setupWebview 立刻发 REQUEST_URL 时左栏 listener 可能还没注册,
+ * 消息会被丢弃。
+ *
+ * 缓冲策略:
+ * - 发消息时若 toSide 无订阅者 → push 到 pending[toSide]
+ * - 新订阅 toSide 时 → flush pending[toSide] 给新 listener(单次性)
+ * - 仅缓存 1 秒内的消息(防止旧消息长期堆积 — 一般 mount 时序差距 < 100ms)
+ */
+interface PendingMessage {
+  message: SlotMessage;
+  fromSide: Side;
+  ts: number;
+}
+
+const PENDING_TTL_MS = 1000;
+
 class SlotBus {
   /** 按目标 side 订阅:listeners.get('right') = 监听"发往右侧"的消息 */
   private listeners: Map<Side, Set<Listener>> = new Map([
@@ -32,17 +52,33 @@ class SlotBus {
     ['right', new Set()],
   ]);
 
+  /** 待 flush 的消息缓冲(toSide → 消息列表)*/
+  private pending: Map<Side, PendingMessage[]> = new Map([
+    ['left', []],
+    ['right', []],
+  ]);
+
   /**
    * fromSide 发消息给对面(toSide = fromSide 反面)
-   *
-   * 实现注:用 setTimeout 0 延迟分发,避免 sync 调用栈嵌套(模拟 IPC 异步语义,
-   * 跟 V1 行为一致 — V1 是真异步 IPC,V2 模拟同步避免 listener 抛错把 sender 也搞挂)
    */
   sendFromSide(fromSide: Side, message: SlotMessage): void {
     const toSide: Side = fromSide === 'left' ? 'right' : 'left';
     const set = this.listeners.get(toSide);
-    if (!set || set.size === 0) return;
-    // 异步分发(模拟 V1 IPC)
+    const now = Date.now();
+
+    // 若 toSide 暂无订阅者 → 缓冲(等订阅时 flush)
+    if (!set || set.size === 0) {
+      const buf = this.pending.get(toSide);
+      if (buf) {
+        buf.push({ message, fromSide, ts: now });
+        // 清理过期消息
+        const cutoff = now - PENDING_TTL_MS;
+        while (buf.length > 0 && buf[0].ts < cutoff) buf.shift();
+      }
+      return;
+    }
+
+    // 有订阅者 → 异步分发(模拟 V1 IPC)
     queueMicrotask(() => {
       set.forEach((listener) => {
         try {
@@ -55,14 +91,33 @@ class SlotBus {
   }
 
   /**
-   * 订阅"发往本 side 的消息"(典型场景:右栏 view subscribe('right', handler) 收来自左侧的消息)
+   * 订阅"发往本 side 的消息"
    *
-   * 返回 unsubscribe 函数。
+   * 订阅时 flush pending(toSide) 中未过期消息给新 listener — 解决"消息抢先 listener"竞态。
    */
   subscribe(toSide: Side, listener: Listener): () => void {
     const set = this.listeners.get(toSide);
     if (!set) return () => {};
     set.add(listener);
+
+    // flush 缓冲消息(给新 listener)
+    const buf = this.pending.get(toSide);
+    if (buf && buf.length > 0) {
+      const now = Date.now();
+      const cutoff = now - PENDING_TTL_MS;
+      const valid = buf.filter((m) => m.ts >= cutoff);
+      this.pending.set(toSide, []); // 清空(只 flush 一次,后续新订阅者不再收旧消息)
+      queueMicrotask(() => {
+        for (const pm of valid) {
+          try {
+            listener(pm.message, pm.fromSide);
+          } catch (err) {
+            console.error('[slot-bus] listener error (flush):', err);
+          }
+        }
+      });
+    }
+
     return () => {
       set.delete(listener);
     };
