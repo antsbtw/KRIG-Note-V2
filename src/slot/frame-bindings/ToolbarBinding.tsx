@@ -33,9 +33,9 @@ export function ToolbarBinding({ viewId }: ToolbarBindingProps) {
     return selection.subscribe((payload) => setSel(payload));
   }, []);
 
-  if (!viewId) {
-    return <div className="krig-toolbar-empty">Toolbar (待 view 激活)</div>;
-  }
+  // L5-B4:view 未激活 / view 没注册任何 toolbar items 时不渲染框架 toolbar 行
+  // (对齐 V1 — web view 类自带 view 内 toolbar 的 view 不应被框架 toolbar 占空间)
+  if (!viewId) return null;
 
   const leftItems = toolbarRegistry.getItemsForView(viewId, 'left');
   const centerItems = toolbarRegistry.getItemsForView(viewId, 'center');
@@ -43,7 +43,7 @@ export function ToolbarBinding({ viewId }: ToolbarBindingProps) {
   const noGroup = toolbarRegistry.getItemsForView(viewId).filter((it) => !it.group);
 
   if (leftItems.length === 0 && centerItems.length === 0 && rightItems.length === 0 && noGroup.length === 0) {
-    return <div className="krig-toolbar-empty">Toolbar (待 view 注册内容)</div>;
+    return null;
   }
 
   const ctx: ToolbarItemContext = { selection: sel };
