@@ -255,36 +255,48 @@ V2 状态:**架构上不需要**(单 React tree,note 模块是 renderer module +
 
 ## 15. 推荐优先级(按"价值 + 阻塞")
 
+> **2026-05-07 修订**:B1/B2 已落地;B3 heading-collapse **砍掉**(视觉冲突,
+> H1-H3 折叠 UX 不美观,导航价值由 TOC 替代);B5 改为媒体三兄弟收齐
+> (audio / video),把音视频从 Phase D 提上来;column-list / html-block / tweet /
+> math-visual 明确归类。
+
 ### Phase B — note 完整化主线(高优)
 
-**B1. note-link 双链系统**(KRIG 核心,知识图谱基础)
-- note-link block + `[[` slash trigger + NoteLinkSearch 组件
-- ~600 行(V1 估)
-- ⭐⭐⭐⭐⭐
+**B1. note-link 双链系统**(KRIG 核心,知识图谱基础)— ✅ **L5-B3.12 完成**
+- inline atom + leafText 复制还原;`[[` 触发 popup 搜索面板;krig://note 协议路由
+- 实际 ~500 行 + 90 CSS
 
-**B2. paste-media plugin**(粘贴图片自动 mediaPutBase64)
-- ~150 行,L5-B4.3.1 已有底层 API,只缺 plugin
-- ⭐⭐⭐⭐
+**B2. paste-media plugin**(粘贴图片自动 mediaPutBase64)— ✅ **L5-B3.13 完成**
+- 同步 dataUrl 占位 + 异步 mediaStore 落盘;HTML 让步规则(table/h1-6 让 PM 默认)
+- 实际 ~122 行
 
-**B3. heading-collapse plugin**(标题折叠下方内容,常用)
-- ~200 行
-- ⭐⭐⭐⭐
+**~~B3. heading-collapse plugin~~** — ❌ **砍掉**(2026-05-07 用户决定)
+- 原因:H1-H3 折叠 UX 视觉不美观;note 通常嵌套不深;导航价值由 TOC 替代
 
 **B4. file-block / file-link / external-ref**(剩余 ❌ 节点)
 - 一组三件,~400 行
 - ⭐⭐⭐⭐
+- 备注:可能依赖 viewAPI fileOpenDialog IPC(若 V2 单 React tree 直接走 file://
+  协议,可不依赖 IPC)— 设计阶段确认
 
-**B5. selection-to-markdown**(选中内容复制为 markdown)
-- ~200 行
+**B5. 媒体三兄弟收齐 — audio-block / video-block**(从 Phase D 提上来)
+- mediaStore 基建(L5-B4.3.1)已经齐了,跟 image block 对齐路径
+- audio-block:`<audio>` 标签,upload / embed link;~150 行
+- video-block:`<video>` 标签 + YouTube embed 支持(iframe);~250 行
+- 总 ~400 行
+- ⭐⭐⭐⭐
+
+**B6. selection-to-markdown**(选中内容复制为 markdown)
+- 原 B5 改 B6;~200 行
 - ⭐⭐⭐
 
-**B6. indent plugin + text-block.attrs.indent UI**
-- ~150 行
+**B7. indent plugin + text-block.attrs.indent UI**
+- 原 B6 改 B7;~150 行
 - ⭐⭐⭐
 
-**B7. TOC(目录指示器)**
-- ~200 行
-- ⭐⭐⭐
+**B8. TOC(目录指示器)**
+- 原 B7 改 B8;heading-collapse 砍掉后 TOC 升级承担"长 note 导航"主能力;~200 行
+- ⭐⭐⭐⭐(从原 ⭐⭐⭐ 提升,因为承接了 heading-collapse 的导航需求)
 
 ### Phase C — Phase A/B sub-stage 补齐
 
@@ -292,31 +304,39 @@ V2 状态:**架构上不需要**(单 React tree,note 模块是 renderer module +
 - **L5-B3.7.2** SlashItem visibleWhen(cell 内 slash 上下文)
 - **L5-B3.6.1** LaTeX 速查面板(help-panel 主框架 + latex 数据)
 
-### Phase D — KRIG 业务特性(留后续)
+### Phase D — 安全 / 容器类块 + KRIG 业务特性
 
+**安全 / 容器类块**(从 § 1 ❌ 列表的剩余项明确归类):
+- **column-list**(Notion 风格分栏多列容器)— 价值中等(笔记排版),容器嵌套
+  PM schema 处理较复杂,~300 行,⭐⭐⭐
+- **html-block**(嵌 HTML 片段)— **必须先有 sanitizer 设计**(XSS 风险),
+  设计时考虑 DOMPurify 等库;~250 行 + sanitizer,⭐⭐⭐
+
+**KRIG 业务特性**(等 thought / frame view 体系成型):
 - thought view + thought mark + thought-plugin
 - frame view + frame-block + FramePicker + frame-commands
 - learning 系统(vocab-highlight + dictionary)
 - AskAIPanel + ask-ai-command(等 L5-B4.3 AI 闭环)
 - ai-workflow sync-note-receiver(L5-B4.3.3 时一起)
-- column-list / html-block / tweet / audio / video(常规 block 进阶批)
 
-### Phase E — 整体优化
+### Phase E — 重投入 / 长尾整体优化
 
-- code-block CodeMirror 6 升级(阻塞分支)+ code-plugins(html/js/md/mermaid 高亮)
-- math-visual 完整模块
-- smart-paste sources(GitHub / Notion 等)
-- help-panel 全套(latex / mermaid / math-visual / bookmarks)
-- 笔记内容全文搜索
+- **code-block CodeMirror 6 升级**(阻塞分支)+ code-plugins(html/js/md/mermaid 高亮)
+- **math-visual** 完整模块(LaTeX 可视化编辑器,V1 ~1219 行独立模块,重投入)
+- **tweet-block** Twitter 嵌入 — 依赖第三方 SDK,Twitter API 已收费,优先级低,~150 行
+- **smart-paste sources**(GitHub / Notion / Word 等智能识别 dispatcher)
+- **help-panel 全套**(latex / mermaid / math-visual / bookmarks)
+- **笔记内容全文搜索**
 
 ---
 
-## 16. 我的建议
+## 16. 当前推进建议(2026-05-07 修订)
 
-**短期(下一阶段)**:推 **Phase B1-B4**(note-link / paste-media / heading-collapse / file-block 系列),解决"用户每天写 note 高频缺陷",~1500 行,5-7 个 sub-stage。
+**已完成**:B1 note-link ✅ + B2 paste-media ✅
 
-**中期**:Phase C(table sub-stage 收尾)+ Phase B5-B7。
+**短期(下一阶段)**:**B4 file-block 系列** → **B5 audio/video 媒体兄弟** →
+**B8 TOC**(替补 heading-collapse 导航能力)
 
-**长期**:Phase D / E 跟 L5-B4.3 AI 闭环 / 后续业务一起规划。
+**中期**:Phase C(table sub-stage 收尾)+ B6 selection-to-markdown + B7 indent
 
-**建议先做 B1 note-link**,这是 KRIG 知识图谱基础能力,缺了 note 闭环不完整。
+**长期**:Phase D 安全块 + KRIG 业务 / Phase E 重投入项目跟 L5-B4.3 AI 闭环规划
