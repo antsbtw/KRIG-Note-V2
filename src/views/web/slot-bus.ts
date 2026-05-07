@@ -34,23 +34,14 @@ type Listener = (message: SlotMessage, fromSide: Side) => void;
  *
  * 缓冲策略:
  * - 发消息时若 toSide 无订阅者 → push 到 pending[toSide]
- * - 新订阅 toSide 时 → flush pending[toSide] 给新 listener(单次性)
- * - 仅缓存 1 秒内的消息(防止旧消息长期堆积 — 一般 mount 时序差距 < 100ms)
+ * - 新订阅 toSide 时 → flush 全部 pending 给新 listener(单次性,清空)
+ * - 不用 TTL 过滤(实测 webview 初始化耗时不可预测,TTL 经常误杀)
  */
 interface PendingMessage {
   message: SlotMessage;
   fromSide: Side;
   ts: number;
 }
-
-/**
- * pending TTL:5 秒(从 1 秒放宽 — webview about:blank 加载有时慢,
- * left subscribe 可能比 right mount 晚 1+ 秒)
- *
- * 设大点的代价:跨翻译 toggle 周期残留旧消息?— 不会,subscribe flush 后 set([])
- * 立刻清空 pending,新订阅者不会重收旧消息。
- */
-const PENDING_TTL_MS = 5000;
 
 class SlotBus {
   /** 按目标 side 订阅:listeners.get('right') = 监听"发往右侧"的消息 */
@@ -72,9 +63,6 @@ class SlotBus {
     const toSide: Side = fromSide === 'left' ? 'right' : 'left';
     const set = this.listeners.get(toSide);
     const now = Date.now();
-    console.log(
-      `[slot-bus] send ${fromSide}→${toSide}: ${message.action} (listeners: ${set?.size ?? 0})`,
-    );
 
     // 若 toSide 暂无订阅者 → 缓冲(等订阅时 flush 全部,无 TTL)
     if (!set || set.size === 0) {
@@ -82,7 +70,6 @@ class SlotBus {
       if (buf) {
         buf.push({ message, fromSide, ts: now });
       }
-      console.log(`[slot-bus v2] no listener,push pending → size ${this.pending.get(toSide)?.length}`);
       return;
     }
 
@@ -107,18 +94,13 @@ class SlotBus {
     const set = this.listeners.get(toSide);
     if (!set) return () => {};
     set.add(listener);
-    console.log(
-      `[slot-bus] subscribe ${toSide} (total listeners: ${set.size}, pending: ${this.pending.get(toSide)?.length ?? 0})`,
-    );
 
-    // flush 缓冲消息(给新 listener)— 不再过滤 TTL,所有 pending 一律 flush
-    // (L5-B4.2 验证:TTL 过滤导致 mount 慢机器丢消息;subscribe 时如果还有 pending,
-    //  说明就是为这次 subscribe 攒的消息,不应过滤)
+    // flush 缓冲消息(给新 listener)— 不过滤 TTL,所有 pending 一律 flush
+    // (subscribe 时如果还有 pending,说明就是为这次 subscribe 攒的消息)
     const buf = this.pending.get(toSide);
     if (buf && buf.length > 0) {
       const allMsgs = buf.slice();
       this.pending.set(toSide, []);
-      console.log(`[slot-bus v2] flush ALL ${allMsgs.length} pending → ${toSide}`);
       queueMicrotask(() => {
         for (const pm of allMsgs) {
           try {

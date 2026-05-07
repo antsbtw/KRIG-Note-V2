@@ -45,7 +45,6 @@ function setupCSPBypass(): void {
     delete headers['X-Frame-Options'];
     callback({ responseHeaders: headers });
   });
-  console.log('[web-translate] CSP bypass 已注册到', WEBVIEW_TRANSLATE_PARTITION);
 }
 
 export function registerWebTranslateHandlers(): void {
@@ -58,19 +57,17 @@ export function registerWebTranslateHandlers(): void {
       return cachedElementJs;
     }
     try {
-      console.log('[web-translate] fetching', ELEMENT_JS_URL);
       const resp = await net.fetch(ELEMENT_JS_URL);
       if (!resp.ok) {
-        console.warn('[web-translate] fetch element.js HTTP', resp.status, resp.statusText);
+        console.warn('[web-translate] fetch element.js HTTP', resp.status);
         return null;
       }
       const text = await resp.text();
-      console.log('[web-translate] element.js fetched OK,', text.length, 'bytes');
       cachedElementJs = text;
       cacheExpireAt = now + CACHE_TTL_MS;
       return text;
     } catch (err) {
-      console.warn('[web-translate] fetch element.js failed (网络不通?):', err);
+      console.warn('[web-translate] fetch element.js failed:', err);
       return null;
     }
   });

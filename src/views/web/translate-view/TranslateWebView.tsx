@@ -63,13 +63,12 @@ export function TranslateWebView() {
         }
         case SYNC_ACTION.NAVIGATE: {
           const url = (msg.payload as { url: string }).url;
-          if (!url) break;
+          if (!url || url === 'about:blank') break;
           if (webviewRef.current && domReadyRef.current) {
-            console.log('[translate-view] NAVIGATE 立即 loadURL:', url);
             remoteNavUntilRef.current = Date.now() + 2000;
             webviewRef.current.loadURL(url);
           } else {
-            console.log('[translate-view] NAVIGATE 暂存(dom 未 ready):', url);
+            // webview 未 dom-ready 时暂存,handleDomReady 内 flush
             pendingNavigateUrlRef.current = url;
           }
           break;
@@ -104,13 +103,10 @@ export function TranslateWebView() {
     syncDriverRef.current = driver;
 
     const handleDomReady = () => {
-      const wasReady = domReadyRef.current;
       domReadyRef.current = true;
-      console.log('[translate-view] dom-ready, 当前 URL:', wv.getURL(), 'wasReady:', wasReady);
-      // 处理 dom-ready 之前收到的 NAVIGATE(REQUEST_URL → 左侧 NAVIGATE 抢先到达)
+      // 处理 dom-ready 之前收到的 NAVIGATE(REQUEST_URL → 左栏 NAVIGATE 抢先到达)
       const pending = pendingNavigateUrlRef.current;
       if (pending) {
-        console.log('[translate-view] flush pending NAVIGATE → loadURL:', pending);
         pendingNavigateUrlRef.current = null;
         remoteNavUntilRef.current = Date.now() + 2000;
         wv.loadURL(pending);
@@ -120,15 +116,7 @@ export function TranslateWebView() {
     // did-finish-load:启动同步 + 异步注入翻译
     const handleFinishLoad = () => {
       const url = wv.getURL();
-      console.log('[translate-view] did-finish-load,URL:', url);
       if (!url || url === 'about:blank') return;
-      // 诊断:确认 webview 关键属性是否生效
-      console.log(
-        '[translate-view] webview attrs — disablewebsecurity:',
-        wv.getAttribute('disablewebsecurity'),
-        ', partition:',
-        wv.getAttribute('partition'),
-      );
       driver.start();
       slotBus.sendFromSide('right', {
         protocol: WEB_TRANSLATE_PROTOCOL,
@@ -166,9 +154,7 @@ export function TranslateWebView() {
     // 首次 mount 完后请求左侧发当前 URL(REQUEST_URL)
     if (!initSentRef.current) {
       initSentRef.current = true;
-      console.log('[translate-view] setupWebview 完成,准备发 REQUEST_URL');
       queueMicrotask(() => {
-        console.log('[translate-view] 发 REQUEST_URL → left');
         slotBus.sendFromSide('right', {
           protocol: WEB_TRANSLATE_PROTOCOL,
           action: SYNC_ACTION.REQUEST_URL,

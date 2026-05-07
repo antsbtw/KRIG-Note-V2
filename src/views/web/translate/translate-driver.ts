@@ -59,50 +59,41 @@ export class TranslateDriver {
     let elementJsCode: string | null = null;
     try {
       elementJsCode = await window.electronAPI.translateFetchElementJs();
-    } catch (err) {
-      console.warn('[translate-driver] fetchElementJs threw:', err);
+    } catch {
       this.injecting = false;
       return;
     }
     if (!elementJsCode) {
-      console.warn(
-        '[translate-driver] fetchElementJs returned null — Google Translate CDN unreachable? 检查 main 进程能否访问 translate.googleapis.com',
-      );
+      console.warn('[translate-driver] element.js fetch failed — 网络不通?');
       this.injecting = false;
       return;
     }
-    console.log('[translate-driver] element.js fetched,', elementJsCode.length, 'bytes — 开始注入');
 
     // 检查 await 期间是否被新 inject 覆盖(页面导航了)
     if (this.injectId !== myId) {
-      console.log('[translate-driver] inject 被新的覆盖,放弃');
       this.injecting = false;
       return;
     }
     if (webview.isLoading()) {
-      console.log('[translate-driver] webview 仍在加载,放弃');
       this.injecting = false;
       return;
     }
 
-    // Step 3-5:顺序注入(fire-and-forget .then 链)
+    // Step 3-5:顺序注入(fire-and-forget .then 链,V1 同款两次 executeJavaScript)
+    // 注:必须 /g 全局替换 __KRIG_TARGET_LANG__(inject 文件多处出现)
     const script = (googleTranslateInjectRaw as unknown as string).replace(
       /__KRIG_TARGET_LANG__/g,
       this.targetLang,
     );
 
-    // 回退 V1 同款:两次 executeJavaScript(启动器 + element.js)
-    // (script 标签注入被 Trusted Types CSP 拦截,且 isolated world 推断不成立)
     webview
       .executeJavaScript(script)
       .then(() => {
-        console.log('[translate-driver] Step 3 注入器 OK');
         if (this.injectId !== myId) return;
         return webview.executeJavaScript(elementJsCode!);
       })
       .then(() => {
-        console.log('[translate-driver] Step 4 element.js OK');
-        // Step 5:暗色模式 meta 注入
+        // Step 5:暗色模式 meta 注入(对齐 V1)
         if (this.injectId !== myId) return;
         return webview.executeJavaScript(`
           (function() {
@@ -119,37 +110,6 @@ export class TranslateDriver {
       })
       .then(() => {
         if (this.injectId === myId) this.injecting = false;
-        // 多次轮询诊断(子 chunks 异步加载,1.5s 不够,多看几次)
-        const probe = (delayMs: number) => {
-          setTimeout(() => {
-            webview
-              .executeJavaScript(`
-                (function() {
-                  var sel = document.querySelector('#google_translate_element select');
-                  var gt = typeof google !== 'undefined' && google.translate;
-                  var hasCtor = !!(gt && google.translate.TranslateElement);
-                  var elDiv = document.getElementById('google_translate_element');
-                  var hasTranslated = !!document.querySelector('font[style*="vertical-align"]');
-                  return JSON.stringify({
-                    initCalled: !!window.__krigInitCalled,
-                    initOK: !!window.__krigInitOK,
-                    initErr: window.__krigInitErr || null,
-                    hasCtor: hasCtor,
-                    divChildren: elDiv ? elDiv.children.length : -1,
-                    selOpts: sel ? sel.options.length : 0,
-                    selValue: sel ? sel.value : null,
-                    hasTranslated: hasTranslated,
-                    cookie: (document.cookie.match(/googtrans=[^;]*/) || ['none'])[0],
-                  });
-                })();
-              `)
-              .then((r) => console.log('[translate-driver] ' + delayMs + 'ms widget:', r))
-              .catch(() => {});
-          }, delayMs);
-        };
-        probe(1500);
-        probe(3500);
-        probe(6000);
       })
       .catch((err) => {
         console.warn('[translate-driver] inject 链路抛错:', err);
