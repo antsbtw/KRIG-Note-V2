@@ -1,7 +1,22 @@
 /**
- * NoteView FloatingToolbar 注册 — Q1=A:4 mark 按钮(同顶部 Toolbar)
+ * NoteView FloatingToolbar 注册(L5-B3.10 重组,对齐 V1 顺序)
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 5.1。
+ * V1 顺序(参考 src/plugins/note/components/FloatingToolbar.tsx):
+ *   B / I / U / S / <>(5 mark)
+ *   ─── 分隔
+ *   ∑(行内公式 — V1 在颜色之前,选中文字 → 转 mathInline)
+ *   ─── 分隔
+ *   🔗(链接 popup)
+ *   ─── 分隔
+ *   颜色(V1 单按钮综合面板;V2 拆 A / A̲ 两个按钮 — 用户拍板,各自独立 popup)
+ *
+ * V2 当前(L5-B3.10):
+ * - 5 mark / ∑ / 🔗 / A / A̲ 五组,group 字段控制分隔
+ * - FloatingToolbarBinding 用 group-with-dividers 渲染竖线分隔符
+ *
+ * 占位项(留 sub-stage):
+ * - V1 颜色按钮综合面板(IconTextColor 含上次用色记忆)— 留 ColorPicker UX 升级
+ * - V1 没的"清除格式"按钮 — 跟 context menu 移除格式一起做
  */
 
 import { floatingToolbarRegistry } from '@slot/interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
@@ -11,11 +26,13 @@ const VIEW = 'note-view';
 
 export function registerFloatingToolbar(): void {
   const items: FloatingToolbarItem[] = [
+    // ── group: marks(5 个 mark 按钮)──
     {
       id: 'note-view.ft.bold',
       label: 'B',
       command: 'note-view.toggle-bold',
       view: VIEW,
+      group: 'marks',
       order: 10,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('bold'),
     },
@@ -24,6 +41,7 @@ export function registerFloatingToolbar(): void {
       label: 'I',
       command: 'note-view.toggle-italic',
       view: VIEW,
+      group: 'marks',
       order: 20,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('italic'),
     },
@@ -32,6 +50,7 @@ export function registerFloatingToolbar(): void {
       label: 'U',
       command: 'note-view.toggle-underline',
       view: VIEW,
+      group: 'marks',
       order: 25,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('underline'),
     },
@@ -40,6 +59,7 @@ export function registerFloatingToolbar(): void {
       label: 'S',
       command: 'note-view.toggle-strike',
       view: VIEW,
+      group: 'marks',
       order: 30,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('strike'),
     },
@@ -48,28 +68,39 @@ export function registerFloatingToolbar(): void {
       label: '<>',
       command: 'note-view.toggle-code',
       view: VIEW,
+      group: 'marks',
       order: 40,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
     },
-    // L5-B3.4:link mark — popup-trigger 弹 LinkPanel
+    // ── group: math(分隔)──
+    {
+      id: 'note-view.ft.math-inline',
+      label: '∑',
+      command: 'note-view.insert-math-inline',
+      view: VIEW,
+      group: 'math',
+      order: 50,
+    },
+    // ── group: link(分隔)──
     {
       id: 'note-view.ft.link',
       label: '🔗',
       kind: 'popup-trigger',
       popupId: 'note-view.popup.link',
       view: VIEW,
-      order: 45,
+      group: 'link',
+      order: 60,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
     },
-    // L5-B3.4:文字色 / 高亮 — popup-trigger 弹 ColorPickerPanel(完整 10 色 swatch)
-    // 注:cycle 命令(L5-B3.3 缩水版)保留作快捷键备份(本阶段不绑;后续 Cmd+Shift+H 之类可绑)
+    // ── group: color(分隔)— V1 综合一个按钮;V2 拆两个 ──
     {
       id: 'note-view.ft.text-color',
       label: 'A',
       kind: 'popup-trigger',
       popupId: 'note-view.popup.color',
       view: VIEW,
-      order: 50,
+      group: 'color',
+      order: 70,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
     },
     {
@@ -78,17 +109,9 @@ export function registerFloatingToolbar(): void {
       kind: 'popup-trigger',
       popupId: 'note-view.popup.color',
       view: VIEW,
-      order: 60,
+      group: 'color',
+      order: 80,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),
-    },
-    // L5-B3.6:行内公式 — 选中文字(LaTeX 源码)→ 转 mathInline atom 渲染
-    //   选区为空时 insert 空 atom,用户单击触发编辑弹窗(备份路径)
-    {
-      id: 'note-view.ft.math-inline',
-      label: '∑',
-      command: 'note-view.insert-math-inline',
-      view: VIEW,
-      order: 70,
     },
   ];
   floatingToolbarRegistry.register(items);

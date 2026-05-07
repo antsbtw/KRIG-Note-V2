@@ -310,3 +310,12 @@
   background: #3a3a3a;
   margin: 4px 0;
 }
+
+/* L5-B3.10:floating-toolbar 分组分隔符(竖线)*/
+.krig-floating-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: #3a3a3a;
+  margin: 0 2px;
+  align-self: center;
+}
