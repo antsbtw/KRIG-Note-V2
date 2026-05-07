@@ -163,8 +163,9 @@ export function TranslateWebView() {
     // 首次 mount 完后请求左侧发当前 URL(REQUEST_URL)
     if (!initSentRef.current) {
       initSentRef.current = true;
-      // queueMicrotask 让 left 的订阅先 ready
+      console.log('[translate-view] setupWebview 完成,准备发 REQUEST_URL');
       queueMicrotask(() => {
+        console.log('[translate-view] 发 REQUEST_URL → left');
         slotBus.sendFromSide('right', {
           protocol: WEB_TRANSLATE_PROTOCOL,
           action: SYNC_ACTION.REQUEST_URL,
