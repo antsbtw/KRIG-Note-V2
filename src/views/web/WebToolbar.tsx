@@ -1,9 +1,10 @@
 /**
  * WebToolbar — WebView 内部工具栏(对齐 V1 简化版)
  *
- * 布局:[← →] [↻] | URL bar
+ * 布局:[← →] [↻] | URL bar | [翻译]
  *
- * 砍 V1 的:书签按钮(Q6=A)/ 翻译按钮 / SlotToggle / closeSlot(留 slot UX epic)
+ * 砍 V1 的:书签按钮(Q6=A)/ SlotToggle / closeSlot(留 slot UX epic)
+ * L5-B4.2 加:翻译按钮(toggle 双栏翻译模式)
  */
 
 import { useState, useCallback, type KeyboardEvent } from 'react';
@@ -13,10 +14,14 @@ interface WebToolbarProps {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** L5-B4.2:翻译模式(右栏 web-translate-view)是否激活 */
+  translateActive: boolean;
   onNavigate: (url: string) => void;
   onGoBack: () => void;
   onGoForward: () => void;
   onReload: () => void;
+  /** L5-B4.2:点翻译按钮 — toggle 双栏翻译模式 */
+  onToggleTranslate: () => void;
 }
 
 export function WebToolbar({
@@ -24,10 +29,12 @@ export function WebToolbar({
   loading,
   canGoBack,
   canGoForward,
+  translateActive,
   onNavigate,
   onGoBack,
   onGoForward,
   onReload,
+  onToggleTranslate,
 }: WebToolbarProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -109,11 +116,25 @@ export function WebToolbar({
         />
       </div>
 
-      {/*
-        L5-B4 占位:右侧 actions 区(对齐 V1 翻译/书签/SlotToggle/× 位置)
-        当前为空,留 L5-B4.x 后续 sub-stage 填入按钮(translate / bookmark / close-slot)
-      */}
-      <div className="krig-web-toolbar__actions" />
+      {/* 右侧 actions 区(L5-B4.2:翻译按钮)*/}
+      <div className="krig-web-toolbar__actions">
+        <button
+          type="button"
+          className={`krig-web-toolbar__btn${translateActive ? ' active' : ''}`}
+          onClick={onToggleTranslate}
+          title={translateActive ? '关闭翻译' : '双栏翻译'}
+          aria-label="双栏翻译"
+        >
+          {/* SVG icon 对齐 V1 — 简化轮廓 */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 5h7" />
+            <path d="M9 3v2c0 4.418-2.239 8-5 8" />
+            <path d="M5 9c0 2.144 2.952 3.908 6.7 4" />
+            <path d="M12 20l4-9 4 9" />
+            <path d="M14.5 16.5h5" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

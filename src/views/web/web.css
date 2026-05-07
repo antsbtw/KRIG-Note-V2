@@ -70,6 +70,15 @@
   cursor: not-allowed;
 }
 
+.krig-web-toolbar__btn.active {
+  background: rgba(138, 180, 248, 0.2);
+  color: #8ab4f8;
+}
+
+.krig-web-toolbar__btn.active:hover {
+  background: rgba(138, 180, 248, 0.3);
+}
+
 .krig-web-toolbar__url {
   flex: 1;
   min-width: 0;

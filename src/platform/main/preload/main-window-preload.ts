@@ -55,4 +55,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   async openPath(filePath: string): Promise<{ ok: boolean; reason?: string }> {
     return ipcRenderer.invoke(IPC_CHANNELS.SHELL_OPEN_PATH, filePath);
   },
+
+  /** L5-B4.2:fetch Google Translate element.js(main 进程取,避 CSP)*/
+  async translateFetchElementJs(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_TRANSLATE_FETCH_ELEMENT_JS);
+  },
 });
