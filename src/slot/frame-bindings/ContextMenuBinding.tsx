@@ -3,6 +3,8 @@
  *
  * L4 阶段:实现 frame 渲染逻辑;触发由 src/slot/triggers/use-context-menu-trigger.ts 通过
  *         contextMenuController 控制(显示/隐藏 + 位置 + 当前 items)。
+ *
+ * L5-B3.9:支持 group 分组渲染(不同 group 之间插分隔符)
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -11,6 +13,7 @@ import { useCollisionPosition } from './use-collision-position';
 import { contextMenuRegistry } from '../interaction-registries/context-menu-registry/context-menu-registry';
 import { contextMenuController } from '../triggers/context-menu-controller';
 import { commandRegistry } from '../command-registry/command-registry';
+import { groupWithDividers, isDivider } from './group-with-dividers';
 import './overlay-bindings.css';
 
 export function ContextMenuBinding() {
@@ -30,6 +33,7 @@ export function ContextMenuBinding() {
 
   const items = contextMenuRegistry.getItemsForContext(state.viewId, state.context);
   if (items.length === 0) return null;
+  const itemsWithDividers = groupWithDividers(items);
 
   return (
     <div
@@ -38,19 +42,24 @@ export function ContextMenuBinding() {
       style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className="krig-context-menu-item"
-          onClick={() => {
-            commandRegistry.execute(item.command);
-            contextMenuController.hide();
-          }}
-        >
-          {item.label}
-        </button>
-      ))}
+      {itemsWithDividers.map((item) => {
+        if (isDivider(item)) {
+          return <div key={item.key} className="krig-context-menu-divider" />;
+        }
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className="krig-context-menu-item"
+            onClick={() => {
+              commandRegistry.execute(item.command);
+              contextMenuController.hide();
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
