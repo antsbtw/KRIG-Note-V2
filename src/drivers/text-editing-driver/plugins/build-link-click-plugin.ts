@@ -34,6 +34,11 @@ export interface LinkClickHandler {
   onOpenNote: (noteId: string, blockAnchor?: string) => void;
   /** 当前 view 文档对应的笔记 id(同文档 anchor 滚动判断用)— 可选 */
   getCurrentNoteId?: () => string | null;
+  /**
+   * L5-B4:打开 http(s):// URL(view 决定是右栏开 web view 还是 shell.openExternal)
+   * 可选 — 若 view 不实现,driver 退化为直接 shell.openExternal
+   */
+  onOpenWebUrl?: (url: string) => void;
 }
 
 let activeHandler: LinkClickHandler | null = null;
@@ -133,7 +138,12 @@ export function buildLinkClickPlugin(): Plugin {
 
         // http(s)://
         if (href.startsWith('http://') || href.startsWith('https://')) {
-          window.electronAPI?.openExternal?.(href);
+          // L5-B4:view 注入 onOpenWebUrl 时优先(右栏开 web view);否则退化系统浏览器
+          if (activeHandler?.onOpenWebUrl) {
+            activeHandler.onOpenWebUrl(href);
+          } else {
+            window.electronAPI?.openExternal?.(href);
+          }
           return true;
         }
 

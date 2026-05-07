@@ -1,0 +1,106 @@
+/* WebView 样式(L5-B4) */
+
+.krig-web-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #1e1e1e;
+  color: #e8eaed;
+}
+
+.krig-web-view__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+  font-size: 14px;
+}
+
+.krig-web-view__webview {
+  flex: 1;
+  width: 100%;
+  border: none;
+  /* electron <webview> 标签默认 inline 元素,需要 block 撑满容器 */
+  display: inline-flex;
+}
+
+/* ── WebToolbar ── */
+
+.krig-web-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #252525;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.krig-web-toolbar__nav {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.krig-web-toolbar__btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #e8eaed;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.1s;
+  min-width: 28px;
+}
+
+.krig-web-toolbar__btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-web-toolbar__btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.krig-web-toolbar__btn:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+.krig-web-toolbar__url {
+  flex: 1;
+  min-width: 0;
+}
+
+.krig-web-toolbar__url-input {
+  width: 100%;
+  padding: 4px 10px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.krig-web-toolbar__url-input:focus {
+  border-color: #8ab4f8;
+}
+
+/*
+ * L5-B4 占位:右侧 actions 区(对齐 V1 翻译 / 书签 / SlotToggle / × 位置)
+ * 当前为空,固定最小宽度让右侧留白,未来填入按钮(L5-B4.x sub-stage)
+ */
+.krig-web-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  /* 占位最小宽度 — 留出 ~4 个按钮位置(每个 28px + gap)*/
+  min-width: 120px;
+  justify-content: flex-end;
+}

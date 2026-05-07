@@ -894,6 +894,89 @@
 
 ---
 
+## 8. L5-B4 web view(基础形态)
+
+> 阶段:web view 落地,验证 link 跨 view 路由能力 + 后续 Note↔Web 交互测试床
+> 跟踪:[stages/L5B4-web-view-design.md](stages/L5B4-web-view-design.md) /
+>      [stages/L5B4-web-view-completion.md](stages/L5B4-web-view-completion.md)
+
+### 8.1 platform 启 webview tag
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.1.1 | npm start 启动 | 不报错,DevTools console 无 webview 相关 warning | ⏳ |
+| 8.1.2 | DevTools 检查 webPreferences | webviewTag: true | ⏳ |
+| 8.1.3 | 现有 NoteView / 4 大交互 | 无回归 | ⏳ |
+
+### 8.2 ViewSwitcher Tab + WebView 渲染
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.2.1 | ViewSwitcher 显示 Note / Web 两个 Tab | Web 是 🌐 emoji | ⏳ |
+| 8.2.2 | 点 Web Tab → 切到 WebView | 默认加载 google.com,显工具栏 | ⏳ |
+| 8.2.3 | 工具栏布局 | [‹ › ↻] [URL bar] | ⏳ |
+| 8.2.4 | 切回 Note Tab | NoteView 状态保留(笔记内容、光标等) | ⏳ |
+
+### 8.3 URL 输入与导航
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.3.1 | URL bar 输入 anthropic.com Enter | 自动补 https://,跳转 anthropic.com | ⏳ |
+| 8.3.2 | URL bar 输入 https://github.com Enter | 直接跳转(不重复补) | ⏳ |
+| 8.3.3 | URL bar Esc | 取消编辑,恢复原 URL | ⏳ |
+| 8.3.4 | URL bar 显示 | 隐藏 https:// 前缀 | ⏳ |
+| 8.3.5 | 加载中 ↻ 按钮变 ✕ | 视觉切换 | ⏳ |
+| 8.3.6 | 加载中点 ✕ | webview.stop() 停止加载 | ⏳ |
+
+### 8.4 前进 / 后退
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.4.1 | 初始无历史 | ‹ › 都禁用 | ⏳ |
+| 8.4.2 | 跳转后 | ‹ 启用,› 禁用 | ⏳ |
+| 8.4.3 | 点 ‹ | 后退到上一页,› 启用 | ⏳ |
+| 8.4.4 | 点 › | 前进 | ⏳ |
+| 8.4.5 | 在网页中点新链接 | webview 内导航,工具栏 ‹ 启用 | ⏳ |
+
+### 8.5 per-workspace state 持久化
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.5.1 | WebView 跳转到 anthropic.com → 切 Note Tab → 切回 Web Tab | URL 保留 anthropic.com(per-ws state) | ⏳ |
+| 8.5.2 | 重启应用 | URL 保留(localStorage 持久化) | ⏳ |
+| 8.5.3 | 多 ws:ws-A 在 anthropic / ws-B 在 google | 切 ws 时各自的 web URL 独立 | ⏳ |
+
+### 8.6 link 跨 view 路由(L5-B3.4 验证)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.6.1 | 在 Note 内创建 https://anthropic.com link → 点击 | **当前 ws 右栏出现 WebView + 加载 anthropic.com** | ⏳ |
+| 8.6.2 | 8.6.1 后,左栏 NoteView 仍是当前笔记(右栏开,不破左栏) | 是 | ⏳ |
+| 8.6.3 | Note 已是 Web 在右栏时,再点新 link | 右栏 URL 切到新 link | ⏳ |
+| 8.6.4 | 点 file:// 链接 | shell.openPath 不开 web view(file 协议路由不变) | ⏳ |
+| 8.6.5 | 点 krig://note 链接 | 切左栏笔记不开 web view(对齐 L5-B3.4 路径) | ⏳ |
+
+### 8.7 右键菜单(简化版 4 项)
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.7.1 | webview 内右键空白处 | 弹 4 项菜单 | ⏳ |
+| 8.7.2 | 右键链接 → 复制链接 | 链接 URL 进剪贴板 | ⏳ |
+| 8.7.3 | 右键图片 → 复制图片地址 | 图片 src 进剪贴板 | ⏳ |
+| 8.7.4 | 选中文字 + 右键 → 复制选中文字 | 文字进剪贴板 | ⏳ |
+| 8.7.5 | 选中文字 + 右键 → 翻译选中文字 | console.info 占位(L5-B4.2 实现) | ⏳ |
+| 8.7.6 | 无选区 / 无链接的右键 | 复制选中文字 / 翻译选中文字 灰显(enabledWhen 'has-selection') | ⏳ |
+
+### 8.8 不回归 + typecheck/lint
+
+| # | 操作 | 期望 | 状态 |
+|---|---|---|---|
+| 8.8.1 | npm run typecheck + lint | 全过 | ⏳ |
+| 8.8.2 | NoteView 全功能(L5-A 至 L5-B3.4)| 无回归 | ⏳ |
+| 8.8.3 | console L5 alive 输出 web view 注册 | 启动观察 | ⏳ |
+
+---
+
 ## 修订记录
 
 | 日期 | 改动 |
@@ -906,3 +989,4 @@
 | 2026-05-06 | § 6.5 callout(19 条)审计 |
 | 2026-05-06 | § 6.6 toggleList(20 条)审计 |
 | 2026-05-06 | § 7 新章节 L5-B3.4(7.1-7.9 共 ~50 条)审计:popup 基础设施 / link mark / LinkPanel 笔记+网页 Tab / 5 协议路由 / 历史栈 / Cmd+K / ColorPickerPanel 升级 / 不回归 |
+| 2026-05-06 | § 8 新章节 L5-B4 web view(8.1-8.8 共 ~30 条)审计:platform webviewTag / ViewSwitcher Tab / URL bar / 前进后退 / per-ws 持久化 / link 跨 view 路由验证 / 简化右键菜单 / 不回归 |
