@@ -65,4 +65,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restartApp(): void {
     ipcRenderer.send(IPC_CHANNELS.APP_RESTART);
   },
+
+  /** L5-B4.3.1:base64 → media:// URL */
+  async mediaPutBase64(
+    input: string,
+    explicitMime?: string,
+    hintedFilename?: string,
+  ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }> {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.MEDIA_PUT_BASE64,
+      input,
+      explicitMime,
+      hintedFilename,
+    );
+  },
+
+  /** L5-B4.3.1:远程 URL → media:// URL */
+  async mediaDownload(
+    url: string,
+    type: 'audio' | 'image' | 'video',
+  ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEDIA_DOWNLOAD, url, type);
+  },
 });

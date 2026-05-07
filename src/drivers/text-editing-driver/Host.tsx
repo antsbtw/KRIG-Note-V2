@@ -28,10 +28,12 @@ import { horizontalRuleSpec } from './blocks/horizontal-rule/spec';
 import { hardBreakSpec } from './blocks/hard-break/spec';
 import { calloutSpec } from './blocks/callout/spec';
 import { toggleListSpec } from './blocks/toggle-list/spec';
+import { unknownSpec } from './blocks/unknown/spec';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
 // L5-B3.2:全部启用的 block 列表(textBlock + 6 新类 + 2 项 list-item/task-item)
 // L5-B3.3:+ hardBreak(inline)
+// L5-B4.3.1:+ unknown(schema 缺失节点占位 — md-to-pm 等转换层用)
 const ENABLED_BLOCKS: BlockSpec[] = [
   textBlockSpec,
   listItemSpec,
@@ -45,6 +47,7 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   hardBreakSpec,
   calloutSpec,
   toggleListSpec,
+  unknownSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

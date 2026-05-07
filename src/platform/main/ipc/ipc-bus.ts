@@ -9,6 +9,7 @@ import { registerDiagnosticsHandlers } from './diagnostics-handler';
 import { registerShellHandlers } from './shell-handler';
 import { registerWebTranslateHandlers } from './web-translate-handler';
 import { registerAppHandlers } from './app-handler';
+import { registerMediaHandlers } from '../media/media-handlers';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -16,4 +17,5 @@ export function initIpcBus(): void {
   registerShellHandlers();
   registerWebTranslateHandlers();
   registerAppHandlers();
+  registerMediaHandlers();
 }

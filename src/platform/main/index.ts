@@ -23,6 +23,7 @@ import { createMainWindow } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
+import { mediaStore } from './media/media-store-impl';
 
 app.whenReady().then(async () => {
   // L0 — 平台层就绪
@@ -30,6 +31,10 @@ app.whenReady().then(async () => {
 
   // L0 — IPC 总线(含健康检查 handlers)
   initIpcBus();
+
+  // L0/L5-B4.3.1 — 注册 media:// 协议
+  // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
+  mediaStore.registerProtocol();
 
   // L4 — 框架级 Application Menu(取代 Electron 默认 File/Edit/View/Window)
   registerFrameworkMenus();

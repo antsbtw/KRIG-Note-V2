@@ -362,3 +362,23 @@
   outline: 1px dashed #6cb6ff;
   outline-offset: 2px;
 }
+
+/* L5-B4.3.1:unknown block — schema 缺失节点占位 */
+.krig-pm-host .ProseMirror .krig-unknown-block {
+  display: block;
+  padding: 8px 12px;
+  margin: 4px 0;
+  background: rgba(255, 180, 100, 0.08);
+  border: 1px dashed rgba(255, 180, 100, 0.4);
+  border-radius: 4px;
+  color: #ffb464;
+  font-size: 13px;
+  font-style: italic;
+  cursor: default;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-unknown-block.ProseMirror-selectednode {
+  outline: 1px dashed #6cb6ff;
+  outline-offset: 2px;
+}
