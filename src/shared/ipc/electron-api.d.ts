@@ -24,6 +24,17 @@ declare global {
       translateFetchElementJs(): Promise<string | null>;
       /** L5-B4.2.2:重启 app(切翻译语言后让 widget 用新 lang 重新初始化)*/
       restartApp(): void;
+      /** L5-B4.3.1:base64 / data URL → media:// URL(SHA256 去重) */
+      mediaPutBase64(
+        input: string,
+        explicitMime?: string,
+        hintedFilename?: string,
+      ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }>;
+      /** L5-B4.3.1:从远程 URL 下载到 media store,返回 media:// URL */
+      mediaDownload(
+        url: string,
+        type: 'audio' | 'image' | 'video',
+      ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }>;
     };
   }
 }
