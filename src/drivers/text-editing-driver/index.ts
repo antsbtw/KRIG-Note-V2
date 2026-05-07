@@ -64,3 +64,11 @@ export {
   setLinkClickHandler,
   type LinkClickHandler,
 } from './plugins/build-link-click-plugin';
+export {
+  noteLinkCommandKey,
+  setNoteLinkSearchHandler,
+  getNoteLinkActiveView,
+  type NoteLinkCommandState,
+  type NoteLinkSearchHandler,
+} from './plugins/build-note-link-command-plugin';
+export { noteLinkSpec } from './blocks/note-link/spec';
