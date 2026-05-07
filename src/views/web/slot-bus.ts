@@ -43,7 +43,14 @@ interface PendingMessage {
   ts: number;
 }
 
-const PENDING_TTL_MS = 1000;
+/**
+ * pending TTL:5 秒(从 1 秒放宽 — webview about:blank 加载有时慢,
+ * left subscribe 可能比 right mount 晚 1+ 秒)
+ *
+ * 设大点的代价:跨翻译 toggle 周期残留旧消息?— 不会,subscribe flush 后 set([])
+ * 立刻清空 pending,新订阅者不会重收旧消息。
+ */
+const PENDING_TTL_MS = 5000;
 
 class SlotBus {
   /** 按目标 side 订阅:listeners.get('right') = 监听"发往右侧"的消息 */
