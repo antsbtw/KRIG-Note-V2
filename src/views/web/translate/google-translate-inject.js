@@ -6,20 +6,28 @@
 
   // Language changed on an already-injected page — switch via cookie + select
   if (window.__krigTranslateInjected) {
-    if (window.__krigCurrentLang === TARGET_LANG) return;
+    window.__krigSwitchLog = (window.__krigSwitchLog || []);
+    window.__krigSwitchLog.push('reinject for lang ' + TARGET_LANG + ' (was ' + window.__krigCurrentLang + ')');
+    if (window.__krigCurrentLang === TARGET_LANG) {
+      window.__krigSwitchLog.push('same lang,skip');
+      return;
+    }
     window.__krigCurrentLang = TARGET_LANG;
 
     document.cookie = 'googtrans=/auto/' + TARGET_LANG + '; path=/';
 
     var select = document.querySelector('#google_translate_element select');
+    window.__krigSwitchLog.push('select found: ' + !!select + ', options: ' + (select ? select.options.length : 0));
     if (select) {
       for (var i = 0; i < select.options.length; i++) {
         if (select.options[i].value === TARGET_LANG) {
           select.selectedIndex = i;
           select.dispatchEvent(new Event('change'));
+          window.__krigSwitchLog.push('select 切到 ' + TARGET_LANG + ' (idx ' + i + ') + dispatchChange');
           return;
         }
       }
+      window.__krigSwitchLog.push('select 没找到 ' + TARGET_LANG + ' option,fallback re-init widget');
     }
 
     var el = document.getElementById('google_translate_element');
@@ -38,6 +46,7 @@
           if (sel.options[j].value === TARGET_LANG) {
             sel.selectedIndex = j;
             sel.dispatchEvent(new Event('change'));
+            window.__krigSwitchLog.push('500ms 后 re-init select 切到 ' + TARGET_LANG);
             break;
           }
         }

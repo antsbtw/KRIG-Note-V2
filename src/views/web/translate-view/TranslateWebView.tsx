@@ -82,8 +82,13 @@ export function TranslateWebView() {
   useEffect(() => {
     const td = translateDriverRef.current;
     const wv = webviewRef.current;
+    console.log(
+      '[translate-view] lang useEffect — targetLang:', targetLang,
+      ', td:', !!td, ', wv:', !!wv, ', domReady:', domReadyRef.current,
+    );
     if (!td || !wv || !domReadyRef.current) return;
     td.setTargetLang(targetLang);
+    console.log('[translate-view] lang 变更触发重新 inject:', targetLang);
     // 重新 inject,触发 inject 脚本头部的"language changed"分支:
     // 写新 cookie + 重置 select 选中 + dispatchEvent('change') → widget 刷新翻译
     td.inject(wv).catch(() => {});
@@ -168,7 +173,11 @@ export function TranslateWebView() {
         });
       });
     }
-  }, [targetLang]);
+    // 注:不依赖 targetLang — driver 创建时用初始 targetLang 即可,
+    // 后续 lang 变化由独立 useEffect [targetLang] 内 td.setTargetLang + reinject 处理。
+    // 若依赖 targetLang,setupWebview 会重生成 → React 解绑 webview ref → driver 被重建 →
+    // [targetLang] 内 td 还是 null 错乱。
+  }, []);
 
   // ── 组件 unmount 时清理 driver ──
   useEffect(() => {
