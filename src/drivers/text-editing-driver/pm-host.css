@@ -705,3 +705,115 @@
   font-size: 12px;
   font-style: italic;
 }
+
+/* L5-B3.7 table — 简版(B+):scroll wrapper + +col/+row 按钮 + 基础样式 */
+
+.krig-pm-host .ProseMirror .krig-table-block {
+  position: relative;
+  margin: 12px 0;
+  padding-right: 24px;  /* 给 +col 按钮留位 */
+  padding-bottom: 24px; /* 给 +row 按钮留位 */
+}
+
+.krig-pm-host .ProseMirror .krig-table-block__scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.krig-pm-host .ProseMirror .krig-pm-table {
+  border-collapse: collapse;
+  margin: 0;
+  width: max-content;
+  min-width: 100%;
+  table-layout: fixed;
+}
+
+.krig-pm-host .ProseMirror .krig-pm-table td,
+.krig-pm-host .ProseMirror .krig-pm-table th {
+  border: 1px solid #3a3a3a;
+  padding: 6px 10px;
+  vertical-align: top;
+  min-width: 80px;
+  position: relative;
+}
+
+.krig-pm-host .ProseMirror .krig-pm-table th {
+  background: rgba(138, 180, 248, 0.08);
+  font-weight: 600;
+  text-align: left;
+}
+
+.krig-pm-host .ProseMirror .krig-pm-table td > p:first-child,
+.krig-pm-host .ProseMirror .krig-pm-table th > p:first-child,
+.krig-pm-host .ProseMirror .krig-pm-table td > h1:first-child,
+.krig-pm-host .ProseMirror .krig-pm-table td > h2:first-child,
+.krig-pm-host .ProseMirror .krig-pm-table td > h3:first-child {
+  margin-top: 0;
+}
+.krig-pm-host .ProseMirror .krig-pm-table td > p:last-child,
+.krig-pm-host .ProseMirror .krig-pm-table th > p:last-child {
+  margin-bottom: 0;
+}
+
+/* CellSelection 选中样式(prosemirror-tables 自动加 selectedCell class)*/
+.krig-pm-host .ProseMirror .krig-pm-table .selectedCell {
+  background: rgba(138, 180, 248, 0.18);
+}
+
+/* prosemirror-tables column-resize 拖拽时显示的 resize-handle(库注入)*/
+.krig-pm-host .ProseMirror .krig-pm-table .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #8ab4f8;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.krig-pm-host .ProseMirror .resize-cursor {
+  cursor: col-resize;
+}
+
+/* +col 按钮(右侧)*/
+.krig-pm-host .ProseMirror .krig-table-block__add-col-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 24px;
+  width: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 4px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-table-block__add-col-btn:hover {
+  background: rgba(138, 180, 248, 0.1);
+  color: #8ab4f8;
+}
+
+/* +row 按钮(底部)*/
+.krig-pm-host .ProseMirror .krig-table-block__add-row-btn {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 24px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 4px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-table-block__add-row-btn:hover {
+  background: rgba(138, 180, 248, 0.1);
+  color: #8ab4f8;
+}

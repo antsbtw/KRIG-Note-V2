@@ -253,6 +253,12 @@ export function registerNoteCommands(): void {
     textEditingDriverApi.insertMathInlineAtSelection(instanceId);
   }));
 
+  // L5-B3.7:slash insert-table — 插入 3x3 表格(第一行 header)
+  commandRegistry.register('note-view.slash-insert-table', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertTableAtSelection(instanceId, 3, 3);
+  }));
+
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();

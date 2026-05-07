@@ -40,5 +40,8 @@ export function registerSlashMenu(): void {
     // L5-B3.6:Math Block(行内公式不在这里,在 floating toolbar)
     { id: 'note-view.slash.math-block', label: 'Math Block', command: 'note-view.slash-insert-math-block',
       keywords: ['math', 'latex', 'equation', 'formula', '公式'], view: VIEW, order: 140 },
+    // L5-B3.7:Table 3x3(第一行 header)
+    { id: 'note-view.slash.table', label: 'Table', command: 'note-view.slash-insert-table',
+      keywords: ['table', 'grid', '表格'], view: VIEW, order: 160 },
   ]);
 }

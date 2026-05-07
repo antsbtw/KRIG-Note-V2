@@ -32,6 +32,12 @@ import { unknownSpec } from './blocks/unknown/spec';
 import { imageSpec } from './blocks/image/spec';
 import { mathBlockSpec } from './blocks/math-block/spec';
 import { mathInlineSpec } from './blocks/math-inline/spec';
+import {
+  tableSpec,
+  tableRowSpec,
+  tableCellSpec,
+  tableHeaderSpec,
+} from './blocks/table';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
 // L5-B3.2:全部启用的 block 列表(textBlock + 6 新类 + 2 项 list-item/task-item)
@@ -39,6 +45,8 @@ import type { TextEditingHostProps, BlockSpec } from './types';
 // L5-B4.3.1:+ unknown(schema 缺失节点占位 — md-to-pm 等转换层用)
 // L5-B3.5:+ image(图片 block,3 态:placeholder / 普通图 / SVG;mediaStore 集成)
 // L5-B3.6:+ mathBlock / mathInline(KaTeX 渲染,块级 + 行内 atom)
+// L5-B3.7:+ table 系列 4 节点(table/tableRow/tableHeader/tableCell;
+//          走 prosemirror-tables 库:tableEditing + columnResizing + 自定义 keymap)
 const ENABLED_BLOCKS: BlockSpec[] = [
   textBlockSpec,
   listItemSpec,
@@ -56,6 +64,10 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   imageSpec,
   mathBlockSpec,
   mathInlineSpec,
+  tableSpec,
+  tableRowSpec,
+  tableCellSpec,
+  tableHeaderSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

@@ -28,7 +28,8 @@
 | 15 | L5-B4.2.2 | 翻译目标语言 per-ws 持久化 + navigator.language 默认 + 切语言重启 banner + sync-driver 防 crash | 9fd1700 | 2026-05-07 |
 | 16 | L5-B4.3.1 | AI ↔ Note 闭环前置基建:mediaStore + md-to-pm(V2 schema 适配)+ ai-service-types | 55a01a7 | 2026-05-07 |
 | 17 | L5-B3.5 | NoteEditor schema Phase A #1:image block(三态 placeholder/普通图/SVG + Upload/Embed/Resize + SVG 安全清洗 + mediaStore 集成 + slash /image)| e9e1475 | 2026-05-07 |
-| 18 | L5-B3.6 | NoteEditor schema Phase A #2:mathBlock + mathInline(KaTeX 渲染 + 共享 IntersectionObserver / 缓存优化 + 双态编辑 + 反向驱动 ✅)| (待 merge) | 2026-05-07 |
+| 18 | L5-B3.6 | NoteEditor schema Phase A #2:mathBlock + mathInline(KaTeX 渲染 + 共享 IntersectionObserver / 缓存优化 + 双态编辑 + 反向驱动 ✅)| 04ffc8c | 2026-05-07 |
+| 19 | L5-B3.7 | NoteEditor schema Phase A #3 收官:table 4 节点(prosemirror-tables 库 + 简版 NodeView + 完整业务 commands + 反向驱动 ✅)— **B+ 路径**:UX 装饰留 sub-stage,扩展性 100% 保留 | (待 merge) | 2026-05-07 |
 
 ---
 
@@ -149,3 +150,4 @@ audio / video / file-block / math-block / table 等。
 | 2026-05-07 | L5-B4.3.1 前置基建完成:mediaStore(V1 直迁,DB 路径剥离)+ md-to-pm(V2 schema 适配 + 节点降级策略)+ ai-service-types(claude/chatgpt/gemini 直迁);L5-B4.3.2 web-bridge 直迁待启动 |
 | 2026-05-07 | L5-B4.3 暂停推进 — note schema 不齐导致 AI 提取无法验证;改 Phase A 优先补 schema(L5-B3.5 image / L5-B3.6 math / L5-B3.7 table)。L5-B3.5 image block 完成(unknown → image 反向驱动证明) |
 | 2026-05-07 | L5-B3.6 mathBlock + mathInline 完成(KaTeX 渲染,V1 性能优化全部直迁:渲染缓存 / 共享 IntersectionObserver / 共享 mousedown listener;砍 LaTeX 速查面板留 L5-B+ / 砍 thoughtMark 集成);反向驱动证明再次验证 |
+| 2026-05-07 | L5-B3.7 table 4 节点完成(prosemirror-tables 库 + B+ 路径:schema + 完整业务 commands + 简版 NodeView + 必要插件;砍 hover 指示器 / 自建 DOM 菜单 / CellSelection 浮动 toolbar 留 L5-B3.7.1 接 V2 注册系统);Phase A 收官,反向驱动第三次证明 ✅ |
