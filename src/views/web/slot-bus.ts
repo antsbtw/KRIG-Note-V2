@@ -76,15 +76,13 @@ class SlotBus {
       `[slot-bus] send ${fromSide}→${toSide}: ${message.action} (listeners: ${set?.size ?? 0})`,
     );
 
-    // 若 toSide 暂无订阅者 → 缓冲(等订阅时 flush)
+    // 若 toSide 暂无订阅者 → 缓冲(等订阅时 flush 全部,无 TTL)
     if (!set || set.size === 0) {
       const buf = this.pending.get(toSide);
       if (buf) {
         buf.push({ message, fromSide, ts: now });
-        const cutoff = now - PENDING_TTL_MS;
-        while (buf.length > 0 && buf[0].ts < cutoff) buf.shift();
       }
-      console.log(`[slot-bus] no listener,push pending → size ${this.pending.get(toSide)?.length}`);
+      console.log(`[slot-bus v2] no listener,push pending → size ${this.pending.get(toSide)?.length}`);
       return;
     }
 
@@ -113,16 +111,16 @@ class SlotBus {
       `[slot-bus] subscribe ${toSide} (total listeners: ${set.size}, pending: ${this.pending.get(toSide)?.length ?? 0})`,
     );
 
-    // flush 缓冲消息(给新 listener)
+    // flush 缓冲消息(给新 listener)— 不再过滤 TTL,所有 pending 一律 flush
+    // (L5-B4.2 验证:TTL 过滤导致 mount 慢机器丢消息;subscribe 时如果还有 pending,
+    //  说明就是为这次 subscribe 攒的消息,不应过滤)
     const buf = this.pending.get(toSide);
     if (buf && buf.length > 0) {
-      const now = Date.now();
-      const cutoff = now - PENDING_TTL_MS;
-      const valid = buf.filter((m) => m.ts >= cutoff);
-      this.pending.set(toSide, []); // 清空(只 flush 一次,后续新订阅者不再收旧消息)
-      console.log(`[slot-bus] flush ${valid.length} pending messages to ${toSide}`);
+      const allMsgs = buf.slice();
+      this.pending.set(toSide, []);
+      console.log(`[slot-bus v2] flush ALL ${allMsgs.length} pending → ${toSide}`);
       queueMicrotask(() => {
-        for (const pm of valid) {
+        for (const pm of allMsgs) {
           try {
             listener(pm.message, pm.fromSide);
           } catch (err) {
