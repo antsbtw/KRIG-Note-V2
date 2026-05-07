@@ -39,12 +39,22 @@ export interface LinkClickHandler {
    * 可选 — 若 view 不实现,driver 退化为直接 shell.openExternal
    */
   onOpenWebUrl?: (url: string) => void;
+  /**
+   * L5-B3.12:noteLink NodeView 同步目标 title 用 — 由 view 接 noteStore.get
+   * 返回 null = 目标 note 不存在(NodeView 切红色"未找到"态)
+   */
+  resolveNoteTitle?: (noteId: string) => string | null;
 }
 
 let activeHandler: LinkClickHandler | null = null;
 
 export function setLinkClickHandler(handler: LinkClickHandler | null): void {
   activeHandler = handler;
+}
+
+/** 给 driver 内部 NodeView 用(noteLink 等)— view 层用 setLinkClickHandler 注入 */
+export function getLinkClickHandler(): LinkClickHandler | null {
+  return activeHandler;
 }
 
 /**

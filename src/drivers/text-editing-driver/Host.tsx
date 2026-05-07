@@ -32,6 +32,7 @@ import { unknownSpec } from './blocks/unknown/spec';
 import { imageSpec } from './blocks/image/spec';
 import { mathBlockSpec } from './blocks/math-block/spec';
 import { mathInlineSpec } from './blocks/math-inline/spec';
+import { noteLinkSpec } from './blocks/note-link/spec';
 import {
   tableSpec,
   tableRowSpec,
@@ -47,6 +48,7 @@ import type { TextEditingHostProps, BlockSpec } from './types';
 // L5-B3.6:+ mathBlock / mathInline(KaTeX 渲染,块级 + 行内 atom)
 // L5-B3.7:+ table 系列 4 节点(table/tableRow/tableHeader/tableCell;
 //          走 prosemirror-tables 库:tableEditing + columnResizing + 自定义 keymap)
+// L5-B3.12:+ noteLink(inline atom — `[[note-title]]` 双链 KRIG 知识图谱基础)
 const ENABLED_BLOCKS: BlockSpec[] = [
   textBlockSpec,
   listItemSpec,
@@ -68,6 +70,7 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   tableRowSpec,
   tableCellSpec,
   tableHeaderSpec,
+  noteLinkSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {
