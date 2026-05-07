@@ -82,16 +82,28 @@ export function TranslateWebView() {
   useEffect(() => {
     const td = translateDriverRef.current;
     const wv = webviewRef.current;
-    console.log(
-      '[translate-view] lang useEffect — targetLang:', targetLang,
-      ', td:', !!td, ', wv:', !!wv, ', domReady:', domReadyRef.current,
-    );
     if (!td || !wv || !domReadyRef.current) return;
     td.setTargetLang(targetLang);
-    console.log('[translate-view] lang 变更触发重新 inject:', targetLang);
-    // 重新 inject,触发 inject 脚本头部的"language changed"分支:
-    // 写新 cookie + 重置 select 选中 + dispatchEvent('change') → widget 刷新翻译
-    td.inject(wv).catch(() => {});
+    td.inject(wv)
+      .then(() => {
+        // 1.5s 后读 webview 内的 __krigSwitchLog 看切 lang 路径走到哪步
+        setTimeout(() => {
+          wv.executeJavaScript(`
+            (function() {
+              return JSON.stringify({
+                switchLog: window.__krigSwitchLog || [],
+                currentLang: window.__krigCurrentLang,
+                cookie: (document.cookie.match(/googtrans=[^;]*/) || ['none'])[0],
+                selValue: (function() {
+                  var s = document.querySelector('#google_translate_element select');
+                  return s ? s.value : null;
+                })(),
+              });
+            })();
+          `).then((r) => console.log('[translate-view] 切 lang ' + targetLang + ' 1.5s 后:', r));
+        }, 1500);
+      })
+      .catch(() => {});
   }, [targetLang]);
 
   // ── webview ref callback ──
