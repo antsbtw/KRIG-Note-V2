@@ -15,6 +15,7 @@ import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
+import { insertTable as insertTableCommand } from './blocks/table';
 
 export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
 
@@ -652,6 +653,20 @@ export const textEditingDriverApi = {
 
     const tr = state.tr.replaceSelectionWith(mathNode, false).scrollIntoView();
     dispatch(tr);
+    inst.view.focus();
+  },
+
+  /**
+   * 在光标处插入 table(L5-B3.7)
+   *
+   * 行为:替换当前 block(空段落直接换;非空段落也换 — V1 行为)
+   * 第一行 tableHeader,后续 tableCell;每 cell 含一个空 text-block 段落
+   * 默认 3x3,可通过参数自定义
+   */
+  insertTableAtSelection(instanceId: string, rows = 3, cols = 3): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertTableCommand(rows, cols)(inst.view.state, inst.view.dispatch);
     inst.view.focus();
   },
 };

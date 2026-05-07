@@ -66,13 +66,16 @@ export const PM_NODE_REGISTRY = {
   //   产出的节点直接渲染,反向驱动证明 — md-to-pm 主体不动)
   mathBlock: '✅',
   mathInline: '✅',
+  // L5-B3.7:table 系列 4 节点已实现(prosemirror-tables + 简版 NodeView,B+ 路线)
+  //   markdown `| a | b |\n|---|---|\n| 1 | 2 |` 转出来的 table/tableRow/tableHeader/
+  //   tableCell 节点直接渲染。Phase A 收官,反向驱动证明第三次 ✅
+  table: '✅',
+  tableRow: '✅',
+  tableHeader: '✅',
+  tableCell: '✅',
   // block — 未实现(L5-B4.3 闭环测试会触发,反向驱动补齐)
   fileBlock: '❌',
   externalRef: '❌',
-  table: '❌',
-  tableRow: '❌',
-  tableHeader: '❌',
-  tableCell: '❌',
 } as const;
 
 /**
@@ -326,8 +329,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Table (| ... |) — V2 未实现 table 系列;构造完整 table 嵌套结构
-    // schema 补齐后直接渲染;暂未支持时由 NoteEditor 渲染层显示占位
+    // Table (| ... |) — V2 schema 已实现(L5-B3.7),直接 emit 完整嵌套结构
     if (line.trimStart().startsWith('|')) {
       const startLine = i;
       const tableRows: PMNode[] = [];
