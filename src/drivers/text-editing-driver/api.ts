@@ -525,6 +525,59 @@ export const textEditingDriverApi = {
     if (!inst) return;
     scrollToBlockAnchor(inst.view, anchor);
   },
+
+  /**
+   * 在光标当前 block 后插入空 image block(L5-B3.5)
+   *
+   * 行为:
+   * - 当前 block 是空段落 → 替换它(避免遗留空行)
+   * - 当前 block 非空 → 在其后插入 image block(用户后续编辑 caption 不影响原段落)
+   * - image attrs.src=null,触发 placeholder 状态
+   * - caption(`text-block`)填一个空段落满足 schema content='text-block'
+   */
+  insertImageAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const imageType = schema.nodes.image;
+    const textBlockType = schema.nodes['text-block'];
+    if (!imageType || !textBlockType) return;
+
+    const captionNode = textBlockType.create();
+    const imageNode = imageType.create({}, captionNode);
+    if (!imageNode) return;
+
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      // 顶层:直接在选区前插入
+      dispatch(state.tr.insert(state.selection.from, imageNode));
+    } else {
+      const blockNode = $from.node(1);
+      const blockStart = $from.before(1);
+      const blockEnd = $from.after(1);
+      // 当前 block 为空段落 → 替换
+      const isEmptyParagraph =
+        blockNode.type.name === 'text-block' &&
+        blockNode.content.size === 0 &&
+        (blockNode.attrs.level == null);
+      let tr = state.tr;
+      if (isEmptyParagraph) {
+        tr = tr.replaceWith(blockStart, blockEnd, imageNode);
+      } else {
+        // 在当前 block 之后插入
+        tr = tr.insert(blockEnd, imageNode);
+      }
+      // 光标移到 image caption 内(让用户能直接写 caption 或继续编辑)
+      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+      // image 起点 + 1 进入 image,再 + 1 进入 caption text-block 内
+      const captionPos = insertPos + 2;
+      const sel = TextSelection.create(tr.doc, captionPos);
+      tr = tr.setSelection(sel).scrollIntoView();
+      dispatch(tr);
+    }
+    inst.view.focus();
+  },
 };
 
 /**
