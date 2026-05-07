@@ -34,7 +34,8 @@
 | 21 | L5-B3.9 | handle / context menu 重组(Turn Into 移到 handle;context = Cut/Copy/Paste/Select All/Delete;按钮 + 菜单分组 + 分隔符) | 0035d20 | 2026-05-07 |
 | 22 | L5-B3.10 | floating toolbar 顺序对齐 V1 + group 分隔符(B/I/U/S/code → ∑ → 🔗 → 颜色) | 6335e95 | 2026-05-07 |
 | 23 | L5-B3.11 | note title(text-block.isTitle + title-guard plugin)+ 单 'A' 综合按钮 + handle 菜单 submenu(对齐 V1 11 项 Turn Into + 4 占位 submenu)+ visibleWhen | 77a9d5b | 2026-05-07 |
-| 24 | L5-B3.12 | **Phase B1 KRIG 知识图谱基础**:noteLink 双链 `[[note-title]]`(inline atom + leafText / `[[` 触发 popup 搜索面板 / krig://note 协议路由 / mount-once title 同步 / 失效红色态)— V1 → V2 直迁 | (待 merge) | 2026-05-07 |
+| 24 | L5-B3.12 | **Phase B1 KRIG 知识图谱基础**:noteLink 双链 `[[note-title]]`(inline atom + leafText / `[[` 触发 popup 搜索面板 / krig://note 协议路由 / mount-once title 同步 / 失效红色态)— V1 → V2 直迁 | 960298f | 2026-05-07 |
+| 25 | L5-B3.13 | **Phase B2 paste-media**:剪贴板图片 → image block(同步 dataUrl 占位 + 异步 mediaPutBase64 落盘 → media://;HTML 让步规则 / `$from.depth` 嵌套定位 / isTitle 守卫)— V1 → V2 直迁 | (待 merge) | 2026-05-07 |
 
 ---
 
@@ -158,3 +159,4 @@ audio / video / file-block / math-block / table 等。
 | 2026-05-07 | L5-B3.7 table 4 节点完成(prosemirror-tables 库 + B+ 路径:schema + 完整业务 commands + 简版 NodeView + 必要插件;砍 hover 指示器 / 自建 DOM 菜单 / CellSelection 浮动 toolbar 留 L5-B3.7.1 接 V2 注册系统);Phase A 收官,反向驱动第三次证明 ✅ |
 | 2026-05-07 | L5-B3.8 - 3.11 UX 对齐 V1 完成:NavSide divider / handle context 菜单重组 / floating toolbar 顺序对齐 / note title(isTitle + title-guard)+ handle submenu 框架 |
 | 2026-05-07 | **L5-B3.12 noteLink 双链完成 — Phase B1 KRIG 知识图谱基础落地** ✅:V1 → V2 直迁(~500 LOC + 90 CSS)。inline atom + leafText 复制还原 / `[[` handleTextInput 触发 popup / `]]` 自动关 / krig://note 协议路由(复用 link-click handler 加 resolveNoteTitle)/ mount-once title 同步 / 删除目标显红色"未找到"态;5 决策点全 A 默认 |
+| 2026-05-07 | **L5-B3.13 paste-media 完成 — Phase B2** ✅:V1 → V2 直迁(~122 LOC)。剪贴板图片 handlePaste 同步 dataUrl 占位 + 异步 mediaPutBase64 落盘 → media://(刷新不丢);HTML 让步规则(table/h1-6 → 让 PM 默认 / Phase E smart-paste 兼容);$from.depth 嵌套容器定位 + L5-B3.11 isTitle 守卫;5 决策点全 A 默认 |
