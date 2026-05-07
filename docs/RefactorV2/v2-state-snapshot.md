@@ -26,7 +26,8 @@
 | 14 | L5-B4.2 | web 双屏同步翻译(slot-bus + sync driver 7 事件 + Google Translate 注入 + 中文翻译 OK,切语言留 L5-B4.2.2) | f79168c | 2026-05-06 |
 | 14.1 | L5-B4.2.1 | URL 路径方案调研(Google translate.goog 替代 widget 注入) | 归档不 merge(`feature/L5B4.2.1-google-url-translate`) | 2026-05-07 |
 | 15 | L5-B4.2.2 | 翻译目标语言 per-ws 持久化 + navigator.language 默认 + 切语言重启 banner + sync-driver 防 crash | 9fd1700 | 2026-05-07 |
-| 16 | L5-B4.3.1 | AI ↔ Note 闭环前置基建:mediaStore + md-to-pm(V2 schema 适配)+ ai-service-types | (待 merge) | 2026-05-07 |
+| 16 | L5-B4.3.1 | AI ↔ Note 闭环前置基建:mediaStore + md-to-pm(V2 schema 适配)+ ai-service-types | 55a01a7 | 2026-05-07 |
+| 17 | L5-B3.5 | NoteEditor schema Phase A #1:image block(三态 placeholder/普通图/SVG + Upload/Embed/Resize + SVG 安全清洗 + mediaStore 集成 + slash /image)| (待 merge) | 2026-05-07 |
 
 ---
 
@@ -145,3 +146,4 @@ audio / video / file-block / math-block / table 等。
 | 2026-05-06 | L5-B4.2 web 双屏同步翻译完成;slot-bus(免 IPC)+ sync driver + Google Translate |
 | 2026-05-07 | L5-B4.2.1 URL 路径方案归档(体验降级未 merge);L5-B4.2.2 切语言走"持久化 + 重启 banner"UX 兜底完成 |
 | 2026-05-07 | L5-B4.3.1 前置基建完成:mediaStore(V1 直迁,DB 路径剥离)+ md-to-pm(V2 schema 适配 + 节点降级策略)+ ai-service-types(claude/chatgpt/gemini 直迁);L5-B4.3.2 web-bridge 直迁待启动 |
+| 2026-05-07 | L5-B4.3 暂停推进 — note schema 不齐导致 AI 提取无法验证;改 Phase A 优先补 schema(L5-B3.5 image / L5-B3.6 math / L5-B3.7 table)。L5-B3.5 image block 完成(unknown → image 反向驱动证明) |
