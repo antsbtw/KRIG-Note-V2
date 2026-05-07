@@ -92,26 +92,21 @@ export function registerFloatingToolbar(): void {
       order: 60,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
     },
-    // ── group: color(分隔)— V1 综合一个按钮;V2 拆两个 ──
+    // ── group: color(分隔)──
+    // L5-B3.11 修订:对齐 V1 — 单按钮 'A' 弹综合 popup(双区:文字色 + 背景色)
+    // ColorPickerPanel 本身已是双区设计(V2 L5-B3.4 落地),只需删高亮按钮即可
     {
-      id: 'note-view.ft.text-color',
+      id: 'note-view.ft.color',
       label: 'A',
       kind: 'popup-trigger',
       popupId: 'note-view.popup.color',
       view: VIEW,
       group: 'color',
       order: 70,
-      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('textStyle'),
-    },
-    {
-      id: 'note-view.ft.highlight',
-      label: 'A̲',
-      kind: 'popup-trigger',
-      popupId: 'note-view.popup.color',
-      view: VIEW,
-      group: 'color',
-      order: 80,
-      activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('highlight'),
+      // 选区有 textStyle 或 highlight 任一 → active 高亮
+      activeWhen: (ctx) =>
+        !!ctx.selection?.activeMarks?.includes('textStyle') ||
+        !!ctx.selection?.activeMarks?.includes('highlight'),
     },
   ];
   floatingToolbarRegistry.register(items);
