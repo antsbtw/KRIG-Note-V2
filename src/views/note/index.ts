@@ -18,6 +18,7 @@ import { registerHandleMenu } from './handle-menu-content';
 import { registerContextMenu } from './context-menu-content';
 import { registerNotePopups } from './popup-registrations';
 import { registerLinkClickIntegration } from './link-click-integration';
+import { registerNoteLinkSearchIntegration } from './note-link-search/integration';
 
 registerView({
   id: 'note-view',
@@ -47,3 +48,4 @@ registerHandleMenu();
 registerContextMenu();
 registerNotePopups();
 registerLinkClickIntegration();
+registerNoteLinkSearchIntegration();

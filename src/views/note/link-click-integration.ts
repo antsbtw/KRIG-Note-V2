@@ -17,6 +17,7 @@
 import { setLinkClickHandler } from '@drivers/text-editing-driver';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { setActiveNote, getNoteWsState } from './data-model';
+import { noteStore } from './note-store';
 import { setWebUrl } from '@views/web/data-model';
 import {
   setCurrentNoteId,
@@ -62,6 +63,14 @@ export function registerLinkClickIntegration(): void {
      *
      * 跨 ws 跳转留 ActiveResourceManager 抽象后(同 onOpenNote 降级)
      */
+    /**
+     * L5-B3.12:noteLink NodeView 同步目标 title — driver 不直接 import note-store,
+     * 通过 handler 反向取(返回 null = 目标已删除,NodeView 切"未找到"态)
+     */
+    resolveNoteTitle(noteId) {
+      const target = noteStore.get(noteId);
+      return target ? target.title : null;
+    },
     onOpenWebUrl(url) {
       const wsId = workspaceManager.getActiveId();
       if (!wsId) return;
