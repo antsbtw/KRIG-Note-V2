@@ -94,16 +94,32 @@ export class TranslateDriver {
       this.targetLang,
     );
 
+    // Step 3-4:把启动器 + element.js 拼一起,注入到 main world(用 <script> 标签插入)
+    // 关键:Electron webview.executeJavaScript 默认跑在 isolated world,
+    // 启动器定义的 window.googleTranslateElementInit 在 isolated world 内,
+    // element.js 加载子 chunks 时跑在 main world,看不到 init 回调 → widget 永不创建
+    // 修法:用 script 标签插入,两段代码都跑在 main world(同 webview 页面)
+    const combinedScript = `${script}\n;\n${elementJsCode}`;
+    const injectViaScriptTag = `
+      (function() {
+        try {
+          var s = document.createElement('script');
+          s.type = 'text/javascript';
+          s.textContent = ${JSON.stringify(combinedScript)};
+          (document.head || document.documentElement).appendChild(s);
+          // 注入完成后移除 script 节点(textContent 已执行,DOM 痕迹无用)
+          if (s.parentNode) s.parentNode.removeChild(s);
+          return 'injected';
+        } catch (e) {
+          return 'error:' + (e && e.message || e);
+        }
+      })();
+    `;
+
     webview
-      .executeJavaScript(script)
-      .then(() => {
-        console.log('[translate-driver] Step 3 注入器 OK');
-        // Step 4:执行 element.js
-        if (this.injectId !== myId) return;
-        return webview.executeJavaScript(elementJsCode!);
-      })
-      .then(() => {
-        console.log('[translate-driver] Step 4 element.js OK — Google Translate widget 应该已激活');
+      .executeJavaScript(injectViaScriptTag)
+      .then((r) => {
+        console.log('[translate-driver] Step 3+4 script 标签注入结果:', r);
         // Step 5:暗色模式 meta 注入
         if (this.injectId !== myId) return;
         return webview.executeJavaScript(`
