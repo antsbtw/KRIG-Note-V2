@@ -34,7 +34,7 @@
     if (el) el.innerHTML = '';
     new google.translate.TranslateElement({
       pageLanguage: 'auto',
-      includedLanguages: TARGET_LANG,
+      includedLanguages: 'zh-CN,ja,ko,en',
       autoDisplay: false,
       layout: google.translate.TranslateElement.InlineLayout.SIMPLE
     }, 'google_translate_element');
@@ -69,7 +69,7 @@
   window.googleTranslateElementInit = function() {
     new google.translate.TranslateElement({
       pageLanguage: 'auto',
-      includedLanguages: TARGET_LANG,
+      includedLanguages: 'zh-CN,ja,ko,en',
       autoDisplay: false,
       layout: google.translate.TranslateElement.InlineLayout.SIMPLE
     }, 'google_translate_element');

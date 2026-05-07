@@ -78,32 +78,28 @@ export function TranslateWebView() {
     return () => unsub();
   }, []);
 
-  // ── lang 变更:更新 driver + 重新注入(让 inject 脚本"已注入分支"切 lang)──
+  // ── lang 变更:更新 driver targetLang + reload webview(最可靠切 lang 路径)──
+  // Google Translate widget 一旦初始化,运行时切 lang 不可靠(单语言 includedLanguages
+  // 没 select / 多语言 select 切了 cookie 也不刷新)。最稳做法 reload 当前 URL 让翻译
+  // 流程从头跑(driver 在 did-finish-load 重新 inject)。
+  const isFirstLangRef = useRef(true);
   useEffect(() => {
     const td = translateDriverRef.current;
     const wv = webviewRef.current;
-    if (!td || !wv || !domReadyRef.current) return;
+    if (!td) return;
     td.setTargetLang(targetLang);
-    td.inject(wv)
-      .then(() => {
-        // 1.5s 后读 webview 内的 __krigSwitchLog 看切 lang 路径走到哪步
-        setTimeout(() => {
-          wv.executeJavaScript(`
-            (function() {
-              return JSON.stringify({
-                switchLog: window.__krigSwitchLog || [],
-                currentLang: window.__krigCurrentLang,
-                cookie: (document.cookie.match(/googtrans=[^;]*/) || ['none'])[0],
-                selValue: (function() {
-                  var s = document.querySelector('#google_translate_element select');
-                  return s ? s.value : null;
-                })(),
-              });
-            })();
-          `).then((r) => console.log('[translate-view] 切 lang ' + targetLang + ' 1.5s 后:', r));
-        }, 1500);
-      })
-      .catch(() => {});
+    if (isFirstLangRef.current) {
+      // 首次 mount 时(初始 zh-CN)不 reload — 让自然加载流程走
+      isFirstLangRef.current = false;
+      return;
+    }
+    if (!wv || !domReadyRef.current) return;
+    const url = wv.getURL();
+    if (!url || url === 'about:blank') return;
+    // 设时间窗,避免 reload 触发的 did-navigate 回发 NAVIGATE 给左栏
+    remoteNavUntilRef.current = Date.now() + 2000;
+    // reload 触发 did-finish-load → driver 用新 targetLang 重新 inject
+    wv.loadURL(url);
   }, [targetLang]);
 
   // ── webview ref callback ──
