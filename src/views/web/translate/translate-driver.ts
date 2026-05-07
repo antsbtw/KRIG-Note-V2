@@ -86,8 +86,11 @@ export class TranslateDriver {
     }
 
     // Step 3-5:顺序注入(fire-and-forget .then 链)
+    // 注意:用 /regex/g 全局替换 — String.replace(string, string) 只替换第一个匹配,
+    // 而 inject 文件里 __KRIG_TARGET_LANG__ 出现 2 处(注释+真实变量),只替换第一个会
+    // 导致真实变量保留占位符,Google Translate widget 用错误"语言"创建,翻译不生效
     const script = (googleTranslateInjectRaw as unknown as string).replace(
-      '__KRIG_TARGET_LANG__',
+      /__KRIG_TARGET_LANG__/g,
       this.targetLang,
     );
 

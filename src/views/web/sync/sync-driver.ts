@@ -198,7 +198,9 @@ export class SyncDriver {
 
   private injectSyncScript(): void {
     if (!this.webviewEl) return;
-    const script = (syncInjectRaw as unknown as string).replace('__KRIG_SIDE__', this.side);
+    // 注意:用 /regex/g 全局替换 — replace(string,string) 只替换第一个匹配,inject 文件
+    // 里 __KRIG_SIDE__ 出现 2 处(注释+真实变量),只替换第一个会让 sync 行为异常
+    const script = (syncInjectRaw as unknown as string).replace(/__KRIG_SIDE__/g, this.side);
     this.webviewEl.executeJavaScript(script).catch(() => {});
   }
 
