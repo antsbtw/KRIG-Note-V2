@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { WEBVIEW_PARTITION } from '@shared/constants/webview';
+import { WEBVIEW_TRANSLATE_PARTITION } from '@shared/constants/webview';
 import { SyncDriver, type WebviewElement } from '../sync/sync-driver';
 import { SYNC_ACTION, WEB_TRANSLATE_PROTOCOL } from '../sync/sync-protocol';
 import { slotBus } from '../slot-bus';
@@ -205,7 +205,7 @@ export function TranslateWebView() {
         const props = {
           ref: setupWebview,
           src: 'about:blank',
-          partition: WEBVIEW_PARTITION,
+          partition: WEBVIEW_TRANSLATE_PARTITION,
           allowpopups: 'true',
           disablewebsecurity: 'true',
           className: 'krig-translate-web-view__webview',
