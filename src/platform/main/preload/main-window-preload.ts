@@ -60,4 +60,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   async translateFetchElementJs(): Promise<string | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.WEB_TRANSLATE_FETCH_ELEMENT_JS);
   },
+
+  /** L5-B4.2.2:重启 app(切翻译语言后让 widget 用新 lang 重新初始化)*/
+  restartApp(): void {
+    ipcRenderer.send(IPC_CHANNELS.APP_RESTART);
+  },
 });
