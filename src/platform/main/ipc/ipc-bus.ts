@@ -8,10 +8,12 @@ import { registerHealthCheckHandlers } from './health-check';
 import { registerDiagnosticsHandlers } from './diagnostics-handler';
 import { registerShellHandlers } from './shell-handler';
 import { registerWebTranslateHandlers } from './web-translate-handler';
+import { registerAppHandlers } from './app-handler';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
   registerDiagnosticsHandlers();
   registerShellHandlers();
   registerWebTranslateHandlers();
+  registerAppHandlers();
 }

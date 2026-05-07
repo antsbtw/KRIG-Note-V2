@@ -32,6 +32,9 @@ export const IPC_CHANNELS = {
 
   // L5-B4.2:Google Translate element.js fetch(避 CSP block,main 进程取后注入)
   WEB_TRANSLATE_FETCH_ELEMENT_JS: 'web-translate.fetch-element-js',
+
+  // L5-B4.2.2:重启 app(切翻译语言后让 widget 用新 lang 重 init)
+  APP_RESTART: 'app.restart',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

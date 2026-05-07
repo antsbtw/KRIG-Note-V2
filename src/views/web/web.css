@@ -26,6 +26,58 @@
   display: inline-flex;
 }
 
+/* L5-B4.2.2:切语言后 banner — 提示需重启 app */
+.krig-web-view__restart-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #4a3a1f;
+  border-bottom: 1px solid #5a4a2f;
+  color: #ffd180;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.krig-web-view__restart-msg {
+  flex: 1;
+}
+
+.krig-web-view__restart-msg strong {
+  color: #fff;
+}
+
+.krig-web-view__restart-btn {
+  background: #8ab4f8;
+  border: none;
+  color: #1e1e1e;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.krig-web-view__restart-btn:hover {
+  background: #aecbfa;
+}
+
+.krig-web-view__restart-dismiss {
+  background: transparent;
+  border: none;
+  color: #ffd180;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.krig-web-view__restart-dismiss:hover {
+  color: #fff;
+}
+
 /* ── WebToolbar ── */
 
 .krig-web-toolbar {
@@ -101,15 +153,86 @@
 }
 
 /*
- * L5-B4 占位:右侧 actions 区(对齐 V1 翻译 / 书签 / SlotToggle / × 位置)
- * 当前为空,固定最小宽度让右侧留白,未来填入按钮(L5-B4.x sub-stage)
+ * 右侧 actions 区(L5-B4.2 翻译按钮 + L5-B4.2.2 语言下拉)
  */
 .krig-web-toolbar__actions {
   display: flex;
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-  /* 占位最小宽度 — 留出 ~4 个按钮位置(每个 28px + gap)*/
   min-width: 120px;
   justify-content: flex-end;
+}
+
+/* 翻译按钮 + 箭头组合(共享同一容器,定位下拉菜单的 anchor)*/
+.krig-web-toolbar__translate-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.krig-web-toolbar__translate-btn {
+  /* 跟箭头无缝相连 — 右侧无 padding */
+  padding-right: 4px;
+  min-width: 24px;
+}
+
+.krig-web-toolbar__translate-caret {
+  /* 箭头小一点,贴翻译按钮右侧 */
+  font-size: 10px;
+  padding: 4px 6px;
+  min-width: 18px;
+  /* 跟右栏 slot × 关闭按钮拉开距离,避免误点 */
+  margin-right: 16px;
+}
+
+/* 语言下拉菜单(锚定 translate-group 右下角)*/
+.krig-web-toolbar__lang-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.krig-web-toolbar__lang-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: #e8eaed;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.krig-web-toolbar__lang-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.krig-web-toolbar__lang-item.active {
+  color: #8ab4f8;
+}
+
+.krig-web-toolbar__lang-check {
+  display: inline-block;
+  width: 12px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #8ab4f8;
+}
+
+.krig-web-toolbar__lang-label {
+  flex: 1;
 }

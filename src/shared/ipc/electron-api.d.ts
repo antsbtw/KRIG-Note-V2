@@ -22,6 +22,8 @@ declare global {
       openPath(filePath: string): Promise<{ ok: boolean; reason?: string }>;
       /** L5-B4.2:fetch Google Translate element.js(main 取后注入 webview,避 CSP)*/
       translateFetchElementJs(): Promise<string | null>;
+      /** L5-B4.2.2:重启 app(切翻译语言后让 widget 用新 lang 重新初始化)*/
+      restartApp(): void;
     };
   }
 }
