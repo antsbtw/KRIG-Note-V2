@@ -12,7 +12,7 @@
  * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 3.2 + § 3.4。
  */
 
-import { Plugin, PluginKey } from 'prosemirror-state';
+import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { dnd } from '@capabilities/drag-and-drop';
 
@@ -106,23 +106,86 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       let currentBlockType = '';
       let isDragging = false;
 
+      // L5-B3.9:外层 wrapper 包两个按钮 + ⋮⋮(对齐 V1 +/⠿ 双按钮)
+      // - + 按钮在下方插入空 paragraph(text-block,attrs.level=null)
+      // - ⋮⋮ 按钮拖拽 / 点击弹 handle menu
       const dom = document.createElement('div');
       dom.className = HANDLE_CLASS;
       dom.contentEditable = 'false';
-      dom.draggable = true;
-      dom.textContent = '⋮⋮';
-      dom.title = '拖动以重排,点击打开菜单';
-      // position: absolute 锚 .krig-pm-host(view.dom 父容器) — V1 同款模式
-      // **关键**:用 opacity 控显隐而非 visibility — opacity:0 元素仍接事件,
-      // visibility:hidden 元素不接事件 → 不接事件就无法触发 handle mouseenter →
-      // 鼠标过渡到 handle 时无法 cancel hide,handle 永久消失。
       dom.style.cssText = `
         position: absolute;
         opacity: 0;
         pointer-events: auto;
         z-index: 10;
         transition: opacity 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 0;
       `;
+
+      // + 按钮(下方插入空 paragraph)
+      const addBtn = document.createElement('div');
+      addBtn.className = `${HANDLE_CLASS}__add`;
+      addBtn.contentEditable = 'false';
+      addBtn.textContent = '+';
+      addBtn.title = '在下方插入新段落';
+      addBtn.style.cssText = `
+        width: 22px; height: 22px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; color: #555; font-size: 18px; border-radius: 3px;
+        user-select: none;
+      `;
+      dom.appendChild(addBtn);
+
+      // ⋮⋮ 按钮(拖拽 + 点菜单)
+      const dragBtn = document.createElement('div');
+      dragBtn.className = `${HANDLE_CLASS}__drag`;
+      dragBtn.contentEditable = 'false';
+      dragBtn.draggable = true;
+      dragBtn.textContent = '⋮⋮';
+      dragBtn.title = '拖动以重排,点击打开菜单';
+      dragBtn.style.cssText = `
+        width: 22px; height: 22px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: grab; color: #555; font-size: 16px; border-radius: 3px;
+        user-select: none;
+      `;
+      dom.appendChild(dragBtn);
+
+      // hover 高亮
+      const onBtnEnter = (btn: HTMLElement) => () => {
+        btn.style.background = '#333';
+        btn.style.color = '#e8eaed';
+      };
+      const onBtnLeave = (btn: HTMLElement) => () => {
+        btn.style.background = 'transparent';
+        btn.style.color = '#555';
+      };
+      addBtn.addEventListener('mouseenter', onBtnEnter(addBtn));
+      addBtn.addEventListener('mouseleave', onBtnLeave(addBtn));
+      dragBtn.addEventListener('mouseenter', onBtnEnter(dragBtn));
+      dragBtn.addEventListener('mouseleave', onBtnLeave(dragBtn));
+
+      // + 按钮:在当前 block 之后插入空 text-block,光标进入
+      addBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (currentPos < 0) return;
+        const node = editorView.state.doc.nodeAt(currentPos);
+        if (!node) return;
+        const insertPos = currentPos + node.nodeSize;
+        const textBlockType = editorView.state.schema.nodes['text-block'];
+        if (!textBlockType) return;
+        const newBlock = textBlockType.create();
+        const tr = editorView.state.tr.insert(insertPos, newBlock);
+        try {
+          tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
+        } catch {
+          /* ignore — pos 计算可能边界 */
+        }
+        editorView.dispatch(tr);
+        editorView.focus();
+      });
       const hostContainer = editorView.dom.parentElement;
       if (hostContainer) {
         // 确保父容器是 stacking 锚点
@@ -135,16 +198,16 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         document.body.appendChild(dom);
       }
 
-      // ── handle 事件 ──
-      dom.addEventListener('click', (e) => {
+      // ── ⋮⋮ 按钮事件(L5-B3.9 — 从 dom 移到 dragBtn,因为 + 按钮也在 dom 内)──
+      dragBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (currentPos < 0) return;
-        const rect = dom.getBoundingClientRect();
+        const rect = dragBtn.getBoundingClientRect();
         handleMenuController.show(rect.right + 4, rect.top, viewId, currentBlockType, currentPos);
       });
 
-      dom.addEventListener('dragstart', (e) => {
+      dragBtn.addEventListener('dragstart', (e) => {
         if (!e.dataTransfer || currentPos < 0) return;
         isDragging = true;
         const node = editorView.state.doc.nodeAt(currentPos);
@@ -158,7 +221,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         handleMenuController.hide();
       });
 
-      dom.addEventListener('dragend', () => {
+      dragBtn.addEventListener('dragend', () => {
         isDragging = false;
         activeDrag = null;
         dnd.emit('dnd.completed', { source: null });
@@ -237,7 +300,8 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const hostRect = hostContainer?.getBoundingClientRect() ?? { top: 0, left: 0 };
 
         const HANDLE_HEIGHT = 22;
-        const HANDLE_WIDTH = 22;
+        // L5-B3.9:wrapper 含两个按钮(+ ⋮⋮),宽度 = 2 * 22 = 44
+        const HANDLE_WIDTH = 44;
         const PM_PADDING_LEFT = 48;
         // 垂直对齐:第一行文字基线中心
         const topAbs = blockRect.top + paddingTop + lineHeight / 2 - HANDLE_HEIGHT / 2;

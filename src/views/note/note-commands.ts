@@ -288,7 +288,42 @@ export function registerNoteCommands(): void {
   registerHandleTurn('note-view.handle-turn-callout', 'callout');
   registerHandleTurn('note-view.handle-turn-toggle', 'toggle-list');
 
+  // L5-B3.9:Copy(复制 block 文本到剪贴板)
   commandRegistry.register('note-view.handle-copy-block', () => {
+    const ctx = getHandlePos();
+    if (!ctx) return;
+    const text = textEditingDriverApi.getBlockTextAt(ctx.instanceId, ctx.pos);
+    if (text) {
+      void navigator.clipboard.writeText(text).catch(() => {
+        /* clipboard 失败静默 */
+      });
+    }
+    handleMenuController.hide();
+  });
+
+  // L5-B3.9:Copy Link(`krig://block/<noteId>/<anchor>` 写剪贴板)
+  // anchor 用 V1 同款规则:heading 用文本 / 普通 block 用 idx:preview
+  commandRegistry.register('note-view.handle-copy-block-link', () => {
+    const ctx = getHandlePos();
+    if (!ctx) return;
+    const anchor = textEditingDriverApi.getBlockAnchorAt(ctx.instanceId, ctx.pos);
+    if (!anchor) {
+      handleMenuController.hide();
+      return;
+    }
+    const ws = workspaceManager.get(ctx.instanceId);
+    const noteId = ws ? getNoteWsState(ws).activeNoteId : null;
+    if (!noteId) {
+      handleMenuController.hide();
+      return;
+    }
+    const link = `krig://block/${noteId}/${anchor}`;
+    void navigator.clipboard.writeText(link).catch(() => {});
+    handleMenuController.hide();
+  });
+
+  // L5-B3.9:Duplicate(在原 block 之后插入复本)— 复用既有 copyBlockAt
+  commandRegistry.register('note-view.handle-duplicate-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
     textEditingDriverApi.copyBlockAt(ctx.instanceId, ctx.pos);
@@ -312,30 +347,45 @@ export function registerNoteCommands(): void {
     return { instanceId: wsId, pos: result.pos };
   }
 
-  function registerCmTurn(commandId: string, target: TurnTarget): void {
-    commandRegistry.register(commandId, () => {
-      const ctx = getCmBlockPos();
-      if (!ctx) return;
-      textEditingDriverApi.turnIntoAt(ctx.instanceId, ctx.pos, target);
-      contextMenuController.hide();
-    });
-  }
-  registerCmTurn('note-view.cm-turn-paragraph', 'paragraph');
-  registerCmTurn('note-view.cm-turn-h1', 'h1');
-  registerCmTurn('note-view.cm-turn-h2', 'h2');
-  registerCmTurn('note-view.cm-turn-h3', 'h3');
-  registerCmTurn('note-view.cm-turn-bullet', 'bullet-list');
-  registerCmTurn('note-view.cm-turn-ordered', 'ordered-list');
-  registerCmTurn('note-view.cm-turn-task', 'task-list');
-  registerCmTurn('note-view.cm-turn-quote', 'blockquote');
-  registerCmTurn('note-view.cm-turn-code', 'code-block');
-  registerCmTurn('note-view.cm-turn-callout', 'callout');
-  registerCmTurn('note-view.cm-turn-toggle', 'toggle-list');
+  // L5-B3.9 重组:context menu 不再做 turnInto(归 handle 菜单),改 V1 标准的
+  // Cut / Copy / Paste / Select All / Delete / 移除 marks / 颜色 等。
+  // 部分高级项(移除 marks / 颜色面板)留 sub-stage 接 mark 分析 / popup,本阶段用占位。
+
+  // ── group: clipboard(Cut/Copy/Paste)— 走 document.execCommand 兼容 PM 默认 ──
+
+  commandRegistry.register('note-view.cm-cut', () => {
+    document.execCommand('cut');
+    contextMenuController.hide();
+  });
+  commandRegistry.register('note-view.cm-copy', () => {
+    document.execCommand('copy');
+    contextMenuController.hide();
+  });
+  commandRegistry.register('note-view.cm-paste', () => {
+    // execCommand('paste') 在 Electron renderer 大多数情况不可用(安全策略)
+    // 占位:后续 sub-stage 接 PM clipboardSerializer + handlePaste,先 noop
+    // 用户走 Cmd+V 默认行为(PM 自带)即可
+    contextMenuController.hide();
+  });
+  commandRegistry.register('note-view.cm-select-all', () => {
+    document.execCommand('selectAll');
+    contextMenuController.hide();
+  });
+
+  // ── group: block-actions(右键作用于光标当前 block)──
 
   commandRegistry.register('note-view.cm-delete-block', () => {
     const ctx = getCmBlockPos();
     if (!ctx) return;
     textEditingDriverApi.deleteBlockAt(ctx.instanceId, ctx.pos);
+    contextMenuController.hide();
+  });
+
+  // ── group: marks(占位 — 后续 sub-stage 接选区 mark 检测 + 移除)──
+
+  commandRegistry.register('note-view.cm-remove-marks', () => {
+    // 占位:对当前选区移除所有 marks(L5-B+ 实现)
+    console.warn('[note-view] cm-remove-marks: 占位,未实现');
     contextMenuController.hide();
   });
 }

@@ -302,3 +302,11 @@
 .krig-toolbar-item:hover {
   background-color: #2a2a2a;
 }
+
+/* L5-B3.9:菜单分组分隔符(handle / context menu)*/
+.krig-handle-menu-divider,
+.krig-context-menu-divider {
+  height: 1px;
+  background: #3a3a3a;
+  margin: 4px 0;
+}

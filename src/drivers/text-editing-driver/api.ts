@@ -264,6 +264,42 @@ export const textEditingDriverApi = {
     inst.view.focus();
   },
 
+  /**
+   * 拿 block 的 textContent(给 Copy 命令写剪贴板用)— L5-B3.9
+   */
+  getBlockTextAt(instanceId: string, pos: number): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(pos);
+    if (!node) return null;
+    return node.textContent;
+  },
+
+  /**
+   * 计算 block 的 anchor(给 Copy Link 命令构造 krig://block/<noteId>/<anchor>)— L5-B3.9
+   *
+   * 规则(对齐 V1):
+   * - heading(text-block attrs.level !== null)→ 用标题文本前 60 字 encodeURIComponent
+   * - 其他 block → `<idx>:<前 30 字 encodeURIComponent>`
+   *   idx 是该 block 在 doc 中的顺序索引(0-based,只数顶层 block)
+   */
+  getBlockAnchorAt(instanceId: string, pos: number): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(pos);
+    if (!node) return null;
+    const text = node.textContent.trim();
+    if (node.type.name === 'text-block' && node.attrs.level != null) {
+      return encodeURIComponent(text.slice(0, 60));
+    }
+    let idx = 0;
+    inst.view.state.doc.forEach((_n, offset, i) => {
+      if (offset === pos) idx = i;
+    });
+    const preview = text.slice(0, 30);
+    return `${idx}:${encodeURIComponent(preview)}`;
+  },
+
   /** 复制 block(在原 block 之后插入复本)*/
   copyBlockAt(instanceId: string, pos: number): void {
     const inst = instanceRegistry.get(instanceId);
