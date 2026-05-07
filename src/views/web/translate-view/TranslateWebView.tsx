@@ -143,6 +143,9 @@ export function TranslateWebView() {
     const handleDidNavigate = (e: Event) => {
       driver.reinject();
       const ev = e as Event & { url?: string };
+      const url = ev.url ?? wv.getURL();
+      // 忽略 about:blank(初始 src 加载,不应回发 NAVIGATE 把左栏冲掉)
+      if (!url || url === 'about:blank') return;
       if (Date.now() < remoteNavUntilRef.current) {
         // 时间窗内 — 对面触发,不回发
       } else {
@@ -150,7 +153,7 @@ export function TranslateWebView() {
         slotBus.sendFromSide('right', {
           protocol: WEB_TRANSLATE_PROTOCOL,
           action: SYNC_ACTION.NAVIGATE,
-          payload: { url: ev.url ?? wv.getURL() },
+          payload: { url },
         });
       }
     };

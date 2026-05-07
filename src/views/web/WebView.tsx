@@ -108,8 +108,10 @@ export function WebView({ workspaceId }: WebViewProps) {
         setDisplayUrl(newUrl);
         setCanGoBack(wv.canGoBack());
         setCanGoForward(wv.canGoForward());
-        // 持久化到 per-ws state
-        setWebUrl(workspaceId, newUrl);
+        // 持久化到 per-ws state(about:blank 不持久化,避免被 reset 状态覆盖)
+        if (newUrl && newUrl !== 'about:blank') {
+          setWebUrl(workspaceId, newUrl);
+        }
 
         // L5-B4.2:翻译模式下导航 → reinject sync 脚本 + 通知对面(防回环)
         const driver = syncDriverRef.current;
@@ -221,7 +223,9 @@ export function WebView({ workspaceId }: WebViewProps) {
         }
         case SYNC_ACTION.NAVIGATE: {
           const url = (msg.payload as { url: string }).url;
-          if (url && wv && domReadyRef.current) {
+          // 忽略 about:blank(右栏初始加载误发,会把左栏冲成空白)
+          if (!url || url === 'about:blank') break;
+          if (wv && domReadyRef.current) {
             remoteNavUntilRef.current = Date.now() + 2000;
             wv.loadURL(url);
           }
