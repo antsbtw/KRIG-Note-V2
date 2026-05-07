@@ -233,6 +233,14 @@ export function registerNoteCommands(): void {
   registerSlashTurn('note-view.slash-turn-callout', 'callout');
   registerSlashTurn('note-view.slash-turn-toggle', 'toggle-list');
 
+  // L5-B3.5:slash insert-image — 插入图片 block(placeholder 态)
+  // 跟 turn-* 不同:image 不能从段落 turn 出来(image 含 caption 内嵌结构),
+  // 用专门的 insert API
+  commandRegistry.register('note-view.slash-insert-image', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertImageAtSelection(instanceId);
+  }));
+
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();

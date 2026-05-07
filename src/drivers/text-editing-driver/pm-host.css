@@ -382,3 +382,154 @@
   outline: 1px dashed #6cb6ff;
   outline-offset: 2px;
 }
+
+/* L5-B3.5:image block(3 态:placeholder / 普通图 / SVG)*/
+
+.krig-pm-host .ProseMirror .krig-image-block {
+  display: block;
+  margin: 8px 0;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block[data-alignment="left"] {
+  text-align: left;
+}
+.krig-pm-host .ProseMirror .krig-image-block[data-alignment="center"] {
+  text-align: center;
+}
+.krig-pm-host .ProseMirror .krig-image-block[data-alignment="right"] {
+  text-align: right;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__wrapper {
+  display: inline-block;
+  position: relative;
+  min-width: 60px;
+  min-height: 60px;
+  max-width: 100%;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__img-area {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__img-area img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__svg-canvas {
+  display: inline-block;
+  max-width: 100%;
+}
+
+/* Resize handles */
+.krig-pm-host .ProseMirror .krig-image-block__resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 1;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 32px;
+  margin-top: -16px;
+  background: rgba(138, 180, 248, 0.6);
+  border-radius: 2px;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__resize-handle--left { left: -4px; }
+.krig-pm-host .ProseMirror .krig-image-block__resize-handle--left::after { left: 0; }
+.krig-pm-host .ProseMirror .krig-image-block__resize-handle--right { right: -4px; }
+.krig-pm-host .ProseMirror .krig-image-block__resize-handle--right::after { right: 0; }
+
+.krig-pm-host .ProseMirror .krig-image-block__img-area:hover .krig-image-block__resize-handle {
+  opacity: 1;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__img-area--resizing .krig-image-block__resize-handle {
+  opacity: 1;
+}
+
+/* Placeholder 态(无 src)*/
+.krig-pm-host .ProseMirror .krig-image-block__placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(138, 180, 248, 0.06);
+  border: 1px dashed rgba(138, 180, 248, 0.3);
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 14px;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__placeholder-icon {
+  font-size: 24px;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__placeholder-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__placeholder-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8eaed;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__placeholder-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__placeholder-input {
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+  width: 240px;
+}
+
+.krig-pm-host .ProseMirror .krig-image-block__placeholder-input:focus {
+  border-color: #8ab4f8;
+}
+
+/* Caption */
+.krig-pm-host .ProseMirror .krig-image-block__caption {
+  display: block;
+  margin-top: 4px;
+  text-align: inherit;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  min-height: 1.4em;
+}
+
+/* 选中态 */
+.krig-pm-host .ProseMirror .krig-image-block--selected .krig-image-block__img-area {
+  outline: 2px solid #8ab4f8;
+  outline-offset: 2px;
+  border-radius: 4px;
+}

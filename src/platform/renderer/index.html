@@ -2,7 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <!--
+      L5-B3.5 CSP 调整(image / SVG 加载):
+      - img-src:'self' / data:(fallback)/ media:(本地文件协议)/ https:(Embed link 外链)
+      - connect-src:'self' / media:(SVG 走 fetch/XHR 加载文本,需要明确允许 media://)
+        SVG block 走 DOM innerHTML 路径(替代 <img>),要求 fetch SVG 文本回来,
+        connect-src 默认 'self' 会拦,必须显式加 media:
+      其他(脚本/iframe)走严格策略,default-src 仍 'self'
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: media: https:; connect-src 'self' media: https:" />
     <title>KRIG Note</title>
   </head>
   <body>

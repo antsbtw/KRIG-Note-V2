@@ -59,8 +59,10 @@ export const PM_NODE_REGISTRY = {
   listItem: '✅',
   taskList: '✅',
   taskItem: '✅',
+  // L5-B3.5:image 已实现(NoteEditor schema 注册 imageSpec,md-to-pm 输出的
+  //   `{ type: 'image', src: 'media://...', alt }` 直接渲染,无需走 unknown 占位)
+  image: '✅',
   // block — 未实现(L5-B4.3 闭环测试会触发,反向驱动补齐)
-  image: '❌',
   mathBlock: '❌',
   fileBlock: '❌',
   externalRef: '❌',
@@ -181,9 +183,12 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       const rawSrc = imgMatch[2];
       const resolved = await resolvePMImageSrc(rawSrc);
       if (resolved.ok && resolved.url) {
+        // image schema content='text-block':必须含一个 caption(可空段落)
+        // alt 默认不当 caption(用户可能想自己写),空 caption 让用户后续编辑
         content.push({
           type: 'image',
           attrs: { src: resolved.url, alt },
+          content: [{ type: 'text-block' }],
         });
       } else {
         content.push(

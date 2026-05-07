@@ -34,5 +34,8 @@ export function registerSlashMenu(): void {
       keywords: ['callout', 'tip', 'warning', 'note', 'admonition'], view: VIEW, order: 110 },
     { id: 'note-view.slash.toggle', label: 'Toggle List', command: 'note-view.slash-turn-toggle',
       keywords: ['toggle', 'fold', 'collapse', 'expand', 'detail'], view: VIEW, order: 120 },
+    // L5-B3.5:image(insert,不是 turn into)
+    { id: 'note-view.slash.image', label: 'Image', command: 'note-view.slash-insert-image',
+      keywords: ['image', 'picture', 'photo', 'img', '图片'], view: VIEW, order: 130 },
   ]);
 }
