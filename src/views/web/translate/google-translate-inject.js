@@ -4,54 +4,24 @@
 (function() {
   var TARGET_LANG = '__KRIG_TARGET_LANG__';
 
-  // Language changed on an already-injected page — switch via cookie + select
+  // 已注入页面 — Google Translate widget 运行时切 lang 不可靠(已知限制 L5-B4.2 v1)
+  // 用户切 lang 走 reload 路径(TranslateWebView 内 useEffect [targetLang]),
+  // reload 后页面是新文档,window 重置 → 走"首次注入"分支 → widget 用新 lang 创建
   if (window.__krigTranslateInjected) {
-    window.__krigSwitchLog = (window.__krigSwitchLog || []);
-    window.__krigSwitchLog.push('reinject for lang ' + TARGET_LANG + ' (was ' + window.__krigCurrentLang + ')');
-    if (window.__krigCurrentLang === TARGET_LANG) {
-      window.__krigSwitchLog.push('same lang,skip');
-      return;
-    }
+    if (window.__krigCurrentLang === TARGET_LANG) return;
     window.__krigCurrentLang = TARGET_LANG;
-
     document.cookie = 'googtrans=/auto/' + TARGET_LANG + '; path=/';
-
+    // 兜底:走原来切 select 路径(部分页面有效);完全不工作时由外层 reload 兜底
     var select = document.querySelector('#google_translate_element select');
-    window.__krigSwitchLog.push('select found: ' + !!select + ', options: ' + (select ? select.options.length : 0));
     if (select) {
       for (var i = 0; i < select.options.length; i++) {
         if (select.options[i].value === TARGET_LANG) {
           select.selectedIndex = i;
           select.dispatchEvent(new Event('change'));
-          window.__krigSwitchLog.push('select 切到 ' + TARGET_LANG + ' (idx ' + i + ') + dispatchChange');
           return;
         }
       }
-      window.__krigSwitchLog.push('select 没找到 ' + TARGET_LANG + ' option,fallback re-init widget');
     }
-
-    var el = document.getElementById('google_translate_element');
-    if (el) el.innerHTML = '';
-    new google.translate.TranslateElement({
-      pageLanguage: 'auto',
-      includedLanguages: 'zh-CN,ja,ko,en',
-      autoDisplay: false,
-      layout: google.translate.TranslateElement.InlineLayout.SIMPLE
-    }, 'google_translate_element');
-
-    setTimeout(function() {
-      var sel = document.querySelector('#google_translate_element select');
-      if (sel) {
-        for (var j = 0; j < sel.options.length; j++) {
-          if (sel.options[j].value === TARGET_LANG) {
-            sel.selectedIndex = j;
-            sel.dispatchEvent(new Event('change'));
-            window.__krigSwitchLog.push('500ms 后 re-init select 切到 ' + TARGET_LANG);
-            break;
-          }
-        }
-      }
-    }, 500);
     return;
   }
 
