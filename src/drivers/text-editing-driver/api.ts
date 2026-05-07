@@ -318,6 +318,13 @@ export const textEditingDriverApi = {
     if (!inst) return;
     const node = inst.view.state.doc.nodeAt(pos);
     if (!node) return;
+    // L5-B3.11:title 块(isTitle text-block)不删除,改成清空内容(保留空 title)
+    if (node.type.name === 'text-block' && node.attrs.isTitle) {
+      if (node.content.size === 0) return; // 已经空,不动
+      const tr = inst.view.state.tr.delete(pos + 1, pos + node.nodeSize - 1);
+      inst.view.dispatch(tr);
+      return;
+    }
     // doc 至少留一个 block(防 schema content: 'block+' 报错)
     if (inst.view.state.doc.childCount === 1) {
       // 改成空 paragraph 而非删除
@@ -415,6 +422,13 @@ export const textEditingDriverApi = {
     const schema = view.state.schema;
     const node = view.state.doc.nodeAt(pos);
     if (!node) return;
+
+    // L5-B3.11:title 块(isTitle text-block)不允许 turn into 任何类型
+    // 否则 title-guard appendTransaction 会自动补回 title,导致 doc 长出多余 block
+    if (node.type.name === 'text-block' && node.attrs.isTitle) {
+      console.warn('[text-editing-driver] turnIntoAt: 不能转换 note title 块');
+      return;
+    }
 
     // headings / paragraph — text-block attrs
     if (target === 'paragraph' || target === 'h1' || target === 'h2' || target === 'h3') {
