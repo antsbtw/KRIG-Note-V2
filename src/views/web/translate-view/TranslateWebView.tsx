@@ -37,6 +37,8 @@ export function TranslateWebView() {
   const remoteNavUntilRef = useRef(0);
   const initSentRef = useRef(false);
   const domReadyRef = useRef(false);
+  /** 对面 NAVIGATE 来得比 dom-ready 早时暂存 URL,ready 后执行 */
+  const pendingNavigateUrlRef = useRef<string | null>(null);
 
   const [targetLang, setTargetLang] = useState('zh-CN');
 
@@ -61,9 +63,13 @@ export function TranslateWebView() {
         }
         case SYNC_ACTION.NAVIGATE: {
           const url = (msg.payload as { url: string }).url;
-          if (url && webviewRef.current && domReadyRef.current) {
+          if (!url) break;
+          if (webviewRef.current && domReadyRef.current) {
             remoteNavUntilRef.current = Date.now() + 2000;
             webviewRef.current.loadURL(url);
+          } else {
+            // webview 还没 dom-ready,暂存 URL 等 ready 后由 handleDomReady 加载
+            pendingNavigateUrlRef.current = url;
           }
           break;
         }
@@ -98,6 +104,13 @@ export function TranslateWebView() {
 
     const handleDomReady = () => {
       domReadyRef.current = true;
+      // 处理 dom-ready 之前收到的 NAVIGATE(REQUEST_URL → 左侧 NAVIGATE 抢先到达)
+      const pending = pendingNavigateUrlRef.current;
+      if (pending) {
+        pendingNavigateUrlRef.current = null;
+        remoteNavUntilRef.current = Date.now() + 2000;
+        wv.loadURL(pending);
+      }
     };
 
     // did-finish-load:启动同步 + 异步注入翻译
