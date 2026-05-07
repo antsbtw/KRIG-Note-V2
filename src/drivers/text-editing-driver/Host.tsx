@@ -30,12 +30,15 @@ import { calloutSpec } from './blocks/callout/spec';
 import { toggleListSpec } from './blocks/toggle-list/spec';
 import { unknownSpec } from './blocks/unknown/spec';
 import { imageSpec } from './blocks/image/spec';
+import { mathBlockSpec } from './blocks/math-block/spec';
+import { mathInlineSpec } from './blocks/math-inline/spec';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
 // L5-B3.2:全部启用的 block 列表(textBlock + 6 新类 + 2 项 list-item/task-item)
 // L5-B3.3:+ hardBreak(inline)
 // L5-B4.3.1:+ unknown(schema 缺失节点占位 — md-to-pm 等转换层用)
 // L5-B3.5:+ image(图片 block,3 态:placeholder / 普通图 / SVG;mediaStore 集成)
+// L5-B3.6:+ mathBlock / mathInline(KaTeX 渲染,块级 + 行内 atom)
 const ENABLED_BLOCKS: BlockSpec[] = [
   textBlockSpec,
   listItemSpec,
@@ -51,6 +54,8 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   toggleListSpec,
   unknownSpec,
   imageSpec,
+  mathBlockSpec,
+  mathInlineSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

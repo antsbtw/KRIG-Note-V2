@@ -62,16 +62,17 @@ export const PM_NODE_REGISTRY = {
   // L5-B3.5:image 已实现(NoteEditor schema 注册 imageSpec,md-to-pm 输出的
   //   `{ type: 'image', src: 'media://...', alt }` 直接渲染,无需走 unknown 占位)
   image: '✅',
+  // L5-B3.6:mathBlock / mathInline 已实现(KaTeX 渲染,markdown $$...$$ / $...$
+  //   产出的节点直接渲染,反向驱动证明 — md-to-pm 主体不动)
+  mathBlock: '✅',
+  mathInline: '✅',
   // block — 未实现(L5-B4.3 闭环测试会触发,反向驱动补齐)
-  mathBlock: '❌',
   fileBlock: '❌',
   externalRef: '❌',
   table: '❌',
   tableRow: '❌',
   tableHeader: '❌',
   tableCell: '❌',
-  // inline — 未实现
-  mathInline: '❌',
 } as const;
 
 /**

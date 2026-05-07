@@ -37,5 +37,8 @@ export function registerSlashMenu(): void {
     // L5-B3.5:image(insert,不是 turn into)
     { id: 'note-view.slash.image', label: 'Image', command: 'note-view.slash-insert-image',
       keywords: ['image', 'picture', 'photo', 'img', '图片'], view: VIEW, order: 130 },
+    // L5-B3.6:Math Block(行内公式不在这里,在 floating toolbar)
+    { id: 'note-view.slash.math-block', label: 'Math Block', command: 'note-view.slash-insert-math-block',
+      keywords: ['math', 'latex', 'equation', 'formula', '公式'], view: VIEW, order: 140 },
   ]);
 }
