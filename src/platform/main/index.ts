@@ -18,12 +18,34 @@
  * 不是 app.setName()。dev 必须 patch Info.plist 才能改首项。
  */
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, protocol } from 'electron';
 import { createMainWindow } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { mediaStore } from './media/media-store-impl';
+
+// L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
+// - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
+// - secure: true       浏览器视为 secure context(允许 Service Worker / Subresource Integrity 等)
+// - supportFetchAPI:   ★ 关键 ★ 允许 fetch() / XMLHttpRequest 加载 media:// URL
+//                       否则 Chromium 报 "URL scheme \"media\" is not supported"(SVG block 必需)
+// - corsEnabled: true  允许跨 origin 加载(media:// 默认 origin 不同)
+// - bypassCSP:         renderer CSP 仍生效;靠 index.html meta 配置 img-src/connect-src 白名单
+//
+// 这一步早于 protocol.handle('media', ...)(在 mediaStore.registerProtocol 内)
+// 也早于 mainWindow 创建,跟 Electron 文档 protocol.registerSchemesAsPrivileged 要求一致
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 
 app.whenReady().then(async () => {
   // L0 — 平台层就绪
