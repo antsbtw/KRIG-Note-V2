@@ -128,16 +128,23 @@ export class TranslateDriver {
               (function() {
                 var sel = document.querySelector('#google_translate_element select');
                 var lang = window.__krigCurrentLang || null;
-                var hasGoog = typeof google !== 'undefined' && google.translate;
-                var bodyClass = document.body ? document.body.className : '';
+                var gt = typeof google !== 'undefined' && google.translate;
+                var hasTranslateElement = !!(gt && google.translate.TranslateElement);
+                var elDiv = document.getElementById('google_translate_element');
                 var hasTranslated = !!document.querySelector('font[style*="vertical-align"]');
                 return JSON.stringify({
                   hasSelect: !!sel,
                   selectValue: sel ? sel.value : null,
                   selectOptions: sel ? sel.options.length : 0,
                   krigLang: lang,
-                  hasGoogleTranslate: hasGoog,
-                  bodyClass: bodyClass,
+                  hasGoogleTranslate: !!gt,
+                  hasTranslateElementCtor: hasTranslateElement,
+                  initCalled: !!window.__krigInitCalled,
+                  initOK: !!window.__krigInitOK,
+                  initErr: window.__krigInitErr || null,
+                  divExists: !!elDiv,
+                  divChildren: elDiv ? elDiv.children.length : 0,
+                  cookieGoogtrans: (document.cookie.match(/googtrans=[^;]*/) || ['none'])[0],
                   hasTranslatedNodes: hasTranslated,
                 });
               })();

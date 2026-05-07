@@ -58,12 +58,18 @@
   document.body.appendChild(div);
 
   window.googleTranslateElementInit = function() {
-    new google.translate.TranslateElement({
-      pageLanguage: 'auto',
-      includedLanguages: TARGET_LANG,
-      autoDisplay: false,
-      layout: google.translate.TranslateElement.InlineLayout.SIMPLE
-    }, 'google_translate_element');
+    window.__krigInitCalled = true;
+    try {
+      new google.translate.TranslateElement({
+        pageLanguage: 'auto',
+        includedLanguages: TARGET_LANG,
+        autoDisplay: false,
+        layout: google.translate.TranslateElement.InlineLayout.SIMPLE
+      }, 'google_translate_element');
+      window.__krigInitOK = true;
+    } catch (e) {
+      window.__krigInitErr = String(e && e.message || e);
+    }
 
     setTimeout(function() {
       var select = document.querySelector('#google_translate_element select');
