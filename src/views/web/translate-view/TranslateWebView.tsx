@@ -78,9 +78,15 @@ export function TranslateWebView() {
     return () => unsub();
   }, []);
 
-  // ── lang 变更同步给 driver ──
+  // ── lang 变更:更新 driver + 重新注入(让 inject 脚本"已注入分支"切 lang)──
   useEffect(() => {
-    translateDriverRef.current?.setTargetLang(targetLang);
+    const td = translateDriverRef.current;
+    const wv = webviewRef.current;
+    if (!td || !wv || !domReadyRef.current) return;
+    td.setTargetLang(targetLang);
+    // 重新 inject,触发 inject 脚本头部的"language changed"分支:
+    // 写新 cookie + 重置 select 选中 + dispatchEvent('change') → widget 刷新翻译
+    td.inject(wv).catch(() => {});
   }, [targetLang]);
 
   // ── webview ref callback ──
