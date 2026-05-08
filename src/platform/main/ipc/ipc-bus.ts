@@ -10,6 +10,7 @@ import { registerShellHandlers } from './shell-handler';
 import { registerWebTranslateHandlers } from './web-translate-handler';
 import { registerAppHandlers } from './app-handler';
 import { registerMediaHandlers } from '../media/media-handlers';
+import { registerYtdlpHandlers } from '../ytdlp/handlers';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -18,4 +19,5 @@ export function initIpcBus(): void {
   registerWebTranslateHandlers();
   registerAppHandlers();
   registerMediaHandlers();
+  registerYtdlpHandlers();   // L5-B3.17:yt-dlp capability(check / install / download / info / saveSubtitle)
 }

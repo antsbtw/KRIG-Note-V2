@@ -43,6 +43,15 @@ export const IPC_CHANNELS = {
   MEDIA_DOWNLOAD: 'media.download',
   // L5-B3.14:media:// URL → 本地路径解析(file-block / file-link / external-ref 打开/Finder 显示用)
   MEDIA_RESOLVE_PATH: 'media.resolve-path',
+
+  // L5-B3.17:yt-dlp 能力(checkStatus / install / download / getInfo / saveSubtitle)
+  YTDLP_CHECK_STATUS: 'ytdlp.check-status',
+  YTDLP_INSTALL: 'ytdlp.install',
+  YTDLP_INSTALL_PROGRESS: 'ytdlp.install-progress',     // main → renderer 推送
+  YTDLP_DOWNLOAD: 'ytdlp.download',
+  YTDLP_DOWNLOAD_PROGRESS: 'ytdlp.download-progress',   // main → renderer 推送
+  YTDLP_GET_INFO: 'ytdlp.get-info',
+  YTDLP_SAVE_SUBTITLE: 'ytdlp.save-subtitle',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
