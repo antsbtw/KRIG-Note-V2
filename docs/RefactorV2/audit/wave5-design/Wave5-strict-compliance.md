@@ -5,7 +5,7 @@ ref:
   - docs/00-architecture/charter.md v0.4 § 1.1 / § 1.2 / § 1.3 / § 1.4
   - docs/RefactorV2/audit/2026-05-08-register-and-layer-audit.md
   - docs/RefactorV2/audit/wave4-design/W4.2-web-rendering-capability.md(过渡方案登记)
-status: design v4 — v4 加两条硬约束(业务路径必须 require / lint 规则 C1 同步落地)+ C1/C2 合并为原子 commit(lint 规则就位时所有违规消费者必须同步切完)
+status: design v5 — v5 复审采纳:eslint prosemirror-* 加 allowTypeImports: true / 严格态边界明确为"定义 A:View 边界"(B/C 留 follow-up)/ 收尾状态命名 "charter v0.4 工程可执行严格态(View 边界,间接路由)"
 risk: 高(R2 改动量与 W4.2 等量;view 直 import 清零涉及 20+ 处)
 trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条修订
 ---
@@ -36,10 +36,16 @@ trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条
 > 切实现 view 一行不改;但 view 仍主动通过 string id 查找,不算 charter line 88
 > "声明依赖 + 自动装配"的字面终态。这是 W5 的明确边界,不再夸大。
 >
-> **W5 完工后的状态命名**:**charter v0.4 工程可执行严格态(间接路由)**——
-> 这是工程层面能稳定落地、lint 可强制、覆盖审计 P1+P2 全部 finding 的合规水平,
-> 但仍未达到 charter line 88 字面终态(自动装配)。后者是 charter v0.5+ 范围。
-> 实施日志 / 收尾报告中均使用此命名,避免"严格遵守 charter"被读者误解为终态。
+> **W5 完工后的状态命名**(v5 钉死):**charter v0.4 工程可执行严格态(View 边界,间接路由)**
+>
+> "View 边界"明确范围:**view 端**0 处直 import capability/driver 运行时值。
+> driver / slot / frame-bindings / triggers 等仍可直 import capability 模块级单例
+> (charter line 88 主语是 View,不在禁列)。详见 audit § 5.2 "W5 严格态边界定义"
+> 把 A(View 边界,W5 选)/ B(全局注册式)/ C(模块级 export 删除)三种可能严格态
+> 区分,声明 W5 选 A,B/C 留 follow-up。
+>
+> 实施日志 / commit message / 收尾报告统一用此命名,避免"严格遵守 charter"被读者
+> 误解为终态。
 
 ## 0.1 硬约束(v4 新增)
 
@@ -462,16 +468,19 @@ W5 实施时 7 capability 全部要补 types.ts(若现有 index.ts 已 export ty
 | 功能回归 | 笔记编辑 / web 浏览 / 双栏翻译 / 媒体粘贴 / Cmd+K/[/] / 翻译注入 全部 OK | 手测 |
 | audit § 6 度量 | 完全合规(8/8 行通过 ✅)| 对照 audit 报告 |
 
-### 5.4 验收结论用词
+### 5.4 验收结论用词(v5 钉死)
 
-W5 完工后**只声称达到**:**charter v0.4 工程可执行严格态(间接路由)**
+W5 完工后**只声称达到**:**charter v0.4 工程可执行严格态(View 边界,间接路由)**
 
 - ✅ 工程可执行 — lint 强制、code review 可拦
-- ✅ 严格 — audit 报告 8 项 finding 全部 close
+- ✅ 严格 — audit 报告 P1+P2 全部 close,且复审 P1-A(prosemirror type import lint 矛盾)v5 已修
+- ✅ View 边界 — view 端 0 处直 import capability/driver 运行时值
 - ✅ 间接路由 — view 跟 capability 模块解耦,通过 string id 走 registry
-- ❌ **不声称**"达到 charter line 88 字面终态" — 自动装配(view 通过 React Context 注入 / 无主动检索)留 charter v0.5+
+- ❌ **不声称**"全局注册式访问"(定义 B)— driver/slot 直 import capability 模块级单例的现状保留
+- ❌ **不声称**"capability 模块级 export 删除"(定义 C)
+- ❌ **不声称**"达到 charter line 88 字面终态" — 自动装配留 charter v0.5+
 
-实施日志、commit message、收尾报告全部使用此命名约束,避免用户读到"严格遵守 charter"误解为终态。
+实施日志、commit message、收尾报告全部使用此命名约束。详见 audit § 5.2 "W5 严格态边界定义"对 A/B/C 三种严格态的区分。
 
 ---
 
