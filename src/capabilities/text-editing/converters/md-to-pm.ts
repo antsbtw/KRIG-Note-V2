@@ -27,7 +27,16 @@
  * 异步原因:base64 → mediaPutBase64 走 IPC。
  */
 
-import { mediaPutBase64 } from './media-store';
+// W5.3:md-to-pm 通过 capability registry 间接拿 media-storage(capability 间不直 import,
+// 同 view 端模式;运行时函数通过 string id 查 registry,charter § 1.2 注册原则路径)
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { MediaStorageApi } from '@capabilities/media-storage/types';
+
+function mediaPutBase64(
+  ...args: Parameters<MediaStorageApi['mediaPutBase64']>
+): ReturnType<MediaStorageApi['mediaPutBase64']> {
+  return requireCapabilityApi<MediaStorageApi>('media-storage').mediaPutBase64(...args);
+}
 
 interface PMNode {
   type: string;

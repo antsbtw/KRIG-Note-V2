@@ -155,9 +155,13 @@ export default [
           // 禁 workspace(per-ws 状态属 L3,capability 跨 workspace 复用,不该绑死)
           { group: ['@workspace/*'],
             message: 'capability 不依赖 workspace 状态;若需 per-ws 数据,由 view 注入(charter § 1.1)' },
-          // 禁 capability 间互拉(charter § 1.2:能力间不能互相 install)
+          // 禁 capability 间互拉运行时(charter § 1.2:能力间不能互相 install)
+          // allowTypeImports: true — 类型 import 放行(W5.3:capability 内部协作通过
+          // requireCapabilityApi 拿运行时,但类型仍需要从对方 types.ts 引)
           { group: ['@capabilities/*'],
-            message: 'capability 间不互相 import(charter § 1.2);若需协作,view 自己组合 install 列表' },
+            message: 'capability 间不直接 import 运行时(charter § 1.2);' +
+                     '运行时通过 requireCapabilityApi(id) 走 registry,类型 import 允许',
+            allowTypeImports: true },
           // 禁向上调用 view(charter § 1.1 单向调用)
           { group: ['@views/*'],
             message: 'capability 不向上调用 view(charter § 1.1 单向调用)' },
