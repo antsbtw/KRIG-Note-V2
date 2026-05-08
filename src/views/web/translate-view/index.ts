@@ -13,7 +13,8 @@ import './translate-view.css';
 registerView({
   id: 'web-translate-view',
   install: [
-    // 跟 web-view 同款:不挂 5 capability(纯 webview 嵌入,无 selection / clipboard / undo 等编辑能力)
+    // W4.2 C4:跟 web-view 同款,依赖 web-rendering capability
+    'web-rendering',
   ],
   component: TranslateWebView,
   // 不挂 navSideTab — 隐式 view,通过命令(WebToolbar 翻译按钮)触发 slotBinding.right
