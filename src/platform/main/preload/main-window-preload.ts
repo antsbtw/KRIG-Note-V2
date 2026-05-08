@@ -148,4 +148,44 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchTweetData(tweetUrl: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.TWEET_FETCH_DATA, tweetUrl);
   },
+
+  // ── L5-B3.20a:learning capability ──
+  learningVocabAdd(
+    word: string,
+    definition: string,
+    context?: string,
+    phonetic?: string,
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.LEARNING_VOCAB_ADD,
+      word,
+      definition,
+      context,
+      phonetic,
+    );
+  },
+  learningVocabRemove(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_VOCAB_REMOVE, id);
+  },
+  learningVocabList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_VOCAB_LIST);
+  },
+  learningVocabHas(word: string): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_VOCAB_HAS, word);
+  },
+  /** 订阅 vocab changed — 多订阅模式,对齐 onFullscreenChanged / onYtdlpInstallProgress */
+  onLearningVocabChanged(callback: (entries: unknown) => void): () => void {
+    const handler = (_event: unknown, entries: unknown): void => callback(entries);
+    ipcRenderer.on(IPC_CHANNELS.LEARNING_VOCAB_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.LEARNING_VOCAB_CHANGED, handler);
+  },
+  learningDictionaryLookup(word: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_LOOKUP, word);
+  },
+  learningTranslate(text: string, targetLang?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_TRANSLATE, text, targetLang);
+  },
+  learningTts(text: string, lang: string): Promise<ArrayBuffer | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_TTS, text, lang);
+  },
 });

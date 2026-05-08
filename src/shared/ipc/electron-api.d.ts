@@ -102,6 +102,60 @@ declare global {
         };
         error?: string;
       }>;
+
+      // ── L5-B3.20a:learning capability(vocab + dictionary + translate + TTS)──
+      /** 添加生词;失败返 null */
+      learningVocabAdd(
+        word: string,
+        definition: string,
+        context?: string,
+        phonetic?: string,
+      ): Promise<{
+        id: string;
+        word: string;
+        definition: string;
+        context?: string;
+        phonetic?: string;
+        createdAt: number;
+      } | null>;
+      /** 删除生词(by id)*/
+      learningVocabRemove(id: string): Promise<void>;
+      /** 全量列表(按 createdAt 倒序)*/
+      learningVocabList(): Promise<Array<{
+        id: string;
+        word: string;
+        definition: string;
+        context?: string;
+        phonetic?: string;
+        createdAt: number;
+      }>>;
+      /** 检查 word 是否已在生词本(case-insensitive)*/
+      learningVocabHas(word: string): Promise<boolean>;
+      /** 订阅 vocab 变化 — 返回 unsubscribe */
+      onLearningVocabChanged(
+        callback: (entries: Array<{
+          id: string;
+          word: string;
+          definition: string;
+          context?: string;
+          phonetic?: string;
+          createdAt: number;
+        }>) => void,
+      ): () => void;
+      /** 词典查询(macOS 优先 / Google fallback)*/
+      learningDictionaryLookup(word: string): Promise<{
+        word: string;
+        definition: string;
+        phonetic?: string;
+        source: string;
+      } | null>;
+      /** Google 翻译(targetLang 默认 'zh-CN')*/
+      learningTranslate(
+        text: string,
+        targetLang?: string,
+      ): Promise<{ text: string; sourceLang: string; targetLang: string } | null>;
+      /** Google TTS — 返 MP3 ArrayBuffer,view 用 Blob 创建 audio URL */
+      learningTts(text: string, lang: string): Promise<ArrayBuffer | null>;
     };
   }
 }
