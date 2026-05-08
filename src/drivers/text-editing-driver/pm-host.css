@@ -1444,6 +1444,50 @@
   min-height: 1.4em;
 }
 
+/* L5-B3.19.1:transcript 折叠区(direct + youtube 共用)*/
+.krig-pm-host .ProseMirror .krig-video-block__transcript {
+  margin-top: 8px;
+  border-top: 1px dashed #3a3a3a;
+  padding-top: 6px;
+}
+
+.krig-pm-host .ProseMirror .krig-video-block__transcript-toggle {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-video-block__transcript-toggle:hover {
+  color: #b8b8b8;
+}
+
+.krig-pm-host .ProseMirror .krig-video-block__transcript-area {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #d8d8d8;
+  font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 100px;
+  max-height: 400px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.krig-pm-host .ProseMirror .krig-video-block__transcript-area:focus {
+  border-color: #4d6fa3;
+}
+
 /* ─── L5-B3.18:tweetBlock(双 Tab + Fetch + Download)─── */
 
 .krig-pm-host .ProseMirror .krig-tweet-block {

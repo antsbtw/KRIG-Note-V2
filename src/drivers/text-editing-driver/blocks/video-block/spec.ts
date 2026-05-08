@@ -32,6 +32,10 @@ const videoBlockNodeSpec: NodeSpec = {
     title: { default: 'Video' },
     mimeType: { default: null },
     duration: { default: null },
+    // L5-B3.19.1:transcript 文本(`[MM:SS] text` / `[HH:MM:SS] text` 多行字符串)
+    // direct + youtube 两种播放态都支持用户编辑;cues 是 derived(parse 时缓存)
+    // 翻译产物预留 transcriptZh / transcriptJa 等多语言字段(B3.19.4 加,本段不做)
+    transcript: { default: '' },
     atomId: { default: null },       // KRIG 知识图谱挂钩(D 阶段)
   },
   parseDOM: [
@@ -46,6 +50,7 @@ const videoBlockNodeSpec: NodeSpec = {
           title: el.getAttribute('data-title') || 'Video',
           mimeType: el.getAttribute('data-mime') || null,
           duration: durStr ? Number(durStr) || null : null,
+          transcript: el.getAttribute('data-transcript') || '',
         };
       },
     },
@@ -57,6 +62,7 @@ const videoBlockNodeSpec: NodeSpec = {
     if (node.attrs.title) attrs['data-title'] = node.attrs.title as string;
     if (node.attrs.mimeType) attrs['data-mime'] = node.attrs.mimeType as string;
     if (node.attrs.duration != null) attrs['data-duration'] = String(node.attrs.duration);
+    if (node.attrs.transcript) attrs['data-transcript'] = node.attrs.transcript as string;
     return [
       'div',
       attrs,
