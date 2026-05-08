@@ -94,4 +94,5 @@ class SelectionCapability {
 export const selection = new SelectionCapability();
 
 // Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
-capabilityRegistry.register({ id: selection.id });
+// Wave 5:加 api 字段,让 view 通过 requireCapabilityApi/getCapabilityApi 间接拿
+capabilityRegistry.register({ id: selection.id, api: selection });

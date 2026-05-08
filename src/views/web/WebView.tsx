@@ -12,10 +12,11 @@
  * - ws 切换时重置 banner
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { WEBVIEW_PARTITION } from '@shared/constants/webview';
-import { Host, type HostHandle } from '@capabilities/web-rendering';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
 import { getWebWsState, setWebUrl, setWebTargetLang } from './data-model';
 import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
@@ -27,6 +28,11 @@ interface WebViewProps {
 }
 
 export function WebView({ workspaceId }: WebViewProps) {
+  // W5:间接路由拿 Host 组件(useMemo 缓存避免每次渲染重 require + 保持 React identity)
+  const Host = useMemo(
+    () => requireCapabilityApi<WebRenderingApi>('web-rendering').Host,
+    [],
+  );
   const hostRef = useRef<HostHandle | null>(null);
 
   // 订阅 per-ws state

@@ -103,4 +103,4 @@ class ClipboardCapability {
 export const clipboard = new ClipboardCapability();
 
 // Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
-capabilityRegistry.register({ id: clipboard.id });
+capabilityRegistry.register({ id: clipboard.id, api: clipboard });
