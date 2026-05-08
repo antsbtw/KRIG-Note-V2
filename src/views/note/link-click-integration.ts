@@ -16,9 +16,9 @@
 
 import { setLinkClickHandler } from '@drivers/text-editing-driver';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import { setActiveNote, getNoteWsState } from './data-model';
 import { noteStore } from './note-store';
-import { setWebUrl } from '@views/web/data-model';
 import {
   setCurrentNoteId,
   navigateToNote,
@@ -55,15 +55,6 @@ export function registerLinkClickIntegration(): void {
       return getNoteWsState(ws).activeNoteId;
     },
     /**
-     * L5-B4:点 http(s):// 链接 → 当前 ws 右栏开 web view + 设 url
-     *
-     * 路径:
-     * 1. setWebUrl(wsId, url):写 pluginStates['web'].currentUrl(WebView 订阅会刷新)
-     * 2. workspaceManager.update slotBinding.right = 'web-view':切右栏到 web view
-     *
-     * 跨 ws 跳转留 ActiveResourceManager 抽象后(同 onOpenNote 降级)
-     */
-    /**
      * L5-B3.12:noteLink NodeView 同步目标 title — driver 不直接 import note-store,
      * 通过 handler 反向取(返回 null = 目标已删除,NodeView 切"未找到"态)
      */
@@ -71,19 +62,12 @@ export function registerLinkClickIntegration(): void {
       const target = noteStore.get(noteId);
       return target ? target.title : null;
     },
+    /**
+     * L5-B4:点 http(s):// 链接 → 走命令路由,note 不直接 import @views/web
+     * (charter § 1.2 + audit Wave 3.2)
+     */
     onOpenWebUrl(url) {
-      const wsId = workspaceManager.getActiveId();
-      if (!wsId) return;
-      const ws = workspaceManager.get(wsId);
-      if (!ws) return;
-      // 1. 写 web view 的 currentUrl(per-ws 持久化)
-      setWebUrl(wsId, url);
-      // 2. 把右栏切到 web view(若已是 web-view 则 update 不会触发额外重渲)
-      if (ws.slotBinding.right !== 'web-view') {
-        workspaceManager.update(wsId, {
-          slotBinding: { ...ws.slotBinding, right: 'web-view' },
-        });
-      }
+      commandRegistry.execute('web-view.open-url', url);
     },
   });
 

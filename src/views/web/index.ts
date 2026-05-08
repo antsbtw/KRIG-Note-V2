@@ -8,6 +8,7 @@
 import { registerView } from '@slot/view-type-registry/register-view';
 import { WebView } from './WebView';
 import { registerWebContextMenu } from './context-menu-integration';
+import { registerWebCommands } from './web-commands';
 
 registerView({
   id: 'web-view',
@@ -19,4 +20,5 @@ registerView({
   navSideTab: { label: 'Web', icon: '🌐', order: 3 },
 });
 
+registerWebCommands();
 registerWebContextMenu();
