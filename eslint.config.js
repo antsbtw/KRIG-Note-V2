@@ -36,6 +36,10 @@ export default [
           { group: ['pdfjs-dist'], message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用' },
           { group: ['epubjs', 'foliate-js'], message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用' },
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
+          // Wave 2 新增 — audit P1-5:view 不直触 storage,走 capability(如 @capabilities/media-storage)
+          { group: ['@storage/*'], message: 'view 不直接 import @storage/*,走对应 capability(audit P1-5)' },
+          // Wave 2 新增 — audit P1-4:view 间不直连,跨 view 调用走 commandRegistry.execute
+          { group: ['@views/*'], message: 'view 间不直接 import,跨 view 调用走 commandRegistry.execute(audit P1-4)' },
         ],
       }],
     },
@@ -52,6 +56,8 @@ export default [
           { group: ['@drivers/*'], message: 'driver 之间零代码 import — 共享逻辑下沉 src/shared/ 或 bus channel' },
           // electron 仍受限
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
+          // Wave 2 新增 — audit P1-5:driver 不直触 storage,走对应 capability
+          { group: ['@storage/*'], message: 'driver 不直接 import @storage/*,走对应 capability(audit P1-5)' },
         ],
       }],
     },
@@ -101,7 +107,43 @@ export default [
     },
   },
 
-  // capabilities 是唯一允许业务 npm 的位置(无限制)
+  // 能力层(capabilities):charter § 1.1 单向调用
+  // - 唯一允许业务 npm 的位置(对外屏障已在 views/drivers/storage/shared 等块布防)
+  // - 禁反依赖 slot 视图层基础设施 + workspace per-ws 状态(audit P2-6 + Wave 3.3)
+  // - 禁互拉(charter § 1.2:能力间不能互相 install)
+  // - 禁 view / driver(向上调用)
+  //
+  // 例外:@slot/capability-registry / @slot/command-registry — charter § 1.2
+  // 注册原则要求 capability 自注册到 Registry 并暴露 commands,这是合理的向上调用。
+  {
+    files: ['src/capabilities/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          // 禁 slot 视图层基础设施(audit P2-6;capability-registry/command-registry 不在此列,见上)
+          { group: ['@slot/workspace-bus/*'],
+            message: 'capability 不依赖 workspace-bus,共享原语在 @shared/event-bus(audit P2-6 / Wave 3.3)' },
+          { group: ['@slot/triggers/*', '@slot/frame-bindings/*',
+                    '@slot/interaction-registries/*', '@slot/toolbar-registry/*',
+                    '@slot/nav-side-registry/*', '@slot/menu-registry/*',
+                    '@slot/view-type-registry/*', '@slot/diagnostics/*',
+                    '@slot/shared-ui/*'],
+            message: 'capability 不依赖 slot 视图层基础设施(charter § 1.1 单向调用)' },
+          // 禁 workspace(per-ws 状态属 L3,capability 跨 workspace 复用,不该绑死)
+          { group: ['@workspace/*'],
+            message: 'capability 不依赖 workspace 状态;若需 per-ws 数据,由 view 注入(charter § 1.1)' },
+          // 禁 capability 间互拉(charter § 1.2:能力间不能互相 install)
+          { group: ['@capabilities/*'],
+            message: 'capability 间不互相 import(charter § 1.2);若需协作,view 自己组合 install 列表' },
+          // 禁向上调用 view / driver
+          { group: ['@views/*'],
+            message: 'capability 不向上调用 view(charter § 1.1 单向调用)' },
+          { group: ['@drivers/*'],
+            message: 'capability 不向上调用 driver(charter § 1.1 单向调用;driver 反过来 import capability 是允许的)' },
+        ],
+      }],
+    },
+  },
 
   // 忽略文件
   {
