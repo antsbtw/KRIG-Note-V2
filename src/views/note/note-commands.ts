@@ -401,11 +401,15 @@ export function registerNoteCommands(): void {
     contextMenuController.hide();
   });
 
-  // L5-B3.15:右键移除选区 link mark(对应 has-link 条件项)
+  // L5-B3.15:右键移除链接(对应 has-link 条件项)
+  // UX 直觉:光标在 link 文字内(甚至无光标,只是右键到 link 上)就能移除,
+  //         不强迫用户先选中文字。用 contextMenu 的鼠标坐标定位 PM pos,
+  //         再扩展到完整 link 范围 + removeMark。
   commandRegistry.register('note-view.cm-remove-link', () => {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
-    textEditingDriverApi.removeLink(wsId);
+    const cm = contextMenuController.getState();
+    textEditingDriverApi.removeLinkAtClientPoint(wsId, cm.x, cm.y);
     contextMenuController.hide();
   });
 }

@@ -32,10 +32,20 @@ export function useContextMenuTrigger(
       const hasSelection = !!domSel && !domSel.isCollapsed;
       const isEditable = !!target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
-      // L5-B3.15:从 selection capability 读 activeMarks 判 hasLink
-      // (driver 在选区变化时已 emit;capability 缓存 last value,右键时同步读)
+      // L5-B3.15:hasLink 双重判定 — 用户在 link 内右键就该能"移除链接",
+      //   不应该强迫先选中文字。两条互补路径:
+      //
+      // (1) DOM 路径:右键 target 的祖先有 <a href> 元素(link mark 渲染)
+      //     — 光标在 link 文字内或贴在 link 边界都能命中,最可靠
+      // (2) selection 路径:driver emit 的 activeMarks 含 'link'
+      //     — 选区跨多个字符且至少一个位置覆盖 link 时命中(包含 collapsed 选区
+      //       时 driver 自己已用 $from.marks() 处理)
+      //
+      // 任一命中即 hasLink = true(对齐"光标在链接里就能移除"的 UX 直觉)
+      const inLinkDom = !!target?.closest('a[href]');
       const selPayload = selection.api.getCurrent();
-      const hasLink = !!selPayload?.activeMarks?.includes('link');
+      const inLinkSel = !!selPayload?.activeMarks?.includes('link');
+      const hasLink = inLinkDom || inLinkSel;
 
       const context: ContextInfo = {
         hasSelection,
