@@ -19,9 +19,11 @@
         需 frame-src 显式允许 youtube.com(default-src 'self' 会拦)
       L5-B3.18 tweet-block:tweetBlock iframe 走 https://platform.twitter.com/embed/Tweet.html,
         需 frame-src 加 platform.twitter.com 白名单(同上,default-src 'self' 会拦)
+      L5-B3.20a learning TTS:learningTts 返 ArrayBuffer,renderer 用 Blob +
+        URL.createObjectURL(blob) 喂给 <audio>,产生 blob: URL,需 media-src 加 blob:
       其他(脚本)走严格策略,default-src 仍 'self'
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: media: https:; media-src 'self' data: media: https:; connect-src 'self' media: https:; font-src 'self' data:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: media: https:; media-src 'self' data: media: https: blob:; connect-src 'self' media: https:; font-src 'self' data:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com" />
     <title>KRIG Note</title>
   </head>
   <body>
