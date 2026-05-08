@@ -44,6 +44,9 @@ const tweetBlockNodeSpec: NodeSpec = {
     inReplyTo: { default: null },
     // UI 状态(持久化让用户切回笔记保留 Tab 选择)
     activeTab: { default: 'browse' }, // 'browse' | 'data'
+    // L5-B3.18 用户红线:下载视频本地路径持久化(切回笔记仍可点 📁 Finder 高亮)
+    // null = 未下载;有值 = 完成下载,Download 按钮显 📁
+    downloadedVideoPath: { default: null },
     // KRIG 知识图谱挂钩(留 null,Phase D 接入)
     atomId: { default: null },
   },
@@ -60,6 +63,7 @@ const tweetBlockNodeSpec: NodeSpec = {
           text: el.getAttribute('data-text') || '',
           createdAt: el.getAttribute('data-created-at') || '',
           activeTab: el.getAttribute('data-active-tab') || 'browse',
+          downloadedVideoPath: el.getAttribute('data-downloaded-video-path') || null,
         };
       },
     },
@@ -73,6 +77,9 @@ const tweetBlockNodeSpec: NodeSpec = {
     if (node.attrs.text) attrs['data-text'] = node.attrs.text as string;
     if (node.attrs.createdAt) attrs['data-created-at'] = node.attrs.createdAt as string;
     if (node.attrs.activeTab) attrs['data-active-tab'] = node.attrs.activeTab as string;
+    if (node.attrs.downloadedVideoPath) {
+      attrs['data-downloaded-video-path'] = node.attrs.downloadedVideoPath as string;
+    }
     return [
       'div',
       attrs,

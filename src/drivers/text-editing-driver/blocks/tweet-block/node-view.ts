@@ -168,19 +168,49 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     spacer.style.flex = '1';
     tabBar.appendChild(spacer);
 
-    // ⬇️ Download(走 ytdlp capability)
+    // Download / Show in Finder 按钮(走 ytdlp + showItemInFolder capability)
+    //
+    // 状态机(L5-B3.18 用户红线 — 用户找得到下载文件):
+    //   未下载(downloadedVideoPath = null):⬇️  → 点击触发下载 → 下载中 ⏳ →
+    //   完成后 attrs 写入 downloadedVideoPath → 切 📁 状态(常驻可点)
+    //   📁 状态:点击调 electronAPI.showItemInFolder 在 Finder 高亮文件
+    //   下载失败:❌ 2s → 回 ⬇️
+    //   yt-dlp 未装:首次点 ⬇️ 触发 install,装完按钮回 ⬇️,用户再点真下载
     const dlBtn = document.createElement('button');
     dlBtn.type = 'button';
     dlBtn.className = 'krig-tweet-block__action-btn';
-    dlBtn.textContent = '⬇️';
-    dlBtn.title = 'Download video';
+    const initialDownloaded = (n.attrs.downloadedVideoPath as string | null) || null;
+    if (initialDownloaded) {
+      dlBtn.textContent = '📁';
+      dlBtn.title = `Show in Finder: ${initialDownloaded}`;
+    } else {
+      dlBtn.textContent = '⬇️';
+      dlBtn.title = 'Download video';
+    }
     let dlBusy = false;
     dlBtn.addEventListener('mousedown', async (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (dlBusy) return;
+
+      // ── 已下载态:点击 → Finder 高亮文件 ──
+      const downloadedPath = (node.attrs.downloadedVideoPath as string | null) || null;
+      if (downloadedPath) {
+        try {
+          const result = await window.electronAPI?.showItemInFolder?.(downloadedPath);
+          if (!result?.ok) {
+            // 文件可能被用户删了 / 移动了 — 清掉持久化路径,回 ⬇️ 态让用户重下
+            console.warn('[tweetBlock] showItemInFolder failed:', result?.reason);
+            updateAttrs({ downloadedVideoPath: null });
+          }
+        } catch (err) {
+          console.warn('[tweetBlock] showItemInFolder threw:', err);
+        }
+        return;
+      }
+
+      // ── 未下载态:走原下载流程 ──
       dlBusy = true;
-      const originalText = dlBtn.textContent;
       try {
         // 1. 检查 yt-dlp 是否装好
         const status = await ytdlpCheckStatus();
@@ -192,11 +222,14 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
           if (!r.installed) {
             dlBtn.textContent = '❌';
             setTimeout(() => {
-              dlBtn.textContent = originalText;
+              if (!dlBtn.isConnected) return;
+              dlBtn.textContent = '⬇️';
+              dlBtn.title = 'Download video';
               dlBtn.disabled = false;
             }, 2000);
           } else {
-            dlBtn.textContent = originalText;
+            dlBtn.textContent = '⬇️';
+            dlBtn.title = 'Download video';
             dlBtn.disabled = false;
           }
           return;
@@ -206,21 +239,27 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         dlBtn.textContent = '⏳';
         dlBtn.disabled = true;
         const result = await ytdlpDownload(tweetUrl);
-        if (result.status === 'complete') {
-          dlBtn.textContent = '✅';
+        if (view.isDestroyed) return;
+        if (result.status === 'complete' && result.filename) {
+          // 持久化下载路径 — 切 📁 态由 update() 路径自然渲染(attrs 变会触发 paint)
+          updateAttrs({ downloadedVideoPath: result.filename });
         } else {
           dlBtn.textContent = '❌';
-        }
-        setTimeout(() => {
-          dlBtn.textContent = originalText;
           dlBtn.disabled = false;
-        }, 2000);
+          setTimeout(() => {
+            if (!dlBtn.isConnected) return;
+            dlBtn.textContent = '⬇️';
+            dlBtn.title = 'Download video';
+          }, 2000);
+        }
       } catch (err) {
         console.warn('[tweetBlock] download failed:', err);
         dlBtn.textContent = '❌';
+        dlBtn.disabled = false;
         setTimeout(() => {
-          dlBtn.textContent = originalText;
-          dlBtn.disabled = false;
+          if (!dlBtn.isConnected) return;
+          dlBtn.textContent = '⬇️';
+          dlBtn.title = 'Download video';
         }, 2000);
       } finally {
         dlBusy = false;
@@ -371,17 +410,19 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       const oldAuthor = node.attrs.authorName;
       const oldText = node.attrs.text;
       const oldTab = node.attrs.activeTab;
+      const oldDownloaded = node.attrs.downloadedVideoPath;
       node = updated;
-      // 整体重渲条件:placeholder ↔ embed 切换 / Fetch 完成数据回填 / Tab 切
-      // (粒度优化留 Phase D,本阶段简化)
+      // 整体重渲条件:placeholder ↔ embed 切换 / Fetch 完成数据回填 / Tab 切 /
+      //                Download 完成态切换(⬇️ ↔ 📁,L5-B3.18 用户红线)
       if (hadUrl !== hasUrl) {
         paint(node);
       } else if (hasUrl) {
-        // 有 url 状态下:数据回填 / Tab 切都重渲
+        // 有 url 状态下:数据回填 / Tab 切 / Download 状态切都重渲
         if (
           oldAuthor !== updated.attrs.authorName ||
           oldText !== updated.attrs.text ||
-          oldTab !== updated.attrs.activeTab
+          oldTab !== updated.attrs.activeTab ||
+          oldDownloaded !== updated.attrs.downloadedVideoPath
         ) {
           paint(node);
         }
