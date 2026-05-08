@@ -107,8 +107,8 @@ export function TranslateWebView({ workspaceId }: TranslateWebViewProps) {
     const td = new TranslateDriver(initialTargetLangRef.current);
     translateDriverRef.current = td;
 
-    // 创建 SyncDriver(右侧角色)
-    const driver = new SyncDriver('right', undefined, () => td.injecting);
+    // 创建 SyncDriver(右侧角色;W4.2 C1:bus 接口注入)
+    const driver = new SyncDriver('right', slotBus, undefined, () => td.injecting);
     driver.bind(wv);
     syncDriverRef.current = driver;
 
