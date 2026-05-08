@@ -68,4 +68,4 @@ class DndCapability {
 export const dnd = new DndCapability();
 
 // Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
-capabilityRegistry.register({ id: dnd.id });
+capabilityRegistry.register({ id: dnd.id, api: dnd });

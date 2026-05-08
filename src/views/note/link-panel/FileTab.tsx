@@ -15,7 +15,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { mediaPutBase64 } from '@capabilities/media-storage';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { MediaStorageApi } from '@capabilities/media-storage/types';
 
 interface FileTabProps {
   onApply: (href: string) => void;
@@ -78,11 +79,12 @@ export function FileTab({ onApply, onClose }: FileTabProps) {
       return;
     }
 
-    // import 模式
+    // import 模式(W5:走 capability api 间接路由)
     setImporting(true);
     try {
       const dataUrl = await readFileAsDataUrl(pickedFile);
-      const r = await mediaPutBase64(
+      const mediaApi = requireCapabilityApi<MediaStorageApi>('media-storage');
+      const r = await mediaApi.mediaPutBase64(
         dataUrl,
         pickedFile.type || 'application/octet-stream',
         pickedFile.name,

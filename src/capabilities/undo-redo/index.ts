@@ -95,4 +95,4 @@ class UndoRedoCapability {
 export const undoRedo = new UndoRedoCapability();
 
 // Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
-capabilityRegistry.register({ id: undoRedo.id });
+capabilityRegistry.register({ id: undoRedo.id, api: undoRedo });

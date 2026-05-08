@@ -92,4 +92,8 @@ export async function mediaResolvePath(mediaUrl: string): Promise<string | null>
 }
 
 // Wave 1 模式:注册到 Registry,让 install 可校验(charter § 1.2)
-capabilityRegistry.register({ id: 'media-storage' });
+// Wave 5:加 api 字段(MediaStorageApi 形态),view 通过 requireCapabilityApi 间接拿
+capabilityRegistry.register({
+  id: 'media-storage',
+  api: { mediaPutBase64, mediaDownload, mediaResolvePath },
+});

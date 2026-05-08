@@ -40,6 +40,12 @@ export default [
           { group: ['@storage/*'], message: 'view 不直接 import @storage/*,走对应 capability(audit P1-5)' },
           // Wave 2 新增 — audit P1-4:view 间不直连,跨 view 调用走 commandRegistry.execute
           { group: ['@views/*'], message: 'view 间不直接 import,跨 view 调用走 commandRegistry.execute(audit P1-4)' },
+          // Wave 5 新增 — audit P1-A:view 不直 import capability 运行时值,走 requireCapabilityApi(id) 间接路由
+          // allowTypeImports: true — 类型 import 允许(如 import type { XApi } from '@capabilities/<id>/types')
+          { group: ['@capabilities/*'],
+            message: 'view 不直接 import capability 运行时值,走 requireCapabilityApi(id) 间接路由;' +
+                     '类型走 import type from @capabilities/<id>/types(W5 设计 § 5)',
+            allowTypeImports: true },
         ],
       }],
     },

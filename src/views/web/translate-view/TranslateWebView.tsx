@@ -15,10 +15,11 @@
  *     mount 时锁定 lang,后续 wsTargetLang 变化不重 inject。
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { WEBVIEW_TRANSLATE_PARTITION } from '@shared/constants/webview';
-import { TranslateHost } from '@capabilities/web-rendering';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { WebRenderingApi } from '@capabilities/web-rendering/types';
 import { getWebWsState, setWebTargetLang } from '../data-model';
 import { getDefaultTargetLang, getLangLabel, LANG_OPTIONS } from './lang-defaults';
 
@@ -27,6 +28,12 @@ interface TranslateWebViewProps {
 }
 
 export function TranslateWebView({ workspaceId }: TranslateWebViewProps) {
+  // W5:间接路由拿 TranslateHost 组件(useMemo 缓存)
+  const TranslateHost = useMemo(
+    () => requireCapabilityApi<WebRenderingApi>('web-rendering').TranslateHost,
+    [],
+  );
+
   // 从 per-ws state 取 targetLang(显示用 + 切语言时写)
   const wsTargetLang = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),

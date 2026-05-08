@@ -98,4 +98,4 @@ class InsertionCapability {
 export const insertion = new InsertionCapability();
 
 // Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
-capabilityRegistry.register({ id: insertion.id });
+capabilityRegistry.register({ id: insertion.id, api: insertion });

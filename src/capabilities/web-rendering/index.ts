@@ -21,7 +21,10 @@
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
+import { Host } from './Host';
+import { TranslateHost } from './translate-host';
 
+// 模块级 export 保留(driver 内部 / 未来 capability 内部消费者用;W5 view 不再走此路径)
 export { Host } from './Host';
 export type { HostProps } from './Host';
 export { TranslateHost } from './translate-host';
@@ -29,4 +32,8 @@ export type { TranslateHostProps } from './translate-host';
 export type { HostHandle, WebContextMenuPayload, WebviewElement } from './webview-types';
 
 // 对齐 Wave 1 模式:capability 自注册到 Registry,让 install 校验可见(charter § 1.2)
-capabilityRegistry.register({ id: 'web-rendering' });
+// Wave 5:加 api 字段(WebRenderingApi 形态),view 通过 requireCapabilityApi 间接拿
+capabilityRegistry.register({
+  id: 'web-rendering',
+  api: { Host, TranslateHost },
+});

@@ -19,6 +19,17 @@ import { reportL5Alive } from '@views/L5-alive';
 import { reportInstallCoverage } from '@slot/diagnostics/install-coverage';
 import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
+// W5:capability 显式 side-effect import — 触发各 capability 的
+// capabilityRegistry.register 副作用(原本由 L5-alive 直 import 触发,L5-alive
+// 改 getCapabilityApi 后 import 链断,需要在 renderer 显式拉)
+import '@capabilities/selection';
+import '@capabilities/clipboard';
+import '@capabilities/undo-redo';
+import '@capabilities/drag-and-drop';
+import '@capabilities/insertion';
+import '@capabilities/media-storage';
+import '@capabilities/web-rendering';
+
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
