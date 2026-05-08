@@ -6,8 +6,8 @@
  * L5-A:safeguard 注册表 + safeInsert 协议守卫包装(driver 占位 noop safeguard)。
  */
 
-import { ChannelHub } from '@slot/workspace-bus/channel';
-import { fail, type Result } from '@slot/workspace-bus/bus-types';
+import { ChannelHub } from '@shared/event-bus/channel';
+import { fail, type Result } from '@shared/event-bus/result';
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export interface SafeguardRegistration {

@@ -6,7 +6,7 @@
  * L5-A:serializer 注册表 + paste handler 注册表 + channel(无 set/do API)
  */
 
-import { ChannelHub } from '@slot/workspace-bus/channel';
+import { ChannelHub } from '@shared/event-bus/channel';
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export type ClipboardFormat = 'pm-json' | 'markdown' | 'html' | 'plain' | string;

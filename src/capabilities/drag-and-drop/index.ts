@@ -6,7 +6,7 @@
  * L5-A:dropTarget 注册表骨架 + channel(没有真实拖动,driver 占位)。
  */
 
-import { ChannelHub } from '@slot/workspace-bus/channel';
+import { ChannelHub } from '@shared/event-bus/channel';
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export interface DropTargetRegistration {
