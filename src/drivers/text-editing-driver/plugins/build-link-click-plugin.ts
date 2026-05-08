@@ -17,7 +17,7 @@
 
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { mediaResolvePath } from '@storage/media-store';
+import { mediaResolvePath } from '@capabilities/media-storage';
 
 // 注:window.electronAPI 类型在 src/shared/ipc/electron-api.d.ts 全局声明
 

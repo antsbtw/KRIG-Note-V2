@@ -15,7 +15,7 @@
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { mediaPutBase64, mediaDownload } from '@storage/media-store';
+import { mediaPutBase64, mediaDownload } from '@capabilities/media-storage';
 
 export const audioBlockNodeView: NodeViewConstructor = (initialNode, view, getPos) => {
   let node = initialNode;

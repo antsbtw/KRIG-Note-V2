@@ -16,7 +16,7 @@
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
-import { mediaPutBase64 } from '@storage/media-store';
+import { mediaPutBase64 } from '@capabilities/media-storage';
 import {
   isSvgSrc,
   loadSvgContent,

@@ -13,7 +13,7 @@
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { mediaPutBase64, mediaResolvePath } from '@storage/media-store';
+import { mediaPutBase64, mediaResolvePath } from '@capabilities/media-storage';
 
 function iconForMime(mime: string): string {
   if (!mime) return '📎';
