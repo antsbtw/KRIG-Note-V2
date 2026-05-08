@@ -23,14 +23,13 @@ import { registerNoteLinkSearchIntegration } from './note-link-search/integratio
 registerView({
   id: 'note-view',
   install: [
-    // 5 通用 capability
+    // W5 严格收尾:install 严格 capability-only(0 driver id)
     'selection',
     'clipboard',
     'undo-redo',
     'drag-and-drop',
     'insertion',
-    // driver(必经,Q-N1=B 显式声明)
-    'text-editing-driver',
+    'text-editing',   // W5 C4:driver 改 capability,view 通过 capability api 间接路由
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },

@@ -46,6 +46,12 @@ export default [
             message: 'view 不直接 import capability 运行时值,走 requireCapabilityApi(id) 间接路由;' +
                      '类型走 import type from @capabilities/<id>/types(W5 设计 § 5)',
             allowTypeImports: true },
+          // Wave 5 C4 新增 — driver 是 capability 内部实现,view 不可见,走 capability api
+          // allowTypeImports: true — view 仍可通过 import type 拿 driver 类型(经 capability/types.ts 中转)
+          { group: ['@drivers/*'],
+            message: 'view 不直接 import driver(driver 是 capability 内部实现);' +
+                     '走 requireCapabilityApi(id),类型走 import type from @capabilities/<id>/types(W5 C4)',
+            allowTypeImports: true },
         ],
       }],
     },

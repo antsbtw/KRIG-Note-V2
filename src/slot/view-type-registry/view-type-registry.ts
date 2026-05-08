@@ -14,7 +14,6 @@ import { slashRegistry } from '../interaction-registries/slash-registry/slash-re
 import { handleRegistry } from '../interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { capabilityRegistry } from '../capability-registry/capability-registry';
-import { KNOWN_DRIVER_IDS } from './known-driver-ids';
 import { keymapRegistry } from '../keymap-registry/keymap-registry';
 
 class ViewTypeRegistry {
@@ -45,16 +44,12 @@ class ViewTypeRegistry {
   /**
    * 校验 install 列表里每个 id 都已注册到 capabilityRegistry。
    *
-   * 已知 driver id(KNOWN_DRIVER_IDS)静默通过——V2 现状,留 Wave 2+ 整理。
-   * 真正缺失 → console.warn(不抛错,避免启动顺序敏感)。
-   *
-   * 与 install-coverage 聚合表共享同一份 driver 白名单,口径一致。
+   * W5 严格收尾:install 列表 0 driver id(KNOWN_DRIVER_IDS 整体淘汰),
+   * 缺失 → console.warn(不抛错,避免启动顺序敏感)。
    */
   private validateInstall(def: ViewDefinition): void {
     if (!def.install || def.install.length === 0) return;
-    const missing = def.install.filter(
-      (id) => !capabilityRegistry.has(id) && !KNOWN_DRIVER_IDS.has(id),
-    );
+    const missing = def.install.filter((id) => !capabilityRegistry.has(id));
     if (missing.length === 0) return;
     console.warn(
       `[L4] viewTypeRegistry: view '${def.id}' install ids 未在 capabilityRegistry 中: ${missing.join(', ')}\n` +

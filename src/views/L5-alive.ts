@@ -13,7 +13,7 @@ import type { ClipboardDiagnosticApi } from '@capabilities/clipboard/types';
 import type { UndoRedoDiagnosticApi } from '@capabilities/undo-redo/types';
 import type { DndDiagnosticApi } from '@capabilities/drag-and-drop/types';
 import type { InsertionDiagnosticApi } from '@capabilities/insertion/types';
-import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { noteStore } from './note/note-store';
 
 export function reportL5Alive(): void {
@@ -22,12 +22,14 @@ export function reportL5Alive(): void {
   const undoRedo = getCapabilityApi<UndoRedoDiagnosticApi>('undo-redo');
   const dnd = getCapabilityApi<DndDiagnosticApi>('drag-and-drop');
   const insertion = getCapabilityApi<InsertionDiagnosticApi>('insertion');
+  // text-editing 诊断:driver instance 计数(W5 C4 改走 capability,driver 不可见)
+  const textEditing = getCapabilityApi<TextEditingApi>('text-editing');
 
   window.electronAPI?.reportAlive({
     layer: 'L5',
     details: {
       'global-notes': noteStore.count,
-      'driver-instances': instanceRegistry.count,
+      'driver-instances': textEditing?.instanceRegistry.count ?? 0,
       'selection-sources': selection?.sourceCount ?? 0,
       'clipboard-serializers': clipboard?.serializerCount ?? 0,
       'undo-scopes': undoRedo?.scopeCount ?? 0,
