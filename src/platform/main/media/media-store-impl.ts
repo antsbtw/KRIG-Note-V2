@@ -314,3 +314,26 @@ class MediaStore {
 }
 
 export const mediaStore = new MediaStore();
+
+/**
+ * L5-B3.14:把 media:// URL 解析为本地文件系统绝对路径
+ *
+ * 用于 file-block / file-link / external-ref 的"打开"和"在 Finder 显示"路径
+ * (`shell.openPath` / `shell.showItemInFolder` 不接受 media:// 协议,需要本地路径)。
+ *
+ * 安全:防 ../../etc/passwd 越界 — path.resolve 后必须仍在 MEDIA_DIR 内。
+ */
+export function resolveMediaPath(mediaUrl: string): string | null {
+  if (typeof mediaUrl !== 'string' || !mediaUrl.startsWith('media://')) return null;
+  const urlPath = mediaUrl.replace('media://', '');
+  const candidate = path.resolve(MEDIA_DIR, urlPath);
+  // 越界白名单兜底:必须以 MEDIA_DIR + 分隔符 开头(防 sibling 路径如 .../media-evil)
+  if (!candidate.startsWith(MEDIA_DIR + path.sep) && candidate !== MEDIA_DIR) return null;
+  // 文件存在才返回
+  try {
+    if (!fs.existsSync(candidate)) return null;
+  } catch {
+    return null;
+  }
+  return candidate;
+}
