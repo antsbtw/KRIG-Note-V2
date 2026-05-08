@@ -4,7 +4,7 @@ date: 2026-05-08
 ref:
   - 起点:[2026-05-08-register-and-layer-audit.md](./2026-05-08-register-and-layer-audit.md)(Wave 0 评估)
   - 完成态:`charter v0.4 工程可执行严格态(View 边界,间接路由)`
-final_main_commit: 6474149
+final_main_commit: 312bece
 status: closed
 ---
 
@@ -93,8 +93,13 @@ status: closed
 | W5 设计 v2-v5 | review 多轮迭代 | 1(每次) | `dc2b46d` / `71d3054` / `46b44d2` / `6223656` |
 | W5 C1+C2 | capability api 字段 + helpers + 4 view 切 | 22 | `2dcfe01` |
 | W5 C4 + finalize | text-editing 拆 capability + 11 view 切 + 严格态钉死 | 21 + 4 | `6474149` |
+| W5.3 | storage 反向依赖清零 — md-to-pm 归位 capability + 删 storage 兜底 | 3 | `312bece` |
 
 总计:**40+ commit**,**100+ 文件改动**。
+
+W5.3 起源:W5 收尾报告写完后用户最终复审发现 storage/media-store.ts re-export
+导致 storage → capability 反向依赖(W3.1 遗留),走 charter § 1.1 字面违规。
+md-to-pm 归位 capability/text-editing/converters,storage 目录归零至 README only。
 
 ---
 
@@ -116,6 +121,7 @@ status: closed
 |---|---|---|---|
 | `grep -rn "from '@views/" src/views/`(view→view) | 1 处 | **0** | ✅ |
 | `grep -rn "from '@storage" src/views/ src/drivers/` | 8 处 | **0** | ✅ |
+| `grep -rn "from '@capabilities" src/storage/`(W5.3 修)| 1 处 re-export | **0**(目录仅剩 README)| ✅ |
 | `grep -rn "from '@slot/workspace-bus" src/capabilities/`(P2-6) | 5 处 | **0** | ✅ |
 | **`grep -rn "from '@capabilities/" src/views/`(运行时)** | 8 处 | **0** | ✅(W5 View 边界) |
 | **`grep -rn "from '@drivers/" src/views/`(运行时)** | 11 处 | **0** | ✅(W5 View 边界) |
