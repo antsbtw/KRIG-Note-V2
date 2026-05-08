@@ -135,11 +135,12 @@ export default [
           // 禁 capability 间互拉(charter § 1.2:能力间不能互相 install)
           { group: ['@capabilities/*'],
             message: 'capability 间不互相 import(charter § 1.2);若需协作,view 自己组合 install 列表' },
-          // 禁向上调用 view / driver
+          // 禁向上调用 view(charter § 1.1 单向调用)
           { group: ['@views/*'],
             message: 'capability 不向上调用 view(charter § 1.1 单向调用)' },
-          { group: ['@drivers/*'],
-            message: 'capability 不向上调用 driver(charter § 1.1 单向调用;driver 反过来 import capability 是允许的)' },
+          // 注:capability → driver 是允许的(charter § 1.3 表格:capability 是 driver 的
+          // 封装方 — 如 capability.text-editing 内部用 prosemirror-*;web-rendering capability
+          // 内部编排 web-sync-driver / web-translate-driver)。不在禁列。
         ],
       }],
     },
