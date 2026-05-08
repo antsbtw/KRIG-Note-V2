@@ -5,7 +5,7 @@ ref:
   - docs/00-architecture/charter.md v0.4 § 1.1 / § 1.2 / § 1.3 / § 1.4
   - docs/RefactorV2/audit/2026-05-08-register-and-layer-audit.md
   - docs/RefactorV2/audit/wave4-design/W4.2-web-rendering-capability.md(过渡方案登记)
-status: design v3 — v3 review 3 条采纳(C2/C3 用 require / C1 7 capability 笔误 / 顶部 + 验收明确"v0.4 工程可执行严格态"边界)
+status: design v4 — v4 加两条硬约束(业务路径必须 require / lint 规则 C1 同步落地)+ C1/C2 合并为原子 commit(lint 规则就位时所有违规消费者必须同步切完)
 risk: 高(R2 改动量与 W4.2 等量;view 直 import 清零涉及 20+ 处)
 trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条修订
 ---
@@ -40,6 +40,34 @@ trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条
 > 这是工程层面能稳定落地、lint 可强制、覆盖审计 P1+P2 全部 finding 的合规水平,
 > 但仍未达到 charter line 88 字面终态(自动装配)。后者是 charter v0.5+ 范围。
 > 实施日志 / 收尾报告中均使用此命名,避免"严格遵守 charter"被读者误解为终态。
+
+## 0.1 硬约束(v4 新增)
+
+W5 实施全程,以下两条不再是"约定"或"建议",而是 **硬约束**:
+
+### 硬约束 H1:业务路径必须 `requireCapabilityApi`
+
+| 路径性质 | helper | code review 标准 |
+|---|---|---|
+| 业务路径(命令 handler / view render / 文件上传 / 编辑器命令)| `requireCapabilityApi` | **拒绝**任何 `getCapabilityApi(...)?.foo()` 形式 — `?.` short-circuit 静默化是 v3 review P2 已识别风险 |
+| 诊断路径(L5-alive 读 sourceCount 等) | `getCapabilityApi` | 允许;capability 没注册时退化输出而非破坏诊断 |
+| 跨可选 capability(未来某 view 可选增强) | `getCapabilityApi` | 允许;缺失退化是设计意图 |
+
+### 硬约束 H2:ESLint 规则在 C1 commit 同步落地
+
+W5 不接受"先改代码,完工后加 lint"路径——这意味 C1+C2+C3+C4 之间任何 commit 都没有强制力,view 偷偷回退到直 import 不会立刻被发现。
+
+**改为**:**C1 commit 加 ESLint 规则的同时,必须把所有现有 view→capability 直 import 全部切掉**(原 C2 内容并入 C1)。lint 在 C1 commit 后立刻达到强约束态,后续 C3/C4 任何 view 想直 import 立刻爆 lint。
+
+**实施层后果**:原"C1+C2 同 session"拆分 → C1+C2 **合并成一个不可分割的 commit**(中间的 lint 红 commit 不能合 main)。Wave 5 三 session 节奏调整为:
+
+| Session | commit | 内容 |
+|---|---|---|
+| 1 | **C1+C2(合并)** | capability api 字段 + helpers + 7 capability 注册 api + types.ts + ESLint 规则 + L5-alive/FileTab 切换 |
+| 2 | C3 | WebView/TranslateWebView 切 capability |
+| 3 | C4 | text-editing 拆 capability + R2/R3 |
+
+---
 
 ---
 
@@ -267,72 +295,99 @@ R3 把所有 view 切完后,删除模块级 export(`export const selection`),只
 
 ---
 
-## 4. 实施计划(分 4 个 commit)
+## 4. 实施计划(分 3 个 commit:**C1+C2 合并** / C3 / C4)
 
-### C1:capability registry api 字段 + helpers + 7 capability 注册时带 api
+### C1+C2(合并,原子)— 基础设施 + ESLint 规则 + 简单 view 切换
 
-**改动**:
-- `CapabilityDefinition` 加 `api?: unknown` 字段
-- `capabilityRegistry.register` 已有(不动)
-- 新增 `src/slot/capability-registry/get-capability-api.ts` 类型化辅助
-  - `getCapabilityApi<T>(id)` 软取(诊断 / 可选场景)
-  - `requireCapabilityApi<T>(id)` 硬取(业务路径,缺失 throw)
-- **7 个** capability 全部 `register({...})` 调用加 `api: <instance/object>`(C4 才会新增 text-editing,所以 C1 阶段 7 = selection / clipboard / undo-redo / drag-and-drop / insertion / media-storage / web-rendering)
-- 同步给 7 个 capability 补 `types.ts` 子模块(对外类型集中,§ 5.2 设计纪律)
+**v4 调整理由**:硬约束 H2 要求 lint 规则在 C1 同步落地,这意味着 C1 commit 完成的瞬间 lint 立刻报现有 view 直 import 违规——必须同步把所有违规切掉。原 C2 内容(L5-alive / FileTab 切换)并入 C1,**确保 C1 commit lint 一次性绿**。
 
-**对外行为零变化** — view 仍走老路径直 import,新 api 字段只是可选并行存在。
+**改动**(按依赖顺序):
 
-**风险**:低(纯增量)
+1. **registry 基础设施**:
+   - `CapabilityDefinition` 加 `api?: unknown` 字段
+   - 新增 `src/slot/capability-registry/get-capability-api.ts`
+     - `getCapabilityApi<T>(id)` 软取(诊断)
+     - `requireCapabilityApi<T>(id)` 硬取(业务,缺失 throw)
+   - 更新 capability-registry README 写明 H1 用法约定
 
-### C2:6 处低复杂度 view 切到 registry.get / require(L5-alive + FileTab)
+2. **7 个 capability 注册时带 api + 提供 types.ts**:
+   - selection / clipboard / undo-redo / drag-and-drop / insertion / media-storage / web-rendering
+   - 每个 capability `register({ id, api: <instance/object> })`
+   - 每个 capability 提供 `types.ts` 子模块(D4 强制),公开类型集中
 
-**改动**(对齐 § 3.3 用法约定):
-- `views/L5-alive.ts` 5 处 capability import 改走 **`getCapabilityApi`**
-  (诊断路径 — 读 sourceCount / serializerCount 等,capability 没注册时容许软取)
-- `views/note/link-panel/FileTab.tsx` 改走 **`requireCapabilityApi('media-storage').mediaPutBase64`**
-  (业务路径 — 文件上传是用户感知功能,缺失即抛错而非静默)
+3. **view 端切换(L5-alive + FileTab)**:
+   - `views/L5-alive.ts` 5 处 capability import 改走 **`getCapabilityApi`**(诊断软取)
+   - `views/note/link-panel/FileTab.tsx` 改走 **`requireCapabilityApi('media-storage').mediaPutBase64`**(业务硬取)
 
-**验证**:典型场景手测(诊断 + 文件上传)
+4. **WebView/TranslateWebView 临时使用 require**:
+   - C3 才完整切 Host 组件,但 C1 加 lint 规则后这两文件的现有 `import { Host } from '@capabilities/web-rendering'` 立刻违规
+   - **C1 同步**改这两文件的 Host 引用走 `requireCapabilityApi`(useMemo 缓存)
+   - 类型走 `import type from '@capabilities/web-rendering/types'`
+   - C3 范围实际上提前到 C1 完成了大半;C3 重命名为"二次审视 + react identity 验证 + 余留细化"
 
-**风险**:低
+5. **ESLint 规则同步落地**(`eslint.config.js` `views/**` 块新增):
+   ```js
+   { group: ['@capabilities/*'],
+     message: 'view 不直接 import capability 运行时值,走 requireCapabilityApi(id)' +
+              '(若需类型,改用 import type 或 from @capabilities/<id>/types)',
+     allowTypeImports: true },
+   ```
+   - 同时给 `drivers/*` 加规则(view 不直 import driver,allowTypeImports: true)— 但 C4 才把 NoteView 切完;C1 阶段先**不**给 drivers 加规则(否则 NoteView 立刻爆),drivers 规则在 C4 同步落地
 
-### C3:WebView / TranslateWebView 改走 capability api
+6. **验证**:`npm run lint --max-warnings 0` 必须通过(0 新增违规)
 
-**改动**:
-- WebView 端:类型 `HostHandle` 走 `import type from '@capabilities/web-rendering/types'`(纯类型 import,合规),
-  `Host` 组件通过 **`requireCapabilityApi<WebRenderingApi>('web-rendering').Host`** 取
-  (业务路径 — view 渲染依赖 Host,缺失即抛错由 React error boundary 捕获,不静默)
-- TranslateWebView 同款,`TranslateHost` 也走 `requireCapabilityApi`
-- 用 `useMemo` 缓存一次 require 结果,避免每次渲染重 throw 检查(同时缓解风险 2 React identity)
-- 验证:webview 浏览 / 双栏翻译 仍 work
+**风险**:中(改动范围比 v3 C1+C2 大,但消除了"中间状态可绕过 lint"的真实风险,净收益正向)
 
-**风险**:中(组件通过 registry 取,可能有 React identity 问题)
+### ~~C2~~(已并入 C1)
 
-### C4:text-editing capability 化 + R2 + R3
+### C3:WebView/TranslateWebView 二次审视 + react identity 验证
+
+C1 已经把 Host/TranslateHost 切到 `requireCapabilityApi + useMemo`。C3 范围收窄为:
+
+- 完整功能回归(webview 浏览 / 双栏翻译 / Google Translate 注入 / 同步)
+- 检查 React identity 是否稳定(多次 render Host 引用是否同一)— 若有问题用更强的 module-level cache
+- 整理 `web-rendering/types.ts`(若 C1 没完整迁完)
+- 移除 capability 模块级 export 兜底(`export const Host`,如果 C1 阶段为兼容保留)
+
+**风险**:低(C1 已做主要工作)
+
+### C4:text-editing 拆 capability + R2 + R3 + drivers/* lint 规则
 
 **改动**(C4 是 Wave 5 的硬骨头,独立 session):
 
 **C4a:新建 `src/capabilities/text-editing/`**
-- `index.ts`:`registerCapability({ id: 'text-editing', api: { ... } })` — api 内部 re-export driver 的 textEditingDriver / textEditingDriverApi / setLinkClickHandler / DriverSerialized 类型 / Host 组件 / createEmptyDoc / extractFirstParagraphText / instanceRegistry 等
+- `index.ts`:`capabilityRegistry.register({ id: 'text-editing', api: { ... } })` —
+  api 内部 re-export driver 的 textEditingDriver / textEditingDriverApi /
+  setLinkClickHandler / Host 组件 / createEmptyDoc / extractFirstParagraphText /
+  instanceRegistry 等
 - `types.ts`:对外类型 (`TextEditingApi`)
 - `DESIGN.md`
 
-**C4b:11 处 view 文件改 import**
-- 类型 import 改 `from '@capabilities/text-editing/types'`
-- 运行时值改走 `getCapabilityApi<TextEditingApi>('text-editing')`
-- 关键文件:NoteView / note-commands(20+ 命令调用)/ data-model / link-click-integration
+**C4b:11 处 view 文件改 import**(对齐 H1 业务/诊断分流)
+- 类型 import 改 `from '@capabilities/text-editing/types'`(D4 路径强制)
+- 运行时值:
+  - 业务路径(NoteView render / note-commands 20+ 命令 / link-click-integration / link-panel / data-model 编辑器初始化等)→ **`requireCapabilityApi`**
+  - 诊断路径(L5-alive 读 instanceRegistry.count)→ `getCapabilityApi`
 
-**C4c:install 改 `['text-editing']` + 删 KNOWN_DRIVER_IDS**
+**C4c:install 改 `['text-editing']` + 删 KNOWN_DRIVER_IDS + 加 drivers/* lint 规则**
 - `note/index.ts` install 列表中 `text-editing-driver` → `text-editing`
-- `known-driver-ids.ts` 删除(整体淘汰)
-- `validateInstall` / `install-coverage` 不再有 driver 白名单分支
+- `known-driver-ids.ts` 整文件删除(整体淘汰)
+- `validateInstall` / `install-coverage` 删除 driver 白名单分支
 - `install-coverage` web-view + note-view 行 drivers 列消失(仅 capabilities 列)
+- ESLint `views/**` 块加 `{ group: ['@drivers/*'], allowTypeImports: true }` 规则
+  (C4 完工后 view 0 处直 import driver,规则成立无违规)
 
 **C4d:capability 模块级 export 删除**
-- `selection/index.ts` 等删 `export const selection`(只留 register)
-- 此时 R1 进入"严格"状态:0 处 view 直 import @capabilities/* 模块级值
+- `selection/index.ts` 等删 `export const selection`(只留 `register`)
+- `platform/renderer/index.tsx` 加显式 side-effect import 触发 capability 注册
+  (见 § 6 风险 1)
+- 此时 R1+R2+R3 全部进入"v0.4 工程可执行严格态":
+  - 0 处 view 直 import @capabilities/* 运行时值
+  - 0 处 view 直 import @drivers/* 运行时值
+  - 0 capability 模块级 export
+  - install 列表 0 driver id
 
-**风险**:高(R2 改动面 + 删模块级 export 容易遗漏)
+**风险**:高(R2 改动面 + 删模块级 export 容易遗漏 + 启动副作用迁移)
 
 ---
 
