@@ -31,6 +31,10 @@ import { mediaStore } from './media/media-store-impl';
 // - supportFetchAPI:   ★ 关键 ★ 允许 fetch() / XMLHttpRequest 加载 media:// URL
 //                       否则 Chromium 报 "URL scheme \"media\" is not supported"(SVG block 必需)
 // - corsEnabled: true  允许跨 origin 加载(media:// 默认 origin 不同)
+// - stream:     true   ★ L5-B3.16 ★ 允许 <video> / <audio> 元素加载本协议
+//                       缺它 → audio/video 元素根本不发请求,显 0:00/0:00 静默失败
+//                       (Electron docs: "Whether requests for this protocol should
+//                        be supported by <video> and <audio> HTML tags")
 // - bypassCSP:         renderer CSP 仍生效;靠 index.html meta 配置 img-src/connect-src 白名单
 //
 // 这一步早于 protocol.handle('media', ...)(在 mediaStore.registerProtocol 内)
@@ -43,6 +47,7 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       corsEnabled: true,
+      stream: true,
     },
   },
 ]);
