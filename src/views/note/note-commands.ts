@@ -30,6 +30,7 @@ import {
 } from './tree-operations';
 import { decodeTreeId, encodeNoteId } from './tree-builder';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
+import { showDictionaryPanel, showTranslationPanel } from './learning-integration';
 
 /**
  * W5 C4:lazy getter — 命令 handler 内部用,避免 module load 时 require
@@ -439,6 +440,41 @@ export function registerNoteCommands(): void {
     if (!wsId) return;
     const cm = contextMenuController.getState();
     tea().removeLinkAtClientPoint(wsId, cm.x, cm.y);
+    contextMenuController.hide();
+  });
+
+  // ── L5-B3.20b:learning 查词 / 翻译(contextMenu has-selection 触发)──
+
+  /** 选区单词查词 → 弹 dictionary popup(lookup 模式)*/
+  commandRegistry.register('note-view.cm-dictionary-lookup', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const text = sel.toString().trim();
+    if (!text) return;
+    // 取选区 BoundingClientRect 给 popup 锚点定位
+    let rect: DOMRect | undefined;
+    try {
+      rect = sel.getRangeAt(0).getBoundingClientRect();
+    } catch {
+      /* selection range invalid — 用 fallback 屏幕中心 */
+    }
+    showDictionaryPanel(text, undefined, rect);
+    contextMenuController.hide();
+  });
+
+  /** 选区句子 / 段落 → 弹 dictionary popup(translate 模式)*/
+  commandRegistry.register('note-view.cm-translate-text', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const text = sel.toString().trim();
+    if (!text) return;
+    let rect: DOMRect | undefined;
+    try {
+      rect = sel.getRangeAt(0).getBoundingClientRect();
+    } catch {
+      /* selection range invalid */
+    }
+    showTranslationPanel(text, rect);
     contextMenuController.hide();
   });
 

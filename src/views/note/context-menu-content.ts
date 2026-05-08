@@ -47,6 +47,14 @@ export function registerContextMenu(): void {
     // L5-B3.15:选区有 link mark 时显示"移除链接"(条件 has-link)
     { id: 'note-view.cm.remove-link', label: '🔗 移除链接', command: 'note-view.cm-remove-link',
       view: VIEW, enabledWhen: 'has-link', group: 'marks', order: 31 },
+    // L5-B3.20b:learning 查词 / 翻译(选区非空时显)— 用户单词查词 / 多词翻译,
+    // 两项都显,内部各自走对应 mode(决策 Q5=A 简化)
+    { id: 'note-view.cm.dictionary-lookup', label: '📖 查词',
+      command: 'note-view.cm-dictionary-lookup',
+      view: VIEW, enabledWhen: 'has-selection', group: 'learning', order: 40 },
+    { id: 'note-view.cm.translate-text', label: '🌐 翻译',
+      command: 'note-view.cm-translate-text',
+      view: VIEW, enabledWhen: 'has-selection', group: 'learning', order: 41 },
     // ── group: destructive ──
     { id: 'note-view.cm.delete-block', label: '🗑 删除 Block', command: 'note-view.cm-delete-block',
       view: VIEW, enabledWhen: 'is-editable', group: 'destructive', order: 90 },
