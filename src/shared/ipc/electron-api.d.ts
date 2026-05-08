@@ -41,6 +41,47 @@ declare global {
       showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }>;
       /** L5-B3.14:File → 绝对路径(同步;Electron 32+ webUtils.getPathForFile 包装)*/
       getFilePath(file: File): string;
+
+      // ── L5-B3.17:yt-dlp capability ──
+      /** 检查 yt-dlp 是否已安装 + 版本 */
+      ytdlpCheckStatus(): Promise<{ installed: boolean; version?: string; path?: string }>;
+      /** 下载并安装 yt-dlp 二进制(从 yt-dlp GitHub release latest)*/
+      ytdlpInstall(): Promise<{ installed: boolean; version?: string; path?: string }>;
+      /** 订阅 yt-dlp install 进度 — 返回取消订阅函数 */
+      onYtdlpInstallProgress(
+        callback: (progress: { percent: number; installed: boolean; version?: string; error?: string }) => void,
+      ): () => void;
+      /** 下载视频(走 spawn yt-dlp,自动抓 YouTube 字幕保存为 .en.srt)*/
+      ytdlpDownload(
+        url: string,
+        outputPath?: string,
+      ): Promise<{
+        url: string;
+        status: 'downloading' | 'complete' | 'error';
+        percent: number;
+        filename?: string;
+        subtitleFile?: string;
+        subtitleText?: string;
+        error?: string;
+      }>;
+      /** 订阅 yt-dlp download 进度 — 返回取消订阅函数 */
+      onYtdlpDownloadProgress(
+        callback: (progress: {
+          url: string;
+          status: 'downloading' | 'complete' | 'error';
+          percent: number;
+          filename?: string;
+          error?: string;
+        }) => void,
+      ): () => void;
+      /** 获取视频元数据(--dump-json,不下载)*/
+      ytdlpGetInfo(url: string): Promise<Record<string, unknown> | null>;
+      /** 保存翻译字幕为 .srt(对齐视频文件,用于字幕系统翻译导出)*/
+      ytdlpSaveSubtitle(
+        videoFilePath: string,
+        langCode: string,
+        timestampText: string,
+      ): Promise<string | null>;
     };
   }
 }
