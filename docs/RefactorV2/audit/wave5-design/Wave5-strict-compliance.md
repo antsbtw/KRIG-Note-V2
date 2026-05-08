@@ -5,7 +5,7 @@ ref:
   - docs/00-architecture/charter.md v0.4 § 1.1 / § 1.2 / § 1.3 / § 1.4
   - docs/RefactorV2/audit/2026-05-08-register-and-layer-audit.md
   - docs/RefactorV2/audit/wave4-design/W4.2-web-rendering-capability.md(过渡方案登记)
-status: design v2 — review 3 条修订采纳(标题去"真装配"夸大表述 / 验收 eslint 化 / 加 require 硬取)
+status: design v3 — v3 review 3 条采纳(C2/C3 用 require / C1 7 capability 笔误 / 顶部 + 验收明确"v0.4 工程可执行严格态"边界)
 risk: 高(R2 改动量与 W4.2 等量;view 直 import 清零涉及 20+ 处)
 trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条修订
 ---
@@ -35,6 +35,11 @@ trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条
 > 间接路由的语义价值:**view 跟 capability 模块解耦**(import 链不存在),capability
 > 切实现 view 一行不改;但 view 仍主动通过 string id 查找,不算 charter line 88
 > "声明依赖 + 自动装配"的字面终态。这是 W5 的明确边界,不再夸大。
+>
+> **W5 完工后的状态命名**:**charter v0.4 工程可执行严格态(间接路由)**——
+> 这是工程层面能稳定落地、lint 可强制、覆盖审计 P1+P2 全部 finding 的合规水平,
+> 但仍未达到 charter line 88 字面终态(自动装配)。后者是 charter v0.5+ 范围。
+> 实施日志 / 收尾报告中均使用此命名,避免"严格遵守 charter"被读者误解为终态。
 
 ---
 
@@ -264,24 +269,28 @@ R3 把所有 view 切完后,删除模块级 export(`export const selection`),只
 
 ## 4. 实施计划(分 4 个 commit)
 
-### C1:capability registry api 字段 + getCapabilityApi helper + 6 capability 注册时带 api
+### C1:capability registry api 字段 + helpers + 7 capability 注册时带 api
 
 **改动**:
 - `CapabilityDefinition` 加 `api?: unknown` 字段
 - `capabilityRegistry.register` 已有(不动)
 - 新增 `src/slot/capability-registry/get-capability-api.ts` 类型化辅助
-- 6 capability(selection / clipboard / undo-redo / drag-and-drop / insertion / media-storage / web-rendering)的 `register({...})` 调用加 `api: <instance/object>`
-- 7 capability 全部加 api 字段(包括 web-rendering)
+  - `getCapabilityApi<T>(id)` 软取(诊断 / 可选场景)
+  - `requireCapabilityApi<T>(id)` 硬取(业务路径,缺失 throw)
+- **7 个** capability 全部 `register({...})` 调用加 `api: <instance/object>`(C4 才会新增 text-editing,所以 C1 阶段 7 = selection / clipboard / undo-redo / drag-and-drop / insertion / media-storage / web-rendering)
+- 同步给 7 个 capability 补 `types.ts` 子模块(对外类型集中,§ 5.2 设计纪律)
 
 **对外行为零变化** — view 仍走老路径直 import,新 api 字段只是可选并行存在。
 
 **风险**:低(纯增量)
 
-### C2:6 处低复杂度 view 切到 registry.get(L5-alive + FileTab)
+### C2:6 处低复杂度 view 切到 registry.get / require(L5-alive + FileTab)
 
-**改动**:
-- `views/L5-alive.ts` 5 处 capability import 全改走 `getCapabilityApi`(读 sourceCount / serializerCount 等)
-- `views/note/link-panel/FileTab.tsx` 改走 `getCapabilityApi('media-storage').mediaPutBase64`
+**改动**(对齐 § 3.3 用法约定):
+- `views/L5-alive.ts` 5 处 capability import 改走 **`getCapabilityApi`**
+  (诊断路径 — 读 sourceCount / serializerCount 等,capability 没注册时容许软取)
+- `views/note/link-panel/FileTab.tsx` 改走 **`requireCapabilityApi('media-storage').mediaPutBase64`**
+  (业务路径 — 文件上传是用户感知功能,缺失即抛错而非静默)
 
 **验证**:典型场景手测(诊断 + 文件上传)
 
@@ -290,8 +299,11 @@ R3 把所有 view 切完后,删除模块级 export(`export const selection`),只
 ### C3:WebView / TranslateWebView 改走 capability api
 
 **改动**:
-- WebView 端:`import { Host, HostHandle } from '@capabilities/web-rendering'` → 类型留(纯类型 import 合规),`Host` 通过 `getCapabilityApi('web-rendering').Host` 取
-- TranslateWebView 同款
+- WebView 端:类型 `HostHandle` 走 `import type from '@capabilities/web-rendering/types'`(纯类型 import,合规),
+  `Host` 组件通过 **`requireCapabilityApi<WebRenderingApi>('web-rendering').Host`** 取
+  (业务路径 — view 渲染依赖 Host,缺失即抛错由 React error boundary 捕获,不静默)
+- TranslateWebView 同款,`TranslateHost` 也走 `requireCapabilityApi`
+- 用 `useMemo` 缓存一次 require 结果,避免每次渲染重 throw 检查(同时缓解风险 2 React identity)
 - 验证:webview 浏览 / 双栏翻译 仍 work
 
 **风险**:中(组件通过 registry 取,可能有 React identity 问题)
@@ -378,6 +390,17 @@ W5 实施时 7 capability 全部要补 types.ts(若现有 index.ts 已 export ty
 | typecheck / lint --max-warnings 0 / vite build | 全过 | npm scripts |
 | 功能回归 | 笔记编辑 / web 浏览 / 双栏翻译 / 媒体粘贴 / Cmd+K/[/] / 翻译注入 全部 OK | 手测 |
 | audit § 6 度量 | 完全合规(8/8 行通过 ✅)| 对照 audit 报告 |
+
+### 5.4 验收结论用词
+
+W5 完工后**只声称达到**:**charter v0.4 工程可执行严格态(间接路由)**
+
+- ✅ 工程可执行 — lint 强制、code review 可拦
+- ✅ 严格 — audit 报告 8 项 finding 全部 close
+- ✅ 间接路由 — view 跟 capability 模块解耦,通过 string id 走 registry
+- ❌ **不声称**"达到 charter line 88 字面终态" — 自动装配(view 通过 React Context 注入 / 无主动检索)留 charter v0.5+
+
+实施日志、commit message、收尾报告全部使用此命名约束,避免用户读到"严格遵守 charter"误解为终态。
 
 ---
 
