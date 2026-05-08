@@ -17,6 +17,7 @@
 
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
+import { mediaResolvePath } from '@storage/media-store';
 
 // 注:window.electronAPI 类型在 src/shared/ipc/electron-api.d.ts 全局声明
 
@@ -158,9 +159,25 @@ export function buildLinkClickPlugin(): Plugin {
         }
 
         // file://
+        // L5-B3.15:URL decoded path — FileTab 输出 href 用 encodeURIComponent,
+        // openPath 需要原始 OS 路径(空格 / 中文等)
         if (href.startsWith('file://')) {
-          const filePath = href.replace(/^file:\/\//, '');
+          let filePath: string;
+          try {
+            filePath = decodeURIComponent(new URL(href).pathname);
+          } catch {
+            filePath = href.replace(/^file:\/\//, '');
+          }
           window.electronAPI?.openPath?.(filePath);
+          return true;
+        }
+
+        // media:// (L5-B3.15)— 走 mediaResolvePath → openPath(对齐 fileBlock 打开)
+        if (href.startsWith('media://')) {
+          void mediaResolvePath(href).then((p) => {
+            if (p) window.electronAPI?.openPath?.(p);
+            else console.warn('[link-click] mediaResolvePath failed:', href);
+          });
           return true;
         }
 

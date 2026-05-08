@@ -231,6 +231,116 @@
   text-decoration: underline;
 }
 
+/* ── L5-B3.15:LinkPanel 文件 Tab(双模式 import/link)── */
+
+.krig-link-panel__file-tab {
+  outline: none;
+  padding: 4px 2px;
+}
+
+.krig-link-panel__file-pick-row {
+  text-align: center;
+  padding: 12px 0 6px;
+}
+
+.krig-link-panel__file-pick-btn {
+  background: #3a3a3a;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  padding: 8px 20px;
+  cursor: pointer;
+}
+
+.krig-link-panel__file-pick-btn:hover {
+  background: #444;
+  border-color: #666;
+}
+
+.krig-link-panel__file-name {
+  font-size: 13px;
+  color: #e8eaed;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+
+.krig-link-panel__file-path {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 8px;
+  word-break: break-all;
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+}
+
+.krig-link-panel__radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #ccc;
+  padding: 3px 0;
+  cursor: pointer;
+}
+
+.krig-link-panel__radio-label input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.krig-link-panel__error {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(244, 81, 81, 0.1);
+  border: 1px solid rgba(244, 81, 81, 0.3);
+  border-radius: 4px;
+  color: #f45151;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.krig-link-panel__file-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.krig-link-panel__file-secondary-btn {
+  background: #3a3a3a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.krig-link-panel__file-secondary-btn:hover {
+  background: #444;
+  border-color: #666;
+}
+
+.krig-link-panel__file-confirm-btn {
+  flex: 1;
+  background: #8ab4f8;
+  border: none;
+  border-radius: 4px;
+  color: #1e1e1e;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.krig-link-panel__file-confirm-btn:hover:not(:disabled) {
+  background: #a4c2fa;
+}
+
+.krig-link-panel__file-confirm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ── L5-B3.4:ColorPickerPanel(对齐 V1 swatch 网格)── */
 
 .krig-color-picker {
