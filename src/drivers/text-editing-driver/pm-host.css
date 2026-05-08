@@ -1443,3 +1443,232 @@
   font-style: italic;
   min-height: 1.4em;
 }
+
+/* ─── L5-B3.18:tweetBlock(双 Tab + Fetch + Download)─── */
+
+.krig-pm-host .ProseMirror .krig-tweet-block {
+  display: block;
+  margin: 12px 0;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block.ProseMirror-selectednode {
+  outline: 2px solid #8ab4f8;
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__player {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: #232323;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+}
+
+/* placeholder */
+.krig-pm-host .ProseMirror .krig-tweet-block__placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(138, 180, 248, 0.06);
+  border: 1px dashed rgba(138, 180, 248, 0.3);
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 14px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__placeholder-icon {
+  font-size: 24px;
+  font-weight: bold;
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__placeholder-url {
+  flex: 1;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  min-width: 240px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__placeholder-url:focus {
+  border-color: #8ab4f8;
+}
+
+/* Tab 栏(Browse / Data + 右侧 Action 按钮组)*/
+.krig-pm-host .ProseMirror .krig-tweet-block__tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__tab-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__tab-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__tab-btn.active {
+  background: rgba(138, 180, 248, 0.12);
+  color: #8ab4f8;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__action-btn {
+  background: #2c2c2c;
+  border: 1px solid #444;
+  color: #e8eaed;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__action-btn:hover:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #555;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Browse Panel(iframe 容器)*/
+.krig-pm-host .ProseMirror .krig-tweet-block__browse-panel {
+  position: relative;
+  overflow: hidden;
+  background: #1a1a1a;
+  border-radius: 4px;
+  min-height: 200px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__iframe {
+  width: 100%;
+  border: none;
+  /* 高度由 postMessage 动态调,初始放高一点避免闪烁 */
+  height: 600px;
+  transform: scale(0.75);
+  transform-origin: top left;
+  width: 133.33%; /* 1/0.75,补 scale 后视觉宽度 */
+  display: block;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__no-embed,
+.krig-pm-host .ProseMirror .krig-tweet-block__no-data {
+  padding: 16px;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  text-align: center;
+}
+
+/* Data Panel(离线卡片)*/
+.krig-pm-host .ProseMirror .krig-tweet-block__data-panel {
+  padding: 8px 4px;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__avatar,
+.krig-pm-host .ProseMirror .krig-tweet-block__avatar-placeholder {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__avatar {
+  object-fit: cover;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__handle {
+  color: #888;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__time {
+  color: #666;
+  font-size: 12px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__reply-to {
+  color: #666;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__text {
+  margin: 6px 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__metrics {
+  margin-top: 8px;
+  color: #888;
+  font-size: 12px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__quoted {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid #444;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__open-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: #8ab4f8;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__open-link:hover {
+  text-decoration: underline;
+}
+
+.krig-pm-host .ProseMirror .krig-tweet-block__caption {
+  display: block;
+  margin-top: 4px;
+  text-align: inherit;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  min-height: 1.4em;
+}
