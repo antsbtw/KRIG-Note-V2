@@ -55,6 +55,16 @@ export const IPC_CHANNELS = {
 
   // L5-B3.18:tweet-fetcher 临时能力(BrowserWindow + DOM scraping;Phase D 被吸收)
   TWEET_FETCH_DATA: 'tweet-fetcher.fetch-data',
+
+  // L5-B3.20a:learning(vocab CRUD + dictionary + translate + TTS)
+  LEARNING_VOCAB_ADD: 'learning.vocab-add',
+  LEARNING_VOCAB_REMOVE: 'learning.vocab-remove',
+  LEARNING_VOCAB_LIST: 'learning.vocab-list',
+  LEARNING_VOCAB_HAS: 'learning.vocab-has',
+  LEARNING_VOCAB_CHANGED: 'learning.vocab-changed',     // main → renderer 推送
+  LEARNING_LOOKUP: 'learning.dictionary-lookup',
+  LEARNING_TRANSLATE: 'learning.translate',
+  LEARNING_TTS: 'learning.tts',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

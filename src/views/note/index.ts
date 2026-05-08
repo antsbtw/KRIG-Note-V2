@@ -33,6 +33,7 @@ registerView({
     'media-storage',    // L5-B3.14/3.15/3.16 file/audio/video block 等消费(driver 内部)
     'ytdlp',            // L5-B3.18 tweet-block Download 按钮消费(driver 内部)
     'tweet-fetcher',    // L5-B3.18 tweet-block Fetch 按钮消费(driver 内部,⚠️ 临时 capability)
+    'learning',         // L5-B3.20a 预留(B3.20b dictionary-panel + B3.19 video-block 是消费方)
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },

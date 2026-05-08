@@ -30,6 +30,7 @@ import '@capabilities/insertion';
 import '@capabilities/media-storage';
 import '@capabilities/web-rendering';
 import '@capabilities/text-editing';   // W5 C4 新增
+import '@capabilities/learning';        // L5-B3.20a 新增(无 view 直接消费需显式拉,P1 审计修正)
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
