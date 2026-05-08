@@ -16,12 +16,7 @@
 
 import { viewTypeRegistry } from '../view-type-registry/view-type-registry';
 import { capabilityRegistry } from '../capability-registry/capability-registry';
-
-/** 已知 driver id 白名单 — V2 当前把 driver 单独拎出 capability,charter § 1.3 留待整理 */
-const KNOWN_DRIVER_IDS = new Set<string>([
-  'text-editing-driver',
-  // 后续 driver(graph-editing-driver / ebook-rendering-driver / web-rendering-driver)按需补
-]);
+import { KNOWN_DRIVER_IDS } from '../view-type-registry/known-driver-ids';
 
 interface CoverageRow {
   view: string;
