@@ -28,6 +28,7 @@ import type {
   DictionaryLookupResult,
   VocabEntry,
 } from '@capabilities/learning/types';
+import './dictionary-panel.css';
 
 // 模块级"待显示"状态(setPanelInitial 写入,popup 组件 mount 时读取)
 let pendingMode: 'lookup' | 'translate' = 'lookup';
