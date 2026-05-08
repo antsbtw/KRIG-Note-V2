@@ -7,6 +7,7 @@
  */
 
 import { ChannelHub } from '@slot/workspace-bus/channel';
+import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export interface DropTargetRegistration {
   id: string;
@@ -65,3 +66,6 @@ class DndCapability {
 }
 
 export const dnd = new DndCapability();
+
+// Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
+capabilityRegistry.register({ id: dnd.id });

@@ -13,6 +13,7 @@ import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
 import { slashRegistry } from '../interaction-registries/slash-registry/slash-registry';
 import { handleRegistry } from '../interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
+import { capabilityRegistry } from '../capability-registry/capability-registry';
 
 class ViewTypeRegistry {
   private views: Map<string, ViewDefinition> = new Map();
@@ -32,9 +33,28 @@ class ViewTypeRegistry {
       this.unregisterRegistries(def.id);
     }
     this.views.set(def.id, def);
+    // Wave 1:install 列表校验(charter § 1.2 — 让违规可见,不阻塞)
+    this.validateInstall(def);
     // 自动拆分到对应 Registry
     this.distributeToRegistries(def);
     this.notify();
+  }
+
+  /**
+   * 校验 install 列表里每个 id 都已注册到 capabilityRegistry。
+   *
+   * 缺失 → console.warn(不抛错,避免启动顺序敏感)。driver id(如
+   * 'text-editing-driver')当前也走 install 声明,会一并警告——这反映
+   * V2 的 driver 单独拎出 charter § 1.3 的现状,Wave 2+ 处理。
+   */
+  private validateInstall(def: ViewDefinition): void {
+    if (!def.install || def.install.length === 0) return;
+    const missing = def.install.filter((id) => !capabilityRegistry.has(id));
+    if (missing.length === 0) return;
+    console.warn(
+      `[L4] viewTypeRegistry: view '${def.id}' install ids 未在 capabilityRegistry 中: ${missing.join(', ')}\n` +
+        `(charter § 1.2 要求 install 项必须是已注册的 capability id;driver id 暂不算违规)`,
+    );
   }
 
   /** 取消注册 view + 清理所有 Registry 子项 */

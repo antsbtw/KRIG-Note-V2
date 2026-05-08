@@ -8,6 +8,7 @@
 
 import { ChannelHub } from '@slot/workspace-bus/channel';
 import { fail, type Result } from '@slot/workspace-bus/bus-types';
+import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export interface SafeguardRegistration {
   id: string;
@@ -95,3 +96,6 @@ class InsertionCapability {
 }
 
 export const insertion = new InsertionCapability();
+
+// Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
+capabilityRegistry.register({ id: insertion.id });

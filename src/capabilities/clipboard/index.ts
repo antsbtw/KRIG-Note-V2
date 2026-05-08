@@ -7,6 +7,7 @@
  */
 
 import { ChannelHub } from '@slot/workspace-bus/channel';
+import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export type ClipboardFormat = 'pm-json' | 'markdown' | 'html' | 'plain' | string;
 
@@ -100,3 +101,6 @@ class ClipboardCapability {
 }
 
 export const clipboard = new ClipboardCapability();
+
+// Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
+capabilityRegistry.register({ id: clipboard.id });
