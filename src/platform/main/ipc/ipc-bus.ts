@@ -11,6 +11,7 @@ import { registerWebTranslateHandlers } from './web-translate-handler';
 import { registerAppHandlers } from './app-handler';
 import { registerMediaHandlers } from '../media/media-handlers';
 import { registerYtdlpHandlers } from '../ytdlp/handlers';
+import { registerTweetFetcherHandlers } from '../tweet-fetcher/handlers';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -19,5 +20,6 @@ export function initIpcBus(): void {
   registerWebTranslateHandlers();
   registerAppHandlers();
   registerMediaHandlers();
-  registerYtdlpHandlers();   // L5-B3.17:yt-dlp capability(check / install / download / info / saveSubtitle)
+  registerYtdlpHandlers();          // L5-B3.17:yt-dlp capability
+  registerTweetFetcherHandlers();   // L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)
 }

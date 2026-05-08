@@ -57,5 +57,9 @@ export function registerSlashMenu(): void {
     { id: 'note-view.slash.video', label: 'Video',
       command: 'note-view.slash-insert-video',
       keywords: ['video', 'movie', 'mp4', 'youtube', '视频'], view: VIEW, order: 150 },
+    // L5-B3.18:tweet-block(X / Twitter 推文嵌入,iframe + Data 离线缓存 + Fetch + Download)
+    { id: 'note-view.slash.tweet', label: 'X Post',
+      command: 'note-view.slash-insert-tweet',
+      keywords: ['x', 'tweet', 'twitter', 'post', 'social', '推文'], view: VIEW, order: 155 },
   ]);
 }

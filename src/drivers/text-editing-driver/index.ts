@@ -77,3 +77,4 @@ export { fileLinkSpec } from './blocks/file-link/spec';
 export { externalRefSpec } from './blocks/external-ref/spec';
 export { audioBlockSpec } from './blocks/audio-block/spec';
 export { videoBlockSpec } from './blocks/video-block/spec';
+export { tweetBlockSpec } from './blocks/tweet-block/spec';

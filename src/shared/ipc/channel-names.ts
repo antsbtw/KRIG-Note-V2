@@ -52,6 +52,9 @@ export const IPC_CHANNELS = {
   YTDLP_DOWNLOAD_PROGRESS: 'ytdlp.download-progress',   // main → renderer 推送
   YTDLP_GET_INFO: 'ytdlp.get-info',
   YTDLP_SAVE_SUBTITLE: 'ytdlp.save-subtitle',
+
+  // L5-B3.18:tweet-fetcher 临时能力(BrowserWindow + DOM scraping;Phase D 被吸收)
+  TWEET_FETCH_DATA: 'tweet-fetcher.fetch-data',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

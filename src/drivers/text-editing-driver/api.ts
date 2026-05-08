@@ -657,6 +657,18 @@ export const textEditingDriverApi = {
   },
 
   /**
+   * 在光标位置插入空 tweetBlock placeholder(L5-B3.18)
+   *
+   * 行为同 image / audio / video。tweetBlock attrs.tweetUrl=null 触发 placeholder
+   * (𝕏 + URL 输入框,Enter 后切到 Browse Tab iframe)。
+   */
+  insertTweetBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertWithCaptionBlock(inst.view, 'tweetBlock');
+  },
+
+  /**
    * 在光标当前 block 位置插入空 mathBlock(L5-B3.6)
    *
    * - 空段落 → 替换;非空段落 → 之后插入
