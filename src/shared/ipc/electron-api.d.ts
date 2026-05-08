@@ -82,6 +82,26 @@ declare global {
         langCode: string,
         timestampText: string,
       ): Promise<string | null>;
+
+      // ── L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)──
+      /** 抓取推文元数据(BrowserWindow + DOM scraping)
+       *  仅接受 https://twitter.com / https://x.com 域 */
+      fetchTweetData(tweetUrl: string): Promise<{
+        success: boolean;
+        data?: {
+          authorName?: string;
+          authorHandle?: string;
+          authorAvatar?: string;
+          text?: string;
+          createdAt?: string;
+          lang?: string;
+          media?: Array<{ type: 'image' | 'video'; url: string; thumbUrl?: string }>;
+          metrics?: { replies?: number; retweets?: number; likes?: number; views?: number };
+          quotedTweet?: string;
+          inReplyTo?: string;
+        };
+        error?: string;
+      }>;
     };
   }
 }

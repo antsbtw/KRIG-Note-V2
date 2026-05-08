@@ -143,4 +143,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ): Promise<string | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_SAVE_SUBTITLE, videoFilePath, langCode, timestampText);
   },
+
+  // ── L5-B3.18:tweet-fetcher 临时 capability ──
+  fetchTweetData(tweetUrl: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.TWEET_FETCH_DATA, tweetUrl);
+  },
 });
