@@ -11,6 +11,7 @@
  */
 
 import { ChannelHub } from '@slot/workspace-bus/channel';
+import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export type SelectionKind = 'text' | 'block' | 'multi-block' | 'graph-nodes' | 'tree-nodes' | 'empty';
 
@@ -91,3 +92,6 @@ class SelectionCapability {
 }
 
 export const selection = new SelectionCapability();
+
+// Wave 1:注册到 Registry,让 install 可校验(charter § 1.2)
+capabilityRegistry.register({ id: selection.id });

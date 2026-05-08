@@ -16,6 +16,7 @@ import { reportL3Alive } from '@workspace/diagnostics/L3-alive';
 import { reportL3_5Alive } from '@slot/workspace-bus/L3.5-alive';
 import { reportL4Alive } from '@slot/diagnostics/L4-alive';
 import { reportL5Alive } from '@views/L5-alive';
+import { reportInstallCoverage } from '@slot/diagnostics/install-coverage';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
@@ -63,4 +64,7 @@ if (rootEl) {
   reportL3_5Alive(workspaceManager.busCount);
   reportL4Alive();
   reportL5Alive();
+  if (import.meta.env.DEV) {
+    reportInstallCoverage();
+  }
 }

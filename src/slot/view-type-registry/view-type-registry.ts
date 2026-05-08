@@ -13,6 +13,8 @@ import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
 import { slashRegistry } from '../interaction-registries/slash-registry/slash-registry';
 import { handleRegistry } from '../interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
+import { capabilityRegistry } from '../capability-registry/capability-registry';
+import { KNOWN_DRIVER_IDS } from './known-driver-ids';
 
 class ViewTypeRegistry {
   private views: Map<string, ViewDefinition> = new Map();
@@ -32,9 +34,31 @@ class ViewTypeRegistry {
       this.unregisterRegistries(def.id);
     }
     this.views.set(def.id, def);
+    // Wave 1:install 列表校验(charter § 1.2 — 让违规可见,不阻塞)
+    this.validateInstall(def);
     // 自动拆分到对应 Registry
     this.distributeToRegistries(def);
     this.notify();
+  }
+
+  /**
+   * 校验 install 列表里每个 id 都已注册到 capabilityRegistry。
+   *
+   * 已知 driver id(KNOWN_DRIVER_IDS)静默通过——V2 现状,留 Wave 2+ 整理。
+   * 真正缺失 → console.warn(不抛错,避免启动顺序敏感)。
+   *
+   * 与 install-coverage 聚合表共享同一份 driver 白名单,口径一致。
+   */
+  private validateInstall(def: ViewDefinition): void {
+    if (!def.install || def.install.length === 0) return;
+    const missing = def.install.filter(
+      (id) => !capabilityRegistry.has(id) && !KNOWN_DRIVER_IDS.has(id),
+    );
+    if (missing.length === 0) return;
+    console.warn(
+      `[L4] viewTypeRegistry: view '${def.id}' install ids 未在 capabilityRegistry 中: ${missing.join(', ')}\n` +
+        `(charter § 1.2:install 项必须是已注册的 capability id)`,
+    );
   }
 
   /** 取消注册 view + 清理所有 Registry 子项 */
