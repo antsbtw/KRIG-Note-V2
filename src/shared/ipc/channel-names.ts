@@ -29,6 +29,8 @@ export const IPC_CHANNELS = {
   // L5-B3.4:外部链接 / 文件打开(给 link-click plugin 用)
   SHELL_OPEN_EXTERNAL: 'shell.open-external',
   SHELL_OPEN_PATH: 'shell.open-path',
+  // L5-B3.14:在 Finder 高亮显示文件(file-block / file-link / external-ref 用)
+  SHELL_SHOW_ITEM_IN_FOLDER: 'shell.show-item-in-folder',
 
   // L5-B4.2:Google Translate element.js fetch(避 CSP block,main 进程取后注入)
   WEB_TRANSLATE_FETCH_ELEMENT_JS: 'web-translate.fetch-element-js',
@@ -39,6 +41,8 @@ export const IPC_CHANNELS = {
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',
   MEDIA_DOWNLOAD: 'media.download',
+  // L5-B3.14:media:// URL → 本地路径解析(file-block / file-link / external-ref 打开/Finder 显示用)
+  MEDIA_RESOLVE_PATH: 'media.resolve-path',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

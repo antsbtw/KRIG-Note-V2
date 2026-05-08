@@ -9,7 +9,7 @@
  * 后续阶段按需扩展。
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type {
   DiagnosticsReportPayload,
@@ -86,5 +86,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     type: 'audio' | 'image' | 'video',
   ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }> {
     return ipcRenderer.invoke(IPC_CHANNELS.MEDIA_DOWNLOAD, url, type);
+  },
+
+  /** L5-B3.14:media:// URL → 本地文件系统绝对路径 */
+  async mediaResolvePath(mediaUrl: string): Promise<{ success: boolean; path?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEDIA_RESOLVE_PATH, mediaUrl);
+  },
+
+  /** L5-B3.14:在 Finder 高亮显示文件 */
+  async showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.SHELL_SHOW_ITEM_IN_FOLDER, filePath);
+  },
+
+  /**
+   * L5-B3.14:File 对象 → 绝对路径(同步)
+   *
+   * Electron 32+ 不再暴露 File.path,必须经 webUtils.getPathForFile 取。
+   * 仅 disk 来源 File 有路径(从浏览器 / Blob URL 拖入会返回空)。
+   */
+  getFilePath(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
   },
 });

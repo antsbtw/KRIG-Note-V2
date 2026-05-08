@@ -54,3 +54,21 @@ export async function mediaDownload(
   }
   return window.electronAPI.mediaDownload(url, type);
 }
+
+/**
+ * media:// URL → 本地文件系统绝对路径(L5-B3.14)
+ *
+ * 给 file-block / file-link / external-ref 的"打开"和"在 Finder 显示"用 —
+ * `shell.openPath` 和 `shell.showItemInFolder` 不接受 media:// 协议,需要本地路径。
+ *
+ * 失败(URL 无效 / 越界 / 文件不存在)返回 null。
+ */
+export async function mediaResolvePath(mediaUrl: string): Promise<string | null> {
+  if (!window.electronAPI?.mediaResolvePath) return null;
+  try {
+    const r = await window.electronAPI.mediaResolvePath(mediaUrl);
+    return r.success ? r.path ?? null : null;
+  } catch {
+    return null;
+  }
+}

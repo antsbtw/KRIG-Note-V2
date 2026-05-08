@@ -35,6 +35,12 @@ declare global {
         url: string,
         type: 'audio' | 'image' | 'video',
       ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }>;
+      /** L5-B3.14:media:// URL → 本地文件系统绝对路径(file-block / file-link / external-ref 用)*/
+      mediaResolvePath(mediaUrl: string): Promise<{ success: boolean; path?: string }>;
+      /** L5-B3.14:在 Finder 高亮显示文件 */
+      showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }>;
+      /** L5-B3.14:File → 绝对路径(同步;Electron 32+ webUtils.getPathForFile 包装)*/
+      getFilePath(file: File): string;
     };
   }
 }

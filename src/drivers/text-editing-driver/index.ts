@@ -72,3 +72,6 @@ export {
   type NoteLinkSearchHandler,
 } from './plugins/build-note-link-command-plugin';
 export { noteLinkSpec } from './blocks/note-link/spec';
+export { fileBlockSpec } from './blocks/file-block/spec';
+export { fileLinkSpec } from './blocks/file-link/spec';
+export { externalRefSpec } from './blocks/external-ref/spec';

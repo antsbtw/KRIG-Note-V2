@@ -7,7 +7,7 @@
 
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
-import { mediaStore } from './media-store-impl';
+import { mediaStore, resolveMediaPath } from './media-store-impl';
 
 export function registerMediaHandlers(): void {
   ipcMain.handle(
@@ -37,6 +37,18 @@ export function registerMediaHandlers(): void {
         return { success: false, error: `invalid type: ${String(type)}` };
       }
       return mediaStore.download(url, type);
+    },
+  );
+
+  // L5-B3.14:media:// URL → 本地文件系统绝对路径(file-block / file-link / external-ref 用)
+  ipcMain.handle(
+    IPC_CHANNELS.MEDIA_RESOLVE_PATH,
+    async (_event, mediaUrl: unknown) => {
+      if (typeof mediaUrl !== 'string' || !mediaUrl) {
+        return { success: false };
+      }
+      const resolved = resolveMediaPath(mediaUrl);
+      return resolved ? { success: true, path: resolved } : { success: false };
     },
   );
 }

@@ -43,5 +43,12 @@ export function registerSlashMenu(): void {
     // L5-B3.7:Table 3x3(第一行 header)
     { id: 'note-view.slash.table', label: 'Table', command: 'note-view.slash-insert-table',
       keywords: ['table', 'grid', '表格'], view: VIEW, order: 160 },
+    // L5-B3.14:fileBlock / externalRef(fileLink 不在 slash — 仅 paste/drag 路径产生)
+    { id: 'note-view.slash.file-block', label: 'File attachment',
+      command: 'note-view.slash-insert-file-block',
+      keywords: ['file', 'attachment', 'pdf', 'attach', '附件'], view: VIEW, order: 170 },
+    { id: 'note-view.slash.external-ref', label: 'External reference',
+      command: 'note-view.slash-insert-external-ref',
+      keywords: ['ref', 'link', 'file', 'url', 'reference', '引用'], view: VIEW, order: 180 },
   ]);
 }

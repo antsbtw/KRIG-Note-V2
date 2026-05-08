@@ -33,6 +33,9 @@ import { imageSpec } from './blocks/image/spec';
 import { mathBlockSpec } from './blocks/math-block/spec';
 import { mathInlineSpec } from './blocks/math-inline/spec';
 import { noteLinkSpec } from './blocks/note-link/spec';
+import { fileBlockSpec } from './blocks/file-block/spec';
+import { fileLinkSpec } from './blocks/file-link/spec';
+import { externalRefSpec } from './blocks/external-ref/spec';
 import {
   tableSpec,
   tableRowSpec,
@@ -49,6 +52,8 @@ import type { TextEditingHostProps, BlockSpec } from './types';
 // L5-B3.7:+ table 系列 4 节点(table/tableRow/tableHeader/tableCell;
 //          走 prosemirror-tables 库:tableEditing + columnResizing + 自定义 keymap)
 // L5-B3.12:+ noteLink(inline atom — `[[note-title]]` 双链 KRIG 知识图谱基础)
+// L5-B3.14:+ fileBlock / fileLink / externalRef(文件附件三件套;前两者字节进 mediaStore,
+//          externalRef 仅存 URL — KRIG Graph 外部引用关系)
 const ENABLED_BLOCKS: BlockSpec[] = [
   textBlockSpec,
   listItemSpec,
@@ -71,6 +76,9 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   tableCellSpec,
   tableHeaderSpec,
   noteLinkSpec,
+  fileBlockSpec,
+  fileLinkSpec,
+  externalRefSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

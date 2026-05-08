@@ -9,6 +9,7 @@
  */
 
 import { ipcMain, shell } from 'electron';
+import * as path from 'path';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 
 const ALLOWED_EXTERNAL_SCHEMES = ['http:', 'https:', 'mailto:'];
@@ -39,6 +40,18 @@ export function registerShellHandlers(): void {
       const result = await shell.openPath(filePath);
       // shell.openPath 返回空字符串=成功;非空=错误信息
       return { ok: result === '', reason: result || undefined };
+    } catch (err) {
+      return { ok: false, reason: String(err) };
+    }
+  });
+
+  // L5-B3.14:在 Finder 高亮显示文件(file-block / file-link / external-ref 用)
+  ipcMain.handle(IPC_CHANNELS.SHELL_SHOW_ITEM_IN_FOLDER, async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath) return { ok: false, reason: 'invalid-path' };
+    if (!path.isAbsolute(filePath)) return { ok: false, reason: 'not-absolute' };
+    try {
+      shell.showItemInFolder(filePath);
+      return { ok: true };
     } catch (err) {
       return { ok: false, reason: String(err) };
     }
