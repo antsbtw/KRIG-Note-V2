@@ -12,6 +12,7 @@ import { registerAppHandlers } from './app-handler';
 import { registerMediaHandlers } from '../media/media-handlers';
 import { registerYtdlpHandlers } from '../ytdlp/handlers';
 import { registerTweetFetcherHandlers } from '../tweet-fetcher/handlers';
+import { registerLearningHandlers } from '../learning/handlers';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -22,4 +23,5 @@ export function initIpcBus(): void {
   registerMediaHandlers();
   registerYtdlpHandlers();          // L5-B3.17:yt-dlp capability
   registerTweetFetcherHandlers();   // L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)
+  registerLearningHandlers();       // L5-B3.20a:learning(vocab + dictionary + translate + TTS)
 }
