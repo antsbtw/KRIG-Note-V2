@@ -15,6 +15,7 @@ import { handleRegistry } from '../interaction-registries/handle-registry/handle
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { capabilityRegistry } from '../capability-registry/capability-registry';
 import { KNOWN_DRIVER_IDS } from './known-driver-ids';
+import { keymapRegistry } from '../keymap-registry/keymap-registry';
 
 class ViewTypeRegistry {
   private views: Map<string, ViewDefinition> = new Map();
@@ -133,6 +134,10 @@ class ViewTypeRegistry {
     if (def.floatingToolbar) {
       floatingToolbarRegistry.register(def.floatingToolbar.map((item) => ({ ...item, view: def.id })));
     }
+    // W4.1:keymap 不需要补 view 字段(注册按 viewId 索引,见 KeymapRegistry.register 签名)
+    if (def.keymap) {
+      keymapRegistry.register(def.id, def.keymap);
+    }
   }
 
   /** 取消该 view 的所有 Registry 子项 */
@@ -142,6 +147,7 @@ class ViewTypeRegistry {
     slashRegistry.unregisterByView(id);
     handleRegistry.unregisterByView(id);
     floatingToolbarRegistry.unregisterByView(id);
+    keymapRegistry.unregisterByView(id);
   }
 }
 

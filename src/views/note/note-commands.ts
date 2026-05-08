@@ -10,6 +10,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { textEditingDriverApi, type MarkName } from '@drivers/text-editing-driver';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
+import { popupController } from '@slot/triggers/popup-controller';
 import {
   createNote,
   deleteNote,
@@ -27,6 +28,7 @@ import {
   deleteSelected,
 } from './tree-operations';
 import { decodeTreeId, encodeNoteId } from './tree-builder';
+import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
 
 /** 确保 slotBinding.left = 'note-view' */
 function ensureNoteViewActive(wsId: string): void {
@@ -423,5 +425,48 @@ export function registerNoteCommands(): void {
     const cm = contextMenuController.getState();
     textEditingDriverApi.removeLinkAtClientPoint(wsId, cm.x, cm.y);
     contextMenuController.hide();
+  });
+
+  // ── W4.1:keymap 命令(原内嵌 NoteView 全局 keymap useEffect 拆出)──
+
+  /** Cmd+[ 笔记导航后退(keymap enabledWhen 已校验 in-view-area + not-in-input)*/
+  commandRegistry.register('note-view.go-back', () => {
+    if (canGoBack()) historyGoBack();
+  });
+
+  /** Cmd+] 笔记导航前进 */
+  commandRegistry.register('note-view.go-forward', () => {
+    if (canGoForward()) historyGoForward();
+  });
+
+  /**
+   * Cmd+K 选中文字时弹 LinkPanel popover
+   *
+   * keymap enabledWhen 已校验 has-text-selection + in-view-area;handler 只负责
+   * 找 anchor 并触发 popup。anchor 优先用 floating-toolbar 的 link 按钮(若已显示),
+   * fallback 用选区 rect 制造虚拟 div anchor(popup 后立即 remove)。
+   */
+  commandRegistry.register('note-view.popup-link', () => {
+    const linkBtn = document.querySelector(
+      '.krig-floating-toolbar [title="🔗"], .krig-floating-toolbar-item[title="🔗"]',
+    );
+    if (linkBtn instanceof Element) {
+      popupController.show('note-view.popup.link', linkBtn);
+      return;
+    }
+    // fallback:选区 rect 模拟虚拟 anchor
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    const fake = document.createElement('div');
+    fake.style.position = 'fixed';
+    fake.style.left = `${rect.left}px`;
+    fake.style.top = `${rect.bottom}px`;
+    fake.style.width = '1px';
+    fake.style.height = '1px';
+    document.body.appendChild(fake);
+    popupController.show('note-view.popup.link', fake);
+    window.setTimeout(() => fake.remove(), 0);
   });
 }
