@@ -29,7 +29,10 @@ registerView({
     'undo-redo',
     'drag-and-drop',
     'insertion',
-    'text-editing',   // W5 C4:driver 改 capability,view 通过 capability api 间接路由
+    'text-editing',     // W5 C4:driver 改 capability,view 通过 capability api 间接路由
+    'media-storage',    // L5-B3.14/3.15/3.16 file/audio/video block 等消费(driver 内部)
+    'ytdlp',            // L5-B3.18 tweet-block Download 按钮消费(driver 内部)
+    'tweet-fetcher',    // L5-B3.18 tweet-block Fetch 按钮消费(driver 内部,⚠️ 临时 capability)
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },

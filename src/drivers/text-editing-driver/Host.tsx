@@ -38,6 +38,7 @@ import { fileLinkSpec } from './blocks/file-link/spec';
 import { externalRefSpec } from './blocks/external-ref/spec';
 import { audioBlockSpec } from './blocks/audio-block/spec';
 import { videoBlockSpec } from './blocks/video-block/spec';
+import { tweetBlockSpec } from './blocks/tweet-block/spec';
 import {
   tableSpec,
   tableRowSpec,
@@ -83,6 +84,7 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   externalRefSpec,
   audioBlockSpec,
   videoBlockSpec,
+  tweetBlockSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

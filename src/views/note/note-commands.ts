@@ -294,6 +294,12 @@ export function registerNoteCommands(): void {
     tea().insertVideoBlockAtSelection(instanceId);
   }));
 
+  // L5-B3.18:slash insert-tweet — 插入空 tweetBlock placeholder(𝕏 URL 输入)
+  commandRegistry.register('note-view.slash-insert-tweet', withInstance((instanceId) => {
+    tea().clearSlashTrigger(instanceId);
+    tea().insertTweetBlockAtSelection(instanceId);
+  }));
+
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();
