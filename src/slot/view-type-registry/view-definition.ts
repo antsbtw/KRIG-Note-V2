@@ -10,6 +10,7 @@ import type { SlashItem } from '../interaction-registries/slash-registry/slash-t
 import type { HandleItem } from '../interaction-registries/handle-registry/handle-types';
 import type { FloatingToolbarItem } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-types';
 import type { ToolbarItem } from '../toolbar-registry/toolbar-types';
+import type { KeymapBinding } from '../keymap-registry/keymap-types';
 
 /** view 组件 props — payload 由 bus.slot.openRight 传入,view 实例 mount 时拿到 */
 export interface ViewComponentProps {
@@ -53,4 +54,6 @@ export interface ViewDefinition {
   handle?: Omit<HandleItem, 'view'>[];
   /** view 独有 FloatingToolbar 项 */
   floatingToolbar?: Omit<FloatingToolbarItem, 'view'>[];
+  /** view 全局快捷键(可选;只在该 view 是当前活跃 view 时生效)— W4.1 */
+  keymap?: KeymapBinding[];
 }

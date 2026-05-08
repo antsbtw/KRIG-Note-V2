@@ -12,6 +12,7 @@ import { floatingToolbarRegistry } from '../interaction-registries/floating-tool
 import { overlayRegistry } from '../interaction-registries/overlay-registry/overlay-registry';
 import { navSideRegistry } from '../nav-side-registry/nav-side-registry';
 import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
+import { keymapRegistry } from '../keymap-registry/keymap-registry';
 
 export function reportL4Alive(): void {
   window.electronAPI?.reportAlive({
@@ -27,6 +28,7 @@ export function reportL4Alive(): void {
       overlay: overlayRegistry.count,
       navSide: navSideRegistry.count,
       toolbar: toolbarRegistry.count,
+      keymap: keymapRegistry.count,
     },
   });
 }
