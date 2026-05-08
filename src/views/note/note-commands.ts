@@ -259,6 +259,18 @@ export function registerNoteCommands(): void {
     textEditingDriverApi.insertTableAtSelection(instanceId, 3, 3);
   }));
 
+  // L5-B3.14:slash insert-file-block — 插入空 fileBlock placeholder
+  commandRegistry.register('note-view.slash-insert-file-block', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertFileBlockAtSelection(instanceId);
+  }));
+
+  // L5-B3.14:slash insert-external-ref — 插入空 externalRef placeholder
+  commandRegistry.register('note-view.slash-insert-external-ref', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertExternalRefAtSelection(instanceId);
+  }));
+
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();
