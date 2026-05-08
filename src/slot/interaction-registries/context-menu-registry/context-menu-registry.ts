@@ -33,6 +33,8 @@ class ContextMenuRegistry {
         // enabledWhen 过滤
         if (item.enabledWhen === 'has-selection' && !context.hasSelection) return false;
         if (item.enabledWhen === 'is-editable' && !context.isEditable) return false;
+        // L5-B3.15:has-link 条件项(如"移除链接")— 选区无 link mark 时隐藏
+        if (item.enabledWhen === 'has-link' && !context.hasLink) return false;
         return true;
       })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

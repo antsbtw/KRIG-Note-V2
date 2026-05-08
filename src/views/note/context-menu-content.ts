@@ -44,6 +44,9 @@ export function registerContextMenu(): void {
     // ── group: marks(占位 — 真实"按选区当前 marks 动态显示移除项"留 sub-stage)──
     { id: 'note-view.cm.remove-marks', label: '✖ 移除格式', command: 'note-view.cm-remove-marks',
       view: VIEW, enabledWhen: 'has-selection', group: 'marks', order: 30 },
+    // L5-B3.15:选区有 link mark 时显示"移除链接"(条件 has-link)
+    { id: 'note-view.cm.remove-link', label: '🔗 移除链接', command: 'note-view.cm-remove-link',
+      view: VIEW, enabledWhen: 'has-link', group: 'marks', order: 31 },
     // ── group: destructive ──
     { id: 'note-view.cm.delete-block', label: '🗑 删除 Block', command: 'note-view.cm-delete-block',
       view: VIEW, enabledWhen: 'is-editable', group: 'destructive', order: 90 },

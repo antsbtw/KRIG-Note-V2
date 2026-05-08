@@ -11,6 +11,7 @@ import { useEffect, RefObject } from 'react';
 import { contextMenuController } from './context-menu-controller';
 import { contextMenuRegistry } from '../interaction-registries/context-menu-registry/context-menu-registry';
 import type { ContextInfo } from '../interaction-registries/context-menu-registry/context-menu-types';
+import { selection } from '@capabilities/selection';
 
 export function useContextMenuTrigger(
   elementRef: RefObject<HTMLElement | null>,
@@ -27,13 +28,19 @@ export function useContextMenuTrigger(
       if (target?.closest('[data-krig-context-menu-handled]')) return;
 
       // 检测当前选区状态
-      const selection = window.getSelection();
-      const hasSelection = !!selection && !selection.isCollapsed;
+      const domSel = window.getSelection();
+      const hasSelection = !!domSel && !domSel.isCollapsed;
       const isEditable = !!target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      // L5-B3.15:从 selection capability 读 activeMarks 判 hasLink
+      // (driver 在选区变化时已 emit;capability 缓存 last value,右键时同步读)
+      const selPayload = selection.api.getCurrent();
+      const hasLink = !!selPayload?.activeMarks?.includes('link');
 
       const context: ContextInfo = {
         hasSelection,
         isEditable,
+        hasLink,
         x: e.clientX,
         y: e.clientY,
       };

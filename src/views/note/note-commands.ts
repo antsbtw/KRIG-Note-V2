@@ -400,4 +400,12 @@ export function registerNoteCommands(): void {
     console.warn('[note-view] cm-remove-marks: 占位,未实现');
     contextMenuController.hide();
   });
+
+  // L5-B3.15:右键移除选区 link mark(对应 has-link 条件项)
+  commandRegistry.register('note-view.cm-remove-link', () => {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    textEditingDriverApi.removeLink(wsId);
+    contextMenuController.hide();
+  });
 }
