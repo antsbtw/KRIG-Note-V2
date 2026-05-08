@@ -8,9 +8,9 @@
  * - noteStore:取笔记数据(全局共享)
  */
 
-import { useSyncExternalStore, useCallback, useEffect } from 'react';
-import { textEditingDriver, textEditingDriverApi } from '@drivers/text-editing-driver';
-import type { DriverSerialized } from '@drivers/text-editing-driver';
+import { useMemo, useSyncExternalStore, useCallback, useEffect } from 'react';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { noteStore } from './note-store';
 import { getNoteWsState, updateNote, deriveTitle } from './data-model';
@@ -24,6 +24,12 @@ interface NoteViewProps {
 }
 
 export function NoteView({ workspaceId }: NoteViewProps) {
+  // W5 C4:间接路由拿 text-editing capability(useMemo 缓存,React identity 稳定)
+  const textEditing = useMemo(
+    () => requireCapabilityApi<TextEditingApi>('text-editing'),
+    [],
+  );
+
   // 订阅当前 ws 的 activeNoteId(per-workspace)
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
@@ -64,7 +70,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     if (!anchor) return;
     // 等编辑器装配 + DOM 渲染完成
     const t = window.setTimeout(() => {
-      textEditingDriverApi.scrollToAnchor(workspaceId, anchor);
+      textEditing.api.scrollToAnchor(workspaceId, anchor);
     }, 100);
     return () => window.clearTimeout(t);
   }, [activeNoteId, workspaceId]);
@@ -86,10 +92,11 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     );
   }
 
+  const Host = textEditing.Host;
   return (
     <div className="krig-note-view" data-view-id="note-view">
       <div className="krig-note-view-content">
-        <textEditingDriver.Host
+        <Host
           config={{
             instanceId: workspaceId,
             undoScope: 'note-view.pm',

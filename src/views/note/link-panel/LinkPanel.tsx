@@ -17,7 +17,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { textEditingDriverApi } from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { noteStore, type Note } from '../note-store';
 import { FileTab } from './FileTab';
 
@@ -65,7 +66,7 @@ function extractHeadings(docJson: unknown): HeadingItem[] {
 export function LinkPanel({ onClose }: PopupCloseProps) {
   const wsId = workspaceManager.getActiveId();
   const currentHref = useMemo(
-    () => (wsId ? textEditingDriverApi.getActiveLinkHref(wsId) : null),
+    () => (wsId ? requireCapabilityApi<TextEditingApi>('text-editing').api.getActiveLinkHref(wsId) : null),
     [wsId],
   );
 
@@ -80,13 +81,13 @@ export function LinkPanel({ onClose }: PopupCloseProps) {
 
   const handleApply = (href: string) => {
     if (!wsId || !href) return;
-    textEditingDriverApi.setLink(wsId, href);
+    requireCapabilityApi<TextEditingApi>('text-editing').api.setLink(wsId, href);
     onClose();
   };
 
   const handleRemove = () => {
     if (!wsId) return;
-    textEditingDriverApi.removeLink(wsId);
+    requireCapabilityApi<TextEditingApi>('text-editing').api.removeLink(wsId);
     onClose();
   };
 

@@ -22,7 +22,7 @@
  *     config.viewId 守门。
  */
 
-import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
+import { Plugin, PluginKey } from 'prosemirror-state';
 
 export const titleGuardKey = new PluginKey('text-editing-driver:title-guard');
 

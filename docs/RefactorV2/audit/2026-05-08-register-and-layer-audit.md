@@ -373,6 +373,48 @@ P2-6(capability→slot 反依赖)
 
 **处置**:**不在 audit Wave 4.x 整改范围**(audit 关注分层/注册原则,这两条是 Electron webview / React hook 维度问题)。后续单独立 issue 跟进,优先级看是否影响用户感知。
 
+### 5.2 W5 严格态边界定义(2026-05-08 复审钉死)
+
+W5 完工后用户复审提"capability 模块级单例 + driver/slot 直 import 链路是否仍违反注册原则"。澄清 W5 严格态有 3 个可能定义,W5 实际选了其中之一:
+
+| 定义 | 范围 | 工作量 |
+|---|---|---|
+| **A:View 边界严格态**(W5 选此) | view 0 处直 import @capabilities/* 或 @drivers/* 运行时值;driver/slot 仍可直 import capability 模块级单例(charter line 88 主语是 View) | 已完成 |
+| B:全局注册式访问 | A + driver/slot/frame-bindings/triggers 也走 registry;capability 模块级 export 不删但所有消费链路改造 | charter 未明文要求,**留 follow-up** |
+| C:模块级 export 完全删除 | B + 所有 capability 删 `export const`,任何消费者必须经 registry | 最严格,**留 charter v0.5+** |
+
+#### W5 选 A 的理由
+
+1. **charter line 88 字面主语是 View**:"View **不直接 import 能力实现**"。driver/slot 不在禁列
+2. **driver 是 capability 内部实现细节**(charter § 1.3 表格 capability 封装 driver),它们跟 capability 协作天然紧密;走 registry 反而设了一层冗余
+3. **slot 是 L4 基础设施**,跟 capability 在层次上几乎平级(同属 V2 工程实施基础),互相 import 不构成跨层穿透
+
+#### W5 不选 B/C 的理由
+
+1. charter v0.4 没明文要求"全局注册式访问"
+2. driver 端走 registry 间接路由会让 capability-integrations / build-block-handle-plugin 等关键文件变得啰嗦,工程价值低
+3. capability 模块级 export 当前是 driver/slot 内部消费者用,不是"过渡兜底"
+4. 升级到 B/C 工作量大(driver 端尤其敏感,clipboard-handlers / selection-source 等都要改;capability 模块级 export 删除涉及全部老消费者)
+
+#### 已知边界
+
+- **W5 完工后仍存在的现状**(用户复审 P1-B 指出):
+  - 5 老 capability 模块级 `export const selection / clipboard / undoRedo / dnd / insertion`
+  - media-storage 模块级 `export function mediaPutBase64 / mediaDownload / mediaResolvePath`
+  - driver 内部(text-editing-driver)直 import 上述 capability 单例
+  - slot/frame-bindings(ToolbarBinding / FloatingToolbarBinding)直 import selection
+  - slot/triggers(use-context-menu-trigger)直 import selection
+- **W5 严格态(定义 A)允许这些**——它们都是合规 capability 协作链路
+
+#### Follow-up(若需升级到 B/C)
+
+- 启动 W6 严格态:driver/slot 全切 registry 间接路由
+- 启动 W7 严格态:capability 模块级 export 删除,renderer side-effect import 兜底注册
+- charter v0.5 修订时**首先需要明确**A/B/C 选哪个作为字面终态
+
+**W5 完工状态命名**(commit message / 收尾报告统一用):
+> charter v0.4 工程可执行严格态(View 边界,间接路由)
+
 ---
 
 ## 6. 度量

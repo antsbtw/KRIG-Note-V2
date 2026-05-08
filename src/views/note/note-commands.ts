@@ -7,7 +7,8 @@
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { textEditingDriverApi, type MarkName } from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { MarkName, TextEditingApi } from '@capabilities/text-editing/types';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import { popupController } from '@slot/triggers/popup-controller';
@@ -29,6 +30,14 @@ import {
 } from './tree-operations';
 import { decodeTreeId, encodeNoteId } from './tree-builder';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
+
+/**
+ * W5 C4:lazy getter — 命令 handler 内部用,避免 module load 时 require
+ * (capability 注册副作用顺序敏感),每次调用拿最新 api。
+ */
+function tea(): TextEditingApi['api'] {
+  return requireCapabilityApi<TextEditingApi>('text-editing').api;
+}
 
 /** 确保 slotBinding.left = 'note-view' */
 function ensureNoteViewActive(wsId: string): void {
@@ -138,7 +147,7 @@ export function registerNoteCommands(): void {
 
   function registerToggleMark(commandId: string, markName: MarkName): void {
     commandRegistry.register(commandId, withInstance((instanceId) => {
-      textEditingDriverApi.toggleMark(instanceId, markName);
+      tea().toggleMark(instanceId, markName);
     }));
   }
 
@@ -152,7 +161,7 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const lvl = typeof level === 'number' ? level : null;
-    textEditingDriverApi.setHeading(wsId, lvl);
+    tea().setHeading(wsId, lvl);
   });
 
   // ── L5-B3.3:文字颜色 / 背景高亮(Plan C-1 缩水版 — 6 色循环;完整 ColorPicker UI 留 L5-B3.4)──
@@ -178,25 +187,25 @@ export function registerNoteCommands(): void {
   ];
 
   commandRegistry.register('note-view.cycle-text-color', withInstance((instanceId) => {
-    const cur = textEditingDriverApi.getActiveTextColor(instanceId);
+    const cur = tea().getActiveTextColor(instanceId);
     const idx = TEXT_COLOR_CYCLE.indexOf(cur ?? '');
     const next = TEXT_COLOR_CYCLE[(idx + 1) % TEXT_COLOR_CYCLE.length];
-    textEditingDriverApi.setTextColor(instanceId, next);
+    tea().setTextColor(instanceId, next);
   }));
 
   commandRegistry.register('note-view.cycle-highlight', withInstance((instanceId) => {
-    const cur = textEditingDriverApi.getActiveHighlight(instanceId);
+    const cur = tea().getActiveHighlight(instanceId);
     const idx = HIGHLIGHT_COLOR_CYCLE.indexOf(cur ?? '');
     const next = HIGHLIGHT_COLOR_CYCLE[(idx + 1) % HIGHLIGHT_COLOR_CYCLE.length];
-    textEditingDriverApi.setHighlight(instanceId, next);
+    tea().setHighlight(instanceId, next);
   }));
 
   commandRegistry.register('note-view.undo', withInstance((instanceId) => {
-    textEditingDriverApi.undo(instanceId);
+    tea().undo(instanceId);
   }));
 
   commandRegistry.register('note-view.redo', withInstance((instanceId) => {
-    textEditingDriverApi.redo(instanceId);
+    tea().redo(instanceId);
   }));
 
   // ── L5-B3.2:Turn Into 9 种类型(slash / handle / cm 三套命令)──
@@ -210,14 +219,14 @@ export function registerNoteCommands(): void {
   // ── slash:作用于光标当前 block(setHeading 走 selection)──
   function registerSlashTurn(commandId: string, target: TurnTarget): void {
     commandRegistry.register(commandId, withInstance((instanceId) => {
-      textEditingDriverApi.clearSlashTrigger(instanceId);
+      tea().clearSlashTrigger(instanceId);
       // slash 没有 pos 参数,作用于光标所在 block
       const ws = workspaceManager.get(instanceId);
       if (!ws) return;
-      const result = textEditingDriverApi.resolveBlockAt(instanceId, { x: 0, y: 0 });
+      const result = tea().resolveBlockAt(instanceId, { x: 0, y: 0 });
       // 用光标位置(driver api 没暴露 cursor pos,用 turnIntoSelection 替代)
       // 简化:直接走 driver api 内部 — 通过 setSelection 之前 PM state.selection.$from
-      textEditingDriverApi.turnIntoSelection(instanceId, target);
+      tea().turnIntoSelection(instanceId, target);
       void ws;
       void result;
     }));
@@ -239,50 +248,50 @@ export function registerNoteCommands(): void {
   // 跟 turn-* 不同:image 不能从段落 turn 出来(image 含 caption 内嵌结构),
   // 用专门的 insert API
   commandRegistry.register('note-view.slash-insert-image', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertImageAtSelection(instanceId);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertImageAtSelection(instanceId);
   }));
 
   // L5-B3.6:slash insert-math-block — 插入 mathBlock(空,自动进 edit 态)
   commandRegistry.register('note-view.slash-insert-math-block', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertMathBlockAtSelection(instanceId);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertMathBlockAtSelection(instanceId);
   }));
 
   // L5-B3.6:行内公式入口在 floating toolbar(选中文字 → 转 mathInline)
   // 选区为空时也允许插入(备份路径,弹编辑器)
   commandRegistry.register('note-view.insert-math-inline', withInstance((instanceId) => {
-    textEditingDriverApi.insertMathInlineAtSelection(instanceId);
+    tea().insertMathInlineAtSelection(instanceId);
   }));
 
   // L5-B3.7:slash insert-table — 插入 3x3 表格(第一行 header)
   commandRegistry.register('note-view.slash-insert-table', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertTableAtSelection(instanceId, 3, 3);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertTableAtSelection(instanceId, 3, 3);
   }));
 
   // L5-B3.14:slash insert-file-block — 插入空 fileBlock placeholder
   commandRegistry.register('note-view.slash-insert-file-block', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertFileBlockAtSelection(instanceId);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertFileBlockAtSelection(instanceId);
   }));
 
   // L5-B3.14:slash insert-external-ref — 插入空 externalRef placeholder
   commandRegistry.register('note-view.slash-insert-external-ref', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertExternalRefAtSelection(instanceId);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertExternalRefAtSelection(instanceId);
   }));
 
   // L5-B3.16:slash insert-audio — 插入空 audioBlock placeholder
   commandRegistry.register('note-view.slash-insert-audio', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertAudioBlockAtSelection(instanceId);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertAudioBlockAtSelection(instanceId);
   }));
 
   // L5-B3.16:slash insert-video — 插入空 videoBlock placeholder
   commandRegistry.register('note-view.slash-insert-video', withInstance((instanceId) => {
-    textEditingDriverApi.clearSlashTrigger(instanceId);
-    textEditingDriverApi.insertVideoBlockAtSelection(instanceId);
+    tea().clearSlashTrigger(instanceId);
+    tea().insertVideoBlockAtSelection(instanceId);
   }));
 
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
@@ -298,7 +307,7 @@ export function registerNoteCommands(): void {
     commandRegistry.register(commandId, () => {
       const ctx = getHandlePos();
       if (!ctx) return;
-      textEditingDriverApi.turnIntoAt(ctx.instanceId, ctx.pos, target);
+      tea().turnIntoAt(ctx.instanceId, ctx.pos, target);
       handleMenuController.hide();
     });
   }
@@ -318,7 +327,7 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.handle-copy-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
-    const text = textEditingDriverApi.getBlockTextAt(ctx.instanceId, ctx.pos);
+    const text = tea().getBlockTextAt(ctx.instanceId, ctx.pos);
     if (text) {
       void navigator.clipboard.writeText(text).catch(() => {
         /* clipboard 失败静默 */
@@ -332,7 +341,7 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.handle-copy-block-link', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
-    const anchor = textEditingDriverApi.getBlockAnchorAt(ctx.instanceId, ctx.pos);
+    const anchor = tea().getBlockAnchorAt(ctx.instanceId, ctx.pos);
     if (!anchor) {
       handleMenuController.hide();
       return;
@@ -352,14 +361,14 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.handle-duplicate-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
-    textEditingDriverApi.copyBlockAt(ctx.instanceId, ctx.pos);
+    tea().copyBlockAt(ctx.instanceId, ctx.pos);
     handleMenuController.hide();
   });
 
   commandRegistry.register('note-view.handle-delete-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
-    textEditingDriverApi.deleteBlockAt(ctx.instanceId, ctx.pos);
+    tea().deleteBlockAt(ctx.instanceId, ctx.pos);
     handleMenuController.hide();
   });
 
@@ -368,7 +377,7 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return null;
     const state = contextMenuController.getState();
-    const result = textEditingDriverApi.resolveBlockAt(wsId, { x: state.x, y: state.y });
+    const result = tea().resolveBlockAt(wsId, { x: state.x, y: state.y });
     if (!result) return null;
     return { instanceId: wsId, pos: result.pos };
   }
@@ -403,7 +412,7 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.cm-delete-block', () => {
     const ctx = getCmBlockPos();
     if (!ctx) return;
-    textEditingDriverApi.deleteBlockAt(ctx.instanceId, ctx.pos);
+    tea().deleteBlockAt(ctx.instanceId, ctx.pos);
     contextMenuController.hide();
   });
 
@@ -423,7 +432,7 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const cm = contextMenuController.getState();
-    textEditingDriverApi.removeLinkAtClientPoint(wsId, cm.x, cm.y);
+    tea().removeLinkAtClientPoint(wsId, cm.x, cm.y);
     contextMenuController.hide();
   });
 

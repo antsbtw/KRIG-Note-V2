@@ -14,7 +14,8 @@
  * 同文档 anchor 滚动由 driver 内部处理(scrollToBlockAnchor),view 不参与。
  */
 
-import { setLinkClickHandler } from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { setActiveNote, getNoteWsState } from './data-model';
@@ -36,7 +37,8 @@ export function takePendingAnchor(): string | null {
 }
 
 export function registerLinkClickIntegration(): void {
-  setLinkClickHandler({
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  textEditing.setLinkClickHandler({
     onOpenNote(noteId, blockAnchor) {
       const wsId = workspaceManager.getActiveId();
       if (!wsId) return;

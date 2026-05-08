@@ -16,8 +16,8 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
 import { noteStore } from './note-store';
 import { folderStore } from './folder-store';
-import { createEmptyDoc, extractFirstParagraphText } from '@drivers/text-editing-driver';
-import type { DriverSerialized } from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
 
 export type SortState = 'title-asc' | 'title-desc' | 'date-asc' | 'date-desc' | null;
 
@@ -128,7 +128,7 @@ export function getTransientVersion(): number {
 // ── 业务 API ──
 
 export function deriveTitle(doc: DriverSerialized): string {
-  const text = extractFirstParagraphText(doc);
+  const text = requireCapabilityApi<TextEditingApi>('text-editing').extractFirstParagraphText(doc);
   return text || '未命名';
 }
 
@@ -136,7 +136,8 @@ export function deriveTitle(doc: DriverSerialized): string {
 export function createNote(workspaceId: string, folderId: string | null = null): string | null {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return null;
-  const id = noteStore.create(createEmptyDoc(), '未命名', folderId);
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const id = noteStore.create(textEditing.createEmptyDoc(), '未命名', folderId);
   writePersistent(workspaceId, { activeNoteId: id });
   // 创建到 folder 时自动展开它
   if (folderId) {

@@ -17,14 +17,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EditorView } from 'prosemirror-view';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
-import {
-  noteLinkCommandKey,
-  getNoteLinkActiveView,
-} from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { noteStore, type Note } from '../note-store';
 
+/** PM PluginKey 类型最小子集(避免直 import prosemirror-state)*/
+interface NoteLinkPluginKey {
+  getState(state: unknown): { active: boolean; query: string; from: number; to: number } | null;
+}
+
 /** 拿当前 plugin state 的 query / from / to */
-function readPluginState(view: EditorView | null): { query: string; from: number; to: number } | null {
+function readPluginState(
+  view: EditorView | null,
+  noteLinkCommandKey: NoteLinkPluginKey,
+): { query: string; from: number; to: number } | null {
   if (!view) return null;
   const s = noteLinkCommandKey.getState(view.state);
   if (!s?.active) return null;
@@ -32,7 +38,9 @@ function readPluginState(view: EditorView | null): { query: string; from: number
 }
 
 export function NoteLinkSearchPanel({ onClose }: PopupCloseProps) {
-  const view = getNoteLinkActiveView();
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const noteLinkCommandKey = textEditing.noteLinkCommandKey as NoteLinkPluginKey;
+  const view = textEditing.getNoteLinkActiveView() as EditorView | null;
   const [allNotes] = useState<Note[]>(() => noteStore.getAll());
   const [tick, setTick] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -53,8 +61,8 @@ export function NoteLinkSearchPanel({ onClose }: PopupCloseProps) {
   }, [view]);
 
   const pluginState = useMemo(
-    () => readPluginState(view),
-    [view, tick],
+    () => readPluginState(view, noteLinkCommandKey),
+    [view, tick, noteLinkCommandKey],
   );
 
   // plugin 关闭时(query 删掉 [[ / 输了 ]] / esc)— 同步关 popup
@@ -87,7 +95,9 @@ export function NoteLinkSearchPanel({ onClose }: PopupCloseProps) {
 
     const { from, to } = s;
     // step 1:删 [[query 源文本 + 标 close meta(同一个 tr)
-    const tr = view.state.tr.delete(from, to).setMeta(noteLinkCommandKey, { close: true });
+    // setMeta 接受 PluginKey 实例;noteLinkCommandKey 类型在 capability 边界被
+    // 窄化为 NoteLinkPluginKey,运行时仍是 PM PluginKey,通过 cast 还原 PM 兼容
+    const tr = view.state.tr.delete(from, to).setMeta(noteLinkCommandKey as unknown as Parameters<typeof view.state.tr.setMeta>[0], { close: true });
     view.dispatch(tr);
 
     // step 2:在删除后位置(== from)插入 noteLink atom

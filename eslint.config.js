@@ -31,10 +31,21 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['prosemirror-*'], message: 'view 通过 driver(@drivers/text-editing-driver) 间接用 PM,禁止直接 import' },
-          { group: ['three', 'three/*'], message: 'view 通过 driver(@drivers/graph-editing-driver) 间接用 Three.js' },
-          { group: ['pdfjs-dist'], message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用' },
-          { group: ['epubjs', 'foliate-js'], message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用' },
+          // W5 修订:对外 npm 包加 allowTypeImports: true,跟 W5 capability/driver 规则口径一致
+          // (类型 import 不引入运行时依赖,view 端从 driver/PM 拿类型在 capability/types.ts
+          //  中转之后仍然合规;PM EditorView 等类型在 view 操作 PM 实例时是必需的)
+          { group: ['prosemirror-*'],
+            message: 'view 通过 driver(@drivers/text-editing-driver) 间接用 PM,禁止直接 import 运行时;类型 import 允许',
+            allowTypeImports: true },
+          { group: ['three', 'three/*'],
+            message: 'view 通过 driver(@drivers/graph-editing-driver) 间接用 Three.js',
+            allowTypeImports: true },
+          { group: ['pdfjs-dist'],
+            message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用',
+            allowTypeImports: true },
+          { group: ['epubjs', 'foliate-js'],
+            message: 'view 通过 driver(@drivers/ebook-rendering-driver) 间接用',
+            allowTypeImports: true },
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
           // Wave 2 新增 — audit P1-5:view 不直触 storage,走 capability(如 @capabilities/media-storage)
           { group: ['@storage/*'], message: 'view 不直接 import @storage/*,走对应 capability(audit P1-5)' },
@@ -45,6 +56,12 @@ export default [
           { group: ['@capabilities/*'],
             message: 'view 不直接 import capability 运行时值,走 requireCapabilityApi(id) 间接路由;' +
                      '类型走 import type from @capabilities/<id>/types(W5 设计 § 5)',
+            allowTypeImports: true },
+          // Wave 5 C4 新增 — driver 是 capability 内部实现,view 不可见,走 capability api
+          // allowTypeImports: true — view 仍可通过 import type 拿 driver 类型(经 capability/types.ts 中转)
+          { group: ['@drivers/*'],
+            message: 'view 不直接 import driver(driver 是 capability 内部实现);' +
+                     '走 requireCapabilityApi(id),类型走 import type from @capabilities/<id>/types(W5 C4)',
             allowTypeImports: true },
         ],
       }],

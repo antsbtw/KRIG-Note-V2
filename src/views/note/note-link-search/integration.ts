@@ -8,14 +8,18 @@
  * (复用 NoteView Cmd+K fallback 模式 — 见 NoteView.tsx 中 fake anchor 处理)
  */
 
-import { setNoteLinkSearchHandler, noteLinkCommandKey } from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { popupController } from '@slot/triggers/popup-controller';
 
 const POPUP_ID = 'note-view.popup.note-link';
 
 export function registerNoteLinkSearchIntegration(): void {
-  setNoteLinkSearchHandler({
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  textEditing.setNoteLinkSearchHandler({
     onOpen(view) {
+      // noteLinkCommandKey 通过 capability api 访问(不直 import driver)
+      const noteLinkCommandKey = textEditing.noteLinkCommandKey as { getState(state: unknown): { active: boolean; from: number; to: number } | null };
       const s = noteLinkCommandKey.getState(view.state);
       if (!s?.active) return;
       // 用 [[ 起始位置 PM coords 作 anchor

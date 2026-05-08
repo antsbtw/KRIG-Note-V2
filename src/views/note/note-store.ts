@@ -12,7 +12,7 @@
  * L5-A 用 localStorage('krig.notes' key)。L7+ 切 SurrealDB 时迁到 src/storage/。
  */
 
-import type { DriverSerialized } from '@drivers/text-editing-driver';
+import type { DriverSerialized } from '@capabilities/text-editing/types';
 
 export interface Note {
   id: string;

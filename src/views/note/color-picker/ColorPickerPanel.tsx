@@ -14,7 +14,8 @@
 
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { textEditingDriverApi } from '@drivers/text-editing-driver';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 const TEXT_COLORS: ReadonlyArray<{ name: string; color: string }> = [
   { name: 'Default', color: '' },
@@ -44,18 +45,18 @@ const BG_COLORS: ReadonlyArray<{ name: string; color: string }> = [
 
 export function ColorPickerPanel({ onClose }: PopupCloseProps) {
   const wsId = workspaceManager.getActiveId();
-  const currentText = wsId ? textEditingDriverApi.getActiveTextColor(wsId) : null;
-  const currentBg = wsId ? textEditingDriverApi.getActiveHighlight(wsId) : null;
+  const currentText = wsId ? requireCapabilityApi<TextEditingApi>('text-editing').api.getActiveTextColor(wsId) : null;
+  const currentBg = wsId ? requireCapabilityApi<TextEditingApi>('text-editing').api.getActiveHighlight(wsId) : null;
 
   const applyText = (color: string) => {
     if (!wsId) return;
-    textEditingDriverApi.setTextColor(wsId, color);
+    requireCapabilityApi<TextEditingApi>('text-editing').api.setTextColor(wsId, color);
     onClose();
   };
 
   const applyBg = (color: string) => {
     if (!wsId) return;
-    textEditingDriverApi.setHighlight(wsId, color);
+    requireCapabilityApi<TextEditingApi>('text-editing').api.setHighlight(wsId, color);
     onClose();
   };
 
