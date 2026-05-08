@@ -223,8 +223,8 @@ export function WebView({ workspaceId }: WebViewProps) {
       return;
     }
 
-    // 创建左侧 SyncDriver
-    const driver = new SyncDriver('left');
+    // 创建左侧 SyncDriver(W4.2 C1:bus 接口注入)
+    const driver = new SyncDriver('left', slotBus);
     driver.bind(wv);
     syncDriverRef.current = driver;
 
