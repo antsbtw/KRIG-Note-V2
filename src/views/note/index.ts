@@ -34,6 +34,24 @@ registerView({
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },
+  // W4.1:view 全局快捷键(原 NoteView 内嵌 useEffect 拆出)
+  keymap: [
+    {
+      key: 'mod+k',
+      command: 'note-view.popup-link',
+      enabledWhen: ['has-text-selection', 'in-view-area'],
+    },
+    {
+      key: 'mod+[',
+      command: 'note-view.go-back',
+      enabledWhen: ['in-view-area', 'not-in-input'],
+    },
+    {
+      key: 'mod+]',
+      command: 'note-view.go-forward',
+      enabledWhen: ['in-view-area', 'not-in-input'],
+    },
+  ],
   // L5-B1:NavSide 右键由 folderTreeContextMenuRegistry 管;view 全局 contextMenu 暂无
   // L5-B2 真有 PM 编辑区菜单需求时(粘贴/格式化等)在此重新注册
 });
