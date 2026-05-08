@@ -719,7 +719,71 @@ export const textEditingDriverApi = {
     insertTableCommand(rows, cols)(inst.view.state, inst.view.dispatch);
     inst.view.focus();
   },
+
+  /**
+   * 在光标位置插入空 fileBlock placeholder(L5-B3.14)
+   *
+   * - 空段落 → 替换;非空段落 → 当前 block 之后插入
+   * - fileBlock 是 atom 节点,placeholder 状态(无 src)显示 file picker + URL embed
+   */
+  insertFileBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertAtomBlock(inst.view, 'fileBlock');
+  },
+
+  /**
+   * 在光标位置插入空 externalRef placeholder(L5-B3.14)
+   *
+   * - 同 insertFileBlockAtSelection 行为,placeholder 显示 pick file + URL embed
+   */
+  insertExternalRefAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertAtomBlock(inst.view, 'externalRef');
+  },
 };
+
+/**
+ * 通用 atom block 插入辅助(L5-B3.14)— 给 fileBlock / externalRef 等无内嵌 caption
+ * 的 atom 节点用。
+ *
+ * - 空段落 → 替换;非空段落 → 当前 block 之后插入
+ * - 不带任何 attrs(由 NodeView placeholder 引导用户填)
+ */
+function insertAtomBlock(
+  view: import('prosemirror-view').EditorView,
+  nodeName: string,
+): void {
+  const { state, dispatch } = view;
+  const nodeType = state.schema.nodes[nodeName];
+  if (!nodeType) return;
+  const node = nodeType.create();
+  if (!node) return;
+
+  const $from = state.selection.$from;
+  if ($from.depth === 0) {
+    dispatch(state.tr.insert(state.selection.from, node));
+  } else {
+    const blockNode = $from.node(1);
+    const blockStart = $from.before(1);
+    const blockEnd = $from.after(1);
+    const isEmptyParagraph =
+      blockNode.type.name === 'text-block' &&
+      blockNode.content.size === 0 &&
+      blockNode.attrs.level == null &&
+      !blockNode.attrs.isTitle;
+    let tr = state.tr;
+    if (isEmptyParagraph) {
+      tr = tr.replaceWith(blockStart, blockEnd, node);
+    } else {
+      tr = tr.insert(blockEnd, node);
+    }
+    tr = tr.scrollIntoView();
+    dispatch(tr);
+  }
+  view.focus();
+}
 
 /**
  * 计算 selection 内激活的 marks
