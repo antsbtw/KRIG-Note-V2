@@ -1,12 +1,17 @@
 /**
- * LinkPanel — 行内链接编辑面板(L5-B3.4)
+ * LinkPanel — 行内链接编辑面板(L5-B3.4 + L5-B3.15)
  *
- * 简化 V1 LinkPanel:2 Tab(笔记 / 网页),文件 Tab 砍掉(等 viewAPI fileOpenDialog IPC)
+ * 三 Tab(对齐 V1):
+ * - 📄 笔记:noteStore 搜索 + drill heading 二级标题
+ * - 📎 文件(L5-B3.15):import 到 mediaStore / link 到原文件,B3.14 IPC 已就位
+ * - 🔗 网页:输 URL
  *
  * 协议输出:
  * - krig://note/{id}             — 笔记 Tab 选中笔记
  * - krig://block/{id}/{anchor}   — 笔记 Tab drill 二级标题
  * - https://...                  — 网页 Tab 输入 URL
+ * - file://{path}                — 文件 Tab link 模式
+ * - media://{...}                — 文件 Tab import 模式
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -14,8 +19,9 @@ import type { PopupCloseProps } from '@slot/interaction-registries/popup-registr
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { textEditingDriverApi } from '@drivers/text-editing-driver';
 import { noteStore, type Note } from '../note-store';
+import { FileTab } from './FileTab';
 
-type LinkTab = 'note' | 'web';
+type LinkTab = 'note' | 'file' | 'web';
 
 interface HeadingItem {
   level: number;
@@ -63,9 +69,13 @@ export function LinkPanel({ onClose }: PopupCloseProps) {
     [wsId],
   );
 
-  // 已有 link 时按协议自动选 Tab
-  const initialTab: LinkTab =
-    currentHref && currentHref.startsWith('http') ? 'web' : 'note';
+  // 已有 link 时按协议自动选 Tab(L5-B3.15:加 file/media → 文件 Tab)
+  const initialTab: LinkTab = (() => {
+    if (!currentHref) return 'note';
+    if (currentHref.startsWith('http')) return 'web';
+    if (currentHref.startsWith('file://') || currentHref.startsWith('media://')) return 'file';
+    return 'note';
+  })();
   const [tab, setTab] = useState<LinkTab>(initialTab);
 
   const handleApply = (href: string) => {
@@ -83,19 +93,20 @@ export function LinkPanel({ onClose }: PopupCloseProps) {
   return (
     <div className="krig-link-panel">
       <div className="krig-link-panel__tabs">
-        {(['note', 'web'] as const).map((key) => (
+        {(['note', 'file', 'web'] as const).map((key) => (
           <button
             key={key}
             type="button"
             className={`krig-link-panel__tab${tab === key ? ' active' : ''}`}
             onClick={() => setTab(key)}
           >
-            {key === 'note' ? '📄 笔记' : '🔗 网页'}
+            {key === 'note' ? '📄 笔记' : key === 'file' ? '📎 文件' : '🔗 网页'}
           </button>
         ))}
       </div>
 
       {tab === 'note' && <NoteTab onApply={handleApply} onClose={onClose} />}
+      {tab === 'file' && <FileTab onApply={handleApply} onClose={onClose} />}
       {tab === 'web' && (
         <WebTab
           currentHref={currentHref?.startsWith('http') ? currentHref : null}

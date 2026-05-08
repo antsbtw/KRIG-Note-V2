@@ -39,6 +39,8 @@ export function showWebContextMenu(payload: WebContextMenuPayload): void {
   contextMenuController.show(payload.x, payload.y, VIEW, {
     hasSelection: payload.selectionText.length > 0,
     isEditable: false,
+    // L5-B3.15:web view 不消费 has-link 条件,默认 false
+    hasLink: false,
     x: payload.x,
     y: payload.y,
   });

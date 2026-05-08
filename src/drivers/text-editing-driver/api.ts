@@ -157,6 +157,46 @@ export const textEditingDriverApi = {
     }
   },
 
+  /**
+   * 移除指定 viewport 坐标处的 link mark(L5-B3.15)
+   *
+   * 用于右键移除链接 — 不要求用户先选中 link 文字,光标落在 link 内或没光标都能用。
+   * 流程:posAtCoords 把鼠标点 (x, y) 转 PM pos → 跳到该位置 → 走 removeLink
+   * 同款"扩展到完整 link 范围"逻辑。
+   *
+   * 失败(坐标不在编辑器内 / 没 link)— 静默 noop
+   */
+  removeLinkAtClientPoint(instanceId: string, x: number, y: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const view = inst.view;
+    const markType = view.state.schema.marks.link;
+    if (!markType) return;
+
+    // 把鼠标坐标转 PM 位置
+    const posResult = view.posAtCoords({ left: x, top: y });
+    if (!posResult) return;
+    const pos = posResult.pos;
+
+    // 找该位置所在的 link 范围(含完整 link mark 的所有连续字符)
+    const $pos = view.state.doc.resolve(pos);
+    const parent = $pos.parent;
+    const parentStart = $pos.start();
+    let linkFrom = -1;
+    let linkTo = -1;
+    parent.forEach((node, offset) => {
+      const nodeStart = parentStart + offset;
+      const nodeEnd = nodeStart + node.nodeSize;
+      if (nodeStart <= pos && pos <= nodeEnd && markType.isInSet(node.marks)) {
+        linkFrom = nodeStart;
+        linkTo = nodeEnd;
+      }
+    });
+    if (linkFrom < 0 || linkTo <= linkFrom) return;
+    view.dispatch(view.state.tr.removeMark(linkFrom, linkTo, markType));
+    view.focus();
+  },
+
   /** 取选区/光标处 link mark 的 href(无则 null)*/
   getActiveLinkHref(instanceId: string): string | null {
     const inst = instanceRegistry.get(instanceId);
