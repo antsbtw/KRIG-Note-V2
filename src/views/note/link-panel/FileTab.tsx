@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { mediaPutBase64 } from '@storage/media-store';
+import { mediaPutBase64 } from '@capabilities/media-storage';
 
 interface FileTabProps {
   onApply: (href: string) => void;

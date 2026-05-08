@@ -25,7 +25,7 @@
 import { Plugin } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { mediaPutBase64 } from '@storage/media-store';
+import { mediaPutBase64 } from '@capabilities/media-storage';
 
 /** 同步插入 image node 到光标位置 — 返回插入后 image 节点的 PM pos(给异步 setNodeAttribute 用)*/
 function insertImageAtCursor(view: EditorView, imageNode: PMNode): number | null {

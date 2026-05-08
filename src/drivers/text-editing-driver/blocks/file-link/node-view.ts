@@ -13,7 +13,7 @@
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
-import { mediaResolvePath } from '@storage/media-store';
+import { mediaResolvePath } from '@capabilities/media-storage';
 
 async function resolveToLocalPath(src: string): Promise<string | null> {
   if (!src) return null;
