@@ -4,21 +4,12 @@
  * 见 PROTOCOL.md § 4(类型契约)+ DESIGN.md § 2(数据结构)。
  */
 
-/** 统一错误处理类型 — 所有 bus 操作返回 Result,不抛错 */
-export type Result<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: string; detail?: unknown };
+/** Result / ok / fail(Wave 3.3 起单一来源在 @shared/event-bus/result)*/
+export { ok, fail } from '@shared/event-bus/result';
+export type { Result } from '@shared/event-bus/result';
 
-export const ok = <T>(value: T): Result<T> => ({ ok: true, value });
-
-export const fail = (reason: string, detail?: unknown): Result<never> => ({
-  ok: false,
-  reason,
-  detail,
-});
-
-/** Channel listener 形态 */
-export type ChannelListener<T = unknown> = (payload: T) => void;
+/** Channel listener 形态(Wave 3.3 起单一来源在 @shared/event-bus/channel)*/
+export type { ChannelListener } from '@shared/event-bus/channel';
 
 /** Request handler 形态(同步或异步)*/
 export type RequestHandler<I = unknown, O = unknown> = (

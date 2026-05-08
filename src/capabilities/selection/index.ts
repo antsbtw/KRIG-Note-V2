@@ -10,7 +10,7 @@
  * ❌ 不持有具体内容(选区只是位置/范围)
  */
 
-import { ChannelHub } from '@slot/workspace-bus/channel';
+import { ChannelHub } from '@shared/event-bus/channel';
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export type SelectionKind = 'text' | 'block' | 'multi-block' | 'graph-nodes' | 'tree-nodes' | 'empty';

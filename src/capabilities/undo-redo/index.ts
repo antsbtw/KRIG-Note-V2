@@ -7,7 +7,7 @@
  * L5-B 加 prosemirror-history 时,driver 注册真实 scope。
  */
 
-import { ChannelHub } from '@slot/workspace-bus/channel';
+import { ChannelHub } from '@shared/event-bus/channel';
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 
 export interface UndoScopeRegistration {
