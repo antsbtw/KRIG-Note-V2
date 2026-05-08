@@ -13,8 +13,9 @@ import { registerWebCommands } from './web-commands';
 registerView({
   id: 'web-view',
   install: [
-    // L5-B4 v1 不挂 capability(WebView 不参与 selection / clipboard / undo 等编辑能力);
-    // 后续 web-bridge 内容捕获 epic 时按需补 capability
+    // W4.2 C4:依赖 web-rendering capability(charter § 1.2 注册原则)
+    // — driver(web-sync-driver / web-translate-driver)是 capability 内部实现细节,view 不可见
+    'web-rendering',
   ],
   component: WebView,
   navSideTab: { label: 'Web', icon: '🌐', order: 3 },
