@@ -364,6 +364,15 @@ P2-6(capability→slot 反依赖)
 - Capability `media-storage` 的完整 API 设计 —— W3.1 触发时单独立 design
 - charter v0.4 → v0.5 的修订 —— 视整改进展决定是否需要补充设计澄清
 
+### 5.1 W4.2 Session 1 验证期间发现的预存 bug(2026-05-08)
+
+跟分层/注册原则整改无关,但既然在主分支上重现成功,登记跟进:
+
+- **WebView 访问 google.com 时闪屏 + 菜单点击立刻收起** —— Google 反爬挑战页(`/sorry/index?...&q=EhAm...`)频繁切 URL,WebView 的 `did-navigate` handler 持久化每次 URL 又触发新 navigate,大量 `ERR_ABORTED (-3)`。**main 与 W4.2 Session 1 分支同症,确认是预存 bug**,跟 driver 物理迁移无因果
+- **`useSyncExternalStore` getSnapshot 警告** —— 启动时 React DevTools 报 `The result of getSnapshot should be cached to avoid an infinite loop`,触发点疑似 `WebView.tsx:65` 或 `:74` 的两个 useSyncExternalStore;data-model.ts 已有 cache 机制(memory 里 `feedback_use_sync_external_store_stable_ref`),但本警告在 main 同样可见,**预存 bug**
+
+**处置**:**不在 audit Wave 4.x 整改范围**(audit 关注分层/注册原则,这两条是 Electron webview / React hook 维度问题)。后续单独立 issue 跟进,优先级看是否影响用户感知。
+
 ---
 
 ## 6. 度量
