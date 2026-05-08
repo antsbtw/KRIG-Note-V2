@@ -111,4 +111,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return '';
     }
   },
+
+  // ── L5-B3.17:yt-dlp capability ──
+  ytdlpCheckStatus(): Promise<{ installed: boolean; version?: string; path?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_CHECK_STATUS);
+  },
+  ytdlpInstall(): Promise<{ installed: boolean; version?: string; path?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_INSTALL);
+  },
+  /** 订阅 install progress — 返回取消订阅函数(对齐 onFullscreenChanged 模式)*/
+  onYtdlpInstallProgress(callback: (progress: unknown) => void): () => void {
+    const handler = (_event: unknown, progress: unknown): void => callback(progress);
+    ipcRenderer.on(IPC_CHANNELS.YTDLP_INSTALL_PROGRESS, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.YTDLP_INSTALL_PROGRESS, handler);
+  },
+  ytdlpDownload(url: string, outputPath?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_DOWNLOAD, url, outputPath);
+  },
+  onYtdlpDownloadProgress(callback: (progress: unknown) => void): () => void {
+    const handler = (_event: unknown, progress: unknown): void => callback(progress);
+    ipcRenderer.on(IPC_CHANNELS.YTDLP_DOWNLOAD_PROGRESS, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.YTDLP_DOWNLOAD_PROGRESS, handler);
+  },
+  ytdlpGetInfo(url: string): Promise<Record<string, unknown> | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_GET_INFO, url);
+  },
+  ytdlpSaveSubtitle(
+    videoFilePath: string,
+    langCode: string,
+    timestampText: string,
+  ): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_SAVE_SUBTITLE, videoFilePath, langCode, timestampText);
+  },
 });
