@@ -629,45 +629,31 @@ export const textEditingDriverApi = {
   insertImageAtSelection(instanceId: string): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
-    const { state, dispatch } = inst.view;
-    const schema = state.schema;
-    const imageType = schema.nodes.image;
-    const textBlockType = schema.nodes['text-block'];
-    if (!imageType || !textBlockType) return;
+    insertWithCaptionBlock(inst.view, 'image');
+  },
 
-    const captionNode = textBlockType.create();
-    const imageNode = imageType.create({}, captionNode);
-    if (!imageNode) return;
+  /**
+   * 在光标位置插入空 audioBlock placeholder(L5-B3.16)
+   *
+   * 行为同 insertImageAtSelection:空段落替换 / 否则段后插入,光标进 caption。
+   * audioBlock attrs.src=null 触发 placeholder(🎵 + Choose file + URL embed)。
+   */
+  insertAudioBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertWithCaptionBlock(inst.view, 'audioBlock');
+  },
 
-    const $from = state.selection.$from;
-    if ($from.depth === 0) {
-      // 顶层:直接在选区前插入
-      dispatch(state.tr.insert(state.selection.from, imageNode));
-    } else {
-      const blockNode = $from.node(1);
-      const blockStart = $from.before(1);
-      const blockEnd = $from.after(1);
-      // 当前 block 为空段落 → 替换
-      const isEmptyParagraph =
-        blockNode.type.name === 'text-block' &&
-        blockNode.content.size === 0 &&
-        (blockNode.attrs.level == null);
-      let tr = state.tr;
-      if (isEmptyParagraph) {
-        tr = tr.replaceWith(blockStart, blockEnd, imageNode);
-      } else {
-        // 在当前 block 之后插入
-        tr = tr.insert(blockEnd, imageNode);
-      }
-      // 光标移到 image caption 内(让用户能直接写 caption 或继续编辑)
-      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
-      // image 起点 + 1 进入 image,再 + 1 进入 caption text-block 内
-      const captionPos = insertPos + 2;
-      const sel = TextSelection.create(tr.doc, captionPos);
-      tr = tr.setSelection(sel).scrollIntoView();
-      dispatch(tr);
-    }
-    inst.view.focus();
+  /**
+   * 在光标位置插入空 videoBlock placeholder(L5-B3.16)
+   *
+   * 行为同 insertImageAtSelection。videoBlock attrs.src=null 触发 placeholder
+   * (🎞 + Choose file + URL embed,URL 支持 mp4 / YouTube)。
+   */
+  insertVideoBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertWithCaptionBlock(inst.view, 'videoBlock');
   },
 
   /**
@@ -791,6 +777,62 @@ export const textEditingDriverApi = {
  * - 空段落 → 替换;非空段落 → 当前 block 之后插入
  * - 不带任何 attrs(由 NodeView placeholder 引导用户填)
  */
+/**
+ * 通用"含 caption 的 block"插入辅助(L5-B3.16)— 给 image / audioBlock / videoBlock 共用
+ *
+ * 这三个 block 都是 content='block'(单段 caption,V2 PM 不允许节点名含短横线,
+ * 用 'block' group 通配 — 实际用户写段落 text-block);NodeView 内嵌 captionDOM。
+ *
+ * 行为:
+ * - 空段落 → 替换它(避免遗留空行)
+ * - 非空段落 → 当前 block 之后插入(保留原段)
+ * - 顶层选区 → 选区前直接插
+ * - 光标进 caption 内(用户能立即写说明)
+ *
+ * 不带任何 attrs(由 NodeView placeholder 引导用户填 src)
+ */
+function insertWithCaptionBlock(
+  view: import('prosemirror-view').EditorView,
+  nodeName: string,
+): void {
+  const { state, dispatch } = view;
+  const schema = state.schema;
+  const nodeType = schema.nodes[nodeName];
+  const textBlockType = schema.nodes['text-block'];
+  if (!nodeType || !textBlockType) return;
+
+  const captionNode = textBlockType.create();
+  const node = nodeType.create({}, captionNode);
+  if (!node) return;
+
+  const $from = state.selection.$from;
+  if ($from.depth === 0) {
+    // 顶层:直接在选区前插入(无需光标 reposition,大概率走不到)
+    dispatch(state.tr.insert(state.selection.from, node));
+  } else {
+    const blockNode = $from.node(1);
+    const blockStart = $from.before(1);
+    const blockEnd = $from.after(1);
+    const isEmptyParagraph =
+      blockNode.type.name === 'text-block' &&
+      blockNode.content.size === 0 &&
+      blockNode.attrs.level == null &&
+      !blockNode.attrs.isTitle;
+    let tr = state.tr;
+    if (isEmptyParagraph) {
+      tr = tr.replaceWith(blockStart, blockEnd, node);
+    } else {
+      tr = tr.insert(blockEnd, node);
+    }
+    // 光标移进 caption 内 — 节点起点 + 1 进入 node,再 + 1 进入 caption text-block 内
+    const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+    const captionPos = insertPos + 2;
+    tr = tr.setSelection(TextSelection.create(tr.doc, captionPos)).scrollIntoView();
+    dispatch(tr);
+  }
+  view.focus();
+}
+
 function insertAtomBlock(
   view: import('prosemirror-view').EditorView,
   nodeName: string,

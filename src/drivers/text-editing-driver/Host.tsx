@@ -36,6 +36,8 @@ import { noteLinkSpec } from './blocks/note-link/spec';
 import { fileBlockSpec } from './blocks/file-block/spec';
 import { fileLinkSpec } from './blocks/file-link/spec';
 import { externalRefSpec } from './blocks/external-ref/spec';
+import { audioBlockSpec } from './blocks/audio-block/spec';
+import { videoBlockSpec } from './blocks/video-block/spec';
 import {
   tableSpec,
   tableRowSpec,
@@ -79,6 +81,8 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   fileBlockSpec,
   fileLinkSpec,
   externalRefSpec,
+  audioBlockSpec,
+  videoBlockSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

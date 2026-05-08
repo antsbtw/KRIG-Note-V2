@@ -10,9 +10,16 @@
         connect-src 默认 'self' 会拦,必须显式加 media:
       - font-src:'self' / data:(KaTeX katex.min.css 含 @font-face url(fonts/...) 字体引用,
         Vite bundle 后字体走 'self';某些字体可能 inline data: URL,加 data: 兜底)
-      其他(脚本/iframe)走严格策略,default-src 仍 'self'
+      L5-B3.16 audio/video CSP 调整:
+      - media-src:audio / video 元素的 src 默认走 default-src(='self'),不加 media:
+        会拦截 media:// 协议的音视频文件(浏览器报"violates default-src" + 0:00/0:00)。
+        加 'self' / data: / media: / https:(对应 import 后 mediaStore / data URL fallback /
+        URL embed 三种情况)
+      - frame-src:videoBlock youtube embed 走 <iframe src="https://www.youtube.com/embed/...">,
+        需 frame-src 显式允许 youtube.com(default-src 'self' 会拦)
+      其他(脚本)走严格策略,default-src 仍 'self'
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: media: https:; connect-src 'self' media: https:; font-src 'self' data:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: media: https:; media-src 'self' data: media: https:; connect-src 'self' media: https:; font-src 'self' data:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com" />
     <title>KRIG Note</title>
   </head>
   <body>

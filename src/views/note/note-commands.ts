@@ -271,6 +271,18 @@ export function registerNoteCommands(): void {
     textEditingDriverApi.insertExternalRefAtSelection(instanceId);
   }));
 
+  // L5-B3.16:slash insert-audio — 插入空 audioBlock placeholder
+  commandRegistry.register('note-view.slash-insert-audio', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertAudioBlockAtSelection(instanceId);
+  }));
+
+  // L5-B3.16:slash insert-video — 插入空 videoBlock placeholder
+  commandRegistry.register('note-view.slash-insert-video', withInstance((instanceId) => {
+    textEditingDriverApi.clearSlashTrigger(instanceId);
+    textEditingDriverApi.insertVideoBlockAtSelection(instanceId);
+  }));
+
   // ── handle:作用于 handleMenuController.state.pos 指向的 block ──
   function getHandlePos(): { instanceId: string; pos: number } | null {
     const wsId = workspaceManager.getActiveId();

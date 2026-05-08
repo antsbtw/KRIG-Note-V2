@@ -50,5 +50,12 @@ export function registerSlashMenu(): void {
     { id: 'note-view.slash.external-ref', label: 'External reference',
       command: 'note-view.slash-insert-external-ref',
       keywords: ['ref', 'link', 'file', 'url', 'reference', '引用'], view: VIEW, order: 180 },
+    // L5-B3.16:audio / video(媒体三兄弟收齐,跟 image 同模式)
+    { id: 'note-view.slash.audio', label: 'Audio',
+      command: 'note-view.slash-insert-audio',
+      keywords: ['audio', 'music', 'sound', 'mp3', 'podcast', '音频'], view: VIEW, order: 145 },
+    { id: 'note-view.slash.video', label: 'Video',
+      command: 'note-view.slash-insert-video',
+      keywords: ['video', 'movie', 'mp4', 'youtube', '视频'], view: VIEW, order: 150 },
   ]);
 }
