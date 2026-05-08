@@ -1,24 +1,40 @@
 ---
-title: Wave 5 严格收尾 — install 真装配 + text-editing capability 化 + view 直 import 清零
+title: Wave 5 严格收尾 — install 严格校验 + 间接路由统一 + text-editing capability 化
 date: 2026-05-08
 ref:
   - docs/00-architecture/charter.md v0.4 § 1.1 / § 1.2 / § 1.3 / § 1.4
   - docs/RefactorV2/audit/2026-05-08-register-and-layer-audit.md
   - docs/RefactorV2/audit/wave4-design/W4.2-web-rendering-capability.md(过渡方案登记)
-status: design draft — 待 user review
+status: design v2 — review 3 条修订采纳(标题去"真装配"夸大表述 / 验收 eslint 化 / 加 require 硬取)
 risk: 高(R2 改动量与 W4.2 等量;view 直 import 清零涉及 20+ 处)
-trigger: 用户复审复审反馈"严格遵守原则"(P1×2 + P2 ×1)
+trigger: 用户复审反馈"严格遵守原则"(P1×2 + P2 ×1)+ v2 review 3 条修订
 ---
 
 # Wave 5 严格收尾设计
 
-> 用户复审复审(2026-05-08)指出 W4.1/W4.2 后仍有 3 处与 charter 严格口径不一致:
+> 用户复审(2026-05-08)指出 W4.1/W4.2 后仍有 3 处与 charter 严格口径不一致:
 > - **P1-A**:install 只校验不装配,view 仍直接 import 能力实现
 > - **P1-B**:install 仍允许 driver ID(text-editing-driver)
 > - **P2**:view→@capabilities/* 直 import 残留(L5-alive / FileTab 等)
 >
 > 这些之前在 W4.x 文档里都登记为 "过渡方案 / charter v0.5+"。Wave 5 的目标是把
 > 过渡方案兑现成最终方案 — **严格遵守** charter v0.4 § 1.2 line 88 / § 1.4 line 269。
+>
+> ## 边界澄清(v2 修订):"间接路由"vs"真装配"
+>
+> 用户 v2 review 指出原标题"install 真装配"措辞偏强。**Wave 5 不挑战"自动装配"
+> 这个更高目标**,而是把"view 主动直 import 能力实现"的反模式改成"view 通过
+> capabilityRegistry 间接路由 + install 严格校验"。
+>
+> | 模式 | view 行为 | 是否 W5 目标 |
+> |---|---|---|
+> | 直 import(W5 之前)| `import { foo } from '@capabilities/x'` | ❌ 反模式,W5 消除 |
+> | **间接路由(W5 目标)** | `requireCapabilityApi<XApi>('x').foo()` | ✅ |
+> | 自动装配(charter 终态)| view 通过 React Context 注入,无主动检索 | charter v0.5+ |
+>
+> 间接路由的语义价值:**view 跟 capability 模块解耦**(import 链不存在),capability
+> 切实现 view 一行不改;但 view 仍主动通过 string id 查找,不算 charter line 88
+> "声明依赖 + 自动装配"的字面终态。这是 W5 的明确边界,不再夸大。
 
 ---
 
@@ -92,17 +108,22 @@ install: ['selection','clipboard','undo-redo','drag-and-drop','insertion','text-
 
 ---
 
-## 2. 设计目标(严格)
+## 2. 设计目标
 
-按 charter v0.4 line 88 / 269 严格口径:
+按 charter v0.4 line 88 / 269 + 用户 review 边界:
 
 1. **install 列表 0 driver ID** — 严格 capability-only
-2. **view 0 处直 import @capabilities/* 实现** — 全部走 `capabilityRegistry.get(id).api` 间接路由
-3. **view 0 处直 import @drivers/* 实现** — 同上,走 capability api
+2. **view 0 处直 import @capabilities/* 运行时值** — 全部走 `requireCapabilityApi(id)` 间接路由
+3. **view 0 处直 import @drivers/* 运行时值** — 同上,走 capability api
 4. **能力调用统一通过 capability api**,而不是模块级 export 单例
 5. **`KNOWN_DRIVER_IDS` 白名单淘汰** — 整改完无遗留
+6. **install 严格校验**(沿用 Wave 1 + 加强:driver id 不再有白名单豁免)
+
+允许:
+- ✅ view `import type` from `@capabilities/<id>/types`(纯类型,无运行时依赖,charter 容许)
 
 非目标:
+- ❌ **install 真装配 / 自动注入**(charter line 88 字面终态)— W5 仅做"间接路由统一",真装配需要为 view 引入 React Context / hook 体系,工作量翻倍且 capability 函数式调用(命令 handler 内调 mediaPutBase64)难以套入 React tree。留 charter v0.5+ 范围
 - ❌ 改 driver 内部代码(driver 是 capability 内部实现细节,W5 只动门面)
 - ❌ 重新设计 capability api 字段命名(沿用现有模块级 export 名称)
 - ❌ charter v0.4 → v0.5 文档修订(W5 仅工程实施;若 v0.4 措辞不清,留 follow-up)
@@ -171,24 +192,58 @@ return Host ? <Host {...props} /> : null;
 
 view 端写法稍变,但语义清晰。
 
-### 3.3 view 端 helper(避免重复 boilerplate)
+### 3.3 view 端 helper(两版:软取 + 硬取)
 
-每次 `capabilityRegistry.get(id)?.api as XApi` 太冗长。提供类型化辅助:
+每次 `capabilityRegistry.get(id)?.api as XApi` 太冗长。提供两个类型化辅助 — **业务路径**强制用硬取版本,避免 `?.` 静默化:
 
 ```ts
-// src/slot/capability-registry/use-capability.ts
+// src/slot/capability-registry/get-capability-api.ts
+
+/**
+ * 软取 — 缺失返回 undefined,适合诊断 / 可选场景(capability 没注册本身合理)
+ */
 export function getCapabilityApi<T>(id: string): T | undefined {
   return capabilityRegistry.get(id)?.api as T | undefined;
 }
+
+/**
+ * 硬取 — 缺失立即 throw,适合业务路径(命令 handler / view render)
+ *
+ * 设计动机(v2 review P2):
+ * - getCapabilityApi(...)?.foo() 的 ?. 会 short-circuit,foo 没跑用户感觉是
+ *   "按钮没反应",console 0 warn,极难 debug
+ * - require 路径在启动期 / 首次调用时立即抛错,问题立刻暴露
+ */
+export function requireCapabilityApi<T>(id: string): T {
+  const api = capabilityRegistry.get(id)?.api as T | undefined;
+  if (api === undefined) {
+    throw new Error(
+      `[capabilityRegistry] capability '${id}' has no api;` +
+      ` view 须在 install 列表声明,且 capability 须 register({ id, api })`,
+    );
+  }
+  return api;
+}
 ```
 
-view 调用:
+view 调用约定(强制):
+
+| 场景 | helper | 理由 |
+|---|---|---|
+| 命令 handler 业务调用(`note-view.toggle-bold` 等)| `requireCapabilityApi` | 缺失立刻抛错,不静默 |
+| view render 取组件(`Host` / `TranslateHost`)| `requireCapabilityApi` | 缺失抛错可被 React error boundary 捕获 |
+| 诊断(L5-alive 读 sourceCount)| `getCapabilityApi` | 软取,capability 没注册时不破坏诊断输出 |
+| 跨可选 capability(未来某 view 可选增强)| `getCapabilityApi` | 软取,缺失退化 |
+
+**约定写进 capability-registry README**,code review 时 `requireCapabilityApi` 优先。
+
+view 调用示例:
 ```ts
-const textEditing = getCapabilityApi<TextEditingApi>('text-editing');
-textEditing?.toggleMark(instanceId, 'bold');
+const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+textEditing.toggleMark(instanceId, 'bold');   // 直接调,不用 ?.
 ```
 
-更短。仍是 registry 间接路由。
+→ 没有 `?.` short-circuit 风险,业务失败立即暴露。
 
 ### 3.4 backward compat 期间的兜底
 
@@ -273,18 +328,56 @@ R3 把所有 view 切完后,删除模块级 export(`export const selection`),只
 
 W5 完工时:
 
-| 项 | 标准 |
-|---|---|
-| `grep -rn "from '@capabilities/" src/views/` | **0 命中**(view 0 处直 import capability 运行时值)|
-| `grep -rn "from '@capabilities/.*types" src/views/` | 允许(纯类型 import)|
-| `grep -rn "from '@drivers/" src/views/` | **0 命中**(driver 完全 capability 内部) |
-| `grep -rn "export const " src/capabilities/*/index.ts` | **0 命中**(模块级单例 export 全删) |
-| install 列表 driver id | **0 处**(全部 capability id) |
-| `KNOWN_DRIVER_IDS` | **整文件删除** |
-| capability `api` 字段 | 7/7 capability 全部填写 |
-| typecheck / lint --max-warnings 0 / vite build | 全过 |
-| 功能回归 | 笔记编辑 / web 浏览 / 双栏翻译 / 媒体粘贴 / Cmd+K/[/] / 翻译注入 全部 OK |
-| audit § 6 度量 | 完全合规(8/8 行通过 ✅)|
+### 5.1 自动化(eslint 规则,而非 grep)
+
+v2 review P1-B 指出原 5.1 grep 跟 5.2 自相矛盾(grep 一刀切打死纯类型 import)。改用 eslint 精准分流:
+
+**新增 eslint 规则**(`eslint.config.js` views/** 块):
+```js
+// W5 新增 — view 不能 import @capabilities/* 运行时值,只允许纯类型
+{
+  group: ['@capabilities/*'],
+  message: 'view 不直接 import capability 运行时值,走 requireCapabilityApi(id)' +
+           '(若需类型,改用 import type 或 from @capabilities/<id>/types)',
+  allowTypeImports: true,   // 关键 — 允许 import type / import type {} / import { type X }
+}
+```
+
+`allowTypeImports: true` 是 eslint `no-restricted-imports` 8.x+ 的精确控制:
+- ✅ `import type { TextEditingApi } from '@capabilities/text-editing/types'`(纯类型)→ 通过
+- ✅ `import { type TextEditingApi } from '@capabilities/text-editing'`(inline type)→ 通过
+- ❌ `import { textEditingDriverApi } from '@capabilities/text-editing'`(运行时值)→ 拦下
+- ❌ `import { Host } from '@capabilities/web-rendering'`(运行时值)→ 拦下
+
+driver 同理,views/** 块加:
+```js
+{ group: ['@drivers/*'], message: 'view 不直接 import driver,走 capability api', allowTypeImports: true }
+```
+
+### 5.2 强制 types 子模块(capability 设计纪律)
+
+每个 capability **必须**提供 `types.ts` 子模块,公开类型集中在那里。理由:
+- view 端 `import type { XApi } from '@capabilities/<id>/types'` 路径明确
+- 防止 view 误用 inline type from index.ts(虽然 inline type 是合规的,但路径不清晰会让审计困难)
+- types.ts 是纯类型,即使被运行时 import 也不引入运行时副作用(types only TS 文件 vite 转译产物为空)
+
+W5 实施时 7 capability 全部要补 types.ts(若现有 index.ts 已 export type,迁移即可)。
+
+### 5.3 客观度量(W5 完工时)
+
+| 项 | 标准 | 校验方法 |
+|---|---|---|
+| view 直 import capability 运行时值 | **0 处** | `npm run lint --max-warnings 0` 通过(W5 新规则触发) |
+| view 直 import driver 运行时值 | **0 处** | 同上 |
+| view 类型 import | 允许 | eslint allowTypeImports: true 显式放行 |
+| `grep -rn "export const " src/capabilities/*/index.ts` | **0 命中**(模块级单例 export 全删)| 直接 grep |
+| install 列表 driver id | **0 处** | 启动 console `[install-coverage]` 表 drivers 列全部 `—` |
+| `KNOWN_DRIVER_IDS` | **整文件删除** | `ls src/slot/view-type-registry/known-driver-ids.ts` no such file |
+| `validateInstall` driver 白名单分支 | 删除 | code review |
+| capability `api` 字段 | 7/7 capability 全部填写 | `grep "api:" src/capabilities/*/index.ts` 7 命中 |
+| typecheck / lint --max-warnings 0 / vite build | 全过 | npm scripts |
+| 功能回归 | 笔记编辑 / web 浏览 / 双栏翻译 / 媒体粘贴 / Cmd+K/[/] / 翻译注入 全部 OK | 手测 |
+| audit § 6 度量 | 完全合规(8/8 行通过 ✅)| 对照 audit 报告 |
 
 ---
 
@@ -320,24 +413,29 @@ const Host = useMemo(() => getCapabilityApi<WebRenderingApi>('web-rendering')?.H
 
 如果实测真有问题,这是 fallback。
 
-### 风险 3:R2 文件改动多,容易在 NoteView 命令注册某条遗漏
+### 风险 3(✅ v2 review 采纳缓解 P2):require 硬取避免静默化
 
-`note-commands.ts` 有 20+ `textEditingDriverApi.<method>` 调用。改成 `getCapabilityApi<TextEditingApi>('text-editing')?.<method>` 是机械替换,但 `?.` 操作符的 short-circuit 会让漏改的 method 静默 noop——**用户感觉是"某个命令不工作"**而不是 typecheck 红。
+v2 review P2 指出 `?.` short-circuit 静默化问题。**已采纳**:`note-commands.ts` 等业务路径强制 `requireCapabilityApi`(见 § 3.3)。
 
-**缓解**:
+```ts
+// 旧设计(v1):静默
+getCapabilityApi<TextEditingApi>('text-editing')?.toggleMark(...)
+// → ?. short-circuit,api 没拿到 toggleMark 不跑,console 0 warn
+
+// 新设计(v2):立即抛错
+const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+textEditing.toggleMark(...)
+// → 启动期 / 首次调用时 capability 没注册立刻 throw,React error boundary 捕获
+```
+
+**额外缓解**:
 - `TextEditingApi` 类型严格定义,所有 method 强制类型化
-- 改完 lint 检查没有遗留 `textEditingDriverApi` 引用
+- W5 新增 lint 规则拦截遗留 import(view 误写 `from '@drivers/...'` 立刻 lint 红)
 - 完整功能回归(笔记编辑 / 加粗 / heading / 颜色 / undo / Turn Into 12 种 / Slash 插入)
 
-### 决策点 1:capability api 单一字段 vs 拆分(api / Host / commands)
+### 决策点 1(✅ v2 review 采纳):capability api 单一字段
 
-我设计的 `api: unknown`(`api: TextEditingApi` 实际类型)是单一字段。
-
-替代:`CapabilityDefinition` 拆 `api / components / commands` 多字段。
-
-我倾向**单一字段**:简单,view 只需记一个字段名。tradeoff:capability 内部要把组件和函数都塞同一对象。
-
-**问 user**:同意 A?
+`api: unknown`(实际类型 `api: XApi`)单一字段。view 只需记一个字段名,简单。capability 内部把组件和函数都塞同一对象 — 由 capability 自己组织对象结构。
 
 ### 决策点 2:Wave 5 一次性做完还是分 session
 
@@ -357,6 +455,38 @@ charter v0.4 line 92-105 的 `registerCapability` 示例有 `createInstance / co
 我建议**不动 charter,Wave 5 实施日志里说明 api 是 V2 工程实施增量**。charter v0.4 的 `createInstance` 在 V2 没全面用上(只 web-rendering 的 Host 组件勉强对应,但走 ref API 不是 createInstance 模式),这是 charter 自己的留白,V2 实施按需扩展合理。
 
 **问 user**:接受不动 charter?
+
+### 决策点 4(v2 新增):types 子模块强制
+
+§ 5.2 提议每个 capability **必须**提供 `types.ts` 子模块,公开类型集中在那里。view 端 `import type { XApi } from '@capabilities/<id>/types'` 路径明确。
+
+替代:不强制 types.ts,允许 view 用 `import type { XApi } from '@capabilities/<id>'`(从 index.ts 拿类型 + inline type)。
+
+我倾向**强制 types.ts**:
+- 路径明确,审计 `grep "from '@capabilities/.*/types'" src/views/` 一行得知 view 用了哪些 capability 类型
+- 防止 view 误用 inline type(虽然合规但不易识别)
+- capability 自己也获益:types.ts 是稳定接口,index.ts 是实现入口,边界清晰
+
+代价:每个 capability 多 1 个文件(很多 capability 现在已经在 index.ts 里 export type,迁移成本低)。
+
+**问 user**:同意强制 types.ts?
+
+### 决策点 5(v2 新增):间接路由是否最终态
+
+§ 1 边界澄清表:
+- 间接路由(W5 目标):`requireCapabilityApi('x').foo()`
+- 自动装配(charter 终态):view 通过 React Context 注入,无主动检索
+
+W5 不挑战自动装配。但 charter line 88 字面要求是"声明依赖 + 自动装配",间接路由仍要求 view 主动通过 string id 查找 — **未到 charter 终态**。
+
+是否将"自动装配"列为 charter v0.5+ 范围,还是 W5 加做?
+
+我建议**留 charter v0.5+**:
+- 自动装配需要为每个 view 引入 React Context Provider / hook 体系,额外 200~300 行基础设施
+- capability 函数式调用(命令 handler 内调 mediaPutBase64)不在 React tree 内,需要给 hook 之外的路径再做一套 — 复杂度翻倍
+- 间接路由已经把"view 跟 capability 模块解耦"做到了(import 链不存在,capability 切实现 view 一行不改)— 80% 价值
+
+**问 user**:接受间接路由作为 W5 终点?
 
 ---
 
