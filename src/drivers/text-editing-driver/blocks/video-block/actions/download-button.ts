@@ -236,12 +236,26 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     e.stopPropagation();
   });
   btn.addEventListener('click', async (e) => {
+    // 入口 log — 任何分支前先打,确保事件触发能被看到
+    const srcAtClick = deps.getSrc();
+    console.log('[download-btn] click ENTRY', {
+      phase,
+      ytdlpAvailable,
+      btnDisabled: btn.disabled,
+      btnText: btn.textContent,
+      src: srcAtClick,
+      localFilePath: deps.getLocalFilePath(),
+    });
     e.stopPropagation();
-    if (btn.disabled) return;
+    if (btn.disabled) {
+      console.log('[download-btn] EARLY RETURN: btn.disabled');
+      return;
+    }
 
     // done + 点击 → showItemInFolder
     if (phase === 'done') {
       const path = deps.getLocalFilePath();
+      console.log('[download-btn] phase=done, opening Finder:', path);
       if (path) {
         await window.electronAPI?.showItemInFolder?.(path);
       }
@@ -249,14 +263,24 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     }
 
     // installing / downloading 期间 — 防呆,不重入
-    if (phase === 'installing' || phase === 'downloading') return;
+    if (phase === 'installing' || phase === 'downloading') {
+      console.log('[download-btn] EARLY RETURN: phase=', phase);
+      return;
+    }
 
-    const src = deps.getSrc();
-    if (!src) return;
-    if (!isYouTubeSrc()) return;
+    if (!srcAtClick) {
+      console.log('[download-btn] EARLY RETURN: src is null');
+      return;
+    }
+    if (!isYouTubeSrc()) {
+      console.log('[download-btn] EARLY RETURN: not YouTube');
+      return;
+    }
 
+    console.log('[download-btn] entering runFlow()');
     // idle → 启动 install(若需)+ download 一气呵成
     await runFlow();
+    console.log('[download-btn] runFlow() returned');
   });
 
   // 初次同步(mount 时若 attrs 已有 localFilePath → done 态)
