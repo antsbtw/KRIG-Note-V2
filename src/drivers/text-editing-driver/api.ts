@@ -15,6 +15,10 @@ import { Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
+import {
+  vocabHighlightPluginKey,
+  updateVocabDefs,
+} from './plugins/build-vocab-highlight-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
 
 export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
@@ -779,6 +783,28 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     insertAtomBlock(inst.view, 'externalRef');
+  },
+
+  /**
+   * 设置全局 vocab 词表(L5-B3.20b — vocab highlight 数据流)
+   *
+   * view 层 learning-integration 订阅 capability.onVocabChanged → 收到全量 list →
+   * 调本 API → 分发到所有 PM instance dispatch vocabHighlightPluginKey meta →
+   * plugin 重建 decorations。同时更新模块级 vocabDefs(给 hover tooltip 显释义)。
+   *
+   * driver 不直接 import learning capability — 是 view 层协调。
+   */
+  setVocabWords(entries: Array<{ word: string; definition: string }>): void {
+    // 1. 更新模块级 vocabDefs(供 tooltip 显释义)
+    updateVocabDefs(entries);
+    // 2. 分发到所有 PM instance,触发 plugin 重建 decorations
+    const wordSet = new Set(entries.map((e) => e.word.toLowerCase()));
+    for (const inst of instanceRegistry.getAll()) {
+      if (inst.view.isDestroyed) continue;
+      const tr = inst.view.state.tr.setMeta(vocabHighlightPluginKey, wordSet);
+      tr.setMeta('addToHistory', false); // vocab 更新不进 undo 栈
+      inst.view.dispatch(tr);
+    }
   },
 };
 

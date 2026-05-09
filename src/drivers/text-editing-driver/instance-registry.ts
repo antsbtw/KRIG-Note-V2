@@ -37,6 +37,13 @@ class InstanceRegistry {
   }
 
   /**
+   * 遍历所有 instance(L5-B3.20b vocab broadcast 用,跨所有 PM 实例 dispatch 词表更新)
+   */
+  getAll(): InstanceEntry[] {
+    return Array.from(this.instances.values());
+  }
+
+  /**
    * 从 selection source 字符串解析 instanceId
    * 'text-editing-driver:<instanceId>' → instanceId
    */

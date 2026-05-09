@@ -1,0 +1,311 @@
+/**
+ * DictionaryPanel — 字典查词 / 翻译 / 生词本面板样式(L5-B3.20b)
+ *
+ * popup-registry 已经处理了外层定位(left/top + visibility)+ z-index,
+ * 本 CSS 只管 panel 内部 UI 样式(暗色主题对齐 V2 既有 popup)。
+ */
+
+.krig-dictionary-panel {
+  display: flex;
+  flex-direction: column;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  width: 380px;
+  max-height: 480px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.krig-dictionary-panel__header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #3a3a3a;
+  flex-shrink: 0;
+}
+
+.krig-dictionary-panel__title {
+  flex: 1;
+  font-size: 13px;
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.krig-dictionary-panel__close-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-dictionary-panel__close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+}
+
+/* ── Tabs ── */
+.krig-dictionary-panel__tabs {
+  display: flex;
+  padding: 0 8px;
+  border-bottom: 1px solid #3a3a3a;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.krig-dictionary-panel__tab {
+  background: transparent;
+  border: none;
+  color: #9aa0a6;
+  font-size: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.krig-dictionary-panel__tab:hover {
+  color: #e0e0e0;
+}
+
+.krig-dictionary-panel__tab--active {
+  color: #4d9aff;
+  border-bottom-color: #4d9aff;
+}
+
+/* ── Body ── */
+.krig-dictionary-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* ── Loading / Empty hint ── */
+.krig-dictionary-panel__loading {
+  text-align: center;
+  padding: 20px 8px;
+}
+
+.krig-dictionary-panel__hint {
+  color: #9aa0a6;
+  font-size: 12px;
+  font-style: italic;
+  margin-top: 8px;
+}
+
+/* ── Word / Original ── */
+.krig-dictionary-panel__word {
+  font-size: 18px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.krig-dictionary-panel__phonetic {
+  color: #9aa0a6;
+  font-size: 13px;
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
+.krig-dictionary-panel__original {
+  font-size: 14px;
+  color: #e8eaed;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.krig-dictionary-panel__definition {
+  font-size: 13px;
+  color: #d0d0d0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 6px;
+}
+
+.krig-dictionary-panel__source {
+  color: #6a6a6a;
+  font-size: 11px;
+  margin-top: 8px;
+}
+
+/* ── Translate Section ── */
+.krig-dictionary-panel__translate-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #3a3a3a;
+}
+
+.krig-dictionary-panel__section-label {
+  color: #9aa0a6;
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.krig-dictionary-panel__translate-text {
+  font-size: 13px;
+  color: #d0d0d0;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* ── TTS Button ── */
+.krig-dictionary-panel__tts-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #9aa0a6;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.krig-dictionary-panel__tts-btn:hover {
+  background: rgba(77, 154, 255, 0.12);
+  color: #4d9aff;
+  border-color: rgba(77, 154, 255, 0.2);
+}
+
+/* ── Actions(添加生词本)── */
+.krig-dictionary-panel__actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #3a3a3a;
+}
+
+.krig-dictionary-panel__add-btn {
+  width: 100%;
+  background: #4d9aff;
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.krig-dictionary-panel__add-btn:hover:not(:disabled) {
+  background: #3d7fcf;
+}
+
+.krig-dictionary-panel__add-btn--added,
+.krig-dictionary-panel__add-btn:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: #888;
+  cursor: default;
+}
+
+/* ── Vocab List ── */
+.krig-dictionary-panel__search {
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  color: #e0e0e0;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+
+.krig-dictionary-panel__search:focus {
+  border-color: #4d9aff;
+}
+
+.krig-dictionary-panel__entries {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.krig-dictionary-panel__empty {
+  text-align: center;
+  color: #6a6a6a;
+  font-size: 12px;
+  padding: 20px 8px;
+  font-style: italic;
+}
+
+.krig-dictionary-panel__entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.krig-dictionary-panel__entry:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(77, 154, 255, 0.2);
+}
+
+.krig-dictionary-panel__entry--phrase {
+  border-color: rgba(255, 200, 100, 0.15);
+}
+
+.krig-dictionary-panel__entry-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.krig-dictionary-panel__entry-word {
+  font-size: 13px;
+  color: #e8eaed;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  word-break: break-word;
+}
+
+.krig-dictionary-panel__entry-def {
+  font-size: 11px;
+  color: #9aa0a6;
+  margin-top: 2px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.krig-dictionary-panel__entry-del {
+  background: transparent;
+  border: none;
+  color: #6a6a6a;
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-dictionary-panel__entry-del:hover {
+  background: rgba(244, 81, 81, 0.15);
+  color: #f45151;
+}

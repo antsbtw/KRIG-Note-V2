@@ -1672,3 +1672,77 @@
   font-style: italic;
   min-height: 1.4em;
 }
+
+/* ────────────────────────────────────────────────────────────
+ * Vocab Highlight(L5-B3.20b learning)
+ *
+ * vocab-highlight plugin 通过 Decoration.inline 给生词本中的词加
+ * .vocab-highlight class — 黄色底虚下划线,hover 显 .vocab-tooltip。
+ * tooltip 是 plugin 自己 createElement 挂到 document.body 的浮层,
+ * 不走 popup-registry(避免 hover singleton 冲突)。
+ * ──────────────────────────────────────────────────────────── */
+
+.krig-pm-host .ProseMirror .vocab-highlight {
+  background: rgba(255, 200, 100, 0.18);
+  border-bottom: 1px dashed rgba(255, 200, 100, 0.6);
+  cursor: help;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.krig-pm-host .ProseMirror .vocab-highlight:hover {
+  background: rgba(255, 200, 100, 0.32);
+}
+
+/* tooltip 挂在 document.body 顶层,不在 .krig-pm-host 内 */
+.vocab-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  padding: 8px 10px;
+  max-width: 280px;
+  font-size: 12px;
+  color: #e0e0e0;
+  pointer-events: auto;
+}
+
+.vocab-tooltip__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.vocab-tooltip__word {
+  font-weight: 600;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.vocab-tooltip__tts {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #9aa0a6;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.vocab-tooltip__tts:hover {
+  background: rgba(77, 154, 255, 0.12);
+  color: #4d9aff;
+  border-color: rgba(77, 154, 255, 0.2);
+}
+
+.vocab-tooltip__def {
+  color: #d0d0d0;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
