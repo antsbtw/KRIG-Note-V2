@@ -249,17 +249,25 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     const transcriptBtn = createTranscriptButton(
       () => node.attrs.src as string | null,
       (text) => {
+        console.log('[node-view onTranscript] start, text length=', text.length, 'framework?', !!framework);
         // 抓到字幕回调:setText 灌入 textarea + 触发 input(自动写 attrs + 重 parse cues)
         transcriptTab.setText(text);
-        if (!framework) return;
+        console.log('[node-view onTranscript] setText done, textarea value len=', transcriptTab.getText().length);
+        if (!framework) {
+          console.warn('[node-view onTranscript] framework null, abort rest');
+          return;
+        }
         framework.cues = parseSubtitleCuesFromText(text);
         if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
         // 即时写,不节流(用户主动触发的非键入操作)
         updateAttrs({ transcriptText: text || null });
+        console.log('[node-view onTranscript] updateAttrs done');
         // 切到 transcript Tab 让用户立即看到
         tabBar.setActive('transcript');
+        console.log('[node-view onTranscript] setActive transcript done, current=', tabBar.getActive());
         // vocab-panel 若可见,基于新 cues 重 build timeline
         framework.vocabPanel.rebuild();
+        console.log('[node-view onTranscript] complete');
       },
     );
     const translateBtn = createTranslateButton(
