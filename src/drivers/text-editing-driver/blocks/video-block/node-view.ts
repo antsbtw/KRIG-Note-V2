@@ -32,6 +32,7 @@ import { createCCButton, type CCButton, type CCState } from './actions/cc-button
 import { createFullscreenButton, type FullscreenButton } from './actions/fullscreen-button';
 import { createTranscriptButton, type TranscriptButton } from './actions/transcript-button';
 import { createTranslateButton, type TranslateButton } from './actions/translate-button';
+import { createMemoryButton, type MemoryControl } from './actions/memory-button';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
@@ -52,6 +53,7 @@ interface FrameworkRefs {
   fsBtn: FullscreenButton;
   transcriptBtn: TranscriptButton;
   translateBtn: TranslateButton;
+  memoryBtn: MemoryControl;
   tracker: TimeTracker | null;
   /** 内存派生的 transcript cues(P1 修正:不持久化)*/
   cues: SubtitleCue[];
@@ -97,6 +99,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     if (!framework) return;
     framework.unsubs.forEach((u) => u());
     if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
+    framework.memoryBtn.destroy(); // 内部 stop() 写回 lastStep,先于 tracker.destroy
     framework.tracker?.destroy();
     framework.transcriptBtn.destroy();
     framework.translateBtn.destroy();
@@ -224,6 +227,10 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     const overlay = createSubtitleOverlay();
     playTab.overlayMount.appendChild(overlay.el);
 
+    // Time tracker(从 player source 创建,先于 memory-button)
+    const playerSource = playTab.getPlayerSource();
+    const tracker = playerSource ? createTimeTracker(playerSource) : null;
+
     // Action buttons(actionBar 由 tabBar 暴露)
     const ccBtn = createCCButton();
     const fsBtn = createFullscreenButton(() => playTab.el);
@@ -249,14 +256,33 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         upsertTranslation(langCode, translatedText);
       },
     );
-    tabBar.actionBarEl.appendChild(transcriptBtn.el);
-    tabBar.actionBarEl.appendChild(translateBtn.el);
-    tabBar.actionBarEl.appendChild(ccBtn.el);
-    tabBar.actionBarEl.appendChild(fsBtn.el);
+    const memoryBtn = createMemoryButton({
+      getSegmentDuration: () => (node.attrs.segmentDuration as number) || 60,
+      getTracker: () => tracker,
+      getLastStep: () => (node.attrs.memoryLastStep as number) || 0,
+      onUpdateAttrs: (patch) => {
+        // updateAttrs 写回 PM doc(addToHistory=false 不进 undo 栈)
+        const pos = typeof getPos === 'function' ? getPos() : undefined;
+        if (pos == null) return;
+        let tr = view.state.tr;
+        if (patch.segmentDuration != null) {
+          tr = tr.setNodeAttribute(pos, 'segmentDuration', patch.segmentDuration);
+        }
+        if (patch.memoryLastStep != null) {
+          tr = tr.setNodeAttribute(pos, 'memoryLastStep', patch.memoryLastStep);
+        }
+        tr.setMeta('addToHistory', false);
+        view.dispatch(tr);
+      },
+    });
 
-    // Time tracker(从 player source 创建)
-    const playerSource = playTab.getPlayerSource();
-    const tracker = playerSource ? createTimeTracker(playerSource) : null;
+    // ── actionBar 顺序对齐 V1(Qc-6=A):CC | ⏮🧠⏭ | 🌐 | 📝 | ⛶ ──
+    // (下载 ⬇ / vocab 📖 留 e 段 / d 段在对应位置插入)
+    tabBar.actionBarEl.appendChild(ccBtn.el);
+    tabBar.actionBarEl.appendChild(memoryBtn.el);
+    tabBar.actionBarEl.appendChild(translateBtn.el);
+    tabBar.actionBarEl.appendChild(transcriptBtn.el);
+    tabBar.actionBarEl.appendChild(fsBtn.el);
 
     // 内存派生 cues(P1)
     const cues = parseSubtitleCuesFromText(initialTranscript || '');
@@ -272,6 +298,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       fsBtn,
       transcriptBtn,
       translateBtn,
+      memoryBtn,
       tracker,
       cues,
       translations: new Map(),
