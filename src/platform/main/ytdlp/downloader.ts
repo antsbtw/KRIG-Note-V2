@@ -98,8 +98,12 @@ export async function downloadVideo(
     let downloadedFilename: string | undefined = outputPath || undefined;
 
     const args = [
+      // format 选择优先级(从高到低):
+      // 1. mp4 单文件,height ≤ 720(优先 720p,YouTube 单文件最高一般是 720p)
+      // 2. 任意 mp4 单文件(360p/480p,V1 行为兜底)
+      // 3. 任意 best(极少用到,非 YouTube 直链等)
       '-f',
-      'best[ext=mp4]/best',
+      'best[height<=?720][ext=mp4]/best[ext=mp4]/best',
       '--no-mtime',
       '--no-check-certificates',
       // 只下当前视频,忽略 URL 里的 &list=... 播放列表参数
