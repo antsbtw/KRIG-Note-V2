@@ -35,6 +35,8 @@ import { createTranslateButton, type TranslateButton } from './actions/translate
 import { createMemoryButton, type MemoryControl } from './actions/memory-button';
 import { createVocabButton, type VocabButton } from './actions/vocab-button';
 import { createVocabPanel, type VocabPanel } from './components/vocab-panel';
+import { createDownloadButton, type DownloadButton } from './actions/download-button';
+import { createProgressBar, type ProgressBar } from './components/progress-bar';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
@@ -58,6 +60,8 @@ interface FrameworkRefs {
   memoryBtn: MemoryControl;
   vocabBtn: VocabButton;
   vocabPanel: VocabPanel;
+  downloadBtn: DownloadButton;
+  progressBar: ProgressBar;
   tracker: TimeTracker | null;
   /** 内存派生的 transcript cues(P1 修正:不持久化)*/
   cues: SubtitleCue[];
@@ -106,6 +110,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.memoryBtn.destroy(); // 内部 stop() 写回 lastStep,先于 tracker.destroy
     framework.vocabBtn.destroy();
     framework.vocabPanel.destroy(); // 解订阅 + 移除 DOM,先于 tracker.destroy
+    framework.downloadBtn.destroy(); // 解 onDownloadProgress 订阅
+    framework.progressBar.destroy();
     framework.tracker?.destroy();
     framework.transcriptBtn.destroy();
     framework.translateBtn.destroy();
@@ -295,12 +301,42 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       else vocabPanel.hide();
     });
 
-    // ── actionBar 顺序对齐 V1(Qc-6=A → Qd 后):CC | ⏮🧠⏭ | 🌐 | 📝 | 📖 | ⛶ ──
-    // (下载 ⬇ 留 e 段在 📝 后插入)
+    // L5-B3.19.e:progress-bar(play-tab 顶部 absolute,Qe-1=A)+ download-button(actionBar)
+    const progressBar = createProgressBar();
+    playTab.el.insertBefore(progressBar.el, playTab.el.firstChild);
+    const downloadBtn = createDownloadButton({
+      getSrc: () => node.attrs.src as string | null,
+      getLocalFilePath: () => (node.attrs.localFilePath as string | null) || null,
+      getTranscriptText: () => (node.attrs.transcriptText as string | null) || null,
+      getTranslations: () => {
+        const raw = node.attrs.translationTexts as string | null;
+        return raw ? parseTranslationsJson(raw) : {};
+      },
+      onUpdateAttrs: (patch) => {
+        const update: Record<string, unknown> = {};
+        if (patch.localFilePath !== undefined) update.localFilePath = patch.localFilePath;
+        if (patch.transcriptText !== undefined) update.transcriptText = patch.transcriptText;
+        if (Object.keys(update).length > 0) updateAttrs(update);
+      },
+      onProgress: (visible, percent) => {
+        progressBar.setVisible(visible);
+        progressBar.setPercent(percent);
+      },
+      onPhaseChange: (phase, percent) => {
+        framework?.dataTab.setDownloadStatus({
+          phase,
+          percent,
+          localFilePath: (node.attrs.localFilePath as string | null) || null,
+        });
+      },
+    });
+
+    // ── actionBar 完整顺序对齐 V1(Qe 后):CC | ⏮🧠⏭ | 🌐 | 📝 | ⬇ | 📖 | ⛶ ──
     tabBar.actionBarEl.appendChild(ccBtn.el);
     tabBar.actionBarEl.appendChild(memoryBtn.el);
     tabBar.actionBarEl.appendChild(translateBtn.el);
     tabBar.actionBarEl.appendChild(transcriptBtn.el);
+    tabBar.actionBarEl.appendChild(downloadBtn.el);
     tabBar.actionBarEl.appendChild(vocabBtn.el);
     tabBar.actionBarEl.appendChild(fsBtn.el);
 
@@ -321,6 +357,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       memoryBtn,
       vocabBtn,
       vocabPanel,
+      downloadBtn,
+      progressBar,
       tracker,
       cues,
       translations: new Map(),
@@ -502,6 +540,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       const oldActiveTab = node.attrs.activeTab;
       const oldTranscript = node.attrs.transcriptText;
       const oldTranslations = node.attrs.translationTexts;
+      const oldLocalFilePath = node.attrs.localFilePath;
       const oldTitle = node.attrs.title;
       node = updated;
 
@@ -548,6 +587,16 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       if (oldTitle !== updated.attrs.title) {
         const titleEl = framework.playTab.el.querySelector('.krig-video-block__title');
         if (titleEl) titleEl.textContent = (updated.attrs.title as string) || 'Video';
+      }
+
+      // L5-B3.19.e:localFilePath 变(撤销 / 协作)→ 同步 dataTab 显示
+      // 注:downloadBtn 内部状态不主动同步(撤销下载状态非关键场景);如真出问题
+      // 用户重新点 ⬇ 即可恢复正确状态(对齐 c 段 memory mode 同样取舍)
+      if (oldLocalFilePath !== updated.attrs.localFilePath) {
+        framework.dataTab.setDownloadStatus({
+          phase: updated.attrs.localFilePath ? 'done' : 'idle',
+          localFilePath: (updated.attrs.localFilePath as string | null) || null,
+        });
       }
 
       return true;

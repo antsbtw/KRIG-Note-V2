@@ -1607,6 +1607,35 @@
   flex: 1;
 }
 
+/* ── L5-B3.19.e Download row 状态文案 ── */
+.krig-pm-host .ProseMirror .krig-video-block__data-download {
+  color: #9aa0a6;
+}
+
+.krig-pm-host .ProseMirror .krig-video-block__data-download--done {
+  color: #34a853;
+}
+
+/* ── L5-B3.19.e Progress bar(play-tab 顶部 absolute,下载时显)── */
+.krig-pm-host .ProseMirror .krig-video-block__progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.krig-pm-host .ProseMirror .krig-video-block__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8ab4f8, #4d9aff);
+  width: 0%;
+  transition: width 0.2s ease-out;
+}
+
 /* ── transcript tab ── */
 .krig-pm-host .ProseMirror .krig-video-block__transcript-tab {
   display: flex;

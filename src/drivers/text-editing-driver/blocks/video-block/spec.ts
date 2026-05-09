@@ -45,6 +45,8 @@ const videoBlockNodeSpec: NodeSpec = {
     // L5-B3.19.c NEW(Memory Mode):
     segmentDuration: { default: 60 },      // 段长(秒);用户从 dropdown 选 30/60/90/120
     memoryLastStep: { default: 0 },        // 上次 stepIndex(stop 时写;start 时跑到此 step)
+    // L5-B3.19.e NEW(Download):
+    localFilePath: { default: null },      // ytdlp 下载完成后的本地路径(Q-e-1=A:不切 src 仅记录;按钮 ⬇ → 📁)
   },
   parseDOM: [
     {
@@ -63,6 +65,7 @@ const videoBlockNodeSpec: NodeSpec = {
           translationTexts: el.getAttribute('data-translations') || null,
           segmentDuration: Number(el.getAttribute('data-segment-duration') || '60') || 60,
           memoryLastStep: Number(el.getAttribute('data-memory-last-step') || '0') || 0,
+          localFilePath: el.getAttribute('data-local-file-path') || null,
         };
       },
     },
@@ -84,6 +87,9 @@ const videoBlockNodeSpec: NodeSpec = {
     }
     if (node.attrs.memoryLastStep) {
       attrs['data-memory-last-step'] = String(node.attrs.memoryLastStep);
+    }
+    if (node.attrs.localFilePath) {
+      attrs['data-local-file-path'] = node.attrs.localFilePath as string;
     }
     return [
       'div',
