@@ -136,6 +136,15 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
   // ── 主点击逻辑 ──
   btn.addEventListener('mousedown', async (e) => {
+    const src = deps.getSrc();
+    const isYT = !!src && detectEmbedType(src) === 'youtube';
+    console.log('[download-btn] mousedown', {
+      phase,
+      ytdlpAvailable,
+      disabled: btn.disabled,
+      src,
+      isYouTube: isYT,
+    });
     e.preventDefault();
     e.stopPropagation();
     if (btn.disabled) return;
@@ -151,9 +160,14 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
     if (phase === 'downloading') return;
 
-    const src = deps.getSrc();
-    if (!src) return;
-    if (!isYouTubeSrc()) return;
+    if (!src) {
+      console.warn('[download-btn] no src');
+      return;
+    }
+    if (!isYT) {
+      console.warn('[download-btn] not youtube — abort');
+      return;
+    }
 
     // 未装 yt-dlp → 先 install
     if (!ytdlpAvailable) {

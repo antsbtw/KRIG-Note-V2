@@ -35,13 +35,24 @@ export function createTranscriptButton(
   applyEnabledState();
 
   btn.addEventListener('mousedown', async (e) => {
+    const src = getSrc();
+    console.log('[transcript-btn] mousedown', {
+      disabled: btn.disabled,
+      src,
+      embed: src ? detectEmbedType(src) : 'no-src',
+    });
     e.preventDefault();
     e.stopPropagation();
     if (btn.disabled) return;
 
-    const src = getSrc();
-    if (!src) return;
-    if (detectEmbedType(src) !== 'youtube') return;
+    if (!src) {
+      console.warn('[transcript-btn] no src');
+      return;
+    }
+    if (detectEmbedType(src) !== 'youtube') {
+      console.warn('[transcript-btn] not youtube — abort');
+      return;
+    }
 
     const origText = btn.textContent;
     const origTitle = btn.title;
