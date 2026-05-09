@@ -2,10 +2,10 @@
  * DictionaryPanel — 字典查词 / 翻译 / 生词本面板(L5-B3.20b)
  *
  * V1 → V2 改写:src/plugins/note/learning/dictionary-panel.ts(V1 纯 DOM 436 行)→
- * V2 React 组件,走 popup-registry(对齐 LinkPanel / NoteLinkSearch / ColorPickerPanel)。
+ * V2 React 组件,L4.1 后从 popup-registry 迁到 help-panel-registry(右栏长侧栏)。
  *
  * 双模式 + 双 Tab:
- * - mode = 'lookup' / 'translate'(由 setPanelInitial 设置,popup 渲染时读)
+ * - mode = 'lookup' / 'translate'(由 setPanelInitial 设置,help-panel 渲染时读)
  * - tab = 'lookup' / 'vocab'(用户切换)
  *
  * lookup 模式:并行查词 + 翻译,UI 显释义 + 中文 + TTS + 加生词本
@@ -18,10 +18,12 @@
  *
  * TTS 实现:Audio + Blob URL(B3.20a CSP fix 已含 blob:);组件级 cleanup
  * (上一个未结束的 audio 在新点击时 pause + revoke)。
+ *
+ * Header / × 关闭按钮:由 help-panel shell 提供,本组件只填 body。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
+import type { HelpPanelCloseProps } from '@slot/interaction-registries/help-panel-registry/help-panel-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   LearningApi,
@@ -30,7 +32,7 @@ import type {
 } from '@capabilities/learning/types';
 import './dictionary-panel.css';
 
-// 模块级"待显示"状态(setPanelInitial 写入,popup 组件 mount 时读取)
+// 模块级"待显示"状态(setPanelInitial 写入,help-panel 组件 mount 时读取)
 let pendingMode: 'lookup' | 'translate' = 'lookup';
 let pendingText = '';
 let pendingContext: string | undefined;
@@ -50,7 +52,7 @@ interface AudioRef {
   url: string | null;
 }
 
-export function DictionaryPanel({ onClose }: PopupCloseProps) {
+export function DictionaryPanel(_props: HelpPanelCloseProps) {
   const learning = useMemo(() => requireCapabilityApi<LearningApi>('learning'), []);
 
   // 初始模式 + 文本(组件级常量,popup 内部不切换 — 切换走"重新打开 popup")
@@ -184,22 +186,9 @@ export function DictionaryPanel({ onClose }: PopupCloseProps) {
     );
   }, [vocab, filter]);
 
-  // 渲染
+  // 渲染(header / × 关闭按钮由 help-panel shell 提供;本组件只填 body)
   return (
     <div className="krig-dictionary-panel">
-      {/* Header */}
-      <div className="krig-dictionary-panel__header">
-        <span className="krig-dictionary-panel__title">Dictionary</span>
-        <button
-          type="button"
-          className="krig-dictionary-panel__close-btn"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-
       {/* Tabs */}
       <div className="krig-dictionary-panel__tabs">
         <button

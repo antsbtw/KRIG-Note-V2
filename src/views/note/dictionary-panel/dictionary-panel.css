@@ -1,56 +1,16 @@
 /**
- * DictionaryPanel — 字典查词 / 翻译 / 生词本面板样式(L5-B3.20b)
+ * DictionaryPanel — 字典查词 / 翻译 / 生词本面板样式(L5-B3.20b → L4.1 迁入 help-panel)
  *
- * popup-registry 已经处理了外层定位(left/top + visibility)+ z-index,
- * 本 CSS 只管 panel 内部 UI 样式(暗色主题对齐 V2 既有 popup)。
+ * 容器 .krig-help-panel 由 help-panel shell 提供(width/height/border/box-shadow/header/×)。
+ * 本 CSS 只管 body 内部 UI 样式(tabs / word / translate / vocab list 等)。
  */
 
 .krig-dictionary-panel {
   display: flex;
   flex-direction: column;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  border-radius: 8px;
-  width: 380px;
-  max-height: 480px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-
-/* ── Header ── */
-.krig-dictionary-panel__header {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid #3a3a3a;
-  flex-shrink: 0;
-}
-
-.krig-dictionary-panel__title {
   flex: 1;
-  font-size: 13px;
-  color: #e0e0e0;
-  font-weight: 500;
-}
-
-.krig-dictionary-panel__close-btn {
-  background: transparent;
-  border: none;
-  color: #888;
-  font-size: 18px;
-  width: 24px;
-  height: 24px;
-  cursor: pointer;
-  border-radius: 4px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.krig-dictionary-panel__close-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e0e0e0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ── Tabs ── */

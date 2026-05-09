@@ -443,38 +443,25 @@ export function registerNoteCommands(): void {
     contextMenuController.hide();
   });
 
-  // ── L5-B3.20b:learning 查词 / 翻译(contextMenu has-selection 触发)──
+  // ── L5-B3.20b → L4.1:learning 查词 / 翻译(contextMenu has-selection 触发,help-panel)──
 
-  /** 选区单词查词 → 弹 dictionary popup(lookup 模式)*/
+  /** 选区单词查词 → 弹 dictionary help-panel(lookup 模式)*/
   commandRegistry.register('note-view.cm-dictionary-lookup', () => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) return;
     const text = sel.toString().trim();
     if (!text) return;
-    // 取选区 BoundingClientRect 给 popup 锚点定位
-    let rect: DOMRect | undefined;
-    try {
-      rect = sel.getRangeAt(0).getBoundingClientRect();
-    } catch {
-      /* selection range invalid — 用 fallback 屏幕中心 */
-    }
-    showDictionaryPanel(text, undefined, rect);
+    showDictionaryPanel(text);
     contextMenuController.hide();
   });
 
-  /** 选区句子 / 段落 → 弹 dictionary popup(translate 模式)*/
+  /** 选区句子 / 段落 → 弹 dictionary help-panel(translate 模式)*/
   commandRegistry.register('note-view.cm-translate-text', () => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) return;
     const text = sel.toString().trim();
     if (!text) return;
-    let rect: DOMRect | undefined;
-    try {
-      rect = sel.getRangeAt(0).getBoundingClientRect();
-    } catch {
-      /* selection range invalid */
-    }
-    showTranslationPanel(text, rect);
+    showTranslationPanel(text);
     contextMenuController.hide();
   });
 
