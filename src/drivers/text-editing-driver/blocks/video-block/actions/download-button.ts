@@ -171,9 +171,11 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
     // 未装 yt-dlp → 先 install
     if (!ytdlpAvailable) {
+      console.log('[download-btn] yt-dlp not installed, calling install()');
       paintLoading('⏳', 'Installing yt-dlp...');
       try {
         const s = await install();
+        console.log('[download-btn] install returned', s);
         if (s.installed) {
           ytdlpAvailable = true;
           paintIdle();

@@ -54,6 +54,8 @@ export function createTranscriptButton(
       return;
     }
 
+    console.log('[transcript-btn] passed checks, calling capability.fetchTranscript');
+
     const origText = btn.textContent;
     const origTitle = btn.title;
     btn.textContent = '⏳';
@@ -62,6 +64,7 @@ export function createTranscriptButton(
 
     try {
       const result = await fetchTranscript(src);
+      console.log('[transcript-btn] fetchTranscript returned', result);
       if (result.transcriptText) {
         onTranscript(result.transcriptText);
         btn.textContent = '✓';
