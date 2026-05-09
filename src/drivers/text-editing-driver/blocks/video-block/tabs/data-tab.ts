@@ -7,7 +7,7 @@
 
 import type { Node as PMNode } from 'prosemirror-model';
 
-export type DownloadPhase = 'idle' | 'downloading' | 'done';
+export type DownloadPhase = 'idle' | 'installing' | 'downloading' | 'done';
 
 export interface DownloadStatusInfo {
   phase: DownloadPhase;
@@ -106,6 +106,10 @@ export function createDataTab(node: PMNode): DataTab {
   function applyDownloadStatus(info: DownloadStatusInfo): void {
     if (info.phase === 'idle') {
       dlVal.textContent = '未下载(点 actionBar 上的 ⬇)';
+      dlVal.classList.remove('krig-video-block__data-download--done');
+    } else if (info.phase === 'installing') {
+      const pct = info.percent != null ? Math.round(info.percent) : 0;
+      dlVal.textContent = `首次安装 yt-dlp... ${pct}%(完成后自动下载视频)`;
       dlVal.classList.remove('krig-video-block__data-download--done');
     } else if (info.phase === 'downloading') {
       const pct = info.percent != null ? Math.round(info.percent) : 0;

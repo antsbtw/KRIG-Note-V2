@@ -21,10 +21,18 @@ import {
   download,
   saveSubtitle,
   onDownloadProgress,
+  onInstallProgress,
 } from '@capabilities/ytdlp';
 import { detectEmbedType } from '../helpers/embed-detection';
 
-export type DownloadPhase = 'idle' | 'downloading' | 'done';
+/**
+ * 下载状态机(扩展自 V1 — 加 'installing' 让首次用户感知到 yt-dlp 装包阶段):
+ *   idle → installing → downloading → done    (首次,自动接力)
+ *   idle →               downloading → done    (后续,已装)
+ *
+ * 单次点击完成所有事(install 完自动接 download)— UX 改进,不再要求用户两次点。
+ */
+export type DownloadPhase = 'idle' | 'installing' | 'downloading' | 'done';
 
 export interface DownloadButtonDeps {
   /** 取当前 src(用于 detectEmbedType + 下载地址)*/
@@ -78,12 +86,6 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     btn.disabled = false;
   }
 
-  function paintLoading(label: string, title: string): void {
-    btn.textContent = label;
-    btn.title = title;
-    btn.disabled = true;
-  }
-
   function paintError(): void {
     btn.textContent = '❌';
     btn.disabled = true;
@@ -134,71 +136,50 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     deps.onPhaseChange('downloading', progress.percent);
   });
 
-  // ── 主点击逻辑 ──
-  // 用 click + mousedown 双重防御:
-  // - mousedown 仅 e.preventDefault() + stopPropagation 阻止 PM 把事件升级为
-  //   NodeSelection(selectable=true 的 node 内 mousedown 会触发 selection 更新 →
-  //   PM 整体销毁重建 NodeView → 闭包丢失)
-  // - click 在 mouseup 后触发,处理实际下载逻辑
-  btn.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // 订阅 install 进度(让用户看到 yt-dlp 装包阶段的实时反馈)
+  const installProgressUnsub = onInstallProgress((progress) => {
+    if (phase !== 'installing') return;
+    const pct = Math.max(0, Math.min(100, progress.percent || 0));
+    btn.textContent = `⏳ ${pct}%`;
+    btn.title = `Installing yt-dlp (${pct}%)... 首次需 ~30s,完成后自动开始下载`;
+    deps.onProgress(true, pct);
+    deps.onPhaseChange('installing', pct);
   });
-  btn.addEventListener('click', async (e) => {
+
+  /**
+   * 运行下载流程(install 未完成时先 install,完成后立即接力 download)。
+   * UX 改进:用户单次点击完成所有事,不需要点两次。
+   */
+  async function runFlow(): Promise<void> {
     const src = deps.getSrc();
-    const isYT = !!src && detectEmbedType(src) === 'youtube';
-    console.log('[download-btn] click', {
-      phase,
-      ytdlpAvailable,
-      disabled: btn.disabled,
-      src,
-      isYouTube: isYT,
-    });
-    e.stopPropagation();
-    if (btn.disabled) return;
+    if (!src) return;
 
-    // done + 点击 → showItemInFolder
-    if (phase === 'done') {
-      const path = deps.getLocalFilePath();
-      if (path) {
-        await window.electronAPI?.showItemInFolder?.(path);
-      }
-      return;
-    }
-
-    if (phase === 'downloading') return;
-
-    if (!src) {
-      console.warn('[download-btn] no src');
-      return;
-    }
-    if (!isYT) {
-      console.warn('[download-btn] not youtube — abort');
-      return;
-    }
-
-    // 未装 yt-dlp → 先 install
+    // 步骤 1:确保 yt-dlp 已装(未装则自动 install)
     if (!ytdlpAvailable) {
-      console.log('[download-btn] yt-dlp not installed, calling install()');
-      paintLoading('⏳', 'Installing yt-dlp...');
+      phase = 'installing';
+      btn.textContent = '⏳';
+      btn.title = '首次使用需先装 yt-dlp(~36MB,约 30s);完成后自动开始下载视频';
+      btn.disabled = true;
+      deps.onProgress(true, 0);
+      deps.onPhaseChange('installing', 0);
       try {
         const s = await install();
-        console.log('[download-btn] install returned', s);
-        if (s.installed) {
-          ytdlpAvailable = true;
-          paintIdle();
-        } else {
+        if (!s.installed) {
           paintError();
+          return;
         }
+        ytdlpAvailable = true;
       } catch {
         paintError();
+        return;
       }
-      return;
     }
 
-    // 开始下载
+    // 步骤 2:下载视频(install 完成后自动接力 — 用户感知是一次点击完成)
     phase = 'downloading';
-    paintLoading('⏳', 'Downloading...');
+    btn.textContent = '⏳';
+    btn.title = 'Downloading video...';
+    btn.disabled = true;
     deps.onProgress(true, 0);
     deps.onPhaseChange('downloading', 0);
 
@@ -242,6 +223,40 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
       deps.onProgress(false, 0);
       deps.onPhaseChange('idle');
     }
+  }
+
+  // ── 主点击逻辑 ──
+  // 用 click + mousedown 双重防御:
+  // - mousedown 仅 e.preventDefault() + stopPropagation 阻止 PM 把事件升级为
+  //   NodeSelection(selectable=true 的 node 内 mousedown 会触发 selection 更新 →
+  //   PM 整体销毁重建 NodeView → 闭包丢失)
+  // - click 在 mouseup 后触发,处理实际逻辑
+  btn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (btn.disabled) return;
+
+    // done + 点击 → showItemInFolder
+    if (phase === 'done') {
+      const path = deps.getLocalFilePath();
+      if (path) {
+        await window.electronAPI?.showItemInFolder?.(path);
+      }
+      return;
+    }
+
+    // installing / downloading 期间 — 防呆,不重入
+    if (phase === 'installing' || phase === 'downloading') return;
+
+    const src = deps.getSrc();
+    if (!src) return;
+    if (!isYouTubeSrc()) return;
+
+    // idle → 启动 install(若需)+ download 一气呵成
+    await runFlow();
   });
 
   // 初次同步(mount 时若 attrs 已有 localFilePath → done 态)
@@ -258,6 +273,7 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
         progressUnsub();
         progressUnsub = null;
       }
+      installProgressUnsub();
       btn.remove();
     },
   };
