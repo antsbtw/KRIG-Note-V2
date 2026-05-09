@@ -69,13 +69,17 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
   let resetTimer: number | null = null;
 
   function paintIdle(): void {
+    // 防御:phase=done 时不该被异步 checkStatus / paintIdle 覆盖按钮文字
+    // (mount 时 syncFromAttrs 已设 📁,checkStatus 几秒后 resolve 不能改回 ⬇)
+    if (phase === 'done') return;
+
     if (!isYouTubeSrc()) {
       btn.disabled = true;
       btn.title = '仅 YouTube 源支持 yt-dlp 下载(直链 mp4 走视频自带下载按钮)';
       btn.textContent = '⬇';
       return;
     }
-    btn.disabled = !ytdlpAvailable && phase === 'idle' ? false : false;
+    btn.disabled = false;
     btn.textContent = '⬇';
     btn.title = ytdlpAvailable ? 'Download video' : 'Click to install yt-dlp';
   }
@@ -252,12 +256,25 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
       return;
     }
 
-    // done + 点击 → showItemInFolder
+    // done + 点击 → showItemInFolder(若文件已被删,自动 reset 到 idle 重新下载)
     if (phase === 'done') {
       const path = deps.getLocalFilePath();
       console.log('[download-btn] phase=done, opening Finder:', path);
       if (path) {
-        await window.electronAPI?.showItemInFolder?.(path);
+        const result = await window.electronAPI?.showItemInFolder?.(path);
+        if (result && !result.ok) {
+          // 文件已被用户删除等 → 重置到 idle,下次点击重新下载
+          console.log('[download-btn] showItemInFolder failed, reason:', result.reason, '→ reset to idle');
+          phase = 'idle';
+          deps.onUpdateAttrs({ localFilePath: null });
+          paintIdle();
+          deps.onPhaseChange('idle');
+        }
+      } else {
+        // localFilePath 缺失 → reset
+        phase = 'idle';
+        paintIdle();
+        deps.onPhaseChange('idle');
       }
       return;
     }
