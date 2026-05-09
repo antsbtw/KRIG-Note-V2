@@ -1,18 +1,22 @@
 /**
- * videoBlock — 多端 embed + 直接 video 播放(L5-B3.16)
+ * videoBlock — 多端 embed + 直接 video + Tab 框架 + 字幕底座(L5-B3.16 → L5-B3.19.a)
  *
- * V1 → V2 直迁:src/plugins/note/blocks/video-block.ts(988 行 → 砍字幕 + 砍 Vimeo/generic
- * 留 Phase D,V2 ~300 行)
+ * V1 → V2 直迁:src/plugins/note/blocks/video-block.ts(988 行)
  *
- * V2 仅支持两种 embedType(决策 § 1.3):
- * - 'youtube':<iframe> 16/9 比例(rel=0,无 jsapi — 字幕系统留 D 阶段才需要)
- * - 'direct'  :<video controls preload=metadata>(media:// / https:// 直链)
+ * embedType:
+ * - 'youtube'  :<iframe> 16/9 + IFrame postMessage time tracking(B3.19.a 启 enablejsapi=1)
+ * - 'direct'   :<video controls preload=metadata>(media:// / https:// 直链)
+ * - 'vimeo'    :探测出但本期不渲染,fallback 占位(总设计 Q4=A)
+ * - 'generic'  :未知 embed,本期不渲染,fallback 占位
  *
- * 砍 V1:
- * - ❌ Vimeo / generic embed iframe — Phase D + iframe 安全 sanitizer 设计
- * - ❌ 字幕系统(WebVTT cue / CC 浮层 / YouTube transcript / 翻译 — 全部留 Phase D)
- * - ❌ YouTube IFrame API postMessage(没字幕需求,enablejsapi=0)
- * - ❌ Tab 框架(单一播放器视图)
+ * Tab 框架(B3.19.a):'play'(默认) / 'data' / 'transcript' / <future translation lang>
+ * 字幕底座(B3.19.a):time-tracker 单源 300ms 轮询;CC 浮层渲染 activeCue
+ *
+ * 后续段:
+ * - B3.19.b:transcript import(ytdlp.fetchTranscript)+ translate 多 Tab
+ * - B3.19.c:Memory Playback Mode(艾宾浩斯)
+ * - B3.19.d:Vocab Panel(timeline 视图)
+ * - B3.19.e:yt-dlp 下载 + 完整 Data Tab
  *
  * caption:contentDOM 由 PM 接管,跟 audio / image 同模式
  */
@@ -28,11 +32,14 @@ const videoBlockNodeSpec: NodeSpec = {
   selectable: true,
   attrs: {
     src: { default: null },          // YouTube URL / mp4 URL / media://
-    embedType: { default: null },    // 'youtube' | 'direct' — NodeView mount 时按 src 推断,持久化
+    embedType: { default: null },    // 'youtube' | 'direct' | 'vimeo' | 'generic' — mount 时按 src 推断,持久化
     title: { default: 'Video' },
     mimeType: { default: null },
     duration: { default: null },
     atomId: { default: null },       // KRIG 知识图谱挂钩(D 阶段)
+    // L5-B3.19.a NEW:
+    activeTab: { default: 'play' },        // 'play' | 'data' | 'transcript' | <future translation lang code>
+    transcriptText: { default: null },     // 字幕原文(P1 修正:真相源,subtitleCues 内存派生不持久化)
   },
   parseDOM: [
     {
@@ -46,6 +53,8 @@ const videoBlockNodeSpec: NodeSpec = {
           title: el.getAttribute('data-title') || 'Video',
           mimeType: el.getAttribute('data-mime') || null,
           duration: durStr ? Number(durStr) || null : null,
+          activeTab: el.getAttribute('data-active-tab') || 'play',
+          transcriptText: el.getAttribute('data-transcript') || null,
         };
       },
     },
@@ -57,6 +66,10 @@ const videoBlockNodeSpec: NodeSpec = {
     if (node.attrs.title) attrs['data-title'] = node.attrs.title as string;
     if (node.attrs.mimeType) attrs['data-mime'] = node.attrs.mimeType as string;
     if (node.attrs.duration != null) attrs['data-duration'] = String(node.attrs.duration);
+    if (node.attrs.activeTab && node.attrs.activeTab !== 'play') {
+      attrs['data-active-tab'] = node.attrs.activeTab as string;
+    }
+    if (node.attrs.transcriptText) attrs['data-transcript'] = node.attrs.transcriptText as string;
     return [
       'div',
       attrs,
