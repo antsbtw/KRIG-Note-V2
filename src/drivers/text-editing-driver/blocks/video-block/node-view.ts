@@ -211,7 +211,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
   // ─── framework(有 src)────────────────────────────────
 
   function buildFramework(n: PMNode): void {
-    console.log('[node-view] buildFramework() called, src=', n.attrs.src);
+    console.log('[node-view] buildFramework() called, src=', n.attrs.src, 'stack:');
+    console.trace();
     destroyFramework();
     console.log('[node-view] destroyFramework done, framework=', framework);
     playerWrap.innerHTML = '';
@@ -627,7 +628,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     },
 
     destroy() {
-      console.log('[node-view] destroy() called (NodeView 整体销毁)');
+      console.log('[node-view] destroy() called (NodeView 整体销毁) stack:');
+      console.trace();
       destroyFramework();
     },
   };
