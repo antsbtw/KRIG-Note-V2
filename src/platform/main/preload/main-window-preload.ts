@@ -143,6 +143,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ): Promise<string | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_SAVE_SUBTITLE, videoFilePath, langCode, timestampText);
   },
+  // L5-B3.19.b:不下载视频抓 YouTube 字幕(沿用 V2 既有 unknown 模式 — 不反向 import capability)
+  ytdlpFetchTranscript(url: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_FETCH_TRANSCRIPT, url);
+  },
 
   // ── L5-B3.18:tweet-fetcher 临时 capability ──
   fetchTweetData(tweetUrl: string): Promise<unknown> {

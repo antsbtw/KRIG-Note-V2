@@ -1378,7 +1378,9 @@
   flex-shrink: 0;
 }
 
-.krig-pm-host .ProseMirror .krig-video-block__action-btn {
+.krig-pm-host .ProseMirror .krig-video-block__action-btn,
+.krig-pm-host .ProseMirror .krig-video-block__transcript-btn,
+.krig-pm-host .ProseMirror .krig-video-block__translate-btn {
   background: transparent;
   border: 1px solid transparent;
   color: #9aa0a6;
@@ -1389,12 +1391,16 @@
   line-height: 1;
 }
 
-.krig-pm-host .ProseMirror .krig-video-block__action-btn:hover {
+.krig-pm-host .ProseMirror .krig-video-block__action-btn:hover:not(:disabled),
+.krig-pm-host .ProseMirror .krig-video-block__transcript-btn:hover:not(:disabled),
+.krig-pm-host .ProseMirror .krig-video-block__translate-btn:hover:not(:disabled) {
   background: rgba(138, 180, 248, 0.12);
   color: #8ab4f8;
 }
 
-.krig-pm-host .ProseMirror .krig-video-block__action-btn:disabled {
+.krig-pm-host .ProseMirror .krig-video-block__action-btn:disabled,
+.krig-pm-host .ProseMirror .krig-video-block__transcript-btn:disabled,
+.krig-pm-host .ProseMirror .krig-video-block__translate-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

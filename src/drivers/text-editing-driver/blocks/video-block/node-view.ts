@@ -30,8 +30,17 @@ import { createTranscriptTab, type TranscriptTab } from './tabs/transcript-tab';
 import { createSubtitleOverlay, type SubtitleOverlay } from './components/subtitle-overlay';
 import { createCCButton, type CCButton, type CCState } from './actions/cc-button';
 import { createFullscreenButton, type FullscreenButton } from './actions/fullscreen-button';
+import { createTranscriptButton, type TranscriptButton } from './actions/transcript-button';
+import { createTranslateButton, type TranslateButton } from './actions/translate-button';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
+
+interface TranslationPanelRef {
+  /** transcript-tab readonly 模式实例 */
+  panel: TranscriptTab;
+  /** 该 lang 对应的内存派生 cues(currentText 重 parse 缓存)*/
+  cues: SubtitleCue[];
+}
 
 interface FrameworkRefs {
   tabBar: TabBar;
@@ -41,9 +50,13 @@ interface FrameworkRefs {
   overlay: SubtitleOverlay;
   ccBtn: CCButton;
   fsBtn: FullscreenButton;
+  transcriptBtn: TranscriptButton;
+  translateBtn: TranslateButton;
   tracker: TimeTracker | null;
-  /** 内存派生的 cues(P1 修正:不持久化)*/
+  /** 内存派生的 transcript cues(P1 修正:不持久化)*/
   cues: SubtitleCue[];
+  /** 翻译 Tab 实例 + 各自 cues:`Map<langCode, TranslationPanelRef>` */
+  translations: Map<string, TranslationPanelRef>;
   /** transcriptText 节流定时器 */
   writeTimer: number | null;
   /** unsubscribe 钩子 */
@@ -85,9 +98,13 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.unsubs.forEach((u) => u());
     if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
     framework.tracker?.destroy();
+    framework.transcriptBtn.destroy();
+    framework.translateBtn.destroy();
     framework.ccBtn.destroy();
     framework.fsBtn.destroy();
     framework.overlay.destroy();
+    framework.translations.forEach((t) => t.panel.destroy());
+    framework.translations.clear();
     framework.transcriptTab.destroy();
     framework.dataTab.destroy();
     framework.playTab.destroy();
@@ -182,8 +199,12 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
 
     const initialActiveTab = (n.attrs.activeTab as string) || 'play';
     const initialTranscript = n.attrs.transcriptText as string | null;
+    const initialTranslationsRaw = n.attrs.translationTexts as string | null;
+    const initialTranslations: Record<string, string> = initialTranslationsRaw
+      ? parseTranslationsJson(initialTranslationsRaw)
+      : {};
 
-    // Tab bar
+    // Tab bar(transcript / 翻译 Tab 都通过同一 lang code 标识 — transcript 用 'transcript')
     const tabBar = createTabBar(initialActiveTab, [
       { id: 'play', label: 'Video' },
       { id: 'data', label: 'Meta' },
@@ -206,6 +227,30 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     // Action buttons(actionBar 由 tabBar 暴露)
     const ccBtn = createCCButton();
     const fsBtn = createFullscreenButton(() => playTab.el);
+    const transcriptBtn = createTranscriptButton(
+      () => node.attrs.src as string | null,
+      (text) => {
+        // 抓到字幕回调:setText 灌入 textarea + 触发 input(自动写 attrs + 重 parse cues)
+        transcriptTab.setText(text);
+        if (!framework) return;
+        framework.cues = parseSubtitleCuesFromText(text);
+        if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
+        // 即时写,不节流(用户主动触发的非键入操作)
+        updateAttrs({ transcriptText: text || null });
+        // 切到 transcript Tab 让用户立即看到
+        tabBar.setActive('transcript');
+      },
+    );
+    const translateBtn = createTranslateButton(
+      () => transcriptTab.getText(),
+      (langCode, translatedText) => {
+        // 翻译完成回调:更新 translations map + 创建/更新对应 Tab + 同步 attrs + cc dropdown
+        if (!framework) return;
+        upsertTranslation(langCode, translatedText);
+      },
+    );
+    tabBar.actionBarEl.appendChild(transcriptBtn.el);
+    tabBar.actionBarEl.appendChild(translateBtn.el);
     tabBar.actionBarEl.appendChild(ccBtn.el);
     tabBar.actionBarEl.appendChild(fsBtn.el);
 
@@ -225,17 +270,31 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       overlay,
       ccBtn,
       fsBtn,
+      transcriptBtn,
+      translateBtn,
       tracker,
       cues,
+      translations: new Map(),
       writeTimer: null,
       unsubs: [],
     };
 
-    // ── 切 panel 显隐(初始 + 订阅 tabBar)──
+    // ── 创建已有翻译 Tab(从 attrs 恢复)──
+    for (const [lang, text] of Object.entries(initialTranslations)) {
+      mountTranslationTab(lang, text);
+    }
+    // 同步 cc dropdown 语言列表
+    syncCcLanguages();
+
+    // ── 切 panel 显隐 ──
     const showPanel = (id: string) => {
       playTab.el.style.display = id === 'play' ? '' : 'none';
       dataTab.el.style.display = id === 'data' ? '' : 'none';
       transcriptTab.el.style.display = id === 'transcript' ? '' : 'none';
+      // 翻译 Tab 同步
+      framework?.translations.forEach((t, lang) => {
+        t.panel.el.style.display = id === lang ? '' : 'none';
+      });
     };
     showPanel(initialActiveTab);
     framework.unsubs.push(
@@ -247,7 +306,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       }),
     );
 
-    // ── CC 状态变化:更新 overlay + 启停 time 订阅 ──
+    // ── CC 状态变化:更新 overlay + 启停 time 订阅(读对应 lang 的 cues)──
     let timeUnsub: (() => void) | null = null;
     const refreshTimeSubscription = () => {
       if (timeUnsub) {
@@ -260,8 +319,10 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       }
       const tracker = framework.tracker;
       const f = framework;
+      const lang = ccState.lang;
       timeUnsub = tracker.onTimeUpdate((t) => {
-        const cue = findActiveCue(f.cues, t);
+        const activeCues = lang === 'transcript' ? f.cues : f.translations.get(lang)?.cues || [];
+        const cue = findActiveCue(activeCues, t);
         f.overlay.setActiveCue(cue);
       });
     };
@@ -271,7 +332,6 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         refreshTimeSubscription();
       }),
     );
-    // unsub 时连带把 timeUnsub 释放
     framework.unsubs.push(() => {
       if (timeUnsub) {
         timeUnsub();
@@ -283,9 +343,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.unsubs.push(
       transcriptTab.onInput((text) => {
         if (!framework) return;
-        // 内存 cues 立即重 parse(给当前订阅者用,无延迟)
         framework.cues = parseSubtitleCuesFromText(text);
-        // attrs 节流写
         if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
         framework.writeTimer = window.setTimeout(() => {
           if (view.isDestroyed) return;
@@ -303,6 +361,69 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         }
       }),
     );
+  }
+
+  // ─── 翻译 Tab 协调辅助 ──────────────────────────────
+
+  function parseTranslationsJson(raw: string): Record<string, string> {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, string>;
+      }
+    } catch {
+      /* 损坏 JSON 静默丢弃 */
+    }
+    return {};
+  }
+
+  /** 创建一个翻译 Tab(readonly)— Qb-1=A;mount + cues parse */
+  function mountTranslationTab(langCode: string, text: string): void {
+    if (!framework) return;
+    const panel = createTranscriptTab(text);
+    // readonly:textarea + import 按钮挂点都不允许编辑(简化:直接禁用 textarea)
+    const textarea = panel.el.querySelector('textarea');
+    if (textarea instanceof HTMLTextAreaElement) {
+      textarea.readOnly = true;
+    }
+    // 隐藏 toolbarMount(翻译 Tab 不需 import)
+    panel.toolbarMount.style.display = 'none';
+    playerWrap.appendChild(panel.el);
+    panel.el.style.display = 'none';
+    framework.tabBar.addTabButton({ id: langCode, label: langCode.toUpperCase() });
+    framework.translations.set(langCode, {
+      panel,
+      cues: parseSubtitleCuesFromText(text),
+    });
+  }
+
+  /** 翻译完成回调:upsert + 持久化 + cc 同步 + 自动切到该 Tab */
+  function upsertTranslation(langCode: string, translatedText: string): void {
+    if (!framework) return;
+    const existing = framework.translations.get(langCode);
+    if (existing) {
+      // 已存在 → 更新内容(Qb-5=A 重新翻译并覆盖)
+      existing.panel.setText(translatedText);
+      existing.cues = parseSubtitleCuesFromText(translatedText);
+    } else {
+      mountTranslationTab(langCode, translatedText);
+    }
+    // 持久化:翻译 attr 序列化
+    const map: Record<string, string> = {};
+    framework.translations.forEach((t, lang) => {
+      map[lang] = t.panel.getText();
+    });
+    updateAttrs({ translationTexts: Object.keys(map).length ? JSON.stringify(map) : null });
+    // 同步 cc dropdown
+    syncCcLanguages();
+    // 切到新创建/更新的 Tab
+    framework.tabBar.setActive(langCode);
+  }
+
+  /** 把 framework.translations 的 keys 推到 ccBtn.setLanguages */
+  function syncCcLanguages(): void {
+    if (!framework) return;
+    framework.ccBtn.setLanguages(Array.from(framework.translations.keys()));
   }
 
   // ─── paint(根据 attrs 决定形态)──────────────────────
@@ -329,6 +450,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       const oldEmbed = node.attrs.embedType;
       const oldActiveTab = node.attrs.activeTab;
       const oldTranscript = node.attrs.transcriptText;
+      const oldTranslations = node.attrs.translationTexts;
       const oldTitle = node.attrs.title;
       node = updated;
 
@@ -351,6 +473,23 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         const text = (updated.attrs.transcriptText as string | null) || '';
         framework.transcriptTab.setText(text);
         framework.cues = parseSubtitleCuesFromText(text);
+      }
+
+      // translationTexts 变(外部驱动,撤销 / 协作)→ 重建翻译 Tab 集合
+      if (oldTranslations !== updated.attrs.translationTexts) {
+        const map = updated.attrs.translationTexts
+          ? parseTranslationsJson(updated.attrs.translationTexts as string)
+          : {};
+        // 清掉已有的(整体重建简单可靠;Tab 数量小,代价低)
+        framework.translations.forEach((t, lang) => {
+          framework!.tabBar.removeTabButton(lang);
+          t.panel.destroy();
+        });
+        framework.translations.clear();
+        for (const [lang, text] of Object.entries(map)) {
+          mountTranslationTab(lang, text);
+        }
+        syncCcLanguages();
       }
 
       // title 变 → 同步 dataTab + play-tab title 元素(若有)

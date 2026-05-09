@@ -38,8 +38,10 @@ const videoBlockNodeSpec: NodeSpec = {
     duration: { default: null },
     atomId: { default: null },       // KRIG 知识图谱挂钩(D 阶段)
     // L5-B3.19.a NEW:
-    activeTab: { default: 'play' },        // 'play' | 'data' | 'transcript' | <future translation lang code>
+    activeTab: { default: 'play' },        // 'play' | 'data' | 'transcript' | <translation lang code>
     transcriptText: { default: null },     // 字幕原文(P1 修正:真相源,subtitleCues 内存派生不持久化)
+    // L5-B3.19.b NEW:
+    translationTexts: { default: null },   // JSON.stringify(Record<langCode, transcriptText>) | null;每语言独立持久化原文
   },
   parseDOM: [
     {
@@ -55,6 +57,7 @@ const videoBlockNodeSpec: NodeSpec = {
           duration: durStr ? Number(durStr) || null : null,
           activeTab: el.getAttribute('data-active-tab') || 'play',
           transcriptText: el.getAttribute('data-transcript') || null,
+          translationTexts: el.getAttribute('data-translations') || null,
         };
       },
     },
@@ -70,6 +73,7 @@ const videoBlockNodeSpec: NodeSpec = {
       attrs['data-active-tab'] = node.attrs.activeTab as string;
     }
     if (node.attrs.transcriptText) attrs['data-transcript'] = node.attrs.transcriptText as string;
+    if (node.attrs.translationTexts) attrs['data-translations'] = node.attrs.translationTexts as string;
     return [
       'div',
       attrs,
