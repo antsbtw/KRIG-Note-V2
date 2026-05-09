@@ -131,6 +131,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
   // ─── placeholder(无 src)──────────────────────────────
 
   function buildPlaceholder(): void {
+    console.log('[node-view] buildPlaceholder() called (无 src 形态)');
     destroyFramework();
     playerWrap.innerHTML = '';
 
@@ -551,10 +552,12 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       const oldTranslations = node.attrs.translationTexts;
       const oldLocalFilePath = node.attrs.localFilePath;
       const oldTitle = node.attrs.title;
+      console.log('[node-view] update() called, oldSrc=', oldSrc, 'newSrc=', updated.attrs.src, 'oldEmbed=', oldEmbed, 'newEmbed=', updated.attrs.embedType);
       node = updated;
 
       // src / embedType 变 → 整体重渲(framework / placeholder 切换)
       if (oldSrc !== updated.attrs.src || oldEmbed !== updated.attrs.embedType) {
+        console.log('[node-view] update() src/embed changed → paint()');
         paint(updated);
         return true;
       }
@@ -624,6 +627,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     },
 
     destroy() {
+      console.log('[node-view] destroy() called (NodeView 整体销毁)');
       destroyFramework();
     },
   };
