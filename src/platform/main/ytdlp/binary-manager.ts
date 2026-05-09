@@ -68,30 +68,41 @@ export async function install(
 async function doInstall(
   onProgress?: (percent: number) => void,
 ): Promise<YtdlpStatus> {
+  console.log('[ytdlp install] starting, fetch', DOWNLOAD_URL);
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
   const response = await net.fetch(DOWNLOAD_URL);
+  console.log('[ytdlp install] fetch returned, status=', response.status, 'ok=', response.ok);
   if (!response.ok) {
     throw new Error(`Download failed: HTTP ${response.status}`);
   }
 
   const totalBytes = parseInt(response.headers.get('content-length') || '0', 10);
+  console.log('[ytdlp install] totalBytes=', totalBytes);
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No response body');
 
   const chunks: Uint8Array[] = [];
   let downloadedBytes = 0;
+  let lastLogPct = -10;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     downloadedBytes += value.length;
-    if (totalBytes > 0 && onProgress) {
-      onProgress(Math.round((downloadedBytes / totalBytes) * 100));
+    if (totalBytes > 0) {
+      const pct = Math.round((downloadedBytes / totalBytes) * 100);
+      if (onProgress) onProgress(pct);
+      // main 侧每 10% log 一次,看下载是否真在推进
+      if (pct - lastLogPct >= 10) {
+        console.log(`[ytdlp install] download ${pct}% (${downloadedBytes}/${totalBytes})`);
+        lastLogPct = pct;
+      }
     }
   }
 
+  console.log('[ytdlp install] download complete, writing file...');
   // 合并 chunks 写入文件
   const buffer = Buffer.concat(chunks);
   fs.writeFileSync(YTDLP_PATH, buffer);
@@ -104,7 +115,10 @@ async function doInstall(
     /* 非 macOS 或 xattr 不存在时静默忽略 */
   }
 
-  return checkStatus();
+  console.log('[ytdlp install] file written, running checkStatus...');
+  const status = await checkStatus();
+  console.log('[ytdlp install] done, installed=', status.installed, 'version=', status.version);
+  return status;
 }
 
 /** 获取 binary 路径(未安装返回 null)*/
