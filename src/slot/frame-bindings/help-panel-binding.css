@@ -1,0 +1,71 @@
+/**
+ * Help Panel Binding 样式(L4.1)
+ *
+ * 提供 shell — 子面板内容样式由各自 panel 自管(对齐 popup-binding 模式:
+ * popup 不画 chrome,panel 自画卡片;help-panel shell 画 chrome,panel 内容
+ * 只填 body 内的 tabs/list/etc)。
+ *
+ * 形态(对齐 V1 help-panel.css):
+ * - 右栏定宽 360px 长侧栏(从 viewport 顶到底)
+ * - z-index 1000(同 .krig-popup)
+ * - --krig-help-panel-top 留位:V2 当前没有顶部固定 toolbar 默认 0,
+ *   后续如加 toolbar 由 platform 写入 root style。
+ */
+
+.krig-help-panel {
+  position: fixed;
+  top: var(--krig-help-panel-top, 0);
+  right: 0;
+  width: 360px;
+  height: calc(100vh - var(--krig-help-panel-top, 0px));
+  background: #2a2a2a;
+  border-left: 1px solid #3a3a3a;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.krig-help-panel__header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #3a3a3a;
+  flex-shrink: 0;
+}
+
+.krig-help-panel__title {
+  flex: 1;
+  font-size: 13px;
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.krig-help-panel__close-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-help-panel__close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+}
+
+.krig-help-panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}

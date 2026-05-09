@@ -10,6 +10,8 @@ import { slashRegistry } from '../interaction-registries/slash-registry/slash-re
 import { handleRegistry } from '../interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { overlayRegistry } from '../interaction-registries/overlay-registry/overlay-registry';
+import { popupRegistry } from '../interaction-registries/popup-registry/popup-registry';
+import { helpPanelRegistry } from '../interaction-registries/help-panel-registry/help-panel-registry';
 import { navSideRegistry } from '../nav-side-registry/nav-side-registry';
 import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
 import { keymapRegistry } from '../keymap-registry/keymap-registry';
@@ -26,6 +28,8 @@ export function reportL4Alive(): void {
       handle: handleRegistry.count,
       floatingToolbar: floatingToolbarRegistry.count,
       overlay: overlayRegistry.count,
+      popup: popupRegistry.count,
+      helpPanel: helpPanelRegistry.count,
       navSide: navSideRegistry.count,
       toolbar: toolbarRegistry.count,
       keymap: keymapRegistry.count,

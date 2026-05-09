@@ -31,21 +31,36 @@ interface VocabHighlightState {
   decos: DecorationSet;
 }
 
-// ─── 模块级 vocab 定义(供 tooltip 显释义)─────────────────
+// ─── 模块级 vocab 状态 ───────────────────────────────
+//
+// vocabDefs:hover tooltip 显释义用
+// currentVocabWords:plugin init 读快照(解决"learning-integration 启动比 PM mount
+//   早 → setVocabWords 落空 instanceRegistry → 后续 onVocabChanged 不触发(vocab
+//   不变)→ 高亮永远建不上"的 bug)
+//
+// 单一真相源:setVocabWords 同时更新两个 module-level 缓存 + dispatch 给已有 instance;
+// 新 instance 在 plugin init 时从 currentVocabWords 直接拿,不依赖 dispatch 时序。
 
-/** word (lowercase) → definition */
+/** word (lowercase) → definition,供 hover tooltip 显释义 */
 const vocabDefs = new Map<string, string>();
 
+/** 当前生词词表(lowercase),plugin init 时读作初始快照 */
+let currentVocabWords: Set<string> = new Set();
+
 /**
- * 更新生词定义(driver setVocabWords 调本函数,跟 dispatch meta 一起)
+ * 更新生词定义 + 词表快照(driver setVocabWords 调本函数,跟 dispatch meta 一起)
  * 内部模块级,不走 plugin state(tooltip 是模块级 DOM,不需要 plugin state 同步)。
  */
 export function updateVocabDefs(entries: Array<{ word: string; definition: string }>): void {
   vocabDefs.clear();
+  currentVocabWords = new Set();
   for (const e of entries) {
-    vocabDefs.set(e.word.toLowerCase(), e.definition);
+    const w = e.word.toLowerCase();
+    vocabDefs.set(w, e.definition);
+    currentVocabWords.add(w);
   }
 }
+
 
 // ─── tooltip(模块级 DOM,生命周期跟随 hover)──────────
 
@@ -177,8 +192,16 @@ export function buildVocabHighlightPlugin(): Plugin {
     key: vocabHighlightPluginKey,
 
     state: {
-      init(): VocabHighlightState {
-        return { words: new Set(), decos: DecorationSet.empty };
+      init(_config, instance): VocabHighlightState {
+        // 读 module-level 快照 — 解决"PM mount 比 learning-integration 推送晚"
+        // 时已有词表无法命中(后续 onVocabChanged 不触发 → 永远空)的冷启动 race。
+        const words = currentVocabWords;
+        return {
+          words,
+          decos: words.size > 0
+            ? buildDecorations(instance.doc, words)
+            : DecorationSet.empty,
+        };
       },
 
       apply(tr, value, _oldState, newState): VocabHighlightState {
