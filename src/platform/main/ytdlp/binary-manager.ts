@@ -35,11 +35,12 @@ export async function checkStatus(): Promise<YtdlpStatus> {
   }
   try {
     const version = await new Promise<string>((resolve, reject) => {
-      // 5s timeout 防 Gatekeeper / 损坏二进制 hang(macOS 首次执行隔离检查可能卡死)
+      // 30s timeout — yt-dlp 是 PyInstaller bundle,首次执行 macOS amfi 验证可能慢
+      // (install 时已做 ad-hoc codesign,签名后第二次启动应 < 2s;但保险起见给 30s)
       const timer = setTimeout(() => {
-        reject(new Error('yt-dlp --version timeout (5s) — 二进制可能被 macOS Gatekeeper 拦截'));
-      }, 5000);
-      execFile(YTDLP_PATH, ['--version'], { timeout: 5000 }, (err, stdout) => {
+        reject(new Error('yt-dlp --version timeout (30s) — 二进制可能未通过 macOS amfi 验证;请尝试在 Terminal 手动跑一次 ~/Library/Application\\ Support/KRIG\\ Note/bin/yt-dlp --version 让 macOS 完成首次验证'));
+      }, 30000);
+      execFile(YTDLP_PATH, ['--version'], { timeout: 30000 }, (err, stdout) => {
         clearTimeout(timer);
         if (err) reject(err);
         else resolve(stdout.trim());
@@ -118,11 +119,24 @@ async function doInstall(
   try {
     execSync(`xattr -dr com.apple.quarantine "${YTDLP_PATH}"`, {
       stdio: 'ignore',
-      timeout: 3000, // 3s 守门,xattr 卡住不阻塞后续
+      timeout: 3000,
     });
     console.log('[ytdlp install] xattr quarantine removed');
   } catch (e) {
-    console.warn('[ytdlp install] xattr failed (非 macOS / 无权限 / 超时,继续):', e instanceof Error ? e.message : String(e));
+    console.warn('[ytdlp install] xattr failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  // macOS:ad-hoc codesign — yt-dlp 是 PyInstaller bundle,未签名时首次执行 amfi
+  // 验证极慢(~1-3 分钟)。ad-hoc 自签后 macOS 信任,启动 < 2s。
+  // --force 覆盖已有签名,--deep 递归签所有内嵌资源,--sign - 用 ad-hoc 身份。
+  try {
+    execSync(`codesign --force --deep --sign - "${YTDLP_PATH}"`, {
+      stdio: 'pipe',
+      timeout: 30000, // 30s 给 codesign 处理 36MB bundle
+    });
+    console.log('[ytdlp install] ad-hoc codesign applied');
+  } catch (e) {
+    console.warn('[ytdlp install] codesign failed (首次执行可能很慢):', e instanceof Error ? e.message : String(e));
   }
 
   console.log('[ytdlp install] file written, running checkStatus...');
