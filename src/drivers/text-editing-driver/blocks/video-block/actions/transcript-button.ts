@@ -64,9 +64,15 @@ export function createTranscriptButton(
 
     try {
       const result = await fetchTranscript(src);
-      console.log('[transcript-btn] fetchTranscript returned', result);
+      console.log('[transcript-btn] fetchTranscript returned, length=', result.transcriptText?.length || 0);
       if (result.transcriptText) {
-        onTranscript(result.transcriptText);
+        console.log('[transcript-btn] calling onTranscript callback');
+        try {
+          onTranscript(result.transcriptText);
+          console.log('[transcript-btn] onTranscript callback returned ok');
+        } catch (cbErr) {
+          console.error('[transcript-btn] onTranscript callback threw:', cbErr);
+        }
         btn.textContent = '✓';
         btn.title = '字幕已导入';
         window.setTimeout(() => {
