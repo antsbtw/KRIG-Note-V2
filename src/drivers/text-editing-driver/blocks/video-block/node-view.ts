@@ -1,35 +1,53 @@
 /**
- * videoBlock NodeView — placeholder ↔ youtube/direct 播放器(L5-B3.16)
+ * videoBlock NodeView — 协调中心(L5-B3.16 → L5-B3.19.a 重写)
  *
- * V1 → V2 直迁(砍字幕系统 / 砍 Vimeo/generic):src/plugins/note/blocks/video-block.ts
+ * 二态:
+ * - placeholder(无 src):🎞 + Upload + URL 输入(沿用 B3.16,Qa-2=A 不动)
+ * - tab framework(有 src):tab-bar + (play / data / transcript) panels + actions(CC / ⛶)
+ *                          + subtitle-overlay(CC 浮层)+ time-tracker(单源 300ms)
  *
- * 三态:
- * - placeholder(无 src)         :🎞 + Choose file + URL embed(支持 mp4 / YouTube URL)
- * - youtube(YouTube URL)        :<iframe> 16/9 比例(rel=0,无 jsapi)
- * - direct(mp4 / mov / media://):<video controls preload=metadata> + 下载按钮(http(s))
+ * 拆分:
+ * - 三态切换 / Tab 切换 / 持久化协调 → 本文件
+ * - 渲染细节 / 子模块行为 → tabs/* actions/* components/* helpers/*
  *
- * destroy:停止 video 播放 + 清空 src 防内存泄漏(对齐 audio)
+ * destroy():tracker / cc / fullscreen / 各 panel 全部 destroy 防内存泄漏。
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { mediaPutBase64, mediaDownload } from '@capabilities/media-storage';
+import { mediaPutBase64 } from '@capabilities/media-storage';
+import { detectEmbedType, type EmbedType } from './helpers/embed-detection';
+import {
+  parseSubtitleCuesFromText,
+  findActiveCue,
+  type SubtitleCue,
+} from './helpers/subtitle-parser';
+import { createTimeTracker, type TimeTracker } from './helpers/time-tracker';
+import { createTabBar, type TabBar } from './tabs/tab-bar';
+import { createPlayTab, type PlayTab } from './tabs/play-tab';
+import { createDataTab, type DataTab } from './tabs/data-tab';
+import { createTranscriptTab, type TranscriptTab } from './tabs/transcript-tab';
+import { createSubtitleOverlay, type SubtitleOverlay } from './components/subtitle-overlay';
+import { createCCButton, type CCButton, type CCState } from './actions/cc-button';
+import { createFullscreenButton, type FullscreenButton } from './actions/fullscreen-button';
 
-type EmbedType = 'youtube' | 'direct';
+const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
-function detectEmbedType(url: string): EmbedType {
-  if (/(?:youtube\.com\/(?:watch|embed|shorts)|youtu\.be\/)/i.test(url)) return 'youtube';
-  return 'direct';
-}
-
-function extractYouTubeId(url: string): string | null {
-  const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/);
-  return m?.[1] ?? null;
-}
-
-function toYouTubeEmbedUrl(id: string): string {
-  // rel=0:不显示相关视频建议;无 enablejsapi(字幕系统才需要,留 Phase D)
-  return `https://www.youtube.com/embed/${id}?rel=0`;
+interface FrameworkRefs {
+  tabBar: TabBar;
+  playTab: PlayTab;
+  dataTab: DataTab;
+  transcriptTab: TranscriptTab;
+  overlay: SubtitleOverlay;
+  ccBtn: CCButton;
+  fsBtn: FullscreenButton;
+  tracker: TimeTracker | null;
+  /** 内存派生的 cues(P1 修正:不持久化)*/
+  cues: SubtitleCue[];
+  /** transcriptText 节流定时器 */
+  writeTimer: number | null;
+  /** unsubscribe 钩子 */
+  unsubs: Array<() => void>;
 }
 
 export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPos) => {
@@ -47,7 +65,9 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
   captionDOM.className = 'krig-video-block__caption';
   dom.appendChild(captionDOM);
 
-  let videoEl: HTMLVideoElement | null = null;
+  let framework: FrameworkRefs | null = null;
+
+  // ─── helpers ──────────────────────────────────────────
 
   function updateAttrs(patch: Record<string, unknown>): void {
     const pos = typeof getPos === 'function' ? getPos() : undefined;
@@ -56,19 +76,29 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     for (const [key, value] of Object.entries(patch)) {
       tr = tr.setNodeAttribute(pos, key, value);
     }
+    tr.setMeta('addToHistory', false); // UI state 不进 undo 栈
     view.dispatch(tr);
   }
 
-  function disposeVideo(): void {
-    if (videoEl) {
-      videoEl.pause();
-      videoEl.src = '';
-      videoEl = null;
-    }
+  function destroyFramework(): void {
+    if (!framework) return;
+    framework.unsubs.forEach((u) => u());
+    if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
+    framework.tracker?.destroy();
+    framework.ccBtn.destroy();
+    framework.fsBtn.destroy();
+    framework.overlay.destroy();
+    framework.transcriptTab.destroy();
+    framework.dataTab.destroy();
+    framework.playTab.destroy();
+    framework.tabBar.destroy();
+    framework = null;
   }
 
+  // ─── placeholder(无 src)──────────────────────────────
+
   function buildPlaceholder(): void {
-    disposeVideo();
+    destroyFramework();
     playerWrap.innerHTML = '';
 
     const ph = document.createElement('div');
@@ -105,7 +135,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
           if (r.success && r.mediaUrl) {
             updateAttrs({
               src: r.mediaUrl,
-              embedType: 'direct',
+              embedType: 'direct' as EmbedType,
               title: file.name.replace(/\.[^.]+$/, ''),
               mimeType: file.type || null,
             });
@@ -113,7 +143,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
             console.warn('[videoBlock] mediaPutBase64 failed:', r.error);
             updateAttrs({
               src: dataUrl,
-              embedType: 'direct',
+              embedType: 'direct' as EmbedType,
               title: file.name.replace(/\.[^.]+$/, ''),
               mimeType: file.type || null,
             });
@@ -125,20 +155,18 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     });
     actions.appendChild(uploadBtn);
 
-    // URL embed(支持 mp4 / YouTube)
+    // URL embed
     const urlInput = document.createElement('input');
     urlInput.type = 'text';
     urlInput.className = 'krig-video-block__placeholder-url';
     urlInput.placeholder = 'mp4 URL or YouTube link...';
     urlInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const url = urlInput.value.trim();
-        if (url) {
-          const embedType = detectEmbedType(url);
-          updateAttrs({ src: url, embedType });
-        }
-      }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const url = urlInput.value.trim();
+      if (!url) return;
+      const embedType = detectEmbedType(url);
+      updateAttrs({ src: url, embedType });
     });
     actions.appendChild(urlInput);
 
@@ -146,136 +174,208 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     playerWrap.appendChild(ph);
   }
 
-  function buildYouTubeEmbed(n: PMNode): void {
-    disposeVideo();
+  // ─── framework(有 src)────────────────────────────────
+
+  function buildFramework(n: PMNode): void {
+    destroyFramework();
     playerWrap.innerHTML = '';
 
-    const src = n.attrs.src as string;
-    const videoId = extractYouTubeId(src);
-    if (!videoId) {
-      // src 标了 youtube 但解析不出 ID — 退化到 direct 试试
-      buildDirectVideo(n);
-      return;
-    }
+    const initialActiveTab = (n.attrs.activeTab as string) || 'play';
+    const initialTranscript = n.attrs.transcriptText as string | null;
 
-    // title
-    if (n.attrs.title && n.attrs.title !== 'Video') {
-      const titleEl = document.createElement('div');
-      titleEl.className = 'krig-video-block__title';
-      titleEl.textContent = n.attrs.title as string;
-      playerWrap.appendChild(titleEl);
-    }
+    // Tab bar
+    const tabBar = createTabBar(initialActiveTab, [
+      { id: 'play', label: 'Video' },
+      { id: 'data', label: 'Meta' },
+      { id: 'transcript', label: 'EN' },
+    ]);
+    playerWrap.appendChild(tabBar.el);
 
-    const iframe = document.createElement('iframe');
-    iframe.src = toYouTubeEmbedUrl(videoId);
-    iframe.setAttribute('allowfullscreen', '');
-    iframe.setAttribute(
-      'allow',
-      'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
-    );
-    iframe.className = 'krig-video-block__iframe';
-    playerWrap.appendChild(iframe);
-  }
+    // Panels
+    const playTab = createPlayTab(n);
+    const dataTab = createDataTab(n);
+    const transcriptTab = createTranscriptTab(initialTranscript);
+    playerWrap.appendChild(playTab.el);
+    playerWrap.appendChild(dataTab.el);
+    playerWrap.appendChild(transcriptTab.el);
 
-  function buildDirectVideo(n: PMNode): void {
-    disposeVideo();
-    playerWrap.innerHTML = '';
+    // Subtitle overlay 挂在 play-tab.overlayMount
+    const overlay = createSubtitleOverlay();
+    playTab.overlayMount.appendChild(overlay.el);
 
-    if (n.attrs.title && n.attrs.title !== 'Video') {
-      const titleEl = document.createElement('div');
-      titleEl.className = 'krig-video-block__title';
-      titleEl.textContent = n.attrs.title as string;
-      playerWrap.appendChild(titleEl);
-    }
+    // Action buttons(actionBar 由 tabBar 暴露)
+    const ccBtn = createCCButton();
+    const fsBtn = createFullscreenButton(() => playTab.el);
+    tabBar.actionBarEl.appendChild(ccBtn.el);
+    tabBar.actionBarEl.appendChild(fsBtn.el);
 
-    videoEl = document.createElement('video');
-    videoEl.src = n.attrs.src as string;
-    videoEl.controls = true;
-    videoEl.preload = 'metadata';
-    videoEl.className = 'krig-video-block__video';
-    playerWrap.appendChild(videoEl);
+    // Time tracker(从 player source 创建)
+    const playerSource = playTab.getPlayerSource();
+    const tracker = playerSource ? createTimeTracker(playerSource) : null;
 
-    // 下载按钮(仅 http(s) 源)
-    const src = n.attrs.src as string;
-    if (src.startsWith('http://') || src.startsWith('https://')) {
-      const downloadBtn = document.createElement('button');
-      downloadBtn.type = 'button';
-      downloadBtn.className = 'krig-video-block__download-btn';
-      downloadBtn.textContent = '⬇';
-      downloadBtn.title = '下载到本地媒体库';
-      downloadBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        downloadBtn.textContent = '⏳';
-        downloadBtn.disabled = true;
-        try {
-          const r = await mediaDownload(src, 'video');
-          if (view.isDestroyed) return;
-          if (r.success && r.mediaUrl) {
-            updateAttrs({ src: r.mediaUrl });
-            downloadBtn.textContent = '✅';
-          } else {
-            console.warn('[videoBlock] mediaDownload failed:', r.error);
-            downloadBtn.textContent = '❌';
-          }
-        } catch (err) {
-          console.warn('[videoBlock] mediaDownload threw:', err);
-          downloadBtn.textContent = '❌';
+    // 内存派生 cues(P1)
+    const cues = parseSubtitleCuesFromText(initialTranscript || '');
+    let ccState: CCState = { enabled: false, lang: 'transcript' };
+
+    framework = {
+      tabBar,
+      playTab,
+      dataTab,
+      transcriptTab,
+      overlay,
+      ccBtn,
+      fsBtn,
+      tracker,
+      cues,
+      writeTimer: null,
+      unsubs: [],
+    };
+
+    // ── 切 panel 显隐(初始 + 订阅 tabBar)──
+    const showPanel = (id: string) => {
+      playTab.el.style.display = id === 'play' ? '' : 'none';
+      dataTab.el.style.display = id === 'data' ? '' : 'none';
+      transcriptTab.el.style.display = id === 'transcript' ? '' : 'none';
+    };
+    showPanel(initialActiveTab);
+    framework.unsubs.push(
+      tabBar.onChange((newId) => {
+        showPanel(newId);
+        if (newId !== (node.attrs.activeTab as string)) {
+          updateAttrs({ activeTab: newId });
         }
-        setTimeout(() => {
-          if (downloadBtn.isConnected) {
-            downloadBtn.textContent = '⬇';
-            downloadBtn.disabled = false;
-          }
-        }, 2000);
+      }),
+    );
+
+    // ── CC 状态变化:更新 overlay + 启停 time 订阅 ──
+    let timeUnsub: (() => void) | null = null;
+    const refreshTimeSubscription = () => {
+      if (timeUnsub) {
+        timeUnsub();
+        timeUnsub = null;
+      }
+      if (!ccState.enabled || !framework?.tracker) {
+        framework?.overlay.setActiveCue(null);
+        return;
+      }
+      const tracker = framework.tracker;
+      const f = framework;
+      timeUnsub = tracker.onTimeUpdate((t) => {
+        const cue = findActiveCue(f.cues, t);
+        f.overlay.setActiveCue(cue);
       });
-      playerWrap.appendChild(downloadBtn);
-    }
+    };
+    framework.unsubs.push(
+      ccBtn.onStateChange((s) => {
+        ccState = s;
+        refreshTimeSubscription();
+      }),
+    );
+    // unsub 时连带把 timeUnsub 释放
+    framework.unsubs.push(() => {
+      if (timeUnsub) {
+        timeUnsub();
+        timeUnsub = null;
+      }
+    });
+
+    // ── transcriptTab textarea 输入:节流写 attrs + 内存重 parse ──
+    framework.unsubs.push(
+      transcriptTab.onInput((text) => {
+        if (!framework) return;
+        // 内存 cues 立即重 parse(给当前订阅者用,无延迟)
+        framework.cues = parseSubtitleCuesFromText(text);
+        // attrs 节流写
+        if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
+        framework.writeTimer = window.setTimeout(() => {
+          if (view.isDestroyed) return;
+          updateAttrs({ transcriptText: text || null });
+          if (framework) framework.writeTimer = null;
+        }, TRANSCRIPT_WRITE_THROTTLE_MS);
+      }),
+    );
+
+    // ── dataTab title 编辑 ──
+    framework.unsubs.push(
+      dataTab.onTitleChange((title) => {
+        if (title !== (node.attrs.title as string)) {
+          updateAttrs({ title: title || 'Video' });
+        }
+      }),
+    );
   }
+
+  // ─── paint(根据 attrs 决定形态)──────────────────────
 
   function paint(n: PMNode): void {
     if (!n.attrs.src) {
       buildPlaceholder();
       return;
     }
-    const embedType = (n.attrs.embedType as EmbedType | null) ?? detectEmbedType(n.attrs.src as string);
-    if (embedType === 'youtube') buildYouTubeEmbed(n);
-    else buildDirectVideo(n);
+    buildFramework(n);
   }
 
   paint(node);
 
+  // ─── PM NodeView 接口 ─────────────────────────────────
+
   return {
     dom,
     contentDOM: captionDOM,
+
     update(updated) {
       if (updated.type.name !== 'videoBlock') return false;
       const oldSrc = node.attrs.src;
       const oldEmbed = node.attrs.embedType;
+      const oldActiveTab = node.attrs.activeTab;
+      const oldTranscript = node.attrs.transcriptText;
       const oldTitle = node.attrs.title;
       node = updated;
-      // src / embedType 变 → 整体重渲;仅 title 变 → 局部刷新
+
+      // src / embedType 变 → 整体重渲(framework / placeholder 切换)
       if (oldSrc !== updated.attrs.src || oldEmbed !== updated.attrs.embedType) {
         paint(updated);
-      } else if (oldTitle !== updated.attrs.title) {
-        const titleEl = playerWrap.querySelector('.krig-video-block__title');
-        if (titleEl) {
-          titleEl.textContent = (updated.attrs.title as string) || 'Video';
-        }
+        return true;
       }
+
+      // 仅 framework 内细粒度变化
+      if (!framework) return true;
+
+      // activeTab 变(外部驱动,如撤销)→ 切 panel
+      if (oldActiveTab !== updated.attrs.activeTab) {
+        framework.tabBar.setActive((updated.attrs.activeTab as string) || 'play');
+      }
+
+      // transcriptText 变(外部驱动,撤销 / 协作)→ 同步 textarea + 重 parse cues
+      if (oldTranscript !== updated.attrs.transcriptText) {
+        const text = (updated.attrs.transcriptText as string | null) || '';
+        framework.transcriptTab.setText(text);
+        framework.cues = parseSubtitleCuesFromText(text);
+      }
+
+      // title 变 → 同步 dataTab + play-tab title 元素(若有)
+      if (oldTitle !== updated.attrs.title) {
+        const titleEl = framework.playTab.el.querySelector('.krig-video-block__title');
+        if (titleEl) titleEl.textContent = (updated.attrs.title as string) || 'Video';
+      }
+
       return true;
     },
+
     stopEvent(event) {
       const target = event.target as HTMLElement | null;
-      if (target?.closest(
-        'video, iframe, .krig-video-block__placeholder, .krig-video-block__download-btn',
-      )) {
+      if (
+        target?.closest(
+          'video, iframe, button, input, textarea, .krig-video-block__placeholder, .krig-video-block__dropdown',
+        )
+      ) {
         return true;
       }
       return false;
     },
+
     destroy() {
-      disposeVideo();
+      destroyFramework();
     },
   };
 };
