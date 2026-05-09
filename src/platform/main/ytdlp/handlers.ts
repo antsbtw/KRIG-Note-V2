@@ -37,20 +37,31 @@ export function registerYtdlpHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.YTDLP_DOWNLOAD,
     async (event, url: unknown, outputPath: unknown) => {
+      console.log('[ytdlp download] handler called, url=', url);
       if (typeof url !== 'string' || !url) {
+        console.warn('[ytdlp download] invalid url, abort');
         return { url: '', status: 'error', percent: 0, error: 'invalid url' };
       }
       const out = typeof outputPath === 'string' ? outputPath : undefined;
       const sender = event.sender;
-      return downloadVideo(
+      let lastLogPct = -10;
+      const result = await downloadVideo(
         url,
         (progress) => {
           if (!sender.isDestroyed()) {
             sender.send(IPC_CHANNELS.YTDLP_DOWNLOAD_PROGRESS, progress);
           }
+          // main 侧每 10% log,看 yt-dlp stdout 是否在推进
+          const p = progress.percent || 0;
+          if (p - lastLogPct >= 10) {
+            console.log(`[ytdlp download] progress ${Math.round(p)}% status=${progress.status}`);
+            lastLogPct = p;
+          }
         },
         out,
       );
+      console.log('[ytdlp download] handler returning, status=', result.status, 'filename=', result.filename, 'error=', result.error);
+      return result;
     },
   );
 

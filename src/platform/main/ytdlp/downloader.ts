@@ -107,6 +107,7 @@ export async function downloadVideo(
       url,
     ];
 
+    console.log('[ytdlp download] spawning yt-dlp:', binPath, 'args:', args.join(' '));
     const proc = spawn(binPath, args);
 
     const parseLine = (line: string): void => {
@@ -123,10 +124,24 @@ export async function downloadVideo(
       if (mergerMatch) downloadedFilename = mergerMatch[1].trim();
     };
 
-    proc.stdout.on('data', (data: Buffer) => parseLine(data.toString()));
-    proc.stderr.on('data', (data: Buffer) => parseLine(data.toString()));
+    proc.stdout.on('data', (data: Buffer) => {
+      const text = data.toString();
+      // 实时把 yt-dlp stdout 也打印到主进程终端,看是不是 stuck
+      process.stdout.write('[yt-dlp stdout] ' + text);
+      parseLine(text);
+    });
+    proc.stderr.on('data', (data: Buffer) => {
+      const text = data.toString();
+      process.stdout.write('[yt-dlp stderr] ' + text);
+      parseLine(text);
+    });
+
+    proc.on('error', (err) => {
+      console.error('[ytdlp download] spawn error:', err);
+    });
 
     proc.on('close', async (code) => {
+      console.log('[ytdlp download] yt-dlp closed, exit code=', code);
       if (code !== 0) {
         resolve({ url, status: 'error', percent: lastPercent, error: `yt-dlp exited with code ${code}` });
         return;
