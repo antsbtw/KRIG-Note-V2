@@ -35,13 +35,19 @@ export async function checkStatus(): Promise<YtdlpStatus> {
   }
   try {
     const version = await new Promise<string>((resolve, reject) => {
-      execFile(YTDLP_PATH, ['--version'], (err, stdout) => {
+      // 5s timeout 防 Gatekeeper / 损坏二进制 hang(macOS 首次执行隔离检查可能卡死)
+      const timer = setTimeout(() => {
+        reject(new Error('yt-dlp --version timeout (5s) — 二进制可能被 macOS Gatekeeper 拦截'));
+      }, 5000);
+      execFile(YTDLP_PATH, ['--version'], { timeout: 5000 }, (err, stdout) => {
+        clearTimeout(timer);
         if (err) reject(err);
         else resolve(stdout.trim());
       });
     });
     return { installed: true, version, path: YTDLP_PATH };
-  } catch {
+  } catch (e) {
+    console.warn('[ytdlp checkStatus] failed:', e instanceof Error ? e.message : String(e));
     return { installed: false };
   }
 }
@@ -110,9 +116,13 @@ async function doInstall(
 
   // macOS:移除 Gatekeeper 隔离属性,允许 spawn 执行
   try {
-    execSync(`xattr -dr com.apple.quarantine "${YTDLP_PATH}"`, { stdio: 'ignore' });
-  } catch {
-    /* 非 macOS 或 xattr 不存在时静默忽略 */
+    execSync(`xattr -dr com.apple.quarantine "${YTDLP_PATH}"`, {
+      stdio: 'ignore',
+      timeout: 3000, // 3s 守门,xattr 卡住不阻塞后续
+    });
+    console.log('[ytdlp install] xattr quarantine removed');
+  } catch (e) {
+    console.warn('[ytdlp install] xattr failed (非 macOS / 无权限 / 超时,继续):', e instanceof Error ? e.message : String(e));
   }
 
   console.log('[ytdlp install] file written, running checkStatus...');
