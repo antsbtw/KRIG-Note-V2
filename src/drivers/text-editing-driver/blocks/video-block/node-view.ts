@@ -627,6 +627,21 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       return false;
     },
 
+    /**
+     * 关键:让 PM DOMObserver 忽略我们自己改的 NodeView 内部 DOM mutations
+     * (按钮 textContent 改 ⏳/✓/❌ / Tab 切换 display / progress-bar width / 等)。
+     * 不忽略的话 PM updateChildren 会把整个 NodeView 重新 mount,断开按钮 closure
+     * (download / transcript / memory / etc 全部丢失状态)。
+     *
+     * 规则:contentDOM(figcaption,只有这是真正的 PM-managed 内容)以外的 mutation
+     * 全忽略 — 我们自管的 player / tabs / actions / panels 等。
+     */
+    ignoreMutation(mutation) {
+      // figcaption(captionDOM)是 PM-managed,不能忽略
+      if (captionDOM.contains(mutation.target as Node)) return false;
+      return true;
+    },
+
     destroy() {
       console.log('[node-view] destroy() called (NodeView 整体销毁) stack:');
       console.trace();

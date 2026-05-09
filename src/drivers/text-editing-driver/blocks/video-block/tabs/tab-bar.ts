@@ -32,6 +32,10 @@ export interface TabBar {
 export function createTabBar(initialActive: string, initialTabs: TabDef[]): TabBar {
   const el = document.createElement('div');
   el.className = 'krig-video-block__tab-bar';
+  // contentEditable=false 让 PM DOMObserver 忽略本子树 mutations。
+  // 否则按钮文字 textContent 赋值(💾 → ⏳ 等)会被识别为 childList 变化触发
+  // PM updateChildren → 整个 NodeView 重 mount,断开按钮 closure 状态。
+  el.contentEditable = 'false';
 
   // tabs 区(左)+ action 区(右)— 用 flex 排版
   const tabsZone = document.createElement('div');
