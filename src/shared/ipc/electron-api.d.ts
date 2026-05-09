@@ -82,6 +82,11 @@ declare global {
         langCode: string,
         timestampText: string,
       ): Promise<string | null>;
+      /** L5-B3.19.b:不下载视频抓 YouTube 字幕([MM:SS] timestamp text 格式;失败时 transcriptText=null + error 详情)*/
+      ytdlpFetchTranscript(url: string): Promise<{
+        transcriptText: string | null;
+        error: string | null;
+      }>;
 
       // ── L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)──
       /** 抓取推文元数据(BrowserWindow + DOM scraping)

@@ -30,6 +30,7 @@ import type {
   YtdlpStatus,
   YtdlpInstallProgress,
   YtdlpDownloadProgress,
+  FetchTranscriptResult,
 } from './types';
 
 export type {
@@ -37,6 +38,7 @@ export type {
   YtdlpStatus,
   YtdlpInstallProgress,
   YtdlpDownloadProgress,
+  FetchTranscriptResult,
 } from './types';
 
 /** 检查 yt-dlp 是否已安装 + 版本号 */
@@ -121,6 +123,20 @@ export async function saveSubtitle(
   return window.electronAPI.ytdlpSaveSubtitle(videoFilePath, langCode, timestampText);
 }
 
+/**
+ * L5-B3.19.b:不下载视频抓 YouTube 字幕(供 📝 import 按钮)
+ *
+ * 失败时不抛 — 返回 `{transcriptText: null, error: 详情}` 让调用方决定 UI 反馈。
+ * 分层方向:capability 自己 narrowing electron-api inline shape 到 FetchTranscriptResult
+ * (两侧结构等价,P1 修正后无 cross-import)。
+ */
+export async function fetchTranscript(url: string): Promise<FetchTranscriptResult> {
+  if (!window.electronAPI?.ytdlpFetchTranscript) {
+    return { transcriptText: null, error: 'electronAPI.ytdlpFetchTranscript not available' };
+  }
+  return window.electronAPI.ytdlpFetchTranscript(url) as Promise<FetchTranscriptResult>;
+}
+
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
 // W5 边界 A 临时允许项:同时保留模块级 export(driver/slot 内部消费可直 import)
 capabilityRegistry.register({
@@ -133,5 +149,6 @@ capabilityRegistry.register({
     onDownloadProgress,
     getInfo,
     saveSubtitle,
+    fetchTranscript,
   } satisfies YtdlpApi,
 });

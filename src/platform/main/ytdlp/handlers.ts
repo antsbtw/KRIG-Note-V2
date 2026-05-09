@@ -17,6 +17,7 @@ import * as path from 'path';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { checkStatus, install } from './binary-manager';
 import { downloadVideo, getVideoInfo, saveTranslationSubtitle } from './downloader';
+import { fetchYouTubeTranscript } from './fetch-transcript';
 
 export function registerYtdlpHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_STATUS, async () => {
@@ -90,4 +91,12 @@ export function registerYtdlpHandlers(): void {
       }
     },
   );
+
+  // L5-B3.19.b:不下载视频抓 YouTube 字幕
+  ipcMain.handle(IPC_CHANNELS.YTDLP_FETCH_TRANSCRIPT, async (_event, url: unknown) => {
+    if (typeof url !== 'string' || !url) {
+      return { transcriptText: null, error: 'invalid url' };
+    }
+    return fetchYouTubeTranscript(url);
+  });
 }

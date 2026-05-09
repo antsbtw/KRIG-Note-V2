@@ -20,6 +20,14 @@ export interface YtdlpInstallProgress {
   error?: string;
 }
 
+/** L5-B3.19.b:不下载视频抓 YouTube 字幕的结果 */
+export interface FetchTranscriptResult {
+  /** 成功:`[MM:SS] text` 格式纯文本(对齐 download 内部 subtitleText 生成方式)*/
+  transcriptText: string | null;
+  /** 失败原因(用户可读 — "字幕不可用" / "网络错误" 等);成功时 null */
+  error: string | null;
+}
+
 export interface YtdlpDownloadProgress {
   url: string;
   status: 'downloading' | 'complete' | 'error';
@@ -53,4 +61,6 @@ export interface YtdlpApi {
   /** 保存翻译字幕为 .srt(对齐视频文件目录,文件名 <video-base>.<langCode>.srt)
    *  失败 / 路径不合规返回 null */
   saveSubtitle(videoFilePath: string, langCode: string, timestampText: string): Promise<string | null>;
+  /** L5-B3.19.b:不下载视频抓 YouTube 字幕(供 video-block 📝 import 按钮)*/
+  fetchTranscript(url: string): Promise<FetchTranscriptResult>;
 }
