@@ -62,6 +62,7 @@ import { slashRegistry } from '../interaction-registries/slash-registry/slash-re
 import { handleRegistry } from '../interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { popupRegistry } from '../interaction-registries/popup-registry/popup-registry';
+import { helpPanelRegistry } from '../interaction-registries/help-panel-registry/help-panel-registry';
 
 export function useContextMenuVersion(): number {
   return useSyncExternalStore(
@@ -95,6 +96,13 @@ export function usePopupVersion(): number {
   return useSyncExternalStore(
     (cb) => popupRegistry.subscribe(cb),
     () => popupRegistry.count,
+  );
+}
+
+export function useHelpPanelVersion(): number {
+  return useSyncExternalStore(
+    (cb) => helpPanelRegistry.subscribe(cb),
+    () => helpPanelRegistry.count,
   );
 }
 
