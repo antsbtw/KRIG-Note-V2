@@ -135,17 +135,25 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
   });
 
   // ── 主点击逻辑 ──
-  btn.addEventListener('mousedown', async (e) => {
+  // 用 click + mousedown 双重防御:
+  // - mousedown 仅 e.preventDefault() + stopPropagation 阻止 PM 把事件升级为
+  //   NodeSelection(selectable=true 的 node 内 mousedown 会触发 selection 更新 →
+  //   PM 整体销毁重建 NodeView → 闭包丢失)
+  // - click 在 mouseup 后触发,处理实际下载逻辑
+  btn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  btn.addEventListener('click', async (e) => {
     const src = deps.getSrc();
     const isYT = !!src && detectEmbedType(src) === 'youtube';
-    console.log('[download-btn] mousedown', {
+    console.log('[download-btn] click', {
       phase,
       ytdlpAvailable,
       disabled: btn.disabled,
       src,
       isYouTube: isYT,
     });
-    e.preventDefault();
     e.stopPropagation();
     if (btn.disabled) return;
 
