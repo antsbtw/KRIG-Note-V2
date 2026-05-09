@@ -104,6 +104,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
   }
 
   function destroyFramework(): void {
+    console.log('[node-view] destroyFramework() called, framework existed?', !!framework);
     if (!framework) return;
     framework.unsubs.forEach((u) => u());
     if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
@@ -209,7 +210,9 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
   // ─── framework(有 src)────────────────────────────────
 
   function buildFramework(n: PMNode): void {
+    console.log('[node-view] buildFramework() called, src=', n.attrs.src);
     destroyFramework();
+    console.log('[node-view] destroyFramework done, framework=', framework);
     playerWrap.innerHTML = '';
 
     const initialActiveTab = (n.attrs.activeTab as string) || 'play';
@@ -246,28 +249,24 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     // Action buttons(actionBar 由 tabBar 暴露)
     const ccBtn = createCCButton();
     const fsBtn = createFullscreenButton(() => playTab.el);
+    // FIX:用本地引用而非 closure framework 变量,避免 buildFramework 被重入时
+    // framework 变量临时为 null 而 callback 通过它读不到正确实例的问题。
+    // tabBar / transcriptTab / playerWrap 内层局部引用可直接安全使用。
     const transcriptBtn = createTranscriptButton(
       () => node.attrs.src as string | null,
       (text) => {
-        console.log('[node-view onTranscript] start, text length=', text.length, 'framework?', !!framework);
-        // 抓到字幕回调:setText 灌入 textarea + 触发 input(自动写 attrs + 重 parse cues)
+        // 抓到字幕回调:textarea 立即填入(本地引用,绕过 framework null race)
         transcriptTab.setText(text);
-        console.log('[node-view onTranscript] setText done, textarea value len=', transcriptTab.getText().length);
-        if (!framework) {
-          console.warn('[node-view onTranscript] framework null, abort rest');
-          return;
-        }
-        framework.cues = parseSubtitleCuesFromText(text);
-        if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
-        // 即时写,不节流(用户主动触发的非键入操作)
+        // 立即写 attrs(updateAttrs 路径不依赖 framework — 走 view.dispatch)
         updateAttrs({ transcriptText: text || null });
-        console.log('[node-view onTranscript] updateAttrs done');
-        // 切到 transcript Tab 让用户立即看到
+        // 切 Tab(本地引用,直接 setActive)
         tabBar.setActive('transcript');
-        console.log('[node-view onTranscript] setActive transcript done, current=', tabBar.getActive());
-        // vocab-panel 若可见,基于新 cues 重 build timeline
-        framework.vocabPanel.rebuild();
-        console.log('[node-view onTranscript] complete');
+        // vocab panel + cues — 这两个真正需要 framework;若 null 跳过,
+        // 后续 update() 走 transcriptText 变化分支会同步 framework.cues + vocabPanel.rebuild
+        if (framework) {
+          framework.cues = parseSubtitleCuesFromText(text);
+          framework.vocabPanel.rebuild();
+        }
       },
     );
     const translateBtn = createTranslateButton(
@@ -331,7 +330,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         progressBar.setPercent(percent);
       },
       onPhaseChange: (phase, percent) => {
-        framework?.dataTab.setDownloadStatus({
+        // FIX:用本地 dataTab 引用,绕过 framework null race
+        dataTab.setDownloadStatus({
           phase,
           percent,
           localFilePath: (node.attrs.localFilePath as string | null) || null,
@@ -352,6 +352,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     const cues = parseSubtitleCuesFromText(initialTranscript || '');
     let ccState: CCState = { enabled: false, lang: 'transcript' };
 
+    console.log('[node-view] assigning framework now');
     framework = {
       tabBar,
       playTab,
