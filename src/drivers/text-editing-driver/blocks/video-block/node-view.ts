@@ -33,6 +33,8 @@ import { createFullscreenButton, type FullscreenButton } from './actions/fullscr
 import { createTranscriptButton, type TranscriptButton } from './actions/transcript-button';
 import { createTranslateButton, type TranslateButton } from './actions/translate-button';
 import { createMemoryButton, type MemoryControl } from './actions/memory-button';
+import { createVocabButton, type VocabButton } from './actions/vocab-button';
+import { createVocabPanel, type VocabPanel } from './components/vocab-panel';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
@@ -54,6 +56,8 @@ interface FrameworkRefs {
   transcriptBtn: TranscriptButton;
   translateBtn: TranslateButton;
   memoryBtn: MemoryControl;
+  vocabBtn: VocabButton;
+  vocabPanel: VocabPanel;
   tracker: TimeTracker | null;
   /** 内存派生的 transcript cues(P1 修正:不持久化)*/
   cues: SubtitleCue[];
@@ -100,6 +104,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.unsubs.forEach((u) => u());
     if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
     framework.memoryBtn.destroy(); // 内部 stop() 写回 lastStep,先于 tracker.destroy
+    framework.vocabBtn.destroy();
+    framework.vocabPanel.destroy(); // 解订阅 + 移除 DOM,先于 tracker.destroy
     framework.tracker?.destroy();
     framework.transcriptBtn.destroy();
     framework.translateBtn.destroy();
@@ -246,6 +252,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         updateAttrs({ transcriptText: text || null });
         // 切到 transcript Tab 让用户立即看到
         tabBar.setActive('transcript');
+        // vocab-panel 若可见,基于新 cues 重 build timeline
+        framework.vocabPanel.rebuild();
       },
     );
     const translateBtn = createTranslateButton(
@@ -276,12 +284,24 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       },
     });
 
-    // ── actionBar 顺序对齐 V1(Qc-6=A):CC | ⏮🧠⏭ | 🌐 | 📝 | ⛶ ──
-    // (下载 ⬇ / vocab 📖 留 e 段 / d 段在对应位置插入)
+    // L5-B3.19.d:vocab panel(挂 play-tab.overlayMount)+ vocab-button(挂 actionBar)
+    const vocabPanel = createVocabPanel({
+      getCues: () => framework?.cues ?? [],
+      getTracker: () => tracker,
+    });
+    playTab.overlayMount.appendChild(vocabPanel.el);
+    const vocabBtn = createVocabButton(false, (active) => {
+      if (active) vocabPanel.show();
+      else vocabPanel.hide();
+    });
+
+    // ── actionBar 顺序对齐 V1(Qc-6=A → Qd 后):CC | ⏮🧠⏭ | 🌐 | 📝 | 📖 | ⛶ ──
+    // (下载 ⬇ 留 e 段在 📝 后插入)
     tabBar.actionBarEl.appendChild(ccBtn.el);
     tabBar.actionBarEl.appendChild(memoryBtn.el);
     tabBar.actionBarEl.appendChild(translateBtn.el);
     tabBar.actionBarEl.appendChild(transcriptBtn.el);
+    tabBar.actionBarEl.appendChild(vocabBtn.el);
     tabBar.actionBarEl.appendChild(fsBtn.el);
 
     // 内存派生 cues(P1)
@@ -299,6 +319,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       transcriptBtn,
       translateBtn,
       memoryBtn,
+      vocabBtn,
+      vocabPanel,
       tracker,
       cues,
       translations: new Map(),
@@ -371,6 +393,8 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       transcriptTab.onInput((text) => {
         if (!framework) return;
         framework.cues = parseSubtitleCuesFromText(text);
+        // vocab-panel 若可见,基于新 cues 重 build timeline
+        framework.vocabPanel.rebuild();
         if (framework.writeTimer != null) window.clearTimeout(framework.writeTimer);
         framework.writeTimer = window.setTimeout(() => {
           if (view.isDestroyed) return;
@@ -495,11 +519,12 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         framework.tabBar.setActive((updated.attrs.activeTab as string) || 'play');
       }
 
-      // transcriptText 变(外部驱动,撤销 / 协作)→ 同步 textarea + 重 parse cues
+      // transcriptText 变(外部驱动,撤销 / 协作)→ 同步 textarea + 重 parse cues + vocab-panel rebuild
       if (oldTranscript !== updated.attrs.transcriptText) {
         const text = (updated.attrs.transcriptText as string | null) || '';
         framework.transcriptTab.setText(text);
         framework.cues = parseSubtitleCuesFromText(text);
+        framework.vocabPanel.rebuild();
       }
 
       // translationTexts 变(外部驱动,撤销 / 协作)→ 重建翻译 Tab 集合
