@@ -1,16 +1,26 @@
 /**
- * data-tab — videoBlock 'data' Tab(L5-B3.19.a 基础版)
+ * data-tab — videoBlock 'data' Tab(L5-B3.19.a 基础版 → L5-B3.19.e 完整版)
  *
- * 本段:仅 title 编辑 + src readonly 显示 + duration / mimeType 显示。
- * 完整版(下载状态机 / localFilePath / metadata 编辑等)留 B3.19.e。
+ * 本段(e):加 download status row(idle / downloading 45% / done + localFilePath)。
+ * 仅显示状态,不含下载按钮(按钮在 actionBar)。
  */
 
 import type { Node as PMNode } from 'prosemirror-model';
+
+export type DownloadPhase = 'idle' | 'downloading' | 'done';
+
+export interface DownloadStatusInfo {
+  phase: DownloadPhase;
+  percent?: number;
+  localFilePath?: string | null;
+}
 
 export interface DataTab {
   el: HTMLElement;
   /** title 文本编辑变化(节流由 node-view 协调,本组件直推)*/
   onTitleChange(cb: (title: string) => void): () => void;
+  /** L5-B3.19.e:由 node-view 调,更新下载状态显示 */
+  setDownloadStatus(info: DownloadStatusInfo): void;
   destroy(): void;
 }
 
@@ -80,6 +90,40 @@ export function createDataTab(node: PMNode): DataTab {
     el.appendChild(mRow);
   }
 
+  // ── L5-B3.19.e download status row ──
+  const dlRow = document.createElement('div');
+  dlRow.className = 'krig-video-block__data-row';
+  const dlLabel = document.createElement('label');
+  dlLabel.className = 'krig-video-block__data-label';
+  dlLabel.textContent = 'Download';
+  dlRow.appendChild(dlLabel);
+  const dlVal = document.createElement('div');
+  dlVal.className = 'krig-video-block__data-value krig-video-block__data-download';
+  dlVal.textContent = '未下载(点 actionBar 上的 ⬇)';
+  dlRow.appendChild(dlVal);
+  el.appendChild(dlRow);
+
+  function applyDownloadStatus(info: DownloadStatusInfo): void {
+    if (info.phase === 'idle') {
+      dlVal.textContent = '未下载(点 actionBar 上的 ⬇)';
+      dlVal.classList.remove('krig-video-block__data-download--done');
+    } else if (info.phase === 'downloading') {
+      const pct = info.percent != null ? Math.round(info.percent) : 0;
+      dlVal.textContent = `下载中... ${pct}%`;
+      dlVal.classList.remove('krig-video-block__data-download--done');
+    } else {
+      // done
+      const path = info.localFilePath || '(已下载)';
+      dlVal.textContent = path;
+      dlVal.classList.add('krig-video-block__data-download--done');
+    }
+  }
+  // 初次:基于 attrs.localFilePath 推断
+  applyDownloadStatus({
+    phase: node.attrs.localFilePath ? 'done' : 'idle',
+    localFilePath: (node.attrs.localFilePath as string | null) || null,
+  });
+
   return {
     el,
     onTitleChange(cb) {
@@ -87,6 +131,9 @@ export function createDataTab(node: PMNode): DataTab {
       return () => {
         listeners.delete(cb);
       };
+    },
+    setDownloadStatus(info) {
+      applyDownloadStatus(info);
     },
     destroy() {
       listeners.clear();
