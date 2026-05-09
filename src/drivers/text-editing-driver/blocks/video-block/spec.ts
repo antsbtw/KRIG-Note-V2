@@ -42,6 +42,9 @@ const videoBlockNodeSpec: NodeSpec = {
     transcriptText: { default: null },     // 字幕原文(P1 修正:真相源,subtitleCues 内存派生不持久化)
     // L5-B3.19.b NEW:
     translationTexts: { default: null },   // JSON.stringify(Record<langCode, transcriptText>) | null;每语言独立持久化原文
+    // L5-B3.19.c NEW(Memory Mode):
+    segmentDuration: { default: 60 },      // 段长(秒);用户从 dropdown 选 30/60/90/120
+    memoryLastStep: { default: 0 },        // 上次 stepIndex(stop 时写;start 时跑到此 step)
   },
   parseDOM: [
     {
@@ -58,6 +61,8 @@ const videoBlockNodeSpec: NodeSpec = {
           activeTab: el.getAttribute('data-active-tab') || 'play',
           transcriptText: el.getAttribute('data-transcript') || null,
           translationTexts: el.getAttribute('data-translations') || null,
+          segmentDuration: Number(el.getAttribute('data-segment-duration') || '60') || 60,
+          memoryLastStep: Number(el.getAttribute('data-memory-last-step') || '0') || 0,
         };
       },
     },
@@ -74,6 +79,12 @@ const videoBlockNodeSpec: NodeSpec = {
     }
     if (node.attrs.transcriptText) attrs['data-transcript'] = node.attrs.transcriptText as string;
     if (node.attrs.translationTexts) attrs['data-translations'] = node.attrs.translationTexts as string;
+    if (node.attrs.segmentDuration && node.attrs.segmentDuration !== 60) {
+      attrs['data-segment-duration'] = String(node.attrs.segmentDuration);
+    }
+    if (node.attrs.memoryLastStep) {
+      attrs['data-memory-last-step'] = String(node.attrs.memoryLastStep);
+    }
     return [
       'div',
       attrs,
