@@ -102,6 +102,9 @@ export async function downloadVideo(
       'best[ext=mp4]/best',
       '--no-mtime',
       '--no-check-certificates',
+      // 只下当前视频,忽略 URL 里的 &list=... 播放列表参数
+      // (否则 YouTube radio mix 之类会下载几百个视频)
+      '--no-playlist',
       '-o',
       outputTemplate,
       url,
