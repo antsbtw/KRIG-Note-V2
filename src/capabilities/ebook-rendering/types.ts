@@ -215,6 +215,10 @@ import type { useBookmarks } from './hooks/use-bookmarks';
 import type { useEpubAnnotation } from './hooks/use-epub-annotation';
 
 export type { EBookHostProps, EBookHostHandle, SearchResult } from './Host';
+export type {
+  PageAnnotation,
+  AnnotationDraft,
+} from './fixed-page-content/annotation-layer';
 
 export interface EBookRenderingApi {
   /** Host 主组件(forwardRef EBookHostHandle)— view 通过 ref 命令式驱动 */

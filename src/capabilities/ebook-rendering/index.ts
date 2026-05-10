@@ -58,6 +58,7 @@ export type {
   TOCItem,
 } from './types';
 export type { EpubSelection } from './hooks/use-epub-annotation';
+export type { PageAnnotation } from './fixed-page-content/annotation-layer';
 
 // 模块级 export(driver/slot 兜底用,W5 边界 A 临时允许项)
 export {

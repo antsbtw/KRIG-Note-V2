@@ -1,9 +1,9 @@
 /**
- * FixedPageContent — 固定页面格式的连续滚动渲染器(L5-C2)
+ * FixedPageContent — 固定页面格式的连续滚动渲染器(L5-C2 + C5 标注层)
  *
  * V1 → V2 改写:src/plugins/ebook/components/FixedPageContent.tsx(317 行)。
- * 砍掉:AnnotationLayer + viewAPI.ebookAnnotation*(留 C5 真做)。
  * 保留:DOM 虚拟化 + Canvas 渲染 + Text Layer + Cmd+/-/0 缩放 + 滚轮缩放。
+ * C5 加:每页挂 AnnotationLayer(rect/underline 标注)。
  *
  * DOM 虚拟化:只创建可见区域 ± DOM_BUFFER 页的 DOM 元素,其余用 spacer div 占位。
  * 大幅减少 DOM 节点数量(几百页 PDF 也只挂载十几个 DOM 节点)。
@@ -11,6 +11,11 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import type { IFixedPageRenderer, PageDimension } from '../types';
+import {
+  AnnotationLayer,
+  type PageAnnotation,
+  type AnnotationDraft,
+} from './annotation-layer';
 
 interface FixedPageContentProps {
   renderer: IFixedPageRenderer;
@@ -20,6 +25,14 @@ interface FixedPageContentProps {
   onScaleChange: (scale: number) => void;
   /** 注册跳转回调,view 端通过此回调命令式跳转到指定页 */
   onRegisterGotoPage: (fn: (page: number) => void) => void;
+  /** 标注模式(C5):'off' / 'rect' / 'underline' */
+  annotationMode?: 'off' | 'rect' | 'underline';
+  /** 已有标注(按页过滤后整体传入,内部按 pageNum 分发)*/
+  annotations?: PageAnnotation[];
+  /** 创建标注:layer 仅传草稿(type/color/rect),pageNum 由 layer 注入,id 由 main 生成 */
+  onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
+  /** 删除标注 */
+  onAnnotationDelete?: (id: string) => void;
 }
 
 const PAGE_GAP = 8;
@@ -33,6 +46,10 @@ export function FixedPageContent({
   onPageChange,
   onScaleChange,
   onRegisterGotoPage,
+  annotationMode = 'off',
+  annotations = [],
+  onAnnotationCreate,
+  onAnnotationDelete,
 }: FixedPageContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefsRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -297,6 +314,17 @@ export function FixedPageContent({
                   if (el) textLayerRefsRef.current.set(pageNum, el);
                   else textLayerRefsRef.current.delete(pageNum);
                 }}
+              />
+              {/* C5:空间标注覆盖层 */}
+              <AnnotationLayer
+                pageNum={pageNum}
+                scale={scale}
+                pageWidth={dim.width}
+                pageHeight={dim.height}
+                mode={annotationMode}
+                annotations={annotations.filter((a) => a.pageNum === pageNum)}
+                onAnnotationCreate={onAnnotationCreate ?? (() => {})}
+                onAnnotationDelete={onAnnotationDelete ?? (() => {})}
               />
             </div>
           );
