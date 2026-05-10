@@ -16,22 +16,39 @@
 
 import { app } from 'electron';
 import { spawn } from 'child_process';
-import { writeFileSync } from 'fs';
+import { writeFileSync, existsSync } from 'fs';
 import { join, dirname, basename, extname } from 'path';
 import { getYtdlpPath } from './binary-manager';
 import { fetchTranscript } from 'youtube-transcript';
 // ffmpeg-static 提供 npm install 时自动下载的当前平台 + 架构 ffmpeg binary
 // (macOS arm64 / x64,Linux x64 / arm64,Windows x64 全覆盖,~45MB)。
 // yt-dlp 用 --ffmpeg-location 调它合并 DASH 分流(720p+ 必需)。
-import ffmpegStatic from 'ffmpeg-static';
 
-/** ffmpeg-static 默认导出 binary 路径;打包后从 asar.unpack 读 */
+/**
+ * 找到 ffmpeg-static 二进制路径。
+ *
+ * 不能直接 import ffmpeg-static!该包返回 path.join(__dirname, 'ffmpeg'),
+ * Vite bundling main 进程时把 __dirname 改成 .vite/build/,导致
+ * 路径变成 .vite/build/ffmpeg(不存在)。
+ *
+ * 走 app.getAppPath() + node_modules 显式构造,dev / 打包 都可靠:
+ * - dev:    /<project>/node_modules/ffmpeg-static/ffmpeg
+ * - 打包后:  /<app>/Contents/Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg
+ *           (forge.config asar.unpack 已配)
+ */
 function getFfmpegPath(): string | null {
-  // 打包后 asar 路径自动 unpack 到 .asar.unpacked 同名目录(forge 配置)
-  const raw = ffmpegStatic;
-  if (!raw) return null;
-  // dev 环境:直接用 node_modules 路径;打包后:asar.unpack 重定向
-  return raw.replace('app.asar', 'app.asar.unpacked');
+  const appPath = app.getAppPath();
+  // 打包后 appPath 是 app.asar 路径,需要走 asar.unpack
+  const candidates = [
+    // dev 环境
+    join(appPath, 'node_modules', 'ffmpeg-static', 'ffmpeg'),
+    // 打包后(asar.unpack 自动重定向)
+    join(appPath.replace('app.asar', 'app.asar.unpacked'), 'node_modules', 'ffmpeg-static', 'ffmpeg'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
 }
 
 export interface DownloadProgress {
