@@ -275,10 +275,14 @@ export function FixedPageContent({
   const topSpacerHeight =
     domRange.first > 1 ? pageOffsets[domRange.first - 1] * scale : 0;
 
+  // L5-C6 修:domRange.last 是 1-based 页码,pageDimensions 是 0-indexed 数组,
+  // 用 [last] 实际是访问 last+1 页的元素 — 当 PDF 加载未完成 / 边界场景下越界 undefined,
+  // 访问 .height 整树崩(无 ErrorBoundary 直接白屏)。加 guard 防御。
+  const lastPageIdx = domRange.last; // 注:domRange.last 是已渲染最后页的 1-based 编号,这里取下一页索引
+  const lastDim = pageDimensions[lastPageIdx];
   const bottomSpacerStart =
-    domRange.last < totalPages
-      ? (pageOffsets[domRange.last] + pageDimensions[domRange.last].height) * scale +
-        PAGE_GAP
+    domRange.last < totalPages && lastDim
+      ? (pageOffsets[lastPageIdx] + lastDim.height) * scale + PAGE_GAP
       : totalHeight;
 
   return (
