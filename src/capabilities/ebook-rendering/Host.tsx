@@ -281,7 +281,24 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
             const dims = fr.getPageDimensions();
             if (dims.length > 0 && containerRef.current) {
               const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
-              const newScale = cw / dims[0].width;
+              const pageW = dims[0].width;
+              const rawScale = cw / pageW;
+              // 防御:容器还没布局好(cw<=0)或算出异常 scale 时,fallback 1.0,
+              // 后续 ResizeObserver / window resize 会再算一次
+              const newScale =
+                cw > 0 && Number.isFinite(rawScale) && rawScale > 0.1
+                  ? rawScale
+                  : 1.0;
+              console.log(
+                '[ebook-rendering/Host] fit-width init: cw=',
+                cw,
+                'pageW=',
+                pageW,
+                'rawScale=',
+                rawScale,
+                'finalScale=',
+                newScale,
+              );
               setScale(newScale);
               fr.setScale(newScale);
               onScaleChange?.(newScale);
@@ -320,7 +337,8 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     };
   }, []);
 
-  // 窗口 resize 时重新计算适应宽度
+  // fit-width 跟随容器宽度变化(window resize + ResizeObserver — 后者覆盖
+  // slot binding 切换 / 双栏布局变化 / Flex 异步 layout 等不触发 window resize 的场景)
   useEffect(() => {
     if (!fitWidth || !rendererReady) return;
     const handle = (): void => {
@@ -329,13 +347,25 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       const dims = r.getPageDimensions();
       if (dims.length === 0) return;
       const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
+      if (cw <= 0) return;
       const newScale = cw / dims[0].width;
+      if (!Number.isFinite(newScale) || newScale <= 0.1) return;
       setScale(newScale);
       r.setScale(newScale);
       onScaleChange?.(newScale);
     };
     window.addEventListener('resize', handle);
-    return () => window.removeEventListener('resize', handle);
+
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(handle);
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handle);
+      observer?.disconnect();
+    };
   }, [fitWidth, rendererReady, onScaleChange]);
 
   // ── view 命令式 API ──
