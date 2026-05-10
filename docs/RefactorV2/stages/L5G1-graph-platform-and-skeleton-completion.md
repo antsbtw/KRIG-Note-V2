@@ -99,7 +99,7 @@ design 内部数字一致性修订(5 条全闭环):
 | ✅ 用户能看到该层功能 | NavSide 显「画板」Tab + [+ 文件夹] [+ 画板] | ✅ |
 | ✅ console 打印 alive 行 | `[Capability] alive` 含 `graph-library-store` + `[L5] alive` 含 `graph-canvas-view` | ✅ |
 | ✅ 上一层 alive 行也在 | L0~L4 alive 行无回归 | ✅ |
-| ✅ install-coverage 0 missing | `graph-canvas-view × ['graph-library-store']` 命中,无 missing | ✅ |
+| ✅ install-coverage 预期 missing 3 | `graph-canvas-view × 4 capabilities · missing 3:shape-library / canvas-rendering / canvas-text-node`(P1-A 修订:install 是声明性契约,G1 阶段后 3 项未注册是预期 warning,**不阻塞验收**;G2~G4 渐次归零)| ✅ |
 | ✅ typecheck 0 error | tsc --noEmit 0 输出 | ✅ |
 | ✅ lint 0 warn | eslint . 0 输出(全工程) | ✅ |
 | ✅ 屏障 grep 0 命中 | view 0 `import 'three'` / view 0 运行时 import `@capabilities` | ✅ |
@@ -130,7 +130,9 @@ design 内部数字一致性修订(5 条全闭环):
 ```
 [Capability] alive | registered: [..., 'graph-library-store']  (14 项)
 [L5] View alive | active: '...', registered views: [..., 'graph-canvas-view']  (5 项)
-[install-coverage] graph-canvas-view × ['graph-library-store']  ✓
+[install-coverage] ❌ install 覆盖率自检:5 views · 14 capabilities · 缺失 3
+  graph-canvas-view × ['graph-library-store'] · missing: shape-library, canvas-rendering, canvas-text-node
+  (P1-A 预期 warning,G2~G4 渐次归零;dev-only,不阻塞验收)
 ```
 
 ---
@@ -161,3 +163,4 @@ G2 不依赖本段任何 capability,与 G1 完全正交(G3 才开始把 graph-li
 | 日期 | 内容 |
 |---|---|
 | 2026-05-10 | 初稿;3 commit 全合 + 12 项验收全过 + 完成判据全 ✅ + design v0.1 → v0.2 P2 复审纳入本报告 |
+| 2026-05-10 | G2 启动前用户 P1-A 复审 — install 列表对齐 plan v0.2 § 6.1 口径(view install 1 项渐进式 → 4 项完整声明):完成判据"install-coverage 0 missing"改"预期 missing 3";自我诊断输出样本改 install-coverage warning + 说明 G2~G4 渐次归零;view 实际代码 `src/views/graph-canvas-view/index.ts` install 列表同步改 4 项(在 G2 分支顺手修补) |

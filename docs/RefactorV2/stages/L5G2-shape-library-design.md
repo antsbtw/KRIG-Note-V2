@@ -1,6 +1,6 @@
 # L5-G2 设计 — Shape + Substance 资源仓库 capability
 
-> v0.1 · 2026-05-10
+> v0.2 · 2026-05-10 · 启动前用户 P1-A 复审(install 列表对齐上游 plan 口径)
 >
 > 配套:
 > - 上游 plan:[../v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 § 3.2 + § 5 G2
@@ -196,7 +196,7 @@ export interface EvaluateInput {
 | ✅ npm start 跑得起来 | 无报错 |
 | ✅ console 显 `shape-library` alive 行 | + `shapes: 22, substances: 5` |
 | ✅ 上一层 alive 行也在 | L0~L5 + G1 alive 行无回归 |
-| ✅ install-coverage 0 missing | graph-canvas-view 未 install shape-library(G3 才加),本段不进 install-coverage;但全工程 capability 数 14 → 15 |
+| ✅ install-coverage missing 3 → 2 | graph-canvas-view install 4 项中 shape-library 在本段归零;启动 console 显 `missing: canvas-rendering, canvas-text-node`(P1-A 修订:install 是声明性契约;G3 / G4 分别再归零 1 项);全工程 capability 数 14 → 15 |
 | ✅ typecheck 0 error | tsc --noEmit |
 | ✅ lint 0 warn | eslint . 全工程 |
 | ✅ **屏障 grep 0 命中**(本段核心)| `grep -rn "from 'three'" src/capabilities/shape-library/` → 0 行 |
@@ -243,7 +243,7 @@ export interface EvaluateInput {
 | import.meta.glob 在打包时找不到 JSON | 沿用 V1 V2 既有路径风格(`./definitions/**/*.json` + `{ eager: true }`)— V2 ebook / learning 已验证 vite glob OK |
 | substance composer / visual-rules 留空壳,G3 / 里程碑 H 实施时容易忘了实现 | DESIGN.md 在"不做项"明示,留 TODO 注释:`// G2-7=B:留 v1.5+ 实施` |
 | V1 shape JSON 的字段(如 handles[0].from 用 FormulaOp)V2 types 不兼容 | types.ts 完全照搬 V1 字段定义,JSON 直接通过 `import` 加载,无额外 schema validation;运行时 evaluateShape 期间报错由 try/catch 兜底,smoke test 检出 |
-| graph-canvas-view 的 install 列表 G2 后是否更新 | **不更新** — install 列表只列"本段或之前段已经被 view 消费"的 capability;shape-library 等 G3 canvas-rendering 接入时,会通过 canvas-rendering 间接消费,view 不直接 install shape-library。G3 时 install 加 `'canvas-rendering'`(自带依赖)|
+| graph-canvas-view 的 install 列表本段是否变 | **不变 — 4 项已在 G1 P1-A 修订时完整声明**(`graph-library-store` / `shape-library` / `canvas-rendering` / `canvas-text-node`);install-coverage 在本段从 "missing 3" 自动归到 "missing 2"(shape-library 注册即归零);view 文件本段 0 改动 |
 
 ---
 
@@ -263,3 +263,4 @@ export interface EvaluateInput {
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G2 范围 + 10 决策点 + 文件清单 + EvaluatedPath / EvaluateContext API + 6 项验收清单(开发态自检) + 单 commit 拆分 + 风险登记 |
+| 2026-05-10 | v0.2 | 启动前用户 P1-A 复审 — install 列表口径与上游 plan 冲突修订:v0.1 § 6 完成判据"install-coverage 0 missing(view 未 install shape-library,G3 才加)"+ § 8 风险表"install 列表 G2 后不更新"等"渐进式 install"表述,与 plan v0.2 § 6.1 写的"install: 4 项"口径冲突 → 选 A(对齐 ebook 既有先例:install 是声明性契约,不是已就绪声明):① § 6 完成判据 install-coverage 改"missing 3 → 2(shape-library 归零)";② § 8 风险表"install 不变"明示 4 项已在 G1 P1-A 修订时完整声明;③ 联动改 G1 design v0.2 → v0.3 + G1 completion 补 P1-A 修订条目 + view 实际代码 install 1 项 → 4 项 |
