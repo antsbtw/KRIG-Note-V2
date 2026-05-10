@@ -54,13 +54,25 @@ function attachExtractionToWebContents(wc: WebContents): void {
   if (attachedWebContents.has(wc)) return;
   attachedWebContents.add(wc);
 
+  console.log('[Extraction] attach to webContents id=', wc.id, 'url=', wc.getURL());
   setupExtractionInterceptor(wc);
 
-  wc.on('console-message', (_event, _level, message) => {
+  // Electron 40 console-message 签名:
+  //   (details: Event<WebContentsConsoleMessageEventParams>, level, message, line, sourceId)
+  // message 既在 details.message(新)也在第三参数(deprecated 但仍存)— 都试一遍最稳。
+  wc.on('console-message', (details, _level, messageArg) => {
+    const message =
+      (details as unknown as { message?: string }).message ?? messageArg ?? '';
     if (!message.startsWith('KRIG_IMPORT:')) return;
     const json = message.slice('KRIG_IMPORT:'.length);
     try {
       const data = JSON.parse(json);
+      console.log(
+        '[Extraction] KRIG_IMPORT received:',
+        (data as { type?: string; chapters?: unknown[] }).type ?? 'unknown',
+        (data as { chapters?: unknown[] }).chapters?.length ?? 0,
+        'chapters',
+      );
       broadcastImport(data);
     } catch (err) {
       console.error('[Extraction] Failed to parse KRIG_IMPORT JSON:', err);
@@ -70,11 +82,14 @@ function attachExtractionToWebContents(wc: WebContents): void {
 
 /** 转发拦截到的 atom JSON 给所有 renderer(view 端协调创建 folder + note)*/
 function broadcastImport(data: unknown): void {
+  let sent = 0;
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, data);
+      sent++;
     }
   }
+  console.log('[Extraction] broadcast EXTRACTION_NOTE_CREATE → windows=', sent);
 }
 
 /**
@@ -85,6 +100,7 @@ function broadcastImport(data: unknown): void {
  */
 export function registerWebviewExtractionHook(mainWindow: BrowserWindow): void {
   mainWindow.webContents.on('did-attach-webview', (_event, guestWebContents) => {
+    console.log('[Extraction] did-attach-webview, guest id=', guestWebContents.id);
     // attach 后 url 可能还未确定;监听 did-navigate 等首个 Platform URL navigation 触发
     const checkAndAttach = (url: string): void => {
       if (isPlatformUrl(url)) {

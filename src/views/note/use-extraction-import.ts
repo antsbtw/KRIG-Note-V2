@@ -16,12 +16,18 @@ import { importExtractionBatch } from './extraction-import';
 
 export function useExtractionImport(): void {
   useEffect(() => {
+    console.log('[extraction-import] hook mounted, subscribing to onExtractionNoteCreate');
     const unsub = window.electronAPI.onExtractionNoteCreate((data) => {
-      void importExtractionBatch(data).then((result) => {
-        console.log(
-          `[extraction-import] folder=${result.folderId} created=${result.noteIds.length} skipped=${result.skippedTitles.length}`,
-        );
-      });
+      console.log('[extraction-import] received data from main:', data);
+      void importExtractionBatch(data)
+        .then((result) => {
+          console.log(
+            `[extraction-import] done — folder=${result.folderId} created=${result.noteIds.length} skipped=${result.skippedTitles.length}`,
+          );
+        })
+        .catch((err) => {
+          console.error('[extraction-import] failed:', err);
+        });
     });
     return unsub;
   }, []);
