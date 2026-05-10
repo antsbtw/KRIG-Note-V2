@@ -1,0 +1,338 @@
+/**
+ * EBookHost — ebook-rendering capability 主组件(L5-C2)
+ *
+ * forwardRef + 命令式 API:view 通过 ref 调用 openBookId / goToPage / setScale 等。
+ * 内部封装 pdfjs-dist(C2)+ foliate-js(C3 起);view 不直 import 任何 npm。
+ *
+ * 数据通路(订阅模式):
+ *   ebook-library.onBookOpened(推送)
+ *     ↓ Host 内 useEffect 订阅
+ *   library.getData() 拿 Uint8Array
+ *     ↓
+ *   PDFRenderer.load(buffer)
+ *     ↓
+ *   FixedPageContent 渲染(by IFixedPageRenderer)
+ *
+ * view 端只感知 props/callbacks/ref,不感知 pdfjs-dist 的存在。
+ *
+ * 见 v0.3 § 3.2 + capabilities/web-rendering/Host.tsx 模板。
+ */
+
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { EBookLibraryApi, EBookLoadedInfo } from '@capabilities/ebook-library/types';
+import {
+  type IBookRenderer,
+  type EBookFileType,
+  type BookPosition,
+  isFixedPage,
+  detectFileType,
+} from './types';
+import { PDFRenderer } from './pdf';
+import { FixedPageContent } from './fixed-page-content';
+
+/** view 通过 ref 调用的命令式 API(EBookHostHandle)*/
+export interface EBookHostHandle {
+  /** 由外部 onBookOpened 推送驱动加载 — view 端常用 */
+  loadFromInfo(info: EBookLoadedInfo): Promise<void>;
+  /** 滚动到指定页(PDF / fixed-page)*/
+  goToPage(page: number): void;
+  /** 跳到 CFI(EPUB,C3 起)*/
+  goToCFI(cfi: string): void;
+  /** 设置 scale(PDF)*/
+  setScale(scale: number): void;
+  /** 适应宽度切换(PDF)— Host 内部计算 scale */
+  setFitWidth(on: boolean): void;
+  /** 当前 renderer 是否 fixed-page(toolbar 用来选择导航形态)*/
+  getRenderMode(): 'fixed-page' | 'reflowable' | null;
+  /** 当前总页数(fixed-page);EPUB 返 null */
+  getTotalPages(): number | null;
+}
+
+export interface EBookHostProps {
+  workspaceId: string;
+  /** 当前页号变化(toolbar 用作 currentPage 显示)*/
+  onPageChange?: (page: number) => void;
+  /** 加载完成后回调(view 用来同步 totalPages 等)*/
+  onLoadComplete?: (info: { totalPages: number; fileType: EBookFileType }) => void;
+  /** scale 变化(view 用来同步 toolbar)*/
+  onScaleChange?: (scale: number) => void;
+  /** 加载/未加载 状态变化(view 决定显示空状态)*/
+  onReadyChange?: (ready: boolean) => void;
+}
+
+const FIT_WIDTH_PADDING = 40;
+
+export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EBookHost(
+  { workspaceId: _workspaceId, onPageChange, onLoadComplete, onScaleChange, onReadyChange },
+  ref,
+) {
+  const library = useMemo(
+    () => requireCapabilityApi<EBookLibraryApi>('ebook-library'),
+    [],
+  );
+
+  const rendererRef = useRef<IBookRenderer | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fitWidthRef = useRef(true);
+  const scaleRef = useRef(1.0);
+
+  const [rendererReady, setRendererReady] = useState(false);
+  const [renderer, setRenderer] = useState<IBookRenderer | null>(null);
+  const [scale, setScale] = useState(1.0);
+  const [fitWidth, setFitWidth] = useState(true);
+  const [restorePage, setRestorePage] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // FixedPageContent 注册的 gotoPage 回调
+  const gotoPageRef = useRef<((page: number) => void) | null>(null);
+  const registerGotoPage = useCallback((fn: (page: number) => void) => {
+    gotoPageRef.current = fn;
+  }, []);
+
+  // 同步 ref(供 useEffect 闭包内拿最新值)
+  useEffect(() => {
+    fitWidthRef.current = fitWidth;
+  }, [fitWidth]);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  // ── 核心加载逻辑 ──
+
+  const loadFromInfo = useCallback(
+    async (info: EBookLoadedInfo) => {
+      try {
+        setLoading(true);
+        setRendererReady(false);
+        setRenderer(null);
+
+        // 销毁旧 renderer
+        rendererRef.current?.destroy();
+        rendererRef.current = null;
+
+        // 拿 buffer
+        const result = await library.getData();
+        if (!result) {
+          setLoading(false);
+          return;
+        }
+
+        const fileType = info.fileType ?? detectFileType(result.fileName);
+        const r = createRendererFor(fileType);
+        if (!r) {
+          console.warn(`[ebook-rendering] renderer for ${fileType} not yet implemented`);
+          setLoading(false);
+          return;
+        }
+
+        // result.data 在 IPC 序列化后是 Uint8Array;PDFRenderer.load 接 ArrayBuffer
+        // 直接传 Uint8Array,内部判类型转换
+        const data = result.data;
+        const buffer =
+          data instanceof Uint8Array
+            ? (data.buffer.slice(
+                data.byteOffset,
+                data.byteOffset + data.byteLength,
+              ) as ArrayBuffer)
+            : (data as ArrayBuffer);
+
+        await r.load(buffer);
+        rendererRef.current = r;
+
+        const pos = info.lastPosition;
+
+        // 恢复缩放模式
+        const shouldFitWidth = pos?.fitWidth !== undefined ? pos.fitWidth : true;
+        setFitWidth(shouldFitWidth);
+
+        if (isFixedPage(r)) {
+          if (!shouldFitWidth && pos?.scale) {
+            setScale(pos.scale);
+            r.setScale(pos.scale);
+          }
+          onLoadComplete?.({
+            totalPages: r.getTotalPages(),
+            fileType,
+          });
+        }
+
+        setRestorePage(pos?.page && pos.page > 1 ? pos.page : null);
+        setRenderer(r);
+        setRendererReady(true);
+        setLoading(false);
+        onReadyChange?.(true);
+
+        // 适应宽度:等 DOM 更新后计算
+        if (shouldFitWidth && isFixedPage(r)) {
+          const fr = r;
+          requestAnimationFrame(() => {
+            const dims = fr.getPageDimensions();
+            if (dims.length > 0 && containerRef.current) {
+              const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
+              const newScale = cw / dims[0].width;
+              setScale(newScale);
+              fr.setScale(newScale);
+              onScaleChange?.(newScale);
+            }
+          });
+        }
+      } catch (err) {
+        console.error('[ebook-rendering/Host] Failed to load:', err);
+        setLoading(false);
+      }
+    },
+    [library, onLoadComplete, onScaleChange, onReadyChange],
+  );
+
+  // **订阅模式**:Host 不订阅 onBookOpened — 由 view 端订阅,通过 ref 命令式
+  // 调 hostRef.current.loadFromInfo(info)。这样数据流单向 view → Host,
+  // 避免 Host 和 view 双订阅导致的重复加载。
+  //
+  // 重启恢复:view 端通过 activeBookId 主动调 library.open(),触发 main 推
+  // EBOOK_LOADED → view 收到 → ref 调 loadFromInfo。本 Host 不在 mount 时
+  // 自动 open,完全由 view 协调。
+
+  // 销毁时清 renderer
+  useEffect(() => {
+    return () => {
+      rendererRef.current?.destroy();
+      rendererRef.current = null;
+    };
+  }, []);
+
+  // 窗口 resize 时重新计算适应宽度
+  useEffect(() => {
+    if (!fitWidth || !rendererReady) return;
+    const handle = (): void => {
+      const r = rendererRef.current;
+      if (!r || !isFixedPage(r) || !containerRef.current) return;
+      const dims = r.getPageDimensions();
+      if (dims.length === 0) return;
+      const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
+      const newScale = cw / dims[0].width;
+      setScale(newScale);
+      r.setScale(newScale);
+      onScaleChange?.(newScale);
+    };
+    window.addEventListener('resize', handle);
+    return () => window.removeEventListener('resize', handle);
+  }, [fitWidth, rendererReady, onScaleChange]);
+
+  // ── view 命令式 API ──
+
+  const handleScaleChange = useCallback(
+    (newScale: number) => {
+      setFitWidth(false);
+      setScale(newScale);
+      const r = rendererRef.current;
+      if (r && isFixedPage(r)) r.setScale(newScale);
+      onScaleChange?.(newScale);
+    },
+    [onScaleChange],
+  );
+
+  const handleSetFitWidth = useCallback(
+    (on: boolean) => {
+      setFitWidth(on);
+      if (on) {
+        requestAnimationFrame(() => {
+          const r = rendererRef.current;
+          if (!r || !isFixedPage(r) || !containerRef.current) return;
+          const dims = r.getPageDimensions();
+          if (dims.length === 0) return;
+          const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
+          const newScale = cw / dims[0].width;
+          setScale(newScale);
+          r.setScale(newScale);
+          onScaleChange?.(newScale);
+        });
+      }
+    },
+    [onScaleChange],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      loadFromInfo,
+      goToPage(page: number): void {
+        gotoPageRef.current?.(page);
+      },
+      goToCFI(cfi: string): void {
+        const r = rendererRef.current;
+        if (!r) return;
+        // C3 起:isReflowable(r) → r.goTo({type:'cfi', cfi})
+        const pos: BookPosition = { type: 'cfi', cfi };
+        r.goTo(pos);
+      },
+      setScale: handleScaleChange,
+      setFitWidth: handleSetFitWidth,
+      getRenderMode(): 'fixed-page' | 'reflowable' | null {
+        return rendererRef.current?.renderMode ?? null;
+      },
+      getTotalPages(): number | null {
+        const r = rendererRef.current;
+        if (r && isFixedPage(r)) return r.getTotalPages();
+        return null;
+      },
+    }),
+    [loadFromInfo, handleScaleChange, handleSetFitWidth],
+  );
+
+  // ── 渲染 ──
+
+  // 注:Host 不处理"未选择书"空状态 — view 端在 activeBookId == null 时
+  // 就 early return,不挂 Host;Host 进 mount 时一定有 activeBookId,只
+  // 区分 loading / ready / 不支持的 renderMode。
+
+  return (
+    <div className="krig-ebook-host" ref={containerRef}>
+      {loading && <div className="krig-ebook-loading">Loading...</div>}
+
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && (
+        <FixedPageContent
+          renderer={renderer}
+          scale={scale}
+          initialPage={restorePage}
+          onPageChange={onPageChange ?? (() => {})}
+          onScaleChange={handleScaleChange}
+          onRegisterGotoPage={registerGotoPage}
+        />
+      )}
+
+      {!loading && rendererReady && renderer && !isFixedPage(renderer) && (
+        <div className="krig-ebook-empty">
+          <div className="krig-ebook-empty-icon">📖</div>
+          <div className="krig-ebook-empty-text">
+            EPUB 渲染留 C3 段(foliate-js 接入)
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ── Renderer 工厂(C2 仅 PDF;C3 起加 EPUBRenderer)──
+
+function createRendererFor(fileType: EBookFileType): IBookRenderer | null {
+  switch (fileType) {
+    case 'pdf':
+      return new PDFRenderer();
+    case 'epub':
+    case 'djvu':
+    case 'cbz':
+      // C3+ / 留作未来:console.warn 已在调用方
+      return null;
+    default:
+      return null;
+  }
+}
