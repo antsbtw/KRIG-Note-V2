@@ -10,6 +10,7 @@
 
 import { ipcMain, shell } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 
 const ALLOWED_EXTERNAL_SCHEMES = ['http:', 'https:', 'mailto:'];
@@ -49,6 +50,11 @@ export function registerShellHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SHELL_SHOW_ITEM_IN_FOLDER, async (_event, filePath: unknown) => {
     if (typeof filePath !== 'string' || !filePath) return { ok: false, reason: 'invalid-path' };
     if (!path.isAbsolute(filePath)) return { ok: false, reason: 'not-absolute' };
+    // 文件存在性检测(shell.showItemInFolder 是 fire-and-forget,文件不存在时
+    // 不抛错也不返失败 — 显式检测让上层能 reset 到 idle 状态)
+    if (!fs.existsSync(filePath)) {
+      return { ok: false, reason: 'file-not-found' };
+    }
     try {
       shell.showItemInFolder(filePath);
       return { ok: true };
