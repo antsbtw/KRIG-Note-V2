@@ -33,11 +33,13 @@ import '@capabilities/text-editing';   // W5 C4 新增
 import '@capabilities/learning';        // L5-B3.20a 新增(无 view 直接消费需显式拉,P1 审计修正)
 import '@capabilities/ebook-library';   // L5-C1 新增(view install 声明 + 显式拉副作用,对齐 P1 审计模式)
 import '@capabilities/ebook-rendering'; // L5-C2 新增(pdfjs-dist 4.9.155 + Host + 虚拟滚动)
+import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 + 文件夹,JSON 起步)
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
 import '@views/ebook';  // L5-C1:EBookView self-register
+import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import './app.css';
 
 // L3 启动:配置持久化 + 加载已存的 Workspaces + 确保至少一个
