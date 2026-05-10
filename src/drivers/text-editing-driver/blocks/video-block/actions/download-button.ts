@@ -56,8 +56,6 @@ export interface DownloadButtonDeps {
 
 export interface DownloadButton {
   el: HTMLButtonElement;
-  /** 强制下载(跳过 YouTube 登录检测;用户在 modal 点"取消"时由 node-view 调)*/
-  forceDownload(): void;
   destroy(): void;
 }
 
@@ -158,10 +156,8 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
   /**
    * 运行下载流程(install 未完成时先 install,完成后立即接力 download)。
    * UX 改进:用户单次点击完成所有事,不需要点两次。
-   *
-   * @param skipCookieCheck 取消 modal 后再点 ⬇,跳过登录检测强行下载
    */
-  async function runFlow(skipCookieCheck = false): Promise<void> {
+  async function runFlow(): Promise<void> {
     const src = deps.getSrc();
     if (!src) return;
 
@@ -188,12 +184,13 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
     // 步骤 1.5:检 YouTube 登录(L5-B3.19.e UX,反爬保护)
     // YouTube 源才检测 — direct mp4 等不需要 cookies
-    if (!skipCookieCheck && isYouTubeSrc()) {
+    if (isYouTubeSrc()) {
       try {
         const status = await checkYoutubeCookies();
         if (!status.hasLogin) {
-          // 没有 webview 登录 → 显 modal 让用户登录,不继续 download
-          phase = 'idle'; // 退回 idle,等用户操作
+          // 没登录 → 直接触发右屏 web view 跳 google 登录页,**不弹 modal**
+          // (用户预期:点下载没登录?自动带我去登录,无需多余确认)
+          phase = 'idle';
           btn.textContent = '⬇';
           btn.title = ytdlpAvailable ? 'Download video' : 'Click to install yt-dlp';
           btn.disabled = false;
@@ -334,11 +331,6 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
   return {
     el: btn,
-    forceDownload() {
-      // 取消 modal 时由 node-view 调:跳过 cookies 检测强行下载(用户已知失败风险)
-      if (phase !== 'idle') return;
-      void runFlow(true);
-    },
     destroy() {
       if (resetTimer != null) {
         window.clearTimeout(resetTimer);
