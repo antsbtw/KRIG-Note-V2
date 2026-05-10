@@ -38,6 +38,7 @@ import { fetchTranscript } from 'youtube-transcript';
  */
 function getFfmpegPath(): string | null {
   const appPath = app.getAppPath();
+  console.log('[ffmpeg path] app.getAppPath() =', appPath);
   // 打包后 appPath 是 app.asar 路径,需要走 asar.unpack
   const candidates = [
     // dev 环境
@@ -46,8 +47,10 @@ function getFfmpegPath(): string | null {
     join(appPath.replace('app.asar', 'app.asar.unpacked'), 'node_modules', 'ffmpeg-static', 'ffmpeg'),
   ];
   for (const p of candidates) {
+    console.log('[ffmpeg path] checking:', p, 'exists:', existsSync(p));
     if (existsSync(p)) return p;
   }
+  console.warn('[ffmpeg path] none of candidates exist — ffmpeg not available');
   return null;
 }
 
