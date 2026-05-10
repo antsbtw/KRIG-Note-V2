@@ -114,14 +114,31 @@ export function registerYtdlpHandlers(): void {
   });
 
   // L5-B3.19.e UX:检 webview partition 是否有 YouTube 登录 cookies
-  // (download-button 在 install 后 / download 前调,无 cookies 时弹提示让
-  // 用户先在 web view 登录 — 不读用户系统 Chrome,隐私友好)
+  //
+  // 关键:仅"有 cookies"不算登录(访问过 youtube.com 都会有 PREF/VISITOR_INFO
+  // 等访客 cookies)。真登录要看 Google/YouTube 特定 session cookies:
+  // - SID / HSID / SSID / APISID / SAPISID(Google account session)
+  // - __Secure-1PSID / __Secure-3PSID(secure session)
+  // - LOGIN_INFO(YouTube login marker)
+  // 任一存在就视为已登录。
   ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, async () => {
     try {
       const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
       const yt = await webviewSession.cookies.get({ domain: '.youtube.com' });
       const google = await webviewSession.cookies.get({ domain: '.google.com' });
-      return { hasLogin: yt.length > 0 || google.length > 0, count: yt.length + google.length };
+      const all = [...yt, ...google];
+      const LOGIN_NAMES = new Set([
+        'SID', 'HSID', 'SSID', 'APISID', 'SAPISID',
+        '__Secure-1PSID', '__Secure-3PSID',
+        '__Secure-1PAPISID', '__Secure-3PAPISID',
+        'LOGIN_INFO',
+      ]);
+      const loginCookies = all.filter((c) => LOGIN_NAMES.has(c.name));
+      return {
+        hasLogin: loginCookies.length > 0,
+        count: all.length,
+        loginCount: loginCookies.length,
+      };
     } catch (e) {
       return { hasLogin: false, count: 0, error: e instanceof Error ? e.message : String(e) };
     }
