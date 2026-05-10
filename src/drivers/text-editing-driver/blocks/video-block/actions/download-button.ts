@@ -154,14 +154,42 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
   });
 
   /**
-   * 运行下载流程(install 未完成时先 install,完成后立即接力 download)。
-   * UX 改进:用户单次点击完成所有事,不需要点两次。
+   * 运行下载流程,正确顺序:
+   *   1. **先检登录态**(站点需要登录吗?webview 已登录吗?)
+   *      没登录 → 立刻跳 web view 登录页,**不浪费 install 36MB**
+   *   2. install yt-dlp(若需)
+   *   3. download 视频
+   *
+   * UX 改进:用户单次点击完成所有事,登录后再点一次完成下载。
    */
   async function runFlow(): Promise<void> {
     const src = deps.getSrc();
     if (!src) return;
 
-    // 步骤 1:确保 yt-dlp 已装(未装则自动 install)
+    // 步骤 1:**先检登录态**(优先级最高,登录前不浪费任何资源)
+    // YouTube 源需要登录过反爬;direct mp4 等不需要
+    if (isYouTubeSrc()) {
+      try {
+        const status = await checkYoutubeCookies();
+        if (!status.hasLogin) {
+          // 没登录 → 直接触发右屏 web view 跳 google 登录页
+          // 不 install,不 download,等用户登录后再点 ⬇
+          phase = 'idle';
+          btn.textContent = '⬇';
+          btn.title = '需要先在 web view 登录 YouTube';
+          btn.disabled = false;
+          deps.onProgress(false, 0);
+          deps.onPhaseChange('idle');
+          deps.onRequestYoutubeLogin();
+          return;
+        }
+      } catch (e) {
+        // 检测失败 — 继续尝试(降级,可能仍失败但给用户机会)
+        console.warn('[download-btn] checkYoutubeCookies failed, continue:', e);
+      }
+    }
+
+    // 步骤 2:确保 yt-dlp 已装(未装则自动 install)
     if (!ytdlpAvailable) {
       phase = 'installing';
       btn.textContent = '⏳';
@@ -182,30 +210,7 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
       }
     }
 
-    // 步骤 1.5:检 YouTube 登录(L5-B3.19.e UX,反爬保护)
-    // YouTube 源才检测 — direct mp4 等不需要 cookies
-    if (isYouTubeSrc()) {
-      try {
-        const status = await checkYoutubeCookies();
-        if (!status.hasLogin) {
-          // 没登录 → 直接触发右屏 web view 跳 google 登录页,**不弹 modal**
-          // (用户预期:点下载没登录?自动带我去登录,无需多余确认)
-          phase = 'idle';
-          btn.textContent = '⬇';
-          btn.title = ytdlpAvailable ? 'Download video' : 'Click to install yt-dlp';
-          btn.disabled = false;
-          deps.onProgress(false, 0);
-          deps.onPhaseChange('idle');
-          deps.onRequestYoutubeLogin();
-          return;
-        }
-      } catch (e) {
-        // 检测失败 — 继续尝试下载(降级,可能仍失败但给用户机会)
-        console.warn('[download-btn] checkYoutubeCookies failed, continue:', e);
-      }
-    }
-
-    // 步骤 2:下载视频(install + cookies 检测都通过)
+    // 步骤 3:下载视频(登录 + install 都通过)
     phase = 'downloading';
     btn.textContent = '⏳';
     btn.title = 'Downloading video...';
