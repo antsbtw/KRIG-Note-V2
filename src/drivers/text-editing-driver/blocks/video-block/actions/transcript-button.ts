@@ -34,27 +34,19 @@ export function createTranscriptButton(
   }
   applyEnabledState();
 
-  btn.addEventListener('mousedown', async (e) => {
-    const src = getSrc();
-    console.log('[transcript-btn] mousedown', {
-      disabled: btn.disabled,
-      src,
-      embed: src ? detectEmbedType(src) : 'no-src',
-    });
+  // mousedown:仅 preventDefault + stopPropagation 阻止 PM 升级为 NodeSelection
+  // (selectable=true node 内 mousedown 会触发 selection 更新 → NodeView 重建)
+  btn.addEventListener('mousedown', (e) => {
     e.preventDefault();
+    e.stopPropagation();
+  });
+  btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (btn.disabled) return;
 
-    if (!src) {
-      console.warn('[transcript-btn] no src');
-      return;
-    }
-    if (detectEmbedType(src) !== 'youtube') {
-      console.warn('[transcript-btn] not youtube — abort');
-      return;
-    }
-
-    console.log('[transcript-btn] passed checks, calling capability.fetchTranscript');
+    const src = getSrc();
+    if (!src) return;
+    if (detectEmbedType(src) !== 'youtube') return;
 
     const origText = btn.textContent;
     const origTitle = btn.title;
@@ -64,14 +56,11 @@ export function createTranscriptButton(
 
     try {
       const result = await fetchTranscript(src);
-      console.log('[transcript-btn] fetchTranscript returned, length=', result.transcriptText?.length || 0);
       if (result.transcriptText) {
-        console.log('[transcript-btn] calling onTranscript callback');
         try {
           onTranscript(result.transcriptText);
-          console.log('[transcript-btn] onTranscript callback returned ok');
         } catch (cbErr) {
-          console.error('[transcript-btn] onTranscript callback threw:', cbErr);
+          console.warn('[transcript-btn] onTranscript callback threw:', cbErr);
         }
         btn.textContent = '✓';
         btn.title = '字幕已导入';

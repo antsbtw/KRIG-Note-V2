@@ -75,41 +75,30 @@ export async function install(
 async function doInstall(
   onProgress?: (percent: number) => void,
 ): Promise<YtdlpStatus> {
-  console.log('[ytdlp install] starting, fetch', DOWNLOAD_URL);
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
   const response = await net.fetch(DOWNLOAD_URL);
-  console.log('[ytdlp install] fetch returned, status=', response.status, 'ok=', response.ok);
   if (!response.ok) {
     throw new Error(`Download failed: HTTP ${response.status}`);
   }
 
   const totalBytes = parseInt(response.headers.get('content-length') || '0', 10);
-  console.log('[ytdlp install] totalBytes=', totalBytes);
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No response body');
 
   const chunks: Uint8Array[] = [];
   let downloadedBytes = 0;
-  let lastLogPct = -10;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     downloadedBytes += value.length;
-    if (totalBytes > 0) {
-      const pct = Math.round((downloadedBytes / totalBytes) * 100);
-      if (onProgress) onProgress(pct);
-      // main 侧每 10% log 一次,看下载是否真在推进
-      if (pct - lastLogPct >= 10) {
-        console.log(`[ytdlp install] download ${pct}% (${downloadedBytes}/${totalBytes})`);
-        lastLogPct = pct;
-      }
+    if (totalBytes > 0 && onProgress) {
+      onProgress(Math.round((downloadedBytes / totalBytes) * 100));
     }
   }
 
-  console.log('[ytdlp install] download complete, writing file...');
   // 合并 chunks 写入文件
   const buffer = Buffer.concat(chunks);
   fs.writeFileSync(YTDLP_PATH, buffer);
@@ -121,28 +110,22 @@ async function doInstall(
       stdio: 'ignore',
       timeout: 3000,
     });
-    console.log('[ytdlp install] xattr quarantine removed');
   } catch (e) {
     console.warn('[ytdlp install] xattr failed:', e instanceof Error ? e.message : String(e));
   }
 
   // macOS:ad-hoc codesign — yt-dlp 是 PyInstaller bundle,未签名时首次执行 amfi
   // 验证极慢(~1-3 分钟)。ad-hoc 自签后 macOS 信任,启动 < 2s。
-  // --force 覆盖已有签名,--deep 递归签所有内嵌资源,--sign - 用 ad-hoc 身份。
   try {
     execSync(`codesign --force --deep --sign - "${YTDLP_PATH}"`, {
       stdio: 'pipe',
-      timeout: 30000, // 30s 给 codesign 处理 36MB bundle
+      timeout: 30000,
     });
-    console.log('[ytdlp install] ad-hoc codesign applied');
   } catch (e) {
-    console.warn('[ytdlp install] codesign failed (首次执行可能很慢):', e instanceof Error ? e.message : String(e));
+    console.warn('[ytdlp install] codesign failed:', e instanceof Error ? e.message : String(e));
   }
 
-  console.log('[ytdlp install] file written, running checkStatus...');
-  const status = await checkStatus();
-  console.log('[ytdlp install] done, installed=', status.installed, 'version=', status.version);
-  return status;
+  return checkStatus();
 }
 
 /** 获取 binary 路径(未安装返回 null)*/

@@ -164,19 +164,15 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
    */
   async function runFlow(): Promise<void> {
     const src = deps.getSrc();
-    console.log('[download-btn runFlow] src=', src, 'isYouTubeSrc=', isYouTubeSrc(), 'ytdlpAvailable=', ytdlpAvailable);
     if (!src) return;
 
     // 步骤 1:**先检登录态**(优先级最高,登录前不浪费任何资源)
     // YouTube 源需要登录过反爬;direct mp4 等不需要
     if (isYouTubeSrc()) {
-      console.log('[download-btn runFlow] is YouTube, calling checkYoutubeCookies()');
       try {
         const status = await checkYoutubeCookies();
-        console.log('[download-btn runFlow] checkYoutubeCookies returned', status);
         if (!status.hasLogin) {
           // 没登录 → 直接触发右屏 web view 跳 google 登录页
-          console.log('[download-btn runFlow] no login → trigger web view login');
           phase = 'idle';
           btn.textContent = '⬇';
           btn.title = '需要先在 web view 登录 YouTube';
@@ -274,31 +270,16 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     e.stopPropagation();
   });
   btn.addEventListener('click', async (e) => {
-    // 入口 log — 任何分支前先打,确保事件触发能被看到
-    const srcAtClick = deps.getSrc();
-    console.log('[download-btn] click ENTRY', {
-      phase,
-      ytdlpAvailable,
-      btnDisabled: btn.disabled,
-      btnText: btn.textContent,
-      src: srcAtClick,
-      localFilePath: deps.getLocalFilePath(),
-    });
     e.stopPropagation();
-    if (btn.disabled) {
-      console.log('[download-btn] EARLY RETURN: btn.disabled');
-      return;
-    }
+    if (btn.disabled) return;
 
     // done + 点击 → showItemInFolder(若文件已被删,自动 reset 到 idle 重新下载)
     if (phase === 'done') {
       const path = deps.getLocalFilePath();
-      console.log('[download-btn] phase=done, opening Finder:', path);
       if (path) {
         const result = await window.electronAPI?.showItemInFolder?.(path);
         if (result && !result.ok) {
           // 文件已被用户删除等 → 重置到 idle,下次点击重新下载
-          console.log('[download-btn] showItemInFolder failed, reason:', result.reason, '→ reset to idle');
           phase = 'idle';
           deps.onUpdateAttrs({ localFilePath: null });
           paintIdle();
@@ -314,24 +295,14 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     }
 
     // installing / downloading 期间 — 防呆,不重入
-    if (phase === 'installing' || phase === 'downloading') {
-      console.log('[download-btn] EARLY RETURN: phase=', phase);
-      return;
-    }
+    if (phase === 'installing' || phase === 'downloading') return;
 
-    if (!srcAtClick) {
-      console.log('[download-btn] EARLY RETURN: src is null');
-      return;
-    }
-    if (!isYouTubeSrc()) {
-      console.log('[download-btn] EARLY RETURN: not YouTube');
-      return;
-    }
+    const src = deps.getSrc();
+    if (!src) return;
+    if (!isYouTubeSrc()) return;
 
-    console.log('[download-btn] entering runFlow()');
     // idle → 启动 install(若需)+ download 一气呵成
     await runFlow();
-    console.log('[download-btn] runFlow() returned');
   });
 
   // 初次同步(mount 时若 attrs 已有 localFilePath → done 态)

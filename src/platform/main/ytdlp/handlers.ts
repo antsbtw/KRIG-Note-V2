@@ -39,31 +39,20 @@ export function registerYtdlpHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.YTDLP_DOWNLOAD,
     async (event, url: unknown, outputPath: unknown) => {
-      console.log('[ytdlp download] handler called, url=', url);
       if (typeof url !== 'string' || !url) {
-        console.warn('[ytdlp download] invalid url, abort');
         return { url: '', status: 'error', percent: 0, error: 'invalid url' };
       }
       const out = typeof outputPath === 'string' ? outputPath : undefined;
       const sender = event.sender;
-      let lastLogPct = -10;
-      const result = await downloadVideo(
+      return downloadVideo(
         url,
         (progress) => {
           if (!sender.isDestroyed()) {
             sender.send(IPC_CHANNELS.YTDLP_DOWNLOAD_PROGRESS, progress);
           }
-          // main 侧每 10% log,看 yt-dlp stdout 是否在推进
-          const p = progress.percent || 0;
-          if (p - lastLogPct >= 10) {
-            console.log(`[ytdlp download] progress ${Math.round(p)}% status=${progress.status}`);
-            lastLogPct = p;
-          }
         },
         out,
       );
-      console.log('[ytdlp download] handler returning, status=', result.status, 'filename=', result.filename, 'error=', result.error);
-      return result;
     },
   );
 
@@ -122,7 +111,6 @@ export function registerYtdlpHandlers(): void {
   // - LOGIN_INFO(YouTube login marker)
   // 任一存在就视为已登录。
   ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, async () => {
-    console.log('[ytdlp checkYoutubeCookies] handler called');
     try {
       const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
       const yt = await webviewSession.cookies.get({ domain: '.youtube.com' });
@@ -135,15 +123,12 @@ export function registerYtdlpHandlers(): void {
         'LOGIN_INFO',
       ]);
       const loginCookies = all.filter((c) => LOGIN_NAMES.has(c.name));
-      const result = {
+      return {
         hasLogin: loginCookies.length > 0,
         count: all.length,
         loginCount: loginCookies.length,
       };
-      console.log('[ytdlp checkYoutubeCookies] returning', result, 'login cookie names:', loginCookies.map((c) => c.name));
-      return result;
     } catch (e) {
-      console.warn('[ytdlp checkYoutubeCookies] error:', e);
       return { hasLogin: false, count: 0, error: e instanceof Error ? e.message : String(e) };
     }
   });
