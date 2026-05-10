@@ -21,6 +21,9 @@
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import { EBookHost } from './Host';
+import { OutlinePanel } from './outline-panel';
+import { SearchBar } from './search-bar';
+import { useSearch } from './hooks/use-search';
 import {
   isFixedPage,
   isReflowable,
@@ -35,6 +38,7 @@ export type {
   EBookRenderingApi,
   EBookHostHandle,
   EBookHostProps,
+  SearchResult,
   IBookRenderer,
   IFixedPageRenderer,
   IReflowableRenderer,
@@ -52,12 +56,24 @@ export type {
 } from './types';
 
 // 模块级 export(driver/slot 兜底用,W5 边界 A 临时允许项)
-export { EBookHost, isFixedPage, isReflowable, detectFileType, getRenderMode };
+export {
+  EBookHost,
+  OutlinePanel,
+  SearchBar,
+  useSearch,
+  isFixedPage,
+  isReflowable,
+  detectFileType,
+  getRenderMode,
+};
 
 capabilityRegistry.register({
   id: 'ebook-rendering',
   api: {
     Host: EBookHost,
+    OutlinePanel,
+    SearchBar,
+    useSearch,
     isFixedPage,
     isReflowable,
     detectFileType,

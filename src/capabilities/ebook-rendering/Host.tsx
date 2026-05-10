@@ -33,11 +33,15 @@ import {
   type IBookRenderer,
   type EBookFileType,
   type BookPosition,
+  type TOCItem,
   isFixedPage,
+  isReflowable,
   detectFileType,
 } from './types';
 import { PDFRenderer } from './pdf';
+import { EPUBRenderer } from './epub';
 import { FixedPageContent } from './fixed-page-content';
+import { ReflowableContent } from './reflowable-content';
 
 /** view 通过 ref 调用的命令式 API(EBookHostHandle)*/
 export interface EBookHostHandle {
@@ -45,7 +49,7 @@ export interface EBookHostHandle {
   loadFromInfo(info: EBookLoadedInfo): Promise<void>;
   /** 滚动到指定页(PDF / fixed-page)*/
   goToPage(page: number): void;
-  /** 跳到 CFI(EPUB,C3 起)*/
+  /** 跳到 CFI(EPUB,reflowable)*/
   goToCFI(cfi: string): void;
   /** 设置 scale(PDF)*/
   setScale(scale: number): void;
@@ -55,6 +59,35 @@ export interface EBookHostHandle {
   getRenderMode(): 'fixed-page' | 'reflowable' | null;
   /** 当前总页数(fixed-page);EPUB 返 null */
   getTotalPages(): number | null;
+
+  // ── EPUB 专用 ──
+  /** EPUB 上一章 */
+  prevChapter(): void;
+  /** EPUB 下一章 */
+  nextChapter(): void;
+  /** EPUB 字号(默认 100;V1 60~200 范围)*/
+  setFontSize(size: number): void;
+  getFontSize(): number;
+
+  // ── TOC + Search(C3 给 outline / search bar 用)──
+  /** 取 renderer 提供的 TOC 树(异步:EPUB 等 readyPromise) */
+  getTOC(): Promise<TOCItem[]>;
+  /** 全文搜索(PDF + EPUB 通用) */
+  searchText(query: string): Promise<SearchResult[]>;
+  /** 跳转到搜索结果(fixed-page 走 page;reflowable 走 CFI)*/
+  goToSearchResult(result: SearchResult): void;
+  /** 清搜索结果 */
+  clearSearch(): void;
+}
+
+/** 搜索结果(PDF / EPUB 通用结构)*/
+export interface SearchResult {
+  /** PDF: 页码;EPUB: section index */
+  pageNum: number;
+  index: number;
+  text: string;
+  /** EPUB 用:跳转 CFI(searchText 内部计算后由 goToSearchResult 消费)*/
+  cfi?: string;
 }
 
 export interface EBookHostProps {
@@ -62,17 +95,30 @@ export interface EBookHostProps {
   /** 当前页号变化(toolbar 用作 currentPage 显示)*/
   onPageChange?: (page: number) => void;
   /** 加载完成后回调(view 用来同步 totalPages 等)*/
-  onLoadComplete?: (info: { totalPages: number; fileType: EBookFileType }) => void;
+  onLoadComplete?: (info: {
+    totalPages: number;
+    fileType: EBookFileType;
+    renderMode: 'fixed-page' | 'reflowable';
+  }) => void;
   /** scale 变化(view 用来同步 toolbar)*/
   onScaleChange?: (scale: number) => void;
   /** 加载/未加载 状态变化(view 决定显示空状态)*/
   onReadyChange?: (ready: boolean) => void;
+  /** EPUB 进度变化(章节标题 + 比例)— view 持久化 + toolbar 显示 */
+  onEpubProgressChange?: (progress: { chapter: string; percentage: number }) => void;
 }
 
 const FIT_WIDTH_PADDING = 40;
 
 export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EBookHost(
-  { workspaceId: _workspaceId, onPageChange, onLoadComplete, onScaleChange, onReadyChange },
+  {
+    workspaceId: _workspaceId,
+    onPageChange,
+    onLoadComplete,
+    onScaleChange,
+    onReadyChange,
+    onEpubProgressChange,
+  },
   ref,
 ) {
   const library = useMemo(
@@ -162,6 +208,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           onLoadComplete?.({
             totalPages: r.getTotalPages(),
             fileType,
+            renderMode: 'fixed-page',
+          });
+        } else if (isReflowable(r)) {
+          // EPUB 恢复上次 CFI(必须在 renderTo 之前 — V1 EBookView.tsx 同款)
+          if (pos?.cfi) r.setRestoreLocation(pos.cfi);
+          onLoadComplete?.({
+            totalPages: 0,
+            fileType,
+            renderMode: 'reflowable',
           });
         }
 
@@ -284,6 +339,50 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         if (r && isFixedPage(r)) return r.getTotalPages();
         return null;
       },
+      // ── EPUB 专用 ──
+      prevChapter(): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.prevChapter();
+      },
+      nextChapter(): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.nextChapter();
+      },
+      setFontSize(size: number): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.setFontSize(size);
+      },
+      getFontSize(): number {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) return r.getFontSize();
+        return 100;
+      },
+      // ── TOC + Search ──
+      async getTOC(): Promise<TOCItem[]> {
+        const r = rendererRef.current;
+        if (!r) return [];
+        return r.getTOC();
+      },
+      async searchText(query: string): Promise<SearchResult[]> {
+        const r = rendererRef.current;
+        if (!r) return [];
+        if (isFixedPage(r)) return r.searchText(query);
+        if (isReflowable(r)) return r.searchText(query);
+        return [];
+      },
+      goToSearchResult(result: SearchResult): void {
+        const r = rendererRef.current;
+        if (!r) return;
+        if (isFixedPage(r)) {
+          gotoPageRef.current?.(result.pageNum);
+        } else if (isReflowable(r) && result.cfi) {
+          r.goTo({ type: 'cfi', cfi: result.cfi });
+        }
+      },
+      clearSearch(): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.clearSearch();
+      },
     }),
     [loadFromInfo, handleScaleChange, handleSetFitWidth],
   );
@@ -309,11 +408,18 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         />
       )}
 
-      {!loading && rendererReady && renderer && !isFixedPage(renderer) && (
+      {!loading && rendererReady && renderer && isReflowable(renderer) && (
+        <ReflowableContent
+          renderer={renderer}
+          onProgressChange={onEpubProgressChange}
+        />
+      )}
+
+      {!loading && rendererReady && renderer && !isFixedPage(renderer) && !isReflowable(renderer) && (
         <div className="krig-ebook-empty">
-          <div className="krig-ebook-empty-icon">📖</div>
+          <div className="krig-ebook-empty-icon">📕</div>
           <div className="krig-ebook-empty-text">
-            EPUB 渲染留 C3 段(foliate-js 接入)
+            DjVu / CBZ 渲染留作未来(C3+)
           </div>
         </div>
       )}
@@ -321,16 +427,17 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   );
 });
 
-// ── Renderer 工厂(C2 仅 PDF;C3 起加 EPUBRenderer)──
+// ── Renderer 工厂(C2 仅 PDF;C3 加 EPUBRenderer;DjVu/CBZ 留作未来)──
 
 function createRendererFor(fileType: EBookFileType): IBookRenderer | null {
   switch (fileType) {
     case 'pdf':
       return new PDFRenderer();
     case 'epub':
+      return new EPUBRenderer();
     case 'djvu':
     case 'cbz':
-      // C3+ / 留作未来:console.warn 已在调用方
+      // 留作未来:console.warn 已在调用方
       return null;
     default:
       return null;
