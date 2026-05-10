@@ -67,6 +67,38 @@ export const IPC_CHANNELS = {
   LEARNING_LOOKUP: 'learning.dictionary-lookup',
   LEARNING_TRANSLATE: 'learning.translate',
   LEARNING_TTS: 'learning.tts',
+
+  // L5-C1:ebook 书架 + 文件夹(D-3=B JSON 实现,过渡至 W6 升 SurrealDB)
+  EBOOK_BOOKSHELF_LIST: 'ebook.bookshelf-list',
+  EBOOK_PICK_FILE: 'ebook.pick-file',
+  EBOOK_BOOKSHELF_ADD: 'ebook.bookshelf-add',
+  EBOOK_BOOKSHELF_OPEN: 'ebook.bookshelf-open',
+  EBOOK_BOOKSHELF_REMOVE: 'ebook.bookshelf-remove',
+  EBOOK_BOOKSHELF_RENAME: 'ebook.bookshelf-rename',
+  EBOOK_BOOKSHELF_MOVE: 'ebook.bookshelf-move',
+  EBOOK_BOOKSHELF_RELOCATE: 'ebook.bookshelf-relocate',         // D-5 文件不存在重新定位
+  EBOOK_BOOKSHELF_TRANSFER: 'ebook.bookshelf-transfer-managed', // link → managed
+  EBOOK_BOOKSHELF_CHANGED: 'ebook.bookshelf-changed',           // main → renderer 推送
+  // 文件夹
+  EBOOK_FOLDER_LIST: 'ebook.folder-list',
+  EBOOK_FOLDER_CREATE: 'ebook.folder-create',
+  EBOOK_FOLDER_RENAME: 'ebook.folder-rename',
+  EBOOK_FOLDER_DELETE: 'ebook.folder-delete',
+  EBOOK_FOLDER_MOVE: 'ebook.folder-move',
+  // 数据传输
+  EBOOK_GET_DATA: 'ebook.get-data',
+  EBOOK_LOADED: 'ebook.loaded',                                 // main → renderer 推送
+  EBOOK_CLOSE: 'ebook.close',
+  // 进度 + 书签 + 标注(C1 仅占位 channel,C2~C5 各段消费)
+  EBOOK_SAVE_PROGRESS: 'ebook.save-progress',
+  EBOOK_BOOKMARK_TOGGLE: 'ebook.bookmark-toggle',
+  EBOOK_BOOKMARK_LIST: 'ebook.bookmark-list',
+  EBOOK_CFI_BOOKMARK_ADD: 'ebook.cfi-bookmark-add',
+  EBOOK_CFI_BOOKMARK_REMOVE: 'ebook.cfi-bookmark-remove',
+  EBOOK_CFI_BOOKMARK_LIST: 'ebook.cfi-bookmark-list',
+  EBOOK_ANNOTATION_LIST: 'ebook.annotation-list',
+  EBOOK_ANNOTATION_ADD: 'ebook.annotation-add',
+  EBOOK_ANNOTATION_REMOVE: 'ebook.annotation-remove',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

@@ -196,4 +196,100 @@ contextBridge.exposeInMainWorld('electronAPI', {
   learningTts(text: string, lang: string): Promise<ArrayBuffer | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_TTS, text, lang);
   },
+
+  // ── L5-C1:ebook 书架 + 文件夹 + 标注(D-3=B JSON 起步)──
+  ebookPickFile(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_PICK_FILE);
+  },
+  ebookBookshelfList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_LIST);
+  },
+  ebookBookshelfAdd(
+    filePath: string,
+    fileType: string,
+    storage: 'managed' | 'link',
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_ADD, filePath, fileType, storage);
+  },
+  ebookBookshelfOpen(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_OPEN, id);
+  },
+  ebookBookshelfRemove(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_REMOVE, id);
+  },
+  ebookBookshelfRename(id: string, displayName: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_RENAME, id, displayName);
+  },
+  ebookBookshelfMove(id: string, folderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_MOVE, id, folderId);
+  },
+  ebookBookshelfRelocate(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_RELOCATE, id);
+  },
+  ebookBookshelfTransferToManaged(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_TRANSFER, id);
+  },
+  /** 订阅 bookshelf changed — 多订阅模式,对齐 onLearningVocabChanged */
+  onEbookBookshelfChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.EBOOK_BOOKSHELF_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.EBOOK_BOOKSHELF_CHANGED, handler);
+  },
+  // 文件夹
+  ebookFolderList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_LIST);
+  },
+  ebookFolderCreate(title: string, parentId?: string | null): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_CREATE, title, parentId ?? null);
+  },
+  ebookFolderRename(id: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_RENAME, id, title);
+  },
+  ebookFolderDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_DELETE, id);
+  },
+  ebookFolderMove(id: string, parentId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_MOVE, id, parentId);
+  },
+  // 数据传输
+  ebookGetData(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_GET_DATA);
+  },
+  ebookClose(): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_CLOSE);
+  },
+  /** main → renderer 推送:书已加载,view 收到后调 ebookGetData() 拿 ArrayBuffer */
+  onEbookLoaded(callback: (info: unknown) => void): () => void {
+    const handler = (_event: unknown, info: unknown): void => callback(info);
+    ipcRenderer.on(IPC_CHANNELS.EBOOK_LOADED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.EBOOK_LOADED, handler);
+  },
+  // 进度 + 书签 + 标注(C1 占位,C2~C5 真消费)
+  ebookSaveProgress(bookId: string, position: unknown): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_SAVE_PROGRESS, bookId, position);
+  },
+  ebookBookmarkToggle(bookId: string, page: number): Promise<number[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKMARK_TOGGLE, bookId, page);
+  },
+  ebookBookmarkList(bookId: string): Promise<number[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKMARK_LIST, bookId);
+  },
+  ebookCfiBookmarkAdd(bookId: string, cfi: string, label: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_CFI_BOOKMARK_ADD, bookId, cfi, label);
+  },
+  ebookCfiBookmarkRemove(bookId: string, cfi: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_CFI_BOOKMARK_REMOVE, bookId, cfi);
+  },
+  ebookCfiBookmarkList(bookId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_CFI_BOOKMARK_LIST, bookId);
+  },
+  ebookAnnotationList(bookId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_LIST, bookId);
+  },
+  ebookAnnotationAdd(bookId: string, ann: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_ADD, bookId, ann);
+  },
+  ebookAnnotationRemove(bookId: string, annotationId: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_REMOVE, bookId, annotationId);
+  },
 });

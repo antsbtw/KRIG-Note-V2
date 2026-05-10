@@ -167,6 +167,50 @@ declare global {
       ): Promise<{ text: string; sourceLang: string; targetLang: string } | null>;
       /** Google TTS — 返 MP3 ArrayBuffer,view 用 Blob 创建 audio URL */
       learningTts(text: string, lang: string): Promise<ArrayBuffer | null>;
+
+      // ── L5-C1:ebook 书架 + 文件夹 + 标注(D-3=B JSON 起步)──
+      /** 选文件 — 弹 dialog,返 { filePath, fileName, fileType } 或 null(取消)*/
+      ebookPickFile(): Promise<unknown>;
+      /** 全量书架(按 lastOpenedAt 倒序)*/
+      ebookBookshelfList(): Promise<unknown>;
+      /** 添加书 — managed=复制到 library;link=只记路径 */
+      ebookBookshelfAdd(
+        filePath: string,
+        fileType: string,
+        storage: 'managed' | 'link',
+      ): Promise<unknown>;
+      /** 打开书 — 加载到 main 内存 + 通知 EBOOK_LOADED */
+      ebookBookshelfOpen(id: string): Promise<unknown>;
+      ebookBookshelfRemove(id: string): Promise<void>;
+      ebookBookshelfRename(id: string, displayName: string): Promise<void>;
+      ebookBookshelfMove(id: string, folderId: string | null): Promise<void>;
+      /** D-5:重新定位失效文件(弹 dialog 选新路径)*/
+      ebookBookshelfRelocate(id: string): Promise<unknown>;
+      /** link → managed:复制文件到 library + 更新元数据 */
+      ebookBookshelfTransferToManaged(id: string): Promise<unknown>;
+      /** 订阅书架变化 — 返回 unsubscribe(对齐 onLearningVocabChanged 模式)*/
+      onEbookBookshelfChanged(callback: (list: unknown) => void): () => void;
+      // 文件夹
+      ebookFolderList(): Promise<unknown>;
+      ebookFolderCreate(title: string, parentId?: string | null): Promise<unknown>;
+      ebookFolderRename(id: string, title: string): Promise<void>;
+      ebookFolderDelete(id: string): Promise<void>;
+      ebookFolderMove(id: string, parentId: string | null): Promise<void>;
+      // 数据传输
+      ebookGetData(): Promise<unknown>;
+      ebookClose(): Promise<void>;
+      /** 推送:书已加载,view 收到后调 ebookGetData() 拿 ArrayBuffer */
+      onEbookLoaded(callback: (info: unknown) => void): () => void;
+      // 进度 + 书签 + 标注(C1 占位 channel,C2~C5 真消费)
+      ebookSaveProgress(bookId: string, position: unknown): Promise<void>;
+      ebookBookmarkToggle(bookId: string, page: number): Promise<number[]>;
+      ebookBookmarkList(bookId: string): Promise<number[]>;
+      ebookCfiBookmarkAdd(bookId: string, cfi: string, label: string): Promise<unknown>;
+      ebookCfiBookmarkRemove(bookId: string, cfi: string): Promise<unknown>;
+      ebookCfiBookmarkList(bookId: string): Promise<unknown>;
+      ebookAnnotationList(bookId: string): Promise<unknown>;
+      ebookAnnotationAdd(bookId: string, ann: unknown): Promise<unknown>;
+      ebookAnnotationRemove(bookId: string, annotationId: string): Promise<void>;
     };
   }
 }
