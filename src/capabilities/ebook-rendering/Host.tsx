@@ -128,6 +128,19 @@ export interface EBookHostProps {
   onEpubSelectionDismiss?: () => void;
   /** 点击已有标注(show-annotation 事件)→ view 触发删除 */
   onEpubAnnotationClick?: (cfi: string) => void;
+
+  // ── C5:PDF 空间标注 ──
+  /** 标注模式(off / rect / underline)— PDF 路径,EPUB 不消费 */
+  pdfAnnotationMode?: 'off' | 'rect' | 'underline';
+  /** 已有 PDF 空间标注(view 从 library 加载后传入) */
+  pdfAnnotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
+  /** 用户拖拽创建标注 → view 端调 library.annotationAdd(pageNum 由 layer 注入,id 由 main 生成)*/
+  onPdfAnnotationCreate?: (
+    pageNum: number,
+    annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
+  ) => void;
+  /** 右键已有标注 → view 端调 library.annotationRemove */
+  onPdfAnnotationDelete?: (id: string) => void;
 }
 
 const FIT_WIDTH_PADDING = 40;
@@ -143,6 +156,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onEpubTextSelected,
     onEpubSelectionDismiss,
     onEpubAnnotationClick,
+    pdfAnnotationMode,
+    pdfAnnotations,
+    onPdfAnnotationCreate,
+    onPdfAnnotationDelete,
   },
   ref,
 ) {
@@ -458,6 +475,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           onPageChange={onPageChange ?? (() => {})}
           onScaleChange={handleScaleChange}
           onRegisterGotoPage={registerGotoPage}
+          annotationMode={pdfAnnotationMode}
+          annotations={pdfAnnotations}
+          onAnnotationCreate={onPdfAnnotationCreate}
+          onAnnotationDelete={onPdfAnnotationDelete}
         />
       )}
 

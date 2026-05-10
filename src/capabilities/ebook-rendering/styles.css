@@ -339,3 +339,80 @@
 .krig-ebook-annotation-picker__cancel:hover {
   color: #ccc;
 }
+
+/* ── PDF 空间标注 — AnnotationLayer(L5-C5)── */
+
+.krig-ebook-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3; /* canvas (z-index auto) < textLayer (z-index 2) < annotation-layer */
+}
+
+.krig-ebook-annotation {
+  position: absolute;
+  pointer-events: auto;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+}
+
+.krig-ebook-annotation--rect {
+  border-style: solid;
+  border-width: 1px;
+}
+
+.krig-ebook-annotation--underline {
+  border: none;
+}
+
+.krig-ebook-annotation--preview {
+  background: rgba(255, 212, 59, 0.15);
+  border: 1px dashed #ffd43b;
+  pointer-events: none;
+}
+
+.krig-ebook-annotation--preview.krig-ebook-annotation--underline {
+  background: #ffd43b;
+  border: none;
+}
+
+/* 创建后的颜色 picker(挂在 layer 内部,跟随标注位置)*/
+.krig-ebook-annotation-color-picker {
+  position: absolute;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+.krig-ebook-annotation-color-picker__btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.krig-ebook-annotation-color-picker__btn:hover {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+
+.krig-ebook-annotation-color-picker__cancel {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.krig-ebook-annotation-color-picker__cancel:hover {
+  color: #ccc;
+}

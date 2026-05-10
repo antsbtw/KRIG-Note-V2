@@ -31,6 +31,7 @@ import type {
 } from '@capabilities/ebook-rendering/types';
 import { getEBookWsState } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
+import { usePdfAnnotations } from './use-pdf-annotations';
 import { EBookToolbar, type EBookToolbarRenderMode } from './EBookToolbar';
 import './ebook.css';
 
@@ -88,6 +89,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const search = useSearch(hostRef);
   const bookmarks = useBookmarks(hostRef, activeBookIdRef, epubChapter);
   const ann = useEpubAnnotation(hostRef, activeBookIdRef);
+  const pdfAnn = usePdfAnnotations(activeBookIdRef);
 
   // 订阅 onBookOpened → 命令式驱动 Host + 加载书签 / 标注
   useEffect(() => {
@@ -98,8 +100,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       bookmarks.loadOnBookOpen(info.bookId);
       // EPUB:加载已有 annotation 并重绘高亮(loadOnBookOpen 内 await getTOC 等就绪)
       void ann.loadOnBookOpen(info.bookId);
+      // C5:PDF 空间标注加载(EPUB 路径会过滤掉,无副作用)
+      void pdfAnn.loadOnBookOpen(info.bookId);
     });
-  }, [library, activeBookIdRef, bookmarks, ann]);
+  }, [library, activeBookIdRef, bookmarks, ann, pdfAnn]);
 
   // 启动 + 切书:有 activeBookId → 主动 open
   useEffect(() => {
@@ -258,6 +262,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onPageChange={onPageChange}
         onScaleChange={onScaleChange}
         onFitWidthToggle={onFitWidthToggle}
+        pdfAnnotationMode={pdfAnn.mode}
+        onPdfAnnotationModeChange={pdfAnn.setMode}
         epubChapter={epubChapter}
         epubPercentage={epubPercentage}
         fontSize={fontSize}
@@ -299,6 +305,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             onEpubTextSelected={ann.setSelection}
             onEpubSelectionDismiss={ann.dismiss}
             onEpubAnnotationClick={ann.handleAnnotationClick}
+            pdfAnnotationMode={pdfAnn.mode}
+            pdfAnnotations={pdfAnn.annotations}
+            onPdfAnnotationCreate={pdfAnn.create}
+            onPdfAnnotationDelete={pdfAnn.remove}
           />
           {ann.selection && (
             <EpubAnnotationPicker
