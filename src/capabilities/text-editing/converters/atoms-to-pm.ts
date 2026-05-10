@@ -183,26 +183,58 @@ function convertTiptapContent(content: unknown): PMNode[] {
     .filter((node): node is PMNode => node !== null);
 }
 
+/**
+ * V2 PM schema 节点名归一(关键 — 否则 deserialize 崩):
+ * - paragraph → text-block(attrs.level=null,attrs.isTitle=false)
+ * - heading → text-block(attrs.level=1/2/3,attrs.isTitle=false)
+ * - 其他 type 保留原样(orderedList / bulletList / listItem / table / 等已是 V2 名)
+ *
+ * V2 schema 只有 text-block,没有独立的 paragraph / heading 节点。
+ * tiptap-style 数据(table cell / blockquote / callout 子节点)常带 paragraph,
+ * 不归一会导致 RangeError: Unknown node type: paragraph。
+ */
+function normalizeNodeType(node: PMNode): PMNode {
+  if (node.type === 'paragraph') {
+    return {
+      ...node,
+      type: 'text-block',
+      attrs: { ...(node.attrs ?? {}), level: null, isTitle: false },
+    };
+  }
+  if (node.type === 'heading') {
+    const rawLevel = (node.attrs as { level?: unknown } | undefined)?.level;
+    const level =
+      typeof rawLevel === 'number' ? Math.max(1, Math.min(3, rawLevel)) : 2;
+    return {
+      ...node,
+      type: 'text-block',
+      attrs: { ...(node.attrs ?? {}), level, isTitle: false },
+    };
+  }
+  return node;
+}
+
 function sanitizeTiptapNode(node: PMNode | undefined): PMNode | null {
   if (!node || typeof node !== 'object') return null;
   if (node.type === 'text') {
     if (!node.text) return null;
     return node;
   }
-  if (Array.isArray(node.content)) {
-    const cleaned = node.content
+
+  // 先归一节点名(paragraph/heading → text-block),再递归 content
+  const normalized = normalizeNodeType(node);
+
+  if (Array.isArray(normalized.content)) {
+    const cleaned = normalized.content
       .map((c) => sanitizeTiptapNode(c))
       .filter((c): c is PMNode => c !== null);
-    // paragraph / heading 等空内容容器:补占位 text(对齐 V1 sanitizeTiptapContent)
-    if (
-      cleaned.length === 0 &&
-      (node.type === 'paragraph' || node.type === 'heading' || node.type === 'text-block')
-    ) {
-      return { ...node, content: undefined };
+    // 空内容容器:补占位(V2 text-block 容器内允许空,设 content: undefined)
+    if (cleaned.length === 0 && normalized.type === 'text-block') {
+      return { ...normalized, content: undefined };
     }
-    return { ...node, content: cleaned };
+    return { ...normalized, content: cleaned };
   }
-  return node;
+  return normalized;
 }
 
 // ── 单 Atom → PMNode(顶层,异步因 image 可能转 media://)──
