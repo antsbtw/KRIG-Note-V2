@@ -25,11 +25,15 @@ export function useExtractionImport(): void {
           console.log(
             `[extraction-import] done — folder=${result.folderId} created=${result.noteIds.length} skipped=${result.skippedTitles.length}`,
           );
-          // 对齐 V1:导入完成后自动切到 NoteView 并打开最后一个新建的 note
-          // (set-active 命令内部 setActiveNote + ensureNoteViewActive 切左栏)
+          // L5-C6 UX:导入完成后右栏切到 NoteView 显示最后一章
+          // - **不动 left slot**(用户在 EBookView 看 PDF,left 是主上下文,
+          //   按"left 不被系统自动关"约定,系统不能擅自替换)
+          // - 关掉 right slot 当前装的 web-view(Platform UI),换成 NoteView
+          // - 走 set-active-in-right 命令(slotBinding.right = 'note-view',
+          //   原 web-view 实例被替换;NoteView 通过 setActiveNote 显新章节)
           const lastId = result.noteIds.at(-1);
           if (lastId) {
-            commandRegistry.execute('note-view.set-active', lastId);
+            commandRegistry.execute('note-view.set-active-in-right', lastId);
           }
         })
         .catch((err) => {

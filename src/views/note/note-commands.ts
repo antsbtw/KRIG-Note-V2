@@ -88,6 +88,30 @@ export function registerNoteCommands(): void {
     ensureNoteViewActive(wsId);
   });
 
+  /**
+   * L5-C6:把 NoteView 装到右栏并把指定 note 设为 active。
+   *
+   * 跟 set-active 区别:set-active 把 NoteView 强切到 **left slot**(掩盖 left
+   * 当前装的内容);本命令保留 left slot 不动,只**操作 right slot**(替换右栏
+   * 当前装的 view 为 NoteView)。
+   *
+   * 适用场景:left slot 当前是用户主导的 view(如 EBookView 看 PDF),需要在右栏
+   * 跳到刚导入的 note 而不打断左栏 — 走"left 不被系统自动关"约定。
+   */
+  commandRegistry.register('note-view.set-active-in-right', (noteId: unknown) => {
+    if (typeof noteId !== 'string') return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+    setActiveNote(wsId, noteId);
+    if (ws.slotBinding.right !== 'note-view') {
+      workspaceManager.update(wsId, {
+        slotBinding: { ...ws.slotBinding, right: 'note-view' },
+      });
+    }
+  });
+
   // ── L5-B1 新命令 ──
 
   commandRegistry.register('note-view.create-folder', (parentId: unknown) => {
