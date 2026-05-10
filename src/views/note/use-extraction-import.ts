@@ -12,6 +12,7 @@
  */
 
 import { useEffect } from 'react';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import { importExtractionBatch } from './extraction-import';
 
 export function useExtractionImport(): void {
@@ -24,6 +25,12 @@ export function useExtractionImport(): void {
           console.log(
             `[extraction-import] done — folder=${result.folderId} created=${result.noteIds.length} skipped=${result.skippedTitles.length}`,
           );
+          // 对齐 V1:导入完成后自动切到 NoteView 并打开最后一个新建的 note
+          // (set-active 命令内部 setActiveNote + ensureNoteViewActive 切左栏)
+          const lastId = result.noteIds.at(-1);
+          if (lastId) {
+            commandRegistry.execute('note-view.set-active', lastId);
+          }
         })
         .catch((err) => {
           console.error('[extraction-import] failed:', err);
