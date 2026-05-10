@@ -120,7 +120,7 @@
 | **web view 基础形态**(WebView + WebToolbar + 简化右键菜单)| ~700 行迁(L5-B4)| ✅ 已迁(本批) | electron `<webview>` tag(已启) | link 跨 view 路由验证落地;书签/历史/翻译/AI 留 L5-B4.x |
 | **web-bridge**(注入 + extraction + 协议)| ~7600 行(web-bridge/) | 中 | web view | 比 web view 更复杂,Note 内容提取 / AI 工作流依赖 |
 | ebook view | 未统计 | 中 | PDF / EPUB 渲染 | KRIG 业务 |
-| graph view(canvas) | 未统计 | 低-中 | three.js 等 | KRIG 知识图谱 view |
+| graph view(canvas) | ~9000 行(plugins/graph 8.7k + main/storage/graph-store 287)| 低-中 | three.js + 复用 V2 text-editing capability | 设计已落地 → [v1-graph-migration-plan.md](./v1-graph-migration-plan.md) v0.2(2026-05-10,P1-1 three 严格版屏障 + P1-2 install 列表口径自洽);拆 4 capability(shape-library / canvas-rendering / canvas-text-node / graph-library-store)+ platform/main/graph;G1~G5 切片;family-tree variant 留里程碑 H |
 | thought view | 未统计 | 低 | NoteView variant | NoteView 变体,代码复用度高 |
 | ai-note-bridge | 未统计 | 中 | NoteView + LLM API | AI 集成 |
 | browser-capability | 未统计 | 中 | 跨 view 浏览器抽象 |  |
