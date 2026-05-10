@@ -20,6 +20,19 @@ import { writeFileSync } from 'fs';
 import { join, dirname, basename, extname } from 'path';
 import { getYtdlpPath } from './binary-manager';
 import { fetchTranscript } from 'youtube-transcript';
+// ffmpeg-static 提供 npm install 时自动下载的当前平台 + 架构 ffmpeg binary
+// (macOS arm64 / x64,Linux x64 / arm64,Windows x64 全覆盖,~45MB)。
+// yt-dlp 用 --ffmpeg-location 调它合并 DASH 分流(720p+ 必需)。
+import ffmpegStatic from 'ffmpeg-static';
+
+/** ffmpeg-static 默认导出 binary 路径;打包后从 asar.unpack 读 */
+function getFfmpegPath(): string | null {
+  // 打包后 asar 路径自动 unpack 到 .asar.unpacked 同名目录(forge 配置)
+  const raw = ffmpegStatic;
+  if (!raw) return null;
+  // dev 环境:直接用 node_modules 路径;打包后:asar.unpack 重定向
+  return raw.replace('app.asar', 'app.asar.unpacked');
+}
 
 export interface DownloadProgress {
   url: string;
@@ -97,22 +110,40 @@ export async function downloadVideo(
     let lastPercent = 0;
     let downloadedFilename: string | undefined = outputPath || undefined;
 
+    const ffmpegPath = getFfmpegPath();
+
+    // format 选择优先级(从高到低,带 ffmpeg 时拿 720p+ DASH 合并):
+    // 1. bv*[height<=?720]+ba — best video-only ≤720p + best audio-only,yt-dlp 调
+    //    ffmpeg 合并(YouTube 720p+ 都是 DASH 分流必需 ffmpeg)
+    // 2. best[ext=mp4]       — 单文件 mp4 兜底(360p,无需 ffmpeg)
+    // 3. best                — 任意源(非 YouTube 直链等)
+    //
+    // 没装 ffmpeg(ffmpegPath null,不太可能 — ffmpeg-static 内置)yt-dlp
+    // 自动跳过 #1 走 #2,降级到 360p 单文件。
+    const formatSelector = ffmpegPath
+      ? 'bv*[height<=?720]+ba/best[ext=mp4]/best'
+      : 'best[ext=mp4]/best';
+
     const args = [
-      // format 选择优先级(从高到低):
-      // 1. mp4 单文件,height ≤ 720(优先 720p,YouTube 单文件最高一般是 720p)
-      // 2. 任意 mp4 单文件(360p/480p,V1 行为兜底)
-      // 3. 任意 best(极少用到,非 YouTube 直链等)
       '-f',
-      'best[height<=?720][ext=mp4]/best[ext=mp4]/best',
+      formatSelector,
       '--no-mtime',
       '--no-check-certificates',
       // 只下当前视频,忽略 URL 里的 &list=... 播放列表参数
       // (否则 YouTube radio mix 之类会下载几百个视频)
       '--no-playlist',
+      // 合并输出统一为 mp4(DASH 合并默认 mkv,我们要 mp4 让 video-block 直播)
+      '--merge-output-format',
+      'mp4',
       '-o',
       outputTemplate,
       url,
     ];
+
+    // 把 ffmpeg-static 路径传给 yt-dlp(让它做 video+audio 合并)
+    if (ffmpegPath) {
+      args.unshift('--ffmpeg-location', ffmpegPath);
+    }
 
     console.log('[ytdlp download] spawning yt-dlp:', binPath, 'args:', args.join(' '));
     const proc = spawn(binPath, args);

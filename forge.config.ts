@@ -5,7 +5,11 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    // asar 启用,但 ffmpeg-static binary 必须 unpack 才能 spawn
+    // (Electron asar 内的二进制无法直接执行)
+    asar: {
+      unpack: '**/node_modules/ffmpeg-static/**',
+    },
     name: 'KRIG Note',
     executableName: 'KRIG Note',
     icon: 'build/icon',  // forge 自动加平台后缀:macOS=.icns / Windows=.ico / Linux=.png
