@@ -23,6 +23,16 @@
   min-height: 0;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: row;
+}
+
+.krig-ebook-view__main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── 空状态 ── */
@@ -121,6 +131,34 @@
 .krig-ebook-toolbar__btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+.krig-ebook-toolbar__btn--active {
+  background: #2a3a5a;
+  border-color: #3b5a8a;
+  color: #e8eaed;
+}
+
+.krig-ebook-toolbar__btn--active:hover:not(:disabled) {
+  background: #2a3a5a;
+  border-color: #4b6a9a;
+}
+
+.krig-ebook-toolbar__epub-progress {
+  font-size: 12px;
+  color: #aaa;
+  margin: 0 8px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.krig-ebook-toolbar__font-size {
+  font-size: 12px;
+  color: #888;
+  min-width: 36px;
+  text-align: center;
 }
 
 .krig-ebook-toolbar__page-input {

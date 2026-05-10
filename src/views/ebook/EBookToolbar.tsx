@@ -1,24 +1,31 @@
 /**
- * EBookToolbar — view 内 toolbar 内容(L5-C2)
+ * EBookToolbar — view 内 toolbar 内容(L5-C2 + C3 扩展)
  *
- * V1 → V2 改写:src/plugins/ebook/components/EBookToolbar.tsx(305 行)→ 简版。
- * 砍掉(C2 不做):
- * - sidebar toggle / OutlinePanel(C3)
- * - annotation mode / bookmark(C4 / C5)
- * - 提取按钮(D-8 不在本迁移)
- * - SlotToggle / 锚定锁 / OpenFilePopup(D-9 锚定单独 / 不在本段)
- * - reflowable 章节导航(C3 起)
+ * V1 → V2 改写。C3 在 C2 基础上加:
+ * - sidebar toggle(☰)— 切换 OutlinePanel 显示
+ * - search 入口(🔍)— 切换 SearchBar 显示(Cmd+F 也触发)
+ * - reflowable 模式分支:章节翻页 ‹›(替代页码)+ 进度显示 + 字号 A−/A+(替代缩放)
  *
- * 保留:文件名 + 上一页/下一页/页码输入/总页数 + 缩放(-/select/+)+ 适应宽度。
+ * fixed-page / reflowable 通过 renderMode 切换 center/right 区段内容。
+ *
+ * 砍掉(C4 / C5):annotation mode / bookmark / extract / SlotToggle / 锚定锁。
  *
  * 所有交互都通过 props callbacks(handlers 在 view 层组合 + 调 hostRef);
- * Toolbar 不直接持有 renderer / library。
+ * Toolbar 不直接持有 renderer / library / host。
  */
 
 import { useState, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
 
+export type EBookToolbarRenderMode = 'fixed-page' | 'reflowable' | null;
+
 interface EBookToolbarProps {
   fileName: string;
+  renderMode: EBookToolbarRenderMode;
+  // 共用
+  sidebarOpen: boolean;
+  onSidebarToggle: () => void;
+  onSearchOpen: () => void;
+  // fixed-page 专用
   currentPage: number;
   pageCount: number;
   scale: number;
@@ -26,6 +33,13 @@ interface EBookToolbarProps {
   onPageChange: (page: number) => void;
   onScaleChange: (scale: number) => void;
   onFitWidthToggle: () => void;
+  // reflowable 专用
+  epubChapter?: string;
+  epubPercentage?: number;
+  fontSize?: number;
+  onPrevChapter?: () => void;
+  onNextChapter?: () => void;
+  onFontSizeChange?: (delta: number) => void;
 }
 
 const ZOOM_PRESETS = [
@@ -37,8 +51,16 @@ const ZOOM_PRESETS = [
   { label: '200%', value: 2.0 },
 ];
 
+const FONT_STEP = 10;
+const FONT_MIN = 60;
+const FONT_MAX = 200;
+
 export function EBookToolbar({
   fileName,
+  renderMode,
+  sidebarOpen,
+  onSidebarToggle,
+  onSearchOpen,
   currentPage,
   pageCount,
   scale,
@@ -46,9 +68,17 @@ export function EBookToolbar({
   onPageChange,
   onScaleChange,
   onFitWidthToggle,
+  epubChapter,
+  epubPercentage,
+  fontSize = 100,
+  onPrevChapter,
+  onNextChapter,
+  onFontSizeChange,
 }: EBookToolbarProps) {
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
+
+  // ── fixed-page 导航 ──
 
   const handlePrevPage = useCallback(() => {
     if (currentPage > 1) onPageChange(currentPage - 1);
@@ -80,6 +110,8 @@ export function EBookToolbar({
     }
   }, []);
 
+  // ── 缩放 ──
+
   const handleZoomChange = useCallback(
     (e: ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
@@ -99,12 +131,38 @@ export function EBookToolbar({
     onScaleChange(Math.round(next * 100) / 100);
   }, [scale, onScaleChange]);
 
-  const showNav = pageCount > 0;
+  // ── 字号 ──
+
+  const handleFontMinus = useCallback(() => {
+    if (!onFontSizeChange) return;
+    const next = Math.max(FONT_MIN, fontSize - FONT_STEP);
+    onFontSizeChange(next);
+  }, [fontSize, onFontSizeChange]);
+
+  const handleFontPlus = useCallback(() => {
+    if (!onFontSizeChange) return;
+    const next = Math.min(FONT_MAX, fontSize + FONT_STEP);
+    onFontSizeChange(next);
+  }, [fontSize, onFontSizeChange]);
+
+  // ── 渲染条件 ──
+
+  const showFixedNav = renderMode === 'fixed-page' && pageCount > 0;
+  const showReflowNav = renderMode === 'reflowable';
 
   return (
     <div className="krig-ebook-toolbar">
-      {/* Left: 文件名 */}
+      {/* Left: sidebar toggle + 文件名 */}
       <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--left">
+        {renderMode && (
+          <button
+            className={`krig-ebook-toolbar__btn ${sidebarOpen ? 'krig-ebook-toolbar__btn--active' : ''}`}
+            onClick={onSidebarToggle}
+            title="目录"
+          >
+            ☰
+          </button>
+        )}
         {fileName && (
           <span className="krig-ebook-toolbar__filename" title={fileName}>
             {fileName}
@@ -112,8 +170,8 @@ export function EBookToolbar({
         )}
       </div>
 
-      {/* Center: 导航(fixed-page 模式)*/}
-      {showNav && (
+      {/* Center: 导航(按 renderMode 切换形态)*/}
+      {showFixedNav && (
         <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--center">
           <button
             className="krig-ebook-toolbar__btn"
@@ -143,9 +201,39 @@ export function EBookToolbar({
         </div>
       )}
 
-      {/* Right: 缩放控件 */}
-      {showNav && (
+      {showReflowNav && (
+        <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--center">
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={onPrevChapter}
+            title="上一页 (←)"
+          >
+            ‹
+          </button>
+          <span className="krig-ebook-toolbar__epub-progress">
+            {epubChapter ? `${epubChapter} · ` : ''}
+            {Math.round((epubPercentage ?? 0) * 100)}%
+          </span>
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={onNextChapter}
+            title="下一页 (→)"
+          >
+            ›
+          </button>
+        </div>
+      )}
+
+      {/* Right: 缩放 / 字号(按 renderMode 切换)+ 搜索 */}
+      {showFixedNav && (
         <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={onSearchOpen}
+            title="搜索 (⌘F)"
+          >
+            🔍
+          </button>
           <button
             className="krig-ebook-toolbar__btn"
             onClick={handleZoomOut}
@@ -174,6 +262,35 @@ export function EBookToolbar({
             title="放大"
           >
             +
+          </button>
+        </div>
+      )}
+
+      {showReflowNav && (
+        <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={onSearchOpen}
+            title="搜索 (⌘F)"
+          >
+            🔍
+          </button>
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={handleFontMinus}
+            title="缩小字号"
+            disabled={fontSize <= FONT_MIN}
+          >
+            A−
+          </button>
+          <span className="krig-ebook-toolbar__font-size">{fontSize}%</span>
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={handleFontPlus}
+            title="放大字号"
+            disabled={fontSize >= FONT_MAX}
+          >
+            A+
           </button>
         </div>
       )}
