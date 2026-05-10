@@ -55,7 +55,7 @@ export type { PMNode };
 // ── Atom 输入类型(契约 § 三)──
 
 interface AtomInput {
-  id: string;
+  id?: string;
   type: string;
   content?: Record<string, unknown>;
   parentId?: string;

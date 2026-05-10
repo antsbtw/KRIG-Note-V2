@@ -21,7 +21,7 @@
  */
 
 interface AtomLike {
-  id: string;
+  id?: string;
   type: string;
   content?: Record<string, unknown>;
   parentId?: string;
@@ -43,7 +43,9 @@ export function sanitizeAtoms(atoms: AtomLike[]): AtomLike[] {
 
   // 收集 document root id(给清理顶层 parentId 用)
   const docRootIds = new Set(
-    atoms.filter((a) => a.type === 'document').map((a) => a.id),
+    atoms
+      .filter((a) => a.type === 'document' && typeof a.id === 'string')
+      .map((a) => a.id as string),
   );
 
   return atoms
