@@ -30,6 +30,8 @@ import {
   extractFirstParagraphText,
 } from '@drivers/text-editing-driver';
 import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry';
+import { atomsToProseMirror } from './converters/atoms-to-pm';
+import { sanitizeAtoms } from './converters/sanitize-atoms';
 import type { TextEditingApi } from './types';
 
 /**
@@ -46,6 +48,8 @@ const api: TextEditingApi = {
   createEmptyDoc,
   extractFirstParagraphText,
   instanceRegistry,
+  atomsToProseMirror,
+  sanitizeAtoms,
 };
 
 capabilityRegistry.register({

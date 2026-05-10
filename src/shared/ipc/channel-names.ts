@@ -99,6 +99,11 @@ export const IPC_CHANNELS = {
   EBOOK_ANNOTATION_LIST: 'ebook.annotation-list',
   EBOOK_ANNOTATION_ADD: 'ebook.annotation-add',
   EBOOK_ANNOTATION_REMOVE: 'ebook.annotation-remove',
+
+  // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform 集成)
+  EXTRACTION_UPLOAD: 'extraction.upload',           // renderer → main:上传当前 PDF → 返 md5
+  EXTRACTION_IMPORT: 'extraction.import',           // renderer → main:主动触发 import(备用入口)
+  EXTRACTION_NOTE_CREATE: 'extraction.note-create', // main → renderer 推送:请 view 端创建 note
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

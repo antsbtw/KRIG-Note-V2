@@ -16,6 +16,7 @@ import { noteStore } from './note-store';
 import { getNoteWsState, updateNote, deriveTitle } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
+import { useExtractionImport } from './use-extraction-import';
 import './note.css';
 
 interface NoteViewProps {
@@ -48,6 +49,10 @@ export function NoteView({ workspaceId }: NoteViewProps) {
   // 取当前活跃笔记
   const activeNote = wsState?.activeNoteId ? noteStore.get(wsState.activeNoteId) : null;
   const activeNoteId = wsState?.activeNoteId ?? null;
+
+  // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteStore
+  // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
+  useExtractionImport();
 
   const handleDocChange = useCallback(
     (newDoc: DriverSerialized) => {

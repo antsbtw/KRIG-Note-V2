@@ -50,6 +50,29 @@ export interface InstanceRegistryDiagnostic {
 }
 
 /**
+ * Atom JSON 输入(L5-C6 PDF 提取契约 § 三)
+ *
+ * 见 docs/10-business-design/ebook/PDF-Note-Atom数据契约-v2.md
+ */
+export interface AtomInput {
+  id?: string;
+  type: string;
+  content?: Record<string, unknown>;
+  parentId?: string;
+  from?: { extractionType?: string; pdfPage?: number; extractedAt?: number };
+  meta?: Record<string, unknown>;
+}
+
+/** PM doc 节点(atomsToProseMirror 输出) */
+export interface PMDocNode {
+  type: string;
+  attrs?: Record<string, unknown>;
+  content?: PMDocNode[];
+  marks?: { type: string; attrs?: Record<string, unknown> }[];
+  text?: string;
+}
+
+/**
  * driver api 字段类型 — 直接 typeof driver export(单一来源,driver 加 method
  * view 自动可见,避免类型漂移)。
  *
@@ -85,6 +108,23 @@ export interface TextEditingApi {
 
   /** 实例注册表(诊断:driver instance 计数)*/
   readonly instanceRegistry: InstanceRegistryDiagnostic;
+
+  /**
+   * L5-C6:Atom JSON → PM doc 节点数组
+   *
+   * 输入契约:docs/10-business-design/ebook/PDF-Note-Atom数据契约-v2.md
+   * 输出可直接装 doc.content,再封 DriverSerialized 信封。
+   * 调用前应先用 sanitizeAtoms 清洗。
+   */
+  readonly atomsToProseMirror: (input: { atoms: AtomInput[] }) => Promise<PMDocNode[]>;
+
+  /**
+   * L5-C6:Atom 清洗(契约 § 9 八条容错)
+   *
+   * 处理 v1→v2 类型迁移、document root 过滤、空 text 节点过滤等。
+   * 必须在 atomsToProseMirror 之前调用。
+   */
+  readonly sanitizeAtoms: (atoms: AtomInput[]) => AtomInput[];
 }
 
 // (内部占位类型已清理)

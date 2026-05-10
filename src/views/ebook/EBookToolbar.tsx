@@ -41,6 +41,10 @@ interface EBookToolbarProps {
   pdfAnnotationMode?: 'off' | 'rect' | 'underline';
   /** 切换 PDF 标注模式(同模式再点 = 关闭) */
   onPdfAnnotationModeChange?: (mode: 'off' | 'rect' | 'underline') => void;
+  /** PDF 提取(C6,fixed-page 专用)— 上传到 KRIG Knowledge Platform 并打开 web-view */
+  onExtract?: () => void;
+  /** 提取按钮 disabled(上传中)*/
+  extractDisabled?: boolean;
   // reflowable 专用
   epubChapter?: string;
   epubPercentage?: number;
@@ -80,6 +84,8 @@ export function EBookToolbar({
   onFitWidthToggle,
   pdfAnnotationMode = 'off',
   onPdfAnnotationModeChange,
+  onExtract,
+  extractDisabled = false,
   epubChapter,
   epubPercentage,
   fontSize = 100,
@@ -267,6 +273,16 @@ export function EBookToolbar({
           >
             {isBookmarked ? '★' : '☆'}
           </button>
+          {onExtract && (
+            <button
+              className="krig-ebook-toolbar__btn"
+              onClick={onExtract}
+              disabled={extractDisabled}
+              title="提取 PDF 到 Note(KRIG Knowledge Platform)"
+            >
+              📤
+            </button>
+          )}
           <button
             className="krig-ebook-toolbar__btn"
             onClick={onSearchOpen}

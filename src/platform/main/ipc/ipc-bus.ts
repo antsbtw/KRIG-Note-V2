@@ -14,6 +14,7 @@ import { registerYtdlpHandlers } from '../ytdlp/handlers';
 import { registerTweetFetcherHandlers } from '../tweet-fetcher/handlers';
 import { registerLearningHandlers } from '../learning/handlers';
 import { registerEBookHandlers } from '../ebook/library-handlers';
+import { registerExtractionHandlers } from '../extraction/handlers';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -26,4 +27,5 @@ export function initIpcBus(): void {
   registerTweetFetcherHandlers();   // L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)
   registerLearningHandlers();       // L5-B3.20a:learning(vocab + dictionary + translate + TTS)
   registerEBookHandlers();          // L5-C1:ebook 书架 + 文件夹 + 标注(D-3=B JSON 起步)
+  registerExtractionHandlers();     // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)
 }

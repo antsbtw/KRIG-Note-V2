@@ -24,6 +24,7 @@ import {
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type {
   EBookRenderingApi,
@@ -90,6 +91,31 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const bookmarks = useBookmarks(hostRef, activeBookIdRef, epubChapter);
   const ann = useEpubAnnotation(hostRef, activeBookIdRef);
   const pdfAnn = usePdfAnnotations(activeBookIdRef);
+
+  // C6:PDF 提取 — 上传当前书到 Platform → 切右栏 web-view 装 Platform UI
+  // (atom batch JSON 落 noteStore 由 NoteView 内的 useExtractionImport 处理)
+  const [extractUploading, setExtractUploading] = useState(false);
+  const handleExtract = useCallback(async () => {
+    if (extractUploading) return;
+    setExtractUploading(true);
+    try {
+      const result = (await window.electronAPI.extractionUpload()) as {
+        uploaded: boolean;
+        platformUrl?: string;
+        reason?: string;
+      };
+      if (!result.uploaded || !result.platformUrl) {
+        console.warn('[ebook-view] extraction upload failed:', result.reason);
+        return;
+      }
+      // 通过命令把 Platform URL 装到右栏 web-view(view 间不直 import @views/web)
+      commandRegistry.execute('web-view.open-url', result.platformUrl);
+    } catch (err) {
+      console.error('[ebook-view] extraction error:', err);
+    } finally {
+      setExtractUploading(false);
+    }
+  }, [extractUploading]);
 
   // 订阅 onBookOpened → 命令式驱动 Host + 加载书签 / 标注
   useEffect(() => {
@@ -264,6 +290,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onFitWidthToggle={onFitWidthToggle}
         pdfAnnotationMode={pdfAnn.mode}
         onPdfAnnotationModeChange={pdfAnn.setMode}
+        onExtract={handleExtract}
+        extractDisabled={extractUploading}
         epubChapter={epubChapter}
         epubPercentage={epubPercentage}
         fontSize={fontSize}

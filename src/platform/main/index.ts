@@ -24,6 +24,7 @@ import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { mediaStore } from './media/media-store-impl';
+import { registerWebviewExtractionHook } from './extraction/handlers';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -67,7 +68,10 @@ app.whenReady().then(async () => {
   registerFrameworkMenus();
 
   // L1 — 主窗口
-  await createMainWindow();
+  const mainWindow = await createMainWindow();
+
+  // L5-C6:webview attach hook(PDF 提取 download 拦截)— 必须在 mainWindow 创建后挂
+  registerWebviewExtractionHook(mainWindow);
 });
 
 // macOS:窗口全关后,点 dock 重新打开

@@ -211,6 +211,14 @@ declare global {
       ebookAnnotationList(bookId: string): Promise<unknown>;
       ebookAnnotationAdd(bookId: string, ann: unknown): Promise<unknown>;
       ebookAnnotationRemove(bookId: string, annotationId: string): Promise<void>;
+
+      // ── L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)──
+      /** 上传当前打开的 PDF → 返 { uploaded, md5?, platformUrl?, alreadyExists?, reason? } */
+      extractionUpload(): Promise<unknown>;
+      /** 主动触发 import(备用)*/
+      extractionImport(data: unknown): Promise<unknown>;
+      /** 订阅 main 推送的拦截到的 atom JSON */
+      onExtractionNoteCreate(callback: (data: unknown) => void): () => void;
     };
   }
 }

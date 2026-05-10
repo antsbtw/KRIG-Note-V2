@@ -292,4 +292,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ebookAnnotationRemove(bookId: string, annotationId: string): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_REMOVE, bookId, annotationId);
   },
+
+  // ── L5-C6:PDF 提取 → Note ──
+  /** 上传当前打开的 PDF 到 Platform → 返 md5 + platformUrl(view 拿后 bus.openRight)*/
+  extractionUpload(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EXTRACTION_UPLOAD);
+  },
+  /** 主动触发 import(备用 / 测试入口);主路径走 console-message 监听 */
+  extractionImport(data: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EXTRACTION_IMPORT, data);
+  },
+  /** 订阅 main 推送 — 拦截到的 atom JSON,view 端接收后转 PM 创建 note */
+  onExtractionNoteCreate(callback: (data: unknown) => void): () => void {
+    const handler = (_event: unknown, data: unknown): void => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, handler);
+  },
 });
