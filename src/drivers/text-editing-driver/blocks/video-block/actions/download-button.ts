@@ -22,6 +22,7 @@ import {
   saveSubtitle,
   onDownloadProgress,
   onInstallProgress,
+  checkYoutubeCookies,
 } from '@capabilities/ytdlp';
 import { detectEmbedType } from '../helpers/embed-detection';
 
@@ -49,10 +50,14 @@ export interface DownloadButtonDeps {
   onProgress: (visible: boolean, percent: number) => void;
   /** 下载状态变化推 data-tab(显示状态行)*/
   onPhaseChange: (phase: DownloadPhase, percent?: number) => void;
+  /** L5-B3.19.e UX:请求显示 YouTube 登录 modal(node-view 创建 prompt 浮层并 show)*/
+  onRequestYoutubeLogin: () => void;
 }
 
 export interface DownloadButton {
   el: HTMLButtonElement;
+  /** 强制下载(跳过 YouTube 登录检测;用户在 modal 点"取消"时由 node-view 调)*/
+  forceDownload(): void;
   destroy(): void;
 }
 
@@ -153,8 +158,10 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
   /**
    * 运行下载流程(install 未完成时先 install,完成后立即接力 download)。
    * UX 改进:用户单次点击完成所有事,不需要点两次。
+   *
+   * @param skipCookieCheck 取消 modal 后再点 ⬇,跳过登录检测强行下载
    */
-  async function runFlow(): Promise<void> {
+  async function runFlow(skipCookieCheck = false): Promise<void> {
     const src = deps.getSrc();
     if (!src) return;
 
@@ -179,7 +186,29 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
       }
     }
 
-    // 步骤 2:下载视频(install 完成后自动接力 — 用户感知是一次点击完成)
+    // 步骤 1.5:检 YouTube 登录(L5-B3.19.e UX,反爬保护)
+    // YouTube 源才检测 — direct mp4 等不需要 cookies
+    if (!skipCookieCheck && isYouTubeSrc()) {
+      try {
+        const status = await checkYoutubeCookies();
+        if (!status.hasLogin) {
+          // 没有 webview 登录 → 显 modal 让用户登录,不继续 download
+          phase = 'idle'; // 退回 idle,等用户操作
+          btn.textContent = '⬇';
+          btn.title = ytdlpAvailable ? 'Download video' : 'Click to install yt-dlp';
+          btn.disabled = false;
+          deps.onProgress(false, 0);
+          deps.onPhaseChange('idle');
+          deps.onRequestYoutubeLogin();
+          return;
+        }
+      } catch (e) {
+        // 检测失败 — 继续尝试下载(降级,可能仍失败但给用户机会)
+        console.warn('[download-btn] checkYoutubeCookies failed, continue:', e);
+      }
+    }
+
+    // 步骤 2:下载视频(install + cookies 检测都通过)
     phase = 'downloading';
     btn.textContent = '⏳';
     btn.title = 'Downloading video...';
@@ -305,6 +334,11 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
   return {
     el: btn,
+    forceDownload() {
+      // 取消 modal 时由 node-view 调:跳过 cookies 检测强行下载(用户已知失败风险)
+      if (phase !== 'idle') return;
+      void runFlow(true);
+    },
     destroy() {
       if (resetTimer != null) {
         window.clearTimeout(resetTimer);

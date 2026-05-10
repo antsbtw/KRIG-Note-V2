@@ -28,6 +28,13 @@ export interface FetchTranscriptResult {
   error: string | null;
 }
 
+/** L5-B3.19.e:检 webview YouTube 登录 cookies 的结果 */
+export interface YoutubeCookiesStatus {
+  hasLogin: boolean;
+  count: number;
+  error?: string;
+}
+
 export interface YtdlpDownloadProgress {
   url: string;
   status: 'downloading' | 'complete' | 'error';
@@ -63,4 +70,6 @@ export interface YtdlpApi {
   saveSubtitle(videoFilePath: string, langCode: string, timestampText: string): Promise<string | null>;
   /** L5-B3.19.b:不下载视频抓 YouTube 字幕(供 video-block 📝 import 按钮)*/
   fetchTranscript(url: string): Promise<FetchTranscriptResult>;
+  /** L5-B3.19.e:检 webview YouTube 登录 cookies(供 download-button 提示用户登录)*/
+  checkYoutubeCookies(): Promise<YoutubeCookiesStatus>;
 }

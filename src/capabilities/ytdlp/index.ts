@@ -31,6 +31,7 @@ import type {
   YtdlpInstallProgress,
   YtdlpDownloadProgress,
   FetchTranscriptResult,
+  YoutubeCookiesStatus,
 } from './types';
 
 export type {
@@ -39,6 +40,7 @@ export type {
   YtdlpInstallProgress,
   YtdlpDownloadProgress,
   FetchTranscriptResult,
+  YoutubeCookiesStatus,
 } from './types';
 
 /** 检查 yt-dlp 是否已安装 + 版本号 */
@@ -137,6 +139,20 @@ export async function fetchTranscript(url: string): Promise<FetchTranscriptResul
   return window.electronAPI.ytdlpFetchTranscript(url) as Promise<FetchTranscriptResult>;
 }
 
+/**
+ * L5-B3.19.e:检查 webview partition 是否有 YouTube 登录 cookies
+ *
+ * download-button 在 install yt-dlp 完成后 / 实际 download 前调:
+ * - hasLogin: true  → 直接 download(yt-dlp 用 webview 导出的 cookies 过反爬)
+ * - hasLogin: false → 显 modal 提示用户先在 web view 登录 YouTube
+ */
+export async function checkYoutubeCookies(): Promise<YoutubeCookiesStatus> {
+  if (!window.electronAPI?.ytdlpCheckYoutubeCookies) {
+    return { hasLogin: false, count: 0, error: 'electronAPI.ytdlpCheckYoutubeCookies not available' };
+  }
+  return window.electronAPI.ytdlpCheckYoutubeCookies() as Promise<YoutubeCookiesStatus>;
+}
+
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
 // W5 边界 A 临时允许项:同时保留模块级 export(driver/slot 内部消费可直 import)
 capabilityRegistry.register({
@@ -150,5 +166,6 @@ capabilityRegistry.register({
     getInfo,
     saveSubtitle,
     fetchTranscript,
+    checkYoutubeCookies,
   } satisfies YtdlpApi,
 });

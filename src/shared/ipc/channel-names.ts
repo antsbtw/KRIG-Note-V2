@@ -53,6 +53,7 @@ export const IPC_CHANNELS = {
   YTDLP_GET_INFO: 'ytdlp.get-info',
   YTDLP_SAVE_SUBTITLE: 'ytdlp.save-subtitle',
   YTDLP_FETCH_TRANSCRIPT: 'ytdlp.fetch-transcript',     // L5-B3.19.b:不下载视频抓 YouTube 字幕
+  YTDLP_CHECK_YOUTUBE_COOKIES: 'ytdlp.check-youtube-cookies', // 检 webview partition 是否有 YouTube 登录 cookies
 
   // L5-B3.18:tweet-fetcher 临时能力(BrowserWindow + DOM scraping;Phase D 被吸收)
   TWEET_FETCH_DATA: 'tweet-fetcher.fetch-data',

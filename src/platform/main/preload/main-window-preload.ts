@@ -147,6 +147,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ytdlpFetchTranscript(url: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_FETCH_TRANSCRIPT, url);
   },
+  // L5-B3.19.e UX:检 webview YouTube 登录 cookies
+  ytdlpCheckYoutubeCookies(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES);
+  },
 
   // ── L5-B3.18:tweet-fetcher 临时 capability ──
   fetchTweetData(tweetUrl: string): Promise<unknown> {

@@ -87,6 +87,12 @@ declare global {
         transcriptText: string | null;
         error: string | null;
       }>;
+      /** L5-B3.19.e UX:检 webview partition 是否有 YouTube 登录 cookies */
+      ytdlpCheckYoutubeCookies(): Promise<{
+        hasLogin: boolean;
+        count: number;
+        error?: string;
+      }>;
 
       // ── L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)──
       /** 抓取推文元数据(BrowserWindow + DOM scraping)

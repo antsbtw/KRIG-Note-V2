@@ -12,12 +12,14 @@
  * 不用 index.ts 聚合 — V2 main 模块平铺约定)。
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, session } from 'electron';
 import * as path from 'path';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { checkStatus, install } from './binary-manager';
 import { downloadVideo, getVideoInfo, saveTranslationSubtitle } from './downloader';
 import { fetchYouTubeTranscript } from './fetch-transcript';
+
+const WEBVIEW_PARTITION = 'persist:webview';
 
 export function registerYtdlpHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_STATUS, async () => {
@@ -109,5 +111,19 @@ export function registerYtdlpHandlers(): void {
       return { transcriptText: null, error: 'invalid url' };
     }
     return fetchYouTubeTranscript(url);
+  });
+
+  // L5-B3.19.e UX:检 webview partition 是否有 YouTube 登录 cookies
+  // (download-button 在 install 后 / download 前调,无 cookies 时弹提示让
+  // 用户先在 web view 登录 — 不读用户系统 Chrome,隐私友好)
+  ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, async () => {
+    try {
+      const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
+      const yt = await webviewSession.cookies.get({ domain: '.youtube.com' });
+      const google = await webviewSession.cookies.get({ domain: '.google.com' });
+      return { hasLogin: yt.length > 0 || google.length > 0, count: yt.length + google.length };
+    } catch (e) {
+      return { hasLogin: false, count: 0, error: e instanceof Error ? e.message : String(e) };
+    }
   });
 }

@@ -37,6 +37,8 @@ import { createVocabButton, type VocabButton } from './actions/vocab-button';
 import { createVocabPanel, type VocabPanel } from './components/vocab-panel';
 import { createDownloadButton, type DownloadButton } from './actions/download-button';
 import { createProgressBar, type ProgressBar } from './components/progress-bar';
+import { createYoutubeLoginPrompt, type YoutubeLoginPrompt } from './components/youtube-login-prompt';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
@@ -62,6 +64,7 @@ interface FrameworkRefs {
   vocabPanel: VocabPanel;
   downloadBtn: DownloadButton;
   progressBar: ProgressBar;
+  youtubeLoginPrompt: YoutubeLoginPrompt;
   tracker: TimeTracker | null;
   /** 内存派生的 transcript cues(P1 修正:不持久化)*/
   cues: SubtitleCue[];
@@ -113,6 +116,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.vocabPanel.destroy(); // 解订阅 + 移除 DOM,先于 tracker.destroy
     framework.downloadBtn.destroy(); // 解 onDownloadProgress 订阅
     framework.progressBar.destroy();
+    framework.youtubeLoginPrompt.destroy();
     framework.tracker?.destroy();
     framework.transcriptBtn.destroy();
     framework.translateBtn.destroy();
@@ -310,9 +314,26 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       else vocabPanel.hide();
     });
 
-    // L5-B3.19.e:progress-bar(play-tab 顶部 absolute,Qe-1=A)+ download-button(actionBar)
+    // L5-B3.19.e:progress-bar(play-tab 顶部 absolute)+ download-button(actionBar)+ youtube-login-prompt 浮层
     const progressBar = createProgressBar();
     playTab.el.insertBefore(progressBar.el, playTab.el.firstChild);
+
+    // YouTube 登录引导 modal — 用户首次下载且 webview 没登录 YouTube 时显
+    const youtubeLoginPrompt = createYoutubeLoginPrompt({
+      onConfirm: () => {
+        // 切到 web view + 跳 youtube.com 让用户登录
+        // (复用 V2 既有 'web-view.open-url' 命令,B4 已就位)
+        commandRegistry.execute('web-view.open-url', 'https://www.youtube.com');
+        youtubeLoginPrompt.hide();
+      },
+      onCancel: () => {
+        youtubeLoginPrompt.hide();
+        // 用户选"取消" — 强行下载(skip cookies 检测,可能失败)
+        framework?.downloadBtn.forceDownload();
+      },
+    });
+    playerWrap.appendChild(youtubeLoginPrompt.el);
+
     const downloadBtn = createDownloadButton({
       getSrc: () => node.attrs.src as string | null,
       getLocalFilePath: () => (node.attrs.localFilePath as string | null) || null,
@@ -338,6 +359,10 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
           percent,
           localFilePath: (node.attrs.localFilePath as string | null) || null,
         });
+      },
+      onRequestYoutubeLogin: () => {
+        // 显登录引导 modal
+        youtubeLoginPrompt.show();
       },
     });
 
@@ -370,6 +395,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       vocabPanel,
       downloadBtn,
       progressBar,
+      youtubeLoginPrompt,
       tracker,
       cues,
       translations: new Map(),
