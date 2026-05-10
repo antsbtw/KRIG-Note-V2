@@ -308,4 +308,60 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, handler);
   },
+
+  // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
+  graphList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_LIST);
+  },
+  graphLoad(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_LOAD, id);
+  },
+  graphCreate(
+    title: string,
+    variant: string,
+    folderId: string | null,
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_CREATE, title, variant, folderId);
+  },
+  graphSave(id: string, docContent: unknown, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_SAVE, id, docContent, title);
+  },
+  graphDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_DELETE, id);
+  },
+  graphRename(id: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_RENAME, id, title);
+  },
+  graphMoveToFolder(id: string, folderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_MOVE_TO_FOLDER, id, folderId);
+  },
+  graphDuplicate(id: string, targetFolderId?: string | null): Promise<unknown> {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.GRAPH_DUPLICATE,
+      id,
+      targetFolderId === undefined ? undefined : targetFolderId,
+    );
+  },
+  /** main → renderer 推送:画板列表变更(create / save / rename / delete / move / duplicate / folder ops 全广播)*/
+  onGraphListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.GRAPH_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.GRAPH_LIST_CHANGED, handler);
+  },
+  // 文件夹
+  graphFolderList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_LIST);
+  },
+  graphFolderCreate(title: string, parentId?: string | null): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_CREATE, title, parentId ?? null);
+  },
+  graphFolderRename(id: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_RENAME, id, title);
+  },
+  graphFolderDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_DELETE, id);
+  },
+  graphFolderMove(id: string, parentId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_MOVE, id, parentId);
+  },
 });

@@ -104,6 +104,23 @@ export const IPC_CHANNELS = {
   EXTRACTION_UPLOAD: 'extraction.upload',           // renderer → main:上传当前 PDF → 返 md5
   EXTRACTION_IMPORT: 'extraction.import',           // renderer → main:主动触发 import(备用入口)
   EXTRACTION_NOTE_CREATE: 'extraction.note-create', // main → renderer 推送:请 view 端创建 note
+
+  // L5-G1:graph 画板 + 文件夹(D-3=B JSON 实现,过渡至 W6 升 SurrealDB)
+  GRAPH_LIST: 'graph.list',
+  GRAPH_LOAD: 'graph.load',
+  GRAPH_CREATE: 'graph.create',
+  GRAPH_SAVE: 'graph.save',
+  GRAPH_DELETE: 'graph.delete',
+  GRAPH_RENAME: 'graph.rename',
+  GRAPH_MOVE_TO_FOLDER: 'graph.move-to-folder',
+  GRAPH_DUPLICATE: 'graph.duplicate',
+  GRAPH_LIST_CHANGED: 'graph.list-changed',         // main → renderer 推送
+  // 文件夹
+  GRAPH_FOLDER_LIST: 'graph.folder-list',
+  GRAPH_FOLDER_CREATE: 'graph.folder-create',
+  GRAPH_FOLDER_RENAME: 'graph.folder-rename',
+  GRAPH_FOLDER_DELETE: 'graph.folder-delete',
+  GRAPH_FOLDER_MOVE: 'graph.folder-move',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
