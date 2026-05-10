@@ -155,6 +155,11 @@ export async function downloadVideo(
       // 合并输出统一为 mp4(DASH 合并默认 mkv,我们要 mp4 让 video-block 直播)
       '--merge-output-format',
       'mp4',
+      // 反 YouTube 反爬 — 从 Chrome 拿 cookies 过 "Sign in to confirm you're not a bot"
+      // 检测。如果用户没装 Chrome / 没登录 YouTube,yt-dlp 静默继续(可能再被反爬,
+      // 用户需自己装 Chrome 或换 --cookies-from-browser firefox/safari/edge)
+      '--cookies-from-browser',
+      'chrome',
       '-o',
       outputTemplate,
       url,
