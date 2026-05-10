@@ -1,6 +1,6 @@
 # L5-G1 设计 — Graph 平台基座 + graph-library-store + view 骨架
 
-> v0.1 · 2026-05-10
+> v0.2 · 2026-05-10 · 实施后用户 P2 复审(文档内部数字一致性修订)
 >
 > 配套:
 > - [v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 — 上游迁移设计(15 决策点 + 5 段切片)
@@ -26,7 +26,7 @@
 ### 1.1 本段做(In)
 
 - [x] **platform/main/graph/** 全套:`canvas-store` / `folder-store` / `library-handlers` / `index.ts`(JSON atomic write,模板对齐 `learning/vocab-store.ts` + `ebook/bookshelf-store.ts`)
-- [x] **shared/ipc/channel-names** 加 `GRAPH_*` 19 条(对齐 v0.2 plan § 3.7)
+- [x] **shared/ipc/channel-names** 加 `GRAPH_*` **14 条**(plan v0.2 § 3.7 列 20 条;决策 G1-8 / G1-9 砍 6 条,详见 § 4)
 - [x] **platform/main/preload + electron-api.d.ts** 加 graph* invoke + on* 订阅(对齐 ebook 模板)
 - [x] **platform/main/ipc/ipc-bus.ts** 接入 `registerGraphHandlers()`
 - [x] **capabilities/graph-library-store/** 全套:`client.ts` + `types.ts` + `index.ts`(双导出 + capabilityRegistry.register)+ `DESIGN.md`
@@ -73,41 +73,59 @@
 
 ---
 
-## 3. 文件清单(物理路径 + LOC 估算)
+## 3. 文件清单(物理路径 + LOC)
 
-### 3.1 新增
+### 3.1 新增 — design 估算 vs 实际(实施后回填,2026-05-10)
 
 ```
 src/platform/main/graph/
-├── canvas-store.ts             ~180 行(JSON 实现,V1 SurrealDB 287 行精简 + atomic write)
-├── folder-store.ts             ~80  行(从 canvas-store 内的 folders 操作分离 — 还是合并?见 G1-5)
-│                                  → G1-5=A 决策合并 → 改归 canvas-store 内,本文件不存在
-├── library-handlers.ts         ~200 行(IPC handler 19 条,对齐 ebook library-handlers.ts 307 行模板)
-└── index.ts                    ~30  行(initGraphPlatform 入口)
+├── canvas-store.ts             估 ~260 / 实 366 行(JSON 实现 + folder ops 合并,见 G1-5;
+│                                +106 实测高于估算:atomic write helpers + load/save/
+│                                deleteDocument 工具 + sanity guards + emptyDocument
+│                                兜底,V1 287 行 SurrealDB 版本基础上的"原子保证 + 类型守卫"
+│                                额外开销)
+├── library-handlers.ts         估 ~150 / 实 149 行(IPC handler 14 条 — 决策 G1-8 / G1-9
+│                                砍 6 条(plan 20 - 14 = 6);对齐 ebook library-handlers.ts
+│                                307 行精简版,因为 graph 没 pickFile / getData / annotation 等)
+└── index.ts                    估 ~30  / 实 16  行(轻量 re-export,initGraphPlatform 入口)
 
 src/capabilities/graph-library-store/
-├── types.ts                    ~80  行(GraphCanvasRecord / GraphCanvasListItem / GraphFolderRecord / GraphVariant / GraphLibraryStoreApi)
-├── index.ts                    ~250 行(client.ts 合并 — 双导出 + capabilityRegistry.register)
-└── DESIGN.md                   ~100 行(对齐 ebook-library DESIGN 模板)
+├── types.ts                    估 ~80  / 实 85  行(GraphCanvasRecord / GraphCanvasListItem /
+│                                GraphFolderRecord / GraphVariant / GraphLibraryStoreApi)
+├── index.ts                    估 ~180 / 实 171 行(client + 双导出 + capabilityRegistry.register;
+│                                估算从 ~250 调下来,因为没有 ebook getData / annotation /
+│                                bookmark 等额外路径)
+└── DESIGN.md                   估 ~100 / 实 122 行(对齐 ebook-library DESIGN 模板 +
+                                与 ebook-library 对照差异表)
 
 src/views/graph-canvas-view/
-├── index.ts                    ~40  行(self-register + 4 个 register* 触发)
-├── GraphCanvasView.tsx         ~80  行(占位空壳 + Toolbar 极简版)
-├── GraphCanvasToolbar.tsx      ~50  行(占位 — 标题显示 + Open 按钮)
-├── data-model.ts               ~140 行(pluginStates + 持久化 + transient selectedIds,对齐 ebook 161 行)
-├── nav-side-content.tsx        ~450 行(FolderTree + 重命名 + 拖拽 + 右键 + 新建 dialog,对齐 ebook 640 行精简版)
-├── canvas-commands.ts          ~150 行(commandRegistry 注册 + import/rename/delete/move/duplicate 路由 + open-canvas)
-└── graph-canvas-view.css       ~80  行(壳样式)
+├── index.ts                    估 ~40  / 实 48  行(self-register + 3 个 register* 触发)
+├── GraphCanvasView.tsx         估 ~80  / 实 66  行(占位空壳 — empty + placeholder 双态)
+├── GraphCanvasToolbar.tsx      估 ~50  / 实 67  行(占位 — title 显示 + onGraphListChanged 订阅)
+├── data-model.ts               估 ~140 / 实 148 行(pluginStates + 持久化 + transient selectedIds,
+│                                对齐 ebook 161 行)
+├── nav-side-content.tsx        估 ~450 / 实 418 行(FolderTree + 重命名 + 拖拽 + 右键 + 命令路由,
+│                                对齐 ebook 640 行精简 35% — 删 ImportModal / pickFile /
+│                                relocate / transferToManaged / openFailed toast)
+├── canvas-commands.ts          估 ~150 / 实 161 行(commandRegistry 注册 8 条 + 3 个 trigger
+│                                桥 + tree id encode/decode)
+└── graph-canvas-view.css       估 ~80  / 实 85  行(壳样式)
 
-合计估算:driver ~1730 行 + CSS ~80 行
+合计:driver 估 ~1610 / 实 1780 行(+11% 实测偏差,canvas-store 单文件高估;其他文件估算精准)
+      DESIGN  估 ~100  / 实 122 行
+      CSS     估 ~80   / 实 85  行
 ```
+
+> **G1-5 决策修订**:design v0.1 § 3.1 原写"folder-store.ts ~80 行(从 canvas-store 内分离)"
+> 加注脚"G1-5=A 决策合并"。本表归并到 canvas-store.ts 一行,canvas-store 估算从 180 调整为 260
+> (180 + 80)。实施时实测 366 行,主要溢出在 atomic write 辅助 + 类型守卫 + 兜底逻辑。
 
 ### 3.2 修改
 
 ```
-src/shared/ipc/channel-names.ts                 + 19 条 GRAPH_* 常量
-src/shared/ipc/electron-api.d.ts                + graph* 方法签名 ~25 条
-src/platform/main/preload/main-window-preload.ts + graph* invoke / on* 实现 ~25 条
+src/shared/ipc/channel-names.ts                 + 14 条 GRAPH_* 常量(v0.2 plan 19 - 砍 5,详见 § 4)
+src/shared/ipc/electron-api.d.ts                + graph* 方法签名 14 条
+src/platform/main/preload/main-window-preload.ts + graph* invoke / on* 实现 14 条
 src/platform/main/ipc/ipc-bus.ts                + registerGraphHandlers() 调用
 src/platform/renderer/index.tsx                  + 2 行(@capabilities/graph-library-store + @views/graph-canvas-view)
 ```
@@ -117,7 +135,7 @@ src/platform/renderer/index.tsx                  + 2 行(@capabilities/graph-lib
 | v0.2 plan G1 项 | G1 design 对应 |
 |---|---|
 | platform/main/graph/(全套) | § 3.1 第一组 |
-| shared/ipc/channel-names 加 GRAPH_* 19 条 | § 3.2 |
+| shared/ipc/channel-names 加 GRAPH_* 14 条(plan 19 砍 5)| § 3.2 + § 4 |
 | platform/main/preload | § 3.2 |
 | capabilities/graph-library-store/ | § 3.1 第二组 |
 | views/graph-canvas-view/ | § 3.1 第三组 |
@@ -127,7 +145,7 @@ src/platform/renderer/index.tsx                  + 2 行(@capabilities/graph-lib
 
 ---
 
-## 4. IPC channel 完整清单(GRAPH_* 19 条)
+## 4. IPC channel 完整清单(GRAPH_* 14 条)
 
 完全对齐 v0.2 plan § 3.7。本段全部实施 + 注册 handler。`GRAPH_SET_ACTIVE` / `GRAPH_GET_ACTIVE` / `GRAPH_OPEN_IN_VIEW` 三条**取消**(决策 G1-8 / G1-9):
 
@@ -151,7 +169,10 @@ GRAPH_FOLDER_DELETE: 'graph.folder-delete',
 GRAPH_FOLDER_MOVE: 'graph.folder-move',
 ```
 
-合计 14 条(v0.2 plan 计 19 — 砍 5:GRAPH_PENDING_OPEN / GRAPH_OPEN_IN_VIEW / GRAPH_DELETED / GRAPH_TITLE_CHANGED / GRAPH_SET_ACTIVE + GRAPH_GET_ACTIVE 共 6 条;新增 onGraphListChanged 推送替代多条专用通道)。
+合计 **14 条**(plan v0.2 § 3.7 列 20 条 — 决策 G1-8 / G1-9 砍 6 条:GRAPH_PENDING_OPEN /
+GRAPH_OPEN_IN_VIEW / GRAPH_DELETED / GRAPH_TITLE_CHANGED / GRAPH_SET_ACTIVE /
+GRAPH_GET_ACTIVE;统一走 GRAPH_LIST_CHANGED 一条推送通道替代多条专用 — 列表 / 重命名 /
+删除变更 view 端订阅同一 channel 自己 diff)。
 
 > **对照 ebook**:ebook 用 28 条,graph 用 14 条 — graph 不需要 PICK_FILE / GET_DATA / LOADED / RELOCATE / TRANSFER / SAVE_PROGRESS / BOOKMARK_* / CFI_* / ANNOTATION_*;只剩 list/CRUD/folder/changed-broadcast。
 
@@ -370,20 +391,25 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 
 按 ebook C1 的"双 commit"模式:
 
-### Commit 1 — platform 层(估 ~600 行)
-- `src/platform/main/graph/canvas-store.ts` + `library-handlers.ts` + `index.ts`
-- `src/shared/ipc/channel-names.ts` 加 GRAPH_* 14 条
-- `src/shared/ipc/electron-api.d.ts` + `src/platform/main/preload/main-window-preload.ts`
-- `src/platform/main/ipc/ipc-bus.ts` 接入 `registerGraphHandlers()`
-- 验证:typecheck 0 + npm start 启动 main 不报错(view 还没注册 console 不会显 alive 行,接受)
+### Commit 1 — platform 层(估 ~600 / 实 628 行 + 0 warn 0 error)
+- `src/platform/main/graph/canvas-store.ts` + `library-handlers.ts` + `index.ts`(366+149+16=531)
+- `src/shared/ipc/channel-names.ts` 加 GRAPH_* 14 条(+17 行)
+- `src/shared/ipc/electron-api.d.ts` + `src/platform/main/preload/main-window-preload.ts`(+22+56=78 行)
+- `src/platform/main/ipc/ipc-bus.ts` 接入 `registerGraphHandlers()`(+2 行)
+- 验证:typecheck 0 + lint 0 warn
 
-### Commit 2 — capability + view(估 ~1100 行)
-- `src/capabilities/graph-library-store/types.ts` + `index.ts` + `DESIGN.md`
-- `src/views/graph-canvas-view/`(7 文件)
+### Commit 2 — capability + view(估 ~1100 / 实 1373 行 + 0 warn 0 error)
+- `src/capabilities/graph-library-store/types.ts` + `index.ts` + `DESIGN.md`(85+171+122=378)
+- `src/views/graph-canvas-view/`(7 文件,GraphCanvasView 66 / Toolbar 67 / data-model 148 /
+  nav-side 418 / commands 161 / index 48 / CSS 85 = 993)
 - `src/platform/renderer/index.tsx` + 2 行
 - 验证:§ 13 用户验收 12 项全过
 
 > 顺序:Commit 1 → Commit 2 → 用户验收 → 用户拍板"通过"才合并 main。
+
+> **实测偏差说明**(2026-05-10):Commit 1 接近估算(+5%);Commit 2 高于估算(+25%),主要在
+> nav-side-content + canvas-commands + DESIGN.md 三处微涨。屏障 grep 自检 0 命中(view 0 import three
+> / view 0 运行时 import @capabilities)。
 
 ---
 
@@ -392,3 +418,4 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G1 范围 + 12 决策点 + 文件清单 + IPC 14 条 + nav-side 直迁 ebook 模板路径 + 12 项验收清单 + 双 commit 拆分 |
+| 2026-05-10 | v0.2 | 实施后用户 P2 复审 — 文档内部数字一致性修订:① § 3.1 文件清单 LOC 改为"估算 vs 实际"双列(实施 commit 466021f + 2521466 后回填),发现 canvas-store.ts 估 ~180 / 实 366 行(folder ops 合并 + atomic write helpers + 类型守卫 + 兜底逻辑共溢出 ~106 行);② § 1.1 / § 3.2 / § 3.3 / § 4 标题 "GRAPH_* 19 条"全文统一为 "14 条"(v0.1 沿用 plan v0.2 § 3.7 笔误,plan 实际列 20 条 — 决策 G1-8 / G1-9 砍 6 条 = 14);③ § 4 末尾"砍 5 / 共 6 条"算术矛盾改写为"砍 6 条";④ § 15 双 commit 估算改"估 vs 实"双列(Commit 1 估 ~600 / 实 628;Commit 2 估 ~1100 / 实 1373 — 主要在 nav-side / commands / DESIGN 三处微涨);⑤ 加"实测偏差说明"段 + 屏障 grep 自检 0 命中佐证 |
