@@ -124,7 +124,7 @@ export interface IFixedPageRenderer extends IBookRenderer {
   searchText(query: string): Promise<Array<{ pageNum: number; index: number; text: string }>>;
 }
 
-/** 可重排渲染引擎(EPUB,C3 起实现)*/
+/** 可重排渲染引擎(EPUB,C3 起实现;C4 加标注 API)*/
 export interface IReflowableRenderer extends IBookRenderer {
   readonly renderMode: 'reflowable';
 
@@ -146,6 +146,20 @@ export interface IReflowableRenderer extends IBookRenderer {
 
   searchText(query: string): Promise<Array<{ pageNum: number; index: number; text: string }>>;
   clearSearch(): void;
+
+  // ── C4:标注 ──
+  /** 文本选择(mouseup 后)→ 弹 picker */
+  onTextSelected(
+    callback: (info: { cfi: string; text: string; x: number; y: number }) => void,
+  ): void;
+  /** mousedown / 显式 dismiss → 关 picker */
+  onSelectionDismiss(callback: () => void): void;
+  /** 点击已有标注(show-annotation 事件)→ 触发删除 */
+  onAnnotationClick(callback: (cfi: string) => void): void;
+  /** 添加 CFI 高亮(自定义颜色)*/
+  addHighlight(cfi: string, color: string): Promise<void>;
+  /** 移除 CFI 高亮 */
+  removeHighlight(cfi: string): void;
 }
 
 // ── 类型守卫 ──
@@ -191,7 +205,10 @@ export function getRenderMode(fileType: EBookFileType): RenderMode {
 import type { EBookHostProps, EBookHostHandle } from './Host';
 import type { OutlinePanel } from './outline-panel';
 import type { SearchBar } from './search-bar';
+import type { EpubAnnotationPicker } from './epub-annotation-picker';
 import type { useSearch } from './hooks/use-search';
+import type { useBookmarks } from './hooks/use-bookmarks';
+import type { useEpubAnnotation } from './hooks/use-epub-annotation';
 
 export type { EBookHostProps, EBookHostHandle, SearchResult } from './Host';
 
@@ -202,8 +219,14 @@ export interface EBookRenderingApi {
   OutlinePanel: typeof OutlinePanel;
   /** 搜索栏 UI(配 useSearch hook 用)*/
   SearchBar: typeof SearchBar;
+  /** EPUB 选区颜色 picker(配 useEpubAnnotation hook 用)*/
+  EpubAnnotationPicker: typeof EpubAnnotationPicker;
   /** 搜索 hook(view 在内部 useState/useCallback 不暴露 renderer)*/
   useSearch: typeof useSearch;
+  /** 书签 hook(C4) */
+  useBookmarks: typeof useBookmarks;
+  /** EPUB 标注 hook(C4) */
+  useEpubAnnotation: typeof useEpubAnnotation;
   /** 类型守卫 — view / capability 内复用 */
   isFixedPage(renderer: IBookRenderer): renderer is IFixedPageRenderer;
   isReflowable(renderer: IBookRenderer): renderer is IReflowableRenderer;

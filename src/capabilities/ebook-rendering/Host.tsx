@@ -78,6 +78,15 @@ export interface EBookHostHandle {
   goToSearchResult(result: SearchResult): void;
   /** 清搜索结果 */
   clearSearch(): void;
+
+  // ── C4:EPUB 当前位置 + 高亮 + 选区 ──
+  /** EPUB 最新 CFI(view 持久化 saveProgress 用,关闭 C3 已知短板);
+   *  PDF 返 null */
+  getCurrentCFI(): string | null;
+  /** EPUB 添加 CFI 高亮;PDF noop */
+  addHighlight(cfi: string, color: string): Promise<void>;
+  /** EPUB 移除 CFI 高亮;PDF noop */
+  removeHighlight(cfi: string): void;
 }
 
 /** 搜索结果(PDF / EPUB 通用结构)*/
@@ -106,6 +115,19 @@ export interface EBookHostProps {
   onReadyChange?: (ready: boolean) => void;
   /** EPUB 进度变化(章节标题 + 比例)— view 持久化 + toolbar 显示 */
   onEpubProgressChange?: (progress: { chapter: string; percentage: number }) => void;
+
+  // ── C4:EPUB 文本选择 + 标注事件 ──
+  /** 文本选择(mouseup 后)— view 端弹 picker(view 计算位置)*/
+  onEpubTextSelected?: (info: {
+    cfi: string;
+    text: string;
+    x: number;
+    y: number;
+  }) => void;
+  /** mousedown / 显式 dismiss → view 关 picker */
+  onEpubSelectionDismiss?: () => void;
+  /** 点击已有标注(show-annotation 事件)→ view 触发删除 */
+  onEpubAnnotationClick?: (cfi: string) => void;
 }
 
 const FIT_WIDTH_PADDING = 40;
@@ -118,6 +140,9 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onScaleChange,
     onReadyChange,
     onEpubProgressChange,
+    onEpubTextSelected,
+    onEpubSelectionDismiss,
+    onEpubAnnotationClick,
   },
   ref,
 ) {
@@ -213,6 +238,12 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         } else if (isReflowable(r)) {
           // EPUB 恢复上次 CFI(必须在 renderTo 之前 — V1 EBookView.tsx 同款)
           if (pos?.cfi) r.setRestoreLocation(pos.cfi);
+
+          // C4:转推 EPUB 选区 / 选区取消 / 标注点击事件给 view
+          if (onEpubTextSelected) r.onTextSelected(onEpubTextSelected);
+          if (onEpubSelectionDismiss) r.onSelectionDismiss(onEpubSelectionDismiss);
+          if (onEpubAnnotationClick) r.onAnnotationClick(onEpubAnnotationClick);
+
           onLoadComplete?.({
             totalPages: 0,
             fileType,
@@ -245,7 +276,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         setLoading(false);
       }
     },
-    [library, onLoadComplete, onScaleChange, onReadyChange],
+    [
+      library,
+      onLoadComplete,
+      onScaleChange,
+      onReadyChange,
+      onEpubTextSelected,
+      onEpubSelectionDismiss,
+      onEpubAnnotationClick,
+    ],
   );
 
   // **订阅模式**:Host 不订阅 onBookOpened — 由 view 端订阅,通过 ref 命令式
@@ -382,6 +421,20 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       clearSearch(): void {
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.clearSearch();
+      },
+      // ── C4:EPUB 当前位置 + 高亮 ──
+      getCurrentCFI(): string | null {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) return r.getLastCFI();
+        return null;
+      },
+      async addHighlight(cfi: string, color: string): Promise<void> {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) await r.addHighlight(cfi, color);
+      },
+      removeHighlight(cfi: string): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.removeHighlight(cfi);
       },
     }),
     [loadFromInfo, handleScaleChange, handleSetFitWidth],
