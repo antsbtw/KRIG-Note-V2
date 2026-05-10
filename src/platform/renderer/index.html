@@ -21,9 +21,16 @@
         需 frame-src 加 platform.twitter.com 白名单(同上,default-src 'self' 会拦)
       L5-B3.20a learning TTS:learningTts 返 ArrayBuffer,renderer 用 Blob +
         URL.createObjectURL(blob) 喂给 <audio>,产生 blob: URL,需 media-src 加 blob:
+      L5-C3 EPUB(foliate-js):EPUB 内容是 zip 解压后由 foliate-js 用
+        URL.createObjectURL 生成 blob URL,然后注入 iframe(<foliate-view> 内部
+        paginator 创建)。需补:
+        - frame-src 加 blob:(否则 iframe blob 被 block,EPUB 加载失败抛
+          "Cannot read properties of null (reading 'head')")
+        - img-src / style-src / font-src / connect-src 都加 blob:(EPUB 内的
+          图片 / 样式表 / 字体也是 blob URL)
       其他(脚本)走严格策略,default-src 仍 'self'
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: media: https:; media-src 'self' data: media: https: blob:; connect-src 'self' media: https:; font-src 'self' data:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' blob:; script-src 'self'; img-src 'self' data: media: https: blob:; media-src 'self' data: media: https: blob:; connect-src 'self' media: https: blob:; font-src 'self' data: blob:; frame-src 'self' blob: https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com" />
     <title>KRIG Note</title>
   </head>
   <body>

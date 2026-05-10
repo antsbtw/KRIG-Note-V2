@@ -160,6 +160,10 @@ export interface IReflowableRenderer extends IBookRenderer {
   addHighlight(cfi: string, color: string): Promise<void>;
   /** 移除 CFI 高亮 */
   removeHighlight(cfi: string): void;
+
+  // ── C4 fix:双指水平 swipe 翻页(macOS Books 同款 UX)──
+  /** 注册 swipe 翻页回调(由 reflowable-content 消费,触发 prev/nextChapter)*/
+  onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void;
 }
 
 // ── 类型守卫 ──

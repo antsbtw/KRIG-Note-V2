@@ -11,6 +11,11 @@
  * - 缩放 = 字号调整(不是整页缩放)
  * - 位置 = CFI(不是页码 + 坐标)
  * - 支持分页 / 滚动模式切换(V1 setDisplayMode,C3 toolbar 不暴露,留 C5 后)
+ *
+ * L5-C4 fix:订阅 renderer.onHorizontalSwipe(macOS Books 同款双指 swipe
+ * 翻页 UX)。wheel 监听由 renderer 在 iframe doc 内绑(EPUB 内容在 iframe
+ * 里 + iframe wheel 不冒泡到外层 container,必须在 iframe 内绑),本组件
+ * 只负责把 'next' / 'prev' 翻译为 nextChapter / prevChapter。
  */
 
 import { useRef, useEffect } from 'react';
@@ -51,6 +56,15 @@ export function ReflowableContent({
     // foliate-js View 注册 relocate 是 push 链式累积,destroy 时统一清
     // (renderer.destroy() 内 relocateCallbacks=[] 会清空)
   }, [renderer, onProgressChange]);
+
+  // L5-C4 fix:订阅 swipe 翻页(macOS Books 同款 UX)
+  // wheel 监听由 renderer 内部绑给 iframe doc(iframe wheel 不冒泡)
+  useEffect(() => {
+    renderer.onHorizontalSwipe((direction) => {
+      if (direction === 'next') renderer.nextChapter();
+      else renderer.prevChapter();
+    });
+  }, [renderer]);
 
   return (
     <div

@@ -314,13 +314,15 @@ export class EPUBRenderer implements IReflowableRenderer {
     this.view?.clearSearch?.();
   }
 
-  // ── C4:标注 + 文本选择 ──
+  // ── C4:标注 + 文本选择 + 双指水平 swipe 翻页 ──
 
   private annotationCallback:
     | ((info: { cfi: string; text: string; x: number; y: number }) => void)
     | null = null;
   private selectionDismissCallback: (() => void) | null = null;
   private annotationClickCallback: ((cfi: string) => void) | null = null;
+  /** L5-C4 fix:水平 swipe 推送(macOS Books 同款 UX);direction 为 'next' / 'prev' */
+  private horizontalSwipeCallback: ((direction: 'next' | 'prev') => void) | null = null;
 
   onTextSelected(
     callback: (info: { cfi: string; text: string; x: number; y: number }) => void,
@@ -336,13 +338,30 @@ export class EPUBRenderer implements IReflowableRenderer {
     this.annotationClickCallback = callback;
   }
 
-  /** 给 EPUB iframe 内的 doc 绑 mousedown / mouseup,转换到 view 容器坐标系 */
+  /** L5-C4 fix:注册水平 swipe 翻页回调(reflowable-content 消费) */
+  onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void {
+    this.horizontalSwipeCallback = callback;
+  }
+
+  /**
+   * 给 EPUB iframe 内的 doc 绑 mousedown / mouseup(选区)+ wheel(swipe 翻页)。
+   * 必须在 iframe doc 上绑而不是外层 container — iframe wheel 不冒泡。
+   */
   private setupSelectionListener(): void {
     if (!this.view) return;
 
-    const attachMouseup = (doc: any, index: number): void => {
-      if (!doc || doc.__ebookMouseupAttached) return;
-      doc.__ebookMouseupAttached = true;
+    // 单源 swipe 状态(跨多个 doc 共享):一次手势只翻一页。
+    // 累计 deltaX 跨阈值触发后,gestureActive=true 屏蔽后续 wheel 事件;
+    // 直到 wheel 静默 GESTURE_END_MS 后才解锁(认定手势结束)。
+    let accumulatedX = 0;
+    let gestureActive = false;
+    let gestureEndTimer: ReturnType<typeof setTimeout> | null = null;
+    const SWIPE_THRESHOLD = 50;
+    const GESTURE_END_MS = 200; // wheel 静默此时长后认为手势结束
+
+    const attachListeners = (doc: any, index: number): void => {
+      if (!doc || doc.__ebookListenersAttached) return;
+      doc.__ebookListenersAttached = true;
 
       // mousedown → 关闭 picker(若产生新选区,mouseup 会重新弹)
       doc.addEventListener('mousedown', () => {
@@ -371,20 +390,59 @@ export class EPUBRenderer implements IReflowableRenderer {
           this.annotationCallback({ cfi, text, x, y });
         }
       });
+
+      // L5-C4 fix:双指水平 swipe → 翻页(macOS Books)
+      // 一次手势 = 一次翻页。手势期间:
+      //   - 触发翻页前累计 deltaX 跨 SWIPE_THRESHOLD
+      //   - 触发后 gestureActive=true 屏蔽后续 wheel 事件
+      //   - wheel 静默 GESTURE_END_MS 后解锁,等待下一次手势
+      doc.addEventListener(
+        'wheel',
+        (e: WheelEvent) => {
+          // Cmd/Ctrl + wheel 留给字号缩放等
+          if (e.metaKey || e.ctrlKey) return;
+          // 仅水平方向(垂直 wheel 不接管 — paginated 模式不需垂直滚动)
+          if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+
+          // 每次水平 wheel 都重启 "手势结束" 计时器
+          if (gestureEndTimer) clearTimeout(gestureEndTimer);
+          gestureEndTimer = setTimeout(() => {
+            accumulatedX = 0;
+            gestureActive = false;
+          }, GESTURE_END_MS);
+
+          // 已触发过本次手势 → 屏蔽
+          if (gestureActive) {
+            e.preventDefault();
+            return;
+          }
+
+          accumulatedX += e.deltaX;
+          if (Math.abs(accumulatedX) < SWIPE_THRESHOLD) return;
+
+          // 触发翻页:deltaX > 0(内容左推)= 下一页;< 0 = 上一页
+          const direction: 'next' | 'prev' = accumulatedX > 0 ? 'next' : 'prev';
+          this.horizontalSwipeCallback?.(direction);
+
+          gestureActive = true;
+          e.preventDefault();
+        },
+        { passive: false },
+      );
     };
 
     // 已加载的 sections
     const contents = this.view.renderer?.getContents?.();
     if (contents) {
       for (const { doc, index } of contents) {
-        attachMouseup(doc, index);
+        attachListeners(doc, index);
       }
     }
 
     // 后续加载的 section
     this.view.addEventListener('load', (e: any) => {
       const { doc, index } = e.detail;
-      attachMouseup(doc, index);
+      attachListeners(doc, index);
     });
   }
 
