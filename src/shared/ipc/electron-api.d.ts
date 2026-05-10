@@ -219,6 +219,28 @@ declare global {
       extractionImport(data: unknown): Promise<unknown>;
       /** 订阅 main 推送的拦截到的 atom JSON */
       onExtractionNoteCreate(callback: (data: unknown) => void): () => void;
+
+      // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
+      graphList(): Promise<unknown>;
+      graphLoad(id: string): Promise<unknown>;
+      graphCreate(
+        title: string,
+        variant: string,
+        folderId: string | null,
+      ): Promise<unknown>;
+      graphSave(id: string, docContent: unknown, title: string): Promise<void>;
+      graphDelete(id: string): Promise<void>;
+      graphRename(id: string, title: string): Promise<void>;
+      graphMoveToFolder(id: string, folderId: string | null): Promise<void>;
+      graphDuplicate(id: string, targetFolderId?: string | null): Promise<unknown>;
+      /** 推送:画板列表变更(create / save / rename / delete / move / duplicate / folder ops 全广播)*/
+      onGraphListChanged(callback: (list: unknown) => void): () => void;
+      // 文件夹
+      graphFolderList(): Promise<unknown>;
+      graphFolderCreate(title: string, parentId?: string | null): Promise<unknown>;
+      graphFolderRename(id: string, title: string): Promise<void>;
+      graphFolderDelete(id: string): Promise<void>;
+      graphFolderMove(id: string, parentId: string | null): Promise<void>;
     };
   }
 }
