@@ -1,0 +1,45 @@
+{
+  "id": "library.family.person",
+  "category": "family",
+  "name": "Family Person",
+  "description": "A person in a family tree (rounded-rect frame + name + dates)",
+  "components": [
+    {
+      "type": "shape",
+      "ref": "krig.basic.roundRect",
+      "transform": { "x": 0, "y": 0, "w": 160, "h": 60 },
+      "style_overrides": {
+        "fill": { "type": "solid", "color": "#a8c7e8" },
+        "line": { "type": "solid", "color": "#2E5C8A", "width": 1.5 }
+      },
+      "binding": "frame"
+    },
+    {
+      "type": "shape",
+      "ref": "krig.text.label",
+      "transform": { "x": 80, "y": 22, "anchor": "center" },
+      "style_overrides": { "fontSize": 14, "color": "#1a3a5c" },
+      "binding": "label"
+    },
+    {
+      "type": "shape",
+      "ref": "krig.text.label",
+      "transform": { "x": 80, "y": 42, "anchor": "center" },
+      "style_overrides": { "fontSize": 11, "color": "#5a7a9c" },
+      "binding": "dates"
+    }
+  ],
+  "default_props": {
+    "label": "未命名",
+    "gender": "U",
+    "birth": null,
+    "death": null
+  },
+  "visual_rules": [
+    { "if": "gender === 'M'", "apply": { "frame.fill.color": "#a8c7e8" } },
+    { "if": "gender === 'F'", "apply": { "frame.fill.color": "#e8a8c0" } },
+    { "if": "gender === 'U'", "apply": { "frame.fill.color": "#d0d0d0" } },
+    { "if": "death !== null", "apply": { "frame.fill.saturation": 0.5 } }
+  ],
+  "source": "builtin"
+}

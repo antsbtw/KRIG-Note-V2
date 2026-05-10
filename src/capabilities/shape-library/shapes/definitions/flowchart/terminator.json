@@ -1,0 +1,33 @@
+{
+  "id": "krig.flowchart.terminator",
+  "category": "flowchart",
+  "name": "Terminator",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "guides": [
+    { "name": "rad", "op": "*/", "args": ["h", 1, 2] },
+    { "name": "x1",  "op": "+-", "args": ["w", 0, "rad"] }
+  ],
+  "path": [
+    { "cmd": "M", "x": "rad", "y": 0   },
+    { "cmd": "L", "x": "x1",  "y": 0   },
+    { "cmd": "A", "rx": "rad", "ry": "rad", "x": "x1",  "y": "h" },
+    { "cmd": "L", "x": "rad", "y": "h" },
+    { "cmd": "A", "rx": "rad", "ry": "rad", "x": "rad", "y": 0   },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0   },
+    { "id": "E", "x": 1,   "y": 0.5 },
+    { "id": "S", "x": 0.5, "y": 1   },
+    { "id": "W", "x": 0,   "y": 0.5 }
+  ],
+  "textBox": { "l": "rad", "t": 0, "r": "x1", "b": "h" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

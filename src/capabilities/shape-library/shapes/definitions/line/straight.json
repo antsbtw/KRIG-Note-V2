@@ -1,0 +1,22 @@
+{
+  "id": "krig.line.straight",
+  "category": "line",
+  "name": "Straight Line",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 1 },
+  "aspect": "variable",
+  "path": [
+    { "cmd": "M", "x": 0,   "y": 0 },
+    { "cmd": "L", "x": "w", "y": 0 }
+  ],
+  "magnets": [
+    { "id": "START", "x": 0, "y": 0 },
+    { "id": "END",   "x": 1, "y": 0 }
+  ],
+  "default_style": {
+    "fill":  { "type": "none" },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

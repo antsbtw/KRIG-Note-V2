@@ -1,0 +1,27 @@
+{
+  "id": "krig.basic.triangle",
+  "category": "basic",
+  "name": "Triangle",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "path": [
+    { "cmd": "M", "x": "hc", "y": 0   },
+    { "cmd": "L", "x": "w",  "y": "h" },
+    { "cmd": "L", "x": 0,    "y": "h" },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5,  "y": 0    },
+    { "id": "E", "x": 0.75, "y": 0.5  },
+    { "id": "S", "x": 0.5,  "y": 1    },
+    { "id": "W", "x": 0.25, "y": 0.5  }
+  ],
+  "textBox": { "l": { "op": "*/", "args": ["w", 1, 4] }, "t": { "op": "*/", "args": ["h", 1, 2] }, "r": { "op": "*/", "args": ["w", 3, 4] }, "b": { "op": "*/", "args": ["h", 9, 10] } },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

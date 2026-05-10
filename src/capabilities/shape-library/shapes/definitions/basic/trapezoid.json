@@ -1,0 +1,42 @@
+{
+  "id": "krig.basic.trapezoid",
+  "category": "basic",
+  "name": "Trapezoid",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "params": {
+    "adj": {
+      "type": "number",
+      "default": 0.25,
+      "min": 0,
+      "max": 0.5,
+      "label": "Top inset",
+      "unit": "ratio"
+    }
+  },
+  "guides": [
+    { "name": "x1", "op": "*/", "args": ["w", "adj", 1] },
+    { "name": "x2", "op": "+-", "args": ["w", 0, "x1"] }
+  ],
+  "path": [
+    { "cmd": "M", "x": "x1", "y": 0   },
+    { "cmd": "L", "x": "x2", "y": 0   },
+    { "cmd": "L", "x": "w",  "y": "h" },
+    { "cmd": "L", "x": 0,    "y": "h" },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0   },
+    { "id": "E", "x": 1,   "y": 1   },
+    { "id": "S", "x": 0.5, "y": 1   },
+    { "id": "W", "x": 0,   "y": 1   }
+  ],
+  "textBox": { "l": "x1", "t": 0, "r": "x2", "b": "h" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

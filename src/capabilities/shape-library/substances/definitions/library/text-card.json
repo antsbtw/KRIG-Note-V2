@@ -1,0 +1,25 @@
+{
+  "id": "library.text-card",
+  "category": "library",
+  "name": "Text Card",
+  "description": "Generic rounded-corner text card",
+  "components": [
+    {
+      "type": "shape",
+      "ref": "krig.basic.roundRect",
+      "transform": { "x": 0, "y": 0, "w": 200, "h": 80 },
+      "binding": "frame"
+    },
+    {
+      "type": "shape",
+      "ref": "krig.text.label",
+      "transform": { "x": 100, "y": 40, "anchor": "center" },
+      "style_overrides": { "fontSize": 14 },
+      "binding": "label"
+    }
+  ],
+  "default_props": {
+    "label": "Text"
+  },
+  "source": "builtin"
+}

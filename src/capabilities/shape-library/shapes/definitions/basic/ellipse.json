@@ -1,0 +1,33 @@
+{
+  "id": "krig.basic.ellipse",
+  "category": "basic",
+  "name": "Ellipse",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "guides": [
+    { "name": "rx", "op": "*/", "args": ["w", 1, 2] },
+    { "name": "ry", "op": "*/", "args": ["h", 1, 2] }
+  ],
+  "path": [
+    { "cmd": "M", "x": "hc", "y": 0 },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": "w",  "y": "vc" },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": "hc", "y": "h"  },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": 0,    "y": "vc" },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": "hc", "y": 0    },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0   },
+    { "id": "E", "x": 1,   "y": 0.5 },
+    { "id": "S", "x": 0.5, "y": 1   },
+    { "id": "W", "x": 0,   "y": 0.5 }
+  ],
+  "textBox": { "l": { "op": "*/", "args": ["w", 15, 100] }, "t": { "op": "*/", "args": ["h", 15, 100] }, "r": { "op": "*/", "args": ["w", 85, 100] }, "b": { "op": "*/", "args": ["h", 85, 100] } },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

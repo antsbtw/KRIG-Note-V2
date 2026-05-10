@@ -1,0 +1,38 @@
+{
+  "id": "krig.basic.pentagon",
+  "category": "basic",
+  "name": "Pentagon",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "guides": [
+    { "name": "x1", "op": "*/", "args": ["w", 5,   100] },
+    { "name": "x2", "op": "*/", "args": ["w", 95,  100] },
+    { "name": "x3", "op": "*/", "args": ["w", 19,  100] },
+    { "name": "x4", "op": "*/", "args": ["w", 81,  100] },
+    { "name": "y1", "op": "*/", "args": ["h", 38,  100] },
+    { "name": "y2", "op": "*/", "args": ["h", 100, 100] }
+  ],
+  "path": [
+    { "cmd": "M", "x": "hc", "y": 0    },
+    { "cmd": "L", "x": "x2", "y": "y1" },
+    { "cmd": "L", "x": "x4", "y": "y2" },
+    { "cmd": "L", "x": "x3", "y": "y2" },
+    { "cmd": "L", "x": "x1", "y": "y1" },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N",  "x": 0.5,  "y": 0    },
+    { "id": "NE", "x": 0.95, "y": 0.38 },
+    { "id": "SE", "x": 0.81, "y": 1    },
+    { "id": "SW", "x": 0.19, "y": 1    },
+    { "id": "NW", "x": 0.05, "y": 0.38 }
+  ],
+  "textBox": { "l": { "op": "*/", "args": ["w", 1, 5] }, "t": { "op": "*/", "args": ["h", 1, 4] }, "r": { "op": "*/", "args": ["w", 4, 5] }, "b": { "op": "*/", "args": ["h", 9, 10] } },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

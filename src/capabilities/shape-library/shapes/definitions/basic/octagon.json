@@ -1,0 +1,38 @@
+{
+  "id": "krig.basic.octagon",
+  "category": "basic",
+  "name": "Octagon",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "guides": [
+    { "name": "x1", "op": "*/", "args": ["w", 30, 100] },
+    { "name": "x2", "op": "*/", "args": ["w", 70, 100] },
+    { "name": "y1", "op": "*/", "args": ["h", 30, 100] },
+    { "name": "y2", "op": "*/", "args": ["h", 70, 100] }
+  ],
+  "path": [
+    { "cmd": "M", "x": "x1", "y": 0    },
+    { "cmd": "L", "x": "x2", "y": 0    },
+    { "cmd": "L", "x": "w",  "y": "y1" },
+    { "cmd": "L", "x": "w",  "y": "y2" },
+    { "cmd": "L", "x": "x2", "y": "h"  },
+    { "cmd": "L", "x": "x1", "y": "h"  },
+    { "cmd": "L", "x": 0,    "y": "y2" },
+    { "cmd": "L", "x": 0,    "y": "y1" },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0   },
+    { "id": "E", "x": 1,   "y": 0.5 },
+    { "id": "S", "x": 0.5, "y": 1   },
+    { "id": "W", "x": 0,   "y": 0.5 }
+  ],
+  "textBox": { "l": "x1", "t": "y1", "r": "x2", "b": "y2" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}
