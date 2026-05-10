@@ -122,6 +122,7 @@ export function registerYtdlpHandlers(): void {
   // - LOGIN_INFO(YouTube login marker)
   // 任一存在就视为已登录。
   ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, async () => {
+    console.log('[ytdlp checkYoutubeCookies] handler called');
     try {
       const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
       const yt = await webviewSession.cookies.get({ domain: '.youtube.com' });
@@ -134,12 +135,15 @@ export function registerYtdlpHandlers(): void {
         'LOGIN_INFO',
       ]);
       const loginCookies = all.filter((c) => LOGIN_NAMES.has(c.name));
-      return {
+      const result = {
         hasLogin: loginCookies.length > 0,
         count: all.length,
         loginCount: loginCookies.length,
       };
+      console.log('[ytdlp checkYoutubeCookies] returning', result, 'login cookie names:', loginCookies.map((c) => c.name));
+      return result;
     } catch (e) {
+      console.warn('[ytdlp checkYoutubeCookies] error:', e);
       return { hasLogin: false, count: 0, error: e instanceof Error ? e.message : String(e) };
     }
   });

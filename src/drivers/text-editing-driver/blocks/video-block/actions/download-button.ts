@@ -164,16 +164,19 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
    */
   async function runFlow(): Promise<void> {
     const src = deps.getSrc();
+    console.log('[download-btn runFlow] src=', src, 'isYouTubeSrc=', isYouTubeSrc(), 'ytdlpAvailable=', ytdlpAvailable);
     if (!src) return;
 
     // 步骤 1:**先检登录态**(优先级最高,登录前不浪费任何资源)
     // YouTube 源需要登录过反爬;direct mp4 等不需要
     if (isYouTubeSrc()) {
+      console.log('[download-btn runFlow] is YouTube, calling checkYoutubeCookies()');
       try {
         const status = await checkYoutubeCookies();
+        console.log('[download-btn runFlow] checkYoutubeCookies returned', status);
         if (!status.hasLogin) {
           // 没登录 → 直接触发右屏 web view 跳 google 登录页
-          // 不 install,不 download,等用户登录后再点 ⬇
+          console.log('[download-btn runFlow] no login → trigger web view login');
           phase = 'idle';
           btn.textContent = '⬇';
           btn.title = '需要先在 web view 登录 YouTube';
