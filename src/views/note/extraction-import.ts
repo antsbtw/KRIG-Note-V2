@@ -106,6 +106,31 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
       continue;
     }
 
+    // 诊断:统计 PM doc 顶层节点 type + 扫描嵌套是否还有 paragraph/heading 漏网
+    const topTypes: Record<string, number> = {};
+    const leaked: string[] = [];
+    const scan = (n: { type?: string; content?: unknown[] }): void => {
+      if (n.type === 'paragraph' || n.type === 'heading') {
+        leaked.push(n.type);
+      }
+      if (Array.isArray(n.content)) {
+        for (const c of n.content as Array<{ type?: string; content?: unknown[] }>) scan(c);
+      }
+    };
+    for (const n of pmContent) {
+      const t = n.type ?? '?';
+      topTypes[t] = (topTypes[t] ?? 0) + 1;
+      scan(n);
+    }
+    console.log(
+      '[extraction-import] PM doc:',
+      title,
+      '| topTypes=',
+      topTypes,
+      '| leaked paragraph/heading=',
+      leaked.length,
+    );
+
     const doc: DriverSerialized = {
       format: 'pm-doc-json',
       version: '0.1',
