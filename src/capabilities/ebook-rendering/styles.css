@@ -114,3 +114,180 @@
   color: #888;
   font-size: 14px;
 }
+
+/* ── Reflowable Content(EPUB,L5-C3)── */
+
+.krig-ebook-content--reflowable {
+  flex: 1;
+  background: #1e1e1e;
+  position: relative;
+  overflow: hidden;
+}
+
+.krig-ebook-content--reflowable foliate-view {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Outline Panel(L5-C3)── */
+
+.krig-ebook-outline-panel {
+  width: 260px;
+  height: 100%;
+  background: #1e1e1e;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.krig-ebook-outline-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.krig-ebook-outline-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8eaed;
+}
+
+.krig-ebook-outline-panel__close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.krig-ebook-outline-panel__close:hover {
+  color: #ccc;
+}
+
+.krig-ebook-outline-panel__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.krig-ebook-outline-panel__item {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #ccc;
+  user-select: none;
+}
+
+.krig-ebook-outline-panel__item:hover {
+  background: #2a2a2a;
+}
+
+.krig-ebook-outline-panel__item--current {
+  background: #3a3a5a;
+  color: #fff;
+  border-radius: 3px;
+}
+
+.krig-ebook-outline-panel__item--current:hover {
+  background: #3a3a5a;
+}
+
+.krig-ebook-outline-panel__toggle {
+  width: 16px;
+  font-size: 12px;
+  color: #888;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.krig-ebook-outline-panel__toggle-placeholder {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.krig-ebook-outline-panel__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.krig-ebook-outline-panel__page {
+  font-size: 11px;
+  color: #666;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.krig-ebook-outline-panel__placeholder {
+  padding: 16px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+}
+
+/* ── Search Bar(L5-C3)── */
+
+.krig-ebook-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: #252525;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.krig-ebook-search-bar__input {
+  flex: 1;
+  max-width: 240px;
+  height: 24px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 13px;
+  padding: 0 8px;
+  outline: none;
+}
+
+.krig-ebook-search-bar__input:focus {
+  border-color: #3b82f6;
+}
+
+.krig-ebook-search-bar__count {
+  font-size: 12px;
+  color: #888;
+  min-width: 60px;
+}
+
+.krig-ebook-search-bar__btn {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-ebook-search-bar__btn:hover:not(:disabled) {
+  background: #333;
+}
+
+.krig-ebook-search-bar__btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}

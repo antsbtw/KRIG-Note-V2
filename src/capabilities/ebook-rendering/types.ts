@@ -189,12 +189,21 @@ export function getRenderMode(fileType: EBookFileType): RenderMode {
 // ── view 业务路径 API ──
 
 import type { EBookHostProps, EBookHostHandle } from './Host';
+import type { OutlinePanel } from './outline-panel';
+import type { SearchBar } from './search-bar';
+import type { useSearch } from './hooks/use-search';
 
-export type { EBookHostProps, EBookHostHandle } from './Host';
+export type { EBookHostProps, EBookHostHandle, SearchResult } from './Host';
 
 export interface EBookRenderingApi {
   /** Host 主组件(forwardRef EBookHostHandle)— view 通过 ref 命令式驱动 */
   Host: ComponentType<EBookHostProps & { ref?: Ref<EBookHostHandle> }>;
+  /** 侧栏 TOC 树(view 通过 host 驱动 — host.getTOC / host.goToPage / host.goToCFI)*/
+  OutlinePanel: typeof OutlinePanel;
+  /** 搜索栏 UI(配 useSearch hook 用)*/
+  SearchBar: typeof SearchBar;
+  /** 搜索 hook(view 在内部 useState/useCallback 不暴露 renderer)*/
+  useSearch: typeof useSearch;
   /** 类型守卫 — view / capability 内复用 */
   isFixedPage(renderer: IBookRenderer): renderer is IFixedPageRenderer;
   isReflowable(renderer: IBookRenderer): renderer is IReflowableRenderer;
