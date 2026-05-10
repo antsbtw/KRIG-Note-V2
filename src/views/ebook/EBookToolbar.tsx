@@ -37,6 +37,10 @@ interface EBookToolbarProps {
   onPageChange: (page: number) => void;
   onScaleChange: (scale: number) => void;
   onFitWidthToggle: () => void;
+  /** PDF 空间标注模式(C5,fixed-page 专用)*/
+  pdfAnnotationMode?: 'off' | 'rect' | 'underline';
+  /** 切换 PDF 标注模式(同模式再点 = 关闭) */
+  onPdfAnnotationModeChange?: (mode: 'off' | 'rect' | 'underline') => void;
   // reflowable 专用
   epubChapter?: string;
   epubPercentage?: number;
@@ -74,6 +78,8 @@ export function EBookToolbar({
   onPageChange,
   onScaleChange,
   onFitWidthToggle,
+  pdfAnnotationMode = 'off',
+  onPdfAnnotationModeChange,
   epubChapter,
   epubPercentage,
   fontSize = 100,
@@ -233,6 +239,27 @@ export function EBookToolbar({
       {/* Right: 书签 + 缩放 / 字号(按 renderMode 切换)+ 搜索 */}
       {showFixedNav && (
         <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
+          {/* C5:PDF 空间标注模式切换 */}
+          <button
+            className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'rect' ? 'krig-ebook-toolbar__btn--active' : ''}`}
+            onClick={() =>
+              onPdfAnnotationModeChange?.(pdfAnnotationMode === 'rect' ? 'off' : 'rect')
+            }
+            title="线框标注(拖拽画矩形)"
+          >
+            ▢
+          </button>
+          <button
+            className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'underline' ? 'krig-ebook-toolbar__btn--active' : ''}`}
+            onClick={() =>
+              onPdfAnnotationModeChange?.(
+                pdfAnnotationMode === 'underline' ? 'off' : 'underline',
+              )
+            }
+            title="横线标注(拖拽画下划线)"
+          >
+            ▁
+          </button>
           <button
             className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
             onClick={onBookmarkToggle}
