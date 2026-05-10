@@ -1,10 +1,11 @@
 /**
- * EPUBRenderer — EPUB 渲染引擎(L5-C3)
+ * EPUBRenderer — EPUB 渲染引擎(L5-C3 + C4)
  *
  * V1 → V2 改写:src/plugins/ebook/renderers/epub/index.ts(366 行)。
- * 砍掉(留 C4):标注相关 — onTextSelected / onSelectionDismiss / onAnnotationClick /
- * addHighlight / removeHighlight / setupSelectionListener / draw-annotation / show-annotation。
- * 保留:基础渲染 + 章节导航 + 字号 + relocate + TOC + search + clearSearch。
+ * C3 范围:基础渲染 + 章节 + 字号 + relocate + TOC + search。
+ * C4 补回:onTextSelected / onSelectionDismiss / onAnnotationClick /
+ *         addHighlight / removeHighlight / setupSelectionListener +
+ *         show-annotation / draw-annotation foliate 事件 + getCurrentCFI。
  *
  * **本文件是 ebook-rendering capability 内部唯一 import foliate-js 的地方**(npm 屏障)。
  *
@@ -111,6 +112,43 @@ export class EPUBRenderer implements IReflowableRenderer {
           if (detail.cfi) this.lastCFI = detail.cfi;
           this.relocateCallbacks.forEach((cb) => cb(this.currentProgress));
         }
+      });
+
+      // ── C4:文本选择 + 已有标注点击 + 高亮自定义颜色 ──
+
+      // 文本选择监听(标注入口)
+      this.setupSelectionListener();
+
+      // 点击已有标注 → 触发回调(用于删除)
+      this.view.addEventListener('show-annotation', (e: any) => {
+        const cfi = e.detail?.value;
+        if (cfi && this.annotationClickCallback) {
+          this.annotationClickCallback(cfi);
+        }
+      });
+
+      // 高亮绘制:根据 annotation.color 自定义颜色
+      this.view.addEventListener('draw-annotation', (e: any) => {
+        const { draw, annotation } = e.detail;
+        const color = annotation?.color || '#ffd43b';
+        draw((range: any, options: any) => {
+          // 优先用 foliate-js Overlayer.highlight(更准的多行高亮)
+          const Overlayer = (self as any).__foliateOverlayer?.Overlayer;
+          if (Overlayer) return Overlayer.highlight(range, { ...options, color });
+          // fallback:简单矩形(覆盖几乎所有 foliate-js 版本)
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          g.setAttribute('fill', color);
+          g.style.opacity = '0.3';
+          for (const { left, top, height, width } of range) {
+            const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            el.setAttribute('x', String(left));
+            el.setAttribute('y', String(top));
+            el.setAttribute('height', String(height));
+            el.setAttribute('width', String(width));
+            g.append(el);
+          }
+          return g;
+        }, { color });
       });
 
       // 提取 TOC
@@ -274,5 +312,151 @@ export class EPUBRenderer implements IReflowableRenderer {
 
   clearSearch(): void {
     this.view?.clearSearch?.();
+  }
+
+  // ── C4:标注 + 文本选择 + 双指水平 swipe 翻页 ──
+
+  private annotationCallback:
+    | ((info: { cfi: string; text: string; x: number; y: number }) => void)
+    | null = null;
+  private selectionDismissCallback: (() => void) | null = null;
+  private annotationClickCallback: ((cfi: string) => void) | null = null;
+  /** L5-C4 fix:水平 swipe 推送(macOS Books 同款 UX);direction 为 'next' / 'prev' */
+  private horizontalSwipeCallback: ((direction: 'next' | 'prev') => void) | null = null;
+
+  onTextSelected(
+    callback: (info: { cfi: string; text: string; x: number; y: number }) => void,
+  ): void {
+    this.annotationCallback = callback;
+  }
+
+  onSelectionDismiss(callback: () => void): void {
+    this.selectionDismissCallback = callback;
+  }
+
+  onAnnotationClick(callback: (cfi: string) => void): void {
+    this.annotationClickCallback = callback;
+  }
+
+  /** L5-C4 fix:注册水平 swipe 翻页回调(reflowable-content 消费) */
+  onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void {
+    this.horizontalSwipeCallback = callback;
+  }
+
+  /**
+   * 给 EPUB iframe 内的 doc 绑 mousedown / mouseup(选区)+ wheel(swipe 翻页)。
+   * 必须在 iframe doc 上绑而不是外层 container — iframe wheel 不冒泡。
+   */
+  private setupSelectionListener(): void {
+    if (!this.view) return;
+
+    // 单源 swipe 状态(跨多个 doc 共享):一次手势只翻一页。
+    // 累计 deltaX 跨阈值触发后,gestureActive=true 屏蔽后续 wheel 事件;
+    // 直到 wheel 静默 GESTURE_END_MS 后才解锁(认定手势结束)。
+    let accumulatedX = 0;
+    let gestureActive = false;
+    let gestureEndTimer: ReturnType<typeof setTimeout> | null = null;
+    const SWIPE_THRESHOLD = 50;
+    const GESTURE_END_MS = 200; // wheel 静默此时长后认为手势结束
+
+    const attachListeners = (doc: any, index: number): void => {
+      if (!doc || doc.__ebookListenersAttached) return;
+      doc.__ebookListenersAttached = true;
+
+      // mousedown → 关闭 picker(若产生新选区,mouseup 会重新弹)
+      doc.addEventListener('mousedown', () => {
+        this.selectionDismissCallback?.();
+      });
+
+      doc.addEventListener('mouseup', () => {
+        const sel = doc.getSelection();
+        if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+
+        const range = sel.getRangeAt(0);
+        const text = sel.toString().trim();
+        if (!text) return;
+
+        const cfi = this.view.getCFI(index, range);
+        if (cfi && this.annotationCallback) {
+          // range 的 getBoundingClientRect 返 iframe 内坐标;转到 view 容器坐标系
+          const rect = range.getBoundingClientRect();
+          const iframeEl = doc.defaultView?.frameElement as HTMLElement | null;
+          const iframeRect =
+            iframeEl?.getBoundingClientRect() ?? { left: 0, top: 0 };
+          const viewRect =
+            this.container?.getBoundingClientRect() ?? { left: 0, top: 0 };
+          const x = rect.left + rect.width / 2 + iframeRect.left - viewRect.left;
+          const y = rect.bottom + iframeRect.top - viewRect.top;
+          this.annotationCallback({ cfi, text, x, y });
+        }
+      });
+
+      // L5-C4 fix:双指水平 swipe → 翻页(macOS Books)
+      // 一次手势 = 一次翻页。手势期间:
+      //   - 触发翻页前累计 deltaX 跨 SWIPE_THRESHOLD
+      //   - 触发后 gestureActive=true 屏蔽后续 wheel 事件
+      //   - wheel 静默 GESTURE_END_MS 后解锁,等待下一次手势
+      doc.addEventListener(
+        'wheel',
+        (e: WheelEvent) => {
+          // Cmd/Ctrl + wheel 留给字号缩放等
+          if (e.metaKey || e.ctrlKey) return;
+          // 仅水平方向(垂直 wheel 不接管 — paginated 模式不需垂直滚动)
+          if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+
+          // 每次水平 wheel 都重启 "手势结束" 计时器
+          if (gestureEndTimer) clearTimeout(gestureEndTimer);
+          gestureEndTimer = setTimeout(() => {
+            accumulatedX = 0;
+            gestureActive = false;
+          }, GESTURE_END_MS);
+
+          // 已触发过本次手势 → 屏蔽
+          if (gestureActive) {
+            e.preventDefault();
+            return;
+          }
+
+          accumulatedX += e.deltaX;
+          if (Math.abs(accumulatedX) < SWIPE_THRESHOLD) return;
+
+          // 触发翻页:deltaX > 0(内容左推)= 下一页;< 0 = 上一页
+          const direction: 'next' | 'prev' = accumulatedX > 0 ? 'next' : 'prev';
+          this.horizontalSwipeCallback?.(direction);
+
+          gestureActive = true;
+          e.preventDefault();
+        },
+        { passive: false },
+      );
+    };
+
+    // 已加载的 sections
+    const contents = this.view.renderer?.getContents?.();
+    if (contents) {
+      for (const { doc, index } of contents) {
+        attachListeners(doc, index);
+      }
+    }
+
+    // 后续加载的 section
+    this.view.addEventListener('load', (e: any) => {
+      const { doc, index } = e.detail;
+      attachListeners(doc, index);
+    });
+  }
+
+  async addHighlight(cfi: string, color: string): Promise<void> {
+    await this.readyPromise;
+    if (!this.view) return;
+    try {
+      await this.view.addAnnotation({ value: cfi, color });
+    } catch {
+      // ignore — 可能 cfi 无效或 view 已 destroy
+    }
+  }
+
+  removeHighlight(cfi: string): void {
+    this.view?.deleteAnnotation?.({ value: cfi });
   }
 }

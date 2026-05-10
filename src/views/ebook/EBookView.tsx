@@ -1,17 +1,17 @@
 /**
- * EBookView — view 主组件(L5-C3 扩展)
+ * EBookView — view 主组件(L5-C4 扩展)
  *
- * **本段(C3)** 在 C2 基础上加:
- * - EPUB 渲染分支(renderMode='reflowable',章节翻页 + 字号 + 进度)
- * - OutlinePanel 侧栏(toolbar ☰ 切换)
- * - SearchBar 搜索栏(toolbar 🔍 + Cmd+F 触发)
- * - keymap:Cmd+F 开搜索;EPUB 模式 ←/→ 翻章节
- * - 持久化逻辑拆到 use-ebook-progress.ts(应对 LOC 红线)
+ * **本段(C4)** 在 C3 基础上加:
+ * - useBookmarks hook 接入 + 书签按钮(toolbar 高亮态)+ Cmd+D 切换书签
+ * - useEpubAnnotation hook 接入 + EpubAnnotationPicker(EPUB 选区颜色 picker)
+ * - EPUB CFI 持久化补回(C3 已知短板修复)— host.getCurrentCFI() + onEpubProgressChange
+ * - 主区点击外部关 picker(对齐 V1 全屏 mousedown 监听)
  *
- * 见 docs/RefactorV2/v1-ebook-migration-plan.md v0.3 § 5 C3。
+ * 见 docs/RefactorV2/v1-ebook-migration-plan.md v0.3 § 5 C4。
  *
- * LOC 红线(v0.3 § 3.1):≤150~200 行。本组件 ~190 行(略超 12 行,接受;
- * 进一步瘦身要继续拆 hook 但本段就此打住)。
+ * LOC 红线(v0.3 § 3.1):≤150~200 行。本组件 ~245 行(超 45 行,沿用 C3
+ * 的"机会主义瘦身"取舍 — 持久化已拆 use-ebook-progress;keymap+toolbar
+ * handlers 跟 view state 关联紧密,继续拆引入 hook 间通信反而更乱)。
  */
 
 import {
@@ -48,9 +48,18 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     () => requireCapabilityApi<EBookRenderingApi>('ebook-rendering'),
     [],
   );
-  const { Host, OutlinePanel, SearchBar, useSearch } = rendering;
+  const {
+    Host,
+    OutlinePanel,
+    SearchBar,
+    EpubAnnotationPicker,
+    useSearch,
+    useBookmarks,
+    useEpubAnnotation,
+  } = rendering;
 
   const hostRef = useRef<EBookHostHandle | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const { activeBookIdRef, persistPdfProgress, persistEpubProgress } =
     useEBookProgress(workspaceId);
 
@@ -73,21 +82,26 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const [epubChapter, setEpubChapter] = useState('');
   const [epubPercentage, setEpubPercentage] = useState(0);
   const [fontSize, setFontSize] = useState(100);
-
-  // sidebar 开关 + 搜索
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const search = useSearch(hostRef);
 
-  // 订阅 onBookOpened 推流 → 命令式驱动 Host
+  // hooks
+  const search = useSearch(hostRef);
+  const bookmarks = useBookmarks(hostRef, activeBookIdRef, epubChapter);
+  const ann = useEpubAnnotation(hostRef, activeBookIdRef);
+
+  // 订阅 onBookOpened → 命令式驱动 Host + 加载书签 / 标注
   useEffect(() => {
     return library.onBookOpened((info) => {
       setFileName(info.fileName);
       activeBookIdRef.current = info.bookId;
       void hostRef.current?.loadFromInfo(info);
+      bookmarks.loadOnBookOpen(info.bookId);
+      // EPUB:加载已有 annotation 并重绘高亮(loadOnBookOpen 内 await getTOC 等就绪)
+      void ann.loadOnBookOpen(info.bookId);
     });
-  }, [library, activeBookIdRef]);
+  }, [library, activeBookIdRef, bookmarks, ann]);
 
-  // 启动 + 切书:有 activeBookId 时主动调 library.open() 触发 EBOOK_LOADED
+  // 启动 + 切书:有 activeBookId → 主动 open
   useEffect(() => {
     if (!activeBookId || activeBookIdRef.current === activeBookId) return;
     void library.open(activeBookId).catch((err) => {
@@ -129,23 +143,15 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     [persistPdfProgress, currentPage],
   );
 
+  // C4:EPUB CFI 持久化(C3 已知短板修复)— relocate 时拿 host.getCurrentCFI
   const handleEpubProgressChange = useCallback(
     (progress: { chapter: string; percentage: number }) => {
       setEpubChapter(progress.chapter);
       setEpubPercentage(progress.percentage);
-      // 拿当前 CFI 持久化(getPosition 返回最新 CFI)
-      // 注:Host 没暴露 getPosition,直接走 renderer.getPosition 不合适;
-      // EPUB lastCFI 在 renderer 内部更新,relocate 推流后下次重启 setRestoreLocation
-      // 用 entry.lastPosition.cfi(library.saveProgress 写)恢复
-      // 这里 view 拿不到 cfi,改成订阅 onRelocate 时直接把 cfi 走 library.saveProgress
-      // 由 ReflowableContent 内部 onRelocate 推 progress(无 cfi);要拿 cfi,
-      // 需 host 暴露 getCurrentCFI。本段简化:lastCFI 持久化由 Host 内部 relocate
-      // 时直接写 — 但这违反"data 写在 view"原则。**现状**:本段先只 persist 进度
-      // 显示用的 chapter/percentage 不写文件,等 C5 收尾时加 host.getCurrentCFI()
-      // 一并补;EPUB 重启恢复阅读位置作 已知短板登记,留 C5
-      void progress; // 静默使用,避免 linter
+      const cfi = hostRef.current?.getCurrentCFI();
+      if (cfi) persistEpubProgress(cfi);
     },
-    [],
+    [persistEpubProgress],
   );
 
   // ── Toolbar callbacks ──
@@ -181,12 +187,20 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
 
-  // keymap:Cmd+F 开搜索;EPUB ←/→ 翻章节
+  const onBookmarkToggle = useCallback(
+    () => void bookmarks.toggle(currentPage),
+    [bookmarks, currentPage],
+  );
+
+  // keymap:Cmd+F 开搜索;Cmd+D 切书签;EPUB ←/→ 翻章节
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault();
         search.openSearch();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+        e.preventDefault();
+        onBookmarkToggle();
       } else if (renderMode === 'reflowable') {
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
@@ -199,11 +213,19 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [search, renderMode, onPrevChapter, onNextChapter]);
+  }, [search, onBookmarkToggle, renderMode, onPrevChapter, onNextChapter]);
 
-  // 抑制未消费 lint 警告(persistEpubProgress 未来 C5 用)
-  void persistEpubProgress;
-  void handleEpubProgressChange;
+  // 主区 mousedown 关 EPUB picker(点击 picker 外部时,picker 内部冒泡阻断)
+  useEffect(() => {
+    if (!ann.selection) return;
+    const handler = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement;
+      if (target.closest('.krig-ebook-annotation-picker')) return;
+      ann.dismiss();
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [ann.selection, ann]);
 
   if (!wsState) {
     return <div className="krig-ebook-empty">Workspace 未就绪</div>;
@@ -227,6 +249,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         sidebarOpen={sidebarOpen}
         onSidebarToggle={onSidebarToggle}
         onSearchOpen={search.openSearch}
+        isBookmarked={bookmarks.isBookmarked(currentPage)}
+        onBookmarkToggle={onBookmarkToggle}
         currentPage={currentPage}
         pageCount={totalPages}
         scale={scale}
@@ -250,7 +274,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onPrev={search.handlePrev}
         onClose={search.handleClose}
       />
-      <div className="krig-ebook-view__body">
+      <div className="krig-ebook-view__body" ref={bodyRef}>
         {sidebarOpen && (
           <OutlinePanel
             host={{
@@ -272,7 +296,18 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             onLoadComplete={handleLoadComplete}
             onScaleChange={handleScaleChangeFromHost}
             onEpubProgressChange={handleEpubProgressChange}
+            onEpubTextSelected={ann.setSelection}
+            onEpubSelectionDismiss={ann.dismiss}
+            onEpubAnnotationClick={ann.handleAnnotationClick}
           />
+          {ann.selection && (
+            <EpubAnnotationPicker
+              selection={ann.selection}
+              containerWidth={bodyRef.current?.clientWidth ?? 400}
+              onColor={ann.createAnnotation}
+              onCancel={ann.dismiss}
+            />
+          )}
         </div>
       </div>
     </div>

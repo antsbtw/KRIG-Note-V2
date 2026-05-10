@@ -25,6 +25,10 @@ interface EBookToolbarProps {
   sidebarOpen: boolean;
   onSidebarToggle: () => void;
   onSearchOpen: () => void;
+  /** 当前位置是否已书签(C4)*/
+  isBookmarked: boolean;
+  /** 切换书签(Cmd+D 也走这个)*/
+  onBookmarkToggle: () => void;
   // fixed-page 专用
   currentPage: number;
   pageCount: number;
@@ -61,6 +65,8 @@ export function EBookToolbar({
   sidebarOpen,
   onSidebarToggle,
   onSearchOpen,
+  isBookmarked,
+  onBookmarkToggle,
   currentPage,
   pageCount,
   scale,
@@ -224,9 +230,16 @@ export function EBookToolbar({
         </div>
       )}
 
-      {/* Right: 缩放 / 字号(按 renderMode 切换)+ 搜索 */}
+      {/* Right: 书签 + 缩放 / 字号(按 renderMode 切换)+ 搜索 */}
       {showFixedNav && (
         <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
+          <button
+            className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
+            onClick={onBookmarkToggle}
+            title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
+          >
+            {isBookmarked ? '★' : '☆'}
+          </button>
           <button
             className="krig-ebook-toolbar__btn"
             onClick={onSearchOpen}
@@ -268,6 +281,13 @@ export function EBookToolbar({
 
       {showReflowNav && (
         <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
+          <button
+            className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
+            onClick={onBookmarkToggle}
+            title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
+          >
+            {isBookmarked ? '★' : '☆'}
+          </button>
           <button
             className="krig-ebook-toolbar__btn"
             onClick={onSearchOpen}

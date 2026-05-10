@@ -23,7 +23,10 @@ import { capabilityRegistry } from '@slot/capability-registry/capability-registr
 import { EBookHost } from './Host';
 import { OutlinePanel } from './outline-panel';
 import { SearchBar } from './search-bar';
+import { EpubAnnotationPicker } from './epub-annotation-picker';
 import { useSearch } from './hooks/use-search';
+import { useBookmarks } from './hooks/use-bookmarks';
+import { useEpubAnnotation } from './hooks/use-epub-annotation';
 import {
   isFixedPage,
   isReflowable,
@@ -54,13 +57,17 @@ export type {
   ToolbarConfig,
   TOCItem,
 } from './types';
+export type { EpubSelection } from './hooks/use-epub-annotation';
 
 // 模块级 export(driver/slot 兜底用,W5 边界 A 临时允许项)
 export {
   EBookHost,
   OutlinePanel,
   SearchBar,
+  EpubAnnotationPicker,
   useSearch,
+  useBookmarks,
+  useEpubAnnotation,
   isFixedPage,
   isReflowable,
   detectFileType,
@@ -73,7 +80,10 @@ capabilityRegistry.register({
     Host: EBookHost,
     OutlinePanel,
     SearchBar,
+    EpubAnnotationPicker,
     useSearch,
+    useBookmarks,
+    useEpubAnnotation,
     isFixedPage,
     isReflowable,
     detectFileType,
