@@ -1,0 +1,116 @@
+/**
+ * ebook-rendering capability — 渲染样式(L5-C2)
+ *
+ * V1 → V2 改写:src/plugins/ebook/ebook.css 中 PDF / TextLayer 部分。
+ * 重命名 `.ebook-*` → `.krig-ebook-*`(对齐 V2 既有命名规范 krig-note-* / krig-web-*)。
+ *
+ * 不含:Toolbar / Outline / Search / Annotation 等 view 端 UI 样式
+ * (Toolbar 在 views/ebook/ebook.css;Outline / Search / Annotation 留 C3~C5)。
+ */
+
+/* ── Host 容器 ── */
+
+.krig-ebook-host {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+/* ── Content(虚拟滚动容器)── */
+
+.krig-ebook-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #1a1a1a;
+  position: relative;
+}
+
+.krig-ebook-content__pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+}
+
+.krig-ebook-content__page-wrapper {
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  background: #fff;
+  position: relative;
+}
+
+.krig-ebook-content__page-wrapper canvas {
+  display: block;
+}
+
+/* ── Text Layer(文本选择 + Cmd+C 复制)── */
+
+.krig-ebook-content__page-wrapper .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  z-index: 2;
+}
+
+.krig-ebook-content__page-wrapper .textLayer span,
+.krig-ebook-content__page-wrapper .textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0% 0%;
+}
+
+.krig-ebook-content__page-wrapper .textLayer ::selection {
+  background: rgba(0, 100, 200, 0.4);
+}
+
+.krig-ebook-content__page-wrapper .textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}
+
+.krig-ebook-content__page-wrapper .textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+/* ── 滚动条 ── */
+
+.krig-ebook-content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.krig-ebook-content::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+.krig-ebook-content::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 5px;
+}
+
+.krig-ebook-content::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+/* ── Loading / Empty(Host 内,view 端 ebook.css 的 .krig-ebook-empty 同名,
+       双方共享视觉)── */
+
+.krig-ebook-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #888;
+  font-size: 14px;
+}

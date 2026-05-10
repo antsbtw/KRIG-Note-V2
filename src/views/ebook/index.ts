@@ -13,8 +13,9 @@
  * 注意:v0.3 文档 D-1 字面是 `ebook`,实施时确认 V2 实际 view-id 风格,
  * 微调为 `ebook-view`。已在 completion 报告登记说明。
  *
- * **install 列表**(C1 仅 ebook-library;C2 起追加 ebook-rendering):
+ * **install 列表**:
  * - `ebook-library`:书架 + 文件夹 + 标注 + 数据传输(L5-C1)
+ * - `ebook-rendering`:PDF / EPUB 渲染(L5-C2,pdfjs-dist 4.9.155;C3 起加 foliate-js)
  *
  * **navSideTab.order=2**:对齐 V1 demo-b 的 order;Note=1 / eBook=2 / Web=3
  */
@@ -27,8 +28,8 @@ import { registerNavSide, registerFolderTreeContextMenu } from './nav-side-conte
 registerView({
   id: 'ebook-view',
   install: [
-    'ebook-library',  // L5-C1:书架 + 文件夹 + 标注 + 数据传输
-    // C2 起追加:'ebook-rendering'
+    'ebook-library',    // L5-C1:书架 + 文件夹 + 标注 + 数据传输
+    'ebook-rendering',  // L5-C2:PDF Canvas 渲染 + 虚拟滚动 + Text Layer
   ],
   component: EBookView,
   navSideTab: { label: 'eBook', icon: '📕', order: 2 },
