@@ -7,5 +7,6 @@ build/icon.iconset/
 *.log
 tmp/
 debug/
+docs/temp/
 .env
 .env.local
