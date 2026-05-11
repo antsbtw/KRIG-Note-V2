@@ -53,7 +53,7 @@ export async function renderList(
     if (!child) continue;
     const childYStart = y;
 
-    if (child.type === 'textBlock') {
+    if (child.type === 'textBlock' || child.type === 'text-block') {
       const { svg, height } = await renderIndentedTextBlock(child, y, indent, innerWidth, links, defaultTextColor);
       if (svg) parts.push(svg);
 

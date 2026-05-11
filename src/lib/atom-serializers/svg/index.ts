@@ -126,6 +126,7 @@ async function renderAtom(
 ): Promise<{ svg: string; height: number }> {
   switch (atom.type) {
     case 'textBlock':
+    case 'text-block':       // V2 BlockSpec.id 用短横线(text-editing-driver text-block/spec.ts:56)
       return renderTextBlock(atom, yOffset, contentWidth, links, defaultTextColor);
     case 'mathBlock': {
       // NoteView mathBlock schema:content: 'text*',LaTeX 存在 PM 子 text 节点里

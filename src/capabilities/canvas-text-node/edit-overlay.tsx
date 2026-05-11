@@ -139,21 +139,23 @@ export function EditOverlay(): ReactElement | null {
 
 const styles: Record<string, CSSProperties> = {
   backdrop: {
+    // V1 edit-overlay.css `.krig-canvas-edit-backdrop` 对齐:全屏 transparent,
+    // 只作为"点空白处提交"的事件捕获层,不遮挡画板视觉.
     position: 'fixed',
     inset: 0,
     zIndex: 1000,
-    background: 'rgba(0, 0, 0, 0.2)',
-    backdropFilter: 'blur(2px)',
-    WebkitBackdropFilter: 'blur(2px)',
+    background: 'transparent',
   },
   popup: {
+    // V1 edit-overlay.css `.krig-canvas-edit-popup` 对齐:popup 与 mesh 投影完全重合,
+    // border 蓝色延续节点选中视觉,padding 内吃(box-sizing: border-box).
     position: 'fixed',
     boxSizing: 'border-box',
-    border: '1px solid rgba(255, 255, 255, 0.12)',
+    border: '1px solid #4a90e2',
     borderRadius: 8,
-    boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
+    boxShadow: '0 6px 20px rgba(0, 0, 0, 0.55)',
     overflow: 'auto',
-    padding: '8px 12px',
+    padding: '8px 10px',
     fontSize: 14,
     lineHeight: 1.5,
   },
