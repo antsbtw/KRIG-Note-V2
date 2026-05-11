@@ -100,10 +100,19 @@ export class InteractionController {
   private redoStack: Instance[][] = [];
   private static readonly HISTORY_LIMIT = 50;
 
-  // [G4.3 砍] marquee 框选状态(V1:55-64)
-  // [G4.3 砍] drawingLine / magnetHints / hoveredLineId / lineEndpointHandles /
-  //          rewiring 状态(V1:89-131)
-  // [G4.3 砍] addMode + onAddModeChange(V1:133-141)
+  /** Marquee 框选状态(V1:55-64 直迁;空白拖动框选) */
+  private marquee: {
+    startWorld: { x: number; y: number };
+    currentWorld: { x: number; y: number };
+    overlayGroup: THREE.Group;
+    /** Shift/Cmd 按住时加到现有 selection,否则替换 */
+    additive: boolean;
+  } | null = null;
+
+  // [G4.3c 砍] drawingLine / hoveredLineId(V1:89-107)
+  // [G4.3d 砍] magnetHints(V1:104)
+  // [G4.3e 砍] lineEndpointHandles / rewiring(V1:113-131)
+  // [G4.3b 砍] addMode + onAddModeChange(V1:133-141)
   // [G4.4 砍] onNodeDoubleClick / onContextMenu(V1:139-141)
 
   /** 事件解绑函数 */
@@ -176,6 +185,11 @@ export class InteractionController {
     this.dragging = null;
     this.resizing = null;
     this.rotating = null;
+    if (this.marquee) {
+      this.sceneManager.scene.remove(this.marquee.overlayGroup);
+      disposeMarqueeOverlay(this.marquee.overlayGroup);
+      this.marquee = null;
+    }
     this.undoStack = [];
     this.redoStack = [];
     this.clipboard = [];
@@ -264,8 +278,9 @@ export class InteractionController {
       }
       this.startDragNodes(world);
     } else {
-      // [G4.3 砍] 空白处:G4.3 改 startMarquee(world, additive)
-      if (!additive) this.clearSelection();
+      // 空白处:启动 marquee 框选(V1 1110-1120 直迁)
+      // additive=false 时若框太小(单击空白)会在 finishMarquee 当 clearSelection 处理
+      this.startMarquee(world, additive);
     }
   }
 
@@ -295,6 +310,12 @@ export class InteractionController {
     }
     if (this.rotating) {
       this.applyRotate(world, e.shiftKey);
+      return;
+    }
+    if (this.marquee) {
+      this.marquee.currentWorld = world;
+      rebuildMarqueeOverlay(this.marquee.overlayGroup, this.marquee.startWorld, world);
+      this.container.style.cursor = 'crosshair';
       return;
     }
 
@@ -327,6 +348,11 @@ export class InteractionController {
       this.rotating = null;
       this.refreshHandles();
       this.onInstancesChange?.();
+      return;
+    }
+    if (this.marquee) {
+      this.finishMarquee();
+      this.container.style.cursor = '';
       return;
     }
     if (this.dragging) {
@@ -430,13 +456,15 @@ export class InteractionController {
         this.deleteSelected();
       }
     } else if (e.key === 'Escape') {
-      // [G4.3 接续]优先级:cancel marquee → cancel rewire → cancel drawingLine → exit addMode → clear selection
+      // V1 优先级:resize/rotate → marquee → [G4.3c rewire] → [G4.3c drawingLine] → [G4.3b addMode] → 清选区
       if (this.resizing) {
         this.resizing = null;
         this.refreshHandles();
       } else if (this.rotating) {
         this.rotating = null;
         this.refreshHandles();
+      } else if (this.marquee) {
+        this.cancelMarquee();
       } else if (this.selected.size > 0) {
         this.clearSelection();
       }
@@ -479,6 +507,70 @@ export class InteractionController {
     return best?.node ?? null;
   }
 
+
+  // ─────────────────────────────────────────────────────────
+  // Marquee 框选(V1 1110-1162 直迁;空白拖动 → AABB 内节点全选)
+  // ─────────────────────────────────────────────────────────
+
+  private startMarquee(startWorld: { x: number; y: number }, additive: boolean): void {
+    const overlayGroup = new THREE.Group();
+    rebuildMarqueeOverlay(overlayGroup, startWorld, startWorld);
+    this.sceneManager.scene.add(overlayGroup);
+    this.marquee = {
+      startWorld,
+      currentWorld: startWorld,
+      overlayGroup,
+      additive,
+    };
+  }
+
+  /** mouseup:框内 shape 加进 selected;太小则视为"清选区" */
+  private finishMarquee(): void {
+    if (!this.marquee) return;
+    const { startWorld, currentWorld, additive, overlayGroup } = this.marquee;
+    this.marquee = null;
+    this.sceneManager.scene.remove(overlayGroup);
+    disposeMarqueeOverlay(overlayGroup);
+
+    const minX = Math.min(startWorld.x, currentWorld.x);
+    const maxX = Math.max(startWorld.x, currentWorld.x);
+    const minY = Math.min(startWorld.y, currentWorld.y);
+    const maxY = Math.max(startWorld.y, currentWorld.y);
+
+    // 太小的框(单击空白)→ 非 additive 时清选区,additive 不动
+    if (maxX - minX < 2 && maxY - minY < 2) {
+      if (!additive && this.selected.size > 0) {
+        this.selected.clear();
+        this.refreshOverlays();
+        this.refreshHandles();
+        this.notifySelection();
+      }
+      return;
+    }
+
+    // 找所有 shape 中心落在框内(line 用 bbox 中心;substance 同)
+    if (!additive) this.selected.clear();
+    for (const id of this.nodeRenderer.ids()) {
+      const node = this.nodeRenderer.get(id);
+      if (!node) continue;
+      const cx = node.position.x + node.size.w / 2;
+      const cy = node.position.y + node.size.h / 2;
+      if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
+        this.selected.add(id);
+      }
+    }
+    this.refreshOverlays();
+    this.refreshHandles();
+    this.notifySelection();
+  }
+
+  private cancelMarquee(): void {
+    if (!this.marquee) return;
+    this.sceneManager.scene.remove(this.marquee.overlayGroup);
+    disposeMarqueeOverlay(this.marquee.overlayGroup);
+    this.marquee = null;
+    this.container.style.cursor = '';
+  }
 
   // ─────────────────────────────────────────────────────────
   // Resize / Rotate(V1 1254-1426 直迁,无算法改动)
@@ -843,6 +935,70 @@ function cursorForHandle(h: HandleKind, rotationDeg: number): string {
   const cursors = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize',
                    'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
   return cursors[bucket];
+}
+
+// ─────────────────────────────────────────────────────────
+// Marquee overlay 渲染 helpers(V1 1913-1975 直迁)
+// ─────────────────────────────────────────────────────────
+
+const MARQUEE_COLOR = 0x4A90E2;
+const MARQUEE_Z = 0.03;
+
+/** 重建框选 overlay:半透明 fill mesh + LineLoop 边框 */
+function rebuildMarqueeOverlay(
+  group: THREE.Group,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): void {
+  while (group.children.length > 0) {
+    const child = group.children[0];
+    group.remove(child);
+    if ('geometry' in child) (child as THREE.Mesh).geometry?.dispose();
+    const m = (child as THREE.Mesh).material;
+    if (Array.isArray(m)) for (const x of m) x.dispose();
+    else if (m) (m as THREE.Material).dispose();
+  }
+
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+  const w = maxX - minX;
+  const h = maxY - minY;
+  if (w <= 0 || h <= 0) return;
+
+  const fillGeom = new THREE.PlaneGeometry(w, h);
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: MARQUEE_COLOR,
+    transparent: true,
+    opacity: 0.12,
+    side: THREE.DoubleSide,
+    depthTest: false,
+  });
+  const fill = new THREE.Mesh(fillGeom, fillMat);
+  fill.position.set(minX + w / 2, minY + h / 2, MARQUEE_Z);
+  group.add(fill);
+
+  const borderGeom = new THREE.BufferGeometry();
+  borderGeom.setAttribute('position', new THREE.Float32BufferAttribute([
+    minX, minY, MARQUEE_Z,
+    maxX, minY, MARQUEE_Z,
+    maxX, maxY, MARQUEE_Z,
+    minX, maxY, MARQUEE_Z,
+  ], 3));
+  const borderMat = new THREE.LineBasicMaterial({ color: MARQUEE_COLOR });
+  const border = new THREE.LineLoop(borderGeom, borderMat);
+  border.renderOrder = 2;
+  group.add(border);
+}
+
+function disposeMarqueeOverlay(group: THREE.Group): void {
+  for (const child of group.children) {
+    if ('geometry' in child) (child as THREE.Mesh).geometry?.dispose();
+    const m = (child as THREE.Mesh).material;
+    if (Array.isArray(m)) for (const x of m) x.dispose();
+    else if (m) (m as THREE.Material).dispose();
+  }
 }
 
 /** 生成新 instance id(粘贴用;crypto.randomUUID 兜底 fallback) */
