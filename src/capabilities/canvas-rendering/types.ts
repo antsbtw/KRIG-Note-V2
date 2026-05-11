@@ -21,7 +21,7 @@ import type {
   ForwardRefExoticComponent,
   RefAttributes,
 } from 'react';
-import type { FillStyle, LineStyle, ArrowStyle } from '@capabilities/shape-library/types';
+import type { FillStyle, LineStyle, ArrowStyle, SubstanceDef } from '@capabilities/shape-library/types';
 
 // ─────────────────────────────────────────────────────────
 // Instance 系(V1 plugins/graph/library/types.ts 直迁)
@@ -134,8 +134,13 @@ export interface CanvasDocument {
   schema_version: number;
   view: Viewport;
   instances: Instance[];
-  /** 用户自创 substance 嵌入(G4 真消费;G3 不创建,仅 load 时透传) */
-  user_substances?: unknown[];
+  /**
+   * 用户自创 substance 嵌入(combineSelectedToSubstance 写盘随画板).
+   * - serialize:扫 instances.ref → SubstanceRegistry.get → source='user' 入此字段
+   * - loadDocument:先 register 到 registry → 再 setInstances
+   * V1 schema v1.x 临时字段;v1.5+ 拆独立 note 存储后此字段废弃.
+   */
+  user_substances?: SubstanceDef[];
 }
 
 /**

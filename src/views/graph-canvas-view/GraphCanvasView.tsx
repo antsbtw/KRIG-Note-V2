@@ -355,6 +355,8 @@ function sanitizeDocument(raw: unknown): CanvasDocument {
         ? view
         : { centerX: 0, centerY: 0, zoom: 1 },
     instances,
-    user_substances: Array.isArray(r.user_substances) ? r.user_substances : undefined,
+    user_substances: Array.isArray(r.user_substances)
+      ? (r.user_substances as CanvasDocument['user_substances'])
+      : undefined,
   };
 }

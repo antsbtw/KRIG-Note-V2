@@ -36,6 +36,8 @@ import { NodeRenderer } from './scene/NodeRenderer';
 import { HandlesOverlay } from './scene/HandlesOverlay';
 import { InteractionController } from './interaction/InteractionController';
 import { combineSelectedToSubstance } from './combine';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { ShapeLibraryApi, SubstanceDef } from '@capabilities/shape-library/types';
 import './styles.css';
 
 export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
@@ -123,11 +125,27 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       const scene = sceneRef.current;
       const renderer = nodeRendererRef.current;
       if (!scene || !renderer) return;
-      // 1) 视口
+      // 1) **先**注册 user_substances 到 SubstanceRegistry,renderer.setInstances
+      //    在 G4.5 user_substances 修复;否则 substance 实例 ref 查不到 def 不渲染
+      //    (V1 deserialize.ts:101-107 直迁顺序)
+      if (Array.isArray(doc.user_substances) && doc.user_substances.length > 0) {
+        try {
+          const api = requireCapabilityApi<ShapeLibraryApi>('shape-library');
+          for (const def of doc.user_substances) {
+            if (!def?.id || !Array.isArray(def.components)) continue;
+            // 已注册的跳过(防 register 报"already registered")
+            if (api.substances.get(def.id)) continue;
+            api.substances.register(def);
+          }
+        } catch (e) {
+          console.warn('[canvas-rendering/Host] user_substances register failed', e);
+        }
+      }
+      // 2) 视口
       if (doc.view) {
         scene.setView(doc.view.centerX, doc.view.centerY, doc.view.zoom);
       }
-      // 2) 节点
+      // 3) 节点
       renderer.setInstances(doc.instances ?? []);
     }, []);
 
@@ -143,10 +161,33 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         };
       }
       const v = scene.getView();
+      const instances = renderer.listInstances();
+
+      // 收集 user_substances(V1 serialize.ts:51-60 直迁):
+      // 扫所有 substance 实例的 ref → SubstanceRegistry → source='user' 的入文档
+      // 用户在画板创建的 substance(combineSelectedToSubstance)随画板写盘
+      let userSubstances: SubstanceDef[] | undefined;
+      try {
+        const api = requireCapabilityApi<ShapeLibraryApi>('shape-library');
+        const userRefs = new Set<string>();
+        for (const inst of instances) {
+          if (inst.type === 'substance') userRefs.add(inst.ref);
+        }
+        const collected: SubstanceDef[] = [];
+        for (const ref of userRefs) {
+          const def = api.substances.get(ref);
+          if (def && def.source === 'user') collected.push(def);
+        }
+        if (collected.length > 0) userSubstances = collected;
+      } catch (e) {
+        console.warn('[canvas-rendering/Host] user_substances collect failed', e);
+      }
+
       return {
         schema_version: 3,
         view: { centerX: v.centerX, centerY: v.centerY, zoom: v.zoom },
-        instances: renderer.listInstances(),
+        instances,
+        user_substances: userSubstances,
       };
     }, []);
 
