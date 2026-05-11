@@ -69,6 +69,21 @@ export interface InteractionControllerOpts {
   onViewportChange?: () => void;
   /** addMode 状态变化(给 view UI 显隐 "Click to place" 提示用) */
   onAddModeChange?: (spec: AddModeSpec | null) => void;
+  /**
+   * 双击节点回调(G4.5 文字节点用):view 端调 canvas-text-node.enterEdit
+   * 打开 EditOverlay popup.参数 = 命中的 instance + 屏幕坐标 + 节点屏幕尺寸.
+   */
+  onNodeDoubleClick?: (info: NodeDoubleClickInfo) => void;
+}
+
+export interface NodeDoubleClickInfo {
+  instanceId: string;
+  /** 节点在屏幕坐标的左上角(用于 popup 定位) */
+  screenX: number;
+  screenY: number;
+  /** 节点在屏幕上的宽高(用于 popup 尺寸) */
+  screenW: number;
+  screenH: number;
 }
 
 export class InteractionController {
@@ -81,6 +96,7 @@ export class InteractionController {
   private onInstancesChange?: () => void;
   private onViewportChange?: () => void;
   private onAddModeChange?: (spec: AddModeSpec | null) => void;
+  private onNodeDoubleClick?: (info: NodeDoubleClickInfo) => void;
 
   /** 当前选中(G3 单选,G4.2 起支持多选 toggle) */
   private selected = new Set<string>();
@@ -188,6 +204,7 @@ export class InteractionController {
     this.onInstancesChange = opts.onInstancesChange;
     this.onViewportChange = opts.onViewportChange;
     this.onAddModeChange = opts.onAddModeChange;
+    this.onNodeDoubleClick = opts.onNodeDoubleClick;
     this.attachListeners();
   }
 
@@ -301,18 +318,43 @@ export class InteractionController {
     const onMouseUp = (e: MouseEvent): void => this.handleMouseUp(e);
     const onWheel = (e: WheelEvent): void => this.handleWheel(e);
     const onKeyDown = (e: KeyboardEvent): void => this.handleKeyDown(e);
+    const onDblClick = (e: MouseEvent): void => this.handleDoubleClick(e);
     el.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     el.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('keydown', onKeyDown);
+    el.addEventListener('dblclick', onDblClick);
     this.unsubscribers.push(
       () => el.removeEventListener('mousedown', onMouseDown),
       () => window.removeEventListener('mousemove', onMouseMove),
       () => window.removeEventListener('mouseup', onMouseUp),
       () => el.removeEventListener('wheel', onWheel),
       () => window.removeEventListener('keydown', onKeyDown),
+      () => el.removeEventListener('dblclick', onDblClick),
     );
+  }
+
+  private handleDoubleClick(e: MouseEvent): void {
+    if (!this.onNodeDoubleClick) return;
+    const screen = this.toContainerCoords(e);
+    const hit = this.hitTest(screen.x, screen.y);
+    if (!hit) return;
+    // 算节点屏幕坐标 + 尺寸(走 SceneManager 同源投影,与 mesh 视觉一致)
+    const tl = this.sceneManager.worldToScreen(hit.position.x, hit.position.y);
+    const br = this.sceneManager.worldToScreen(
+      hit.position.x + hit.size.w,
+      hit.position.y + hit.size.h,
+    );
+    // 把 container-relative 坐标转 viewport(EditOverlay popup 用 fixed 定位)
+    const rect = this.container.getBoundingClientRect();
+    this.onNodeDoubleClick({
+      instanceId: hit.instanceId,
+      screenX: rect.left + Math.min(tl.x, br.x),
+      screenY: rect.top + Math.min(tl.y, br.y),
+      screenW: Math.abs(br.x - tl.x),
+      screenH: Math.abs(br.y - tl.y),
+    });
   }
 
   // ─────────────────────────────────────────────────────────

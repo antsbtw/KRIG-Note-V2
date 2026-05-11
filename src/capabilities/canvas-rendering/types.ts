@@ -163,6 +163,17 @@ export interface CanvasHostProps {
   onContextMenu?: (e: { clientX: number; clientY: number; targetIds: string[] }) => void;
   /** addMode 状态变化(view UI 显隐 "Click to place" 提示 + crosshair cursor) */
   onAddModeChange?: (spec: AddModeSpec | null) => void;
+  /**
+   * 节点双击(G4.5 文字节点用):view 端拿 instanceId + 屏幕投影 → 调
+   * canvas-text-node.enterEdit 打开 EditOverlay popup.
+   */
+  onNodeDoubleClick?: (info: {
+    instanceId: string;
+    screenX: number;
+    screenY: number;
+    screenW: number;
+    screenH: number;
+  }) => void;
 }
 
 /**
@@ -214,6 +225,12 @@ export interface CanvasHostHandle {
     category: string;
     description: string;
   }): { substanceId: string; newInstanceId: string; consumedIds: string[] } | null;
+  /**
+   * G4.5 P4:view 端 mount 后注入 canvas-text-node.atomBridge.atomsToSvgInput.
+   * NodeRenderer 文字节点真渲染需此函数把 instance.doc → SerializerAtom[].
+   * 不调时 text 节点降级为占位灰矩形.
+   */
+  setAtomBridge(fn: ((doc: unknown) => Promise<unknown[]>) | null): void;
 }
 
 // ─────────────────────────────────────────────────────────

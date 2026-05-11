@@ -38,10 +38,14 @@ class SessionStore {
     this.active = { opts };
     this.emit();
     return {
-      exit: (commit: boolean): void => {
+      // 命令式 exit 主要给外部"强制关闭"场景用(view unmount 等);
+      // 编辑结束的正常路径走 EditOverlay 内部 onExit + clear(它持有最新 doc).
+      // 这里命令式 commit 拿不到 latest doc,等同 commit=false(丢弃),只 clear 状态.
+      exit: (_commit: boolean): void => {
         if (!this.active || this.active.opts.instanceId !== opts.instanceId) return;
-        opts.onExit(opts.instanceId, commit ? 'pending-from-overlay' : null);
-        // EditOverlay 内部会调 clear();此处不立即 emit,避免重复触发
+        opts.onExit(opts.instanceId, null);
+        this.active = null;
+        this.emit();
       },
       isActive: (): boolean =>
         this.active !== null && this.active.opts.instanceId === opts.instanceId,

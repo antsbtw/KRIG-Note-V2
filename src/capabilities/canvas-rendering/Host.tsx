@@ -40,7 +40,7 @@ import './styles.css';
 
 export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
   function CanvasHost(props, ref) {
-    const { onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange } = props;
+    const { onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange, onNodeDoubleClick } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneManager | null>(null);
     const nodeRendererRef = useRef<NodeRenderer | null>(null);
@@ -75,6 +75,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
           viewportDirtyRef.current = true;
         },
         onAddModeChange: (spec) => onAddModeChange?.(spec),
+        onNodeDoubleClick: (info) => onNodeDoubleClick?.(info),
       });
       sceneRef.current = scene;
       nodeRendererRef.current = nodeRenderer;
@@ -200,6 +201,26 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
     }, []);
 
     /**
+     * 注入 canvas-text-node atomBridge — 文字节点真渲染依赖.
+     * 类型用 Promise<unknown[]> 是因为 SerializerAtom 在 canvas-text-node 内部,
+     * NodeRenderer 内 cast 成 Atom[](运行时 atom-bridge 返回的就是 SerializerAtom).
+     */
+    const setAtomBridge = useCallback(
+      (fn: ((doc: unknown) => Promise<unknown[]>) | null): void => {
+        const renderer = nodeRendererRef.current;
+        if (!renderer) return;
+        // SerializerAtom == AtomBridgeHook 输出 — cast 走 atom-serializers Atom 形态
+        renderer.setAtomBridge(fn as Parameters<typeof renderer.setAtomBridge>[0]);
+        // 注入后:重新渲染所有 text 节点(让降级灰矩形升级为真 SVG mesh)
+        const list = renderer.listInstances();
+        for (const inst of list) {
+          if (inst.ref === 'krig.text.label') renderer.update(inst);
+        }
+      },
+      [],
+    );
+
+    /**
      * Inspector / view 端 patch Instance:浅合并 + 重渲染.
      * style_overrides 走深合并(fill/line/arrow 分别合并字段),否则 fill 改了 color
      * 会丢掉 type.
@@ -259,6 +280,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         isAddMode,
         updateInstance,
         combineSelected,
+        setAtomBridge,
       }),
       [
         loadDocument,
@@ -275,6 +297,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         isAddMode,
         updateInstance,
         combineSelected,
+        setAtomBridge,
       ],
     );
 

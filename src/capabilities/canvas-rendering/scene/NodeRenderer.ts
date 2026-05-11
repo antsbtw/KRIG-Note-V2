@@ -35,9 +35,18 @@ import type { SceneManager } from './SceneManager';
 import { pathToThree } from './path-to-three';
 import { renderLine, updateLineGeometry } from './LineRenderer';
 import { resolveLineEndpoints } from '../interaction/magnet-snap';
+import { TextRenderer } from './TextRenderer';
+import type { Atom as SerializerAtom } from '../../../lib/atom-serializers/svg';
 
-/** ref === 'krig.text.label' 时走 G3-10 占位;G4.5 接 TextRenderer + atom-bridge 真渲染 */
+/** ref === 'krig.text.label' 时走 TextRenderer SVG → mesh 真渲染(G4.5 P4) */
 const TEXT_REF = 'krig.text.label';
+
+/**
+ * canvas-text-node atom-bridge 注入(view 端 mount 时通过 NodeRenderer.setAtomBridge 设).
+ * 不直 import canvas-text-node 模块,避免 capability 互相耦合;view 端走 capabilityRegistry
+ * 拿 canvas-text-node.atomBridge 再注入(NodeRenderer 不知道 capability registry 存在).
+ */
+type AtomBridgeHook = (doc: unknown) => Promise<SerializerAtom[]>;
 
 /** 判断 instance 是否为 line 类(需要 shape-library 查 category;调用方先确保 instance.type === 'shape')*/
 function isLineInstance(inst: Instance, api: ShapeLibraryApi): boolean {
@@ -74,7 +83,19 @@ export class NodeRenderer {
   /** lazy shape-library api;首次 mount 时拿一次 */
   private shapeApi: ShapeLibraryApi | null = null;
 
+  /** 文字节点 SVG → Three.js mesh 渲染器(G4.5 P4) */
+  private textRenderer = new TextRenderer();
+  /** 文字节点异步 render token(同 instance 多次刷新时丢弃过期回调) */
+  private textRenderTokens = new Map<string, number>();
+  /** view 端注入的 canvas-text-node atomBridge.atomsToSvgInput(避免 capability 耦合) */
+  private atomBridge: AtomBridgeHook | null = null;
+
   constructor(private sceneManager: SceneManager) {}
+
+  /** view 端 mount 时注入 canvas-text-node atom-bridge */
+  setAtomBridge(fn: AtomBridgeHook | null): void {
+    this.atomBridge = fn;
+  }
 
   private getShapeApi(): ShapeLibraryApi {
     if (!this.shapeApi) {
@@ -164,6 +185,7 @@ export class NodeRenderer {
     for (const id of Array.from(this.byId.keys())) this.remove(id);
     this.lineRefs.clear();
     this.instances.clear();
+    this.textRenderTokens.clear();
   }
 
   /**
@@ -273,9 +295,12 @@ export class NodeRenderer {
       return null;
     }
 
-    // G3-10 文字节点仍占位(text label,G4.5 接 canvas-text-node 真渲染)
+    // G4.5 文字节点:走 TextRenderer + canvas-text-node.atomBridge 真渲染
+    // (atomBridge 未注入时降级灰色占位)
     if (inst.ref === TEXT_REF) {
-      return this.renderPlaceholder(inst, shape, 'text');
+      return this.atomBridge
+        ? this.renderTextInstance(inst)
+        : this.renderPlaceholder(inst, shape, 'text');
     }
 
     // G4.1 line 类 shape:真渲染(端点驱动,经 magnet-snap.resolveLineEndpoints)
@@ -396,8 +421,102 @@ export class NodeRenderer {
   }
 
   /**
-   * G3-10 文字节点占位渲染:text label 用占位灰色 mesh + 边框,让用户视觉上能看到
-   * 节点位置;**G4.5 接 canvas-text-node + TextRenderer + atom-bridge 真渲染**.
+   * 文字节点真渲染(V1 NodeRenderer:336-453 直迁简化):
+   * - inner group 三层:bg(可选 sticky)+ hitArea(透明覆盖)+ contentSlot(SVG mesh 异步填入)
+   * - 异步 textRenderer.render(atoms) → 填入 contentSlot
+   * - token 防同 instance 多次刷新过期回调污染
+   *
+   * 砍掉(留 v1.1):adaptTextNodeSizeToContent / pickReadableTextColor 智能配色 /
+   * size_lock + text_valign 高度自适应
+   */
+  private renderTextInstance(inst: Instance): RenderedNode | null {
+    if (!this.atomBridge) return null;
+    const { position, size } = ensurePositionSize(inst, null);
+    const safeSize = { w: Math.max(1, size.w), h: Math.max(1, size.h) };
+
+    const innerGroup = new THREE.Group();
+
+    // 背景(Sticky):style_overrides.fill 实色背景
+    const bgFill = inst.style_overrides?.fill;
+    if (bgFill?.type === 'solid' && bgFill.color) {
+      const bgGeo = new THREE.PlaneGeometry(safeSize.w, safeSize.h);
+      const bgMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(bgFill.color),
+        side: THREE.DoubleSide,
+      });
+      const bgMesh = new THREE.Mesh(bgGeo, bgMat);
+      bgMesh.position.set(safeSize.w / 2, safeSize.h / 2, -0.01);
+      bgMesh.renderOrder = -1;
+      bgMesh.userData.isTextBackground = true;
+      innerGroup.add(bgMesh);
+    }
+
+    // 透明 hit-area(覆盖整个 size,捕获 glyph 间空隙点击 + 双击进入编辑)
+    const hitGeo = new THREE.PlaneGeometry(safeSize.w, safeSize.h);
+    const hitMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+    hitMesh.position.set(safeSize.w / 2, safeSize.h / 2, 0);
+    hitMesh.userData.isTextHitArea = true;
+    innerGroup.add(hitMesh);
+
+    // content slot(SVG mesh 异步填入)
+    const contentSlot = new THREE.Group();
+    contentSlot.userData.isTextContentSlot = true;
+    innerGroup.add(contentSlot);
+
+    const outerGroup = wrapForRotation(innerGroup, position, safeSize, inst.rotation ?? 0);
+    outerGroup.userData.instanceId = inst.id;
+    outerGroup.userData.isTextNode = true;
+
+    // 异步 SVG mesh
+    const token = (this.textRenderTokens.get(inst.id) ?? 0) + 1;
+    this.textRenderTokens.set(inst.id, token);
+
+    void this.atomBridge(inst.doc).then(async (atoms) => {
+      if (atoms.length === 0) return;
+      if (this.textRenderTokens.get(inst.id) !== token) return;
+      try {
+        const svgGroup = await this.textRenderer.render(atoms, { width: safeSize.w });
+        if (this.textRenderTokens.get(inst.id) !== token) {
+          this.textRenderer.dispose(svgGroup);
+          return;
+        }
+        if (!this.byId.has(inst.id)) {
+          this.textRenderer.dispose(svgGroup);
+          return;
+        }
+        // 抵消 TextRenderer 内的 group.scale.y=-1(SceneManager frustum 已 Y 翻转)
+        svgGroup.scale.y = 1;
+        svgGroup.position.set(0, 0, 0.01);
+        svgGroup.traverse((obj) => { obj.renderOrder = 1; });
+        contentSlot.add(svgGroup);
+      } catch (e) {
+        console.warn(`[NodeRenderer] text render failed for ${inst.id}`, e);
+      }
+    }).catch((e) => {
+      console.warn(`[NodeRenderer] atomBridge failed for ${inst.id}`, e);
+    });
+
+    return {
+      instanceId: inst.id,
+      kind: 'shape',
+      group: outerGroup,
+      shapeRef: inst.ref,
+      position: { ...position },
+      size: { ...safeSize },
+      rotation: inst.rotation ?? 0,
+    };
+  }
+
+  /**
+   * G3-10 文字节点占位渲染:text label 用占位灰色 mesh + 边框(降级路径,
+   * canvas-text-node.atomBridge 未注入时使用).
    *
    * G4.1 已删除 line 占位分支 — line 类 shape 走 renderLineShape 真渲染.
    */
@@ -550,9 +669,16 @@ function estimateSubstanceBbox(def: SubstanceDef, api: ShapeLibraryApi): { w: nu
   return { w: w || 100, h: h || 100 };
 }
 
-/** Three.js 资源 dispose(防内存泄漏) */
+/**
+ * Three.js 资源 dispose(防内存泄漏).
+ *
+ * **跳过 userData.sharedAsset = true 的 mesh**(TextRenderer L2 LRU 共享的 SVG
+ * geom/mat;dispose 后其他 mesh 一起变空 — 由 LRU 淘汰时统一释放,见
+ * TextRenderer.clearGeometryCache).
+ */
 function disposeGroup(group: THREE.Object3D): void {
   group.traverse((obj) => {
+    if (obj.userData?.sharedAsset === true) return;
     if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineLoop) {
       const m = obj as THREE.Mesh | THREE.Line;
       m.geometry?.dispose?.();

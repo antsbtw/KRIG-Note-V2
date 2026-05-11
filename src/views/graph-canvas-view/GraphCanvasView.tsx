@@ -36,6 +36,7 @@ import type {
   Instance,
   AddModeSpec,
 } from '@capabilities/canvas-rendering/types';
+import type { CanvasTextNodeApi } from '@capabilities/canvas-text-node';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasRecord,
@@ -60,6 +61,11 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     () => requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store'),
     [],
   );
+  const textNode = useMemo(
+    () => requireCapabilityApi<CanvasTextNodeApi>('canvas-text-node'),
+    [],
+  );
+  const TextEditOverlay = textNode.EditOverlay;
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
 
@@ -177,6 +183,16 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     return () => flushSave();
   }, [flushSave]);
 
+  // ── G4.5 P4:Host mount 后注入 canvas-text-node atom-bridge,文字节点真渲染 ──
+  // 必须在 activeGraphId 改变后(loadDocument 触发 setInstances)再注入,否则首批
+  // text 节点会用降级灰矩形.放在 activeGraphId 后的 effect 里,与 load 串行.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.setAtomBridge(textNode.atomBridge.atomsToSvgInput as Parameters<CanvasHostHandle['setAtomBridge']>[0]);
+    return () => host.setAtomBridge(null);
+  }, [textNode, activeGraphId]);
+
   // ── Host 回调 ──
   const handleInstancesChange = useCallback(
     (_instances: Instance[]): void => {
@@ -220,6 +236,34 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     [scheduleSave],
   );
 
+  // ── G4.5 P4 双击节点 → 文字节点进入编辑(其他节点暂忽略) ──
+  const handleNodeDoubleClick = useCallback(
+    (info: { instanceId: string; screenX: number; screenY: number; screenW: number; screenH: number }): void => {
+      const inst = hostRef.current?.getInstance(info.instanceId);
+      if (!inst) return;
+      if (!textNode.atomBridge.isTextNodeRef(inst.ref)) return;
+      textNode.enterEdit({
+        instanceId: info.instanceId,
+        initialDoc: inst.doc,
+        screenX: info.screenX,
+        screenY: info.screenY,
+        width: info.screenW,
+        height: info.screenH,
+        backgroundColor: inst.style_overrides?.fill?.color,
+        heightFixed: !!inst.size_lock?.h,
+        workspaceId,
+        viewId: 'graph-canvas-view',
+        onExit: (id, newDoc) => {
+          if (newDoc !== null) {
+            hostRef.current?.updateInstance(id, { doc: newDoc } as Partial<Instance>);
+            scheduleSave();
+          }
+        },
+      });
+    },
+    [textNode, workspaceId, scheduleSave],
+  );
+
   return (
     <div className="krig-graph-canvas-view">
       <GraphCanvasToolbar
@@ -246,9 +290,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
             onInstancesChange={handleInstancesChange}
             onViewportChange={handleViewportChange}
             onSelectionChange={handleSelectionChange}
+            onNodeDoubleClick={handleNodeDoubleClick}
           />
         )}
       </div>
+
+      {/* G4.5 文字节点编辑浮层(挂在画板顶层,session-store 驱动渲染) */}
+      <TextEditOverlay />
 
       {/* UI 浮层(画板内浮层归 capability,view 控 open/anchor) */}
       <LibraryPicker
