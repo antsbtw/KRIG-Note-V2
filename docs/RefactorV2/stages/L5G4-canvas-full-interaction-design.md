@@ -1,6 +1,6 @@
 # L5-G4 设计 — canvas-rendering 完整交互 + Library Picker / Inspector + canvas-text-node
 
-> v0.1 · 2026-05-10
+> v0.2 · 2026-05-11 · 实施前用户 P1 复审(删除 G4-2 回退到违规路径的文本;W5 严格态 A 边界不可破)
 >
 > 配套:
 > - 上游 plan:[../v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 § 5 G4
@@ -91,7 +91,7 @@ Canvas.md § 2.1 v1 验收清单 17 项中 **第 1~17 项**(除第 13 项 Edit S
 | # | 决策点 | A(默认) | B(替代) | 推荐 |
 |---|---|---|---|---|
 | **G4-1** | 子段拆分粒度(plan G4 一段口径下) | **A 4~5 commit 子段**(G4.1 scene + G4.2 handles + G4.3 marquee/addMode + G4.4 UI + G4.5 canvas-text-node)| B 单 commit | **A** — G3 教训:巨变 commit 容易卡;每子段独立 typecheck + lint + 手测;最后统一合 main |
-| **G4-2** | canvas-text-node 内 PM 实例化路径 | A 直迁 V1 GraphEditor(import @drivers/text-editing-driver 直接拿 blockRegistry)— **违反 W5 严格态**,view 屏障层只允 type import driver | **B 复用 text-editing.Host 作为子 PM 挂载** — Host 是 React 组件,canvas-text-node 把它嵌入 EditOverlay popup 内 | **B** — 不破 W5 屏障;V2 text-editing.Host 是完整 PM EditorView,canvas-text-node 当"管理 popup 浮层 + 注入初始 atoms + 接编辑结果回调"的薄壳即可 |
+| **G4-2** | canvas-text-node 内 PM 实例化路径 | ❌ A 直迁 V1 GraphEditor(import @drivers/text-editing-driver 直接拿 blockRegistry)— **W5 严格态 A 边界硬约束:capability 不直 import @drivers/* 运行时**,本选项不可行,仅作历史记录(V1 模式) | **B 复用 text-editing.Host 作为子 PM 挂载** — Host 是 React 组件,canvas-text-node 把它嵌入 EditOverlay popup 内 | **B**(唯一合规路径) — V2 text-editing.Host 是完整 PM EditorView,canvas-text-node 当"管理 popup 浮层 + 注入初始 atoms + 接编辑结果回调"的薄壳即可;**如 Host 当前不支持嵌入 + 自定义 plugin,见 § 7 风险表 — 走"扩展 text-editing API"前置子任务,不走任何回退** |
 | **G4-3** | canvas-text-node 内 InlineToolbar(选区浮工具栏)| **A 直迁 V1 InlineToolbar 371 行**(自管 mark toggle) | B 复用 V2 floating-toolbar-registry 注册项 | **A** — V1 InlineToolbar 是浮层内**独立小工具栏**,跟 V2 floating-toolbar(应用级)定位不同;且 V2 floating-toolbar 跟 text-editing.Host 内部已耦合,跨 view 复用复杂.G5 时若需统一可再评估 |
 | **G4-4** | atom-bridge 反向 prosemirrorToAtoms 路径 | A 让 text-editing API 加 `prosemirrorToAtoms` 方法 | **B canvas-text-node 内部自管反向转换**(用 PM doc.toJSON 后,自己写转换器) | **A** — text-editing 已经有 atomsToProseMirror,加配对的 prosemirrorToAtoms 是同位扩展;V2 text-editing.Host 编辑时 view 拿到的是 DriverSerialized(PM JSON),atom 转换在 capability 内部.**预留 G4.5 子段实施**;如 text-editing 内部反向已存在(可能在 ebook extraction 链路里也有),直接复用 |
 | **G4-5** | undo/redo 实现 | **A V1 50 步快照模式**(InteractionController 内 pushHistory)| B 接 V2 `undo-redo` capability | **A** — 对齐 D-13=B 决议;画板状态是 Three.js mesh + JSON,V2 undo-redo 当前只针对 PM 文档;后续 v1.5+ 评估抽 view-agnostic |
@@ -261,7 +261,7 @@ grep -rn "from 'prosemirror" src/ --include="*.ts" --include="*.tsx" | grep -v "
 
 | 风险 | 缓解 |
 |---|---|
-| **G4-2 canvas-text-node 走 text-editing.Host** 是新接口设计,V2 既有节奏没先例 | G4.5 启动前单独评估:看 text-editing.Host 是否支持"嵌入到任意 DOM 节点 + 自定义 plugin 清单"(可能需要 text-editing capability 扩展 API)。如不支持,降级 G4-2=A 直接 import @drivers(违反 W5 但实用),并登记 charter v0.5 时统一改造 |
+| **G4-2 canvas-text-node 走 text-editing.Host** 是新接口设计,V2 既有节奏没先例 | G4.5 启动前**单独前置子任务**:评估 text-editing.Host 是否支持"嵌入到任意 DOM 节点 + 自定义 plugin 清单";**如不支持**,暂停 G4.5,先开独立 commit 扩展 text-editing capability API(`Host` props 加 `mountTarget / pluginsBuilder / initialDoc / onUpdate` 等接口字段;同时配套补 `prosemirrorToAtoms`,见 G4-4),text-editing 自身典型场景(NoteView)0 影响后再进 G4.5.**绝不**降级到"view/capability 直 import @drivers/* 运行时" — W5 严格态 A 边界不可破,无"实用但违规"的退路 |
 | **G4-4 prosemirrorToAtoms** 接口可能 text-editing 暂未暴露 | 同上,G4.5 启动前 grep text-editing.api.ts / DESIGN.md 看是否有 docToAtoms;无则提 text-editing API 扩展 PR(单独 commit,在 G4.5 commit 之前) |
 | InteractionController 直迁 V1 1975 行后,**部分方法依赖 dispatchLinkHref / 自定义事件**等 V2 没的能力 | dispatchLinkHref 整段砍(独立阶段);其他依赖逐行评估 |
 | HandlesOverlay 依赖 V1 `isTextNodeRef`(在 V1 edit/atom-bridge 内),G4.1 砍掉 atom-bridge 真依赖前,先在 canvas-rendering 内提供 isTextNodeRef helper 简版(`ref === 'krig.text.label'`) | 已在 G3 NodeRenderer.ts 内有同名常量(TEXT_REF)逻辑;G4.1 时抽出公共 helper |
@@ -283,12 +283,16 @@ Commit 2  feat(L5-G4.1) scene 补齐 + NodeRenderer 还原 line(~1100 行)
 Commit 3  feat(L5-G4.2) handles + resize/rotate + Cmd+C+V+Z(~900 行)
 Commit 4  feat(L5-G4.3) marquee + addMode + 画 line + rewire(~700 行)
 Commit 5  feat(L5-G4.4) UI 浮层(Picker + Inspector + Combine Dialog)(~1100 行)
+Commit 5.5 feat(text-editing) 扩展 API:Host 嵌入式 + prosemirrorToAtoms
+           — **G4.5 前置依赖,W5 严格态 A 唯一合规路径**(条件触发:G4.5 启动
+           前评估 text-editing.Host 不支持嵌入 + 自定义 plugin 时,先开本
+           commit;若已支持则跳过)
 Commit 6  feat(L5-G4.5) canvas-text-node + NodeRenderer text 真渲染(~1100 行)
 Commit 7  docs(L5-G4) completion + snapshot
 Merge --no-ff feature/L5G4-canvas-full-interaction → main
 
 每个 commit 自包含 typecheck 0 + lint 0 warn + 屏障 grep 0 + 用户子段验收过
-全 5 实施 commit 完成 + 用户全段验收通过后,统一合 main
+全 5(或 6,含 5.5)实施 commit 完成 + 用户全段验收通过后,统一合 main
 ```
 
 ---
@@ -298,3 +302,4 @@ Merge --no-ff feature/L5G4-canvas-full-interaction → main
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G4 单段 + 内部 5 commit 子段(G4.1~G4.5);12 决策点全 A 默认或推荐项;3 段验收清单 20 项;P1-1 严格屏障保持;LOC 估算 ~3245 新增 + ~1700 改写;**charter § 6.5 教训登记**:本段所有 interaction / scene 代码强制按 V1 直迁 + 整段砍模式(G4-10=A);**G4-2=B canvas-text-node 走 text-editing.Host 嵌入式**是新接口设计,需 G4.5 启动前评估 text-editing capability API 扩展(可能 prosemirrorToAtoms / Host 自定义 plugin 清单需扩) |
+| 2026-05-11 | v0.2 | 实施前用户 P1 复审 — 删除 G4-2 回退到违规路径的文本:v0.1 § 7 风险表把"降级 G4-2=A 直接 import @drivers(违反 W5 但实用)"写成可执行备选,与 W5 严格态 A 边界硬约束冲突(view/capability 不直 import @drivers/* 运行时).修法:① § 7 风险条目改写为"暂停 G4.5 并先补 text-editing capability API",绝不允许任何"实用但违规"退路;② § 2 决策表 G4-2 行 A 选项标 ❌ 不可行(仅作 V1 历史记录),B 标"唯一合规路径";③ § 8 实施分 commit 加 **Commit 5.5 text-editing API 扩展前置子任务**(条件触发,Host 嵌入式 + prosemirrorToAtoms;典型场景 NoteView 0 影响后再进 G4.5).其余审计 4 项(three 屏障/install/canvas-text-node registry/UI 归属)通过 |
