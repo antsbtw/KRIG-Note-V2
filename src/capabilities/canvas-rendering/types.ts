@@ -197,6 +197,12 @@ export interface CanvasHostHandle {
   exitAddMode(): void;
   /** 是否在添加模式(view 端 toolbar 高亮 Picker 按钮用) */
   isAddMode(): boolean;
+  /**
+   * 浅合并 patch 到 instance + 重新渲染.
+   * Inspector 改 position/size/style_overrides 等都走这条.
+   * 不存在的 id 静默忽略.
+   */
+  updateInstance(id: string, patch: Partial<Instance>): void;
 }
 
 // ─────────────────────────────────────────────────────────

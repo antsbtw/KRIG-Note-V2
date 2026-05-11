@@ -52,6 +52,8 @@ export { CanvasHost };
 // view 端直接 import 使用(open / anchorRect / onPick / onClose 全 view 控制)
 export { LibraryPicker } from './ui/library-picker';
 export type { LibraryPickerProps } from './ui/library-picker';
+export { FloatingInspector } from './ui/floating-inspector';
+export type { FloatingInspectorProps } from './ui/floating-inspector';
 
 // ── 自我诊断(charter § 5)──
 console.info(

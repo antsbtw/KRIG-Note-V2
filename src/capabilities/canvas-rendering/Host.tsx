@@ -198,6 +198,32 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return interactionRef.current?.isAddMode() ?? false;
     }, []);
 
+    /**
+     * Inspector / view 端 patch Instance:浅合并 + 重渲染.
+     * style_overrides 走深合并(fill/line/arrow 分别合并字段),否则 fill 改了 color
+     * 会丢掉 type.
+     */
+    const updateInstance = useCallback((id: string, patch: Partial<Instance>): void => {
+      const renderer = nodeRendererRef.current;
+      if (!renderer) return;
+      const current = renderer.getInstance(id);
+      if (!current) return;
+      const next: Instance = {
+        ...current,
+        ...patch,
+        // style_overrides 嵌套合并:fill / line / arrow 各自合并
+        style_overrides: patch.style_overrides
+          ? {
+              fill: { ...current.style_overrides?.fill, ...patch.style_overrides.fill },
+              line: { ...current.style_overrides?.line, ...patch.style_overrides.line },
+              arrow: { ...current.style_overrides?.arrow, ...patch.style_overrides.arrow },
+            }
+          : current.style_overrides,
+      };
+      renderer.update(next);
+      onInstancesChange?.(renderer.listInstances());
+    }, [onInstancesChange]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -213,6 +239,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         enterAddMode,
         exitAddMode,
         isAddMode,
+        updateInstance,
       }),
       [
         loadDocument,
@@ -227,6 +254,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         enterAddMode,
         exitAddMode,
         isAddMode,
+        updateInstance,
       ],
     );
 
