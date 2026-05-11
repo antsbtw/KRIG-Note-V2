@@ -75,11 +75,17 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   /** 当前活跃画板 id 的 ref(防抖到点时 closure 读最新) */
   const activeIdRef = useRef<string | null>(null);
   /** 当前画板 title 的 ref(serialize 不带 title,save 需要 title 一并写入) */
-  const titleRef = useRef<string>('Untitled Canvas');
+  const titleRef = useRef<string>('');
   /** 防抖定时器 */
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** load 竞态保护:快速切画板时丢弃过期的 async 结果 */
   const loadSeqRef = useRef(0);
+  /**
+   * 已 load 完成的画板 id(防御性 — 避免 record 还没回来时 viewport / instance 推流
+   * 触发 save 用空 doc + 默认 title 覆盖磁盘数据).
+   * 只有 `loadedIdRef === activeIdRef` 时才允许 flushSave 真正写盘.
+   */
+  const loadedIdRef = useRef<string | null>(null);
 
   // ── 实际保存(flush)──
   const flushSave = useCallback((): void => {
@@ -89,6 +95,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     }
     const id = activeIdRef.current;
     if (!id) return;
+    // 防御:record 还没 load 完时不 save(避免空 doc + 默认 title 擦磁盘真数据)
+    if (loadedIdRef.current !== id) return;
     const host = hostRef.current;
     if (!host) return;
     const doc = host.serialize();
@@ -116,11 +124,15 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
       // Host 已渲染但容器空,清掉残留 — 加载空 document
       host.loadDocument(emptyDocument());
       titleRef.current = '';
+      loadedIdRef.current = null;
       return;
     }
 
     // G3-9=A:先 flush 旧 → 再 load 新
     flushSave();
+    // 新画板还没 load 完之前,标记未就绪,阻止 scheduleSave 误写
+    loadedIdRef.current = null;
+    titleRef.current = '';
     const seq = ++loadSeqRef.current;
     void library
       .load(activeGraphId)
@@ -131,6 +143,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         titleRef.current = record.title;
         const doc = sanitizeDocument(record.doc_content);
         host.loadDocument(doc);
+        // load 成功后标记就绪 — 后续 scheduleSave 才允许真正写盘
+        loadedIdRef.current = activeGraphId;
       })
       .catch((err) => {
         console.warn('[graph-canvas-view] load failed:', err);

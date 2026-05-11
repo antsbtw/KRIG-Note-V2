@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * InteractionController — 画板鼠标 / 键盘交互(L5-G3 减量版)
  *
@@ -270,41 +271,41 @@ export class InteractionController {
   }
 
   // ─────────────────────────────────────────────────────────
-  // hit-test(简单 AABB,G3 不支持 OBB — 旋转节点的 hit-test 精度可能差,G4 补 OBB)
+  // hit-test — Three.js Raycaster(对齐 V1 src/plugins/graph/canvas/interaction/
+  // InteractionController.ts L754;与渲染共享投影矩阵,用户视觉看到哪里就能
+  // 命中哪里;支持旋转节点;不依赖坐标系符号约定)
   // ─────────────────────────────────────────────────────────
 
   private hitTest(screenX: number, screenY: number): RenderedNode | null {
-    const world = this.sceneManager.screenToWorld(screenX, screenY);
-    // 从上(最后渲染)向下找,return 第一个命中
-    const rendered: RenderedNode[] = [];
-    for (const rn of this.allRendered()) rendered.push(rn);
-    for (let i = rendered.length - 1; i >= 0; i--) {
-      const rn = rendered[i];
-      if (this.pointInAabb(world, rn)) return rn;
-    }
-    return null;
-  }
-
-  /** 简单 AABB 命中(不考虑 rotation,G3 简化) */
-  private pointInAabb(world: { x: number; y: number }, rn: RenderedNode): boolean {
-    const { position, size } = rn;
-    return (
-      world.x >= position.x &&
-      world.x <= position.x + size.w &&
-      world.y >= position.y &&
-      world.y <= position.y + size.h
+    if (!this.sceneManager.screenToNDC(screenX, screenY, this.ndc)) return null;
+    this.raycaster.setFromCamera(this.ndc, this.sceneManager.camera);
+    const hits = this.raycaster.intersectObjects(
+      this.sceneManager.scene.children,
+      true,
     );
+    // 沿 parent 链找 outer.group(带 userData.instanceId),取最小 area 优先
+    // (小元素优先,避免大背景遮挡选小元素)
+    let best: { node: RenderedNode; area: number } | null = null;
+    for (const hit of hits) {
+      let obj: THREE.Object3D | null = hit.object;
+      let instanceId: string | null = null;
+      while (obj) {
+        const id = (obj.userData as { instanceId?: string })?.instanceId;
+        if (typeof id === 'string') {
+          instanceId = id;
+          break;
+        }
+        obj = obj.parent;
+      }
+      if (!instanceId) continue;
+      const node = this.nodeRenderer.get(instanceId);
+      if (!node) continue;
+      const area = node.size.w * node.size.h;
+      if (!best || area < best.area) best = { node, area };
+    }
+    return best?.node ?? null;
   }
 
-  /** 列出当前所有渲染节点(NodeRenderer.byId 内部访问 ids → get) */
-  private allRendered(): RenderedNode[] {
-    const out: RenderedNode[] = [];
-    for (const id of this.nodeRenderer.ids()) {
-      const rn = this.nodeRenderer.get(id);
-      if (rn) out.push(rn);
-    }
-    return out;
-  }
 
   // ─────────────────────────────────────────────────────────
   // 选中边框 overlay
@@ -374,9 +375,3 @@ function sameSet<T>(a: Set<T>, b: Set<T>): boolean {
   return true;
 }
 
-// raycaster / ndc 暂留(给 G4 旋转 OBB / Line2 hit 用),G3 走简单 AABB
-// 后续 G4 引入 HandlesOverlay 时,raycaster + ndc 接 handle hit-test
-// 简化变量未在 G3 使用时让 TypeScript 不报错:
-// (Already declared in class fields for G4 use)
-void new THREE.Raycaster;
-void new THREE.Vector2;
