@@ -42,12 +42,23 @@
   padding: 0 !important;
 }
 
-/* Headings:画板节点不该有"放大字号",H1/H2/H3 视觉 = paragraph 同字号 + 加粗 */
-.krig-canvas-edit-popup .krig-pm-host .ProseMirror h1,
-.krig-canvas-edit-popup .krig-pm-host .ProseMirror h2,
-.krig-canvas-edit-popup .krig-pm-host .ProseMirror h3 {
-  font-size: 14px !important;
+/* Headings:画板节点缩小字号(对齐 V1 — H1=22 / H2=18 / H3=16),
+   不再用 NoteView 全屏的 38/28/22(会撑爆 popup),也不强行 14(失去视觉区别) */
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror h1 {
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  margin: 2px 0 !important;
+  padding: 0 !important;
+}
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror h2 {
+  font-size: 18px !important;
   font-weight: 600 !important;
-  margin: 0 !important;
+  margin: 2px 0 !important;
+  padding: 0 !important;
+}
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror h3 {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  margin: 2px 0 !important;
   padding: 0 !important;
 }
