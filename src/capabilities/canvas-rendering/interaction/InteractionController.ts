@@ -30,6 +30,8 @@ import type { HandlesOverlay, HandleKind } from '../scene/HandlesOverlay';
 import type { Instance, InstanceKind } from '../types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
+import { renderLine, updateLineGeometry } from '../scene/LineRenderer';
+import { findClosestMagnet, MAGNET_SNAP_RADIUS_PX } from './magnet-snap';
 
 /**
  * Picker / Toolbar 触发"添加模式"的入参:
@@ -132,7 +134,18 @@ export class InteractionController {
   /** 添加模式 — 用户从 Picker 选 spec,等点击画布放置(V1:133) */
   private addMode: AddModeSpec | null = null;
 
-  // [G4.3c 砍] drawingLine / hoveredLineId(V1:89-107)
+  /** 画 line 状态(addMode 是 line 类时 mousedown 启动;V1:89-101 直迁) */
+  private drawingLine: {
+    startInstanceId: string;
+    startMagnetId: string;
+    /** 起点世界坐标(magnet 解析结果,绑定后不再变) */
+    startWorld: { x: number; y: number };
+    /** 同 addMode.spec.ref */
+    lineRef: string;
+    /** 预览 line 的 THREE.Group(挂在 sceneManager.scene) */
+    previewGroup: THREE.Group;
+  } | null = null;
+
   // [G4.3d 砍] magnetHints(V1:104)
   // [G4.3e 砍] lineEndpointHandles / rewiring(V1:113-131)
   // [G4.4 砍] onNodeDoubleClick / onContextMenu(V1:139-141)
@@ -196,7 +209,8 @@ export class InteractionController {
   exitAddMode(): void {
     if (!this.addMode) return;
     this.addMode = null;
-    // [G4.3c 接续] cancelDrawingLine + clearMagnetHints
+    this.cancelDrawingLine();
+    // [G4.3d 接续] clearMagnetHints
     this.container.style.cursor = '';
     this.onAddModeChange?.(null);
   }
@@ -236,6 +250,12 @@ export class InteractionController {
       disposeMarqueeOverlay(this.marquee.overlayGroup);
       this.marquee = null;
     }
+    if (this.drawingLine) {
+      this.sceneManager.scene.remove(this.drawingLine.previewGroup);
+      disposeLineGroup(this.drawingLine.previewGroup);
+      this.drawingLine = null;
+    }
+    this.addMode = null;
     this.undoStack = [];
     this.redoStack = [];
     this.clipboard = [];
@@ -286,10 +306,10 @@ export class InteractionController {
 
     // ── 0. addMode 优先级最高(V1 365-374 直迁) ──
     if (this.addMode) {
-      // [G4.3c 接续]line 类 shape 走 press-drag-release 画线模式;G4.3b 仅 placeInstance
+      // line 类 shape:press-drag-release 画线模式 — mousedown 必须在某 magnet 16px 内,
+      // 否则取消(不创建悬空 line)
       if (this.isAddingLine()) {
-        // [G4.3c 砍] tryStartDrawingLine — 占位:line addMode 直接退出,先不创建
-        this.exitAddMode();
+        this.tryStartDrawingLine(world);
         return;
       }
       this.placeInstance(world);
@@ -369,6 +389,10 @@ export class InteractionController {
       this.applyRotate(world, e.shiftKey);
       return;
     }
+    if (this.drawingLine) {
+      this.updateDrawingLine(world);
+      return;
+    }
     if (this.marquee) {
       this.marquee.currentWorld = world;
       rebuildMarqueeOverlay(this.marquee.overlayGroup, this.marquee.startWorld, world);
@@ -394,7 +418,7 @@ export class InteractionController {
     }
   }
 
-  private handleMouseUp(_e: MouseEvent): void {
+  private handleMouseUp(e: MouseEvent): void {
     if (this.resizing) {
       this.resizing = null;
       this.refreshHandles();
@@ -405,6 +429,12 @@ export class InteractionController {
       this.rotating = null;
       this.refreshHandles();
       this.onInstancesChange?.();
+      return;
+    }
+    if (this.drawingLine) {
+      const screen = this.toContainerCoords(e);
+      const world = this.sceneManager.screenToWorld(screen.x, screen.y);
+      this.tryFinishDrawingLine(world);
       return;
     }
     if (this.marquee) {
@@ -513,7 +543,7 @@ export class InteractionController {
         this.deleteSelected();
       }
     } else if (e.key === 'Escape') {
-      // V1 优先级:resize/rotate → marquee → [G4.3e rewire] → [G4.3c drawingLine] → addMode → 清选区
+      // V1 优先级:resize/rotate → marquee → [G4.3e rewire] → drawingLine → addMode → 清选区
       if (this.resizing) {
         this.resizing = null;
         this.refreshHandles();
@@ -522,6 +552,8 @@ export class InteractionController {
         this.refreshHandles();
       } else if (this.marquee) {
         this.cancelMarquee();
+      } else if (this.drawingLine) {
+        this.cancelDrawingLine();
       } else if (this.addMode) {
         this.exitAddMode();
       } else if (this.selected.size > 0) {
@@ -616,6 +648,128 @@ export class InteractionController {
     this.notifySelection();
     this.exitAddMode();
     this.onInstancesChange?.();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // 画 line(V1 874-973 直迁;addMode line 类下 press-drag-release + magnet 吸附)
+  // ─────────────────────────────────────────────────────────
+
+  /** 收集所有候选 magnet 节点(供 findClosestMagnet 用) */
+  private allMagnetCandidates(): Array<{ node: RenderedNode; instance: Instance }> {
+    const out: Array<{ node: RenderedNode; instance: Instance }> = [];
+    for (const id of this.nodeRenderer.ids()) {
+      const node = this.nodeRenderer.get(id);
+      const inst = this.getInstance(id);
+      if (node && inst) out.push({ node, instance: inst });
+    }
+    return out;
+  }
+
+  /** 屏幕像素吸附半径 → 世界距离(用于 magnet 吸附半径换算) */
+  private snapRadiusWorld(): number {
+    const zoom = this.sceneManager.getView().zoom;
+    return MAGNET_SNAP_RADIUS_PX / Math.max(zoom, 0.01);
+  }
+
+  /** mousedown 在 magnet 16px 内 → 起手画线;否则取消 addMode(不创建悬空 line) */
+  private tryStartDrawingLine(world: { x: number; y: number }): void {
+    if (!this.addMode) return;
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+    );
+    if (!closest) {
+      this.exitAddMode();
+      return;
+    }
+    const lineRef = this.addMode.ref;
+    const startWorld = { x: closest.magnet.x, y: closest.magnet.y };
+    // 创建预览 line(start = end = magnet 处,长度 0)
+    const previewGroup = renderLine(lineRef, {
+      start: startWorld,
+      end: startWorld,
+    });
+    this.sceneManager.scene.add(previewGroup);
+    this.drawingLine = {
+      startInstanceId: closest.magnet.instanceId,
+      startMagnetId: closest.magnet.magnetId,
+      startWorld,
+      lineRef,
+      previewGroup,
+    };
+  }
+
+  /** mousemove:更新预览 line 终点(吸附附近 magnet 或跟鼠标) */
+  private updateDrawingLine(world: { x: number; y: number }): void {
+    if (!this.drawingLine) return;
+    const exclude = new Set([this.drawingLine.startInstanceId]);
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+      exclude,
+    );
+    const end = closest ? { x: closest.magnet.x, y: closest.magnet.y } : world;
+    updateLineGeometry(
+      this.drawingLine.previewGroup,
+      this.drawingLine.lineRef,
+      this.drawingLine.startWorld,
+      end,
+    );
+  }
+
+  /** mouseup:落点在 magnet 16px 内 → 创建 line instance;否则取消 */
+  private tryFinishDrawingLine(world: { x: number; y: number }): void {
+    if (!this.drawingLine) return;
+    const drawing = this.drawingLine;
+    // 清掉预览 line(无论成败)
+    this.sceneManager.scene.remove(drawing.previewGroup);
+    disposeLineGroup(drawing.previewGroup);
+    this.drawingLine = null;
+
+    const exclude = new Set([drawing.startInstanceId]);
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+      exclude,
+    );
+    if (!closest) {
+      this.exitAddMode();
+      return;
+    }
+
+    // 创建 line instance(endpoints 驱动,无 position/size)
+    this.pushHistory();
+    const id = this.nodeRenderer.nextInstanceId();
+    const instance: Instance = {
+      id,
+      type: 'shape',
+      ref: drawing.lineRef,
+      endpoints: [
+        { instance: drawing.startInstanceId, magnet: drawing.startMagnetId },
+        { instance: closest.magnet.instanceId, magnet: closest.magnet.magnetId },
+      ],
+    };
+    this.nodeRenderer.add(instance);
+
+    // 选中新 line(line 不显 handles — refreshHandles 内部已守门)
+    this.selected.clear();
+    this.selected.add(id);
+    this.refreshOverlays();
+    this.refreshHandles();
+    this.notifySelection();
+    this.exitAddMode();
+    this.onInstancesChange?.();
+  }
+
+  /** ESC / unmount / exitAddMode 时取消画 line(清掉预览 group) */
+  private cancelDrawingLine(): void {
+    if (!this.drawingLine) return;
+    this.sceneManager.scene.remove(this.drawingLine.previewGroup);
+    disposeLineGroup(this.drawingLine.previewGroup);
+    this.drawingLine = null;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -1147,6 +1301,17 @@ function rebuildMarqueeOverlay(
   const border = new THREE.LineLoop(borderGeom, borderMat);
   border.renderOrder = 2;
   group.add(border);
+}
+
+/** 释放 line 预览 group 的几何 / 材质(V1 1796-1804 直迁) */
+function disposeLineGroup(group: THREE.Group): void {
+  for (const child of group.children) {
+    const line = child as THREE.Line;
+    if (line.geometry) line.geometry.dispose();
+    const m = line.material;
+    if (Array.isArray(m)) for (const x of m) x.dispose();
+    else if (m) (m as THREE.Material).dispose();
+  }
 }
 
 function disposeMarqueeOverlay(group: THREE.Group): void {
