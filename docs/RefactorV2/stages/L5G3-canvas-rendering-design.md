@@ -1,6 +1,6 @@
 # L5-G3 设计 — canvas-rendering capability(Three.js 单点屏障核心)
 
-> v0.2 · 2026-05-10 · 实施前用户 P1+P2 复审(Instance 归属 + NodeRenderer 调用方式统一)
+> v0.3 · 2026-05-10 · 实施前用户复审第二轮(G3-2=B → G3-2=A,对齐 ebook-rendering 实际模式)
 >
 > 配套:
 > - 上游 plan:[../v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 § 3.3 + § 5 G3
@@ -29,7 +29,7 @@
 - [x] **npm 屏障收紧**:`src/capabilities/canvas-rendering/` 是**唯一允许 import three 的位置**(eslint config 配 override allowlist);所有其他位置 0 import three(view / shape-library / 其他 capability 全部禁)
 - [x] **capabilities/canvas-rendering/scene/**(Three.js 渲染管线核心,V1 直迁 4 文件 + path-to-three 从 V1 plugin 迁入):
   - `SceneManager.ts`:Three.js 底座(scene / camera / renderer / Retina / RAF / fitToContent / screenToWorld 互转)
-  - `NodeRenderer.ts` **G3 砍剩"shape + 简单 substance"**:V1 818 行砍掉 line/text/canvas-text-node 部分(归 G4),~400 行;**直 import shape-library 模块级 `ShapeRegistry / SubstanceRegistry` + `evaluateShape`**(决策 G3-2=B,capability 层间 W5 边界 A 允许;对齐 V2 ebook-rendering 直 import ebook-library 单例模式);拿到 EvaluatedPath → path-to-three 转 Mesh
+  - `NodeRenderer.ts` **G3 砍剩"shape + 简单 substance"**:V1 818 行砍掉 line/text/canvas-text-node 部分(归 G4),~400 行;**通过 `requireCapabilityApi<ShapeLibraryApi>('shape-library')` 拿 shapes/substances API**(决策 G3-2=A v0.3 修订,对齐 V2 既有 ebook-rendering 实际模式 — Host.tsx 用 `requireCapabilityApi<EBookLibraryApi>('ebook-library')` 拿运行时,不直 import 单例);类型走 `import type { ShapeLibraryApi, EvaluatedPath } from '@capabilities/shape-library/types'`;拿到 EvaluatedPath → path-to-three 转 Mesh
   - `DotGrid.ts`:F-1 点阵网格底(V1 132 行直迁)
   - **`path-to-three.ts`**:V1 `plugins/graph/library/shapes/renderers/path-to-three.ts` 395 行迁入(P1-1 屏障核心 — V2 单一 Three.Shape 投影位置);**接口改对接 EvaluatedPath**(V1 内部直接吃 ShapeDef + buildEnv,V2 改为接受 G2 输出的 `EvaluatedPath` 纯数据 + `FillStyle / LineStyle` 风格)
 - [x] **capabilities/canvas-rendering/interaction/** **G3 减量版**:
@@ -67,7 +67,7 @@
 | # | 决策点 | A(默认) | B(替代) | 推荐 |
 |---|---|---|---|---|
 | **G3-1** | capability id 字面值 | **`canvas-rendering`**(对齐 plan v0.2 § 3.3) | `canvas-three` / `graph-rendering` | **A** — plan 字面 |
-| **G3-2** | NodeRenderer 渲染数据流 — direct 调 shape-library 模块 vs 走 requireCapabilityApi | A 走 `requireCapabilityApi('shape-library')` 间接(对齐 W5 严格态)| **B** 同 capability 层间允许直 import 单例 `ShapeRegistry / SubstanceRegistry`(双导出兜底) | **B** — capability 层间 W5 边界 A 允许直 import 单例(对齐 V2 ebook-rendering 直 import @capabilities/ebook-library 单例的模式;`requireCapabilityApi` 是给 view 用的);**用 type import + 模块级 export** |
+| **G3-2** | NodeRenderer 渲染数据流 — 走 requireCapabilityApi vs 直 import 单例 | **A 走 `requireCapabilityApi('shape-library')` 拿运行时**(类型走 `import type`)| B 直 import 模块级 `ShapeRegistry / SubstanceRegistry` 单例 | **A** — v0.3 修订(实施前用户复审第二轮):核实 V2 既有 `capabilities/ebook-rendering/Host.tsx:167` 实际是 `useMemo(() => requireCapabilityApi<EBookLibraryApi>('ebook-library'))` 拿运行时,不是直 import 单例;V2 既有节奏统一为 **capability 层间也走 requireCapabilityApi**(view 强制 + capability 间也走);ESLint config 不需要例外,现状即可(`@capabilities/* allowTypeImports: true` 对类型 import 放行,运行时只能走 capabilityRegistry)|
 | **G3-3** | path-to-three 接收数据形态 | A 接受 ShapeDef + EvaluateContext,内部再调 evaluate(V1 模式) | **B** 接受 EvaluatedPath(G2 输出的纯数据)+ 风格 | **B**(P1-1 严格屏障核心) — NodeRenderer 调 `shapeLibrary.shapes.evaluate(id, props, ctx)` 拿 EvaluatedPath,再 `pathToThree(evalPath, fillStyle, lineStyle)` 转 mesh;**path-to-three 不再 import shape-library**(纯函数,只吃数据) |
 | **G3-4** | path-to-three 是否同时支持 SVG path 字符串 input | A 是 — 也可接 raw SVG path 字符串(扩展给 family-tree projection 用) | **B** 否 — v1 只接 EvaluatedPath | **B**(范围控制) — family-tree projection 阶段(里程碑 H)有需求再加 path-to-three 重载 |
 | **G3-5** | NodeRenderer 砍 line/text 后,substance 内的 line/text 子组件怎么办 | A skip(渲染 substance 时遇 line/text component 静默跳过) | B fallback 灰色矩形(显式让用户知道 G3 没实现)| **A**(对齐 plan G3 范围 — 完整 substance 渲染留 G4 一起做);V1 内置 substance library 2 / family 3 全是 shape + text 组合,G3 仅渲染 shape 部分,family-tree 验收留 G4+ |
@@ -93,7 +93,7 @@ src/capabilities/canvas-rendering/
 ├── Host.tsx                      ~250 行(forwardRef + useImperativeHandle + 装 SceneManager + NodeRenderer + DotGrid + InteractionController)
 ├── scene/
 │   ├── SceneManager.ts           ~346 行(V1 直迁)
-│   ├── NodeRenderer.ts           ~400 行(V1 818 砍 line/text/canvas-text-node 后;G3-2=B 直 import shape-library 模块级 ShapeRegistry + SubstanceRegistry;G3-5 substance 内 line/text 子组件静默 skip;G3-10 文字节点占位)
+│   ├── NodeRenderer.ts           ~400 行(V1 818 砍 line/text/canvas-text-node 后;**G3-2=A v0.3 修订**:通过 `requireCapabilityApi<ShapeLibraryApi>('shape-library')` 拿 shapes/substances API,对齐 V2 既有 ebook-rendering 实际模式;G3-5 substance 内 line/text 子组件静默 skip;G3-10 文字节点占位)
 │   ├── DotGrid.ts                ~132 行(V1 直迁)
 │   └── path-to-three.ts          ~310 行(V1 395 砍 SVGLoader 等同等部分;接口改对接 EvaluatedPath;P1-1 屏障核心)
 ├── interaction/
@@ -307,4 +307,5 @@ grep -rn "from 'three'" src/ --include="*.ts" --include="*.tsx" | grep -v "canva
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G3 范围 + 13 决策点 + 文件清单 + EvaluatedPath → path-to-three 数据流 + 14 项验收清单 + 双 commit 拆分 + 风险登记 + P1-1 严格版屏障 ESLint 落地点 |
+| 2026-05-10 | v0.3 | 实施开工时实地核验发现 v0.2 G3-2=B "对齐 ebook-rendering 直 import 单例" 是误判:核验 `capabilities/ebook-rendering/Host.tsx:167` 实际是 `useMemo(() => requireCapabilityApi<EBookLibraryApi>('ebook-library'))` — 通过 capabilityRegistry 拿运行时;V2 ESLint config 行 161-164 也对 `@capabilities/*` 设 `allowTypeImports: true`(禁运行时 import,允许 type) → V2 既有节奏统一为 **capability 层间也走 requireCapabilityApi**.修法:G3-2 由 B 改 **A**(走 requireCapabilityApi);§ 1.1 NodeRenderer 描述 + § 2 决策行 + § 3 文件清单 NodeRenderer 行 共 3 处同步.工作量影响:NodeRenderer 内 `const shapeApi = requireCapabilityApi<ShapeLibraryApi>('shape-library')` 代替 import 单例;ESLint config 不需例外块,现状即可.**(条目顺序按错误发现先后,v0.3 与 v0.2 同日)** |
 | 2026-05-10 | v0.2 | 实施前用户 P1+P2 复审 — 两条 design 内部口径冲突修订:**P1 Instance 归属冲突**:v0.1 § 1.1 + § 3 文件清单写"Instance 类型 type import @capabilities/shape-library/types",但 G2-10=B 已决策 shape-library 不含 Instance 系(实际 src/capabilities/shape-library/types.ts 已确认不含);修法:Instance / InstanceKind / InstanceEndpoint / TextNodeAtoms 显式归 canvas-rendering/types.ts(从 V1 plugins/graph/library/types.ts 直迁,V1 当时 Instance 与 ShapeDef 混在一起;V2 G2 已分离 ShapeDef → shape-library,G3 接 Instance → canvas-rendering);canvas-text-node / graph-library-store(IPC 边界仍 unknown / CanvasDocumentJson)/ future family-tree 通过 `import type from '@capabilities/canvas-rendering/types'`;types.ts LOC 估算 120 → 180(+60 行 V1 Instance 类型迁入).**P2 NodeRenderer 调用方式冲突**:v0.1 § 1.1 写"通过 requireCapabilityApi('shape-library') 调 evaluate",与 § 2 G3-2=B 决策(直 import 模块级 ShapeRegistry)矛盾;修法:§ 1.1 改"**直 import shape-library 模块级 ShapeRegistry / SubstanceRegistry + evaluateShape**(决策 G3-2=B,capability 层间 W5 边界 A 允许;对齐 ebook-rendering 直 import ebook-library 单例模式)" |
