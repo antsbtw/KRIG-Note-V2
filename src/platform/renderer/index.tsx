@@ -55,8 +55,15 @@ if (_activeId) workspaceManager.getBus(_activeId);
 
 // dev-only:DevTools 调试钩子 — 让 `window.__krig.bus` / `__krig.wm` 直接可用
 // Vite 在 prod build 时会 dead-code eliminate 整段(import.meta.env.DEV === false)。
+//
+// **扩展模式**(不覆盖):各 capability(如 shape-library)启动副作用可能已经在
+// `window.__krig` 上挂了自己的 dev 桥;这里 spread 现有对象保留它们,只追加 wm / bus.
+// 修法对齐 L5-G2 shape-library 实施时发现的初始化顺序 bug — capability import 顺序
+// 早于本段,如果这里硬赋值会抹掉 capability 设的桥.
 if (import.meta.env.DEV) {
-  (window as unknown as Record<string, unknown>).__krig = {
+  const win = window as unknown as { __krig?: Record<string, unknown> };
+  win.__krig = {
+    ...(win.__krig ?? {}),
     wm: workspaceManager,
     get bus() {
       const id = workspaceManager.getActiveId();
