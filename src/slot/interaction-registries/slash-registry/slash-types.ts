@@ -9,6 +9,12 @@ export interface SlashItem {
   keywords?: string[];
   /** 关联 view(undefined = 全局)*/
   view?: string;
+  /**
+   * 条目作用域(L5-G4.5,与 floating-toolbar 同形态):
+   * - 'view'(默认):仅 view===viewId 时可见
+   * - 'global':所有 PM-using view 可见(turn-into H1-H3 / list / quote 等通用)
+   */
+  scope?: 'view' | 'global';
   group?: string;
   order?: number;
 }

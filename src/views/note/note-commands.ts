@@ -163,9 +163,21 @@ export function registerNoteCommands(): void {
 
   function withInstance(fn: (instanceId: string) => void): () => void {
     return () => {
+      // L5-G4.5:focus-first — 优先用真正持有焦点的 PM 实例 id.
+      // 这让 NoteView 注册的"通用"命令(toggleMark / setHeading 等)能被 canvas-text-node
+      // 嵌入的 popup 编辑器消费(那边 instanceId 是 `${workspaceId}::${nodeId}` 复合,
+      // 与 workspaceManager.getActiveId() 不等).
+      //
+      // Fallback:focus 为空时(无 PM 实例聚焦,但 view 仍在),走 workspace activeId.
+      // L5-A 约定保留:NoteView 自己的 driver instanceId == workspaceId.
+      const focused = requireCapabilityApi<TextEditingApi>('text-editing')
+        .instanceRegistry.getFocusedInstanceId();
+      if (focused) {
+        fn(focused);
+        return;
+      }
       const wsId = workspaceManager.getActiveId();
       if (!wsId) return;
-      // L5-A 约定:driver instanceId == workspaceId(一 workspace 一 NoteView)
       fn(wsId);
     };
   }
@@ -183,10 +195,13 @@ export function registerNoteCommands(): void {
   registerToggleMark('note-view.toggle-code', 'code');
 
   commandRegistry.register('note-view.set-heading-level', (level: unknown) => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    // 同 withInstance:focus-first,workspace fallback(L5-G4.5)
+    const focused = requireCapabilityApi<TextEditingApi>('text-editing')
+      .instanceRegistry.getFocusedInstanceId();
+    const id = focused ?? workspaceManager.getActiveId();
+    if (!id) return;
     const lvl = typeof level === 'number' ? level : null;
-    tea().setHeading(wsId, lvl);
+    tea().setHeading(id, lvl);
   });
 
   // ── L5-B3.3:文字颜色 / 背景高亮(Plan C-1 缩水版 — 6 色循环;完整 ColorPicker UI 留 L5-B3.4)──
@@ -245,15 +260,10 @@ export function registerNoteCommands(): void {
   function registerSlashTurn(commandId: string, target: TurnTarget): void {
     commandRegistry.register(commandId, withInstance((instanceId) => {
       tea().clearSlashTrigger(instanceId);
-      // slash 没有 pos 参数,作用于光标所在 block
-      const ws = workspaceManager.get(instanceId);
-      if (!ws) return;
-      const result = tea().resolveBlockAt(instanceId, { x: 0, y: 0 });
-      // 用光标位置(driver api 没暴露 cursor pos,用 turnIntoSelection 替代)
-      // 简化:直接走 driver api 内部 — 通过 setSelection 之前 PM state.selection.$from
+      // 作用于光标所在 block;driver 内部走 PM state.selection.$from.
+      // L5-G4.5:不再 require workspace 存在(canvas-text-node 复合 id 拿不到 workspace),
+      // turnIntoSelection 只需 driver instanceId,不依赖 workspace.
       tea().turnIntoSelection(instanceId, target);
-      void ws;
-      void result;
     }));
   }
   registerSlashTurn('note-view.slash-turn-paragraph', 'paragraph');
