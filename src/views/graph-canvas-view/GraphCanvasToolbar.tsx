@@ -1,26 +1,36 @@
 /**
- * GraphCanvasToolbar — view 顶部 toolbar(L5-G1 占位)
+ * GraphCanvasToolbar — view 顶部 toolbar(L5-G3 升级)
  *
- * G1 范围:仅显示当前打开的画板标题(从 graph-library-store 拉)。完整功能
- * (导航 / + 添加 / 缩放 / Open / SlotToggle / Combine 临时按钮)留 G4 + G5 段。
+ * G1 占位 → G3 加最小可用工具:
+ * - 当前画板标题(订阅 onGraphListChanged 刷新)
+ * - Fit-to-content 按钮(调 hostRef.fitToContent)
+ * - 缩放显示(占位级,完整 toolbar 留 G5 注册到 toolbarRegistry)
  *
- * G5 时,toolbar 内容会从 view 内组件改注册到 toolbarRegistry,本组件可能
- * 整体被替换;现在保留是为了"占位 + 调试"。
+ * G5 时,toolbar 内容会从 view 内组件改注册到 toolbarRegistry,本组件整体替换.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import {
+  type MutableRefObject,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasListItem,
 } from '@capabilities/graph-library-store/types';
+import type { CanvasHostHandle } from '@capabilities/canvas-rendering/types';
 
 interface GraphCanvasToolbarProps {
   activeGraphId: string | null;
+  /** Host ref(G3 加 — Fit-to-content 等命令调用入口) */
+  hostRef: MutableRefObject<CanvasHostHandle | null>;
 }
 
 export function GraphCanvasToolbar({
   activeGraphId,
+  hostRef,
 }: GraphCanvasToolbarProps) {
   const library = useMemo(
     () => requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store'),
@@ -54,13 +64,29 @@ export function GraphCanvasToolbar({
     };
   }, [activeGraphId, library]);
 
+  const handleFit = (): void => {
+    hostRef.current?.fitToContent();
+  };
+
   return (
     <div className="krig-graph-canvas-toolbar">
       <div className="krig-graph-canvas-toolbar__title">
         {activeGraphId == null ? '画板' : title || 'Untitled Canvas'}
       </div>
+      <div className="krig-graph-canvas-toolbar__actions">
+        {activeGraphId != null && (
+          <button
+            type="button"
+            className="krig-graph-canvas-toolbar__btn"
+            onClick={handleFit}
+            title="适应内容(↔)"
+          >
+            ↔ Fit
+          </button>
+        )}
+      </div>
       <div className="krig-graph-canvas-toolbar__placeholder-note">
-        G1 占位 — 完整 toolbar 留 G5
+        G3 占位 toolbar — 完整工具栏留 G5
       </div>
     </div>
   );

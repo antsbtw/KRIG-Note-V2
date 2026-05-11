@@ -35,6 +35,7 @@ import '@capabilities/ebook-library';   // L5-C1 新增(view install 声明 + �
 import '@capabilities/ebook-rendering'; // L5-C2 新增(pdfjs-dist 4.9.155 + Host + 虚拟滚动)
 import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 + 文件夹,JSON 起步)
 import '@capabilities/shape-library';       // L5-G2 新增(Shape + Substance 资源仓库,0 import three)
+import '@capabilities/canvas-rendering';    // L5-G3 新增(Three.js 单点屏障核心,P1-1 严格屏障)
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
