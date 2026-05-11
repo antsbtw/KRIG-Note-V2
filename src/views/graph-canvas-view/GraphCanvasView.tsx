@@ -53,7 +53,9 @@ interface GraphCanvasViewProps {
 const SAVE_DEBOUNCE_MS = 1000; // G3-8=A 对齐 V1
 
 export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
-  const { Host, LibraryPicker, FloatingInspector, CreateSubstanceDialog } = useMemo(
+  // FloatingInspector 砍掉 — v1.1+ 走 V1/Freeform 风格"shape 边缘跟随浮条",
+  // 替代当前"右上角 Format Shape 浮窗"模式.capability 文件保留作历史参考.
+  const { Host, LibraryPicker, CreateSubstanceDialog } = useMemo(
     () => requireCapabilityApi<CanvasRenderingApi>('canvas-rendering'),
     [],
   );
@@ -73,10 +75,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
-  // 文字编辑态 — 进入编辑时关 Inspector / Picker(避免与 popup 互相干扰)
-  const [isTextEditing, setIsTextEditing] = useState(false);
 
   // ── per-ws state 订阅 ──
   const wsState = useSyncExternalStore(
@@ -195,13 +194,12 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     return () => host.setAtomBridge(null);
   }, [textNode, activeGraphId]);
 
-  // ── G4.5 P5:订阅文字编辑态,enter 时关 Inspector / Picker / Combine Dialog ──
-  // (互斥:popup 内编辑文字时,其他浮层都该让位)
+  // ── G4.5 P5:订阅文字编辑态,enter 时关其他浮层(Picker / Combine Dialog) ──
+  // FloatingInspector 已砍,留 Picker 互斥(同时打开 Picker 进 addMode + popup 编辑文字
+  // 在交互上没意义).
   useEffect(() => {
     return textNode.onEditingChange((editing) => {
-      setIsTextEditing(editing);
       if (editing) {
-        setInspectorOpen(false);
         setPickerOpen(false);
         setCombineDialogOpen(false);
       }
@@ -223,8 +221,6 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   );
   const handleSelectionChange = useCallback((ids: string[]): void => {
     setSelectedIds(ids);
-    // 单选自动打开 Inspector;空选区关掉
-    setInspectorOpen(ids.length > 0);
   }, []);
 
   // ── G4.4d UI 浮层 handlers ──
@@ -236,12 +232,6 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     hostRef.current?.enterAddMode(spec);
     setPickerOpen(false);
   }, []);
-  const handleInspectorUpdate = useCallback(
-    (id: string, patch: Partial<Instance>): void => {
-      hostRef.current?.updateInstance(id, patch);
-    },
-    [],
-  );
   const handleCombineSubmit = useCallback(
     (result: { name: string; category: string; description: string }): void => {
       const r = hostRef.current?.combineSelected(result);
@@ -319,14 +309,6 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         anchorRect={pickerAnchor}
         onPick={handlePickerPick}
         onClose={() => setPickerOpen(false)}
-      />
-      <FloatingInspector
-        open={inspectorOpen && activeGraphId != null && !isTextEditing}
-        selectedIds={selectedIds}
-        getInstance={(id) => hostRef.current?.getInstance(id) ?? null}
-        onUpdate={handleInspectorUpdate}
-        onClose={() => setInspectorOpen(false)}
-        onCombine={() => setCombineDialogOpen(true)}
       />
       <CreateSubstanceDialog
         open={combineDialogOpen}
