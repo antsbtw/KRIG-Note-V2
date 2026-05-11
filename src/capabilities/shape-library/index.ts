@@ -99,20 +99,26 @@ console.info(
   `[shape-library] alive | shapes: ${_shapeCount}, substances: ${_substanceCount}`,
 );
 
-// ── dev-only:启动时跑 smoke test + 暴露到 window.__krig.shapeLib(DevTools 自检用)──
+// ── dev-only:暴露到 window.__krig.shapeLib(DevTools 自检用)──
 // prod 模式 Vite dead-code eliminate 整段(import.meta.env.DEV === false)
+//
+// **不**在启动时自动跑 smoke — 对齐 G2 design v0.2 § 2 表 G2-6=B
+// (smoke 只暴露函数,用户在 DevTools 按需 `window.__krig.shapeLib.runSmoke()` 触发,
+// 避免污染启动 console).runShapeSmoke / printSmoke 通过桥暴露便于手测.
 if (import.meta.env.DEV) {
-  // 启动跑一次 smoke,失败时输出 failures 表
-  import('./shapes/__smoke__/run').then(({ runShapeSmoke, printSmoke }) => {
-    const rep = runShapeSmoke();
-    printSmoke(rep);
-  });
-  // DevTools 桥:`window.__krig.shapeLib.shapes.evaluate(...)` 等
+  // DevTools 桥:`window.__krig.shapeLib.shapes.Registry.list()` /
+  // `window.__krig.shapeLib.runSmoke()` 等
   // (path alias `@capabilities/*` 在 DevTools 原生 import 不识别,这里挂全局桥)
   const krig = (window as unknown as { __krig?: Record<string, unknown> }).__krig ?? {};
   krig.shapeLib = {
     shapes: { Registry: ShapeRegistry },
     substances: { Registry: SubstanceRegistry },
+    runSmoke: async () => {
+      const { runShapeSmoke, printSmoke } = await import('./shapes/__smoke__/run');
+      const rep = runShapeSmoke();
+      printSmoke(rep);
+      return rep;
+    },
   };
   (window as unknown as Record<string, unknown>).__krig = krig;
 }

@@ -1,6 +1,6 @@
 # L5-G2 设计 — Shape + Substance 资源仓库 capability
 
-> v0.2 · 2026-05-10 · 启动前用户 P1-A 复审(install 列表对齐上游 plan 口径)
+> v0.3 · 2026-05-10 · G2 merge 后用户 P2 复审(dev-auto-smoke 与 G2-6=B 决策冲突修订)
 >
 > 配套:
 > - 上游 plan:[../v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 § 3.2 + § 5 G2
@@ -201,7 +201,7 @@ export interface EvaluateInput {
 | ✅ typecheck 0 error | tsc --noEmit |
 | ✅ lint 0 warn | eslint . 全工程 |
 | ✅ **屏障 grep 0 命中**(本段核心)| `grep -rn "from 'three'" src/capabilities/shape-library/` → 0 行 |
-| ✅ smoke test 通过 | runShapeSmoke() 返回 ok:true,total:22,failures:[] |
+| ✅ smoke test 通过 | DevTools 调 `window.__krig.shapeLib.runSmoke()` 返回 ok:true,total:22,failures:[](G2-6=B 按需触发,不启动自动跑)|
 
 ---
 
@@ -220,12 +220,15 @@ export interface EvaluateInput {
    grep -rn "import.*'three'" src/capabilities/shape-library/ # 应 0 命中
    grep -rn "THREE\." src/capabilities/shape-library/        # 应 0 命中
    ```
-4. **smoke test**(在 DevTools console):
+4. **smoke test**(在 DevTools console,按需触发 — 对齐 G2-6=B,**不**启动自动跑):
    ```js
-   const api = (await import('@capabilities/shape-library')).runShapeSmoke();
+   // 用 dev-only 桥(path alias 不识别走 __krig)
+   await window.__krig.shapeLib.runSmoke();
    // 期望:{ ok: true, total: 22, failed: [], byCategory: { basic: 11, arrow: 3, flowchart: 4, line: 3, text: 1 } }
    ```
-   或者把 `runShapeSmoke()` 调用挂在 `index.ts` 末尾的 dev-only 分支(`if (import.meta.env.DEV)`),让启动时自动跑一次。
+   ⚠️ v0.1 设计文档此处曾写"或挂在 index.ts dev-only 分支启动自动跑"
+   — 与 G2-6=B 决策(smoke 不污染启动 console)矛盾,v0.3 修订删除该误导,
+   实施时按 G2-6=B 走"按需触发"路径.
 5. **typecheck / lint** — 命令行 `npx tsc --noEmit && npx eslint .` 全 0
 6. **renderer 注册闭环** — DevTools 跑:
    ```js
@@ -265,3 +268,4 @@ export interface EvaluateInput {
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G2 范围 + 10 决策点 + 文件清单 + EvaluatedPath / EvaluateContext API + 6 项验收清单(开发态自检) + 单 commit 拆分 + 风险登记 |
 | 2026-05-10 | v0.2 | 启动前用户 P1-A 复审 — install 列表口径与上游 plan 冲突修订:v0.1 § 6 完成判据"install-coverage 0 missing(view 未 install shape-library,G3 才加)"+ § 8 风险表"install 列表 G2 后不更新"等"渐进式 install"表述,与 plan v0.2 § 6.1 写的"install: 4 项"口径冲突 → 选 A(对齐 ebook 既有先例:install 是声明性契约,不是已就绪声明):① § 6 完成判据 install-coverage 改"missing 3 → 2(shape-library 归零)";② § 8 风险表"install 不变"明示 4 项已在 G1 P1-A 修订时完整声明;③ 联动改 G1 design v0.2 → v0.3 + G1 completion 补 P1-A 修订条目 + view 实际代码 install 1 项 → 4 项 |
+| 2026-05-10 | v0.3 | G2 merge 后用户 P2 复审 — dev-auto-smoke 与 G2-6=B 决策冲突修订:v0.1 § 7 第 4 项写"或把 runShapeSmoke 挂 dev-only 分支启动自动跑",与 § 2 表 G2-6=B(smoke 只暴露函数 / 不污染启动 console)矛盾;实施 commit 4(f2f2c32)按 § 7 误导文字加了 dev-auto-smoke;v0.3 修订:① § 7 第 4 项删除误导文字,改写为 "DevTools 按需触发 `window.__krig.shapeLib.runSmoke()`";② § 6 smoke 完成判据同步;③ 代码修补 src/capabilities/shape-library/index.ts 删除启动自动跑,改挂 `runSmoke` 函数到 `__krig.shapeLib` 桥(单独 fix commit);④ G2 completion 补"P2 dev-auto-smoke 修订"条目 |
