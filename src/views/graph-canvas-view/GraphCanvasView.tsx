@@ -23,6 +23,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
@@ -33,6 +34,7 @@ import type {
   CanvasDocument,
   Viewport,
   Instance,
+  AddModeSpec,
 } from '@capabilities/canvas-rendering/types';
 import type {
   GraphLibraryStoreApi,
@@ -50,7 +52,7 @@ interface GraphCanvasViewProps {
 const SAVE_DEBOUNCE_MS = 1000; // G3-8=A 对齐 V1
 
 export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
-  const { Host } = useMemo(
+  const { Host, LibraryPicker, FloatingInspector, CreateSubstanceDialog } = useMemo(
     () => requireCapabilityApi<CanvasRenderingApi>('canvas-rendering'),
     [],
   );
@@ -60,6 +62,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   );
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
+
+  // ── G4.4d UI 浮层状态(view 端拥有 open/anchor;capability 提供组件)──
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [combineDialogOpen, setCombineDialogOpen] = useState(false);
 
   // ── per-ws state 订阅 ──
   const wsState = useSyncExternalStore(
@@ -181,10 +190,45 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     },
     [scheduleSave],
   );
+  const handleSelectionChange = useCallback((ids: string[]): void => {
+    setSelectedIds(ids);
+    // 单选自动打开 Inspector;空选区关掉
+    setInspectorOpen(ids.length > 0);
+  }, []);
+
+  // ── G4.4d UI 浮层 handlers ──
+  const handlePickerOpen = useCallback((rect: DOMRect): void => {
+    setPickerAnchor(rect);
+    setPickerOpen(true);
+  }, []);
+  const handlePickerPick = useCallback((spec: AddModeSpec): void => {
+    hostRef.current?.enterAddMode(spec);
+    setPickerOpen(false);
+  }, []);
+  const handleInspectorUpdate = useCallback(
+    (id: string, patch: Partial<Instance>): void => {
+      hostRef.current?.updateInstance(id, patch);
+    },
+    [],
+  );
+  const handleCombineSubmit = useCallback(
+    (result: { name: string; category: string; description: string }): void => {
+      const r = hostRef.current?.combineSelected(result);
+      setCombineDialogOpen(false);
+      if (r) scheduleSave();
+    },
+    [scheduleSave],
+  );
 
   return (
     <div className="krig-graph-canvas-view">
-      <GraphCanvasToolbar activeGraphId={activeGraphId} hostRef={hostRef} />
+      <GraphCanvasToolbar
+        activeGraphId={activeGraphId}
+        hostRef={hostRef}
+        selectedCount={selectedIds.length}
+        onAddClick={handlePickerOpen}
+        onCombineClick={() => setCombineDialogOpen(true)}
+      />
       <div className="krig-graph-canvas-view__body">
         {activeGraphId == null ? (
           <div className="krig-graph-canvas-view__empty">
@@ -201,9 +245,31 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
             workspaceId={workspaceId}
             onInstancesChange={handleInstancesChange}
             onViewportChange={handleViewportChange}
+            onSelectionChange={handleSelectionChange}
           />
         )}
       </div>
+
+      {/* UI 浮层(画板内浮层归 capability,view 控 open/anchor) */}
+      <LibraryPicker
+        open={pickerOpen}
+        anchorRect={pickerAnchor}
+        onPick={handlePickerPick}
+        onClose={() => setPickerOpen(false)}
+      />
+      <FloatingInspector
+        open={inspectorOpen && activeGraphId != null}
+        selectedIds={selectedIds}
+        getInstance={(id) => hostRef.current?.getInstance(id) ?? null}
+        onUpdate={handleInspectorUpdate}
+        onClose={() => setInspectorOpen(false)}
+        onCombine={() => setCombineDialogOpen(true)}
+      />
+      <CreateSubstanceDialog
+        open={combineDialogOpen}
+        onCreate={handleCombineSubmit}
+        onCancel={() => setCombineDialogOpen(false)}
+      />
     </div>
   );
 }

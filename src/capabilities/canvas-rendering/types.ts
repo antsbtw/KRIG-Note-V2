@@ -17,6 +17,7 @@
  */
 
 import type {
+  ComponentType,
   ForwardRefExoticComponent,
   RefAttributes,
 } from 'react';
@@ -221,4 +222,36 @@ export interface CanvasHostHandle {
 
 export interface CanvasRenderingApi {
   Host: ForwardRefExoticComponent<CanvasHostProps & RefAttributes<CanvasHostHandle>>;
+  /** Library Picker(画板内浮层,view 控 open/anchor 状态;G4.4a) */
+  LibraryPicker: ComponentType<LibraryPickerComponentProps>;
+  /** Floating Inspector(画板内浮层,view 控 open + 选区;G4.4b) */
+  FloatingInspector: ComponentType<FloatingInspectorComponentProps>;
+  /** Create Substance Dialog(模态;G4.4c) */
+  CreateSubstanceDialog: ComponentType<CreateSubstanceDialogComponentProps>;
+}
+
+// UI 组件 props 形态(给 CanvasRenderingApi 用,实际类型在各组件文件)
+
+export interface LibraryPickerComponentProps {
+  open: boolean;
+  anchorRect: { left: number; top: number; width: number; height: number } | null;
+  onPick: (spec: AddModeSpec) => void;
+  onClose: () => void;
+}
+
+export interface FloatingInspectorComponentProps {
+  open: boolean;
+  selectedIds: string[];
+  getInstance: (id: string) => Instance | null;
+  onUpdate: (id: string, patch: Partial<Instance>) => void;
+  onClose: () => void;
+  onCombine?: () => void;
+}
+
+export interface CreateSubstanceDialogComponentProps {
+  open: boolean;
+  defaultName?: string;
+  defaultCategory?: string;
+  onCreate: (result: { name: string; category: string; description: string }) => void;
+  onCancel: () => void;
 }

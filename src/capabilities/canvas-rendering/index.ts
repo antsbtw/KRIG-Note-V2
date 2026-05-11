@@ -29,6 +29,9 @@ import { capabilityRegistry } from '@slot/capability-registry/capability-registr
 import { REVISION as THREE_REVISION } from 'three';
 import type { CanvasRenderingApi } from './types';
 import { CanvasHost } from './Host';
+import { LibraryPicker } from './ui/library-picker';
+import { FloatingInspector } from './ui/floating-inspector';
+import { CreateSubstanceDialog } from './ui/create-substance-dialog';
 
 // 类型 re-export(view 端走 `import type from '@capabilities/canvas-rendering/types'`
 // 也可走 `from '@capabilities/canvas-rendering'`,两路径都可)
@@ -71,5 +74,8 @@ capabilityRegistry.register({
   id: 'canvas-rendering',
   api: {
     Host: CanvasHost,
+    LibraryPicker,
+    FloatingInspector,
+    CreateSubstanceDialog,
   } satisfies CanvasRenderingApi,
 });

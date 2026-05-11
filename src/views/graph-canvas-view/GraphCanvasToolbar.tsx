@@ -13,6 +13,7 @@ import {
   type MutableRefObject,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
@@ -26,12 +27,22 @@ interface GraphCanvasToolbarProps {
   activeGraphId: string | null;
   /** Host ref(G3 加 — Fit-to-content 等命令调用入口) */
   hostRef: MutableRefObject<CanvasHostHandle | null>;
+  /** 选区数(G4.4d):0 隐 Combine,1+ 显;Combine 仅 ≥2 才可点 */
+  selectedCount: number;
+  /** "+添加"按钮点击 — view 端打开 LibraryPicker(传 anchorRect) */
+  onAddClick: (rect: DOMRect) => void;
+  /** Combine 按钮点击 — view 端打开 CreateSubstanceDialog */
+  onCombineClick: () => void;
 }
 
 export function GraphCanvasToolbar({
   activeGraphId,
   hostRef,
+  selectedCount,
+  onAddClick,
+  onCombineClick,
 }: GraphCanvasToolbarProps) {
+  const addBtnRef = useRef<HTMLButtonElement>(null);
   const library = useMemo(
     () => requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store'),
     [],
@@ -68,6 +79,11 @@ export function GraphCanvasToolbar({
     hostRef.current?.fitToContent();
   };
 
+  const handleAdd = (): void => {
+    const rect = addBtnRef.current?.getBoundingClientRect();
+    if (rect) onAddClick(rect);
+  };
+
   return (
     <div className="krig-graph-canvas-toolbar">
       <div className="krig-graph-canvas-toolbar__title">
@@ -75,18 +91,36 @@ export function GraphCanvasToolbar({
       </div>
       <div className="krig-graph-canvas-toolbar__actions">
         {activeGraphId != null && (
-          <button
-            type="button"
-            className="krig-graph-canvas-toolbar__btn"
-            onClick={handleFit}
-            title="适应内容(↔)"
-          >
-            ↔ Fit
-          </button>
+          <>
+            <button
+              ref={addBtnRef}
+              type="button"
+              className="krig-graph-canvas-toolbar__btn"
+              onClick={handleAdd}
+              title="添加 shape / substance"
+            >
+              + 添加
+            </button>
+            <button
+              type="button"
+              className="krig-graph-canvas-toolbar__btn"
+              onClick={handleFit}
+              title="适应内容(↔)"
+            >
+              ↔ Fit
+            </button>
+            {selectedCount >= 2 && (
+              <button
+                type="button"
+                className="krig-graph-canvas-toolbar__btn"
+                onClick={onCombineClick}
+                title="Combine to Substance(多选)"
+              >
+                ⊟ Combine
+              </button>
+            )}
+          </>
         )}
-      </div>
-      <div className="krig-graph-canvas-toolbar__placeholder-note">
-        G3 占位 toolbar — 完整工具栏留 G5
       </div>
     </div>
   );
