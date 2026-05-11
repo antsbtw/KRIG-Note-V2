@@ -31,7 +31,7 @@ import type { Instance, InstanceKind } from '../types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
 import { renderLine, updateLineGeometry } from '../scene/LineRenderer';
-import { findClosestMagnet, MAGNET_SNAP_RADIUS_PX } from './magnet-snap';
+import { findClosestMagnet, listMagnets, MAGNET_SNAP_RADIUS_PX } from './magnet-snap';
 
 /**
  * Picker / Toolbar 触发"添加模式"的入参:
@@ -146,7 +146,9 @@ export class InteractionController {
     previewGroup: THREE.Group;
   } | null = null;
 
-  // [G4.3d 砍] magnetHints(V1:104)
+  /** Magnet 提示 overlay:hover shape / 画 line 时显示该 shape 的 magnet 点(V1:104 直迁) */
+  private magnetHints = new Map<string, THREE.Group>();
+
   // [G4.3e 砍] lineEndpointHandles / rewiring(V1:113-131)
   // [G4.4 砍] onNodeDoubleClick / onContextMenu(V1:139-141)
 
@@ -210,7 +212,7 @@ export class InteractionController {
     if (!this.addMode) return;
     this.addMode = null;
     this.cancelDrawingLine();
-    // [G4.3d 接续] clearMagnetHints
+    this.clearMagnetHints();
     this.container.style.cursor = '';
     this.onAddModeChange?.(null);
   }
@@ -255,6 +257,11 @@ export class InteractionController {
       disposeLineGroup(this.drawingLine.previewGroup);
       this.drawingLine = null;
     }
+    for (const group of this.magnetHints.values()) {
+      this.sceneManager.scene.remove(group);
+      disposeMagnetHintGroup(group);
+    }
+    this.magnetHints.clear();
     this.addMode = null;
     this.undoStack = [];
     this.redoStack = [];
@@ -391,6 +398,12 @@ export class InteractionController {
     }
     if (this.drawingLine) {
       this.updateDrawingLine(world);
+      this.refreshMagnetHintsForHover(world);
+      return;
+    }
+    // addMode 是 line(未起手)时 hover 高亮 magnet
+    if (this.addMode && this.isAddingLine()) {
+      this.refreshMagnetHintsForHover(world);
       return;
     }
     if (this.marquee) {
@@ -770,6 +783,126 @@ export class InteractionController {
     this.sceneManager.scene.remove(this.drawingLine.previewGroup);
     disposeLineGroup(this.drawingLine.previewGroup);
     this.drawingLine = null;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Magnet hints(V1 1163-1251 + 1806-1858 直迁;hover shape 显示 magnet 点)
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * hover 显示 magnet 提示:
+   * - 画线中:显示除起点 instance 外所有 shape 的 magnet 点
+   * - 仅 addMode 是 line(未起手):只显示鼠标 hover 的 shape 的 magnet 点
+   */
+  private refreshMagnetHintsForHover(world: { x: number; y: number }): void {
+    if (this.drawingLine) {
+      const startId = this.drawingLine.startInstanceId;
+      this.showMagnetHintsFor((id) => id !== startId);
+      return;
+    }
+    const proximityIds = this.findShapesNearMouse(world);
+    if (proximityIds.size === 0) {
+      this.clearMagnetHints();
+      return;
+    }
+    this.showMagnetHintsFor((id) => proximityIds.has(id));
+  }
+
+  /**
+   * 找鼠标附近的 shape:命中本体 OR 距任意 magnet ≤ snapRadius
+   * 用于"鼠标接近边缘 magnet 时"也能显示候选 shape 的所有 magnets(V1 1189)
+   */
+  private findShapesNearMouse(world: { x: number; y: number }): Set<string> {
+    const radius = this.snapRadiusWorld();
+    const ids = new Set<string>();
+    const hit = this.hitTestByWorldOBB(world);
+    if (hit) ids.add(hit);
+    for (const { node, instance } of this.allMagnetCandidates()) {
+      if (ids.has(instance.id)) continue;
+      const magnets = listMagnets(node, instance);
+      for (const m of magnets) {
+        const d = Math.hypot(world.x - m.x, world.y - m.y);
+        if (d <= radius) {
+          ids.add(instance.id);
+          break;
+        }
+      }
+    }
+    return ids;
+  }
+
+  /** 在指定 instance 上显示 magnet 点(filter 返回 true 的 instance 才显;V1 1211) */
+  private showMagnetHintsFor(filter: (id: string) => boolean): void {
+    const wantedIds = new Set<string>();
+    for (const id of this.nodeRenderer.ids()) {
+      if (!filter(id)) continue;
+      const node = this.nodeRenderer.get(id);
+      const inst = this.getInstance(id);
+      if (!node || !inst) continue;
+      if (listMagnets(node, inst).length === 0) continue;
+      wantedIds.add(id);
+    }
+    // 删多余
+    for (const [id, group] of Array.from(this.magnetHints)) {
+      if (!wantedIds.has(id)) {
+        this.sceneManager.scene.remove(group);
+        disposeMagnetHintGroup(group);
+        this.magnetHints.delete(id);
+      }
+    }
+    // 加新 / 更新已有(magnet 位置可能因节点拖动 / 旋转变化)
+    for (const id of wantedIds) {
+      const node = this.nodeRenderer.get(id);
+      const inst = this.getInstance(id);
+      if (!node || !inst) continue;
+      const existing = this.magnetHints.get(id);
+      if (existing) {
+        rebuildMagnetHintDots(existing, node, inst);
+      } else {
+        const group = makeMagnetHintGroup(node, inst);
+        this.sceneManager.scene.add(group);
+        this.magnetHints.set(id, group);
+      }
+    }
+  }
+
+  private clearMagnetHints(): void {
+    for (const group of this.magnetHints.values()) {
+      this.sceneManager.scene.remove(group);
+      disposeMagnetHintGroup(group);
+    }
+    this.magnetHints.clear();
+  }
+
+  /**
+   * 旧 OBB hit-test(基于世界坐标 + AABB 反变换);用于 findShapesNearMouse
+   * 等拿到的是世界坐标的场景.与 Raycaster hitTest 有微小偏差,在 zoom 后视觉
+   * 精度场景不要用这个(V1 804-828 直迁).
+   */
+  private hitTestByWorldOBB(world: { x: number; y: number }): string | null {
+    let bestShape: { id: string; area: number } | null = null;
+    for (const id of this.nodeRenderer.ids()) {
+      const node = this.nodeRenderer.get(id);
+      if (!node || isLineKind(node)) continue;
+      const { position, size } = node;
+      if (size.w === 0 && size.h === 0) continue;
+      const cx = position.x + size.w / 2;
+      const cy = position.y + size.h / 2;
+      const dx = world.x - cx;
+      const dy = world.y - cy;
+      const rad = -((node.rotation ?? 0) * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      const halfW = size.w / 2;
+      const halfH = size.h / 2;
+      if (lx >= -halfW && lx <= halfW && ly >= -halfH && ly <= halfH) {
+        const area = size.w * size.h;
+        if (!bestShape || area < bestShape.area) bestShape = { id, area };
+      }
+    }
+    return bestShape?.id ?? null;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -1301,6 +1434,57 @@ function rebuildMarqueeOverlay(
   const border = new THREE.LineLoop(borderGeom, borderMat);
   border.renderOrder = 2;
   group.add(border);
+}
+
+// ─────────────────────────────────────────────────────────
+// Magnet hint mesh helpers(V1 1791-1858 直迁)
+// ─────────────────────────────────────────────────────────
+
+const MAGNET_HINT_COLOR = 0x4A90E2;
+const MAGNET_HINT_Z = 0.04;            // 略低于 handles(0.05),不抢交互
+
+function makeMagnetHintGroup(node: RenderedNode, inst: Instance): THREE.Group {
+  const group = new THREE.Group();
+  rebuildMagnetHintDots(group, node, inst);
+  return group;
+}
+
+/** 每个 magnet 一个 CircleGeometry(世界坐标系) */
+function rebuildMagnetHintDots(group: THREE.Group, node: RenderedNode, inst: Instance): void {
+  while (group.children.length > 0) {
+    const child = group.children[0];
+    group.remove(child);
+    const mesh = child as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const m = mesh.material;
+    if (Array.isArray(m)) for (const x of m) x.dispose();
+    else if (m) (m as THREE.Material).dispose();
+  }
+  const dots = listMagnets(node, inst);
+  for (const m of dots) {
+    // 半径取 max(节点半最小边的 0.04, 4 世界单位),保证视觉可见
+    const r = Math.max(Math.min(node.size.w, node.size.h) * 0.04, 4);
+    const geom = new THREE.CircleGeometry(r, 16);
+    const mat = new THREE.MeshBasicMaterial({
+      color: MAGNET_HINT_COLOR,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.set(m.x, m.y, MAGNET_HINT_Z);
+    group.add(mesh);
+  }
+}
+
+function disposeMagnetHintGroup(group: THREE.Group): void {
+  for (const child of group.children) {
+    const mesh = child as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const m = mesh.material;
+    if (Array.isArray(m)) for (const x of m) x.dispose();
+    else if (m) (m as THREE.Material).dispose();
+  }
 }
 
 /** 释放 line 预览 group 的几何 / 材质(V1 1796-1804 直迁) */
