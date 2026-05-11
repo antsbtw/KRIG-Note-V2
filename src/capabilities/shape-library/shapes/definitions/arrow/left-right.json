@@ -1,0 +1,60 @@
+{
+  "id": "krig.arrow.left-right",
+  "category": "arrow",
+  "name": "Left-Right Arrow",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "params": {
+    "headLen": {
+      "type": "number",
+      "default": 0.25,
+      "min": 0.1,
+      "max": 0.4,
+      "label": "Head length",
+      "unit": "ratio"
+    },
+    "headWidth": {
+      "type": "number",
+      "default": 0.5,
+      "min": 0.5,
+      "max": 1,
+      "label": "Head width",
+      "unit": "ratio"
+    }
+  },
+  "guides": [
+    { "name": "hL", "op": "*/", "args": ["w", "headLen", 1] },
+    { "name": "xL", "op": "*/", "args": ["w", "headLen", 1] },
+    { "name": "xR", "op": "+-", "args": ["w", 0, "hL"] },
+    { "name": "hW", "op": "*/", "args": ["h", "headWidth", 1] },
+    { "name": "y1", "op": "+/", "args": ["h", { "op": "*/", "args": ["hW", -1, 1] }, 2] },
+    { "name": "y2", "op": "+/", "args": ["h", "hW", 2] }
+  ],
+  "path": [
+    { "cmd": "M", "x": 0,    "y": "vc" },
+    { "cmd": "L", "x": "xL", "y": 0    },
+    { "cmd": "L", "x": "xL", "y": "y1" },
+    { "cmd": "L", "x": "xR", "y": "y1" },
+    { "cmd": "L", "x": "xR", "y": 0    },
+    { "cmd": "L", "x": "w",  "y": "vc" },
+    { "cmd": "L", "x": "xR", "y": "h"  },
+    { "cmd": "L", "x": "xR", "y": "y2" },
+    { "cmd": "L", "x": "xL", "y": "y2" },
+    { "cmd": "L", "x": "xL", "y": "h"  },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "W", "x": 0,   "y": 0.5 },
+    { "id": "E", "x": 1,   "y": 0.5 },
+    { "id": "N", "x": 0.5, "y": 0.25 },
+    { "id": "S", "x": 0.5, "y": 0.75 }
+  ],
+  "textBox": { "l": "xL", "t": "y1", "r": "xR", "b": "y2" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

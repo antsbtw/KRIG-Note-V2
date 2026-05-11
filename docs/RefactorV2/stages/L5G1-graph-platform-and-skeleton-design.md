@@ -1,6 +1,6 @@
 # L5-G1 设计 — Graph 平台基座 + graph-library-store + view 骨架
 
-> v0.2 · 2026-05-10 · 实施后用户 P2 复审(文档内部数字一致性修订)
+> v0.3 · 2026-05-10 · G2 启动前用户 P1-A 复审(install 列表对齐上游 plan 口径)
 >
 > 配套:
 > - [v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 — 上游迁移设计(15 决策点 + 5 段切片)
@@ -31,14 +31,14 @@
 - [x] **platform/main/ipc/ipc-bus.ts** 接入 `registerGraphHandlers()`
 - [x] **capabilities/graph-library-store/** 全套:`client.ts` + `types.ts` + `index.ts`(双导出 + capabilityRegistry.register)+ `DESIGN.md`
 - [x] **views/graph-canvas-view/**(对齐 D-1=A 命名):
-  - `index.ts` self-register(install: ['graph-library-store'],其他 3 个 capability G2~G4 加)
+  - `index.ts` self-register(install: 4 项完整声明 `['graph-library-store', 'shape-library', 'canvas-rendering', 'canvas-text-node']`,P1-A 口径对齐 plan v0.2 § 6.1;G1~G3 阶段后三项尚未注册,install-coverage dev-only warning,不阻塞验收)
   - `GraphCanvasView.tsx` 占位空壳(显「画板加载中(G3 才填)」)
   - `data-model.ts` pluginStates['graph-canvas-view'](activeGraphId / expandedFolders / selectedIds — 对齐 ebook data-model)
   - `nav-side-content.tsx` 完整画板列表(FolderTree + 拖拽 + 右键菜单 + 重命名 + 创建文件夹 dialog;**直迁 V1 GraphPanel + useGraphOperations + useGraphSync 共 ~430 行,改写到 V2 框架**)
   - `canvas-commands.ts` `graph-canvas-view.*` 命令注册
   - `graph-canvas-view.css` 壳样式
 - [x] **renderer/index.tsx** 加 `import '@capabilities/graph-library-store'` + `import '@views/graph-canvas-view'`
-- [x] **alive 自检**:`reportInstallCoverage()` 启动时显示 `graph-canvas-view × ['graph-library-store']` 无 missing
+- [x] **alive 自检**:`reportInstallCoverage()` 启动时显示 `graph-canvas-view × 4 capabilities · missing 3:shape-library / canvas-rendering / canvas-text-node`(P1-A 修订:install 是声明性契约,G1 阶段后 3 项尚未注册是预期 warning,G2~G4 渐次归零)
 
 ### 1.2 本段不做(Out)
 
@@ -335,7 +335,9 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 ```
 [Capability] alive | registered: [..., 'graph-library-store']
 [L5] View alive | active: '...', registered views: [..., 'graph-canvas-view']
-[install-coverage] graph-canvas-view × ['graph-library-store']  ✓
+[install-coverage] ❌ install 覆盖率自检:5 views · 14 capabilities · 缺失 3
+  graph-canvas-view × ['graph-library-store'] · missing: shape-library, canvas-rendering, canvas-text-node
+  (P1-A 修订:G1 阶段后 3 项 capability 尚未注册是预期状态;G2 归零 1 项 / G3 归零 1 项 / G4 全部归零)
 ```
 
 健康检查 IPC `health.platform` 返回值含 `graph-library-store` 已挂(由 ipc-bus 注册时计数)。
@@ -350,7 +352,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 | ✅ 用户能看到该层功能 | NavSide 显「画板」Tab + 「+ 文件夹」「+ 画板」按钮 |
 | ✅ console 打印 alive 行 | `[Capability] alive` 含 `graph-library-store`;`[L5] alive` 含 `graph-canvas-view` |
 | ✅ 上一层 alive 行也在 | L0~L4 alive 行无回归 |
-| ✅ install-coverage 0 missing | dev 模式启动显示 graph-canvas-view × 1 capability,无 missing |
+| ✅ install-coverage 预期 missing 3 | dev 模式启动显示 graph-canvas-view × 4 capabilities · missing 3(shape-library / canvas-rendering / canvas-text-node);**P1-A 修订(2026-05-10)**:install 是声明性契约,G1 阶段后 3 项 capability 尚未注册是预期 warning,**不阻塞验收**;G2~G4 渐次归零 |
+| ✅ viewTypeRegistry warn 配套出现 | 同 install-coverage,registerView 时校验 install ids 是否在 capabilityRegistry,缺失则 `[L4] viewTypeRegistry: view 'graph-canvas-view' install ids 未在 capabilityRegistry 中: shape-library, canvas-rendering, canvas-text-node`;**P1-A 修订:渐进式 install 下这条 warn 是预期**,与 install-coverage 同源、配套,不阻塞验收 |
 | ✅ typecheck 0 error | tsc --noEmit |
 | ✅ lint 0 warn | eslint . |
 
@@ -419,3 +422,4 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G1 范围 + 12 决策点 + 文件清单 + IPC 14 条 + nav-side 直迁 ebook 模板路径 + 12 项验收清单 + 双 commit 拆分 |
 | 2026-05-10 | v0.2 | 实施后用户 P2 复审 — 文档内部数字一致性修订:① § 3.1 文件清单 LOC 改为"估算 vs 实际"双列(实施 commit 466021f + 2521466 后回填),发现 canvas-store.ts 估 ~180 / 实 366 行(folder ops 合并 + atomic write helpers + 类型守卫 + 兜底逻辑共溢出 ~106 行);② § 1.1 / § 3.2 / § 3.3 / § 4 标题 "GRAPH_* 19 条"全文统一为 "14 条"(v0.1 沿用 plan v0.2 § 3.7 笔误,plan 实际列 20 条 — 决策 G1-8 / G1-9 砍 6 条 = 14);③ § 4 末尾"砍 5 / 共 6 条"算术矛盾改写为"砍 6 条";④ § 15 双 commit 估算改"估 vs 实"双列(Commit 1 估 ~600 / 实 628;Commit 2 估 ~1100 / 实 1373 — 主要在 nav-side / commands / DESIGN 三处微涨);⑤ 加"实测偏差说明"段 + 屏障 grep 自检 0 命中佐证 |
+| 2026-05-10 | v0.3 | G2 启动前用户 P1-A 复审 — install 列表对齐上游 plan 口径(v0.2 plan § 6.1 写 "install: 4 项",本 design v0.1/v0.2 写 "install: 1 项(渐进式)",口径冲突)→ 选 A(对齐 ebook 既有先例:install 是"声明性契约,不是已就绪声明",dev-only warning 不阻塞):① § 1.1 install 描述 1 项 → 4 项完整声明;② § 1.1 alive 自检条目改"missing 3:shape-library / canvas-rendering / canvas-text-node,G2~G4 渐次归零";③ § 5 自我诊断输出样本改 4 项 install + missing 3;④ § 6 完成判据"install-coverage 0 missing"改"预期 missing 3,P1-A 不阻塞验收";⑤ 同步修改 view 实际代码 `src/views/graph-canvas-view/index.ts` install 列表 1 项 → 4 项(在 G2 分支顺手修补)|

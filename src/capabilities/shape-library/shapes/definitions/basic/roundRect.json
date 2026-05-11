@@ -1,0 +1,49 @@
+{
+  "id": "krig.basic.roundRect",
+  "category": "basic",
+  "name": "Rounded Rectangle",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "params": {
+    "r": {
+      "type": "number",
+      "default": 0.15,
+      "min": 0,
+      "max": 0.5,
+      "label": "Corner radius",
+      "unit": "ratio"
+    }
+  },
+  "guides": [
+    { "name": "rad", "op": "*/", "args": ["ss", "r", 1] }
+  ],
+  "path": [
+    { "cmd": "M", "x": "rad",     "y": 0 },
+    { "cmd": "L", "x": "w - rad", "y": 0 },
+    { "cmd": "A", "rx": "rad", "ry": "rad", "x": "w", "y": "rad" },
+    { "cmd": "L", "x": "w", "y": "h - rad" },
+    { "cmd": "A", "rx": "rad", "ry": "rad", "x": "w - rad", "y": "h" },
+    { "cmd": "L", "x": "rad", "y": "h" },
+    { "cmd": "A", "rx": "rad", "ry": "rad", "x": 0, "y": "h - rad" },
+    { "cmd": "L", "x": 0, "y": "rad" },
+    { "cmd": "A", "rx": "rad", "ry": "rad", "x": "rad", "y": 0 },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0   },
+    { "id": "E", "x": 1,   "y": 0.5 },
+    { "id": "S", "x": 0.5, "y": 1   },
+    { "id": "W", "x": 0,   "y": 0.5 }
+  ],
+  "handles": [
+    { "param": "r", "axis": "x", "from": { "op": "*/", "args": ["params.r", "w", 1] }, "min": 0, "max": { "op": "*/", "args": ["w", 1, 2] } }
+  ],
+  "textBox": { "l": "rad", "t": "rad", "r": "w - rad", "b": "h - rad" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

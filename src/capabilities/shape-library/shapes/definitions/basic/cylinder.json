@@ -1,0 +1,48 @@
+{
+  "id": "krig.basic.cylinder",
+  "category": "basic",
+  "name": "Cylinder",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "params": {
+    "adj": {
+      "type": "number",
+      "default": 0.15,
+      "min": 0.05,
+      "max": 0.5,
+      "label": "Cap height",
+      "unit": "ratio"
+    }
+  },
+  "guides": [
+    { "name": "ry", "op": "*/", "args": ["h", "adj", 1] },
+    { "name": "y1", "op": "+-", "args": ["h", 0, "ry"] },
+    { "name": "rx", "op": "*/", "args": ["w", 1, 2] }
+  ],
+  "path": [
+    { "cmd": "M", "x": 0,    "y": "ry" },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": "w", "y": "ry" },
+    { "cmd": "L", "x": "w",  "y": "y1" },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": 0,   "y": "y1" },
+    { "cmd": "L", "x": 0,    "y": "ry" },
+    { "cmd": "Z" },
+    { "cmd": "M", "x": 0,    "y": "ry" },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": "w", "y": "ry" },
+    { "cmd": "A", "rx": "rx", "ry": "ry", "x": 0,   "y": "ry" },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0   },
+    { "id": "E", "x": 1,   "y": 0.5 },
+    { "id": "S", "x": 0.5, "y": 1   },
+    { "id": "W", "x": 0,   "y": 0.5 }
+  ],
+  "textBox": { "l": 0, "t": "ry", "r": "w", "b": "y1" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

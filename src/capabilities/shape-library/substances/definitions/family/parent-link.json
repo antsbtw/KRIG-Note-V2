@@ -1,0 +1,19 @@
+{
+  "id": "library.family.parent-link",
+  "category": "family",
+  "name": "Parent Link",
+  "description": "Parent-child link (three-segment elbow connector)",
+  "components": [
+    {
+      "type": "shape",
+      "ref": "krig.line.elbow",
+      "transform": { "x": 0, "y": 0, "w": 100, "h": 100 },
+      "style_overrides": {
+        "line": { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" }
+      },
+      "binding": "frame"
+    }
+  ],
+  "default_props": {},
+  "source": "builtin"
+}

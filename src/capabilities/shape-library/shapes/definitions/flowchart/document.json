@@ -1,0 +1,34 @@
+{
+  "id": "krig.flowchart.document",
+  "category": "flowchart",
+  "name": "Document",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "guides": [
+    { "name": "y1",  "op": "*/", "args": ["h", 85,  100] },
+    { "name": "yLo", "op": "*/", "args": ["h", 100, 100] },
+    { "name": "yHi", "op": "*/", "args": ["h", 70,  100] },
+    { "name": "x1",  "op": "*/", "args": ["w", 1,   2  ] }
+  ],
+  "path": [
+    { "cmd": "M", "x": 0,    "y": 0    },
+    { "cmd": "L", "x": "w",  "y": 0    },
+    { "cmd": "L", "x": "w",  "y": "y1" },
+    { "cmd": "Q", "x1": "x1", "y1": "yHi", "x": 0, "y": "yLo" },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "N", "x": 0.5, "y": 0    },
+    { "id": "E", "x": 1,   "y": 0.5  },
+    { "id": "S", "x": 0.5, "y": 0.85 },
+    { "id": "W", "x": 0,   "y": 0.5  }
+  ],
+  "textBox": { "l": 0, "t": 0, "r": "w", "b": "y1" },
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

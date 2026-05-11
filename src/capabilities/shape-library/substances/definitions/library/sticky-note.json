@@ -1,0 +1,29 @@
+{
+  "id": "library.sticky-note",
+  "category": "library",
+  "name": "Sticky Note",
+  "description": "Yellow sticky note with text",
+  "components": [
+    {
+      "type": "shape",
+      "ref": "krig.basic.rect",
+      "transform": { "x": 0, "y": 0, "w": 160, "h": 160 },
+      "style_overrides": {
+        "fill": { "type": "solid", "color": "#FFEB99" },
+        "line": { "type": "solid", "color": "#E5C56E", "width": 1 }
+      },
+      "binding": "frame"
+    },
+    {
+      "type": "shape",
+      "ref": "krig.text.label",
+      "transform": { "x": 80, "y": 80, "anchor": "center" },
+      "style_overrides": { "fontSize": 14, "color": "#5C4A1A" },
+      "binding": "label"
+    }
+  ],
+  "default_props": {
+    "label": "Note"
+  },
+  "source": "builtin"
+}

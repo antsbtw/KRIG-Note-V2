@@ -1,0 +1,21 @@
+{
+  "id": "library.family.spouse-line",
+  "category": "family",
+  "name": "Spouse Line",
+  "description": "Marriage / spouse connection between two persons",
+  "components": [
+    {
+      "type": "shape",
+      "ref": "krig.line.straight",
+      "transform": { "x": 0, "y": 0, "w": 100, "h": 1 },
+      "style_overrides": {
+        "line": { "type": "solid", "color": "#2E5C8A", "width": 2, "dashType": "solid" }
+      },
+      "binding": "frame"
+    }
+  ],
+  "default_props": {
+    "label": ""
+  },
+  "source": "builtin"
+}

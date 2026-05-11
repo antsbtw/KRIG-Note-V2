@@ -1,0 +1,65 @@
+{
+  "id": "krig.arrow.bent",
+  "category": "arrow",
+  "name": "Bent Arrow",
+  "renderer": "parametric",
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "params": {
+    "shaft": {
+      "type": "number",
+      "default": 0.25,
+      "min": 0.1,
+      "max": 0.4,
+      "label": "Shaft thickness",
+      "unit": "ratio"
+    },
+    "headLen": {
+      "type": "number",
+      "default": 0.3,
+      "min": 0.15,
+      "max": 0.5,
+      "label": "Head length",
+      "unit": "ratio"
+    },
+    "headWidth": {
+      "type": "number",
+      "default": 0.5,
+      "min": 0.4,
+      "max": 0.8,
+      "label": "Head width",
+      "unit": "ratio"
+    }
+  },
+  "guides": [
+    { "name": "sW", "op": "*/", "args": ["w", "shaft", 1] },
+    { "name": "hL", "op": "*/", "args": ["w", "headLen", 1] },
+    { "name": "x1", "op": "+-", "args": ["w", 0, "hL"] },
+    { "name": "hH", "op": "*/", "args": ["h", "headWidth", 1] },
+    { "name": "y1", "op": "+-", "args": [{ "op": "*/", "args": ["hH", 1, 2] }, 0, { "op": "*/", "args": ["sW", 1, 2] }] },
+    { "name": "y2", "op": "+-", "args": [{ "op": "*/", "args": ["hH", 1, 2] }, { "op": "*/", "args": ["sW", 1, 2] }, 0] },
+    { "name": "y3", "op": "*/", "args": ["h", "headWidth", 1] }
+  ],
+  "path": [
+    { "cmd": "M", "x": 0,    "y": "h"  },
+    { "cmd": "L", "x": 0,    "y": "y1" },
+    { "cmd": "L", "x": "x1", "y": "y1" },
+    { "cmd": "L", "x": "x1", "y": 0    },
+    { "cmd": "L", "x": "w",  "y": { "op": "*/", "args": ["y3", 1, 2] } },
+    { "cmd": "L", "x": "x1", "y": "y3" },
+    { "cmd": "L", "x": "x1", "y": "y2" },
+    { "cmd": "L", "x": "sW", "y": "y2" },
+    { "cmd": "L", "x": "sW", "y": "h"  },
+    { "cmd": "Z" }
+  ],
+  "magnets": [
+    { "id": "S",   "x": 0.125, "y": 1   },
+    { "id": "TIP", "x": 1,     "y": 0.25 }
+  ],
+  "default_style": {
+    "fill":  { "type": "solid", "color": "#4A90E2", "transparency": 0 },
+    "line":  { "type": "solid", "color": "#2E5C8A", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}
