@@ -43,7 +43,7 @@ registerView({
     'graph-library-store', // ✅ L5-G1:画板 + 文件夹 + CRUD(JSON 起步)
     'shape-library',       // 🚧 L5-G2:Shape + Substance 资源仓库
     'canvas-rendering',    // 🚧 L5-G3:Three.js Host(P1-1 单点屏障)
-    'canvas-text-node',    // 🚧 L5-G4:文字节点 PM 桥接(text-editing 旁路)
+    'canvas-text-node',    // ✅ L5-G4.5:文字节点 PM 桥接(text-editing.Host 嵌入,路径 A)
   ],
   component: GraphCanvasView,
   navSideTab: { label: 'Graph', icon: '🎨', order: 4 },

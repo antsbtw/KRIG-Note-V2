@@ -23,6 +23,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
@@ -33,7 +34,9 @@ import type {
   CanvasDocument,
   Viewport,
   Instance,
+  AddModeSpec,
 } from '@capabilities/canvas-rendering/types';
+import type { CanvasTextNodeApi } from '@capabilities/canvas-text-node';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasRecord,
@@ -50,7 +53,9 @@ interface GraphCanvasViewProps {
 const SAVE_DEBOUNCE_MS = 1000; // G3-8=A 对齐 V1
 
 export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
-  const { Host } = useMemo(
+  // FloatingInspector 砍掉 — v1.1+ 走 V1/Freeform 风格"shape 边缘跟随浮条",
+  // 替代当前"右上角 Format Shape 浮窗"模式.capability 文件保留作历史参考.
+  const { Host, LibraryPicker, CreateSubstanceDialog } = useMemo(
     () => requireCapabilityApi<CanvasRenderingApi>('canvas-rendering'),
     [],
   );
@@ -58,8 +63,19 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     () => requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store'),
     [],
   );
+  const textNode = useMemo(
+    () => requireCapabilityApi<CanvasTextNodeApi>('canvas-text-node'),
+    [],
+  );
+  const TextEditOverlay = textNode.EditOverlay;
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
+
+  // ── G4.4d UI 浮层状态(view 端拥有 open/anchor;capability 提供组件)──
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
+  const [combineDialogOpen, setCombineDialogOpen] = useState(false);
 
   // ── per-ws state 订阅 ──
   const wsState = useSyncExternalStore(
@@ -168,6 +184,28 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     return () => flushSave();
   }, [flushSave]);
 
+  // ── G4.5 P4:Host mount 后注入 canvas-text-node atom-bridge,文字节点真渲染 ──
+  // 必须在 activeGraphId 改变后(loadDocument 触发 setInstances)再注入,否则首批
+  // text 节点会用降级灰矩形.放在 activeGraphId 后的 effect 里,与 load 串行.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.setAtomBridge(textNode.atomBridge.atomsToSvgInput as Parameters<CanvasHostHandle['setAtomBridge']>[0]);
+    return () => host.setAtomBridge(null);
+  }, [textNode, activeGraphId]);
+
+  // ── G4.5 P5:订阅文字编辑态,enter 时关其他浮层(Picker / Combine Dialog) ──
+  // FloatingInspector 已砍,留 Picker 互斥(同时打开 Picker 进 addMode + popup 编辑文字
+  // 在交互上没意义).
+  useEffect(() => {
+    return textNode.onEditingChange((editing) => {
+      if (editing) {
+        setPickerOpen(false);
+        setCombineDialogOpen(false);
+      }
+    });
+  }, [textNode]);
+
   // ── Host 回调 ──
   const handleInstancesChange = useCallback(
     (_instances: Instance[]): void => {
@@ -181,10 +219,65 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     },
     [scheduleSave],
   );
+  const handleSelectionChange = useCallback((ids: string[]): void => {
+    setSelectedIds(ids);
+  }, []);
+
+  // ── G4.4d UI 浮层 handlers ──
+  const handlePickerOpen = useCallback((rect: DOMRect): void => {
+    setPickerAnchor(rect);
+    setPickerOpen(true);
+  }, []);
+  const handlePickerPick = useCallback((spec: AddModeSpec): void => {
+    hostRef.current?.enterAddMode(spec);
+    setPickerOpen(false);
+  }, []);
+  const handleCombineSubmit = useCallback(
+    (result: { name: string; category: string; description: string }): void => {
+      const r = hostRef.current?.combineSelected(result);
+      setCombineDialogOpen(false);
+      if (r) scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  // ── G4.5 P4 双击节点 → 文字节点进入编辑(其他节点暂忽略) ──
+  const handleNodeDoubleClick = useCallback(
+    (info: { instanceId: string; screenX: number; screenY: number; screenW: number; screenH: number }): void => {
+      const inst = hostRef.current?.getInstance(info.instanceId);
+      if (!inst) return;
+      if (!textNode.atomBridge.isTextNodeRef(inst.ref)) return;
+      textNode.enterEdit({
+        instanceId: info.instanceId,
+        initialDoc: inst.doc,
+        screenX: info.screenX,
+        screenY: info.screenY,
+        width: info.screenW,
+        height: info.screenH,
+        backgroundColor: inst.style_overrides?.fill?.color,
+        heightFixed: !!inst.size_lock?.h,
+        workspaceId,
+        viewId: 'graph-canvas-view',
+        onExit: (id, newDoc) => {
+          if (newDoc !== null) {
+            hostRef.current?.updateInstance(id, { doc: newDoc } as Partial<Instance>);
+            scheduleSave();
+          }
+        },
+      });
+    },
+    [textNode, workspaceId, scheduleSave],
+  );
 
   return (
     <div className="krig-graph-canvas-view">
-      <GraphCanvasToolbar activeGraphId={activeGraphId} hostRef={hostRef} />
+      <GraphCanvasToolbar
+        activeGraphId={activeGraphId}
+        hostRef={hostRef}
+        selectedCount={selectedIds.length}
+        onAddClick={handlePickerOpen}
+        onCombineClick={() => setCombineDialogOpen(true)}
+      />
       <div className="krig-graph-canvas-view__body">
         {activeGraphId == null ? (
           <div className="krig-graph-canvas-view__empty">
@@ -201,9 +294,27 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
             workspaceId={workspaceId}
             onInstancesChange={handleInstancesChange}
             onViewportChange={handleViewportChange}
+            onSelectionChange={handleSelectionChange}
+            onNodeDoubleClick={handleNodeDoubleClick}
           />
         )}
       </div>
+
+      {/* G4.5 文字节点编辑浮层(挂在画板顶层,session-store 驱动渲染) */}
+      <TextEditOverlay />
+
+      {/* UI 浮层(画板内浮层归 capability,view 控 open/anchor) */}
+      <LibraryPicker
+        open={pickerOpen}
+        anchorRect={pickerAnchor}
+        onPick={handlePickerPick}
+        onClose={() => setPickerOpen(false)}
+      />
+      <CreateSubstanceDialog
+        open={combineDialogOpen}
+        onCreate={handleCombineSubmit}
+        onCancel={() => setCombineDialogOpen(false)}
+      />
     </div>
   );
 }
@@ -244,6 +355,8 @@ function sanitizeDocument(raw: unknown): CanvasDocument {
         ? view
         : { centerX: 0, centerY: 0, zoom: 1 },
     instances,
-    user_substances: Array.isArray(r.user_substances) ? r.user_substances : undefined,
+    user_substances: Array.isArray(r.user_substances)
+      ? (r.user_substances as CanvasDocument['user_substances'])
+      : undefined,
   };
 }

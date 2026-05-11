@@ -29,6 +29,9 @@ import { capabilityRegistry } from '@slot/capability-registry/capability-registr
 import { REVISION as THREE_REVISION } from 'three';
 import type { CanvasRenderingApi } from './types';
 import { CanvasHost } from './Host';
+import { LibraryPicker } from './ui/library-picker';
+import { FloatingInspector } from './ui/floating-inspector';
+import { CreateSubstanceDialog } from './ui/create-substance-dialog';
 
 // 类型 re-export(view 端走 `import type from '@capabilities/canvas-rendering/types'`
 // 也可走 `from '@capabilities/canvas-rendering'`,两路径都可)
@@ -42,10 +45,23 @@ export type {
   InstanceKind,
   InstanceEndpoint,
   TextNodeAtoms,
+  AddModeSpec,
 } from './types';
 
 // 模块级 export(W5 边界 A 临时允许项 — driver/slot 内部可直 import;view 侧仍走 requireCapabilityApi)
 export { CanvasHost };
+
+// G4.4a UI 浮层(画板内浮层归 capability,charter § 1.4 + design G4-11=A)
+// view 端直接 import 使用(open / anchorRect / onPick / onClose 全 view 控制)
+export { LibraryPicker } from './ui/library-picker';
+export type { LibraryPickerProps } from './ui/library-picker';
+export { FloatingInspector } from './ui/floating-inspector';
+export type { FloatingInspectorProps } from './ui/floating-inspector';
+export { CreateSubstanceDialog } from './ui/create-substance-dialog';
+export type {
+  CreateSubstanceDialogProps,
+  CreateSubstanceFormResult,
+} from './ui/create-substance-dialog';
 
 // ── 自我诊断(charter § 5)──
 console.info(
@@ -58,5 +74,8 @@ capabilityRegistry.register({
   id: 'canvas-rendering',
   api: {
     Host: CanvasHost,
+    LibraryPicker,
+    FloatingInspector,
+    CreateSubstanceDialog,
   } satisfies CanvasRenderingApi,
 });

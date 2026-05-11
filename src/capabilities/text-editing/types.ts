@@ -15,6 +15,7 @@ export type {
   DriverSerialized,
   TextEditingHostProps,
   TextEditingConfig,
+  TextEditingPluginToggles,
 } from '@drivers/text-editing-driver';
 export type { MarkName, ActiveBlockType, NoteLinkSearchHandler } from '@drivers/text-editing-driver';
 
@@ -44,9 +45,16 @@ export interface LinkClickHandler {
 
 // NoteLinkSearchHandler 已从 driver 层 re-export(line 13),不再重复声明
 
-/** 实例注册表诊断字段(view 诊断路径用 — 软取场景)*/
+/**
+ * 实例注册表诊断 + 焦点查询(view 用)
+ *
+ * L5-G4.5 加 getFocusedInstanceId:跨 view 命令(toggleMark / setHeading 等)
+ * 通过此找到"当前真正持有焦点的 PM 实例",避开"workspace activeId 不等于 driver
+ * instanceId"的场景(canvas-text-node Host 用复合 id `${ws}::${node}`).
+ */
 export interface InstanceRegistryDiagnostic {
   readonly count: number;
+  readonly getFocusedInstanceId: () => string | null;
 }
 
 /**

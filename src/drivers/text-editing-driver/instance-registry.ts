@@ -52,6 +52,26 @@ class InstanceRegistry {
     if (!source.startsWith(prefix)) return null;
     return source.slice(prefix.length);
   }
+
+  /**
+   * L5-G4.5 — 拿当前 EditorView.hasFocus()=true 的实例 id.
+   *
+   * **只读焦点状态,不掺杂 workspace / view 维度信息**(职责单一).
+   * 调用端(如 NoteView withInstance)按需 fallback 到 workspace activeId.
+   *
+   * 用途:跨 view 的 PM 命令(toggleMark / setHeading 等)需要找"当前真正在编辑的
+   * PM 实例" — workspace activeId 不够,因为 canvas-text-node Host 嵌入在 view
+   * 内部 popup 里,instanceId 形态 = `${workspaceId}::${nodeId}`(复合),不等于
+   * workspaceId.focus 是唯一可靠信号.
+   *
+   * 多实例同时 hasFocus 极罕见(浏览器单焦点);若发生返回找到的第一个.
+   */
+  getFocusedInstanceId(): string | null {
+    for (const [id, entry] of this.instances) {
+      if (entry.view.hasFocus()) return id;
+    }
+    return null;
+  }
 }
 
 export const instanceRegistry = new InstanceRegistry();

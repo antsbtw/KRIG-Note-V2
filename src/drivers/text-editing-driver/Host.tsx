@@ -124,6 +124,7 @@ export function Host(props: TextEditingHostProps) {
       },
       config.viewId,
       config.instanceId,
+      config.plugins,
     );
 
     viewRef.current = view;

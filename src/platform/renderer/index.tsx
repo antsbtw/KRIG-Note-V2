@@ -36,6 +36,7 @@ import '@capabilities/ebook-rendering'; // L5-C2 新增(pdfjs-dist 4.9.155 + Hos
 import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 + 文件夹,JSON 起步)
 import '@capabilities/shape-library';       // L5-G2 新增(Shape + Substance 资源仓库,0 import three)
 import '@capabilities/canvas-rendering';    // L5-G3 新增(Three.js 单点屏障核心,P1-1 严格屏障)
+import '@capabilities/canvas-text-node';    // L5-G4.5 新增(画板文字节点 PM 桥接 + EditOverlay,路径 A 嵌 text-editing.Host)
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register

@@ -17,10 +17,11 @@
  */
 
 import type {
+  ComponentType,
   ForwardRefExoticComponent,
   RefAttributes,
 } from 'react';
-import type { FillStyle, LineStyle, ArrowStyle } from '@capabilities/shape-library/types';
+import type { FillStyle, LineStyle, ArrowStyle, SubstanceDef } from '@capabilities/shape-library/types';
 
 // ─────────────────────────────────────────────────────────
 // Instance 系(V1 plugins/graph/library/types.ts 直迁)
@@ -133,8 +134,24 @@ export interface CanvasDocument {
   schema_version: number;
   view: Viewport;
   instances: Instance[];
-  /** 用户自创 substance 嵌入(G4 真消费;G3 不创建,仅 load 时透传) */
-  user_substances?: unknown[];
+  /**
+   * 用户自创 substance 嵌入(combineSelectedToSubstance 写盘随画板).
+   * - serialize:扫 instances.ref → SubstanceRegistry.get → source='user' 入此字段
+   * - loadDocument:先 register 到 registry → 再 setInstances
+   * V1 schema v1.x 临时字段;v1.5+ 拆独立 note 存储后此字段废弃.
+   */
+  user_substances?: SubstanceDef[];
+}
+
+/**
+ * Picker / Toolbar 触发"添加模式"的入参(V1 AddModeSpec 直迁).
+ * 详见 src/capabilities/canvas-rendering/interaction/InteractionController.ts
+ */
+export interface AddModeSpec {
+  kind: InstanceKind;
+  ref: string;
+  defaultSize?: { w: number; h: number };
+  presetInstance?: Partial<Instance>;
 }
 
 export interface CanvasHostProps {
@@ -149,6 +166,19 @@ export interface CanvasHostProps {
   onInstancesChange?: (instances: Instance[]) => void;
   /** 画板右键(view 端通过 contextMenuRegistry 路由,G5 真接) */
   onContextMenu?: (e: { clientX: number; clientY: number; targetIds: string[] }) => void;
+  /** addMode 状态变化(view UI 显隐 "Click to place" 提示 + crosshair cursor) */
+  onAddModeChange?: (spec: AddModeSpec | null) => void;
+  /**
+   * 节点双击(G4.5 文字节点用):view 端拿 instanceId + 屏幕投影 → 调
+   * canvas-text-node.enterEdit 打开 EditOverlay popup.
+   */
+  onNodeDoubleClick?: (info: {
+    instanceId: string;
+    screenX: number;
+    screenY: number;
+    screenW: number;
+    screenH: number;
+  }) => void;
 }
 
 /**
@@ -178,6 +208,34 @@ export interface CanvasHostHandle {
   getInstance(id: string): Instance | null;
   /** 取全 instances 原始数据(view 端序列化 fallback,正常走 serialize) */
   getInstances(): Instance[];
+  /** 进入"添加模式" — Picker 选好 shape/substance 后调,等用户点击画布放置 */
+  enterAddMode(spec: AddModeSpec): void;
+  /** 退出"添加模式"(view 端 ESC 兜底 / Picker 切换 / 主动取消) */
+  exitAddMode(): void;
+  /** 是否在添加模式(view 端 toolbar 高亮 Picker 按钮用) */
+  isAddMode(): boolean;
+  /**
+   * 浅合并 patch 到 instance + 重新渲染.
+   * Inspector 改 position/size/style_overrides 等都走这条.
+   * 不存在的 id 静默忽略.
+   */
+  updateInstance(id: string, patch: Partial<Instance>): void;
+  /**
+   * Combine to Substance:把当前选中的 shape 实例打包成一个新 substance
+   * 返回新 substance / instance id;失败(少于 2 个 shape 实例)返 null.
+   * 详见 src/capabilities/canvas-rendering/combine.ts.
+   */
+  combineSelected(params: {
+    name: string;
+    category: string;
+    description: string;
+  }): { substanceId: string; newInstanceId: string; consumedIds: string[] } | null;
+  /**
+   * G4.5 P4:view 端 mount 后注入 canvas-text-node.atomBridge.atomsToSvgInput.
+   * NodeRenderer 文字节点真渲染需此函数把 instance.doc → SerializerAtom[].
+   * 不调时 text 节点降级为占位灰矩形.
+   */
+  setAtomBridge(fn: ((doc: unknown) => Promise<unknown[]>) | null): void;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -186,4 +244,36 @@ export interface CanvasHostHandle {
 
 export interface CanvasRenderingApi {
   Host: ForwardRefExoticComponent<CanvasHostProps & RefAttributes<CanvasHostHandle>>;
+  /** Library Picker(画板内浮层,view 控 open/anchor 状态;G4.4a) */
+  LibraryPicker: ComponentType<LibraryPickerComponentProps>;
+  /** Floating Inspector(画板内浮层,view 控 open + 选区;G4.4b) */
+  FloatingInspector: ComponentType<FloatingInspectorComponentProps>;
+  /** Create Substance Dialog(模态;G4.4c) */
+  CreateSubstanceDialog: ComponentType<CreateSubstanceDialogComponentProps>;
+}
+
+// UI 组件 props 形态(给 CanvasRenderingApi 用,实际类型在各组件文件)
+
+export interface LibraryPickerComponentProps {
+  open: boolean;
+  anchorRect: { left: number; top: number; width: number; height: number } | null;
+  onPick: (spec: AddModeSpec) => void;
+  onClose: () => void;
+}
+
+export interface FloatingInspectorComponentProps {
+  open: boolean;
+  selectedIds: string[];
+  getInstance: (id: string) => Instance | null;
+  onUpdate: (id: string, patch: Partial<Instance>) => void;
+  onClose: () => void;
+  onCombine?: () => void;
+}
+
+export interface CreateSubstanceDialogComponentProps {
+  open: boolean;
+  defaultName?: string;
+  defaultCategory?: string;
+  onCreate: (result: { name: string; category: string; description: string }) => void;
+  onCancel: () => void;
 }

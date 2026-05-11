@@ -18,12 +18,20 @@ class SlashRegistry {
     this.notify();
   }
 
-  /** 按当前活跃 view + 关键词过滤 */
+  /**
+   * 按当前活跃 view + 关键词过滤
+   *
+   * L5-G4.5 加 scope='global' 通配 — 所有 PM-using view 共享通用条目.
+   * 旧条目 item.view===undefined 历史兼容(也算 view-scoped 匹配所有).
+   */
   getItemsForView(viewId: string, query: string = ''): SlashItem[] {
     const q = query.toLowerCase();
     return this.items
       .filter((item) => {
-        if (item.view !== undefined && item.view !== viewId) return false;
+        const visible = item.scope === 'global'
+          || item.view === undefined
+          || item.view === viewId;
+        if (!visible) return false;
         if (q) {
           const matchLabel = item.label.toLowerCase().includes(q);
           const matchKeywords = item.keywords?.some((k) => k.toLowerCase().includes(q));

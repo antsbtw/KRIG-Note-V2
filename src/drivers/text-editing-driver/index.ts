@@ -57,7 +57,7 @@ export function extractFirstParagraphText(data: DriverSerialized): string {
 }
 
 // ── re-exports(NoteView 用)──
-export type { DriverSerialized, TextEditingHostProps, TextEditingConfig } from './types';
+export type { DriverSerialized, TextEditingHostProps, TextEditingConfig, TextEditingPluginToggles } from './types';
 export { deserializeDoc };
 export { textEditingDriverApi, type MarkName, type ActiveBlockType } from './api';
 export {
