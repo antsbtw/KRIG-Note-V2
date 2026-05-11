@@ -179,6 +179,7 @@ export class InteractionController {
     this.undoStack = [];
     this.redoStack = [];
     this.clipboard = [];
+    this.container.style.cursor = '';
   }
 
   // ─────────────────────────────────────────────────────────
@@ -296,6 +297,11 @@ export class InteractionController {
       this.applyRotate(world, e.shiftKey);
       return;
     }
+
+    // hover handle:更新 cursor(V1 1719-1731 cursorForHandle 直迁)
+    if (!this.dragging) {
+      this.updateHoverCursor(screen.x, screen.y);
+    }
     if (this.dragging) {
       const dx = world.x - this.dragging.startWorld.x;
       const dy = world.y - this.dragging.startWorld.y;
@@ -328,6 +334,20 @@ export class InteractionController {
       this.dragging = null;
     }
     this.dragMoved = false;
+  }
+
+  /**
+   * Hover handle 时换 cursor(resize 双箭头 / rotation grab);未命中 handle 时还原 default.
+   * V1 InteractionController 在 mousemove 拐角处调用 cursorForHandle(rotation 折算 8 方位).
+   */
+  private updateHoverCursor(screenX: number, screenY: number): void {
+    const handleHit = this.handlesOverlay.hitTest(screenX, screenY);
+    const target = this.handlesOverlay.getTarget();
+    if (handleHit && target) {
+      this.container.style.cursor = cursorForHandle(handleHit, target.rotation ?? 0);
+    } else {
+      this.container.style.cursor = 'default';
+    }
   }
 
   /**
@@ -716,22 +736,37 @@ export class InteractionController {
     for (const id of this.overlays.keys()) {
       if (!this.selected.has(id)) this.removeOverlay(id);
     }
-    // 加新选中的 overlay
+    // 加新选中的 overlay + 刷新已存在 overlay 的顶点(resize/rotate 时跟随)
     for (const id of this.selected) {
       if (!this.overlays.has(id)) this.createOverlay(id);
+      else this.updateOverlay(id);
     }
+  }
+
+  /** 计算节点旋转后的 4 个 OBB 角点(世界坐标),用于选中边框 LineLoop */
+  private obbCorners(rn: RenderedNode): THREE.Vector3[] {
+    const { position, size, rotation } = rn;
+    const cx = position.x + size.w / 2;
+    const cy = position.y + size.h / 2;
+    const halfW = size.w / 2;
+    const halfH = size.h / 2;
+    const rad = ((rotation ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const corners: Array<[number, number]> = [
+      [-halfW, -halfH], [halfW, -halfH], [halfW, halfH], [-halfW, halfH],
+    ];
+    return corners.map(([lx, ly]) => new THREE.Vector3(
+      cx + lx * cos - ly * sin,
+      cy + lx * sin + ly * cos,
+      0.1,
+    ));
   }
 
   private createOverlay(id: string): void {
     const rn = this.nodeRenderer.get(id);
     if (!rn) return;
-    const { position, size } = rn;
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(position.x, position.y, 0.1),
-      new THREE.Vector3(position.x + size.w, position.y, 0.1),
-      new THREE.Vector3(position.x + size.w, position.y + size.h, 0.1),
-      new THREE.Vector3(position.x, position.y + size.h, 0.1),
-    ]);
+    const geom = new THREE.BufferGeometry().setFromPoints(this.obbCorners(rn));
     const mat = new THREE.LineBasicMaterial({ color: 0x3b82f6 });
     const loop = new THREE.LineLoop(geom, mat);
     loop.renderOrder = 10;
@@ -744,13 +779,7 @@ export class InteractionController {
     if (!overlay) return;
     const rn = this.nodeRenderer.get(id);
     if (!rn) return;
-    const { position, size } = rn;
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(position.x, position.y, 0.1),
-      new THREE.Vector3(position.x + size.w, position.y, 0.1),
-      new THREE.Vector3(position.x + size.w, position.y + size.h, 0.1),
-      new THREE.Vector3(position.x, position.y + size.h, 0.1),
-    ]);
+    const geom = new THREE.BufferGeometry().setFromPoints(this.obbCorners(rn));
     overlay.geometry.dispose();
     overlay.geometry = geom;
   }
@@ -797,6 +826,23 @@ function cloneInstance(inst: Instance): Instance {
 /** line 类节点判断(shapeRef 以 'krig.line.' 开头;V1 1691-1693 直迁) */
 function isLineKind(node: RenderedNode): boolean {
   return !!node.shapeRef && node.shapeRef.startsWith('krig.line.');
+}
+
+/**
+ * 给 handle hover / drag 选 cursor(V1 1719-1731 直迁).
+ * 节点旋转后 handle 视觉位置变了,cursor 也跟着旋转(rotation 折算到最近 8 方位 bucket).
+ */
+function cursorForHandle(h: HandleKind, rotationDeg: number): string {
+  if (h === 'rotate') return 'grab';
+  const baseDeg: Record<Exclude<HandleKind, 'rotate'>, number> = {
+    n: -90, ne: -45, e: 0, se: 45, s: 90, sw: 135, w: 180, nw: -135,
+  };
+  const deg = (baseDeg[h] + rotationDeg + 360 + 22.5) % 360;
+  const bucket = Math.floor(deg / 45);  // 0..7
+  // bucket 0..7 → e, se, s, sw, w, nw, n, ne
+  const cursors = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize',
+                   'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
+  return cursors[bucket];
 }
 
 /** 生成新 instance id(粘贴用;crypto.randomUUID 兜底 fallback) */

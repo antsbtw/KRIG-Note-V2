@@ -221,22 +221,35 @@ export class SceneManager {
   // 屏幕 ↔ 世界坐标互转(交互模块要用)
   // ─────────────────────────────────────────────────────────
 
-  /** 容器内 CSS 像素坐标 → 世界坐标 */
+  /**
+   * 容器内 CSS 像素坐标 → 世界坐标(与 Three.js Raycaster 同源)
+   *
+   * 修复 G4.2 bug:之前用 `viewCenter + (screen - clientCenter)/zoom` 公式
+   * 与 applyCamera 的 frustum 设置不一致(camera.position 已是 viewCenter,
+   * frustum 又用 viewCenter±halfW 当世界坐标 → 二次偏移 viewCenter*zoom 像素).
+   *
+   * 改用 NDC + camera.unproject 走 Three 的真实投影矩阵,与 Raycaster 一致.
+   * 优势:不再依赖公式与 applyCamera 同步,Three.js 改投影逻辑也自动跟随.
+   */
   screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
     const { clientWidth, clientHeight } = this.container;
-    if (clientWidth === 0 || clientHeight === 0) return { x: 0, y: 0 };
-    return {
-      x: this.viewCenter.x + (screenX - clientWidth / 2) / this.zoom,
-      y: this.viewCenter.y + (screenY - clientHeight / 2) / this.zoom,
-    };
+    if (clientWidth <= 0 || clientHeight <= 0) return { x: 0, y: 0 };
+    const ndcX = (screenX / clientWidth) * 2 - 1;
+    const ndcY = -(screenY / clientHeight) * 2 + 1;
+    // unproject 走 camera 的 projectionMatrix + matrixWorld;Y 在 NDC→world
+    // 时被 frustum top<bottom 翻转回 Y-down 世界坐标
+    const v = new THREE.Vector3(ndcX, ndcY, 0).unproject(this.camera);
+    return { x: v.x, y: v.y };
   }
 
-  /** 世界坐标 → 容器内 CSS 像素坐标 */
+  /** 世界坐标 → 容器内 CSS 像素坐标(与 screenToWorld 互逆,走 camera.project) */
   worldToScreen(worldX: number, worldY: number): { x: number; y: number } {
     const { clientWidth, clientHeight } = this.container;
+    if (clientWidth <= 0 || clientHeight <= 0) return { x: 0, y: 0 };
+    const v = new THREE.Vector3(worldX, worldY, 0).project(this.camera);
     return {
-      x: clientWidth / 2 + (worldX - this.viewCenter.x) * this.zoom,
-      y: clientHeight / 2 + (worldY - this.viewCenter.y) * this.zoom,
+      x: ((v.x + 1) / 2) * clientWidth,
+      y: ((-v.y + 1) / 2) * clientHeight,
     };
   }
 

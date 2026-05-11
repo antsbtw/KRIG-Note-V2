@@ -145,7 +145,8 @@ export class HandlesOverlay {
     const halfH = node.size.h * view.zoom / 2;
     const positions = handlePositions(halfW, halfH);
 
-    const HIT_RADIUS = HANDLE_RADIUS + 4;  // 容忍区
+    // HIT_RADIUS:handle 像素半径 + 8px 容忍区(V1 是 +4,实测体感偏小;参考 Figma 用 +8)
+    const HIT_RADIUS = HANDLE_RADIUS + 8;
     const allowed = allowedHandlesFor(node, this.getInstance);
     let closest: { kind: HandleKind; dist: number } | null = null;
     for (const [kind, [hx, hy]] of Object.entries(positions) as [HandleKind, [number, number]][]) {
