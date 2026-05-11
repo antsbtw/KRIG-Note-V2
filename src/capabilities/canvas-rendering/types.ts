@@ -203,6 +203,16 @@ export interface CanvasHostHandle {
    * 不存在的 id 静默忽略.
    */
   updateInstance(id: string, patch: Partial<Instance>): void;
+  /**
+   * Combine to Substance:把当前选中的 shape 实例打包成一个新 substance
+   * 返回新 substance / instance id;失败(少于 2 个 shape 实例)返 null.
+   * 详见 src/capabilities/canvas-rendering/combine.ts.
+   */
+  combineSelected(params: {
+    name: string;
+    category: string;
+    description: string;
+  }): { substanceId: string; newInstanceId: string; consumedIds: string[] } | null;
 }
 
 // ─────────────────────────────────────────────────────────

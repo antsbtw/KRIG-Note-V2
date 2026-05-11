@@ -54,6 +54,11 @@ export { LibraryPicker } from './ui/library-picker';
 export type { LibraryPickerProps } from './ui/library-picker';
 export { FloatingInspector } from './ui/floating-inspector';
 export type { FloatingInspectorProps } from './ui/floating-inspector';
+export { CreateSubstanceDialog } from './ui/create-substance-dialog';
+export type {
+  CreateSubstanceDialogProps,
+  CreateSubstanceFormResult,
+} from './ui/create-substance-dialog';
 
 // ── 自我诊断(charter § 5)──
 console.info(

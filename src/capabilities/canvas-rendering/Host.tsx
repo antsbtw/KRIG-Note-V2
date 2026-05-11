@@ -35,6 +35,7 @@ import { SceneManager } from './scene/SceneManager';
 import { NodeRenderer } from './scene/NodeRenderer';
 import { HandlesOverlay } from './scene/HandlesOverlay';
 import { InteractionController } from './interaction/InteractionController';
+import { combineSelectedToSubstance } from './combine';
 import './styles.css';
 
 export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
@@ -203,6 +204,23 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
      * style_overrides 走深合并(fill/line/arrow 分别合并字段),否则 fill 改了 color
      * 会丢掉 type.
      */
+    const combineSelected = useCallback(
+      (params: { name: string; category: string; description: string }) => {
+        const renderer = nodeRendererRef.current;
+        const interaction = interactionRef.current;
+        if (!renderer || !interaction) return null;
+        const selectedIds = interaction.getSelection();
+        if (selectedIds.length < 2) return null;
+        const result = combineSelectedToSubstance(renderer, { selectedIds, ...params });
+        if (!result) return null;
+        // 替换选区为新 substance 实例
+        interaction.setSelection([result.newInstanceId]);
+        onInstancesChange?.(renderer.listInstances());
+        return result;
+      },
+      [onInstancesChange],
+    );
+
     const updateInstance = useCallback((id: string, patch: Partial<Instance>): void => {
       const renderer = nodeRendererRef.current;
       if (!renderer) return;
@@ -240,6 +258,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         exitAddMode,
         isAddMode,
         updateInstance,
+        combineSelected,
       }),
       [
         loadDocument,
@@ -255,6 +274,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         exitAddMode,
         isAddMode,
         updateInstance,
+        combineSelected,
       ],
     );
 
