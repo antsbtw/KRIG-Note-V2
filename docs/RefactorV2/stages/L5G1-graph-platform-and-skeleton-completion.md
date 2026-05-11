@@ -100,6 +100,7 @@ design 内部数字一致性修订(5 条全闭环):
 | ✅ console 打印 alive 行 | `[Capability] alive` 含 `graph-library-store` + `[L5] alive` 含 `graph-canvas-view` | ✅ |
 | ✅ 上一层 alive 行也在 | L0~L4 alive 行无回归 | ✅ |
 | ✅ install-coverage 预期 missing 3 | `graph-canvas-view × 4 capabilities · missing 3:shape-library / canvas-rendering / canvas-text-node`(P1-A 修订:install 是声明性契约,G1 阶段后 3 项未注册是预期 warning,**不阻塞验收**;G2~G4 渐次归零)| ✅ |
+| ✅ viewTypeRegistry warn 配套出现 | registerView 校验 install ids 时缺失输出 `[L4] viewTypeRegistry: view 'graph-canvas-view' install ids 未在 capabilityRegistry 中: shape-library, canvas-rendering, canvas-text-node`(charter § 1.2);**P1-A 修订:渐进式 install 下这条 warn 是预期**,与 install-coverage 同源、配套,不阻塞验收 | ✅ |
 | ✅ typecheck 0 error | tsc --noEmit 0 输出 | ✅ |
 | ✅ lint 0 warn | eslint . 0 输出(全工程) | ✅ |
 | ✅ 屏障 grep 0 命中 | view 0 `import 'three'` / view 0 运行时 import `@capabilities` | ✅ |

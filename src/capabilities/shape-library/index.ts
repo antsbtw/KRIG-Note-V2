@@ -99,6 +99,24 @@ console.info(
   `[shape-library] alive | shapes: ${_shapeCount}, substances: ${_substanceCount}`,
 );
 
+// ── dev-only:启动时跑 smoke test + 暴露到 window.__krig.shapeLib(DevTools 自检用)──
+// prod 模式 Vite dead-code eliminate 整段(import.meta.env.DEV === false)
+if (import.meta.env.DEV) {
+  // 启动跑一次 smoke,失败时输出 failures 表
+  import('./shapes/__smoke__/run').then(({ runShapeSmoke, printSmoke }) => {
+    const rep = runShapeSmoke();
+    printSmoke(rep);
+  });
+  // DevTools 桥:`window.__krig.shapeLib.shapes.evaluate(...)` 等
+  // (path alias `@capabilities/*` 在 DevTools 原生 import 不识别,这里挂全局桥)
+  const krig = (window as unknown as { __krig?: Record<string, unknown> }).__krig ?? {};
+  krig.shapeLib = {
+    shapes: { Registry: ShapeRegistry },
+    substances: { Registry: SubstanceRegistry },
+  };
+  (window as unknown as Record<string, unknown>).__krig = krig;
+}
+
 // ── api 路由(W5 严格态 Registry 注册)──
 
 const shapesApi: ShapeLibraryApi['shapes'] = {

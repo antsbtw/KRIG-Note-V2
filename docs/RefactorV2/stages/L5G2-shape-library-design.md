@@ -197,6 +197,7 @@ export interface EvaluateInput {
 | ✅ console 显 `shape-library` alive 行 | + `shapes: 22, substances: 5` |
 | ✅ 上一层 alive 行也在 | L0~L5 + G1 alive 行无回归 |
 | ✅ install-coverage missing 3 → 2 | graph-canvas-view install 4 项中 shape-library 在本段归零;启动 console 显 `missing: canvas-rendering, canvas-text-node`(P1-A 修订:install 是声明性契约;G3 / G4 分别再归零 1 项);全工程 capability 数 14 → 15 |
+| ✅ viewTypeRegistry warn 配套出现 | 同 install-coverage,registerView 时校验 install ids 是否在 capabilityRegistry,缺失则 `[L4] viewTypeRegistry: view 'graph-canvas-view' install ids 未在 capabilityRegistry 中: canvas-rendering, canvas-text-node`;**P1-A 修订:渐进式 install 下这条 warn 是预期,与 install-coverage 同源、配套,不阻塞验收**(framework 自检冗余但稳妥保留 — V2 不为 graph 一段调整框架告警语义)|
 | ✅ typecheck 0 error | tsc --noEmit |
 | ✅ lint 0 warn | eslint . 全工程 |
 | ✅ **屏障 grep 0 命中**(本段核心)| `grep -rn "from 'three'" src/capabilities/shape-library/` → 0 行 |

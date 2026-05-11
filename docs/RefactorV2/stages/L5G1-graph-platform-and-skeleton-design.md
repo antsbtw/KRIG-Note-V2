@@ -353,6 +353,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 | ✅ console 打印 alive 行 | `[Capability] alive` 含 `graph-library-store`;`[L5] alive` 含 `graph-canvas-view` |
 | ✅ 上一层 alive 行也在 | L0~L4 alive 行无回归 |
 | ✅ install-coverage 预期 missing 3 | dev 模式启动显示 graph-canvas-view × 4 capabilities · missing 3(shape-library / canvas-rendering / canvas-text-node);**P1-A 修订(2026-05-10)**:install 是声明性契约,G1 阶段后 3 项 capability 尚未注册是预期 warning,**不阻塞验收**;G2~G4 渐次归零 |
+| ✅ viewTypeRegistry warn 配套出现 | 同 install-coverage,registerView 时校验 install ids 是否在 capabilityRegistry,缺失则 `[L4] viewTypeRegistry: view 'graph-canvas-view' install ids 未在 capabilityRegistry 中: shape-library, canvas-rendering, canvas-text-node`;**P1-A 修订:渐进式 install 下这条 warn 是预期**,与 install-coverage 同源、配套,不阻塞验收 |
 | ✅ typecheck 0 error | tsc --noEmit |
 | ✅ lint 0 warn | eslint . |
 
