@@ -27,10 +27,41 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type {
   DriverSerialized,
   TextEditingApi,
+  TextEditingPluginToggles,
 } from '@capabilities/text-editing/types';
 import { sessionStore, type ActiveSession } from './session-store';
 import { docToDriverSerialized } from './atom-bridge';
 import './edit-overlay.css';
+
+/**
+ * canvas-text-node plugin 预设(L5-G4.5 问题 3).
+ *
+ * 画板文字节点 = 单一文字块,**关掉 NoteView 段落级别能力**:
+ * - blockHandle:     ⋮⋮ 拖动手柄(NoteView 段落 drag/turn-into 入口)
+ * - vocabHighlight:  词汇高亮(NoteView 词汇学习专属)
+ * - noteLinkCommand: [[ 双链搜索(NoteView 知识图谱专属)
+ * - pasteMedia:      粘贴图片变 image block(画板不需要)
+ * - dropCursor:      拖拽插入位置蓝线(popup 内无拖入语义)
+ *
+ * 保留(画板编辑必需):
+ * - slash:        / 触发 turn-into(H1-H3 / list / blockquote 等),很有用
+ * - floating-toolbar: 选区 B/I/link 等,driver Host 内部默认挂(不在 toggles 配置内)
+ * - history:      Cmd+Z 撤销 PM 编辑(popup 内 stopPropagation 拦冒泡)
+ * - inputRules:   #/## 转 heading 等 markdown 输入
+ * - 各 keymap:    Mod-B/I/U 等快捷键
+ * - linkClick:    点击链接走路由
+ *
+ * 单一常量集中,避免 5 个布尔散落各处.
+ */
+export const CANVAS_TEXT_NODE_PLUGIN_PRESET: TextEditingPluginToggles = {
+  blockHandle: false,
+  vocabHighlight: false,
+  noteLinkCommand: false,
+  pasteMedia: false,
+  dropCursor: false,
+  // slash 默认 true,显式标出以表"刻意保留"
+  slash: true,
+};
 
 export function EditOverlay(): ReactElement | null {
   const textEditing = useMemo(
@@ -128,6 +159,7 @@ export function EditOverlay(): ReactElement | null {
             instanceId: `${t.workspaceId}::${t.instanceId}`,
             undoScope: `canvas-text-node.${t.workspaceId}.${t.instanceId}`,
             viewId: t.viewId,
+            plugins: CANVAS_TEXT_NODE_PLUGIN_PRESET,
           }}
           doc={initialDoc}
           onChange={handleChange}

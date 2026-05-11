@@ -15,6 +15,7 @@ export type {
   DriverSerialized,
   TextEditingHostProps,
   TextEditingConfig,
+  TextEditingPluginToggles,
 } from '@drivers/text-editing-driver';
 export type { MarkName, ActiveBlockType, NoteLinkSearchHandler } from '@drivers/text-editing-driver';
 

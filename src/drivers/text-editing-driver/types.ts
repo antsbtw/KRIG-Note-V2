@@ -46,6 +46,39 @@ export interface TextEditingHostProps {
   className?: string;
 }
 
+/**
+ * Plugin 启停开关(L5-G4.5 引入,view 按需关闭非必要 plugin).
+ *
+ * **默认全开**(NoteView 全套行为零回归);其他 view 按需 opt-out.
+ *
+ * 当前提供的开关(default true):
+ * - blockHandle:   ⋮⋮ 左侧拖动手柄 + drag source(NoteView 段落拖移用)
+ * - vocabHighlight:  词汇高亮 + hover tooltip(NoteView 词汇学习用)
+ * - noteLinkCommand: [[ 触发双链搜索面板(NoteView 知识图谱用)
+ * - pasteMedia:     剪贴板图片 → image block(NoteView mediaStore 集成)
+ * - dropCursor:     拖拽时蓝线指示插入位置
+ * - slash:          / 触发 slashMenuController(turn-into 入口)
+ *
+ * **不暴露的 plugin**(始终开,PM 编辑器必备):
+ * - history / inputRules / mark+heading keymap / list+codeBlock+hardBreak keymap /
+ *   linkClick / baseKeymap / 各 block plugin
+ *
+ * **特殊**(view 维度守门,不在 plugins 配置内):
+ * - titleGuard:viewId === 'note-view' 才挂(driver 内硬条件,避免 noteTitle 概念
+ *   泄漏给其他 view).
+ *
+ * Why default 全开:driver 当前已对齐 NoteView 行为,任何 NoteView 不传 plugins
+ * 的场景必须零回归;只有新 view(canvas-text-node 等)显式 opt-out 才改变.
+ */
+export interface TextEditingPluginToggles {
+  blockHandle?: boolean;
+  vocabHighlight?: boolean;
+  noteLinkCommand?: boolean;
+  pasteMedia?: boolean;
+  dropCursor?: boolean;
+  slash?: boolean;
+}
+
 export interface TextEditingConfig {
   /** 实例 ID(P1.3,通常用 workspaceId)— driver 用此区分多 Host 实例 */
   instanceId: string;
@@ -53,6 +86,8 @@ export interface TextEditingConfig {
   undoScope: string;
   /** view ID(L5-B3.1 — driver 通过此把 controller 事件 attribute 给具体 view)*/
   viewId: string;
+  /** L5-G4.5 plugin 启停开关;不传 = 全开(NoteView 零回归) */
+  plugins?: TextEditingPluginToggles;
 }
 
 // ── Driver 主接口(DESIGN.md v0.2.1 § 1.1)──

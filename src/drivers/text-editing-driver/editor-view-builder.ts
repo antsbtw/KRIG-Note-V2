@@ -46,6 +46,7 @@ export function buildEditorView(
   onTransaction: (tr: Transaction, view: EditorView) => void,
   viewId: string,
   instanceId: string,
+  pluginToggles?: import('./types').TextEditingPluginToggles,
 ): EditorView {
   // 收集 nodeViews
   const nodeViews: Record<string, NodeViewConstructor> = {};
@@ -67,28 +68,41 @@ export function buildEditorView(
   // mark/heading(view 级)→ baseKeymap(PM 标准兜底)
   // slash / block-handle 是 L5-B3.1 加的交互 plugin
   //
-  // title-guard 守门(L5-B3.11 + G4.5):仅 'note-view' 启用强制首块 isTitle.
-  // canvas-text-node / 未来 thought-view 等场景不需要 noteTitle,不挂这个 plugin.
+  // L5-G4.5 plugin 启停:`pluginToggles?` opt-out 模式(default 全开),
+  // NoteView 不传 → 行为零回归;canvas-text-node 关 5 项专属能力.
+  // 不暴露的(始终开):history / inputRules / 所有 keymap / linkClick / block plugins.
+  //
+  // title-guard 守门:仅 'note-view' 启用强制首块 isTitle(架构决议 — 不开放给
+  // pluginToggles,因为 noteTitle 是 NoteView 专属概念,泄漏给其他 view 反而错乱).
   // 详见 plugins/build-title-guard-plugin.ts 注释 § "L5-B3.11 接入策略".
   const requiresTitleGuard = viewId === 'note-view';
+  // opt-out 默认值 — 未传开关时 = true(NoteView 零回归契约)
+  const optIn = (v: boolean | undefined): boolean => v !== false;
+  const enableBlockHandle = optIn(pluginToggles?.blockHandle);
+  const enableVocabHighlight = optIn(pluginToggles?.vocabHighlight);
+  const enableNoteLinkCommand = optIn(pluginToggles?.noteLinkCommand);
+  const enablePasteMedia = optIn(pluginToggles?.pasteMedia);
+  const enableDropCursor = optIn(pluginToggles?.dropCursor);
+  const enableSlash = optIn(pluginToggles?.slash);
+
   const plugins: Plugin[] = [
-    ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y
+    ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
     ...blockPlugins,
     ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
-    buildInputRules(schema),     // headings + 4 mark markdown
-    buildSlashPlugin(viewId),    // / 触发 slashMenuController(L5-B3.1)
-    buildBlockHandlePlugin(viewId, instanceId), // ⋮⋮ 手柄 + drag source(L5-B3.1)
-    dropCursor({ color: '#4a90e2', width: 2 }), // L5-B3.1 拖拽时显蓝线指示插入位置
-    buildListKeymap(schema),     // L5-B3.2 list 内 Tab/Shift-Tab/Enter
-    buildCodeBlockKeymap(schema), // L5-B3.2 codeBlock Enter 换行 / 双 Enter 跳出 / Tab 缩进
-    buildHardBreakKeymap(schema), // L5-B3.3 Shift-Enter 插入 hardBreak 软换行
-    buildLinkClickPlugin(),       // L5-B3.4 link 点击分发(5 协议路由)
-    buildNoteLinkCommandPlugin(), // L5-B3.12 [[ 触发 — 双链搜索面板
-    buildPasteMediaPlugin(),      // L5-B3.13 剪贴板图片 → image block(异步 mediaStore)
-    buildVocabHighlightPlugin(),  // L5-B3.20b vocab 高亮 + hover tooltip
-    buildMarkKeymap(schema),     // Mod-b / Mod-i / Mod-Shift-x / Mod-e
-    buildHeadingKeymap(schema),  // Mod-Alt-0/1/2/3
-    keymap(baseKeymap),          // PM 标准键盘(Enter / Backspace / 光标)兜底
+    buildInputRules(schema),     // headings + 4 mark markdown(始终开)
+    ...(enableSlash ? [buildSlashPlugin(viewId)] : []),
+    ...(enableBlockHandle ? [buildBlockHandlePlugin(viewId, instanceId)] : []),
+    ...(enableDropCursor ? [dropCursor({ color: '#4a90e2', width: 2 })] : []),
+    buildListKeymap(schema),
+    buildCodeBlockKeymap(schema),
+    buildHardBreakKeymap(schema),
+    buildLinkClickPlugin(),
+    ...(enableNoteLinkCommand ? [buildNoteLinkCommandPlugin()] : []),
+    ...(enablePasteMedia ? [buildPasteMediaPlugin()] : []),
+    ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
+    buildMarkKeymap(schema),
+    buildHeadingKeymap(schema),
+    keymap(baseKeymap),
   ];
 
   const state = EditorState.create({ doc, plugins });
