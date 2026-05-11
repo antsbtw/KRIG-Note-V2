@@ -73,33 +73,61 @@ export async function atomsToSvgInput(doc: unknown): Promise<SerializerAtom[]> {
  * 给定一个 instance.doc(任意形态),返回 DriverSerialized.
  * 用于编辑态 enter 时把 instance.doc 转成 text-editing.Host 接受的 initial doc.
  *
- * - DriverSerialized → 透传
- * - V1 NoteView Atom[] → 转 PMDocNode[] 后封装
- * - 空 / 无效 → 空 doc(text-editing.createEmptyDoc)
+ * - DriverSerialized → 剥 noteTitle 后透传(NoteView 持久化的 doc 复用到画板时
+ *   可能带 isTitle,需剥;canvas-text-node 自己持久化的不带 isTitle)
+ * - V1 NoteView Atom[] → 转 PMDocNode[] 后剥 noteTitle 封装
+ * - 空 / 无效 → canvasEmptyDoc(text-block isTitle:false,非 NoteView 全屏 title)
  */
 export async function docToDriverSerialized(doc: unknown): Promise<unknown> {
-  const api = getTextEditing();
-  if (!doc) return api.createEmptyDoc();
-  if (isDriverSerialized(doc)) return doc;
+  if (!doc) return canvasEmptyDoc();
+  if (isDriverSerialized(doc)) {
+    // 即使透传也剥一下 noteTitle(防 NoteView 同源 doc 复用到画板)
+    const content = (doc.payload?.content ?? []) as PMDocNode[];
+    const filtered = stripNoteTitle(content);
+    if (filtered.length === 0) return canvasEmptyDoc();
+    return {
+      format: 'pm-doc-json',
+      version: '0.1',
+      payload: { type: 'doc', content: filtered },
+    };
+  }
   if (Array.isArray(doc) && doc.length > 0) {
     try {
+      const api = getTextEditing();
       const sanitized = api.sanitizeAtoms(doc as AtomInput[]);
       const nodes = await api.atomsToProseMirror({ atoms: sanitized });
       const filtered = stripNoteTitle(nodes);
-      // 兜底:空内容补一个空 paragraph(text-editing 内部已兜底 emptyTextBlock,但
-      // stripNoteTitle 可能剥到只剩 noteTitle 那种情况)
-      const finalContent = filtered.length > 0 ? filtered : nodes;
+      if (filtered.length === 0) return canvasEmptyDoc();
       return {
         format: 'pm-doc-json',
         version: '0.1',
-        payload: { type: 'doc', content: finalContent },
+        payload: { type: 'doc', content: filtered },
       };
     } catch (e) {
       console.warn('[canvas-text-node/atom-bridge] docToDriverSerialized failed', e);
-      return api.createEmptyDoc();
+      return canvasEmptyDoc();
     }
   }
-  return api.createEmptyDoc();
+  return canvasEmptyDoc();
+}
+
+/**
+ * 画板文字节点的"空 doc" — 一个 isTitle=false 的空 text-block.
+ *
+ * 不复用 text-editing.createEmptyDoc 因为那个版本首块 isTitle=true(NoteView 标题).
+ * 画板节点没有 title 概念,首块就是普通段落.
+ */
+function canvasEmptyDoc(): { format: string; version: string; payload: { type: string; content: PMDocNode[] } } {
+  return {
+    format: 'pm-doc-json',
+    version: '0.1',
+    payload: {
+      type: 'doc',
+      content: [
+        { type: 'text-block', attrs: { isTitle: false, level: null }, content: [] },
+      ],
+    },
+  };
 }
 
 /** ref 是否为文字节点 */
@@ -126,10 +154,13 @@ function isDriverSerialized(x: unknown): x is DriverSerializedLite {
   return r.format === 'pm-doc-json' && typeof r.payload === 'object';
 }
 
-/** 剥掉 atomsToProseMirror 硬补的 noteTitle 节点(画板节点没 title) */
+/**
+ * 剥掉 atomsToProseMirror 硬补的 noteTitle 节点(画板节点没 title).
+ * V2 schema 节点名 `text-block`(带短横线,对齐 V2 BlockSpec.id;不是 V1 驼峰 `textBlock`).
+ */
 function stripNoteTitle(nodes: PMDocNode[]): PMDocNode[] {
   return nodes.filter((n) => {
-    if (n.type !== 'textBlock') return true;
+    if (n.type !== 'text-block') return true;
     const isTitle = (n.attrs as { isTitle?: boolean } | undefined)?.isTitle;
     return !isTitle;
   });

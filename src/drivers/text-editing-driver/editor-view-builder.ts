@@ -66,10 +66,15 @@ export function buildEditorView(
   // L5-B3.1 装配清单 — history 最前(覆盖所有后续动作);keymap 顺序:
   // mark/heading(view 级)→ baseKeymap(PM 标准兜底)
   // slash / block-handle 是 L5-B3.1 加的交互 plugin
+  //
+  // title-guard 守门(L5-B3.11 + G4.5):仅 'note-view' 启用强制首块 isTitle.
+  // canvas-text-node / 未来 thought-view 等场景不需要 noteTitle,不挂这个 plugin.
+  // 详见 plugins/build-title-guard-plugin.ts 注释 § "L5-B3.11 接入策略".
+  const requiresTitleGuard = viewId === 'note-view';
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y
     ...blockPlugins,
-    buildTitleGuardPlugin(),     // L5-B3.11 维护 doc 首块为 isTitle text-block(handlePaste + appendTransaction)
+    ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
     buildInputRules(schema),     // headings + 4 mark markdown
     buildSlashPlugin(viewId),    // / 触发 slashMenuController(L5-B3.1)
     buildBlockHandlePlugin(viewId, instanceId), // ⋮⋮ 手柄 + drag source(L5-B3.1)
