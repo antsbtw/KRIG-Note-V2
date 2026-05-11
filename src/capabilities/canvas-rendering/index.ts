@@ -42,10 +42,16 @@ export type {
   InstanceKind,
   InstanceEndpoint,
   TextNodeAtoms,
+  AddModeSpec,
 } from './types';
 
 // 模块级 export(W5 边界 A 临时允许项 — driver/slot 内部可直 import;view 侧仍走 requireCapabilityApi)
 export { CanvasHost };
+
+// G4.4a UI 浮层(画板内浮层归 capability,charter § 1.4 + design G4-11=A)
+// view 端直接 import 使用(open / anchorRect / onPick / onClose 全 view 控制)
+export { LibraryPicker } from './ui/library-picker';
+export type { LibraryPickerProps } from './ui/library-picker';
 
 // ── 自我诊断(charter § 5)──
 console.info(
