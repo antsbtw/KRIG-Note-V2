@@ -67,6 +67,8 @@ export interface CanvasTextNodeApi {
   enterEdit(opts: EnterEditOptions): EditSession;
   /** 当前是否在编辑态(view 端浮层互斥判断用) */
   isEditing(): boolean;
+  /** 订阅编辑态变化(view 端浮层互斥用,enter / exit 时触发);返回取消订阅函数 */
+  onEditingChange(cb: (editing: boolean) => void): () => void;
   /** atom-bridge(NodeRenderer 展示态 + ref helper) */
   atomBridge: AtomBridgeApi;
   /** EditOverlay React 组件(view 端挂在画板顶层,canvas-rendering 内浮层归属对齐 G4-11=A) */

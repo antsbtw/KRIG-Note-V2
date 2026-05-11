@@ -34,6 +34,9 @@ const api: CanvasTextNodeApi = {
   isEditing() {
     return sessionStore.isActive();
   },
+  onEditingChange(cb) {
+    return sessionStore.subscribe(() => cb(sessionStore.isActive()));
+  },
   atomBridge: {
     atomsToSvgInput,
     isTextNodeRef,

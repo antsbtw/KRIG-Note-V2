@@ -75,6 +75,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
+  // 文字编辑态 — 进入编辑时关 Inspector / Picker(避免与 popup 互相干扰)
+  const [isTextEditing, setIsTextEditing] = useState(false);
 
   // ── per-ws state 订阅 ──
   const wsState = useSyncExternalStore(
@@ -193,6 +195,19 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     return () => host.setAtomBridge(null);
   }, [textNode, activeGraphId]);
 
+  // ── G4.5 P5:订阅文字编辑态,enter 时关 Inspector / Picker / Combine Dialog ──
+  // (互斥:popup 内编辑文字时,其他浮层都该让位)
+  useEffect(() => {
+    return textNode.onEditingChange((editing) => {
+      setIsTextEditing(editing);
+      if (editing) {
+        setInspectorOpen(false);
+        setPickerOpen(false);
+        setCombineDialogOpen(false);
+      }
+    });
+  }, [textNode]);
+
   // ── Host 回调 ──
   const handleInstancesChange = useCallback(
     (_instances: Instance[]): void => {
@@ -306,7 +321,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         onClose={() => setPickerOpen(false)}
       />
       <FloatingInspector
-        open={inspectorOpen && activeGraphId != null}
+        open={inspectorOpen && activeGraphId != null && !isTextEditing}
         selectedIds={selectedIds}
         getInstance={(id) => hostRef.current?.getInstance(id) ?? null}
         onUpdate={handleInspectorUpdate}
