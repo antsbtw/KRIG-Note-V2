@@ -27,6 +27,11 @@ import * as THREE from 'three';
 import type { SceneManager } from '../scene/SceneManager';
 import type { NodeRenderer, RenderedNode } from '../scene/NodeRenderer';
 
+/** V1 wheel zoom 灵敏度 / 上下限(InteractionController.ts:155-160 直迁) */
+const WHEEL_ZOOM_SENSITIVITY = 0.005;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 20;
+
 export interface InteractionControllerOpts {
   container: HTMLElement;
   sceneManager: SceneManager;
@@ -58,14 +63,17 @@ export class InteractionController {
     snapshots: Map<string, { x: number; y: number }>;
   } | null = null;
 
-  /** 拖空白平移视口状态 */
-  private panning: {
-    startScreen: { x: number; y: number };
-    startCenter: { x: number; y: number };
-  } | null = null;
-
   /** 拖动期间是否真正发生位移(用于 mouseup 时判断 click 还是 drag end) */
   private dragMoved = false;
+
+  // [G4 砍] marquee 框选状态(V1 InteractionController.ts:55-64)— 接续时补回:
+  //   private marquee: { startWorld, currentWorld, overlayGroup, additive } | null = null;
+  // [G4 砍] resize 状态(V1:67-77)
+  // [G4 砍] rotate 状态(V1:79-87)
+  // [G4 砍] drawingLine 状态 / magnetHints / hoveredLineId / lineEndpointHandles /
+  //         rewiring 状态(V1:89-131)
+  // [G4 砍] addMode + onAddModeChange / onNodeDoubleClick / onContextMenu(V1:133-141)
+  // [G4 砍] undo/redo stack(V1:158-160)— D-13=B 留 V1 自管,本段不接
 
   /** 事件解绑函数 */
   private unsubscribers: Array<() => void> = [];
@@ -129,7 +137,6 @@ export class InteractionController {
     this.overlays.clear();
     this.selected.clear();
     this.dragging = null;
-    this.panning = null;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -158,66 +165,77 @@ export class InteractionController {
   }
 
   // ─────────────────────────────────────────────────────────
-  // mouse: down / move / up
+  // mouse: down / move / up(V1 模式对齐;G3 砍 G4 部分)
   // ─────────────────────────────────────────────────────────
+
+  /** V1 helper:event 坐标 → 容器内坐标(全 mouse / wheel handler 共用) */
+  private toContainerCoords(e: MouseEvent | WheelEvent): { x: number; y: number } {
+    const rect = this.container.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
 
   private handleMouseDown(e: MouseEvent): void {
     if (e.button !== 0) return; // 只处理左键
-    const rect = this.container.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    const hit = this.hitTest(screenX, screenY);
+    this.container.focus(); // V1:抢键盘焦点(Delete / Escape 用)
 
+    const screen = this.toContainerCoords(e);
+    const world = this.sceneManager.screenToWorld(screen.x, screen.y);
+
+    // [G4 砍] addMode:placeInstance / tryStartDrawingLine
+    // [G4 砍] HandlesOverlay.hitTest → startResize / startRotate
+    // [G4 砍] line endpoint handle → startRewire
+    // [G4 砍] raycastLinkHref → dispatchLinkHref
+
+    const hit = this.hitTest(screen.x, screen.y);
+    const additive = e.shiftKey || e.metaKey;
     if (hit) {
-      // 点中节点 — 选中 + 准备拖动
-      this.setSelection([hit.instanceId]);
-      const startWorld = this.sceneManager.screenToWorld(screenX, screenY);
-      const snapshots = new Map<string, { x: number; y: number }>();
-      for (const id of this.selected) {
-        const inst = this.nodeRenderer.getInstance(id);
-        if (inst?.position) snapshots.set(id, { ...inst.position });
+      // V1 模式:additive 时 toggle;非 additive 时若未选则替换为单选
+      if (additive) {
+        if (this.selected.has(hit.instanceId)) {
+          this.selected.delete(hit.instanceId);
+        } else {
+          this.selected.add(hit.instanceId);
+        }
+        this.refreshOverlays();
+        this.notifySelection();
+      } else {
+        if (!this.selected.has(hit.instanceId)) {
+          this.selected.clear();
+          this.selected.add(hit.instanceId);
+          this.refreshOverlays();
+          this.notifySelection();
+        }
+        // 已选中且非 additive:不变(下面进入拖动)
       }
-      this.dragging = { startWorld, snapshots };
-      this.dragMoved = false;
+      this.startDragNodes(world);
     } else {
-      // 空白 — 准备 pan + 清选中(若有)
-      const view = this.sceneManager.getView();
-      this.panning = {
-        startScreen: { x: screenX, y: screenY },
-        startCenter: { x: view.centerX, y: view.centerY },
-      };
-      this.dragMoved = false;
-      if (this.selected.size > 0) this.clearSelection();
+      // 空白处:非 additive 清选区
+      // [G4 砍] startMarquee(框选)— G4 接续时把空白分支改成 startMarquee(world, additive)
+      if (!additive) this.clearSelection();
     }
   }
 
-  private handleMouseMove(e: MouseEvent): void {
-    if (!this.dragging && !this.panning) return;
-    const rect = this.container.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
+  /** V1 startDrag:记录所有选中节点的起始位置快照,move 时 + delta */
+  private startDragNodes(startWorld: { x: number; y: number }): void {
+    const snapshots = new Map<string, { x: number; y: number }>();
+    for (const id of this.selected) {
+      const inst = this.nodeRenderer.getInstance(id);
+      if (inst?.position) snapshots.set(id, { ...inst.position });
+    }
+    this.dragging = { startWorld, snapshots };
+    this.dragMoved = false;
+  }
 
-    if (this.dragging) {
-      const cur = this.sceneManager.screenToWorld(screenX, screenY);
-      const dx = cur.x - this.dragging.startWorld.x;
-      const dy = cur.y - this.dragging.startWorld.y;
-      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) this.dragMoved = true;
-      for (const [id, snap] of this.dragging.snapshots) {
-        this.nodeRenderer.setPosition(id, { x: snap.x + dx, y: snap.y + dy });
-        this.updateOverlay(id);
-      }
-    } else if (this.panning) {
-      const dx = screenX - this.panning.startScreen.x;
-      const dy = screenY - this.panning.startScreen.y;
-      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) this.dragMoved = true;
-      // 平移视口:屏幕 dx 像素 = 世界 dx / zoom
-      const view = this.sceneManager.getView();
-      this.sceneManager.setView(
-        this.panning.startCenter.x - dx / view.zoom,
-        this.panning.startCenter.y - dy / view.zoom,
-        view.zoom,
-      );
-      this.onViewportChange?.();
+  private handleMouseMove(e: MouseEvent): void {
+    if (!this.dragging) return;
+    const screen = this.toContainerCoords(e);
+    const cur = this.sceneManager.screenToWorld(screen.x, screen.y);
+    const dx = cur.x - this.dragging.startWorld.x;
+    const dy = cur.y - this.dragging.startWorld.y;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) this.dragMoved = true;
+    for (const [id, snap] of this.dragging.snapshots) {
+      this.nodeRenderer.setPosition(id, { x: snap.x + dx, y: snap.y + dy });
+      this.updateOverlay(id);
     }
   }
 
@@ -226,30 +244,50 @@ export class InteractionController {
       if (this.dragMoved) this.onInstancesChange?.();
       this.dragging = null;
     }
-    if (this.panning) {
-      this.panning = null;
-    }
     this.dragMoved = false;
   }
 
+  /**
+   * V1 wheel — pan(双指拖动)+ zoom-to-cursor(pinch / 鼠标滚轮)
+   *
+   * macOS 手势规约(V1 InteractionController.ts:616):
+   * - 双指 pinch  → wheel + ctrlKey=true  → zoom-to-cursor
+   * - 双指拖动    → wheel + ctrlKey=false → pan
+   * - 鼠标滚轮    → wheel + ctrlKey=false 但 deltaMode=DOM_DELTA_LINE
+   *   (双指拖动是 DOM_DELTA_PIXEL),用 deltaMode 兼容物理鼠标 zoom
+   */
   private handleWheel(e: WheelEvent): void {
-    e.preventDefault();
-    const rect = this.container.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    // zoom-to-cursor:鼠标位置作为缩放中心
+    e.preventDefault(); // 阻止 macOS 双指 history navigation
     const view = this.sceneManager.getView();
-    const beforeWorld = this.sceneManager.screenToWorld(screenX, screenY);
-    // deltaY > 0 ⇒ 滚下 ⇒ 缩小;< 0 ⇒ 滚上 ⇒ 放大
-    const factor = e.deltaY > 0 ? 0.9 : 1 / 0.9;
-    const newZoom = Math.max(0.1, Math.min(20, view.zoom * factor));
-    // 算 newCenter 让 beforeWorld 在屏幕上仍然在鼠标位置
-    // screenX = cw/2 + (beforeWorld.x - newCenter.x) * newZoom
-    // → newCenter.x = beforeWorld.x - (screenX - cw/2) / newZoom
-    const { clientWidth, clientHeight } = this.container;
-    const newCenterX = beforeWorld.x - (screenX - clientWidth / 2) / newZoom;
-    const newCenterY = beforeWorld.y - (screenY - clientHeight / 2) / newZoom;
-    this.sceneManager.setView(newCenterX, newCenterY, newZoom);
+    if (view.zoom <= 0) return;
+
+    const isPinchZoom = e.ctrlKey;
+    const isMouseWheel = e.deltaMode !== 0; // 0 = DOM_DELTA_PIXEL(trackpad)
+
+    if (isPinchZoom || isMouseWheel) {
+      // ── Zoom-to-cursor ──
+      const sensitivity = isPinchZoom ? WHEEL_ZOOM_SENSITIVITY * 5 : WHEEL_ZOOM_SENSITIVITY;
+      const factor = Math.exp(-e.deltaY * sensitivity);
+      const newZoom = view.zoom * factor;
+      const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+      if (clamped === view.zoom) return;
+
+      const screen = this.toContainerCoords(e);
+      const cursor = this.sceneManager.screenToWorld(screen.x, screen.y);
+      const ratio = view.zoom / clamped;
+      const newCenterX = cursor.x - (cursor.x - view.centerX) * ratio;
+      const newCenterY = cursor.y - (cursor.y - view.centerY) * ratio;
+      this.sceneManager.setView(newCenterX, newCenterY, clamped);
+    } else {
+      // ── Pan(trackpad 双指拖动)──
+      const dxWorld = e.deltaX / view.zoom;
+      const dyWorld = e.deltaY / view.zoom;
+      this.sceneManager.setView(
+        view.centerX + dxWorld,
+        view.centerY + dyWorld,
+        view.zoom,
+      );
+    }
     this.onViewportChange?.();
   }
 
