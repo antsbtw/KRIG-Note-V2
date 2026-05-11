@@ -149,7 +149,26 @@ export class InteractionController {
   /** Magnet 提示 overlay:hover shape / 画 line 时显示该 shape 的 magnet 点(V1:104 直迁) */
   private magnetHints = new Map<string, THREE.Group>();
 
-  // [G4.3e 砍] lineEndpointHandles / rewiring(V1:113-131)
+  /**
+   * Line 端点 handle:line 单选时显示 2 个端点小圆(替代常规 8 resize handle)
+   * 仅当选中实例是 line 时存在;切换选区时清掉(V1:113-118)
+   */
+  private lineEndpointHandles: {
+    instanceId: string;
+    handles: [THREE.Mesh, THREE.Mesh];
+    group: THREE.Group;
+  } | null = null;
+
+  /** Rewire 状态(拖 line 端点改连接;V1:121-130 直迁) */
+  private rewiring: {
+    instanceId: string;
+    endpointIndex: 0 | 1;
+    startEndpoints: [
+      { instance: string; magnet: string },
+      { instance: string; magnet: string },
+    ];
+  } | null = null;
+
   // [G4.4 砍] onNodeDoubleClick / onContextMenu(V1:139-141)
 
   /** 事件解绑函数 */
@@ -262,6 +281,8 @@ export class InteractionController {
       disposeMagnetHintGroup(group);
     }
     this.magnetHints.clear();
+    this.clearLineEndpointHandles();
+    this.rewiring = null;
     this.addMode = null;
     this.undoStack = [];
     this.redoStack = [];
@@ -323,7 +344,6 @@ export class InteractionController {
       return;
     }
 
-    // [G4.3e 砍] line endpoint handle → startRewire(V1:388-403)
     // [G4.4 砍] raycastLinkHref → dispatchLinkHref
 
     // ── 1. 优先命中 HandlesOverlay(resize / rotate)──
@@ -335,6 +355,13 @@ export class InteractionController {
       } else {
         this.startResize(handleTarget, handleHit, world);
       }
+      return;
+    }
+
+    // ── 1.5 line endpoint handle 命中 → 进 rewire(V1:388-393) ──
+    const epIdx = this.hitTestLineEndpointHandle(world);
+    if (epIdx !== null && this.lineEndpointHandles) {
+      this.startRewire(this.lineEndpointHandles.instanceId, epIdx);
       return;
     }
 
@@ -396,6 +423,10 @@ export class InteractionController {
       this.applyRotate(world, e.shiftKey);
       return;
     }
+    if (this.rewiring) {
+      this.updateRewire(world);
+      return;
+    }
     if (this.drawingLine) {
       this.updateDrawingLine(world);
       this.refreshMagnetHintsForHover(world);
@@ -442,6 +473,12 @@ export class InteractionController {
       this.rotating = null;
       this.refreshHandles();
       this.onInstancesChange?.();
+      return;
+    }
+    if (this.rewiring) {
+      const screen = this.toContainerCoords(e);
+      const world = this.sceneManager.screenToWorld(screen.x, screen.y);
+      this.tryFinishRewire(world);
       return;
     }
     if (this.drawingLine) {
@@ -556,7 +593,7 @@ export class InteractionController {
         this.deleteSelected();
       }
     } else if (e.key === 'Escape') {
-      // V1 优先级:resize/rotate → marquee → [G4.3e rewire] → drawingLine → addMode → 清选区
+      // V1 优先级:resize/rotate → marquee → rewire → drawingLine → addMode → 清选区
       if (this.resizing) {
         this.resizing = null;
         this.refreshHandles();
@@ -565,6 +602,8 @@ export class InteractionController {
         this.refreshHandles();
       } else if (this.marquee) {
         this.cancelMarquee();
+      } else if (this.rewiring) {
+        this.cancelRewire();
       } else if (this.drawingLine) {
         this.cancelDrawingLine();
       } else if (this.addMode) {
@@ -872,6 +911,207 @@ export class InteractionController {
       disposeMagnetHintGroup(group);
     }
     this.magnetHints.clear();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Line endpoint handles + Rewire(V1 1524-1611 + 980-1104 直迁)
+  // ─────────────────────────────────────────────────────────
+
+  /** 单选 line 时显示 2 个端点 handle(rewire 入口) */
+  private refreshLineEndpointHandles(): void {
+    const ids = Array.from(this.selected);
+    const single = ids.length === 1 ? this.nodeRenderer.get(ids[0]) : null;
+    const isLine = single && isLineKind(single);
+    if (!isLine) {
+      this.clearLineEndpointHandles();
+      return;
+    }
+    const inst = this.getInstance(single.instanceId);
+    if (!inst) return;
+    const ep = this.resolveLineWorldEndpoints(inst);
+    if (!ep) {
+      this.clearLineEndpointHandles();
+      return;
+    }
+    if (this.lineEndpointHandles && this.lineEndpointHandles.instanceId === single.instanceId) {
+      this.lineEndpointHandles.handles[0].position.set(ep.start.x, ep.start.y, MAGNET_HINT_Z);
+      this.lineEndpointHandles.handles[1].position.set(ep.end.x, ep.end.y, MAGNET_HINT_Z);
+    } else {
+      this.clearLineEndpointHandles();
+      const group = new THREE.Group();
+      const h0 = makeEndpointHandleMesh();
+      const h1 = makeEndpointHandleMesh();
+      h0.position.set(ep.start.x, ep.start.y, MAGNET_HINT_Z);
+      h1.position.set(ep.end.x, ep.end.y, MAGNET_HINT_Z);
+      group.add(h0);
+      group.add(h1);
+      this.sceneManager.scene.add(group);
+      this.lineEndpointHandles = { instanceId: single.instanceId, handles: [h0, h1], group };
+    }
+  }
+
+  private clearLineEndpointHandles(): void {
+    if (!this.lineEndpointHandles) return;
+    this.sceneManager.scene.remove(this.lineEndpointHandles.group);
+    for (const m of this.lineEndpointHandles.handles) {
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    this.lineEndpointHandles = null;
+  }
+
+  /** 解析一条 line 实例两端的世界坐标(V1 1574-1594) */
+  private resolveLineWorldEndpoints(
+    inst: Instance,
+  ): { start: { x: number; y: number }; end: { x: number; y: number } } | null {
+    if (!inst.endpoints) return null;
+    const resolveOther = (id: string): { node: RenderedNode; instance: Instance } | null => {
+      const n = this.nodeRenderer.get(id);
+      const i = this.getInstance(id);
+      return n && i ? { node: n, instance: i } : null;
+    };
+    const a = inst.endpoints[0];
+    const b = inst.endpoints[1];
+    const aPair = resolveOther(a.instance);
+    const bPair = resolveOther(b.instance);
+    if (!aPair || !bPair) return null;
+    const start = listMagnets(aPair.node, aPair.instance).find((m) => m.magnetId === a.magnet);
+    const end = listMagnets(bPair.node, bPair.instance).find((m) => m.magnetId === b.magnet);
+    if (!start || !end) return null;
+    return { start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y } };
+  }
+
+  /** 世界坐标 → 命中的 line endpoint handle index(0/1) or null(V1 1597-1610) */
+  private hitTestLineEndpointHandle(world: { x: number; y: number }): 0 | 1 | null {
+    if (!this.lineEndpointHandles) return null;
+    const handles = this.lineEndpointHandles.handles;
+    const radius = 12; // 世界单位
+    for (let i = 0; i < 2; i++) {
+      const p = handles[i].position;
+      const d = Math.hypot(world.x - p.x, world.y - p.y);
+      if (d <= radius) return i as 0 | 1;
+    }
+    return null;
+  }
+
+  /** 进入 rewire 状态:记 line + 拖的哪一端 + 起始 endpoints 快照(V1 980-996) */
+  private startRewire(instanceId: string, endpointIndex: 0 | 1): void {
+    const inst = this.getInstance(instanceId);
+    if (!inst || !inst.endpoints) return;
+    this.pushHistory();
+    this.rewiring = {
+      instanceId,
+      endpointIndex,
+      startEndpoints: [
+        { ...inst.endpoints[0] },
+        { ...inst.endpoints[1] },
+      ],
+    };
+    // 进 rewire 时显示所有候选 shape 的 magnet 点(除 line 自身)
+    this.showMagnetHintsFor((id) => id !== instanceId);
+  }
+
+  /**
+   * mousemove:line 几何跟随鼠标(吸附附近 magnet 或跟手),不改 Instance.endpoints
+   * (避免 endpoints 字段不支持"自由坐标"的限制).mouseup 命中 magnet 才正式写.
+   */
+  private updateRewire(world: { x: number; y: number }): void {
+    if (!this.rewiring) return;
+    const inst = this.getInstance(this.rewiring.instanceId);
+    if (!inst || !inst.endpoints) return;
+    const node = this.nodeRenderer.get(this.rewiring.instanceId);
+    if (!node) return;
+
+    // 解析另一端世界坐标(rewire 中固定不动)
+    const otherIdx = this.rewiring.endpointIndex === 0 ? 1 : 0;
+    const otherEp = this.rewiring.startEndpoints[otherIdx];
+    const otherPair = ((): { node: RenderedNode; instance: Instance } | null => {
+      const n = this.nodeRenderer.get(otherEp.instance);
+      const i = this.getInstance(otherEp.instance);
+      return n && i ? { node: n, instance: i } : null;
+    })();
+    if (!otherPair) return;
+    const otherMagnet = listMagnets(otherPair.node, otherPair.instance)
+      .find((m) => m.magnetId === otherEp.magnet);
+    if (!otherMagnet) return;
+    const fixedEnd = { x: otherMagnet.x, y: otherMagnet.y };
+
+    // 被拖端:吸附附近 magnet,否则跟鼠标
+    const exclude = new Set([otherEp.instance]);
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+      exclude,
+    );
+    const draggedEnd = closest
+      ? { x: closest.magnet.x, y: closest.magnet.y }
+      : { x: world.x, y: world.y };
+
+    const start = this.rewiring.endpointIndex === 0 ? draggedEnd : fixedEnd;
+    const end = this.rewiring.endpointIndex === 0 ? fixedEnd : draggedEnd;
+
+    // 直接改 line group 几何(不动 endpoints)
+    updateLineGeometry(node.group, inst.ref, start, end);
+
+    // 同步 endpoint handle 位置(被拖端跟着)
+    if (this.lineEndpointHandles &&
+        this.lineEndpointHandles.instanceId === this.rewiring.instanceId) {
+      this.lineEndpointHandles.handles[this.rewiring.endpointIndex]
+        .position.set(draggedEnd.x, draggedEnd.y, MAGNET_HINT_Z);
+    }
+  }
+
+  /** mouseup:落点吸附到 magnet 则写 endpoints,落空则还原(V1 1052-1088) */
+  private tryFinishRewire(world: { x: number; y: number }): void {
+    if (!this.rewiring) return;
+    const r = this.rewiring;
+    this.rewiring = null;
+    this.clearMagnetHints();
+    const inst = this.getInstance(r.instanceId);
+    if (!inst || !inst.endpoints) return;
+
+    const otherIdx = r.endpointIndex === 0 ? 1 : 0;
+    const otherInst = r.startEndpoints[otherIdx].instance;
+    const exclude = new Set([otherInst]);
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+      exclude,
+    );
+    if (closest) {
+      inst.endpoints[r.endpointIndex] = {
+        instance: closest.magnet.instanceId,
+        magnet: closest.magnet.magnetId,
+      };
+      this.nodeRenderer.updateLinesFor(closest.magnet.instanceId);
+      this.refreshOverlays();
+      this.onInstancesChange?.();
+    } else {
+      // 落空:还原原 endpoints + 刷几何 + 弹掉 pushHistory 记的快照
+      inst.endpoints[0] = { ...r.startEndpoints[0] };
+      inst.endpoints[1] = { ...r.startEndpoints[1] };
+      this.nodeRenderer.updateLinesFor(r.startEndpoints[0].instance);
+      this.refreshOverlays();
+      if (this.undoStack.length > 0) this.undoStack.pop();
+    }
+  }
+
+  /** ESC / unmount:还原起始 endpoints(V1 1091-1104) */
+  private cancelRewire(): void {
+    if (!this.rewiring) return;
+    const r = this.rewiring;
+    this.rewiring = null;
+    this.clearMagnetHints();
+    const inst = this.getInstance(r.instanceId);
+    if (inst && inst.endpoints) {
+      inst.endpoints[0] = { ...r.startEndpoints[0] };
+      inst.endpoints[1] = { ...r.startEndpoints[1] };
+      this.nodeRenderer.updateLinesFor(r.startEndpoints[0].instance);
+      this.refreshOverlays();
+    }
+    if (this.undoStack.length > 0) this.undoStack.pop();
   }
 
   /**
@@ -1226,10 +1466,20 @@ export class InteractionController {
       if (!this.selected.has(id)) this.removeOverlay(id);
     }
     // 加新选中的 overlay + 刷新已存在 overlay 的顶点(resize/rotate 时跟随)
+    // V1:line 实例不显矩形选中边框(它的 bbox 是端点 AABB,框个矩形没意义;
+    // 选中视觉走 line endpoint handles 替代)
     for (const id of this.selected) {
+      const node = this.nodeRenderer.get(id);
+      if (!node) continue;
+      if (isLineKind(node)) {
+        if (this.overlays.has(id)) this.removeOverlay(id);
+        continue;
+      }
       if (!this.overlays.has(id)) this.createOverlay(id);
       else this.updateOverlay(id);
     }
+    // 单选 line 时显示 2 个端点 handle(V1:1520)
+    this.refreshLineEndpointHandles();
   }
 
   /** 计算节点旋转后的 4 个 OBB 角点(世界坐标),用于选中边框 LineLoop */
@@ -1475,6 +1725,21 @@ function rebuildMagnetHintDots(group: THREE.Group, node: RenderedNode, inst: Ins
     mesh.position.set(m.x, m.y, MAGNET_HINT_Z);
     group.add(mesh);
   }
+}
+
+/**
+ * Line endpoint handle mesh:line 选中时两端的深蓝小圆,供拖拽 rewire
+ * 半径 6 世界单位(低 zoom 下也清晰可点)— V1 1898-1907 直迁
+ */
+function makeEndpointHandleMesh(): THREE.Mesh {
+  const geom = new THREE.CircleGeometry(6, 24);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x2E5C8A,
+    transparent: true,
+    opacity: 0.95,
+    side: THREE.DoubleSide,
+  });
+  return new THREE.Mesh(geom, mat);
 }
 
 function disposeMagnetHintGroup(group: THREE.Group): void {
