@@ -78,7 +78,11 @@ function hydrate(ws: WorkspaceState): NoteWorkspaceState {
     expandedFolders: new Set(raw?.expandedFolders ?? []),
     folderSortMap: raw?.folderSortMap ?? {},
     clipboard: raw?.clipboard ?? null,
-    selectedIds: transientSelected.get(ws.id) ?? new Set<string>(),
+    // selectedIds 兜底用 DEFAULT_WS_STATE.selectedIds(冻结引用),与 cached
+    // 分支兜底一致 — useSyncExternalStore getSnapshot 多次调用返回稳定引用,
+    // 避免 React 19 dev mode "getSnapshot should be cached" 警告(V2 既有 bug,
+    // L5-G2 顺手修;memory feedback_use_sync_external_store_stable_ref)
+    selectedIds: transientSelected.get(ws.id) ?? DEFAULT_WS_STATE.selectedIds,
   };
   hydratedCache.set(ws, result);
   return result;
