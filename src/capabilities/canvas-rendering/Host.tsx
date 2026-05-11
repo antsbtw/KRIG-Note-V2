@@ -32,6 +32,7 @@ import type {
 } from './types';
 import { SceneManager } from './scene/SceneManager';
 import { NodeRenderer } from './scene/NodeRenderer';
+import { HandlesOverlay } from './scene/HandlesOverlay';
 import { InteractionController } from './interaction/InteractionController';
 import './styles.css';
 
@@ -41,6 +42,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneManager | null>(null);
     const nodeRendererRef = useRef<NodeRenderer | null>(null);
+    const handlesRef = useRef<HandlesOverlay | null>(null);
     const interactionRef = useRef<InteractionController | null>(null);
     /** 防抖 / 节流 onViewportChange — RAF 内多次调用合并 */
     const viewportDirtyRef = useRef(false);
@@ -53,10 +55,18 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
 
       const scene = new SceneManager(container);
       const nodeRenderer = new NodeRenderer(scene);
+      const handles = new HandlesOverlay(scene);
+      // size_lock 反查给 HandlesOverlay(文字节点 size_lock 维度隐藏对应 handle)
+      handles.setInstanceLookup((id) => {
+        const inst = nodeRenderer.getInstance(id);
+        return inst?.size_lock ? { size_lock: inst.size_lock } : undefined;
+      });
       const interaction = new InteractionController({
         container,
         sceneManager: scene,
         nodeRenderer,
+        handlesOverlay: handles,
+        getInstance: (id) => nodeRenderer.getInstance(id),
         onSelectionChange: (ids) => onSelectionChange?.(ids),
         onInstancesChange: () => onInstancesChange?.(nodeRenderer.listInstances()),
         onViewportChange: () => {
@@ -65,6 +75,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       });
       sceneRef.current = scene;
       nodeRendererRef.current = nodeRenderer;
+      handlesRef.current = handles;
       interactionRef.current = interaction;
 
       // viewport change 推送(RAF 内节流,避免每次 wheel 都触发持久化保存)
@@ -82,10 +93,12 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);
         interaction.dispose();
+        handles.dispose();
         nodeRenderer.clear();
         scene.dispose();
         sceneRef.current = null;
         nodeRendererRef.current = null;
+        handlesRef.current = null;
         interactionRef.current = null;
       };
     // onViewportChange / onSelectionChange / onInstancesChange 故意不放入 deps —

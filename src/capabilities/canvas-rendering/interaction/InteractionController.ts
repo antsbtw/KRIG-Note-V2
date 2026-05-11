@@ -1,31 +1,33 @@
 /// <reference types="vite/client" />
 /**
- * InteractionController — 画板鼠标 / 键盘交互(L5-G3 减量版)
+ * InteractionController — 画板鼠标 / 键盘交互(L5-G4.2 加 resize/rotate/undo/clipboard)
  *
- * 范围(对齐 design v0.3 § 1.1 + G3-6=A 砍到极简):
- * - 单选(click 节点)
+ * 范围(对齐 design v0.3 § 1.1 + G4.2 接续):
+ * - 单选 + 多选(Shift/Cmd-click toggle)
  * - 拖动选中节点(mousedown + mousemove + mouseup)
+ * - 8 方向 resize + rotation handle(走 HandlesOverlay,V1 模式直迁)
  * - 删除选中(Delete / Backspace)
- * - **pan**(空白处拖动平移视口)
- * - **zoom-to-cursor**(滚轮缩放,以光标位置为中心)
+ * - undo / redo(Cmd+Z / Shift+Cmd+Z,50 步全量快照)
+ * - 复制 / 粘贴(Cmd+C / Cmd+V,view-scoped clipboard)
+ * - pan(trackpad 双指拖动)+ zoom-to-cursor(pinch / 鼠标滚轮)
  * - 选中态:单层 LineLoop 矩形线框 overlay
  *
- * 砍掉(留 G4 / G5):
- * - 多选(Shift/Cmd-click)/ marquee 框选
- * - resize 8 方向 / rotation handle / HandlesOverlay
+ * 砍掉(留 G4.3 / G4.4 / G4.5):
+ * - marquee 框选
  * - 画 line(press-drag-release 创建)/ line rewire / magnet 吸附
  * - addMode(添加模式,Picker 触发后点击画布实例化)
  * - 文字节点双击进入编辑(canvas-text-node)
- * - Cmd+C/V / Cmd+Z(view-scoped 自管,G5)
  * - 右键菜单(G5 走 contextMenuRegistry)
  * - link 路由(独立阶段)
  *
- * 形态来源:V1 src/plugins/graph/canvas/interaction/InteractionController.ts(1975 行)— G3 从零按 V1 模式重写极简版.
+ * 形态来源:V1 src/plugins/graph/canvas/interaction/InteractionController.ts(1975 行)— G3/G4.2 按 V1 直迁 + 整段砍.
  */
 
 import * as THREE from 'three';
 import type { SceneManager } from '../scene/SceneManager';
 import type { NodeRenderer, RenderedNode } from '../scene/NodeRenderer';
+import type { HandlesOverlay, HandleKind } from '../scene/HandlesOverlay';
+import type { Instance } from '../types';
 
 /** V1 wheel zoom 灵敏度 / 上下限(InteractionController.ts:155-160 直迁) */
 const WHEEL_ZOOM_SENSITIVITY = 0.005;
@@ -36,9 +38,13 @@ export interface InteractionControllerOpts {
   container: HTMLElement;
   sceneManager: SceneManager;
   nodeRenderer: NodeRenderer;
+  /** Handles overlay(8 resize + 1 rotation)— G4.2 必传 */
+  handlesOverlay: HandlesOverlay;
+  /** 反查 instance(给 resize/rotate 修原始 Instance 用) */
+  getInstance: (id: string) => Instance | undefined;
   /** 选中变化回调(view 端 toolbar 用) */
   onSelectionChange?: (ids: string[]) => void;
-  /** 节点状态变化(拖动结束 / 删除后 view 端防抖保存) */
+  /** 节点状态变化(拖动 / resize / rotate / 删除 / 粘贴后 view 端防抖保存) */
   onInstancesChange?: () => void;
   /** 视口变化(pan / zoom 时推 view 持久化) */
   onViewportChange?: () => void;
@@ -48,11 +54,13 @@ export class InteractionController {
   private container: HTMLElement;
   private sceneManager: SceneManager;
   private nodeRenderer: NodeRenderer;
+  private handlesOverlay: HandlesOverlay;
+  private getInstance: (id: string) => Instance | undefined;
   private onSelectionChange?: (ids: string[]) => void;
   private onInstancesChange?: () => void;
   private onViewportChange?: () => void;
 
-  /** 当前选中(G3 单选,Set 最多 1 项;用 Set 是为 G4 多选预留接口形态) */
+  /** 当前选中(G3 单选,G4.2 起支持多选 toggle) */
   private selected = new Set<string>();
   /** instanceId → 选中边框 LineLoop overlay */
   private overlays = new Map<string, THREE.LineLoop>();
@@ -66,14 +74,37 @@ export class InteractionController {
   /** 拖动期间是否真正发生位移(用于 mouseup 时判断 click 还是 drag end) */
   private dragMoved = false;
 
-  // [G4 砍] marquee 框选状态(V1 InteractionController.ts:55-64)— 接续时补回:
-  //   private marquee: { startWorld, currentWorld, overlayGroup, additive } | null = null;
-  // [G4 砍] resize 状态(V1:67-77)
-  // [G4 砍] rotate 状态(V1:79-87)
-  // [G4 砍] drawingLine 状态 / magnetHints / hoveredLineId / lineEndpointHandles /
-  //         rewiring 状态(V1:89-131)
-  // [G4 砍] addMode + onAddModeChange / onNodeDoubleClick / onContextMenu(V1:133-141)
-  // [G4 砍] undo/redo stack(V1:158-160)— D-13=B 留 V1 自管,本段不接
+  /** Resize 状态(8 个边/角 handle 之一)— V1:67-77 直迁 */
+  private resizing: {
+    instanceId: string;
+    handle: Exclude<HandleKind, 'rotate'>;
+    startWorld: { x: number; y: number };
+    startPos: { x: number; y: number };
+    startSize: { w: number; h: number };
+    startRotation: number;
+  } | null = null;
+
+  /** Rotation 状态(rotation handle)— V1:79-87 直迁 */
+  private rotating: {
+    instanceId: string;
+    centerWorld: { x: number; y: number };
+    startAngle: number;
+    startRotation: number;
+  } | null = null;
+
+  /** Clipboard:Cmd+C 时存当前选中 instances 全量快照(view-scoped,不跨画板) */
+  private clipboard: Instance[] = [];
+
+  /** Undo/Redo 历史栈(V1:158-160 直迁,50 步全量快照) */
+  private undoStack: Instance[][] = [];
+  private redoStack: Instance[][] = [];
+  private static readonly HISTORY_LIMIT = 50;
+
+  // [G4.3 砍] marquee 框选状态(V1:55-64)
+  // [G4.3 砍] drawingLine / magnetHints / hoveredLineId / lineEndpointHandles /
+  //          rewiring 状态(V1:89-131)
+  // [G4.3 砍] addMode + onAddModeChange(V1:133-141)
+  // [G4.4 砍] onNodeDoubleClick / onContextMenu(V1:139-141)
 
   /** 事件解绑函数 */
   private unsubscribers: Array<() => void> = [];
@@ -86,6 +117,8 @@ export class InteractionController {
     this.container = opts.container;
     this.sceneManager = opts.sceneManager;
     this.nodeRenderer = opts.nodeRenderer;
+    this.handlesOverlay = opts.handlesOverlay;
+    this.getInstance = opts.getInstance;
     this.onSelectionChange = opts.onSelectionChange;
     this.onInstancesChange = opts.onInstancesChange;
     this.onViewportChange = opts.onViewportChange;
@@ -105,6 +138,7 @@ export class InteractionController {
     if (sameSet(next, this.selected)) return;
     this.selected = next;
     this.refreshOverlays();
+    this.refreshHandles();
     this.notifySelection();
   }
 
@@ -112,16 +146,19 @@ export class InteractionController {
     if (this.selected.size === 0) return;
     this.selected.clear();
     this.refreshOverlays();
+    this.refreshHandles();
     this.notifySelection();
   }
 
   deleteSelected(): void {
     if (this.selected.size === 0) return;
+    this.pushHistory();
     for (const id of this.selected) {
       this.removeOverlay(id);
       this.nodeRenderer.remove(id);
     }
     this.selected.clear();
+    this.handlesOverlay.setTarget(null);
     this.notifySelection();
     this.onInstancesChange?.();
   }
@@ -137,6 +174,11 @@ export class InteractionController {
     this.overlays.clear();
     this.selected.clear();
     this.dragging = null;
+    this.resizing = null;
+    this.rotating = null;
+    this.undoStack = [];
+    this.redoStack = [];
+    this.clipboard = [];
   }
 
   // ─────────────────────────────────────────────────────────
@@ -176,20 +218,31 @@ export class InteractionController {
 
   private handleMouseDown(e: MouseEvent): void {
     if (e.button !== 0) return; // 只处理左键
-    this.container.focus(); // V1:抢键盘焦点(Delete / Escape 用)
+    this.container.focus(); // V1:抢键盘焦点(Delete / Escape / Cmd+Z 用)
 
     const screen = this.toContainerCoords(e);
     const world = this.sceneManager.screenToWorld(screen.x, screen.y);
 
-    // [G4 砍] addMode:placeInstance / tryStartDrawingLine
-    // [G4 砍] HandlesOverlay.hitTest → startResize / startRotate
-    // [G4 砍] line endpoint handle → startRewire
-    // [G4 砍] raycastLinkHref → dispatchLinkHref
+    // [G4.3 砍] addMode:placeInstance / tryStartDrawingLine
+    // [G4.3 砍] line endpoint handle → startRewire
+    // [G4.4 砍] raycastLinkHref → dispatchLinkHref
 
+    // ── 1. 优先命中 HandlesOverlay(resize / rotate)──
+    const handleHit = this.handlesOverlay.hitTest(screen.x, screen.y);
+    const handleTarget = this.handlesOverlay.getTarget();
+    if (handleHit && handleTarget) {
+      if (handleHit === 'rotate') {
+        this.startRotate(handleTarget, world);
+      } else {
+        this.startResize(handleTarget, handleHit, world);
+      }
+      return;
+    }
+
+    // ── 2. 命中节点 → 选中 + 启动拖动 ──
     const hit = this.hitTest(screen.x, screen.y);
     const additive = e.shiftKey || e.metaKey;
     if (hit) {
-      // V1 模式:additive 时 toggle;非 additive 时若未选则替换为单选
       if (additive) {
         if (this.selected.has(hit.instanceId)) {
           this.selected.delete(hit.instanceId);
@@ -197,49 +250,79 @@ export class InteractionController {
           this.selected.add(hit.instanceId);
         }
         this.refreshOverlays();
+        this.refreshHandles();
         this.notifySelection();
       } else {
         if (!this.selected.has(hit.instanceId)) {
           this.selected.clear();
           this.selected.add(hit.instanceId);
           this.refreshOverlays();
+          this.refreshHandles();
           this.notifySelection();
         }
-        // 已选中且非 additive:不变(下面进入拖动)
       }
       this.startDragNodes(world);
     } else {
-      // 空白处:非 additive 清选区
-      // [G4 砍] startMarquee(框选)— G4 接续时把空白分支改成 startMarquee(world, additive)
+      // [G4.3 砍] 空白处:G4.3 改 startMarquee(world, additive)
       if (!additive) this.clearSelection();
     }
   }
 
-  /** V1 startDrag:记录所有选中节点的起始位置快照,move 时 + delta */
+  /** V1 startDrag:pushHistory + 记录所有选中节点的起始位置快照,move 时 + delta */
   private startDragNodes(startWorld: { x: number; y: number }): void {
     const snapshots = new Map<string, { x: number; y: number }>();
     for (const id of this.selected) {
       const inst = this.nodeRenderer.getInstance(id);
       if (inst?.position) snapshots.set(id, { ...inst.position });
     }
+    if (snapshots.size === 0) {
+      this.dragging = null;
+      return;
+    }
+    this.pushHistory();
     this.dragging = { startWorld, snapshots };
     this.dragMoved = false;
   }
 
   private handleMouseMove(e: MouseEvent): void {
-    if (!this.dragging) return;
     const screen = this.toContainerCoords(e);
-    const cur = this.sceneManager.screenToWorld(screen.x, screen.y);
-    const dx = cur.x - this.dragging.startWorld.x;
-    const dy = cur.y - this.dragging.startWorld.y;
-    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) this.dragMoved = true;
-    for (const [id, snap] of this.dragging.snapshots) {
-      this.nodeRenderer.setPosition(id, { x: snap.x + dx, y: snap.y + dy });
-      this.updateOverlay(id);
+    const world = this.sceneManager.screenToWorld(screen.x, screen.y);
+
+    if (this.resizing) {
+      this.applyResize(world);
+      return;
+    }
+    if (this.rotating) {
+      this.applyRotate(world, e.shiftKey);
+      return;
+    }
+    if (this.dragging) {
+      const dx = world.x - this.dragging.startWorld.x;
+      const dy = world.y - this.dragging.startWorld.y;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) this.dragMoved = true;
+      for (const [id, snap] of this.dragging.snapshots) {
+        this.nodeRenderer.setPosition(id, { x: snap.x + dx, y: snap.y + dy });
+        this.updateOverlay(id);
+      }
+      // 拖动时 handles 跟着动(node 是同一引用,layout 通过 RAF 自动跟)
+      const target = this.handlesOverlay.getTarget();
+      if (target) this.handlesOverlay.setTarget(this.nodeRenderer.get(target.instanceId) ?? null);
     }
   }
 
   private handleMouseUp(_e: MouseEvent): void {
+    if (this.resizing) {
+      this.resizing = null;
+      this.refreshHandles();
+      this.onInstancesChange?.();
+      return;
+    }
+    if (this.rotating) {
+      this.rotating = null;
+      this.refreshHandles();
+      this.onInstancesChange?.();
+      return;
+    }
     if (this.dragging) {
       if (this.dragMoved) this.onInstancesChange?.();
       this.dragging = null;
@@ -298,13 +381,45 @@ export class InteractionController {
       const tag = target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
     }
+
+    const meta = e.metaKey || e.ctrlKey;
+
+    // Cmd/Ctrl + Z / Shift+Z(undo / redo)
+    if (meta && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) this.redo();
+      else this.undo();
+      return;
+    }
+    // Cmd/Ctrl + C(copy)
+    if (meta && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      this.copySelected();
+      return;
+    }
+    // Cmd/Ctrl + V(paste)
+    if (meta && (e.key === 'v' || e.key === 'V')) {
+      e.preventDefault();
+      this.pasteClipboard();
+      return;
+    }
+
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (this.selected.size > 0) {
         e.preventDefault();
         this.deleteSelected();
       }
     } else if (e.key === 'Escape') {
-      if (this.selected.size > 0) this.clearSelection();
+      // [G4.3 接续]优先级:cancel marquee → cancel rewire → cancel drawingLine → exit addMode → clear selection
+      if (this.resizing) {
+        this.resizing = null;
+        this.refreshHandles();
+      } else if (this.rotating) {
+        this.rotating = null;
+        this.refreshHandles();
+      } else if (this.selected.size > 0) {
+        this.clearSelection();
+      }
     }
   }
 
@@ -344,6 +459,253 @@ export class InteractionController {
     return best?.node ?? null;
   }
 
+
+  // ─────────────────────────────────────────────────────────
+  // Resize / Rotate(V1 1254-1426 直迁,无算法改动)
+  // ─────────────────────────────────────────────────────────
+
+  private startResize(
+    node: RenderedNode,
+    handle: Exclude<HandleKind, 'rotate'>,
+    startWorld: { x: number; y: number },
+  ): void {
+    this.pushHistory();
+    this.resizing = {
+      instanceId: node.instanceId,
+      handle,
+      startWorld,
+      startPos: { x: node.position.x, y: node.position.y },
+      startSize: { w: node.size.w, h: node.size.h },
+      startRotation: node.rotation ?? 0,
+    };
+  }
+
+  private startRotate(node: RenderedNode, startWorld: { x: number; y: number }): void {
+    this.pushHistory();
+    const cx = node.position.x + node.size.w / 2;
+    const cy = node.position.y + node.size.h / 2;
+    const startAngle = (Math.atan2(startWorld.y - cy, startWorld.x - cx) * 180) / Math.PI;
+    this.rotating = {
+      instanceId: node.instanceId,
+      centerWorld: { x: cx, y: cy },
+      startAngle,
+      startRotation: node.rotation ?? 0,
+    };
+  }
+
+  /**
+   * 应用 resize:支持 8 handle + 已旋转节点(V1 1324-1403 算法直迁)
+   * 把 mouse delta 转回节点本地坐标(去 startRotation),按 handle 类型
+   * 调整本地半宽/半高 + 中心位移,再把中心位移转回世界更新 position
+   */
+  private applyResize(world: { x: number; y: number }): void {
+    const r = this.resizing;
+    if (!r) return;
+    const inst = this.getInstance(r.instanceId);
+    if (!inst || !inst.position || !inst.size) return;
+
+    const startCx = r.startPos.x + r.startSize.w / 2;
+    const startCy = r.startPos.y + r.startSize.h / 2;
+
+    const dx = world.x - r.startWorld.x;
+    const dy = world.y - r.startWorld.y;
+
+    // delta 转本地坐标(逆 rotation)
+    const rad = (-r.startRotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const ldx = dx * cos - dy * sin;
+    const ldy = dx * sin + dy * cos;
+
+    const dir = handleDir(r.handle);
+    const isCorner = dir.x !== 0 && dir.y !== 0;
+
+    const startHW = r.startSize.w / 2;
+    const startHH = r.startSize.h / 2;
+    const minHalf = 5;
+    let newHW = startHW;
+    let newHH = startHH;
+    let centerShiftX = 0;
+    let centerShiftY = 0;
+
+    if (isCorner) {
+      // 角 handle = 等比缩放:沿对角线方向投影
+      const startHX = dir.x * startHW;
+      const startHY = dir.y * startHH;
+      const newHX = startHX + ldx;
+      const newHY = startHY + ldy;
+      const startLen = Math.hypot(startHX, startHY);
+      const proj = (newHX * startHX + newHY * startHY) / startLen;
+      const ratio = Math.max(minHalf / Math.min(startHW, startHH), proj / startLen);
+      newHW = startHW * ratio;
+      newHH = startHH * ratio;
+      centerShiftX = (dir.x * (newHW - startHW)) / 2;
+      centerShiftY = (dir.y * (newHH - startHH)) / 2;
+    } else {
+      // 边 handle = 单边缩放
+      if (dir.x !== 0) {
+        newHW = Math.max(minHalf, startHW + dir.x * ldx);
+        centerShiftX = (dir.x * (newHW - startHW)) / 2;
+      }
+      if (dir.y !== 0) {
+        newHH = Math.max(minHalf, startHH + dir.y * ldy);
+        centerShiftY = (dir.y * (newHH - startHH)) / 2;
+      }
+    }
+
+    // 本地中心位移转回世界
+    const cosBack = Math.cos((r.startRotation * Math.PI) / 180);
+    const sinBack = Math.sin((r.startRotation * Math.PI) / 180);
+    const wShiftX = centerShiftX * cosBack - centerShiftY * sinBack;
+    const wShiftY = centerShiftX * sinBack + centerShiftY * cosBack;
+
+    const newCx = startCx + wShiftX;
+    const newCy = startCy + wShiftY;
+    const newW = newHW * 2;
+    const newH = newHH * 2;
+
+    inst.size.w = newW;
+    inst.size.h = newH;
+    inst.position.x = newCx - newW / 2;
+    inst.position.y = newCy - newH / 2;
+    this.nodeRenderer.update(inst);
+    this.handlesOverlay.setTarget(this.nodeRenderer.get(r.instanceId) ?? null);
+    this.refreshOverlays();
+  }
+
+  /** 应用 rotate:当前角度 - 起始角度 + startRotation;Shift 吸附到 15°(V1 1406-1426 直迁) */
+  private applyRotate(world: { x: number; y: number }, snap: boolean): void {
+    const r = this.rotating;
+    if (!r) return;
+    const inst = this.getInstance(r.instanceId);
+    if (!inst) return;
+
+    const curAngle =
+      (Math.atan2(world.y - r.centerWorld.y, world.x - r.centerWorld.x) * 180) / Math.PI;
+    let newRot = r.startRotation + (curAngle - r.startAngle);
+    while (newRot > 180) newRot -= 360;
+    while (newRot < -180) newRot += 360;
+    if (snap) newRot = Math.round(newRot / 15) * 15;
+
+    inst.rotation = newRot;
+    this.nodeRenderer.update(inst);
+    this.handlesOverlay.setTarget(this.nodeRenderer.get(r.instanceId) ?? null);
+    this.refreshOverlays();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Undo / Redo(V1 1432-1482 直迁,50 步全量快照)
+  // ─────────────────────────────────────────────────────────
+
+  /** 在原子操作前调:把当前 instances 全量快照压入 undo stack,清 redo stack */
+  private pushHistory(): void {
+    const snap = this.nodeRenderer.listInstances().map(cloneInstance);
+    this.undoStack.push(snap);
+    if (this.undoStack.length > InteractionController.HISTORY_LIMIT) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  private undo(): void {
+    const prev = this.undoStack.pop();
+    if (!prev) return;
+    this.redoStack.push(this.nodeRenderer.listInstances().map(cloneInstance));
+    this.applySnapshot(prev);
+  }
+
+  private redo(): void {
+    const next = this.redoStack.pop();
+    if (!next) return;
+    this.undoStack.push(this.nodeRenderer.listInstances().map(cloneInstance));
+    this.applySnapshot(next);
+  }
+
+  /** 加载一份 instances 快照:清空,逐个 add,清选区,触发持久化 */
+  private applySnapshot(snap: Instance[]): void {
+    this.dragging = null;
+    this.resizing = null;
+    this.rotating = null;
+    this.nodeRenderer.clear();
+    for (const inst of snap) this.nodeRenderer.add(cloneInstance(inst));
+    this.selected.clear();
+    this.refreshOverlays();
+    this.handlesOverlay.setTarget(null);
+    this.notifySelection();
+    this.onInstancesChange?.();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Clipboard(view-scoped Cmd+C / Cmd+V;V1 复制偏移 + 新 id)
+  // ─────────────────────────────────────────────────────────
+
+  /** Cmd+C:存当前选中 instances 全量快照 */
+  private copySelected(): void {
+    if (this.selected.size === 0) return;
+    const ids = Array.from(this.selected);
+    this.clipboard = ids
+      .map((id) => this.getInstance(id))
+      .filter((x): x is Instance => x !== undefined)
+      .map(cloneInstance);
+  }
+
+  /**
+   * Cmd+V:把 clipboard instances 加进画板,各自生成新 id + 偏移 16 像素.
+   * line 的 endpoints.instance 引用:若引用的是同批粘贴里的 instance(id 映射存在),
+   * 则换成新 id;否则保留原引用(指向画板上未变的 instance).
+   * 粘贴后选中新粘贴的 instances + handles 锁定第一个.
+   */
+  private pasteClipboard(): void {
+    if (this.clipboard.length === 0) return;
+    this.pushHistory();
+    const OFFSET = 16;
+    // 旧 id → 新 id 映射(用于 line.endpoints rewire)
+    const idMap = new Map<string, string>();
+    for (const inst of this.clipboard) idMap.set(inst.id, genId());
+
+    const newIds: string[] = [];
+    for (const orig of this.clipboard) {
+      const next = cloneInstance(orig);
+      next.id = idMap.get(orig.id) as string;
+      if (next.position) {
+        next.position.x += OFFSET;
+        next.position.y += OFFSET;
+      }
+      if (next.endpoints) {
+        const [a, b] = next.endpoints;
+        next.endpoints = [
+          { ...a, instance: idMap.get(a.instance) ?? a.instance },
+          { ...b, instance: idMap.get(b.instance) ?? b.instance },
+        ];
+      }
+      this.nodeRenderer.add(next);
+      newIds.push(next.id);
+    }
+    this.selected = new Set(newIds);
+    this.refreshOverlays();
+    this.refreshHandles();
+    this.notifySelection();
+    this.onInstancesChange?.();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Handles 同步(选中变 / size 变后 setTarget;单选时显示,多选 / 空选时隐藏)
+  // ─────────────────────────────────────────────────────────
+
+  /** 选中态变化后同步 HandlesOverlay 显示:单选 line 之外的节点才显 */
+  private refreshHandles(): void {
+    if (this.selected.size !== 1) {
+      this.handlesOverlay.setTarget(null);
+      return;
+    }
+    const [only] = this.selected;
+    const node = this.nodeRenderer.get(only);
+    if (!node || isLineKind(node)) {
+      this.handlesOverlay.setTarget(null);
+      return;
+    }
+    this.handlesOverlay.setTarget(node);
+  }
 
   // ─────────────────────────────────────────────────────────
   // 选中边框 overlay
@@ -411,5 +773,37 @@ function sameSet<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) return false;
   for (const v of a) if (!b.has(v)) return false;
   return true;
+}
+
+/** Handle 方向向量(本地坐标;Y 向下)— V1 1701-1712 直迁 */
+function handleDir(h: Exclude<HandleKind, 'rotate'>): { x: number; y: number } {
+  switch (h) {
+    case 'nw': return { x: -1, y: -1 };
+    case 'n':  return { x:  0, y: -1 };
+    case 'ne': return { x:  1, y: -1 };
+    case 'e':  return { x:  1, y:  0 };
+    case 'se': return { x:  1, y:  1 };
+    case 's':  return { x:  0, y:  1 };
+    case 'sw': return { x: -1, y:  1 };
+    case 'w':  return { x: -1, y:  0 };
+  }
+}
+
+/** Instance 深拷贝(undo/redo + clipboard 用;V1 1696-1698 直迁) */
+function cloneInstance(inst: Instance): Instance {
+  return structuredClone(inst);
+}
+
+/** line 类节点判断(shapeRef 以 'krig.line.' 开头;V1 1691-1693 直迁) */
+function isLineKind(node: RenderedNode): boolean {
+  return !!node.shapeRef && node.shapeRef.startsWith('krig.line.');
+}
+
+/** 生成新 instance id(粘贴用;crypto.randomUUID 兜底 fallback) */
+function genId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `inst-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
