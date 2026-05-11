@@ -1,0 +1,189 @@
+/**
+ * canvas-rendering capability — 对外类型(L5-G3)
+ *
+ * 严格对齐 docs/10-business-design/graph/canvas/Canvas.md §4.1(Canvas note 内容).
+ *
+ * **画板实例数据类型归属**(G2-10=B 决策 + G3 v0.2 修订):
+ * - V1 plugins/graph/library/types.ts 同时含 ShapeDef + SubstanceDef + Instance / InstanceEndpoint / TextNodeAtoms / InstanceKind
+ * - V2 G2 已分离 ShapeDef / SubstanceDef → shape-library
+ * - V2 G3 接收画板实例数据类型 → 本文件(canvas-rendering/types.ts)
+ * - canvas-text-node / graph-library-store(IPC 边界仍用 unknown / CanvasDocumentJson)/
+ *   future family-tree projection 等通过 `import type { Instance } from '@capabilities/canvas-rendering/types'` 拿
+ *
+ * **本文件 0 import three**(虽然 canvas-rendering 整体允许 import three,
+ * 但 types.ts 不需要 — 暴露的是与 three 无关的画板数据类型 + 命令式 Host API).
+ *
+ * 详见 docs/RefactorV2/stages/L5G3-canvas-rendering-design.md v0.3 § 3.3.
+ */
+
+import type {
+  ForwardRefExoticComponent,
+  RefAttributes,
+} from 'react';
+import type { FillStyle, LineStyle, ArrowStyle } from '@capabilities/shape-library/types';
+
+// ─────────────────────────────────────────────────────────
+// Instance 系(V1 plugins/graph/library/types.ts 直迁)
+// ─────────────────────────────────────────────────────────
+
+export type InstanceKind = 'shape' | 'substance';
+
+/**
+ * 文字节点的语义内容类型(V1 M2.1 引入).
+ *
+ * 与 NoteView 同源:本质是 src/semantic/atom-types.ts 的 Atom[].
+ * 此处用 unknown[] 是因为 canvas-rendering/types.ts 是基础类型层,不应直接依赖
+ * note 模块;消费方(canvas-text-node 桥接 / 编辑层)做 import + 类型断言.
+ *
+ * 详见 docs/10-business-design/graph/canvas/Canvas-M2.1-TextNode-Spec.md §1.
+ *
+ * **G4 真消费**:canvas-text-node capability 承担 atom ↔ instance.doc 桥接.G3 不渲染文字.
+ */
+export type TextNodeAtoms = unknown[];
+
+export interface InstanceEndpoint {
+  /** 连接到哪个 instance 的 id */
+  instance: string;
+  /** 连到该 instance 的哪个 magnet(N/S/E/W/START/END/...) */
+  magnet: string;
+}
+
+/**
+ * Canvas note 中的一个节点实例.
+ *
+ * shape / substance 实例:用 position + size 定位
+ * line 实例:可用 endpoints(由两端 magnet 驱动,**G4 才支持**;G3 line 走占位)
+ *           也可用 position + size(用户手动定位,无 magnet 跟随)
+ */
+export interface Instance {
+  id: string;
+  type: InstanceKind;
+  /** 引用 Library 中的 shape / substance id */
+  ref: string;
+
+  /** 非 line 实例必备;line 实例若有 endpoints 可省略 */
+  position?: { x: number; y: number };
+  size?: { w: number; h: number };
+
+  /**
+   * 旋转(度数;顺时针方向 = 用户视觉的"顺时针")
+   * 缺省 = 0(无旋转);旋转中心 = bbox 中心(position + size/2)
+   * **G3 注**:渲染时尊重 rotation;但 G3 不提供 rotation handle UI(留 G4).
+   */
+  rotation?: number;
+
+  /** line 实例两端连接(G4 真用;G3 不渲染 line) */
+  endpoints?: [InstanceEndpoint, InstanceEndpoint];
+
+  /** 用户调整的参数(覆盖 ShapeDef.params 的 default) */
+  params?: Record<string, number>;
+
+  /** 覆盖默认样式(对齐 Canvas.md §4.1) */
+  style_overrides?: {
+    fill?: Partial<FillStyle>;
+    line?: Partial<LineStyle>;
+    arrow?: Partial<ArrowStyle>;
+  };
+
+  /** substance 实例的业务属性(姓名 / gender / birth / death 等) */
+  props?: Record<string, unknown>;
+
+  /**
+   * 文字节点语义内容(V1 M2.1 引入,G4 真消费).
+   *
+   * 仅当 ref === 'krig.text.label' 时生效;格式 = NoteView 同源 Atom[].
+   * 详见 docs/10-business-design/graph/canvas/Canvas-M2.1-TextNode-Spec.md §1.
+   */
+  doc?: TextNodeAtoms;
+
+  /**
+   * 文字节点 size 锁(V1 M2.x 引入).仅 ref='krig.text.label' 用.
+   * - undefined 或 false:维度未锁,adaptTextNodeSizeToContent 自动撑
+   * - true:维度被用户主动 resize 锁住,内容溢出时不再自动改 size
+   */
+  size_lock?: { w?: boolean; h?: boolean };
+
+  /**
+   * 文字垂直对齐(V1 F-10).仅 ref='krig.text.label' 用 + size_lock.h=true 时生效.
+   * - 'top'(默认 / undefined):内容顶部对齐
+   * - 'middle':内容垂直居中(Sticky 默认)
+   * - 'bottom':内容底部对齐
+   */
+  text_valign?: 'top' | 'middle' | 'bottom';
+}
+
+// ─────────────────────────────────────────────────────────
+// Host API(view 通过 ref 命令式调用 canvas-rendering)
+// ─────────────────────────────────────────────────────────
+
+/** 视口(world 坐标中心 + zoom);对齐 V1 schema_version=2 的 doc.view */
+export interface Viewport {
+  centerX: number;
+  centerY: number;
+  zoom: number;
+}
+
+/**
+ * Canvas note 的内容形态(V1 schema_version=2/3 直迁,canvas-rendering 在 IPC
+ * 边界外的内部表征;graph-library-store IPC 边界仍用 CanvasDocumentJson = unknown 透传).
+ *
+ * 详见 docs/10-business-design/graph/canvas/Canvas.md §4.1.
+ */
+export interface CanvasDocument {
+  schema_version: number;
+  view: Viewport;
+  instances: Instance[];
+  /** 用户自创 substance 嵌入(G4 真消费;G3 不创建,仅 load 时透传) */
+  user_substances?: unknown[];
+}
+
+export interface CanvasHostProps {
+  workspaceId: string;
+  // G4 注入:文字节点 PM 桥接(canvas-text-node capability);G3 不用
+  // textNode?: CanvasTextNodeApi;
+  /** view 持久化:视口变化时推 doc_content.view */
+  onViewportChange?: (vp: Viewport) => void;
+  /** 选区变化(view 端 toolbar 状态用) */
+  onSelectionChange?: (ids: string[]) => void;
+  /** instances 变化(view 端 1s 防抖保存) */
+  onInstancesChange?: (instances: Instance[]) => void;
+  /** 画板右键(view 端通过 contextMenuRegistry 路由,G5 真接) */
+  onContextMenu?: (e: { clientX: number; clientY: number; targetIds: string[] }) => void;
+}
+
+/**
+ * Host 命令式 API(view 通过 ref 调用).
+ *
+ * G3 范围:loadDocument / serialize / setViewport / fitToContent / zoomTo /
+ * deleteSelected / clearSelection / getInstance(s).
+ * G4 扩展:line 创建 / rewire / addMode / combineSelected / updateInstance(Inspector) /
+ * enterTextEdit / 等.
+ */
+export interface CanvasHostHandle {
+  /** 从画板 JSON 反序列化 — 切画板 / 重启恢复用 */
+  loadDocument(doc: CanvasDocument): void;
+  /** 序列化当前状态 — view 防抖保存用 */
+  serialize(): CanvasDocument;
+  /** 直接设视口 — view 端 toolbar zoom 滑块用 */
+  setViewport(vp: Viewport): void;
+  /** Fit-to-content;true 表示成功 fit,false 表示空画板/退化几何跳过 */
+  fitToContent(padding?: number): boolean;
+  /** zoom 百分比(100 = zoom=1) */
+  zoomTo(percent: number): void;
+  /** 删除当前选中 */
+  deleteSelected(): void;
+  /** 清空选中 */
+  clearSelection(): void;
+  /** 取单 instance 原始数据(view 端 Inspector G4 用,G3 不消费) */
+  getInstance(id: string): Instance | null;
+  /** 取全 instances 原始数据(view 端序列化 fallback,正常走 serialize) */
+  getInstances(): Instance[];
+}
+
+// ─────────────────────────────────────────────────────────
+// Registry API
+// ─────────────────────────────────────────────────────────
+
+export interface CanvasRenderingApi {
+  Host: ForwardRefExoticComponent<CanvasHostProps & RefAttributes<CanvasHostHandle>>;
+}

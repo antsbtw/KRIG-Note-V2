@@ -1,0 +1,23 @@
+/**
+ * canvas-rendering 主样式(L5-G3)
+ *
+ * G3 仅含 Host 容器样式;画板内浮层(LibraryPicker / FloatingInspector /
+ * CreateSubstanceDialog)样式留 G4 一起加.
+ */
+
+.krig-canvas-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  outline: none; /* tabIndex=0 接键盘,但不显示焦点框 */
+  overflow: hidden;
+  background: #1e1e1e;
+  /* Three.js 渲染器自动追加 canvas 子元素到本容器 */
+}
+
+.krig-canvas-host canvas {
+  display: block;
+  /* SceneManager 用 setSize(w, h, true) 控制 CSS 尺寸,这里只保险 */
+  width: 100% !important;
+  height: 100% !important;
+}
