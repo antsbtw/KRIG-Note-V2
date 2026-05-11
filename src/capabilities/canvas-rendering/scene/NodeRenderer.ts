@@ -487,15 +487,31 @@ export class NodeRenderer {
           this.textRenderer.dispose(svgGroup);
           return;
         }
-        if (!this.byId.has(inst.id)) {
+        const current = this.byId.get(inst.id);
+        if (!current) {
           this.textRenderer.dispose(svgGroup);
           return;
         }
-        // 抵消 TextRenderer 内的 group.scale.y=-1(SceneManager frustum 已 Y 翻转)
+
+        // 1. 在 attach 之前测 SVG 本地 bbox(避开 matrixWorld 时序问题).
+        //    svgGroup 局部坐标系就是 SVG path 自身,bbox.max.y 直接 = 内容高度.
+        svgGroup.updateMatrixWorld(true);
+        const localBbox = new THREE.Box3().setFromObject(svgGroup);
+        const contentH = (Number.isFinite(localBbox.max.y) && Number.isFinite(localBbox.min.y))
+          ? localBbox.max.y - localBbox.min.y
+          : 0;
+
+        // 2. 抵消 TextRenderer 内的 group.scale.y=-1(SceneManager frustum 已 Y 翻转)
         svgGroup.scale.y = 1;
         svgGroup.position.set(0, 0, 0.01);
         svgGroup.traverse((obj) => { obj.renderOrder = 1; });
         contentSlot.add(svgGroup);
+
+        // 3. 内容溢出 → 自适应高度(V1 adaptTextNodeSizeToContent 直迁简化)
+        //    bbox / hit-area / 渲染框三者尺寸一致,用户点 mesh 任意位置都能命中.
+        if (contentH > 0) {
+          this.adaptTextNodeSizeToContent(inst.id, current, contentH);
+        }
       } catch (e) {
         console.warn(`[NodeRenderer] text render failed for ${inst.id}`, e);
       }
@@ -512,6 +528,63 @@ export class NodeRenderer {
       size: { ...safeSize },
       rotation: inst.rotation ?? 0,
     };
+  }
+
+  /**
+   * 文字节点内容溢出 → 自适应高度(V1 NodeRenderer.adaptTextNodeSizeToContent
+   * 直迁简化):
+   * - bbox / hit-area / 渲染框 三者尺寸一致,用户点 mesh 任意位置都能命中
+   * - 同步 RenderedNode.size + instance.size(让 serialize / overlay / hit-test 拿新尺寸)
+   * - size_lock.h=true 时跳过(用户已固定高度,如 Sticky 或拖过 N/S handle)
+   */
+  private adaptTextNodeSizeToContent(
+    instanceId: string,
+    rendered: RenderedNode,
+    contentH: number,
+  ): void {
+    const inst = this.instances.get(instanceId);
+    if (inst?.size_lock?.h) return;
+
+    const padding = 8;
+    const newH = Math.ceil(contentH + padding);
+    if (newH <= rendered.size.h + 1) return;
+
+    // outer/inner 嵌套(wrapForRotation):
+    // outer.position = (px + w/2, py + h/2);inner.position = (-w/2, -h/2)
+    // 改 size.h 时两处同步(否则 bbox 中心算错,节点上下偏移)
+    const outer = rendered.group;
+    const inner = outer.children[0] as THREE.Group | undefined;
+    if (!inner) return;
+    const oldH = rendered.size.h;
+    outer.position.y += (newH - oldH) / 2;
+    inner.position.y = -newH / 2;
+
+    // 重建 hit-area mesh(PlaneGeometry size 写死了无法 in-place 改)
+    const oldHitMesh = inner.children.find(
+      (c) => (c as THREE.Mesh).userData?.isTextHitArea,
+    ) as THREE.Mesh | undefined;
+    if (oldHitMesh) {
+      oldHitMesh.geometry.dispose();
+      oldHitMesh.geometry = new THREE.PlaneGeometry(rendered.size.w, newH);
+      oldHitMesh.position.set(rendered.size.w / 2, newH / 2, 0);
+    }
+
+    // 同步 BG mesh(Sticky):同 hit-area,size 变了要重建
+    const oldBgMesh = inner.children.find(
+      (c) => (c as THREE.Mesh).userData?.isTextBackground,
+    ) as THREE.Mesh | undefined;
+    if (oldBgMesh) {
+      oldBgMesh.geometry.dispose();
+      oldBgMesh.geometry = new THREE.PlaneGeometry(rendered.size.w, newH);
+      oldBgMesh.position.set(rendered.size.w / 2, newH / 2, -0.01);
+    }
+
+    // 更新 RenderedNode.size + instance.size(后者影响序列化 + overlay 边框)
+    rendered.size.h = newH;
+    if (inst?.size) inst.size.h = newH;
+
+    // 引用此节点的 line 端点更新
+    this.updateLinesFor(instanceId);
   }
 
   /**
