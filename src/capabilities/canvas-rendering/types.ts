@@ -137,6 +137,17 @@ export interface CanvasDocument {
   user_substances?: unknown[];
 }
 
+/**
+ * Picker / Toolbar 触发"添加模式"的入参(V1 AddModeSpec 直迁).
+ * 详见 src/capabilities/canvas-rendering/interaction/InteractionController.ts
+ */
+export interface AddModeSpec {
+  kind: InstanceKind;
+  ref: string;
+  defaultSize?: { w: number; h: number };
+  presetInstance?: Partial<Instance>;
+}
+
 export interface CanvasHostProps {
   workspaceId: string;
   // G4 注入:文字节点 PM 桥接(canvas-text-node capability);G3 不用
@@ -149,6 +160,8 @@ export interface CanvasHostProps {
   onInstancesChange?: (instances: Instance[]) => void;
   /** 画板右键(view 端通过 contextMenuRegistry 路由,G5 真接) */
   onContextMenu?: (e: { clientX: number; clientY: number; targetIds: string[] }) => void;
+  /** addMode 状态变化(view UI 显隐 "Click to place" 提示 + crosshair cursor) */
+  onAddModeChange?: (spec: AddModeSpec | null) => void;
 }
 
 /**
@@ -178,6 +191,12 @@ export interface CanvasHostHandle {
   getInstance(id: string): Instance | null;
   /** 取全 instances 原始数据(view 端序列化 fallback,正常走 serialize) */
   getInstances(): Instance[];
+  /** 进入"添加模式" — Picker 选好 shape/substance 后调,等用户点击画布放置 */
+  enterAddMode(spec: AddModeSpec): void;
+  /** 退出"添加模式"(view 端 ESC 兜底 / Picker 切换 / 主动取消) */
+  exitAddMode(): void;
+  /** 是否在添加模式(view 端 toolbar 高亮 Picker 按钮用) */
+  isAddMode(): boolean;
 }
 
 // ─────────────────────────────────────────────────────────

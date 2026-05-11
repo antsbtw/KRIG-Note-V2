@@ -27,7 +27,24 @@ import * as THREE from 'three';
 import type { SceneManager } from '../scene/SceneManager';
 import type { NodeRenderer, RenderedNode } from '../scene/NodeRenderer';
 import type { HandlesOverlay, HandleKind } from '../scene/HandlesOverlay';
-import type { Instance } from '../types';
+import type { Instance, InstanceKind } from '../types';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
+
+/**
+ * Picker / Toolbar 触发"添加模式"的入参:
+ * - kind: shape / substance
+ * - ref: 资源 id(krig.basic.roundRect / family.person 等)
+ * - defaultSize: 可选自定义尺寸
+ * - presetInstance: 创建时浅合并到 instance(M2.2 Sticky 的预设 fill)
+ * V1 InteractionController.ts:1630-1640 直迁.
+ */
+export interface AddModeSpec {
+  kind: InstanceKind;
+  ref: string;
+  defaultSize?: { w: number; h: number };
+  presetInstance?: Partial<Instance>;
+}
 
 /** V1 wheel zoom 灵敏度 / 上下限(InteractionController.ts:155-160 直迁) */
 const WHEEL_ZOOM_SENSITIVITY = 0.005;
@@ -48,6 +65,8 @@ export interface InteractionControllerOpts {
   onInstancesChange?: () => void;
   /** 视口变化(pan / zoom 时推 view 持久化) */
   onViewportChange?: () => void;
+  /** addMode 状态变化(给 view UI 显隐 "Click to place" 提示用) */
+  onAddModeChange?: (spec: AddModeSpec | null) => void;
 }
 
 export class InteractionController {
@@ -59,6 +78,7 @@ export class InteractionController {
   private onSelectionChange?: (ids: string[]) => void;
   private onInstancesChange?: () => void;
   private onViewportChange?: () => void;
+  private onAddModeChange?: (spec: AddModeSpec | null) => void;
 
   /** 当前选中(G3 单选,G4.2 起支持多选 toggle) */
   private selected = new Set<string>();
@@ -109,10 +129,12 @@ export class InteractionController {
     additive: boolean;
   } | null = null;
 
+  /** 添加模式 — 用户从 Picker 选 spec,等点击画布放置(V1:133) */
+  private addMode: AddModeSpec | null = null;
+
   // [G4.3c 砍] drawingLine / hoveredLineId(V1:89-107)
   // [G4.3d 砍] magnetHints(V1:104)
   // [G4.3e 砍] lineEndpointHandles / rewiring(V1:113-131)
-  // [G4.3b 砍] addMode + onAddModeChange(V1:133-141)
   // [G4.4 砍] onNodeDoubleClick / onContextMenu(V1:139-141)
 
   /** 事件解绑函数 */
@@ -131,6 +153,7 @@ export class InteractionController {
     this.onSelectionChange = opts.onSelectionChange;
     this.onInstancesChange = opts.onInstancesChange;
     this.onViewportChange = opts.onViewportChange;
+    this.onAddModeChange = opts.onAddModeChange;
     this.attachListeners();
   }
 
@@ -157,6 +180,29 @@ export class InteractionController {
     this.refreshOverlays();
     this.refreshHandles();
     this.notifySelection();
+  }
+
+  /**
+   * 进入添加模式 — UI(Picker)选好 shape/substance 后调,等用户点击画布放置
+   * 配套副作用:cursor 切 crosshair,通知 onAddModeChange.
+   */
+  enterAddMode(spec: AddModeSpec): void {
+    this.addMode = spec;
+    this.container.style.cursor = 'crosshair';
+    this.onAddModeChange?.(spec);
+  }
+
+  /** 退出添加模式(ESC / 点完一次后自动调用 / 外部主动取消) */
+  exitAddMode(): void {
+    if (!this.addMode) return;
+    this.addMode = null;
+    // [G4.3c 接续] cancelDrawingLine + clearMagnetHints
+    this.container.style.cursor = '';
+    this.onAddModeChange?.(null);
+  }
+
+  isAddMode(): boolean {
+    return this.addMode !== null;
   }
 
   deleteSelected(): void {
@@ -238,8 +284,19 @@ export class InteractionController {
     const screen = this.toContainerCoords(e);
     const world = this.sceneManager.screenToWorld(screen.x, screen.y);
 
-    // [G4.3 砍] addMode:placeInstance / tryStartDrawingLine
-    // [G4.3 砍] line endpoint handle → startRewire
+    // ── 0. addMode 优先级最高(V1 365-374 直迁) ──
+    if (this.addMode) {
+      // [G4.3c 接续]line 类 shape 走 press-drag-release 画线模式;G4.3b 仅 placeInstance
+      if (this.isAddingLine()) {
+        // [G4.3c 砍] tryStartDrawingLine — 占位:line addMode 直接退出,先不创建
+        this.exitAddMode();
+        return;
+      }
+      this.placeInstance(world);
+      return;
+    }
+
+    // [G4.3e 砍] line endpoint handle → startRewire(V1:388-403)
     // [G4.4 砍] raycastLinkHref → dispatchLinkHref
 
     // ── 1. 优先命中 HandlesOverlay(resize / rotate)──
@@ -456,7 +513,7 @@ export class InteractionController {
         this.deleteSelected();
       }
     } else if (e.key === 'Escape') {
-      // V1 优先级:resize/rotate → marquee → [G4.3c rewire] → [G4.3c drawingLine] → [G4.3b addMode] → 清选区
+      // V1 优先级:resize/rotate → marquee → [G4.3e rewire] → [G4.3c drawingLine] → addMode → 清选区
       if (this.resizing) {
         this.resizing = null;
         this.refreshHandles();
@@ -465,6 +522,8 @@ export class InteractionController {
         this.refreshHandles();
       } else if (this.marquee) {
         this.cancelMarquee();
+      } else if (this.addMode) {
+        this.exitAddMode();
       } else if (this.selected.size > 0) {
         this.clearSelection();
       }
@@ -507,6 +566,57 @@ export class InteractionController {
     return best?.node ?? null;
   }
 
+
+  // ─────────────────────────────────────────────────────────
+  // addMode 实例化(V1 429-463 直迁;Picker 触发后点画布创建 instance)
+  // ─────────────────────────────────────────────────────────
+
+  /** 当前 addMode spec 是否是 line 类 shape — G4.3c 真消费时区分点击 / press-drag 路径 */
+  private isAddingLine(): boolean {
+    if (!this.addMode || this.addMode.kind !== 'shape') return false;
+    const api = getShapeApi();
+    const shape = api.shapes.get(this.addMode.ref);
+    return shape?.category === 'line';
+  }
+
+  /** 把当前 spec 实例化到点击的世界坐标,居中对齐 */
+  private placeInstance(world: { x: number; y: number }): void {
+    const spec = this.addMode;
+    if (!spec) return;
+    this.pushHistory();
+
+    const size = resolveDefaultSize(spec);
+    const id = this.nodeRenderer.nextInstanceId();
+    const position = { x: world.x - size.w / 2, y: world.y - size.h / 2 };
+    const instance: Instance = {
+      ...(spec.presetInstance ?? {}),
+      id,
+      type: spec.kind,
+      ref: spec.ref,
+      position,
+      size,
+    };
+    // 文字节点:创建时初始化空 doc 字段(G4.5 canvas-text-node 编辑时填内容)
+    if (spec.ref === 'krig.text.label') {
+      instance.doc = [];
+    }
+    this.nodeRenderer.add(instance);
+    // 防御:shape/substance 找不到时 add 不渲染也不存数据,此时不要选中孤儿 id
+    if (!this.nodeRenderer.get(id)) {
+      console.warn(`[InteractionController] placeInstance: ${spec.kind} '${spec.ref}' 渲染失败,跳过选中`);
+      this.exitAddMode();
+      return;
+    }
+
+    // 选中新建的 instance,退出 addMode
+    this.selected.clear();
+    this.selected.add(id);
+    this.refreshOverlays();
+    this.refreshHandles();
+    this.notifySelection();
+    this.exitAddMode();
+    this.onInstancesChange?.();
+  }
 
   // ─────────────────────────────────────────────────────────
   // Marquee 框选(V1 1110-1162 直迁;空白拖动 → AABB 内节点全选)
@@ -935,6 +1045,53 @@ function cursorForHandle(h: HandleKind, rotationDeg: number): string {
   const cursors = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize',
                    'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
   return cursors[bucket];
+}
+
+// ─────────────────────────────────────────────────────────
+// shape-library lazy singleton(magnet-snap / NodeRenderer 模式一致)
+// ─────────────────────────────────────────────────────────
+
+let _shapeApi: ShapeLibraryApi | null = null;
+function getShapeApi(): ShapeLibraryApi {
+  if (!_shapeApi) {
+    _shapeApi = requireCapabilityApi<ShapeLibraryApi>('shape-library');
+  }
+  return _shapeApi;
+}
+
+/**
+ * 解析新实例的 size(V1 1643-1672 直迁):
+ * - 优先 spec.defaultSize
+ * - shape:line 类默认 200×100;text.label 默认 200×40;其他默认 160×100
+ * - substance:从 components transform 估 bbox
+ * - 兜底 100×100
+ */
+function resolveDefaultSize(spec: AddModeSpec): { w: number; h: number } {
+  if (spec.defaultSize) return spec.defaultSize;
+  const api = getShapeApi();
+  if (spec.kind === 'shape') {
+    if (spec.ref === 'krig.text.label') return { w: 200, h: 40 };
+    const shape = api.shapes.get(spec.ref);
+    if (shape) {
+      if (shape.category === 'line') return { w: 200, h: 100 };
+      return { w: 160, h: 100 };
+    }
+  } else {
+    const def = api.substances.get(spec.ref);
+    if (def) {
+      let maxX = 0, maxY = 0;
+      for (const c of def.components) {
+        const w = c.transform.w ?? 0;
+        const h = c.transform.h ?? 0;
+        const right = c.transform.x + (c.transform.anchor === 'center' ? w / 2 : w);
+        const bottom = c.transform.y + (c.transform.anchor === 'center' ? h / 2 : h);
+        if (right > maxX) maxX = right;
+        if (bottom > maxY) maxY = bottom;
+      }
+      if (maxX > 0 && maxY > 0) return { w: maxX, h: maxY };
+    }
+  }
+  return { w: 100, h: 100 };
 }
 
 // ─────────────────────────────────────────────────────────

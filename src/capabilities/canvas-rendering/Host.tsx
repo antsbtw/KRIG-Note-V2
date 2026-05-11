@@ -24,6 +24,7 @@ import {
   useRef,
 } from 'react';
 import type {
+  AddModeSpec,
   CanvasDocument,
   CanvasHostHandle,
   CanvasHostProps,
@@ -38,7 +39,7 @@ import './styles.css';
 
 export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
   function CanvasHost(props, ref) {
-    const { onViewportChange, onSelectionChange, onInstancesChange } = props;
+    const { onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneManager | null>(null);
     const nodeRendererRef = useRef<NodeRenderer | null>(null);
@@ -72,11 +73,18 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         onViewportChange: () => {
           viewportDirtyRef.current = true;
         },
+        onAddModeChange: (spec) => onAddModeChange?.(spec),
       });
       sceneRef.current = scene;
       nodeRendererRef.current = nodeRenderer;
       handlesRef.current = handles;
       interactionRef.current = interaction;
+
+      // [G4.3 dev hook] 暴露给 DevTools 手测 enterAddMode(picker 还没接,G4.4 才有)
+      if (import.meta.env.DEV) {
+        const w = window as unknown as { __krig?: Record<string, unknown> };
+        w.__krig = { ...(w.__krig ?? {}), canvasInteraction: interaction };
+      }
 
       // viewport change 推送(RAF 内节流,避免每次 wheel 都触发持久化保存)
       let rafId: number | null = null;
@@ -178,6 +186,18 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return nodeRendererRef.current?.listInstances() ?? [];
     }, []);
 
+    const enterAddMode = useCallback((spec: AddModeSpec): void => {
+      interactionRef.current?.enterAddMode(spec);
+    }, []);
+
+    const exitAddMode = useCallback((): void => {
+      interactionRef.current?.exitAddMode();
+    }, []);
+
+    const isAddMode = useCallback((): boolean => {
+      return interactionRef.current?.isAddMode() ?? false;
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -190,6 +210,9 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         clearSelection,
         getInstance,
         getInstances,
+        enterAddMode,
+        exitAddMode,
+        isAddMode,
       }),
       [
         loadDocument,
@@ -201,6 +224,9 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         clearSelection,
         getInstance,
         getInstances,
+        enterAddMode,
+        exitAddMode,
+        isAddMode,
       ],
     );
 
