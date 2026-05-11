@@ -1,6 +1,6 @@
 # L5-G3 设计 — canvas-rendering capability(Three.js 单点屏障核心)
 
-> v0.1 · 2026-05-10
+> v0.2 · 2026-05-10 · 实施前用户 P1+P2 复审(Instance 归属 + NodeRenderer 调用方式统一)
 >
 > 配套:
 > - 上游 plan:[../v1-graph-migration-plan.md](../v1-graph-migration-plan.md) v0.2 § 3.3 + § 5 G3
@@ -29,7 +29,7 @@
 - [x] **npm 屏障收紧**:`src/capabilities/canvas-rendering/` 是**唯一允许 import three 的位置**(eslint config 配 override allowlist);所有其他位置 0 import three(view / shape-library / 其他 capability 全部禁)
 - [x] **capabilities/canvas-rendering/scene/**(Three.js 渲染管线核心,V1 直迁 4 文件 + path-to-three 从 V1 plugin 迁入):
   - `SceneManager.ts`:Three.js 底座(scene / camera / renderer / Retina / RAF / fitToContent / screenToWorld 互转)
-  - `NodeRenderer.ts` **G3 砍剩"shape + 简单 substance"**:V1 818 行砍掉 line/text/canvas-text-node 部分(归 G4),~400 行;通过 `requireCapabilityApi('shape-library')` 调 evaluate 拿 EvaluatedPath → path-to-three 转 Mesh
+  - `NodeRenderer.ts` **G3 砍剩"shape + 简单 substance"**:V1 818 行砍掉 line/text/canvas-text-node 部分(归 G4),~400 行;**直 import shape-library 模块级 `ShapeRegistry / SubstanceRegistry` + `evaluateShape`**(决策 G3-2=B,capability 层间 W5 边界 A 允许;对齐 V2 ebook-rendering 直 import ebook-library 单例模式);拿到 EvaluatedPath → path-to-three 转 Mesh
   - `DotGrid.ts`:F-1 点阵网格底(V1 132 行直迁)
   - **`path-to-three.ts`**:V1 `plugins/graph/library/shapes/renderers/path-to-three.ts` 395 行迁入(P1-1 屏障核心 — V2 单一 Three.Shape 投影位置);**接口改对接 EvaluatedPath**(V1 内部直接吃 ShapeDef + buildEnv,V2 改为接受 G2 输出的 `EvaluatedPath` 纯数据 + `FillStyle / LineStyle` 风格)
 - [x] **capabilities/canvas-rendering/interaction/** **G3 减量版**:
@@ -38,7 +38,7 @@
   - Props:`workspaceId / onViewportChange / onSelectionChange / onInstancesChange / onTitleChange / textNode?(G4 注入,本段不用)`
   - Handle:`loadDocument / serialize / setViewport / fitToContent / zoomTo / deleteSelected / clearSelection`
   - 内部装 SceneManager + NodeRenderer + DotGrid + InteractionController
-- [x] **capabilities/canvas-rendering/types.ts**:`CanvasHostHandle / CanvasHostProps / CanvasDocument / Viewport / CanvasRenderingApi`(V2 自己定义,不消费 V1 types 内的 Instance — Instance 类型在 graph 体系中**归属 shape-library**已实现,canvas-rendering 通过 type import 拿)
+- [x] **capabilities/canvas-rendering/types.ts**:`CanvasHostHandle / CanvasHostProps / CanvasDocument / Viewport / CanvasRenderingApi` **+ `Instance / InstanceKind / InstanceEndpoint / TextNodeAtoms`**(画板上的实例数据类型;G2-10=B 确认 shape-library 不含 Instance 系,本段归 canvas-rendering;V1 类型直迁。canvas-text-node / graph-library-store(IPC 边界仍用 `unknown / CanvasDocumentJson` 通用类型,不强耦合 Instance)/ 未来 family-tree projection 等需要时通过 `import type from '@capabilities/canvas-rendering/types'`)
 - [x] **capabilities/canvas-rendering/index.ts**:双导出 + capabilityRegistry.register + alive 行
 - [x] **capabilities/canvas-rendering/styles.css**:V1 `plugins/graph/graph.css` 中的 scene / interaction 相关样式迁入
 - [x] **capabilities/canvas-rendering/DESIGN.md**:P1-1 屏障落地点显式声明
@@ -89,7 +89,7 @@
 ```
 src/capabilities/canvas-rendering/
 ├── index.ts                      ~150 行(双导出 + capabilityRegistry.register + alive 行)
-├── types.ts                      ~120 行(CanvasHostHandle / CanvasHostProps / CanvasDocument / Viewport / CanvasRenderingApi;Instance 类型走 type import @capabilities/shape-library/types)
+├── types.ts                      ~180 行(CanvasHostHandle / CanvasHostProps / CanvasDocument / Viewport / CanvasRenderingApi **+ Instance / InstanceKind / InstanceEndpoint / TextNodeAtoms** — V1 types.ts 内的画板实例类型归本段所有,G2-10=B 决策时 shape-library 显式拆出后这里接收;V1 types.ts 直迁约 80 行)
 ├── Host.tsx                      ~250 行(forwardRef + useImperativeHandle + 装 SceneManager + NodeRenderer + DotGrid + InteractionController)
 ├── scene/
 │   ├── SceneManager.ts           ~346 行(V1 直迁)
@@ -307,3 +307,4 @@ grep -rn "from 'three'" src/ --include="*.ts" --include="*.tsx" | grep -v "canva
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-05-10 | v0.1 | 初稿;G3 范围 + 13 决策点 + 文件清单 + EvaluatedPath → path-to-three 数据流 + 14 项验收清单 + 双 commit 拆分 + 风险登记 + P1-1 严格版屏障 ESLint 落地点 |
+| 2026-05-10 | v0.2 | 实施前用户 P1+P2 复审 — 两条 design 内部口径冲突修订:**P1 Instance 归属冲突**:v0.1 § 1.1 + § 3 文件清单写"Instance 类型 type import @capabilities/shape-library/types",但 G2-10=B 已决策 shape-library 不含 Instance 系(实际 src/capabilities/shape-library/types.ts 已确认不含);修法:Instance / InstanceKind / InstanceEndpoint / TextNodeAtoms 显式归 canvas-rendering/types.ts(从 V1 plugins/graph/library/types.ts 直迁,V1 当时 Instance 与 ShapeDef 混在一起;V2 G2 已分离 ShapeDef → shape-library,G3 接 Instance → canvas-rendering);canvas-text-node / graph-library-store(IPC 边界仍 unknown / CanvasDocumentJson)/ future family-tree 通过 `import type from '@capabilities/canvas-rendering/types'`;types.ts LOC 估算 120 → 180(+60 行 V1 Instance 类型迁入).**P2 NodeRenderer 调用方式冲突**:v0.1 § 1.1 写"通过 requireCapabilityApi('shape-library') 调 evaluate",与 § 2 G3-2=B 决策(直 import 模块级 ShapeRegistry)矛盾;修法:§ 1.1 改"**直 import shape-library 模块级 ShapeRegistry / SubstanceRegistry + evaluateShape**(决策 G3-2=B,capability 层间 W5 边界 A 允许;对齐 ebook-rendering 直 import ebook-library 单例模式)" |
