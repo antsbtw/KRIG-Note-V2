@@ -173,6 +173,25 @@ export default [
     },
   },
 
+  // P1-1 严格版屏障 — three 单点屏障(L5-G3 引入):
+  // capability 层默认禁 three;canvas-rendering 是唯一允许 import three 的位置。
+  //
+  // 详见 docs/RefactorV2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3。
+  // 这一块顺序在前面"capabilities/**" 块之后,通过 files 精确匹配排除
+  // canvas-rendering 自身,达到"默认禁 + 例外允许"的效果。
+  {
+    files: ['src/capabilities/**/*.{ts,tsx}'],
+    ignores: ['src/capabilities/canvas-rendering/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['three', 'three/*'],
+            message: 'P1-1 严格版屏障:three 只允许 capabilities/canvas-rendering/ import' },
+        ],
+      }],
+    },
+  },
+
   // 忽略文件
   {
     ignores: ['node_modules/**', '.vite/**', 'dist/**', 'out/**', 'docs/**'],
