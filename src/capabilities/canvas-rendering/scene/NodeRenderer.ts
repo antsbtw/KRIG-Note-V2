@@ -1,17 +1,22 @@
 /**
- * NodeRenderer — Canvas instance JSON → Three.js mesh 渲染管线(L5-G3 减量版)
+ * NodeRenderer — Canvas instance JSON → Three.js mesh 渲染管线(L5-G4.1)
  *
  * V1 直迁:src/plugins/graph/canvas/scene/NodeRenderer.ts(818 行).
- * V2 G3 减量(对齐 design v0.3 § 1.2):
- * - **砍 line 渲染**(V1 `renderLineShape` + LineRenderer + magnet-snap → 留 G4 灰线占位)
- * - **砍 text 渲染**(V1 `renderTextInstance` + TextRenderer + atom-bridge → 留 G4 灰矩形占位)
- * - **砍 substance 内 line/text 子组件**(V1 `renderLineComponent` / 同 → G3-5 静默 skip)
- * - **走 G3-2=A**:通过 `requireCapabilityApi<ShapeLibraryApi>('shape-library')` 拿
- *   shapes / substances API(对齐 V2 既有 ebook-rendering Host.tsx 模式)
- * - **走 G3-3=B**:`shapes.evaluate(id, props, ctx)` 返 `EvaluatedPath` 纯数据 →
- *   `pathToThree(evalPath, opts)` 转 mesh(path-to-three 是本 capability 内部模块)
  *
- * G4 接续:line 渲染 + line endpoints 驱动 + text label + substance line/text 子组件 + canvas-text-node 接入.
+ * G3 减量(已落):
+ * - 走 G3-2=A:requireCapabilityApi('shape-library') 拿 shapes/substances API
+ * - 走 G3-3=B:shapes.evaluate → EvaluatedPath 纯数据 → pathToThree 转 mesh
+ *
+ * **G4.1 还原**(本段):
+ * - ✅ line 渲染:接 LineRenderer + magnet-snap.resolveLineEndpoints(V1 295-324 行 renderLineShape 对齐)
+ * - ✅ lineRefs 反向索引:line 引用 instance 时登记;被引用 instance 拖动 → updateLinesFor 触发 line 重渲染
+ * - ✅ orphan line 自动清理:被引用 instance 删除时,引用它的 line 一并删(避免悬空 line)
+ * - ✅ setPosition 后自动 updateLinesFor(让 line 端点跟随节点拖动)
+ * - ✅ setInstances 顺序:非 line 先,line 后(端点解析需要其他 instance 已就位)
+ *
+ * G4 后续(仍留):
+ * - text label 真渲染(G4.5 canvas-text-node 接入 TextRenderer + atom-bridge);本段仍占位灰矩形
+ * - substance 内 line/text 子组件(G4.5 一起;line 子组件 G4.3 addMode 真消费时再回看)
  */
 
 import * as THREE from 'three';
@@ -28,13 +33,18 @@ import type {
 import type { Instance } from '../types';
 import type { SceneManager } from './SceneManager';
 import { pathToThree } from './path-to-three';
+import { renderLine, updateLineGeometry } from './LineRenderer';
+import { resolveLineEndpoints } from '../interaction/magnet-snap';
 
-/**
- * **G3-10 文字节点占位**:遇 ref === 'krig.text.label' 渲染半透明灰矩形 + 标签
- * **G3-5 line 占位**:遇 shape.category === 'line' 渲染灰色线段(端点用 inst.endpoints 解析,
- * line 端点 magnet 跟随留 G4 真实施;G3 若 endpoints 缺失,渲染占位矩形)
- */
+/** ref === 'krig.text.label' 时走 G3-10 占位;G4.5 接 TextRenderer + atom-bridge 真渲染 */
 const TEXT_REF = 'krig.text.label';
+
+/** 判断 instance 是否为 line 类(需要 shape-library 查 category;调用方先确保 instance.type === 'shape')*/
+function isLineInstance(inst: Instance, api: ShapeLibraryApi): boolean {
+  if (inst.type !== 'shape') return false;
+  const shape = api.shapes.get(inst.ref);
+  return shape?.category === 'line';
+}
 
 export interface RenderedNode {
   instanceId: string;
@@ -54,6 +64,12 @@ export class NodeRenderer {
   private byId = new Map<string, RenderedNode>();
   /** 原始 Instance 数据(给 view 端 serialize 用) */
   private instances = new Map<string, Instance>();
+  /**
+   * 反向索引(V1 NodeRenderer.lineRefs 直迁):
+   * 被引用的 instance id → 引用它的 line instance id 集合.
+   * 用途:被引用 instance 拖动 / 删除时,自动 updateLinesFor / remove orphan line.
+   */
+  private lineRefs = new Map<string, Set<string>>();
 
   /** lazy shape-library api;首次 mount 时拿一次 */
   private shapeApi: ShapeLibraryApi | null = null;
@@ -71,21 +87,44 @@ export class NodeRenderer {
   // 增量 / 全量 API(对齐 V1)
   // ─────────────────────────────────────────────────────────
 
-  /** 全量替换:清掉现有节点,渲染新的 instances 列表 */
+  /**
+   * 全量替换:清掉现有节点,渲染新的 instances 列表.
+   * 顺序:**非 line 先,line 后**(端点解析需要其他 instance 已就位;V1 NodeRenderer:54-65 直迁).
+   */
   setInstances(instances: Instance[]): void {
     this.clear();
+    const api = this.getShapeApi();
+    const lines: Instance[] = [];
     for (const inst of instances) {
-      this.add(inst);
+      if (isLineInstance(inst, api)) lines.push(inst);
+      else this.add(inst);
     }
+    for (const inst of lines) this.add(inst);
   }
 
-  /** 增量添加单个 instance */
+  /** 增量添加单个 instance(V1 NodeRenderer:67-91 直迁) */
   add(inst: Instance): void {
+    if (this.byId.has(inst.id)) {
+      console.warn(`[canvas-rendering/NodeRenderer] instance ${inst.id} already rendered, replacing`);
+      this.remove(inst.id);
+    }
     const rendered = this.renderInstance(inst);
-    if (rendered) {
-      this.sceneManager.scene.add(rendered.group);
-      this.byId.set(inst.id, rendered);
-      this.instances.set(inst.id, inst);
+    if (!rendered) return;
+    this.sceneManager.scene.add(rendered.group);
+    this.byId.set(inst.id, rendered);
+    this.instances.set(inst.id, inst);
+
+    // line 实例通过 endpoints 引用其他 instance:登记反向索引(V1:79-86 直迁)
+    const api = this.getShapeApi();
+    if (isLineInstance(inst, api) && inst.endpoints) {
+      for (const ep of inst.endpoints) {
+        let set = this.lineRefs.get(ep.instance);
+        if (!set) {
+          set = new Set();
+          this.lineRefs.set(ep.instance, set);
+        }
+        set.add(inst.id);
+      }
     }
   }
 
@@ -95,27 +134,42 @@ export class NodeRenderer {
     this.add(updated);
   }
 
-  /** 删除某个 instance */
+  /**
+   * 删除某个 instance(V1:120-140 直迁).
+   * 引用本 instance 的 line 自动清理(避免悬空 line).
+   */
   remove(id: string): void {
     const rn = this.byId.get(id);
     if (!rn) return;
-    disposeGroup(rn.group);
     this.sceneManager.scene.remove(rn.group);
+    disposeGroup(rn.group);
     this.byId.delete(id);
     this.instances.delete(id);
+
+    // 找出引用这个 instance 的所有 line(被删时这些 line 失去端点 → 一并删除避免悬空)
+    // ⚠️ 必须先抓 orphans 再清 lineRefs[id],否则 delete 后查不到了
+    const orphans = Array.from(this.lineRefs.get(id) ?? []);
+
+    // 1. 这个 instance 被哪些 line 引用,反向索引清掉
+    this.lineRefs.delete(id);
+    // 2. 这个 instance 自己若是 line,从所有"被它引用的 instance 的反向集合"里移除
+    for (const set of this.lineRefs.values()) set.delete(id);
+
+    // 3. 递归删除悬空的 line
+    for (const orphanId of orphans) this.remove(orphanId);
   }
 
-  /** 清空所有节点 */
+  /** 清空所有节点(V1:178-184 直迁) */
   clear(): void {
-    for (const rn of this.byId.values()) {
-      disposeGroup(rn.group);
-      this.sceneManager.scene.remove(rn.group);
-    }
-    this.byId.clear();
+    for (const id of Array.from(this.byId.keys())) this.remove(id);
+    this.lineRefs.clear();
     this.instances.clear();
   }
 
-  /** 拖动时直接改 position(避免 remove + add 重建 mesh) */
+  /**
+   * 拖动时直接改 position(避免 remove + add 重建 mesh)
+   * 自动 updateLinesFor 让引用本 instance 的 line 端点跟随更新(V1 拖动模式).
+   */
   setPosition(id: string, position: { x: number; y: number }): void {
     const rn = this.byId.get(id);
     if (!rn) return;
@@ -124,6 +178,37 @@ export class NodeRenderer {
     rn.group.position.y = position.y + rn.size.h / 2;
     const inst = this.instances.get(id);
     if (inst) inst.position = { ...position };
+    this.updateLinesFor(id);
+  }
+
+  /**
+   * 通知:某个 instance 的 position/size 变了,重新计算所有引用它的 line 的端点几何
+   * (V1 NodeRenderer.updateLinesFor:142-176 直迁;拖动时高频调用).
+   */
+  updateLinesFor(instanceId: string): void {
+    const lineIds = this.lineRefs.get(instanceId);
+    if (!lineIds) return;
+    for (const lineId of lineIds) {
+      const lineInst = this.instances.get(lineId);
+      const lineNode = this.byId.get(lineId);
+      if (!lineInst || !lineNode) continue;
+      const ep = resolveLineEndpoints(lineInst, (id) => {
+        const n = this.byId.get(id);
+        const i = this.instances.get(id);
+        return n && i ? { node: n, instance: i } : null;
+      });
+      if (!ep) continue;
+      updateLineGeometry(lineNode.group, lineInst.ref, ep.start, ep.end);
+      // 同步更新 line node 的 position/size(bbox,用于选中边框等)
+      lineNode.position = {
+        x: Math.min(ep.start.x, ep.end.x),
+        y: Math.min(ep.start.y, ep.end.y),
+      };
+      lineNode.size = {
+        w: Math.abs(ep.end.x - ep.start.x),
+        h: Math.abs(ep.end.y - ep.start.y),
+      };
+    }
   }
 
   /** 查询 instance 的渲染产物 */
@@ -188,14 +273,14 @@ export class NodeRenderer {
       return null;
     }
 
-    // G3-10 文字节点占位
+    // G3-10 文字节点仍占位(text label,G4.5 接 canvas-text-node 真渲染)
     if (inst.ref === TEXT_REF) {
       return this.renderPlaceholder(inst, shape, 'text');
     }
 
-    // G3-5 line 类 shape:占位(灰线段,line 端点驱动留 G4)
+    // G4.1 line 类 shape:真渲染(端点驱动,经 magnet-snap.resolveLineEndpoints)
     if (shape.category === 'line') {
-      return this.renderPlaceholder(inst, shape, 'line');
+      return this.renderLineShape(inst, shape);
     }
 
     // 正常 shape:走 evaluate → path-to-three
@@ -224,6 +309,41 @@ export class NodeRenderer {
       position: { ...position },
       size: { ...size },
       rotation: inst.rotation ?? 0,
+    };
+  }
+
+  /**
+   * line shape 实例:解析两端世界坐标 → LineRenderer(V1 NodeRenderer:296-324 直迁)
+   *
+   * V1 LineRenderer 输出 group(line 顶点已是世界坐标,无需 wrapForRotation).
+   * position/size 用 bbox 表达(M1.3a 选中态 / 删除可能用).
+   */
+  private renderLineShape(inst: Instance, shape: ShapeDef): RenderedNode | null {
+    const ep = resolveLineEndpoints(inst, (id) => {
+      const n = this.byId.get(id);
+      const i = this.instances.get(id);
+      return n && i ? { node: n, instance: i } : null;
+    });
+    if (!ep) {
+      console.warn(`[canvas-rendering/NodeRenderer] line ${inst.id} cannot resolve endpoints`);
+      return null;
+    }
+    const group = renderLine(inst.ref, {
+      start: ep.start,
+      end: ep.end,
+      style: mergeLine(shape.default_style?.line, inst.style_overrides?.line),
+    });
+    group.userData.instanceId = inst.id;
+    return {
+      instanceId: inst.id,
+      kind: 'shape',
+      group,
+      shapeRef: inst.ref,
+      position: { x: Math.min(ep.start.x, ep.end.x), y: Math.min(ep.start.y, ep.end.y) },
+      size: {
+        w: Math.abs(ep.end.x - ep.start.x),
+        h: Math.abs(ep.end.y - ep.start.y),
+      },
     };
   }
 
@@ -276,23 +396,24 @@ export class NodeRenderer {
   }
 
   /**
-   * G3-5 / G3-10 占位渲染:line / text label 类型用占位灰色 mesh + 标签覆盖,
-   * 让用户视觉上能看到节点位置;G4 接 LineRenderer / TextRenderer / canvas-text-node 真渲染.
+   * G3-10 文字节点占位渲染:text label 用占位灰色 mesh + 边框,让用户视觉上能看到
+   * 节点位置;**G4.5 接 canvas-text-node + TextRenderer + atom-bridge 真渲染**.
+   *
+   * G4.1 已删除 line 占位分支 — line 类 shape 走 renderLineShape 真渲染.
    */
   private renderPlaceholder(
     inst: Instance,
     shape: ShapeDef,
-    kind: 'line' | 'text',
+    kind: 'text',
   ): RenderedNode {
     const { position, size } = ensurePositionSize(inst, shape);
     const w = Math.max(8, size.w);
     const h = Math.max(8, size.h);
 
     const innerGroup = new THREE.Group();
-    // 半透明灰矩形(line 占位用更扁的矩形)
     const geom = new THREE.PlaneGeometry(w, h);
     const mat = new THREE.MeshBasicMaterial({
-      color: kind === 'line' ? 0x666666 : 0x4a4a4a,
+      color: 0x4a4a4a,
       transparent: true,
       opacity: 0.35,
     });
