@@ -30,6 +30,7 @@ import type {
 } from '@capabilities/text-editing/types';
 import { sessionStore, type ActiveSession } from './session-store';
 import { docToDriverSerialized } from './atom-bridge';
+import './edit-overlay.css';
 
 export function EditOverlay(): ReactElement | null {
   const textEditing = useMemo(
@@ -98,24 +99,13 @@ export function EditOverlay(): ReactElement | null {
 
   const Host = textEditing.Host;
   const t = session.opts;
-  // popup 最小宽 280 / 最小高 80 — 保证编辑器可用,不被退化为竖条;
-  // 短小节点编辑时 popup 适度溢出 mesh 边界,提交后 mesh 自然 wrap.
-  const popupW = Math.max(t.width, MIN_POPUP_W);
-  const popupH = Math.max(t.height, MIN_POPUP_H);
-  // 极窄节点(< 280):popup 居中对齐 mesh 中心,而不是左对齐 mesh 左边
-  const popupLeft = t.width < MIN_POPUP_W
-    ? t.screenX - (popupW - t.width) / 2
-    : t.screenX;
-  // 极矮节点(< 80):popup 顶对齐放下,避免 popup 顶部跑到画板外
-  const popupTop = t.height < MIN_POPUP_H
-    ? Math.max(8, t.screenY - (popupH - t.height) / 2)
-    : t.screenY;
+  // V1 体验:popup 完全贴合 mesh 屏幕投影,编辑态与展示态视觉无缝过渡(M2.1 §4.2)
   const popupStyle: CSSProperties = {
     ...styles.popup,
-    left: popupLeft,
-    top: popupTop,
-    width: popupW,
-    [t.heightFixed ? 'height' : 'minHeight']: popupH,
+    left: t.screenX,
+    top: t.screenY,
+    width: t.width,
+    [t.heightFixed ? 'height' : 'minHeight']: t.height,
     background: t.backgroundColor ?? 'rgba(40, 40, 40, 0.98)',
     color: t.backgroundColor ? '#222' : 'var(--krig-text-primary)',
   };
@@ -128,6 +118,7 @@ export function EditOverlay(): ReactElement | null {
       }}
     >
       <div
+        className="krig-canvas-edit-popup"
         style={popupStyle}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation() /* 防 InteractionController Delete/Cmd+Z */}
@@ -145,10 +136,6 @@ export function EditOverlay(): ReactElement | null {
     </div>
   );
 }
-
-/** popup 最小尺寸 — 保证编辑器可用,不被退化为竖条 / 矮条 */
-const MIN_POPUP_W = 280;
-const MIN_POPUP_H = 80;
 
 const styles: Record<string, CSSProperties> = {
   backdrop: {

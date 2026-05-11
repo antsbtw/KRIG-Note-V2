@@ -1,0 +1,53 @@
+/**
+ * canvas-text-node EditOverlay popup 内 PM 样式 override(V1 edit-overlay.css 对齐)
+ *
+ * text-editing-driver `.krig-pm-host` 是为全屏 NoteView 设计的:
+ *   - padding: 24px 24px 24px 48px(给 block-handle gutter)
+ *   - font-size: 16px / line-height: 1.7
+ *   - min-height: 200px
+ *   - h1: 38px / h2: 28px / h3: 22px
+ *
+ * 这套样式塞进画板小 popup 会:padding 吃宽度 → 单字换行;
+ * h1 巨大字号 + min-height 200 撑爆小节点 popup.
+ *
+ * 这里 override:popup 内 PM 用紧凑样式,padding 0 + 字号 14 + 不设 min-height.
+ * 用 .krig-canvas-edit-popup 作用域,只影响 popup 内,不影响 NoteView 全屏编辑.
+ */
+
+.krig-canvas-edit-popup .krig-pm-host {
+  height: auto;
+  min-height: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: visible;
+}
+
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror {
+  padding: 0 !important;
+  min-height: 0 !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  color: var(--krig-canvas-edit-fg, #e8eaed) !important;
+  caret-color: var(--krig-canvas-edit-fg, #e8eaed) !important;
+}
+
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror > * {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Headings:画板节点不该有"放大字号",H1/H2/H3 视觉 = paragraph 同字号 + 加粗 */
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror h1,
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror h2,
+.krig-canvas-edit-popup .krig-pm-host .ProseMirror h3 {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
