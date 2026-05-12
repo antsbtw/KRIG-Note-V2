@@ -5,7 +5,7 @@
  * KRIG Knowledge Platform 后端 OCR 输出的 Atom JSON。
  *
  * 输出:V2 PM doc JSON(可直接装 doc.content 数组),封 DriverSerialized 信封后
- * 走 noteStore.create / save。
+ * 走 noteCapability.createNote / updateNote (L7-sub2:SurrealDB 持久化)。
  *
  * 13 种 Atom type 映射到 V2 schema:
  *

@@ -5,11 +5,12 @@
  *
  * 行为:
  * - 渲染 `📄 <label>`,contenteditable=false
- * - mount 时一次性查 noteStore:存在 → 同步 title 到 attrs.label;不存在 → 红色"未找到"
+ * - mount 时一次性查 handler.resolveNoteTitle:存在 → 同步 title 到 attrs.label;不存在 → 红色"未找到"
  * - 点击 → 走 link-click 协议路由,view 注入 onOpenNote 处理(对齐 krig://note 行为)
- * - 失效态(noteId 为空 / noteStore 查不到)显 .krig-note-link--missing 红字
+ * - 失效态(noteId 为空 / handler 查不到)显 .krig-note-link--missing 红字
  *
- * 砍 V1:viewAPI(IPC)→ V2 直接 noteStore 函数调用;路由用 link-click handler 复用
+ * 解耦:driver 不依赖具体上层 capability,view 端注入 resolveNoteTitle 同步契约
+ *      (V2 实施时 view 端用本地缓存的 NoteInfo 列表实现,IPC 查询不在 render 路径上)
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
