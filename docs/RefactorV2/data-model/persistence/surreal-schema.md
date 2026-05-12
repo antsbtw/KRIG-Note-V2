@@ -45,7 +45,21 @@ V2 衍生:
 - 跨 domain 一致（pm / rdf / embedding / three 共用 atom 表）
 - 跨 vocabulary 一致（family-tree / bpmn / prov 共用 edge 表）
 - 跨业务一致（笔记 / 画板 / 书架统一为 atom + edge 模型）
-- 新业务无需新表（注册新 domain / vocabulary 即可）
+- 新业务**无需新表**（注册新 domain / vocabulary 即可）
+
+**精确承诺**：
+
+| 业务变更 | 是否需要 schema migration |
+|---|---|
+| 新增 domain（如未来加 `markdown-ast`） | **不需要**（domain 字段正则约束允许任意 kebab-case 字符串） |
+| 新增 vocabulary（如 `bpmn`） | **不需要**（vocabulary 段同样正则约束） |
+| 新增 atom payload 内字段（如 pm domain 加新 attr） | **不需要**（payload 字段是 `any`，schema 不约束内部结构） |
+| 新增 edge attrs 字段（vocabulary-specific 扩展） | **不需要**（attrs 是 `[key]: any`） |
+| 新增 atom 实体壳字段（如未来加 `lastModifiedBy`） | **需要**（minor 版本号 schema migration） |
+| 新增索引 | **需要**（minor 版本号） |
+| 修改既有字段类型 | **需要**（major 版本号 + 数据迁移） |
+
+→ "新业务无需 schema migration" 仅指**业务变化**（新 domain / vocabulary / 内部字段）。**实体壳字段变更 / 索引变更**仍需走 SemVer migration（详 §6）。
 
 **代价**：
 - atom / edge 表数据量大（V1 一张 note 表对应 V2 一个 atom + 多条 edge）
@@ -95,8 +109,12 @@ DEFINE FIELD createdBy ON atom TYPE string ASSERT $value != "";
 
 -- payload (atom 数据,domain + payload JSON)
 DEFINE FIELD payload ON atom TYPE object ASSERT $value != NONE;
+
+-- domain 字段:正则约束格式(kebab-case 字符串),允许扩展
+-- 不硬编码白名单 — 按 atom/spec.md §1.1 Domain 注册治理,domain 是开放注册体系
 DEFINE FIELD payload.domain ON atom TYPE string
-  ASSERT $value INSIDE ['pm', 'rdf', 'embedding', 'three'];
+  ASSERT string::matches($value, '^[a-z][a-z0-9-]*$');
+
 DEFINE FIELD payload.payload ON atom TYPE any;  -- 按 domain 分派,SurrealDB 不强约束
 ```
 
@@ -291,6 +309,31 @@ DEFINE EVENT atom_delete_cascade ON TABLE atom
 
 ### 5.1 按 namespace 切片查询
 
+按 §3.4 namespace 切片索引启用与否，本节有**两种版本**：
+
+#### 基础版（始终可用 —— 直接 predicate 字符串匹配）
+
+```sql
+-- 查询所有 family-tree 边
+SELECT * FROM edge
+WHERE string::starts_with(predicate, 'user:family-tree:')
+   OR string::starts_with(predicate, 'ai:family-tree:')
+   OR string::starts_with(predicate, 'sys:family-tree:')
+ORDER BY createdAt;
+
+-- 查询某用户的所有 family-tree 边
+SELECT * FROM edge
+WHERE string::starts_with(predicate, 'user:family-tree:')
+  AND attrs.createdBy = $userId
+ORDER BY createdAt;
+```
+
+**性能**：依赖 `edge_predicate` 索引前缀扫描。SurrealDB 字符串前缀查询性能通常较好但**不如等值查询**。
+
+#### 优化版（依赖 §3.4 启用 computed fields + 索引）
+
+**前置条件**：必须先按 §3.4 创建 `predicate_source` / `predicate_vocab` 虚拟字段及对应索引。
+
 ```sql
 -- 查询所有 family-tree 边
 SELECT * FROM edge
@@ -303,6 +346,16 @@ WHERE predicate_source = 'user'
   AND predicate_vocab = 'family-tree'
   AND attrs.createdBy = $userId;
 ```
+
+**性能**：走 `edge_predicate_vocab` / `edge_predicate_source` 索引等值查询，比基础版快。
+
+#### 选用建议
+
+| 阶段 | 推荐方案 |
+|---|---|
+| V2 启动初期（业务少 / 数据小） | **基础版**（不启用 §3.4 优化字段，schema 更简单） |
+| 数据规模增长 / 性能瓶颈出现 | 启用 §3.4 优化字段 → **优化版** |
+| Phase N 业务实施时 | 视真实数据规模决定，**默认基础版** |
 
 ### 5.2 邻居遍历（深度 1）
 
@@ -318,21 +371,80 @@ WHERE subject.atomId = $rootAtomId;
 
 ### 5.3 子图查询（深度 N，按 namespace 限定）
 
-```sql
--- 从 root atom 出发,沿 family-tree 边遍历深度 5
-LET $rootIds = [$rootAtomId];
-LET $namespace = 'family-tree';
-LET $depth = 5;
+按 §4.1 决议 —— V2 用**字符串 atomId**引用（非 SurrealDB record link），所以**不能用** `->edge->atom` 图遍历语法。子图查询走**应用层 BFS / 多次查询**或 SurrealDB **递归 SELECT** 实现：
 
--- 递归 BFS（SurrealDB 2.x 图查询语法）
-SELECT
-  ->edge[WHERE predicate_vocab = $namespace]->atom AS reachable_atoms
+#### 方案 A：应用层 BFS（storage 层实施）
+
+```ts
+// 伪代码 (StorageAPI.querySubgraph 内部实施)
+async function querySubgraph(rootAtomId: string, namespace: string, depth: number) {
+  const visitedAtomIds = new Set<string>([rootAtomId]);
+  const allEdges: EdgeEntity[] = [];
+  let frontier = [rootAtomId];
+
+  for (let d = 0; d < depth; d++) {
+    // 查询当前 frontier 的所有出边 (按 namespace 切片)
+    const edges = await db.query(`
+      SELECT * FROM edge
+      WHERE subject.atomId INSIDE $frontier
+        AND predicate_vocab = $namespace
+    `, { frontier, namespace });
+
+    allEdges.push(...edges);
+
+    // 收集下一层 frontier (object.atomId, 跳过已访问)
+    const nextFrontier = edges
+      .filter(e => e.object.kind === 'atom' && !visitedAtomIds.has(e.object.atomId))
+      .map(e => e.object.atomId);
+
+    nextFrontier.forEach(id => visitedAtomIds.add(id));
+    frontier = nextFrontier;
+    if (frontier.length === 0) break;
+  }
+
+  // 一次性加载所有命中的 atoms
+  const atoms = await db.query('SELECT * FROM atom WHERE id INSIDE $ids', {
+    ids: [...visitedAtomIds],
+  });
+
+  return { atoms, edges: allEdges };
+}
+```
+
+**好处**：
+- 跟字符串 atomId 引用方案一致
+- 每层只一次查询（深度 D → D 次查询）
+- 利用 `edge_subject` 索引高效
+
+#### 方案 B：SurrealDB 递归 SELECT（性能更好但语法复杂）
+
+SurrealDB 2.x 支持递归 SELECT（视具体版本特性）。如果可用，可用单条查询替代应用层 BFS：
+
+```sql
+-- 伪代码,实际语法待 V2 实施时按 SurrealDB 2.x 文档验证
+-- (注: SurrealDB 2.x 是否完整支持此模式待 Phase N 实施时验证)
+SELECT *, (
+  -- 递归收集到深度 N 的所有 atom + edge
+  -- 具体实施方式: WITH RECURSIVE 或 LET 链式查询
+) AS subgraph
+FROM atom WHERE id = $rootAtomId;
+```
+
+#### 方案 C：未来切 record link 方案时
+
+如果未来 [decision 008](decisions/008-storage-layer-interface.md) / 本文档 §4.1 重新评估，**改用 SurrealDB record link**（`subject: option<record<atom>>`），则可用原生图遍历语法：
+
+```sql
+-- 仅当切到 record link 方案时适用
+SELECT ->edge[WHERE predicate_vocab = $namespace]->atom AS reachable_atoms
 FROM atom
-WHERE id IN $rootIds
+WHERE id = $rootAtomId
 LIMIT $depth;
 ```
 
-**注**：具体语法依赖 SurrealDB 版本。V2 实施时按 SurrealDB 2.x stable 调整（可能用 graph traversal 函数）。
+**当前默认**：用方案 A（应用层 BFS），待 Phase N 实施时验证方案 B 可用性。如方案 B 不可用，方案 A 已足够覆盖业务场景。
+
+→ 标 Open Q SS7（详 §9）。
 
 ### 5.4 物化视图（高频查询优化）
 
@@ -501,6 +613,7 @@ V1 `src/main/storage/schema.ts` 含表（25+ 张）：
 | SS4 | record link vs 字符串 atomId 选型 | **字符串 atomId**（跨后端 portable） | 不调整 |
 | SS5 | 物化视图启用策略 | 默认不启用，按需立项 | Phase N |
 | SS6 | schema_version 表的 migration runner 实施位置 | `src/storage/migrations/runner.ts`（待 Phase N 落地） | Phase N |
+| SS7 | SurrealDB 2.x 是否支持递归 SELECT 实现深度 N 子图查询？（§5.3 方案 B） | **默认用方案 A 应用层 BFS**（始终可用）；方案 B 待 Phase N 实施时验证 | Phase N 实施 |
 
 ---
 
