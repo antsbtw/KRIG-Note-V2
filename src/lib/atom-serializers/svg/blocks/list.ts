@@ -47,13 +47,14 @@ export async function renderList(
   const innerWidth = Math.max(20, contentWidth - indent);
 
   // NoteView schema(权威源):bulletList/orderedList content='block+',
-  // 子元素直接是 textBlock/嵌套 list,**没有 listItem 中间层**.
-  // 序列化器适配此结构:每个 textBlock child = 一个列表项,嵌套 list 缩进递归.
+  // 子元素直接是 paragraph/heading/嵌套 list,**没有 listItem 中间层**.
+  // 序列化器适配此结构:每个 paragraph/heading child = 一个列表项,嵌套 list 缩进递归.
+  // (兼容旧 atom 'textBlock' 命名)
   for (const child of atom.content) {
     if (!child) continue;
     const childYStart = y;
 
-    if (child.type === 'textBlock' || child.type === 'text-block') {
+    if (child.type === 'textBlock' || child.type === 'paragraph' || child.type === 'heading') {
       const { svg, height } = await renderIndentedTextBlock(child, y, indent, innerWidth, links, defaultTextColor);
       if (svg) parts.push(svg);
 

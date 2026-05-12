@@ -12,7 +12,7 @@
  *   5. 过滤空 text 节点(`text === ''` 在 PM schema 非法)
  *   6. children 内 Tiptap 格式 mathInline → InlineElement math-inline 归一
  *   7. tiptapContent 递归过滤空 text 节点 + 段落空容器补占位
- *   8. children 全空时补占位空格(PM `text-block` 等容器至少一段非空)
+ *   8. children 全空时补占位空格(PM `paragraph` 等容器至少一段非空)
  *
  * **跟 V1 差异**:V2 PM schema 含 `listItem`,所以 V1 那条
  * "listItem → paragraph 展开"的逻辑此处**不复制**(atoms-to-pm.ts 自己 tree builder)。
@@ -144,9 +144,7 @@ function sanitizeTiptapContent(
         );
         if (
           cleaned.length === 0 &&
-          (node.type === 'paragraph' ||
-            node.type === 'heading' ||
-            node.type === 'text-block')
+          (node.type === 'paragraph' || node.type === 'heading')
         ) {
           return { ...node, content: [{ type: 'text', text: ' ' }] };
         }

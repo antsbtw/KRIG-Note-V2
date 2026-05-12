@@ -11,17 +11,17 @@
  *
  * | Atom type | V2 PM node | 备注 |
  * |---|---|---|
- * | noteTitle | text-block(attrs.isTitle=true) | 文档第一块 |
- * | heading | text-block(attrs.level=1/2/3) | level 限 1-3 |
- * | paragraph | text-block(attrs.level=null) | 段落 |
+ * | noteTitle | paragraph(attrs.isTitle=true) | 文档第一块 |
+ * | heading | heading(attrs.level=1-6) | level 范围 1-6 (CommonMark) |
+ * | paragraph | paragraph(attrs.isTitle=false) | 段落 |
  * | mathBlock | mathBlock(text* content) | LaTeX 装 text 子节点 |
  * | codeBlock | codeBlock(text* content + attrs.language) | code 装 text 子节点 |
- * | image | image(attrs.src + caption=text-block) | base64 → media:// |
+ * | image | image(attrs.src + caption=paragraph) | base64 → media:// |
  * | table | table(tiptapContent 直接装载) | content 已是 PM 子树 |
- * | blockquote | blockquote(block+ content) | children → text-block;tiptapContent → 直装 |
+ * | blockquote | blockquote(block+ content) | children → paragraph;tiptapContent → 直装 |
  * | bulletList | bulletList(listItem+ content) | flat + parentId → nested |
  * | orderedList | orderedList(listItem+ content) | 同上 |
- * | listItem | listItem(block+ content) | children → text-block 包一层 |
+ * | listItem | listItem(block+ content) | children → paragraph 包一层 |
  * | horizontalRule | horizontalRule | 无 content |
  * | callout | callout(block+ content,attrs.emoji) | tiptapContent 直装 |
  * | columnList | unknown(V2 schema 未实现) | 留 unknown 占位 |
@@ -91,9 +91,9 @@ function unknownNode(originalType: string, raw?: unknown, error?: string): PMNod
   };
 }
 
-/** 空 text-block(占位,确保 PM doc 不空 / 容器至少一段)*/
-function emptyTextBlock(): PMNode {
-  return { type: 'text-block' };
+/** 空 paragraph(占位,确保 PM doc 不空 / 容器至少一段)*/
+function emptyParagraph(): PMNode {
+  return { type: 'paragraph' };
 }
 
 /** 把 Atom.from 字段塞到 PMNode.attrs.from(view 端可读,以后 graph 关系可用)*/
@@ -184,31 +184,19 @@ function convertTiptapContent(content: unknown): PMNode[] {
 }
 
 /**
- * V2 PM schema 节点名归一(关键 — 否则 deserialize 崩):
- * - paragraph → text-block(attrs.level=null,attrs.isTitle=false)
- * - heading → text-block(attrs.level=1/2/3,attrs.isTitle=false)
- * - 其他 type 保留原样(orderedList / bulletList / listItem / table / 等已是 V2 名)
- *
- * V2 schema 只有 text-block,没有独立的 paragraph / heading 节点。
- * tiptap-style 数据(table cell / blockquote / callout 子节点)常带 paragraph,
- * 不归一会导致 RangeError: Unknown node type: paragraph。
+ * V2 PM schema 节点名归一(L6 拆分后):
+ * - V2 schema 原生支持 paragraph / heading 节点,tiptap-style 数据直接保留
+ * - heading.level 钳到 1-6 (CommonMark 范围;旧数据可能有越界值)
+ * - 其他 type 保留原样(orderedList / bulletList / listItem / table / 等)
  */
 function normalizeNodeType(node: PMNode): PMNode {
-  if (node.type === 'paragraph') {
-    return {
-      ...node,
-      type: 'text-block',
-      attrs: { ...(node.attrs ?? {}), level: null, isTitle: false },
-    };
-  }
   if (node.type === 'heading') {
     const rawLevel = (node.attrs as { level?: unknown } | undefined)?.level;
     const level =
-      typeof rawLevel === 'number' ? Math.max(1, Math.min(3, rawLevel)) : 2;
+      typeof rawLevel === 'number' ? Math.max(1, Math.min(6, rawLevel)) : 1;
     return {
       ...node,
-      type: 'text-block',
-      attrs: { ...(node.attrs ?? {}), level, isTitle: false },
+      attrs: { ...(node.attrs ?? {}), level },
     };
   }
   return node;
@@ -221,15 +209,15 @@ function sanitizeTiptapNode(node: PMNode | undefined): PMNode | null {
     return node;
   }
 
-  // 先归一节点名(paragraph/heading → text-block),再递归 content
+  // 归一(heading level 钳位等),再递归 content
   const normalized = normalizeNodeType(node);
 
   if (Array.isArray(normalized.content)) {
     const cleaned = normalized.content
       .map((c) => sanitizeTiptapNode(c))
       .filter((c): c is PMNode => c !== null);
-    // 空内容容器:补占位(V2 text-block 容器内允许空,设 content: undefined)
-    if (cleaned.length === 0 && normalized.type === 'text-block') {
+    // 空内容容器:补占位(V2 paragraph 容器内允许空,设 content: undefined)
+    if (cleaned.length === 0 && normalized.type === 'paragraph') {
       return { ...normalized, content: undefined };
     }
     return { ...normalized, content: cleaned };
@@ -243,38 +231,38 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
   const c = (atom.content ?? {}) as Record<string, unknown>;
 
   switch (atom.type) {
-    // 4.1 noteTitle → text-block(attrs.isTitle=true)
+    // 4.1 noteTitle → paragraph(attrs.isTitle=true)
     case 'noteTitle': {
       const inline = convertInlineList(c.children as InlineElement[] | undefined);
       const node: PMNode = {
-        type: 'text-block',
-        attrs: { isTitle: true, level: null },
+        type: 'paragraph',
+        attrs: { isTitle: true },
         content: inline.length > 0 ? inline : undefined,
       };
       return attachFrom(node, atom.from);
     }
 
-    // 4.2 heading → text-block(attrs.level=1/2/3)
+    // 4.2 heading → heading(attrs.level=1-6,CommonMark)
     case 'heading': {
-      const level = typeof c.level === 'number' ? Math.max(1, Math.min(3, c.level)) : 2;
+      const level = typeof c.level === 'number' ? Math.max(1, Math.min(6, c.level)) : 1;
       const inline = convertInlineList(c.children as InlineElement[] | undefined);
       return attachFrom(
         {
-          type: 'text-block',
-          attrs: { level, isTitle: false },
+          type: 'heading',
+          attrs: { level },
           content: inline.length > 0 ? inline : undefined,
         },
         atom.from,
       );
     }
 
-    // 4.3 paragraph → text-block(attrs.level=null)
+    // 4.3 paragraph → paragraph(attrs.isTitle=false)
     case 'paragraph': {
       const inline = convertInlineList(c.children as InlineElement[] | undefined);
       return attachFrom(
         {
-          type: 'text-block',
-          attrs: { level: null, isTitle: false },
+          type: 'paragraph',
+          attrs: { isTitle: false },
           content: inline.length > 0 ? inline : undefined,
         },
         atom.from,
@@ -307,7 +295,7 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
       );
     }
 
-    // 4.6 image → image(content text-block caption;src 走 mediaPutBase64)
+    // 4.6 image → image(content paragraph caption;src 走 mediaPutBase64)
     case 'image': {
       const rawSrc = (c.src as string) ?? '';
       const alt = (c.alt as string) ?? '';
@@ -331,10 +319,10 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
       // caption(可空)
       const caption: PMNode = captionText
         ? {
-            type: 'text-block',
+            type: 'paragraph',
             content: [{ type: 'text', text: captionText }],
           }
-        : { type: 'text-block' };
+        : { type: 'paragraph' };
 
       return attachFrom(
         {
@@ -361,7 +349,7 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
         return attachFrom(
           {
             type: 'blockquote',
-            content: inner.length > 0 ? inner : [emptyTextBlock()],
+            content: inner.length > 0 ? inner : [emptyParagraph()],
           },
           atom.from,
         );
@@ -372,7 +360,7 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
           type: 'blockquote',
           content: [
             {
-              type: 'text-block',
+              type: 'paragraph',
               content: inline.length > 0 ? inline : undefined,
             },
           ],
@@ -387,7 +375,7 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
     case 'orderedList':
       return attachFrom({ type: 'orderedList', content: [] }, atom.from);
 
-    // 4.10 listItem → listItem(content block+,把 children 包成 text-block)
+    // 4.10 listItem → listItem(content block+,把 children 包成 paragraph)
     case 'listItem': {
       const inline = convertInlineList(c.children as InlineElement[] | undefined);
       return attachFrom(
@@ -395,7 +383,7 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
           type: 'listItem',
           content: [
             {
-              type: 'text-block',
+              type: 'paragraph',
               content: inline.length > 0 ? inline : undefined,
             },
           ],
@@ -416,7 +404,7 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
         {
           type: 'callout',
           attrs: { emoji },
-          content: inner.length > 0 ? inner : [emptyTextBlock()],
+          content: inner.length > 0 ? inner : [emptyParagraph()],
         },
         atom.from,
       );
@@ -505,10 +493,10 @@ export interface AtomsToPmInput {
  * 输出可直接装 doc.content(再封 DriverSerialized 信封):
  *   { format: 'pm-doc-json', version: '0.1', payload: { type: 'doc', content: 输出 } }
  *
- * 输出至少含一个 block(空文档兜底加 text-block)。
+ * 输出至少含一个 block(空文档兜底加 paragraph)。
  */
 export async function atomsToProseMirror(input: AtomsToPmInput): Promise<PMNode[]> {
   const nodes = await buildTopLevelNodes(input.atoms);
-  if (nodes.length === 0) return [emptyTextBlock()];
+  if (nodes.length === 0) return [emptyParagraph()];
   return nodes;
 }

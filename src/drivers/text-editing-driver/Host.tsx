@@ -48,7 +48,7 @@ import {
 } from './blocks/table';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
-// L5-B3.2:全部启用的 block 列表(textBlock + 6 新类 + 2 项 list-item/task-item)
+// L5-B3.2:全部启用的 block 列表(paragraph + heading + 6 新类 + 2 项 list-item/task-item)
 // L5-B3.3:+ hardBreak(inline)
 // L5-B4.3.1:+ unknown(schema 缺失节点占位 — md-to-pm 等转换层用)
 // L5-B3.5:+ image(图片 block,3 态:placeholder / 普通图 / SVG;mediaStore 集成)
