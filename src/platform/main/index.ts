@@ -25,6 +25,7 @@ import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
+import { initStorage, shutdownStorageSync } from '@storage/index';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -60,6 +61,16 @@ app.whenReady().then(async () => {
   // L0 — IPC 总线(含健康检查 handlers)
   initIpcBus();
 
+  // L7 — Storage (SurrealDB Sidecar) 基础设施初始化
+  // 业务 store 尚未接入;本步仅启动 SurrealDB + 跑 schema migration。
+  const storageStartedAt = Date.now();
+  try {
+    await initStorage();
+    console.log(`[storage] cold-start latency: ${Date.now() - storageStartedAt}ms`);
+  } catch (err) {
+    console.error('[storage] init failed:', err);
+  }
+
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
   mediaStore.registerProtocol();
@@ -86,4 +97,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// 退出前同步关 SurrealDB (300ms SIGTERM,超时 SIGKILL,避免孤儿)
+app.on('before-quit', () => {
+  shutdownStorageSync();
 });
