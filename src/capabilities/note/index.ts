@@ -6,46 +6,68 @@
  *
  * 设计师批复 P1:V2 扁平驼峰惯例,renderer 端 capability 包装层吸收命名差异。
  *
+ * W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
+ * W5 边界 A 临时允许项:同时保留模块级 export(driver/slot 内部消费可直 import,
+ * 跟 ebook-library / learning 同模式)。
+ *
  * 边界:
- * - view 层 import { noteCapability } from '@capabilities/note',零感知 IPC
+ * - view 层走 requireCapabilityApi<NoteCapabilityApi>('note') 间接路由
  * - 拿到 NoteInfo.doc 仍是 DriverSerialized 信封 (路径 Y 决议)
  *
  * 副作用:模块加载时触发 clearLegacyLocalStorage (idempotent,L5-alive 已先调一次)
  */
 
+import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import { clearLegacyLocalStorage } from './migration';
-import type { NoteInfo, NoteDocEnvelope } from '@shared/ipc/note-folder-types';
+import type {
+  NoteCapabilityApi,
+  NoteInfo,
+  NoteDocEnvelope,
+} from './types';
 
-export type { NoteInfo, NoteDocEnvelope } from '@shared/ipc/note-folder-types';
+export type { NoteCapabilityApi, NoteInfo, NoteDocEnvelope } from './types';
 export { clearLegacyLocalStorage };
 
 // 模块加载时清一次 V1 残留 (idempotent + 防御性,即便 L5-alive 路径未跑也兜底)
 clearLegacyLocalStorage();
 
-export const noteCapability = {
-  async createNote(
-    initialDoc: NoteDocEnvelope | null = null,
-    folderId: string | null = null,
-  ): Promise<NoteInfo> {
-    return window.electronAPI.noteCreate(initialDoc, folderId);
-  },
-  async listNotes(): Promise<NoteInfo[]> {
-    return window.electronAPI.noteList();
-  },
-  async getNote(id: string): Promise<NoteInfo | null> {
-    return window.electronAPI.noteGet(id);
-  },
-  async updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null> {
-    return window.electronAPI.noteUpdate(id, doc);
-  },
-  async moveNote(noteId: string, newFolderId: string | null): Promise<void> {
-    return window.electronAPI.noteMove(noteId, newFolderId);
-  },
-  async deleteNote(id: string): Promise<void> {
-    return window.electronAPI.noteDelete(id);
-  },
-  /** 订阅笔记列表变更;返 unsubscribe */
-  onListChanged(callback: (list: NoteInfo[]) => void): () => void {
-    return window.electronAPI.onNoteListChanged(callback);
-  },
+async function createNote(
+  initialDoc: NoteDocEnvelope | null = null,
+  folderId: string | null = null,
+): Promise<NoteInfo> {
+  return window.electronAPI.noteCreate(initialDoc, folderId);
+}
+async function listNotes(): Promise<NoteInfo[]> {
+  return window.electronAPI.noteList();
+}
+async function getNote(id: string): Promise<NoteInfo | null> {
+  return window.electronAPI.noteGet(id);
+}
+async function updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null> {
+  return window.electronAPI.noteUpdate(id, doc);
+}
+async function moveNote(noteId: string, newFolderId: string | null): Promise<void> {
+  return window.electronAPI.noteMove(noteId, newFolderId);
+}
+async function deleteNote(id: string): Promise<void> {
+  return window.electronAPI.noteDelete(id);
+}
+function onListChanged(callback: (list: NoteInfo[]) => void): () => void {
+  return window.electronAPI.onNoteListChanged(callback);
+}
+
+export const noteCapability: NoteCapabilityApi = {
+  createNote,
+  listNotes,
+  getNote,
+  updateNote,
+  moveNote,
+  deleteNote,
+  onListChanged,
 };
+
+// W5 严格态:Registry 注册 — view 走 requireCapabilityApi<NoteCapabilityApi>('note')
+capabilityRegistry.register({
+  id: 'note',
+  api: noteCapability,
+});

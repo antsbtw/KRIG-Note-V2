@@ -31,14 +31,21 @@
  * 关系语义在 atom.from.pdfPage(已附 from)— 真要关联到 ebookId,留 graph 阶段做。
  */
 
-import { folderStore } from './folder-store';
-import { noteStore } from './note-store';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { NoteCapabilityApi } from '@capabilities/note/types';
+import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import type {
   AtomInput,
   DriverSerialized,
   TextEditingApi,
 } from '@capabilities/text-editing/types';
+
+function noteCap(): NoteCapabilityApi {
+  return requireCapabilityApi<NoteCapabilityApi>('note');
+}
+function folderCap(): FolderCapabilityApi {
+  return requireCapabilityApi<FolderCapabilityApi>('folder');
+}
 
 interface ChapterInput {
   fileName?: string;
@@ -74,12 +81,15 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
   }
 
   const bookName = extractBookName(batch);
-  const folderId = getOrCreateFolder(bookName);
+  const folderId = await getOrCreateFolder(bookName);
+  if (!folderId) {
+    return { folderId: '', noteIds: [], skippedTitles: ['ALL_FAILED'] };
+  }
 
   // 收集已存在的同文件夹下笔记标题(去重)
+  const allNotes = await noteCap().listNotes();
   const existingTitles = new Set(
-    noteStore
-      .getAll()
+    allNotes
       .filter((n) => n.folderId === folderId)
       .map((n) => n.title),
   );
@@ -137,8 +147,10 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
       payload: { type: 'doc', content: pmContent },
     };
 
-    const noteId = noteStore.create(doc, title, folderId);
-    noteIds.push(noteId);
+    // L7-sub2:noteCap().createNote 是 async,title 字段已不可写
+    // (派生自 doc.content[0]),import 路径用 doc 首段文本 (= title) 自然兜底
+    const note = await noteCap().createNote(doc, folderId);
+    noteIds.push(note.id);
     existingTitles.add(title);
   }
 
@@ -161,11 +173,12 @@ function stripPdfExt(name: string): string {
   return name.replace(/\.pdf$/i, '');
 }
 
-function getOrCreateFolder(name: string): string {
-  const folders = folderStore.getAll();
+async function getOrCreateFolder(name: string): Promise<string | null> {
+  const folders = await folderCap().listFolders();
   const existing = folders.find((f) => f.title === name && f.parentId === null);
   if (existing) return existing.id;
-  return folderStore.create(name);
+  const folder = await folderCap().createFolder(name, null);
+  return folder?.id ?? null;
 }
 
 /**

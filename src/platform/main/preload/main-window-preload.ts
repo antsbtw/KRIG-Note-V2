@@ -407,7 +407,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   folderMove(folderId: string, newParentFolderId: string | null): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_MOVE, { folderId, newParentFolderId });
   },
-  folderDelete(id: string): Promise<void> {
+  folderDelete(id: string): Promise<{ deletedFolders: number; deletedNotes: number; cascadedEdges: number }> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id);
   },
   onFolderListChanged(callback: (list: unknown) => void): () => void {

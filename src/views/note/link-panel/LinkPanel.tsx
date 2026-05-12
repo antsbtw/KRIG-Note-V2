@@ -19,7 +19,8 @@ import type { PopupCloseProps } from '@slot/interaction-registries/popup-registr
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { noteStore, type Note } from '../note-store';
+import type { NoteInfo as Note } from '@capabilities/note/types';
+import { useAllNotes } from '../use-notes-folders';
 import { FileTab } from './FileTab';
 
 type LinkTab = 'note' | 'file' | 'web';
@@ -141,16 +142,10 @@ function NoteTab({
   onClose: () => void;
 }) {
   const [input, setInput] = useState('');
-  const [notes, setNotes] = useState<Note[]>([]);
+  const notes = useAllNotes();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [drillNote, setDrillNote] = useState<Note | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  // 笔记列表 + 订阅(ws 内新建笔记会刷新)
-  useEffect(() => {
-    setNotes(noteStore.getAll());
-    return noteStore.subscribe(() => setNotes(noteStore.getAll()));
-  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();

@@ -9,7 +9,7 @@
  * 注册入口:src/platform/main/ipc/ipc-bus.ts.initIpcBus()
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { NoteDocEnvelope } from '@shared/ipc/note-folder-types';
 import {
@@ -20,19 +20,7 @@ import {
   moveNote,
   deleteNote,
 } from './capability-impl';
-
-async function broadcastNoteListChanged(): Promise<void> {
-  try {
-    const list = await listNotes();
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send(IPC_CHANNELS.NOTE_LIST_CHANGED, list);
-      }
-    }
-  } catch (err) {
-    console.warn('[note] broadcast list-changed failed:', err);
-  }
-}
+import { broadcastNoteListChanged } from './broadcast';
 
 function isDocEnvelope(v: unknown): v is NoteDocEnvelope {
   if (!v || typeof v !== 'object') return false;

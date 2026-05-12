@@ -13,14 +13,15 @@ import {
   useActiveWorkspaceId,
   useWorkspace,
 } from '@workspace/workspace-instance/use-workspace';
-import { noteStore, type Note } from './note-store';
-import { folderStore } from './folder-store';
+import type { NoteInfo as Note } from '@capabilities/note/types';
+import { useAllNotes, useAllFolders } from './use-notes-folders';
 import {
   getNoteWsState,
   setSelectedIds,
   setFolderExpanded,
   subscribeTransient,
   getTransientVersion,
+  renameFolder,
 } from './data-model';
 import { buildTreeNodes, decodeTreeId, relativeTime } from './tree-builder';
 import { handleDrop } from './tree-operations';
@@ -30,15 +31,9 @@ function FolderTreePanel() {
   const wsId = useActiveWorkspaceId();
   const ws = useWorkspace(wsId);
 
-  // 订阅全局笔记 / 文件夹 store
-  const allNotes = useSyncExternalStore(
-    (cb) => noteStore.subscribe(cb),
-    () => noteStore.getAll(),
-  );
-  const allFolders = useSyncExternalStore(
-    (cb) => folderStore.subscribe(cb),
-    () => folderStore.getAll(),
-  );
+  // 订阅 noteCapability / folderCapability(IPC 广播)
+  const allNotes = useAllNotes();
+  const allFolders = useAllFolders();
 
   // 订阅 transient selectedIds(每 ws 独立,不持久化)— 版本号触发重渲
   useSyncExternalStore(
@@ -51,19 +46,20 @@ function FolderTreePanel() {
   const [renameValue, setRenameValue] = useState('');
 
   // 把 setRenameTrigger 桥到右键菜单(mount 时挂上,unmount 时清掉)
+  // L7-sub2:从本地缓存 (allNotes / allFolders) 查 title,避免 async 路径
   useEffect(() => {
     setRenameTrigger((treeId) => {
       const { type, id } = decodeTreeId(treeId);
       const item =
         type === 'note'
-          ? noteStore.get(id)
-          : folderStore.get(id);
+          ? allNotes.find((n) => n.id === id)
+          : allFolders.find((f) => f.id === id);
       if (!item) return;
       setRenamingId(treeId);
       setRenameValue(item.title);
     });
     return () => setRenameTrigger(null);
-  }, []);
+  }, [allNotes, allFolders]);
 
   if (!wsId || !ws) return null;
   const wsState = getNoteWsState(ws);
@@ -83,7 +79,10 @@ function FolderTreePanel() {
       }
     } else if (action === 'rename') {
       const { type, id } = decodeTreeId(target.id);
-      const item = type === 'note' ? noteStore.get(id) : folderStore.get(id);
+      const item =
+        type === 'note'
+          ? allNotes.find((n) => n.id === id)
+          : allFolders.find((f) => f.id === id);
       if (item) {
         setRenamingId(target.id);
         setRenameValue(item.title);
@@ -102,8 +101,11 @@ function FolderTreePanel() {
     const { type, id } = decodeTreeId(treeId);
     const trimmed = renameValue.trim();
     if (trimmed) {
-      if (type === 'note') noteStore.update(id, { title: trimmed });
-      else folderStore.update(id, { title: trimmed });
+      // L7-sub2:
+      // - folder:可直接 rename(title 是真实字段)
+      // - note:title 派生自 doc.content[0],L5-A 兼容路径不支持纯改 title
+      //   (改名要改 doc 首段文本,由 NoteView/编辑器路径承担);本处 fire-and-forget 忽略
+      if (type === 'folder') void renameFolder(id, trimmed);
     }
     setRenamingId(null);
   };
@@ -130,7 +132,8 @@ function FolderTreePanel() {
         commandRegistry.execute('note-view.set-active', noteId);
       }}
       onItemDoubleClick={(item) => {
-        const note = noteStore.get(decodeTreeId(item.id).id);
+        const noteId = decodeTreeId(item.id).id;
+        const note = allNotes.find((n) => n.id === noteId);
         if (note) {
           setRenamingId(item.id);
           setRenameValue(note.title);
@@ -139,7 +142,7 @@ function FolderTreePanel() {
       draggable
       onDrop={(ids, targetTreeFolderId) => {
         const targetFolderId = targetTreeFolderId ? decodeTreeId(targetTreeFolderId).id : null;
-        handleDrop(wsId, ids, targetFolderId);
+        void handleDrop(wsId, ids, targetFolderId);
       }}
       onKeyAction={handleKeyAction}
       renamingId={renamingId}

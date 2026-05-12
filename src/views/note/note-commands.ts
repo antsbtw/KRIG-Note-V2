@@ -57,11 +57,14 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const fid = typeof folderId === 'string' ? folderId : null;
-    const noteId = createNote(wsId, fid);
-    if (noteId) {
-      // 选中新建笔记(单选)
-      setSelectedIds(wsId, new Set([encodeNoteId(noteId)]));
-    }
+    // L7-sub2:createNote 是 async,handler 是 sync,用 IIFE 包装拿 id 走后续选中
+    void (async () => {
+      const noteId = await createNote(wsId, fid);
+      if (noteId) {
+        // 选中新建笔记(单选)
+        setSelectedIds(wsId, new Set([encodeNoteId(noteId)]));
+      }
+    })();
     ensureNoteViewActive(wsId);
   });
 
@@ -73,11 +76,11 @@ export function registerNoteCommands(): void {
     const state = getNoteWsState(ws);
     // 优先批量删 selectedIds(L5-B1 多选支持)
     if (state.selectedIds.size > 0) {
-      deleteSelected(wsId);
+      void deleteSelected(wsId);
       return;
     }
     // fallback:删活跃笔记
-    if (state.activeNoteId) deleteNote(state.activeNoteId);
+    if (state.activeNoteId) void deleteNote(state.activeNoteId);
   });
 
   commandRegistry.register('note-view.set-active', (noteId: unknown) => {
@@ -118,7 +121,7 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const pid = typeof parentId === 'string' ? parentId : null;
-    createFolder(wsId, pid);
+    void createFolder(wsId, pid);
     ensureNoteViewActive(wsId);
   });
 
@@ -126,8 +129,8 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.delete-by-tree-id', (treeId: unknown) => {
     if (typeof treeId !== 'string') return;
     const { type, id } = decodeTreeId(treeId);
-    if (type === 'note') deleteNote(id);
-    else deleteFolder(id);
+    if (type === 'note') void deleteNote(id);
+    else void deleteFolder(id);
   });
 
   commandRegistry.register('note-view.copy-by-tree-id', (treeId: unknown) => {
@@ -142,7 +145,7 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const fid = typeof targetFolderId === 'string' ? targetFolderId : null;
-    pasteFromClipboard(wsId, fid);
+    void pasteFromClipboard(wsId, fid);
   });
 
   commandRegistry.register('note-view.sort-cycle-title', (folderKey: unknown) => {

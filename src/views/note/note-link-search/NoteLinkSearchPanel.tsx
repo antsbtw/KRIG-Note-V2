@@ -19,7 +19,8 @@ import type { EditorView } from 'prosemirror-view';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { noteStore, type Note } from '../note-store';
+import type { NoteInfo as Note } from '@capabilities/note/types';
+import { useAllNotes } from '../use-notes-folders';
 
 /** PM PluginKey 类型最小子集(避免直 import prosemirror-state)*/
 interface NoteLinkPluginKey {
@@ -41,7 +42,7 @@ export function NoteLinkSearchPanel({ onClose }: PopupCloseProps) {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const noteLinkCommandKey = textEditing.noteLinkCommandKey as NoteLinkPluginKey;
   const view = textEditing.getNoteLinkActiveView() as EditorView | null;
-  const [allNotes] = useState<Note[]>(() => noteStore.getAll());
+  const allNotes = useAllNotes();
   const [tick, setTick] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);

@@ -263,7 +263,12 @@ declare global {
       folderCreate(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
       folderRename(id: string, title: string): Promise<FolderInfo | null>;
       folderMove(folderId: string, newParentFolderId: string | null): Promise<void>;
-      folderDelete(id: string): Promise<void>;
+      /** Path Y:删 folder 递归删子 folder + 内含笔记 (decision 012 设计师批复) */
+      folderDelete(id: string): Promise<{
+        deletedFolders: number;
+        deletedNotes: number;
+        cascadedEdges: number;
+      }>;
       /** main → renderer 推送:文件夹列表变更;返 unsubscribe */
       onFolderListChanged(callback: (list: FolderInfo[]) => void): () => void;
     };

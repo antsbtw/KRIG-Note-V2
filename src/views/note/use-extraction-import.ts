@@ -1,5 +1,5 @@
 /**
- * useExtractionImport — 订阅 main 推送的 atom batch JSON,转 PM,落 noteStore
+ * useExtractionImport — 订阅 main 推送的 atom batch JSON,转 PM,落 noteCapability
  *
  * 见 extraction-import.ts 的导入流程。本 hook 只做"挂订阅 + 调导入"。
  *

@@ -93,7 +93,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const pdfAnn = usePdfAnnotations(activeBookIdRef);
 
   // C6:PDF 提取 — 上传当前书到 Platform → 切右栏 web-view 装 Platform UI
-  // (atom batch JSON 落 noteStore 由 NoteView 内的 useExtractionImport 处理)
+  // (atom batch JSON 落 noteCapability 由 NoteView 内的 useExtractionImport 处理)
   const [extractUploading, setExtractUploading] = useState(false);
   const handleExtract = useCallback(async () => {
     if (extractUploading) return;

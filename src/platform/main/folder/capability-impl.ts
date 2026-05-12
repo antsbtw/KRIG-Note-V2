@@ -14,6 +14,7 @@
  */
 
 import { storage } from '@storage/index';
+import type { StorageTransaction } from '@storage/index';
 import type { AtomEntity, FolderPayload } from '@semantic/types';
 import type { FolderInfo } from '@shared/ipc/note-folder-types';
 
@@ -126,8 +127,94 @@ export async function moveFolder(
   });
 }
 
-export async function deleteFolder(id: string): Promise<{ cascadedEdges: number }> {
-  // storage.deleteAtom 内部应用层 cascade delete inFolder 边 (sub-phase 1 已实施)
-  const result = await storage.deleteAtom(id);
-  return { cascadedEdges: result.cascadedEdges };
+/**
+ * 删 folder + 递归子 folder + 内含笔记 (Path Y 契约,对齐 macOS Finder)
+ *
+ * 业务契约变更 (decision 012 设计师批复 Path Y):
+ * V1/V2 现状: 删 folder = 删 folder + 子 folder; 笔记移到根级
+ * Path Y    : 删 folder = 删 folder + 子 folder + 内含笔记 (一棵子树全删)
+ *
+ * 实施:用 storage.transaction 包整段,任何子操作失败则整棵子树回滚。
+ *
+ * ⚠ 风险登记:误删 folder = 丢笔记。配套保护 (删除前弹窗 + 回收站) 留 sub-phase 3+
+ *   单独 decision (decision 012 §8 Q7)。
+ */
+export async function deleteFolder(id: string): Promise<{
+  deletedFolders: number;
+  deletedNotes: number;
+  cascadedEdges: number;
+}> {
+  return storage.transaction(async (tx) => {
+    // 1. 递归收集所有 descendants (含 self)
+    const allFolderIds = await collectFolderSubtree(tx, id);
+
+    // 2. 收集所有 inFolder 这些 folder 的 notes
+    const allNoteIds = await collectNotesInFolders(tx, allFolderIds);
+
+    // 3. 一并删除 (storage.deleteAtom 应用层 cascade 自动删关联 edges)
+    let cascadedEdges = 0;
+    for (const noteId of allNoteIds) {
+      const res = await tx.deleteAtom(noteId);
+      cascadedEdges += res.cascadedEdges;
+    }
+    for (const folderId of allFolderIds) {
+      const res = await tx.deleteAtom(folderId);
+      cascadedEdges += res.cascadedEdges;
+    }
+
+    return {
+      deletedFolders: allFolderIds.length,
+      deletedNotes: allNoteIds.length,
+      cascadedEdges,
+    };
+  });
+}
+
+/** BFS 收集 descendant folder ids (含 self) */
+async function collectFolderSubtree(
+  tx: StorageTransaction,
+  rootFolderId: string,
+): Promise<string[]> {
+  const result: string[] = [rootFolderId];
+  const queue: string[] = [rootFolderId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    // 查所有 inFolder current 且 subject 是 folder atom 的边
+    // 注:tx 不暴露 listEdges,走外部 storage.listEdges (同事务 db connection)
+    const childEdges = await storage.listEdges({
+      predicate: IN_FOLDER_PREDICATE,
+      objectAtomId: current,
+    });
+    for (const e of childEdges) {
+      if (e.subject.kind !== 'atom') continue;
+      const childAtom = await tx.getAtom(e.subject.atomId);
+      if (childAtom?.payload.domain === FOLDER_DOMAIN) {
+        result.push(e.subject.atomId);
+        queue.push(e.subject.atomId);
+      }
+    }
+  }
+  return result;
+}
+
+/** 收集 folder ids 集合中所有内含 note */
+async function collectNotesInFolders(
+  tx: StorageTransaction,
+  folderIds: string[],
+): Promise<string[]> {
+  const noteIds: string[] = [];
+  for (const folderId of folderIds) {
+    const edges = await storage.listEdges({
+      predicate: IN_FOLDER_PREDICATE,
+      objectAtomId: folderId,
+    });
+    for (const e of edges) {
+      if (e.subject.kind !== 'atom') continue;
+      const subjAtom = await tx.getAtom(e.subject.atomId);
+      if (subjAtom?.payload.domain === 'pm') {
+        noteIds.push(e.subject.atomId);
+      }
+    }
+  }
+  return noteIds;
 }

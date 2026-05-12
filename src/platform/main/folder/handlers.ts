@@ -19,6 +19,7 @@ import {
   moveFolder,
   deleteFolder,
 } from './capability-impl';
+import { broadcastNoteListChanged } from '../note/broadcast';
 
 async function broadcastFolderListChanged(): Promise<void> {
   try {
@@ -73,8 +74,11 @@ export function registerFolderHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.FOLDER_DELETE, async (_e, id: unknown) => {
-    if (typeof id !== 'string' || !id) return;
-    await deleteFolder(id);
+    if (typeof id !== 'string' || !id) return { deletedFolders: 0, deletedNotes: 0, cascadedEdges: 0 };
+    const result = await deleteFolder(id);
+    // Path Y:删 folder 递归删笔记后,folder + note 两条 list-changed 都广播
     await broadcastFolderListChanged();
+    await broadcastNoteListChanged();
+    return result;
   });
 }

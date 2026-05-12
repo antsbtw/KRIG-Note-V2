@@ -25,7 +25,6 @@ export function clearLegacyLocalStorage(): void {
     }
   }
   if (removed.length > 0) {
-    // eslint-disable-next-line no-console
     console.log(
       `[note-capability] cleared legacy localStorage keys: ${removed.join(', ')} (V2 storage 已切 SurrealDB)`,
     );

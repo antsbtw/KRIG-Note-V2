@@ -17,7 +17,7 @@
  */
 
 import { storage } from '@storage/index';
-import type { AtomEntity, PmPayload } from '@semantic/types';
+import type { AtomEntity } from '@semantic/types';
 import type { NoteInfo, NoteDocEnvelope } from '@shared/ipc/note-folder-types';
 import { deriveTitle } from './derive-title';
 import { wrapPmDoc, unwrapPmDoc, emptyNoteDoc } from './envelope';
