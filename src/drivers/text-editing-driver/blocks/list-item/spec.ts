@@ -2,7 +2,7 @@
  * listItem — bullet-list / ordered-list 内部的列表项
  *
  * id 用驼峰(`listItem`)— PM content 表达式不支持节点 name 含短横线。
- * content: 'block+' — 用 group 'block' 引用,而非直接 ref text-block(避免短横线问题)。
+ * content: 'block+' — 用 group 'block' 引用(允许 paragraph / heading / list 等任意 block 嵌套)。
  */
 
 import type { NodeSpec } from 'prosemirror-model';
