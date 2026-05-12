@@ -1,9 +1,9 @@
 # 持久化总规范（Phase 3 spec）
 
-> **状态**: 📝 **RFC 进行中**（Phase 3a 已写 / 3b-3d 待写）
+> **状态**: ✅ **已转正**（Phase 3 全部完成 + audit 通过，2026-05-12）
 > **参考依据**: `atom/spec.md` §1.1 + `relations/spec.md` §3 + `naming-conventions.md` + `atom/decisions/003`
 >
-> ⚠ 本规范处于 RFC 阶段。含"临时默认 / 待决议"标识的字段 / 字段名 / 决议均非最终规范，实施代码遇冲突时以 V2 现有实现为准。
+> 本规范为 V2 持久化层正式基线。具体未决议项标在 §6 Open Questions（实施时按硬门槛 / 真实需求触发逐项验证决议）。
 
 ---
 

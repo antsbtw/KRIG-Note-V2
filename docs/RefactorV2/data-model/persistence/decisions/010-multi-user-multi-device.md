@@ -88,9 +88,9 @@ interface StorageOptions {
 }
 ```
 
-**当前状态**：📐 **已规范化**（Phase 3c decision 008 RFC 进行中）
+**当前状态**：📐 **已规范化**（Phase 3c decision 008 已转正）
 
-**实施状态**：⏳ 代码层尚未实施（decision 008 RFC 转正后，storage 层实施时落地）
+**实施状态**：⏳ 代码层尚未实施（storage 层实施 Phase N 时落地）
 
 **实施细节**：
 - 调用方不传 `ownerId` = 当前用户（storage 层填 `'user-default'`）

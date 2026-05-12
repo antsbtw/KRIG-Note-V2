@@ -1,7 +1,7 @@
 # Decision 008 — StorageAPI 接口设计
 
 > **Phase**: 3c
-> **状态**: 📝 **RFC 提议**（待用户拍板）
+> **状态**: ✅ **已转正**（2026-05-12）—— StorageAPI 接口 + 4 层调用边界 + 受控 Unsafe 迁移接口获用户拍板
 > **影响**: `persistence/spec.md` + `persistence/edge-entity.md` + 未来 V2 storage 层实施
 
 ---

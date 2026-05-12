@@ -1,7 +1,7 @@
 # Decision 007 — V2 存储后端选型
 
 > **Phase**: 3b
-> **状态**: 📝 **RFC 提议**（待用户拍板）
+> **状态**: ✅ **已转正**（2026-05-12）—— SurrealDB（Embedded 优先 / Sidecar fallback / 6 硬门槛）获用户拍板
 > **影响**: `persistence/spec.md` + `persistence/surreal-schema.md` + 未来 V2 storage 层实施
 
 ---

@@ -1,7 +1,7 @@
 # Decision 006 — Atom / Edge 实体 id 生成策略
 
 > **Phase**: 3b
-> **状态**: 📝 **RFC 提议**（待用户拍板）
+> **状态**: ✅ **已转正**（2026-05-12）—— ULID 推荐方案获用户拍板
 > **影响**: `persistence/spec.md` + `persistence/atom-entity.md` + `persistence/edge-entity.md` + 未来 storage 层实施
 
 ---

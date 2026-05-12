@@ -1,10 +1,10 @@
 # SurrealDB Schema 设计
 
 > **Phase**: 3d
-> **状态**: 📝 **RFC 进行中**
+> **状态**: ✅ **已转正**（2026-05-12）
 > **参考依据**: `persistence/spec.md` + `atom-entity.md` + `edge-entity.md` + `decisions/006-010`
 >
-> ⚠ 表设计 / 索引 / SurrealQL 语句含"临时默认 / 待决议"项均为 RFC 提议，未最终拍板。实施前需对照 V2 现有实现 + Phase 3 后续决议 + SurrealDB 实际版本特性。
+> 表设计 / 索引 / SurrealQL 已转正。Open Questions（§9 SS1-SS7）含 SurrealDB 实际版本特性验证（如 EVENT 触发器 / 递归 SELECT / computed fields）等，待 Phase N 实施时按硬门槛逐项验证。
 
 ---
 
