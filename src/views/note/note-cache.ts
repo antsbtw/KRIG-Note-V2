@@ -10,7 +10,7 @@
  * 边界纪律 (设计师批复 L2):
  * ✓ cache 在 view 层 (本文件)
  * ✗ 不在 capability 层 (污染 V2 既有"capability 全 async"惯例)
- * ✗ 不在 driver 层 (driver 不知 noteStore/noteCapability)
+ * ✗ 不在 driver 层 (driver 不知 noteCapability)
  *
  * 启动 race 处理:
  * - resolveNoteTitle 在 cache refresh 完成前调用 → 返回 null

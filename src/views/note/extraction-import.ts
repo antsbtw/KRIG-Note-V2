@@ -18,13 +18,13 @@
  *   }
  *
  * 流程(对齐 V1 src/main/extraction/import-service.ts 但纯 renderer):
- * 1. bookName → 找/建文件夹(folderStore)
+ * 1. bookName → 找/建文件夹(folderCapability)
  * 2. 每个 chapter:
  *    a. atoms = [noteTitle, ...flatten(pages.map(p => p.atoms with from.pdfPage))]
  *    b. sanitizeAtoms(atoms)
  *    c. atomsToProseMirror({atoms}) → PM doc content
  *    d. 封 DriverSerialized 信封
- *    e. noteStore.create(doc, title, folderId)
+ *    e. noteCapability.createNote(doc, folderId) (title 派生自 doc 首段)
  * 3. 同名同文件夹章节去重
  *
  * **不做** Graph 关系建立(V1 graphStore.relateNoteToEBook);V2 graph 是 view-only 视图,

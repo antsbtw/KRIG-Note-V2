@@ -5,7 +5,7 @@
  *
  * 订阅两层:
  * - workspaceManager:取当前 ws.activeNoteId(per-workspace)
- * - noteStore:取笔记数据(全局共享)
+ * - noteCapability:取笔记数据(全局共享,通过 useAllNotes hook + IPC 广播)
  */
 
 import { useMemo, useSyncExternalStore, useCallback, useEffect } from 'react';
@@ -47,7 +47,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
   const activeNoteId = wsState?.activeNoteId ?? null;
   const activeNote = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) ?? null : null;
 
-  // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteStore
+  // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteCapability
   // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
   useExtractionImport();
 

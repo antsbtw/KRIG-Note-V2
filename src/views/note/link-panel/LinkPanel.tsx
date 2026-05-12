@@ -2,7 +2,7 @@
  * LinkPanel — 行内链接编辑面板(L5-B3.4 + L5-B3.15)
  *
  * 三 Tab(对齐 V1):
- * - 📄 笔记:noteStore 搜索 + drill heading 二级标题
+ * - 📄 笔记:noteCapability 搜索 + drill heading 二级标题
  * - 📎 文件(L5-B3.15):import 到 mediaStore / link 到原文件,B3.14 IPC 已就位
  * - 🔗 网页:输 URL
  *

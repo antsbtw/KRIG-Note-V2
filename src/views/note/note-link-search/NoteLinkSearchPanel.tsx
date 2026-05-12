@@ -4,12 +4,12 @@
  * V1 → V2 改造:src/plugins/note/components/NoteLinkSearch.tsx
  *
  * - V1:直接组件 + view.dispatch hook → V2:popup-registry 模式(对齐 LinkPanel/ColorPickerPanel)
- * - V1:viewAPI.noteList() IPC → V2:noteStore.getAll() 同步函数
+ * - V1:viewAPI.noteList() IPC → V2:useAllNotes hook (noteCapability + onListChanged)
  * - 订阅 plugin state:每次 PM transaction 后 query 可能更新,组件靠 view-version
  *   tick 重渲(panel 内部用 useState + 副作用挂 view dom keydown / 显式 tick)
  *
  * 行为:
- * - 默认列出 noteStore 全部笔记;输入过滤(title 含 query)
+ * - 默认列出 noteCapability 全部笔记;输入过滤(title 含 query)
  * - ↑/↓ 导航;Enter 选中;Esc 关闭(全 popup 行为)
  * - 选中 → 删 [[query 文本 + 插入 noteLink atom + 关 popup
  */
