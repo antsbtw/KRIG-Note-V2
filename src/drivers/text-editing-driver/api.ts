@@ -247,9 +247,16 @@ export const textEditingDriverApi = {
   setHeading(instanceId: string, level: number | null): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
-    const blockType = inst.view.state.schema.nodes['text-block'];
-    if (!blockType) return;
-    setBlockType(blockType, { level })(inst.view.state, inst.view.dispatch);
+    const schema = inst.view.state.schema;
+    if (level === null) {
+      const paragraphType = schema.nodes.paragraph;
+      if (!paragraphType) return;
+      setBlockType(paragraphType)(inst.view.state, inst.view.dispatch);
+    } else {
+      const headingType = schema.nodes.heading;
+      if (!headingType) return;
+      setBlockType(headingType, { level })(inst.view.state, inst.view.dispatch);
+    }
     inst.view.focus();
   },
 
@@ -284,7 +291,7 @@ export const textEditingDriverApi = {
     const node = $from.node($from.depth);
     return {
       name: node.type.name,
-      level: (node.attrs.level as number | null) ?? null,
+      level: node.type.name === 'heading' ? (node.attrs.level as number) : null,
     };
   },
 
@@ -302,9 +309,24 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     const node = inst.view.state.doc.nodeAt(pos);
-    if (!node || node.type.name !== 'text-block') return;
-    const tr = inst.view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, level });
-    inst.view.dispatch(tr);
+    if (!node) return;
+    // 仅 paragraph / heading 可转换
+    if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return;
+    // title paragraph 不可转
+    if (node.type.name === 'paragraph' && node.attrs.isTitle) return;
+
+    const schema = inst.view.state.schema;
+    if (level === null) {
+      const paragraphType = schema.nodes.paragraph;
+      if (!paragraphType) return;
+      const tr = inst.view.state.tr.setNodeMarkup(pos, paragraphType, { isTitle: false });
+      inst.view.dispatch(tr);
+    } else {
+      const headingType = schema.nodes.heading;
+      if (!headingType) return;
+      const tr = inst.view.state.tr.setNodeMarkup(pos, headingType, { level });
+      inst.view.dispatch(tr);
+    }
     inst.view.focus();
   },
 
@@ -323,7 +345,7 @@ export const textEditingDriverApi = {
    * 计算 block 的 anchor(给 Copy Link 命令构造 krig://block/<noteId>/<anchor>)— L5-B3.9
    *
    * 规则(对齐 V1):
-   * - heading(text-block attrs.level !== null)→ 用标题文本前 60 字 encodeURIComponent
+   * - heading 节点 → 用标题文本前 60 字 encodeURIComponent
    * - 其他 block → `<idx>:<前 30 字 encodeURIComponent>`
    *   idx 是该 block 在 doc 中的顺序索引(0-based,只数顶层 block)
    */
@@ -333,7 +355,7 @@ export const textEditingDriverApi = {
     const node = inst.view.state.doc.nodeAt(pos);
     if (!node) return null;
     const text = node.textContent.trim();
-    if (node.type.name === 'text-block' && node.attrs.level != null) {
+    if (node.type.name === 'heading') {
       return encodeURIComponent(text.slice(0, 60));
     }
     let idx = 0;
@@ -362,8 +384,8 @@ export const textEditingDriverApi = {
     if (!inst) return;
     const node = inst.view.state.doc.nodeAt(pos);
     if (!node) return;
-    // L5-B3.11:title 块(isTitle text-block)不删除,改成清空内容(保留空 title)
-    if (node.type.name === 'text-block' && node.attrs.isTitle) {
+    // L5-B3.11:title 块(isTitle paragraph)不删除,改成清空内容(保留空 title)
+    if (node.type.name === 'paragraph' && node.attrs.isTitle) {
       if (node.content.size === 0) return; // 已经空,不动
       const tr = inst.view.state.tr.delete(pos + 1, pos + node.nodeSize - 1);
       inst.view.dispatch(tr);
@@ -372,7 +394,7 @@ export const textEditingDriverApi = {
     // doc 至少留一个 block(防 schema content: 'block+' 报错)
     if (inst.view.state.doc.childCount === 1) {
       // 改成空 paragraph 而非删除
-      const empty = inst.view.state.schema.nodes['text-block']?.create();
+      const empty = inst.view.state.schema.nodes.paragraph?.create();
       if (!empty) return;
       const tr = inst.view.state.tr.replaceWith(pos, pos + node.nodeSize, empty);
       inst.view.dispatch(tr);
@@ -419,7 +441,7 @@ export const textEditingDriverApi = {
     return {
       pos: blockPos,
       type: node.type.name,
-      level: (node.attrs.level as number | null) ?? null,
+      level: node.type.name === 'heading' ? (node.attrs.level as number) : null,
     };
   },
 
@@ -437,11 +459,11 @@ export const textEditingDriverApi = {
    * 把当前光标所在 block(或指定 pos block)Turn Into 指定类型
    *
    * 支持:
-   * - 'paragraph' / 'h1' / 'h2' / 'h3' — text-block 改 attrs.level
-   * - 'bullet-list' / 'ordered-list' / 'task-list' — 包成 list > list-item > text-block
+   * - 'paragraph' / 'h1' / 'h2' / 'h3' — 切换到 paragraph / heading{level} 节点类型
+   * - 'bullet-list' / 'ordered-list' / 'task-list' — 包成 list > list-item > paragraph(或 heading)
    * - 'blockquote' — 包成 blockquote > 当前 block
    * - 'code-block' — 替换为 code-block(纯文本)
-   * - 'horizontal-rule' — 替换为 hr + 新空 text-block
+   * - 'horizontal-rule' — 替换为 hr + 新空 paragraph
    */
   turnIntoAt(
     instanceId: string,
@@ -467,24 +489,35 @@ export const textEditingDriverApi = {
     const node = view.state.doc.nodeAt(pos);
     if (!node) return;
 
-    // L5-B3.11:title 块(isTitle text-block)不允许 turn into 任何类型
+    // L5-B3.11:title 块(isTitle paragraph)不允许 turn into 任何类型
     // 否则 title-guard appendTransaction 会自动补回 title,导致 doc 长出多余 block
-    if (node.type.name === 'text-block' && node.attrs.isTitle) {
+    if (node.type.name === 'paragraph' && node.attrs.isTitle) {
       console.warn('[text-editing-driver] turnIntoAt: 不能转换 note title 块');
       return;
     }
 
-    // headings / paragraph — text-block attrs
-    if (target === 'paragraph' || target === 'h1' || target === 'h2' || target === 'h3') {
-      if (node.type.name !== 'text-block') return;
-      const level = target === 'paragraph' ? null : parseInt(target.slice(1), 10);
-      const tr = view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, level });
+    // paragraph 切换 — 切到 paragraph 节点类型
+    if (target === 'paragraph') {
+      const paragraphType = schema.nodes.paragraph;
+      if (!paragraphType) return;
+      const tr = view.state.tr.setNodeMarkup(pos, paragraphType, { isTitle: false });
       view.dispatch(tr);
       view.focus();
       return;
     }
 
-    // lists — wrap text-block into list > listItem(taskItem) > text-block
+    // heading 切换 — 切到 heading 节点类型 + level
+    if (target === 'h1' || target === 'h2' || target === 'h3') {
+      const headingType = schema.nodes.heading;
+      if (!headingType) return;
+      const level = parseInt(target.slice(1), 10);
+      const tr = view.state.tr.setNodeMarkup(pos, headingType, { level });
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    // lists — wrap paragraph / heading into list > listItem(taskItem) > 原节点
     // 注意:节点 id 是驼峰('bulletList' / 'orderedList' / 'taskList' / 'listItem' / 'taskItem')
     if (target === 'bullet-list' || target === 'ordered-list' || target === 'task-list') {
       const listNodeName =
@@ -494,7 +527,8 @@ export const textEditingDriverApi = {
       const itemNodeName = target === 'task-list' ? 'taskItem' : 'listItem';
       const listType = schema.nodes[listNodeName];
       const itemType = schema.nodes[itemNodeName];
-      if (!listType || !itemType || node.type.name !== 'text-block') return;
+      if (!listType || !itemType) return;
+      if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return;
       const item = itemType.create(
         target === 'task-list' ? { checked: false } : null,
         [node.copy(node.content)],
@@ -532,9 +566,9 @@ export const textEditingDriverApi = {
 
     if (target === 'horizontal-rule') {
       const hr = schema.nodes.horizontalRule;
-      const tb = schema.nodes['text-block'];
-      if (!hr || !tb) return;
-      const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, [hr.create(), tb.create()]);
+      const paragraphType = schema.nodes.paragraph;
+      if (!hr || !paragraphType) return;
+      const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, [hr.create(), paragraphType.create()]);
       view.dispatch(tr);
       view.focus();
       return;
@@ -628,7 +662,7 @@ export const textEditingDriverApi = {
    * - 当前 block 是空段落 → 替换它(避免遗留空行)
    * - 当前 block 非空 → 在其后插入 image block(用户后续编辑 caption 不影响原段落)
    * - image attrs.src=null,触发 placeholder 状态
-   * - caption(`text-block`)填一个空段落满足 schema content='text-block'
+   * - caption(`paragraph`)填一个空段落满足 schema content
    */
   insertImageAtSelection(instanceId: string): void {
     const inst = instanceRegistry.get(instanceId);
@@ -698,9 +732,9 @@ export const textEditingDriverApi = {
       const blockStart = $from.before(1);
       const blockEnd = $from.after(1);
       const isEmptyParagraph =
-        blockNode.type.name === 'text-block' &&
+        blockNode.type.name === 'paragraph' &&
         blockNode.content.size === 0 &&
-        blockNode.attrs.level == null;
+        !blockNode.attrs.isTitle;
       let tr = state.tr;
       const insertPos = isEmptyParagraph ? blockStart : blockEnd;
       if (isEmptyParagraph) {
@@ -724,7 +758,7 @@ export const textEditingDriverApi = {
    *   例:选 "x^2 + y^2" → 转成 mathInline latex="x^2 + y^2"
    * - 无选区 → 插入空 mathInline,用户单击触发编辑弹窗
    *
-   * mathInline 是 inline atom,只能插在 text-block 等 inline 容器里。
+   * mathInline 是 inline atom,只能插在 paragraph / heading 等 inline 容器里。
    */
   insertMathInlineAtSelection(instanceId: string): void {
     const inst = instanceRegistry.get(instanceId);
@@ -752,7 +786,7 @@ export const textEditingDriverApi = {
    * 在光标处插入 table(L5-B3.7)
    *
    * 行为:替换当前 block(空段落直接换;非空段落也换 — V1 行为)
-   * 第一行 tableHeader,后续 tableCell;每 cell 含一个空 text-block 段落
+   * 第一行 tableHeader,后续 tableCell;每 cell 含一个空 paragraph
    * 默认 3x3,可通过参数自定义
    */
   insertTableAtSelection(instanceId: string, rows = 3, cols = 3): void {
@@ -819,7 +853,7 @@ export const textEditingDriverApi = {
  * 通用"含 caption 的 block"插入辅助(L5-B3.16)— 给 image / audioBlock / videoBlock 共用
  *
  * 这三个 block 都是 content='block'(单段 caption,V2 PM 不允许节点名含短横线,
- * 用 'block' group 通配 — 实际用户写段落 text-block);NodeView 内嵌 captionDOM。
+ * 用 'block' group 通配 — 实际用户写段落 paragraph);NodeView 内嵌 captionDOM。
  *
  * 行为:
  * - 空段落 → 替换它(避免遗留空行)
@@ -836,10 +870,10 @@ function insertWithCaptionBlock(
   const { state, dispatch } = view;
   const schema = state.schema;
   const nodeType = schema.nodes[nodeName];
-  const textBlockType = schema.nodes['text-block'];
-  if (!nodeType || !textBlockType) return;
+  const paragraphType = schema.nodes.paragraph;
+  if (!nodeType || !paragraphType) return;
 
-  const captionNode = textBlockType.create();
+  const captionNode = paragraphType.create();
   const node = nodeType.create({}, captionNode);
   if (!node) return;
 
@@ -852,9 +886,8 @@ function insertWithCaptionBlock(
     const blockStart = $from.before(1);
     const blockEnd = $from.after(1);
     const isEmptyParagraph =
-      blockNode.type.name === 'text-block' &&
+      blockNode.type.name === 'paragraph' &&
       blockNode.content.size === 0 &&
-      blockNode.attrs.level == null &&
       !blockNode.attrs.isTitle;
     let tr = state.tr;
     if (isEmptyParagraph) {
@@ -862,7 +895,7 @@ function insertWithCaptionBlock(
     } else {
       tr = tr.insert(blockEnd, node);
     }
-    // 光标移进 caption 内 — 节点起点 + 1 进入 node,再 + 1 进入 caption text-block 内
+    // 光标移进 caption 内 — 节点起点 + 1 进入 node,再 + 1 进入 caption paragraph 内
     const insertPos = isEmptyParagraph ? blockStart : blockEnd;
     const captionPos = insertPos + 2;
     tr = tr.setSelection(TextSelection.create(tr.doc, captionPos)).scrollIntoView();
@@ -889,9 +922,8 @@ function insertAtomBlock(
     const blockStart = $from.before(1);
     const blockEnd = $from.after(1);
     const isEmptyParagraph =
-      blockNode.type.name === 'text-block' &&
+      blockNode.type.name === 'paragraph' &&
       blockNode.content.size === 0 &&
-      blockNode.attrs.level == null &&
       !blockNode.attrs.isTitle;
     let tr = state.tr;
     if (isEmptyParagraph) {
