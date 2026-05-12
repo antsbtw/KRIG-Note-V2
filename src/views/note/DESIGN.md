@@ -16,6 +16,13 @@
 
 ---
 
+> **L6 更新(2026-05-11)**: NoteView 编辑的文本节点已从 text-block 拆为 paragraph + heading
+> (Decision 005)。本文档示例中的 `{ type: 'text-block', ... }` 历史快照保留,实际数据
+> 现在是 `{ type: 'paragraph', attrs: { isTitle: true|false } }` 或
+> `{ type: 'heading', attrs: { level: 1-6 } }`。
+
+---
+
 ## 0. 上下文 + 范围
 
 ### 0.1 NoteView 在 V2 架构中的位置

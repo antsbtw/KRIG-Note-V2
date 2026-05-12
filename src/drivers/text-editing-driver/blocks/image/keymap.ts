@@ -15,15 +15,15 @@ export function buildImageKeymap(): Plugin {
   return keymap({
     Enter: (state, dispatch) => {
       const { $from } = state.selection;
-      // image > text-block(caption)> inline content
+      // image > paragraph(caption)> inline content
       // 期望 $from.depth >= 2,$from.node(-1) 是 image
       if ($from.depth < 2) return false;
       const parent = $from.node(-1);
       if (parent.type.name !== 'image') return false;
 
-      const textBlockType = state.schema.nodes['text-block'];
-      if (!textBlockType) return false;
-      const newPara = textBlockType.create();
+      const paragraphType = state.schema.nodes.paragraph;
+      if (!paragraphType) return false;
+      const newPara = paragraphType.create();
       const insertPos = $from.after(-1);
       if (dispatch) {
         let tr = state.tr.insert(insertPos, newPara);

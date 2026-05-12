@@ -8,7 +8,7 @@
  * - 普通图(有 src,非 SVG):走 <img>
  * - SVG 图:走 <div> + innerHTML(CSS 变量 / 字体 fallback / 内部事件需要 inline DOM)
  *
- * caption:`content: 'text-block'` 单段 caption,空也可
+ * caption:`content: 'block'` 单段 caption(用户实际写 paragraph),空也可
  *
  * attrs:
  *   src       图片 URL(http / https / data: / media://)
@@ -26,11 +26,9 @@ import { imageNodeView } from './node-view';
 import { buildImageKeymap } from './keymap';
 
 const imageNodeSpec: NodeSpec = {
-  // caption — V1 image content='textBlock'(单段)。V2 PM content 表达式不允许节点
-  // 名含短横线('-' 被当减号 → SyntaxError → schema 拼装失败 → 白屏,L5-B4.x 已踩过坑,
-  // 见 memory feedback_pm_schema_naming),只能引用 group 而非具体节点 id。
-  // 用 'block' (group) 表示单个 block,跟 V1 单 caption 行为等价 — 用户实际只会
-  // 写段落 (text-block),其他 block 类型(list / blockquote 等)允许但不常见。
+  // caption — V1 image content='textBlock'(单段)。V2 拆分后默认 caption 是 paragraph,
+  // 但 content 用 'block' (group) 表示单个 block — 跟 V1 单 caption 行为等价,
+  // 用户实际只会写段落 (paragraph),其他 block 类型(heading / list / 等)允许但不常见。
   content: 'block',
   group: 'block',
   draggable: true,

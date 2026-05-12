@@ -12,6 +12,16 @@
 
 ---
 
+> **L6 更新(2026-05-11)**: 原"合一节点 text-block(attrs.level/isTitle)"已按 PM 标准拆为
+> **paragraph + heading** 双节点(详见 Decision 005)。本文档 §4 文本流类 block 描述按拆分后版本:
+> - `paragraph` 节点(BlockSpec.id='paragraph'): content='inline\*',attrs={isTitle: false}
+>   - isTitle=true 表示 noteTitle(文档首块特殊形态,不是 heading)
+> - `heading` 节点(BlockSpec.id='heading'): content='inline\*',attrs={level: 1-6}
+>   - level 范围 1-6 (CommonMark);UI 入口当前仅样式化 1-3,schema 支持完整 1-6
+> - 命名:paragraph / heading 是 PM 标准命名(无短横线兼容问题);其他节点命名风格未变。
+
+---
+
 ## 0. 设计哲学
 
 ### 0.1 block 是 driver 内部自治模块

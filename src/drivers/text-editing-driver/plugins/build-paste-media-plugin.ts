@@ -12,11 +12,11 @@
  * - 异步:mediaPutBase64 → 替换 src 为 media:// URL(刷新不丢);失败留 dataUrl
  *
  * 智能位置(对齐 V1):
- * - 当前在空 text-block(非 title)→ 替换为 image
+ * - 当前在空 paragraph(非 title)→ 替换为 image
  * - 否则在当前 block 之后插入(用 $from.depth 兼容 callout/blockquote 嵌套)
  *
  * V1 → V2 关键差异:
- * - 节点名 textBlock → 'text-block'(短横线)
+ * - 节点名按 PM 标准命名(paragraph/heading)
  * - schema typed:schema.nodes.image.create({ src }, captionNode)
  * - L5-B3.11 isTitle 守卫:空 title 不可被替换(必须保留)
  * - mediaStore 异步落盘(对齐 image NodeView upload 路径)
@@ -42,11 +42,11 @@ function insertImageAtCursor(view: EditorView, imageNode: PMNode): number | null
   let insertedPos: number;
 
   if (
-    blockNode.type.name === 'text-block' &&
+    blockNode.type.name === 'paragraph' &&
     blockNode.textContent.length === 0 &&
     !blockNode.attrs.isTitle
   ) {
-    // 空 text-block(非 title)→ 替换
+    // 空 paragraph(非 title)→ 替换
     tr = tr.replaceWith(blockPos, blockPos + blockNode.nodeSize, imageNode);
     insertedPos = blockPos;
   } else {
@@ -87,8 +87,8 @@ export function buildPasteMediaPlugin(): Plugin {
         // 3. schema 校验
         const { schema } = view.state;
         const imageType = schema.nodes.image;
-        const textBlockType = schema.nodes['text-block'];
-        if (!imageType || !textBlockType) return false;
+        const paragraphType = schema.nodes.paragraph;
+        if (!imageType || !paragraphType) return false;
 
         // 4. FileReader → dataUrl → 同步占位插入 + 异步落 mediaStore
         const file = imageFile; // 闭包捕获
@@ -99,7 +99,7 @@ export function buildPasteMediaPlugin(): Plugin {
           if (!dataUrl) return;
 
           // 同步:占位插入(dataUrl)
-          const captionNode = textBlockType.create();
+          const captionNode = paragraphType.create();
           const tempImg = imageType.create({ src: dataUrl, alt: file.name }, captionNode);
           const insertedPos = insertImageAtCursor(view, tempImg);
           if (insertedPos == null) return;

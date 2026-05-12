@@ -107,7 +107,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       let isDragging = false;
 
       // L5-B3.9:外层 wrapper 包两个按钮 + ⋮⋮(对齐 V1 +/⠿ 双按钮)
-      // - + 按钮在下方插入空 paragraph(text-block,attrs.level=null)
+      // - + 按钮在下方插入空 paragraph 节点
       // - ⋮⋮ 按钮拖拽 / 点击弹 handle menu
       const dom = document.createElement('div');
       dom.className = HANDLE_CLASS;
@@ -166,7 +166,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dragBtn.addEventListener('mouseenter', onBtnEnter(dragBtn));
       dragBtn.addEventListener('mouseleave', onBtnLeave(dragBtn));
 
-      // + 按钮:在当前 block 之后插入空 text-block,光标进入
+      // + 按钮:在当前 block 之后插入空 paragraph,光标进入
       addBtn.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -174,9 +174,9 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const node = editorView.state.doc.nodeAt(currentPos);
         if (!node) return;
         const insertPos = currentPos + node.nodeSize;
-        const textBlockType = editorView.state.schema.nodes['text-block'];
-        if (!textBlockType) return;
-        const newBlock = textBlockType.create();
+        const paragraphType = editorView.state.schema.nodes.paragraph;
+        if (!paragraphType) return;
+        const newBlock = paragraphType.create();
         const tr = editorView.state.tr.insert(insertPos, newBlock);
         try {
           tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
@@ -268,7 +268,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         // 解析"最具体可拖动 block":
         // - 鼠标在 list 内 → 取 listItem / taskItem 层(每项独立 handle)
-        // - 否则 → 取顶层 block(textBlock / blockquote / codeBlock 等)
+        // - 否则 → 取顶层 block(paragraph / heading / blockquote / codeBlock 等)
         let blockStart = -1;
         let blockNode = null;
         let blockDom: HTMLElement | null = null;
@@ -300,7 +300,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
 
         // L5-B3.11:title 块上不显示 handle(title 不能 turnInto / 删除 / 拖拽 /
         // + 按钮在 title 上插段落语义不准 — title 应该是独立顶部条)
-        if (blockNode.type.name === 'text-block' && blockNode.attrs.isTitle) {
+        if (blockNode.type.name === 'paragraph' && blockNode.attrs.isTitle) {
           dom.style.opacity = '0';
           currentPos = -1;
           return;

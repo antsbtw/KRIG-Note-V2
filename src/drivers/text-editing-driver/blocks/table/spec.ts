@@ -12,7 +12,7 @@
  * 关键约束:
  * - tableRow content 引用驼峰 `tableCell` / `tableHeader`(短横线会触发 PM content
  *   表达式 SyntaxError → 白屏,见 memory feedback_pm_schema_naming)
- * - cell content='block+' 用 group 引用,允许嵌套任意 block(text-block / list / 等)
+ * - cell content='block+' 用 group 引用,允许嵌套任意 block(paragraph / heading / list / 等)
  *
  * attrs(cell / header 都有):
  *   colspan / rowspan(default 1)

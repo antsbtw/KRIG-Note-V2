@@ -30,7 +30,7 @@ interface HeadingItem {
 }
 
 /**
- * 从 PM JSON doc 中提取 heading 列表(text-block.attrs.level ≥ 1)
+ * 从 PM JSON doc 中提取 heading 列表(heading 节点,attrs.level 1-6)
  */
 function extractHeadings(docJson: unknown): HeadingItem[] {
   const result: HeadingItem[] = [];
@@ -41,7 +41,7 @@ function extractHeadings(docJson: unknown): HeadingItem[] {
   for (const node of content) {
     if (!node || typeof node !== 'object') continue;
     const n = node as { type?: string; attrs?: { level?: number }; content?: unknown[] };
-    if (n.type !== 'text-block') continue;
+    if (n.type !== 'heading') continue;
     const level = n.attrs?.level;
     if (typeof level !== 'number' || level < 1) continue;
 
