@@ -15,6 +15,7 @@ export type AtomPayloadOf<D extends AtomDomain> =
   D extends 'rdf'       ? RdfPayload :
   D extends 'embedding' ? EmbeddingPayload :
   D extends 'three'     ? ThreePayload :
+  D extends 'folder'    ? FolderPayload :
   unknown;
 
 export interface PmPayload {
@@ -42,6 +43,11 @@ export interface ThreePayload {
   position?: { x: number; y: number; z?: number };
   shape?: string;
   size?: { w: number; h: number; d?: number };
+}
+
+/** folder domain — 笔记 / 资源的文件夹容器 (decision 012 §3.1) */
+export interface FolderPayload {
+  title: string;
 }
 
 export type Mark =

@@ -4,12 +4,12 @@
  * V1 → V2 改造:src/plugins/note/components/NoteLinkSearch.tsx
  *
  * - V1:直接组件 + view.dispatch hook → V2:popup-registry 模式(对齐 LinkPanel/ColorPickerPanel)
- * - V1:viewAPI.noteList() IPC → V2:noteStore.getAll() 同步函数
+ * - V1:viewAPI.noteList() IPC → V2:useAllNotes hook (noteCapability + onListChanged)
  * - 订阅 plugin state:每次 PM transaction 后 query 可能更新,组件靠 view-version
  *   tick 重渲(panel 内部用 useState + 副作用挂 view dom keydown / 显式 tick)
  *
  * 行为:
- * - 默认列出 noteStore 全部笔记;输入过滤(title 含 query)
+ * - 默认列出 noteCapability 全部笔记;输入过滤(title 含 query)
  * - ↑/↓ 导航;Enter 选中;Esc 关闭(全 popup 行为)
  * - 选中 → 删 [[query 文本 + 插入 noteLink atom + 关 popup
  */
@@ -19,7 +19,8 @@ import type { EditorView } from 'prosemirror-view';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { noteStore, type Note } from '../note-store';
+import type { NoteInfo as Note } from '@capabilities/note/types';
+import { useAllNotes } from '../use-notes-folders';
 
 /** PM PluginKey 类型最小子集(避免直 import prosemirror-state)*/
 interface NoteLinkPluginKey {
@@ -41,7 +42,7 @@ export function NoteLinkSearchPanel({ onClose }: PopupCloseProps) {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const noteLinkCommandKey = textEditing.noteLinkCommandKey as NoteLinkPluginKey;
   const view = textEditing.getNoteLinkActiveView() as EditorView | null;
-  const [allNotes] = useState<Note[]>(() => noteStore.getAll());
+  const allNotes = useAllNotes();
   const [tick, setTick] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);

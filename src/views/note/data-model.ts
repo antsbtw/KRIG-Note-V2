@@ -3,21 +3,32 @@
  *
  * 见 docs/RefactorV2/stages/L5B1-folder-tree-design.md § 2.3。
  *
- * 用户数据(笔记/文件夹)走全局 noteStore / folderStore;
+ * 用户数据(笔记/文件夹)走 noteCapability / folderCapability (L7-sub2:SurrealDB);
  * 本文件管理 **当前 Workspace 的工作位状态**(看哪条笔记 / 折哪些文件夹 / 选了什么 / 排序 / 剪贴板)。
  *
  * **持久化字段**(写 pluginStates):activeNoteId / expandedFolders / folderSortMap / clipboard
  * **Transient 字段**(只内存,Q8=B):selectedIds — 关闭重启后清空,避免干扰新操作
  *
  * Set 字段持久化策略:Set ↔ string[] 编/解码在 hydrate/encode 内做,view 业务无感。
+ *
+ * L7-sub2 改造 (decision 012):
+ * - 写 API (create/update/delete) 转 async;caller 需 await
+ * - 读笔记/文件夹列表交给 view 层 hook (useAllNotes / useAllFolders)
  */
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
-import { noteStore } from './note-store';
-import { folderStore } from './folder-store';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { NoteCapabilityApi } from '@capabilities/note/types';
+import type { FolderCapabilityApi, FolderDeleteResult } from '@capabilities/folder/types';
 import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
+
+function noteCap(): NoteCapabilityApi {
+  return requireCapabilityApi<NoteCapabilityApi>('note');
+}
+function folderCap(): FolderCapabilityApi {
+  return requireCapabilityApi<FolderCapabilityApi>('folder');
+}
 
 export type SortState = 'title-asc' | 'title-desc' | 'date-asc' | 'date-desc' | null;
 
@@ -136,13 +147,19 @@ export function deriveTitle(doc: DriverSerialized): string {
   return text || '未命名';
 }
 
-/** 创建笔记(全局 store)+ 当前 ws activeNoteId */
-export function createNote(workspaceId: string, folderId: string | null = null): string | null {
+/**
+ * 创建笔记(noteCapability)+ 当前 ws activeNoteId
+ * L7-sub2:async (IPC roundtrip);caller 需 await
+ */
+export async function createNote(
+  workspaceId: string,
+  folderId: string | null = null,
+): Promise<string | null> {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return null;
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-  const id = noteStore.create(textEditing.createEmptyDoc(), '未命名', folderId);
-  writePersistent(workspaceId, { activeNoteId: id });
+  const note = await noteCap().createNote(textEditing.createEmptyDoc(), folderId);
+  writePersistent(workspaceId, { activeNoteId: note.id });
   // 创建到 folder 时自动展开它
   if (folderId) {
     const cur = hydrate(ws).expandedFolders;
@@ -152,18 +169,29 @@ export function createNote(workspaceId: string, folderId: string | null = null):
       writePersistent(workspaceId, { expandedFolders: Array.from(next) });
     }
   }
-  return id;
+  return note.id;
 }
 
-export function updateNote(
+/**
+ * 更新笔记 doc (+ 可选 folderId 移动)
+ * L7-sub2:async;title 字段已不存(派生),patch.title 忽略。
+ * patch.folderId 与 patch.doc 同时存在时:先 update doc,再 move 到新 folder。
+ */
+export async function updateNote(
   noteId: string,
   patch: { doc?: DriverSerialized; title?: string; folderId?: string | null },
-): void {
-  noteStore.update(noteId, patch);
+): Promise<void> {
+  if (patch.doc !== undefined) {
+    await noteCap().updateNote(noteId, patch.doc);
+  }
+  if (patch.folderId !== undefined) {
+    await noteCap().moveNote(noteId, patch.folderId);
+  }
+  // patch.title 在 L7-sub2 已不可写 (派生自 doc.content[0]),忽略
 }
 
-export function deleteNote(noteId: string): void {
-  noteStore.delete(noteId);
+export async function deleteNote(noteId: string): Promise<void> {
+  await noteCap().deleteNote(noteId);
 }
 
 export function setActiveNote(workspaceId: string, noteId: string | null): void {
@@ -176,8 +204,12 @@ export function setActiveNote(workspaceId: string, noteId: string | null): void 
 
 // ── 文件夹 ──
 
-export function createFolder(workspaceId: string, parentId: string | null = null): string {
-  const id = folderStore.create('新建文件夹', parentId);
+export async function createFolder(
+  workspaceId: string,
+  parentId: string | null = null,
+): Promise<string | null> {
+  const folder = await folderCap().createFolder('新建文件夹', parentId);
+  if (!folder) return null;
   // 父文件夹自动展开
   if (parentId) {
     const ws = workspaceManager.get(workspaceId);
@@ -190,19 +222,29 @@ export function createFolder(workspaceId: string, parentId: string | null = null
       }
     }
   }
-  return id;
+  return folder.id;
 }
 
-/** 删 folder + 级联:子 folder 一起删,内含笔记 folderId → null */
-export function deleteFolder(folderId: string): void {
-  const deletedIds = folderStore.delete(folderId);
-  if (deletedIds.length === 0) return;
-  // 笔记 folderId 落根
-  for (const note of noteStore.getAll()) {
-    if (note.folderId && deletedIds.includes(note.folderId)) {
-      noteStore.update(note.id, { folderId: null });
-    }
-  }
+/**
+ * 删 folder (Path Y:递归删子 folder + 内含笔记,对齐 macOS Finder)
+ * 业务契约变更见 decision 012 设计师批复
+ * 返回删除统计(deletedFolders + deletedNotes + cascadedEdges),caller 可记账。
+ */
+export async function deleteFolder(folderId: string): Promise<FolderDeleteResult> {
+  return folderCap().deleteFolder(folderId);
+}
+
+/** 重命名 folder (L7-sub2:title 写 atom.payload.title) */
+export async function renameFolder(folderId: string, newTitle: string): Promise<void> {
+  await folderCap().renameFolder(folderId, newTitle);
+}
+
+/** 移动 folder (改 parentId,内部走 user:krig:inFolder 边重写) */
+export async function moveFolder(
+  folderId: string,
+  newParentId: string | null,
+): Promise<void> {
+  await folderCap().moveFolder(folderId, newParentId);
 }
 
 export function setFolderExpanded(workspaceId: string, folderId: string, expanded: boolean): void {

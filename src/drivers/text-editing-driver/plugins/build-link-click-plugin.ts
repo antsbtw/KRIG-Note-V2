@@ -41,8 +41,10 @@ export interface LinkClickHandler {
    */
   onOpenWebUrl?: (url: string) => void;
   /**
-   * L5-B3.12:noteLink NodeView 同步目标 title 用 — 由 view 接 noteStore.get
+   * L5-B3.12:noteLink NodeView 同步目标 title 用 — 由 view 接 noteCapability.getNote
    * 返回 null = 目标 note 不存在(NodeView 切红色"未找到"态)
+   * 注:resolver 形态保持同步,view 端用本地缓存的 NoteInfo 列表查 title
+   *    (异步 IPC 查询不适合 NodeView render 路径)
    */
   resolveNoteTitle?: (noteId: string) => string | null;
 }

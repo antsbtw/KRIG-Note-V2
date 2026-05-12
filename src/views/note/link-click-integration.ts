@@ -19,7 +19,7 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { setActiveNote, getNoteWsState } from './data-model';
-import { noteStore } from './note-store';
+import { startNoteCache, getNoteTitle } from './note-cache';
 import {
   setCurrentNoteId,
   navigateToNote,
@@ -37,6 +37,9 @@ export function takePendingAnchor(): string | null {
 }
 
 export function registerLinkClickIntegration(): void {
+  // L7-sub2 (设计师批复 L2):view 层私有 sync cache,给 driver resolveNoteTitle 守约
+  startNoteCache();
+
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   textEditing.setLinkClickHandler({
     onOpenNote(noteId, blockAnchor) {
@@ -57,12 +60,12 @@ export function registerLinkClickIntegration(): void {
       return getNoteWsState(ws).activeNoteId;
     },
     /**
-     * L5-B3.12:noteLink NodeView 同步目标 title — driver 不直接 import note-store,
-     * 通过 handler 反向取(返回 null = 目标已删除,NodeView 切"未找到"态)
+     * L5-B3.12:noteLink NodeView 同步目标 title — driver 不直接 import noteCapability,
+     * 通过 handler 反向取(返回 null = 目标已删除 / 启动 cache 未就绪,NodeView 切"未找到"态)
+     * L7-sub2:走 view 层私有 sync cache (note-cache.ts),启动后由 onListChanged 增量更新
      */
     resolveNoteTitle(noteId) {
-      const target = noteStore.get(noteId);
-      return target ? target.title : null;
+      return getNoteTitle(noteId);
     },
     /**
      * L5-B4:点 http(s):// 链接 → 走命令路由,note 不直接 import @views/web

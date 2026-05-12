@@ -6,7 +6,7 @@
  * - import 路径改 ../types
  * - 拆 bootstrap 到独立文件(substances/bootstrap.ts)— G2-8=B 模式
  *
- * v1 只管"内置 substance"的注册 / 查询;用户自创 substance 在 v1.5+ 接 note-store
+ * v1 只管"内置 substance"的注册 / 查询;用户自创 substance 在 v1.5+ 接 noteCapability
  * (每个一篇 note,见 Library.md §7.2).
  */
 

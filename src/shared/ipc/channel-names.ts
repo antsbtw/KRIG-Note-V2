@@ -105,6 +105,24 @@ export const IPC_CHANNELS = {
   EXTRACTION_IMPORT: 'extraction.import',           // renderer → main:主动触发 import(备用入口)
   EXTRACTION_NOTE_CREATE: 'extraction.note-create', // main → renderer 推送:请 view 端创建 note
 
+  // L7-sub2:note + folder capability (decision 012,SurrealDB Sidecar)
+  // 业务粒度 IPC + LIST_CHANGED 广播,对齐 ebook / graph 模式
+  NOTE_CREATE: 'note.create',
+  NOTE_LIST: 'note.list',
+  NOTE_GET: 'note.get',
+  NOTE_UPDATE: 'note.update',
+  NOTE_MOVE: 'note.move',
+  NOTE_DELETE: 'note.delete',
+  NOTE_LIST_CHANGED: 'note.list-changed',           // main → renderer 推送
+
+  FOLDER_CREATE: 'folder.create',
+  FOLDER_LIST: 'folder.list',
+  FOLDER_GET: 'folder.get',
+  FOLDER_RENAME: 'folder.rename',
+  FOLDER_MOVE: 'folder.move',
+  FOLDER_DELETE: 'folder.delete',
+  FOLDER_LIST_CHANGED: 'folder.list-changed',       // main → renderer 推送
+
   // L5-G1:graph 画板 + 文件夹(D-3=B JSON 实现,过渡至 W6 升 SurrealDB)
   GRAPH_LIST: 'graph.list',
   GRAPH_LOAD: 'graph.load',

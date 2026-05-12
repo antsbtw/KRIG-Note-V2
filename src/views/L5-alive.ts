@@ -14,9 +14,13 @@ import type { UndoRedoDiagnosticApi } from '@capabilities/undo-redo/types';
 import type { DndDiagnosticApi } from '@capabilities/drag-and-drop/types';
 import type { InsertionDiagnosticApi } from '@capabilities/insertion/types';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { noteStore } from './note/note-store';
+import { startNoteCache, getCachedNoteCount } from './note/note-cache';
 
 export function reportL5Alive(): void {
+  // L7-sub2:确保 view 层 note-cache 已起 (idempotent;driver resolveNoteTitle 用)
+  // (legacy localStorage 清理由 @capabilities/note index.ts 副作用自管,不在此重复)
+  startNoteCache();
+
   const selection = getCapabilityApi<SelectionDiagnosticApi>('selection');
   const clipboard = getCapabilityApi<ClipboardDiagnosticApi>('clipboard');
   const undoRedo = getCapabilityApi<UndoRedoDiagnosticApi>('undo-redo');
@@ -28,7 +32,7 @@ export function reportL5Alive(): void {
   window.electronAPI?.reportAlive({
     layer: 'L5',
     details: {
-      'global-notes': noteStore.count,
+      'global-notes': getCachedNoteCount(),
       'driver-instances': textEditing?.instanceRegistry.count ?? 0,
       'selection-sources': selection?.sourceCount ?? 0,
       'clipboard-serializers': clipboard?.serializerCount ?? 0,

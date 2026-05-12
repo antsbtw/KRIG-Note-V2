@@ -8,6 +8,11 @@ import type {
   DiagnosticsReportPayload,
   HealthCheckResponse,
 } from './message-types';
+import type {
+  NoteInfo,
+  FolderInfo,
+  NoteDocEnvelope,
+} from './note-folder-types';
 
 declare global {
   interface Window {
@@ -241,6 +246,31 @@ declare global {
       graphFolderRename(id: string, title: string): Promise<void>;
       graphFolderDelete(id: string): Promise<void>;
       graphFolderMove(id: string, parentId: string | null): Promise<void>;
+
+      // ── L7-sub2:note capability (decision 012,SurrealDB) ──
+      noteList(): Promise<NoteInfo[]>;
+      noteGet(id: string): Promise<NoteInfo | null>;
+      noteCreate(initialDoc: NoteDocEnvelope | null, folderId: string | null): Promise<NoteInfo>;
+      noteUpdate(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
+      noteMove(noteId: string, newFolderId: string | null): Promise<void>;
+      noteDelete(id: string): Promise<void>;
+      /** main → renderer 推送:笔记列表变更;返 unsubscribe */
+      onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
+
+      // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
+      folderList(): Promise<FolderInfo[]>;
+      folderGet(id: string): Promise<FolderInfo | null>;
+      folderCreate(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
+      folderRename(id: string, title: string): Promise<FolderInfo | null>;
+      folderMove(folderId: string, newParentFolderId: string | null): Promise<void>;
+      /** Path Y:删 folder 递归删子 folder + 内含笔记 (decision 012 设计师批复) */
+      folderDelete(id: string): Promise<{
+        deletedFolders: number;
+        deletedNotes: number;
+        cascadedEdges: number;
+      }>;
+      /** main → renderer 推送:文件夹列表变更;返 unsubscribe */
+      onFolderListChanged(callback: (list: FolderInfo[]) => void): () => void;
     };
   }
 }

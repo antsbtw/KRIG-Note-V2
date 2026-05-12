@@ -5,8 +5,8 @@
  */
 
 import type { TreeNode, FolderNode, ItemNode } from '@slot/shared-ui/FolderTree';
-import type { Note } from './note-store';
-import type { Folder } from './folder-store';
+import type { NoteInfo as Note } from '@capabilities/note/types';
+import type { FolderInfo as Folder } from '@capabilities/folder/types';
 import type { SortState } from './data-model';
 
 interface BuildArgs {

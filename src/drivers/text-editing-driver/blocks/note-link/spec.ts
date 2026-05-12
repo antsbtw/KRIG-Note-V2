@@ -5,7 +5,7 @@
  *
  * 行为:
  * - inline + atom + group:'inline'(光标不进入,作为整体单元处理)
- * - noteId 存目标 note 的 id(noteStore 中的 'note-<n>'),null = 失效
+ * - noteId 存目标 note 的 atom id(noteCapability 中的 ULID 字符串),null = 失效
  * - label 派生自目标 note.title(NodeView mount 时同步一次)
  * - 渲染:`📄 <label>` — 由 nodeView 接管(toDOM 是 fallback 序列化)
  * - leafText:'[[label]]' — textBetween / 复制成纯文本时还原源码,对齐 mathInline

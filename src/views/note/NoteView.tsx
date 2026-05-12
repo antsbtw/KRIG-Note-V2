@@ -5,15 +5,15 @@
  *
  * 订阅两层:
  * - workspaceManager:取当前 ws.activeNoteId(per-workspace)
- * - noteStore:取笔记数据(全局共享)
+ * - noteCapability:取笔记数据(全局共享,通过 useAllNotes hook + IPC 广播)
  */
 
 import { useMemo, useSyncExternalStore, useCallback, useEffect } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { noteStore } from './note-store';
-import { getNoteWsState, updateNote, deriveTitle } from './data-model';
+import { useAllNotes } from './use-notes-folders';
+import { getNoteWsState, updateNote } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
@@ -40,25 +40,22 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     },
   );
 
-  // 订阅 noteStore — 任何笔记内容改了都触发重渲(其他 Workspace 改也广播过来)
-  useSyncExternalStore(
-    (cb) => noteStore.subscribe(cb),
-    () => noteStore.count, // 数字稳定,容器变化触发重渲
-  );
+  // 订阅 noteCapability — onListChanged 推送(所有 ws 共享视图)
+  const allNotes = useAllNotes();
 
   // 取当前活跃笔记
-  const activeNote = wsState?.activeNoteId ? noteStore.get(wsState.activeNoteId) : null;
   const activeNoteId = wsState?.activeNoteId ?? null;
+  const activeNote = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) ?? null : null;
 
-  // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteStore
+  // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteCapability
   // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
   useExtractionImport();
 
   const handleDocChange = useCallback(
     (newDoc: DriverSerialized) => {
       if (!wsState?.activeNoteId) return;
-      const newTitle = deriveTitle(newDoc);
-      updateNote(wsState.activeNoteId, { doc: newDoc, title: newTitle });
+      // L7-sub2:title 派生自 doc 首段文本 (capability 内自动算),view 不传 title
+      void updateNote(wsState.activeNoteId, { doc: newDoc });
     },
     [wsState?.activeNoteId],
   );
