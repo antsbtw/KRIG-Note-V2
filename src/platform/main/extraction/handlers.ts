@@ -12,8 +12,10 @@
  *   等同直接广播 EXTRACTION_NOTE_CREATE(供 main 端无 webview 场景手动测试)
  *
  * **职责边界**(关键设计):
- * - main 不写 noteStore(noteStore 在 renderer)— main 只负责 IPC 转发 + Platform
- *   交互;atom→PM 转换 + folder/note 创建在 view 端做
+ * - main 不直接写 atom (noteCapability 桥接在 renderer)— main 只负责 IPC 转发 +
+ *   Platform 交互;atom→PM 转换 + folder/note 创建在 view 端做
+ *   注:L7-sub2 后 noteCapability impl 居 main 进程,但 extraction 流仍走"broadcast
+ *      给 renderer,view 端调 noteCapability.createNote"路径保持单向数据流
  * - V1 ctx.openCompanion('extraction') 一步开右栏 → V2 留给 view 端走 bus;
  *   main 不感知 view 状态机
  */
