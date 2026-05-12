@@ -364,4 +364,55 @@ contextBridge.exposeInMainWorld('electronAPI', {
   graphFolderMove(id: string, parentId: string | null): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_MOVE, id, parentId);
   },
+
+  // ── L7-sub2:note capability (decision 012,SurrealDB) ──
+  noteList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_LIST);
+  },
+  noteGet(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_GET, id);
+  },
+  noteCreate(initialDoc: unknown, folderId: string | null): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_CREATE, { initialDoc, folderId });
+  },
+  noteUpdate(id: string, doc: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_UPDATE, { id, doc });
+  },
+  noteMove(noteId: string, newFolderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_MOVE, { noteId, newFolderId });
+  },
+  noteDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_DELETE, id);
+  },
+  /** main → renderer 推送:笔记列表变更(create / update / move / delete 后广播)*/
+  onNoteListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.NOTE_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.NOTE_LIST_CHANGED, handler);
+  },
+
+  // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
+  folderList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_LIST);
+  },
+  folderGet(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_GET, id);
+  },
+  folderCreate(title: string, parentFolderId: string | null): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_CREATE, { title, parentFolderId });
+  },
+  folderRename(id: string, title: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_RENAME, { id, title });
+  },
+  folderMove(folderId: string, newParentFolderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_MOVE, { folderId, newParentFolderId });
+  },
+  folderDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id);
+  },
+  onFolderListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);
+  },
 });
