@@ -85,21 +85,24 @@ V1 `src/main/storage/schema.ts` 含完整 schema（note / folder / vocab / activ
 
 V2 9 store 按业务复杂度分 4 个 sub-phase 迁移：
 
-#### Sub-phase 1: SurrealDB 基础设施
+#### Sub-phase 1: SurrealDB 基础设施 ✅ 已完成
+
+**状态**: ✅ 已实施完成（2026-05-12，13 commits / [decision 011](011-sub-phase-1-surrealdb-infrastructure.md)）
 
 **任务**：
-- 引入 SurrealDB（Embedded 优先 / Sidecar fallback，按 [decision 007 §4.2.1](007-storage-target.md) EM1-EM6 硬门槛验证）
-- 实施 `src/storage/api.ts` —— StorageAPI 接口
-- 实施 `src/storage/surreal/` —— SurrealStorage 实现
-- atom + edge 基础 schema（按 [Phase 3d surreal-schema.md](../surreal-schema.md) 设计）
-- Health check / 数据目录初始化
+- ✅ 引入 SurrealDB —— sub-phase 1 实施期间 EM1 触发，实际采用 **Sidecar only** 模式（详 [decision 007 §4.2](007-storage-target.md) 事实纠错）
+- ✅ 实施 `src/storage/api.ts` —— StorageAPI 接口
+- ✅ 实施 `src/storage/surreal/` —— SurrealStorage 实现
+- ✅ atom + edge 基础 schema（按 [Phase 3d surreal-schema.md](../surreal-schema.md) 设计）
+- ✅ Health check / 数据目录初始化
+- ✅ 新增 V2 productName 隔离（"KRIG Note" → "KRIG Note V2"）
 
 **完成判据**：
-- `npm start` 跑通，SurrealDB 启动成功
-- 写入 / 读取一个测试 atom 成功
-- StorageAPI 单元测试通过
+- ✅ `npm start` 跑通，SurrealDB 启动成功（3 次连续冷启动验证）
+- ✅ 冷启动时延 < 3 秒（实际 578-1102ms）
+- ✅ 写入 / 读取一致性 EM4 验证通过
 
-**不在范围**：业务 store 改造（保留 9 store 现状）
+**不在范围（已保留）**：业务 store 改造（保留 9 store 现状，sub-phase 2-4 处理）
 
 #### Sub-phase 2: noteStore + folderStore 迁移（最优先）
 

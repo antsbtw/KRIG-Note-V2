@@ -221,23 +221,35 @@ DEFINE FIELD attrs.comment ON edge TYPE option<string>;
 
 ```sql
 -- 按完整 predicate 查询(高频)
-DEFINE INDEX edge_predicate ON edge FIELDS predicate;
+DEFINE INDEX IF NOT EXISTS edge_predicate ON edge FIELDS predicate;
 
 -- 按 subject atomId 查询(读 atom 的出边)
-DEFINE INDEX edge_subject ON edge FIELDS subject.atomId;
+DEFINE INDEX IF NOT EXISTS edge_subject ON edge FIELDS subject.atomId;
 
--- 按 object atomId 查询(读 atom 的入边,仅 kind='atom' 时)
-DEFINE INDEX edge_object ON edge FIELDS object.atomId WHERE object.kind = 'atom';
+-- 按 object atomId 查询(读 atom 的入边)
+-- 注:SurrealDB v3.x DEFINE INDEX 不支持 WHERE 子句(partial index)
+-- 索引覆盖全部 edge(literal edges 的 NONE atomId 也被索引,无害但索引略增)
+-- 查询时仍按 object.kind='atom' 过滤
+DEFINE INDEX IF NOT EXISTS edge_object ON edge FIELDS object.atomId;
 
 -- 时间范围
-DEFINE INDEX edge_createdAt ON edge FIELDS createdAt;
+DEFINE INDEX IF NOT EXISTS edge_createdAt ON edge FIELDS createdAt;
 
 -- 按 createdBy 切片(用户边 vs AI 边 vs sys 边)
-DEFINE INDEX edge_createdBy ON edge FIELDS attrs.createdBy;
+DEFINE INDEX IF NOT EXISTS edge_createdBy ON edge FIELDS attrs.createdBy;
 
 -- 组合索引(高频场景:某 atom 的某 vocabulary 边)
-DEFINE INDEX edge_subject_predicate ON edge FIELDS subject.atomId, predicate;
+DEFINE INDEX IF NOT EXISTS edge_subject_predicate ON edge FIELDS subject.atomId, predicate;
 ```
+
+**事实纠错备注**（来自 Phase N sub-phase 1 实施验证）：
+
+1. **partial index 不支持** —— SurrealDB v3.x `DEFINE INDEX ... WHERE ...` 语法不识别（v2.x 文档示例），改全索引接受 NONE atomId 入索引的代价（无害）。
+2. **IF NOT EXISTS 必加** —— 二次冷启动 DEFINE 重复执行触发 AlreadyExistsError；所有 DEFINE TABLE / FIELD / INDEX 必须加 `IF NOT EXISTS` 保证幂等。
+3. **schema_version 用 UPSERT** —— `CREATE schema_version SET version = '1.0.0'` 重复执行触发 UNIQUE 冲突；改 `UPSERT schema_version:'1.0.0' SET ...`。
+4. **id 字段是 RecordId 不是 string** —— SCHEMAFULL 表 id 字段实际是 SurrealDB RecordId（`atom:01K...`），不是普通 string。业务层用 `new RecordId('atom', id)` 绑定 + `SELECT FROM $rid` / `CREATE $rid SET ...` / `UPDATE $rid` / `DELETE $rid` 语法。subject.atomId / object.atomId 是普通 string 字段保持 string 绑定。
+
+详 [decision 011 实施记录](decisions/011-sub-phase-1-surrealdb-infrastructure.md)。
 
 ### 3.4 namespace 切片索引（可选优化）
 

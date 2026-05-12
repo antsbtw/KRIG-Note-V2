@@ -88,9 +88,12 @@ interface StorageOptions {
 }
 ```
 
-**当前状态**：📐 **已规范化**（Phase 3c decision 008 已转正）
+**当前状态**：📐 **已规范化** + 🔨 **接口已落地**（Phase N sub-phase 1 / commit `b06a337` `src/storage/api.ts`）
 
-**实施状态**：⏳ 代码层尚未实施（storage 层实施 Phase N 时落地）
+**实施状态**：✅ **接口签名已落地，运行时仍仅 `'user-default'`**
+- `StorageOptions.ownerId?: string` 字段在 `src/storage/api.ts` 中正式定义
+- `SurrealStorage` 实现层默认填 `'user-default'`（按 sub-phase 1 决议）
+- 未来引入用户身份时：仅需 storage 层读当前 agentId 注入，**接口签名不需要再改**
 
 **实施细节**：
 - 调用方不传 `ownerId` = 当前用户（storage 层填 `'user-default'`）

@@ -2,7 +2,7 @@
 
 > **Phase**: 3（persistence 规范 / 范围 X：先文档后代码）
 > **状态**: ✅ **已转正**（Phase 3a / 3b / 3c / 3d 全部完成 + audit 通过 + 用户拍板，2026-05-12）
-> **分支**: 已合并 main（commit `<待 merge 后填入>`）
+> **分支**: 已合并 main（merge commit `9580246` Phase 3 规范；merge commit `34e3758` Phase N sub-phase 1 实施）
 >
 > 本目录文档为 V2 持久化层**正式规范基线**。"临时默认 / 待决议" 标识的具体决议项（Open Questions SS1-SS7 / EM1-EM6 / N* / 等）在实施 Phase 时按"硬门槛触发 / 真实需求出现"逐项验证决议。规范本身已转正。
 >

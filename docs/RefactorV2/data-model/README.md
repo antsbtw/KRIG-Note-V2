@@ -216,7 +216,37 @@ L6-data-modeling 分支已 merge main 拉到最新，反向更新对齐文档完
 - `persistence/decisions/010-multi-user-multi-device.md` —— 路径 B 正式登记
 - `persistence/surreal-schema.md` —— SurrealDB schema 设计
 
-**状态**：RFC 进行中（5 个 commits 在 `feature/L7-persistence-spec` 分支，待用户拍板转正）。
+**状态**：✅ **已转正**（2026-05-12，merge commit `9580246` / 6 commits）。
+
+### Phase N sub-phase 1（2026-05-12 完成）—— ✅ SurrealDB 基础设施代码实施
+
+执行：`feature/L7-sub1-surreal-infrastructure` 分支（独立 session 按 [decision 011](persistence/decisions/011-sub-phase-1-surrealdb-infrastructure.md) 实施 + 本对话审计验收）。
+
+产出（13 commits）：
+
+- ✅ V2 productName 隔离（"KRIG Note" → "KRIG Note V2"，userData 路径与 V1 完全独立）
+- ✅ `src/semantic/types/` —— Atom / Edge / AtomEntity / EdgeEntity TS 类型完整定义
+- ✅ `src/storage/api.ts` —— StorageAPI 接口（含 4 层调用边界）
+- ✅ `src/storage/ulid.ts` —— ULID 生成（uppercase / monotonic）
+- ✅ `src/storage/surreal/` —— Sidecar 模式 client + schema + storage 实现
+- ✅ `src/storage/migrations/runner.ts` —— schema migration runner
+- ✅ Main 进程启动接入 storage init/shutdown
+- ✅ EM1/2/3/4 硬门槛验证通过（3 次连续冷启动 / 时延 578-1102ms / 写入读取一致性）
+
+实施期间 4 处事实纠错（设计文档与 SurrealDB binary 3.0.4 实际行为不一致），已反向更新 decision 007 / 011 / 009 / 010 + surreal-schema.md。
+
+**未实施部分**（留 sub-phase 2-4）：
+- ❌ 业务 store 迁移（noteStore / folderStore / 等保留现状）
+- ❌ EVENT 触发器 cascade delete（留 sub-phase 2 EM6 验证后）
+- ❌ Embedded 引擎切换（留未来 sub-phase，等 surrealdb@3.x client SDK 转 stable）
+
+### Phase N sub-phase 2+（待启动）—— 业务 store 渐进迁移
+
+按 [decision 009 §3.1](persistence/decisions/009-migration-strategy.md)：
+
+- sub-phase 2: noteStore + folderStore 迁移
+- sub-phase 3: graphStore + ebookStore + annotationStore
+- sub-phase 4: 剩余 store（mediaStore 大文件 / inspectorStore UI 状态等可能不迁）
 
 ### Phase 4+（其他视图启动时按需展开）
 
@@ -256,18 +286,19 @@ data-model/
 │   ├── spec.md                            ✓2c-pre Mixin 总览 + 设计原则
 │   ├── text-flow.md                       ✓2c-pre TextFlowAttrs
 │   └── media-resource.md                  ✓2c-pre MediaResourceAttrs
-└── persistence/                           ✓3  Phase 3 完整产出(9 文件,RFC 进行中)
+└── persistence/                           ✓3  Phase 3 完整产出(10 文件,已转正)
     ├── README.md                          ✓3a 总览
     ├── spec.md                            ✓3a 持久化总规范
     ├── atom-entity.md                     ✓3a AtomEntity 实体壳
     ├── edge-entity.md                     ✓3c EdgeEntity 实体壳
     ├── decisions/
-    │   ├── 006-id-generation.md           ✓3b ULID 推荐
-    │   ├── 007-storage-target.md          ✓3b SurrealDB 推荐
-    │   ├── 008-storage-layer-interface.md ✓3c StorageAPI 接口
-    │   ├── 009-migration-strategy.md      ✓3c 渐进迁移策略
-    │   └── 010-multi-user-multi-device.md ✓3c 路径 B 正式登记
-    └── surreal-schema.md                  ✓3d SurrealDB schema 设计
+    │   ├── 006-id-generation.md           ✓3b ULID 推荐(已实施)
+    │   ├── 007-storage-target.md          ✓3b SurrealDB 推荐(Sidecar 模式已实施)
+    │   ├── 008-storage-layer-interface.md ✓3c StorageAPI 接口(已实施)
+    │   ├── 009-migration-strategy.md      ✓3c 渐进迁移策略(sub-phase 1 已完成)
+    │   ├── 010-multi-user-multi-device.md ✓3c 路径 B 正式登记
+    │   └── 011-sub-phase-1-surrealdb-infrastructure.md ✓Phase N sub1 sub-phase 1 实施任务(已完成)
+    └── surreal-schema.md                  ✓3d SurrealDB schema 设计(已实施)
 ```
 
 文件状态标识：
@@ -277,9 +308,10 @@ data-model/
 - **✓2c-pre** = Phase 2c-pre Mixin 文档 + V2 改造设计
 - **✓2bb** = Phase 2bb V2 代码改造已完成（在 main 分支 commit `c9ae4e4`）
 - **✓2c** = Phase 2c pm domain 业务展开（在 main 分支 commit `a07f84d`，33 份子文档）
-- **✓3a/3b/3c/3d** = Phase 3 persistence 规范（在 `feature/L7-persistence-spec` 分支，RFC 进行中）
+- **✓3a/3b/3c/3d** = Phase 3 persistence 规范（已合 main commit `9580246`，2026-05-12 转正）
+- **✓Phase N sub1** = Phase N sub-phase 1 SurrealDB 基础设施代码实施（已合 main，2026-05-12 完成）
 
-**Phase 1 是核心规范**，**Phase 2a/2b/2c-pre 是基于 Phase 1 的扩展决议**，**Phase 2bb 是数据建模驱动的 V2 代码改造**，**Phase 2c 是 pm domain 业务展开**，**Phase 3 是持久化规范**。各阶段各有定位，互不替代。
+**Phase 1 是核心规范**，**Phase 2a/2b/2c-pre 是基于 Phase 1 的扩展决议**，**Phase 2bb 是数据建模驱动的 V2 代码改造**，**Phase 2c 是 pm domain 业务展开**，**Phase 3 是持久化规范**，**Phase N 是规范落地的代码实施 sub-phases**。各阶段各有定位，互不替代。
 
 ---
 
@@ -290,6 +322,10 @@ data-model/
 **已完成分支（已合 main）**：
 - `feature/L6-data-modeling` —— Phase 1 / 2a / 2b / 2c-pre / 2c，merge commit `a07f84d`
 - `feature/L6-block-decomposition` —— Phase 2bb V2 代码改造，merge commit `c9ae4e4`
+- `feature/L7-persistence-spec` —— Phase 3 persistence 规范（已转正），merge commit `9580246`
+- `feature/L7-sub1-surreal-infrastructure` —— Phase N sub-phase 1 SurrealDB 基础设施代码实施，merge commit `34e3758`
 
-**进行中分支**：
-- `feature/L7-persistence-spec` —— Phase 3 persistence RFC，5 commits 待审计转正
+**待启动分支（按 [decision 009 sub-phase 顺序](persistence/decisions/009-migration-strategy.md)）**：
+- `feature/L7-sub2-note-folder-migration` —— sub-phase 2 noteStore + folderStore 迁移
+- `feature/L7-sub3-graph-ebook-migration` —— sub-phase 3 graph / ebook / annotation 迁移
+- `feature/L7-sub4-remaining-store-migration` —— sub-phase 4 剩余 store 迁移

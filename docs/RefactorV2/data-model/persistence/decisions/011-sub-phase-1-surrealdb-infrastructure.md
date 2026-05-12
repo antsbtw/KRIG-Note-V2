@@ -1,10 +1,45 @@
 # Decision 011 — Phase N Sub-phase 1: SurrealDB 基础设施实施任务
 
 > **Phase**: N（实施 Phase）/ Sub-phase 1
-> **状态**: 📝 实施任务（待新对话执行）
-> **设计师 / 审计师**: 本对话（main 分支）
-> **实施者**: 新对话（`feature/L7-sub1-surreal-infrastructure` 分支）
+> **状态**: ✅ **已实施完成**（merge commit `34e3758`，13 commits）
+> **设计师 / 审计师**: main 分支
+> **实施者**: `feature/L7-sub1-surreal-infrastructure` 分支（已审计通过）
 > **决议日期**: 2026-05-12
+> **实施完成**: 2026-05-12
+>
+> ## 实施过程偏离设计的事实纠错（已合入实施）
+>
+> 实施期间发现 4 处设计文档与 SurrealDB binary 3.0.4 实际行为不一致，由实施者按设计师批复修正：
+>
+> | 偏离点 | 设计文档原写法 | 实际实施 | 原因 |
+> |---|---|---|---|
+> | **§3.4 + §5.6 Embedded 模式** | "Embedded 优先 / Sidecar fallback" | **Sidecar only** | `surrealdb@2.x` client SDK 与 `@surrealdb/node@3.x` Embedded engine 主版本不兼容（3.x 仍 alpha）；EM1 硬门槛触发 |
+> | **§3.4 edge_object 索引** | `DEFINE INDEX edge_object ... WHERE object.kind = 'atom'` | 去除 WHERE 子句，全索引 | SurrealDB 3.0.4 DEFINE INDEX 不支持 WHERE 子句（partial index 语法 v3.x 不识别）|
+> | **§3.4 schema 幂等性** | 无 IF NOT EXISTS | 全部 DEFINE 加 `IF NOT EXISTS` | 二次冷启动 DEFINE 重复执行触发 AlreadyExistsError |
+> | **§3.4 schema_version CREATE** | `CREATE schema_version SET version = '1.0.0'` | 改 `UPSERT schema_version:'1.0.0'` + RecordId 绑定 | 字面量字符串在 SurrealQL 解析为 strand 而非 record id，CREATE 重复执行 UNIQUE 冲突 |
+> | **§5.7 storage.ts id 类型** | `string` 字段绑定 | `new RecordId('atom', id)` / `new RecordId('edge', id)` 绑定 | SCHEMAFULL 表 id 字段是 record id 类型（`atom:01K...`），不是普通 string |
+>
+> 责任在设计师 —— 写 SQL / SurrealQL 时未在 binary 实测。**未来 sub-phase 2-4 设计文档应明示"已 binary 验证 / 仅纸上推演"标识**。
+>
+> ## 实施新增（未在原文档预设）
+>
+> | 新增 step | 内容 | 理由 |
+> |---|---|---|
+> | **Step 5.1.5** | 改 V2 productName "KRIG Note" → "KRIG Note V2" | 隔离 V1/V2 userData（Electron `app.getPath('userData')` 按 productName 走，V1/V2 同名会冲突） |
+>
+> ## 反向更新已对齐的下游文档
+>
+> - `decisions/007-storage-target.md` §4.2 — Embedded 优先变 Sidecar only + EM1 触发说明
+> - `decisions/009-migration-strategy.md` §3.1 — sub-phase 1 标 ✅ 完成
+> - `decisions/010-multi-user-multi-device.md` §2 预留 3 — ownerId 状态改"接口已落地，运行时仍 user-default"
+> - `surreal-schema.md` §3.3 — edge_object 索引去 WHERE + 4 处事实纠错备注
+> - `data-model/README.md` — Phase N sub-phase 1 完成记录
+>
+> ---
+>
+> **以下为原设计文档**（实施已完成，保留作历史记录；事实纠错见上文）：
+
+---
 
 ---
 
