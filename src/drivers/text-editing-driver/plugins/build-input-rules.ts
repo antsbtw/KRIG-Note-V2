@@ -19,13 +19,18 @@ import type { Schema, MarkType, NodeType } from 'prosemirror-model';
 
 export function buildInputRules(schema: Schema): Plugin {
   const rules: InputRule[] = [];
-  const textBlock = schema.nodes['text-block'];
+  const paragraph = schema.nodes.paragraph;
+  const heading = schema.nodes.heading;
 
-  // ── Headings(block-level)──
-  if (textBlock) {
+  // ── Headings(block-level): `# `..`###### ` → heading{level} ──
+  // D2 决议: heading.level 范围 1-6 (CommonMark 标准)
+  if (paragraph && heading) {
     rules.push(headingRule(/^#\s$/, 1));
     rules.push(headingRule(/^##\s$/, 2));
     rules.push(headingRule(/^###\s$/, 3));
+    rules.push(headingRule(/^####\s$/, 4));
+    rules.push(headingRule(/^#####\s$/, 5));
+    rules.push(headingRule(/^######\s$/, 6));
   }
 
   // ── Marks(inline,markdown 风格;触发字符是空格)──
@@ -44,7 +49,7 @@ export function buildInputRules(schema: Schema): Plugin {
   }
 
   // ── Lists / Quote / HR / CodeBlock (block-level wrapping)──
-  // 节点 id 用驼峰(PM content expression 不支持短横线;textBlock 例外因为 L5-A 既存)
+  // 节点 id 用驼峰(PM content expression 不支持短横线;paragraph / heading 用 PM 标准命名)
   const bulletList = schema.nodes.bulletList;
   const orderedList = schema.nodes.orderedList;
   const taskList = schema.nodes.taskList;
@@ -87,11 +92,13 @@ export function buildInputRules(schema: Schema): Plugin {
 }
 
 /**
- * wrapInListRule — `- ` / `1. ` 触发,把当前 text-block 包成 list > list-item > text-block
+ * wrapInListRule — `- ` / `1. ` 触发,把当前 paragraph 包成 list > list-item > paragraph
  *
  * 用 prosemirror-inputrules.wrappingInputRule 不直接合适,因为我们的 schema 是
- * list > list-item > text-block 三层(list-item 内必须包 text-block 才合法)。
+ * list > list-item > paragraph 三层(list-item 内必须包 paragraph/heading 才合法)。
  * 手写规则确保结构正确。
+ *
+ * 注: input-rule 仅对 paragraph 触发(在 heading 上不触发 list 包装 — 跟 V1 一致)。
  */
 function wrapInListRule(
   regex: RegExp,
@@ -101,31 +108,31 @@ function wrapInListRule(
 ): InputRule {
   return new InputRule(regex, (state, match, start, end) => {
     const $start = state.doc.resolve(start);
-    // 必须在 text-block 第一个位置触发(行首)
+    // 必须在 paragraph 第一个位置触发(行首)
     const blockStart = $start.before($start.depth);
     const node = state.doc.nodeAt(blockStart);
-    if (!node || node.type.name !== 'text-block') return null;
+    if (!node || node.type.name !== 'paragraph') return null;
     // 不在已有 list 里(避免在 listItem 内再触发)
     if ($start.depth > 1) {
       const parent = $start.node($start.depth - 1);
       if (parent.type.name === 'listItem' || parent.type.name === 'taskItem') return null;
     }
     const tr = state.tr.delete(start, end); // 删触发字符
-    // 当前 text-block 不变,把它包进 listItem 再包进 list
+    // 当前 paragraph 不变,把它包进 listItem 再包进 list
     const updated = tr.doc.nodeAt(blockStart);
     if (!updated) return null;
     const item = listItemType.create(null, [updated.copy(updated.content)]);
     const list = listType.create(getAttrs?.(match) ?? null, Fragment.from(item));
     tr.replaceWith(blockStart, blockStart + updated.nodeSize, list);
-    // 把光标放进 list > listItem > textBlock 内
-    // 路径偏移:list 起点 (blockStart) + 1(进入 list)+ 1(进入 listItem)+ 1(进入 textBlock)= +3
+    // 把光标放进 list > listItem > paragraph 内
+    // 路径偏移:list 起点 (blockStart) + 1(进入 list)+ 1(进入 listItem)+ 1(进入 paragraph)= +3
     const cursorPos = blockStart + 3;
     tr.setSelection(TextSelection.near(tr.doc.resolve(cursorPos)));
     return tr;
   });
 }
 
-/** wrapInTaskRule — `[]` / `[ ]` / `[x]` → taskList > taskItem > textBlock */
+/** wrapInTaskRule — `[]` / `[ ]` / `[x]` → taskList > taskItem > paragraph */
 function wrapInTaskRule(
   regex: RegExp,
   taskListType: NodeType,
@@ -136,7 +143,7 @@ function wrapInTaskRule(
     const $start = state.doc.resolve(start);
     const blockStart = $start.before($start.depth);
     const node = state.doc.nodeAt(blockStart);
-    if (!node || node.type.name !== 'text-block') return null;
+    if (!node || node.type.name !== 'paragraph') return null;
     if ($start.depth > 1) {
       const parent = $start.node($start.depth - 1);
       if (parent.type.name === 'listItem' || parent.type.name === 'taskItem') return null;
@@ -153,16 +160,16 @@ function wrapInTaskRule(
   });
 }
 
-/** `---` 行首 → 替换为 horizontalRule + 新空 textBlock,光标进 textBlock */
+/** `---` 行首 → 替换为 horizontalRule + 新空 paragraph,光标进 paragraph */
 function horizontalRuleRule(hrType: NodeType): InputRule {
   return new InputRule(/^---$/, (state, _match, start) => {
     const $start = state.doc.resolve(start);
     const blockStart = $start.before($start.depth);
     const blockEnd = $start.after($start.depth);
-    const textBlock = state.schema.nodes['text-block'];
-    if (!textBlock) return null;
-    const tr = state.tr.replaceWith(blockStart, blockEnd, [hrType.create(), textBlock.create()]);
-    // 光标移到新 textBlock 内(跳过 hr 占的位置)
+    const paragraph = state.schema.nodes.paragraph;
+    if (!paragraph) return null;
+    const tr = state.tr.replaceWith(blockStart, blockEnd, [hrType.create(), paragraph.create()]);
+    // 光标移到新 paragraph 内(跳过 hr 占的位置)
     const newPos = blockStart + hrType.create().nodeSize + 1;
     tr.setSelection(TextSelection.near(tr.doc.resolve(newPos)));
     return tr;
@@ -181,16 +188,20 @@ function codeBlockRule(codeBlockType: NodeType): InputRule {
   });
 }
 
-/** heading 规则:把当前 text-block 节点的 attrs.level 改成 N */
+/** heading 规则:把当前 paragraph 节点切换为 heading{level} */
 function headingRule(regex: RegExp, level: number): InputRule {
   return new InputRule(regex, (state, _match, start, end) => {
     const $start = state.doc.resolve(start);
     const blockStart = $start.before($start.depth);
     const node = state.doc.nodeAt(blockStart);
-    if (!node || node.type.name !== 'text-block') return null;
+    if (!node || node.type.name !== 'paragraph') return null;
+    // title paragraph 不允许转 heading
+    if (node.attrs.isTitle) return null;
+    const headingType = state.schema.nodes.heading;
+    if (!headingType) return null;
     return state.tr
       .delete(start, end)
-      .setNodeMarkup(blockStart, undefined, { ...node.attrs, level });
+      .setNodeMarkup(blockStart, headingType, { level });
   });
 }
 

@@ -13,8 +13,7 @@
  *
  * 关闭:Escape / `]]` 出现 / [[ 被删 / view 层 popup close 时 dispatch close meta
  *
- * V1 → V2 改动:
- * - $from.parent.type.name !== 'textBlock' → V2 是 'text-block'(短横线 id)
+ * V2 拆分后:paragraph / heading 节点内都允许触发 [[(原 V1 合一节点行为)
  * - active 时 Enter / 上下方向键由 view 层 popup 拿走(plugin 让 keydown 返回 true 阻断 PM)
  * - open / close 通过 view 注入 onOpenSearch / onCloseSearch 通知 view 启停 popup
  */
@@ -107,7 +106,7 @@ export function buildNoteLinkCommandPlugin(): Plugin<NoteLinkCommandState> {
         if (state?.active) return false;
 
         const { $from } = view.state.selection;
-        if ($from.parent.type.name !== 'text-block') return false;
+        if ($from.parent.type.name !== 'paragraph' && $from.parent.type.name !== 'heading') return false;
 
         // 让本次 `[` 输入先落到文档,再延后检查 textBefore 是否以 [[ 结尾
         setTimeout(() => {
@@ -116,7 +115,7 @@ export function buildNoteLinkCommandPlugin(): Plugin<NoteLinkCommandState> {
           if (cur?.active) return;
 
           const { $from: $f } = view.state.selection;
-          if ($f.parent.type.name !== 'text-block') return;
+          if ($f.parent.type.name !== 'paragraph' && $f.parent.type.name !== 'heading') return;
           const textBefore = $f.parent.textBetween(0, $f.parentOffset);
           if (!textBefore.endsWith('[[')) return;
 

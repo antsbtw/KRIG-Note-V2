@@ -72,7 +72,7 @@ export function scrollToBlockAnchor(view: EditorView, anchor: string): void {
 
   doc.forEach((node, offset) => {
     if (targetPos !== null) return;
-    if (node.type.name === 'text-block' && node.attrs.level) {
+    if (node.type.name === 'heading') {
       const text = node.textContent.trim();
       if (text === decoded || text.startsWith(decoded)) {
         targetPos = offset;
