@@ -1,6 +1,6 @@
 {
   "name": "krig-note-v2",
-  "productName": "KRIG Note",
+  "productName": "KRIG Note V2",
   "version": "0.1.0",
   "description": "KRIG-Note V2 — 自上而下分层重构",
   "main": ".vite/build/index.js",
