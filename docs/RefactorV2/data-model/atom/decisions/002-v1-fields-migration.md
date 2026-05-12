@@ -127,22 +127,22 @@ V2 处置：
 
 V1 → V2 映射示例（不展开全部，仅举例）：
 
-| V1 AtomType | V2 block type 名称（建议） | V2 处置 |
-|---|---|---|
-| `paragraph` | `textBlock` | 直搬，对齐 V2 已有命名 |
-| `heading` | `headingBlock` | 直搬，attrs 含 level |
-| `noteTitle` | `noteTitleBlock` | 直搬 |
-| `bulletList` / `orderedList` | `bulletList` / `orderedList` | 直搬 |
-| `listItem` | `listItem` | **删除 children 兼容字段**（V1 @deprecated），改用 PM 嵌套 |
-| `taskList` / `taskItem` | `taskList` / `taskItem` | 同上 |
-| `blockquote` / `callout` / `toggleList` / `toggleItem` | 同名 | 直搬 |
-| `frameBlock` | **删除** | V2 用视图层 frame 实现（违反原则 1） |
-| `table` / `tableRow` / `tableCell` / `tableHeader` | 同名 | 直搬，删 tableCell.children 兼容字段 |
-| `columnList` / `column` | 同名 | 直搬 |
-| `codeBlock` / `mathBlock` / `mathVisual` | 同名 | 直搬 |
-| `image` / `figure` / `video` / `audio` / `tweet` | 同名 | 直搬 |
-| `fileBlock` / `externalRef` / `htmlBlock` | 同名 | 直搬 |
-| `horizontalRule` / `hardBreak` / `document` / `pageAnchor` | 同名 | 直搬 |
+| V1 AtomType | V2 block type 名称 | V2 处置 | 状态 |
+|---|---|---|---|
+| `paragraph` | `paragraph` | 沿用 PM 标准命名（不再叫 textBlock） | **✅ 已实施**（decision 005）|
+| `heading` | `heading` | 沿用 PM 标准命名，attrs 含 level（范围扩到 1-6） | **✅ 已实施**（decision 005 D2）|
+| `noteTitle` | `paragraph.attrs.isTitle: true` | 不再是独立节点，归 paragraph 特殊形态 | **✅ 已实施**（decision 005 D1）|
+| `bulletList` / `orderedList` | `bulletList` / `orderedList` | 直搬，camelCase 命名（V2 现状） | V2 已实现 |
+| `listItem` | `listItem` | **删除 children 兼容字段**（V1 @deprecated），改用 PM 嵌套 | V2 已实现 |
+| `taskList` / `taskItem` | `taskList` / `taskItem` | 同上 | V2 已实现 |
+| `blockquote` / `callout` / `toggleList` / `toggleItem` | 同名 | 直搬 | V2 已实现 |
+| `frameBlock` | **删除** | V2 用视图层 frame 实现（违反原则 1） | 提案 |
+| `table` / `tableRow` / `tableCell` / `tableHeader` | 同名 | 直搬，删 tableCell.children 兼容字段 | V2 已实现 |
+| `columnList` / `column` | 同名 | 直搬 | 提案 |
+| `codeBlock` / `mathBlock` / `mathVisual` | 同名 | 直搬 | V2 已实现（含 mathVisual 占位）|
+| `image` / `figure` / `video` / `audio` / `tweet` | 同名 | 直搬 | V2 已实现 |
+| `fileBlock` / `externalRef` / `htmlBlock` | 同名 | 直搬 | V2 已实现（htmlBlock 待 Phase 2c 确认）|
+| `horizontalRule` / `hardBreak` / `document` / `pageAnchor` | 同名 | 直搬 | V2 已实现 |
 
 具体每个 block 的 attrs schema 在 `relations/pm-note.md`（Phase 2）展开。
 
@@ -160,15 +160,15 @@ V1 [`atom-types.ts:147-390`](../../../../../../KRIG-Note/src/shared/types/atom-t
 
 **逐项处置**（仅列重要项 + 全部 @deprecated 字段）：
 
-| V1 Content 接口 | V2 处置 |
-|---|---|
-| `ParagraphContent.{children, textIndent, indent, align}` | textBlock.attrs: {textIndent, indent, align}; children → content |
-| `HeadingContent.{level, children, ...}` | headingBlock.attrs: {level, textIndent, indent, align}; children → content |
-| `ListItemContent.children` | **删**（V1 @deprecated 兼容字段）。V2 listItem 子 block 走 content 嵌套。 |
-| `ListItemContent.{checked, createdAt, completedAt, deadline}` | listItem.attrs（任务项专用字段保留） |
-| `TableCellContent.children` | **删**（V1 @deprecated 兼容字段）。V2 tableCell 子 block 走 content 嵌套。 |
-| `TableCellContent.{colspan, rowspan, isHeader, align}` | tableCell.attrs |
-| 其余 30+ 接口 | 按"V1 字段 → V2 attrs"机械迁移 |
+| V1 Content 接口 | V2 处置 | 状态 |
+|---|---|---|
+| `ParagraphContent.{children, textIndent, indent, align}` | paragraph.attrs: 当前仅 `isTitle`；textIndent / indent / align 待 Phase 2c TextFlowAttrs Mixin 决议时引入 | ✅ paragraph 节点已实施（decision 005），TextFlowAttrs 待 Phase 2c |
+| `HeadingContent.{level, children, ...}` | heading.attrs: `level: 1-6`（默认 1）；其他字段（textIndent/indent/align）同上 | ✅ heading 节点已实施（decision 005 D2），其余待 Phase 2c |
+| `ListItemContent.children` | **删**（V1 @deprecated 兼容字段）。V2 listItem 子 block 走 content 嵌套。 | V2 已实现 |
+| `ListItemContent.{checked, createdAt, completedAt, deadline}` | listItem.attrs（任务项专用字段保留） | 提案；deadline → due 待 Phase 2c |
+| `TableCellContent.children` | **删**（V1 @deprecated 兼容字段）。V2 tableCell 子 block 走 content 嵌套。 | V2 已实现 |
+| `TableCellContent.{colspan, rowspan, isHeader, align}` | tableCell.attrs | V2 已实现 |
+| 其余 30+ 接口 | 按"V1 字段 → V2 attrs"机械迁移 | 部分已实施 |
 
 ---
 

@@ -1,9 +1,51 @@
 # Decision 005 — text-block 拆分为 paragraph + heading（V2 代码改造任务）
 
-> **状态**：实施任务（待新对话执行）
-> **设计师 / 审计师**：本对话（feature/L6-data-modeling 分支）
-> **实施者**：新对话（feature/L6-block-decomposition 分支）
+> **状态**：✅ **已实施完成**
+> **设计师 / 审计师**：feature/L6-data-modeling 分支
+> **实施者**：feature/L6-block-decomposition 分支（独立 session）
 > **决议日期**：2026-05-11
+> **实施完成**：merge commit `c9ae4e4`（含 12 个实施 commits）
+> **审计通过**：static check 100% + UI 测试 10 项必跑全部通过
+>
+> ## 实施记录
+>
+> | Step | Commit | 内容 |
+> |---|---|---|
+> | 5.2 | `27966a0` | 新建 paragraph block spec |
+> | 5.3 | `278231b` | 新建 heading block spec |
+> | 5.4 | `07a6bde` | Host ENABLED_BLOCKS + createEmptyDoc 切换到 paragraph/heading |
+> | 5.5 | `8ba742b` | api.ts 全部 text-block 引用迁移（含 turnIntoAt / setHeading / 9 处） |
+> | 5.6 | `c9d3757` | title-guard 改 paragraph 守门 |
+> | 5.7 | `3490a98` | heading-keymap 改 setBlockType(heading) |
+> | 5.8 | `f7284ac` | plugins 全部清理 text-block 引用 |
+> | 5.9 | `9dfe4c0` | image / table / list-item 内嵌引用清理 |
+> | 5.10 | `335c403` | capability / lib / slot 层全面清理 |
+> | 5.11 | `2504297` | 删除 text-block 目录 |
+> | 5.12 | `f946f94` | driver 文档加 L6 更新段 |
+> | 5.13-5.14 | `1ad2081` | 验证通过 + 测试报告 |
+> | merge | `c9ae4e4` | Merge feature/L6-block-decomposition → main（--no-ff，36 files / +406 / -295） |
+>
+> ## 设计文档修订记录
+>
+> 实施过程中发现的设计文档遗漏，由设计师在原文档基础上记录（不改动原 §5 步骤文本，避免歧义）：
+>
+> | 修订点 | 内容 |
+> |---|---|
+> | §4.1 / §5.4 ENABLED_BLOCKS 位置 | 文档说"index.ts"，实际 ENABLED_BLOCKS 在 Host.tsx:60-88；index.ts 只在 createEmptyDoc 用 textBlockSpec。实施按真实位置改 |
+> | §5.5 范围 | 文档只点 turnIntoAt，实际 api.ts 内还有 setHeading / getActiveBlockType / setHeadingAt / deleteBlockAt / getBlockAnchorAt / resolveBlockAt / 多个 isEmptyParagraph / insertWithCaption / insertAtomBlock 等 9 处 |
+> | §5.1 起点判据 | npm start 长进程不适合自动化；接受 typecheck 通过作为起点 OK 判据 |
+> | §6.10.1 grep 判据 | .md 文档历史快照说明保留允许；src/platform/renderer/dist 构建产物忽略 |
+>
+> ## 反向更新已对齐的下游文档
+>
+> - `naming-conventions.md` §5 命名变更影响表（节点拆分 / 字段迁移标 ✅ 已实施）
+> - `naming-conventions.md` §6 N3（heading 1-6 schema 部分 ✅）
+> - `decisions/002-v1-fields-migration.md` §"V1 AtomType 枚举字段判定"（V1 → V2 节点名映射表更新，含 paragraph / heading / noteTitle 已实施状态）
+> - `mixins/text-flow.md` §3 适用节点表（标 V2 节点状态 + Phase 2c 引入 attrs）
+>
+> ---
+>
+> **以下为原决议正文**（设计文档，实施已完成，保留作历史记录）：
 
 ---
 

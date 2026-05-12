@@ -71,14 +71,16 @@ interface TextFlowAttrs {
 
 V2 第一波引用 TextFlowAttrs 的节点：
 
-| 节点 type | 引用形式 | 备注 |
-|---|---|---|
-| `paragraph` | `attrs: TextFlowAttrs` | 完全等于 Mixin 字段，无额外字段 |
-| `heading` | `attrs: TextFlowAttrs & { level: 1..6 }` | 加 PM 标准 level 字段 |
-| `blockquote` | `attrs: TextFlowAttrs` | 完全等于 Mixin 字段 |
+| 节点 type | V2 节点状态 | 引用形式（目标态） | V2 当前 attrs |
+|---|---|---|---|
+| `paragraph` | ✅ 已实现（decision 005 / commit `c9ae4e4`） | `attrs: TextFlowAttrs & { isTitle: boolean }` | V2 当前 paragraph.attrs 只有 `isTitle`。TextFlowAttrs 三字段（textIndent / indent / align）**待 Phase 2c 引入** |
+| `heading` | ✅ 已实现（decision 005 D2，level 1-6） | `attrs: TextFlowAttrs & { level: 1..6 }` | V2 当前 heading.attrs 只有 `level`。TextFlowAttrs 三字段**待 Phase 2c 引入** |
+| `blockquote` | ✅ 已实现（V2 既有） | `attrs: TextFlowAttrs` | V2 当前 blockquote.attrs 待核验。TextFlowAttrs 字段引入**待 Phase 2c** |
+
+**Phase 2c 实施动作**：将 TextFlowAttrs 的三个字段（textIndent / indent / align）作为新增 attrs 添加到 paragraph / heading / blockquote 节点 spec.ts。本 Mixin 文档为代码实施提供权威字段定义。
 
 **未来候选**（Phase 2c 后视需要）：
-- noteTitle-style block（V2 已用 `heading level=1` 表达，不需新节点）
+- noteTitle-style block：V2 已用 `paragraph.attrs.isTitle: true` 实现（**不是** `heading level=1`，按 decision 005 D1），不需新节点
 - callout / toggle 等容器 block —— 视真实场景决定（可能仅需 align 不需 indent）
 
 ---
