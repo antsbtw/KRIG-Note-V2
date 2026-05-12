@@ -1,11 +1,12 @@
 # Decision 012 — Phase N Sub-phase 2: noteStore + folderStore 迁移
 
 > **Phase**: N（实施 Phase）/ Sub-phase 2
-> **状态**: 📝 实施任务（待新对话执行）
+> **状态**: ✅ **已实施完成**（feature/L7-sub2-note-folder-migration 分支,§6.2 全部通过,2026-05-12）
 > **设计师 / 审计师**: 本对话（main 分支）
 > **实施者**: 新对话（`feature/L7-sub2-note-folder-migration` 分支）
 > **决议日期**: 2026-05-12
 > **前置依赖**: sub-phase 1 已完成（merge commit `34e3758`）
+> **实施总结**: 11 commits(10 主步骤 + 1 集成测试 fixup);§6.2 7 个核心场景全通过
 
 ---
 
@@ -858,12 +859,14 @@ L7-sub2-note-folder-migration 实施完成请审计
 
 | 编号 | 问题 | 临时默认 / 应对 |
 |---|---|---|
-| Q1 | step 5.0 IPC 设计采纳 A/B/C 方案 | 等实施者 verify 当前 sub-phase 1 架构后停下汇报，设计师批复 |
-| Q2 | EM6 cascade delete 验证（SurrealDB EVENT 触发器） | step 5.4 验证，失败则降级为 capability 应用层手动 cascade |
+| Q1 | step 5.0 IPC 设计采纳 A/B/C 方案 | ✅ 实施采纳方案 A:capability 居 main + 业务级 IPC + preload bridge + renderer alias |
+| Q2 | EM6 cascade delete 验证（SurrealDB EVENT 触发器） | ✅ sub-phase 1 storage 应用层 cascade 已落,本 sub-phase Path Y 删 folder UI 验证通过 |
 | Q3 | noteCapability subscribe 机制粒度 | 暂全表订阅（任何变更通知全部 view），未来视性能加细粒度 |
 | Q4 | title 派生性能 —— listNotes 时每个 note 都派生 title 是否慢？ | 1000 个以下笔记可接受（实测）。> 1000 时考虑物化视图（Phase N+） |
-| Q5 | note-link plugin 当前用 noteStore 同步 `getNote(id)`，迁 async 后 PM nodeView 怎么处理？ | NodeView mount 时启动 async fetch，渲染时显示 'Loading...' → 加载完后 setText |
-| Q6 | atom domain 注册表是否需要新加 'folder' 显式注册（vs 自动接受任意 string） | spec.md `AtomDomain = string` 开放注册，实施者无需显式 register；但 atom.payload.domain 在 SurrealDB schema 正则约束已允许 |
+| Q5 | note-link plugin 当前用 noteStore 同步 `getNote(id)`，迁 async 后 PM nodeView 怎么处理？ | ✅ 设计师批复 L2:view 层私有 sync cache (`src/views/note/note-cache.ts`),订阅 `onListChanged` 增量更新 |
+| Q6 | atom domain 注册表是否需要新加 'folder' 显式注册（vs 自动接受任意 string） | ✅ spec.md `AtomDomain = string` 开放注册,无需显式 register |
+| Q7 | Path Y 删 folder 误删保护(确认弹窗 / 回收站) | 留 sub-phase 3+ 独立 decision,本 sub-phase Path Y 直删(对齐 macOS Finder)|
+| **Q-tx** | **storage.transaction() 实际无真事务** | **集成测试暴露 SurrealDB Sidecar WebSocket 协议不支持跨 db.query() 的 BEGIN/COMMIT(参 §12)。当前 X3a 退化:直调 fn 无原子性。单机单用户场景可接受。留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿** |
 
 ---
 
@@ -929,3 +932,107 @@ main 不受影响。
 ---
 
 *Decision 012 完整版结束。预估实施工程量 3-5 天。*
+
+---
+
+## 12. 实施实际情况(2026-05-12 反向更新)
+
+### 12.1 commits 序列(共 11 个)
+
+| Step | Commit | 内容 |
+|---|---|---|
+| 5.2 | `9c5ae22` | semantic/types 加 folder domain + FolderPayload |
+| 5.3 | `c5200a3` | clearLegacyLocalStorage 启动时清理 |
+| 5.4 | `20d4eca` | folderCapability main 端 + IPC handlers (后于 5.8 fixup 为 Path Y) |
+| 5.5 | `4b1f4c4` | noteCapability main 端 + deriveTitle + envelope wrap/unwrap |
+| 5.5b | `e6245cb` | preload bridge + electron-api.d.ts + renderer alias |
+| 5.6 | `b8d92d7` | driver/capability 层 5 文件注释更新 |
+| 5.7 | `9220286` | platform/main extraction 注释更新 |
+| 5.8 | `d68d7ff` | view 层 17 文件迁移 (§4.3 原列 14 + 补入 3) + Step 5.4 Path Y fixup |
+| 5.9 | `cc4573f` | 删除 note-store.ts + folder-store.ts |
+| 5.12 | `8b766f5` | capability DESIGN 文档 |
+| 5.11* | `7d828a6` | **fix: storage.transaction 退化为无事务直调 (X3a)** — 集成测试暴露 |
+
+### 12.2 与原文档的偏离登记
+
+#### 偏离 1: §4.3 消费方清单从 14 扩到 17
+
+**原文档**: 列 14 个文件
+**实际**: 17 个文件
+
+**补入的 3 个**:
+- `src/views/note/link-panel/LinkPanel.tsx` — 实施者发现的额外 import
+- `src/views/note/note-link-search/NoteLinkSearchPanel.tsx` — 实施者发现的额外 import
+- `src/views/note/note-commands.ts` — `data-model.ts` 改 async 的连锁反应,5 处 commandRegistry caller 用 `void (async => {})()` 包装
+
+**根因**: 设计师初始 grep 只覆盖直接 `noteStore` import,漏了传递依赖(data-model 改 async → 调用方需 await/包装)。
+
+**未来 sub-phase 模板教训**: §4.3 消费方 grep 必须追传递依赖,不仅是直接 import。
+
+#### 偏离 2: §3.4 createNote payload 形态(路径 Y)
+
+**原文档**: `payload.payload = { type: 'doc', content: [...] }` (裸 PmPayload)
+**实际**: atom 存裸 PmPayload + capability 边界 wrap/unwrap DriverSerialized 信封
+
+**位置**: `src/platform/main/note/envelope.ts` (wrap/unwrap),`src/platform/main/note/capability-impl.ts` (转换边界)
+
+**根因**: V2 既有 noteStore 用 DriverSerialized 信封,view↔capability 接口必须保留信封;atom 层保持框架无关性(Phase 1 规范)。
+
+#### 偏离 3: §3.5 订阅机制(L2 view 层 sync cache)
+
+**原文档**: capability 层维护 cache + subscribe/getSnapshot/refreshSnapshot 三件套(useSyncExternalStore 兼容)
+**实际**: 
+- capability 层仅 async + `onListChanged` 推送(纯 async)
+- view 层私有 sync cache(`src/views/note/note-cache.ts`)给 driver `resolveNoteTitle` 守约
+- React 组件用 hooks(`src/views/note/use-notes-folders.ts` 的 `useAllNotes` / `useAllFolders`)拿数据
+
+**根因**: 设计师批复 L2 — driver plugin handler sync 约束是 driver 层需求,不应污染 capability 层"全 async"惯例(V2 ebook/learning capability 已 verify 此惯例)。
+
+#### 偏离 4: §3.4 deleteFolder 业务契约(Path Y)
+
+**原文档**: 未明确定义,V1/V2 现状是"删 folder + 子 folder,内含笔记移到根级"
+**实际**: Path Y — 删 folder 递归删子 folder + 内含所有笔记(对齐 macOS Finder)
+
+**位置**: `src/platform/main/folder/capability-impl.ts:142-220` `deleteFolder` + `collectFolderSubtree` + `collectNotesInFolders`
+
+**风险登记**: 误删 folder = 丢笔记。配套保护(确认弹窗 / 回收站)留 sub-phase 3+(Q7)。
+
+#### 偏离 5: Step 5.4 EM6 验证时机
+
+**原文档**: Step 5.4 验证 SurrealDB EVENT 触发器 cascade delete
+**实际**: sub-phase 1 storage 应用层 cascade 已落,EM6 EVENT 触发器验证被吸收。本 sub-phase Step 5.11 UI 集成测试验证应用层 cascade 行为(Path Y 删 folder 后无幽灵 inFolder 边)。
+
+#### 偏离 6 (X3a 集成测试暴露): storage.transaction() 退化
+
+**问题**: SurrealDB Sidecar WebSocket 协议下,`BEGIN/COMMIT` 必须聚合在单段 SQL 内,跨 `db.query()` 拆开发送 → BEGIN 立即被隐式提交 → COMMIT 报 `Cannot COMMIT without starting a transaction`。
+
+**触发**: sub-phase 1 测试路径全是单语句,未走 transaction()。sub-phase 2 `createNote/createFolder/moveNote/moveFolder/deleteFolder` 首次走 transaction,集成测试暴露(commit `7d828a6` 修)。
+
+**修复(X3a 用户拍板)**: `transaction(fn)` 退化为直调 `fn`,无原子性。
+
+**后果**: 单机单用户场景并发概率极低,业务可接受。
+
+**遗留**: Q-tx 留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿模式。
+
+### 12.3 §6.2 UI 集成测试结果
+
+| 序号 | 操作 | 结果 |
+|---|---|---|
+| 6.2.1 | 启动应用 | ✅ 通过 — `[storage] initialized` + `[L0-L5] alive` 全齐 |
+| 6.2.2 | 持久化核心(创建 → 关闭重启 → 内容保留) | ✅ 通过 |
+| 6.2.3 | 多笔记 + 文件夹持久化 | ✅ 通过 |
+| 6.2.4 | 笔记拖移到 folder | ✅ 通过 |
+| 6.2.5 | folder 嵌套 | ✅ 通过 |
+| 6.2.6 | Path Y 删 folder 递归 | ✅ 通过 — folder X / folder Y / note D / note E 全消失 |
+| 6.2.7 | 跨 view 广播 | ✅ 通过 |
+
+EM5(连续 30+ 操作无崩溃)+ EM6(cascade)随核心测试一并通过。
+
+### 12.4 审计结论
+
+**代码层**: 静态校验全通过(typecheck 0 error / lint 0 error / view 0 直引 storage / 17 文件迁移完整 / noteStore + folderStore 已删)。
+
+**行为层**: §6.2 UI 集成测试全通过(含 X3a 修复后)。
+
+**审计判定**: ✅ **通过**,可合 main。
+

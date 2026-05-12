@@ -104,7 +104,7 @@ V2 9 store 按业务复杂度分 4 个 sub-phase 迁移：
 
 **不在范围（已保留）**：业务 store 改造（保留 9 store 现状，sub-phase 2-4 处理）
 
-#### Sub-phase 2: noteStore + folderStore 迁移（最优先）
+#### Sub-phase 2: noteStore + folderStore 迁移（最优先）✅ **已完成**(2026-05-12)
 
 **任务**：noteStore + folderStore 改走 StorageAPI
 
@@ -113,10 +113,12 @@ V2 9 store 按业务复杂度分 4 个 sub-phase 迁移：
 - folderStore 跟 noteStore 紧耦合（folderId 引用），一起迁移避免半完成态
 - 笔记是 V2 核心功能，迁移完成验证最有意义
 
-**完成判据**：
-- 新建笔记 / 编辑 / 关闭重启 → 笔记保留 ✓（解决早期对话提到的"笔记找不到"问题）
-- 文件夹层级正确
-- 跨 workspace 笔记共享正确
+**完成判据**(全部通过):
+- ✅ 新建笔记 / 编辑 / 关闭重启 → 笔记保留(解决"笔记找不到"问题)
+- ✅ 文件夹层级正确(嵌套 / 拖移 / Path Y 删 folder)
+- ✅ 跨 view 广播同步正确
+
+**实施详情**: 见 [`decision 012`](012-sub-phase-2-note-folder-migration.md) + `feature/L7-sub2-note-folder-migration` 分支(11 commits)。
 
 #### Sub-phase 3: graphStore + ebookStore + annotationStore 迁移
 

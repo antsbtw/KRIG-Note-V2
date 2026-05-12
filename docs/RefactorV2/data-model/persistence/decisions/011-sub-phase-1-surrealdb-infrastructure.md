@@ -824,7 +824,12 @@ export const surrealStorage: StorageAPI = new SurrealStorage();
 **实施重点**：
 
 - 所有 CRUD 方法对应 SurrealQL 实施（按 [surreal-schema.md §5](../surreal-schema.md) 查询示例）
-- `transaction` 用 SurrealDB BEGIN/COMMIT
+- ~~`transaction` 用 SurrealDB BEGIN/COMMIT~~ ⚠ **sub-phase 2 集成测试暴露失效**(2026-05-12):
+  - SurrealDB Sidecar WebSocket 协议下 BEGIN/COMMIT 必须聚合在单段 SQL 内,跨 `db.query()` 拆开会让 BEGIN 被立即隐式提交,后续 COMMIT 报 `Cannot COMMIT without starting a transaction`
+  - X3a 修复(commit `7d828a6`): `transaction(fn)` 退化为直调 fn,**无真原子性**
+  - sub-phase 1 audit 未暴露:测试路径仅走 putAtom/deleteAtom 单语句,从未真用 transaction
+  - 这正是本决议 §4.2 "binary 验证风险条款" 命中,sub-phase 1 设计师纸上推演遗漏
+  - Open Question Q-tx 留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿
 - `querySubgraph` 按 [surreal-schema.md §5.3 方案 A 应用层 BFS](../surreal-schema.md) 实施
 - 写入边时校验 subject / object atomId 存在（[decision 008 §5.2](008-storage-layer-interface.md)）
 
