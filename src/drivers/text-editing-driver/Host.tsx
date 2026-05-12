@@ -17,7 +17,8 @@ import { registerUndoScope } from './capability-integrations/undo-scope';
 import { registerDropTargets } from './capability-integrations/dnd-targets';
 import { registerInsertionSafeguards } from './capability-integrations/insertion-safeguards';
 import { setupFloatingToolbarTrigger } from './floating-toolbar-source';
-import { textBlockSpec } from './blocks/text-block/spec';
+import { paragraphSpec } from './blocks/paragraph/spec';
+import { headingSpec } from './blocks/heading/spec';
 import { listItemSpec } from './blocks/list-item/spec';
 import { bulletListSpec } from './blocks/bullet-list/spec';
 import { orderedListSpec } from './blocks/ordered-list/spec';
@@ -58,7 +59,8 @@ import type { TextEditingHostProps, BlockSpec } from './types';
 // L5-B3.14:+ fileBlock / fileLink / externalRef(文件附件三件套;前两者字节进 mediaStore,
 //          externalRef 仅存 URL — KRIG Graph 外部引用关系)
 const ENABLED_BLOCKS: BlockSpec[] = [
-  textBlockSpec,
+  paragraphSpec,
+  headingSpec,
   listItemSpec,
   bulletListSpec,
   orderedListSpec,
