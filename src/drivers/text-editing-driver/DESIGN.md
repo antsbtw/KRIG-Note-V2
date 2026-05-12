@@ -15,6 +15,14 @@
 
 ---
 
+> **L6 更新(2026-05-11)**: 文本流核心已从原"合一节点 text-block(attrs.level/isTitle)"
+> 拆为 **paragraph + heading** 双节点(Decision 005)。本文档历史叙述保留 L5-A 阶段原文
+> (textBlock 单节点),实际代码以拆分后两节点为准。详见:
+> - [Decision 005](../../../docs/RefactorV2/data-model/atom/decisions/005-block-schema-decomposition.md)
+> - [BLOCK-SPEC.md](./BLOCK-SPEC.md) 顶部 L6 更新段
+
+---
+
 ## 0. 上下文 + 范围
 
 ### 0.1 driver 在 V2 架构中的位置

@@ -16,6 +16,17 @@
 
 ---
 
+> **L6 更新(2026-05-11)**: text-editing-driver 文本流节点 'text-block' 已按 PM 标准拆为
+> 'paragraph' + 'heading'(详见 Decision 005)。本文档历史示例 / 命名空间样例中的
+> 'text-block' 字面字符串保留(作为 L5-A 历史快照),实际 driver 现在用 paragraph + heading
+> 双节点。例:
+> - 旧:`text-editing-driver.text-block`(selection source)
+> - 新:`text-editing-driver.paragraph` / `text-editing-driver.heading`(实际可用名,具体见各 driver / capability 实现)
+>
+> driver 内具体节点 id 列表见 [text-editing-driver/BLOCK-SPEC.md](./text-editing-driver/BLOCK-SPEC.md) 顶部 L6 更新段。
+
+---
+
 ## 0. 设计哲学
 
 ### 0.1 为什么需要 driver layer
