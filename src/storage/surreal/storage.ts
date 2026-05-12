@@ -27,17 +27,34 @@ import type {
   AtomRef,
   EdgeEndpoint,
 } from '@semantic/types';
+import { RecordId } from 'surrealdb';
 import { getDB, getMode } from './client';
 import { generateUlid } from '../ulid';
 
 const DEFAULT_OWNER = 'user-default';
+const ATOM_TBL = 'atom';
+const EDGE_TBL = 'edge';
 
 function nowMs(): number {
   return Date.now();
 }
 
-/** SurrealDB 返回的 record id 可能是 `atom:xxxxx` 形式,剥掉表名前缀 */
+/** 把 storage 层 plain string id 包成 SurrealDB RecordId(表前缀分离) */
+function atomRid(id: string): RecordId {
+  return new RecordId(ATOM_TBL, id);
+}
+function edgeRid(id: string): RecordId {
+  return new RecordId(EDGE_TBL, id);
+}
+
+/**
+ * SurrealDB 返回的 id 是 RecordId 实例(toString = 'atom:01KRE...')。
+ * 业务层契约 id 是 plain string(纯 ULID,不含表前缀),从 RecordId 实例剥出 .id 段。
+ */
 function stripRecordPrefix(raw: unknown): string {
+  if (raw instanceof RecordId) {
+    return String(raw.id);
+  }
   if (typeof raw !== 'string') return String(raw);
   const idx = raw.indexOf(':');
   return idx === -1 ? raw : raw.slice(idx + 1);
@@ -74,9 +91,11 @@ class SurrealStorage implements StorageAPI {
     id: string,
   ): Promise<AtomEntity<D> | null> {
     const db = getDB();
+    // SurrealDB id 是 record id (atom:01K..) 而不是 string;
+    // 用 RecordId 实例绑定 + SELECT FROM $rid 直读单条。
     const result = await db.query<[Array<Record<string, unknown>>]>(
-      `SELECT * FROM atom WHERE id = $id LIMIT 1`,
-      { id },
+      `SELECT * FROM $rid LIMIT 1`,
+      { rid: atomRid(id) },
     );
     const row = result[0]?.[0];
     return row ? normalizeAtomEntity<D>(row) : null;
@@ -92,9 +111,8 @@ class SurrealStorage implements StorageAPI {
 
     if (input.id) {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE atom SET payload = $payload, updatedAt = $now
-         WHERE id = $id RETURN AFTER`,
-        { id: input.id, payload: input.payload, now },
+        `UPDATE $rid SET payload = $payload, updatedAt = $now RETURN AFTER`,
+        { rid: atomRid(input.id), payload: input.payload, now },
       );
       const row = result[0]?.[0];
       if (!row) throw new Error(`Atom ${input.id} not found`);
@@ -103,9 +121,9 @@ class SurrealStorage implements StorageAPI {
 
     const id = generateUlid();
     await db.query(
-      `CREATE atom SET id = $id, createdAt = $now, updatedAt = $now,
+      `CREATE $rid SET createdAt = $now, updatedAt = $now,
                        createdBy = $ownerId, payload = $payload`,
-      { id, now, ownerId, payload: input.payload },
+      { rid: atomRid(id), now, ownerId, payload: input.payload },
     );
     return {
       id,
@@ -161,6 +179,7 @@ class SurrealStorage implements StorageAPI {
     const db = getDB();
 
     // 应用层级联删除关联 edges (EVENT 触发器留 sub-phase 2 EM6 后实施)
+    // subject.atomId / object.atomId 字段存的是 plain string,不是 RecordId,所以用 $id (string) 绑定
     const edgeRes = await db.query<[Array<Record<string, unknown>>]>(
       `SELECT id FROM edge
         WHERE subject.atomId = $id
@@ -177,7 +196,10 @@ class SurrealStorage implements StorageAPI {
       );
     }
 
-    const delRes = await db.query<[Array<unknown>]>(`DELETE atom WHERE id = $id RETURN BEFORE`, { id });
+    const delRes = await db.query<[Array<unknown>]>(
+      `DELETE $rid RETURN BEFORE`,
+      { rid: atomRid(id) },
+    );
     const deleted = (delRes[0]?.length ?? 0) > 0;
     return { deleted, cascadedEdges };
   }
@@ -187,8 +209,8 @@ class SurrealStorage implements StorageAPI {
   async getEdge(id: string): Promise<EdgeEntity | null> {
     const db = getDB();
     const result = await db.query<[Array<Record<string, unknown>>]>(
-      `SELECT * FROM edge WHERE id = $id LIMIT 1`,
-      { id },
+      `SELECT * FROM $rid LIMIT 1`,
+      { rid: edgeRid(id) },
     );
     const row = result[0]?.[0];
     return row ? normalizeEdgeEntity(row) : null;
@@ -218,11 +240,10 @@ class SurrealStorage implements StorageAPI {
 
     if (input.id) {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE edge SET predicate = $predicate, subject = $subject, object = $object,
-                         attrs = $attrs, updatedAt = $now
-         WHERE id = $id RETURN AFTER`,
+        `UPDATE $rid SET predicate = $predicate, subject = $subject, object = $object,
+                         attrs = $attrs, updatedAt = $now RETURN AFTER`,
         {
-          id: input.id,
+          rid: edgeRid(input.id),
           predicate: input.predicate,
           subject: input.subject,
           object: input.object,
@@ -237,11 +258,11 @@ class SurrealStorage implements StorageAPI {
 
     const id = generateUlid();
     await db.query(
-      `CREATE edge SET id = $id, createdAt = $now, updatedAt = $now,
+      `CREATE $rid SET createdAt = $now, updatedAt = $now,
                        predicate = $predicate, subject = $subject,
                        object = $object, attrs = $attrs`,
       {
-        id, now,
+        rid: edgeRid(id), now,
         predicate: input.predicate,
         subject: input.subject,
         object: input.object,
@@ -307,8 +328,8 @@ class SurrealStorage implements StorageAPI {
   async deleteEdge(id: string): Promise<{ deleted: boolean }> {
     const db = getDB();
     const result = await db.query<[Array<unknown>]>(
-      `DELETE edge WHERE id = $id RETURN BEFORE`,
-      { id },
+      `DELETE $rid RETURN BEFORE`,
+      { rid: edgeRid(id) },
     );
     return { deleted: (result[0]?.length ?? 0) > 0 };
   }
@@ -441,8 +462,8 @@ class SurrealStorage implements StorageAPI {
   private async assertAtomExists(atomId: string, role: 'subject' | 'object'): Promise<void> {
     const db = getDB();
     const result = await db.query<[Array<{ id: unknown }>]>(
-      `SELECT id FROM atom WHERE id = $id LIMIT 1`,
-      { id: atomId },
+      `SELECT id FROM $rid LIMIT 1`,
+      { rid: atomRid(atomId) },
     );
     if (!result[0] || result[0].length === 0) {
       throw new Error(`Edge ${role} atom not found: ${atomId}`);
