@@ -1,7 +1,7 @@
 # pm-note —— pm atom 如何组成一篇 note
 
 > **Phase**: 2c（pm domain 业务展开 / 主索引）
-> **状态**: 撰写中（批 1 进行）
+> **状态**: ✅ **已完成**（批 1 / 批 2 / 批 3 全部产出，33 份子文档 / 待增量维护）
 > **参考依据**: `atom/spec.md` + `mixins/spec.md` + `decisions/004` + `decisions/005` + `naming-conventions.md`
 
 ---
@@ -33,7 +33,7 @@ text: { group: 'inline' }
 - `doc` 由 schema-builder 框架提供，不是 BlockSpec 注册的 block。
 - `text` 是 PM 默认 inline 节点，由 schema-builder 框架提供。
 - **任何 block** 都属于 `'block'` group（含 paragraph / heading / blockquote / list / 等）。
-- **inline 节点**（如 mathInline / codeInline / noteLink）属于 `'inline'` group。
+- **inline 节点**（如 mathInline / hardBreak / noteLink / fileLink）属于 `'inline'` group。
 
 ### 1.2 noteTitle 守门约束
 
@@ -310,4 +310,9 @@ inline / mark（4 份）：
 
 ---
 
-**当前批 1 进度**：主索引（本文件）+ paragraph sample 审计通过。继续铺批 1 其余 6 份子文档。
+**Phase 2c 已完成**：批 1 + 批 2 + 批 3 共 33 份子文档（主索引 + 20 blocks + 4 inlines + 4 marks + basic-marks 五合一）。文档进入**增量维护态**——后续 V2 schema 变更时同步更新对应子文档。
+
+下一步可选方向：
+- Phase 3 persistence（决议 atom 实体 id / 时间戳 / 等存储层包裹）
+- 其他 domain 展开（rdf / embedding / three）
+- Open Questions 收口（PM1-PM4 / 各子文档 P-* Q）
