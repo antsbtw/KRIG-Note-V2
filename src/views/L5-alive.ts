@@ -15,8 +15,13 @@ import type { DndDiagnosticApi } from '@capabilities/drag-and-drop/types';
 import type { InsertionDiagnosticApi } from '@capabilities/insertion/types';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { noteStore } from './note/note-store';
+import { clearLegacyLocalStorage } from '@capabilities/note/migration';
 
 export function reportL5Alive(): void {
+  // L7-sub2 (decision 012 §3.6): V2 切 SurrealDB 后清掉 V1 兼容 localStorage 键
+  // (idempotent,无残留时静默 no-op)
+  clearLegacyLocalStorage();
+
   const selection = getCapabilityApi<SelectionDiagnosticApi>('selection');
   const clipboard = getCapabilityApi<ClipboardDiagnosticApi>('clipboard');
   const undoRedo = getCapabilityApi<UndoRedoDiagnosticApi>('undo-redo');
