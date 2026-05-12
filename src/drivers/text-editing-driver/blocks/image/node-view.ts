@@ -6,7 +6,7 @@
  * - 普通图(有 src,非 SVG):<img> + 左右 resize handles
  * - SVG 图:<div> + safe innerHTML(剥离 script / on*)+ resize
  *
- * caption 区:contentDOM,V2 schema content='text-block',允许空段落
+ * caption 区:contentDOM,V2 schema content='block'(用户实际写 paragraph),允许空段落
  *
  * 关键点:
  * - placeholder ↔ 图态切换 / SVG ↔ 普通图切换 → update 返回 false 让 PM 重建 NodeView

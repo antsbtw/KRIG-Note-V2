@@ -76,7 +76,7 @@ export async function atomsToSvgInput(doc: unknown): Promise<SerializerAtom[]> {
  * - DriverSerialized → 剥 noteTitle 后透传(NoteView 持久化的 doc 复用到画板时
  *   可能带 isTitle,需剥;canvas-text-node 自己持久化的不带 isTitle)
  * - V1 NoteView Atom[] → 转 PMDocNode[] 后剥 noteTitle 封装
- * - 空 / 无效 → canvasEmptyDoc(text-block isTitle:false,非 NoteView 全屏 title)
+ * - 空 / 无效 → canvasEmptyDoc(paragraph isTitle:false,非 NoteView 全屏 title)
  */
 export async function docToDriverSerialized(doc: unknown): Promise<unknown> {
   if (!doc) return canvasEmptyDoc();
@@ -112,7 +112,7 @@ export async function docToDriverSerialized(doc: unknown): Promise<unknown> {
 }
 
 /**
- * 画板文字节点的"空 doc" — 一个 isTitle=false 的空 text-block.
+ * 画板文字节点的"空 doc" — 一个 isTitle=false 的空 paragraph.
  *
  * 不复用 text-editing.createEmptyDoc 因为那个版本首块 isTitle=true(NoteView 标题).
  * 画板节点没有 title 概念,首块就是普通段落.
@@ -124,7 +124,7 @@ function canvasEmptyDoc(): { format: string; version: string; payload: { type: s
     payload: {
       type: 'doc',
       content: [
-        { type: 'text-block', attrs: { isTitle: false, level: null }, content: [] },
+        { type: 'paragraph', attrs: { isTitle: false }, content: [] },
       ],
     },
   };
@@ -156,11 +156,11 @@ function isDriverSerialized(x: unknown): x is DriverSerializedLite {
 
 /**
  * 剥掉 atomsToProseMirror 硬补的 noteTitle 节点(画板节点没 title).
- * V2 schema 节点名 `text-block`(带短横线,对齐 V2 BlockSpec.id;不是 V1 驼峰 `textBlock`).
+ * V2 schema noteTitle = paragraph(isTitle=true);非 paragraph 节点(heading 等)直接保留.
  */
 function stripNoteTitle(nodes: PMDocNode[]): PMDocNode[] {
   return nodes.filter((n) => {
-    if (n.type !== 'text-block') return true;
+    if (n.type !== 'paragraph') return true;
     const isTitle = (n.attrs as { isTitle?: boolean } | undefined)?.isTitle;
     return !isTitle;
   });

@@ -4,7 +4,7 @@
  */
 
 export interface HandleVisibilityContext {
-  /** 当前 block 节点的 type name(如 'text-block' / 'bulletList')*/
+  /** 当前 block 节点的 type name(如 'paragraph' / 'heading' / 'bulletList')*/
   blockType: string;
   /** 当前 block 节点的 attrs(给 visibleWhen 判断 isTitle / level / indent 等)*/
   blockAttrs: Record<string, unknown>;

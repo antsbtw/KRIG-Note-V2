@@ -3,12 +3,12 @@
  *
  * 行为(对齐 V1):
  * - Enter           → 插入换行(\n),不出 codeBlock
- * - Enter(末尾且最后字符是 \n)→ 删末尾 \n,在 codeBlock 之后插新 text-block(double-enter 跳出)
+ * - Enter(末尾且最后字符是 \n)→ 删末尾 \n,在 codeBlock 之后插新 paragraph(double-enter 跳出)
  * - Tab             → 插 2 空格(代码缩进)
  * - Shift-Tab       → 删行首 2 空格(反缩进)
- * - Backspace(空 codeBlock)→ 替换为 text-block
+ * - Backspace(空 codeBlock)→ 替换为 paragraph
  *
- * 注:V2 text-block 节点 id 是 'text-block'(短横线,L5-A 既存)。
+ * 注:V2 paragraph 节点 id 是 'paragraph'(PM 标准命名)。
  */
 
 import { Plugin, TextSelection } from 'prosemirror-state';
@@ -18,8 +18,8 @@ const INDENT = '  '; // 2 spaces
 
 export function buildCodeBlockKeymap(schema: Schema): Plugin {
   const codeBlock = schema.nodes.codeBlock;
-  const textBlock = schema.nodes['text-block'];
-  if (!codeBlock || !textBlock) {
+  const paragraph = schema.nodes.paragraph;
+  if (!codeBlock || !paragraph) {
     return new Plugin({}); // 缺节点 — 退化为空 plugin(向前兼容)
   }
 
@@ -46,7 +46,7 @@ export function buildCodeBlockKeymap(schema: Schema): Plugin {
             let tr = state.tr;
             tr = tr.delete($from.pos - 1, $from.pos); // 删末尾 \n
             const mappedEnd = tr.mapping.map(blockEnd);
-            tr = tr.insert(mappedEnd, textBlock.create());
+            tr = tr.insert(mappedEnd, paragraph.create());
             tr = tr.setSelection(TextSelection.create(tr.doc, mappedEnd + 1));
 
             // 若 codeBlock 已空,删除它
@@ -91,12 +91,12 @@ export function buildCodeBlockKeymap(schema: Schema): Plugin {
           return true;
         }
 
-        // ── Backspace(空 codeBlock → 替换为 text-block) ──
+        // ── Backspace(空 codeBlock → 替换为 paragraph) ──
         if (event.key === 'Backspace' && blockNode.content.size === 0) {
           event.preventDefault();
           const blockPos = $from.before($from.depth);
           const blockEnd = $from.after($from.depth);
-          const tr = state.tr.replaceWith(blockPos, blockEnd, textBlock.create());
+          const tr = state.tr.replaceWith(blockPos, blockEnd, paragraph.create());
           tr.setSelection(TextSelection.create(tr.doc, blockPos + 1));
           view.dispatch(tr);
           return true;

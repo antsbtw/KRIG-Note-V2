@@ -3,7 +3,7 @@
  *
  * 见 DESIGN.md v0.2.1 § 3 + L5B2 设计 § 3.1。
  *
- * L5-A:只 textBlock + 无 marks
+ * L5-A:只 paragraph 节点 + 无 marks
  * L5-B2:加 4 marks(bold/italic/strike/code)
  */
 

@@ -125,8 +125,9 @@ async function renderAtom(
   defaultTextColor?: string,
 ): Promise<{ svg: string; height: number }> {
   switch (atom.type) {
-    case 'textBlock':
-    case 'text-block':       // V2 BlockSpec.id 用短横线(text-editing-driver text-block/spec.ts:56)
+    case 'textBlock':        // 旧 atom 格式兼容(V1 NoteView)
+    case 'paragraph':        // V2 BlockSpec.id 拆分后:paragraph
+    case 'heading':          // V2 BlockSpec.id 拆分后:heading (level 走 attrs.level)
       return renderTextBlock(atom, yOffset, contentWidth, links, defaultTextColor);
     case 'mathBlock': {
       // NoteView mathBlock schema:content: 'text*',LaTeX 存在 PM 子 text 节点里
@@ -164,7 +165,7 @@ function extractMathLatex(atom: Atom): string {
 }
 
 /**
- * 未识别 atom 的降级渲染:构造一个虚拟 textBlock,内容是 ASCII 占位
+ * 未识别 atom 的降级渲染:构造一个虚拟 paragraph,内容是 ASCII 占位
  * (避免 emoji 字体回退缺失;占位文字不可编辑,只是视觉提示).
  *
  * 详见 docs/graph/canvas/Canvas-M2.1-TextNode-Spec.md §2.3
@@ -176,7 +177,7 @@ async function renderUnknownAtom(
 ): Promise<{ svg: string; height: number }> {
   const label = unknownAtomLabel(atom.type);
   const placeholderAtom: Atom = {
-    type: 'textBlock',
+    type: 'paragraph',
     content: [{ type: 'text', text: label }],
   };
   return renderTextBlock(placeholderAtom, yOffset, contentWidth);

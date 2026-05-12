@@ -10,7 +10,7 @@ import { setupClipboardIntegration } from './capability-integrations/clipboard-h
 import { Host } from './Host';
 import { serializeDoc, deserializeDoc, buildSchema } from './schema-builder';
 import type { TextEditingDriver, DriverSerialized } from './types';
-import { textBlockSpec } from './blocks/text-block/spec';
+import { paragraphSpec } from './blocks/paragraph/spec';
 import './pm-host.css';
 
 // ── 模块加载时的副作用:注册模块级 capability 命令 handler(应用启动一次)──
@@ -42,8 +42,8 @@ export const textEditingDriver: TextEditingDriver = {
  * L5-B3.11:首块带 isTitle:true(对齐 title-guard 约束 — doc 必须以 isTitle 开头)
  */
 export function createEmptyDoc(): DriverSerialized {
-  const schema = buildSchema([textBlockSpec]);
-  const titleNode = schema.node('text-block', { isTitle: true, level: null }, []);
+  const schema = buildSchema([paragraphSpec]);
+  const titleNode = schema.node('paragraph', { isTitle: true }, []);
   const emptyDoc = schema.node('doc', null, [titleNode]);
   return serializeDoc(emptyDoc);
 }

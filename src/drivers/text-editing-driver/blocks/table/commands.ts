@@ -4,7 +4,7 @@
  * V1 → V2 直迁:src/plugins/note/blocks/table/commands.ts
  *
  * V2 改造:
- * - V1 `schema.nodes.textBlock` → V2 `schema.nodes['text-block']`(短横线 id)
+ * - V1 `schema.nodes.textBlock` → V2 `schema.nodes.paragraph`(PM 标准命名,L6 拆分后)
  * - 其他不动
  *
  * 命令清单(全 export — 后续 sub-stage L5-B3.7.1 接 V2 floating-toolbar / context-menu
@@ -56,7 +56,7 @@ function findNearestBlock($pos: ResolvedPos): { pos: number; node: PMNode } {
 /**
  * 在光标当前 block 位置插入表格(替换该 block)
  *
- * V2 schema:第一行 tableHeader,后续 tableCell;每个 cell 含一个 text-block(段落)
+ * V2 schema:第一行 tableHeader,后续 tableCell;每个 cell 含一个 paragraph
  */
 export function insertTable(rows = 3, cols = 3): Command {
   return (state, dispatch) => {
@@ -65,8 +65,8 @@ export function insertTable(rows = 3, cols = 3): Command {
     const rowType = schema.nodes.tableRow;
     const cellType = schema.nodes.tableCell;
     const headerType = schema.nodes.tableHeader;
-    const textBlockType = schema.nodes['text-block'];
-    if (!tableType || !rowType || !cellType || !headerType || !textBlockType) return false;
+    const paragraphType = schema.nodes.paragraph;
+    if (!tableType || !rowType || !cellType || !headerType || !paragraphType) return false;
 
     if (dispatch) {
       const { pos: blockStart, node: blockNode } = findNearestBlock(state.selection.$from);
@@ -74,14 +74,14 @@ export function insertTable(rows = 3, cols = 3): Command {
 
       // 第一行 header
       const headerCells = Array.from({ length: cols }, () =>
-        headerType.create(null, [textBlockType.create()]),
+        headerType.create(null, [paragraphType.create()]),
       );
       const headerRow = rowType.create(null, headerCells);
 
       // body 行
       const bodyRows = Array.from({ length: rows - 1 }, () => {
         const cells = Array.from({ length: cols }, () =>
-          cellType.create(null, [textBlockType.create()]),
+          cellType.create(null, [paragraphType.create()]),
         );
         return rowType.create(null, cells);
       });
@@ -89,8 +89,8 @@ export function insertTable(rows = 3, cols = 3): Command {
       const table = tableType.create(null, [headerRow, ...bodyRows]);
       const tr = state.tr.replaceWith(blockStart, blockEnd, table);
 
-      // 光标进第一个 header cell 内的 text-block
-      // blockStart 是 table 起点,+1 进 table,+1 进 row,+1 进 header,+1 进 text-block,= +4
+      // 光标进第一个 header cell 内的 paragraph
+      // blockStart 是 table 起点,+1 进 table,+1 进 row,+1 进 header,+1 进 paragraph,= +4
       try {
         tr.setSelection(TextSelection.create(tr.doc, blockStart + 4));
       } catch {
@@ -239,7 +239,7 @@ export const duplicateSelectedCells: Command = (state, dispatch) => {
   const schema = state.schema;
   const rowType = schema.nodes.tableRow;
   const cellType = schema.nodes.tableCell;
-  const textBlockType = schema.nodes['text-block'];
+  const paragraphType = schema.nodes.paragraph;
   const { table, tableStart, map } = rect;
 
   const selRect = map.rectBetween(
@@ -267,7 +267,7 @@ export const duplicateSelectedCells: Command = (state, dispatch) => {
             );
           }
         } else {
-          cells.push(cellType.create(null, [textBlockType.create()]));
+          cells.push(cellType.create(null, [paragraphType.create()]));
         }
       }
       newRows.push(rowType.create(null, cells));

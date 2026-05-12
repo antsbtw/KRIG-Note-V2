@@ -14,7 +14,7 @@
  *   tableHeader / tableCell
  *
  * 已实现节点(V2 schema 现成可用):
- *   text-block(段落 + heading 1-3,attrs.level)/ codeBlock / blockquote / horizontalRule /
+ *   paragraph / heading(level 1-6,CommonMark)/ codeBlock / blockquote / horizontalRule /
  *   bulletList > listItem / orderedList > listItem / taskList > taskItem
  *
  * 未实现节点(用 unknown 占位,触发 schema 补齐):
@@ -59,7 +59,8 @@ export type { PMNode };
  */
 export const PM_NODE_REGISTRY = {
   // block — 已实现
-  'text-block': '✅',
+  paragraph: '✅',
+  heading: '✅',
   codeBlock: '✅',
   blockquote: '✅',
   horizontalRule: '✅',
@@ -196,12 +197,12 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       const rawSrc = imgMatch[2];
       const resolved = await resolvePMImageSrc(rawSrc);
       if (resolved.ok && resolved.url) {
-        // image schema content='text-block':必须含一个 caption(可空段落)
+        // image schema content='block':必须含一个 caption(可空段落,paragraph)
         // alt 默认不当 caption(用户可能想自己写),空 caption 让用户后续编辑
         content.push({
           type: 'image',
           attrs: { src: resolved.url, alt },
-          content: [{ type: 'text-block' }],
+          content: [{ type: 'paragraph' }],
         });
       } else {
         content.push(
@@ -253,12 +254,12 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Heading (# ## ###) — V2 用 text-block attrs.level
-    const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
+    // Heading (# ~ ######) — V2 用 heading 节点(D2 level 1-6,CommonMark)
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
     if (headingMatch) {
       const level = headingMatch[1].length;
       content.push({
-        type: 'text-block',
+        type: 'heading',
         attrs: { level },
         content: parseInline(headingMatch[2]),
       });
@@ -283,12 +284,12 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       const innerContent = await markdownToProseMirror(quoteLines.join('\n'));
       content.push({
         type: 'blockquote',
-        content: innerContent.length > 0 ? innerContent : [{ type: 'text-block' }],
+        content: innerContent.length > 0 ? innerContent : [{ type: 'paragraph' }],
       });
       continue;
     }
 
-    // Task list — V2 schema:taskList > taskItem > text-block
+    // Task list — V2 schema:taskList > taskItem > paragraph
     if (/^\s*[-*]\s+\[([ x])\]\s/.test(line)) {
       const items: PMNode[] = [];
       while (i < lines.length && /^\s*[-*]\s+\[([ x])\]\s/.test(lines[i])) {
@@ -296,7 +297,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
         items.push({
           type: 'taskItem',
           attrs: { checked: match[1] === 'x' },
-          content: [{ type: 'text-block', content: parseInline(match[2]) }],
+          content: [{ type: 'paragraph', content: parseInline(match[2]) }],
         });
         i++;
       }
@@ -304,7 +305,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Bullet list — V2 schema:bulletList > listItem > text-block
+    // Bullet list — V2 schema:bulletList > listItem > paragraph
     if (/^\s*[-*]\s+/.test(line) && !/^\s*[-*]\s+\[/.test(line)) {
       const items: PMNode[] = [];
       while (
@@ -315,7 +316,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
         const text = lines[i].replace(/^\s*[-*]\s+/, '');
         items.push({
           type: 'listItem',
-          content: [{ type: 'text-block', content: parseInline(text) }],
+          content: [{ type: 'paragraph', content: parseInline(text) }],
         });
         i++;
       }
@@ -323,14 +324,14 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Ordered list — V2 schema:orderedList > listItem > text-block
+    // Ordered list — V2 schema:orderedList > listItem > paragraph
     if (/^\s*\d+\.\s+/.test(line)) {
       const items: PMNode[] = [];
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
         const text = lines[i].replace(/^\s*\d+\.\s+/, '');
         items.push({
           type: 'listItem',
-          content: [{ type: 'text-block', content: parseInline(text) }],
+          content: [{ type: 'paragraph', content: parseInline(text) }],
         });
         i++;
       }
@@ -359,7 +360,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
           type: 'tableRow',
           content: cells.map((cell) => ({
             type: cellType,
-            content: [{ type: 'text-block', content: parseInline(cell) }],
+            content: [{ type: 'paragraph', content: parseInline(cell) }],
           })),
         });
         isFirst = false;
@@ -375,7 +376,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
 
     // 默认 paragraph
     content.push({
-      type: 'text-block',
+      type: 'paragraph',
       content: parseInline(line),
     });
     i++;

@@ -23,22 +23,23 @@ export function extractPlainText(atoms: Atom[] | undefined | null): string {
   return out.join('');
 }
 
-/** 把任意输入归一化为合法 atom 数组。string → textBlock atom；其他原样。 */
+/** 把任意输入归一化为合法 atom 数组。string → paragraph atom；其他原样。 */
 export function ensureAtomLabel(value: unknown): Atom[] {
   if (Array.isArray(value)) return value as Atom[];
   if (typeof value === 'string') return makeTextLabel(value);
   return [];
 }
 
-/** 用纯文字构造一个 textBlock atom。
+/** 用纯文字构造一个 paragraph atom。
  *
  * 结构对应 SVG 序列化器期待的格式：
- *   textBlock 直接含 inline children（text / 等）
+ *   paragraph 直接含 inline children（text / 等）
  *   见 svg/blocks/textBlock.ts renderTextBlock 实现
+ *   (V2 BlockSpec 拆分后,改用 PM 标准命名 paragraph;旧 'textBlock' 兼容仍保留)
  */
 export function makeTextLabel(text: string): Atom[] {
   return [{
-    type: 'textBlock',
+    type: 'paragraph',
     content: [{ type: 'text', text }],
   }];
 }

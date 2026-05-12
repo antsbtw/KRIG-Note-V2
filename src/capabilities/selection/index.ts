@@ -27,7 +27,7 @@ export interface SelectionPayload {
   // L5-B2:text 模式扩展(仅 text 有意义,其他 kind 缺省即可)
   /** 当前选区激活的 mark 名称列表 — Toolbar active 高亮用 */
   activeMarks?: string[];
-  /** 当前选区所在 block 类型(如 'text-block')*/
+  /** 当前选区所在 block 类型(如 'paragraph' / 'heading' / 'codeBlock')*/
   activeBlockType?: string;
   /** 当前 block 的 heading level — null=paragraph, 1/2/3=heading */
   activeLevel?: number | null;
