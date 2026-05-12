@@ -425,24 +425,27 @@ class SurrealStorage implements StorageAPI {
   // ── 事务 ──────────────────────────────────────────────────
 
   async transaction<T>(fn: (tx: StorageTransaction) => Promise<T>): Promise<T> {
-    const db = getDB();
-    await db.query(`BEGIN TRANSACTION`);
-    try {
-      const tx: StorageTransaction = {
-        getAtom: (id) => this.getAtom(id),
-        putAtom: (input, options) => this.putAtom(input, options),
-        deleteAtom: (id) => this.deleteAtom(id),
-        getEdge: (id) => this.getEdge(id),
-        putEdge: (input, options) => this.putEdge(input, options),
-        deleteEdge: (id) => this.deleteEdge(id),
-      };
-      const result = await fn(tx);
-      await db.query(`COMMIT TRANSACTION`);
-      return result;
-    } catch (err) {
-      try { await db.query(`CANCEL TRANSACTION`); } catch { /* ignore */ }
-      throw err;
-    }
+    // ⚠ SurrealDB Sidecar WebSocket 协议不支持跨 db.query() 调用的真事务:
+    // BEGIN/COMMIT 必须聚合在单段 SQL 文本内,但 fn 是用户 async 回调,
+    // 内部 db.query 多次发送 → BEGIN 后立即被隐式提交,导致后续 COMMIT
+    // 报 "Cannot COMMIT without starting a transaction"。
+    //
+    // 当前退化:直接调 fn 不开真事务,无原子性。
+    // 单机单用户场景并发概率极低,业务可接受(参 decision 008 §X)。
+    //
+    // Open Question(留 sub-phase 3+ 单独评估):
+    // - SDK 原生 transaction API?(surrealdb-js 3.x 待查)
+    // - 应用层补偿模式?(记录已做操作 → 失败时反向)
+    // 见 decision 011 §4.2 binary 验证风险条 + decision 012 §8 Q-tx
+    const tx: StorageTransaction = {
+      getAtom: (id) => this.getAtom(id),
+      putAtom: (input, options) => this.putAtom(input, options),
+      deleteAtom: (id) => this.deleteAtom(id),
+      getEdge: (id) => this.getEdge(id),
+      putEdge: (input, options) => this.putEdge(input, options),
+      deleteEdge: (id) => this.deleteEdge(id),
+    };
+    return fn(tx);
   }
 
   // ── 健康检查 ──────────────────────────────────────────────
