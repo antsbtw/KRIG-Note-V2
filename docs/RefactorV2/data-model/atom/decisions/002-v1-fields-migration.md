@@ -155,7 +155,7 @@ V1 [`atom-types.ts:147-390`](../../../../../../KRIG-Note/src/shared/types/atom-t
 **整体处置**：**这是 block 的 attrs schema，不是 atom 字段**。标签 **D**。
 
 每个 V1 ContentInterface 拆为 V2 block 的：
-- 顶层属性 → block 的 `attrs`（如 `HeadingContent.level` → `headingBlock.attrs.level`）。
+- 顶层属性 → block 的 `attrs`（如 `HeadingContent.level` → `heading.attrs.level`）。
 - `children: InlineElement[]` → block 的 `content`（PM 嵌套）。
 
 **逐项处置**（仅列重要项 + 全部 @deprecated 字段）：
