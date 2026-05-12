@@ -113,10 +113,10 @@ export interface Edge {
    */
   predicate: EdgePredicate;
 
-  /** 关系主语（subject） */
-  subject: EdgeEndpoint;
+  /** 关系主语（subject）—— 按 §5.1 Phase 1 规范层禁止 literal,类型层强制 AtomRef */
+  subject: AtomRef;
 
-  /** 关系宾语（object） */
+  /** 关系宾语（object）—— 允许 atom 或 literal */
   object: EdgeEndpoint;
 
   /** 边属性（必填字段见 §3） */
