@@ -290,6 +290,17 @@ export interface StorageTransaction {
 - ACID 原子性（事务内所有操作要么全成功，要么全失败回滚）
 - 由后端实现（SurrealDB / SQLite 都原生支持）
 
+**SurrealDB 后端实施现状(2026-05-13,sub-phase 3a-tx 完成)**：
+
+事务实施走 SDK 2.x `beginTransaction() + commit() / cancel()` 原生路径,详 [decision 020](020-sub-phase-3a-tx-true-atomicity.md)。13 项 binary verify + 23 项故障注入回归全 PASS。
+
+**已知约束(decision 020 §3.5.ter / §9 Open Questions)**:
+- **OCC 冲突语义**:SurrealDB 走 Optimistic Concurrency Control;两个事务并发写同一 atom/edge 时,后 commit 的会抛 `Transaction conflict: Write conflict, retry the transaction. This transaction can be retried`。本 sub-phase **不内置 retry**(单机单用户场景概率极低),capability 上层可选 try-catch retry。协作场景 retry 策略留 sub-phase 5+ 协作决议(Q-tx-occ-retry,decision 020 §9.4)。
+- **无 SDK 默认超时**:6s+ 长事务实测可正常 commit(场景 8 实证)。capability 长事务防御性 timeout 留独立 sub-phase 评估(Q-tx-perf,decision 020 §9.1)。
+- **cancel 失败不遮盖原 fn 错误**:`storage.transaction` wrapper 内 cancel 失败时 `console.error` 登记并继续抛原 fn 错误,见 decision 020 §4.1 / §9.5。
+
+**SDK 版本绑定纪律(用户 P0)**:surrealdb@^2.0.3 锁定到 KRIG-Note 发布包,跨大版本升级(3.x / 4.x)走独立 sub-phase,详 [SDK-version-binding-policy.md](../SDK-version-binding-policy.md)。
+
 ## 3. 接口使用示例
 
 > ⚠ 以下示例**仅在 capability 层 / platform 层内**调用，view 层禁止直接 import StorageAPI（详 §4.0 调用边界规则）。
