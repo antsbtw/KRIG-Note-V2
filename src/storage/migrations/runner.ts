@@ -29,12 +29,20 @@ const MIGRATIONS: Migration[] = [
 export async function runMigrations(db: Surreal): Promise<void> {
   let currentVersion = '0.0.0';
   try {
-    const versionRes = await db.query<[Array<{ version: string }>]>(
-      `SELECT version FROM schema_version ORDER BY appliedAt DESC LIMIT 1`,
+    // SurrealDB 3.0.4 要求 ORDER BY 字段须出现在 SELECT 子句中 (decision 017 §1.2):
+    // 原语句 `SELECT version FROM ... ORDER BY appliedAt` 触发 parse error,
+    // 被外层 catch 静默吞掉 → currentVersion 永远 0.0.0 → migration 每次启动全跑。
+    const versionRes = await db.query<[Array<{ version: string; appliedAt: number }>]>(
+      `SELECT version, appliedAt FROM schema_version ORDER BY appliedAt DESC LIMIT 1`,
     );
     currentVersion = versionRes[0]?.[0]?.version ?? '0.0.0';
-  } catch {
-    // schema_version 表还不存在 — 视为 0.0.0,后续 initSchema 会创建它
+  } catch (err) {
+    // schema_version 表还不存在(冷启动)或查询失败 — 视为 0.0.0,后续 initSchema 会创建它
+    // catch 不静默:打 warn 露出诊断信息,避免 SQL 语法错误等真实 bug 被埋(decision 017 §1.2)
+    console.warn(
+      '[storage/migrations] schema_version SELECT failed, treating as 0.0.0:',
+      err,
+    );
   }
 
   for (const mig of MIGRATIONS) {
