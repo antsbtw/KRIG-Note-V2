@@ -26,7 +26,8 @@ graph 画板的 text-node (Instance with `ref === 'krig.text.label'`) 持有的 
 本 sub-phase 实施**单引用模式**:一段 pm content 只能被 1 个 Instance 引用。
 `PmAtomInfo.hasBeenReferenced` 字段恒 false。
 
-浅引用 / 跨 view 复用留 3a-shared-ref 子任务,前置 Q-tx (storage.transaction 真原子性) 必做。
+浅引用 / 跨 view 复用留 3a-shared-ref 子任务。前置 Q-tx ✅ 已解决(sub-phase 3a-tx,
+decision 020 — `storage.transaction(fn)` 走 SDK 2.x 原生 `beginTransaction()` 真原子性)。
 
 ## 未来扩展 (3a-N+)
 
