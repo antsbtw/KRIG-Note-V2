@@ -1583,3 +1583,59 @@ decision 017 P0a 修法把 putAtom 改 UPSERT 后,sub-phase 3a-1 实施漏的 ca
 
 cardinality 约束的实施成本远小于事后排查的成本 — 字面拍板时就要同步登记**三层防线落地点**,而非只写"cardinality: 一对一"一行。
 
+### 12.11 后续 hotfix — view 端 DriverSerialized 透传契约引入 P0d(2026-05-13)
+
+sub-phase 3a-1 引入 view 端"DriverSerialized 信封透传"契约(text-node `instance.doc`
+形态 `{ format: 'pm-doc-json', version: '0.1', payload: PmPayload }`),但 canvas-store
+写读两端形态错位:
+
+**写路径** [`canvas-store.incomingDocToPmPayload`](../../../../../src/platform/main/graph/canvas-store.ts#L279)(P0d 修复前):
+- 字面期望 `inst.doc` 是 `unknown[]` 数组(旧 PmPayload.content 直接放数组)
+- 但 view 端实际推 DriverSerialized 信封对象
+- `Array.isArray(inst.doc)` 返 false → 空数组兜底 → pm atom 写空 content → 重启后文字消失
+
+**读路径** [`canvas-store.instanceAtomToObject`](../../../../../src/platform/main/graph/canvas-store.ts#L196)(P0d 修复前):
+- 字面返 `instance.doc = pm_payload.content` 数组形态
+- 与 view 端预期 DriverSerialized 信封不一致 → readback 触发 save 时回写空 doc → 覆盖原内容
+
+**根因**:sub-phase 3a-1 §3.4 pmContentCapability 写决议时,view 端 DriverSerialized
+契约尚未拍板;3a-1 实施时 view 端 driver 演化为 DriverSerialized 信封透传,但 canvas-store
+两端未跟随更新,**字面契约错位**(P0d)。
+
+**P0a 揭露后才显化的 P0d 链**:
+- 017 P0a 修法前(UPDATE-only 抛 not found)pm atom 写入直接失败 → 没机会写空 doc
+- 017 P0a 修法后(UPSERT 存在则更新)pm atom 写空 content 成功 → 重启读 0 字符 = P0d 现象
+
+**修复(decision 018 P0d hotfix,4 commits)**:
+- `2a203e2`:`types.ts` TextNodeAtoms `unknown[] → unknown` 类型契约对齐
+- `f4bc441`:`canvas-store.incomingDocToPmPayload` 识别 DriverSerialized 信封
+- `8659715`:`canvas-store.instanceAtomToObject` 返 DriverSerialized 信封(读路径形态对齐)
+- `db046fb`:`InteractionController.placeInstance` 新建 text-node 初始化空 DriverSerialized
+
+**binary verify 场景 ① 三层实证**(2026-05-13):
+- 用户屏幕 text-node "123-abc*abc" 字面可见
+- HTTP query pm atom `01KRGRZ70S0G50K04W4338V7PN` content 跨重启字面完整保留
+- updatedAt > createdAt 1500+s(view 端 readback 触发 save)但 content 未被覆盖空 →
+  等价覆盖场景 ② update 路径
+
+**P0a-bis 兼容**:P0d 修法字面位置(canvas-store text-node helper 函数)与 P0a-bis K2
+inCanvas 守门(`createInstance` 函数体 putAtom 后 putEdge 前)字面不重叠,merge main 时
+ort 策略自动合并无 conflict(merge commit `7104ad9`)。新建 text-node id 走 K1 ULID
+(`01KRGRZ60YKYJHQ3V2PWRB4C90`),启动 self-check 0 violations。
+
+### 12.12 设计师 P1 教训累积(第 8 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 8 | decision 014 §3.4 pmContentCapability / canvas-store text-node helper | **sub-phase 3a-1 写决议时没核实 view 端 driver 演化路径(DriverSerialized 信封是 sub-phase 3a-1 实施期间确定的形态)。canvas-store 写读两端 helper 函数(`incomingDocToPmPayload` / `instanceAtomToObject`)字面期望旧 PmPayload 数组,但 view 端实际推 DriverSerialized 信封,形态错位写空 doc → P0d 重启丢文字** |
+
+**沉淀**: **跨层透传契约(view ↔ capability ↔ storage)是 sub-phase 必须拍板的关键决议
+块,不是"实施者按需对齐"的注释**。本次实施期间 view 端 driver 演化为 DriverSerialized
+信封,但 canvas-store 没跟随更新 — **形态错位是 17 P0a UPSERT 揭露的第二个 sub-phase 3a-1
+漏(P0d 是第二个,P0a-bis 是第一个)**。
+
+未来跨层透传契约的拍板纪律:
+1. 决议字面登记**两端形态字面**(view 推什么 / capability 写什么 / storage 存什么)
+2. 实施期间形态变更 → **decision 必须同步反向更新**(不是"事后由实施者推断")
+3. 写读两端 helper 函数 → **必须有 grep 实证两端形态一致**,而非"看起来该这样"
+
