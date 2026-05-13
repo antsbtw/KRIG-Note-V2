@@ -467,7 +467,11 @@ interface AtomEntity {
 
 #### 3.5.1.bis ⚠ 一致性约束 — 跟 Q-tx 退化的协同
 
-**问题**: sub-phase 1 storage.transaction() 已退化为无真原子性(commit `7d828a6`)。本契约的关键路径是:
+> **更新(2026-05-13,sub-phase 3a-tx 完成)**:Q-tx 已解决,见 [decision 020](020-sub-phase-3a-tx-true-atomicity.md)。`storage.transaction(fn)` 走 SDK 2.x `beginTransaction()` 原生路径,真原子性恢复。
+>
+> 本节"单引用模式强制"约束**仍然成立**,但触发条件从"Q-tx 未解"改为"sub-phase 3a-shared-ref 未启动"(浅引用是独立架构议题,需配套 UI + 竞态测试,不只是事务原子性)。下文"Q-tx 永不解"措辞已不准确,但单引用模式现状仍然有效,延后到 sub-phase 3a-shared-ref 决议再独立讨论解锁条件。
+
+**问题(历史背景)**: ~~sub-phase 1 storage.transaction() 已退化为无真原子性(commit `7d828a6`)~~ ✅ **已恢复 sub-phase 3a-tx(decision 020)**。本契约的关键路径是:
 
 ```
 读 pm atom hasBeenReferenced → 查现有 hasContent 边数 → 决定是否 cascade 删 → 更新 flag
@@ -481,13 +485,13 @@ interface AtomEntity {
 |---|---|---|
 | **sub-phase 3a-2 (text-node + pmContentCapability)** | 一个 wrapper 创建一个 pm atom(必然 hasBeenReferenced=false 且 1:1) | 引用已有 pm atom 到第 2 个 wrapper(浅引用 / 跨画板共享) |
 | **sub-phase 3a-2.5 (note 升级)** | note 形态升级 + migration 加 hasBeenReferenced=false 给所有现有 pm atom | 同上 |
-| **sub-phase 3a-N+ (浅引用 / 复用)** | 引入浅引用,但**前提是 Q-tx 已解** | 在 Q-tx 未解时引入浅引用 |
+| **sub-phase 3a-N+ (浅引用 / 复用)** | 引入浅引用,但**前提是 Q-tx 已解(✅ sub-phase 3a-tx 已完成)+ 浅引用配套设计完成** | ~~在 Q-tx 未解时引入浅引用~~(Q-tx 已解,但浅引用本身仍需独立 sub-phase 启动)|
 
 **理由**: 单引用模式下,**hasBeenReferenced flag 永远保持 false**(因为永远只有 1 个 wrapper 引用),read-modify-write 不会发生冲突。删除逻辑退化为"草稿态 cascade",跟 sub-phase 2 noteCapability.deleteNote 行为完全一致,**契约成立但不依赖原子性**。
 
 **触发"引入浅引用"的前置门槛**:
 
-1. ✅ Q-tx 已解(SDK 原生 transaction / 应用层补偿模式 / 单点串行更新器,三选一)
+1. ✅ Q-tx 已解(sub-phase 3a-tx 走 SDK 2.x 原生 `beginTransaction()`,[decision 020](020-sub-phase-3a-tx-true-atomicity.md))
 2. ✅ 一致性方案明确(乐观锁 / 悲观锁 / 串行队列,选定后写入 decision)
 3. ✅ 浅引用 UI 入口设计(让用户感知"我在引用,不是复制")
 4. ✅ 单元测试覆盖竞态场景
@@ -502,7 +506,7 @@ interface AtomEntity {
 - 跨 view 复用(同一段内容在 note + graph 同时显示)在 3a-N+ 实现,**当前阶段不暴露给用户**
 - 删除契约的代码逻辑仍按 §3.5.2 实施(检查 flag),但 flag 在 3a-2/2.5 阶段恒为 false,等价于"草稿态自动 cascade"
 
-**好处**: 即便 Q-tx 永远不解(单机单用户场景可接受退化),sub-phase 3a-2/2.5 仍然完整可用,且未来引入浅引用时**契约本身不需要再改**(代码已经按 flag dispatch)。
+**好处(历史背景)**: ~~即便 Q-tx 永远不解(单机单用户场景可接受退化),sub-phase 3a-2/2.5 仍然完整可用~~,且未来引入浅引用时**契约本身不需要再改**(代码已经按 flag dispatch)。 *2026-05-13 更新:Q-tx 已解(decision 020),本"好处"措辞过时但 flag dispatch 设计本身仍是正向价值。*
 
 #### 3.5.2 删除行为
 
@@ -770,8 +774,8 @@ pm atom 不再"是" note,而是"被 note view 引用"。
 | **3a-3** | connector(连接线 — 端点引用其他节点 wrapper)| 3a-1 | 中(新边类型 `krig:connects`)| 按 V2 需求 |
 | **3a-4** | image / media node(wrapper + media content atom,单引用模式)| 3a-1 模板 | 中 | 按 V2 需求 |
 | **3a-5+** | 其他节点类型(按 V2 后续 graph 节点演化)| 各异 | 各异 | 按需 |
-| **3a-tx** | **Q-tx 解决** — SDK 原生 transaction / 应用层补偿 / 单点串行更新器(三选一,独立 decision)| 任意 3a-x | 中-高(影响所有 capability 写路径)| **浅引用前置必做** |
-| **3a-shared-ref** | 浅引用 / 跨 view 复用(同一 pm atom 多 wrapper 引用) | **3a-tx 必须先完成** | 中(竞态保护)| 按 vision 闭环需求触发 |
+| **3a-tx** | **Q-tx 解决** — ~~SDK 原生 transaction / 应用层补偿 / 单点串行更新器(三选一,独立 decision)~~ ✅ **已完成 2026-05-13**:SDK 2.x `beginTransaction()` 原生路径,详 [decision 020](020-sub-phase-3a-tx-true-atomicity.md)| 任意 3a-x | 中-高(影响所有 capability 写路径)| ✅ **已完成** |
+| **3a-shared-ref** | 浅引用 / 跨 view 复用(同一 pm atom 多 wrapper 引用) | **3a-tx 已完成 ✅**,可启动 | 中(竞态保护)| 按 vision 闭环需求触发 |
 | **3a-N** | 后续节点类型(按 graph variant 演化 + Freeform 对标) | 各异 | 各异 | 按需 |
 
 **子任务依赖图**:
