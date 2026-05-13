@@ -51,8 +51,9 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 
 ### 1.4 未解的关键 Open Questions
 
-- **Q-tx**(继承 sub-phase 1):`storage.transaction()` 真原子性未解 — sub-phase 1 X3a 退化(`7d828a6`)。单机单用户场景可接受,但浅引用 / 跨 view 复用前必须解
-- **Q7**(继承 sub-phase 2):误删 folder / canvas 保护(确认弹窗 + 回收站)未实施
+- ~~**Q-tx**(继承 sub-phase 1):`storage.transaction()` 真原子性未解 — sub-phase 1 X3a 退化(`7d828a6`)~~ **✅ 已修 sub-phase 3a-tx**([decision 020](../data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md),2026-05-13;路径 1 SDK 原生 `beginTransaction()` 真原子性 + 5 个调用站点透明受益 + binary verify 12 PASS + Checkpoint 1/2 全 PASS + 17 → 23 故障注入 PASS)
+- **Q-shared-folder-ux**(sub-phase 3a-tx Step 5.7 UI 集成测试期间用户报,2026-05-13):note / graph / 未来 ebook **共享 folder 树**(decision 014 §2.3 字面拍板 + canvas-store.ts:756 注释),用户在 note 模式建的文件夹,在 graph 模式也可见,但**内含 note 在 graph 模式不可见**,易引发误删("看着是空文件夹,实际有 note")。根因:共享语义层 + 视图内容隔离,缺"跨视图删除保护 + 内容指示"UX。**与 Q7 同根**(误删保护),合并讨论;**跟 sub-phase 3a-tx transaction 改造无关**(不阻塞当前 sub-phase 收尾)。**处置**:独立 hotfix 候选(类似 P0e 模式),待 sub-phase 3a-tx 合 main 后单独决议。修法方向(待决议):(a) 删除前 cascade check + 内含资源列表弹窗;(b) folder 树按 view 加内容指示器(N 笔记 / M 画板);(c) 改"共享 folder"为"viewport 视图(按当前视图过滤)",底层仍共享。
+- **Q7**(继承 sub-phase 2):误删 folder / canvas 保护(确认弹窗 + 回收站)未实施。**与 Q-shared-folder-ux 同根**,建议合并讨论(共用一套删除保护 UX)
 - **Q-orphan-surreal-d-state**(sub-phase 3a-1 暴露):sub-phase 1 防御链对内核 D-state 孤儿 surreal 进程无效,只能重启 mac 根治
 - **F1 audit 发现**(sub-phase 3a-1):§6.3.5 读路径自愈端到端 binary verify 未跑(代码已实施,但人为插脏边 → 自愈端到端未验证)
 - ~~**noteCapability listNotes 误列 text-node pm atom**(sub-phase 3a-1 暴露)~~ **✅ 已修**([decision 016](../data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) sub-phase 3a-2.5,note 形态从 "pm atom = note" 升级到 "pm atom + `user:krig:hasNoteView` 边 = note";binary verify §6.2.4 实证:4 个 graph text-node pm atom 字面零 hasNoteView 边 + 4 个 hasNoteView 边都指向真 note pm atom,完全互不污染)
