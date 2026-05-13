@@ -550,41 +550,328 @@ function createStorageTransactionWrapper(surrealTx: SurrealTransaction): Storage
 
 ---
 
-## 5. 实施步骤(待 §3.5 binary verify + 用户 P1 复审后定稿)
+## 5. 实施步骤(按顺序执行 + 每步 commit)
 
-> **§5 占位**:具体 Step 5.0 - 5.N 在 binary verify 完成 + 用户 P1 复审 §0-§4 拍板路径 1 后定稿。
->
-> 预期骨架:
-> - Step 5.0 V2 现状 verify(实施者跑一遍 §0.4 5 项 grep)
-> - Step 5.1 binary verify 复跑(实施者独立验,不只信总指挥决议字面)
-> - Step 5.2 提取 storage helper 到 `queries/` 子模块(可选)
-> - Step 5.3 写 `createStorageTransactionWrapper` + 6 个 ViaTx helper
-> - Step 5.4 改写 `storage.ts:transaction()`,删退化态注释
-> - Step 5.5 typecheck + lint
-> - Step 5.6 故障注入测试 framework + 4 个调用站点回归
-> - Step 5.7 §6 checkpoint binary verify
-> - Step 5.8 反向更新决议清单(本决议 §8)
+> **§5 已定稿**(2026-05-13 binary verify 完成后):路径 1 实证可行,实施步骤按下述顺序推进。
+
+### Step 5.0 — V2 现状 verify(前置 + 实施者独立确认)
+
+**目的**:实施者不只信总指挥决议字面,独立 grep 一遍 §0.4 / §1.2 字面证据。
+
+**任务**:
+1. `git log --oneline -3` 确认 V2 main HEAD = `b8093d9`,当前分支 = `feature/L7-sub3a-tx-true-atomicity`,decision 020 已包含 commit `c1f6b37` + `8cafefb`
+2. `cat package.json | grep surrealdb` 确认 SDK 锁定 `^2.0.3`
+3. `cat src/storage/surreal/storage.ts | sed -n '437,461p'` 确认现状 transaction 是退化态
+4. `grep -n "storage\.transaction\|tx\.putAtom\|tx\.putEdge" src/platform/main/note/capability-impl.ts src/platform/main/folder/capability-impl.ts` 确认 4 个调用站点字面
+5. `grep -n "beginTransaction\|class SurrealTransaction" node_modules/surrealdb/dist/surrealdb.d.ts` 确认 SDK API 字面存在
+
+**完成判据**:5 项 grep 结果跟决议 §0.4 / §1.2 一致;否则停下汇报。
+
+**commit**: 无(纯 verify 步骤,不动代码)
+
+### Step 5.1 — Binary verify 复跑(实施者独立验)
+
+**目的**:实施者不只信决议 §3.5.bis 表格,独立跑 verify 脚本确认 SDK 行为。
+
+**任务**:
+1. 起 surreal binary on 8534:`/opt/homebrew/bin/surreal start --bind 127.0.0.1:8534 --username root --password root --log warn memory &`
+2. 等就绪:`until curl -s http://127.0.0.1:8534/health > /dev/null; do sleep 1; done`
+3. 跑 verify:`node tmp/verify/sub-phase-3a-tx-binary-verify.mjs`
+4. 比对结果与决议 §3.5.bis 表格:关键场景 4/11/13b 必须 PASS
+5. 清理:`pkill -f 'surreal start --bind 127.0.0.1:8534'`
+
+**完成判据**:实跑 12 PASS / 0 FAIL / 2 WARN(场景 12 + 13a),与决议字面一致;若有 FAIL 停下汇报。
+
+**commit**: 无
+
+### Step 5.2 — Storage tx helper 设计 + 文件骨架
+
+**目的**:不动 `storage.ts` 现有公共方法实施,新增 6 个 ViaTx helper 通过 surrealTx 实例跑查询。
+
+**任务**:
+1. 新建 `src/storage/surreal/transaction-helpers.ts`(本决议核心新文件):
+   - 6 个 `*ViaTx` helper:`getAtomViaTx / putAtomViaTx / deleteAtomViaTx / getEdgeViaTx / putEdgeViaTx / deleteEdgeViaTx`
+   - 每个 helper 签名:`(tx: SurrealTransaction, ...args) => Promise<...>`
+   - 内部逻辑跟 `SurrealStorage` 现有同名方法**字面一致**,只把 `await db.query(sql, bindings)` 替换为 `await tx.query(sql, bindings)`
+   - 提取 SurrealStorage 现有 helper(normalize / atomRid / edgeRid / RecordId 解析等)到 `transaction-helpers.ts` 或新建 `queries-common.ts`(实施者可选,只要 storage.ts + transaction-helpers.ts 不重复代码即可)
+2. 不修改 `storage.ts` 公共方法签名 + 实施
+3. import `SurrealTransaction` 类型从 `surrealdb` SDK
+
+**完成判据**:新文件 6 helper 字面齐全,typecheck 通过。
+
+**commit message**:
+```
+feat(storage/surreal): 新增 transaction-helpers.ts 6 个 ViaTx helper
+
+按 decision 020 §4.1 拍板,新增基于 SurrealTransaction 实例的查询 helper:
+- getAtomViaTx / putAtomViaTx / deleteAtomViaTx
+- getEdgeViaTx / putEdgeViaTx / deleteEdgeViaTx
+逻辑沿 SurrealStorage 同名方法,只替换底层 query 调用为 tx.query。
+不改 storage.ts 公共方法签名。
+```
+
+### Step 5.3 — 改写 `SurrealStorage.transaction()` 启用真原子性
+
+**目的**:把退化态(直调 fn)替换为真原子(beginTransaction + commit / cancel)。
+
+**任务**:
+1. 改 [storage.ts:437-461](../../../../../src/storage/surreal/storage.ts#L437):
+   ```typescript
+   async transaction<T>(fn: (tx: StorageTransaction) => Promise<T>, options?: StorageOptions): Promise<T> {
+     const db = getDB();
+     const surrealTx = await db.beginTransaction();
+     try {
+       const tx: StorageTransaction = {
+         getAtom: (id) => getAtomViaTx(surrealTx, id),
+         putAtom: (input, opts) => putAtomViaTx(surrealTx, input, opts ?? options),
+         deleteAtom: (id) => deleteAtomViaTx(surrealTx, id),
+         getEdge: (id) => getEdgeViaTx(surrealTx, id),
+         putEdge: (input, opts) => putEdgeViaTx(surrealTx, input, opts ?? options),
+         deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
+       };
+       const result = await fn(tx);
+       await surrealTx.commit();
+       return result;
+     } catch (err) {
+       try {
+         await surrealTx.cancel();
+       } catch (cancelErr) {
+         console.error('[storage.transaction] cancel failed after fn error', cancelErr);
+         // 不让 cancel 错误遮盖原 fn 错误,继续抛 fn 错误
+       }
+       throw err;
+     }
+   }
+   ```
+2. **删除原 X3a 退化注释**(line 440-446):"⚠ SurrealDB Sidecar WebSocket 协议不支持... 当前退化:直接调 fn 不开真事务,无原子性。"全部删除,**改为指向本决议的简短引用注释**:
+   ```typescript
+   // sub-phase 3a-tx 启用真原子性(decision 020):
+   // SDK 2.x beginTransaction + commit / cancel 包整段。
+   // OCC 冲突 (Transaction conflict) 不在本 sub-phase 处理 (decision 020 §9.4)。
+   ```
+3. import `getAtomViaTx` 等 6 helper 从 `./transaction-helpers`
+
+**完成判据**:typecheck 通过 + grep `"退化\|degraded\|无真原子性"` 在 storage.ts 应零结果。
+
+**commit message**:
+```
+feat(storage/surreal): 启用真原子性 transaction (decision 020 §4.1)
+
+替换 X3a 退化态(直调 fn)为 SDK 原生 beginTransaction + commit/cancel:
+- fn 成功 → commit
+- fn 抛错 → cancel + 重抛原错(cancel 失败仅 console.error,不遮盖)
+- StorageAPI / StorageTransaction 接口签名 0 变化
+- 4 个调用站点零改动(note/folder capability-impl.ts)
+
+X3a 退化注释删除 + 替换为指向 decision 020 的简短引用。
+```
+
+### Step 5.4 — typecheck + lint + 自测
+
+**任务**:
+1. `npx tsc --noEmit` — 应零错误
+2. `npx eslint src/storage/ 2>&1 | tail -10` — 应零新错误
+3. `grep -n "storage\.transaction" src/platform/main/note/capability-impl.ts src/platform/main/folder/capability-impl.ts` — 应仍是 4 个调用站点,字面 0 改动
+4. `git diff src/platform/main/note/capability-impl.ts src/platform/main/folder/capability-impl.ts` — 应字面空(无任何 capability 改动)
+
+**完成判据**:全部通过。任何 typecheck 错误停下汇报。
+
+**commit**: 无(若需要修微调,微调 commit 进 Step 5.3)
+
+### Step 5.5 — §6 Checkpoint 1: SDK transaction 单元 binary verify
+
+**目的**:跑实施期 SDK 行为单元 verify,确认改造后 `storage.transaction(fn)` 与决议 §3.5.bis 行为一致。
+
+**任务**:
+1. 跑 verify 脚本 `tmp/verify/sub-phase-3a-tx-binary-verify.mjs`(本决议撰写期已 PASS,实施者复跑确认 SDK 行为没退化)
+2. **新增**实施期 verify 脚本 `tmp/verify/sub-phase-3a-tx-storage-integration.mjs`:
+   - 直接调 V2 `SurrealStorage.transaction(fn)` 写真 atom / edge
+   - 8 个场景(成功 commit / fn 抛 cancel / putAtom + putEdge 原子 / 事务内 getAtom 中间态 / 删 atom cascade / 长事务 30s timeout / cancel 失败注入 / 关键调用站点 1 个 createNote 模拟)
+   - 用 V2 真 schema(`atom` 表 + `edge` 表),而不是 verify 脚本的临时 schema
+
+**完成判据**:Checkpoint 1 全部 PASS。失败停下汇报。
+
+**commit message**:
+```
+test(storage/surreal): Checkpoint 1 SDK transaction 单元 binary verify PASS
+
+实施期 verify 脚本 sub-phase-3a-tx-storage-integration.mjs 跑 8 场景全 PASS:
+- SurrealStorage.transaction(fn) 改造后行为与 decision 020 §3.5.bis 一致
+- 4 个调用站点假设(createNote / moveNote / moveResource / deleteFolder)
+  原子性符合预期
+```
+
+### Step 5.6 — §7 Checkpoint 2: 全 capability 故障注入回归
+
+**目的**:4 个真实调用站点(note / folder capability)的故障注入测试 — 中途模拟失败,验证回滚行为。
+
+**任务**:见 §7 故障注入测试矩阵详细。
+
+**完成判据**:Checkpoint 2 全部 PASS。
+
+**commit message**:
+```
+test: Checkpoint 2 全 capability 故障注入回归 PASS
+
+4 个 storage.transaction 调用站点故障注入回归(decision 020 §7):
+- note.createNote: 中途 throw → pm atom + hasNoteView 边都不存在
+- note.moveNote: 中途 throw → 旧 inFolder 边保留,新边不存在
+- folder.moveResource: 中途 throw → 资源仍归属旧 folder
+- folder.deleteFolder: 中途 throw → cascade 子树无 partial 删除
+```
+
+### Step 5.7 — UI 集成测试清单(用户跑,实施者待)
+
+**目的**:实施者自测可能漏掉的 UX 路径,用户在 IDE 内跑一遍真 V2 应用确认。
+
+**完整测试清单**(用户跑,见 §6.3):
+
+| # | 场景 | 操作 | 期望 |
+|---|---|---|---|
+| 1 | 创建 note | `Cmd+N` 新建 note | 成功,refresh 后存在 |
+| 2 | 移动 note | 右键 → 移到其他文件夹 | 成功,refresh 后归属正确 |
+| 3 | 移动文件夹 | 右键 → 移文件夹 | 成功,递归归属正确 |
+| 4 | 删除空文件夹 | 右键 → 删除 | 成功消失 |
+| 5 | 删除含 note 文件夹 | 同上,内含 1 note | cascade,note 也消失 |
+| 6 | 删除含 graph 文件夹 | 同上,内含 1 graph | cascade,graph 也消失 |
+| 7 | 删除嵌套子文件夹 | 深 3 层嵌套 | 全 cascade 消失 |
+| 8 | 创建 graph + 添加 text-node | 画布新建 text-node | 成功,refresh 保留 |
+| 9 | refresh 后所有数据保留 | Cmd+R | 全部正确 |
+| 10 | **故障模拟**(实施者协助):中途 kill V2 子进程 | 在 moveFolder 半途 kill V2 | 重启后无 partial 残留(关键!) |
+
+### Step 5.8 — 反向更新决议清单 + memory + 永久文档
+
+**任务**:见 §8 反向更新清单,逐项落地。
+
+**完成判据**:
+- 12 个决议反向更新完成(011 / 008 / 009 / 012 / 013 / 014 / 016 / 017 / 019 / pm-content README / folder DESIGN / L7 启动包)
+- 新建 `docs/RefactorV2/data-model/persistence/SDK-version-binding-policy.md`(必须新增)
+- 新建 memory `feedback_sdk_version_binding_policy.md`(必须新增)
+- 更新 MEMORY.md 加新条目
+
+**commit message**:
+```
+docs: sub-phase 3a-tx 完成后反向更新决议链 + 新增 SDK 版本绑定纪律
+
+- decision 011 §X3a 改"已修复 sub-phase 3a-tx (decision 020)"
+- decision 008 / 012 / 013 / 014 / 016 / 017 / 019 §相关章节同步
+- 移除 pm-content README / folder DESIGN 中"Q-tx 必做"过时表述
+- L7 启动包 §1.4 / §2.1 / §6.2 同步更新
+- 新增 SDK-version-binding-policy.md(用户 P1 硬性,跨子阶段永久规则)
+- 新增 memory feedback_sdk_version_binding_policy.md
+```
+
+### Step 5.9 — 完成报告
+
+**任务**:实施者向总指挥提交完成报告:
+- §5 全 9 step commit hash 列表
+- §6 Checkpoint 1 / 2 实跑结果(PASS / FAIL / WARN 矩阵)
+- §7 故障注入测试结果(4 站点 × N 场景)
+- §10 偏离登记(若有任何偏离决议字面的情况)
+- 自动测试 + 集成测试 通过截图
+
+**等待**:总指挥审计 + UI 集成测试用户反馈 + 拍板合 main。
 
 ---
 
-## 6. binary verify checkpoint(待定稿)
+## 6. binary verify checkpoint(已定稿)
 
-> **§6 占位**:checkpoint 1 = SDK 行为(§3.5 完成时验);checkpoint 2 = 全 capability 故障注入(§5.7 完成时验)。详细 verify 矩阵 § 5 定稿时同步定稿。
+### 6.1 Checkpoint 1 — SDK transaction 单元 verify(Step 5.5)
 
----
+**前置**:本决议撰写期已跑过 [tmp/verify/sub-phase-3a-tx-binary-verify.mjs](../../../../../tmp/verify/sub-phase-3a-tx-binary-verify.mjs) 13 场景,结果归档 §3.5.bis(12 PASS / 0 FAIL / 2 WARN)。
 
-## 7. 故障注入测试矩阵(待定稿)
+**实施期新增 verify**:`tmp/verify/sub-phase-3a-tx-storage-integration.mjs` 8 场景,直接调 V2 `SurrealStorage.transaction(fn)`:
 
-> **§7 占位**:故障注入 framework 设计 + 4 个调用站点逐个故障场景。§5 定稿时同步定稿。
-
----
-
-## 8. 反向更新清单(实施完成后)
-
-| 决议 | 章节 | 更新内容 |
+| # | 场景 | 期望 |
 |---|---|---|
-| [011 sub-phase 1](011-sub-phase-1-surrealdb-infrastructure.md) | §3 line 864-869 X3a 条 | 改"已修复 sub-phase 3a-tx" + 指向本决议 + SDK 版本绑定纪律 |
-| [008 storage interface](008-storage-layer-interface.md) | §事务 | 加 SDK 版本绑定纪律(surrealdb@^2.x,跨版本独立 sub-phase) |
+| 1 | `storage.transaction(async tx => tx.putAtom(...))` + 自然完成 | atom 持久化,主连接能读 |
+| 2 | `storage.transaction(async tx => { tx.putAtom(...); throw new Error('test') })` | atom **不**持久化,异常正确抛出 |
+| 3 | `storage.transaction(async tx => { const a = await tx.putAtom(...); await tx.putEdge({ subject: a.id, ... }); })` 成功 | atom + edge 都持久化 |
+| 4 | 场景 3 + 中途 throw → 两者都不持久化 | 全回滚 |
+| 5 | 事务内 `tx.putAtom + tx.getAtom`(中间态读) | 能读到 |
+| 6 | 长事务模拟:fn 内 `await sleep(30s)` 后 commit | 应成功(无 SDK timeout),storage 层未加 timeoutMs option 时 |
+| 7 | 故意触发 cancel 失败:在 fn throw 前先手动 `await surrealTx.commit()`,再 throw → storage 层应捕获 cancel 失败 + 重抛原 fn 错 | 抛 fn 错而非 cancel 错 |
+| 8 | createNote 模拟:`storage.transaction` 包 putAtom + putEdge hasNoteView,中途 throw → 两者都不在 | 模拟 createNote 调用站点回滚 |
+
+**关键门槛**:8 场景全 PASS。任一 FAIL → STOP + 设计审查会签。
+
+### 6.2 Checkpoint 2 — 全 capability 故障注入回归(Step 5.6)
+
+见 §7 故障注入测试矩阵。
+
+---
+
+## 7. 故障注入测试矩阵(已定稿)
+
+**故障注入策略**:
+- **方式 A**(单测层):在 `fn` 内手动 `throw new Error('FAULT')` 模拟,验证 storage 层回滚
+- **方式 B**(集成层):在 fn 中途 process.kill -SIGKILL(V2 启子进程模拟),验证重启后无 partial — **本 sub-phase 留可选**(单机单用户场景影响低,且 kill -SIGKILL 模拟工程量大)
+
+**方式 A 矩阵**(必跑):
+
+### 7.1 noteCapability.createNote
+
+**调用站点**: [note/capability-impl.ts:60](../../../../../src/platform/main/note/capability-impl.ts#L60)
+
+| # | 故障点 | 期望 |
+|---|---|---|
+| C1 | `tx.putAtom` 前 throw | atom + hasNoteView 边都不存在 |
+| C2 | `tx.putAtom` 后 / `tx.putEdge hasNoteView` 前 throw | atom **不**持久化(关键!), hasNoteView 边不存在 |
+| C3 | `tx.putEdge hasNoteView` 后 / `tx.putEdge inFolder` 前 throw | atom / hasNoteView / inFolder 都不存在 |
+| C4 | folderId=null 路径自然成功 | atom + hasNoteView 边都在,inFolder 边不存在 |
+| C5 | folderId 给定路径自然成功 | atom + hasNoteView + inFolder 都在 |
+
+### 7.2 noteCapability.moveNote
+
+**调用站点**: [note/capability-impl.ts:139](../../../../../src/platform/main/note/capability-impl.ts#L139)
+
+| # | 故障点 | 期望 |
+|---|---|---|
+| M1 | `tx.deleteEdge` (旧 inFolder) 前 throw | 旧 inFolder 边保留,无新边 |
+| M2 | `tx.deleteEdge` 后 / `tx.putEdge` (新 inFolder) 前 throw | 旧 inFolder 边**仍保留**(被回滚),无新边(关键回滚验证!)|
+| M3 | `tx.putEdge` 后自然成功 | 新 inFolder 边在,旧不在 |
+| M4 | newFolderId=null 路径(只删旧 + 不加新) | 旧不在,无新边 |
+
+### 7.3 folderCapability.moveResource
+
+**调用站点**: [folder/capability-impl.ts:54](../../../../../src/platform/main/folder/capability-impl.ts#L54)
+
+| # | 故障点 | 期望 |
+|---|---|---|
+| MR1 | `tx.deleteEdge` 前 throw | 资源仍归属旧 folder |
+| MR2 | `tx.deleteEdge` 后 / `tx.putEdge` 前 throw | **资源仍归属旧 folder(回滚)**,无新边 |
+| MR3 | 完整成功 | 资源归属新 folder |
+
+### 7.4 folderCapability.deleteFolder cascade
+
+**调用站点**: [folder/capability-impl.ts:110, 158](../../../../../src/platform/main/folder/capability-impl.ts#L110)
+
+| # | 故障点 | 期望 |
+|---|---|---|
+| DF1 | cascade 第一个子资源 `tx.deleteAtom` 前 throw | folder + 所有子资源都保留 |
+| DF2 | cascade 第 K 个子资源 `tx.deleteAtom` 后,第 K+1 前 throw | folder + 所有子资源**仍全部保留**(K 个回滚)(关键!) |
+| DF3 | folder 本身 `tx.deleteAtom` 前 throw | folder + 子全保留 |
+| DF4 | 完整成功 cascade | folder + 所有子资源都消失,无悬空边 |
+| DF5 | 嵌套子 folder 深 3 层 cascade | 全消失 |
+
+**全矩阵汇总**:5 + 4 + 3 + 5 = **17 个故障注入测试**,Checkpoint 2 全 PASS 才允许进 Step 5.7 UI 集成。
+
+### 7.5 故障注入测试 framework 设计
+
+实施者可选两种实施方式:
+- **方式 1**(推荐):写 `tmp/verify/sub-phase-3a-tx-fault-injection.mjs`,临时注入 fn 中途 throw,验证 storage 状态
+- **方式 2**:用 `vitest` 或类似框架(V2 当前未集成单测,引入有 sunk cost)
+
+**推荐方式 1**(沿 §3.5 verify 模式),不引入新依赖。
+
+---
+
+## 8. 反向更新清单(实施完成后,Step 5.8 落地)
+
+| 决议 / 文档 | 章节 | 更新内容 |
+|---|---|---|
+| [011 sub-phase 1](011-sub-phase-1-surrealdb-infrastructure.md) | §4.2 line 864-869 X3a 条 | 改"已修复 sub-phase 3a-tx (decision 020)" + 字面指向 §3.5.bis 实证 + SDK 版本绑定纪律 |
+| [008 storage interface](008-storage-layer-interface.md) | §事务 | 加 SDK 版本绑定纪律 + OCC 冲突已知约束(decision 020 §3.5.ter) |
 | [009 migration strategy](009-migration-strategy.md) | §sub-phase 进度 | 加 sub-phase 3a-tx ✅ |
 | [012 sub-phase 2](012-sub-phase-2-note-folder-migration.md) | §8 Q-tx | 改"已解决 sub-phase 3a-tx" |
 | [013 sub-phase 3a 总纲](013-sub-phase-3a-graph-canvas-migration.md) | §3.5.1.bis | 改"已解决 sub-phase 3a-tx" |
@@ -597,10 +884,11 @@ function createStorageTransactionWrapper(surrealTx: SurrealTransaction): Storage
 | `docs/RefactorV2/notes/L7-next-phase-kickoff.md` | §1.4 Q-tx + §6.2 | 改"已解决",移除"3.x 待查"误导;§2.1 sub-phase 3a-tx ✅ |
 | **`docs/RefactorV2/data-model/persistence/SDK-version-binding-policy.md`** | **新建** | **独立永久文档(用户 P1 硬性,非可选)**,骨架见 §4.4 |
 | **memory** `feedback_sdk_version_binding_policy.md` | **新建(用户 P1 硬性,非可选)** | feedback 类型,引用 SDK-version-binding-policy.md;描述:"SDK 选定绑定发布包 + 跨大版本独立决议" |
+| **memory** MEMORY.md | 加新条目 | 链 feedback_sdk_version_binding_policy.md |
 
 ---
 
-## 9. Open Questions(留尾)
+## 9. Open Questions(留尾,binary verify 后更新)
 
 ### 9.1 Q-tx-perf:长事务超时
 
@@ -643,18 +931,41 @@ function createStorageTransactionWrapper(surrealTx: SurrealTransaction): Storage
 
 ---
 
-## 10. 偏离登记(实施期更新,占位)
+## 10. 偏离登记(实施期更新)
 
-> **§10 占位**:实施期间任何偏离本决议字面的情况(SDK 行为意外 / 额外消费点 / 路径调整)由实施者在此登记,总指挥反向更新决议正文。
+> **§10 占位**:实施期间任何偏离本决议字面的情况(SDK 行为意外 / 额外消费点 / 路径调整 / OCC retry 触发等)由实施者在此登记,总指挥反向更新决议正文。
+
+实施期发现需要登记的预期偏离类型:
+- **类型 A**(SDK 行为不符 §3.5.bis):严重,STOP + 设计审查
+- **类型 B**(发现新调用站点):中等,可能影响 §7 矩阵
+- **类型 C**(测试期发现 OCC 冲突):预期外,记录但不阻塞(单机单用户)
+- **类型 D**(typecheck / lint 暴露 implicit any / unsafe cast):低,实施期修复 + 登记
 
 ---
 
-## 11. 累积教训(实施完成后追加,占位)
+## 11. 累积教训(实施完成后追加)
 
-> **§11 占位**:实施完成后总指挥追加本 sub-phase 教训,沿 decision 014 §12 模式。
->
-> 已预登记教训:
-> - **第 9 次设计师教训**(§0.6):涉及外部依赖版本时要 grep `package.json` / `.d.ts` 字面证据,不靠模糊记忆;用户 P0 纪律("绑定发布包")永久登记。
+### 11.1 第 9 次设计师教训(§0.6 已登记)
+
+> **拍板涉及外部依赖版本时,要意识到该选择会绑定到发布包,跨大版本升级是独立 sub-phase 不能合并。**
+
+落点:`SDK-version-binding-policy.md`(永久文档)+ memory `feedback_sdk_version_binding_policy.md`(永久 memory)+ 第 9 次教训写本决议 §0.6 + 反向更新 008 / 011 字面登记。
+
+### 11.2 第 10 次教训(预登记):binary verify 揭示 OCC 冲突语义
+
+> **拍板事务设计时,必须 binary verify 并发语义**(场景 12 揭示 OCC 而非锁定 / last-write-wins),不靠 SDK 文档假设。
+
+本次 binary verify 场景 12 实证 SurrealDB 走 OCC,后 commit 抛 `Transaction conflict: ... can be retried`。本来设计师可能默认假设"两个 transaction 都成功(MVCC 快照隔离)"或"后写覆盖"。**实证才能拍板**。
+
+落点:Q-tx-occ-retry Open Question + decision 008 已知约束 + 留 sub-phase 5+ 协作场景单独决议。
+
+### 11.3 实施完成后追加教训(占位)
+
+> 实施期 / Checkpoint / 集成测试过程中发现的新教训由总指挥追加。
+
+---
+
+*决议 020 §0-§11 全部完成。等待用户 P2 复审,通过后启动独立实施者 session。*
 
 ---
 
