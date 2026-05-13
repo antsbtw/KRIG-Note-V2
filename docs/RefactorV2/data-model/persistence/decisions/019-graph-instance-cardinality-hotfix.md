@@ -316,7 +316,7 @@ attrs:     { createdBy, createdAt }
 | `referencedIn` | 一对多 | **引用**(可在多 canvas 显示)| 删引用 canvas → 只删该画板的 `referencedIn` 边,不动 instance / `inCanvas` 边 |
 
 **前置依赖**:
-- sub-phase 3a-tx(真原子性):多边写入需事务
+- ~~sub-phase 3a-tx(真原子性):多边写入需事务~~ ✅ **已解决**([decision 020](020-sub-phase-3a-tx-true-atomicity.md),2026-05-13)— storage.transaction 走 SDK 2.x 原生 `beginTransaction()`,前置门槛清除
 - `hasBeenReferenced` flag 切换路径(decision 013 §3.5.1.bis):pm atom 出现第 2+ 条 `hasContent` 边时置 true
 
 **当前 sub-phase 不引入此边**(避免死代码占位),仅本节登记接口。
@@ -337,7 +337,7 @@ decision 014 line 704 字面"`inFolder` 一对一约束",但本次 P0a-bis cardi
 - `SELECT ... WHERE NOT EXISTS` 模式 putEdge 前置守门
 - partial UNIQUE index(等 SurrealDB 升级支持)
 
-**前置依赖**:sub-phase 3a-tx 真原子性。
+**前置依赖**:~~sub-phase 3a-tx 真原子性~~ ✅ **已解决**([decision 020](020-sub-phase-3a-tx-true-atomicity.md),2026-05-13)。然 3a-tx 解的是事务原子性,不解决 cardinality 约束本身;Q-3 升级仍需独立 sub-phase(`SELECT ... WHERE NOT EXISTS` putEdge 前置守门是新增 storage API,partial UNIQUE 等 SurrealDB binary 升级)。3a-tx 完成只是清除"无事务原子性下加 cardinality 约束的安全顾虑"。
 
 ---
 
@@ -354,6 +354,7 @@ decision 014 line 704 字面"`inFolder` 一对一约束",但本次 P0a-bis cardi
 | 7 | L7 启动包 §1.4 + §1.5 | P0a-bis 已修(✅ 划线)+ Q-2 inFolder 占位 + 第 7 次教训登记 + 拍板纪律 | ✅ commit `26e2681` |
 | 8 | [`decision 016 §10.1`](016-sub-phase-3a-2.5-note-form-upgrade.md) | hasNoteView 一对一同模式参考,本决议作下游引用 | ✅ commit `03acdfc` |
 | 9 | [`decision 017 §12.7`](017-storage-persistence-hotfix.md) | 链下游:P0a UPSERT 揭露 sub-phase 3a-1 cardinality 漏,P0a-bis 三层防线补完 | ✅ commit `96f5a96` |
+| 10 | 本决议 §Q-shared-ref + §Q-3 字面 | 链下游:sub-phase 3a-tx 已完成([decision 020](020-sub-phase-3a-tx-true-atomicity.md)),前置依赖项 ✅ 划线 + 澄清 3a-tx 不解决 cardinality 约束本身 | ✅ sub-phase 3a-tx Step 5.8 P2-11 反向更新 |
 
 ---
 
