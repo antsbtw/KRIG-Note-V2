@@ -123,7 +123,7 @@
 **本次教训**:本决议 §3 / §4 / §7 草案字面假设 `storage.clearAll()` API 存在 + `EdgeFilter` 支持 objectLiteralValue filter,自审 grep [src/storage/api.ts:21-117](../../../../../src/storage/api.ts#L21) 发现**两项均不存在**。第 5/11 次教训复现:"假设已实施模块自动支持新需求 → 必须 grep 代码字面行为验证"。
 
 **触发场景特性**:
-- decision 020 §3.5.ter binary verify 实证"单语句 BEGIN/COMMIT 字面跑通 OCC 语义",**容易让设计师推测"clearAll 也是单语句"**
+- decision 020 §3.5.bis binary verify 实证"单次 db.query() 承载的多语句事务脚本 BEGIN/COMMIT 跨语句原子",**容易让设计师推测"clearAll 也走单 API 调用"**(混淆"单次 query 调用" 与 "单 SQL 语句" 两个不同概念)
 - LiteralValue 字面在 [semantic/types/edge.ts:14](../../../../../src/semantic/types/edge.ts#L14) 明确含 `type` 字段,**但本决议第一版草案漏掉**(只写 `{ kind: 'literal', value }`)→ 跟 sub-phase 3a-1 P0a 三层防线漏掉 cardinality 一对一约束同型(decision 019 §2.1)
 
 **纪律升级**(跟第 11/13/14 次教训同型):
@@ -742,7 +742,8 @@ export async function runMigration021IfNeeded(): Promise<void> {
   );
 
   // ⚠ StorageAPI 无 clearAll,走 client.ts getDB() 直跑 SurrealQL
-  // 单语句 BEGIN ... COMMIT 实证 sub-phase 3a-tx 单语句原子 (decision 020 §3.5.ter)
+  // 单次 db.query() 承载的多语句事务脚本 BEGIN ... COMMIT
+  // 实证 sub-phase 3a-tx §3.5.bis 场景 1/3/5 跨语句原子 (decision 020)
   const db = getDB();
   await db.query('BEGIN TRANSACTION; DELETE atom; DELETE edge; COMMIT TRANSACTION;');
 
@@ -873,4 +874,16 @@ export async function runMigration021IfNeeded(): Promise<void> {
 
 **字面 commit hash**:由本对话 P1 修订轮 commit 落地,沿决议示例 commit message 格式。
 
-**未来 P2 修订轮预留**:实施期 §10 偏离登记 / 跨 sub-phase 反向更新等 P2 级反馈到达时,本节追加 v0.3 段。
+**未来 P2 修订轮预留**:实施期 §10 偏离登记 / 跨 sub-phase 反向更新等 P2 级反馈到达时,本节追加 v0.4+ 段。
+
+### v0.3(2026-05-13,用户二度复审 1 项低风险文案一致性)
+
+**审计反馈**(用户 2026-05-13 二度复审):
+- v0.2 已达到可实施水平,4 项 v0.2 反馈基本修掉
+- 仅 1 项小修(低风险,无阻断实施):**§7.2 代码示例注释残留"单语句"旧词**
+
+| # | 严重度 | 反馈 | 修复 |
+|---|---|---|---|
+| 5 | 低 | §7.2 代码示例注释 line 745 "单语句 BEGIN ... COMMIT 实证 ... 单语句原子" 与新术语不一致 | 改为 "单次 db.query() 承载的多语句事务脚本 BEGIN ... COMMIT / 实证 sub-phase 3a-tx §3.5.bis 场景 1/3/5 跨语句原子";同时修复 grep 命中的 §0.7 教训段 line 126 同型残留(把"3.5.ter / 容易让设计师推测 clearAll 也是单语句"改写澄清 "单次 query 调用 ≠ 单 SQL 语句" 两个概念) |
+
+**finalize 状态**:用户二度复审字面"已达到可实施水平,我这边没有再看到阻断实施的合规问题"。本决议进入 finalize 阶段,准备合 main → 启动实施者 prompt 编排。
