@@ -915,45 +915,82 @@ decision 014 (sub-phase 3a-1 graph canvas + Instance)
 
 ---
 
-## 12. 实施实际情况(实施后反向更新)
+## 12. 实施实际情况(2026-05-13 反向更新)
 
-> 本节由实施完成后总指挥 + 实施者协作填写。
+> 本节实施完成后总指挥 + 实施者协作填写。**状态**: ✅ 实施完成 + binary verify 8 场景全过 + 反向更新完成,授权合 main。
 
 ### 12.1 commit 序列
 
 | # | Step | Commit | 内容 |
 |---|---|---|---|
-| 1 | 5.2 | (待填) | hasNoteView 边类型注册 |
-| 2 | 5.3 | (待填) | schema 1.2.0 migration |
-| 3 | 5.4 | (待填) | noteCapability 四函数改造 |
-| 4 | 5.7 | (待填) | DESIGN.md 更新 |
+| 1 | 5.2 | `21ac1d2` | 注册 `user:krig:hasNoteView` 边类型(vocab 登记) |
+| 2 | 5.3 | `56a8304` | schema 1.2.0 + `migration_1_2_0` 给现有 note pm atom 加 hasNoteView 边 |
+| 3 | 5.4 | `535ca2e` | noteCapability 4 函数改造(createNote/listNotes/getNote/deleteNote 走 hasNoteView 边) |
+| 4 | 5.5 | `0ae0930` | Merge main(拉 3 hotfix:017 P0a/P0c + 018 P0d + 019 P0a-bis)— ort 策略零 conflict |
+| 5 | 5.7 | `f145384` | DESIGN.md v0.1 → v0.2(形态升级文档化)|
 
-合并 commit: (待填)
+合并 commit: (待合 main 后填,本批次反向更新 commits + merge commit 一并)
 
 ### 12.2 与本决议的偏离登记
 
-(待填)
+**无偏离**。5 个 commits 全部按本决议 §5 步骤(5.2 → 5.3 → 5.4 → 5.5 merge main → 5.6 binary verify → 5.7 DESIGN.md)字面执行;Step 5.5 merge main 期间未触发 conflict(ort 策略自动合并 runner.ts + relations/spec.md,Step 5.3 MIGRATIONS 数组与 017 P0c SELECT 改动字面位置不重叠)。
 
-### 12.3 Checkpoint 1 binary verify 结果(step 5.3 migration)
+### 12.3 Checkpoint 1 binary verify 结果(Step 5.3 migration)
 
-(待填)
+✅ 跟 Step 5.6 §6.2.1 合并实证:启动 migration 1.2.0 `added 2`(2 个 sub-phase 2 老 pm atom 加 hasNoteView)+ schema_version 1.2.0 行存在 + 幂等(老 user-default 边跳过 — 第二次启动 added 0)。
 
-### 12.4 Checkpoint 2 UI 集成测试结果(step 5.6)
+### 12.4 Checkpoint 2 UI 集成测试结果(Step 5.6)
 
-(待填)
+✅ 8 场景全过(2026-05-13 总指挥协调用户跑 + 数据层 HTTP query 双证):
+
+| # | 场景 | 实证 |
+|---|---|---|
+| 6.2.1 | 启动 migration 1.2.0 | `added 2` + schema_version 1.2.0 行 + 幂等 |
+| 6.2.2 | 创建 note "5.6-test-note" | pm atom `01KRGZWADG37CXS4777VEPWK7B` + hasNoteView 边 user-default |
+| **6.2.4** | **graph text-node 不误列**(核心业务价值)| **当前 4 个 graph text-node pm atom(hasContent object)字面零 hasNoteView 边**;4 个 hasNoteView 边都指向真正的 note pm atom(零 hasContent 入边);listNotes 返 4 / graph text-node 隔离 4 / **完全互不污染** |
+| 6.2.5 | listNotes 跨重启 | 数据层 query 实证 |
+| 6.2.6 | getNote 字段 | C-2 UI 实测 |
+| 6.2.7 | folder 兼容(sub-phase 2 行为零破裂)| C-1 UI 实测 |
+| 6.2.8 | P0a-bis K3 self-check 兼容 | inCanvas 4/0/0 + hasContent 2/0/0,**不扫 hasNoteView**(本期 migration 加的边不被自愈清掉) |
 
 ### 12.5 实施期间事故 / 障碍
 
-(待填)
+**无事故**。Step 5.5 merge main 顺利无 conflict;Step 5.6 binary verify 一次通过。
 
-### 12.6 设计师 P1 教训累积(若有第 6 次)
+### 12.6 跟 main 上 3 hotfix 兼容性观察(Step 5.5 后)
 
-(待填)
+| hotfix | 影响点 | 兼容性 |
+|---|---|---|
+| 017 P0a (`putAtom` UPSERT)| createNote 走 `storage.transaction tx.putAtom` 无 id 传入 → CREATE 分支 | ✅ 兼容(未触发 UPSERT 路径)|
+| 017 P0c (runner SELECT)| `runner.ts` 函数体内 SELECT 字面位置 vs Step 5.3 MIGRATIONS 数组字面位置不重叠 | ✅ 自动合并,grep 实证两段都在 |
+| 019 P0a-bis K3 (cardinality-check) | self-check predicate = `['user:krig:inCanvas', 'user:krig:hasContent']`,**不扫 hasNoteView** | ✅ §6.2.8 binary verify 实证 |
+| 018 P0d (canvas-store text-node helper)| DriverSerialized 信封识别在 canvas-store text-node 函数字面位置 vs noteCapability 字面位置完全不重叠 | ✅ 兼容,noteCapability 字面无改动 |
 
-### 12.7 审计结论
+### 12.7 P0e 额外发现(不阻塞合 main)
 
-(待填)
+Step 5.6 binary verify 期间用户报新现象(不在本决议范围):
+
+- **症状**:画板新建 text-node 编辑时,首块默认成 codeBlock 而非 paragraph,显示 `[Code 前缀`
+- **影响**:仅渲染降级(数据层正确,text 字面完整保留)
+- **根因怀疑**:canvas-text-node / text-editing-driver 初始 schema 配置;非 sub-phase 3a-2.5 / P0d / P0a-bis 范围
+- **处置**:留独立 hotfix(决议 020 或类似),sub-phase 3a-2.5 合 main 后单独起新对话
+
+L7 启动包 §1.4 已挂 P0e 占位跟踪。
+
+### 12.8 设计师 P1 教训累积(若有第 X 次)
+
+**无新增 P1 教训**。本 sub-phase 决议字面拍板 + 实施 + binary verify 全过流畅,无设计师漏机制 / 字面错位类问题;P1 教训累积保持第 8 次(参 [decision 014 §12.12](014-sub-phase-3a-1-graph-canvas-instance-migration.md))。
+
+### 12.9 审计结论
+
+**代码合规**:typecheck 0 / eslint 0 error 0 warning / 4 函数字面 100% 对齐决议 §3.2-§3.5。
+
+**行为合规**:Step 5.6 §6.2 8 场景全过 + §6.2.4 核心业务价值(graph text-node 完全隔离)实证通过。
+
+**跨 hotfix 兼容**:Step 5.5 merge main 零 conflict + §6.2.8 K3 self-check 字面证。
+
+**审计判定**:✅ 通过,授权合 main + push + 反向更新决议链。
 
 ---
 
-*Decision 016 草稿结束 — 等用户复审后修订,然后授权合 main。*
+*Decision 016 实施完成。sub-phase 3a-2.5 是 L7 修改版 Y 推进策略第 1 个 sub-phase,note 形态升级从 "pm atom = note" 升级到 "pm atom + hasNoteView 边 = note",核心业务价值是 listNotes 不再误列 graph text-node 的 pm atom。*
