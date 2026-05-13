@@ -34,7 +34,6 @@ import type {
   GraphCanvasPayload,
   PmPayload,
 } from '@semantic/types';
-import { wrapPmDoc } from '../note/envelope';
 import {
   adapterFolderList,
   adapterFolderCreate,
@@ -214,17 +213,19 @@ async function instanceAtomToObject(
   if (payload.text_valign !== undefined) instance.text_valign = payload.text_valign;
 
   // text-node 特例:从 hasContent 边 + pm atom 拼回 doc 字段
+  // V2 view 端契约(decision 018 P0d hotfix):instance.doc 是 DriverSerialized 信封,
+  // view 透明消费(canvas-text-node atom-bridge / NodeRenderer atomBridge 字面识别
+  // format==='pm-doc-json')。读写两端形态对齐,view 端无需处理多形态。
   if (payload.ref === TEXT_LABEL_REF) {
     const pmAtomId = await getPmAtomIdForInstance(atom.id);
     if (pmAtomId) {
       const pmAtom = await storage.getAtom<'pm'>(pmAtomId);
       if (pmAtom && pmAtom.payload.domain === PM_DOMAIN) {
-        // V1/V2 view 期望 doc 字段是 TextNodeAtoms = unknown[] (PM content 数组).
-        // pm atom payload 已是 PmPayload,wrap → 取 payload (= 原 PmPayload).
-        // 实际取 content 数组传给 view (canvas-text-node 桥接消费).
-        const env = wrapPmDoc(pmAtom.payload.payload as PmPayload);
-        const pmDoc = env.payload as PmPayload;
-        instance.doc = pmDoc.content ?? [];
+        instance.doc = {
+          format: 'pm-doc-json',
+          version: '0.1',
+          payload: pmAtom.payload.payload as PmPayload,
+        };
       }
     }
   }
@@ -261,21 +262,46 @@ function incomingInstanceToPayload(inst: Record<string, unknown>): import('@sema
 }
 
 /**
- * 从 view 端 incoming Instance 提取 doc (PM content 数组),包装为完整 PmPayload。
- * 仅 text-node (ref==='krig.text.label') 调用。incoming.doc 是 TextNodeAtoms = unknown[],
- * 需包成 PmPayload { type:'doc', content: [...] } 才能存 pm atom。
+ * 从 view 端 incoming Instance 提取 doc,返完整 PmPayload(供 pm atom 持久化)。
+ *
+ * V2 view 端契约(decision 018 P0d hotfix):inst.doc 是 DriverSerialized 信封对象
+ *   { format:'pm-doc-json', version:'0.1', payload:{ type:'doc', content:[...] } }
+ * 直接拆 payload(本身就是 PmPayload 形态)返。
+ *
+ * 旧契约(unknown[] 数组)在 sub-phase 3a-1 与 view 端的 DriverSerialized 透传
+ * 不一致 — 真实 inst.doc 是对象,Array.isArray 返 false → 空数组兜底 → pm atom
+ * 写空 doc → 重启后文字消失(P0d 根因)。
+ *
+ * 不静默兜底:格式不认时 warn(沿 P0c 修法纪律),返空 doc 但确保问题暴露。
+ *
+ * 仅 text-node (ref==='krig.text.label') 调用。
  */
 function incomingDocToPmPayload(inst: Record<string, unknown>): PmPayload {
-  const docArr = Array.isArray(inst.doc) ? inst.doc : [];
-  return {
-    type: 'doc',
-    content: docArr as PmPayload[],
-  };
+  const doc = inst.doc as unknown;
+  // V2 view 端契约:DriverSerialized 信封 { format:'pm-doc-json', payload:PmPayload }
+  if (doc && typeof doc === 'object' && (doc as Record<string, unknown>).format === 'pm-doc-json') {
+    const payload = (doc as { payload?: unknown }).payload;
+    if (
+      payload && typeof payload === 'object' &&
+      (payload as { type?: string }).type === 'doc' &&
+      Array.isArray((payload as { content?: unknown }).content)
+    ) {
+      return payload as PmPayload;
+    }
+  }
+  // 兜底:格式不认 = view 端契约破裂,记 warn,返空 doc(沿 P0c 修法纪律不静默)
+  console.warn('[graph/canvas-store] incomingDocToPmPayload: unexpected inst.doc shape', doc);
+  return { type: 'doc', content: [] };
 }
 
 /**
  * 新建 instance atom + inCanvas 边;若 text-node 同步建 pm atom + hasContent 边。
  * @param targetId 指定 atom id (view 端预生成);null = storage 生成
+ *
+ * P0a-bis K2 守门:写 inCanvas 边前先查 subject=instanceId 已有 inCanvas 边。
+ * 若已存在(K1 后 ULID 唯一情况下理论不触发,作诊断窗口 + 防御未来违约):
+ *   - warn 记录违约 + 异步清旧边(沿 decision 014 line 735 keep-latest 同模式)
+ *   - 然后写新边,确保 cardinality 一对一(decision 014 §3.3 line 388 字面契约兑现)
  */
 async function createInstance(
   canvasId: string,
@@ -287,6 +313,24 @@ async function createInstance(
     id: targetId ?? undefined,
     payload: { domain: INSTANCE_DOMAIN, payload },
   });
+  // P0a-bis K2:cardinality 守门 — 检查既有 inCanvas 边,有则 warn + 清后再写
+  const existingInCanvas = await storage.listEdges({
+    predicate: IN_CANVAS_PREDICATE,
+    subjectAtomId: created.id,
+  });
+  if (existingInCanvas.length > 0) {
+    console.warn(
+      `[graph/canvas-store] inCanvas cardinality violation on instance ${created.id}: `
+        + `${existingInCanvas.length} existing edge(s), cleaning before writing new edge`,
+    );
+    for (const e of existingInCanvas) {
+      try {
+        await storage.deleteEdge(e.id);
+      } catch (err) {
+        console.warn(`[graph/canvas-store] failed to clean stale inCanvas edge ${e.id}:`, err);
+      }
+    }
+  }
   await storage.putEdge({
     predicate: IN_CANVAS_PREDICATE,
     subject: { kind: 'atom', atomId: created.id },

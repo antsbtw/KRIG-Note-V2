@@ -30,17 +30,20 @@ import type { FillStyle, LineStyle, ArrowStyle, SubstanceDef } from '@capabiliti
 export type InstanceKind = 'shape' | 'substance';
 
 /**
- * 文字节点的语义内容类型(V1 M2.1 引入).
+ * 文字节点的语义内容类型(V1 M2.1 引入;decision 018 P0d hotfix 类型放宽).
  *
- * 与 NoteView 同源:本质是 src/semantic/atom-types.ts 的 Atom[].
- * 此处用 unknown[] 是因为 canvas-rendering/types.ts 是基础类型层,不应直接依赖
- * note 模块;消费方(canvas-text-node 桥接 / 编辑层)做 import + 类型断言.
+ * V2 sub-phase 3a-1 实际形态:DriverSerialized 信封
+ *   { format:'pm-doc-json', version:'0.1', payload:{ type:'doc', content:[...] } }
+ * 而非旧 V1 NoteView Atom[] 扁平形态.形态决议见 docs/RefactorV2/data-model/persistence/decisions/018.
+ *
+ * 此处用 unknown 是因为 canvas-rendering/types.ts 是基础类型层,不应直接依赖
+ * text-editing capability;消费方(canvas-text-node 桥接 / 编辑层)做 import + 类型断言.
  *
  * 详见 docs/10-business-design/graph/canvas/Canvas-M2.1-TextNode-Spec.md §1.
  *
  * **G4 真消费**:canvas-text-node capability 承担 atom ↔ instance.doc 桥接.G3 不渲染文字.
  */
-export type TextNodeAtoms = unknown[];
+export type TextNodeAtoms = unknown;
 
 export interface InstanceEndpoint {
   /** 连接到哪个 instance 的 id */

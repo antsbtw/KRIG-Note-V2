@@ -20,6 +20,7 @@
  */
 
 import * as THREE from 'three';
+import { generateUlid } from '@shared/ulid';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   ShapeLibraryApi,
@@ -253,11 +254,18 @@ export class NodeRenderer {
     return Array.from(this.byId.keys());
   }
 
-  /** 生成不冲突的 instance id */
-  nextInstanceId(prefix = 'i'): string {
-    let n = this.byId.size + 1;
-    while (this.byId.has(`${prefix}-${pad(n)}`)) n++;
-    return `${prefix}-${pad(n)}`;
+  /**
+   * 生成全局唯一 instance id (P0a-bis K1)。
+   *
+   * 历史:V1 用 `i-001` / `i-002` 等 per-NodeRenderer counter 短可读 id;
+   * 但 NodeRenderer 是 per-canvas 实例 → counter 跨画板碰撞 → atom 表 putAtom
+   * UPSERT 撞库(P0a-bis 根因)。
+   *
+   * 改用 monotonic ULID (decision 006):26 字符 Crockford Base32,跨 canvas /
+   * 进程 / 设备天然唯一;前 10 字符是毫秒时间戳,日志肉眼可分组。
+   */
+  nextInstanceId(): string {
+    return generateUlid();
   }
 
   /** fit camera 到所有节点 */
@@ -642,10 +650,6 @@ export class NodeRenderer {
 // ─────────────────────────────────────────────────────────
 // helpers
 // ─────────────────────────────────────────────────────────
-
-function pad(n: number): string {
-  return n.toString().padStart(3, '0');
-}
 
 function ensurePositionSize(
   inst: Instance,

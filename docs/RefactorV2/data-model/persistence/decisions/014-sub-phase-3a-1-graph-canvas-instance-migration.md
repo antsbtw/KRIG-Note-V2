@@ -385,9 +385,18 @@ type StyleOverrides = unknown;       // 沿用 V2 既有 type,实施者从 canva
 predicate: 'user:krig:inCanvas'
 subject:   AtomRef(graph-instance atom)
 object:    AtomRef(graph-canvas atom)
-cardinality: 一对一(一个 Instance 只在一个画板内)
+cardinality: 一对一(归属边 — 一个 Instance 严格归属一个画板)
 attrs:     { createdBy: 'user-default', createdAt }
 ```
+
+⚠ **P0a-bis 反向更新(2026-05-13)**:`inCanvas` 升级为**归属边**语义。
+- **"归属"含义**:容器归属(Instance **诞生于**该 canvas,cascade 跟随 canvas 删除),**不指**编辑者归属(KRIG-Note v1 单机单用户,Owner-Editor 区分无意义)。
+- **机制化保证**(P0a-bis 三层防线,详 [decision 019](019-graph-instance-cardinality-hotfix.md)):
+  1. **K1 view 端**:`NodeRenderer.nextInstanceId` 走 ULID 全局唯一(原 `i-001/i-002` per-canvas counter 撞库已修)
+  2. **K2 store 端**:`canvas-store.createInstance` 在 putEdge inCanvas 前查既有 → keep-latest 自愈(K1 后理论不触发)
+  3. **K3 storage 启动**:`runCardinalityCheck` 扫描 inCanvas + hasContent 一对多边 → keep-latest 异步清理(覆盖历史污染数据)
+- **文档语言**:用 "归属" / "container" / "contained in" 描述,**避免**用 "owner" 字眼(歧义大)。
+- **未来 sub-phase 3a-shared-ref 对照**:届时引入新边 `referencedIn`(暂定名)表示**引用关系**(一对多 cardinality,不改变归属);详 [decision 019 §9](019-graph-instance-cardinality-hotfix.md)。当前 sub-phase **不引入此边**(避免死代码占位)。
 
 #### `user:krig:hasContent`(本 sub-phase 新引入)
 
@@ -1501,4 +1510,132 @@ EM5/EM6 累计远超 30+ 次操作无崩溃,cascade 边路径正确。
 **审计发现**: F1 §6.3.5 读路径自愈端到端 binary verify 未跑(已登记到 §10 反向更新清单尾部)。
 
 **审计判定**: ✅ 通过,合 main。
+
+### 12.7 后续 hotfix — sub-phase 3a-1 view client id 模式触发 P0a(2026-05-13)
+
+sub-phase 3a-1 实施引入 [canvas-store.createInstance](../../../../../src/platform/main/graph/canvas-store.ts#L280)
+"view 端预生成 client-side id"模式(§3.2.x + canvas-store §5.5b 内 update diff
+"新增 (view 端可能预先生成了 client-side id;storage putAtom 允许传 id)"),
+但 sub-phase 1 [putAtom](../../../../../src/storage/surreal/storage.ts#L106) 契约字面是
+UPDATE-only(传 id 必须已存在),**两者错位**导致 graph instance 写入全部抛
+"Atom not found",新 shape 永远不入库(P0a)。
+
+3a-1 实施 / 审计期间 §6.2.2 持久化核心场景通过的原因:**实施期间画板 instance 没传 client id**
+(走 createInstance 不带 targetId 路径,storage 生成 ULID,走 putAtom CREATE 分支
+不触发 UPDATE-only 抛错);后期 sub-phase 3a-2.5 引入用户拖入 hexagon 等 ref-shape
+时 view 端拼出 client id `i-001` 推过来,即刻暴露。
+
+**修复**: [decision 017](017-storage-persistence-hotfix.md) P0a 改 putAtom 为 UPSERT
+短路语义(commit `e6b5ca3`),createdAt/createdBy 用 `field OR $val` 短路。
+
+**附带修 P0c**(runner SELECT 3.0.4 不兼容 + catch 静默,跟 3a-1 范围无关
+但同一 hotfix 一并修;详 017 §1.2)。
+
+**binary verify 三层实证**(2026-05-13 总指挥协调用户跑):
+- shape 3 个跨重启保留 + atom 10 个数据完整(P0a)
+- schema_version 3 条 appliedAt 历史时间(P0c)
+- 重启 0 行 applying 日志(P0c)
+
+**遗留**: P0d 新发现 — text-node pm content 被空 doc 覆盖跨重启丢文字
+(sub-phase 3a-1 §3.4 pmContentCapability 写路径),不在 017 范围,留独立 hotfix。
+
+### 12.8 设计师 P1 教训累积(第 6 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 6 | decision 014 §3.5.3 / canvas-store.createInstance | 设计 "view 端预生成 client id 推过来" 模式时,没核 sub-phase 1 putAtom 契约支不支持;字面注释"storage putAtom 允许传 id"是设计师一厢情愿,实际只 UPDATE 不 UPSERT |
+
+**沉淀**: 跨 sub-phase 调用 storage 契约时,**必须读 storage.ts 源码验证 input 路径行为**,
+而不是按"看起来该这样"假设。注释里写"X 允许 Y"必须配套 grep 实现验证。
+
+### 12.9 后续 hotfix — P0a UPSERT 揭露 inCanvas cardinality 漏机制(2026-05-13 P0a-bis)
+
+decision 017 P0a 修法把 putAtom 改 UPSERT 后,sub-phase 3a-1 实施漏的 cardinality
+机制立刻显化:同一个 instance `i-001` 同时出现在两个画板(用户截图实证)。
+
+**根因 — 决议字面拍板,实施漏机制**:
+
+- decision 014 §3.3 line 388 **字面**:`inCanvas cardinality: 一对一(一个 Instance 只在一个画板内)`
+- 但 sub-phase 3a-1 三层实施全部漏机制保证:
+  - **view 端** [NodeRenderer.nextInstanceId](../../../../../src/capabilities/canvas-rendering/scene/NodeRenderer.ts#L257):基于 `byId.size + 1` 的 per-NodeRenderer counter 生成 `i-001` / `i-002` 短可读 id;NodeRenderer 是 per-canvas 实例 → counter 跨画板碰撞
+  - **store 端** [canvas-store.createInstance](../../../../../src/platform/main/graph/canvas-store.ts#L301):直接走 putEdge inCanvas,不查既有边
+  - **storage 启动**:无 cardinality self-check
+- P0a 修法前(UPDATE-only 抛 not found)隐藏漏(写入失败);P0a 修法后(UPSERT 存在则更新)化为可见(撞库覆盖 + 一对多 inCanvas 边)
+
+**修复 — [decision 019](019-graph-instance-cardinality-hotfix.md) P0a-bis 三层防线**:
+
+1. **K1 view 端**:`nextInstanceId` 改 `generateUlid` 全局唯一(commit `27595aa`)
+2. **K2 store 端**:`createInstance` 加 inCanvas 一对一守门 keep-latest 自愈(commit `8198f56`)
+3. **K3+K4 storage 启动**:`runCardinalityCheck` 扫 inCanvas + hasContent 一对多边 keep-latest 异步清理(commit `0fd3dda`)
+4. **K6 反向更新**:inCanvas 升级归属边语义(本节 §3.3 + relations spec §10.1)
+5. **K7 未来扩展**:decision 019 §9 留 `referencedIn` 边接口(sub-phase 3a-shared-ref)
+
+### 12.10 设计师 P1 教训累积(第 7 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 7 | decision 014 §3.3 line 388 cardinality | **决议字面拍板 "一对一",但实施层(view + store + storage)三层全部漏机制保证。** P0a UPSERT 修法揭露(而非引入)此漏 |
+
+**沉淀**: **决议字面拍板的 cardinality 约束(一对一 / 一对多)是契约,不是注释**。实施时必须:
+1. **view 端 id 生成**:跨 view 实例使用同一种 atom 时,client id 必须**全局**唯一(per-view counter 是踩雷模式)
+2. **store 端 putEdge 前**:对一对一边,必须查既有边 + 自愈(沿 keep-latest 模式)
+3. **storage 启动**:对一对一边,必须有 self-check 兜底(防御实施漏 + 历史污染)
+
+cardinality 约束的实施成本远小于事后排查的成本 — 字面拍板时就要同步登记**三层防线落地点**,而非只写"cardinality: 一对一"一行。
+
+### 12.11 后续 hotfix — view 端 DriverSerialized 透传契约引入 P0d(2026-05-13)
+
+sub-phase 3a-1 引入 view 端"DriverSerialized 信封透传"契约(text-node `instance.doc`
+形态 `{ format: 'pm-doc-json', version: '0.1', payload: PmPayload }`),但 canvas-store
+写读两端形态错位:
+
+**写路径** [`canvas-store.incomingDocToPmPayload`](../../../../../src/platform/main/graph/canvas-store.ts#L279)(P0d 修复前):
+- 字面期望 `inst.doc` 是 `unknown[]` 数组(旧 PmPayload.content 直接放数组)
+- 但 view 端实际推 DriverSerialized 信封对象
+- `Array.isArray(inst.doc)` 返 false → 空数组兜底 → pm atom 写空 content → 重启后文字消失
+
+**读路径** [`canvas-store.instanceAtomToObject`](../../../../../src/platform/main/graph/canvas-store.ts#L196)(P0d 修复前):
+- 字面返 `instance.doc = pm_payload.content` 数组形态
+- 与 view 端预期 DriverSerialized 信封不一致 → readback 触发 save 时回写空 doc → 覆盖原内容
+
+**根因**:sub-phase 3a-1 §3.4 pmContentCapability 写决议时,view 端 DriverSerialized
+契约尚未拍板;3a-1 实施时 view 端 driver 演化为 DriverSerialized 信封透传,但 canvas-store
+两端未跟随更新,**字面契约错位**(P0d)。
+
+**P0a 揭露后才显化的 P0d 链**:
+- 017 P0a 修法前(UPDATE-only 抛 not found)pm atom 写入直接失败 → 没机会写空 doc
+- 017 P0a 修法后(UPSERT 存在则更新)pm atom 写空 content 成功 → 重启读 0 字符 = P0d 现象
+
+**修复(decision 018 P0d hotfix,4 commits)**:
+- `2a203e2`:`types.ts` TextNodeAtoms `unknown[] → unknown` 类型契约对齐
+- `f4bc441`:`canvas-store.incomingDocToPmPayload` 识别 DriverSerialized 信封
+- `8659715`:`canvas-store.instanceAtomToObject` 返 DriverSerialized 信封(读路径形态对齐)
+- `db046fb`:`InteractionController.placeInstance` 新建 text-node 初始化空 DriverSerialized
+
+**binary verify 场景 ① 三层实证**(2026-05-13):
+- 用户屏幕 text-node "123-abc*abc" 字面可见
+- HTTP query pm atom `01KRGRZ70S0G50K04W4338V7PN` content 跨重启字面完整保留
+- updatedAt > createdAt 1500+s(view 端 readback 触发 save)但 content 未被覆盖空 →
+  等价覆盖场景 ② update 路径
+
+**P0a-bis 兼容**:P0d 修法字面位置(canvas-store text-node helper 函数)与 P0a-bis K2
+inCanvas 守门(`createInstance` 函数体 putAtom 后 putEdge 前)字面不重叠,merge main 时
+ort 策略自动合并无 conflict(merge commit `7104ad9`)。新建 text-node id 走 K1 ULID
+(`01KRGRZ60YKYJHQ3V2PWRB4C90`),启动 self-check 0 violations。
+
+### 12.12 设计师 P1 教训累积(第 8 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 8 | decision 014 §3.4 pmContentCapability / canvas-store text-node helper | **sub-phase 3a-1 写决议时没核实 view 端 driver 演化路径(DriverSerialized 信封是 sub-phase 3a-1 实施期间确定的形态)。canvas-store 写读两端 helper 函数(`incomingDocToPmPayload` / `instanceAtomToObject`)字面期望旧 PmPayload 数组,但 view 端实际推 DriverSerialized 信封,形态错位写空 doc → P0d 重启丢文字** |
+
+**沉淀**: **跨层透传契约(view ↔ capability ↔ storage)是 sub-phase 必须拍板的关键决议
+块,不是"实施者按需对齐"的注释**。本次实施期间 view 端 driver 演化为 DriverSerialized
+信封,但 canvas-store 没跟随更新 — **形态错位是 17 P0a UPSERT 揭露的第二个 sub-phase 3a-1
+漏(P0d 是第二个,P0a-bis 是第一个)**。
+
+未来跨层透传契约的拍板纪律:
+1. 决议字面登记**两端形态字面**(view 推什么 / capability 写什么 / storage 存什么)
+2. 实施期间形态变更 → **decision 必须同步反向更新**(不是"事后由实施者推断")
+3. 写读两端 helper 函数 → **必须有 grep 实证两端形态一致**,而非"看起来该这样"
 
