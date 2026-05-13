@@ -1639,3 +1639,32 @@ ort 策略自动合并无 conflict(merge commit `7104ad9`)。新建 text-node id
 2. 实施期间形态变更 → **decision 必须同步反向更新**(不是"事后由实施者推断")
 3. 写读两端 helper 函数 → **必须有 grep 实证两端形态一致**,而非"看起来该这样"
 
+### 12.13 链下游 — sub-phase 3a-2.5 noteCapability listNotes 误列修复(2026-05-13)
+
+sub-phase 3a-1 引入 graph text-node 走 pm atom domain(本决议 §3.4 pmContentCapability)
++ `hasContent` 边,但**实施时未同步升级 noteCapability** — `listNotes()` 字面
+`storage.listAtoms({ domain: 'pm' })` 全 pm domain 一锅端,**误把 graph text-node
+内容当 note 列出**。
+
+**P0d binary verify 期间用户截图实证**(2026-05-13):画板新建 text-node
+`"123-abc*abc"` 后,note 列表里出现此条目 → 这是 sub-phase 3a-2.5 [decision 016 §1.1
++ §6.2.4](016-sub-phase-3a-2.5-note-form-upgrade.md) 要修的核心业务 bug。
+
+**修复**:[decision 016](016-sub-phase-3a-2.5-note-form-upgrade.md) sub-phase 3a-2.5 —
+note 形态从 "pm atom = note" 升级到 "**pm atom + `user:krig:hasNoteView` 边 = note**":
+
+- `listNotes()` 改走 `listEdges({ predicate: 'user:krig:hasNoteView' })` → 拿 subject
+  atom ids → `getAtom` 批读
+- graph text-node pm atom 字面零 hasNoteView 边 → 完全隔离不再误列
+
+**§6.2.4 binary verify 实证**(decision 016 §12.4):
+- 当前 4 个 graph text-node pm atom(hasContent object)字面**零 hasNoteView 边**
+- 4 个 hasNoteView 边都指向真正的 note pm atom(零 hasContent 入边)
+- listNotes 返 4 / graph text-node 隔离 4 / **完全互不污染**
+
+**链下游意义**:sub-phase 3a-1 设计师漏机制累积第 3 项(在 P0a-bis cardinality 漏 +
+P0d 形态错位之后):**pm domain 复用时未同步升级 listNotes 边过滤**。这三层漏共同
+组成 sub-phase 3a-1 实施期间的"决议字面拍板但实施漏机制"模式累积,详 sub-phase
+3a-2.5 [decision 016 §12.X](016-sub-phase-3a-2.5-note-form-upgrade.md) +
+[decision 012 §12.6](012-sub-phase-2-note-folder-migration.md)。
+

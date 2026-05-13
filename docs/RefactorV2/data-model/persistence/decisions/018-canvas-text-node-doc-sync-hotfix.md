@@ -496,6 +496,28 @@ binary verify 期间用户截图发现 graph text-node 内容(刚输入的 "123-
 | 4 | [decision 019 §12.X](019-graph-instance-cardinality-hotfix.md) | P0a-bis K1 ULID + K3 self-check 兼容 P0d 修法 | 待落 |
 | 5 | L7 启动包 §1.4 | P0d ✅ 已修(去掉占位) | 待落 |
 
+### 12.6 链下游 — listNotes 误列由 sub-phase 3a-2.5 修复(2026-05-13)
+
+§12.4 字面预告的 "graph text-node 内容误列在 note 列表里" 现象,sub-phase 3a-2.5
+合 main 后通过 `hasNoteView` 边形态升级修复完成。
+
+**修复决议**:[decision 016](016-sub-phase-3a-2.5-note-form-upgrade.md) — note 形态从
+"pm atom = note" 升级到 "pm atom + `user:krig:hasNoteView` 边 = note"。
+
+**核心 binary verify**(decision 016 §12.4 §6.2.4):
+- 4 个 graph text-node pm atom 字面**零 hasNoteView 边**
+- 4 个 hasNoteView 边都指向真正的 note pm atom(零 hasContent 入边)
+- listNotes 返 4 / graph text-node 隔离 4 / **完全互不污染**
+
+**跨 hotfix 链完整闭环**(017 + 018 + 019 + sub-phase 3a-2.5):
+- P0d 修法本职 text-node 内容写入正确性 ✅(本决议)
+- P0a-bis 修法 inCanvas cardinality ✅(decision 019)
+- sub-phase 3a-2.5 修法 note 形态升级 ✅(decision 016)
+- 三层共同覆盖 sub-phase 3a-1 三个漏机制(DriverSerialized 错位 / cardinality 漏 / listNotes 误列)
+
+L7 启动包 §1.4 字面 "noteCapability listNotes 误列 text-node pm atom" Open Question
+占位:✅ 已修(随 sub-phase 3a-2.5 合 main)。
+
 ---
 
 ## 13. P1 教训第 7 次记录

@@ -1,4 +1,5 @@
 import { RecordId, type Surreal } from 'surrealdb';
+import { surrealStorage } from './storage';
 
 /**
  * V2 SurrealDB schema 初始化
@@ -125,5 +126,63 @@ export async function migration_1_1_0(db: Surreal): Promise<void> {
       appliedAt = $now,
       description = 'Add atom.hasBeenReferenced field (Phase N sub-phase 3a-1)'`,
     { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.2.0 migration up — 给 note 形态的 pm atom 加 user:krig:hasNoteView 边
+ * (decision 016 §3.6 / sub-phase 3a-2.5)。
+ *
+ * 判据:pm atom 满足 (1) 未被任何 hasContent 边引用 (object) + (2) 未已有
+ * hasNoteView 边 (subject) 时加边。
+ *
+ * (1) = "不是 graph text-node 的内容 ref 目标" 字面等价于 "noteCapability
+ * 创建的 pm atom"(决议 §3.6 阶段性启发式,基于本 sub-phase 时刻 3 个 pm
+ * atom 产生点的事实)。
+ * (2) 是幂等保护 — 重启重跑后 added=0。
+ *
+ * 复用 surrealStorage facade 而非手写 SurrealQL,避免与 storage 层查/插边
+ * 实施重复;facade 内部 getDB() 懒解析,initSurrealDB() 已先于 runMigrations
+ * 完成 (src/storage/index.ts:28-31),调用安全。
+ */
+export async function migration_1_2_0(_db: Surreal): Promise<void> {
+  const pmAtoms = await surrealStorage.listAtoms({ domain: 'pm' });
+
+  const hasContentEdges = await surrealStorage.listEdges({
+    predicate: 'user:krig:hasContent',
+  });
+  const referencedPmAtomIds = new Set<string>();
+  for (const e of hasContentEdges) {
+    if (e.object.kind === 'atom') referencedPmAtomIds.add(e.object.atomId);
+  }
+
+  const existingHasNoteViewEdges = await surrealStorage.listEdges({
+    predicate: 'user:krig:hasNoteView',
+  });
+  const alreadyHasNoteView = new Set<string>(
+    existingHasNoteViewEdges.map((e) => e.subject.atomId),
+  );
+
+  let added = 0;
+  const now = Date.now();
+  for (const atom of pmAtoms) {
+    if (referencedPmAtomIds.has(atom.id)) continue;
+    if (alreadyHasNoteView.has(atom.id)) continue;
+    await surrealStorage.putEdge({
+      predicate: 'user:krig:hasNoteView',
+      subject: { kind: 'atom', atomId: atom.id },
+      object: { kind: 'literal', type: 'boolean', value: true },
+      attrs: { createdBy: 'migration-1.2.0', createdAt: now },
+    });
+    added++;
+  }
+  console.log(`[migration 1.2.0] added ${added} hasNoteView edges`);
+
+  await _db.query(
+    `UPSERT $rid SET
+      version = '1.2.0',
+      appliedAt = $now,
+      description = 'Add hasNoteView edges for note pm atoms (Phase N sub-phase 3a-2.5)'`,
+    { rid: new RecordId('schema_version', '1.2.0'), now },
   );
 }

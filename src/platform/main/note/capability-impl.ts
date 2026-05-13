@@ -24,6 +24,7 @@ import { wrapPmDoc, unwrapPmDoc, emptyNoteDoc } from './envelope';
 
 const NOTE_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
+const HAS_NOTE_VIEW_PREDICATE = 'user:krig:hasNoteView';
 
 function atomToNoteInfo(
   atom: AtomEntity<'pm'>,
@@ -60,12 +61,22 @@ export async function createNote(
     const atom = await tx.putAtom<'pm'>({
       payload: { domain: NOTE_DOMAIN, payload: pmDoc },
     });
+    // 新 atom 由 putAtom 生成新 ULID,字面上不可能跟既有 hasNoteView 边冲突;
+    // 一对一 cardinality 由 (decision 016 §3.1) "新 atom 天然单边 +
+    // migration 幂等 + 未来产生点决议层契约" 三层保证,无需查重
+    const now = Date.now();
+    await tx.putEdge({
+      predicate: HAS_NOTE_VIEW_PREDICATE,
+      subject: { kind: 'atom', atomId: atom.id },
+      object: { kind: 'literal', type: 'boolean', value: true },
+      attrs: { createdBy: 'user-default', createdAt: now },
+    });
     if (folderId) {
       await tx.putEdge({
         predicate: IN_FOLDER_PREDICATE,
         subject: { kind: 'atom', atomId: atom.id },
         object: { kind: 'atom', atomId: folderId },
-        attrs: { createdBy: 'user-default', createdAt: Date.now() },
+        attrs: { createdBy: 'user-default', createdAt: now },
       });
     }
     return atomToNoteInfo(atom, folderId);
@@ -73,22 +84,37 @@ export async function createNote(
 }
 
 export async function listNotes(): Promise<NoteInfo[]> {
+  // 3 query 路径 (decision 016 §1.3 / §3.3):
+  //   listAtoms domain=pm + listEdges hasNoteView + listEdges inFolder
+  // sub-phase 3a-1 后 pm domain 不再是 note 专属 (canvas-store 也用),
+  // 故必须叠加 hasNoteView 边过滤区分 note 与 graph text-node pm atom
   const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
-  // 一次性查所有 inFolder 边 (subject=note 的)
-  const edges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
+  const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
+  const folderEdges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
   const folderBySubject = new Map<string, string>();
-  for (const e of edges) {
+  for (const e of folderEdges) {
     if (e.object.kind === 'atom') {
       folderBySubject.set(e.subject.atomId, e.object.atomId);
     }
   }
-  return atoms.map((a) => atomToNoteInfo(a, folderBySubject.get(a.id) ?? null));
+  return atoms
+    .filter((a) => noteAtomIds.has(a.id))
+    .map((a) => atomToNoteInfo(a, folderBySubject.get(a.id) ?? null));
 }
 
 export async function getNote(id: string): Promise<NoteInfo | null> {
   const atom = await storage.getAtom<'pm'>(id);
   if (!atom) return null;
   if (atom.payload.domain !== NOTE_DOMAIN) return null;
+  // 确认这个 pm atom 有 hasNoteView 边 (decision 016 §3.4) — 防御性编程,
+  // 防止上层用 graph text-node 的 atom id 调 getNote 拿到 "note" 假阳性
+  const noteViewEdges = await storage.listEdges({
+    predicate: HAS_NOTE_VIEW_PREDICATE,
+    subjectAtomId: id,
+    limit: 1,
+  });
+  if (noteViewEdges.length === 0) return null;
   const folderId = await getFolderIdForNote(id);
   return atomToNoteInfo(atom, folderId);
 }
@@ -130,6 +156,25 @@ export async function moveNote(
 }
 
 export async function deleteNote(id: string): Promise<{ cascadedEdges: number }> {
+  // 单引用模式下 hasBeenReferenced 恒 false,本 sub-phase 只实施草稿分支
+  // (decision 016 §3.5)。流通分支 (hasBeenReferenced=true 仅断 hasNoteView
+  // 边) 留 sub-phase 3a-shared-ref,前置 sub-phase 3a-tx 解真原子性。
+  const atom = await storage.getAtom<'pm'>(id);
+  if (atom?.hasBeenReferenced === true) {
+    // 单引用模式下不应触发;万一触发 (手工改库 / 未来 bug) 走 console.error
+    // + fallback。不抛硬错误是为不破坏对外契约 (view 层 7+ 调用点
+    // fire-and-forget,catch 不到也无法处理)
+    console.error(
+      `[noteCapability.deleteNote] pm atom ${id} hasBeenReferenced=true ` +
+        `not supported in sub-phase 3a-2.5 (single-ref mode); ` +
+        `falling back to draft branch (will cascade delete pm atom). ` +
+        `If this is a multi-ref pm atom, data in other views may be lost. ` +
+        `Track in sub-phase 3a-shared-ref.`,
+    );
+    // fallthrough 到草稿分支
+  }
+  // 草稿分支:storage.deleteAtom 应用层级联删 atom + 所有相关边
+  // (inFolder + hasNoteView 都是 subject=该 atom,会被级联删)
   const result = await storage.deleteAtom(id);
   return { cascadedEdges: result.cascadedEdges };
 }
