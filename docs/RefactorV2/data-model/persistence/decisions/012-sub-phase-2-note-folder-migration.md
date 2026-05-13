@@ -866,7 +866,7 @@ L7-sub2-note-folder-migration 实施完成请审计
 | Q5 | note-link plugin 当前用 noteStore 同步 `getNote(id)`，迁 async 后 PM nodeView 怎么处理？ | ✅ 设计师批复 L2:view 层私有 sync cache (`src/views/note/note-cache.ts`),订阅 `onListChanged` 增量更新 |
 | Q6 | atom domain 注册表是否需要新加 'folder' 显式注册（vs 自动接受任意 string） | ✅ spec.md `AtomDomain = string` 开放注册,无需显式 register |
 | Q7 | Path Y 删 folder 误删保护(确认弹窗 / 回收站) | 留 sub-phase 3+ 独立 decision,本 sub-phase Path Y 直删(对齐 macOS Finder)|
-| **Q-tx** | **storage.transaction() 实际无真事务** | **集成测试暴露 SurrealDB Sidecar WebSocket 协议不支持跨 db.query() 的 BEGIN/COMMIT(参 §12)。当前 X3a 退化:直调 fn 无原子性。单机单用户场景可接受。留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿** |
+| **Q-tx** | **storage.transaction() 实际无真事务** | ✅ **已解决 sub-phase 3a-tx**([decision 020](020-sub-phase-3a-tx-true-atomicity.md),2026-05-13)— SDK 2.x `beginTransaction()` 原生支持真原子性,§3.5.bis binary verify + §7 故障注入 23 项 PASS,5 个调用站点透明受益。SDK 版本绑定纪律详 [SDK-version-binding-policy.md](../SDK-version-binding-policy.md)。 |
 
 ---
 
@@ -1012,7 +1012,7 @@ main 不受影响。
 
 **后果**: 单机单用户场景并发概率极低,业务可接受。
 
-**遗留**: Q-tx 留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿模式。
+**~~遗留~~**: ~~Q-tx 留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿模式。~~ ✅ **已解决 sub-phase 3a-tx** ([decision 020](020-sub-phase-3a-tx-true-atomicity.md),2026-05-13)— 走 SDK 2.x `beginTransaction()` 原生路径,binary verify + 故障注入测试全 PASS。
 
 ### 12.3 §6.2 UI 集成测试结果
 

@@ -866,7 +866,10 @@ export const surrealStorage: StorageAPI = new SurrealStorage();
   - X3a 修复(commit `7d828a6`): `transaction(fn)` 退化为直调 fn,**无真原子性**
   - sub-phase 1 audit 未暴露:测试路径仅走 putAtom/deleteAtom 单语句,从未真用 transaction
   - 这正是本决议 §4.2 "binary 验证风险条款" 命中,sub-phase 1 设计师纸上推演遗漏
-  - Open Question Q-tx 留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿
+  - ~~Open Question Q-tx 留 sub-phase 3+ 评估 SDK 原生 transaction API 或应用层补偿~~
+  - ✅ **已解决 sub-phase 3a-tx**([decision 020](020-sub-phase-3a-tx-true-atomicity.md),2026-05-13):
+    SDK 2.x `beginTransaction()` 原生支持真原子性,§3.5.bis binary verify 13 场景实证 + §7 故障注入 23 项 PASS;`storage.transaction(fn)` 现走 `beginTransaction + commit/cancel` 包整段,5 个调用站点(createNote/moveNote/createFolder/moveFolder/deleteFolder)透明受益。
+  - **SDK 版本绑定纪律**(decision 020 §0.5 / §4.4):surrealdb@^2.0.3 锁定到发布包,跨大版本升级走独立 sub-phase,详 [SDK-version-binding-policy.md](../SDK-version-binding-policy.md)。
 - `querySubgraph` 按 [surreal-schema.md §5.3 方案 A 应用层 BFS](../surreal-schema.md) 实施
 - 写入边时校验 subject / object atomId 存在（[decision 008 §5.2](008-storage-layer-interface.md)）
 

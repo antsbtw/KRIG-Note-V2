@@ -1453,6 +1453,17 @@ main 不受影响。
 - migration.ts 注释主动登记此偏差
 - 反向更新 decision 014 §5.7 + §4.1 文件清单
 
+#### 偏离 9: Q-tx 退化继承(2026-05-13 反向更新)
+
+**问题(历史)**: 本 sub-phase §3.5.3.6 + §10 字面登记"继承 sub-phase 1 Q-tx 退化 — `storage.transaction()` 无真原子性,inFolder 边并发删除是 best-effort 语义"。单引用模式下场景影响极低,但留下了显式技术债。
+
+**处置(2026-05-13)**: ✅ **3a-tx 已解决,storage.transaction 真原子性恢复**([decision 020](020-sub-phase-3a-tx-true-atomicity.md))。
+- SDK 2.x `beginTransaction()` 原生路径
+- 13 项 binary verify + 23 项故障注入回归(含 §7.4 moveFolder MF1-MF4 + §7.5 deleteFolder cascade DF1-DF5)全 PASS
+- 本 sub-phase 所有依赖 `storage.transaction` 的写路径(graph instance + pm-content + folder cascade)透明受益,**字面 0 改动**
+
+**§3.5.3.6 / §10 "Q-tx 不依赖"措辞维持**(单引用模式下契约不变),但 best-effort 语义已升级为真原子性,边并发删除现在是真回滚而非 best-effort。
+
 ### 12.3 §6.2 UI 集成测试结果(Checkpoint 3)
 
 | 序号 | 操作 | 结果 |

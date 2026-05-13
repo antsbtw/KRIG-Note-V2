@@ -63,6 +63,9 @@ edge:
 `storage.transaction` 包"删旧 inFolder 边 + 加新 inFolder 边"原子操作,
 保证树形结构一致性。
 
+> 事务原子性已恢复 (sub-phase 3a-tx 完成,[decision 020](../../../docs/RefactorV2/data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md)):
+> SDK 2.x `beginTransaction()` 原生路径,任一步失败整段回滚。
+
 ## deleteFolder Path Y 语义 (decision 012 设计师批复)
 
 **业务契约变更** (对齐 macOS Finder):
@@ -96,7 +99,9 @@ const RESOURCE_DOMAINS = ['pm', 'graph-canvas'];   // 当前白名单
 1. BFS 收集所有 descendants(含 self,通过 user:krig:inFolder 边逆向查)
 2. 收集所有 inFolder 这些 folder 的资源(按 RESOURCE_DOMAINS 白名单过滤)
 3. `storage.transaction` 包整段:逐个 deleteAtom(资源先 / folder 后),
-   storage 应用层 cascade 自动删关联 edges(sub-phase 1 实施)
+   storage 应用层 cascade 自动删关联 edges(sub-phase 1 实施);
+   **事务原子性已恢复**(sub-phase 3a-tx,decision 020 — 任一 deleteAtom 失败
+   整棵子树全回滚,§7.5 故障注入 DF1-DF5 5 项 PASS)
 4. 返 `{ deletedFolders, deletedResources, cascadedEdges }` 给 UI 记账
    (sub-phase 3a-1 反向更新 `deletedNotes → deletedResources` 字段名,
    类型扩展,语义不变)

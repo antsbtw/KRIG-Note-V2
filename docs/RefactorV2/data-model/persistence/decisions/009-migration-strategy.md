@@ -134,8 +134,8 @@ V2 9 store 按业务复杂度分 4 个 sub-phase 迁移：
   - **sub-phase 3a-1** ([`decision 014`](014-sub-phase-3a-1-graph-canvas-instance-migration.md))— graph 容器 + Instance + pmContentCapability ✅ **已完成**(merge `67f18b2`,2026-05-12)
   - **sub-phase 3a-2.5** ([`decision 016`](016-sub-phase-3a-2.5-note-form-upgrade.md))— note 形态升级(hasNoteView 边)✅ **已完成**(merge 待填,2026-05-13)
   - sub-phase 3a-2 / 3a-3+ — 其他节点类型(sticky / connector / image)⏳ 待启动
-  - sub-phase 3a-tx — Q-tx 真原子性 ⏳ 待启动(浅引用前置)
-  - sub-phase 3a-shared-ref — 浅引用跨 view 复用 ⏳ 等 Q-tx
+  - **sub-phase 3a-tx** ([`decision 020`](020-sub-phase-3a-tx-true-atomicity.md))— Q-tx 真原子性(SDK 2.x `beginTransaction()`)✅ **已完成**(merge 待填,2026-05-13;13 项 binary verify + 23 项故障注入回归全 PASS)
+  - sub-phase 3a-shared-ref — 浅引用跨 view 复用 ⏳ 可启动(3a-tx 已完成,前置门槛清除)
 - **sub-phase 3b** — ebook + annotation 迁移 ⏳ 待启动(可跟 sub-phase 3a 并行)
 
 **2026-05-13 hotfix 累积**(独立于 sub-phase 推进):

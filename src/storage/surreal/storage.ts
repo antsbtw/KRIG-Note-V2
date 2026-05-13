@@ -24,67 +24,25 @@ import type {
   AtomEntity,
   EdgeEntity,
   AtomDomain,
-  AtomRef,
-  EdgeEndpoint,
 } from '@semantic/types';
-import { RecordId } from 'surrealdb';
 import { getDB, getMode } from './client';
 import { generateUlid } from '../ulid';
-
-const DEFAULT_OWNER = 'user-default';
-const ATOM_TBL = 'atom';
-const EDGE_TBL = 'edge';
-
-function nowMs(): number {
-  return Date.now();
-}
-
-/** 把 storage 层 plain string id 包成 SurrealDB RecordId(表前缀分离) */
-function atomRid(id: string): RecordId {
-  return new RecordId(ATOM_TBL, id);
-}
-function edgeRid(id: string): RecordId {
-  return new RecordId(EDGE_TBL, id);
-}
-
-/**
- * SurrealDB 返回的 id 是 RecordId 实例(toString = 'atom:01KRE...')。
- * 业务层契约 id 是 plain string(纯 ULID,不含表前缀),从 RecordId 实例剥出 .id 段。
- */
-function stripRecordPrefix(raw: unknown): string {
-  if (raw instanceof RecordId) {
-    return String(raw.id);
-  }
-  if (typeof raw !== 'string') return String(raw);
-  const idx = raw.indexOf(':');
-  return idx === -1 ? raw : raw.slice(idx + 1);
-}
-
-function normalizeAtomEntity<D extends AtomDomain = AtomDomain>(
-  row: Record<string, unknown>,
-): AtomEntity<D> {
-  return {
-    id: stripRecordPrefix(row.id),
-    createdAt: row.createdAt as number,
-    updatedAt: row.updatedAt as number,
-    createdBy: row.createdBy as string,
-    payload: row.payload as AtomEntity<D>['payload'],
-    // decision 014 §3.7:单向 flag,SurrealDB DEFAULT false 兜底;旧 row 无字段时用 false
-    hasBeenReferenced: (row.hasBeenReferenced as boolean | undefined) ?? false,
-  };
-}
-
-function normalizeEdgeEntity(row: Record<string, unknown>): EdgeEntity {
-  return {
-    id: stripRecordPrefix(row.id),
-    createdAt: row.createdAt as number,
-    updatedAt: row.updatedAt as number,
-    predicate: row.predicate as EdgeEntity['predicate'],
-    subject: row.subject as AtomRef,
-    object: row.object as EdgeEndpoint,
-    attrs: row.attrs as EdgeEntity['attrs'],
-  };
-}
+import {
+  DEFAULT_OWNER,
+  atomRid,
+  edgeRid,
+  nowMs,
+  normalizeAtomEntity,
+  normalizeEdgeEntity,
+} from './queries-common';
+import {
+  getAtomViaTx,
+  putAtomViaTx,
+  deleteAtomViaTx,
+  getEdgeViaTx,
+  putEdgeViaTx,
+  deleteEdgeViaTx,
+} from './transaction-helpers';
 
 class SurrealStorage implements StorageAPI {
   // ── atom CRUD ─────────────────────────────────────────────
@@ -437,27 +395,32 @@ class SurrealStorage implements StorageAPI {
   // ── 事务 ──────────────────────────────────────────────────
 
   async transaction<T>(fn: (tx: StorageTransaction) => Promise<T>): Promise<T> {
-    // ⚠ SurrealDB Sidecar WebSocket 协议不支持跨 db.query() 调用的真事务:
-    // BEGIN/COMMIT 必须聚合在单段 SQL 文本内,但 fn 是用户 async 回调,
-    // 内部 db.query 多次发送 → BEGIN 后立即被隐式提交,导致后续 COMMIT
-    // 报 "Cannot COMMIT without starting a transaction"。
-    //
-    // 当前退化:直接调 fn 不开真事务,无原子性。
-    // 单机单用户场景并发概率极低,业务可接受(参 decision 008 §X)。
-    //
-    // Open Question(留 sub-phase 3+ 单独评估):
-    // - SDK 原生 transaction API?(surrealdb-js 3.x 待查)
-    // - 应用层补偿模式?(记录已做操作 → 失败时反向)
-    // 见 decision 011 §4.2 binary 验证风险条 + decision 012 §8 Q-tx
-    const tx: StorageTransaction = {
-      getAtom: (id) => this.getAtom(id),
-      putAtom: (input, options) => this.putAtom(input, options),
-      deleteAtom: (id) => this.deleteAtom(id),
-      getEdge: (id) => this.getEdge(id),
-      putEdge: (input, options) => this.putEdge(input, options),
-      deleteEdge: (id) => this.deleteEdge(id),
-    };
-    return fn(tx);
+    // sub-phase 3a-tx 启用真原子性 (decision 020):
+    // SDK 2.x beginTransaction + commit / cancel 包整段。
+    // OCC 冲突 (Transaction conflict) 不在本 sub-phase 处理 (decision 020 §9.4)。
+    const db = getDB();
+    const surrealTx = await db.beginTransaction();
+    try {
+      const tx: StorageTransaction = {
+        getAtom: (id) => getAtomViaTx(surrealTx, id),
+        putAtom: (input, options) => putAtomViaTx(surrealTx, input, options),
+        deleteAtom: (id) => deleteAtomViaTx(surrealTx, id),
+        getEdge: (id) => getEdgeViaTx(surrealTx, id),
+        putEdge: (input, options) => putEdgeViaTx(surrealTx, input, options),
+        deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
+      };
+      const result = await fn(tx);
+      await surrealTx.commit();
+      return result;
+    } catch (err) {
+      try {
+        await surrealTx.cancel();
+      } catch (cancelErr) {
+        // cancel 失败不遮盖原 fn 错误 (decision 020 §4.1 / §9.5)
+        console.error('[storage.transaction] cancel failed after fn error', cancelErr);
+      }
+      throw err;
+    }
   }
 
   // ── 健康检查 ──────────────────────────────────────────────
