@@ -400,7 +400,7 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 | `user:krig:inFolder` | folder / pm (note) / graph-canvas / 未来 ebook | folder | 一对一 | sub-phase 2(基础)+ sub-phase 3a-1(扩展)| [decision 012 §3.3](../persistence/decisions/012-sub-phase-2-note-folder-migration.md) + [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
 | `user:krig:inCanvas` | graph-instance | graph-canvas | 一对一(归属边,P0a-bis 机制化保证)| sub-phase 3a-1(+ P0a-bis hotfix)| [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) + [decision 019](../persistence/decisions/019-graph-instance-cardinality-hotfix.md) |
 | `user:krig:hasContent` | graph-instance(text-node ref)| pm | 一对一(单引用约束,sub-phase 3a-1..3a-5)| sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
-| `user:krig:hasNoteView` | pm | literal `bool` (value 恒 true) | 一对一(应用层契约,详 decision 016 §3.1)| sub-phase 3a-2.5 | [decision 016 §3.1](../persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) |
+| `user:krig:hasNoteView` | pm | literal `boolean` (value 恒 true) | 一对一(应用层契约,详 decision 016 §3.1)| sub-phase 3a-2.5 ✅ 已实施 | [decision 016 §3.1](../persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) |
 
 **单引用约束说明**:`hasContent` 边 cardinality 在 sub-phase 3a-1..3a-5 阶段强制为"一对一"(一段 pm content 只被 1 个 wrapper 引用)。多引用(浅引用 / 跨 view 复用)留 sub-phase 3a-shared-ref 子任务,前置 sub-phase 3a-tx 解决真原子性(详 [decision 013 §3.5.1.bis](../persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md))。
 
