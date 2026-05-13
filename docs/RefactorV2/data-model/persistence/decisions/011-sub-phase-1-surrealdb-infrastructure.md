@@ -21,6 +21,21 @@
 >
 > 责任在设计师 —— 写 SQL / SurrealQL 时未在 binary 实测。**未来 sub-phase 2-4 设计文档应明示"已 binary 验证 / 仅纸上推演"标识**。
 >
+> ## 后续 hotfix(sub-phase 1 合入后新发现并修复)
+>
+> 2026-05-13 在 sub-phase 3a-2.5 Checkpoint 2 排查 P1 持久化丢失时,发现并修复
+> 2 个 sub-phase 1 阶段已埋下、尚未触发的 bug。详 [decision 017](017-storage-persistence-hotfix.md):
+>
+> | Bug | 位置 | 偏离描述 | 修复 |
+> |---|---|---|---|
+> | **P0a — putAtom UPDATE-only** | [`storage.ts:114`](../../../../../src/storage/surreal/storage.ts#L114) | 设计契约 "传 id = UPDATE 必须已存在",sub-phase 3a-1 引入 view 端预生成 client id 模式后触发 — 新 instance 全部抛 "Atom not found" 不入库 | `e6b5ca3` 改 UPSERT 短路语义,OR 短路 createdAt/createdBy(decision 017 §2.1) |
+> | **P0c — runner SELECT 3.0.4 不兼容** | [`runner.ts:32`](../../../../../src/storage/migrations/runner.ts#L32) | `SELECT version FROM schema_version ORDER BY appliedAt DESC LIMIT 1` 在 SurrealDB 3.0.4 触发 parse error (要求 ORDER BY 字段须在 SELECT 中),catch 静默吞 → currentVersion 永远 fallback '0.0.0' → migration 每次启动全跑;不丢数据但浪费 + 埋诊断 | `04a5c5e` SELECT 加 `appliedAt` 投影 + catch console.warn(decision 017 §2.2) |
+>
+> binary verify 三层实证(2026-05-13 总指挥协调用户跑):
+> - shape 3 个跨重启保留 + atom 10 个数据完整(P0a UPSERT 生效)
+> - schema_version 3 条记录 appliedAt 是历史时间(P0c SELECT 修法生效)
+> - 重启后 0 行 applying 日志(P0c catch 修法生效)
+>
 > ## 实施新增（未在原文档预设）
 >
 > | 新增 step | 内容 | 理由 |
