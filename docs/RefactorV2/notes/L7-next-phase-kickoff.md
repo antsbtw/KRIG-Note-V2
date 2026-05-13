@@ -57,7 +57,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 - **F1 audit 发现**(sub-phase 3a-1):§6.3.5 读路径自愈端到端 binary verify 未跑(代码已实施,但人为插脏边 → 自愈端到端未验证)
 - **noteCapability listNotes 误列 text-node pm atom**(sub-phase 3a-1 暴露):sub-phase 2 noteCapability 假设所有 pm domain atom = note,sub-phase 3a-1 引入 graph text-node 共享 pm domain 后,`listNotes` 会误列 text-node 的 pm atom 为"note"
 - **Q-P3 — Electron before-quit 不 await 是 land mine**([decision 017](../data-model/persistence/decisions/017-storage-persistence-hotfix.md) §9):[`platform/main/index.ts:109-111`](../../../src/platform/main/index.ts#L109) 同步 `shutdownStorageSync()`,[`storage/surreal/client.ts:260`](../../../src/storage/surreal/client.ts#L260) 300ms `setTimeout` SIGKILL 在主进程退出后实际不执行;`db.close()` 不 await。小数据量实测 graceful Cmd+Q 后跨重启完整保留(RocksDB SIGTERM 默认 fsync WAL,300ms 够),但**写量大 + macOS launchd 立刻收割** 时可能踩。修法方向:`before-quit` 改 `event.preventDefault()` + await + `app.quit()`,或 `serverProcess.unref()`,或等 embedded 模式
-- **P0d — text-node pm content 被空 doc 覆盖跨重启丢文字**(sub-phase 3a-1 范围,2026-05-13 binary verify 期间新发现):sub-phase 3a-1 §3.4 pmContentCapability 写路径相关;**占位待 P0d hotfix 决议细化**(本对话未深查根因,不在 017 范围)
+- ~~**P0d — text-node pm content 被空 doc 覆盖跨重启丢文字**(sub-phase 3a-1 范围,2026-05-13 binary verify 期间新发现)~~ **✅ 已修**([decision 018](../data-model/persistence/decisions/018-canvas-text-node-doc-sync-hotfix.md),4 处形态对齐 + binary verify 场景 ① 三层实证 PASS;canvas-store `incomingDocToPmPayload` / `instanceAtomToObject` 两端识别 DriverSerialized 信封 + `InteractionController` 新建初始化空 DriverSerialized + types.ts TextNodeAtoms unknown[] → unknown 类型契约对齐)
 - ~~**P0a-bis — sub-phase 3a-1 inCanvas cardinality 漏机制**(2026-05-13 binary verify 期间用户截图实证)~~ **✅ 已修**([decision 019](../data-model/persistence/decisions/019-graph-instance-cardinality-hotfix.md),三层防线 K1-K7 + binary verify 4 场景 PASS;view 端 client id 走 ULID + store 守门 + storage 启动 self-check + inCanvas 升级归属边语义)
 - **Q-2 inFolder cardinality self-check 扩展**(P0a-bis decision 019 §9 留位):decision 014 line 704 字面 inFolder 一对一约束,但 P0a-bis cardinality-check 仅扫 inCanvas + hasContent(超范围)。触发条件:发现 inFolder 撞库 bug 实证或 sub-phase 3b ebook 接入触发新归属场景。实施成本:[`src/storage/health/cardinality-check.ts`](../../../src/storage/health/cardinality-check.ts) `CARDINALITY_ONE_PREDICATES` 加一行 `'user:krig:inFolder'`
 
@@ -72,6 +72,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 | 5 | decision 014 实施期 | 没核 AtomEntity 字段集 + normalizer |
 | 6 | decision 014 §3.5.3 / canvas-store.createInstance | 设计 "view 端预生成 client id 推给 storage" 模式时,没核 sub-phase 1 putAtom 契约支不支持;字面注释"storage putAtom 允许传 id"是设计师一厢情愿,实际 UPDATE-only(由 [decision 017](../data-model/persistence/decisions/017-storage-persistence-hotfix.md) 改 UPSERT 修复)|
 | 7 | decision 014 §3.3 line 388 cardinality | 决议字面拍板"inCanvas cardinality 一对一",但实施 view + store + storage 三层全部漏机制保证;P0a UPSERT 修法揭露(由 [decision 019](../data-model/persistence/decisions/019-graph-instance-cardinality-hotfix.md) 三层防线补完)|
+| 8 | decision 014 §3.4 pmContentCapability / canvas-store text-node helper | sub-phase 3a-1 写决议时没核实 view 端 driver 演化路径;view 端 DriverSerialized 信封透传契约与 canvas-store helper 函数(`incomingDocToPmPayload` / `instanceAtomToObject`)字面期望旧 PmPayload 数组形态错位 → 写空 doc → 重启丢文字(由 [decision 018](../data-model/persistence/decisions/018-canvas-text-node-doc-sync-hotfix.md) 4 处形态对齐修复)|
 
 **纪律**:
 - 涉及"已实施模块自动支持新需求"假设 → 必须 grep 代码字面行为验证
@@ -79,6 +80,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 - 决议预设 checkpoint binary verify 模型(非每 step 单独 verify)
 - "不动已完成模块" 本意 = "不改对外契约 + atom CRUD 语义",允许向后兼容字段扩展
 - **拍板 cardinality 约束时 → 三层防线必须同步登记落地点**(view 端 id 全局唯一 + store putEdge 守门 + storage 启动 self-check),不是只写"cardinality: 一对一"一行(详 [decision 019 §2.1-§2.3](../data-model/persistence/decisions/019-graph-instance-cardinality-hotfix.md))
+- **跨层透传契约(view ↔ capability ↔ storage)必须拍板字面登记两端形态**;实施期间形态变更 → decision 必须同步反向更新;读写两端 helper 函数必须 grep 实证两端形态一致(详 [decision 014 §12.12](../data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md))
 
 ### 1.6 实施者纪律累积教训(必须遵守,详 memory `feedback_v2_is_workspace_v1_is_reference`)
 
