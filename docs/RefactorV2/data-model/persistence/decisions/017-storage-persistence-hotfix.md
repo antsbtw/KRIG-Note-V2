@@ -556,3 +556,29 @@ P0d 恢复:fix/canvas-text-node-doc-sync git merge main → 7104ad9
 (P0a-bis 先做)→ P0d 在 P0a-bis 修过的环境上 binary verify 通过。017 + 018 + 019 形成
 "持久化基础 → cardinality 机制 → text-node 形态对齐"三层完整闭环,sub-phase 3a-1
 设计师 P1 教训累积到第 8 次(详 [decision 014 §12.10 / §12.12](014-sub-phase-3a-1-graph-canvas-instance-migration.md))。
+
+### 12.9 链下游 — sub-phase 3a-2.5 noteCapability listNotes 误列修复(2026-05-13)
+
+P0d binary verify 期间用户报第 3 个 sub-phase 3a-1 漏(本 hotfix 修过环境揭露):
+`listNotes()` 误列 graph text-node 内容 `"123-abc*abc"` — sub-phase 3a-1 引入 graph
+text-node 走 pm atom domain 后,未升级 noteCapability 边过滤。
+
+**修复**:[decision 016](016-sub-phase-3a-2.5-note-form-upgrade.md) sub-phase 3a-2.5 —
+note 形态从 "pm atom = note" 升级到 "pm atom + `user:krig:hasNoteView` 边 = note",
+`listNotes()` 改走 `listEdges hasNoteView` 过滤。
+
+**跨 hotfix 链全闭环**(本次 017 + 018 + 019 + sub-phase 3a-2.5 合 main 后):
+
+```
+017 P0a/P0c (f7f908d) — storage 持久化基础
+    ↓ 揭露 P0a-bis (cardinality) + P0d (DriverSerialized) + listNotes 误列
+019 P0a-bis (c64183b) — inCanvas cardinality 机制
+    ↓
+018 P0d (b809510) — canvas text-node DriverSerialized 形态
+    ↓
+sub-phase 3a-2.5(本次合 main)— note 形态升级 hasNoteView 边
+```
+
+KRIG-Note V2 三大核心模块(note / graph / ebook)之 note + graph 数据基础完成;
+ebook 留 sub-phase 3b。sub-phase 3a-1 漏机制三件套(P0a-bis / P0d / listNotes 误列)
+全部串行修复,P1 教训累积保持第 8 次(sub-phase 3a-2.5 实施无新增 P1 教训)。
