@@ -53,6 +53,21 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 
 - ~~**Q-tx**(继承 sub-phase 1):`storage.transaction()` 真原子性未解 — sub-phase 1 X3a 退化(`7d828a6`)~~ **✅ 已修 sub-phase 3a-tx**([decision 020](../data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md),2026-05-13;路径 1 SDK 原生 `beginTransaction()` 真原子性 + 5 个调用站点透明受益 + binary verify 12 PASS + Checkpoint 1/2 全 PASS + 17 → 23 故障注入 PASS)
 - **Q-shared-folder-ux**(sub-phase 3a-tx Step 5.7 UI 集成测试期间用户报,2026-05-13):note / graph / 未来 ebook **共享 folder 树**(decision 014 §2.3 字面拍板 + canvas-store.ts:756 注释),用户在 note 模式建的文件夹,在 graph 模式也可见,但**内含 note 在 graph 模式不可见**,易引发误删("看着是空文件夹,实际有 note")。根因:共享语义层 + 视图内容隔离,缺"跨视图删除保护 + 内容指示"UX。**与 Q7 同根**(误删保护),合并讨论;**跟 sub-phase 3a-tx transaction 改造无关**(不阻塞当前 sub-phase 收尾)。**处置**:独立 hotfix 候选(类似 P0e 模式),待 sub-phase 3a-tx 合 main 后单独决议。修法方向(待决议):(a) 删除前 cascade check + 内含资源列表弹窗;(b) folder 树按 view 加内容指示器(N 笔记 / M 画板);(c) 改"共享 folder"为"viewport 视图(按当前视图过滤)",底层仍共享。
+
+  **用户 2026-05-13 拍板核心两点**(sub-phase 3a-tx 收尾对话末段,作为 decision 021 起点):
+
+  1. **各视图 folder 归自己管 + 显示规则**:每个视图(note / graph / future ebook)有自己的 folder 树;显示规则:每个视图只显示自己的 folder + 自己的文档;folder 功能(样式 / 创建 / 递归删除)所有视图一致。
+
+  2. **数据模型层解决,不是视图层补丁**:folder 作为 atom(点),通过关系(边)或属性(payload 字段)区分视图归属;具体路径(属性 vs 边)留 decision 021 实施层决定。
+
+  **未来 decision 021 范围**(待启动新对话单独撰写):
+  - 数据模型加 folder ↔ view 归属字段或边类型(技术路径属性 vs 边待拍板)
+  - schema migration:现有共享 folder 数据怎么归属(待拍板)
+  - 各 view `listFolders` / `listResources` 按归属过滤
+  - `deleteFolder` cascade 模式 1 不变(沿 [decision 020 §7.5](../data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md) 的"递归删除关联实体")
+  - 视图隔离落地后,"误删跨视图 folder" 风险根除(用户根本看不到非己建 folder);但 Q7 仍含"含资源 folder 删除前弹窗 + 回收站",留 decision 021 一并讨论
+
+  **第 13 次设计师教训**(本对话过程,2026-05-13):总指挥讨论方案 C 时反复用 "L1/L2/L3 抽象分层" 术语(语义层 / 视图层 / 关系层),但 V2 项目 L0-L7 字面是 stages 阶段命名(L0 platform / L2 shell+tabs / L3 workspace / L4 slot registry / L5 note / L7 持久化),**不是抽象层级**。术语错用会污染 KRIG 项目术语体系。**纪律升级**:使用项目术语必须 grep 实证字面,不允许从编程社区 / 训练数据带入"看起来通用"的术语;跟第 9 / 11 / 12 次教训同型("实证字面而不靠记忆")。**落点**:本教训登记在 decision 021 §0.6,反向更新 SDK-version-binding-policy §2.2 加"项目术语必须 grep 实证"作为第 5 步证据(留 decision 021 撰写时落地,不在本对话推进)。
 - **Q7**(继承 sub-phase 2):误删 folder / canvas 保护(确认弹窗 + 回收站)未实施。**与 Q-shared-folder-ux 同根**,建议合并讨论(共用一套删除保护 UX)
 - **Q-orphan-surreal-d-state**(sub-phase 3a-1 暴露):sub-phase 1 防御链对内核 D-state 孤儿 surreal 进程无效,只能重启 mac 根治
 - **F1 audit 发现**(sub-phase 3a-1):§6.3.5 读路径自愈端到端 binary verify 未跑(代码已实施,但人为插脏边 → 自愈端到端未验证)
