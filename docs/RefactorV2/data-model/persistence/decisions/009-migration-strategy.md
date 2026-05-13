@@ -132,11 +132,16 @@ V2 9 store 按业务复杂度分 4 个 sub-phase 迁移：
 
 - **sub-phase 3a 总纲** ([`decision 013`](013-sub-phase-3a-graph-canvas-migration.md))— graph 渐进迁移 ✅ 总纲已撰写(merge `281d74b`)
   - **sub-phase 3a-1** ([`decision 014`](014-sub-phase-3a-1-graph-canvas-instance-migration.md))— graph 容器 + Instance + pmContentCapability ✅ **已完成**(merge `67f18b2`,2026-05-12)
-  - sub-phase 3a-2.5 — note 形态升级(hasNoteView 边)⏳ 待启动
+  - **sub-phase 3a-2.5** ([`decision 016`](016-sub-phase-3a-2.5-note-form-upgrade.md))— note 形态升级(hasNoteView 边)✅ **已完成**(merge 待填,2026-05-13)
   - sub-phase 3a-2 / 3a-3+ — 其他节点类型(sticky / connector / image)⏳ 待启动
   - sub-phase 3a-tx — Q-tx 真原子性 ⏳ 待启动(浅引用前置)
   - sub-phase 3a-shared-ref — 浅引用跨 view 复用 ⏳ 等 Q-tx
 - **sub-phase 3b** — ebook + annotation 迁移 ⏳ 待启动(可跟 sub-phase 3a 并行)
+
+**2026-05-13 hotfix 累积**(独立于 sub-phase 推进):
+- [decision 017](017-storage-persistence-hotfix.md) — sub-phase 1 storage 持久化 hotfix(P0a putAtom UPSERT + P0c runner SELECT)✅ 已合 main(merge `f7f908d`)
+- [decision 018](018-canvas-text-node-doc-sync-hotfix.md) — canvas text-node DriverSerialized 形态对齐(P0d)✅ 已合 main(merge `b809510`)
+- [decision 019](019-graph-instance-cardinality-hotfix.md) — inCanvas cardinality 机制保证 + 归属语义(P0a-bis)✅ 已合 main(merge `c64183b`)
 
 #### Sub-phase 4: 剩余 store 迁移
 
