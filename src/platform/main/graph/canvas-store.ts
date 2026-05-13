@@ -34,7 +34,6 @@ import type {
   GraphCanvasPayload,
   PmPayload,
 } from '@semantic/types';
-import { wrapPmDoc } from '../note/envelope';
 import {
   adapterFolderList,
   adapterFolderCreate,
@@ -214,17 +213,19 @@ async function instanceAtomToObject(
   if (payload.text_valign !== undefined) instance.text_valign = payload.text_valign;
 
   // text-node 特例:从 hasContent 边 + pm atom 拼回 doc 字段
+  // V2 view 端契约(decision 018 P0d hotfix):instance.doc 是 DriverSerialized 信封,
+  // view 透明消费(canvas-text-node atom-bridge / NodeRenderer atomBridge 字面识别
+  // format==='pm-doc-json')。读写两端形态对齐,view 端无需处理多形态。
   if (payload.ref === TEXT_LABEL_REF) {
     const pmAtomId = await getPmAtomIdForInstance(atom.id);
     if (pmAtomId) {
       const pmAtom = await storage.getAtom<'pm'>(pmAtomId);
       if (pmAtom && pmAtom.payload.domain === PM_DOMAIN) {
-        // V1/V2 view 期望 doc 字段是 TextNodeAtoms = unknown[] (PM content 数组).
-        // pm atom payload 已是 PmPayload,wrap → 取 payload (= 原 PmPayload).
-        // 实际取 content 数组传给 view (canvas-text-node 桥接消费).
-        const env = wrapPmDoc(pmAtom.payload.payload as PmPayload);
-        const pmDoc = env.payload as PmPayload;
-        instance.doc = pmDoc.content ?? [];
+        instance.doc = {
+          format: 'pm-doc-json',
+          version: '0.1',
+          payload: pmAtom.payload.payload as PmPayload,
+        };
       }
     }
   }
