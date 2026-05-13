@@ -1,7 +1,7 @@
 # Decision 019 — Graph Instance Cardinality Hotfix (P0a-bis)
 
 > **Phase**: N(实施 Phase)/ Hotfix(sub-phase 3a-1 cardinality 漏机制补完)
-> **状态**: ✅ **实施完成,等总指挥静态复核 + binary verify**(commits `82d7f68` + `27595aa` + `8198f56` + `0fd3dda` + `4cd12f6` + 本决议)
+> **状态**: ✅ **已实施完成 + binary verify 4 场景 PASS + 反向更新完成,授权合 main**(10 commits — 6 实施 + 4 反向更新)
 > **设计师 / 审计师**: 总指挥(main)
 > **诊断 + 实施**: `fix/graph-instance-cardinality` 分支(基于 main `f7f908d`)
 > **决议日期**: 2026-05-13
@@ -351,13 +351,17 @@ decision 014 line 704 字面"`inFolder` 一对一约束",但本次 P0a-bis cardi
 | 4 | [`decision 017 §12`](017-storage-persistence-hotfix.md) | 链下游:P0a UPSERT 修法揭露 cardinality 漏,P0a-bis 补完 | 待总指挥指示 |
 | 5 | [`decision 018 §12`](018-canvas-text-node-doc-sync-hotfix.md)(P0d fix 分支)| 链下游:P0d binary verify 时暴露 P0a-bis,P0d 恢复路径 | 待 P0d 合 main 后 |
 | 6 | [`relations/spec.md §10.1`](../../relations/spec.md) | inCanvas 归属边语义新增小节 | ✅ commit `4cd12f6` |
-| 7 | L7 启动包 | 加 P0a-bis 已知 bug 占位 → 修后清掉 | 待总指挥指示 |
+| 7 | L7 启动包 §1.4 + §1.5 | P0a-bis 已修(✅ 划线)+ Q-2 inFolder 占位 + 第 7 次教训登记 + 拍板纪律 | ✅ commit `26e2681` |
+| 8 | [`decision 016 §10.1`](016-sub-phase-3a-2.5-note-form-upgrade.md) | hasNoteView 一对一同模式参考,本决议作下游引用 | ✅ commit `03acdfc` |
+| 9 | [`decision 017 §12.7`](017-storage-persistence-hotfix.md) | 链下游:P0a UPSERT 揭露 sub-phase 3a-1 cardinality 漏,P0a-bis 三层防线补完 | ✅ commit `96f5a96` |
 
 ---
 
 ## 12. 实施实际情况(填写于实施后)
 
-### 12.1 commit 序列(共 6 个)
+### 12.1 commit 序列(共 10 个 — 6 实施 + 4 反向更新)
+
+**实施 commits**:
 
 | # | commit | 范围 |
 |---|---|---|
@@ -365,8 +369,17 @@ decision 014 line 704 字面"`inFolder` 一对一约束",但本次 P0a-bis cardi
 | 2 | `27595aa` | K1:`NodeRenderer.nextInstanceId` 改 ULID |
 | 3 | `8198f56` | K2:inCanvas 一对一守门 |
 | 4 | `0fd3dda` | K3+K4:cardinality-check 自愈 |
-| 5 | `4cd12f6` | K6:文档化(spec + decision 014) |
-| 6 | (本 commit) | K7 + 决议 019 |
+| 5 | `4cd12f6` | K6:文档化(spec + decision 014 §3.3 + §12.9 + §12.10) |
+| 6 | `8dad238` | K7 + 决议 019 |
+
+**反向更新 commits**(binary verify PASS 后,合 main 前):
+
+| # | commit | 范围 |
+|---|---|---|
+| 7 | `03acdfc` | 反向更新 016 §10.1 — hasNoteView 一对一同模式参考 |
+| 8 | `96f5a96` | 反向更新 017 §12.7 — P0a UPSERT 揭露 cardinality 漏 |
+| 9 | `26e2681` | 反向更新 L7 §1.4 + §1.5 — P0a-bis 已修 + Q-2 inFolder + 第 7 次教训 |
+| 10 | (本 commit) | 标实施完成 + binary verify 4 场景 PASS |
 
 ### 12.2 与本决议的偏离登记
 
@@ -389,6 +402,39 @@ decision 014 line 704 字面"`inFolder` 一对一约束",但本次 P0a-bis cardi
 
 cardinality 约束的实施成本远小于事后排查的成本。
 
-### 12.5 审计结论(等总指挥填)
+### 12.5 审计结论 — ✅ 通过,合 main(2026-05-13 总指挥)
 
-待总指挥静态复核 + 协调 binary verify 4 场景后填。
+**静态合规**:
+- typecheck 0 错(每个代码 commit 后跑 + 全分支最终跑)
+- commit 顺序 + commit message 严格按总指挥批复字面
+- 不动 P0d fix 分支 5 commits / sub-phase 3a-2.5 分支 3 commits / 017 已合 main 7 commits
+- 反向更新链 016 / 017 / L7 全部完成,decision 018 链下游待 P0d 合 main 后
+
+**行为合规**:binary verify 4 场景全过(详 §12.6)。
+
+**审计判定**:✅ 通过,授权合 main + push。
+
+### 12.6 Binary verify 4 场景实证(2026-05-13)
+
+**场景 ①** — self-check 清污染:
+```
+[storage/cardinality-check] user:krig:inCanvas: scanned 2 / found 1 / cleaned 1
+```
+i-001 跨两画板的污染数据按 keep-latest 自动清理。
+
+**场景 ②** — query inCanvas 仅 1 条:
+i-001 → "456" 画板,keep-latest 正确保留。
+
+**场景 ③** — 新 instance ULID 生效(K1 字面证据):
+跨画板创建 triangle shape,新 instance id = `01KRGMJQTYBXGPB4MH4CQHX72G`(ULID 26 字符 Crockford Base32),不再是 `i-001` 短可读 id 格式。
+
+**场景 ④** — 重启 0 violations:
+- inCanvas: 2 edges / 0 violations / 0 cleaned
+- hasContent: 1 edge / 0 violations / 0 cleaned
+
+**附加 verify**:
+- schema_version 3 条记录跨重启保留(017 P0c 同步保持)
+- 启动 latency 592ms,无显著退化
+- 历史 `i-001` 与新 ULID 各自独立(不撞库)
+
+**结论**:三层防线 K1+K2+K3+K4 全部字面生效,decision 014 §3.3 line 388 cardinality 一对一契约真正兑现。
