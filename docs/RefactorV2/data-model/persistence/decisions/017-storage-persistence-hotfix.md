@@ -492,3 +492,36 @@ Phase N 状态加:`2026-05-13 hotfix 017 — sub-phase 1 putAtom + runner 修复
 
 参 §9 Q-P3 — Electron `before-quit` 不 await。小数据量实测不踩,但写量大 / SIGTERM 时长不够时可能踩。
 本 hotfix 不修;留 sub-phase 后续。L7 启动包 §1.4 已挂 Q-P3 跟踪。
+
+### 12.7 链下游 — P0a UPSERT 揭露 sub-phase 3a-1 cardinality 漏(2026-05-13 P0a-bis)
+
+本 017 hotfix 合 main 后,binary verify 期间用户截图实证 P0a-bis 现象:同一个
+instance `i-001` 同时显示在两个不同画板里(本是 P0a 的"同一现象不同表现")。
+
+**真根因 — 不是 017 引入,是揭露**:
+
+- decision 014 §3.3 line 388 字面拍板"`inCanvas` cardinality 一对一",但 sub-phase 3a-1
+  实施时 view 端 [`NodeRenderer.nextInstanceId`](../../../../../src/capabilities/canvas-rendering/scene/NodeRenderer.ts#L257)(原版)
+  用 per-NodeRenderer counter 生成 `i-001` / `i-002`,跨画板碰撞
+- P0a 修法**前**(UPDATE-only 抛 not found)隐藏漏:撞库时 storage 抛错 → 写入失败,
+  业务层看到 P0a 现象(shape 跨重启丢)
+- P0a 修法**后**(UPSERT 存在则更新)化为可见:撞库时 storage 覆盖 atom payload +
+  写新 inCanvas 边 → 业务层看到 `i-001` 出现在两个画板(P0a-bis 现象)
+
+**P0a-bis 三层防线补完**(详 [decision 019](019-graph-instance-cardinality-hotfix.md)):
+
+1. **K1 view 端**:`NodeRenderer.nextInstanceId` 改 `generateUlid` 全局唯一(commit `27595aa`)
+2. **K2 store 端**:`canvas-store.createInstance` 加 inCanvas 一对一守门 keep-latest(commit `8198f56`)
+3. **K3+K4 storage 启动**:`runCardinalityCheck` 扫 inCanvas + hasContent + 自愈历史污染(commit `0fd3dda`)
+4. **K6 反向更新**:inCanvas 升级归属边语义(`relations/spec.md` §10.1 + decision 014 §3.3)
+5. **K7 未来扩展**:`referencedIn` 边接口预留(sub-phase 3a-shared-ref)
+
+**binary verify 4 场景全过**(2026-05-13):
+- ① self-check 清污染:scanned 2 / found 1 / cleaned 1
+- ② inCanvas 边 keep-latest 后仅 1 条
+- ③ 跨画板新 instance ULID 生效(`01KRGMJQTYBXGPB4MH4CQHX72G` triangle)
+- ④ 重启 0 violations 0 cleaned
+
+**链下游意义**:P0a 修法语义正确,P0a-bis 揭露的是 sub-phase 3a-1 设计师 P1 第 7 次教训
+(decision 014 §12.10),不是 017 修法缺陷。017 + 019 形成"持久化基础 → cardinality
+机制"两层完整闭环。
