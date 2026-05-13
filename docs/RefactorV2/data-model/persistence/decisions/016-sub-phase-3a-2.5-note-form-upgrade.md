@@ -40,7 +40,7 @@
 | 边模型路线 | 路线 B(literal marker)| ✅ **路线 B** | grep verify 后 storage schema literal object 支持完备 |
 | listNotes 查询路径 | 总纲未明确 | **listAtoms + listEdges(hasNoteView) + listEdges(inFolder) + 应用层 filter**(**3 query**,在 sub-phase 2 现状 2 query 基础上加 1 次 listEdges)| 避免 N+1 性能退化;EdgeFilter 不支持按 literal value 过滤 |
 | deleteNote 契约 | 总纲提"草稿 cascade,流通仅断 hasNoteView 边" | ✅ **本 sub-phase 只实施草稿分支**,流通态走 console.error + fallback 草稿分支(不抛硬错误)| 单引用模式下 hasBeenReferenced 恒 false,流通分支永不触发;fallback 防护对外契约不破坏 |
-| hasNoteView 边一对一机制 | 总纲未明确 | **三层契约防御**:新 atom 天然单边(createNote)+ migration 幂等(查→无则插)+ 未来产生点决议层契约;SurrealDB 3.0.4 不支持 partial UNIQUE index + StorageTransaction 不暴露 listEdges,故 createNote 不做查重 | 跟 decision 013 §3.5.1.bis 单引用约束同模式(应用层契约 + 单机单用户假设);存储层机制保护留 sub-phase 3a-tx 升级 |
+| hasNoteView 边一对一机制 | 总纲未明确 | **三层契约防御**:新 atom 天然单边(createNote)+ migration 幂等(查→无则插)+ 未来产生点决议层契约;SurrealDB 3.0.4 不支持 partial UNIQUE index + StorageTransaction 不暴露 listEdges,故 createNote 不做查重 | 跟 decision 013 §3.5.1.bis 单引用约束同模式(应用层契约 + 单机单用户假设);~~存储层机制保护留 sub-phase 3a-tx 升级~~ **2026-05-13 更新**:sub-phase 3a-tx 已完成([decision 020](020-sub-phase-3a-tx-true-atomicity.md))事务原子性已恢复;但 SurrealDB 仍不支持 partial UNIQUE index + StorageTransaction 仍不暴露 listEdges,**存储层机制保护不在 3a-tx 范围**,留 sub-phase 3a-shared-ref 真用到时(浅引用启动)再独立讨论(Q016-5)|
 | migration 边界 | 总纲提"给所有 sub-phase 2 创建的 pm atom 加边" | ✅ **改成"给所有未被 hasContent 边 object 引用的 pm atom 加边"** | grep 后确认,这等价于"sub-phase 2 createNote 创建的那批",但避免依赖创建时间戳/createdBy 等不可靠依据 |
 | checkpoint 划分 | 总纲提"1 个 binary verify checkpoint" | **2 个 checkpoint**(schema + migration / capability 改造 + UI)| 沿 decision 014 模式;migration 是关键风险点必须单独 verify |
 
@@ -238,7 +238,7 @@ cardinality: 一对一(一个 pm atom 最多一条 hasNoteView 边)
    - 任何后续 sub-phase 新增 pm atom 产生点必须显式登记 hasNoteView 边的产生策略
    - 决议层契约 + 审计师查核,不依赖存储层 UNIQUE
 
-→ **机制保护升级路径**: sub-phase 3a-tx 解 Q-tx 真原子性后,可考虑 SurrealQL 显式 `SELECT ... WHERE NOT EXISTS` + 应用层 UNIQUE 校验函数 `assertNoteViewCardinality(atomId)`(留 Open Question Q016-5)。
+→ **机制保护升级路径**: ~~sub-phase 3a-tx 解 Q-tx 真原子性后~~ ✅ sub-phase 3a-tx 已完成([decision 020](020-sub-phase-3a-tx-true-atomicity.md));但 SurrealDB 仍不支持 partial UNIQUE index + StorageTransaction 仍不暴露 listEdges,**存储层机制保护不在 3a-tx 范围**(3a-tx 解的是事务原子性,不是 cardinality 约束)。可考虑的升级路径:SurrealQL 显式 `SELECT ... WHERE NOT EXISTS` + 应用层 UNIQUE 校验函数 `assertNoteViewCardinality(atomId)`(留 Open Question Q016-5,触发条件已从"3a-tx 完成"改为"sub-phase 3a-shared-ref 启动")。
 
 → **当前接受的风险**:单机单用户场景 + 三层契约防御,实测足够;若未来引入多用户 / 多设备并发(或外部工具直改库不走 noteCapability),必须升级到 storage 层机制。
 
@@ -823,7 +823,7 @@ grep -rn "domain.*pm\|kind.*pm\|payload.domain" src/views/  # 期望:全部走 c
 - 业务出现"同一段 pm 内容要在多视图复用"明确需求
 - 或 sub-phase 3b ebook 接入 + 实施"笔记引用 ebook 段落"知识闭环 UX
 
-**前置依赖**:sub-phase 3a-tx 解 Q-tx 真原子性。
+**前置依赖**:~~sub-phase 3a-tx 解 Q-tx 真原子性~~ ✅ **已解决 sub-phase 3a-tx**([decision 020](020-sub-phase-3a-tx-true-atomicity.md),2026-05-13)。3a-shared-ref 启动门槛已清除(技术层面),余下触发条件是业务需求 + 浅引用 UX 配套设计。
 
 ### Q016-4 — 未来 domain='pm' 产生点的表征边约定
 
@@ -843,7 +843,7 @@ grep -rn "domain.*pm\|kind.*pm\|payload.domain" src/views/  # 期望:全部走 c
 
 **升级触发条件**(任一):
 - SurrealDB 升级到支持 partial UNIQUE index 的版本(关注 binary release notes)
-- sub-phase 3a-tx 完成,SDK transaction 隔离级别可控时,可加 SurrealQL 显式 `SELECT ... WHERE NOT EXISTS` + UPSERT 模式
+- ~~sub-phase 3a-tx 完成,SDK transaction 隔离级别可控时,可加 SurrealQL 显式 `SELECT ... WHERE NOT EXISTS` + UPSERT 模式~~ ✅ sub-phase 3a-tx 已完成(decision 020,2026-05-13)。然实测 binary verify 后,**3a-tx 没解决 cardinality 问题** — 解的是事务原子性。SurrealQL `WHERE NOT EXISTS + UPSERT` 仍可考虑作独立机制,但需要 sub-phase 3a-shared-ref 启动时单独评估
 - 引入多用户 / 多设备并发场景(必须升级,应用层防御不再够)
 
 **升级路径建议**(留实施时拍板):
