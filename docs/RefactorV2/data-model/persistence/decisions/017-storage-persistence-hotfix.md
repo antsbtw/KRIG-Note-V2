@@ -582,3 +582,14 @@ sub-phase 3a-2.5(本次合 main)— note 形态升级 hasNoteView 边
 KRIG-Note V2 三大核心模块(note / graph / ebook)之 note + graph 数据基础完成;
 ebook 留 sub-phase 3b。sub-phase 3a-1 漏机制三件套(P0a-bis / P0d / listNotes 误列)
 全部串行修复,P1 教训累积保持第 8 次(sub-phase 3a-2.5 实施无新增 P1 教训)。
+
+### 12.10 链下游 — sub-phase 3a-tx 完成(2026-05-13)
+
+sub-phase 3a-2.5 合 main 后,启动 sub-phase 3a-tx ([decision 020](020-sub-phase-3a-tx-true-atomicity.md)) 解 Q-tx — `storage.transaction(fn)` 走 SDK 2.x `beginTransaction()` 原生路径,真原子性恢复。
+
+- 13 项 binary verify(§3.5.bis)+ 23 项故障注入回归(§7 矩阵)全 PASS
+- 5 个调用站点(createNote/moveNote/createFolder/moveFolder/deleteFolder)透明受益,字面 0 改动
+- SDK 版本绑定纪律(用户 P0)落地 — surrealdb@^2.0.3 锁定,跨大版本走独立 sub-phase,详 [SDK-version-binding-policy.md](../SDK-version-binding-policy.md)
+- 第 9 次设计师教训(SDK 版本选型 grep 字面证据)+ 第 10 次教训(binary verify 揭示 OCC 并发语义)+ 第 11 次教训(决议字面 grep 双向核对)+ 第 12 次教训(decision 020 §6.1 verify import 链 electron 依赖未预见)
+
+**Q-P3 跟 3a-tx 关系澄清**:Q-P3(before-quit flush 时长)跟 Q-tx(transaction 原子性)是两条独立线;3a-tx 解前者不影响后者,Q-P3 仍留 sub-phase 后续。
