@@ -13,6 +13,7 @@ import type {
   FolderInfo,
   NoteDocEnvelope,
 } from './note-folder-types';
+import type { FolderViewType } from '@capabilities/folder/types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 
 declare global {
@@ -259,9 +260,14 @@ declare global {
       onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
 
       // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
-      folderList(): Promise<FolderInfo[]>;
+      // decision 021 §1.1: folderList / folderCreate 加 viewType 入参 (note + graph 隔离视图)
+      folderList(viewType: FolderViewType): Promise<FolderInfo[]>;
       folderGet(id: string): Promise<FolderInfo | null>;
-      folderCreate(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
+      folderCreate(
+        title: string,
+        parentFolderId: string | null,
+        viewType: FolderViewType,
+      ): Promise<FolderInfo | null>;
       folderRename(id: string, title: string): Promise<FolderInfo | null>;
       folderMove(folderId: string, newParentFolderId: string | null): Promise<void>;
       /**

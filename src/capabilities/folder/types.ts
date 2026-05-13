@@ -8,6 +8,16 @@ import type { FolderInfo } from '@shared/ipc/note-folder-types';
 
 export type { FolderInfo };
 
+/**
+ * 视图归属标记 (decision 021 §4.1).
+ *
+ * folder atom 通过 user:krig:folderForView 边表达 view 归属:
+ * - 'note'  → object literal '__view__/note'
+ * - 'graph' → object literal '__view__/graph'
+ * - future sub-phase 022 加 | 'ebook' (现状 ebook 走独立 JSON 树,不接 atom)
+ */
+export type FolderViewType = 'note' | 'graph';
+
 export interface FolderDeleteResult {
   deletedFolders: number;
   /**
@@ -21,8 +31,19 @@ export interface FolderDeleteResult {
 }
 
 export interface FolderCapabilityApi {
-  createFolder(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
-  listFolders(): Promise<FolderInfo[]>;
+  /**
+   * decision 021 §4.1: viewType 必传,写 folder atom + folderForView 边 + (可选) inFolder 边.
+   */
+  createFolder(
+    title: string,
+    parentFolderId: string | null,
+    viewType: FolderViewType,
+  ): Promise<FolderInfo | null>;
+  /**
+   * decision 021 §4.1: viewType 必传,过滤当前 view 的 folder atom.
+   * 无 folderForView 边的 folder atom (孤儿) 不返.
+   */
+  listFolders(viewType: FolderViewType): Promise<FolderInfo[]>;
   getFolder(id: string): Promise<FolderInfo | null>;
   renameFolder(id: string, newTitle: string): Promise<FolderInfo | null>;
   moveFolder(folderId: string, newParentFolderId: string | null): Promise<void>;

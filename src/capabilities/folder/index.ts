@@ -13,18 +13,25 @@ import type {
   FolderCapabilityApi,
   FolderInfo,
   FolderDeleteResult,
+  FolderViewType,
 } from './types';
 
-export type { FolderCapabilityApi, FolderInfo, FolderDeleteResult } from './types';
+export type {
+  FolderCapabilityApi,
+  FolderInfo,
+  FolderDeleteResult,
+  FolderViewType,
+} from './types';
 
 async function createFolder(
   title: string,
-  parentFolderId: string | null = null,
+  parentFolderId: string | null,
+  viewType: FolderViewType,
 ): Promise<FolderInfo | null> {
-  return window.electronAPI.folderCreate(title, parentFolderId);
+  return window.electronAPI.folderCreate(title, parentFolderId, viewType);
 }
-async function listFolders(): Promise<FolderInfo[]> {
-  return window.electronAPI.folderList();
+async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
+  return window.electronAPI.folderList(viewType);
 }
 async function getFolder(id: string): Promise<FolderInfo | null> {
   return window.electronAPI.folderGet(id);
