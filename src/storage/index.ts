@@ -9,6 +9,7 @@
 import { initSurrealDB, shutdownSurrealDB, shutdownSurrealDBAsync, getDB } from './surreal/client';
 import { runMigrations } from './migrations/runner';
 import { surrealStorage } from './surreal/storage';
+import { runCardinalityCheck } from './health/cardinality-check';
 
 export type {
   StorageAPI,
@@ -28,6 +29,9 @@ export const storage = surrealStorage;
 export async function initStorage(): Promise<void> {
   await initSurrealDB();
   await runMigrations(getDB());
+  // P0a-bis K3+K4:cardinality 一对一约束 self-check + keep-latest 自愈
+  // (在 runMigrations 后,任何业务 IPC 调用前)
+  await runCardinalityCheck(surrealStorage);
   console.log('[storage] initialized');
 }
 

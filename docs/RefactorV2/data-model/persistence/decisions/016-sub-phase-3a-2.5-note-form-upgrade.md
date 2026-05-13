@@ -876,6 +876,23 @@ grep -rn "domain.*pm\|kind.*pm\|payload.domain" src/views/  # 期望:全部走 c
 - [ ] atom domain spec.md(若有引用 note 形态)
 - [ ] L7 启动包 §1.4 Open Questions 去除"noteCapability listNotes 误列 text-node pm atom"
 
+### 10.1 后续 hotfix 反向引用 — P0a-bis 同模式参考(2026-05-13)
+
+[decision 019](019-graph-instance-cardinality-hotfix.md) P0a-bis hotfix 在实施 `inCanvas`
+边一对一 cardinality 守门时,**直接参考本决议 `hasNoteView` 边的应用层模式**:
+
+| 维度 | `hasNoteView` (decision 016) | `inCanvas` (decision 014 + P0a-bis decision 019) |
+|---|---|---|
+| cardinality | 一对一(pm note → noteView marker) | 一对一(graph-instance → graph-canvas) |
+| 语义 | view 形态标记(literal marker) | **归属边**(Owner-Container) |
+| 守门策略 | warn + keep-latest 自愈 | warn + keep-latest 自愈(沿同模式) |
+| storage 启动 self-check | (未实施,留 P0a-bis 引入)| `runCardinalityCheck` 扫 hasNoteView 同种模式可扩展 |
+
+**未来扩展提示**:若 sub-phase 3a-2.5 后期发现 `hasNoteView` 一对一也出现实施漏机制
+(view 端 / store 端 / storage 启动三层任一未守门),可直接复用 [decision 019 §2.1-§2.3](019-graph-instance-cardinality-hotfix.md) 三层防线模板。
+
+P0a-bis cardinality-check 模块 [`src/storage/health/cardinality-check.ts`](../../../../../src/storage/health/cardinality-check.ts) `CARDINALITY_ONE_PREDICATES` 数组当前仅含 `inCanvas` + `hasContent`(P0a-bis 范围);若日后 hasNoteView 需 self-check 兜底,加一行即可。
+
 ---
 
 ## 11. 决议链

@@ -276,6 +276,11 @@ function incomingDocToPmPayload(inst: Record<string, unknown>): PmPayload {
 /**
  * 新建 instance atom + inCanvas 边;若 text-node 同步建 pm atom + hasContent 边。
  * @param targetId 指定 atom id (view 端预生成);null = storage 生成
+ *
+ * P0a-bis K2 守门:写 inCanvas 边前先查 subject=instanceId 已有 inCanvas 边。
+ * 若已存在(K1 后 ULID 唯一情况下理论不触发,作诊断窗口 + 防御未来违约):
+ *   - warn 记录违约 + 异步清旧边(沿 decision 014 line 735 keep-latest 同模式)
+ *   - 然后写新边,确保 cardinality 一对一(decision 014 §3.3 line 388 字面契约兑现)
  */
 async function createInstance(
   canvasId: string,
@@ -287,6 +292,24 @@ async function createInstance(
     id: targetId ?? undefined,
     payload: { domain: INSTANCE_DOMAIN, payload },
   });
+  // P0a-bis K2:cardinality 守门 — 检查既有 inCanvas 边,有则 warn + 清后再写
+  const existingInCanvas = await storage.listEdges({
+    predicate: IN_CANVAS_PREDICATE,
+    subjectAtomId: created.id,
+  });
+  if (existingInCanvas.length > 0) {
+    console.warn(
+      `[graph/canvas-store] inCanvas cardinality violation on instance ${created.id}: `
+        + `${existingInCanvas.length} existing edge(s), cleaning before writing new edge`,
+    );
+    for (const e of existingInCanvas) {
+      try {
+        await storage.deleteEdge(e.id);
+      } catch (err) {
+        console.warn(`[graph/canvas-store] failed to clean stale inCanvas edge ${e.id}:`, err);
+      }
+    }
+  }
   await storage.putEdge({
     predicate: IN_CANVAS_PREDICATE,
     subject: { kind: 'atom', atomId: created.id },

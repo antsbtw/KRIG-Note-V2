@@ -385,9 +385,18 @@ type StyleOverrides = unknown;       // 沿用 V2 既有 type,实施者从 canva
 predicate: 'user:krig:inCanvas'
 subject:   AtomRef(graph-instance atom)
 object:    AtomRef(graph-canvas atom)
-cardinality: 一对一(一个 Instance 只在一个画板内)
+cardinality: 一对一(归属边 — 一个 Instance 严格归属一个画板)
 attrs:     { createdBy: 'user-default', createdAt }
 ```
+
+⚠ **P0a-bis 反向更新(2026-05-13)**:`inCanvas` 升级为**归属边**语义。
+- **"归属"含义**:容器归属(Instance **诞生于**该 canvas,cascade 跟随 canvas 删除),**不指**编辑者归属(KRIG-Note v1 单机单用户,Owner-Editor 区分无意义)。
+- **机制化保证**(P0a-bis 三层防线,详 [decision 019](019-graph-instance-cardinality-hotfix.md)):
+  1. **K1 view 端**:`NodeRenderer.nextInstanceId` 走 ULID 全局唯一(原 `i-001/i-002` per-canvas counter 撞库已修)
+  2. **K2 store 端**:`canvas-store.createInstance` 在 putEdge inCanvas 前查既有 → keep-latest 自愈(K1 后理论不触发)
+  3. **K3 storage 启动**:`runCardinalityCheck` 扫描 inCanvas + hasContent 一对多边 → keep-latest 异步清理(覆盖历史污染数据)
+- **文档语言**:用 "归属" / "container" / "contained in" 描述,**避免**用 "owner" 字眼(歧义大)。
+- **未来 sub-phase 3a-shared-ref 对照**:届时引入新边 `referencedIn`(暂定名)表示**引用关系**(一对多 cardinality,不改变归属);详 [decision 019 §9](019-graph-instance-cardinality-hotfix.md)。当前 sub-phase **不引入此边**(避免死代码占位)。
 
 #### `user:krig:hasContent`(本 sub-phase 新引入)
 
@@ -1538,4 +1547,39 @@ UPDATE-only(传 id 必须已存在),**两者错位**导致 graph instance 写入
 
 **沉淀**: 跨 sub-phase 调用 storage 契约时,**必须读 storage.ts 源码验证 input 路径行为**,
 而不是按"看起来该这样"假设。注释里写"X 允许 Y"必须配套 grep 实现验证。
+
+### 12.9 后续 hotfix — P0a UPSERT 揭露 inCanvas cardinality 漏机制(2026-05-13 P0a-bis)
+
+decision 017 P0a 修法把 putAtom 改 UPSERT 后,sub-phase 3a-1 实施漏的 cardinality
+机制立刻显化:同一个 instance `i-001` 同时出现在两个画板(用户截图实证)。
+
+**根因 — 决议字面拍板,实施漏机制**:
+
+- decision 014 §3.3 line 388 **字面**:`inCanvas cardinality: 一对一(一个 Instance 只在一个画板内)`
+- 但 sub-phase 3a-1 三层实施全部漏机制保证:
+  - **view 端** [NodeRenderer.nextInstanceId](../../../../../src/capabilities/canvas-rendering/scene/NodeRenderer.ts#L257):基于 `byId.size + 1` 的 per-NodeRenderer counter 生成 `i-001` / `i-002` 短可读 id;NodeRenderer 是 per-canvas 实例 → counter 跨画板碰撞
+  - **store 端** [canvas-store.createInstance](../../../../../src/platform/main/graph/canvas-store.ts#L301):直接走 putEdge inCanvas,不查既有边
+  - **storage 启动**:无 cardinality self-check
+- P0a 修法前(UPDATE-only 抛 not found)隐藏漏(写入失败);P0a 修法后(UPSERT 存在则更新)化为可见(撞库覆盖 + 一对多 inCanvas 边)
+
+**修复 — [decision 019](019-graph-instance-cardinality-hotfix.md) P0a-bis 三层防线**:
+
+1. **K1 view 端**:`nextInstanceId` 改 `generateUlid` 全局唯一(commit `27595aa`)
+2. **K2 store 端**:`createInstance` 加 inCanvas 一对一守门 keep-latest 自愈(commit `8198f56`)
+3. **K3+K4 storage 启动**:`runCardinalityCheck` 扫 inCanvas + hasContent 一对多边 keep-latest 异步清理(commit `0fd3dda`)
+4. **K6 反向更新**:inCanvas 升级归属边语义(本节 §3.3 + relations spec §10.1)
+5. **K7 未来扩展**:decision 019 §9 留 `referencedIn` 边接口(sub-phase 3a-shared-ref)
+
+### 12.10 设计师 P1 教训累积(第 7 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 7 | decision 014 §3.3 line 388 cardinality | **决议字面拍板 "一对一",但实施层(view + store + storage)三层全部漏机制保证。** P0a UPSERT 修法揭露(而非引入)此漏 |
+
+**沉淀**: **决议字面拍板的 cardinality 约束(一对一 / 一对多)是契约,不是注释**。实施时必须:
+1. **view 端 id 生成**:跨 view 实例使用同一种 atom 时,client id 必须**全局**唯一(per-view counter 是踩雷模式)
+2. **store 端 putEdge 前**:对一对一边,必须查既有边 + 自愈(沿 keep-latest 模式)
+3. **storage 启动**:对一对一边,必须有 self-check 兜底(防御实施漏 + 历史污染)
+
+cardinality 约束的实施成本远小于事后排查的成本 — 字面拍板时就要同步登记**三层防线落地点**,而非只写"cardinality: 一对一"一行。
 
