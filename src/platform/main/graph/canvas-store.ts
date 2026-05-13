@@ -35,6 +35,13 @@ import type {
   PmPayload,
 } from '@semantic/types';
 import { wrapPmDoc } from '../note/envelope';
+import {
+  adapterFolderList,
+  adapterFolderCreate,
+  adapterFolderRename,
+  adapterFolderDelete,
+  adapterFolderMove,
+} from './folder-adapter';
 
 // ── 数据模型(view 透明,字段命名跟 V2 既有保持一致)──
 
@@ -702,33 +709,31 @@ class CanvasStore {
     return canvasAtomToRecord(newCanvasAtom, newFolderId);
   }
 
-  // ── 文件夹 (Step 5.6 改 folder-adapter,本 step 临时占位) ──
-  // 5.5a 临时占位:JSON 实施移除后,folder list/CRUD 走 sub-phase 2 folder atom + adapter,
-  // 在 Step 5.6 完整实施 folder-adapter。本 step 临时返空 array / no-op,确保 IPC 不 crash。
+  // ── 文件夹 (Step 5.6 改走 sub-phase 2 folder atom + folder-adapter) ──
+  // graph + note + future ebook 共享同一 folder 树 (decision 014 §2.3 + §3.5.3);
+  // graph IPC 契约保留 snake_case (parent_id / sort_order 等),adapter 做字段映射。
 
   async folderList(): Promise<GraphFolderRecord[]> {
-    console.warn('[graph/canvas-store] folderList placeholder (留 Step 5.6 folder-adapter)');
-    return [];
+    return adapterFolderList();
   }
 
   async folderCreate(
-    _title: string,
-    _parentId: string | null,
+    title: string,
+    parentId: string | null,
   ): Promise<GraphFolderRecord | null> {
-    console.warn('[graph/canvas-store] folderCreate placeholder (留 Step 5.6 folder-adapter)');
-    return null;
+    return adapterFolderCreate(title, parentId);
   }
 
-  async folderRename(_id: string, _title: string): Promise<void> {
-    console.warn('[graph/canvas-store] folderRename placeholder (留 Step 5.6 folder-adapter)');
+  async folderRename(id: string, title: string): Promise<void> {
+    return adapterFolderRename(id, title);
   }
 
-  async folderDelete(_id: string): Promise<void> {
-    console.warn('[graph/canvas-store] folderDelete placeholder (留 Step 5.6 folder-adapter)');
+  async folderDelete(id: string): Promise<void> {
+    return adapterFolderDelete(id);
   }
 
-  async folderMove(_id: string, _parentId: string | null): Promise<void> {
-    console.warn('[graph/canvas-store] folderMove placeholder (留 Step 5.6 folder-adapter)');
+  async folderMove(id: string, parentId: string | null): Promise<void> {
+    return adapterFolderMove(id, parentId);
   }
 }
 
