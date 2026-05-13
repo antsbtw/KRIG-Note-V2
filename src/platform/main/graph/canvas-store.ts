@@ -609,15 +609,97 @@ class CanvasStore {
   }
 
   /**
-   * 复制画板。
-   * ⚠ Step 5.5c 实施 (深拷贝 canvas + instance + pm);5.5a 暂返 null 占位。
+   * 复制画板 (Step 5.5c) — 深拷贝 canvas + instance + pm atom (单引用约束 Q5)。
+   *
+   * 步骤:
+   * 1. 读源 canvas atom + 源 inFolder 边
+   * 2. 创建新 canvas atom (新 ULID;title 加"(副本)";其他字段拷贝)
+   * 3. 决定新 inFolder:targetFolderId 优先 (undefined 时跟源 canvas 同 folder)
+   * 4. 遍历源 inCanvas 边 → 对每个源 instance:
+   *    a. 读源 instance atom payload
+   *    b. 创建新 instance atom (新 ULID,payload 复制)
+   *    c. 建新 inCanvas 边 (新 instance → 新 canvas)
+   *    d. text-node 特例:读源 pm atom payload → 创建新 pm atom + 新 hasContent 边
+   *
+   * 单引用保持:每条 pm atom 在 duplicate 后仍只被 1 个 Instance 引用 (深拷贝避免 shared-ref)。
    */
   async duplicate(
-    _id: string,
-    _targetFolderId?: string | null,
+    id: string,
+    targetFolderId?: string | null,
   ): Promise<GraphCanvasRecord | null> {
-    console.warn('[graph/canvas-store] duplicate is not implemented yet (留 Step 5.5c)');
-    return null;
+    const srcAtom = await storage.getAtom<'graph-canvas'>(id);
+    if (!srcAtom) return null;
+    if (srcAtom.payload.domain !== CANVAS_DOMAIN) return null;
+    const srcP = srcAtom.payload.payload;
+
+    // 决定新 folder id (undefined → 跟源同 folder;explicit null → 根级)
+    const srcFolderId = await getFolderIdForCanvas(id);
+    const newFolderId = targetFolderId === undefined ? srcFolderId : targetFolderId;
+
+    // 1. 创建新 canvas atom (深拷贝 payload + title 加"(副本)")
+    const newCanvasPayload: GraphCanvasPayload = {
+      ...srcP,
+      title: `${srcP.title ?? 'Untitled Canvas'} (副本)`,
+    };
+    const newCanvasAtom = await storage.putAtom<'graph-canvas'>({
+      payload: { domain: CANVAS_DOMAIN, payload: newCanvasPayload },
+    });
+
+    // 2. 可选 inFolder 边
+    if (newFolderId) {
+      await storage.putEdge({
+        predicate: IN_FOLDER_PREDICATE,
+        subject: { kind: 'atom', atomId: newCanvasAtom.id },
+        object: { kind: 'atom', atomId: newFolderId },
+        attrs: { createdBy: 'user-default', createdAt: Date.now() },
+      });
+    }
+
+    // 3. 拷贝所有 instance + text-node 的 pm atom
+    const srcInCanvasEdges = await storage.listEdges({
+      predicate: IN_CANVAS_PREDICATE,
+      objectAtomId: id,
+    });
+    for (const e of srcInCanvasEdges) {
+      if (e.subject.kind !== 'atom') continue;
+      const srcInst = await storage.getAtom<'graph-instance'>(e.subject.atomId);
+      if (!srcInst || srcInst.payload.domain !== INSTANCE_DOMAIN) continue;
+      const instP = srcInst.payload.payload;
+
+      // 新 instance atom (深拷贝 payload,新 ULID)
+      const newInst = await storage.putAtom<'graph-instance'>({
+        payload: { domain: INSTANCE_DOMAIN, payload: { ...instP } },
+      });
+      // 新 inCanvas 边
+      await storage.putEdge({
+        predicate: IN_CANVAS_PREDICATE,
+        subject: { kind: 'atom', atomId: newInst.id },
+        object: { kind: 'atom', atomId: newCanvasAtom.id },
+        attrs: { createdBy: 'user-default', createdAt: Date.now() },
+      });
+
+      // text-node 特例:深拷贝 pm atom + 新 hasContent 边
+      if (instP.ref === TEXT_LABEL_REF) {
+        const srcPmId = await getPmAtomIdForInstance(e.subject.atomId);
+        if (srcPmId) {
+          const srcPm = await storage.getAtom<'pm'>(srcPmId);
+          if (srcPm && srcPm.payload.domain === PM_DOMAIN) {
+            const newPm = await storage.putAtom<'pm'>({
+              payload: { domain: PM_DOMAIN, payload: srcPm.payload.payload as PmPayload },
+            });
+            await storage.putEdge({
+              predicate: HAS_CONTENT_PREDICATE,
+              subject: { kind: 'atom', atomId: newInst.id },
+              object: { kind: 'atom', atomId: newPm.id },
+              attrs: { createdBy: 'user-default', createdAt: Date.now() },
+            });
+          }
+        }
+      }
+    }
+
+    // 4. 返完整 record (拼装新 instance 列表 + folder id)
+    return canvasAtomToRecord(newCanvasAtom, newFolderId);
   }
 
   // ── 文件夹 (Step 5.6 改 folder-adapter,本 step 临时占位) ──
