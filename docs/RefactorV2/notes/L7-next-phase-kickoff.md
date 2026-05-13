@@ -55,7 +55,8 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 - **Q7**(继承 sub-phase 2):误删 folder / canvas 保护(确认弹窗 + 回收站)未实施
 - **Q-orphan-surreal-d-state**(sub-phase 3a-1 暴露):sub-phase 1 防御链对内核 D-state 孤儿 surreal 进程无效,只能重启 mac 根治
 - **F1 audit 发现**(sub-phase 3a-1):§6.3.5 读路径自愈端到端 binary verify 未跑(代码已实施,但人为插脏边 → 自愈端到端未验证)
-- **noteCapability listNotes 误列 text-node pm atom**(sub-phase 3a-1 暴露):sub-phase 2 noteCapability 假设所有 pm domain atom = note,sub-phase 3a-1 引入 graph text-node 共享 pm domain 后,`listNotes` 会误列 text-node 的 pm atom 为"note"
+- ~~**noteCapability listNotes 误列 text-node pm atom**(sub-phase 3a-1 暴露)~~ **✅ 已修**([decision 016](../data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) sub-phase 3a-2.5,note 形态从 "pm atom = note" 升级到 "pm atom + `user:krig:hasNoteView` 边 = note";binary verify §6.2.4 实证:4 个 graph text-node pm atom 字面零 hasNoteView 边 + 4 个 hasNoteView 边都指向真 note pm atom,完全互不污染)
+- **P0e — canvas-text-node 编辑器首块默认 codeBlock 而非 paragraph**(2026-05-13 sub-phase 3a-2.5 binary verify 期间用户报):画板新建 text-node 编辑时,首块默认成 codeBlock 而非 paragraph,显示 `[Code 前缀`。**仅渲染降级**(数据层正确,text 字面完整保留)。**根因怀疑**:canvas-text-node / text-editing-driver 初始 schema 配置;**非 sub-phase 3a-2.5 / P0d / P0a-bis / 017 任一范围**。**处置**:留独立 hotfix(决议 020 或类似),单独起新对话
 - **Q-P3 — Electron before-quit 不 await 是 land mine**([decision 017](../data-model/persistence/decisions/017-storage-persistence-hotfix.md) §9):[`platform/main/index.ts:109-111`](../../../src/platform/main/index.ts#L109) 同步 `shutdownStorageSync()`,[`storage/surreal/client.ts:260`](../../../src/storage/surreal/client.ts#L260) 300ms `setTimeout` SIGKILL 在主进程退出后实际不执行;`db.close()` 不 await。小数据量实测 graceful Cmd+Q 后跨重启完整保留(RocksDB SIGTERM 默认 fsync WAL,300ms 够),但**写量大 + macOS launchd 立刻收割** 时可能踩。修法方向:`before-quit` 改 `event.preventDefault()` + await + `app.quit()`,或 `serverProcess.unref()`,或等 embedded 模式
 - ~~**P0d — text-node pm content 被空 doc 覆盖跨重启丢文字**(sub-phase 3a-1 范围,2026-05-13 binary verify 期间新发现)~~ **✅ 已修**([decision 018](../data-model/persistence/decisions/018-canvas-text-node-doc-sync-hotfix.md),4 处形态对齐 + binary verify 场景 ① 三层实证 PASS;canvas-store `incomingDocToPmPayload` / `instanceAtomToObject` 两端识别 DriverSerialized 信封 + `InteractionController` 新建初始化空 DriverSerialized + types.ts TextNodeAtoms unknown[] → unknown 类型契约对齐)
 - ~~**P0a-bis — sub-phase 3a-1 inCanvas cardinality 漏机制**(2026-05-13 binary verify 期间用户截图实证)~~ **✅ 已修**([decision 019](../data-model/persistence/decisions/019-graph-instance-cardinality-hotfix.md),三层防线 K1-K7 + binary verify 4 场景 PASS;view 端 client id 走 ULID + store 守门 + storage 启动 self-check + inCanvas 升级归属边语义)
@@ -105,7 +106,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 
 | 顺序 | sub-phase | 内容 | 工程量 | 触发 |
 |---|---|---|---|---|
-| **1** | **sub-phase 3a-2.5**(note 形态升级)| 加 `krig:hasNoteView` 边 → noteCapability 走"pm atom + hasNoteView 边"模型,修 `listNotes` 误列 graph text-node pm atom 风险 | 0.5-1 天 | 当前已暴露 bug |
+| ~~**1**~~ | ~~**sub-phase 3a-2.5**(note 形态升级)~~ **✅ 已完成**(2026-05-13,[decision 016](../data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md))| 加 `krig:hasNoteView` 边 → noteCapability 走"pm atom + hasNoteView 边"模型,修 `listNotes` 误列 graph text-node pm atom 风险 | 0.5-1 天(实际)| 当前已暴露 bug,binary verify 8 场景全过 |
 | **2** | **sub-phase 3a-tx**(真原子性)| 评估 surrealdb-js 3.x SDK 原生 transaction API,或应用层补偿模式,解 Q-tx;前置 sub-phase 3a-shared-ref | 1-2 天 | 系统稳定性基础 |
 | **3** | **sub-phase 3b**(ebook + annotation 迁移)| ebook 书架 / 进度 / 书签 / 标注 迁 SurrealDB,接 atom/edge 体系,让"阅读 → 笔记"知识闭环数据互通 | 2-3 天 | KRIG 三大核心模块共享 atom |
 
