@@ -36,6 +36,20 @@
 > - schema_version 3 条记录 appliedAt 是历史时间(P0c SELECT 修法生效)
 > - 重启后 0 行 applying 日志(P0c catch 修法生效)
 >
+> ## schema_version 表迁移历史(累积登记)
+>
+> 本 sub-phase 1 字面只落 `1.0.0`(initial schema)。后续 sub-phase 各加 1 条 migration,
+> 当前累积如下:
+>
+> | version | 引入 sub-phase | 内容 | runner 注册 commit |
+> |---|---|---|---|
+> | `1.0.0` | sub-phase 1(本决议)| Initial schema(atom + edge + schema_version 三表)| `34e3758` |
+> | `1.1.0` | sub-phase 3a-1([decision 014 §3.7](014-sub-phase-3a-1-graph-canvas-instance-migration.md))| 加 `atom.hasBeenReferenced` field DEFAULT false | sub-phase 3a-1 合 main |
+> | `1.2.0` | sub-phase 3a-2.5([decision 016 §3.2](016-sub-phase-3a-2.5-note-form-upgrade.md))| 给所有现有 `domain='pm'` atom 加 `user:krig:hasNoteView` 边(幂等)| `56a8304`(Step 5.3) |
+>
+> binary verify 2026-05-13:schema_version 3 条记录 appliedAt 历史时间 + 重启
+> currentVersion ≥ 当前版本 → 0 行 applying 日志(017 P0c 修法生效)。
+>
 > ## 实施新增（未在原文档预设）
 >
 > | 新增 step | 内容 | 理由 |
