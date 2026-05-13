@@ -438,3 +438,27 @@ i-001 → "456" 画板,keep-latest 正确保留。
 - 历史 `i-001` 与新 ULID 各自独立(不撞库)
 
 **结论**:三层防线 K1+K2+K3+K4 全部字面生效,decision 014 §3.3 line 388 cardinality 一对一契约真正兑现。
+
+### 12.7 链下游 — P0a-bis K1 ULID + K3 self-check 兼容 P0d 修法(2026-05-13)
+
+本 019 P0a-bis hotfix 合 main 后,[decision 018](018-canvas-text-node-doc-sync-hotfix.md)
+P0d hotfix 从 `fix/canvas-text-node-doc-sync` 分支 `git merge main` 恢复推进,P0a-bis
+三层防线与 P0d 修法字面兼容,无 conflict 无回归:
+
+**merge 实证(merge commit `7104ad9`)**:
+
+- canvas-store.ts ort 策略自动合并:P0d 改 text-node helper 函数(`incomingDocToPmPayload` / `instanceAtomToObject`,line 196-293)+ P0a-bis 加 `createInstance` 函数体内 inCanvas 守门(line 316-323),字面位置不重叠
+- typecheck + lint 全部 0 错(P0a-bis K1 ULID 与 P0d DriverSerialized 信封形态独立)
+
+**P0d binary verify 场景 ① 兼容实证**(2026-05-13):
+
+- **K1 兼容**:新 text-node id = `01KRGRZ60YKYJHQ3V2PWRB4C90`(ULID 26 字符,非 `i-XXX`),P0d 修法字面接受新 id 形态
+- **K3 兼容**:启动 self-check 输出
+  ```
+  [storage/cardinality-check] user:krig:inCanvas: scanned 3 edges, found 0 violations, cleaned 0 stale edges
+  [storage/cardinality-check] user:krig:hasContent: scanned 2 edges, found 0 violations, cleaned 0 stale edges
+  ```
+  hasContent 一对一约束在 P0d 修过的写路径(`incomingDocToPmPayload` 识别 DriverSerialized → 写 pm atom + 新 hasContent 边)上字面成立
+- **启动 latency**:596ms,与 P0a-bis 独立 verify 时 592ms 几乎一致,P0d 修法对 self-check 阶段无显著开销影响
+
+**链下游意义**:P0a-bis K1+K2+K3+K4 三层防线**通过 view 端 + store 端 + storage 启动三层而非具体业务逻辑实现**,与 P0d 修法(text-node DriverSerialized 形态对齐)互不耦合 — 验证 P0a-bis 设计的**正交性**(decision 019 §2.1-§2.3 三层防线模板可被未来任意业务 hotfix 继承,不踩 hotfix 间冲突的坑)。
