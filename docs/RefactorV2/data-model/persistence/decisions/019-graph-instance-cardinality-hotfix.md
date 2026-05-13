@@ -347,7 +347,7 @@ decision 014 line 704 字面"`inFolder` 一对一约束",但本次 P0a-bis cardi
 |---|---|---|---|
 | 1 | [`decision 014 §3.3`](014-sub-phase-3a-1-graph-canvas-instance-migration.md#33-边类型规范) | inCanvas 升级归属边语义 + 三层防线落地点 | ✅ commit `4cd12f6` |
 | 2 | [`decision 014 §12.9 + §12.10`](014-sub-phase-3a-1-graph-canvas-instance-migration.md#129-后续-hotfix--p0a-upsert-揭露-incanvas-cardinality-漏机制2026-05-13-p0a-bis) | P0a-bis 实施登记 + P1 第 7 次教训累积 | ✅ commit `4cd12f6` |
-| 3 | [`decision 016 §10`](016-sub-phase-3a-2.5-note-form-upgrade.md) | hasNoteView 一对一同模式参考(本决议引用) | 待总指挥指示 |
+| 3 | [`decision 016 §10`](016-sub-phase-3a-2.5-note-form-upgrade.md) | hasNoteView 一对一同模式参考(本决议引用) | ✅ 见 #8(commit `03acdfc`)— sub-phase 3a-2.5 合 main 后双向引用闭环 |
 | 4 | [`decision 017 §12`](017-storage-persistence-hotfix.md) | 链下游:P0a UPSERT 修法揭露 cardinality 漏,P0a-bis 补完 | 待总指挥指示 |
 | 5 | [`decision 018 §12`](018-canvas-text-node-doc-sync-hotfix.md)(P0d fix 分支)| 链下游:P0d binary verify 时暴露 P0a-bis,P0d 恢复路径 | 待 P0d 合 main 后 |
 | 6 | [`relations/spec.md §10.1`](../../relations/spec.md) | inCanvas 归属边语义新增小节 | ✅ commit `4cd12f6` |
