@@ -1,7 +1,7 @@
 # Decision 017 — Sub-phase 1 Storage 持久化 Hotfix
 
 > **Phase**: N（实施 Phase）/ Hotfix（跨越 Sub-phase 1 + 3a-1）
-> **状态**: ✅ **已实施完成**(commits `e6b5ca3` + `04a5c5e`,待总指挥审计 + 用户 binary verify)
+> **状态**: ✅ **已实施完成 + binary verify 三层实证 + 反向更新完成,授权合 main**(commits `e6b5ca3` + `04a5c5e` + 决议 + 反向更新 3 commit)
 > **设计师 / 审计师**: 总指挥(main)
 > **诊断 + 实施**: `debug/persistence-probe` 分支 → `fix/storage-persistence-hotfix` 分支
 > **决议日期**: 2026-05-13
@@ -457,18 +457,38 @@ Phase N 状态加:`2026-05-13 hotfix 017 — sub-phase 1 putAtom + runner 修复
 - ESLint:`npx eslint src/storage/surreal/storage.ts src/storage/migrations/runner.ts` — 无 warning(pass)
 - SurrealDB 3.0.4 binary 实测:见 §6.1 / §6.2
 
-### 12.3 Binary verify 结果(待用户跑)
+### 12.3 Binary verify 结果(✅ 三层实证全过)
 
-| 场景 | 状态 | 备注 |
+2026-05-13 总指挥协调用户跑,实证齐全:
+
+| 场景 | 状态 | 实证 |
 |---|---|---|
-| ① graceful close + reopen 数据保留 | ⏳ 待跑 | 总指挥协调用户执行 |
-| ② 启动 5 次 migration 只跑 1 次 console.log | ⏳ 待跑 | 总指挥协调用户执行 |
+| ① graceful close + reopen 数据保留 | ✅ 通过 | shape 3 个跨重启保留 + atom 10 个数据完整(P0a UPSERT 生效) |
+| ② 启动 5 次 migration 只跑 1 次 console.log | ✅ 通过 | 重启后 0 行 `applying` 日志 + schema_version 3 条记录 `appliedAt` 是历史时间(P0c SELECT 修法 + UPSERT 不刷 appliedAt 生效) |
 
-### 12.4 反向更新(待 binary verify 通过后做)
+### 12.4 反向更新(✅ 合 main 前完成)
 
-| 文档 | 状态 |
-|---|---|
-| 011 sub-phase 1 偏离纠错表 | ⏳ 待更新 |
-| 014 sub-phase 3a-1 createInstance 备注 | ⏳ 待更新 |
-| surreal-schema.md putAtom 契约 | ⏳ 待审查 |
-| data-model/README.md phase 进度 | ⏳ 待更新 |
+| 文档 | 状态 | Commit |
+|---|---|---|
+| 011 §10.x "后续 hotfix" blockquote 加 P0a/P0c 偏离登记 + binary verify 实证 | ✅ 完成 | `57ed282` |
+| 014 §12.7 后续 hotfix + §12.8 P1 教训第 6 次 | ✅ 完成 | `8e8213f` |
+| L7-next-phase-kickoff.md §1.4 加 Q-P3 + P0d 占位 / §1.5 教训 6 / §1.6 cwd 漂移 4 | ✅ 完成 | `acf6328` |
+| 决议 017 §12 标实施完成 + 三层实证 | ✅ 本 commit | (本次) |
+
+注:`surreal-schema.md` putAtom 契约 / `data-model/README.md` phase 进度未在本轮做 — 总指挥未列入授权清单,
+留 sub-phase 后续(若有新需求触发再更)。
+
+### 12.5 P0d 新发现(独立 hotfix,不在 017 范围)
+
+2026-05-13 binary verify 期间总指挥发现 sub-phase 3a-1 范围 1 个新 P0 bug:
+
+- **症状**: text-node pm content 被空 doc 覆盖,跨重启丢文字
+- **位置怀疑**: sub-phase 3a-1 §3.4 pmContentCapability 写路径或 canvas-store
+  text-node update 路径(`updateInstance` 内 pm payload 处理)
+- **本对话未深查**:不在 017 修法范围,独立 hotfix 处理
+- **占位**:L7 启动包 §1.4 加 P0d 占位条目;独立 decision 文档由后续对话/总指挥起
+
+### 12.6 P3 留独立 issue
+
+参 §9 Q-P3 — Electron `before-quit` 不 await。小数据量实测不踩,但写量大 / SIGTERM 时长不够时可能踩。
+本 hotfix 不修;留 sub-phase 后续。L7 启动包 §1.4 已挂 Q-P3 跟踪。
