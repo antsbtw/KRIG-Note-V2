@@ -56,6 +56,8 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 - **Q-orphan-surreal-d-state**(sub-phase 3a-1 暴露):sub-phase 1 防御链对内核 D-state 孤儿 surreal 进程无效,只能重启 mac 根治
 - **F1 audit 发现**(sub-phase 3a-1):§6.3.5 读路径自愈端到端 binary verify 未跑(代码已实施,但人为插脏边 → 自愈端到端未验证)
 - **noteCapability listNotes 误列 text-node pm atom**(sub-phase 3a-1 暴露):sub-phase 2 noteCapability 假设所有 pm domain atom = note,sub-phase 3a-1 引入 graph text-node 共享 pm domain 后,`listNotes` 会误列 text-node 的 pm atom 为"note"
+- **Q-P3 — Electron before-quit 不 await 是 land mine**([decision 017](../data-model/persistence/decisions/017-storage-persistence-hotfix.md) §9):[`platform/main/index.ts:109-111`](../../../src/platform/main/index.ts#L109) 同步 `shutdownStorageSync()`,[`storage/surreal/client.ts:260`](../../../src/storage/surreal/client.ts#L260) 300ms `setTimeout` SIGKILL 在主进程退出后实际不执行;`db.close()` 不 await。小数据量实测 graceful Cmd+Q 后跨重启完整保留(RocksDB SIGTERM 默认 fsync WAL,300ms 够),但**写量大 + macOS launchd 立刻收割** 时可能踩。修法方向:`before-quit` 改 `event.preventDefault()` + await + `app.quit()`,或 `serverProcess.unref()`,或等 embedded 模式
+- **P0d — text-node pm content 被空 doc 覆盖跨重启丢文字**(sub-phase 3a-1 范围,2026-05-13 binary verify 期间新发现):sub-phase 3a-1 §3.4 pmContentCapability 写路径相关;**占位待 P0d hotfix 决议细化**(本对话未深查根因,不在 017 范围)
 
 ### 1.5 设计师纪律累积教训(必须遵守,详 decision 013 §0.5)
 
@@ -66,6 +68,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 | 3 | decision 014 前 | 没核 folder 模块导出 + 进程边界 |
 | 4 | decision 014 实施期 | 没核 sub-phase 2 deleteFolder cascade scope |
 | 5 | decision 014 实施期 | 没核 AtomEntity 字段集 + normalizer |
+| 6 | decision 014 §3.5.3 / canvas-store.createInstance | 设计 "view 端预生成 client id 推给 storage" 模式时,没核 sub-phase 1 putAtom 契约支不支持;字面注释"storage putAtom 允许传 id"是设计师一厢情愿,实际 UPDATE-only(由 [decision 017](../data-model/persistence/decisions/017-storage-persistence-hotfix.md) 改 UPSERT 修复)|
 
 **纪律**:
 - 涉及"已实施模块自动支持新需求"假设 → 必须 grep 代码字面行为验证
@@ -75,10 +78,11 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 
 ### 1.6 实施者纪律累积教训(必须遵守,详 memory `feedback_v2_is_workspace_v1_is_reference`)
 
-**cwd 漂移事故已发生 3 次**:
+**cwd 漂移事故已发生 4 次**:
 - git push 错仓库
 - npm install 装到 V1
 - npm start & 启 V1(复合命令陷阱)
+- decision 017 hotfix 排查期 `git checkout main && git checkout -b ...` 链断 cwd 漂移到 V1(zsh 默认 cwd 在 V1,前一条 `cd V2 &&` 已被前次命令终止;补救:每条 Bash 调用独立 `cd V2 &&` 前缀,不依赖 session cwd)
 
 **纪律**:
 - 任何 Bash 调用前 `cd /Users/wenwu/Documents/VPN-Server/KRIG-Note-V2 &&` 显式指定

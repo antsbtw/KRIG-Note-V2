@@ -112,12 +112,22 @@ class SurrealStorage implements StorageAPI {
     const ownerId = options?.ownerId ?? DEFAULT_OWNER;
 
     if (input.id) {
+      // UPSERT 语义 (decision 017 §2.1):
+      // - view 端可能预先生成 client-side id 推过来 (graph instance 等场景)
+      // - createdAt / createdBy 用 `field OR $now` 短路:已存在保留原值,不存在取 $now
+      // - payload / updatedAt 总是覆盖
+      // SurrealDB 3.0.4 已实测验证 OR 短路语义生效 (decision 017 §6.1)。
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE $rid SET payload = $payload, updatedAt = $now RETURN AFTER`,
-        { rid: atomRid(input.id), payload: input.payload, now },
+        `UPSERT $rid SET
+           createdAt = createdAt OR $now,
+           updatedAt = $now,
+           createdBy = createdBy OR $ownerId,
+           payload = $payload
+         RETURN AFTER`,
+        { rid: atomRid(input.id), payload: input.payload, now, ownerId },
       );
       const row = result[0]?.[0];
-      if (!row) throw new Error(`Atom ${input.id} not found`);
+      if (!row) throw new Error(`Atom ${input.id} upsert returned no row`);
       return normalizeAtomEntity<D>(row);
     }
 

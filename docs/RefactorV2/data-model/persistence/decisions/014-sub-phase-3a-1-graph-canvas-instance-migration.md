@@ -1502,3 +1502,40 @@ EM5/EM6 累计远超 30+ 次操作无崩溃,cascade 边路径正确。
 
 **审计判定**: ✅ 通过,合 main。
 
+### 12.7 后续 hotfix — sub-phase 3a-1 view client id 模式触发 P0a(2026-05-13)
+
+sub-phase 3a-1 实施引入 [canvas-store.createInstance](../../../../../src/platform/main/graph/canvas-store.ts#L280)
+"view 端预生成 client-side id"模式(§3.2.x + canvas-store §5.5b 内 update diff
+"新增 (view 端可能预先生成了 client-side id;storage putAtom 允许传 id)"),
+但 sub-phase 1 [putAtom](../../../../../src/storage/surreal/storage.ts#L106) 契约字面是
+UPDATE-only(传 id 必须已存在),**两者错位**导致 graph instance 写入全部抛
+"Atom not found",新 shape 永远不入库(P0a)。
+
+3a-1 实施 / 审计期间 §6.2.2 持久化核心场景通过的原因:**实施期间画板 instance 没传 client id**
+(走 createInstance 不带 targetId 路径,storage 生成 ULID,走 putAtom CREATE 分支
+不触发 UPDATE-only 抛错);后期 sub-phase 3a-2.5 引入用户拖入 hexagon 等 ref-shape
+时 view 端拼出 client id `i-001` 推过来,即刻暴露。
+
+**修复**: [decision 017](017-storage-persistence-hotfix.md) P0a 改 putAtom 为 UPSERT
+短路语义(commit `e6b5ca3`),createdAt/createdBy 用 `field OR $val` 短路。
+
+**附带修 P0c**(runner SELECT 3.0.4 不兼容 + catch 静默,跟 3a-1 范围无关
+但同一 hotfix 一并修;详 017 §1.2)。
+
+**binary verify 三层实证**(2026-05-13 总指挥协调用户跑):
+- shape 3 个跨重启保留 + atom 10 个数据完整(P0a)
+- schema_version 3 条 appliedAt 历史时间(P0c)
+- 重启 0 行 applying 日志(P0c)
+
+**遗留**: P0d 新发现 — text-node pm content 被空 doc 覆盖跨重启丢文字
+(sub-phase 3a-1 §3.4 pmContentCapability 写路径),不在 017 范围,留独立 hotfix。
+
+### 12.8 设计师 P1 教训累积(第 6 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 6 | decision 014 §3.5.3 / canvas-store.createInstance | 设计 "view 端预生成 client id 推过来" 模式时,没核 sub-phase 1 putAtom 契约支不支持;字面注释"storage putAtom 允许传 id"是设计师一厢情愿,实际只 UPDATE 不 UPSERT |
+
+**沉淀**: 跨 sub-phase 调用 storage 契约时,**必须读 storage.ts 源码验证 input 路径行为**,
+而不是按"看起来该这样"假设。注释里写"X 允许 Y"必须配套 grep 实现验证。
+
