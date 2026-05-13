@@ -1,7 +1,7 @@
 # Decision 018 — Canvas Text-Node Doc Sync Hotfix(P0d)
 
 > **Phase**: N(实施 Phase）/ Hotfix(局部 — sub-phase 3a-1 范围)
-> **状态**: 🟡 **实施完成,待审计 + binary verify**(commits 见 §4)
+> **状态**: ✅ **已实施完成 + binary verify 场景 ① 三层实证 + 反向更新完成,授权合 main**(10 commits — 5 实施 + 1 merge main + 4 反向更新)
 > **设计师 / 审计师**: 总指挥(main)
 > **诊断 + 实施**: 本对话(P0d 排查实施者)
 > **决议日期**: 2026-05-13
@@ -426,25 +426,75 @@ fallback 返回值。
 
 ### 12.1 Commit hash
 
+**实施 commits**(5 个):
+
 - `2a203e2` — fix(graph/types): TextNodeAtoms unknown[] → unknown — P0d 类型契约对齐
 - `f4bc441` — fix(graph/canvas-store): incomingDocToPmPayload 识别 DriverSerialized — 修 P0d 写路径
 - `8659715` — fix(graph/canvas-store): get text-node instance.doc 返 DriverSerialized — 对齐读路径形态
 - `db046fb` — fix(graph/canvas/interaction): 新建 text-node instance.doc 初始化空 DriverSerialized — 形态对齐
-- 本决议自身作为第 5 个 commit(hash 见 `git log fix/canvas-text-node-doc-sync`)
+- `724cbbd` — docs(decision 018): P0d canvas text-node doc sync hotfix 决议
+
+**merge main 拉 P0a-bis**(1 个,无 conflict):
+
+- `7104ad9` — Merge branch 'main' into fix/canvas-text-node-doc-sync(拉 P0a-bis K1+K2+K3+K4 三层防线 + 017 反向更新链)
+
+**反向更新 commits**(4 个,binary verify PASS 后,合 main 前):
+
+- `7469853` — 反向更新 014 §12.11 + §12.12:DriverSerialized 透传引入 P0d + P1 第 8 次教训
+- `3b8bcff` — 反向更新 017 §12.8:P0d binary verify 暴露 P0a-bis + P0d 恢复路径
+- (本 commit)— 反向更新 018 §12.X 标实施完成 + binary verify 场景 ① 三层实证
+- (后续)— 反向更新 019 §12.X + L7 启动包
 
 ### 12.2 静态验证结果
 
 - TypeScript:`npx tsc --noEmit -p tsconfig.json` — 无输出(pass)
 - ESLint:`npx eslint src/capabilities/canvas-rendering/types.ts src/capabilities/canvas-rendering/interaction/InteractionController.ts src/platform/main/graph/canvas-store.ts` — 无 warning / error(pass;仅有 1 条 eslint.config.js MODULE_TYPELESS_PACKAGE_JSON 工具自身 warning,与本次修改无关)
 - grep verify:view 端字面消费 `inst.doc` 的所有位置(NodeRenderer.ts:481 透传给 atomBridge / GraphCanvasView.tsx:252 透传给 enterEdit / InteractionController.ts:725-732 新建初始化)— 全部已对齐 DriverSerialized 信封形态
+- merge main(`7104ad9`)后再跑 `npx tsc --noEmit` + 三文件 lint — 全部 0 错(P0a-bis 与 P0d 字面位置不重叠,自动合并无回归)
 
-### 12.3 Binary verify 结果
+### 12.3 Binary verify 结果 — ✅ 场景 ① 三层实证 PASS(2026-05-13)
 
-⏳ 待总指挥协调用户跑(场景 ① ② ③ 见 §3.2)
+**总指挥拍板 A**:场景 ② / ③ 跳过(场景 ① 已覆盖核心 + update 路径等价覆盖 + K1 + self-check 兼容)。
 
-### 12.4 反向更新
+**场景 ① — create + 跨重启**:
 
-⏳ 合 main 前完成(清单见 §10)
+| 实证层 | 字面证据 |
+|---|---|
+| 屏幕层 | 用户报告 text-node "123-abc*abc" 字面可见 |
+| HTTP query 层 | pm atom `01KRGRZ70S0G50K04W4338V7PN` content = `[{type:'paragraph', attrs:{isTitle:false}, content:[{type:'text', text:'123-abc*abc'}]}]` 跨重启完整保留 |
+| 等价覆盖路径 | updatedAt > createdAt 1500+ 秒(view 端 readback 触发 save),但 content **未被覆盖空** → 等价覆盖场景 ② update 路径 |
+
+→ P0d 修法字面完整生效:写路径 `incomingDocToPmPayload` 识别 DriverSerialized + 读路径 `instanceAtomToObject` 返 DriverSerialized + 新建路径初始化空 DriverSerialized 三处都已生效。
+
+**附加 verify(P0a-bis 兼容)**:
+
+- **K1 ULID 兼容**:新 text-node id = `01KRGRZ60YKYJHQ3V2PWRB4C90`(26 字符 ULID,非 i-XXX)
+- **K3 self-check 兼容**:启动 self-check 输出
+  ```
+  [storage/cardinality-check] user:krig:inCanvas: scanned 3 edges, found 0 violations, cleaned 0 stale edges
+  [storage/cardinality-check] user:krig:hasContent: scanned 2 edges, found 0 violations, cleaned 0 stale edges
+  ```
+- **启动 latency**:596ms 不退化
+
+### 12.4 用户报告 listNotes 误列观察(2026-05-13,非 P0d 范围)
+
+binary verify 期间用户截图发现 graph text-node 内容(刚输入的 "123-abc*abc")**误列在 note 列表里** — 这正是 sub-phase 3a-2.5([decision 016 §1.1 + §6.2.4](016-sub-phase-3a-2.5-note-form-upgrade.md))要修的 bug,**不属于 P0d 范围**。
+
+**根因**:sub-phase 2 noteCapability `listNotes` 假设所有 `pm` domain atom = note,sub-phase 3a-1 引入 graph text-node 共享 pm domain 后,`listNotes` 会误列 text-node 的 pm atom 为"note"。
+
+**P0d 修法本职是 text-node 内容写入正确性**(已通过),listNotes 误列由 sub-phase 3a-2.5 合 main 后通过 `hasNoteView` 边形态升级修复(只列有 `hasNoteView` 边的 pm atom 为 note)。
+
+**当前状态**:L7 启动包 §1.4 字面已挂"noteCapability listNotes 误列 text-node pm atom" Open Question 占位,等 sub-phase 3a-2.5 合 main 后清掉。
+
+### 12.5 反向更新清单 — ✅ 完成
+
+| # | 文件 | 字面 | 状态 |
+|---|---|---|---|
+| 1 | [decision 014 §12.11 + §12.12](014-sub-phase-3a-1-graph-canvas-instance-migration.md) | DriverSerialized 透传契约引入 P0d + P1 第 8 次教训 | ✅ commit `7469853` |
+| 2 | [decision 017 §12.8](017-storage-persistence-hotfix.md) | P0d binary verify 暴露 P0a-bis + P0d 恢复路径 | ✅ commit `3b8bcff` |
+| 3 | 本决议 018 §12.X | 标实施完成 + binary verify 场景 ① + listNotes 误列 + P0a-bis 兼容 | ✅(本 commit) |
+| 4 | [decision 019 §12.X](019-graph-instance-cardinality-hotfix.md) | P0a-bis K1 ULID + K3 self-check 兼容 P0d 修法 | 待落 |
+| 5 | L7 启动包 §1.4 | P0d ✅ 已修(去掉占位) | 待落 |
 
 ---
 
