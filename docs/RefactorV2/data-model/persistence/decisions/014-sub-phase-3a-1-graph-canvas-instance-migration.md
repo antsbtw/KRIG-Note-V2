@@ -1,12 +1,13 @@
 # Decision 014 — Phase N Sub-phase 3a-1: Graph Canvas + Instance 持久化迁移
 
 > **Phase**: N（实施 Phase）/ Sub-phase 3a-1
-> **状态**: 📝 实施任务（待新对话执行）
+> **状态**: ✅ **已实施完成**(2026-05-12,merge commit `67f18b2`,10 commits / 28 files / +1502/-342)
 > **设计师 / 审计师**: 本对话（main 分支）
 > **实施者**: 新对话（`feature/L7-sub3a-1-canvas-instance-migration` 分支)
 > **决议日期**: 2026-05-12
 > **前置依赖**: sub-phase 2 (`0ad60c7`) + decision 013 总纲 (`281d74b`)
 > **总纲依据**: [decision 013 sub-phase 3a 总纲](013-sub-phase-3a-graph-canvas-migration.md)
+> **实施总结**: §6.2 8 个核心场景全通过 + EM5/EM6 + 静态合规审计全通过;含 2 个实施期间主对话拍板的关键决策(A: folder cascade 扩展;E: AtomEntity 扩展 hasBeenReferenced)
 
 ---
 
@@ -33,10 +34,11 @@
 6. **允许消费已完成模块的对外 API**(`@capabilities/folder` / `@capabilities/note` 的 capability registry 接口),**但禁止修改其行为 / 对外契约 / 内部实施**(`src/capabilities/note/` / `src/capabilities/folder/` / `src/platform/main/note/` / `src/platform/main/folder/` 全部目录不动)。本 sub-phase 只动 graph + 引入 pmContentCapability。
 
    **如出现模型不匹配**(例如 §3.5.3 graph IPC 契约 `GraphFolderRecord` 跟 `folderCapability.FolderInfo` 字段命名 / 集合不一致):**只在 graph 侧加 adapter 层做映射**(`src/platform/main/graph/folder-adapter.ts`),**不动 folder 模块本身**。详 §3.5.3。
-7. **不动 view 层渲染逻辑**(`src/capabilities/canvas-rendering/Host`内部 / `src/capabilities/shape-library/` / variants),只改 `src/capabilities/graph-library-store/` 的底层落地 + 引入新边 + 新 capability。
+7. **不动 storage 对外契约 + atom CRUD 语义**(原 "不动 storage 内部实施" 字面在实施时发现过严,**实质允许向后兼容字段扩展 + normalizer 同步带出**,跟 sub-phase 2 加 folder domain 同范畴。详 §12.2 偏离 6 + decision 011 §5.7 反向更新)。**禁止改 storage 对外接口签名 + atom CRUD 语义**。
 8. 涉及 SurrealQL / schema 操作时**未在 binary 验证**,实施者需在实际 binary 上 verify,发现 SurrealDB 3.0.4 行为不一致**立即停下汇报**。
 9. **遵守 decision 013 §3.0 域注册门槛**:新 atom domain 引入前必须完成 4 步代码侧注册闭环(`AtomPayloadOf` / `AtomDomain` / storage dispatch / capability register),commit message 显式列"已注册 domain"。
 10. **遵守 decision 013 §3.5.1.bis 单引用约束**:本 sub-phase 仅实现"单引用模式",一段 pm content 只被一个 Instance 引用,**禁止浅引用 / 跨 view 复用**(那是 3a-shared-ref 子任务,前置 Q-tx 必做)。
+11. **(实施期间补加)checkpoint 合并 binary verify**:每 step 单独 binary verify 在 D-state 等 OS 故障环境下不可行,允许合并到 checkpoint(配套静态深度审计 + 失败立即回溯)。本 sub-phase 用了 3 checkpoint 替代 5+ 次,详 §12.2 偏离 7。
 
 ### 0.3 本子决议覆盖 decision 013 总纲的偏差
 
@@ -1270,15 +1272,34 @@ console.log('Got:', b);
 
 ## 10. 反向更新清单(审计通过后做)
 
-1. `decision 013` 顶部状态: 加"sub-phase 3a-1 已完成"段
-2. `decision 013 §3.2` 节点 atom 分解原则反向修订: "每节点一 domain" → "Instance + ref 模式,单 domain"
-3. `decision 013 §6.1` 子任务表反向修订: 3a-2 内容(原为 text-node)调整为 sticky 或其他节点(实施时根据 V2 后续 graph 节点演化定)
-4. `decision 013 §3.7` capability 命名表反向修订: 加 `pmContentCapability` + 标注 `graph-library-store` 是改造非新建
-5. `decision 013` 新增"画板视觉模型 = Freeform 对标"段落(原决议未明确对标 app)
-6. `decision 014` 顶部状态 → ✅ 已实施完成 + merge commit hash
-7. `decision 009 §3.1 sub-phase 3` 标 ✅ 部分完成(3a-1)+ commit hash
-8. `atom/spec.md` atom domain 列表加 graph-canvas / graph-instance(若该文档有列表)
-9. `relations/spec.md` krig vocab 加 inCanvas / hasContent 登记
+**已完成 (2026-05-12 反向更新合 main 时同步做)**:
+
+1. ✅ `decision 013` 顶部状态: 加"sub-phase 3a-1 已完成"段
+2. ✅ `decision 013 §3.2` 节点 atom 分解原则反向修订: "每节点一 domain" → "Instance + ref 模式,单 domain"
+3. ✅ `decision 013 §6.1` 子任务表反向修订: 3a-2 内容(原为 text-node)合并入 3a-1,3a-2.5 调整为 note 形态升级
+4. ✅ `decision 013 §3.7` capability 命名表反向修订: 加 `pmContentCapability` + 标注 `graph-library-store` 是改造非新建
+5. ✅ `decision 013` 新增"画板视觉模型 = Freeform 对标"段落(原决议未明确对标 app)
+6. ✅ `decision 013 §3.5.1` 字段位置确认: hasBeenReferenced = atom 元数据(entity 字段),不进 payload
+7. ✅ `decision 013 §0.5` 新增设计师纪律累积条款 (第 4 / 第 5 次 P1 教训)
+8. ✅ `decision 014` 顶部状态 → ✅ 已实施完成 + merge commit `67f18b2`
+9. ✅ `decision 014 §0.2.7` 措辞调整: 实质允许向后兼容字段扩展(详 §12.2 偏离 6)
+10. ✅ `decision 014 §5.7` 路径偏差登记: `migration.ts` 实际放 `src/platform/main/graph/` 而非 `src/capabilities/graph-library-store/`(renderer 包不能 import electron/fs)
+11. ✅ `decision 014 §12.2` 偏离 6 (AtomEntity 扩展) + 偏离 7 (checkpoint 合并 verify) + 偏离 8 (migration.ts 路径) 完整登记
+12. ✅ `decision 012 §12` 偏离登记: deletedNotes → deletedResources cascade scope 扩展
+13. ✅ `decision 011 §5.7` AtomEntity 字段表加 hasBeenReferenced (sub-phase 1 反向更新)
+14. ✅ `decision 009 §3.1 sub-phase 3` 标 ✅ 部分完成(3a-1)+ merge commit `67f18b2`
+15. ✅ `atom/spec.md` atom domain 列表加 graph-canvas / graph-instance(若该文档有列表)
+16. ✅ `relations/spec.md` krig vocab 加 inCanvas / hasContent 登记
+17. ✅ `src/capabilities/folder/DESIGN.md` cascade scope 扩展说明
+18. ✅ `memory feedback_v2_is_workspace_v1_is_reference` 加复合命令陷阱条款 (本 sub-phase npm start & cwd 漂移事故)
+
+**审计发现登记 (F1) — 留 sub-phase 3a-N+ 补**:
+
+- **F1 (Audit)**: §6.3.5 读路径自愈端到端 binary verify 未跑
+  - 代码已实施 (`getFolderIdForCanvas` / `getPmAtomIdForInstance` / `asyncCleanupStaleEdges` 完整)
+  - 未端到端 verify: 人为插脏边 → `graphList/Load` 触发自愈 → 异步清理验证
+  - 风险: 单引用约束正常使用不产生脏边,自愈是兜底但未实测;若写路径任何 bug 残留脏边,自愈是唯一收敛路径
+  - 处置: 留 sub-phase 3a-N+ 补 binary verify(可通过手工 surreal CLI 插边模拟)
 
 ---
 
@@ -1335,4 +1356,149 @@ main 不受影响。
 
 ---
 
-*Decision 014 版本结束。预估实施工程量 4-6 天。*
+*Decision 014 版本结束。预估实施工程量 4-6 天,实际 1 天完成。*
+
+---
+
+## 12. 实施实际情况(2026-05-12 反向更新)
+
+### 12.1 commit 序列(共 10 个)
+
+| # | Step | Commit | 内容 |
+|---|---|---|---|
+| 1 | 5.2 | `71ea3bc` | semantic/types 加 graph-canvas + graph-instance domain (域注册 1/2) |
+| 2 | 5.3 | `991f3d6` | storage schema 加 hasBeenReferenced field (1.1.0 migration) |
+| 3 | 5.4 | `c652dee` | pmContentCapability main + IPC + preload + AtomEntity 扩展 |
+| 4 | 5.5a | `9c95011` | canvas-store list/get/create/rename/move/delete 走 SurrealDB |
+| 5 | 5.5b | `8774c0f` | canvas-store update diff 算法 + text-node hasContent 双层 |
+| 6 | 5.5c | `2a71bd0` | canvas-store duplicate 深拷贝(单引用 Q5)|
+| 7 | 5.6 | `cec5580` | folder 关联升级 — graph 跟 note 共享 folder 树 + adapter |
+| 8 | 5.6.bis | `5764aab` | sub-phase 2 deleteFolder cascade 扩展 graph-canvas(决策点 A)|
+| 9 | 5.7 | `7a6c9bf` | clearLegacyGraphStorage 启动时清旧磁盘 JSON |
+| 10 | 5.10 | `7e7ea4f` | pm-content DESIGN.md + graph-library-store DESIGN.md v0.2 |
+
+合并 commit: `67f18b2`
+
+### 12.2 与本决议的偏离登记
+
+#### 偏离 1: §3.2 节点 atom 分解(已在 §0.3 / §13 提及)
+
+总纲假设"每节点一 domain",实际 V2 是 Instance + ref,单 `graph-instance` domain + ref 字段区分类型。已反向更新 decision 013 §3.2。
+
+#### 偏离 2: §6.1 子任务表(已在 §0.3 / §13 提及)
+
+总纲 3a-2 = text-node,实际 text-node 合并入 3a-1(因为只比 shape 多 hasContent 边 + pm atom,跟 shape 实施同模板)。3a-2 调整为后续节点类型(如 sticky / connector)。
+
+#### 偏离 3: §3.7 capability 命名(已在 §0.3 提及)
+
+总纲设想"新建 graphCanvasCapability",实际改造既有 `graph-library-store`(接口透明),新建 `pmContentCapability`(view-agnostic pm atom)。
+
+#### 偏离 4: 画板视觉模型 = Freeform(已在 §0.3 + §3.1.0 提及)
+
+总纲未明确对标 app,本决议 §3.1.0 显式拍板 Freeform 对标 + Figma 扩展占位。
+
+#### 偏离 5: 决策点 A — folder cascade scope 扩展
+
+**问题**: sub-phase 2 `deleteFolder` `collectNotesInFolders` 字面只 cascade `payload.domain === 'pm'`,sub-phase 3a-1 加 graph-canvas 后 Path Y for canvas 期望删 folder 时同步删内含 canvas,但代码不支持。
+
+**处置(实施期间主对话拍板 A)**:
+- `collectNotesInFolders` → `collectResourcesInFolders`
+- 白名单 `['pm', 'graph-canvas']`
+- 返回字段 `deletedNotes` → `deletedResources`
+- 实施 commit: `5764aab` (step 5.6.bis)
+- 反向更新 decision 012 §12 偏离登记
+
+**未来扩展**: sub-phase 3b ebook 接入时,白名单加 `'ebook'`;每加一个内容 domain,显式约束(代码层 + 决议层登记)。
+
+#### 偏离 6: 决策点 E — AtomEntity 扩展 hasBeenReferenced
+
+**问题**: 决议 §3.4 `PmAtomInfo.hasBeenReferenced` 要求 capability 能读到此字段,但 sub-phase 1 `AtomEntity` 5 字段不含(写决议时设计师漏核 — 第 5 次同类 P1 教训)。
+
+**处置(实施期间主对话拍板 A)**:
+- `AtomEntity` 加 `hasBeenReferenced?: boolean`(optional 字段,sub-phase 1/2 旧数据 normalizer 用 `?? false` 兜底)
+- `normalizeAtomEntity` 同步带出字段
+- 实施 commit: `c652dee` (step 5.4 内)
+- 反向更新 decision 011 §5.7 + decision 013 §3.5.1
+
+**§0.2.7 措辞调整原因**: 字面"不动 storage 内部实施"过严,实质允许向后兼容字段扩展(跟 sub-phase 2 加 folder domain 同范畴)。
+
+#### 偏离 7: Checkpoint 合并 binary verify
+
+**问题**: 决议 §0.2 + §5.X 各 step 字面要求单独 binary verify(5+ 次),实施期间 D-state 孤儿 surreal 进程让每次 binary verify 都需用户协助重启 mac,5+ 次用户疲劳不可行。
+
+**处置(实施期间主对话拍板修改版 B)**:
+- 划分 3 个 checkpoint 合并 verify:
+  - Checkpoint 1: Step 5.3 + 5.4 (schema + pm-content IPC)
+  - Checkpoint 2: Step 5.5a + 5.5b + 5.5c (canvas-store CRUD/diff/duplicate)
+  - Checkpoint 3: Step 5.6 + 5.7 + 5.9 (folder 共享 + cleanup + §6.2 集成)
+- 每 step 完成时配套静态深度审计(typecheck / lint / grep / 接口签名核对 / 域注册闭环 / 单引用约束 / 进程边界)
+- 任何 checkpoint binary verify 失败 → 立即停下汇报 + 回溯 checkpoint 内所有 step
+- 用户协作次数从 5+ 降到 3 次,binary verify 早期 fail-fast 设计基本保留
+
+#### 偏离 8: §5.7 migration.ts 路径
+
+**问题**: 决议 §5.7 字面要求 `src/capabilities/graph-library-store/migration.ts`,但该路径属 renderer 侧 capability 包,无法 import `electron` / `node:fs`(sub-phase 1 边界严防 renderer 包侵入 main API)。
+
+**处置(实施期间务实纠正)**:
+- 实际放 `src/platform/main/graph/migration.ts`(main 进程内)
+- migration.ts 注释主动登记此偏差
+- 反向更新 decision 014 §5.7 + §4.1 文件清单
+
+### 12.3 §6.2 UI 集成测试结果(Checkpoint 3)
+
+| 序号 | 操作 | 结果 |
+|---|---|---|
+| 6.2.1 | 启动应用 | ✅ `[storage] initialized` + 1.0.0/1.1.0 migration 日志 + clearLegacyGraphStorage(无旧目录 → skip) |
+| 6.2.2 | 持久化核心(画板 + shape + 关闭重启)| ✅ |
+| 6.2.3 | text-node 持久化(hasContent + pm atom 双层)| ✅ |
+| 6.2.4 | 删 text-node cascade 删 pm atom(单引用)| ✅ |
+| 6.2.5 | folder 共享(graph + note 双向看到同 folder)| ✅ |
+| 6.2.6 | Path Y cascade — 删 folder X 内含 1 画板 + 1 note | ✅ 返 `{deletedFolders:1, deletedResources:2, cascadedEdges:3}` 全删 |
+| 6.2.7 | family-tree variant 持久化 | ✅ |
+| 6.2.8 | duplicate 独立性 | ✅ |
+| 6.3.3 | moveToFolder × 3 幂等(keep-latest 去重)| ✅ |
+| 6.3.4 | moveToFolder null(回根级)| ✅ |
+| 6.4.1-4.4 | 反向 grep 验证 | ✅ |
+
+EM5/EM6 累计远超 30+ 次操作无崩溃,cascade 边路径正确。
+
+### 12.4 实施期间事故 / 障碍
+
+#### 事故 1: cwd 漂移到 V1(第 3 次同类)
+
+- 实施者后台 `npm start &` 命令漏 `cd V2 &&` 前缀
+- zsh 默认 cwd 是 V1,导致 V1 启动了一次,V2 没启动
+- 实施者主动汇报 + 自查 + 纠正
+- V1 文件系统 / git 完全无损害
+- 沉淀: memory `feedback_v2_is_workspace_v1_is_reference` 加复合命令陷阱条款
+
+#### 障碍 1: D-state 孤儿 surreal 进程
+
+- 之前 sub-phase 启动留的 surreal 8533 进程 hang 在内核 IO(UE state)
+- SIGTERM / SIGKILL 均无效,只能重启 mac
+- 阻塞 Step 5.3 binary verify,用户协助重启 mac 根治
+- 沉淀: sub-phase 1 防御链不足(memory `project_surreal_defensive_startup` 仅在正常 shutdown 触发,异常退出留残留)
+- 留 Open Question Q-orphan-surreal-d-state-cleanup(留 sub-phase 3a-N+ 或独立小修)
+
+### 12.5 设计师 P1 教训累积(第 5 次)
+
+| 次 | sub-phase | 失误 |
+|---|---|---|
+| 1 | sub-phase 2 IPC 设计 | 没核实 V2 capability 在哪个进程 |
+| 2 | decision 013 §3.0 | 没核实 SurrealDB schema 约束 |
+| 3 | decision 014 §3.5.3.3 (前) | 没核实 folder 模块导出 + 进程边界 |
+| 4 | decision 014 §3.5.3.3 (实施期) | 没核实 sub-phase 2 deleteFolder cascade scope |
+| **5** | **decision 014 §3.4 / §3.7 (实施期)** | **没核实 AtomEntity 字段集 + normalizer 是否带出 hasBeenReferenced** |
+
+**沉淀**: 涉及加 schema field 时,**必须同步核 entity 接口 + normalizer 是否带出**。任何"x 走 storage.getAtom 拿到"的字段,都要 verify entity + normalizer 真带这字段。
+
+### 12.6 审计结论
+
+**代码合规**: typecheck 0 / lint 0 / view 不直连 storage / 磁盘 JSON 全清 / main 进程无 requireCapabilityApi 误用 / 域注册 4 步闭环 / keep-latest + 自愈代码完整。
+
+**行为合规**: §6.2 8 场景 + EM5/EM6 全通过。
+
+**审计发现**: F1 §6.3.5 读路径自愈端到端 binary verify 未跑(已登记到 §10 反向更新清单尾部)。
+
+**审计判定**: ✅ 通过,合 main。
+

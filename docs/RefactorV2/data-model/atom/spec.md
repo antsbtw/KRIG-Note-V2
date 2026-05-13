@@ -277,6 +277,65 @@ export interface ThreePayload {
 
 > ⚠️ **此处特别强调** —— V2 不设"family-tree domain" / "bpmn domain" / "mind-map domain"。它们都是 three domain + 对应命名空间边的组合。理由详见 [`decisions/003-naming-conventions.md`](decisions/003-naming-conventions.md) §"为什么领域解释不做成 domain"。
 
+### 3.4 folder Domain(sub-phase 2 已实施 / 2026-05-12)
+
+**职责**：笔记 / 资源的文件夹容器,KRIG 通用容器概念,不绑定具体内容类型。
+
+**形态**(详 [`decision 012 §3.1`](../persistence/decisions/012-sub-phase-2-note-folder-migration.md)):
+
+```ts
+export interface FolderPayload {
+  title: string;            // 文件夹显示名(真实业务字段)
+}
+```
+
+**容器关系**:走 `user:krig:inFolder` 边表达"X 属于 folder Y"。X 可以是 note(pm atom) / graph-canvas / 嵌套 folder / 未来 ebook 等。
+
+**实施位置**: `src/capabilities/folder/` + `src/platform/main/folder/`(sub-phase 2 完成,merge `0ad60c7`)。
+
+### 3.5 graph-canvas / graph-instance Domain(sub-phase 3a-1 已实施 / 2026-05-12)
+
+**职责**:画板容器 + 画板内节点统一模型。详 [`decision 014`](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md)。
+
+#### graph-canvas
+
+```ts
+export interface GraphCanvasPayload {
+  title: string;
+  variant: 'canvas' | 'family-tree' | 'knowledge' | 'mindmap';
+  view: { centerX: number; centerY: number; zoom: number };
+  schemaVersion: number;     // = 2
+  // Freeform-style 可选视觉
+  background?: { type: 'solid' | 'dotted-grid' | ...; color?: string };
+  gridVisible?: boolean;
+  locked?: boolean;
+  // Figma-style 扩展占位(sub-phase 4+)
+  bounds?: { width: number; height: number } | null;
+  themeRef?: string | null;
+}
+```
+
+#### graph-instance
+
+```ts
+export interface GraphInstancePayload {
+  type: 'shape' | 'substance';     // V2 InstanceKind
+  ref: string;                     // Library id(如 'krig.basic.rectangle' / 'krig.text.label')
+  position?, size?, rotation?;
+  endpoints?;                      // line 类节点(future)
+  params?: Record<string, number>;
+  style_overrides?, props?, size_lock?, text_valign?;
+  // text-node 特例: ref === 'krig.text.label' 时,doc 内容通过 user:krig:hasContent 边引用 pm atom
+}
+```
+
+**容器关系**:
+- 画板归属 folder: `user:krig:inFolder`(跟 note 同款,sub-phase 2 已定义)
+- 画板内节点: `user:krig:inCanvas`(本 sub-phase 新引入)
+- text-node 内容引用: `user:krig:hasContent` 边指向 pm atom(本 sub-phase 新引入)
+
+**实施位置**: `src/capabilities/graph-library-store/`(改造)+ `src/capabilities/pm-content/`(新)+ `src/platform/main/graph/` + `src/platform/main/pm-content/`(sub-phase 3a-1 完成,merge `67f18b2`)。
+
 ---
 
 ## 4. 跨 Atom 关系（边一等公民）

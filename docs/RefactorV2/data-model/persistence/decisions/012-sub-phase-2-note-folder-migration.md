@@ -1036,3 +1036,20 @@ EM5(连续 30+ 操作无崩溃)+ EM6(cascade)随核心测试一并通过。
 
 **审计判定**: ✅ **通过**,可合 main。
 
+### 12.5 后续 sub-phase 反向扩展(2026-05-12 由 sub-phase 3a-1 触发)
+
+sub-phase 3a-1 实施时发现 **sub-phase 2 `deleteFolder` cascade scope 不支持 graph-canvas**(原 `collectNotesInFolders` 字面只 cascade `payload.domain === 'pm'`),需要扩展白名单支持 graph-canvas。
+
+**反向扩展内容**:
+- `collectNotesInFolders` → `collectResourcesInFolders`(函数 + 内部变量改名)
+- 判断条件 `payload.domain === 'pm'` → `['pm', 'graph-canvas'].includes(domain)`
+- 返回字段 `deletedNotes` → `deletedResources`(类型扩展,语义不变)
+- 实施 commit: `5764aab` (sub-phase 3a-1 step 5.6.bis)
+
+**纪律登记**:
+- 主对话设计师**未在 sub-phase 2 实施时预留扩展点**,sub-phase 3a-1 实施时被迫扩展(违反 sub-phase 3a-1 §0.2.7 字面"不动 folder 模块",但符合实质"不改 Path Y 语义契约")
+- 详 decision 014 §12.2 偏离 5 + decision 013 §0.5 设计师纪律第 4 次累积
+- 未来 sub-phase 3b ebook 接入时,白名单加 `'ebook'`(每加一个内容 domain,显式约束)
+
+**对 sub-phase 2 测试结果的影响**: 无。原 §6.2.6 Path Y 测试场景行为不变(folder 内含 note 全部清),只是扩展后多支持 folder 内含 graph-canvas 的 cascade。
+

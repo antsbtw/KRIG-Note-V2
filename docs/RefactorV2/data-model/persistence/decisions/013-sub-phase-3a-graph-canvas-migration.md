@@ -1,7 +1,15 @@
 # Decision 013 — Phase N Sub-phase 3a: Graph Canvas 渐进迁移总纲
 
 > **Phase**: N（实施 Phase）/ Sub-phase 3a 总纲
-> **状态**: 📝 总纲已撰写（待用户拍板 + 启动 sub-phase 3a-1）
+> **状态**: ✅ **总纲已撰写 + sub-phase 3a-1 已实施完成**(2026-05-12,merge commit `67f18b2`)
+>
+> **3a-1 完成后反向更新**:
+> - §3.2 节点 atom 分解 → 改为 "Instance + ref 模式 + 单 graph-instance domain"(sub-phase 3a-1 实施现实)
+> - §3.7 capability 命名表 → 加 `pmContentCapability` + 标 `graph-library-store` 是改造
+> - §6.1 子任务表 → 3a-1 范围扩大(含 text-node),3a-2 调整为后续节点
+> - §3.5.1 字段位置 → 确认 hasBeenReferenced 在 atom 元数据(entity 字段)
+> - 新增 §3.1.bis "画板视觉模型 = Freeform 对标"段落
+> - §0.5 设计师纪律累积第 5 次 P1 教训
 > **设计师 / 审计师**: main 对话
 > **实施者**: 每个 3a-N 子任务由独立 session 执行
 > **决议日期**: 2026-05-12
@@ -48,6 +56,39 @@ sub-phase 3a-3+              →  sticky / connector / image / ... (按需扩展
 **补遗 1 — 用户主权**:涉及"删除 / 转换 / 提升内容"等改变 atom 形态的操作,默认提供用户选择,不替用户简化语义。
 
 **补遗 2 — UX 跟随客观状态**:UX 复杂度跟随内容的客观状态(如 `hasBeenReferenced`),而非把决策负担推给用户。草稿态无打扰,流通态有保护,状态升级单向不可逆。
+
+### 0.5 设计师纪律累积(2026-05-12 反向更新加入,sub-phase 3a-1 实施后)
+
+跨多个 sub-phase 累积的 P1 教训,写后续决议时必须遵守:
+
+**纪律 1 — 不假设"已实施模块自动支持新需求"**
+
+任何"x 走已实施的 y 自然支持"假设,**必须 grep 验证已实施代码字面行为**。截至 sub-phase 3a-1 完成,这条纪律已积累 5 次 P1 教训:
+- 第 1 次(sub-phase 2): 没核 V2 capability 在哪个进程
+- 第 2 次(decision 013): 没核 SurrealDB schema 约束
+- 第 3 次(decision 014 撰写): 没核 folder 模块导出 + 进程边界
+- 第 4 次(decision 014 实施期): 没核 sub-phase 2 deleteFolder cascade scope
+- 第 5 次(decision 014 实施期): 没核 AtomEntity 字段集 + normalizer 是否带出新字段
+
+**纪律 2 — 加 schema field 时必须三层同步**
+
+涉及加 schema field 时,**必须同步核**:
+- ① schema DEFINE FIELD(存层)
+- ② entity 接口(类型层)
+- ③ normalizer(读路径转换层)
+
+任何"x 走 storage.getAtom 拿到"的字段,都要 verify ② + ③ 真带这字段。
+
+**纪律 3 — checkpoint binary verify 模型**
+
+决议字面"每 step 单 binary verify" 在 D-state 等 OS 故障环境下不可行。新决议预设 checkpoint 划分:
+- 静态深度审计(typecheck / lint / grep / 接口签名核对 / 域注册闭环 / 进程边界)前置到每 step
+- binary verify 合并到 checkpoint(每 sub-phase 通常 2-3 个 checkpoint)
+- 任何 checkpoint binary verify 失败 → 立即停下回溯
+
+**纪律 4 — 跨 sub-phase 模块的协作扩展**
+
+"不动已完成模块" 的本意是 "不改对外契约 + atom CRUD 语义",**允许必要的向后兼容字段扩展**(跟 sub-phase 2 加 folder domain + sub-phase 3a-1 加 hasBeenReferenced 同范畴)。新决议措辞应预设这条路径,不强求"字面一行不动"。
 
 ---
 
@@ -208,7 +249,51 @@ interface GraphCanvasPayload {
 
 **画板内节点**(全部):走 `user:krig:inCanvas` 边,subject=node,object=canvas。
 
+### 3.1.bis 画板视觉模型对标(2026-05-12 反向更新加入)
+
+总纲原文未明确对标 app(画板用什么视觉哲学)。sub-phase 3a-1 实施时拍板:
+
+**对标 Freeform(Apple 无限白板)起步 + Figma 扩展占位,明确不引入 PowerPoint 母版/布局体系。**
+
+| 维度 | 决议 | 理由 |
+|---|---|---|
+| 边界形态 | **无限平面**(Freeform / Miro 同款)| KRIG 是知识工具,边界是认知边界不是物理边界 |
+| 节点结构 | **扁平 Instance + ref**(V2 现状)| 不引入 Frame / Group 嵌套(留 sub-phase 4+ 评估)|
+| 母版 / 布局 | **不引入** | PowerPoint 演示场景不适用 KRIG |
+| 主题系统 | **不引入**(schema 仅占位 `themeRef`)| 留 sub-phase 4+ 跟 substance 三层架构联合实施 |
+| 协作元数据 | **不引入** | 单机单用户(decision 010),协作留 v2+ |
+
+sub-phase 3a-1 实施 Freeform-style 极简 canvas 模型,GraphCanvasPayload 字段:
+- 必填 4: `title` / `variant` / `view` / `schemaVersion`
+- 可选 3(Freeform 视觉): `background` / `gridVisible` / `locked`
+- Figma 扩展占位 2: `bounds` / `themeRef`(sub-phase 4+ 实施)
+
+详 decision 014 §3.1。
+
 ### 3.2 节点 atom 分解原则
+
+> ⚠ **2026-05-12 反向更新**(sub-phase 3a-1 实施现实覆盖):
+>
+> 本节原方案是"每节点类型一 domain"(`graph-shape` / `graph-text-node` / `graph-sticky`)。
+> sub-phase 3a-1 实施时发现 V2 已经走 Instance + ref 模式(`canvas-rendering/types.ts:59-114`),
+> 改为**单 atom domain `graph-instance` + payload.type + payload.ref 区分节点类型**。
+>
+> 实际落地形态(详 decision 014 §3.2):
+> ```ts
+> interface GraphInstancePayload {
+>   type: 'shape' | 'substance';     // InstanceKind
+>   ref: string;                     // Library id,如 'krig.basic.rectangle' / 'krig.text.label'
+>   position?, size?, rotation?, params?, style_overrides?, props?, ...
+>   // 复合节点(text-node)的内容走 user:krig:hasContent 边 + pm atom
+> }
+> ```
+>
+> 优点(实施发现):
+> - 跟 V2 substance 三层架构哲学一致(实例容器,不按形状分裂 domain)
+> - 加新 substance type 只是 Library 注册,storage schema 不变
+> - 跟 pm domain 同模式(一个 domain 装多种 PM 节点形态)
+>
+> 下文保留原方案描述作历史记录,实施层以 decision 014 §3.2 为准。
 
 #### 简单节点(无内容)— shape / sticky 几何部分
 
@@ -342,22 +427,41 @@ sub-phase 3a-2 同步引入 pmContentCapability + graphTextNodeCapability 协作
 
 #### 3.5.1 字段定义
 
-每个 pm atom(及其他可被引用的 content atom 类型)的 payload 内加单向 flag:
+> ✅ **2026-05-12 反向更新**(sub-phase 3a-1 实施时确认):
+>
+> **字段位置 = atom 元数据(entity 字段),不进 payload。**
+>
+> 落地形态(详 decision 014 §3.7 + decision 011 §5.7 反向更新):
+> ```ts
+> // src/semantic/types/atom-entity.ts
+> export interface AtomEntity<D extends AtomDomain = AtomDomain> {
+>   id: string;
+>   createdAt: number;
+>   updatedAt: number;
+>   createdBy: string;
+>   payload: Atom<D>;
+>   hasBeenReferenced?: boolean;   // ← optional,sub-phase 1/2 旧数据用 ?? false 兜底
+> }
+> ```
+>
+> SurrealDB schema:`DEFINE FIELD hasBeenReferenced ON atom TYPE bool DEFAULT false`(sub-phase 3a-1 migration 1.1.0)
+>
+> 适用所有 atom(不仅 pm),但目前只有 pm 会被多 wrapper 引用 hasContent,其他 domain 此字段恒 false。
+
+每个 pm atom(及其他可被引用的 content atom 类型)有单向 flag:
 
 ```ts
-// 注:flag 位置实施时定 — 加 payload 内 / 独立边 attrs / pm atom 元数据字段。
-// 推荐放 atom 元数据(类似 createdBy),不进 payload(payload 是纯语义内容)。
-// 具体由 sub-phase 3a-2 实施 decision 015 定。
-
-// 概念形态:
-interface PmAtomMetadata {
-  hasBeenReferenced: boolean;   // 单向 flag,永不复位
+// 实际落地(2026-05-12 sub-phase 3a-1 确认):
+// 位置 = atom 元数据(AtomEntity 字段),不进 payload(payload 是纯语义内容)。
+interface AtomEntity {
+  // ... id / timestamps / createdBy / payload ...
+  hasBeenReferenced?: boolean;   // 单向 flag,永不复位
 }
 ```
 
-**初始值**: `false`(刚创建时)。
+**初始值**: `false`(刚创建时,DB schema DEFAULT false 兜底)。
 
-**触发条件**: 当**任意 capability 创建第 2+ 条 `hasContent` 边指向此 pm atom 时**(即开始流通),置为 `true`。
+**触发条件**: 当**任意 capability 创建第 2+ 条 `hasContent` 边指向此 pm atom 时**(即开始流通),置为 `true`。**单引用模式(sub-phase 3a-1..3a-5)下永不触发**(每个 pm atom 只被 1 个 wrapper 引用)。
 
 **永不复位**: 即便所有引用后来都断开,`hasBeenReferenced` 保持 `true`(单向门)。
 
@@ -453,6 +557,22 @@ interface PmAtomMetadata {
 ⚠ 风险登记:误删 canvas = 丢节点 + 丢草稿内容。配套保护(删除前弹窗 + 回收站)留 sub-phase 3+(同 sub-phase 2 Q7)。
 
 ### 3.7 capability 边界与命名
+
+> ⚠ **2026-05-12 反向更新**(sub-phase 3a-1 实施现实覆盖):
+>
+> 本节原方案是"新建 `graphCanvasCapability` / `graphShapeCapability` / `graphTextNodeCapability` / ..."。
+> sub-phase 3a-1 实施时改为:
+> - **改造**既有 `graph-library-store` capability(view 端期望 12 接口,接口不变最少改动 + 内部底层换 SurrealDB)
+> - **新建** `pmContentCapability`(view-agnostic pm atom CRUD,跟 noteCapability 解耦)
+>
+> 实际命名映射(详 decision 014 §9.4):
+> | 资源 | atom domain | capability 模块 | IPC channel | electron-api |
+> |---|---|---|---|---|
+> | 画板容器 | `graph-canvas` | `@capabilities/graph-library-store`(改造)| `graph.*`(保留)| `graph*` |
+> | 画板节点 | `graph-instance`(单 domain)| 同上 | 同上 | 同上 |
+> | 内容 (pm) | `pm`(sub-phase 2 已注册)| `@capabilities/pm-content`(新)| `pm-content.*` | `pmContent*` |
+>
+> 下文保留原方案描述作历史记录,实施层以 decision 014 §9.4 为准。
 
 按 decision 008 §4.0 调用边界:
 
@@ -637,14 +757,14 @@ pm atom 不再"是" note,而是"被 note view 引用"。
 
 ### 6.1 子任务全表
 
-| 子任务 | 内容 | 依赖 | 风险 | 优先级 |
+| 子任务 | 内容 | 依赖 | 风险 | 优先级 / 状态 |
 |---|---|---|---|---|
-| **3a-1** | graph 容器 + shape 节点 | sub-phase 2 | 低 | **首要** |
-| **3a-2** | text-node + pmContentCapability + hasContent 边 + hasBeenReferenced 契约(**单引用模式,见 §3.5.1.bis**) | 3a-1 | 中(双 atom 架构首次落地) | **次要** |
-| **3a-2.5** | note 形态升级(hasNoteView 边 — 路线 B literal marker,见 §5.3)| 3a-2 | 中(migration)| **必要,接 3a-2** |
-| **3a-3** | sticky 节点(底色 sticky + 含文字时 hasContent 引用 pm,单引用模式) | 3a-2 | 中 | 按 V2 需求 |
-| **3a-4** | connector(连接线 — 端点引用其他节点 wrapper) | 3a-1 | 中(新边类型 `krig:connects`)| 按 V2 需求 |
-| **3a-5** | image / media node(wrapper + media content atom,单引用模式) | 3a-2 模板 | 中 | 按 V2 需求 |
+| **3a-1** | graph 容器(Instance + ref 模式)+ shape 节点 + **text-node 节点(2026-05-12 合并入 3a-1 实施)** + pmContentCapability + hasContent 边 + hasBeenReferenced 契约(单引用模式,见 §3.5.1.bis)| sub-phase 2 | 中(双 atom 架构首次落地)| ✅ **已完成**(merge `67f18b2`)|
+| **3a-2.5** | note 形态升级(hasNoteView 边 — 路线 B literal marker,见 §5.3)| 3a-1 | 中(migration)| **必要,接 3a-1** |
+| **3a-2** | sticky 节点专属能力(若 V2 sticky 跟 Instance 形态差异显著,届时再拆;原 3a-2 内容已并入 3a-1)| 3a-1 | 中 | 按 V2 需求 |
+| **3a-3** | connector(连接线 — 端点引用其他节点 wrapper)| 3a-1 | 中(新边类型 `krig:connects`)| 按 V2 需求 |
+| **3a-4** | image / media node(wrapper + media content atom,单引用模式)| 3a-1 模板 | 中 | 按 V2 需求 |
+| **3a-5+** | 其他节点类型(按 V2 后续 graph 节点演化)| 各异 | 各异 | 按需 |
 | **3a-tx** | **Q-tx 解决** — SDK 原生 transaction / 应用层补偿 / 单点串行更新器(三选一,独立 decision)| 任意 3a-x | 中-高(影响所有 capability 写路径)| **浅引用前置必做** |
 | **3a-shared-ref** | 浅引用 / 跨 view 复用(同一 pm atom 多 wrapper 引用) | **3a-tx 必须先完成** | 中(竞态保护)| 按 vision 闭环需求触发 |
 | **3a-N** | 后续节点类型(按 graph variant 演化 + Freeform 对标) | 各异 | 各异 | 按需 |
