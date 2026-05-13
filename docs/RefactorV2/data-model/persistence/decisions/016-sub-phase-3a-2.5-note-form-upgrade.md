@@ -40,7 +40,7 @@
 | 边模型路线 | 路线 B(literal marker)| ✅ **路线 B** | grep verify 后 storage schema literal object 支持完备 |
 | listNotes 查询路径 | 总纲未明确 | **listAtoms + listEdges(hasNoteView) + listEdges(inFolder) + 应用层 filter**(**3 query**,在 sub-phase 2 现状 2 query 基础上加 1 次 listEdges)| 避免 N+1 性能退化;EdgeFilter 不支持按 literal value 过滤 |
 | deleteNote 契约 | 总纲提"草稿 cascade,流通仅断 hasNoteView 边" | ✅ **本 sub-phase 只实施草稿分支**,流通态走 console.error + fallback 草稿分支(不抛硬错误)| 单引用模式下 hasBeenReferenced 恒 false,流通分支永不触发;fallback 防护对外契约不破坏 |
-| hasNoteView 边一对一机制 | 总纲未明确 | **应用层幂等 putEdge(查→无则插)**,SurrealDB 3.0.4 不支持 partial UNIQUE index(decision 014 §12.4) | 跟 decision 013 §3.5.1.bis 单引用约束同模式(应用层契约 + 单机单用户假设);存储层机制保护留 sub-phase 3a-tx 升级 |
+| hasNoteView 边一对一机制 | 总纲未明确 | **三层契约防御**:新 atom 天然单边(createNote)+ migration 幂等(查→无则插)+ 未来产生点决议层契约;SurrealDB 3.0.4 不支持 partial UNIQUE index + StorageTransaction 不暴露 listEdges,故 createNote 不做查重 | 跟 decision 013 §3.5.1.bis 单引用约束同模式(应用层契约 + 单机单用户假设);存储层机制保护留 sub-phase 3a-tx 升级 |
 | migration 边界 | 总纲提"给所有 sub-phase 2 创建的 pm atom 加边" | ✅ **改成"给所有未被 hasContent 边 object 引用的 pm atom 加边"** | grep 后确认,这等价于"sub-phase 2 createNote 创建的那批",但避免依赖创建时间戳/createdBy 等不可靠依据 |
 | checkpoint 划分 | 总纲提"1 个 binary verify checkpoint" | **2 个 checkpoint**(schema + migration / capability 改造 + UI)| 沿 decision 014 模式;migration 是关键风险点必须单独 verify |
 
@@ -220,18 +220,27 @@ cardinality: 一对一(一个 pm atom 最多一条 hasNoteView 边)
 
 **已知设计选择**:value 恒 true(EdgeFilter 不过滤 value,应用层信任此约定)。未来若需"标记 note 在某种状态(归档/草稿/...)" 应该走另一条边类型或 atom payload 字段,**不复用本边的 value 字段**。
 
-**一对一 cardinality 机制保护**(2026-05-12 审计补充):
+**一对一 cardinality 机制保护**(2026-05-12 审计补充,P2 round 修订):
 
-文档声明"一个 pm atom 最多一条 hasNoteView 边",但 SurrealDB binary 3.0.4 不支持 `DEFINE INDEX ... WHERE` partial UNIQUE 索引(详 [schema.ts:67-70 字面登记](../../../../../src/storage/surreal/schema.ts#L67) + decision 014 §12.4),全 UNIQUE 索引会限制其他 predicate 边,路径不通。
+文档声明"一个 pm atom 最多一条 hasNoteView 边",但 SurrealDB binary 3.0.4 不支持 `DEFINE INDEX ... WHERE` partial UNIQUE 索引(详 [schema.ts:67-70 字面登记](../../../../../src/storage/surreal/schema.ts#L67) + decision 014 §12.4),全 UNIQUE 索引会限制其他 predicate 边,路径不通;`StorageTransaction` 接口字面也没暴露 `listEdges`([api.ts:130-137](../../../../../src/storage/api.ts#L130)),tx 内查重不可行。
 
-→ **应用层幂等保护**(本 sub-phase):
-- migration 内已查 `alreadyHasNoteView` Set,跳过已加边的 atom(§3.6)
-- **createNote 内必须先查后插**:transaction 内先 `tx.listEdges({ predicate: 'user:krig:hasNoteView', subjectAtomId: atom.id, limit: 1 })`,**长度=0 才** `tx.putEdge`(§3.2 已包含此保护)
-- 任何外部工具 / 后续 migration 修库都必须遵循"查→无则插"规约
+→ **三层契约防御**(本 sub-phase):
 
-→ **机制保护升级路径**: sub-phase 3a-tx 解 Q-tx 真原子性后,可考虑 SurrealQL 显式 `IF NOT EXISTS` + 应用层 UNIQUE 校验函数 `assertNoteViewCardinality(atomId)`(留 Open Question Q016-5)。
+1. **createNote — 新 atom 天然单边**(§3.2)
+   - putAtom 生成全新 ULID,不可能跟既有 hasNoteView 边冲突
+   - 直接 putEdge,无需查重(查重字面恒空查)
 
-→ **当前接受的风险**:单机单用户场景 + SurrealDB transaction 序列化 + 应用层幂等三层防御,实测足够;若未来引入多用户 / 多设备并发,必须升级到 storage 层机制。
+2. **migration 1.2.0 — 应用层幂等**(§3.6)
+   - 跑前查 `alreadyHasNoteView` Set,跳过已加边的 atom
+   - 重启重跑 → added=0(§5.3 Checkpoint 1 必验)
+
+3. **未来 domain='pm' 产生点契约**(§9 Q016-4)
+   - 任何后续 sub-phase 新增 pm atom 产生点必须显式登记 hasNoteView 边的产生策略
+   - 决议层契约 + 审计师查核,不依赖存储层 UNIQUE
+
+→ **机制保护升级路径**: sub-phase 3a-tx 解 Q-tx 真原子性后,可考虑 SurrealQL 显式 `SELECT ... WHERE NOT EXISTS` + 应用层 UNIQUE 校验函数 `assertNoteViewCardinality(atomId)`(留 Open Question Q016-5)。
+
+→ **当前接受的风险**:单机单用户场景 + 三层契约防御,实测足够;若未来引入多用户 / 多设备并发(或外部工具直改库不走 noteCapability),必须升级到 storage 层机制。
 
 ### 3.2 noteCapability.createNote 改造
 
@@ -253,33 +262,33 @@ export async function createNote(initialDoc, folderId) {
   const pmDoc = ...;
   return storage.transaction(async (tx) => {
     const atom = await tx.putAtom<'pm'>({ payload: { domain: 'pm', payload: pmDoc } });
-    // 新增:幂等加 hasNoteView 边 — 一对一 cardinality 应用层防御
-    // (新建 atom 字面上不会有边,但走"查→无则插"模式确保 createNote 被任何路径重入也安全)
-    const existing = await tx.listEdges({
+    // 新 atom 由 putAtom 生成新 ULID,字面上不可能跟既有 hasNoteView 边冲突;
+    // 无需查重 — 一对一 cardinality 由"新 atom 天然单边" + migration 幂等 + 未来产生点契约 (§3.1) 三层保证
+    await tx.putEdge({
       predicate: 'user:krig:hasNoteView',
-      subjectAtomId: atom.id,
-      limit: 1,
+      subject: { kind: 'atom', atomId: atom.id },
+      object: { kind: 'literal', type: 'bool', value: true },
+      attrs: { createdBy: 'user-default', createdAt: Date.now() },
     });
-    if (existing.length === 0) {
-      await tx.putEdge({
-        predicate: 'user:krig:hasNoteView',
-        subject: { kind: 'atom', atomId: atom.id },
-        object: { kind: 'literal', type: 'bool', value: true },
-        attrs: { createdBy: 'user-default', createdAt: Date.now() },
-      });
-    }
     if (folderId) await tx.putEdge({ predicate: 'user:krig:inFolder', ... });
     return atomToNoteInfo(atom, folderId);
   });
 }
 ```
 
-→ transaction 内同时创建 atom + hasNoteView 边(幂等)+ inFolder 边(若有 folderId)。
+→ transaction 内同时创建 atom + hasNoteView 边 + inFolder 边(若有 folderId)。
 
-⚠ **transaction.listEdges 是否可用 verify**:`StorageTransaction` 接口字面没暴露 `listEdges`([api.ts:130-137](../../../../../src/storage/api.ts#L130) 只暴露 atom CRUD + getEdge + putEdge + deleteEdge)。实施者 step 5.4 需:
-- (a) 检查 `StorageTransaction` 是否有 `listEdges`(若有,直接用)
-- (b) **若无**,改用 `storage.listEdges(...)`(非 tx 内,串行执行;sub-phase 1 单机单用户场景可接受;反正 migration 也走非 tx listEdges)
-- 任一选择需在 commit message 显式登记
+**为什么 createNote 不需要"查→无则插"**(2026-05-12 审计补充):
+
+审计 P2 round 指出 `StorageTransaction` 接口字面没有 `listEdges`([api.ts:130-137](../../../../../src/storage/api.ts#L130) 只暴露 atom CRUD + getEdge + putEdge + deleteEdge),tx 内查重不可行;tx 外 storage.listEdges 又削弱原子性语义。
+
+重新审视后:**createNote 查重逻辑本身就是冗余的**。理由:
+- createNote 调用 `tx.putAtom()` 不传 id,storage 层生成全新 ULID
+- 新 ULID 在数据库内**不存在任何 subject = atom.id 的边**(任何边都不可能)
+- 故 hasNoteView 边的"查→无则插"在 createNote 路径上字面恒为空查 → 直接 putEdge 即可
+- 真正可能产生重复 hasNoteView 边的场景是 **migration 重入**(已存 atom 重跑迁移) — 已由 §3.6 内 `alreadyHasNoteView` Set 防护
+
+→ 删 createNote 查重 + 一对一 cardinality 防御重心放在 §3.1 三层契约 + §3.6 migration 幂等。
 
 ### 3.3 noteCapability.listNotes 改造
 
@@ -436,16 +445,15 @@ await db.query(
 
 ### 4.1 新建文件
 
-- `src/storage/migrations/1.2.0-note-form-upgrade.ts`(可选,若 schema.ts 内联不便)
-- 或:直接在 `src/storage/surreal/schema.ts` 加 `SCHEMA_VERSION_1_2_0` 常量 + migration 函数
+**无新建文件**。schema 1.2.0 migration 函数加在既有 `src/storage/surreal/schema.ts` 内(同 1.1.0 模式)。
 
-(实施者按 §5.3 决定,跟 1.1.0 的位置对称)
+> 备选路径(本 sub-phase **不采用**):新建 `src/storage/migrations/1.2.0-note-form-upgrade.ts` 独立文件 — 留 §9 Q016-6 后续讨论(若 migration 数量增多,整批改用独立文件)。
 
 ### 4.2 改造文件
 
 - `src/platform/main/note/capability-impl.ts`:createNote + listNotes + getNote + deleteNote 四函数改造
-- `src/storage/surreal/schema.ts`:加 1.2.0 schema migration 函数 + runner.ts 调用
-- `src/storage/migrations/runner.ts`:加 1.2.0 调用(或调度逻辑,看实施者按现有 runner 模式)
+- `src/storage/surreal/schema.ts`:加 `SCHEMA_VERSION_1_2_0` 常量 + migration 函数 + `initSchema` 调用
+- `src/storage/migrations/runner.ts`:**仅当现有 runner 模式需要调用注册时改**(实施者 step 5.3 grep verify 现有 1.0.0 / 1.1.0 是否走 runner.ts;若 schema.ts 内 initSchema 直接调度则不动)
 - `docs/RefactorV2/data-model/relations/spec.md`:§10 vocab 登记表加 hasNoteView 一行
 
 ### 4.3 不改的文件(明确边界)
@@ -519,11 +527,14 @@ feat(L7-sub3a-2.5 step 5.2): 注册 user:krig:hasNoteView 边类型 — vocab + 
 
 **目标**: 给所有未被 `hasContent` 边引用 + 未已有 hasNoteView 边的 pm atom 加 hasNoteView 边。
 
-**位置选择**(实施者按现有 runner 模式选):
-- 选 a:在 `src/storage/surreal/schema.ts` 内加 `SCHEMA_VERSION_1_2_0` 函数 + initSchema 调用(同 1.1.0 模式)
-- 选 b:新建 `src/storage/migrations/1.2.0-note-form-upgrade.ts` + runner.ts 注册(更清洁,但跟现有 1.1.0 不对称)
+**位置**: 在 `src/storage/surreal/schema.ts` 内加 `SCHEMA_VERSION_1_2_0` 常量 + migration 函数 + `initSchema` 调用,**完全沿 1.1.0 模式**(参 [schema.ts:84-97](../../../../../src/storage/surreal/schema.ts#L84) `SCHEMA_VERSION_1_1_0`)。不新建独立文件,不动 `migrations/runner.ts`(除非 grep verify 现有 1.0.0/1.1.0 走 runner 注册)。
 
-→ **推荐 a**(跟 1.1.0 对称,改动最小)。
+**前置 grep verify**(实施者必跑):
+```bash
+cd /Users/wenwu/Documents/VPN-Server/KRIG-Note-V2 && \
+  grep -n "SCHEMA_VERSION_1_1_0\|initSchema\|UPSERT.*schema_version" src/storage/surreal/schema.ts src/storage/migrations/runner.ts
+```
+确认 1.1.0 是在 schema.ts 内直接 initSchema 中调度,**不走 runner.ts 注册**。若 verify 失败(1.1.0 字面走了 runner.ts),停下汇报,本步骤需调整。
 
 **实施**:见 §3.6 伪代码。
 
@@ -547,10 +558,10 @@ feat(L7-sub3a-2.5 step 5.3): schema 1.2.0 — migration 给 note pm atom 加 has
 ### Step 5.4 — noteCapability 四函数改造
 
 **改造**:
-- `createNote`(§3.2):transaction 内加 hasNoteView 边
+- `createNote`(§3.2):transaction 内 putAtom + putEdge hasNoteView(新 atom 天然单边,无需查重)+ inFolder 边(若有 folderId)
 - `listNotes`(§3.3 / §1.3):listAtoms + listEdges hasNoteView + listEdges inFolder + 应用层 filter
 - `getNote`(§3.4):confirm hasNoteView 边存在
-- `deleteNote`(§3.5):草稿分支 + hasBeenReferenced=true 抛错
+- `deleteNote`(§3.5):草稿分支 + hasBeenReferenced=true 走 console.error + fallback 草稿分支(**不抛硬错误**,对外契约不变)
 
 **静态深度审计 (典型每 step 审计)**:
 - typecheck 0
@@ -661,8 +672,8 @@ npx eslint src/ 2>&1 | tail -5   # 期望 0
 | 6.3.1 | 反复创建 + 删除 30 次 note | 无崩溃,listAtoms / listEdges hasNoteView 边数对应 |
 | 6.3.2 | migration 重复执行 5 次(每次重启)| added=0 稳定,不重复加边 |
 | 6.3.3 | 创建 50 个 note + 同时 30 个 graph text-node → listNotes 返回 | 50 条,不含 text-node |
-| 6.3.4 | **并发创建 verify**(风险 3 verify)— Node 脚本或 DevTools 并行 `Promise.all([createNote(), createNote(), ...])` 同 doc 10 次(同 doc 不可能,改为 10 次 different doc 并行)→ 实际**应是 10 个不同 atom,每个 1 条 hasNoteView 边**(无重复)| 10 个 atom + 10 条 hasNoteView 边(应用层幂等 verify)|
-| 6.3.5 | **deleteNote console.error fallback verify**(风险 中1 verify)— 手工改库塞 hasBeenReferenced=true 到一个测试 note atom → deleteNote 该 atom | console 出现 `[noteCapability.deleteNote] ... hasBeenReferenced=true ...` 日志;函数仍返回 `{cascadedEdges: N}` 不抛异常;pm atom 已删 |
+| 6.3.4 | **createNote cardinality verify** — 并行 `Promise.all([createNote(), createNote(), ...])` 10 次 → 应是 10 个独立 atom,每个**恰好** 1 条 hasNoteView 边 | 10 个 atom + 10 条 hasNoteView 边(新 atom 天然单边 verify)|
+| 6.3.5 | **deleteNote console.error fallback verify** — 手工改库塞 hasBeenReferenced=true 到一个测试 note atom → deleteNote 该 atom | console 出现 `[noteCapability.deleteNote] ... hasBeenReferenced=true ...` 日志;函数仍返回 `{cascadedEdges: N}` 不抛异常;pm atom 已删 |
 
 ### 6.4 反向 grep 验证(实施者跑)
 
@@ -707,7 +718,7 @@ grep -A 30 "deleteAtom" src/storage/surreal/storage.ts | head -50  # 确认 subj
 ### 7.2 实施细节审计
 
 - ✅ createNote transaction 内同时建 atom + hasNoteView 边(grep verify 一个 tx 内两个 putXxx)
-- ✅ **createNote 在 putEdge hasNoteView 前先 listEdges 查重(应用层幂等)**(grep verify)
+- ✅ **createNote 不做查重**(新 atom 天然单边,grep verify 无 tx.listEdges / storage.listEdges 在 createNote 内)
 - ✅ listNotes 用 Set + filter 而非 N+1 getAtom(grep verify 无 `for ... getAtom`)
 - ✅ getNote 加了 hasNoteView 边 confirm
 - ✅ **deleteNote 走 console.error + fallback 草稿分支,不抛硬错误**(grep verify 无 `throw new Error` 在 deleteNote 内)
@@ -748,29 +759,31 @@ grep -A 30 "deleteAtom" src/storage/surreal/storage.ts | head -50  # 确认 subj
 
 **风险 2 — storage.deleteAtom 级联范围**
 
-sub-phase 1 storage.deleteAtom 应用层级联是否覆盖"subject = atom" 的所有边?**实施期 §6.5 binary verify**。若不覆盖,要么扩展 storage(出 sub-phase 范围)要么 noteCapability.deleteNote 手动 transaction 删 hasNoteView 边。
+sub-phase 1 storage.deleteAtom 应用层级联是否覆盖"subject = atom" 的所有边?**实施期 §6.5 binary verify**。若不覆盖,处置方案:
+- 方案 X(出 sub-phase 范围):扩展 storage 级联范围
+- 方案 Y(本 sub-phase 内):noteCapability.deleteNote 手动 transaction 删 hasNoteView 边
 
-**优先选 b**(noteCapability 手动 tx),避免动 storage。
+→ **失败时优先方案 Y**(避免动 storage,符合 §0.2 不动 storage 内部实施纪律)。
 
-**风险 3 — hasNoteView 一对一 cardinality 机制保护**(2026-05-12 审计补充)
+**风险 3 — hasNoteView 一对一 cardinality 机制保护**(2026-05-12 审计补充,P2 round 修订)
 
-SurrealDB binary 3.0.4 不支持 partial UNIQUE index,**机制保护无法落在存储层**。当前防御:
-- migration 应用层"查→无则插"(§3.6)
-- createNote 应用层"查→无则插"(§3.2)
-- 单机单用户场景 + SurrealDB transaction 序列化
+SurrealDB binary 3.0.4 不支持 partial UNIQUE index,**机制保护无法落在存储层**;`StorageTransaction` 也未暴露 listEdges,tx 内查重不可行。当前防御 = §3.1 三层契约:
+- createNote 新 atom 天然单边(putAtom 生成新 ULID,不可能有既有边冲突)
+- migration 1.2.0 应用层幂等(`alreadyHasNoteView` Set)
+- 未来 domain='pm' 产生点决议层契约(§9 Q016-4)+ 审计师查核
 
 **潜在破坏路径**(单机单用户场景下极不可能,但理论上存在):
-- 实施 bug:createNote 被并发调用(view 层多个 promise race)
-- 外部工具改库不走 noteCapability(本决议契约要求遵循"查→无则插"规约)
+- 外部工具改库不走 noteCapability(本决议契约要求遵循三层防御)
 - 数据迁移期事故重启(migration 中途宕机,重启后跑第二轮,幂等保护应覆盖但需 verify)
+- 未来 sub-phase 决议忘了登记新产生点的 hasNoteView 策略(审计师查核失效)
 
 **机制升级路径** § Q016-5。
 
-**审计师查核**:实施期 §5.4 + §5.6 verify createNote 在并发调用下不出重复边(EM 验证 §6.3.4 新增)。
+**审计师查核**:实施期 §5.4 verify createNote 不做冗余查重(已删) + §5.6 EM 验证 6.3.4 verify 并发 createNote 每 atom 恰好 1 条 hasNoteView 边。
 
 ### 8.2 中风险点
 
-**风险 3 — view 层假设破裂**
+**风险 4 — view 层假设破裂**
 
 view 层 7+ 调用点都走 `noteCapability.listNotes()`,接口签名不变。但是否有 view 层在内部对 `domain='pm'` 做其他假设?**grep verify**:
 
@@ -780,7 +793,7 @@ grep -rn "domain.*pm\|kind.*pm\|payload.domain" src/views/  # 期望:全部走 c
 
 ### 8.3 低风险点
 
-**风险 4 — EdgePredicate 类型 union 是否需要更新**
+**风险 5 — EdgePredicate 类型 union 是否需要更新**
 
 实施期 step 5.2 grep verify。若是 string union,加 'user:krig:hasNoteView';若是宽 string + 正则,跳过。
 
@@ -826,7 +839,7 @@ grep -rn "domain.*pm\|kind.*pm\|payload.domain" src/views/  # 期望:全部走 c
 
 ### Q016-5 — hasNoteView 一对一 cardinality 机制保护升级
 
-本 sub-phase 走应用层幂等(§3.1 + §3.2 + §3.6)。SurrealDB binary 3.0.4 不支持 partial UNIQUE index 是当前阻碍。
+本 sub-phase 走三层契约防御(§3.1):新 atom 天然单边 + migration 幂等 + 未来产生点决议层契约。SurrealDB binary 3.0.4 不支持 partial UNIQUE index 是当前阻碍。
 
 **升级触发条件**(任一):
 - SurrealDB 升级到支持 partial UNIQUE index 的版本(关注 binary release notes)
@@ -837,6 +850,17 @@ grep -rn "domain.*pm\|kind.*pm\|payload.domain" src/views/  # 期望:全部走 c
 - 修法 A:SurrealDB 升级后加 partial UNIQUE index
 - 修法 B:加 startup self-check 函数 `assertNoteViewCardinality()` 扫全表,发现重复边记日志 + 自愈(留最早一条,删其他)
 - 修法 C:写入路径走 SurrealQL 原生 `IF NOT EXISTS` 表达式
+
+### Q016-6 — schema migration 文件组织(内联 schema.ts vs 独立 migrations/)
+
+本 sub-phase 拍板**内联 schema.ts**(§4.1 / §5.3)— 同 1.1.0 模式,改动最小。
+
+**未来 revisit 触发**:
+- migration 数量增多(目前 1.0.0 / 1.1.0 / 1.2.0 三个,若到 5+ 个)
+- 单个 migration 复杂度增加(超 50 行)
+- 需要 migration 测试(独立文件好做单元测试)
+
+**升级路径**:整批改造 — 把所有 schema_version 函数迁出 schema.ts 到 `src/storage/migrations/X.Y.Z-name.ts`,改动 runner.ts 注册顺序。**不在 016 范围**,留独立 decision。
 
 ---
 
