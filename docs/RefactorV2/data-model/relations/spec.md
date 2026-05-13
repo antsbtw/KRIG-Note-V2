@@ -398,7 +398,7 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 | 边类型 | subject | object | cardinality | 引入 sub-phase | 文档 |
 |---|---|---|---|---|---|
 | `user:krig:inFolder` | folder / pm (note) / graph-canvas / 未来 ebook | folder | 一对一 | sub-phase 2(基础)+ sub-phase 3a-1(扩展)| [decision 012 §3.3](../persistence/decisions/012-sub-phase-2-note-folder-migration.md) + [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
-| `user:krig:inCanvas` | graph-instance | graph-canvas | 一对一 | sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
+| `user:krig:inCanvas` | graph-instance | graph-canvas | 一对一(归属边,P0a-bis 机制化保证)| sub-phase 3a-1(+ P0a-bis hotfix)| [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) + [decision 019](../persistence/decisions/019-graph-instance-cardinality-hotfix.md) |
 | `user:krig:hasContent` | graph-instance(text-node ref)| pm | 一对一(单引用约束,sub-phase 3a-1..3a-5)| sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
 
 **单引用约束说明**:`hasContent` 边 cardinality 在 sub-phase 3a-1..3a-5 阶段强制为"一对一"(一段 pm content 只被 1 个 wrapper 引用)。多引用(浅引用 / 跨 view 复用)留 sub-phase 3a-shared-ref 子任务,前置 sub-phase 3a-tx 解决真原子性(详 [decision 013 §3.5.1.bis](../persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md))。
@@ -408,3 +408,21 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 - 删 graph-canvas → cascade 删内含 instance + 单引用 pm content(sub-phase 3a-1 实施)
 - 删 instance(text-node)→ 单引用模式下 cascade 删 pm content
 - 详 [decision 014 §3.5.3.5 / §3.5.3.6](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md)
+
+### 10.1 inCanvas 归属边语义(2026-05-13 P0a-bis 反向更新)
+
+`user:krig:inCanvas` 边语义升级为**归属边**(Owner-Container 一种含义):
+
+- **cardinality 一对一**:一个 graph-instance atom 严格归属一个 graph-canvas atom
+- **机制化保证**(P0a-bis 实施):
+  - view 端 `NodeRenderer.nextInstanceId` 走 ULID,client id 全局唯一(覆盖原 `i-001/i-002` per-canvas counter 撞库)
+  - store 端 `canvas-store.createInstance` 在写 inCanvas 边前查既有边 → keep-latest 自愈
+  - storage 启动 `cardinality-check` 扫描 inCanvas / hasContent 一对多边 → keep-latest 异步清理
+- **"归属"语义**:
+  - 容器归属:instance **诞生于**该 canvas,cascade 跟随 canvas 删除
+  - **不指**编辑者归属(KRIG-Note v1 单机单用户,`createdBy` 恒为 `user-default`,Owner-Editor 区分无意义)
+- **文档语言**:用 "归属" / "container" / "contained in" 描述,**避免** 用 "owner" 字眼(歧义大)
+
+**未来 sub-phase 3a-shared-ref 的对照**:届时引入新边 `referencedIn`(暂定名),表示某 canvas **引用**别处归属的 instance,不改变归属。一对多 cardinality,与归属边形成清晰对照。详 [decision 019 §9](../persistence/decisions/019-graph-instance-cardinality-hotfix.md)。
+
+**当前 sub-phase 不引入 `referencedIn` 边**(避免死代码占位),仅决议 §9 留接口。
