@@ -226,9 +226,9 @@ export async function createFolder(
 }
 
 /**
- * 删 folder (Path Y:递归删子 folder + 内含笔记,对齐 macOS Finder)
- * 业务契约变更见 decision 012 设计师批复
- * 返回删除统计(deletedFolders + deletedNotes + cascadedEdges),caller 可记账。
+ * 删 folder (Path Y:递归删子 folder + 内含资源,对齐 macOS Finder)
+ * 业务契约变更见 decision 012 设计师批复 + decision 014 §6.2.6 (cascade scope 扩展)
+ * 返回删除统计(deletedFolders + deletedResources + cascadedEdges),caller 可记账。
  */
 export async function deleteFolder(folderId: string): Promise<FolderDeleteResult> {
   return folderCap().deleteFolder(folderId);

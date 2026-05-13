@@ -264,10 +264,13 @@ declare global {
       folderCreate(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
       folderRename(id: string, title: string): Promise<FolderInfo | null>;
       folderMove(folderId: string, newParentFolderId: string | null): Promise<void>;
-      /** Path Y:删 folder 递归删子 folder + 内含笔记 (decision 012 设计师批复) */
+      /**
+       * Path Y:删 folder 递归删子 folder + 内含资源 (pm note + graph-canvas + future)。
+       * decision 012 设计师批复 + decision 014 §6.2.6 cascade scope 扩展。
+       */
       folderDelete(id: string): Promise<{
         deletedFolders: number;
-        deletedNotes: number;
+        deletedResources: number;
         cascadedEdges: number;
       }>;
       /** main → renderer 推送:文件夹列表变更;返 unsubscribe */

@@ -15,26 +15,13 @@
  * 注册入口:`platform/main/ipc/ipc-bus.ts.initIpcBus()`(本段接进去)。
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { canvasStore, type GraphVariant } from './canvas-store';
+import { broadcastGraphListChanged as broadcastListChanged } from './broadcast';
 
 function isVariant(v: unknown): v is GraphVariant {
   return v === 'canvas' || v === 'family-tree' || v === 'knowledge' || v === 'mindmap';
-}
-
-/** 广播画板列表全量到所有 renderer (sub-phase 3a-1 改 async, canvasStore.list 现走 SurrealDB) */
-async function broadcastListChanged(): Promise<void> {
-  try {
-    const list = await canvasStore.list();
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send(IPC_CHANNELS.GRAPH_LIST_CHANGED, list);
-      }
-    }
-  } catch (err) {
-    console.warn('[graph/library-handlers] broadcast list-changed failed:', err);
-  }
 }
 
 export function registerGraphHandlers(): void {

@@ -20,6 +20,7 @@ import {
   deleteFolder,
 } from './capability-impl';
 import { broadcastNoteListChanged } from '../note/broadcast';
+import { broadcastGraphListChanged } from '../graph/broadcast';
 
 async function broadcastFolderListChanged(): Promise<void> {
   try {
@@ -74,11 +75,15 @@ export function registerFolderHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.FOLDER_DELETE, async (_e, id: unknown) => {
-    if (typeof id !== 'string' || !id) return { deletedFolders: 0, deletedNotes: 0, cascadedEdges: 0 };
+    if (typeof id !== 'string' || !id) {
+      return { deletedFolders: 0, deletedResources: 0, cascadedEdges: 0 };
+    }
     const result = await deleteFolder(id);
-    // Path Y:删 folder 递归删笔记后,folder + note 两条 list-changed 都广播
+    // Path Y (decision 014 5.6.bis 扩展):删 folder 递归删 note + graph-canvas,
+    // 三条 list-changed 都广播 (folder + note + graph)。
     await broadcastFolderListChanged();
     await broadcastNoteListChanged();
+    await broadcastGraphListChanged();
     return result;
   });
 }

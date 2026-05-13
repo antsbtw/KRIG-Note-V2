@@ -139,22 +139,33 @@ export async function moveFolder(
  * ⚠ 风险登记:误删 folder = 丢笔记。配套保护 (删除前弹窗 + 回收站) 留 sub-phase 3+
  *   单独 decision (decision 012 §8 Q7)。
  */
+/**
+ * Path Y cascade (decision 012 Path Y + decision 014 §3.5.3 graph-canvas 加入白名单).
+ *
+ * sub-phase 3a-1 (decision 014 §6.2.6 + §3.5.3.3) 把 cascade scope 从仅 'pm' 扩展到
+ * ['pm', 'graph-canvas'] — 实现"删 folder 递归删子 folder + 内含 note + 内含 graph-canvas"。
+ *
+ * 未来 sub-phase 3b ebook 接入时,白名单可继续扩展到 ['pm', 'graph-canvas', 'ebook']。
+ *
+ * 字段命名 deletedNotes → deletedResources 反映 scope 扩展;
+ * 无 caller 真实消费 deletedNotes 字段名 (grep 仅声明位置)。
+ */
 export async function deleteFolder(id: string): Promise<{
   deletedFolders: number;
-  deletedNotes: number;
+  deletedResources: number;
   cascadedEdges: number;
 }> {
   return storage.transaction(async (tx) => {
     // 1. 递归收集所有 descendants (含 self)
     const allFolderIds = await collectFolderSubtree(tx, id);
 
-    // 2. 收集所有 inFolder 这些 folder 的 notes
-    const allNoteIds = await collectNotesInFolders(tx, allFolderIds);
+    // 2. 收集所有 inFolder 这些 folder 的资源 (pm note + graph-canvas + future 扩展)
+    const allResourceIds = await collectResourcesInFolders(tx, allFolderIds);
 
     // 3. 一并删除 (storage.deleteAtom 应用层 cascade 自动删关联 edges)
     let cascadedEdges = 0;
-    for (const noteId of allNoteIds) {
-      const res = await tx.deleteAtom(noteId);
+    for (const resourceId of allResourceIds) {
+      const res = await tx.deleteAtom(resourceId);
       cascadedEdges += res.cascadedEdges;
     }
     for (const folderId of allFolderIds) {
@@ -164,7 +175,7 @@ export async function deleteFolder(id: string): Promise<{
 
     return {
       deletedFolders: allFolderIds.length,
-      deletedNotes: allNoteIds.length,
+      deletedResources: allResourceIds.length,
       cascadedEdges,
     };
   });
@@ -197,12 +208,24 @@ async function collectFolderSubtree(
   return result;
 }
 
-/** 收集 folder ids 集合中所有内含 note */
-async function collectNotesInFolders(
+/**
+ * 收集 folder ids 集合中所有内含资源 (pm note + graph-canvas + future 扩展)。
+ *
+ * Path Y cascade 白名单 (decision 014 §3.5.3 + 5.6.bis 扩展):
+ * - 'pm' — sub-phase 2 note
+ * - 'graph-canvas' — sub-phase 3a-1 画板
+ * - 未来 sub-phase 3b ebook 接入时可扩展加 'ebook'
+ *
+ * 字面约束 (主对话批 A):本函数只扩展 cascade scope,不改 deleteFolder 对外语义
+ * (仍是 Path Y "删 folder + 所有 descendants + 所有内含资源")。
+ */
+const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas']);
+
+async function collectResourcesInFolders(
   tx: StorageTransaction,
   folderIds: string[],
 ): Promise<string[]> {
-  const noteIds: string[] = [];
+  const resourceIds: string[] = [];
   for (const folderId of folderIds) {
     const edges = await storage.listEdges({
       predicate: IN_FOLDER_PREDICATE,
@@ -211,10 +234,11 @@ async function collectNotesInFolders(
     for (const e of edges) {
       if (e.subject.kind !== 'atom') continue;
       const subjAtom = await tx.getAtom(e.subject.atomId);
-      if (subjAtom?.payload.domain === 'pm') {
-        noteIds.push(e.subject.atomId);
+      const domain = subjAtom?.payload.domain ?? '';
+      if (CASCADE_RESOURCE_DOMAINS.has(domain)) {
+        resourceIds.push(e.subject.atomId);
       }
     }
   }
-  return noteIds;
+  return resourceIds;
 }
