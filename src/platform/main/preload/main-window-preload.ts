@@ -407,12 +407,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   folderMove(folderId: string, newParentFolderId: string | null): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_MOVE, { folderId, newParentFolderId });
   },
-  folderDelete(id: string): Promise<{ deletedFolders: number; deletedNotes: number; cascadedEdges: number }> {
+  folderDelete(id: string): Promise<{ deletedFolders: number; deletedResources: number; cascadedEdges: number }> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id);
   },
   onFolderListChanged(callback: (list: unknown) => void): () => void {
     const handler = (_event: unknown, list: unknown): void => callback(list);
     ipcRenderer.on(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);
+  },
+
+  // ── L7-sub3a-1:pm-content capability (decision 014 §3.4) ──
+  pmContentCreate(doc: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_CREATE, doc);
+  },
+  pmContentGet(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_GET, id);
+  },
+  pmContentUpdate(id: string, doc: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_UPDATE, id, doc);
   },
 });

@@ -18,6 +18,7 @@ import { registerExtractionHandlers } from '../extraction/handlers';
 import { registerGraphHandlers } from '../graph';
 import { registerFolderHandlers } from '../folder';
 import { registerNoteHandlers } from '../note';
+import { registerPmContentHandlers } from '../pm-content';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -34,4 +35,5 @@ export function initIpcBus(): void {
   registerGraphHandlers();          // L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步,模板对齐 ebook)
   registerFolderHandlers();         // L7-sub2:folder capability (decision 012,SurrealDB)
   registerNoteHandlers();           // L7-sub2:note capability (decision 012,SurrealDB)
+  registerPmContentHandlers();      // L7-sub3a-1:pm-content capability (decision 014,view-agnostic pm atom)
 }

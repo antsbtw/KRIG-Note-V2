@@ -26,6 +26,7 @@ import { registerFrameworkMenus } from './menu/framework-menus';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { initStorage, shutdownStorageSync } from '@storage/index';
+import { clearLegacyGraphStorage } from './graph/migration';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -70,6 +71,11 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[storage] init failed:', err);
   }
+
+  // L7-sub3a-1 (decision 014 §3.6) — 清旧 graph 磁盘 JSON
+  // 必须在 initStorage 后 + graph-library-store 任何 IPC 调用前 (initIpcBus 已注册 handlers
+  // 但用户尚未触发 IPC,此处幂等清理)。
+  clearLegacyGraphStorage();
 
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND

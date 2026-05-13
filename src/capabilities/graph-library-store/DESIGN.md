@@ -1,9 +1,13 @@
 # graph-library-store capability
 
-> v0.1 · 2026-05-10 · L5-G1
+> v0.2 · 2026-05-12 · L5-G1 + L7-sub3a-1
 >
-> 配套:[../../../docs/RefactorV2/v1-graph-migration-plan.md](../../../docs/RefactorV2/v1-graph-migration-plan.md) v0.2 § 3.4 +
-> [../../../docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md](../../../docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md) v0.1
+> 配套:
+> - [../../../docs/RefactorV2/v1-graph-migration-plan.md](../../../docs/RefactorV2/v1-graph-migration-plan.md) v0.2 § 3.4
+> - [../../../docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md](../../../docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md) v0.1
+> - [decision 014 sub-phase 3a-1](../../../docs/RefactorV2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) — SurrealDB 切换 + Instance + ref + pm 双层
+>
+> **v0.2 变更**:JSON 磁盘后端 → SurrealDB Sidecar (sub-phase 3a-1 完成)
 
 ## 职责
 
@@ -24,27 +28,41 @@ view + 后续 canvas-rendering capability 都通过此 capability 读写,**view 
 | preload 暴露 | `src/platform/main/preload/main-window-preload.ts` 末尾追加 | ~55 | |
 | electron-api 类型 | `src/shared/ipc/electron-api.d.ts` 末尾追加 | ~22 | |
 
-## 持久化路径(D-3=B JSON 起步)
+## 持久化路径 (v0.2 — sub-phase 3a-1 切 SurrealDB)
+
+**新 (v0.2)** — SurrealDB Sidecar:
 
 ```
-{userData}/krig-data/graph/
-  canvases.json               ← 元数据 + folders 合一(version='1' + entries[] + folders[])
-                                  entries 是 GraphCanvasListItem(无 doc_content)
-  documents/
-    {uuid}.json               ← GraphCanvasRecord.doc_content(每画板一文件)
+SurrealDB rocksdb at userData/krig-data/surreal/
+├─ atom 表
+│  ├─ graph-canvas domain — 画板容器 (title, variant, view, schemaVersion + 可选字段)
+│  ├─ graph-instance domain — 画板内节点 (Instance + ref 模式,无 doc 字段)
+│  ├─ pm domain — text-node 的 PM 内容 (sub-phase 2 已注册,本 sub-phase 复用)
+│  └─ folder domain — 容器树 (sub-phase 2,graph + note 共享)
+└─ edge 表
+   ├─ user:krig:inFolder (canvas → folder atom)
+   ├─ user:krig:inCanvas (instance → canvas atom) ← 本 sub-phase 新引入
+   └─ user:krig:hasContent (text-node instance → pm atom) ← 本 sub-phase 新引入
 ```
 
-**save 顺序**:先写 `documents/{id}.json` → 再更新 `canvases.json`(metadata 是真理之源,
-中途挂掉留孤儿 documents/ 文件可后期 GC,G1 不做 GC)。
+**Instance + ref 模式** (sub-phase 3a-1 走 V2 substance 哲学,而非总纲推演的"每节点一 domain"):
+- 所有节点共享 `graph-instance` 单 domain
+- 通过 `payload.type` (shape/substance) + `payload.ref` (Library ShapeDef id) 区分形态
+- text-node = `ref === 'krig.text.label'` 的特例
 
-写入策略:atomic — `*.tmp` → `fs.renameSync`(POSIX 保证原子);防"写一半挂掉损坏旧数据"。
-对齐 V2 既有 `learning/vocab-store.ts` / `ebook/bookshelf-store.ts` 模式。
+**单引用约束** (decision 013 §3.5.1.bis,本 sub-phase 临时态):
+- 一段 pm content 只被 1 个 Instance 引用
+- 浅引用 / 跨 view 复用留 3a-shared-ref (前置 Q-tx 必做)
 
-## 退出条件(对齐 v0.2 D-4)
+**旧 (v0.1,已废弃)** — JSON 磁盘:
 
-C5 / G5 验收 + 稳定 ≥2 周 + 独立 SurrealDB 客户端 epic(候选 W6)落地 → 整体迁
-`src/storage/graph/` + 升 SurrealDB 实现。V1 `src/main/storage/graph-store.ts`
-(SurrealDB,287 行)保留作 W6 起点参考,不删。
+```
+{userData}/krig-data/graph/      ← 启动时由 clearLegacyGraphStorage 清除
+  canvases.json                  (sub-phase 3a-1 §3.6 选项 M)
+  documents/{uuid}.json
+```
+
+V1 `src/main/storage/graph-store.ts` (SurrealDB,287 行) 在 V2 sub-phase 3a-1 启用后保留作参考。
 
 ## API 形状
 
@@ -108,7 +126,36 @@ await library.save(canvasId, docJson, title);
 
 `window.electronAPI.graph*` 由 preload 注入,不算 npm import。
 
-## 不做的事(G1 范围外)
+## sub-phase 3a-1 后端切换记录 (decision 014)
+
+| 维度 | v0.1 (JSON 磁盘) | v0.2 (SurrealDB Sidecar) |
+|---|---|---|
+| 物理后端 | `userData/krig-data/graph/*.json` | SurrealDB Sidecar (rocksdb) |
+| Canvas 元数据 | `canvases.json.entries[]` | atom (domain='graph-canvas') |
+| Canvas 内容 | `documents/{id}.json.instances[]` | atom (domain='graph-instance') × N + 边 |
+| Folder 体系 | `canvases.json.folders[]` (graph 独占) | folder atom (graph + note 共享,sub-phase 2 引入) |
+| folder_id 字段 | 直接外键 | 派生自 user:krig:inFolder 边 |
+| text-node doc | Instance.doc 字段内嵌 | hasContent 边 + pm atom (view-agnostic) |
+| 写入原子性 | atomic tmp+rename | Q-tx 退化无原子 (decision 011 + 014 §3.5.3.6) |
+| 跨域 cascade | folder/canvas/instance 各自管 | storage.deleteAtom 应用层 cascade 边 |
+| 接口签名 | 不变 (view 透明) | 不变 (view 透明) |
+
+**graph + note + future ebook 共享同一 folder 树** (decision 014 §2.3 + §3.5.3):
+- 用户视角:工作 folder 同时装 note 和 graph,不该被工具分裂
+- 数据视角:folder 是 KRIG 通用容器,不绑具体内容类型
+- 实施:graph 走 sub-phase 2 folder atom + folder-adapter 做字段映射 (parentId ↔ parent_id 等)
+
+**Path Y cascade scope 扩展** (5.6.bis):
+- sub-phase 2 deleteFolder 原 cascade 仅 pm domain (note)
+- sub-phase 3a-1 扩展到 ['pm', 'graph-canvas'] (未来 ebook 接入再加)
+- 删 folder X → 内含 note + canvas 全部 cascade 删
+
+**hasBeenReferenced 单向 flag** (decision 014 §3.7):
+- atom 顶层字段,DEFAULT false
+- 单引用约束下本 sub-phase 恒 false
+- 3a-shared-ref 阶段才会出现 true (前置 Q-tx 必做)
+
+## 不做的事(G1 + sub-phase 3a-1 范围外)
 
 | 不做 | 说明 |
 |---|---|
