@@ -1053,3 +1053,47 @@ sub-phase 3a-1 实施时发现 **sub-phase 2 `deleteFolder` cascade scope 不支
 
 **对 sub-phase 2 测试结果的影响**: 无。原 §6.2.6 Path Y 测试场景行为不变(folder 内含 note 全部清),只是扩展后多支持 folder 内含 graph-canvas 的 cascade。
 
+### 12.6 后续 sub-phase 反向扩展 — note 形态升级(2026-05-13 由 sub-phase 3a-2.5 触发)
+
+sub-phase 2 字面拍板 "**pm atom = note**"(本决议 §3.2 路径 Y);sub-phase 3a-1 引入 graph text-node 也走 pm atom domain(decision 014 §3.4)+ `hasContent` 边,**pm domain 不再唯一对应 note** — 但 sub-phase 3a-1 实施时未改 noteCapability,导致 `listNotes()` 字面 `storage.listAtoms({ domain: 'pm' })` 误列 graph text-node 内容(P0d binary verify 2026-05-13 期间用户截图实证 `"123-abc*abc"` 误列)。
+
+**修复**:[decision 016](016-sub-phase-3a-2.5-note-form-upgrade.md) sub-phase 3a-2.5 — note 形态从 "pm atom = note" 升级到 "**pm atom + `user:krig:hasNoteView` 边 = note**"。
+
+**形态对比**:
+
+```
+sub-phase 2(本决议):
+  note         = pm atom (domain='pm')
+  listNotes()  = listAtoms({ domain:'pm' })
+
+sub-phase 3a-1(P0d 落地后):
+  note         = pm atom (domain='pm')
+  graph text   = pm atom (domain='pm') + hasContent 边
+  listNotes()  = listAtoms({ domain:'pm' })  ← bug:误列 graph text-node
+
+sub-phase 3a-2.5(本扩展):
+  note         = pm atom (domain='pm') + hasNoteView 边 (subject=该 atom)
+  graph text   = pm atom (domain='pm') + hasContent 边 (subject=graph-instance)
+  listNotes()  = listEdges({ predicate:'user:krig:hasNoteView' }) → getAtom 批读
+                 ← 严格区分,完全隔离
+```
+
+**实施 commits**(详 [decision 016 §12.1](016-sub-phase-3a-2.5-note-form-upgrade.md)):
+- `21ac1d2` Step 5.2:注册 hasNoteView 边类型
+- `56a8304` Step 5.3:schema 1.2.0 migration 给现有 pm atom 加 hasNoteView 边(幂等)
+- `535ca2e` Step 5.4:noteCapability 4 函数改造(createNote/listNotes/getNote/deleteNote)
+- `f145384` Step 5.7:DESIGN.md v0.1 → v0.2 形态升级文档化
+
+**对 sub-phase 2 测试结果的影响**: 无。
+
+- §6.2 全部 8 场景行为不变(create / list / get / delete / move 等 API 字面契约保留)
+- atom payload 形态完全不变(payload domain='pm' + payload=PmPayload)
+- view ↔ capability 边界 NoteInfo 字面不变
+- 新增的是 atom 之外的边(hasNoteView 边),独立于 atom 本体
+
+**纪律登记**:
+
+- 主对话设计师**未在 sub-phase 2 实施时预留 "未来 pm atom 可能被多 view 复用" 的扩展点**;sub-phase 3a-1 引入 graph text-node 时直接复用 pm domain 未升级 noteCapability,P0d binary verify 期间被用户截图实证发现 listNotes 误列 bug
+- decision 013 §3.5.1.bis 单引用约束已字面预告 "未来 pm atom 跨 view 复用",但 sub-phase 3a-1 实施时没同步落地 hasNoteView 边
+- sub-phase 3a-2.5 设计 hasNoteView 边时已显式预留 "未来 pm atom 多 view 复用"(decision 016 §3.2),不再重复此错
+
