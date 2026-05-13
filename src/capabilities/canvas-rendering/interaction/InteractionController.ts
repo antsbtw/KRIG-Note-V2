@@ -722,9 +722,15 @@ export class InteractionController {
       position,
       size,
     };
-    // 文字节点:创建时初始化空 doc 字段(G4.5 canvas-text-node 编辑时填内容)
+    // 文字节点:创建时初始化空 DriverSerialized 信封(decision 018 P0d hotfix
+    // 形态对齐 — 与 view 端编辑结束写回 inst.doc 的 DriverSerialized 信封一致,
+    // 防 incomingDocToPmPayload 走 fallback 触发 warn 噪音化)。
     if (spec.ref === 'krig.text.label') {
-      instance.doc = [];
+      instance.doc = {
+        format: 'pm-doc-json',
+        version: '0.1',
+        payload: { type: 'doc', content: [] },
+      };
     }
     this.nodeRenderer.add(instance);
     // 防御:shape/substance 找不到时 add 不渲染也不存数据,此时不要选中孤儿 id
