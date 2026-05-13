@@ -224,6 +224,138 @@ async function instanceAtomToObject(
   return instance;
 }
 
+// ── Instance write 路径 (5.5b diff 算法消费) ──
+
+/**
+ * 从 view 端 incoming Instance 对象提取 graph-instance payload。
+ * 不带 id (由 storage 生成或调用方传入);不带 doc (text-node 走 hasContent 边)。
+ */
+function incomingInstanceToPayload(inst: Record<string, unknown>): import('@semantic/types').GraphInstancePayload {
+  const p: import('@semantic/types').GraphInstancePayload = {
+    type: (inst.type as 'shape' | 'substance') ?? 'shape',
+    ref: typeof inst.ref === 'string' ? inst.ref : '',
+  };
+  if (inst.position !== undefined) p.position = inst.position as { x: number; y: number };
+  if (inst.size !== undefined) p.size = inst.size as { w: number; h: number };
+  if (inst.rotation !== undefined) p.rotation = inst.rotation as number;
+  if (inst.endpoints !== undefined) {
+    p.endpoints = inst.endpoints as import('@semantic/types').GraphInstancePayload['endpoints'];
+  }
+  if (inst.params !== undefined) p.params = inst.params as Record<string, number>;
+  if (inst.style_overrides !== undefined) {
+    p.style_overrides = inst.style_overrides as import('@semantic/types').GraphInstanceStyleOverrides;
+  }
+  if (inst.props !== undefined) p.props = inst.props as Record<string, unknown>;
+  if (inst.size_lock !== undefined) p.size_lock = inst.size_lock as { w?: boolean; h?: boolean };
+  if (inst.text_valign !== undefined) {
+    p.text_valign = inst.text_valign as 'top' | 'middle' | 'bottom';
+  }
+  return p;
+}
+
+/**
+ * 从 view 端 incoming Instance 提取 doc (PM content 数组),包装为完整 PmPayload。
+ * 仅 text-node (ref==='krig.text.label') 调用。incoming.doc 是 TextNodeAtoms = unknown[],
+ * 需包成 PmPayload { type:'doc', content: [...] } 才能存 pm atom。
+ */
+function incomingDocToPmPayload(inst: Record<string, unknown>): PmPayload {
+  const docArr = Array.isArray(inst.doc) ? inst.doc : [];
+  return {
+    type: 'doc',
+    content: docArr as PmPayload[],
+  };
+}
+
+/**
+ * 新建 instance atom + inCanvas 边;若 text-node 同步建 pm atom + hasContent 边。
+ * @param targetId 指定 atom id (view 端预生成);null = storage 生成
+ */
+async function createInstance(
+  canvasId: string,
+  inst: Record<string, unknown>,
+  targetId: string | null,
+): Promise<void> {
+  const payload = incomingInstanceToPayload(inst);
+  const created = await storage.putAtom<'graph-instance'>({
+    id: targetId ?? undefined,
+    payload: { domain: INSTANCE_DOMAIN, payload },
+  });
+  await storage.putEdge({
+    predicate: IN_CANVAS_PREDICATE,
+    subject: { kind: 'atom', atomId: created.id },
+    object: { kind: 'atom', atomId: canvasId },
+    attrs: { createdBy: 'user-default', createdAt: Date.now() },
+  });
+  // text-node 特例:建 pm atom + hasContent 边
+  if (payload.ref === TEXT_LABEL_REF && inst.doc !== undefined) {
+    const pmPayload = incomingDocToPmPayload(inst);
+    const pmAtom = await storage.putAtom<'pm'>({
+      payload: { domain: PM_DOMAIN, payload: pmPayload },
+    });
+    await storage.putEdge({
+      predicate: HAS_CONTENT_PREDICATE,
+      subject: { kind: 'atom', atomId: created.id },
+      object: { kind: 'atom', atomId: pmAtom.id },
+      attrs: { createdBy: 'user-default', createdAt: Date.now() },
+    });
+  }
+}
+
+/**
+ * 更新现有 instance atom payload;若 text-node 同步更新或建立 pm atom。
+ */
+async function updateInstance(
+  instanceId: string,
+  inst: Record<string, unknown>,
+): Promise<void> {
+  const payload = incomingInstanceToPayload(inst);
+  await storage.putAtom<'graph-instance'>({
+    id: instanceId,
+    payload: { domain: INSTANCE_DOMAIN, payload },
+  });
+  // text-node 特例
+  if (payload.ref === TEXT_LABEL_REF && inst.doc !== undefined) {
+    const pmAtomId = await getPmAtomIdForInstance(instanceId);
+    const pmPayload = incomingDocToPmPayload(inst);
+    if (pmAtomId) {
+      // 更新现有 pm atom
+      await storage.putAtom<'pm'>({
+        id: pmAtomId,
+        payload: { domain: PM_DOMAIN, payload: pmPayload },
+      });
+    } else {
+      // hasContent 边不存在 (text-node 之前没 doc 或迁移残缺) → 新建 pm atom + hasContent
+      const pmAtom = await storage.putAtom<'pm'>({
+        payload: { domain: PM_DOMAIN, payload: pmPayload },
+      });
+      await storage.putEdge({
+        predicate: HAS_CONTENT_PREDICATE,
+        subject: { kind: 'atom', atomId: instanceId },
+        object: { kind: 'atom', atomId: pmAtom.id },
+        attrs: { createdBy: 'user-default', createdAt: Date.now() },
+      });
+    }
+  }
+}
+
+/**
+ * 删 instance atom + cascade 边;若 text-node 单引用 pm 同步删 pm atom。
+ * 单引用约束 (decision 013 §3.5.1.bis):本 sub-phase hasBeenReferenced 必为 false。
+ */
+async function deleteInstanceWithCascade(instanceId: string): Promise<void> {
+  const instanceAtom = await storage.getAtom<'graph-instance'>(instanceId);
+  if (instanceAtom?.payload.domain === INSTANCE_DOMAIN
+      && instanceAtom.payload.payload.ref === TEXT_LABEL_REF) {
+    const pmAtomId = await getPmAtomIdForInstance(instanceId);
+    if (pmAtomId) {
+      // 单引用模式:本 sub-phase pm 必为 false → 直接删
+      await storage.deleteAtom(pmAtomId);
+    }
+  }
+  // 删 instance atom (storage cascade 删 inCanvas + hasContent 边)
+  await storage.deleteAtom(instanceId);
+}
+
 // ── canvas atom → record / list-item ──
 
 function canvasAtomToListItem(
@@ -342,11 +474,19 @@ class CanvasStore {
   }
 
   /**
-   * 保存画板内容 + 同步 title。
+   * 保存画板内容 + 同步 title (Step 5.5b 完整 diff 算法)。
    *
-   * ⚠ Step 5.5a 临时态:仅更新 canvas atom 自身 (title / view / schemaVersion),
-   *           不动 instance 集合 (旧实例保留,新实例丢弃)。
-   * ⚠ Step 5.5b 实施完整 diff 算法 (增/删/改 instance + hasContent + pm)。
+   * 实施流程 (decision 014 §3.5.2):
+   * 1. 更新 canvas atom payload (title / view / schemaVersion)
+   * 2. 读现有 instance atoms (查 inCanvas 边 object=canvas)
+   * 3. diff docContent.instances vs 现有 instances:
+   *    - 新增: putAtom(graph-instance) + putEdge(inCanvas);若 text-node 同步建 pm + hasContent
+   *    - 修改: putAtom 更新 payload;若 text-node 同步更新 pm
+   *    - 删除: deleteAtom(instance) + storage cascade 边;若 text-node 单引用同步删 pm
+   * 4. handler 层广播 onGraphListChanged
+   *
+   * ⚠ 性能 (Q1):1000 节点画板软目标 < 200ms,实测超标停下汇报。
+   * ⚠ 无原子性 (Q-tx):diff 中途崩溃 → 部分写入,worst case = 残留游离 atom (留 3a-N+ 清理入口)。
    */
   async update(id: string, docContent: CanvasDocumentJson, title: string): Promise<void> {
     const existing = await storage.getAtom<'graph-canvas'>(id);
@@ -357,8 +497,11 @@ class CanvasStore {
     const doc = (docContent ?? {}) as {
       view?: GraphCanvasPayload['view'];
       schema_version?: number;
+      instances?: Array<Record<string, unknown>>;
     };
-    const newPayload: GraphCanvasPayload = {
+
+    // ── 1. 更新 canvas atom payload ──
+    const newCanvasPayload: GraphCanvasPayload = {
       ...oldP,
       title: title || oldP.title,
       view: doc.view ?? oldP.view,
@@ -366,34 +509,56 @@ class CanvasStore {
     };
     await storage.putAtom<'graph-canvas'>({
       id,
-      payload: { domain: CANVAS_DOMAIN, payload: newPayload },
+      payload: { domain: CANVAS_DOMAIN, payload: newCanvasPayload },
     });
-    // Step 5.5b 在此处加 instance diff 逻辑
-  }
 
-  async delete(id: string): Promise<void> {
-    // 查所有 inCanvas 边 → 拿 instance ids
+    // ── 2. 读现有 instance atoms ──
     const inCanvasEdges = await storage.listEdges({
       predicate: IN_CANVAS_PREDICATE,
       objectAtomId: id,
     });
-    const instanceIds: string[] = [];
+    const existingInstanceIds = new Set<string>();
     for (const e of inCanvasEdges) {
-      if (e.subject.kind === 'atom') instanceIds.push(e.subject.atomId);
+      if (e.subject.kind === 'atom') existingInstanceIds.add(e.subject.atomId);
     }
-    // 对每个 instance:若是 text-node 单引用 pm,一并删 pm atom
-    for (const instanceId of instanceIds) {
-      const instanceAtom = await storage.getAtom<'graph-instance'>(instanceId);
-      if (instanceAtom && instanceAtom.payload.domain === INSTANCE_DOMAIN
-          && instanceAtom.payload.payload.ref === TEXT_LABEL_REF) {
-        const pmAtomId = await getPmAtomIdForInstance(instanceId);
-        if (pmAtomId) {
-          // 单引用模式:本 sub-phase hasBeenReferenced 必为 false,直接删
-          await storage.deleteAtom(pmAtomId);
-        }
+
+    // ── 3. diff docContent.instances ──
+    const incoming = Array.isArray(doc.instances) ? doc.instances : [];
+    const incomingIds = new Set<string>();
+    for (const inst of incoming) {
+      const instId = typeof inst.id === 'string' ? inst.id : null;
+      if (!instId) {
+        // 无 id 的入站节点 → 视为"新增请求",storage 会生成新 ULID
+        await createInstance(id, inst, /*targetId*/ null);
+        continue;
       }
-      // 删 instance atom (storage cascade 删 inCanvas + hasContent 边)
-      await storage.deleteAtom(instanceId);
+      incomingIds.add(instId);
+      if (existingInstanceIds.has(instId)) {
+        // 修改
+        await updateInstance(instId, inst);
+      } else {
+        // 新增 (view 端可能预先生成了 client-side id;storage putAtom 允许传 id)
+        await createInstance(id, inst, instId);
+      }
+    }
+    // 删除:existingInstanceIds - incomingIds
+    for (const oldId of existingInstanceIds) {
+      if (!incomingIds.has(oldId)) {
+        await deleteInstanceWithCascade(oldId);
+      }
+    }
+  }
+
+  async delete(id: string): Promise<void> {
+    // 查所有 inCanvas 边 → 拿 instance ids → 走单实例 cascade 删除
+    const inCanvasEdges = await storage.listEdges({
+      predicate: IN_CANVAS_PREDICATE,
+      objectAtomId: id,
+    });
+    for (const e of inCanvasEdges) {
+      if (e.subject.kind === 'atom') {
+        await deleteInstanceWithCascade(e.subject.atomId);
+      }
     }
     // 删 canvas atom (storage cascade 删 inFolder 边)
     await storage.deleteAtom(id);
