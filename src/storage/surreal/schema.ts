@@ -81,6 +81,21 @@ DEFINE FIELD IF NOT EXISTS description ON schema_version TYPE string;
 DEFINE INDEX IF NOT EXISTS schema_version_unique ON schema_version FIELDS version UNIQUE;
 `;
 
+/**
+ * 1.1.0 schema (decision 014 §3.7) — 加 atom.hasBeenReferenced 单向 flag。
+ *
+ * 用于 decision 013 §3.5.1 单向 flag 模型:
+ * - DEFAULT false,创建 pm atom 时显式 false
+ * - 当某 pm atom 被第 2+ 条 hasContent 边引用时,update 为 true (永不复位)
+ * - 本 sub-phase (3a-1) 单引用约束下永远不触发置 true,字段先落地占位
+ *
+ * 字段适用所有 atom (不仅 pm),但目前只有 pm 会被多引用,
+ * 其他 domain 此字段恒 false (兜底正确)。
+ */
+const SCHEMA_VERSION_1_1_0 = `
+DEFINE FIELD IF NOT EXISTS hasBeenReferenced ON atom TYPE bool DEFAULT false;
+`;
+
 export async function initSchema(db: Surreal): Promise<void> {
   await db.query(SCHEMA_VERSION_1_0_0);
 
@@ -93,5 +108,22 @@ export async function initSchema(db: Surreal): Promise<void> {
       appliedAt = $now,
       description = 'Initial schema (Phase N sub-phase 1)'`,
     { rid: new RecordId('schema_version', '1.0.0'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.0 migration up — 加 atom.hasBeenReferenced field (decision 014 §3.7)。
+ *
+ * 幂等:DEFINE FIELD IF NOT EXISTS,重复执行无副作用。
+ */
+export async function migration_1_1_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_1_0);
+
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.1.0',
+      appliedAt = $now,
+      description = 'Add atom.hasBeenReferenced field (Phase N sub-phase 3a-1)'`,
+    { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
   );
 }
