@@ -341,11 +341,92 @@ await db.query(`BEGIN; ${writes.map(w => w.sql).join('; ')}; COMMIT;`, mergedBin
 **verify 跑法**:
 ```bash
 cd /Users/wenwu/Documents/VPN-Server/KRIG-Note-V2
-# 起 surreal binary(独立端口,不污染 V2 数据)
-./resources/surreal/surreal start --bind 0.0.0.0:8534 --user root --pass root memory &
-# 跑 verify
-npx tsx scripts/verify/sub-phase-3a-tx-binary-verify.ts
+# 起 surreal binary(独立端口 8534,memory backend,不污染 V2 数据)
+/opt/homebrew/bin/surreal start --bind 127.0.0.1:8534 \
+  --username root --password root --log warn memory &
+until curl -s http://127.0.0.1:8534/health > /dev/null; do sleep 1; done
+# 跑 verify(本决议撰写期 2026-05-13 实跑脚本)
+node tmp/verify/sub-phase-3a-tx-binary-verify.mjs
+# 清理
+pkill -f 'surreal start --bind 127.0.0.1:8534'
 ```
+
+### 3.5.bis Binary verify 实跑结果(2026-05-13)
+
+**环境**:
+- SurrealDB binary: `/opt/homebrew/bin/surreal` 3.0.4 for macos on aarch64
+- SDK: `surrealdb@2.0.3`(V2 现状)
+- 端口: 127.0.0.1:8534
+- backend: memory(不污染磁盘,本决议撰写期临时跑)
+- 脚本: [tmp/verify/sub-phase-3a-tx-binary-verify.mjs](../../../../../tmp/verify/sub-phase-3a-tx-binary-verify.mjs)(临时脚本,在 `.gitignore` 的 `tmp/` 下)
+- 日志: [tmp/verify/result.log](../../../../../tmp/verify/result.log)(同上)
+
+**实跑结果汇总(PASS 12 / FAIL 0 / WARN 2)**:
+
+| # | 场景 | 结果 | 实际行为 |
+|---|---|---|---|
+| 1 | beginTransaction 创建 | ✅ PASS | tx.commit / tx.cancel 都存在,API 字面可用 |
+| 2 | 事务内 putAtom + commit | ✅ PASS | commit 后主连接能读到 |
+| 3 | 事务内 putAtom + cancel | ✅ PASS | cancel 后主连接查不到,无 partial 写入 |
+| **4** | **事务内 putAtom + 紧跟 getAtom** | ✅ **PASS** | **关键!事务内能读自己未 commit 的中间态** |
+| 5 | 事务内多步 + throw + cancel | ✅ PASS | 两步都不存在(全回滚) |
+| 6 | 事务内多步 + commit | ✅ PASS | 两步都存在 |
+| 7 | 事务内 SQL 语法错误后 cancel | ✅ PASS | query 抛错 / cancel 仍能正常执行 |
+| 8 | 长事务 >5s | ✅ PASS | 6s 后仍能 commit + 数据持久化,**无默认 timeout** |
+| 9 | 并发事务写不同 atom | ✅ PASS | 两个事务都成功,无干扰 |
+| 10 | commit 后再 cancel | ✅ PASS | cancel 抛 `Transaction not found`,但数据已 commit 保留(commit 优先语义) |
+| **11** | **commit 后断开重连** | ✅ **PASS** | **关键!commit 返回后断连重连,数据仍在,提交边界可靠** |
+| 12 | **并发写同一 atom** | ⚠ **WARN(重大发现,见 §3.5.ter)** | **OCC 语义**:第一 tx commit 成功;第二 tx commit 报 `Transaction conflict: Write conflict, retry the transaction. This transaction can be retried`(可重试错误) |
+| 13a | commit 后再 cancel(异常路径)| ⚠ WARN | 跟场景 10 一致,cancel 抛 `Transaction not found`,数据保留 |
+| **13b** | **连接断开未 commit** | ✅ **PASS** | **关键!连接断开未 commit,数据库无 partial 写入** |
+
+**关键门槛硬判定**(§3.5 拍板规则):
+- 场景 4 ✅ PASS — 事务内中间态读可见
+- 场景 11 ✅ PASS — 提交边界可靠
+- 场景 13b ✅ PASS — 连接异常无 partial
+- 场景 1/2/3/5/6 ✅ 全 PASS — 基础事务语义完整
+
+→ **路径 1 binary 实证可行,本决议 §4 拍板路径维持不变。**
+
+### 3.5.ter 场景 12 重大发现:SurrealDB OCC 并发冲突语义
+
+**实测行为**:
+```
+tx1 / tx2 同时 UPDATE atom:s12 SET value = 1/2
+tx1.commit() → 成功
+tx2.commit() → throw Error("Transaction conflict: Write conflict, retry the transaction. This transaction can be retried")
+最终 value = 1, tx = 'tx1'(tx1 写入保留,tx2 写入完全丢失)
+```
+
+**字面证据**:错误信息含 `"This transaction can be retried"` — SurrealDB 明确把这归为**应用层应该重试的错误**。
+
+**这是 OCC(Optimistic Concurrency Control)语义**,不同于:
+- ❌ 阻塞锁(pessimistic locking,tx2 会等到 tx1 commit)
+- ❌ Last-write-wins(tx2 会覆盖 tx1)
+- ❌ MVCC 快照隔离(tx2 看到旧版本,不冲突)
+
+**对本决议的影响**:
+1. **单机单用户场景下并发冲突概率极低** — 不阻塞本 sub-phase 拍板
+2. **但 vision §2.4 协作场景必踩** — 长期必须处理
+3. **本 sub-phase 设计选项**:
+   - 选项 A:`storage.transaction(fn)` 内置 retry-with-exponential-backoff(限次,默认 3 次),透明化冲突
+   - 选项 B:抛给 capability 上层处理(让业务决定是否重试)
+   - 选项 C:本 sub-phase 不处理,只字面登记到 decision 008 已知约束 + Open Question
+
+**推荐 → 选项 C(本 sub-phase 不内置 retry)**:
+- 理由:V2 当前是单机单用户,本 sub-phase 解的是"半成功污染",不是"高并发优化"
+- 内置 retry 会引入新设计点(超时 / 退避策略 / retry 期间 fn 副作用),超出本 sub-phase 范围
+- 留 sub-phase 5+ 协作场景启动时单独决议
+
+**§9 Open Question 新增**:Q-tx-occ-retry(见 §9.4)。
+
+### 3.5.quat Binary verify 后置警示
+
+**WARN 项不阻塞拍板,但作为已知约束登记**:
+
+- **场景 8**:6s 长事务未超时 — SurrealDB 3.0.4 默认行为是无超时;**实施期 §5 加 `timeoutMs` option 防御,默认 30s**
+- **场景 10/13a**:`Transaction not found` 错误名 — `storage.transaction()` wrapper 实施期必须**捕获 cancel 异常**(不让 cancel 失败遮盖原 fn 错误),已在 §4.1 草案体现
+- **场景 12 OCC 冲突**:见 §3.5.ter,本决议字面登记 + Open Question
 
 ---
 
@@ -521,9 +602,44 @@ function createStorageTransactionWrapper(surrealTx: SurrealTransaction): Storage
 
 ## 9. Open Questions(留尾)
 
-- **Q-tx-perf**: 长事务超时阈值是多少?SurrealDB 3.0.4 binary 默认行为?binary verify §6.1 场景 8 结果决定是否需要加 timeout option。
-- **Q-tx-concurrent**: 并发事务的锁/排队/冲突行为?单机单用户场景影响极低,但 binary verify §6.1 场景 9 结果作为已知约束登记到 decision 008。
-- **Q-tx-deleteAtom-atomicity**: storage.deleteAtom 内部级联删 atom + 多张边表,单语句 SurrealQL 是否原子?binary verify 单独一项确认,不在 §3.5 主清单内(因为 deleteAtom 不走 transaction wrapper)。
+### 9.1 Q-tx-perf:长事务超时
+
+**问题**:SurrealDB 3.0.4 binary 默认无超时(场景 8 实测 6s 仍能 commit)。是否需要 storage 层加 timeout 防御?
+
+**当前结论**:**§5 实施期加 `timeoutMs` option,默认 30s,跨 timeout 自动 cancel**。
+
+### 9.2 Q-tx-concurrent:并发事务的锁/排队/冲突
+
+**问题**:并发事务的具体语义?
+
+**实测结论(场景 9/12)**:
+- 写不同 record:独立运行,无干扰
+- 写同一 record:OCC 冲突,后 commit 报 `Transaction conflict: ... can be retried`
+
+**单机单用户场景影响**:极低。**作为已知约束登记到 decision 008**。
+
+### 9.3 Q-tx-deleteAtom-atomicity
+
+**问题**:`storage.deleteAtom` 内部级联删 atom + 多张边表,单语句 SurrealQL 是否原子?
+
+**当前结论**:**§5 实施期补一个独立 binary verify**(deleteAtom 中途 binary kill,重启后是否有 partial 残留)。不阻塞本决议拍板(因为 deleteAtom 不走 transaction wrapper)。
+
+### 9.4 Q-tx-occ-retry(场景 12 衍生):OCC 冲突的应用层 retry 策略
+
+**问题**:`storage.transaction(fn)` 是否内置 OCC 冲突 retry?
+
+**本决议拍板**:**不内置**(选项 C,见 §3.5.ter)。理由:
+- 单机单用户场景并发冲突概率极低
+- 内置 retry 引入新设计点(超时 / 退避 / fn 副作用)超出本 sub-phase 范围
+- 留 sub-phase 5+ 协作场景启动时单独决议
+
+**当前实施纪律**:storage.transaction 透传 SurrealDB 的 `Transaction conflict` 错误,capability 上层若想处理可以 try-catch retry,本 sub-phase 不强制。
+
+### 9.5 Q-tx-cancel-error-handling:cancel 失败时的错误处理
+
+**问题(场景 7/10/13a 衍生)**:fn 抛错后 cancel 又抛错,该传递哪个错误?
+
+**当前 §4.1 草案**:cancel 失败时 console.error,继续抛原 fn 错误(不让 cancel 异常遮盖原因)。实施期 §5 字面验证。
 
 ---
 
