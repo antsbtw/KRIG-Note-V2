@@ -676,7 +676,12 @@ interface GraphNodeCapabilityApi {
 
 ---
 
-## 5. note 形态升级路径(sub-phase 3a-2.5)
+## 5. note 形态升级路径(sub-phase 3a-2.5) — ✅ 已实施(2026-05-13 反向更新)
+
+> **状态**: ✅ 实施完成 → 详 [decision 016](016-sub-phase-3a-2.5-note-form-upgrade.md)(本总纲 §5 是路径起点,decision 016 是落地详细规范)。
+> **commits**: `21ac1d2` / `56a8304` / `535ca2e` / `0ae0930` / `f145384` + 反向更新链。
+> **binary verify**: 8 场景全过(decision 016 §12.4),核心业务价值 graph text-node 完全隔离实证通过。
+> **实施路线选择**: 路线 B(Literal Marker)— 但 `relations/spec.md krig vocab` 实施时按 [decision 016 §3.2](016-sub-phase-3a-2.5-note-form-upgrade.md) 拍板的字面 `object = { kind: 'literal', value: <boolean> }` 落地。
 
 ### 5.1 当前形态(sub-phase 2 已落)
 
