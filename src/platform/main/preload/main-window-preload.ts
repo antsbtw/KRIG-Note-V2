@@ -415,4 +415,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);
   },
+
+  // ── L7-sub3a-1:pm-content capability (decision 014 §3.4) ──
+  pmContentCreate(doc: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_CREATE, doc);
+  },
+  pmContentGet(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_GET, id);
+  },
+  pmContentUpdate(id: string, doc: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_UPDATE, id, doc);
+  },
 });

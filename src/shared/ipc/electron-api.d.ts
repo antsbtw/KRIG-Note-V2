@@ -13,6 +13,7 @@ import type {
   FolderInfo,
   NoteDocEnvelope,
 } from './note-folder-types';
+import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 
 declare global {
   interface Window {
@@ -271,6 +272,11 @@ declare global {
       }>;
       /** main → renderer 推送:文件夹列表变更;返 unsubscribe */
       onFolderListChanged(callback: (list: FolderInfo[]) => void): () => void;
+
+      // ── L7-sub3a-1:pm-content capability (decision 014 §3.4) ──
+      pmContentCreate(doc: PmDocEnvelope): Promise<PmAtomInfo>;
+      pmContentGet(id: string): Promise<PmAtomInfo | null>;
+      pmContentUpdate(id: string, doc: PmDocEnvelope): Promise<PmAtomInfo>;
     };
   }
 }

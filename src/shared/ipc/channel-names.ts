@@ -139,6 +139,11 @@ export const IPC_CHANNELS = {
   GRAPH_FOLDER_RENAME: 'graph.folder-rename',
   GRAPH_FOLDER_DELETE: 'graph.folder-delete',
   GRAPH_FOLDER_MOVE: 'graph.folder-move',
+
+  // L7-sub3a-1:pm-content capability (decision 014 §3.4,view-agnostic pm atom CRUD)
+  PM_CONTENT_CREATE: 'pm-content.create',
+  PM_CONTENT_GET: 'pm-content.get',
+  PM_CONTENT_UPDATE: 'pm-content.update',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

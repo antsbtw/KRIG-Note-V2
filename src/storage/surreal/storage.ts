@@ -69,6 +69,8 @@ function normalizeAtomEntity<D extends AtomDomain = AtomDomain>(
     updatedAt: row.updatedAt as number,
     createdBy: row.createdBy as string,
     payload: row.payload as AtomEntity<D>['payload'],
+    // decision 014 §3.7:单向 flag,SurrealDB DEFAULT false 兜底;旧 row 无字段时用 false
+    hasBeenReferenced: (row.hasBeenReferenced as boolean | undefined) ?? false,
   };
 }
 
