@@ -23,13 +23,17 @@ function isVariant(v: unknown): v is GraphVariant {
   return v === 'canvas' || v === 'family-tree' || v === 'knowledge' || v === 'mindmap';
 }
 
-/** 广播画板列表全量到所有 renderer */
-function broadcastListChanged(): void {
-  const list = canvasStore.list();
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
-      win.webContents.send(IPC_CHANNELS.GRAPH_LIST_CHANGED, list);
+/** 广播画板列表全量到所有 renderer (sub-phase 3a-1 改 async, canvasStore.list 现走 SurrealDB) */
+async function broadcastListChanged(): Promise<void> {
+  try {
+    const list = await canvasStore.list();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC_CHANNELS.GRAPH_LIST_CHANGED, list);
+      }
     }
+  } catch (err) {
+    console.warn('[graph/library-handlers] broadcast list-changed failed:', err);
   }
 }
 
@@ -49,8 +53,8 @@ export function registerGraphHandlers(): void {
       const t = typeof title === 'string' && title ? title : 'Untitled Canvas';
       const v: GraphVariant = isVariant(variant) ? variant : 'canvas';
       const fid = typeof folderId === 'string' ? folderId : null;
-      const record = canvasStore.create(t, v, fid);
-      broadcastListChanged();
+      const record = await canvasStore.create(t, v, fid);
+      await broadcastListChanged();
       return record;
     },
   );
@@ -59,25 +63,24 @@ export function registerGraphHandlers(): void {
     IPC_CHANNELS.GRAPH_SAVE,
     async (_e, id: unknown, docContent: unknown, title: unknown) => {
       if (typeof id !== 'string' || !id) return;
-      // docContent 可能是任意 JSON 形态(画板状态),交给 store 透传
       const t = typeof title === 'string' ? title : 'Untitled Canvas';
-      canvasStore.update(id, docContent, t);
-      broadcastListChanged();
+      await canvasStore.update(id, docContent, t);
+      await broadcastListChanged();
     },
   );
 
   ipcMain.handle(IPC_CHANNELS.GRAPH_DELETE, async (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) return;
-    canvasStore.delete(id);
-    broadcastListChanged();
+    await canvasStore.delete(id);
+    await broadcastListChanged();
   });
 
   ipcMain.handle(
     IPC_CHANNELS.GRAPH_RENAME,
     async (_e, id: unknown, title: unknown) => {
       if (typeof id !== 'string' || typeof title !== 'string') return;
-      canvasStore.rename(id, title);
-      broadcastListChanged();
+      await canvasStore.rename(id, title);
+      await broadcastListChanged();
     },
   );
 
@@ -86,8 +89,8 @@ export function registerGraphHandlers(): void {
     async (_e, id: unknown, folderId: unknown) => {
       if (typeof id !== 'string' || !id) return;
       const fid = typeof folderId === 'string' ? folderId : null;
-      canvasStore.moveToFolder(id, fid);
-      broadcastListChanged();
+      await canvasStore.moveToFolder(id, fid);
+      await broadcastListChanged();
     },
   );
 
@@ -101,8 +104,8 @@ export function registerGraphHandlers(): void {
           : typeof targetFolderId === 'string'
             ? targetFolderId
             : undefined;
-      const record = canvasStore.duplicate(id, fid);
-      if (record) broadcastListChanged();
+      const record = await canvasStore.duplicate(id, fid);
+      if (record) await broadcastListChanged();
       return record;
     },
   );
@@ -116,8 +119,8 @@ export function registerGraphHandlers(): void {
     async (_e, title: unknown, parentId: unknown) => {
       if (typeof title !== 'string' || !title) return null;
       const pid = typeof parentId === 'string' ? parentId : null;
-      const folder = canvasStore.folderCreate(title, pid);
-      broadcastListChanged();
+      const folder = await canvasStore.folderCreate(title, pid);
+      await broadcastListChanged();
       return folder;
     },
   );
@@ -126,15 +129,15 @@ export function registerGraphHandlers(): void {
     IPC_CHANNELS.GRAPH_FOLDER_RENAME,
     async (_e, id: unknown, title: unknown) => {
       if (typeof id !== 'string' || typeof title !== 'string') return;
-      canvasStore.folderRename(id, title);
-      broadcastListChanged();
+      await canvasStore.folderRename(id, title);
+      await broadcastListChanged();
     },
   );
 
   ipcMain.handle(IPC_CHANNELS.GRAPH_FOLDER_DELETE, async (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) return;
-    canvasStore.folderDelete(id);
-    broadcastListChanged();
+    await canvasStore.folderDelete(id);
+    await broadcastListChanged();
   });
 
   ipcMain.handle(
@@ -142,8 +145,8 @@ export function registerGraphHandlers(): void {
     async (_e, id: unknown, parentId: unknown) => {
       if (typeof id !== 'string') return;
       const pid = typeof parentId === 'string' ? parentId : null;
-      canvasStore.folderMove(id, pid);
-      broadcastListChanged();
+      await canvasStore.folderMove(id, pid);
+      await broadcastListChanged();
     },
   );
 }
