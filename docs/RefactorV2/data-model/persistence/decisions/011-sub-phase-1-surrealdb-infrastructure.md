@@ -263,6 +263,13 @@ import type { Atom, AtomDomain } from './atom';
 /**
  * V2 atom 实体壳
  * 详 docs/RefactorV2/data-model/persistence/atom-entity.md §1
+ *
+ * ⚠ 2026-05-12 反向更新(sub-phase 3a-1 实施时扩展):
+ * 加 hasBeenReferenced?: boolean 字段(decision 013 §3.5 + decision 014 §3.7)
+ * - 单向 flag,DEFAULT false,被第 2+ 条 hasContent 边引用时置 true(永不复位)
+ * - optional 字段,sub-phase 1/2 旧数据无此字段 — normalizer 用 `?? false` 兜底
+ * - 适用所有 atom,但目前只有 pm 会被多引用(sub-phase 3a-1 单引用约束下恒 false)
+ * - 详 decision 014 §12.2 偏离 6(决策点 E)
  */
 export interface AtomEntity<D extends AtomDomain = AtomDomain> {
   id: string;
@@ -270,6 +277,7 @@ export interface AtomEntity<D extends AtomDomain = AtomDomain> {
   updatedAt: number;
   createdBy: string;
   payload: Atom<D>;
+  hasBeenReferenced?: boolean;   // ← sub-phase 3a-1 反向扩展
 }
 ```
 

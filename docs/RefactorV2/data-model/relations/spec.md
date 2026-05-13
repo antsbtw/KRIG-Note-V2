@@ -71,7 +71,7 @@ identifier       ::= [a-z] [a-zA-Z0-9-]* [a-zA-Z0-9]
 | `owl` | W3C OWL 标准 | `sameAs` / `equivalentClass` / `equivalentProperty` |
 | `skos` | W3C SKOS 标准 | `broader` / `narrower` / `related` |
 | `schema` | Schema.org 词汇表 | `author` / `about` / `creator` |
-| `krig` | KRIG 自有 | `embeddedBy` / `represents` / `shownIn` |
+| `krig` | KRIG 自有 | `embeddedBy` / `represents` / `shownIn` / `inFolder` / `inCanvas` / `hasContent` |
 | `family-tree` | KRIG 领域命名空间 | `isParentOf` / `hasSpouse` / `hasGender` |
 | `bpmn` | KRIG 领域命名空间 | `flowsTo` / `triggers` / `signals` |
 | `mind-map` | KRIG 领域命名空间 | `hasChild` / `expandsTo` |
@@ -388,3 +388,23 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 2. **V2 代码实施** —— `src/semantic/edge.ts`（或类似位置）实现 `Edge` 接口；`capability.graph-query` 提供 predicate 校验 + cardinality 校验 + 子图查询。
 3. **存储层 schema** —— Phase 3 persistence 决议 edge 表 schema（含索引设计）。
 4. **架构文档反向更新** —— 等边体系稳定运行 N 个 phase 后，反向更新 `docs/00-architecture/three-layer.md`，把"边是一等公民"纳入架构定义。
+
+---
+
+## 10. krig vocabulary 已落地的边类型登记(2026-05-12 反向更新)
+
+随 sub-phase 2 / 3a-1 实施落地的 krig vocabulary 边类型登记表。新增边类型时同步在此登记。
+
+| 边类型 | subject | object | cardinality | 引入 sub-phase | 文档 |
+|---|---|---|---|---|---|
+| `user:krig:inFolder` | folder / pm (note) / graph-canvas / 未来 ebook | folder | 一对一 | sub-phase 2(基础)+ sub-phase 3a-1(扩展)| [decision 012 §3.3](../persistence/decisions/012-sub-phase-2-note-folder-migration.md) + [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
+| `user:krig:inCanvas` | graph-instance | graph-canvas | 一对一 | sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
+| `user:krig:hasContent` | graph-instance(text-node ref)| pm | 一对一(单引用约束,sub-phase 3a-1..3a-5)| sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
+
+**单引用约束说明**:`hasContent` 边 cardinality 在 sub-phase 3a-1..3a-5 阶段强制为"一对一"(一段 pm content 只被 1 个 wrapper 引用)。多引用(浅引用 / 跨 view 复用)留 sub-phase 3a-shared-ref 子任务,前置 sub-phase 3a-tx 解决真原子性(详 [decision 013 §3.5.1.bis](../persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md))。
+
+**Path Y cascade 关联**:
+- 删 folder → cascade 删内含资源(白名单 `['pm', 'graph-canvas']`,sub-phase 3a-1 扩展)
+- 删 graph-canvas → cascade 删内含 instance + 单引用 pm content(sub-phase 3a-1 实施)
+- 删 instance(text-node)→ 单引用模式下 cascade 删 pm content
+- 详 [decision 014 §3.5.3.5 / §3.5.3.6](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md)
