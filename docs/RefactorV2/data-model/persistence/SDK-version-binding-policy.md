@@ -34,7 +34,7 @@
 
 ### 2.2 拍板"用 SDK X 版本的某 API"前必须 grep 字面证据
 
-- 涉及 SDK API 选型的决议,撰写时**必须**满足以下三步证据:
+- 涉及 SDK API 选型的决议,撰写时**必须**满足以下四步证据:
   1. **实证当前锁定版本**:`grep "<sdk-name>" package.json`(或读 lockfile / `npm ls <sdk-name>`)
   2. **实证 API 字面存在于该版本的类型定义**(以下任选一种,以已安装依赖的实际 types 入口为准):
      - 读 `node_modules/<sdk>/package.json` 的 `"types"` / `"typings"` / `"exports": { ... "types": ... }` 字段,定位实际 `.d.ts` 入口,再 grep 目标 API
@@ -42,8 +42,11 @@
      - `find node_modules/<sdk> -name '*.d.ts' | xargs grep "<api-name>"` 兜底全扫(适用于无 dist / 类型在根目录的 SDK)
      - 若 SDK 无类型定义(JS-only):必须读源码 `.js` 字面实证,**禁止只看 `@types/<sdk>` 第三方类型**(可能与实际行为不一致)
   3. **行为 / 边缘语义实证**(若决议涉及):必须 binary verify,参 decision 020 §3.5 模式;不只信类型声明,不只信公开文档
+  4. **API 可执行链路实证**(若决议字面要求"verify 脚本直接 import 项目内模块"调 SDK API,2026-05-13 v1.2 新增,见 [decision 020 §11.5 第 12 次教训](decisions/020-sub-phase-3a-tx-true-atomicity.md)):必须 `grep -A 5 "^import" <目标模块>` 跟踪 import 链到底层依赖,实证 verify 脚本运行上下文兼容(typical:纯 node 脚本 vs electron renderer / main vs worker / DOM env)
+     - 若 import 链含 electron / `window` / DOM / app context / IPC 等运行时上下文依赖,verify 脚本必须**重新设计**(stub / 解耦 / 字面 copy 改造主体),不能字面"直接 import"
+     - 反例(decision 020 §10.B-2):storage.ts → client.ts → `import { app } from 'electron'`,纯 node 脚本 import 失败,改 import 解耦模块 `transaction-helpers.ts`
 - **不允许**靠模糊记忆 / 公开文档 / 上版本经验 / 训练数据假设拍板 SDK API
-- 教训来源:[decision 020 §0.6 第 9 次设计师教训](decisions/020-sub-phase-3a-tx-true-atomicity.md)
+- 教训来源:[decision 020 §0.6 第 9 次设计师教训](decisions/020-sub-phase-3a-tx-true-atomicity.md) + [decision 020 §11.5 第 12 次教训](decisions/020-sub-phase-3a-tx-true-atomicity.md)
 
 ### 2.3 实施期间不得擅自升级 SDK 主版本
 
@@ -112,6 +115,16 @@
 
 **教训详细**:[decision 020 §0.6](decisions/020-sub-phase-3a-tx-true-atomicity.md)。
 
+### 5.2 第 12 次设计师教训(2026-05-13,decision 020 §11.5)
+
+> 决议 §5 / §6 字面 verify / 实施任务必须 grep import 链确认可执行性;不只验证"API 字面存在",还要验证"API 可在 verify 上下文跑起来"。
+
+**起因**:decision 020 §5.5 / §6.1 字面要求"直接调 V2 `SurrealStorage.transaction(fn)`",但 storage.ts → client.ts → `import { app } from 'electron'`,纯 node 脚本 import 失败。实施者 Step 5.5 才发现。
+
+**纪律升级**:§2.2 加第 4 步"API 可执行链路实证"(2026-05-13 v1.2)。
+
+**教训详细**:[decision 020 §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md)。
+
 ---
 
 ## 6. 修订记录
@@ -120,6 +133,7 @@
 |---|---|---|---|
 | 2026-05-13 | v1.0 | 首次制定(由 decision 020 触发) | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.1 | 用户 P3 修订:消除"禁止顺带改 vs §4 必改"矛盾(§7 分两类);§2.2 API 证据采集通用化;§4 表列字段口径统一 | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
+| 2026-05-13 | v1.2 | sub-phase 3a-tx 实施期 §10.B-2 偏离 + 第 12 次教训反向更新:§2.2 加第 4 步"API 可执行链路实证";§5 加 5.2 第 12 次教训 | [decision 020 §10.B-2 + §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 
 ---
 
