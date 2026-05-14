@@ -36,6 +36,26 @@ import type {
   EBookDataPayload,
   EBookLoadedInfo,
 } from '@shared/ipc/ebook-types';
+import type { NoteInfo } from '@shared/ipc/note-folder-types';
+import type { BookAnchor } from '@drivers/text-editing-driver/blocks/_shared/book-anchor';
+
+// sub-phase 022 (decision 022 §4.1.3): thought block 5 新 API 字面契约
+// view 端通过 ebook capability 字面创建 / 删除 / 列举 thought PM doc 内 block,
+// 内部走 ensureReadingThought + note.updateNote 全量替换 (沿决议 §4.1.3 字面).
+
+/** 一个 thought block 字面 spec (view 端字面创建 PDF 标注 / EPUB 标注 / 任意 anchor 字面用) */
+export interface ThoughtBlockSpec {
+  /** PM block type: 'image' / 'blockquote' / 'paragraph' 字面三选一 (沿 §7.3 字面) */
+  type: 'image' | 'blockquote' | 'paragraph';
+  /** bookAnchor attrs 字面必填 */
+  bookAnchor: BookAnchor;
+  /** 可选 image src (字面用 thumbnail base64) */
+  src?: string;
+  /** 可选 textContent (highlight 字面字段, 用作 blockquote 内 paragraph 子节点) */
+  textContent?: string;
+}
+
+export type { NoteInfo, BookAnchor };
 
 // ── view 业务路径 API ──
 
@@ -103,15 +123,28 @@ export interface EBookLibraryApi {
   ): Promise<Array<{ cfi: string; label: string }>>;
   cfiBookmarkList(bookId: string): Promise<Array<{ cfi: string; label: string }>>;
 
+  // ── sub-phase 022: 5 新 thought block API (decision 022 §4.1.3 §4.3.1-L1) ──
+
+  /** 取 ebook 关联的 thought atom (NoteInfo 信封); 无则返 null */
+  getReadingThought(bookId: string): Promise<NoteInfo | null>;
+  /**
+   * lazy 幂等创建 thought atom + hasReadingThought 边.
+   * §4.3.1-L1 互斥校验主防: 若 storage 状态坏 (新 pm atom 同时挂 hasNoteView)
+   * 抛 MarkerEdgeMutexViolation.
+   */
+  ensureReadingThought(bookId: string): Promise<NoteInfo | null>;
+  /** 添加一个标注 block 到 thought PM doc (内部 ensureReadingThought + updateNote 全量替换) */
+  addReadingThoughtBlock(bookId: string, spec: ThoughtBlockSpec): Promise<void>;
+  /** 通过 bookAnchor.createdAt 字面 (作为 blockId) 字面匹配删一个 block */
+  removeReadingThoughtBlock(bookId: string, blockId: string): Promise<void>;
+  /** 扫 thought PM doc, 返扁平 BookAnchor[] (view 端 PDF/EPUB 标注层 filter 用) */
+  getReadingThoughtAnnotations(bookId: string): Promise<BookAnchor[]>;
+
   // 注: sub-phase 022 删除 5 folder API (folderList / folderCreate / folderRename /
   // folderDelete / folderMove) — 决议 021 §4.3 兼容约束落地, view caller 改走
-  // folder capability + viewType='ebook' (Step 5.6 实施).
+  // folder capability + viewType='ebook' (Step 5.4 commit 2 实施).
   //
   // 注: sub-phase 022 删除 3 annotation API (annotationList / annotationAdd /
   // annotationRemove) — annotation 概念消亡, view caller 改走 thought block
-  // 新 API (Step 5.5 + Step 5.6 实施).
-  //
-  // 5 新 thought block 级 API 字面 (getReadingThought / ensureReadingThought /
-  // addReadingThoughtBlock / removeReadingThoughtBlock /
-  // getReadingThoughtAnnotations) 字面 Step 5.5 实施时加入本 interface.
+  // 新 5 API.
 }

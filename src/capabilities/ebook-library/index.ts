@@ -33,6 +33,9 @@ import type {
   EBookLoadedInfo,
   PickFileResult,
   ReadingPosition,
+  ThoughtBlockSpec,
+  NoteInfo,
+  BookAnchor,
 } from './types';
 
 export type {
@@ -44,6 +47,8 @@ export type {
   EBookLoadedInfo,
   PickFileResult,
   ReadingPosition,
+  ThoughtBlockSpec,
+  BookAnchor,
 } from './types';
 // sub-phase 022: EBookEntry → EBookInfo 字面改名; EBookFolder / StoredAnnotation 报废.
 // folder API caller 改走 folder capability + viewType='ebook'; annotation 概念消亡,
@@ -196,7 +201,46 @@ export async function cfiBookmarkList(
 }
 
 // ── 标注 ── (sub-phase 022: annotation 概念消亡 — 3 annotation API 完整废弃,
-//             view caller 改走 thought block (留 Step 5.5 加 5 个 thought block 新 API))
+//             view caller 改走 thought block 新 5 API, 内部走 ebook capability +
+//             note.updateNote 全量替换 thought PM doc)
+
+// ── sub-phase 022:5 新 thought block API (decision 022 §4.1.3 §4.3.1-L1) ──
+
+export async function getReadingThought(bookId: string): Promise<NoteInfo | null> {
+  if (!window.electronAPI?.ebookThoughtGet) return null;
+  const r = await window.electronAPI.ebookThoughtGet(bookId);
+  return (r as NoteInfo | null) ?? null;
+}
+
+export async function ensureReadingThought(bookId: string): Promise<NoteInfo | null> {
+  if (!window.electronAPI?.ebookThoughtEnsure) return null;
+  const r = await window.electronAPI.ebookThoughtEnsure(bookId);
+  return (r as NoteInfo | null) ?? null;
+}
+
+export async function addReadingThoughtBlock(
+  bookId: string,
+  spec: ThoughtBlockSpec,
+): Promise<void> {
+  if (!window.electronAPI?.ebookThoughtBlockAdd) return;
+  return window.electronAPI.ebookThoughtBlockAdd(bookId, spec);
+}
+
+export async function removeReadingThoughtBlock(
+  bookId: string,
+  blockId: string,
+): Promise<void> {
+  if (!window.electronAPI?.ebookThoughtBlockRemove) return;
+  return window.electronAPI.ebookThoughtBlockRemove(bookId, blockId);
+}
+
+export async function getReadingThoughtAnnotations(
+  bookId: string,
+): Promise<BookAnchor[]> {
+  if (!window.electronAPI?.ebookThoughtAnnotations) return [];
+  const r = await window.electronAPI.ebookThoughtAnnotations(bookId);
+  return Array.isArray(r) ? (r as BookAnchor[]) : [];
+}
 
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
 // W5 边界 A 临时允许项:同时保留模块级 export(driver/slot 内部消费可直 import)
@@ -223,5 +267,11 @@ capabilityRegistry.register({
     cfiBookmarkAdd,
     cfiBookmarkRemove,
     cfiBookmarkList,
+    // sub-phase 022: 5 新 thought block API
+    getReadingThought,
+    ensureReadingThought,
+    addReadingThoughtBlock,
+    removeReadingThoughtBlock,
+    getReadingThoughtAnnotations,
   } satisfies EBookLibraryApi,
 });
