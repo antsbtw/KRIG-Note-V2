@@ -9,6 +9,8 @@
 > **前置依赖**: sub-phase 1(`34e3758`)+ sub-phase 2(`0ad60c7`)+ sub-phase 3a-1(`67f18b2`)+ 反向更新 10 项(`19b6ed6`)+ sub-phase 3a-2.5(`b8093d9`)
 > **总纲**: [decision 011 §4.2 X3a 退化条](011-sub-phase-1-surrealdb-infrastructure.md)+ [decision 012 §8 Q-tx](012-sub-phase-2-note-folder-migration.md)+ [decision 013 §3.5.1.bis](013-sub-phase-3a-graph-canvas-migration.md)
 > **范围风格**: storage 底座单点改造 + 全已迁 capability 回归 verify(view 层零改动)
+>
+> **2026-05-13 反向更新**(decision 021 sub-phase 021 完成):本决议 §3.5.bis 场景 1/3/5 字面 binary verify "单次 db.query() 内 BEGIN/COMMIT 跨语句原子" 实证,被 decision 021 §7.2 clearAll migration 字面引用作为 `BEGIN TRANSACTION; DELETE atom; DELETE edge; COMMIT TRANSACTION;` 单次 query 调用承载多语句事务脚本的字面前置实证。详 [decision 021 §0.7 第 15 次教训](021-sub-phase-021-folder-view-isolation.md#07-设计师累积教训第-15-次2026-05-13-决议自审命中)。
 
 ---
 

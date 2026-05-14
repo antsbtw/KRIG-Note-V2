@@ -151,6 +151,8 @@ interface Folder {
 
 按用户拍板选项 A —— folder 是新 atom domain（atom domain 开放注册体系，无 schema migration）。
 
+> **2026-05-13 反向更新**(decision 021 sub-phase 021 完成):folder atom 多挂一条 `user:krig:folderForView` 边表达 view 归属(object literal `'__view__/note'` 或 `'__view__/graph'`),实现 note + graph 视图隔离;一个 folder atom 可挂多条 folderForView 边(将来跨 view 共享场景预留)。详 [decision 021 §4.1](021-sub-phase-021-folder-view-isolation.md#41-实施核心草案5-详细)。
+
 **folder domain 定义**（实施者在 `src/semantic/types/atom.ts` 加）：
 
 ```ts

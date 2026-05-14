@@ -43,6 +43,14 @@ edge:
   object: AtomRef(atomId=<父 folder atomId>)
   attrs: { createdBy:'user-default', createdAt:... }
 
+// folder view 归属用边表达 (decision 021 §4.1):
+edge:
+  predicate: 'user:krig:folderForView'
+  subject: AtomRef(atomId=<folder atomId>)
+  object: LiteralMarker({ kind:'literal', type:'string', value:'__view__/note' 或 '__view__/graph' })
+  attrs: { createdBy:'user-default', createdAt:... }
+  // cardinality: 0-N(0 = 孤儿不可见;1 = 单 view 归属;N = 跨 view 共享预留)
+
 // view ↔ capability 边界 (FolderInfo):
 {
   id: ULID,
@@ -50,13 +58,17 @@ edge:
   parentId: <派生自 inFolder 边>,
   createdAt, updatedAt,
 }
+
+// FolderViewType (decision 021 §4.1 + §10.C-1):
+// SSOT 在 @shared/ipc/note-folder-types(跟 FolderInfo 同模式)
+type FolderViewType = 'note' | 'graph';   // future sub-phase 022 加 | 'ebook'
 ```
 
 ## Cardinality
 
-- subject (note / folder) → object (folder):一对一 (一个 note / folder 只能在一个父
-  folder 内)
-- 根级 note / folder:没有 inFolder 边
+- inFolder: subject (note / folder) → object (folder):一对一 (一个 note / folder 只能在一个父 folder 内)
+- inFolder 根级 note / folder:没有 inFolder 边
+- folderForView (decision 021): subject (folder) → object (view literal):0-N(0 = 孤儿不可见;1 = 单 view 归属;N = 跨 view 共享预留)
 
 ## moveFolder 语义
 
@@ -112,8 +124,39 @@ const RESOURCE_DOMAINS = ['pm', 'graph-canvas'];   // 当前白名单
 - `GRAPH_LIST_CHANGED`(当 cascade 删了 graph-canvas 时,sub-phase 3a-1 加)
 - 未来 sub-phase 3b 加 ebook 时同款扩展
 
-⚠ **风险登记**: 误删 folder = 丢所有内含资源。配套保护(删除前弹窗 + 回收站)留
-sub-phase 3+ 单独 decision(decision 012 §8 Q7 + decision 014 §8 Q7)。
+⚠ **风险登记**: 误删 folder = 丢所有内含资源。配套保护(删除前弹窗 + 回收站)— 弹窗已弱处理(sub-phase 021),回收站留 decision 023。
+
+## previewDeleteFolder Q7 弱保护 (decision 021 §5.5 + §10.B-3,2026-05-13 新增 8th API)
+
+**语义**:dry-run 计数,**仅计数不删除**。UI 调用本 API 后,`resources > 0 || folders > 0` 时弹框确认。
+
+```ts
+previewDeleteFolder(id: string): Promise<{ folders: number; resources: number }>
+// - folders: 子 folder 数(不含 self)
+// - resources: 含 self 在内的所有 folder 内含资源数(pm note + graph-canvas)
+```
+
+**实施**(sub-phase 021 §5.5,沿 decision 020 §7.5 deleteFolder 同模式):事务内 BFS `collectFolderSubtree + collectResourcesInFolders`,仅计数不删除。
+
+**view 层 R3 字面各自实施**(decision 021 §10.C-2 — V2 W5 lint 禁止 view 直 import @capabilities/* 运行时值,跨 view UI 复用语义澄清"UX 一致而非代码共用 helper"):
+- `src/views/graph-canvas-view/canvas-commands.ts:102`(graph view 单选)
+- `src/views/note/note-commands.ts` `note-view.delete-by-tree-id` command(note view 单选)
+- `src/views/note/tree-operations.ts:108` `deleteSelected`(note view 多选,逐个 confirm,batch UX 留 decision 023)
+
+**触发条件**:`preview.resources > 0 || preview.folders > 0`(任一非空就弹,空 folder 直接删)
+
+**UX**:`window.confirm` 原生(Q7 弱处理 + 0 工程量),精致 UX(React modal + 回收站 undo)留 decision 023。
+
+## listFolders / createFolder 视图归属 (decision 021 §4.1,2026-05-13 签名变更)
+
+**listFolders(viewType) / createFolder(title, parentId, viewType)** 必传 `viewType: FolderViewType`:
+- `listFolders('note')`:返 note view 的 folder list(应用层 filter `user:krig:folderForView` 边的 object literal `__view__/note`)
+- `createFolder(title, parentId, 'note')`:写 folder atom + 加 `user:krig:folderForView` 边 + (可选) inFolder 边
+- graph view 走 graph-library-store + folder-adapter,**folder-adapter 内部硬编 'graph'**(renderer IPC 字面透明,GRAPH_FOLDER_* channel payload 不加 viewType 字段)
+
+**EdgeFilter 字面不支持 objectLiteralValue filter**(decision 021 §0.4 #8),listFolders 应用层 filter object.kind/type/value 三字段。未来若性能差,留独立 sub-phase 扩 EdgeFilter 接口。
+
+**broadcast 方案 C**(decision 021 §10.B-2):main 端 `broadcastFolderListChanged` 按 view 分别广播 2 次(`listFolders('note')` + `listFolders('graph')`),renderer 端 `useAllFolders(viewType)` hook 在 onListChanged callback 内调 `listFolders(viewType)` 重拉,避免对端 view 广播污染本 view 缓存。`onListChanged` callback 签名字面**不动**(`(list: FolderInfo[]) => void`)。
 
 ### 跨 sub-phase 设计纪律
 

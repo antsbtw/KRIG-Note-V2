@@ -45,8 +45,18 @@
   4. **API 可执行链路实证**(若决议字面要求"verify 脚本直接 import 项目内模块"调 SDK API,2026-05-13 v1.2 新增,见 [decision 020 §11.5 第 12 次教训](decisions/020-sub-phase-3a-tx-true-atomicity.md)):必须 `grep -A 5 "^import" <目标模块>` 跟踪 import 链到底层依赖,实证 verify 脚本运行上下文兼容(typical:纯 node 脚本 vs electron renderer / main vs worker / DOM env)
      - 若 import 链含 electron / `window` / DOM / app context / IPC 等运行时上下文依赖,verify 脚本必须**重新设计**(stub / 解耦 / 字面 copy 改造主体),不能字面"直接 import"
      - 反例(decision 020 §10.B-2):storage.ts → client.ts → `import { app } from 'electron'`,纯 node 脚本 import 失败,改 import 解耦模块 `transaction-helpers.ts`
+  8. **V2 完整传播层 6 层 grep 前瞻验证**(2026-05-13 v1.4 新增,见 [decision 021 §0.5.ter](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新)):决议字面拍板涉及"新类型字面归属 / 接口签名变更 / 跨层复用方案 / API 不变约束 / 跨 view 资源复用"任一时,必须**前瞻 grep V2 完整传播层 6 层清单**:
+     1. **view caller 真消费点**(grep API 在 src/views/ 全部使用位置;**对每个签名变更 API 独立 grep**,不要只 grep 主要 API — decision 021 §10.B-1 教训 16)
+     2. **capability types.ts 接口**(@capabilities/<id>/types.ts 字面 API 列表 + 字段)
+     3. **capability index.ts renderer 入口**(@capabilities/<id>/index.ts 字面 export)
+     4. **IPC channel + preload + electron-api.d.ts**(channel-names.ts 字面 channel id + preload 桥 + d.ts 接口签名)
+     5. **分层 lint 规则 eslint.config.js**(no-restricted-imports patterns 字面,verify 新增 import 字面合规 — decision 021 §10.C-1 / §10.C-2 教训 18/20)
+     6. **V2 既有同类型 SSOT 位置**(grep 同类业务类型字面位置,如 FolderInfo / NoteInfo / PmAtomInfo 都在 shared/ipc/ — decision 021 §10.C-1 教训 18)
+     - **间接传播路径**(2026-05-13 v1.4 强化,见 decision 021 §10.B-2 教训 17):接口签名变更必须额外 grep "间接被调"位置(broadcast / 订阅 / hook / hook caller — `broadcastXListChanged` / `useAllX` / `subscribe` / `onListChanged`),不能假设"既有路径会自动兼容新签名"
+     - **API 总数描述前瞻**(2026-05-13 v1.4 强化,见 decision 021 §10.B-3 教训 19):决议字面对 API 总数描述不能字面写死"= N",必须**"既有 N API 签名不动" + "新增 API 允许(但必须 §10 偏离登记)"** 字面措辞
+     - **"跨 X 复用"语义明示**(2026-05-13 v1.4 强化,见 decision 021 §10.C-2 教训 20):决议字面拍板"跨 view 复用 / 跨层 helper"时必须明示是"UX 一致(走重复实施模式)"还是"代码共用 helper 函数(走 lib/ + 字面登记新跨层依赖)",不能字面歧义
 - **不允许**靠模糊记忆 / 公开文档 / 上版本经验 / 训练数据假设拍板 SDK API
-- 教训来源:[decision 020 §0.6 第 9 次设计师教训](decisions/020-sub-phase-3a-tx-true-atomicity.md) + [decision 020 §11.5 第 12 次教训](decisions/020-sub-phase-3a-tx-true-atomicity.md)
+- 教训来源:[decision 020 §0.6 第 9 次设计师教训](decisions/020-sub-phase-3a-tx-true-atomicity.md) + [decision 020 §11.5 第 12 次教训](decisions/020-sub-phase-3a-tx-true-atomicity.md) + [decision 021 §11.3-§11.7 第 16-20 次教训](decisions/021-sub-phase-021-folder-view-isolation.md#113-第-16-次设计师教训决议-grep-自审必须对每个变更-api-独立-grep10b-1-触发)
 
 ### 2.3 实施期间不得擅自升级 SDK 主版本
 
@@ -134,6 +144,7 @@
 | 2026-05-13 | v1.0 | 首次制定(由 decision 020 触发) | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.1 | 用户 P3 修订:消除"禁止顺带改 vs §4 必改"矛盾(§7 分两类);§2.2 API 证据采集通用化;§4 表列字段口径统一 | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.2 | sub-phase 3a-tx 实施期 §10.B-2 偏离 + 第 12 次教训反向更新:§2.2 加第 4 步"API 可执行链路实证";§5 加 5.2 第 12 次教训 | [decision 020 §10.B-2 + §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
+| 2026-05-13 | v1.4 | sub-phase 021 实施期 5 个偏离(§10.B-1/B-2/B-3/C-1/C-2)+ 第 16-20 次教训累积反向更新:§2.2 加第 8 步"V2 完整传播层 6 层 grep 前瞻验证"(view caller / capability types / capability index / IPC+preload+d.ts / 分层 lint / 同类型 SSOT 位置 + 间接传播路径 + API 总数前瞻 + "跨 X 复用"语义明示)。授权依据:[decision 021 §0.5.ter 用户 P0 授权](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新) | [decision 021 §11.3-§11.7](decisions/021-sub-phase-021-folder-view-isolation.md) |
 
 ---
 

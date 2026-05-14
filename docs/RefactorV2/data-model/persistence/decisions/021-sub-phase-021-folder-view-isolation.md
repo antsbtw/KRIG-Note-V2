@@ -32,9 +32,10 @@
    - 例外(folder capability 层):`src/platform/main/folder/capability-impl.ts` 的 `listFolders / createFolder` 改造(本决议核心改造点)+ `src/capabilities/folder/types.ts` 加 `viewType` 入参
    - **澄清"不动 src/storage" 的语义边界**(2026-05-13 P1 修订轮回应审计):"不动" = 不改 src/storage 现有任何 .ts 文件内的字面;**允许**在 src/storage/migrations/ 子目录下新建 021 专属 migration 脚本(单一新文件,不动 runner / api / surreal 子目录任一既有文件)— 与 decision 020 sub-phase 3a-tx 新建 `transaction-helpers.ts` 同模式
 4. **FolderCapabilityApi 对外接口签名变化白名单**:
-   - `listFolders()` → `listFolders(viewType: FolderViewType)` 必须改(本决议必要变更,3 个 caller 同步改造)
+   - `listFolders()` → `listFolders(viewType: FolderViewType)` 必须改(本决议必要变更,7 个 caller 同步改造 — 反向 §10.B-1 4→7)
    - `createFolder(title, parentFolderId)` → `createFolder(title, parentFolderId, viewType: FolderViewType)` 必须改
-   - 其他 5 API 签名不动
+   - 既有 5 API(getFolder / renameFolder / moveFolder / deleteFolder / onListChanged)签名**不动**
+   - **新增 8th API** `previewDeleteFolder(id): Promise<{folders, resources}>`(Q7 弱保护 dry-run,§10.B-3 反向 §5.5 实施期偏离登记;2026-05-13 实施者 Step 5.5 P0 拍板)
 5. **SDK 版本锁定 surrealdb@^2.0.3**:沿 [SDK-version-binding-policy.md](../SDK-version-binding-policy.md) v1.2 纪律,本 sub-phase 不升级
 6. **任何偏离决议 / SurrealDB binary 行为不符预期 / 发现额外消费点 → 停下汇报**,等总指挥批复后再继续
 7. **进程边界**:
@@ -62,7 +63,7 @@
 | 3 | 现状 ebook 路径 listFolders 实施 | ⚠ [ebook/bookshelf-store.ts:335-339](../../../../../src/platform/main/ebook/bookshelf-store.ts#L335) **完全独立 JSON 树**(`{userData}/krig-data/ebook/bookshelf.json`),跟 atom 体系零接触 → 本决议不涉及,留 sub-phase 022 |
 | 4 | krig vocab 现状边类型 | ✅ grep `user:krig:*` 字面:已用 `inFolder`(decision 012)/ `hasNoteView`(decision 016)/ `hasContent`(decision 014)/ `inCanvas`(decision 014)— 本决议新增 `user:krig:folderForView` 不撞名 |
 | 5 | SurrealDB schema FoldatomViewMarker | ❌ 现状 schema 字面:`folder` domain payload 字面 `{ title: string }`(decision 012 §3.1)—**无 viewType 字段**;本决议拍板用边表达而非加 payload 字段,sub-phase 启动前 schema 字面 0 影响 |
-| 6 | 3 视图 listFolders / folderList 字面消费点 | ✅ grep:`src/views/note/extraction-import.ts:177` + `src/views/note/tree-operations.ts:49,133` + `src/views/note/use-notes-folders.ts:45`(note,**3 处真消费**)+ `src/views/graph-canvas-view/nav-side-content.tsx:83`(graph,**1 处**)+ `src/views/ebook/nav-side-content.tsx:87`(ebook,**1 处** — 本决议不动)|
+| 6 | 3 视图 listFolders / folderList 字面消费点(实施期 §10.B-1 复 grep 修正:本初版 grep 漏 createFolder 3 处)| ✅ 完整字面 7 处(listFolders 4 + createFolder 3):`src/views/note/extraction-import.ts:177,180` + `src/views/note/tree-operations.ts:49,133,175` + `src/views/note/use-notes-folders.ts:45` + `src/views/note/data-model.ts:211`(note,**7 处真消费**)+ `src/views/graph-canvas-view/nav-side-content.tsx:83`(graph,**1 处**走 graph-library-store)+ `src/views/ebook/nav-side-content.tsx:87`(ebook,**1 处** — 本决议不动)|
 | 7 | **EdgeEndpoint LiteralValue 字面形态**(2026-05-13 自审命中)| ⚠ [semantic/types/edge.ts:14-21](../../../../../src/semantic/types/edge.ts#L14) 字面:`StringLiteral = { kind: 'literal'; type: 'string'; value: string }` — **必须带 `type` 字段**;本决议 §4.1 草案漏 type 字段已修正(`object: { kind: 'literal', type: 'string', value: '__view__/note' }`)|
 | 8 | **`storage.clearAll()` API 是否字面存在 + `EdgeFilter` 是否字面支持 object literal filter**(2026-05-13 自审命中)| ❌ 两项**都不存在**:[storage/api.ts:21-66](../../../../../src/storage/api.ts#L21) `StorageAPI` 12 API 无 `clearAll`;[storage/api.ts:108-117](../../../../../src/storage/api.ts#L108) `EdgeFilter` 7 字段(predicate / source / vocabulary / subjectAtomId / objectAtomId / createdAtRange / limit / offset / orderBy / orderDirection)**无 `objectLiteralValue`**;现状只能拉全 predicate 字面后应用层 filter 。第 15 次教训登记(§0.7)|
 
@@ -100,6 +101,23 @@
 **为什么满足 policy §7.1 合规**:
 - 独立决议:✅ decision 021 是 sub-phase 021 独立决议,非业务 sub-phase 决议内"顺带改"
 - 用户 P0 授权:✅ 本节字面登记,跟 §0.5 "数据模型层根治"P0 字面同标准
+
+**纪律登记**:本次授权**仅本决议范围有效**;未来若再有决议要改 SDK-policy 规则正文,**仍需独立 P0 授权**,不允许引用本节作为通用授权先例。
+
+### 0.5.ter 用户 P0 授权:Step 5.7 顺手改 SDK-version-binding-policy.md §2.2 第 8 步 + §6 修订记录 v1.4(2026-05-13 实施期反向更新)
+
+**授权触发**:实施期 §10 5 个偏离登记(B-1/B-2/B-3/C-1/C-2)累积出第 16-20 次设计师教训,核心启示统一为"决议字面拍板涉及跨层 / 跨 view 复用 / API 不变约束 / 新类型字面归属时,必须前瞻 grep V2 完整传播层 6 层清单(view + capability 接口 + capability 实施 + IPC channel + preload + 分层 lint 规则)"。沿 policy §7.1 字面,§2.2 规则正文修改需独立决议 + 用户 P0 授权。
+
+**用户 2026-05-13 实施期 Step 5.7 拍板**:授权决议 021 Step 5.7 反向更新一并修改 SDK-version-binding-policy.md §2.2 第 8 步 + §6 修订记录 v1.4(承载第 16-20 次教训累积启示)。
+
+**授权范围**(本节字面登记):
+- 授权 **decision 021** 在 Step 5.7 反向更新清单一并修改 SDK-version-binding-policy.md §2.2 加第 8 步规则正文 +  §6 修订记录加 v1.4 条目指向 decision 021 §0.5.ter
+- 第 8 步规则内容:"决议字面拍板新类型字面归属 / 接口签名变更 / 跨层复用方案 / API 不变约束 / 跨 view 资源复用时,必须前瞻 grep V2 完整传播层 6 层清单 — view caller 真消费点 / capability types.ts 接口 / capability index.ts renderer 入口 / IPC channel + preload + electron-api.d.ts / 分层 lint 规则 eslint.config.js / V2 既有同类型 SSOT 位置(如 FolderInfo / NoteInfo)"
+- §6 修订记录字面 v1.4 条目指向 decision 021 §0.5.ter(本节)
+
+**为什么满足 policy §7.1 合规**:
+- 独立决议:✅ decision 021 是 sub-phase 021 独立决议
+- 用户 P0 授权:✅ 本节字面登记,跟 §0.5 / §0.5.bis 字面同标准
 
 **纪律登记**:本次授权**仅本决议范围有效**;未来若再有决议要改 SDK-policy 规则正文,**仍需独立 P0 授权**,不允许引用本节作为通用授权先例。
 
@@ -142,7 +160,7 @@
 **包含**:
 - 引入新边类型 [`user:krig:folderForView`](§4.1):subject = folder atom,object = view literal marker(`'__view__/note'` 或 `'__view__/graph'`)
 - 改造 [folder/capability-impl.ts](../../../../../src/platform/main/folder/capability-impl.ts) `listFolders` / `createFolder`:加 `viewType` 入参 + 过滤逻辑 / 写边逻辑
-- 改造 [folder/types.ts](../../../../../src/capabilities/folder/types.ts) FolderCapabilityApi:`listFolders / createFolder` 签名加 viewType,新增 `FolderViewType` 类型
+- 改造 [folder/types.ts](../../../../../src/capabilities/folder/types.ts) FolderCapabilityApi:`listFolders / createFolder` 签名加 viewType,**`FolderViewType` 类型字面 SSOT 在 [shared/ipc/note-folder-types.ts](../../../../../src/shared/ipc/note-folder-types.ts)**(跟 `FolderInfo` 同模式;§10.C-1 反向修正:决议初版字面归属 capability 层会触发 V2 W5 lint `no-restricted-imports` 字面禁止 shared/ipc/ 反向 import @capabilities/,实施期 Step 5.4 移到 shared/ipc/ 后 capability `types.ts` re-export 该类型)
 - 改造 [folder/handlers.ts](../../../../../src/platform/main/folder/handlers.ts):FOLDER_LIST / FOLDER_CREATE handler 透传 viewType
 - 改造 [folder/index.ts](../../../../../src/capabilities/folder/index.ts):renderer 入口 + capability registry 同步
 - 改造 [folder-adapter.ts](../../../../../src/platform/main/graph/folder-adapter.ts):graph 路径 listFolders / createFolder 强制 'graph' viewType
@@ -175,14 +193,26 @@
 | ebook folder | [ebook/bookshelf-store.ts](../../../../../src/platform/main/ebook/bookshelf-store.ts) | 333-389 | `folderList / folderCreate / folderRename / folderDelete / folderMove` **5 个独立 JSON 实施**,与 atom 零接触 — **本决议不涉及** |
 | krig vocab 已登记 | (grep `user:krig:*`)| - | `inFolder / hasContent / hasNoteView / inCanvas`,本决议新增 `folderForView` |
 
-**caller 字面(4 处真消费)**:
+**caller 字面**(§10.B-1 反向修正:**7 处真消费**,初版 grep 漏 createFolder 3 处):
 
-| view | 文件 | 行 | 现状字面 |
+| view | 文件 | 行 | 现状字面 | API |
+|---|---|---|---|---|
+| note | [src/views/note/extraction-import.ts](../../../../../src/views/note/extraction-import.ts) | 177 | `folderCap().listFolders()` | listFolders |
+| note | [src/views/note/extraction-import.ts](../../../../../src/views/note/extraction-import.ts) | 180 | `folderCap().createFolder(name, null)` | createFolder(§10.B-1 补登)|
+| note | [src/views/note/tree-operations.ts](../../../../../src/views/note/tree-operations.ts) | 49 | `folderCap().listFolders()` | listFolders |
+| note | [src/views/note/tree-operations.ts](../../../../../src/views/note/tree-operations.ts) | 133 | `folderCap().listFolders()` | listFolders |
+| note | [src/views/note/tree-operations.ts](../../../../../src/views/note/tree-operations.ts) | 175 | `folderCap().createFolder(newTitle, targetParentId)` | createFolder(§10.B-1 补登)|
+| note | [src/views/note/use-notes-folders.ts](../../../../../src/views/note/use-notes-folders.ts) | 45 | `folder.listFolders()`(本 hook 也是 caller,但承担"useAllFolders 入参 viewType 上下文"职责 — §10.B-2)| listFolders |
+| note | [src/views/note/data-model.ts](../../../../../src/views/note/data-model.ts) | 211 | `folderCap().createFolder('新建文件夹', parentId)` | createFolder(§10.B-1 补登)|
+| graph | [src/views/graph-canvas-view/nav-side-content.tsx](../../../../../src/views/graph-canvas-view/nav-side-content.tsx) | 83 | `library.folderList()`(走 graph-library-store → IPC → canvasStore → folder-adapter)| listFolders(间接)|
+
+**hook + broadcast 路径**(§10.B-2 反向补登,broadcast 设计盲点):
+
+| 文件 | 行 | 字面 | §10 偏离登记 |
 |---|---|---|---|
-| note | [src/views/note/extraction-import.ts](../../../../../src/views/note/extraction-import.ts) | 177 | `folderCap().listFolders()` |
-| note | [src/views/note/tree-operations.ts](../../../../../src/views/note/tree-operations.ts) | 49, 133 | `folderCap().listFolders()`(×2 处)|
-| note | [src/views/note/use-notes-folders.ts](../../../../../src/views/note/use-notes-folders.ts) | 45 | `folder.listFolders()` |
-| graph | [src/views/graph-canvas-view/nav-side-content.tsx](../../../../../src/views/graph-canvas-view/nav-side-content.tsx) | 83 | `library.folderList()`(走 graph-library-store → IPC → canvasStore → folder-adapter)|
+| [src/views/note/use-notes-folders.ts](../../../../../src/views/note/use-notes-folders.ts) | useAllFolders | 加 `viewType: FolderViewType` 入参,onListChanged callback 内重调 `listFolders(viewType)` 重拉 | §10.B-2 hook 签名扩 |
+| [src/views/note/nav-side-content.tsx](../../../../../src/views/note/nav-side-content.tsx) | 36 | `useAllFolders('note')` 字面 | §10.B-2 hook caller 改 |
+| [src/platform/main/folder/handlers.ts](../../../../../src/platform/main/folder/handlers.ts) | broadcastFolderListChanged | 方案 C:按 view 分别广播 2 次(`listFolders('note')` + `listFolders('graph')`),onListChanged callback 签名字面不动 | §10.B-2 broadcast 设计盲点 |
 
 ### 1.3 目标态(本 sub-phase 完成后)
 
@@ -215,13 +245,14 @@ export interface FolderCapabilityApi {
 }
 ```
 
-**新 caller 字面**:
+**新 caller 字面**(§10.B-1 反向 4→7 修正):
 ```typescript
-// note view
-folder.listFolders('note')      // 4 个 caller 全部加 'note' 字面
-folder.createFolder(title, parentId, 'note')
+// note view (7 caller 全部加 'note' 字面)
+folder.listFolders('note')                              // 4 处
+folder.createFolder(title, parentId, 'note')            // 3 处(§10.B-1 补登)
+useAllFolders('note')                                   // hook(§10.B-2 补登)
 
-// graph view
+// graph view (caller 字面 0 改,renderer 透明)
 library.folderList()            // 内部 IPC → canvasStore.folderList() → folder-adapter 强制传 'graph'
 library.folderCreate(title, parentId)  // 内部强制 'graph'
 ```
@@ -240,7 +271,7 @@ library.folderCreate(title, parentId)  // 内部强制 'graph'
 | **2 view caller 改造不完整**(漏 grep 字面)| listFolders / folderList 调用编译错误 | §5 Step 5.0 实施者复 grep 6 项确认 4 caller 字面;TypeScript 编译期间 errors 暴露漏改 |
 | **folder-adapter 内 listFolders 字面期望"返全 folder"**(decision 014 §3.5.3.3)| 改成传 'graph' 后 adapter 内部行为可能错位 | §5 Step 5.3 改 folder-adapter listFolders 字面**显式传 'graph'**,语义对齐 |
 | **graph-library-store IPC channel 改字段**(graphFolderCreate 加 viewType)| 跨 IPC 边界增加字段 | 本决议拍板:graph 路径 IPC channel **不**加 viewType,viewType 字面在 main 端 folder-adapter 内部硬编 'graph';renderer 透明 |
-| **note view 4 caller 漏传 viewType**(TypeScript 兜底)| TypeScript 编译错误 | §5 Step 5.4 改完所有 caller 字面后 typecheck;CI 拦截漏改 |
+| **note view 7 caller 漏传 viewType**(§10.B-1 反向修正:4→7,createFolder caller grep 漏)(TypeScript 兜底)| TypeScript 编译错误 | §5 Step 5.4 改完所有 caller 字面后 typecheck;CI 拦截漏改 |
 | **Q7 弹框 UX 在 deleteFolder 链上**(已含资源 cascade)| 弹框逻辑需要含资源数预查 | §5.5 加 deleteFolder 前 listEdges(inFolder, object=folderId) 计数 + UI 弹框 |
 
 ---
@@ -386,11 +417,14 @@ async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
 | attrs | `{ createdBy, createdAt }` | 沿 inFolder 边格式 |
 | cardinality | 0-N(允许 0 表示孤儿不可见,允许 N 表示跨 view 共享)| 单 view 视角下:0 或 1 条匹配 |
 
-**FolderViewType 类型字面**:
+**FolderViewType 类型字面**(§10.C-1 反向修正:SSOT 在 shared/ipc/note-folder-types.ts):
 ```typescript
-// src/capabilities/folder/types.ts
+// src/shared/ipc/note-folder-types.ts (SSOT,跟 FolderInfo 同模式)
 export type FolderViewType = 'note' | 'graph';
 // future sub-phase 022 加 | 'ebook'
+
+// src/capabilities/folder/types.ts 字面 re-export
+export type { FolderInfo, FolderViewType } from '@shared/ipc/note-folder-types';
 ```
 
 **`listFolders(viewType)` 实施(草案)**:
@@ -466,7 +500,7 @@ async function createFolder(
 | # | 约束 | 验证方法 |
 |---|---|---|
 | 1 | `FolderInfo` 字段不动 | `git diff src/shared/ipc/note-folder-types.ts` 应无变化 |
-| 2 | `deleteFolder / moveFolder / renameFolder / getFolder / onListChanged` 签名不动 | `git diff src/capabilities/folder/types.ts` 仅 listFolders / createFolder + FolderViewType |
+| 2 | `deleteFolder / moveFolder / renameFolder / getFolder / onListChanged` 签名不动 | `git diff src/capabilities/folder/types.ts` 仅 listFolders / createFolder + FolderViewType + 新增 `previewDeleteFolder` 8th API(§10.B-3);**注**:`useAllFolders` hook(view 层不属本接口字面)签名加 viewType 入参(§10.B-2 broadcast 设计盲点反向修正,2026-05-13 实施期 Step 5.3 类型 B 偏离) |
 | 3 | ebook-library / ebook bookshelf-store 任一字面不动 | `git diff src/capabilities/ebook-library/ src/platform/main/ebook/` 应无变化 |
 | 4 | `user:krig:inFolder` 边语义不动 | grep 现有 inFolder 路径字面不动 |
 | 5 | folder atom payload schema 不动 | `payload: { title }` 字面不加新字段 |
@@ -550,6 +584,13 @@ ebook viewType 未加,留 sub-phase 022 (§4.3 兼容约束)。
 > 🟢 **本 Step 是 Step 5.2 后唯一 typecheck 全绿成立的 step** — 5.2 签名扩 + 5.3 caller + main 端 + handler 一并改完,TS 错误全清。
 >
 > **2026-05-13 P1 修订轮回应审计**:原 Step 5.2 / 5.3 编排把 caller 修推到 5.5,造成 5.3 typecheck 完成判据不可成立。本轮重排 — caller 改 + main 端实施合并到本 Step,**两个 commit 但同一原子推进单元**。
+>
+> **§10.B-1 + §10.B-2 反向 7 任务整合**(2026-05-13 实施期 Step 5.3 类型 B 偏离登记):
+> - caller 字面 4 → 7(createFolder 3 处补登)
+> - useAllFolders hook 加 `viewType: FolderViewType` 入参 + onListChanged callback 内重拉(broadcast 设计盲点,方案 C)
+> - nav-side-content.tsx:36 改 `useAllFolders('note')`
+> - main 端 broadcastFolderListChanged 方案 C(按 view 分别广播 2 次,onListChanged callback 签名字面不动)
+> - folder-adapter.ts 直接填 'graph' 字面(P2 到位,Step 5.4 字面属性变更见下)
 
 **任务**:
 1. **caller 改造**(原 Step 5.5 任务,提前):
@@ -585,7 +626,14 @@ caller:
 typecheck 全绿 (Step 5.2 引入的 TS2554 错误全清)。
 ```
 
-### Step 5.4 — graph folder-adapter 强制 'graph' viewType
+### Step 5.4 — graph folder-adapter verify + §10.C-1 偏离修复 commit step
+
+> **§10.C-1 字面属性变更**(2026-05-13 实施期 Step 5.4 类型 C 偏离登记):
+> 原字面"纯 verify step,不 commit"。实施期发现 Step 5.2 把 `FolderViewType` 字面归 capability 层,触发 V2 W5 lint `no-restricted-imports` 字面禁止 shared/ipc/ 反向 import @capabilities/(electron-api.d.ts:16 lint error)。Step 5.4 字面属性变更为"verify + §10.C-1 偏离修复 commit step",新增 3 文件改动(FolderViewType 字面 SSOT 移到 shared/ipc/note-folder-types.ts + folder/types.ts re-export + electron-api.d.ts 同层 import)。
+>
+> §5 头部 step 分类字面同步:本 Step 从"3 个非 commit step 之一"挪到"commit step 之一",commit step 数量从 6 → 7。
+
+### Step 5.4 原字面 — graph folder-adapter 强制 'graph' viewType(P2 到位字面合并到 Step 5.3)
 
 **任务**:
 1. 改 [graph/folder-adapter.ts](../../../../../src/platform/main/graph/folder-adapter.ts):listFolders / createFolder 包装层强制传 'graph'
@@ -607,6 +655,11 @@ nav-side-content.tsx caller 字面 0 改动。
 ### Step 5.5 — Q7 弱保护(含资源 folder 删除前弹框)
 
 > **2026-05-13 P1 修订轮回应审计**:原 Step 5.5 含 caller 改造 + Q7 双任务,caller 已提前到 Step 5.3,本 Step 仅留 Q7 弱保护单一职责。
+>
+> **§10.B-3 + §10.C-2 反向修正**(2026-05-13 实施期 Step 5.5 类型 B/C 偏离登记):
+> - §10.B-3:Q7 实施新增 `previewDeleteFolder` 8th API(原决议字面"5 API 不动 + 改 2"未覆盖新增 API 场景,§0.2 第 4 条字面已反向修正)
+> - §10.C-2:Step 5.5 字面"跨 2 view UI 复用"**语义澄清** — 意思是"UX 一致(同样的弹框文案 + 触发逻辑)而非代码共用一个 helper 函数"。实施期尝试做 q7-confirm.ts shared helper 触发 V2 W5 lint `no-restricted-imports`(view 不直 import @capabilities/* 运行时值)+ @views/* 禁止跨 view import + lib/ 纯函数现状不允反向 capability 依赖,3 caller R3 字面各自实施(粘贴 ~24 行 confirm 逻辑)为唯一字面合规路径
+> - **R3 实施模式**:3 caller 字面各自:`requireCapabilityApi<FolderCapabilityApi>('folder') + previewDeleteFolder + getFolder + window.confirm` + 触发条件 `preview.resources > 0 || preview.folders > 0` + 文案 2 种(含 resources / 仅含 folders)
 
 **任务**:
 1. main 端:`folder/capability-impl.ts` 新增 `previewDeleteFolder(id)` method 或 `deleteFolder` 加 dry-run 入参,返 `{ folders, resources }` 计数
@@ -704,16 +757,20 @@ docs: sub-phase 021 完成后反向更新决议链 + 第 14 / 15 次教训
 
 ## 7. clearAll migration 详细(已定稿)
 
-### 7.1 Migration 时机
+### 7.1 Migration 时机(2026-05-13 实施期 Step 5.6 字面修正)
 
-启动时,在 storage 初始化后、IPC 注册前,执行:
+启动时,在 storage 初始化后、**业务 webContents 触发前**(沿 decision 014 §3.6 `clearLegacyGraphStorage()` 同型字面)执行:
 
 ```typescript
 // src/platform/main/index.ts(伪代码)
+initIpcBus();                       // V2 现状字面 initIpcBus 早于 initStorage(handlers 已注册但 mainWindow 未创建,无 webContents 触发业务请求)
 await initStorage();
-await runMigration021IfNeeded();   // 本决议新增
-registerAllIpcHandlers();
+clearLegacyGraphStorage();           // decision 014 §3.6
+await runMigration021IfNeeded();     // 本决议新增,字面跟 clearLegacyGraphStorage 同模式
+await createMainWindow();            // webContents 创建,业务 IPC 开始接收消息
 ```
+
+**字面修正**:原 §7.1 字面"IPC 注册前"在 V2 现状不可成立(`initIpcBus()` 早于 `initStorage()`,reverse 顺序需改 main/index.ts 全局架构,远超本 sub-phase 范围)。**真实意图安全窗口** = "业务 IPC 真接收消息前" = "createMainWindow() 前"。实施期 Step 5.6 字面对齐 V2 现状 + clearLegacyGraphStorage 同型字面登记。
 
 ### 7.2 Migration 实施
 
@@ -745,11 +802,22 @@ export async function runMigration021IfNeeded(): Promise<void> {
   // 单次 db.query() 承载的多语句事务脚本 BEGIN ... COMMIT
   // 实证 sub-phase 3a-tx §3.5.bis 场景 1/3/5 跨语句原子 (decision 020)
   const db = getDB();
-  await db.query('BEGIN TRANSACTION; DELETE atom; DELETE edge; COMMIT TRANSACTION;');
+  try {
+    await db.query('BEGIN TRANSACTION; DELETE atom; DELETE edge; COMMIT TRANSACTION;');
+  } catch (err) {
+    console.error('[migration/021] clearAll 失败,migration 未完成,启动下次仍会重试:', err);
+    throw err;
+  }
 
-  // 写 flag
-  writeFileSync(FLAG_PATH, '', 'utf-8');
-  console.warn('[migration/021] clearAll 完成,migration-021-completed flag 写入');
+  // 写 flag(目录幂等创建,沿 vocab-store / ebook 同模式 + 实施期 Step 5.6 正向偏离登记)
+  try {
+    mkdirSync(FLAG_DIR, { recursive: true });
+    writeFileSync(FLAG_PATH, '', 'utf-8');
+    console.warn('[migration/021] clearAll 完成,migration-021-completed flag 写入');
+  } catch (err) {
+    console.error('[migration/021] flag 写入失败,启动下次会重跑 clearAll(幂等):', err);
+    throw err;
+  }
 }
 ```
 
@@ -831,7 +899,66 @@ export async function runMigration021IfNeeded(): Promise<void> {
 - **类型 B**(发现新 caller):中等,可能影响 §5.5
 - **类型 C**(typecheck / lint 暴露 implicit any / unsafe cast):低,实施期修复 + 登记
 
-(待实施期补充)
+### §10.B-1 — caller grep 漏 createFolder(2026-05-13 实施期 Step 5.2 类型 B 偏离)
+
+**触发**:Step 5.2 typecheck 实跑 TS2554 错误 **7 处** 而非决议 §0.4 #6 字面预期 4 处。
+
+**根因**:决议 §0.4 #6 字面 grep 命令只覆盖 `listFolders` API,**漏 `createFolder` 同样改签名**(必传 viewType)的 caller。3 个 createFolder caller 全部在 note view 范围内,语义跟原决议拍板路径完全一致(全填 `'note'`),只是决议自审 grep 命令本身不完整。
+
+**修正**:Step 5.3 任务字面 caller 改造范围 4 → 7。语义不变,工程量增量 3 处。
+
+**新发现 caller**:`extraction-import.ts:180` + `tree-operations.ts:175` + `data-model.ts:211`(全部 note view createFolder caller)。
+
+### §10.B-2 — broadcast 设计盲点 + useAllFolders hook 签名扩(2026-05-13 实施期 Step 5.3 类型 B 偏离)
+
+**触发**:Step 5.3 实施期发现 `broadcastFolderListChanged()` 字面调 `listFolders()`,新签名必传 viewType。但 onListChanged 签名字面不动(决议 §0.2 第 4 条 + §4.2 不变约束 #2 字面强制)。
+
+**根因**:决议字面**完全没设计** broadcast 路径在视图隔离下怎么处理。原假设 broadcast 一份"全部 folder" + renderer 端 useAllFolders 不做 view 过滤,但视图隔离下任一 view 的 folder list 都不应包含对端 view 的 folder。
+
+**3 候选方案**:
+- 方案 A:broadcast 合并两个 view + 去重(违背隔离语义,任一 view 改 folder 触发对端 useAllFolders 刷新)
+- 方案 B:onListChanged 签名加 viewType 入参(违反决议 §0.2 + §4.2 字面)
+- **方案 C(拍板)**:onListChanged callback 签名字面**不动**(`(list: FolderInfo[]) => void`),main 端按 view 分别广播 2 次,renderer 端 useAllFolders(viewType) hook 在 callback 内调 listFolders(viewType) 重拉
+
+**实施修正**:
+- main 端 `broadcastFolderListChanged()` 字面拉 `listFolders('note')` + `listFolders('graph')` 分别广播 2 次
+- `useAllFolders` hook 加 `viewType: FolderViewType` 入参,onListChanged callback 内不直接 setFolders(list) 而是重调 listFolders(viewType) 拉自己 view 的 folder
+- `nav-side-content.tsx:36` `useAllFolders()` → `useAllFolders('note')`
+
+### §10.B-3 — Q7 实施新增 8th API previewDeleteFolder(2026-05-13 实施期 Step 5.5 类型 B 偏离)
+
+**触发**:Step 5.5 Q7 弱保护实施需要"dry-run 计数"API,决议 §5.5 字面"新增 `previewDeleteFolder` method 或 `deleteFolder` 加 dry-run 入参"两条候选。
+
+**根因**:决议 §0.2 第 4 条字面"5 API 不动"+ §4.2 不变约束 #2 字面"既有 5 API 签名不动"——禁止改既有 5 API。但决议字面**没禁止新增 API**。新增 `previewDeleteFolder` 是更合规的字面路径(改既有 API 签名风险更大)。
+
+**实施修正**:
+- FolderCapabilityApi 加 8th API `previewDeleteFolder(id): Promise<{folders, resources}>`
+- IPC channel `FOLDER_PREVIEW_DELETE: 'folder.preview-delete'`(channel-names.ts)
+- preload 桥 + electron-api.d.ts + folder/index.ts renderer 入口 + folder/handlers.ts handler 同步
+- main 端 `capability-impl.ts` 沿 deleteFolder 字面 BFS collectFolderSubtree + collectResourcesInFolders 同模式,仅计数不删除
+
+### §10.C-1 — FolderViewType 字面归属违反 V2 W5 分层 lint(2026-05-13 实施期 Step 5.4 类型 C 偏离)
+
+**触发**:Step 5.4 lint 实跑 `src/shared/ipc/electron-api.d.ts:16  error  '@capabilities/folder/types' import is restricted` —— V2 W5 设计 §5 字面 `no-restricted-imports` 规则禁止 `@shared/ipc/` 反向 import `@capabilities/`(防分层倒挂)。
+
+**根因**:决议 §1.1 字面"folder/types.ts 加 FolderViewType 类型" + Step 5.2 字面归 capability 层,但 IPC d.ts 也要用该类型(决议字面没考虑 IPC 桥层 d.ts 也需要 FolderViewType)。
+
+**修正**(方案 A1,跟 V2 既有 `FolderInfo` 字面架构同型):
+- `FolderViewType` 字面 SSOT 移到 `src/shared/ipc/note-folder-types.ts`
+- `src/capabilities/folder/types.ts` 改 re-export 该类型
+- `src/shared/ipc/electron-api.d.ts:16` 改 `import from './note-folder-types'`(同层路径)
+
+### §10.C-2 — Q7 helper 触发 view 直 import @capabilities/* 违反 W5 lint(2026-05-13 实施期 Step 5.5 类型 C 偏离,跟 §10.C-1 同型连发)
+
+**触发**:Step 5.5 实施期第一版 `src/capabilities/folder/q7-confirm.ts` shared helper,3 个 view caller `import { confirmDeleteFolder } from '@capabilities/folder/q7-confirm'` 触发 V2 W5 lint:`'@capabilities/folder/q7-confirm' import is restricted by pattern. view 不直接 import capability 运行时值,走 requireCapabilityApi(id) 间接路由`(eslint.config.js:56-59 字面)。
+
+**根因**:决议 §5.5 字面"跨 2 view UI 复用"语义未明示是"代码复用 helper 函数"还是"UX 一致"。第一版按"代码复用"实施触发 lint。实施期发现:
+- R1(views/_shared/):`@views/*` 字面禁止(eslint.config.js:53)
+- R2(暴露为 capability 接口):capability 加 UI 副作用违反职责单一
+- R5(lib/folder-q7-confirm.ts):违反 lib/ "纯通用代码"现状(grep verify lib/atom-serializers/ 0 反向 capability 依赖,引入新跨层架构债)
+- **R3(3 caller 字面各自实施)**:唯一字面合规路径,~24 行重复 + 0 跨层架构债
+
+**修正**:决议 §5.5 字面"跨 2 view UI 复用"语义澄清"UX 一致(同样的弹框文案 + 触发逻辑)而非代码共用一个 helper 函数"。Step 5.5 实施模式字面 R3:3 caller 字面各自 `requireCapabilityApi<FolderCapabilityApi>('folder') + previewDeleteFolder + getFolder + window.confirm` + 触发条件 `preview.resources > 0 || preview.folders > 0` + 文案 2 种。删除第一版 q7-confirm.ts helper。
 
 ---
 
@@ -849,7 +976,51 @@ export async function runMigration021IfNeeded(): Promise<void> {
 
 **纪律升级**:决议引用 storage API / 语义层类型字段前,grep 真实接口字面;每个 API 独立验证不推测;LiteralValue 形态完整字面 `{ kind, type, value }` 缺一不可。登记 SDK-version-binding-policy.md §2.2 第 7 步。
 
-### 11.3 实施完成后追加教训(占位)
+### 11.3 第 16 次设计师教训:决议 grep 自审必须对每个变更 API 独立 grep(§10.B-1 触发)
+
+**本次教训**:决议 §0.4 #6 字面 grep verify caller 字面位置时只 grep `listFolders`(主要变更 API)而漏 `createFolder`(同样改签名,也是 caller 漏传 viewType 重灾区)。Step 5.2 typecheck 实跑 TS2554 错误 7 处而非预期 4 处。
+
+**纪律升级**(跟第 11/13/14/15 次同型):
+- 决议字面 grep verify 接口签名变更时**必须对每个变更 API 独立 grep 命令**,不能只 grep 主要 API
+- 字面操作:对每个签名变更的 API,grep 全部消费点(view + capability + IPC channel + preload + d.ts)
+
+### 11.4 第 17 次设计师教训:决议字面缺 broadcast / hook 等"间接传播路径"设计(§10.B-2 触发)
+
+**本次教训**:决议 §5 字面拍板 caller / capability / IPC 直接传播路径,但**完全没考虑 broadcast / useAllFolders hook 等间接传播路径**。Step 5.3 实施期发现 `broadcastFolderListChanged()` 调 listFolders 必须传 viewType,但 onListChanged 签名字面不动(被 §0.2 / §4.2 字面约束),实施期不得不临时拍板"方案 C 按 view 分别广播 2 次 + hook 加 viewType 入参"。
+
+**纪律升级**:
+- 决议字面拍板"接口签名变更"时必须**完整 grep V2 间接传播路径**:broadcast / 订阅 / hook / hook caller
+- 不能假设"既有路径会自动兼容新签名"
+- 字面操作:grep 出每个签名变更 API 的全部"间接被调"位置(`broadcastXListChanged` / `useAllX` / `subscribe` / `onListChanged` 等)
+
+### 11.5 第 18 次设计师教训:决议字面拍板新类型字面归属必须 grep V2 既有同类型 SSOT 位置 + 分层 lint(§10.C-1 触发)
+
+**本次教训**:决议 §1.1 字面拍板 `FolderViewType` 字面归 `capability/folder/types.ts`,但 V2 既有 `FolderInfo` 字面 SSOT 在 `shared/ipc/note-folder-types.ts`(decision 012 字面架构)+ V2 W5 lint 禁止 shared/ipc/ 反向 import @capabilities/(eslint.config.js:56)。决议字面归属错位触发 Step 5.4 lint error。
+
+**纪律升级**(跟第 14/15 次同型):
+- 决议字面拍板"新类型字面归属"时**必须 grep V2 既有同类型 SSOT 位置**(如 FolderInfo / NoteInfo / PmAtomInfo 都在 shared/ipc/)
+- **必须 verify V2 分层 lint 规则**(eslint.config.js no-restricted-imports patterns)字面允不允许新类型字面位置
+- 字面操作:决议字面拍板"新增 X 类型在 Y 位置"前,grep 同类业务类型 / 文件树字面位置 + lint 规则白名单
+
+### 11.6 第 19 次设计师教训:决议字面 API 总数描述必须前瞻(§10.B-3 触发)
+
+**本次教训**:决议 §0.2 第 4 条字面"既有 5 API 签名不动" + §4.2 不变约束 #2 字面"5 API 签名不动",**字面写死 = N**。Step 5.5 实施需要新增 `previewDeleteFolder` 8th API(Q7 dry-run 计数),决议字面没明示"新增 API"场景的字面合规性。
+
+**纪律升级**:
+- 决议字面拍板"API 不变约束"时**必须前瞻考虑实施期可能新增的 API 数量**,不能字面写死"= N"
+- 字面措辞应该是"**既有** N API 签名不动" + "新增 API 允许(但必须 §10 偏离登记)"
+- 字面操作:决议字面对 API 总数描述前 grep 实施步骤里"新增 X method / API" 字眼,验证字面叙述前瞻性
+
+### 11.7 第 20 次设计师教训:决议字面拍板"跨 X 复用"必须前瞻 grep V2 分层 lint(§10.C-2 触发,跟第 18 次同型连发)
+
+**本次教训**:决议 §5.5 字面"跨 2 view UI 复用"语义不明 — 是"UX 一致"还是"代码共用一个 helper 函数"?Step 5.5 实施期按"代码复用"实施触发 V2 W5 lint 禁止 view 直 import @capabilities/* 运行时值 + @views/* 跨 view 禁止 import + lib/ 纯函数现状不允反向 capability 依赖。
+
+**纪律升级**(跟第 18 次同型连发):
+- 决议字面拍板"跨 X 复用"时**必须前瞻 grep V2 分层 lint 规则 + 同层 helper 现状**(view / capability / lib / drivers 各层 lint 字面)
+- 字面措辞应该是"跨 view UX 一致(可走重复实施 R3 模式)"或"跨 view helper 共享(走 lib/ + 字面登记新跨层依赖)"
+- 字面操作:决议字面拍板"复用"前 grep eslint.config.js no-restricted-imports patterns + 既有 lib/ 现状反向依赖模式
+
+### 11.8 实施完成后追加教训(占位)
 
 (实施者 §5 完成后,任何过程中暴露的设计盲点 / 实施陷阱在此追加)
 
@@ -887,3 +1058,34 @@ export async function runMigration021IfNeeded(): Promise<void> {
 | 5 | 低 | §7.2 代码示例注释 line 745 "单语句 BEGIN ... COMMIT 实证 ... 单语句原子" 与新术语不一致 | 改为 "单次 db.query() 承载的多语句事务脚本 BEGIN ... COMMIT / 实证 sub-phase 3a-tx §3.5.bis 场景 1/3/5 跨语句原子";同时修复 grep 命中的 §0.7 教训段 line 126 同型残留(把"3.5.ter / 容易让设计师推测 clearAll 也是单语句"改写澄清 "单次 query 调用 ≠ 单 SQL 语句" 两个概念) |
 
 **finalize 状态**:用户二度复审字面"已达到可实施水平,我这边没有再看到阻断实施的合规问题"。本决议进入 finalize 阶段,准备合 main → 启动实施者 prompt 编排。
+
+### v0.4(2026-05-13,实施期 Step 5.2-5.6 偏离汇总反向更新)
+
+**实施期 §10 5 个偏离登记汇总**(实施者粘 Step 5.2-5.5 完成报告 + 总指挥批复 R3 / 方案 C / S1 / A1 同步反向更新):
+
+| # | 偏离 | Step | 影响范围 | 反向更新位置 |
+|---|---|---|---|---|
+| §10.B-1 | caller grep 漏 createFolder(4 → 7) | 5.2 | §0.4 #6 + §1.2 caller 表 + §1.3 + §1.4 | 决议正文反向 5 处 |
+| §10.B-2 | broadcast 设计盲点 + useAllFolders hook 签名扩 | 5.3 | §1.2 + §4.2 + §5 Step 5.3 | 决议正文反向 3 处 |
+| §10.B-3 | Q7 新增 previewDeleteFolder 8th API | 5.5 | §0.2 第 4 条 + §4.2 + §5 Step 5.5 | 决议正文反向 3 处 |
+| §10.C-1 | FolderViewType 字面归属违反分层 lint | 5.4 | §1.1 + §4.1 + §5 Step 5.4 | 决议正文反向 3 处 |
+| §10.C-2 | Q7 helper 触发 view 直 import @capabilities | 5.5 | §5 Step 5.5 "跨 view UI 复用"语义 | 决议正文反向 1 处 |
+
+**第 16-20 次教训累积启示**(总指挥本对话拍板,沿 §0.5.ter P0 授权落到 SDK-policy §2.2 第 8 步):
+- 5 个偏离全部围绕"决议字面拍板时未前瞻 grep V2 完整传播层 6 层清单"
+- 永久纪律:决议字面拍板新类型字面归属 / 接口签名变更 / 跨层复用方案 / API 不变约束 / 跨 view 资源复用时,**必须前瞻 grep 6 层**:
+  1. view caller 真消费点
+  2. capability types.ts 接口
+  3. capability index.ts renderer 入口
+  4. IPC channel + preload + electron-api.d.ts
+  5. 分层 lint 规则 eslint.config.js
+  6. V2 既有同类型 SSOT 位置(如 FolderInfo / NoteInfo)
+
+**实施期 commit 列表**(7 commit step,§10.C-1 字面属性变更后 6 → 7):
+- Step 5.2 `4a41d5e` types + capability 签名扩展 viewType
+- Step 5.3 `22d42c1` 7 caller + main 端 + hook + broadcast 方案 C
+- Step 5.4 `ad9fd73` §10.C-1 FolderViewType SSOT 移到 shared/ipc
+- Step 5.5 `f189cc2` Q7 弱保护 + previewDeleteFolder 8th API + R3 模式
+- Step 5.6 `5be1bf0` clearAll migration + flag
+- Step 5.7 反向更新(本 commit)
+- (Step 5.0 / 5.1 / 5.8 字面非 commit step)

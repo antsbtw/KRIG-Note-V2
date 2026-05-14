@@ -9,6 +9,8 @@
 > **前置依赖**: sub-phase 1(`34e3758`)+ sub-phase 2(`0ad60c7`)+ sub-phase 3a-1(`67f18b2`)+ 反向更新 10 项(`19b6ed6`)
 > **总纲**: [decision 013 §5](013-sub-phase-3a-graph-canvas-migration.md)
 > **范围风格**: 小步快跑 — 1 个 schema migration + noteCapability 内部改造,view 层零改动
+>
+> **2026-05-13 反向更新**(decision 021 sub-phase 021 完成):folder atom 新增 `user:krig:folderForView` 边表达 view 归属(note + graph 视图隔离),`hasNoteView` 边语义不动(本决议字面),两者协同 — folder atom 通过 folderForView 边归属 view,note atom 通过 hasNoteView 边关联 doc。详 [decision 021](021-sub-phase-021-folder-view-isolation.md)。
 
 ---
 
