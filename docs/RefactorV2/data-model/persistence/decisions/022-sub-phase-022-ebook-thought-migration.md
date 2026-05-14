@@ -1203,6 +1203,25 @@ V2 现状 `listAtoms({domain: 'pm'})` 返回所有 pm atom(note + thought 不分
 
 **缓解**: view 端字面 PDF 截图 generation 字面留 decision 023+ 接入字面, finalize `rect → image block + thumbnail` 字面字面字面映射完整字面.
 
+### 9.10 Q-022-import-open-race-empty-render: 导入即开 race 致中间区空白 (不稳定复现)
+
+**Step 5.13 用户 UI 测试发现 + Step 5.13 闭环未复现**: 用户首次 sub-022 dev server 启动 + 导入一本 PDF 时, 中间区**完全空白** (无 toolbar / 无 reader / 无 empty state), 控制台无 error/warn. Step 5.13 [N-5] + [N-5b] 抢修后用户重启 dev server 再测**正常 PDF reader 渲染** (字面截图 `[ebook-rendering/Host] fit-width init: cw= 849 pageW= 452.9763 ...` 字面 Host 完整跑起来), 不能稳定复现.
+
+**字面诊断**:
+- EBookView.tsx 字面跟 main 0 diff (Step 5.13 抢修期 git diff 实证)
+- library-handlers.ts EBOOK_LOADED 推流字面完整 (line 121-131 add 即推 + line 152-157 open 推)
+- capability-impl list/getBook/atomToEBookInfo 字面正常
+- 字面层 0 漏点
+
+**候选根因 (P3 留 sub-023+ 诊断)**:
+1. **导入即开 race** — EBOOK_BOOKSHELF_ADD line 121-131 字面 "导入完即推 EBOOK_LOADED", 但 view 端 `activeBookId` 没设 (不走 ebook-view.open-book command), Host 不 mount, loadFromInfo silent 失败 → 此条**最可能**, 但 Step 5.13 重测不复现
+2. **pdfAnn.loadOnBookOpen throw** — sub-022 改的 `getReadingThoughtAnnotations` 调链可能在新书无 thought atom 时 throw → 中断 callback 链 (但 throw 会有控制台 error)
+3. **跟 [N-5b] 同根但已抢修** — view 端 wsState/activeBookId 跟 nav-side folder list-changed 订阅链联动问题, Step 5.13 [N-5b] 修复字面后副带消除
+
+**风险等级**: P3 低 (Step 5.13 闭环不可复现, 用户判断"持久化已闭环可告一段落"). 沿决议 022 §10.D-13 字面登记 sub-023+ 跟进.
+
+**缓解**: sub-023+ trash 域规划 / 023+ ebook view import-flow 重设计时**字面 grep 实证 import 即开 race 路径**, 字面查 `EBOOK_BOOKSHELF_ADD` 内部 broadcastEBookLoaded 跟 view 端 Host mount 时机, 字面加 `setActiveBookId(wsId, entry.id)` 字面让 add 走完成 open-book command 路径不走 race 路径.
+
 ---
 
 ## 10. 偏离登记(实施期更新)
@@ -1394,7 +1413,19 @@ useEffect(() => {
 
 **字面风险**: 中等 — sub-phase 把单 capability 分流 (library → folder) 时, view 端订阅链字面**配对漏改**. 沿决议 021 §10.B-2 间接传播路径教训 (broadcast / 订阅 / hook 命名模式 grep) 字面**同型复现** — 决议 021 教训字面是"接口签名变更必须额外 grep 间接被调", 本次字面是"capability 责任拆分必须 grep view 端订阅 onXChanged 配对". 第 32 次教训字面扩展.
 
-**[N-6] 导入文档渲染空白**: 字面层 grep 实证后**不在本 §10.D-12 / §10.D-12b 修复范围** (EBookView.tsx 字面跟 main 0 diff + library-handlers.ts EBOOK_LOADED 推流字面完整 + capability-impl list/getBook 字面正常). 运行时根因待用户复现 + 控制台日志诊断 (Step 5.13 第 2 commit 或独立 §10.D-13).
+**[N-6] 导入文档渲染空白**: 字面层 grep 实证后**不在本 §10.D-12 / §10.D-12b 修复范围** (EBookView.tsx 字面跟 main 0 diff + library-handlers.ts EBOOK_LOADED 推流字面完整 + capability-impl list/getBook 字面正常). Step 5.13 [N-5] + [N-5b] 抢修闭环后用户重测**不可复现**, 降为 Open Q §9.10 `Q-022-import-open-race-empty-render` P3 低留尾 sub-023+ 跟进 (字面候选根因: 导入即开 race / pdfAnn.loadOnBookOpen throw / view-mount 联动问题).
+
+#### §10.D-13 — Step 5.13 [N-6] 不可复现降 Open Q §9.10
+
+**发现期**: Step 5.13 [N-5] + [N-5b] 抢修闭环后用户重测 [N-6] (导入文档 + 控制台日志贴), 截图字面 `[ebook-rendering/Host] fit-width init: cw= 849 pageW= 452.9763 ...` 字面 Host 完整跑起来, **PDF reader 正常显示** 高等数学 18/442 页字面, 不再复现首次启动时的"中间区完全空白"现象.
+
+**字面**: [N-6] 首次发现 = sub-022 首次 dev server 启动 + 导入即开 race 路径, Step 5.13 dev server 完全重启 + 数据库已有书 + 走单击 open-book command 路径不走 import-add 路径, race 消除. 字面候选根因不可单独锁定 (字面层无漏点 + runtime 不可稳定触发), 沿用户 P0 拍板降 §9.10 P3 留尾 sub-023+ trash 域规划/ebook view import-flow 重设计阶段一并解决.
+
+**用户 P0 拍板** (2026-05-14): "解决持久化后, 这个阶段的工作就可以暂时告一段落" — sub-022 sub-phase scope = "ebook + annotation 持久化迁移" 完整闭环, [N-6] 渲染时机 race 不属 022 数据模型 scope.
+
+**字面风险**: 中等 — [N-6] 不可复现可能掩盖真实 race 字面字面字面字面, sub-023+ 跟进时必须**字面 grep 实证 import 即开 race 路径** 不假设已自愈. §9.10 字面缓解策略字面登记.
+
+**[N-6] 跟 sub-022 合 main 解耦**: 沿决议 §0.5 用户 P0 纪律 "数据模型层根治不是视图层补丁" 反面 — [N-6] 是视图层 race 不阻 sub-022 数据模型迁移合 main. 用户 2026-05-14 P0 拍板显式授权 sub-022 现在合 main.
 
 ## 11. 累积教训(实施完成后追加)
 
@@ -1660,9 +1691,12 @@ useEffect(() => {
 
 **触发**: Step 5.12 finalize 后用户 UI 测试 (T1 + T11) 发现 2 项回归 — [N-5] "+ 文件夹"按钮无反应 + [N-6] 导入文档渲染空白. main HEAD (0e6efe3) 反向验证两项均正常, 锤实 sub-022 引入回归. [N-5] commit 0afb0bd 抢修后用户重测仍 0 UI 反应 → 完全重启 dev server 后**重启出现"很多文件夹"** 暴露 [N-5b] 第二处漏点 (view 端订阅链).
 
-**§10 新增 2 条偏离** (§10.D-12 + §10.D-12b):
+**§10 新增 3 条偏离** (§10.D-12 + §10.D-12b + §10.D-13):
 - §10.D-12: folder handler narrow guard 漏 'ebook' (main 端字面层). 详 §10.D-12 字面 (3 处字面修复 + 字面风险 + [N-6] 字面分离).
 - §10.D-12b: ebook view nav-side 漏订阅 folderApi.onListChanged (view 端字面层). 详 §10.D-12b 字面 (1 处 useEffect 双订阅 + 用户 UI 验证 PASS).
+- §10.D-13: [N-6] 导入渲染空白 不可复现降 Open Q §9.10 P3 留尾 sub-023+ 跟进. 详 §10.D-13 字面 (字面候选根因 + 用户 P0 拍板 + 跟合 main 解耦).
+
+**§9 新增 1 条 Open Q** (§9.10 Q-022-import-open-race-empty-render): [N-6] 不可复现 race P3 低留尾.
 
 **§11 新增 1 条教训** (第 32 次, 字面**两子层扩展**): view type union 加项 + capability 责任拆分时必须 grep 全谱多个字面层 — **第 7-A 层** main 端 IPC handler narrow guard 字面值 (沿 [N-5] 漏点) + **第 7-B 层** view 端订阅链 onXChanged 配对 (沿 [N-5b] 漏点). 详 §11 第 32 次字面.
 
@@ -1692,4 +1726,4 @@ commit 2 — (本反向更新合并 commit, §10.D-12b + 字面扩展):
 - 误创"很多文件夹" 用户手动右键删 (顺手验证 §10.D-12b list-changed 实时刷新) — 2026-05-14
 - [N-6] 运行时诊断 由用户配合 (重启 dev server + 复现 + 贴控制台日志给总指挥定位) — 2026-05-14
 
-**[N-6] 留尾**: §10.D-13 字面**留待用户日志诊断后回填**. 若运行时根因可锁定, Step 5.13 加第 3 commit (字面修代码) + 更新本 §12 v0.7 字面"Step 5.13 抢修 commit 字面 3 个". 若根因复杂或跨 sub-phase scope, 字面移 §9.10 Open Q + sub-023 抢修.
+**[N-6] 留尾闭环 (2026-05-14)**: §10.D-13 字面登记 Step 5.13 [N-5] + [N-5b] 抢修闭环后用户重测 [N-6] **不可稳定复现** (截图字面 Host fit-width init 完整跑起来 + PDF reader 正常显示). 沿用户 P0 拍板降 §9.10 Open Q `Q-022-import-open-race-empty-render` P3 低留尾 sub-023+ 跟进 (字面候选根因: 导入即开 race / pdfAnn.loadOnBookOpen throw / view-mount 联动问题). [N-6] 跟 sub-022 合 main **解耦** (视图层 race 不阻数据模型迁移).
