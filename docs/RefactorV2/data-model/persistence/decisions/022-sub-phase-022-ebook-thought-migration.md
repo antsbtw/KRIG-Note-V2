@@ -1344,9 +1344,29 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 
 **字面风险**: 中等 — 完成报告 hash 矩阵 / 完成判据 / 偏离汇总跨段一致性纪律失守 (沿决议 021 第 21 次教训"字面 grep 实证"同型). 其中 lint 口径错暴露了"sub-phase lint scope 未做来源溯源"的纪律漏洞 (sub-022 整文件新建的 capability-impl.ts 当然属于 sub-022 的 lint 责任, pre-existing 才不属 sub-022 scope).
 
+#### §10.D-12 — Step 5.13 UI 回归 [N-5]: folder/handlers.ts narrow guard 漏 'ebook' viewType
+
+**发现期**: Step 5.12 finalize 后用户 UI 测试 (T1 + T11) 发现"文件夹创不了" + "导入文档渲染空白" 2 项回归. main HEAD (0e6efe3) 反向验证两项均正常, 锤实 sub-022 引入回归.
+
+**字面**: 决议 022 §10.D-8 "FolderViewType += 'ebook' 前置入 Step 5.4 commit 2" 字面**只改了 `src/capabilities/folder/types.ts` 的 FolderViewType union 字面 + view caller 字面 + decision 022 §4.1.4 字面 caller 改造**, **漏改 main 端 IPC handler `src/platform/main/folder/handlers.ts` 的 narrow guard 字面**, 字面 3 处:
+
+1. `FOLDER_LIST` handler line 55: `if (viewType !== 'note' && viewType !== 'graph') return [];` — sub-022 view 端调 `listFolders('ebook')` → 直返 `[]` → ebook view 文件夹列表永空 (但截图书架显示书 + 文件夹用户操作通路绕过此点, 故 import 流程仍 OK, **文件夹查询表面正常**, 实际只是恰好 list 为空跟实测一致).
+2. `FOLDER_CREATE` handler line 67: `if (p.viewType !== 'note' && p.viewType !== 'graph') return null;` — sub-022 view 端调 `createFolder(name, parent, 'ebook')` → 直返 null → `pendingFolderCreatedTrigger?.(null)` 链不进入 → 用户点"+ 文件夹"按钮**无任何 UI 反应** (跟现象完全对应).
+3. `broadcastFolderListChanged` line 38-41: `Promise.all([listFolders('note'), listFolders('graph')])` — 即使 create 字面成功也不会 broadcast 'ebook' list, ebook view onListChanged 收不到刷新.
+
+**Step 5.13 抢修落地** (1 commit + decision 22 §10.D-12 + 第 32 次教训登记):
+
+- 字面 3 处 Edit (handlers.ts 3 处加 'ebook' narrow guard + broadcast 加 'ebook')
+- `npm run typecheck` PASS + `npm run lint` PASS (0 warning, exit 0)
+- grep narrow guard 全谱 0 残留命中 (handlers.ts 3 处是唯一字面漏点)
+
+**字面风险**: 中等 — sub-phase 加 view type union 字面没传播到 main 端 narrow guard, 沿 SDK-policy v1.4 第 8 步"V2 完整传播层 6 层 grep"清单字面**第 4 层 IPC channel + preload + d.ts** 字面**没明示 handler 内 narrow guard 字面**. 这是新教训第 32 次升级落点.
+
+**[N-6] 导入文档渲染空白**: 字面层 grep 实证后**不在本 §10.D-12 修复范围** (EBookView.tsx 字面跟 main 0 diff + library-handlers.ts EBOOK_LOADED 推流字面完整 + capability-impl list/getBook 字面正常). 运行时根因待用户复现 + 控制台日志诊断 (Step 5.13 第 2 commit 或独立 §10.D-13).
+
 ## 11. 累积教训(实施完成后追加)
 
-实施期共登记 **8 条新教训** (第 24-31 次), 字面跟决议 022 §0.6 第 22 次教训同型扩展. 第 31 次字面 Step 5.12 反向更新追加.
+实施期共登记 **9 条新教训** (第 24-32 次), 字面跟决议 022 §0.6 第 22 次教训同型扩展. 第 31 次字面 Step 5.12 反向更新追加; 第 32 次字面 Step 5.13 反向更新追加.
 
 ### 第 24 次 — 决议字面引用 storage API 调用语法时必须 grep V2 EdgeFilter 字段名
 
@@ -1415,6 +1435,21 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 完成报告字面 `npm run typecheck PASS` 不代表 `npm run lint PASS` — typecheck 只查类型错, lint `--max-warnings 0` 字面 1 个 warning 就 exit 1. Step 5.11 完成判据矩阵必须**typecheck + lint 双跑双绿**, 不能只引 typecheck 输出.
 
 **纪律升级**: SDK-version-binding-policy.md §2.2 第 9 步加 "完成报告字面 lint warning 来源必须 `git log -- <file>` 实证溯源 pre-existing vs sub-phase 引入, 完成判据矩阵字面 typecheck + lint 双跑双绿" (沿第 24 / 25 / 27 / 29 次教训同型升级).
+
+### 第 32 次 — view type union 加项必须 grep 全谱 main 端 IPC handler narrow guard 字面
+
+**触发**: §10.D-12 (Step 5.13 抢修 — sub-022 加 FolderViewType 'ebook' 字面只改 union + view caller, 漏改 main 端 IPC handler `if (viewType !== 'note' && viewType !== 'graph')` 3 处 narrow guard 字面, 用户 UI 测试"+ 文件夹"按钮无反应才暴露)
+
+**字面**: 决议字面拍板"view type union += 新值"时必须**额外 grep 全谱 main 端 IPC handler narrow guard 字面**:
+- IPC handler 字面 `if (viewType !== 'A' && viewType !== 'B') return ...` 字面 narrow guard (本次 §10.D-12 漏点)
+- broadcast 字面 `Promise.all([listX('A'), listX('B')])` 字面遍历 (本次 §10.D-12 漏点)
+- 后端 enum / union 字面校验函数 (例: `isXType(v): v is XType` 字面)
+
+不能字面只 grep `FolderViewType` / `XType` 字面 type union 字面命中点 — narrow guard 字面是**字面值字符串字面字面**, 不引 union 类型字面 (例: `viewType !== 'note' && viewType !== 'graph'`), grep type 名拿不到.
+
+完整传播层 grep 字面**第 7 层** (扩展 SDK-policy v1.4 字面 6 层清单): **main 端 IPC handler 字面值校验** (字面 grep `'<type-name-A>'` + `'<type-name-B>'` 字面字符串 + narrow guard 字面模式 `!== 'A' && !== 'B'`).
+
+**纪律升级**: SDK-version-binding-policy.md §2.2 第 8 步加 "view type union / enum 加项时必须 grep main 端 IPC handler narrow guard 字面字符串值"; §5.9 新加第 32 次教训完整字面 (沿第 18 / 22 / 24 / 25 / 29 次教训同型升级 — V2 完整传播层 grep 清单字面扩展).
 
 ## 12. P1 修订轮变更日志(可追溯)
 
@@ -1583,3 +1618,29 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 - pre-existing svg/textBlock.ts:8 字面顺手清 (虽跨 sub-phase scope, 但用户判断"清掉换 lint 0 warning 干净" 优先于严格 scope 原则) — 2026-05-14
 - [N-4] 第 31 次教训 SDK-policy §2.2 第 9 步 + §6 v1.6 修订记录 Step 5.12 当前 docs commit 内合并落地 — 2026-05-14
 - 行数 §10.D-11 第 2 项字面 `+2542 / -963` → `+2541 / -963 (Step 5.12 lint fix 后)` 顺手改 — 2026-05-14
+
+### v0.7(2026-05-14,Step 5.13 抢修 UI 回归 [N-5] folder handler narrow guard)
+
+**触发**: Step 5.12 finalize 后用户 UI 测试 (T1 + T11) 发现 2 项回归 — [N-5] "+ 文件夹"按钮无反应 + [N-6] 导入文档渲染空白. main HEAD (0e6efe3) 反向验证两项均正常, 锤实 sub-022 引入回归.
+
+**§10 新增 1 条偏离** (§10.D-12): Step 5.13 UI 回归 [N-5] folder handler narrow guard 漏 'ebook'. 详 §10.D-12 字面 (3 处字面修复 + 字面风险 + [N-6] 字面分离).
+
+**§11 新增 1 条教训** (第 32 次): view type union 加项必须 grep 全谱 main 端 IPC handler narrow guard 字面 (SDK-policy v1.4 字面 6 层 grep 清单字面**第 7 层扩展** — IPC handler narrow guard 字面字符串值校验). 详 §11 第 32 次字面.
+
+**Step 5.13 抢修 commit 字面 (本反向更新合并 1 commit)**:
+- `fix(folder)`: src/platform/main/folder/handlers.ts 3 处加 'ebook' narrow guard + broadcast (decision 022 §10.D-12 + 第 32 次教训) + docs(decision/022): §10.D-12 + §11 第 32 次 + §12 v0.7 + SDK-policy v1.7 联动
+- verify: npm run typecheck PASS + npm run lint PASS (0 warning, --max-warnings 0 exit 0)
+- grep narrow guard 全谱 0 残留命中 (handlers.ts 3 处是唯一字面漏点)
+
+**累计 commit 矩阵更新** (Step 5.12 原 12 commit → Step 5.13 加 1 → 13 commit).
+
+**SDK-version-binding-policy.md 联动 v1.7** (Step 5.13 同 docs commit 内合并落地):
+- §5.9 新加第 32 次教训完整字面 (view type union 加项必须 grep 全谱 main 端 IPC handler narrow guard 字面)
+- §6 修订记录加 v1.7 条目, 授权依据 decision 022 §10.D-12 + Step 5.13 用户 P0 拍板
+- 跟 v1.5 / v1.6 同模式纵向纪律落地, 沿第 18 / 22 / 24 / 25 / 29 / 31 次教训"V2 完整传播层 grep 清单扩展" + "决议字面承诺必须实际落 SDK-policy 文件"
+
+**用户 P0 拍板** (Step 5.13):
+- [N-5] folder handler 字面修 总指挥直接动手 (3 处字面 Edit + lint/typecheck + commit) — 2026-05-14
+- [N-6] 运行时诊断 由用户配合 (重启 dev server + 复现 + 贴控制台日志给总指挥定位) — 2026-05-14
+
+**[N-6] 留尾**: §10.D-13 字面**留待用户日志诊断后回填**. 若运行时根因可锁定, Step 5.13 加第 2 commit (字面修代码) + 更新本 §12 v0.7 字面"Step 5.13 抢修 commit 字面 2 个". 若根因复杂或跨 sub-phase scope, 字面移 §9.10 Open Q + sub-023 抢修.

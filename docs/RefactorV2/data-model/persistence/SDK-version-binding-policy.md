@@ -195,6 +195,16 @@
 
 **教训详细**: [decision 022 §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
 
+### 5.9 第 32 次设计师教训(2026-05-14,decision 022 §10.D-12 Step 5.13 反向更新)
+
+> view type union / enum 加项时必须 grep 全谱 main 端 IPC handler narrow guard 字面字符串值, 不能字面只 grep type 名拿命中.
+
+**起因**: decision 022 §10.D-12 — sub-022 §10.D-8 字面"FolderViewType += 'ebook'"字面只改 `src/capabilities/folder/types.ts` 的 FolderViewType union 字面 + view caller 字面 + capability-impl 字面, **漏改 main 端 IPC handler `src/platform/main/folder/handlers.ts` 字面 3 处 narrow guard**: `FOLDER_LIST` (`if (viewType !== 'note' && viewType !== 'graph') return [];`) / `FOLDER_CREATE` (同型) / `broadcastFolderListChanged` (`Promise.all([listFolders('note'), listFolders('graph')])` 字面遍历漏 'ebook'). 用户 UI 测试 (Step 5.12 finalize 后 T1 + T11) 发现"+ 文件夹"按钮无反应才暴露, main HEAD (0e6efe3) 反向验证锤实 sub-022 回归. 根因是**完整传播层 6 层 grep 清单字面**第 4 层 (IPC channel + preload + d.ts) **字面没明示 handler 内 narrow guard 字面**, narrow guard 是**字面值字符串字面**, 不引 union 类型字面 (例: `viewType !== 'note' && viewType !== 'graph'`), grep type 名拿不到.
+
+**纪律升级**: §2.2 第 8 步登记此教训; view type union / enum 加项时必须**额外 grep 全谱 main 端 IPC handler narrow guard 字面字符串值** (字面 grep `!== '<type-name-A>'` + `!== '<type-name-B>'` 字面字符串模式 + `Promise.all([listX('A'), listX('B')])` 字面遍历漏点), 不能字面只 grep type 名拿命中. 完整传播层 grep **第 7 层扩展** (沿 v1.4 字面 6 层清单字面扩展): main 端 IPC handler 字面值校验 (字面 grep `'<type-name>'` 字面字符串 + narrow guard 字面模式).
+
+**教训详细**: [decision 022 §10.D-12 + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
 ---
 
 ## 6. 修订记录
@@ -207,6 +217,7 @@
 | 2026-05-13 | v1.4 | sub-phase 021 实施期 5 个偏离(§10.B-1/B-2/B-3/C-1/C-2)+ 第 16-20 次教训累积反向更新:§2.2 加第 8 步"V2 完整传播层 6 层 grep 前瞻验证"(view caller / capability types / capability index / IPC+preload+d.ts / 分层 lint / 同类型 SSOT 位置 + 间接传播路径 + API 总数前瞻 + "跨 X 复用"语义明示)。授权依据:[decision 021 §0.5.ter 用户 P0 授权](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新) | [decision 021 §11.3-§11.7](decisions/021-sub-phase-021-folder-view-isolation.md) |
 | 2026-05-14 | v1.5 | sub-phase 022 实施期 13 偏离 (3B + 10D) + 第 24/25/26/27/30 次教训累积反向更新: §2.2 第 8 步加 "决议字面引用 storage API 调用语法 grep EdgeFilter 字段名" + "决议字面引用 V2 既有目录前必须 grep 实证" (沿第 24/25 次); §2.2 第 9 步加 "Bash tool persistent cwd 假设不可靠每 Bash 独立 cd 前缀" + "typecheck error code 沿 sub-phase 实际 fail 形态" + "健康检查 helper 自愈 vs 告警分离" (沿第 26/27/30 次). 授权依据: decision 022 §0.5.quat 用户 2026-05-14 P0 授权 (沿 sub-phase 021 §0.5.ter 同模式) | [decision 022 §11 第 24-27 + 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 | 2026-05-14 | v1.6 | sub-phase 022 Step 5.12 总指挥审计反馈 + 第 31 次教训反向更新: §5.8 新加第 31 次教训字面 "完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入, 完成判据矩阵 typecheck + lint 双跑双绿, commit 矩阵行数以 `git diff --stat <merge-base>..HEAD` 实测口径为准弃用逐 commit 累加法"; §2.2 第 9 步同步登记. 授权依据: decision 022 §10.D-11 + Step 5.12 用户 2026-05-14 P0 拍板 (沿 v1.5 同模式) | [decision 022 §10.D-11 + §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
+| 2026-05-14 | v1.7 | sub-phase 022 Step 5.13 UI 回归 [N-5] folder handler narrow guard + 第 32 次教训反向更新: §5.9 新加第 32 次教训字面 "view type union / enum 加项时必须 grep 全谱 main 端 IPC handler narrow guard 字面字符串值"; §2.2 第 8 步同步登记 + 完整传播层 grep 清单字面**第 7 层扩展** (IPC handler 字面值校验). 授权依据: decision 022 §10.D-12 + Step 5.13 用户 2026-05-14 P0 拍板 (沿 v1.5 / v1.6 同模式) | [decision 022 §10.D-12 + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 
 ---
 
