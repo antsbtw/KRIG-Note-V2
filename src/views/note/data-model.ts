@@ -194,6 +194,43 @@ export async function deleteNote(noteId: string): Promise<void> {
   await noteCap().deleteNote(noteId);
 }
 
+/**
+ * 重命名 note(L7-sub2:title 派生自 doc.content[0],改名 = 反写首段 text)
+ *
+ * 写入策略(Q1/Q2 决议):
+ * - 首段 block 自身 type/attrs 保留(原 paragraph/heading/isTitle 不变)
+ * - 首段 content 全部 inline 合并为单一 text 节点 = newTitle
+ * - 保留首个原 text 节点的 marks(若有)
+ *
+ * NoteView Host 收到 doc 广播会 swap PM doc(setMeta addToHistory:false)。
+ */
+export async function renameNote(noteId: string, newTitle: string): Promise<void> {
+  const note = await noteCap().getNote(noteId);
+  if (!note) return;
+  const docCopy = JSON.parse(JSON.stringify(note.doc)) as { payload?: unknown };
+  const root = docCopy.payload as { content?: Array<Record<string, unknown>> } | undefined;
+  const firstBlock = root?.content?.[0];
+  if (!firstBlock) return;
+  // 保留首个 text 的 marks(Q1:保留 mark)
+  const existingMarks = pluckFirstTextMarks(firstBlock);
+  const newInline: Record<string, unknown> = { type: 'text', text: newTitle };
+  if (existingMarks && existingMarks.length > 0) newInline.marks = existingMarks;
+  // Q2:合并所有 inline 为单一 text 节点
+  (firstBlock as { content?: unknown[] }).content = [newInline];
+  await noteCap().updateNote(noteId, docCopy as DriverSerialized);
+}
+
+function pluckFirstTextMarks(node: Record<string, unknown>): unknown[] | null {
+  if (node.type === 'text') return (node.marks as unknown[] | undefined) ?? null;
+  const children = node.content as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(children)) return null;
+  for (const c of children) {
+    const r = pluckFirstTextMarks(c);
+    if (r !== null) return r;
+  }
+  return null;
+}
+
 export function setActiveNote(workspaceId: string, noteId: string | null): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
@@ -207,8 +244,13 @@ export function setActiveNote(workspaceId: string, noteId: string | null): void 
 export async function createFolder(
   workspaceId: string,
   parentId: string | null = null,
-): Promise<string | null> {
-  const folder = await folderCap().createFolder('新建文件夹', parentId, 'note');
+): Promise<{ id: string; title: string } | null> {
+  // 同父级同名 → 取最小可用序号("新建文件夹" → "新建文件夹 2" → "新建文件夹 3" ...)
+  const all = await folderCap().listFolders('note');
+  const siblings = all.filter((f) => f.parentId === parentId);
+  const title = nextAvailableFolderName('新建文件夹', siblings.map((s) => s.title));
+
+  const folder = await folderCap().createFolder(title, parentId, 'note');
   if (!folder) return null;
   // 父文件夹自动展开
   if (parentId) {
@@ -222,7 +264,18 @@ export async function createFolder(
       }
     }
   }
-  return folder.id;
+  return { id: folder.id, title: folder.title };
+}
+
+/** 同父级同名兜底:base 未占用直接用,否则取最小可用 "base N" (N>=2) */
+function nextAvailableFolderName(base: string, existingTitles: string[]): string {
+  const taken = new Set(existingTitles);
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 10000; n++) {
+    const candidate = `${base} ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${base} ${Date.now()}`;
 }
 
 /**

@@ -14,11 +14,19 @@ import { decodeTreeId } from './tree-builder';
 
 const SCOPE = 'note-view';
 
-/** 重命名 hook — NavSide 组件挂载时设置,用于触发 inline rename */
-let renameTrigger: ((treeId: string) => void) | null = null;
+/** 重命名 hook — NavSide 组件挂载时设置,用于触发 inline rename
+ *  fallbackTitle: 创建场景传入,避开 allFolders 广播尚未到达的 race */
+let renameTrigger: ((treeId: string, fallbackTitle?: string) => void) | null = null;
 
-export function setRenameTrigger(fn: ((treeId: string) => void) | null): void {
+export function setRenameTrigger(
+  fn: ((treeId: string, fallbackTitle?: string) => void) | null,
+): void {
   renameTrigger = fn;
+}
+
+/** 外部触发 inline rename(右键菜单 / 命令处理器 / 新建后自动进入)*/
+export function triggerRename(treeId: string, fallbackTitle?: string): void {
+  renameTrigger?.(treeId, fallbackTitle);
 }
 
 function formatSortLabel(base: string, sortMap: unknown, key: string, kind: 'title' | 'date'): string {
@@ -49,6 +57,18 @@ export function registerContextMenuItems(): void {
     icon: '📁',
     command: 'note-view.create-folder',
     order: 20,
+  });
+
+  folderTreeContextMenuRegistry.register({
+    id: 'note-view.fl-blank.paste',
+    scope: SCOPE,
+    appliesTo: ['blank'],
+    label: '粘贴',
+    icon: '📌',
+    enabledWhen: (ctx) => ctx.hasClipboard,
+    command: 'note-view.paste',
+    commandArgFn: () => null,
+    order: 25,
   });
 
   folderTreeContextMenuRegistry.register({

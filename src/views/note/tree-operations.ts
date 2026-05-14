@@ -178,7 +178,40 @@ async function pasteNote(
   if (!src) return;
   // 深拷贝 doc(JSON 序列化 / 反序列化最简单)
   const docCopy = JSON.parse(JSON.stringify(src.doc));
+  // note title 派生自 doc.content[0],粘贴前缀 "副本 " 改首段第一个 text 节点
+  prefixFirstTextNode(docCopy?.payload, src.title.startsWith('副本 ') ? '' : '副本 ');
   await noteCap().createNote(docCopy, targetFolderId);
+}
+
+/** 在 doc.content[0] 第一个 text 节点 .text 前插入 prefix(空 prefix = no-op)
+ *  对齐 derive-title.ts 的 extractInlineText 取文本规则 */
+function prefixFirstTextNode(payload: unknown, prefix: string): void {
+  if (!prefix) return;
+  const root = payload as { content?: Array<Record<string, unknown>> } | undefined;
+  const firstBlock = root?.content?.[0];
+  if (!firstBlock) return;
+  const first = findFirstTextNode(firstBlock);
+  if (first) {
+    first.text = `${prefix}${first.text ?? ''}`;
+  } else {
+    // 首段无 text 节点(e.g. 空段):插一个
+    const block = firstBlock as { content?: Array<Record<string, unknown>> };
+    if (!Array.isArray(block.content)) block.content = [];
+    block.content.unshift({ type: 'text', text: prefix });
+  }
+}
+
+function findFirstTextNode(
+  node: Record<string, unknown>,
+): { text?: string } | null {
+  if (node.type === 'text') return node as { text?: string };
+  const children = node.content as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(children)) return null;
+  for (const c of children) {
+    const r = findFirstTextNode(c);
+    if (r) return r;
+  }
+  return null;
 }
 
 /** 递归拷贝 folder 树(folder 自身 + 所有子 folder + 所有内含笔记)*/
