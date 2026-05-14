@@ -16,7 +16,11 @@
 import { useEffect, useState } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { NoteCapabilityApi, NoteInfo } from '@capabilities/note/types';
-import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types';
+import type {
+  FolderCapabilityApi,
+  FolderInfo,
+  FolderViewType,
+} from '@capabilities/folder/types';
 
 export function useAllNotes(): NoteInfo[] {
   const [notes, setNotes] = useState<NoteInfo[]>([]);
@@ -37,21 +41,30 @@ export function useAllNotes(): NoteInfo[] {
   return notes;
 }
 
-export function useAllFolders(): FolderInfo[] {
+/**
+ * decision 021 §10.B-2 偏离:useAllFolders 加 viewType 入参 (broadcast 设计盲点 + hook 签名扩).
+ *
+ * 方案 C 实施:onListChanged callback 字面不动 (FolderInfo[] 入参),
+ * 但 hook 内 callback 收到任一 view 广播都重新调 listFolders(viewType) 拉自己 view 的 folder,
+ * 避免对端 view 的广播污染本 view 状态.
+ */
+export function useAllFolders(viewType: FolderViewType): FolderInfo[] {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   useEffect(() => {
     const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
     let cancelled = false;
-    void folder.listFolders().then((list) => {
+    void folder.listFolders(viewType).then((list) => {
       if (!cancelled) setFolders(list);
     });
-    const unsubscribe = folder.onListChanged((list) => {
-      if (!cancelled) setFolders(list);
+    const unsubscribe = folder.onListChanged(() => {
+      void folder.listFolders(viewType).then((list) => {
+        if (!cancelled) setFolders(list);
+      });
     });
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [viewType]);
   return folders;
 }

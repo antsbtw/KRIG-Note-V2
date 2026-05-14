@@ -121,6 +121,7 @@ export const IPC_CHANNELS = {
   FOLDER_RENAME: 'folder.rename',
   FOLDER_MOVE: 'folder.move',
   FOLDER_DELETE: 'folder.delete',
+  FOLDER_PREVIEW_DELETE: 'folder.preview-delete',   // decision 021 §5.5 Q7 弱保护
   FOLDER_LIST_CHANGED: 'folder.list-changed',       // main → renderer 推送
 
   // L5-G1:graph 画板 + 文件夹(D-3=B JSON 实现,过渡至 W6 升 SurrealDB)

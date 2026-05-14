@@ -4,9 +4,13 @@
  * view 通过 requireCapabilityApi<FolderCapabilityApi>('folder') 取 api。
  */
 
-import type { FolderInfo } from '@shared/ipc/note-folder-types';
+import type { FolderInfo, FolderViewType } from '@shared/ipc/note-folder-types';
 
-export type { FolderInfo };
+/**
+ * decision 021 §10.C-1: FolderViewType 字面 SSOT 归 @shared/ipc/note-folder-types
+ * (跟 FolderInfo 同模式),本模块 re-export 给 capability 消费者.
+ */
+export type { FolderInfo, FolderViewType };
 
 export interface FolderDeleteResult {
   deletedFolders: number;
@@ -21,8 +25,19 @@ export interface FolderDeleteResult {
 }
 
 export interface FolderCapabilityApi {
-  createFolder(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
-  listFolders(): Promise<FolderInfo[]>;
+  /**
+   * decision 021 §4.1: viewType 必传,写 folder atom + folderForView 边 + (可选) inFolder 边.
+   */
+  createFolder(
+    title: string,
+    parentFolderId: string | null,
+    viewType: FolderViewType,
+  ): Promise<FolderInfo | null>;
+  /**
+   * decision 021 §4.1: viewType 必传,过滤当前 view 的 folder atom.
+   * 无 folderForView 边的 folder atom (孤儿) 不返.
+   */
+  listFolders(viewType: FolderViewType): Promise<FolderInfo[]>;
   getFolder(id: string): Promise<FolderInfo | null>;
   renameFolder(id: string, newTitle: string): Promise<FolderInfo | null>;
   moveFolder(folderId: string, newParentFolderId: string | null): Promise<void>;
@@ -31,6 +46,14 @@ export interface FolderCapabilityApi {
    * decision 012 设计师批复 + decision 014 §6.2.6 cascade scope 扩展。
    */
   deleteFolder(id: string): Promise<FolderDeleteResult>;
+  /**
+   * Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3 新增 8th API).
+   *
+   * UI 调用本 API 后,resources > 0 || folders > 0 时弹框确认.
+   * - folders: 子 folder 数(不含 self)
+   * - resources: 含 self 在内的所有 folder 内含资源数(pm note + graph-canvas)
+   */
+  previewDeleteFolder(id: string): Promise<{ folders: number; resources: number }>;
   /** 订阅文件夹列表变更 (IPC 广播);返 unsubscribe */
   onListChanged(callback: (list: FolderInfo[]) => void): () => void;
 }

@@ -33,7 +33,7 @@ function FolderTreePanel() {
 
   // 订阅 noteCapability / folderCapability(IPC 广播)
   const allNotes = useAllNotes();
-  const allFolders = useAllFolders();
+  const allFolders = useAllFolders('note');
 
   // 订阅 transient selectedIds(每 ws 独立,不持久化)— 版本号触发重渲
   useSyncExternalStore(

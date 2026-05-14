@@ -17,9 +17,15 @@ import { storage } from '@storage/index';
 import type { StorageTransaction } from '@storage/index';
 import type { AtomEntity, FolderPayload } from '@semantic/types';
 import type { FolderInfo } from '@shared/ipc/note-folder-types';
+import type { FolderViewType } from '@capabilities/folder/types';
 
 const FOLDER_DOMAIN = 'folder';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
+const FOLDER_FOR_VIEW_PREDICATE = 'user:krig:folderForView';
+
+function viewMarkerFor(viewType: FolderViewType): string {
+  return `__view__/${viewType}`;
+}
 
 function atomToFolderInfo(
   atom: AtomEntity<'folder'>,
@@ -48,12 +54,22 @@ async function getParentIdForFolder(folderId: string): Promise<string | null> {
 
 export async function createFolder(
   title: string,
-  parentFolderId: string | null = null,
+  parentFolderId: string | null,
+  viewType: FolderViewType,
 ): Promise<FolderInfo> {
   const payload: FolderPayload = { title };
+  const viewMarker = viewMarkerFor(viewType);
   return storage.transaction(async (tx) => {
     const atom = await tx.putAtom<'folder'>({
       payload: { domain: FOLDER_DOMAIN, payload },
+    });
+    // decision 021 §4.1: folderForView 边表达 view 归属
+    // LiteralValue 字面三字段 { kind, type, value } 缺一不可 (决议 §0.7 第 15 次教训)
+    await tx.putEdge({
+      predicate: FOLDER_FOR_VIEW_PREDICATE,
+      subject: { kind: 'atom', atomId: atom.id },
+      object: { kind: 'literal', type: 'string', value: viewMarker },
+      attrs: { createdBy: 'user-default', createdAt: Date.now() },
     });
     if (parentFolderId) {
       await tx.putEdge({
@@ -67,9 +83,28 @@ export async function createFolder(
   });
 }
 
-export async function listFolders(): Promise<FolderInfo[]> {
+export async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
+  // decision 021 §4.1: 应用层 filter folderForView 边的 object literal value
+  // EdgeFilter 字面不支持 objectLiteralValue (§0.4 #8),只能拉全 predicate 后应用层 filter
+  const viewMarker = viewMarkerFor(viewType);
+  const allViewEdges = await storage.listEdges({
+    predicate: FOLDER_FOR_VIEW_PREDICATE,
+  });
+  const folderIdsInView = new Set(
+    allViewEdges
+      .filter(
+        (e) =>
+          e.object.kind === 'literal' &&
+          e.object.type === 'string' &&
+          e.object.value === viewMarker,
+      )
+      .map((e) => e.subject.atomId),
+  );
+
   const atoms = (await storage.listAtoms({ domain: FOLDER_DOMAIN })) as AtomEntity<'folder'>[];
-  // 一次性查所有 inFolder 边,按 subject 索引
+  const inViewAtoms = atoms.filter((a) => folderIdsInView.has(a.id));
+
+  // 一次性查所有 inFolder 边,按 subject 索引 (语义不变,沿决议 012)
   const edges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
   const parentBySubject = new Map<string, string>();
   for (const e of edges) {
@@ -77,7 +112,7 @@ export async function listFolders(): Promise<FolderInfo[]> {
       parentBySubject.set(e.subject.atomId, e.object.atomId);
     }
   }
-  return atoms.map((a) => atomToFolderInfo(a, parentBySubject.get(a.id) ?? null));
+  return inViewAtoms.map((a) => atomToFolderInfo(a, parentBySubject.get(a.id) ?? null));
 }
 
 export async function getFolder(id: string): Promise<FolderInfo | null> {
@@ -150,6 +185,28 @@ export async function moveFolder(
  * 字段命名 deletedNotes → deletedResources 反映 scope 扩展;
  * 无 caller 真实消费 deletedNotes 字段名 (grep 仅声明位置)。
  */
+/**
+ * Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3).
+ *
+ * 事务内 BFS collectFolderSubtree + collectResourcesInFolders 同模式(decision 020 §7.5),
+ * 仅计数不删除. UI 调用本 API 后,resources > 0 || folders > 0 时弹框确认.
+ *
+ * folders 字段返"子 folder 数"(不含 self),resources 字段返"含 self 在内的所有 folder 内含资源数".
+ */
+export async function previewDeleteFolder(
+  id: string,
+): Promise<{ folders: number; resources: number }> {
+  return storage.transaction(async (tx) => {
+    const allFolderIds = await collectFolderSubtree(tx, id);
+    const allResourceIds = await collectResourcesInFolders(tx, allFolderIds);
+    return {
+      // allFolderIds 含 self,UI 文案"包含 N 个子文件夹"减 self
+      folders: Math.max(0, allFolderIds.length - 1),
+      resources: allResourceIds.length,
+    };
+  });
+}
+
 export async function deleteFolder(id: string): Promise<{
   deletedFolders: number;
   deletedResources: number;

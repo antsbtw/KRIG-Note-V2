@@ -15,6 +15,7 @@ import type {
   DiagnosticsReportPayload,
   HealthCheckResponse,
 } from '@shared/ipc/message-types';
+import type { FolderViewType } from '@capabilities/folder/types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /** 诊断上报(renderer → main) */
@@ -392,14 +393,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
-  folderList(): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_LIST);
+  // decision 021 §1.1: folderList / folderCreate 加 viewType 入参 (note + graph 隔离视图)
+  folderList(viewType: FolderViewType): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_LIST, viewType);
   },
   folderGet(id: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_GET, id);
   },
-  folderCreate(title: string, parentFolderId: string | null): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_CREATE, { title, parentFolderId });
+  folderCreate(
+    title: string,
+    parentFolderId: string | null,
+    viewType: FolderViewType,
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_CREATE, { title, parentFolderId, viewType });
   },
   folderRename(id: string, title: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_RENAME, { id, title });
@@ -409,6 +415,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   folderDelete(id: string): Promise<{ deletedFolders: number; deletedResources: number; cascadedEdges: number }> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id);
+  },
+  /** decision 021 §5.5 + §10.B-3:Q7 弱保护 dry-run 计数 */
+  folderPreviewDelete(id: string): Promise<{ folders: number; resources: number }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_PREVIEW_DELETE, id);
   },
   onFolderListChanged(callback: (list: unknown) => void): () => void {
     const handler = (_event: unknown, list: unknown): void => callback(list);

@@ -41,3 +41,18 @@ export interface FolderInfo {
   createdAt: number;
   updatedAt: number;
 }
+
+/**
+ * 视图归属标记 (decision 021 §4.1 + §10.C-1).
+ *
+ * folder atom 通过 user:krig:folderForView 边表达 view 归属:
+ * - 'note'  → object literal '__view__/note'
+ * - 'graph' → object literal '__view__/graph'
+ * - future sub-phase 022 加 | 'ebook' (现状 ebook 走独立 JSON 树,不接 atom)
+ *
+ * 字面 SSOT 位置 (§10.C-1 偏离登记,2026-05-13):跟 FolderInfo 同模式归到
+ * shared/ipc/ IPC 契约层,避免 shared/ipc/electron-api.d.ts 反向 import @capabilities/
+ * (V2 分层 lint 规则 no-restricted-imports 禁止).
+ * capability folder/types.ts re-export 该类型给消费者.
+ */
+export type FolderViewType = 'note' | 'graph';

@@ -11,6 +11,7 @@ import type {
 import type {
   NoteInfo,
   FolderInfo,
+  FolderViewType,
   NoteDocEnvelope,
 } from './note-folder-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
@@ -259,9 +260,14 @@ declare global {
       onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
 
       // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
-      folderList(): Promise<FolderInfo[]>;
+      // decision 021 §1.1: folderList / folderCreate 加 viewType 入参 (note + graph 隔离视图)
+      folderList(viewType: FolderViewType): Promise<FolderInfo[]>;
       folderGet(id: string): Promise<FolderInfo | null>;
-      folderCreate(title: string, parentFolderId: string | null): Promise<FolderInfo | null>;
+      folderCreate(
+        title: string,
+        parentFolderId: string | null,
+        viewType: FolderViewType,
+      ): Promise<FolderInfo | null>;
       folderRename(id: string, title: string): Promise<FolderInfo | null>;
       folderMove(folderId: string, newParentFolderId: string | null): Promise<void>;
       /**
@@ -273,6 +279,8 @@ declare global {
         deletedResources: number;
         cascadedEdges: number;
       }>;
+      /** decision 021 §5.5 + §10.B-3:Q7 弱保护 dry-run 计数 */
+      folderPreviewDelete(id: string): Promise<{ folders: number; resources: number }>;
       /** main → renderer 推送:文件夹列表变更;返 unsubscribe */
       onFolderListChanged(callback: (list: FolderInfo[]) => void): () => void;
 

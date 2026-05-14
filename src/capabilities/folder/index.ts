@@ -13,18 +13,25 @@ import type {
   FolderCapabilityApi,
   FolderInfo,
   FolderDeleteResult,
+  FolderViewType,
 } from './types';
 
-export type { FolderCapabilityApi, FolderInfo, FolderDeleteResult } from './types';
+export type {
+  FolderCapabilityApi,
+  FolderInfo,
+  FolderDeleteResult,
+  FolderViewType,
+} from './types';
 
 async function createFolder(
   title: string,
-  parentFolderId: string | null = null,
+  parentFolderId: string | null,
+  viewType: FolderViewType,
 ): Promise<FolderInfo | null> {
-  return window.electronAPI.folderCreate(title, parentFolderId);
+  return window.electronAPI.folderCreate(title, parentFolderId, viewType);
 }
-async function listFolders(): Promise<FolderInfo[]> {
-  return window.electronAPI.folderList();
+async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
+  return window.electronAPI.folderList(viewType);
 }
 async function getFolder(id: string): Promise<FolderInfo | null> {
   return window.electronAPI.folderGet(id);
@@ -39,6 +46,12 @@ async function moveFolder(folderId: string, newParentFolderId: string | null): P
 async function deleteFolder(id: string): Promise<FolderDeleteResult> {
   return window.electronAPI.folderDelete(id);
 }
+/** Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3) */
+async function previewDeleteFolder(
+  id: string,
+): Promise<{ folders: number; resources: number }> {
+  return window.electronAPI.folderPreviewDelete(id);
+}
 function onListChanged(callback: (list: FolderInfo[]) => void): () => void {
   return window.electronAPI.onFolderListChanged(callback);
 }
@@ -50,6 +63,7 @@ export const folderCapability: FolderCapabilityApi = {
   renameFolder,
   moveFolder,
   deleteFolder,
+  previewDeleteFolder,
   onListChanged,
 };
 

@@ -27,6 +27,7 @@ import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
+import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -76,6 +77,16 @@ app.whenReady().then(async () => {
   // 必须在 initStorage 后 + graph-library-store 任何 IPC 调用前 (initIpcBus 已注册 handlers
   // 但用户尚未触发 IPC,此处幂等清理)。
   clearLegacyGraphStorage();
+
+  // L7-sub021 (decision 021 §7) — clearAll migration:folder 视图隔离重置数据库
+  // 必须在 initStorage 后 + createMainWindow 前(IPC handlers 已注册,但 mainWindow 未创建,
+  // 无 webContents 触发业务请求,此窗口期内执行 clearAll 安全)。
+  // 用户拍板:测试数据可重置 (§0.5)。flag 写入后绝不重跑。
+  try {
+    await runMigration021IfNeeded();
+  } catch (err) {
+    console.error('[migration/021] 执行失败,启动下次会重试:', err);
+  }
 
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND

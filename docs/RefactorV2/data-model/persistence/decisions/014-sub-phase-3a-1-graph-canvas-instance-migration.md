@@ -568,6 +568,8 @@ V2 现状两套 folder 模型不同字段命名 + 集合,**不能直接转调**,
 
 ##### 3.5.3.3 Adapter 设计(`src/platform/main/graph/folder-adapter.ts`,新建)
 
+> **2026-05-13 反向更新**(decision 021 sub-phase 021 完成):folder-adapter `listFolders` / `createFolder` 字面**强制传 `'graph'` viewType**(main 端 folder-adapter 内部硬编,renderer IPC 字面透明,GRAPH_FOLDER_* channel payload 不加 viewType 字段)。详 [decision 021 §1.1](021-sub-phase-021-folder-view-isolation.md#11-本-sub-phase-的范围)。
+
 ⚠ **进程边界**: 本文件在 **main 进程**(`src/platform/main/graph/`),**不能**调用 `requireCapabilityApi('folder')`(那是 renderer 侧 capability-registry 入口)。
 
 **正确入口**: 直接从 `@platform/main/folder` barrel 导入 main 侧 capability-impl 函数。这是 sub-phase 2 已建立的同进程直调约定(见 `src/platform/main/folder/index.ts` 注释 "extraction 等 main 端模块可直接 import capability-impl 函数")。

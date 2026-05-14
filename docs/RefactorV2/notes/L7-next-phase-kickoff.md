@@ -52,7 +52,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 ### 1.4 未解的关键 Open Questions
 
 - ~~**Q-tx**(继承 sub-phase 1):`storage.transaction()` 真原子性未解 — sub-phase 1 X3a 退化(`7d828a6`)~~ **✅ 已修 sub-phase 3a-tx**([decision 020](../data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md),2026-05-13;路径 1 SDK 原生 `beginTransaction()` 真原子性 + 5 个调用站点透明受益 + binary verify 12 PASS + Checkpoint 1/2 全 PASS + 17 → 23 故障注入 PASS)
-- **Q-shared-folder-ux**(sub-phase 3a-tx Step 5.7 UI 集成测试期间用户报,2026-05-13):note / graph / 未来 ebook **共享 folder 树**(decision 014 §2.3 字面拍板 + canvas-store.ts:756 注释),用户在 note 模式建的文件夹,在 graph 模式也可见,但**内含 note 在 graph 模式不可见**,易引发误删("看着是空文件夹,实际有 note")。根因:共享语义层 + 视图内容隔离,缺"跨视图删除保护 + 内容指示"UX。**与 Q7 同根**(误删保护),合并讨论;**跟 sub-phase 3a-tx transaction 改造无关**(不阻塞当前 sub-phase 收尾)。**处置**:独立 hotfix 候选(类似 P0e 模式),待 sub-phase 3a-tx 合 main 后单独决议。修法方向(待决议):(a) 删除前 cascade check + 内含资源列表弹窗;(b) folder 树按 view 加内容指示器(N 笔记 / M 画板);(c) 改"共享 folder"为"viewport 视图(按当前视图过滤)",底层仍共享。
+- ~~**Q-shared-folder-ux**~~ ✅ **已解决 decision 021**(sub-phase 021 folder 视图隔离完成,2026-05-13):folder atom 通过 `user:krig:folderForView` 边表达 view 归属(note + graph 各自独立 folder 树),Q7 弱保护(含资源 folder 删除前 window.confirm)+ clearAll 一次性 migration 重置数据库。详 [decision 021](../data-model/persistence/decisions/021-sub-phase-021-folder-view-isolation.md)。**Q7 字面登记**:弱处理仅含资源 folder 删除前弹框,回收站完整设计留 decision 023。**Q-shared-folder-ux 历史描述**(供追溯):note / graph / 未来 ebook **共享 folder 树**(decision 014 §2.3 字面拍板 + canvas-store.ts:756 注释),用户在 note 模式建的文件夹,在 graph 模式也可见,但**内含 note 在 graph 模式不可见**,易引发误删("看着是空文件夹,实际有 note")。根因:共享语义层 + 视图内容隔离,缺"跨视图删除保护 + 内容指示"UX。decision 021 走"数据模型层根治"路径(用户 §0.5 P0 字面拍板)。
 
   **用户 2026-05-13 拍板核心两点**(sub-phase 3a-tx 收尾对话末段,作为 decision 021 起点):
 
@@ -68,7 +68,7 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
   - 视图隔离落地后,"误删跨视图 folder" 风险根除(用户根本看不到非己建 folder);但 Q7 仍含"含资源 folder 删除前弹窗 + 回收站",留 decision 021 一并讨论
 
   **第 13 次设计师教训**(本对话过程,2026-05-13):总指挥讨论方案 C 时反复用 "L1/L2/L3 抽象分层" 术语(语义层 / 视图层 / 关系层),但 V2 项目 L0-L7 字面是 stages 阶段命名(L0 platform / L2 shell+tabs / L3 workspace / L4 slot registry / L5 note / L7 持久化),**不是抽象层级**。术语错用会污染 KRIG 项目术语体系。**纪律升级**:使用项目术语必须 grep 实证字面,不允许从编程社区 / 训练数据带入"看起来通用"的术语;跟第 9 / 11 / 12 次教训同型("实证字面而不靠记忆")。**落点**:本教训登记在 decision 021 §0.6,反向更新 SDK-version-binding-policy §2.2 加"项目术语必须 grep 实证"作为第 5 步证据(留 decision 021 撰写时落地,不在本对话推进)。
-- **Q7**(继承 sub-phase 2):误删 folder / canvas 保护(确认弹窗 + 回收站)未实施。**与 Q-shared-folder-ux 同根**,建议合并讨论(共用一套删除保护 UX)
+- ~~**Q7**~~ 🟡 **部分解决 decision 021**(sub-phase 021 弱处理,2026-05-13):含资源 folder 删除前 `window.confirm` 弹框确认(`preview.resources > 0 || preview.folders > 0` 触发),3 caller R3 字面各自实施(canvas-commands.ts:102 + note-commands.ts delete-by-tree-id + tree-operations.ts:108 deleteSelected 多选逐个 confirm)。**未实施部分**:回收站(trash domain + undo)留 **decision 023** 一并讨论。详 [decision 021 §5.5](../data-model/persistence/decisions/021-sub-phase-021-folder-view-isolation.md#step-55--q7-弱保护含资源-folder-删除前弹框)。
 - **Q-orphan-surreal-d-state**(sub-phase 3a-1 暴露):sub-phase 1 防御链对内核 D-state 孤儿 surreal 进程无效,只能重启 mac 根治
 - **F1 audit 发现**(sub-phase 3a-1):§6.3.5 读路径自愈端到端 binary verify 未跑(代码已实施,但人为插脏边 → 自愈端到端未验证)
 - ~~**noteCapability listNotes 误列 text-node pm atom**(sub-phase 3a-1 暴露)~~ **✅ 已修**([decision 016](../data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) sub-phase 3a-2.5,note 形态从 "pm atom = note" 升级到 "pm atom + `user:krig:hasNoteView` 边 = note";binary verify §6.2.4 实证:4 个 graph text-node pm atom 字面零 hasNoteView 边 + 4 个 hasNoteView 边都指向真 note pm atom,完全互不污染)
@@ -90,6 +90,13 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 | 6 | decision 014 §3.5.3 / canvas-store.createInstance | 设计 "view 端预生成 client id 推给 storage" 模式时,没核 sub-phase 1 putAtom 契约支不支持;字面注释"storage putAtom 允许传 id"是设计师一厢情愿,实际 UPDATE-only(由 [decision 017](../data-model/persistence/decisions/017-storage-persistence-hotfix.md) 改 UPSERT 修复)|
 | 7 | decision 014 §3.3 line 388 cardinality | 决议字面拍板"inCanvas cardinality 一对一",但实施 view + store + storage 三层全部漏机制保证;P0a UPSERT 修法揭露(由 [decision 019](../data-model/persistence/decisions/019-graph-instance-cardinality-hotfix.md) 三层防线补完)|
 | 8 | decision 014 §3.4 pmContentCapability / canvas-store text-node helper | sub-phase 3a-1 写决议时没核实 view 端 driver 演化路径;view 端 DriverSerialized 信封透传契约与 canvas-store helper 函数(`incomingDocToPmPayload` / `instanceAtomToObject`)字面期望旧 PmPayload 数组形态错位 → 写空 doc → 重启丢文字(由 [decision 018](../data-model/persistence/decisions/018-canvas-text-node-doc-sync-hotfix.md) 4 处形态对齐修复)|
+| 14 | decision 021 §0.6 | 启动包 / 总纲文档字面"X / Y / 未来 Z 共享 ABC"混述现状 vs 未来计划,grep verify 后才知 ebook 现状是独立 JSON 树未接 atom(由 decision 021 §0.6 登记)|
+| 15 | decision 021 §0.7 | 决议字面假设 `storage.clearAll()` API 存在 + `EdgeFilter` 支持 objectLiteralValue,自审 grep 命中两项均不存在;LiteralValue 字面三字段 `{kind, type, value}` 决议初版漏 type 字段(由 decision 021 §0.7 登记)|
+| 16 | decision 021 §10.B-1 / §11.3 | 决议 §0.4 grep verify 接口签名变更时只 grep `listFolders` 漏 `createFolder`(同样改签名),Step 5.2 typecheck 实跑 7 TS2554 而非预期 4(由 decision 021 §11.3 登记)|
+| 17 | decision 021 §10.B-2 / §11.4 | 决议字面拍板 caller / capability / IPC 直接传播路径但完全没考虑 broadcast / useAllFolders hook 等间接传播,Step 5.3 实施期不得不临时拍板"方案 C 按 view 分别广播 2 次 + hook 加 viewType 入参"(由 decision 021 §11.4 登记)|
+| 18 | decision 021 §10.C-1 / §11.5 | 决议 §1.1 字面拍板 `FolderViewType` 归 capability 层但 V2 既有 `FolderInfo` SSOT 在 shared/ipc 层 + W5 lint 禁止 shared/ipc 反向 import @capabilities/,Step 5.4 触发 lint error(由 decision 021 §11.5 登记)|
+| 19 | decision 021 §10.B-3 / §11.6 | 决议字面"既有 5 API 签名不动"字面写死 = N,Step 5.5 Q7 实施需新增 `previewDeleteFolder` 8th API,字面叙述前瞻性不足(由 decision 021 §11.6 登记)|
+| 20 | decision 021 §10.C-2 / §11.7 | 决议字面"跨 2 view UI 复用"语义不明(UX 一致 vs 代码共用 helper),实施期按"代码复用"实施触发 V2 W5 + @views/* + lib/ 3 层 lint 禁止,3 caller R3 重复实施成唯一字面合规路径(由 decision 021 §11.7 登记)|
 
 **纪律**:
 - 涉及"已实施模块自动支持新需求"假设 → 必须 grep 代码字面行为验证

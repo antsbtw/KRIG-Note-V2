@@ -208,7 +208,7 @@ export async function createFolder(
   workspaceId: string,
   parentId: string | null = null,
 ): Promise<string | null> {
-  const folder = await folderCap().createFolder('新建文件夹', parentId);
+  const folder = await folderCap().createFolder('新建文件夹', parentId, 'note');
   if (!folder) return null;
   // 父文件夹自动展开
   if (parentId) {
