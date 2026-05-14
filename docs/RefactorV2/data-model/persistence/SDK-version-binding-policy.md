@@ -185,6 +185,16 @@
 
 **教训详细**: [decision 022 §11 第 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
 
+### 5.8 第 31 次设计师教训(2026-05-14,decision 022 §10.D-11 Step 5.12 反向更新)
+
+> 完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入,完成判据矩阵 typecheck + lint 双跑双绿.
+
+**起因**: decision 022 §10.D-11 — Step 5.11 完成报告 §3 完成判据矩阵字面把 capability-impl.ts 字面 2 个 unused import 算成 "3 pre-existing warning", 实测 `git log -- capability-impl.ts` 字面该文件由 sub-022 commit 378a283 整文件新建 (+748 行) 引入, 2 个 unused import 属**sub-phase 新引入**, 不是 pre-existing. 只有 svg/textBlock.ts:8 经 `git log` 实证 sub-022 分支 0 commit 触及, 是真 pre-existing. 同时报告 §2 commit 矩阵底行字面用逐 commit `git show --stat` 累加法把 merge commit 9c88af1 的 138 行重复计入, 跟 `git diff --stat 91cfbf8..HEAD` 实测口径偏差 +170/-170 行.
+
+**纪律升级**: §2.2 第 9 步登记此教训; 完成报告字面 lint warning 来源溯源必须 `git log -- <file>` 实证, 区分 pre-existing (文件 main HEAD 已存在 + sub-phase 0 commit 触及) vs sub-phase 新引入 (本 sub-phase commit 整文件新建或改文件时新增 warning); 完成判据矩阵字面**typecheck PASS + lint PASS (--max-warnings 0 exit 0) 双跑双绿**, 不能只引 typecheck 输出代替 lint; 完成报告字面 commit 矩阵行数累计字面以 `git diff --stat <merge-base>..HEAD` 实测口径为准, 弃用逐 commit `git show --stat` 累加法 (避免 merge commit 重复计入).
+
+**教训详细**: [decision 022 §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
 ---
 
 ## 6. 修订记录
@@ -196,6 +206,7 @@
 | 2026-05-13 | v1.2 | sub-phase 3a-tx 实施期 §10.B-2 偏离 + 第 12 次教训反向更新:§2.2 加第 4 步"API 可执行链路实证";§5 加 5.2 第 12 次教训 | [decision 020 §10.B-2 + §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.4 | sub-phase 021 实施期 5 个偏离(§10.B-1/B-2/B-3/C-1/C-2)+ 第 16-20 次教训累积反向更新:§2.2 加第 8 步"V2 完整传播层 6 层 grep 前瞻验证"(view caller / capability types / capability index / IPC+preload+d.ts / 分层 lint / 同类型 SSOT 位置 + 间接传播路径 + API 总数前瞻 + "跨 X 复用"语义明示)。授权依据:[decision 021 §0.5.ter 用户 P0 授权](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新) | [decision 021 §11.3-§11.7](decisions/021-sub-phase-021-folder-view-isolation.md) |
 | 2026-05-14 | v1.5 | sub-phase 022 实施期 13 偏离 (3B + 10D) + 第 24/25/26/27/30 次教训累积反向更新: §2.2 第 8 步加 "决议字面引用 storage API 调用语法 grep EdgeFilter 字段名" + "决议字面引用 V2 既有目录前必须 grep 实证" (沿第 24/25 次); §2.2 第 9 步加 "Bash tool persistent cwd 假设不可靠每 Bash 独立 cd 前缀" + "typecheck error code 沿 sub-phase 实际 fail 形态" + "健康检查 helper 自愈 vs 告警分离" (沿第 26/27/30 次). 授权依据: decision 022 §0.5.quat 用户 2026-05-14 P0 授权 (沿 sub-phase 021 §0.5.ter 同模式) | [decision 022 §11 第 24-27 + 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
+| 2026-05-14 | v1.6 | sub-phase 022 Step 5.12 总指挥审计反馈 + 第 31 次教训反向更新: §5.8 新加第 31 次教训字面 "完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入, 完成判据矩阵 typecheck + lint 双跑双绿, commit 矩阵行数以 `git diff --stat <merge-base>..HEAD` 实测口径为准弃用逐 commit 累加法"; §2.2 第 9 步同步登记. 授权依据: decision 022 §10.D-11 + Step 5.12 用户 2026-05-14 P0 拍板 (沿 v1.5 同模式) | [decision 022 §10.D-11 + §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 
 ---
 

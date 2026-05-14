@@ -1327,9 +1327,26 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 
 **字面风险**: verify 脚本字面跟源码字面可能漂移 (源码改后 verify 脚本未同步). P3 低 (一次性 verify, 跑完归档, 不持续维护).
 
+#### §10.D-11 — Step 5.11 完成报告跨段一致性失守(lint 口径错 + 行数偏差)
+
+**发现期**: Step 5.11 完成报告交付后, 总指挥审计独立 grep 实证
+
+**字面**: 完成报告两处跨段一致性失守:
+
+1. **lint 口径错**: 报告 §3 完成判据矩阵写"⚠ 3 pre-existing warning (capability-impl.ts 2 个 unused import + svg/textBlock.ts 1 个)" — 实测 `src/platform/main/ebook/capability-impl.ts` 由 sub-022 commit 378a283 (Step 5.5) 整文件新建 (+748 行) 时引入, 其中 `NoteDocEnvelope` + `getNote` 2 个 unused import 属于**sub-phase 新引入**, **不是 pre-existing**. 只有 `svg/textBlock.ts:8` 的 `CHAR_ADVANCE_FALLBACK` 经 git log 实证 sub-022 分支 0 commit 触及, 是真 pre-existing (自 L5-G4.5 P1 68bf831).
+
+2. **行数偏差**: 报告 §2 commit 矩阵底行累计 `+2712 / -1133`, 跟 `git diff --stat 91cfbf8..feature/L7-sub022-ebook-thought-migration` 实测 `+2541 / -963` (Step 5.12 lint fix bb32e1d 后, Step 5.11 报告时刻为 `+2542 / -963`) 偏差 +170 / -170 行. 偏差超出 merge commit 9c88af1 的 138 行 prompt 范围 (138 ≠ 170), 根因是逐 commit `git show --stat` 加总把 merge 引入的内容重复计入 (`9c88af1` 行 `1 file changed, 138 insertions(+)` 是 merge commit 对其第一父的 diff stat, 不应跟前 9 commit 累加).
+
+**反向更新落地**: Step 5.12 用 2 commit 处置:
+
+- **commit bb32e1d** — `fix(ebook)`: 删 capability-impl.ts 的 2 个 unused import (sub-022 新引入) + svg/textBlock.ts 的 1 个 pre-existing (用户拍板顺手清). `npm run typecheck` PASS + `npm run lint` PASS (0 warning, exit 0).
+- **commit (本反向更新 commit)** — `docs(decision/022)`: 决议 §10.D-11 + §11 第 31 次教训 + §12 v0.6 修订日志 finalize. Step 5.12 完成报告 §2 矩阵以 `git diff --stat` 实测口径重算行数, 弃用逐 commit `git show --stat` 累加法.
+
+**字面风险**: 中等 — 完成报告 hash 矩阵 / 完成判据 / 偏离汇总跨段一致性纪律失守 (沿决议 021 第 21 次教训"字面 grep 实证"同型). 其中 lint 口径错暴露了"sub-phase lint scope 未做来源溯源"的纪律漏洞 (sub-022 整文件新建的 capability-impl.ts 当然属于 sub-022 的 lint 责任, pre-existing 才不属 sub-022 scope).
+
 ## 11. 累积教训(实施完成后追加)
 
-实施期共登记 **7 条新教训** (第 24-30 次), 字面跟决议 022 §0.6 第 22 次教训同型扩展.
+实施期共登记 **8 条新教训** (第 24-31 次), 字面跟决议 022 §0.6 第 22 次教训同型扩展. 第 31 次字面 Step 5.12 反向更新追加.
 
 ### 第 24 次 — 决议字面引用 storage API 调用语法时必须 grep V2 EdgeFilter 字段名
 
@@ -1386,6 +1403,18 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 **字面**: 沿 decision 014 §3.5.3.6 字面 keep-latest 自愈语义 vs decision 022 §4.3.1-L2 字面 "扫描+告警" 语义分离. cardinality 1:1 字面字面 keep-latest 字面适用旧 atom 字面字面 (沿 decision 014 字面历史数据 inCanvas 一对多场景); cardinality 1:1 / 0..1 字面字面 sub-phase 022 字面字面 scan-only 字面适用 (数据完整性问题留管理员决断, 跟 L1 throw + L3 throw + 不写 flag 三层防线字面字面字面区分).
 
 **纪律登记**: SDK-version-binding-policy.md §2.2 第 9 步登记此教训; decision 022 §11 字面登记 (本节).
+
+### 第 31 次 — 完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入
+
+**触发**: §10.D-11 (Step 5.11 完成报告 §3 表 lint 字面口径错把 2 个 sub-022 新引入 warning 算成 pre-existing)
+
+**字面**: 完成报告字面 lint warning 来源溯源必须 `git log -- <file>` 实证, 区分两类:
+- **pre-existing**: 文件 main HEAD 已存在, sub-phase 0 commit 触及 (例: svg/textBlock.ts 自 L5-G4.5 P1 68bf831, sub-022 分支 0 commit)
+- **sub-phase 新引入**: 文件由本 sub-phase commit 整文件新建, 或本 sub-phase commit 改文件时新增 warning (例: capability-impl.ts 由 sub-022 commit 378a283 整文件新建 +748 行引入)
+
+完成报告字面 `npm run typecheck PASS` 不代表 `npm run lint PASS` — typecheck 只查类型错, lint `--max-warnings 0` 字面 1 个 warning 就 exit 1. Step 5.11 完成判据矩阵必须**typecheck + lint 双跑双绿**, 不能只引 typecheck 输出.
+
+**纪律升级**: SDK-version-binding-policy.md §2.2 第 9 步加 "完成报告字面 lint warning 来源必须 `git log -- <file>` 实证溯源 pre-existing vs sub-phase 引入, 完成判据矩阵字面 typecheck + lint 双跑双绿" (沿第 24 / 25 / 27 / 29 次教训同型升级).
 
 ## 12. P1 修订轮变更日志(可追溯)
 
@@ -1530,3 +1559,27 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 **用户 P0 拍板** (Step 5.10 反向更新前):
 - §0.5.quat: SDK-version-binding-policy.md §2.2 加第 24/25/26/27/30 次教训 + §6 v1.5 修订记录授权 (2026-05-14)
 - §10.D-4 选项 A: Step 5.10 末执行 `git merge main --no-ff` 拉 prompt 进 feature 分支 (2026-05-14)
+
+### v0.6(2026-05-14,Step 5.12 总指挥审计反馈 lint 整改 + 报告口径修正)
+
+**触发**: Step 5.11 完成报告交付后, 总指挥独立 grep 实证发现 2 项处置点 ([N-1] lint + [N-2] 行数偏差).
+
+**§10 新增 1 条偏离** (§10.D-11): 完成报告跨段一致性失守 (lint 口径错 + 行数偏差 +170/-170). 详 §10.D-11 字面.
+
+**§11 新增 1 条教训** (第 31 次): 完成报告 lint warning 来源必须 `git log -- <file>` 实证溯源 pre-existing vs sub-phase 引入; 完成判据矩阵字面 typecheck + lint 双跑双绿. 详 §11 第 31 次字面.
+
+**Step 5.12 commit 字面 2 个 hash**:
+1. `bb32e1d` — `fix(ebook)`: 删 capability-impl.ts 字面 2 个 unused import (sub-022 新引入) + svg/textBlock.ts 字面 1 个 pre-existing (用户拍板顺手清). typecheck PASS + lint PASS (0 warning).
+2. (本反向更新 commit) — `docs(decision/022)`: §10.D-11 + §11 第 31 次教训 + §12 v0.6 修订日志 finalize.
+
+**累计 commit 矩阵更新** (Step 5.11 原 10 commit → Step 5.12 加 2 → 12 commit). 报告 §2 矩阵底行字面以 `git diff --stat 91cfbf8..HEAD` 实测口径重算字面 +/- 行数 (Step 5.12 lint fix bb32e1d 后 `+2541 / -963`, Step 5.11 报告时刻为 `+2542 / -963`), 弃用逐 commit `git show --stat` 累加法 (沿 §10.D-11 字面行数偏差根因).
+
+**SDK-version-binding-policy.md 联动 v1.6** (Step 5.12 同 docs commit 内合并落地):
+- §5.8 新加第 31 次教训完整字面 (完成报告 lint 来源溯源 + 双跑双绿 + commit 矩阵行数 git diff 口径)
+- §6 修订记录加 v1.6 条目, 授权依据 decision 022 §10.D-11 + Step 5.12 用户 P0 拍板
+- 跟 v1.5 (第 24/25/26/27/30 次) 同模式纵向纪律落地, 沿第 24/25/27/29 次教训"决议字面承诺必须实际落 SDK-policy 文件"
+
+**用户 P0 拍板** (Step 5.12):
+- pre-existing svg/textBlock.ts:8 字面顺手清 (虽跨 sub-phase scope, 但用户判断"清掉换 lint 0 warning 干净" 优先于严格 scope 原则) — 2026-05-14
+- [N-4] 第 31 次教训 SDK-policy §2.2 第 9 步 + §6 v1.6 修订记录 Step 5.12 当前 docs commit 内合并落地 — 2026-05-14
+- 行数 §10.D-11 第 2 项字面 `+2542 / -963` → `+2541 / -963 (Step 5.12 lint fix 后)` 顺手改 — 2026-05-14
