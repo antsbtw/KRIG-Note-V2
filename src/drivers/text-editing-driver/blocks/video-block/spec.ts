@@ -47,6 +47,8 @@ const videoBlockNodeSpec: NodeSpec = {
     memoryLastStep: { default: 0 },        // 上次 stepIndex(stop 时写;start 时跑到此 step)
     // L5-B3.19.e NEW(Download):
     localFilePath: { default: null },      // ytdlp 下载完成后的本地路径(Q-e-1=A:不切 src 仅记录;按钮 ⬇ → 📁)
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    bookAnchor: { default: null },
   },
   parseDOM: [
     {

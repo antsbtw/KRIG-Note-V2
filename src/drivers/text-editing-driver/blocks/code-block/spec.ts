@@ -11,7 +11,11 @@ const codeBlockNodeSpec: NodeSpec = {
   group: 'block',
   code: true,
   defining: true,
-  attrs: { language: { default: '' } },
+  attrs: {
+    language: { default: '' },
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    bookAnchor: { default: null },
+  },
   parseDOM: [
     {
       tag: 'pre',

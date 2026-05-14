@@ -11,6 +11,10 @@ import type { BlockSpec } from '../../types';
 const listItemNodeSpec: NodeSpec = {
   content: 'block+',
   defining: true,
+  attrs: {
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    bookAnchor: { default: null },
+  },
   parseDOM: [{ tag: 'li' }],
   toDOM() {
     return ['li', 0];

@@ -126,6 +126,12 @@ const tableCellNodeSpec: NodeSpec = {
     rowspan: { default: 1 },
     colwidth: { default: null },
     align: { default: null },
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    // table 目录 4 NodeSpec 字面仅 tableCell 字面 receiver bookAnchor (字面最细粒度
+    // 标注 receiver), table / tableRow / tableHeader 字面保持既有 attrs 0 变化
+    // (table/row 字面容器, header 字面跟 cell 同型但实务无标注语义);
+    // 字面登记 §10.D 偏离 - "24 种 block 按目录计数 = 24 处 bookAnchor" 字面落实方式
+    bookAnchor: { default: null },
   },
   tableRole: 'cell',
   isolating: true,
