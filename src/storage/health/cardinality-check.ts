@@ -90,12 +90,72 @@ async function checkPredicate(storage: StorageAPI, predicate: string): Promise<C
   return result;
 }
 
+// ── sub-phase 022 L2 (decision 022 §4.3.1-L2) — 仅扫描+告警, 不自愈 ──
+
+/**
+ * sub-phase 022 一对一 / 0..1 cardinality 扫描 (decision 022 §4.3.1-L2).
+ *
+ * 区别于 CARDINALITY_ONE_PREDICATES (keep-latest 自愈): 本组 predicate 字面
+ * 一旦发现违反, 仅 warn 告警, 不自动清理 — 沿决议 §4.3.1-L2 "扫描+告警" 语义,
+ * 数据完整性问题留管理员决断 (跟 L1 throw + L3 throw+不写 flag 区分).
+ */
+const CARDINALITY_SCAN_PREDICATES = [
+  // hasReadingState: ebook → reading-state, cardinality 1:1 (每 ebook 必有且仅 1 条)
+  { predicate: 'user:krig:hasReadingState', cardinality: '1:1' as const },
+  // hasReadingThought: ebook → pm-as-thought, cardinality 0..1 (lazy create, 最多 1 条)
+  { predicate: 'user:krig:hasReadingThought', cardinality: '0..1' as const },
+];
+
+interface ScanResult {
+  predicate: string;
+  cardinality: '1:1' | '0..1';
+  scannedEdges: number;
+  /** subject.atomId 字面挂 > 1 条同 predicate 边 (违反 1:1 或 0..1 字面 "最多 1 条") */
+  multiViolations: number;
+}
+
+/**
+ * sub-phase 022 字面扫描器 (decision 022 §4.3.1-L2): 按 subject.atomId 分组,
+ * 任何 atom 挂 > 1 条同 predicate 边 → 报告违反 (warn, 不清理).
+ *
+ * 跟 checkPredicate 区别:
+ * - 本函数字面**不**走 keep-latest 自愈路径 (沿 §4.3.1-L2 "告警" 语义)
+ * - 1:1 字面字面**不**报"=0 条违反"(因 ebook atom 创建时字面伴随 reading-state,
+ *   若 0 条字面是 migration 中途失败留半成品, 字面字面 L1 ensureReadingState 兜底
+ *   而不是 L2 健康检查负责)
+ */
+async function scanCardinality(
+  storage: StorageAPI,
+  predicate: string,
+  cardinality: '1:1' | '0..1',
+): Promise<ScanResult> {
+  const allEdges = await storage.listEdges({ predicate });
+  const grouped = new Map<string, EdgeEntity[]>();
+  for (const edge of allEdges) {
+    if (edge.subject.kind !== 'atom') continue;
+    const list = grouped.get(edge.subject.atomId) ?? [];
+    list.push(edge);
+    grouped.set(edge.subject.atomId, list);
+  }
+  let multiViolations = 0;
+  for (const [subjectId, edges] of grouped) {
+    if (edges.length <= 1) continue;
+    multiViolations++;
+    console.warn(
+      `[storage/cardinality-check] CARDINALITY_VIOLATION_${cardinality === '1:1' ? 'ONE_TO_ONE' : 'AT_MOST_ONE'} `
+        + `${predicate} subject ${subjectId}: ${edges.length} edges (expected ≤1)`,
+    );
+  }
+  return { predicate, cardinality, scannedEdges: allEdges.length, multiViolations };
+}
+
 /**
  * 启动 self-check 入口(initStorage 后调用)。
  *
  * 失败 best-effort:单个 predicate 扫描失败 warn 继续,不抛错阻塞启动。
  */
 export async function runCardinalityCheck(storage: StorageAPI): Promise<void> {
+  // 既有 1:1 keep-latest 自愈扫描 (inCanvas / hasContent, decision 014)
   for (const predicate of CARDINALITY_ONE_PREDICATES) {
     try {
       const r = await checkPredicate(storage, predicate);
@@ -106,6 +166,38 @@ export async function runCardinalityCheck(storage: StorageAPI): Promise<void> {
     } catch (err) {
       console.warn(`[storage/cardinality-check] ${predicate} scan failed:`, err);
     }
+  }
+
+  // sub-phase 022 L2 仅扫描+告警 (hasReadingState 1:1 / hasReadingThought 0..1)
+  for (const { predicate, cardinality } of CARDINALITY_SCAN_PREDICATES) {
+    try {
+      const r = await scanCardinality(storage, predicate, cardinality);
+      console.log(
+        `[storage/cardinality-check] ${r.predicate} (${r.cardinality}): scanned `
+          + `${r.scannedEdges} edges, found ${r.multiViolations} multi-edge violations`,
+      );
+    } catch (err) {
+      console.warn(`[storage/cardinality-check] ${predicate} scan failed:`, err);
+    }
+  }
+
+  // sub-phase 022 L2 marker 边互斥扫描 (decision 022 §4.3.1-L2)
+  // 复用 Step 5.7 抽的 scanMarkerEdgeMutexViolations helper.
+  try {
+    const violations = await scanMarkerEdgeMutexViolations(storage);
+    if (violations.length > 0) {
+      for (const v of violations) {
+        console.warn(
+          `[storage/cardinality-check] CARDINALITY_VIOLATION_PM_MARKER_MUTEX `
+            + `atom ${v.atomId}: 同时挂 [${v.predicates.join(', ')}]`,
+        );
+      }
+    }
+    console.log(
+      `[storage/cardinality-check] marker-edge-mutex: scanned, found ${violations.length} violations`,
+    );
+  } catch (err) {
+    console.warn('[storage/cardinality-check] marker-edge-mutex scan failed:', err);
   }
 }
 
