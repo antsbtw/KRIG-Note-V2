@@ -517,15 +517,20 @@ async function createFolder(
 
 **本决议字面登记此约束**:022 决议必须按此接入路径,不允许"ebook 自有 folder 模型"二次复活。
 
-**✅ 2026-05-14 反向更新 (sub-phase 022 已落地)**:
+**✅ 2026-05-14 反向更新 (sub-phase 022 已落地 + 合 main `ac69e3b`)**:
 
-- decision 022 sub-phase 022 字面完整实施, 字面 commit hash 累计 9 个:
-  `4d3ada5` / `1209398` / `c040d36` / `c0bab38` / `378a283` / `ea1be84` / `bb2ef00` / `9247ba5` / `<Step 5.10 hash>`
+- decision 022 sub-phase 022 字面完整实施, 合 main merge commit `ac69e3b` (2026-05-14), feature 分支 15 commit:
+  - 核心实施 (Step 5.2-5.10) 9 commit: `4d3ada5` / `1209398` / `c040d36` / `c0bab38` / `378a283` / `ea1be84` / `bb2ef00` / `9247ba5` / `21b9e3d`
+  - main merge: `9c88af1` (§10.D-4 处置 A)
+  - Step 5.12 总指挥审计 (lint fix + finalize): `bb32e1d` / `0a4bbca`
+  - Step 5.13 UI 回归抢修 ([N-5] + [N-5b] + [N-6] 降 Open Q): `0afb0bd` / `22562df` / `da1a275`
 - `FolderViewType` 字面已扩 `'note' | 'graph' | 'ebook'` (src/shared/ipc/note-folder-types.ts:58, Step 5.4 commit 2 前置入 `c0bab38`, 沿 §10.D-8 偏离登记)
 - ebook 5 folder API 字面字面完整废弃 (`folderList / folderCreate / folderRename / folderDelete / folderMove`), view caller 字面改走 folder capability + viewType='ebook'
 - ebook bookshelf-store `folders[]` JSON 字段字面废弃, folder 走 atom + folderForView('ebook') 边 + inFolder 边派生 (跟 note / graph 同模式)
 - bookshelf-store.ts / annotation-store.ts 字面 Step 5.10 整文件 git rm 清除
-- binary verify: Step 5.8 字面 12 PASS / 0 FAIL (含 folder atom + folderForView 边 + inFolder 边数据完整性 + L3 互斥三场景)
+- main 端 folder/handlers.ts narrow guard 字面加 'ebook' (Step 5.13 [N-5] 抢修, §10.D-12 字面登记)
+- ebook view nav-side useEffect 字面订阅 folderApi.onListChanged + library.onBookshelfChanged 双流 (Step 5.13 [N-5b] 抢修, §10.D-12b 字面登记)
+- binary verify: Step 5.8 字面 12 PASS / 0 FAIL (含 folder atom + folderForView 边 + inFolder 边数据完整性 + L3 互斥三场景); Step 5.13 用户 UI 验证 PASS (文件夹创建/删除实时刷新)
 
 ---
 

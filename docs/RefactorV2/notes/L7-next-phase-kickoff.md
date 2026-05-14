@@ -30,24 +30,27 @@ sub-phase 3a  总纲 (decision 013)           ✅ merge 281d74b  (decision 013)
 sub-phase 3a-1 graph 容器 + Instance 子决议  ✅ merge 574adfa  (decision 014)
 sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1 实施)
 反向更新 10 项                              ✅ merge 19b6ed6  (反向更新)
+sub-phase 021 folder 视图隔离               ✅ merge d55b0b6  (decision 021)
+sub-phase 022 ebook + annotation 迁移        ✅ merge ac69e3b  (decision 022, 2026-05-14)
 ```
 
 ### 1.2 已迁到 SurrealDB 的模块(可用)
 
 - ✅ note(笔记 — pm domain)
-- ✅ folder(文件夹 — folder domain,note + graph 共享)
+- ✅ folder(文件夹 — folder domain,note + graph + **ebook** 三 view 共享,folderForView 边表达视图归属,decision 021 + 022)
 - ✅ graph 容器 + Instance(画板 — graph-canvas + graph-instance domain)
 - ✅ pm content(view-agnostic pm atom,通过 pmContentCapability 管理)
+- ✅ ebook(书架 / 书 / 进度 / 书签 — ebook + reading-state atom 4 层模型,decision 022)
+- ✅ annotation(电子书标注 — 概念消亡,改走 thought pm block + bookAnchor attrs,decision 022)
 
 ### 1.3 未迁到 SurrealDB 的模块(走旧 localStorage / 磁盘 JSON)
 
 - ⏳ graph 其他节点类型(sticky / connector / image — Library + ShapeDef 注册路径,未持久化形态)
-- ⏳ ebook(书架 / 书 / 进度 / 书签 — 磁盘 JSON)
-- ⏳ annotation(电子书标注 — 磁盘 JSON)
 - ⏳ vocab(生词本 — 磁盘 JSON)
 - ⏳ media(媒体文件 metadata — 磁盘 JSON,实际二进制不一定迁)
 - ⏳ inspector(浮窗位置等 UI 局部状态 — localStorage)
 - ⏳ workspace(workspace 框架壳 — localStorage)
+- ⏳ trash(回收站 — V1 老 thought 迁 + 完整设计,留 sub-phase 023+,decision 022 §9.10/9.7/9.8 留尾)
 
 ### 1.4 未解的关键 Open Questions
 
