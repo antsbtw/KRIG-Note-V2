@@ -22,13 +22,26 @@ import {
 import { broadcastNoteListChanged } from '../note/broadcast';
 import { broadcastGraphListChanged } from '../graph/broadcast';
 
+/**
+ * decision 021 §4.2 不变约束 #2 + §0.2 第 4 条:onListChanged callback 签名字面不动
+ * ((list: FolderInfo[]) => void).
+ *
+ * 方案 C (决议 §10.B-2 偏离,2026-05-13 总指挥批复):
+ * - main 端按 view 分别广播 2 次 (note + graph),renderer 端 useAllFolders(viewType) hook
+ *   在 onListChanged callback 内调 listFolders(viewType) 重拉,只保留当前 view folder.
+ * - 字面合规:onListChanged 签名不动 (renderer 端 hook 上下文 viewType 已知,不依赖 callback 参数).
+ * - 隔离语义:每个 view 只收到自己 view 的 folder list,不污染对端 view 缓存.
+ */
 async function broadcastFolderListChanged(): Promise<void> {
   try {
-    const list = await listFolders();
+    const [noteList, graphList] = await Promise.all([
+      listFolders('note'),
+      listFolders('graph'),
+    ]);
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, list);
-      }
+      if (win.isDestroyed()) continue;
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, noteList);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, graphList);
     }
   } catch (err) {
     console.warn('[folder] broadcast list-changed failed:', err);
@@ -36,16 +49,22 @@ async function broadcastFolderListChanged(): Promise<void> {
 }
 
 export function registerFolderHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.FOLDER_LIST, async () => listFolders());
+  // decision 021 §4.1: FOLDER_LIST handler 透传 viewType 入参
+  ipcMain.handle(IPC_CHANNELS.FOLDER_LIST, async (_e, viewType: unknown) => {
+    if (viewType !== 'note' && viewType !== 'graph') return [];
+    return listFolders(viewType);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.FOLDER_CREATE,
     async (_e, payload: unknown) => {
-      const p = payload as { title?: unknown; parentFolderId?: unknown } | null;
+      const p = payload as { title?: unknown; parentFolderId?: unknown; viewType?: unknown } | null;
       if (!p || typeof p.title !== 'string' || !p.title) return null;
       const parentFolderId =
         typeof p.parentFolderId === 'string' && p.parentFolderId ? p.parentFolderId : null;
-      const folder = await createFolder(p.title, parentFolderId);
+      // decision 021 §4.1: viewType 必传校验
+      if (p.viewType !== 'note' && p.viewType !== 'graph') return null;
+      const folder = await createFolder(p.title, parentFolderId, p.viewType);
       await broadcastFolderListChanged();
       return folder;
     },

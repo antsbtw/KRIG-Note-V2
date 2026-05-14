@@ -46,7 +46,7 @@ export async function handleDrop(
   // 拉一次当前 notes/folders 用作防环 + 当前 parentId 判断
   const [allNotes, allFolders] = await Promise.all([
     noteCap().listNotes(),
-    folderCap().listFolders(),
+    folderCap().listFolders('note'),
   ]);
   const noteById = new Map(allNotes.map((n) => [n.id, n]));
   const folderById = new Map(allFolders.map((f) => [f.id, f]));
@@ -130,7 +130,7 @@ export async function pasteFromClipboard(
 
   const [allNotes, allFolders] = await Promise.all([
     noteCap().listNotes(),
-    folderCap().listFolders(),
+    folderCap().listFolders('note'),
   ]);
   const noteById = new Map(allNotes.map((n) => [n.id, n]));
   const folderById = new Map(allFolders.map((f) => [f.id, f]));
@@ -172,7 +172,7 @@ async function pasteFolderTree(
   if (!src) return;
 
   const newTitle = src.title.startsWith('副本 ') ? src.title : `副本 ${src.title}`;
-  const newFolder = await folderCap().createFolder(newTitle, targetParentId);
+  const newFolder = await folderCap().createFolder(newTitle, targetParentId, 'note');
   if (!newFolder) return;
   const newFolderId = newFolder.id;
 

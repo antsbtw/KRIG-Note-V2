@@ -69,7 +69,8 @@ function assignSortOrder(folders: FolderInfo[]): GraphFolderRecord[] {
 }
 
 export async function adapterFolderList(): Promise<GraphFolderRecord[]> {
-  const list = await listFolders();
+  // decision 021 §1.1: main 端 folder-adapter 内部硬编 'graph' viewType,renderer IPC 字面透明
+  const list = await listFolders('graph');
   return assignSortOrder(list);
 }
 
@@ -86,8 +87,9 @@ export async function adapterFolderCreate(
   parentId: string | null,
 ): Promise<GraphFolderRecord | null> {
   try {
-    const created = await createFolder(title, parentId);
-    const all = await listFolders();
+    // decision 021 §1.1: main 端 folder-adapter 内部硬编 'graph' viewType
+    const created = await createFolder(title, parentId, 'graph');
+    const all = await listFolders('graph');
     const records = assignSortOrder(all);
     return records.find((r) => r.id === created.id) ?? null;
   } catch (err) {

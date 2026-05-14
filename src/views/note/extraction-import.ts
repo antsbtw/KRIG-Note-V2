@@ -174,10 +174,10 @@ function stripPdfExt(name: string): string {
 }
 
 async function getOrCreateFolder(name: string): Promise<string | null> {
-  const folders = await folderCap().listFolders();
+  const folders = await folderCap().listFolders('note');
   const existing = folders.find((f) => f.title === name && f.parentId === null);
   if (existing) return existing.id;
-  const folder = await folderCap().createFolder(name, null);
+  const folder = await folderCap().createFolder(name, null, 'note');
   return folder?.id ?? null;
 }
 
