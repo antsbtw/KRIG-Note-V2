@@ -25,22 +25,104 @@
  */
 
 import path from 'node:path';
-import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { app } from 'electron';
 
 import { storage } from '@storage/index';
 import {
   scanMarkerEdgeMutexViolations,
 } from '@storage/health/cardinality-check';
-import { bookshelfStore } from '@platform/main/ebook/bookshelf-store';
-import { annotationStore } from '@platform/main/ebook/annotation-store';
-import type { EBookEntry, EBookFolder } from '@platform/main/ebook/bookshelf-store';
-import type { StoredAnnotation } from '@platform/main/ebook/annotation-store';
 import type { BookAnchor } from '@drivers/text-editing-driver/blocks/_shared/book-anchor';
 import type { PmPayload } from '@semantic/types';
 
+// sub-phase 022 (decision 022 §5 Step 5.10): bookshelf-store.ts / annotation-store.ts
+// 字面 git rm. Migration 字面 inline 旧 JSON schema type + 直接 readFileSync + JSON.parse
+// 字面读旧数据 (不再 import store class, 字面 store class 字面已删除).
+
+/** V1 → V2 旧 bookshelf.json entries[] schema (inline 沿 git history bookshelf-store.ts:41) */
+interface EBookEntry {
+  id: string;
+  fileType: 'pdf' | 'epub' | 'djvu' | 'cbz';
+  storage: 'link' | 'managed';
+  filePath: string;
+  originalPath?: string;
+  fileName: string;
+  displayName: string;
+  pageCount?: number;
+  folderId: string | null;
+  addedAt: number;
+  lastOpenedAt: number;
+  lastPosition?: { page?: number; scale?: number; fitWidth?: boolean; cfi?: string };
+  bookmarks?: number[];
+  cfiBookmarks?: Array<{ cfi: string; label: string }>;
+}
+
+/** V1 → V2 旧 bookshelf.json folders[] schema (inline 沿 git history bookshelf-store.ts:58) */
+interface EBookFolder {
+  id: string;
+  title: string;
+  parent_id: string | null;
+  sort_order: number;
+  created_at: number;
+}
+
+/** V1 → V2 旧 annotations/{bookId}.json schema (inline 沿 git history annotation-store.ts:25) */
+interface StoredAnnotation {
+  id: string;
+  type: 'rect' | 'underline';
+  color: string;
+  pageNum: number;
+  rect: { x: number; y: number; w: number; h: number };
+  cfi?: string;
+  textContent?: string;
+  ocrText?: string;
+  thumbnail?: string;
+  createdAt: number;
+}
+
 const FLAG_DIR = path.join(app.getPath('userData'), 'krig-data');
 const FLAG_PATH = path.join(FLAG_DIR, 'migration-022-completed');
+const EBOOK_DIR = path.join(app.getPath('userData'), 'krig-data', 'ebook');
+const BOOKSHELF_PATH = path.join(EBOOK_DIR, 'bookshelf.json');
+const ANNOTATIONS_DIR = path.join(EBOOK_DIR, 'annotations');
+
+/** 读旧 bookshelf.json — entries + folders 字面 inline (沿 bookshelf-store.ts:89-116 load 字面) */
+function loadBookshelf(): { entries: EBookEntry[]; folders: EBookFolder[] } {
+  if (!existsSync(BOOKSHELF_PATH)) return { entries: [], folders: [] };
+  try {
+    const raw = JSON.parse(readFileSync(BOOKSHELF_PATH, 'utf-8'));
+    if (Array.isArray(raw)) {
+      // 兼容老格式 (纯数组)
+      return {
+        entries: raw.map((e: EBookEntry) => ({ ...e, folderId: e.folderId ?? null })),
+        folders: [],
+      };
+    }
+    if (raw && typeof raw === 'object') {
+      return {
+        entries: Array.isArray(raw.entries) ? (raw.entries as EBookEntry[]) : [],
+        folders: Array.isArray(raw.folders) ? (raw.folders as EBookFolder[]) : [],
+      };
+    }
+    return { entries: [], folders: [] };
+  } catch (err) {
+    console.warn('[migration/022] bookshelf.json 读取失败 (file 损坏或权限问题):', err);
+    return { entries: [], folders: [] };
+  }
+}
+
+/** 读旧 annotations/{bookId}.json — 沿 annotation-store.ts:60-81 load 字面 */
+function loadAnnotations(bookId: string): StoredAnnotation[] {
+  const fp = path.join(ANNOTATIONS_DIR, `${bookId}.json`);
+  if (!existsSync(fp)) return [];
+  try {
+    const data = JSON.parse(readFileSync(fp, 'utf-8'));
+    return Array.isArray(data) ? (data as StoredAnnotation[]) : [];
+  } catch (err) {
+    console.warn(`[migration/022] annotations/${bookId}.json 读取失败:`, err);
+    return [];
+  }
+}
 
 const HAS_READING_THOUGHT_PREDICATE = 'user:krig:hasReadingThought';
 const HAS_READING_STATE_PREDICATE = 'user:krig:hasReadingState';
@@ -168,9 +250,10 @@ export async function runMigration022IfNeeded(): Promise<void> {
       'L3 末段互斥扫描 fail 时不写 flag, 启动下次重试',
   );
 
-  // ── [1] 读旧 JSON store ──
-  const entries: EBookEntry[] = bookshelfStore.list();
-  const folders: EBookFolder[] = bookshelfStore.folderList();
+  // ── [1] 读旧 JSON store (inline loadBookshelf, 沿 §10.B-2 字面 store 文件已删除) ──
+  const { entries, folders } = loadBookshelf();
+  // sub-phase 022 沿 V2 现状字面: 按 lastOpenedAt 倒序 (沿原 bookshelf-store.ts:134)
+  entries.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
 
   console.log(
     `[migration/022] 读旧 JSON: ${entries.length} entries, ${folders.length} folders`,
@@ -293,7 +376,7 @@ export async function runMigration022IfNeeded(): Promise<void> {
   let thoughtCount = 0;
   let blockCount = 0;
   for (const entry of entries) {
-    const annotations = annotationStore.list(entry.id);
+    const annotations = loadAnnotations(entry.id);
     if (annotations.length === 0) continue; // lazy: 无标注的书不创空 thought (沿决议 §4.1.2 §0.5)
 
     // 排序: pageNum 升序 + createdAt 升序 (沿决议 §7.2 [5a] 字面)

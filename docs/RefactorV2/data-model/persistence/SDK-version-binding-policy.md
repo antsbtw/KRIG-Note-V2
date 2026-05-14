@@ -135,6 +135,56 @@
 
 **教训详细**:[decision 020 §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md)。
 
+### 5.3 第 24 次设计师教训(2026-05-14,decision 022 §10.D-2)
+
+> 决议字面引用 storage API 调用语法时, 必须 grep V2 EdgeFilter / AtomFilter / SubgraphQuery 等 V2 既有 filter 字段名 (扁平 `subjectAtomId` 等), 不能复用决议字面伪代码或上一 sub-phase 字面 (沿第 22 次教训同型升级).
+
+**起因**: decision 022 §10.D-2 — 决议字面 4 处 (line 536 / 613 / 718 / 944) `listEdges({ predicate, subject: { atomId } })` 是设计师伪代码字面, 实测 V2 EdgeFilter 字面字段是扁平 `subjectAtomId` (src/storage/api.ts:107). Step 5.1 binary verify 实证扁平字段 PASS.
+
+**纪律升级**: §2.2 第 8 步加 "决议字面引用 storage API 调用语法时, 必须 grep EdgeFilter / AtomFilter / SubgraphQuery 等 V2 既有 filter 字段名".
+
+**教训详细**: [decision 022 §10.D-2](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.4 第 25 次设计师教训(2026-05-14,decision 022 §10.D-5)
+
+> 决议字面引用 V2 既有目录前必须 grep 实证 (沿第 18 / 22 / 24 次同型升级).
+
+**起因**: decision 022 §10.D-5 — 决议 §5 Step 5.3 字面 "沿 V2 既有 `_shared/` 目录字面", 实测 V2 字面 `src/drivers/text-editing-driver/blocks/` 字面**无 `_shared/` 子目录**, 字面新建符合决议字面意图.
+
+**纪律升级**: §2.2 第 8 步加 "决议字面引用 V2 既有目录前必须 grep 实证".
+
+**教训详细**: [decision 022 §10.D-5](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.5 第 26 次设计师教训(2026-05-14,decision 022 §10.D-6)
+
+> Bash tool persistent cwd 假设不可靠, 每个 Bash 调用独立 cd 前缀.
+
+**起因**: decision 022 §10.D-6 — 实施者字面 Bash 调用字面**2 次漂移到 V1 仓** (Step 5.4 早期 grep + Step 5.10 任务 1 typecheck verify), 累计 sub-phase 022 字面 7+ 次同型事故 (memory `feedback_v2_is_workspace_v1_is_reference`). Bash tool 文档字面 "working directory persists between commands" 在长 session 字面可能因复合命令 / pipe / heredoc 字面副作用失效.
+
+**纪律升级**: §2.2 第 9 步登记此教训; 每个 Bash 调用字面字面**必须独立 `cd /Users/wenwu/Documents/VPN-Server/KRIG-Note-V2 &&` 前缀**, 不依赖 persistent cwd 假设; L7 启动包 §1.6 实施者纪律累积教训追加第 7 条 (沿决议 022 反向更新).
+
+**教训详细**: [decision 022 §10.D-6](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.6 第 27 次设计师教训(2026-05-14,decision 022 §10.D-7)
+
+> 总指挥批复 typecheck error code 时必须沿 sub-phase 实际 fail 形态登记, 不复用上一 sub-phase 模板.
+
+**起因**: decision 022 §10.D-7 — prompt 字面字面 "Step 5.4 commit 1 后 typecheck 预期 fail (14+ caller TS2554)", 实测 25 errors: TS2305 × 10 + TS2339 × 12 + TS2353 × 1 + TS7006/7053 × 2, 无一条 TS2554. TS2554 字面字面 sub-phase 021 字面 (加 viewType 参数, caller 漏传), sub-phase 022 字面字面**删 interface + 删 API** 字面 fail 形态必然是 TS2305 + TS2339. prompt 字面沿 021 模板字面没修正 — 设计师笔误.
+
+**纪律升级**: §2.2 第 9 步登记此教训; 总指挥批复字面引用 typecheck error code 时, 必须沿 sub-phase 实际 fail 形态字面登记 (删 interface → TS2305 / 删 API → TS2339 / arity mismatch → TS2554).
+
+**教训详细**: [decision 022 §10.D-7](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.7 第 30 次设计师教训(2026-05-14,decision 022 Step 5.9)
+
+> 健康检查 helper 自愈模式 (keep-latest) vs 告警模式 (scan-only) 分离原则, 沿 decision 014 + 022 双 sub-phase 实证.
+
+**起因**: decision 022 Step 5.9 实施期决策 — scanCardinality 独立函数 (跟 checkPredicate keep-latest 区分). 沿 decision 014 §3.5.3.6 字面 keep-latest 自愈语义 (`inCanvas` / `hasContent` 一对一适用旧 atom 字面字面字面历史数据自愈) vs decision 022 §4.3.1-L2 字面 "扫描+告警" 语义 (`hasReadingState` / `hasReadingThought` 字面 sub-phase 022 字面留管理员决断, 跟 L1 throw + L3 throw+不写 flag 三层防线区分).
+
+**纪律升级**: §2.2 第 9 步登记此教训; 健康检查 helper 字面字面字面字面字面 sub-phase 设计意图字面字面字面字面字面**自愈 vs 告警**字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面 (沿决议 022 §11 第 30 次教训).
+
+**教训详细**: [decision 022 §11 第 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
 ---
 
 ## 6. 修订记录
@@ -145,6 +195,7 @@
 | 2026-05-13 | v1.1 | 用户 P3 修订:消除"禁止顺带改 vs §4 必改"矛盾(§7 分两类);§2.2 API 证据采集通用化;§4 表列字段口径统一 | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.2 | sub-phase 3a-tx 实施期 §10.B-2 偏离 + 第 12 次教训反向更新:§2.2 加第 4 步"API 可执行链路实证";§5 加 5.2 第 12 次教训 | [decision 020 §10.B-2 + §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.4 | sub-phase 021 实施期 5 个偏离(§10.B-1/B-2/B-3/C-1/C-2)+ 第 16-20 次教训累积反向更新:§2.2 加第 8 步"V2 完整传播层 6 层 grep 前瞻验证"(view caller / capability types / capability index / IPC+preload+d.ts / 分层 lint / 同类型 SSOT 位置 + 间接传播路径 + API 总数前瞻 + "跨 X 复用"语义明示)。授权依据:[decision 021 §0.5.ter 用户 P0 授权](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新) | [decision 021 §11.3-§11.7](decisions/021-sub-phase-021-folder-view-isolation.md) |
+| 2026-05-14 | v1.5 | sub-phase 022 实施期 13 偏离 (3B + 10D) + 第 24/25/26/27/30 次教训累积反向更新: §2.2 第 8 步加 "决议字面引用 storage API 调用语法 grep EdgeFilter 字段名" + "决议字面引用 V2 既有目录前必须 grep 实证" (沿第 24/25 次); §2.2 第 9 步加 "Bash tool persistent cwd 假设不可靠每 Bash 独立 cd 前缀" + "typecheck error code 沿 sub-phase 实际 fail 形态" + "健康检查 helper 自愈 vs 告警分离" (沿第 26/27/30 次). 授权依据: decision 022 §0.5.quat 用户 2026-05-14 P0 授权 (沿 sub-phase 021 §0.5.ter 同模式) | [decision 022 §11 第 24-27 + 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 
 ---
 
