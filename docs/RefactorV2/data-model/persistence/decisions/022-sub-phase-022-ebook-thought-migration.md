@@ -1362,7 +1362,39 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 
 **字面风险**: 中等 — sub-phase 加 view type union 字面没传播到 main 端 narrow guard, 沿 SDK-policy v1.4 第 8 步"V2 完整传播层 6 层 grep"清单字面**第 4 层 IPC channel + preload + d.ts** 字面**没明示 handler 内 narrow guard 字面**. 这是新教训第 32 次升级落点.
 
-**[N-6] 导入文档渲染空白**: 字面层 grep 实证后**不在本 §10.D-12 修复范围** (EBookView.tsx 字面跟 main 0 diff + library-handlers.ts EBOOK_LOADED 推流字面完整 + capability-impl list/getBook 字面正常). 运行时根因待用户复现 + 控制台日志诊断 (Step 5.13 第 2 commit 或独立 §10.D-13).
+#### §10.D-12b — Step 5.13 [N-5b]: ebook view nav-side 漏订阅 folderApi.onListChanged
+
+**发现期**: [N-5] folder handler narrow guard 抢修 commit 0afb0bd 后用户 UI 验证 [N-5] 仍"点+文件夹按钮 0 日志 + 0 UI 反应". 完全重启 dev server 后**重启出现"很多文件夹"** — 用户之前 N 次点击其实每次都成功创了 atom (main 端 fix 已生效), 但 view 端 UI 永不刷新, 直到 dev server 重启走 mount-time `refresh()` 才从 atom 库重新拉到全部 folder 显出. 锤实 view 端订阅链断裂.
+
+**字面**: sub-022 §5.6 view caller 改造把 folder 从 `library.folderXxx` 改走 `folder.createFolder(viewType='ebook')` 后, `src/views/ebook/nav-side-content.tsx:100-103` 字面**只订阅 library.onBookshelfChanged** (书架变化推流), **没订阅 folderApi.onListChanged** (文件夹变化推流). main 端 fix [N-5] 后字面 broadcast `FOLDER_LIST_CHANGED` 推流有 ebook list, 但 view 端字面不接 → UI 永不实时刷新.
+
+**字面对照** (修前):
+```typescript
+useEffect(() => {
+  refresh();
+  return library.onBookshelfChanged(() => refresh());  // ← 仅订阅 library, 漏 folder
+}, [library, refresh]);
+```
+
+(修后):
+```typescript
+useEffect(() => {
+  refresh();
+  const unsubLib = library.onBookshelfChanged(() => refresh());
+  const unsubFolder = folderApi.onListChanged(() => refresh());  // ← sub-022 §5.6 漏的一笔
+  return () => { unsubLib(); unsubFolder(); };
+}, [library, folderApi, refresh]);
+```
+
+**Step 5.13 抢修落地** (跟 §10.D-12 [N-5] 合并 commit, 字面 nav-side-content.tsx useEffect 改造):
+
+- 字面 1 处 Edit (line 100-110 双订阅 + 双 unsub return cleanup)
+- `npm run typecheck` PASS + `npm run lint` PASS (0 warning, exit 0)
+- 用户 UI 验证: 点+文件夹按钮立即出现新条目 + 重命名输入框 ✅; 右键删立即消失 ✅
+
+**字面风险**: 中等 — sub-phase 把单 capability 分流 (library → folder) 时, view 端订阅链字面**配对漏改**. 沿决议 021 §10.B-2 间接传播路径教训 (broadcast / 订阅 / hook 命名模式 grep) 字面**同型复现** — 决议 021 教训字面是"接口签名变更必须额外 grep 间接被调", 本次字面是"capability 责任拆分必须 grep view 端订阅 onXChanged 配对". 第 32 次教训字面扩展.
+
+**[N-6] 导入文档渲染空白**: 字面层 grep 实证后**不在本 §10.D-12 / §10.D-12b 修复范围** (EBookView.tsx 字面跟 main 0 diff + library-handlers.ts EBOOK_LOADED 推流字面完整 + capability-impl list/getBook 字面正常). 运行时根因待用户复现 + 控制台日志诊断 (Step 5.13 第 2 commit 或独立 §10.D-13).
 
 ## 11. 累积教训(实施完成后追加)
 
@@ -1440,16 +1472,21 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 
 **触发**: §10.D-12 (Step 5.13 抢修 — sub-022 加 FolderViewType 'ebook' 字面只改 union + view caller, 漏改 main 端 IPC handler `if (viewType !== 'note' && viewType !== 'graph')` 3 处 narrow guard 字面, 用户 UI 测试"+ 文件夹"按钮无反应才暴露)
 
-**字面**: 决议字面拍板"view type union += 新值"时必须**额外 grep 全谱 main 端 IPC handler narrow guard 字面**:
-- IPC handler 字面 `if (viewType !== 'A' && viewType !== 'B') return ...` 字面 narrow guard (本次 §10.D-12 漏点)
-- broadcast 字面 `Promise.all([listX('A'), listX('B')])` 字面遍历 (本次 §10.D-12 漏点)
+**字面**: 决议字面拍板"view type union += 新值"或"capability 责任拆分 (老 capability X.foo → 新 capability Y.foo)"时必须**额外 grep 全谱多个字面层**:
+
+**第 7-A 层 — main 端 IPC handler narrow guard 字面字符串值** (沿 §10.D-12 [N-5] 漏点):
+- IPC handler 字面 `if (viewType !== 'A' && viewType !== 'B') return ...` 字面 narrow guard
+- broadcast 字面 `Promise.all([listX('A'), listX('B')])` 字面遍历
 - 后端 enum / union 字面校验函数 (例: `isXType(v): v is XType` 字面)
+- 不能字面只 grep `FolderViewType` / `XType` 字面 type union 字面命中点 — narrow guard 字面是**字面值字符串字面字面**, 不引 union 类型字面 (例: `viewType !== 'note' && viewType !== 'graph'`), grep type 名拿不到
 
-不能字面只 grep `FolderViewType` / `XType` 字面 type union 字面命中点 — narrow guard 字面是**字面值字符串字面字面**, 不引 union 类型字面 (例: `viewType !== 'note' && viewType !== 'graph'`), grep type 名拿不到.
+**第 7-B 层 — view 端订阅链 onXChanged 配对** (沿 §10.D-12b [N-5b] 漏点):
+- capability 责任拆分时, view 端 useEffect 内**订阅字面必须同步配对扩** (例: 老 `library.onBookshelfChanged` + 新 `folderApi.onListChanged` 两条流并存, view 端要订阅两条; cleanup return 双 unsub)
+- 字面 grep view 端 `useEffect.*on[A-Z]\w+Changed\|onListChanged\|onBookshelfChanged` 等订阅模式
+- 拆分前书架+文件夹一体推流, view 订阅一条; 拆分后两条流, view 必须订阅双流 — 漏一笔字面层 lint/typecheck 不报, 只有 runtime UI 不实时刷新才暴露
+- 沿决议 021 §10.B-2 教训 17 "间接传播路径 — broadcast / 订阅 / hook" **同型扩展**
 
-完整传播层 grep 字面**第 7 层** (扩展 SDK-policy v1.4 字面 6 层清单): **main 端 IPC handler 字面值校验** (字面 grep `'<type-name-A>'` + `'<type-name-B>'` 字面字符串 + narrow guard 字面模式 `!== 'A' && !== 'B'`).
-
-**纪律升级**: SDK-version-binding-policy.md §2.2 第 8 步加 "view type union / enum 加项时必须 grep main 端 IPC handler narrow guard 字面字符串值"; §5.9 新加第 32 次教训完整字面 (沿第 18 / 22 / 24 / 25 / 29 次教训同型升级 — V2 完整传播层 grep 清单字面扩展).
+**纪律升级**: SDK-version-binding-policy.md §2.2 第 8 步加 "view type union / enum 加项 + capability 责任拆分时必须 grep 完整传播层第 7-A + 7-B 层字面"; §5.9 新加第 32 次教训完整字面 (沿第 17 / 18 / 22 / 24 / 25 / 29 次教训同型升级 — V2 完整传播层 grep 清单字面扩展, 字面**第 7 层拆 7-A / 7-B 两子层**).
 
 ## 12. P1 修订轮变更日志(可追溯)
 
@@ -1619,28 +1656,40 @@ table 目录字面导出 4 NodeSpec (table / tableRow / tableCell / tableHeader)
 - [N-4] 第 31 次教训 SDK-policy §2.2 第 9 步 + §6 v1.6 修订记录 Step 5.12 当前 docs commit 内合并落地 — 2026-05-14
 - 行数 §10.D-11 第 2 项字面 `+2542 / -963` → `+2541 / -963 (Step 5.12 lint fix 后)` 顺手改 — 2026-05-14
 
-### v0.7(2026-05-14,Step 5.13 抢修 UI 回归 [N-5] folder handler narrow guard)
+### v0.7(2026-05-14,Step 5.13 抢修 UI 回归 [N-5] folder handler narrow guard + [N-5b] view 订阅链漏配对)
 
-**触发**: Step 5.12 finalize 后用户 UI 测试 (T1 + T11) 发现 2 项回归 — [N-5] "+ 文件夹"按钮无反应 + [N-6] 导入文档渲染空白. main HEAD (0e6efe3) 反向验证两项均正常, 锤实 sub-022 引入回归.
+**触发**: Step 5.12 finalize 后用户 UI 测试 (T1 + T11) 发现 2 项回归 — [N-5] "+ 文件夹"按钮无反应 + [N-6] 导入文档渲染空白. main HEAD (0e6efe3) 反向验证两项均正常, 锤实 sub-022 引入回归. [N-5] commit 0afb0bd 抢修后用户重测仍 0 UI 反应 → 完全重启 dev server 后**重启出现"很多文件夹"** 暴露 [N-5b] 第二处漏点 (view 端订阅链).
 
-**§10 新增 1 条偏离** (§10.D-12): Step 5.13 UI 回归 [N-5] folder handler narrow guard 漏 'ebook'. 详 §10.D-12 字面 (3 处字面修复 + 字面风险 + [N-6] 字面分离).
+**§10 新增 2 条偏离** (§10.D-12 + §10.D-12b):
+- §10.D-12: folder handler narrow guard 漏 'ebook' (main 端字面层). 详 §10.D-12 字面 (3 处字面修复 + 字面风险 + [N-6] 字面分离).
+- §10.D-12b: ebook view nav-side 漏订阅 folderApi.onListChanged (view 端字面层). 详 §10.D-12b 字面 (1 处 useEffect 双订阅 + 用户 UI 验证 PASS).
 
-**§11 新增 1 条教训** (第 32 次): view type union 加项必须 grep 全谱 main 端 IPC handler narrow guard 字面 (SDK-policy v1.4 字面 6 层 grep 清单字面**第 7 层扩展** — IPC handler narrow guard 字面字符串值校验). 详 §11 第 32 次字面.
+**§11 新增 1 条教训** (第 32 次, 字面**两子层扩展**): view type union 加项 + capability 责任拆分时必须 grep 全谱多个字面层 — **第 7-A 层** main 端 IPC handler narrow guard 字面值 (沿 [N-5] 漏点) + **第 7-B 层** view 端订阅链 onXChanged 配对 (沿 [N-5b] 漏点). 详 §11 第 32 次字面.
 
-**Step 5.13 抢修 commit 字面 (本反向更新合并 1 commit)**:
+**Step 5.13 抢修 commit 字面 (本反向更新合并 2 commit)**:
+
+commit 1 — `0afb0bd` (已合 §10.D-12):
 - `fix(folder)`: src/platform/main/folder/handlers.ts 3 处加 'ebook' narrow guard + broadcast (decision 022 §10.D-12 + 第 32 次教训) + docs(decision/022): §10.D-12 + §11 第 32 次 + §12 v0.7 + SDK-policy v1.7 联动
 - verify: npm run typecheck PASS + npm run lint PASS (0 warning, --max-warnings 0 exit 0)
 - grep narrow guard 全谱 0 残留命中 (handlers.ts 3 处是唯一字面漏点)
 
-**累计 commit 矩阵更新** (Step 5.12 原 12 commit → Step 5.13 加 1 → 13 commit).
+commit 2 — (本反向更新合并 commit, §10.D-12b + 字面扩展):
+- `fix(ebook-view) + docs`: src/views/ebook/nav-side-content.tsx useEffect 加订阅 folderApi.onListChanged + 双 unsub return cleanup; decision §10.D-12b + 第 32 次教训扩展两子层 + §12 v0.7 修订 + SDK-policy v1.7 字面扩展
+- verify: npm run typecheck PASS + npm run lint PASS (0 warning)
+- 用户 UI 验证: 点+文件夹立即出现重命名输入框 ✅; 右键删立即消失 ✅ (2026-05-14)
 
-**SDK-version-binding-policy.md 联动 v1.7** (Step 5.13 同 docs commit 内合并落地):
-- §5.9 新加第 32 次教训完整字面 (view type union 加项必须 grep 全谱 main 端 IPC handler narrow guard 字面)
-- §6 修订记录加 v1.7 条目, 授权依据 decision 022 §10.D-12 + Step 5.13 用户 P0 拍板
-- 跟 v1.5 / v1.6 同模式纵向纪律落地, 沿第 18 / 22 / 24 / 25 / 29 / 31 次教训"V2 完整传播层 grep 清单扩展" + "决议字面承诺必须实际落 SDK-policy 文件"
+**累计 commit 矩阵更新** (Step 5.12 原 12 commit → Step 5.13 加 2 → 14 commit).
+
+**SDK-version-binding-policy.md 联动 v1.7** (Step 5.13 同 docs commit 内合并落地, **字面两子层扩展**):
+- §5.9 新加第 32 次教训完整字面 (view type union 加项 + capability 责任拆分必须 grep 第 7-A 层 IPC handler narrow guard 字面值 + 第 7-B 层 view 端订阅链 onXChanged 配对)
+- §6 修订记录加 v1.7 条目, 授权依据 decision 022 §10.D-12 + §10.D-12b + Step 5.13 用户 P0 拍板
+- 跟 v1.5 / v1.6 同模式纵向纪律落地, 沿第 17 / 18 / 22 / 24 / 25 / 29 / 31 次教训"V2 完整传播层 grep 清单扩展" + "间接传播路径 broadcast / 订阅 / hook"
 
 **用户 P0 拍板** (Step 5.13):
 - [N-5] folder handler 字面修 总指挥直接动手 (3 处字面 Edit + lint/typecheck + commit) — 2026-05-14
+- [N-5b] view 订阅链字面修 总指挥直接动手 (1 处 useEffect Edit + lint/typecheck + 用户 UI 验证 PASS 后才 commit) — 2026-05-14
+- [N-5b] 验证前不假设修对, 沿 memory feedback_strict_compliance_workflow + feedback_implementation_test_checklist 纪律 (用户纠错点) — 2026-05-14
+- 误创"很多文件夹" 用户手动右键删 (顺手验证 §10.D-12b list-changed 实时刷新) — 2026-05-14
 - [N-6] 运行时诊断 由用户配合 (重启 dev server + 复现 + 贴控制台日志给总指挥定位) — 2026-05-14
 
-**[N-6] 留尾**: §10.D-13 字面**留待用户日志诊断后回填**. 若运行时根因可锁定, Step 5.13 加第 2 commit (字面修代码) + 更新本 §12 v0.7 字面"Step 5.13 抢修 commit 字面 2 个". 若根因复杂或跨 sub-phase scope, 字面移 §9.10 Open Q + sub-023 抢修.
+**[N-6] 留尾**: §10.D-13 字面**留待用户日志诊断后回填**. 若运行时根因可锁定, Step 5.13 加第 3 commit (字面修代码) + 更新本 §12 v0.7 字面"Step 5.13 抢修 commit 字面 3 个". 若根因复杂或跨 sub-phase scope, 字面移 §9.10 Open Q + sub-023 抢修.

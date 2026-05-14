@@ -99,8 +99,16 @@ function BookshelfPanel() {
 
   useEffect(() => {
     refresh();
-    return library.onBookshelfChanged(() => refresh());
-  }, [library, refresh]);
+    // sub-phase 022 §10.D-12b: 同时订阅 library (书) + folder (文件夹) 两条流;
+    // sub-022 §5.6 view caller 改造时漏改一笔 — 仅订阅 library 时, 新建文件夹后
+    // main 端 FOLDER_LIST_CHANGED broadcast 字面有但 view 端不接 → UI 不刷新.
+    const unsubLib = library.onBookshelfChanged(() => refresh());
+    const unsubFolder = folderApi.onListChanged(() => refresh());
+    return () => {
+      unsubLib();
+      unsubFolder();
+    };
+  }, [library, folderApi, refresh]);
 
   // 订阅 transient selectedIds(全局 transientVersion 触发)
   // 读 wsState 的 selectedIds 只来自 transient,所以 ws 字段变化不触发 — 单独订阅 version

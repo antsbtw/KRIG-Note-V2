@@ -195,15 +195,25 @@
 
 **教训详细**: [decision 022 §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
 
-### 5.9 第 32 次设计师教训(2026-05-14,decision 022 §10.D-12 Step 5.13 反向更新)
+### 5.9 第 32 次设计师教训(2026-05-14,decision 022 §10.D-12 + §10.D-12b Step 5.13 反向更新)
 
-> view type union / enum 加项时必须 grep 全谱 main 端 IPC handler narrow guard 字面字符串值, 不能字面只 grep type 名拿命中.
+> view type union / enum 加项 + capability 责任拆分时必须 grep 全谱**两子层**: main 端 IPC handler narrow guard 字面值 + view 端订阅链 onXChanged 配对.
 
-**起因**: decision 022 §10.D-12 — sub-022 §10.D-8 字面"FolderViewType += 'ebook'"字面只改 `src/capabilities/folder/types.ts` 的 FolderViewType union 字面 + view caller 字面 + capability-impl 字面, **漏改 main 端 IPC handler `src/platform/main/folder/handlers.ts` 字面 3 处 narrow guard**: `FOLDER_LIST` (`if (viewType !== 'note' && viewType !== 'graph') return [];`) / `FOLDER_CREATE` (同型) / `broadcastFolderListChanged` (`Promise.all([listFolders('note'), listFolders('graph')])` 字面遍历漏 'ebook'). 用户 UI 测试 (Step 5.12 finalize 后 T1 + T11) 发现"+ 文件夹"按钮无反应才暴露, main HEAD (0e6efe3) 反向验证锤实 sub-022 回归. 根因是**完整传播层 6 层 grep 清单字面**第 4 层 (IPC channel + preload + d.ts) **字面没明示 handler 内 narrow guard 字面**, narrow guard 是**字面值字符串字面**, 不引 union 类型字面 (例: `viewType !== 'note' && viewType !== 'graph'`), grep type 名拿不到.
+**起因**: decision 022 Step 5.13 抢修期连续暴露 2 处字面漏点:
 
-**纪律升级**: §2.2 第 8 步登记此教训; view type union / enum 加项时必须**额外 grep 全谱 main 端 IPC handler narrow guard 字面字符串值** (字面 grep `!== '<type-name-A>'` + `!== '<type-name-B>'` 字面字符串模式 + `Promise.all([listX('A'), listX('B')])` 字面遍历漏点), 不能字面只 grep type 名拿命中. 完整传播层 grep **第 7 层扩展** (沿 v1.4 字面 6 层清单字面扩展): main 端 IPC handler 字面值校验 (字面 grep `'<type-name>'` 字面字符串 + narrow guard 字面模式).
+1. **§10.D-12 (第 7-A 层 — main 端 IPC handler narrow guard 字面值)**: sub-022 §10.D-8 字面"FolderViewType += 'ebook'"字面只改 `src/capabilities/folder/types.ts` 的 union 字面 + view caller 字面 + capability-impl 字面, **漏改 main 端 IPC handler `src/platform/main/folder/handlers.ts` 字面 3 处 narrow guard**: `FOLDER_LIST` (`if (viewType !== 'note' && viewType !== 'graph') return [];`) / `FOLDER_CREATE` (同型) / `broadcastFolderListChanged` (`Promise.all([listFolders('note'), listFolders('graph')])` 字面遍历漏 'ebook'). narrow guard 字面是**字面值字符串字面**, 不引 union 类型字面, grep type 名拿不到.
 
-**教训详细**: [decision 022 §10.D-12 + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+2. **§10.D-12b (第 7-B 层 — view 端订阅链 onXChanged 配对)**: §10.D-12 抢修 commit 0afb0bd 后用户 UI 验证仍 0 反应, 完全重启 dev server 出现"很多文件夹"暴露 — sub-022 §5.6 view caller 把 folder 从 `library.folderXxx` 改走 `folder.createFolder(viewType='ebook')` 时, `src/views/ebook/nav-side-content.tsx:100-103` 字面**只订阅 library.onBookshelfChanged**, **没订阅 folderApi.onListChanged**. main 端 fix 后 broadcast `FOLDER_LIST_CHANGED` 字面有但 view 端字面不接 → UI 永不实时刷新, 只有冷启动 mount-time refresh() 才从 atom 库重新拉到. 沿 decision 021 §10.B-2 教训 17"间接传播路径 broadcast / 订阅 / hook"**同型扩展** — 决议 021 教训字面是"接口签名变更必须额外 grep 间接被调", 本次字面是"capability 责任拆分必须 grep view 端订阅 onXChanged 配对".
+
+**纪律升级**: §2.2 第 8 步登记此教训; view type union / enum 加项 + capability 责任拆分时必须**额外 grep 全谱两子层**:
+
+- **第 7-A 层 — main 端 IPC handler 字面值校验**: 字面 grep `!== '<type-name-A>'` + `!== '<type-name-B>'` 字面字符串模式 + `Promise.all([listX('A'), listX('B')])` 字面遍历 + `isXType(v): v is XType` 字面 narrow function. 不能字面只 grep type 名拿命中.
+
+- **第 7-B 层 — view 端订阅链 onXChanged 配对**: 字面 grep view 端 useEffect 内 `on[A-Z]\w+Changed\|onListChanged\|onBookshelfChanged` 等订阅模式. capability 责任拆分时 (老 capability X.foo → 新 capability Y.foo), view 端**订阅必须同步配对扩**: 老 `X.onXChanged` + 新 `Y.onYChanged` 两条流并存, view 要订阅两条; cleanup return 双 unsub. 漏一笔字面层 lint/typecheck 不报, 只有 runtime UI 不实时刷新才暴露.
+
+完整传播层 grep **第 7 层拆 7-A / 7-B 两子层** (沿 v1.4 字面 6 层清单字面扩展).
+
+**教训详细**: [decision 022 §10.D-12 + §10.D-12b + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
 
 ---
 
@@ -217,7 +227,7 @@
 | 2026-05-13 | v1.4 | sub-phase 021 实施期 5 个偏离(§10.B-1/B-2/B-3/C-1/C-2)+ 第 16-20 次教训累积反向更新:§2.2 加第 8 步"V2 完整传播层 6 层 grep 前瞻验证"(view caller / capability types / capability index / IPC+preload+d.ts / 分层 lint / 同类型 SSOT 位置 + 间接传播路径 + API 总数前瞻 + "跨 X 复用"语义明示)。授权依据:[decision 021 §0.5.ter 用户 P0 授权](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新) | [decision 021 §11.3-§11.7](decisions/021-sub-phase-021-folder-view-isolation.md) |
 | 2026-05-14 | v1.5 | sub-phase 022 实施期 13 偏离 (3B + 10D) + 第 24/25/26/27/30 次教训累积反向更新: §2.2 第 8 步加 "决议字面引用 storage API 调用语法 grep EdgeFilter 字段名" + "决议字面引用 V2 既有目录前必须 grep 实证" (沿第 24/25 次); §2.2 第 9 步加 "Bash tool persistent cwd 假设不可靠每 Bash 独立 cd 前缀" + "typecheck error code 沿 sub-phase 实际 fail 形态" + "健康检查 helper 自愈 vs 告警分离" (沿第 26/27/30 次). 授权依据: decision 022 §0.5.quat 用户 2026-05-14 P0 授权 (沿 sub-phase 021 §0.5.ter 同模式) | [decision 022 §11 第 24-27 + 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 | 2026-05-14 | v1.6 | sub-phase 022 Step 5.12 总指挥审计反馈 + 第 31 次教训反向更新: §5.8 新加第 31 次教训字面 "完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入, 完成判据矩阵 typecheck + lint 双跑双绿, commit 矩阵行数以 `git diff --stat <merge-base>..HEAD` 实测口径为准弃用逐 commit 累加法"; §2.2 第 9 步同步登记. 授权依据: decision 022 §10.D-11 + Step 5.12 用户 2026-05-14 P0 拍板 (沿 v1.5 同模式) | [decision 022 §10.D-11 + §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
-| 2026-05-14 | v1.7 | sub-phase 022 Step 5.13 UI 回归 [N-5] folder handler narrow guard + 第 32 次教训反向更新: §5.9 新加第 32 次教训字面 "view type union / enum 加项时必须 grep 全谱 main 端 IPC handler narrow guard 字面字符串值"; §2.2 第 8 步同步登记 + 完整传播层 grep 清单字面**第 7 层扩展** (IPC handler 字面值校验). 授权依据: decision 022 §10.D-12 + Step 5.13 用户 2026-05-14 P0 拍板 (沿 v1.5 / v1.6 同模式) | [decision 022 §10.D-12 + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
+| 2026-05-14 | v1.7 | sub-phase 022 Step 5.13 UI 回归 [N-5] folder handler narrow guard + [N-5b] view 订阅链漏配对 + 第 32 次教训反向更新 (**字面两子层扩展**): §5.9 新加第 32 次教训字面 "view type union / enum 加项 + capability 责任拆分时必须 grep 全谱两子层 — 第 7-A 层 main 端 IPC handler narrow guard 字面值 + 第 7-B 层 view 端订阅链 onXChanged 配对"; §2.2 第 8 步同步登记 + 完整传播层 grep 清单字面**第 7 层拆 7-A / 7-B 两子层** (沿 v1.4 字面 6 层清单字面扩展). 授权依据: decision 022 §10.D-12 + §10.D-12b + Step 5.13 用户 2026-05-14 P0 拍板 (沿 v1.5 / v1.6 同模式) | [decision 022 §10.D-12 + §10.D-12b + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 
 ---
 
