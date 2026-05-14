@@ -416,6 +416,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   folderDelete(id: string): Promise<{ deletedFolders: number; deletedResources: number; cascadedEdges: number }> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id);
   },
+  /** decision 021 §5.5 + §10.B-3:Q7 弱保护 dry-run 计数 */
+  folderPreviewDelete(id: string): Promise<{ folders: number; resources: number }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_PREVIEW_DELETE, id);
+  },
   onFolderListChanged(callback: (list: unknown) => void): () => void {
     const handler = (_event: unknown, list: unknown): void => callback(list);
     ipcRenderer.on(IPC_CHANNELS.FOLDER_LIST_CHANGED, handler);

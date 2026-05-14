@@ -185,6 +185,28 @@ export async function moveFolder(
  * 字段命名 deletedNotes → deletedResources 反映 scope 扩展;
  * 无 caller 真实消费 deletedNotes 字段名 (grep 仅声明位置)。
  */
+/**
+ * Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3).
+ *
+ * 事务内 BFS collectFolderSubtree + collectResourcesInFolders 同模式(decision 020 §7.5),
+ * 仅计数不删除. UI 调用本 API 后,resources > 0 || folders > 0 时弹框确认.
+ *
+ * folders 字段返"子 folder 数"(不含 self),resources 字段返"含 self 在内的所有 folder 内含资源数".
+ */
+export async function previewDeleteFolder(
+  id: string,
+): Promise<{ folders: number; resources: number }> {
+  return storage.transaction(async (tx) => {
+    const allFolderIds = await collectFolderSubtree(tx, id);
+    const allResourceIds = await collectResourcesInFolders(tx, allFolderIds);
+    return {
+      // allFolderIds 含 self,UI 文案"包含 N 个子文件夹"减 self
+      folders: Math.max(0, allFolderIds.length - 1),
+      resources: allResourceIds.length,
+    };
+  });
+}
+
 export async function deleteFolder(id: string): Promise<{
   deletedFolders: number;
   deletedResources: number;

@@ -104,8 +104,28 @@ export async function deleteSelected(workspaceId: string): Promise<void> {
 
   for (const treeId of ids) {
     const { type, id } = decodeTreeId(treeId);
-    if (type === 'note') await deleteNote(id);
-    else await deleteFolder(id);
+    if (type === 'note') {
+      await deleteNote(id);
+    } else {
+      // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):批量删除时,含资源 folder 逐个 confirm
+      // 总指挥批复字面:逐个 confirm 字面对齐 Q7 弱处理 + 0 工程量,multi-select batch UX 留 023
+      // 用户在某个 folder 上点"取消"则跳过该 folder,其他继续
+      const cap = folderCap();
+      const [preview, info] = await Promise.all([
+        cap.previewDeleteFolder(id),
+        cap.getFolder(id),
+      ]);
+      let shouldDelete = true;
+      if (preview.resources > 0 || preview.folders > 0) {
+        const folderTitle = info?.title ?? '(未命名)';
+        const message =
+          preview.resources > 0
+            ? `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹 + ${preview.resources} 个文件,操作不可撤销(回收站功能未实施)`
+            : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
+        shouldDelete = window.confirm(message);
+      }
+      if (shouldDelete) await deleteFolder(id);
+    }
   }
   setSelectedIds(workspaceId, new Set());
 }

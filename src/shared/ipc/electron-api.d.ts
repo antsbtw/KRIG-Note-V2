@@ -279,6 +279,8 @@ declare global {
         deletedResources: number;
         cascadedEdges: number;
       }>;
+      /** decision 021 §5.5 + §10.B-3:Q7 弱保护 dry-run 计数 */
+      folderPreviewDelete(id: string): Promise<{ folders: number; resources: number }>;
       /** main → renderer 推送:文件夹列表变更;返 unsubscribe */
       onFolderListChanged(callback: (list: FolderInfo[]) => void): () => void;
 

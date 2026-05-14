@@ -29,6 +29,7 @@ import {
   deleteSelected,
 } from './tree-operations';
 import { decodeTreeId, encodeNoteId } from './tree-builder';
+import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
 import { showDictionaryPanel, showTranslationPanel } from './learning-integration';
 
@@ -129,8 +130,27 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.delete-by-tree-id', (treeId: unknown) => {
     if (typeof treeId !== 'string') return;
     const { type, id } = decodeTreeId(treeId);
-    if (type === 'note') void deleteNote(id);
-    else void deleteFolder(id);
+    if (type === 'note') {
+      void deleteNote(id);
+    } else {
+      // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):含资源 folder 删除前 confirm
+      void (async () => {
+        const folderCap = requireCapabilityApi<FolderCapabilityApi>('folder');
+        const [preview, info] = await Promise.all([
+          folderCap.previewDeleteFolder(id),
+          folderCap.getFolder(id),
+        ]);
+        if (preview.resources > 0 || preview.folders > 0) {
+          const folderTitle = info?.title ?? '(未命名)';
+          const message =
+            preview.resources > 0
+              ? `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹 + ${preview.resources} 个文件,操作不可撤销(回收站功能未实施)`
+              : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
+          if (!window.confirm(message)) return;
+        }
+        await deleteFolder(id);
+      })();
+    }
   });
 
   commandRegistry.register('note-view.copy-by-tree-id', (treeId: unknown) => {

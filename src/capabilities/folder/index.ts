@@ -46,6 +46,12 @@ async function moveFolder(folderId: string, newParentFolderId: string | null): P
 async function deleteFolder(id: string): Promise<FolderDeleteResult> {
   return window.electronAPI.folderDelete(id);
 }
+/** Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3) */
+async function previewDeleteFolder(
+  id: string,
+): Promise<{ folders: number; resources: number }> {
+  return window.electronAPI.folderPreviewDelete(id);
+}
 function onListChanged(callback: (list: FolderInfo[]) => void): () => void {
   return window.electronAPI.onFolderListChanged(callback);
 }
@@ -57,6 +63,7 @@ export const folderCapability: FolderCapabilityApi = {
   renameFolder,
   moveFolder,
   deleteFolder,
+  previewDeleteFolder,
   onListChanged,
 };
 

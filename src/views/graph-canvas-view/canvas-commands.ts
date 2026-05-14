@@ -17,6 +17,7 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { GraphLibraryStoreApi } from '@capabilities/graph-library-store/types';
+import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import {
   getGraphCanvasWsState,
   setActiveGraphId,
@@ -99,6 +100,21 @@ export function registerGraphCanvasCommands(): void {
           }
         }
       } else {
+        // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):含资源 folder 删除前 confirm
+        // canvas-commands 是 view 层,跨 capability 调用允许(graph-library-store 不动 + folder capability 单独调)
+        const folderCap = requireCapabilityApi<FolderCapabilityApi>('folder');
+        const [preview, info] = await Promise.all([
+          folderCap.previewDeleteFolder(id),
+          folderCap.getFolder(id),
+        ]);
+        if (preview.resources > 0 || preview.folders > 0) {
+          const folderTitle = info?.title ?? '(未命名)';
+          const message =
+            preview.resources > 0
+              ? `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹 + ${preview.resources} 个文件,操作不可撤销(回收站功能未实施)`
+              : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
+          if (!window.confirm(message)) return;
+        }
         await library.folderDelete(id);
       }
     },

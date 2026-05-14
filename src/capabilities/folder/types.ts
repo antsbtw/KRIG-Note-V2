@@ -46,6 +46,14 @@ export interface FolderCapabilityApi {
    * decision 012 设计师批复 + decision 014 §6.2.6 cascade scope 扩展。
    */
   deleteFolder(id: string): Promise<FolderDeleteResult>;
+  /**
+   * Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3 新增 8th API).
+   *
+   * UI 调用本 API 后,resources > 0 || folders > 0 时弹框确认.
+   * - folders: 子 folder 数(不含 self)
+   * - resources: 含 self 在内的所有 folder 内含资源数(pm note + graph-canvas)
+   */
+  previewDeleteFolder(id: string): Promise<{ folders: number; resources: number }>;
   /** 订阅文件夹列表变更 (IPC 广播);返 unsubscribe */
   onListChanged(callback: (list: FolderInfo[]) => void): () => void;
 }

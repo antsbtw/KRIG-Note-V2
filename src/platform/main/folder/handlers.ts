@@ -18,6 +18,7 @@ import {
   renameFolder,
   moveFolder,
   deleteFolder,
+  previewDeleteFolder,
 } from './capability-impl';
 import { broadcastNoteListChanged } from '../note/broadcast';
 import { broadcastGraphListChanged } from '../graph/broadcast';
@@ -91,6 +92,14 @@ export function registerFolderHandlers(): void {
       typeof p.newParentFolderId === 'string' && p.newParentFolderId ? p.newParentFolderId : null;
     await moveFolder(p.folderId, newParentFolderId);
     await broadcastFolderListChanged();
+  });
+
+  // decision 021 §5.5 Q7 弱保护: dry-run 计数,不删除
+  ipcMain.handle(IPC_CHANNELS.FOLDER_PREVIEW_DELETE, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) {
+      return { folders: 0, resources: 0 };
+    }
+    return previewDeleteFolder(id);
   });
 
   ipcMain.handle(IPC_CHANNELS.FOLDER_DELETE, async (_e, id: unknown) => {
