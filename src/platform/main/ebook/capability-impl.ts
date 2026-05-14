@@ -43,9 +43,8 @@ import type {
   ReadingStateInfo,
 } from '@shared/ipc/ebook-types';
 import type { BookAnchor } from '@drivers/text-editing-driver/blocks/_shared/book-anchor';
-import type { NoteDocEnvelope, NoteInfo } from '@shared/ipc/note-folder-types';
+import type { NoteInfo } from '@shared/ipc/note-folder-types';
 import {
-  getNote,
   updateNote,
   wrapPmDoc,
   unwrapPmDoc,
