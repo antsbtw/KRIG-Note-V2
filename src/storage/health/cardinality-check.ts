@@ -108,3 +108,60 @@ export async function runCardinalityCheck(storage: StorageAPI): Promise<void> {
     }
   }
 }
+
+// ── sub-phase 022 (decision 022 §4.3.1) — pm atom marker 边互斥扫描 ──
+
+/**
+ * pm atom 上的 marker 边互斥组 (decision 022 §4.3.1).
+ *
+ * 一个 pm atom 最多挂这组中的 1 条 marker 边:
+ * - user:krig:hasNoteView      (note,decision 016 §3.6)
+ * - user:krig:hasReadingThought (ebook reading thought,decision 022 §4.1.2)
+ * - 未来 023+ 可能加 hasNoteThought (V1 老 thought 挂 note 字面,沿 §4.3 字面)
+ *
+ * 互斥扫描结果字面 — L2 健康检查 + L3 migration 末段都消费.
+ */
+export interface MarkerEdgeMutexViolation {
+  /** pm atom id (subject 字面) */
+  atomId: string;
+  /** 该 atom 同时挂的 marker predicate (字面应只 1 条) */
+  predicates: string[];
+}
+
+const PM_MARKER_PREDICATES = [
+  'user:krig:hasNoteView',
+  'user:krig:hasReadingThought',
+] as const;
+
+/**
+ * 扫描 pm atom 上的 marker 边互斥违反.
+ *
+ * L2 字面消费:启动期 + 用户手动触发 health-check 时调,违反 → warn 告警,不抛错.
+ * L3 字面消费:022 migration 末段调,违反 → migration throw + 不写 flag.
+ *
+ * 字面 helper 单一职责: 纯 storage.listEdges 查询 + 返 violations[], 不抛错,
+ * 字面由调用者 (L2 / L3) 字面分流处置.
+ */
+export async function scanMarkerEdgeMutexViolations(
+  storage: StorageAPI,
+): Promise<MarkerEdgeMutexViolation[]> {
+  // 按 subject.atomId 聚合各 predicate 的边
+  const atomToPredicates = new Map<string, Set<string>>();
+  for (const predicate of PM_MARKER_PREDICATES) {
+    const edges = await storage.listEdges({ predicate });
+    for (const e of edges) {
+      if (e.subject.kind !== 'atom') continue;
+      const set = atomToPredicates.get(e.subject.atomId) ?? new Set<string>();
+      set.add(predicate);
+      atomToPredicates.set(e.subject.atomId, set);
+    }
+  }
+  // 找出挂 >1 marker 的 atom
+  const violations: MarkerEdgeMutexViolation[] = [];
+  for (const [atomId, set] of atomToPredicates) {
+    if (set.size > 1) {
+      violations.push({ atomId, predicates: [...set] });
+    }
+  }
+  return violations;
+}

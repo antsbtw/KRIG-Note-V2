@@ -28,6 +28,7 @@ import { registerWebviewExtractionHook } from './extraction/handlers';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
+import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -86,6 +87,15 @@ app.whenReady().then(async () => {
     await runMigration021IfNeeded();
   } catch (err) {
     console.error('[migration/021] 执行失败,启动下次会重试:', err);
+  }
+
+  // L7-sub022 (decision 022 §7) — ebook + annotation → atom 体系迁移
+  // 必须严格在 021 之后跑 (021 已 clearAll 全部数据,022 起点是空数据库 + 旧 JSON store)。
+  // L3 末段互斥扫描 fail 时不写 flag, 启动下次重试 (沿决议 §4.3.1-L3 字面 + §0.2 字面纪律).
+  try {
+    await runMigration022IfNeeded();
+  } catch (err) {
+    console.error('[migration/022] 执行失败,启动下次会重试:', err);
   }
 
   // L0/L5-B4.3.1 — 注册 media:// 协议
