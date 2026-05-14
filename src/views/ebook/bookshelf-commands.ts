@@ -9,6 +9,7 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
+import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { getEBookWsState, setActiveBookId, setFolderExpanded } from './data-model';
 
 /** 拿当前活跃 workspace id(commands 由用户在某 ws 触发,默认作用于活跃 ws)*/
@@ -30,26 +31,26 @@ export function registerEBookCommands(): void {
     pendingImportTrigger?.();
   });
 
-  // 创建文件夹(根目录)
+  // 创建文件夹(根目录) — sub-phase 022: 走 folder capability + viewType='ebook'
   commandRegistry.register('ebook-view.create-folder', async () => {
-    const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-    const folder = await library.folderCreate('新建文件夹', null);
-    if (folder) {
+    const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
+    const created = await folder.createFolder('新建文件夹', null, 'ebook');
+    if (created) {
       // 创建后让 nav-side-content 进入重命名态(走 setRenameTrigger 桥)
-      pendingFolderCreatedTrigger?.(folder.id);
+      pendingFolderCreatedTrigger?.(created.id);
     }
   });
 
   // 在指定文件夹下新建子文件夹(右键 → "在此新建文件夹")
   commandRegistry.register('ebook-view.create-folder-in', async (parentId: unknown) => {
     if (typeof parentId !== 'string' || !parentId) return;
-    const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-    const folder = await library.folderCreate('新建文件夹', parentId);
-    if (folder) {
+    const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
+    const created = await folder.createFolder('新建文件夹', parentId, 'ebook');
+    if (created) {
       // 自动展开父
       const wsId = getActiveWorkspaceId();
       if (wsId) setFolderExpanded(wsId, parentId, true);
-      pendingFolderCreatedTrigger?.(folder.id);
+      pendingFolderCreatedTrigger?.(created.id);
     }
   });
 
@@ -87,7 +88,9 @@ export function registerEBookCommands(): void {
         }
       }
     } else {
-      await library.folderDelete(id);
+      // sub-phase 022: folder 删除走 folder capability (FolderViewType='ebook' 已自带 cascade)
+      const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
+      await folder.deleteFolder(id);
     }
   });
 

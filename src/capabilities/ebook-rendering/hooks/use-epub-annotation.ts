@@ -1,21 +1,16 @@
 /**
- * useEpubAnnotation — EPUB 标注 hook(L5-C4)
+ * useEpubAnnotation — EPUB 标注 hook (L5-C4)
  *
- * V1 → V2 改写:src/plugins/ebook/hooks/useEpubAnnotation.ts(95 行)。
- * 改动:接 host 命令式 API + ebook-library API,**不直接消费 renderer**。
- * EPUB 选区 / annotation 事件由 view 端 Host props 传入(onEpubTextSelected
- * / onEpubSelectionDismiss / onEpubAnnotationClick),hook 维护 selection /
- * annotations state,提供 createAnnotation + dismissSelection。
+ * sub-phase 022 (decision 022 §0.5 + §4.1.4): annotation 概念消亡, view caller
+ * 改走 thought block. 本 hook 字面 stub 化, 留 Step 5.6 (view caller 改造) 字面
+ * 真实接入 ebook capability 新 5 API:
+ *   - lib.getReadingThoughtAnnotations(bookId): Promise<BookAnchor[]>  (替代 annotationList)
+ *   - lib.addReadingThoughtBlock(bookId, blockSpec): Promise<void>     (替代 annotationAdd)
+ *   - lib.removeReadingThoughtBlock(bookId, blockId): Promise<void>    (替代 annotationRemove)
  *
- * 数据流:
- *   EPUB 内 mouseup → renderer onTextSelected → Host onEpubTextSelected →
- *     view 调 hook 的 setSelection → 显 picker
- *   用户选色 → hook.createAnnotation(color) → library.annotationAdd +
- *     host.addHighlight → 重渲高亮
- *   EPUB 内 click 已有标注 → renderer onAnnotationClick → Host
- *     onEpubAnnotationClick → view 调 hook 的 onAnnotationClick → 删除
+ * 当前 Step 5.4 commit 2 阶段: 接口签名保留, 实现返回空 (typecheck 全绿).
  *
- * 用法(view 端):
+ * 用法(view 端, Step 5.6 后):
  *   const ann = useEpubAnnotation(hostRef, bookIdRef);
  *   <Host onEpubTextSelected={ann.setSelection}
  *         onEpubSelectionDismiss={ann.dismiss}
@@ -26,9 +21,7 @@
  *   ann.loadOnBookOpen(bookId)  // onBookOpened 时调,加载已有 + 重绘高亮
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { EBookLibraryApi, StoredAnnotation } from '@capabilities/ebook-library/types';
+import { useState, useCallback } from 'react';
 import type { EBookHostHandle } from '../Host';
 
 export interface EpubSelection {
@@ -38,17 +31,22 @@ export interface EpubSelection {
   y: number;
 }
 
+/** 临时占位类型 (Step 5.6 替换为 BookAnchor[] 投影) */
+interface EpubAnnotationStub {
+  id: string;
+  cfi: string;
+  color: string;
+  textContent?: string;
+}
+
 export function useEpubAnnotation(
-  hostRef: React.RefObject<EBookHostHandle | null>,
-  bookIdRef: React.RefObject<string | null>,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _hostRef: React.RefObject<EBookHostHandle | null>,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _bookIdRef: React.RefObject<string | null>,
 ) {
   const [selection, setSelectionState] = useState<EpubSelection | null>(null);
-  const [annotations, setAnnotations] = useState<StoredAnnotation[]>([]);
-  const annotationsRef = useRef(annotations);
-
-  useEffect(() => {
-    annotationsRef.current = annotations;
-  }, [annotations]);
+  const [annotations] = useState<EpubAnnotationStub[]>([]);
 
   const setSelection = useCallback((info: EpubSelection) => {
     setSelectionState(info);
@@ -58,67 +56,27 @@ export function useEpubAnnotation(
     setSelectionState(null);
   }, []);
 
-  /** EPUB 内点击已有标注:删除该标注 + 移除高亮 */
-  const handleAnnotationClick = useCallback(
-    async (cfi: string) => {
-      const bookId = bookIdRef.current;
-      const host = hostRef.current;
-      if (!bookId || !host) return;
-      const ann = annotationsRef.current.find((a) => a.cfi === cfi);
-      if (!ann) return;
-      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-      await lib.annotationRemove(bookId, ann.id);
-      host.removeHighlight(cfi);
-      setAnnotations((prev) => prev.filter((a) => a.cfi !== cfi));
-    },
-    [bookIdRef, hostRef],
-  );
+  // TODO Step 5.6: 接入 lib.removeReadingThoughtBlock(bookId, blockId) +
+  //                host.removeHighlight(cfi)
+  const handleAnnotationClick = useCallback(async (_cfi: string) => {
+    // stub
+  }, []);
 
-  /** 用户选色 → 创建 annotation + 加 EPUB 高亮 */
-  const createAnnotation = useCallback(
-    async (color: string) => {
-      const bookId = bookIdRef.current;
-      const host = hostRef.current;
-      if (!selection || !bookId || !host) return;
-      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-      try {
-        const stored = await lib.annotationAdd(bookId, {
-          type: 'underline',
-          color,
-          pageNum: 0,
-          rect: { x: 0, y: 0, w: 0, h: 0 },
-          cfi: selection.cfi,
-          textContent: selection.text,
-        });
-        if (!stored) return;
-        await host.addHighlight(selection.cfi, color);
-        setAnnotations((prev) => [...prev, stored]);
-        setSelectionState(null);
-      } catch (err) {
-        console.warn('[useEpubAnnotation] createAnnotation failed:', err);
-      }
-    },
-    [selection, bookIdRef, hostRef],
-  );
+  // TODO Step 5.6: 接入 lib.addReadingThoughtBlock(bookId, { type: 'blockquote',
+  //                  attrs: { bookAnchor: { pageNum: 0, cfi, textContent, color,
+  //                                          type: 'highlight', createdAt } },
+  //                  content: [{ type: 'paragraph', content: [{ type: 'text',
+  //                              text: selection.text }] }] }) + host.addHighlight
+  const createAnnotation = useCallback(async (_color: string) => {
+    // stub: 留 Step 5.6 接入 thought block API
+    setSelectionState(null);
+  }, []);
 
-  /** 书加载后:拿全部 annotation + 重绘高亮(EPUB 重启场景关键)*/
-  const loadOnBookOpen = useCallback(
-    async (bookId: string) => {
-      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-      const host = hostRef.current;
-      const list = await lib.annotationList(bookId);
-      setAnnotations(list);
-      if (!host) return;
-      // 等 EPUB renderer ready(host.getTOC 走 readyPromise,迂回保证就绪)
-      await host.getTOC();
-      for (const ann of list) {
-        if (ann.cfi) {
-          await host.addHighlight(ann.cfi, ann.color);
-        }
-      }
-    },
-    [hostRef],
-  );
+  // TODO Step 5.6: 接入 lib.getReadingThoughtAnnotations(bookId) → 筛 cfi 非空的
+  //                BookAnchor → 重绘 host.addHighlight
+  const loadOnBookOpen = useCallback(async (_bookId: string) => {
+    // stub
+  }, []);
 
   return {
     selection,
