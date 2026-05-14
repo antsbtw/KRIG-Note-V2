@@ -119,6 +119,12 @@ sub-phase 3a-1 实施                         ✅ merge 67f18b2  (sub-phase 3a-1
 - 复合命令(`&` / `>` / pipe / heredoc / chain)前 `cd` 一定要在 `&&` 最前
 - 不确定时先 `pwd`
 
+**完成报告字面纪律(2026-05-13 sub-phase 021 Step 5.8 总指挥审计触发第 21 次教训追加,详 [decision 021 §11.8](../data-model/persistence/decisions/021-sub-phase-021-folder-view-isolation.md))**:
+- **完成报告字面 "X commit" 必须 `git log feature ^main` 字面 verify**(沿"严格 cd"同型字面纪律,本次扩展到"严格 git log verify")
+- **完成报告字面跨段一致性自校验**:首段总述 / table 矩阵 / 完成判据 / 偏离汇总字面**字面互相核对**,任一段修订时其他段字面同步
+- 字面 commit 数 mismatch 必须**字面立即纠正**,不等总指挥审计发现
+- 跟决议 020 §11.4 第 11 次教训"决议字面 grep verify 双向核对"同型升级 — "双向核对"模式扩展
+
 ---
 
 ## 2. 下阶段推进策略 — 修改版 Y(总指挥已拍板)
