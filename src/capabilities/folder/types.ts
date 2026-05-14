@@ -4,19 +4,13 @@
  * view 通过 requireCapabilityApi<FolderCapabilityApi>('folder') 取 api。
  */
 
-import type { FolderInfo } from '@shared/ipc/note-folder-types';
-
-export type { FolderInfo };
+import type { FolderInfo, FolderViewType } from '@shared/ipc/note-folder-types';
 
 /**
- * 视图归属标记 (decision 021 §4.1).
- *
- * folder atom 通过 user:krig:folderForView 边表达 view 归属:
- * - 'note'  → object literal '__view__/note'
- * - 'graph' → object literal '__view__/graph'
- * - future sub-phase 022 加 | 'ebook' (现状 ebook 走独立 JSON 树,不接 atom)
+ * decision 021 §10.C-1: FolderViewType 字面 SSOT 归 @shared/ipc/note-folder-types
+ * (跟 FolderInfo 同模式),本模块 re-export 给 capability 消费者.
  */
-export type FolderViewType = 'note' | 'graph';
+export type { FolderInfo, FolderViewType };
 
 export interface FolderDeleteResult {
   deletedFolders: number;

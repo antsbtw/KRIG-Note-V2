@@ -11,9 +11,9 @@ import type {
 import type {
   NoteInfo,
   FolderInfo,
+  FolderViewType,
   NoteDocEnvelope,
 } from './note-folder-types';
-import type { FolderViewType } from '@capabilities/folder/types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 
 declare global {
