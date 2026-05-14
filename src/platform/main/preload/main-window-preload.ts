@@ -236,22 +236,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.EBOOK_BOOKSHELF_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.EBOOK_BOOKSHELF_CHANGED, handler);
   },
-  // 文件夹
-  ebookFolderList(): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_LIST);
-  },
-  ebookFolderCreate(title: string, parentId?: string | null): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_CREATE, title, parentId ?? null);
-  },
-  ebookFolderRename(id: string, title: string): Promise<void> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_RENAME, id, title);
-  },
-  ebookFolderDelete(id: string): Promise<void> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_DELETE, id);
-  },
-  ebookFolderMove(id: string, parentId: string | null): Promise<void> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_FOLDER_MOVE, id, parentId);
-  },
+  // 文件夹: sub-phase 022 删除 5 channel bridge — view caller 改走 folder capability
+  // + viewType='ebook' (决议 021 §4.3 + 决议 022 Step 5.4 commit 2 已落地)
   // 数据传输
   ebookGetData(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_GET_DATA);
@@ -284,14 +270,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ebookCfiBookmarkList(bookId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_CFI_BOOKMARK_LIST, bookId);
   },
-  ebookAnnotationList(bookId: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_LIST, bookId);
+  // 标注: sub-phase 022 删除 3 channel bridge — annotation 概念消亡, 改走下面 5 个
+  // thought block bridge (decision 022 §4.1.4 + §0.5)
+
+  // ── sub-phase 022:reading thought block (5 新 API bridge) ──
+  ebookThoughtGet(bookId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_GET, bookId);
   },
-  ebookAnnotationAdd(bookId: string, ann: unknown): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_ADD, bookId, ann);
+  ebookThoughtEnsure(bookId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_ENSURE, bookId);
   },
-  ebookAnnotationRemove(bookId: string, annotationId: string): Promise<void> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_ANNOTATION_REMOVE, bookId, annotationId);
+  ebookThoughtBlockAdd(bookId: string, spec: unknown): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_BLOCK_ADD, bookId, spec);
+  },
+  ebookThoughtBlockRemove(bookId: string, blockId: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_BLOCK_REMOVE, bookId, blockId);
+  },
+  ebookThoughtAnnotations(bookId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_ANNOTATIONS, bookId);
   },
 
   // ── L5-C6:PDF 提取 → Note ──

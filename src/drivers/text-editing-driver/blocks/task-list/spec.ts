@@ -26,6 +26,10 @@ const taskItemNodeSpec: NodeSpec = {
     createdAt: { default: null },
     completedAt: { default: null },
     deadline: { default: null },
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    // task-list 目录 2 NodeSpec 字面仅 taskItem receiver bookAnchor (字面标注落到 item,
+    // 不在容器 taskList 上); 字面登记 §10.D 偏离同 table 模式
+    bookAnchor: { default: null },
   },
   parseDOM: [
     {

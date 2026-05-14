@@ -68,7 +68,7 @@ export const IPC_CHANNELS = {
   LEARNING_TRANSLATE: 'learning.translate',
   LEARNING_TTS: 'learning.tts',
 
-  // L5-C1:ebook 书架 + 文件夹(D-3=B JSON 实现,过渡至 W6 升 SurrealDB)
+  // L5-C1:ebook 书架(sub-phase 022: 走 atom 体系 — ebook + reading-state + pm domain)
   EBOOK_BOOKSHELF_LIST: 'ebook.bookshelf-list',
   EBOOK_PICK_FILE: 'ebook.pick-file',
   EBOOK_BOOKSHELF_ADD: 'ebook.bookshelf-add',
@@ -79,26 +79,27 @@ export const IPC_CHANNELS = {
   EBOOK_BOOKSHELF_RELOCATE: 'ebook.bookshelf-relocate',         // D-5 文件不存在重新定位
   EBOOK_BOOKSHELF_TRANSFER: 'ebook.bookshelf-transfer-managed', // link → managed
   EBOOK_BOOKSHELF_CHANGED: 'ebook.bookshelf-changed',           // main → renderer 推送
-  // 文件夹
-  EBOOK_FOLDER_LIST: 'ebook.folder-list',
-  EBOOK_FOLDER_CREATE: 'ebook.folder-create',
-  EBOOK_FOLDER_RENAME: 'ebook.folder-rename',
-  EBOOK_FOLDER_DELETE: 'ebook.folder-delete',
-  EBOOK_FOLDER_MOVE: 'ebook.folder-move',
+  // 文件夹: sub-phase 022 删 5 channel (folderList/Create/Rename/Delete/Move) — 改走
+  // folder capability + viewType='ebook' (决议 021 §4.3 兼容约束落地)
   // 数据传输
   EBOOK_GET_DATA: 'ebook.get-data',
   EBOOK_LOADED: 'ebook.loaded',                                 // main → renderer 推送
   EBOOK_CLOSE: 'ebook.close',
-  // 进度 + 书签 + 标注(C1 仅占位 channel,C2~C5 各段消费)
+  // 进度 + 书签 (sub-phase 022: reading-state atom CRUD)
   EBOOK_SAVE_PROGRESS: 'ebook.save-progress',
   EBOOK_BOOKMARK_TOGGLE: 'ebook.bookmark-toggle',
   EBOOK_BOOKMARK_LIST: 'ebook.bookmark-list',
   EBOOK_CFI_BOOKMARK_ADD: 'ebook.cfi-bookmark-add',
   EBOOK_CFI_BOOKMARK_REMOVE: 'ebook.cfi-bookmark-remove',
   EBOOK_CFI_BOOKMARK_LIST: 'ebook.cfi-bookmark-list',
-  EBOOK_ANNOTATION_LIST: 'ebook.annotation-list',
-  EBOOK_ANNOTATION_ADD: 'ebook.annotation-add',
-  EBOOK_ANNOTATION_REMOVE: 'ebook.annotation-remove',
+  // 标注: sub-phase 022 删 3 annotation channel — annotation 概念消亡,改走下面 5 个
+  // thought block channel (pm atom + hasReadingThought 边 + PM block.attrs.bookAnchor)
+  // ── L5-C1 / sub-phase 022:reading thought block (annotation → thought 转后接入) ──
+  EBOOK_THOUGHT_GET: 'ebook.thought-get',                       // getReadingThought
+  EBOOK_THOUGHT_ENSURE: 'ebook.thought-ensure',                 // ensureReadingThought (lazy create)
+  EBOOK_THOUGHT_BLOCK_ADD: 'ebook.thought-block-add',           // addReadingThoughtBlock
+  EBOOK_THOUGHT_BLOCK_REMOVE: 'ebook.thought-block-remove',     // removeReadingThoughtBlock
+  EBOOK_THOUGHT_ANNOTATIONS: 'ebook.thought-annotations',       // getReadingThoughtAnnotations
 
   // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform 集成)
   EXTRACTION_UPLOAD: 'extraction.upload',           // renderer → main:上传当前 PDF → 返 md5

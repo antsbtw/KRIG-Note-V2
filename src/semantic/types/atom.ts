@@ -18,6 +18,8 @@ export type AtomPayloadOf<D extends AtomDomain> =
   D extends 'folder'         ? FolderPayload :
   D extends 'graph-canvas'   ? GraphCanvasPayload :
   D extends 'graph-instance' ? GraphInstancePayload :
+  D extends 'ebook'          ? EBookPayload :
+  D extends 'reading-state'  ? ReadingStatePayload :
   unknown;
 
 export interface PmPayload {
@@ -114,6 +116,42 @@ export interface GraphInstancePayload {
 export type GraphInstanceEndpoint = unknown;
 /** capability 层窄化为 canvas-rendering/types.ts 内 StyleOverrides — semantic 层 unknown */
 export type GraphInstanceStyleOverrides = unknown;
+
+/**
+ * ebook domain — Layer 2 Book metadata (decision 022 §1.3.1)
+ *
+ * 持久化 ebook 文件元数据 (binary 二进制留磁盘, payload.filePath 引用)。
+ * Layer 3 阅读进度 / Layer 4 reading thought 走独立 atom + edge marker
+ * (decision 022 §4.1.2 hasReadingState / hasReadingThought)。
+ */
+export interface EBookPayload {
+  fileType: 'pdf' | 'epub' | 'djvu' | 'cbz';
+  storage: 'managed' | 'link';
+  filePath: string;
+  originalPath?: string;
+  fileName: string;
+  displayName: string;
+  pageCount?: number;
+  addedAt: number;
+}
+
+/**
+ * reading-state domain — Layer 3 阅读进度 + 书签 (decision 022 §1.3.1)
+ *
+ * cardinality 1:1 跟 ebook (decision 022 §4.1.2 hasReadingState),
+ * 拆分理由: 翻页 / bookmark 高频改, 跟书本 metadata 解耦避免无效 IO。
+ */
+export interface ReadingStatePayload {
+  lastOpenedAt: number;
+  lastPosition: {
+    page?: number;
+    scale?: number;
+    fitWidth?: boolean;
+    cfi?: string;
+  };
+  bookmarks: number[];                                   // PDF pageNum 书签
+  cfiBookmarks: Array<{ cfi: string; label: string }>;   // EPUB CFI 书签
+}
 
 export type Mark =
   | { type: 'bold' }

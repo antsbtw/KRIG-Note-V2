@@ -9,6 +9,12 @@ const blockquoteNodeSpec: NodeSpec = {
   content: 'block+',
   group: 'block',
   defining: true,
+  attrs: {
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    // EPUB highlight 标注转换字面 receiver (decision 022 §7.3): type='highlight' →
+    // blockquote + bookAnchor + content=[paragraph(textContent)]
+    bookAnchor: { default: null },
+  },
   parseDOM: [{ tag: 'blockquote' }],
   toDOM() {
     return ['blockquote', { class: 'krig-blockquote' }, 0];

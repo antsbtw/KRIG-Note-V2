@@ -28,12 +28,12 @@ import {
 } from '@workspace/workspace-instance/use-workspace';
 import type {
   EBookLibraryApi,
-  EBookEntry,
-  EBookFolder,
+  EBookInfo,
   EBookFileType,
   EBookStorageMode,
   PickFileResult,
 } from '@capabilities/ebook-library/types';
+import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types';
 import {
   getEBookWsState,
   setSelectedIds,
@@ -54,6 +54,11 @@ const FILE_ICONS: Record<EBookFileType, string> = {
   djvu: '📄',
   cbz: '🖼️',
 };
+
+/** EBookFileType narrowing helper — 兜底未知 fileType (沿 V2 EBookFileType union 4 项) */
+function fileIcon(fileType: string): string {
+  return (FILE_ICONS as Record<string, string | undefined>)[fileType] ?? '📄';
+}
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -77,20 +82,33 @@ function BookshelfPanel() {
     () => requireCapabilityApi<EBookLibraryApi>('ebook-library'),
     [],
   );
+  // sub-phase 022: folder 走 folder capability + viewType='ebook'
+  const folderApi = useMemo(
+    () => requireCapabilityApi<FolderCapabilityApi>('folder'),
+    [],
+  );
 
-  // 订阅全局书架 + 文件夹(走 capability,IPC + onBookshelfChanged 推流)
-  const [books, setBooks] = useState<EBookEntry[]>([]);
-  const [folders, setFolders] = useState<EBookFolder[]>([]);
+  // 订阅全局书架 + 文件夹(书走 ebook capability, 文件夹走 folder capability)
+  const [books, setBooks] = useState<EBookInfo[]>([]);
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
 
   const refresh = useCallback(() => {
     void library.list().then(setBooks).catch(() => {});
-    void library.folderList().then(setFolders).catch(() => {});
-  }, [library]);
+    void folderApi.listFolders('ebook').then(setFolders).catch(() => {});
+  }, [library, folderApi]);
 
   useEffect(() => {
     refresh();
-    return library.onBookshelfChanged(() => refresh());
-  }, [library, refresh]);
+    // sub-phase 022 §10.D-12b: 同时订阅 library (书) + folder (文件夹) 两条流;
+    // sub-022 §5.6 view caller 改造时漏改一笔 — 仅订阅 library 时, 新建文件夹后
+    // main 端 FOLDER_LIST_CHANGED broadcast 字面有但 view 端不接 → UI 不刷新.
+    const unsubLib = library.onBookshelfChanged(() => refresh());
+    const unsubFolder = folderApi.onListChanged(() => refresh());
+    return () => {
+      unsubLib();
+      unsubFolder();
+    };
+  }, [library, folderApi, refresh]);
 
   // 订阅 transient selectedIds(全局 transientVersion 触发)
   // 读 wsState 的 selectedIds 只来自 transient,所以 ws 字段变化不触发 — 单独订阅 version
@@ -165,9 +183,11 @@ function BookshelfPanel() {
 
   const buildChildren = (parentId: string | null): TreeNode[] => {
     const out: TreeNode[] = [];
+    // sub-phase 022: FolderInfo 字段 parentId (camelCase) 取代 EBookFolder.parent_id;
+    // FolderInfo 无 sort_order 字段, 沿 V2 现状 (note/tree-builder.ts) 字面用 title 排序
     const subFolders = folders
-      .filter((f) => f.parent_id === parentId)
-      .sort((a, b) => a.sort_order - b.sort_order);
+      .filter((f) => f.parentId === parentId)
+      .sort((a, b) => a.title.localeCompare(b.title));
     for (const f of subFolders) {
       const node: FolderNode = {
         kind: 'folder',
@@ -195,14 +215,14 @@ function BookshelfPanel() {
   };
   const nodes = buildChildren(null);
 
-  // ── 重命名提交(根据 treeId 类型分发到 library.rename / folderRename)──
+  // ── 重命名提交(book 走 ebook capability, folder 走 folder capability) ──
 
   const commitRename = (treeId: string) => {
     const { type, id } = decodeTreeId(treeId);
     const trimmed = renameValue.trim();
     if (trimmed) {
       if (type === 'book') void library.rename(id, trimmed);
-      else void library.folderRename(id, trimmed);
+      else void folderApi.renameFolder(id, trimmed);
     }
     setRenamingId(null);
   };
@@ -217,7 +237,7 @@ function BookshelfPanel() {
       visited.add(current);
       if (current === parentId) return true;
       const f = folders.find((x) => x.id === current);
-      current = f?.parent_id ?? null;
+      current = f?.parentId ?? null;
     }
     return false;
   };
@@ -235,9 +255,9 @@ function BookshelfPanel() {
         }
       } else {
         const f = folders.find((x) => x.id === id);
-        if (f && f.parent_id !== targetFolderId) {
+        if (f && f.parentId !== targetFolderId) {
           if (!targetFolderId || !isDescendantFolder(id, targetFolderId)) {
-            void library.folderMove(id, targetFolderId);
+            void folderApi.moveFolder(id, targetFolderId);
             if (targetFolderId) needExpand = true;
           }
         }
@@ -273,9 +293,9 @@ function BookshelfPanel() {
           setFolderExpanded(wsId, id, expanded);
         }}
         itemMeta={(item: ItemNode) => {
-          const book = item.payload as EBookEntry;
+          const book = item.payload as EBookInfo;
           return {
-            icon: FILE_ICONS[book.fileType] ?? '📄',
+            icon: fileIcon(book.fileType),
             title: book.displayName || '未命名',
             rightHint: relativeTime(book.lastOpenedAt),
           };

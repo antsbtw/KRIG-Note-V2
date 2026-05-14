@@ -134,12 +134,18 @@ export interface EBookHostProps {
   pdfAnnotationMode?: 'off' | 'rect' | 'underline';
   /** 已有 PDF 空间标注(view 从 library 加载后传入) */
   pdfAnnotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
-  /** 用户拖拽创建标注 → view 端调 library.annotationAdd(pageNum 由 layer 注入,id 由 main 生成)*/
+  /**
+   * 用户拖拽创建标注 → view 端调 ebook capability 新 thought block API
+   * (sub-phase 022 Step 5.6: lib.addReadingThoughtBlock 替代 lib.annotationAdd)
+   */
   onPdfAnnotationCreate?: (
     pageNum: number,
     annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
   ) => void;
-  /** 右键已有标注 → view 端调 library.annotationRemove */
+  /**
+   * 右键已有标注 → view 端调 ebook capability 新 thought block API
+   * (sub-phase 022 Step 5.6: lib.removeReadingThoughtBlock 替代 lib.annotationRemove)
+   */
   onPdfAnnotationDelete?: (id: string) => void;
 }
 

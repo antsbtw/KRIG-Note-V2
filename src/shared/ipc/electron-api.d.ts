@@ -197,12 +197,8 @@ declare global {
       ebookBookshelfTransferToManaged(id: string): Promise<unknown>;
       /** 订阅书架变化 — 返回 unsubscribe(对齐 onLearningVocabChanged 模式)*/
       onEbookBookshelfChanged(callback: (list: unknown) => void): () => void;
-      // 文件夹
-      ebookFolderList(): Promise<unknown>;
-      ebookFolderCreate(title: string, parentId?: string | null): Promise<unknown>;
-      ebookFolderRename(id: string, title: string): Promise<void>;
-      ebookFolderDelete(id: string): Promise<void>;
-      ebookFolderMove(id: string, parentId: string | null): Promise<void>;
+      // 文件夹: sub-phase 022 删除 5 folder bridge — view caller 改走 folder capability
+      // + viewType='ebook' (决议 021 §4.3 + 决议 022 Step 5.4 commit 2 已落地)
       // 数据传输
       ebookGetData(): Promise<unknown>;
       ebookClose(): Promise<void>;
@@ -215,9 +211,14 @@ declare global {
       ebookCfiBookmarkAdd(bookId: string, cfi: string, label: string): Promise<unknown>;
       ebookCfiBookmarkRemove(bookId: string, cfi: string): Promise<unknown>;
       ebookCfiBookmarkList(bookId: string): Promise<unknown>;
-      ebookAnnotationList(bookId: string): Promise<unknown>;
-      ebookAnnotationAdd(bookId: string, ann: unknown): Promise<unknown>;
-      ebookAnnotationRemove(bookId: string, annotationId: string): Promise<void>;
+      // 标注: sub-phase 022 删 3 annotation bridge (annotation 概念消亡), 改走 5 个
+      // thought block bridge (decision 022 §4.1.4 + §0.5)
+      // ── sub-phase 022:reading thought block ──
+      ebookThoughtGet(bookId: string): Promise<unknown>;
+      ebookThoughtEnsure(bookId: string): Promise<unknown>;
+      ebookThoughtBlockAdd(bookId: string, spec: unknown): Promise<void>;
+      ebookThoughtBlockRemove(bookId: string, blockId: string): Promise<void>;
+      ebookThoughtAnnotations(bookId: string): Promise<unknown>;
 
       // ── L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)──
       /** 上传当前打开的 PDF → 返 { uploaded, md5?, platformUrl?, alreadyExists?, reason? } */

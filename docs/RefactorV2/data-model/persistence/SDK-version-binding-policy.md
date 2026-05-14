@@ -135,6 +135,86 @@
 
 **教训详细**:[decision 020 §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md)。
 
+### 5.3 第 24 次设计师教训(2026-05-14,decision 022 §10.D-2)
+
+> 决议字面引用 storage API 调用语法时, 必须 grep V2 EdgeFilter / AtomFilter / SubgraphQuery 等 V2 既有 filter 字段名 (扁平 `subjectAtomId` 等), 不能复用决议字面伪代码或上一 sub-phase 字面 (沿第 22 次教训同型升级).
+
+**起因**: decision 022 §10.D-2 — 决议字面 4 处 (line 536 / 613 / 718 / 944) `listEdges({ predicate, subject: { atomId } })` 是设计师伪代码字面, 实测 V2 EdgeFilter 字面字段是扁平 `subjectAtomId` (src/storage/api.ts:107). Step 5.1 binary verify 实证扁平字段 PASS.
+
+**纪律升级**: §2.2 第 8 步加 "决议字面引用 storage API 调用语法时, 必须 grep EdgeFilter / AtomFilter / SubgraphQuery 等 V2 既有 filter 字段名".
+
+**教训详细**: [decision 022 §10.D-2](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.4 第 25 次设计师教训(2026-05-14,decision 022 §10.D-5)
+
+> 决议字面引用 V2 既有目录前必须 grep 实证 (沿第 18 / 22 / 24 次同型升级).
+
+**起因**: decision 022 §10.D-5 — 决议 §5 Step 5.3 字面 "沿 V2 既有 `_shared/` 目录字面", 实测 V2 字面 `src/drivers/text-editing-driver/blocks/` 字面**无 `_shared/` 子目录**, 字面新建符合决议字面意图.
+
+**纪律升级**: §2.2 第 8 步加 "决议字面引用 V2 既有目录前必须 grep 实证".
+
+**教训详细**: [decision 022 §10.D-5](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.5 第 26 次设计师教训(2026-05-14,decision 022 §10.D-6)
+
+> Bash tool persistent cwd 假设不可靠, 每个 Bash 调用独立 cd 前缀.
+
+**起因**: decision 022 §10.D-6 — 实施者字面 Bash 调用字面**2 次漂移到 V1 仓** (Step 5.4 早期 grep + Step 5.10 任务 1 typecheck verify), 累计 sub-phase 022 字面 7+ 次同型事故 (memory `feedback_v2_is_workspace_v1_is_reference`). Bash tool 文档字面 "working directory persists between commands" 在长 session 字面可能因复合命令 / pipe / heredoc 字面副作用失效.
+
+**纪律升级**: §2.2 第 9 步登记此教训; 每个 Bash 调用字面字面**必须独立 `cd /Users/wenwu/Documents/VPN-Server/KRIG-Note-V2 &&` 前缀**, 不依赖 persistent cwd 假设; L7 启动包 §1.6 实施者纪律累积教训追加第 7 条 (沿决议 022 反向更新).
+
+**教训详细**: [decision 022 §10.D-6](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.6 第 27 次设计师教训(2026-05-14,decision 022 §10.D-7)
+
+> 总指挥批复 typecheck error code 时必须沿 sub-phase 实际 fail 形态登记, 不复用上一 sub-phase 模板.
+
+**起因**: decision 022 §10.D-7 — prompt 字面字面 "Step 5.4 commit 1 后 typecheck 预期 fail (14+ caller TS2554)", 实测 25 errors: TS2305 × 10 + TS2339 × 12 + TS2353 × 1 + TS7006/7053 × 2, 无一条 TS2554. TS2554 字面字面 sub-phase 021 字面 (加 viewType 参数, caller 漏传), sub-phase 022 字面字面**删 interface + 删 API** 字面 fail 形态必然是 TS2305 + TS2339. prompt 字面沿 021 模板字面没修正 — 设计师笔误.
+
+**纪律升级**: §2.2 第 9 步登记此教训; 总指挥批复字面引用 typecheck error code 时, 必须沿 sub-phase 实际 fail 形态字面登记 (删 interface → TS2305 / 删 API → TS2339 / arity mismatch → TS2554).
+
+**教训详细**: [decision 022 §10.D-7](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.7 第 30 次设计师教训(2026-05-14,decision 022 Step 5.9)
+
+> 健康检查 helper 自愈模式 (keep-latest) vs 告警模式 (scan-only) 分离原则, 沿 decision 014 + 022 双 sub-phase 实证.
+
+**起因**: decision 022 Step 5.9 实施期决策 — scanCardinality 独立函数 (跟 checkPredicate keep-latest 区分). 沿 decision 014 §3.5.3.6 字面 keep-latest 自愈语义 (`inCanvas` / `hasContent` 一对一适用旧 atom 字面字面字面历史数据自愈) vs decision 022 §4.3.1-L2 字面 "扫描+告警" 语义 (`hasReadingState` / `hasReadingThought` 字面 sub-phase 022 字面留管理员决断, 跟 L1 throw + L3 throw+不写 flag 三层防线区分).
+
+**纪律升级**: §2.2 第 9 步登记此教训; 健康检查 helper 字面字面字面字面字面 sub-phase 设计意图字面字面字面字面字面**自愈 vs 告警**字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面字面 (沿决议 022 §11 第 30 次教训).
+
+**教训详细**: [decision 022 §11 第 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.8 第 31 次设计师教训(2026-05-14,decision 022 §10.D-11 Step 5.12 反向更新)
+
+> 完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入,完成判据矩阵 typecheck + lint 双跑双绿.
+
+**起因**: decision 022 §10.D-11 — Step 5.11 完成报告 §3 完成判据矩阵字面把 capability-impl.ts 字面 2 个 unused import 算成 "3 pre-existing warning", 实测 `git log -- capability-impl.ts` 字面该文件由 sub-022 commit 378a283 整文件新建 (+748 行) 引入, 2 个 unused import 属**sub-phase 新引入**, 不是 pre-existing. 只有 svg/textBlock.ts:8 经 `git log` 实证 sub-022 分支 0 commit 触及, 是真 pre-existing. 同时报告 §2 commit 矩阵底行字面用逐 commit `git show --stat` 累加法把 merge commit 9c88af1 的 138 行重复计入, 跟 `git diff --stat 91cfbf8..HEAD` 实测口径偏差 +170/-170 行.
+
+**纪律升级**: §2.2 第 9 步登记此教训; 完成报告字面 lint warning 来源溯源必须 `git log -- <file>` 实证, 区分 pre-existing (文件 main HEAD 已存在 + sub-phase 0 commit 触及) vs sub-phase 新引入 (本 sub-phase commit 整文件新建或改文件时新增 warning); 完成判据矩阵字面**typecheck PASS + lint PASS (--max-warnings 0 exit 0) 双跑双绿**, 不能只引 typecheck 输出代替 lint; 完成报告字面 commit 矩阵行数累计字面以 `git diff --stat <merge-base>..HEAD` 实测口径为准, 弃用逐 commit `git show --stat` 累加法 (避免 merge commit 重复计入).
+
+**教训详细**: [decision 022 §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
+### 5.9 第 32 次设计师教训(2026-05-14,decision 022 §10.D-12 + §10.D-12b Step 5.13 反向更新)
+
+> view type union / enum 加项 + capability 责任拆分时必须 grep 全谱**两子层**: main 端 IPC handler narrow guard 字面值 + view 端订阅链 onXChanged 配对.
+
+**起因**: decision 022 Step 5.13 抢修期连续暴露 2 处字面漏点:
+
+1. **§10.D-12 (第 7-A 层 — main 端 IPC handler narrow guard 字面值)**: sub-022 §10.D-8 字面"FolderViewType += 'ebook'"字面只改 `src/capabilities/folder/types.ts` 的 union 字面 + view caller 字面 + capability-impl 字面, **漏改 main 端 IPC handler `src/platform/main/folder/handlers.ts` 字面 3 处 narrow guard**: `FOLDER_LIST` (`if (viewType !== 'note' && viewType !== 'graph') return [];`) / `FOLDER_CREATE` (同型) / `broadcastFolderListChanged` (`Promise.all([listFolders('note'), listFolders('graph')])` 字面遍历漏 'ebook'). narrow guard 字面是**字面值字符串字面**, 不引 union 类型字面, grep type 名拿不到.
+
+2. **§10.D-12b (第 7-B 层 — view 端订阅链 onXChanged 配对)**: §10.D-12 抢修 commit 0afb0bd 后用户 UI 验证仍 0 反应, 完全重启 dev server 出现"很多文件夹"暴露 — sub-022 §5.6 view caller 把 folder 从 `library.folderXxx` 改走 `folder.createFolder(viewType='ebook')` 时, `src/views/ebook/nav-side-content.tsx:100-103` 字面**只订阅 library.onBookshelfChanged**, **没订阅 folderApi.onListChanged**. main 端 fix 后 broadcast `FOLDER_LIST_CHANGED` 字面有但 view 端字面不接 → UI 永不实时刷新, 只有冷启动 mount-time refresh() 才从 atom 库重新拉到. 沿 decision 021 §10.B-2 教训 17"间接传播路径 broadcast / 订阅 / hook"**同型扩展** — 决议 021 教训字面是"接口签名变更必须额外 grep 间接被调", 本次字面是"capability 责任拆分必须 grep view 端订阅 onXChanged 配对".
+
+**纪律升级**: §2.2 第 8 步登记此教训; view type union / enum 加项 + capability 责任拆分时必须**额外 grep 全谱两子层**:
+
+- **第 7-A 层 — main 端 IPC handler 字面值校验**: 字面 grep `!== '<type-name-A>'` + `!== '<type-name-B>'` 字面字符串模式 + `Promise.all([listX('A'), listX('B')])` 字面遍历 + `isXType(v): v is XType` 字面 narrow function. 不能字面只 grep type 名拿命中.
+
+- **第 7-B 层 — view 端订阅链 onXChanged 配对**: 字面 grep view 端 useEffect 内 `on[A-Z]\w+Changed\|onListChanged\|onBookshelfChanged` 等订阅模式. capability 责任拆分时 (老 capability X.foo → 新 capability Y.foo), view 端**订阅必须同步配对扩**: 老 `X.onXChanged` + 新 `Y.onYChanged` 两条流并存, view 要订阅两条; cleanup return 双 unsub. 漏一笔字面层 lint/typecheck 不报, 只有 runtime UI 不实时刷新才暴露.
+
+完整传播层 grep **第 7 层拆 7-A / 7-B 两子层** (沿 v1.4 字面 6 层清单字面扩展).
+
+**教训详细**: [decision 022 §10.D-12 + §10.D-12b + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md).
+
 ---
 
 ## 6. 修订记录
@@ -145,6 +225,9 @@
 | 2026-05-13 | v1.1 | 用户 P3 修订:消除"禁止顺带改 vs §4 必改"矛盾(§7 分两类);§2.2 API 证据采集通用化;§4 表列字段口径统一 | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.2 | sub-phase 3a-tx 实施期 §10.B-2 偏离 + 第 12 次教训反向更新:§2.2 加第 4 步"API 可执行链路实证";§5 加 5.2 第 12 次教训 | [decision 020 §10.B-2 + §11.5](decisions/020-sub-phase-3a-tx-true-atomicity.md) |
 | 2026-05-13 | v1.4 | sub-phase 021 实施期 5 个偏离(§10.B-1/B-2/B-3/C-1/C-2)+ 第 16-20 次教训累积反向更新:§2.2 加第 8 步"V2 完整传播层 6 层 grep 前瞻验证"(view caller / capability types / capability index / IPC+preload+d.ts / 分层 lint / 同类型 SSOT 位置 + 间接传播路径 + API 总数前瞻 + "跨 X 复用"语义明示)。授权依据:[decision 021 §0.5.ter 用户 P0 授权](decisions/021-sub-phase-021-folder-view-isolation.md#05ter-用户-p0-授权step-57-顺手改-sdk-version-binding-policymd-22-第-8-步--6-修订记录-v142026-05-13-实施期反向更新) | [decision 021 §11.3-§11.7](decisions/021-sub-phase-021-folder-view-isolation.md) |
+| 2026-05-14 | v1.5 | sub-phase 022 实施期 13 偏离 (3B + 10D) + 第 24/25/26/27/30 次教训累积反向更新: §2.2 第 8 步加 "决议字面引用 storage API 调用语法 grep EdgeFilter 字段名" + "决议字面引用 V2 既有目录前必须 grep 实证" (沿第 24/25 次); §2.2 第 9 步加 "Bash tool persistent cwd 假设不可靠每 Bash 独立 cd 前缀" + "typecheck error code 沿 sub-phase 实际 fail 形态" + "健康检查 helper 自愈 vs 告警分离" (沿第 26/27/30 次). 授权依据: decision 022 §0.5.quat 用户 2026-05-14 P0 授权 (沿 sub-phase 021 §0.5.ter 同模式) | [decision 022 §11 第 24-27 + 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
+| 2026-05-14 | v1.6 | sub-phase 022 Step 5.12 总指挥审计反馈 + 第 31 次教训反向更新: §5.8 新加第 31 次教训字面 "完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入, 完成判据矩阵 typecheck + lint 双跑双绿, commit 矩阵行数以 `git diff --stat <merge-base>..HEAD` 实测口径为准弃用逐 commit 累加法"; §2.2 第 9 步同步登记. 授权依据: decision 022 §10.D-11 + Step 5.12 用户 2026-05-14 P0 拍板 (沿 v1.5 同模式) | [decision 022 §10.D-11 + §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
+| 2026-05-14 | v1.7 | sub-phase 022 Step 5.13 UI 回归 [N-5] folder handler narrow guard + [N-5b] view 订阅链漏配对 + 第 32 次教训反向更新 (**字面两子层扩展**): §5.9 新加第 32 次教训字面 "view type union / enum 加项 + capability 责任拆分时必须 grep 全谱两子层 — 第 7-A 层 main 端 IPC handler narrow guard 字面值 + 第 7-B 层 view 端订阅链 onXChanged 配对"; §2.2 第 8 步同步登记 + 完整传播层 grep 清单字面**第 7 层拆 7-A / 7-B 两子层** (沿 v1.4 字面 6 层清单字面扩展). 授权依据: decision 022 §10.D-12 + §10.D-12b + Step 5.13 用户 2026-05-14 P0 拍板 (沿 v1.5 / v1.6 同模式) | [decision 022 §10.D-12 + §10.D-12b + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 
 ---
 

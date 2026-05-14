@@ -23,7 +23,9 @@
 import { BrowserWindow, ipcMain, type WebContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getEBookData } from '../ebook/file-loader';
-import { bookshelfStore } from '../ebook/bookshelf-store';
+// sub-phase 022 (§10.B-3): 旧 bookshelfStore JSON store 字面 git rm,
+// 改走 ebook capability-impl 字面 list() 函数 (走 atom CRUD)
+import { list as listEBooks } from '../ebook/capability-impl';
 import { uploadPdfToPlatform } from './upload-service';
 import { setupExtractionInterceptor } from './extraction-handler';
 import { PLATFORM_API, PLATFORM_WEB_UI } from './config';
@@ -131,7 +133,8 @@ export function registerExtractionHandlers(): void {
     }
 
     // 从书架取 displayName(避免 UUID 文件名)
-    const allEntries = bookshelfStore.list();
+    // sub-phase 022: 走 ebook capability-impl 字面 list() (atom CRUD,返 EBookInfo[])
+    const allEntries = await listEBooks();
     const entry = allEntries.find((e) => e.filePath === ebookData.filePath);
     const displayName =
       entry?.displayName || ebookData.fileName.replace(/\.pdf$/i, '');

@@ -517,6 +517,16 @@ async function createFolder(
 
 **本决议字面登记此约束**:022 决议必须按此接入路径,不允许"ebook 自有 folder 模型"二次复活。
 
+**✅ 2026-05-14 反向更新 (sub-phase 022 已落地)**:
+
+- decision 022 sub-phase 022 字面完整实施, 字面 commit hash 累计 9 个:
+  `4d3ada5` / `1209398` / `c040d36` / `c0bab38` / `378a283` / `ea1be84` / `bb2ef00` / `9247ba5` / `<Step 5.10 hash>`
+- `FolderViewType` 字面已扩 `'note' | 'graph' | 'ebook'` (src/shared/ipc/note-folder-types.ts:58, Step 5.4 commit 2 前置入 `c0bab38`, 沿 §10.D-8 偏离登记)
+- ebook 5 folder API 字面字面完整废弃 (`folderList / folderCreate / folderRename / folderDelete / folderMove`), view caller 字面改走 folder capability + viewType='ebook'
+- ebook bookshelf-store `folders[]` JSON 字段字面废弃, folder 走 atom + folderForView('ebook') 边 + inFolder 边派生 (跟 note / graph 同模式)
+- bookshelf-store.ts / annotation-store.ts 字面 Step 5.10 整文件 git rm 清除
+- binary verify: Step 5.8 字面 12 PASS / 0 FAIL (含 folder atom + folderForView 边 + inFolder 边数据完整性 + L3 互斥三场景)
+
 ---
 
 ## 5. 实施步骤(按顺序执行,代码/文档 step 必须 commit,纯 verify step 不 commit)

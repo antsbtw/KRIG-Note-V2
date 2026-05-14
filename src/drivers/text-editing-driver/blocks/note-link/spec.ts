@@ -24,6 +24,8 @@ const noteLinkNodeSpec: NodeSpec = {
   attrs: {
     noteId: { default: null },
     label: { default: '' },
+    // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
+    bookAnchor: { default: null },
   },
   parseDOM: [
     {

@@ -26,39 +26,43 @@
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import type {
   EBookLibraryApi,
-  EBookEntry,
-  EBookFolder,
+  EBookInfo,
   EBookFileType,
   EBookStorageMode,
   EBookDataPayload,
   EBookLoadedInfo,
   PickFileResult,
   ReadingPosition,
-  StoredAnnotation,
+  ThoughtBlockSpec,
+  NoteInfo,
+  BookAnchor,
 } from './types';
 
 export type {
   EBookLibraryApi,
-  EBookEntry,
-  EBookFolder,
+  EBookInfo,
   EBookFileType,
   EBookStorageMode,
   EBookDataPayload,
   EBookLoadedInfo,
   PickFileResult,
   ReadingPosition,
-  StoredAnnotation,
+  ThoughtBlockSpec,
+  BookAnchor,
 } from './types';
+// sub-phase 022: EBookEntry → EBookInfo 字面改名; EBookFolder / StoredAnnotation 报废.
+// folder API caller 改走 folder capability + viewType='ebook'; annotation 概念消亡,
+// view caller 改走 thought block (留 Step 5.5 / 5.6 落地).
 
 // ── 书架 ──
 
-export async function list(): Promise<EBookEntry[]> {
+export async function list(): Promise<EBookInfo[]> {
   if (!window.electronAPI?.ebookBookshelfList) return [];
   const r = await window.electronAPI.ebookBookshelfList();
-  return Array.isArray(r) ? (r as EBookEntry[]) : [];
+  return Array.isArray(r) ? (r as EBookInfo[]) : [];
 }
 
-export async function get(id: string): Promise<EBookEntry | null> {
+export async function get(id: string): Promise<EBookInfo | null> {
   // 走 list 过滤(避免新增 GET_BY_ID IPC;书架规模 ≤ 几百本,过滤成本可忽略)
   const all = await list();
   return all.find((e) => e.id === id) ?? null;
@@ -74,10 +78,10 @@ export async function add(
   filePath: string,
   fileType: EBookFileType,
   storage: EBookStorageMode,
-): Promise<EBookEntry | null> {
+): Promise<EBookInfo | null> {
   if (!window.electronAPI?.ebookBookshelfAdd) return null;
   const r = await window.electronAPI.ebookBookshelfAdd(filePath, fileType, storage);
-  return (r as EBookEntry | null) ?? null;
+  return (r as EBookInfo | null) ?? null;
 }
 
 export async function open(id: string): Promise<{ success: boolean; error?: string }> {
@@ -101,49 +105,20 @@ export async function moveToFolder(id: string, folderId: string | null): Promise
   return window.electronAPI.ebookBookshelfMove(id, folderId);
 }
 
-export async function relocate(id: string): Promise<EBookEntry | null> {
+export async function relocate(id: string): Promise<EBookInfo | null> {
   if (!window.electronAPI?.ebookBookshelfRelocate) return null;
   const r = await window.electronAPI.ebookBookshelfRelocate(id);
-  return (r as EBookEntry | null) ?? null;
+  return (r as EBookInfo | null) ?? null;
 }
 
-export async function transferToManaged(id: string): Promise<EBookEntry | null> {
+export async function transferToManaged(id: string): Promise<EBookInfo | null> {
   if (!window.electronAPI?.ebookBookshelfTransferToManaged) return null;
   const r = await window.electronAPI.ebookBookshelfTransferToManaged(id);
-  return (r as EBookEntry | null) ?? null;
+  return (r as EBookInfo | null) ?? null;
 }
 
-// ── 文件夹 ──
-
-export async function folderList(): Promise<EBookFolder[]> {
-  if (!window.electronAPI?.ebookFolderList) return [];
-  const r = await window.electronAPI.ebookFolderList();
-  return Array.isArray(r) ? (r as EBookFolder[]) : [];
-}
-
-export async function folderCreate(
-  title: string,
-  parentId?: string | null,
-): Promise<EBookFolder | null> {
-  if (!window.electronAPI?.ebookFolderCreate) return null;
-  const r = await window.electronAPI.ebookFolderCreate(title, parentId ?? null);
-  return (r as EBookFolder | null) ?? null;
-}
-
-export async function folderRename(id: string, title: string): Promise<void> {
-  if (!window.electronAPI?.ebookFolderRename) return;
-  return window.electronAPI.ebookFolderRename(id, title);
-}
-
-export async function folderDelete(id: string): Promise<void> {
-  if (!window.electronAPI?.ebookFolderDelete) return;
-  return window.electronAPI.ebookFolderDelete(id);
-}
-
-export async function folderMove(id: string, parentId: string | null): Promise<void> {
-  if (!window.electronAPI?.ebookFolderMove) return;
-  return window.electronAPI.ebookFolderMove(id, parentId);
-}
+// ── 文件夹 ── (sub-phase 022: 5 folder API 完整废弃,改走 folder capability + viewType='ebook'
+//             沿决议 021 §4.3 + 决议 022 §1.3.2)
 
 // ── 数据传输 ──
 
@@ -161,11 +136,11 @@ export async function close(): Promise<void> {
 // ── 推送订阅(多订阅模式,对齐 learning.onVocabChanged)──
 
 export function onBookshelfChanged(
-  callback: (list: EBookEntry[]) => void,
+  callback: (list: EBookInfo[]) => void,
 ): () => void {
   if (!window.electronAPI?.onEbookBookshelfChanged) return () => {};
   return window.electronAPI.onEbookBookshelfChanged((raw) => {
-    callback(Array.isArray(raw) ? (raw as EBookEntry[]) : []);
+    callback(Array.isArray(raw) ? (raw as EBookInfo[]) : []);
   });
 }
 
@@ -225,29 +200,46 @@ export async function cfiBookmarkList(
   return Array.isArray(r) ? (r as Array<{ cfi: string; label: string }>) : [];
 }
 
-// ── 标注(C5 真消费)──
+// ── 标注 ── (sub-phase 022: annotation 概念消亡 — 3 annotation API 完整废弃,
+//             view caller 改走 thought block 新 5 API, 内部走 ebook capability +
+//             note.updateNote 全量替换 thought PM doc)
 
-export async function annotationList(bookId: string): Promise<StoredAnnotation[]> {
-  if (!window.electronAPI?.ebookAnnotationList) return [];
-  const r = await window.electronAPI.ebookAnnotationList(bookId);
-  return Array.isArray(r) ? (r as StoredAnnotation[]) : [];
+// ── sub-phase 022:5 新 thought block API (decision 022 §4.1.3 §4.3.1-L1) ──
+
+export async function getReadingThought(bookId: string): Promise<NoteInfo | null> {
+  if (!window.electronAPI?.ebookThoughtGet) return null;
+  const r = await window.electronAPI.ebookThoughtGet(bookId);
+  return (r as NoteInfo | null) ?? null;
 }
 
-export async function annotationAdd(
-  bookId: string,
-  ann: Omit<StoredAnnotation, 'id' | 'createdAt'>,
-): Promise<StoredAnnotation | null> {
-  if (!window.electronAPI?.ebookAnnotationAdd) return null;
-  const r = await window.electronAPI.ebookAnnotationAdd(bookId, ann);
-  return (r as StoredAnnotation | null) ?? null;
+export async function ensureReadingThought(bookId: string): Promise<NoteInfo | null> {
+  if (!window.electronAPI?.ebookThoughtEnsure) return null;
+  const r = await window.electronAPI.ebookThoughtEnsure(bookId);
+  return (r as NoteInfo | null) ?? null;
 }
 
-export async function annotationRemove(
+export async function addReadingThoughtBlock(
   bookId: string,
-  annotationId: string,
+  spec: ThoughtBlockSpec,
 ): Promise<void> {
-  if (!window.electronAPI?.ebookAnnotationRemove) return;
-  return window.electronAPI.ebookAnnotationRemove(bookId, annotationId);
+  if (!window.electronAPI?.ebookThoughtBlockAdd) return;
+  return window.electronAPI.ebookThoughtBlockAdd(bookId, spec);
+}
+
+export async function removeReadingThoughtBlock(
+  bookId: string,
+  blockId: string,
+): Promise<void> {
+  if (!window.electronAPI?.ebookThoughtBlockRemove) return;
+  return window.electronAPI.ebookThoughtBlockRemove(bookId, blockId);
+}
+
+export async function getReadingThoughtAnnotations(
+  bookId: string,
+): Promise<BookAnchor[]> {
+  if (!window.electronAPI?.ebookThoughtAnnotations) return [];
+  const r = await window.electronAPI.ebookThoughtAnnotations(bookId);
+  return Array.isArray(r) ? (r as BookAnchor[]) : [];
 }
 
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
@@ -265,11 +257,6 @@ capabilityRegistry.register({
     moveToFolder,
     relocate,
     transferToManaged,
-    folderList,
-    folderCreate,
-    folderRename,
-    folderDelete,
-    folderMove,
     getData,
     close,
     onBookshelfChanged,
@@ -280,8 +267,11 @@ capabilityRegistry.register({
     cfiBookmarkAdd,
     cfiBookmarkRemove,
     cfiBookmarkList,
-    annotationList,
-    annotationAdd,
-    annotationRemove,
+    // sub-phase 022: 5 新 thought block API
+    getReadingThought,
+    ensureReadingThought,
+    addReadingThoughtBlock,
+    removeReadingThoughtBlock,
+    getReadingThoughtAnnotations,
   } satisfies EBookLibraryApi,
 });
