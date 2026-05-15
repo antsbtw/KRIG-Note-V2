@@ -26,6 +26,7 @@ export function registerDropTargets(instanceId: string): () => void {
     accepts: ['block'],
     computeDropPoint(coords) {
       // 协议层 — 真实 drop 由 plugin.handleDrop 处理,这里仅供其他订阅者查询
+      // 深层寻址:最深的 group='block' 节点(callout/toggle 内部 block 也能被识别)
       const inst = instanceRegistry.get(instanceId);
       if (!inst) return null;
       const view = inst.view;
@@ -34,7 +35,14 @@ export function registerDropTargets(instanceId: string): () => void {
       if (!result) return null;
       const $pos = view.state.doc.resolve(result.pos);
       if ($pos.depth === 0) return null;
-      return { pos: $pos.before(1), valid: true };
+      let targetDepth = 1;
+      for (let d = $pos.depth; d >= 1; d--) {
+        if ($pos.node(d).type.spec.group === 'block') {
+          targetDepth = d;
+          break;
+        }
+      }
+      return { pos: $pos.before(targetDepth), valid: true };
     },
     onDrop() {
       // 协议层 — 实际处理在 plugin.handleDrop

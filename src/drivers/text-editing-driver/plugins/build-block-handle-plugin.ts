@@ -13,6 +13,8 @@
  */
 
 import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
+import { Slice, Fragment } from 'prosemirror-model';
+import { dropPoint } from 'prosemirror-transform';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { dnd } from '@capabilities/drag-and-drop';
 
@@ -87,60 +89,29 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
           if (!result) return true;
 
-          // 拖拽源类型决定目标深度:
-          // - source 是 listItem/taskItem → 找目标位置同款层级
-          // - 否则 → 顶层 block 边界
           const sourceNode = view.state.doc.nodeAt(fromPos);
           if (!sourceNode) return true;
-          const sourceIsListItem =
-            sourceNode.type.name === 'listItem' || sourceNode.type.name === 'taskItem';
 
-          let dropPos: number;
-          const $pos = view.state.doc.resolve(result.pos);
-          if ($pos.depth >= 1) {
-            // 找跟 source 同类型的目标层级
-            let targetDepth = 1;
-            if (sourceIsListItem) {
-              for (let d = $pos.depth; d >= 1; d--) {
-                const nodeAt = $pos.node(d);
-                if (nodeAt.type.name === sourceNode.type.name) {
-                  targetDepth = d;
-                  break;
-                }
-              }
-            }
-            const blockStart = $pos.before(targetDepth);
-            const block = view.state.doc.nodeAt(blockStart);
-            if (block) {
-              dropPos = blockStart;
-              try {
-                const nodeDom = view.nodeDOM(blockStart);
-                const el = nodeDom instanceof HTMLElement ? nodeDom : null;
-                if (el) {
-                  const r = el.getBoundingClientRect();
-                  if (event.clientY > r.top + r.height / 2) {
-                    dropPos = blockStart + block.nodeSize;
-                  }
-                }
-              } catch { /* fallback */ }
-            } else {
-              dropPos = result.pos;
-            }
-          } else {
-            dropPos = result.pos;
-          }
-
-          if (fromPos === dropPos) return true;
+          // 用 PM 标准 dropPoint 找最近合法插入点 —
+          // 跟 prosemirror-dropcursor 蓝线指示一致(同一套算法),
+          // 自动处理 callout/blockquote/toggle/list 等嵌套容器的边界情况。
+          const sliceToDrop = new Slice(Fragment.from(sourceNode.copy(sourceNode.content)), 0, 0);
+          const dropPos = dropPoint(view.state.doc, result.pos, sliceToDrop);
+          if (dropPos == null) return true;
+          if (dropPos === fromPos) return true;
 
           const tr = view.state.tr;
-          let actualDrop = dropPos;
-          if (dropPos > fromPos) actualDrop = dropPos - sourceNode.nodeSize;
+          // delete + insert 的顺序敏感:先 delete 再 insert 时,
+          // dropPos > fromPos 要减去 sourceSize(因为 doc 已变短)。
+          // 用 tr.mapping 自动处理 pos 映射更稳。
           tr.delete(fromPos, fromPos + sourceNode.nodeSize);
-          tr.insert(actualDrop, sourceNode.copy(sourceNode.content));
+          const mappedDrop = tr.mapping.map(dropPos);
+          tr.insert(mappedDrop, sourceNode.copy(sourceNode.content));
           view.dispatch(tr);
           dnd.emit('dnd.completed', { source: null });
           return true;
         } catch (err) {
+          // eslint-disable-next-line no-console
           console.warn('[block-handle] drop exception', err);
           return false;
         }
@@ -151,6 +122,10 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       let currentPos = -1;
       let currentBlockType = '';
       let isDragging = false;
+      // isHovered:鼠标在 handle DOM 上(防止 mousemove 误重算 currentPos
+      // 让 handle 跳走 — callout/blockquote/toggle 内子 block 的 handle
+      // 在 view.dom 边缘外,鼠标移近时 probeX 夹紧会解析到容器层)
+      let isHovered = false;
 
       // L5-B3.9:外层 wrapper 包两个按钮 + ⋮⋮(对齐 V1 +/⠿ 双按钮)
       // - + 按钮在下方插入空 paragraph 节点
@@ -287,6 +262,11 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       // ── view.dom 监听 mousemove → 定位 handle ──
       const onMouseMove = (e: MouseEvent) => {
         if (isDragging) return;
+        // handle hover 中 → 冻结当前 block,不再 probeX/posAtCoords 重算
+        // (callout/blockquote/toggle 内子 block 的 handle 在 view.dom 边缘附近,
+        //  鼠标移近 handle 时 probeX 被夹紧到容器 padding 区,会误解析到外层容器
+        //  让 handle 瞬移走 — 见 user 反馈:"鼠标移到 handle, handle 自动关闭")
+        if (isHovered) return;
         const view = editorView;
         const editorRect = view.dom.getBoundingClientRect();
 
@@ -312,23 +292,34 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           return;
         }
 
-        // 解析"最具体可拖动 block":
-        // - 鼠标在 list 内 → 取 listItem / taskItem 层(每项独立 handle)
-        // - 否则 → 取顶层 block(paragraph / heading / blockquote / codeBlock 等)
+        // 解析"最具体可拖动 block"(callout/blockquote/toggle 内子 block 也要显示 handle):
+        // - 鼠标在 list 内 → 取 listItem / taskItem 层(list 独立语义,Tab 嵌套)
+        // - 否则 → 取**最深**的 group='block' 节点
+        //   (callout > paragraph 命中 paragraph;顶层 paragraph 命中自身)
         let blockStart = -1;
         let blockNode = null;
         let blockDom: HTMLElement | null = null;
         try {
           const $pos = view.state.doc.resolve(result.pos);
           if ($pos.depth >= 1) {
-            // 从最深向外找:第一个 listItem/taskItem 优先;没有则用 depth=1
-            let targetDepth = 1;
+            // 先看是否在 list 内 — listItem/taskItem 优先(对齐 V1 list 拖拽语义)
+            let targetDepth = -1;
             for (let d = $pos.depth; d >= 1; d--) {
               const nodeAt = $pos.node(d);
               if (nodeAt.type.name === 'listItem' || nodeAt.type.name === 'taskItem') {
                 targetDepth = d;
                 break;
               }
+            }
+            // 不在 list 内 → 取最深的 group='block' 节点
+            if (targetDepth < 0) {
+              for (let d = $pos.depth; d >= 1; d--) {
+                if ($pos.node(d).type.spec.group === 'block') {
+                  targetDepth = d;
+                  break;
+                }
+              }
+              if (targetDepth < 0) targetDepth = 1; // 兜底
             }
             blockStart = $pos.before(targetDepth);
             blockNode = $pos.node(targetDepth);
@@ -350,6 +341,32 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           dom.style.opacity = '0';
           currentPos = -1;
           return;
+        }
+
+        // 祖先保留(对齐 Notion 行为):鼠标从 callout 内 child 横向移到左侧 handle 时,
+        // 会先经过 callout padding 区(probeX 命中 callout 容器自身,新候选是当前
+        // block 的祖先);**鼠标 y 仍落在当前 child 的垂直范围内**时不切换 currentPos —
+        // "block + 它的 handle 视为整体"。若鼠标 y 离开 child 范围(移到 callout 顶/底
+        // padding),允许正常切换到祖先(此时显示 callout 自身的 handle)。
+        if (currentPos >= 0 && blockStart !== currentPos) {
+          const newRangeEnd = blockStart + blockNode.nodeSize;
+          const isAncestor = blockStart <= currentPos && currentPos < newRangeEnd;
+          if (isAncestor) {
+            // 检查鼠标 y 是否还在当前 currentPos block 的垂直范围内
+            const curNode = view.state.doc.nodeAt(currentPos);
+            const curDom = curNode ? view.nodeDOM(currentPos) : null;
+            const curEl =
+              curDom instanceof HTMLElement
+                ? curDom
+                : (curDom as Node)?.parentElement as HTMLElement | null;
+            if (curEl) {
+              const r = curEl.getBoundingClientRect();
+              if (e.clientY >= r.top && e.clientY <= r.bottom) {
+                // 还在 child 行内 → 保留
+                return;
+              }
+            }
+          }
         }
 
         currentPos = blockStart;
@@ -382,7 +399,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       // - view.dom.mouseleave(hideHandle)只在 !isHovered 时才 schedule 100ms hide
       // 关键:opacity:0 期间 handle 仍接事件(visibility:hidden 不接),
       //   鼠标过渡到 handle 时 mouseenter 触发 → 取消 hide
-      let isHovered = false;
+      // (isHovered 已在 view() 开头声明,onMouseMove 也读它做冻结守门)
       let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
       dom.addEventListener('mouseenter', () => {
@@ -405,9 +422,14 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         }, CONFIG.HIDE_DELAY_FROM_HANDLE);
       });
 
-      const onMouseLeave = () => {
+      const onMouseLeave = (e: MouseEvent) => {
         if (isDragging) return;
         if (isHovered) return; // 鼠标在 handle 上,不 hide
+        // 鼠标从 view.dom 离开但**正进入 handle DOM**(handle 是 hostContainer 的子,
+        //  不是 view.dom 的子,鼠标穿越边界会触发 view.dom.mouseleave —
+        //  但语义上 handle 和当前 block 是一个整体,不能 hide)
+        const next = e.relatedTarget as Node | null;
+        if (next && (next === dom || dom.contains(next))) return;
         if (hideTimer) clearTimeout(hideTimer);
         hideTimer = setTimeout(() => {
           if (!isHovered) {

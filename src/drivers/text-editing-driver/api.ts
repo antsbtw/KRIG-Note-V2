@@ -578,7 +578,11 @@ export const textEditingDriverApi = {
     inst.view.focus();
   },
 
-  /** 解析屏幕坐标 → block pos + type(context-menu 鼠标位置用)*/
+  /** 解析屏幕坐标 → block pos + type(context-menu 鼠标位置用)
+   *
+   * 深层寻址:callout/blockquote/toggle/listItem 内的 paragraph 上右键时,
+   * 返回最深的 textblock(group='block')而非顶层容器。
+   */
   resolveBlockAt(
     instanceId: string,
     coords: { x: number; y: number },
@@ -589,7 +593,16 @@ export const textEditingDriverApi = {
     if (!result) return null;
     const $pos = inst.view.state.doc.resolve(result.pos);
     if ($pos.depth === 0) return null;
-    const blockPos = $pos.before(1);
+    // 从最深向外找 group='block' 的祖先(paragraph/heading/codeBlock/
+    // callout/blockquote/toggle/list 等都符合);兜底 depth=1
+    let targetDepth = 1;
+    for (let d = $pos.depth; d >= 1; d--) {
+      if ($pos.node(d).type.spec.group === 'block') {
+        targetDepth = d;
+        break;
+      }
+    }
+    const blockPos = $pos.before(targetDepth);
     const node = inst.view.state.doc.nodeAt(blockPos);
     if (!node) return null;
     return {
@@ -783,7 +796,12 @@ export const textEditingDriverApi = {
     inst.view.focus();
   },
 
-  /** turnIntoSelection — slash menu 用:对光标当前 block 应用 Turn Into */
+  /**
+   * turnIntoSelection — slash menu 用:对光标"最深 textblock"应用 Turn Into
+   *
+   * 寻址深层(callout / blockquote / toggle / listItem 等容器内的 paragraph
+   * 都能命中自身,而非顶层容器),让"任意 block 都能在 callout 内创建/转换"。
+   */
   turnIntoSelection(
     instanceId: string,
     target:
@@ -804,7 +822,7 @@ export const textEditingDriverApi = {
     if (!inst) return;
     const $from = inst.view.state.selection.$from;
     if ($from.depth === 0) return;
-    const blockPos = $from.before(1);
+    const blockPos = $from.before($from.depth);
     this.turnIntoAt(instanceId, blockPos, target);
   },
 
@@ -893,9 +911,12 @@ export const textEditingDriverApi = {
     if ($from.depth === 0) {
       dispatch(state.tr.insert(state.selection.from, mathNode));
     } else {
-      const blockNode = $from.node(1);
-      const blockStart = $from.before(1);
-      const blockEnd = $from.after(1);
+      // 深层寻址:光标所在 textblock 那层(callout/blockquote/toggle/list 内的
+      // paragraph 都命中自身,而非顶层容器)
+      const depth = $from.depth;
+      const blockNode = $from.node(depth);
+      const blockStart = $from.before(depth);
+      const blockEnd = $from.after(depth);
       const isEmptyParagraph =
         blockNode.type.name === 'paragraph' &&
         blockNode.content.size === 0 &&
@@ -1047,9 +1068,11 @@ function insertWithCaptionBlock(
     // 顶层:直接在选区前插入(无需光标 reposition,大概率走不到)
     dispatch(state.tr.insert(state.selection.from, node));
   } else {
-    const blockNode = $from.node(1);
-    const blockStart = $from.before(1);
-    const blockEnd = $from.after(1);
+    // 深层寻址:在光标所在 textblock 那层就近插入(callout/blockquote/toggle 内)
+    const depth = $from.depth;
+    const blockNode = $from.node(depth);
+    const blockStart = $from.before(depth);
+    const blockEnd = $from.after(depth);
     const isEmptyParagraph =
       blockNode.type.name === 'paragraph' &&
       blockNode.content.size === 0 &&
@@ -1083,9 +1106,11 @@ function insertAtomBlock(
   if ($from.depth === 0) {
     dispatch(state.tr.insert(state.selection.from, node));
   } else {
-    const blockNode = $from.node(1);
-    const blockStart = $from.before(1);
-    const blockEnd = $from.after(1);
+    // 深层寻址(同 insertWithCaptionBlock)
+    const depth = $from.depth;
+    const blockNode = $from.node(depth);
+    const blockStart = $from.before(depth);
+    const blockEnd = $from.after(depth);
     const isEmptyParagraph =
       blockNode.type.name === 'paragraph' &&
       blockNode.content.size === 0 &&
