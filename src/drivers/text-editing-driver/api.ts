@@ -85,6 +85,112 @@ export const textEditingDriverApi = {
     inst.view.focus();
   },
 
+  /**
+   * 给整个 block 设文字色(handle 菜单 Color panel 用)。
+   *
+   * 分流:
+   * - mathBlock(marks:'',禁用 inline marks)→ 走 node attr `color` 路径
+   * - 其他 block → 把整块内部 range 一起加 textStyle mark
+   *
+   * color 为空字符串时移除(mathBlock 设 null,其他清 mark)。
+   */
+  applyBlockTextColor(instanceId: string, blockPos: number, color: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return;
+    if (node.type.name === 'mathBlock') {
+      const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+        ...node.attrs,
+        color: color || null,
+      });
+      inst.view.dispatch(tr);
+      inst.view.focus();
+      return;
+    }
+    // 普通 block:把内部 range 喂给 setTextColor(复用同一算子)
+    this.setTextColor(instanceId, color, {
+      from: blockPos + 1,
+      to: blockPos + node.nodeSize - 1,
+    });
+  },
+
+  /**
+   * 给整个 block 设背景色(handle 菜单 Color panel 用)。
+   *
+   * 分流同 applyBlockTextColor:mathBlock 走 node attr `bgColor`,
+   * 其他 block 把整块 range 喂给 setHighlight。
+   */
+  applyBlockBgColor(instanceId: string, blockPos: number, color: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return;
+    if (node.type.name === 'mathBlock') {
+      const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+        ...node.attrs,
+        bgColor: color || null,
+      });
+      inst.view.dispatch(tr);
+      inst.view.focus();
+      return;
+    }
+    this.setHighlight(instanceId, color, {
+      from: blockPos + 1,
+      to: blockPos + node.nodeSize - 1,
+    });
+  },
+
+  /**
+   * 取 block 的文字色(handle Color panel active swatch 高亮用)。
+   *
+   * mathBlock 读 node.attrs.color;其他 block 取**第一个**带 textStyle 的子节点 color。
+   * 子节点无 textStyle 或整块未着色 → null。
+   */
+  getBlockTextColor(instanceId: string, blockPos: number): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    if (node.type.name === 'mathBlock') {
+      return (node.attrs.color as string | null) ?? null;
+    }
+    const markType = inst.view.state.schema.marks.textStyle;
+    if (!markType) return null;
+    let found: string | null = null;
+    node.descendants((child) => {
+      if (found) return false;
+      const m = markType.isInSet(child.marks);
+      if (m) found = (m.attrs.color as string | null) ?? null;
+      return true;
+    });
+    return found;
+  },
+
+  /**
+   * 取 block 的背景色(handle Color panel active swatch 高亮用)。
+   * 语义同 getBlockTextColor,mark 换成 highlight。
+   */
+  getBlockBgColor(instanceId: string, blockPos: number): string | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    if (node.type.name === 'mathBlock') {
+      return (node.attrs.bgColor as string | null) ?? null;
+    }
+    const markType = inst.view.state.schema.marks.highlight;
+    if (!markType) return null;
+    let found: string | null = null;
+    node.descendants((child) => {
+      if (found) return false;
+      const m = markType.isInSet(child.marks);
+      if (m) found = (m.attrs.color as string | null) ?? null;
+      return true;
+    });
+    return found;
+  },
+
   /** 取选区第一个 textStyle mark 的 color attr(无则 null)*/
   getActiveTextColor(instanceId: string): string | null {
     const inst = instanceRegistry.get(instanceId);
