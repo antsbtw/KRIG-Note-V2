@@ -28,7 +28,8 @@ import {
   pasteFromClipboard,
   deleteSelected,
 } from './tree-operations';
-import { decodeTreeId, encodeNoteId } from './tree-builder';
+import { decodeTreeId, encodeNoteId, encodeFolderId } from './tree-builder';
+import { triggerRename } from './context-menu-registrations';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
 import { showDictionaryPanel, showTranslationPanel } from './learning-integration';
@@ -122,8 +123,13 @@ export function registerNoteCommands(): void {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const pid = typeof parentId === 'string' ? parentId : null;
-    void createFolder(wsId, pid);
     ensureNoteViewActive(wsId);
+    void (async () => {
+      const created = await createFolder(wsId, pid);
+      // fallbackTitle 用实际生成的 title(可能含序号 e.g. "新建文件夹 2"),
+      // 绕过 useAllFolders 广播 race
+      if (created) triggerRename(encodeFolderId(created.id), created.title);
+    })();
   });
 
   /** 删除单个 treeId(注意跟 delete-active 区分:这条按 treeId 精确删,不依赖 selectedIds)*/

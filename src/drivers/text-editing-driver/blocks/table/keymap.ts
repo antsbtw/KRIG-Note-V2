@@ -18,10 +18,16 @@ import { goToNextCell, addRowAfter } from 'prosemirror-tables';
 export function tableKeymapPlugin(): Plugin {
   return keymap({
     Tab: (state, dispatch) => {
-      // goToNextCell 在末 cell 时返回 false → 加新行后再 dispatch goToNextCell
-      if (goToNextCell(1)(state, dispatch)) return true;
-      if (dispatch) addRowAfter(state, dispatch);
-      return true;
+      // 不在 table 内时透传 Tab(让 buildListKeymap 等后续 plugin 接管)
+      // goToNextCell / addRowAfter dry-run 都返回 false → 当前光标不在 table 内
+      if (goToNextCell(1)(state)) {
+        return goToNextCell(1)(state, dispatch);
+      }
+      if (addRowAfter(state)) {
+        if (dispatch) addRowAfter(state, dispatch);
+        return true;
+      }
+      return false;
     },
     'Shift-Tab': goToNextCell(-1),
   });

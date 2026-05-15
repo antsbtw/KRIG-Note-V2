@@ -22,6 +22,7 @@ import {
   subscribeTransient,
   getTransientVersion,
   renameFolder,
+  renameNote,
 } from './data-model';
 import { buildTreeNodes, decodeTreeId, relativeTime } from './tree-builder';
 import { handleDrop } from './tree-operations';
@@ -47,16 +48,18 @@ function FolderTreePanel() {
 
   // 把 setRenameTrigger 桥到右键菜单(mount 时挂上,unmount 时清掉)
   // L7-sub2:从本地缓存 (allNotes / allFolders) 查 title,避免 async 路径
+  // fallbackTitle: 创建路径走这条,绕过 allFolders 广播尚未到达的 race
   useEffect(() => {
-    setRenameTrigger((treeId) => {
+    setRenameTrigger((treeId, fallbackTitle) => {
       const { type, id } = decodeTreeId(treeId);
       const item =
         type === 'note'
           ? allNotes.find((n) => n.id === id)
           : allFolders.find((f) => f.id === id);
-      if (!item) return;
+      const title = item?.title ?? fallbackTitle;
+      if (title === undefined) return;
       setRenamingId(treeId);
-      setRenameValue(item.title);
+      setRenameValue(title);
     });
     return () => setRenameTrigger(null);
   }, [allNotes, allFolders]);
@@ -102,10 +105,10 @@ function FolderTreePanel() {
     const trimmed = renameValue.trim();
     if (trimmed) {
       // L7-sub2:
-      // - folder:可直接 rename(title 是真实字段)
-      // - note:title 派生自 doc.content[0],L5-A 兼容路径不支持纯改 title
-      //   (改名要改 doc 首段文本,由 NoteView/编辑器路径承担);本处 fire-and-forget 忽略
+      // - folder:直接 rename(title 是真实字段)
+      // - note:title 派生自 doc.content[0],改名 = 反写首段 text(保留 marks / 合并 inline)
       if (type === 'folder') void renameFolder(id, trimmed);
+      else if (type === 'note') void renameNote(id, trimmed);
     }
     setRenamingId(null);
   };

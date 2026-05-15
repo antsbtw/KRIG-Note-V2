@@ -49,26 +49,38 @@ export function useCollisionPosition(
       return;
     }
 
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    // 计算位置(根据当前 popup rect 与 viewport 碰撞决定 anchor / flip)
+    const compute = () => {
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
 
-    let nextX = anchorX;
-    let nextY = anchorY;
+      let nextX = anchorX;
+      let nextY = anchorY;
 
-    // X 方向:右溢则翻转(浮层 right edge 贴近 anchor)
-    if (anchorX + rect.width + margin > vw) {
-      nextX = anchorX - rect.width;
-      if (nextX < margin) nextX = margin; // 翻后还溢左 → clamp
-    }
+      // X 方向:右溢则翻转(浮层 right edge 贴近 anchor)
+      if (anchorX + rect.width + margin > vw) {
+        nextX = anchorX - rect.width;
+        if (nextX < margin) nextX = margin; // 翻后还溢左 → clamp
+      }
 
-    // Y 方向:下溢则翻转
-    if (anchorY + rect.height + margin > vh) {
-      nextY = anchorY - rect.height;
-      if (nextY < margin) nextY = margin;
-    }
+      // Y 方向:下溢则翻转
+      if (anchorY + rect.height + margin > vh) {
+        nextY = anchorY - rect.height;
+        if (nextY < margin) nextY = margin;
+      }
 
-    setPos({ x: nextX, y: nextY });
+      setPos({ x: nextX, y: nextY });
+    };
+
+    compute();
+
+    // popup 内部内容变化(slash 过滤项数 / 菜单展开)导致尺寸跳变时重算
+    // 漏挂会让 effect 用首次 render 的 stale rect → flip 判断错误(过滤后视觉只 1 项但
+    // 算的是过滤前 15 项的高度,误触发上翻)
+    const observer = new ResizeObserver(compute);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [ref, anchorX, anchorY, margin]);
 
   return pos;

@@ -535,6 +535,8 @@ export const textEditingDriverApi = {
       );
       const list = listType.create(null, Fragment.from(item));
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, list);
+      // 光标落进新 list 内的第一个 item 的 paragraph(pos + list开1 + item开1 + p开1 = pos+3)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 3)));
       view.dispatch(tr);
       view.focus();
       return;
@@ -548,6 +550,9 @@ export const textEditingDriverApi = {
         pos + node.nodeSize,
         bq.create(null, [node.copy(node.content)]),
       );
+      // replaceWith 默认 mapping 把 cursor 丢到替换区末(blockquote 闭合外),
+      // 显式将 cursor 落进新 blockquote 内的 paragraph(pos + bq开1 + p开1 = pos+2)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
       view.dispatch(tr);
       view.focus();
       return;
@@ -559,6 +564,8 @@ export const textEditingDriverApi = {
       const text = node.textContent;
       const newNode = text ? cb.create(null, schema.text(text)) : cb.create();
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, newNode);
+      // 光标进新 codeBlock 内部(pos + cb开1 = pos+1)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)));
       view.dispatch(tr);
       view.focus();
       return;
@@ -583,6 +590,8 @@ export const textEditingDriverApi = {
         pos + node.nodeSize,
         co.create(null, [node.copy(node.content)]),
       );
+      // 光标落进新 callout 内的 paragraph(pos + 容器开1 + p开1 = pos+2)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
       view.dispatch(tr);
       view.focus();
       return;
@@ -597,6 +606,8 @@ export const textEditingDriverApi = {
         pos + node.nodeSize,
         tl.create(null, [node.copy(node.content)]),
       );
+      // 光标落进新 toggleList 内的 paragraph(pos + 容器开1 + p开1 = pos+2)
+      tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
       view.dispatch(tr);
       view.focus();
       return;
