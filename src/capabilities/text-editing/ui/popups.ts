@@ -46,6 +46,6 @@ export function registerTextEditingPopups(): void {
   popupRegistry.register({
     id: 'text-editing.popup.callout-emoji',
     Component: EmojiPickerPanel,
-    estimatedSize: { width: 220, height: 100 },
+    estimatedSize: { width: 352, height: 435 },
   });
 }

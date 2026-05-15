@@ -396,46 +396,65 @@
   box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.4);
 }
 
-/* ── callout emoji picker(callout block click 弹出 grid 选 emoji)── */
+/* ── callout emoji picker(Notion 风格:4 tab 栏 + emoji-mart Web Component)── */
 
 .krig-emoji-picker {
-  background: #2a2a2a;
-  border: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  width: 352px;
+  background: #1f1f1f;
+  border: 1px solid #333;
   border-radius: 8px;
-  padding: 8px;
-  min-width: 200px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
 }
 
-.krig-emoji-picker__grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
+/* 4 tab 栏 */
+.krig-emoji-picker__tabs {
+  display: flex;
   gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid #2a2a2a;
 }
 
-.krig-emoji-picker__swatch {
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  border: 1px solid transparent;
+.krig-emoji-picker__tab {
+  padding: 6px 10px;
   background: transparent;
+  border: none;
+  color: #aaa;
+  font-size: 13px;
   cursor: pointer;
-  padding: 0;
-  font-size: 20px;
-  line-height: 1;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 80ms ease;
+}
+
+.krig-emoji-picker__tab:hover:not(:disabled) {
+  color: #fff;
+}
+
+.krig-emoji-picker__tab--active {
+  color: #fff;
+  border-bottom-color: #fff;
+}
+
+.krig-emoji-picker__tab--disabled,
+.krig-emoji-picker__tab:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+/* Picker mount 容器:emoji-mart 自带 shadow DOM 视觉,不干预 */
+.krig-emoji-picker__mount {
+  display: contents;
+}
+
+.krig-emoji-picker__loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.1s, border-color 0.1s, background-color 0.1s;
-}
-
-.krig-emoji-picker__swatch:hover {
-  background-color: #3a3a3a;
-  border-color: #555;
-  transform: scale(1.1);
-}
-
-.krig-emoji-picker__swatch.active {
-  border-color: #8ab4f8;
-  background-color: rgba(138, 180, 248, 0.15);
+  width: 352px;
+  height: 435px;
+  color: #999;
+  font-size: 13px;
 }
