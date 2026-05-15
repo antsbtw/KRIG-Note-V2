@@ -91,6 +91,30 @@ import type { textEditingDriverApi as DriverApiInstance } from '@drivers/text-ed
 export type TextEditingDriverApi = typeof DriverApiInstance;
 
 /**
+ * PM 通用菜单 item 工厂集(C8 W5 整改 W-1)
+ *
+ * view 端不可直 import @capabilities/text-editing/ui/* 运行时值(W5 规则),
+ * 改走 requireCapabilityApi<TextEditingApi>('text-editing').ui.<sub>.createX(viewId)。
+ *
+ * typeof namespace import 设计:
+ * - 工厂模块加新 export view 自动可见,无需手列签名
+ * - import type 编译期擦除,view bundle 不引入 ui/* 运行时模块
+ */
+import type * as FloatingToolbarFactory from './ui/floating-toolbar/items';
+import type * as ToolbarFactory from './ui/toolbar/items';
+import type * as SlashMenuFactory from './ui/slash-menu/items';
+import type * as HandleMenuFactory from './ui/handle-menu/items';
+import type * as ContextMenuFactory from './ui/context-menu/items';
+
+export interface TextEditingUiApi {
+  readonly floatingToolbar: typeof FloatingToolbarFactory;
+  readonly toolbar: typeof ToolbarFactory;
+  readonly slashMenu: typeof SlashMenuFactory;
+  readonly handleMenu: typeof HandleMenuFactory;
+  readonly contextMenu: typeof ContextMenuFactory;
+}
+
+/**
  * text-editing capability 对外 API
  */
 export interface TextEditingApi {
@@ -133,6 +157,14 @@ export interface TextEditingApi {
    * 必须在 atomsToProseMirror 之前调用。
    */
   readonly sanitizeAtoms: (atoms: AtomInput[]) => AtomInput[];
+
+  /**
+   * PM 通用菜单 item 工厂(C8 W5 整改 W-1)
+   *
+   * view 拼装 floating-toolbar / toolbar / slash-menu / handle-menu / context-menu
+   * 时调本字段下的工厂函数(传 viewId),不直接 import @capabilities/text-editing/ui/*。
+   */
+  readonly ui: TextEditingUiApi;
 }
 
 // (内部占位类型已清理)

@@ -35,6 +35,12 @@ import { sanitizeAtoms } from './converters/sanitize-atoms';
 import { registerTextEditingPopups } from './ui/popups';
 import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integration';
 import { registerTextEditingCommands } from './commands/register-pm-commands';
+// C8 W-1:PM 通用菜单 item 工厂(view 端通过 api.ui.* 取,W5 合规)
+import * as floatingToolbarFactory from './ui/floating-toolbar/items';
+import * as toolbarFactory from './ui/toolbar/items';
+import * as slashMenuFactory from './ui/slash-menu/items';
+import * as handleMenuFactory from './ui/handle-menu/items';
+import * as contextMenuFactory from './ui/context-menu/items';
 import type { TextEditingApi } from './types';
 
 /**
@@ -53,6 +59,13 @@ const api: TextEditingApi = {
   instanceRegistry,
   atomsToProseMirror,
   sanitizeAtoms,
+  ui: {
+    floatingToolbar: floatingToolbarFactory,
+    toolbar: toolbarFactory,
+    slashMenu: slashMenuFactory,
+    handleMenu: handleMenuFactory,
+    contextMenu: contextMenuFactory,
+  },
 };
 
 capabilityRegistry.register({
