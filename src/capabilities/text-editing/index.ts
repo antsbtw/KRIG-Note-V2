@@ -34,6 +34,7 @@ import { atomsToProseMirror } from './converters/atoms-to-pm';
 import { sanitizeAtoms } from './converters/sanitize-atoms';
 import { registerTextEditingPopups } from './ui/popups';
 import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integration';
+import { registerTextEditingCommands } from './commands/register-pm-commands';
 import type { TextEditingApi } from './types';
 
 /**
@@ -64,3 +65,7 @@ capabilityRegistry.register({
 // 注:driver activeHandler 是模块级单例,view 各自注册会互相覆盖,故归 capability 自管。
 registerTextEditingPopups();
 registerNoteLinkSearchIntegration();
+
+// C7:capability 加载时一次性注册 PM 通用命令(46 个;原 NoteView 注册全部搬来)。
+// N-1:同 id 全工程唯一 register 调用 — 同步删 NoteView 旧 register。
+registerTextEditingCommands();
