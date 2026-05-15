@@ -35,6 +35,8 @@ import type {
   DictionaryLookupResult,
   TranslateResult,
 } from './types';
+import * as dictionaryPanelIntegration from './ui/help-panel-integration';
+import { registerLearningHelpPanels } from './ui/help-panels';
 
 export type {
   LearningApi,
@@ -120,5 +122,14 @@ capabilityRegistry.register({
     dictionaryLookup,
     translate,
     tts,
+    // S2:ui 命名空间(view 通过 api.ui.dictionaryPanel.* 触发查词/翻译面板)
+    ui: {
+      dictionaryPanel: dictionaryPanelIntegration,
+    },
   } satisfies LearningApi,
 });
+
+// S2:capability 加载时一次性注册 learning help-panel(D-2 决议)。
+// help-panel-registry Map<id, item> 按 id 全局唯一,view 字段对渲染无作用,
+// 故归 capability 自管(同 stage 04 popup C4 模式)。
+registerLearningHelpPanels();

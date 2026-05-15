@@ -44,7 +44,7 @@ import { decodeTreeId, encodeNoteId, encodeFolderId } from './tree-builder';
 import { triggerRename } from './context-menu-registrations';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
-import { showDictionaryPanel, showTranslationPanel } from './learning-integration';
+import type { LearningApi } from '@capabilities/learning/types';
 
 /**
  * lazy getter — 命令 handler 内部用,避免 module load 时 require
@@ -297,7 +297,7 @@ export function registerNoteCommands(): void {
     handleMenuController.hide();
   });
 
-  // ── Learning 业务(2):查词 / 翻译 ──
+  // ── Learning 业务(2):查词 / 翻译(S2 改走 capability ui;S3 命令 id 改 learning.cm-*)──
 
   /** 选区单词查词 → 弹 dictionary help-panel(lookup 模式)*/
   commandRegistry.register('note-view.cm-dictionary-lookup', () => {
@@ -305,7 +305,7 @@ export function registerNoteCommands(): void {
     if (!sel || sel.isCollapsed) return;
     const text = sel.toString().trim();
     if (!text) return;
-    showDictionaryPanel(text);
+    requireCapabilityApi<LearningApi>('learning').ui.dictionaryPanel.showLookup(text);
     contextMenuController.hide();
   });
 
@@ -315,7 +315,7 @@ export function registerNoteCommands(): void {
     if (!sel || sel.isCollapsed) return;
     const text = sel.toString().trim();
     if (!text) return;
-    showTranslationPanel(text);
+    requireCapabilityApi<LearningApi>('learning').ui.dictionaryPanel.showTranslate(text);
     contextMenuController.hide();
   });
 

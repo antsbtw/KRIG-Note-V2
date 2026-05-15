@@ -1,28 +1,21 @@
 /**
- * note view learning 集成(L5-B3.20b → L4.1 改用 help-panel)
+ * NoteView learning 桥接(S2 后:仅留 vocab → driver setVocabWords 桥接)
  *
- * 职责:
- * 1. 启动取一次 vocab 全量 + 订阅 onVocabChanged → 调 driver setVocabWords
+ * 历史:本文件原含 vocab bridge + showDictionaryPanel/showTranslationPanel 两触发函数。
+ * - S2 触发函数搬 capabilities/learning/ui/help-panel-integration.ts(D-3 决议)
+ * - S4 vocab bridge 也搬 capability(D-4 决议)
+ * - S5 本文件整体删除
+ *
+ * 当前 vocab bridge 职责(暂留):
+ * 1. 启动取一次 vocab 全量 + 订阅 onVocabChanged → 调 text-editing.api.setVocabWords
  *    分发到所有 PM instance(供 vocab-highlight plugin 重建 decorations)
- * 2. 暴露 showDictionaryPanel(word, ctx?) / showTranslationPanel(text)
- *    给 contextMenu cm-dictionary-lookup / cm-translate-text 命令调
- *    (anchorRect 不再需要 — help-panel 是右栏定宽长侧栏,不锚点定位)
- *
- * W5-A View 边界:走 requireCapabilityApi<LearningApi>('learning'),
- * 不直 import @capabilities/learning 运行时函数(types 是类型 only,纯擦除可 import)。
  */
 
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { LearningApi } from '@capabilities/learning/types';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { helpPanelController } from '@slot/triggers/help-panel-controller';
-import { setPanelInitial } from './dictionary-panel/DictionaryPanel';
-
-const HELP_PANEL_ID = 'note-view.help.dictionary';
 
 export function registerLearningIntegration(): void {
-  // W5-A View 边界:走 capability 间接路由(text-editing capability 把
-  // driverApi 整包暴露在 .api 字段,setVocabWords 通过它访问)
   const learning = requireCapabilityApi<LearningApi>('learning');
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
 
@@ -36,23 +29,4 @@ export function registerLearningIntegration(): void {
   learning.onVocabChanged((entries) => {
     textEditing.api.setVocabWords(entries);
   });
-}
-
-/**
- * 给 cm-dictionary-lookup 命令调用 — 弹 dictionary help-panel(查词模式)
- *
- * @param word 要查的词
- * @param context 单词所在句子上下文(B3.20b 暂不传,留 Phase D 增强)
- */
-export function showDictionaryPanel(word: string, context?: string): void {
-  setPanelInitial('lookup', word, context);
-  helpPanelController.show(HELP_PANEL_ID);
-}
-
-/**
- * 给 cm-translate-text 命令调用 — 弹 dictionary help-panel(翻译模式)
- */
-export function showTranslationPanel(text: string): void {
-  setPanelInitial('translate', text);
-  helpPanelController.show(HELP_PANEL_ID);
 }
