@@ -1,9 +1,9 @@
 /**
- * NoteView HandleMenu 注册(L5-B3.11 完整对齐 V1)
+ * NoteView HandleMenu 注册(L5-B3.11 完整对齐 V1;2026-05-15 Color 接入)
  *
  * V1 handle 菜单层级(完整对齐截图):
  *   ↔ Turn Into  ▸    (子菜单 — 11 项)
- *   🎨 Color      ▸    (子菜单 — 占位,留 sub-stage)
+ *   🎨 Color      ▸    (panel 模式 — Notion 同款栈式切换,2026-05-15 接入)
  *   ▣ 框定         ▸    (子菜单 — V2 暂无 frame block,占位)
  *   ¶ Format      ▸    (子菜单 — 仅在 indent attr 存在时显示;V2 暂无 indent,
  *                       条件 visibleWhen 留 false 直到 indent attr 实现)
@@ -18,10 +18,13 @@
  *
  * 占位项约定:command 留空字符串 → HandleMenuBinding 渲染 disabled,点击无效。
  * 子菜单容器项:submenuId 设置,无 command → 仅展开子菜单,不响应点击。
+ * Panel 容器项:panelId + panelRender 设置 → 点击切换主菜单为 panel(Notion 模式)。
  * 条件显示:visibleWhen 返回 false 时不渲染该 item(对齐 V1 Format 仅在有 indent 时)。
  */
 
+import { createElement } from 'react';
 import { handleRegistry } from '@slot/interaction-registries/handle-registry/handle-registry';
+import { HandleColorPanel } from './color-picker/HandleColorPanel';
 
 const VIEW = 'note-view';
 
@@ -34,7 +37,8 @@ export function registerHandleMenu(): void {
     { id: 'note-view.h.turn-into', icon: '↔', label: 'Turn Into', command: TODO,
       submenuId: 'turn-into', view: VIEW, group: 'transform', order: 10 },
     { id: 'note-view.h.color', icon: '🎨', label: 'Color', command: TODO,
-      submenuId: 'color', view: VIEW, group: 'transform', order: 20 },
+      panelId: 'color', view: VIEW, group: 'transform', order: 20,
+      panelRender: (ctx) => createElement(HandleColorPanel, { ctx }) },
     { id: 'note-view.h.frame', icon: '▣', label: '框定', command: TODO,
       submenuId: 'frame', view: VIEW, group: 'transform', order: 30 },
     { id: 'note-view.h.format', icon: '¶', label: 'Format', command: TODO,
@@ -83,9 +87,7 @@ export function registerHandleMenu(): void {
     { id: 'note-view.h.sub.turn-toggle', icon: '▸', label: 'Toggle List',
       command: 'note-view.handle-turn-toggle', submenuOf: 'turn-into', view: VIEW, order: 20 },
 
-    // ── submenu: color(占位 — 留 sub-stage 接 ColorPickerPanel)──
-    { id: 'note-view.h.sub.color-todo', icon: '⏳', label: '暂未实现 — 留 sub-stage',
-      command: TODO, submenuOf: 'color', view: VIEW, order: 10 },
+    // ── (color 走 panel 模式,见上面 note-view.h.color 的 panelId/panelRender)──
 
     // ── submenu: frame(占位 — V2 暂无 frame block)──
     { id: 'note-view.h.sub.frame-todo', icon: '⏳', label: '暂未实现 — frame block 留 Phase D',
