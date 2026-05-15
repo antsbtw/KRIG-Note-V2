@@ -2,7 +2,7 @@
  * ColorPickerPanel — 文字色 + 高亮背景色选择器(L5-B3.4)
  *
  * 用于:浮条 A 按钮 / 顶部 toolbar 弹出(selection-bound)。
- * handle 菜单 Color 走 HandleColorPanel(block-scoped),不复用本组件。
+ * handle 菜单 Color 走 HandleColorSubmenu(block-scoped),不复用本组件。
  *
  * 拆分(2026-05-15):
  * - L3 视觉 → ColorSwatchGrid 组件 + TEXT_COLORS / BG_COLORS 共享色板

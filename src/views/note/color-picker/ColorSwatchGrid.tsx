@@ -4,7 +4,7 @@
  * 纯视觉组件:接 swatches + activeColor + onPick callback,不知道颜色去哪。
  * 复用方:
  * - ColorPickerPanel(selection-bound,floating toolbar / 顶部 toolbar 用)
- * - HandleColorPanel(block-scoped,handle 菜单用)
+ * - HandleColorSubmenu(block-scoped,handle 菜单用)
  */
 
 import type { ReactNode } from 'react';
