@@ -395,3 +395,47 @@
   border-color: #8ab4f8;
   box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.4);
 }
+
+/* ── callout emoji picker(callout block click 弹出 grid 选 emoji)── */
+
+.krig-emoji-picker {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.krig-emoji-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.krig-emoji-picker__swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s, border-color 0.1s, background-color 0.1s;
+}
+
+.krig-emoji-picker__swatch:hover {
+  background-color: #3a3a3a;
+  border-color: #555;
+  transform: scale(1.1);
+}
+
+.krig-emoji-picker__swatch.active {
+  border-color: #8ab4f8;
+  background-color: rgba(138, 180, 248, 0.15);
+}
