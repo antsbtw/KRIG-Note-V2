@@ -4,13 +4,19 @@
  * 支持:
  * - group 分组(自动插分隔符;同组无分隔)
  * - submenu(item.submenuId 设置时是父项,渲染右侧 ▸ + 子菜单)
+ * - panel 模式(item.panelId 设置时点击切换主菜单为自定义内容,Notion 同款,2026-05-15)
  * - visibleWhen(只在 block 满足条件时渲染该 item — 对齐 V1 Format/Collapse 条件显示)
- * - 占位项(command='' → 按钮 disabled,不响应点击)
+ * - 占位项(command='' && !submenuId && !panelId → 按钮 disabled,不响应点击)
  *
  * Submenu 行为(对齐 V1):
  * - hover 父项 → 弹子菜单(右侧 / 翻边界)
  * - hover 移到子菜单 → 不收
  * - 点击子菜单项 → 触发命令并关菜单
+ *
+ * Panel 行为(对齐 Notion):
+ * - 点击 panel 父项 → 主菜单整体替换为 panel 内容,顶部一行"← <label>"返回
+ * - panel 内组件通过 ctx.close() 关闭整个 handle 菜单
+ * - 切换菜单 / 关菜单时 panel 状态自动清空
  */
 
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
@@ -22,6 +28,7 @@ import { commandRegistry } from '../command-registry/command-registry';
 import type {
   HandleItem,
   HandleVisibilityContext,
+  HandlePanelContext,
 } from '../interaction-registries/handle-registry/handle-types';
 import { groupWithDividers, isDivider } from './group-with-dividers';
 
@@ -62,13 +69,16 @@ export function HandleMenuBinding() {
   /** 当前展开的 submenu ID(hover 触发)*/
   const [openSub, setOpenSub] = useState<string | null>(null);
   const [subPos, setSubPos] = useState<{ left: number; top: number } | null>(null);
+  /** 当前进入的 panel ID(点击 panelId 项触发,Notion 栈式切换)*/
+  const [openPanel, setOpenPanel] = useState<string | null>(null);
 
   useEffect(() => {
     return handleMenuController.subscribe(() => {
       setState(handleMenuController.getState());
-      // 切换菜单时关闭 submenu
+      // 切换菜单时关闭 submenu / panel
       setOpenSub(null);
       setSubPos(null);
+      setOpenPanel(null);
     });
   }, []);
 
@@ -111,58 +121,97 @@ export function HandleMenuBinding() {
   const itemsWithDividers = groupWithDividers(topLevel);
 
   function executeItem(item: HandleItem): void {
+    if (item.submenuId) return; // submenu 容器项,只展开不执行(hover 触发,不走 click)
+    if (item.panelId) {
+      // panel 容器项 → 主菜单整体切换到 panel
+      setOpenPanel(item.panelId);
+      setOpenSub(null);
+      return;
+    }
     if (!item.command) return; // 占位项,无命令
-    if (item.submenuId) return; // submenu 容器项,只展开不执行
     commandRegistry.execute(item.command);
     handleMenuController.hide();
   }
 
   // 当前展开 submenu 的子项
   const subItems = openSub ? submenus.get(openSub) ?? [] : [];
+  // 当前进入的 panel item(找出 panelId 匹配项)
+  const activePanelItem = openPanel
+    ? topLevel.find((it) => it.panelId === openPanel) ?? null
+    : null;
+  // panel ctx(只在进入 panel 时构造)
+  const panelCtx: HandlePanelContext | null = activePanelItem
+    ? {
+        blockType: state.blockType ?? '',
+        blockAttrs: state.blockAttrs ?? {},
+        blockPos: state.pos ?? 0,
+        viewId: state.viewId,
+        close: () => handleMenuController.hide(),
+      }
+    : null;
 
   return (
     <>
-      {/* 主菜单 */}
+      {/* 主菜单(panel 模式时主菜单内容替换为 panel) */}
       <div
         ref={menuRef}
-        className="krig-handle-menu"
+        className={`krig-handle-menu${activePanelItem ? ' krig-handle-menu--panel' : ''}`}
         style={{ left: x, top: y }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {itemsWithDividers.map((item) => {
-          if (isDivider(item)) {
-            return <div key={item.key} className="krig-handle-menu-divider" />;
-          }
-          const hasSubmenu = !!item.submenuId;
-          const disabled = !item.command && !hasSubmenu;
-          const cls = ['krig-handle-menu-item'];
-          if (disabled) cls.push('krig-handle-menu-item--disabled');
-          if (hasSubmenu && openSub === item.submenuId) cls.push('krig-handle-menu-item--active');
-          return (
+        {activePanelItem && panelCtx ? (
+          <>
             <button
-              key={item.id}
               type="button"
-              className={cls.join(' ')}
-              disabled={disabled && !hasSubmenu}
-              onMouseEnter={() => {
-                if (hasSubmenu) {
-                  setOpenSub(item.submenuId!);
-                } else {
-                  setOpenSub(null);
-                }
-              }}
-              onClick={() => executeItem(item)}
+              className="krig-handle-menu-panel-header"
+              onClick={() => setOpenPanel(null)}
             >
-              {item.icon && <span className="krig-handle-menu-item__icon">{item.icon}</span>}
-              <span className="krig-handle-menu-item__label">{item.label}</span>
-              {hasSubmenu && <span className="krig-handle-menu-item__arrow">▸</span>}
+              <span className="krig-handle-menu-panel-header__arrow">←</span>
+              <span className="krig-handle-menu-panel-header__label">{activePanelItem.label}</span>
             </button>
-          );
-        })}
+            <div className="krig-handle-menu-panel-body">
+              {activePanelItem.panelRender?.(panelCtx)}
+            </div>
+          </>
+        ) : (
+          itemsWithDividers.map((item) => {
+            if (isDivider(item)) {
+              return <div key={item.key} className="krig-handle-menu-divider" />;
+            }
+            const hasSubmenu = !!item.submenuId;
+            const hasPanel = !!item.panelId;
+            const disabled = !item.command && !hasSubmenu && !hasPanel;
+            const cls = ['krig-handle-menu-item'];
+            if (disabled) cls.push('krig-handle-menu-item--disabled');
+            if (hasSubmenu && openSub === item.submenuId) cls.push('krig-handle-menu-item--active');
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cls.join(' ')}
+                disabled={disabled}
+                onMouseEnter={() => {
+                  if (hasSubmenu) {
+                    setOpenSub(item.submenuId!);
+                  } else {
+                    setOpenSub(null);
+                  }
+                }}
+                onClick={() => executeItem(item)}
+              >
+                {item.icon && <span className="krig-handle-menu-item__icon">{item.icon}</span>}
+                <span className="krig-handle-menu-item__label">{item.label}</span>
+                {(hasSubmenu || hasPanel) && (
+                  <span className="krig-handle-menu-item__arrow">▸</span>
+                )}
+              </button>
+            );
+          })
+        )}
       </div>
 
-      {/* 子菜单 */}
-      {openSub && subItems.length > 0 && (
+      {/* 子菜单(panel 模式不显示) */}
+      {!activePanelItem && openSub && subItems.length > 0 && (
         <div
           ref={subMenuRef}
           className="krig-handle-submenu"

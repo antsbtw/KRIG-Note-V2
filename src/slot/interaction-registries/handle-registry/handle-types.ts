@@ -1,13 +1,33 @@
 /** Handle 菜单类型(块手柄)
  *
  * L5-B3.11:加 visibleWhen / icon / submenuOf 支持子菜单 + 条件显示(对齐 V1)
+ * 2026-05-15:加 panel 模式,栈式切换主菜单为自定义内容(对齐 Notion handle UX)
  */
+
+import type { ReactNode } from 'react';
 
 export interface HandleVisibilityContext {
   /** 当前 block 节点的 type name(如 'paragraph' / 'heading' / 'bulletList')*/
   blockType: string;
   /** 当前 block 节点的 attrs(给 visibleWhen 判断 isTitle / level / indent 等)*/
   blockAttrs: Record<string, unknown>;
+}
+
+/**
+ * Panel 渲染上下文(panelRender 收到)— 含 block 信息 + close 回调。
+ *
+ * 关键:blockPos 是 handle 触发那一刻的瞬时值,通过这里传给 panel 内组件,
+ * 不污染 popup-controller 匿名契约。
+ */
+export interface HandlePanelContext {
+  blockType: string;
+  blockAttrs: Record<string, unknown>;
+  /** PM doc 中的 block pos(driver block-scoped API 用)*/
+  blockPos: number;
+  /** view id(driver 调用必传)*/
+  viewId: string;
+  /** 关闭整个 handle 菜单(panel 内部操作完后调)*/
+  close: () => void;
 }
 
 export interface HandleItem {
@@ -46,4 +66,20 @@ export interface HandleItem {
    * ctx.blockType / ctx.blockAttrs 由 HandleMenuBinding 在 show 时填入。
    */
   visibleWhen?: (ctx: HandleVisibilityContext) => boolean;
+  /**
+   * Panel ID — 设置则点击此项后**主菜单整体切换**到 panelRender 内容(Notion 同款)。
+   *
+   * 与 submenuId 互斥:submenuId 是右侧浮出小菜单,panelId 是栈式替换主菜单。
+   * 适合内容复杂(swatch grid / 二级搜索面板等)、submenu 宽度放不下的场景。
+   *
+   * 配套 panelRender 函数返回 panel 内容;panel 顶部由 binding 渲染"← 返回"。
+   */
+  panelId?: string;
+  /**
+   * Panel 渲染函数(panelId 设置时必填)。
+   *
+   * 收 HandlePanelContext:含 blockPos / blockType / blockAttrs / viewId / close。
+   * 内部组件调 driver block-scoped API 后调 ctx.close() 关闭整个 handle 菜单。
+   */
+  panelRender?: (ctx: HandlePanelContext) => ReactNode;
 }
