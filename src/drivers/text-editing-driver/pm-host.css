@@ -270,21 +270,29 @@
   font-size: inherit;
 }
 
-/* toggleList — 对齐 V1(箭头 + 内容,closed 时仅显第一行) */
+/* toggleList — 对齐 V1(箭头 + 内容,closed 时仅显第一行)
+ * flex 让 ▶ 与内容行首中线对齐(单行场景最准;closed 多行时箭头仍贴第一行) */
 .krig-pm-host .ProseMirror div.krig-toggle-list {
   margin: 0.2em 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .krig-pm-host .ProseMirror .krig-toggle-list__arrow {
-  display: inline-block;
+  flex-shrink: 0;
+  /* 箭头自身按行高高度,flex 内 center 让 ▶ 字符视觉中线对齐文字第一行
+   * 行高 = font-size 16 * line-height 1.7 = 27.2px
+   * font-size 跟正文同 16px,▶ 视觉大小匹配文字字号 */
   width: 20px;
+  height: 27.2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   user-select: none;
-  font-size: 14px;
+  font-size: 16px;
   color: #e8eaed;
-  vertical-align: top;
-  margin-top: 4px;
-  text-align: center;
 }
 
 .krig-pm-host .ProseMirror .krig-toggle-list__arrow:hover {
@@ -292,9 +300,16 @@
 }
 
 .krig-pm-host .ProseMirror .krig-toggle-list__content {
-  display: inline-block;
-  width: calc(100% - 24px);
-  vertical-align: top;
+  flex: 1;
+  min-width: 0;
+}
+
+/* toggle 内首段去掉 .ProseMirror > * 通用 padding:3px,
+ * 否则文字相对 ▶ 下沉 3px(▶ 在 flex 容器中线,文字 padding-top 把行框推下) */
+.krig-pm-host .ProseMirror .krig-toggle-list__content > * {
+  padding-top: 0;
+  padding-bottom: 0;
+  margin: 0;
 }
 
 /* closed 状态:子内容仅显示第一个(标题行)*/
