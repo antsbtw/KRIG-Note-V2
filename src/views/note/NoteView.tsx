@@ -103,6 +103,10 @@ export function NoteView({ workspaceId }: NoteViewProps) {
             instanceId: workspaceId,
             undoScope: 'text-editing.pm',
             viewId: 'note-view',
+            // C8 D-D:NoteView 显式声明 titleGuard(noteTitle 强制守门)。
+            // driver 层 fallback `viewId === 'note-view'` 仍兼容兜底,
+            // 但显式声明为后续删 fallback 铺路。
+            plugins: { titleGuard: true },
           }}
           doc={activeNote.doc}
           onChange={handleDocChange}

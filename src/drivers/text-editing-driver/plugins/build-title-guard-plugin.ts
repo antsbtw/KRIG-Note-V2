@@ -15,11 +15,12 @@
  * 其他用 driver 的场景(如未来 thought view 等)如果不希望强制 title,可以选择不挂这个
  * plugin — 通过 BlockSpec 注册的 plugin 是 schema 全局生效,但 view 可以选择性接入。
  *
- * **L5-B3.11 接入策略**:本 plugin 不在 paragraph.spec.plugin 注册(避免影响其他用
- * driver 但不要 title 的场景),而是在 NoteView 层用 viewId='note-view' 时单独装。
- *   → 实施:加进 Host.tsx ENABLED_BLOCKS 之外的 plugins 数组(plugin 全局),但 view
- *     只有 NoteView 用 driver,所以暂时不用区分;若未来 thought view 接入,再用
- *     config.viewId 守门。
+ * **接入策略**(L5-B3.11 起,C8 D-D 改 toggle):
+ * - 本 plugin 不在 paragraph.spec.plugin 注册(避免影响其他用 driver 但不要 title 的场景)
+ * - editor-view-builder.ts 按 `pluginToggles?.titleGuard ?? (viewId === 'note-view')` 守门
+ *   - view 显式 plugins.titleGuard=true → 装
+ *   - 兼容 fallback:viewId === 'note-view' 时默认装(NoteView 暂未显式声明也零回归)
+ *   - 所有 view 显式声明后可删 fallback(整个改 hard opt-in)
  */
 
 import { Plugin, PluginKey } from 'prosemirror-state';

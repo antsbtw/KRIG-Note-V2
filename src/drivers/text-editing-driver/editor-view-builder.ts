@@ -72,10 +72,11 @@ export function buildEditorView(
   // NoteView 不传 → 行为零回归;canvas-text-node 关 5 项专属能力.
   // 不暴露的(始终开):history / inputRules / 所有 keymap / linkClick / block plugins.
   //
-  // title-guard 守门:仅 'note-view' 启用强制首块 isTitle(架构决议 — 不开放给
-  // pluginToggles,因为 noteTitle 是 NoteView 专属概念,泄漏给其他 view 反而错乱).
-  // 详见 plugins/build-title-guard-plugin.ts 注释 § "L5-B3.11 接入策略".
-  const requiresTitleGuard = viewId === 'note-view';
+  // title-guard 守门(C8 D-D):从硬编码 viewId === 'note-view' 改 toggle,
+  // view 显式声明 plugins.titleGuard=true。兼容期保留 viewId === 'note-view'
+  // fallback(NoteView 暂未显式传该 toggle 即可零回归);未来所有 view 显式声明
+  // 后可删 fallback。详见 plugins/build-title-guard-plugin.ts。
+  const requiresTitleGuard = pluginToggles?.titleGuard ?? (viewId === 'note-view');
   // opt-out 默认值 — 未传开关时 = true(NoteView 零回归契约)
   const optIn = (v: boolean | undefined): boolean => v !== false;
   const enableBlockHandle = optIn(pluginToggles?.blockHandle);

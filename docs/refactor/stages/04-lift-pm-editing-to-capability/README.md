@@ -217,7 +217,7 @@ no per-ws state)。C6 实施时若发现需要额外依赖,**停下重新评估*
 | **C5** | context menu PM 项工厂化 + NoteView 自注册查词/翻译 | 编辑区右键完整 |
 | **C6** | note-link-search 完整目录搬到 capability(useAllNotes hook → 改 NoteCapabilityApi 直调) | `[[` 触发笔记搜索 work / `grep -rn "useAllNotes\|@views/note" src/capabilities/text-editing/` 0 命中(N-2) |
 | **C7** | note-commands.ts 拆 PM commands → capability + 修 D-5 handle-copy 丢格式 bug + **同步删 NoteView 旧 register**(N-1) | 浮条命令 work + handle Copy 粘贴回来 mathBlock 保留格式 / `grep -rn "commandRegistry.register('text-editing\." src/` 每 id 仅 1 行 |
-| **C8** | 删除 `scope:'global'` 字段(D-C) + driver titleGuard 走 toggles(D-D) | typecheck pass / NoteView noteTitle 保护仍生效 |
+| **C8** | driver titleGuard 走 toggles(D-D);**D-C 暂缓** — 删 `scope:'global'` 需先让 graph-canvas-view 调工厂注册一份(否则 canvas-text-node popup 内 slash/floating-toolbar 失通用项),独立任务调研 | typecheck pass / NoteView noteTitle 保护仍生效 |
 
 ## 六、不动的边界(确认)
 
@@ -242,6 +242,9 @@ no per-ws state)。C6 实施时若发现需要额外依赖,**停下重新评估*
   每个 id 仅 1 行
 - **N-2 capability 分层退化风险**(主要 C6):note-link-search 搬到 capability 后
   禁止依赖 `@views/*` / view-layer hook;若需要额外依赖,**停下重新评估**,可能要拆通用 + adapter
-- C8 删 `scope:'global'` 是破坏性 schema 字段变更:必须在 C2~C7 把所有 item 都改成
-  显式 `view: viewId` 之后才能做,否则 thought-view / canvas-text-node 跨 view 项会断
+- **C8 D-C 暂缓**(2026-05-15 实施过程发现):scope:'global' 当前真实作用是让
+  canvas-text-node popup(viewId='graph-canvas-view')共享 NoteView 注册的 slash /
+  floating-toolbar 通用项。删字段前必须让 graph-canvas-view 显式调一遍工厂注册
+  view='graph-canvas-view' 条目,否则 canvas-text-node 内嵌编辑器立刻失去全部
+  PM 通用菜单。归入独立任务调研 — 当前 C8 仅做 D-D。
 - 不走 main 合并(memory feedback_merge_requires_explicit_ok),里程碑后用户显式确认才合
