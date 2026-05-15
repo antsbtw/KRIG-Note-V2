@@ -39,6 +39,7 @@ import * as dictionaryPanelIntegration from './ui/help-panel-integration';
 import * as contextMenuFactory from './ui/context-menu/items';
 import { registerLearningHelpPanels } from './ui/help-panels';
 import { registerLearningCommands } from './commands/register-commands';
+import { bridgeVocabToTextEditing } from './integrations/vocab-to-text-editing';
 
 export type {
   LearningApi,
@@ -141,3 +142,10 @@ registerLearningHelpPanels();
 // 命令 id 'learning.cm-*',任何 view 想"选区查词/翻译"绑到自己的右键菜单 / keymap /
 // 浮条等触发器即可。命令实现自包含,不依赖 view 业务。
 registerLearningCommands();
+
+// S4:capability 加载时启动 vocab → text-editing driver 桥接(D-4 决议)。
+// 加载顺序保证:platform/renderer/index.tsx line 32 text-editing 先注册,
+// line 33 learning 加载时 text-editing 已就绪;requireCapabilityApi 必能拿到。
+// 跨 view 平等消费:driver.setVocabWords 遍历 instanceRegistry,所有 PM 实例
+// (NoteView / ThoughtView / canvas-text-node popup)自动拿到 vocab 高亮。
+bridgeVocabToTextEditing({ vocabList, onVocabChanged });

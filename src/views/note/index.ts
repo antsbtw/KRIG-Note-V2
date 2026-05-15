@@ -17,7 +17,6 @@ import { registerSlashMenu } from './slash-menu-content';
 import { registerHandleMenu } from './handle-menu-content';
 import { registerContextMenu } from './context-menu-content';
 import { registerLinkClickIntegration } from './link-click-integration';
-import { registerLearningIntegration } from './learning-integration';
 
 registerView({
   id: 'note-view',
@@ -69,5 +68,5 @@ registerContextMenu();
 // C4/C6:popup color/link/note-link 由 text-editing capability 自注册;
 //        note-link search handler 同款(driver activeHandler 单例)。
 // S2:learning help-panel 由 learning capability 自注册(原 registerNoteHelpPanels 删除)
+// S4:vocab → driver 桥接 由 learning capability 自管(原 registerLearningIntegration 删除)
 registerLinkClickIntegration();
-registerLearningIntegration();
