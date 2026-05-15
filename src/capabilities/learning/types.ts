@@ -79,4 +79,23 @@ export interface LearningApi {
    *          object URL 给 audio 播放;失败返 null
    */
   tts(text: string, lang: string): Promise<ArrayBuffer | null>;
+
+  /** UI 命名空间(S2 上提;view 通过 api.ui.* 拿工厂 / 触发函数,W5 合规) */
+  readonly ui: LearningUiApi;
+}
+
+// ── ui 命名空间(typeof namespace import 模式,同 stage 04 text-editing.ui)──
+
+import type * as DictionaryPanelIntegration from './ui/help-panel-integration';
+import type * as ContextMenuFactory from './ui/context-menu/items';
+
+/**
+ * learning UI API(view 通过 requireCapabilityApi 取):
+ * - dictionaryPanel.showLookup(word, ctx?) / showTranslate(text)  — 触发 help-panel
+ * - contextMenu.createDictionaryLookupItem(viewId) / createTranslateItem(viewId)
+ *   → 工厂返 ContextMenuItem,view 拼装到自己的 context-menu register 数组
+ */
+export interface LearningUiApi {
+  readonly dictionaryPanel: typeof DictionaryPanelIntegration;
+  readonly contextMenu: typeof ContextMenuFactory;
 }

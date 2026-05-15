@@ -23,7 +23,6 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
-import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import {
   createNote,
   deleteNote,
@@ -44,7 +43,6 @@ import { decodeTreeId, encodeNoteId, encodeFolderId } from './tree-builder';
 import { triggerRename } from './context-menu-registrations';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
-import { showDictionaryPanel, showTranslationPanel } from './learning-integration';
 
 /**
  * lazy getter — 命令 handler 内部用,避免 module load 时 require
@@ -297,27 +295,11 @@ export function registerNoteCommands(): void {
     handleMenuController.hide();
   });
 
-  // ── Learning 业务(2):查词 / 翻译 ──
-
-  /** 选区单词查词 → 弹 dictionary help-panel(lookup 模式)*/
-  commandRegistry.register('note-view.cm-dictionary-lookup', () => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    const text = sel.toString().trim();
-    if (!text) return;
-    showDictionaryPanel(text);
-    contextMenuController.hide();
-  });
-
-  /** 选区句子 / 段落 → 弹 dictionary help-panel(translate 模式)*/
-  commandRegistry.register('note-view.cm-translate-text', () => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    const text = sel.toString().trim();
-    if (!text) return;
-    showTranslationPanel(text);
-    contextMenuController.hide();
-  });
+  // ── Learning 命令(查词/翻译)已上提到 learning capability ──
+  // S3:'note-view.cm-dictionary-lookup' / 'note-view.cm-translate-text' →
+  //     'learning.cm-dictionary-lookup' / 'learning.cm-translate-text'
+  // 命令实现在 capability/learning/commands/register-commands.ts(全工程唯一注册源)
+  // context-menu item 走 capability/learning/ui/context-menu/items.ts 工厂
 
   // ── Note 导航历史(2)── (Cmd+[ / Cmd+] keymap)
 
