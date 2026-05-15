@@ -21,7 +21,7 @@
 **理由**:命令是能力原子,不应绑某个 view。canvas-text-node 嵌入的 PM 实例
 也能用 `text-editing.cycle-text-color`,语义正确。
 
-**影响面**:见下文 §三命令归类表(47 个上提 / 15 个保留)。
+**影响面**:见下文 §三命令归类表(47 个上提 / 22 个保留,共 69 个命令)。
 
 ### D-B 菜单 item 用工厂函数,不是预设数组
 
@@ -88,17 +88,18 @@ ThoughtView 不传)以 toggles 为准。
 | Popup trigger | 1 | `note-view.popup-link` | `text-editing.popup-link` |
 | **合计** | **47** | | |
 
-### 🟢 保留在 view/note(15 个)
+### 🟢 保留在 view/note(22 个)
 
-| 类别 | id |
-|---|---|
-| 笔记 CRUD | `create-note` / `set-active` / `set-active-in-right` / `delete-active` |
-| 文件夹 CRUD | `create-folder` / `delete-by-tree-id` / `copy-by-tree-id` / `paste` |
-| 文件夹排序 | `sort-cycle-title` / `sort-cycle-date` |
-| Note 导航历史 | `go-back` / `go-forward` |
-| 业务依赖 | `handle-copy-block-link`(依 noteId) |
-| Learning 业务 | `cm-dictionary-lookup` / `cm-translate-text` |
-| 业务插入(7) | `slash-insert-{image,table,audio,video,tweet,file-block,external-ref}` |
+| 类别 | 数量 | id |
+|---|---|---|
+| 笔记 CRUD | 4 | `create-note` / `set-active` / `set-active-in-right` / `delete-active` |
+| 文件夹 CRUD | 4 | `create-folder` / `delete-by-tree-id` / `copy-by-tree-id` / `paste` |
+| 文件夹排序 | 2 | `sort-cycle-title` / `sort-cycle-date` |
+| Note 导航历史 | 2 | `go-back` / `go-forward` |
+| 业务依赖 | 1 | `handle-copy-block-link`(依 noteId) |
+| Learning 业务 | 2 | `cm-dictionary-lookup` / `cm-translate-text` |
+| 业务插入 | 7 | `slash-insert-{image,table,audio,video,tweet,file-block,external-ref}` |
+| **合计** | **22** | |
 
 ### 🟣 字符串常量同步迁
 
@@ -147,18 +148,75 @@ src/capabilities/text-editing/
         └── register.ts
 ```
 
-## 五、实施路线(8 个 commit)
+## 四点五、注册原则 + 分层契约(实施前必读)
+
+### 4.5.1 唯一注册源原则(N-1)
+
+**任何一个 command id 在全部 src/ 内只允许一个 `commandRegistry.register('<id>', ...)` 调用点。**
+
+理由:commandRegistry 内部是 Map.set 行为(后注册者 silent overwrite 先注册者),
+多源注册会让"实际生效的 handler 是哪个"取决于 module 加载顺序,debug 极痛苦。
+
+**适用约束(本阶段相关)**:
+
+- C1 改 id 时,**保持 NoteView 单一注册源**(注册位置不动,只换 id 字符串)
+- C7 把 PM 命令实现迁到 capability 时,**必须同步删除 NoteView 一侧的旧注册**
+  (memory feedback_strict_compliance_workflow:同一动作的两个状态不能并存)
+- 每个 commit 验证步骤含 `grep -rn "commandRegistry.register('text-editing\." src/`
+  统计每个 id 只出现一次
+
+### 4.5.2 capability 分层契约(N-2)
+
+**搬到 src/capabilities/text-editing/ 的代码,允许的依赖:**
+
+| 依赖类型 | 允许 | 例 |
+|---|---|---|
+| driver | ✓ | `@drivers/text-editing-driver`(本 capability 的 driver) |
+| 同层其他 capability | ✓ | `requireCapabilityApi<NoteCapabilityApi>('note')` — 横向 capability API |
+| slot 注册表 | ✓ | popupRegistry / slashRegistry / floatingToolbarRegistry 等(item 工厂注册路径) |
+| `@workspace/*` | △ 有条件 | 只能调 `workspaceManager.getActiveId()` 等无业务语义 API;**禁止读 ws.pluginStates 业务数据** |
+
+**禁止依赖**:
+
+- `@views/*` — 任何 view 私有模块(包括 view 内的 hook / store / 业务 helper)
+- `@capabilities/note` 等具体 capability 的 **内部模块**(只能走 requireCapabilityApi 间接路由)
+
+**特别约束 — note-link-search(C6)分层澄清**:
+
+该模块虽然命名带 "note",但语义是 **PM 内 `[[` 双链触发的通用搜索机制** —
+canvas-text-node / thought 都可能用("在 thought 里 `[[` 链接到笔记" 合理)。
+
+上提到 capability 后必须保证:
+
+| 项 | 当前 (在 views/note/) | C6 后 (在 capabilities/text-editing/ui/note-link-search/) |
+|---|---|---|
+| 数据来源 | `useAllNotes()` hook(view 层) | `requireCapabilityApi<NoteCapabilityApi>('note').listNotes()` + `onListChanged` 自封订阅 |
+| 业务模型依赖 | 无(仅 Note.id / Note.title 字段) | 同左,保持 |
+| 输出 atom | `noteLink` PM atom(schema 内置) | 同左,保持 |
+
+**契约**:note-link-search 只依赖 NoteCapabilityApi 的 listNotes / onListChanged
+**两个签名**,**不依赖 view-layer hook**,**不依赖 note 业务模型**(no folderStore /
+no per-ws state)。C6 实施时若发现需要额外依赖,**停下重新评估** —— 可能要拆成
+通用搜索 + note adapter 两层。
+
+### 4.5.3 已知薄弱点(沿用 noteview-feature-inventory)
+
+- inventory §15 `workspaceManager.getActiveId()` 在 ColorPickerPanel handle submenu
+  场景下的 "复合 instanceId" 问题:本阶段不动,仍走 fallback;canvas-text-node 接入
+  PM 通用菜单时整套切换(controller state 加 instanceId 字段)
+
+## 五、实施路线(9 个 commit:C0~C8)
 
 | Commit | 内容 | 验证 |
 |---|---|---|
 | **C0** | 本设计文档 + 开分支 | git log 看分支建好 |
-| **C1** | 47 个 PM 通用命令 id `note-view.*` → `text-editing.*`(命令注册位置暂不动) | typecheck pass / 全 view 菜单功能不退化 |
+| **C1** | 47 个 PM 通用命令 id `note-view.*` → `text-editing.*`(命令注册位置暂不动) | typecheck pass / 全 view 菜单功能不退化 / `grep -rn "commandRegistry.register('text-editing\." src/` 每 id 仅 1 行(N-1) |
 | **C2** | floating-toolbar + toolbar 工厂函数化(items.ts) + NoteView 改调工厂 | 浮条 B/I/U/S/code/∑/🔗/A 全 work + toolbar dropdown work |
 | **C3** | slash menu 12 PM 项工厂化 + NoteView 改调工厂(7 业务插入留 NoteView 自注册) | / 触发 SlashMenu 含全部 19 项 |
 | **C4** | popup color + LinkPanel(opts) + handle menu PM 项工厂化 | Color popup work / Cmd+K LinkPanel work / handle ⋮⋮ 全菜单 work |
 | **C5** | context menu PM 项工厂化 + NoteView 自注册查词/翻译 | 编辑区右键完整 |
-| **C6** | note-link-search 完整目录搬到 capability | `[[` 触发笔记搜索 work |
-| **C7** | note-commands.ts 拆 PM commands → capability + 修 D-5 handle-copy 丢格式 bug | 浮条命令 work + handle Copy 粘贴回来 mathBlock 保留格式 |
+| **C6** | note-link-search 完整目录搬到 capability(useAllNotes hook → 改 NoteCapabilityApi 直调) | `[[` 触发笔记搜索 work / `grep -rn "useAllNotes\|@views/note" src/capabilities/text-editing/` 0 命中(N-2) |
+| **C7** | note-commands.ts 拆 PM commands → capability + 修 D-5 handle-copy 丢格式 bug + **同步删 NoteView 旧 register**(N-1) | 浮条命令 work + handle Copy 粘贴回来 mathBlock 保留格式 / `grep -rn "commandRegistry.register('text-editing\." src/` 每 id 仅 1 行 |
 | **C8** | 删除 `scope:'global'` 字段(D-C) + driver titleGuard 走 toggles(D-D) | typecheck pass / NoteView noteTitle 保护仍生效 |
 
 ## 六、不动的边界(确认)
@@ -178,6 +236,12 @@ src/capabilities/text-editing/
 - 每个 commit 独立可回滚(`git revert <sha>`)
 - C1 命令 id 大批量替换是高频改动点:每改一处 grep verify 引用全清(memory
   feedback_decision_grep_verify_complete_propagation)
+- **N-1 双注册风险**(C1~C7 期间):C1 改 id 后 NoteView 注册的是 `text-editing.*`;
+  C7 capability 加 `registerTextEditingCommands()` 时**必须同步删 NoteView 旧 register**,
+  否则后注册者 silent overwrite。每个 commit 验证 `grep -rn "commandRegistry.register('text-editing\."`
+  每个 id 仅 1 行
+- **N-2 capability 分层退化风险**(主要 C6):note-link-search 搬到 capability 后
+  禁止依赖 `@views/*` / view-layer hook;若需要额外依赖,**停下重新评估**,可能要拆通用 + adapter
 - C8 删 `scope:'global'` 是破坏性 schema 字段变更:必须在 C2~C7 把所有 item 都改成
   显式 `view: viewId` 之后才能做,否则 thought-view / canvas-text-node 跨 view 项会断
 - 不走 main 合并(memory feedback_merge_requires_explicit_ok),里程碑后用户显式确认才合
