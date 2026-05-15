@@ -33,6 +33,7 @@ import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry
 import { atomsToProseMirror } from './converters/atoms-to-pm';
 import { sanitizeAtoms } from './converters/sanitize-atoms';
 import { registerTextEditingPopups } from './ui/popups';
+import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integration';
 import type { TextEditingApi } from './types';
 
 /**
@@ -58,6 +59,8 @@ capabilityRegistry.register({
   api,
 });
 
-// C4:capability 加载时一次性注册 PM 通用 popup(color / link)。
-// note-link 搜索 popup 留 C6 整目录搬时一并迁。
+// C4/C6:capability 加载时一次性注册 PM 通用 popup(color / link / note-link)+
+// driver note-link search handler 注入。
+// 注:driver activeHandler 是模块级单例,view 各自注册会互相覆盖,故归 capability 自管。
 registerTextEditingPopups();
+registerNoteLinkSearchIntegration();

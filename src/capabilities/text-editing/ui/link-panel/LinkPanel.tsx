@@ -19,34 +19,9 @@ import type { PopupCloseProps } from '@slot/interaction-registries/popup-registr
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import type { NoteCapabilityApi, NoteInfo as Note } from '@capabilities/note/types';
+import type { NoteInfo as Note } from '@capabilities/note/types';
+import { useNoteList } from '../hooks/use-note-list';
 import { FileTab } from './FileTab';
-
-/**
- * 本地 hook:订阅 NoteCapabilityApi 的笔记列表(C4 上提到 capability 时建立)。
- *
- * N-2 合规:不依赖 @views/note/use-notes-folders 的 useAllNotes hook。
- * 形态与 useAllNotes 一致(首次 listNotes() 拿到 [] → setState 触发重渲,
- * 后续靠 onListChanged 增量推送)。
- */
-function useNoteListFromCapability(): Note[] {
-  const [notes, setNotes] = useState<Note[]>([]);
-  useEffect(() => {
-    const noteCap = requireCapabilityApi<NoteCapabilityApi>('note');
-    let cancelled = false;
-    void noteCap.listNotes().then((list) => {
-      if (!cancelled) setNotes(list);
-    });
-    const unsubscribe = noteCap.onListChanged((list) => {
-      if (!cancelled) setNotes(list);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
-  return notes;
-}
 
 type LinkTab = 'note' | 'file' | 'web';
 
@@ -167,7 +142,7 @@ function NoteTab({
   onClose: () => void;
 }) {
   const [input, setInput] = useState('');
-  const notes = useNoteListFromCapability();
+  const notes = useNoteList();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [drillNote, setDrillNote] = useState<Note | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);

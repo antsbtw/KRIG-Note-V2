@@ -4,7 +4,8 @@
  * V1 → V2 改造:src/plugins/note/components/NoteLinkSearch.tsx
  *
  * - V1:直接组件 + view.dispatch hook → V2:popup-registry 模式(对齐 LinkPanel/ColorPickerPanel)
- * - V1:viewAPI.noteList() IPC → V2:useAllNotes hook (noteCapability + onListChanged)
+ * - V1:viewAPI.noteList() IPC → V2:useNoteList hook(capability/text-editing/ui/hooks,
+ *   走 NoteCapabilityApi.listNotes + onListChanged;C6 N-2 改造)
  * - 订阅 plugin state:每次 PM transaction 后 query 可能更新,组件靠 view-version
  *   tick 重渲(panel 内部用 useState + 副作用挂 view dom keydown / 显式 tick)
  *
@@ -20,7 +21,7 @@ import type { PopupCloseProps } from '@slot/interaction-registries/popup-registr
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { NoteInfo as Note } from '@capabilities/note/types';
-import { useAllNotes } from '../use-notes-folders';
+import { useNoteList } from '../hooks/use-note-list';
 
 /** PM PluginKey 类型最小子集(避免直 import prosemirror-state)*/
 interface NoteLinkPluginKey {
@@ -42,7 +43,7 @@ export function NoteLinkSearchPanel({ onClose }: PopupCloseProps) {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const noteLinkCommandKey = textEditing.noteLinkCommandKey as NoteLinkPluginKey;
   const view = textEditing.getNoteLinkActiveView() as EditorView | null;
-  const allNotes = useAllNotes();
+  const allNotes = useNoteList();
   const [tick, setTick] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);

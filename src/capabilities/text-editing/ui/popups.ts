@@ -1,5 +1,5 @@
 /**
- * text-editing popup 注册(C4 上提)
+ * text-editing popup 注册(C4 上提 + C6 加 note-link)
  *
  * Popup 跟菜单 item 不同:菜单 item 是"按 view 显示哪些条目"(view 决定内容),
  * popup 是"id → Component 映射"(全局唯一)。
@@ -11,12 +11,16 @@
  *
  * view 字段:undefined(对齐 popup-types.ts:25 "全 view 可用" 约定)
  *
- * note-link 搜索 popup 留 C6 一并迁(整目录搬,含 NoteLinkSearchPanel + integration)。
+ * note-link 搜索 popup 由 driver build-note-link-command-plugin 检测 `[[`
+ * 触发 setNoteLinkSearchHandler.onOpen,handler 内 popupController.show 弹起。
+ * handler 装配走 registerNoteLinkSearchIntegration()(view 自管,因 driver handler
+ * 注入是 capability-level 单一来源 — 多 view 注册会互相覆盖,与 popup 同理)。
  */
 
 import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
 import { ColorPickerPanel } from './color-picker/ColorPickerPanel';
 import { LinkPanel } from './link-panel/LinkPanel';
+import { NoteLinkSearchPanel } from './note-link-search/NoteLinkSearchPanel';
 
 /** capability 加载时一次性注册所有 PM 通用 popup */
 export function registerTextEditingPopups(): void {
@@ -30,5 +34,11 @@ export function registerTextEditingPopups(): void {
     id: 'text-editing.popup.link',
     Component: LinkPanel,
     estimatedSize: { width: 320, height: 360 },
+  });
+
+  popupRegistry.register({
+    id: 'text-editing.popup.note-link',
+    Component: NoteLinkSearchPanel,
+    estimatedSize: { width: 280, height: 360 },
   });
 }
