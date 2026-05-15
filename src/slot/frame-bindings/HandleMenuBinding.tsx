@@ -1,16 +1,19 @@
 /**
- * HandleMenu Binding — 渲染块手柄菜单(L5-B3.11 完整重写,对齐 V1)
+ * HandleMenu Binding — 渲染块手柄菜单(L5-B3.11 + 2026-05-15 统一交互式样)
+ *
+ * 统一交互式样:
+ * - 顶层 item(叶):click → 触发命令 + 关菜单
+ * - 顶层 item(带 ▸):hover → 右侧浮出 submenu
+ * - submenu 默认 button 列表(submenuOf 子项填充)
+ * - submenu 自定义渲染(item.submenuRender 字段)— Color swatch grid 等用
  *
  * 支持:
  * - group 分组(自动插分隔符;同组无分隔)
  * - submenu(item.submenuId 设置时是父项,渲染右侧 ▸ + 子菜单)
- * - visibleWhen(只在 block 满足条件时渲染该 item — 对齐 V1 Format/Collapse 条件显示)
- * - 占位项(command='' → 按钮 disabled,不响应点击)
+ * - submenuRender 自定义内容(submenuRender 函数返回 ReactNode 替换 button 列表)
+ * - visibleWhen(只在 block 满足条件时渲染该 item)
  *
- * Submenu 行为(对齐 V1):
- * - hover 父项 → 弹子菜单(右侧 / 翻边界)
- * - hover 移到子菜单 → 不收
- * - 点击子菜单项 → 触发命令并关菜单
+ * 注册原则:未实装的功能不注册,registry 里没该 item → 菜单不出现该项。
  */
 
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
@@ -22,6 +25,7 @@ import { commandRegistry } from '../command-registry/command-registry';
 import type {
   HandleItem,
   HandleVisibilityContext,
+  HandleSubmenuContext,
 } from '../interaction-registries/handle-registry/handle-types';
 import { groupWithDividers, isDivider } from './group-with-dividers';
 
@@ -111,14 +115,27 @@ export function HandleMenuBinding() {
   const itemsWithDividers = groupWithDividers(topLevel);
 
   function executeItem(item: HandleItem): void {
-    if (!item.command) return; // 占位项,无命令
-    if (item.submenuId) return; // submenu 容器项,只展开不执行
+    if (item.submenuId) return; // submenu 容器项,只展开不执行(hover 触发,不走 click)
+    if (!item.command) return; // 无命令(理论上不该到这步,但兜底)
     commandRegistry.execute(item.command);
     handleMenuController.hide();
   }
 
-  // 当前展开 submenu 的子项
+  // 当前展开的 submenu 父项 + 子项(用于判断渲染默认列表 or 自定义 render)
+  const openSubParent = openSub
+    ? topLevel.find((it) => it.submenuId === openSub) ?? null
+    : null;
   const subItems = openSub ? submenus.get(openSub) ?? [] : [];
+
+  // submenu 自定义渲染上下文(submenuRender 用)
+  const submenuCtx: HandleSubmenuContext | null = openSubParent
+    ? {
+        blockType: state.blockType ?? '',
+        blockAttrs: state.blockAttrs ?? {},
+        blockPos: state.pos ?? 0,
+        close: () => handleMenuController.hide(),
+      }
+    : null;
 
   return (
     <>
@@ -143,7 +160,7 @@ export function HandleMenuBinding() {
               key={item.id}
               type="button"
               className={cls.join(' ')}
-              disabled={disabled && !hasSubmenu}
+              disabled={disabled}
               onMouseEnter={() => {
                 if (hasSubmenu) {
                   setOpenSub(item.submenuId!);
@@ -162,7 +179,7 @@ export function HandleMenuBinding() {
       </div>
 
       {/* 子菜单 */}
-      {openSub && subItems.length > 0 && (
+      {openSubParent && (
         <div
           ref={subMenuRef}
           className="krig-handle-submenu"
@@ -174,26 +191,32 @@ export function HandleMenuBinding() {
           onMouseDown={(e) => e.stopPropagation()}
           onMouseEnter={() => setOpenSub(openSub)}
         >
-          {groupWithDividers(subItems).map((item) => {
-            if (isDivider(item)) {
-              return <div key={item.key} className="krig-handle-menu-divider" />;
-            }
-            const disabled = !item.command;
-            const cls = ['krig-handle-menu-item'];
-            if (disabled) cls.push('krig-handle-menu-item--disabled');
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={cls.join(' ')}
-                disabled={disabled}
-                onClick={() => executeItem(item)}
-              >
-                {item.icon && <span className="krig-handle-menu-item__icon">{item.icon}</span>}
-                <span className="krig-handle-menu-item__label">{item.label}</span>
-              </button>
-            );
-          })}
+          {openSubParent.submenuRender && submenuCtx ? (
+            // 自定义渲染:Color swatch grid 等复杂内容
+            openSubParent.submenuRender(submenuCtx)
+          ) : (
+            // 默认渲染:submenuOf 子项的 button 列表(Turn Into 等用)
+            groupWithDividers(subItems).map((item) => {
+              if (isDivider(item)) {
+                return <div key={item.key} className="krig-handle-menu-divider" />;
+              }
+              const disabled = !item.command;
+              const cls = ['krig-handle-menu-item'];
+              if (disabled) cls.push('krig-handle-menu-item--disabled');
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={cls.join(' ')}
+                  disabled={disabled}
+                  onClick={() => executeItem(item)}
+                >
+                  {item.icon && <span className="krig-handle-menu-item__icon">{item.icon}</span>}
+                  <span className="krig-handle-menu-item__label">{item.label}</span>
+                </button>
+              );
+            })
+          )}
         </div>
       )}
     </>

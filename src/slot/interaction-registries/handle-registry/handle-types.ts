@@ -1,13 +1,45 @@
 /** Handle 菜单类型(块手柄)
  *
  * L5-B3.11:加 visibleWhen / icon / submenuOf 支持子菜单 + 条件显示(对齐 V1)
+ * 2026-05-15:加 submenuRender 让 submenu 容器自定义渲染内容(统一 hover ▸ 式样)
+ *
+ * 统一交互式样:
+ * - 顶层 item(叶):click → 触发命令 + 关菜单
+ * - 顶层 item(带 ▸):hover → 右侧浮出 submenu
+ * - submenu 默认 button 列表(submenuOf 子项填充)
+ * - submenu 自定义渲染(submenuRender 字段)— Color swatch grid 等复杂内容用
+ *
+ * 注册原则:未实装的功能不注册(registry 里没该 item → ⠿ 菜单不显示)。
+ * "占位项" / "暂未实现"概念已废弃。
  */
+
+import type { ReactNode } from 'react';
 
 export interface HandleVisibilityContext {
   /** 当前 block 节点的 type name(如 'paragraph' / 'heading' / 'bulletList')*/
   blockType: string;
   /** 当前 block 节点的 attrs(给 visibleWhen 判断 isTitle / level / indent 等)*/
   blockAttrs: Record<string, unknown>;
+}
+
+/**
+ * Submenu 自定义渲染上下文(submenuRender 收到)— 含 block 信息 + close 回调。
+ *
+ * 关键:blockPos 是 handle 触发那一刻的瞬时值,通过这里传给 submenu 内组件,
+ * 不污染 popup-controller 匿名契约(后者只管 anchor + id)。
+ *
+ * 不携带 instanceId/viewId:driver instanceId 与 view 类型名不同,
+ * caller 通过 workspaceManager.getActiveId() 自取(与 V2 handle 命令风格一致,
+ * 见 note-commands.ts getHandlePos)。混入 viewId 字段会误导 caller 当
+ * instanceId 用,无 bug 信号(2026-05-15 教训)。
+ */
+export interface HandleSubmenuContext {
+  blockType: string;
+  blockAttrs: Record<string, unknown>;
+  /** PM doc 中的 block pos(driver block-scoped API 用)*/
+  blockPos: number;
+  /** 关闭整个 handle 菜单(submenu 内部操作完后调)*/
+  close: () => void;
 }
 
 export interface HandleItem {
@@ -46,4 +78,15 @@ export interface HandleItem {
    * ctx.blockType / ctx.blockAttrs 由 HandleMenuBinding 在 show 时填入。
    */
   visibleWhen?: (ctx: HandleVisibilityContext) => boolean;
+  /**
+   * Submenu 自定义渲染函数(submenuId 设置时可选)。
+   *
+   * 设置则 submenu 容器内不走默认 button 列表(按 submenuOf 收集),
+   * 而是调本函数取得 ReactNode 渲染(Color swatch grid 等复杂内容用)。
+   *
+   * 收 HandleSubmenuContext:含 blockPos / blockType / blockAttrs / close。
+   * 内部组件调 driver block-scoped API 后调 ctx.close() 关闭整个 handle 菜单。
+   * instanceId 自取(workspaceManager.getActiveId() 等),ctx 不携带。
+   */
+  submenuRender?: (ctx: HandleSubmenuContext) => ReactNode;
 }

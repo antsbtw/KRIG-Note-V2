@@ -1,47 +1,46 @@
 /**
- * NoteView HandleMenu 注册(L5-B3.11 完整对齐 V1)
+ * NoteView HandleMenu 注册(L5-B3.11 完整对齐 V1;2026-05-15 Color 统一 submenu 式样)
  *
- * V1 handle 菜单层级(完整对齐截图):
- *   ↔ Turn Into  ▸    (子菜单 — 11 项)
- *   🎨 Color      ▸    (子菜单 — 占位,留 sub-stage)
+ * V1 handle 菜单层级:
+ *   ↔ Turn Into  ▸    (子菜单 — 11 项 button)
+ *   🎨 Color      ▸    (子菜单 — submenuRender 自定义 swatch grid,2026-05-15 接入)
  *   ▣ 框定         ▸    (子菜单 — V2 暂无 frame block,占位)
- *   ¶ Format      ▸    (子菜单 — 仅在 indent attr 存在时显示;V2 暂无 indent,
- *                       条件 visibleWhen 留 false 直到 indent attr 实现)
  *   ─── 分隔
  *   📋 Copy
  *   🔗 Copy Link
  *   ⧉ Duplicate
- *   💭 Thought         (占位 — V2 暂无 thought 系统)
- *   🤖 Ask AI           (占位 — V2 暂无 AI 集成)
+ *   💭 Thought         (顶层占位 — V2 暂无 thought 系统,disabled)
+ *   🤖 Ask AI           (顶层占位 — V2 暂无 AI 集成,disabled)
  *   ─── 分隔
  *   🗑 Delete
  *
- * 占位项约定:command 留空字符串 → HandleMenuBinding 渲染 disabled,点击无效。
- * 子菜单容器项:submenuId 设置,无 command → 仅展开子菜单,不响应点击。
- * 条件显示:visibleWhen 返回 false 时不渲染该 item(对齐 V1 Format 仅在有 indent 时)。
+ * 统一交互式样(2026-05-15):
+ * - 顶层叶 item:click → 触发命令
+ * - 顶层带 ▸ item:hover → 右侧浮出 submenu
+ * - submenu 内容:默认 button 列表(submenuOf 子项)或 submenuRender 自定义渲染
+ *
+ * 注册原则:永远不会显示的 item 不注册(V1 Format ▸ visibleWhen=false 项已删,
+ * indent attr 实装后再加回 — Notion 实际也不在 ⠿ 菜单放 indent,走 Tab/Shift-Tab)。
  */
 
 import { handleRegistry } from '@slot/interaction-registries/handle-registry/handle-registry';
+import { HandleColorSubmenu } from '@capabilities/text-editing/ui/color-picker/HandleColorSubmenu';
 
 const VIEW = 'note-view';
 
-// 占位:暂未实现的命令(渲染 disabled)
+// 占位:暂未实现的命令(渲染 disabled,鼠标 hover 不展开 submenu)
 const TODO = '';
 
 export function registerHandleMenu(): void {
   handleRegistry.register([
-    // ── 顶层:5 个 submenu 容器 ──(对齐 V1 顺序)
+    // ── 顶层:submenu 容器 ──(对齐 V1 顺序)
     { id: 'note-view.h.turn-into', icon: '↔', label: 'Turn Into', command: TODO,
       submenuId: 'turn-into', view: VIEW, group: 'transform', order: 10 },
     { id: 'note-view.h.color', icon: '🎨', label: 'Color', command: TODO,
-      submenuId: 'color', view: VIEW, group: 'transform', order: 20 },
+      submenuId: 'color', view: VIEW, group: 'transform', order: 20,
+      submenuRender: (ctx) => <HandleColorSubmenu ctx={ctx} /> },
     { id: 'note-view.h.frame', icon: '▣', label: '框定', command: TODO,
       submenuId: 'frame', view: VIEW, group: 'transform', order: 30 },
-    { id: 'note-view.h.format', icon: '¶', label: 'Format', command: TODO,
-      submenuId: 'format', view: VIEW, group: 'transform', order: 40,
-      // V1:仅在 block 有 indent attr 时显示;V2 schema 暂无 indent → 永远 false
-      // 留 sub-stage 实现 indent 时改成 ctx => ctx.blockAttrs.indent !== undefined && !ctx.blockAttrs.isTitle
-      visibleWhen: () => false },
 
     // ── 顶层:block 操作 ── (group 切换 → 自动分隔符)
     { id: 'note-view.h.copy', icon: '📋', label: 'Copy', command: 'note-view.handle-copy-block',
@@ -83,16 +82,10 @@ export function registerHandleMenu(): void {
     { id: 'note-view.h.sub.turn-toggle', icon: '▸', label: 'Toggle List',
       command: 'note-view.handle-turn-toggle', submenuOf: 'turn-into', view: VIEW, order: 20 },
 
-    // ── submenu: color(占位 — 留 sub-stage 接 ColorPickerPanel)──
-    { id: 'note-view.h.sub.color-todo', icon: '⏳', label: '暂未实现 — 留 sub-stage',
-      command: TODO, submenuOf: 'color', view: VIEW, order: 10 },
+    // ── submenu: color ── (走 submenuRender 自定义渲染,无 submenuOf 子项)
 
-    // ── submenu: frame(占位 — V2 暂无 frame block)──
+    // ── submenu: frame ── (V2 暂无 frame block,保留占位)
     { id: 'note-view.h.sub.frame-todo', icon: '⏳', label: '暂未实现 — frame block 留 Phase D',
       command: TODO, submenuOf: 'frame', view: VIEW, order: 10 },
-
-    // ── submenu: format(占位 — V2 暂无 indent)── (visibleWhen 现在返回 false,sub 不显示)
-    { id: 'note-view.h.sub.format-todo', icon: '⏳', label: '暂未实现 — indent attr 留 sub-stage',
-      command: TODO, submenuOf: 'format', view: VIEW, order: 10 },
   ]);
 }

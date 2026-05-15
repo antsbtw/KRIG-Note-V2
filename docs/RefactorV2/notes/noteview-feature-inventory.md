@@ -59,7 +59,7 @@
 
 - [Image] 三态 — placeholder/img/SVG,Upload/URL/base64,resize handle + caption (L5B3.5)
 - [Image] SVG 安全注入 — 剥离 script/on*/javascript: (`image/svg-helpers.ts`, L5B3.5)
-- [Math] KaTeX — `$$..$$` / `$..$` display/inline,input rule (L5B3.6)
+- [Math] KaTeX — block(slash `/math`)+ inline(浮条 `∑`),双击进编辑态 + live preview。**注:V2 当前无 `$$`/`$` input rule,实测走 slash + floating toolbar**(L5B3.6)
 - [Table] 表格 — md table input rule,Tab 导航 / Enter 新行 (L5B3.7)
 - [Callout] 标注块 — 10 emoji cycle,灰底 #252525 (L5B3.3)
 - [ToggleList] 折叠列表 — ▼/▶ open attr,closed 隐藏非首行 (L5B3.3)
@@ -121,6 +121,28 @@
 8. **file-block 待复测** — L5B3.14 完成报告里标完成,实地未列在功能列表(C 类标"待复测")
 9. **ContextMenuBinding render 有重复** — folderTree 和编辑区两套注册表,binding 层未统一
 10. **PM_NODE_REGISTRY 标记散落** — md-to-pm 引入后 schema node 标记位置不集中
+11. **popup-controller 是匿名契约** — 只管 anchor + id,不携带 context payload。
+    handle/contextMenu 等"瞬时上下文"场景应让 binding 自构 ctx(如 HandleSubmenuContext),
+    不要污染 popup-controller 加 payload(2026-05-15 教训:Color UI 第一版误走 popup-trigger 卡壳)
+12. **handle 菜单子菜单已统一 hover ▸ 式样**(2026-05-15) — 撤掉 panel 栈式切换;复杂内容
+    通过 `HandleItem.submenuRender(ctx) => ReactNode` 注册;**未实装的不注册**(永远不显示
+    的 visibleWhen=false 项已删 Format)
+13. **indent attr 仅 schema 定义未消费** — schema-builder.ts `indent: { default: 0 }` 注入
+    所有 block,但 spec.toDOM / parseDOM 没读;V2 当前无 indent 视觉,Tab/Shift-Tab 只对
+    list/codeBlock 起效(普通段落 Tab 落空)。Notion 同款"普通段落 Tab 缩进"待立项
+    **feature/indent-attr** 独立分支做(横切 6 处:keymap/driver API/spec toDOM/parseDOM/
+    atom serializer/md 转换)
+14. **mathBlock attrs.color/bgColor 是唯一带 node-attr 着色的 block** — 其他 block 走
+    inline marks(textStyle/highlight);driver `applyBlockTextColor/applyBlockBgColor`
+    内部分流(mathBlock setNodeMarkup,其他 setMark over range)。新加 marks:'' block
+    时(若有)同样需要此分流
+15. **handle 命令体系 instanceId 取值不一致** — V2 现有 handle-turn-* 等命令统一用
+    `workspaceManager.getActiveId()` 取 instanceId(`note-commands.ts getHandlePos`),
+    在 canvas-text-node 这种"instanceId = `${workspaceId}::${nodeId}` 复合"的场景下
+    会拿错(返回 workspaceId,driver `instanceRegistry.get` 取不到)。canvas-text-node
+    当前 plugin preset `blockHandle: false` 暂时回避;handle 真要支持复合实例时整个
+    handle 体系一起改(controller state 加 instanceId 字段,所有 handle 命令统一切换),
+    勿单点修。ColorPickerPanel(浮条触发)已用 `getFocusedInstanceId()` 修复同类问题。
 
 ---
 

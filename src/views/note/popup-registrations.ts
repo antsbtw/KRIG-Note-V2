@@ -11,7 +11,7 @@
 
 import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
 import { LinkPanel } from './link-panel/LinkPanel';
-import { ColorPickerPanel } from './color-picker/ColorPickerPanel';
+import { ColorPickerPanel } from '@capabilities/text-editing/ui/color-picker/ColorPickerPanel';
 import { NoteLinkSearchPanel } from './note-link-search/NoteLinkSearchPanel';
 
 export function registerNotePopups(): void {
