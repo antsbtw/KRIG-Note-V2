@@ -71,6 +71,10 @@ export {
   type NoteLinkCommandState,
   type NoteLinkSearchHandler,
 } from './plugins/build-note-link-command-plugin';
+export {
+  setCalloutEmojiHandler,
+  type CalloutEmojiHandler,
+} from './blocks/callout/emoji-handler';
 export { noteLinkSpec } from './blocks/note-link/spec';
 export { fileBlockSpec } from './blocks/file-block/spec';
 export { fileLinkSpec } from './blocks/file-link/spec';

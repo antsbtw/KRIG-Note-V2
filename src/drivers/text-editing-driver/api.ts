@@ -142,6 +142,23 @@ export const textEditingDriverApi = {
   },
 
   /**
+   * 给 callout block 设 emoji attr(emoji picker popup 用)。
+   *
+   * 仅作用于 callout block;其他 block 类型静默忽略(防误用)。
+   */
+  setCalloutEmoji(instanceId: string, blockPos: number, emoji: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node || node.type.name !== 'callout') return;
+    const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+      ...node.attrs,
+      emoji,
+    });
+    inst.view.dispatch(tr);
+  },
+
+  /**
    * 取 block 的文字色(handle Color panel active swatch 高亮用)。
    *
    * mathBlock 读 node.attrs.color;其他 block 取**第一个**带 textStyle 的子节点 color。
