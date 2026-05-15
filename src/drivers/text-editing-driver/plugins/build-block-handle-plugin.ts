@@ -21,6 +21,52 @@ const handleKey = new PluginKey('text-editing-driver:block-handle');
 const HANDLE_CLASS = 'krig-block-handle';
 export const HANDLE_DRAG_MIME = 'application/krig-block-source';
 
+// ─────────────────────────────────────────────────────────────────────
+// 配置区(可调) — block handle 视觉 / 行为参数
+// 改完任一项需完全重启 Electron(plugin view 一次性吃配置)
+// ─────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  // 按钮(+ / ⋮⋮ 共享尺寸字号)
+  BTN_SIZE: 24,           // px 按钮宽高
+  BTN_FONT_SIZE: 24,      // px 字号(影响 + 字符大小)
+  BTN_BORDER_RADIUS: 3,   // px 圆角
+  BTN_COLOR: '#555',      // 静态字符色
+  BTN_HOVER_BG: '#333',   // hover 背景
+  BTN_HOVER_COLOR: '#f3f6fa', // hover 字符色
+
+  // wrapper(两按钮容器)
+  HANDLE_GAP: 1,          // px + 与 ⋮⋮ 间距
+  HANDLE_Z_INDEX: 10,
+  HANDLE_OPACITY_TRANSITION: '0.15s',
+
+  // 定位(handle 相对当前 block 文字左缘)
+  HANDLE_TEXT_GAP: 8,     // px handle 右缘距 block 文字左缘的间距(对齐 Notion 紧贴风格)
+
+  // hover 检测范围(鼠标超出 view.dom 边界多少 px 才隐藏 handle)
+  HOVER_GUTTER_LEFT: 70,  // 鼠标在 view.dom 左外侧 70px 内仍探测
+  HOVER_GUTTER_RIGHT: 10, // 右外侧 10px 内仍探测
+  PROBE_TEXT_LEFT: 60,    // 必须 = pm-host.css .ProseMirror padding-left(探测位移用)
+  PROBE_OFFSET: 20,       // 鼠标在 gutter 时夹紧到文字区内 20px(让 posAtCoords 命中行)
+
+  // hide 延迟
+  HIDE_DELAY_FROM_HANDLE: 300, // ms 鼠标离开 handle 后多久隐
+  HIDE_DELAY_FROM_VIEW: 100,   // ms 鼠标离开 view.dom 后多久隐
+
+  // ⋮⋮ menu 弹出 offset
+  MENU_OFFSET_RIGHT: 4,        // menu 距 ⋮⋮ 右缘多少 px
+} as const;
+
+// 推导值(基于上面配置算出来)
+const HANDLE_WIDTH = CONFIG.BTN_SIZE * 2 + CONFIG.HANDLE_GAP;  // wrapper 总宽
+const HANDLE_HEIGHT = CONFIG.BTN_SIZE;
+
+// 按钮共享样式(BTN_CSS) — 仅 cursor 在两按钮间不同
+const BTN_CSS =
+  `width: ${CONFIG.BTN_SIZE}px; height: ${CONFIG.BTN_SIZE}px;` +
+  `display: flex; align-items: center; justify-content: center;` +
+  `color: ${CONFIG.BTN_COLOR}; font-size: ${CONFIG.BTN_FONT_SIZE}px;` +
+  `border-radius: ${CONFIG.BTN_BORDER_RADIUS}px; user-select: none;`;
+
 // 模块级 drag 状态:dragstart 时存,drop/dragend 时读 + 清
 // 浏览器 drag-and-drop "protected mode" 会清空自定义 MIME 在 drop 阶段的 dataTransfer
 // 所以不能依赖 dataTransfer.getData(MIME) 跨 dragstart→drop 传递业务数据 — 用模块级变量
@@ -112,16 +158,11 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       const dom = document.createElement('div');
       dom.className = HANDLE_CLASS;
       dom.contentEditable = 'false';
-      dom.style.cssText = `
-        position: absolute;
-        opacity: 0;
-        pointer-events: auto;
-        z-index: 10;
-        transition: opacity 0.15s;
-        display: flex;
-        align-items: center;
-        gap: 0;
-      `;
+      dom.style.cssText =
+        `position: absolute; opacity: 0; pointer-events: auto;` +
+        `z-index: ${CONFIG.HANDLE_Z_INDEX};` +
+        `transition: opacity ${CONFIG.HANDLE_OPACITY_TRANSITION};` +
+        `display: flex; align-items: center; gap: ${CONFIG.HANDLE_GAP}px;`;
 
       // + 按钮(下方插入空 paragraph)
       const addBtn = document.createElement('div');
@@ -129,12 +170,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       addBtn.contentEditable = 'false';
       addBtn.textContent = '+';
       addBtn.title = '在下方插入新段落';
-      addBtn.style.cssText = `
-        width: 22px; height: 22px;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer; color: #555; font-size: 18px; border-radius: 3px;
-        user-select: none;
-      `;
+      addBtn.style.cssText = BTN_CSS + 'cursor: pointer;';
       dom.appendChild(addBtn);
 
       // ⋮⋮ 按钮(拖拽 + 点菜单)
@@ -144,42 +180,53 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dragBtn.draggable = true;
       dragBtn.textContent = '⋮⋮';
       dragBtn.title = '拖动以重排,点击打开菜单';
-      dragBtn.style.cssText = `
-        width: 22px; height: 22px;
-        display: flex; align-items: center; justify-content: center;
-        cursor: grab; color: #555; font-size: 16px; border-radius: 3px;
-        user-select: none;
-      `;
+      dragBtn.style.cssText = BTN_CSS + 'cursor: grab;';
       dom.appendChild(dragBtn);
 
       // hover 高亮
       const onBtnEnter = (btn: HTMLElement) => () => {
-        btn.style.background = '#333';
-        btn.style.color = '#e8eaed';
+        btn.style.background = CONFIG.BTN_HOVER_BG;
+        btn.style.color = CONFIG.BTN_HOVER_COLOR;
       };
       const onBtnLeave = (btn: HTMLElement) => () => {
         btn.style.background = 'transparent';
-        btn.style.color = '#555';
+        btn.style.color = CONFIG.BTN_COLOR;
       };
       addBtn.addEventListener('mouseenter', onBtnEnter(addBtn));
       addBtn.addEventListener('mouseleave', onBtnLeave(addBtn));
       dragBtn.addEventListener('mouseenter', onBtnEnter(dragBtn));
       dragBtn.addEventListener('mouseleave', onBtnLeave(dragBtn));
 
-      // + 按钮:在当前 block 之后插入空 paragraph,光标进入
+      // + 按钮:在当前 block 之后插入新 block
+      // - 当前是 listItem/taskItem → 插同类型新 item(包一个空 paragraph)
+      // - 其他 → 插空 paragraph
       addBtn.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (currentPos < 0) return;
-        const node = editorView.state.doc.nodeAt(currentPos);
+        const { schema, doc } = editorView.state;
+        const node = doc.nodeAt(currentPos);
         if (!node) return;
         const insertPos = currentPos + node.nodeSize;
-        const paragraphType = editorView.state.schema.nodes.paragraph;
+        const paragraphType = schema.nodes.paragraph;
         if (!paragraphType) return;
-        const newBlock = paragraphType.create();
+
+        let newBlock;
+        let cursorOffset;
+        if (node.type.name === 'listItem' || node.type.name === 'taskItem') {
+          // list 容器 content: '<item>+' → 必须插同类型 item;item content: 'block+' → 内嵌 paragraph
+          const itemType = schema.nodes[node.type.name];
+          if (!itemType) return;
+          newBlock = itemType.create(null, paragraphType.create());
+          cursorOffset = 2; // 跳过 itemStart + paragraphStart
+        } else {
+          newBlock = paragraphType.create();
+          cursorOffset = 1; // 跳过 paragraphStart
+        }
+
         const tr = editorView.state.tr.insert(insertPos, newBlock);
         try {
-          tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
+          tr.setSelection(TextSelection.create(tr.doc, insertPos + cursorOffset));
         } catch {
           /* ignore — pos 计算可能边界 */
         }
@@ -208,7 +255,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const node = editorView.state.doc.nodeAt(currentPos);
         const blockAttrs = node ? { ...node.attrs } : undefined;
         handleMenuController.show(
-          rect.right + 4,
+          rect.right + CONFIG.MENU_OFFSET_RIGHT,
           rect.top,
           viewId,
           currentBlockType,
@@ -237,17 +284,16 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         dnd.emit('dnd.completed', { source: null });
       });
 
-      let handlePositionLogCount = 0;
       // ── view.dom 监听 mousemove → 定位 handle ──
       const onMouseMove = (e: MouseEvent) => {
         if (isDragging) return;
         const view = editorView;
         const editorRect = view.dom.getBoundingClientRect();
 
-        // 鼠标超出编辑区(左边 70px gutter / 右边 10px) → 隐
+        // 鼠标超出编辑区(左边 / 右边 gutter)→ 隐
         if (
-          e.clientX < editorRect.left - 70 ||
-          e.clientX > editorRect.right + 10 ||
+          e.clientX < editorRect.left - CONFIG.HOVER_GUTTER_LEFT ||
+          e.clientX > editorRect.right + CONFIG.HOVER_GUTTER_RIGHT ||
           e.clientY < editorRect.top ||
           e.clientY > editorRect.bottom
         ) {
@@ -257,8 +303,8 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         }
 
         // probeX:在 gutter 区域时夹紧到文字区内一点(避免 posAtCoords 跳到容器层级)
-        const textLeft = editorRect.left + 24; // .ProseMirror padding-left 大约 24
-        const probeX = e.clientX >= textLeft ? e.clientX : textLeft + 20;
+        const textLeft = editorRect.left + CONFIG.PROBE_TEXT_LEFT;
+        const probeX = e.clientX >= textLeft ? e.clientX : textLeft + CONFIG.PROBE_OFFSET;
 
         const result = view.posAtCoords({ left: probeX, top: e.clientY });
         if (!result) {
@@ -317,13 +363,10 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const paddingTop = parseFloat(blockComputed.paddingTop);
         const hostRect = hostContainer?.getBoundingClientRect() ?? { top: 0, left: 0 };
 
-        const HANDLE_HEIGHT = 22;
-        // L5-B3.9:wrapper 含两个按钮(+ ⋮⋮),宽度 = 2 * 22 = 44
-        const HANDLE_WIDTH = 44;
-        const PM_PADDING_LEFT = 48;
-        // 垂直对齐:第一行文字基线中心
+        // 对齐 Notion:handle 跟随当前 block 文字左缘(blockRect.left 含 list 嵌套缩进)
+        // 垂直对齐第一行基线中心
         const topAbs = blockRect.top + paddingTop + lineHeight / 2 - HANDLE_HEIGHT / 2;
-        const leftAbs = editorRect.left + PM_PADDING_LEFT - HANDLE_WIDTH - 4;
+        const leftAbs = blockRect.left - HANDLE_WIDTH - CONFIG.HANDLE_TEXT_GAP;
         // 相对 hostContainer 的偏移
         const top = topAbs - hostRect.top;
         const left = leftAbs - hostRect.left;
@@ -331,25 +374,6 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         dom.style.top = `${top}px`;
         dom.style.left = `${left}px`;
         dom.style.opacity = '1';
-
-        // 诊断(前 5 次)
-        if (handlePositionLogCount < 5) {
-          // 等下一帧让 visibility 生效再测
-          requestAnimationFrame(() => {
-            const r2 = dom.getBoundingClientRect();
-            const stack = document.elementsFromPoint(
-              r2.left + r2.width / 2,
-              r2.top + r2.height / 2,
-            );
-            console.log('[block-handle][fix v4] positioned', {
-              handleVisible: window.getComputedStyle(dom).visibility,
-              handleZ: window.getComputedStyle(dom).zIndex,
-              stack: stack.slice(0, 5).map((e) => `${e.tagName}.${e.className?.toString().slice(0, 30) || ''}`),
-              handleAtTop: stack[0] === dom,
-            });
-          });
-          handlePositionLogCount++;
-        }
       };
 
       // V1 模式:isHovered 标志 + 100ms 延迟 hide
@@ -378,7 +402,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
             currentPos = -1;
           }
           hideTimer = null;
-        }, 300);
+        }, CONFIG.HIDE_DELAY_FROM_HANDLE);
       });
 
       const onMouseLeave = () => {
@@ -391,7 +415,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
             currentPos = -1;
           }
           hideTimer = null;
-        }, 100);
+        }, CONFIG.HIDE_DELAY_FROM_VIEW);
       };
 
       editorView.dom.addEventListener('mousemove', onMouseMove);

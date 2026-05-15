@@ -16,8 +16,8 @@
   min-height: 200px;
   /* PM 推荐:white-space: pre-wrap 保留输入空格 + 换行 */
   white-space: pre-wrap;
-  /* 对齐 V1:左 padding 给 block-handle 留 gutter / 上下右适中 */
-  padding: 24px 24px 24px 48px;
+  /* 左 padding 给 block-handle 留 gutter:wrapper 48 + gap 8 = 56,gutter 取 60 */
+  padding: 24px 24px 24px 60px;
   caret-color: #e8eaed;
   /* 让 handle 父容器(driver 自动加 position:relative)能正确锚定 */
   position: relative;

@@ -76,31 +76,11 @@
   color: #fff;
 }
 
-/* L5-B3.1 — block handle(driver 内部浮动 DOM,跟随 mouse 定位)*/
+/* L5-B3.1 — block handle wrapper (driver 内部浮动 DOM)
+ * L5-B3.9 后 wrapper 内含 + / ⋮⋮ 两按钮,size/cursor/font-* 由 driver
+ * 在子按钮 inline style 设置;wrapper 自身只负责定位 + flex 排列(都走 inline) */
 .krig-block-handle {
-  /* position / opacity / left / top 由 driver inline-style 动态设置 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  color: #888;
-  cursor: grab;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -1px;
   user-select: none;
-  border-radius: 3px;
-  background-color: transparent;
-}
-
-.krig-block-handle:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-  color: #e8eaed;
-}
-
-.krig-block-handle:active {
-  cursor: grabbing;
 }
 
 /* 通用 Overlay(帮助 / dialog)— 全屏 backdrop */
