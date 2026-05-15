@@ -343,6 +343,21 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           return;
         }
 
+        // callout 第一个子 block:handle 与 emoji 💡 视觉撞挤,隐藏 handle。
+        // 后续子 block (第 2 行及以后) 仍有 handle 可拖。
+        // 用户可通过 callout 顶 padding 区(emoji 旁)拿到 callout 容器自身的 handle
+        // 拖动整个 callout。
+        try {
+          const $start = view.state.doc.resolve(blockStart);
+          if ($start.parent.type.name === 'callout' && $start.index() === 0) {
+            dom.style.opacity = '0';
+            currentPos = -1;
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+
         // 祖先保留(对齐 Notion 行为):鼠标从 callout 内 child 横向移到左侧 handle 时,
         // 会先经过 callout padding 区(probeX 命中 callout 容器自身,新候选是当前
         // block 的祖先);**鼠标 y 仍落在当前 child 的垂直范围内**时不切换 currentPos —
