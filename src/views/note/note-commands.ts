@@ -217,13 +217,13 @@ export function registerNoteCommands(): void {
     }));
   }
 
-  registerToggleMark('note-view.toggle-bold', 'bold');
-  registerToggleMark('note-view.toggle-italic', 'italic');
-  registerToggleMark('note-view.toggle-underline', 'underline');
-  registerToggleMark('note-view.toggle-strike', 'strike');
-  registerToggleMark('note-view.toggle-code', 'code');
+  registerToggleMark('text-editing.toggle-bold', 'bold');
+  registerToggleMark('text-editing.toggle-italic', 'italic');
+  registerToggleMark('text-editing.toggle-underline', 'underline');
+  registerToggleMark('text-editing.toggle-strike', 'strike');
+  registerToggleMark('text-editing.toggle-code', 'code');
 
-  commandRegistry.register('note-view.set-heading-level', (level: unknown) => {
+  commandRegistry.register('text-editing.set-heading-level', (level: unknown) => {
     // 同 withInstance:focus-first,workspace fallback(L5-G4.5)
     const focused = requireCapabilityApi<TextEditingApi>('text-editing')
       .instanceRegistry.getFocusedInstanceId();
@@ -255,25 +255,25 @@ export function registerNoteCommands(): void {
     'rgba(52, 168, 83, 0.2)',            // green
   ];
 
-  commandRegistry.register('note-view.cycle-text-color', withInstance((instanceId) => {
+  commandRegistry.register('text-editing.cycle-text-color', withInstance((instanceId) => {
     const cur = tea().getActiveTextColor(instanceId);
     const idx = TEXT_COLOR_CYCLE.indexOf(cur ?? '');
     const next = TEXT_COLOR_CYCLE[(idx + 1) % TEXT_COLOR_CYCLE.length];
     tea().setTextColor(instanceId, next);
   }));
 
-  commandRegistry.register('note-view.cycle-highlight', withInstance((instanceId) => {
+  commandRegistry.register('text-editing.cycle-highlight', withInstance((instanceId) => {
     const cur = tea().getActiveHighlight(instanceId);
     const idx = HIGHLIGHT_COLOR_CYCLE.indexOf(cur ?? '');
     const next = HIGHLIGHT_COLOR_CYCLE[(idx + 1) % HIGHLIGHT_COLOR_CYCLE.length];
     tea().setHighlight(instanceId, next);
   }));
 
-  commandRegistry.register('note-view.undo', withInstance((instanceId) => {
+  commandRegistry.register('text-editing.undo', withInstance((instanceId) => {
     tea().undo(instanceId);
   }));
 
-  commandRegistry.register('note-view.redo', withInstance((instanceId) => {
+  commandRegistry.register('text-editing.redo', withInstance((instanceId) => {
     tea().redo(instanceId);
   }));
 
@@ -295,18 +295,18 @@ export function registerNoteCommands(): void {
       tea().turnIntoSelection(instanceId, target);
     }));
   }
-  registerSlashTurn('note-view.slash-turn-paragraph', 'paragraph');
-  registerSlashTurn('note-view.slash-turn-h1', 'h1');
-  registerSlashTurn('note-view.slash-turn-h2', 'h2');
-  registerSlashTurn('note-view.slash-turn-h3', 'h3');
-  registerSlashTurn('note-view.slash-turn-bullet', 'bullet-list');
-  registerSlashTurn('note-view.slash-turn-ordered', 'ordered-list');
-  registerSlashTurn('note-view.slash-turn-task', 'task-list');
-  registerSlashTurn('note-view.slash-turn-quote', 'blockquote');
-  registerSlashTurn('note-view.slash-turn-code', 'code-block');
-  registerSlashTurn('note-view.slash-turn-divider', 'horizontal-rule');
-  registerSlashTurn('note-view.slash-turn-callout', 'callout');
-  registerSlashTurn('note-view.slash-turn-toggle', 'toggle-list');
+  registerSlashTurn('text-editing.slash-turn-paragraph', 'paragraph');
+  registerSlashTurn('text-editing.slash-turn-h1', 'h1');
+  registerSlashTurn('text-editing.slash-turn-h2', 'h2');
+  registerSlashTurn('text-editing.slash-turn-h3', 'h3');
+  registerSlashTurn('text-editing.slash-turn-bullet', 'bullet-list');
+  registerSlashTurn('text-editing.slash-turn-ordered', 'ordered-list');
+  registerSlashTurn('text-editing.slash-turn-task', 'task-list');
+  registerSlashTurn('text-editing.slash-turn-quote', 'blockquote');
+  registerSlashTurn('text-editing.slash-turn-code', 'code-block');
+  registerSlashTurn('text-editing.slash-turn-divider', 'horizontal-rule');
+  registerSlashTurn('text-editing.slash-turn-callout', 'callout');
+  registerSlashTurn('text-editing.slash-turn-toggle', 'toggle-list');
 
   // L5-B3.5:slash insert-image — 插入图片 block(placeholder 态)
   // 跟 turn-* 不同:image 不能从段落 turn 出来(image 含 caption 内嵌结构),
@@ -317,14 +317,14 @@ export function registerNoteCommands(): void {
   }));
 
   // L5-B3.6:slash insert-math-block — 插入 mathBlock(空,自动进 edit 态)
-  commandRegistry.register('note-view.slash-insert-math-block', withInstance((instanceId) => {
+  commandRegistry.register('text-editing.slash-insert-math-block', withInstance((instanceId) => {
     tea().clearSlashTrigger(instanceId);
     tea().insertMathBlockAtSelection(instanceId);
   }));
 
   // L5-B3.6:行内公式入口在 floating toolbar(选中文字 → 转 mathInline)
   // 选区为空时也允许插入(备份路径,弹编辑器)
-  commandRegistry.register('note-view.insert-math-inline', withInstance((instanceId) => {
+  commandRegistry.register('text-editing.insert-math-inline', withInstance((instanceId) => {
     tea().insertMathInlineAtSelection(instanceId);
   }));
 
@@ -381,20 +381,20 @@ export function registerNoteCommands(): void {
       handleMenuController.hide();
     });
   }
-  registerHandleTurn('note-view.handle-turn-paragraph', 'paragraph');
-  registerHandleTurn('note-view.handle-turn-h1', 'h1');
-  registerHandleTurn('note-view.handle-turn-h2', 'h2');
-  registerHandleTurn('note-view.handle-turn-h3', 'h3');
-  registerHandleTurn('note-view.handle-turn-bullet', 'bullet-list');
-  registerHandleTurn('note-view.handle-turn-ordered', 'ordered-list');
-  registerHandleTurn('note-view.handle-turn-task', 'task-list');
-  registerHandleTurn('note-view.handle-turn-quote', 'blockquote');
-  registerHandleTurn('note-view.handle-turn-code', 'code-block');
-  registerHandleTurn('note-view.handle-turn-callout', 'callout');
-  registerHandleTurn('note-view.handle-turn-toggle', 'toggle-list');
+  registerHandleTurn('text-editing.handle-turn-paragraph', 'paragraph');
+  registerHandleTurn('text-editing.handle-turn-h1', 'h1');
+  registerHandleTurn('text-editing.handle-turn-h2', 'h2');
+  registerHandleTurn('text-editing.handle-turn-h3', 'h3');
+  registerHandleTurn('text-editing.handle-turn-bullet', 'bullet-list');
+  registerHandleTurn('text-editing.handle-turn-ordered', 'ordered-list');
+  registerHandleTurn('text-editing.handle-turn-task', 'task-list');
+  registerHandleTurn('text-editing.handle-turn-quote', 'blockquote');
+  registerHandleTurn('text-editing.handle-turn-code', 'code-block');
+  registerHandleTurn('text-editing.handle-turn-callout', 'callout');
+  registerHandleTurn('text-editing.handle-turn-toggle', 'toggle-list');
 
   // L5-B3.9:Copy(复制 block 文本到剪贴板)
-  commandRegistry.register('note-view.handle-copy-block', () => {
+  commandRegistry.register('text-editing.handle-copy-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
     const text = tea().getBlockTextAt(ctx.instanceId, ctx.pos);
@@ -428,14 +428,14 @@ export function registerNoteCommands(): void {
   });
 
   // L5-B3.9:Duplicate(在原 block 之后插入复本)— 复用既有 copyBlockAt
-  commandRegistry.register('note-view.handle-duplicate-block', () => {
+  commandRegistry.register('text-editing.handle-duplicate-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
     tea().copyBlockAt(ctx.instanceId, ctx.pos);
     handleMenuController.hide();
   });
 
-  commandRegistry.register('note-view.handle-delete-block', () => {
+  commandRegistry.register('text-editing.handle-delete-block', () => {
     const ctx = getHandlePos();
     if (!ctx) return;
     tea().deleteBlockAt(ctx.instanceId, ctx.pos);
@@ -458,28 +458,28 @@ export function registerNoteCommands(): void {
 
   // ── group: clipboard(Cut/Copy/Paste)— 走 document.execCommand 兼容 PM 默认 ──
 
-  commandRegistry.register('note-view.cm-cut', () => {
+  commandRegistry.register('text-editing.cm-cut', () => {
     document.execCommand('cut');
     contextMenuController.hide();
   });
-  commandRegistry.register('note-view.cm-copy', () => {
+  commandRegistry.register('text-editing.cm-copy', () => {
     document.execCommand('copy');
     contextMenuController.hide();
   });
-  commandRegistry.register('note-view.cm-paste', () => {
+  commandRegistry.register('text-editing.cm-paste', () => {
     // execCommand('paste') 在 Electron renderer 大多数情况不可用(安全策略)
     // 占位:后续 sub-stage 接 PM clipboardSerializer + handlePaste,先 noop
     // 用户走 Cmd+V 默认行为(PM 自带)即可
     contextMenuController.hide();
   });
-  commandRegistry.register('note-view.cm-select-all', () => {
+  commandRegistry.register('text-editing.cm-select-all', () => {
     document.execCommand('selectAll');
     contextMenuController.hide();
   });
 
   // ── group: block-actions(右键作用于光标当前 block)──
 
-  commandRegistry.register('note-view.cm-delete-block', () => {
+  commandRegistry.register('text-editing.cm-delete-block', () => {
     const ctx = getCmBlockPos();
     if (!ctx) return;
     tea().deleteBlockAt(ctx.instanceId, ctx.pos);
@@ -488,7 +488,7 @@ export function registerNoteCommands(): void {
 
   // ── group: marks(占位 — 后续 sub-stage 接选区 mark 检测 + 移除)──
 
-  commandRegistry.register('note-view.cm-remove-marks', () => {
+  commandRegistry.register('text-editing.cm-remove-marks', () => {
     // 占位:对当前选区移除所有 marks(L5-B+ 实现)
     console.warn('[note-view] cm-remove-marks: 占位,未实现');
     contextMenuController.hide();
@@ -498,7 +498,7 @@ export function registerNoteCommands(): void {
   // UX 直觉:光标在 link 文字内(甚至无光标,只是右键到 link 上)就能移除,
   //         不强迫用户先选中文字。用 contextMenu 的鼠标坐标定位 PM pos,
   //         再扩展到完整 link 范围 + removeMark。
-  commandRegistry.register('note-view.cm-remove-link', () => {
+  commandRegistry.register('text-editing.cm-remove-link', () => {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
     const cm = contextMenuController.getState();
@@ -547,12 +547,12 @@ export function registerNoteCommands(): void {
    * 找 anchor 并触发 popup。anchor 优先用 floating-toolbar 的 link 按钮(若已显示),
    * fallback 用选区 rect 制造虚拟 div anchor(popup 后立即 remove)。
    */
-  commandRegistry.register('note-view.popup-link', () => {
+  commandRegistry.register('text-editing.popup-link', () => {
     const linkBtn = document.querySelector(
       '.krig-floating-toolbar [title="🔗"], .krig-floating-toolbar-item[title="🔗"]',
     );
     if (linkBtn instanceof Element) {
-      popupController.show('note-view.popup.link', linkBtn);
+      popupController.show('text-editing.popup.link', linkBtn);
       return;
     }
     // fallback:选区 rect 模拟虚拟 anchor
@@ -567,7 +567,7 @@ export function registerNoteCommands(): void {
     fake.style.width = '1px';
     fake.style.height = '1px';
     document.body.appendChild(fake);
-    popupController.show('note-view.popup.link', fake);
+    popupController.show('text-editing.popup.link', fake);
     window.setTimeout(() => fake.remove(), 0);
   });
 }

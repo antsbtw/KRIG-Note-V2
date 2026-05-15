@@ -32,20 +32,20 @@ const VIEW = 'note-view';
 export function registerContextMenu(): void {
   contextMenuRegistry.register([
     // ── group: clipboard ──
-    { id: 'note-view.cm.cut', label: '✂ Cut', command: 'note-view.cm-cut',
+    { id: 'note-view.cm.cut', label: '✂ Cut', command: 'text-editing.cm-cut',
       view: VIEW, enabledWhen: 'has-selection', group: 'clipboard', order: 10 },
-    { id: 'note-view.cm.copy', label: '📋 Copy', command: 'note-view.cm-copy',
+    { id: 'note-view.cm.copy', label: '📋 Copy', command: 'text-editing.cm-copy',
       view: VIEW, enabledWhen: 'has-selection', group: 'clipboard', order: 11 },
-    { id: 'note-view.cm.paste', label: '📄 Paste', command: 'note-view.cm-paste',
+    { id: 'note-view.cm.paste', label: '📄 Paste', command: 'text-editing.cm-paste',
       view: VIEW, enabledWhen: 'is-editable', group: 'clipboard', order: 12 },
     // ── group: selection ──
-    { id: 'note-view.cm.select-all', label: '☐ Select All', command: 'note-view.cm-select-all',
+    { id: 'note-view.cm.select-all', label: '☐ Select All', command: 'text-editing.cm-select-all',
       view: VIEW, enabledWhen: 'is-editable', group: 'selection', order: 20 },
     // ── group: marks(占位 — 真实"按选区当前 marks 动态显示移除项"留 sub-stage)──
-    { id: 'note-view.cm.remove-marks', label: '✖ 移除格式', command: 'note-view.cm-remove-marks',
+    { id: 'note-view.cm.remove-marks', label: '✖ 移除格式', command: 'text-editing.cm-remove-marks',
       view: VIEW, enabledWhen: 'has-selection', group: 'marks', order: 30 },
     // L5-B3.15:选区有 link mark 时显示"移除链接"(条件 has-link)
-    { id: 'note-view.cm.remove-link', label: '🔗 移除链接', command: 'note-view.cm-remove-link',
+    { id: 'note-view.cm.remove-link', label: '🔗 移除链接', command: 'text-editing.cm-remove-link',
       view: VIEW, enabledWhen: 'has-link', group: 'marks', order: 31 },
     // L5-B3.20b:learning 查词 / 翻译(选区非空时显)— 用户单词查词 / 多词翻译,
     // 两项都显,内部各自走对应 mode(决策 Q5=A 简化)
@@ -56,7 +56,7 @@ export function registerContextMenu(): void {
       command: 'note-view.cm-translate-text',
       view: VIEW, enabledWhen: 'has-selection', group: 'learning', order: 41 },
     // ── group: destructive ──
-    { id: 'note-view.cm.delete-block', label: '🗑 删除 Block', command: 'note-view.cm-delete-block',
+    { id: 'note-view.cm.delete-block', label: '🗑 删除 Block', command: 'text-editing.cm-delete-block',
       view: VIEW, enabledWhen: 'is-editable', group: 'destructive', order: 90 },
   ]);
 }

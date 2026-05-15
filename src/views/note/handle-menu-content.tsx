@@ -43,11 +43,11 @@ export function registerHandleMenu(): void {
       submenuId: 'frame', view: VIEW, group: 'transform', order: 30 },
 
     // ── 顶层:block 操作 ── (group 切换 → 自动分隔符)
-    { id: 'note-view.h.copy', icon: '📋', label: 'Copy', command: 'note-view.handle-copy-block',
+    { id: 'note-view.h.copy', icon: '📋', label: 'Copy', command: 'text-editing.handle-copy-block',
       view: VIEW, group: 'block-actions', order: 50 },
     { id: 'note-view.h.copy-link', icon: '🔗', label: 'Copy Link', command: 'note-view.handle-copy-block-link',
       view: VIEW, group: 'block-actions', order: 51 },
-    { id: 'note-view.h.duplicate', icon: '⧉', label: 'Duplicate', command: 'note-view.handle-duplicate-block',
+    { id: 'note-view.h.duplicate', icon: '⧉', label: 'Duplicate', command: 'text-editing.handle-duplicate-block',
       view: VIEW, group: 'block-actions', order: 52 },
     { id: 'note-view.h.thought', icon: '💭', label: 'Thought', command: TODO,
       view: VIEW, group: 'block-actions', order: 53 },
@@ -55,32 +55,32 @@ export function registerHandleMenu(): void {
       view: VIEW, group: 'block-actions', order: 54 },
 
     // ── 顶层:destructive ──
-    { id: 'note-view.h.delete', icon: '🗑', label: 'Delete', command: 'note-view.handle-delete-block',
+    { id: 'note-view.h.delete', icon: '🗑', label: 'Delete', command: 'text-editing.handle-delete-block',
       view: VIEW, group: 'destructive', order: 90 },
 
     // ── submenu: turn-into(11 项)──
     { id: 'note-view.h.sub.turn-p', icon: '¶', label: 'Paragraph',
-      command: 'note-view.handle-turn-paragraph', submenuOf: 'turn-into', view: VIEW, order: 10 },
+      command: 'text-editing.handle-turn-paragraph', submenuOf: 'turn-into', view: VIEW, order: 10 },
     { id: 'note-view.h.sub.turn-h1', icon: 'H1', label: 'Heading 1',
-      command: 'note-view.handle-turn-h1', submenuOf: 'turn-into', view: VIEW, order: 11 },
+      command: 'text-editing.handle-turn-h1', submenuOf: 'turn-into', view: VIEW, order: 11 },
     { id: 'note-view.h.sub.turn-h2', icon: 'H2', label: 'Heading 2',
-      command: 'note-view.handle-turn-h2', submenuOf: 'turn-into', view: VIEW, order: 12 },
+      command: 'text-editing.handle-turn-h2', submenuOf: 'turn-into', view: VIEW, order: 12 },
     { id: 'note-view.h.sub.turn-h3', icon: 'H3', label: 'Heading 3',
-      command: 'note-view.handle-turn-h3', submenuOf: 'turn-into', view: VIEW, order: 13 },
+      command: 'text-editing.handle-turn-h3', submenuOf: 'turn-into', view: VIEW, order: 13 },
     { id: 'note-view.h.sub.turn-bullet', icon: '•', label: 'Bullet List',
-      command: 'note-view.handle-turn-bullet', submenuOf: 'turn-into', view: VIEW, order: 14 },
+      command: 'text-editing.handle-turn-bullet', submenuOf: 'turn-into', view: VIEW, order: 14 },
     { id: 'note-view.h.sub.turn-ordered', icon: '1.', label: 'Numbered List',
-      command: 'note-view.handle-turn-ordered', submenuOf: 'turn-into', view: VIEW, order: 15 },
+      command: 'text-editing.handle-turn-ordered', submenuOf: 'turn-into', view: VIEW, order: 15 },
     { id: 'note-view.h.sub.turn-task', icon: '☐', label: 'Task List',
-      command: 'note-view.handle-turn-task', submenuOf: 'turn-into', view: VIEW, order: 16 },
+      command: 'text-editing.handle-turn-task', submenuOf: 'turn-into', view: VIEW, order: 16 },
     { id: 'note-view.h.sub.turn-quote', icon: '"', label: 'Quote',
-      command: 'note-view.handle-turn-quote', submenuOf: 'turn-into', view: VIEW, order: 17 },
+      command: 'text-editing.handle-turn-quote', submenuOf: 'turn-into', view: VIEW, order: 17 },
     { id: 'note-view.h.sub.turn-code', icon: '<>', label: 'Code Block',
-      command: 'note-view.handle-turn-code', submenuOf: 'turn-into', view: VIEW, order: 18 },
+      command: 'text-editing.handle-turn-code', submenuOf: 'turn-into', view: VIEW, order: 18 },
     { id: 'note-view.h.sub.turn-callout', icon: '!', label: 'Callout',
-      command: 'note-view.handle-turn-callout', submenuOf: 'turn-into', view: VIEW, order: 19 },
+      command: 'text-editing.handle-turn-callout', submenuOf: 'turn-into', view: VIEW, order: 19 },
     { id: 'note-view.h.sub.turn-toggle', icon: '▸', label: 'Toggle List',
-      command: 'note-view.handle-turn-toggle', submenuOf: 'turn-into', view: VIEW, order: 20 },
+      command: 'text-editing.handle-turn-toggle', submenuOf: 'turn-into', view: VIEW, order: 20 },
 
     // ── submenu: color ── (走 submenuRender 自定义渲染,无 submenuOf 子项)
 

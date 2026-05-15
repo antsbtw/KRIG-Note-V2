@@ -21,7 +21,7 @@
 **理由**:命令是能力原子,不应绑某个 view。canvas-text-node 嵌入的 PM 实例
 也能用 `text-editing.cycle-text-color`,语义正确。
 
-**影响面**:见下文 §三命令归类表(47 个上提 / 22 个保留,共 69 个命令)。
+**影响面**:见下文 §三命令归类表(46 个上提 / 22 个保留,共 68 个命令)。
 
 ### D-B 菜单 item 用工厂函数,不是预设数组
 
@@ -72,7 +72,7 @@ ThoughtView 不传)以 toggles 为准。
 
 ## 三、命令归类清单(grep 实证)
 
-### 🔵 上提到 capability(47 个)
+### 🔵 上提到 capability(46 个)
 
 | 类别 | 数量 | 旧 id 模式 | 新 id 模式 |
 |---|---|---|---|
@@ -83,10 +83,10 @@ ThoughtView 不传)以 toggles 为准。
 | Slash turn | 12 | `note-view.slash-turn-{paragraph,h1..h3,bullet,ordered,task,quote,code,divider,callout,toggle}` | `text-editing.slash-turn-*` |
 | Slash math 通用 | 2 | `note-view.{slash-insert-math-block,insert-math-inline}` | `text-editing.*` |
 | Handle turn | 11 | `note-view.handle-turn-*`(11 项,不含 divider) | `text-editing.handle-turn-*` |
-| Handle action | 4 | `note-view.handle-{duplicate-block,delete-block,copy-block}` + (`copy-block-link` 留 view) | `text-editing.handle-*` |
+| Handle action | 3 | `note-view.handle-{duplicate-block,delete-block,copy-block}`(`copy-block-link` 留 view,不计) | `text-editing.handle-*` |
 | Context menu PM 通用 | 7 | `note-view.cm-{cut,copy,paste,select-all,remove-marks,remove-link,delete-block}` | `text-editing.cm-*` |
 | Popup trigger | 1 | `note-view.popup-link` | `text-editing.popup-link` |
-| **合计** | **47** | | |
+| **合计** | **46** | | |
 
 ### 🟢 保留在 view/note(22 个)
 
@@ -210,7 +210,7 @@ no per-ws state)。C6 实施时若发现需要额外依赖,**停下重新评估*
 | Commit | 内容 | 验证 |
 |---|---|---|
 | **C0** | 本设计文档 + 开分支 | git log 看分支建好 |
-| **C1** | 47 个 PM 通用命令 id `note-view.*` → `text-editing.*`(命令注册位置暂不动) | typecheck pass / 全 view 菜单功能不退化 / `grep -rn "commandRegistry.register('text-editing\." src/` 每 id 仅 1 行(N-1) |
+| **C1** | 46 个 PM 通用命令 id `note-view.*` → `text-editing.*` + 1 undoScope + 3 popup id(命令注册位置暂不动) | typecheck pass / 全 view 菜单功能不退化 / `grep -rn "commandRegistry.register('text-editing\." src/` 每 id 仅 1 行(N-1) |
 | **C2** | floating-toolbar + toolbar 工厂函数化(items.ts) + NoteView 改调工厂 | 浮条 B/I/U/S/code/∑/🔗/A 全 work + toolbar dropdown work |
 | **C3** | slash menu 12 PM 项工厂化 + NoteView 改调工厂(7 业务插入留 NoteView 自注册) | / 触发 SlashMenu 含全部 19 项 |
 | **C4** | popup color + LinkPanel(opts) + handle menu PM 项工厂化 | Color popup work / Cmd+K LinkPanel work / handle ⋮⋮ 全菜单 work |

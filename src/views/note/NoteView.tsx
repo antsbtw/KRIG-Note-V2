@@ -101,7 +101,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
         <Host
           config={{
             instanceId: workspaceId,
-            undoScope: 'note-view.pm',
+            undoScope: 'text-editing.pm',
             viewId: 'note-view',
           }}
           doc={activeNote.doc}

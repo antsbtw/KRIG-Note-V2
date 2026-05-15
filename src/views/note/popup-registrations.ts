@@ -16,21 +16,21 @@ import { NoteLinkSearchPanel } from './note-link-search/NoteLinkSearchPanel';
 
 export function registerNotePopups(): void {
   popupRegistry.register({
-    id: 'note-view.popup.link',
+    id: 'text-editing.popup.link',
     view: 'note-view',
     Component: LinkPanel,
     estimatedSize: { width: 320, height: 360 },
   });
 
   popupRegistry.register({
-    id: 'note-view.popup.color',
+    id: 'text-editing.popup.color',
     view: 'note-view',
     Component: ColorPickerPanel,
     estimatedSize: { width: 240, height: 200 },
   });
 
   popupRegistry.register({
-    id: 'note-view.popup.note-link',
+    id: 'text-editing.popup.note-link',
     view: 'note-view',
     Component: NoteLinkSearchPanel,
     estimatedSize: { width: 280, height: 360 },

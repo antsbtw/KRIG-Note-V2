@@ -30,7 +30,7 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.bold',
       label: 'B',
-      command: 'note-view.toggle-bold',
+      command: 'text-editing.toggle-bold',
       view: VIEW,
       scope: 'global',
       group: 'marks',
@@ -40,7 +40,7 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.italic',
       label: 'I',
-      command: 'note-view.toggle-italic',
+      command: 'text-editing.toggle-italic',
       view: VIEW,
       scope: 'global',
       group: 'marks',
@@ -50,7 +50,7 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.underline',
       label: 'U',
-      command: 'note-view.toggle-underline',
+      command: 'text-editing.toggle-underline',
       view: VIEW,
       scope: 'global',
       group: 'marks',
@@ -60,7 +60,7 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.strike',
       label: 'S',
-      command: 'note-view.toggle-strike',
+      command: 'text-editing.toggle-strike',
       view: VIEW,
       scope: 'global',
       group: 'marks',
@@ -70,7 +70,7 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.code',
       label: '<>',
-      command: 'note-view.toggle-code',
+      command: 'text-editing.toggle-code',
       view: VIEW,
       scope: 'global',
       group: 'marks',
@@ -81,7 +81,7 @@ export function registerFloatingToolbar(): void {
     {
       id: 'note-view.ft.math-inline',
       label: '∑',
-      command: 'note-view.insert-math-inline',
+      command: 'text-editing.insert-math-inline',
       view: VIEW,
       scope: 'global',
       group: 'math',
@@ -92,7 +92,7 @@ export function registerFloatingToolbar(): void {
       id: 'note-view.ft.link',
       label: '🔗',
       kind: 'popup-trigger',
-      popupId: 'note-view.popup.link',
+      popupId: 'text-editing.popup.link',
       view: VIEW,
       scope: 'global',
       group: 'link',
@@ -106,7 +106,7 @@ export function registerFloatingToolbar(): void {
       id: 'note-view.ft.color',
       label: 'A',
       kind: 'popup-trigger',
-      popupId: 'note-view.popup.color',
+      popupId: 'text-editing.popup.color',
       view: VIEW,
       scope: 'global',
       group: 'color',

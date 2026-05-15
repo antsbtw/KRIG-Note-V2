@@ -12,7 +12,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { popupController } from '@slot/triggers/popup-controller';
 
-const POPUP_ID = 'note-view.popup.note-link';
+const POPUP_ID = 'text-editing.popup.note-link';
 
 export function registerNoteLinkSearchIntegration(): void {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');

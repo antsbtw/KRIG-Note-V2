@@ -82,7 +82,7 @@ export interface TextEditingPluginToggles {
 export interface TextEditingConfig {
   /** 实例 ID(P1.3,通常用 workspaceId)— driver 用此区分多 Host 实例 */
   instanceId: string;
-  /** view 提供的 undo scope 名(铁律 6b)— 如 'note-view.pm' */
+  /** view 提供的 undo scope 名(铁律 6b)— 如 'text-editing.pm' */
   undoScope: string;
   /** view ID(L5-B3.1 — driver 通过此把 controller 事件 attribute 给具体 view)*/
   viewId: string;

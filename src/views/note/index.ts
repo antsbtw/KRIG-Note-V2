@@ -43,7 +43,7 @@ registerView({
   keymap: [
     {
       key: 'mod+k',
-      command: 'note-view.popup-link',
+      command: 'text-editing.popup-link',
       enabledWhen: ['has-text-selection', 'in-view-area'],
     },
     {
