@@ -40,15 +40,16 @@ export const textEditingDriverApi = {
   },
 
   /**
-   * 给选区设置文字颜色(textStyle mark);color 为空字符串时移除。
-   * 对齐 V1 applyTextColor。
+   * 给指定 range 设置文字颜色(textStyle mark);color 为空字符串时移除。
+   * range 缺省时取当前 selection(对齐 V1 applyTextColor / floating toolbar 用法)。
+   * 显式传 range:handle 菜单 / 程序化批量改色等场景用。
    */
-  setTextColor(instanceId: string, color: string): void {
+  setTextColor(instanceId: string, color: string, range?: { from: number; to: number }): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     const markType = inst.view.state.schema.marks.textStyle;
     if (!markType) return;
-    const { from, to } = inst.view.state.selection;
+    const { from, to } = range ?? inst.view.state.selection;
     if (from >= to) return;
     const tr = inst.view.state.tr;
     if (!color) {
@@ -62,15 +63,16 @@ export const textEditingDriverApi = {
   },
 
   /**
-   * 给选区设置背景高亮色(highlight mark);color 为空字符串时移除。
-   * 对齐 V1 applyHighlight。
+   * 给指定 range 设置背景高亮色(highlight mark);color 为空字符串时移除。
+   * range 缺省时取当前 selection(对齐 V1 applyHighlight / floating toolbar 用法)。
+   * 显式传 range:handle 菜单 / 程序化批量改色等场景用。
    */
-  setHighlight(instanceId: string, color: string): void {
+  setHighlight(instanceId: string, color: string, range?: { from: number; to: number }): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     const markType = inst.view.state.schema.marks.highlight;
     if (!markType) return;
-    const { from, to } = inst.view.state.selection;
+    const { from, to } = range ?? inst.view.state.selection;
     if (from >= to) return;
     const tr = inst.view.state.tr;
     if (!color) {
