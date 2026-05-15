@@ -15,7 +15,6 @@
  * - 工厂只返回 Item[],不调 register(N-1 唯一注册源仍在 view)
  * - viewId 决定 item id 前缀(`${viewId}.ft.bold`)+ item.view 字段
  *   (controller 按 view 字段过滤;同 viewId 多 view 实例共享菜单内容)
- * - scope: 'global' 暂保留(C8 删字段,届时改为 view 拼装时显式声明 viewId)
  * - command 走 C1 重命名后的 text-editing.* 命名空间
  */
 
@@ -29,7 +28,6 @@ export function createMarkButtons(viewId: string): FloatingToolbarItem[] {
       label: 'B',
       command: 'text-editing.toggle-bold',
       view: viewId,
-      scope: 'global',
       group: 'marks',
       order: 10,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('bold'),
@@ -39,7 +37,6 @@ export function createMarkButtons(viewId: string): FloatingToolbarItem[] {
       label: 'I',
       command: 'text-editing.toggle-italic',
       view: viewId,
-      scope: 'global',
       group: 'marks',
       order: 20,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('italic'),
@@ -49,7 +46,6 @@ export function createMarkButtons(viewId: string): FloatingToolbarItem[] {
       label: 'U',
       command: 'text-editing.toggle-underline',
       view: viewId,
-      scope: 'global',
       group: 'marks',
       order: 25,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('underline'),
@@ -59,7 +55,6 @@ export function createMarkButtons(viewId: string): FloatingToolbarItem[] {
       label: 'S',
       command: 'text-editing.toggle-strike',
       view: viewId,
-      scope: 'global',
       group: 'marks',
       order: 30,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('strike'),
@@ -69,7 +64,6 @@ export function createMarkButtons(viewId: string): FloatingToolbarItem[] {
       label: '<>',
       command: 'text-editing.toggle-code',
       view: viewId,
-      scope: 'global',
       group: 'marks',
       order: 40,
       activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('code'),
@@ -84,7 +78,6 @@ export function createMathButton(viewId: string): FloatingToolbarItem {
     label: '∑',
     command: 'text-editing.insert-math-inline',
     view: viewId,
-    scope: 'global',
     group: 'math',
     order: 50,
   };
@@ -98,7 +91,6 @@ export function createLinkButton(viewId: string): FloatingToolbarItem {
     kind: 'popup-trigger',
     popupId: 'text-editing.popup.link',
     view: viewId,
-    scope: 'global',
     group: 'link',
     order: 60,
     activeWhen: (ctx) => !!ctx.selection?.activeMarks?.includes('link'),
@@ -117,7 +109,6 @@ export function createColorButton(viewId: string): FloatingToolbarItem {
     kind: 'popup-trigger',
     popupId: 'text-editing.popup.color',
     view: viewId,
-    scope: 'global',
     group: 'color',
     order: 70,
     activeWhen: (ctx) =>

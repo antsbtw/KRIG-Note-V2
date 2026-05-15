@@ -12,7 +12,6 @@
  * 设计原则:
  * - 工厂只返回 Item[],不调 register(N-1 唯一注册源仍在 view)
  * - viewId 决定 item id 前缀(`${viewId}.slash.h1`)+ item.view 字段
- * - scope:'global' 暂保留(C8 删字段,届时由 view 拼装时显式声明 viewId)
  * - command 走 C1 重命名后的 text-editing.* 命名空间
  *
  * 业务插入(image/table/audio/video/tweet/file-block/external-ref)留 view 自注册:
@@ -31,7 +30,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-paragraph',
       keywords: ['p', 'paragraph', 'text', 'plain'],
       view: viewId,
-      scope: 'global',
       order: 10,
     },
     {
@@ -40,7 +38,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-h1',
       keywords: ['h1', 'heading', 'title', 'header'],
       view: viewId,
-      scope: 'global',
       order: 20,
     },
     {
@@ -49,7 +46,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-h2',
       keywords: ['h2', 'heading', 'header'],
       view: viewId,
-      scope: 'global',
       order: 30,
     },
     {
@@ -58,7 +54,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-h3',
       keywords: ['h3', 'heading', 'header'],
       view: viewId,
-      scope: 'global',
       order: 40,
     },
     {
@@ -67,7 +62,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-bullet',
       keywords: ['bullet', 'ul', 'list', 'unordered'],
       view: viewId,
-      scope: 'global',
       order: 50,
     },
     {
@@ -76,7 +70,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-ordered',
       keywords: ['ordered', 'ol', 'list', 'number'],
       view: viewId,
-      scope: 'global',
       order: 60,
     },
     {
@@ -85,7 +78,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-task',
       keywords: ['task', 'todo', 'checkbox', 'check'],
       view: viewId,
-      scope: 'global',
       order: 70,
     },
     {
@@ -94,7 +86,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-quote',
       keywords: ['quote', 'blockquote'],
       view: viewId,
-      scope: 'global',
       order: 80,
     },
     {
@@ -103,7 +94,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-code',
       keywords: ['code', 'codeblock', 'pre'],
       view: viewId,
-      scope: 'global',
       order: 90,
     },
     {
@@ -112,7 +102,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-divider',
       keywords: ['divider', 'hr', 'horizontal', 'rule', 'separator'],
       view: viewId,
-      scope: 'global',
       order: 100,
     },
     {
@@ -121,7 +110,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-callout',
       keywords: ['callout', 'tip', 'warning', 'note', 'admonition'],
       view: viewId,
-      scope: 'global',
       order: 110,
     },
     {
@@ -130,7 +118,6 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-toggle',
       keywords: ['toggle', 'fold', 'collapse', 'expand', 'detail'],
       view: viewId,
-      scope: 'global',
       order: 120,
     },
   ];
@@ -149,7 +136,6 @@ export function createMathBlockItem(viewId: string): SlashItem {
     command: 'text-editing.slash-insert-math-block',
     keywords: ['math', 'latex', 'equation', 'formula', '公式'],
     view: viewId,
-    scope: 'global',
     order: 140,
   };
 }
