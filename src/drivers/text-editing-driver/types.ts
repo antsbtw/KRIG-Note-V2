@@ -63,26 +63,32 @@ export interface TextEditingHostProps {
  * - history / inputRules / mark+heading keymap / list+codeBlock+hardBreak keymap /
  *   linkClick / baseKeymap / 各 block plugin
  *
- * **特殊**(view 维度守门,不在 plugins 配置内):
- * - titleGuard:viewId === 'note-view' 才挂(driver 内硬条件,避免 noteTitle 概念
- *   泄漏给其他 view).
+ * **opt-in plugin**(默认 false,view 显式 true 才挂):
+ * - titleGuard:NoteView 专属"强制首块 isTitle"守门;其他 view 不需要(noteTitle 是
+ *   NoteView 业务概念,泄漏给其他 view 反而错乱)。
+ *   C8 (D-D):从 driver 内硬编码 `viewId === 'note-view'` 改 toggle,view 显式声明。
+ *   兼容期 driver 端保留 `viewId === 'note-view'` fallback,所有 view 显式声明后可删。
  *
- * Why default 全开:driver 当前已对齐 NoteView 行为,任何 NoteView 不传 plugins
- * 的场景必须零回归;只有新 view(canvas-text-node 等)显式 opt-out 才改变.
+ * Why default 全开(opt-out plugin 部分):driver 当前已对齐 NoteView 行为,任何
+ * NoteView 不传 plugins 的场景必须零回归;只有新 view(canvas-text-node 等)显式
+ * opt-out 才改变.
  */
 export interface TextEditingPluginToggles {
+  // opt-out(默认 true,view 显式 false 关闭)
   blockHandle?: boolean;
   vocabHighlight?: boolean;
   noteLinkCommand?: boolean;
   pasteMedia?: boolean;
   dropCursor?: boolean;
   slash?: boolean;
+  // opt-in(默认 false,view 显式 true 开启)
+  titleGuard?: boolean;
 }
 
 export interface TextEditingConfig {
   /** 实例 ID(P1.3,通常用 workspaceId)— driver 用此区分多 Host 实例 */
   instanceId: string;
-  /** view 提供的 undo scope 名(铁律 6b)— 如 'note-view.pm' */
+  /** view 提供的 undo scope 名(铁律 6b)— 如 'text-editing.pm' */
   undoScope: string;
   /** view ID(L5-B3.1 — driver 通过此把 controller 事件 attribute 给具体 view)*/
   viewId: string;

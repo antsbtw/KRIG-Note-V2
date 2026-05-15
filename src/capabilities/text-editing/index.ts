@@ -32,6 +32,15 @@ import {
 import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry';
 import { atomsToProseMirror } from './converters/atoms-to-pm';
 import { sanitizeAtoms } from './converters/sanitize-atoms';
+import { registerTextEditingPopups } from './ui/popups';
+import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integration';
+import { registerTextEditingCommands } from './commands/register-pm-commands';
+// C8 W-1:PM 通用菜单 item 工厂(view 端通过 api.ui.* 取,W5 合规)
+import * as floatingToolbarFactory from './ui/floating-toolbar/items';
+import * as toolbarFactory from './ui/toolbar/items';
+import * as slashMenuFactory from './ui/slash-menu/items';
+import * as handleMenuFactory from './ui/handle-menu/items';
+import * as contextMenuFactory from './ui/context-menu/items';
 import type { TextEditingApi } from './types';
 
 /**
@@ -50,9 +59,26 @@ const api: TextEditingApi = {
   instanceRegistry,
   atomsToProseMirror,
   sanitizeAtoms,
+  ui: {
+    floatingToolbar: floatingToolbarFactory,
+    toolbar: toolbarFactory,
+    slashMenu: slashMenuFactory,
+    handleMenu: handleMenuFactory,
+    contextMenu: contextMenuFactory,
+  },
 };
 
 capabilityRegistry.register({
   id: 'text-editing',
   api,
 });
+
+// C4/C6:capability 加载时一次性注册 PM 通用 popup(color / link / note-link)+
+// driver note-link search handler 注入。
+// 注:driver activeHandler 是模块级单例,view 各自注册会互相覆盖,故归 capability 自管。
+registerTextEditingPopups();
+registerNoteLinkSearchIntegration();
+
+// C7:capability 加载时一次性注册 PM 通用命令(46 个;原 NoteView 注册全部搬来)。
+// N-1:同 id 全工程唯一 register 调用 — 同步删 NoteView 旧 register。
+registerTextEditingCommands();

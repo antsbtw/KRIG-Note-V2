@@ -11,7 +11,7 @@ import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
-import { Fragment } from 'prosemirror-model';
+import { DOMSerializer, Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
@@ -447,6 +447,35 @@ export const textEditingDriverApi = {
     const node = inst.view.state.doc.nodeAt(pos);
     if (!node) return null;
     return node.textContent;
+  },
+
+  /**
+   * 拿 block 的剪贴板 envelope(html + plain),给 Copy 命令写双格式剪贴板用 — C7 (D-5)
+   *
+   * 修 V1/V2 历史 bug:handle Copy 之前只走 navigator.clipboard.writeText(textContent),
+   * 粘贴回 KRIG 内部时 mathBlock / image / table / callout 等富 block 降级成裸文字。
+   * 改成:用 PM DOMSerializer 把 node 序列化成 DOM,outerHTML 作为 text/html;
+   * textContent 作为 text/plain 兜底。粘到 KRIG 内 PM smart-paste 能识别 HTML 还原 block;
+   * 粘到外部应用降级到 plain text。
+   *
+   * 注:本 API 仅拿单 block;多选/选区拷贝走 PM 原生 cm-copy(document.execCommand('copy'))。
+   */
+  getBlockClipboardAt(
+    instanceId: string,
+    pos: number,
+  ): { html: string; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(pos);
+    if (!node) return null;
+    const serializer = DOMSerializer.fromSchema(inst.view.state.schema);
+    const domFragment = serializer.serializeNode(node);
+    const container = document.createElement('div');
+    container.appendChild(domFragment);
+    return {
+      html: container.innerHTML,
+      text: node.textContent,
+    };
   },
 
   /**

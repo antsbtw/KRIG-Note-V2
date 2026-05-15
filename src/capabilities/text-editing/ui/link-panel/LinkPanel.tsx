@@ -20,7 +20,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { NoteInfo as Note } from '@capabilities/note/types';
-import { useAllNotes } from '../use-notes-folders';
+import { useNoteList } from '../hooks/use-note-list';
 import { FileTab } from './FileTab';
 
 type LinkTab = 'note' | 'file' | 'web';
@@ -142,7 +142,7 @@ function NoteTab({
   onClose: () => void;
 }) {
   const [input, setInput] = useState('');
-  const notes = useAllNotes();
+  const notes = useNoteList();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [drillNote, setDrillNote] = useState<Note | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);

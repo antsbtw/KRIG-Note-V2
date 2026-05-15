@@ -1,26 +1,35 @@
 /**
- * note-link 搜索面板 — view 层 popup 接入(L5-B3.12)
+ * note-link 搜索面板 — capability 端 popup 接入(L5-B3.12;C6 上提)
  *
- * driver 的 build-note-link-command-plugin 检测到 `[[` 触发时通过 setNoteLinkSearchHandler
+ * driver 的 build-note-link-command-plugin 检测到 `[[` 时通过 setNoteLinkSearchHandler
  * 调本模块的 onOpen,本模块用 popupController.show 启 popup(NoteLinkSearchPanel)。
  *
  * anchor 用 view.coordsAtPos(plugin.from) 算锚点 → 临时 fake div 作 anchor 元素
- * (复用 NoteView Cmd+K fallback 模式 — 见 NoteView.tsx 中 fake anchor 处理)
+ * (复用 NoteView Cmd+K fallback 模式)
+ *
+ * 装配:capability 加载时自调一次(详 capabilities/text-editing/index.ts);
+ * driver activeHandler 是模块级单例,view 各自注册会互相覆盖,故归 capability 自管。
  */
 
-import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { TextEditingApi } from '@capabilities/text-editing/types';
+import { setNoteLinkSearchHandler, noteLinkCommandKey } from '@drivers/text-editing-driver';
 import { popupController } from '@slot/triggers/popup-controller';
 
-const POPUP_ID = 'note-view.popup.note-link';
+const POPUP_ID = 'text-editing.popup.note-link';
 
+interface NoteLinkPluginState {
+  active: boolean;
+  from: number;
+  to: number;
+}
+
+/** capability 加载时一次性注册 driver note-link search handler */
 export function registerNoteLinkSearchIntegration(): void {
-  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-  textEditing.setNoteLinkSearchHandler({
+  setNoteLinkSearchHandler({
     onOpen(view) {
-      // noteLinkCommandKey 通过 capability api 访问(不直 import driver)
-      const noteLinkCommandKey = textEditing.noteLinkCommandKey as { getState(state: unknown): { active: boolean; from: number; to: number } | null };
-      const s = noteLinkCommandKey.getState(view.state);
+      const key = noteLinkCommandKey as unknown as {
+        getState(state: unknown): NoteLinkPluginState | null;
+      };
+      const s = key.getState(view.state);
       if (!s?.active) return;
       // 用 [[ 起始位置 PM coords 作 anchor
       let coords: { left: number; top: number; bottom: number };

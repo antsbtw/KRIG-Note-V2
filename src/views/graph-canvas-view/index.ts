@@ -30,6 +30,10 @@
  */
 
 import { registerView } from '@slot/view-type-registry/register-view';
+import { floatingToolbarRegistry } from '@slot/interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
+import { slashRegistry } from '@slot/interaction-registries/slash-registry/slash-registry';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { GraphCanvasView } from './GraphCanvasView';
 import { registerGraphCanvasCommands } from './canvas-commands';
 import {
@@ -37,8 +41,10 @@ import {
   registerFolderTreeContextMenu,
 } from './nav-side-content';
 
+const VIEW = 'graph-canvas-view';
+
 registerView({
-  id: 'graph-canvas-view',
+  id: VIEW,
   install: [
     'graph-library-store', // ✅ L5-G1:画板 + 文件夹 + CRUD(JSON 起步)
     'shape-library',       // 🚧 L5-G2:Shape + Substance 资源仓库
@@ -52,3 +58,22 @@ registerView({
 registerGraphCanvasCommands();
 registerNavSide();
 registerFolderTreeContextMenu();
+
+// canvas-text-node popup 编辑器(viewId='graph-canvas-view')自注册 PM 通用菜单
+// 见 docs/refactor/stages/04-lift-pm-editing-to-capability/c8-d-c-design.md(方案 A)
+// 注:7 业务插入(image/table/...)留 NoteView,画板文字节点无此语义
+function registerTextEditingMenusForCanvas(): void {
+  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui;
+  floatingToolbarRegistry.register([
+    ...ui.floatingToolbar.createMarkButtons(VIEW),
+    ui.floatingToolbar.createMathButton(VIEW),
+    ui.floatingToolbar.createLinkButton(VIEW),
+    ui.floatingToolbar.createColorButton(VIEW),
+  ]);
+  slashRegistry.register([
+    ...ui.slashMenu.createTurnIntoItems(VIEW),
+    ui.slashMenu.createMathBlockItem(VIEW),
+  ]);
+}
+
+registerTextEditingMenusForCanvas();

@@ -8,12 +8,12 @@
  * 用法:
  * ```ts
  * popupRegistry.register({
- *   id: 'note-view.popup.link',
+ *   id: 'text-editing.popup.link',
  *   view: 'note-view',
  *   Component: LinkPanel,
  * });
  *
- * popupController.show('note-view.popup.link', anchorEl);
+ * popupController.show('text-editing.popup.link', anchorEl);
  * ```
  */
 

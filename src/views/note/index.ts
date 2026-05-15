@@ -16,10 +16,8 @@ import { registerFloatingToolbar } from './floating-toolbar-content';
 import { registerSlashMenu } from './slash-menu-content';
 import { registerHandleMenu } from './handle-menu-content';
 import { registerContextMenu } from './context-menu-content';
-import { registerNotePopups } from './popup-registrations';
 import { registerNoteHelpPanels } from './help-panel-registrations';
 import { registerLinkClickIntegration } from './link-click-integration';
-import { registerNoteLinkSearchIntegration } from './note-link-search/integration';
 import { registerLearningIntegration } from './learning-integration';
 
 registerView({
@@ -43,7 +41,7 @@ registerView({
   keymap: [
     {
       key: 'mod+k',
-      command: 'note-view.popup-link',
+      command: 'text-editing.popup-link',
       enabledWhen: ['has-text-selection', 'in-view-area'],
     },
     {
@@ -69,8 +67,8 @@ registerFloatingToolbar();
 registerSlashMenu();
 registerHandleMenu();
 registerContextMenu();
-registerNotePopups();
+// C4/C6:popup color/link/note-link 由 text-editing capability 自注册;
+//        note-link search handler 同款(driver activeHandler 单例)。
 registerNoteHelpPanels();
 registerLinkClickIntegration();
-registerNoteLinkSearchIntegration();
 registerLearningIntegration();

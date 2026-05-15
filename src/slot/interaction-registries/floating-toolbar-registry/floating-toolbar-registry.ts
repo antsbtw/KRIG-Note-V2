@@ -20,16 +20,12 @@ class FloatingToolbarRegistry {
 
   /**
    * 按当前 viewId 过滤可见条目:
-   * - scope='global':所有 view 都可见(L5-G4.5,PM 编辑通用条目)
-   * - scope='view' 缺省:仅 item.view === viewId 时可见
-   *   (item.view === undefined 历史兼容:也算 view-scoped 但匹配所有 — 见旧测试)
+   * - item.view === viewId 命中
+   * - item.view === undefined 历史兼容(也算 view-scoped 匹配所有 — 见旧测试)
    */
   getItemsForView(viewId: string): FloatingToolbarItem[] {
     return this.items
-      .filter((item) => {
-        if (item.scope === 'global') return true;
-        return item.view === undefined || item.view === viewId;
-      })
+      .filter((item) => item.view === undefined || item.view === viewId)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
 
