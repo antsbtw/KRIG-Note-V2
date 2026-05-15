@@ -21,6 +21,7 @@ import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup
 import { ColorPickerPanel } from './color-picker/ColorPickerPanel';
 import { LinkPanel } from './link-panel/LinkPanel';
 import { NoteLinkSearchPanel } from './note-link-search/NoteLinkSearchPanel';
+import { EmojiPickerPanel } from './emoji-picker/EmojiPickerPanel';
 
 /** capability 加载时一次性注册所有 PM 通用 popup */
 export function registerTextEditingPopups(): void {
@@ -40,5 +41,11 @@ export function registerTextEditingPopups(): void {
     id: 'text-editing.popup.note-link',
     Component: NoteLinkSearchPanel,
     estimatedSize: { width: 280, height: 360 },
+  });
+
+  popupRegistry.register({
+    id: 'text-editing.popup.callout-emoji',
+    Component: EmojiPickerPanel,
+    estimatedSize: { width: 220, height: 100 },
   });
 }
