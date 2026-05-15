@@ -27,14 +27,17 @@ export interface HandleVisibilityContext {
  *
  * 关键:blockPos 是 handle 触发那一刻的瞬时值,通过这里传给 submenu 内组件,
  * 不污染 popup-controller 匿名契约(后者只管 anchor + id)。
+ *
+ * 不携带 instanceId/viewId:driver instanceId 与 view 类型名不同,
+ * caller 通过 workspaceManager.getActiveId() 自取(与 V2 handle 命令风格一致,
+ * 见 note-commands.ts getHandlePos)。混入 viewId 字段会误导 caller 当
+ * instanceId 用,无 bug 信号(2026-05-15 教训)。
  */
 export interface HandleSubmenuContext {
   blockType: string;
   blockAttrs: Record<string, unknown>;
   /** PM doc 中的 block pos(driver block-scoped API 用)*/
   blockPos: number;
-  /** view id(driver 调用必传)*/
-  viewId: string;
   /** 关闭整个 handle 菜单(submenu 内部操作完后调)*/
   close: () => void;
 }
@@ -81,8 +84,9 @@ export interface HandleItem {
    * 设置则 submenu 容器内不走默认 button 列表(按 submenuOf 收集),
    * 而是调本函数取得 ReactNode 渲染(Color swatch grid 等复杂内容用)。
    *
-   * 收 HandleSubmenuContext:含 blockPos / blockType / blockAttrs / viewId / close。
+   * 收 HandleSubmenuContext:含 blockPos / blockType / blockAttrs / close。
    * 内部组件调 driver block-scoped API 后调 ctx.close() 关闭整个 handle 菜单。
+   * instanceId 自取(workspaceManager.getActiveId() 等),ctx 不携带。
    */
   submenuRender?: (ctx: HandleSubmenuContext) => ReactNode;
 }

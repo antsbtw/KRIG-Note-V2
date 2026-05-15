@@ -133,7 +133,6 @@ export function HandleMenuBinding() {
         blockType: state.blockType ?? '',
         blockAttrs: state.blockAttrs ?? {},
         blockPos: state.pos ?? 0,
-        viewId: state.viewId,
         close: () => handleMenuController.hide(),
       }
     : null;
