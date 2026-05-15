@@ -352,6 +352,17 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
+/* 在 handle submenu 内嵌入时:submenu 容器已自带背景/边框/阴影,
+   ColorPicker 自己去掉这些,只保留 padding 给 grid 呼吸空间 */
+.krig-color-picker--handle-submenu {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 4px 4px 6px;
+  min-width: 0;
+}
+
 .krig-color-picker__section-label {
   font-size: 11px;
   color: #888;

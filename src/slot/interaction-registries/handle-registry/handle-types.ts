@@ -1,7 +1,16 @@
 /** Handle 菜单类型(块手柄)
  *
  * L5-B3.11:加 visibleWhen / icon / submenuOf 支持子菜单 + 条件显示(对齐 V1)
- * 2026-05-15:加 panel 模式,栈式切换主菜单为自定义内容(对齐 Notion handle UX)
+ * 2026-05-15:加 submenuRender 让 submenu 容器自定义渲染内容(统一 hover ▸ 式样)
+ *
+ * 统一交互式样:
+ * - 顶层 item(叶):click → 触发命令 + 关菜单
+ * - 顶层 item(带 ▸):hover → 右侧浮出 submenu
+ * - submenu 默认 button 列表(submenuOf 子项填充)
+ * - submenu 自定义渲染(submenuRender 字段)— Color swatch grid 等复杂内容用
+ *
+ * 注册原则:未实装的功能不注册(registry 里没该 item → ⠿ 菜单不显示)。
+ * "占位项" / "暂未实现"概念已废弃。
  */
 
 import type { ReactNode } from 'react';
@@ -14,19 +23,19 @@ export interface HandleVisibilityContext {
 }
 
 /**
- * Panel 渲染上下文(panelRender 收到)— 含 block 信息 + close 回调。
+ * Submenu 自定义渲染上下文(submenuRender 收到)— 含 block 信息 + close 回调。
  *
- * 关键:blockPos 是 handle 触发那一刻的瞬时值,通过这里传给 panel 内组件,
- * 不污染 popup-controller 匿名契约。
+ * 关键:blockPos 是 handle 触发那一刻的瞬时值,通过这里传给 submenu 内组件,
+ * 不污染 popup-controller 匿名契约(后者只管 anchor + id)。
  */
-export interface HandlePanelContext {
+export interface HandleSubmenuContext {
   blockType: string;
   blockAttrs: Record<string, unknown>;
   /** PM doc 中的 block pos(driver block-scoped API 用)*/
   blockPos: number;
   /** view id(driver 调用必传)*/
   viewId: string;
-  /** 关闭整个 handle 菜单(panel 内部操作完后调)*/
+  /** 关闭整个 handle 菜单(submenu 内部操作完后调)*/
   close: () => void;
 }
 
@@ -67,19 +76,13 @@ export interface HandleItem {
    */
   visibleWhen?: (ctx: HandleVisibilityContext) => boolean;
   /**
-   * Panel ID — 设置则点击此项后**主菜单整体切换**到 panelRender 内容(Notion 同款)。
+   * Submenu 自定义渲染函数(submenuId 设置时可选)。
    *
-   * 与 submenuId 互斥:submenuId 是右侧浮出小菜单,panelId 是栈式替换主菜单。
-   * 适合内容复杂(swatch grid / 二级搜索面板等)、submenu 宽度放不下的场景。
+   * 设置则 submenu 容器内不走默认 button 列表(按 submenuOf 收集),
+   * 而是调本函数取得 ReactNode 渲染(Color swatch grid 等复杂内容用)。
    *
-   * 配套 panelRender 函数返回 panel 内容;panel 顶部由 binding 渲染"← 返回"。
-   */
-  panelId?: string;
-  /**
-   * Panel 渲染函数(panelId 设置时必填)。
-   *
-   * 收 HandlePanelContext:含 blockPos / blockType / blockAttrs / viewId / close。
+   * 收 HandleSubmenuContext:含 blockPos / blockType / blockAttrs / viewId / close。
    * 内部组件调 driver block-scoped API 后调 ctx.close() 关闭整个 handle 菜单。
    */
-  panelRender?: (ctx: HandlePanelContext) => ReactNode;
+  submenuRender?: (ctx: HandleSubmenuContext) => ReactNode;
 }
