@@ -21,20 +21,17 @@
  */
 
 import { floatingToolbarRegistry } from '@slot/interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
-import {
-  createMarkButtons,
-  createMathButton,
-  createLinkButton,
-  createColorButton,
-} from '@capabilities/text-editing/ui/floating-toolbar/items';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 const VIEW = 'note-view';
 
 export function registerFloatingToolbar(): void {
+  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui.floatingToolbar;
   floatingToolbarRegistry.register([
-    ...createMarkButtons(VIEW),
-    createMathButton(VIEW),
-    createLinkButton(VIEW),
-    createColorButton(VIEW),
+    ...ui.createMarkButtons(VIEW),
+    ui.createMathButton(VIEW),
+    ui.createLinkButton(VIEW),
+    ui.createColorButton(VIEW),
   ]);
 }

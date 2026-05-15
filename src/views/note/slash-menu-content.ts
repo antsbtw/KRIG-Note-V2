@@ -10,10 +10,8 @@
 
 import { slashRegistry } from '@slot/interaction-registries/slash-registry/slash-registry';
 import type { SlashItem } from '@slot/interaction-registries/slash-registry/slash-types';
-import {
-  createTurnIntoItems,
-  createMathBlockItem,
-} from '@capabilities/text-editing/ui/slash-menu/items';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 const VIEW = 'note-view';
 
@@ -85,9 +83,10 @@ function createNoteBusinessInsertItems(): SlashItem[] {
 }
 
 export function registerSlashMenu(): void {
+  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui.slashMenu;
   slashRegistry.register([
-    ...createTurnIntoItems(VIEW),
-    createMathBlockItem(VIEW),
+    ...ui.createTurnIntoItems(VIEW),
+    ui.createMathBlockItem(VIEW),
     ...createNoteBusinessInsertItems(),
   ]);
 }

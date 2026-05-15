@@ -10,22 +10,18 @@
  */
 
 import { toolbarRegistry } from '@slot/toolbar-registry/toolbar-registry';
-import {
-  createHeadingDropdown,
-  createSeparator,
-  createToolbarMarkButtons,
-  createToolbarLinkButton,
-  createToolbarColorButtons,
-} from '@capabilities/text-editing/ui/toolbar/items';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 const VIEW = 'note-view';
 
 export function registerToolbar(): void {
+  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui.toolbar;
   toolbarRegistry.register([
-    createHeadingDropdown(VIEW),
-    createSeparator(VIEW, 'sep1', 20),
-    ...createToolbarMarkButtons(VIEW),
-    createToolbarLinkButton(VIEW),
-    ...createToolbarColorButtons(VIEW),
+    ui.createHeadingDropdown(VIEW),
+    ui.createSeparator(VIEW, 'sep1', 20),
+    ...ui.createToolbarMarkButtons(VIEW),
+    ui.createToolbarLinkButton(VIEW),
+    ...ui.createToolbarColorButtons(VIEW),
   ]);
 }

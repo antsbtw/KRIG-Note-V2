@@ -24,12 +24,8 @@
 
 import { contextMenuRegistry } from '@slot/interaction-registries/context-menu-registry/context-menu-registry';
 import type { ContextMenuItem } from '@slot/interaction-registries/context-menu-registry/context-menu-types';
-import {
-  createClipboardGroup,
-  createSelectAllItem,
-  createRemoveMarksGroup,
-  createDeleteBlockItem,
-} from '@capabilities/text-editing/ui/context-menu/items';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 const VIEW = 'note-view';
 
@@ -58,11 +54,12 @@ function createNoteSpecificContextItems(): ContextMenuItem[] {
 }
 
 export function registerContextMenu(): void {
+  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui.contextMenu;
   contextMenuRegistry.register([
-    ...createClipboardGroup(VIEW),       // Cut / Copy / Paste
-    createSelectAllItem(VIEW),            // Select All
-    ...createRemoveMarksGroup(VIEW),      // 移除格式 / 移除链接
-    ...createNoteSpecificContextItems(),  // 查词 / 翻译(view 业务)
-    createDeleteBlockItem(VIEW),          // 删除 Block
+    ...ui.createClipboardGroup(VIEW),       // Cut / Copy / Paste
+    ui.createSelectAllItem(VIEW),            // Select All
+    ...ui.createRemoveMarksGroup(VIEW),      // 移除格式 / 移除链接
+    ...createNoteSpecificContextItems(),    // 查词 / 翻译(view 业务)
+    ui.createDeleteBlockItem(VIEW),          // 删除 Block
   ]);
 }

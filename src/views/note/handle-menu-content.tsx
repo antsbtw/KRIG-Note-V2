@@ -24,12 +24,8 @@
 
 import { handleRegistry } from '@slot/interaction-registries/handle-registry/handle-registry';
 import type { HandleItem } from '@slot/interaction-registries/handle-registry/handle-types';
-import {
-  createTurnIntoContainer,
-  createColorContainer,
-  createTurnIntoSubmenu,
-  createBlockActions,
-} from '@capabilities/text-editing/ui/handle-menu/items';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 const VIEW = 'note-view';
 
@@ -68,16 +64,17 @@ function createNoteSpecificHandleItems(): HandleItem[] {
 }
 
 export function registerHandleMenu(): void {
+  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui.handleMenu;
   handleRegistry.register([
     // ── 顶层 submenu 容器(对齐 V1 顺序):Turn Into / Color (PM 通用) + Frame (业务) ──
-    createTurnIntoContainer(VIEW),
-    createColorContainer(VIEW),
+    ui.createTurnIntoContainer(VIEW),
+    ui.createColorContainer(VIEW),
 
     // ── PM 通用 turn-into submenu(11 项)──
-    ...createTurnIntoSubmenu(VIEW),
+    ...ui.createTurnIntoSubmenu(VIEW),
 
     // ── PM 通用 block 操作 + destructive(Copy / Duplicate / Delete)──
-    ...createBlockActions(VIEW),
+    ...ui.createBlockActions(VIEW),
 
     // ── NoteView 业务增量(Frame 容器 + Copy Link / Thought / Ask AI + Frame submenu)──
     ...createNoteSpecificHandleItems(),
