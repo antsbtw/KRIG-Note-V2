@@ -4,32 +4,37 @@
  * 用于:浮条 A 按钮 / 顶部 toolbar 弹出(selection-bound)。
  * handle 菜单 Color 走 HandleColorSubmenu(block-scoped),不复用本组件。
  *
- * 拆分(2026-05-15):
+ * 分层(2026-05-15 上提到 capability/text-editing/ui):
  * - L3 视觉 → ColorSwatchGrid 组件 + TEXT_COLORS / BG_COLORS 共享色板
- * - L4 装配 → 本组件:接 selection 当前色 + 调 setTextColor / setHighlight(不传 range)
+ * - L4 装配 → 本组件:接 focused PM 实例 + 调 setTextColor / setHighlight(不传 range)
+ *
+ * instanceId 来源 — instanceRegistry.getFocusedInstanceId()(L5-G4.5):
+ * 浮条 A 触发时 PM EditorView 仍持有焦点(toolbar 不抢 focus),取真正在编辑的实例。
+ * **不能用 workspaceManager.getActiveId()** — canvas-text-node 场景 instanceId 是
+ * 复合 `${workspaceId}::${nodeId}`,与 workspaceId 不等。
  */
 
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { ColorSwatchGrid, TEXT_COLORS, BG_COLORS } from './ColorSwatchGrid';
 
 export function ColorPickerPanel({ onClose }: PopupCloseProps) {
-  const wsId = workspaceManager.getActiveId();
-  const api = wsId ? requireCapabilityApi<TextEditingApi>('text-editing').api : null;
-  const currentText = api && wsId ? api.getActiveTextColor(wsId) : null;
-  const currentBg = api && wsId ? api.getActiveHighlight(wsId) : null;
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const instanceId = textEditing.instanceRegistry.getFocusedInstanceId();
+  const api = textEditing.api;
+  const currentText = instanceId ? api.getActiveTextColor(instanceId) : null;
+  const currentBg = instanceId ? api.getActiveHighlight(instanceId) : null;
 
   const applyText = (color: string) => {
-    if (!api || !wsId) return;
-    api.setTextColor(wsId, color);
+    if (!instanceId) return;
+    api.setTextColor(instanceId, color);
     onClose();
   };
 
   const applyBg = (color: string) => {
-    if (!api || !wsId) return;
-    api.setHighlight(wsId, color);
+    if (!instanceId) return;
+    api.setHighlight(instanceId, color);
     onClose();
   };
 

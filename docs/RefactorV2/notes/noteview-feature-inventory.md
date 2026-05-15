@@ -136,6 +136,13 @@
     inline marks(textStyle/highlight);driver `applyBlockTextColor/applyBlockBgColor`
     内部分流(mathBlock setNodeMarkup,其他 setMark over range)。新加 marks:'' block
     时(若有)同样需要此分流
+15. **handle 命令体系 instanceId 取值不一致** — V2 现有 handle-turn-* 等命令统一用
+    `workspaceManager.getActiveId()` 取 instanceId(`note-commands.ts getHandlePos`),
+    在 canvas-text-node 这种"instanceId = `${workspaceId}::${nodeId}` 复合"的场景下
+    会拿错(返回 workspaceId,driver `instanceRegistry.get` 取不到)。canvas-text-node
+    当前 plugin preset `blockHandle: false` 暂时回避;handle 真要支持复合实例时整个
+    handle 体系一起改(controller state 加 instanceId 字段,所有 handle 命令统一切换),
+    勿单点修。ColorPickerPanel(浮条触发)已用 `getFocusedInstanceId()` 修复同类问题。
 
 ---
 

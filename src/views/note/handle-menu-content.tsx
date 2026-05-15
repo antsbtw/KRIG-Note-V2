@@ -24,7 +24,7 @@
  */
 
 import { handleRegistry } from '@slot/interaction-registries/handle-registry/handle-registry';
-import { HandleColorSubmenu } from './color-picker/HandleColorSubmenu';
+import { HandleColorSubmenu } from '@capabilities/text-editing/ui/color-picker/HandleColorSubmenu';
 
 const VIEW = 'note-view';
 
