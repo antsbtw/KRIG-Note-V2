@@ -163,10 +163,11 @@
   padding-left: 4px;
 }
 
-/* task-item flex 布局 — 覆盖通用 li 的 padding-left:24px(checkbox 自占位置) */
+/* task-item flex 布局 — 覆盖通用 li 的 padding-left:24px(checkbox 自占位置)
+ * align-items: center 让 checkbox 与文字行中线对齐(单行 task 最准;多行罕见) */
 .krig-pm-host .ProseMirror li.krig-task-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   margin: 2px 0;
   padding-left: 0;
@@ -181,7 +182,6 @@
 
 .krig-pm-host .ProseMirror .krig-task-item__checkbox {
   flex-shrink: 0;
-  margin-top: 0.4em;
   cursor: pointer;
   accent-color: #8ab4f8;
   width: 16px;
