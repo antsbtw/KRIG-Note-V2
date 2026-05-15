@@ -1,65 +1,46 @@
 /**
- * NoteView ContextMenu 注册(C5:工厂函数化,PM 通用 7 项 + NoteView 业务增量)
+ * NoteView ContextMenu 注册(S3:learning 2 项也走 capability 工厂,view 端零业务增量)
  *
  * V1 右键菜单层级(参考 src/plugins/note/components/ContextMenu.tsx):
- *   Cut / Copy / Paste(剪贴板组)— PM 通用
+ *   Cut / Copy / Paste(剪贴板组)— text-editing 通用
  *   ─── 分隔
- *   Select All                  — PM 通用
+ *   Select All                  — text-editing 通用
  *   ─── 分隔
- *   ✖ 移除格式 / 🔗 移除链接     — PM 通用(real-mark 检测留 sub-stage)
+ *   ✖ 移除格式 / 🔗 移除链接     — text-editing 通用(real-mark 检测留 sub-stage)
  *   ─── 分隔
- *   📖 查词 / 🌐 翻译           — NoteView learning 业务
+ *   📖 查词 / 🌐 翻译           — learning 通用(S3 起;原 note-view 业务上提)
  *   ─── 分隔
- *   🗑 删除 Block                — PM 通用
+ *   🗑 删除 Block                — text-editing 通用
  *
- * 注册:
- * - PM 通用 7 项 → @capabilities/text-editing/ui/context-menu/items 工厂
- * - NoteView learning 业务 2 项 → 本文件 createNoteSpecificContextItems
+ * 注册(S3 后,全部走 capability 工厂):
+ * - text-editing 通用 7 项 → @capabilities/text-editing/ui/context-menu/items
+ * - learning 通用 2 项     → @capabilities/learning/ui/context-menu/items
  *
  * 设计:
  * - **Turn Into 已从 context menu 移除**(归 handle 菜单 — cm = "改文字 / 操作选区",
  *   "改 block 类型"走 handle ⠿ 菜单)
  * - V1 规划但 V2 未实装项(Ask AI / Frame / Thought 等)沿用 "不注册" 策略
+ *
+ * 当前 NoteView 没有 cm 业务增量(查词/翻译 上提后);若未来加 Ask AI 等 NoteView
+ * 专属右键项,在 register 数组追加。
  */
 
 import { contextMenuRegistry } from '@slot/interaction-registries/context-menu-registry/context-menu-registry';
-import type { ContextMenuItem } from '@slot/interaction-registries/context-menu-registry/context-menu-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
+import type { LearningApi } from '@capabilities/learning/types';
 
 const VIEW = 'note-view';
 
-/** NoteView learning 业务专属(2 项:查词/翻译) */
-function createNoteSpecificContextItems(): ContextMenuItem[] {
-  return [
-    {
-      id: `${VIEW}.cm.dictionary-lookup`,
-      label: '📖 查词',
-      command: 'note-view.cm-dictionary-lookup',
-      view: VIEW,
-      enabledWhen: 'has-selection',
-      group: 'learning',
-      order: 40,
-    },
-    {
-      id: `${VIEW}.cm.translate-text`,
-      label: '🌐 翻译',
-      command: 'note-view.cm-translate-text',
-      view: VIEW,
-      enabledWhen: 'has-selection',
-      group: 'learning',
-      order: 41,
-    },
-  ];
-}
-
 export function registerContextMenu(): void {
-  const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui.contextMenu;
+  const te = requireCapabilityApi<TextEditingApi>('text-editing').ui.contextMenu;
+  const lr = requireCapabilityApi<LearningApi>('learning').ui.contextMenu;
   contextMenuRegistry.register([
-    ...ui.createClipboardGroup(VIEW),       // Cut / Copy / Paste
-    ui.createSelectAllItem(VIEW),            // Select All
-    ...ui.createRemoveMarksGroup(VIEW),      // 移除格式 / 移除链接
-    ...createNoteSpecificContextItems(),    // 查词 / 翻译(view 业务)
-    ui.createDeleteBlockItem(VIEW),          // 删除 Block
+    ...te.createClipboardGroup(VIEW),       // Cut / Copy / Paste
+    te.createSelectAllItem(VIEW),            // Select All
+    ...te.createRemoveMarksGroup(VIEW),      // 移除格式 / 移除链接
+    lr.createDictionaryLookupItem(VIEW),     // 📖 查词(S3 走 learning 工厂)
+    lr.createTranslateItem(VIEW),            // 🌐 翻译(S3 走 learning 工厂)
+    te.createDeleteBlockItem(VIEW),          // 删除 Block
   ]);
 }

@@ -87,13 +87,15 @@ export interface LearningApi {
 // ── ui 命名空间(typeof namespace import 模式,同 stage 04 text-editing.ui)──
 
 import type * as DictionaryPanelIntegration from './ui/help-panel-integration';
+import type * as ContextMenuFactory from './ui/context-menu/items';
 
 /**
  * learning UI API(view 通过 requireCapabilityApi 取):
  * - dictionaryPanel.showLookup(word, ctx?) / showTranslate(text)  — 触发 help-panel
- *
- * S3 加 context-menu item 工厂(createDictionaryLookupItem / createTranslateItem)。
+ * - contextMenu.createDictionaryLookupItem(viewId) / createTranslateItem(viewId)
+ *   → 工厂返 ContextMenuItem,view 拼装到自己的 context-menu register 数组
  */
 export interface LearningUiApi {
   readonly dictionaryPanel: typeof DictionaryPanelIntegration;
+  readonly contextMenu: typeof ContextMenuFactory;
 }
