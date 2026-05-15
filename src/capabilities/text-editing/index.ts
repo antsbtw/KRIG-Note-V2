@@ -32,6 +32,7 @@ import {
 import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry';
 import { atomsToProseMirror } from './converters/atoms-to-pm';
 import { sanitizeAtoms } from './converters/sanitize-atoms';
+import { registerTextEditingPopups } from './ui/popups';
 import type { TextEditingApi } from './types';
 
 /**
@@ -56,3 +57,7 @@ capabilityRegistry.register({
   id: 'text-editing',
   api,
 });
+
+// C4:capability 加载时一次性注册 PM 通用 popup(color / link)。
+// note-link 搜索 popup 留 C6 整目录搬时一并迁。
+registerTextEditingPopups();
