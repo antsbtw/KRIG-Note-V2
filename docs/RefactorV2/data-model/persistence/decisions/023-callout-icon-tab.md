@@ -1,0 +1,564 @@
+# Decision 023 — callout emoji picker: Icons tab(v2 增量)
+
+## §0 决议元数据
+
+| 字段 | 值 |
+|------|------|
+| decision-id | 023-callout-icon-tab |
+| 状态 | Pending(决议字面拍板,等实施) |
+| 提出日期 | 2026-05-16 |
+| 优先级 | P1(用户体验增量,非阻塞) |
+| 前置决议 | v1 callout-as-container([test-checklists/callout-as-container.md](../../../test-checklists/callout-as-container.md))已合 main commit `794db28..361444d` |
+| 后置决议 | 024 callout Upload tab(独立 sub-phase,本决议不做) |
+| 涉及分支 | `feature/callout-icon-tab`(从 main 切) |
+
+## §0.5 SDK 版本依赖登记
+
+> 依据 [SDK-version-binding-policy.md](../SDK-version-binding-policy.md) §2.2 字面"决议字面拍板必须 grep package.json + .d.ts 字面证据"。
+
+### §0.5.1 本 sub-phase 涉及 SDK 字面清单
+
+| 包名 | 字面 package.json range | node_modules 实装版本 | npm latest(2026-05-16) | 本 sub-phase 是否升级 | 字面理由 |
+|------|------|------|------|------|------|
+| `lucide-react` | `^1.14.0` | `1.14.0` | `1.16.0` | **否** | 落后 2 minor,1952 个 icon 字面已覆盖目标子集;跨大版本升级独立 sub-phase(SDK policy §2 字面"跨大版本独立 sub-phase") |
+| `react` | `^19.2.0` | `19.2.5` | (本 sub-phase 不动) | 否 | 字面 grep 确认 lucide-react peer 含 `^19.0.0`,兼容 |
+| `emoji-mart` | `^5.6.0` | `5.6.0` | (v1 已锁) | 否 | v1 已锁 |
+| `@emoji-mart/data` | `^1.2.1` | `1.2.1` | (v1 已锁) | 否 | v1 已锁 |
+
+### §0.5.2 lucide-react 来源验证字面(防 typo 包/fork)
+
+- `name: "lucide-react"` 字面(npm 官方包名)
+- `author: Eric Fennis` 字面(lucide 官方维护者)
+- `repository: github.com/lucide-icons/lucide` 字面(官方 monorepo,`directory: packages/lucide-react`)
+- `homepage: https://lucide.dev` 字面(官方站点)
+- npm `view lucide-react versions` 字面跨 `0.0.1 → 0.577.0 → 1.0.0-rc → 1.16.0` 连续主线
+
+详见 [§2.5 lucide-react SDK 验证字面](#25-lucide-react-sdk-验证字面)。
+
+---
+
+## §1 背景与目标
+
+### §1.1 上下文
+
+V2 的 callout block emoji picker 字面在 [src/capabilities/text-editing/ui/emoji-picker/](../../../../../src/capabilities/text-editing/ui/emoji-picker/)。
+
+**v1 已合 main**(commit 范围 `794db28..361444d`):
+- emoji-mart 5.x Web Component 包装(不用 `@emoji-mart/react`,手写 React 包装)
+- 4 tab 栏:**Emojis active** / Icons disabled / Upload disabled / Remove disabled
+- "Callouts" 24 emoji 通过 `custom` prop 置顶
+- callout schema 字面 `attrs.emoji: { default: '💡' }`(required string)
+- emoji-picker 完整使用 [test-checklists/callout-as-container.md](../../../test-checklists/callout-as-container.md) F 段验证
+
+### §1.2 目标
+
+本 sub-phase 实施 **Icons tab**:
+- 点击 Icons tab → 显示字符 icon 库 + 搜索
+- 选中 icon 后 callout 头部显示该 icon(lucide `<svg>`) 而非 emoji
+- 切回 Emojis tab 选 emoji → 自动清除 icon,渲回 emoji
+
+### §1.3 范围决定
+
+**做**:
+1. Icons tab UI(lucide-react 字符画 icon 库 + 搜索 + 网格,默认置顶 Notion 风格子集)
+2. callout schema 扩展(新增 `attrs.iconName: { default: null }`)
+3. callout NodeView 渲染分支(emoji 字符 vs `<svg>` icon,iconName 优先)
+4. atom 序列化处理新字段(零反向 converter,PM toJSON 透传)
+5. 旧 callout 数据(仅有 emoji)向前兼容(schema default null 兜底)
+
+**不做**(留 v3 / 后续):
+- Upload tab(mediaStore 集成,独立 sub-phase 024)
+- Remove tab(用户字面决议"无意义",不做)
+- icon 颜色自定义(v2 用默认色)
+- 多 icon 库切换(v2 只 lucide)
+- theme light 模式(V2 字面无 theme store,主功能完成后统一调)
+- lucide-react `1.14 → 1.16` 升级(SDK policy §2 字面独立 sub-phase)
+
+---
+
+## §2 现状(6 层传播 grep 结果字面)
+
+### §2.1 view caller 真消费点
+
+字面 grep `attrs.emoji` `setCalloutEmoji` 在 `src/views/` 全部使用:
+
+```
+src/views/  → 0 处直接消费 attrs.emoji 或 setCalloutEmoji
+```
+
+字面**所有消费方都在 driver / capability 层**,view 不直接读 callout attrs。
+
+### §2.2 capability types.ts 接口
+
+[src/capabilities/text-editing/types.ts](../../../../../src/capabilities/text-editing/types.ts) 字面:
+- `setCalloutEmoji` 字面不出现在 capability types(由 driver 层 `textEditingDriverApi` 暴露)
+- callout block 在 `BLOCK_TYPES` 字面枚举(line 33): `'callout' | 'toggle-list'`
+
+### §2.3 capability index.ts renderer 入口
+
+[src/capabilities/text-editing/index.ts](../../../../../src/capabilities/text-editing/index.ts) 字面:
+- callout-emoji popup 字面注册在 [ui/popups.ts:47](../../../../../src/capabilities/text-editing/ui/popups.ts#L47): `id: 'text-editing.popup.callout-emoji'`
+- emoji-picker integration 字面在 [ui/emoji-picker/integration.ts:39](../../../../../src/capabilities/text-editing/ui/emoji-picker/integration.ts#L39) `setCalloutEmojiHandler({...})`
+
+### §2.4 IPC channel + preload + electron-api.d.ts
+
+字面 callout atom **不过 IPC** — 走 PM `doc.toJSON()` 整体 payload 经存储层(SurrealDB)透明持久化。新字段 `iconName` 字面随 payload 透传,**零 IPC 改动**。
+
+详见 [§3.3.bis 反向 PM→atom 字面路径验证](#33bis-反向-pmatom-字面路径验证反馈-2-闭环)。
+
+### §2.5 lucide-react SDK 验证字面
+
+> SDK-policy §2.2 字面要求:跨大版本 SDK 选定前必须 grep package.json + .d.ts 字面证据。
+> 字面证据缺失则 §3 字面 B 方案基础动摇,字面禁止拍板。
+
+#### §2.5.1 `npm view lucide-react versions` 字面输出
+
+字面跨度:
+- 起点 `0.0.1`(2020 初)
+- 中段 `0.11.0 → 0.577.0`(2020–2025 主力)
+- 切版 `1.0.0-rc.0 → 1.0.0`(2025 SemVer 正式化)
+- 当前 `1.16.0` 字面 npm latest
+
+V2 字面装版本: `^1.14.0`(落后 latest 2 个 minor)
+
+**结论**: lucide-react 字面是同一作者(Eric Fennis)同一仓库(`lucide-icons/lucide`)的连续主线,非 typo/fork 包。
+
+#### §2.5.2 `node_modules/lucide-react/package.json` 字面 version
+
+| 字段 | 字面值 |
+|------|------|
+| name | `lucide-react` |
+| version | `1.14.0` |
+| author | Eric Fennis |
+| homepage | `https://lucide.dev` |
+| repository | `github.com/lucide-icons/lucide`(directory:`packages/lucide-react`) |
+| main | `dist/cjs/lucide-react.js` |
+| module | `dist/esm/lucide-react.mjs` |
+| typings | `dist/lucide-react.d.ts` |
+| peerDependencies.react | `^16.5.1 \|\| ^17.0.0 \|\| ^18.0.0 \|\| ^19.0.0` |
+
+**React 19 字面优势**: peer 字面已含 `^19.0.0`,V2 装 `react@19.2.5` 直接兼容,不像 `@emoji-mart/react@1.1.1` peer 只到 18 需要手写 React 包装绕开(详见 v1 决议字面)。
+
+#### §2.5.3 24 个目标 icon 一次性 grep 命中表(反馈 2 闭环)
+
+字面命令:
+```bash
+grep -oE "\b(Lightbulb|Hand|ChevronUp|ThumbsUp|Key|Construction|AlertTriangle|Flame|Pin|Scissors|HelpCircle|Ban|Octagon|AlarmClock|Phone|Siren|Recycle|CheckCircle|Lock|Paperclip|BookOpen|MessageCircle|ArrowRight|Megaphone|Wrench|Settings)\b" \
+  node_modules/lucide-react/dist/lucide-react.d.ts | sort -u
+```
+
+24 个 v1 Callouts emoji → lucide icon 字面映射表:
+
+| # | v1 emoji | v1 emoji name | lucide 候选名 | d.ts 字面命中 | 状态 |
+|---|---|---|---|---|---|
+| 1 | 💡 | Light bulb | `Lightbulb` | ✓ | 命中 |
+| 2 | 👉 | Pointing right | `Hand` 或 `ArrowRight` | ✓ ✓ | 命中(取 `ArrowRight` 更对齐 Notion) |
+| 3 | ☝️ | Pointing up | `ChevronUp` 或 `ArrowUp` | ✓ ✓ | 命中(取 `ChevronUp`) |
+| 4 | 👌 | OK hand | `ThumbsUp` | ✓ | 命中(语义近似替换) |
+| 5 | 🔑 | Key | `Key` | ✓ | 命中 |
+| 6 | 🚧 | Construction | `Construction` | ✓ | 命中 |
+| 7 | ⚠️ | Warning | `AlertTriangle` | ✓ | 命中(或 alias `TriangleAlert`) |
+| 8 | 🔥 | Fire | `Flame` | ✓ | 命中 |
+| 9 | 📌 | Push pin | `Pin` | ✓ | 命中 |
+| 10 | ✂️ | Scissors | `Scissors` | ✓ | 命中 |
+| 11 | ❓ | Question mark | `HelpCircle` 或 `CircleHelp` | ✓ ✓ | 命中 |
+| 12 | 🚫 | No entry sign | `Ban` | ✓ | 命中 |
+| 13 | ⛔ | No entry | `Octagon` | ✓ | 命中(语义近似) |
+| 14 | ⏰ | Alarm clock | `AlarmClock` | ✓ | 命中 |
+| 15 | ☎️ | Telephone | `Phone` | ✓ | 命中 |
+| 16 | 🚨 | Rotating light | `Siren` | ✓ | 命中 |
+| 17 | ♻️ | Recycle | `Recycle` | ✓ | 命中 |
+| 18 | ✅ | Check mark | `CheckCircle` | ✓ | 命中(或 alias `CircleCheck`) |
+| 19 | 🔒 | Lock | `Lock` | ✓ | 命中 |
+| 20 | 📎 | Paperclip | `Paperclip` | ✓ | 命中 |
+| 21 | 📖 | Book | `BookOpen` 或 `Book` | ✓ ✓ | 命中 |
+| 22 | 🗣️ | Speaking head | `MessageCircle` | ✓ | 命中(语义近似) |
+| 23 | ➡️ | Arrow right | `ArrowRight` 或 `MoveRight` | ✓ ✓ | 命中 |
+| 24 | 📣 | Megaphone | `Megaphone` | ✓ | 命中 |
+
+**字面 grep 总命中**: 45 个候选名全部命中,**24 个 v1 emoji 一对一映射全部成立,零缺失**。
+
+#### §2.5.4 SDK 验证结论
+
+- V2 装的 `lucide-react@^1.14.0` 字面是官方主线,非历史 typo 包,非 fork
+- 字面 1952 个 icon 覆盖 Notion callout 风格子集(24 个目标 icon 字面全部命中)
+- React 19.2.5 peer 兼容(peer 字面含 `^19.0.0`) — **这是 lucide-react 相对 `@emoji-mart/react@1.1.1` 的字面优势**,后者 peer 只到 18 需要手写 React 包装绕开
+- **B 方案字面拍板基础成立**,§3 解禁
+- 版本滞后(`1.14` vs `1.16`)字面登记在 §0.5,**本 sub-phase 不升级**,升级单立 sub-phase
+- 字面零缺失,**fallback 策略字面无需启用**(原计划"缺失 icon 用近义或 emoji 兜底"未触发)
+
+### §2.6 分层 lint 规则
+
+[eslint.config.js](../../../../../eslint.config.js) 字面 `no-restricted-imports` 不禁止 capability 字面 import `lucide-react`(既有 [shell/workspace-bar/AddWorkspaceButton.tsx](../../../../../src/shell/workspace-bar/AddWorkspaceButton.tsx) 字面已用)。
+
+⚠️ **注意**: audit §5.4 字面登记 ESLint config block 互覆盖让 capability 主块规则失效,**lint 通过不等于合规**,需手工核对 [refactor charter](../../../00-总纲.md) §1.1/§1.3。
+
+### §2.7 V2 既有同类型 SSOT 位置
+
+callout block attrs 字面唯一 SSOT 在 [drivers/text-editing-driver/blocks/callout/spec.ts](../../../../../src/drivers/text-editing-driver/blocks/callout/spec.ts),无第二处镜像。新字段加在此处即可。
+
+### §2.8 callout schema 6 处字面影响点 grep
+
+| # | 文件 | 字面命中 | 改动 |
+|---|------|------|------|
+| 1 | `drivers/text-editing-driver/blocks/callout/spec.ts` | line 18 `emoji: { default: '💡' }` + toDOM line 32 + parseDOM line 27 | 新增 `iconName: { default: null }` + toDOM/parseDOM 处理 |
+| 2 | `drivers/text-editing-driver/blocks/callout/node-view.ts` | line 16/21/35/51 字面读 `node.attrs.emoji` | 新增 iconName 分支(优先) |
+| 3 | `drivers/text-editing-driver/api.ts` | line 149 `setCalloutEmoji` | 修订:同步清 iconName(§4.4) + 新增 `setCalloutIcon` |
+| 4 | `capabilities/text-editing/converters/atoms-to-pm.ts:400` | line 401 字面 `emoji = c.emoji ?? '💡'` | 加 `iconName: c.iconName ?? null` 透传 |
+| 5 | PM→atom 反向 converter | **字面不存在**(详 §3.3.bis) | 零改动 |
+| 6 | 其他 `attrs.emoji` 消费方 | 字面 grep 仅 5 处(spec/node-view/api/atoms-to-pm/EmojiPickerPanel),无其他 | 已全覆盖 |
+
+---
+
+## §3 方案选型
+
+### §3.1 待选方案
+
+**方案 A — 复合字段**(否决)
+- schema: `attrs.symbol: { type: 'emoji' | 'icon', value: string }`
+- atom 改造代价: 全部既有 callout atom 必须 migrate `emoji: '💡'` → `symbol: { type: 'emoji', value: '💡' }`
+- 否决理由: SurrealDB migration 字面成本高,旧数据零迁移目标违背
+
+**方案 B — 双字段并存且 iconName 非 null 优先**(采纳)
+- schema: 保留 `attrs.emoji: { default: '💡' }`,新增 `attrs.iconName: { default: null }`
+- 渲染规则: NodeView 内 `if (iconName != null) 渲 lucide <svg>; else 渲 emoji 字符`
+- atom 改造代价: 旧数据零迁移(缺 iconName 字段默认 null,走 emoji 分支)
+- 序列化代价: atoms-to-pm.ts callout case 加一行 `iconName: c.iconName ?? null` 透传
+- SSOT 单点: callout 块的"显示什么"由 `iconName == null` 单一判定决定
+
+**方案 C — 双字段 + 显式类型标记**(否决)
+- schema: `attrs.symbol: string` + `attrs.symbolType: 'emoji' | 'icon'`
+- 否决理由: 信息冗余(`symbolType` 可由 `symbol` 字面是 emoji 还是 icon-name 推断),且需 migrate
+
+### §3.2 采纳方案 B 的字面理由
+
+1. **向前兼容零迁移**: 旧 callout atom 字面无 `iconName` 字段,PM schema `default: null` 自动填充
+2. **回滚成本最低**: 移除字段只需删 `attrs.iconName` + node-view 分支,emoji 路径不变
+3. **NodeView 渲染分支单点判定**: `iconName != null ? renderIcon() : renderEmoji()`
+4. **API 增量不破坏**: 现有 `setCalloutEmoji(instanceId, pos, emoji)` 签名不变(行为字面修订见 §4.4),新增并行 `setCalloutIcon(instanceId, pos, iconName: string | null)`,iconName=null 字面表示"切回 emoji 模式"
+5. **互斥副作用语义单一来源**(反馈 3): `setCalloutEmoji` 字面同步清 iconName(§4.4),view caller 不必字面记得两 API 配对调用 — 单 API 调用一次完成"切回 emoji 且清掉 icon"语义,无双调用同步漏洞
+
+### §3.3 方案 B 字面影响清单(5 处文件)
+
+| 文件 | 字面改动 |
+|------|------|
+| `src/drivers/text-editing-driver/blocks/callout/spec.ts` | attrs 加 `iconName: { default: null }`;toDOM 条件加 `data-icon-name`(iconName != null 时);parseDOM `getAttrs` 读 `data-icon-name`(为空字符串则按 null)。注:本 DOM 改动也字面服务于 `getBlockClipboardAt` 内 `DOMSerializer.fromSchema` 路径([api.ts:488](../../../../../src/drivers/text-editing-driver/api.ts#L488) 字面),iconName 通过 toDOM 自动进 clipboard HTML,无需独立 markdown serializer 改造 |
+| `src/drivers/text-editing-driver/blocks/callout/node-view.ts` | `update()` + 初始化分支:iconName != null 时 mount lucide `<svg>`(字面通过 ReactDOM portal 或 dynamic 字面 createIcons 函数注入,实施期 Step 5.x 决定);iconName == null 时 textContent emoji;mousedown handler 不动 |
+| `src/drivers/text-editing-driver/api.ts` | 新增 `setCalloutIcon(instanceId, blockPos, iconName: string \| null)` API(字面在 setCalloutEmoji 同位 line ~160);`setCalloutEmoji` 字面修订:setNodeMarkup 时同步把 `iconName` 字面写 null(切回 emoji 模式互斥);见 §4.4 |
+| `src/capabilities/text-editing/converters/atoms-to-pm.ts:400` | callout case `attrs: { emoji, iconName: (c.iconName as string \| null) ?? null }`,既有逻辑透传新字段 |
+| `src/capabilities/text-editing/ui/emoji-picker/EmojiPickerPanel.tsx` | Icons tab 实装(替换 disabled tab),24 Notion 风格 icon 置顶 + 搜索过滤全库;选中 icon 时**只调 `api.setCalloutIcon(ctx.instanceId, ctx.blockPos, iconName)`,字面不动 emoji 字段**(iconName 优先单点判定,emoji 是 fallback 兜底);切回 Emojis tab 选 emoji 时 `setCalloutEmoji` 字面会清 iconName(§4.4 副作用) |
+
+### §3.3.bis 反向 PM→atom 字面路径验证(反馈 2 闭环)
+
+**字面 grep 结论**: V2 字面**不存在** atom-level pm-to-atoms 反向 converter。
+
+证据链字面:
+1. [Host.tsx:120](../../../../../src/drivers/text-editing-driver/Host.tsx#L120) 字面 `serializeDoc(v.state.doc)` 触发 onChange — 即 doc 变化时回调上层
+2. [schema-builder.ts:65-71](../../../../../src/drivers/text-editing-driver/schema-builder.ts#L65) 字面 `serializeDoc` = `{ format: 'pm-doc-json', version: '0.1', payload: doc.toJSON() }` — payload 字面就是 PMDoc.toJSON() 整体序列化结果,**无任何 callout 字段抽取/转换逻辑**
+3. [index.ts:24-31](../../../../../src/drivers/text-editing-driver/index.ts#L24) 字面 driver 协议 serialize/deserialize 是字面信封透传,payload 不动
+4. 反向恢复: [schema-builder.ts:51](../../../../../src/drivers/text-editing-driver/schema-builder.ts#L51) 字面 `PMNode.fromJSON(schema, data.payload)` — 完全交给 PM schema 还原,**schema `attrs.iconName: { default: null }` 字面会自动兜底**旧 doc 缺字段
+5. 旁路消费方字面只 2 处,均**不读 emoji/iconName 字段**:
+   - [LinkPanel.tsx:164](../../../../../src/capabilities/text-editing/ui/link-panel/LinkPanel.tsx#L164) 字面 `extractHeadings(drillNote.doc.payload)` 只递归 heading 类型
+   - [lib/atom-serializers/svg/index.ts:197](../../../../../src/lib/atom-serializers/svg/index.ts#L197) 字面 `case 'callout': return '[Callout]'` 文字 fallback,不读 attrs
+
+**结论**: `attrs.iconName` 字面通过 PM toJSON 透传写入 payload,重启时 PM schema default 兜底,**零反向 converter 改动,零持久化代码改动,零旁路消费方影响**。
+
+### §3.3.ter markdown/HTML serializer 字面验证(反馈 3 闭环)
+
+字面 grep 全谱搜索:
+- `domSerializer` 字面命中 1 处: [api.ts:488](../../../../../src/drivers/text-editing-driver/api.ts#L488) `DOMSerializer.fromSchema(inst.view.state.schema)` 用于 `getBlockClipboardAt`(剪贴板 HTML 生成)
+- `toMarkdown` 字面命中 0 处
+- `MarkdownSerializer` 字面命中 0 处
+- `serializeCallout` 字面命中 0 处
+
+**结论**: V2 字面**无独立 markdown serializer**,**无独立 callout 序列化函数**。HTML 序列化字面走 PM `DOMSerializer.fromSchema` 自动从 `spec.toDOM` 推导 — spec.ts 改 toDOM 加 `data-icon-name` 字面**同时覆盖 clipboard HTML 路径**,无遗漏。
+
+---
+
+## §4 数据模型变更
+
+### §4.1 callout schema 字面变更
+
+```ts
+// src/drivers/text-editing-driver/blocks/callout/spec.ts (字面)
+const calloutNodeSpec: NodeSpec = {
+  content: 'block+',
+  group: 'block',
+  defining: true,
+  attrs: {
+    emoji: { default: '💡' },              // 既有,不变
+    bookAnchor: { default: null },         // 既有(sub-phase 022),不变
+    iconName: { default: null },           // 【新增】lucide icon 名,null 表示走 emoji
+  },
+  parseDOM: [
+    {
+      tag: 'div.krig-callout',
+      getAttrs(node) {
+        const el = node as HTMLElement;
+        const iconName = el.getAttribute('data-icon-name') || null;
+        return {
+          emoji: el.getAttribute('data-emoji') || '💡',
+          iconName,                        // 【新增】
+        };
+      },
+    },
+  ],
+  toDOM(node) {
+    const attrs: Record<string, string> = {
+      class: 'krig-callout',
+      'data-emoji': node.attrs.emoji as string,
+    };
+    if (node.attrs.iconName) {
+      attrs['data-icon-name'] = node.attrs.iconName as string;   // 【新增】
+    }
+    return ['div', attrs, 0];
+  },
+};
+```
+
+### §4.2 NodeView 渲染分支字面规则(单点判定)
+
+```
+if (node.attrs.iconName != null && node.attrs.iconName !== '') {
+  // 渲 lucide <svg>
+  emojiEl.innerHTML = '';
+  mount(emojiEl, getLucideIconByName(node.attrs.iconName));
+} else {
+  // 渲 emoji 字符(fallback 兜底)
+  emojiEl.innerHTML = '';
+  emojiEl.textContent = node.attrs.emoji as string || '💡';
+}
+```
+
+**字面单点判定语义**: iconName 字段是"显示模式开关",iconName 非 null 优先;emoji 字段始终保留作 fallback。
+
+### §4.3 atom 字段字面变更(向前/向后兼容)
+
+`AtomCalloutContent` 字面增加 `iconName?: string | null` 可选字段:
+
+- **旧数据**(v1 callout atom,字面无 iconName 字段): 反序列化时 atoms-to-pm.ts 走 `(c.iconName as string|null) ?? null`,fallback null → schema default null 兜底 → 渲 emoji 模式(行为字面无变化)
+- **新数据**(用户用 Icons tab 选了 icon): atom 字面写入 `iconName: 'Lightbulb'` 之类,PM toJSON 透传 payload,重启恢复 → schema 还原 attrs.iconName → 渲 icon 模式
+- **混合数据**(同一 atom 既有 emoji 又有 iconName): iconName 字面优先,emoji 字面保留作切回 fallback
+
+### §4.4 API 字面互斥副作用登记(反馈 1 字面方向)
+
+**API 1: `setCalloutIcon(instanceId, blockPos, iconName: string | null)`**(新增)
+```ts
+// 字面只动 iconName,不动 emoji
+setCalloutIcon(instanceId, blockPos, iconName) {
+  const node = inst.view.state.doc.nodeAt(blockPos);
+  if (!node || node.type.name !== 'callout') return;
+  const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+    ...node.attrs,
+    iconName,        // emoji 字面保留不动
+  });
+  inst.view.dispatch(tr);
+}
+```
+
+**API 2: `setCalloutEmoji(instanceId, blockPos, emoji)`**(既有 + 字面修订)
+```ts
+// 字面修订:setNodeMarkup 时同步把 iconName 写 null(切回 emoji 模式互斥)
+setCalloutEmoji(instanceId, blockPos, emoji) {
+  const node = inst.view.state.doc.nodeAt(blockPos);
+  if (!node || node.type.name !== 'callout') return;
+  const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+    ...node.attrs,
+    emoji,
+    iconName: null,  // 【字面新增】互斥副作用 — 切回 emoji 模式自动清 iconName
+  });
+  inst.view.dispatch(tr);
+}
+```
+
+**字面副作用语义**:
+- 用户切到 Icons tab 选 icon → `setCalloutIcon(..., 'Lightbulb')` → emoji 字段保留 '💡'(或上次值),iconName 写入 → 渲 icon
+- 用户切回 Emojis tab 选 emoji(比如 '🔥') → `setCalloutEmoji(..., '🔥')` → emoji 写入 '🔥',iconName 字面自动清 null → 渲 emoji
+- 用户在 Icons tab 选"取消 icon"(即 `setCalloutIcon(..., null)`) → iconName 字面清 null → 渲 emoji(用上次保留的 emoji 值,平滑回退)
+
+> 拍板理由字面登在 [§3.2 理由 5](#32-采纳方案-b-的字面理由) — 互斥副作用语义单一来源(view caller 不必字面记得两 API 配对)。
+
+### §4.5 默认 Icons tab 置顶 24 icon 字面清单(对齐 v1 Callouts emoji 一对一)
+
+按 §2.5.3 字面 grep 结果选定:
+
+```ts
+// src/capabilities/text-editing/ui/emoji-picker/callout-icons.ts (新建)
+export const CALLOUT_ICON_PICKS = [
+  { name: 'Lightbulb',     keywords: ['bulb', 'idea', 'tip'] },
+  { name: 'ArrowRight',    keywords: ['point right'] },
+  { name: 'ChevronUp',     keywords: ['point up'] },
+  { name: 'ThumbsUp',      keywords: ['ok', 'good'] },
+  { name: 'Key',           keywords: ['important'] },
+  { name: 'Construction',  keywords: ['wip', 'progress'] },
+  { name: 'AlertTriangle', keywords: ['warning', 'caution'] },
+  { name: 'Flame',         keywords: ['fire', 'hot'] },
+  { name: 'Pin',           keywords: ['pushpin', 'sticky'] },
+  { name: 'Scissors',      keywords: ['cut'] },
+  { name: 'HelpCircle',    keywords: ['question', 'doubt'] },
+  { name: 'Ban',           keywords: ['no entry', 'forbidden'] },
+  { name: 'Octagon',       keywords: ['stop', 'no entry'] },
+  { name: 'AlarmClock',    keywords: ['time', 'reminder'] },
+  { name: 'Phone',         keywords: ['telephone', 'call'] },
+  { name: 'Siren',         keywords: ['emergency', 'alert'] },
+  { name: 'Recycle',       keywords: ['reuse'] },
+  { name: 'CheckCircle',   keywords: ['done', 'ok'] },
+  { name: 'Lock',          keywords: ['secure', 'private'] },
+  { name: 'Paperclip',     keywords: ['attach'] },
+  { name: 'BookOpen',      keywords: ['read', 'docs'] },
+  { name: 'MessageCircle', keywords: ['speak', 'comment'] },
+  { name: 'Megaphone',     keywords: ['announce', 'broadcast'] },
+  { name: 'Wrench',        keywords: ['tools', 'fix'] },
+];
+```
+
+字面 24 条,与 v1 [callout-emojis.ts:19-46](../../../../../src/capabilities/text-editing/ui/emoji-picker/callout-emojis.ts#L19) 字面一对一对齐(实施期 Step 5.x 字面以代码为准微调)。
+
+---
+
+## §5 实施任务清单
+
+### Step 5.1 — schema 字面扩展(driver 层)
+- 修 [spec.ts](../../../../../src/drivers/text-editing-driver/blocks/callout/spec.ts) 加 `iconName: { default: null }` + toDOM/parseDOM 字面如 §4.1
+- typecheck 通过
+- commit: `feat(callout): add iconName attr to PM schema (D023)`
+
+### Step 5.2 — API 字面扩展 + 互斥(driver 层)
+- 修 [api.ts:149 setCalloutEmoji](../../../../../src/drivers/text-editing-driver/api.ts#L149) 加 `iconName: null` 互斥写入
+- 加新 API `setCalloutIcon(instanceId, blockPos, iconName)`(line 同位)
+- types 字面更新(若 driver api types.ts 有镜像)
+- commit: `feat(callout): setCalloutIcon API + setCalloutEmoji clear iconName side-effect (D023 §4.4)`
+
+### Step 5.3 — NodeView 字面渲染分支
+- 修 [node-view.ts](../../../../../src/drivers/text-editing-driver/blocks/callout/node-view.ts):iconName 非 null 时 mount lucide `<svg>`
+- 字面用动态 import `lucide-react` 按需加载(避免 1952 个 icon 全 bundle)
+- mousedown handler 字面不动
+- commit: `feat(callout): nodeView render branch for iconName (D023 §4.2)`
+
+### Step 5.4 — atom 序列化字面透传
+- 修 [atoms-to-pm.ts:400](../../../../../src/capabilities/text-editing/converters/atoms-to-pm.ts#L400) callout case 加 `iconName: (c.iconName as string|null) ?? null`
+- 字面验证旧 atom(无 iconName 字段)反序列化兜底
+- commit: `feat(callout): atoms-to-pm.ts passthrough iconName (D023 §4.3)`
+
+### Step 5.5 — Icons tab UI 字面实装(capability 层)
+- 新建 [callout-icons.ts](../../../../../src/capabilities/text-editing/ui/emoji-picker/callout-icons.ts) 含 24 条置顶 icon(字面如 §4.5)
+- 修 [EmojiPickerPanel.tsx](../../../../../src/capabilities/text-editing/ui/emoji-picker/EmojiPickerPanel.tsx):Icons tab 不再 disabled,切换时显示 icon 网格 + 搜索框
+- icon 网格字面用 `<Lightbulb size={20} />` 之类 React 组件渲染
+- 搜索字面过滤 24 置顶 + lucide 全库(动态 import 字面按名取组件)
+- 选中 icon 字面调 `api.setCalloutIcon(ctx.instanceId, ctx.blockPos, name)`
+- commit: `feat(callout): Icons tab implemented (D023 §3.3 §4.5)`
+
+### Step 5.6 — 自测 + 测试清单字面输出
+- 按 §6 字面测试清单逐项手测
+- commit: `test(callout): D023 Icons tab manual test pass`
+
+---
+
+## §6 测试与验收
+
+### §6.1 测试清单字面(可执行)
+
+| # | 测试步骤 | 字面期望结果 |
+|---|------|------|
+| 1 | 创建新 callout block(slash menu 选 Callout) | 字面渲染 💡 emoji 默认 |
+| 2 | 点击 emoji `<span>` | 弹 emoji picker popup,4 tab,Emojis active |
+| 3 | 切换到 Icons tab(原 disabled) | tab 字面 active,显示 24 置顶 icon 网格 + 搜索框 |
+| 4 | 选中 `Lightbulb` icon | callout 头部字面渲 `<svg>` 灯泡 icon(替换 emoji 显示) |
+| 5 | 再点 callout 头部 icon | 重弹 picker,字面 Icons tab active |
+| 6 | 切换到 Emojis tab,选中 🔥 | callout 头部字面渲 🔥 emoji(icon 字面被清) |
+| 7 | 重新点 callout 头部 emoji | picker 字面 Emojis tab active(iconName 已 null) |
+| 8 | 选 Lightbulb icon → 重启应用 | 字面 callout 仍渲 `<svg>` icon(持久化通过) |
+| 9 | 选 emoji 🔥 → 重启应用 | 字面 callout 仍渲 🔥 emoji |
+| 10 | 旧 callout block(v1 创建,字面无 iconName 字段) | 字面渲 emoji,行为不变 |
+| 11 | Icons tab 搜索 "info" | 字面过滤显示 Info / Info* 系列 icon |
+| 12 | Icons tab 选 icon 后,Copy/Paste callout block | 粘贴回 KRIG 字面恢复 icon(走 DOMSerializer 走 spec.toDOM 字面带 data-icon-name) |
+| 13 | Upload tab / Remove tab | 字面仍 disabled(本 sub-phase 不做) |
+| 14 | 字面 grep `attrs.emoji` 旧消费方 | 5 处字面无回归(spec/node-view/api/atoms-to-pm/EmojiPickerPanel) |
+
+### §6.2 通过条件
+
+§6.1 字面 14 项全 PASS → 通过
+
+---
+
+## §7 风险与回滚
+
+### §7.1 风险字面清单
+
+| 风险 | 概率 | 影响 | 字面缓解 |
+|------|------|------|------|
+| lucide-react dynamic import 字面失败(找不到 icon 名) | 低 | 中(NodeView 渲染空) | NodeView 字面兜底 fallback 到 emoji 渲染;实施期 Step 5.3 加 try/catch |
+| 旧 callout atom 反序列化字面缺 iconName 字段 | 已验证零风险 | — | PM schema default null 兜底,§4.3 字面已确认 |
+| `setCalloutEmoji` 字面修订(加 iconName: null)破坏既有 view caller | 极低 | 低 | 字面 grep `setCalloutEmoji` 仅 1 处真消费([EmojiPickerPanel.tsx:88](../../../../../src/capabilities/text-editing/ui/emoji-picker/EmojiPickerPanel.tsx#L88)),行为变化是预期 |
+| Icons tab 搜索全库性能(1952 icon) | 中 | 低 | 字面用 debounce + 截前 60 项展示 |
+| lucide-react `1.14 → 1.16` 升级字面 breaking | 中 | 高 | 本 sub-phase 字面不升级,§0.5 已锁定 |
+
+### §7.2 回滚字面策略
+
+- 字面 revert 5 commits(Step 5.1–5.5)
+- schema iconName 字段保留无害(default null,旧行为)
+- 或字面 revert spec.ts 单 commit 即移除 schema 字段
+
+---
+
+## §8 反向更新清单(本文档涉及更新的其他文档清单)
+
+| 文档 | 字面更新内容 |
+|------|------|
+| [MEMORY.md](/Users/wenwu/.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/MEMORY.md) | 加一条 project memory:"023 callout icon tab 已实施;24 lucide icon 对齐 v1 emoji" |
+| [SDK-version-binding-policy.md §4](../SDK-version-binding-policy.md) | 字面登记 `lucide-react@^1.14.0` 锁定原因(本 sub-phase 不升级,§0.5 字面理由) |
+| [test-checklists/](../../../test-checklists/) | 新建 `callout-icon-tab.md` 含本 §6.1 字面 14 项测试清单 |
+| [refactor charter](../../../00-总纲.md) | 本 sub-phase 字面挂在 charter 哪一波?待 §11 实施期登记 |
+
+---
+
+## §9 通过条件(实施完成后填)
+
+- [ ] Step 5.1–5.6 字面全 commit
+- [ ] §6.1 字面 14 项测试 PASS
+- [ ] §8 反向更新清单字面全完成
+- [ ] 用户字面拍板 merge to main
+
+---
+
+## §10 实施期偏离登记(实施期遇到的偏差登记)
+
+### §10.1 提案期偏离(decision 拍板前)
+
+- **偏离 #1**: 用户反馈字面 `react@19.2.6`,实测字面 `19.2.5`(差 patch 一位)。无实质影响,§0.5 字面以实测为准。
+
+### §10.2 实施期偏离(待 Step 5.x 实施时填)
+
+(待实施期填写)
+
+---
+
+## §11 教训登记(实施完成后填)
+
+(待实施完成后填写)
+
+---
+
+## 附录 A — v1 决议交接字面索引
+
+- v1 emoji picker 实施: [test-checklists/callout-as-container.md](../../../test-checklists/callout-as-container.md) F 段
+- v1 commit 范围: `794db28..361444d`
+- v1 决议号: 无独立 decision(随 callout-as-container 一起实施)
+- v1 SDK 锁定: emoji-mart 5.6.0 + @emoji-mart/data 1.2.1(本决议 §0.5 字面继承)
+
+## 附录 B — 字面 grep 命令复用清单
+
+```bash
+# 反馈 2 闭环:24 icon 一次性命中验证
+grep -oE "\b(Lightbulb|Hand|ChevronUp|ThumbsUp|Key|Construction|AlertTriangle|Flame|Pin|Scissors|HelpCircle|Ban|Octagon|AlarmClock|Phone|Siren|Recycle|CheckCircle|Lock|Paperclip|BookOpen|MessageCircle|ArrowRight|Megaphone|Wrench|Settings)\b" \
+  node_modules/lucide-react/dist/lucide-react.d.ts | sort -u
+
+# 反馈 2 闭环:反向 PM→atom 字面路径
+grep -rn "pm-to-atom\|pmToAtom\|pm_to_atom\|toAtoms\|fromPm\|fromPM\|docToAtoms" src/
+
+# 反馈 3 闭环:markdown/HTML serializer
+grep -rn "domSerializer\|DOMSerializer\|toMarkdown\|MarkdownSerializer\|serializeCallout" src/
+
+# 6 层传播(SDK policy §2.2 字面)
+grep -rn "attrs\.emoji\|setCalloutEmoji\|CalloutAttrs" src/
+```
