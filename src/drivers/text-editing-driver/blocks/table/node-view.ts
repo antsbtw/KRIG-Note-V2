@@ -105,13 +105,19 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     const cells = Array.from(firstRow.children) as HTMLElement[];
     if (cells.length === 0) return;
 
+    // dot 容器 colBar 是 absolute,跟 table-block 同源;table 在 table-block 内通过
+    // scroll wrapper 嵌套,有可能 scroll wrapper 加 margin/scroll offset → 显式量
+    // table 相对 table-block 的偏移,让 dot center 落在 table 顶 border 中线上
     const tableRect = table.getBoundingClientRect();
-    // 列基于 colspan/colwidth 可能复杂,M2 简化:按第一行 cell 顺序 + getBoundingClientRect
-    // colspan>1 时仍以单 cell 为 anchor(用户语义"操作该 cell 所在列")
+    const blockRect = dom.getBoundingClientRect();
+    const tableOffsetY = tableRect.top - blockRect.top; // table 顶 border 上沿
+    const BAR_THICKNESS = 6;
+    const DOT_LEN = 32;
+
     let visualColIdx = 0;
     cells.forEach((cell) => {
       const cellRect = cell.getBoundingClientRect();
-      const left = cellRect.left - tableRect.left;
+      const left = cellRect.left - blockRect.left;
       const width = cellRect.width;
 
       const dot = document.createElement('button');
@@ -119,11 +125,12 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__col-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该列';
-      // dot 固定 32px 宽,严格居中 cell 水平中点(所有列 dot 长度一致,视觉整齐)
-      const DOT_LEN = 32;
+      // dot 固定 32px 宽,严格居中 cell 水平中点;
+      // 纵向:dot 中线落在 table 顶 border 中线(border 1px:中线在 tableOffsetY + 0.5)
       dot.style.left = `${left + width / 2 - DOT_LEN / 2}px`;
       dot.style.width = `${DOT_LEN}px`;
-      // 闭包捕获当前 visualColIdx
+      dot.style.top = `${tableOffsetY + 0.5 - BAR_THICKNESS / 2}px`;
+      dot.style.height = `${BAR_THICKNESS}px`;
       const colIdx = visualColIdx;
       dot.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -135,7 +142,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     });
   }
 
-  // ── 重建行 dots(按当前 tbody.rows,DOM 量取每行 top + height)─────────────
+  // ── 重建行 dots(放 table 右沿 border,避开左侧 block-handle)─────────────
 
   function rebuildRowDots(): void {
     rowBar.innerHTML = '';
@@ -143,9 +150,15 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     if (rows.length === 0) return;
 
     const tableRect = table.getBoundingClientRect();
+    const blockRect = dom.getBoundingClientRect();
+    // 行 bar 放 table 右沿 border 中线上(避开左侧 block-handle + / ⠿)
+    const tableRightOffset = tableRect.right - blockRect.left;
+    const BAR_THICKNESS = 6;
+    const DOT_LEN = 32;
+
     rows.forEach((row, rowIdx) => {
       const rowRect = row.getBoundingClientRect();
-      const top = rowRect.top - tableRect.top;
+      const top = rowRect.top - blockRect.top;
       const height = rowRect.height;
 
       const dot = document.createElement('button');
@@ -153,8 +166,9 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__row-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该行';
-      // dot 固定 32px 高,严格居中 row 垂直中点(所有行 dot 长度一致)
-      const DOT_LEN = 32;
+      // dot 中线落在 table 右 border 中线(右 border 在 tableRightOffset - 1 ~ tableRightOffset)
+      dot.style.left = `${tableRightOffset - 0.5 - BAR_THICKNESS / 2}px`;
+      dot.style.width = `${BAR_THICKNESS}px`;
       dot.style.top = `${top + height / 2 - DOT_LEN / 2}px`;
       dot.style.height = `${DOT_LEN}px`;
       dot.addEventListener('mousedown', (e) => {
