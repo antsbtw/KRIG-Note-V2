@@ -54,14 +54,16 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   table.appendChild(tbody);
   scroll.appendChild(table);
 
-  // ── 列 handle bar(挂 scroll 内 — 跟 table 同级,scroll 自动跟随)─────
-  // 视图(cell)与操作(bar)解耦:bar 不是 cell 子元素,不被 cell 背景/border-collapse
-  // 渲染遮挡;但 bar 在 scroll wrapper 内 → 横向滚动时 bar 跟 cell 同步移动
+  // ── 列 handle bar(挂外层 dom — 不被 scroll overflow 裁掉)─────
+  // 视图(cell)与操作(bar)解耦:bar 不是 cell 子元素,也不在 scroll 容器内
+  // (scroll overflow-x:auto 强制纵向也裁,会切掉凸出 table 顶那一半 bar)。
+  // 横向滚动同步走 transform translateX(-scrollLeft)+ overflow:hidden 让 bar
+  // 超出 scroll 边界时也被裁(跟 table 视觉一致)
 
   const colBar = document.createElement('div');
   colBar.classList.add('krig-table-block__col-bar');
   colBar.setAttribute('contenteditable', 'false');
-  scroll.appendChild(colBar);
+  dom.appendChild(colBar);
 
   // ── 行 handle bar(行不滚动,挂外层 dom 即可)─────────────
 
@@ -101,12 +103,12 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     popupController.show(POPUP_ID, anchor);
   }
 
-  // ── 重建列 dots(挂 scroll 内,bar 独立于 cell — 不被 cell 渲染遮挡)─────
+  // ── 重建列 dots(挂外层 dom,独立于 cell + scroll)─────
   //
-  // 几何:colBar 是 scroll absolute 子元素(scroll position:relative)。
-  // dot.left 按 cell 中心相对 scroll content 原点(含 scrollLeft)算 →
-  // colBar 自身 transform translateX(-scrollLeft) 跟随 scroll 同步 cell 移动。
-  // 这样 bar 视觉上跟 cell 完全锐定。
+  // 几何:colBar 是外层 dom absolute 子元素(dom position:relative)。
+  // dot.left 算 cell 中心相对 scroll content(含 scroll.scrollLeft 偏移)→
+  // colBar 自身 transform translateX(-scrollLeft) 跟随横向 scroll 同步。
+  // 这样 bar 视觉上跟 cell 完全锐定,且不被 scroll overflow 裁掉凸出部分。
 
   function rebuildColumnDots(): void {
     colBar.innerHTML = '';
@@ -115,16 +117,17 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     const cells = Array.from(firstRow.children) as HTMLElement[];
     if (cells.length === 0) return;
 
-    const scrollRect = scroll.getBoundingClientRect();
+    const blockRect = dom.getBoundingClientRect();
     const tableRect = table.getBoundingClientRect();
-    const tableTopOffset = tableRect.top - scrollRect.top;
+    // table 顶 border 相对 dom 顶的偏移(scroll 容器在 dom 内,table 在 scroll 内)
+    const tableTopOffset = tableRect.top - blockRect.top;
     const BAR_THICKNESS = 6;
     const DOT_LEN = 32;
 
     cells.forEach((cell, colIdx) => {
       const cellRect = cell.getBoundingClientRect();
-      // cell 中心 X 在 scroll content 坐标系(scroll.scrollLeft 是被滚出的距离)
-      const cellCenterX = cellRect.left + cellRect.width / 2 - scrollRect.left + scroll.scrollLeft;
+      // cell 中心 X 在 scroll content 坐标系(scrollLeft 抵消由 colBar transform 处理)
+      const cellCenterX = cellRect.left + cellRect.width / 2 - blockRect.left + scroll.scrollLeft;
 
       const dot = document.createElement('button');
       dot.type = 'button';
@@ -146,7 +149,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     syncColBarToScroll();
   }
 
-  // colBar 整体 translateX 抵消 scrollLeft,让 dot 视觉跟随 cell
+  // colBar 整体 translateX 抵消 scrollLeft,dot 视觉跟随 cell 移动
   function syncColBarToScroll(): void {
     colBar.style.transform = `translateX(${-scroll.scrollLeft}px)`;
   }

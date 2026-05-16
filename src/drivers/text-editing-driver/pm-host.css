@@ -750,8 +750,6 @@
 .krig-pm-host .ProseMirror .krig-table-block__scroll {
   overflow-x: auto;
   max-width: 100%;
-  /* col-bar 是 scroll 的 absolute 子元素,需要 scroll 作为定位 anchor */
-  position: relative;
 }
 
 .krig-pm-host .ProseMirror .krig-pm-table {
