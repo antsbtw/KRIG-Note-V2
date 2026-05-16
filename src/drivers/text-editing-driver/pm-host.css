@@ -792,19 +792,31 @@
   background: rgba(138, 180, 248, 0.18);
 }
 
-/* prosemirror-tables column-resize 拖拽时显示的 resize-handle(库注入)*/
+/* prosemirror-tables column-resize handle(库注入 widget decoration):
+ * hover 状态:鼠标靠近 cell 右边界 5px 内时显示;按下拖动后状态变 dragging。
+ * 区分两套样式让用户清楚知道"这里可以拖":
+ * - hover(.ProseMirror.resize-cursor):淡灰细线 + 光标 ↔ → 邀请拖动
+ * - dragging(.ProseMirror.column-resize-dragging):饱和蓝色 → 拖动中反馈 */
 .krig-pm-host .ProseMirror .krig-pm-table .column-resize-handle {
   position: absolute;
   right: -2px;
   top: 0;
   bottom: 0;
   width: 4px;
-  background: #8ab4f8;
+  background: rgba(180, 180, 180, 0.5); /* hover 默认淡灰 */
   pointer-events: none;
   z-index: 10;
+  transition: background 0.1s;
 }
 
-.krig-pm-host .ProseMirror .resize-cursor {
+/* dragging 状态:column-resize-dragging class 由 prosemirror-tables 在
+ * resize 拖动期间通过 Decoration.node 加在被拖动的 cell 上 */
+.krig-pm-host .ProseMirror .krig-pm-table td.column-resize-dragging .column-resize-handle,
+.krig-pm-host .ProseMirror .krig-pm-table th.column-resize-dragging .column-resize-handle {
+  background: #8ab4f8; /* 饱和蓝 → 拖动反馈 */
+}
+
+.krig-pm-host .ProseMirror.resize-cursor {
   cursor: col-resize;
 }
 
