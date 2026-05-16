@@ -347,6 +347,16 @@
   background: rgba(255, 255, 255, 0.07);
 }
 
+/* D024 §4.2 — 用户上传图,macOS Big Sur+ App Icon squircle 圆角(22.37%)*/
+.krig-pm-host .ProseMirror .krig-callout__emoji .krig-callout__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 22.37%;
+  display: block;
+  pointer-events: none;
+}
+
 .krig-pm-host .ProseMirror .krig-callout__content {
   flex: 1;
   min-width: 0;

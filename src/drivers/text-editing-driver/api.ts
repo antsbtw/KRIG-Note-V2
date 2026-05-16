@@ -146,9 +146,9 @@ export const textEditingDriverApi = {
    *
    * 仅作用于 callout block;其他 block 类型静默忽略(防误用)。
    *
-   * D023 §4.4 字面互斥副作用:同步清 iconName(切回 emoji 模式),
-   * 单 API 调用一次完成"切回 emoji 且清 icon"语义,view caller
-   * 不必字面记得两 API 配对(§3.2 理由 5)。
+   * D023 / D024 §4.4 字面互斥副作用:同步清 iconName + imageSrc(切回 emoji 模式),
+   * 单 API 调用一次完成"切回 emoji 且清掉其他态"语义,view caller
+   * 不必字面记得三 API 配对。
    */
   setCalloutEmoji(instanceId: string, blockPos: number, emoji: string): void {
     const inst = instanceRegistry.get(instanceId);
@@ -159,6 +159,7 @@ export const textEditingDriverApi = {
       ...node.attrs,
       emoji,
       iconName: null,
+      imageSrc: null,
     });
     inst.view.dispatch(tr);
   },
@@ -171,6 +172,8 @@ export const textEditingDriverApi = {
    *
    * 仅作用于 callout block;其他 block 类型静默忽略(防误用)。
    * emoji 字段字面不动(D023 §4.4 — iconName 优先单点判定,emoji 是 fallback)。
+   *
+   * D024 §4.4 互斥副作用:同步清 imageSrc(切回 icon 模式,emoji 保留作 fallback)。
    */
   setCalloutIcon(instanceId: string, blockPos: number, iconName: string | null): void {
     const inst = instanceRegistry.get(instanceId);
@@ -180,6 +183,30 @@ export const textEditingDriverApi = {
     const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
       ...node.attrs,
       iconName,
+      imageSrc: null,
+    });
+    inst.view.dispatch(tr);
+  },
+
+  /**
+   * 给 callout block 设 imageSrc attr(D024 Upload tab 用)。
+   *
+   * imageSrc 非 null 时 NodeView 字面渲 `<img>` 取代 emoji / icon;
+   * imageSrc === null 字面表示"取消 image",回退到 emoji / iconName 渲染(字段保留)。
+   *
+   * 仅作用于 callout block;其他 block 类型静默忽略(防误用)。
+   * D024 §4.4 互斥副作用:同步清 iconName(切回 image 模式,emoji 保留作 fallback)。
+   * emoji 字段字面不动(NodeView 渲染优先级 imageSrc > iconName > emoji)。
+   */
+  setCalloutImage(instanceId: string, blockPos: number, imageSrc: string | null): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node || node.type.name !== 'callout') return;
+    const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+      ...node.attrs,
+      imageSrc,
+      iconName: null,
     });
     inst.view.dispatch(tr);
   },

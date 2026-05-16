@@ -23,6 +23,7 @@ import { consumeCalloutEmojiCtx } from './integration';
 import { EmojiPickerTabs, type EmojiPickerTabId } from './EmojiPickerTabs';
 import { CALLOUT_CUSTOM_CATEGORY } from './callout-emojis';
 import { IconsTabPanel } from './IconsTabPanel';
+import { UploadTabPanel } from './UploadTabPanel';
 
 interface EmojiSelectEvent {
   native: string;
@@ -116,6 +117,14 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
         <IconsTabPanel
           onPick={(iconName) => {
             if (ctx) api.setCalloutIcon(ctx.instanceId, ctx.blockPos, iconName);
+            onCloseRef.current();
+          }}
+        />
+      )}
+      {activeTab === 'upload' && (
+        <UploadTabPanel
+          onPick={(imageSrc) => {
+            if (ctx) api.setCalloutImage(ctx.instanceId, ctx.blockPos, imageSrc);
             onCloseRef.current();
           }}
         />
