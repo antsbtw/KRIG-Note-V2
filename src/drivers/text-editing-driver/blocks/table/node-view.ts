@@ -119,11 +119,10 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__col-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该列';
-      // dot 横向覆盖 cell 宽 40%(min 24px),严格居中 cell 水平中点
-      // 起点 = cell中心 - dot宽/2,公式跟宽度同源 → 保证居中
-      const dotWidth = Math.max(24, width * 0.4);
-      dot.style.left = `${left + width / 2 - dotWidth / 2}px`;
-      dot.style.width = `${dotWidth}px`;
+      // dot 固定 32px 宽,严格居中 cell 水平中点(所有列 dot 长度一致,视觉整齐)
+      const DOT_LEN = 32;
+      dot.style.left = `${left + width / 2 - DOT_LEN / 2}px`;
+      dot.style.width = `${DOT_LEN}px`;
       // 闭包捕获当前 visualColIdx
       const colIdx = visualColIdx;
       dot.addEventListener('mousedown', (e) => {
@@ -154,10 +153,10 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__row-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该行';
-      // dot 纵向覆盖 row 高 40%(min 24px),严格居中 row 垂直中点
-      const dotHeight = Math.max(24, height * 0.4);
-      dot.style.top = `${top + height / 2 - dotHeight / 2}px`;
-      dot.style.height = `${dotHeight}px`;
+      // dot 固定 32px 高,严格居中 row 垂直中点(所有行 dot 长度一致)
+      const DOT_LEN = 32;
+      dot.style.top = `${top + height / 2 - DOT_LEN / 2}px`;
+      dot.style.height = `${DOT_LEN}px`;
       dot.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
