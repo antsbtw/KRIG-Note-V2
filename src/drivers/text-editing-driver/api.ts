@@ -145,6 +145,10 @@ export const textEditingDriverApi = {
    * 给 callout block 设 emoji attr(emoji picker popup 用)。
    *
    * 仅作用于 callout block;其他 block 类型静默忽略(防误用)。
+   *
+   * D023 §4.4 字面互斥副作用:同步清 iconName(切回 emoji 模式),
+   * 单 API 调用一次完成"切回 emoji 且清 icon"语义,view caller
+   * 不必字面记得两 API 配对(§3.2 理由 5)。
    */
   setCalloutEmoji(instanceId: string, blockPos: number, emoji: string): void {
     const inst = instanceRegistry.get(instanceId);
@@ -154,6 +158,28 @@ export const textEditingDriverApi = {
     const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
       ...node.attrs,
       emoji,
+      iconName: null,
+    });
+    inst.view.dispatch(tr);
+  },
+
+  /**
+   * 给 callout block 设 iconName attr(D023 Icons tab 用)。
+   *
+   * iconName 非 null 时 NodeView 字面渲 lucide `<svg>` 取代 emoji;
+   * iconName === null 字面表示"取消 icon",回退到 emoji 渲染(emoji 字段保留)。
+   *
+   * 仅作用于 callout block;其他 block 类型静默忽略(防误用)。
+   * emoji 字段字面不动(D023 §4.4 — iconName 优先单点判定,emoji 是 fallback)。
+   */
+  setCalloutIcon(instanceId: string, blockPos: number, iconName: string | null): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node || node.type.name !== 'callout') return;
+    const tr = inst.view.state.tr.setNodeMarkup(blockPos, null, {
+      ...node.attrs,
+      iconName,
     });
     inst.view.dispatch(tr);
   },
