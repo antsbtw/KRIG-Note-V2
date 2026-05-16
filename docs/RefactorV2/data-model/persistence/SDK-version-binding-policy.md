@@ -107,6 +107,7 @@
 | surrealdb | 2 | 2.0.3 | `^2.0.3` | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) | 2026-05-13 | `beginTransaction()` API 在 2.x 字面已支持;**允许** caret range 自动到 < 3.0.0 的 minor/patch(2.1.x / 2.2.x 等);**禁止** 3.x 升级(独立 sub-phase)|
 | emoji-mart | 5 | 5.6.0 | `^5.6.0` | (无 decision-XXX,见 §6 v1.8 备注) | 2026-05-15 | `feature/callout-as-container` emoji picker Notion 风格升级。**仅装核心包**,不装 `@emoji-mart/react`(其 peer 字面 `^16.8 \|\| ^17 \|\| ^18` 不含 19,但源码 20 行只用 useRef/useEffect 实测兼容;V2 改走手写 React wrapper 调 `new Picker({ref, data, theme, onEmojiSelect, ... })`,绕开 peer 字面冲突 + 不被 3 年未更新的官方包装阻塞)。**允许** caret 到 < 6.0.0;**禁止** 6.x 升级(独立 sub-phase)|
 | @emoji-mart/data | 1 | 1.2.1 | `^1.2.1` | (同上) | 2026-05-15 | emoji-mart 5.x 配套数据集;`{ data }` prop 字面传入 Picker;1.x 内部数据 schema 与 emoji-mart 5.x 锁定。**允许** caret 到 < 2.0.0;**禁止** 2.x 升级(独立 sub-phase)|
+| lucide-react | 1 | 1.14.0 | `^1.14.0` | [decision 023](decisions/023-callout-icon-tab.md) | 2026-05-16 | callout Icons tab 用;静态 `import * as LucideIcons` tree-shake 68 picks + `lucide-react/dynamic` 的 `DynamicIcon` lazy 加载 1884 全库 icon;peer `^16.5.1 \|\| ^17 \|\| ^18 \|\| ^19` 含 React 19,无需手写包装。npm latest 1.16(落后 2 minor)本 sub-phase 不升级,详 D023 §0.5。**允许** caret 到 < 2.0.0;**禁止** 2.x 升级(独立 sub-phase)|
 
 **列字段语义**:
 - **锁定 major**:不可跨越的硬版本号。跨此 major 升级必须独立决议(§2.4 流程)。

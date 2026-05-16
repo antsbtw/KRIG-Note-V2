@@ -22,6 +22,7 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { consumeCalloutEmojiCtx } from './integration';
 import { EmojiPickerTabs, type EmojiPickerTabId } from './EmojiPickerTabs';
 import { CALLOUT_CUSTOM_CATEGORY } from './callout-emojis';
+import { IconsTabPanel } from './IconsTabPanel';
 
 interface EmojiSelectEvent {
   native: string;
@@ -32,7 +33,8 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
   const ctx = useMemo(() => consumeCalloutEmojiCtx(), []);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
-  // v1: 后 3 个 tab disabled,activeTab 永远是 'emojis'。预留 state 给 v2/v3。
+  // D023 Step 5.5.3:Icons tab 字面解 disabled,字面双 tab 切换。
+  // Upload / Remove 仍 disabled,activeTab 字面取值 'emojis' | 'icons'。
   const [activeTab, setActiveTab] = useState<EmojiPickerTabId>('emojis');
 
   // onClose 是父级闭包字面新引用(PopupBinding 每次 re-render 都新建),
@@ -45,6 +47,9 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
   onCloseRef.current = onClose;
 
   useEffect(() => {
+    // D023 Step 5.5.3:仅在 Emojis tab 字面 active 时 mount emoji-mart Picker;
+    // 切 Icons tab 字面触发 cleanup(picker 销毁),切回 Emojis 字面 effect re-run 重建。
+    if (activeTab !== 'emojis') return;
     let cancelled = false;
     let pickerEl: HTMLElement | null = null;
 
@@ -96,13 +101,25 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
       cancelled = true;
       if (pickerEl?.parentNode) pickerEl.parentNode.removeChild(pickerEl);
     };
-  }, [api, ctx]);
+  }, [api, ctx, activeTab]);
 
   return (
     <div className="krig-emoji-picker">
       <EmojiPickerTabs activeTab={activeTab} onTabChange={setActiveTab} />
-      <div ref={mountRef} className="krig-emoji-picker__mount" />
-      {!loaded && <div className="krig-emoji-picker__loading">Loading…</div>}
+      {activeTab === 'emojis' && (
+        <>
+          <div ref={mountRef} className="krig-emoji-picker__mount" />
+          {!loaded && <div className="krig-emoji-picker__loading">Loading…</div>}
+        </>
+      )}
+      {activeTab === 'icons' && (
+        <IconsTabPanel
+          onPick={(iconName) => {
+            if (ctx) api.setCalloutIcon(ctx.instanceId, ctx.blockPos, iconName);
+            onCloseRef.current();
+          }}
+        />
+      )}
     </div>
   );
 }

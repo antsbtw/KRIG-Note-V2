@@ -1,7 +1,8 @@
 /**
  * EmojiPickerTabs — Notion 风格 4 tab 栏(表情符号/图标/上传/移除)
  *
- * v1 只激活"Emojis" tab,后 3 个 stub disabled(prompt §5 字面留 v2/v3)。
+ * D023 Step 5.5.3:Icons tab 字面解 disabled(v2 实施)。
+ * Upload / Remove 仍 disabled(留独立 sub-phase / 用户字面决议不做)。
  * disabled tab 视觉淡化 + cursor not-allowed + 不可 click 不触发任何行为。
  */
 
@@ -15,7 +16,7 @@ interface TabDef {
 
 const TABS: ReadonlyArray<TabDef> = [
   { id: 'emojis', label: 'Emojis', disabled: false },
-  { id: 'icons', label: 'Icons', disabled: true },
+  { id: 'icons', label: 'Icons', disabled: false },
   { id: 'upload', label: 'Upload', disabled: true },
   { id: 'remove', label: 'Remove', disabled: true },
 ];

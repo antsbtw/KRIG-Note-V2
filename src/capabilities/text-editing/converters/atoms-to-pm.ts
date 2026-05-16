@@ -23,7 +23,7 @@
  * | orderedList | orderedList(listItem+ content) | 同上 |
  * | listItem | listItem(block+ content) | children → paragraph 包一层 |
  * | horizontalRule | horizontalRule | 无 content |
- * | callout | callout(block+ content,attrs.emoji) | tiptapContent 直装 |
+ * | callout | callout(block+ content,attrs.emoji + attrs.iconName) | tiptapContent 直装;D023 §4.3 iconName 可选 |
  * | columnList | unknown(V2 schema 未实现) | 留 unknown 占位 |
  *
  * InlineElement(children[] 内,kebab-case + 扁平字段)→ PM inline:
@@ -396,14 +396,17 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
     case 'horizontalRule':
       return attachFrom({ type: 'horizontalRule' }, atom.from);
 
-    // 4.12 callout → callout(attrs.emoji + content block+)
+    // 4.12 callout → callout(attrs.emoji + attrs.iconName + content block+)
+    // D023 §4.3: iconName 字面可选,旧 atom 字面无该字段时 ?? null 兜底,
+    // PM schema default null 字面再次兜底(双层保险)。
     case 'callout': {
       const emoji = (c.emoji as string) ?? '💡';
+      const iconName = (c.iconName as string | null | undefined) ?? null;
       const inner = convertTiptapContent(c.tiptapContent);
       return attachFrom(
         {
           type: 'callout',
-          attrs: { emoji },
+          attrs: { emoji, iconName },
           content: inner.length > 0 ? inner : [emptyParagraph()],
         },
         atom.from,

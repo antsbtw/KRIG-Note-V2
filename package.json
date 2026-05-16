@@ -10,6 +10,7 @@
     "make": "electron-forge make",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . --max-warnings 0",
+    "build:lucide-manifest": "node scripts/build-lucide-manifest.mjs",
     "postinstall": "bash scripts/patch-electron-dev.sh"
   },
   "keywords": [],
