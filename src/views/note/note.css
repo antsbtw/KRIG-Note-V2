@@ -485,12 +485,94 @@
   border-color: #8ab4f8;
 }
 
-.krig-icons-tab__grid {
+/* category 导航条:横排 chip,字面 query 非空时字面隐藏 */
+.krig-icons-tab__category-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+.krig-icons-tab__category-nav::-webkit-scrollbar {
+  height: 4px;
+}
+
+.krig-icons-tab__category-nav::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 2px;
+}
+
+.krig-icons-tab__category-chip {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 999px;
+  color: #c0c0c0;
+  font-size: 11px;
+  text-transform: capitalize;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+  white-space: nowrap;
+}
+
+.krig-icons-tab__category-chip:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+
+/* 滚动容器:字面分 section 字面垂直滚动 */
+.krig-icons-tab__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+.krig-icons-tab__scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.krig-icons-tab__scroll::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 3px;
+}
+
+.krig-icons-tab__section {
+  display: flex;
+  flex-direction: column;
+}
+
+.krig-icons-tab__section-title {
+  position: sticky;
+  top: 0;
+  padding: 4px 0;
+  background: #1f1f1f;
+  color: #999;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  z-index: 1;
+}
+
+.krig-icons-tab__section-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: 4px;
-  overflow-y: auto;
   align-content: start;
+}
+
+.krig-icons-tab__section-placeholder {
+  /* 字面 IntersectionObserver 未触发字面占位,height 字面 inline style 控制 */
 }
 
 .krig-icons-tab__cell {
@@ -513,7 +595,6 @@
 }
 
 .krig-icons-tab__empty {
-  grid-column: 1 / -1;
   padding: 24px 8px;
   color: #777;
   font-size: 13px;
