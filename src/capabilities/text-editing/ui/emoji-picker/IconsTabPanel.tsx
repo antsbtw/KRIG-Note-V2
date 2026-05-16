@@ -1,9 +1,9 @@
 /**
  * IconsTabPanel — callout Icons tab 字面全库分组 + 搜索(D023 Step 5.8 emoji-mart 同款)
  *
- * 字面结构(对齐 emoji-mart 字面视觉):
- *   ┌─ search box (sticky top)
- *   ├─ category nav bar (1 row chips: Callouts + 42 lucide categories)
+ * 字面结构(emoji-mart 字面 1:1 同款 — 用户字面 Step 5.8.1 字面要求):
+ *   ┌─ category nav bar (1 row, icon-only chips: Callouts + 42 lucide categories)
+ *   ├─ search box (字面下方,字面对齐 emoji-mart)
  *   └─ scroll area (vertical):
  *      ├─ "Callouts" section (68 置顶,字面 callout-icons.ts)
  *      ├─ "accessibility" section ... (42 lucide categories,每个 chunk 字面 IntersectionObserver lazy render)
@@ -58,6 +58,56 @@ const PASCAL_TO_KEBAB = new Map<string, string>();
 for (const [kebab, info] of Object.entries(MANIFEST.icons)) {
   PASCAL_TO_KEBAB.set(info.pascalName, kebab);
 }
+
+// 字面 category → 代表 icon(kebab)字面映射 — 字面 emoji-mart 字面 10 个 cat icon 字面风格,
+// 字面手工挑"显然代表"(字面非"高 tag 命中" — 字面 lucide 字面 shield 字面在 9 cat 字面排第一字面无区分度)。
+// 字面 Callouts 字面 lightbulb 对齐 v1 默认 💡 emoji 语义;字面 Others 字面 circle-help 兜底。
+const CATEGORY_ICON: Record<string, string> = {
+  callouts: 'lightbulb',
+  accessibility: 'accessibility',
+  account: 'wallet',
+  animals: 'dog',
+  arrows: 'arrow-right',
+  buildings: 'building-2',
+  charts: 'bar-chart-3',
+  communication: 'message-circle',
+  connectivity: 'wifi',
+  cursors: 'mouse-pointer',
+  design: 'palette',
+  development: 'code-2',
+  devices: 'smartphone',
+  emoji: 'smile',
+  files: 'file',
+  finance: 'dollar-sign',
+  'food-beverage': 'utensils',
+  gaming: 'gamepad-2',
+  home: 'home',
+  layout: 'layout-grid',
+  mail: 'mail',
+  math: 'sigma',
+  medical: 'heart-pulse',
+  multimedia: 'music',
+  nature: 'leaf',
+  navigation: 'navigation',
+  notifications: 'bell',
+  people: 'user',
+  photography: 'camera',
+  science: 'flask-conical',
+  seasons: 'sun',
+  security: 'lock',
+  shapes: 'shapes',
+  shopping: 'shopping-cart',
+  social: 'users',
+  sports: 'dumbbell',
+  sustainability: 'recycle',
+  text: 'type',
+  time: 'clock',
+  tools: 'wrench',
+  transportation: 'car',
+  travel: 'plane',
+  weather: 'cloud',
+  others: 'circle-help',
+};
 
 interface Section {
   id: string;
@@ -306,6 +356,27 @@ export function IconsTabPanel({ onPick }: Props) {
 
   return (
     <div className="krig-icons-tab">
+      {/* category 导航条(字面 icon-only,字面 emoji-mart 同款;query 非空时隐藏) */}
+      {!searchResults && (
+        <div className="krig-icons-tab__category-nav" aria-label="Icon categories">
+          {sections.map((section) => {
+            const navIconKebab = CATEGORY_ICON[section.id] ?? 'circle-help';
+            return (
+              <button
+                key={section.id}
+                type="button"
+                className="krig-icons-tab__category-chip"
+                onClick={() => jumpToSection(section.id)}
+                title={section.title}
+                aria-label={section.title}
+              >
+                <DynamicIcon name={navIconKebab as IconName} size={18} aria-hidden />
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <input
         type="text"
         className="krig-icons-tab__search"
@@ -313,23 +384,6 @@ export function IconsTabPanel({ onPick }: Props) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-
-      {/* category 导航条(字面 query 非空时字面隐藏) */}
-      {!searchResults && (
-        <div className="krig-icons-tab__category-nav" aria-label="Icon categories">
-          {sections.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              className="krig-icons-tab__category-chip"
-              onClick={() => jumpToSection(section.id)}
-              title={section.title}
-            >
-              {section.title}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* 滚动区:字面 search 字面单 flat grid,字面无 search 字面分 section */}
       <div ref={scrollRef} className="krig-icons-tab__scroll">

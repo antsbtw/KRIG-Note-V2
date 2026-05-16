@@ -506,22 +506,25 @@
   border-radius: 2px;
 }
 
+/* category icon 按钮(emoji-mart 同款 — icon-only 字面非 text pill) */
 .krig-icons-tab__category-chip {
   flex: 0 0 auto;
-  padding: 4px 10px;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  border-radius: 999px;
-  color: #c0c0c0;
-  font-size: 11px;
-  text-transform: capitalize;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #888;
   cursor: pointer;
   transition: background 80ms ease, color 80ms ease;
-  white-space: nowrap;
 }
 
 .krig-icons-tab__category-chip:hover {
-  background: #3a3a3a;
+  background: #2f2f2f;
   color: #fff;
 }
 
