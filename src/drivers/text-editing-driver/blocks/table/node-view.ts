@@ -1,25 +1,26 @@
 /**
  * table NodeView — Notion-style hover handle 版(L5-B3.7.1, M2)
  *
- * M1 → M2 变更:
- * - **移除** +col / +row 按钮(M1 末尾插入快捷)
- * - **新增** 列 handle bar(table 上沿,按列宽分段;hover 列冒出 dot;点击弹菜单)
- * - **新增** 行 handle bar(table 左沿,按行高分段;hover 行冒出 dot;点击弹菜单)
- * - **新增** CellSelection handle(检测到 CellSelection 时浮在选区上方;点击弹菜单)
+ * M2 职责拆分:
+ * - **列 dot**:由 [[decorations.ts]] PM Decoration.widget 注入,锐 cell 内部,
+ *   scroll 时自动跟随;NodeView 不管列 dot
+ * - **行 dot**:仍由 NodeView wrapper absolute 渲染(待后续阶段一并迁 Decoration)
+ * - **CellSelection ⋯ handle**:NodeView wrapper absolute,监听 view dispatch
+ *   动态显隐(待后续阶段迁 Decoration)
  *
  * 关键设计:
- * - handle DOM 全在 contentDOM(tbody)外层,ignoreMutation 已只允 tbody 通过
+ * - 非装饰 DOM 全在 contentDOM(tbody)外层,ignoreMutation 守门只允 tbody 通过
  *   → PM 不 react,prosemirror-tables 内部状态不受干扰
- * - 列 / 行段几何来源:DOM 量(table.rows / cells getBoundingClientRect),
- *   随 colwidth resize / 行数变化 update() 回调时重算
- * - CellSelection handle:订阅 view 状态变化(NodeView 没原生订阅口,
- *   监听 view.dom 的 'mouseup' + 'keyup' + 自己维护 dispatch 跟随)
- *   M2 走"事件后 rAF 检查 selection",M3 plugin 化更稳
+ * - 行 dot 几何来源:DOM 量(每行 tr getBoundingClientRect),随行数变化 update()
+ *   回调重算
+ * - CellSelection handle 监听 view.dom 的 mouseup/keyup/mousedown + rAF 防抖
  *
- * 菜单点击链:
+ * 菜单点击链(行 / cellSelection):
  *   handle dot mousedown
  *     → setTableMenuContext({ instanceId, tablePos, scope, rowIdx?/colIdx? })
  *     → popupController.show('text-editing.popup.table-menu', dotEl)
+ *
+ * 列 dot 点击链:同上(decorations.ts createColDot 内)
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
@@ -53,12 +54,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   table.appendChild(tbody);
   scroll.appendChild(table);
 
-  // ── handle bars(列上沿 + 行左沿)─────────────────────────
-
-  const colBar = document.createElement('div');
-  colBar.classList.add('krig-table-block__col-bar');
-  colBar.setAttribute('contenteditable', 'false');
-  dom.appendChild(colBar);
+  // ── handle bar(行 left 沿;列 dot 走 PM Decoration 不在这)─────────────
 
   const rowBar = document.createElement('div');
   rowBar.classList.add('krig-table-block__row-bar');
@@ -94,36 +90,6 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       colIdx: indices.colIdx,
     });
     popupController.show(POPUP_ID, anchor);
-  }
-
-  // ── 重建列 dots(按当前 table 列数,DOM 量取每列 left + width)─────────────
-
-  function rebuildColumnDots(): void {
-    // 清理旧 dot:遍历所有 cell 把 .krig-table-block__col-dot 移除
-    // (M2 早期 dot 在 colBar 容器内;现在 dot 直接挂 cell 内 → 锐 cell,scroll 跟随)
-    tbody.querySelectorAll(':scope > tr > th > .krig-table-block__col-dot, :scope > tr > td > .krig-table-block__col-dot').forEach((d) => d.remove());
-
-    const firstRow = tbody.querySelector(':scope > tr');
-    if (!firstRow) return;
-    const cells = Array.from(firstRow.children) as HTMLElement[];
-    if (cells.length === 0) return;
-
-    cells.forEach((cell, colIdx) => {
-      const dot = document.createElement('button');
-      dot.type = 'button';
-      dot.classList.add('krig-table-block__col-dot');
-      dot.setAttribute('contenteditable', 'false');
-      dot.setAttribute('data-krig-decoration', 'true'); // ignoreMutation 守门标记
-      dot.title = '操作该列';
-      dot.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openMenu(dot, 'column', { colIdx });
-      });
-      // 直接 append 到 cell 内 — cell 已 position:relative,dot CSS 相对 cell 定位
-      // (cell scroll 时 dot 自动跟随,无需 absolute 算坐标)
-      cell.appendChild(dot);
-    });
   }
 
   // ── 重建行 dots(放 table 右沿 border,避开左侧 block-handle)─────────────
@@ -233,7 +199,6 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
 
   // 首次 build(NodeViewConstructor 返回后 tbody 才被 PM 填充,延后一帧)
   requestAnimationFrame(() => {
-    rebuildColumnDots();
     rebuildRowDots();
     updateCellSelectionHandle();
   });
@@ -243,10 +208,10 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     contentDOM: tbody,
     update(node) {
       if (node.type.name !== 'table') return false;
-      // 行数 / 列数 / colwidth 变化都进这里(PM 会在节点变更时调 update)
+      // 行数 / 行高变化都进这里(PM 会在节点变更时调 update)
       // 延后一帧避免 colgroup 还没 sync,DOM rect 计算误差
+      // 列 dot 由 decorations plugin 管,NodeView 不再处理
       requestAnimationFrame(() => {
-        rebuildColumnDots();
         rebuildRowDots();
         updateCellSelectionHandle();
       });
