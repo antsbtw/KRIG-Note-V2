@@ -771,6 +771,9 @@
 
 .krig-pm-host .ProseMirror .krig-pm-table th {
   background: rgba(138, 180, 248, 0.08);
+  /* background 不画到 border 区,让 col dot 在 cell 顶 border 上方那一半
+   * 不被 cell 自身背景遮挡 — 跟 row dot 视觉一致 */
+  background-clip: padding-box;
   font-weight: 600;
   text-align: left;
 }
@@ -827,6 +830,9 @@
  * z-index:3 让 dot 浮在 cell 上沿 border 之上 */
 .krig-pm-host .ProseMirror .krig-table-block__col-dot {
   position: absolute;
+  /* dot 中线骑在 cell 顶 border 上(top:-3 → dot 跨 [-3,+3])。
+   * 跟 row dot 视觉一致(都贯穿 border)。
+   * z-index:10 + transform 自建堆叠上下文,确保 dot 浮在 cell 内容之上 */
   top: -3px;
   left: 50%;
   transform: translateX(-50%);
@@ -837,7 +843,7 @@
   border-radius: 3px;
   cursor: pointer;
   padding: 0;
-  z-index: 3;
+  z-index: 10;
   transition: background 0.12s;
 }
 
