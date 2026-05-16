@@ -146,12 +146,14 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       colBar.appendChild(dot);
     });
 
-    syncColBarToScroll();
+    syncBarsToScroll();
   }
 
-  // colBar 整体 translateX 抵消 scrollLeft,dot 视觉跟随 cell 移动
-  function syncColBarToScroll(): void {
-    colBar.style.transform = `translateX(${-scroll.scrollLeft}px)`;
+  // colBar / rowBar 整体 translateX 抵消 scrollLeft,dot 视觉跟随 cell 移动
+  function syncBarsToScroll(): void {
+    const transform = `translateX(${-scroll.scrollLeft}px)`;
+    colBar.style.transform = transform;
+    rowBar.style.transform = transform;
   }
 
   // scroll 监听:rAF 节流避免高频抖动
@@ -160,12 +162,12 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     if (scrollRafId != null) return;
     scrollRafId = requestAnimationFrame(() => {
       scrollRafId = null;
-      syncColBarToScroll();
+      syncBarsToScroll();
     });
   };
   scroll.addEventListener('scroll', onScroll, { passive: true });
 
-  // ── 重建行 dots(放 table 左沿 border,挂外层 dom — 纵向不滚)─────────────
+  // ── 重建行 dots(放 table 左沿 border,挂外层 dom — 跟 colBar 同源)─────────────
 
   function rebuildRowDots(): void {
     rowBar.innerHTML = '';
@@ -176,7 +178,9 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     const blockRect = dom.getBoundingClientRect();
     // 行 bar 放 table 左沿 border 中线上(用户拍板:M2 行 dot 在左)
     // 跟左侧 block-handle (+/⠿) 共占同一 gutter,但 hover 时机不同,实际不冲突
-    const tableLeftOffset = tableRect.left - blockRect.left;
+    // table 左沿在 scroll content 坐标系 = tableRect.left - blockRect.left + scrollLeft
+    // (跟 colBar dot.left 同源算法,scroll 时 transform 抵消)
+    const tableLeftOffset = tableRect.left - blockRect.left + scroll.scrollLeft;
     const BAR_THICKNESS = 6;
     const DOT_LEN = 32;
 
@@ -202,6 +206,8 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       });
       rowBar.appendChild(dot);
     });
+
+    syncBarsToScroll();
   }
 
   // ── CellSelection handle:监听 view 状态(rAF 防抖)─────────
