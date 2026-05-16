@@ -700,6 +700,25 @@ export const CALLOUT_ICON_PICKS = [
   字面影响:字面零数据迁移,字面零 schema 改动,字面 attrs.iconName 字面继续 Pascal。
   字面 IconName type 字面 cast `as IconName`(运行期一定在 union 内,字面 TS 静态推不出)。
 
+- **偏离 #12 (Step 5.8 字面 review:category nav 字面布局字面用户反悔 — emoji-mart 1:1 同款)**:
+  Step 5.8 初版字面 IconsTabPanel 字面 search box 在上 / category nav text-chip 在下,
+  字面用户字面截图反馈"分组方法不一样,字面应该和 emoji 字面检索方法一样,
+  字面在搜索栏的下一行做 tab 分类"。
+
+  字面再看 emoji-mart 实际字面截图:
+  - **nav 字面在上**(横排 10 个 icon-only chip:* 🕐 😀 🐶 🍔 🏈 🚗 💡 🎵⚡ 🚩)
+  - **search 在下**(占满字面下一行)
+
+  字面拍板字面对齐 emoji-mart 1:1:
+  - 字面布局顺序字面反:nav 在上,search 在下(原 search 在上字面 wrong)
+  - 字面 chip 字面从 text 字面改 **icon-only**(28×28 button,字面渲一个代表 icon)
+  - 字面 43 个 category → 代表 icon 字面手工映射表(callouts→lightbulb /
+    accessibility→accessibility / arrows→arrow-right / .../ others→circle-help)
+  - 字面选 icon 字面用"显然代表"(字面非"高 tag 命中"— 字面 shield 字面在 9 cat 排第一字面无区分度)
+
+  字面无 schema / API / renderer 改动 — UI-only 字面体验调整。
+  字面 commit 9723921。
+
 ---
 
 ## §11 教训登记(实施完成后填)
