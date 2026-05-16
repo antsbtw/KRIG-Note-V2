@@ -101,8 +101,9 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
 
     const tableRect = table.getBoundingClientRect();
     const blockRect = dom.getBoundingClientRect();
-    // 行 bar 放 table 右沿 border 中线上(避开左侧 block-handle + / ⠿)
-    const tableRightOffset = tableRect.right - blockRect.left;
+    // 行 bar 放 table 左沿 border 中线上(用户拍板:M2 行 dot 在左)
+    // 跟左侧 block-handle (+/⠿) 共占同一 gutter,但 hover 时机不同,实际不冲突
+    const tableLeftOffset = tableRect.left - blockRect.left;
     const BAR_THICKNESS = 6;
     const DOT_LEN = 32;
 
@@ -116,8 +117,8 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__row-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该行';
-      // dot 中线落在 table 右 border 中线(右 border 在 tableRightOffset - 1 ~ tableRightOffset)
-      dot.style.left = `${tableRightOffset - 0.5 - BAR_THICKNESS / 2}px`;
+      // dot 中线落在 table 左 border 中线(左 border 在 tableLeftOffset ~ tableLeftOffset + 1)
+      dot.style.left = `${tableLeftOffset + 0.5 - BAR_THICKNESS / 2}px`;
       dot.style.width = `${BAR_THICKNESS}px`;
       dot.style.top = `${top + height / 2 - DOT_LEN / 2}px`;
       dot.style.height = `${DOT_LEN}px`;
