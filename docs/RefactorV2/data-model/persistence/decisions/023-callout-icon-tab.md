@@ -552,6 +552,19 @@ export const CALLOUT_ICON_PICKS = [
   NodeView 字面 fallback 路径(emoji cycle,capability 未装兜底)字面同步清 iconName,
   对齐 setCalloutEmoji 互斥副作用语义(§4.4),防 fallback 路径绕过互斥造成 iconName 残留。
 
+- **偏离 #4 (Step 5.4 字面 AtomCalloutContent SSOT 不存在)**:
+  决议 §4.3 字面承诺"`AtomCalloutContent` 字面增加 `iconName?: string \| null` 可选字段"。
+  Step 5.4 实施期字面 grep 确认 V2 字面**无 `AtomCalloutContent` interface SSOT**:
+  [atoms-to-pm.ts:60](../../../../../src/capabilities/text-editing/converters/atoms-to-pm.ts#L60) 字面
+  `AtomInput.content?: Record<string, unknown>` — 所有 atom content 字面共享宽松索引类型,
+  callout 字段访问字面通过 `c.emoji as string` 类型断言,无独立 interface。
+
+  字面无需新建 SSOT(对齐 atoms-to-pm.ts 既有风格,其他 12 种 atom 同样字面无独立接口),
+  iconName 字段字面通过 `(c.iconName as string | null | undefined) ?? null` 类型断言访问。
+  双层兜底:本处字面 `?? null` + PM schema `default: null`(§4.1)。
+
+  字面影响:零 — 决议 §4.3 字面描述需理解为"逻辑字段加入",而非"独立 SSOT interface 改动"。
+
 ---
 
 ## §11 教训登记(实施完成后填)
