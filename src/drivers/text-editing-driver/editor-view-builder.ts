@@ -28,6 +28,10 @@ import { buildTitleGuardPlugin } from './plugins/build-title-guard-plugin';
 import { buildNoteLinkCommandPlugin } from './plugins/build-note-link-command-plugin';
 import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
 import { buildVocabHighlightPlugin } from './plugins/build-vocab-highlight-plugin';
+import {
+  buildBlockSelectionPlugin,
+  buildBlockSelectionKeymap,
+} from './plugins/build-block-selection-plugin';
 
 /**
  * 装配 EditorView
@@ -85,9 +89,13 @@ export function buildEditorView(
   const enablePasteMedia = optIn(pluginToggles?.pasteMedia);
   const enableDropCursor = optIn(pluginToggles?.dropCursor);
   const enableSlash = optIn(pluginToggles?.slash);
+  const enableBlockSelection = optIn(pluginToggles?.blockSelection);
 
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
+    // block-selection 主 plugin 放最前:handleDOMEvents.copy/cut/mousedown + handleKeyDown
+    // 在所有其他 plugin 之前优先消费(只在有块选择激活时才接管,无副作用)
+    ...(enableBlockSelection ? [buildBlockSelectionPlugin()] : []),
     ...blockPlugins,
     ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
     buildInputRules(schema),     // headings + 4 mark markdown(始终开)
@@ -103,6 +111,8 @@ export function buildEditorView(
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
+    // block-selection keymap 放 baseKeymap 之前抢 Esc/Shift+Arrow
+    ...(enableBlockSelection ? [buildBlockSelectionKeymap()] : []),
     keymap(baseKeymap),
   ];
 

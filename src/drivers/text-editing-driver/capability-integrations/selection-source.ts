@@ -9,7 +9,8 @@
 
 import type { EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { selection, type SelectionPayload } from '@capabilities/selection';
+import { selection, type SelectionKind, type SelectionPayload } from '@capabilities/selection';
+import { getBlockSelectionIndices } from '../plugins/build-block-selection-plugin';
 
 const SOURCE_PREFIX = 'text-editing-driver:';
 
@@ -22,6 +23,8 @@ interface SelectionSnapshot {
   marksKey: string;       // activeMarks join('|')
   blockType: string;
   level: number | null;
+  kind: SelectionKind;
+  blockIndicesKey: string;  // block selection indices join('|')(block/multi-block 用)
 }
 
 /** 实例 ID → 上次快照(diff 用)*/
@@ -50,6 +53,21 @@ export function emitSelectionChanged(view: EditorView, instanceId: string): void
   const blockType = node.type.name;
   const level = (node.attrs.level as number | null) ?? null;
 
+  // 优先看 block-selection plugin state:有则覆盖 kind/positions
+  const blockIndices = getBlockSelectionIndices(state);
+  let kind: SelectionKind = 'text';
+  let positions: number[] = [];
+  if (blockIndices && blockIndices.length > 0) {
+    kind = blockIndices.length === 1 ? 'block' : 'multi-block';
+    // 把 top-level index 转 doc 内 before 位置(positions 字段语义:每块起点)
+    let offset = 0;
+    const docChildren = state.doc.childCount;
+    for (let i = 0; i < docChildren; i++) {
+      if (blockIndices.includes(i)) positions.push(offset);
+      offset += state.doc.child(i).nodeSize;
+    }
+  }
+
   const snapshot: SelectionSnapshot = {
     isEmpty: sel.empty,
     from: sel.from,
@@ -59,6 +77,8 @@ export function emitSelectionChanged(view: EditorView, instanceId: string): void
     marksKey: activeMarks.join('|'),
     blockType,
     level,
+    kind,
+    blockIndicesKey: positions.join('|'),
   };
 
   // 真变才 emit
@@ -68,8 +88,8 @@ export function emitSelectionChanged(view: EditorView, instanceId: string): void
 
   const payload: SelectionPayload = {
     source: buildSourceId(instanceId),
-    isEmpty: sel.empty,
-    kind: 'text',
+    isEmpty: kind === 'text' ? sel.empty : false,
+    kind,
     from: sel.from,
     to: sel.to,
     anchor: sel.anchor,
@@ -77,6 +97,7 @@ export function emitSelectionChanged(view: EditorView, instanceId: string): void
     activeMarks,
     activeBlockType: blockType,
     activeLevel: level,
+    ...(positions.length > 0 ? { positions } : {}),
   };
   selection.emit(payload);
 }
@@ -90,7 +111,9 @@ function shallowEqualSnapshot(a: SelectionSnapshot, b: SelectionSnapshot): boole
     a.head === b.head &&
     a.marksKey === b.marksKey &&
     a.blockType === b.blockType &&
-    a.level === b.level
+    a.level === b.level &&
+    a.kind === b.kind &&
+    a.blockIndicesKey === b.blockIndicesKey
   );
 }
 
