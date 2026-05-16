@@ -396,17 +396,19 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
     case 'horizontalRule':
       return attachFrom({ type: 'horizontalRule' }, atom.from);
 
-    // 4.12 callout → callout(attrs.emoji + attrs.iconName + content block+)
+    // 4.12 callout → callout(attrs.emoji + iconName + imageSrc + content block+)
     // D023 §4.3: iconName 字面可选,旧 atom 字面无该字段时 ?? null 兜底,
     // PM schema default null 字面再次兜底(双层保险)。
+    // D024 §4.3: imageSrc 字面可选,同上双层兜底。
     case 'callout': {
       const emoji = (c.emoji as string) ?? '💡';
       const iconName = (c.iconName as string | null | undefined) ?? null;
+      const imageSrc = (c.imageSrc as string | null | undefined) ?? null;
       const inner = convertTiptapContent(c.tiptapContent);
       return attachFrom(
         {
           type: 'callout',
-          attrs: { emoji, iconName },
+          attrs: { emoji, iconName, imageSrc },
           content: inner.length > 0 ? inner : [emptyParagraph()],
         },
         atom.from,
