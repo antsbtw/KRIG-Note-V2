@@ -567,6 +567,12 @@ export const CALLOUT_ICON_PICKS = [
   §7.1 字面"Icons tab 搜索全库性能(1952 icon)中风险"字面**不再适用**(v2 字面只搜 24),
   全库搜索独立 sub-phase 字面再评估。
 
+  > **#5 字面反悔登记(2026-05-16,Step 5.7-5.8)**:用户字面 Step 5.6 路径 B 通过后再次提问字面
+  > "1952 个 icon 但只看到 32 个?"(实际 68),字面拍板字面把"全库搜索"字面合进 D023
+  > (字面不再字面独立 sub-phase)。字面具体走 lucide 字面自带 `DynamicIcon` + 字面预生成
+  > manifest(Step 5.7)+ IntersectionObserver lazy render(Step 5.8)三段路径解决。
+  > 字面 #5 字面原拍板的"5.5.3-A 路径"字面留作回滚 fallback(若 DynamicIcon 路径出问题字面回到 68 only)。
+
 - **偏离 #7 (Step 5.6 字面路径 B — 扩 24 → 68 置顶 icon)**:
   用户字面 Step 5.5 截图通过后字面提问"1952 icon 只看到 32 个?"(实际 24),
   字面诊断为偏离 #5 字面后果(全库搜索字面留独立 sub-phase,v2 仅 24 置顶)。
@@ -614,6 +620,85 @@ export const CALLOUT_ICON_PICKS = [
   双层兜底:本处字面 `?? null` + PM schema `default: null`(§4.1)。
 
   字面影响:零 — 决议 §4.3 字面描述需理解为"逻辑字段加入",而非"独立 SSOT interface 改动"。
+
+- **偏离 #8 (Step 5.7 字面 manifest 字面数据源:GitHub raw CDN 而非 official API)**:
+  prompt 字面承诺走 `api.github.com/repos/lucide-icons/lucide/contents/icons` 字面 throttle 60req/min。
+  Step 5.7 实施期字面发现:
+  - unauth GitHub API rate-limit 字面 60 req/h(不是 60/min),字面绝对不够 1952 文件
+  - lucide repo 字面所有 .json 字面在 `raw.githubusercontent.com/lucide-icons/lucide/main/icons/<name>.json`
+    字面可直接 fetch(CDN,字面无 API rate-limit)
+
+  字面拍板:
+  - icon 名清单字面走本地 `node_modules/lucide-react/dist/esm/dynamicIconImports.mjs`
+    字面正则解析(零网络,1952 kebab name 字面 100% 覆盖)
+  - 字面 categories/tags 字面走 raw CDN(并发 20,~50 秒跑完,字面比 prompt 预估 2 min 还快)
+  - 字面 commit-sha 字面单走 official API(unauth 60/h 字面够用)字面 pin manifest 版本
+
+  字面 manifest 实测:
+  - 1952 icon 全收
+  - 1703 有 meta(87%)
+  - **249 无 meta**(字面 alias/deprecated icon 字面 lucide repo 字面无 .json — 比如 `sort-desc`
+    是 `arrow-down-01` 字面 alias,`alarm-check` 字面已 deprecated)
+  - 42 categories(prompt 预估 26-44 字面符合;字面 `animals` / `account` / `finance` / `emoji`
+    等字面 prompt 未列字面但 lucide 实有)
+
+  字面 249 no-meta icon 字面处理:Step 5.8 IconsTabPanel 字面给它们一个 "Others"
+  字面 chunk 兜底,字面不进任何 category section(对齐 emoji-mart 字面 "no-category" 同款处理)。
+
+- **偏离 #9 (Step 5.8 字面反悔 C3 lazy load:lucide-react 字面无法纯 lazy at picker open)**:
+  prompt 字面 C3 路径承诺 "IconsTabPanel mount 时 dynamic import lucide-react 整包,
+  字面首屏 0 bundle 影响"。
+  Step 5.8 实施期字面发现 callout-icon-renderer 字面在 capability 加载就需要 lucide-react
+  (字面 read-only callout 字面在 NoteView 第一帧字面就要渲 icon — 字面不能等 picker open):
+  - 字面用户字面打开存有 callout-with-icon 的 note 字面立刻看 svg icon
+  - 字面 renderer 字面 driver 注入字面发生在 capability registry init(text-editing/index.ts:84)
+  - 字面无法字面用 React.lazy / 字面 dynamic import 字面包裹 renderer 字面 module
+
+  字面拍板 **lucide-react 字面 eager at text-editing capability load**:
+  - 静态 `import * as LucideIcons from 'lucide-react'` 字面 tree-shake 68 picks(~34KB)
+  - 静态 `import { DynamicIcon } from 'lucide-react/dynamic'` 字面 Helper 组件(~2KB)
+  - 字面 1952 个 icon body 字面 Vite 字面拆 1952 单 chunk,字面按需 fetch
+    (字面只渲 IntersectionObserver visible section 字面才会下载)
+  - 字面 IconsTabPanel 字面本身字面静态 import 字面进 text-editing capability bundle
+    (字面 mount 时字面 IntersectionObserver 字面控制渲染开销)
+
+  字面与 prompt 字面 C3 差异:
+  - prompt 期待:首屏 ~5KB,Icons tab 打开时一次性 ~500KB-1MB loading
+  - 实际:首屏 ~34KB(68 Pascal tree-shake)+ Icons tab 打开瞬时 render placeholder,
+    字面 visible icon 字面 ~500B per chunk 字面渐进 fetch
+  - 字面体验字面比 C3 字面好(无大 chunk loading 闪现,visible icon 字面立即渐进出现)
+
+- **偏离 #10 (Step 5.8 字面 manifest.json 字面 inline 进 text-editing bundle)**:
+  prompt 字面未明确字面 manifest 字面如何加载,字面只提"~200KB"字面 inline 默认。
+  Step 5.7 实测字面 manifest 字面 **515KB**(超 prompt 预估 2.5 倍 — 字面 lucide tags
+  字面比预估字面多)。
+
+  字面两条路径:
+  - inline JSON import(默认 Vite 字面 resolveJsonModule):字面进 text-editing chunk,
+    字面 gzip ~80KB(string 字面大量重复 tag 字面压缩率高)
+  - 字面 `?url` 字面 import + runtime fetch:字面延迟首次渲染 ~50ms,字面增加 async 复杂度
+
+  字面拍板 **inline path**:
+  - text-editing capability 字面已经 eager load(read-only callout 字面 icon 渲染依赖),
+    字面无关 lazy-loading 时机
+  - 515KB raw / 80KB gzip 字面对桌面 app 字面可接受
+  - 字面减少 IconsTabPanel 字面 async ready state 字面复杂度(全 sync 渲)
+
+  字面影响登记:text-editing capability chunk 字面增量 ~80KB gzip,字面 desktop app
+  字面性能影响字面可忽略(Electron 字面无网络下载字面 webpack chunk)。
+
+- **偏离 #11 (Step 5.8 字面 attrs.iconName 字面保持 Pascal,不改 kebab)**:
+  Step 5.7 字面 manifest 字面 kebab 为主索引(对齐 lucide repo 字面文件名),字面 Step 5.8
+  字面 DynamicIcon 字面 prop `name` 字面 IconName union(kebab)。
+  字面但 attrs.iconName 字面已字面 Pascal(Step 5.1-5.5 字面锁定,字面写入持久化数据)。
+
+  字面拍板字面保持 Pascal in attrs(向前兼容字面已存数据),字面 renderer 字面构建
+  Pascal→kebab 反向 map(模块 init 一次性 ~30ms),字面 DynamicIcon 字面调用前 lookup:
+  - 静态 lucide-react named export 字面 Pascal 命中字面优先(快路径)
+  - 字面 Pascal 字面命中失败 → manifest 反向 map → DynamicIcon name={kebab}
+
+  字面影响:字面零数据迁移,字面零 schema 改动,字面 attrs.iconName 字面继续 Pascal。
+  字面 IconName type 字面 cast `as IconName`(运行期一定在 union 内,字面 TS 静态推不出)。
 
 ---
 
