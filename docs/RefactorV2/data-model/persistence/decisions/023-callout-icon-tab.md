@@ -529,7 +529,28 @@ export const CALLOUT_ICON_PICKS = [
 
 ### §10.2 实施期偏离(待 Step 5.x 实施时填)
 
-(待实施期填写)
+- **偏离 #2 (Step 5.3 字面架构选择 — B 路径)**:
+  决议 §3.3 字面留白 "Step 5.x 决定 ReactDOM portal 或 dynamic 字面 createIcons 函数注入"。
+  Step 5.3 实施期字面发现 driver NodeView 字面是 vanilla DOM(零 React 依赖),
+  让 driver 字面 import lucide-react 违反既有"driver 零 view-layer SDK 依赖"架构
+  (字面对照 [emoji-handler.ts](../../../../../src/drivers/text-editing-driver/blocks/callout/emoji-handler.ts) 现有模式)。
+
+  **拍板 B 路径**:driver 字面暴露 iconHost DOM + 加 `setCalloutIconRenderer` handler 接口
+  (新建 [icon-handler.ts](../../../../../src/drivers/text-editing-driver/blocks/callout/icon-handler.ts),字面对齐 emoji-handler.ts 模板),
+  capability 层字面注入 React/lucide 渲染逻辑(Step 5.5)。
+
+  字面优势:
+  - driver 层字面零 lucide-react / 零 React 新依赖
+  - renderer 未注入时字面 fallback 到 emoji 渲染(零行为退化)
+  - 字面对齐既有 emoji-handler / link-click-handler / note-link-search-handler 注入范式
+
+  字面影响:
+  - Step 5.3 单步无运行可见行为(renderer 未注入时字面渲 emoji 兜底,需 Step 5.5 接 capability 后才可见 icon)
+  - 字面新增一个 driver re-export(`setCalloutIconRenderer` / `CalloutIconRenderer`)
+
+- **偏离 #3 (Step 5.3 fallback cycle 字面互斥)**:
+  NodeView 字面 fallback 路径(emoji cycle,capability 未装兜底)字面同步清 iconName,
+  对齐 setCalloutEmoji 互斥副作用语义(§4.4),防 fallback 路径绕过互斥造成 iconName 残留。
 
 ---
 

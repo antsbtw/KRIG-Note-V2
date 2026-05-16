@@ -75,6 +75,10 @@ export {
   setCalloutEmojiHandler,
   type CalloutEmojiHandler,
 } from './blocks/callout/emoji-handler';
+export {
+  setCalloutIconRenderer,
+  type CalloutIconRenderer,
+} from './blocks/callout/icon-handler';
 export { noteLinkSpec } from './blocks/note-link/spec';
 export { fileBlockSpec } from './blocks/file-block/spec';
 export { fileLinkSpec } from './blocks/file-link/spec';
