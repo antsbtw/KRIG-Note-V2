@@ -22,6 +22,7 @@ import { ColorPickerPanel } from './color-picker/ColorPickerPanel';
 import { LinkPanel } from './link-panel/LinkPanel';
 import { NoteLinkSearchPanel } from './note-link-search/NoteLinkSearchPanel';
 import { EmojiPickerPanel } from './emoji-picker/EmojiPickerPanel';
+import { TableMenuPanel } from '@drivers/text-editing-driver/blocks/table/TableMenuPanel';
 
 /** capability 加载时一次性注册所有 PM 通用 popup */
 export function registerTextEditingPopups(): void {
@@ -47,5 +48,12 @@ export function registerTextEditingPopups(): void {
     id: 'text-editing.popup.callout-emoji',
     Component: EmojiPickerPanel,
     estimatedSize: { width: 352, height: 435 },
+  });
+
+  // L5-B3.7.1(M2):table hover handle 弹的菜单(列 / 行 / CellSelection 三态)
+  popupRegistry.register({
+    id: 'text-editing.popup.table-menu',
+    Component: TableMenuPanel,
+    estimatedSize: { width: 200, height: 280 },
   });
 }

@@ -743,8 +743,8 @@
 .krig-pm-host .ProseMirror .krig-table-block {
   position: relative;
   margin: 12px 0;
-  padding-right: 24px;  /* 给 +col 按钮留位 */
-  padding-bottom: 24px; /* 给 +row 按钮留位 */
+  /* M2 v3:无 padding,handle bar 骑在 table 上/左 border 线上(Notion-style overlay),
+   * 不跟左侧 block-handle (+/⠿)冲突 */
 }
 
 .krig-pm-host .ProseMirror .krig-table-block__scroll {
@@ -755,8 +755,11 @@
 .krig-pm-host .ProseMirror .krig-pm-table {
   border-collapse: collapse;
   margin: 0;
+  /* width:max-content + 移除 min-width:100% → table 按 sum(colwidth) 精确显示,
+   * 不再强制撑满容器(原 min-width:100% 会让 table-layout:fixed 把多余宽度均分
+   * 到各列,造成"拖一列邻列被挤"假象)。
+   * Notion 行为:table 总宽 = sum;>容器走 scroll wrapper 横向滚动,<容器右侧留白 */
   width: max-content;
-  min-width: 100%;
   table-layout: fixed;
 }
 
@@ -792,61 +795,107 @@
   background: rgba(138, 180, 248, 0.18);
 }
 
-/* prosemirror-tables column-resize 拖拽时显示的 resize-handle(库注入)*/
+/* prosemirror-tables column-resize handle(库注入 widget decoration):
+ * hover 状态:鼠标靠近 cell 右边界 5px 内时显示;按下拖动后状态变 dragging。
+ * 区分两套样式让用户清楚知道"这里可以拖":
+ * - hover(.ProseMirror.resize-cursor):淡灰细线 + 光标 ↔ → 邀请拖动
+ * - dragging(.ProseMirror.column-resize-dragging):饱和蓝色 → 拖动中反馈 */
 .krig-pm-host .ProseMirror .krig-pm-table .column-resize-handle {
   position: absolute;
   right: -2px;
   top: 0;
   bottom: 0;
   width: 4px;
-  background: #8ab4f8;
+  background: rgba(180, 180, 180, 0.5); /* hover 默认淡灰 */
   pointer-events: none;
   z-index: 10;
+  transition: background 0.1s;
 }
 
-.krig-pm-host .ProseMirror .resize-cursor {
+/* dragging 状态:column-resize-dragging class 由 prosemirror-tables 在
+ * resize 拖动期间通过 Decoration.node 加在被拖动的 cell 上 */
+.krig-pm-host .ProseMirror .krig-pm-table td.column-resize-dragging .column-resize-handle,
+.krig-pm-host .ProseMirror .krig-pm-table th.column-resize-dragging .column-resize-handle {
+  background: #8ab4f8; /* 饱和蓝 → 拖动反馈 */
+}
+
+.krig-pm-host .ProseMirror.resize-cursor {
   cursor: col-resize;
 }
 
-/* +col 按钮(右侧)*/
-.krig-pm-host .ProseMirror .krig-table-block__add-col-btn {
+/* ─── M2 v5:列 bar 挂 scroll 内独立于 cell(视图与操作解耦)+ 行 bar 挂外层 ───── */
+
+/* col-bar:scroll absolute 子;node-view 监听 scroll 给 colBar transform
+ * translateX(-scrollLeft) 让 dot 跟 cell 同步移动。
+ * 容器 0 尺寸,真正定位由内部 dot 处理 */
+.krig-pm-host .ProseMirror .krig-table-block__col-bar {
   position: absolute;
   top: 0;
-  right: 0;
-  bottom: 24px;
-  width: 20px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  color: #888;
-  cursor: pointer;
-  font-size: 14px;
-  border-radius: 4px;
-  transition: background 0.1s, color 0.1s;
-}
-
-.krig-pm-host .ProseMirror .krig-table-block__add-col-btn:hover {
-  background: rgba(138, 180, 248, 0.1);
-  color: #8ab4f8;
-}
-
-/* +row 按钮(底部)*/
-.krig-pm-host .ProseMirror .krig-table-block__add-row-btn {
-  position: absolute;
-  bottom: 0;
   left: 0;
-  right: 24px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  color: #888;
-  cursor: pointer;
-  font-size: 14px;
-  border-radius: 4px;
-  transition: background 0.1s, color 0.1s;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 3;
 }
 
-.krig-pm-host .ProseMirror .krig-table-block__add-row-btn:hover {
-  background: rgba(138, 180, 248, 0.1);
+/* row-bar:外层 dom absolute 子(行不滚动) */
+.krig-pm-host .ProseMirror .krig-table-block__row-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* 列 / 行 dot:6px 厚条 + 32px 长,定位由 node-view 显式 top/left/width/height
+ * 设置(让 border 贯穿 dot 中线)。
+ * 列 dot 骑在 table 顶 border;行 dot 骑在 table 左 border */
+.krig-pm-host .ProseMirror .krig-table-block__col-dot,
+.krig-pm-host .ProseMirror .krig-table-block__row-dot {
+  position: absolute;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0;
+  transition: background 0.12s;
+}
+
+.krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__col-dot,
+.krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__row-dot {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.krig-pm-host .ProseMirror .krig-table-block__col-dot:hover,
+.krig-pm-host .ProseMirror .krig-table-block__row-dot:hover {
+  background: #8ab4f8 !important;
+}
+
+/* CellSelection handle — 浮在选区上方的 ⋯ 按钮(node-view 控显隐) */
+.krig-pm-host .ProseMirror .krig-table-block__cs-handle {
+  position: absolute;
+  width: 24px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  z-index: 5;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-table-block__cs-handle:hover {
+  background: rgba(138, 180, 248, 0.15);
+  border-color: #8ab4f8;
   color: #8ab4f8;
 }
 
