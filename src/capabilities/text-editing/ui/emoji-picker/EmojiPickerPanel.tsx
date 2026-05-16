@@ -35,6 +35,15 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
   // v1: 后 3 个 tab disabled,activeTab 永远是 'emojis'。预留 state 给 v2/v3。
   const [activeTab, setActiveTab] = useState<EmojiPickerTabId>('emojis');
 
+  // onClose 是父级闭包字面新引用(PopupBinding 每次 re-render 都新建),
+  // 不能进 useEffect 依赖 — 否则父级 re-render 会触发 cleanup → cancelled=true
+  // → dynamic import 完成后跳过创建 Picker。冷启动连续点 💡 会引发
+  // popupController setState → PopupBinding re-render → cancel 循环,
+  // 表现"点 N 次才能出 picker"。用 ref 持最新 onClose,effect 依赖只放
+  // 真稳定项(api / ctx)。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     let cancelled = false;
     let pickerEl: HTMLElement | null = null;
@@ -69,11 +78,15 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
         previewPosition: 'none',
         skinTonePosition: 'search',
         maxFrequentRows: 2,
-        autoFocus: true,
+        // autoFocus: false — 抢 PM 焦点会让 PM blur, 之后再点 💡 时
+        // instanceRegistry.getFocusedInstanceId() 拿不到, ABORT 不弹 popup
+        // (虽 onOpen 已改 view 反查 fallback, 但避免 emoji-mart 焦点抢占
+        // 仍是稳健选择 — picker 默认不抢搜索框, 用户需要时点一下即可)。
+        autoFocus: false,
         ref: mountRef,
         onEmojiSelect: (e: EmojiSelectEvent) => {
           if (ctx) api.setCalloutEmoji(ctx.instanceId, ctx.blockPos, e.native);
-          onClose();
+          onCloseRef.current();
         },
       });
       setLoaded(true);
@@ -83,7 +96,7 @@ export function EmojiPickerPanel({ onClose }: PopupCloseProps) {
       cancelled = true;
       if (pickerEl?.parentNode) pickerEl.parentNode.removeChild(pickerEl);
     };
-  }, [api, ctx, onClose]);
+  }, [api, ctx]);
 
   return (
     <div className="krig-emoji-picker">

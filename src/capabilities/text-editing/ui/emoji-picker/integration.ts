@@ -37,9 +37,15 @@ export function consumeCalloutEmojiCtx(): PendingCtx | null {
 /** capability 加载时一次性注册 driver callout emoji handler */
 export function registerCalloutEmojiIntegration(): void {
   setCalloutEmojiHandler({
-    onOpen(_view, blockPos, anchorEl) {
-      // instanceId 优先用 focused(对 canvas-text-node 复合 id 场景安全)
-      const instanceId = instanceRegistry.getFocusedInstanceId();
+    onOpen(view, blockPos, anchorEl) {
+      // emoji span 是 contentEditable=false,点它 PM editor 可能不 focus
+      // (尤其原有 callout 笔记打开时光标未自动 set 进 PM,hasFocus=false)。
+      // 用 view 反查 instanceId — view 是 NodeView 闭包字面拿到的真实 EditorView,
+      // 比 hasFocus 路径可靠。focused 路径只作 fallback(canvas-text-node 复合
+      // id 场景 view→id 反查也能 work,因为 registry set 时是同一个 view 引用)。
+      const instanceId =
+        instanceRegistry.getInstanceIdByView(view) ??
+        instanceRegistry.getFocusedInstanceId();
       if (!instanceId) return;
       pendingCtx = { instanceId, blockPos };
       popupController.show(POPUP_ID, anchorEl);

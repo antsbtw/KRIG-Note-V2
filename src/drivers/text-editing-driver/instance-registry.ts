@@ -72,6 +72,19 @@ class InstanceRegistry {
     }
     return null;
   }
+
+  /**
+   * 反查 view 所属 instanceId(用于 NodeView 点击事件 — 此时 view 已知但
+   * editor 可能因鼠标点 contentEditable=false 元素 hasFocus()=false,
+   * 不能依赖 focused 路径).
+   * 典型场景:callout emoji span click → onOpen(view, ...) → 需取 instanceId.
+   */
+  getInstanceIdByView(view: EditorView): string | null {
+    for (const [id, entry] of this.instances) {
+      if (entry.view === view) return id;
+    }
+    return null;
+  }
 }
 
 export const instanceRegistry = new InstanceRegistry();
