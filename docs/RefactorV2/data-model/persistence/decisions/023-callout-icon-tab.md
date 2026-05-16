@@ -503,21 +503,21 @@ export const CALLOUT_ICON_PICKS = [
 
 ## §8 反向更新清单(本文档涉及更新的其他文档清单)
 
-| 文档 | 字面更新内容 |
-|------|------|
-| [MEMORY.md](/Users/wenwu/.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/MEMORY.md) | 加一条 project memory:"023 callout icon tab 已实施;24 lucide icon 对齐 v1 emoji" |
-| [SDK-version-binding-policy.md §4](../SDK-version-binding-policy.md) | 字面登记 `lucide-react@^1.14.0` 锁定原因(本 sub-phase 不升级,§0.5 字面理由) |
-| [test-checklists/](../../../test-checklists/) | 新建 `callout-icon-tab.md` 含本 §6.1 字面 14 项测试清单 |
-| [refactor charter](../../../00-总纲.md) | 本 sub-phase 字面挂在 charter 哪一波?待 §11 实施期登记 |
+| 文档 | 更新内容 | 状态 |
+|------|------|------|
+| [MEMORY.md](/Users/wenwu/.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/MEMORY.md) | 加 project memory `decision-023-callout-icon-tab-done`(架构要点 + 12 偏离索引)+ feedback memory `flex-container-shrink-collapse`(nav 失踪教训);更新 `emoji-picker-v1-done-v2v3-pending` 把 Icons tab 标已完成 | ✅(2026-05-16) |
+| [SDK-version-binding-policy.md §4](../SDK-version-binding-policy.md) | 表加一行 `lucide-react@^1.14.0` 锁定(决议号 023,日期 2026-05-16,允许 caret 到 < 2.0.0,禁止 2.x 跨大版本) | ✅(2026-05-16) |
+| [test-checklists/callout-icon-tab.md](../../../test-checklists/callout-icon-tab.md) | 新建测试清单 A–H 8 段 30+ 项(UI / 跳转 lazy / 搜索 / 选 icon / 持久化 / Copy-Paste / 性能 / 回归);超出决议 §6.1 原 14 项是因为 Step 5.7-5.8 新增 nav + 搜索 + lazy render 功能 | ✅(2026-05-16) |
+| [refactor charter](../../../00-总纲.md) | 本 sub-phase 挂在 charter 哪一波?暂未登记(charter 自身整改进行中,待第 6 波完成后回填) | ⏳ |
 
 ---
 
 ## §9 通过条件(实施完成后填)
 
-- [ ] Step 5.1–5.6 字面全 commit
-- [ ] §6.1 字面 14 项测试 PASS
-- [ ] §8 反向更新清单字面全完成
-- [ ] 用户字面拍板 merge to main
+- [x] Step 5.1–5.8 全 commit(13 commit hash `6e28dd0..bc81784`)
+- [ ] [test-checklists/callout-icon-tab.md](../../../test-checklists/callout-icon-tab.md) A–H 全 PASS(用户手测)
+- [x] §8 反向更新清单 3/4 完成(charter 回填留待第 6 波后)
+- [ ] 用户拍板 merge to main
 
 ---
 
