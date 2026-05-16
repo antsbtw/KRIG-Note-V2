@@ -755,8 +755,11 @@
 .krig-pm-host .ProseMirror .krig-pm-table {
   border-collapse: collapse;
   margin: 0;
+  /* width:max-content + 移除 min-width:100% → table 按 sum(colwidth) 精确显示,
+   * 不再强制撑满容器(原 min-width:100% 会让 table-layout:fixed 把多余宽度均分
+   * 到各列,造成"拖一列邻列被挤"假象)。
+   * Notion 行为:table 总宽 = sum;>容器走 scroll wrapper 横向滚动,<容器右侧留白 */
   width: max-content;
-  min-width: 100%;
   table-layout: fixed;
 }
 

@@ -20,15 +20,13 @@
  * - deleteTable / goToNextCell
  */
 
-import { TextSelection, type Command } from 'prosemirror-state';
+import { TextSelection, type Command, type Transaction } from 'prosemirror-state';
 import type { Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import { selectedRect, CellSelection } from 'prosemirror-tables';
 import type { CellAlign } from './spec';
 
 // re-export 库内置命令(集中入口给 view / api / 后续 sub-stage 用)
 export {
-  addColumnBefore,
-  addColumnAfter,
   deleteColumn,
   addRowBefore,
   addRowAfter,
@@ -38,6 +36,80 @@ export {
   deleteTable,
   goToNextCell,
 } from 'prosemirror-tables';
+
+import {
+  addColumnBefore as libAddColumnBefore,
+  addColumnAfter as libAddColumnAfter,
+} from 'prosemirror-tables';
+
+const DEFAULT_COL_WIDTH = 120;
+
+/**
+ * 包装 addColumnBefore / addColumnAfter:库创建新 cell 时 colwidth=null,
+ * 会让 prosemirror-tables fixedWidth=false → table 总宽不扩展、邻列被挤压。
+ * 包装在库调用后扫描新增列 cell 给它们补默认 colwidth,保 fixedWidth=true。
+ *
+ * 实现:加列前快照 table 列数 → 调库命令 → 加列后比对找到新加列 idx →
+ * setNodeMarkup 给新列每个 cell 写 colwidth=[120]。
+ */
+function wrapAddColumn(libFn: typeof libAddColumnBefore): Command {
+  return (state, dispatch) => {
+    if (!libFn(state)) return false; // dry-run 库判定能否执行
+    if (!dispatch) return true;
+
+    // 拍快照:操作前 table 的 firstRow childCount = 旧列数
+    let oldColCount = -1;
+    let tablePos = -1;
+    {
+      const $from = state.selection.$from;
+      for (let d = $from.depth; d > 0; d--) {
+        if ($from.node(d).type.name === 'table') {
+          tablePos = $from.before(d);
+          oldColCount = $from.node(d).firstChild?.childCount ?? -1;
+          break;
+        }
+      }
+    }
+    if (oldColCount < 0 || tablePos < 0) {
+      // 找不到 table → 直接调库不补 colwidth(降级)
+      libFn(state, dispatch);
+      return true;
+    }
+
+    // 调库命令(自带 dispatch)— 此处用 wrapper 截获 dispatch 拿到 tr
+    const captured: { tr: Transaction | null } = { tr: null };
+    libFn(state, (tr: Transaction) => { captured.tr = tr; });
+    if (!captured.tr) return true;
+    const tr = captured.tr;
+
+    // 比对新 table 找新加列(找哪一列的 cell colwidth=null + 不在旧 idx)
+    const newTable = tr.doc.nodeAt(tablePos);
+    if (!newTable || newTable.type.name !== 'table') {
+      dispatch(tr);
+      return true;
+    }
+
+    // 给所有 colwidth=null 的列 cell 补 [DEFAULT_COL_WIDTH]
+    // (老列已有 colwidth,只补新加的)
+    newTable.forEach((row: PMNode, rowOffset: number) => {
+      let cellPos = tablePos + 1 + rowOffset + 1; // +1 进 table,+rowOffset,+1 进 row
+      row.forEach((cell: PMNode) => {
+        if (cell.attrs.colwidth == null) {
+          tr.setNodeMarkup(cellPos, undefined, {
+            ...cell.attrs,
+            colwidth: [DEFAULT_COL_WIDTH],
+          });
+        }
+        cellPos += cell.nodeSize;
+      });
+    });
+    dispatch(tr);
+    return true;
+  };
+}
+
+export const addColumnBefore: Command = wrapAddColumn(libAddColumnBefore);
+export const addColumnAfter: Command = wrapAddColumn(libAddColumnAfter);
 
 // ─── 工具:找最近的 block 节点(给 insertTable 替换当前空段落用)──
 
@@ -72,16 +144,22 @@ export function insertTable(rows = 3, cols = 3): Command {
       const { pos: blockStart, node: blockNode } = findNearestBlock(state.selection.$from);
       const blockEnd = blockStart + blockNode.nodeSize;
 
+      // 给每个 cell 设默认 colwidth=[120],让 prosemirror-tables fixedWidth=true,
+      // 拖动某列时 table 总宽 = sum(colwidth) 自动扩展,不挤压邻列
+      // (用户拍板:table 是富文本,该跟内容撑开,不该挤压)
+      const DEFAULT_COL_WIDTH = 120;
+      const defaultAttrs = { colwidth: [DEFAULT_COL_WIDTH] };
+
       // 第一行 header
       const headerCells = Array.from({ length: cols }, () =>
-        headerType.create(null, [paragraphType.create()]),
+        headerType.create(defaultAttrs, [paragraphType.create()]),
       );
       const headerRow = rowType.create(null, headerCells);
 
       // body 行
       const bodyRows = Array.from({ length: rows - 1 }, () => {
         const cells = Array.from({ length: cols }, () =>
-          cellType.create(null, [paragraphType.create()]),
+          cellType.create(defaultAttrs, [paragraphType.create()]),
         );
         return rowType.create(null, cells);
       });
@@ -201,8 +279,9 @@ export const duplicateColumn: Command = (state, dispatch) => {
 
       const cell = row.child(colIdx);
       const targetType = cell.type.name === 'tableHeader' ? headerType : cellType;
+      // 新列继承原列 colwidth(保留 fixedWidth=true → table 总宽自动扩展)
       const newCell = targetType.create(
-        { ...cell.attrs, colwidth: null },
+        { ...cell.attrs },
         cell.content,
         cell.marks,
       );
@@ -260,14 +339,22 @@ export const duplicateSelectedCells: Command = (state, dispatch) => {
           if (cell) {
             cells.push(
               cellType.create(
-                { colspan: cell.attrs.colspan, rowspan: cell.attrs.rowspan, colwidth: null },
+                {
+                  colspan: cell.attrs.colspan,
+                  rowspan: cell.attrs.rowspan,
+                  // 继承原 cell colwidth(保留列宽对齐 + fixedWidth=true)
+                  colwidth: cell.attrs.colwidth,
+                },
                 cell.content,
                 cell.marks,
               ),
             );
           }
         } else {
-          cells.push(cellType.create(null, [paragraphType.create()]));
+          // 占位 cell:colwidth 从第一行同列 cell 取(保对齐)
+          const firstRowCell = table.firstChild?.maybeChild(c);
+          const colwidth = (firstRowCell?.attrs.colwidth as number[] | null) ?? null;
+          cells.push(cellType.create({ colwidth }, [paragraphType.create()]));
         }
       }
       newRows.push(rowType.create(null, cells));
