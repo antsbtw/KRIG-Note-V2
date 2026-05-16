@@ -3,23 +3,25 @@
  *
  * M1 → M2 变更:
  * - **移除** +col / +row 按钮(M1 末尾插入快捷)
- * - **新增** 列 handle bar(table 上沿,按列宽分段;hover 列冒出 dot;点击弹菜单)
- * - **新增** 行 handle bar(table 左沿,按行高分段;hover 行冒出 dot;点击弹菜单)
+ * - **新增** 列 handle bar(table 上沿):每列对应一个 ⋮⋮ dot,默认透明,
+ *   鼠标进入某 cell → 该 cell 所在列的 dot 浮现(is-active)
+ * - **新增** 行 handle bar(table 左沿):同上,纵向 ⋮⋮ dot,跟随当前 hover 的行
  * - **新增** CellSelection handle(检测到 CellSelection 时浮在选区上方;点击弹菜单)
+ *
+ * UX 对标 Notion:
+ * - 不在 table 内时,**所有 handle 不可见**
+ * - 鼠标进入某 cell → 仅该 cell 所在列 / 行的 handle 浮现(高亮 .is-active)
+ * - 鼠标离开 table → 所有 handle 隐藏
+ * - 点击 handle → 弹菜单
  *
  * 关键设计:
  * - handle DOM 全在 contentDOM(tbody)外层,ignoreMutation 已只允 tbody 通过
  *   → PM 不 react,prosemirror-tables 内部状态不受干扰
- * - 列 / 行段几何来源:DOM 量(table.rows / cells getBoundingClientRect),
+ * - 列 / 行 dot 几何来源:DOM 量(table 的第一行 cell / tbody 的 tr getBoundingClientRect),
  *   随 colwidth resize / 行数变化 update() 回调时重算
- * - CellSelection handle:订阅 view 状态变化(NodeView 没原生订阅口,
- *   监听 view.dom 的 'mouseup' + 'keyup' + 自己维护 dispatch 跟随)
- *   M2 走"事件后 rAF 检查 selection",M3 plugin 化更稳
- *
- * 菜单点击链:
- *   handle dot mousedown
- *     → setTableMenuContext({ instanceId, tablePos, scope, rowIdx?/colIdx? })
- *     → popupController.show('text-editing.popup.table-menu', dotEl)
+ * - "当前列 / 行"高亮:监听 dom 的 mousemove(target.closest('td,th'))→ index
+ * - CellSelection handle:订阅 view 状态变化(NodeView 无原生订阅口,
+ *   监听 view.dom 的 mouseup/keyup/mousedown + rAF 防抖)
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
@@ -28,6 +30,7 @@ import { popupController } from '@slot/triggers/popup-controller';
 import { setTableMenuContext } from './menu-context';
 
 const POPUP_ID = 'text-editing.popup.table-menu';
+const HANDLE_ICON = '⋮⋮';
 
 /** 从 view.dom 反查 driver instanceId(Host.tsx mount 时挂在 data-instance-id) */
 function findInstanceId(view: { dom: HTMLElement }): string | null {
@@ -76,7 +79,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   csHandle.style.display = 'none';
   dom.appendChild(csHandle);
 
-  // ── 工具:开 popup(共用所有 handle dot)─────────────
+  // ── 工具:开 popup(共用所有 handle)─────────────
 
   function openMenu(
     anchor: HTMLElement,
@@ -96,20 +99,35 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     popupController.show(POPUP_ID, anchor);
   }
 
-  // ── 重建列 dots(按当前 table 列数,DOM 量取每列 left + width)─────────────
+  // ── dot 容器(按 idx 索引,setActive 用)─────────────
+
+  let colDots: HTMLButtonElement[] = [];
+  let rowDots: HTMLButtonElement[] = [];
+
+  function setActiveCol(idx: number | null): void {
+    colDots.forEach((dot, i) => {
+      dot.classList.toggle('is-active', i === idx);
+    });
+  }
+
+  function setActiveRow(idx: number | null): void {
+    rowDots.forEach((dot, i) => {
+      dot.classList.toggle('is-active', i === idx);
+    });
+  }
+
+  // ── 重建列 dots ─────────────────────────────────────────
 
   function rebuildColumnDots(): void {
     colBar.innerHTML = '';
+    colDots = [];
     const firstRow = tbody.querySelector('tr');
     if (!firstRow) return;
     const cells = Array.from(firstRow.children) as HTMLElement[];
     if (cells.length === 0) return;
 
     const tableRect = table.getBoundingClientRect();
-    // 列基于 colspan/colwidth 可能复杂,M2 简化:按第一行 cell 顺序 + getBoundingClientRect
-    // colspan>1 时仍以单 cell 为 anchor(用户语义"操作该 cell 所在列")
-    let visualColIdx = 0;
-    cells.forEach((cell) => {
+    cells.forEach((cell, visualColIdx) => {
       const cellRect = cell.getBoundingClientRect();
       const left = cellRect.left - tableRect.left;
       const width = cellRect.width;
@@ -119,10 +137,11 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__col-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该列';
-      // dot 自身宽度 16px,居中放到 cell 顶部中点
-      dot.style.left = `${left + width / 2 - 8}px`;
-      dot.style.width = `${Math.max(16, width - 4)}px`;
-      // 闭包捕获当前 visualColIdx
+      dot.textContent = HANDLE_ICON;
+      // 横条覆盖单列宽 80%,居中
+      const dotWidth = Math.max(28, width * 0.5);
+      dot.style.left = `${left + width / 2 - dotWidth / 2}px`;
+      dot.style.width = `${dotWidth}px`;
       const colIdx = visualColIdx;
       dot.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -130,14 +149,15 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
         openMenu(dot, 'column', { colIdx });
       });
       colBar.appendChild(dot);
-      visualColIdx += 1;
+      colDots.push(dot);
     });
   }
 
-  // ── 重建行 dots(按当前 tbody.rows,DOM 量取每行 top + height)─────────────
+  // ── 重建行 dots ─────────────────────────────────────────
 
   function rebuildRowDots(): void {
     rowBar.innerHTML = '';
+    rowDots = [];
     const rows = Array.from(tbody.querySelectorAll(':scope > tr')) as HTMLElement[];
     if (rows.length === 0) return;
 
@@ -152,16 +172,59 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       dot.classList.add('krig-table-block__row-dot');
       dot.setAttribute('contenteditable', 'false');
       dot.title = '操作该行';
-      dot.style.top = `${top + height / 2 - 8}px`;
-      dot.style.height = `${Math.max(16, height - 4)}px`;
+      dot.textContent = HANDLE_ICON;
+      // 纵条覆盖行高 50%,居中
+      const dotHeight = Math.max(28, height * 0.5);
+      dot.style.top = `${top + height / 2 - dotHeight / 2}px`;
+      dot.style.height = `${dotHeight}px`;
       dot.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         openMenu(dot, 'row', { rowIdx });
       });
       rowBar.appendChild(dot);
+      rowDots.push(dot);
     });
   }
+
+  // ── Notion-style 当前 cell hover 高亮 ─────────────
+
+  function updateActiveByCell(target: EventTarget | null): void {
+    if (!(target instanceof Element)) {
+      setActiveCol(null);
+      setActiveRow(null);
+      return;
+    }
+    const cell = target.closest('td, th') as HTMLElement | null;
+    if (!cell || !tbody.contains(cell)) {
+      setActiveCol(null);
+      setActiveRow(null);
+      return;
+    }
+    const row = cell.parentElement as HTMLElement | null;
+    if (!row) {
+      setActiveCol(null);
+      setActiveRow(null);
+      return;
+    }
+    const colIdx = Array.from(row.children).indexOf(cell);
+    const rowIdx = Array.from(tbody.children).indexOf(row);
+    setActiveCol(colIdx >= 0 ? colIdx : null);
+    setActiveRow(rowIdx >= 0 ? rowIdx : null);
+  }
+
+  const onMouseMove = (e: MouseEvent) => {
+    updateActiveByCell(e.target);
+  };
+  const onMouseLeave = () => {
+    setActiveCol(null);
+    setActiveRow(null);
+  };
+
+  // 在 wrapper (dom) 上监听 — dot 自身在 wrapper 内,hover dot 时也会 mouseleave tbody
+  // 走 wrapper 而非 tbody 让 dot 浮起后鼠标移到 dot 上不会丢 active
+  dom.addEventListener('mousemove', onMouseMove);
+  dom.addEventListener('mouseleave', onMouseLeave);
 
   // ── CellSelection handle:监听 view 状态(rAF 防抖)─────────
 
@@ -175,7 +238,6 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
         csHandle.style.display = 'none';
         return;
       }
-      // 确认 CellSelection 是本 table 的(检查 anchorCell 在本 table 范围内)
       const tablePos = typeof getPos === 'function' ? getPos() : undefined;
       if (tablePos == null) return;
       const tableNode = view.state.doc.nodeAt(tablePos);
@@ -186,7 +248,6 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
         csHandle.style.display = 'none';
         return;
       }
-      // 算选区 DOM bounding rect(取所有 selectedCell 的并集)
       const cells = Array.from(
         tbody.querySelectorAll('.selectedCell'),
       ) as HTMLElement[];
@@ -218,10 +279,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     openMenu(csHandle, 'cellSelection', {});
   });
 
-  // ── 监听 view 状态变化触发器(M2 简易方案:event-driven + rAF)─────
-  //
-  // 真正的方案是 PluginView dispatch,但 NodeView 没原生订阅 view state 的口子。
-  // 用户行为入口:鼠标点 / 拖、键盘按、focus 切换 — 都监听一遍。
+  // ── view 状态监听(CellSelection handle 用)─────
 
   const onUserAction = () => updateCellSelectionHandle();
   view.dom.addEventListener('mouseup', onUserAction);
@@ -230,7 +288,6 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
 
   // ── 初始 / update / destroy ─────────────────────────────
 
-  // 首次 build(NodeViewConstructor 返回后 tbody 才被 PM 填充,延后一帧)
   requestAnimationFrame(() => {
     rebuildColumnDots();
     rebuildRowDots();
@@ -242,8 +299,6 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     contentDOM: tbody,
     update(node) {
       if (node.type.name !== 'table') return false;
-      // 行数 / 列数 / colwidth 变化都进这里(PM 会在节点变更时调 update)
-      // 延后一帧避免 colgroup 还没 sync,DOM rect 计算误差
       requestAnimationFrame(() => {
         rebuildColumnDots();
         rebuildRowDots();
@@ -253,12 +308,13 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     },
     ignoreMutation(mutation) {
       const target = mutation.target as Node;
-      // 只允许 tbody 的 mutation 通过到 PM
       if (!tbody.contains(target)) return true;
       return false;
     },
     destroy() {
       if (csRafId != null) cancelAnimationFrame(csRafId);
+      dom.removeEventListener('mousemove', onMouseMove);
+      dom.removeEventListener('mouseleave', onMouseLeave);
       view.dom.removeEventListener('mouseup', onUserAction);
       view.dom.removeEventListener('keyup', onUserAction);
       view.dom.removeEventListener('mousedown', onUserAction);
