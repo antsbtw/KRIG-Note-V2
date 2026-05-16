@@ -10,3 +10,6 @@ debug/
 docs/temp/
 .env
 .env.local
+
+# Test checklist prompt drafts (临时 prompt 模板,不入仓)
+docs/RefactorV2/test-checklists/*-prompt.md
