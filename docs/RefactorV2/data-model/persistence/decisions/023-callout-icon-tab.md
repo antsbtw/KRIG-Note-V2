@@ -567,6 +567,32 @@ export const CALLOUT_ICON_PICKS = [
   §7.1 字面"Icons tab 搜索全库性能(1952 icon)中风险"字面**不再适用**(v2 字面只搜 24),
   全库搜索独立 sub-phase 字面再评估。
 
+- **偏离 #7 (Step 5.6 字面路径 B — 扩 24 → 68 置顶 icon)**:
+  用户字面 Step 5.5 截图通过后字面提问"1952 icon 只看到 32 个?"(实际 24),
+  字面诊断为偏离 #5 字面后果(全库搜索字面留独立 sub-phase,v2 仅 24 置顶)。
+  字面拍板路径 B:扩 callout-icons.ts 字面到 ~50,字面覆盖 Notion/Linear 高频子集。
+
+  字面实施期 grep 字面全数命中 44 个候选(原计划 25,字面扩展时发现多个高频字面应纳入):
+  - 收藏/标记: Heart, Bookmark, Star, Tag(4)
+  - 奖励/成就: Trophy, Award, Crown, Rocket(4)
+  - 能量/特效: Zap, Sparkles(2)
+  - 提醒/时间: Bell, BellRing, Calendar, Timer(4)
+  - 通讯: Mail, Send, Inbox(3)
+  - 文件/数据: Folder, FileText, Database(3)
+  - 工具/开发: Code, Terminal, Bug, GitBranch(4)
+  - 媒体: Music, Camera, Image(3)
+  - 用户/社交: User, Users, Smile(3)
+  - 环境/天气: Sun, Moon, Cloud, Globe(4)
+  - 商业/探索: ShoppingCart, MapPin, Eye, Search, Target(5)
+  - 数据/可视: Activity, TrendingUp, Filter, Layers(4)
+  - 食物: Coffee(1)
+
+  字面 `Github` icon 缺失(lucide 1.14 字面无 Github brand named export,字面已剔除候选,
+  用 GitBranch 替代;字面如需 git 平台 icon 走独立 brand-icons SDK 字面独立 sub-phase)。
+
+  字面总计 24 + 44 = 68 个置顶 icon,字面 bundle 增量 ~22KB(每 icon ~500B tree-shake),字面可接受。
+  字面零 schema/API/NodeView 改动 — 全数据驱动(callout-icons.ts 单文件追加)。
+
 - **偏离 #6 (Step 5.5.3 字面 emoji-mart Picker 仅 Emojis tab 时 mount)**:
   v1 字面 emoji-mart useEffect 字面无 tab 守门(Icons tab 字面 disabled 时无需考虑)。
   Step 5.5.3 字面双 tab 切换 active 时,字面在 effect 头加 `if (activeTab !== 'emojis') return`,
