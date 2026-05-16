@@ -24,7 +24,6 @@ import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 import { tableNodeView } from './node-view';
 import { tableKeymapPlugin } from './keymap';
-import { buildTableDecorationsPlugin } from './decorations';
 import { tableEditing, columnResizing } from 'prosemirror-tables';
 
 // ── cell / header attrs 共用 ──
@@ -90,17 +89,11 @@ export const tableSpec: BlockSpec = {
   displayName: 'Table',
   spec: tableNodeSpec,
   nodeView: tableNodeView,
-  // L5-B3.7 plugin 套件:
-  // - tableEditing()           库内置,处理 selection / keymap / 删除保护(必装)
-  // - columnResizing()         库内置,拖 cell 边界改 colwidth + 同步 colgroup(必装)
-  // - tableKeymapPlugin        Tab / Shift-Tab 自定义(末 cell Tab 加新行)
-  // - buildTableDecorationsPlugin (M2)列 dot widget decoration 锐 cell
-  plugin: () => [
-    tableEditing(),
-    columnResizing(),
-    tableKeymapPlugin(),
-    buildTableDecorationsPlugin(),
-  ],
+  // L5-B3.7 plugin 三件套:
+  // - tableEditing()    库内置,处理 selection / keymap / 删除保护(必装)
+  // - columnResizing()  库内置,拖 cell 边界改 colwidth + 同步 colgroup(必装)
+  // - tableKeymapPlugin Tab / Shift-Tab 自定义(末 cell Tab 加新行)
+  plugin: () => [tableEditing(), columnResizing(), tableKeymapPlugin()],
   containerRule: 'block+',
   cascadeBoundary: true,
 };

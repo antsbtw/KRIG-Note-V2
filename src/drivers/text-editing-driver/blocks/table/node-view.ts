@@ -54,7 +54,16 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   table.appendChild(tbody);
   scroll.appendChild(table);
 
-  // ── handle bar(行 left 沿;列 dot 走 PM Decoration 不在这)─────────────
+  // ── 列 handle bar(挂 scroll 内 — 跟 table 同级,scroll 自动跟随)─────
+  // 视图(cell)与操作(bar)解耦:bar 不是 cell 子元素,不被 cell 背景/border-collapse
+  // 渲染遮挡;但 bar 在 scroll wrapper 内 → 横向滚动时 bar 跟 cell 同步移动
+
+  const colBar = document.createElement('div');
+  colBar.classList.add('krig-table-block__col-bar');
+  colBar.setAttribute('contenteditable', 'false');
+  scroll.appendChild(colBar);
+
+  // ── 行 handle bar(行不滚动,挂外层 dom 即可)─────────────
 
   const rowBar = document.createElement('div');
   rowBar.classList.add('krig-table-block__row-bar');
@@ -92,7 +101,68 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     popupController.show(POPUP_ID, anchor);
   }
 
-  // ── 重建行 dots(放 table 右沿 border,避开左侧 block-handle)─────────────
+  // ── 重建列 dots(挂 scroll 内,bar 独立于 cell — 不被 cell 渲染遮挡)─────
+  //
+  // 几何:colBar 是 scroll absolute 子元素(scroll position:relative)。
+  // dot.left 按 cell 中心相对 scroll content 原点(含 scrollLeft)算 →
+  // colBar 自身 transform translateX(-scrollLeft) 跟随 scroll 同步 cell 移动。
+  // 这样 bar 视觉上跟 cell 完全锐定。
+
+  function rebuildColumnDots(): void {
+    colBar.innerHTML = '';
+    const firstRow = tbody.querySelector(':scope > tr');
+    if (!firstRow) return;
+    const cells = Array.from(firstRow.children) as HTMLElement[];
+    if (cells.length === 0) return;
+
+    const scrollRect = scroll.getBoundingClientRect();
+    const tableRect = table.getBoundingClientRect();
+    const tableTopOffset = tableRect.top - scrollRect.top;
+    const BAR_THICKNESS = 6;
+    const DOT_LEN = 32;
+
+    cells.forEach((cell, colIdx) => {
+      const cellRect = cell.getBoundingClientRect();
+      // cell 中心 X 在 scroll content 坐标系(scroll.scrollLeft 是被滚出的距离)
+      const cellCenterX = cellRect.left + cellRect.width / 2 - scrollRect.left + scroll.scrollLeft;
+
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.classList.add('krig-table-block__col-dot');
+      dot.setAttribute('contenteditable', 'false');
+      dot.title = '操作该列';
+      dot.style.left = `${cellCenterX - DOT_LEN / 2}px`;
+      dot.style.width = `${DOT_LEN}px`;
+      dot.style.top = `${tableTopOffset + 0.5 - BAR_THICKNESS / 2}px`;
+      dot.style.height = `${BAR_THICKNESS}px`;
+      dot.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openMenu(dot, 'column', { colIdx });
+      });
+      colBar.appendChild(dot);
+    });
+
+    syncColBarToScroll();
+  }
+
+  // colBar 整体 translateX 抵消 scrollLeft,让 dot 视觉跟随 cell
+  function syncColBarToScroll(): void {
+    colBar.style.transform = `translateX(${-scroll.scrollLeft}px)`;
+  }
+
+  // scroll 监听:rAF 节流避免高频抖动
+  let scrollRafId: number | null = null;
+  const onScroll = () => {
+    if (scrollRafId != null) return;
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null;
+      syncColBarToScroll();
+    });
+  };
+  scroll.addEventListener('scroll', onScroll, { passive: true });
+
+  // ── 重建行 dots(放 table 左沿 border,挂外层 dom — 纵向不滚)─────────────
 
   function rebuildRowDots(): void {
     rowBar.innerHTML = '';
@@ -200,6 +270,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
 
   // 首次 build(NodeViewConstructor 返回后 tbody 才被 PM 填充,延后一帧)
   requestAnimationFrame(() => {
+    rebuildColumnDots();
     rebuildRowDots();
     updateCellSelectionHandle();
   });
@@ -209,10 +280,10 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     contentDOM: tbody,
     update(node) {
       if (node.type.name !== 'table') return false;
-      // 行数 / 行高变化都进这里(PM 会在节点变更时调 update)
+      // 行数 / 列数 / colwidth 变化都进这里(PM 会在节点变更时调 update)
       // 延后一帧避免 colgroup 还没 sync,DOM rect 计算误差
-      // 列 dot 由 decorations plugin 管,NodeView 不再处理
       requestAnimationFrame(() => {
+        rebuildColumnDots();
         rebuildRowDots();
         updateCellSelectionHandle();
       });
@@ -233,6 +304,8 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     },
     destroy() {
       if (csRafId != null) cancelAnimationFrame(csRafId);
+      if (scrollRafId != null) cancelAnimationFrame(scrollRafId);
+      scroll.removeEventListener('scroll', onScroll);
       view.dom.removeEventListener('mouseup', onUserAction);
       view.dom.removeEventListener('keyup', onUserAction);
       view.dom.removeEventListener('mousedown', onUserAction);

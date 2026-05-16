@@ -750,6 +750,8 @@
 .krig-pm-host .ProseMirror .krig-table-block__scroll {
   overflow-x: auto;
   max-width: 100%;
+  /* col-bar 是 scroll 的 absolute 子元素,需要 scroll 作为定位 anchor */
+  position: relative;
 }
 
 .krig-pm-host .ProseMirror .krig-pm-table {
@@ -771,9 +773,6 @@
 
 .krig-pm-host .ProseMirror .krig-pm-table th {
   background: rgba(138, 180, 248, 0.08);
-  /* background 不画到 border 区,让 col dot 在 cell 顶 border 上方那一半
-   * 不被 cell 自身背景遮挡 — 跟 row dot 视觉一致 */
-  background-clip: padding-box;
   font-weight: 600;
   text-align: left;
 }
@@ -811,10 +810,22 @@
   cursor: col-resize;
 }
 
-/* ─── M2 v3:hover handle bars 骑在 table border 线上(Notion-style overlay)───── */
+/* ─── M2 v5:列 bar 挂 scroll 内独立于 cell(视图与操作解耦)+ 行 bar 挂外层 ───── */
 
-/* 列 / 行 handle bar 是 0 尺寸容器,真正定位由内部 dot 处理 */
-.krig-pm-host .ProseMirror .krig-table-block__col-bar,
+/* col-bar:scroll absolute 子;node-view 监听 scroll 给 colBar transform
+ * translateX(-scrollLeft) 让 dot 跟 cell 同步移动。
+ * 容器 0 尺寸,真正定位由内部 dot 处理 */
+.krig-pm-host .ProseMirror .krig-table-block__col-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* row-bar:外层 dom absolute 子(行不滚动) */
 .krig-pm-host .ProseMirror .krig-table-block__row-bar {
   position: absolute;
   top: 0;
@@ -824,38 +835,10 @@
   pointer-events: none;
 }
 
-/* 列 dot:6px 厚 × 32px 长,锐第一行 cell 内部(cell position:relative,
- * dot absolute top:-3 让 cell 上 border 贯穿 dot 中线)。
- * cell 横向滚动时 dot 跟着 cell 走,完全锐定。
- * z-index:3 让 dot 浮在 cell 上沿 border 之上 */
-.krig-pm-host .ProseMirror .krig-table-block__col-dot {
-  position: absolute;
-  /* dot 中线骑在 cell 顶 border 上(top:-3 → dot 跨 [-3,+3])。
-   * 跟 row dot 视觉一致(都贯穿 border)。
-   * z-index:10 + transform 自建堆叠上下文,确保 dot 浮在 cell 内容之上 */
-  top: -3px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 32px;
-  height: 6px;
-  background: transparent;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  padding: 0;
-  z-index: 10;
-  transition: background 0.12s;
-}
-
-.krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__col-dot {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.krig-pm-host .ProseMirror .krig-table-block__col-dot:hover {
-  background: #8ab4f8 !important;
-}
-
-/* 行 dot:暂仍走 wrapper absolute(待 row 锐定阶段一并迁) */
+/* 列 / 行 dot:6px 厚条 + 32px 长,定位由 node-view 显式 top/left/width/height
+ * 设置(让 border 贯穿 dot 中线)。
+ * 列 dot 骑在 table 顶 border;行 dot 骑在 table 左 border */
+.krig-pm-host .ProseMirror .krig-table-block__col-dot,
 .krig-pm-host .ProseMirror .krig-table-block__row-dot {
   position: absolute;
   background: transparent;
@@ -864,14 +847,15 @@
   cursor: pointer;
   pointer-events: auto;
   padding: 0;
-  z-index: 3;
   transition: background 0.12s;
 }
 
+.krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__col-dot,
 .krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__row-dot {
   background: rgba(255, 255, 255, 0.25);
 }
 
+.krig-pm-host .ProseMirror .krig-table-block__col-dot:hover,
 .krig-pm-host .ProseMirror .krig-table-block__row-dot:hover {
   background: #8ab4f8 !important;
 }
