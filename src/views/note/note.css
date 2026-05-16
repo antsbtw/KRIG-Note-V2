@@ -472,6 +472,7 @@
 }
 
 .krig-icons-tab__search {
+  flex: 0 0 auto;
   padding: 6px 10px;
   background: #2a2a2a;
   border: 1px solid #3a3a3a;
@@ -485,8 +486,10 @@
   border-color: #8ab4f8;
 }
 
-/* category 导航条:横排 chip,字面 query 非空时字面隐藏 */
+/* category 导航条:横排 chip,query 非空时隐藏 */
 .krig-icons-tab__category-nav {
+  flex: 0 0 auto;
+  min-height: 32px;
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
