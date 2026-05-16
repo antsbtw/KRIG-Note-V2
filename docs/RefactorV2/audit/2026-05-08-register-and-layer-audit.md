@@ -417,6 +417,60 @@ W5 完工后用户复审提"capability 模块级单例 + driver/slot 直 import 
 
 ---
 
+### 5.3 popup 认清为第六交互 Registry(2026-05-15 emoji-picker sprint 复审)
+
+emoji-picker sprint 期间用户复审"capability 字面 import @slot/triggers/popup-controller + @slot/interaction-registries/popup-registry/* 是否违反分层"。澄清:
+
+**字面性质**:
+- charter § 1.2 字面列出"五大交互各自 Registry":ContextMenuRegistry / ToolbarRegistry / SlashRegistry / HandleRegistry / FloatingToolbarRegistry
+- popup-registry / popup-controller 是 V2 后期(L5-B3.4)补加的**同型基础设施** — capability 注册 popup Component,view/floating-toolbar/keymap 通过 popupController.show 触发
+- charter § 1.2 字面 capability 自注册到 Registry **是合规向上调用**(capability-registry / command-registry 已在 audit § 5.2 字面认清)
+- popup 性质完全同 capability-registry / command-registry — capability 提供内容 + 触发 popup,L4 收集 + 渲染
+
+**认清结果**:
+- popup-registry / popup-controller 作为**第六交互 Registry**,capability 字面允许 import
+- eslint.config.js capability 主块 `no-restricted-imports` 字面把 `@slot/interaction-registries/popup-registry/*` 和 `@slot/triggers/popup-controller` 从禁列**移出**(与 capability-registry/command-registry 同型例外)
+- charter v0.5 修订时**字面追加** popup 入 § 1.2 "五大交互"列表 → 改为"六大交互"
+
+**Follow-up(本 sprint 未做)**:
+- charter v0.5 字面追加 popup 描述
+- 已有 popup integration 文件(emoji-picker / link-panel / color-picker / note-link-search 4 处 + popups.ts + register-pm-commands.ts)字面无需改 import 路径(本来就 import 对的位置,只是 eslint 字面误禁)
+
+### 5.4 ESLint config block 互覆盖 bug 登记(2026-05-15 emoji-picker sprint 发现)
+
+emoji-picker sprint 审计期间发现 V2 eslint.config.js 字面**两个 capability block 互覆盖**让规则失效:
+
+**字面证据**:
+- eslint.config.js line 141-174 字面定义 capability 主块(`no-restricted-imports` patterns 含 9 个禁/例外条目)
+- eslint.config.js line 182-193 字面 "P1-1 严格版屏障 — three 单点屏障" 块 ignores 字面 `canvas-rendering/`,对其他 `capabilities/**` 设了 `no-restricted-imports` 只含 `three / three/*`
+- **ESLint flat config 字面行为**:同一 rule 在多个 config block 之间**相互覆盖**(`{ rule: [...] }` 是替换不是合并),后块字面覆盖前块
+- `npx eslint --print-config src/capabilities/<any>.ts` 字面输出 `no-restricted-imports` 只剩 `three / three/*` patterns
+
+**实证**:
+```
+$ echo "import {x} from '@slot/triggers/popup-controller';" > src/capabilities/__test.ts
+$ echo "import {y} from '@workspace/foo';" >> src/capabilities/__test.ts
+$ echo "import {z} from '@views/note/x';" >> src/capabilities/__test.ts
+$ npx eslint src/capabilities/__test.ts
+exit 0(0 错误 - 应该全报 error)
+```
+
+**影响**:
+- audit § 2.6 [P2-6] 字面声明 "Wave 3.3 已修 capability 反依赖 slot",**实际只做了物理迁移(channel.ts → @shared/event-bus),lint 拦截层一直没生效**
+- audit § 5.2 W5 字面 capability 不互拉 / 不向上拉 view 等多条规则字面写了**全部不工作**
+- **任何**违反 capability 主块 patterns 的新增字面**都不会被 lint 拦**
+
+**严重程度**: **P0 Critical**(影响整个 V2 lint 屏障可信度)
+
+**修法(独立 sub-phase,不本 sprint 动)**:
+- 把 P1-1 three 屏障字面**合入** capability 主块的 patterns 数组(line 141-174 内追加 one entry),删第二个 block
+- 或两个 block 字面用**不同的 rule id**(如 一个用 `no-restricted-imports`,一个用某 custom rule)避免覆盖
+- 配合 W5/Wave 3 字面规则一并启用 + 清理被暴露的存量违规(预计 10+ 处)
+
+**Follow-up sub-phase**:`fix/eslint-capability-block-merge`(待启动)
+
+---
+
 ## 6. 度量
 
 整改完成后需要满足的可观测指标:

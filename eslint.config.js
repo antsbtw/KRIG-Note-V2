@@ -136,8 +136,13 @@ export default [
   // - 禁互拉(charter § 1.2:能力间不能互相 install)
   // - 禁 view / driver(向上调用)
   //
-  // 例外:@slot/capability-registry / @slot/command-registry — charter § 1.2
-  // 注册原则要求 capability 自注册到 Registry 并暴露 commands,这是合理的向上调用。
+  // 例外(charter § 1.2 注册原则字面允许 capability 向上注册到 Registry):
+  // - @slot/capability-registry / @slot/command-registry — capability 自注册 + 暴露 commands
+  // - @slot/interaction-registries/popup-registry/* — popup 是第六交互 Registry
+  //   (charter § 1.2 字面五大: ContextMenu/Toolbar/Slash/Handle/FloatingToolbar,
+  //    popup 是 V2 后期补的同型基础设施;audit/2026-05-08 §5.3 字面认清)
+  // - @slot/triggers/popup-controller — popup 的命令式控制器,与 popup-registry 配对,
+  //   capability 注入 popup 后必须能 .show()/hide() 触发(与 capability-registry 同型)
   {
     files: ['src/capabilities/**/*.{ts,tsx}'],
     rules: {
@@ -146,8 +151,14 @@ export default [
           // 禁 slot 视图层基础设施(audit P2-6;capability-registry/command-registry 不在此列,见上)
           { group: ['@slot/workspace-bus/*'],
             message: 'capability 不依赖 workspace-bus,共享原语在 @shared/event-bus(audit P2-6 / Wave 3.3)' },
-          { group: ['@slot/triggers/*', '@slot/frame-bindings/*',
-                    '@slot/interaction-registries/*', '@slot/toolbar-registry/*',
+          // @slot/triggers/* 禁列 — 但 popup-controller 例外(第六交互配对控制器)
+          { group: ['@slot/triggers/*', '!@slot/triggers/popup-controller'],
+            message: 'capability 不依赖 slot triggers(charter § 1.1);例外:popup-controller(第六交互注册原则)' },
+          // @slot/interaction-registries/* 禁列 — 但 popup-registry 例外(第六交互 Registry)
+          { group: ['@slot/interaction-registries/*', '!@slot/interaction-registries/popup-registry/*'],
+            message: 'capability 不依赖 slot 视图层基础设施(charter § 1.1);例外:popup-registry(第六交互注册原则)' },
+          { group: ['@slot/frame-bindings/*',
+                    '@slot/toolbar-registry/*',
                     '@slot/nav-side-registry/*', '@slot/menu-registry/*',
                     '@slot/view-type-registry/*', '@slot/diagnostics/*',
                     '@slot/shared-ui/*'],

@@ -105,6 +105,8 @@
 | SDK | 锁定 major | 当前基线版本 | package.json range | 锁定决议 | 锁定日期 | 备注 |
 |---|---|---|---|---|---|---|
 | surrealdb | 2 | 2.0.3 | `^2.0.3` | [decision 020](decisions/020-sub-phase-3a-tx-true-atomicity.md) | 2026-05-13 | `beginTransaction()` API 在 2.x 字面已支持;**允许** caret range 自动到 < 3.0.0 的 minor/patch(2.1.x / 2.2.x 等);**禁止** 3.x 升级(独立 sub-phase)|
+| emoji-mart | 5 | 5.6.0 | `^5.6.0` | (无 decision-XXX,见 §6 v1.8 备注) | 2026-05-15 | `feature/callout-as-container` emoji picker Notion 风格升级。**仅装核心包**,不装 `@emoji-mart/react`(其 peer 字面 `^16.8 \|\| ^17 \|\| ^18` 不含 19,但源码 20 行只用 useRef/useEffect 实测兼容;V2 改走手写 React wrapper 调 `new Picker({ref, data, theme, onEmojiSelect, ... })`,绕开 peer 字面冲突 + 不被 3 年未更新的官方包装阻塞)。**允许** caret 到 < 6.0.0;**禁止** 6.x 升级(独立 sub-phase)|
+| @emoji-mart/data | 1 | 1.2.1 | `^1.2.1` | (同上) | 2026-05-15 | emoji-mart 5.x 配套数据集;`{ data }` prop 字面传入 Picker;1.x 内部数据 schema 与 emoji-mart 5.x 锁定。**允许** caret 到 < 2.0.0;**禁止** 2.x 升级(独立 sub-phase)|
 
 **列字段语义**:
 - **锁定 major**:不可跨越的硬版本号。跨此 major 升级必须独立决议(§2.4 流程)。
@@ -228,6 +230,7 @@
 | 2026-05-14 | v1.5 | sub-phase 022 实施期 13 偏离 (3B + 10D) + 第 24/25/26/27/30 次教训累积反向更新: §2.2 第 8 步加 "决议字面引用 storage API 调用语法 grep EdgeFilter 字段名" + "决议字面引用 V2 既有目录前必须 grep 实证" (沿第 24/25 次); §2.2 第 9 步加 "Bash tool persistent cwd 假设不可靠每 Bash 独立 cd 前缀" + "typecheck error code 沿 sub-phase 实际 fail 形态" + "健康检查 helper 自愈 vs 告警分离" (沿第 26/27/30 次). 授权依据: decision 022 §0.5.quat 用户 2026-05-14 P0 授权 (沿 sub-phase 021 §0.5.ter 同模式) | [decision 022 §11 第 24-27 + 30 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 | 2026-05-14 | v1.6 | sub-phase 022 Step 5.12 总指挥审计反馈 + 第 31 次教训反向更新: §5.8 新加第 31 次教训字面 "完成报告 lint 字面口径必须区分 pre-existing vs sub-phase 引入, 完成判据矩阵 typecheck + lint 双跑双绿, commit 矩阵行数以 `git diff --stat <merge-base>..HEAD` 实测口径为准弃用逐 commit 累加法"; §2.2 第 9 步同步登记. 授权依据: decision 022 §10.D-11 + Step 5.12 用户 2026-05-14 P0 拍板 (沿 v1.5 同模式) | [decision 022 §10.D-11 + §11 第 31 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
 | 2026-05-14 | v1.7 | sub-phase 022 Step 5.13 UI 回归 [N-5] folder handler narrow guard + [N-5b] view 订阅链漏配对 + 第 32 次教训反向更新 (**字面两子层扩展**): §5.9 新加第 32 次教训字面 "view type union / enum 加项 + capability 责任拆分时必须 grep 全谱两子层 — 第 7-A 层 main 端 IPC handler narrow guard 字面值 + 第 7-B 层 view 端订阅链 onXChanged 配对"; §2.2 第 8 步同步登记 + 完整传播层 grep 清单字面**第 7 层拆 7-A / 7-B 两子层** (沿 v1.4 字面 6 层清单字面扩展). 授权依据: decision 022 §10.D-12 + §10.D-12b + Step 5.13 用户 2026-05-14 P0 拍板 (沿 v1.5 / v1.6 同模式) | [decision 022 §10.D-12 + §10.D-12b + §11 第 32 次](decisions/022-sub-phase-022-ebook-thought-migration.md) |
+| 2026-05-15 | v1.8 | §4 表新增 2 行:`emoji-mart@5.6.0` + `@emoji-mart/data@1.2.1`(`feature/callout-as-container` sprint emoji picker Notion 风格升级)。**无 decision-XXX 决议文档支撑**(前端 UI sprint,用户 P0 授权"走轻量登记":SDK policy §3.1 字面新增 SDK 绑定必须改 §4 表 + 走业务决议 §8 反向更新流程,本次为前端 UI sprint 例外授权,仅登记 §4 表 + §6 修订记录,不开 decision-XXX)。**字面证据**:`npm view emoji-mart peerDependencies` = 空(0 peer 冲突);`@emoji-mart/react@1.1.1` 源码 20 行 grep 实证只用 `useRef`/`useEffect`(React 16.8+ 基础 hook,19 100% 保留),包 3 年未更新 peer 字面 `^16.8 \|\| ^17 \|\| ^18` 不含 19;V2 决策走手写 React wrapper 调 `new Picker({ ref, data, theme, ... })` 绕开 peer 字面冲突。授权依据:2026-05-15 用户 P0 拍板 "走轻量登记 + caret range" | (无 decision-XXX;sprint 完工 commit hash 见 §4 备注) |
 
 ---
 
