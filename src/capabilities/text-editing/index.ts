@@ -35,6 +35,7 @@ import { sanitizeAtoms } from './converters/sanitize-atoms';
 import { registerTextEditingPopups } from './ui/popups';
 import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integration';
 import { registerCalloutEmojiIntegration } from './ui/emoji-picker/integration';
+import { registerCalloutIconRenderer } from './ui/emoji-picker/callout-icon-renderer';
 import { registerTextEditingCommands } from './commands/register-pm-commands';
 // C8 W-1:PM 通用菜单 item 工厂(view 端通过 api.ui.* 取,W5 合规)
 import * as floatingToolbarFactory from './ui/floating-toolbar/items';
@@ -80,6 +81,7 @@ capabilityRegistry.register({
 registerTextEditingPopups();
 registerNoteLinkSearchIntegration();
 registerCalloutEmojiIntegration();
+registerCalloutIconRenderer();
 
 // C7:capability 加载时一次性注册 PM 通用命令(46 个;原 NoteView 注册全部搬来)。
 // N-1:同 id 全工程唯一 register 调用 — 同步删 NoteView 旧 register。

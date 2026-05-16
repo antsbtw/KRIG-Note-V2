@@ -458,3 +458,64 @@
   color: #999;
   font-size: 13px;
 }
+
+/* ── D023 Icons tab(callout lucide icon 网格)── */
+
+.krig-icons-tab {
+  display: flex;
+  flex-direction: column;
+  width: 352px;
+  height: 435px;
+  padding: 12px;
+  box-sizing: border-box;
+  gap: 10px;
+}
+
+.krig-icons-tab__search {
+  padding: 6px 10px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  outline: none;
+}
+
+.krig-icons-tab__search:focus {
+  border-color: #8ab4f8;
+}
+
+.krig-icons-tab__grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.krig-icons-tab__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #d0d0d0;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.krig-icons-tab__cell:hover {
+  background: #2f2f2f;
+  color: #fff;
+}
+
+.krig-icons-tab__empty {
+  grid-column: 1 / -1;
+  padding: 24px 8px;
+  color: #777;
+  font-size: 13px;
+  text-align: center;
+}

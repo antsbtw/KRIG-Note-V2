@@ -552,6 +552,30 @@ export const CALLOUT_ICON_PICKS = [
   NodeView 字面 fallback 路径(emoji cycle,capability 未装兜底)字面同步清 iconName,
   对齐 setCalloutEmoji 互斥副作用语义(§4.4),防 fallback 路径绕过互斥造成 iconName 残留。
 
+- **偏离 #5 (Step 5.5.3 字面搜索范围:24 置顶 only,字面全库搜索推后)**:
+  决议 §3.3 字面承诺 "24 Notion 风格 icon 置顶 + 搜索过滤全库"。
+  Step 5.5.3 实施期字面发现 lucide-react 全库 1952 icon 字面两条路径都不可行:
+  - 整包 import + tree-shake:搜索字面要按名取所有 icon → 全打包 bundle ~1MB(emoji picker 过重)
+  - per-icon dynamic import:每 icon 字面单 chunk,搜索体验差(每输入字符触发若干网络请求)
+
+  字面拍板 **5.5.3-A 路径**:v2 字面只搜 24 置顶 icon(`callout-icons.ts` 字面 keywords + label + name 匹配),
+  覆盖 v1 Callouts 24 emoji 一对一映射,字面够用。
+
+  字面全库搜索留独立 sub-phase(可走 dynamic import + 预生成 search index,
+  或字面 import lucide 仅 `dynamicIconImports.mjs` 名字 manifest 加按需加载)。
+
+  §7.1 字面"Icons tab 搜索全库性能(1952 icon)中风险"字面**不再适用**(v2 字面只搜 24),
+  全库搜索独立 sub-phase 字面再评估。
+
+- **偏离 #6 (Step 5.5.3 字面 emoji-mart Picker 仅 Emojis tab 时 mount)**:
+  v1 字面 emoji-mart useEffect 字面无 tab 守门(Icons tab 字面 disabled 时无需考虑)。
+  Step 5.5.3 字面双 tab 切换 active 时,字面在 effect 头加 `if (activeTab !== 'emojis') return`,
+  effect 字面 deps 加 `activeTab` — 切 Icons tab 字面 cleanup(picker 销毁),
+  切回 Emojis 字面 re-run 重建。
+
+  字面副作用:切 tab 字面 picker re-mount,字面有 loading 闪现(~50ms,首次后 emoji-mart data 字面已缓存,
+  re-mount 字面比首次快)。可接受,且字面与"切到 Icons tab 字面 picker 不可见"的语义一致。
+
 - **偏离 #4 (Step 5.4 字面 AtomCalloutContent SSOT 不存在)**:
   决议 §4.3 字面承诺"`AtomCalloutContent` 字面增加 `iconName?: string \| null` 可选字段"。
   Step 5.4 实施期字面 grep 确认 V2 字面**无 `AtomCalloutContent` interface SSOT**:
