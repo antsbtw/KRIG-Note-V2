@@ -91,16 +91,19 @@
 
 ---
 
-## F. Callout emoji picker（Notion 风格升级）
+## F. Callout emoji picker（Notion 风格升级 + D023 Icons tab + D024 Upload tab）
 
-> **本 sprint emoji picker 升级要点**：emoji-mart 5.x + Callouts 24 emoji 置顶 + 4 tab 栏（v1 只激活 Emojis）+ 暗色硬编码
+> **本 sprint emoji picker 升级要点**：emoji-mart 5.x + Callouts 24 emoji 置顶 + 4 tab 栏 + 暗色硬编码
+> **D023 升级**：Icons tab 字面解 disabled，lucide-react 全库 1952 icon + Callouts 68 置顶
+> **D024 升级**：Upload tab 字面解 disabled，拖拽 / 文件选择 → mediaPutBase64 → callout 头部 `<img>`（macOS squircle 圆角）
+> **三态字段互斥**：`attrs.emoji + iconName + imageSrc` 字面三字段平级，setter 守门同时只一个非 null
 
 | # | 步骤 | 期望 | 状态 |
 |---|------|------|------|
 | F1 | 点击 callout 的 💡 | picker popup 紧贴 emoji 下方弹出（短暂 loading… 后 emoji-mart 加载完） | ✅ |
 | F2 | picker 内点击新 emoji | callout 头部 emoji 立即更新 + picker 关闭 | ✅ |
 | F3 | 嵌套 callout（外层内层都是 💡），点内层 💡 | picker 弹在**内层** emoji 旁 | ✅ |
-| F4 | picker 顶部 4 tab 栏 | Emojis 白色 active + 下划线；Icons/Upload/Remove 灰色不可点 | ⏳ |
+| F4 | picker 顶部 4 tab 栏（D024 升级） | **Emojis / Icons / Upload** 三者白色可点（active 时下划线）；**Remove** 仍灰色 disabled | ✅ |
 | F5 | picker 内容区第一个分类 | "Callouts" 置顶，含 24 个 callout-friendly emoji（💡👉☝️👌🔑🚧⚠️🔥📌✂️❓🚫⛔⏰☎️🚨♻️✅🔒📎📖🗣️➡️📣🛠️⚙️） | ⏳ |
 | F6 | Callouts 之后的分类顺序 | Frequently used → Smileys & People → ... → Flags（emoji-mart 9 内置类） | ⏳ |
 | F7 | 搜索框输入 "fire" | 列出 🔥 等火焰类 emoji（英文搜索，v1 不含中文 i18n） | ⏳ |
@@ -108,6 +111,40 @@
 | F9 | 选中某 emoji 后重开 picker | Frequently used 区出现该 emoji | ⏳ |
 | F10 | 系统主题切 light → V2 | picker **仍是暗色**（V2 现无 light mode，硬编码 dark） | ⏳ |
 | F11 | viewport 右下角创建 callout 点 💡 | picker 自动翻上方/左方避让，不溢出 viewport | ⏳ |
+
+### F.icons（D023 Icons tab）
+
+| # | 步骤 | 期望 | 状态 |
+|---|------|------|------|
+| F-i1 | 切 Icons tab | 显示 nav row（Callouts + 42 lucide 分类 chip）+ 搜索框 + Callouts 68 icon 网格 | ✅ |
+| F-i2 | 滚到任一分类 | IntersectionObserver lazy 渲染 icon 网格（非首屏的分类滚到时才填） | ✅ |
+| F-i3 | 点 nav chip "accessibility" | 平滑滚到该 section | ✅ |
+| F-i4 | 搜索框输入 "calendar" | 单 flat grid 显示所有匹配 icon（绕过 category 分组） | ✅ |
+| F-i5 | 点任一 icon | callout 头部渲 lucide `<svg>` + picker 关闭 + emoji 字段保留（fallback） | ✅ |
+
+### F.upload（D024 Upload tab）
+
+| # | 步骤 | 期望 | 状态 |
+|---|------|------|------|
+| F-u1 | 切 Upload tab | 显示拖拽虚线框 + 🖼️ 图标 + "拖拽图片到此处，或" + 蓝按钮"选择图片" + 灰字"支持 PNG / JPEG / WEBP / GIF / SVG（最大 20 MB）" | ✅ |
+| F-u2 | 点"选择图片" → 选 PNG | 切预览态：缩略图（squircle 圆角）+ 文件名 + 蓝"确认"+ 灰"重选" | ✅ |
+| F-u3 | 点"确认" | 按钮变"上传中..." → mediaPutBase64 → callout 头部渲 `<img>`（macOS squircle 22.37% border-radius）+ picker 关闭 | ✅ |
+| F-u4 | 拖 .txt 到拖拽区 | inline 红字"不支持的文件类型: text/plain"，不切预览态 | ✅ |
+| F-u5 | 拖图片到拖拽区（拖入过程） | 虚线框变蓝色 `#8ab4f8` + 浅蓝底，松手切预览态 | ✅ |
+| F-u6 | 选超过 20 MB 的图 → 点确认 | inline 红字"上传失败: ..."，callout 不变，popup 不关，可重选 | ✅ |
+| F-u7 | 预览态点"重选" | 回拖拽虚线框态，可重新选 | ✅ |
+| F-u8 | reload note | callout `<img>` 字面恢复（imageSrc 透明持久化） | ✅ |
+
+### F.mutex（三态字段互斥 — D023 + D024）
+
+| # | 步骤 | 期望 | 状态 |
+|---|------|------|------|
+| F-m1 | callout 当前是 image → 切 Emojis 选 emoji | 头部变 emoji 字符（imageSrc + iconName 都清空） | ✅ |
+| F-m2 | callout 当前是 image → 切 Icons 选 icon | 头部变 lucide `<svg>`（imageSrc 清空，emoji 字段保留 fallback） | ✅ |
+| F-m3 | callout 当前是 icon → 切 Upload 上传图 | 头部变 `<img>`（iconName 清空，emoji 字段保留 fallback） | ✅ |
+| F-m4 | callout 当前是 emoji → 切 Upload 上传图 | 头部变 `<img>`（iconName + emoji 字段保留作底层 fallback） | ✅ |
+| F-m5 | D023 之前的旧笔记（只有 emoji） | 正常渲 emoji，无报错 | ✅ |
+| F-m6 | D023 之后的笔记（有 iconName） | 正常渲 lucide icon，无报错 | ✅ |
 
 ---
 
@@ -173,3 +210,5 @@
 | 2026-05-15 | callout Notion 风格 CSS + 修 emoji height 撑爆导致 popup 飘位（F1/F3）| c1e3cc3 |
 | 2026-05-15 | emoji picker 升级 Notion 风格（emoji-mart + Callouts 24 emoji 置顶 + 4 tab 栏）| 4a7c8eb |
 | 2026-05-15 | callout 第一个子 block 隐藏 block-handle（避免与 💡 撞挤）| b366fdb |
+| 2026-05-16 | D023 Icons tab 实施完成（lucide 1952 icon 全库 + Callouts 68 置顶 + emoji-mart 同款 nav）| 82ea08c |
+| 2026-05-16 | D024 Upload tab 实施完成（拖拽 / 选图 → mediaPutBase64 → callout 头部 `<img>` macOS squircle）| (本 sub-phase) |

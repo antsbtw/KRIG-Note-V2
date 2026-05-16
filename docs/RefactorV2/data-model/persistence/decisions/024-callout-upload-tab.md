@@ -830,12 +830,12 @@ commit `docs(callout): D024 §10 deviations + §11 lessons (Step 5.7 self-test)`
 
 ## §8 反向更新清单
 
-| # | 字面文件 | 字面更新 |
-|---|------|------|
-| 1 | [SDK-version-binding-policy.md §4](../SDK-version-binding-policy.md) | 加 D024 字面 SDK 锁定记录(实质零新增 SDK,字面备注"消费既有 media-storage capability") |
-| 2 | [test-checklists/callout-as-container.md](../../../../test-checklists/callout-as-container.md) | F 段 emoji picker 升级到 4 tab 字面 3 active(emojis / icons / upload) |
-| 3 | 本 §8 勾选 | 实施完成后字面勾此清单 |
-| 4 | [MEMORY.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/MEMORY.md) | 加 `project_decision_024_callout_upload_done` 记 D024 完成状态 + 下游 D025 待立 |
+| # | 字面文件 | 字面更新 | 状态 |
+|---|------|------|------|
+| 1 | [SDK-version-binding-policy.md §6](../SDK-version-binding-policy.md) | §6 修订记录加 v1.9 字面 "本 sub-phase 字面零新增 SDK 备案"(§4 表无新行,仅时间线登记) | ✅ |
+| 2 | [test-checklists/callout-as-container.md](../../../../test-checklists/callout-as-container.md) | F 段升级:F4 字面三 tab active(Emojis/Icons/Upload)+ 新加 F.icons / F.upload / F.mutex 三段共 19 个字面测试场景 + 历史改动记录加 D024 commit | ✅ |
+| 3 | 本 §8 勾选 | 实施完成后字面勾此清单 | ✅ |
+| 4 | [MEMORY.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/MEMORY.md) | 加 `project_decision_024_callout_upload_done` 记 D024 完成状态 + 下游 D025 全局媒体画廊待立 | ✅ |
 
 ---
 
@@ -856,10 +856,74 @@ commit `docs(callout): D024 §10 deviations + §11 lessons (Step 5.7 self-test)`
 
 > 字面实施期凡是字面与本决议字面不符的决策都登记到此 — 教训累积参考 [feedback_decision_grep_verify_complete_propagation.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/feedback_decision_grep_verify_complete_propagation.md)。
 
-(实施期待填)
+**字面零偏离**(2026-05-16 用户测试 PASS 15 场景,无 §10 偏离登记)。
+
+字面实施期改动严格按 §5 Step 5.1-5.6 顺序执行,字面所有字段命名 / API 签名 / NodeView 分支结构 / CSS class 名 / 错误形态字面与 §3.1 / §3.3 / §3.4 / §4 一致。
 
 ---
 
 ## §11 教训登记
 
-(实施期待填)
+### §11.1 字面方法论教训
+
+#### 11.1.1 字面"提示词字段名 imageMediaUrl"被 grep 既有约定推翻
+
+字面 prompt §1.2 字面预设字段名 `attrs.symbolType + attrs.symbolValue` 或 `attrs.imageMediaUrl`,字面**实施前 grep 既有命名约定**([image-block/spec.ts](../../../../../src/drivers/text-editing-driver/blocks/image/spec.ts) / [file-block/spec.ts](../../../../../src/drivers/text-editing-driver/blocks/file-block/spec.ts))字面发现 V2 字面零 `xxxMediaUrl` 长名先例,字面统一 `src + mediaId` 双字段约定。字面最终定 `imageSrc` 字面对齐既有 image-block PM 字段语义。
+
+**教训字面**:**"提示词字面预设字段名"字面不是字面决议**,字面拍板前必须 grep 既有命名约定,字面**避免凭空造词**导致字段命名分裂。本教训字面对齐 [feedback_decision_grep_verify_complete_propagation.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/feedback_decision_grep_verify_complete_propagation.md) "决议字面拍板必须前瞻 grep V2 完整传播层 6 层 + 同类型 SSOT 位置"。
+
+#### 11.1.2 用户字面"上传库"诉求字面被数据模型范围拦下来
+
+字面用户字面反馈 Q4 提"上传后作为独立的库显示在上传的下方,方便下一次选择"。字面**未直接实施**,字面理由实证:
+
+1. mediaStore 字面 `putBase64` 不写 index([media-store-impl.ts](../../../../../src/platform/main/media/media-store-impl.ts) line 262 注释)→ 老用户磁盘数据画廊**字面看不见**
+2. index key 字面是 originalUrl 而非 mediaId(line 195+239)→ 字面 list API 需要改 key 结构 + migration
+3. 未定语义:删除引用计数 / 缩略图生成 / 跨笔记隐私 / SSOT 归属
+
+字面留 decision-025 独立 sub-phase 字面理由:**画廊跨视图(callout / image-block / 未来 ebook 封面 / graph node 图)字面需要先回 charter §1.3 评审 SSOT 归属**,不是 callout sub-phase 字面 scope。
+
+**教训字面**:用户字面"顺手 N+1"诉求字面**不应该被 sub-phase 顺手吃下**,字面**贸然改数据模型**字面触发 [decision 008 storage-layer-interface.md](../008-storage-layer-interface.md) / [decision 009 migration-strategy.md](../009-migration-strategy.md) 字面接口变更评审。字面回 [feedback_strict_compliance_workflow.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/feedback_strict_compliance_workflow.md) "不挂'过渡方案'标签"原则。
+
+### §11.2 字面技术教训
+
+#### 11.2.1 字面 PM schema attrs 字面平级新增字段字面零 atom migration
+
+字面 D023 加 iconName + 本 D024 加 imageSrc,字面**两次都零 atom migration**,字面理由:
+- PM schema `default: null` 字面字段不存在时兜底
+- atoms-to-pm 字面 `?? null` 字面双层兜底
+- 旧 atom 字面 `c.imageSrc === undefined` 字面消费侧 `?? null` 字面恢复 null
+
+字面**字段独立 / default 友好 + 双层兜底** = atom migration 字面可省略。字面对比方案 B/C 字面破坏既有字段结构字面要 migration,**字面字段独立平级方案的字面隐性收益**。
+
+#### 11.2.2 字面三态字段渲染分支字面对齐 D023 已稳定模式字面降低 review 负担
+
+字面 NodeView `renderSymbol` 字面三态判定字面直接扩展 D023 既有的两态判定结构(`if iconName / else emoji` → `if imageSrc / else if iconName / else emoji`)。字面**复用既有架构字面降低 review 负担 + 提高字面正确性**:
+- destroy 钩子字面调 `renderer.unmount(symbolEl)` 字面 D023 已写,本 sub-phase 字面零改动
+- ignoreMutation 字面 D023 已守 symbolEl,字面 `<img>` 字面挂同 host 字面继承守门
+
+**教训字面**:**字面前一个 sub-phase 留下的稳定模式字面尽量延用**,字面对齐 [project_decision_023_callout_icon_tab_done.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/project_decision_023_callout_icon_tab_done.md) 字面 "B 路径 renderer 闭环"模式字面 reusable。
+
+#### 11.2.3 字面 capability 字面通过 `requireCapabilityApi` 间接调 mediaStore 字面 charter §1.1 合规
+
+字面 UploadTabPanel 字面**不直 import `@storage/*`**,字面 `requireCapabilityApi<MediaStorageApi>('media-storage')` 间接拿运行时 + `import type { MediaStorageApi } from '@capabilities/media-storage/types'` 拿类型。字面对齐 [FileTab.tsx](../../../../../src/capabilities/text-editing/ui/link-panel/FileTab.tsx) 既有 v1 已稳定模式,字面零跨层穿透。
+
+**教训字面**:**audit Wave 3.1 字面 P1-5 media-store 字面 capability 化 follow-up 完成后**,字面所有新功能字面**自动**走 capability 层(本 sub-phase 字面已是字面消费方,字面零改动),字面 audit 整改字面长效收益。
+
+### §11.3 字面流程教训
+
+#### 11.3.1 字面"先讨论方案再动手"字面 4 项确认字面避免后续重做
+
+字面实施前字面给出 250 字内方案简述 + 4 项确认点(字段名 / 优先级 / 圆角 / 上传库),字面用户字面 4 项**均给出反馈调整**:
+- Q1 字段名:用户字面"参考已有命名,避免冲突",字面触发 §11.1.1 grep 既有约定
+- Q2 优先级:用户字面"已经有 3 tab,没必要优先级"字面触发字段独立单点判定字面定义
+- Q3 圆角:用户字面"macOS 一致方圆形"字面定 `border-radius: 22.37%`
+- Q4 上传库:用户字面"建议作为独立库下方显示"字面触发 §11.1.2 scope 取舍
+
+**字面 4 项反馈字面均字面影响最终设计**,字面**字面无 4 项确认字面直接动手**字面会导致字段命名分裂 / 优先级争议 / 圆角风格不一 / scope 蔓延。字面对齐 [feedback_strict_compliance_workflow.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/feedback_strict_compliance_workflow.md) 字面 "字面要求即当下要求"。
+
+#### 11.3.2 字面"v1 是参考,V2 是工作目录"字面 grep 字面 cwd 守门字面再次验证
+
+字面实施期字面有一次 grep `src/drivers/` 字面 cwd 落在 V1 字面报 "No such file or directory"(V1 字面无 `src/drivers/`,V2 才有),字面立即字面 `cd /Users/wenwu/Documents/VPN-Server/KRIG-Note-V2` 显式 cd 修复。字面对齐 [feedback_v2_is_workspace_v1_is_reference.md](../../../../../../.claude/projects/-Users-wenwu-Documents-VPN-Server-KRIG-Note/memory/feedback_v2_is_workspace_v1_is_reference.md) 字面 "**所有 cwd 敏感命令每次 Bash 都显式 cd V2**"。
+
+**教训字面**:字面 grep 字面**报路径不存在**字面是字面 V1/V2 错位字面早期信号,字面**立即字面 cd V2 重跑**字面避免后续误判 V2 字面真无该模块。
+
