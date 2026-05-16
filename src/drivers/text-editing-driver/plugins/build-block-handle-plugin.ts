@@ -343,13 +343,13 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           return;
         }
 
-        // callout 第一个子 block:handle 与 emoji 💡 视觉撞挤,隐藏 handle。
-        // 后续子 block (第 2 行及以后) 仍有 handle 可拖。
-        // 用户可通过 callout 顶 padding 区(emoji 旁)拿到 callout 容器自身的 handle
-        // 拖动整个 callout。
+        // callout / toggleList 第一个子 block:handle 与 emoji 💡 或 ▼ 三角视觉撞挤,
+        // 隐藏 handle。后续子 block (第 2 行及以后) 仍有 handle 可拖。
+        // 用户可通过容器顶 padding 区(emoji / 三角旁)拿到容器自身的 handle 拖动整个 callout/toggle。
         try {
           const $start = view.state.doc.resolve(blockStart);
-          if ($start.parent.type.name === 'callout' && $start.index() === 0) {
+          const parentName = $start.parent.type.name;
+          if ((parentName === 'callout' || parentName === 'toggleList') && $start.index() === 0) {
             dom.style.opacity = '0';
             currentPos = -1;
             return;

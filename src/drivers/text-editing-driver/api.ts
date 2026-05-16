@@ -716,10 +716,39 @@ export const textEditingDriverApi = {
       return;
     }
 
+    // 容器节点(callout / toggleList)turn into:
+    // 这两个节点 content='block+',无法直接 setNodeMarkup 改成非容器类型
+    // (schema 冲突 — paragraph/heading content=inline,list 的 itemType 也不接 block+)。
+    // 语义:**解包**容器,把全部子 block 提到容器位置(unwrap);
+    //   - target='callout'/'toggle-list' → 等于"换壳",把容器换成对应类型;
+    //   - 其他 target → 先 unwrap,再对**第一个子 block**应用 turn into。
+    if (node.type.name === 'callout' || node.type.name === 'toggleList') {
+      // 换壳:callout ↔ toggle-list
+      if (target === 'callout' || target === 'toggle-list') {
+        const newType = target === 'callout' ? schema.nodes.callout : schema.nodes.toggleList;
+        if (!newType) return;
+        const tr = view.state.tr.setNodeMarkup(pos, newType, target === 'toggle-list' ? { open: true } : null);
+        view.dispatch(tr);
+        view.focus();
+        return;
+      }
+      // 其他 target:解包 container,把子内容替换 container,然后递归 turnInto 第一个子 block
+      const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, node.content);
+      view.dispatch(tr);
+      // 第一个子 block 现在落在 pos 位置(去掉 container 的开标 1 个 token 后)
+      this.turnIntoAt(instanceId, pos, target);
+      return;
+    }
+
     // paragraph 切换 — 切到 paragraph 节点类型
     if (target === 'paragraph') {
       const paragraphType = schema.nodes.paragraph;
       if (!paragraphType) return;
+      // 已经是 paragraph(非 title)→ 无需操作
+      if (node.type.name === 'paragraph') {
+        view.focus();
+        return;
+      }
       const tr = view.state.tr.setNodeMarkup(pos, paragraphType, { isTitle: false });
       view.dispatch(tr);
       view.focus();
