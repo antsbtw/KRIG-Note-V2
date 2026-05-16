@@ -821,10 +821,35 @@
   pointer-events: none;
 }
 
-/* 列 / 行 dot:6px 厚条 + 32px 长,定位由 node-view 显式 top/left/width/height
- * 设置(让 border 贯穿 dot 中线)。z-index 高于 cell 让 dot 浮在 border 之上。
- * 列 dot 骑在 table 顶 border;行 dot 骑在 table 右 border(避开左侧 block-handle)*/
-.krig-pm-host .ProseMirror .krig-table-block__col-dot,
+/* 列 dot:6px 厚 × 32px 长,锐第一行 cell 内部(cell position:relative,
+ * dot absolute top:-3 让 cell 上 border 贯穿 dot 中线)。
+ * cell 横向滚动时 dot 跟着 cell 走,完全锐定。
+ * z-index:3 让 dot 浮在 cell 上沿 border 之上 */
+.krig-pm-host .ProseMirror .krig-table-block__col-dot {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  z-index: 3;
+  transition: background 0.12s;
+}
+
+.krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__col-dot {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.krig-pm-host .ProseMirror .krig-table-block__col-dot:hover {
+  background: #8ab4f8 !important;
+}
+
+/* 行 dot:暂仍走 wrapper absolute(待 row 锐定阶段一并迁) */
 .krig-pm-host .ProseMirror .krig-table-block__row-dot {
   position: absolute;
   background: transparent;
@@ -837,12 +862,10 @@
   transition: background 0.12s;
 }
 
-.krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__col-dot,
 .krig-pm-host .ProseMirror .krig-table-block:hover .krig-table-block__row-dot {
   background: rgba(255, 255, 255, 0.25);
 }
 
-.krig-pm-host .ProseMirror .krig-table-block__col-dot:hover,
 .krig-pm-host .ProseMirror .krig-table-block__row-dot:hover {
   background: #8ab4f8 !important;
 }

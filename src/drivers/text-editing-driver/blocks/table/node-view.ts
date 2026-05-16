@@ -99,46 +99,30 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   // ── 重建列 dots(按当前 table 列数,DOM 量取每列 left + width)─────────────
 
   function rebuildColumnDots(): void {
-    colBar.innerHTML = '';
-    const firstRow = tbody.querySelector('tr');
+    // 清理旧 dot:遍历所有 cell 把 .krig-table-block__col-dot 移除
+    // (M2 早期 dot 在 colBar 容器内;现在 dot 直接挂 cell 内 → 锐 cell,scroll 跟随)
+    tbody.querySelectorAll(':scope > tr > th > .krig-table-block__col-dot, :scope > tr > td > .krig-table-block__col-dot').forEach((d) => d.remove());
+
+    const firstRow = tbody.querySelector(':scope > tr');
     if (!firstRow) return;
     const cells = Array.from(firstRow.children) as HTMLElement[];
     if (cells.length === 0) return;
 
-    // dot 容器 colBar 是 absolute,跟 table-block 同源;table 在 table-block 内通过
-    // scroll wrapper 嵌套,有可能 scroll wrapper 加 margin/scroll offset → 显式量
-    // table 相对 table-block 的偏移,让 dot center 落在 table 顶 border 中线上
-    const tableRect = table.getBoundingClientRect();
-    const blockRect = dom.getBoundingClientRect();
-    const tableOffsetY = tableRect.top - blockRect.top; // table 顶 border 上沿
-    const BAR_THICKNESS = 6;
-    const DOT_LEN = 32;
-
-    let visualColIdx = 0;
-    cells.forEach((cell) => {
-      const cellRect = cell.getBoundingClientRect();
-      const left = cellRect.left - blockRect.left;
-      const width = cellRect.width;
-
+    cells.forEach((cell, colIdx) => {
       const dot = document.createElement('button');
       dot.type = 'button';
       dot.classList.add('krig-table-block__col-dot');
       dot.setAttribute('contenteditable', 'false');
+      dot.setAttribute('data-krig-decoration', 'true'); // ignoreMutation 守门标记
       dot.title = '操作该列';
-      // dot 固定 32px 宽,严格居中 cell 水平中点;
-      // 纵向:dot 中线落在 table 顶 border 中线(border 1px:中线在 tableOffsetY + 0.5)
-      dot.style.left = `${left + width / 2 - DOT_LEN / 2}px`;
-      dot.style.width = `${DOT_LEN}px`;
-      dot.style.top = `${tableOffsetY + 0.5 - BAR_THICKNESS / 2}px`;
-      dot.style.height = `${BAR_THICKNESS}px`;
-      const colIdx = visualColIdx;
       dot.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         openMenu(dot, 'column', { colIdx });
       });
-      colBar.appendChild(dot);
-      visualColIdx += 1;
+      // 直接 append 到 cell 内 — cell 已 position:relative,dot CSS 相对 cell 定位
+      // (cell scroll 时 dot 自动跟随,无需 absolute 算坐标)
+      cell.appendChild(dot);
     });
   }
 
@@ -270,8 +254,15 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     },
     ignoreMutation(mutation) {
       const target = mutation.target as Node;
-      // 只允许 tbody 的 mutation 通过到 PM
+      // tbody 外的 mutation(colgroup / handle bar 等)不通过
       if (!tbody.contains(target)) return true;
+      // tbody 内但落在我们自己加的装饰 dot(data-krig-decoration)上的 mutation 不通过
+      // — 我们 append col-dot 到 cell 内,PM 不该把 dot 当 cell 子内容
+      if (target instanceof Element) {
+        if (target.closest('[data-krig-decoration]')) return true;
+      } else if (target.parentElement?.closest('[data-krig-decoration]')) {
+        return true;
+      }
       return false;
     },
     destroy() {
