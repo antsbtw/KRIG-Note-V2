@@ -6,6 +6,8 @@
  * id 驼峰避免短横线问题(参考 [feedback_pm_schema_naming.md])。
  *
  * D023:新增 attrs.iconName(lucide icon 名),非 null 时优先于 emoji 渲染。
+ * D024 §4.1:新增 attrs.imageSrc(用户上传图 media:// URL),非 null 时优先于 iconName / emoji。
+ *           三字段字面平级互斥(setter 守门,见 driver/api.ts setCalloutEmoji/Icon/Image)。
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -22,6 +24,8 @@ const calloutNodeSpec: NodeSpec = {
     bookAnchor: { default: null },
     // D023 §4.1: lucide icon 名,null 走 emoji 模式
     iconName: { default: null },
+    // D024 §4.1: 用户上传图 media:// URL,null 走 iconName / emoji 模式
+    imageSrc: { default: null },
   },
   parseDOM: [
     {
@@ -31,6 +35,7 @@ const calloutNodeSpec: NodeSpec = {
         return {
           emoji: el.getAttribute('data-emoji') || '💡',
           iconName: el.getAttribute('data-icon-name') || null,
+          imageSrc: el.getAttribute('data-image-src') || null,
         };
       },
     },
@@ -42,6 +47,9 @@ const calloutNodeSpec: NodeSpec = {
     };
     if (node.attrs.iconName) {
       attrs['data-icon-name'] = node.attrs.iconName as string;
+    }
+    if (node.attrs.imageSrc) {
+      attrs['data-image-src'] = node.attrs.imageSrc as string;
     }
     return ['div', attrs, 0];
   },
