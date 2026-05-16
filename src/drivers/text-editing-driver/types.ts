@@ -58,6 +58,7 @@ export interface TextEditingHostProps {
  * - pasteMedia:     剪贴板图片 → image block(NoteView mediaStore 集成)
  * - dropCursor:     拖拽时蓝线指示插入位置
  * - slash:          / 触发 slashMenuController(turn-into 入口)
+ * - blockSelection: Notion-like 整块多选(Esc 选块 / Shift+Arrow 扩选 / Cmd+C/X/Del / 整块蓝底)
  *
  * **不暴露的 plugin**(始终开,PM 编辑器必备):
  * - history / inputRules / mark+heading keymap / list+codeBlock+hardBreak keymap /
@@ -81,6 +82,7 @@ export interface TextEditingPluginToggles {
   pasteMedia?: boolean;
   dropCursor?: boolean;
   slash?: boolean;
+  blockSelection?: boolean;
   // opt-in(默认 false,view 显式 true 开启)
   titleGuard?: boolean;
 }

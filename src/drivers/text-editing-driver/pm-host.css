@@ -2166,3 +2166,17 @@
   word-break: break-word;
   white-space: pre-wrap;
 }
+
+/* ─── block-selection plugin:Notion-like 整块圆角蓝底 ─── */
+/* Decoration.node 包裹的 top-level block 加此 class;选区底色覆盖整块 padding 区 */
+.ProseMirror .krig-block-selected {
+  background-color: rgba(77, 154, 255, 0.22);
+  border-radius: 4px;
+  /* 让选区比 block 内容稍微外扩;不影响布局 */
+  box-shadow: 0 0 0 2px rgba(77, 154, 255, 0.22);
+}
+
+/* 选块期间隐藏文本选区高亮(避免双层底色叠加)*/
+.ProseMirror .krig-block-selected ::selection {
+  background-color: transparent;
+}
