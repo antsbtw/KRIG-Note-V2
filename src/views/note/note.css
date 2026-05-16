@@ -606,3 +606,147 @@
   font-size: 13px;
   text-align: center;
 }
+
+/* ── D024 Upload tab(callout 用户图上传)── */
+
+.krig-upload-tab {
+  display: flex;
+  flex-direction: column;
+  width: 352px;
+  height: 435px;
+  padding: 16px;
+  box-sizing: border-box;
+  gap: 12px;
+}
+
+.krig-upload-tab__dropzone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 2px dashed #3a3a3a;
+  border-radius: 8px;
+  background: #232323;
+  padding: 24px;
+  transition: border-color 80ms ease, background 80ms ease;
+}
+
+.krig-upload-tab--dragging .krig-upload-tab__dropzone {
+  border-color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.08);
+}
+
+.krig-upload-tab__icon {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.krig-upload-tab__hint {
+  color: #aaa;
+  font-size: 13px;
+}
+
+.krig-upload-tab__pick-btn {
+  padding: 8px 18px;
+  background: #3a3a3a;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.krig-upload-tab__pick-btn:hover {
+  background: #4a4a4a;
+}
+
+.krig-upload-tab__formats {
+  color: #777;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.krig-upload-tab__preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #232323;
+  border-radius: 8px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.krig-upload-tab__preview-img {
+  max-width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: 22.37%; /* 与 callout 字面 squircle 一致 */
+}
+
+.krig-upload-tab__preview-name {
+  color: #ccc;
+  font-size: 12px;
+  text-align: center;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.krig-upload-tab__actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.krig-upload-tab__confirm-btn,
+.krig-upload-tab__reset-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid #4a4a4a;
+  transition: background 80ms ease, opacity 80ms ease;
+}
+
+.krig-upload-tab__confirm-btn {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.krig-upload-tab__confirm-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.krig-upload-tab__reset-btn {
+  background: #3a3a3a;
+  color: #ccc;
+}
+
+.krig-upload-tab__reset-btn:hover:not(:disabled) {
+  background: #4a4a4a;
+}
+
+.krig-upload-tab__confirm-btn:disabled,
+.krig-upload-tab__reset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.krig-upload-tab__error {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 12px;
+  line-height: 1.4;
+}
