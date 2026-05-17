@@ -89,10 +89,9 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
     props: {
       handleDrop(view, event) {
         // 多块拖动优先:block-selection plugin 标记了 activeMultiDrag → 走整组移动
-        const multiIndices = getActiveMultiBlockDrag(instanceId);
-        if (multiIndices) {
+        if (getActiveMultiBlockDrag(instanceId)) {
           try {
-            performMultiBlockDrop(view, multiIndices, event.clientX, event.clientY);
+            performMultiBlockDrop(view, event.clientX, event.clientY);
             dnd.emit('dnd.completed', { source: null });
             // 即便 no-op 也返回 true 阻断 PM 默认(不允许文本 drop)
             return true;

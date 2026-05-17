@@ -1,210 +1,202 @@
 /**
- * block-selection plugin — Notion-like 整块多选
+ * block-selection plugin — Notion-like 同级 sibling 多块选择
  *
- * 设计:
- *  - 独立 PluginState `selectedIndices: number[] | null`(top-level block 索引升序);
- *    null = 无块选择;非空 = 选中的 top-level block 序号集合。
- *  - 视觉:每选中 block 包 Decoration.node + CSS class `krig-block-selected`(整块圆角蓝底);
- *    同时给 deco 设 draggable="true" 让浏览器允许拖动起点。
- *  - 行为:Esc 选当前块 / 再按解除;Shift+Arrow 扩缩选区;
- *         Copy/Cut 序列化选中 blocks 为 PM Slice + HTML + plain text;
- *         Backspace/Delete 删除全部选中 blocks;
- *         **选中区按住拖动**:整组用 dropPoint 找合法位 → delete+insert(参考 block-handle);
- *         **选中区右键**:弹出独立 context menu(复制/剪切/粘贴)。
- *  - 自动解除:任何文档/选区变化(非本插件 meta)→ 清空 selectedIndices;
- *    mousedown 落在选中区**外**才解除(落在选中区内保留,让拖动/右键能识别选中态)。
+ * 设计规则(对齐用户三条约定):
+ *  1. "块" = handle 视觉单元(与 block-handle 一致)
+ *     - 共用 _shared/handle-block.ts 的 resolveHandleBlock
+ *     - list 内取 listItem/taskItem;其他取最深 group='block' 节点
+ *  2. 多选只选**同级 sibling**
+ *     - PluginState 记录 parentStart + childIndices,Shift+Arrow 不跨出 parent
+ *  3. 拖动可到任意位置
+ *     - dropPoint 算法允许的任何插入点(doc 顶层 / 其他容器内 / 容器间)
+ *     - drop 后从 mappedDrop 反推新 parent + childIndices,选中态跟随
  *
- * 多块复制粘贴:走 PM 标准三格式(application/x-prosemirror-slice + text/html via
- *   DOMSerializer + text/plain via textContent),内部粘贴自动还原结构,外部粘贴降级文本/HTML。
+ * 行为:
+ *  - Esc 选光标所在 handle block / 再按解除
+ *  - Shift+Arrow 同级扩缩
+ *  - Backspace/Delete/Enter/字符 替换或删除整组
+ *  - Cmd+C / Cmd+X / Cmd+V 走 PM 三格式 clipboard
+ *  - ⋮⋮ handle 拖动整组(block-handle plugin 接管)
+ *  - 右键弹独立 context menu(复制/剪切/粘贴)
  *
- * 粒度:**仅 top-level block**(list 整组算 1 块、callout/table 整体算 1 块)。
- *   list-item 单条多选 / 嵌套块多选不支持(避免序列化跨边界 fragment 失败)。
+ * 多块复制粘贴:走 PM 标准三格式(application/x-prosemirror-slice + text/html +
+ *   text/plain),内部还原结构,外部降级文本/HTML。
  */
 
-import { Plugin, PluginKey, TextSelection, type Command } from 'prosemirror-state';
+import { Plugin, PluginKey, TextSelection, type Command, type EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
-import { Fragment, Slice, DOMSerializer } from 'prosemirror-model';
+import { Fragment, Slice, DOMSerializer, type Node } from 'prosemirror-model';
 import { dropPoint } from 'prosemirror-transform';
+import { resolveHandleBlock, listSiblings, type SiblingInfo } from './_shared/handle-block';
 
 export const blockSelectionKey = new PluginKey<BlockSelectionState>(
   'text-editing-driver:block-selection',
 );
 
 interface BlockSelectionState {
-  /** 升序的 top-level block 索引;null = 无块选择 */
-  indices: number[] | null;
-  /** 扩选锚点(第一次选中的 index);Shift+Arrow 以此为基准计算端点 */
-  anchorIndex: number | null;
+  /** 父节点在 doc 内的 before pos;-1 表示 parent = doc 自身 */
+  parentStart: number;
+  /** parent 内被选中的连续 child 索引(升序);空 = 无选择 */
+  childIndices: number[];
+  /** 扩选锚点(parent 内 child index)*/
+  anchorChildIdx: number;
 }
 
-const EMPTY: BlockSelectionState = { indices: null, anchorIndex: null };
+const EMPTY: BlockSelectionState = { parentStart: -1, childIndices: [], anchorChildIdx: -1 };
 
 interface BlockSelectionMeta {
-  indices: number[] | null;
-  anchorIndex: number | null;
+  parentStart: number;
+  childIndices: number[];
+  anchorChildIdx: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 纯读 helper(导出给 selection-source 用)
+// 内部 helpers
 // ─────────────────────────────────────────────────────────────────────
 
-export function getBlockSelectionIndices(state: import('prosemirror-state').EditorState): number[] | null {
-  const pluginState = blockSelectionKey.getState(state);
-  return pluginState?.indices ?? null;
+/** parentStart=-1 → doc 自身;否则 doc.nodeAt(parentStart) */
+function resolveParent(state: EditorState, parentStart: number): Node | null {
+  if (parentStart === -1) return state.doc;
+  if (parentStart < 0 || parentStart >= state.doc.content.size) return null;
+  return state.doc.nodeAt(parentStart);
+}
+
+/** 从 PluginState 拿到选中 sibling 的 SiblingInfo[] (按 parent 内 index 升序)*/
+function getSelectedSiblings(state: EditorState): SiblingInfo[] | null {
+  const s = blockSelectionKey.getState(state);
+  if (!s || s.childIndices.length === 0) return null;
+  const parent = resolveParent(state, s.parentStart);
+  if (!parent) return null;
+  const sibs = listSiblings(parent, s.parentStart);
+  return s.childIndices
+    .map((i) => sibs[i])
+    .filter((info): info is SiblingInfo => info !== undefined);
+}
+
+function clearMeta(): BlockSelectionMeta {
+  return { parentStart: -1, childIndices: [], anchorChildIdx: -1 };
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 工具:top-level index ↔ pos / node 转换
+// 纯读 API(给 selection-source / 其他 plugin)
 // ─────────────────────────────────────────────────────────────────────
 
-interface TopLevelBlockInfo {
-  index: number;
-  start: number;    // node 起点(before 位置)
-  end: number;      // node 终点(after 位置)
-  node: import('prosemirror-model').Node;
+/** 选中块在 doc 内的 before pos 数组;null = 无选择 */
+export function getBlockSelectionPositions(state: EditorState): number[] | null {
+  const sibs = getSelectedSiblings(state);
+  if (!sibs || sibs.length === 0) return null;
+  return sibs.map((s) => s.start);
 }
 
-function listTopLevelBlocks(doc: import('prosemirror-model').Node): TopLevelBlockInfo[] {
-  const out: TopLevelBlockInfo[] = [];
-  let offset = 0;
-  for (let i = 0; i < doc.childCount; i++) {
-    const node = doc.child(i);
-    out.push({ index: i, start: offset, end: offset + node.nodeSize, node });
-    offset += node.nodeSize;
-  }
-  return out;
+/** 选中块数量(给 selection-source 判 kind 用)*/
+export function getBlockSelectionCount(state: EditorState): number {
+  const s = blockSelectionKey.getState(state);
+  return s?.childIndices.length ?? 0;
 }
 
-function getTopLevelIndexAtPos(doc: import('prosemirror-model').Node, pos: number): number | null {
-  const $pos = doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
-  if ($pos.depth < 1) return null;
-  return $pos.index(0);
-}
+// ─────────────────────────────────────────────────────────────────────
+// 多块拖动 module-level state(block-handle 接管 dragstart/dragend)
+// ─────────────────────────────────────────────────────────────────────
 
-/** 根据鼠标坐标算出 top-level block index;界外返回 null */
-function getTopLevelIndexAtCoords(
-  view: EditorView,
-  clientX: number,
-  clientY: number,
-): number | null {
-  const result = view.posAtCoords({ left: clientX, top: clientY });
-  if (!result) return null;
-  return getTopLevelIndexAtPos(view.state.doc, result.pos);
-}
-
-/** 模块级:跨实例 drag 状态(浏览器 dataTransfer 在 drop 阶段会被清,只能用模块变量传) */
 let activeMultiDrag: {
   instanceId: string;
-  indices: number[];
+  parentStart: number;
+  childIndices: number[];
 } | null = null;
 
-// ─────────────────────────────────────────────────────────────────────
-// 跨 plugin 协作 API — 给 block-handle plugin 使用
-// ─────────────────────────────────────────────────────────────────────
-
 /**
- * block-handle dragstart 时调用:如果指定的 fromPos(单块起拖点) 在当前 block 选区内,
- * 标记为多块拖动并返回 true(block-handle 不需要再写自己的单块 activeDrag)。
+ * block-handle dragstart 时调用:fromPos 是 ⋮⋮ 所属块的 before pos。
+ * 检查该块在不在当前 plugin 选区内;在 → 标记多块拖动并返回 true。
  *
- * 返回 false 表示当前不需要多块拖动,block-handle 走原单块路径。
+ * 注:< 2 块时退回单块(单块走 block-handle 原路径,避免无谓走多块逻辑)。
  */
 export function tryStartMultiBlockDrag(
-  state: import('prosemirror-state').EditorState,
+  state: EditorState,
   fromPos: number,
   instanceId: string,
 ): boolean {
-  const indices = blockSelectionKey.getState(state)?.indices ?? null;
-  if (!indices || indices.length < 2) return false;
-  const hitIdx = getTopLevelIndexAtPos(state.doc, fromPos);
-  if (hitIdx === null || !indices.includes(hitIdx)) return false;
-  activeMultiDrag = { instanceId, indices: [...indices] };
+  const s = blockSelectionKey.getState(state);
+  if (!s || s.childIndices.length < 2) return false;
+  // fromPos 是 block 的 before pos,+1 进入 block 内部以走 resolveHandleBlock
+  const block = resolveHandleBlock(state.doc, fromPos + 1);
+  if (!block) return false;
+  if (block.parentStart !== s.parentStart) return false;
+  if (!s.childIndices.includes(block.indexInParent)) return false;
+  activeMultiDrag = {
+    instanceId,
+    parentStart: s.parentStart,
+    childIndices: [...s.childIndices],
+  };
   return true;
 }
 
-/** 查询当前是否有多块 drag 激活(给 block-handle handleDrop 用)*/
+/** block-handle handleDrop 调:查多块状态(返回 indices 表存在 / null 表无)*/
 export function getActiveMultiBlockDrag(instanceId: string): number[] | null {
   if (!activeMultiDrag || activeMultiDrag.instanceId !== instanceId) return null;
-  return activeMultiDrag.indices;
+  return activeMultiDrag.childIndices;
 }
 
-/** block-handle dragend 时调用清空 */
+/** block-handle dragend 调清空 */
 export function clearMultiBlockDrag(): void {
   activeMultiDrag = null;
 }
 
 /**
- * 多块拖动落 drop 时调用:把选中 blocks 整组移到鼠标坐标对应的合法插入点。
+ * 多块拖动 drop:用 PM dropPoint 找合法位 → delete + insert → 反推新 parent 维护选区。
  *
- * 算法对齐**单块拖动**(build-block-handle-plugin.ts handleDrop):
- *  - posAtCoords → 鼠标位置
- *  - dropPoint(doc, pos, slice) → PM 标准算法找最近合法插入点(与 dropcursor 蓝线同源)
- *  - schema 允许多块进 list/callout/cell 就允许;不允许 dropPoint 自动退到外层
- *  - tr.delete 源区间 → tr.mapping.map(dropPos) → tr.insert
- *
- * @returns true 表示成功处理(block-handle handleDrop 应返回 true 阻断 PM 默认);
- *          false 表示无效(如 drop 在自身区间或界外)
+ * 算法与单块拖动同源(都走 dropPoint),所以蓝线指示位置 = 实际 drop 位置。
  */
 export function performMultiBlockDrop(
   view: EditorView,
-  indices: number[],
   clientX: number,
   clientY: number,
 ): boolean {
+  if (!activeMultiDrag) return false;
   const doc = view.state.doc;
-  const blocks = listTopLevelBlocks(doc);
-  const first = blocks[indices[0]];
-  const last = blocks[indices[indices.length - 1]];
-  if (!first || !last) return false;
+  const parent = resolveParent(view.state, activeMultiDrag.parentStart);
+  if (!parent) return false;
+  const sibs = listSiblings(parent, activeMultiDrag.parentStart);
+  const selected = activeMultiDrag.childIndices
+    .map((i) => sibs[i])
+    .filter((info): info is SiblingInfo => info !== undefined);
+  if (selected.length === 0) return false;
+  const first = selected[0];
+  const last = selected[selected.length - 1];
 
   const result = view.posAtCoords({ left: clientX, top: clientY });
   if (!result) return false;
 
-  // 构造 slice:含选中的所有 top-level node,openStart=openEnd=0 表示"完整块整组"
-  const nodes = indices.map((i) => blocks[i].node);
+  const nodes = selected.map((s) => s.node);
   const slice = new Slice(Fragment.fromArray(nodes), 0, 0);
 
-  // PM 标准 dropPoint:跟 dropcursor 蓝线同源
   const dropPos = dropPoint(doc, result.pos, slice);
   if (dropPos == null) return false;
 
-  // drop 到选区内部 → no-op
+  // drop 到选区自身 → no-op
   if (dropPos >= first.start && dropPos <= last.end) return false;
 
   let tr = view.state.tr.delete(first.start, last.end);
   const mappedDrop = tr.mapping.map(dropPos);
   tr.insert(mappedDrop, Fragment.fromArray(nodes));
 
-  // 维持视觉连续:把 block-selection 更新成新位置(仅在仍是 top-level 时)
+  // 反推新 parent + childIndices 维护选区(用户要求拖动后选中态保留)
   try {
     const newDoc = tr.doc;
     const $newPos = newDoc.resolve(mappedDrop);
-    if ($newPos.depth >= 1) {
-      // 取插入位置在新 doc 中的 top-level index
-      const newFirstIdx = $newPos.index(0);
-      // 校验:确认新位置确实是 top-level(深度为 1,即直接 doc.child)
-      if ($newPos.depth === 1 || (mappedDrop === newDoc.content.size)) {
-        const newIndices: number[] = [];
-        // 处理边界:dropPos == content.size 时 index 取 childCount
-        const baseIdx = mappedDrop === newDoc.content.size
-          ? newDoc.childCount - indices.length
-          : newFirstIdx;
-        for (let i = 0; i < indices.length; i++) newIndices.push(baseIdx + i);
-        tr = tr.setMeta(blockSelectionKey, {
-          indices: newIndices,
-          anchorIndex: baseIdx,
-        } as BlockSelectionMeta);
-      } else {
-        // 嵌进 list/callout/cell 内部 — 解除多块选择(PluginState 无法描述嵌套多选)
-        tr = tr.setMeta(blockSelectionKey, {
-          indices: null,
-          anchorIndex: null,
-        } as BlockSelectionMeta);
-      }
-    }
+    const newParentDepth = $newPos.depth;
+    const newParentStart = newParentDepth === 0 ? -1 : $newPos.before(newParentDepth);
+    const newAnchorChildIdx = $newPos.index(newParentDepth);
+    const newChildIndices: number[] = [];
+    for (let i = 0; i < nodes.length; i++) newChildIndices.push(newAnchorChildIdx + i);
+    tr = tr.setMeta(blockSelectionKey, {
+      parentStart: newParentStart,
+      childIndices: newChildIndices,
+      anchorChildIdx: newAnchorChildIdx,
+    } as BlockSelectionMeta);
   } catch {
-    /* 选区维护失败不阻断主流程 */
+    tr = tr.setMeta(blockSelectionKey, clearMeta());
   }
 
   view.dispatch(tr.scrollIntoView());
@@ -212,41 +204,28 @@ export function performMultiBlockDrop(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 序列化:选中 blocks → 3 格式 clipboard 数据
+// Clipboard 三格式序列化
 // ─────────────────────────────────────────────────────────────────────
 
 interface ClipboardBundle {
   html: string;
   text: string;
-  pmJson: string;  // PM Slice toJSON 字符串(内部粘贴用)
+  pmJson: string;
 }
 
-function buildClipboardFromSelection(
-  view: EditorView,
-  indices: number[],
-): ClipboardBundle | null {
-  if (indices.length === 0) return null;
-  const doc = view.state.doc;
-  const blocks = listTopLevelBlocks(doc);
+function buildClipboardFromSelection(view: EditorView): ClipboardBundle | null {
+  const sibs = getSelectedSiblings(view.state);
+  if (!sibs || sibs.length === 0) return null;
 
-  const nodes: import('prosemirror-model').Node[] = [];
-  for (const idx of indices) {
-    if (idx < 0 || idx >= blocks.length) continue;
-    nodes.push(blocks[idx].node);
-  }
-  if (nodes.length === 0) return null;
-
+  const nodes = sibs.map((s) => s.node);
   const fragment = Fragment.fromArray(nodes);
-  // openStart=0 openEnd=0:顶层完整 block 切片
   const slice = new Slice(fragment, 0, 0);
 
-  // text/html via DOMSerializer
   const serializer = DOMSerializer.fromSchema(view.state.schema);
   const dom = serializer.serializeFragment(fragment);
   const container = document.createElement('div');
   container.appendChild(dom);
 
-  // text/plain:每块 textContent 用 \n\n 连接(与 PM clipboardTextSerializer 兼容)
   const textParts = nodes.map((n) => n.textContent).filter((t) => t.length > 0);
 
   return {
@@ -257,36 +236,31 @@ function buildClipboardFromSelection(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 命令:Esc 选块 / 再按解除
+// 命令:Esc 选当前 handle block / 再按解除
 // ─────────────────────────────────────────────────────────────────────
 
 const escapeBlockSelection: Command = (state, dispatch) => {
-  const cur = blockSelectionKey.getState(state)?.indices ?? null;
+  const s = blockSelectionKey.getState(state);
 
-  // 已有块选择 → 清空(再按 Esc 解除)
-  if (cur && cur.length > 0) {
-    if (dispatch) {
-      const meta: BlockSelectionMeta = { indices: null, anchorIndex: null };
-      dispatch(state.tr.setMeta(blockSelectionKey, meta));
-    }
+  if (s && s.childIndices.length > 0) {
+    if (dispatch) dispatch(state.tr.setMeta(blockSelectionKey, clearMeta()));
     return true;
   }
 
-  // 否则:把光标所在 top-level block 选中
   const head = state.selection.head;
-  const idx = getTopLevelIndexAtPos(state.doc, head);
-  if (idx === null) return false;
+  const block = resolveHandleBlock(state.doc, head);
+  if (!block) return false;
 
   if (dispatch) {
-    const meta: BlockSelectionMeta = { indices: [idx], anchorIndex: idx };
-    // 同步把 PM TextSelection 收成 collapsed,落在该 block 起点 +1(避免文本选区底色叠加)
-    const blocks = listTopLevelBlocks(state.doc);
-    const block = blocks[idx];
-    const tr = state.tr.setMeta(blockSelectionKey, meta);
-    // 把 TextSelection 设到 block 内首位置(尽量靠近原 head 但避免跨块)
+    const meta: BlockSelectionMeta = {
+      parentStart: block.parentStart,
+      childIndices: [block.indexInParent],
+      anchorChildIdx: block.indexInParent,
+    };
+    let tr = state.tr.setMeta(blockSelectionKey, meta);
     try {
       const inside = state.doc.resolve(block.start + 1);
-      tr.setSelection(TextSelection.near(inside, 1));
+      tr = tr.setSelection(TextSelection.near(inside, 1));
     } catch {
       /* ignore */
     }
@@ -296,44 +270,47 @@ const escapeBlockSelection: Command = (state, dispatch) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// 命令:Shift+Arrow 扩缩
+// 命令:Shift+Arrow 同级扩缩(不跨出 parent)
 // ─────────────────────────────────────────────────────────────────────
 
 function extendBlockSelection(direction: -1 | 1): Command {
   return (state, dispatch) => {
-    const cur = blockSelectionKey.getState(state);
-    const doc = state.doc;
-    const total = doc.childCount;
-    if (total === 0) return false;
+    let s = blockSelectionKey.getState(state);
 
-    let indices = cur?.indices ?? null;
-    let anchor = cur?.anchorIndex ?? null;
-
-    // 当前没有块选择:用光标所在 block 作起点
-    if (!indices || indices.length === 0) {
+    if (!s || s.childIndices.length === 0) {
       const head = state.selection.head;
-      const start = getTopLevelIndexAtPos(doc, head);
-      if (start === null) return false;
-      anchor = start;
-      indices = [start];
+      const block = resolveHandleBlock(state.doc, head);
+      if (!block) return false;
+      s = {
+        parentStart: block.parentStart,
+        childIndices: [block.indexInParent],
+        anchorChildIdx: block.indexInParent,
+      };
     }
 
-    // 找当前 head 端(非锚点的端点)
-    const minIdx = indices[0];
-    const maxIdx = indices[indices.length - 1];
-    const headIdx = anchor === minIdx ? maxIdx : minIdx;
+    const parent = resolveParent(state, s.parentStart);
+    if (!parent) return false;
+    const total = parent.childCount;
+
+    const minIdx = s.childIndices[0];
+    const maxIdx = s.childIndices[s.childIndices.length - 1];
+    const headIdx = s.anchorChildIdx === minIdx ? maxIdx : minIdx;
     const newHead = headIdx + direction;
 
+    // 同级边界:不跨出 parent
     if (newHead < 0 || newHead >= total) return false;
 
-    // 重算区间
-    const lo = Math.min(anchor!, newHead);
-    const hi = Math.max(anchor!, newHead);
+    const lo = Math.min(s.anchorChildIdx, newHead);
+    const hi = Math.max(s.anchorChildIdx, newHead);
     const newIndices: number[] = [];
     for (let i = lo; i <= hi; i++) newIndices.push(i);
 
     if (dispatch) {
-      const meta: BlockSelectionMeta = { indices: newIndices, anchorIndex: anchor! };
+      const meta: BlockSelectionMeta = {
+        parentStart: s.parentStart,
+        childIndices: newIndices,
+        anchorChildIdx: s.anchorChildIdx,
+      };
       dispatch(state.tr.setMeta(blockSelectionKey, meta).scrollIntoView());
     }
     return true;
@@ -341,27 +318,21 @@ function extendBlockSelection(direction: -1 | 1): Command {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 命令:删除选中 blocks
+// 命令:删除选中整组
 // ─────────────────────────────────────────────────────────────────────
 
 const deleteSelectedBlocks: Command = (state, dispatch) => {
-  const indices = blockSelectionKey.getState(state)?.indices ?? null;
-  if (!indices || indices.length === 0) return false;
-
-  const blocks = listTopLevelBlocks(state.doc);
-  // 找连续区间的整体范围(top-level 连续 — 我们的 indices 总是连续的)
-  const first = blocks[indices[0]];
-  const last = blocks[indices[indices.length - 1]];
-  if (!first || !last) return false;
+  const sibs = getSelectedSiblings(state);
+  if (!sibs || sibs.length === 0) return false;
+  const first = sibs[0];
+  const last = sibs[sibs.length - 1];
 
   if (dispatch) {
     let tr = state.tr.delete(first.start, last.end);
-    // 清块选择 meta
-    tr = tr.setMeta(blockSelectionKey, { indices: null, anchorIndex: null } as BlockSelectionMeta);
-    // 把 TextSelection 落到删除位置
+    tr = tr.setMeta(blockSelectionKey, clearMeta());
     try {
       const $pos = tr.doc.resolve(Math.min(first.start, tr.doc.content.size));
-      tr.setSelection(TextSelection.near($pos, 1));
+      tr = tr.setSelection(TextSelection.near($pos, 1));
     } catch {
       /* ignore */
     }
@@ -371,7 +342,7 @@ const deleteSelectedBlocks: Command = (state, dispatch) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// 右键菜单
+// 右键菜单(DOM)
 // ─────────────────────────────────────────────────────────────────────
 
 let activeContextMenu: HTMLElement | null = null;
@@ -389,7 +360,6 @@ function showBlockSelectionContextMenu(view: EditorView, clientX: number, client
   const menu = document.createElement('div');
   menu.className = 'krig-block-selection-menu';
   menu.contentEditable = 'false';
-  // 临时定位;append 后再纠偏防溢出视口
   menu.style.cssText =
     `position: fixed; left: ${clientX}px; top: ${clientY}px; z-index: 1000;` +
     `min-width: 160px; padding: 4px 0;` +
@@ -428,27 +398,19 @@ function showBlockSelectionContextMenu(view: EditorView, clientX: number, client
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
   const mod = isMac ? '⌘' : 'Ctrl+';
 
-  addItem('复制', `${mod}C`, () => {
-    runClipboardCommand(view, 'copy');
-  });
-  addItem('剪切', `${mod}X`, () => {
-    runClipboardCommand(view, 'cut');
-  });
-  addItem('粘贴', `${mod}V`, () => {
-    runClipboardCommand(view, 'paste');
-  });
+  addItem('复制', `${mod}C`, () => runClipboardCommand(view, 'copy'));
+  addItem('剪切', `${mod}X`, () => runClipboardCommand(view, 'cut'));
+  addItem('粘贴', `${mod}V`, () => runClipboardCommand(view, 'paste'));
 
   document.body.appendChild(menu);
   activeContextMenu = menu;
 
-  // 防溢出:挂载后量真实尺寸再调整位置
   const r = menu.getBoundingClientRect();
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   if (r.right > vw) menu.style.left = `${Math.max(0, vw - r.width - 8)}px`;
   if (r.bottom > vh) menu.style.top = `${Math.max(0, vh - r.height - 8)}px`;
 
-  // 外部点击 / Esc / 滚动 → 关闭
   const dismiss = (): void => {
     dismissContextMenu();
     document.removeEventListener('mousedown', onOutside, true);
@@ -456,14 +418,11 @@ function showBlockSelectionContextMenu(view: EditorView, clientX: number, client
     window.removeEventListener('scroll', dismiss, true);
   };
   const onOutside = (e: MouseEvent): void => {
-    if (activeContextMenu && !activeContextMenu.contains(e.target as Node)) {
-      dismiss();
-    }
+    if (activeContextMenu && !activeContextMenu.contains(e.target as globalThis.Node)) dismiss();
   };
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') dismiss();
   };
-  // 异步注册避免立即被自身 contextmenu 触发的事件序列误关
   setTimeout(() => {
     document.addEventListener('mousedown', onOutside, true);
     document.addEventListener('keydown', onKey, true);
@@ -471,10 +430,6 @@ function showBlockSelectionContextMenu(view: EditorView, clientX: number, client
   }, 0);
 }
 
-/**
- * 触发浏览器 copy/cut/paste 命令 — execCommand 会触发 PM 的 props.copy/cut/paste 流水线,
- * 自动走我们已实现的 handleDOMEvents.copy/cut 路径(写三格式)。paste 则用 PM 默认。
- */
 function runClipboardCommand(view: EditorView, kind: 'copy' | 'cut' | 'paste'): void {
   view.focus();
   try {
@@ -485,7 +440,7 @@ function runClipboardCommand(view: EditorView, kind: 'copy' | 'cut' | 'paste'): 
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Plugin
+// Plugin 工厂
 // ─────────────────────────────────────────────────────────────────────
 
 export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSelectionState> {
@@ -496,10 +451,13 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
       apply(tr, prev) {
         const meta = tr.getMeta(blockSelectionKey) as BlockSelectionMeta | undefined;
         if (meta !== undefined) {
-          return { indices: meta.indices, anchorIndex: meta.anchorIndex };
+          return {
+            parentStart: meta.parentStart,
+            childIndices: meta.childIndices,
+            anchorChildIdx: meta.anchorChildIdx,
+          };
         }
-        // 文档变化或选区变化(非本插件触发)→ 清空块选择
-        if (prev.indices !== null && (tr.docChanged || tr.selectionSet)) {
+        if (prev.childIndices.length > 0 && (tr.docChanged || tr.selectionSet)) {
           return EMPTY;
         }
         return prev;
@@ -507,28 +465,17 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
     },
     props: {
       decorations(state) {
-        const s = blockSelectionKey.getState(state);
-        if (!s || !s.indices || s.indices.length === 0) return null;
-        const decos: Decoration[] = [];
-        const blocks = listTopLevelBlocks(state.doc);
-        for (const idx of s.indices) {
-          if (idx < 0 || idx >= blocks.length) continue;
-          const b = blocks[idx];
-          decos.push(
-            Decoration.node(b.start, b.end, { class: 'krig-block-selected' }),
-          );
-        }
+        const sibs = getSelectedSiblings(state);
+        if (!sibs || sibs.length === 0) return null;
+        const decos = sibs.map((s) =>
+          Decoration.node(s.start, s.end, { class: 'krig-block-selected' }),
+        );
         return DecorationSet.create(state.doc, decos);
       },
-      // 注:多块拖动 drop 不在本 plugin 处理 — 由 block-handle plugin 在 handleDrop
-      //   里读 activeBlockSelectionForDrag (导出 helper) 后调 moveSelectedBlocks 完成。
-      //   原因:从段落 DOM 起拖经 PM 内部 dragstart 路径不稳定;统一让用户从 ⋮⋮ 起拖,
-      //   行为模型与单块拖动一致(只是 source 是整组)。
       handleKeyDown(view, event) {
-        const indices = blockSelectionKey.getState(view.state)?.indices ?? null;
-        if (!indices || indices.length === 0) return false;
+        const s = blockSelectionKey.getState(view.state);
+        if (!s || s.childIndices.length === 0) return false;
 
-        // 块选择激活时:Backspace/Delete 删除整组
         if (event.key === 'Backspace' || event.key === 'Delete') {
           if (deleteSelectedBlocks(view.state, view.dispatch)) {
             event.preventDefault();
@@ -536,7 +483,6 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
           }
         }
 
-        // ArrowLeft/Right/Up/Down(无 Shift)→ 解除并把光标落到首/尾块
         if (
           !event.shiftKey &&
           (event.key === 'ArrowLeft' ||
@@ -544,17 +490,16 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
             event.key === 'ArrowUp' ||
             event.key === 'ArrowDown')
         ) {
-          const blocks = listTopLevelBlocks(view.state.doc);
-          const toFirst = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
-          const targetIdx = toFirst ? indices[0] : indices[indices.length - 1];
-          const target = blocks[targetIdx];
-          if (target) {
+          const sibs = getSelectedSiblings(view.state);
+          if (sibs && sibs.length > 0) {
+            const toFirst = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+            const target = toFirst ? sibs[0] : sibs[sibs.length - 1];
             try {
               const inside = view.state.doc.resolve(
                 toFirst ? target.start + 1 : target.end - 1,
               );
               const tr = view.state.tr
-                .setMeta(blockSelectionKey, { indices: null, anchorIndex: null } as BlockSelectionMeta)
+                .setMeta(blockSelectionKey, clearMeta())
                 .setSelection(TextSelection.near(inside, toFirst ? 1 : -1))
                 .scrollIntoView();
               view.dispatch(tr);
@@ -566,7 +511,6 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
           }
         }
 
-        // Enter:删除选中块,落到原位置(下游 baseKeymap 不再触发 splitBlock,因为光标已在新位置)
         if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
           if (deleteSelectedBlocks(view.state, view.dispatch)) {
             event.preventDefault();
@@ -574,23 +518,22 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
           }
         }
 
-        // 字符输入(printable key 且无 modifier)→ 替换选中块为输入字符
         if (
           event.key.length === 1 &&
           !event.ctrlKey &&
           !event.metaKey &&
           !event.altKey
         ) {
-          const blocks = listTopLevelBlocks(view.state.doc);
-          const first = blocks[indices[0]];
-          const last = blocks[indices[indices.length - 1]];
-          if (first && last) {
+          const sibs = getSelectedSiblings(view.state);
+          if (sibs && sibs.length > 0) {
+            const first = sibs[0];
+            const last = sibs[sibs.length - 1];
             try {
               let tr = view.state.tr.delete(first.start, last.end);
               const $pos = tr.doc.resolve(Math.min(first.start, tr.doc.content.size));
               tr = tr
                 .setSelection(TextSelection.near($pos, 1))
-                .setMeta(blockSelectionKey, { indices: null, anchorIndex: null } as BlockSelectionMeta)
+                .setMeta(blockSelectionKey, clearMeta())
                 .insertText(event.key);
               view.dispatch(tr.scrollIntoView());
               event.preventDefault();
@@ -604,57 +547,46 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
         return false;
       },
       handleDOMEvents: {
-        // mousedown:右键(button=2)保留选区(让 contextmenu 看见选中态);其他按键清空。
-        // 拖动统一从 block-handle (⋮⋮) 起手,所以 mousedown 在编辑区内不需要"落选区内保留"。
+        // 右键(button=2)保留选区;其他按键清空。拖动从 ⋮⋮ 起手。
         mousedown(view, event) {
-          const cur = blockSelectionKey.getState(view.state)?.indices ?? null;
-          if (!cur || cur.length === 0) return false;
+          const s = blockSelectionKey.getState(view.state);
+          if (!s || s.childIndices.length === 0) return false;
           if (event.button === 2) return false;
-          view.dispatch(
-            view.state.tr.setMeta(blockSelectionKey, {
-              indices: null,
-              anchorIndex: null,
-            } as BlockSelectionMeta),
-          );
+          view.dispatch(view.state.tr.setMeta(blockSelectionKey, clearMeta()));
           return false;
         },
-        // 右键:落选中区内弹独立菜单;落区外 / 无选择走浏览器默认
+        // 右键落选中块内 → 弹独立菜单
         contextmenu(view, event) {
-          const cur = blockSelectionKey.getState(view.state)?.indices ?? null;
-          if (!cur || cur.length === 0) return false;
-          const hitIdx = getTopLevelIndexAtCoords(view, event.clientX, event.clientY);
-          if (hitIdx === null || !cur.includes(hitIdx)) return false;
+          const s = blockSelectionKey.getState(view.state);
+          if (!s || s.childIndices.length === 0) return false;
+          const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          if (!result) return false;
+          const block = resolveHandleBlock(view.state.doc, result.pos);
+          if (!block) return false;
+          if (
+            block.parentStart !== s.parentStart ||
+            !s.childIndices.includes(block.indexInParent)
+          ) return false;
           event.preventDefault();
           showBlockSelectionContextMenu(view, event.clientX, event.clientY);
           return true;
         },
-        // 注:dragstart 不走 handleDOMEvents.dragstart — PM 内部对 dragstart 是
-        //   "直接 DOM addEventListener" 而不是走 props.handleDOMEvents 分发链,
-        //   所以这里挂的回调不会被触发(见 block-handle plugin 也是在 dragBtn 上
-        //   addEventListener 直接挂)。我们的多块拖动从段落 DOM 起手,
-        //   所以在下面的 view() lifecycle 里挂 view.dom 'dragstart' 监听。
         copy(view, event) {
-          const indices = blockSelectionKey.getState(view.state)?.indices ?? null;
-          if (!indices || indices.length === 0) return false;
-          const bundle = buildClipboardFromSelection(view, indices);
+          const bundle = buildClipboardFromSelection(view);
           if (!bundle || !event.clipboardData) return false;
           event.clipboardData.setData('text/html', bundle.html);
           event.clipboardData.setData('text/plain', bundle.text);
-          // PM 内部识别字段(与 PM clipboardSerializer 兼容)
           event.clipboardData.setData('application/x-prosemirror-slice', bundle.pmJson);
           event.preventDefault();
           return true;
         },
         cut(view, event) {
-          const indices = blockSelectionKey.getState(view.state)?.indices ?? null;
-          if (!indices || indices.length === 0) return false;
-          const bundle = buildClipboardFromSelection(view, indices);
+          const bundle = buildClipboardFromSelection(view);
           if (!bundle || !event.clipboardData) return false;
           event.clipboardData.setData('text/html', bundle.html);
           event.clipboardData.setData('text/plain', bundle.text);
           event.clipboardData.setData('application/x-prosemirror-slice', bundle.pmJson);
           event.preventDefault();
-          // 删除选中 blocks
           deleteSelectedBlocks(view.state, view.dispatch);
           return true;
         },
@@ -664,7 +596,7 @@ export function buildBlockSelectionPlugin(_instanceId: string): Plugin<BlockSele
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// keymap(独立 Plugin,装配时与主 plugin 一起 enable)
+// keymap(独立 Plugin)
 // ─────────────────────────────────────────────────────────────────────
 
 export function buildBlockSelectionKeymap(): Plugin {

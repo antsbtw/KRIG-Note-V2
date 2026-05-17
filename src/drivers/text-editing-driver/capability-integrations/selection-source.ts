@@ -10,7 +10,10 @@
 import type { EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { selection, type SelectionKind, type SelectionPayload } from '@capabilities/selection';
-import { getBlockSelectionIndices } from '../plugins/build-block-selection-plugin';
+import {
+  getBlockSelectionPositions,
+  getBlockSelectionCount,
+} from '../plugins/build-block-selection-plugin';
 
 const SOURCE_PREFIX = 'text-editing-driver:';
 
@@ -54,18 +57,13 @@ export function emitSelectionChanged(view: EditorView, instanceId: string): void
   const level = (node.attrs.level as number | null) ?? null;
 
   // 优先看 block-selection plugin state:有则覆盖 kind/positions
-  const blockIndices = getBlockSelectionIndices(state);
+  // (handle-aligned 重构:positions 直接返回选中块的 before pos 数组,无需自己再算)
+  const blockCount = getBlockSelectionCount(state);
   let kind: SelectionKind = 'text';
   let positions: number[] = [];
-  if (blockIndices && blockIndices.length > 0) {
-    kind = blockIndices.length === 1 ? 'block' : 'multi-block';
-    // 把 top-level index 转 doc 内 before 位置(positions 字段语义:每块起点)
-    let offset = 0;
-    const docChildren = state.doc.childCount;
-    for (let i = 0; i < docChildren; i++) {
-      if (blockIndices.includes(i)) positions.push(offset);
-      offset += state.doc.child(i).nodeSize;
-    }
+  if (blockCount > 0) {
+    kind = blockCount === 1 ? 'block' : 'multi-block';
+    positions = getBlockSelectionPositions(state) ?? [];
   }
 
   const snapshot: SelectionSnapshot = {
