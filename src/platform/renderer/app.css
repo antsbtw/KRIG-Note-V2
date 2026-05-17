@@ -16,6 +16,14 @@ html, body {
 }
 
 .krig-app {
+  /* App 根:容纳 workspace 层 + fullscreen overlay 层(后者通过自身 position:fixed
+   * 撑满 viewport,不参与 flex 布局)*/
+  height: 100%;
+  position: relative;
+}
+
+.krig-app__workspace-layer {
+  /* Workspace 层 = WorkspaceBar(顶部 28px)+ WorkspaceContainer(剩余区域)*/
   display: flex;
   flex-direction: column;
   height: 100%;

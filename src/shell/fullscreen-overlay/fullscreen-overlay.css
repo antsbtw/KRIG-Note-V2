@@ -1,0 +1,33 @@
+/**
+ * Fullscreen Overlay — 基础样式
+ *
+ * Binding 渲染的根 <div className="krig-fullscreen-overlay">,
+ * 撑满 viewport,layout 由内部 Component 自由布局。
+ *
+ * 业务 Component 自己写自己的样式(toolbar / 编辑区 / tab 等),
+ * Binding 不强制结构。
+ */
+
+.krig-fullscreen-overlay {
+  /* L2 Shell 内的全屏槽位 — 与 WorkspaceContainer 并列,active 时由
+   * 入口隐藏 sibling,本元素撑满 viewport */
+  position: fixed;
+  inset: 0;
+
+  /* 比 floating-toolbar(2000)/ popup(1000)更高;active 时其他 sibling
+   * 已 display:none,理论上不需要 z-index 战争,但保留作为防御 */
+  z-index: 9999;
+
+  /* 默认黑底,业务方可在子组件内覆盖背景 */
+  background: #111;
+
+  /* layout 完全自由:子组件可用 flex / grid / 任意 */
+  display: flex;
+  flex-direction: column;
+
+  /* 文字颜色默认(业务方可覆盖)*/
+  color: #d4d4d4;
+
+  /* 字体栈对齐 V2 其他基础 UI */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}

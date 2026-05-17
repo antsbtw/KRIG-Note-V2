@@ -63,6 +63,7 @@ import { handleRegistry } from '../interaction-registries/handle-registry/handle
 import { floatingToolbarRegistry } from '../interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import { popupRegistry } from '../interaction-registries/popup-registry/popup-registry';
 import { helpPanelRegistry } from '../interaction-registries/help-panel-registry/help-panel-registry';
+import { fullscreenOverlayRegistry } from '../interaction-registries/fullscreen-overlay-registry/registry';
 
 export function useContextMenuVersion(): number {
   return useSyncExternalStore(
@@ -103,6 +104,13 @@ export function useHelpPanelVersion(): number {
   return useSyncExternalStore(
     (cb) => helpPanelRegistry.subscribe(cb),
     () => helpPanelRegistry.count,
+  );
+}
+
+export function useFullscreenOverlayVersion(): number {
+  return useSyncExternalStore(
+    (cb) => fullscreenOverlayRegistry.subscribe(cb),
+    () => fullscreenOverlayRegistry.count,
   );
 }
 

@@ -6,9 +6,12 @@
  * L3 阶段:接入 WorkspaceManager + 持久化 + 实例渲染(本阶段)
  */
 
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { WorkspaceBar } from '@shell/workspace-bar/WorkspaceBar';
 import { WorkspaceContainer } from '@shell/workspace-container/WorkspaceContainer';
+import { FullscreenOverlayContainer } from '@shell/fullscreen-overlay/FullscreenOverlayContainer';
+import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { reportL2Alive } from '@shell/diagnostics/L2-alive';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { localStoragePersistence } from '@workspace/persistence/local-storage';
@@ -76,11 +79,35 @@ if (import.meta.env.DEV) {
   };
 }
 
+/**
+ * 订阅 fullscreenOverlayController state — 用于 active 时隐藏 WorkspaceBar +
+ * WorkspaceContainer(让 overlay 视觉独占 viewport,与 workspace 切换语义隔离)。
+ */
+function useFullscreenOverlayActive(): boolean {
+  const [visible, setVisible] = useState(
+    fullscreenOverlayController.getState().visible,
+  );
+  useEffect(() => {
+    return fullscreenOverlayController.subscribe(() =>
+      setVisible(fullscreenOverlayController.getState().visible),
+    );
+  }, []);
+  return visible;
+}
+
 function App() {
+  const fullscreenActive = useFullscreenOverlayActive();
+  // active 时把 WorkspaceBar + WorkspaceContainer 隐藏 — 保留 DOM 与 state,
+  // 仅视觉 hide(切回时所有 workspace / view 状态原样保留)
+  const workspaceStyle = fullscreenActive ? { display: 'none' } : undefined;
+
   return (
     <div className="krig-app">
-      <WorkspaceBar />
-      <WorkspaceContainer />
+      <div className="krig-app__workspace-layer" style={workspaceStyle}>
+        <WorkspaceBar />
+        <WorkspaceContainer />
+      </div>
+      <FullscreenOverlayContainer />
     </div>
   );
 }
