@@ -28,6 +28,7 @@ import { buildTitleGuardPlugin } from './plugins/build-title-guard-plugin';
 import { buildNoteLinkCommandPlugin } from './plugins/build-note-link-command-plugin';
 import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
 import { buildVocabHighlightPlugin } from './plugins/build-vocab-highlight-plugin';
+import { buildBlockSelectionPlugin } from './plugins/build-block-selection-plugin';
 
 /**
  * 装配 EditorView
@@ -88,6 +89,7 @@ export function buildEditorView(
 
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
+    buildBlockSelectionPlugin(), // MultipleNodeSelection 视觉增强(Step 1 骨架)
     ...blockPlugins,
     ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
     buildInputRules(schema),     // headings + 4 mark markdown(始终开)
