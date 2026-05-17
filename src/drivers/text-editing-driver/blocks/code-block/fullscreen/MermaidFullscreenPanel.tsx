@@ -126,6 +126,14 @@ export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps)
     initialCodeRef.current = node?.textContent ?? '';
   }
 
+  // **关键**:lastValueRef 镜像 CM 当前内容。React unmount 时子组件 MermaidEditor
+  // 的 cleanup 先于本 Panel 的 cleanup 执行 → CM view.destroy() + viewRef=null
+  // → editorRef.current?.getValue() 返回 ''(viewRef 已死)。
+  // 如果 cleanup 用 getValue 拿 newContent 会拿到 '' → tr.delete 把内容清空。
+  // 解法:onChange 时同步更新 lastValueRef,cleanup 用本 ref 而非 imperative
+  // API,即使 CM 已 destroy 也能拿到最后一次正确内容。
+  const lastValueRef = useRef<string>(initialCodeRef.current);
+
   // ── React state ──
   const [source, setSource] = useState<string>(initialCodeRef.current);
   const [theme, setTheme] = useState<MermaidTheme>(readInitialTheme);
@@ -156,7 +164,9 @@ export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps)
           const view = inst.view;
           const node = view.state.doc.nodeAt(ctx.nodePos);
           if (node && node.type.name === 'codeBlock') {
-            const newContent = editorRef.current?.getValue() ?? '';
+            // 用 lastValueRef 而非 editorRef.getValue() — 子组件 cleanup 先跑
+            // 已 destroy CM,getValue 返回 '' 会让 tr.delete 把 codeBlock 清空
+            const newContent = lastValueRef.current;
             if (node.textContent !== newContent) {
               const tr = view.state.tr;
               const start = ctx.nodePos + 1;
@@ -176,8 +186,7 @@ export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps)
               );
               view.dispatch(selTr);
             } catch {
-              // 节点几何已变(理论不可能 — overlay 期间 workspace 全 hidden,
-              // 但仍保护)
+              // 节点几何已变(理论不可能 — overlay 期间 workspace 全 hidden)
             }
             view.focus();
           }
@@ -313,7 +322,12 @@ export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps)
   }, []);
 
   // 编辑器内容变化 → source state(MermaidPreview 内部 300ms 防抖)
-  const onEditorChange = useCallback((v: string) => setSource(v), []);
+  // + 同步 lastValueRef(cleanup 写回唯一可靠数据源,CM 子组件 cleanup 先跑会
+  //   destroy CM 让 imperative getValue 拿不到)
+  const onEditorChange = useCallback((v: string) => {
+    lastValueRef.current = v;
+    setSource(v);
+  }, []);
 
   // ── 没有 context 的兜底(防御保护,理论不会发生)──
   if (!ctxRef.current) {
