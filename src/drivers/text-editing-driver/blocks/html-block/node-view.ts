@@ -272,14 +272,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const startY = e.clientY;
-      const startHeight = iframe.offsetHeight;
 
       // mousedown 立刻锁 userOverrideHeight,否则拖动期间 ResizeObserver 触发
       // applyAutoHeight 抢回 iframe height,用户看不到拖动效果。
       userOverrideHeight = true;
 
       const scrollContainer = findScrollContainer(iframe);
+      let lastClientY = e.clientY;
 
       const prevPointer = iframe.style.pointerEvents;
       const prevUserSelect = document.body.style.userSelect;
@@ -288,23 +287,38 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       document.body.style.userSelect = 'none';
       document.body.style.cursor = 'ns-resize';
 
+      /**
+       * 拖动模型:鼠标在屏幕物理位置移动 delta 像素 → iframe 高度变化 delta 像素。
+       *
+       * 用每帧 delta(clientY 与上一帧的差)而非"clientY - startY 总差"。
+       * iframe top-anchored,缩高时 bottom(handle) 在视口里自然上移 delta 像素,
+       * 正好等于鼠标移动 delta → handle 跟随鼠标。
+       *
+       * iframe 顶部在视口内 + iframe 高度大于视口时(handle 在视口外下方):
+       * 主动滚动容器让 iframe top 滚出视口上方,使 handle 进入视口跟上鼠标 —
+       * 否则鼠标在上半屏拖动时 iframe 底部在屏幕下方外,用户感觉"拖不动"。
+       */
       const onMouseMove = (ev: MouseEvent) => {
-        const dy = ev.clientY - startY;
-        const newHeight = Math.max(HEIGHT_MIN_PX, startHeight + dy);
-        iframe.style.height = `${newHeight}px`;
+        const delta = ev.clientY - lastClientY;
+        lastClientY = ev.clientY;
 
-        // 视口边缘自动 scroll:鼠标接近窗口顶/底 50px 内时,note 容器对应滚动,
-        // 让 iframe 底部 (handle) 持续可见 + 跟随鼠标。否则 iframe 比视口还高
-        // 时用户看不到 height 变化,误以为"拖不动"。
+        if (delta !== 0) {
+          const currentHeight = iframe.offsetHeight;
+          const newHeight = Math.max(HEIGHT_MIN_PX, currentHeight + delta);
+          iframe.style.height = `${newHeight}px`;
+        }
+
+        // 拖动期间若 handle 仍在视口下方外,把它滚进视口;若在视口上方外(向下
+        // 拖动场景),把 iframe 滚下来。维持 handle 接近鼠标 ev.clientY 位置。
         if (scrollContainer) {
-          const EDGE = 60;
-          const MAX_STEP = 24;
-          const viewportH = window.innerHeight;
-          if (ev.clientY < EDGE) {
-            const step = Math.min(MAX_STEP, EDGE - ev.clientY);
-            scrollContainer.scrollTop -= step;
-          } else if (ev.clientY > viewportH - EDGE) {
-            const step = Math.min(MAX_STEP, ev.clientY - (viewportH - EDGE));
+          const handleRect = handle.getBoundingClientRect();
+          const handleY = handleRect.top + handleRect.height / 2;
+          const targetY = ev.clientY;
+          const diff = handleY - targetY; // diff>0 handle 在鼠标下方 → 需上滚
+          // 阈值:容差 4px 内不滚,避免抖动
+          if (Math.abs(diff) > 4) {
+            const MAX_STEP = 32;
+            const step = Math.max(-MAX_STEP, Math.min(MAX_STEP, diff));
             scrollContainer.scrollTop += step;
           }
         }
