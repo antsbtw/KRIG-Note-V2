@@ -260,10 +260,11 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       const startY = e.clientY;
       const startHeight = iframe.offsetHeight;
 
-      // 拖动期间禁 iframe 接收鼠标事件 — 否则鼠标进入 iframe 区域后,事件被
-      // contentDocument 接管,parent document 的 mousemove 收不到,表现为"拖
-      // 一点点就卡住"。同时给 body 强制 ns-resize 光标,避免穿越 iframe 时
-      // 光标抖。
+      // 关键:mousedown 立刻锁 userOverrideHeight,否则拖动期间 ResizeObserver
+      // 持续触发 applyAutoHeight 把刚调小的 iframe height 立即抢回大值 → 用户
+      // 看上去"完全无法拖动",虽然 mousemove 在持续 setProperty。
+      userOverrideHeight = true;
+
       const prevPointer = iframe.style.pointerEvents;
       const prevUserSelect = document.body.style.userSelect;
       const prevCursor = document.body.style.cursor;
@@ -284,7 +285,6 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         document.body.style.userSelect = prevUserSelect;
         document.body.style.cursor = prevCursor;
         if (view.isDestroyed) return;
-        userOverrideHeight = true;
         updateAttrs({ height: iframe.offsetHeight });
       };
 
