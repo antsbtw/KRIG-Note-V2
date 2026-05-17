@@ -17,6 +17,7 @@ import { Slice, Fragment } from 'prosemirror-model';
 import { dropPoint } from 'prosemirror-transform';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { dnd } from '@capabilities/drag-and-drop';
+import { MultipleNodeSelection } from './_shared/multiple-node-selection';
 
 const handleKey = new PluginKey('text-editing-driver:block-handle');
 
@@ -72,7 +73,14 @@ const BTN_CSS =
 // 模块级 drag 状态:dragstart 时存,drop/dragend 时读 + 清
 // 浏览器 drag-and-drop "protected mode" 会清空自定义 MIME 在 drop 阶段的 dataTransfer
 // 所以不能依赖 dataTransfer.getData(MIME) 跨 dragstart→drop 传递业务数据 — 用模块级变量
-let activeDrag: { instanceId: string; fromPos: number } | null = null;
+//
+// 单块 (fromPos): block-handle ⋮⋮ 拖单个 node 时用
+// 多块 (multiSlice + multiFrom + multiTo): MultipleNodeSelection 激活时拖整组
+let activeDrag: {
+  instanceId: string;
+  fromPos: number;
+  multi?: { slice: Slice; from: number; to: number };
+} | null = null;
 
 export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plugin {
   return new Plugin({
@@ -84,6 +92,31 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       handleDrop(view, event) {
         if (!activeDrag) return false;
         if (activeDrag.instanceId !== instanceId) return false;
+
+        // 多块拖动:用 MNS 的 slice + dropPoint,一次性 delete + insert
+        if (activeDrag.multi) {
+          const { slice, from, to } = activeDrag.multi;
+          try {
+            const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
+            if (!result) return true;
+            const dropPos = dropPoint(view.state.doc, result.pos, slice);
+            if (dropPos == null) return true;
+            // drop 到选区内部 → no-op
+            if (dropPos >= from && dropPos <= to) return true;
+
+            const tr = view.state.tr.delete(from, to);
+            const mappedDrop = tr.mapping.map(dropPos);
+            tr.insert(mappedDrop, slice.content);
+            view.dispatch(tr);
+            dnd.emit('dnd.completed', { source: null });
+            return true;
+          } catch (err) {
+            console.warn('[block-handle] multi-drop exception', err);
+            return false;
+          }
+        }
+
+        // 单块拖动(原逻辑)
         const fromPos = activeDrag.fromPos;
         try {
           const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
@@ -111,7 +144,6 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           dnd.emit('dnd.completed', { source: null });
           return true;
         } catch (err) {
-          // eslint-disable-next-line no-console
           console.warn('[block-handle] drop exception', err);
           return false;
         }
@@ -245,8 +277,25 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const node = editorView.state.doc.nodeAt(currentPos);
         if (!node) return;
         e.dataTransfer.effectAllowed = 'move';
-        activeDrag = { instanceId, fromPos: currentPos };
         e.dataTransfer.setData(HANDLE_DRAG_MIME, '1');
+
+        // 检测当前是否有 MultipleNodeSelection 且 currentPos 在选区范围内 →
+        // 走多块拖动(整组移动)
+        const sel = editorView.state.selection;
+        const inMultiSelection =
+          sel instanceof MultipleNodeSelection &&
+          currentPos >= sel.from && currentPos < sel.to;
+        if (inMultiSelection) {
+          const mns = sel as MultipleNodeSelection;
+          activeDrag = {
+            instanceId,
+            fromPos: currentPos,
+            multi: { slice: mns.content(), from: mns.from, to: mns.to },
+          };
+        } else {
+          activeDrag = { instanceId, fromPos: currentPos };
+        }
+
         dnd.emit('dnd.started', {
           source: { type: 'block', data: { fromPos: currentPos, instanceId } },
         });
