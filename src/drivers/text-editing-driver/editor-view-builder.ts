@@ -28,6 +28,7 @@ import { buildTitleGuardPlugin } from './plugins/build-title-guard-plugin';
 import { buildNoteLinkCommandPlugin } from './plugins/build-note-link-command-plugin';
 import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
 import { buildVocabHighlightPlugin } from './plugins/build-vocab-highlight-plugin';
+import { buildCodeSyntaxHighlightPlugin } from './plugins/build-code-syntax-highlight-plugin';
 import { buildBlockSelectionPlugin } from './plugins/build-block-selection-plugin';
 import { buildBlockSelectionKeymap } from './plugins/build-block-selection-keymap';
 import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-selection-context-menu-plugin';
@@ -89,6 +90,7 @@ export function buildEditorView(
   const enableDropCursor = optIn(pluginToggles?.dropCursor);
   const enableSlash = optIn(pluginToggles?.slash);
   const enableBlockSelection = optIn(pluginToggles?.blockSelection);
+  const enableCodeSyntaxHighlight = optIn(pluginToggles?.codeSyntaxHighlight);
 
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
@@ -110,6 +112,7 @@ export function buildEditorView(
     ...(enableNoteLinkCommand ? [buildNoteLinkCommandPlugin()] : []),
     ...(enablePasteMedia ? [buildPasteMediaPlugin()] : []),
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
+    ...(enableCodeSyntaxHighlight ? [buildCodeSyntaxHighlightPlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
     // block-selection keymap 抢在 baseKeymap 之前(Esc/Shift+Arrow/Arrow)

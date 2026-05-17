@@ -2392,3 +2392,106 @@
   border-top: none;
   border-radius: 0 0 6px 6px;
 }
+
+/* ── Generic codeBlock 语法高亮(Phase 2 + Phase 3 调色)──
+ * 对齐 VSCode Dark+ 配色 + capability/code-editing/host/theme-dark.ts(inline + 全屏共用)
+ * Decoration.inline 走 view 层独立 span,PM `code: true` 不拦截。
+ * 12 类 token,见 capability/code-editing/tokenize.ts `inlineHighlighter`。 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--storage       { color: #c586c0; }                     /* import/export/type/as — 紫 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--keyword       { color: #569cd6; }                     /* if/return/for — 蓝 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--typeName      { color: #4ec9b0; }                     /* HTMLAudioElement / NodeViewConstructor — 青绿 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--functionName  { color: #dcdcaa; }                     /* updateAttrs / audioBlockNodeView — 浅黄 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--variableName  { color: #9cdcfe; }                     /* 局部变量 / 参数 — 浅蓝 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--propertyName  { color: #9cdcfe; }                     /* obj.prop — 浅蓝(同 variableName) */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--string        { color: #ce9178; }                     /* 'x' "x" `x` — 橙 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--number        { color: #b5cea8; }                     /* 1 2.0 true false null — 浅绿 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--comment       { color: #6a9955; font-style: italic; } /* // /* */ — 绿斜 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--operator      { color: #d4d4d4; }                     /* + - * / = > < — 浅灰(不加粗) */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--attributeName { color: #92c5f8; }                     /* JSX/HTML 属性 — 淡蓝 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--punctuation   { color: #808080; }                     /* ( ) { } ; , — 灰 */
+
+/* ── Generic codeBlock(Phase 1)── */
+/* lang button — 复用 __lang-label 的尺寸 / 边框 / 字号,叠加交互态 */
+.krig-pm-host .ProseMirror .krig-code-block__lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  background: transparent;
+  user-select: none;
+}
+.krig-pm-host .ProseMirror .krig-code-block__lang-btn:hover {
+  background: #3a3a3a;
+  color: #e8eaed;
+  border-color: #555;
+}
+.krig-pm-host .ProseMirror .krig-code-block__lang-btn-text {
+  line-height: 1;
+}
+.krig-pm-host .ProseMirror .krig-code-block__lang-btn-chevron {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+}
+
+/* lang dropdown — mount 到 document.body 上,不走 .krig-pm-host 命名空间也覆盖 */
+.krig-code-lang-dropdown {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 180px;
+  max-width: 240px;
+  padding: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #d4d4d4;
+}
+.krig-code-lang-dropdown__search {
+  width: 100%;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #d4d4d4;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+.krig-code-lang-dropdown__search:focus {
+  border-color: #4a90e2;
+}
+.krig-code-lang-dropdown__list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.krig-code-lang-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.krig-code-lang-dropdown__item:hover {
+  background: #3a3a3a;
+}
+.krig-code-lang-dropdown__item--current {
+  color: #e8eaed;
+}
+.krig-code-lang-dropdown__check {
+  width: 12px;
+  flex-shrink: 0;
+  color: #4caf50;
+  font-size: 12px;
+}
+.krig-code-lang-dropdown__label {
+  flex: 1;
+}
+.krig-code-lang-dropdown__empty {
+  padding: 6px 8px;
+  color: #777;
+  font-style: italic;
+  font-size: 12px;
+}

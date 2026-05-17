@@ -63,6 +63,22 @@ export interface LanguageItem {
 }
 
 // ─────────────────────────────────────────────────────────
+// Tokenize API(供 inline syntax highlight plugin 消费)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * 一段 source 切出的语法 token;driver 拿到后转 PM Decoration.inline。
+ *
+ * tag 归一为 8 类字符串:keyword / comment / string / number / operator /
+ * variableName / attributeName / punctuation(对齐 capability/theme-dark.ts 配色)。
+ */
+export interface TokenSpan {
+  from: number;
+  to: number;
+  tag: string;
+}
+
+// ─────────────────────────────────────────────────────────
 // Registry API(view 通过 requireCapabilityApi 拿)
 // ─────────────────────────────────────────────────────────
 
@@ -71,4 +87,10 @@ export interface CodeEditingApi {
   registerLanguage(item: LanguageItem): void;
   getLanguages(): LanguageItem[];
   getLanguage(id: string): LanguageItem | undefined;
+  /** 异步预热语言 loader(plugin init / lang 切换时调) */
+  ensureLanguageLoaded(language: string): Promise<void>;
+  /** 同步查询是否已加载(plugin state apply 内决定走同步还是异步路径) */
+  isLanguageLoaded(language: string): boolean;
+  /** 同步 tokenize — language 必须已 loaded;未 loaded 返回空数组 */
+  tokenizeSync(language: string, source: string): TokenSpan[];
 }

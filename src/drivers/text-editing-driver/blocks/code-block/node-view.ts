@@ -1,34 +1,37 @@
 /**
- * codeBlock NodeView — Mermaid 专用 (V2 最小迁移)
+ * codeBlock NodeView — Mermaid 专用 + Generic(Phase 1 加 generic 路径)
  *
  * V1 → V2 直迁:src/plugins/note/blocks/code-block.ts(剪掉非 mermaid 部分)
  *
  * 行为:
- * - attrs.language !== 'mermaid':构造 <pre class="krig-code-block"><code> 普通代码块
  * - attrs.language === 'mermaid':渲染工具栏 + 代码区 + 预览区,支持分屏/纯预览切换、
  *   下载 PNG、**全屏编辑**(走 L2 fullscreen-overlay)
+ * - 其他语言('' / javascript / typescript / python / json / markdown / 任意已注册):
+ *   走 buildGenericCodeBlockView — 带 hover toolbar(语言下拉 + Copy);Fullscreen
+ *   Phase 1 不渲染,Phase 3 启用
  *
  * NodeView 工厂始终返回完整 NodeView 对象(PM 不接受 undefined / null)。
  *
- * 全屏编辑器:走 L2 fullscreen-overlay 体系,Component 是 React 组件,事件不被
- * PM 抢(见 [[fullscreen/MermaidFullscreenPanel]] + [[fullscreen/menu-context]])。
+ * 切换 mermaid ↔ generic:update 返回 false 让 PM destroy 重建(确保两侧 DOM 结构差
+ * 异不被强行 patch)。
  *
- * 不带:
- * - 语言下拉(V2 暂无 UI;mermaid block 走专门 slash 命令创建)
- * - ? 语法参考面板(对齐 mathBlock 做法,V1 LaTeX help-panel 也被砍)
- * - 多语言插件框架(V1 code-plugins 不迁,本期只迁 mermaid)
+ * 全屏编辑器:走 L2 fullscreen-overlay 体系,Component 是 React 组件,事件不被
+ * PM 抢(见 [[fullscreen/CodeFullscreenPanel]] + [[fullscreen/menu-context]])。
+ * mermaid / 非 mermaid 都走 'text-editing.fullscreen.code' overlay id;CodeFullscreenPanel
+ * 内部按 language 决定是否渲染 MermaidPreviewPane。
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import { renderMermaidDiagram } from './mermaid-renderer';
 import { downloadBlob } from './save-blob';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
-import { setMermaidFullscreenContext } from './fullscreen/menu-context';
+import { setCodeFullscreenContext } from './fullscreen/menu-context';
+import { createGenericToolbar } from './generic-toolbar';
 
 const LS_VIEW_KEY = 'krig-mermaid-view-mode';
 type ViewMode = 'split' | 'preview';
 
-const FULLSCREEN_OVERLAY_ID = 'text-editing.fullscreen.mermaid';
+const FULLSCREEN_OVERLAY_ID = 'text-editing.fullscreen.code';
 
 const ICON_EYE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -41,23 +44,71 @@ function findInstanceId(view: { dom: HTMLElement }): string | null {
   return el?.getAttribute('data-instance-id') ?? null;
 }
 
-/** 非 mermaid 的纯代码块 NodeView (等价 spec.toDOM 的 <pre class="krig-code-block"><code>) */
-function buildPlainCodeBlockView(language: string): ReturnType<NodeViewConstructor> {
-  const dom = document.createElement('pre');
-  dom.classList.add('krig-code-block');
+/** Generic codeBlock NodeView(非 mermaid;Phase 1:toolbar + lang dropdown + Copy) */
+function buildGenericCodeBlockView(
+  initialNode: Parameters<NodeViewConstructor>[0],
+  view: Parameters<NodeViewConstructor>[1],
+  getPos: Parameters<NodeViewConstructor>[2],
+): ReturnType<NodeViewConstructor> {
+  // 外层 div(对齐 mermaid NodeView 结构,共用 .krig-code-block / __toolbar CSS)
+  const dom = document.createElement('div');
+  dom.classList.add('krig-code-block', 'krig-code-block--generic');
+
+  const pre = document.createElement('pre');
+  pre.classList.add('krig-code-block__pre');
   const code = document.createElement('code');
-  if (language) code.className = `language-${language}`;
-  dom.appendChild(code);
+  code.classList.add('krig-code-block__code');
+  const initialLang = initialNode.attrs.language as string;
+  if (initialLang) code.classList.add(`language-${initialLang}`);
+  pre.appendChild(code);
+
+  const toolbar = createGenericToolbar({
+    initialLanguage: initialLang,
+    getCodeText: () => code.textContent || '',
+    onLanguageChange: (newLang) => {
+      const pos = typeof getPos === 'function' ? getPos() : undefined;
+      if (pos == null) return;
+      const node = view.state.doc.nodeAt(pos);
+      if (!node || node.type.name !== 'codeBlock') return;
+      const tr = view.state.tr.setNodeMarkup(pos, undefined, {
+        ...node.attrs,
+        language: newLang,
+      });
+      view.dispatch(tr);
+    },
+    onFullscreen: () => {
+      const instanceId = findInstanceId(view);
+      const pos = typeof getPos === 'function' ? getPos() : undefined;
+      if (!instanceId || pos == null) return;
+      const currentNode = view.state.doc.nodeAt(pos);
+      const lang = (currentNode?.attrs.language as string) ?? '';
+      setCodeFullscreenContext({ instanceId, nodePos: pos, language: lang });
+      fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
+    },
+  });
+
+  dom.appendChild(toolbar.el);
+  dom.appendChild(pre);
+
   return {
     dom,
     contentDOM: code,
+    // toolbar / dropdown DOM 变化不让 PM 重渲(对齐 mermaid 写法)
+    ignoreMutation(mutation) {
+      return !code.contains(mutation.target);
+    },
     update(updatedNode) {
       if (updatedNode.type.name !== 'codeBlock') return false;
-      // 语言切到 / 切出 mermaid 都让 PM destroy 重建
+      // 语言切到 mermaid → 让 PM destroy 重建,走 mermaid NodeView 分支
       if (updatedNode.attrs.language === 'mermaid') return false;
       const newLang = updatedNode.attrs.language as string;
-      code.className = newLang ? `language-${newLang}` : '';
+      // 同步 <code> className(影响 Phase 2 高亮 plugin 之外的 CSS 兜底)
+      code.className = 'krig-code-block__code' + (newLang ? ` language-${newLang}` : '');
+      toolbar.setLanguage(newLang);
       return true;
+    },
+    destroy() {
+      toolbar.destroy();
     },
   };
 }
@@ -193,7 +244,7 @@ function buildMermaidCodeBlockView(
     const instanceId = findInstanceId(view);
     const pos = typeof getPos === 'function' ? getPos() : undefined;
     if (!instanceId || pos == null) return;
-    setMermaidFullscreenContext({ instanceId, nodePos: pos });
+    setCodeFullscreenContext({ instanceId, nodePos: pos, language: 'mermaid' });
     fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
   });
 
@@ -227,5 +278,5 @@ export const codeBlockNodeView: NodeViewConstructor = (node, view, getPos) => {
   if (node.attrs.language === 'mermaid') {
     return buildMermaidCodeBlockView(node, view, getPos);
   }
-  return buildPlainCodeBlockView(node.attrs.language as string);
+  return buildGenericCodeBlockView(node, view, getPos);
 };

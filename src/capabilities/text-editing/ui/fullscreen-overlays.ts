@@ -8,23 +8,31 @@
  *
  * 详见 src/shell/DESIGN.md v0.4 § 1.2 边界辨析。
  *
- * 触发链(以 mermaid 为例):
+ * 触发链(Phase 3 后通用 — mermaid / plain / JS / TS / Py / JSON / MD 都走它):
  *   node-view 全屏按钮 mousedown
- *     → setMermaidFullscreenContext({ instanceId, nodePos })
- *     → fullscreenOverlayController.show('text-editing.fullscreen.mermaid')
- *     → FullscreenOverlayBinding 渲染 MermaidFullscreenPanel
+ *     → setCodeFullscreenContext({ instanceId, nodePos, language })
+ *     → fullscreenOverlayController.show('text-editing.fullscreen.code')
+ *     → FullscreenOverlayBinding 渲染 CodeFullscreenPanel
  *     → 关闭(Esc / × / business hide)→ binding unmount → cleanup 写回 PM
+ *
+ * Phase 3 alias:旧 id `text-editing.fullscreen.mermaid` 同时注册指向同一 Component,
+ * 短期兼容老 trigger;Phase 4 全部下游迁完后可删。
  */
 
 import { fullscreenOverlayRegistry }
   from '@slot/interaction-registries/fullscreen-overlay-registry/registry';
-import { MermaidFullscreenPanel }
-  from '@drivers/text-editing-driver/blocks/code-block/fullscreen/MermaidFullscreenPanel';
+import { CodeFullscreenPanel }
+  from '@drivers/text-editing-driver/blocks/code-block/fullscreen/CodeFullscreenPanel';
 
 /** capability 加载时一次性注册所有 text-editing 相关 fullscreen overlay */
 export function registerTextEditingFullscreenOverlays(): void {
   fullscreenOverlayRegistry.register({
+    id: 'text-editing.fullscreen.code',
+    Component: CodeFullscreenPanel,
+  });
+  // alias:Phase 3 兼容(老的 'text-editing.fullscreen.mermaid' trigger 仍能工作)
+  fullscreenOverlayRegistry.register({
     id: 'text-editing.fullscreen.mermaid',
-    Component: MermaidFullscreenPanel,
+    Component: CodeFullscreenPanel,
   });
 }
