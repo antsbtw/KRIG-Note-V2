@@ -34,10 +34,15 @@
 │  │  │  │ └───────────┘ │ │                                       │  │  │  │
 │  │  │  └───────────────┘ └───────────────────────────────────────┘  │  │  │
 │  │  │                                                              │  │  │
-│  │  │  ┌─ Overlays (浮层) ────────────────────────────────────┐  │  │  │
-│  │  │  │  DocumentListPanel / BookmarkPanel / HistoryPanel      │  │  │  │
-│  │  │  │  LogPanel / InputPopup                                 │  │  │  │
+│  │  │  ┌─ FullscreenOverlay (L2,单例,app-scoped) ────────────┐  │  │  │
+│  │  │  │  撑满整个 viewport(含 WorkspaceBar 区域)            │  │  │  │
+│  │  │  │  active 时上方 sibling 全部 display:none             │  │  │  │
+│  │  │  │  示例:mermaid 全屏编辑 / PDF 全屏 / 画板全屏 / modal │  │  │  │
 │  │  │  └──────────────────────────────────────────────────────┘  │  │  │
+│  │  │                                                              │  │  │
+│  │  │  view-scoped 浮层(L3 内,见 § 2.4):ContextMenu /          │  │  │
+│  │  │  SlashMenu / HandleMenu / FloatingToolbar / Popup /         │  │  │
+│  │  │  HelpPanel / GenericOverlay                                  │  │  │
 │  │  └──────────────────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -106,24 +111,11 @@ Shell 是窗口内的**固定骨架**。Shell 的所有组件都是**全局的**
 Shell
   ├── WorkspaceBar         固定在顶部（28px, 管理工作空间标签）
   ├── NavSidebar           固定在左侧（可折叠，含 ModeBar + 笔记目录）
-  ├── Workspace Area       中央内容区域（由活跃 Workspace 填充）
-  ├── Overlays             view-scoped 浮层面板（L3 内 — ContextMenu/Slash/Handle/...）
-  └── FullscreenOverlay   app-scoped 全屏视图槽（L2 内 — 单例顶级模式）
+  ├── Workspace Area       中央内容区域（由活跃 Workspace 填充 — 内含 view-scoped 浮层）
+  └── FullscreenOverlay   app-scoped 全屏视图槽（L2 内，2026-05 新增 — 单例顶级模式）
 ```
 
-**FullscreenOverlay 与 Overlays 的区别**（2026-05 新增）：
-
-| 维度 | Overlays（L3） | FullscreenOverlay（L2） |
-|---|---|---|
-| 作用域 | view-scoped（单 view 内局部弹层） | app-scoped（撑满 viewport，跨 view） |
-| 视觉 | anchor 旁的小弹层 | 撑满全屏含 WorkspaceBar 区域 |
-| 同时多个 | 是 | 否（controller 单例） |
-| 关闭 | 点外 / Esc / 显式 | Esc / 显式（无"点外"） |
-| WorkspaceBar 可见性 | 仍可见 | display:none |
-| 典型用途 | LinkPanel / ColorPicker / TableMenu | mermaid 全屏 / PDF 全屏 / 画板全屏 / 设置 modal |
-| 挂点 | `WorkspaceInstance.OverlayFrames`（L3） | `<App>.FullscreenOverlayContainer`（L2） |
-
-详见 `src/shell/DESIGN.md` v0.4 § 1.2 边界辨析。
+**层级辨析**：view-scoped 浮层（ContextMenu / Slash / Handle / FloatingToolbar / Popup / HelpPanel / GenericOverlay）归 **L3 Workspace** 内（详见 § 2.4），而 **FullscreenOverlay 归 L2 Shell**（详见 § 2.3.5）。两者作用域和视觉行为完全不同，速查表见 § 2.3.4。
 
 #### 2.3.1 WorkspaceBar
 
@@ -184,11 +176,86 @@ areaHeight = windowHeight - workspaceBarHeight
 
 Workspace 内部包含 Left Slot + Divider + Right Slot。Divider（6px 拖拽条）属于 Workspace，不属于 Shell。
 
-#### 2.3.4 Overlays（浮层面板）
+#### 2.3.4 浮层与 Overlay 体系
 
-Overlay 是覆盖在 Workspace 之上的面板，按需显示/隐藏。同一 `group` 的 Overlay 互斥（只能同时显示一个）。
+KRIG 的"浮层 / overlay" 分两类，**作用域和挂点不同**，不要混淆：
 
-> **当前状态**：KRIG-Note 暂无独立的 Overlay 面板。浮层功能（如 SlashMenu、FloatingToolbar、ContextMenu）由各 View 内部渲染。
+##### A) view-scoped 浮层（L3 Workspace 内）
+
+| 类型 | 用途 | 实现 |
+|------|------|------|
+| **ContextMenu** | 右键菜单 | `context-menu-registry` + `ContextMenuBinding` |
+| **SlashMenu** | `/` 触发命令面板 | `slash-registry` + `SlashMenuBinding` |
+| **HandleMenu** | block hover handle | `handle-registry` + `HandleMenuBinding` |
+| **FloatingToolbar** | 文本选中浮工具栏 | `floating-toolbar-registry` + `FloatingToolbarBinding` |
+| **Popup** | anchor 旁的小弹层（LinkPanel/ColorPicker/TableMenu 等） | `popup-registry` + `PopupBinding` |
+| **HelpPanel** | 右侧抽屉式帮助面板 | `help-panel-registry` + `HelpPanelBinding` |
+| **GenericOverlay** | 通用 backdrop dialog | `overlay-registry` + `OverlayBinding` |
+
+挂点：`WorkspaceInstance` 内的 `<OverlayFrames>`。每个 Workspace 自管一套，状态相互隔离。视觉上覆盖在 view 之上但**workspace 仍可见**。
+
+##### B) app-scoped 全屏 overlay（L2 Shell 内，2026-05 新增）
+
+**FullscreenOverlay**：撑满整个 viewport（含 WorkspaceBar 区域）的专注式视图。详见 [§ 2.3.5 FullscreenOverlay](#235-fullscreenoverlayl2-app-scoped) 和 `src/shell/DESIGN.md` v0.4 § 1.2 边界辨析。
+
+挂点：`<App>.FullscreenOverlayContainer`（与 WorkspaceBar、WorkspaceContainer 并列三 sibling）。**active 时整个 workspace 层 display:none**，用户视觉离开 workspace 进入"专注模式"。
+
+##### A vs B 速查表
+
+| 维度 | A) view-scoped 浮层（L3） | B) FullscreenOverlay（L2） |
+|---|---|---|
+| 作用域 | 单 view 内 | 跨所有 view + workspace |
+| 视觉 | anchor 旁小弹层 | 撑满 viewport |
+| 同时多个 | 是 | 否（controller 单例） |
+| WorkspaceBar 可见 | 是 | 否 |
+| 关闭 | 点外 / Esc / 显式 | Esc / 显式（无"点外"） |
+| 典型用途 | LinkPanel / ColorPicker / TableMenu | mermaid 全屏 / PDF 全屏 / 画板全屏 / modal |
+
+#### 2.3.5 FullscreenOverlay（L2，app-scoped）
+
+L2 Shell 内与 WorkspaceContainer 并列的"app-scoped 全屏视图槽"。2026-05 新增（commit `a1ae9dd`）。
+
+**已落地客户**：
+- `text-editing.fullscreen.mermaid` — Mermaid 全屏编辑器（CodeMirror + 实时预览 + 主题/方向/导出工具栏）
+
+**规划场景**（未来接入零额外架构改动）：
+- PDF / 电子书 全屏阅读
+- 画板（Graph Canvas）全屏编辑
+- 图片预览 + 标注
+- 视频播放
+- 设置 / 登录 / 确认 modal
+- 截图 / 录屏批注
+- 演示模式（note → slide）
+
+**接入流程**（业务方）：
+```ts
+// 1. 写 React Component（layout 完全自由）
+function MyPanel({ onClose }: FullscreenOverlayCloseProps) { ... }
+
+// 2. 启动时注册（命名约定:<feature>.fullscreen.<name>）
+fullscreenOverlayRegistry.register({
+  id: 'my-feature.fullscreen.editor',
+  Component: MyPanel,
+});
+
+// 3. 触发（payload 走模块级 SSOT，对齐 table-menu-context 模式）
+setMyContext({ ... });
+fullscreenOverlayController.show('my-feature.fullscreen.editor');
+```
+
+**设计契约**：
+- 同一时刻只一个 overlay 活跃（controller 单例）
+- Overlay 内部布局完全自治（业务方想做单面板 / 多 tab / 嵌套 view / 内嵌小弹层都行）
+- Esc 关闭由 Binding 自管（Component 不挂 Esc listener）
+- 不点外关闭（全屏无外）
+- z-index 9999（压过 floating-toolbar 2000 / popup 1000）
+- active 时 WorkspaceBar + WorkspaceContainer `display:none` → workspace 切换在 UI 上不可达 → 不存在"切 workspace 期间 overlay 何去何从"的两难
+
+**关键代码位置**：
+- `src/slot/interaction-registries/fullscreen-overlay-registry/` — registry + types
+- `src/slot/triggers/fullscreen-overlay-controller.ts` — controller
+- `src/shell/fullscreen-overlay/` — Binding + Container + 基础 CSS
+- 详细架构 → `src/shell/DESIGN.md` v0.4
 
 ---
 
@@ -783,6 +850,8 @@ L0  Application
 
 | 文档 | 关系 |
 |------|------|
+| `src/shell/DESIGN.md` | **L2 Shell 详细设计**（v0.4 含 FullscreenOverlay 边界辨析）|
+| `src/shell/fullscreen-overlay/README.md` | FullscreenOverlay 模块说明 + 业务方接入示例 |
 | `docs/系统模块清单.md` | 系统全貌清单，记录当前代码和命名现状 |
 | `docs/分层原则符合性评估报告-2026-04-21.md` | 分层原则评估，指出越层问题 |
 | `docs/note/Schema-Reference.md` | NoteView (L5) 内部的 Block Schema 参考 |
