@@ -24,6 +24,7 @@ import { iframeThemeStyleTag } from './iframe-theme';
 const HEIGHT_CAP_PX = 4000;
 const HEIGHT_BUFFER_PX = 20;
 const HEIGHT_MIN_PX = 100;
+const HEIGHT_DEFAULT_PX = 400;
 
 async function loadHtmlContent(src: string): Promise<string | null> {
   try {
@@ -125,6 +126,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   let messageListener: ((e: MessageEvent) => void) | null = null;
   let iframeEl: HTMLIFrameElement | null = null;
   let currentSrc: string | null = null;
+  let currentBlobUrl: string | null = null;
 
   function updateAttrs(patch: Record<string, unknown>): void {
     const pos = typeof getPos === 'function' ? getPos() : undefined;
@@ -140,6 +142,10 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     if (messageListener) {
       window.removeEventListener('message', messageListener);
       messageListener = null;
+    }
+    if (currentBlobUrl) {
+      URL.revokeObjectURL(currentBlobUrl);
+      currentBlobUrl = null;
     }
     iframeEl = null;
     currentSrc = null;
@@ -307,16 +313,24 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     iframe.className = 'krig-html-block__iframe';
     iframe.setAttribute('sandbox', (n.attrs.sandbox as string) || 'allow-scripts');
     iframe.style.width = '100%';
-    iframe.style.height = n.attrs.height ? `${n.attrs.height as number}px` : '0px';
+    iframe.style.height = `${(n.attrs.height as number | null) ?? HEIGHT_DEFAULT_PX}px`;
     iframe.style.border = 'none';
     iframe.style.borderRadius = '8px';
     iframe.style.backgroundColor = '#ffffff';
     iframeEl = iframe;
 
+    // 改用 Blob URL 替代 srcdoc:srcdoc 继承 parent 的 CSP('self' 禁 inline script),
+    // 高度上报 inline script 会被拦;Blob URL 有自己的 opaque origin,inline 不受
+    // parent CSP 约束(sandbox 仍 allow-scripts 保留安全约束)。
     loadHtmlContent(src).then((html) => {
       if (!html || view.isDestroyed) return;
       if (iframeEl !== iframe) return;
-      iframe.srcdoc = injectThemeAndHeightScript(html);
+      const prepared = injectThemeAndHeightScript(html);
+      const blob = new Blob([prepared], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+      currentBlobUrl = blobUrl;
+      iframe.src = blobUrl;
     });
 
     const onMessage = (e: MessageEvent) => {
