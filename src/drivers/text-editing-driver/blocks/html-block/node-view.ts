@@ -1,19 +1,20 @@
 /**
- * htmlBlock NodeView — 两态 HTML 预览(V1 → V2 直迁)
- *
- * V1 直迁:src/plugins/note/blocks/html-block.ts NodeView 部分
+ * htmlBlock NodeView — 两态 HTML 预览
  *
  * 两态:
  * - placeholder(无 src):🌐 + Upload .html / Embed URL 输入(参考 audio-block)
- * - render(有 src):sandbox iframe + srcdoc 注入主题 + 高度上报脚本 + 拖拽 handle + 工具栏
+ * - render(有 src):same-origin iframe + parent 直接 DOM 写入 + ResizeObserver
  *
- * 高度自适应:iframe 内 MutationObserver/load 用 postMessage 上报,parent
- *   监听 'krig-iframe-height' 设 iframe height,上限 min(reported+20, 4000) — V1 line 204。
+ * 设计要点 — 为什么不用 sandbox:
+ *   V2 默认 CSP `script-src 'self'` 拦 inline / blob script,而 sandbox iframe
+ *   下 parent 又读不到 contentDocument 来主动测量高度 → 自动高度死路。
+ *   去 sandbox 后 iframe 与 parent 同 origin,parent 直接 contentDocument.open
+ *   /write/close 注入 HTML,然后 ResizeObserver 监听 body 高度,无需 iframe 内
+ *   任何脚本通信。Trade-off:HTML 内 script 能读 KRIG window 状态 — KRIG 是
+ *   本地 app 无敏感 cookie/session,HTML 来源仅用户自己上传,接受此 trade-off。
  *
- * 工具栏:{} 切换源码视图 / ↗ 在新窗口打开 — 二者都通过 loadHtmlContent
- *   拉取 srcdoc(支持 media:// / data:text/html;base64 / http(s))。
- *
- * caption:contentDOM(figcaption)由 PM 接管 — 与 audio-block / image 一致。
+ * 工具栏:{} 切换源码视图 / ↗ 在新窗口打开(blob URL window.open,这里不进 iframe)。
+ * caption:contentDOM(figcaption)由 PM 接管。
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
@@ -22,9 +23,8 @@ import { mediaPutBase64 } from '@capabilities/media-storage';
 import { iframeThemeStyleTag } from './iframe-theme';
 
 const HEIGHT_CAP_PX = 4000;
-const HEIGHT_BUFFER_PX = 20;
+const HEIGHT_BUFFER_PX = 4;
 const HEIGHT_MIN_PX = 100;
-const HEIGHT_DEFAULT_PX = 400;
 
 async function loadHtmlContent(src: string): Promise<string | null> {
   try {
@@ -66,44 +66,11 @@ async function loadHtmlContent(src: string): Promise<string | null> {
   }
 }
 
-function injectThemeAndHeightScript(html: string): string {
+function injectTheme(html: string): string {
   const themeStyle = iframeThemeStyleTag();
-  const heightScript = `<script>
-(function() {
-  var lastH = 0;
-  function reportHeight() {
-    var h = Math.max(
-      document.body.scrollHeight,
-      document.body.offsetHeight,
-      document.documentElement.scrollHeight,
-      document.documentElement.offsetHeight
-    );
-    if (h !== lastH && h > 0) {
-      lastH = h;
-      parent.postMessage({ type: 'krig-iframe-height', height: h }, '*');
-    }
-  }
-  window.addEventListener('load', function() { setTimeout(reportHeight, 50); });
-  new MutationObserver(reportHeight).observe(document.body, { childList: true, subtree: true, attributes: true });
-  setTimeout(reportHeight, 200);
-  setTimeout(reportHeight, 1000);
-  setTimeout(reportHeight, 3000);
-})();
-</script>`;
-
-  let prepared = html;
-  if (prepared.includes('</head>')) {
-    prepared = prepared.replace('</head>', themeStyle + '</head>');
-  } else if (prepared.includes('<body')) {
-    prepared = prepared.replace('<body', themeStyle + '<body');
-  } else {
-    prepared = themeStyle + prepared;
-  }
-
-  if (prepared.includes('</body>')) {
-    return prepared.replace('</body>', heightScript + '</body>');
-  }
-  return prepared + heightScript;
+  if (html.includes('</head>')) return html.replace('</head>', themeStyle + '</head>');
+  if (html.includes('<body')) return html.replace('<body', themeStyle + '<body');
+  return themeStyle + html;
 }
 
 export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos) => {
@@ -112,7 +79,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   const dom = document.createElement('div');
   dom.className = 'krig-html-block';
 
-  // render 区(contentEditable=false,完全 NodeView 控制 — placeholder 或 iframe)
+  // render 区(contentEditable=false,完全 NodeView 控制)
   const renderWrap = document.createElement('div');
   renderWrap.className = 'krig-html-block__render';
   renderWrap.contentEditable = 'false';
@@ -123,10 +90,11 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   captionDOM.className = 'krig-html-block__caption';
   dom.appendChild(captionDOM);
 
-  let messageListener: ((e: MessageEvent) => void) | null = null;
   let iframeEl: HTMLIFrameElement | null = null;
+  let resizeObserver: ResizeObserver | null = null;
   let currentSrc: string | null = null;
-  let currentBlobUrl: string | null = null;
+  // 用户拖拽手动覆盖高度后(写入 attrs.height),不再自动跟随 ResizeObserver。
+  let userOverrideHeight = false;
 
   function updateAttrs(patch: Record<string, unknown>): void {
     const pos = typeof getPos === 'function' ? getPos() : undefined;
@@ -139,16 +107,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   }
 
   function disposeIframe(): void {
-    if (messageListener) {
-      window.removeEventListener('message', messageListener);
-      messageListener = null;
-    }
-    if (currentBlobUrl) {
-      URL.revokeObjectURL(currentBlobUrl);
-      currentBlobUrl = null;
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
     }
     iframeEl = null;
     currentSrc = null;
+    userOverrideHeight = false;
   }
 
   function buildPlaceholder(): void {
@@ -274,6 +239,21 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     renderWrap.appendChild(pre);
   }
 
+  function applyAutoHeight(iframe: HTMLIFrameElement): void {
+    if (userOverrideHeight) return;
+    const doc = iframe.contentDocument;
+    if (!doc?.documentElement) return;
+    const h = Math.max(
+      doc.body?.scrollHeight ?? 0,
+      doc.body?.offsetHeight ?? 0,
+      doc.documentElement.scrollHeight,
+      doc.documentElement.offsetHeight,
+    );
+    if (h > 0) {
+      iframe.style.height = `${Math.min(h + HEIGHT_BUFFER_PX, HEIGHT_CAP_PX)}px`;
+    }
+  }
+
   function setupHeightResize(handle: HTMLElement, iframe: HTMLIFrameElement): void {
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -291,6 +271,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         if (view.isDestroyed) return;
+        userOverrideHeight = true;
         updateAttrs({ height: iframe.offsetHeight });
       };
 
@@ -305,51 +286,49 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
 
     const src = n.attrs.src as string;
     currentSrc = src;
+    userOverrideHeight = n.attrs.height != null;
 
     const toolbar = buildToolbar(src);
     renderWrap.appendChild(toolbar);
 
+    // 无 sandbox 属性 — iframe 与 parent 同 origin,parent 可直接读 contentDocument。
     const iframe = document.createElement('iframe');
     iframe.className = 'krig-html-block__iframe';
-    iframe.setAttribute('sandbox', (n.attrs.sandbox as string) || 'allow-scripts');
     iframe.style.width = '100%';
-    iframe.style.height = `${(n.attrs.height as number | null) ?? HEIGHT_DEFAULT_PX}px`;
     iframe.style.border = 'none';
     iframe.style.borderRadius = '8px';
     iframe.style.backgroundColor = '#ffffff';
+    // 用户已拖过 → 沿用用户高度;否则初始 0,等内容加载完 ResizeObserver 自动撑高。
+    iframe.style.height = userOverrideHeight ? `${n.attrs.height as number}px` : '0px';
     iframeEl = iframe;
 
-    // 改用 Blob URL 替代 srcdoc:srcdoc 继承 parent 的 CSP('self' 禁 inline script),
-    // 高度上报 inline script 会被拦;Blob URL 有自己的 opaque origin,inline 不受
-    // parent CSP 约束(sandbox 仍 allow-scripts 保留安全约束)。
-    loadHtmlContent(src).then((html) => {
-      if (!html || view.isDestroyed) return;
-      if (iframeEl !== iframe) return;
-      const prepared = injectThemeAndHeightScript(html);
-      const blob = new Blob([prepared], { type: 'text/html' });
-      const blobUrl = URL.createObjectURL(blob);
-      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-      currentBlobUrl = blobUrl;
-      iframe.src = blobUrl;
-    });
-
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.type === 'krig-iframe-height' && typeof e.data.height === 'number') {
-        if (e.source === iframe.contentWindow) {
-          const h = Math.min(e.data.height + HEIGHT_BUFFER_PX, HEIGHT_CAP_PX);
-          iframe.style.height = `${h}px`;
-        }
-      }
-    };
-    window.addEventListener('message', onMessage);
-    messageListener = onMessage;
+    renderWrap.appendChild(iframe);
 
     const resizeHandle = document.createElement('div');
     resizeHandle.className = 'krig-html-block__resize-handle';
     setupHeightResize(resizeHandle, iframe);
-
-    renderWrap.appendChild(iframe);
     renderWrap.appendChild(resizeHandle);
+
+    // 加载 + 同 origin 写入 — iframe 默认 src=about:blank 即与 parent 同 origin。
+    loadHtmlContent(src).then((html) => {
+      if (!html || view.isDestroyed) return;
+      if (iframeEl !== iframe) return;
+      const prepared = injectTheme(html);
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+      doc.open();
+      doc.write(prepared);
+      doc.close();
+
+      // 首次撑高
+      applyAutoHeight(iframe);
+
+      // 监听 body 内容变化(D3 / Chart 等动态生成元素)自动跟随
+      if (doc.body) {
+        resizeObserver = new ResizeObserver(() => applyAutoHeight(iframe));
+        resizeObserver.observe(doc.body);
+      }
+    });
   }
 
   function paint(n: PMNode): void {
@@ -375,8 +354,12 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         if (oldSrc !== updated.attrs.src) {
           buildRender(updated);
         } else if (oldHeight !== updated.attrs.height && iframeEl && currentSrc === updated.attrs.src) {
-          if (updated.attrs.height) {
+          if (updated.attrs.height != null) {
             iframeEl.style.height = `${updated.attrs.height as number}px`;
+            userOverrideHeight = true;
+          } else {
+            userOverrideHeight = false;
+            applyAutoHeight(iframeEl);
           }
         }
       }
@@ -391,9 +374,6 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       }
       return false;
     },
-    // renderWrap 子树由 NodeView 完全控制(iframe srcdoc 写入 / resize 改 height /
-    // placeholder→render 切换都会触发 mutation);若不忽略 PM 会以为 DOM 偏离 doc
-    // 反复销毁重建 NodeView → 死循环。captionDOM 由 PM 接管不在此守门内。
     ignoreMutation(mutation) {
       return mutation.target === renderWrap || renderWrap.contains(mutation.target as Node);
     },

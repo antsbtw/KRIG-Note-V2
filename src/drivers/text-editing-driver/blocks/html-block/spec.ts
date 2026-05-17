@@ -1,16 +1,17 @@
 /**
- * htmlBlock — HTML 预览(V1 → V2 直迁)
+ * htmlBlock — HTML 预览
  *
- * V1 直迁:src/plugins/note/blocks/html-block.ts(331 行)
- *
- * 用 sandbox iframe 安全地渲染 AI 生成的 HTML artifact。
  * attrs.src = media:// URL 引用(源码在 mediaStore,PM doc 只持引用 — 不存源码)。
  *
- * 安全:sandbox='allow-scripts'(对齐 V1),不开 allow-same-origin —
- *   iframe 内 script 可执行 + 可外发 fetch,但无法访问 parent cookie/storage。
+ * 不用 sandbox:V2 默认 CSP `script-src 'self'` 拦 sandbox iframe 内的 inline
+ *   script,而 sandbox 又禁 parent 读 contentDocument,造成"自动高度死路"。
+ *   去 sandbox 后 iframe 与 parent 同 origin,parent 直接 contentDocument.open
+ *   写入 + ResizeObserver 监听 body,无需 iframe 内任何脚本通信。
  *
- * caption:`content: 'block'` 单段(对齐 V2 image / audio-block — 'block' group
- *   单子节点 == V1 'textBlock' 单 caption 等价)。
+ *   Trade-off:HTML 内 script 能访问 parent window/cookie/storage — KRIG 是本地
+ *   app 无敏感会话,HTML 来源限用户自行上传(非远端不可信),接受此 trade-off。
+ *
+ * caption:`content: 'block'` 单段(对齐 V2 image / audio-block)。
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -26,7 +27,6 @@ const htmlBlockNodeSpec: NodeSpec = {
     src: { default: null },
     title: { default: '' },
     height: { default: null },
-    sandbox: { default: 'allow-scripts' },
     atomId: { default: null },
   },
   parseDOM: [
@@ -39,7 +39,6 @@ const htmlBlockNodeSpec: NodeSpec = {
           src: el.getAttribute('data-src') || null,
           title: el.getAttribute('data-title') || '',
           height: heightStr ? Number(heightStr) || null : null,
-          sandbox: el.getAttribute('data-sandbox') || 'allow-scripts',
         };
       },
     },
@@ -49,7 +48,6 @@ const htmlBlockNodeSpec: NodeSpec = {
     if (node.attrs.src) attrs['data-src'] = node.attrs.src as string;
     if (node.attrs.title) attrs['data-title'] = node.attrs.title as string;
     if (node.attrs.height != null) attrs['data-height'] = String(node.attrs.height);
-    if (node.attrs.sandbox) attrs['data-sandbox'] = node.attrs.sandbox as string;
     return [
       'div',
       attrs,
