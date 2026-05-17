@@ -253,20 +253,6 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     }
   }
 
-  /** 找最近的"真正能滚动"的祖先(scrollHeight > clientHeight + overflow 允许滚)。
-   *  纯粹 overflow:auto 但内容未溢出的容器跳过 — 否则 scrollTop += diff 无效。 */
-  function findScrollContainer(el: HTMLElement): HTMLElement | null {
-    let cur: HTMLElement | null = el.parentElement;
-    while (cur && cur !== document.body) {
-      const overflow = getComputedStyle(cur).overflowY;
-      const canScroll = overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay';
-      if (canScroll && cur.scrollHeight > cur.clientHeight) return cur;
-      cur = cur.parentElement;
-    }
-    // 兜底 document scrolling element(window 自身)
-    return document.scrollingElement as HTMLElement | null;
-  }
-
   /**
    * Resize handle 拖动 — Pointer Capture + movementY + "handle 绑鼠标" scrollTop 补偿
    *
@@ -279,6 +265,24 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
    * 但其 viewport 位置可能在视口外用户看不到。要让用户视觉感受到"handle 跟鼠标走",
    * 需主动滚动 note 容器,使 handle.getBoundingClientRect().top 紧跟鼠标 clientY。
    */
+  /**
+   * Resize 拖动 — Pointer Capture + movementY + 临时 spacer 让 scrollHeight 守恒
+   *
+   * 多回合反复试错的根因(诊断日志铁证):
+   *
+   * 用户拖动开始时若 note 容器已经滚到底部(scrollTop == scrollMax),iframe 缩短
+   * 会让 scrollHeight 减小 → 浏览器自动 clamp scrollTop 到新上限(规范行为)。
+   *
+   * 结果:handle DOM offsetTop 减小 X 像素 + scrollTop 同步减少 X 像素 → viewport
+   * 上互相抵消,handle viewport Y 完全不变 — 用户看到 "==" 钉在原位不跟鼠标走,
+   * 即便 iframe 真的在缩短(渲染区在视口外用户也看不见)。
+   *
+   * 修法:拖动期间在 handle 后插一个 spacer div,高度 = (initialHeight - currentHeight)。
+   * iframe 缩 X 则 spacer 补 X,scrollHeight 全程保持初始值不变 → scrollTop 不被
+   * clamp → handle DOM offsetTop 真的减小 → viewport Y 自然跟鼠标。
+   *
+   * pointerup 移除 spacer,scrollHeight 自然回到含新 iframe height 的真实值。
+   */
   function setupHeightResize(handle: HTMLElement, iframe: HTMLIFrameElement): void {
     handle.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
@@ -287,7 +291,11 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       userOverrideHeight = true;
       handle.setPointerCapture(e.pointerId);
 
-      const scrollContainer = findScrollContainer(handle);
+      const initialIframeHeight = iframe.offsetHeight;
+      const spacer = document.createElement('div');
+      spacer.style.height = '0px';
+      spacer.style.pointerEvents = 'none';
+      handle.parentElement?.insertBefore(spacer, handle.nextSibling);
 
       const prevUserSelect = document.body.style.userSelect;
       const prevCursor = document.body.style.cursor;
@@ -297,19 +305,10 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       const onPointerMove = (ev: PointerEvent) => {
         const dy = ev.movementY;
         if (dy === 0) return;
-
         const newHeight = Math.max(HEIGHT_MIN_PX, iframe.offsetHeight + dy);
         iframe.style.height = `${newHeight}px`;
-
-        // "==" 绑定鼠标 viewport Y:每帧把 handle 滚到鼠标位置。
-        if (scrollContainer) {
-          const handleRect = handle.getBoundingClientRect();
-          const handleCenterY = handleRect.top + handleRect.height / 2;
-          const diff = handleCenterY - ev.clientY;
-          if (Math.abs(diff) > 1) {
-            scrollContainer.scrollTop += diff;
-          }
-        }
+        const shrinkage = initialIframeHeight - newHeight;
+        spacer.style.height = `${Math.max(0, shrinkage)}px`;
       };
 
       const onPointerUp = () => {
@@ -322,6 +321,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         } catch {
           /* capture released, ignore */
         }
+        spacer.remove();
         document.body.style.userSelect = prevUserSelect;
         document.body.style.cursor = prevCursor;
         if (view.isDestroyed) return;
