@@ -8,11 +8,12 @@
  * @codemirror/* / @lezer/*,通过 `requireCapabilityApi<CodeEditingApi>('code-editing')`
  * 拿 Host 组件 + registerLanguage / getLanguages API。
  *
- * ── 下游消费者(规划)──
+ * ── 下游消费者 ──
  *
- * - drivers/text-editing-driver/blocks/code-block/fullscreen/MermaidFullscreenPanel
- *   (Phase 2 切换;mermaid 全屏首个客户)
- * - 未来 inline code-block 走 Path 1(本 capability 落地后再起独立 PR)
+ * - drivers/text-editing-driver/blocks/code-block/fullscreen/CodeFullscreenPanel
+ *   (Phase 3 后通用 — mermaid + plain + JS/TS/Py/JSON/MD 都走它)
+ * - drivers/text-editing-driver/plugins/build-code-syntax-highlight-plugin
+ *   (Phase 2 — inline 语法高亮,走 tokenizeSync)
  * - 未来其他需要"代码编辑器"的全屏 / 内嵌业务
  *
  * ── 设计文档 ──

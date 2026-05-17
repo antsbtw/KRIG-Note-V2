@@ -83,42 +83,87 @@ export function isLanguageLoaded(language: string): boolean {
 // Tag 归一
 // ─────────────────────────────────────────────────────────
 
-// LanguageSupport 路径:用 tagHighlighter 把 Lezer tag 映射到字符串名
-// 8 类对齐 theme-dark.ts;额外加几条同义映射(typeName / className 等都归入 variableName,
-// 简化 inline 视觉)
+// LanguageSupport 路径:用 tagHighlighter 把 Lezer tag 映射到字符串 class 名
+//
+// **对齐 VSCode Dark+ 配色**(详 CSS pm-host.css `.krig-code-syntax-token--*`)。
+// 12 类 token —— 比初版 8 类更细分,与 VSCode 视觉接近:
+//   - storage:    紫 `import / export / type / as`(definitionKeyword / moduleKeyword)
+//   - keyword:    蓝 `if / return / for / function`(普通控制 / 操作符 keyword)
+//   - typeName:   青绿 类型名 / 接口名 / 类名(typeName / className)
+//   - functionName: 浅黄 函数名 / 方法名(function(variableName))
+//   - variableName: 浅蓝 局部变量 / 参数 / 属性名
+//   - propertyName: 浅蓝(同 variableName 同色;留 class 名以备未来微调)
+//   - string:     橙
+//   - number:     浅绿(整型 / 浮点 / bool / null)
+//   - comment:    绿斜
+//   - operator:   浅灰
+//   - punctuation: 深灰(括号 / 大括号 / 冒号 / 分号)
+//   - attributeName: 黄(JSX 属性 / mermaid attribute 等)
+//
+// 同名 tag 多次出现:Lezer tagHighlighter 用**最先匹配**;具体规则(如 function(variableName))
+// 比通用(variableName)更先列出,确保函数名先于普通变量名命中。
 const inlineHighlighter: Highlighter = tagHighlighter([
+  // ── storage / modifier keyword:紫(import / export / type / as) ──
+  { tag: tags.definitionKeyword, class: 'storage' },
+  { tag: tags.moduleKeyword, class: 'storage' },
+  { tag: tags.modifier, class: 'storage' },
+
+  // ── 普通 keyword:蓝(if / return / for / function 等流控 / 操作符 keyword) ──
   { tag: tags.keyword, class: 'keyword' },
   { tag: tags.controlKeyword, class: 'keyword' },
   { tag: tags.operatorKeyword, class: 'keyword' },
-  { tag: tags.modifier, class: 'keyword' },
-  { tag: tags.definitionKeyword, class: 'keyword' },
-  { tag: tags.moduleKeyword, class: 'keyword' },
+  { tag: tags.self, class: 'keyword' },
+  { tag: tags.null, class: 'keyword' },
+
+  // ── 类型 / 类名:青绿(HTMLAudioElement / NodeViewConstructor / string / number) ──
+  { tag: tags.typeName, class: 'typeName' },
+  { tag: tags.className, class: 'typeName' },
+  { tag: tags.namespace, class: 'typeName' },
+  { tag: tags.constant(tags.name), class: 'typeName' },
+
+  // ── 函数 / 方法名:浅黄(audioBlockNodeView / updateAttrs / 调用点) ──
+  { tag: tags.function(tags.variableName), class: 'functionName' },
+  { tag: tags.function(tags.propertyName), class: 'functionName' },
+  { tag: tags.labelName, class: 'functionName' },
+
+  // ── 变量名 / 参数 / 属性名:浅蓝 ──
+  { tag: tags.variableName, class: 'variableName' },
+  { tag: tags.propertyName, class: 'propertyName' },
+
+  // ── 字符串(string + 模板字串 + 正则) ──
+  { tag: tags.string, class: 'string' },
+  { tag: tags.special(tags.string), class: 'string' },
+  { tag: tags.regexp, class: 'string' },
+
+  // ── 数字 / 常量(bool / null 也归入,等价 #b5cea8) ──
+  { tag: tags.number, class: 'number' },
+  { tag: tags.integer, class: 'number' },
+  { tag: tags.float, class: 'number' },
+  { tag: tags.bool, class: 'number' },
+
+  // ── 注释 ──
   { tag: tags.comment, class: 'comment' },
   { tag: tags.lineComment, class: 'comment' },
   { tag: tags.blockComment, class: 'comment' },
   { tag: tags.docComment, class: 'comment' },
-  { tag: tags.string, class: 'string' },
-  { tag: tags.special(tags.string), class: 'string' },
-  { tag: tags.regexp, class: 'string' },
-  { tag: tags.number, class: 'number' },
-  { tag: tags.integer, class: 'number' },
-  { tag: tags.float, class: 'number' },
+
+  // ── 操作符 ──
   { tag: tags.operator, class: 'operator' },
   { tag: tags.arithmeticOperator, class: 'operator' },
   { tag: tags.logicOperator, class: 'operator' },
   { tag: tags.bitwiseOperator, class: 'operator' },
   { tag: tags.compareOperator, class: 'operator' },
   { tag: tags.updateOperator, class: 'operator' },
-  { tag: tags.variableName, class: 'variableName' },
-  { tag: tags.typeName, class: 'variableName' },
-  { tag: tags.className, class: 'variableName' },
-  { tag: tags.propertyName, class: 'variableName' },
-  { tag: tags.function(tags.variableName), class: 'variableName' },
+
+  // ── 属性名(JSX / mermaid / markdown 属性等) ──
   { tag: tags.attributeName, class: 'attributeName' },
+
+  // ── 标点 / 括号 ──
   { tag: tags.punctuation, class: 'punctuation' },
   { tag: tags.bracket, class: 'punctuation' },
   { tag: tags.paren, class: 'punctuation' },
   { tag: tags.brace, class: 'punctuation' },
+  { tag: tags.separator, class: 'punctuation' },
 ]);
 
 // ─────────────────────────────────────────────────────────
@@ -223,12 +268,16 @@ function tokenizeStream(streamLang: StreamLanguage<unknown>, source: string): To
 function normalizeStreamTag(tag: string): string | null {
   const head = tag.split(/[.\s]/)[0];
   const allowed = new Set([
-    'keyword', 'comment', 'string', 'number',
-    'operator', 'variableName', 'attributeName', 'punctuation',
+    'keyword', 'storage', 'comment', 'string', 'number',
+    'operator', 'variableName', 'propertyName', 'functionName',
+    'typeName', 'attributeName', 'punctuation',
   ]);
   if (allowed.has(head)) return head;
   // 兜底 — 把 atom / property / def 等映射到最接近的类
-  if (head === 'atom' || head === 'def' || head === 'property') return 'variableName';
+  if (head === 'atom') return 'number';        // bool / null 类
+  if (head === 'def') return 'functionName';   // function def
+  if (head === 'property') return 'propertyName';
+  if (head === 'type') return 'typeName';
   if (head === 'tag') return 'keyword';
   if (head === 'attribute') return 'attributeName';
   return null;
