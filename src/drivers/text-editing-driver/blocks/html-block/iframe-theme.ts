@@ -66,5 +66,15 @@ body {
   color: var(--color-text-primary, #e8e8e8);
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
+/* 隐藏滚动条:用户拖小 iframe 时,超出内容自然被 iframe 自身 overflow:hidden
+   裁切,无需暴露原生滚动条(视觉干净)。Chromium / WebKit / Firefox 三家兼容。*/
+html, body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
 </style>`;
 }
