@@ -81,6 +81,8 @@ export default [
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
           // Wave 2 新增 — audit P1-5:driver 不直触 storage,走对应 capability
           { group: ['@storage/*'], message: 'driver 不直接 import @storage/*,走对应 capability(audit P1-5)' },
+          // CM6 / ELK driver 屏障:Phase 2 mermaid 切换完成后加(Phase 1A 暂不加,
+          // 否则现有 fullscreen/MermaidEditor + mermaid-renderer 直接报错)。
         ],
       }],
     },
@@ -198,6 +200,44 @@ export default [
         patterns: [
           { group: ['three', 'three/*'],
             message: 'P1-1 严格版屏障:three 只允许 capabilities/canvas-rendering/ import' },
+        ],
+      }],
+    },
+  },
+
+  // CodeMirror 6 单点屏障(Phase 1A code-editing capability 引入):
+  // capability 层默认禁 @codemirror/* + @lezer/*;code-editing 是唯一允许 import 的位置。
+  //
+  // 详见 docs/tasks/cm6-elk-capability-refactor.md §Task A 屏障约束。
+  {
+    files: ['src/capabilities/**/*.{ts,tsx}'],
+    ignores: ['src/capabilities/code-editing/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['@codemirror/*'],
+            message: 'CM6 单点屏障:@codemirror/* 只允许 capabilities/code-editing/ import' },
+          { group: ['@lezer/*'],
+            message: 'CM6 单点屏障:@lezer/* 只允许 capabilities/code-editing/ import' },
+        ],
+      }],
+    },
+  },
+
+  // ELK 单点屏障(Phase 1B graph-layout capability 引入):
+  // capability 层默认禁 elkjs + @mermaid-js/layout-elk;graph-layout 是唯一允许 import 的位置。
+  //
+  // 详见 docs/tasks/cm6-elk-capability-refactor.md §Task B 屏障约束。
+  {
+    files: ['src/capabilities/**/*.{ts,tsx}'],
+    ignores: ['src/capabilities/graph-layout/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['elkjs', 'elkjs/*'],
+            message: 'ELK 单点屏障:elkjs 只允许 capabilities/graph-layout/ import' },
+          { group: ['@mermaid-js/layout-elk'],
+            message: 'ELK 单点屏障:@mermaid-js/layout-elk 只允许 capabilities/graph-layout/ import' },
         ],
       }],
     },

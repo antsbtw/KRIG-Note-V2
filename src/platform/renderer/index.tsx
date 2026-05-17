@@ -40,6 +40,7 @@ import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 +
 import '@capabilities/shape-library';       // L5-G2 新增(Shape + Substance 资源仓库,0 import three)
 import '@capabilities/canvas-rendering';    // L5-G3 新增(Three.js 单点屏障核心,P1-1 严格屏障)
 import '@capabilities/canvas-text-node';    // L5-G4.5 新增(画板文字节点 PM 桥接 + EditOverlay,路径 A 嵌 text-editing.Host)
+import '@capabilities/code-editing';        // Phase 1A 新增(CM6 单点屏障,封装 @codemirror/* + @lezer/*;mermaid 全屏 Phase 2 接入)
 import '@capabilities/note';                // L7-sub2 新增(note CRUD via IPC bridge,decision 012)
 import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IPC bridge,decision 012)
 
