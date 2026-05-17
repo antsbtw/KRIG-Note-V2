@@ -355,6 +355,42 @@ src/drivers/text-editing-driver/plugins/
 - ❌ 代码块差异比对 / 历史回滚 / 自动保存
 - ❌ Custom Highlight 主题切换 UI(用户级别偏好,留 settings 落地后做)
 
+## 未来扩展(本 PR 不做,留下游 PR)
+
+### html codeBlock 内嵌渲染框(2026-05-17 提出)
+
+**想法**:html language 的 codeBlock 像 mermaid 一样,inline 显示"代码 + 渲染"双框
+(可 split / preview-only 切换);**不再单独做 htmlBlock 节点**。
+
+**和 D7 的关系**:这是 D7 "mermaid 是 codeBlock 特例" 思路的拓展 —— 把"特例"从单点
+mermaid 泛化为"language 可挂 preview adapter",mermaid 是首批,html 是第二批。
+
+**落地路径**(单独 PR `feature/code-block-html-preview`):
+
+- spec 不变,`language='html'` 走新分支 `buildHtmlCodeBlockView`
+- inline preview pane 用 **iframe `sandbox=""`** 渲染(完全沙箱,**不开 allow-scripts** —
+  避免用户粘 `<script>` 任意执行)
+- 切语言到 html ↔ 切出 html 都让 PM destroy 重建(update 返回 false,同 mermaid 现状)
+- Phase 3 完成后的 `CodeFullscreenPanel` 通用外壳天然支持 `HtmlPreviewPane`(adapter 同型)
+- 全屏内复用 generic toolbar(Copy / 关闭),html 特有的可选:"刷新预览 / 沙箱级别切换"
+
+**风险点**:
+- 安全:sandbox 不能开 allow-same-origin + allow-scripts 同时开(同源逃逸);默认全空
+- 链接:iframe 内点链接默认替换 iframe;需要 `<base target="_blank">` 或拦截
+- 资源加载:iframe 内 `<img src="local-path">` 不可达;若要支持本地资源,得走 srcdoc
+  转 blob URL,这是独立子任务
+- 性能:每次 source 变都重建 iframe srcdoc;实测够用即可,不需要 diff 增量
+
+**开工前必须先讨论**:default 视图是 split 还是 preview-only?切语言到 html 自动开
+preview 还是手动切?跟 mermaid 行为是否对齐?
+
+### 通用 "language preview adapter" 抽象(html 落地后再讨论)
+
+如果未来还有 svg / markdown(自渲染)/ latex 等带 preview 的 language,把"哪些 language
+有 inline preview" 改成 capability 注册项 — code-editing capability 加 `registerPreview(lang, adapter)`,
+NodeView 按 language 查 adapter 决定走 generic 还是 preview 版。当前 v1 不抽象,
+mermaid / html 写死分支即可。
+
 ## 参考已有 memory
 
 - `project_cm6_elk_capability_done` — 前置 PR 已合 main 64eefbe,capability 边界已确立
