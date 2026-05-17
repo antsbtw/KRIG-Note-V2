@@ -19,12 +19,14 @@
  *   PreviewPane 触发预览;非 mermaid 路径 setSource 也调,无副作用)
  * - lastValueRef 写回 PM(memory feedback_react_unmount_child_cleanup_order):React unmount
  *   时子组件 cleanup 先于父执行,直接调 editorRef.current?.getValue() 会拿到 ''
- * - language 切换:Phase 3 v1 不支持全屏内切语言(D8 拍板 + complexity 收敛);Language
- *   select 显示当前语言只读;如果用户期望切语言,关闭全屏 → inline 切 → 重开
- *   (避免复杂的 CodeHost 重 mount + 语言验证 + PM attrs 同步链)
+ * - language 切换:全屏内 select onChange → setLanguage state + 写回 PM attrs(供
+ *   关闭后 inline 同步)。CodeHost 用 key={language} 强制重 mount(走新 language
+ *   的 loader);mount 前 lastValueRef 已保住内容,新 mount 走 initialValue=ref.current。
+ *   mermaid 路径切换:language === 'mermaid' 时显示右侧 MermaidPreviewPane,从
+ *   mermaid 切出时 PreviewPane 自然 unmount(cleanup 恢复 dark theme 渲染单例)。
  */
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { TextSelection } from 'prosemirror-state';
 import type { FullscreenOverlayCloseProps }
   from '@slot/interaction-registries/fullscreen-overlay-registry/types';
@@ -37,7 +39,6 @@ import {
   clearCodeFullscreenContext,
 } from './menu-context';
 import { MermaidPreviewPane } from './MermaidPreviewPane';
-import { getLanguageLabel } from '../lang-dropdown';
 import './code-fullscreen.css';
 import './mermaid-fullscreen.css';
 
@@ -74,7 +75,8 @@ export function CodeFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
   // 详见 memory feedback_react_unmount_child_cleanup_order。
   const lastValueRef = useRef<string>(initialCodeRef.current);
 
-  const language = ctxRef.current?.language ?? '';
+  // language 用 React state — select onChange 切换时让 CodeHost / PreviewPane 重渲
+  const [language, setLanguage] = useState<string>(ctxRef.current?.language ?? '');
   const isMermaid = language === 'mermaid';
 
   // 用 source state 给 MermaidPreviewPane 提供 doc 源 — onChange 同步,不影响非 mermaid 路径
@@ -91,6 +93,34 @@ export function CodeFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
     editorRef.current?.setValue(newSource);
     // setValue 通过 CMView dispatch 触发 onChange → 已同步 lastValueRef + source state
   }, []);
+
+  // ── 全屏内切语言:写回 PM attrs.language + setLanguage 让 CodeHost 重 mount ──
+  // CodeHost 用 key={language} 在 React render 中,setLanguage 即触发 unmount+mount;
+  // unmount 子组件 cleanup 先于父执行,但 lastValueRef 已保住当前内容,新 mount 走
+  // initialValue=lastValueRef.current,内容不丢。
+  // mermaid ↔ plain 切换:mermaid 时 MermaidPreviewPane 显;切走时自然 unmount,其 cleanup
+  // 恢复 dark theme 渲染单例(memo:feedback_react_unmount_child_cleanup_order)。
+  const onLanguageSelectChange = useCallback((e: FormEvent<HTMLSelectElement>) => {
+    const newLang = e.currentTarget.value;
+    if (newLang === language) return;
+    // 写回 PM attrs(让关闭后 inline 同步)
+    const ctx = ctxRef.current;
+    if (ctx) {
+      const inst = instanceRegistry.get(ctx.instanceId);
+      if (inst) {
+        const view = inst.view;
+        const node = view.state.doc.nodeAt(ctx.nodePos);
+        if (node && node.type.name === 'codeBlock') {
+          const tr = view.state.tr.setNodeMarkup(ctx.nodePos, undefined, {
+            ...node.attrs,
+            language: newLang,
+          });
+          view.dispatch(tr);
+        }
+      }
+    }
+    setLanguage(newLang);
+  }, [language]);
 
   // ── unmount cleanup:diff 写回 + 清 context ──
   useEffect(() => {
@@ -197,9 +227,8 @@ export function CodeFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
     });
   }, []);
 
-  // 当前语言显示
+  // 当前语言显示;select 选项 = Plain Text + 所有已注册语言(含 mermaid)
   const langs: LanguageItem[] = codeApi.getLanguages();
-  const langLabel = getLanguageLabel(language);
 
   // ── 没有 context 的兜底 ──
   if (!ctxRef.current) {
@@ -220,22 +249,19 @@ export function CodeFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
           {isMermaid ? 'Mermaid Editor' : 'Code Editor'}
         </span>
 
-        {/* Language select(Phase 3 v1 只读显示;切语言走 inline toolbar) */}
+        {/* Language select(可切;选项 = Plain Text + 所有已注册语言) */}
         <select
           className="krig-code-fs__select"
           value={language}
-          disabled
-          title="语言切换请在 inline toolbar 内操作"
+          onChange={onLanguageSelectChange}
+          title="切换语言"
         >
-          <option value={language}>{langLabel}</option>
-          {/* 兜底:列出已注册语言(disabled 状态下浏览器仍渲;disabled 时点击无效) */}
-          {langs.map((l) =>
-            l.id === language ? null : (
-              <option key={l.id} value={l.id}>
-                {l.label}
-              </option>
-            ),
-          )}
+          <option value="">Plain Text</option>
+          {langs.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.label}
+            </option>
+          ))}
         </select>
 
         <div className="krig-code-fs__spacer" />
@@ -273,8 +299,11 @@ export function CodeFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
           className="krig-code-fs__pane krig-code-fs__pane--editor krig-mermaid-fs__pane--editor"
           ref={editorPaneRef}
         >
+          {/* key={language} 在 language 变化时强制 unmount+mount 走新 loader;
+              initialValue 用 lastValueRef.current(切语言时已保住当前内容,新 mount 不丢) */}
           <CodeHost
-            initialValue={initialCodeRef.current}
+            key={language || 'plain'}
+            initialValue={lastValueRef.current}
             language={language || undefined}
             theme="dark"
             onChange={onEditorChange}
