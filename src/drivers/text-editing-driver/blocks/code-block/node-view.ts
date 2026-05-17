@@ -16,20 +16,22 @@
  * 异不被强行 patch)。
  *
  * 全屏编辑器:走 L2 fullscreen-overlay 体系,Component 是 React 组件,事件不被
- * PM 抢(见 [[fullscreen/MermaidFullscreenPanel]] + [[fullscreen/menu-context]])。
+ * PM 抢(见 [[fullscreen/CodeFullscreenPanel]] + [[fullscreen/menu-context]])。
+ * mermaid / 非 mermaid 都走 'text-editing.fullscreen.code' overlay id;CodeFullscreenPanel
+ * 内部按 language 决定是否渲染 MermaidPreviewPane。
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import { renderMermaidDiagram } from './mermaid-renderer';
 import { downloadBlob } from './save-blob';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
-import { setMermaidFullscreenContext } from './fullscreen/menu-context';
+import { setCodeFullscreenContext } from './fullscreen/menu-context';
 import { createGenericToolbar } from './generic-toolbar';
 
 const LS_VIEW_KEY = 'krig-mermaid-view-mode';
 type ViewMode = 'split' | 'preview';
 
-const FULLSCREEN_OVERLAY_ID = 'text-editing.fullscreen.mermaid';
+const FULLSCREEN_OVERLAY_ID = 'text-editing.fullscreen.code';
 
 const ICON_EYE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -73,6 +75,15 @@ function buildGenericCodeBlockView(
         language: newLang,
       });
       view.dispatch(tr);
+    },
+    onFullscreen: () => {
+      const instanceId = findInstanceId(view);
+      const pos = typeof getPos === 'function' ? getPos() : undefined;
+      if (!instanceId || pos == null) return;
+      const currentNode = view.state.doc.nodeAt(pos);
+      const lang = (currentNode?.attrs.language as string) ?? '';
+      setCodeFullscreenContext({ instanceId, nodePos: pos, language: lang });
+      fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
     },
   });
 
@@ -233,7 +244,7 @@ function buildMermaidCodeBlockView(
     const instanceId = findInstanceId(view);
     const pos = typeof getPos === 'function' ? getPos() : undefined;
     if (!instanceId || pos == null) return;
-    setMermaidFullscreenContext({ instanceId, nodePos: pos });
+    setCodeFullscreenContext({ instanceId, nodePos: pos, language: 'mermaid' });
     fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
   });
 

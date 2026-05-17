@@ -1,0 +1,130 @@
+/**
+ * Code Fullscreen Panel — 通用外壳样式(Phase 3)
+ *
+ * 父容器 .krig-fullscreen-overlay(由 FullscreenOverlayBinding 提供)已:
+ *   position: fixed; inset: 0; display: flex; flex-direction: column;
+ *
+ * 内部 layout(language === 'mermaid' 时含 split + preview,其他语言仅 editor):
+ *   .krig-code-fs(flex column)
+ *   ├─ .krig-code-fs__toolbar          (flex row,不收缩 — 通用部分;mermaid 右侧子组件叠加自己的 toolbar)
+ *   ├─ .krig-code-fs__split            (flex row 或单 pane,占满中间)
+ *   │   ├─ .krig-code-fs__pane--editor (内嵌 CodeHost)
+ *   │   ├─ .krig-code-fs__divider      (mermaid 才出现;非 mermaid 隐藏)
+ *   │   └─ .krig-code-fs__pane--preview(mermaid 才出现;MermaidPreviewPane 内继续用旧 krig-mermaid-fs__*)
+ *   └─ .krig-code-fs__status            (mermaid preview 渲染状态;非 mermaid 该 slot 不出现)
+ *
+ * mermaid 特化样式(preview / template / theme / direction / zoom / status 视觉细节)
+ * 保留在 mermaid-fullscreen.css 内,本文件只覆盖通用外壳/toolbar/select/btn/split/divider。
+ */
+
+.krig-code-fs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #111;
+  color: #d4d4d4;
+}
+
+/* ── 通用 toolbar ────────────────────────────────── */
+
+.krig-code-fs__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.krig-code-fs__title {
+  font-size: 13px;
+  color: #888;
+  font-weight: 500;
+  margin-right: 8px;
+}
+
+.krig-code-fs__spacer {
+  flex: 1;
+}
+
+.krig-code-fs__sep {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: #444;
+  flex-shrink: 0;
+}
+
+.krig-code-fs__select {
+  height: 28px;
+  padding: 0 6px;
+  background: #252525;
+  color: #ccc;
+  border: 1px solid #444;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+}
+.krig-code-fs__select:hover {
+  border-color: #666;
+}
+
+.krig-code-fs__btn {
+  min-width: 30px;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-family: inherit;
+}
+.krig-code-fs__btn:hover {
+  background: #333;
+  color: #e8eaed;
+}
+.krig-code-fs__btn--ok {
+  color: #4caf50 !important;
+}
+.krig-code-fs__btn--close {
+  font-size: 20px;
+}
+
+/* ── split + pane ────────────────────────────────── */
+
+.krig-code-fs__split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.krig-code-fs__pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.krig-code-fs__pane--editor {
+  flex: 1;
+}
+.krig-code-fs__pane--preview {
+  flex: 1;
+}
+.krig-code-fs__divider {
+  width: 5px;
+  background: #333;
+  flex-shrink: 0;
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+.krig-code-fs__divider:hover {
+  background: #555;
+}
