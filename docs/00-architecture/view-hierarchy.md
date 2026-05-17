@@ -852,6 +852,8 @@ L0  Application
 |------|------|
 | `src/shell/DESIGN.md` | **L2 Shell 详细设计**（v0.4 含 FullscreenOverlay 边界辨析）|
 | `src/shell/fullscreen-overlay/README.md` | FullscreenOverlay 模块说明 + 业务方接入示例 |
+| `src/capabilities/code-editing/README.md` | **CM6 单点屏障 capability**（封装 `@codemirror/*` + `@lezer/*`,对外提供 React `Host` + 语言注册;mermaid 全屏首个客户）|
+| `src/capabilities/graph-layout/README.md` | **ELK 单点屏障 capability**（封装 `elkjs` + `@mermaid-js/layout-elk`,对外提供 `computeLayout` + mermaid loader;未来画板/BPMN/Mind/知识图谱共用）|
 | `docs/系统模块清单.md` | 系统全貌清单，记录当前代码和命名现状 |
 | `docs/分层原则符合性评估报告-2026-04-21.md` | 分层原则评估，指出越层问题 |
 | `docs/note/Schema-Reference.md` | NoteView (L5) 内部的 Block Schema 参考 |

@@ -31,6 +31,8 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouse
 import { TextSelection } from 'prosemirror-state';
 import type { FullscreenOverlayCloseProps }
   from '@slot/interaction-registries/fullscreen-overlay-registry/types';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { CodeEditingApi, CodeEditingHandle } from '@capabilities/code-editing/types';
 import { instanceRegistry } from '../../../instance-registry';
 import {
   buildMermaidConfig,
@@ -42,7 +44,6 @@ import {
   getMermaidFullscreenContext,
   clearMermaidFullscreenContext,
 } from './menu-context';
-import { MermaidEditor, type MermaidEditorHandle } from './MermaidEditor';
 import {
   MermaidPreview,
   type MermaidPreviewHandle,
@@ -116,8 +117,12 @@ function svgWithBg(svgEl: SVGElement): string {
 export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
   // ── mount 时一次性读取 context + 初始内容 ──
   const ctxRef = useRef(getMermaidFullscreenContext());
-  const editorRef = useRef<MermaidEditorHandle | null>(null);
+  // Phase 2:editorRef 通过 code-editing capability Host 的 onMount 回调拿 handle
+  const editorRef = useRef<CodeEditingHandle | null>(null);
   const previewRef = useRef<MermaidPreviewHandle | null>(null);
+
+  // Phase 2:Host 来自 code-editing capability(单点屏障核心 — @codemirror/* import 收敛)
+  const CodeHost = requireCapabilityApi<CodeEditingApi>('code-editing').Host;
 
   const initialCodeRef = useRef<string>('');
   if (!initialCodeRef.current && ctxRef.current) {
@@ -126,12 +131,13 @@ export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps)
     initialCodeRef.current = node?.textContent ?? '';
   }
 
-  // **关键**:lastValueRef 镜像 CM 当前内容。React unmount 时子组件 MermaidEditor
-  // 的 cleanup 先于本 Panel 的 cleanup 执行 → CM view.destroy() + viewRef=null
-  // → editorRef.current?.getValue() 返回 ''(viewRef 已死)。
+  // **关键**:lastValueRef 镜像 CM 当前内容。React unmount 时子组件
+  // (code-editing capability 的 CodeHost)的 cleanup 先于本 Panel 的 cleanup 执行
+  // → CM view.destroy() → editorRef.current?.getValue() 返回 ''(SDK 已死)。
   // 如果 cleanup 用 getValue 拿 newContent 会拿到 '' → tr.delete 把内容清空。
   // 解法:onChange 时同步更新 lastValueRef,cleanup 用本 ref 而非 imperative
   // API,即使 CM 已 destroy 也能拿到最后一次正确内容。
+  // 详见 memory feedback_react_unmount_child_cleanup_order。
   const lastValueRef = useRef<string>(initialCodeRef.current);
 
   // ── React state ──
@@ -364,10 +370,14 @@ export function MermaidFullscreenPanel({ onClose }: FullscreenOverlayCloseProps)
 
       <div className="krig-mermaid-fs__split" ref={splitContainerRef}>
         <div className="krig-mermaid-fs__pane krig-mermaid-fs__pane--editor" ref={editorPaneRef}>
-          <MermaidEditor
-            ref={editorRef}
+          <CodeHost
             initialValue={initialCodeRef.current}
+            language="mermaid"
+            theme="dark"
             onChange={onEditorChange}
+            onMount={(handle) => {
+              editorRef.current = handle;
+            }}
           />
         </div>
         <div className="krig-mermaid-fs__divider" onMouseDown={onDividerDown} />

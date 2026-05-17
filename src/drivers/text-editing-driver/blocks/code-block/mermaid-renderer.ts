@@ -1,16 +1,24 @@
 /**
- * Mermaid 渲染核心 — 模块单例 (V1 → V2 直迁)
+ * Mermaid 渲染核心 — 模块单例 (V1 → V2 直迁;Phase 2 接入 graph-layout capability)
  *
  * V1 源:src/plugins/note/blocks/code-plugins/mermaid-plugin.ts
  *
  * 负责:
- * - lazy 初始化 mermaid + ELK layout
+ * - lazy 初始化 mermaid + 通过 graph-layout capability 注入 ELK loader
  * - 渲染 mermaid 源到容器 (renderMermaidDiagram)
  * - 暴露 themes / templates 常量给 fullscreen 编辑器
  *
  * NodeView / Fullscreen 通过本模块的 getMermaidModule() 拿到全局 mermaid 实例,
  * 不重复 init.
+ *
+ * **Phase 2 重构**(原 `await import('@mermaid-js/layout-elk')`):
+ * 改走 `requireCapabilityApi<GraphLayoutApi>('graph-layout').getMermaidElkLoader()` —
+ * @mermaid-js/layout-elk 的 import 收敛到 capabilities/graph-layout/ 内,driver 层
+ * ESLint 屏障禁止重复 import(详见 docs/tasks/cm6-elk-capability-refactor.md §Task C)。
  */
+
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { GraphLayoutApi } from '@capabilities/graph-layout/types';
 
 let mermaidInitialized = false;
 let mermaidModule: typeof import('mermaid').default | null = null;
@@ -61,7 +69,11 @@ async function ensureMermaidInit(): Promise<void> {
   mermaidModule = (await import('mermaid')).default;
 
   try {
-    const elkLayouts = (await import('@mermaid-js/layout-elk')).default;
+    // Phase 2 重构:走 graph-layout capability 拿 ELK loader,@mermaid-js/layout-elk
+    // 的 import 收敛到 capabilities/graph-layout/ 内(ESLint 单点屏障)。
+    // getMermaidElkLoader 返回 Promise<unknown>(adapter 内 lazy import + 缓存)。
+    const layoutApi = requireCapabilityApi<GraphLayoutApi>('graph-layout');
+    const elkLayouts = await (layoutApi.getMermaidElkLoader() as Promise<unknown>);
     // registerLayoutLoaders 仅在 mermaid v11+ 上存在,types 未导出
     (mermaidModule as unknown as { registerLayoutLoaders: (l: unknown) => void })
       .registerLayoutLoaders(elkLayouts);

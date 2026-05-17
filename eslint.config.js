@@ -81,8 +81,16 @@ export default [
           { group: ['electron'], message: 'Electron API 必须经能力层封装' },
           // Wave 2 新增 — audit P1-5:driver 不直触 storage,走对应 capability
           { group: ['@storage/*'], message: 'driver 不直接 import @storage/*,走对应 capability(audit P1-5)' },
-          // CM6 / ELK driver 屏障:Phase 2 mermaid 切换完成后加(Phase 1A 暂不加,
-          // 否则现有 fullscreen/MermaidEditor + mermaid-renderer 直接报错)。
+          // CM6 单点屏障(Phase 2 启用):driver 内禁 import @codemirror/* / @lezer/*,走 capability
+          { group: ['@codemirror/*'],
+            message: 'CM6 单点屏障:driver 内禁 import @codemirror/*,走 requireCapabilityApi(\'code-editing\').Host' },
+          { group: ['@lezer/*'],
+            message: 'CM6 单点屏障:driver 内禁 import @lezer/*,走 code-editing capability' },
+          // ELK 单点屏障(Phase 2 启用):driver 内禁 import elkjs / @mermaid-js/layout-elk
+          { group: ['elkjs', 'elkjs/*'],
+            message: 'ELK 单点屏障:driver 内禁 import elkjs,走 requireCapabilityApi(\'graph-layout\')' },
+          { group: ['@mermaid-js/layout-elk'],
+            message: 'ELK 单点屏障:driver 内禁 import @mermaid-js/layout-elk,走 graph-layout capability' },
         ],
       }],
     },
