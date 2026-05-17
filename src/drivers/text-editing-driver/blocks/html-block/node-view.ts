@@ -253,6 +253,21 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     }
   }
 
+  /**
+   * 找到 iframe 所在的可滚动祖先(note view 的 ProseMirror 容器,通常 overflow:auto)。
+   * 用于拖动期间自动 scroll,让 iframe 底部(resize handle)跟随鼠标位置,避免
+   * "iframe 比窗口还高时,用户看不到 height 变化"的视觉错觉。
+   */
+  function findScrollContainer(el: HTMLElement): HTMLElement | null {
+    let cur: HTMLElement | null = el.parentElement;
+    while (cur && cur !== document.body) {
+      const overflow = getComputedStyle(cur).overflowY;
+      if (overflow === 'auto' || overflow === 'scroll') return cur;
+      cur = cur.parentElement;
+    }
+    return null;
+  }
+
   function setupHeightResize(handle: HTMLElement, iframe: HTMLIFrameElement): void {
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -260,10 +275,11 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       const startY = e.clientY;
       const startHeight = iframe.offsetHeight;
 
-      // 关键:mousedown 立刻锁 userOverrideHeight,否则拖动期间 ResizeObserver
-      // 持续触发 applyAutoHeight 把刚调小的 iframe height 立即抢回大值 → 用户
-      // 看上去"完全无法拖动",虽然 mousemove 在持续 setProperty。
+      // mousedown 立刻锁 userOverrideHeight,否则拖动期间 ResizeObserver 触发
+      // applyAutoHeight 抢回 iframe height,用户看不到拖动效果。
       userOverrideHeight = true;
+
+      const scrollContainer = findScrollContainer(iframe);
 
       const prevPointer = iframe.style.pointerEvents;
       const prevUserSelect = document.body.style.userSelect;
@@ -276,16 +292,33 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         const dy = ev.clientY - startY;
         const newHeight = Math.max(HEIGHT_MIN_PX, startHeight + dy);
         iframe.style.height = `${newHeight}px`;
+
+        // 视口边缘自动 scroll:鼠标接近窗口顶/底 50px 内时,note 容器对应滚动,
+        // 让 iframe 底部 (handle) 持续可见 + 跟随鼠标。否则 iframe 比视口还高
+        // 时用户看不到 height 变化,误以为"拖不动"。
+        if (scrollContainer) {
+          const EDGE = 60;
+          const MAX_STEP = 24;
+          const viewportH = window.innerHeight;
+          if (ev.clientY < EDGE) {
+            const step = Math.min(MAX_STEP, EDGE - ev.clientY);
+            scrollContainer.scrollTop -= step;
+          } else if (ev.clientY > viewportH - EDGE) {
+            const step = Math.min(MAX_STEP, ev.clientY - (viewportH - EDGE));
+            scrollContainer.scrollTop += step;
+          }
+        }
       };
 
       const onMouseUp = () => {
+        const finalH = iframe.offsetHeight;
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         iframe.style.pointerEvents = prevPointer;
         document.body.style.userSelect = prevUserSelect;
         document.body.style.cursor = prevCursor;
         if (view.isDestroyed) return;
-        updateAttrs({ height: iframe.offsetHeight });
+        updateAttrs({ height: finalH });
       };
 
       document.addEventListener('mousemove', onMouseMove);
