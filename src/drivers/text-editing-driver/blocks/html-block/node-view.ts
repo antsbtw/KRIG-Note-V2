@@ -253,30 +253,39 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     }
   }
 
+  /** 找最近的 overflow:auto/scroll 滚动祖先(note 容器),用于拖动期间让 handle
+   *  保持跟鼠标 viewport Y 一致 — 即"== 一定要和鼠标绑定"。 */
+  function findScrollContainer(el: HTMLElement): HTMLElement | null {
+    let cur: HTMLElement | null = el.parentElement;
+    while (cur && cur !== document.body) {
+      const overflow = getComputedStyle(cur).overflowY;
+      if (overflow === 'auto' || overflow === 'scroll') return cur;
+      cur = cur.parentElement;
+    }
+    return null;
+  }
+
   /**
-   * Resize handle 拖动 — Pointer Capture API + movementY
+   * Resize handle 拖动 — Pointer Capture + movementY + "handle 绑鼠标" scrollTop 补偿
    *
-   * 业界标准做法(react-resizable / Notion / VSCode panel resize 同款):
-   * - setPointerCapture:pointerdown 后接管该 pointer,所有 pointermove 事件
-   *   路由到 handle,鼠标即使移出窗口都持续触发(操作系统级 capture)
-   * - event.movementY:浏览器报告的"每帧物理鼠标位移",**不受视口限制**。
-   *   鼠标到达屏幕边界后系统仍报告 movementY,用户继续推鼠标 = 继续拖动。
+   * 设计目标(用户明确表述):
+   * - 鼠标向上拖 dy 像素 → handle / caption / 后续内容 在屏幕上**同步上移** dy
+   * - iframe 顶部保持 DOM 位置不变(A 模式),height 减 dy
+   * - "==" 拖柄始终绑定鼠标 viewport Y 位置
    *
-   * 弃用前版自造方案(mousedown/move/up + scrollTop 补偿 + handle-follow):
-   * iframe 比视口高 / 鼠标移出 viewport / 容器滚动等多边界情况下都有不自洽
-   * 路径,用户体验"卡"、"跟不上"、"必须松开重锚"。Pointer Capture 一并消解。
+   * 当 iframe 比视口大时,A 模式下 handle 在 DOM 中虽然跟随 iframe bottom 移动,
+   * 但其 viewport 位置可能在视口外用户看不到。要让用户视觉感受到"handle 跟鼠标走",
+   * 需主动滚动 note 容器,使 handle.getBoundingClientRect().top 紧跟鼠标 clientY。
    */
   function setupHeightResize(handle: HTMLElement, iframe: HTMLIFrameElement): void {
     handle.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return; // 仅左键
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
-
-      // pointerdown 立刻锁 userOverrideHeight,否则 ResizeObserver 触发
-      // applyAutoHeight 抢回 iframe height,拖动效果被覆盖。
       userOverrideHeight = true;
-
       handle.setPointerCapture(e.pointerId);
+
+      const scrollContainer = findScrollContainer(handle);
 
       const prevUserSelect = document.body.style.userSelect;
       const prevCursor = document.body.style.cursor;
@@ -284,13 +293,24 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       document.body.style.cursor = 'ns-resize';
 
       const onPointerMove = (ev: PointerEvent) => {
-        // movementY = 浏览器报告的物理鼠标 y 位移(不受 viewport 限制,
-        // 鼠标到屏幕边后继续推仍报告 movementY)
         const dy = ev.movementY;
         if (dy === 0) return;
+
         const currentHeight = iframe.offsetHeight;
         const newHeight = Math.max(HEIGHT_MIN_PX, currentHeight + dy);
         iframe.style.height = `${newHeight}px`;
+
+        // "== 和鼠标绑定" — 每帧把 handle 滚到鼠标 viewport Y 位置。
+        // 即便 iframe 比视口高 / 鼠标推到屏幕外都成立:movementY 不受 viewport
+        // 限制,iframe 持续缩;scrollTop 调整让 handle 视口位置追上鼠标。
+        if (scrollContainer) {
+          const handleRect = handle.getBoundingClientRect();
+          const handleCenterY = handleRect.top + handleRect.height / 2;
+          const diff = handleCenterY - ev.clientY;
+          if (Math.abs(diff) > 1) {
+            scrollContainer.scrollTop += diff;
+          }
+        }
       };
 
       const onPointerUp = () => {
@@ -301,7 +321,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         try {
           handle.releasePointerCapture(e.pointerId);
         } catch {
-          /* capture 已释放或丢失,忽略 */
+          /* capture released, ignore */
         }
         document.body.style.userSelect = prevUserSelect;
         document.body.style.cursor = prevCursor;
