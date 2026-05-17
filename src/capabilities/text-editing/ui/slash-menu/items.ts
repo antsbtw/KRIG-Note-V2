@@ -139,3 +139,20 @@ export function createMathBlockItem(viewId: string): SlashItem {
     order: 140,
   };
 }
+
+/**
+ * Mermaid Block (V1 → V2 直迁)
+ *
+ * Mermaid 图表块也常用 — flowchart / sequence / class / ER / Gantt / pie / mindmap 等。
+ * 视为 PM 通用(同 Math 思路)。
+ */
+export function createMermaidBlockItem(viewId: string): SlashItem {
+  return {
+    id: `${viewId}.slash.mermaid-block`,
+    label: 'Mermaid Diagram',
+    command: 'text-editing.slash-insert-mermaid-block',
+    keywords: ['mermaid', 'diagram', 'flowchart', 'sequence', 'chart', 'graph', '图表', '流程图'],
+    view: viewId,
+    order: 142,
+  };
+}

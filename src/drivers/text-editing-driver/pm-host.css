@@ -2281,3 +2281,114 @@
 .krig-pm-host .ProseMirror .krig-column-list__handle--dragging::after {
   background: #42a5f5;
 }
+
+/* ── codeBlock Mermaid NodeView (V1 → V2 直迁) ── */
+.krig-pm-host .ProseMirror div.krig-code-block {
+  position: relative;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  margin: 0.5em 0;
+  padding: 0;
+}
+
+.krig-pm-host .ProseMirror div.krig-code-block .krig-code-block__toolbar {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #252525;
+  border-bottom: 1px solid #333;
+  border-radius: 6px 6px 0 0;
+}
+.krig-pm-host .ProseMirror div.krig-code-block:hover .krig-code-block__toolbar {
+  display: flex;
+}
+
+.krig-pm-host .ProseMirror .krig-code-block__lang-label {
+  font-size: 11px;
+  color: #999;
+  padding: 2px 8px;
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+
+.krig-pm-host .ProseMirror .krig-code-block__toolbar-btn {
+  width: 28px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.krig-pm-host .ProseMirror .krig-code-block__toolbar-btn:hover {
+  background: #3a3a3a;
+  color: #e8eaed;
+}
+.krig-pm-host .ProseMirror .krig-code-block__toolbar-btn--active {
+  background: #3a3a3a;
+  color: #e8eaed;
+}
+.krig-pm-host .ProseMirror .krig-code-block__toolbar-btn--copied {
+  color: #4caf50 !important;
+}
+
+.krig-pm-host .ProseMirror .krig-code-block__pre {
+  padding: 12px 16px;
+  margin: 0;
+  overflow-x: auto;
+}
+.krig-pm-host .ProseMirror .krig-code-block__code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  background: transparent;
+  padding: 0;
+  border: none;
+  outline: none;
+  white-space: pre;
+}
+
+.krig-pm-host .ProseMirror .krig-code-block__preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 60px;
+  border-top: 1px solid #333;
+  background: #1a1a1a;
+}
+
+.krig-pm-host .ProseMirror .krig-code-block__mermaid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  padding: 16px;
+  background: #111;
+  overflow: hidden;
+}
+.krig-pm-host .ProseMirror .krig-code-block__mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.krig-pm-host .ProseMirror .krig-code-block__mermaid-empty {
+  color: #555;
+  font-size: 13px;
+  font-style: italic;
+}
+.krig-pm-host .ProseMirror .krig-code-block__mermaid-error {
+  color: #f87171;
+  font-size: 12px;
+}
+
+.krig-pm-host .ProseMirror div.krig-code-block--preview-only {
+  border-radius: 6px;
+}
+.krig-pm-host .ProseMirror div.krig-code-block--preview-only .krig-code-block__mermaid {
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+}
