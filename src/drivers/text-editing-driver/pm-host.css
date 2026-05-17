@@ -2582,23 +2582,52 @@
   border-color: #8ab4f8;
 }
 
-/* render — wrap div 套 iframe,CSS resize:vertical 提供原生右下角拖柄 */
-.krig-pm-host .ProseMirror .krig-html-block__iframe-wrap {
-  display: block;
-  width: 100%;
-  resize: vertical;
-  overflow: hidden;
-  border-radius: 8px;
-  background: #ffffff;
-  min-height: 100px;
-}
-
+/* render */
 .krig-pm-host .ProseMirror .krig-html-block__iframe {
   display: block;
   width: 100%;
-  height: 100%;
   border: none;
+  border-radius: 8px;
   background: #ffffff;
+}
+
+/* resize handle:常驻底部细线;mouse-near 时显出居中的 "==" 拖柄;hover/拖动时高亮 */
+.krig-pm-host .ProseMirror .krig-html-block__resize-handle {
+  position: relative;
+  height: 10px;
+  margin-top: 2px;
+  cursor: ns-resize;
+  background: transparent;
+  border-radius: 2px;
+  transition: background 0.12s ease-in-out;
+}
+
+/* 居中可见的 "==" 拖柄(::after 伪元素 — 不污染 DOM,仅视觉) */
+.krig-pm-host .ProseMirror .krig-html-block__resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 0.12s ease-in-out, width 0.12s ease-in-out;
+}
+
+/* hover 整个 block 时,拖柄淡显;hover 拖柄本身时强显 */
+.krig-pm-host .ProseMirror .krig-html-block:hover .krig-html-block__resize-handle::after {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__resize-handle:hover {
+  background: rgba(138, 180, 248, 0.12);
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__resize-handle:hover::after {
+  background: rgba(138, 180, 248, 0.65);
+  width: 64px;
 }
 
 /* toolbar */
