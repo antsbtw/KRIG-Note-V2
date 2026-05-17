@@ -22,10 +22,11 @@
  * non-fatal,renderer 走文件系统访问也能用)
  */
 
-import { app, protocol, net } from 'electron';
+import { app, protocol, net, session } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
+import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 
 const MEDIA_DIR = path.join(app.getPath('userData'), 'krig-data', 'media');
 const INDEX_FILE = path.join(MEDIA_DIR, 'media-index.json');
@@ -167,17 +168,27 @@ class MediaStore {
   }
 
   /**
-   * 注册 media:// 协议(全局 default session)
+   * 注册 media:// 协议
    *
-   * 必须在 app.whenReady 之后、第一个 webview 创建之前调,否则 webview 加载
-   * media://... 会 ERR_FILE_NOT_FOUND
+   * 双 session 注册:
+   * - default session:主 renderer 内 iframe / img / video / audio 等
+   * - persist:webview partition:右栏 web-view 加载 media:// 链接 / 本地资源
+   *
+   * Electron `protocol.handle` 默认只在 default session 生效;webview 用独立
+   * partition session,**必须显式再注册一次**,否则 webview 加载 media:// 会
+   * ERR_UNKNOWN_URL_SCHEME / ERR_FILE_NOT_FOUND。
+   *
+   * 必须在 app.whenReady 之后、第一个 webview 创建之前调。
    */
   registerProtocol(): void {
-    protocol.handle('media', (request) => {
+    const handler = (request: Request): Promise<Response> => {
       const urlPath = request.url.replace('media://', '');
       const filePath = path.join(MEDIA_DIR, urlPath);
       return net.fetch(`file://${filePath}`);
-    });
+    };
+
+    protocol.handle('media', handler);
+    session.fromPartition(WEBVIEW_PARTITION).protocol.handle('media', handler);
   }
 
   /**
