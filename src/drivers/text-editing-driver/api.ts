@@ -1067,6 +1067,55 @@ export const textEditingDriverApi = {
   },
 
   /**
+   * 在光标当前 block 位置插入空 htmlBlock(placeholder 态)
+   *
+   * 行为参照 insertMermaidBlockAtSelection:
+   * - 空段落 → 替换;非空段落 → 之后插入
+   * - 插入的 htmlBlock 无 src(走 placeholder UI,用户用 Upload / Embed 上传源码)
+   * - caption(figcaption)用空 paragraph 填(满足 content:'block')
+   * - 光标进 caption 内(insertPos + 2 = 进入 figcaption 内的 paragraph)
+   */
+  insertHtmlBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const htmlType = schema.nodes.htmlBlock;
+    const paraType = schema.nodes.paragraph;
+    if (!htmlType || !paraType) return;
+
+    const captionPara = paraType.create();
+    const htmlNode = htmlType.create({}, captionPara);
+    if (!htmlNode) return;
+
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      dispatch(state.tr.insert(state.selection.from, htmlNode));
+    } else {
+      const depth = $from.depth;
+      const blockNode = $from.node(depth);
+      const blockStart = $from.before(depth);
+      const blockEnd = $from.after(depth);
+      const isEmptyParagraph =
+        blockNode.type.name === 'paragraph' &&
+        blockNode.content.size === 0 &&
+        !blockNode.attrs.isTitle;
+      let tr = state.tr;
+      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+      if (isEmptyParagraph) {
+        tr = tr.replaceWith(blockStart, blockEnd, htmlNode);
+      } else {
+        tr = tr.insert(blockEnd, htmlNode);
+      }
+      // 光标进 caption 内(insertPos + 2 = htmlBlock 内 paragraph 起点)
+      const sel = TextSelection.create(tr.doc, insertPos + 2);
+      tr = tr.setSelection(sel).scrollIntoView();
+      dispatch(tr);
+    }
+    inst.view.focus();
+  },
+
+  /**
    * 插入 mathInline atom(L5-B3.6)
    *
    * 行为:

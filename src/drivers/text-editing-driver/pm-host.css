@@ -2495,3 +2495,158 @@
   font-style: italic;
   font-size: 12px;
 }
+
+/* ─── htmlBlock (V1 → V2 直迁) ─── */
+
+.krig-pm-host .ProseMirror .krig-html-block {
+  display: block;
+  margin: 12px 0;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block.ProseMirror-selectednode {
+  outline: 2px solid #8ab4f8;
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__render {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #232323;
+  border: 1px solid #3a3a3a;
+}
+
+/* placeholder */
+.krig-pm-host .ProseMirror .krig-html-block__placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(138, 180, 248, 0.06);
+  border: 1px dashed rgba(138, 180, 248, 0.3);
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 14px;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__placeholder-icon {
+  font-size: 24px;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__placeholder-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__placeholder-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8eaed;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__placeholder-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__placeholder-url {
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+  flex: 1;
+  min-width: 200px;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__placeholder-url:focus {
+  border-color: #8ab4f8;
+}
+
+/* render */
+.krig-pm-host .ProseMirror .krig-html-block__iframe {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__resize-handle {
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__resize-handle:hover {
+  background: rgba(138, 180, 248, 0.25);
+}
+
+/* toolbar */
+.krig-pm-host .ProseMirror .krig-html-block__toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__render:hover .krig-html-block__toolbar {
+  opacity: 1;
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__toolbar-btn {
+  background: rgba(40, 40, 40, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8eaed;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  backdrop-filter: blur(4px);
+}
+
+.krig-pm-host .ProseMirror .krig-html-block__toolbar-btn:hover {
+  background: rgba(60, 60, 60, 0.9);
+}
+
+/* source view (切换源码) */
+.krig-pm-host .ProseMirror .krig-html-block__source {
+  max-height: 400px;
+  overflow: auto;
+  padding: 12px;
+  margin: 0;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-radius: 8px;
+}
+
+/* caption */
+.krig-pm-host .ProseMirror .krig-html-block__caption {
+  display: block;
+  margin-top: 4px;
+  text-align: inherit;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  min-height: 1.4em;
+}
