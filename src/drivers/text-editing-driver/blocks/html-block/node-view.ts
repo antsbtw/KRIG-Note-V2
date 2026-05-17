@@ -254,89 +254,64 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   }
 
   /**
-   * 找到 iframe 所在的可滚动祖先(note view 的 ProseMirror 容器,通常 overflow:auto)。
-   * 用于拖动期间自动 scroll,让 iframe 底部(resize handle)跟随鼠标位置,避免
-   * "iframe 比窗口还高时,用户看不到 height 变化"的视觉错觉。
+   * Resize handle 拖动 — Pointer Capture API + movementY
+   *
+   * 业界标准做法(react-resizable / Notion / VSCode panel resize 同款):
+   * - setPointerCapture:pointerdown 后接管该 pointer,所有 pointermove 事件
+   *   路由到 handle,鼠标即使移出窗口都持续触发(操作系统级 capture)
+   * - event.movementY:浏览器报告的"每帧物理鼠标位移",**不受视口限制**。
+   *   鼠标到达屏幕边界后系统仍报告 movementY,用户继续推鼠标 = 继续拖动。
+   *
+   * 弃用前版自造方案(mousedown/move/up + scrollTop 补偿 + handle-follow):
+   * iframe 比视口高 / 鼠标移出 viewport / 容器滚动等多边界情况下都有不自洽
+   * 路径,用户体验"卡"、"跟不上"、"必须松开重锚"。Pointer Capture 一并消解。
    */
-  function findScrollContainer(el: HTMLElement): HTMLElement | null {
-    let cur: HTMLElement | null = el.parentElement;
-    while (cur && cur !== document.body) {
-      const overflow = getComputedStyle(cur).overflowY;
-      if (overflow === 'auto' || overflow === 'scroll') return cur;
-      cur = cur.parentElement;
-    }
-    return null;
-  }
-
   function setupHeightResize(handle: HTMLElement, iframe: HTMLIFrameElement): void {
-    handle.addEventListener('mousedown', (e) => {
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return; // 仅左键
       e.preventDefault();
       e.stopPropagation();
 
-      // mousedown 立刻锁 userOverrideHeight,否则拖动期间 ResizeObserver 触发
-      // applyAutoHeight 抢回 iframe height,用户看不到拖动效果。
+      // pointerdown 立刻锁 userOverrideHeight,否则 ResizeObserver 触发
+      // applyAutoHeight 抢回 iframe height,拖动效果被覆盖。
       userOverrideHeight = true;
 
-      const scrollContainer = findScrollContainer(iframe);
-      let lastClientY = e.clientY;
+      handle.setPointerCapture(e.pointerId);
 
-      const prevPointer = iframe.style.pointerEvents;
       const prevUserSelect = document.body.style.userSelect;
       const prevCursor = document.body.style.cursor;
-      iframe.style.pointerEvents = 'none';
       document.body.style.userSelect = 'none';
       document.body.style.cursor = 'ns-resize';
 
-      /**
-       * 拖动模型:鼠标在屏幕物理位置移动 delta 像素 → iframe 高度变化 delta 像素。
-       *
-       * 用每帧 delta(clientY 与上一帧的差)而非"clientY - startY 总差"。
-       * iframe top-anchored,缩高时 bottom(handle) 在视口里自然上移 delta 像素,
-       * 正好等于鼠标移动 delta → handle 跟随鼠标。
-       *
-       * iframe 顶部在视口内 + iframe 高度大于视口时(handle 在视口外下方):
-       * 主动滚动容器让 iframe top 滚出视口上方,使 handle 进入视口跟上鼠标 —
-       * 否则鼠标在上半屏拖动时 iframe 底部在屏幕下方外,用户感觉"拖不动"。
-       */
-      const onMouseMove = (ev: MouseEvent) => {
-        const delta = ev.clientY - lastClientY;
-        lastClientY = ev.clientY;
-
-        if (delta !== 0) {
-          const currentHeight = iframe.offsetHeight;
-          const newHeight = Math.max(HEIGHT_MIN_PX, currentHeight + delta);
-          iframe.style.height = `${newHeight}px`;
-        }
-
-        // 拖动期间若 handle 仍在视口下方外,把它滚进视口;若在视口上方外(向下
-        // 拖动场景),把 iframe 滚下来。维持 handle 接近鼠标 ev.clientY 位置。
-        if (scrollContainer) {
-          const handleRect = handle.getBoundingClientRect();
-          const handleY = handleRect.top + handleRect.height / 2;
-          const targetY = ev.clientY;
-          const diff = handleY - targetY; // diff>0 handle 在鼠标下方 → 需上滚
-          // 阈值:容差 4px 内不滚,避免抖动
-          if (Math.abs(diff) > 4) {
-            const MAX_STEP = 32;
-            const step = Math.max(-MAX_STEP, Math.min(MAX_STEP, diff));
-            scrollContainer.scrollTop += step;
-          }
-        }
+      const onPointerMove = (ev: PointerEvent) => {
+        // movementY = 浏览器报告的物理鼠标 y 位移(不受 viewport 限制,
+        // 鼠标到屏幕边后继续推仍报告 movementY)
+        const dy = ev.movementY;
+        if (dy === 0) return;
+        const currentHeight = iframe.offsetHeight;
+        const newHeight = Math.max(HEIGHT_MIN_PX, currentHeight + dy);
+        iframe.style.height = `${newHeight}px`;
       };
 
-      const onMouseUp = () => {
+      const onPointerUp = () => {
         const finalH = iframe.offsetHeight;
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        iframe.style.pointerEvents = prevPointer;
+        handle.removeEventListener('pointermove', onPointerMove);
+        handle.removeEventListener('pointerup', onPointerUp);
+        handle.removeEventListener('pointercancel', onPointerUp);
+        try {
+          handle.releasePointerCapture(e.pointerId);
+        } catch {
+          /* capture 已释放或丢失,忽略 */
+        }
         document.body.style.userSelect = prevUserSelect;
         document.body.style.cursor = prevCursor;
         if (view.isDestroyed) return;
         updateAttrs({ height: finalH });
       };
 
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
+      handle.addEventListener('pointermove', onPointerMove);
+      handle.addEventListener('pointerup', onPointerUp);
+      handle.addEventListener('pointercancel', onPointerUp);
     });
   }
 
