@@ -29,18 +29,21 @@ import {
   getLanguages,
 } from './languages/registry';
 import { registerBuiltinLanguages } from './register-builtin';
+import { ensureLanguageLoaded, isLanguageLoaded, tokenizeSync } from './tokenize';
 
 export type {
   CodeEditingApi,
   CodeEditingHostProps,
   CodeEditingHandle,
   LanguageItem,
+  TokenSpan,
 } from './types';
 
 // 模块级 export(对齐 shape-library / canvas-rendering 双导出模式 — driver/slot
 // 内部可直 import 兜底;view 侧仍走 requireCapabilityApi)
 export { CodeHost };
 export { registerLanguage, getLanguage, getLanguages };
+export { ensureLanguageLoaded, isLanguageLoaded, tokenizeSync };
 
 // ── side-effect:注册 6 个内置语言(对齐 shape-library bootstrap 模式)──
 registerBuiltinLanguages();
@@ -58,5 +61,8 @@ capabilityRegistry.register({
     registerLanguage,
     getLanguages,
     getLanguage,
+    ensureLanguageLoaded,
+    isLanguageLoaded,
+    tokenizeSync,
   } satisfies CodeEditingApi,
 });
