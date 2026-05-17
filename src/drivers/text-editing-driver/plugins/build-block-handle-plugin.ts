@@ -17,6 +17,12 @@ import { Slice, Fragment } from 'prosemirror-model';
 import { dropPoint } from 'prosemirror-transform';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { dnd } from '@capabilities/drag-and-drop';
+import {
+  tryStartMultiBlockDrag,
+  getActiveMultiBlockDrag,
+  clearMultiBlockDrag,
+  performMultiBlockDrop,
+} from './build-block-selection-plugin';
 
 const handleKey = new PluginKey('text-editing-driver:block-handle');
 
@@ -82,6 +88,20 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
     // 是冒泡阶段,PM 默认 handler 已先把 dataTransfer.text/plain 当文字插入了)
     props: {
       handleDrop(view, event) {
+        // 多块拖动优先:block-selection plugin 标记了 activeMultiDrag → 走整组移动
+        const multiIndices = getActiveMultiBlockDrag(instanceId);
+        if (multiIndices) {
+          try {
+            performMultiBlockDrop(view, multiIndices, event.clientX, event.clientY);
+            dnd.emit('dnd.completed', { source: null });
+            // 即便 no-op 也返回 true 阻断 PM 默认(不允许文本 drop)
+            return true;
+          } catch (err) {
+            console.warn('[block-handle] multi-block drop exception', err);
+            return false;
+          }
+        }
+
         if (!activeDrag) return false;
         if (activeDrag.instanceId !== instanceId) return false;
         const fromPos = activeDrag.fromPos;
@@ -111,7 +131,6 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           dnd.emit('dnd.completed', { source: null });
           return true;
         } catch (err) {
-          // eslint-disable-next-line no-console
           console.warn('[block-handle] drop exception', err);
           return false;
         }
@@ -245,8 +264,13 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         const node = editorView.state.doc.nodeAt(currentPos);
         if (!node) return;
         e.dataTransfer.effectAllowed = 'move';
-        activeDrag = { instanceId, fromPos: currentPos };
         e.dataTransfer.setData(HANDLE_DRAG_MIME, '1');
+        // 多块选择激活且当前 ⋮⋮ 所属块在选中区内 → 标记为多块拖动(activeMultiDrag);
+        // 不在 → 标记为单块(activeDrag,原行为)
+        const isMulti = tryStartMultiBlockDrag(editorView.state, currentPos, instanceId);
+        if (!isMulti) {
+          activeDrag = { instanceId, fromPos: currentPos };
+        }
         dnd.emit('dnd.started', {
           source: { type: 'block', data: { fromPos: currentPos, instanceId } },
         });
@@ -256,6 +280,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       dragBtn.addEventListener('dragend', () => {
         isDragging = false;
         activeDrag = null;
+        clearMultiBlockDrag();
         dnd.emit('dnd.completed', { source: null });
       });
 
