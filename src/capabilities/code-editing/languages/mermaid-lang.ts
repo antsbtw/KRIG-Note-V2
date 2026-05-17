@@ -1,9 +1,10 @@
 /**
- * Mermaid CodeMirror 6 StreamLanguage(V1 直迁)
+ * Mermaid CodeMirror 6 StreamLanguage(从 V1 / V2 mermaid-fullscreen 直迁)
  *
- * 仅供 fullscreen 内的 CodeMirror 编辑器消费;inline NodeView 不用 CodeMirror。
+ * 原路径:src/drivers/text-editing-driver/blocks/code-block/fullscreen/mermaid-lang.ts
+ * 迁入本 capability 后,Phase 2 删除原文件,mermaid 全屏改走 capability Host。
  *
- * 覆盖 Mermaid 常用关键字、连接线、字符串、数字 — 轻量实现,够用即可。
+ * 覆盖 Mermaid 常用关键字 / 连接线 / 字符串 / 数字 — 轻量实现,够用即可。
  */
 
 import { StreamLanguage, type StringStream } from '@codemirror/language';
