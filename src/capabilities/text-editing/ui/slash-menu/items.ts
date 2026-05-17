@@ -156,3 +156,20 @@ export function createMermaidBlockItem(viewId: string): SlashItem {
     order: 142,
   };
 }
+
+/**
+ * HTML Preview Block (V1 → V2 直迁)
+ *
+ * sandbox iframe 渲染 AI 生成的 HTML artifact(D3 / Chart.js / UI 原型等)。
+ * 视为 PM 通用(同 Math / Mermaid 思路)。
+ */
+export function createHtmlBlockItem(viewId: string): SlashItem {
+  return {
+    id: `${viewId}.slash.html-block`,
+    label: 'HTML Preview',
+    command: 'text-editing.slash-insert-html-block',
+    keywords: ['html', 'web', 'preview', 'artifact', '网页', '预览'],
+    view: viewId,
+    order: 144,
+  };
+}

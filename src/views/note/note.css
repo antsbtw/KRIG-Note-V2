@@ -6,6 +6,9 @@
   display: flex;
   flex-direction: column;
   overflow: auto;
+  /* 禁滚动锚定 — html-block iframe resize 时浏览器默认锁定锚点 viewport 位置,
+     导致 handle 在屏幕上完全不动。NoteView 是 html-block 的实际滚动容器。*/
+  overflow-anchor: none;
 }
 
 /* 编辑区限宽居中(对齐 V1 视觉:maxWidth 900 + margin 0 auto)*/

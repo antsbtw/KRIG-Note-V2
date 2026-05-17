@@ -176,6 +176,13 @@ export function registerTextEditingCommands(): void {
     tea.insertMermaidBlockAtSelection(instanceId);
   }));
 
+  // ── HTML preview block(V1 → V2 直迁) ──
+
+  commandRegistry.register('text-editing.slash-insert-html-block', withInstance((instanceId) => {
+    tea.clearSlashTrigger(instanceId);
+    tea.insertHtmlBlockAtSelection(instanceId);
+  }));
+
   // ── L5-B3.2:Handle turn-into(11 项 — handleMenuController.pos 路径) ──
 
   function registerHandleTurn(commandId: string, target: TurnTarget): void {
