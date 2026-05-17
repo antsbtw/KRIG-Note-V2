@@ -20,6 +20,7 @@
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { mediaPutBase64 } from '@capabilities/media-storage';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import { iframeThemeStyleTag } from './iframe-theme';
 
 const HEIGHT_CAP_PX = 4000;
@@ -207,16 +208,14 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     openBtn.type = 'button';
     openBtn.className = 'krig-html-block__toolbar-btn';
     openBtn.textContent = '↗';
-    openBtn.title = '在新窗口中打开';
-    openBtn.addEventListener('click', async (e) => {
+    openBtn.title = '在右栏 web view 中打开';
+    openBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const html = await loadHtmlContent(src);
-      if (html) {
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-      }
+      // 跨 view 走命令注册(charter §1.2):web-view 自己决定怎么加载 URL —
+      // src 可能是 media:// / http(s) / data:。webview 是独立 partition 进程,
+      // parent iframe 渲染不受影响(双处同时存在)。
+      commandRegistry.execute('web-view.open-url', src);
     });
     toolbar.appendChild(openBtn);
 
