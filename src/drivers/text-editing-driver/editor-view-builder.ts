@@ -30,6 +30,7 @@ import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
 import { buildVocabHighlightPlugin } from './plugins/build-vocab-highlight-plugin';
 import { buildBlockSelectionPlugin } from './plugins/build-block-selection-plugin';
 import { buildBlockSelectionKeymap } from './plugins/build-block-selection-keymap';
+import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-selection-context-menu-plugin';
 
 /**
  * 装配 EditorView
@@ -87,10 +88,15 @@ export function buildEditorView(
   const enablePasteMedia = optIn(pluginToggles?.pasteMedia);
   const enableDropCursor = optIn(pluginToggles?.dropCursor);
   const enableSlash = optIn(pluginToggles?.slash);
+  const enableBlockSelection = optIn(pluginToggles?.blockSelection);
 
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
-    buildBlockSelectionPlugin(), // MultipleNodeSelection 视觉增强(Step 1 骨架)
+    // block-selection 三件套(opt-out, NoteView 默认开):decoration + context menu + keymap
+    ...(enableBlockSelection ? [
+      buildBlockSelectionPlugin(),
+      buildBlockSelectionContextMenuPlugin(),
+    ] : []),
     ...blockPlugins,
     ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
     buildInputRules(schema),     // headings + 4 mark markdown(始终开)
@@ -106,7 +112,8 @@ export function buildEditorView(
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
-    buildBlockSelectionKeymap(),  // Esc/Shift+Arrow:抢在 baseKeymap 之前
+    // block-selection keymap 抢在 baseKeymap 之前(Esc/Shift+Arrow/Arrow)
+    ...(enableBlockSelection ? [buildBlockSelectionKeymap()] : []),
     keymap(baseKeymap),
   ];
 

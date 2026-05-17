@@ -172,4 +172,13 @@ export class MultipleNodeSelection extends Selection {
 }
 
 // 注册 Selection.jsonID — PM 走 transaction/history/clipboard 时识别类型
-Selection.jsonID('multiple-node', MultipleNodeSelection);
+// guard:重复 import 同一模块时不应重复注册(PM 第二次会抛 RangeError)
+// 注:Selection.jsonID 没有公开查询 API,用 try/catch 防御
+interface GlobalWithRegistrationFlag {
+  __krigMultipleNodeSelectionRegistered?: boolean;
+}
+const g = globalThis as unknown as GlobalWithRegistrationFlag;
+if (!g.__krigMultipleNodeSelectionRegistered) {
+  Selection.jsonID('multiple-node', MultipleNodeSelection);
+  g.__krigMultipleNodeSelectionRegistered = true;
+}
