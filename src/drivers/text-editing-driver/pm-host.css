@@ -2512,10 +2512,8 @@
 
 .krig-pm-host .ProseMirror .krig-html-block__render {
   position: relative;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #232323;
-  border: 1px solid #3a3a3a;
+  display: block;
+  min-height: 60px;
 }
 
 /* placeholder */
@@ -2529,6 +2527,9 @@
   border-radius: 6px;
   color: #aaa;
   font-size: 14px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 60px;
 }
 
 .krig-pm-host .ProseMirror .krig-html-block__placeholder-icon {

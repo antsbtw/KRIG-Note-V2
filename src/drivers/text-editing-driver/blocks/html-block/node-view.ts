@@ -111,11 +111,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   const dom = document.createElement('div');
   dom.className = 'krig-html-block';
 
+  // render 区(contentEditable=false,完全 NodeView 控制 — placeholder 或 iframe)
   const renderWrap = document.createElement('div');
   renderWrap.className = 'krig-html-block__render';
   renderWrap.contentEditable = 'false';
   dom.appendChild(renderWrap);
 
+  // caption 区(contentDOM,PM 接管)
   const captionDOM = document.createElement('figcaption');
   captionDOM.className = 'krig-html-block__caption';
   dom.appendChild(captionDOM);
@@ -374,6 +376,12 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         return true;
       }
       return false;
+    },
+    // renderWrap 子树由 NodeView 完全控制(iframe srcdoc 写入 / resize 改 height /
+    // placeholder→render 切换都会触发 mutation);若不忽略 PM 会以为 DOM 偏离 doc
+    // 反复销毁重建 NodeView → 死循环。captionDOM 由 PM 接管不在此守门内。
+    ignoreMutation(mutation) {
+      return mutation.target === renderWrap || renderWrap.contains(mutation.target as Node);
     },
     destroy() {
       disposeIframe();
