@@ -92,10 +92,16 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   dom.appendChild(captionDOM);
 
   let iframeEl: HTMLIFrameElement | null = null;
-  let resizeObserver: ResizeObserver | null = null;
+  let wrapEl: HTMLDivElement | null = null;
+  let bodyObserver: ResizeObserver | null = null;
+  let wrapObserver: ResizeObserver | null = null;
   let currentSrc: string | null = null;
-  // 用户拖拽手动覆盖高度后(写入 attrs.height),不再自动跟随 ResizeObserver。
+  // 用户拖拽手动覆盖高度后(写入 attrs.height),不再自动跟随 body ResizeObserver。
   let userOverrideHeight = false;
+  // 程序刚 set 的 wrap height — wrapObserver 看到与此一致的尺寸忽略,只反应用户拖动。
+  let lastSetWrapHeight = 0;
+  // 用户拖动结束后 debounce 写 attrs.height(防 RO 触发过密)。
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   function updateAttrs(patch: Record<string, unknown>): void {
     const pos = typeof getPos === 'function' ? getPos() : undefined;
@@ -108,13 +114,23 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   }
 
   function disposeIframe(): void {
-    if (resizeObserver) {
-      resizeObserver.disconnect();
-      resizeObserver = null;
+    if (bodyObserver) {
+      bodyObserver.disconnect();
+      bodyObserver = null;
+    }
+    if (wrapObserver) {
+      wrapObserver.disconnect();
+      wrapObserver = null;
+    }
+    if (persistTimer != null) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
     }
     iframeEl = null;
+    wrapEl = null;
     currentSrc = null;
     userOverrideHeight = false;
+    lastSetWrapHeight = 0;
   }
 
   function buildPlaceholder(): void {
@@ -238,7 +254,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     renderWrap.appendChild(pre);
   }
 
-  function applyAutoHeight(iframe: HTMLIFrameElement): void {
+  /** 设 wrap 高度,同步记录 lastSetWrapHeight 防 wrap RO 当作"用户拖动" */
+  function setWrapHeight(wrap: HTMLDivElement, h: number): void {
+    lastSetWrapHeight = h;
+    wrap.style.height = `${h}px`;
+  }
+
+  function applyAutoHeight(iframe: HTMLIFrameElement, wrap: HTMLDivElement): void {
     if (userOverrideHeight) return;
     const doc = iframe.contentDocument;
     if (!doc?.documentElement) return;
@@ -249,70 +271,8 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       doc.documentElement.offsetHeight,
     );
     if (h > 0) {
-      iframe.style.height = `${Math.min(h + HEIGHT_BUFFER_PX, HEIGHT_CAP_PX)}px`;
+      setWrapHeight(wrap, Math.min(h + HEIGHT_BUFFER_PX, HEIGHT_CAP_PX));
     }
-  }
-
-  /**
-   * Resize handle 拖动 — Pointer Capture API + movementY
-   *
-   * 业界标准做法(react-resizable / Notion / VSCode panel resize 同款):
-   * - setPointerCapture:pointerdown 后接管该 pointer,所有 pointermove 事件
-   *   路由到 handle,鼠标即使移出窗口都持续触发(操作系统级 capture)
-   * - event.movementY:浏览器报告的"每帧物理鼠标位移",**不受视口限制**。
-   *   鼠标到达屏幕边界后系统仍报告 movementY,用户继续推鼠标 = 继续拖动。
-   *
-   * 弃用前版自造方案(mousedown/move/up + scrollTop 补偿 + handle-follow):
-   * iframe 比视口高 / 鼠标移出 viewport / 容器滚动等多边界情况下都有不自洽
-   * 路径,用户体验"卡"、"跟不上"、"必须松开重锚"。Pointer Capture 一并消解。
-   */
-  function setupHeightResize(handle: HTMLElement, iframe: HTMLIFrameElement): void {
-    handle.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return; // 仅左键
-      e.preventDefault();
-      e.stopPropagation();
-
-      // pointerdown 立刻锁 userOverrideHeight,否则 ResizeObserver 触发
-      // applyAutoHeight 抢回 iframe height,拖动效果被覆盖。
-      userOverrideHeight = true;
-
-      handle.setPointerCapture(e.pointerId);
-
-      const prevUserSelect = document.body.style.userSelect;
-      const prevCursor = document.body.style.cursor;
-      document.body.style.userSelect = 'none';
-      document.body.style.cursor = 'ns-resize';
-
-      const onPointerMove = (ev: PointerEvent) => {
-        // movementY = 浏览器报告的物理鼠标 y 位移(不受 viewport 限制,
-        // 鼠标到屏幕边后继续推仍报告 movementY)
-        const dy = ev.movementY;
-        if (dy === 0) return;
-        const currentHeight = iframe.offsetHeight;
-        const newHeight = Math.max(HEIGHT_MIN_PX, currentHeight + dy);
-        iframe.style.height = `${newHeight}px`;
-      };
-
-      const onPointerUp = () => {
-        const finalH = iframe.offsetHeight;
-        handle.removeEventListener('pointermove', onPointerMove);
-        handle.removeEventListener('pointerup', onPointerUp);
-        handle.removeEventListener('pointercancel', onPointerUp);
-        try {
-          handle.releasePointerCapture(e.pointerId);
-        } catch {
-          /* capture 已释放或丢失,忽略 */
-        }
-        document.body.style.userSelect = prevUserSelect;
-        document.body.style.cursor = prevCursor;
-        if (view.isDestroyed) return;
-        updateAttrs({ height: finalH });
-      };
-
-      handle.addEventListener('pointermove', onPointerMove);
-      handle.addEventListener('pointerup', onPointerUp);
-      handle.addEventListener('pointercancel', onPointerUp);
-    });
   }
 
   function buildRender(n: PMNode): void {
@@ -326,23 +286,44 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     const toolbar = buildToolbar(src);
     renderWrap.appendChild(toolbar);
 
+    // wrap div:CSS resize:vertical 浏览器原生拖柄(右下角)— 业界标准做法,
+    // 浏览器内部处理所有拖动边界情况(viewport / cursor / 容器滚动等)。
+    // iframe 在 wrap 内 100% 撑满。
+    const wrap = document.createElement('div');
+    wrap.className = 'krig-html-block__iframe-wrap';
+    const initialHeight = userOverrideHeight
+      ? (n.attrs.height as number)
+      : HEIGHT_MIN_PX; // body 内容加载后由 applyAutoHeight 撑到实际高度
+    setWrapHeight(wrap, initialHeight);
+    wrapEl = wrap;
+
     // 无 sandbox 属性 — iframe 与 parent 同 origin,parent 可直接读 contentDocument。
     const iframe = document.createElement('iframe');
     iframe.className = 'krig-html-block__iframe';
-    iframe.style.width = '100%';
-    iframe.style.border = 'none';
-    iframe.style.borderRadius = '8px';
-    iframe.style.backgroundColor = '#ffffff';
-    // 用户已拖过 → 沿用用户高度;否则初始 0,等内容加载完 ResizeObserver 自动撑高。
-    iframe.style.height = userOverrideHeight ? `${n.attrs.height as number}px` : '0px';
     iframeEl = iframe;
+    wrap.appendChild(iframe);
 
-    renderWrap.appendChild(iframe);
+    renderWrap.appendChild(wrap);
 
-    const resizeHandle = document.createElement('div');
-    resizeHandle.className = 'krig-html-block__resize-handle';
-    setupHeightResize(resizeHandle, iframe);
-    renderWrap.appendChild(resizeHandle);
+    // wrap 尺寸变化监听器 — 区分"程序设的"vs"用户拖的":
+    // 用户拖 CSS resize 拖柄 → wrap height 与 lastSetWrapHeight 不一致 →
+    // debounce 300ms 后持久化 attrs.height + 锁 userOverrideHeight。
+    wrapObserver = new ResizeObserver(() => {
+      if (!wrapEl) return;
+      const h = wrapEl.offsetHeight;
+      if (Math.abs(h - lastSetWrapHeight) < 2) return; // 程序自己设的,忽略
+      // 用户拖动 → 锁定 + debounce 持久化
+      userOverrideHeight = true;
+      lastSetWrapHeight = h;
+      if (persistTimer != null) clearTimeout(persistTimer);
+      persistTimer = setTimeout(() => {
+        persistTimer = null;
+        if (view.isDestroyed) return;
+        if (!wrapEl) return;
+        updateAttrs({ height: wrapEl.offsetHeight });
+      }, 300);
+    });
+    wrapObserver.observe(wrap);
 
     // 加载 + 同 origin 写入 — iframe 默认 src=about:blank 即与 parent 同 origin。
     loadHtmlContent(src).then((html) => {
@@ -355,13 +336,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       doc.write(prepared);
       doc.close();
 
-      // 首次撑高
-      applyAutoHeight(iframe);
+      // 首次撑高(若用户未手动覆盖)
+      applyAutoHeight(iframe, wrap);
 
       // 监听 body 内容变化(D3 / Chart 等动态生成元素)自动跟随
       if (doc.body) {
-        resizeObserver = new ResizeObserver(() => applyAutoHeight(iframe));
-        resizeObserver.observe(doc.body);
+        bodyObserver = new ResizeObserver(() => applyAutoHeight(iframe, wrap));
+        bodyObserver.observe(doc.body);
       }
     });
   }
@@ -388,13 +369,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       } else if (hasSrc) {
         if (oldSrc !== updated.attrs.src) {
           buildRender(updated);
-        } else if (oldHeight !== updated.attrs.height && iframeEl && currentSrc === updated.attrs.src) {
+        } else if (oldHeight !== updated.attrs.height && wrapEl && iframeEl && currentSrc === updated.attrs.src) {
           if (updated.attrs.height != null) {
-            iframeEl.style.height = `${updated.attrs.height as number}px`;
+            setWrapHeight(wrapEl, updated.attrs.height as number);
             userOverrideHeight = true;
           } else {
             userOverrideHeight = false;
-            applyAutoHeight(iframeEl);
+            applyAutoHeight(iframeEl, wrapEl);
           }
         }
       }
@@ -403,7 +384,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     stopEvent(event) {
       const target = event.target as HTMLElement | null;
       if (target?.closest(
-        '.krig-html-block__placeholder, .krig-html-block__toolbar, .krig-html-block__resize-handle, .krig-html-block__iframe',
+        '.krig-html-block__placeholder, .krig-html-block__toolbar, .krig-html-block__iframe-wrap, .krig-html-block__iframe',
       )) {
         return true;
       }
