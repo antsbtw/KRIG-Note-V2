@@ -6,13 +6,14 @@
  * 行为:
  * - attrs.language !== 'mermaid':构造 <pre class="krig-code-block"><code> 普通代码块
  * - attrs.language === 'mermaid':渲染工具栏 + 代码区 + 预览区,支持分屏/纯预览切换、
- *   下载 PNG
+ *   下载 PNG、**全屏编辑**(走 L2 fullscreen-overlay)
  *
  * NodeView 工厂始终返回完整 NodeView 对象(PM 不接受 undefined / null)。
  *
+ * 全屏编辑器:走 L2 fullscreen-overlay 体系,Component 是 React 组件,事件不被
+ * PM 抢(见 [[fullscreen/MermaidFullscreenPanel]] + [[fullscreen/menu-context]])。
+ *
  * 不带:
- * - 全屏编辑器(架构需要走 V2 popup 体系重写;手工 appendChild 浮层在 V2 PM+slot
- *   架构里 hit-test 会被 PM 事件流抢走,详见 TODO)
  * - 语言下拉(V2 暂无 UI;mermaid block 走专门 slash 命令创建)
  * - ? 语法参考面板(对齐 mathBlock 做法,V1 LaTeX help-panel 也被砍)
  * - 多语言插件框架(V1 code-plugins 不迁,本期只迁 mermaid)
@@ -21,13 +22,24 @@
 import type { NodeViewConstructor } from 'prosemirror-view';
 import { renderMermaidDiagram } from './mermaid-renderer';
 import { downloadBlob } from './save-blob';
+import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
+import { setMermaidFullscreenContext } from './fullscreen/menu-context';
 
 const LS_VIEW_KEY = 'krig-mermaid-view-mode';
 type ViewMode = 'split' | 'preview';
 
+const FULLSCREEN_OVERLAY_ID = 'text-editing.fullscreen.mermaid';
+
 const ICON_EYE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const ICON_DOWNLOAD = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+const ICON_FULLSCREEN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+
+/** 从 view.dom 反查 driver instanceId(Host.tsx mount 时挂在 data-instance-id 上)*/
+function findInstanceId(view: { dom: HTMLElement }): string | null {
+  const el = view.dom.closest('[data-instance-id]') as HTMLElement | null;
+  return el?.getAttribute('data-instance-id') ?? null;
+}
 
 /** 非 mermaid 的纯代码块 NodeView (等价 spec.toDOM 的 <pre class="krig-code-block"><code>) */
 function buildPlainCodeBlockView(language: string): ReturnType<NodeViewConstructor> {
@@ -53,8 +65,8 @@ function buildPlainCodeBlockView(language: string): ReturnType<NodeViewConstruct
 /** Mermaid NodeView:工具栏 + 代码区 + 预览区 */
 function buildMermaidCodeBlockView(
   _initialNode: Parameters<NodeViewConstructor>[0],
-  _view: Parameters<NodeViewConstructor>[1],
-  _getPos: Parameters<NodeViewConstructor>[2],
+  view: Parameters<NodeViewConstructor>[1],
+  getPos: Parameters<NodeViewConstructor>[2],
 ): ReturnType<NodeViewConstructor> {
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let viewMode: ViewMode = (localStorage.getItem(LS_VIEW_KEY) as ViewMode) || 'split';
@@ -87,9 +99,11 @@ function buildMermaidCodeBlockView(
   const btnToggle = createBtn(ICON_EYE, '切换代码 / 预览');
   const btnCopy = createBtn(ICON_COPY, '复制代码');
   const btnDownload = createBtn(ICON_DOWNLOAD, '下载 PNG');
+  const btnFullscreen = createBtn(ICON_FULLSCREEN, '全屏编辑');
   toolbar.appendChild(btnToggle);
   toolbar.appendChild(btnCopy);
   toolbar.appendChild(btnDownload);
+  toolbar.appendChild(btnFullscreen);
 
   const pre = document.createElement('pre');
   pre.classList.add('krig-code-block__pre');
@@ -172,7 +186,16 @@ function buildMermaidCodeBlockView(
     img.src = dataUri;
   });
 
-  // 全屏编辑器已砍 — 待 V2 popup 体系重写后补回
+  // 全屏编辑器:走 L2 fullscreen-overlay 体系
+  btnFullscreen.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const instanceId = findInstanceId(view);
+    const pos = typeof getPos === 'function' ? getPos() : undefined;
+    if (!instanceId || pos == null) return;
+    setMermaidFullscreenContext({ instanceId, nodePos: pos });
+    fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
+  });
 
   const observer = new MutationObserver(() => scheduleRender());
   observer.observe(code, { childList: true, characterData: true, subtree: true });

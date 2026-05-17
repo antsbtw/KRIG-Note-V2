@@ -48,11 +48,6 @@ import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
 import '@views/ebook';  // L5-C1:EBookView self-register
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
-
-// Phase 1 临时演示:/demo-fullscreen slash 项触发 fullscreen overlay 演示。
-// Phase 2 接 mermaid 全屏时,删除整个 __demo__/ 目录 + 本行 import。
-import '@shell/fullscreen-overlay/__demo__/demo-installer';
-
 import './app.css';
 
 // L3 启动:配置持久化 + 加载已存的 Workspaces + 确保至少一个

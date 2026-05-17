@@ -1,0 +1,275 @@
+/**
+ * Mermaid Fullscreen Panel — 样式
+ *
+ * 父容器 .krig-fullscreen-overlay(由 FullscreenOverlayBinding 提供)已:
+ *   position: fixed; inset: 0; display: flex; flex-direction: column;
+ *
+ * 本 Panel(.krig-mermaid-fs)只需 flex:1 自然填满父容器即可。
+ * 不再需要 position:fixed / onMouseDown stopPropagation 等。
+ *
+ * 内部 layout:
+ *   .krig-mermaid-fs(flex column)
+ *   ├─ .krig-mermaid-fs__toolbar          (flex row,不收缩)
+ *   ├─ .krig-mermaid-fs__split            (flex row,占满中间)
+ *   │   ├─ .krig-mermaid-fs__pane--editor  (flex,内嵌 CodeMirror)
+ *   │   ├─ .krig-mermaid-fs__divider       (拖拽分隔条)
+ *   │   └─ .krig-mermaid-fs__pane--preview (flex,内嵌预览)
+ *   └─ .krig-mermaid-fs__status            (底部状态栏,不收缩)
+ */
+
+.krig-mermaid-fs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #111;
+  color: #d4d4d4;
+}
+
+/* ── toolbar ───────────────────────────────────────── */
+
+.krig-mermaid-fs__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.krig-mermaid-fs__title {
+  font-size: 13px;
+  color: #888;
+  font-weight: 500;
+  margin-right: 8px;
+}
+
+.krig-mermaid-fs__spacer {
+  flex: 1;
+}
+
+.krig-mermaid-fs__sep {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: #444;
+  flex-shrink: 0;
+}
+
+.krig-mermaid-fs__select {
+  height: 28px;
+  padding: 0 6px;
+  background: #252525;
+  color: #ccc;
+  border: 1px solid #444;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+}
+.krig-mermaid-fs__select:hover {
+  border-color: #666;
+}
+
+.krig-mermaid-fs__btn {
+  min-width: 30px;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-family: inherit;
+}
+.krig-mermaid-fs__btn:hover {
+  background: #333;
+  color: #e8eaed;
+}
+.krig-mermaid-fs__btn--ok {
+  color: #4caf50 !important;
+}
+.krig-mermaid-fs__btn--labeled {
+  gap: 4px;
+  padding: 0 8px;
+}
+.krig-mermaid-fs__btn--close {
+  font-size: 20px;
+}
+
+.krig-mermaid-fs__btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* pointer-events 穿透到 button,让 onClick e.target 落 button */
+  pointer-events: none;
+}
+.krig-mermaid-fs__btn-label {
+  font-size: 10px;
+  color: #8ab4f8;
+  cursor: pointer;
+  user-select: none;
+}
+.krig-mermaid-fs__btn-label:hover {
+  color: #aecbfa;
+}
+
+/* ── zoom 控件 ───────────────────────────────────────── */
+
+.krig-mermaid-fs__zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 5px;
+  padding: 1px 3px;
+}
+.krig-mermaid-fs__zoom-btn {
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #aaa;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: inherit;
+}
+.krig-mermaid-fs__zoom-btn:hover {
+  background: #333;
+  color: #e8eaed;
+}
+.krig-mermaid-fs__zoom-label {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+  user-select: none;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+}
+.krig-mermaid-fs__zoom-label:hover {
+  color: #8ab4f8;
+}
+.krig-mermaid-fs__zoom-input {
+  width: 44px;
+  height: 22px;
+  text-align: center;
+  font-size: 12px;
+  color: #e8eaed;
+  background: #333;
+  border: 1px solid #555;
+  border-radius: 3px;
+  outline: none;
+  padding: 0;
+  font-family: inherit;
+}
+
+/* ── 左右分屏 ─────────────────────────────────────────── */
+
+.krig-mermaid-fs__split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.krig-mermaid-fs__pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.krig-mermaid-fs__pane--editor {
+  flex: 1;
+}
+.krig-mermaid-fs__pane--preview {
+  flex: 1;
+}
+.krig-mermaid-fs__divider {
+  width: 5px;
+  background: #333;
+  flex-shrink: 0;
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+.krig-mermaid-fs__divider:hover {
+  background: #555;
+}
+
+/* ── CodeMirror 容器 ─────────────────────────────────── */
+
+.krig-mermaid-fs__cm {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+}
+.krig-mermaid-fs__cm .cm-editor {
+  flex: 1;
+  height: 100%;
+  outline: none;
+}
+.krig-mermaid-fs__cm .cm-scroller {
+  overflow: auto;
+}
+
+/* ── 预览区 ──────────────────────────────────────────── */
+
+.krig-mermaid-fs__preview {
+  flex: 1;
+  overflow: auto;
+  background: #111;
+  padding: 24px;
+}
+.krig-mermaid-fs__preview-wrapper {
+  transform-origin: top left;
+  display: inline-block;
+}
+.krig-mermaid-fs__preview-wrapper svg {
+  max-width: none;
+  height: auto;
+}
+.krig-mermaid-fs__empty {
+  color: #666;
+  font-size: 13px;
+  padding: 12px;
+}
+.krig-mermaid-fs__error {
+  color: #e57373;
+  font-size: 13px;
+  padding: 12px;
+}
+
+/* ── 状态栏 ──────────────────────────────────────────── */
+
+.krig-mermaid-fs__status {
+  padding: 4px 16px;
+  font-size: 12px;
+  color: #666;
+  background: #1a1a1a;
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+  min-height: 24px;
+  line-height: 24px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.krig-mermaid-fs__status--ok {
+  color: #4caf50;
+}
+.krig-mermaid-fs__status--error {
+  color: #e57373;
+}
