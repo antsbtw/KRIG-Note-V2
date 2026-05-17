@@ -1,9 +1,13 @@
 /**
  * codeBlock — 代码块(id 驼峰避免短横线问题)
+ *
+ * V2 当前仅对 language === 'mermaid' 提供 NodeView(渲染图表 + 工具栏);
+ * 其他语言走默认 toDOM 输出 <pre><code>。
  */
 
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
+import { codeBlockNodeView } from './node-view';
 
 const codeBlockNodeSpec: NodeSpec = {
   content: 'text*',
@@ -41,6 +45,7 @@ export const codeBlockSpec: BlockSpec = {
   id: 'codeBlock',
   displayName: 'Code',
   spec: codeBlockNodeSpec,
+  nodeView: codeBlockNodeView,
   containerRule: 'inline-only',
   cascadeBoundary: true,
 };

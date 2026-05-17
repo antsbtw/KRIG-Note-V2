@@ -1020,6 +1020,53 @@ export const textEditingDriverApi = {
   },
 
   /**
+   * 在光标当前 block 位置插入 mermaid codeBlock(language='mermaid' + 起步模板)
+   *
+   * 行为参照 insertMathBlockAtSelection:
+   * - 空段落 → 替换;非空段落 → 之后插入
+   * - 插入的 codeBlock 带默认 `graph TD\n  A --> B` 起步内容,NodeView 即时渲染预览
+   * - 光标进 codeBlock 内(光标在起步代码末尾)
+   */
+  insertMermaidBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const cb = schema.nodes.codeBlock;
+    if (!cb) return;
+
+    const starter = 'graph TD\n  A[开始] --> B[结束]';
+    const mermaidNode = cb.create({ language: 'mermaid' }, schema.text(starter));
+    if (!mermaidNode) return;
+
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      dispatch(state.tr.insert(state.selection.from, mermaidNode));
+    } else {
+      const depth = $from.depth;
+      const blockNode = $from.node(depth);
+      const blockStart = $from.before(depth);
+      const blockEnd = $from.after(depth);
+      const isEmptyParagraph =
+        blockNode.type.name === 'paragraph' &&
+        blockNode.content.size === 0 &&
+        !blockNode.attrs.isTitle;
+      let tr = state.tr;
+      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+      if (isEmptyParagraph) {
+        tr = tr.replaceWith(blockStart, blockEnd, mermaidNode);
+      } else {
+        tr = tr.insert(blockEnd, mermaidNode);
+      }
+      // 光标进 codeBlock 内文本末尾(insertPos + 1 起点 + starter.length)
+      const sel = TextSelection.create(tr.doc, insertPos + 1 + starter.length);
+      tr = tr.setSelection(sel).scrollIntoView();
+      dispatch(tr);
+    }
+    inst.view.focus();
+  },
+
+  /**
    * 插入 mathInline atom(L5-B3.6)
    *
    * 行为:
