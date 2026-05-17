@@ -70,7 +70,6 @@ export class MultipleNodeSelection extends Selection {
     if ($anchorPos.depth < 1) {
       throw new RangeError('MultipleNodeSelection: depth must be >= 1');
     }
-    // 取 anchor/head 在 parent 内的 index,确保 from <= to
     const anchorIdx = $anchorPos.index($anchorPos.depth - 1);
     const headIdx = $headPos.index($headPos.depth - 1);
     const minIdx = Math.min(anchorIdx, headIdx);
@@ -134,7 +133,7 @@ export class MultipleNodeSelection extends Selection {
     try {
       return MultipleNodeSelection.create($anchor, $head);
     } catch {
-      // doc 变化后 anchor/head 不再同级 → fallback 到 text selection 端点
+      // doc 变化后 anchor/head 不再同 parent → fallback 到 text selection
       return Selection.near($head);
     }
   }

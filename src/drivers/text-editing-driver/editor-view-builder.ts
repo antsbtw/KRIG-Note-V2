@@ -29,6 +29,7 @@ import { buildNoteLinkCommandPlugin } from './plugins/build-note-link-command-pl
 import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
 import { buildVocabHighlightPlugin } from './plugins/build-vocab-highlight-plugin';
 import { buildBlockSelectionPlugin } from './plugins/build-block-selection-plugin';
+import { buildBlockSelectionKeymap } from './plugins/build-block-selection-keymap';
 
 /**
  * 装配 EditorView
@@ -105,6 +106,7 @@ export function buildEditorView(
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
+    buildBlockSelectionKeymap(),  // Esc/Shift+Arrow:抢在 baseKeymap 之前
     keymap(baseKeymap),
   ];
 
