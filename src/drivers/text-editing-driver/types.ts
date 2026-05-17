@@ -83,6 +83,8 @@ export interface TextEditingPluginToggles {
   dropCursor?: boolean;
   slash?: boolean;
   blockSelection?: boolean;
+  /** codeBlock 内联语法高亮(Phase 2 引入);NoteView 默认开,canvas-text-node 等可关 */
+  codeSyntaxHighlight?: boolean;
   // opt-in(默认 false,view 显式 true 开启)
   titleGuard?: boolean;
 }

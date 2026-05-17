@@ -2393,6 +2393,18 @@
   border-radius: 0 0 6px 6px;
 }
 
+/* ── Generic codeBlock 语法高亮(Phase 2)──
+ * 对齐 capability/code-editing/host/theme-dark.ts 的 8 类 token 配色
+ * Decoration.inline 走 view 层独立 span,PM `code: true` 不拦截 */
+.krig-pm-host .ProseMirror .krig-code-syntax-token--keyword     { color: #569cd6; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--comment     { color: #6a9955; font-style: italic; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--string      { color: #ce9178; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--number      { color: #b5cea8; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--operator    { color: #d4d4d4; font-weight: bold; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--variableName { color: #9cdcfe; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--attributeName { color: #dcdcaa; }
+.krig-pm-host .ProseMirror .krig-code-syntax-token--punctuation { color: #808080; }
+
 /* ── Generic codeBlock(Phase 1)── */
 /* lang button — 复用 __lang-label 的尺寸 / 边框 / 字号,叠加交互态 */
 .krig-pm-host .ProseMirror .krig-code-block__lang-btn {

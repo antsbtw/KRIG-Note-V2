@@ -109,6 +109,28 @@ src/capabilities/code-editing/
 - `setValue(text: string): void`
 - `focus(): void`
 
+### Tokenize API(Phase 2 引入)
+
+供 inline syntax highlight plugin(driver 侧)消费 — 把"切语法 token"这一步收敛在
+capability 内,driver 拿到的是 `TokenSpan[]`(`{ from, to, tag }`),0 import `@codemirror/*` / `@lezer/*`。
+
+```ts
+const api = requireCapabilityApi<CodeEditingApi>('code-editing');
+
+// 1. 异步预热(plugin init / lang 切换时调)
+await api.ensureLanguageLoaded('javascript');
+
+// 2. 同步查询(plugin state apply 内决定走同步还是异步路径)
+api.isLanguageLoaded('javascript'); // true
+
+// 3. 同步 tokenize(language 未 load 返回 [])
+const tokens = api.tokenizeSync('javascript', 'const x = 1;');
+// → [{ from: 0, to: 5, tag: 'keyword' }, ...]
+```
+
+tag 归一为 8 类字符串(对齐 theme-dark.ts):`keyword` / `comment` / `string` / `number` /
+`operator` / `variableName` / `attributeName` / `punctuation`。
+
 ## Phase 路线
 
 | Phase | 状态 | 内容 |
