@@ -104,11 +104,26 @@ Shell 是窗口内的**固定骨架**。Shell 的所有组件都是**全局的**
 
 ```
 Shell
-  ├── WorkspaceBar     固定在顶部（28px, 管理工作空间标签）
-  ├── NavSidebar       固定在左侧（可折叠，含 ModeBar + 笔记目录）
-  ├── Workspace Area   中央内容区域（由活跃 Workspace 填充）
-  └── Overlays         浮层面板（覆盖在 Workspace Area 之上）
+  ├── WorkspaceBar         固定在顶部（28px, 管理工作空间标签）
+  ├── NavSidebar           固定在左侧（可折叠，含 ModeBar + 笔记目录）
+  ├── Workspace Area       中央内容区域（由活跃 Workspace 填充）
+  ├── Overlays             view-scoped 浮层面板（L3 内 — ContextMenu/Slash/Handle/...）
+  └── FullscreenOverlay   app-scoped 全屏视图槽（L2 内 — 单例顶级模式）
 ```
+
+**FullscreenOverlay 与 Overlays 的区别**（2026-05 新增）：
+
+| 维度 | Overlays（L3） | FullscreenOverlay（L2） |
+|---|---|---|
+| 作用域 | view-scoped（单 view 内局部弹层） | app-scoped（撑满 viewport，跨 view） |
+| 视觉 | anchor 旁的小弹层 | 撑满全屏含 WorkspaceBar 区域 |
+| 同时多个 | 是 | 否（controller 单例） |
+| 关闭 | 点外 / Esc / 显式 | Esc / 显式（无"点外"） |
+| WorkspaceBar 可见性 | 仍可见 | display:none |
+| 典型用途 | LinkPanel / ColorPicker / TableMenu | mermaid 全屏 / PDF 全屏 / 画板全屏 / 设置 modal |
+| 挂点 | `WorkspaceInstance.OverlayFrames`（L3） | `<App>.FullscreenOverlayContainer`（L2） |
+
+详见 `src/shell/DESIGN.md` v0.4 § 1.2 边界辨析。
 
 #### 2.3.1 WorkspaceBar
 
@@ -751,6 +766,15 @@ L0  Application
                        │     │        └── L4  Right Slot ─→ L5 NoteView-B1
                        │     │
                        │     └── L3  Workspace C (隐藏) ...
+                       │
+                       └── FullscreenOverlay (app-scoped, 单例)
+                             │
+                             └── 一个全屏 Component 撑满 viewport（active 时上面所有 sibling display:none）
+                                 业务方注册形态:
+                                 - 'text-editing.fullscreen.mermaid'  → MermaidFullscreenPanel
+                                 - 'ebook.fullscreen.read'             → EBookReadFullscreen
+                                 - 'canvas.fullscreen.edit'            → CanvasFullscreen
+                                 - '...modal'                          → 通用 dialog
 ```
 
 ---

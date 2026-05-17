@@ -1,29 +1,69 @@
 # src/shell — 详细设计
 
-> v0.3 · 2026-05-05 · 草稿,等用户审阅
+> v0.4 · 2026-05-17 · 草稿,等用户审阅
 >
 > 配套:[charter.md v0.4 § 1.4 + § 2.2](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md](../../docs/RefactorV2/view-hierarchy-v2.md)
 >
 > v0.1 → v0.2:经过深度讨论(2026-05-05),纠正 v0.1 把 NavSide / Toolbar / 浮层归 Shell 的错误。Shell 极轻,只做 WorkspaceBar + Workspace Container 容器。所有应用级 UI(NavSide / Toolbar / 浮层)归 L3 Workspace Container。
 >
 > v0.2 → v0.3(2026-05-05):明确 WorkspaceBar 内含 NavSide Toggle / Workspace Tabs / [+] 按钮三类控件,Toggle 视觉在 L2 但状态归 L3 WorkspaceState。
+>
+> v0.3 → v0.4(2026-05-17):新增 **FullscreenOverlay**(`shell/fullscreen-overlay/`)— L2 内与 WorkspaceContainer 并列的"app-scoped 全屏视图槽"。这是 L2 Shell **新增**的第三个 sibling 类目,**不**违反 v0.2/v0.3 的"5 大 view-scoped 浮层全归 L3"原则:fullscreen-overlay 在概念和实现上都跟那 5 大浮层不同(app-scoped vs view-scoped,撑满 viewport vs anchor 弹层,单例顶级模式 vs N 个局部弹层)。详见本文 § 1.2。
 
 ---
 
-## 1. 本层范围(L2 Shell — 极轻 + WorkspaceBar 控件)
+## 1. 本层范围(L2 Shell — 极轻 + WorkspaceBar 控件 + FullscreenOverlay 槽)
 
-L2 Shell 做两件事:
+L2 Shell 做三件事:
 
 ```
 src/shell/
-├── workspace-bar/       ← 顶部 28px:NavSide Toggle + Workspace Tabs + [+] 按钮
-└── workspace-container/ ← 全屏容器,挂载当前活跃 Workspace 实例
+├── workspace-bar/         ← 顶部 28px:NavSide Toggle + Workspace Tabs + [+] 按钮
+├── workspace-container/   ← 容器,挂载当前活跃 Workspace 实例
+└── fullscreen-overlay/    ← app-scoped 全屏视图槽(v0.4 新增)
 ```
 
 **Shell 不包含**(与 V1 重大差异,详见 view-hierarchy-v2.md § 0):
 - ❌ NavSide(归 L3 Workspace Container,Toggle 控制 L3 状态)
 - ❌ Toolbar(归 L3 Workspace Container)
-- ❌ 任何浮层(ContextMenu / Slash / Handle / FloatingToolbar / 通用 Overlay 全部归 L3)
+- ❌ **view-scoped 浮层**(ContextMenu / Slash / Handle / FloatingToolbar / view-scoped Popup / 通用 Overlay 全部归 L3)
+
+**Shell 包含的"全屏 overlay"≠ "浮层"**(v0.4 新增辨别):
+- 5 大 view-scoped 浮层:在 view 内的 anchor 位置弹局部弹层,服务编辑器局部交互
+- fullscreen-overlay:撑满整个 viewport(含 WorkspaceBar 区域),用户视觉离开 Workspace 进入"专注模式"
+
+详见 § 1.2。
+
+### 1.2 FullscreenOverlay vs 5 大 view-scoped 浮层 — 边界辨析
+
+| 维度 | view-scoped 浮层(L3) | fullscreen-overlay(L2) |
+|---|---|---|
+| **作用域** | 单 view 内 | 跨所有 view + workspace,app 级 |
+| **触发** | view 内编辑器(右键 / `/` / hover / 选中) | 任意 view 内业务方主动 `controller.show(id)` |
+| **视觉** | anchor 旁的小弹层 | 撑满 viewport(包含 WorkspaceBar 区域) |
+| **同时多个** | 是(不同 view 各自的 popup) | **否**(controller 单例) |
+| **WorkspaceBar 可见性** | 仍可见 | **隐藏** |
+| **关闭语义** | 点外 / Esc / 显式 | Esc / 显式(无"点外") |
+| **典型用途** | LinkPanel / ColorPicker / TableMenu | mermaid 全屏编辑 / PDF 全屏阅读 / 画板全屏 / 设置 modal |
+| **挂点** | `WorkspaceInstance.OverlayFrames`(L3) | `<App>.FullscreenOverlayContainer`(L2) |
+
+**判定原则**:UI 是否在"workspace 内的某个 view 内服务局部操作"→ 是则 L3 浮层。UI 是否"用户进入新的视图模式,临时离开 Workspace"→ 是则 L2 fullscreen-overlay。
+
+### 1.3 FullscreenOverlay 子模块
+
+```
+src/shell/fullscreen-overlay/
+├── FullscreenOverlayContainer.tsx   ← L2 Shell 入口组件(App 内 sibling)
+├── FullscreenOverlayBinding.tsx     ← 订阅 controller,渲染 active overlay
+├── fullscreen-overlay.css           ← 基础样式(position:fixed inset:0)
+└── README.md                        ← 模块说明 + API 使用示例
+```
+
+配套的 **registry / controller** 在 `src/slot/`:
+- `src/slot/interaction-registries/fullscreen-overlay-registry/` — registry + types
+- `src/slot/triggers/fullscreen-overlay-controller.ts` — show/hide/state
+
+**Workspace 切换语义**:active 时整个 workspace 层(WorkspaceBar + WorkspaceContainer)由 App 入口 `display:none`,WorkspaceBar 上的切 workspace 按钮**用户看不到也点不到**。这是 v0.4 选择的方案 — "Workspace 切换自动关 overlay"和"切 workspace 期间 overlay 状态保留"两个语义的折中:用户主观上**无法**在 overlay 期间切 workspace,所以两难问题不出现。
 
 ### WorkspaceBar 内的三类控件
 
@@ -340,3 +380,4 @@ export function reportL2Alive() {
 | 2026-05-03 | v0.1 | 初稿;V1 学习 + 三栏布局思路 — **被 v0.2 完全推翻** |
 | 2026-05-05 | v0.2 | 完全重写;反映"NavSide / Toolbar / 浮层全归 L3 Workspace Container"修正;Shell 只做 WorkspaceBar + Workspace Container 容器极简版;子目录从 three-column-layout 改为 workspace-bar / workspace-container |
 | 2026-05-05 | v0.3 | 修正 v0.2 漏掉的 WorkspaceBar 内控件;明确 WorkspaceBar 含 NavSide Toggle / Workspace Tabs / [+] 三类控件(方案 C 折中:UI 在 L2,状态归 L3 WorkspaceState.navSideCollapsed);加 NavSideToggle.tsx + AddWorkspaceButton.tsx 实施清单 |
+| 2026-05-17 | v0.4 | 新增 FullscreenOverlay 子模块(L2 第三个 sibling);定义 v0.2/v0.3 "浮层全归 L3"原则的精确边界 — 5 大 view-scoped 浮层归 L3,app-scoped 全屏视图归 L2 新槽;典型场景 mermaid/PDF/画板/设置 modal 全部归 L2 这一槽;active 时 workspace 层 display:none(避免 workspace 切换语义两难) |
