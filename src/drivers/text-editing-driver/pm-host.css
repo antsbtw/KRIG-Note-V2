@@ -2178,3 +2178,106 @@
 .ProseMirror .krig-block-selected ::selection {
   background-color: transparent;
 }
+
+/* ─── columnList — Notion 风格多列布局(直迁 V1 ../note.css:1598-1705) ─── */
+.krig-pm-host .ProseMirror .krig-column-list {
+  position: relative;
+  margin: 8px 0;
+}
+
+/* Toolbar — hover 显示 */
+.krig-pm-host .ProseMirror .krig-column-list__toolbar {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  display: none;
+  gap: 2px;
+  z-index: 10;
+}
+.krig-pm-host .ProseMirror .krig-column-list:hover > .krig-column-list__toolbar {
+  display: flex;
+}
+.krig-pm-host .ProseMirror .krig-column-list__toolbar-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #2d2d2d;
+  color: #e8eaed;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.krig-pm-host .ProseMirror .krig-column-list__toolbar-btn:hover {
+  background: #3c3c3c;
+  border-color: #8ab4f8;
+}
+
+/* Wrapper — handles 的定位基准 */
+.krig-pm-host .ProseMirror .krig-column-list__wrapper {
+  position: relative;
+}
+
+/* Content — flex 布局 */
+.krig-pm-host .ProseMirror .krig-column-list__content {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Column — 纯布局容器,无视觉边界 */
+.krig-pm-host .ProseMirror .krig-column {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Column 垂直对齐 */
+.krig-pm-host .ProseMirror .krig-column[data-vertical-align="center"] > .krig-column__content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+.krig-pm-host .ProseMirror .krig-column[data-vertical-align="bottom"] > .krig-column__content {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+}
+
+/* Resize handles */
+.krig-pm-host .ProseMirror .krig-column-list__handles {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+.krig-pm-host .ProseMirror .krig-column-list__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  cursor: col-resize;
+  pointer-events: auto;
+}
+.krig-pm-host .ProseMirror .krig-column-list__handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.15s;
+}
+.krig-pm-host .ProseMirror .krig-column-list__handle:hover::after {
+  background: #1976d2;
+}
+.krig-pm-host .ProseMirror .krig-column-list__handle--dragging::after {
+  background: #42a5f5;
+}

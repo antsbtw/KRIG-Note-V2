@@ -239,6 +239,12 @@ export function registerNoteCommands(): void {
     tea().insertTableAtSelection(instanceId, 3, 3);
   }));
 
+  // columnList:slash insert-columns — 插入 2 列 columnList(第一列继承当前段内容)
+  commandRegistry.register('note-view.slash-insert-columns', withInstance((instanceId) => {
+    tea().clearSlashTrigger(instanceId);
+    tea().insertColumnListAtSelection(instanceId, 2);
+  }));
+
   // L5-B3.14:slash insert-file-block — 插入空 fileBlock placeholder
   commandRegistry.register('note-view.slash-insert-file-block', withInstance((instanceId) => {
     tea().clearSlashTrigger(instanceId);

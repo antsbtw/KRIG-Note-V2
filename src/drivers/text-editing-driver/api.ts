@@ -20,6 +20,7 @@ import {
   updateVocabDefs,
 } from './plugins/build-vocab-highlight-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
+import { insertColumnList as insertColumnListCommand } from './blocks/column-list';
 
 export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
 
@@ -1061,6 +1062,20 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     insertTableCommand(rows, cols)(inst.view.state, inst.view.dispatch);
+    inst.view.focus();
+  },
+
+  /**
+   * 在光标处插入 columnList(2 或 3 列)
+   *
+   * - 替换当前 block(对齐 V1 SlashMenu 行为);第一列继承当前 paragraph 内容
+   * - 嵌套防护:光标已在 columnList 内 → no-op(insertColumnListCommand 自检)
+   * - cols 默认 2(slash menu 仅暴露 2 Columns 入口)
+   */
+  insertColumnListAtSelection(instanceId: string, cols: 2 | 3 = 2): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    insertColumnListCommand(cols)(inst.view.state, inst.view.dispatch);
     inst.view.focus();
   },
 
