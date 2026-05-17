@@ -9,6 +9,9 @@
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 16px;
   line-height: 1.7;
+  /* 禁滚动锚定:html-block iframe resize 时浏览器默认会"锚定"某元素 viewport
+     位置稳定(scroll anchoring),导致 iframe bottom 锁住、用户看不到拖动效果。*/
+  overflow-anchor: none;
 }
 
 .krig-pm-host .ProseMirror {
@@ -2505,6 +2508,7 @@
   border-radius: 6px;
   user-select: none;
   transition: background 0.12s ease-in-out;
+  overflow-anchor: none;
 }
 
 .krig-pm-host .ProseMirror .krig-html-block:hover {
@@ -2521,6 +2525,11 @@
   position: relative;
   display: block;
   min-height: 60px;
+  /* 禁用 Chromium scroll-anchoring。否则 iframe 缩高时浏览器为"保持视觉稳定"
+     自动锚定 iframe bottom 在原 viewport 位置(scroll anchoring 默认开启),
+     导致 handle/iframe bottom 完全不跟随鼠标 — 用户感觉"拖了但没动"。
+     诊断日志铁证:iframeRectBottom 从 960 → 960 完全不变,而 height 减了 500+px。*/
+  overflow-anchor: none;
 }
 
 /* placeholder */

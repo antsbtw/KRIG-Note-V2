@@ -253,16 +253,18 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     }
   }
 
-  /** 找最近的 overflow:auto/scroll 滚动祖先(note 容器),用于拖动期间让 handle
-   *  保持跟鼠标 viewport Y 一致 — 即"== 一定要和鼠标绑定"。 */
+  /** 找最近的"真正能滚动"的祖先(scrollHeight > clientHeight + overflow 允许滚)。
+   *  纯粹 overflow:auto 但内容未溢出的容器跳过 — 否则 scrollTop += diff 无效。 */
   function findScrollContainer(el: HTMLElement): HTMLElement | null {
     let cur: HTMLElement | null = el.parentElement;
     while (cur && cur !== document.body) {
       const overflow = getComputedStyle(cur).overflowY;
-      if (overflow === 'auto' || overflow === 'scroll') return cur;
+      const canScroll = overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay';
+      if (canScroll && cur.scrollHeight > cur.clientHeight) return cur;
       cur = cur.parentElement;
     }
-    return null;
+    // 兜底 document scrolling element(window 自身)
+    return document.scrollingElement as HTMLElement | null;
   }
 
   /**
@@ -296,13 +298,10 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
         const dy = ev.movementY;
         if (dy === 0) return;
 
-        const currentHeight = iframe.offsetHeight;
-        const newHeight = Math.max(HEIGHT_MIN_PX, currentHeight + dy);
+        const newHeight = Math.max(HEIGHT_MIN_PX, iframe.offsetHeight + dy);
         iframe.style.height = `${newHeight}px`;
 
-        // "== 和鼠标绑定" — 每帧把 handle 滚到鼠标 viewport Y 位置。
-        // 即便 iframe 比视口高 / 鼠标推到屏幕外都成立:movementY 不受 viewport
-        // 限制,iframe 持续缩;scrollTop 调整让 handle 视口位置追上鼠标。
+        // "==" 绑定鼠标 viewport Y:每帧把 handle 滚到鼠标位置。
         if (scrollContainer) {
           const handleRect = handle.getBoundingClientRect();
           const handleCenterY = handleRect.top + handleRect.height / 2;
