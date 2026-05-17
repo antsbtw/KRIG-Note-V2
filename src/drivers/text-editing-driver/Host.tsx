@@ -46,6 +46,7 @@ import {
   tableCellSpec,
   tableHeaderSpec,
 } from './blocks/table';
+import { columnListSpec, columnSpec } from './blocks/column-list';
 import type { TextEditingHostProps, BlockSpec } from './types';
 
 // L5-B3.2:全部启用的 block 列表(paragraph + heading + 6 新类 + 2 项 list-item/task-item)
@@ -80,6 +81,8 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   tableRowSpec,
   tableCellSpec,
   tableHeaderSpec,
+  columnListSpec,
+  columnSpec,
   noteLinkSpec,
   fileBlockSpec,
   fileLinkSpec,

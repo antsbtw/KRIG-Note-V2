@@ -415,9 +415,36 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
       );
     }
 
-    // 4.13 columnList → V2 schema 未实现,unknown 占位
-    case 'columnList':
-      return unknownNode('columnList', atom);
+    // 4.13 columnList → V2 schema 已实现(columnList + column 两层)
+    // V1 atom 把 column 内容存在 tiptapContent(契约 § 4.13 直装路径);
+    // tiptapContent 顶层是 column 节点数组,每个 column 内 content 已是 PM JSON。
+    case 'columnList': {
+      const columns = ((c as { columns?: unknown }).columns as number) || 2;
+      const tiptap = convertTiptapContent(c.tiptapContent);
+      // 过滤出 type='column' 的子节点(防御:跳过其他 noise)
+      const columnNodes = tiptap.filter((n): n is PMNode => n.type === 'column');
+      if (columnNodes.length < 2) {
+        // schema 强约束 column{2,3};不足时 unknown 占位避免 PM 拒绝整 doc
+        return unknownNode('columnList', atom, 'column count < 2');
+      }
+      // 钳到 [2,3](schema 上限);超出截断 + warn
+      const kept = columnNodes.slice(0, 3);
+      // 每个 column 必须有 content(空 column 补 emptyParagraph,对齐 column.content='block+')
+      const safeColumns = kept.map((col) => {
+        if (!Array.isArray(col.content) || col.content.length === 0) {
+          return { ...col, content: [emptyParagraph()] };
+        }
+        return col;
+      });
+      return attachFrom(
+        {
+          type: 'columnList',
+          attrs: { columns: Math.min(Math.max(columns, 2), 3) },
+          content: safeColumns,
+        },
+        atom.from,
+      );
+    }
 
     default:
       return unknownNode(atom.type, atom, 'unknown atom type');

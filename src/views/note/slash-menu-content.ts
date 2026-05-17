@@ -62,6 +62,15 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       view: VIEW,
       order: 160,
     },
+    // columnList:2 Columns(V1 直迁;3 列入口待 v1.5)
+    {
+      id: `${VIEW}.slash.columns`,
+      label: '2 Columns',
+      command: 'note-view.slash-insert-columns',
+      keywords: ['column', 'columns', 'split', 'side by side', '分栏', '两列'],
+      view: VIEW,
+      order: 165,
+    },
     // L5-B3.14:fileBlock / externalRef(fileLink 不在 slash — 仅 paste/drag 路径产生)
     {
       id: `${VIEW}.slash.file-block`,
