@@ -56,4 +56,12 @@ export interface ToolbarItem {
    * 直接耦合 view 数据的小组件)。组件应自行处理点击事件与样式。
    */
   Component?: ComponentType<{ ctx: ToolbarItemContext }>;
+  /**
+   * 视觉变体(对齐 V1 NoteView toolbar 样式):
+   * - 'default'(缺省):带 1px solid #555 边框,如 V1 saveBtn/newBtn/iconBtn
+   * - 'plain':透明无边框,如 V1 navBtn(‹ ›)/closeSlotBtn(×)
+   *
+   * 仅对 kind='button' / 'popup-trigger' 生效;dropdown/separator 不受影响。
+   */
+  variant?: 'default' | 'plain';
 }

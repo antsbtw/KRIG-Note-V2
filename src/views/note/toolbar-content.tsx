@@ -31,7 +31,7 @@ export function registerToolbar(): void {
   });
 
   toolbarRegistry.register([
-    // ── 左侧:导航箭头 ──
+    // ── 左侧:导航箭头(V1 透明无边框样式)──
     {
       id: 'note-view.nav-back',
       view: VIEW,
@@ -39,6 +39,7 @@ export function registerToolbar(): void {
       label: '后退 (⌘[)',
       icon: '‹',
       command: 'note-view.go-back',
+      variant: 'plain',
       order: 10,
     },
     {
@@ -48,6 +49,7 @@ export function registerToolbar(): void {
       label: '前进 (⌘])',
       icon: '›',
       command: 'note-view.go-forward',
+      variant: 'plain',
       order: 20,
     },
 
@@ -142,6 +144,7 @@ export function registerToolbar(): void {
       label: '关闭此面板',
       icon: '×',
       command: 'note-view.close-view',
+      variant: 'plain',
       order: 60,
     },
   ]);

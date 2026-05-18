@@ -77,11 +77,17 @@ function renderItem(item: ToolbarItem, ctx: ToolbarItemContext) {
   // 默认 button(含 'popup-trigger' 分支)
   const active = item.activeWhen?.(ctx) ?? false;
   const isPopupTrigger = item.kind === 'popup-trigger';
+  const variant = item.variant ?? 'default';
+  const className = [
+    'krig-toolbar-button',
+    `krig-toolbar-button--${variant}`,
+    active ? 'active' : '',
+  ].filter(Boolean).join(' ');
   return (
     <button
       key={item.id}
       type="button"
-      className={`krig-toolbar-button${active ? ' active' : ''}`}
+      className={className}
       onMouseDown={(e) => e.preventDefault()} // 不抢编辑器焦点
       onClick={(e) => {
         if (isPopupTrigger && item.popupId) {
