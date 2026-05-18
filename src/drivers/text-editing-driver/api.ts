@@ -15,7 +15,10 @@ import { DOMSerializer, Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
-import { scrollToThoughtAnchor as scrollToThoughtAnchorImpl } from './plugins/build-thought-anchor-plugin';
+import {
+  scrollToThoughtAnchor as scrollToThoughtAnchorImpl,
+  thoughtAnchorKey,
+} from './plugins/build-thought-anchor-plugin';
 import {
   vocabHighlightPluginKey,
   updateVocabDefs,
@@ -1041,6 +1044,54 @@ export const textEditingDriverApi = {
     });
 
     if (changed) inst.view.dispatch(tr);
+  },
+
+  /**
+   * 改 thought anchor 在 Note PM 内的 type 缓存(mark.attrs.thoughtType /
+   * thought-anchor-plugin decoration data-thought-type)。
+   *
+   * thoughtMark.attrs.thoughtType 是冗余缓存(thought atom payload 才是 SSOT),
+   * 用于 CSS class `krig-thought-mark--{type}` 着色。atom type 变化时 mark attrs
+   * 不会自动同步 → 颜色不变。本 API 扫整 doc 找该 thoughtId 的 mark + frame
+   * + node attr(后两者通过 plugin decoration `resolveThoughtType` callback
+   * 渲染色,不需要改 PM doc,只需触发 plugin re-render → note-bridge 的 thoughtCache
+   * 已先更新)。
+   *
+   * 实际只需更新 inline mark 的 attrs.thoughtType。block frame / image attr
+   * 的颜色由 thought-anchor-plugin decoration 走 resolveThoughtType callback 渲染,
+   * thoughtCache 更新后下一次 doc transaction 会触发 decoration 重算。
+   */
+  updateThoughtMarkType(instanceId: string, thoughtId: string, newType: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state } = inst.view;
+    const markType = state.schema.marks.thought;
+    if (!markType) return;
+    let tr = state.tr;
+    let changed = false;
+    state.doc.descendants((node, pos) => {
+      node.marks.forEach((m) => {
+        if (
+          m.type === markType &&
+          m.attrs.thoughtId === thoughtId &&
+          m.attrs.thoughtType !== newType
+        ) {
+          // PM mark 不支持直接改 attr — 必须 removeMark 旧的 + addMark 新的
+          const end = pos + node.nodeSize;
+          tr = tr.removeMark(pos, end, m);
+          tr = tr.addMark(pos, end, markType.create({ thoughtId, thoughtType: newType }));
+          changed = true;
+        }
+      });
+    });
+    // 即使 inline mark 路径没找到匹配(用户改的是 block frame / image anchor),
+    // 也需要触发 thought-anchor-plugin decoration 重算 — 它读 activeHandler
+    // .resolveThoughtType(刚由 note-bridge 更新 thoughtCache),但只在 docChanged
+    // 或 thoughtAnchorKey meta='refresh' 时重算。这里恒发 meta 让 plugin 重算
+    // block/image 颜色,与 mark 路径效果一致。
+    tr = tr.setMeta(thoughtAnchorKey, 'refresh');
+    inst.view.dispatch(tr);
+    void changed; // mark 路径变化记录(留 hook),目前只需 plugin refresh
   },
 
   /** 滚动到 thought anchor 在 PM 内的位置(跨槽通信 → ThoughtView 点卡片 → Note 跳转) */

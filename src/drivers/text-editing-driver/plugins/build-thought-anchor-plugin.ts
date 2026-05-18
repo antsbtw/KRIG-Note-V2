@@ -106,8 +106,12 @@ export function buildThoughtAnchorPlugin(): Plugin<DecorationSet> {
         return DecorationSet.create(state.doc, decorations);
       },
       apply(tr, old) {
-        // doc 变化时重算 decoration(简单策略 — block 不多,O(n) 可接受)
-        if (!tr.docChanged) return old;
+        // doc 变化或 meta 'thought-refresh' 时重算 decoration:
+        // - docChanged:用户编辑 / addThoughtBlockFrame 修改 frameThoughtId attr
+        // - 'thought-refresh' meta:thoughtCache type 变化(thought atom type 改)
+        //   doc 没变但 type 色需重算 — note-bridge dispatch 触发
+        const needRecompute = tr.docChanged || tr.getMeta(thoughtAnchorKey) === 'refresh';
+        if (!needRecompute) return old;
         const decorations: Decoration[] = [];
         tr.doc.descendants((node, pos) => {
           const frameThoughtId = node.attrs.frameThoughtId as string | null | undefined;

@@ -30,34 +30,52 @@ import type {
 let thoughtCache = new Map<string, ThoughtInfo>();
 
 /**
- * 广播 callback:diff 检测 thought 被删 → 清 Note PM 内的 mark/frame/node attr。
+ * 广播 callback:diff 检测 thought 变化 → 同步 Note PM 内的 mark/frame/node attr。
  *
- * thought 与 Note anchor 1:1 同生同死:删 thought atom(任一入口 —
- * 卡片 🗑️ / 右键 删除Thought / IPC 直调) → onListChanged 广播 →
- * 本回调比 newIds vs oldIds → 缺失的 thoughtId 调 driver removeThoughtAnchor
- * 清 mark + frameThoughtId + image.thoughtId。
+ * thought 与 Note anchor 1:1 同生同死 + 状态同步:
+ *   - 删 thought atom → 清 Note mark(removeThoughtAnchor 扫 doc 清 mark +
+ *     frameThoughtId + image.thoughtId)
+ *   - 改 thought.type → 改 Note inline mark 的 attrs.thoughtType(让
+ *     `krig-thought-mark--{type}` CSS class 生效,颜色同步)
+ *   - block frame / image 三态 anchor 的颜色由 thought-anchor-plugin
+ *     decoration 走 resolveThoughtType callback 渲染,thoughtCache 更新后下次
+ *     doc transaction 触发 decoration 重算自动跟上
  */
 function buildDiffHandler(textEditing: TextEditingApi) {
   return (list: ThoughtInfo[]): void => {
-    const newIds = new Set(list.map((t) => t.id));
-    // diff:旧缓存有但新列表没 → 该 thought 被删,需要清 Note mark
+    const oldCache = thoughtCache;
+    const newCache = new Map(list.map((t) => [t.id, t]));
+    const newIds = new Set(newCache.keys());
+
+    // diff 1:删除(oldCache 有但 newCache 没)
     const deletedIds: string[] = [];
-    for (const oldId of thoughtCache.keys()) {
+    for (const oldId of oldCache.keys()) {
       if (!newIds.has(oldId)) deletedIds.push(oldId);
     }
-    // 更新缓存(decoration 色解析用)
-    thoughtCache = new Map(list.map((t) => [t.id, t]));
-    // 清 PM 内对应 anchor。driver removeThoughtAnchor 字面扫整 doc 清 mark +
-    // frameThoughtId attr + image.thoughtId attr(见 driver/api.ts removeThoughtAnchor)。
-    // instanceId 用当前 focused PM 实例;没 focus 时 fallback 到 active workspace id
-    // (NoteView Host 默认用 workspaceId 作 instanceId,见 views/note/NoteView.tsx)。
-    if (deletedIds.length === 0) return;
+    // diff 2:type 变化(两边都有且 type 不同)
+    const typeChanges: Array<{ id: string; newType: string }> = [];
+    for (const [id, newT] of newCache) {
+      const oldT = oldCache.get(id);
+      if (oldT && oldT.type !== newT.type) {
+        typeChanges.push({ id, newType: newT.type });
+      }
+    }
+
+    // 更新缓存(decoration 色解析用,thought-anchor-plugin resolveThoughtType 会读)
+    thoughtCache = newCache;
+
+    if (deletedIds.length === 0 && typeChanges.length === 0) return;
+
     const instanceId =
       textEditing.instanceRegistry.getFocusedInstanceId() ??
       workspaceManager.getActiveId();
     if (!instanceId) return;
+
     for (const id of deletedIds) {
       textEditing.api.removeThoughtAnchor(instanceId, id);
+    }
+    for (const { id, newType } of typeChanges) {
+      textEditing.api.updateThoughtMarkType(instanceId, id, newType);
     }
   };
 }
