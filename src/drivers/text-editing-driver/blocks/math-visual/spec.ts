@@ -20,6 +20,7 @@
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 import { mathVisualNodeView } from './node-view';
+import { buildMathVisualKeymap } from './keymap';
 import { DEFAULT_CANVAS_CONFIG } from './types';
 
 const mathVisualNodeSpec: NodeSpec = {
@@ -101,6 +102,8 @@ export const mathVisualSpec: BlockSpec = {
   displayName: 'Function Graph',
   spec: mathVisualNodeSpec,
   nodeView: mathVisualNodeView,
+  // caption 内 Enter 跳出 mathVisual 插入新段落(防整块被删,对齐 html-block / image 模式)
+  plugin: () => buildMathVisualKeymap(),
   containerRule: 'inline-only',  // caption 只能含 inline 内容
   cascadeBoundary: true,         // atom 视为整体,不可拆
 };
