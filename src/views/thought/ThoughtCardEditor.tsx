@@ -75,10 +75,18 @@ export function ThoughtCardEditor({ thought, readOnly }: ThoughtCardEditorProps)
         undoScope: 'thought-view.pm',
         viewId: 'thought-view',
         plugins: {
+          // V1 ThoughtEditor 字面只禁 5 项:noteTitle / titleGuardPlugin /
+          // thoughtPlugin / AskAIPanel / TOC。其中只有 titleGuard 是 driver
+          // plugin toggle(其他 4 项不在 driver toggle 范畴):
+          //  - noteTitle 节点 — thought doc 不带 isTitle:true paragraph,自然不存在
+          //  - thoughtPlugin — V2 拆为 thought-anchor-plugin,自递归问题不存在
+          //  - AskAIPanel — V2 由 view-scoped registry 决定;thought-view 不注册即可
+          //  - TOC — V2 由 view 决定,thought-view 不接 TOC
+          //
+          // 其他 plugin(blockHandle / noteLinkCommand / vocabHighlight / slash /
+          // blockSelection / etc)**全部沿用默认开**,完整继承 PM 能力
+          // (对齐 charter §1.4 view 平等 + V1 ThoughtEditor 字面)。
           titleGuard: false,
-          blockHandle: false,    // 卡片内无需 block handle ⋮⋮
-          noteLinkCommand: false, // 卡片不接 [[ note link 搜索
-          vocabHighlight: false,  // 卡片不接词汇高亮
         },
       }}
       doc={thought.doc}

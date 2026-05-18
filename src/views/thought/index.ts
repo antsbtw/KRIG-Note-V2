@@ -21,17 +21,28 @@ import { registerView } from '@slot/view-type-registry/register-view';
 import { ThoughtView } from './ThoughtView';
 import { registerThoughtCommands } from './thought-commands';
 import { registerNoteBridge } from './note-bridge';
+import { registerFloatingToolbar } from './floating-toolbar-content';
+import { registerSlashMenu } from './slash-menu-content';
+import { registerHandleMenu } from './handle-menu-content';
+import { registerContextMenu } from './context-menu-content';
 
 registerView({
   id: 'thought-view',
   install: [
+    // V1 ThoughtEditor 字面 = NoteEditor variant='thought' 薄包装,完整继承
+    // NoteEditor 全部能力。V2 charter §1.4 view 平等 → install 镜像 NoteView。
     'selection',
     'clipboard',
     'undo-redo',
-    'thought',
+    'drag-and-drop',
+    'insertion',
     'text-editing',
-    'learning',
-    'math-rendering',
+    'media-storage',    // slash 插 image/audio/video 等业务消费
+    'ytdlp',            // tweet-block Download 按钮消费
+    'tweet-fetcher',    // tweet-block Fetch 按钮消费
+    'learning',         // 卡片内查词 / 翻译
+    'math-rendering',   // math-visual / inline 公式
+    'thought',          // 横切层自身
   ],
   component: ThoughtView,
   // 不设 navSideTab — V1 形态 thought 是 hidden view(只被动召唤右槽)
@@ -39,3 +50,8 @@ registerView({
 
 registerThoughtCommands();
 registerNoteBridge();
+// 5 大交互注册(charter §1.4 view 平等 — thought-view 同款获得 PM 编辑全套能力)
+registerFloatingToolbar();
+registerSlashMenu();
+registerHandleMenu();
+registerContextMenu();
