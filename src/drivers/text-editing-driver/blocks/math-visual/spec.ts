@@ -45,6 +45,7 @@ const mathVisualNodeSpec: NodeSpec = {
     normalLines: { default: [] },
     integralRegions: { default: [] },
     featurePoints: { default: [] },
+    toolMode: { default: 'move' },
     // KRIG 知识图谱挂钩(占位,对齐 image/html-block)
     atomId: { default: null },
   },
@@ -71,6 +72,7 @@ const mathVisualNodeSpec: NodeSpec = {
         normalLines: safeJson('data-normal-lines', []),
         integralRegions: safeJson('data-integral-regions', []),
         featurePoints: safeJson('data-feature-points', []),
+        toolMode: el.getAttribute('data-tool-mode') || 'move',
       };
     },
   }],
@@ -86,6 +88,7 @@ const mathVisualNodeSpec: NodeSpec = {
     if ((node.attrs.normalLines as unknown[])?.length) attrs['data-normal-lines'] = JSON.stringify(node.attrs.normalLines);
     if ((node.attrs.integralRegions as unknown[])?.length) attrs['data-integral-regions'] = JSON.stringify(node.attrs.integralRegions);
     if ((node.attrs.featurePoints as unknown[])?.length) attrs['data-feature-points'] = JSON.stringify(node.attrs.featurePoints);
+    if (node.attrs.toolMode && node.attrs.toolMode !== 'move') attrs['data-tool-mode'] = node.attrs.toolMode as string;
     return [
       'div', attrs,
       ['figcaption', { class: 'krig-math-visual__caption' }, 0],

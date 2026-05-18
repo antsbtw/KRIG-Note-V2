@@ -32,6 +32,8 @@ import {
 interface MathVisualComponentProps {
   data: MathVisualData;
   onChange: (data: MathVisualData) => void;
+  /** 全屏按钮点击(Phase 2);由 NodeView 注入(setContext + controller.show) */
+  onFullscreen?: () => void;
 }
 
 // ─── 主组件 ─────────────────────────────────────────────
@@ -39,6 +41,7 @@ interface MathVisualComponentProps {
 export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
   data,
   onChange,
+  onFullscreen,
 }) => {
   const math = requireCapabilityApi<MathRenderingApi>('math-rendering');
   const { Host: MathHost } = math;
@@ -301,7 +304,16 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
 
   return (
     <div className="math-visual" onMouseDown={(e) => e.stopPropagation()}>
-      {/* Phase 1B:不渲染全屏按钮(Phase 2 接 L2 fullscreen overlay 时重新引入) */}
+      {/* 全屏按钮(absolute 浮层,与函数行错开:函数行 padding-right 留 36px) */}
+      {onFullscreen && (
+        <button
+          className="mv-fullscreen-btn"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onFullscreen(); }}
+          title="全屏编辑"
+        >
+          ⛶
+        </button>
+      )}
 
       {/* 函数列表 */}
       <div className="mv-fn-list">

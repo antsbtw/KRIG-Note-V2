@@ -152,7 +152,11 @@ export const ANNOTATION_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
  * MathVisual Block 完整数据(去 title — 已用 PM figcaption)。
  *
  * 全屏模式的 tangentLines / normalLines / integralRegions / featurePoints
- * 字段在 Phase 1B 已定义但 UI 未启用(全屏按钮 disabled),Phase 2 接入。
+ * 字段在 Phase 1B 已定义但 UI 未启用,Phase 2 接入。
+ *
+ * toolMode (Phase 2):**唯一持久化的全屏 UI 状态** — 跨全屏记住"上次在哪个工具",
+ * 用户体验友好。其他全屏 UI 状态(selected*Id / animating / riemannConfig /
+ * featureVisibleTypes / boxSelect*)仍在 Panel React state(关闭全屏即丢)。
  */
 export interface MathVisualData {
   functions: FunctionEntry[];
@@ -161,11 +165,12 @@ export interface MathVisualData {
   parameters: Parameter[];
   annotations: Annotation[];
   canvas: CanvasConfig;
-  // 全屏模式新增(Phase 2 启用)
+  // 全屏模式持久化(Phase 2 启用)
   tangentLines?: TangentLine[];
   normalLines?: NormalLine[];
   integralRegions?: IntegralRegion[];
   featurePoints?: FeaturePoint[];
+  toolMode?: ToolMode;       // Phase 2:跨全屏持久,默认 'move'
 }
 
 /** 自动分配色板 */
