@@ -143,7 +143,7 @@ function ToolbarDropdown({ item, ctx }: { item: ToolbarItem; ctx: ToolbarItemCon
       <button
         ref={triggerRef}
         type="button"
-        className="krig-toolbar-button krig-toolbar-dropdown-trigger"
+        className="krig-toolbar-button krig-toolbar-button--default krig-toolbar-dropdown-trigger"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
         title={item.label}
