@@ -177,7 +177,7 @@ export function registerToolbar(): void {
       label: '关闭此面板',
       icon: '×',
       command: 'note-view.close-view',
-      variant: 'plain',
+      variant: 'close',
       order: 60,
     },
   ]);
