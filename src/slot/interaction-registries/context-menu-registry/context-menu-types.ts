@@ -10,11 +10,21 @@
  * - 'has-link'(L5-B3.15)选区上覆盖 link mark — "移除链接"等条件项用
  * - 'has-thought'    点击位置在 thought anchor 上(inline mark / block frame /
  *                    image node attr 三态任一)— "删除Thought" 条件项用
+ * - 'has-marks'      选区上覆盖至少一个 mark — "移除格式" 条件项用(光标态/无 mark 选区隐藏)
+ * - 'has-block-selection'  block / multi-block 选区(NodeSelection 或跨多 block 的 text 选区)
+ *                    — "删除 Block" 条件项用;光标态 + 单 block 内文本选区隐藏
  *
  * 当 enabledWhen 不满足时:本 item 不渲染(对齐 V1 "条件显示"行为)。
  * 加新枚举时同步 use-context-menu-trigger 的 ContextInfo 计算逻辑。
  */
-export type EnabledWhen = 'always' | 'has-selection' | 'is-editable' | 'has-link' | 'has-thought';
+export type EnabledWhen =
+  | 'always'
+  | 'has-selection'
+  | 'is-editable'
+  | 'has-link'
+  | 'has-thought'
+  | 'has-marks'
+  | 'has-block-selection';
 
 export interface ContextMenuItem {
   id: string;
@@ -34,6 +44,13 @@ export interface ContextInfo {
   isEditable: boolean;
   /** L5-B3.15:选区上是否覆盖 link mark(给"移除链接"条件项用) */
   hasLink: boolean;
+  /** 选区上是否覆盖至少一个 mark — "移除格式"条件项用。
+   *  来源:selection capability activeMarks 非空。光标态/无选区时 false。 */
+  hasMarks: boolean;
+  /** block / multi-block 选区(选区跨多个 block,或 NodeSelection)— "删除 Block"条件项用。
+   *  来源:selection capability kind ∈ {'block','multi-block'}。光标态 + 单 block 内文本选区
+   *  为 false(那种情况退格删字即可)。 */
+  hasBlockSelection: boolean;
   /** thought-view:点击位置的 thought id(inline mark / block frame / image attr 任一)
    *  null = 不在 thought anchor 上;非空 = 用作 'has-thought' enabledWhen 判定 +
    *  传给 "删除Thought" 命令 handler。 */

@@ -72,7 +72,7 @@ export function createSelectAllItem(viewId: string): ContextMenuItem {
 /**
  * 移除 marks 组:✖ 移除格式 / 🔗 移除链接(group='marks')
  *
- * - "移除格式" 占位实现(真实"按选区当前 marks 动态显示移除项"留 sub-stage)
+ * - "移除格式" enabledWhen='has-marks'(选区上覆盖至少一个 mark 才显示)
  * - "移除链接" L5-B3.15 实装,enabledWhen='has-link'
  */
 export function createRemoveMarksGroup(viewId: string): ContextMenuItem[] {
@@ -82,7 +82,7 @@ export function createRemoveMarksGroup(viewId: string): ContextMenuItem[] {
       label: '✖ 移除格式',
       command: 'text-editing.cm-remove-marks',
       view: viewId,
-      enabledWhen: 'has-selection',
+      enabledWhen: 'has-marks',
       group: 'marks',
       order: 30,
     },
@@ -98,14 +98,15 @@ export function createRemoveMarksGroup(viewId: string): ContextMenuItem[] {
   ];
 }
 
-/** 🗑 删除 Block(group='destructive') */
+/** 🗑 删除 Block(group='destructive') — enabledWhen='has-block-selection'
+ *  (光标态 / 单 block 内文本选区时隐藏,那种情况退格即可) */
 export function createDeleteBlockItem(viewId: string): ContextMenuItem {
   return {
     id: `${viewId}.cm.delete-block`,
     label: '🗑 删除 Block',
     command: 'text-editing.cm-delete-block',
     view: viewId,
-    enabledWhen: 'is-editable',
+    enabledWhen: 'has-block-selection',
     group: 'destructive',
     order: 90,
   };

@@ -19,7 +19,17 @@ const initialState: ContextMenuState = {
   x: 0,
   y: 0,
   viewId: '',
-  context: { hasSelection: false, isEditable: false, hasLink: false, thoughtId: null, pmInstanceId: null, x: 0, y: 0 },
+  context: {
+    hasSelection: false,
+    isEditable: false,
+    hasLink: false,
+    hasMarks: false,
+    hasBlockSelection: false,
+    thoughtId: null,
+    pmInstanceId: null,
+    x: 0,
+    y: 0,
+  },
 };
 
 class ContextMenuController {
