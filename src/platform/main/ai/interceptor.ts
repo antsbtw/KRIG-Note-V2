@@ -12,10 +12,7 @@
  * V1 源:src/plugins/web-bridge/capabilities/interceptor.ts(字面搬,改 import alias)
  */
 
-import {
-  type AIServiceId,
-  detectAIServiceByUrl,
-} from '@shared/types/ai-service-types';
+import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
 import { getSSECaptureScript } from './inject-scripts/sse-capture';
 
 export interface SSEResponseRecord {
