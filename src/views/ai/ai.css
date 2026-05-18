@@ -1,14 +1,17 @@
 /**
  * AI View 样式
  *
- * 跟 web-view 同 flex column 布局:toolbar 固定高 + webview 占满剩余。
+ * Toolbar 视觉字面对齐 WebToolbar (web.css .krig-web-toolbar 系列):
+ * - height 36px / background #252525 / border-bottom #333 / 文字 #e8eaed
+ * - 按钮无边框,hover 才显灰底(rgba(255,255,255,0.08))
+ * - 与 ToolbarFrame (workspace-instance/toolbar-frame.css) 同高同色
  */
 
 .krig-ai-view {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--krig-bg, #fff);
+  background: #1e1e1e;
 }
 
 .krig-ai-view__empty {
@@ -16,63 +19,96 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--krig-text-secondary, #888);
+  color: #888;
   font-size: 14px;
 }
 
-/* ── toolbar(参考 web-view toolbar)── */
+/* ── toolbar(字面对齐 web.css .krig-web-toolbar 数值)── */
 
-.krig-ai-view__toolbar {
-  flex: 0 0 auto;
+.krig-ai-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--krig-border, #e0e0e0);
-  background: var(--krig-toolbar-bg, #fafafa);
-  min-height: 36px;
+  gap: 8px;
+  padding: 0 12px;
+  height: 36px;
+  background: #252525;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+  color: #e8eaed;
 }
 
-.krig-ai-view__service-select {
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--krig-border, #d0d0d0);
-  border-radius: 4px;
-  background: #fff;
-  font-size: 13px;
+.krig-ai-toolbar__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.krig-ai-toolbar__btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #e8eaed;
   cursor: pointer;
-  flex: 0 0 auto;
-}
-
-.krig-ai-view__btn {
-  height: 28px;
-  width: 28px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.1s;
+  min-width: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--krig-border, #d0d0d0);
+}
+
+.krig-ai-toolbar__btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-ai-toolbar__btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.krig-ai-toolbar__btn:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+/* 服务下拉(原生 select 在深色主题样式有限,做基础对齐) */
+.krig-ai-toolbar__service-select {
+  background: #1e1e1e;
+  border: 1px solid #444;
+  color: #e8eaed;
+  font-size: 13px;
+  height: 26px;
+  padding: 0 8px;
   border-radius: 4px;
-  background: #fff;
   cursor: pointer;
-  font-size: 14px;
-  color: var(--krig-text, #333);
-  flex: 0 0 auto;
+  flex-shrink: 0;
+  outline: none;
 }
 
-.krig-ai-view__btn:hover {
-  background: var(--krig-hover-bg, #f0f0f0);
+.krig-ai-toolbar__service-select:focus {
+  border-color: #8ab4f8;
 }
 
-.krig-ai-view__url {
-  flex: 1 1 auto;
+/* URL bar(只读显示,模仿 WebToolbar url-input 的视觉但不可编辑) */
+.krig-ai-toolbar__url {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 10px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #888;
   font-size: 12px;
-  color: var(--krig-text-secondary, #888);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
-  padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  box-sizing: border-box;
+  height: 26px;
+  display: flex;
+  align-items: center;
 }
 
 /* ── webview 占满剩余 ── */

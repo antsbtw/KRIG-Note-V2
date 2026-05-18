@@ -1,5 +1,8 @@
 /**
- * AIToolbar — 服务切换下拉 + 新对话 + URL 显示
+ * AIToolbar — 服务切换下拉 + 新对话 + 重载 + URL 显示
+ *
+ * 视觉对齐:字面照搬 WebToolbar 的 36px 高度 / #252525 背景 / 无边框按钮 hover 灰底,
+ * 与 Note view 的 ToolbarFrame (workspace-instance/toolbar-frame.css) 同款主题。
  *
  * V1 对应:src/plugins/web/components/AIWebView.tsx 的顶栏(服务选择下拉)
  */
@@ -36,41 +39,46 @@ export function AIToolbar(props: AIToolbarProps) {
     [onSelectService],
   );
 
+  // 显示简洁 URL(去掉协议前缀,对齐 WebToolbar)
+  const displayUrl = url.replace(/^https?:\/\//, '');
+
   return (
-    <div className="krig-ai-view__toolbar">
-      <select
-        className="krig-ai-view__service-select"
-        value={serviceId}
-        onChange={handleSelect}
-        aria-label="选择 AI 服务"
-      >
-        {AI_SERVICE_PROFILES.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.icon} {p.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className="krig-ai-view__btn"
-        onClick={onNewChat}
-        title="新对话"
-        aria-label="新对话"
-      >
-        ＋
-      </button>
-      <button
-        type="button"
-        className="krig-ai-view__btn"
-        onClick={onReload}
-        title="重载"
-        aria-label="重载"
-      >
-        ↻
-      </button>
-      <div className="krig-ai-view__url" title={url}>
-        {loading ? '⏳ ' : ''}
-        {url}
+    <div className="krig-ai-toolbar">
+      <div className="krig-ai-toolbar__nav">
+        <select
+          className="krig-ai-toolbar__service-select"
+          value={serviceId}
+          onChange={handleSelect}
+          aria-label="选择 AI 服务"
+        >
+          {AI_SERVICE_PROFILES.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.icon} {p.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="krig-ai-toolbar__btn"
+          onClick={onNewChat}
+          title="新对话"
+          aria-label="新对话"
+        >
+          ＋
+        </button>
+        <button
+          type="button"
+          className="krig-ai-toolbar__btn"
+          onClick={onReload}
+          title={loading ? '加载中' : '重载'}
+          aria-label={loading ? '加载中' : '重载'}
+        >
+          {loading ? '✕' : '↻'}
+        </button>
+      </div>
+
+      <div className="krig-ai-toolbar__url" title={url}>
+        {displayUrl || 'about:blank'}
       </div>
     </div>
   );
