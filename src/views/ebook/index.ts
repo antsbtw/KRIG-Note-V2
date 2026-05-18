@@ -30,6 +30,7 @@ registerView({
   install: [
     'ebook-library',    // L5-C1:书架 + 文件夹 + 标注 + 数据传输
     'ebook-rendering',  // L5-C2:PDF Canvas 渲染 + 虚拟滚动 + Text Layer
+    'thought',          // thought-view Phase 4:横切思考层(EPUB 高亮/PDF rect/underline 走 thought capability)
   ],
   component: EBookView,
   navSideTab: { label: 'eBook', icon: '📕', order: 2 },

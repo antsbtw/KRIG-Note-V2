@@ -225,6 +225,13 @@
   font-style: italic;
 }
 
+.krig-thought-anchor-dangling {
+  flex: 1 1 auto;
+  color: #ffab40;
+  font-style: italic;
+  font-size: 11px;
+}
+
 .krig-thought-card-editor {
   flex: 1 1 auto;
   min-height: 200px;
@@ -241,5 +248,48 @@
 }
 
 .krig-thought-card-editor:focus {
+  border-color: var(--krig-accent, #4a9eff);
+}
+
+/* AI response 状态 */
+.krig-thought-card-ai-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 200px;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--krig-fg-muted, #888);
+  background: var(--krig-bg-secondary, #232323);
+  border: 1px dashed var(--krig-border, #333);
+  border-radius: 8px;
+}
+
+.krig-thought-ai-spinner {
+  font-size: 32px;
+  animation: krig-ai-spin 1.5s ease-in-out infinite;
+}
+
+@keyframes krig-ai-spin {
+  0%, 100% { transform: rotate(-8deg); }
+  50%      { transform: rotate(8deg); }
+}
+
+.krig-thought-card-copy {
+  align-self: flex-end;
+  background: var(--krig-bg-secondary, #232323);
+  color: var(--krig-fg, #e0e0e0);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-thought-card-copy:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
   border-color: var(--krig-accent, #4a9eff);
 }

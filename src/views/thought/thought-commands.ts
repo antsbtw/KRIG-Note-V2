@@ -178,44 +178,97 @@ export function registerThoughtCommands(): void {
   });
 
   /**
-   * 跳到 thought 的 source(从 ThoughtCard 点击 anchor 信息 → Note 内滚到对应位置 + 高亮)。
-   * Phase 3 仅支持 source='note'(NoteView 必须已 active 且 noteId 匹配 — 不匹配则切 active note)。
+   * AI response Phase 4(mock 实现):
+   * 1. 拿 Note 选区文字
+   * 2. 建 thought type='ai-response' + serviceId='chatgpt' + 空 doc + inline anchor
+   * 3. 开右槽激活
+   * 4. mock async 2s → updateThought 填 doc(AI 回复正文)
+   *
+   * 真接入(后续 sub-phase):serviceId 路由到 ChatGPT/Claude/Gemini webview 抓取 dom。
+   */
+  commandRegistry.register('thought-view.ask-ai-from-note', () => {
+    void askAiFromNote();
+  });
+
+  /**
+   * 跳到 thought 的 source。
+   *   Phase 3:source='note' → 切 active note + scrollToThoughtAnchor。
+   *   Phase 4:source='book' → 切 active book + ebookCap.open(bookId) + 跳页(PDF)/CFI(EPUB)。
+   *   source='graph'/'canvas':本期预留,留 Phase 6+。
    */
   commandRegistry.register('thought-view.scroll-to-source', (thoughtId: unknown) => {
     if (typeof thoughtId !== 'string') return;
-    void (async () => {
-      const t = await thoughtCap().getThought(thoughtId);
-      if (!t || !t.anchor || t.anchor.source !== 'note') return;
-      const wsId = workspaceManager.getActiveId();
-      if (!wsId) return;
-      // 切 active note 到 anchor.resourceId(可能本来就是)
-      const ws = workspaceManager.get(wsId);
-      const noteState = ws?.pluginStates['note'] as { activeNoteId?: string } | undefined;
-      if (noteState?.activeNoteId !== t.anchor.resourceId) {
-        commandRegistry.execute('note-view.set-active', t.anchor.resourceId);
-      }
-      // 让 NoteView 在 left slot 显示(用 bus.slot 把 NoteView 设为 left;
-      // V2 NoteView 默认就在 left,这里仅保证状态;ThoughtView 留 right)
-      const ws2 = workspaceManager.get(wsId);
-      if (ws2 && ws2.slotBinding.left !== 'note-view') {
-        workspaceManager.update(wsId, {
-          slotBinding: { ...ws2.slotBinding, left: 'note-view' },
-        });
-      }
-      // 等 NoteView host mount 完成(异步切 activeNoteId 后 driver instance 还没就绪)
-      const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-      const tryScroll = (attempt: number): void => {
-        const instanceId = textEditing.instanceRegistry.getFocusedInstanceId() ?? wsId;
-        const locator = t.anchor!.locator as NoteLocator;
-        textEditing.api.scrollToThoughtAnchor(instanceId, locator.pmPos);
-        // 简单兜底:首次可能 instance 还没 ready,200ms 重试一次
-        if (attempt === 0) {
-          window.setTimeout(() => tryScroll(1), 200);
-        }
-      };
-      tryScroll(0);
-    })();
+    void scrollToSource(thoughtId);
   });
+}
+
+async function scrollToSource(thoughtId: string): Promise<void> {
+  const t = await thoughtCap().getThought(thoughtId);
+  if (!t || !t.anchor) return;
+  const wsId = workspaceManager.getActiveId();
+  if (!wsId) return;
+
+  if (t.anchor.source === 'note') {
+    return scrollToNoteSource(t.anchor.resourceId, t.anchor.locator as NoteLocator, wsId);
+  }
+  if (t.anchor.source === 'book') {
+    return scrollToBookSource(t.anchor.resourceId, t.anchor.locator as import('@capabilities/thought/types').BookLocator, wsId);
+  }
+  // graph / canvas 本期不实施
+}
+
+async function scrollToNoteSource(
+  noteId: string,
+  locator: NoteLocator,
+  wsId: string,
+): Promise<void> {
+  const ws = workspaceManager.get(wsId);
+  const noteState = ws?.pluginStates['note'] as { activeNoteId?: string } | undefined;
+  if (noteState?.activeNoteId !== noteId) {
+    commandRegistry.execute('note-view.set-active', noteId);
+  }
+  const ws2 = workspaceManager.get(wsId);
+  if (ws2 && ws2.slotBinding.left !== 'note-view') {
+    workspaceManager.update(wsId, {
+      slotBinding: { ...ws2.slotBinding, left: 'note-view' },
+    });
+  }
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const tryScroll = (attempt: number): void => {
+    const instanceId = textEditing.instanceRegistry.getFocusedInstanceId() ?? wsId;
+    textEditing.api.scrollToThoughtAnchor(instanceId, locator.pmPos);
+    if (attempt === 0) window.setTimeout(() => tryScroll(1), 200);
+  };
+  tryScroll(0);
+}
+
+async function scrollToBookSource(
+  bookId: string,
+  locator: import('@capabilities/thought/types').BookLocator,
+  wsId: string,
+): Promise<void> {
+  // 切 left → ebook-view,并 open 该 book(ebook capability 已支持 open(id))
+  const ws = workspaceManager.get(wsId);
+  if (ws && ws.slotBinding.left !== 'ebook-view') {
+    workspaceManager.update(wsId, {
+      slotBinding: { ...ws.slotBinding, left: 'ebook-view' },
+    });
+  }
+  // 调 ebook-library.open(bookId) 让 EBookView 加载该书
+  const ebookApi = requireCapabilityApi<import('@capabilities/ebook-library/types').EBookLibraryApi>('ebook-library');
+  await ebookApi.open(bookId);
+  // 跳页/CFI(异步等 EBookView 加载完;Phase 4 简化:200ms 重试一次,后续 sub-phase 接 onBookOpened 推流)
+  // 注:Host 是 view 内部 ref,从命令端拿不到 — 这里只能依赖 EBookView 处理"刚 open 的书自动 goToPage/goToCFI"
+  //    Phase 4 临时方案:bus.channels.emit thought.scroll-to-book-source,view 端订阅后调 host
+  const bus = workspaceManager.getBus(wsId);
+  if (bus) {
+    bus.channels.emit('thought.scroll-to-book-source', {
+      thoughtId: '',
+      bookId,
+      pageNum: locator.pageNum,
+      cfi: locator.cfi,
+    });
+  }
 }
 
 const NODE_ANCHOR_TYPES = new Set(['image']);
@@ -320,8 +373,77 @@ async function addThoughtFromNote(): Promise<void> {
   }
 }
 
+async function askAiFromNote(): Promise<void> {
+  const wsId = workspaceManager.getActiveId();
+  if (!wsId) return;
+  const ws = workspaceManager.get(wsId);
+  if (!ws) return;
+  const noteState = ws.pluginStates['note'] as { activeNoteId?: string } | undefined;
+  const noteId = noteState?.activeNoteId;
+  if (!noteId) return;
+
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const instanceId = textEditing.instanceRegistry.getFocusedInstanceId();
+  if (!instanceId) return;
+
+  // 尝试 inline anchor;如失败(光标无选区)就直接 unanchored
+  // thoughtType='ai-response' 让 mark 颜色显紫色
+  const thoughtId = await preCreatePlaceholder(noteId, 'ai-response', 'chatgpt');
+  if (!thoughtId) return;
+
+  const inlineResult = textEditing.api.addThoughtMark(
+    instanceId,
+    thoughtId,
+    'ai-response',
+  );
+  if (inlineResult) {
+    const anchor: ThoughtAnchor = {
+      source: 'note',
+      resourceId: noteId,
+      locator: {
+        pmPos: inlineResult.pos,
+        anchorType: 'inline',
+        text: inlineResult.text,
+      },
+    };
+    await thoughtCap().updateThoughtAnchor(thoughtId, anchor);
+  }
+
+  // 开右槽 + 激活
+  const bus = workspaceManager.getBus(wsId);
+  if (bus) {
+    bus.slot.openRight('thought-view');
+    bus.channels.emit('thought.activate', { thoughtId });
+  }
+
+  // mock async:2s 后填充 AI 回复 doc(真集成时改成 webview 抓取或 API 调用)
+  window.setTimeout(() => {
+    void (async () => {
+      const promptText = inlineResult?.text ?? '(无选区)';
+      const replyText = `[AI mock 回复] 关于「${promptText}」:\n\n这是一个占位 AI 回复,真接入时会替换为 ChatGPT/Claude/Gemini 实际响应。\n\n— 设计依据: thought-view-port.md v0.5 §6 + Phase 4 AI 状态机。`;
+      const replyDoc: NoteDocEnvelope = {
+        format: 'pm-doc-json',
+        version: '0.1',
+        payload: {
+          type: 'doc',
+          content: replyText.split('\n').map((line) => ({
+            type: 'paragraph',
+            content: line ? [{ type: 'text', text: line }] : undefined,
+          })),
+        },
+      };
+      await thoughtCap().updateThought(thoughtId, { doc: replyDoc });
+      bus?.channels.emit('thought.ai-ready', { thoughtId });
+    })();
+  }, 2000);
+}
+
 /** 先建一个 placeholder thought(unanchored,后续 updateAnchor 补) — 用 anchor=null 单步原子建 atom 拿 id */
-async function preCreatePlaceholder(noteId: string): Promise<string | null> {
+async function preCreatePlaceholder(
+  noteId: string,
+  type: ThoughtType = 'thought',
+  serviceId?: string,
+): Promise<string | null> {
   void noteId; // anchor.noteId 在 updateAnchor 时塞,这里不用
   const emptyDoc: NoteDocEnvelope = {
     format: 'pm-doc-json',
@@ -330,9 +452,10 @@ async function preCreatePlaceholder(noteId: string): Promise<string | null> {
   };
   try {
     const t = await thoughtCap().createThought({
-      type: 'thought',
+      type,
       resolved: false,
       pinned: false,
+      serviceId,
       doc: emptyDoc,
       folderId: null,
       anchor: null, // placeholder,马上 updateAnchor 补

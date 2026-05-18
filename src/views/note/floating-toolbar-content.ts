@@ -43,5 +43,15 @@ export function registerFloatingToolbar(): void {
       group: 'thought',
       order: 100,
     },
+    // thought-view Phase 4:🤖 问 AI(选区文字 → AI mock 回复 thought 卡片)
+    {
+      id: 'ask-ai',
+      label: '🤖',
+      kind: 'button',
+      command: 'thought-view.ask-ai-from-note',
+      view: VIEW,
+      group: 'thought',
+      order: 101,
+    },
   ]);
 }

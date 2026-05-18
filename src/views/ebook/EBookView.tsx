@@ -257,6 +257,37 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     return () => window.removeEventListener('mousedown', handler);
   }, [ann.selection, ann]);
 
+  // thought-view Phase 4:订阅 'thought.scroll-to-book-source' channel
+  // → ThoughtView 点 anchor 跳转到 ebook 当前 active book 的页/CFI(host.goToPage/goToCFI)
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const unsub = bus.channels.subscribe('thought.scroll-to-book-source', (payload: unknown) => {
+      const { bookId, pageNum, cfi } = (payload ?? {}) as {
+        bookId?: string;
+        pageNum?: number;
+        cfi?: string;
+      };
+      if (!bookId) return;
+      // 等 EBookView 加载完该书(scroll-to-source 流程内已调 ebookCap.open,
+      // 此时 onBookOpened 推流可能还没来 — 200ms 重试一次兜底)
+      const tryScroll = (attempt: number): void => {
+        const host = hostRef.current;
+        if (!host) {
+          if (attempt < 8) window.setTimeout(() => tryScroll(attempt + 1), 200);
+          return;
+        }
+        if (cfi) {
+          void host.goToCFI(cfi);
+        } else if (pageNum && pageNum > 0) {
+          host.goToPage(pageNum);
+        }
+      };
+      tryScroll(0);
+    });
+    return unsub;
+  }, [workspaceId]);
+
   if (!wsState) {
     return <div className="krig-ebook-empty">Workspace 未就绪</div>;
   }

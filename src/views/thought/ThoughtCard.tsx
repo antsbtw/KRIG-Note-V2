@@ -141,15 +141,44 @@ export function ThoughtCard({ thought }: ThoughtCardProps) {
         </div>
       )}
 
-      <textarea
-        className="krig-thought-card-editor"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder={`记一条 ${meta.label}...`}
-        aria-label="思考内容"
-      />
+      {isAiPending(thought) ? (
+        <div className="krig-thought-card-ai-pending" aria-label="AI 正在回复">
+          <span className="krig-thought-ai-spinner" aria-hidden>🤖</span>
+          <span>AI 正在思考...</span>
+        </div>
+      ) : (
+        <textarea
+          className="krig-thought-card-editor"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={`记一条 ${meta.label}...`}
+          aria-label="思考内容"
+          readOnly={thought.type === 'ai-response'}
+        />
+      )}
+      {thought.type === 'ai-response' && !isAiPending(thought) && (
+        <button
+          className="krig-thought-card-copy"
+          onClick={() => copyToClipboard(draft)}
+          title="复制 AI 回复"
+        >
+          📋 复制
+        </button>
+      )}
     </div>
   );
+}
+
+function isAiPending(t: ThoughtInfo): boolean {
+  if (t.type !== 'ai-response') return false;
+  const body = extractFirstParaText(t.doc);
+  return body.trim().length === 0;
+}
+
+function copyToClipboard(text: string): void {
+  void navigator.clipboard?.writeText(text).catch((e) => {
+    console.warn('[thought-card] clipboard failed:', e);
+  });
 }
 
 function anchorBadge(t: ThoughtInfo): React.ReactNode {
@@ -160,14 +189,20 @@ function anchorBadge(t: ThoughtInfo): React.ReactNode {
     graph: '📊 Graph',
     canvas: '🎨 Canvas',
   }[t.anchor.source];
-  // v0.5 §8.3:anchor 元数据在但 source 资源已删 → dangling-anchor。
-  // Phase 2 仅 UI 显示,不做实时探测(Phase 3+ 接入跨槽 ping)。
+  // v0.5 §8.3 dangling-anchor 简化探测(Phase 4):
+  //   anchor 存在但 locator.text/textContent 都空 → 视为锚点失效(✓ 兜底视觉,
+  //   真实 source 探测留 Phase 5 异步路径)。
   const locator = t.anchor.locator as { text?: string; textContent?: string };
   const anchorText = locator.text ?? locator.textContent ?? '';
+  const isDangling = !anchorText.trim();
   return (
     <>
       <span className="krig-thought-anchor-source">{sourceText}</span>
-      {anchorText && (
+      {isDangling ? (
+        <span className="krig-thought-anchor-dangling" title="锚点失效 — 点击解依附">
+          ⚠️ 锚点失效
+        </span>
+      ) : (
         <span className="krig-thought-anchor-text" title={anchorText}>
           {anchorText.slice(0, 40)}{anchorText.length > 40 ? '…' : ''}
         </span>
