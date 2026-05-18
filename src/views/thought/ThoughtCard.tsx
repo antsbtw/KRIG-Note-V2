@@ -69,13 +69,17 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
   const [showTypeMenu, setShowTypeMenu] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // V1 同模式:active 时自动展开 + scrollIntoView
+  // V1 同模式:active 时自动展开 + scrollIntoView。
+  // **deps 字面只 isActive** — 含 expanded 会让用户手动收起后立刻被 effect
+  // 反弹回展开(active && !expanded → setExpanded(true)),用户无法 toggle 收起。
+  // V1 src/plugins/thought/components/ThoughtCard.tsx:45 字面 deps:[isActive]。
   useEffect(() => {
     if (isActive && !expanded) setExpanded(true);
     if (isActive && cardRef.current) {
       cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [isActive, expanded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   const meta = THOUGHT_TYPE_META[thought.type];
   const isAI = thought.type === 'ai-response';

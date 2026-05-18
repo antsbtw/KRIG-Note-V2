@@ -194,11 +194,18 @@
 
 /* editor host:对齐 V1 .thought-card__editor 字面无边框,只留 padding + min-height */
 .krig-thought-card-editor-host {
-  min-height: 60px;
-  padding: 4px;
   font-size: 13px;
   line-height: 1.5;
-  overflow: auto;
+}
+
+/* PM driver host 容器在 thought card 内紧凑化(默认 NoteView 用 200px min-height
+   + 60px 左 gutter,不适合卡片内嵌)。空 doc 应贴合 1 行高度,有 doc 自然撑开。*/
+.krig-thought-card-editor-host .krig-pm-host {
+  height: auto;
+}
+.krig-thought-card-editor-host .krig-pm-host .ProseMirror {
+  min-height: 1.5em;
+  padding: 4px 8px 4px 48px;
 }
 
 /* AI pending */
