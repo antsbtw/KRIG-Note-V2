@@ -33,25 +33,9 @@ export function registerFloatingToolbar(): void {
     ui.createMathButton(VIEW),
     ui.createLinkButton(VIEW),
     ui.createColorButton(VIEW),
-    // thought-view Phase 3:💭 加思考(选区/光标 → thought atom + anchor + 开右槽)
-    {
-      id: 'add-thought',
-      label: '💭',
-      kind: 'button',
-      command: 'thought-view.add-from-note',
-      view: VIEW,
-      group: 'thought',
-      order: 100,
-    },
-    // thought-view Phase 4:🤖 问 AI(选区文字 → AI mock 回复 thought 卡片)
-    {
-      id: 'ask-ai',
-      label: '🤖',
-      kind: 'button',
-      command: 'thought-view.ask-ai-from-note',
-      view: VIEW,
-      group: 'thought',
-      order: 101,
-    },
+    // thought-view 💭/🤖 已迁出 floating toolbar 至 NoteView context menu:
+    //   floating toolbar 字面靠选区驱动(use-floating-toolbar-trigger),不弹于
+    //   光标态/块态/多块选中;但 💭/🤖 加 thought 需覆盖块和多块场景,
+    //   所以迁到右键菜单 — 见 src/views/note/context-menu-content.ts
   ]);
 }
