@@ -23,6 +23,8 @@ import { fullscreenOverlayRegistry }
   from '@slot/interaction-registries/fullscreen-overlay-registry/registry';
 import { CodeFullscreenPanel }
   from '@drivers/text-editing-driver/blocks/code-block/fullscreen/CodeFullscreenPanel';
+import { MathVisualFullscreenPanel }
+  from '@drivers/text-editing-driver/blocks/math-visual/fullscreen/MathVisualFullscreenPanel';
 
 /** capability 加载时一次性注册所有 text-editing 相关 fullscreen overlay */
 export function registerTextEditingFullscreenOverlays(): void {
@@ -34,5 +36,10 @@ export function registerTextEditingFullscreenOverlays(): void {
   fullscreenOverlayRegistry.register({
     id: 'text-editing.fullscreen.mermaid',
     Component: CodeFullscreenPanel,
+  });
+  // math-visual 全屏(Phase 2):独立 Component,共用 L2 机制
+  fullscreenOverlayRegistry.register({
+    id: 'text-editing.fullscreen.math-visual',
+    Component: MathVisualFullscreenPanel,
   });
 }

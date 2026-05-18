@@ -98,6 +98,114 @@ export interface MathEndpoint {
 }
 
 // ─────────────────────────────────────────────────────────
+// Overlay specs(全屏工具配置,Phase 2)
+//
+// 9 件工具迁 capability 内部,driver 通过 MathHostProps.overlays 传配置 + 回调。
+// 设计:每类工具传 spec[] (含数据 id + 显示属性) + 回调
+// (onTangentMove / onAnnotationMove / onIntegralMove 等)。
+// ─────────────────────────────────────────────────────────
+
+/** 切线工具配置(对应 driver TangentLine 数据) */
+export interface TangentSpec {
+  id: string;
+  curveId: string;     // 关联 curve.id(必须是 fnOfX 类型,内部 derivative 求斜率)
+  x: number;
+  color?: string;
+  fixed?: boolean;     // false = 可拖动(MovablePoint),true = 静态
+  showSlope?: boolean; // 显示 "k = 斜率"
+}
+
+/** 法线工具配置(对应 driver NormalLine) */
+export interface NormalSpec {
+  id: string;
+  curveId: string;
+  x: number;
+  color?: string;
+  fixed?: boolean;
+  showSlope?: boolean;
+}
+
+/** 积分区域工具配置(对应 driver IntegralRegion) */
+export interface IntegralSpec {
+  id: string;
+  curveId: string;
+  a: number;
+  b: number;
+  color?: string;
+  showValue?: boolean; // 显示面积值
+}
+
+/** 特征点工具配置(对应 driver FeaturePoint;capability 也支持自检测) */
+export interface FeaturePointSpec {
+  id: string;
+  curveId: string;
+  x: number;
+  y: number;
+  type: 'maximum' | 'minimum' | 'zero' | 'inflection';
+}
+
+/** 标注工具配置(对应 driver Annotation) */
+export interface AnnotationSpec {
+  id: string;          // capability 用,driver 端可用 idx 同步
+  curveId: string;
+  x: number;
+  label?: string;      // 默认 ANNOTATION_LABELS[idx]
+  color?: string;
+  showCoord?: boolean; // 默认 true
+}
+
+/** 黎曼和工具配置 */
+export interface RiemannSpec {
+  curveId: string;
+  a: number;
+  b: number;
+  n: number;
+  mode: 'left' | 'right' | 'midpoint';
+  color?: string;
+  showSum?: boolean;
+}
+
+/**
+ * 工具叠加层(Phase 2);driver 全屏 Panel 拼好后传给 MathHost。
+ *
+ * 设计:driver 用 PM 持久数据(tangentLines/normalLines/integralRegions/...) 转换。
+ * 这里类型与 driver types 一致(curveId == functionId 同义)。
+ *
+ * 用户在画布上拖动 MovablePoint → onOverlayChange 回调,driver 写回 PM。
+ */
+export interface OverlaysConfig {
+  tangents?: TangentSpec[];
+  normals?: NormalSpec[];
+  integrals?: IntegralSpec[];
+  features?: FeaturePointSpec[];
+  /** 标注选中状态(单选 idx 显示为 MovablePoint,多选用框选高亮)
+   *  设计:annotations[] + selectedAnnotationIdx + selectedAnnotationIdxs 三件套独立 prop */
+  annotations?: AnnotationSpec[];
+  selectedAnnotationIdx?: number | null;
+  selectedAnnotationIdxs?: Set<number>;
+  /** 黎曼和(单实例,跟随当前选中积分;driver 决定何时塞) */
+  riemann?: RiemannSpec | null;
+  /** Hover 坐标提示(开关) */
+  hoverCoords?: boolean;
+  /** 端点 ○/● 标记(开关) — 由 MathHost 根据 fnOfX.segments 自动计算 */
+  showEndpoints?: boolean;
+}
+
+/** Overlay 用户交互回调集合(driver 全屏 Panel 接收) */
+export interface OverlayCallbacks {
+  /** 切线点拖动 → 新 x 坐标 */
+  onTangentMove?: (id: string, newX: number) => void;
+  /** 法线点拖动 → 新 x 坐标 */
+  onNormalMove?: (id: string, newX: number) => void;
+  /** 积分区域 a / b 边界拖动 */
+  onIntegralMove?: (id: string, key: 'a' | 'b', newX: number) => void;
+  /** 标注点 onSelect(单击非选中标注切换单选) */
+  onAnnotationSelect?: (idx: number) => void;
+  /** 标注点拖动(MovablePoint 单选时) */
+  onAnnotationMove?: (idx: number, newX: number) => void;
+}
+
+// ─────────────────────────────────────────────────────────
 // MathHost(画布)
 // ─────────────────────────────────────────────────────────
 
@@ -148,6 +256,14 @@ export interface MathHostProps {
   preserveAspectRatio?: false | 'contain';
   /** Transient viewport 通知(pan/zoom 触发);driver 视情况持久化或忽略 */
   onViewportChange?: (vp: ViewportState) => void;
+
+  // ── Overlay 工具(Phase 2 全屏接入) ──
+  /** 工具叠加层配置 — 切线/法线/积分/特征点/标注/黎曼和/HoverCoords/端点 */
+  overlays?: OverlaysConfig;
+  /** Overlay 交互回调(driver 写回 PM) */
+  overlayCallbacks?: OverlayCallbacks;
+  /** 点大小(标注/特征/端点都用) — 默认 6 */
+  pointSize?: number;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -267,4 +383,27 @@ export interface MathRenderingApi {
    * driver 拿 latex 字符串后传给 katex.render(supplied externally)。
    */
   exprToLatex(expression: string): string | null;
+
+  // ── Phase 2:全屏专用数值计算 ──
+  /** 中心差分一阶导数(h=1e-7,Tangent/Normal 工具用) */
+  derivative(fn: (x: number) => number, x: number, h?: number): number;
+  /** 中心差分二阶导数(h=1e-5,拐点检测用) */
+  secondDerivative(fn: (x: number) => number, x: number, h?: number): number;
+  /** Simpson 法则积分(默认 200 段) */
+  integrate(fn: (x: number) => number, a: number, b: number, n?: number): number;
+  /** 特征点扫描(零点 / 极值 / 拐点);types 默认全 4 类 */
+  detectFeaturePoints(
+    fn: (x: number) => number,
+    functionId: string,
+    xMin: number,
+    xMax: number,
+    opts?: { types?: Set<'maximum' | 'minimum' | 'zero' | 'inflection'> },
+  ): Array<{
+    id: string;
+    functionId: string;
+    x: number;
+    y: number;
+    type: 'maximum' | 'minimum' | 'zero' | 'inflection';
+    auto: boolean;
+  }>;
 }

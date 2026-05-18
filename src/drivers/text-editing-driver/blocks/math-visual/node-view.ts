@@ -15,13 +15,22 @@
  * - `destroy` cleanup React root + 清引用,memory:react-unmount-cleanup-order
  */
 
-import type { NodeViewConstructor } from 'prosemirror-view';
+import type { NodeViewConstructor, EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { createRoot, type Root } from 'react-dom/client';
 import React from 'react';
+import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { MathVisualComponent } from './MathVisualComponent';
+import { setMathVisualFullscreenContext } from './fullscreen/menu-context';
 import type { MathVisualData } from './types';
 import { DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from './types';
+
+const FULLSCREEN_OVERLAY_ID = 'text-editing.fullscreen.math-visual';
+
+function findInstanceId(view: EditorView): string | null {
+  const el = view.dom.closest('[data-instance-id]') as HTMLElement | null;
+  return el?.getAttribute('data-instance-id') ?? null;
+}
 
 function getDataFromNode(n: PMNode): MathVisualData {
   return {
@@ -39,6 +48,7 @@ function getDataFromNode(n: PMNode): MathVisualData {
     normalLines: n.attrs.normalLines || [],
     integralRegions: n.attrs.integralRegions || [],
     featurePoints: n.attrs.featurePoints || [],
+    toolMode: n.attrs.toolMode || 'move',
   };
 }
 
@@ -76,7 +86,16 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
     if (newData.normalLines !== undefined) tr = tr.setNodeAttribute(pos, 'normalLines', newData.normalLines);
     if (newData.integralRegions !== undefined) tr = tr.setNodeAttribute(pos, 'integralRegions', newData.integralRegions);
     if (newData.featurePoints !== undefined) tr = tr.setNodeAttribute(pos, 'featurePoints', newData.featurePoints);
+    if (newData.toolMode !== undefined) tr = tr.setNodeAttribute(pos, 'toolMode', newData.toolMode);
     view.dispatch(tr);
+  }
+
+  function onFullscreen(): void {
+    const instanceId = findInstanceId(view);
+    const pos = typeof getPos === 'function' ? getPos() : undefined;
+    if (!instanceId || pos == null) return;
+    setMathVisualFullscreenContext({ instanceId, nodePos: pos });
+    fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
   }
 
   function render(): void {
@@ -84,6 +103,7 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
     const element = React.createElement(MathVisualComponent, {
       data,
       onChange: updateAttrs,
+      onFullscreen,
     });
     if (!root) {
       root = createRoot(renderWrap);
