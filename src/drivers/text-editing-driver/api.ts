@@ -1116,6 +1116,55 @@ export const textEditingDriverApi = {
   },
 
   /**
+   * 在光标当前 block 位置插入空 mathVisual(V1 → V2 迁移 Phase 1B)
+   *
+   * 行为参照 insertHtmlBlockAtSelection:
+   * - 空段落 → 替换;非空段落 → 之后插入
+   * - 插入的 mathVisual 走 spec.ts 内 attrs default(默认 `f(x) = x^2` 一条曲线)
+   * - caption(figcaption)用空 paragraph 填(满足 content:'block')
+   * - 光标进 caption 内(insertPos + 2 = mathVisual 内 paragraph 起点)
+   */
+  insertMathVisualAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const mvType = schema.nodes.mathVisual;
+    const paraType = schema.nodes.paragraph;
+    if (!mvType || !paraType) return;
+
+    const captionPara = paraType.create();
+    const mvNode = mvType.create({}, captionPara);
+    if (!mvNode) return;
+
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      dispatch(state.tr.insert(state.selection.from, mvNode));
+    } else {
+      const depth = $from.depth;
+      const blockNode = $from.node(depth);
+      const blockStart = $from.before(depth);
+      const blockEnd = $from.after(depth);
+      const isEmptyParagraph =
+        blockNode.type.name === 'paragraph' &&
+        blockNode.content.size === 0 &&
+        !blockNode.attrs.isTitle;
+      let tr = state.tr;
+      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+      if (isEmptyParagraph) {
+        tr = tr.replaceWith(blockStart, blockEnd, mvNode);
+      } else {
+        tr = tr.insert(blockEnd, mvNode);
+      }
+      // 光标进 caption 内(insertPos + 2 = mathVisual 内 paragraph 起点)
+      const sel = TextSelection.create(tr.doc, insertPos + 2);
+      tr = tr.setSelection(sel).scrollIntoView();
+      dispatch(tr);
+    }
+    inst.view.focus();
+  },
+
+  /**
    * 插入 mathInline atom(L5-B3.6)
    *
    * 行为:

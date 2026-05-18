@@ -26,6 +26,10 @@ import {
   createEvalFn,
   extractParameters,
   numericalDerivative,
+  makeParametricFn,
+  makePolarFn,
+  makeVerticalLineX,
+  exprToLatex,
 } from './compute/evaluator';
 import { detectDiscontinuities, buildSegments } from './compute/discontinuity';
 import { detectPlotType } from './compute/plot-detect';
@@ -62,6 +66,7 @@ export type {
 // 内部可直 import 兜底;view 侧仍走 requireCapabilityApi)
 export { MathHost };
 export { createEvalFn, extractParameters, numericalDerivative };
+export { makeParametricFn, makePolarFn, makeVerticalLineX, exprToLatex };
 export { detectDiscontinuities, buildSegments };
 export { detectPlotType };
 export { latexToMathjs, latexToFunction, latexToFunctionWithEndpoints };
@@ -83,5 +88,9 @@ capabilityRegistry.register({
     latexToMathjs,
     latexToFunction,
     latexToFunctionWithEndpoints,
+    makeParametricFn,
+    makePolarFn,
+    makeVerticalLineX,
+    exprToLatex,
   } satisfies MathRenderingApi,
 });

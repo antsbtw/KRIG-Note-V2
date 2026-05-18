@@ -41,6 +41,7 @@ import { audioBlockSpec } from './blocks/audio-block/spec';
 import { videoBlockSpec } from './blocks/video-block/spec';
 import { tweetBlockSpec } from './blocks/tweet-block/spec';
 import { htmlBlockSpec } from './blocks/html-block/spec';
+import { mathVisualSpec } from './blocks/math-visual/spec';
 import {
   tableSpec,
   tableRowSpec,
@@ -92,6 +93,7 @@ const ENABLED_BLOCKS: BlockSpec[] = [
   videoBlockSpec,
   tweetBlockSpec,
   htmlBlockSpec,
+  mathVisualSpec,
 ];
 
 export function Host(props: TextEditingHostProps) {

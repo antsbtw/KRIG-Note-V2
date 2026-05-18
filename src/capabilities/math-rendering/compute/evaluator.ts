@@ -109,3 +109,92 @@ export function numericalDerivative(fn: (x: number) => number): (x: number) => n
   const h = 1e-6;
   return (x: number) => (fn(x + h) - fn(x - h)) / (2 * h);
 }
+
+// ─── 工厂 API:parametric / polar / vertical-line ────────────
+
+/**
+ * 参数方程 "x(t);y(t)" → (t) => [x, y] | null。
+ * 内部按分号拆两段,分别 mathjs 编译;失败返 null(整个曲线不渲染)。
+ *
+ * 接 V1 MathVisualComponent.tsx:298-318 的 parametric 分支逻辑,把 mathjs 调用
+ * 收敛到 capability 内,driver 不直 import mathjs。
+ */
+export function makeParametricFn(
+  expression: string,
+  params: MathParameter[],
+): ((t: number) => [number, number]) | null {
+  const parts = expression.split(';').map((s) => s.trim());
+  if (parts.length !== 2) return null;
+  try {
+    const compiledX = math.compile(parts[0]);
+    const compiledY = math.compile(parts[1]);
+    return (t: number) => {
+      try {
+        const scope: Record<string, number> = { t };
+        for (const p of params) scope[p.name] = p.value;
+        return [compiledX.evaluate(scope) as number, compiledY.evaluate(scope) as number];
+      } catch {
+        return [NaN, NaN];
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 极坐标 r(theta) → (theta) => r。
+ * driver 拿到 r(theta) 后,可直接构造 `{ kind: 'polar', r, thetaDomain }`
+ * (MathHost 内部转 [r·cos θ, r·sin θ]),也可调 makeParametricFn 自己拼。
+ *
+ * 接 V1 MathVisualComponent.tsx:321-337 的 polar 分支(分号语法独立 polar 不用)。
+ */
+export function makePolarFn(
+  expression: string,
+  params: MathParameter[],
+): ((theta: number) => number) | null {
+  try {
+    const compiled = math.compile(expression);
+    return (theta: number) => {
+      try {
+        // V1 同时支持 theta 和 t(用于"以 t 命名极坐标变量")
+        const scope: Record<string, number> = { theta, t: theta };
+        for (const p of params) scope[p.name] = p.value;
+        const r = compiled.evaluate(scope) as number;
+        return typeof r === 'number' && isFinite(r) ? r : NaN;
+      } catch {
+        return NaN;
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * "x = <常数>" 表达式(由 detectPlotType 归一化后已经是纯数字字符串)→ 数值。
+ * 失败(非有限数)返 null,driver 应当跳过该曲线。
+ *
+ * driver 拿到值 c 后构造 `{ kind: 'verticalLine', x: c }`。
+ */
+export function makeVerticalLineX(expression: string): number | null {
+  const v = Number(expression);
+  return isFinite(v) ? v : null;
+}
+
+/**
+ * mathjs 表达式 → LaTeX 字符串(供 KaTeX 渲染用)。失败返 null。
+ *
+ * V1 KaTexHelpers.tsx 内 exprToLatex 同等效用,driver 不再 import mathjs。
+ * Fallback 策略:mathjs 不识别 + 表达式含 \\/^/_ 时按 LaTeX 字面直返(用户可能粘 LaTeX)。
+ */
+export function exprToLatex(expression: string): string | null {
+  if (!expression.trim()) return null;
+  try {
+    return math.parse(expression).toTex();
+  } catch { /* not mathjs syntax */ }
+  if (expression.includes('\\') || expression.includes('^') || expression.includes('_')) {
+    return expression;
+  }
+  return null;
+}

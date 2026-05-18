@@ -237,4 +237,34 @@ export interface MathRenderingApi {
   latexToFunction(latex: string): ((x: number) => number) | null;
   /** LaTeX → 求值函数 + 端点信息(仅分段函数返非 null) */
   latexToFunctionWithEndpoints(latex: string): PiecewiseResult | null;
+
+  // ── 工厂 API:非 y-of-x 类型的曲线构造(driver 不直 import mathjs) ──
+  /**
+   * 参数方程 "x(t);y(t)" → (t) => [x, y] | null。
+   * expression 必须含分号分隔的两段(由 detectPlotType 判定);失败返 null。
+   */
+  makeParametricFn(
+    expression: string,
+    params: MathParameter[],
+  ): ((t: number) => [number, number]) | null;
+  /**
+   * 极坐标 r(theta) → (theta) => [r·cos θ, r·sin θ] | null。
+   * MathHost.kind='polar' 内部已经做了坐标转换,本 API 返回的是直接给 Curve.xy 的形式;
+   * driver 调它后塞进 `{ kind: 'parametric', xy: ..., tDomain: paramDomain }`。
+   * (capability 也支持直接传 `{ kind: 'polar', r, thetaDomain }`,二选一)
+   */
+  makePolarFn(
+    expression: string,
+    params: MathParameter[],
+  ): ((theta: number) => number) | null;
+  /**
+   * "x = <常数>" → 数值常量 c | null。driver 拿到 c 后构造 `{ kind: 'verticalLine', x: c }`。
+   * 实际就是 Number(expression) 包装 + isFinite 校验,纯粹避免 driver 写散落判断。
+   */
+  makeVerticalLineX(expression: string): number | null;
+  /**
+   * mathjs 表达式 → LaTeX 字符串(供 KaTeX 渲染),失败返 null。
+   * driver 拿 latex 字符串后传给 katex.render(supplied externally)。
+   */
+  exprToLatex(expression: string): string | null;
 }
