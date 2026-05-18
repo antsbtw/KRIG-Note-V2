@@ -1,0 +1,86 @@
+/**
+ * AI View 样式
+ *
+ * 跟 web-view 同 flex column 布局:toolbar 固定高 + webview 占满剩余。
+ */
+
+.krig-ai-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--krig-bg, #fff);
+}
+
+.krig-ai-view__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--krig-text-secondary, #888);
+  font-size: 14px;
+}
+
+/* ── toolbar(参考 web-view toolbar)── */
+
+.krig-ai-view__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--krig-border, #e0e0e0);
+  background: var(--krig-toolbar-bg, #fafafa);
+  min-height: 36px;
+}
+
+.krig-ai-view__service-select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--krig-border, #d0d0d0);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.krig-ai-view__btn {
+  height: 28px;
+  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--krig-border, #d0d0d0);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--krig-text, #333);
+  flex: 0 0 auto;
+}
+
+.krig-ai-view__btn:hover {
+  background: var(--krig-hover-bg, #f0f0f0);
+}
+
+.krig-ai-view__url {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--krig-text-secondary, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  padding: 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ── webview 占满剩余 ── */
+
+.krig-ai-view__webview {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  display: flex;
+}

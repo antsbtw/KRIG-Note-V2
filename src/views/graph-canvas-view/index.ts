@@ -26,7 +26,9 @@
  * - G3:`canvas-rendering`        Three.js Host(单点屏障核心)
  * - G4:`canvas-text-node`        文字节点 PM 桥接
  *
- * **navSideTab.order=4**:Note=1 / eBook=2 / Web=3 / **Graph=4**(决策 G1-2)
+ * **navSideTab.order=5**:Note=1 / eBook=2 / Web=3 / AI=4 / **Graph=5**
+ * (view-definition.ts 预设 "Note<eBook<Web<AI<Graph" — feature/ai-view 时把
+ *  原 G1-2 决策的 Graph=4 顺延到 5,给 AI tab 让位)
  */
 
 import { registerView } from '@slot/view-type-registry/register-view';
@@ -52,7 +54,7 @@ registerView({
     'canvas-text-node',    // ✅ L5-G4.5:文字节点 PM 桥接(text-editing.Host 嵌入,路径 A)
   ],
   component: GraphCanvasView,
-  navSideTab: { label: 'Graph', icon: '🎨', order: 4 },
+  navSideTab: { label: 'Graph', icon: '🎨', order: 5 },
 });
 
 registerGraphCanvasCommands();

@@ -46,11 +46,13 @@ import '@capabilities/math-rendering';      // math-visual Phase 1A 新增(Mafs 
 import '@capabilities/note';                // L7-sub2 新增(note CRUD via IPC bridge,decision 012)
 import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IPC bridge,decision 012)
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)
+import '@capabilities/ai-conversation';     // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
 import '@views/ebook';  // L5-C1:EBookView self-register
+import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
 import './app.css';
