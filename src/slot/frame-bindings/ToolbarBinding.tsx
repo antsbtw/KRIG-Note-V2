@@ -70,6 +70,10 @@ function renderItem(item: ToolbarItem, ctx: ToolbarItemContext) {
   if (item.kind === 'dropdown') {
     return <ToolbarDropdown key={item.id} item={item} ctx={ctx} />;
   }
+  if (item.kind === 'custom-render' && item.Component) {
+    const C = item.Component;
+    return <C key={item.id} ctx={ctx} />;
+  }
   // 默认 button(含 'popup-trigger' 分支)
   const active = item.activeWhen?.(ctx) ?? false;
   const isPopupTrigger = item.kind === 'popup-trigger';
@@ -159,12 +163,18 @@ function renderDropdownOption(
   closeMenu: () => void,
 ) {
   const active = opt.activeWhen?.(ctx) ?? false;
+  const disabled = opt.disabled ?? false;
   return (
     <div
       key={opt.id}
-      className={`krig-toolbar-dropdown-option${active ? ' active' : ''}`}
+      className={
+        'krig-toolbar-dropdown-option' +
+        (active ? ' active' : '') +
+        (disabled ? ' disabled' : '')
+      }
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => {
+        if (disabled) return;
         commandRegistry.execute(opt.command, opt.commandArg);
         closeMenu();
       }}
