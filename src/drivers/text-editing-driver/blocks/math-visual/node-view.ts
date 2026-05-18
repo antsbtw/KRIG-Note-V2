@@ -20,8 +20,10 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { createRoot, type Root } from 'react-dom/client';
 import React from 'react';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
+import { helpPanelController } from '@slot/triggers/help-panel-controller';
 import { MathVisualComponent } from './MathVisualComponent';
 import { setMathVisualFullscreenContext } from './fullscreen/menu-context';
+import { setMathVisualHelpContext, MATH_VISUAL_HELP_PANEL_ID } from './help-panel';
 import type { MathVisualData } from './types';
 import { DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from './types';
 
@@ -98,12 +100,18 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
     fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
   }
 
+  function onShowHelp(insertFn: (expr: string) => void): void {
+    setMathVisualHelpContext({ insertFn });
+    helpPanelController.show(MATH_VISUAL_HELP_PANEL_ID);
+  }
+
   function render(): void {
     const data = getDataFromNode(node);
     const element = React.createElement(MathVisualComponent, {
       data,
       onChange: updateAttrs,
       onFullscreen,
+      onShowHelp,
     });
     if (!root) {
       root = createRoot(renderWrap);

@@ -34,6 +34,8 @@ interface MathVisualComponentProps {
   onChange: (data: MathVisualData) => void;
   /** 全屏按钮点击(Phase 2);由 NodeView 注入(setContext + controller.show) */
   onFullscreen?: () => void;
+  /** Help-panel ? 按钮点击(Phase 3);NodeView 注入,接 insertFn 把表达式注入到 active 函数行 */
+  onShowHelp?: (insertFn: (expr: string) => void) => void;
 }
 
 // ─── 主组件 ─────────────────────────────────────────────
@@ -42,6 +44,7 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
   data,
   onChange,
   onFullscreen,
+  onShowHelp,
 }) => {
   const math = requireCapabilityApi<MathRenderingApi>('math-rendering');
   const { Host: MathHost } = math;
@@ -98,6 +101,30 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
     const newFn = createFunctionEntry(fns.length);
     onChange({ ...data, functions: [...fns, newFn] });
   }, [data, fns, onChange]);
+
+  // Phase 3:help-panel Insert 回调 — 接 expr,自动 detectPlotType + extractParameters
+  // 创建新函数 + 同步参数(对齐 V1 insertFromHelp 行为)
+  const insertFromHelp = useCallback((expr: string) => {
+    const newFn = createFunctionEntry(fns.length, expr);
+    const detected = math.detectPlotType(expr);
+    newFn.plotType = detected.plotType;
+    newFn.expression = detected.expression;
+    if (detected.plotType === 'parametric') {
+      newFn.label = newFn.label.replace('(x)', '(t)');
+    }
+    const allFns = [...fns, newFn];
+    const allExprs = allFns.filter((f) => f.plotType !== 'vertical-line').map((f) => f.expression);
+    const allVarNames = new Set<string>();
+    for (const e of allExprs) {
+      for (const v of math.extractParameters(e)) allVarNames.add(v);
+    }
+    const newParams: Parameter[] = [];
+    for (const name of allVarNames) {
+      const existing = parameters.find((p) => p.name === name);
+      newParams.push(existing || { name, value: 1, min: -5, max: 5, step: 0.1 });
+    }
+    onChange({ ...data, functions: allFns, parameters: newParams });
+  }, [data, fns, parameters, onChange, math]);
 
   const removeFunction = useCallback(
     (id: string) => {
@@ -342,7 +369,7 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
         </div>
       )}
 
-      {/* Mafs 画布 + 浮动工具栏 */}
+      {/* Mafs 画布 */}
       <div className="mv-canvas" ref={canvasRef} style={{ position: 'relative' }}>
         <MathHost
           viewBox={{ x: viewX, y: viewY }}
@@ -355,45 +382,51 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
           pan={canvas.pan}
           preserveAspectRatio={false}
         />
-
-        {/* 浮动工具栏 */}
-        <div className="mv-floating-toolbar">
-          <div className="mv-range-group">
-            <span className="mv-range-label">x</span>
-            <RangeInput value={domain[0]} onCommit={(v) => updateDomain(0, v)} />
-            <span className="mv-range-sep">~</span>
-            <RangeInput value={domain[1]} onCommit={(v) => updateDomain(1, v)} />
-          </div>
-          <div className="mv-range-group">
-            <span className="mv-range-label">y</span>
-            <RangeInput value={range[0]} onCommit={(v) => updateRange(0, v)} />
-            <span className="mv-range-sep">~</span>
-            <RangeInput value={range[1]} onCommit={(v) => updateRange(1, v)} />
-          </div>
-          <button
-            className="mv-fn-btn"
-            onClick={() =>
-              onChange({ ...data, domain: [-5, 5], range: [-5, 5], canvas: { ...canvas, height: 350 } })
-            }
-            title="重置视图"
-          >
-            重置
-          </button>
-          <div style={{ flex: 1 }} />
-          {/* Phase 3 接 help-panel;Phase 1B 占位 disabled */}
-          <button className="mv-fn-btn" disabled title="函数参考(Phase 3 启用)">?</button>
-          <button
-            className={`mv-fn-btn ${settingsOpen ? 'mv-fn-btn--active' : ''}`}
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            title="显示设置"
-          >
-            设置
-          </button>
-        </div>
-
         {settingsOpen && (
           <SettingsPanel canvas={canvas} axis={axis} setCanvas={setCanvas} setAxis={setAxis} />
         )}
+      </div>
+
+      {/* 工具栏 — 画布下方独立一行,hover 时显示 */}
+      <div className="mv-floating-toolbar">
+        <div className="mv-range-group">
+          <span className="mv-range-label">x</span>
+          <RangeInput value={domain[0]} onCommit={(v) => updateDomain(0, v)} />
+          <span className="mv-range-sep">~</span>
+          <RangeInput value={domain[1]} onCommit={(v) => updateDomain(1, v)} />
+        </div>
+        <div className="mv-range-group">
+          <span className="mv-range-label">y</span>
+          <RangeInput value={range[0]} onCommit={(v) => updateRange(0, v)} />
+          <span className="mv-range-sep">~</span>
+          <RangeInput value={range[1]} onCommit={(v) => updateRange(1, v)} />
+        </div>
+        <button
+          className="mv-fn-btn"
+          onClick={() =>
+            onChange({ ...data, domain: [-5, 5], range: [-5, 5], canvas: { ...canvas, height: 350 } })
+          }
+          title="重置视图"
+        >
+          重置
+        </button>
+        <div style={{ flex: 1 }} />
+        {onShowHelp && (
+          <button
+            className="mv-fn-btn"
+            onClick={() => onShowHelp(insertFromHelp)}
+            title="函数参考"
+          >
+            ?
+          </button>
+        )}
+        <button
+          className={`mv-fn-btn ${settingsOpen ? 'mv-fn-btn--active' : ''}`}
+          onClick={() => setSettingsOpen(!settingsOpen)}
+          title="显示设置"
+        >
+          设置
+        </button>
       </div>
     </div>
   );

@@ -34,6 +34,7 @@ import { atomsToProseMirror } from './converters/atoms-to-pm';
 import { sanitizeAtoms } from './converters/sanitize-atoms';
 import { registerTextEditingPopups } from './ui/popups';
 import { registerTextEditingFullscreenOverlays } from './ui/fullscreen-overlays';
+import { registerTextEditingHelpPanels } from './ui/help-panels';
 import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integration';
 import { registerCalloutEmojiIntegration } from './ui/emoji-picker/integration';
 import { registerCalloutIconRenderer } from './ui/emoji-picker/callout-icon-renderer';
@@ -81,6 +82,7 @@ capabilityRegistry.register({
 // 注:driver activeHandler 是模块级单例,view 各自注册会互相覆盖,故归 capability 自管。
 registerTextEditingPopups();
 registerTextEditingFullscreenOverlays();  // L2 fullscreen-overlay:mermaid 全屏(Phase 2)
+registerTextEditingHelpPanels();          // help-panel:math-visual Function Reference(Phase 3)
 registerNoteLinkSearchIntegration();
 registerCalloutEmojiIntegration();
 registerCalloutIconRenderer();
