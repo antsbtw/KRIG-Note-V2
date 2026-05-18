@@ -753,3 +753,44 @@
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* ── NoteView toolbar 视觉补丁(对齐 V1 风格) ── */
+
+/* 导航箭头 ‹ › — 字号大、无边距 */
+.krig-toolbar-button[title^='后退'],
+.krig-toolbar-button[title^='前进'] {
+  font-size: 18px;
+  min-width: 24px;
+  padding: 0 4px;
+  color: #ddd;
+}
+
+/* 已保存 / +新建 / Open / 🔄 — 描边按钮 */
+.krig-toolbar-button[title='已保存(自动)'],
+.krig-toolbar-button[title='新建笔记'],
+.krig-toolbar-button[title='打开笔记'],
+.krig-toolbar-button[title='重置(占位)'] {
+  border-color: #444;
+  padding: 0 10px;
+}
+
+/* 已保存 — 弱化(占位静态状态)*/
+.krig-toolbar-button[title='已保存(自动)'] {
+  opacity: 0.5;
+  cursor: default;
+}
+.krig-toolbar-button[title='已保存(自动)']:hover {
+  background: transparent;
+}
+
+/* × 关闭按钮 — 字号大,hover 红 */
+.krig-toolbar-button[title='关闭此面板'] {
+  font-size: 16px;
+  color: #888;
+  min-width: 22px;
+  padding: 0 6px;
+}
+.krig-toolbar-button[title='关闭此面板']:hover {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
