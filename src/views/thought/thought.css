@@ -1,0 +1,235 @@
+/* ── ThoughtView 主舞台 ── */
+
+.krig-thought-view {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  background: var(--krig-bg, #1e1e1e);
+  color: var(--krig-fg, #e0e0e0);
+}
+
+.krig-thought-view-list {
+  flex: 0 0 280px;
+  border-right: 1px solid var(--krig-border, #333);
+  overflow-y: auto;
+  background: var(--krig-bg-secondary, #232323);
+}
+
+.krig-thought-view-detail {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.krig-thought-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--krig-fg-muted, #888);
+}
+
+.krig-thought-empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.krig-thought-empty-text {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.krig-thought-empty-hint {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* ── ThoughtList(中区列表) ── */
+
+.krig-thought-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.krig-thought-list-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--krig-fg-muted, #888);
+}
+
+.krig-thought-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+
+.krig-thought-list-item:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.krig-thought-list-item.active {
+  background: var(--krig-bg-selected, rgba(74, 158, 255, 0.12));
+  border-left-color: var(--krig-accent, #4a9eff);
+}
+
+.krig-thought-list-item.resolved {
+  opacity: 0.55;
+}
+
+.krig-thought-list-item.resolved .krig-thought-list-title {
+  text-decoration: line-through;
+}
+
+.krig-thought-list-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex: 0 0 auto;
+}
+
+.krig-thought-list-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.krig-thought-list-title {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.krig-thought-list-pin {
+  margin-right: 4px;
+  font-size: 11px;
+}
+
+.krig-thought-list-meta {
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+}
+
+.krig-thought-list-source {
+  flex: 0 0 auto;
+}
+
+.krig-thought-list-time {
+  flex: 0 0 auto;
+}
+
+/* ── ThoughtCard(右区详情) ── */
+
+.krig-thought-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+  height: 100%;
+}
+
+.krig-thought-card.resolved .krig-thought-card-editor {
+  opacity: 0.55;
+}
+
+.krig-thought-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.krig-thought-type-select {
+  background: var(--krig-bg-secondary, #232323);
+  color: var(--krig-fg, #e0e0e0);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.krig-thought-card-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.krig-thought-action {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--krig-fg, #e0e0e0);
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.krig-thought-action:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.krig-thought-action.on {
+  background: var(--krig-bg-selected, rgba(74, 158, 255, 0.18));
+  border-color: var(--krig-accent, #4a9eff);
+}
+
+.krig-thought-action.danger:hover {
+  background: rgba(255, 82, 82, 0.12);
+  border-color: #ff5252;
+}
+
+.krig-thought-card-anchor {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--krig-bg-secondary, #232323);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--krig-fg-muted, #888);
+}
+
+.krig-thought-anchor-source {
+  flex: 0 0 auto;
+}
+
+.krig-thought-anchor-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+.krig-thought-card-editor {
+  flex: 1 1 auto;
+  min-height: 200px;
+  background: var(--krig-bg-secondary, #232323);
+  color: var(--krig-fg, #e0e0e0);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+}
+
+.krig-thought-card-editor:focus {
+  border-color: var(--krig-accent, #4a9eff);
+}
