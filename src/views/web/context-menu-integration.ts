@@ -43,6 +43,8 @@ export function showWebContextMenu(payload: WebContextMenuPayload): void {
     hasLink: false,
     // thought-view:web 内容无 thought anchor 概念,默认 null
     thoughtId: null,
+    // thought-view:web view 不嵌 PM 实例,默认 null
+    pmInstanceId: null,
     x: payload.x,
     y: payload.y,
   });

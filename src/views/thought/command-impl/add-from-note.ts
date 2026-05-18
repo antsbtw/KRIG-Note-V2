@@ -11,6 +11,7 @@
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { ThoughtAnchor, NoteLocator } from '@capabilities/thought/types';
 import { thoughtCap, preCreatePlaceholder } from './shared';
@@ -47,7 +48,12 @@ export async function addThoughtFromNote(): Promise<void> {
   if (!noteId) return;
 
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-  const instanceId = textEditing.instanceRegistry.getFocusedInstanceId();
+  // 优先从 context menu 抓拍的 pmInstanceId(右键场景:focus 已转向菜单,
+  // getFocusedInstanceId 此时返 null);否则用当前 focused(floating toolbar
+  // / keymap 等触发场景)。
+  const instanceId =
+    contextMenuController.getState().context.pmInstanceId ??
+    textEditing.instanceRegistry.getFocusedInstanceId();
   if (!instanceId) return;
 
   const thoughtId = await preCreatePlaceholder('thought');

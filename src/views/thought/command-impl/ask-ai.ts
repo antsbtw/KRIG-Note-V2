@@ -12,6 +12,7 @@
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { ThoughtAnchor } from '@capabilities/thought/types';
 import type { NoteDocEnvelope } from '@shared/ipc/note-folder-types';
@@ -29,7 +30,10 @@ export async function askAiFromNote(): Promise<void> {
   if (!noteId) return;
 
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-  const instanceId = textEditing.instanceRegistry.getFocusedInstanceId();
+  // 优先用 context menu 抓拍(右键场景);否则当前 focused(floating/keymap 场景)
+  const instanceId =
+    contextMenuController.getState().context.pmInstanceId ??
+    textEditing.instanceRegistry.getFocusedInstanceId();
   if (!instanceId) return;
 
   const thoughtId = await preCreatePlaceholder('ai-response', 'chatgpt');

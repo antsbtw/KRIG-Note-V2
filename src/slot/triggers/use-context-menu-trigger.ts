@@ -12,6 +12,8 @@ import { contextMenuController } from './context-menu-controller';
 import { contextMenuRegistry } from '../interaction-registries/context-menu-registry/context-menu-registry';
 import type { ContextInfo } from '../interaction-registries/context-menu-registry/context-menu-types';
 import { selection } from '@capabilities/selection';
+import { getCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 export function useContextMenuTrigger(
   elementRef: RefObject<HTMLElement | null>,
@@ -57,11 +59,19 @@ export function useContextMenuTrigger(
         thoughtEl?.getAttribute('data-thought-block-id') ??
         null;
 
+      // thought-view:抓拍 focused PM 实例(右键事件触发那一刻 PM 还有焦点;
+      // contextMenuController.show 之后 focus 转向菜单,getFocusedInstanceId
+      // 会返 null)。命令 handler 从 controller.context.pmInstanceId 拿。
+      // 诊断路径(getCapabilityApi):text-editing 未注册时退化 null,不破坏其他 view。
+      const textEditing = getCapabilityApi<TextEditingApi>('text-editing');
+      const pmInstanceId = textEditing?.instanceRegistry.getFocusedInstanceId() ?? null;
+
       const context: ContextInfo = {
         hasSelection,
         isEditable,
         hasLink,
         thoughtId,
+        pmInstanceId,
         x: e.clientX,
         y: e.clientY,
       };

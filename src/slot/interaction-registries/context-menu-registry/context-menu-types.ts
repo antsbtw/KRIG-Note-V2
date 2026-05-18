@@ -38,6 +38,11 @@ export interface ContextInfo {
    *  null = 不在 thought anchor 上;非空 = 用作 'has-thought' enabledWhen 判定 +
    *  传给 "删除Thought" 命令 handler。 */
   thoughtId: string | null;
+  /** 右键触发时焦点 PM 实例 id(在 contextmenu 事件触发 / focus 转向菜单之前抓拍)。
+   *  thought-view.add-from-note / ask-ai-from-note 等命令从 context menu 触发时,
+   *  焦点已转向菜单,getFocusedInstanceId() 返 null;命令需从 controller.context
+   *  拿本字段而非实时查 focus。null = 右键时本来就无 PM 实例聚焦。 */
+  pmInstanceId: string | null;
   /** 鼠标位置 */
   x: number;
   y: number;
