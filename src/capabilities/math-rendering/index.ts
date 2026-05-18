@@ -38,6 +38,9 @@ import {
   latexToFunction,
   latexToFunctionWithEndpoints,
 } from './compute/latex-converter';
+import { derivative, secondDerivative } from './compute/derivatives';
+import { integrate } from './compute/integrate';
+import { detectFeaturePoints } from './compute/features';
 
 export type {
   MathRenderingApi,
@@ -60,6 +63,15 @@ export type {
   PiecewiseResult,
   ContSeg,
   PlotType,
+  // Phase 2 overlay 类型
+  OverlaysConfig,
+  OverlayCallbacks,
+  TangentSpec,
+  NormalSpec,
+  IntegralSpec,
+  FeaturePointSpec,
+  AnnotationSpec,
+  RiemannSpec,
 } from './types';
 
 // 模块级 export(对齐 code-editing / canvas-rendering 双导出模式 — driver/slot
@@ -70,6 +82,8 @@ export { makeParametricFn, makePolarFn, makeVerticalLineX, exprToLatex };
 export { detectDiscontinuities, buildSegments };
 export { detectPlotType };
 export { latexToMathjs, latexToFunction, latexToFunctionWithEndpoints };
+// Phase 2:全屏专用计算
+export { derivative, secondDerivative, integrate, detectFeaturePoints };
 
 // ── 自我诊断 ──
 console.info('[math-rendering] alive | sdk: mafs + mathjs + compute-engine');
@@ -92,5 +106,9 @@ capabilityRegistry.register({
     makePolarFn,
     makeVerticalLineX,
     exprToLatex,
+    derivative,
+    secondDerivative,
+    integrate,
+    detectFeaturePoints,
   } satisfies MathRenderingApi,
 });
