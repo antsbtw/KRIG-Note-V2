@@ -83,6 +83,27 @@ DEFINE INDEX IF NOT EXISTS schema_version_unique ON schema_version FIELDS versio
 `;
 
 /**
+ * 1.3.0 schema — edge.attrs / atom.payload 改 FLEXIBLE,让 vocabulary 扩展字段合法。
+ *
+ * 设计文档(docs/RefactorV2/data-model/persistence/surreal-schema.md §3.1 line 203)
+ * 字面写 "vocabulary-specific 扩展字段不约束([key]: any)",但 1.0.0 实施漏了
+ * FLEXIBLE 关键字 → SurrealDB SCHEMAFULL 默认拒绝未声明字段 →
+ * thought capability 写 attrs.source / attrs.locator(user:krig:thoughtOf 边的
+ * vocabulary 扩展)被 InternalError 'no such field' 拒绝。
+ *
+ * 同理 atom.payload.payload 改 FLEXIBLE,让各 domain payload 自由扩展(目前
+ * payload.payload TYPE any 一刀切允许,但子字段类型校验也没用,改 FLEXIBLE 更明确)。
+ *
+ * FLEXIBLE 字面语义(SurrealDB 2.x+):预声明字段仍按规则校验,未声明子字段被
+ * 允许存储,不报 'no such field' 错。这正是 spec.md §3.3 "vocabulary 可声明
+ * 额外 attrs" 字面意图。
+ */
+const SCHEMA_VERSION_1_3_0 = `
+DEFINE FIELD OVERWRITE attrs ON edge FLEXIBLE TYPE object;
+DEFINE FIELD OVERWRITE payload ON atom FLEXIBLE TYPE object ASSERT $value != NONE;
+`;
+
+/**
  * 1.1.0 schema (decision 014 §3.7) — 加 atom.hasBeenReferenced 单向 flag。
  *
  * 用于 decision 013 §3.5.1 单向 flag 模型:
@@ -145,6 +166,26 @@ export async function migration_1_1_0(db: Surreal): Promise<void> {
  * 实施重复;facade 内部 getDB() 懒解析,initSurrealDB() 已先于 runMigrations
  * 完成 (src/storage/index.ts:28-31),调用安全。
  */
+/**
+ * 1.3.0 migration up — edge.attrs / atom.payload 改 FLEXIBLE
+ * (修补 1.0.0 设计文档与 schema 实施分裂)。
+ *
+ * 幂等:DEFINE FIELD OVERWRITE 重复执行无副作用,SurrealDB 字面替换字段定义。
+ * 不影响已有数据(只改 schema 约束,数据形态不变)。
+ */
+export async function migration_1_3_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_3_0);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.3.0',
+      appliedAt = $now,
+      description = 'Make edge.attrs and atom.payload FLEXIBLE (vocabulary extension support)'`,
+    { rid: new RecordId('schema_version', '1.3.0'), now },
+  );
+}
+
 export async function migration_1_2_0(_db: Surreal): Promise<void> {
   const pmAtoms = await surrealStorage.listAtoms({ domain: 'pm' });
 
