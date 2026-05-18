@@ -15,11 +15,34 @@
 
 import { toolbarRegistry } from '@slot/toolbar-registry/toolbar-registry';
 import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
+import { useSyncExternalStore } from 'react';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { NoteOpenPopup } from './note-open-popup/NoteOpenPopup';
+import { useAllNotes } from './use-notes-folders';
+import { getNoteWsState } from './data-model';
 
 const VIEW = 'note-view';
 
 const OPEN_POPUP_ID = 'note-view.popup.open';
+
+/** Toolbar title 组件 — 显示当前 active note 的标题(V1 NoteView.tsx:772 同款)*/
+function NoteToolbarTitle() {
+  const wsId = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => workspaceManager.getActiveId(),
+  );
+  const allNotes = useAllNotes();
+  const activeNoteId = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => {
+      const ws = wsId ? workspaceManager.get(wsId) : undefined;
+      return ws ? getNoteWsState(ws).activeNoteId : null;
+    },
+  );
+  const note = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) : null;
+  const title = note?.title || 'Note';
+  return <span className="krig-toolbar-title">{title}</span>;
+}
 
 export function registerToolbar(): void {
   // 注册 Open popup(全局唯一,本 view 独占)
@@ -31,7 +54,7 @@ export function registerToolbar(): void {
   });
 
   toolbarRegistry.register([
-    // ── 左侧:导航箭头 ──
+    // ── 左侧:导航箭头(V1 透明无边框样式)──
     {
       id: 'note-view.nav-back',
       view: VIEW,
@@ -39,6 +62,7 @@ export function registerToolbar(): void {
       label: '后退 (⌘[)',
       icon: '‹',
       command: 'note-view.go-back',
+      variant: 'plain',
       order: 10,
     },
     {
@@ -48,7 +72,18 @@ export function registerToolbar(): void {
       label: '前进 (⌘])',
       icon: '›',
       command: 'note-view.go-forward',
+      variant: 'plain',
       order: 20,
+    },
+    // ── 笔记标题(V1 NoteView toolbar 同款)──
+    {
+      id: 'note-view.title',
+      view: VIEW,
+      group: 'left',
+      label: '当前笔记标题',
+      kind: 'custom-render',
+      Component: NoteToolbarTitle,
+      order: 30,
     },
 
     // ── 右侧:view 操作 ──
@@ -142,6 +177,7 @@ export function registerToolbar(): void {
       label: '关闭此面板',
       icon: '×',
       command: 'note-view.close-view',
+      variant: 'close',
       order: 60,
     },
   ]);

@@ -1,13 +1,11 @@
-/* Toolbar 视觉(L5-B2 — Q6=A 简陋暗主题)*/
+/* Toolbar 视觉(对齐 V1 NoteView toolbar 字面样式)*/
 
 .krig-toolbar-binding {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  background: #1e1e1e;
-  border-bottom: 1px solid #2a2a2a;
-  height: 36px;
+  flex: 1 1 auto;
+  height: 100%;
   box-sizing: border-box;
   user-select: none;
 }
@@ -15,7 +13,7 @@
 .krig-toolbar-group {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .krig-toolbar-group--left {
@@ -29,30 +27,79 @@
   flex: 0 0 auto;
 }
 
+/* button 基础样式(V1 NoteView.tsx 字面 + APP_CONFIG.layout.toolbarBtnHeight=28)*/
 .krig-toolbar-button {
   background: transparent;
-  border: 1px solid transparent;
-  color: #ccc;
+  color: #e8eaed;
   cursor: pointer;
-  padding: 0 8px;
-  font-size: 13px;
+  padding: 0 10px;
+  font-size: 12px;
   font-family: inherit;
-  border-radius: 3px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  height: 26px;
+  height: 28px;
   outline: none;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
-.krig-toolbar-button:hover {
+/* default variant:带 1px solid #555 边框(V1 saveBtn/newBtn/iconBtn 同款,height 28)*/
+.krig-toolbar-button--default {
+  border: 1px solid #555;
+}
+
+.krig-toolbar-button--default:hover {
   background: rgba(255, 255, 255, 0.06);
+  border-color: #777;
+}
+
+/* plain variant:透明无边框(V1 navBtn ‹ › 同款,24×24 / font 18)*/
+.krig-toolbar-button--plain {
+  border: 1px solid transparent;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  font-size: 18px;
+  color: #e8eaed;
+}
+
+.krig-toolbar-button--plain:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* close variant:透明无边框 + 灰色(V1 closeSlotBtn × 同款,height 28 / font 16 / #888) */
+.krig-toolbar-button--close {
+  border: 1px solid transparent;
+  padding: 0 6px;
+  height: 28px;
+  font-size: 16px;
+  color: #888;
+}
+
+.krig-toolbar-button--close:hover {
+  background: rgba(255, 82, 82, 0.16);
+  color: #ddd;
 }
 
 .krig-toolbar-button.active {
-  background: rgba(74, 144, 226, 0.25);
+  background: #3a5a9e;
+  border-color: #6b8ec6;
   color: #fff;
+}
+
+/* toolbar 笔记标题(V1 NoteView.tsx toolbarTitle 同款:13/500/marginLeft 8)*/
+.krig-toolbar-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-left: 8px;
+  color: #e8eaed;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+  user-select: none;
 }
 
 .krig-toolbar-sep {
@@ -69,14 +116,13 @@
   display: inline-flex;
 }
 
+/* dropdown trigger:与普通 button 同款窄宽,icon + 紧贴 caret(对齐 V1 视觉) */
 .krig-toolbar-dropdown-trigger {
-  min-width: 90px;
-  justify-content: space-between;
-  padding: 0 6px 0 10px;
+  padding: 0 6px;
+  gap: 4px;
 }
 
 .krig-toolbar-dropdown-caret {
-  margin-left: 6px;
   font-size: 9px;
   color: #888;
 }
