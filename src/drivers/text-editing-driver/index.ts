@@ -65,6 +65,12 @@ export {
   type LinkClickHandler,
 } from './plugins/build-link-click-plugin';
 export {
+  setThoughtAnchorHandler,
+  scrollToThoughtAnchor,
+  type ThoughtAnchorHandler,
+  type ThoughtAnchorClickPayload,
+} from './plugins/build-thought-anchor-plugin';
+export {
   noteLinkCommandKey,
   setNoteLinkSearchHandler,
   getNoteLinkActiveView,

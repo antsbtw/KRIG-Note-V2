@@ -276,7 +276,7 @@ async function collectFolderSubtree(
  * 字面约束 (主对话批 A):本函数只扩展 cascade scope,不改 deleteFolder 对外语义
  * (仍是 Path Y "删 folder + 所有 descendants + 所有内含资源")。
  */
-const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas']);
+const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas', 'thought']);
 
 async function collectResourcesInFolders(
   tx: StorageTransaction,

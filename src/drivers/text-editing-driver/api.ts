@@ -16,6 +16,10 @@ import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
 import {
+  scrollToThoughtAnchor as scrollToThoughtAnchorImpl,
+  thoughtAnchorKey,
+} from './plugins/build-thought-anchor-plugin';
+import {
   vocabHighlightPluginKey,
   updateVocabDefs,
 } from './plugins/build-vocab-highlight-plugin';
@@ -919,6 +923,182 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     scrollToBlockAnchor(inst.view, anchor);
+  },
+
+  // ── thought-view Phase 3:横切思考层 anchor 操作 ──
+
+  /**
+   * inline mark anchor:在选区加 thoughtMark(attrs.thoughtId + thoughtType)。
+   * 选区为空时不操作(view 侧应先 checkInlineSelection)。
+   *
+   * 返 pos = selection.from(view 用此存 anchor.locator.pmPos)。
+   */
+  addThoughtMark(
+    instanceId: string,
+    thoughtId: string,
+    thoughtType: string,
+  ): { pos: number; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const markType = state.schema.marks.thought;
+    if (!markType) return null;
+    const { from, to } = state.selection;
+    if (from >= to) return null;
+    const mark = markType.create({ thoughtId, thoughtType });
+    const tr = state.tr.addMark(from, to, mark);
+    inst.view.dispatch(tr);
+    const text = state.doc.textBetween(from, to, ' ').slice(0, 100);
+    return { pos: from, text };
+  },
+
+  /**
+   * block frame anchor:给指定 block(blockPos)设 frameThoughtId attr,
+   * thought-anchor-plugin 自动按 frameThoughtId + resolveThoughtType 画外框。
+   *
+   * 返 pos + 该 block 文本前 100 字(用作 locator.text)。
+   */
+  addThoughtBlockFrame(
+    instanceId: string,
+    blockPos: number,
+    thoughtId: string,
+  ): { pos: number; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const node = state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    const tr = state.tr.setNodeMarkup(blockPos, undefined, {
+      ...node.attrs,
+      frameThoughtId: thoughtId,
+    });
+    inst.view.dispatch(tr);
+    const text = node.textContent.slice(0, 100);
+    return { pos: blockPos, text };
+  },
+
+  /**
+   * node attr anchor:给指定 node(image / future audio / video)设 thoughtId attr。
+   * 仅 image 在本期支持(其它节点 spec 暂无 thoughtId attr)。
+   */
+  addThoughtNodeAttr(
+    instanceId: string,
+    nodePos: number,
+    thoughtId: string,
+  ): { pos: number; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const node = state.doc.nodeAt(nodePos);
+    if (!node) return null;
+    if (node.type.spec.attrs?.thoughtId === undefined) return null;
+    const tr = state.tr.setNodeMarkup(nodePos, undefined, {
+      ...node.attrs,
+      thoughtId,
+    });
+    inst.view.dispatch(tr);
+    // image 用 alt 兜底
+    const text =
+      node.type.name === 'image'
+        ? `[图片] ${(node.attrs.alt as string) || ''}`.trim()
+        : `[${node.type.name}]`;
+    return { pos: nodePos, text };
+  },
+
+  /**
+   * 清除 thought anchor — 三种形态自动识别(走找 mark/frame/node attr,擦掉对应 thoughtId)。
+   * Note ⌘Z 撤销 mark 之外的"主动解除"路径(thought atom 仍在,仅清 anchor)。
+   */
+  removeThoughtAnchor(instanceId: string, thoughtId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state } = inst.view;
+    let tr = state.tr;
+    let changed = false;
+
+    // 1) inline mark
+    const markType = state.schema.marks.thought;
+    if (markType) {
+      state.doc.descendants((node, pos) => {
+        node.marks.forEach((m) => {
+          if (m.type === markType && m.attrs.thoughtId === thoughtId) {
+            tr = tr.removeMark(pos, pos + node.nodeSize, m);
+            changed = true;
+          }
+        });
+      });
+    }
+
+    // 2) block frame + 3) node attr(thoughtId 字段)
+    state.doc.descendants((node, pos) => {
+      const ft = node.attrs.frameThoughtId as string | null | undefined;
+      if (ft === thoughtId) {
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, frameThoughtId: null });
+        changed = true;
+      }
+      const ti = node.attrs.thoughtId as string | null | undefined;
+      if (ti === thoughtId) {
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, thoughtId: null });
+        changed = true;
+      }
+    });
+
+    if (changed) inst.view.dispatch(tr);
+  },
+
+  /**
+   * 改 thought anchor 在 Note PM 内的 type 缓存(mark.attrs.thoughtType /
+   * thought-anchor-plugin decoration data-thought-type)。
+   *
+   * thoughtMark.attrs.thoughtType 是冗余缓存(thought atom payload 才是 SSOT),
+   * 用于 CSS class `krig-thought-mark--{type}` 着色。atom type 变化时 mark attrs
+   * 不会自动同步 → 颜色不变。本 API 扫整 doc 找该 thoughtId 的 mark + frame
+   * + node attr(后两者通过 plugin decoration `resolveThoughtType` callback
+   * 渲染色,不需要改 PM doc,只需触发 plugin re-render → note-bridge 的 thoughtCache
+   * 已先更新)。
+   *
+   * 实际只需更新 inline mark 的 attrs.thoughtType。block frame / image attr
+   * 的颜色由 thought-anchor-plugin decoration 走 resolveThoughtType callback 渲染,
+   * thoughtCache 更新后下一次 doc transaction 会触发 decoration 重算。
+   */
+  updateThoughtMarkType(instanceId: string, thoughtId: string, newType: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state } = inst.view;
+    const markType = state.schema.marks.thought;
+    if (!markType) return;
+    let tr = state.tr;
+    let changed = false;
+    state.doc.descendants((node, pos) => {
+      node.marks.forEach((m) => {
+        if (
+          m.type === markType &&
+          m.attrs.thoughtId === thoughtId &&
+          m.attrs.thoughtType !== newType
+        ) {
+          // PM mark 不支持直接改 attr — 必须 removeMark 旧的 + addMark 新的
+          const end = pos + node.nodeSize;
+          tr = tr.removeMark(pos, end, m);
+          tr = tr.addMark(pos, end, markType.create({ thoughtId, thoughtType: newType }));
+          changed = true;
+        }
+      });
+    });
+    // 即使 inline mark 路径没找到匹配(用户改的是 block frame / image anchor),
+    // 也需要触发 thought-anchor-plugin decoration 重算 — 它读 activeHandler
+    // .resolveThoughtType(刚由 note-bridge 更新 thoughtCache),但只在 docChanged
+    // 或 thoughtAnchorKey meta='refresh' 时重算。这里恒发 meta 让 plugin 重算
+    // block/image 颜色,与 mark 路径效果一致。
+    tr = tr.setMeta(thoughtAnchorKey, 'refresh');
+    inst.view.dispatch(tr);
+    void changed; // mark 路径变化记录(留 hook),目前只需 plugin refresh
+  },
+
+  /** 滚动到 thought anchor 在 PM 内的位置(跨槽通信 → ThoughtView 点卡片 → Note 跳转) */
+  scrollToThoughtAnchor(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    scrollToThoughtAnchorImpl(inst.view, pos);
   },
 
   /**

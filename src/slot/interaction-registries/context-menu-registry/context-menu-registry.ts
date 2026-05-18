@@ -35,6 +35,12 @@ class ContextMenuRegistry {
         if (item.enabledWhen === 'is-editable' && !context.isEditable) return false;
         // L5-B3.15:has-link 条件项(如"移除链接")— 选区无 link mark 时隐藏
         if (item.enabledWhen === 'has-link' && !context.hasLink) return false;
+        // thought-view:has-thought 条件项("删除Thought")— 点击位置无 thought anchor 时隐藏
+        if (item.enabledWhen === 'has-thought' && !context.thoughtId) return false;
+        // "移除格式" 条件项 — 选区无任何 mark 时隐藏
+        if (item.enabledWhen === 'has-marks' && !context.hasMarks) return false;
+        // "删除 Block" 条件项 — 光标态 + 单 block 内文本选区时隐藏
+        if (item.enabledWhen === 'has-block-selection' && !context.hasBlockSelection) return false;
         return true;
       })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

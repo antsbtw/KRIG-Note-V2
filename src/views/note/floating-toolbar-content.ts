@@ -33,5 +33,9 @@ export function registerFloatingToolbar(): void {
     ui.createMathButton(VIEW),
     ui.createLinkButton(VIEW),
     ui.createColorButton(VIEW),
+    // thought-view 💭/🤖 已迁出 floating toolbar 至 NoteView context menu:
+    //   floating toolbar 字面靠选区驱动(use-floating-toolbar-trigger),不弹于
+    //   光标态/块态/多块选中;但 💭/🤖 加 thought 需覆盖块和多块场景,
+    //   所以迁到右键菜单 — 见 src/views/note/context-menu-content.ts
   ]);
 }

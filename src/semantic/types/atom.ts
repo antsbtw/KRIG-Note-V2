@@ -20,6 +20,7 @@ export type AtomPayloadOf<D extends AtomDomain> =
   D extends 'graph-instance' ? GraphInstancePayload :
   D extends 'ebook'          ? EBookPayload :
   D extends 'reading-state'  ? ReadingStatePayload :
+  D extends 'thought'        ? ThoughtPayload :
   unknown;
 
 export interface PmPayload {
@@ -151,6 +152,39 @@ export interface ReadingStatePayload {
   };
   bookmarks: number[];                                   // PDF pageNum 书签
   cfiBookmarks: Array<{ cfi: string; label: string }>;   // EPUB CFI 书签
+}
+
+/**
+ * thought domain — 横切思考层(thought-view-port.md v0.5 §4.3)
+ *
+ * 一个独立 thought atom + 通过 user:krig:thoughtOf 边挂到 source 资源
+ * (note/book/graph/canvas)。anchor 元数据(source/locator)存边 attrs,不存
+ * payload — payload 仅保存"思考内容本身",查询时按 source 走边过滤。
+ *
+ * doc 字段:thought 正文 PM doc(可空对象 — ebook 高亮场景全部信息在 anchor,
+ * doc 留空)。结构与 NoteInfo.doc 的裸 payload 一致(envelope wrap 在 capability 层做)。
+ */
+export interface ThoughtPayload {
+  type:
+    | 'thought'
+    | 'question'
+    | 'important'
+    | 'todo'
+    | 'analysis'
+    | 'ai-response'
+    | 'highlight'
+    | 'underline'
+    | 'rect-frame';
+  resolved: boolean;
+  pinned: boolean;
+  /** 5 色 picker(ebook 用),非 ebook 留空靠 type 默认色 */
+  color?: string;
+  /** AI 服务标识('chatgpt'/'claude'/'gemini'),仅 type='ai-response' */
+  serviceId?: string;
+  /** PDF 框选缩略图 base64,仅 type='rect-frame' 且 source='book' */
+  thumbnail?: string;
+  /** 思考正文(裸 PmPayload,可空对象 — capability 层 wrap/unwrap envelope) */
+  doc: PmPayload;
 }
 
 export type Mark =

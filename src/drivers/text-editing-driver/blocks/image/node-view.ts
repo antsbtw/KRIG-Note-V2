@@ -28,6 +28,11 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
   const dom = document.createElement('div');
   dom.className = 'krig-image-block';
   dom.setAttribute('data-alignment', (node.attrs.alignment as string) || 'center');
+  // thought-view Phase 3:node anchor — thoughtId 非空时 CSS 画外框(色按 thoughtType,
+  // 但 image attr 只存 thoughtId,thoughtType 需在 anchor-plugin 内运行时查 atom 注入
+  // data-thought-type → Phase 3 暂以 thoughtId 存在与否切 outline,色用 css var 兜底)
+  const thoughtId = node.attrs.thoughtId as string | null;
+  if (thoughtId) dom.setAttribute('data-thought-id', thoughtId);
 
   const imgWrapper = document.createElement('div');
   imgWrapper.className = 'krig-image-block__wrapper';
@@ -288,6 +293,10 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
         'data-alignment',
         (updatedNode.attrs.alignment as string) || 'center',
       );
+      // thought-view Phase 3:同步 thoughtId attr → dom data-thought-id
+      const newThoughtId = updatedNode.attrs.thoughtId as string | null;
+      if (newThoughtId) dom.setAttribute('data-thought-id', newThoughtId);
+      else dom.removeAttribute('data-thought-id');
 
       if (newSrc) {
         // 普通图:更新 src / alt / title / width

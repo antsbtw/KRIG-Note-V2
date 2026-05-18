@@ -116,6 +116,18 @@ export const IPC_CHANNELS = {
   NOTE_DELETE: 'note.delete',
   NOTE_LIST_CHANGED: 'note.list-changed',           // main → renderer 推送
 
+  // thought capability(横切思考层 — thought-view-port.md v0.5 §5.3)
+  // 9 channel-names = 8 invoke(对应 §5.3 API #1–#8) + 1 broadcast
+  THOUGHT_CREATE: 'thought.create',
+  THOUGHT_LIST: 'thought.list',
+  THOUGHT_LIST_BY_SOURCE: 'thought.list-by-source',
+  THOUGHT_GET: 'thought.get',
+  THOUGHT_UPDATE: 'thought.update',
+  THOUGHT_DELETE: 'thought.delete',
+  THOUGHT_MOVE_TO_FOLDER: 'thought.move-to-folder',
+  THOUGHT_UPDATE_ANCHOR: 'thought.update-anchor',
+  THOUGHT_LIST_CHANGED: 'thought.list-changed',     // main → renderer 推送
+
   FOLDER_CREATE: 'folder.create',
   FOLDER_LIST: 'folder.list',
   FOLDER_GET: 'folder.get',

@@ -1,0 +1,308 @@
+/**
+ * thought view 样式(V1 形态对齐)
+ *
+ * class 命名沿 V1 src/plugins/thought/thought.css:
+ *   .thought-view + .thought-view__toolbar + .thought-panel + .thought-card
+ */
+
+/* ── ThoughtView 容器 + toolbar ── */
+
+.thought-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--krig-bg, #1e1e1e);
+  color: var(--krig-fg, #e0e0e0);
+  overflow: hidden;
+}
+
+.thought-view__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--krig-border, #333);
+  background: var(--krig-bg-secondary, #232323);
+  font-size: 13px;
+}
+
+.thought-view__toolbar-title {
+  font-weight: 600;
+}
+
+.thought-view__toolbar-count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.08));
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+}
+
+.thought-view__close-btn {
+  background: transparent;
+  border: none;
+  color: var(--krig-fg-muted, #888);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.thought-view__close-btn:hover {
+  background: rgba(255, 82, 82, 0.16);
+  color: #ff5252;
+}
+
+/* ── ThoughtPanel(卡片纵向列表) ── */
+
+.thought-panel {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.thought-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.thought-panel__empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--krig-fg-muted, #888);
+  font-size: 13px;
+}
+
+.thought-panel__empty-hint {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* ── ThoughtCard ── */
+
+.thought-card {
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 6px;
+  background: var(--krig-bg-secondary, #232323);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+/* active:对齐 V1,仅边框加粗;颜色由 ThoughtCard inline style 按 type meta 设置 */
+.thought-card--active {
+  border-width: 2px;
+}
+
+.thought-card--resolved {
+  opacity: 0.55;
+}
+
+.thought-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.thought-card__header:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.thought-card__icon {
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+
+.thought-card__title {
+  flex: 1 1 auto;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thought-card--resolved .thought-card__title {
+  text-decoration: line-through;
+}
+
+.thought-card__service {
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.thought-card__time {
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+  flex: 0 0 auto;
+}
+
+.thought-card__chevron {
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+  flex: 0 0 auto;
+}
+
+/* anchor 引文条(展开后) */
+.thought-card__anchor {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 6px 10px;
+  background: var(--krig-bg, #1e1e1e);
+  border-left: 3px solid var(--krig-accent, #4a9eff);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--krig-fg-muted, #b0b0b0);
+  transition: background 0.1s;
+}
+
+.thought-card__anchor:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.thought-card__anchor-text {
+  flex: 1 1 auto;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.thought-card__anchor-jump {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--krig-accent, #4a9eff);
+}
+
+/* editor 区(展开后) */
+.thought-card__editor {
+  margin: 0 12px 8px;
+}
+
+/* editor host(driver Host 内部把 props.className 与 'krig-pm-host' 拼在同一
+   div 上 — 见 src/drivers/text-editing-driver/Host.tsx:185 字面),所以本 class
+   直接覆盖 .krig-pm-host 的全局默认值。
+   默认 NoteView 用 height:100% + min-height:200px + padding 60px,卡片内嵌
+   会撑出空 doc 200px+ 空白。卡片内 PM host 必须紧凑:不撑满父容器高度,
+   按内容自然撑开,空 doc 仅 1 行。*/
+.krig-thought-card-editor-host {
+  height: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.krig-thought-card-editor-host .ProseMirror {
+  min-height: 1.5em;
+  padding: 4px 8px 4px 48px;
+}
+
+/* AI pending */
+.thought-card__ai-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 24px 12px;
+  background: var(--krig-bg, #1e1e1e);
+  border: 1px dashed var(--krig-border, #333);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--krig-fg-muted, #888);
+}
+
+.thought-card__ai-spinner {
+  font-size: 28px;
+  animation: krig-ai-spin 1.5s ease-in-out infinite;
+}
+
+@keyframes krig-ai-spin {
+  0%, 100% { transform: rotate(-8deg); }
+  50%      { transform: rotate(8deg); }
+}
+
+/* bottom action bar */
+.thought-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 12px 10px;
+}
+
+.thought-card__type-switcher {
+  position: relative;
+  margin-right: auto;
+}
+
+/* type menu:fixed 定位由 React 通过 useCollisionPosition 计算(left/top inline style)
+   配合 viewport 边界 flip;position/left/top 不在 CSS 写,避免与 React inline 冲突。*/
+.thought-card__type-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px 0;
+  background: var(--krig-bg-secondary, #232323);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.thought-card__type-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: var(--krig-fg, #e0e0e0);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thought-card__type-option:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.thought-card__type-option--active {
+  background: var(--krig-bg-selected, rgba(74, 158, 255, 0.18));
+}
+
+.thought-card__action-btn {
+  background: var(--krig-bg, #1e1e1e);
+  color: var(--krig-fg, #e0e0e0);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.thought-card__action-btn:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.thought-card__action-btn--resolved {
+  color: var(--krig-fg-muted, #888);
+}
+
+.thought-card__action-btn--danger:hover {
+  border-color: #ff5252;
+  background: rgba(255, 82, 82, 0.12);
+}

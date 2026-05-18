@@ -24,6 +24,7 @@ import { buildListKeymap } from './plugins/build-list-keymap';
 import { buildCodeBlockKeymap } from './plugins/build-code-block-keymap';
 import { buildHardBreakKeymap } from './plugins/build-hard-break-keymap';
 import { buildLinkClickPlugin } from './plugins/build-link-click-plugin';
+import { buildThoughtAnchorPlugin } from './plugins/build-thought-anchor-plugin';
 import { buildTitleGuardPlugin } from './plugins/build-title-guard-plugin';
 import { buildNoteLinkCommandPlugin } from './plugins/build-note-link-command-plugin';
 import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
@@ -109,6 +110,7 @@ export function buildEditorView(
     buildCodeBlockKeymap(schema),
     buildHardBreakKeymap(schema),
     buildLinkClickPlugin(),
+    buildThoughtAnchorPlugin(),
     ...(enableNoteLinkCommand ? [buildNoteLinkCommandPlugin()] : []),
     ...(enablePasteMedia ? [buildPasteMediaPlugin()] : []),
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),

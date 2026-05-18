@@ -3872,3 +3872,56 @@
 .mv-help__action-btn:hover {
   background: rgba(138, 180, 248, 0.25);
 }
+
+/* ── thought-view Phase 3:横切思考层 anchor 渲染 ── */
+
+/* inline mark — 9 种 type color(色对齐 THOUGHT_TYPE_META) */
+.krig-thought-mark {
+  background: rgba(74, 158, 255, 0.08);
+  border-bottom: 2px dotted var(--krig-thought-color, #4a9eff);
+  cursor: pointer;
+  padding: 0 1px;
+  transition: background 0.1s;
+}
+.krig-thought-mark:hover { background: rgba(74, 158, 255, 0.18); }
+.krig-thought-mark--thought      { --krig-thought-color: #4a9eff; }
+.krig-thought-mark--question     { --krig-thought-color: #ff5252; }
+.krig-thought-mark--important    { --krig-thought-color: #ffab40; }
+.krig-thought-mark--todo         { --krig-thought-color: #4caf50; }
+.krig-thought-mark--analysis     { --krig-thought-color: #ab47bc; }
+.krig-thought-mark--ai-response  { --krig-thought-color: #6366f1; }
+.krig-thought-mark--highlight    { --krig-thought-color: #ffd43b; background: rgba(255, 212, 59, 0.18); }
+.krig-thought-mark--underline    { --krig-thought-color: #74c0fc; }
+.krig-thought-mark--rect-frame   { --krig-thought-color: #b197fc; }
+
+/* block frame decoration(frameThoughtId 非空时画外框) */
+.krig-thought-block-frame {
+  position: relative;
+  outline: 1.5px solid var(--krig-thought-block-color, #4a9eff);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.krig-thought-block-frame[data-thought-type="question"]    { --krig-thought-block-color: #ff5252; }
+.krig-thought-block-frame[data-thought-type="important"]   { --krig-thought-block-color: #ffab40; }
+.krig-thought-block-frame[data-thought-type="todo"]        { --krig-thought-block-color: #4caf50; }
+.krig-thought-block-frame[data-thought-type="analysis"]    { --krig-thought-block-color: #ab47bc; }
+.krig-thought-block-frame[data-thought-type="ai-response"] { --krig-thought-block-color: #6366f1; }
+.krig-thought-block-frame[data-thought-type="highlight"]   { --krig-thought-block-color: #ffd43b; }
+.krig-thought-block-frame[data-thought-type="underline"]   { --krig-thought-block-color: #74c0fc; }
+.krig-thought-block-frame[data-thought-type="rect-frame"]  { --krig-thought-block-color: #b197fc; }
+
+/* image node anchor — data-thought-id 非空时画外框 */
+.krig-image-block[data-thought-id] {
+  outline: 1.5px solid #4a9eff;
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* scrollToThoughtAnchor flash(2s 闪光) */
+.krig-thought-anchor-flash {
+  animation: krig-thought-anchor-flash 1.5s ease-out;
+}
+@keyframes krig-thought-anchor-flash {
+  0%   { background: rgba(74, 158, 255, 0.30); }
+  100% { background: transparent; }
+}

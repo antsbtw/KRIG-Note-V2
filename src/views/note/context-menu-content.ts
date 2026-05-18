@@ -42,5 +42,34 @@ export function registerContextMenu(): void {
     lr.createDictionaryLookupItem(VIEW),     // 📖 查词(S3 走 learning 工厂)
     lr.createTranslateItem(VIEW),            // 🌐 翻译(S3 走 learning 工厂)
     te.createDeleteBlockItem(VIEW),          // 删除 Block
+    // thought-view:💭/🤖 从 floating toolbar 迁来(覆盖块/多块场景):
+    //   - 💭 加思考:always 可见(命令内部三态识别选区/光标/image/多块全兼容)
+    //   - 🤖 问 AI:always 可见
+    //   - 💭 删除Thought:仅在 has-thought 可见(点击位置含 thought anchor)
+    {
+      id: 'note-view.add-thought-from-note',
+      label: '💭 加思考',
+      command: 'thought-view.add-from-note',
+      view: VIEW,
+      group: 'thought',
+      order: 190,
+    },
+    {
+      id: 'note-view.ask-ai-from-note',
+      label: '🤖 问 AI',
+      command: 'thought-view.ask-ai-from-note',
+      view: VIEW,
+      group: 'thought',
+      order: 191,
+    },
+    {
+      id: 'note-view.delete-thought-at-cursor',
+      label: '💭 删除 Thought',
+      command: 'thought-view.delete-thought-at-cursor',
+      enabledWhen: 'has-thought',
+      view: VIEW,
+      group: 'thought',
+      order: 200,
+    },
   ]);
 }

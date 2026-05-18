@@ -9,9 +9,12 @@
 
 import { useEffect, RefObject } from 'react';
 import { contextMenuController } from './context-menu-controller';
+import { floatingToolbarController } from './floating-toolbar-controller';
 import { contextMenuRegistry } from '../interaction-registries/context-menu-registry/context-menu-registry';
 import type { ContextInfo } from '../interaction-registries/context-menu-registry/context-menu-types';
 import { selection } from '@capabilities/selection';
+import { getCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 
 export function useContextMenuTrigger(
   elementRef: RefObject<HTMLElement | null>,
@@ -47,10 +50,37 @@ export function useContextMenuTrigger(
       const inLinkSel = !!selPayload?.activeMarks?.includes('link');
       const hasLink = inLinkDom || inLinkSel;
 
+      // "移除格式" 用 — 选区上覆盖至少一个 mark(光标态/无选区/空 mark 集都 false)
+      const hasMarks = !!selPayload?.activeMarks && selPayload.activeMarks.length > 0;
+      // "删除 Block" 用 — block/multi-block 选区(NodeSelection 或跨多 block 文本选区)
+      const hasBlockSelection =
+        selPayload?.kind === 'block' || selPayload?.kind === 'multi-block';
+
+      // thought-view:点击位置 thought anchor 三态 DOM 检测
+      //   - inline mark    → <span data-thought-id="...">
+      //   - image attr     → <div data-thought-id="..." class="krig-image-block">
+      //   - block frame    → 节点上挂 data-thought-block-id="..." (decoration)
+      const thoughtEl = target?.closest('[data-thought-id], [data-thought-block-id]');
+      const thoughtId =
+        thoughtEl?.getAttribute('data-thought-id') ??
+        thoughtEl?.getAttribute('data-thought-block-id') ??
+        null;
+
+      // thought-view:抓拍 focused PM 实例(右键事件触发那一刻 PM 还有焦点;
+      // contextMenuController.show 之后 focus 转向菜单,getFocusedInstanceId
+      // 会返 null)。命令 handler 从 controller.context.pmInstanceId 拿。
+      // 诊断路径(getCapabilityApi):text-editing 未注册时退化 null,不破坏其他 view。
+      const textEditing = getCapabilityApi<TextEditingApi>('text-editing');
+      const pmInstanceId = textEditing?.instanceRegistry.getFocusedInstanceId() ?? null;
+
       const context: ContextInfo = {
         hasSelection,
         isEditable,
         hasLink,
+        hasMarks,
+        hasBlockSelection,
+        thoughtId,
+        pmInstanceId,
         x: e.clientX,
         y: e.clientY,
       };
@@ -59,6 +89,8 @@ export function useContextMenuTrigger(
       const items = contextMenuRegistry.getItemsForContext(viewId, context);
       if (items.length > 0) {
         e.preventDefault();
+        // 互斥:floating toolbar 跟 context menu 不同时出现(右键既有 cm 项就关浮条)
+        floatingToolbarController.hide();
         contextMenuController.show(e.clientX, e.clientY, viewId, context);
       }
     };
