@@ -20,6 +20,7 @@ import { useRef, useSyncExternalStore } from 'react';
 import { ResizableDivider } from './ResizableDivider';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import { useWorkspaceBus } from '@slot/workspace-bus/use-workspace-bus';
+import { ToolbarFrame } from '../toolbar-frame/ToolbarFrame';
 import type { SlotBinding } from '../../workspace-state/workspace-state';
 import './slot-area.css';
 
@@ -61,7 +62,16 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
       className={`krig-slot-area${hasRight ? ' krig-slot-area--split' : ''}`}
       style={{ gridTemplateColumns: gridColumns }}
     >
-      {/* 所有 view 实例 — 扁平列表,稳定 key,grid-area 决定位置 */}
+      {/* 所有 view 实例 — 扁平列表,稳定 key,grid-area 决定位置
+       *
+       * per-slot toolbar(fix/per-slot-toolbar):view 实例内嵌"顶部 toolbar + 主体"
+       * 两层结构。toolbar 由 ToolbarFrame 按 viewId 渲染(view 没注册 items 时 frame
+       * 自动空渲不占高度)。这样 right slot 装的 view 自己有 toolbar,不被 left
+       * 的 toolbar 越界覆盖(V1 同语义:view 自带 toolbar)。
+       *
+       * 铁律 7(view 实例不重建)仍然成立:slot-view 容器 key 是稳定的 viewId,
+       * right→left 升级时 grid-column 变 toolbar 跟着 viewId 走,不影响 view 内部 state。
+       */}
       {allViews.map((view) => {
         const pos = positionOf(view.id);
         const Comp = view.component;
@@ -75,9 +85,12 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
             key={view.id}
             className="krig-slot-view"
             data-slot={pos}
-            style={{ display: pos === 'hidden' ? 'none' : 'block' }}
+            style={{ display: pos === 'hidden' ? 'none' : 'flex' }}
           >
-            <Comp workspaceId={workspaceId} payload={payload} />
+            <ToolbarFrame viewId={view.id} />
+            <div className="krig-slot-view-content">
+              <Comp workspaceId={workspaceId} payload={payload} />
+            </div>
           </div>
         );
       })}

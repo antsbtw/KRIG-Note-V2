@@ -14,11 +14,16 @@
  * view 实例 — 扁平列表 + grid-column 决定位置。
  * 左右切换 = grid-column 变,React 实例不重建(同一 key 在同一 children 序列)。
  * left=1, divider=2, right=3。
+ *
+ * per-slot toolbar(fix/per-slot-toolbar):slot-view 改 flex column,
+ * 内嵌 ToolbarFrame(顶,可空渲不占高度)+ slot-view-content(主体填充剩余空间)。
  */
 .krig-slot-view {
+  flex-direction: column;
   overflow: hidden;
   border-radius: 4px;
   margin: 4px;
+  min-height: 0;
 }
 
 .krig-slot-view[data-slot='left'] {
@@ -33,6 +38,20 @@
 
 .krig-slot-view[data-slot='hidden'] {
   display: none;
+}
+
+/* slot 内 ToolbarFrame:紧贴 slot 顶部,不再横跨 workspace-main */
+.krig-slot-view > .krig-toolbar-frame {
+  flex: 0 0 auto;
+}
+
+/* slot 内 view 主体:占满 toolbar 之下的所有空间 */
+.krig-slot-view-content {
+  flex: 1 1 auto;
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Slot 框架装饰(占位文字 + 关闭按钮)— 与 view 实例叠加在同一 grid area
