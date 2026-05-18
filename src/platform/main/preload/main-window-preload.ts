@@ -465,4 +465,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pmContentUpdate(id: string, doc: unknown): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_UPDATE, id, doc);
   },
+
+  // ── ai-conversation capability(V1 web-bridge AI 自动化 → V2 抽 capability)──
+  // 4 invoke + 3 broadcast 订阅 = 7 表面
+  aiAsk(serviceId: string, prompt: string, options?: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options });
+  },
+  aiOpenSession(serviceId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, serviceId);
+  },
+  aiServiceList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SERVICE_LIST);
+  },
+  aiSSEStatus(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SSE_STATUS);
+  },
+  onAIResponseStream(callback: (chunk: unknown) => void): () => void {
+    const handler = (_event: unknown, chunk: unknown): void => callback(chunk);
+    ipcRenderer.on(IPC_CHANNELS.AI_RESPONSE_STREAM, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_RESPONSE_STREAM, handler);
+  },
+  onAIResponseReady(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.AI_RESPONSE_READY, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_RESPONSE_READY, handler);
+  },
+  onAIError(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.AI_ERROR, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_ERROR, handler);
+  },
 });

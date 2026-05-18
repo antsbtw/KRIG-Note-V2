@@ -16,6 +16,15 @@ import type {
 } from './note-folder-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
+import type {
+  AIAskOptions,
+  AIAskResult,
+  AIResponseReadyPayload,
+  AIErrorPayload,
+  AIStreamChunk,
+  AISSEStatus,
+} from './ai-types';
+import type { AIServiceId } from '../types/ai-service-types';
 
 declare global {
   interface Window {
@@ -319,6 +328,29 @@ declare global {
       pmContentCreate(doc: PmDocEnvelope): Promise<PmAtomInfo>;
       pmContentGet(id: string): Promise<PmAtomInfo | null>;
       pmContentUpdate(id: string, doc: PmDocEnvelope): Promise<PmAtomInfo>;
+
+      // ── ai-conversation capability (V1 web-bridge AI 自动化 → V2 抽 capability) ──
+      // 4 invoke + 3 broadcast 订阅 = 7 表面
+      /** 给 AI 服务发 prompt 等完整 Markdown 回复;5 分钟无请求后台 webview 自动销毁 */
+      aiAsk(
+        serviceId: AIServiceId,
+        prompt: string,
+        options?: AIAskOptions,
+      ): Promise<AIAskResult>;
+      /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
+      aiOpenSession(
+        serviceId: AIServiceId,
+      ): Promise<{ success: boolean; status?: string; serviceId?: AIServiceId | null; url?: string | null; error?: string }>;
+      /** 取三服务清单(UI 下拉菜单用) */
+      aiServiceList(): Promise<Array<{ id: AIServiceId; name: string; icon: string }>>;
+      /** debug:SSE 拦截状态 */
+      aiSSEStatus(): Promise<AISSEStatus>;
+      /** main → renderer 推送:Claude 流式增量(本期仅 Claude);返 unsubscribe */
+      onAIResponseStream(callback: (chunk: AIStreamChunk) => void): () => void;
+      /** main → renderer 推送:AI 完整回复就绪;返 unsubscribe */
+      onAIResponseReady(callback: (payload: AIResponseReadyPayload) => void): () => void;
+      /** main → renderer 推送:AI 调用失败;返 unsubscribe */
+      onAIError(callback: (payload: AIErrorPayload) => void): () => void;
     };
   }
 }
