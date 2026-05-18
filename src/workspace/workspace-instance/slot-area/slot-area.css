@@ -45,13 +45,24 @@
   flex: 0 0 auto;
 }
 
-/* slot 内 view 主体:占满 toolbar 之下的所有空间 */
+/* slot 内 view 主体:占满 toolbar 之下的所有空间。
+ *
+ * 不能用 display:flex,因为 view 自身(.krig-note-view / .krig-ebook-view)
+ * 用 height:100% + display:flex 撑空间。若本容器用 flex,view 子元素 height
+ * 计算会崩(flex 上下文里 height:100% 行为不同)。
+ *
+ * 用 position 容器 + 0 间距让 view "撑满"父级矩形。
+ */
 .krig-slot-view-content {
   flex: 1 1 auto;
-  overflow: hidden;
+  position: relative;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
+}
+
+.krig-slot-view-content > * {
+  position: absolute;
+  inset: 0;
 }
 
 /* Slot 框架装饰(占位文字 + 关闭按钮)— 与 view 实例叠加在同一 grid area

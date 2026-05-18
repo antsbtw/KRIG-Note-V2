@@ -19,7 +19,6 @@
 import { useRef, useSyncExternalStore } from 'react';
 import { ResizableDivider } from './ResizableDivider';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
-import { useWorkspaceBus } from '@slot/workspace-bus/use-workspace-bus';
 import { ToolbarFrame } from '../toolbar-frame/ToolbarFrame';
 import type { SlotBinding } from '../../workspace-state/workspace-state';
 import './slot-area.css';
@@ -35,9 +34,7 @@ type SlotPosition = 'left' | 'right' | 'hidden';
 
 export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChange }: SlotAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const bus = useWorkspaceBus();
   const hasRight = slotBinding.right !== null;
-  const canCloseLeft = slotBinding.right !== null;
 
   // 订阅 view 注册变化(L5 view 注册时自动触发重渲)
   const allViews = useSyncExternalStore(
@@ -95,17 +92,13 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
         );
       })}
 
-      {/* Left slot 框架(关闭按钮 + 占位文字)— 单独容器,只装"框架装饰",不装 view 实例 */}
+      {/* Left slot 框架(空态占位文字 / view 未注册兜底)
+       *
+       * per-slot toolbar(fix/per-slot-toolbar):删 SlotArea 的关闭按钮 —
+       * V1 同语义,每个 view 自己 toolbar 自带关闭(Note 已有 note-view.close-view;
+       * 其他 view 需要时自己注册)。SlotArea frame 只负责"view 未 mount 的兜底文字"。
+       */}
       <div className="krig-slot-frame krig-slot-frame--left">
-        {slotBinding.left && (
-          <button
-            type="button"
-            className="krig-slot-close"
-            disabled={!canCloseLeft}
-            onClick={() => bus.slot.closeLeft()}
-            title={canCloseLeft ? '关闭左 Slot(右 Slot 升级)' : '至少保留一个 view'}
-          >×</button>
-        )}
         {!slotBinding.left && (
           <div className="krig-slot-empty">Left Slot (空,从 NavSide 选 view)</div>
         )}
@@ -124,15 +117,9 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
         />
       )}
 
-      {/* Right slot 框架 */}
+      {/* Right slot 框架(空态占位文字 / view 未注册兜底) */}
       {hasRight && (
         <div className="krig-slot-frame krig-slot-frame--right">
-          <button
-            type="button"
-            className="krig-slot-close"
-            onClick={() => bus.slot.closeRight()}
-            title="关闭右 Slot"
-          >×</button>
           {slotBinding.right &&
             allViews.find((v) => v.id === slotBinding.right)?.component === undefined && (
             <div className="krig-slot-empty">{`Right: ${slotBinding.right} (待 L5 component)`}</div>
