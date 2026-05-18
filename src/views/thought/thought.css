@@ -96,8 +96,9 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+/* active:对齐 V1,仅边框加粗;颜色由 ThoughtCard inline style 按 type meta 设置 */
 .thought-card--active {
-  box-shadow: 0 0 0 1px var(--krig-accent, #4a9eff) inset;
+  border-width: 2px;
 }
 
 .thought-card--resolved {
@@ -191,19 +192,13 @@
   margin: 0 12px 8px;
 }
 
+/* editor host:对齐 V1 .thought-card__editor 字面无边框,只留 padding + min-height */
 .krig-thought-card-editor-host {
-  min-height: 80px;
-  background: var(--krig-bg, #1e1e1e);
-  border: 1px solid var(--krig-border, #333);
-  border-radius: 4px;
-  padding: 8px 10px;
+  min-height: 60px;
+  padding: 4px;
   font-size: 13px;
   line-height: 1.5;
   overflow: auto;
-}
-
-.krig-thought-card-editor-host:focus-within {
-  border-color: var(--krig-accent, #4a9eff);
 }
 
 /* AI pending */
