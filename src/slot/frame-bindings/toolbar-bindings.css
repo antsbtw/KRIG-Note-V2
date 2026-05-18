@@ -74,6 +74,19 @@
   color: #fff;
 }
 
+/* toolbar 笔记标题(V1 NoteView.tsx toolbarTitle 同款:13/500/marginLeft 8)*/
+.krig-toolbar-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-left: 8px;
+  color: #e8eaed;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+  user-select: none;
+}
+
 .krig-toolbar-sep {
   width: 1px;
   height: 18px;
