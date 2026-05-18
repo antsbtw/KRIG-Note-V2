@@ -1,79 +1,99 @@
 /**
- * ThoughtView — view 主组件(对位 NoteView 形态:NavSide + 单栏主区)
+ * ThoughtView — V1 形态对齐(右槽伴随面板)
  *
- * 用户语义("ThoughtView 是 NoteView 的变种"):
- * - NavSide 接 thought 列表(nav-side-content.tsx 的 FolderTreePanel)
- * - 主区只渲染**当前 active thought 的卡片**(无 list,无双栏)
- * - 三个场景同一组件:
- *   1) NavSide 点列表项 → wsState.activeThoughtId 改 → 本组件显该卡片
- *   2) Note ⌘⇧M 右槽召唤 → bus.channels 'thought.activate' → activeThoughtId
- *   3) 卡片切换:同组件 + ThoughtCard 内 key={thought.id} 强制 remount Host
+ * 见 V1 src/plugins/thought/components/ThoughtView.tsx:
+ *   - toolbar (💭 Thoughts {N} ×)
+ *   - ThoughtPanel(纵向列卡片,按 anchor.locator.pos 排)
  *
- * 不渲染列表是因为 NavSide 已经在列(charter §1.4 应用级 UI 在 Workspace
- * Container,view 不重复造)。
+ * source-aware:跟随 left slot 资源动态过滤
+ *   left='note-view'  → source='note', resourceId=activeNoteId
+ *   left='ebook-view' → source='book', resourceId=activeBookId
+ *   其他 view         → 空(显空态)
+ *
+ * 跨槽通信:监听 bus.channels 'thought.activate' 切 activeId(Note ⌘⇧M / eBook
+ * 高亮 / NavSide 等触发后高亮对应卡片)。
  */
 
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { useAllThoughts } from './use-thoughts-folders';
-import { getThoughtWsState, setActiveThought } from './data-model';
-import { ThoughtCard } from './ThoughtCard';
+import type { ThoughtSource } from '@capabilities/thought/types';
+import { useThoughtsBySource } from './use-thoughts';
+import { ThoughtPanel } from './ThoughtPanel';
 import './thought.css';
 
 interface ThoughtViewProps {
   workspaceId: string;
 }
 
+/** 从 workspace state 派生当前 left slot 的 thought source(V1 思路:跟随主视图)*/
+function deriveSourceFromLeft(
+  leftViewId: string | null,
+  ws: ReturnType<typeof workspaceManager.get> | undefined,
+): { source: ThoughtSource | null; resourceId: string | null } {
+  if (!ws) return { source: null, resourceId: null };
+  if (leftViewId === 'note-view') {
+    const s = ws.pluginStates['note'] as { activeNoteId?: string } | undefined;
+    return { source: 'note', resourceId: s?.activeNoteId ?? null };
+  }
+  if (leftViewId === 'ebook-view') {
+    const s = ws.pluginStates['ebook'] as { activeBookId?: string } | undefined;
+    return { source: 'book', resourceId: s?.activeBookId ?? null };
+  }
+  return { source: null, resourceId: null };
+}
+
 export function ThoughtView({ workspaceId }: ThoughtViewProps) {
-  const wsState = useSyncExternalStore(
+  // 订阅 workspace 变化(left slot 切换 / activeNoteId 变 / activeBookId 变都重渲)
+  const ws = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
-    () => {
-      const ws = workspaceManager.get(workspaceId);
-      return ws ? getThoughtWsState(ws) : null;
-    },
+    () => workspaceManager.get(workspaceId),
   );
 
-  const allThoughts = useAllThoughts();
-  const activeId = wsState?.activeThoughtId ?? null;
-  const activeThought = useMemo(
-    () => (activeId ? allThoughts.find((t) => t.id === activeId) ?? null : null),
-    [activeId, allThoughts],
+  const { source, resourceId } = useMemo(
+    () => deriveSourceFromLeft(ws?.slotBinding.left ?? null, ws),
+    [ws],
   );
 
-  // 跨槽通信:监听 'thought.activate' 切到对应卡片
-  //   - Note ⌘⇧M / 💭 / 🤖 触发(thought-commands 内 emit)
-  //   - eBook 高亮触发(同理 emit channel)
+  const thoughts = useThoughtsBySource(source, resourceId);
+
+  // active thought id(跨槽 thought.activate 触发后高亮)
+  const [activeId, setActiveId] = useState<string | null>(null);
   useEffect(() => {
     const bus = workspaceManager.getBus(workspaceId);
     if (!bus) return;
     const unsub = bus.channels.subscribe('thought.activate', (payload: unknown) => {
       const { thoughtId } = (payload ?? {}) as { thoughtId?: string };
-      if (typeof thoughtId === 'string') setActiveThought(workspaceId, thoughtId);
+      if (typeof thoughtId === 'string') setActiveId(thoughtId);
     });
     return unsub;
   }, [workspaceId]);
 
-  if (!wsState) {
-    return <div className="krig-thought-empty">Workspace 未就绪</div>;
-  }
-
-  if (!activeThought) {
-    return (
-      <div className="krig-thought-empty">
-        <div className="krig-thought-empty-icon">💭</div>
-        <div className="krig-thought-empty-text">未选择思考</div>
-        <div className="krig-thought-empty-hint">
-          从左侧列表点选,或 NavSide 顶部 + Thought 新建
-        </div>
-      </div>
-    );
-  }
+  const handleClose = (): void => {
+    const bus = workspaceManager.getBus(workspaceId);
+    bus?.slot.closeRight();
+  };
 
   return (
-    <div className="krig-thought-view" data-view-id="thought-view">
-      <div className="krig-thought-view-content">
-        <ThoughtCard thought={activeThought} />
+    <div className="thought-view">
+      <div className="thought-view__toolbar">
+        <span className="thought-view__toolbar-title">💭 Thoughts</span>
+        <span className="thought-view__toolbar-count">{thoughts.length}</span>
+        <div style={{ flex: 1 }} />
+        <button
+          className="thought-view__close-btn"
+          onClick={handleClose}
+          title="关闭此面板"
+        >
+          ×
+        </button>
       </div>
+      <ThoughtPanel
+        thoughts={thoughts}
+        activeId={activeId}
+        onActivate={setActiveId}
+        source={source}
+        resourceId={resourceId}
+      />
     </div>
   );
 }

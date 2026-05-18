@@ -1,13 +1,14 @@
 /**
- * ThoughtCard — 单个 thought 详情卡片(主舞台右区)
+ * ThoughtCard — V1 形态对齐(inline 展开/收起 + 蓝色 anchor 引文 + Editor + bottom actions)
  *
- * Phase 5.2 升级:文本编辑由 ThoughtCardEditor(text-editing.Host 薄包装)承担。
- *
- * 操作:type 切换(9 种)/ resolve / pin / delete。
- * 状态:dangling-anchor 角标(anchor 在但 text 空)— v0.5 §8.3。
- * AI:type='ai-response' 且 doc 空 → spinner;非空 → Host readOnly + 复制按钮。
+ * 见 V1 src/plugins/thought/components/ThoughtCard.tsx:
+ *   - header click → toggle expanded(active 时自动展开 + scrollIntoView)
+ *   - 收起时:仅显 icon + title + time + chevron(性能优化销毁 Editor)
+ *   - 展开时:anchor 引文条(点 ↗ 跳源)+ Editor + bottom action bar
+ *     (type 切换菜单 / 完成/重开 / 删除;ai-response 加复制)
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import type { ThoughtInfo } from '@capabilities/thought/types';
 import {
@@ -18,157 +19,218 @@ import { ThoughtCardEditor } from './ThoughtCardEditor';
 
 interface ThoughtCardProps {
   thought: ThoughtInfo;
+  isActive: boolean;
+  onActivate: (id: string) => void;
 }
 
-const TYPES: ThoughtType[] = [
-  'thought', 'question', 'important', 'todo', 'analysis', 'ai-response',
-  'highlight', 'underline', 'rect-frame',
-];
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
 
-function extractPlainText(doc: ThoughtInfo['doc']): string {
-  const root = doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
+function extractTitle(t: ThoughtInfo): string {
+  const root = t.doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
   if (!root?.content) return '';
-  return root.content.map(extractBlockText).join('\n');
+  for (const block of root.content) {
+    const children = block.content as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(children)) continue;
+    for (const c of children) {
+      if (c.type === 'text' && typeof c.text === 'string' && c.text.trim()) {
+        return c.text.trim().slice(0, 60);
+      }
+    }
+  }
+  return '';
 }
 
-function extractBlockText(node: Record<string, unknown>): string {
-  if (node.type === 'text') return (node.text as string) ?? '';
-  const children = node.content as Array<Record<string, unknown>> | undefined;
-  if (!Array.isArray(children)) return '';
-  return children.map(extractBlockText).join('');
+function extractFullText(t: ThoughtInfo): string {
+  const root = t.doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
+  if (!root?.content) return '';
+  return root.content
+    .map((b) => {
+      const children = b.content as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(children)) return '';
+      return children
+        .filter((c) => c.type === 'text')
+        .map((c) => (c.text as string) ?? '')
+        .join('');
+    })
+    .join('\n');
 }
 
-function isAiPending(t: ThoughtInfo): boolean {
-  if (t.type !== 'ai-response') return false;
-  return extractPlainText(t.doc).trim().length === 0;
+function anchorPreviewText(t: ThoughtInfo): string {
+  if (!t.anchor) return '';
+  const loc = t.anchor.locator as { text?: string; textContent?: string };
+  return loc.text ?? loc.textContent ?? '';
 }
 
-function copyToClipboard(text: string): void {
-  void navigator.clipboard?.writeText(text).catch((e) => {
-    console.warn('[thought-card] clipboard failed:', e);
-  });
-}
+export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
 
-function anchorBadge(t: ThoughtInfo): React.ReactNode {
-  if (!t.anchor) return null;
-  const sourceText = {
-    note: '📝 Note',
-    book: '📚 Book',
-    graph: '📊 Graph',
-    canvas: '🎨 Canvas',
-  }[t.anchor.source];
-  // v0.5 §8.3 dangling-anchor 简化探测:
-  //   anchor 存在但 locator.text/textContent 都空 → 视为锚点失效(兜底视觉,
-  //   真实 source 探测留后续 sub-phase 异步路径)。
-  const locator = t.anchor.locator as { text?: string; textContent?: string };
-  const anchorText = locator.text ?? locator.textContent ?? '';
-  const isDangling = !anchorText.trim();
-  return (
-    <>
-      <span className="krig-thought-anchor-source">{sourceText}</span>
-      {isDangling ? (
-        <span className="krig-thought-anchor-dangling" title="锚点失效 — 点击解依附">
-          ⚠️ 锚点失效
-        </span>
-      ) : (
-        <span className="krig-thought-anchor-text" title={anchorText}>
-          {anchorText.slice(0, 40)}{anchorText.length > 40 ? '…' : ''}
-        </span>
-      )}
-    </>
-  );
-}
+  // V1 同模式:active 时自动展开 + scrollIntoView
+  useEffect(() => {
+    if (isActive && !expanded) setExpanded(true);
+    if (isActive && cardRef.current) {
+      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [isActive, expanded]);
 
-export function ThoughtCard({ thought }: ThoughtCardProps) {
+  const meta = THOUGHT_TYPE_META[thought.type];
+  const isAI = thought.type === 'ai-response';
+  const title = extractTitle(thought);
+  const isAiPending = isAI && !title;
+  const anchorText = anchorPreviewText(thought);
+  const displayTitle = isAI
+    ? (isAiPending ? 'AI 思考中...' : (title || 'AI 回复'))
+    : (title || '空思考');
+
   const cardClass = [
-    'krig-thought-card',
-    thought.resolved ? 'resolved' : '',
+    'thought-card',
+    isActive ? 'thought-card--active' : '',
+    thought.resolved ? 'thought-card--resolved' : '',
   ].filter(Boolean).join(' ');
-  const aiPending = isAiPending(thought);
-  const aiReadOnly = thought.type === 'ai-response' && !aiPending;
+
+  const cardStyle = isActive
+    ? { borderColor: meta.color, borderWidth: 2 }
+    : undefined;
+
+  const handleToggle = (): void => {
+    setExpanded((p) => !p);
+    onActivate(thought.id);
+  };
+
+  const handleScrollToSource = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    commandRegistry.execute('thought-view.scroll-to-source', thought.id);
+  };
+
+  const handleTypeChange = (newType: ThoughtType): void => {
+    commandRegistry.execute('thought-view.change-type', {
+      id: thought.id,
+      type: newType,
+    });
+    setShowTypeMenu(false);
+  };
+
+  const handleResolve = (): void => {
+    commandRegistry.execute('thought-view.toggle-resolve', thought.id);
+  };
+
+  const handleDelete = (): void => {
+    commandRegistry.execute('thought-view.delete-thought', thought.id);
+  };
+
+  const handleCopyAi = (): void => {
+    const text = extractFullText(thought);
+    if (text) void navigator.clipboard?.writeText(text);
+  };
 
   return (
-    <div className={cardClass}>
-      <div className="krig-thought-card-header">
-        <select
-          className="krig-thought-type-select"
-          value={thought.type}
-          onChange={(e) =>
-            commandRegistry.execute('thought-view.change-type', {
-              id: thought.id,
-              type: e.target.value as ThoughtType,
-            })
-          }
-          aria-label="思考类型"
-        >
-          {TYPES.map((t) => {
-            const m = THOUGHT_TYPE_META[t];
-            return (
-              <option key={t} value={t}>
-                {m.icon} {m.label}
-              </option>
-            );
-          })}
-        </select>
-
-        <div className="krig-thought-card-actions">
-          <button
-            className={`krig-thought-action ${thought.pinned ? 'on' : ''}`}
-            title={thought.pinned ? '取消置顶' : '置顶'}
-            onClick={() => commandRegistry.execute('thought-view.toggle-pinned', thought.id)}
+    <div ref={cardRef} className={cardClass} style={cardStyle}>
+      {/* Header */}
+      <div className="thought-card__header" onClick={handleToggle}>
+        <span className="thought-card__icon">{meta.icon}</span>
+        <span className="thought-card__title">{displayTitle}</span>
+        {isAI && thought.serviceId && (
+          <span
+            className="thought-card__service"
+            style={{ color: meta.color }}
           >
-            📌
-          </button>
-          <button
-            className={`krig-thought-action ${thought.resolved ? 'on' : ''}`}
-            title={thought.resolved ? '撤销解决' : '标记解决'}
-            onClick={() => commandRegistry.execute('thought-view.toggle-resolve', thought.id)}
-          >
-            ✓
-          </button>
-          <button
-            className="krig-thought-action danger"
-            title="删除"
-            onClick={() => commandRegistry.execute('thought-view.delete-active')}
-          >
-            🗑
-          </button>
-        </div>
+            {thought.serviceId}
+          </span>
+        )}
+        <span className="thought-card__time">{formatTime(thought.createdAt)}</span>
+        <span className="thought-card__chevron">{expanded ? '▾' : '▸'}</span>
       </div>
 
-      {thought.anchor && (
-        <div
-          className="krig-thought-card-anchor clickable"
-          onClick={() =>
-            commandRegistry.execute('thought-view.scroll-to-source', thought.id)
-          }
-          title="跳转到源"
-        >
-          {anchorBadge(thought)}
-        </div>
-      )}
+      {expanded && (
+        <>
+          {/* Anchor 引文条 — 点 ↗ 跳源 */}
+          {anchorText && (
+            <div
+              className="thought-card__anchor"
+              onClick={handleScrollToSource}
+              title="点击跳转到原文位置"
+              style={{ borderLeftColor: meta.color }}
+            >
+              <span className="thought-card__anchor-text">{anchorText}</span>
+              <span className="thought-card__anchor-jump">↗</span>
+            </div>
+          )}
 
-      {aiPending ? (
-        <div className="krig-thought-card-ai-pending" aria-label="AI 正在回复">
-          <span className="krig-thought-ai-spinner" aria-hidden>🤖</span>
-          <span>AI 正在思考...</span>
-        </div>
-      ) : (
-        // key={thought.id}:切换 thought 时强制 remount Host instance(避 stale state)
-        <ThoughtCardEditor
-          key={thought.id}
-          thought={thought}
-          readOnly={aiReadOnly}
-        />
-      )}
-      {aiReadOnly && (
-        <button
-          className="krig-thought-card-copy"
-          onClick={() => copyToClipboard(extractPlainText(thought.doc))}
-          title="复制 AI 回复"
-        >
-          📋 复制
-        </button>
+          {/* Editor 区(ai-response pending 时显 spinner 替代) */}
+          {isAiPending ? (
+            <div className="thought-card__ai-pending">
+              <span className="thought-card__ai-spinner" aria-hidden>🤖</span>
+              <span>AI 正在思考...</span>
+            </div>
+          ) : (
+            <div className="thought-card__editor">
+              <ThoughtCardEditor
+                key={thought.id}
+                thought={thought}
+                readOnly={isAI}
+              />
+            </div>
+          )}
+
+          {/* Bottom action bar */}
+          <div className="thought-card__actions">
+            <div className="thought-card__type-switcher">
+              <button
+                className="thought-card__action-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowTypeMenu((p) => !p);
+                }}
+              >
+                {meta.icon} {meta.label} ▾
+              </button>
+              {showTypeMenu && (
+                <div className="thought-card__type-menu">
+                  {(Object.keys(THOUGHT_TYPE_META) as ThoughtType[]).map((t) => (
+                    <button
+                      key={t}
+                      className={`thought-card__type-option ${t === thought.type ? 'thought-card__type-option--active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTypeChange(t);
+                      }}
+                    >
+                      {THOUGHT_TYPE_META[t].icon} {THOUGHT_TYPE_META[t].label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {isAI && !isAiPending && (
+              <button
+                className="thought-card__action-btn"
+                onClick={handleCopyAi}
+                title="复制 Markdown"
+              >
+                📋 复制
+              </button>
+            )}
+
+            <button
+              className={`thought-card__action-btn ${thought.resolved ? 'thought-card__action-btn--resolved' : ''}`}
+              onClick={handleResolve}
+            >
+              {thought.resolved ? '↩ 重开' : '√ 完成'}
+            </button>
+
+            <button
+              className="thought-card__action-btn thought-card__action-btn--danger"
+              onClick={handleDelete}
+            >
+              🗑
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

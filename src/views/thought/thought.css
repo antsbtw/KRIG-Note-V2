@@ -1,154 +1,204 @@
-/* ── ThoughtView(对位 NoteView:单栏主区,NavSide 接列表)── */
+/**
+ * thought view 样式(V1 形态对齐)
+ *
+ * class 命名沿 V1 src/plugins/thought/thought.css:
+ *   .thought-view + .thought-view__toolbar + .thought-panel + .thought-card
+ */
 
-.krig-thought-view {
+/* ── ThoughtView 容器 + toolbar ── */
+
+.thought-view {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   background: var(--krig-bg, #1e1e1e);
   color: var(--krig-fg, #e0e0e0);
+  overflow: hidden;
+}
+
+.thought-view__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--krig-border, #333);
+  background: var(--krig-bg-secondary, #232323);
+  font-size: 13px;
+}
+
+.thought-view__toolbar-title {
+  font-weight: 600;
+}
+
+.thought-view__toolbar-count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.08));
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+}
+
+.thought-view__close-btn {
+  background: transparent;
+  border: none;
+  color: var(--krig-fg-muted, #888);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.thought-view__close-btn:hover {
+  background: rgba(255, 82, 82, 0.16);
+  color: #ff5252;
+}
+
+/* ── ThoughtPanel(卡片纵向列表) ── */
+
+.thought-panel {
+  flex: 1 1 auto;
   overflow-y: auto;
 }
 
-.krig-thought-view-content {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 16px 20px;
+.thought-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
 }
 
-.krig-thought-empty {
+.thought-panel__empty {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  gap: 6px;
+  padding: 40px 16px;
   text-align: center;
   color: var(--krig-fg-muted, #888);
+  font-size: 13px;
 }
 
-.krig-thought-empty-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-
-.krig-thought-empty-text {
-  font-size: 14px;
-  margin-bottom: 4px;
-}
-
-.krig-thought-empty-hint {
-  font-size: 12px;
+.thought-panel__empty-hint {
+  font-size: 11px;
   opacity: 0.7;
 }
 
-/* ── ThoughtCard(单栏主区) ── */
+/* ── ThoughtCard ── */
 
-.krig-thought-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.thought-card {
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 6px;
+  background: var(--krig-bg-secondary, #232323);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.krig-thought-card.resolved .krig-thought-card-editor {
+.thought-card--active {
+  box-shadow: 0 0 0 1px var(--krig-accent, #4a9eff) inset;
+}
+
+.thought-card--resolved {
   opacity: 0.55;
 }
 
-.krig-thought-card-header {
+.thought-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.krig-thought-type-select {
-  background: var(--krig-bg-secondary, #232323);
-  color: var(--krig-fg, #e0e0e0);
-  border: 1px solid var(--krig-border, #333);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 13px;
+  gap: 8px;
+  padding: 8px 12px;
   cursor: pointer;
+  user-select: none;
 }
 
-.krig-thought-card-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.krig-thought-action {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 14px;
-  cursor: pointer;
-  color: var(--krig-fg, #e0e0e0);
-  transition: background 0.1s, border-color 0.1s;
-}
-
-.krig-thought-action:hover {
+.thought-card__header:hover {
   background: var(--krig-bg-hover, rgba(255, 255, 255, 0.04));
 }
 
-.krig-thought-action.on {
-  background: var(--krig-bg-selected, rgba(74, 158, 255, 0.18));
-  border-color: var(--krig-accent, #4a9eff);
-}
-
-.krig-thought-action.danger:hover {
-  background: rgba(255, 82, 82, 0.12);
-  border-color: #ff5252;
-}
-
-.krig-thought-card-anchor {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 6px 10px;
-  background: var(--krig-bg-secondary, #232323);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--krig-fg-muted, #888);
-}
-
-.krig-thought-card-anchor.clickable {
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.krig-thought-card-anchor.clickable:hover {
-  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
-  color: var(--krig-accent, #4a9eff);
-}
-
-.krig-thought-anchor-source {
+.thought-card__icon {
+  font-size: 16px;
   flex: 0 0 auto;
 }
 
-.krig-thought-anchor-text {
+.thought-card__title {
   flex: 1 1 auto;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-style: italic;
 }
 
-.krig-thought-anchor-dangling {
-  flex: 1 1 auto;
-  color: #ffab40;
-  font-style: italic;
+.thought-card--resolved .thought-card__title {
+  text-decoration: line-through;
+}
+
+.thought-card__service {
   font-size: 11px;
+  margin-left: 4px;
 }
 
-/* Phase 5.2:textarea → text-editing.Host;Host 容器外壳样式 */
-.krig-thought-card-editor-host {
+.thought-card__time {
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+  flex: 0 0 auto;
+}
+
+.thought-card__chevron {
+  font-size: 11px;
+  color: var(--krig-fg-muted, #888);
+  flex: 0 0 auto;
+}
+
+/* anchor 引文条(展开后) */
+.thought-card__anchor {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 6px 10px;
+  background: var(--krig-bg, #1e1e1e);
+  border-left: 3px solid var(--krig-accent, #4a9eff);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--krig-fg-muted, #b0b0b0);
+  transition: background 0.1s;
+}
+
+.thought-card__anchor:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.thought-card__anchor-text {
   flex: 1 1 auto;
-  min-height: 200px;
-  background: var(--krig-bg-secondary, #232323);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.thought-card__anchor-jump {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--krig-accent, #4a9eff);
+}
+
+/* editor 区(展开后) */
+.thought-card__editor {
+  margin: 0 12px 8px;
+}
+
+.krig-thought-card-editor-host {
+  min-height: 80px;
+  background: var(--krig-bg, #1e1e1e);
   border: 1px solid var(--krig-border, #333);
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-size: 14px;
-  line-height: 1.6;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
   overflow: auto;
 }
 
@@ -156,24 +206,24 @@
   border-color: var(--krig-accent, #4a9eff);
 }
 
-/* AI response 状态 */
-.krig-thought-card-ai-pending {
+/* AI pending */
+.thought-card__ai-pending {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1 1 auto;
-  min-height: 200px;
-  gap: 12px;
-  font-size: 14px;
-  color: var(--krig-fg-muted, #888);
-  background: var(--krig-bg-secondary, #232323);
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 24px 12px;
+  background: var(--krig-bg, #1e1e1e);
   border: 1px dashed var(--krig-border, #333);
-  border-radius: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--krig-fg-muted, #888);
 }
 
-.krig-thought-ai-spinner {
-  font-size: 32px;
+.thought-card__ai-spinner {
+  font-size: 28px;
   animation: krig-ai-spin 1.5s ease-in-out infinite;
 }
 
@@ -182,19 +232,76 @@
   50%      { transform: rotate(8deg); }
 }
 
-.krig-thought-card-copy {
-  align-self: flex-end;
-  background: var(--krig-bg-secondary, #232323);
-  color: var(--krig-fg, #e0e0e0);
-  border: 1px solid var(--krig-border, #333);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.1s;
+/* bottom action bar */
+.thought-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 12px 10px;
 }
 
-.krig-thought-card-copy:hover {
+.thought-card__type-switcher {
+  position: relative;
+  margin-right: auto;
+}
+
+.thought-card__type-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px 0;
+  background: var(--krig-bg-secondary, #232323);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+.thought-card__type-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: var(--krig-fg, #e0e0e0);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thought-card__type-option:hover {
   background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
-  border-color: var(--krig-accent, #4a9eff);
+}
+
+.thought-card__type-option--active {
+  background: var(--krig-bg-selected, rgba(74, 158, 255, 0.18));
+}
+
+.thought-card__action-btn {
+  background: var(--krig-bg, #1e1e1e);
+  color: var(--krig-fg, #e0e0e0);
+  border: 1px solid var(--krig-border, #333);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.thought-card__action-btn:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.thought-card__action-btn--resolved {
+  color: var(--krig-fg-muted, #888);
+}
+
+.thought-card__action-btn--danger:hover {
+  border-color: #ff5252;
+  background: rgba(255, 82, 82, 0.12);
 }
