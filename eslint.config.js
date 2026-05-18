@@ -63,6 +63,17 @@ export default [
             message: 'view 不直接 import driver(driver 是 capability 内部实现);' +
                      '走 requireCapabilityApi(id),类型走 import type from @capabilities/<id>/types(W5 C4)',
             allowTypeImports: true },
+          // math-rendering 单点屏障(Phase 1A math-rendering capability 引入):
+          // view 内禁 import mafs / mathjs / @cortex-js/compute-engine,走 capability。
+          { group: ['mafs', 'mafs/*'],
+            message: 'math-rendering 单点屏障:view 内禁 import mafs,走 requireCapabilityApi(\'math-rendering\').Host',
+            allowTypeImports: true },
+          { group: ['mathjs'],
+            message: 'math-rendering 单点屏障:view 内禁 import mathjs,走 math-rendering capability',
+            allowTypeImports: true },
+          { group: ['@cortex-js/compute-engine'],
+            message: 'math-rendering 单点屏障:view 内禁 import @cortex-js/compute-engine,走 math-rendering capability',
+            allowTypeImports: true },
         ],
       }],
     },
@@ -91,6 +102,14 @@ export default [
             message: 'ELK 单点屏障:driver 内禁 import elkjs,走 requireCapabilityApi(\'graph-layout\')' },
           { group: ['@mermaid-js/layout-elk'],
             message: 'ELK 单点屏障:driver 内禁 import @mermaid-js/layout-elk,走 graph-layout capability' },
+          // math-rendering 单点屏障(Phase 1A math-rendering capability 引入):
+          // driver 内禁 import mafs / mathjs / @cortex-js/compute-engine,走 capability。
+          { group: ['mafs', 'mafs/*'],
+            message: 'math-rendering 单点屏障:driver 内禁 import mafs,走 requireCapabilityApi(\'math-rendering\').Host' },
+          { group: ['mathjs'],
+            message: 'math-rendering 单点屏障:driver 内禁 import mathjs,走 math-rendering capability' },
+          { group: ['@cortex-js/compute-engine'],
+            message: 'math-rendering 单点屏障:driver 内禁 import @cortex-js/compute-engine,走 math-rendering capability' },
         ],
       }],
     },
@@ -102,7 +121,7 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['prosemirror-*', 'three', 'pdfjs-dist', 'epubjs', 'foliate-js'],
+          { group: ['prosemirror-*', 'three', 'pdfjs-dist', 'epubjs', 'foliate-js', 'mafs', 'mafs/*', 'mathjs', '@cortex-js/compute-engine'],
             message: '基础设施层禁止 import 业务 npm 包' },
         ],
       }],
@@ -115,7 +134,7 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['prosemirror-*', 'three', 'pdfjs-dist', 'epubjs', 'foliate-js', 'react'],
+          { group: ['prosemirror-*', 'three', 'pdfjs-dist', 'epubjs', 'foliate-js', 'react', 'mafs', 'mafs/*', 'mathjs', '@cortex-js/compute-engine'],
             message: '存储层只允许 surrealdb + 内部模块' },
         ],
       }],
@@ -130,7 +149,7 @@ export default [
       'no-restricted-imports': ['error', {
         patterns: [
           // 禁业务 npm 包
-          { group: ['prosemirror-*', 'three', 'three/*', 'pdfjs-dist', 'epubjs', 'foliate-js', 'electron', 'react', 'react-dom'],
+          { group: ['prosemirror-*', 'three', 'three/*', 'pdfjs-dist', 'epubjs', 'foliate-js', 'electron', 'react', 'react-dom', 'mafs', 'mafs/*', 'mathjs', '@cortex-js/compute-engine'],
             message: '语义层 / 共享层只允许纯类型,不允许 import npm 包' },
           // 禁跨层 alias(只允许同层相对路径)
           { group: ['@views/*', '@capabilities/*', '@storage/*', '@platform/*', '@shell/*', '@workspace/*', '@slot/*'],
@@ -246,6 +265,28 @@ export default [
             message: 'ELK 单点屏障:elkjs 只允许 capabilities/graph-layout/ import' },
           { group: ['@mermaid-js/layout-elk'],
             message: 'ELK 单点屏障:@mermaid-js/layout-elk 只允许 capabilities/graph-layout/ import' },
+        ],
+      }],
+    },
+  },
+
+  // math-rendering 单点屏障(Phase 1A math-rendering capability 引入):
+  // capability 层默认禁 mafs + mathjs + @cortex-js/compute-engine;
+  // math-rendering 是唯一允许 import 的位置。
+  //
+  // 详见 docs/tasks/math-visual-migration-prompt.md §D1。
+  {
+    files: ['src/capabilities/**/*.{ts,tsx}'],
+    ignores: ['src/capabilities/math-rendering/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['mafs', 'mafs/*'],
+            message: 'math-rendering 单点屏障:mafs 只允许 capabilities/math-rendering/ import' },
+          { group: ['mathjs'],
+            message: 'math-rendering 单点屏障:mathjs 只允许 capabilities/math-rendering/ import' },
+          { group: ['@cortex-js/compute-engine'],
+            message: 'math-rendering 单点屏障:@cortex-js/compute-engine 只允许 capabilities/math-rendering/ import' },
         ],
       }],
     },
