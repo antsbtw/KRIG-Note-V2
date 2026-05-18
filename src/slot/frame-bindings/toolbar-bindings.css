@@ -116,14 +116,13 @@
   display: inline-flex;
 }
 
+/* dropdown trigger:与普通 button 同款窄宽,icon + 紧贴 caret(对齐 V1 视觉) */
 .krig-toolbar-dropdown-trigger {
-  min-width: 90px;
-  justify-content: space-between;
-  padding: 0 6px 0 10px;
+  padding: 0 6px;
+  gap: 4px;
 }
 
 .krig-toolbar-dropdown-caret {
-  margin-left: 6px;
   font-size: 9px;
   color: #888;
 }
