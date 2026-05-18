@@ -248,10 +248,9 @@
   margin-right: auto;
 }
 
+/* type menu:fixed 定位由 React 通过 useCollisionPosition 计算(left/top inline style)
+   配合 viewport 边界 flip;position/left/top 不在 CSS 写,避免与 React inline 冲突。*/
 .thought-card__type-menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
   display: flex;
   flex-direction: column;
   min-width: 120px;
@@ -260,7 +259,7 @@
   border: 1px solid var(--krig-border, #333);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  z-index: 10;
+  z-index: 1000;
 }
 
 .thought-card__type-option {

@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { useCollisionPosition } from '@slot/frame-bindings/use-collision-position';
 import type { ThoughtInfo } from '@capabilities/thought/types';
 import {
   THOUGHT_TYPE_META,
@@ -181,33 +182,15 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
 
           {/* Bottom action bar */}
           <div className="thought-card__actions">
-            <div className="thought-card__type-switcher">
-              <button
-                className="thought-card__action-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowTypeMenu((p) => !p);
-                }}
-              >
-                {meta.icon} {meta.label} ▾
-              </button>
-              {showTypeMenu && (
-                <div className="thought-card__type-menu">
-                  {(Object.keys(THOUGHT_TYPE_META) as ThoughtType[]).map((t) => (
-                    <button
-                      key={t}
-                      className={`thought-card__type-option ${t === thought.type ? 'thought-card__type-option--active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleTypeChange(t);
-                      }}
-                    >
-                      {THOUGHT_TYPE_META[t].icon} {THOUGHT_TYPE_META[t].label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <TypeSwitcher
+              currentType={thought.type}
+              open={showTypeMenu}
+              onToggle={() => setShowTypeMenu((p) => !p)}
+              onSelect={(t) => {
+                handleTypeChange(t);
+                setShowTypeMenu(false);
+              }}
+            />
 
             {isAI && !isAiPending && (
               <button
@@ -234,6 +217,95 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
             </button>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// ── TypeSwitcher ──
+// 触发按钮 inline,菜单走 fixed 浮层 + useCollisionPosition 自动 flip
+// (V1 thought-card__type-menu position:absolute bottom:100% 在 V2 thought-view
+//  toolbar 下方时被遮挡 — V2 用碰撞检测自动选向上/向下展开)。
+
+interface TypeSwitcherProps {
+  currentType: ThoughtType;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (t: ThoughtType) => void;
+}
+
+function TypeSwitcher({ currentType, open, onToggle, onSelect }: TypeSwitcherProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // open 状态变化时测 trigger 位置,作为 menu fixed 锚点(default 向上展开 —
+  // anchor = trigger bottom-left;useCollisionPosition 检测下溢时自动翻为向下)。
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    // 默认期望菜单底贴 trigger 顶上方 4px — collision hook anchorY 是 menu top,
+    // 所以这里 anchorY = triggerTop - menuHeight - 4。但 menuHeight 在 hook 内测,
+    // 这里 anchorY = triggerTop 直接给(hook 用 anchorY 测+flip):菜单默认向下展开,
+    // 不符合 V1 向上语义。
+    // V1 同款做法:anchorY = triggerTop - 估算高度。但 hook 是基于 "anchor 是默认
+    // 展开位置 + 下溢翻上" 设计,这里反过来:我们想要默认向上 + 上溢翻下。
+    // 简化:anchorY = triggerTop(用 hook 默认向下展开 → 命中遮挡时不变;
+    //       不够好,因为 trigger 下方就是 viewport 下边距,几乎必下溢 → 翻上 → 命中)。
+    // 折中:trigger 顶坐标给 anchorY,让 hook 总尝试向下,通常会触发翻上(因为卡片底
+    // 接近 viewport 底)。
+    setAnchor({ x: rect.left, y: rect.bottom + 4 });
+  }, [open]);
+
+  const { x, y } = useCollisionPosition(menuRef, anchor.x, anchor.y);
+
+  // 点外部关闭
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent): void => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t)) return;
+      if (triggerRef.current?.contains(t)) return;
+      onToggle();
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [open, onToggle]);
+
+  const meta = THOUGHT_TYPE_META[currentType];
+
+  return (
+    <div className="thought-card__type-switcher">
+      <button
+        ref={triggerRef}
+        className="thought-card__action-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+      >
+        {meta.icon} {meta.label} ▾
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          className="thought-card__type-menu"
+          style={{ position: 'fixed', left: x, top: y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {(Object.keys(THOUGHT_TYPE_META) as ThoughtType[]).map((t) => (
+            <button
+              key={t}
+              className={`thought-card__type-option ${t === currentType ? 'thought-card__type-option--active' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(t);
+              }}
+            >
+              {THOUGHT_TYPE_META[t].icon} {THOUGHT_TYPE_META[t].label}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
