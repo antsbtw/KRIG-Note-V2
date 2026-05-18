@@ -183,6 +183,13 @@ export function registerTextEditingCommands(): void {
     tea.insertHtmlBlockAtSelection(instanceId);
   }));
 
+  // ── Math Visual block(V1 → V2 迁移 Phase 1B,走 math-rendering capability) ──
+
+  commandRegistry.register('text-editing.slash-insert-math-visual', withInstance((instanceId) => {
+    tea.clearSlashTrigger(instanceId);
+    tea.insertMathVisualAtSelection(instanceId);
+  }));
+
   // ── L5-B3.2:Handle turn-into(11 项 — handleMenuController.pos 路径) ──
 
   function registerHandleTurn(commandId: string, target: TurnTarget): void {

@@ -200,7 +200,7 @@ function unknownAtomLabel(atomType: string): string {
     case 'externalRef':   return '[Ref]';
     case 'fileBlock':     return '[File]';
     case 'htmlBlock':     return '[HTML]';
-    case 'mathVisual':    return '[Diagram]';
+    case 'mathVisual':    return '[Function Graph]';
     case 'horizontalRule': return '---';
     case 'pageAnchor':    return '[Anchor]';
     case 'taskList':      return '[Tasks]';
