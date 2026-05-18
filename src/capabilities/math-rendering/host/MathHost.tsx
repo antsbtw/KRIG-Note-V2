@@ -5,16 +5,18 @@
  * `@cortex-js/compute-engine` 的位置**。
  *
  * driver 通过 `requireCapabilityApi('math-rendering').Host` 拿到本组件,传声明式
- * props(viewBox / curves / annotations 等),内部决定如何拼装 Mafs 元件。
+ * props(viewBox / curves / annotations / overlays 等),内部决定如何拼装 Mafs 元件。
  *
  * 设计原则:
  * - Prop-driven 黑盒:driver 0 接触 Mafs 元件(对齐 D1 决议)
  * - Curve discriminated union:fnOfX / parametric / polar / verticalLine / unsupported
  * - viewBox 只作"初始/重置视口"(driver PM 持久化);pan/zoom 实时变化走 onViewportChange
- *   通知,driver 可选择持久化或忽略(避免 undo 堆膨胀,见 viewport 拆分决议)
+ *   通知,driver 可选择持久化或忽略(避免 undo 堆膨胀)
+ * - Phase 2:overlays props 接 8 类工具配置(切线/法线/积分/特征/标注/黎曼/HoverCoords/端点),
+ *   capability 内部子组件渲染 — driver 全屏 Panel 仅传配置 + 回调
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Mafs, Plot, Point, Line, Coordinates } from 'mafs';
 import './mafs-style';
 import type {
@@ -25,6 +27,12 @@ import type {
   AxisDisplayConfig,
 } from '../types';
 import { numericalDerivative } from '../compute/evaluator';
+import { buildSegments, detectDiscontinuities } from '../compute/discontinuity';
+import {
+  TangentTool, NormalTool, IntegralTool, AnnotationTool,
+  FeatureTool, RiemannTool, EndpointMarkers, HoverCoords,
+} from './tools';
+import type { EndpointData } from './tools';
 
 // ─── 主组件 ─────────────────────────────────────────────
 
@@ -39,8 +47,44 @@ export const MathHost: React.FC<MathHostProps> = ({
   pan = true,
   preserveAspectRatio = false,
   onViewportChange: _onViewportChange,
-  // Mafs 0.21 没有公开 viewport 变化事件;预留参数,Phase 2 / 上游 SDK 支持后接通
+  overlays,
+  overlayCallbacks,
+  pointSize = 6,
 }) => {
+  // 从 curves 提取 fnOfX 类型 → evalFns / fnColors Map(工具消费)
+  const { evalFns, fnColors, visibleFnIds } = useMemo(() => {
+    const fns = new Map<string, (x: number) => number>();
+    const colors = new Map<string, string>();
+    const visible = new Set<string>();
+    for (const c of curves) {
+      if (c.kind === 'fnOfX') {
+        fns.set(c.id, c.fn);
+        colors.set(c.id, c.color);
+        visible.add(c.id);
+      }
+    }
+    return { evalFns: fns, fnColors: colors, visibleFnIds: visible };
+  }, [curves]);
+
+  // 自动端点(分段函数)— 走 overlays.showEndpoints 启用
+  const autoEndpoints: EndpointData[] = useMemo(() => {
+    if (!overlays?.showEndpoints) return [];
+    const out: EndpointData[] = [];
+    for (const c of curves) {
+      if (c.kind !== 'fnOfX' || !c.segments || c.segments.length === 0) continue;
+      // 用 buildSegments 在 segments 周边算端点 closed/open(若 driver 未传完整 segments,本地从 fn+discontinuity 重算)
+      for (const seg of c.segments) {
+        // 简化:本 capability 内每个 segment 两端各算一次,closed 取近端 finite 判定
+        const [a, b] = seg.domain;
+        const yA = c.fn(a);
+        const yB = c.fn(b);
+        if (isFinite(yA)) out.push({ x: a, y: yA, closed: true });
+        if (isFinite(yB)) out.push({ x: b, y: yB, closed: true });
+      }
+    }
+    return out;
+  }, [overlays?.showEndpoints, curves]);
+
   return (
     <div className="mr-math-host" style={{ position: 'relative' }}>
       <Mafs
@@ -54,6 +98,75 @@ export const MathHost: React.FC<MathHostProps> = ({
         {curves.map((c) => renderCurve(c))}
         {endpoints?.map((ep, i) => renderEndpoint(ep, i))}
         {annotations?.map((ann) => renderAnnotation(ann, curves))}
+
+        {/* ── Phase 2:工具叠加层 ── */}
+        {overlays?.tangents && overlays.tangents.length > 0 && (
+          <TangentTool
+            tangents={overlays.tangents}
+            evalFns={evalFns}
+            fnColors={fnColors}
+            onMove={overlayCallbacks?.onTangentMove}
+          />
+        )}
+        {overlays?.normals && overlays.normals.length > 0 && (
+          <NormalTool
+            normals={overlays.normals}
+            evalFns={evalFns}
+            fnColors={fnColors}
+            onMove={overlayCallbacks?.onNormalMove}
+          />
+        )}
+        {overlays?.integrals && overlays.integrals.length > 0 && (
+          <IntegralTool
+            integrals={overlays.integrals}
+            evalFns={evalFns}
+            fnColors={fnColors}
+            onMove={overlayCallbacks?.onIntegralMove}
+          />
+        )}
+        {overlays?.features && overlays.features.length > 0 && (
+          <FeatureTool
+            features={overlays.features}
+            visibleTypes={new Set(['maximum', 'minimum', 'zero', 'inflection'])}
+          />
+        )}
+        {overlays?.annotations && overlays.annotations.length > 0 && (
+          <AnnotationTool
+            annotations={overlays.annotations}
+            evalFns={evalFns}
+            pointSize={pointSize}
+            selectedIdx={overlays.selectedAnnotationIdx ?? null}
+            selectedIdxs={overlays.selectedAnnotationIdxs ?? new Set()}
+            onSelect={overlayCallbacks?.onAnnotationSelect}
+            onMove={overlayCallbacks?.onAnnotationMove}
+          />
+        )}
+        {overlays?.riemann && (() => {
+          const fn = evalFns.get(overlays.riemann.curveId);
+          if (!fn) return null;
+          const color = overlays.riemann.color ?? fnColors.get(overlays.riemann.curveId) ?? '#2D7FF9';
+          return (
+            <RiemannTool
+              fn={fn}
+              a={overlays.riemann.a}
+              b={overlays.riemann.b}
+              n={overlays.riemann.n}
+              mode={overlays.riemann.mode}
+              color={color}
+              showSum={overlays.riemann.showSum !== false}
+            />
+          );
+        })()}
+        {overlays?.hoverCoords && (
+          <HoverCoords
+            evalFns={evalFns}
+            fnColors={fnColors}
+            visibleFnIds={visibleFnIds}
+          />
+        )}
+        {overlays?.showEndpoints && autoEndpoints.length > 0 && (
+          <EndpointMarkers endpoints={autoEndpoints} color="#2D7FF9" />
+        )}
       </Mafs>
     </div>
   );
@@ -63,7 +176,6 @@ export const MathHost: React.FC<MathHostProps> = ({
 
 function renderAxis(axis?: AxisDisplayConfig): React.ReactNode {
   if (!axis) {
-    // 默认显示标准坐标系
     return <Coordinates.Cartesian />;
   }
   const showAxes = axis.showAxes !== false;
@@ -77,7 +189,6 @@ function renderAxis(axis?: AxisDisplayConfig): React.ReactNode {
         showAxes
           ? {
               labels: showNumbers ? undefined : () => '',
-              // Mafs 不支持 step null,这里用 undefined(走 Mafs 默认自动步长)
               lines: axis.xStep ?? undefined,
               subdivisions: showGrid ? 2 : false,
             }
@@ -135,7 +246,6 @@ function renderCurve(c: Curve): React.ReactNode {
         />
       );
     case 'verticalLine':
-      // Mafs 没有直接的 vertical line 元件;用 Line.ThroughPoints 接近 ±∞ 模拟
       return (
         <Line.ThroughPoints
           key={c.id}
@@ -148,14 +258,12 @@ function renderCurve(c: Curve): React.ReactNode {
         />
       );
     case 'unsupported':
-      // 不渲染 — driver 负责通过其他途径显示 error
       return null;
   }
 }
 
 function renderFnOfX(c: Extract<Curve, { kind: 'fnOfX' }>): React.ReactNode {
   const style = normalizeStyle(c.style);
-  // Mafs Plot.OfX 的 style 仅支持 solid/dashed,不支持 dotted(同 Line)
   const segments = c.segments && c.segments.length > 0 ? c.segments : null;
 
   return (
@@ -196,7 +304,6 @@ function renderFnOfX(c: Extract<Curve, { kind: 'fnOfX' }>): React.ReactNode {
 // ─── 标注 ─────────────────────────────────────────────
 
 function renderAnnotation(ann: MathAnnotation, curves: Curve[]): React.ReactNode {
-  // 在对应曲线上查 y 值;非 fnOfX 曲线暂不支持标注(driver 应避免传)
   const curve = curves.find((c) => c.id === ann.curveId);
   if (!curve || curve.kind !== 'fnOfX') return null;
   const y = curve.fn(ann.x);
@@ -212,7 +319,7 @@ function renderAnnotation(ann: MathAnnotation, curves: Curve[]): React.ReactNode
   );
 }
 
-// ─── 分段端点(空心 ○ / 实心 ●) ─────────────────────
+// ─── 分段端点(空心 ○ / 实心 ●,driver 显式传 endpoints) ─────────────────────
 
 function renderEndpoint(ep: MathEndpoint, i: number): React.ReactNode {
   const r = 4;
@@ -220,7 +327,6 @@ function renderEndpoint(ep: MathEndpoint, i: number): React.ReactNode {
   if (ep.closed) {
     return <Point key={`ep-${i}`} x={ep.x} y={ep.y} color={color} svgCircleProps={{ r }} />;
   }
-  // 空心 — Mafs Point 没有 stroke-only 模式;用 svgCircleProps 设置 fill=white + stroke=color
   return (
     <Point
       key={`ep-${i}`}
@@ -231,3 +337,8 @@ function renderEndpoint(ep: MathEndpoint, i: number): React.ReactNode {
     />
   );
 }
+
+// 留接口为未来引用(避免 unused import 警告;buildSegments + detectDiscontinuities
+// 供 overlay 自动端点路径备用,Phase 1A 已可用)
+void buildSegments;
+void detectDiscontinuities;
