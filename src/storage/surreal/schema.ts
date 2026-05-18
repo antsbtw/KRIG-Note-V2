@@ -99,8 +99,8 @@ DEFINE INDEX IF NOT EXISTS schema_version_unique ON schema_version FIELDS versio
  * 额外 attrs" 字面意图。
  */
 const SCHEMA_VERSION_1_3_0 = `
-DEFINE FIELD OVERWRITE attrs ON edge FLEXIBLE TYPE object;
-DEFINE FIELD OVERWRITE payload ON atom FLEXIBLE TYPE object ASSERT $value != NONE;
+DEFINE FIELD OVERWRITE attrs ON edge TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE payload ON atom TYPE object FLEXIBLE ASSERT $value != NONE;
 `;
 
 /**
