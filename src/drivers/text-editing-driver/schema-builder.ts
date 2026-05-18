@@ -19,7 +19,10 @@ function injectFrameworkAttrs(spec: NodeSpec): NodeSpec {
     attrs: {
       ...(spec.attrs || {}),
       indent: spec.attrs?.indent ?? { default: 0 },
-      // L5-B+ 加:fromPage / frameColor / frameStyle / frameGroupId / frameThoughtId
+      // thought-view Phase 3:block anchor 用 — thought atom id 引用,
+      // thought-anchor-plugin 按此 attr 画 block 外框 decoration(色由 thoughtType 决定)
+      frameThoughtId: spec.attrs?.frameThoughtId ?? { default: null },
+      // L5-B+ 加:fromPage / frameColor / frameStyle / frameGroupId
     },
   };
 }

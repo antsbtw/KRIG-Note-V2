@@ -16,6 +16,7 @@ import { registerView } from '@slot/view-type-registry/register-view';
 import { ThoughtView } from './ThoughtView';
 import { registerThoughtCommands } from './thought-commands';
 import { registerNavSide } from './nav-side-content';
+import { registerNoteBridge } from './note-bridge';
 
 registerView({
   id: 'thought-view',
@@ -35,3 +36,4 @@ registerView({
 
 registerThoughtCommands();
 registerNavSide();
+registerNoteBridge();

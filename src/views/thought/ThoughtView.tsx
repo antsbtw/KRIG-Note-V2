@@ -7,10 +7,10 @@
  * - 渲染:折叠列表(按 source 分组)+ active 卡片详情
  */
 
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useAllThoughts } from './use-thoughts-folders';
-import { getThoughtWsState } from './data-model';
+import { getThoughtWsState, setActiveThought } from './data-model';
 import { ThoughtList } from './ThoughtList';
 import { ThoughtCard } from './ThoughtCard';
 import './thought.css';
@@ -30,6 +30,18 @@ export function ThoughtView({ workspaceId }: ThoughtViewProps) {
 
   const allThoughts = useAllThoughts();
   const activeId = wsState?.activeThoughtId ?? null;
+
+  // 跨槽通信:监听 'thought.activate' 切到对应卡片
+  // (来源:Note 内点 mark/image/frame 或 add-from-note 后激活刚创建的 thought)
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const unsub = bus.channels.subscribe('thought.activate', (payload: unknown) => {
+      const { thoughtId } = (payload ?? {}) as { thoughtId?: string };
+      if (typeof thoughtId === 'string') setActiveThought(workspaceId, thoughtId);
+    });
+    return unsub;
+  }, [workspaceId]);
   const activeThought = useMemo(
     () => (activeId ? allThoughts.find((t) => t.id === activeId) ?? null : null),
     [activeId, allThoughts],

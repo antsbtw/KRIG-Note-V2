@@ -203,6 +203,16 @@
   color: var(--krig-fg-muted, #888);
 }
 
+.krig-thought-card-anchor.clickable {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-thought-card-anchor.clickable:hover {
+  background: var(--krig-bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--krig-accent, #4a9eff);
+}
+
 .krig-thought-anchor-source {
   flex: 0 0 auto;
 }

@@ -15,6 +15,7 @@ import { DOMSerializer, Fragment } from 'prosemirror-model';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
+import { scrollToThoughtAnchor as scrollToThoughtAnchorImpl } from './plugins/build-thought-anchor-plugin';
 import {
   vocabHighlightPluginKey,
   updateVocabDefs,
@@ -919,6 +920,134 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     scrollToBlockAnchor(inst.view, anchor);
+  },
+
+  // ── thought-view Phase 3:横切思考层 anchor 操作 ──
+
+  /**
+   * inline mark anchor:在选区加 thoughtMark(attrs.thoughtId + thoughtType)。
+   * 选区为空时不操作(view 侧应先 checkInlineSelection)。
+   *
+   * 返 pos = selection.from(view 用此存 anchor.locator.pmPos)。
+   */
+  addThoughtMark(
+    instanceId: string,
+    thoughtId: string,
+    thoughtType: string,
+  ): { pos: number; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const markType = state.schema.marks.thought;
+    if (!markType) return null;
+    const { from, to } = state.selection;
+    if (from >= to) return null;
+    const mark = markType.create({ thoughtId, thoughtType });
+    const tr = state.tr.addMark(from, to, mark);
+    inst.view.dispatch(tr);
+    const text = state.doc.textBetween(from, to, ' ').slice(0, 100);
+    return { pos: from, text };
+  },
+
+  /**
+   * block frame anchor:给指定 block(blockPos)设 frameThoughtId attr,
+   * thought-anchor-plugin 自动按 frameThoughtId + resolveThoughtType 画外框。
+   *
+   * 返 pos + 该 block 文本前 100 字(用作 locator.text)。
+   */
+  addThoughtBlockFrame(
+    instanceId: string,
+    blockPos: number,
+    thoughtId: string,
+  ): { pos: number; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const node = state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    const tr = state.tr.setNodeMarkup(blockPos, undefined, {
+      ...node.attrs,
+      frameThoughtId: thoughtId,
+    });
+    inst.view.dispatch(tr);
+    const text = node.textContent.slice(0, 100);
+    return { pos: blockPos, text };
+  },
+
+  /**
+   * node attr anchor:给指定 node(image / future audio / video)设 thoughtId attr。
+   * 仅 image 在本期支持(其它节点 spec 暂无 thoughtId attr)。
+   */
+  addThoughtNodeAttr(
+    instanceId: string,
+    nodePos: number,
+    thoughtId: string,
+  ): { pos: number; text: string } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const node = state.doc.nodeAt(nodePos);
+    if (!node) return null;
+    if (node.type.spec.attrs?.thoughtId === undefined) return null;
+    const tr = state.tr.setNodeMarkup(nodePos, undefined, {
+      ...node.attrs,
+      thoughtId,
+    });
+    inst.view.dispatch(tr);
+    // image 用 alt 兜底
+    const text =
+      node.type.name === 'image'
+        ? `[图片] ${(node.attrs.alt as string) || ''}`.trim()
+        : `[${node.type.name}]`;
+    return { pos: nodePos, text };
+  },
+
+  /**
+   * 清除 thought anchor — 三种形态自动识别(走找 mark/frame/node attr,擦掉对应 thoughtId)。
+   * Note ⌘Z 撤销 mark 之外的"主动解除"路径(thought atom 仍在,仅清 anchor)。
+   */
+  removeThoughtAnchor(instanceId: string, thoughtId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state } = inst.view;
+    let tr = state.tr;
+    let changed = false;
+
+    // 1) inline mark
+    const markType = state.schema.marks.thought;
+    if (markType) {
+      state.doc.descendants((node, pos) => {
+        node.marks.forEach((m) => {
+          if (m.type === markType && m.attrs.thoughtId === thoughtId) {
+            tr = tr.removeMark(pos, pos + node.nodeSize, m);
+            changed = true;
+          }
+        });
+      });
+    }
+
+    // 2) block frame + 3) node attr(thoughtId 字段)
+    state.doc.descendants((node, pos) => {
+      const ft = node.attrs.frameThoughtId as string | null | undefined;
+      if (ft === thoughtId) {
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, frameThoughtId: null });
+        changed = true;
+      }
+      const ti = node.attrs.thoughtId as string | null | undefined;
+      if (ti === thoughtId) {
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, thoughtId: null });
+        changed = true;
+      }
+    });
+
+    if (changed) inst.view.dispatch(tr);
+  },
+
+  /** 滚动到 thought anchor 在 PM 内的位置(跨槽通信 → ThoughtView 点卡片 → Note 跳转) */
+  scrollToThoughtAnchor(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    scrollToThoughtAnchorImpl(inst.view, pos);
   },
 
   /**

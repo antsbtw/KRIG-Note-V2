@@ -33,6 +33,7 @@ registerView({
     'tweet-fetcher',    // L5-B3.18 tweet-block Fetch 按钮消费(driver 内部,⚠️ 临时 capability)
     'learning',         // L5-B3.20a 预留(B3.20b dictionary-panel + B3.19 video-block 是消费方)
     'math-rendering',   // math-visual Phase 1B 新增(driver math-visual block 消费 MathHost + compute API)
+    'thought',          // thought-view Phase 3:横切思考层(NoteView ⌘⇧M + floating 💭 用)
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },
@@ -52,6 +53,12 @@ registerView({
       key: 'mod+]',
       command: 'note-view.go-forward',
       enabledWhen: ['in-view-area', 'not-in-input'],
+    },
+    // thought-view Phase 3:⌘⇧M 选区/光标 → 建 thought + anchor + 开右槽
+    {
+      key: 'mod+shift+m',
+      command: 'thought-view.add-from-note',
+      enabledWhen: ['in-view-area'],
     },
   ],
   // L5-B1:NavSide 右键由 folderTreeContextMenuRegistry 管;view 全局 contextMenu 暂无

@@ -33,5 +33,15 @@ export function registerFloatingToolbar(): void {
     ui.createMathButton(VIEW),
     ui.createLinkButton(VIEW),
     ui.createColorButton(VIEW),
+    // thought-view Phase 3:💭 加思考(选区/光标 → thought atom + anchor + 开右槽)
+    {
+      id: 'add-thought',
+      label: '💭',
+      kind: 'button',
+      command: 'thought-view.add-from-note',
+      view: VIEW,
+      group: 'thought',
+      order: 100,
+    },
   ]);
 }

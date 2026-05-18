@@ -130,7 +130,13 @@ export function ThoughtCard({ thought }: ThoughtCardProps) {
       </div>
 
       {thought.anchor && (
-        <div className="krig-thought-card-anchor">
+        <div
+          className="krig-thought-card-anchor clickable"
+          onClick={() =>
+            commandRegistry.execute('thought-view.scroll-to-source', thought.id)
+          }
+          title="跳转到源"
+        >
           {anchorBadge(thought)}
         </div>
       )}

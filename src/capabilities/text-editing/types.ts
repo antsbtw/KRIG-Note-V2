@@ -43,6 +43,15 @@ export interface LinkClickHandler {
   onOpenWebUrl: (url: string) => void;
 }
 
+/**
+ * thought-anchor 路由 handler(view 注入,thought-view-port.md v0.5 §5.5)
+ *
+ * driver 内 anchor 点击 / decoration type 解析都通过这个 callback 让 view 决定:
+ * - onAnchorClick:用户点 mark/node anchor → view 开 right slot ThoughtView + 激活卡片
+ * - resolveThoughtType:driver decoration render 用,view 从 thoughtCapability 本地缓存查
+ */
+export type { ThoughtAnchorHandler, ThoughtAnchorClickPayload } from '@drivers/text-editing-driver';
+
 // NoteLinkSearchHandler 已从 driver 层 re-export(line 13),不再重复声明
 
 /**
@@ -126,6 +135,11 @@ export interface TextEditingApi {
 
   /** view 注入 link-click 路由 */
   readonly setLinkClickHandler: (handler: LinkClickHandler) => void;
+
+  /** thought-view Phase 3:view 注入 thought-anchor 路由(点击 mark/node + decoration 色解析) */
+  readonly setThoughtAnchorHandler: (
+    handler: import('@drivers/text-editing-driver').ThoughtAnchorHandler | null,
+  ) => void;
 
   /** view 注入 noteLink search 路由 */
   readonly setNoteLinkSearchHandler: (handler: NoteLinkSearchHandler) => void;
