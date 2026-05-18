@@ -15,6 +15,7 @@ import type {
   NoteDocEnvelope,
 } from './note-folder-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
+import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
 
 declare global {
   interface Window {
@@ -259,6 +260,35 @@ declare global {
       noteDelete(id: string): Promise<void>;
       /** main → renderer 推送:笔记列表变更;返 unsubscribe */
       onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
+
+      // ── thought capability (横切思考层 — thought-view-port.md v0.5 §5.3) ──
+      // 8 invoke + 1 broadcast = 9 表面
+      /** #1 原子操作:建 atom;若 info.anchor != null 同事务内建 thoughtOf 边(attrs.source/locator) */
+      thoughtCreate(info: Omit<ThoughtInfo, 'id' | 'createdAt' | 'updatedAt'>): Promise<ThoughtInfo>;
+      /** #2 全量列表(Thought View 主舞台) */
+      thoughtList(): Promise<ThoughtInfo[]>;
+      /** #3 某 source 资源的全部 thought(NoteView/EBookView 右槽用) */
+      thoughtListBySource(source: ThoughtSource, resourceId: string): Promise<ThoughtInfo[]>;
+      /** #4 单条查询 */
+      thoughtGet(id: string): Promise<ThoughtInfo | null>;
+      /** #5 改 payload 字段(doc/type/resolved/pinned/color/thumbnail/serviceId) */
+      thoughtUpdate(
+        id: string,
+        updates: Partial<
+          Pick<
+            ThoughtInfo,
+            'doc' | 'type' | 'resolved' | 'pinned' | 'color' | 'thumbnail' | 'serviceId'
+          >
+        >,
+      ): Promise<ThoughtInfo | null>;
+      /** #6 级联删 atom + 所有 thoughtOf 边 */
+      thoughtDelete(id: string): Promise<void>;
+      /** #7 NavSide Thought tab 拖拽用 */
+      thoughtMoveToFolder(thoughtId: string, folderId: string | null): Promise<void>;
+      /** #8 改/解 anchor(Note 撤销 mark / ebook 位置变 / 显式 unanchor)*/
+      thoughtUpdateAnchor(thoughtId: string, anchor: ThoughtAnchor | null): Promise<void>;
+      /** main → renderer 推送:thought 列表变更;返 unsubscribe */
+      onThoughtListChanged(callback: (list: ThoughtInfo[]) => void): () => void;
 
       // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
       // decision 021 §1.1: folderList / folderCreate 加 viewType 入参 (note + graph 隔离视图)

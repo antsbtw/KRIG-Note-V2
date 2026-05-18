@@ -388,6 +388,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.NOTE_LIST_CHANGED, handler);
   },
 
+  // ── thought capability(横切思考层 — thought-view-port.md v0.5)──
+  // 8 invoke + 1 broadcast 订阅 = 9 表面
+  thoughtCreate(info: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_CREATE, info);
+  },
+  thoughtList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_LIST);
+  },
+  thoughtListBySource(source: string, resourceId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_LIST_BY_SOURCE, { source, resourceId });
+  },
+  thoughtGet(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_GET, id);
+  },
+  thoughtUpdate(id: string, updates: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_UPDATE, { id, updates });
+  },
+  thoughtDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_DELETE, id);
+  },
+  thoughtMoveToFolder(thoughtId: string, folderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_MOVE_TO_FOLDER, { thoughtId, folderId });
+  },
+  thoughtUpdateAnchor(thoughtId: string, anchor: unknown): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.THOUGHT_UPDATE_ANCHOR, { thoughtId, anchor });
+  },
+  /** main → renderer 推送:thought 列表变更 */
+  onThoughtListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.THOUGHT_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.THOUGHT_LIST_CHANGED, handler);
+  },
+
   // ── L7-sub2:folder capability (decision 012,SurrealDB) ──
   // decision 021 §1.1: folderList / folderCreate 加 viewType 入参 (note + graph 隔离视图)
   folderList(viewType: FolderViewType): Promise<unknown> {

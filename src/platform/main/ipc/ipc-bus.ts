@@ -19,6 +19,7 @@ import { registerGraphHandlers } from '../graph';
 import { registerFolderHandlers } from '../folder';
 import { registerNoteHandlers } from '../note';
 import { registerPmContentHandlers } from '../pm-content';
+import { registerThoughtHandlers } from '../thought';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -36,4 +37,5 @@ export function initIpcBus(): void {
   registerFolderHandlers();         // L7-sub2:folder capability (decision 012,SurrealDB)
   registerNoteHandlers();           // L7-sub2:note capability (decision 012,SurrealDB)
   registerPmContentHandlers();      // L7-sub3a-1:pm-content capability (decision 014,view-agnostic pm atom)
+  registerThoughtHandlers();        // 横切思考层(thought-view-port.md v0.5)
 }

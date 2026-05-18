@@ -35,16 +35,18 @@ import { broadcastGraphListChanged } from '../graph/broadcast';
  */
 async function broadcastFolderListChanged(): Promise<void> {
   try {
-    const [noteList, graphList, ebookList] = await Promise.all([
+    const [noteList, graphList, ebookList, thoughtList] = await Promise.all([
       listFolders('note'),
       listFolders('graph'),
       listFolders('ebook'),
+      listFolders('thought'),
     ]);
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue;
       win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, noteList);
       win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, graphList);
       win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, ebookList);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, thoughtList);
     }
   } catch (err) {
     console.warn('[folder] broadcast list-changed failed:', err);
@@ -54,7 +56,14 @@ async function broadcastFolderListChanged(): Promise<void> {
 export function registerFolderHandlers(): void {
   // decision 021 §4.1: FOLDER_LIST handler 透传 viewType 入参
   ipcMain.handle(IPC_CHANNELS.FOLDER_LIST, async (_e, viewType: unknown) => {
-    if (viewType !== 'note' && viewType !== 'graph' && viewType !== 'ebook') return [];
+    if (
+      viewType !== 'note' &&
+      viewType !== 'graph' &&
+      viewType !== 'ebook' &&
+      viewType !== 'thought'
+    ) {
+      return [];
+    }
     return listFolders(viewType);
   });
 
@@ -65,8 +74,15 @@ export function registerFolderHandlers(): void {
       if (!p || typeof p.title !== 'string' || !p.title) return null;
       const parentFolderId =
         typeof p.parentFolderId === 'string' && p.parentFolderId ? p.parentFolderId : null;
-      // decision 021 §4.1 + sub-phase 022: viewType 必传校验 (含 'ebook')
-      if (p.viewType !== 'note' && p.viewType !== 'graph' && p.viewType !== 'ebook') return null;
+      // decision 021 §4.1 + sub-phase 022: viewType 必传校验 (含 'ebook' / 'thought')
+      if (
+        p.viewType !== 'note' &&
+        p.viewType !== 'graph' &&
+        p.viewType !== 'ebook' &&
+        p.viewType !== 'thought'
+      ) {
+        return null;
+      }
       const folder = await createFolder(p.title, parentFolderId, p.viewType);
       await broadcastFolderListChanged();
       return folder;

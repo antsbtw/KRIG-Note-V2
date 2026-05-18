@@ -55,4 +55,4 @@ export interface FolderInfo {
  * (V2 分层 lint 规则 no-restricted-imports 禁止).
  * capability folder/types.ts re-export 该类型给消费者.
  */
-export type FolderViewType = 'note' | 'graph' | 'ebook';
+export type FolderViewType = 'note' | 'graph' | 'ebook' | 'thought';
