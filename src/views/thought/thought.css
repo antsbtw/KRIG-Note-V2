@@ -232,22 +232,20 @@
   font-size: 11px;
 }
 
-.krig-thought-card-editor {
+/* Phase 5.2:textarea → text-editing.Host;Host 容器外壳样式 */
+.krig-thought-card-editor-host {
   flex: 1 1 auto;
   min-height: 200px;
   background: var(--krig-bg-secondary, #232323);
-  color: var(--krig-fg, #e0e0e0);
   border: 1px solid var(--krig-border, #333);
   border-radius: 8px;
   padding: 12px 14px;
   font-size: 14px;
   line-height: 1.6;
-  font-family: inherit;
-  resize: none;
-  outline: none;
+  overflow: auto;
 }
 
-.krig-thought-card-editor:focus {
+.krig-thought-card-editor-host:focus-within {
   border-color: var(--krig-accent, #4a9eff);
 }
 

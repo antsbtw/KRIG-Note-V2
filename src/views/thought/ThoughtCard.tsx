@@ -1,21 +1,20 @@
 /**
  * ThoughtCard — 单个 thought 详情卡片(主舞台右区)
  *
- * Phase 2 简化:文本编辑用 textarea(派生自 doc 首段);Phase 3 切到 text-editing.Host。
- * 数据兼容:textarea 内容 = doc.payload.content[0].content[0].text,空时建空 paragraph。
+ * Phase 5.2 升级:文本编辑由 ThoughtCardEditor(text-editing.Host 薄包装)承担。
  *
  * 操作:type 切换(9 种)/ resolve / pin / delete。
- * 状态:dangling-anchor 角标(anchor 在但失效);v0.5 §8.3。
+ * 状态:dangling-anchor 角标(anchor 在但 text 空)— v0.5 §8.3。
+ * AI:type='ai-response' 且 doc 空 → spinner;非空 → Host readOnly + 复制按钮。
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import type { ThoughtCapabilityApi, ThoughtInfo } from '@capabilities/thought/types';
+import type { ThoughtInfo } from '@capabilities/thought/types';
 import {
   THOUGHT_TYPE_META,
   type ThoughtType,
 } from '@shared/ipc/thought-types';
+import { ThoughtCardEditor } from './ThoughtCardEditor';
 
 interface ThoughtCardProps {
   thought: ThoughtInfo;
@@ -26,59 +25,67 @@ const TYPES: ThoughtType[] = [
   'highlight', 'underline', 'rect-frame',
 ];
 
-function extractFirstParaText(doc: ThoughtInfo['doc']): string {
+function extractPlainText(doc: ThoughtInfo['doc']): string {
   const root = doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
-  const firstBlock = root?.content?.[0] as { content?: Array<Record<string, unknown>> } | undefined;
-  if (!firstBlock?.content) return '';
-  return firstBlock.content
-    .filter((n) => n.type === 'text')
-    .map((n) => (n.text as string) ?? '')
-    .join('');
+  if (!root?.content) return '';
+  return root.content.map(extractBlockText).join('\n');
 }
 
-function wrapPlainText(text: string): ThoughtInfo['doc'] {
-  const paragraph: Record<string, unknown> = { type: 'paragraph' };
-  if (text) {
-    paragraph.content = [{ type: 'text', text }];
-  }
-  return {
-    format: 'pm-doc-json',
-    version: '0.1',
-    payload: { type: 'doc', content: [paragraph] },
-  };
+function extractBlockText(node: Record<string, unknown>): string {
+  if (node.type === 'text') return (node.text as string) ?? '';
+  const children = node.content as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(children)) return '';
+  return children.map(extractBlockText).join('');
+}
+
+function isAiPending(t: ThoughtInfo): boolean {
+  if (t.type !== 'ai-response') return false;
+  return extractPlainText(t.doc).trim().length === 0;
+}
+
+function copyToClipboard(text: string): void {
+  void navigator.clipboard?.writeText(text).catch((e) => {
+    console.warn('[thought-card] clipboard failed:', e);
+  });
+}
+
+function anchorBadge(t: ThoughtInfo): React.ReactNode {
+  if (!t.anchor) return null;
+  const sourceText = {
+    note: '📝 Note',
+    book: '📚 Book',
+    graph: '📊 Graph',
+    canvas: '🎨 Canvas',
+  }[t.anchor.source];
+  // v0.5 §8.3 dangling-anchor 简化探测:
+  //   anchor 存在但 locator.text/textContent 都空 → 视为锚点失效(兜底视觉,
+  //   真实 source 探测留后续 sub-phase 异步路径)。
+  const locator = t.anchor.locator as { text?: string; textContent?: string };
+  const anchorText = locator.text ?? locator.textContent ?? '';
+  const isDangling = !anchorText.trim();
+  return (
+    <>
+      <span className="krig-thought-anchor-source">{sourceText}</span>
+      {isDangling ? (
+        <span className="krig-thought-anchor-dangling" title="锚点失效 — 点击解依附">
+          ⚠️ 锚点失效
+        </span>
+      ) : (
+        <span className="krig-thought-anchor-text" title={anchorText}>
+          {anchorText.slice(0, 40)}{anchorText.length > 40 ? '…' : ''}
+        </span>
+      )}
+    </>
+  );
 }
 
 export function ThoughtCard({ thought }: ThoughtCardProps) {
-  const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
-  const [draft, setDraft] = useState(() => extractFirstParaText(thought.doc));
-  const saveTimer = useRef<number | null>(null);
-  const lastSavedRef = useRef(draft);
-
-  // 切换到不同 thought 时同步草稿(避免 stale)
-  useEffect(() => {
-    const fresh = extractFirstParaText(thought.doc);
-    setDraft(fresh);
-    lastSavedRef.current = fresh;
-  }, [thought.id, thought.doc]);
-
-  // debounce 2s 落库(防抖)
-  useEffect(() => {
-    if (draft === lastSavedRef.current) return;
-    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      lastSavedRef.current = draft;
-      void thoughtApi.updateThought(thought.id, { doc: wrapPlainText(draft) });
-    }, 1000);
-    return () => {
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    };
-  }, [draft, thought.id, thoughtApi]);
-
-  const meta = THOUGHT_TYPE_META[thought.type];
   const cardClass = [
     'krig-thought-card',
     thought.resolved ? 'resolved' : '',
   ].filter(Boolean).join(' ');
+  const aiPending = isAiPending(thought);
+  const aiReadOnly = thought.type === 'ai-response' && !aiPending;
 
   return (
     <div className={cardClass}>
@@ -141,72 +148,28 @@ export function ThoughtCard({ thought }: ThoughtCardProps) {
         </div>
       )}
 
-      {isAiPending(thought) ? (
+      {aiPending ? (
         <div className="krig-thought-card-ai-pending" aria-label="AI 正在回复">
           <span className="krig-thought-ai-spinner" aria-hidden>🤖</span>
           <span>AI 正在思考...</span>
         </div>
       ) : (
-        <textarea
-          className="krig-thought-card-editor"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={`记一条 ${meta.label}...`}
-          aria-label="思考内容"
-          readOnly={thought.type === 'ai-response'}
+        // key={thought.id}:切换 thought 时强制 remount Host instance(避 stale state)
+        <ThoughtCardEditor
+          key={thought.id}
+          thought={thought}
+          readOnly={aiReadOnly}
         />
       )}
-      {thought.type === 'ai-response' && !isAiPending(thought) && (
+      {aiReadOnly && (
         <button
           className="krig-thought-card-copy"
-          onClick={() => copyToClipboard(draft)}
+          onClick={() => copyToClipboard(extractPlainText(thought.doc))}
           title="复制 AI 回复"
         >
           📋 复制
         </button>
       )}
     </div>
-  );
-}
-
-function isAiPending(t: ThoughtInfo): boolean {
-  if (t.type !== 'ai-response') return false;
-  const body = extractFirstParaText(t.doc);
-  return body.trim().length === 0;
-}
-
-function copyToClipboard(text: string): void {
-  void navigator.clipboard?.writeText(text).catch((e) => {
-    console.warn('[thought-card] clipboard failed:', e);
-  });
-}
-
-function anchorBadge(t: ThoughtInfo): React.ReactNode {
-  if (!t.anchor) return null;
-  const sourceText = {
-    note: '📝 Note',
-    book: '📚 Book',
-    graph: '📊 Graph',
-    canvas: '🎨 Canvas',
-  }[t.anchor.source];
-  // v0.5 §8.3 dangling-anchor 简化探测(Phase 4):
-  //   anchor 存在但 locator.text/textContent 都空 → 视为锚点失效(✓ 兜底视觉,
-  //   真实 source 探测留 Phase 5 异步路径)。
-  const locator = t.anchor.locator as { text?: string; textContent?: string };
-  const anchorText = locator.text ?? locator.textContent ?? '';
-  const isDangling = !anchorText.trim();
-  return (
-    <>
-      <span className="krig-thought-anchor-source">{sourceText}</span>
-      {isDangling ? (
-        <span className="krig-thought-anchor-dangling" title="锚点失效 — 点击解依附">
-          ⚠️ 锚点失效
-        </span>
-      ) : (
-        <span className="krig-thought-anchor-text" title={anchorText}>
-          {anchorText.slice(0, 40)}{anchorText.length > 40 ? '…' : ''}
-        </span>
-      )}
-    </>
   );
 }
