@@ -41,6 +41,8 @@ export function showWebContextMenu(payload: WebContextMenuPayload): void {
     isEditable: false,
     // L5-B3.15:web view 不消费 has-link 条件,默认 false
     hasLink: false,
+    // thought-view:web 内容无 thought anchor 概念,默认 null
+    thoughtId: null,
     x: payload.x,
     y: payload.y,
   });

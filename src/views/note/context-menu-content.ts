@@ -42,5 +42,15 @@ export function registerContextMenu(): void {
     lr.createDictionaryLookupItem(VIEW),     // 📖 查词(S3 走 learning 工厂)
     lr.createTranslateItem(VIEW),            // 🌐 翻译(S3 走 learning 工厂)
     te.createDeleteBlockItem(VIEW),          // 删除 Block
+    // thought-view:点击位置有 thought anchor 时显 "删除Thought"
+    {
+      id: 'note-view.delete-thought-at-cursor',
+      label: '💭 删除 Thought',
+      command: 'thought-view.delete-thought-at-cursor',
+      enabledWhen: 'has-thought',
+      view: VIEW,
+      group: 'thought',
+      order: 200,
+    },
   ]);
 }

@@ -8,11 +8,13 @@
  * - 'has-selection'  选区非空(光标态隐藏)
  * - 'is-editable'    点击位置在可编辑区域
  * - 'has-link'(L5-B3.15)选区上覆盖 link mark — "移除链接"等条件项用
+ * - 'has-thought'    点击位置在 thought anchor 上(inline mark / block frame /
+ *                    image node attr 三态任一)— "删除Thought" 条件项用
  *
  * 当 enabledWhen 不满足时:本 item 不渲染(对齐 V1 "条件显示"行为)。
  * 加新枚举时同步 use-context-menu-trigger 的 ContextInfo 计算逻辑。
  */
-export type EnabledWhen = 'always' | 'has-selection' | 'is-editable' | 'has-link';
+export type EnabledWhen = 'always' | 'has-selection' | 'is-editable' | 'has-link' | 'has-thought';
 
 export interface ContextMenuItem {
   id: string;
@@ -32,6 +34,10 @@ export interface ContextInfo {
   isEditable: boolean;
   /** L5-B3.15:选区上是否覆盖 link mark(给"移除链接"条件项用) */
   hasLink: boolean;
+  /** thought-view:点击位置的 thought id(inline mark / block frame / image attr 任一)
+   *  null = 不在 thought anchor 上;非空 = 用作 'has-thought' enabledWhen 判定 +
+   *  传给 "删除Thought" 命令 handler。 */
+  thoughtId: string | null;
   /** 鼠标位置 */
   x: number;
   y: number;

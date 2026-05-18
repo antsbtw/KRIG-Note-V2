@@ -47,10 +47,21 @@ export function useContextMenuTrigger(
       const inLinkSel = !!selPayload?.activeMarks?.includes('link');
       const hasLink = inLinkDom || inLinkSel;
 
+      // thought-view:点击位置 thought anchor 三态 DOM 检测
+      //   - inline mark    → <span data-thought-id="...">
+      //   - image attr     → <div data-thought-id="..." class="krig-image-block">
+      //   - block frame    → 节点上挂 data-thought-block-id="..." (decoration)
+      const thoughtEl = target?.closest('[data-thought-id], [data-thought-block-id]');
+      const thoughtId =
+        thoughtEl?.getAttribute('data-thought-id') ??
+        thoughtEl?.getAttribute('data-thought-block-id') ??
+        null;
+
       const context: ContextInfo = {
         hasSelection,
         isEditable,
         hasLink,
+        thoughtId,
         x: e.clientX,
         y: e.clientY,
       };

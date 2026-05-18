@@ -12,6 +12,7 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { ThoughtType } from '@capabilities/thought/types';
 import { thoughtCap } from './command-impl/shared';
 import { addThoughtFromNote } from './command-impl/add-from-note';
@@ -61,5 +62,17 @@ export function registerThoughtCommands(): void {
   commandRegistry.register('thought-view.scroll-to-source', (thoughtId: unknown) => {
     if (typeof thoughtId !== 'string') return;
     void scrollToSource(thoughtId);
+  });
+
+  /**
+   * 右键菜单 "删除Thought" 命令 — 从 contextMenuController 拿当前点击位置
+   * 的 thoughtId(由 use-context-menu-trigger DOM 检测填入 context.thoughtId)。
+   * 删 thought atom 后 capability onListChanged 广播 → Note 侧 note-bridge
+   * 检测到 thought 消失 → 调 driver removeThoughtAnchor 清 mark/frame/node attr。
+   */
+  commandRegistry.register('thought-view.delete-thought-at-cursor', () => {
+    const id = contextMenuController.getState().context.thoughtId;
+    if (typeof id !== 'string') return;
+    void thoughtCap().deleteThought(id);
   });
 }

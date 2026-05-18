@@ -78,7 +78,6 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
     if (isActive && cardRef.current) {
       cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
   const meta = THOUGHT_TYPE_META[thought.type];
