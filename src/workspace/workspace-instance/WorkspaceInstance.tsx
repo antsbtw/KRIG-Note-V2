@@ -10,7 +10,6 @@
 
 import { useRef } from 'react';
 import { NavSideFrame } from './nav-side-frame/NavSideFrame';
-import { ToolbarFrame } from './toolbar-frame/ToolbarFrame';
 import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
 import { workspaceManager } from '../workspace-state/workspace-manager';
@@ -69,7 +68,8 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
           <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
         )}
         <div className="krig-workspace-main">
-          <ToolbarFrame viewId={activeViewId} />
+          {/* per-slot toolbar(fix/per-slot-toolbar):ToolbarFrame 下沉进 SlotArea 的
+              每个 slot 容器内,left/right view 各自有独立 toolbar 不再越界。*/}
           <SlotArea
             workspaceId={state.id}
             slotBinding={effectiveSlotBinding}
