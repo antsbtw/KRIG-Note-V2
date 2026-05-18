@@ -2696,3 +2696,481 @@
   font-style: italic;
   min-height: 1.4em;
 }
+
+/* ─────────────────────────────────────────────────────────
+ * Math Visual Block(V1 → V2 迁移 Phase 1B)
+ *
+ * 容器 .krig-math-visual + 内部 React 区 .krig-math-visual__render +
+ * caption figcaption.krig-math-visual__caption。
+ *
+ * 内部所有 .math-visual / .mv-* 类名沿用 V1 设计(避免冲突的 mv- namespace)。
+ * ──────────────────────────────────────────────────────── */
+
+.krig-pm-host .ProseMirror .krig-math-visual {
+  margin: 12px 0;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1e1e1e;
+}
+
+.krig-pm-host .ProseMirror .krig-math-visual.ProseMirror-selectednode {
+  border-color: #2D7FF9;
+  box-shadow: 0 0 0 2px rgba(45, 127, 249, 0.3);
+}
+
+.krig-pm-host .ProseMirror .krig-math-visual__render {
+  /* React 控制区,本身不加 padding/border(交给内部 .math-visual) */
+}
+
+.krig-pm-host .ProseMirror .krig-math-visual__caption {
+  display: block;
+  margin: 4px 12px 8px;
+  text-align: inherit;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  min-height: 1.4em;
+}
+
+.krig-pm-host .ProseMirror .math-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 函数列表 */
+.krig-pm-host .ProseMirror .mv-fn-list {
+  padding: 8px 12px;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-color--clickable {
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-color--clickable:hover {
+  transform: scale(1.3);
+}
+
+/* StylePopover */
+.krig-pm-host .ProseMirror .mv-style-popover {
+  position: absolute;
+  z-index: 100;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.krig-pm-host .ProseMirror .mv-style-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.krig-pm-host .ProseMirror .mv-style-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.1s;
+}
+
+.krig-pm-host .ProseMirror .mv-style-swatch:hover { border-color: #888; }
+.krig-pm-host .ProseMirror .mv-style-swatch--active { border-color: #fff; }
+
+.krig-pm-host .ProseMirror .mv-style-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.krig-pm-host .ProseMirror .mv-style-label {
+  font-size: 11px;
+  color: #888;
+  min-width: 28px;
+}
+
+.krig-pm-host .ProseMirror .mv-style-slider {
+  flex: 1;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border-radius: 2px;
+  outline: none;
+}
+
+.krig-pm-host .ProseMirror .mv-style-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #2D7FF9;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror .mv-style-value {
+  font-size: 11px;
+  color: #888;
+  min-width: 20px;
+  text-align: right;
+  font-family: 'SF Mono', monospace;
+}
+
+.krig-pm-host .ProseMirror .mv-style-btns {
+  display: flex;
+  gap: 2px;
+}
+
+.krig-pm-host .ProseMirror .mv-style-btn {
+  background: #333;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #aaa;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror .mv-style-btn:hover { background: #3a3a3a; }
+.krig-pm-host .ProseMirror .mv-style-btn--active {
+  background: #1a3a5c;
+  border-color: #2D7FF9;
+  color: #7bb8ff;
+}
+
+/* 函数 label / 表达式 / 输入 / 按钮 */
+.krig-pm-host .ProseMirror .mv-fn-label {
+  font-size: 13px;
+  color: #aaa;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  white-space: nowrap;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-expr {
+  flex: 1;
+  font-size: 13px;
+  color: #e0e0e0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  cursor: text;
+  padding: 2px 6px;
+  border-radius: 4px;
+  min-width: 60px;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-expr:hover { background: #2a2a2a; }
+.krig-pm-host .ProseMirror .mv-fn-row--error .mv-fn-expr { color: #f87171; }
+
+.krig-pm-host .ProseMirror .mv-fn-error {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-expr-tex .katex { font-size: 1.05em; }
+.krig-pm-host .ProseMirror .mv-fn-expr-text { color: #666; font-style: italic; }
+
+.krig-pm-host .ProseMirror .mv-fn-input {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  padding: 2px 6px;
+  outline: none;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-input:focus { border-color: #2D7FF9; }
+
+.krig-pm-host .ProseMirror .mv-fn-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: #888;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-btn:hover { background: #333; color: #ddd; }
+.krig-pm-host .ProseMirror .mv-fn-btn--active { color: #2D7FF9; border-color: #2D7FF9; }
+.krig-pm-host .ProseMirror .mv-fn-btn-tex .katex { font-size: 0.85em; }
+.krig-pm-host .ProseMirror .mv-fn-btn--hidden { opacity: 0.4; }
+
+.krig-pm-host .ProseMirror .mv-fn-btn--remove {
+  color: #888;
+  font-size: 16px;
+  padding: 0 4px;
+}
+
+.krig-pm-host .ProseMirror .mv-fn-btn--remove:hover { color: #ff4444; }
+.krig-pm-host .ProseMirror .mv-fn-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.krig-pm-host .ProseMirror .mv-add-fn {
+  background: none;
+  border: 1px dashed #444;
+  color: #888;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.krig-pm-host .ProseMirror .mv-add-fn:hover { border-color: #666; color: #bbb; }
+
+/* 参数滑块 */
+.krig-pm-host .ProseMirror .mv-params {
+  padding: 6px 12px;
+  border-bottom: 1px solid #333;
+}
+
+.krig-pm-host .ProseMirror .mv-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.krig-pm-host .ProseMirror .mv-param-name {
+  font-size: 13px;
+  color: #aaa;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  min-width: 16px;
+  text-align: right;
+}
+
+.krig-pm-host .ProseMirror .mv-param-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border-radius: 2px;
+  outline: none;
+}
+
+.krig-pm-host .ProseMirror .mv-param-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2D7FF9;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror .mv-param-value {
+  font-size: 12px;
+  color: #888;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  min-width: 42px;
+  text-align: right;
+}
+
+/* 画布 */
+.krig-pm-host .ProseMirror .mv-canvas {
+  padding: 4px;
+  min-height: 300px;
+}
+
+.krig-pm-host .ProseMirror .mv-canvas svg {
+  border-radius: 4px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.krig-pm-host .ProseMirror .mv-canvas svg:active { cursor: grabbing; }
+
+/* 浮动工具栏 */
+.krig-pm-host .ProseMirror .mv-floating-toolbar {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: rgba(26, 26, 26, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+
+.krig-pm-host .ProseMirror .mv-canvas:hover .mv-floating-toolbar,
+.krig-pm-host .ProseMirror .mv-floating-toolbar:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.krig-pm-host .ProseMirror .mv-range-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.krig-pm-host .ProseMirror .mv-range-label {
+  font-size: 12px;
+  color: #888;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-style: italic;
+  min-width: 10px;
+}
+
+.krig-pm-host .ProseMirror .mv-range-input {
+  width: 48px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #ddd;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  padding: 2px 4px;
+  text-align: center;
+  outline: none;
+}
+
+.krig-pm-host .ProseMirror .mv-range-input:focus { border-color: #2D7FF9; }
+.krig-pm-host .ProseMirror .mv-range-sep { font-size: 12px; color: #666; }
+
+/* 设置面板 */
+.krig-pm-host .ProseMirror .mv-settings {
+  padding: 8px 12px;
+  border-top: 1px solid #333;
+  background: #1a1a1a;
+}
+
+.krig-pm-host .ProseMirror .mv-settings--floating {
+  position: absolute;
+  bottom: 48px;
+  right: 8px;
+  z-index: 20;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: rgba(26, 26, 26, 0.95);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  max-width: 380px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-section {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 0 2px;
+  border-bottom: 1px solid #2a2a2a;
+  margin-bottom: 4px;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-section:first-child { padding-top: 0; }
+
+.krig-pm-host .ProseMirror .mv-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-label {
+  font-size: 12px;
+  color: #888;
+  min-width: 56px;
+  flex-shrink: 0;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-btn {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #bbb;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-btn:hover {
+  border-color: #666;
+  color: #ddd;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-btn--active {
+  background: #2D7FF9;
+  border-color: #2D7FF9;
+  color: #fff;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-unit { font-size: 11px; color: #666; }
+
+.krig-pm-host .ProseMirror .mv-settings-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #bbb;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror .mv-settings-check input { accent-color: #2D7FF9; }
+
+/* Mafs 暗色主题覆盖 */
+.krig-pm-host .ProseMirror .math-visual .MafsView {
+  --mafs-bg: #1e1e1e;
+  --mafs-fg: #888;
+  --mafs-line-color: #333;
+  background: #1e1e1e !important;
+}
+
+/* 全屏按钮 — Phase 2 接 L2 fullscreen overlay 时引入(.mv-fullscreen-btn) */

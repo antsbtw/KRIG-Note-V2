@@ -32,6 +32,7 @@ registerView({
     'ytdlp',            // L5-B3.18 tweet-block Download 按钮消费(driver 内部)
     'tweet-fetcher',    // L5-B3.18 tweet-block Fetch 按钮消费(driver 内部,⚠️ 临时 capability)
     'learning',         // L5-B3.20a 预留(B3.20b dictionary-panel + B3.19 video-block 是消费方)
+    'math-rendering',   // math-visual Phase 1B 新增(driver math-visual block 消费 MathHost + compute API)
   ],
   component: NoteView,
   navSideTab: { label: 'Note', icon: '📝', order: 1 },

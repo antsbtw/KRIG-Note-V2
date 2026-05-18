@@ -173,3 +173,21 @@ export function createHtmlBlockItem(viewId: string): SlashItem {
     order: 144,
   };
 }
+
+/**
+ * Math Visual Block(V1 → V2 迁移 Phase 1B,走 math-rendering capability)
+ *
+ * 交互式函数图 Block — Mafs 画布 + mathjs 求值 + LaTeX 公式输入。
+ * 与 Math Block(KaTeX 公式静态渲染)是不同节点:Math Visual 是动态绘图。
+ * 视为 PM 通用(同 Math / Mermaid / HTML 思路)。
+ */
+export function createMathVisualBlockItem(viewId: string): SlashItem {
+  return {
+    id: `${viewId}.slash.math-visual`,
+    label: 'Function Graph',
+    command: 'text-editing.slash-insert-math-visual',
+    keywords: ['graph', 'plot', 'function', 'math', 'visual', 'mafs', '函数图', '绘图'],
+    view: viewId,
+    order: 146,
+  };
+}
