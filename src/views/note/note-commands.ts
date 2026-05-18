@@ -318,4 +318,39 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.go-forward', () => {
     if (canGoForward()) historyGoForward();
   });
+
+  // ── Toolbar 操作命令 ──
+
+  /** × 关闭 NoteView(走 bus.slot.closeLeft;最后一个 view 时 closeLeft 自身拒绝)*/
+  commandRegistry.register('note-view.close-view', () => {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const bus = workspaceManager.getBus(wsId);
+    if (!bus) return;
+    bus.slot.closeLeft();
+  });
+
+  /** 已保存 button 的 no-op handler — V2 已 auto-persist,这里只占位提示状态 */
+  commandRegistry.register('note-view.flush-save', () => {
+    // V2 updateNote 同步落 SurrealDB,无需手动 flush;占位等未来加 dirty 状态时填实
+  });
+
+  /** 重置 button 占位(V1 是 slot lock toggle,V2 无对应概念,先 no-op)*/
+  commandRegistry.register('note-view.toolbar-reset', () => {
+    // 占位:V2 无 slot lock / 联动锁概念,后续接入时填实
+  });
+
+  /**
+   * 田 dropdown 视图切换 — 在 right slot 打开指定 view(空白,无 payload)。
+   * commandArg = 目标 viewId(e.g. 'note-view' / 'ebook-view' / 'web-view')。
+   * 已装同类直接覆盖重开(openRight 是幂等的)。
+   */
+  commandRegistry.register('note-view.open-right-slot', (viewId: unknown) => {
+    if (typeof viewId !== 'string') return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const bus = workspaceManager.getBus(wsId);
+    if (!bus) return;
+    bus.slot.openRight(viewId);
+  });
 }

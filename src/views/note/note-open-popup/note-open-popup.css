@@ -1,0 +1,75 @@
+/* NoteOpenPopup — Toolbar Open 按钮弹层(对齐 V1 OpenFilePopup 视觉) */
+
+.krig-note-open-popup {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: 420px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.krig-note-open-popup__input {
+  flex-shrink: 0;
+  border: none;
+  border-bottom: 1px solid #3a3a3a;
+  background: transparent;
+  padding: 10px 12px;
+  color: #e8eaed;
+  font-size: 13px;
+  outline: none;
+}
+
+.krig-note-open-popup__input::placeholder {
+  color: #888;
+}
+
+.krig-note-open-popup__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.krig-note-open-popup__empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.krig-note-open-popup__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.krig-note-open-popup__item--active,
+.krig-note-open-popup__item:hover {
+  background: #3a3a3a;
+}
+
+.krig-note-open-popup__icon {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 15px;
+  text-align: center;
+}
+
+.krig-note-open-popup__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
