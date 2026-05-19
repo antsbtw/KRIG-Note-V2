@@ -119,6 +119,12 @@ function rebaseCollapsed(tr: Transaction, oldCollapsed: Set<number>): Set<number
 
 // ─── 公共 API(供 driver / TOC 用)────────────────────────
 
+/** 查某 heading 当前是否折叠(handle dynamicLabel 用)*/
+export function isHeadingCollapsed(state: EditorState, pos: number): boolean {
+  const cur = headingCollapseKey.getState(state);
+  return cur ? cur.collapsed.has(pos) : false;
+}
+
 /** 切换某 heading 的折叠状态 */
 export function toggleHeadingCollapse(view: EditorView, pos: number): void {
   const node = view.state.doc.nodeAt(pos);

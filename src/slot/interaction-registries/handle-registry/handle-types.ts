@@ -20,6 +20,8 @@ export interface HandleVisibilityContext {
   blockType: string;
   /** 当前 block 节点的 attrs(给 visibleWhen 判断 isTitle / level / indent 等)*/
   blockAttrs: Record<string, unknown>;
+  /** PM doc 中的 block pos(给 dynamicLabel 查询 plugin state 用,如 heading 折叠态)*/
+  blockPos: number;
 }
 
 /**
@@ -78,6 +80,16 @@ export interface HandleItem {
    * ctx.blockType / ctx.blockAttrs 由 HandleMenuBinding 在 show 时填入。
    */
   visibleWhen?: (ctx: HandleVisibilityContext) => boolean;
+  /**
+   * 动态 label(优先于静态 label)— 对齐 V1 折叠 / 展开 文案随 attrs 切换。
+   *
+   * 返回 string:渲染时替换 item.label;返回 null/undefined:回落静态 label。
+   */
+  dynamicLabel?: (ctx: HandleVisibilityContext) => string | null | undefined;
+  /**
+   * 动态 icon(优先于静态 icon)— 与 dynamicLabel 同理,用于折叠/展开 ⌃/⌄ 切换。
+   */
+  dynamicIcon?: (ctx: HandleVisibilityContext) => string | null | undefined;
   /**
    * Submenu 自定义渲染函数(submenuId 设置时可选)。
    *

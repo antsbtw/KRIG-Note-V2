@@ -30,6 +30,8 @@ import {
   scrollToHeadingPos,
   extractTocHeadings,
   subscribeHeadingChange,
+  toggleHeadingCollapse as toggleHeadingCollapseImpl,
+  isHeadingCollapsed as isHeadingCollapsedImpl,
   type TocHeadingEntry,
 } from './plugins/build-heading-collapse-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
@@ -1891,6 +1893,25 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst || inst.view.isDestroyed) return;
     scrollToHeadingPos(inst.view, pos);
+  },
+
+  /**
+   * 切换指定 heading 的折叠状态(handle menu 折叠/展开项 用)
+   * pos = handle ctx.blockPos
+   */
+  toggleHeadingCollapseAt(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return;
+    toggleHeadingCollapseImpl(inst.view, pos);
+  },
+
+  /**
+   * 查指定 heading 当前是否折叠(handle dynamicLabel 用,渲染期同步读)
+   */
+  isHeadingCollapsedAt(instanceId: string, pos: number): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return false;
+    return isHeadingCollapsedImpl(inst.view.state, pos);
   },
 
   /**
