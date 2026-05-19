@@ -35,6 +35,7 @@ import { buildBlockSelectionKeymap } from './plugins/build-block-selection-keyma
 import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-selection-context-menu-plugin';
 import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
 import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
+import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 
 /**
  * 装配 EditorView
@@ -112,6 +113,9 @@ export function buildEditorView(
     buildBlockFramePlugin(),
     buildBlockIndentPlugin(),
     buildListKeymap(schema),
+    // block-indent keymap 顺序在 list-keymap 之后:列表/codeblock/table 优先抢断 Tab,
+    // 落到这里都是普通顶层 block(paragraph/heading/blockquote/callout/...)的视觉缩进。
+    buildBlockIndentKeymap(),
     buildCodeBlockKeymap(schema),
     buildHardBreakKeymap(schema),
     buildLinkClickPlugin(),
