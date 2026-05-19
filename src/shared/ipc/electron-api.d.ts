@@ -23,6 +23,7 @@ import type {
   AIErrorPayload,
   AIStreamChunk,
   AISSEStatus,
+  AISyncAppendTurnPayload,
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 
@@ -368,6 +369,14 @@ declare global {
       onAIResponseReady(callback: (payload: AIResponseReadyPayload) => void): () => void;
       /** main → renderer 推送:AI 调用失败;返 unsubscribe */
       onAIError(callback: (payload: AIErrorPayload) => void): () => void;
+
+      // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
+      /** 启动 ai-sync:让 main 端 orchestrator 开始轮询 SSE,turn 完成时 emit AI_SYNC_APPEND_TURN */
+      aiSyncStart(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+      /** 停止 ai-sync */
+      aiSyncStop(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+      /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
+      onAISyncAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
     };
   }
 }

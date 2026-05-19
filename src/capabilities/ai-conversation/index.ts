@@ -22,6 +22,7 @@ import type {
   AIErrorPayload,
   AISSEStatus,
   AIServiceListItem,
+  AISyncAppendTurnPayload,
 } from './types';
 import { Host } from './Host';
 import {
@@ -42,6 +43,8 @@ export type {
   AIServiceListItem,
   AIHostHandle,
   AIHostProps,
+  AISyncAppendTurnPayload,
+  AISyncTurn,
 } from './types';
 
 async function askAI(
@@ -85,6 +88,24 @@ function onError(callback: (payload: AIErrorPayload) => void): () => void {
   return window.electronAPI.onAIError(callback);
 }
 
+async function startAISync(
+  serviceId: AIServiceId,
+): Promise<{ success: boolean; error?: string }> {
+  return window.electronAPI.aiSyncStart(serviceId);
+}
+
+async function stopAISync(
+  serviceId: AIServiceId,
+): Promise<{ success: boolean; error?: string }> {
+  return window.electronAPI.aiSyncStop(serviceId);
+}
+
+function onAppendTurn(
+  callback: (payload: AISyncAppendTurnPayload) => void,
+): () => void {
+  return window.electronAPI.onAISyncAppendTurn(callback);
+}
+
 export const aiConversationCapability: AIConversationApi = {
   askAI,
   openSession,
@@ -99,6 +120,9 @@ export const aiConversationCapability: AIConversationApi = {
   consumePendingAIThought,
   peekPendingAIThought,
   clearPendingAIThought,
+  startAISync,
+  stopAISync,
+  onAppendTurn,
 };
 
 // W5 严格态:Registry 注册 — view 通过 requireCapabilityApi<AIConversationApi>('ai-conversation')

@@ -11,6 +11,7 @@ import type {
   AIResponseReadyPayload,
   AIErrorPayload,
   AIStreamChunk,
+  AISyncAppendTurnPayload,
 } from '@shared/ipc/ai-types';
 
 function broadcast(channel: string, payload: unknown): void {
@@ -31,4 +32,9 @@ export function broadcastAIError(payload: AIErrorPayload): void {
 
 export function broadcastAIStreamChunk(payload: AIStreamChunk): void {
   broadcast(IPC_CHANNELS.AI_RESPONSE_STREAM, payload);
+}
+
+/** ai-sync feature:某一 turn 完成 → 通知所有 renderer 追加到当前右槽 Note */
+export function broadcastAISyncAppendTurn(payload: AISyncAppendTurnPayload): void {
+  broadcast(IPC_CHANNELS.AI_SYNC_APPEND_TURN, payload);
 }

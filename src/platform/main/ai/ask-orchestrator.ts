@@ -33,6 +33,15 @@ import {
 let captureManager: SSECaptureManager | null = null;
 
 /**
+ * 给外部模块(ai-sync-orchestrator 等)访问当前 SSE 拦截 manager。
+ *
+ * 注:返回值随 webview 切换变更,调用方每次轮询前都重新调,不要缓存本地。
+ */
+export function getSSECaptureManager(): SSECaptureManager | null {
+  return captureManager;
+}
+
+/**
  * 订阅 registry 的"活跃 webContents 变更",自动 stop 旧 manager + new + start。
  * 模块加载时立即订阅(IIFE,确保 main 启动后任何 AI webview navigate 都被拦截)。
  */

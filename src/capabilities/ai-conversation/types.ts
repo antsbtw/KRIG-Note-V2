@@ -16,6 +16,8 @@ import type {
   AIResponseReadyPayload,
   AIErrorPayload,
   AISSEStatus,
+  AISyncAppendTurnPayload,
+  AISyncTurn,
 } from '@shared/ipc/ai-types';
 
 export type {
@@ -25,6 +27,8 @@ export type {
   AIResponseReadyPayload,
   AIErrorPayload,
   AISSEStatus,
+  AISyncAppendTurnPayload,
+  AISyncTurn,
 };
 
 export interface AIServiceListItem {
@@ -109,6 +113,13 @@ export interface AIConversationApi {
   onResponseReady(callback: (payload: AIResponseReadyPayload) => void): () => void;
   /** 订阅 AI 调用失败;返 unsubscribe */
   onError(callback: (payload: AIErrorPayload) => void): () => void;
+  // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加) ──
+  /** 启动 ai-sync(让 main 端开始为该 serviceId 轮询并 emit AI_SYNC_APPEND_TURN)*/
+  startAISync(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+  /** 停止 ai-sync */
+  stopAISync(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+  /** 订阅"某 turn 完成"事件(view 端拿去 build PM nodes 插入到 Note);返 unsubscribe */
+  onAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
   // ── UI 组件 ──
   /**
    * AI Host(嵌三大 AI 服务网站的 webview)— forwardRef AIHostHandle

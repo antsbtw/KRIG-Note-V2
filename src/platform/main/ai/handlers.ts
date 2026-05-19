@@ -12,6 +12,7 @@ import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-
 import type { AIAskOptions, AIAskResult } from '@shared/ipc/ai-types';
 import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse, extractFullConversation } from './ask-orchestrator';
 import { getActiveAIWebContents } from './webview-registry';
+import { registerAISyncHandlers } from './ai-sync-orchestrator';
 
 function isServiceId(v: unknown): v is AIServiceId {
   return v === 'chatgpt' || v === 'claude' || v === 'gemini';
@@ -85,4 +86,8 @@ export function registerAIHandlers(): void {
     }
     return extractFullConversation(serviceId);
   });
+
+  // #8/#9 ai-sync.start / ai-sync.stop — renderer 端 ai-sync-integration 控制
+  // (上下文:左 ai-view + 右 note-view 槽组合下 start,组合一变就 stop)
+  registerAISyncHandlers();
 }

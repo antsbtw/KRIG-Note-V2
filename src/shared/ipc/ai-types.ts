@@ -53,3 +53,21 @@ export const AI_ACTION = {
   RESPONSE_READY: 'response-ready',
   ERROR: 'error',
 } as const;
+
+// ── ai-sync feature 类型(AI 对话 → 右槽 Note 自动追加) ──
+
+/** 单个 turn 的 user / assistant 文本 */
+export interface AISyncTurn {
+  /** 用户提问原文(Claude 走 chat_conversations API 拿;ChatGPT/Gemini 暂为空字符串) */
+  userMessage: string;
+  /** AI 回复 markdown(SSE 抓到 / extractor 拿到的原始字符串) */
+  markdown: string;
+  /** main 端 emit 时间戳(ms) */
+  timestamp: number;
+}
+
+/** ai-sync.append-turn broadcast payload(main → renderer) */
+export interface AISyncAppendTurnPayload {
+  serviceId: AIServiceId;
+  turn: AISyncTurn;
+}

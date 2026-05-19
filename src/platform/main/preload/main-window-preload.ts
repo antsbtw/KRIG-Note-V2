@@ -504,4 +504,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.AI_ERROR, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.AI_ERROR, handler);
   },
+
+  // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
+  aiSyncStart(serviceId: string): Promise<{ success: boolean; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_START, serviceId);
+  },
+  aiSyncStop(serviceId: string): Promise<{ success: boolean; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_STOP, serviceId);
+  },
+  /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
+  onAISyncAppendTurn(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
+  },
 });

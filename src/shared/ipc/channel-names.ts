@@ -171,6 +171,13 @@ export const IPC_CHANNELS = {
   AI_RESPONSE_STREAM: 'ai.response-stream',         // main → renderer 推送流式增量(本期仅 Claude)
   AI_RESPONSE_READY: 'ai.response-ready',           // main → renderer 推送完成
   AI_ERROR: 'ai.error',                             // main → renderer 推送错误
+
+  // ai-sync feature(AI 回复 → 右槽 Note 末尾自动追加 ❓ Callout + 🔀 Toggle)
+  // renderer 侧 ai-sync-integration 在"左 ai-view + 右 note-view"槽组合下 start;
+  // main 端 ai-sync-orchestrator 轮询 SSECaptureManager 检测完成跃迁,emit turn。
+  AI_SYNC_START: 'ai-sync.start',                   // renderer → main:启动 ai-sync(serviceId)
+  AI_SYNC_STOP: 'ai-sync.stop',                     // renderer → main:停止 ai-sync(serviceId)
+  AI_SYNC_APPEND_TURN: 'ai-sync.append-turn',       // main → renderer 推送一个新完成的 turn
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
