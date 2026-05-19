@@ -67,6 +67,23 @@ function isUserTurnHeading(node: PmJsonNode): boolean {
 }
 
 /**
+ * 把节点(及其后代)内所有 heading 等级 +1(H6 封顶) — 原地不复用,返回新节点。
+ * 用途:AI 回答 body 内 markdown 自带的 # 标题在 Thought/Note 卡片里太大不美观,
+ * 整体下沉一级让视觉更紧凑;不丢层次,H6 保持原级避免越界。
+ */
+function demoteHeadings(node: PmJsonNode): PmJsonNode {
+  const next: PmJsonNode = { ...node };
+  if (node.type === 'heading') {
+    const level = (node.attrs?.level as number | undefined) ?? 1;
+    next.attrs = { ...node.attrs, level: Math.min(level + 1, 6) };
+  }
+  if (Array.isArray(node.content)) {
+    next.content = node.content.map(demoteHeadings);
+  }
+  return next;
+}
+
+/**
  * 把整页 markdown 转出的扁平节点数组按轮次重整成"❓ Callout + 🔀 Toggle + ---"。
  *
  * @param nodes 整页 markdown 转出来的扁平节点数组(NoteDocEnvelope.payload.content)
@@ -120,7 +137,8 @@ export function wrapAITurnsInToggle(
         const next = input[j];
         if (isAITurnHeading(next) || isUserTurnHeading(next)) break;
         if (next.type === 'horizontalRule') { j++; continue; }
-        bodyNodes.push(next);
+        // AI 回答 body 内 heading 整体降级一档(H6 封顶),视觉更紧凑
+        bodyNodes.push(demoteHeadings(next));
         j++;
       }
       // 🔀 Toggle 包 AI 回答(label="回答 (服务名)";default open=false 折叠,对齐

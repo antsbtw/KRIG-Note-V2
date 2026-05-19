@@ -126,9 +126,17 @@ export function registerAICommands(): void {
     }
 
     const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
-    // Phase 10.A:走 ResultParser + extractedBlocksToPmDoc 无损渲染
-    // (不再 markdown.split('\n\n'):标题/数学/代码/表格/列表/引用/inline marks 全保留)
-    const doc = aiMarkdownToNoteDoc(extraction.markdown);
+    // Thought 通道格式对齐 Note 通道(同走 wrapAITurnsInToggle):
+    // 砍 H1/模型/N 条消息元数据 + ❓ Callout 包用户提问 + 🔀 Toggle 包 AI 回答 + --- 分隔。
+    // doc envelope 仍是 {format,version,payload:{type:'doc',content:[...]}},只替换 content。
+    const envelope = aiMarkdownToNoteDoc(extraction.markdown);
+    const pmDoc = envelope.payload as { type: string; content?: unknown[] };
+    const rawNodes = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+    const serviceName = getAIServiceProfile(serviceId).name;
+    const doc: typeof envelope = {
+      ...envelope,
+      payload: { type: pmDoc.type, content: wrapAITurnsInToggle(rawNodes, serviceName) },
+    };
 
     // 路径分支:有 pending(场景 A:Note Ask AI)→ update 已 preCreate 的 atom
     //         无 pending(场景 B:独立 AI 聊天)→ createNew 独立 atom
