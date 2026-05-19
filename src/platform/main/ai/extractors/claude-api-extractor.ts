@@ -57,6 +57,78 @@ export function extractConversationId(url: string): string | null {
 }
 
 /**
+ * 调 Claude 内部 API 拿 raw conversation JSON。
+ *
+ * 关键:URL 必须带 ?tree=True&rendering_mode=messages&render_all_tools=true
+ * (V1 字面对齐,V1 实测能拿到完整 tool_use content 含 widget_code/file_text)
+ * 不带这些参数时 API 只返 message.text(artifact 部分是 placeholder)。
+ *
+ * 返完整 raw JSON,供两类消费方:
+ *   1. extractClaudeConversation — 旧 ai-sync 流(只用 .text 字段)
+ *   2. claude-conversation-query — 新整页提取流(走 content[].tool_use 拿 artifact 源码)
+ */
+export async function fetchClaudeConversationRaw(
+  webContents: Electron.WebContents,
+): Promise<Record<string, unknown> | null> {
+  const url = webContents.getURL() || '';
+  const convId = extractConversationId(url);
+  if (!convId) {
+    console.warn('[ClaudeAPI] Not on a Claude chat page:', url);
+    return null;
+  }
+
+  try {
+    // Execute fetch inside guest page — has login cookies
+    // V1 用 ?tree=True&rendering_mode=messages&render_all_tools=true 三参数拿
+    // structured 内容(含 artifact widget_code / file_text)— 缺一不可
+    const script = `(async function() {
+      var convId = ${JSON.stringify(convId)};
+
+      // Step 1: Get organization ID — performance entries + cookie + bootstrap (V1 对齐)
+      var orgId = window.__krig_claude_orgId || null;
+      if (!orgId) {
+        var entries = performance.getEntriesByType('resource');
+        for (var i = 0; i < entries.length; i++) {
+          var m = entries[i].name.match(/claude\\.ai\\/api\\/organizations\\/([0-9a-f-]{36})/);
+          if (m) { orgId = m[1]; break; }
+        }
+      }
+      if (!orgId) {
+        var cm = document.cookie.match(/lastActiveOrg=([0-9a-f-]{36})/);
+        if (cm) orgId = cm[1];
+      }
+      if (!orgId) {
+        var orgsResp = await fetch('/api/organizations/', { credentials: 'include' });
+        if (!orgsResp.ok) return { error: 'Failed to get organizations: ' + orgsResp.status };
+        var orgs = await orgsResp.json();
+        if (!Array.isArray(orgs) || orgs.length === 0) return { error: 'No organizations found' };
+        orgId = orgs[0].uuid;
+      }
+      window.__krig_claude_orgId = orgId;
+
+      // Step 2: Fetch conversation with render_all_tools=true(关键!不带就拿不到 artifact 源码)
+      var apiUrl = '/api/organizations/' + orgId + '/chat_conversations/' + convId
+        + '?tree=True&rendering_mode=messages&render_all_tools=true';
+      var convResp = await fetch(apiUrl, { credentials: 'include' });
+      if (!convResp.ok) return { error: 'Failed to get conversation: ' + convResp.status };
+      var conv = await convResp.json();
+      return { conv: conv, orgId: orgId };
+    })()`;
+
+    const result = await webContents.executeJavaScript(script);
+
+    if (!result || result.error) {
+      console.warn('[ClaudeAPI] Extraction failed:', result?.error);
+      return null;
+    }
+    return result.conv as Record<string, unknown>;
+  } catch (err) {
+    console.error('[ClaudeAPI] fetchClaudeConversationRaw exception:', err);
+    return null;
+  }
+}
+
+/**
  * Extract full conversation data by calling Claude's internal API.
  * Runs in the guest webview context (has auth cookies).
  *
@@ -69,71 +141,32 @@ export function extractConversationId(url: string): string | null {
 export async function extractClaudeConversation(
   webContents: Electron.WebContents,
 ): Promise<ClaudeConversation | null> {
-  const url = webContents.getURL() || '';
-  const convId = extractConversationId(url);
-  if (!convId) {
-    console.warn('[ClaudeAPI] Not on a Claude chat page:', url);
-    return null;
-  }
+  const raw = await fetchClaudeConversationRaw(webContents);
+  if (!raw) return null;
 
-  try {
-    // Execute fetch inside guest page — has login cookies
-    const script = `(async function() {
-      var convId = ${JSON.stringify(convId)};
+  // Claude's chat_messages use the top-level `text` field as the authoritative source.
+  // The `content` array now (with render_all_tools=true) contains tool_use parts with
+  // widget_code / file_text — but this legacy function only exposes flat `text`.
+  // 新整页提取走 claude-conversation-query.getConversationData 拿 structured content.
+  const messages: ClaudeMessage[] = ((raw.chat_messages as unknown[]) || []).map((m: any) => ({
+    uuid: m.uuid,
+    sender: m.sender,
+    index: m.index,
+    text: m.text || '',
+    created_at: m.created_at,
+    attachments: m.attachments,
+    files: m.files,
+  }));
 
-      // Step 1: Get organization ID from bootstrap API
-      var orgsResp = await fetch('/api/organizations/', { credentials: 'include' });
-      if (!orgsResp.ok) return { error: 'Failed to get organizations: ' + orgsResp.status };
-      var orgs = await orgsResp.json();
-      if (!Array.isArray(orgs) || orgs.length === 0) return { error: 'No organizations found' };
-      var orgId = orgs[0].uuid;
+  console.log(`[ClaudeAPI] Extracted ${messages.length} messages from conversation`);
 
-      // Step 2: Fetch conversation
-      var convResp = await fetch('/api/organizations/' + orgId + '/chat_conversations/' + convId, {
-        credentials: 'include',
-      });
-      if (!convResp.ok) return { error: 'Failed to get conversation: ' + convResp.status };
-      var conv = await convResp.json();
-
-      // Note: Artifact endpoint consistently returns 404.
-      // Artifact content is NOT available via server API — it must be
-      // extracted via the "Copy to clipboard" button in the page UI.
-      return { conv: conv, orgId: orgId };
-    })()`;
-
-    const result = await webContents.executeJavaScript(script);
-
-    if (!result || result.error) {
-      console.warn('[ClaudeAPI] Extraction failed:', result?.error);
-      return null;
-    }
-
-    const raw = result.conv;
-    // Claude's chat_messages use the top-level `text` field as the authoritative source.
-    // The `content` array exists but is always empty in observed responses.
-    const messages: ClaudeMessage[] = (raw.chat_messages || []).map((m: any) => ({
-      uuid: m.uuid,
-      sender: m.sender,
-      index: m.index,
-      text: m.text || '',
-      created_at: m.created_at,
-      attachments: m.attachments,
-      files: m.files,
-    }));
-
-    console.log(`[ClaudeAPI] Extracted ${messages.length} messages from conversation ${convId}`);
-
-    return {
-      uuid: raw.uuid,
-      name: raw.name || '',
-      model: raw.model || '',
-      messages,
-      raw: { conversation: raw },
-    };
-  } catch (err) {
-    console.error('[ClaudeAPI] Exception:', err);
-    return null;
-  }
+  return {
+    uuid: raw.uuid as string,
+    name: (raw.name as string) || '',
+    model: (raw.model as string) || '',
+    messages,
+    raw: { conversation: raw },
+  };
 }
 
 /**
