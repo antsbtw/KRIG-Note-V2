@@ -17,7 +17,7 @@
  */
 
 import { keymap } from 'prosemirror-keymap';
-import { Selection, TextSelection, type Command, type Plugin } from 'prosemirror-state';
+import { NodeSelection, Selection, TextSelection, type Command, type Plugin } from 'prosemirror-state';
 import type { ResolvedPos } from 'prosemirror-model';
 import { MultipleNodeSelection } from './_shared/multiple-node-selection';
 import { resolveHandleBlock } from './_shared/handle-block';
@@ -77,6 +77,9 @@ function findSiblingPos(
 /**
  * Esc 命令:
  *  - 当前是 MultipleNodeSelection → 解除(变 TextSelection 落在选区起点)
+ *  - 当前是 NodeSelection 框住一个 atom block(如 horizontalRule)
+ *    → 转成 MultipleNodeSelection(统一 block 选中视觉/语义,避免 PM 默认虚线框
+ *    与 krig-block-selected 蓝底两套样式并存)
  *  - 否则 → 选光标所在 handle block
  */
 const escapeBlockSelection: Command = (state, dispatch) => {
@@ -87,6 +90,21 @@ const escapeBlockSelection: Command = (state, dispatch) => {
     if (dispatch) {
       const $pos = state.doc.resolve(sel.from);
       dispatch(state.tr.setSelection(TextSelection.near($pos, 1)));
+    }
+    return true;
+  }
+
+  // NodeSelection on atom block:PM 把光标无法陷入的 atom 节点(hr 等)做 NodeSelection,
+  // 这里转成 MultipleNodeSelection 统一选块语义。
+  if (sel instanceof NodeSelection && sel.node.isBlock && sel.node.isAtom) {
+    if (dispatch) {
+      try {
+        const $inside = state.doc.resolve(sel.from + 1);
+        const newSel = MultipleNodeSelection.create($inside, $inside);
+        dispatch(state.tr.setSelection(newSel).scrollIntoView());
+      } catch {
+        /* atom 在顶层 doc 时 depth=0 构造失败 — 保留 NodeSelection */
+      }
     }
     return true;
   }

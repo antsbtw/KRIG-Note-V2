@@ -392,10 +392,11 @@
   cursor: pointer;
 }
 
+/* hr 选中视觉走统一 krig-block-selected(block-selection plugin 加的 deco);
+ * 本规则清掉 PM 默认的虚线 outline,避免和 deco 蓝底叠加。
+ * (border-top 颜色保留默认 hr 视觉,不再加 highlight 色) */
 .krig-pm-host .ProseMirror hr.krig-horizontal-rule.ProseMirror-selectednode {
-  border-top-color: #6cb6ff;
-  outline: 1px dashed #6cb6ff;
-  outline-offset: 2px;
+  outline: none;
 }
 
 /* L5-B4.3.1:unknown block — schema 缺失节点占位 */

@@ -1,27 +1,34 @@
 /**
- * block-selection plugin — MultipleNodeSelection 路线骨架(Step 1)
+ * block-selection plugin — block 选中视觉统一(MultipleNodeSelection + NodeSelection-on-atom)
  *
  * 设计:
- *  - 选区类型走 MultipleNodeSelection(Selection 子类),tr.setSelection 携带,
+ *  - 多块/常规块走 MultipleNodeSelection(Selection 子类),tr.setSelection 携带,
  *    clipboard / drag / history 自动走 PM 默认 pipeline。
- *  - 本 plugin 做两件视觉增强:
- *    1. decoration: 给每个选中节点画 `krig-block-selected`(整块圆角蓝底)
- *    2. root class: view.dom 加 `is-block-selecting`,让 CSS 全局抑制
- *       原生 ::selection 文字底色,避免"双层选区"叠加(参见 pm-host.css)
- *  - 选区算法(Esc / Shift+Arrow / 拖动后保留 / ...)由后续 Step 2-4 加入。
+ *  - atom block(horizontalRule 等无内容叶子)点击触发 PM 默认 NodeSelection,
+ *    本 plugin 给它同款 `krig-block-selected` 蓝底 deco + is-block-selecting 类,
+ *    视觉与 MultipleNodeSelection 完全一致(用户无需感知两套机制)。
+ *  - 选区算法(Esc / Shift+Arrow / 拖动后保留 / ...)在 build-block-selection-keymap。
  *
  * **不**持有 PluginState — 一切选区都在 view.state.selection 中。
  */
 
-import { Plugin } from 'prosemirror-state';
+import { NodeSelection, Plugin } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { MultipleNodeSelection } from './_shared/multiple-node-selection';
 
 const ROOT_CLASS = 'is-block-selecting';
 
+/** atom block 上的 NodeSelection 是"块选择"语义的另一种形态(PM 内置) */
+function isAtomBlockNodeSelection(sel: import('prosemirror-state').Selection): sel is NodeSelection {
+  return sel instanceof NodeSelection && sel.node.isBlock && sel.node.isAtom;
+}
+
+function isBlockSelectionLike(sel: import('prosemirror-state').Selection): boolean {
+  return sel instanceof MultipleNodeSelection || isAtomBlockNodeSelection(sel);
+}
+
 function syncRootClass(view: import('prosemirror-view').EditorView): void {
-  const active = view.state.selection instanceof MultipleNodeSelection;
-  view.dom.classList.toggle(ROOT_CLASS, active);
+  view.dom.classList.toggle(ROOT_CLASS, isBlockSelectionLike(view.state.selection));
 }
 
 export function buildBlockSelectionPlugin(): Plugin {
@@ -29,8 +36,16 @@ export function buildBlockSelectionPlugin(): Plugin {
     props: {
       decorations(state) {
         const sel = state.selection;
+
+        // 分支 1:atom block 的 NodeSelection(hr 等)— 单节点 deco
+        if (isAtomBlockNodeSelection(sel)) {
+          return DecorationSet.create(state.doc, [
+            Decoration.node(sel.from, sel.to, { class: 'krig-block-selected' }),
+          ]);
+        }
+
+        // 分支 2:MultipleNodeSelection — 同级多块 deco
         if (!(sel instanceof MultipleNodeSelection)) return null;
-        // 选中节点 = sel.nodes;每个对应 doc 内一个连续 child block
         const parent = sel.$anchorPos.node(sel.$anchorPos.depth - 1);
         const anchorIdx = sel.$anchorPos.index(sel.$anchorPos.depth - 1);
         const headIdx = sel.$headPos.index(sel.$headPos.depth - 1);
