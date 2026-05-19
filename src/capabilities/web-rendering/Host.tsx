@@ -71,6 +71,19 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
   const webviewRef = useRef<WebviewElement | null>(null);
   /** webview dom-ready 才允许调 getURL / loadURL 等;前期通过 src 属性初始化 URL */
   const domReadyRef = useRef(false);
+  /**
+   * webview 初始 URL — mount 时锁定一次。
+   *
+   * **关键**:webview 标签的 src 属性是"受控 attribute",React 重设 src 会让
+   * Chromium 重新加载页面。Google 等 SPA 站点的 did-navigate-in-page 会触发
+   * onUrlChanged → workspaceManager.update → WebView 重渲 → currentUrl prop 变 →
+   * 若 <webview src={currentUrl}> 是 reactive,React 把新 URL 写回 src,
+   * Chromium 收到 src 变化 → 又一次 did-navigate → 自打自循环 = 抖动。
+   *
+   * 解决:src 只读初始 URL,之后所有变化走 useEffect [currentUrl] + wv.loadURL
+   * (uncontrolled webview 模式,等同 HTML5 `<video src>` 的常规用法)。
+   */
+  const initialUrlRef = useRef(currentUrl);
   /** 左侧 SyncDriver(仅当 translateMode=true 时 active)*/
   const syncDriverRef = useRef<SyncDriver | null>(null);
   /** 对面 NAVIGATE 触发的导航时间窗(防回环)*/
@@ -313,10 +326,13 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     [],
   );
 
-  // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型
+  // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型。
+  // src 用 initialUrlRef(mount 时锁定)而非 currentUrl(reactive) — 避免 React 把
+  // 后续 currentUrl 变化回写到 webview src attribute,触发 Chromium 重新加载循环。
+  // 见 initialUrlRef 注释。后续 URL 变化走 useEffect [currentUrl] → wv.loadURL。
   const tagProps = {
     ref: setupWebview,
-    src: currentUrl,
+    src: initialUrlRef.current,
     partition,
     allowpopups: 'true',
     className,

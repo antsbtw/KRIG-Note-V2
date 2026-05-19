@@ -120,6 +120,15 @@ export function Host(props: TextEditingHostProps) {
   // 解决:composing 时不立即 replaceWith,把目标 doc 暂存,等 compositionend 后再处理。
   const pendingExternalDocRef = useRef<DriverSerialized | null>(null);
 
+  // IME composing 期间用户输入产生的 doc — 不 emit 出去(切断 IPC roundtrip → broadcast →
+  // 自打自的循环),只在 compositionend 后做一次 flush。
+  // 根因:每个拼音键 → PM dispatch tr → onChange → IPC updateNote → main broadcast →
+  // useAllNotes setNotes → NoteView 重渲 → doc 新引用 → useEffect [doc] → applyExternalDoc。
+  // 即便有 view.composing 守门,IPC roundtrip(10-50ms)回来时 composing 时序窗口未必同步
+  // 命中,echo-back 指纹(lastEmittedJsonRef)又只防最后一次,前面快连击的 echo 都会走
+  // replaceWith → 摧毁 IME 预编辑文本 → "拼音直出 + 光标跳"。
+  const pendingComposingDocRef = useRef<DriverSerialized | null>(null);
+
   // 初始化 EditorView(每个 instanceId 一个)
   useEffect(() => {
     const container = containerRef.current;
@@ -141,9 +150,15 @@ export function Host(props: TextEditingHostProps) {
         // doc 变化:封装回 DriverSerialized,触发 onChange
         if (tr.docChanged) {
           const serialized = serializeDoc(v.state.doc);
-          // 记下指纹 — 用于识别 useEffect 收到的是 echo-back(避免重复 dispatch replaceWith)
-          lastEmittedJsonRef.current = JSON.stringify(serialized.payload);
-          onChangeRef.current?.(serialized);
+          // IME composing 期间 stash,**不 emit**(切断 broadcast 回流循环 — IME 抖动根因)。
+          // compositionend 后由 onCompositionEnd 做一次性 flush。
+          if (v.composing) {
+            pendingComposingDocRef.current = serialized;
+          } else {
+            // 记下指纹 — 用于识别 useEffect 收到的是 echo-back(避免重复 dispatch replaceWith)
+            lastEmittedJsonRef.current = JSON.stringify(serialized.payload);
+            onChangeRef.current?.(serialized);
+          }
         }
         // selection 变化:emit 到 selection capability(带实例 source)
         // L5-B2:Snapshot diff 真变才 emit
@@ -162,9 +177,18 @@ export function Host(props: TextEditingHostProps) {
       workspaceId: config.instanceId, // L5-A:instanceId == workspaceId
     });
 
-    // IME 拼音结束后 flush pending 外部 doc 更新(若 composing 期间错过过 prop 变化)。
+    // IME 拼音结束后:
+    //   1. flush pendingComposingDoc — 把拼音整段产生的最终 doc 一次性 emit 出去(IPC 只走 1 次)
+    //   2. flush pendingExternalDoc — 若 composing 期间错过过外部 prop 变化,RAF 后 apply
     // PM 内部还有 ~150ms 的 cooldown 把 IME 残留状态收尾,等 RAF 后再 apply 才稳妥。
     const onCompositionEnd = () => {
+      // 用户自己输入的拼音终态 — 同步 emit(不必等 RAF,IPC 是 async 不阻塞 UI)
+      const composed = pendingComposingDocRef.current;
+      if (composed) {
+        pendingComposingDocRef.current = null;
+        lastEmittedJsonRef.current = JSON.stringify(composed.payload);
+        onChangeRef.current?.(composed);
+      }
       requestAnimationFrame(() => {
         const pending = pendingExternalDocRef.current;
         if (!pending) return;
