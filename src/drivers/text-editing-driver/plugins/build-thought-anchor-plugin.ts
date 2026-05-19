@@ -52,15 +52,22 @@ export function getThoughtAnchorHandler(): ThoughtAnchorHandler | null {
   return activeHandler;
 }
 
-/** 给定 EditorView 滚到指定 pos(thought scroll-to-anchor 时用) */
+/**
+ * 给定 EditorView 滚到指定 pos(thought scroll-to-anchor 时用)
+ *
+ * inline mark anchor 时 view.nodeDOM(pos) 会返 text node(nodeType=3),
+ * 此时 instanceof HTMLElement 判否会静默失败 → 必须回退 parentElement
+ * (通常正好是 <span class="krig-thought-mark">,flash CSS 也挂在它上)。
+ */
 export function scrollToThoughtAnchor(view: EditorView, pos: number): void {
   if (pos < 0 || pos >= view.state.doc.content.size) return;
   const dom = view.nodeDOM(pos) ?? view.domAtPos(pos).node;
-  if (dom instanceof HTMLElement) {
-    dom.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    dom.classList.add('krig-thought-anchor-flash');
-    window.setTimeout(() => dom.classList.remove('krig-thought-anchor-flash'), 1500);
-  }
+  const target =
+    dom instanceof HTMLElement ? dom : (dom?.parentElement ?? null);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('krig-thought-anchor-flash');
+  window.setTimeout(() => target.classList.remove('krig-thought-anchor-flash'), 1500);
 }
 
 const NODE_ANCHOR_TYPES = new Set(['image']);
