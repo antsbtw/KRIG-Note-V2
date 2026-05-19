@@ -111,6 +111,95 @@
   align-items: center;
 }
 
+/* 右侧 actions 区(提取整页对话 + SlotToggle + 重载 + 关闭) */
+.krig-ai-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 提取整页对话 — V1 蓝色主按钮(参考 AIWebView.tsx 1278-1287:#1f3b64 / 边框 #335a92) */
+.krig-ai-toolbar__btn--primary {
+  background: #1f3b64;
+  border-color: #335a92;
+  color: #e8eaed;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.krig-ai-toolbar__btn--primary:hover:not(:disabled) {
+  background: #2d4a7a;
+}
+
+/* SlotToggle dropdown 容器 */
+.krig-ai-toolbar__slot-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.krig-ai-toolbar__caret {
+  font-size: 10px;
+  margin-left: 2px;
+  opacity: 0.7;
+}
+
+/* SlotToggle 弹出菜单(对齐 web.css .krig-web-toolbar__lang-menu) */
+.krig-ai-toolbar__slot-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.krig-ai-toolbar__slot-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: #e8eaed;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.krig-ai-toolbar__slot-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-ai-toolbar__slot-item.active {
+  background: #3a3a3a;
+  color: #7cb3f5;
+}
+
+.krig-ai-toolbar__slot-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* 关闭按钮 — 仅右槽场景显示;hover 红色 */
+.krig-ai-toolbar__btn--close {
+  color: #888;
+  font-size: 14px;
+}
+
+.krig-ai-toolbar__btn--close:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
+
 /* ── webview 占满剩余 ── */
 
 .krig-ai-view__webview {

@@ -31,6 +31,31 @@ export function registerAICommands(): void {
   });
 
   /**
+   * SlotToggle dropdown — 在 right slot 打开指定 view(空白,无 payload)。
+   * commandArg = 目标 viewId(e.g. 'note-view' / 'thought-view')。
+   * 仿 note-view.open-right-slot 模式,本地版本服务 AI View 自身 toolbar SlotToggle。
+   */
+  commandRegistry.register('ai-view.open-right-slot', (viewId: unknown) => {
+    if (typeof viewId !== 'string' || !viewId) return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const bus = workspaceManager.getBus(wsId);
+    if (!bus) return;
+    bus.slot.openRight(viewId);
+  });
+
+  /**
+   * 关 right slot。SlotToggle 再次点击已激活项时触发。
+   */
+  commandRegistry.register('ai-view.close-right-slot', () => {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const bus = workspaceManager.getBus(wsId);
+    if (!bus) return;
+    bus.slot.closeRight();
+  });
+
+  /**
    * 端到端 askAI:给当前 ws 的活跃 AI 服务发 prompt,等回复(broadcast 自动推 onAIResponseReady)。
    *
    * 调用方式:
