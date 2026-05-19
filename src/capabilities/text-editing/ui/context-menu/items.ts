@@ -21,7 +21,9 @@
  * - V1 还规划但 V2 未实装的 Ask AI / Frame / 添加标注 / 删除标注 等
  */
 
+import { createElement } from 'react';
 import type { ContextMenuItem } from '@slot/interaction-registries/context-menu-registry/context-menu-types';
+import { ContextFrameSubmenu } from '../frame-picker/ContextFrameSubmenu';
 
 /** 剪贴板组:✂ Cut / 📋 Copy / 📄 Paste(group='clipboard') */
 export function createClipboardGroup(viewId: string): ContextMenuItem[] {
@@ -109,5 +111,23 @@ export function createDeleteBlockItem(viewId: string): ContextMenuItem {
     enabledWhen: 'has-block-selection',
     group: 'destructive',
     order: 90,
+  };
+}
+
+/** ▣ 框定 容器(submenuRender → ContextFrameSubmenu,group='frame')
+ *
+ * 子菜单内含色板 + 单/双线 + 删除;无框定时点击颜色 = 新建,有框定时 = 更新。
+ * 不写 enabledWhen — 任意右键都可框定(对齐 V1 行为)。
+ */
+export function createFrameItem(viewId: string): ContextMenuItem {
+  return {
+    id: `${viewId}.cm.frame`,
+    label: '▣ 框定',
+    command: '',
+    submenuId: 'frame',
+    submenuRender: (ctx) => createElement(ContextFrameSubmenu, { ctx }),
+    view: viewId,
+    group: 'frame',
+    order: 80,
   };
 }

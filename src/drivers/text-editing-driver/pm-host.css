@@ -392,10 +392,11 @@
   cursor: pointer;
 }
 
+/* hr 选中视觉走统一 krig-block-selected(block-selection plugin 加的 deco);
+ * 本规则清掉 PM 默认的虚线 outline,避免和 deco 蓝底叠加。
+ * (border-top 颜色保留默认 hr 视觉,不再加 highlight 色) */
 .krig-pm-host .ProseMirror hr.krig-horizontal-rule.ProseMirror-selectednode {
-  border-top-color: #6cb6ff;
-  outline: 1px dashed #6cb6ff;
-  outline-offset: 2px;
+  outline: none;
 }
 
 /* L5-B4.3.1:unknown block — schema 缺失节点占位 */
@@ -2177,8 +2178,23 @@
   box-shadow: 0 0 0 2px rgba(77, 154, 255, 0.22);
 }
 
-/* 选块期间抑制内部字符级文本选区高亮(避免双层底色叠加)*/
-.ProseMirror .krig-block-selected ::selection {
+/* 选块期间抑制字符级文本选区高亮(避免双层底色叠加)
+ *
+ * MultipleNodeSelection 时 PM 把 selection from/to 仍交给 PM 父类,浏览器
+ * 默认会在该范围内画原生 ::selection;叠在 krig-block-selected 蓝底上
+ * 产生"双重选区"的视觉。
+ *
+ * 实现:激活时 build-block-selection-plugin 给 ProseMirror root 加
+ * `is-block-selecting` class,本规则在 :host-scoped 后代上全局清掉
+ * ::selection 底色;选块状态消失(普通文本选区/光标)时规则失效自动复原。
+ *
+ * 不使用 `.krig-block-selected ::selection` 是因为 deco 挂在 block wrapper
+ * 上,::selection 伪元素只对最近 selector 的元素 + 其文本节点生效,
+ * 在某些浏览器实现里不会向下继承到 inline 子节点。改用 root class
+ * 通配更可靠。
+ */
+.ProseMirror.is-block-selecting ::selection,
+.ProseMirror.is-block-selecting *::selection {
   background-color: transparent;
 }
 
@@ -3924,4 +3940,69 @@
 @keyframes krig-thought-anchor-flash {
   0%   { background: rgba(74, 158, 255, 0.30); }
   100% { background: transparent; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * Block 框定(用户主动框定) — build-block-frame-plugin.ts decoration
+ *
+ * CSS 变量来自 inline style:
+ *   --krig-frame-color: 边框颜色
+ *   --krig-frame-style: 'solid' | 'double'
+ *
+ * 修饰类:
+ *   .krig-block-frame--only   单块四边
+ *   .krig-block-frame--first  多块首(上 + 左右)
+ *   .krig-block-frame--middle 多块中(只左右)
+ *   .krig-block-frame--last   多块尾(下 + 左右)
+ * ═══════════════════════════════════════════════════════════════ */
+
+.krig-block-frame {
+  border-left: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-right: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  padding-left: 6px;
+  padding-right: 6px;
+  position: relative;
+  transition: background 0.15s;
+}
+.krig-block-frame[style*="--krig-frame-style: double"] {
+  border-left-width: 3px;
+  border-right-width: 3px;
+}
+
+.krig-block-frame--only {
+  border-top: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-bottom: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-radius: 4px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+.krig-block-frame--only[style*="--krig-frame-style: double"] {
+  border-top-width: 3px;
+  border-bottom-width: 3px;
+}
+
+.krig-block-frame--first {
+  border-top: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-radius: 4px 4px 0 0;
+  margin-top: 2px;
+}
+.krig-block-frame--first[style*="--krig-frame-style: double"] {
+  border-top-width: 3px;
+}
+
+.krig-block-frame--middle {
+  border-radius: 0;
+}
+
+.krig-block-frame--last {
+  border-bottom: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-radius: 0 0 4px 4px;
+  margin-bottom: 2px;
+}
+.krig-block-frame--last[style*="--krig-frame-style: double"] {
+  border-bottom-width: 3px;
+}
+
+.krig-block-frame:hover {
+  background: color-mix(in srgb, var(--krig-frame-color, #337EA9) 6%, transparent);
 }

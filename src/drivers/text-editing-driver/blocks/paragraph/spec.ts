@@ -26,6 +26,9 @@ const paragraphNodeSpec: NodeSpec = {
     isTitle: { default: false },
     // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
     bookAnchor: { default: null },
+    // 排版(对齐 V1 textBlock — 仅 paragraph/heading 这类纯文本 block 有意义)
+    align: { default: 'left' },          // 'left' | 'center' | 'right'
+    textIndent: { default: false },      // 首行缩进 2em
   },
   defining: true,
   parseDOM: [
@@ -33,16 +36,28 @@ const paragraphNodeSpec: NodeSpec = {
       tag: 'p',
       getAttrs(dom) {
         const el = dom as HTMLElement;
+        const align = el.style.textAlign as 'left' | 'center' | 'right' | '';
+        const textIndent = el.style.textIndent === '2em';
         return {
           isTitle: el.getAttribute('data-is-title') === 'true',
+          align: align || 'left',
+          textIndent,
         };
       },
     },
   ],
   toDOM(node) {
-    const isTitle = node.attrs.isTitle as boolean;
-    if (isTitle) return ['p', { 'data-is-title': 'true', class: 'krig-note-title' }, 0];
-    return ['p', 0];
+    const { isTitle, align, textIndent } = node.attrs;
+    const styles: string[] = [];
+    if (align && align !== 'left') styles.push(`text-align: ${align}`);
+    if (textIndent) styles.push('text-indent: 2em');
+    const styleAttr = styles.length > 0 ? styles.join('; ') : null;
+    if (isTitle) {
+      const attrs: Record<string, string> = { 'data-is-title': 'true', class: 'krig-note-title' };
+      if (styleAttr) attrs.style = styleAttr;
+      return ['p', attrs, 0];
+    }
+    return ['p', styleAttr ? { style: styleAttr } : {}, 0];
   },
 };
 

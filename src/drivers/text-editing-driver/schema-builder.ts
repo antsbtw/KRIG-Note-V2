@@ -22,7 +22,10 @@ function injectFrameworkAttrs(spec: NodeSpec): NodeSpec {
       // thought-view Phase 3:block anchor 用 — thought atom id 引用,
       // thought-anchor-plugin 按此 attr 画 block 外框 decoration(色由 thoughtType 决定)
       frameThoughtId: spec.attrs?.frameThoughtId ?? { default: null },
-      // L5-B+ 加:fromPage / frameColor / frameStyle / frameGroupId
+      // block 框定(对齐 V1 block-frame plugin):色 + 线型(solid|double) + 多块分组
+      frameColor: spec.attrs?.frameColor ?? { default: null },
+      frameStyle: spec.attrs?.frameStyle ?? { default: null },
+      frameGroupId: spec.attrs?.frameGroupId ?? { default: null },
     },
   };
 }

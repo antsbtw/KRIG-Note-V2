@@ -217,6 +217,254 @@ export const textEditingDriverApi = {
     inst.view.dispatch(tr);
   },
 
+  // ── Block 框定(frame) ── L5-Frame
+
+  /**
+   * 给一组 block 设框定(对齐 V1 addBlockFrameGroup)。
+   *
+   * - positions.length === 1:不设 groupId(单块 only 渲染)
+   * - positions.length > 1:生成 groupId,多块共享(首/中/尾连成整体)
+   *
+   * 任一 position 无对应 node 时跳过该 position(不抛错)。
+   */
+  setBlockFrame(
+    instanceId: string,
+    positions: number[],
+    color: string,
+    style: 'solid' | 'double' = 'solid',
+  ): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || positions.length === 0) return;
+    const groupId =
+      positions.length > 1
+        ? `frame-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+        : null;
+    let tr = inst.view.state.tr;
+    let changed = false;
+    for (const pos of positions) {
+      const node = tr.doc.nodeAt(pos);
+      if (!node || !node.isBlock) continue;
+      tr = tr.setNodeMarkup(pos, null, {
+        ...node.attrs,
+        frameColor: color,
+        frameStyle: style,
+        frameGroupId: groupId,
+      });
+      changed = true;
+    }
+    if (changed) {
+      inst.view.dispatch(tr);
+      inst.view.focus();
+    }
+  },
+
+  /**
+   * 修改框定颜色(已有框定才生效)。
+   *
+   * 若 block 有 frameGroupId,同步更新同组所有 block 的颜色(group 必须色一致)。
+   */
+  updateBlockFrameColor(instanceId: string, blockPos: number, color: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node || !node.attrs.frameColor) return;
+    const groupId = node.attrs.frameGroupId as string | null;
+    let tr = inst.view.state.tr;
+    if (groupId) {
+      inst.view.state.doc.forEach((child, offset) => {
+        if (child.attrs.frameGroupId === groupId) {
+          tr = tr.setNodeMarkup(offset, null, { ...child.attrs, frameColor: color });
+        }
+      });
+    } else {
+      tr = tr.setNodeMarkup(blockPos, null, { ...node.attrs, frameColor: color });
+    }
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /**
+   * 修改框定线型(对齐 updateBlockFrameColor 的 group 行为)。
+   */
+  updateBlockFrameStyle(
+    instanceId: string,
+    blockPos: number,
+    style: 'solid' | 'double',
+  ): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node || !node.attrs.frameColor) return;
+    const groupId = node.attrs.frameGroupId as string | null;
+    let tr = inst.view.state.tr;
+    if (groupId) {
+      inst.view.state.doc.forEach((child, offset) => {
+        if (child.attrs.frameGroupId === groupId) {
+          tr = tr.setNodeMarkup(offset, null, { ...child.attrs, frameStyle: style });
+        }
+      });
+    } else {
+      tr = tr.setNodeMarkup(blockPos, null, { ...node.attrs, frameStyle: style });
+    }
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /**
+   * 删除框定(对齐 V1 removeBlockFrame,group 同步清)。
+   */
+  removeBlockFrame(instanceId: string, blockPos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return;
+    const groupId = node.attrs.frameGroupId as string | null;
+    let tr = inst.view.state.tr;
+    if (groupId) {
+      inst.view.state.doc.forEach((child, offset) => {
+        if (child.attrs.frameGroupId === groupId) {
+          tr = tr.setNodeMarkup(offset, null, {
+            ...child.attrs,
+            frameColor: null,
+            frameStyle: null,
+            frameGroupId: null,
+          });
+        }
+      });
+    } else {
+      tr = tr.setNodeMarkup(blockPos, null, {
+        ...node.attrs,
+        frameColor: null,
+        frameStyle: null,
+        frameGroupId: null,
+      });
+    }
+    inst.view.dispatch(tr);
+    inst.view.focus();
+  },
+
+  /**
+   * 取 block 的 frame 信息(submenu active 状态用)。
+   */
+  getBlockFrame(
+    instanceId: string,
+    blockPos: number,
+  ): { color: string; style: string; groupId: string | null } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    const color = node.attrs.frameColor as string | null;
+    if (!color) return null;
+    return {
+      color,
+      style: (node.attrs.frameStyle as string | null) ?? 'solid',
+      groupId: (node.attrs.frameGroupId as string | null) ?? null,
+    };
+  },
+
+  /**
+   * 取当前选区覆盖的顶层 block 位置(context menu 多选场景)。
+   *
+   * 走 MultipleNodeSelection 优先 / fallback 文本选区交集。
+   */
+  getSelectedTopLevelBlockPositions(instanceId: string): number[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const { from, to } = inst.view.state.selection;
+    const positions: number[] = [];
+    inst.view.state.doc.forEach((node, offset) => {
+      if (!node.isBlock) return;
+      const nodeEnd = offset + node.nodeSize;
+      if (offset < to && nodeEnd > from) {
+        positions.push(offset);
+      }
+    });
+    return positions;
+  },
+
+  // ── Block 排版(align / textIndent / indent) ── L5-Frame
+
+  /**
+   * 设 block 对齐(仅 paragraph / heading 有 align attr,其他静默)。
+   */
+  setBlockAlign(
+    instanceId: string,
+    blockPos: number,
+    align: 'left' | 'center' | 'right',
+  ): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return;
+    if (node.attrs.align === undefined) return;
+    inst.view.dispatch(
+      inst.view.state.tr.setNodeMarkup(blockPos, null, { ...node.attrs, align }),
+    );
+    inst.view.focus();
+  },
+
+  /**
+   * 切换 block 首行缩进(仅 paragraph / heading 有 textIndent attr)。
+   */
+  toggleBlockTextIndent(instanceId: string, blockPos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return;
+    if (node.attrs.textIndent === undefined) return;
+    inst.view.dispatch(
+      inst.view.state.tr.setNodeMarkup(blockPos, null, {
+        ...node.attrs,
+        textIndent: !node.attrs.textIndent,
+      }),
+    );
+    inst.view.focus();
+  },
+
+  /**
+   * 调整 block 布局缩进(indent attr,范围 0-8)。
+   *
+   * delta = ±1;边界外不动(0 不能再 outdent,8 不能再 indent)。
+   * indent attr 通过 schema-builder injectFrameworkAttrs 给所有 group:'block' 注入,
+   * 所以这里不需要 attrs?.indent 防御性 undefined 检查 — schema 已保证有该 attr。
+   */
+  adjustBlockIndent(instanceId: string, blockPos: number, delta: 1 | -1): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return false;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return false;
+    const current = (node.attrs.indent as number | undefined) ?? 0;
+    const MAX_INDENT = 8;
+    const next = Math.max(0, Math.min(MAX_INDENT, current + delta));
+    if (next === current) return false;
+    inst.view.dispatch(
+      inst.view.state.tr.setNodeMarkup(blockPos, null, { ...node.attrs, indent: next }),
+    );
+    inst.view.focus();
+    return true;
+  },
+
+  /**
+   * 取 block 排版 attrs(submenu active 状态用)。
+   *
+   * align / textIndent 可能为 undefined(非 paragraph/heading);indent 一定有(框架注入)。
+   */
+  getBlockFormat(
+    instanceId: string,
+    blockPos: number,
+  ): { align: 'left' | 'center' | 'right' | null; textIndent: boolean | null; indent: number } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const node = inst.view.state.doc.nodeAt(blockPos);
+    if (!node) return null;
+    return {
+      align: (node.attrs.align as 'left' | 'center' | 'right' | undefined) ?? null,
+      textIndent: (node.attrs.textIndent as boolean | undefined) ?? null,
+      indent: (node.attrs.indent as number | undefined) ?? 0,
+    };
+  },
+
   /**
    * 取 block 的文字色(handle Color panel active swatch 高亮用)。
    *

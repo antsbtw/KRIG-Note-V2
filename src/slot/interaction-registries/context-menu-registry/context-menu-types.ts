@@ -29,13 +29,60 @@ export type EnabledWhen =
 export interface ContextMenuItem {
   id: string;
   label: string;
-  /** 字符串引用 commandRegistry */
+  /**
+   * 字符串引用 commandRegistry。
+   *
+   * 子菜单容器项(submenuId 设置)可留空字符串 '' — 此时点击只展开 submenu,不触发命令;
+   * 自定义渲染 submenu(submenuRender)由 submenu 内组件负责操作。
+   */
   command: string;
   enabledWhen?: EnabledWhen;
   group?: string;
   order?: number;
   /** 关联的 view ID(undefined = 全局,所有 view 显示) */
   view?: string;
+  /**
+   * 子菜单 ID — 设置则此 item 是 submenu 容器(右侧显 ▸,hover 展开)
+   *
+   * 配套 submenuOf:子菜单的子项设 submenuOf 指回父 ID;或走 submenuRender 自定义渲染。
+   * 语义对齐 handle-registry/handle-types.ts(2026-05-15 引入)。
+   */
+  submenuId?: string;
+  /**
+   * 该 item 属于哪个 submenu(submenuId 引用)
+   *
+   * 不设时是顶层 item;设了表示渲染在指定子菜单内,顶层菜单不显示。
+   */
+  submenuOf?: string;
+  /**
+   * Submenu 自定义渲染函数(submenuId 设置时可选)。
+   *
+   * 设置则 submenu 容器内不走默认 button 列表(按 submenuOf 收集),
+   * 而是调本函数取得 ReactNode 渲染(Color swatch grid / FramePicker 等复杂内容用)。
+   *
+   * 收 ContextSubmenuContext:含 contextInfo / viewId / close。
+   * 内部组件调 driver block-scoped API 时,instanceId 走 ctx.contextInfo.pmInstanceId
+   * (右键触发瞬间快照,不再走 focus query)。
+   */
+  submenuRender?: (ctx: ContextSubmenuContext) => import('react').ReactNode;
+}
+
+/**
+ * Context menu submenu 自定义渲染上下文(对齐 handle-types.ts HandleSubmenuContext)。
+ *
+ * 关键差异 vs HandleSubmenuContext:
+ * - context 不带 blockPos(右键位置不一定对应单 block — 选区可能跨多块);
+ *   pos 解析由 submenu 内组件按需用 contextInfo.x/y + driver.resolveBlockAt 取
+ *   或走 driver.getSelectedTopLevelBlockPositions 跨多块。
+ * - 直接暴露 pmInstanceId(右键触发瞬间快照,避免 focus 转向菜单后 query 失败)。
+ */
+export interface ContextSubmenuContext {
+  /** 触发时的 view id */
+  viewId: string;
+  /** 触发瞬间的 context info(含 pmInstanceId / x / y / hasSelection 等) */
+  contextInfo: ContextInfo;
+  /** 关闭整个 context menu(submenu 内部操作完后调) */
+  close: () => void;
 }
 
 /** 触发时的上下文信息(用于 enabledWhen 判断) */

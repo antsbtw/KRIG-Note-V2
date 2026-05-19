@@ -24,19 +24,28 @@ const headingNodeSpec: NodeSpec = {
     level: { default: 1 },
     // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
     bookAnchor: { default: null },
+    // 排版(对齐 V1 textBlock — heading 同 paragraph 都有 align/textIndent)
+    align: { default: 'left' },          // 'left' | 'center' | 'right'
+    textIndent: { default: false },      // 首行缩进 2em
   },
   defining: true,
-  parseDOM: [
-    { tag: 'h1', attrs: { level: 1 } },
-    { tag: 'h2', attrs: { level: 2 } },
-    { tag: 'h3', attrs: { level: 3 } },
-    { tag: 'h4', attrs: { level: 4 } },
-    { tag: 'h5', attrs: { level: 5 } },
-    { tag: 'h6', attrs: { level: 6 } },
-  ],
+  parseDOM: ([1, 2, 3, 4, 5, 6] as const).map((lv) => ({
+    tag: `h${lv}`,
+    getAttrs(dom: HTMLElement | string) {
+      const el = dom as HTMLElement;
+      const align = el.style.textAlign as 'left' | 'center' | 'right' | '';
+      const textIndent = el.style.textIndent === '2em';
+      return { level: lv, align: align || 'left', textIndent };
+    },
+  })),
   toDOM(node) {
-    const level = node.attrs.level as number;
-    return [`h${level}`, 0];
+    const { level, align, textIndent } = node.attrs;
+    const styles: string[] = [];
+    if (align && align !== 'left') styles.push(`text-align: ${align}`);
+    if (textIndent) styles.push('text-indent: 2em');
+    const attrs: Record<string, string> = {};
+    if (styles.length > 0) attrs.style = styles.join('; ');
+    return [`h${level}`, attrs, 0];
   },
 };
 
