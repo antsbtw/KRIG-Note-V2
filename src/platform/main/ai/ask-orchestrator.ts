@@ -113,10 +113,9 @@ export async function pasteAndSend(
       return { success: false, error: 'Failed to paste text into AI input box' };
     }
 
-    // Claude/ChatGPT 在 paste 后到 send 按钮启用之间需 200-800ms 不等(检测 input
-    // change → 解除 button disabled)。等 600ms 大概率覆盖;万一仍 disabled,
-    // clickSendButton 内会自动 fallback dispatch Enter keydown,也能触发提交。
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // writer.pasteTextToAI 内已 sleep 400ms + verify content landed,这里只需
+    // 短暂 250ms 让 send button disabled 状态解除(React state propagation)。
+    await new Promise((resolve) => setTimeout(resolve, 250));
     await clickSendButton(webContents, serviceId);
     return { success: true };
   } catch (error) {
