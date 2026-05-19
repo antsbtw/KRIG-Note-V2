@@ -1519,6 +1519,81 @@ export const textEditingDriverApi = {
     inst.view.dispatch(tr);
     return true;
   },
+
+  /**
+   * 在"PM 光标处或末尾"插入一组 PM nodes(ai-sync 模式下"提取整页对话"用)。
+   *
+   * 行为:
+   * - PM hasFocus()=true → 在 selection.from 当前 block 之后插(safe replace 当前 block
+   *   或 split,语义对齐用户"在光标位置插块")
+   * - hasFocus()=false → fallback 到 insertNodesAtEnd 同款"末尾插+空段替换"
+   *
+   * 为啥用 hasFocus 而不是单看 selection.from:刚打开 note 时 selection 默认在
+   * 标题后(非 0)— hasFocus=false 时还是该判"用户没碰过 Note 编辑器"→ 走末尾。
+   *
+   * 返 true=插入成功;false=instance 不存在 / 全节点无效。
+   */
+  insertNodesAtCursorOrEnd(instanceId: string, nodesJson: unknown[]): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return false;
+    const { state } = inst.view;
+    const { schema } = state;
+
+    const nodes: PMNode[] = [];
+    for (const raw of nodesJson) {
+      try {
+        nodes.push(PMNode.fromJSON(schema, raw as Parameters<typeof PMNode.fromJSON>[1]));
+      } catch (err) {
+        console.warn('[insertNodesAtCursorOrEnd] node parse failed, skipping:', err);
+      }
+    }
+    if (nodes.length === 0) return false;
+
+    const hasFocus = inst.view.hasFocus();
+    let tr = state.tr;
+
+    if (!hasFocus) {
+      // ── fallback 末尾插(逻辑同 insertNodesAtEnd)──
+      const lastChild = state.doc.lastChild;
+      const lastChildIsEmptyPara =
+        lastChild != null &&
+        lastChild.type.name === 'paragraph' &&
+        lastChild.content.size === 0 &&
+        lastChild.attrs.isTitle !== true;
+      if (lastChildIsEmptyPara) {
+        const lastChildStart = state.doc.content.size - lastChild.nodeSize;
+        tr = tr.replaceWith(lastChildStart, state.doc.content.size, nodes);
+      } else {
+        tr = tr.insert(state.doc.content.size, nodes);
+      }
+    } else {
+      // ── 光标位置插(在 selection.from 所在 top-level block 之后)──
+      const $from = state.selection.$from;
+      if ($from.depth === 0) {
+        tr = tr.insert(state.selection.from, nodes);
+      } else {
+        const depth = 1; // top-level block boundary
+        const blockNode = $from.node(depth);
+        const blockStart = $from.before(depth);
+        const blockEnd = $from.after(depth);
+        const isEmptyParagraph =
+          blockNode.type.name === 'paragraph' &&
+          blockNode.content.size === 0 &&
+          !blockNode.attrs.isTitle;
+        if (isEmptyParagraph) {
+          // 光标停在空段(典型:用户按 Enter 留下的空行)→ 替换避免多余间距
+          tr = tr.replaceWith(blockStart, blockEnd, nodes);
+        } else {
+          tr = tr.insert(blockEnd, nodes);
+        }
+      }
+    }
+
+    tr.setMeta('addToHistory', true);
+    tr = tr.scrollIntoView();
+    inst.view.dispatch(tr);
+    return true;
+  },
 };
 
 /**

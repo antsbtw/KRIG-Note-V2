@@ -2,8 +2,12 @@
  * ai-sync 集成 — NoteView 端"AI 对话自动同步到右槽 Note"接收侧
  *
  * 工作模式:用户 NavSide 点 🤖 AI(左槽)+ 任意 Note(右槽),Note 端订阅 main 端
- * broadcast 的 AI_SYNC_APPEND_TURN,拿到 turn payload 后用 buildAITurnPmNodes 拼装
- * ❓ Callout + 🔀 Toggle + ─ 块,driver insertNodesAtEnd 落到当前右槽 Note 末尾。
+ * broadcast 的 AI_SYNC_APPEND_TURN,拿到 turn payload 后通过 note-view.append-ai-turn
+ * 命令把 ❓ Callout + 🔀 Toggle + ─ 块追加到当前右槽 Note 末尾(mode='end')。
+ *
+ * 与"提取整页对话"按钮的区别:auto-sync 是单 turn 增量(走 ❓+🔀 包装,落末尾不打扰
+ * 用户光标);extract 按钮是整页 dump(走 raw PM nodes,落光标处或末尾)。两条路径
+ * 都通过 note-view 命令统一收口,本模块只管"何时启动 + 转发"。
  *
  * 触发逻辑:
  *   订阅 workspaceManager → 检查 active workspace 的 slotBinding
@@ -20,12 +24,11 @@
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import type {
   AIConversationApi,
   AISyncAppendTurnPayload,
 } from '@capabilities/ai-conversation/types';
-import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { buildAITurnPmNodes } from './ai-sync-blocks';
 import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
 
 /**
@@ -122,17 +125,16 @@ function handleAppendTurn(payload: AISyncAppendTurnPayload): void {
   const ws = workspaceManager.get(activeId);
   if (!ws || !matchesAISyncCombo(ws)) return; // slot 组合已变(reconcile 之前抢跑一帧)
 
-  // NoteView 用 instanceId = workspaceId(NoteView.tsx Host config);右槽 note-view
-  // 与左槽共享 workspaceId,driver instance registry 里只有一个 entry.
-  const instanceId = activeId;
-  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-  const nodes = buildAITurnPmNodes(payload.serviceId, payload.turn);
-  if (nodes.length === 0) return;
-
-  const ok = textEditing.api.insertNodesAtEnd(instanceId, nodes);
+  // 走 note-view.append-ai-turn 命令(同一 view 也用命令,统一插入路径)。
+  // mode='end':auto-sync 增量同步,总是末尾(用户在 Note 里改东西不被打扰)。
+  const ok = commandRegistry.execute('note-view.append-ai-turn', {
+    serviceId: payload.serviceId,
+    turn: payload.turn,
+    mode: 'end',
+  });
   if (!ok) {
     console.warn(
-      `[ai-sync-integration] insertNodesAtEnd failed instance=${instanceId} (PM 实例未注册?Note 未打开?)`,
+      `[ai-sync-integration] append-ai-turn failed ws=${activeId} (PM 实例未注册?Note 未打开?)`,
     );
   }
 }

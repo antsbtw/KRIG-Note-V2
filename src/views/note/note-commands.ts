@@ -43,6 +43,8 @@ import { decodeTreeId, encodeNoteId, encodeFolderId } from './tree-builder';
 import { triggerRename } from './context-menu-registrations';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
+import { buildAITurnPmNodes } from './ai-sync-blocks';
+import type { AISyncTurn, AIServiceId } from '@capabilities/ai-conversation/types';
 
 /**
  * lazy getter — 命令 handler 内部用,避免 module load 时 require
@@ -352,5 +354,66 @@ export function registerNoteCommands(): void {
     const bus = workspaceManager.getBus(wsId);
     if (!bus) return;
     bus.slot.openRight(viewId);
+  });
+
+  /**
+   * ai-sync feature 跨 view 入口 — 把一段 AI turn (user + assistant) 追加进当前
+   * active workspace 的 Note PM 实例。两种 mode:
+   *
+   *   - mode='end'           : 总是落到 doc 末尾(空段替换 — auto-sync 自动同步用)
+   *   - mode='cursor-or-end' : PM hasFocus=true 落光标处当前 block 之后;否则末尾
+   *
+   * 调用约定:
+   *   commandRegistry.execute('note-view.append-ai-turn', { serviceId, turn, mode })
+   *
+   * 块结构: ❓ Callout (user message) + 🔀 Toggle (回答 (服务名)) + ─ 分隔
+   * 适用场景:单 turn 同步(auto-sync)— user/assistant 配对清晰。
+   *
+   * 返:boolean(true=插入成功;false=未插入,典型场景 instance 未注册 / 节点全失败)
+   * 边界:命令不校验 slot 组合(由调用方判);只要 active workspace 有 PM 实例就插。
+   */
+  commandRegistry.register('note-view.append-ai-turn', (arg: unknown) => {
+    const p = (arg ?? {}) as {
+      serviceId?: AIServiceId;
+      turn?: AISyncTurn;
+      mode?: 'end' | 'cursor-or-end';
+    };
+    if (!p.serviceId || !p.turn) return false;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return false;
+
+    const nodes = buildAITurnPmNodes(p.serviceId, p.turn);
+    if (nodes.length === 0) return false;
+
+    const api = tea();
+    // NoteView 用 instanceId = workspaceId(参考 NoteView.tsx Host config)
+    if (p.mode === 'cursor-or-end') {
+      return api.insertNodesAtCursorOrEnd(wsId, nodes);
+    }
+    return api.insertNodesAtEnd(wsId, nodes);
+  });
+
+  /**
+   * 把一段已转好的 PM 节点(NoteDocEnvelope.payload.content)插入当前 active Note。
+   *
+   * 适用场景:"提取整页对话"— extractFull 返完整 markdown(多 turn + ## 用户/## AI
+   * 标题已自带),aiMarkdownToNoteDoc 转出来直接是带 heading 的多 block,不需要再
+   * 用 ❓+🔀 包一层(那是单 turn 才有的语义)。
+   *
+   * 调用约定:
+   *   commandRegistry.execute('note-view.append-pm-nodes', { nodes: unknown[], mode })
+   *
+   * 返:boolean
+   */
+  commandRegistry.register('note-view.append-pm-nodes', (arg: unknown) => {
+    const p = (arg ?? {}) as { nodes?: unknown; mode?: 'end' | 'cursor-or-end' };
+    if (!Array.isArray(p.nodes) || p.nodes.length === 0) return false;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return false;
+    const api = tea();
+    if (p.mode === 'cursor-or-end') {
+      return api.insertNodesAtCursorOrEnd(wsId, p.nodes);
+    }
+    return api.insertNodesAtEnd(wsId, p.nodes);
   });
 }

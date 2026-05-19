@@ -93,6 +93,37 @@ export function registerAICommands(): void {
       return;
     }
 
+    // ── ai-sync 组合分支:左 AI + 右 Note → 整页 markdown 落入当前 Note ──
+    // 用户预期:右槽 Note 是当前工作面,提取按钮应"把对话整页 dump 进 Note",
+    // 而不是抢走右槽切到 Thoughts(那是用户没开 Note 时的 fallback)。
+    //
+    // 整页 markdown 已含多 turn + ## 用户 / ## AI heading 分隔,直接转 PM doc 插入,
+    // 不再用 ❓+🔀 单 turn 包装(那是 ai-sync 增量同步专用)。
+    //
+    // 插入位置:走 driver insertNodesAtCursorOrEnd —
+    //   - PM 编辑器 hasFocus()=true(用户点过 Note 里面)→ 光标所在 block 之后
+    //   - hasFocus()=false → 文末
+    // 走 note-view.append-pm-nodes 命令(cross-view 标准入口),不直依赖 note 模块。
+    if (ws.slotBinding.left === 'ai-view' && ws.slotBinding.right === 'note-view') {
+      const envelope = aiMarkdownToNoteDoc(extraction.markdown);
+      const pmDoc = envelope.payload as { content?: unknown[] };
+      const nodes = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+      if (nodes.length === 0) {
+        console.warn('[ai-view.extract] 整页 markdown 转空 doc,回退 Thought 链路');
+      } else {
+        const ok = commandRegistry.execute('note-view.append-pm-nodes', {
+          nodes,
+          mode: 'cursor-or-end',
+        });
+        if (!ok) {
+          console.warn('[ai-view.extract] append-pm-nodes returned false, 回退 Thought 链路');
+          // PM 实例未挂(罕见,note 还没加载?)— 回退老链路避免提取丢失
+        } else {
+          return; // ai-sync 路径完成,不走 Thought
+        }
+      }
+    }
+
     const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
     // Phase 10.A:走 ResultParser + extractedBlocksToPmDoc 无损渲染
     // (不再 markdown.split('\n\n'):标题/数学/代码/表格/列表/引用/inline marks 全保留)
