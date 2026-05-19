@@ -13,7 +13,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { AIConversationApi } from '@capabilities/ai-conversation/types';
 import type { ThoughtCapabilityApi } from '@capabilities/thought/types';
-import type { NoteDocEnvelope } from '@shared/ipc/note-folder-types';
+import { aiMarkdownToNoteDoc } from '@shared/ai-markdown-parser';
 import { setAIServiceId, getAIWsState } from './data-model';
 import type { AIServiceId } from '@shared/types/ai-service-types';
 
@@ -87,7 +87,9 @@ export function registerAICommands(): void {
     }
 
     const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
-    const doc = markdownToDoc(markdown);
+    // Phase 10.A:走 ResultParser + extractedBlocksToPmDoc 无损渲染
+    // (不再 markdown.split('\n\n'):标题/数学/代码/表格/列表/引用/inline marks 全保留)
+    const doc = aiMarkdownToNoteDoc(markdown);
 
     // 路径分支:有 pending(场景 A:Note Ask AI)→ update 已 preCreate 的 atom
     //         无 pending(场景 B:独立 AI 聊天)→ createNew 独立 atom
@@ -168,26 +170,4 @@ export function registerAICommands(): void {
     // fire-and-forget — 结果通过 onAIResponseReady / onAIError 广播
     void ai.askAI(serviceId, prompt);
   });
-}
-
-/**
- * Markdown → NoteDocEnvelope(本期最小集:按段落拆分,不解析 markdown 语法)
- *
- * 与 thought/command-impl/ask-ai.ts 旧版 markdownToDoc 同模式。
- * 后续 sub-phase 接 V1 blocks-to-pm-nodes 做真 md → PM 还原。
- */
-function markdownToDoc(markdown: string): NoteDocEnvelope {
-  const paragraphs = markdown.split(/\n\n+/).map((p) => p.trim()).filter((p) => p.length > 0);
-  if (paragraphs.length === 0) paragraphs.push('(空回复)');
-  return {
-    format: 'pm-doc-json',
-    version: '0.1',
-    payload: {
-      type: 'doc',
-      content: paragraphs.map((p) => ({
-        type: 'paragraph',
-        content: [{ type: 'text', text: p }],
-      })),
-    },
-  };
 }
