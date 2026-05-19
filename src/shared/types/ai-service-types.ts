@@ -120,7 +120,8 @@ const CLAUDE_PROFILE: AIServiceProfile = {
   urlPattern: '^https://claude\\.ai',
   selectors: {
     inputBox: '[contenteditable="true"].ProseMirror',
-    sendButton: 'button[aria-label="Send Message"]',
+    // Claude.ai 历次 UI 变更:Send Message(2024) → Send message(2025) → 兜底 type=submit
+    sendButton: 'button[aria-label="Send message"], button[aria-label="Send Message"], button[type="submit"][aria-label*="end"], fieldset button[type="submit"]:not([disabled])',
     messageList: '[class*="conversation-content"]',
     userMessage: '[data-is-streaming="false"][class*="human"]',
     assistantMessage: '.font-claude-response, [class*="font-claude-response"]:not([class*="response-body"])',
@@ -154,7 +155,7 @@ const CHATGPT_PROFILE: AIServiceProfile = {
   urlPattern: '^https://chatgpt\\.com',
   selectors: {
     inputBox: '#prompt-textarea',
-    sendButton: 'button[data-testid="send-button"]',
+    sendButton: 'button[data-testid="send-button"], button[data-testid="composer-send-button"], button[aria-label*="Send" i]',
     messageList: '[class*="react-scroll-to-bottom"]',
     userMessage: '[data-message-author-role="user"]',
     assistantMessage: '[data-message-author-role="assistant"], .agent-turn',
@@ -188,7 +189,7 @@ const GEMINI_PROFILE: AIServiceProfile = {
   urlPattern: '^https://gemini\\.google\\.com',
   selectors: {
     inputBox: '.ql-editor[contenteditable="true"]',
-    sendButton: 'button.send-button',
+    sendButton: 'button.send-button, button[aria-label*="Send" i], button[mat-icon-button][aria-label*="end"]',
     messageList: 'infinite-scroller',
     userMessage: '.user-query-container',
     assistantMessage: '.response-container',
