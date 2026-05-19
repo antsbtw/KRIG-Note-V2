@@ -13,11 +13,12 @@
  *
  * 输出格式(对齐 V1):
  * - SVG → 保存到 mediaStore → 返 `![title](media://...)` markdown
- * - HTML widget → 保存到 mediaStore → 返 `!html[title](media://...)` markdown
- *   (Note 端 link-click 暂不处理 !html — 现网降级 code fence;后续 sub-phase 加 !html
- *    渲染)。本期 HTML 走 fallback ```html fence,SVG 是当前主诉求。
- * - file_text(代码) → ```lang fence
- * - local_resource → 下载到 sandbox 后按 ext 走 SVG/HTML/code 路径
+ * - HTML widget / .html file_text / .html local_resource → 保存到 mediaStore →
+ *   返 `!html[title](media://...)` markdown(ResultParser 识别 !html[] 语法,
+ *   blocks-to-pm-doc 转 PM htmlBlock 节点;Note 端 htmlBlock NodeView 加载 iframe
+ *   真渲染 HTML)
+ * - file_text(非 .html 代码)→ ```lang fence
+ * - local_resource(非 .svg/.html 文件)→ 下载到 sandbox 后按 ext 走 code fence
  */
 
 import { mediaStore } from '../../media/media-store-impl';
@@ -199,7 +200,18 @@ async function artifactToMarkdown(artifact: MessageArtifact): Promise<string> {
       const encoded = Buffer.from(content.code, 'utf-8').toString('base64');
       return `![${artifact.title}](data:image/svg+xml;base64,${encoded})\n`;
     }
-    // HTML widget(本期 V2 没接 htmlBlock 媒体链路,降级 code fence;后续 sub-phase 补)
+    // HTML widget:转 data:text/html;base64 → mediaStore → media:// URL
+    // ResultParser 识别 !html[...](...) 后 blocks-to-pm-doc 出 PM htmlBlock 节点
+    try {
+      const dataUrl = `data:text/html;base64,${Buffer.from(content.code, 'utf-8').toString('base64')}`;
+      const result = await mediaStore.putBase64(dataUrl, 'text/html', `${artifact.title}.html`);
+      if (result.success && result.mediaUrl) {
+        return `!html[${artifact.title}](${result.mediaUrl})\n`;
+      }
+    } catch (err) {
+      console.warn('[extract-turn] mediaStore put HTML widget failed', { title: artifact.title, error: err });
+    }
+    // Fallback:mediaStore 不可用 → code fence
     return '```html\n' + content.code.trimEnd() + '\n```\n';
   }
 
@@ -218,6 +230,20 @@ async function artifactToMarkdown(artifact: MessageArtifact): Promise<string> {
         }
       } catch (err) {
         console.warn('[extract-turn] svg file_text put failed', { title: artifact.title, error: err });
+      }
+    }
+
+    // HTML file_text → htmlBlock 路径(mediaStore → !html[](media://...))
+    if (ext === 'html' || ext === 'htm') {
+      try {
+        const dataUrl = `data:text/html;base64,${Buffer.from(content.text, 'utf-8').toString('base64')}`;
+        const filename = content.path.split('/').pop() || `${artifact.title}.html`;
+        const result = await mediaStore.putBase64(dataUrl, 'text/html', filename);
+        if (result.success && result.mediaUrl) {
+          return `!html[${artifact.title}](${result.mediaUrl})\n`;
+        }
+      } catch (err) {
+        console.warn('[extract-turn] html file_text put failed', { title: artifact.title, error: err });
       }
     }
 
@@ -240,6 +266,7 @@ async function artifactToMarkdown(artifact: MessageArtifact): Promise<string> {
       if (fileContent) {
         const filename = content.filePath.split('/').pop() || artifact.title;
         const isSvg = content.mimeType === 'image/svg+xml' || filename.match(/\.svg$/i);
+        const isHtml = content.mimeType === 'text/html' || filename.match(/\.html?$/i);
 
         if (isSvg) {
           const svgCode = prepareSvgForDom(fileContent);
@@ -251,6 +278,18 @@ async function artifactToMarkdown(artifact: MessageArtifact): Promise<string> {
           );
           if (result.success && result.mediaUrl) {
             return `![${artifact.title}](${result.mediaUrl})\n`;
+          }
+        }
+
+        if (isHtml) {
+          const dataUrl = `data:text/html;base64,${Buffer.from(fileContent, 'utf-8').toString('base64')}`;
+          const result = await mediaStore.putBase64(
+            dataUrl,
+            'text/html',
+            filename.match(/\.html?$/i) ? filename : `${filename}.html`,
+          );
+          if (result.success && result.mediaUrl) {
+            return `!html[${artifact.title}](${result.mediaUrl})\n`;
           }
         }
 

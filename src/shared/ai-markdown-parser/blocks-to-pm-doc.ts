@@ -20,7 +20,8 @@
  *   'bulletList'     → 'bulletList' > 'listItem' > 'paragraph'
  *   'orderedList'    → 'orderedList' > 'listItem' > 'paragraph'
  *   'table'          → 'table' > 'tableRow' > 'tableHeader'/'tableCell' > 'paragraph'
- *   'file'/'htmlBlock' → 'paragraph' placeholder(V2 当前 ai-response 不接复杂 block)
+ *   'htmlBlock'    → 'htmlBlock' { src, title } 包空 paragraph(caption,留空)
+ *   'file'         → 'paragraph' placeholder(V2 ai-response 不接 file block)
  *
  * Inline 元素(ExtractedInline → PM inline):
  *   'text'         → text node + marks
@@ -170,10 +171,23 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
         },
       ];
 
+    case 'htmlBlock':
+      // V2 htmlBlock spec: content='block' 单 caption + attrs.src(media:// URL)
+      // AI 提取 HTML artifact 走这条路径(extract-turn.ts 输出 !html[title](media://...))
+      return [
+        {
+          type: 'htmlBlock',
+          attrs: {
+            src: block.src || null,
+            title: block.text || '',
+          },
+          content: [{ type: 'paragraph' }],
+        },
+      ];
+
     case 'video':
     case 'audio':
     case 'file':
-    case 'htmlBlock':
       // V2 当前 ai-response thought 不接复杂媒体 block,降级 paragraph 占位
       return [
         {
