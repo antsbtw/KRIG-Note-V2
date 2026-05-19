@@ -212,6 +212,15 @@ export function registerTextEditingCommands(): void {
   registerHandleTurn('text-editing.handle-turn-callout', 'callout');
   registerHandleTurn('text-editing.handle-turn-toggle', 'toggle-list');
 
+  // ── Handle heading 折叠/展开(note-toc feature) ──
+
+  commandRegistry.register('text-editing.handle-toggle-heading-collapse', () => {
+    const ctx = getHandlePos();
+    if (!ctx) return;
+    tea.toggleHeadingCollapseAt(ctx.instanceId, ctx.pos);
+    handleMenuController.hide();
+  });
+
   // ── L5-B3.9:Handle block 操作(Copy / Duplicate / Delete) ──
 
   /**

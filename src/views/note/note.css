@@ -1,5 +1,15 @@
 /* NoteView 样式 */
 
+/* NoteView 外框:充满 slot 区域,提供 TOC 侧边面板的定位锚点(absolute 子元素以此为坐标系) */
+.krig-note-view-frame {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .krig-note-view {
   height: 100%;
   width: 100%;

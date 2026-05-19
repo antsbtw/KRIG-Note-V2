@@ -28,6 +28,9 @@
  */
 
 import type { HandleItem } from '@slot/interaction-registries/handle-registry/handle-types';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import type { TextEditingApi } from '../../types';
 import { HandleColorSubmenu } from '../color-picker/HandleColorSubmenu';
 import { HandleFormatSubmenu } from './HandleFormatSubmenu';
 
@@ -123,6 +126,42 @@ export function createTurnIntoSubmenu(viewId: string): HandleItem[] {
       command: 'text-editing.handle-turn-toggle', submenuOf: 'turn-into', view: viewId, order: 20,
     },
   ];
+}
+
+/**
+ * Heading 折叠/展开项(仅 heading 节点显示,V2 对齐 V1 ⌃/⌄ 切换)
+ *
+ * 依赖 driver 的 headingCollapse plugin(NoteView 默认开;canvas-text-node/
+ * thought-view 已 opt-out — 即便注册了本项,blockType !== 'heading' 也不显示)。
+ *
+ * dynamicLabel/dynamicIcon 渲染期同步读 plugin state,确保 折叠/展开 文案与
+ * ⌃/⌄ 跟当前 attr 实时一致(类比 V1 textBlock.attrs.open 切换)。
+ */
+export function createHeadingCollapseItem(viewId: string): HandleItem {
+  const getInstanceId = (): string | null =>
+    workspaceManager.getActiveId();
+  return {
+    id: `${viewId}.h.heading-collapse`,
+    icon: '⌃',
+    label: '折叠',
+    command: 'text-editing.handle-toggle-heading-collapse',
+    view: viewId,
+    group: 'block-actions',
+    order: 49, // 紧贴 Copy(50)之前
+    visibleWhen: (ctx) => ctx.blockType === 'heading',
+    dynamicLabel: (ctx) => {
+      const id = getInstanceId();
+      if (!id) return null;
+      const api = requireCapabilityApi<TextEditingApi>('text-editing');
+      return api.api.isHeadingCollapsedAt(id, ctx.blockPos) ? '展开' : '折叠';
+    },
+    dynamicIcon: (ctx) => {
+      const id = getInstanceId();
+      if (!id) return null;
+      const api = requireCapabilityApi<TextEditingApi>('text-editing');
+      return api.api.isHeadingCollapsedAt(id, ctx.blockPos) ? '⌄' : '⌃';
+    },
+  };
 }
 
 /** 3 项 block 操作(📋 Copy / ⧉ Duplicate / 🗑 Delete,group='block-actions'/'destructive') */

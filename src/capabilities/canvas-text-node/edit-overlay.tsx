@@ -61,6 +61,8 @@ export const CANVAS_TEXT_NODE_PLUGIN_PRESET: TextEditingPluginToggles = {
   dropCursor: false,
   // slash 默认 true,显式标出以表"刻意保留"
   slash: true,
+  // headingCollapse:canvas 文字节点 doc 短,无 TOC 面板,关
+  headingCollapse: false,
 };
 
 export function EditOverlay(): ReactElement | null {

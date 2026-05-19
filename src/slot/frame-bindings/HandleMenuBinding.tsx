@@ -108,6 +108,7 @@ export function HandleMenuBinding() {
   const ctx: HandleVisibilityContext = {
     blockType: state.blockType ?? '',
     blockAttrs: state.blockAttrs ?? {},
+    blockPos: state.pos ?? 0,
   };
   const { topLevel, submenus } = organizeItems(allItems, ctx);
   if (topLevel.length === 0) return null;
@@ -155,6 +156,8 @@ export function HandleMenuBinding() {
           const cls = ['krig-handle-menu-item'];
           if (disabled) cls.push('krig-handle-menu-item--disabled');
           if (hasSubmenu && openSub === item.submenuId) cls.push('krig-handle-menu-item--active');
+          const label = item.dynamicLabel?.(ctx) ?? item.label;
+          const icon = item.dynamicIcon?.(ctx) ?? item.icon;
           return (
             <button
               key={item.id}
@@ -170,8 +173,8 @@ export function HandleMenuBinding() {
               }}
               onClick={() => executeItem(item)}
             >
-              {item.icon && <span className="krig-handle-menu-item__icon">{item.icon}</span>}
-              <span className="krig-handle-menu-item__label">{item.label}</span>
+              {icon && <span className="krig-handle-menu-item__icon">{icon}</span>}
+              <span className="krig-handle-menu-item__label">{label}</span>
               {hasSubmenu && <span className="krig-handle-menu-item__arrow">▸</span>}
             </button>
           );
@@ -203,6 +206,8 @@ export function HandleMenuBinding() {
               const disabled = !item.command;
               const cls = ['krig-handle-menu-item'];
               if (disabled) cls.push('krig-handle-menu-item--disabled');
+              const label = item.dynamicLabel?.(ctx) ?? item.label;
+              const icon = item.dynamicIcon?.(ctx) ?? item.icon;
               return (
                 <button
                   key={item.id}
@@ -211,8 +216,8 @@ export function HandleMenuBinding() {
                   disabled={disabled}
                   onClick={() => executeItem(item)}
                 >
-                  {item.icon && <span className="krig-handle-menu-item__icon">{item.icon}</span>}
-                  <span className="krig-handle-menu-item__label">{item.label}</span>
+                  {icon && <span className="krig-handle-menu-item__icon">{icon}</span>}
+                  <span className="krig-handle-menu-item__label">{label}</span>
                 </button>
               );
             })

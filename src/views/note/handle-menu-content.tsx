@@ -51,6 +51,9 @@ export function registerHandleMenu(): void {
     // ── PM 通用 turn-into submenu(11 项)──
     ...ui.createTurnIntoSubmenu(VIEW),
 
+    // ── Heading 折叠/展开(仅 heading,note-toc feature)──
+    ui.createHeadingCollapseItem(VIEW),
+
     // ── PM 通用 block 操作 + destructive(Copy / Duplicate / Delete)──
     ...ui.createBlockActions(VIEW),
 
