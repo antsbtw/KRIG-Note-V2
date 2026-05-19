@@ -18,6 +18,7 @@ import { registerHandleMenu } from './handle-menu-content';
 import { registerContextMenu } from './context-menu-content';
 import { registerLinkClickIntegration } from './link-click-integration';
 import { registerAskAIPopup } from './ask-ai-popup';
+import { registerAISyncIntegration } from './ai-sync-integration';
 
 registerView({
   id: 'note-view',
@@ -80,3 +81,5 @@ registerContextMenu();
 // S4:vocab → driver 桥接 由 learning capability 自管(原 registerLearningIntegration 删除)
 registerLinkClickIntegration();
 registerAskAIPopup();
+// ai-sync feature:左 ai-view + 右 note-view 槽组合下,AI 回复完成自动追加到 Note 末尾
+registerAISyncIntegration();
