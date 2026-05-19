@@ -11,7 +11,7 @@ import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
-import { DOMSerializer, Fragment } from 'prosemirror-model';
+import { DOMSerializer, Fragment, Node as PMNode } from 'prosemirror-model';
 import { sliceToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
@@ -1466,6 +1466,58 @@ export const textEditingDriverApi = {
       tr.setMeta('addToHistory', false); // vocab 更新不进 undo 栈
       inst.view.dispatch(tr);
     }
+  },
+
+  /**
+   * 在 doc 末尾追加一组 PM nodes(ai-sync feature 用)。
+   *
+   * 行为:
+   * - 末尾若是"空 paragraph 且非 isTitle"(用户刚换行留下的空段),先替换它避免多余间距
+   * - 用 schema.nodeFromJSON 还原 PMNode,过滤掉 schema 不识别的节点(防御)
+   * - scrollIntoView 让用户视觉跟随
+   * - 返 true 表示插入成功;false = instance 不存在 / 全部节点都无效
+   *
+   * 不动 selection(避免抢用户光标);若调用方需要把光标挪到末尾,自行 setSelectionAt。
+   */
+  insertNodesAtEnd(instanceId: string, nodesJson: unknown[]): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return false;
+    const { state } = inst.view;
+    const { schema } = state;
+
+    const nodes: PMNode[] = [];
+    for (const raw of nodesJson) {
+      try {
+        const node = PMNode.fromJSON(schema, raw as Parameters<typeof PMNode.fromJSON>[1]);
+        nodes.push(node);
+      } catch (err) {
+        // 单节点解析失败不阻断其他节点(防御 schema 漂移 / parser 输出异常)
+        console.warn('[insertNodesAtEnd] node parse failed, skipping:', err);
+      }
+    }
+    if (nodes.length === 0) return false;
+
+    let tr = state.tr;
+
+    // 末尾空 paragraph 检测:doc.lastChild 是 paragraph + content.size===0 + 非 isTitle
+    const lastChild = state.doc.lastChild;
+    const lastChildIsEmptyPara =
+      lastChild != null &&
+      lastChild.type.name === 'paragraph' &&
+      lastChild.content.size === 0 &&
+      lastChild.attrs.isTitle !== true;
+
+    if (lastChildIsEmptyPara) {
+      const lastChildStart = state.doc.content.size - lastChild.nodeSize;
+      tr = tr.replaceWith(lastChildStart, state.doc.content.size, nodes);
+    } else {
+      tr = tr.insert(state.doc.content.size, nodes);
+    }
+
+    tr.setMeta('addToHistory', true);
+    tr = tr.scrollIntoView();
+    inst.view.dispatch(tr);
+    return true;
   },
 };
 
