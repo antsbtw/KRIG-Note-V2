@@ -477,6 +477,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiGetLatestResponse(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE);
   },
+  aiExtractFull(serviceId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, serviceId);
+  },
   aiOpenSession(serviceId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, serviceId);
   },

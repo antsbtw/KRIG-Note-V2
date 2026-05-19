@@ -178,10 +178,59 @@ export async function pasteAndSend(
 /**
  * 取 SSECaptureManager 抓到的最新一次完整 AI 回复 markdown。
  *
- * 用于"提取整页对话"(Phase 6.5)从 capture 缓存拿 AI 最后一段回复。
- * 本期简化:只返最新一次;后续 sub-phase 可扩展为"取所有 turn"。
+ * Phase 10.B 后:仅用作 ChatGPT/Gemini 的兜底(Claude 走 extractFullConversation 真 API)。
  */
 export async function getLatestCapturedResponse(): Promise<string | null> {
   if (!captureManager) return null;
   return captureManager.getLatestResponse();
+}
+
+/**
+ * Phase 10.B:整页对话提取(多 turn + artifact + 图片)。
+ *
+ * Claude:走 extractClaudeFullConversation(/api/.../chat_conversations + artifact hook)
+ * ChatGPT/Gemini:Phase 10.B.2-3 待实现,目前回退 getLatestResponse 单 turn
+ *
+ * 返完整 markdown(已含 ## 用户/## AI 分隔 + artifact 源码 fence),
+ * 由 view 层调 aiMarkdownToNoteDoc 转 PM doc 渲染。
+ */
+export async function extractFullConversation(
+  serviceId: AIServiceId,
+): Promise<{
+  success: boolean;
+  markdown?: string;
+  title?: string;
+  model?: string;
+  turnCount?: number;
+  artifactCount?: number;
+  error?: string;
+}> {
+  const wc = getActiveAIWebContents(serviceId);
+  if (!wc) {
+    return {
+      success: false,
+      error: `No active ${serviceId} webview — open AI tab first`,
+    };
+  }
+
+  if (serviceId === 'claude') {
+    const { extractClaudeFullConversation } = await import('./extractors/claude-full-extraction');
+    return extractClaudeFullConversation(wc);
+  }
+
+  // ChatGPT / Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn(失真但不阻塞)
+  const md = await getLatestCapturedResponse();
+  if (!md) {
+    return {
+      success: false,
+      error: `${serviceId} 整页提取暂未实现(Phase 10.B.2/3 待补);SSE 缓存也无回复`,
+    };
+  }
+  return {
+    success: true,
+    markdown: md,
+    title: `${serviceId} 对话(单 turn 兜底)`,
+    turnCount: 1,
+    artifactCount: 0,
+  };
 }

@@ -344,6 +344,16 @@ declare global {
       ): Promise<{ success: boolean; error?: string }>;
       /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
       aiGetLatestResponse(): Promise<string | null>;
+      /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)*/
+      aiExtractFull(serviceId: AIServiceId): Promise<{
+        success: boolean;
+        markdown?: string;
+        title?: string;
+        model?: string;
+        turnCount?: number;
+        artifactCount?: number;
+        error?: string;
+      }>;
       /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
       aiOpenSession(
         serviceId: AIServiceId,

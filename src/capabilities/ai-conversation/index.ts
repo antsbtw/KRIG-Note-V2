@@ -71,6 +71,10 @@ async function getLatestResponse(): Promise<string | null> {
   return window.electronAPI.aiGetLatestResponse();
 }
 
+async function extractFull(serviceId: AIServiceId) {
+  return window.electronAPI.aiExtractFull(serviceId);
+}
+
 function onResponseReady(
   callback: (payload: AIResponseReadyPayload) => void,
 ): () => void {
@@ -87,6 +91,7 @@ export const aiConversationCapability: AIConversationApi = {
   getServiceList,
   getSSEStatus,
   getLatestResponse,
+  extractFull,
   onResponseReady,
   onError,
   Host,

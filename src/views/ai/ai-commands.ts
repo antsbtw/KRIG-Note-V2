@@ -76,12 +76,19 @@ export function registerAICommands(): void {
     const serviceId = aiState?.currentServiceId;
 
     const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
-    const markdown = await ai.getLatestResponse();
-    if (!markdown) {
+
+    // Phase 10.B 主路径:整页对话提取(Claude:多 turn + artifact 真 API;
+    // ChatGPT/Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn)
+    if (!serviceId) {
+      window.alert('AI 服务未指定');
+      return;
+    }
+    const extraction = await ai.extractFull(serviceId);
+    if (!extraction.success || !extraction.markdown) {
       window.alert(
-        '尚未抓到 AI 回复:\n\n' +
-        '- 请先在 AI Web 中跟 AI 完成至少一次对话\n' +
-        '- 或确认 AI 回复已结束(streaming 完成)',
+        `提取失败:${extraction.error || '未知错误'}\n\n` +
+        '- 请确保 AI Web 已加载到对话页(claude.ai/chat/xxx)\n' +
+        '- 并已登录;然后再试一次',
       );
       return;
     }
@@ -89,7 +96,7 @@ export function registerAICommands(): void {
     const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
     // Phase 10.A:走 ResultParser + extractedBlocksToPmDoc 无损渲染
     // (不再 markdown.split('\n\n'):标题/数学/代码/表格/列表/引用/inline marks 全保留)
-    const doc = aiMarkdownToNoteDoc(markdown);
+    const doc = aiMarkdownToNoteDoc(extraction.markdown);
 
     // 路径分支:有 pending(场景 A:Note Ask AI)→ update 已 preCreate 的 atom
     //         无 pending(场景 B:独立 AI 聊天)→ createNew 独立 atom

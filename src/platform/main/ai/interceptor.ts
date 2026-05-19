@@ -14,6 +14,7 @@
 
 import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
 import { getSSECaptureScript } from './inject-scripts/sse-capture';
+import { getArtifactPostMessageHookScript } from './inject-scripts/artifact-postmessage-hook';
 
 export interface SSEResponseRecord {
   id: string;
@@ -168,16 +169,30 @@ export class SSECaptureManager {
     if (!profile) return;
 
     // Gemini is handled via CDP, not page-level hooks
-    if (profile.id === 'gemini') return;
+    if (profile.id !== 'gemini') {
+      const script = getSSECaptureScript(profile.id, profile.intercept.endpointPattern);
+      this.webContents.executeJavaScript(script).then((result) => {
+        if (result === 'hooked') {
+          console.log(`[SSECapture] Fetch hook installed for ${profile.id}`);
+        }
+      }).catch(() => {
+        // Page may not be ready — will retry on next lifecycle event
+      });
+    }
 
-    const script = getSSECaptureScript(profile.id, profile.intercept.endpointPattern);
-    this.webContents.executeJavaScript(script).then((result) => {
-      if (result === 'hooked') {
-        console.log(`[SSECapture] Fetch hook installed for ${profile.id}`);
-      }
-    }).catch(() => {
-      // Page may not be ready — will retry on next lifecycle event
-    });
+    // Claude artifact postMessage hook(独立于 SSE,跑在 Claude 页拦截 artifact iframe
+    // 跟 parent 的 postMessage / fetch,把源码缓存到 window.__krig_artifact_messages,
+    // claude-full-extraction 提取时读)
+    if (profile.id === 'claude') {
+      const artifactScript = getArtifactPostMessageHookScript();
+      this.webContents.executeJavaScript(artifactScript).then((result) => {
+        if (result === 'hooked') {
+          console.log('[SSECapture] Artifact postMessage hook installed for Claude');
+        }
+      }).catch(() => {
+        // Page may not be ready — retry on next lifecycle event
+      });
+    }
   }
 
   /**

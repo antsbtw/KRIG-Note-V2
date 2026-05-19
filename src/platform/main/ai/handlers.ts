@@ -10,7 +10,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
 import type { AIAskOptions, AIAskResult } from '@shared/ipc/ai-types';
-import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse } from './ask-orchestrator';
+import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse, extractFullConversation } from './ask-orchestrator';
 import { getActiveAIWebContents } from './webview-registry';
 
 function isServiceId(v: unknown): v is AIServiceId {
@@ -76,5 +76,13 @@ export function registerAIHandlers(): void {
   // #6 ai.get-latest-response — 提取按钮用:从 SSE 缓存取最新回复 markdown
   ipcMain.handle(IPC_CHANNELS.AI_GET_LATEST_RESPONSE, async () => {
     return getLatestCapturedResponse();
+  });
+
+  // #7 ai.extract-full — Phase 10.B:整页对话提取(多 turn + artifact + 图片)
+  ipcMain.handle(IPC_CHANNELS.AI_EXTRACT_FULL, async (_e, serviceId: unknown) => {
+    if (!isServiceId(serviceId)) {
+      return { success: false, error: 'invalid serviceId' };
+    }
+    return extractFullConversation(serviceId);
   });
 }

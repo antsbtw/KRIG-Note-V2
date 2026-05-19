@@ -33,6 +33,18 @@ export interface AIServiceListItem {
   icon: string;
 }
 
+/** Phase 10.B:整页对话提取结果 */
+export interface AIExtractFullResult {
+  success: boolean;
+  /** 多 turn 拼接后的完整 markdown(成功时)— view 层调 aiMarkdownToNoteDoc 转 PM doc */
+  markdown?: string;
+  title?: string;
+  model?: string;
+  turnCount?: number;
+  artifactCount?: number;
+  error?: string;
+}
+
 /** AI Host(嵌 claude.ai / chatgpt.com / gemini.google.com 的 webview)imperative API */
 export interface AIHostHandle {
   /** 导航到指定服务的 newChatUrl(切服务用) */
@@ -80,6 +92,8 @@ export interface AIConversationApi {
   getSSEStatus(): Promise<AISSEStatus>;
   /** 取 SSE 缓存最新一次 AI 完整回复 markdown(供"提取整页对话"用) */
   getLatestResponse(): Promise<string | null>;
+  /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)— 提取按钮主路径 */
+  extractFull(serviceId: AIServiceId): Promise<AIExtractFullResult>;
   // ── pending thought 路由(场景 A: Note Ask AI 用) ──
   /** 在 Note Ask AI 流程发送时调,把已创建的 ai-response thought atom id 暂存,
    *  供后续"提取整页对话"按钮取出 update 而非重复 createNew */
