@@ -52,12 +52,16 @@ function findSiblingPos(
   $head: ResolvedPos,
   direction: -1 | 1,
 ): SiblingPosResult | null {
-  let currentDepth = $head.depth;
-  let currentIdx = $head.index(currentDepth - 1);
+  // parentDepth = $head 所在 sibling 层 parent 的 depth:
+  //  - atom $pos(depth=0 in doc top 或 depth=N 在容器内):$head 落在 parent 层 → parentDepth = $head.depth
+  //  - 非 atom $pos:$head 在 child 内部 → parentDepth = $head.depth - 1
+  // 判定:看 $head 当前位置 parent 的对应 child(由 index(depth-1) 取)是不是 $head.parent;
+  // 简化:$head.depth = 0 时必然是 atom 间隙形态。否则按 child 内部处理。
+  let parentDepth = $head.depth === 0 ? 0 : $head.depth - 1;
+  let currentIdx = $head.index(parentDepth);
 
   // 一直向外冒泡,直到找到一个非语法容器 parent 且 newIdx 在边界内
-  while (currentDepth >= 1) {
-    const parentDepth = currentDepth - 1;
+  while (parentDepth >= 0) {
     const parent = $head.node(parentDepth);
     const newIdx = currentIdx + direction;
 
@@ -69,21 +73,22 @@ function findSiblingPos(
       const newChildStart = offset;
       const childNode = parent.child(newIdx);
       const childIsAtom = childNode.isAtom;
-      // 非 atom child:resolve(start + 1) 进入 child 内部 → $pos.depth = child 深度
-      // atom child:无 inside,resolve(start) 落在 parent 层 → $pos.depth = parent 深度
-      //   两种情形下调用方都需要根据 isAtom 决定后续 selection 类型(NS vs MNS)。
+      // 非 atom child:resolve(start + 1) 进入 child 内部 → $pos.depth = parentDepth + 1
+      // atom child:无 inside,resolve(start) 落在 parent 层 → $pos.depth = parentDepth
       const resolvePos = childIsAtom ? newChildStart : newChildStart + 1;
       const $newHead = doc.resolve(resolvePos);
-      const bubbled = currentDepth !== $head.depth;
+      // bubbled:是否离开了 $head 起步层(用于 anchor 上提逻辑)
+      const startParentDepth = $head.depth === 0 ? 0 : $head.depth - 1;
+      const bubbled = parentDepth !== startParentDepth;
       return { $newHead, bubbled, childIsAtom, childStartPos: newChildStart };
     }
 
     // 越界:看 parent 是不是语法容器
     if (!SYNTAX_CONTAINERS.has(parent.type.name)) return null;
     // 冒泡一层:current 变成 parent 在它的 parent 内的位置
-    currentDepth = parentDepth;
-    if (currentDepth < 1) return null;
-    currentIdx = $head.index(currentDepth - 1);
+    if (parentDepth < 1) return null;
+    parentDepth = parentDepth - 1;
+    currentIdx = $head.index(parentDepth);
   }
   return null;
 }
@@ -223,20 +228,26 @@ function extendBlockSelection(direction: -1 | 1): Command {
     if (!result) return wasMNS || startAtomNS;
     const { $newHead, bubbled } = result;
 
-    // 如果发生冒泡,anchor 也要上提到新 head 同 depth(否则两端不同 parent,
+    // 如果发生冒泡,anchor 也要上提到新 head 同 parent(否则两端不同 parent,
     // MultipleNodeSelection.create 抛 RangeError)。
     // 上提时 anchor 取"原 anchor 所在的语法容器整体" → 即 anchor 的对应祖先 $pos。
+    // 注:新 MNS 构造器支持 anchor/head 不同 $pos.depth 只要 normalize 后同 parent;
+    // 但跨语法容器冒泡时 anchor 仍可能在内层 list,需要显式上提。
     if (bubbled) {
-      const newDepth = $newHead.depth;
-      if ($anchor.depth !== newDepth) {
-        // 找 $anchor 在 newDepth 层的对应 ancestor pos:即 $anchor.before(newDepth)
-        // 但 newDepth < $anchor.depth,所以 ancestor 就是 $anchor.before(newDepth) + 1
+      // 目标 parentDepth(新 head 归一化后的):atom 走 $newHead.depth,非 atom 走 $newHead.depth-1
+      const newParentDepth = $newHead.depth === 0
+        ? 0
+        : ($newHead.parent.isAtom ? $newHead.depth : $newHead.depth - 1);
+      const anchorParentDepth = $anchor.depth === 0 ? 0 : $anchor.depth - 1;
+      if (anchorParentDepth !== newParentDepth) {
         try {
-          // 用 $anchor 路径上对应 depth 的 before 位置 + 1 进入该节点
-          const anchorAtNewDepth = $anchor.before(newDepth) + 1;
-          $anchor = state.doc.resolve(anchorAtNewDepth);
+          // anchor 上提到 newParentDepth + 1(即 child 内部),取 ancestor pos
+          const anchorAtNewDepth = newParentDepth === 0
+            ? $anchor.before(1)
+            : $anchor.before(newParentDepth + 1);
+          $anchor = state.doc.resolve(anchorAtNewDepth + 1);
         } catch {
-          return wasMNS;
+          return wasMNS || startAtomNS;
         }
       }
     }
