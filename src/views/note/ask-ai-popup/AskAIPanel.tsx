@@ -17,7 +17,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
+import type { AIConversationApi } from '@capabilities/ai-conversation/types';
+import type { ThoughtCapabilityApi } from '@capabilities/thought/types';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { consumePendingAskAIContext, type AskAIContext } from './panel-context';
 import './ask-ai-popup.css';
 
@@ -44,6 +48,8 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
   );
   const [showServiceMenu, setShowServiceMenu] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  /** 标记发送是否已触发(用于区分 close 是 "已发送后 close" 还是 "未发送 cancel") */
+  const sentRef = useRef(false);
 
   useEffect(() => {
     // 延迟 focus 避免与 popup binding 内 click 冲突
@@ -58,6 +64,40 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
     }
   }, [ctx, onClose]);
 
+  /** 用 ref 镜像 serviceId,让 unmount cleanup 拿最新 serviceId(避免 deps 加 serviceId
+   *  导致服务切换时 cleanup 误触发 cancel 路径清掉 mark) */
+  const serviceIdRef = useRef(serviceId);
+  serviceIdRef.current = serviceId;
+
+  /**
+   * cleanup:unmount 时若没发送过 → cancel 路径:
+   *   - 清 pending atom(thoughtCap.deleteThought)
+   *   - 清选区 mark(textEditing.removeThoughtAnchor)
+   *   - 清 ai-conversation pending(防下一轮误用)
+   *
+   * 触发场景:用户按 Esc / 点 × / 点击外部关闭 / 任何 onClose 调用导致 popup 卸载。
+   * "已 sent" 走另一路径:thoughtId 留着,提取按钮 update 用。
+   *
+   * deps 只放 ctx — serviceId 走 ref 镜像(避免切服务 cleanup 误清 mark)。
+   */
+  useEffect(() => {
+    if (!ctx) return;
+    return () => {
+      if (sentRef.current) return; // 已发送 — 留着 atom + mark 等提取
+      // cancel:反向清理
+      try {
+        const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+        const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+        const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
+        textEditing.api.removeThoughtAnchor(ctx.instanceId, ctx.thoughtId);
+        void thought.deleteThought(ctx.thoughtId);
+        ai.clearPendingAIThought(serviceIdRef.current);
+      } catch (err) {
+        console.warn('[AskAIPanel] cancel cleanup failed:', err);
+      }
+    };
+  }, [ctx]);
+
   function handleSend(): void {
     if (!ctx) return;
     const prompt = buildPrompt(instruction, ctx.selectionMarkdown);
@@ -70,6 +110,15 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
     if (!bus) {
       onClose();
       return;
+    }
+    // 标记已发送(unmount cleanup 不再做 cancel 清理)
+    sentRef.current = true;
+    // 把 thoughtId 写到 ai-conversation pending(提取按钮 update 用)
+    try {
+      const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
+      ai.setPendingAIThought(serviceId, ctx.thoughtId);
+    } catch (err) {
+      console.warn('[AskAIPanel] setPendingAIThought failed:', err);
     }
     // 开右槽 + emit 跨槽消息(AIView 订阅 'ai.paste-and-send')
     bus.slot.openRight('ai-view');

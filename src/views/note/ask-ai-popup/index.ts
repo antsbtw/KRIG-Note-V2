@@ -30,7 +30,9 @@ function isOpenAskAIPopupArg(v: unknown): v is OpenAskAIPopupArg {
     typeof o.selectionMarkdown === 'string' &&
     typeof o.anchorX === 'number' &&
     typeof o.anchorY === 'number' &&
-    typeof o.defaultServiceId === 'string'
+    typeof o.defaultServiceId === 'string' &&
+    typeof o.thoughtId === 'string' &&
+    typeof o.instanceId === 'string'
   );
 }
 
@@ -51,6 +53,8 @@ export function registerAskAIPopup(): void {
     setPendingAskAIContext({
       selectionMarkdown: arg.selectionMarkdown,
       defaultServiceId: arg.defaultServiceId,
+      thoughtId: arg.thoughtId,
+      instanceId: arg.instanceId,
     });
     // fake anchor:1x1 透明 div(同 note-link-search/integration.ts 模式)
     const fake = document.createElement('div');

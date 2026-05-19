@@ -24,6 +24,12 @@ import type {
   AIServiceListItem,
 } from './types';
 import { Host } from './Host';
+import {
+  setPendingAIThought,
+  consumePendingAIThought,
+  peekPendingAIThought,
+  clearPendingAIThought,
+} from './pending-thought';
 
 export type {
   AIConversationApi,
@@ -84,6 +90,10 @@ export const aiConversationCapability: AIConversationApi = {
   onResponseReady,
   onError,
   Host,
+  setPendingAIThought,
+  consumePendingAIThought,
+  peekPendingAIThought,
+  clearPendingAIThought,
 };
 
 // W5 严格态:Registry 注册 — view 通过 requireCapabilityApi<AIConversationApi>('ai-conversation')

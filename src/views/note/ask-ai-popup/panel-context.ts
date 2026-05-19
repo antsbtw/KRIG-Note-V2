@@ -14,6 +14,10 @@ export interface AskAIContext {
   selectionMarkdown: string;
   /** 默认 AI 服务(AIView per-ws state,panel 可让用户改) */
   defaultServiceId: AIServiceId;
+  /** 已 preCreatePlaceholder + addThoughtMark 后的 ai-response thought atom id */
+  thoughtId: string;
+  /** PM instance id(cancel 时 removeThoughtAnchor 用) */
+  instanceId: string;
 }
 
 let pending: AskAIContext | null = null;

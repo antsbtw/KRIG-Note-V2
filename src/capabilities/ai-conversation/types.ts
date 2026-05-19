@@ -80,6 +80,16 @@ export interface AIConversationApi {
   getSSEStatus(): Promise<AISSEStatus>;
   /** 取 SSE 缓存最新一次 AI 完整回复 markdown(供"提取整页对话"用) */
   getLatestResponse(): Promise<string | null>;
+  // ── pending thought 路由(场景 A: Note Ask AI 用) ──
+  /** 在 Note Ask AI 流程发送时调,把已创建的 ai-response thought atom id 暂存,
+   *  供后续"提取整页对话"按钮取出 update 而非重复 createNew */
+  setPendingAIThought(serviceId: AIServiceId, thoughtId: string): void;
+  /** 消费 pending(取出 + 清):提取按钮 必调 */
+  consumePendingAIThought(serviceId: AIServiceId): string | null;
+  /** 仅取不删:cancel / 诊断用 */
+  peekPendingAIThought(serviceId: AIServiceId): string | null;
+  /** 清 pending(panel cancel 路径用,删 atom 后清掉 pending 防止下一轮误用) */
+  clearPendingAIThought(serviceId: AIServiceId): void;
   // ── 订阅 ──
   /** 订阅 AI 回复就绪(任意 askAI 完成时触发);返 unsubscribe */
   onResponseReady(callback: (payload: AIResponseReadyPayload) => void): () => void;

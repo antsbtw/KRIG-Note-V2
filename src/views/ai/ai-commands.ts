@@ -87,20 +87,47 @@ export function registerAICommands(): void {
     }
 
     const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
-    const created = await thought.createThought({
-      type: 'ai-response',
-      resolved: false,
-      pinned: false,
-      serviceId,
-      doc: markdownToDoc(markdown),
-      folderId: null,
-      anchor: null,
-    });
+    const doc = markdownToDoc(markdown);
+
+    // 路径分支:有 pending(场景 A:Note Ask AI)→ update 已 preCreate 的 atom
+    //         无 pending(场景 B:独立 AI 聊天)→ createNew 独立 atom
+    const pendingThoughtId = serviceId ? ai.consumePendingAIThought(serviceId) : null;
+    let thoughtIdToActivate: string;
+    if (pendingThoughtId) {
+      const updated = await thought.updateThought(pendingThoughtId, { doc });
+      if (!updated) {
+        // pending atom 已被外部删了(罕见):回退创新
+        console.warn('[ai-view.extract] pending thought gone, fallback createNew');
+        const created = await thought.createThought({
+          type: 'ai-response',
+          resolved: false,
+          pinned: false,
+          serviceId,
+          doc,
+          folderId: null,
+          anchor: null,
+        });
+        thoughtIdToActivate = created.id;
+      } else {
+        thoughtIdToActivate = pendingThoughtId;
+      }
+    } else {
+      const created = await thought.createThought({
+        type: 'ai-response',
+        resolved: false,
+        pinned: false,
+        serviceId,
+        doc,
+        folderId: null,
+        anchor: null,
+      });
+      thoughtIdToActivate = created.id;
+    }
 
     const bus = workspaceManager.getBus(wsId);
     if (bus) {
       bus.slot.openRight('thought-view');
-      bus.channels.emit('thought.activate', { thoughtId: created.id });
+      bus.channels.emit('thought.activate', { thoughtId: thoughtIdToActivate });
     }
   });
 
