@@ -38,11 +38,20 @@ const SYNTAX_CONTAINERS = new Set(['bulletList', 'orderedList', 'taskList']);
  *     **整个语法容器**视为外层的 1 个 sibling,然后在外层 parent 内找 newIdx
  *  4. 若越界且 parent 不是语法容器 → 返回 null(撞真正容器边界,停下)
  */
+interface SiblingPosResult {
+  $newHead: ResolvedPos;
+  bubbled: boolean;
+  /** target child 是不是 atom node(hr 等)— 调用方需用 NodeSelection 而非 MNS */
+  childIsAtom: boolean;
+  /** target child 的 before pos in doc(atom 走 NodeSelection 时直接用此 pos) */
+  childStartPos: number;
+}
+
 function findSiblingPos(
   doc: import('prosemirror-model').Node,
   $head: ResolvedPos,
   direction: -1 | 1,
-): { $newHead: ResolvedPos; bubbled: boolean } | null {
+): SiblingPosResult | null {
   let currentDepth = $head.depth;
   let currentIdx = $head.index(currentDepth - 1);
 
@@ -58,10 +67,15 @@ function findSiblingPos(
       let offset = parentStart === -1 ? 0 : parentStart + 1;
       for (let i = 0; i < newIdx; i++) offset += parent.child(i).nodeSize;
       const newChildStart = offset;
-      // 进入新 child 内部一个位置 → $pos.depth = child 自身深度
-      const $newHead = doc.resolve(newChildStart + 1);
+      const childNode = parent.child(newIdx);
+      const childIsAtom = childNode.isAtom;
+      // 非 atom child:resolve(start + 1) 进入 child 内部 → $pos.depth = child 深度
+      // atom child:无 inside,resolve(start) 落在 parent 层 → $pos.depth = parent 深度
+      //   两种情形下调用方都需要根据 isAtom 决定后续 selection 类型(NS vs MNS)。
+      const resolvePos = childIsAtom ? newChildStart : newChildStart + 1;
+      const $newHead = doc.resolve(resolvePos);
       const bubbled = currentDepth !== $head.depth;
-      return { $newHead, bubbled };
+      return { $newHead, bubbled, childIsAtom, childStartPos: newChildStart };
     }
 
     // 越界:看 parent 是不是语法容器
@@ -99,11 +113,12 @@ const escapeBlockSelection: Command = (state, dispatch) => {
   if (sel instanceof NodeSelection && sel.node.isBlock && sel.node.isAtom) {
     if (dispatch) {
       try {
-        const $inside = state.doc.resolve(sel.from + 1);
-        const newSel = MultipleNodeSelection.create($inside, $inside);
+        // atom 端 $pos 用 sel.from(atom 的 before pos,落在 parent 层)
+        const $atParent = state.doc.resolve(sel.from);
+        const newSel = MultipleNodeSelection.create($atParent, $atParent);
         dispatch(state.tr.setSelection(newSel).scrollIntoView());
       } catch {
-        /* atom 在顶层 doc 时 depth=0 构造失败 — 保留 NodeSelection */
+        /* atom 在不合法位置 — 保留 NodeSelection */
       }
     }
     return true;
@@ -136,25 +151,32 @@ const escapeBlockSelection: Command = (state, dispatch) => {
 function moveBlockSelection(direction: -1 | 1): Command {
   return (state, dispatch) => {
     const sel = state.selection;
-    if (!(sel instanceof MultipleNodeSelection)) return false;
+    // 当前是 MNS 或 NodeSelection-on-atom 时,Arrow 折叠到上/下同级 sibling 单块
+    const isAtomNS = sel instanceof NodeSelection && sel.node.isBlock && sel.node.isAtom;
+    if (!(sel instanceof MultipleNodeSelection) && !isAtomNS) return false;
 
-    // direction=+1 取选区 max 端,-1 取 min 端
-    const $headPos = sel.$headPos;
-    const $anchorPos = sel.$anchorPos;
-    const headIdx = $headPos.index($headPos.depth - 1);
-    const anchorIdx = $anchorPos.index($anchorPos.depth - 1);
-    const startFrom = direction === 1
-      ? (headIdx >= anchorIdx ? $headPos : $anchorPos)
-      : (headIdx <= anchorIdx ? $headPos : $anchorPos);
+    // 起点 $head:MNS 取 head/anchor 中朝 direction 一端;atom NS 取 sel.$from
+    let startFrom: ResolvedPos;
+    if (sel instanceof MultipleNodeSelection) {
+      startFrom = direction === 1
+        ? (sel.headIdx >= sel.anchorIdx ? sel.$headPos : sel.$anchorPos)
+        : (sel.headIdx <= sel.anchorIdx ? sel.$headPos : sel.$anchorPos);
+    } else {
+      // atom NS:sel.$from 落在 parent 层,index() 指向 atom — findSiblingPos
+      // 用 $head.depth 拿 parent + currentIdx,可直接传入。
+      startFrom = (sel as NodeSelection).$from;
+    }
 
     const result = findSiblingPos(state.doc, startFrom, direction);
     if (!result) return true;  // 撞真正容器边界 → 吃事件保护选区
-    const { $newHead } = result;
+    const { $newHead, childIsAtom, childStartPos } = result;
 
     if (dispatch) {
       try {
-        // anchor = head = 新位置 → 折叠成单块选中
-        const newSel = MultipleNodeSelection.create($newHead, $newHead);
+        // atom 目标 → NodeSelection;非 atom → MultipleNodeSelection 折叠成单块
+        const newSel = childIsAtom
+          ? NodeSelection.create(state.doc, childStartPos)
+          : MultipleNodeSelection.create($newHead, $newHead);
         dispatch(state.tr.setSelection(newSel).scrollIntoView());
       } catch {
         return true;
@@ -173,6 +195,7 @@ function moveBlockSelection(direction: -1 | 1): Command {
 function extendBlockSelection(direction: -1 | 1): Command {
   return (state, dispatch) => {
     const sel = state.selection;
+    const startAtomNS = sel instanceof NodeSelection && sel.node.isBlock && sel.node.isAtom;
 
     let $anchor;
     let $head;
@@ -181,6 +204,11 @@ function extendBlockSelection(direction: -1 | 1): Command {
     if (sel instanceof MultipleNodeSelection) {
       $anchor = sel.$anchorPos;
       $head = sel.$headPos;
+    } else if (startAtomNS) {
+      // Shift+Arrow 从 atom NS 起步:$anchor 落在 atom 的 before pos(depth=parent 层),
+      // $head 同 — 走 findSiblingPos 找下一 sibling。
+      $anchor = (sel as NodeSelection).$from;
+      $head = $anchor;
     } else {
       const block = resolveHandleBlock(state.doc, sel.head);
       if (!block) return false;
@@ -192,7 +220,7 @@ function extendBlockSelection(direction: -1 | 1): Command {
     // findSiblingPos:撞语法容器(bulletList 等)边界会自动冒泡;
     // 撞真正容器(callout/blockquote)边界返回 null → 停下
     const result = findSiblingPos(state.doc, $head, direction);
-    if (!result) return wasMNS;
+    if (!result) return wasMNS || startAtomNS;
     const { $newHead, bubbled } = result;
 
     // 如果发生冒泡,anchor 也要上提到新 head 同 depth(否则两端不同 parent,
@@ -218,7 +246,7 @@ function extendBlockSelection(direction: -1 | 1): Command {
         const newSel = MultipleNodeSelection.create($anchor, $newHead);
         dispatch(state.tr.setSelection(newSel).scrollIntoView());
       } catch {
-        return wasMNS;
+        return wasMNS || startAtomNS;
       }
     }
     return true;

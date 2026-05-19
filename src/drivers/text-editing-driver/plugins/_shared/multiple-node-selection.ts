@@ -61,55 +61,94 @@ class MultipleNodeSelectionBookmark implements SelectionBookmark {
 }
 
 /**
+ * 把 ResolvedPos 归一化为 (parent + parentDepth + childIdx) 形式。
+ *
+ * 同一个 sibling layer 在 PM 里有两种 $pos 表达:
+ *  1. $pos 落在 child 内部某处:depth = childDepth,parent 在 depth-1
+ *  2. $pos 落在 atom child 的 before/after 间隙(atom 无 inside):depth = parentDepth
+ *
+ * 归一化让 MNS 同时接纳两种表达,关键是表达"同一 sibling 层"的能力 — atom 与
+ * 非 atom 邻居能共存于同一 MNS。
+ */
+function normalizeParentInfo(
+  $pos: ResolvedPos,
+): { parent: PMNode; parentDepth: number; idx: number } {
+  if ($pos.depth === 0) {
+    // doc 顶层间隙:parent = doc 自身,idx = $pos.index(0)
+    return { parent: $pos.parent, parentDepth: 0, idx: $pos.index(0) };
+  }
+  // depth >= 1: $pos 在某 child 内部,parent 在 depth-1
+  return {
+    parent: $pos.node($pos.depth - 1),
+    parentDepth: $pos.depth - 1,
+    idx: $pos.index($pos.depth - 1),
+  };
+}
+
+/**
  * MultipleNodeSelection — 同级多块选区
  */
 export class MultipleNodeSelection extends Selection {
+  /** 归一化后的 parent + sibling 范围(idx 升序) */
+  readonly parent: PMNode;
+  readonly parentDepth: number;
+  readonly anchorIdx: number;
+  readonly headIdx: number;
+
   /**
-   * 构造:anchor/head 必须都解析到**同一 parent**(depth 相同 + parent 相同)。
-   * 否则会抛 RangeError(调用方应先用 resolveHandleBlock 对齐两端再构造)。
+   * 构造:anchor/head 必须能归一化到**同一 parent**。
+   *
+   * 允许的两种 $pos 形式(对齐 PM resolve 自然行为):
+   *  - $pos 落在 child 内部(常规情况,depth = childDepth)
+   *  - $pos 落在 atom child 的间隙(depth = parentDepth) — 支持 hr 等无内容叶子
+   *
+   * 不同 form 的 $pos 只要归一化后 parent 相同 + parentDepth 相同 即合法。
    */
   constructor(
     public readonly $anchorPos: ResolvedPos,
     public readonly $headPos: ResolvedPos,
   ) {
-    if ($anchorPos.depth !== $headPos.depth) {
-      throw new RangeError('MultipleNodeSelection: anchor/head must be at same depth');
+    const a = normalizeParentInfo($anchorPos);
+    const h = normalizeParentInfo($headPos);
+    if (a.parentDepth !== h.parentDepth) {
+      throw new RangeError('MultipleNodeSelection: anchor/head normalize to different parent depth');
     }
-    if ($anchorPos.depth < 1) {
-      throw new RangeError('MultipleNodeSelection: depth must be >= 1');
-    }
-    const anchorIdx = $anchorPos.index($anchorPos.depth - 1);
-    const headIdx = $headPos.index($headPos.depth - 1);
-    const minIdx = Math.min(anchorIdx, headIdx);
-    const maxIdx = Math.max(anchorIdx, headIdx);
-    const parent = $anchorPos.node($anchorPos.depth - 1);
-    if (parent !== $headPos.node($headPos.depth - 1)) {
+    if (a.parent !== h.parent) {
       throw new RangeError('MultipleNodeSelection: anchor/head must share the same parent');
     }
-    // 计算 from / to 在 doc 内的 pos
+    const minIdx = Math.min(a.idx, h.idx);
+    const maxIdx = Math.max(a.idx, h.idx);
+    // 计算 from / to 在 doc 内的 pos:
+    // - parentDepth=0 时 parent 是 doc 顶层,parentStart 设 -1(下方循环从 offset=0 起)
+    // - parentDepth>=1 时需要 parent 的 before pos,从两端中取 depth > parentDepth
+    //   的一端调 .before(parentDepth)(atom 端 depth===parentDepth 不可调,会抛错)
+    const sourcePos = $anchorPos.depth > a.parentDepth ? $anchorPos : $headPos;
     const parentStart =
-      $anchorPos.depth - 1 === 0 ? -1 : $anchorPos.before($anchorPos.depth - 1);
+      a.parentDepth === 0 ? -1 :
+      sourcePos.depth > a.parentDepth ? sourcePos.before(a.parentDepth) :
+      -1; // 两端都是 atom + parentDepth=0 时走上面分支;若 parentDepth>=1 但都是 atom 不可能存在
     let offset = parentStart === -1 ? 0 : parentStart + 1;
     let from = offset;
     let to = offset;
-    for (let i = 0; i < parent.childCount; i++) {
-      const childSize = parent.child(i).nodeSize;
+    for (let i = 0; i < a.parent.childCount; i++) {
+      const childSize = a.parent.child(i).nodeSize;
       if (i === minIdx) from = offset;
       offset += childSize;
       if (i === maxIdx) to = offset;
     }
     super($anchorPos.doc.resolve(from), $anchorPos.doc.resolve(to));
+    this.parent = a.parent;
+    this.parentDepth = a.parentDepth;
+    this.anchorIdx = a.idx;
+    this.headIdx = h.idx;
   }
 
   /** 选中的 sibling block 节点数组(升序) */
   get nodes(): PMNode[] {
-    const parent = this.$anchorPos.node(this.$anchorPos.depth - 1);
-    const anchorIdx = this.$anchorPos.index(this.$anchorPos.depth - 1);
-    const headIdx = this.$headPos.index(this.$headPos.depth - 1);
-    const minIdx = Math.min(anchorIdx, headIdx);
-    const maxIdx = Math.max(anchorIdx, headIdx);
+    const minIdx = Math.min(this.anchorIdx, this.headIdx);
+    const maxIdx = Math.max(this.anchorIdx, this.headIdx);
     const out: PMNode[] = [];
-    for (let i = minIdx; i <= maxIdx; i++) out.push(parent.child(i));
+    for (let i = minIdx; i <= maxIdx; i++) out.push(this.parent.child(i));
     return out;
   }
 

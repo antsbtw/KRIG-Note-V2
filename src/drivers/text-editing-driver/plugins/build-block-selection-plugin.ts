@@ -44,20 +44,20 @@ export function buildBlockSelectionPlugin(): Plugin {
           ]);
         }
 
-        // 分支 2:MultipleNodeSelection — 同级多块 deco
+        // 分支 2:MultipleNodeSelection — 同级多块 deco(直接读 sel 暴露的归一化字段)
         if (!(sel instanceof MultipleNodeSelection)) return null;
-        const parent = sel.$anchorPos.node(sel.$anchorPos.depth - 1);
-        const anchorIdx = sel.$anchorPos.index(sel.$anchorPos.depth - 1);
-        const headIdx = sel.$headPos.index(sel.$headPos.depth - 1);
-        const minIdx = Math.min(anchorIdx, headIdx);
-        const maxIdx = Math.max(anchorIdx, headIdx);
+        const minIdx = Math.min(sel.anchorIdx, sel.headIdx);
+        const maxIdx = Math.max(sel.anchorIdx, sel.headIdx);
+        // parent before pos:parentDepth=0 时是 doc 顶层(-1);否则用 depth > parentDepth 一端
+        const srcPos = sel.$anchorPos.depth > sel.parentDepth ? sel.$anchorPos : sel.$headPos;
         const parentStart =
-          sel.$anchorPos.depth - 1 === 0 ? -1 : sel.$anchorPos.before(sel.$anchorPos.depth - 1);
+          sel.parentDepth === 0 ? -1 :
+          srcPos.depth > sel.parentDepth ? srcPos.before(sel.parentDepth) : -1;
 
         const decos: Decoration[] = [];
         let offset = parentStart === -1 ? 0 : parentStart + 1;
-        for (let i = 0; i < parent.childCount; i++) {
-          const childSize = parent.child(i).nodeSize;
+        for (let i = 0; i < sel.parent.childCount; i++) {
+          const childSize = sel.parent.child(i).nodeSize;
           if (i >= minIdx && i <= maxIdx) {
             decos.push(
               Decoration.node(offset, offset + childSize, { class: 'krig-block-selected' }),

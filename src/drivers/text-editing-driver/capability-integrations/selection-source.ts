@@ -59,18 +59,16 @@ export function emitSelectionChanged(view: EditorView, instanceId: string): void
   if (sel instanceof MultipleNodeSelection) {
     const nodes = sel.nodes;
     kind = nodes.length === 1 ? 'block' : 'multi-block';
-    // 算每块在 doc 内的 before pos
-    const parent = sel.$anchorPos.node(sel.$anchorPos.depth - 1);
-    const minIdx = Math.min(
-      sel.$anchorPos.index(sel.$anchorPos.depth - 1),
-      sel.$headPos.index(sel.$headPos.depth - 1),
-    );
-    const parentDepth = sel.$anchorPos.depth - 1;
-    const parentStart = parentDepth === 0 ? -1 : sel.$anchorPos.before(parentDepth);
+    // 算每块在 doc 内的 before pos(用 sel 上归一化字段)
+    const minIdx = Math.min(sel.anchorIdx, sel.headIdx);
+    const srcPos = sel.$anchorPos.depth > sel.parentDepth ? sel.$anchorPos : sel.$headPos;
+    const parentStart =
+      sel.parentDepth === 0 ? -1 :
+      srcPos.depth > sel.parentDepth ? srcPos.before(sel.parentDepth) : -1;
     let offset = parentStart === -1 ? 0 : parentStart + 1;
-    for (let i = 0; i < parent.childCount; i++) {
+    for (let i = 0; i < sel.parent.childCount; i++) {
       if (i >= minIdx && i < minIdx + nodes.length) positions.push(offset);
-      offset += parent.child(i).nodeSize;
+      offset += sel.parent.child(i).nodeSize;
     }
   }
 
