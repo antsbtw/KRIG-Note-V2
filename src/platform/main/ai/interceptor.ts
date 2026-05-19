@@ -15,6 +15,7 @@
 import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
 import { getSSECaptureScript } from './inject-scripts/sse-capture';
 import { getArtifactPostMessageHookScript } from './inject-scripts/artifact-postmessage-hook';
+import { getChatGPTConversationHookScript } from './inject-scripts/chatgpt-conversation-hook';
 
 export interface SSEResponseRecord {
   id: string;
@@ -71,6 +72,14 @@ export class SSECaptureManager {
       } catch { /* already detached */ }
       this.geminiDebuggerAttached = false;
     }
+  }
+
+  /**
+   * 取所有 Gemini StreamGenerate 响应记录(Phase 10.B.3 用于多 turn 提取)。
+   * 按时间从老到新顺序;每条 record 是一次 turn 的 AI 回复(Gemini 一次问答 = 一次 batchexecute)。
+   */
+  getAllGeminiResponses(): readonly SSEResponseRecord[] {
+    return this.geminiResponses;
   }
 
   /**
@@ -188,6 +197,20 @@ export class SSECaptureManager {
       this.webContents.executeJavaScript(artifactScript).then((result) => {
         if (result === 'hooked') {
           console.log('[SSECapture] Artifact postMessage hook installed for Claude');
+        }
+      }).catch(() => {
+        // Page may not be ready — retry on next lifecycle event
+      });
+    }
+
+    // ChatGPT conversation cache hook(Phase 10.B.2):截 /backend-api/conversation,
+    // /textdocs, /estuary/content 响应,缓存到 window.__krig_chatgpt_cache,
+    // chatgpt-full-extraction 提取时读
+    if (profile.id === 'chatgpt') {
+      const cgptScript = getChatGPTConversationHookScript();
+      this.webContents.executeJavaScript(cgptScript).then((result) => {
+        if (result === 'hooked') {
+          console.log('[SSECapture] ChatGPT conversation hook installed');
         }
       }).catch(() => {
         // Page may not be ready — retry on next lifecycle event

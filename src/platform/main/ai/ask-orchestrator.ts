@@ -213,24 +213,38 @@ export async function extractFullConversation(
     };
   }
 
+  let result: { success: boolean; markdown?: string; title?: string; model?: string; turnCount?: number; artifactCount?: number; error?: string };
+
   if (serviceId === 'claude') {
     const { extractClaudeFullConversation } = await import('./extractors/claude-full-extraction');
-    return extractClaudeFullConversation(wc);
+    result = await extractClaudeFullConversation(wc);
+  } else if (serviceId === 'chatgpt') {
+    const { extractChatGPTFullConversation } = await import('./extractors/chatgpt-full-extraction');
+    result = await extractChatGPTFullConversation(wc);
+  } else if (serviceId === 'gemini') {
+    const { extractGeminiFullConversation } = await import('./extractors/gemini-full-extraction');
+    result = await extractGeminiFullConversation(wc, () => {
+      if (!captureManager) return [];
+      return captureManager.getAllGeminiResponses().map((r) => ({
+        markdown: r.markdown,
+        timestamp: r.timestamp,
+      }));
+    });
+  } else {
+    return { success: false, error: `Unknown serviceId: ${serviceId}` };
   }
 
-  // ChatGPT / Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn(失真但不阻塞)
-  const md = await getLatestCapturedResponse();
-  if (!md) {
-    return {
-      success: false,
-      error: `${serviceId} 整页提取暂未实现(Phase 10.B.2/3 待补);SSE 缓存也无回复`,
-    };
+  // Phase 10.B.4 image proxy:把 markdown 内跨域 img URL 下载入 mediaStore
+  // 换成 media:// URL,避免 thought atom 引用外部 URL(用户离线/AI 网页 cookie 过期失效)。
+  // 失败容忍:某图下不下来保留原 URL(不阻塞整体提取)。
+  if (result.success && result.markdown) {
+    try {
+      const { proxyImagesInMarkdown } = await import('./extractors/image-proxy');
+      result.markdown = await proxyImagesInMarkdown(result.markdown);
+    } catch (err) {
+      console.warn('[ask-orchestrator] image proxy failed (non-fatal):', err);
+    }
   }
-  return {
-    success: true,
-    markdown: md,
-    title: `${serviceId} 对话(单 turn 兜底)`,
-    turnCount: 1,
-    artifactCount: 0,
-  };
+
+  return result;
 }
