@@ -72,17 +72,15 @@ export function registerAICommands(): void {
     if (!wsId) return;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
-    const aiState = ws.pluginStates['ai'] as { currentServiceId?: AIServiceId } | undefined;
-    const serviceId = aiState?.currentServiceId;
+    // 走 getAIWsState fallback 到 DEFAULT_AI_SERVICE — 跟 AIView/Toolbar 显示同源
+    // (pluginStates['ai'] 在用户从未手动切服务时为空,但 AIView 默认显示 Claude;
+    //  提取命令也应走同款 fallback,而不是弹"AI 服务未指定")
+    const serviceId = getAIWsState(ws).currentServiceId;
 
     const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
 
     // Phase 10.B 主路径:整页对话提取(Claude:多 turn + artifact 真 API;
     // ChatGPT/Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn)
-    if (!serviceId) {
-      window.alert('AI 服务未指定');
-      return;
-    }
     const extraction = await ai.extractFull(serviceId);
     if (!extraction.success || !extraction.markdown) {
       window.alert(
