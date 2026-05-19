@@ -50,7 +50,6 @@ export function registerAskAIPopup(): void {
     }
     setPendingAskAIContext({
       selectionMarkdown: arg.selectionMarkdown,
-      selectionDocJSON: arg.selectionDocJSON,
       defaultServiceId: arg.defaultServiceId,
     });
     // fake anchor:1x1 透明 div(同 note-link-search/integration.ts 模式)

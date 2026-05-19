@@ -24,27 +24,15 @@ import './ask-ai-popup.css';
 const PREVIEW_MAX = 200;
 
 /**
- * 拼"无损 prompt":用户 instruction(顶)+ 渲染预览(中)+ 完整结构 JSON(底)。
+ * 拼 prompt(纯 markdown,YAGNI:之前的 JSON 块对 AI 无信息增益且重复)。
+ *
+ * - 有 instruction:<inst>\n\n<markdown>(AI 先看问题,再看上下文)
+ * - 无 instruction:单发 markdown(AI 自由发挥,一般会总结或解释)
  */
-function buildPrompt(instruction: string, markdown: string, docJSON: unknown): string {
-  const trimmedInstruction = instruction.trim();
-  const parts: string[] = [];
-  if (trimmedInstruction) {
-    parts.push(trimmedInstruction);
-    parts.push('');
-    parts.push('---');
-    parts.push('');
-  }
-  parts.push('【渲染预览】');
-  parts.push(markdown);
-  if (docJSON !== null) {
-    parts.push('');
-    parts.push('【完整结构 JSON(如需精确修改 / 引用原始结构请参考)】');
-    parts.push('```json');
-    parts.push(JSON.stringify(docJSON, null, 2));
-    parts.push('```');
-  }
-  return parts.join('\n');
+function buildPrompt(instruction: string, markdown: string): string {
+  const trimmed = instruction.trim();
+  if (!trimmed) return markdown;
+  return `${trimmed}\n\n${markdown}`;
 }
 
 export function AskAIPanel({ onClose }: PopupCloseProps) {
@@ -72,7 +60,7 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
 
   function handleSend(): void {
     if (!ctx) return;
-    const prompt = buildPrompt(instruction, ctx.selectionMarkdown, ctx.selectionDocJSON);
+    const prompt = buildPrompt(instruction, ctx.selectionMarkdown);
     const wsId = workspaceManager.getActiveId();
     if (!wsId) {
       onClose();

@@ -1455,22 +1455,6 @@ export const textEditingDriverApi = {
     return sliceToMarkdown(slice);
   },
 
-  /**
-   * 取当前 selection 的 PM doc JSON(原始结构,供 AI 看 attrs)。
-   *
-   * 返 Slice toJSON 结果(含 content/openStart/openEnd),AI 读到可
-   * 精确知道 callout/code lang/math latex/list 缩进等所有 attrs。
-   *
-   * 选区为空返 null。
-   */
-  getSelectionDocJSON(instanceId: string): unknown | null {
-    const inst = instanceRegistry.get(instanceId);
-    if (!inst) return null;
-    const { state } = inst.view;
-    if (state.selection.empty) return null;
-    return state.selection.content().toJSON();
-  },
-
   setVocabWords(entries: Array<{ word: string; definition: string }>): void {
     // 1. 更新模块级 vocabDefs(供 tooltip 显释义)
     updateVocabDefs(entries);

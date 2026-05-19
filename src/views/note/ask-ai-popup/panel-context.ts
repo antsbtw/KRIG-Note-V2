@@ -10,10 +10,8 @@
 import type { AIServiceId } from '@shared/types/ai-service-types';
 
 export interface AskAIContext {
-  /** 序列化后的选区 markdown(用于预览 + 拼 prompt 下半) */
+  /** 序列化后的选区 markdown(预览 + 拼 prompt) */
   selectionMarkdown: string;
-  /** 选区 PM doc JSON(用于拼 prompt 末尾 JSON 块) */
-  selectionDocJSON: unknown | null;
   /** 默认 AI 服务(AIView per-ws state,panel 可让用户改) */
   defaultServiceId: AIServiceId;
 }

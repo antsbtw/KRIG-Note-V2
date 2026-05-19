@@ -40,11 +40,10 @@ export async function askAiFromNote(): Promise<void> {
     return;
   }
 
-  // 抓选区双格式(无损传递)
+  // 抓选区 markdown(YAGNI:不再附 PM JSON,纯 markdown AI 已能完整理解)
   const { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
-  const docJSON = textEditing.api.getSelectionDocJSON(instanceId);
 
-  if (!markdown && !docJSON) {
+  if (!markdown) {
     // 无选区 — 直接开 AI Web 让用户手动跟 AI 对话(不弹 panel,空 prompt 没意义)
     const bus = workspaceManager.getBus(wsId);
     bus?.slot.openRight('ai-view');
@@ -58,7 +57,6 @@ export async function askAiFromNote(): Promise<void> {
   // 走 commandRegistry 跨 view 调用(避免 thought-view 直 import note-view 模块)
   commandRegistry.execute('note-view.open-ask-ai-popup', {
     selectionMarkdown: markdown,
-    selectionDocJSON: docJSON,
     defaultServiceId,
     anchorX: cmState.x,
     anchorY: cmState.y,
