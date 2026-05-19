@@ -93,6 +93,12 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
       ];
 
     case 'paragraph':
+      // ResultParser 把 markdown 的 "---" / "***" / "___" 标成
+      // {type:'paragraph', tag:'hr', text:'---'}(因为 ExtractedBlock 没正式 hr 类型);
+      // 转 PM 时还原为真 horizontalRule 节点,而不是含 "---" 文本的 paragraph。
+      if (block.tag === 'hr') {
+        return [{ type: 'horizontalRule' }];
+      }
       return [
         {
           type: 'paragraph',
