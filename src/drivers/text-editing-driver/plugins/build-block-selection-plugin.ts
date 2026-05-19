@@ -4,8 +4,10 @@
  * 设计:
  *  - 选区类型走 MultipleNodeSelection(Selection 子类),tr.setSelection 携带,
  *    clipboard / drag / history 自动走 PM 默认 pipeline。
- *  - 本 plugin 只做"视觉增强":当 view.state.selection 是 MultipleNodeSelection 时,
- *    给每个选中节点画 `krig-block-selected` 的 deco(整块圆角蓝底)。
+ *  - 本 plugin 做两件视觉增强:
+ *    1. decoration: 给每个选中节点画 `krig-block-selected`(整块圆角蓝底)
+ *    2. root class: view.dom 加 `is-block-selecting`,让 CSS 全局抑制
+ *       原生 ::selection 文字底色,避免"双层选区"叠加(参见 pm-host.css)
  *  - 选区算法(Esc / Shift+Arrow / 拖动后保留 / ...)由后续 Step 2-4 加入。
  *
  * **不**持有 PluginState — 一切选区都在 view.state.selection 中。
@@ -14,6 +16,13 @@
 import { Plugin } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { MultipleNodeSelection } from './_shared/multiple-node-selection';
+
+const ROOT_CLASS = 'is-block-selecting';
+
+function syncRootClass(view: import('prosemirror-view').EditorView): void {
+  const active = view.state.selection instanceof MultipleNodeSelection;
+  view.dom.classList.toggle(ROOT_CLASS, active);
+}
 
 export function buildBlockSelectionPlugin(): Plugin {
   return new Plugin({
@@ -43,6 +52,17 @@ export function buildBlockSelectionPlugin(): Plugin {
         }
         return DecorationSet.create(state.doc, decos);
       },
+    },
+    view(view) {
+      syncRootClass(view);
+      return {
+        update(v) {
+          syncRootClass(v);
+        },
+        destroy() {
+          view.dom.classList.remove(ROOT_CLASS);
+        },
+      };
     },
   });
 }

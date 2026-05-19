@@ -2177,8 +2177,23 @@
   box-shadow: 0 0 0 2px rgba(77, 154, 255, 0.22);
 }
 
-/* 选块期间抑制内部字符级文本选区高亮(避免双层底色叠加)*/
-.ProseMirror .krig-block-selected ::selection {
+/* 选块期间抑制字符级文本选区高亮(避免双层底色叠加)
+ *
+ * MultipleNodeSelection 时 PM 把 selection from/to 仍交给 PM 父类,浏览器
+ * 默认会在该范围内画原生 ::selection;叠在 krig-block-selected 蓝底上
+ * 产生"双重选区"的视觉。
+ *
+ * 实现:激活时 build-block-selection-plugin 给 ProseMirror root 加
+ * `is-block-selecting` class,本规则在 :host-scoped 后代上全局清掉
+ * ::selection 底色;选块状态消失(普通文本选区/光标)时规则失效自动复原。
+ *
+ * 不使用 `.krig-block-selected ::selection` 是因为 deco 挂在 block wrapper
+ * 上,::selection 伪元素只对最近 selector 的元素 + 其文本节点生效,
+ * 在某些浏览器实现里不会向下继承到 inline 子节点。改用 root class
+ * 通配更可靠。
+ */
+.ProseMirror.is-block-selecting ::selection,
+.ProseMirror.is-block-selecting *::selection {
   background-color: transparent;
 }
 
