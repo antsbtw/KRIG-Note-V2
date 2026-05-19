@@ -10,6 +10,7 @@
 
 export { ResultParser } from './result-parser';
 export { extractedBlocksToPmDoc } from './blocks-to-pm-doc';
+export { wrapAITurnsInToggle } from './wrap-ai-turns';
 export type {
   ExtractedBlock,
   ExtractedInline,

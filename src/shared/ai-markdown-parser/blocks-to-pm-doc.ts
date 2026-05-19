@@ -155,6 +155,9 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
     }
 
     case 'image':
+      // V2 image PM spec content='block' 必须有一个 child block(caption),
+      // 不加 content 时 PM.nodeFromJSON 会抛 RangeError(失败 fence 走默认 fallback)。
+      // 用空 paragraph 占位即可,用户可后续手填 caption。
       return [
         {
           type: 'image',
@@ -163,6 +166,7 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
             alt: block.alt || '',
             title: block.caption || '',
           },
+          content: [{ type: 'paragraph' }],
         },
       ];
 

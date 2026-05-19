@@ -13,9 +13,9 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { AIConversationApi } from '@capabilities/ai-conversation/types';
 import type { ThoughtCapabilityApi } from '@capabilities/thought/types';
-import { aiMarkdownToNoteDoc } from '@shared/ai-markdown-parser';
+import { aiMarkdownToNoteDoc, wrapAITurnsInToggle } from '@shared/ai-markdown-parser';
 import { setAIServiceId, getAIWsState } from './data-model';
-import type { AIServiceId } from '@shared/types/ai-service-types';
+import { getAIServiceProfile, type AIServiceId } from '@shared/types/ai-service-types';
 
 function isServiceId(v: unknown): v is AIServiceId {
   return v === 'chatgpt' || v === 'claude' || v === 'gemini';
@@ -107,7 +107,10 @@ export function registerAICommands(): void {
     if (ws.slotBinding.left === 'ai-view' && ws.slotBinding.right === 'note-view') {
       const envelope = aiMarkdownToNoteDoc(extraction.markdown);
       const pmDoc = envelope.payload as { content?: unknown[] };
-      const nodes = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+      const rawNodes = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+      // 每轮 AI 回答外套 toggleList(label="回答 (服务名)");用户提问 / 顶部元数据 / hr 不动
+      const serviceName = getAIServiceProfile(serviceId).name;
+      const nodes = wrapAITurnsInToggle(rawNodes, serviceName);
       if (nodes.length === 0) {
         console.warn('[ai-view.extract] 整页 markdown 转空 doc,回退 Thought 链路');
       } else {

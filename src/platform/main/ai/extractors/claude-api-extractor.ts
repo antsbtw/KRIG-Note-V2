@@ -498,9 +498,11 @@ function rebuildArtifactSegments(
 function collapseDuplicateFallbackCallouts(text: string): string {
   if (!text) return text;
   const normalized = text.replace(/\r\n/g, '\n');
+  // 新 callout 格式([!note] 独占第一行 + 内容 + 可选链接 = 2~3 行 blockquote)
   const calloutPattern =
-    '(> \\[!note\\] 📥 此处图片请点击 Claude 页面的拷贝按钮\\n' +
-    '(?:> \\[在 Claude 中查看原图\\]\\([^\\n]+\\)))';
+    '(> \\[!note\\]\\n' +
+    '> 📥 此处图片请点击 Claude 页面的拷贝按钮' +
+    '(?:\\n> \\[在 Claude 中查看原图\\]\\([^\\n]+\\))?)';
   const duplicatePattern = new RegExp(
     calloutPattern + '(?:\\n[ \\t]*){1,3}' + calloutPattern,
     'g',
@@ -541,9 +543,38 @@ export function fillArtifactPlaceholders(
     const idxFromEnd = placeholdersFromEnd - 1 - placeholder.index;
     const src = capturedSources[idxFromEnd];
     if (!src) return null;
-    const info = placeholder.info || 'html';
-    return '```' + info + '\n' + src + '\n```';
+    return renderArtifactSource(src, placeholder.info || 'html');
   });
+}
+
+/**
+ * 把抓到的 artifact 源码渲染成 markdown 片段:
+ *
+ * - SVG 源码 → image markdown with data:image/svg+xml;base64,... URL
+ *   (Note 端 image NodeView 检测 isSvgSrc 后用 innerHTML 真渲染 SVG;不只是源码可见)
+ * - 其他(HTML / JSX / React / mermaid / code)→ fenced code block(用户至少能看源码)
+ *
+ * 为什么 HTML 不也走 image:
+ *   data:text/html;base64 + image markdown 不被 Note image NodeView 当 HTML 渲染;
+ *   未来若做 htmlBlock 嵌入支持再迁。本期保持 V1 等价行为(html 源码可见)。
+ */
+function renderArtifactSource(source: string, infoHint: string): string {
+  const trimmed = source.trim();
+  // 检测 SVG(以 <svg 开头或含 xmlns="http://www.w3.org/2000/svg")
+  const looksLikeSvg =
+    /^<svg[\s>]/i.test(trimmed) ||
+    /xmlns\s*=\s*["']http:\/\/www\.w3\.org\/2000\/svg["']/i.test(trimmed.slice(0, 200)) ||
+    infoHint.toLowerCase() === 'svg' ||
+    infoHint.toLowerCase() === 'image/svg+xml';
+
+  if (looksLikeSvg) {
+    // base64 编码 SVG(用 Buffer 兼容 main 进程 + electron renderer)
+    const base64 = Buffer.from(trimmed, 'utf-8').toString('base64');
+    return `![Claude Artifact](data:image/svg+xml;base64,${base64})`;
+  }
+
+  // 默认 code fence(html / jsx / react / mermaid / 其他)
+  return '```' + (infoHint || 'html') + '\n' + source + '\n```';
 }
 
 /**
@@ -641,10 +672,17 @@ export function replaceArtifactPlaceholders(
   messageText: string,
   conversationUrl?: string,
 ): string {
+  // [!note] 必须独占第一行,ResultParser GitHub callout 正则要求 ^\[!(\w+)\]\s*$
+  // (之前 [!note] 后面跟内容时无法被识别为 callout,只能落回普通 blockquote — 用户看不到提示)
   const linkText = conversationUrl
     ? `> [在 Claude 中查看原图](${conversationUrl})`
     : '';
-  const fallback = `> [!note] 📥 此处图片请点击 Claude 页面的拷贝按钮${linkText ? `\n${linkText}` : ''}`;
+  const bodyLines = [
+    `> [!note]`,
+    `> 📥 此处图片请点击 Claude 页面的拷贝按钮`,
+  ];
+  if (linkText) bodyLines.push(linkText);
+  const fallback = bodyLines.join('\n');
   const segments = splitByArtifactPlaceholders(messageText);
   return collapseDuplicateFallbackCallouts(
     rebuildArtifactSegments(segments, () => fallback).text,
