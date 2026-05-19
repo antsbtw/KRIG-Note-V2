@@ -252,7 +252,10 @@ export const textEditingDriverApi = {
       });
       changed = true;
     }
-    if (changed) inst.view.dispatch(tr);
+    if (changed) {
+      inst.view.dispatch(tr);
+      inst.view.focus();
+    }
   },
 
   /**
@@ -277,6 +280,7 @@ export const textEditingDriverApi = {
       tr = tr.setNodeMarkup(blockPos, null, { ...node.attrs, frameColor: color });
     }
     inst.view.dispatch(tr);
+    inst.view.focus();
   },
 
   /**
@@ -303,6 +307,7 @@ export const textEditingDriverApi = {
       tr = tr.setNodeMarkup(blockPos, null, { ...node.attrs, frameStyle: style });
     }
     inst.view.dispatch(tr);
+    inst.view.focus();
   },
 
   /**
@@ -335,6 +340,7 @@ export const textEditingDriverApi = {
       });
     }
     inst.view.dispatch(tr);
+    inst.view.focus();
   },
 
   /**
@@ -395,6 +401,7 @@ export const textEditingDriverApi = {
     inst.view.dispatch(
       inst.view.state.tr.setNodeMarkup(blockPos, null, { ...node.attrs, align }),
     );
+    inst.view.focus();
   },
 
   /**
@@ -412,6 +419,7 @@ export const textEditingDriverApi = {
         textIndent: !node.attrs.textIndent,
       }),
     );
+    inst.view.focus();
   },
 
   /**
@@ -433,6 +441,7 @@ export const textEditingDriverApi = {
     inst.view.dispatch(
       inst.view.state.tr.setNodeMarkup(blockPos, null, { ...node.attrs, indent: next }),
     );
+    inst.view.focus();
     return true;
   },
 
