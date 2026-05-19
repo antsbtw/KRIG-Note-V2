@@ -29,6 +29,7 @@
 
 import type { HandleItem } from '@slot/interaction-registries/handle-registry/handle-types';
 import { HandleColorSubmenu } from '../color-picker/HandleColorSubmenu';
+import { HandleFormatSubmenu } from './HandleFormatSubmenu';
 
 /** ↔ Turn Into 容器(顶层 submenu 容器,group='transform') */
 export function createTurnIntoContainer(viewId: string): HandleItem {
@@ -56,6 +57,21 @@ export function createColorContainer(viewId: string): HandleItem {
     group: 'transform',
     order: 20,
     submenuRender: (ctx) => <HandleColorSubmenu ctx={ctx} />,
+  };
+}
+
+/** ¶ Format 容器(submenuRender 渲染 HandleFormatSubmenu — indent/outdent/text-indent/align)*/
+export function createFormatContainer(viewId: string): HandleItem {
+  return {
+    id: `${viewId}.h.format`,
+    icon: '¶',
+    label: 'Format',
+    command: '',
+    submenuId: 'format',
+    view: viewId,
+    group: 'transform',
+    order: 30,
+    submenuRender: (ctx) => <HandleFormatSubmenu ctx={ctx} />,
   };
 }
 

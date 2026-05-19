@@ -41,6 +41,7 @@ export function registerContextMenu(): void {
     ...te.createRemoveMarksGroup(VIEW),      // 移除格式 / 移除链接
     lr.createDictionaryLookupItem(VIEW),     // 📖 查词(S3 走 learning 工厂)
     lr.createTranslateItem(VIEW),            // 🌐 翻译(S3 走 learning 工厂)
+    te.createFrameItem(VIEW),                // ▣ 框定(submenu — 颜色 + 线型 + 删除)
     te.createDeleteBlockItem(VIEW),          // 删除 Block
     // thought-view:💭/🤖 从 floating toolbar 迁来(覆盖块/多块场景):
     //   - 💭 加思考:always 可见(命令内部三态识别选区/光标/image/多块全兼容)

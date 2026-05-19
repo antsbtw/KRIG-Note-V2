@@ -399,6 +399,147 @@
   box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.4);
 }
 
+/* ── frame picker(context menu 框定 submenu)── */
+
+.krig-frame-picker {
+  padding: 8px 10px;
+  min-width: 220px;
+}
+
+.krig-frame-picker__section-label {
+  font-size: 11px;
+  color: #9aa0a6;
+  margin: 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.krig-frame-picker__color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.krig-frame-picker__swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: outline 0.1s;
+}
+
+.krig-frame-picker__style-row {
+  display: flex;
+  gap: 4px;
+}
+
+.krig-frame-picker__style-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e8eaed;
+  background: transparent;
+}
+.krig-frame-picker__style-btn:hover:not(:disabled) {
+  background: #3a3a3a;
+}
+.krig-frame-picker__style-btn--active {
+  background: #3a3a3a;
+}
+.krig-frame-picker__style-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.krig-frame-picker__separator {
+  height: 1px;
+  background: #444;
+  margin: 8px 0;
+}
+
+.krig-frame-picker__remove-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #ea4335;
+  background: transparent;
+  text-align: left;
+}
+.krig-frame-picker__remove-btn:hover {
+  background: #3a3a3a;
+}
+
+/* ── handle 菜单 Format submenu(handle ⠿ ▸ ¶ Format)── */
+
+.krig-format-submenu {
+  padding: 4px;
+  min-width: 200px;
+}
+
+.krig-format-submenu__row {
+  display: flex;
+  gap: 4px;
+}
+
+.krig-format-submenu__btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #e8eaed;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+.krig-format-submenu__btn:hover:not(:disabled) {
+  background: #3a3a3a;
+}
+.krig-format-submenu__btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.krig-format-submenu__btn--half {
+  flex: 1;
+  justify-content: center;
+}
+.krig-format-submenu__btn--active {
+  background: #3a3a3a;
+}
+.krig-format-submenu__icon {
+  width: 18px;
+  flex-shrink: 0;
+  text-align: center;
+  color: #aaa;
+}
+.krig-format-submenu__label {
+  flex: 1;
+}
+.krig-format-submenu__shortcut {
+  flex-shrink: 0;
+  color: #888;
+  font-size: 11px;
+}
+.krig-format-submenu__divider {
+  height: 1px;
+  background: #3a3a3a;
+  margin: 4px 0;
+}
+
 /* ── callout emoji picker(Notion 风格:4 tab 栏 + emoji-mart Web Component)── */
 
 .krig-emoji-picker {
