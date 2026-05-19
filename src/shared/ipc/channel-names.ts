@@ -159,7 +159,7 @@ export const IPC_CHANNELS = {
   PM_CONTENT_GET: 'pm-content.get',
   PM_CONTENT_UPDATE: 'pm-content.update',
 
-  // ai-conversation capability(V1 web-bridge AI 自动化 → V2 抽 capability 层)
+  // ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability 层;原 ai-conversation)
   // 4 invoke + 3 push = 7 channel-names
   AI_ASK: 'ai.ask',                                 // renderer → main:askAI(serviceId, prompt, opts?)
   AI_PASTE_AND_SEND: 'ai.paste-and-send',           // renderer → main:只 paste + send 不等回复(Phase 6 问 AI 路径)

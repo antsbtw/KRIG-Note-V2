@@ -1,5 +1,5 @@
 /**
- * ai-conversation 跨模块广播工具(对齐 thought/broadcast.ts 同模式)
+ * ai-extraction 跨模块广播工具(对齐 thought/broadcast.ts 同模式)
  *
  * 广播 main 进程产生的 AI 事件(回复完成 / 错误 / 流式增量)给所有 renderer 窗口。
  * 后台 webview(BrowserWindow.show=false)不会订阅这些事件 — 仅前台 renderer 看到。

@@ -1,11 +1,14 @@
 /**
- * ai-conversation capability — 对外类型
+ * ai-extraction capability — 对外类型
  *
- * view 通过 requireCapabilityApi<AIConversationApi>('ai-conversation') 取 api;
+ * view 通过 requireCapabilityApi<AIConversationApi>('ai-extraction') 取 api;
  * driver/slot 内部消费可直 import 模块级 export(对齐 thought/note 同模式)。
  *
- * 横切定位:任何 view (note / ai-view / thought / ...) 都能 install 'ai-conversation'
- * 获得相同的"问 AI / 监听回复 / 错误"能力,与 thought capability 同性质。
+ * 横切定位:任何 view (note / ai-view / thought / ...) 都能 install 'ai-extraction'
+ * 获得相同的"问 AI / 抓取整页对话 / 监听回复"能力,与 thought capability 同性质。
+ *
+ * 类型名 AIConversationApi:为减少改名时类型噪声,接口名保持(语义仍准确:这是
+ * "操作 AI 对话"的 API);capability id 已改为 'ai-extraction',对齐目录命名原则。
  */
 
 import type { ComponentType, Ref } from 'react';

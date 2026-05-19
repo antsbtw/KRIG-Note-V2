@@ -35,7 +35,7 @@
 ```
 src/capabilities/
 ├── representation/    (表征类:渲染方法,如 text-editing / canvas-rendering / pdf-rendering)
-├── interop/           (互操作类:动作抽象,如 browser-capability / content-extraction / ai-conversation)
+├── interop/           (互操作类:动作抽象,如 browser-capability / content-extraction / ai-extraction)
 └── system-service/    (系统服务类:如 history / find-replace / copy-paste)
 ```
 

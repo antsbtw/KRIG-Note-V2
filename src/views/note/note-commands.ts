@@ -44,7 +44,7 @@ import { triggerRename } from './context-menu-registrations';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
 import { buildAITurnPmNodes } from './ai-sync-blocks';
-import type { AISyncTurn, AIServiceId } from '@capabilities/ai-conversation/types';
+import type { AISyncTurn, AIServiceId } from '@capabilities/ai-extraction/types';
 
 /**
  * lazy getter — 命令 handler 内部用,避免 module load 时 require

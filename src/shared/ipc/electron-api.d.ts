@@ -330,7 +330,7 @@ declare global {
       pmContentGet(id: string): Promise<PmAtomInfo | null>;
       pmContentUpdate(id: string, doc: PmDocEnvelope): Promise<PmAtomInfo>;
 
-      // ── ai-conversation capability (V1 web-bridge AI 自动化 → V2 抽 capability) ──
+      // ── ai-extraction capability (V1 web-bridge AI 自动化 → V2 抽 capability;原 ai-conversation) ──
       // 4 invoke + 3 broadcast 订阅 = 7 表面
       /** 给 AI 服务发 prompt 等完整 Markdown 回复;5 分钟无请求后台 webview 自动销毁 */
       aiAsk(

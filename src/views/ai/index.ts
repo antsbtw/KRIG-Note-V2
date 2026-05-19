@@ -13,7 +13,7 @@ registerView({
   id: 'ai-view',
   install: [
     // 横切 AI 能力(charter § 1.2 注册原则)— driver 隐于 capability,view 不可见
-    'ai-conversation',
+    'ai-extraction',
   ],
   component: AIView,
   navSideTab: { label: 'AI', icon: '🤖', order: 4 },

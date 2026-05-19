@@ -197,8 +197,13 @@ export async function getLatestCapturedResponse(): Promise<string | null> {
 /**
  * Phase 10.B:整页对话提取(多 turn + artifact + 图片)。
  *
- * Claude:走 extractClaudeFullConversation(/api/.../chat_conversations + artifact hook)
- * ChatGPT/Gemini:Phase 10.B.2-3 待实现,目前回退 getLatestResponse 单 turn
+ * 按 serviceId 分派到对应平台 extractor:
+ * - Claude:走 extractClaudeFullConversation
+ *     (/api/.../chat_conversations 真 API + artifact hook 抓源码)
+ * - ChatGPT:走 extractChatGPTFullConversation
+ *     (DOM/JSON 爬虫,见 extractors/chatgpt-full-extraction.ts)
+ * - Gemini:走 extractGeminiFullConversation
+ *     (DOM 抓用户 turn + SSECaptureManager 缓存合并 AI 回复)
  *
  * 返完整 markdown(已含 ## 用户/## AI 分隔 + artifact 源码 fence),
  * 由 view 层调 aiMarkdownToNoteDoc 转 PM doc 渲染。

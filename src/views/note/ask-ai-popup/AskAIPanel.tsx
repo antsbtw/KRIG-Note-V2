@@ -19,7 +19,7 @@ import type { PopupCloseProps } from '@slot/interaction-registries/popup-registr
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
-import type { AIConversationApi } from '@capabilities/ai-conversation/types';
+import type { AIConversationApi } from '@capabilities/ai-extraction/types';
 import type { ThoughtCapabilityApi } from '@capabilities/thought/types';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { consumePendingAskAIContext, type AskAIContext } from './panel-context';
@@ -73,7 +73,7 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
    * cleanup:unmount 时若没发送过 → cancel 路径:
    *   - 清 pending atom(thoughtCap.deleteThought)
    *   - 清选区 mark(textEditing.removeThoughtAnchor)
-   *   - 清 ai-conversation pending(防下一轮误用)
+   *   - 清 ai-extraction pending(防下一轮误用)
    *
    * 触发场景:用户按 Esc / 点 × / 点击外部关闭 / 任何 onClose 调用导致 popup 卸载。
    * "已 sent" 走另一路径:thoughtId 留着,提取按钮 update 用。
@@ -88,7 +88,7 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
       try {
         const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
         const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-        const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
+        const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
         textEditing.api.removeThoughtAnchor(ctx.instanceId, ctx.thoughtId);
         void thought.deleteThought(ctx.thoughtId);
         ai.clearPendingAIThought(serviceIdRef.current);
@@ -113,9 +113,9 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
     }
     // 标记已发送(unmount cleanup 不再做 cancel 清理)
     sentRef.current = true;
-    // 把 thoughtId 写到 ai-conversation pending(提取按钮 update 用)
+    // 把 thoughtId 写到 ai-extraction pending(提取按钮 update 用)
     try {
-      const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
+      const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
       ai.setPendingAIThought(serviceId, ctx.thoughtId);
     } catch (err) {
       console.warn('[AskAIPanel] setPendingAIThought failed:', err);
