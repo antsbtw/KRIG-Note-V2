@@ -11,7 +11,7 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
 import type { AIAskOptions, AIAskResult } from '@shared/ipc/ai-types';
 import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse } from './ask-orchestrator';
-import { backgroundAI } from './background-webview';
+import { getActiveAIWebContents } from './webview-registry';
 
 function isServiceId(v: unknown): v is AIServiceId {
   return v === 'chatgpt' || v === 'claude' || v === 'gemini';
@@ -34,15 +34,26 @@ export function registerAIHandlers(): void {
     },
   );
 
-  // #2 ai.open-session — 把后台 webview 转前台(本期占位,返回当前状态)
+  // #2 ai.open-session — 探测某服务的活跃前台 AI Host webview 是否就绪
+  // (Phase 8 架构改造后:不再创建后台 BrowserWindow,所有 AI 操作走前台 webview;
+  //  本 API 退化为"探测 webview 是否注册"诊断用)
   ipcMain.handle(IPC_CHANNELS.AI_OPEN_SESSION, async (_e, serviceId: unknown) => {
     if (!isServiceId(serviceId)) return { success: false, error: 'invalid serviceId' };
-    try {
-      await backgroundAI.ensureReady(serviceId);
-      return { success: true, ...backgroundAI.getStatus() };
-    } catch (err) {
-      return { success: false, error: String(err) };
+    const wc = getActiveAIWebContents(serviceId);
+    if (!wc) {
+      return {
+        success: false,
+        status: 'not-attached',
+        serviceId,
+        error: 'No active webview — open AI tab and navigate to service URL first',
+      };
     }
+    return {
+      success: true,
+      status: 'ready',
+      serviceId,
+      url: wc.getURL(),
+    };
   });
 
   // #3 ai.service-list — 三服务清单(UI 下拉菜单用)

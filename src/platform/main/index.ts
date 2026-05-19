@@ -25,6 +25,7 @@ import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
+import { registerAIWebviewHook } from './ai';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -110,6 +111,9 @@ app.whenReady().then(async () => {
 
   // L5-C6:webview attach hook(PDF 提取 download 拦截)— 必须在 mainWindow 创建后挂
   registerWebviewExtractionHook(mainWindow);
+  // ai-conversation:webview attach hook(AI Host webview did-navigate 到 AI URL 时
+  // 注册到 ai-webview-registry,askAI / pasteAndSend 走前台 webContents 而非后台)
+  registerAIWebviewHook(mainWindow);
 });
 
 // macOS:窗口全关后,点 dock 重新打开
