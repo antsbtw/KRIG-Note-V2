@@ -24,6 +24,14 @@ import {
   vocabHighlightPluginKey,
   updateVocabDefs,
 } from './plugins/build-vocab-highlight-plugin';
+import {
+  expandToLevel as expandHeadingsToLevelImpl,
+  getCurrentExpandLevel as getCurrentExpandLevelImpl,
+  scrollToHeadingPos,
+  extractTocHeadings,
+  subscribeHeadingChange,
+  type TocHeadingEntry,
+} from './plugins/build-heading-collapse-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
 import { insertColumnList as insertColumnListCommand } from './blocks/column-list';
 
@@ -1841,6 +1849,60 @@ export const textEditingDriverApi = {
     tr = tr.scrollIntoView();
     inst.view.dispatch(tr);
     return true;
+  },
+
+  // ── TOC / heading-collapse(L5-G6,note-toc feature)──────────────
+
+  /**
+   * 收集 H1-H3 顶层标题(给 TOC 面板渲染列表用)
+   * 返回 { level, text, pos } 列表;pos = 在 doc 中的顶层位置(scroll/expand 用)
+   */
+  getTocHeadings(instanceId: string): TocHeadingEntry[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return [];
+    return extractTocHeadings(inst.view.state);
+  },
+
+  /**
+   * 取当前展开级别(用于 TOC 顶部 H1/H2/H3/📖 按钮高亮)
+   * 返回 1/2/3/Infinity
+   */
+  getCurrentHeadingExpandLevel(instanceId: string): number {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return Infinity;
+    return getCurrentExpandLevelImpl(inst.view.state);
+  },
+
+  /**
+   * 展开到指定级别(用户点 TOC 顶部按钮)
+   *   level=1 只看到 H1;level=Infinity 全展开
+   */
+  expandHeadingsToLevel(instanceId: string, level: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return;
+    expandHeadingsToLevelImpl(inst.view, level);
+  },
+
+  /**
+   * 跳到指定 heading pos(展开所有隐藏它的祖先 + 滚动 + 光标)
+   * pos 来自 getTocHeadings 返回的 entry.pos
+   */
+  scrollToTocHeading(instanceId: string, pos: number): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return;
+    scrollToHeadingPos(inst.view, pos);
+  },
+
+  /**
+   * 订阅 heading 列表 / 折叠状态变化(view 层 TOC 面板用)
+   * cb 在以下情况触发:
+   *   - plugin mount(首屏一次)
+   *   - doc 变化(增删改 heading)
+   *   - collapsed 集合变化(用户点折叠按钮 / TOC 级别按钮)
+   * 返 unsubscribe 函数。
+   */
+  subscribeTocChange(instanceId: string, cb: () => void): () => void {
+    return subscribeHeadingChange(instanceId, cb);
   },
 };
 

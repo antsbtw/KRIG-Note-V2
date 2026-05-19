@@ -36,6 +36,7 @@ import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-sele
 import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
 import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
+import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
 
 /**
  * 装配 EditorView
@@ -95,6 +96,7 @@ export function buildEditorView(
   const enableSlash = optIn(pluginToggles?.slash);
   const enableBlockSelection = optIn(pluginToggles?.blockSelection);
   const enableCodeSyntaxHighlight = optIn(pluginToggles?.codeSyntaxHighlight);
+  const enableHeadingCollapse = optIn(pluginToggles?.headingCollapse);
 
   const plugins: Plugin[] = [
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
@@ -124,6 +126,7 @@ export function buildEditorView(
     ...(enablePasteMedia ? [buildPasteMediaPlugin()] : []),
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     ...(enableCodeSyntaxHighlight ? [buildCodeSyntaxHighlightPlugin()] : []),
+    ...(enableHeadingCollapse ? [buildHeadingCollapsePlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
     // block-selection keymap 抢在 baseKeymap 之前(Esc/Shift+Arrow/Arrow)

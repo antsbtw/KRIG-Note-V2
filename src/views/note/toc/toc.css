@@ -1,0 +1,201 @@
+/**
+ * toc.css — note view 目录侧边面板样式
+ *
+ * 左侧窄 hover 触发区:24px 宽,全高;hover 时显示淡背景渐变。
+ * 浮层面板:240px 宽,从左侧滑出。
+ *
+ * 与 V1 一致(src/plugins/note/toc/toc.css),仅 top 改为 0(V2 NoteView 自身
+ * 没有 toolbar bar 高,顶部留给 hotzone 直接铺到容器顶)。
+ */
+
+/* ─── Hover 触发区 ─── */
+/* NoteView 自身是滚动容器(.krig-note-view overflow:auto + position:relative),
+   TOC 用 absolute 锚到 NoteView 内,避免 fixed 在分屏布局下越界。*/
+.toc-hotzone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  z-index: 10;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.toc-hotzone::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.15);
+  pointer-events: none;
+}
+
+.toc-hotzone:hover {
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.02) 60%,
+    transparent 100%
+  );
+}
+
+/* ─── 浮层面板 ─── */
+.toc-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  background: #2a2a2a;
+  border: 1px solid #3c3c3c;
+  border-left: none;
+  border-bottom: none;
+  border-radius: 0 10px 0 0;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  opacity: 0;
+  transform: translateX(-8px);
+  pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.toc-panel--visible {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* ─── 顶部:级别按钮条 ─── */
+.toc-panel__levels {
+  display: flex;
+  padding: 0;
+  flex-shrink: 0;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.toc-panel__level-btn {
+  flex: 1;
+  height: 34px;
+  background: none;
+  border: none;
+  border-right: 1px solid #3c3c3c;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.toc-panel__level-btn:last-child {
+  border-right: none;
+}
+
+.toc-panel__level-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8eaed;
+}
+
+.toc-panel__level-btn--active {
+  color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.08);
+}
+
+/* ─── 主体:heading 列表 ─── */
+.toc-panel__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+  min-height: 0;
+}
+
+.toc-panel__empty {
+  padding: 24px 14px;
+  color: #666;
+  font-size: 13px;
+  text-align: center;
+}
+
+.toc-panel__item {
+  display: block;
+  width: 100%;
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  text-align: left;
+  color: #9aa0a6;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s, color 0.1s;
+}
+
+.toc-panel__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8eaed;
+}
+
+.toc-panel__item--active {
+  color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.08);
+}
+
+/* 层级缩进 + 字重 */
+.toc-panel__item[data-level="1"] {
+  padding-left: 14px;
+  font-weight: 600;
+}
+
+.toc-panel__item[data-level="2"] {
+  padding-left: 28px;
+  font-weight: 500;
+}
+
+.toc-panel__item[data-level="3"] {
+  padding-left: 42px;
+  font-weight: 400;
+}
+
+/* 滚动条样式 */
+.toc-panel__list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.toc-panel__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.toc-panel__list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.toc-panel__list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ─── heading-collapse Plugin Decoration(driver 注入)─── */
+
+/* 折叠 heading 底部虚线(对应 plugin 的 .heading-collapsed) */
+.ProseMirror h1.heading-collapsed,
+.ProseMirror h2.heading-collapsed,
+.ProseMirror h3.heading-collapsed,
+.ProseMirror h4.heading-collapsed,
+.ProseMirror h5.heading-collapsed,
+.ProseMirror h6.heading-collapsed {
+  border-bottom: 2px dotted #5a5a5a;
+  padding-bottom: 4px;
+}
+
+/* 被折叠隐藏的节点 */
+.ProseMirror .heading-collapsed-hidden {
+  display: none;
+}

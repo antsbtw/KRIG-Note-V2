@@ -85,6 +85,8 @@ export interface TextEditingPluginToggles {
   blockSelection?: boolean;
   /** codeBlock 内联语法高亮(Phase 2 引入);NoteView 默认开,canvas-text-node 等可关 */
   codeSyntaxHighlight?: boolean;
+  /** Heading 折叠(配合 TOC 面板);NoteView 默认开,canvas-text-node / thought 等单段 view 可关 */
+  headingCollapse?: boolean;
   // opt-in(默认 false,view 显式 true 开启)
   titleGuard?: boolean;
 }

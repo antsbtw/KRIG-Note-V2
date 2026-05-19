@@ -87,6 +87,8 @@ export function ThoughtCardEditor({ thought, readOnly }: ThoughtCardEditorProps)
           // blockSelection / etc)**全部沿用默认开**,完整继承 PM 能力
           // (对齐 charter §1.4 view 平等 + V1 ThoughtEditor 字面)。
           titleGuard: false,
+          // headingCollapse:thought 是单段 doc,heading 折叠无意义,显式关
+          headingCollapse: false,
         },
       }}
       doc={thought.doc}
