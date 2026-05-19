@@ -3,17 +3,25 @@
  *
  * 两态:
  * - placeholder(无 src):🌐 + Upload .html / Embed URL 输入(参考 audio-block)
- * - render(有 src):same-origin iframe + parent 直接 DOM 写入 + ResizeObserver
+ * - render(有 src):iframe.src = media:// URL + postMessage 测高 bridge
  *
- * 设计要点 — 为什么不用 sandbox:
- *   V2 默认 CSP `script-src 'self'` 拦 inline / blob script,而 sandbox iframe
- *   下 parent 又读不到 contentDocument 来主动测量高度 → 自动高度死路。
- *   去 sandbox 后 iframe 与 parent 同 origin,parent 直接 contentDocument.open
- *   /write/close 注入 HTML,然后 ResizeObserver 监听 body 高度,无需 iframe 内
- *   任何脚本通信。Trade-off:HTML 内 script 能读 KRIG window 状态 — KRIG 是
- *   本地 app 无敏感 cookie/session,HTML 来源仅用户自己上传,接受此 trade-off。
+ * 为什么直接走 iframe.src 而不是 srcdoc / doc.write(2026-05-19 重定):
+ *   - doc.write 同 origin:iframe 继承 parent CSP(`script-src 'self'`)→ AI
+ *     artifact 内的 inline / 跨域 script 全部被拦,Chart.js / D3 完全跑不动。
+ *   - srcdoc + sandbox:Chromium 规范 srcdoc 仍继承父框架 CSP(即使 sandbox 让
+ *     origin 变 opaque),实测同样被 script-src 'self' 拦。
+ *   - blob: URL:W3C CSP3 spec 把 blob: / filesystem: 列为 local scheme,继承
+ *     创建者 CSP,同样不行。
+ *   - 自定义 standard scheme(media://):有独立 origin,**不继承 parent CSP**,
+ *     iframe 内文档自己的 CSP(我们不注 meta = 无)→ inline / 跨域 script 自由
+ *     执行。这是唯一干净路径。
  *
- * 工具栏:{} 切换源码视图 / ↗ 在新窗口打开(blob URL window.open,这里不进 iframe)。
+ *   Trade-off:iframe 与 parent 跨 origin,parent 读不到 contentDocument →
+ *   自动高度走 iframe 内 bridge script + parent.postMessage 回传(主进程
+ *   media:// handler 在 .html 响应中注入 theme + bridge,见 media-store-impl)。
+ *   源码视图改用 loadHtmlContent 拉原始文件文本。
+ *
+ * 工具栏:{} 切换源码视图 / ↗ 在右栏 web-view 打开同一文件。
  * caption:contentDOM(figcaption)由 PM 接管。
  */
 
@@ -21,7 +29,6 @@ import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { mediaPutBase64 } from '@capabilities/media-storage';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { iframeThemeStyleTag } from './iframe-theme';
 
 const HEIGHT_CAP_PX = 4000;
 const HEIGHT_BUFFER_PX = 4;
@@ -67,13 +74,6 @@ async function loadHtmlContent(src: string): Promise<string | null> {
   }
 }
 
-function injectTheme(html: string): string {
-  const themeStyle = iframeThemeStyleTag();
-  if (html.includes('</head>')) return html.replace('</head>', themeStyle + '</head>');
-  if (html.includes('<body')) return html.replace('<body', themeStyle + '<body');
-  return themeStyle + html;
-}
-
 export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos) => {
   let node = initialNode;
 
@@ -92,10 +92,32 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   dom.appendChild(captionDOM);
 
   let iframeEl: HTMLIFrameElement | null = null;
-  let resizeObserver: ResizeObserver | null = null;
   let currentSrc: string | null = null;
-  // 用户拖拽手动覆盖高度后(写入 attrs.height),不再自动跟随 ResizeObserver。
+  // 缓存当前 src 加载到的 HTML 源码,供 {} 源码视图直接渲染(跨 origin 后无法读 contentDocument)。
+  let currentHtmlText: string | null = null;
+  // 用户拖拽手动覆盖高度后(写入 attrs.height),不再自动跟随 bridge postMessage 回传的高度。
   let userOverrideHeight = false;
+
+  // 跨 origin iframe 通过 postMessage 回传高度;listener 挂 window,在 destroy 中移除。
+  //
+  // 防反馈环:Chart.js / D3 等 responsive lib 在 iframe 内会监听 body 大小,iframe
+  // 自身高度变化触发 body resize,RO 再次报告新高度 → 无限放大。两道闸:
+  //   1. 阈值过滤:新高度跟当前高度差 < FEEDBACK_DEAD_BAND px 直接忽略
+  //   2. 单调升高:report 涨势达到平台后只接受小幅波动,不再追逐 lib 跨次重排
+  let lastReportedHeight = 0;
+  const FEEDBACK_DEAD_BAND_PX = 8;
+  function onBridgeMessage(e: MessageEvent): void {
+    const data = e.data as { tag?: string; height?: number } | null;
+    if (!data || data.tag !== 'krig-html-resize') return;
+    if (!iframeEl || e.source !== iframeEl.contentWindow) return;
+    if (userOverrideHeight) return;
+    const h = data.height;
+    if (typeof h !== 'number' || !Number.isFinite(h) || h <= 0) return;
+    if (Math.abs(h - lastReportedHeight) < FEEDBACK_DEAD_BAND_PX) return;
+    lastReportedHeight = h;
+    iframeEl.style.height = `${Math.min(h + HEIGHT_BUFFER_PX, HEIGHT_CAP_PX)}px`;
+  }
+  window.addEventListener('message', onBridgeMessage);
 
   function updateAttrs(patch: Record<string, unknown>): void {
     const pos = typeof getPos === 'function' ? getPos() : undefined;
@@ -108,12 +130,13 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   }
 
   function disposeIframe(): void {
-    if (resizeObserver) {
-      resizeObserver.disconnect();
-      resizeObserver = null;
+    if (iframeEl) {
+      const io = (iframeEl as unknown as { __krigIO?: IntersectionObserver }).__krigIO;
+      if (io) io.disconnect();
     }
     iframeEl = null;
     currentSrc = null;
+    currentHtmlText = null;
     userOverrideHeight = false;
   }
 
@@ -232,25 +255,15 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     if (iframeEl) iframeEl.style.display = 'none';
     const pre = document.createElement('pre');
     pre.className = 'krig-html-block__source';
-    loadHtmlContent(src).then((html) => {
-      if (html) pre.textContent = html;
-    });
-    renderWrap.appendChild(pre);
-  }
-
-  function applyAutoHeight(iframe: HTMLIFrameElement): void {
-    if (userOverrideHeight) return;
-    const doc = iframe.contentDocument;
-    if (!doc?.documentElement) return;
-    const h = Math.max(
-      doc.body?.scrollHeight ?? 0,
-      doc.body?.offsetHeight ?? 0,
-      doc.documentElement.scrollHeight,
-      doc.documentElement.offsetHeight,
-    );
-    if (h > 0) {
-      iframe.style.height = `${Math.min(h + HEIGHT_BUFFER_PX, HEIGHT_CAP_PX)}px`;
+    // sandbox 后 parent 读不到 contentDocument,改用缓存的源码文本;若 race 期还没就位再 fetch 一次。
+    if (currentHtmlText) {
+      pre.textContent = currentHtmlText;
+    } else {
+      loadHtmlContent(src).then((html) => {
+        if (html) pre.textContent = html;
+      });
     }
+    renderWrap.appendChild(pre);
   }
 
   /**
@@ -345,15 +358,18 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     const toolbar = buildToolbar(src);
     renderWrap.appendChild(toolbar);
 
-    // 无 sandbox 属性 — iframe 与 parent 同 origin,parent 可直接读 contentDocument。
+    // iframe.src = media:// → 跨 origin(独立 standard scheme),不继承 parent CSP。
+    // 主进程 media:// handler 拦截 .html 响应,在 <body> 末插入 theme + bridge script,
+    // bridge 通过 parent.postMessage 报告高度,parent 端 onBridgeMessage 接收。
     const iframe = document.createElement('iframe');
     iframe.className = 'krig-html-block__iframe';
     iframe.style.width = '100%';
     iframe.style.border = 'none';
     iframe.style.borderRadius = '8px';
     iframe.style.backgroundColor = '#ffffff';
-    // 用户已拖过 → 沿用用户高度;否则初始 0,等内容加载完 ResizeObserver 自动撑高。
+    // 用户已拖过 → 沿用用户高度;否则初始 0,等 bridge postMessage 报高度后撑开。
     iframe.style.height = userOverrideHeight ? `${n.attrs.height as number}px` : '0px';
+    iframe.src = src;
     iframeEl = iframe;
 
     renderWrap.appendChild(iframe);
@@ -363,26 +379,26 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     setupHeightResize(resizeHandle, iframe);
     renderWrap.appendChild(resizeHandle);
 
-    // 加载 + 同 origin 写入 — iframe 默认 src=about:blank 即与 parent 同 origin。
+    // 源码视图需要原始文本,异步拉一份缓存。
     loadHtmlContent(src).then((html) => {
       if (!html || view.isDestroyed) return;
       if (iframeEl !== iframe) return;
-      const prepared = injectTheme(html);
-      const doc = iframe.contentDocument;
-      if (!doc) return;
-      doc.open();
-      doc.write(prepared);
-      doc.close();
-
-      // 首次撑高
-      applyAutoHeight(iframe);
-
-      // 监听 body 内容变化(D3 / Chart 等动态生成元素)自动跟随
-      if (doc.body) {
-        resizeObserver = new ResizeObserver(() => applyAutoHeight(iframe));
-        resizeObserver.observe(doc.body);
-      }
+      currentHtmlText = html;
     });
+
+    // iframe 可能被 toggle 折叠 / 滚出视口而初次测高为 0;变可见时通知 bridge 重测。
+    if (typeof IntersectionObserver !== 'undefined') {
+      const io = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && iframe.contentWindow) {
+            iframe.contentWindow.postMessage({ tag: 'krig-html-remeasure' }, '*');
+          }
+        }
+      });
+      io.observe(iframe);
+      // 关联到 iframe 元素上,disposeIframe 时一起清。
+      (iframe as unknown as { __krigIO?: IntersectionObserver }).__krigIO = io;
+    }
   }
 
   function paint(n: PMNode): void {
@@ -412,8 +428,8 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
             iframeEl.style.height = `${updated.attrs.height as number}px`;
             userOverrideHeight = true;
           } else {
+            // 撤回手动高度:等 iframe 内 bridge 下一次 ResizeObserver tick 自动报高度撑回。
             userOverrideHeight = false;
-            applyAutoHeight(iframeEl);
           }
         }
       }
@@ -432,6 +448,7 @@ export const htmlBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
       return mutation.target === renderWrap || renderWrap.contains(mutation.target as Node);
     },
     destroy() {
+      window.removeEventListener('message', onBridgeMessage);
       disposeIframe();
     },
   };

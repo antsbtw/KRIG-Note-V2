@@ -31,6 +31,186 @@ import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 const MEDIA_DIR = path.join(app.getPath('userData'), 'krig-data', 'media');
 const INDEX_FILE = path.join(MEDIA_DIR, 'media-index.json');
 
+/**
+ * 注入到 media:// .html 响应中的主题 CSS + 高度回传 bridge
+ *
+ * - theme:AI artifact 常用 var(--color-*) 引用主题色,iframe 独立文档默认没这些
+ *   变量,直接渲染会丢色;在 head 顶部注 :root{ --... } 兜底。
+ * - bridge:iframe 与 parent 跨 origin,parent 读不到 contentDocument 测高;让
+ *   iframe 内部用 ResizeObserver 监听 body 高度,通过 parent.postMessage 回传。
+ *   tag 字段供 parent 过滤其他 message 来源。
+ */
+const HTML_BLOCK_THEME_BRIDGE = `<style>
+:root {
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #a3a3a3;
+  --color-text-tertiary: #737373;
+  --text-color-primary: #e8e8e8;
+  --text-color-secondary: #a3a3a3;
+  --text-color-tertiary: #737373;
+  --fg-color: #e8e8e8;
+  --color-bg-primary: #1e1e1e;
+  --color-bg-secondary: #2a2a2a;
+  --color-bg-tertiary: #3a3a3a;
+  --color-background-primary: #1e1e1e;
+  --color-background-secondary: #2a2a2a;
+  --color-background-tertiary: #3a3a3a;
+  --bg-color: #1e1e1e;
+  --color-border-primary: #5a5a5a;
+  --color-border-secondary: #4a4a4a;
+  --color-border-tertiary: #3a3a3a;
+  --color-text-info: #78c8f0;
+  --color-background-info: rgba(120, 200, 240, 0.12);
+  --color-border-info: rgba(120, 200, 240, 0.25);
+  --color-text-warning: #e8a820;
+  --color-background-warning: rgba(232, 168, 32, 0.12);
+  --color-border-warning: rgba(232, 168, 32, 0.25);
+  --color-text-success: #4ade80;
+  --color-background-success: rgba(74, 222, 128, 0.12);
+  --color-border-success: rgba(74, 222, 128, 0.25);
+  --color-text-danger: #f87171;
+  --color-background-danger: rgba(248, 113, 113, 0.12);
+  --color-border-danger: rgba(248, 113, 113, 0.25);
+  --border-radius-sm: 4px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  --border-radius-xl: 16px;
+}
+body {
+  background: var(--color-background-primary, #1e1e1e);
+  color: var(--color-text-primary, #e8e8e8);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+html, body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
+</style>`;
+
+const HTML_BLOCK_BRIDGE_SCRIPT = `<script>
+(function() {
+  // 一次定型策略(对齐 Claude artifact 哲学):AI artifact 几乎都是"画一次就稳定"
+  // 的展示型内容,不需要持续高度跟随。持续监听 + 回传会让 Chart.js / D3 等
+  // responsive lib 形成 "iframe 撑高 → 容器变 → lib 重排 → body 又涨" 的反馈
+  // 死循环。改为:load 事件后 STABLE_DELAY_MS 单次测量定型,之后不再报告。
+  //
+  // 用户后续如果需要调整高度,用 resize handle 拖拽(NodeView parent 端已支持)。
+  // 稳态收敛策略(应对 iframe 在折叠/不可见容器内、PM hydrate 时序错位等情况):
+  //   - 每 POLL_MS 测一次 body content-intrinsic height
+  //   - 连续 STABLE_HITS 次值不变(差 <2px)且 > 0 → 报告 + 停轮询
+  //   - 测到 0(body 没就绪 / iframe 被隐藏)不计稳定,继续轮询直到 MAX_WAIT_MS
+  //   - MAX_WAIT_MS 时:有非 0 历史值就报最后一次;一直 0 则停轮询,改挂
+  //     IntersectionObserver 等 iframe 变可见时重启,避免 toggle 折叠 / 懒加载场景
+  var POLL_MS = 100;
+  var STABLE_HITS = 3;
+  var MAX_WAIT_MS = 3000;
+  var lastH = -1;
+  var stableCount = 0;
+  var startedAt = 0;
+  var pollId = 0;
+  function measure() {
+    var body = document.body;
+    if (!body) return 0;
+    var prevH = body.style.height;
+    var prevO = body.style.overflow;
+    body.style.height = 'auto';
+    body.style.overflow = 'visible';
+    var h = body.getBoundingClientRect().height;
+    body.style.height = prevH;
+    body.style.overflow = prevO;
+    return h;
+  }
+  function postIfReady() {
+    if (lastH > 0 && window.parent && window.parent !== window) {
+      window.parent.postMessage({ tag: 'krig-html-resize', height: lastH }, '*');
+      return true;
+    }
+    return false;
+  }
+  function tick() {
+    var h = measure();
+    if (h > 0) {
+      if (Math.abs(h - lastH) < 2) {
+        stableCount++;
+      } else {
+        stableCount = 0;
+        lastH = h;
+      }
+    } else {
+      // 测到 0 — 不计稳定也不更新 lastH,继续等
+      stableCount = 0;
+    }
+    if (stableCount >= STABLE_HITS) {
+      postIfReady();
+      clearInterval(pollId);
+      pollId = 0;
+      return;
+    }
+    if (Date.now() - startedAt > MAX_WAIT_MS) {
+      // 兜底超时
+      if (postIfReady()) {
+        clearInterval(pollId);
+        pollId = 0;
+      } else {
+        // 一直 0:iframe 大概率被隐藏(toggle 折叠 / display:none),停轮询省 CPU,
+        // 等 IntersectionObserver 报告 iframe 可见时再 start。
+        clearInterval(pollId);
+        pollId = 0;
+        if (typeof IntersectionObserver !== 'undefined' && document.documentElement) {
+          var io = new IntersectionObserver(function(entries) {
+            for (var i = 0; i < entries.length; i++) {
+              if (entries[i].isIntersecting) {
+                io.disconnect();
+                start();
+                break;
+              }
+            }
+          });
+          io.observe(document.documentElement);
+        }
+      }
+    }
+  }
+  function start() {
+    if (pollId) return;
+    startedAt = Date.now();
+    lastH = -1;
+    stableCount = 0;
+    pollId = setInterval(tick, POLL_MS);
+  }
+  if (document.readyState === 'complete') {
+    start();
+  } else {
+    window.addEventListener('load', start);
+  }
+  // parent 可见性变化(toggle 展开 / 滚动进视口)时主动通知 iframe 重测
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.tag === 'krig-html-remeasure') start();
+  });
+})();
+</script>`;
+
+function injectHtmlBlockBridge(html: string): string {
+  let out = html;
+  if (out.includes('</head>')) {
+    out = out.replace('</head>', HTML_BLOCK_THEME_BRIDGE + '</head>');
+  } else if (out.includes('<body')) {
+    out = out.replace('<body', HTML_BLOCK_THEME_BRIDGE + '<body');
+  } else {
+    out = HTML_BLOCK_THEME_BRIDGE + out;
+  }
+  if (out.includes('</body>')) {
+    out = out.replace('</body>', HTML_BLOCK_BRIDGE_SCRIPT + '</body>');
+  } else {
+    out = out + HTML_BLOCK_BRIDGE_SCRIPT;
+  }
+  return out;
+}
+
 const SIZE_LIMITS: Record<string, number> = {
   audio: 50 * 1024 * 1024,
   video: 200 * 1024 * 1024,
@@ -181,9 +361,24 @@ class MediaStore {
    * 必须在 app.whenReady 之后、第一个 webview 创建之前调。
    */
   registerProtocol(): void {
-    const handler = (request: Request): Promise<Response> => {
+    const handler = async (request: Request): Promise<Response> => {
       const urlPath = request.url.replace('media://', '');
       const filePath = path.join(MEDIA_DIR, urlPath);
+      // .html 资源:在主进程注入 theme + bridge,让 NoteView htmlBlock 内嵌的 iframe
+      // 加载 media:// HTML 时获得跨 origin(脱离 parent CSP)的 inline script 执行能力
+      // + 高度自适应回传。详见 drivers/text-editing-driver/blocks/html-block/node-view.ts。
+      if (filePath.toLowerCase().endsWith('.html') || filePath.toLowerCase().endsWith('.htm')) {
+        try {
+          const html = await fs.promises.readFile(filePath, 'utf-8');
+          const injected = injectHtmlBlockBridge(html);
+          return new Response(injected, {
+            status: 200,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
+        } catch (err) {
+          return new Response(`Failed to load ${urlPath}: ${(err as Error).message}`, { status: 404 });
+        }
+      }
       return net.fetch(`file://${filePath}`);
     };
 
