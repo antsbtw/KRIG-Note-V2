@@ -29,17 +29,28 @@ function formatTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
+// 深度优先遍历 PM 节点取所有 text node 的 text — 兼容 callout/toggleList 等容器节点
+// (旧版只看一层 child,提取 AI 对话改用 ❓Callout/🔀Toggle 包装后,顶层 child 不是
+//  text node 而是 paragraph,会取不到任何文字,导致"AI 思考中"骨架永不消失)
+function collectText(node: Record<string, unknown>, out: string[]): void {
+  if (node.type === 'text' && typeof node.text === 'string') {
+    out.push(node.text);
+    return;
+  }
+  const children = node.content as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(children)) {
+    for (const c of children) collectText(c, out);
+  }
+}
+
 function extractTitle(t: ThoughtInfo): string {
   const root = t.doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
   if (!root?.content) return '';
   for (const block of root.content) {
-    const children = block.content as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(children)) continue;
-    for (const c of children) {
-      if (c.type === 'text' && typeof c.text === 'string' && c.text.trim()) {
-        return c.text.trim().slice(0, 60);
-      }
-    }
+    const parts: string[] = [];
+    collectText(block, parts);
+    const joined = parts.join('').trim();
+    if (joined) return joined.slice(0, 60);
   }
   return '';
 }
@@ -48,14 +59,12 @@ function extractFullText(t: ThoughtInfo): string {
   const root = t.doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
   if (!root?.content) return '';
   return root.content
-    .map((b) => {
-      const children = b.content as Array<Record<string, unknown>> | undefined;
-      if (!Array.isArray(children)) return '';
-      return children
-        .filter((c) => c.type === 'text')
-        .map((c) => (c.text as string) ?? '')
-        .join('');
+    .map((block) => {
+      const parts: string[] = [];
+      collectText(block, parts);
+      return parts.join('');
     })
+    .filter((s) => s.length > 0)
     .join('\n');
 }
 
