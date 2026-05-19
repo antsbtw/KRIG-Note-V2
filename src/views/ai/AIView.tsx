@@ -10,9 +10,10 @@
  * - AIToolbar UI + 命令路由(命令式 ref 调 host)
  */
 
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import type {
   AIConversationApi,
   AIHostHandle,
@@ -94,18 +95,54 @@ export function AIView({ workspaceId }: AIViewProps) {
   const handleReload = useCallback(() => hostRef.current?.reload(), []);
 
   /**
-   * "提取整页对话" — V1 batch extractor (chatgpt-content / claude-api / gemini-content,
-   * 共 ~1800 行) 本期不搬,占位 alert 提示。后续 sub-phase 接打通后改为真调用。
+   * 订阅跨槽消息 'ai.paste-and-send' — Note "🤖 问 AI" 触发 ask-ai.ts 发的:
+   * payload: { prompt: string, serviceId?: AIServiceId, emittedAt: number }
    *
-   * V1 流程参考: web-bridge browserCapabilityExtractFull → as:import-conversation
-   * ViewMessage → NoteView 逐 turn 插入。
+   * 收到 → 调 host.pasteAndSend(prompt, serviceId) → 自动 paste + send。
+   * Host 内部排队等 webview dom-ready,所以 ai.paste-and-send 早于 dom-ready 也可。
+   *
+   * mount 时 getLastValue 兜底取一次 last-known(模块级 push 必须配合 receiver init pull,
+   * memory feedback_module_push_pull_both):应对"用户首次启动 app 后第一次 ask-ai 时
+   * AIView 还没 mount 完 subscribe 错过 emit"边角。
+   *
+   * emittedAt 去重:lastHandledAtRef 跟踪最后处理的时间戳,避免 mount 时 getLastValue
+   * 拿到老消息重放(SlotArea 扁平列表让 AIView 一直在 mount,但 ws 切换 / hot reload
+   * 等场景仍可能重入)。
+   */
+  const lastHandledAtRef = useRef(0);
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const handle = (payload: unknown): void => {
+      const p = (payload ?? {}) as {
+        prompt?: string;
+        serviceId?: AIServiceId;
+        emittedAt?: number;
+      };
+      if (typeof p.prompt !== 'string' || !p.prompt) return;
+      const ts = typeof p.emittedAt === 'number' ? p.emittedAt : Date.now();
+      if (ts <= lastHandledAtRef.current) return; // 已处理过(去重)
+      lastHandledAtRef.current = ts;
+      void hostRef.current?.pasteAndSend(p.prompt, p.serviceId);
+    };
+    // 1. last-known pull(若 emit 已在 mount 前发生)
+    const last = bus.channels.getLastValue('ai.paste-and-send');
+    if (last) handle(last);
+    // 2. 后续 emit 走 subscribe
+    const unsub = bus.channels.subscribe('ai.paste-and-send', handle);
+    return () => unsub();
+  }, [workspaceId]);
+
+  /**
+   * "提取整页对话" — 走 ai-view.extract-conversation 命令(Phase 6.5 实施)。
+   *
+   * 本期简化:从 SSE 缓存取最新一次 AI 完整回复 → 创 type='ai-response' thought atom
+   * → 切右槽到 Thought View + activate 卡片。
+   *
+   * 后续 sub-phase 接 V1 重型 extractor 做完整 conversation 抓取。
    */
   const handleExtractFull = useCallback(() => {
-    window.alert(
-      '提取整页对话:此功能依赖 V1 重型 extractor (~1800 行) 迁移完成,\n' +
-      '本期 AI View 仅打通 askAI 端到端最小集,留待后续 sub-phase。\n\n' +
-      '当前可用:在 Note 中选中文字 → 右键 🤖 问 AI(端到端真 askAI 接通)。',
-    );
+    void commandRegistry.execute('ai-view.extract-conversation');
   }, []);
 
   const handleCloseRightSlot = useCallback(() => {

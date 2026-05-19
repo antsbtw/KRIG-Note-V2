@@ -85,6 +85,12 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
       } catch {
         /* ignore */
       }
+      // flush pending prompt(pasteAndSend 在 dom-ready 前调时排的队)
+      // 延迟 800ms 让 AI 网站脚本初始化完(否则输入框 selector 找不到)
+      const flush = flushPendingRef.current;
+      if (flush) {
+        setTimeout(() => flush(), 800);
+      }
     };
 
     wv.addEventListener('did-start-loading', handleStartLoading);
@@ -117,6 +123,23 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     }
   }, [serviceId]);
 
+  /**
+   * 待发送 prompt 缓存(pasteAndSend 在 webview dom-ready 前被调时排队)。
+   *
+   * 多次调以最后一次为准(覆盖,不排队);dom-ready 后立即 flush。
+   */
+  const pendingPromptRef = useRef<{ prompt: string; serviceId?: AIServiceId } | null>(null);
+
+  /** 内部:真正发送给 main 进程的 paste+send 调用 */
+  const sendNow = useCallback(async (prompt: string, targetService: AIServiceId) => {
+    const api = window.electronAPI;
+    if (!api?.aiPasteAndSend) {
+      console.warn('[ai Host] electronAPI.aiPasteAndSend not available');
+      return;
+    }
+    await api.aiPasteAndSend(targetService, prompt);
+  }, []);
+
   // imperative API
   useImperativeHandle(
     ref,
@@ -128,9 +151,39 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
       },
       reload: () => webviewRef.current?.reload(),
       getURL: () => webviewRef.current?.getURL() ?? '',
+      pasteAndSend: async (prompt: string, targetServiceId?: AIServiceId) => {
+        if (!prompt) return;
+        const finalService = targetServiceId ?? serviceId;
+        // webview 未 dom-ready,缓存等 dom-ready 后再发(防 main 拿空 webContents)
+        if (!domReadyRef.current) {
+          pendingPromptRef.current = { prompt, serviceId: finalService };
+          return;
+        }
+        // 若需切服务,先 loadURL(loadURL 后页面会重 ready,把 prompt 入 pending 等)
+        if (targetServiceId && targetServiceId !== serviceId) {
+          pendingPromptRef.current = { prompt, serviceId: finalService };
+          webviewRef.current?.loadURL(getAIServiceProfile(targetServiceId).newChatUrl);
+          domReadyRef.current = false; // loadURL 会触发新一轮 dom-ready
+          return;
+        }
+        await sendNow(prompt, finalService);
+      },
     }),
-    [],
+    [serviceId, sendNow],
   );
+
+  /**
+   * flush pending prompt:setupWebview.handleDomReady 内调本 ref 触发 paste+send。
+   *
+   * 用 ref 而非闭包让最新的 sendNow / serviceId 始终可访问(避免 stale closure)。
+   */
+  const flushPendingRef = useRef<(() => void) | null>(null);
+  flushPendingRef.current = () => {
+    const pending = pendingPromptRef.current;
+    if (!pending) return;
+    pendingPromptRef.current = null;
+    void sendNow(pending.prompt, pending.serviceId ?? serviceId);
+  };
 
   // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型
   const tagProps = {

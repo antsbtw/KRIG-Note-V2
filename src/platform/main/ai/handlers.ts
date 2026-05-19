@@ -10,7 +10,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
 import type { AIAskOptions, AIAskResult } from '@shared/ipc/ai-types';
-import { askAI, getSSEStatus } from './ask-orchestrator';
+import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse } from './ask-orchestrator';
 import { backgroundAI } from './background-webview';
 
 function isServiceId(v: unknown): v is AIServiceId {
@@ -52,4 +52,18 @@ export function registerAIHandlers(): void {
 
   // #4 ai.sse-status — debug
   ipcMain.handle(IPC_CHANNELS.AI_SSE_STATUS, async () => getSSEStatus());
+
+  // #5 ai.paste-and-send — 问 AI 路径:paste + send 不等回复(用户在 AI Web 实时看)
+  ipcMain.handle(IPC_CHANNELS.AI_PASTE_AND_SEND, async (_e, payload: unknown) => {
+    const p = payload as { serviceId?: unknown; prompt?: unknown } | null;
+    if (!p || !isServiceId(p.serviceId) || typeof p.prompt !== 'string' || !p.prompt) {
+      return { success: false, error: 'invalid pasteAndSend payload' };
+    }
+    return pasteAndSend(p.serviceId, p.prompt);
+  });
+
+  // #6 ai.get-latest-response — 提取按钮用:从 SSE 缓存取最新回复 markdown
+  ipcMain.handle(IPC_CHANNELS.AI_GET_LATEST_RESPONSE, async () => {
+    return getLatestCapturedResponse();
+  });
 }

@@ -84,3 +84,50 @@ export async function getSSEStatus(): Promise<AISSEStatus> {
   }
   return captureManager.getStatus();
 }
+
+/**
+ * pasteAndSend — 只 paste prompt + click send,不等 AI 回复。
+ *
+ * 用于"问 AI"主动让用户看到 AI Web 实时聊天体验:用户能在 AI 网页里看 AI
+ * 打字、追问、修改回复。askAI 的"等回复 + 一次性返 Markdown"路径在这场景不合适。
+ *
+ * SSE 拦截 manager 仍然 start,后台一直抓所有 AI 回复入 cache;
+ * 用户点"提取整页对话"时一次性从 cache 拿全部 turn(Phase 6.5 实现)。
+ */
+export async function pasteAndSend(
+  serviceId: AIServiceId,
+  prompt: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const webContents = await backgroundAI.ensureReady(serviceId);
+
+    if (!captureManager || captureManager.getWebContents() !== webContents) {
+      captureManager?.stop();
+      captureManager = new SSECaptureManager(webContents);
+      captureManager.start();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const pasted = await pasteTextToAI(webContents, serviceId, prompt);
+    if (!pasted) {
+      return { success: false, error: 'Failed to paste text into AI input box' };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await clickSendButton(webContents, serviceId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+/**
+ * 取 SSECaptureManager 抓到的最新一次完整 AI 回复 markdown。
+ *
+ * 用于"提取整页对话"(Phase 6.5)从 capture 缓存拿 AI 最后一段回复。
+ * 本期简化:只返最新一次;后续 sub-phase 可扩展为"取所有 turn"。
+ */
+export async function getLatestCapturedResponse(): Promise<string | null> {
+  if (!captureManager) return null;
+  return captureManager.getLatestResponse();
+}

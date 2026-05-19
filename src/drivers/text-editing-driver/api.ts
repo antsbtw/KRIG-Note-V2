@@ -12,6 +12,7 @@ import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
 import { DOMSerializer, Fragment } from 'prosemirror-model';
+import { sliceToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
@@ -1436,6 +1437,40 @@ export const textEditingDriverApi = {
    *
    * driver 不直接 import learning capability — 是 view 层协调。
    */
+  /**
+   * 取当前 selection 的 Markdown 序列化结果 + 图片清单。
+   *
+   * 用于"问 AI"等场景把选区无损发给 AI。
+   * 选区为空时返回 { markdown:'', images:[] }。
+   *
+   * V2 简化:只走 state.selection.content();V1 走 computeSliceForClipboard(含
+   * blockSelection plugin)— V2 选区机制不同,后续 V2 上 block-selection 时再适配。
+   */
+  getSelectionMarkdown(instanceId: string): SerializeResult {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return { markdown: '', images: [] };
+    const { state } = inst.view;
+    if (state.selection.empty) return { markdown: '', images: [] };
+    const slice = state.selection.content();
+    return sliceToMarkdown(slice);
+  },
+
+  /**
+   * 取当前 selection 的 PM doc JSON(原始结构,供 AI 看 attrs)。
+   *
+   * 返 Slice toJSON 结果(含 content/openStart/openEnd),AI 读到可
+   * 精确知道 callout/code lang/math latex/list 缩进等所有 attrs。
+   *
+   * 选区为空返 null。
+   */
+  getSelectionDocJSON(instanceId: string): unknown | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    if (state.selection.empty) return null;
+    return state.selection.content().toJSON();
+  },
+
   setVocabWords(entries: Array<{ word: string; definition: string }>): void {
     // 1. 更新模块级 vocabDefs(供 tooltip 显释义)
     updateVocabDefs(entries);

@@ -337,6 +337,13 @@ declare global {
         prompt: string,
         options?: AIAskOptions,
       ): Promise<AIAskResult>;
+      /** 只 paste prompt + click send,不等回复(用户在 AI Web 实时看聊天) */
+      aiPasteAndSend(
+        serviceId: AIServiceId,
+        prompt: string,
+      ): Promise<{ success: boolean; error?: string }>;
+      /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
+      aiGetLatestResponse(): Promise<string | null>;
       /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
       aiOpenSession(
         serviceId: AIServiceId,

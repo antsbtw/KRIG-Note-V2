@@ -41,6 +41,19 @@ export interface AIHostHandle {
   reload(): void;
   /** 取当前 URL */
   getURL(): string;
+  /**
+   * 把 prompt 粘贴到 AI 输入框并自动发送(走 main 进程 writer.ts pasteText + clickSend)。
+   *
+   * 用于 Note "🤖 问 AI" 把 selection markdown 自动送进 AI 对话框。
+   *
+   * 行为:
+   * - 如 webview 未 dom-ready,Host 内部缓存,dom-ready 后自动 paste+send;
+   *   多次调用以最后一次 prompt 为准。
+   * - serviceId 不传时用当前显示的 serviceId(props 传入);若传则先切服务再发。
+   *
+   * 返 Promise,resolve 时表示 paste+send 已派发(不等 AI 回复完成)。
+   */
+  pasteAndSend(prompt: string, serviceId?: AIServiceId): Promise<void>;
 }
 
 export interface AIHostProps {
@@ -65,6 +78,8 @@ export interface AIConversationApi {
   getServiceList(): Promise<AIServiceListItem[]>;
   /** debug:SSE 拦截状态 */
   getSSEStatus(): Promise<AISSEStatus>;
+  /** 取 SSE 缓存最新一次 AI 完整回复 markdown(供"提取整页对话"用) */
+  getLatestResponse(): Promise<string | null>;
   // ── 订阅 ──
   /** 订阅 AI 回复就绪(任意 askAI 完成时触发);返 unsubscribe */
   onResponseReady(callback: (payload: AIResponseReadyPayload) => void): () => void;

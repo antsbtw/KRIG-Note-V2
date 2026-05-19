@@ -61,6 +61,10 @@ async function getSSEStatus(): Promise<AISSEStatus> {
   return window.electronAPI.aiSSEStatus();
 }
 
+async function getLatestResponse(): Promise<string | null> {
+  return window.electronAPI.aiGetLatestResponse();
+}
+
 function onResponseReady(
   callback: (payload: AIResponseReadyPayload) => void,
 ): () => void {
@@ -76,6 +80,7 @@ export const aiConversationCapability: AIConversationApi = {
   openSession,
   getServiceList,
   getSSEStatus,
+  getLatestResponse,
   onResponseReady,
   onError,
   Host,
