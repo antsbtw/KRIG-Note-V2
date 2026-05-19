@@ -33,6 +33,8 @@ import { buildCodeSyntaxHighlightPlugin } from './plugins/build-code-syntax-high
 import { buildBlockSelectionPlugin } from './plugins/build-block-selection-plugin';
 import { buildBlockSelectionKeymap } from './plugins/build-block-selection-keymap';
 import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-selection-context-menu-plugin';
+import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
+import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 
 /**
  * 装配 EditorView
@@ -106,6 +108,9 @@ export function buildEditorView(
     ...(enableSlash ? [buildSlashPlugin(viewId)] : []),
     ...(enableBlockHandle ? [buildBlockHandlePlugin(viewId, instanceId)] : []),
     ...(enableDropCursor ? [dropCursor({ color: '#4a90e2', width: 2 })] : []),
+    // block 框定 + 视觉缩进装饰(读 node attrs 渲染,纯视觉,始终开)
+    buildBlockFramePlugin(),
+    buildBlockIndentPlugin(),
     buildListKeymap(schema),
     buildCodeBlockKeymap(schema),
     buildHardBreakKeymap(schema),

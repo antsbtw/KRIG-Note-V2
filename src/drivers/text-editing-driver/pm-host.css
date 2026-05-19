@@ -3925,3 +3925,68 @@
   0%   { background: rgba(74, 158, 255, 0.30); }
   100% { background: transparent; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+ * Block 框定(用户主动框定) — build-block-frame-plugin.ts decoration
+ *
+ * CSS 变量来自 inline style:
+ *   --krig-frame-color: 边框颜色
+ *   --krig-frame-style: 'solid' | 'double'
+ *
+ * 修饰类:
+ *   .krig-block-frame--only   单块四边
+ *   .krig-block-frame--first  多块首(上 + 左右)
+ *   .krig-block-frame--middle 多块中(只左右)
+ *   .krig-block-frame--last   多块尾(下 + 左右)
+ * ═══════════════════════════════════════════════════════════════ */
+
+.krig-block-frame {
+  border-left: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-right: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  padding-left: 6px;
+  padding-right: 6px;
+  position: relative;
+  transition: background 0.15s;
+}
+.krig-block-frame[style*="--krig-frame-style: double"] {
+  border-left-width: 3px;
+  border-right-width: 3px;
+}
+
+.krig-block-frame--only {
+  border-top: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-bottom: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-radius: 4px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+.krig-block-frame--only[style*="--krig-frame-style: double"] {
+  border-top-width: 3px;
+  border-bottom-width: 3px;
+}
+
+.krig-block-frame--first {
+  border-top: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-radius: 4px 4px 0 0;
+  margin-top: 2px;
+}
+.krig-block-frame--first[style*="--krig-frame-style: double"] {
+  border-top-width: 3px;
+}
+
+.krig-block-frame--middle {
+  border-radius: 0;
+}
+
+.krig-block-frame--last {
+  border-bottom: var(--krig-frame-style, solid) 1px var(--krig-frame-color, #337EA9);
+  border-radius: 0 0 4px 4px;
+  margin-bottom: 2px;
+}
+.krig-block-frame--last[style*="--krig-frame-style: double"] {
+  border-bottom-width: 3px;
+}
+
+.krig-block-frame:hover {
+  background: color-mix(in srgb, var(--krig-frame-color, #337EA9) 6%, transparent);
+}
