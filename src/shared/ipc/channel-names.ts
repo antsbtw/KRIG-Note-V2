@@ -158,6 +158,26 @@ export const IPC_CHANNELS = {
   PM_CONTENT_CREATE: 'pm-content.create',
   PM_CONTENT_GET: 'pm-content.get',
   PM_CONTENT_UPDATE: 'pm-content.update',
+
+  // ai-conversation capability(V1 web-bridge AI 自动化 → V2 抽 capability 层)
+  // 4 invoke + 3 push = 7 channel-names
+  AI_ASK: 'ai.ask',                                 // renderer → main:askAI(serviceId, prompt, opts?)
+  AI_PASTE_AND_SEND: 'ai.paste-and-send',           // renderer → main:只 paste + send 不等回复(Phase 6 问 AI 路径)
+  AI_GET_LATEST_RESPONSE: 'ai.get-latest-response', // renderer → main:取 SSE 缓存最新一次回复(提取按钮用)
+  AI_EXTRACT_FULL: 'ai.extract-full',               // renderer → main:整页对话提取(多 turn + artifact + 图片)
+  AI_OPEN_SESSION: 'ai.open-session',               // renderer → main:把后台 webview 转前台 (AI View Host 用,本期占位)
+  AI_SERVICE_LIST: 'ai.service-list',               // renderer → main:取三服务清单(可直接读 ai-service-types,留作扩展)
+  AI_SSE_STATUS: 'ai.sse-status',                   // renderer → main:debug 用
+  AI_RESPONSE_STREAM: 'ai.response-stream',         // main → renderer 推送流式增量(本期仅 Claude)
+  AI_RESPONSE_READY: 'ai.response-ready',           // main → renderer 推送完成
+  AI_ERROR: 'ai.error',                             // main → renderer 推送错误
+
+  // ai-sync feature(AI 回复 → 右槽 Note 末尾自动追加 ❓ Callout + 🔀 Toggle)
+  // renderer 侧 ai-sync-integration 在"左 ai-view + 右 note-view"槽组合下 start;
+  // main 端 ai-sync-orchestrator 轮询 SSECaptureManager 检测完成跃迁,emit turn。
+  AI_SYNC_START: 'ai-sync.start',                   // renderer → main:启动 ai-sync(serviceId)
+  AI_SYNC_STOP: 'ai-sync.stop',                     // renderer → main:停止 ai-sync(serviceId)
+  AI_SYNC_APPEND_TURN: 'ai-sync.append-turn',       // main → renderer 推送一个新完成的 turn
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

@@ -1,0 +1,174 @@
+/**
+ * AskAIPanel 样式(对齐 V1 AskAIPanel + V2 深色主题:#2a2a2a / #555 / 圆角 10)
+ */
+
+.krig-ask-ai-panel {
+  width: 320px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.krig-ask-ai-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.krig-ask-ai-panel__title {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.krig-ask-ai-panel__close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.krig-ask-ai-panel__close:hover {
+  color: #fca5a5;
+}
+
+/* Preview(选区) */
+.krig-ask-ai-panel__preview {
+  background: #1e1e1e;
+  border-radius: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid #6366f1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.krig-ask-ai-panel__preview-label {
+  color: #888;
+  font-size: 11px;
+}
+
+.krig-ask-ai-panel__preview-text {
+  color: #ccc;
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* Instruction textarea */
+.krig-ask-ai-panel__textarea {
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  line-height: 1.4;
+  box-sizing: border-box;
+  min-height: 48px;
+}
+
+.krig-ask-ai-panel__textarea:focus {
+  border-color: #6366f1;
+}
+
+/* Bottom bar */
+.krig-ask-ai-panel__bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.krig-ask-ai-panel__service-wrap {
+  position: relative;
+}
+
+.krig-ask-ai-panel__service-btn {
+  background: #333;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.krig-ask-ai-panel__service-btn:hover {
+  background: #3a3a3a;
+}
+
+.krig-ask-ai-panel__service-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 130px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.krig-ask-ai-panel__service-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: #e8eaed;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.krig-ask-ai-panel__service-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-ask-ai-panel__service-item--active {
+  background: #3a3a3a;
+  color: #7cb3f5;
+}
+
+.krig-ask-ai-panel__send {
+  background: #6366f1;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.krig-ask-ai-panel__send:hover:not(:disabled) {
+  background: #7c7ef5;
+}
+
+.krig-ask-ai-panel__send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

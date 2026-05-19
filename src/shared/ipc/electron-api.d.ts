@@ -16,6 +16,16 @@ import type {
 } from './note-folder-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
+import type {
+  AIAskOptions,
+  AIAskResult,
+  AIResponseReadyPayload,
+  AIErrorPayload,
+  AIStreamChunk,
+  AISSEStatus,
+  AISyncAppendTurnPayload,
+} from './ai-types';
+import type { AIServiceId } from '../types/ai-service-types';
 
 declare global {
   interface Window {
@@ -319,6 +329,54 @@ declare global {
       pmContentCreate(doc: PmDocEnvelope): Promise<PmAtomInfo>;
       pmContentGet(id: string): Promise<PmAtomInfo | null>;
       pmContentUpdate(id: string, doc: PmDocEnvelope): Promise<PmAtomInfo>;
+
+      // ── ai-conversation capability (V1 web-bridge AI 自动化 → V2 抽 capability) ──
+      // 4 invoke + 3 broadcast 订阅 = 7 表面
+      /** 给 AI 服务发 prompt 等完整 Markdown 回复;5 分钟无请求后台 webview 自动销毁 */
+      aiAsk(
+        serviceId: AIServiceId,
+        prompt: string,
+        options?: AIAskOptions,
+      ): Promise<AIAskResult>;
+      /** 只 paste prompt + click send,不等回复(用户在 AI Web 实时看聊天) */
+      aiPasteAndSend(
+        serviceId: AIServiceId,
+        prompt: string,
+      ): Promise<{ success: boolean; error?: string }>;
+      /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
+      aiGetLatestResponse(): Promise<string | null>;
+      /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)*/
+      aiExtractFull(serviceId: AIServiceId): Promise<{
+        success: boolean;
+        markdown?: string;
+        title?: string;
+        model?: string;
+        turnCount?: number;
+        artifactCount?: number;
+        error?: string;
+      }>;
+      /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
+      aiOpenSession(
+        serviceId: AIServiceId,
+      ): Promise<{ success: boolean; status?: string; serviceId?: AIServiceId | null; url?: string | null; error?: string }>;
+      /** 取三服务清单(UI 下拉菜单用) */
+      aiServiceList(): Promise<Array<{ id: AIServiceId; name: string; icon: string }>>;
+      /** debug:SSE 拦截状态 */
+      aiSSEStatus(): Promise<AISSEStatus>;
+      /** main → renderer 推送:Claude 流式增量(本期仅 Claude);返 unsubscribe */
+      onAIResponseStream(callback: (chunk: AIStreamChunk) => void): () => void;
+      /** main → renderer 推送:AI 完整回复就绪;返 unsubscribe */
+      onAIResponseReady(callback: (payload: AIResponseReadyPayload) => void): () => void;
+      /** main → renderer 推送:AI 调用失败;返 unsubscribe */
+      onAIError(callback: (payload: AIErrorPayload) => void): () => void;
+
+      // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
+      /** 启动 ai-sync:让 main 端 orchestrator 开始轮询 SSE,turn 完成时 emit AI_SYNC_APPEND_TURN */
+      aiSyncStart(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+      /** 停止 ai-sync */
+      aiSyncStop(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+      /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
+      onAISyncAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
     };
   }
 }

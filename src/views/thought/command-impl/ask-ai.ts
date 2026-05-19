@@ -1,24 +1,39 @@
 /**
- * thought-view.ask-ai-from-note 业务实现(Phase 5 拆分 + Phase 4 mock)
+ * thought-view.ask-ai-from-note 业务实现(Phase 9 加 V1 同款选区 mark + anchor)
  *
- * AI response 状态机(thought-view-port.md v0.5 §6):
- *   1. preCreatePlaceholder type='ai-response' + serviceId
- *   2. addThoughtMark + updateThoughtAnchor(若有选区)
- *   3. 开右槽 + emit activate
- *   4. mock async 2s → updateThought 填 reply doc + emit 'thought.ai-ready'
+ * 流程:
+ *   1. 抓 Note 选区 markdown(text-editing.api.getSelectionMarkdown)
+ *   2. preCreatePlaceholder type='ai-response' + serviceId → 拿空 thought atom id
+ *   3. addThoughtMark(instanceId, thoughtId, 'ai-response') → 选区紫色下划线
+ *      ⚠️ 这步必须在 selection 还在的时候调(右键命令触发时选区仍存活,
+ *         弹 popup 后 focus 转移 selection 丢)
+ *   4. updateThoughtAnchor(thoughtId, {source:'note', resourceId:noteId,
+ *      locator:{pmPos, anchorType:'inline', text}})
+ *      → atom 与 Note 选区双向关联(Thought tab 卡片点击 → Note 跳转,
+ *         Note mark 点击 → Thought tab 滚到卡片)
+ *   5. 执行 commandRegistry.execute('note-view.open-ask-ai-popup', {
+ *      selectionMarkdown, defaultServiceId, anchorX, anchorY, thoughtId, instanceId
+ *      })
+ *   6. 用户在 panel 内编辑 instruction → 点发送
+ *   7. panel handleSend:emit ai.paste-and-send + setPendingAIThoughtId(serviceId, thoughtId)
+ *      → AIView host.pasteAndSend 自动塞 AI
+ *   8. 用户在 AI Web 看 AI 回复、追问
+ *   9. 用户点 toolbar "提取整页对话" → ai-view.extract-conversation 读 pending thoughtId
+ *      → 有 → thoughtUpdate(thoughtId, { doc })(不重复创 atom)
+ *      → 无 → createThought 新建独立 (未来场景 B 走这路径)
  *
- * 真接入(后续 sub-phase):serviceId 路由到 webview 抓取 / API 调用。
+ * cancel 路径:用户在 panel 点 × / Esc / 点击外部 → onClose 调命令
+ *   'note-view.cancel-ask-ai',传 thoughtId + instanceId → 反向清空 atom + mark。
+ *   空 atom + 无人引用 mark = 数据垃圾,主动清除。
  */
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import type { ThoughtAnchor } from '@capabilities/thought/types';
-import type { NoteDocEnvelope } from '@shared/ipc/note-folder-types';
-import { thoughtCap, preCreatePlaceholder } from './shared';
-
-const MOCK_DELAY_MS = 2000;
+import type { ThoughtAnchor, ThoughtCapabilityApi } from '@capabilities/thought/types';
+import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
 
 export async function askAiFromNote(): Promise<void> {
   const wsId = workspaceManager.getActiveId();
@@ -27,66 +42,77 @@ export async function askAiFromNote(): Promise<void> {
   if (!ws) return;
   const noteState = ws.pluginStates['note'] as { activeNoteId?: string } | undefined;
   const noteId = noteState?.activeNoteId;
-  if (!noteId) return;
+  if (!noteId) {
+    console.warn('[ask-ai] no active note');
+    return;
+  }
 
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-  // 优先用 context menu 抓拍(右键场景);否则当前 focused(floating/keymap 场景)
+  const cmState = contextMenuController.getState();
   const instanceId =
-    contextMenuController.getState().context.pmInstanceId ??
-    textEditing.instanceRegistry.getFocusedInstanceId();
-  if (!instanceId) return;
+    cmState.context.pmInstanceId ?? textEditing.instanceRegistry.getFocusedInstanceId();
+  if (!instanceId) {
+    console.warn('[ask-ai] no active PM instance');
+    return;
+  }
 
-  const thoughtId = await preCreatePlaceholder('ai-response', 'chatgpt');
-  if (!thoughtId) return;
+  // 1. 抓选区 markdown
+  const { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
+  if (!markdown) {
+    // 无选区 — 直接开 AI Web 让用户手动跟 AI 对话(不弹 panel,空 prompt 没意义)
+    const bus = workspaceManager.getBus(wsId);
+    bus?.slot.openRight('ai-view');
+    return;
+  }
 
-  // 尝试 inline anchor;失败(无选区)则保持 unanchored
-  const inlineResult = textEditing.api.addThoughtMark(
+  // 2. 取活跃 AI 服务
+  const aiState = ws.pluginStates['ai'] as { currentServiceId?: AIServiceId } | undefined;
+  const defaultServiceId: AIServiceId = aiState?.currentServiceId ?? DEFAULT_AI_SERVICE;
+
+  // 3. 创空 thought atom 拿 id(用户取消时 cancel 命令会反向 delete)
+  const thoughtCap = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+  const placeholder = await thoughtCap.createThought({
+    type: 'ai-response',
+    resolved: false,
+    pinned: false,
+    serviceId: defaultServiceId,
+    doc: {
+      format: 'pm-doc-json',
+      version: '0.1',
+      payload: { type: 'doc', content: [{ type: 'paragraph' }] },
+    },
+    folderId: null,
+    anchor: null,
+  });
+  const thoughtId = placeholder.id;
+
+  // 4. addThoughtMark 选区(必须在 selection 还在时调)
+  const markResult = textEditing.api.addThoughtMark(
     instanceId,
     thoughtId,
     'ai-response',
   );
-  if (inlineResult) {
+  if (markResult) {
+    // 5. 写 anchor 边(source=note,locator=inline pos+text)
     const anchor: ThoughtAnchor = {
       source: 'note',
       resourceId: noteId,
       locator: {
-        pmPos: inlineResult.pos,
+        pmPos: markResult.pos,
         anchorType: 'inline',
-        text: inlineResult.text,
+        text: markResult.text,
       },
     };
-    await thoughtCap().updateThoughtAnchor(thoughtId, anchor);
+    await thoughtCap.updateThoughtAnchor(thoughtId, anchor);
   }
 
-  const bus = workspaceManager.getBus(wsId);
-  if (bus) {
-    bus.slot.openRight('thought-view');
-    bus.channels.emit('thought.activate', { thoughtId });
-  }
-
-  // mock async:延后填充 AI 回复 doc
-  window.setTimeout(() => {
-    void fillMockReply(thoughtId, inlineResult?.text ?? '(无选区)').then(() => {
-      bus?.channels.emit('thought.ai-ready', { thoughtId });
-    });
-  }, MOCK_DELAY_MS);
-}
-
-async function fillMockReply(thoughtId: string, promptText: string): Promise<void> {
-  const replyText =
-    `[AI mock 回复] 关于「${promptText}」:\n\n` +
-    `这是一个占位 AI 回复,真接入时会替换为 ChatGPT/Claude/Gemini 实际响应。\n\n` +
-    `— 设计依据: thought-view-port.md v0.5 §6 + Phase 4 AI 状态机。`;
-  const replyDoc: NoteDocEnvelope = {
-    format: 'pm-doc-json',
-    version: '0.1',
-    payload: {
-      type: 'doc',
-      content: replyText.split('\n').map((line) => ({
-        type: 'paragraph',
-        content: line ? [{ type: 'text', text: line }] : undefined,
-      })),
-    },
-  };
-  await thoughtCap().updateThought(thoughtId, { doc: replyDoc });
+  // 6. 弹 panel(panel handleSend 时把 thoughtId 塞进 ai-conversation pending)
+  commandRegistry.execute('note-view.open-ask-ai-popup', {
+    selectionMarkdown: markdown,
+    defaultServiceId,
+    anchorX: cmState.x,
+    anchorY: cmState.y,
+    thoughtId,
+    instanceId,
+  });
 }

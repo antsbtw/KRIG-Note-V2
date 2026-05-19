@@ -465,4 +465,57 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pmContentUpdate(id: string, doc: unknown): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_UPDATE, id, doc);
   },
+
+  // ── ai-conversation capability(V1 web-bridge AI 自动化 → V2 抽 capability)──
+  // 4 invoke + 3 broadcast 订阅 = 7 表面
+  aiAsk(serviceId: string, prompt: string, options?: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options });
+  },
+  aiPasteAndSend(serviceId: string, prompt: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt });
+  },
+  aiGetLatestResponse(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE);
+  },
+  aiExtractFull(serviceId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, serviceId);
+  },
+  aiOpenSession(serviceId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, serviceId);
+  },
+  aiServiceList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SERVICE_LIST);
+  },
+  aiSSEStatus(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SSE_STATUS);
+  },
+  onAIResponseStream(callback: (chunk: unknown) => void): () => void {
+    const handler = (_event: unknown, chunk: unknown): void => callback(chunk);
+    ipcRenderer.on(IPC_CHANNELS.AI_RESPONSE_STREAM, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_RESPONSE_STREAM, handler);
+  },
+  onAIResponseReady(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.AI_RESPONSE_READY, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_RESPONSE_READY, handler);
+  },
+  onAIError(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.AI_ERROR, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_ERROR, handler);
+  },
+
+  // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
+  aiSyncStart(serviceId: string): Promise<{ success: boolean; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_START, serviceId);
+  },
+  aiSyncStop(serviceId: string): Promise<{ success: boolean; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_STOP, serviceId);
+  },
+  /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
+  onAISyncAppendTurn(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
+  },
 });

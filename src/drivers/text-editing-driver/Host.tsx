@@ -49,7 +49,7 @@ import {
   tableHeaderSpec,
 } from './blocks/table';
 import { columnListSpec, columnSpec } from './blocks/column-list';
-import type { TextEditingHostProps, BlockSpec } from './types';
+import type { TextEditingHostProps, BlockSpec, DriverSerialized } from './types';
 
 // L5-B3.2:全部启用的 block 列表(paragraph + heading + 6 新类 + 2 项 list-item/task-item)
 // L5-B3.3:+ hardBreak(inline)
@@ -103,6 +103,22 @@ export function Host(props: TextEditingHostProps) {
   // onChange 用 ref 避免每次渲染重建 EditorView
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  // 记录本 Host 最后一次 emit 出去的 doc JSON 字符串 — 用于识别"广播回来的是我们自己刚 emit
+  // 的那个 doc",此时跳过 useEffect 的 replaceWith 避免:
+  //   1. 用户输入产生 tr → dispatchTransaction → onChange → updateNote → DB → broadcast →
+  //      useAllNotes setState → NoteView 重渲 → 新 doc prop → useEffect 触发 deserialize+eq;
+  //   2. eq 比较若任何细微差异(默认 attrs 序列化丢失 / 派生 title 顺带改动等)失败,
+  //      tr.replaceWith(0, ..., newDoc.content) 会替换 doc,selection 被 PM mapping 推到
+  //      末尾或前面 → 视觉上光标"跳"。
+  // 改成"指纹比较":emit 时记下 JSON;收到 prop 变化时,先看 JSON 是否字面等于上次 emit
+  // 的,若是 → 这是 echo-back,跳过(用户实际 PM state 已是最新)。
+  const lastEmittedJsonRef = useRef<string | null>(null);
+
+  // IME 输入(composing)期间 pending 的外部 doc 更新 — composition end 后再 flush。
+  // PM 原则:view.composing=true 时不能 dispatch 任何 tr,否则会破坏 IME 预编辑状态,
+  // 中文/日文/韩文等输入法会出现拼音被截断 / 光标跳的现象。
+  // 解决:composing 时不立即 replaceWith,把目标 doc 暂存,等 compositionend 后再处理。
+  const pendingExternalDocRef = useRef<DriverSerialized | null>(null);
 
   // 初始化 EditorView(每个 instanceId 一个)
   useEffect(() => {
@@ -125,6 +141,8 @@ export function Host(props: TextEditingHostProps) {
         // doc 变化:封装回 DriverSerialized,触发 onChange
         if (tr.docChanged) {
           const serialized = serializeDoc(v.state.doc);
+          // 记下指纹 — 用于识别 useEffect 收到的是 echo-back(避免重复 dispatch replaceWith)
+          lastEmittedJsonRef.current = JSON.stringify(serialized.payload);
           onChangeRef.current?.(serialized);
         }
         // selection 变化:emit 到 selection capability(带实例 source)
@@ -144,6 +162,18 @@ export function Host(props: TextEditingHostProps) {
       workspaceId: config.instanceId, // L5-A:instanceId == workspaceId
     });
 
+    // IME 拼音结束后 flush pending 外部 doc 更新(若 composing 期间错过过 prop 变化)。
+    // PM 内部还有 ~150ms 的 cooldown 把 IME 残留状态收尾,等 RAF 后再 apply 才稳妥。
+    const onCompositionEnd = () => {
+      requestAnimationFrame(() => {
+        const pending = pendingExternalDocRef.current;
+        if (!pending) return;
+        pendingExternalDocRef.current = null;
+        applyExternalDoc(pending);
+      });
+    };
+    view.dom.addEventListener('compositionend', onCompositionEnd);
+
     // 实例级 capability 注册
     const unregisterSource = registerSelectionSource(config.instanceId);
     const unregisterUndo = registerUndoScope(config.undoScope);
@@ -153,6 +183,7 @@ export function Host(props: TextEditingHostProps) {
     const unregisterFt = setupFloatingToolbarTrigger(view, config.viewId, config.instanceId);
 
     return () => {
+      view.dom.removeEventListener('compositionend', onCompositionEnd);
       unregisterSource();
       unregisterUndo();
       unregisterDnd();
@@ -165,18 +196,44 @@ export function Host(props: TextEditingHostProps) {
     // 依赖 instanceId / undoScope —— 实例 ID 变化时必须重建(doc 在另一个 useEffect 处理)
   }, [config.instanceId, config.undoScope, config.viewId]);
 
-  // 外部 doc 变化(view 切笔记)→ 替换 PM doc
-  useEffect(() => {
+  /**
+   * 把外部 doc(prop)同步到 PM view —— 走 replaceWith 或快路径跳过。
+   *
+   * 调用点:
+   * 1. useEffect [doc] —— prop.doc 变化时(若 composing 则推迟到 compositionend)
+   * 2. compositionend 监听器 —— 拼音完成后,flush pendingExternalDocRef
+   *
+   * 返 true 表示已处理 / 跳过;返 false 表示 composing 中已 stash 到 pending(本调用不动)。
+   */
+  const applyExternalDoc = (nextDoc: DriverSerialized): boolean => {
     const view = viewRef.current;
-    if (!view) return;
+    if (!view) return true;
+    // IME composing 期间不动 PM doc —— 拼音被打断、光标跳的根源
+    if (view.composing) {
+      pendingExternalDocRef.current = nextDoc;
+      return false;
+    }
+    // 1. echo-back 快路径:对比 prop.doc 的 JSON 字符串与 Host 上一次 emit 的指纹,
+    //    一致说明这次 prop 变化就是用户输入引发的"DB roundtrip 回来",PM state 已是
+    //    最新,不需要 replaceWith(否则会触发 selection jump = 光标跳)。
+    const incomingJson = JSON.stringify(nextDoc.payload);
+    if (incomingJson === lastEmittedJsonRef.current) return true;
+    // 2. 真外部更新(切笔记 / 别处更新同 note doc)→ deserialize 并比 + replaceWith
     const schema = view.state.schema;
-    const newDoc = deserializeDoc(doc, schema);
-    if (!newDoc) return;
-    // 比较当前 doc 跟新 doc,不同才替换(避免循环)
-    if (view.state.doc.eq(newDoc)) return;
+    const newDoc = deserializeDoc(nextDoc, schema);
+    if (!newDoc) return true;
+    if (view.state.doc.eq(newDoc)) return true;
     const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
     tr.setMeta('addToHistory', false); // 切笔记不记入 history
     view.dispatch(tr);
+    return true;
+  };
+
+  // 外部 doc 变化(view 切笔记 / DB broadcast 回来)→ 试图同步到 PM
+  // applyExternalDoc 是渲染期闭包但只读 ref,deps 不带它是安全的(V2 eslint config 没
+  // 装 react-hooks/exhaustive-deps 规则,无需 disable 注释)。
+  useEffect(() => {
+    applyExternalDoc(doc);
   }, [doc]);
 
   return (
