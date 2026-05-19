@@ -54,11 +54,18 @@ function tea(): TextEditingApi['api'] {
   return requireCapabilityApi<TextEditingApi>('text-editing').api;
 }
 
-/** 确保 slotBinding.left = 'note-view' */
+/**
+ * 确保当前 workspace 至少有一槽是 'note-view'。
+ *
+ * 行为:
+ * - 左 / 右 任一已是 'note-view' → 不动(典型场景:ai-sync 组合 [ai-view, note-view]
+ *   下点 toolbar + 新建,不应该踢掉左槽 AI)
+ * - 两槽都不是 'note-view' → 把 left 设成 'note-view'(让 NoteView 显示新 note)
+ */
 function ensureNoteViewActive(wsId: string): void {
   const ws = workspaceManager.get(wsId);
   if (!ws) return;
-  if (ws.slotBinding.left === 'note-view') return;
+  if (ws.slotBinding.left === 'note-view' || ws.slotBinding.right === 'note-view') return;
   workspaceManager.update(wsId, {
     slotBinding: { ...ws.slotBinding, left: 'note-view' },
   });
