@@ -466,7 +466,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.PM_CONTENT_UPDATE, id, doc);
   },
 
-  // ── ai-conversation capability(V1 web-bridge AI 自动化 → V2 抽 capability)──
+  // ── ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)──
   // 4 invoke + 3 broadcast 订阅 = 7 表面
   aiAsk(serviceId: string, prompt: string, options?: unknown): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options });

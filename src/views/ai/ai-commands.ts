@@ -11,7 +11,7 @@
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { AIConversationApi } from '@capabilities/ai-conversation/types';
+import type { AIConversationApi } from '@capabilities/ai-extraction/types';
 import type { ThoughtCapabilityApi } from '@capabilities/thought/types';
 import { aiMarkdownToNoteDoc, wrapAITurnsInToggle } from '@shared/ai-markdown-parser';
 import { setAIServiceId, getAIWsState } from './data-model';
@@ -77,7 +77,7 @@ export function registerAICommands(): void {
     //  提取命令也应走同款 fallback,而不是弹"AI 服务未指定")
     const serviceId = getAIWsState(ws).currentServiceId;
 
-    const ai = requireCapabilityApi<AIConversationApi>('ai-conversation');
+    const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
 
     // Phase 10.B 主路径:整页对话提取(Claude:多 turn + artifact 真 API;
     // ChatGPT/Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn)
@@ -191,9 +191,9 @@ export function registerAICommands(): void {
    *   commandRegistry.execute('ai-view.ask', { prompt: '...', serviceId: 'chatgpt' })
    */
   commandRegistry.register('ai-view.ask', async (arg: unknown) => {
-    const ai = getCapabilityApi<AIConversationApi>('ai-conversation');
+    const ai = getCapabilityApi<AIConversationApi>('ai-extraction');
     if (!ai) {
-      console.warn('[ai-view.ask] ai-conversation capability not registered');
+      console.warn('[ai-view.ask] ai-extraction capability not registered');
       return;
     }
     const wsId = workspaceManager.getActiveId();

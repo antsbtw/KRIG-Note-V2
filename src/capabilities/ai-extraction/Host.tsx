@@ -1,5 +1,5 @@
 /**
- * ai-conversation Host — 嵌 claude.ai / chatgpt.com / gemini.google.com 的 webview
+ * ai-extraction Host — 嵌 claude.ai / chatgpt.com / gemini.google.com 的 webview
  *
  * 与 web-rendering Host 思路一致(把 webview 编排封装到 capability,view 用 props/callbacks/ref 协作),
  * 但简化:不做翻译 / sync driver / 远端导航回环防御 — AI 网站是单方向只读浏览。

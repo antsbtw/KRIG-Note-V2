@@ -46,7 +46,7 @@ import '@capabilities/math-rendering';      // math-visual Phase 1A 新增(Mafs 
 import '@capabilities/note';                // L7-sub2 新增(note CRUD via IPC bridge,decision 012)
 import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IPC bridge,decision 012)
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)
-import '@capabilities/ai-conversation';     // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability
+import '@capabilities/ai-extraction';       // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability(原 ai-conversation,2026-05-19 改名)
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register

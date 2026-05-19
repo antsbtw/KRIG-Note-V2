@@ -39,5 +39,5 @@ export function initIpcBus(): void {
   registerNoteHandlers();           // L7-sub2:note capability (decision 012,SurrealDB)
   registerPmContentHandlers();      // L7-sub3a-1:pm-content capability (decision 014,view-agnostic pm atom)
   registerThoughtHandlers();        // 横切思考层(thought-view-port.md v0.5)
-  registerAIHandlers();             // ai-conversation capability(V1 web-bridge AI 自动化 → V2 抽 capability)
+  registerAIHandlers();             // ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)
 }

@@ -16,7 +16,7 @@
  */
 
 import { ResultParser, extractedBlocksToPmDoc } from '@shared/ai-markdown-parser';
-import type { AISyncTurn, AIServiceId } from '@capabilities/ai-conversation/types';
+import type { AISyncTurn, AIServiceId } from '@capabilities/ai-extraction/types';
 import { getAIServiceProfile } from '@shared/types/ai-service-types';
 
 /** PM JSON 节点字面量(driver 层的 PMDocNode 同形态,本地复制避免跨边界 import) */

@@ -106,7 +106,7 @@ export async function askAiFromNote(): Promise<void> {
     await thoughtCap.updateThoughtAnchor(thoughtId, anchor);
   }
 
-  // 6. 弹 panel(panel handleSend 时把 thoughtId 塞进 ai-conversation pending)
+  // 6. 弹 panel(panel handleSend 时把 thoughtId 塞进 ai-extraction pending)
   commandRegistry.execute('note-view.open-ask-ai-popup', {
     selectionMarkdown: markdown,
     defaultServiceId,

@@ -1,5 +1,5 @@
 /**
- * ai-conversation capability — IPC 边界类型
+ * ai-extraction capability — IPC 边界类型(原 ai-conversation,2026-05-19 改名)
  *
  * Renderer 与 main 之间传递的 askAI 入参 / 结果 / 流式增量。
  * AIServiceId / AIServiceProfile 等服务配置仍在 shared/types/ai-service-types.ts。
@@ -46,7 +46,13 @@ export interface AIErrorPayload {
   error: string;
 }
 
-/** 跨槽 ViewMessage 协议(供 Note ↔ AI / Note ↔ Thought 等使用) */
+/**
+ * 跨槽 ViewMessage 协议(供 Note ↔ AI / Note ↔ Thought 等使用)
+ *
+ * **字面量保留**:值仍为 'ai-conversation' 是历史协议名(2026-05-19 capability 改名为
+ * ai-extraction 时未跟改),用于跨进程 ViewMessage 协议头识别,保留以确保零数据迁移。
+ * 同理 SurrealDB atom 的 extractionType:'ai-conversation' 字面量也不动。
+ */
 export const AI_PROTOCOL = 'ai-conversation';
 export const AI_ACTION = {
   ASK: 'ask',

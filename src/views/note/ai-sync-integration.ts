@@ -28,7 +28,7 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import type {
   AIConversationApi,
   AISyncAppendTurnPayload,
-} from '@capabilities/ai-conversation/types';
+} from '@capabilities/ai-extraction/types';
 import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
 
 /**
@@ -69,7 +69,7 @@ function matchesAISyncCombo(ws: WorkspaceState): boolean {
  * 处理一次 active workspace 状态变更 — 决定 start / stop / 切 service。
  */
 function reconcileForActive(): void {
-  const aiCap = requireCapabilityApi<AIConversationApi>('ai-conversation');
+  const aiCap = requireCapabilityApi<AIConversationApi>('ai-extraction');
   const activeId = workspaceManager.getActiveId();
   if (!activeId) {
     void stopActive(aiCap);
@@ -149,7 +149,7 @@ export function registerAISyncIntegration(): void {
 
   // 订阅 main 端推送(全局只挂一次)
   if (!appendTurnUnsub) {
-    const aiCap = requireCapabilityApi<AIConversationApi>('ai-conversation');
+    const aiCap = requireCapabilityApi<AIConversationApi>('ai-extraction');
     appendTurnUnsub = aiCap.onAppendTurn(handleAppendTurn);
   }
 

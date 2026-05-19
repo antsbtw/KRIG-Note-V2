@@ -1,5 +1,5 @@
 /**
- * ai-conversation IPC handlers(对齐 thought/handlers.ts 同模式)
+ * ai-extraction IPC handlers(对齐 thought/handlers.ts 同模式)
  *
  * 注册入口:src/platform/main/ipc/ipc-bus.ts initIpcBus()
  *

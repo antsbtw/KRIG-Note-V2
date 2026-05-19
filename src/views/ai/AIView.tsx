@@ -2,7 +2,7 @@
  * AIView — AI 主舞台视图(NavSide tab 🤖 AI)
  *
  * 职责(charter § 1.4):仅做"组合 + 状态订阅 + 命令注册"。webview tag 生命周期 +
- * 服务切换 + URL 同步等编排全部封装在 ai-conversation capability 的 <Host /> 组件内。
+ * 服务切换 + URL 同步等编排全部封装在 ai-extraction capability 的 <Host /> 组件内。
  *
  * View 持有:
  * - per-ws state 订阅(currentServiceId)
@@ -17,7 +17,7 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import type {
   AIConversationApi,
   AIHostHandle,
-} from '@capabilities/ai-conversation/types';
+} from '@capabilities/ai-extraction/types';
 import {
   getAIServiceProfile,
   type AIServiceId,
@@ -35,7 +35,7 @@ interface AIViewProps {
 export function AIView({ workspaceId }: AIViewProps) {
   // 间接路由拿 Host 组件(useMemo 缓存避免每次渲染重 require + 保持 React identity)
   const Host = useMemo(
-    () => requireCapabilityApi<AIConversationApi>('ai-conversation').Host,
+    () => requireCapabilityApi<AIConversationApi>('ai-extraction').Host,
     [],
   );
   const hostRef = useRef<AIHostHandle | null>(null);

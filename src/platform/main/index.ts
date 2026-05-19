@@ -111,7 +111,7 @@ app.whenReady().then(async () => {
 
   // L5-C6:webview attach hook(PDF 提取 download 拦截)— 必须在 mainWindow 创建后挂
   registerWebviewExtractionHook(mainWindow);
-  // ai-conversation:webview attach hook(AI Host webview did-navigate 到 AI URL 时
+  // ai-extraction:webview attach hook(AI Host webview did-navigate 到 AI URL 时
   // 注册到 ai-webview-registry,askAI / pasteAndSend 走前台 webContents 而非后台)
   registerAIWebviewHook(mainWindow);
 });

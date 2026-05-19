@@ -1,12 +1,15 @@
-# ai-conversation capability
+# ai-extraction capability
 
-**Status**: v0.1 (Phase 2 of feature/ai-view)
+**Status**: v0.2 (改名自 ai-conversation,2026-05-19)
 **Owner**: assistant + wenwu
 **Created**: 2026-05-18
+**Renamed**: 2026-05-19(ai-conversation → ai-extraction,对齐目录命名"装的什么"原则)
 
 ## 定位
 
-横切 capability：任何 view (note / ai-view / thought / future) 都能 install 'ai-conversation' 获得相同的"问 AI"能力。与 thought capability 同性质（charter §1.4 line 196）。
+横切 capability：任何 view (note / ai-view / thought / future) 都能 install 'ai-extraction' 获得相同的"问 AI / 抓取整页对话"能力。与 thought capability 同性质（charter §1.4 line 196）。
+
+**职责边界**:本 capability 只负责"抓取",**不负责落库** — 抓取结果由调用方决定写入哪个 thought(参见 src/views/ai/ai-commands.ts 的 extract-conversation)。
 
 ## 实现路径
 
@@ -15,7 +18,7 @@
 ```
 ┌─────────────────────────────────────────────┐
 │ view (AI View / Note / Thought / ...)       │
-│   install: ['ai-conversation', ...]         │
+│   install: ['ai-extraction', ...]         │
 │   const ai = requireCapabilityApi<...>(...) │
 │   ai.askAI('claude', '总结一下') ─────────┐ │
 │                                            │ │
@@ -24,7 +27,7 @@
               │ this file                    │
               ▼                              │
 ┌─────────────────────────────────────────────┐
-│ capabilities/ai-conversation/               │
+│ capabilities/ai-extraction/               │
 │   types.ts:    AIConversationApi            │
 │   index.ts:    Registry 注册 + 薄包装        │
 │   Host.tsx:    嵌 webview(不做 sync driver) │
@@ -54,7 +57,7 @@
 ## 与其他 capability 的关系
 
 - **thought**: AI 回复落 thought atom (type='ai-response')，跨 view 集成时调 thought capability。
-- **web-rendering**: 两者独立 — web-rendering 是通用 webview, ai-conversation 专属 AI 网站(走 SSE 拦截 + Auto-fill prompt)。partition 共享 'persist:webview' 复用登录。
+- **web-rendering**: 两者独立 — web-rendering 是通用 webview, ai-extraction 专属 AI 网站(走 SSE 拦截 + Auto-fill prompt)。partition 共享 'persist:webview' 复用登录。
 
 ## 历史
 
