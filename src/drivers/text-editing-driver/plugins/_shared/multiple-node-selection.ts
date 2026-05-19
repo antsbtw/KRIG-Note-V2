@@ -48,7 +48,15 @@ class MultipleNodeSelectionBookmark implements SelectionBookmark {
   resolve(doc: PMNode): Selection {
     const $anchor = doc.resolve(Math.min(this.anchor, doc.content.size));
     const $head = doc.resolve(Math.min(this.head, doc.content.size));
-    return MultipleNodeSelection.create($anchor, $head);
+    // 与 MultipleNodeSelection.map 同款防御:bookmark 在 mapping 后可能落到
+    // depth=0 / 跨 parent / 单点位置 — 构造器会抛 RangeError。history undo
+    // 调本方法还原选区时一旦抛错会让整个 undo 失败(框定后 Cmd+Z 卡死的根因)。
+    // 抛错就 fallback 到 head 附近的 text selection,保证 undo 完成。
+    try {
+      return MultipleNodeSelection.create($anchor, $head);
+    } catch {
+      return Selection.near($head);
+    }
   }
 }
 
