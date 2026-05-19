@@ -9,9 +9,9 @@
  *   📋 Copy            — PM 通用
  *   🔗 Copy Link       — NoteView 业务(依 noteId)
  *   ⧉ Duplicate        — PM 通用
- *   💭 Thought         — NoteView 业务(占位,V2 未实装)
- *   🤖 Ask AI          — NoteView 业务(占位,V2 未实装)
  *   ─── 分隔
+ *
+ * 注:Thought / Ask AI 由 context menu(右键)提供,handle 菜单不重复入口。
  *   🗑 Delete          — PM 通用
  *
  * 注册:
@@ -32,7 +32,7 @@ const VIEW = 'note-view';
 // 占位:暂未实现的命令(渲染 disabled,鼠标 hover 不展开 submenu)
 const TODO = '';
 
-/** NoteView 业务专属 handle item(Copy Link / Thought / Ask AI / Frame 容器 + Frame submenu placeholder) */
+/** NoteView 业务专属 handle item(Copy Link / Frame 容器 + Frame submenu placeholder) */
 function createNoteSpecificHandleItems(): HandleItem[] {
   return [
     // 顶层容器:▣ 框定(submenu placeholder)
@@ -40,19 +40,11 @@ function createNoteSpecificHandleItems(): HandleItem[] {
       id: `${VIEW}.h.frame`, icon: '▣', label: '框定', command: TODO,
       submenuId: 'frame', view: VIEW, group: 'transform', order: 30,
     },
-    // block-actions:🔗 Copy Link(依 noteId)/ 💭 Thought / 🤖 Ask AI
+    // block-actions:🔗 Copy Link(依 noteId)
     {
       id: `${VIEW}.h.copy-link`, icon: '🔗', label: 'Copy Link',
       command: 'note-view.handle-copy-block-link',
       view: VIEW, group: 'block-actions', order: 51,
-    },
-    {
-      id: `${VIEW}.h.thought`, icon: '💭', label: 'Thought', command: TODO,
-      view: VIEW, group: 'block-actions', order: 53,
-    },
-    {
-      id: `${VIEW}.h.ask-ai`, icon: '🤖', label: 'Ask AI', command: TODO,
-      view: VIEW, group: 'block-actions', order: 54,
     },
     // submenu: frame placeholder
     {
@@ -76,7 +68,7 @@ export function registerHandleMenu(): void {
     // ── PM 通用 block 操作 + destructive(Copy / Duplicate / Delete)──
     ...ui.createBlockActions(VIEW),
 
-    // ── NoteView 业务增量(Frame 容器 + Copy Link / Thought / Ask AI + Frame submenu)──
+    // ── NoteView 业务增量(Frame 容器 + Copy Link + Frame submenu)──
     ...createNoteSpecificHandleItems(),
   ]);
 }
