@@ -82,6 +82,13 @@ let activeDrag: {
   multi?: { slice: Slice; from: number; to: number };
 } | null = null;
 
+// drop dispatch 后短时间禁止 mousemove 重算 handle 位置 —
+// PM 刚 dispatch 大 tr,doc 结构变,此时 posAtCoords + reflow 极慢,
+// 用户感受为"等 1 秒"才能继续操作。给 80ms 收尾窗口。
+// 模块级因 handleDrop 在 props 闭包外,view() 内的 onMouseMove 通过同一变量读。
+let postDispatchUntil = 0;
+const POST_DISPATCH_COOLDOWN_MS = 80;
+
 export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plugin {
   return new Plugin({
     // 截获 drop:plugin.props.handleDrop 在 PM 默认 drop 处理之前调用,
@@ -108,6 +115,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
             const mappedDrop = tr.mapping.map(dropPos);
             tr.insert(mappedDrop, slice.content);
             view.dispatch(tr);
+            postDispatchUntil = performance.now() + POST_DISPATCH_COOLDOWN_MS;
             dnd.emit('dnd.completed', { source: null });
             return true;
           } catch (err) {
@@ -141,6 +149,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           const mappedDrop = tr.mapping.map(dropPos);
           tr.insert(mappedDrop, sourceNode.copy(sourceNode.content));
           view.dispatch(tr);
+          postDispatchUntil = performance.now() + POST_DISPATCH_COOLDOWN_MS;
           dnd.emit('dnd.completed', { source: null });
           return true;
         } catch (err) {
@@ -158,6 +167,18 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       // 让 handle 跳走 — callout/blockquote/toggle 内子 block 的 handle
       // 在 view.dom 边缘外,鼠标移近时 probeX 夹紧会解析到容器层)
       let isHovered = false;
+
+      // ── mousemove 节流(rAF 合并)+ 同帧早退 ──
+      // 原实现:每次 mousemove 都跑 posAtCoords + 3× getBoundingClientRect + getComputedStyle,
+      // 强制 reflow,60Hz 下卡顿明显;drop 完成时刚 dispatch 大 tr,doc 刚变,此时鼠标继续
+      // 移动会立刻触发昂贵重算 → "等 1 秒"才能继续操作。
+      // 改:rAF 合并多次 mousemove 为单帧执行;并在 16px 范围内 + 上次解析到同一 block 时早退。
+      let rafPending = 0;
+      let pendingEvent: MouseEvent | null = null;
+      let lastProbedX = -1;
+      let lastProbedY = -1;
+      // 注:postDispatchUntil/POST_DISPATCH_COOLDOWN_MS 在模块顶层(handleDrop 在 props 闭包
+      // 外,两处需共享同一变量,故模块级)
 
       // L5-B3.9:外层 wrapper 包两个按钮 + ⋮⋮(对齐 V1 +/⠿ 双按钮)
       // - + 按钮在下方插入空 paragraph 节点
@@ -310,12 +331,9 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
       });
 
       // ── view.dom 监听 mousemove → 定位 handle ──
-      const onMouseMove = (e: MouseEvent) => {
+      // 真正的 handle 定位计算(包到 rAF 内,同一帧最多跑一次)
+      const computeHandleForEvent = (e: MouseEvent) => {
         if (isDragging) return;
-        // handle hover 中 → 冻结当前 block,不再 probeX/posAtCoords 重算
-        // (callout/blockquote/toggle 内子 block 的 handle 在 view.dom 边缘附近,
-        //  鼠标移近 handle 时 probeX 被夹紧到容器 padding 区,会误解析到外层容器
-        //  让 handle 瞬移走 — 见 user 反馈:"鼠标移到 handle, handle 自动关闭")
         if (isHovered) return;
         const view = editorView;
         const editorRect = view.dom.getBoundingClientRect();
@@ -458,6 +476,36 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         dom.style.opacity = '1';
       };
 
+      // mousemove 入口:rAF 合并 + 同帧早退 + drop 后短窗冷却
+      // - 多次 mousemove 在同一帧只跑最后一次(60Hz 上限)
+      // - 鼠标在 16px 内未移动且上次解析过 → 跳过重算
+      // - dispatch tr 后 80ms 内 mousemove 直接忽略(让 PM doc 状态收尾)
+      const PROBE_DEAD_ZONE_PX = 16;
+      const onMouseMove = (e: MouseEvent) => {
+        if (isDragging) return;
+        if (isHovered) return;
+        if (performance.now() < postDispatchUntil) return;
+        // 鼠标位置变化太小 + 仍有有效 currentPos → 跳过(handle 已就位)
+        if (
+          currentPos >= 0 &&
+          Math.abs(e.clientX - lastProbedX) < PROBE_DEAD_ZONE_PX &&
+          Math.abs(e.clientY - lastProbedY) < PROBE_DEAD_ZONE_PX
+        ) {
+          return;
+        }
+        pendingEvent = e;
+        if (rafPending) return;
+        rafPending = requestAnimationFrame(() => {
+          rafPending = 0;
+          const ev = pendingEvent;
+          pendingEvent = null;
+          if (!ev) return;
+          lastProbedX = ev.clientX;
+          lastProbedY = ev.clientY;
+          computeHandleForEvent(ev);
+        });
+      };
+
       // V1 模式:isHovered 标志 + 100ms 延迟 hide
       // - handle.mouseenter 时 isHovered=true,清 timer
       // - handle.mouseleave 时 isHovered=false,300ms 后 hide
@@ -513,6 +561,11 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           editorView.dom.removeEventListener('mousemove', onMouseMove);
           editorView.dom.removeEventListener('mouseleave', onMouseLeave);
           if (hideTimer) clearTimeout(hideTimer);
+          if (rafPending) {
+            cancelAnimationFrame(rafPending);
+            rafPending = 0;
+          }
+          pendingEvent = null;
           dom.remove();
         },
       };
