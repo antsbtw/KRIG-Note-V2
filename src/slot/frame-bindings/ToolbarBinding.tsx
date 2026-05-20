@@ -103,11 +103,14 @@ function renderItem(item: ToolbarItem, ctx: ToolbarItemContext) {
   );
 }
 
+const DROPDOWN_VIEWPORT_MARGIN = 8;
+const DROPDOWN_ANCHOR_GAP = 2;
+
 function ToolbarDropdown({ item, ctx }: { item: ToolbarItem; ctx: ToolbarItemContext }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; visible: boolean } | null>(null);
 
   // 关菜单:外部点击 / Esc
   useEffect(() => {
@@ -129,11 +132,38 @@ function ToolbarDropdown({ item, ctx }: { item: ToolbarItem; ctx: ToolbarItemCon
     };
   }, [open]);
 
-  // 浮层定位(锚 trigger 下边缘)
+  // 浮层定位 — 测菜单实际宽高 + 视口边界夹紧(对齐 PopupBinding 模式)
+  // 1) 默认 trigger 下方右对齐(下拉菜单常规);若 trigger 左边空间不够 → 改左对齐
+  // 2) 右溢出:贴右边缘 - VIEWPORT_MARGIN;左溢出:贴左边缘 + VIEWPORT_MARGIN
+  // 3) 下溢出且上方更宽裕:翻到 trigger 上方
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    setPos({ left: rect.left, top: rect.bottom + 2 });
+    if (!open || !triggerRef.current || !menuRef.current) return;
+    const anchor = triggerRef.current.getBoundingClientRect();
+    const menu = menuRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // 水平:默认右对齐(menu.right 对齐 trigger.right),即菜单从 trigger 右端向左展开
+    // 这样靠右 toolbar 的 trigger 弹出菜单一定不会越过右边缘
+    let left = anchor.right - menu.width;
+    if (left < DROPDOWN_VIEWPORT_MARGIN) left = DROPDOWN_VIEWPORT_MARGIN;
+    if (left + menu.width > vw - DROPDOWN_VIEWPORT_MARGIN) {
+      left = vw - menu.width - DROPDOWN_VIEWPORT_MARGIN;
+    }
+
+    // 垂直:默认 trigger 下方;下方放不下且上方更宽裕 → 翻上方
+    let top = anchor.bottom + DROPDOWN_ANCHOR_GAP;
+    if (top + menu.height > vh - DROPDOWN_VIEWPORT_MARGIN && anchor.top > vh - anchor.bottom) {
+      top = anchor.top - menu.height - DROPDOWN_ANCHOR_GAP;
+      if (top < DROPDOWN_VIEWPORT_MARGIN) top = DROPDOWN_VIEWPORT_MARGIN;
+    }
+
+    setPos({ left, top, visible: true });
+  }, [open]);
+
+  // 关闭时清 pos(下次打开重新测,避免拿 stale 坐标先闪一帧)
+  useEffect(() => {
+    if (!open) setPos(null);
   }, [open]);
 
   const currentLabel = item.currentLabel?.(ctx) ?? item.label;
@@ -150,11 +180,16 @@ function ToolbarDropdown({ item, ctx }: { item: ToolbarItem; ctx: ToolbarItemCon
       >
         {currentLabel} <span className="krig-toolbar-dropdown-caret">▾</span>
       </button>
-      {open && pos && (
+      {open && (
         <div
           ref={menuRef}
           className="krig-toolbar-dropdown-menu"
-          style={{ left: pos.left, top: pos.top }}
+          style={{
+            left: pos?.left ?? 0,
+            top: pos?.top ?? 0,
+            // 第一帧 pos 还没测出来时藏一下,避免左上角闪一下再跳到正确位置
+            visibility: pos?.visible ? 'visible' : 'hidden',
+          }}
         >
           {(item.options ?? []).map((opt) => renderDropdownOption(opt, ctx, () => setOpen(false)))}
         </div>
