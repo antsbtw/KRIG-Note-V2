@@ -125,10 +125,29 @@
 
 .thought-card__title {
   flex: 1 1 auto;
+  min-width: 0;        /* flex child min-width:auto 拒绝收缩,显式归零让 ellipsis 生效 */
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 空 thought / AI 思考中 等占位文字:灰斜体不抢视觉重量 */
+.thought-card__title--fallback {
+  color: var(--krig-fg-muted, #888);
+  font-style: italic;
+}
+
+/* title / anchor 内 inline KaTeX:基线对齐,KaTeX 全局 1.21em 会撑高 13px 容器到 ~16px,
+   强制 1em 维持容器高度;display:inline-block 让 ellipsis 时 KaTeX 可被截断 */
+.thought-card__inline-math {
+  display: inline-block;
+  vertical-align: baseline;
+  font-size: 1em;
+  line-height: 1;
+}
+.thought-card__inline-math .katex {
+  font-size: 1em;
 }
 
 .thought-card--resolved .thought-card__title {

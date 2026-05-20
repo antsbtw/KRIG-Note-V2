@@ -265,6 +265,7 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           rect.right + CONFIG.MENU_OFFSET_RIGHT,
           rect.top,
           viewId,
+          instanceId,
           currentBlockType,
           currentPos,
           blockAttrs,

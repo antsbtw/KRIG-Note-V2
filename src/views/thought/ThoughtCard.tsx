@@ -8,7 +8,9 @@
  *     (type 切换菜单 / 完成/重开 / 删除;ai-response 加复制)
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { useCollisionPosition } from '@slot/frame-bindings/use-collision-position';
 import type { ThoughtInfo } from '@capabilities/thought/types';
@@ -55,6 +57,69 @@ function extractTitle(t: ThoughtInfo): string {
   return '';
 }
 
+// ── 标题 segments(text + mathInline 混排,给 KaTeX 渲染用) ──
+// title 来自 thought.doc 第一段;为支持行内公式,深度遍历时把 mathInline 节点
+// 抽出为独立 math segment(用 attrs.latex),其余文字按 text segment 平铺。
+
+type TitleSegment = { kind: 'text'; text: string } | { kind: 'math'; latex: string };
+
+function collectSegments(node: Record<string, unknown>, out: TitleSegment[]): void {
+  if (node.type === 'text' && typeof node.text === 'string') {
+    out.push({ kind: 'text', text: node.text });
+    return;
+  }
+  if (node.type === 'mathInline') {
+    const attrs = node.attrs as { latex?: string } | undefined;
+    const latex = (attrs?.latex ?? '').trim();
+    if (latex) out.push({ kind: 'math', latex });
+    return;
+  }
+  const children = node.content as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(children)) {
+    for (const c of children) collectSegments(c, out);
+  }
+}
+
+function extractTitleSegments(t: ThoughtInfo): TitleSegment[] {
+  const root = t.doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
+  if (!root?.content) return [];
+  for (const block of root.content) {
+    const segs: TitleSegment[] = [];
+    collectSegments(block, segs);
+    const hasContent = segs.some(
+      (s) => s.kind === 'math' || (s.kind === 'text' && s.text.trim().length > 0),
+    );
+    if (hasContent) return segs;
+  }
+  return [];
+}
+
+// ── anchor 引文条 $...$ markdown 解析 ──
+// 截图里 anchor.locator.text 是从 Note 抓的源字符串,带 markdown 风格 $f$ $X$
+// 等占位符。最小解析:扫 $...$ 配对(non-greedy,不跨段落),命中转 math segment,
+// 其余按 text segment 平铺。不解析 *bold* / `code` 等其他 markdown。
+
+function parseInlineMathInText(text: string): TitleSegment[] {
+  if (!text) return [];
+  const segments: TitleSegment[] = [];
+  // non-greedy 匹配 $...$;避开转义 \$(用否定回溯不友好,简化:不支持转义,
+  //   实际 anchor 文字罕见反斜杠 + $ 组合)
+  const re = /\$([^$\n]+?)\$/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      segments.push({ kind: 'text', text: text.slice(last, m.index) });
+    }
+    segments.push({ kind: 'math', latex: m[1].trim() });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    segments.push({ kind: 'text', text: text.slice(last) });
+  }
+  return segments;
+}
+
 function extractFullText(t: ThoughtInfo): string {
   const root = t.doc.payload as { content?: Array<Record<string, unknown>> } | undefined;
   if (!root?.content) return '';
@@ -92,12 +157,15 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
 
   const meta = THOUGHT_TYPE_META[thought.type];
   const isAI = thought.type === 'ai-response';
-  const title = extractTitle(thought);
-  const isAiPending = isAI && !title;
+  // KaTeX inline: title 来自 doc 第一段 segments,anchor 来自源字符串里 $...$ 配对
+  const titleSegments = useMemo(() => extractTitleSegments(thought), [thought]);
+  const hasTitleContent = titleSegments.length > 0;
+  const isAiPending = isAI && !hasTitleContent;
   const anchorText = anchorPreviewText(thought);
-  const displayTitle = isAI
-    ? (isAiPending ? 'AI 思考中...' : (title || 'AI 回复'))
-    : (title || '空思考');
+  const anchorSegments = useMemo(() => parseInlineMathInText(anchorText), [anchorText]);
+  const titleFallback = isAI
+    ? (isAiPending ? 'AI 思考中...' : 'AI 回复')
+    : '空思考';
 
   const cardClass = [
     'thought-card',
@@ -145,7 +213,12 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
       {/* Header */}
       <div className="thought-card__header" onClick={handleToggle}>
         <span className="thought-card__icon">{meta.icon}</span>
-        <span className="thought-card__title">{displayTitle}</span>
+        <InlineSegments
+          segments={titleSegments}
+          fallback={titleFallback}
+          className="thought-card__title"
+          fallbackClassName="thought-card__title--fallback"
+        />
         {isAI && thought.serviceId && (
           <span
             className="thought-card__service"
@@ -168,7 +241,11 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
               title="点击跳转到原文位置"
               style={{ borderLeftColor: meta.color }}
             >
-              <span className="thought-card__anchor-text">{anchorText}</span>
+              <InlineSegments
+                segments={anchorSegments}
+                fallback=""
+                className="thought-card__anchor-text"
+              />
               <span className="thought-card__anchor-jump">↗</span>
             </div>
           )}
@@ -229,6 +306,59 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
       )}
     </div>
   );
+}
+
+// ── InlineSegments + InlineKaTeX ──
+// 通用 inline 段渲染:text 直显,math 走 KaTeX。
+// 用于 title(来自 PM doc 第一段 segments)和 anchor 引文条(来自 $...$ 解析)。
+// 空 segments 走 fallback 占位文字(灰色 — 由 fallbackClassName 控制)。
+
+interface InlineSegmentsProps {
+  segments: TitleSegment[];
+  fallback: string;
+  className?: string;
+  fallbackClassName?: string;
+}
+
+function InlineSegments({
+  segments,
+  fallback,
+  className,
+  fallbackClassName,
+}: InlineSegmentsProps) {
+  if (segments.length === 0) {
+    const cls = [className, fallbackClassName].filter(Boolean).join(' ');
+    return <span className={cls}>{fallback}</span>;
+  }
+  return (
+    <span className={className}>
+      {segments.map((seg, i) =>
+        seg.kind === 'text' ? (
+          <span key={i}>{seg.text}</span>
+        ) : (
+          <InlineKaTeX key={i} latex={seg.latex} />
+        ),
+      )}
+    </span>
+  );
+}
+
+function InlineKaTeX({ latex }: { latex: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    try {
+      katex.render(latex, ref.current, {
+        throwOnError: false,
+        displayMode: false,
+        strict: false,
+      });
+    } catch {
+      // throwOnError:false 已兜底,这里仅挡 katex 自身异常
+      if (ref.current) ref.current.textContent = latex;
+    }
+  }, [latex]);
+  return <span className="thought-card__inline-math" ref={ref} />;
 }
 
 // ── TypeSwitcher ──
