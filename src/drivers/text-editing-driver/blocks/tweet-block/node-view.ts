@@ -86,6 +86,7 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     for (const [key, value] of Object.entries(patch)) {
       tr = tr.setNodeAttribute(pos, key, value);
     }
+    tr.setMeta('addToHistory', false); // 内部 attr 同步不进 undo 栈
     view.dispatch(tr);
   }
 
