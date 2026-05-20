@@ -7,6 +7,13 @@
  * - 左 ≡ + 中间 Tabs + 右 [+]
  */
 
+/* 顶栏高度对外广播 — help-panel-binding.css 等 fixed 覆盖层用此 var 避让顶栏
+ * (help-panel-binding 注释里早已留位: --krig-help-panel-top 由 platform 写入)。
+ * 改本 bar 高度时,同步改这里的变量值。 */
+:root {
+  --krig-help-panel-top: 28px;
+}
+
 .krig-workspace-bar {
   display: flex;
   align-items: center;

@@ -8,13 +8,20 @@
  * - 共享 IntersectionObserver:所有 mathBlock 实例复用一个 observer,200px lazy 渲染
  * - 共享全局 mousedown:单一 listener 管理所有进入 edit 的 mathBlock
  *
- * 砍 V1:LaTeX 速查面板(help-panel/latex)— 留 L5-B+,本阶段编辑头不放 ? 按钮
+ * LaTeX 速查面板:编辑头 ? 按钮 → setLatexHelpContext + helpPanelController.show/hide
+ * (1:1 复刻 V1 行为:进入编辑态可触发,退出编辑态强制关闭并复位按钮状态)
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { helpPanelController } from '@slot/triggers/help-panel-controller';
+import {
+  setLatexHelpContext,
+  clearLatexHelpContext,
+  LATEX_HELP_PANEL_ID,
+} from './help-panel';
 
 /** 渲染 KaTeX 到 target,处理空 / 错误情况 */
 function renderKaTeX(target: HTMLElement, source: string): void {
@@ -123,8 +130,29 @@ export const mathBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   label.textContent = '∑ Block equation';
   headerBar.appendChild(label);
 
-  // L5-B3.6 砍 V1 ? help 按钮:LaTeX 速查面板留 L5-B+
-  // 编辑头只显示 label,不放按钮
+  // LaTeX 速查面板按需触发(V1 行为复刻)— 熟悉 LaTeX 的用户不会被自动弹面板干扰
+  const helpBtn = document.createElement('button');
+  helpBtn.classList.add('krig-math-block__help-btn');
+  helpBtn.setAttribute('contenteditable', 'false');
+  helpBtn.type = 'button';
+  helpBtn.textContent = '?';
+  helpBtn.title = 'LaTeX 参考';
+  let helpPanelOpen = false;
+  helpBtn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (helpPanelOpen) {
+      helpPanelController.hide();
+      helpPanelOpen = false;
+      helpBtn.classList.remove('is-active');
+    } else {
+      setLatexHelpContext({ insertFn: insertLatex });
+      helpPanelController.show(LATEX_HELP_PANEL_ID);
+      helpPanelOpen = true;
+      helpBtn.classList.add('is-active');
+    }
+  });
+  headerBar.appendChild(helpBtn);
 
   editorArea.appendChild(headerBar);
 
@@ -142,6 +170,14 @@ export const mathBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
   // ── Helpers ──
   function getLatex(): string {
     return node.textContent;
+  }
+
+  /** help 面板 Insert → 把 LaTeX 文本插入到 contentDOM 光标位置(V1 行为) */
+  function insertLatex(latex: string): void {
+    const { state } = view;
+    const tr = state.tr.insertText(latex, state.selection.from);
+    view.dispatch(tr);
+    view.focus();
   }
 
   function renderRenderedView(): void {
@@ -208,6 +244,13 @@ export const mathBlockNodeView: NodeViewConstructor = (initialNode, view, getPos
     rendered.style.display = '';
     lastRenderedLatex = null; // 清缓存,强制刷新
     renderRenderedView();
+    // 退出编辑态:无论 help 面板是否打开都强制关闭并复位按钮(V1 行为)
+    if (helpPanelOpen) {
+      helpPanelController.hide();
+      helpPanelOpen = false;
+    }
+    helpBtn.classList.remove('is-active');
+    clearLatexHelpContext();
     unregisterActiveEditor(selfEditor);
   }
 
