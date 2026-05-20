@@ -126,7 +126,9 @@ export function PopupBinding() {
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <Component onClose={handleClose} />
+      {/* key 用 activeId-showSeq:同 id 重复 show 时也强制 remount,确保
+          pending-context 模式(AskAIPanel useMemo consume)能读到新 ctx */}
+      <Component key={`${state.activeId}-${state.showSeq}`} onClose={handleClose} />
     </div>
   );
 }
