@@ -76,6 +76,7 @@ export const externalRefNodeView: NodeViewConstructor = (initialNode, view, getP
     for (const [k, v] of Object.entries(attrs)) {
       tr = tr.setNodeAttribute(pos, k, v);
     }
+    tr.setMeta('addToHistory', false); // 内部 attr 同步不进 undo 栈
     view.dispatch(tr);
   }
 
