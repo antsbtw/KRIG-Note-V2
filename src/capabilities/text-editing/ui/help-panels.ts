@@ -13,6 +13,8 @@ import { helpPanelRegistry }
   from '@slot/interaction-registries/help-panel-registry/help-panel-registry';
 import { MathVisualHelpPanel, MATH_VISUAL_HELP_PANEL_ID }
   from '@drivers/text-editing-driver/blocks/math-visual/help-panel';
+import { LatexHelpPanel, LATEX_HELP_PANEL_ID }
+  from '@drivers/text-editing-driver/blocks/math-block/help-panel';
 
 /** capability 加载时一次性注册 text-editing 全部 help-panel */
 export function registerTextEditingHelpPanels(): void {
@@ -23,5 +25,14 @@ export function registerTextEditingHelpPanels(): void {
     Component: MathVisualHelpPanel,
     // 点击 math-visual block 内 / 全屏内不算"点外部",不关闭面板
     excludeFromClickOutside: ['.krig-math-visual', '.mv-fullscreen-overlay'],
+  });
+
+  // latex:LaTeX 公式速查(V1 directly 迁)— math-block / math-inline 共用
+  helpPanelRegistry.register({
+    id: LATEX_HELP_PANEL_ID,
+    title: 'Formula Reference',
+    Component: LatexHelpPanel,
+    // 点 math-block / math-inline 编辑区不算"点外部" — 否则 ? 按钮反复关 panel
+    excludeFromClickOutside: ['.krig-math-block', '.krig-math-inline-editor'],
   });
 }

@@ -5,6 +5,8 @@
  *
  * 渲染缓存:lastLatex 跳过未变化重新渲染
  * 编辑弹窗:input + live preview;Enter 保存 / Esc 取消 / 点外保存
+ * LaTeX 速查面板:弹窗内 ? 按钮 → setLatexHelpContext + helpPanelController.toggle
+ * (Insert 时插到 input 当前光标位 + 触发 preview 更新;切换 active 块时 context 自动覆盖)
  *
  * 砍 V1:syncThoughtMark(V2 没 thought mark 系统)
  */
@@ -12,6 +14,12 @@
 import type { NodeViewConstructor } from 'prosemirror-view';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { helpPanelController } from '@slot/triggers/help-panel-controller';
+import {
+  setLatexHelpContext,
+  clearLatexHelpContext,
+  LATEX_HELP_PANEL_ID,
+} from '../math-block/help-panel';
 
 export const mathInlineNodeView: NodeViewConstructor = (initialNode, view, getPos) => {
   let node = initialNode;
@@ -66,16 +74,56 @@ export const mathInlineNodeView: NodeViewConstructor = (initialNode, view, getPo
     const editor = document.createElement('div');
     editor.classList.add('krig-math-inline-editor');
 
+    // input 行:LaTeX 输入框 + ? 帮助按钮
+    const inputRow = document.createElement('div');
+    inputRow.classList.add('krig-math-inline-editor__input-row');
+
     const input = document.createElement('input');
     input.type = 'text';
     input.classList.add('krig-math-inline-editor__input');
     input.value = currentLatex;
     input.placeholder = 'LaTeX: e.g. x^2 + y^2 = z^2';
-    editor.appendChild(input);
+    inputRow.appendChild(input);
+
+    const helpBtn = document.createElement('button');
+    helpBtn.classList.add('krig-math-inline-editor__help-btn');
+    helpBtn.type = 'button';
+    helpBtn.textContent = '?';
+    helpBtn.title = 'LaTeX 参考';
+    let helpPanelOpen = false;
+    helpBtn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (helpPanelOpen) {
+        helpPanelController.hide();
+        helpPanelOpen = false;
+        helpBtn.classList.remove('is-active');
+      } else {
+        setLatexHelpContext({ insertFn: insertAtCursor });
+        helpPanelController.show(LATEX_HELP_PANEL_ID);
+        helpPanelOpen = true;
+        helpBtn.classList.add('is-active');
+      }
+    });
+    inputRow.appendChild(helpBtn);
+    editor.appendChild(inputRow);
 
     const previewEl = document.createElement('div');
     previewEl.classList.add('krig-math-inline-editor__preview');
     editor.appendChild(previewEl);
+
+    /** help 面板 Insert → 把 LaTeX 插到 input 当前光标位并更新 preview */
+    function insertAtCursor(latex: string): void {
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      const before = input.value.slice(0, start);
+      const after = input.value.slice(end);
+      input.value = before + latex + after;
+      const caret = start + latex.length;
+      input.setSelectionRange(caret, caret);
+      input.focus();
+      updatePreview(input.value);
+    }
 
     // 绝对定位在行内元素下方
     const rect = dom.getBoundingClientRect();
@@ -108,6 +156,15 @@ export const mathInlineNodeView: NodeViewConstructor = (initialNode, view, getPo
       updatePreview(input.value);
     });
 
+    /** 收尾:关 help panel + 清 context(无论 save / cancel / 点外) */
+    function cleanupHelp(): void {
+      if (helpPanelOpen) {
+        helpPanelController.hide();
+        helpPanelOpen = false;
+      }
+      clearLatexHelpContext();
+    }
+
     function save(): void {
       const pos = typeof getPos === 'function' ? getPos() : undefined;
       if (pos != null) {
@@ -115,6 +172,7 @@ export const mathInlineNodeView: NodeViewConstructor = (initialNode, view, getPo
           view.state.tr.setNodeMarkup(pos, undefined, { latex: input.value }),
         );
       }
+      cleanupHelp();
       editor.remove();
       view.focus();
     }
@@ -125,15 +183,20 @@ export const mathInlineNodeView: NodeViewConstructor = (initialNode, view, getPo
         save();
       } else if (ev.key === 'Escape') {
         ev.preventDefault();
+        cleanupHelp();
         editor.remove();
         view.focus();
       }
     });
 
-    // 点外部保存
+    // 点外部保存(点 help panel 内不算外部 — 否则点 Insert 立即触发保存)
     const closeOnClick = (ev: MouseEvent): void => {
       const target = ev.target as Node;
       if (editor.contains(target) || target === dom) return;
+      if (
+        target instanceof HTMLElement &&
+        target.closest('.krig-help-panel')
+      ) return;
       save();
       document.removeEventListener('mousedown', closeOnClick);
     };

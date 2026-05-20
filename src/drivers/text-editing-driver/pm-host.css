@@ -3039,6 +3039,24 @@
 
 .krig-pm-host .ProseMirror .mv-canvas svg:active { cursor: grabbing; }
 
+/* 底部 resize 把手 — 对齐 V1 html-block 模式:全宽 6px 细条,hover 显色 */
+.krig-pm-host .ProseMirror .mv-canvas-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 4;
+  transition: background 120ms ease;
+}
+
+.krig-pm-host .ProseMirror .mv-canvas-resize-handle:hover,
+.krig-pm-host .ProseMirror .mv-canvas-resize-handle:active {
+  background: rgba(232, 234, 237, 0.18);
+}
+
 /* 工具栏 — 画布下方独立一行(static),hover 时显示 */
 .krig-pm-host .ProseMirror .mv-floating-toolbar {
   display: flex;
@@ -3891,6 +3909,93 @@
 
 .mv-help__action-btn:hover {
   background: rgba(138, 180, 248, 0.25);
+}
+
+/* ── Latex Help Panel(.mv-help--latex)覆盖 ── */
+/* LaTeX 预览只渲染一个 KaTeX 公式,要居中显示 + 允许多行;
+ * 不复用 math-visual 的 title+formula 横向 layout */
+.mv-help--latex .mv-help__preview {
+  justify-content: center;
+}
+.mv-help--latex .mv-help__preview-formula {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  color: #e0e0e0;
+}
+.mv-help--latex .mv-help__preview-formula .katex {
+  font-size: 1em;
+}
+/* detail 行没 desc,code 直接吃满,Insert 紧贴右 */
+.mv-help--latex .mv-help__detail {
+  gap: 8px;
+}
+
+/* ── math-block 编辑头 ? 按钮(1:1 复刻 V1 .math-block__help-btn)── */
+.krig-pm-host .ProseMirror .krig-math-block__help-btn {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #3c3c3c;
+  border-radius: 3px;
+  color: #9aa0a6;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.krig-pm-host .ProseMirror .krig-math-block__help-btn:hover {
+  background: #3c3c3c;
+  color: #e8eaed;
+  border-color: #5f6368;
+}
+.krig-pm-host .ProseMirror .krig-math-block__help-btn.is-active {
+  background: rgba(138, 180, 248, 0.15);
+  color: #8ab4f8;
+  border-color: #8ab4f8;
+}
+
+/* ── math-inline 编辑弹窗 ? 按钮 + input row 布局 ── */
+.krig-math-inline-editor__input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.krig-math-inline-editor__input-row .krig-math-inline-editor__input {
+  flex: 1;
+  min-width: 0;
+}
+.krig-math-inline-editor__help-btn {
+  width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #3c3c3c;
+  border-radius: 3px;
+  color: #9aa0a6;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.krig-math-inline-editor__help-btn:hover {
+  background: #3c3c3c;
+  color: #e8eaed;
+  border-color: #5f6368;
+}
+.krig-math-inline-editor__help-btn.is-active {
+  background: rgba(138, 180, 248, 0.15);
+  color: #8ab4f8;
+  border-color: #8ab4f8;
 }
 
 /* ── thought-view Phase 3:横切思考层 anchor 渲染 ── */
