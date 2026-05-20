@@ -556,8 +556,8 @@
 .krig-pm-host .ProseMirror .krig-image-block__caption {
   display: block;
   margin-top: 4px;
-  text-align: inherit;
-  color: #888;
+  text-align: center;
+  color: #e8eaed;
   font-size: 13px;
   font-style: italic;
   min-height: 1.4em;
@@ -1392,8 +1392,8 @@
 .krig-pm-host .ProseMirror .krig-audio-block__caption {
   display: block;
   margin-top: 4px;
-  text-align: inherit;
-  color: #888;
+  text-align: center;
+  color: #e8eaed;
   font-size: 13px;
   font-style: italic;
   min-height: 1.4em;
@@ -1865,8 +1865,8 @@
 .krig-pm-host .ProseMirror .krig-video-block__caption {
   display: block;
   margin-top: 4px;
-  text-align: inherit;
-  color: #888;
+  text-align: center;
+  color: #e8eaed;
   font-size: 13px;
   font-style: italic;
   min-height: 1.4em;
@@ -2094,8 +2094,8 @@
 .krig-pm-host .ProseMirror .krig-tweet-block__caption {
   display: block;
   margin-top: 4px;
-  text-align: inherit;
-  color: #888;
+  text-align: center;
+  color: #e8eaed;
   font-size: 13px;
   font-style: italic;
   min-height: 1.4em;
@@ -2710,8 +2710,8 @@
 .krig-pm-host .ProseMirror .krig-html-block__caption {
   display: block;
   margin-top: 4px;
-  text-align: inherit;
-  color: #888;
+  text-align: center;
+  color: #e8eaed;
   font-size: 13px;
   font-style: italic;
   min-height: 1.4em;
@@ -2746,8 +2746,8 @@
 .krig-pm-host .ProseMirror .krig-math-visual__caption {
   display: block;
   margin: 4px 12px 8px;
-  text-align: inherit;
-  color: #888;
+  text-align: center;
+  color: #e8eaed;
   font-size: 13px;
   font-style: italic;
   min-height: 1.4em;
