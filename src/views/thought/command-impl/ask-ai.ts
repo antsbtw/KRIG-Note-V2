@@ -56,12 +56,16 @@ export async function askAiFromNote(): Promise<void> {
     return;
   }
 
+  // 入口立即切 right slot 到 AI View(用户契约:🤖 问 AI 一点 right slot 就装 AI View,
+  // 不管原来是空 / Thought / 别的 Note / eBook / 画板等)。
+  // openRight 幂等;handleSend 时还会再调一次保险。
+  const bus = workspaceManager.getBus(wsId);
+  bus?.slot.openRight('ai-view');
+
   // 1. 抓选区 markdown
   const { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
   if (!markdown) {
-    // 无选区 — 直接开 AI Web 让用户手动跟 AI 对话(不弹 panel,空 prompt 没意义)
-    const bus = workspaceManager.getBus(wsId);
-    bus?.slot.openRight('ai-view');
+    // 无选区 — AI View 已切好,用户手动跟 AI 对话(不弹 panel,空 prompt 没意义)
     return;
   }
 
