@@ -12,7 +12,7 @@ import { EditorView, type NodeViewConstructor } from 'prosemirror-view';
 import type { Schema, Node as PMNode } from 'prosemirror-model';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
-import { dropCursor } from 'prosemirror-dropcursor';
+import { buildThrottledDropCursorPlugin } from './plugins/build-throttled-dropcursor-plugin';
 import type { BlockSpec } from './types';
 import { buildHistoryPlugins } from './plugins/build-history-plugin';
 import { buildInputRules } from './plugins/build-input-rules';
@@ -110,7 +110,7 @@ export function buildEditorView(
     buildInputRules(schema),     // headings + 4 mark markdown(始终开)
     ...(enableSlash ? [buildSlashPlugin(viewId)] : []),
     ...(enableBlockHandle ? [buildBlockHandlePlugin(viewId, instanceId)] : []),
-    ...(enableDropCursor ? [dropCursor({ color: '#4a90e2', width: 2 })] : []),
+    ...(enableDropCursor ? [buildThrottledDropCursorPlugin({ color: '#4a90e2', width: 2 })] : []),
     // block 框定 + 视觉缩进装饰(读 node attrs 渲染,纯视觉,始终开)
     buildBlockFramePlugin(),
     buildBlockIndentPlugin(),
