@@ -9,6 +9,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { EditorView } from 'prosemirror-view';
+import { Selection } from 'prosemirror-state';
 import { buildSchema, deserializeDoc, serializeDoc } from './schema-builder';
 import { buildEditorView } from './editor-view-builder';
 import { instanceRegistry } from './instance-registry';
@@ -259,6 +260,10 @@ export function Host(props: TextEditingHostProps) {
     if (!newDoc) return true;
     if (view.state.doc.eq(newDoc)) return true;
     const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
+    // 替换整 doc 后 PM 默认把 selection mapping 到末尾(=光标跳末尾根源)。
+    // 显式 setSelection(atStart):外部更新场景下光标回首段而非末尾,体感比"跳到底"
+    // 友好(dual-channel §2.4)。
+    tr.setSelection(Selection.atStart(tr.doc));
     tr.setMeta('addToHistory', false); // 切笔记不记入 history
     view.dispatch(tr);
     return true;

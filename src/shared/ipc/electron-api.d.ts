@@ -13,6 +13,7 @@ import type {
   FolderInfo,
   FolderViewType,
   NoteDocEnvelope,
+  NoteDocContentChangedPayload,
 } from './note-folder-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
@@ -270,6 +271,15 @@ declare global {
       noteDelete(id: string): Promise<void>;
       /** main → renderer 推送:笔记列表变更;返 unsubscribe */
       onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
+      /**
+       * main → renderer 推送:单 note doc 变更;返 unsubscribe
+       *
+       * 区别于 onNoteListChanged:粒度更细 + 发起者(emitterId)被 main 侧排除,
+       * 防 NoteView Host useEffect[doc] echo 回灌跳光标。
+       */
+      onNoteDocContentChanged(
+        callback: (payload: NoteDocContentChangedPayload) => void,
+      ): () => void;
 
       // ── thought capability (横切思考层 — thought-view-port.md v0.5 §5.3) ──
       // 8 invoke + 1 broadcast = 9 表面

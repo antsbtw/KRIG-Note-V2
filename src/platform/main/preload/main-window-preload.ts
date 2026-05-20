@@ -387,6 +387,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.NOTE_LIST_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.NOTE_LIST_CHANGED, handler);
   },
+  /**
+   * main → renderer 推送:单 note doc 内容变更(NOTE_UPDATE 发起者不收;ebook 外部更新所有 renderer 都收)
+   *
+   * 区别于 onNoteListChanged:粒度更细 + 发起者排除(防 echo 触发 NoteView Host useEffect[doc] 回灌)
+   */
+  onNoteDocContentChanged(
+    callback: (payload: unknown) => void,
+  ): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.NOTE_DOC_CONTENT_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.NOTE_DOC_CONTENT_CHANGED, handler);
+  },
 
   // ── thought capability(横切思考层 — thought-view-port.md v0.5)──
   // 8 invoke + 1 broadcast 订阅 = 9 表面

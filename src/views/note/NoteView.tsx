@@ -8,15 +8,17 @@
  * - noteCapability:取笔记数据(全局共享,通过 useAllNotes hook + IPC 广播)
  */
 
-import { useMemo, useSyncExternalStore, useCallback, useEffect } from 'react';
+import { useMemo, useState, useSyncExternalStore, useCallback, useEffect } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
+import type { NoteCapabilityApi, NoteDocEnvelope } from '@capabilities/note/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useAllNotes } from './use-notes-folders';
 import { getNoteWsState, updateNote } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
+import { useActiveNoteDocSync } from './use-active-note-doc-sync';
 import { TocIndicator } from './toc/TocIndicator';
 import './note.css';
 
@@ -42,11 +44,52 @@ export function NoteView({ workspaceId }: NoteViewProps) {
   );
 
   // 订阅 noteCapability — onListChanged 推送(所有 ws 共享视图)
+  // NoteView 自此仅读 list 的元数据(title/folderId);doc 走独立 incomingDoc 通道
+  // 避免自家 onChange 经 LIST_CHANGED 回灌让 activeNote.doc 引用变 → Host useEffect[doc] 跳光标。
   const allNotes = useAllNotes();
 
-  // 取当前活跃笔记
+  // 取当前活跃笔记元数据
   const activeNoteId = wsState?.activeNoteId ?? null;
-  const activeNote = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) ?? null : null;
+  const activeNoteMeta = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) ?? null : null;
+
+  // doc 独立通道(dual-channel 方案 §5.1):
+  // - 切笔记时 getNote() 拉初始 doc(主动)
+  // - 外部更新通过 onDocContentChanged 推送(被动);自家编辑不动 incomingDoc
+  // - activeNoteId=null 或 note 被外部删除 → setIncomingDoc(null)
+  const [incomingDoc, setIncomingDoc] = useState<NoteDocEnvelope | null>(null);
+
+  // 切笔记:拉初始 doc。getNote 返 null(已删除/找不到)时显式清空,UI 回兜底态;
+  // 不能保留旧 doc,否则用户错觉"删除/切换没生效"。
+  useEffect(() => {
+    if (!activeNoteId) {
+      setIncomingDoc(null);
+      return;
+    }
+    let cancelled = false;
+    const note = requireCapabilityApi<NoteCapabilityApi>('note');
+    void note.getNote(activeNoteId).then((info) => {
+      if (cancelled) return;
+      setIncomingDoc(info ? info.doc : null);
+    });
+    return () => { cancelled = true; };
+  }, [activeNoteId]);
+
+  // 外部更新(ebook addReadingThoughtBlock / removeReadingThoughtBlock 等)
+  useActiveNoteDocSync(
+    activeNoteId,
+    useCallback((doc, origin) => {
+      console.debug('[NoteView] external doc update', { activeNoteId, origin });
+      setIncomingDoc(doc);
+    }, [activeNoteId]),
+  );
+
+  // allNotes 变化:若 activeNote 被外部删除(LIST_CHANGED 不再含),清空 incomingDoc。
+  // 选用方案 b(§5.1):UI 层兜底,不主动改 workspaceManager.activeNoteId;留 followup。
+  useEffect(() => {
+    if (!activeNoteId || !incomingDoc) return;
+    const stillExists = allNotes.some((n) => n.id === activeNoteId);
+    if (!stillExists) setIncomingDoc(null);
+  }, [allNotes, activeNoteId, incomingDoc]);
 
   // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteCapability
   // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
@@ -56,6 +99,8 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     (newDoc: DriverSerialized) => {
       if (!wsState?.activeNoteId) return;
       // L7-sub2:title 派生自 doc 首段文本 (capability 内自动算),view 不传 title
+      // 注意:这里只发 IPC,**不动 incomingDoc** — Host 内部 PM state 已是最新,
+      // 自家编辑不需要回灌;若回灌反而触发 useEffect[doc] 跳光标。
       void updateNote(wsState.activeNoteId, { doc: newDoc });
     },
     [wsState?.activeNoteId],
@@ -85,12 +130,25 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     return <div className="krig-note-empty">Workspace 未就绪</div>;
   }
 
-  if (!activeNote) {
+  // 三态(§5.1):
+  //   未选笔记(activeNoteId=null) → "未选择笔记"
+  //   选了笔记但 doc 还没到/note 已被删 → "加载中或已删除"
+  //   doc 到了 → 渲染 Host
+  if (!activeNoteId) {
     return (
       <div className="krig-note-empty">
         <div className="krig-note-empty-icon">📝</div>
         <div className="krig-note-empty-text">未选择笔记</div>
         <div className="krig-note-empty-hint">从左侧列表点选,或新建笔记</div>
+      </div>
+    );
+  }
+
+  if (!incomingDoc || !activeNoteMeta) {
+    return (
+      <div className="krig-note-empty">
+        <div className="krig-note-empty-icon">📝</div>
+        <div className="krig-note-empty-text">笔记加载中或已删除</div>
       </div>
     );
   }
@@ -110,7 +168,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
               // 但显式声明为后续删 fallback 铺路。
               plugins: { titleGuard: true, headingCollapse: true },
             }}
-            doc={activeNote.doc}
+            doc={incomingDoc}
             onChange={handleDocChange}
           />
         </div>

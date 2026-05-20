@@ -44,11 +44,14 @@ import type {
 } from '@shared/ipc/ebook-types';
 import type { BookAnchor } from '@drivers/text-editing-driver/blocks/_shared/book-anchor';
 import type { NoteInfo } from '@shared/ipc/note-folder-types';
+import { NOTE_DOC_ORIGIN } from '@shared/ipc/note-folder-types';
 import {
   updateNote,
   wrapPmDoc,
   unwrapPmDoc,
   emptyNoteDoc,
+  broadcastNoteListChanged,
+  broadcastNoteDocContentChanged,
 } from '@platform/main/note';
 
 // ── predicate 常量 (沿 V2 现状分散模式 §10.D-3 + decision 022 §4.1.2) ──
@@ -692,6 +695,19 @@ export async function addReadingThoughtBlock(
     content,
   };
   await updateNote(thought.id, wrapPmDoc(updatedDoc));
+  // Latent bug 修:ebook 写 thought doc 后必须广播,否则同进程内打开的 NoteView
+  // 看不到外部更新(P1#1 场景在双 channel 改造前实际从未工作)。
+  // emitterId 不传 — main 内部触发, 所有 renderer 都该收到。
+  const updated = await getReadingThought(bookId);
+  if (updated) {
+    broadcastNoteDocContentChanged({
+      noteId: updated.id,
+      doc: updated.doc,
+      origin: NOTE_DOC_ORIGIN.EBOOK_READING_THOUGHT,
+      updatedAt: updated.updatedAt,
+    });
+    await broadcastNoteListChanged();
+  }
 }
 
 /**
@@ -721,6 +737,17 @@ export async function removeReadingThoughtBlock(
     content: filtered,
   };
   await updateNote(thought.id, wrapPmDoc(updatedDoc));
+  // Latent bug 修:同 addReadingThoughtBlock,删 thought block 后也必须广播。
+  const updated = await getReadingThought(bookId);
+  if (updated) {
+    broadcastNoteDocContentChanged({
+      noteId: updated.id,
+      doc: updated.doc,
+      origin: NOTE_DOC_ORIGIN.EBOOK_READING_THOUGHT,
+      updatedAt: updated.updatedAt,
+    });
+    await broadcastNoteListChanged();
+  }
 }
 
 /**
