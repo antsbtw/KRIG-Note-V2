@@ -50,13 +50,18 @@ function withInstance(fn: (instanceId: string) => void): () => void {
   };
 }
 
-/** handle pos 解析(handle 命令作用于 handleMenuController.state.pos 指向的 block) */
+/** handle pos 解析(handle 命令作用于 handleMenuController.state.pos 指向的 block)
+ *
+ * fix/handle-menu-instance-id:不再走 resolveInstanceId() 的 focused-fallback。
+ * controller state 自带 instanceId(handle plugin show 时显式传),命令必须用 state
+ * 携带的 id — 否则多 PM 实例共存(thought 横切层等)时 focused 会指向无关 view,
+ * 把 thought 的 pos 用到 NoteView 实例上误删数据(本 fix 起因)。
+ */
 function getHandlePos(): { instanceId: string; pos: number } | null {
-  const id = resolveInstanceId();
-  if (!id) return null;
   const state = handleMenuController.getState();
+  if (!state.instanceId) return null;
   if (typeof state.pos !== 'number') return null;
-  return { instanceId: id, pos: state.pos };
+  return { instanceId: state.instanceId, pos: state.pos };
 }
 
 /** context menu block pos 解析(从鼠标位置 resolveBlockAt) */
