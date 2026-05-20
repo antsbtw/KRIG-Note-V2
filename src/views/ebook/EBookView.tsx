@@ -217,6 +217,19 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
 
+  // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
+  // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
+  const onClose = useCallback(() => {
+    const ws = workspaceManager.get(workspaceId);
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!ws || !bus) return;
+    if (ws.slotBinding.right === 'ebook-view') {
+      bus.slot.closeRight();
+    } else {
+      bus.slot.closeLeft();
+    }
+  }, [workspaceId]);
+
   const onBookmarkToggle = useCallback(
     () => void bookmarks.toggle(currentPage),
     [bookmarks, currentPage],
@@ -309,7 +322,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         renderMode={renderMode}
         sidebarOpen={sidebarOpen}
         onSidebarToggle={onSidebarToggle}
-        onSearchOpen={search.openSearch}
         isBookmarked={bookmarks.isBookmarked(currentPage)}
         onBookmarkToggle={onBookmarkToggle}
         currentPage={currentPage}
@@ -329,6 +341,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onPrevChapter={onPrevChapter}
         onNextChapter={onNextChapter}
         onFontSizeChange={onFontSizeChange}
+        onClose={onClose}
       />
       <SearchBar
         visible={search.visible}

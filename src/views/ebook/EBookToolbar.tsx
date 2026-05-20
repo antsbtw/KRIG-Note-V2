@@ -14,7 +14,9 @@
  * Toolbar 不直接持有 renderer / library / host。
  */
 
-import { useState, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
+import { useState, useCallback, type KeyboardEvent, type ChangeEvent, type MouseEvent } from 'react';
+import { popupController } from '@slot/triggers/popup-controller';
+import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID } from './popup-ids';
 
 export type EBookToolbarRenderMode = 'fixed-page' | 'reflowable' | null;
 
@@ -24,7 +26,6 @@ interface EBookToolbarProps {
   // 共用
   sidebarOpen: boolean;
   onSidebarToggle: () => void;
-  onSearchOpen: () => void;
   /** 当前位置是否已书签(C4)*/
   isBookmarked: boolean;
   /** 切换书签(Cmd+D 也走这个)*/
@@ -52,6 +53,8 @@ interface EBookToolbarProps {
   onPrevChapter?: () => void;
   onNextChapter?: () => void;
   onFontSizeChange?: (delta: number) => void;
+  /** 关闭当前 ebook view(× 按钮)*/
+  onClose: () => void;
 }
 
 const ZOOM_PRESETS = [
@@ -72,7 +75,6 @@ export function EBookToolbar({
   renderMode,
   sidebarOpen,
   onSidebarToggle,
-  onSearchOpen,
   isBookmarked,
   onBookmarkToggle,
   currentPage,
@@ -92,6 +94,7 @@ export function EBookToolbar({
   onPrevChapter,
   onNextChapter,
   onFontSizeChange,
+  onClose,
 }: EBookToolbarProps) {
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
@@ -162,6 +165,20 @@ export function EBookToolbar({
     const next = Math.min(FONT_MAX, fontSize + FONT_STEP);
     onFontSizeChange(next);
   }, [fontSize, onFontSizeChange]);
+
+  // ── 通用尾部 handlers(Open / ⊞ 走 popup-registry;🔄 仍占位)──
+
+  const handleOpenClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
+    popupController.toggle(EBOOK_OPEN_POPUP_ID, e.currentTarget);
+  }, []);
+
+  const handleViewSwitchClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
+    popupController.toggle(EBOOK_VIEW_SWITCH_POPUP_ID, e.currentTarget);
+  }, []);
+
+  const handleReloadPlaceholder = useCallback(() => {
+    console.log('[ebook-toolbar] reload — 占位符');
+  }, []);
 
   // ── 渲染条件 ──
 
@@ -242,121 +259,143 @@ export function EBookToolbar({
         </div>
       )}
 
-      {/* Right: 书签 + 缩放 / 字号(按 renderMode 切换)+ 搜索 */}
-      {showFixedNav && (
-        <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
-          {/* C5:PDF 空间标注模式切换 */}
-          <button
-            className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'rect' ? 'krig-ebook-toolbar__btn--active' : ''}`}
-            onClick={() =>
-              onPdfAnnotationModeChange?.(pdfAnnotationMode === 'rect' ? 'off' : 'rect')
-            }
-            title="线框标注(拖拽画矩形)"
-          >
-            ▢
-          </button>
-          <button
-            className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'underline' ? 'krig-ebook-toolbar__btn--active' : ''}`}
-            onClick={() =>
-              onPdfAnnotationModeChange?.(
-                pdfAnnotationMode === 'underline' ? 'off' : 'underline',
-              )
-            }
-            title="横线标注(拖拽画下划线)"
-          >
-            ▁
-          </button>
-          <button
-            className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
-            onClick={onBookmarkToggle}
-            title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
-          >
-            {isBookmarked ? '★' : '☆'}
-          </button>
-          {onExtract && (
+      {/* Right: 模式特定按钮(标注/书签/缩放 或 字号)+ 通用尾部(Open / 🔄 / ⊞▾ / ×)*/}
+      <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
+        {/* — PDF 专属:标注模式 + 书签 + 提取 + 缩放 — */}
+        {showFixedNav && (
+          <>
+            <button
+              className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'rect' ? 'krig-ebook-toolbar__btn--active' : ''}`}
+              onClick={() =>
+                onPdfAnnotationModeChange?.(pdfAnnotationMode === 'rect' ? 'off' : 'rect')
+              }
+              title="线框标注(拖拽画矩形)"
+            >
+              ▢
+            </button>
+            <button
+              className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'underline' ? 'krig-ebook-toolbar__btn--active' : ''}`}
+              onClick={() =>
+                onPdfAnnotationModeChange?.(
+                  pdfAnnotationMode === 'underline' ? 'off' : 'underline',
+                )
+              }
+              title="横线标注(拖拽画下划线)"
+            >
+              ▁
+            </button>
+            <button
+              className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
+              onClick={onBookmarkToggle}
+              title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
+            >
+              {isBookmarked ? '★' : '☆'}
+            </button>
+            {onExtract && (
+              <button
+                className="krig-ebook-toolbar__btn"
+                onClick={onExtract}
+                disabled={extractDisabled}
+                title="提取 PDF 到 Note(KRIG Knowledge Platform)"
+              >
+                📤
+              </button>
+            )}
             <button
               className="krig-ebook-toolbar__btn"
-              onClick={onExtract}
-              disabled={extractDisabled}
-              title="提取 PDF 到 Note(KRIG Knowledge Platform)"
+              onClick={handleZoomOut}
+              title="缩小"
             >
-              📤
+              −
             </button>
-          )}
-          <button
-            className="krig-ebook-toolbar__btn"
-            onClick={onSearchOpen}
-            title="搜索 (⌘F)"
-          >
-            🔍
-          </button>
-          <button
-            className="krig-ebook-toolbar__btn"
-            onClick={handleZoomOut}
-            title="缩小"
-          >
-            −
-          </button>
-          <select
-            className="krig-ebook-toolbar__zoom-select"
-            value={fitWidth ? 'fit-width' : String(scale)}
-            onChange={handleZoomChange}
-          >
-            <option value="fit-width">适应宽度</option>
-            {ZOOM_PRESETS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-            {!fitWidth && !ZOOM_PRESETS.some((p) => p.value === scale) && (
-              <option value={scale}>{Math.round(scale * 100)}%</option>
-            )}
-          </select>
-          <button
-            className="krig-ebook-toolbar__btn"
-            onClick={handleZoomIn}
-            title="放大"
-          >
-            +
-          </button>
-        </div>
-      )}
+            <select
+              className="krig-ebook-toolbar__zoom-select"
+              value={fitWidth ? 'fit-width' : String(scale)}
+              onChange={handleZoomChange}
+            >
+              <option value="fit-width">适应宽度</option>
+              {ZOOM_PRESETS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+              {!fitWidth && !ZOOM_PRESETS.some((p) => p.value === scale) && (
+                <option value={scale}>{Math.round(scale * 100)}%</option>
+              )}
+            </select>
+            <button
+              className="krig-ebook-toolbar__btn"
+              onClick={handleZoomIn}
+              title="放大"
+            >
+              +
+            </button>
+          </>
+        )}
 
-      {showReflowNav && (
-        <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--right">
-          <button
-            className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
-            onClick={onBookmarkToggle}
-            title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
-          >
-            {isBookmarked ? '★' : '☆'}
-          </button>
-          <button
-            className="krig-ebook-toolbar__btn"
-            onClick={onSearchOpen}
-            title="搜索 (⌘F)"
-          >
-            🔍
-          </button>
-          <button
-            className="krig-ebook-toolbar__btn"
-            onClick={handleFontMinus}
-            title="缩小字号"
-            disabled={fontSize <= FONT_MIN}
-          >
-            A−
-          </button>
-          <span className="krig-ebook-toolbar__font-size">{fontSize}%</span>
-          <button
-            className="krig-ebook-toolbar__btn"
-            onClick={handleFontPlus}
-            title="放大字号"
-            disabled={fontSize >= FONT_MAX}
-          >
-            A+
-          </button>
-        </div>
-      )}
+        {/* — EPUB 专属:书签 + 字号 — */}
+        {showReflowNav && (
+          <>
+            <button
+              className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
+              onClick={onBookmarkToggle}
+              title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
+            >
+              {isBookmarked ? '★' : '☆'}
+            </button>
+            <button
+              className="krig-ebook-toolbar__btn"
+              onClick={handleFontMinus}
+              title="缩小字号"
+              disabled={fontSize <= FONT_MIN}
+            >
+              A−
+            </button>
+            <span className="krig-ebook-toolbar__font-size">{fontSize}%</span>
+            <button
+              className="krig-ebook-toolbar__btn"
+              onClick={handleFontPlus}
+              title="放大字号"
+              disabled={fontSize >= FONT_MAX}
+            >
+              A+
+            </button>
+          </>
+        )}
+
+        {/* — 通用尾部:Open(popup)/ 🔄(占位)/ ⊞(popup)/ × — */}
+        <button
+          className="krig-ebook-toolbar__btn krig-ebook-toolbar__btn--open"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleOpenClick}
+          title="打开电子书"
+        >
+          Open
+        </button>
+        <button
+          className="krig-ebook-toolbar__btn"
+          onClick={handleReloadPlaceholder}
+          title="重置(占位符)"
+        >
+          🔄
+        </button>
+        <button
+          className="krig-ebook-toolbar__btn"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleViewSwitchClick}
+          title="切换视图"
+        >
+          ⊞
+        </button>
+        <button
+          className="krig-ebook-toolbar__btn krig-ebook-toolbar__btn--close"
+          onClick={onClose}
+          title="关闭此面板"
+          aria-label="关闭此面板"
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 }

@@ -21,12 +21,18 @@
  */
 
 import { registerView } from '@slot/view-type-registry/register-view';
+import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
 import { EBookView } from './EBookView';
 import { registerEBookCommands } from './bookshelf-commands';
 import { registerNavSide, registerFolderTreeContextMenu } from './nav-side-content';
+import { EBookOpenPopup } from './ebook-open-popup/EBookOpenPopup';
+import { EBookViewSwitchPopup } from './ebook-view-switch-popup/EBookViewSwitchPopup';
+import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID } from './popup-ids';
+
+const VIEW = 'ebook-view';
 
 registerView({
-  id: 'ebook-view',
+  id: VIEW,
   install: [
     'ebook-library',    // L5-C1:书架 + 文件夹 + 标注 + 数据传输
     'ebook-rendering',  // L5-C2:PDF Canvas 渲染 + 虚拟滚动 + Text Layer
@@ -39,3 +45,17 @@ registerView({
 registerEBookCommands();
 registerNavSide();
 registerFolderTreeContextMenu();
+
+// Toolbar Open / ⊞ 弹层注册(走 popup-registry,EBookToolbar 用 popupController.toggle 触发)
+popupRegistry.register({
+  id: EBOOK_OPEN_POPUP_ID,
+  view: VIEW,
+  Component: EBookOpenPopup,
+  estimatedSize: { width: 320, height: 420 },
+});
+popupRegistry.register({
+  id: EBOOK_VIEW_SWITCH_POPUP_ID,
+  view: VIEW,
+  Component: EBookViewSwitchPopup,
+  estimatedSize: { width: 140, height: 200 },
+});

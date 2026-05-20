@@ -114,6 +114,16 @@ export function registerEBookCommands(): void {
     const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
     await library.transferToManaged(bookId);
   });
+
+  // ⊞ Toolbar 视图切换:在右槽打开 commandArg=viewId(对齐 note-view.open-right-slot)
+  commandRegistry.register('ebook-view.open-right-slot', (viewId: unknown) => {
+    if (typeof viewId !== 'string') return;
+    const wsId = getActiveWorkspaceId();
+    if (!wsId) return;
+    const bus = workspaceManager.getBus(wsId);
+    if (!bus) return;
+    bus.slot.openRight(viewId);
+  });
 }
 
 // ── 桥接器(nav-side-content mount 时挂上,unmount 清掉)──

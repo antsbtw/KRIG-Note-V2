@@ -1,0 +1,30 @@
+/* EBookViewSwitchPopup — Toolbar ⊞ 视图切换菜单 */
+
+.krig-ebook-view-switch-popup {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  padding: 4px;
+  gap: 1px;
+}
+
+.krig-ebook-view-switch-popup__item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #e8eaed;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.krig-ebook-view-switch-popup__item:hover {
+  background: #3a3a3a;
+}
