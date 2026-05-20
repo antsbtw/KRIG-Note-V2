@@ -113,6 +113,10 @@ export function Host(props: TextEditingHostProps) {
   // 改成"指纹比较":emit 时记下 JSON;收到 prop 变化时,先看 JSON 是否字面等于上次 emit
   // 的,若是 → 这是 echo-back,跳过(用户实际 PM state 已是最新)。
   const lastEmittedJsonRef = useRef<string | null>(null);
+  // 用户最近一次 emit 的时间戳 — echo-back 守护窗口(broadcast roundtrip 通常 < 200ms,
+  // 期间任何 prop.doc 变化都视为 echo-back 滞后,跳过 replaceWith。切笔记几乎不会在用户
+  // 刚打字 200ms 内发生,误报近 0。)
+  const lastEmitTsRef = useRef<number>(0);
 
   // IME 输入(composing)期间 pending 的外部 doc 更新 — composition end 后再 flush。
   // PM 原则:view.composing=true 时不能 dispatch 任何 tr,否则会破坏 IME 预编辑状态,
@@ -157,6 +161,7 @@ export function Host(props: TextEditingHostProps) {
           } else {
             // 记下指纹 — 用于识别 useEffect 收到的是 echo-back(避免重复 dispatch replaceWith)
             lastEmittedJsonRef.current = JSON.stringify(serialized.payload);
+            lastEmitTsRef.current = Date.now();
             onChangeRef.current?.(serialized);
           }
         }
@@ -187,6 +192,7 @@ export function Host(props: TextEditingHostProps) {
       if (composed) {
         pendingComposingDocRef.current = null;
         lastEmittedJsonRef.current = JSON.stringify(composed.payload);
+        lastEmitTsRef.current = Date.now();
         onChangeRef.current?.(composed);
       }
       requestAnimationFrame(() => {
@@ -242,6 +248,11 @@ export function Host(props: TextEditingHostProps) {
     //    最新,不需要 replaceWith(否则会触发 selection jump = 光标跳)。
     const incomingJson = JSON.stringify(nextDoc.payload);
     if (incomingJson === lastEmittedJsonRef.current) return true;
+    // 1.5. echo-back 时间窗守护 — 用户刚 emit 后 200ms 内,任何 prop.doc 变化都视为
+    //    broadcast roundtrip 滞后(或字段重排后失配的 echo),view.state.doc 一定比 nextDoc
+    //    更新,绝不能用旧 doc 覆盖。切笔记几乎不会在用户刚打字后 200ms 内发生(误报近 0)。
+    //    本守护是修光标跳 / 输入字符落到错位段落 bug 的核心(2026-05-20 排查)。
+    if (Date.now() - lastEmitTsRef.current < 200) return true;
     // 2. 真外部更新(切笔记 / 别处更新同 note doc)→ deserialize 并比 + replaceWith
     const schema = view.state.schema;
     const newDoc = deserializeDoc(nextDoc, schema);
