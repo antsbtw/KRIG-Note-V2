@@ -28,3 +28,17 @@ html, body {
   flex-direction: column;
   height: 100%;
 }
+
+/* pdfjs-dist 加载时会往 <body> 直接注入一个用于离屏渲染/文本测量的辅助 canvas
+   (className "hiddenCanvasElement")。原厂 pdfjs-dist/web/pdf_viewer.css 把它
+   display:none + 尺寸归零;我们没引入整套 viewer.css(避免污染),所以需要这一条
+   补丁。否则 canvas 默认 display:inline + 实际高度,会撑大 body,导致整页
+   (顶栏 + 所有 slot)可滚出 viewport。 */
+.hiddenCanvasElement {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  display: none;
+}
