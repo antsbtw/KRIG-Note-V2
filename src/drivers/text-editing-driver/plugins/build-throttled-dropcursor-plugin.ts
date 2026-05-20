@@ -205,16 +205,31 @@ class ThrottledDropCursorView {
   }
 
   private onDragend(): void {
+    // 同 onDrop:丢弃 pending dragover,避免 rAF 跑完覆盖清理 timer
+    this.cancelPendingDragover();
     this.scheduleRemoval(20);
   }
 
+  // 取消 rAF 内 pending 的 dragover 计算 — 在 drop/dragend/dragleave 时调用,
+  // 防止"刚 stash 但没跑的 dragover"在 drop 之后 rAF tick 时调用
+  // scheduleRemoval(5000) 覆盖掉 drop 设的 scheduleRemoval(20),致蓝线挂 5 秒。
+  private cancelPendingDragover(): void {
+    if (this.rafPending) {
+      cancelAnimationFrame(this.rafPending);
+      this.rafPending = 0;
+    }
+    this.pendingDragoverEvent = null;
+  }
+
   private onDrop(): void {
+    this.cancelPendingDragover();
     this.scheduleRemoval(20);
   }
 
   private onDragleave(event: DragEvent): void {
     const target = event.relatedTarget as Node | null;
     if (!target || !this.editorView.dom.contains(target)) {
+      this.cancelPendingDragover();
       this.setCursor(null);
     }
   }
