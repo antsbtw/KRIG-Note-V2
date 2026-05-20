@@ -56,3 +56,42 @@ export interface FolderInfo {
  * capability folder/types.ts re-export 该类型给消费者.
  */
 export type FolderViewType = 'note' | 'graph' | 'ebook' | 'thought';
+
+/**
+ * NOTE_DOC_CONTENT_CHANGED origin 常量
+ *
+ * 用常量而非裸字符串 union — 避免散落字面值拼写漂移(如 'ebook-reading-thoughts' /
+ * 'ebook_reading_thought');任何调用方写 broadcast 时引用此常量, IDE 自动补全 +
+ * grep 可查所有使用点。
+ */
+export const NOTE_DOC_ORIGIN = {
+  /** renderer 通过 NOTE_UPDATE IPC 进来的用户编辑 */
+  NOTE_EDITOR: 'note-editor',
+  /** ebook capability addReadingThoughtBlock / removeReadingThoughtBlock 触发 */
+  EBOOK_READING_THOUGHT: 'ebook-reading-thought',
+  /** extraction-import 路径创建/更新(本 PR 暂不接入, 留 followup) */
+  EXTRACTION_IMPORT: 'extraction-import',
+  /** 启动时 migration 修正 doc (留 followup) */
+  MIGRATION: 'migration',
+} as const;
+
+export type NoteDocOrigin = typeof NOTE_DOC_ORIGIN[keyof typeof NOTE_DOC_ORIGIN];
+
+/**
+ * NOTE_DOC_CONTENT_CHANGED payload — 单个 note 的 doc 变化推送
+ *
+ * 跟 NOTE_LIST_CHANGED 的区别:
+ * - NOTE_LIST_CHANGED:整个 list 元数据(title / folderId / updatedAt 等), 所有订阅者收
+ * - NOTE_DOC_CONTENT_CHANGED:单个 noteId+doc payload, 发起 renderer **不收**(防 echo 回灌)
+ *
+ * emitterId:有时表示"NOTE_UPDATE 经 IPC handler 进来的发起 renderer", main 内部直接
+ * 调 updateNote(ebook capability 等)时 undefined。main broadcast 时据此排除该 renderer。
+ */
+export interface NoteDocContentChangedPayload {
+  noteId: string;
+  doc: NoteDocEnvelope;
+  origin: NoteDocOrigin;
+  updatedAt: number;
+  /** 仅 origin=NOTE_EDITOR 时有 — 发起更新的 renderer webContents.id */
+  emitterId?: number;
+}

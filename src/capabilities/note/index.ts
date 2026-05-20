@@ -23,9 +23,16 @@ import type {
   NoteCapabilityApi,
   NoteInfo,
   NoteDocEnvelope,
+  NoteDocContentChangedPayload,
 } from './types';
 
-export type { NoteCapabilityApi, NoteInfo, NoteDocEnvelope } from './types';
+export type {
+  NoteCapabilityApi,
+  NoteInfo,
+  NoteDocEnvelope,
+  NoteDocContentChangedPayload,
+  NoteDocOrigin,
+} from './types';
 export { clearLegacyLocalStorage };
 
 // 模块加载时清一次 V1 残留 (idempotent + 防御性,即便 L5-alive 路径未跑也兜底)
@@ -55,6 +62,11 @@ async function deleteNote(id: string): Promise<void> {
 function onListChanged(callback: (list: NoteInfo[]) => void): () => void {
   return window.electronAPI.onNoteListChanged(callback);
 }
+function onDocContentChanged(
+  callback: (payload: NoteDocContentChangedPayload) => void,
+): () => void {
+  return window.electronAPI.onNoteDocContentChanged(callback);
+}
 
 export const noteCapability: NoteCapabilityApi = {
   createNote,
@@ -64,6 +76,7 @@ export const noteCapability: NoteCapabilityApi = {
   moveNote,
   deleteNote,
   onListChanged,
+  onDocContentChanged,
 };
 
 // W5 严格态:Registry 注册 — view 走 requireCapabilityApi<NoteCapabilityApi>('note')

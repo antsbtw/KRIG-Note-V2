@@ -115,6 +115,7 @@ export const IPC_CHANNELS = {
   NOTE_MOVE: 'note.move',
   NOTE_DELETE: 'note.delete',
   NOTE_LIST_CHANGED: 'note.list-changed',           // main → renderer 推送
+  NOTE_DOC_CONTENT_CHANGED: 'note.doc-content-changed', // main → renderer 推送(单 note doc 变化,发起者除外)
 
   // thought capability(横切思考层 — thought-view-port.md v0.5 §5.3)
   // 9 channel-names = 8 invoke(对应 §5.3 API #1–#8) + 1 broadcast

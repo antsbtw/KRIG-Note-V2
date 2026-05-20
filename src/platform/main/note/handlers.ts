@@ -12,6 +12,7 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { NoteDocEnvelope } from '@shared/ipc/note-folder-types';
+import { NOTE_DOC_ORIGIN } from '@shared/ipc/note-folder-types';
 import {
   createNote,
   listNotes,
@@ -20,7 +21,7 @@ import {
   moveNote,
   deleteNote,
 } from './capability-impl';
-import { broadcastNoteListChanged } from './broadcast';
+import { broadcastNoteListChanged, broadcastNoteDocContentChanged } from './broadcast';
 
 function isDocEnvelope(v: unknown): v is NoteDocEnvelope {
   if (!v || typeof v !== 'object') return false;
@@ -50,11 +51,22 @@ export function registerNoteHandlers(): void {
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.NOTE_UPDATE, async (_e, payload: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.NOTE_UPDATE, async (e, payload: unknown) => {
     const p = payload as { id?: unknown; doc?: unknown } | null;
     if (!p || typeof p.id !== 'string' || !p.id) return null;
     if (!isDocEnvelope(p.doc)) return null;
     const note = await updateNote(p.id, p.doc);
+    if (note) {
+      // 新 channel:发起者(e.sender.id)不收;NavSide / TOC 等仍走老 channel
+      // 顺序:先 DOC_CONTENT_CHANGED (内容), 后 LIST_CHANGED (元数据派生)
+      broadcastNoteDocContentChanged({
+        noteId: note.id,
+        doc: note.doc,
+        origin: NOTE_DOC_ORIGIN.NOTE_EDITOR,
+        updatedAt: note.updatedAt,
+        emitterId: e.sender.id,
+      });
+    }
     await broadcastNoteListChanged();
     return note;
   });
