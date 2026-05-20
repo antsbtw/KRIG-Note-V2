@@ -176,7 +176,7 @@ export function registerAICommands(): void {
     const bus = workspaceManager.getBus(wsId);
     if (bus) {
       bus.slot.openRight('thought-view');
-      bus.channels.emit('thought.activate', { thoughtId: thoughtIdToActivate });
+      bus.channels.emit('thought.activate', { thoughtId: thoughtIdToActivate, emittedAt: Date.now() });
     }
   });
 

@@ -13,12 +13,19 @@ interface PopupState {
   activeId: string | null;
   /** anchor 元素的 viewport 坐标 rect(给 binding 算 popup 位置)*/
   anchorRect: DOMRect | null;
+  /**
+   * show 序号(每次 show 自增),配合 PopupBinding 里 key={activeId-showSeq}
+   * 让"同 id 重复 show"也能强制 Component remount —— pending-context 模式
+   * (AskAIPanel 等)依赖 mount 时 consume,不 remount 会让新 ctx 永远不被读取。
+   */
+  showSeq: number;
 }
 
 const EMPTY_STATE: PopupState = Object.freeze({
   visible: false,
   activeId: null,
   anchorRect: null,
+  showSeq: 0,
 });
 
 class PopupController {
@@ -27,7 +34,12 @@ class PopupController {
 
   show(activeId: string, anchorEl: Element): void {
     const rect = anchorEl.getBoundingClientRect();
-    this.state = { visible: true, activeId, anchorRect: rect };
+    this.state = {
+      visible: true,
+      activeId,
+      anchorRect: rect,
+      showSeq: this.state.showSeq + 1,
+    };
     this.notify();
   }
 

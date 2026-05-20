@@ -71,7 +71,7 @@ export async function addThoughtFromNote(): Promise<void> {
   const bus = workspaceManager.getBus(wsId);
   if (bus) {
     bus.slot.openRight('thought-view');
-    bus.channels.emit('thought.activate', { thoughtId, anchor });
+    bus.channels.emit('thought.activate', { thoughtId, anchor, emittedAt: Date.now() });
   }
 }
 

@@ -99,7 +99,7 @@ export function registerNoteBridge(): void {
       if (!bus) return;
       // 开右槽 ThoughtView + 广播激活(ThoughtView 监听 channel 切 active)
       bus.slot.openRight('thought-view');
-      bus.channels.emit('thought.activate', { thoughtId });
+      bus.channels.emit('thought.activate', { thoughtId, emittedAt: Date.now() });
     },
     resolveThoughtType: (thoughtId) => thoughtCache.get(thoughtId)?.type ?? null,
   });
