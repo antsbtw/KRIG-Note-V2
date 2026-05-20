@@ -142,10 +142,12 @@
 .krig-pm-host .ProseMirror ol.krig-ordered-list > li::before {
   content: counter(ordered-item) '.';
   position: absolute;
-  left: 0;
+  /* 用 right 锚点替代固定 width:20px：marker 向左自然生长，10/100+ 不会被裁
+   * 等价于 marker 右边界距 li 左边 20px(li 有 padding-left:24px,留 4px 间距给文字) */
+  right: calc(100% - 20px);
   top: 3px;
-  width: 20px;
   text-align: right;
+  white-space: nowrap;
   color: inherit;
   font-variant-numeric: tabular-nums;
 }
