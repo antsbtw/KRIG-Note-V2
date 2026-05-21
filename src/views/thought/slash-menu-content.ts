@@ -28,6 +28,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-image',
       keywords: ['image', 'picture', 'photo', 'img', '图片'],
       view: VIEW,
+      group: 'media',
+      icon: 'image',
       order: 130,
     },
     {
@@ -36,6 +38,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-audio',
       keywords: ['audio', 'music', 'sound', 'mp3', '音频'],
       view: VIEW,
+      group: 'media',
+      icon: 'audio-lines',
       order: 145,
     },
     {
@@ -44,6 +48,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-video',
       keywords: ['video', 'movie', 'mp4', '视频'],
       view: VIEW,
+      group: 'media',
+      icon: 'video',
       order: 150,
     },
     {
@@ -52,6 +58,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-tweet',
       keywords: ['tweet', 'twitter', 'x', '推文'],
       view: VIEW,
+      group: 'media',
+      icon: 'twitter',
       order: 155,
     },
     {
@@ -60,6 +68,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-file-block',
       keywords: ['file', 'attach', '文件', '附件'],
       view: VIEW,
+      group: 'media',
+      icon: 'paperclip',
       order: 160,
     },
     {
@@ -68,6 +78,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-external-ref',
       keywords: ['ref', 'external', 'link', '外链', '引用'],
       view: VIEW,
+      group: 'media',
+      icon: 'external-link',
       order: 170,
     },
     {
@@ -76,6 +88,8 @@ function createBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-table',
       keywords: ['table', '表格'],
       view: VIEW,
+      group: 'advanced',
+      icon: 'table',
       order: 180,
     },
   ];

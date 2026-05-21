@@ -12,9 +12,11 @@
  *
  * 关闭条件:
  *  - 选区变非空(用户拖选)
- *  - query 含空格 / 换行
+ *  - query 含换行
  *  - 光标移到 triggerPos 之前(用户删了 `/`)
  *  - Esc(由 SlashMenuBinding 监听)
+ *
+ * NOTE:空格不再关闭(Notion 行为)— 允许 "/2 col" / "task list" 等多词检索。
  */
 
 import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
@@ -51,7 +53,7 @@ export function buildSlashPlugin(viewId: string): Plugin {
           const queryTo = sel.from;
           if (queryTo < queryFrom) return initialState;
           const text = newState.doc.textBetween(queryFrom, queryTo, '\n');
-          if (text.includes('\n') || text.includes(' ')) return initialState;
+          if (text.includes('\n')) return initialState;
           return { ...prev, query: text };
         }
 

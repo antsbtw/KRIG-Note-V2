@@ -158,7 +158,17 @@ export function registerTextEditingCommands(): void {
   registerSlashTurn('text-editing.slash-turn-ordered', 'ordered-list');
   registerSlashTurn('text-editing.slash-turn-task', 'task-list');
   registerSlashTurn('text-editing.slash-turn-quote', 'blockquote');
-  registerSlashTurn('text-editing.slash-turn-code', 'code-block');
+  // slash-turn-code 单独注册:支持 payload { language } —— `/code python` 直接落语言
+  commandRegistry.register('text-editing.slash-turn-code', (payload?: unknown) => {
+    const id = resolveInstanceId();
+    if (!id) return;
+    tea.clearSlashTrigger(id);
+    const lang =
+      payload && typeof payload === 'object' && 'language' in payload
+        ? String((payload as { language: unknown }).language ?? '')
+        : '';
+    tea.turnIntoSelection(id, 'code-block', lang || undefined);
+  });
   registerSlashTurn('text-editing.slash-turn-divider', 'horizontal-rule');
   registerSlashTurn('text-editing.slash-turn-callout', 'callout');
   registerSlashTurn('text-editing.slash-turn-toggle', 'toggle-list');
