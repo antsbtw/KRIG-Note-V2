@@ -246,6 +246,17 @@ Thought 的内容         → thought.doc_content（Atom[] inline）
 - 长期目标作为本规范的"远期愿景"登记，未来由专项工作推进
 - 现有视图（Note / Graph）的工作不被这个愿景阻塞
 
+**2026-05-21 反向更新(L7 block atomization sub-phase 完成后)**:
+
+V2 字面通过 [decision 025](../RefactorV2/data-model/atom/decisions/025-atom-granularity-current-form-acknowledgment.md) + [decision 026](../RefactorV2/data-model/persistence/decisions/026-block-atomization-sub-phase-design.md) 字面**部分**走出 v1.2 工程妥协:
+
+- ✅ **Note 视图字面 block 独立化**:Note 的 doc_content 字面从"整篇 1 atom"字面升级为"单 block = 1 pm atom + 边集合"
+- ✅ **Graph 视图字面已是 instance 模型**(decision 014 字面 sub-phase 3a-1 完成):每节点字面 1 graph-instance atom
+- ❌ **投影模型字面不在 L7 sub-phase 范围**(decision 026 §0.2 字面拍板):L7 字面解 atom 颗粒度,字面不解"语义层 vs 渲染层彻底分离"
+- ❌ **跨 note Block 共享 / 多视图 Block 复用**字面不在 L7 范围(留 future sub-phase)
+
+→ 字面 V2 当前状态:**Note + Graph 字面都是 block-level atom**(可被边直接引用),但字面**仍是单视图持有自己副本**(无跨视图共享)。投影模型字面仍是远期愿景。
+
 ### 2.5 关系（Relation）的归属问题
 
 > 这是一个 **Open Question**（详见 § 7.1）。
@@ -505,11 +516,18 @@ Note 视图 → Note 转换层 → 语义层 (atom[]) → Graph 转换层 → Gr
 
 ### 6.4 中长期演化路径
 
-- **Block 独立化**（spec v1.0 / v1.1 提过的方向）
-  - SurrealDB 增加 `block:[id]` 表
+- **Block 独立化**（spec v1.0 / v1.1 提过的方向)
+  - ~~SurrealDB 增加 `block:[id]` 表~~
   - 各视图通过 blockId 引用语义层，而不是 inline 存 Atom[]
   - 实现真正的"跨视图 Block 复用"和"修改一处自动同步多视图"
   - 不阻塞 v1.3，但是语义层落地的最终形态
+
+  → **2026-05-21 反向更新(L7 block atomization sub-phase 完成后)**:V2 字面**部分兑现**:
+  - ✅ Note 视图字面 block 独立化字面已落地(decision 026)
+  - ✅ blockId 字面引用语义层(belongsToNote / nextSibling / childOf 边)
+  - ⚠ **字面落地选择**:字面**不**字面增 `block:[id]` 独立表,字面沿用 `atom` 表(block-level atom 字面 domain='pm' + payload 单 block JSON);字面与本节字面"增独立表"字面**略有差异**,详 [decision 025 §2.2](../RefactorV2/data-model/atom/decisions/025-atom-granularity-current-form-acknowledgment.md) 字面拍板理由
+  - ❌ **"跨视图 Block 复用"字面字面留 future sub-phase**(L7 字面解 atom 颗粒度,字面不解多视图共享)
+
 - **新视图引入**（按业务需求节奏）
   - TimelineView / MindMapView / KanbanView / BPMNView 等
   - 每个新视图按本规范设计，独立增加一个柱子（图 § 1.1）
@@ -581,6 +599,7 @@ Note 视图 → Note 转换层 → 语义层 (atom[]) → Graph 转换层 → Gr
 | **版本图**（用户主动按钮创建新版本，版本间有语义关系） | **远期愿景**，KRIG 知识表达的差异化方向 | 2026-04-25 |
 | v1.3 阶段不实施投影模型 / 版本图 | 工程妥协，保留 atom 内联现状 | 2026-04-25 |
 | 关系是否在语义层 | 待定（Open Question 7.1） | 2026-04-25 |
+| **L7 block atomization sub-phase** 字面落地 Note 视图 block 独立化 | 字面**部分兑现** 6.4 字面 "Block 独立化" 愿景:Note doc 字面拆 block-level atom + 边集合;字面仍**不**实施跨视图共享 / 投影模型(留 future sub-phase)。字面**字面落地选择**:沿用 atom 表,字面不增 `block:[id]` 独立表(详 decision 025 §2.2)。详 [decision 026](../RefactorV2/data-model/persistence/decisions/026-block-atomization-sub-phase-design.md) + [完成报告](../RefactorV2/notes/block-atomization-completion-report-2026-05-21.md) | **2026-05-21** |
 
 ---
 

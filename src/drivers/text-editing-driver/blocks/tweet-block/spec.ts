@@ -15,7 +15,7 @@
  * V1 → V2 改造:
  * - 砍 V1 的 richText / embedHtml(V1 也只用 text;richText 是预留;embedHtml 走 oEmbed
  *   备用路径,本阶段不上)
- * - 砍 V1 的 sourcePages / thoughtId,KRIG 挂钩留 atomId 占位
+ * - 砍 V1 的 sourcePages / thoughtId;atomId 由 L7 block atomization rename 为 id 承接
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -47,8 +47,9 @@ const tweetBlockNodeSpec: NodeSpec = {
     // L5-B3.18 用户红线:下载视频本地路径持久化(切回笔记仍可点 📁 Finder 高亮)
     // null = 未下载;有值 = 完成下载,Download 按钮显 📁
     downloadedVideoPath: { default: null },
-    // KRIG 知识图谱挂钩(留 null,Phase D 接入)
-    atomId: { default: null },
+    // L7 block atomization (decision 026 §3.1.1 / §4 / §4.4 字面 rename atomId→id):
+    // block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
     bookAnchor: { default: null },
   },

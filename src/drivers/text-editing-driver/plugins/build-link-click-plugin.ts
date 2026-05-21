@@ -47,6 +47,13 @@ export interface LinkClickHandler {
    *    (异步 IPC 查询不适合 NodeView render 路径)
    */
   resolveNoteTitle?: (noteId: string) => string | null;
+  /**
+   * L7 block atomization Stage 5(decision 026 §7.3):
+   * 用户点击旧 URL(krig://block/<noteId>/<V1 anchor>)字面触发,view 字面弹 toast 提示
+   * "链接已失效,请重新复制"。
+   * 可选 — 若 view 不实现,driver 字面 console.warn 静默退出。
+   */
+  onLegacyBlockAnchor?: (anchor: string) => void;
 }
 
 let activeHandler: LinkClickHandler | null = null;
@@ -61,44 +68,73 @@ export function getLinkClickHandler(): LinkClickHandler | null {
 }
 
 /**
- * 滚动到目标 block(同文档 krig://block 路径 / 加载完成后路径)
+ * 字面判断:此 anchor 是 V1 旧格式(含 ':' 表 idx:text;或纯文本不是 ULID 格式)?
  *
- * anchor 格式:
- * - 纯文本 → 按 heading 文本前缀匹配
- * - "idx:前缀文本" → 按顺序索引 + 文本前缀匹配(给非 heading block 用,本阶段暂不必)
+ * L7 block atomization Stage 5(decision 026 §7.3):
+ * 新 URL 字面 `krig://block/<noteId>/<blockId>`,blockId 字面是 ULID(26 字符 Crockford Base32 大写)。
+ *
+ * V1 旧格式两种字面命中:
+ * - `<idx>:<前30字>` — 字面含 ':' 字符
+ * - `<heading text 前60字>` — 不含 ':' 但 length / charset 字面跟 ULID 不匹配
+ *
+ * ULID 字面 26 字符,字符集 0-9 + A-Z(不含 I/L/O/U,Crockford Base32)。
+ */
+function isV1LegacyAnchor(anchor: string): boolean {
+  // 含 ':' → 字面 V1 'idx:text' 格式
+  if (anchor.includes(':')) return true;
+  // 长度不是 26 字符 → 不是 ULID
+  if (anchor.length !== 26) return true;
+  // 字符集校验:大写 + 数字 + Crockford(去 I/L/O/U)
+  return !/^[0-9A-HJ-KM-NP-TV-Z]{26}$/.test(anchor);
+}
+
+/**
+ * 滚动到目标 block(同文档 krig://block 路径 / 加载完成后路径)。
+ *
+ * L7 block atomization Stage 5 升级(decision 026 §7.3):
+ * 旧版按 heading text / idx:text 字面匹配 — 字面漂移失效。
+ * 新版按 blockId(== PM attrs.id)字面精确定位,跨编辑稳定。
+ *
+ * 字面检测旧格式 anchor → console.error + 调 onLegacyAnchor callback(view 端字面弹 toast)。
  */
 export function scrollToBlockAnchor(view: EditorView, anchor: string): void {
-  const decoded = decodeURIComponent(anchor);
+  // 旧格式字面检测 — 弹 UI 提示
+  if (isV1LegacyAnchor(anchor)) {
+    console.warn(
+      `[link-click] V1 旧格式 anchor 字面失效(L7 block atomization):${anchor}\n` +
+        `  字面请重新复制链接(新格式 krig://block/<noteId>/<blockId>,blockId 是 26 字符 ULID)。`,
+    );
+    activeHandler?.onLegacyBlockAnchor?.(anchor);
+    return;
+  }
+
+  const blockId = anchor; // 新格式 anchor 字面就是 blockId
   const doc = view.state.doc;
   let targetPos: number | null = null;
 
-  doc.forEach((node, offset) => {
-    if (targetPos !== null) return;
-    if (node.type.name === 'heading') {
-      const text = node.textContent.trim();
-      if (text === decoded || text.startsWith(decoded)) {
-        targetPos = offset;
-      }
+  doc.descendants((node, pos) => {
+    if (targetPos !== null) return false;
+    const id = node.attrs?.id as string | null | undefined;
+    if (id === blockId) {
+      targetPos = pos;
+      return false;
     }
+    return true;
   });
-  // 标题没匹配 → 全文前缀搜索兜底
+
   if (targetPos === null) {
-    doc.forEach((node, offset) => {
-      if (targetPos !== null) return;
-      if (node.textContent.trim().startsWith(decoded)) {
-        targetPos = offset;
-      }
-    });
+    console.warn(`[link-click] blockId ${blockId} not found in current doc`);
+    return;
   }
 
-  if (targetPos !== null) {
-    const dom = view.nodeDOM(targetPos);
-    if (dom instanceof HTMLElement) {
-      dom.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      dom.classList.add('krig-block-link-highlight');
-      window.setTimeout(() => dom.classList.remove('krig-block-link-highlight'), 2000);
-    }
-  }
+  const dom = view.nodeDOM(targetPos);
+  // [feedback_pm_dom_at_pos_text_node] DOM 字面可能是 text node → parentElement 兜底
+  const target =
+    dom instanceof HTMLElement ? dom : (dom?.parentElement ?? null);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  target.classList.add('krig-block-link-highlight');
+  window.setTimeout(() => target.classList.remove('krig-block-link-highlight'), 2000);
 }
 
 export function buildLinkClickPlugin(): Plugin {
@@ -125,12 +161,20 @@ export function buildLinkClickPlugin(): Plugin {
 
         // ── 协议分发 ──
 
-        // krig://block/{id}/{anchor}
+        // krig://block/{id}/{blockId}  (L7 升级:blockId 取代 idx:text / heading text)
         if (href.startsWith('krig://block/')) {
           const parts = href.replace('krig://block/', '').split('/');
           const noteId = parts[0];
           const blockAnchor = parts.slice(1).join('/');
           if (!noteId) return true;
+          // L7 旧格式字面早检测(避免跨文档跳转还传脏 anchor 让目标 view 找不到)
+          if (blockAnchor && isV1LegacyAnchor(blockAnchor)) {
+            console.warn(
+              `[link-click] V1 旧格式 anchor 字面失效:${href}`,
+            );
+            activeHandler?.onLegacyBlockAnchor?.(blockAnchor);
+            return true;
+          }
           // 同文档 → 当场滚动(对齐 V1 心智模型 — 不开右栏)
           const currentId = activeHandler?.getCurrentNoteId?.() ?? null;
           if (blockAnchor && currentId === noteId) {

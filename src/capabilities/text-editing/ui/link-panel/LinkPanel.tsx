@@ -28,10 +28,16 @@ type LinkTab = 'note' | 'file' | 'web';
 interface HeadingItem {
   level: number;
   text: string;
+  /** L7 block atomization Stage 5(decision 026 §7.3):block atom ULID,稳定锚点 */
+  id: string | null;
 }
 
 /**
- * 从 PM JSON doc 中提取 heading 列表(heading 节点,attrs.level 1-6)
+ * 从 PM JSON doc 中提取 heading 列表(heading 节点,attrs.level 1-6)。
+ *
+ * L7 升级:同时抽 attrs.id(Stage 1 给 heading 加的稳定 block atom ULID)。
+ * 无 id 字面 skip(数据异常:plugin 字面应保证所有 heading 有 id;migration 之前的旧
+ * 数据已字面被 D-11 清空 → 不应在生产数据中遇到 null)。
  */
 function extractHeadings(docJson: unknown): HeadingItem[] {
   const result: HeadingItem[] = [];
@@ -41,7 +47,11 @@ function extractHeadings(docJson: unknown): HeadingItem[] {
 
   for (const node of content) {
     if (!node || typeof node !== 'object') continue;
-    const n = node as { type?: string; attrs?: { level?: number }; content?: unknown[] };
+    const n = node as {
+      type?: string;
+      attrs?: { level?: number; id?: string | null };
+      content?: unknown[];
+    };
     if (n.type !== 'heading') continue;
     const level = n.attrs?.level;
     if (typeof level !== 'number' || level < 1) continue;
@@ -59,7 +69,9 @@ function extractHeadings(docJson: unknown): HeadingItem[] {
       }
     }
     text = text.trim();
-    if (text) result.push({ level, text });
+    if (text) {
+      result.push({ level, text, id: n.attrs?.id ?? null });
+    }
   }
   return result;
 }
@@ -183,7 +195,8 @@ function NoteTab({
       }
       if (drillNote) {
         const h = headings[selectedIdx];
-        if (h) onApply(`krig://block/${drillNote.id}/${encodeURIComponent(h.text)}`);
+        // L7 Stage 5:URL 用 block atom ULID 字面取代旧 heading text(decision 026 §7.3)
+        if (h && h.id) onApply(`krig://block/${drillNote.id}/${h.id}`);
       } else {
         const note = filteredNotes[selectedIdx];
         if (note) onApply(`krig://note/${note.id}`);
@@ -225,9 +238,10 @@ function NoteTab({
               key={i}
               className={`krig-link-panel__item${i === selectedIdx ? ' active' : ''}`}
               style={{ paddingLeft: 8 + (h.level - 1) * 12 }}
-              onClick={() =>
-                onApply(`krig://block/${drillNote.id}/${encodeURIComponent(h.text)}`)
-              }
+              onClick={() => {
+                // L7 Stage 5(decision 026 §7.3):URL 字面用 block atom ULID
+                if (h.id) onApply(`krig://block/${drillNote.id}/${h.id}`);
+              }}
               onMouseEnter={() => setSelectedIdx(i)}
             >
               <span className="krig-link-panel__heading-tag">H{h.level}</span>

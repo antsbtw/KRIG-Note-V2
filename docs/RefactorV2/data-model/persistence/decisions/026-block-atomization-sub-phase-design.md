@@ -666,7 +666,7 @@ PM tr 一次可能改多个 block(如 bulk paste / replace all)。capability 层
 | **PM block schemas** | 28 个 blocks 目录(`src/drivers/text-editing-driver/blocks/`,grep 字面)| 拆 atom 范围按 §3.1 字面规则:叶子及叶子级容器加 `id` 字段;结构性容器(table / tableRow / 3 list 容器 / columnList)不拆但仍需保留 schema 兼容 — 详 §3.1.1 与 §3.1.2 拆分清单 |
 | | 6 个媒体 block 已有 `atomId: null` 占位 | 字面迁移到 `id` 字段(migration 处理)|
 | **PM transaction handling** | [`src/drivers/text-editing-driver/editor-view-builder.ts:142`](../../../../../src/drivers/text-editing-driver/editor-view-builder.ts#L142) `dispatchTransaction` | 加 appendTransaction(自动注 id + split/merge 拦截)|
-| **Thought NoteLocator** | [`src/shared/ipc/thought-types.ts:57`](../../../../../src/shared/ipc/thought-types.ts#L57) `NoteLocator { pmPos, anchorType, text }` | 升级为 `NoteLocator { blockId, ... }`(对齐 GraphLocator)|
+| **Thought NoteLocator** | [`src/shared/ipc/thought-types.ts:57`](../../../../../src/shared/ipc/thought-types.ts#L57) `NoteLocator { pmPos, anchorType, text }` | 升级为 `NoteLocator { blockId, offset?, preview? }`(对齐 GraphLocator)。⚠ **Stage 4 实施时字面扩展 preview 字段**(用户 2026-05-21 拍板,字面 UI 显示用,不参与定位)— 字面是字面对决议 §10.1 "取代旧的 pmPos + 冗余 text" 字面的扩展,详 [Stage 4 EM4 verify](../../../notes/block-atomization-em4-verify-2026-05-21.md) §"preview 字段(用户 2026-05-21 拍板)"。 |
 | | 约 10 处 NoteLocator 使用点(2026-05-21 grep 字面,实施时复 grep 校准)| 字面同步 |
 | **Thought view** | [`src/views/thought/`](../../../../../src/views/thought/) | 走新 NoteLocator,锚点不漂移 |
 | **ebook bookAnchor** | 24 种 PM block attrs.bookAnchor | 字面保留(decision 022 字面不动),但 thought→ebook 标注语义可由 blockId 直接表达更稳 |

@@ -44,6 +44,57 @@ export interface ActiveBlockType {
   level: number | null;
 }
 
+/**
+ * 在 PM doc 内沿 pos 向上找最近的"带 attrs.id 的 block"祖先。
+ *
+ * L7 block atomization Stage 4 helper(decision 026 §3.1):
+ * Stage 1 字面拍板 22 NodeSpec(叶子 + 叶子级容器)加 attrs.id;
+ * 字面识别"此 pos 属于哪个 block atom" → 沿 PM 树最近 group='block' + 有 attrs.id 的祖先。
+ *
+ * 返:{ blockId, start } — start 字面是该 block 在 doc 中的起点 pos(content 内 inline 字符
+ * 偏移 = pos - start - 1,因 block 节点字面占 1 enterToken)。
+ */
+function findBlockIdAtPos(doc: PMNode, pos: number): { blockId: string; start: number } | null {
+  if (pos < 0 || pos > doc.content.size) return null;
+  const $pos = doc.resolve(Math.min(pos, doc.content.size));
+  for (let d = $pos.depth; d >= 0; d--) {
+    const node = $pos.node(d);
+    if (node.type.spec.group !== 'block') continue;
+    const id = node.attrs?.id as string | null | undefined;
+    if (!id) continue;
+    return { blockId: id, start: $pos.before(d) };
+  }
+  return null;
+}
+
+/**
+ * 反向:在 PM doc 内按 blockId 字面找 block node + 其 PM pos。
+ *
+ * L7 block atomization Stage 4 helper(decision 026 §10.1):
+ * thought view 跳转字面 anchor.locator.blockId 查 PM 当前 pos(可能因编辑漂移),
+ * 用于 scroll / highlight。
+ *
+ * 返:{ pos, nodeSize } — pos 字面是 block 节点起点(可用于 scrollIntoView 等);
+ *                       nodeSize 字面是节点大小(可与 pos 计算 block 内字符范围)。
+ * 未找到返 null(block 字面已被删 / 数据不一致)。
+ */
+export function findBlockNodeById(
+  doc: PMNode,
+  blockId: string,
+): { pos: number; nodeSize: number } | null {
+  let result: { pos: number; nodeSize: number } | null = null;
+  doc.descendants((node, pos) => {
+    if (result) return false;
+    const id = node.attrs?.id as string | null | undefined;
+    if (id === blockId) {
+      result = { pos, nodeSize: node.nodeSize };
+      return false;
+    }
+    return true;
+  });
+  return result;
+}
+
 export const textEditingDriverApi = {
   /** toggle mark on current selection */
   toggleMark(instanceId: string, markName: MarkName): void {
@@ -813,28 +864,20 @@ export const textEditingDriverApi = {
   },
 
   /**
-   * 计算 block 的 anchor(给 Copy Link 命令构造 krig://block/<noteId>/<anchor>)— L5-B3.9
+   * 计算 block 的稳定 id(给 Copy Link 命令构造 krig://block/<noteId>/<blockId>)。
    *
-   * 规则(对齐 V1):
-   * - heading 节点 → 用标题文本前 60 字 encodeURIComponent
-   * - 其他 block → `<idx>:<前 30 字 encodeURIComponent>`
-   *   idx 是该 block 在 doc 中的顺序索引(0-based,只数顶层 block)
+   * L7 block atomization Stage 5 升级(decision 026 §7 + §10.1):
+   * 旧版 `getBlockAnchorAt` 字面用"heading 文本前 60 字"或"idx:文本前 30 字"作 anchor —
+   * 用户编辑(改标题 / 插段 / 改文本)后 anchor 字面漂移定位失效。
+   * 新版字面返 block atom ULID(== PM attrs.id == storage atom.id),跨编辑稳定。
+   *
+   * 沿 Stage 4 字面 helper findBlockIdAtPos(沿 PM 树最近 group='block' + 带 id 的祖先)。
    */
-  getBlockAnchorAt(instanceId: string, pos: number): string | null {
+  getBlockIdAt(instanceId: string, pos: number): string | null {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return null;
-    const node = inst.view.state.doc.nodeAt(pos);
-    if (!node) return null;
-    const text = node.textContent.trim();
-    if (node.type.name === 'heading') {
-      return encodeURIComponent(text.slice(0, 60));
-    }
-    let idx = 0;
-    inst.view.state.doc.forEach((_n, offset, i) => {
-      if (offset === pos) idx = i;
-    });
-    const preview = text.slice(0, 30);
-    return `${idx}:${encodeURIComponent(preview)}`;
+    const found = findBlockIdAtPos(inst.view.state.doc, pos);
+    return found?.blockId ?? null;
   },
 
   /** 复制 block(在原 block 之后插入复本)*/
@@ -1185,18 +1228,26 @@ export const textEditingDriverApi = {
   },
 
   // ── thought-view Phase 3:横切思考层 anchor 操作 ──
+  // L7 block atomization Stage 4 升级(decision 026 §10.1):
+  // 三个 addThought* 字面返 { blockId, offset?, preview } 取代旧 { pos, text }。
+  // - blockId = 选区/光标所在 block 的 attrs.id(沿 PM 树最近 group='block' 父)
+  // - offset(可选)= inline 锚点的 block 内字符级偏移(基于 block.textContent)
+  // - preview = 创建瞬间字面文本快照(沿 V1 text 字段 100 字截断,UI 显示用,不参与定位)
 
   /**
    * inline mark anchor:在选区加 thoughtMark(attrs.thoughtId + thoughtType)。
    * 选区为空时不操作(view 侧应先 checkInlineSelection)。
    *
-   * 返 pos = selection.from(view 用此存 anchor.locator.pmPos)。
+   * 返 { blockId, offset:{from,to}, preview }:
+   * - blockId = 选区所在 block 的 attrs.id(同一 PM block 内选区字面属此 block)
+   * - offset = 选区在该 block 内的**字符级**偏移(基于 block.textContent)
+   * - preview = 选区文本 100 字截断
    */
   addThoughtMark(
     instanceId: string,
     thoughtId: string,
     thoughtType: string,
-  ): { pos: number; text: string } | null {
+  ): { blockId: string; offset: { from: number; to: number }; preview: string } | null {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return null;
     const { state } = inst.view;
@@ -1204,64 +1255,85 @@ export const textEditingDriverApi = {
     if (!markType) return null;
     const { from, to } = state.selection;
     if (from >= to) return null;
+
+    // 找选区起点所在 block(沿 PM 树最近 group='block' + 带 attrs.id 的祖先)
+    const blockInfo = findBlockIdAtPos(state.doc, from);
+    if (!blockInfo) return null;
+
     const mark = markType.create({ thoughtId, thoughtType });
     const tr = state.tr.addMark(from, to, mark);
     inst.view.dispatch(tr);
-    const text = state.doc.textBetween(from, to, ' ').slice(0, 100);
-    return { pos: from, text };
+
+    // 字符级偏移:选区 PM pos 减去 block content 起点(block 内字符位 = PM pos - blockStart - 1)
+    // - 1 是 block 节点自身的开闭标签算 1 字面占位(PM enterToken)
+    const offsetFrom = Math.max(0, from - blockInfo.start - 1);
+    const offsetTo = Math.max(offsetFrom, to - blockInfo.start - 1);
+    const preview = state.doc.textBetween(from, to, ' ').slice(0, 100);
+    return {
+      blockId: blockInfo.blockId,
+      offset: { from: offsetFrom, to: offsetTo },
+      preview,
+    };
   },
 
   /**
    * block frame anchor:给指定 block(blockPos)设 frameThoughtId attr,
    * thought-anchor-plugin 自动按 frameThoughtId + resolveThoughtType 画外框。
    *
-   * 返 pos + 该 block 文本前 100 字(用作 locator.text)。
+   * 返 { blockId, preview }(无 offset = 整 block 锚点)。
    */
   addThoughtBlockFrame(
     instanceId: string,
     blockPos: number,
     thoughtId: string,
-  ): { pos: number; text: string } | null {
+  ): { blockId: string; preview: string } | null {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return null;
     const { state } = inst.view;
     const node = state.doc.nodeAt(blockPos);
     if (!node) return null;
+    const blockId = (node.attrs.id as string | null | undefined) ?? null;
+    if (!blockId) return null;
     const tr = state.tr.setNodeMarkup(blockPos, undefined, {
       ...node.attrs,
       frameThoughtId: thoughtId,
     });
     inst.view.dispatch(tr);
-    const text = node.textContent.slice(0, 100);
-    return { pos: blockPos, text };
+    const preview = node.textContent.slice(0, 100);
+    return { blockId, preview };
   },
 
   /**
    * node attr anchor:给指定 node(image / future audio / video)设 thoughtId attr。
    * 仅 image 在本期支持(其它节点 spec 暂无 thoughtId attr)。
+   *
+   * 返 { blockId, preview }(无 offset = 整 node 锚点)。
+   * blockId 字面 = node 自身的 attrs.id(image / audioBlock / 等 Stage 1 字面加了 id)。
    */
   addThoughtNodeAttr(
     instanceId: string,
     nodePos: number,
     thoughtId: string,
-  ): { pos: number; text: string } | null {
+  ): { blockId: string; preview: string } | null {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return null;
     const { state } = inst.view;
     const node = state.doc.nodeAt(nodePos);
     if (!node) return null;
     if (node.type.spec.attrs?.thoughtId === undefined) return null;
+    const blockId = (node.attrs.id as string | null | undefined) ?? null;
+    if (!blockId) return null;
     const tr = state.tr.setNodeMarkup(nodePos, undefined, {
       ...node.attrs,
       thoughtId,
     });
     inst.view.dispatch(tr);
     // image 用 alt 兜底
-    const text =
+    const preview =
       node.type.name === 'image'
         ? `[图片] ${(node.attrs.alt as string) || ''}`.trim()
         : `[${node.type.name}]`;
-    return { pos: nodePos, text };
+    return { blockId, preview };
   },
 
   /**
@@ -1353,11 +1425,28 @@ export const textEditingDriverApi = {
     void changed; // mark 路径变化记录(留 hook),目前只需 plugin refresh
   },
 
-  /** 滚动到 thought anchor 在 PM 内的位置(跨槽通信 → ThoughtView 点卡片 → Note 跳转) */
-  scrollToThoughtAnchor(instanceId: string, pos: number): void {
+  /**
+   * 滚动到 thought anchor 在 PM 内的位置(跨槽通信 → ThoughtView 点卡片 → Note 跳转)。
+   *
+   * L7 block atomization Stage 4 升级(decision 026 §10.1):字面**按 blockId** 在
+   * 当前 PM doc 字面找 block(可能因编辑漂移过 pos);offset 给定时字面计算 inline pos。
+   */
+  scrollToThoughtAnchor(
+    instanceId: string,
+    blockId: string,
+    offset?: { from: number; to: number },
+  ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
-    scrollToThoughtAnchorImpl(inst.view, pos);
+    const found = findBlockNodeById(inst.view.state.doc, blockId);
+    if (!found) {
+      console.warn(`[textEditingDriver/scrollToThoughtAnchor] block ${blockId} not found in current doc`);
+      return;
+    }
+    // 无 offset:整 block 锚点,字面 scroll 到 block 起点
+    // 有 offset:inline 锚点,字面 scroll 到 block 内 + offset.from(+1 跳过 block enterToken)
+    const targetPos = offset ? found.pos + 1 + offset.from : found.pos;
+    scrollToThoughtAnchorImpl(inst.view, targetPos);
   },
 
   /**

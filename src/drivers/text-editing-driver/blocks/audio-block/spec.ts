@@ -13,7 +13,7 @@
  * V1 → V2 改造:
  * - viewAPI.downloadMedia → V2 直接 mediaDownload(L5-B4.3.1 已落)
  * - 不复用 V1 createRenderBlockView 共享基类(对齐 L5-B3.5 image 各自独立 NodeView)
- * - 砍 V1 sourcePages / thoughtId / atomId 字段(KRIG 知识图谱挂钩留 D 阶段)— **保留 atomId 占位**
+ * - 砍 V1 sourcePages / thoughtId 字段(KRIG 知识图谱挂钩留 D 阶段);atomId 由 L7 block atomization rename 为 id 承接
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -30,8 +30,9 @@ const audioBlockNodeSpec: NodeSpec = {
     title: { default: 'Audio' },
     mimeType: { default: null },
     duration: { default: null },   // 秒数(可选)
-    // KRIG 知识图谱挂钩(留 null,D 阶段接入)
-    atomId: { default: null },
+    // L7 block atomization (decision 026 §3.1.1 / §4 / §4.4 字面 rename atomId→id):
+    // block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
     bookAnchor: { default: null },
   },

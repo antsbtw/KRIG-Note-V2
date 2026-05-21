@@ -23,6 +23,8 @@ const externalRefNodeSpec: NodeSpec = {
   draggable: true,
   selectable: true,
   attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4): block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     kind: { default: 'url' },        // 'file' | 'url'
     href: { default: '' },
     title: { default: '' },

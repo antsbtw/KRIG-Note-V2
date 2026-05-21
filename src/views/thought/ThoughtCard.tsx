@@ -95,9 +95,9 @@ function extractTitleSegments(t: ThoughtInfo): TitleSegment[] {
 }
 
 // ── anchor 引文条 $...$ markdown 解析 ──
-// 截图里 anchor.locator.text 是从 Note 抓的源字符串,带 markdown 风格 $f$ $X$
-// 等占位符。最小解析:扫 $...$ 配对(non-greedy,不跨段落),命中转 math segment,
-// 其余按 text segment 平铺。不解析 *bold* / `code` 等其他 markdown。
+// anchor.locator.preview(L7 升级前字段名 text)字面是从 Note 抓的源字符串,
+// 带 markdown 风格 $f$ $X$ 等占位符。最小解析:扫 $...$ 配对(non-greedy,不跨段落),
+// 命中转 math segment,其余按 text segment 平铺。不解析 *bold* / `code` 等其他 markdown。
 
 function parseInlineMathInText(text: string): TitleSegment[] {
   if (!text) return [];
@@ -135,8 +135,11 @@ function extractFullText(t: ThoughtInfo): string {
 
 function anchorPreviewText(t: ThoughtInfo): string {
   if (!t.anchor) return '';
-  const loc = t.anchor.locator as { text?: string; textContent?: string };
-  return loc.text ?? loc.textContent ?? '';
+  // L7 升级(decision 026 §10.1 + 2026-05-21 用户拍板):
+  // - note locator 字面 preview 字段(取代 V1 text)— 创建瞬间快照,UI 显示用
+  // - book locator 字面 textContent 字段(本期不动 BookLocator)
+  const loc = t.anchor.locator as { preview?: string; textContent?: string };
+  return loc.preview ?? loc.textContent ?? '';
 }
 
 export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps) {

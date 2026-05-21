@@ -401,6 +401,9 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 | `user:krig:inCanvas` | graph-instance | graph-canvas | 一对一(归属边,P0a-bis 机制化保证)| sub-phase 3a-1(+ P0a-bis hotfix)| [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) + [decision 019](../persistence/decisions/019-graph-instance-cardinality-hotfix.md) |
 | `user:krig:hasContent` | graph-instance(text-node ref)| pm | 一对一(单引用约束,sub-phase 3a-1..3a-5)| sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
 | `user:krig:hasNoteView` | pm | literal `boolean` (value 恒 true) | 一对一(应用层契约,详 decision 016 §3.1)| sub-phase 3a-2.5 ✅ 已实施 | [decision 016 §3.1](../persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) |
+| `user:krig:belongsToNote` | pm(block atom)| pm(note / reading-thought container atom)| 一对一(每 block 字面 1 条 outgoing)| L7 block atomization ✅ Stage 2 实施 | [decision 026 §6.3](../persistence/decisions/026-block-atomization-sub-phase-design.md) |
+| `user:krig:nextSibling` | pm(block atom)| pm(block atom)| 0..1 outgoing + 0..1 incoming(链表;首 block 无 incoming,末 block 无 outgoing)| L7 block atomization ✅ Stage 2 实施 | [decision 026 §6.2](../persistence/decisions/026-block-atomization-sub-phase-design.md) |
+| `user:krig:childOf` | pm(嵌套 block atom)| pm(最近非结构性祖先:叶子级容器 atom 或 container atom 本身)| 0..1 outgoing(顶层 block 无,嵌套 block 字面 1 条)| L7 block atomization ✅ Stage 2 实施 | [decision 026 §6.1](../persistence/decisions/026-block-atomization-sub-phase-design.md) |
 
 **单引用约束说明**:`hasContent` 边 cardinality 在 sub-phase 3a-1..3a-5 阶段强制为"一对一"(一段 pm content 只被 1 个 wrapper 引用)。多引用(浅引用 / 跨 view 复用)留 sub-phase 3a-shared-ref 子任务,前置 sub-phase 3a-tx 解决真原子性(详 [decision 013 §3.5.1.bis](../persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md))。
 
@@ -427,3 +430,33 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 **未来 sub-phase 3a-shared-ref 的对照**:届时引入新边 `referencedIn`(暂定名),表示某 canvas **引用**别处归属的 instance,不改变归属。一对多 cardinality,与归属边形成清晰对照。详 [decision 019 §9](../persistence/decisions/019-graph-instance-cardinality-hotfix.md)。
 
 **当前 sub-phase 不引入 `referencedIn` 边**(避免死代码占位),仅决议 §9 留接口。
+
+### 10.2 block atomization 三条边语义(L7 block atomization Stage 3 反向更新)
+
+L7 block atomization sub-phase 把 `pm atom = 整篇 doc` 升级为 `pm atom = 单 block`(详 [decision 026](../persistence/decisions/026-block-atomization-sub-phase-design.md))。三条新 predicate 字面定义:
+
+**`user:krig:belongsToNote`** — block 归属容器:
+- 字面拍板"全部叶子 + 叶子级容器拆 atom;结构性容器(table/tableRow/3 list 容器/columnList)不拆"(decision 026 §3.1)
+- 每个拆出的 block atom 字面 1 条 outgoing 指向容器 atom(note container 或 reading-thought container)
+- 容器 atom 字面**可以**不带 hasNoteView marker(D-10:reading-thought 字面是 pm atom 但带 hasReadingThought 而非 hasNoteView,也使用 belongsToNote 子节点)
+- cardinality 一对一硬约束(`assemble-pm-doc.ts` 字面假设)
+
+**`user:krig:nextSibling`** — block 顺序:
+- 字面拍板用边表达顺序(非 `order` 字段,decision 026 §6.2 方案 A)
+- subject = 上一 block atom,object = 下一 block atom
+- 同一容器 / 同一 childOf 父下,字面构成链表(首 atom 无 incoming;末 atom 无 outgoing)
+- 链断裂字面 fallback:assemble 时 `console.error` + 字典序 append(decision 026 §13.3 临时默认)
+
+**`user:krig:childOf`** — 嵌套(跨结构性容器跳层):
+- subject = 嵌套子 block atom,object = **最近的拆 atom 祖先**(可能是叶子级容器 atom 或容器 atom 本身)
+- **跨结构性容器跳层**(decision 026 §6.1):
+  - tableCell.childOf → table atom(跳过 tableRow / tableHeader 的中间层)
+  - listItem.childOf → callout / blockquote / 上层 listItem / 容器 atom(跳过 bulletList / orderedList / taskList)
+  - column.childOf → 容器 atom(跳过 columnList)
+- 顶层 block 字面**无** childOf(由 belongsToNote 表达归属)
+- cardinality 0..1 outgoing(嵌套 block 字面 1 条,顶层 block 字面 0 条)
+
+**拼装规则**(assemble-pm-doc.ts 字面落地):
+- 读时拼装:listAtoms(belongsToNote.object=containerId)+ listEdges(nextSibling/childOf)+ 拓扑排序 + 跨层 wrapper 重建(`STRUCTURAL_REBUILD_RULES`,decision 026 §13.8)
+- listItem 字面用 `_assemblyHints.listType` 区分 bullet/ordered(dissect 时写,assemble 时读,PM nodeFromJSON 字面再 strip — 不污染 PM schema)
+- tableCell 字面**单行 tableRow 重建**(v1 简化,真实 row × col 信息字面丢;Stage 9 反向更新登记)

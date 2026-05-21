@@ -53,14 +53,34 @@ export const THOUGHT_TYPE_META: Record<
 
 export type ThoughtSource = 'note' | 'book' | 'graph' | 'canvas';
 
-/** Note 内锚点(V1 三态:inline mark / block frame / node attr) */
+/**
+ * Note 内锚点(L7 block atomization Stage 4 升级,decision 026 §10.1):
+ *
+ * 新字段语义(取代 V1 pmPos + anchorType + text):
+ * - blockId(必填):block atom ULID(== PM attrs.id == storage atom.id)。
+ *   注:此 id 字面跨编辑稳定 — 用户在 note 任意位置插/删/拆/合 block,
+ *   被标注的 block 自身 attrs.id 字面不变(decision 026 §5.6 + §6 字面),
+ *   故 anchor 字面**不漂移**(对比 V1 pmPos 字面随插入 block 整体下移)。
+ * - offset(可选):sub-position 偏移,V1 'inline' 锚点字面新表达。
+ *   `{from, to}` 字面是 block 内**字符级**偏移(基于 block.textContent),
+ *   不是 PM doc 全局 pos。
+ *   - undefined:整 block 锚点(V1 'block' / 'node' 锚点统一形态)
+ *   - 有值:inline 锚点(V1 'inline' 形态,选区跨字)
+ * - preview(可选):UI 预览缓存,**仅 ThoughtCard / ThoughtPanel 字面显示用**,
+ *   不参与定位逻辑(沿 2026-05-21 用户拍板,Stage 9 反向更新决议字面登记此扩展)。
+ *   字面创建 anchor 时由 driver 字面截取 100 字写入;PM 编辑后**不自动同步**
+ *   (preview 字面是"创建瞬间快照",UI 字面接受陈旧)。
+ *
+ * 旧 NoteLocator 字面**已字面替换**,无双形态共存期 — 用户拍板"清空本地旧数据"(D-11),
+ * 故无 V1 数据兼容需要(Stage 6 migration 字面针对生产数据,本期开发期数据清掉重建)。
+ */
 export interface NoteLocator {
-  /** PM doc 位置(integer)— 用于排序 + 跳转 */
-  pmPos: number;
-  /** 三种 anchor 形态 */
-  anchorType: 'inline' | 'block' | 'node';
-  /** 冗余文本(避免每次回读 PM doc) */
-  text: string;
+  /** block atom ULID(=PM attrs.id =storage atom.id)— 跨编辑稳定的锚点核心 */
+  blockId: string;
+  /** inline 级 sub-position(可选,字符级偏移,基于 block.textContent)*/
+  offset?: { from: number; to: number };
+  /** UI 预览(仅显示用,不参与定位,创建时字面截取 100 字快照,不自动同步)*/
+  preview?: string;
 }
 
 /**

@@ -47,8 +47,9 @@ const mathVisualNodeSpec: NodeSpec = {
     integralRegions: { default: [] },
     featurePoints: { default: [] },
     toolMode: { default: 'move' },
-    // KRIG 知识图谱挂钩(占位,对齐 image/html-block)
-    atomId: { default: null },
+    // L7 block atomization (decision 026 §3.1.1 / §4 / §4.4 字面 rename atomId→id):
+    // block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
   },
   parseDOM: [{
     tag: 'div.krig-math-visual',

@@ -36,7 +36,9 @@ const videoBlockNodeSpec: NodeSpec = {
     title: { default: 'Video' },
     mimeType: { default: null },
     duration: { default: null },
-    atomId: { default: null },       // KRIG 知识图谱挂钩(D 阶段)
+    // L7 block atomization (decision 026 §3.1.1 / §4 / §4.4 字面 rename atomId→id):
+    // block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     // L5-B3.19.a NEW:
     activeTab: { default: 'play' },        // 'play' | 'data' | 'transcript' | <translation lang code>
     transcriptText: { default: null },     // 字幕原文(P1 修正:真相源,subtitleCues 内存派生不持久化)

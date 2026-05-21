@@ -15,6 +15,8 @@ const paragraphNodeSpec: NodeSpec = {
   content: 'inline*',
   group: 'block',
   attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4): block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     /**
      * 文档标题标识。
      * - true: 该 paragraph 是文档标题(doc 首块)

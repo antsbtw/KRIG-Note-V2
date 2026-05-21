@@ -25,6 +25,8 @@ const unknownNodeSpec: NodeSpec = {
   atom: true, // 叶子节点 — 光标不能陷进去
   selectable: true,
   attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4): block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     originalType: { default: '' },
     missing: { default: true },
     raw: { default: '' },

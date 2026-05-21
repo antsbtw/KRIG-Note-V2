@@ -17,7 +17,7 @@
  *   width     像素宽度(resize 后写)— null 表示 auto
  *   height    像素高度 — null 表示 auto
  *   alignment 'left' | 'center' | 'right'
- *   atomId / sourcePages / thoughtId — KRIG 知识图谱挂钩,留 null,后续接入
+ *   id / sourcePages / thoughtId — KRIG 知识图谱挂钩(id 由 L7 block atomization 承接 atom.id,sourcePages / thoughtId 留 null,后续接入)
  */
 
 import type { NodeSpec } from 'prosemirror-model';
@@ -40,8 +40,9 @@ const imageNodeSpec: NodeSpec = {
     width: { default: null },
     height: { default: null },
     alignment: { default: 'center' },
-    // KRIG 知识图谱挂钩(留 null,L5-B+ 接入)
-    atomId: { default: null },
+    // L7 block atomization (decision 026 §3.1.1 / §4 / §4.4 字面 rename atomId→id):
+    // block atom 稳定 ULID,与 atom.id 同步;承接 L5-B+ 占位 atomId 字段
+    id: { default: null },
     sourcePages: { default: null },
     thoughtId: { default: null },
     // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)

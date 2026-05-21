@@ -3,7 +3,8 @@
  *
  * 跨槽跳转:Thought 卡片 anchor 点击 → 切 left slot 到 source view + 滚到目标位置。
  *
- *   source='note' → 切 active note + scrollToThoughtAnchor(pmPos)
+ *   source='note' → 切 active note + scrollToThoughtAnchor(blockId, offset?)
+ *                   (L7 升级 decision 026 §10.1:blockId 取代 pmPos,根治编辑漂移)
  *   source='book' → ebookCap.open(bookId) + emit 'thought.scroll-to-book-source'
  *                   → EBookView 订阅 → host.goToPage/goToCFI
  *   source='graph'/'canvas':本期预留(Phase 6+ 接入)
@@ -49,9 +50,11 @@ async function scrollToNoteSource(
   }
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   // driver instance 异步 mount,200ms 重试兜底
+  // L7 升级:locator 字面 blockId + offset?;driver scrollToThoughtAnchor 字面按
+  // blockId 在当前 doc 字面找 block(漂移后字面仍能精确定位,decision 026 §10.1 拍板根治)
   const tryScroll = (attempt: number): void => {
     const instanceId = textEditing.instanceRegistry.getFocusedInstanceId() ?? wsId;
-    textEditing.api.scrollToThoughtAnchor(instanceId, locator.pmPos);
+    textEditing.api.scrollToThoughtAnchor(instanceId, locator.blockId, locator.offset);
     if (attempt === 0) window.setTimeout(() => tryScroll(1), 200);
   };
   tryScroll(0);

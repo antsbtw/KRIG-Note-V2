@@ -83,9 +83,10 @@ async function resolveLocator(
   const driverApi = textEditing.api;
 
   // 路径 1:inline mark(选区非空且单 block 内)
+  // L7 升级:driver 字面返 { blockId, offset, preview };NoteLocator 字面直接用
   const inline = driverApi.addThoughtMark(instanceId, thoughtId, 'thought');
   if (inline) {
-    return { pmPos: inline.pos, anchorType: 'inline', text: inline.text };
+    return { blockId: inline.blockId, offset: inline.offset, preview: inline.preview };
   }
 
   // 路径 2/3:走 selection 拓扑识别 node / block
@@ -93,22 +94,22 @@ async function resolveLocator(
   if (!sel) return null;
   const { $from } = sel;
 
-  // 路径 2:image 节点
+  // 路径 2:image 节点(整 node 锚点,无 offset)
   for (let d = $from.depth; d >= 0; d--) {
     const n = $from.node(d);
     if (NODE_ANCHOR_TYPES.has(n.type.name)) {
       const blockPos = $from.before(d);
       const r = driverApi.addThoughtNodeAttr(instanceId, blockPos, thoughtId);
       if (!r) return null;
-      return { pmPos: r.pos, anchorType: 'node', text: r.text };
+      return { blockId: r.blockId, preview: r.preview };
     }
   }
 
-  // 路径 3:top-level block frame
+  // 路径 3:top-level block frame(整 block 锚点,无 offset)
   const topDepth = Math.min($from.depth, 1);
   if (topDepth < 1) return null;
   const blockPos = $from.before(topDepth);
   const r = driverApi.addThoughtBlockFrame(instanceId, blockPos, thoughtId);
   if (!r) return null;
-  return { pmPos: r.pos, anchorType: 'block', text: r.text };
+  return { blockId: r.blockId, preview: r.preview };
 }
