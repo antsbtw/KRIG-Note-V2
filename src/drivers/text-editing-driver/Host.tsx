@@ -152,6 +152,15 @@ export function Host(props: TextEditingHostProps) {
       ENABLED_BLOCKS,
       initialDoc,
       (tr, v) => {
+        // L7 block atomization Stage 1.5 防御(decision 026 §12.2 第 6 行 audit 拍板):
+        // auto-block-id-plugin 注入 id 时 setMeta('skipOnChange', true),冷启动 race
+        // 防御 — 旧 doc 装载完 appendTransaction 给每个无 id block 注 ULID 会触发 N
+        // 次 IPC 写入;migration (Stage 6) 一次性补 id 后此路径不再触发,运行期偶发
+        // 走这里也只是 0 cost 跳过 IPC。
+        if (tr.getMeta('skipOnChange') === true) {
+          return; // 不调 onChange,不发 IPC,不动 selection
+        }
+
         // doc 变化:封装回 DriverSerialized,触发 onChange
         if (tr.docChanged) {
           const serialized = serializeDoc(v.state.doc);

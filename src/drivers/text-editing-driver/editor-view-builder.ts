@@ -37,6 +37,7 @@ import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
 import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
+import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
 
 /**
  * 装配 EditorView
@@ -99,6 +100,10 @@ export function buildEditorView(
   const enableHeadingCollapse = optIn(pluginToggles?.headingCollapse);
 
   const plugins: Plugin[] = [
+    // L7 block atomization Stage 1.5:auto-block-id-plugin 必须早于 history
+    // (避免 id 注入 tr 被记入 undo 栈),early in plugin list 让 appendTransaction
+    // 在 dispatch 阶段尽早跑(plugin 顺序影响 appendTransaction 队列顺序).
+    buildAutoBlockIdPlugin(),
     ...buildHistoryPlugins(),    // history() + Mod-z/Mod-Shift-z/Mod-y(始终开)
     // block-selection 三件套(opt-out, NoteView 默认开):decoration + context menu + keymap
     ...(enableBlockSelection ? [
