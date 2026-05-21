@@ -355,6 +355,83 @@ V2 字面**没有**现成的 toast capability — grep `toast / Toast` 字面无
 
 ---
 
+---
+
+## D-14 — Stage 7 字面跳过(用户拍板,8 场景留运行中发现)
+
+**决议字面**(decision 026 §11.2 / 实施计划 §8):
+> "Stage 7:典型场景测试(8 场景 T1-T8)"
+> "硬门槛:8 场景全通过 + 测试报告字面记录"
+
+**实际事实**(2026-05-21 用户拍板):
+
+字面 Stage 5/6 完成后 AskUserQuestion:
+
+> "跳过 Stage 7 手动测,直推进 Stage 8/9 + 合 main"
+
+字面用户字面有意识接受"静态检查已足"赌注。
+
+**字面影响**:
+
+- 字面 11 场景**字面无 manual verify**(8 决议字面 + 3 L7 新加 T9/T10/T11)
+- 字面**高风险未验项**(沿 EM7 verify 报告字面 ⚠ 标记):
+  - **T7** callout + 内部 paragraph(嵌套 childOf 边 + 跨层 wrapper 重建字面无实测)
+  - **T8** thought 锚点跨编辑稳定(blockId 字面**根治性**字面无实测)
+  - **T10** ebook reading-thought 走 updateNote(D-10 路径字面**最高风险**)
+- 字面 bug 留运行中字面发现 + future commit 修
+
+**字面建议**(合 main 后):
+- 优先字面验上述 3 高风险项
+- 字面任一失败 → 字面 revert merge / hotfix
+
+**字面登记**:[block-atomization-em7-verify-2026-05-21.md](./block-atomization-em7-verify-2026-05-21.md)
+
+---
+
+## D-15 — Stage 8 字面跳过 + listNotes 字面性能退化已知
+
+**决议字面**(decision 026 §9 / 实施计划 §9):
+> "Stage 8:性能压测(5 指标 P95)"
+> "不达标字面字面字面留独立 sub-phase"
+
+**实际事实**(2026-05-21 用户拍板):
+
+字面 D-14 拍板 implicitly 也跳过 Stage 8(性能压测字面需用户字面提供 1000 block 测试数据;字面 D-11 加成开发期数据已清)。
+
+**字面已知性能退化**(无 benchmark 但字面静态分析字面命中):
+
+字面 `listNotes` 字面字面退化 — 字面 Stage 2 字面改为字面**每 note 字面调 assemblePmDoc**(各自 3 query):
+
+```ts
+// src/platform/main/note/capability-impl.ts:248-269
+const results = await Promise.all(
+  noteAtoms.map(async (atom) => {
+    const cached = pmDocCache.get(atom.id);
+    const assembled = cached ?? (await assemblePmDoc(atom.id));
+    ...
+  }),
+);
+```
+
+字面 100 notes × 3 query each = **300 query / listNotes 调用**(Promise.all 并发 cover 部分)。
+字面 cold start(cache 空)字面字面可能字面卡顿;warm 字面 cache 命中后字面 cover。
+
+**字面已知 stableStringify O(N²)**(diff-block-tree.ts:60-77):
+字面 1000 block updateNote(single char edit)字面 diff 算法字面要把 oldDoc / newDoc 字面全 dissect + stableStringify 比对 → 字面字面 O(N²) 可能字面慢。
+
+**字面缓解 / future 优化**:
+1. listNotes 字面只返**轻量 NoteInfo**(title 持久化在 container atom 新字段;doc 字面字面不拼)
+2. diff 算法字面用 hash 缓存(不每次 stableStringify)
+3. listAtoms 批量查询接口(decision 026 §9.3 字面已登记 future sub-phase)
+
+**字面影响**:
+- 字面留 future commit / 性能优化 sub-phase 兑现
+- 字面合 main 后字面观察实际用户场景(笔记数 < 20 字面字面无明显感知)
+
+**字面登记**:[block-atomization-em8-verify-2026-05-21.md](./block-atomization-em8-verify-2026-05-21.md)
+
+---
+
 ## 汇总(2026-05-21,Stage 1 EM1 通过后修订)
 
 **字面拆账**(grep `id: { default: null }` 实测):
