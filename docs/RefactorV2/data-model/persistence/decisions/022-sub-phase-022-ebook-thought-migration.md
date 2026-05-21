@@ -323,7 +323,8 @@ BookAnchor schema:
 - ✅ thought 内部 block 顺序 = 用户阅读 / 整理顺序(不强制按 pageNum 排序)
 
 **缺点**:
-- block 是 atom-level 子结构,不能被边直接引用(decision 030+ 大架构升级才能解)
+- ~~block 是 atom-level 子结构,不能被边直接引用(decision 030+ 大架构升级才能解)~~
+  → **2026-05-21 反向更新**:字面已由 [decision 026](./026-block-atomization-sub-phase-design.md) L7 block atomization sub-phase 字面解决。block 字面**就是** atom(单 block = 1 pm atom),字面可被边直接引用。
 - 24 种 PM block attrs 都要加 optional bookAnchor 字段
 
 ### 3.3 路径 3:annotation 独立 domain + 1 book 1 annotation atom 聚合容器(候选 fallback)
