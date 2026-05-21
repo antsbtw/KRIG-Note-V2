@@ -15,6 +15,8 @@ const toggleListNodeSpec: NodeSpec = {
   group: 'block',
   defining: true,
   attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4): block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     open: { default: true },
     // sub-phase 022: 标注 eBook 时承载定位元数据 (default null, decision 022 §1.3.1)
     bookAnchor: { default: null },

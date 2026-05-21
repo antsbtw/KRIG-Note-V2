@@ -21,6 +21,8 @@ const taskItemNodeSpec: NodeSpec = {
   content: 'block+',
   defining: true,
   attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4): block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     checked: { default: false },
     // V1 兼容:创建/完成/截止时间(ISO 字符串 | null)
     createdAt: { default: null },

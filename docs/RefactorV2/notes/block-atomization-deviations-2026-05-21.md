@@ -135,4 +135,89 @@ grep -rn "noteUpdate\|noteGet\|noteList" src/platform/preload/ src/shared/ipc/
 
 ---
 
+---
+
+## D-06 — hardBreak 实际是 inline 不应加 id(决议字面自相矛盾,用户拍板)
+
+**决议字面冲突**:
+
+- decision 026 §3.1.1 字面把 **hardBreak** 列在"叶子文本"加 id 清单
+- decision 026 §3.1.3 字面"inline 节点不拆(group='inline')"
+
+**实际代码**([hard-break/spec.ts:14-15](../../src/drivers/text-editing-driver/blocks/hard-break/spec.ts#L14)):
+
+```ts
+const hardBreakNodeSpec: NodeSpec = {
+  inline: true,
+  group: 'inline',
+  ...
+}
+```
+
+**用户拍板**(2026-05-21 AskUserQuestion):**不加 id,归 inline**
+
+**理由**(用户字面):"hardBreak 是 `<br>` 行内换行,用户不会单独引用 / 标注;§3.1.1 列 hardBreak 是字面遗状"
+
+**处理**:
+- Stage 1 Step 1.2 **不改** hard-break/spec.ts(保持 inline 现状)
+- Stage 9 反向更新 decision 026 §3.1.1 字面从加 id 清单删 hardBreak,字面纳入 §3.1.3 inline 清单
+
+---
+
+## D-07 — fileLink 实际是 inline atom 不应加 id(决议字面两处冲突)
+
+**决议字面冲突**(同一 decision 026 内自相矛盾):
+
+- §3.1.1 把 **fileLink** 列在"叶子媒体"加 id 清单
+- §3.1.3 同时把 **fileLink(inline 形态)** 列在 inline 不拆清单
+
+**实际代码**([file-link/spec.ts:19-22](../../src/drivers/text-editing-driver/blocks/file-link/spec.ts#L19)):
+
+```ts
+const fileLinkNodeSpec: NodeSpec = {
+  inline: true,
+  group: 'inline',
+  atom: true,
+  ...
+}
+```
+
+**处理**(沿 D-06 同模式,**不再单独 AskUserQuestion** — 用户对 hardBreak 拍板的逻辑直接适用):
+- Stage 1 Step 1.2 **不改** file-link/spec.ts(保持 inline 现状)
+- Stage 9 反向更新 decision 026 §3.1.1 字面从加 id 清单删 fileLink,**保留** §3.1.3 字面
+
+**注**:fileBlock(group='block', atom: true)与 fileLink(group='inline', atom: true)是两个不同 NodeSpec,**fileBlock 仍按 §3.1.1 加 id**。
+
+---
+
+## D-08 — tableHeader 无 bookAnchor 字段(事实纠错)
+
+**决议字面**(decision 022 + decision 026 §10.1):
+
+> "24 种 PM block attrs 全加 optional bookAnchor 字段"
+> "table 目录 4 NodeSpec 字面仅 tableCell 字面 receiver bookAnchor"
+
+**实际代码**(table/spec.ts):
+
+- `tableCellNodeSpec.attrs.bookAnchor` ✓ 存在(L134)
+- `tableHeaderNodeSpec.attrs` **无 bookAnchor**(L163-168 仅 colspan/rowspan/colwidth/align)
+
+**影响**:本 sub-phase 加 attrs.id 到 tableHeader,但 tableHeader 还没 bookAnchor(decision 022 同模式)。实施时只需加 id 字段,**不补 bookAnchor**(超本 sub-phase 范围,沿提示词 §7 红线)。
+
+**处理**:Stage 1 Step 1.2 给 tableHeader 加 `id: { default: null }`,bookAnchor 不动(留 future decision 022 续修 sub-phase)。
+
+---
+
+**汇总**(2026-05-21):
+
+实际加 id 的 NodeSpec = decision 026 §3.1.1 字面 24 项 − hardBreak(D-06)− fileLink(D-07)= **22 个 NodeSpec**。
+
+- 3 个已完成(paragraph / heading / horizontalRule)
+- 13 个待加 id(codeBlock / mathBlock / fileBlock / externalRef / listItem / taskItem / tableCell / tableHeader / callout / blockquote / column / toggleList / unknown)
+- 6 个 rename atomId → id(image / audioBlock / videoBlock / htmlBlock / tweetBlock / mathVisual)
+
+合计 22 个 NodeSpec 改动。
+
+---
+
 *实施期间发现新偏离继续追加,Stage 9 汇总到完成报告。*

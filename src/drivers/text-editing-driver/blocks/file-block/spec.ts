@@ -28,6 +28,8 @@ const fileBlockNodeSpec: NodeSpec = {
   draggable: true,
   selectable: true,
   attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4): block atom 稳定 ULID,与 atom.id 同步
+    id: { default: null },
     src: { default: '' },        // media:// URL(主要)/ file:// / 绝对路径(兼容)
     mediaId: { default: '' },    // mediaStore 内部 ID(去重 hash)
     filename: { default: '' },
