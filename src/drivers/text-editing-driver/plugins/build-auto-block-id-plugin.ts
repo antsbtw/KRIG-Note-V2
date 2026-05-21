@@ -26,12 +26,16 @@
  * undo 后 attrs.id 字面已被 PM history 精确回滚(decision 026 §5.6),plugin 检查"无 id"才
  * 注入 → undo/redo 触发不会重复注入(idempotent)。
  *
- * Copy/Paste 语义(decision 026 §5.2):
- * - 粘贴的 PM tr 内 node attrs.id 字面 = 来源 doc 的旧 ULID
- * - 但粘贴 paste tr 是 user transaction(非 history)→ 本 plugin 看到的 newState 含旧 id
- * - 直接简化:本 plugin **不区分**粘贴场景,**永远只为无 id 的 node 注入**
- *   → 粘贴的 node 字面保留来源 id(违反 §5.2 拍板"粘贴全部生成新 id")
- *   ⚠ 此偏差留 D-09 字面登记,Stage 7 测试 T5 验收 + 后续 commit 加 paste hook
+ * Split / Paste 语义(decision 026 §5.2 + §5.3,Stage 2 EM2 触发 dup-id 根因后修):
+ * - PM split(用户按 Enter 拆 paragraph)字面**继承上方 attrs**(含 attrs.id)→ 下半 id 跟上半重复
+ * - PM paste 字面把 clipboard 内 PM JSON(含原 id)插回 doc → 粘贴段携带来源 id,可能跟当前 doc 已有 id 重复
+ * - 本 plugin 字面**一遍扫描去重**:descendants 内维护 seen Set,
+ *   首次遇到某 id 字面保留(对齐 §5.3"上半保留"),后续重复出现字面重新生成新 ULID
+ * - 与 attrs.id === null 注入路径合并到同一逻辑(needRegen = !id || seen.has(id))
+ *
+ * 历史 D-09 字面登记:Stage 1 提交时本 plugin 仅处理 (A) null → 注入;Stage 2 EM2 用户
+ * 测试触发 split 字面 dup-id throw 后(2026-05-21),合并增加 (B) 重复检测 → 重生成。
+ * Stage 7 T5 测试场景字面验收 paste 语义。
  */
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -84,13 +88,36 @@ export function buildAutoBlockIdPlugin(): Plugin {
       let tr = newState.tr;
       let modified = false;
 
-      newState.doc.descendants((node, pos) => {
-        if (!shouldHaveId(node)) return true; // descend into children(可能含需要 id 的子 node)
-        if (node.attrs.id) return true;        // 已有 id,不重新生成(idempotent;undo 也走这条)
+      // 一遍扫描:同时处理
+      //   (A) attrs.id === null → 注入新 ULID
+      //   (B) attrs.id 已存在 但在 doc 内**重复出现** → 给后出现的节点重生成新 ULID
+      //
+      // (B) 必要性(decision 026 §5.3 split + §5.2 paste 字面拍板):
+      // - PM split 默认行为字面**继承**上方 node 的所有 attrs(含 attrs.id)
+      //   → 下半字面有非 null id 但跟上半重复 → 必须**给下半**重生成(保上半 id,§5.3 字面)
+      // - PM paste 字面把 clipboard 内的 PM JSON(含原 id)插回 doc
+      //   → 粘贴段字面携带来源 id;若来源 id 已在当前 doc → 重生成(§5.2 字面"粘贴全部生成新 ULID")
+      // - 同一遍扫描内"先出现保留 / 后出现新生成" 字面对齐 §5.3 split"上半保留"
+      const seen = new Set<string>();
 
-        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: generateUlid() });
+      newState.doc.descendants((node, pos) => {
+        if (!shouldHaveId(node)) return true; // descend(列表/单元格内可能嵌套需要 id 的 block)
+
+        const currentId = node.attrs.id as string | null;
+        const needRegen =
+          !currentId || // (A) null → 新建
+          seen.has(currentId); // (B) 重复 → split 下半 / paste 复用 → 重生成
+
+        if (!needRegen) {
+          seen.add(currentId);
+          return true;
+        }
+
+        const newId = generateUlid();
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: newId });
+        seen.add(newId);
         modified = true;
-        return true; // 继续遍历(列表/单元格内可能嵌套需要 id 的 block)
+        return true;
       });
 
       if (!modified) return null;

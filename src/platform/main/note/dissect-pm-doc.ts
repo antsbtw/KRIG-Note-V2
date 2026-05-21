@@ -122,9 +122,12 @@ function processChildren(
       );
     }
     if (ctx.duplicateIds.has(id)) {
+      // dup id 字面**只应在 plugin 未执行 / 数据库坏 / migration bug 时**触发 —
+      // 正常路径 buildAutoBlockIdPlugin 字面已在 PM appendTransaction 内一遍扫描去重
+      // (split / paste 都覆盖,decision 026 §5.2 §5.3)。若仍触发,数据已坏,字面 throw。
       throw new Error(
         `[dissect-pm-doc] duplicate block id ${id} in same doc; ` +
-          `paste 语义 hook 未实施(D-09)— caller 字面应在 paste 入口字面重新生成 id`,
+          `buildAutoBlockIdPlugin 字面去重失效(或 caller 绕开 PM 路径直接 IPC)`,
       );
     }
     ctx.duplicateIds.add(id);
