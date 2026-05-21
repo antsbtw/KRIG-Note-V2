@@ -4,7 +4,11 @@
 > **分支**:`feature/L7-block-atomization`
 > **commits**:`c4bb1520` D-10/D-11 偏离 / `f7f4fd49` assemble+dissect / `59bf92b7` diff / `7ba23467` cache / `a121c356` capability rewrite
 > **验收依据**:实施计划 §3.4 EM2 4 条
-> **状态**:静态检查 PASS(2 条) / round-trip 手动测试待用户验(2 条)
+> **状态**:✅ PASS(2026-05-21 19:03 用户字面拍板通过)
+>   - 静态:typecheck 全绿 + lint 0 新增 warning
+>   - 手动 EM2.3 / EM2.4 round-trip:用户**清旧 note 重新测**,console 0 throw → PASS
+>   - dup-id bug fix(`dc74a4de`):PM split / paste 字面继承 attrs.id → plugin 一遍扫 seen Set 去重
+>   - D-10 ebook reading-thought 路径 + Stage 7 T5 Cmd+C/V:字面**跳过**EM2 验,留 Stage 7 兑现
 
 ---
 
@@ -150,11 +154,21 @@ getNote 字面会 `assemblePmDoc` 返 null(无 belongsToNote 边 → blockIds=[]
 
 ## 后续步骤
 
-EM2 静态检查通过,**等用户手动验证 EM2.3-2.4 后**才 mark 完整通过。
+✅ **EM2 字面通过(2026-05-21 19:03)**,推进 Stage 3。
 
-✅ 用户验证通过 → 推进 Stage 3(三 predicate 字面落地 + cardinality 检查)
-❌ 任一项失败 → 字面登记 + 修复 + 重 verify
+字面已兑现:
+- EM2.1 typecheck 全绿
+- EM2.2 lint 0 新增 warning
+- EM2.3 创 note + 3 paragraph + 关闭重开 → 字面相等(用户清旧 note 重测,console 0 throw)
+- EM2.4 split / 编辑 → 字面不再 dup-id throw
+
+字面**留 Stage 7 兑现**(用户拍板跳过 EM2 验):
+- D-10 ebook reading-thought 走 updateNote 路径 → T8 字面验收
+- Stage 7 T5 Cmd+C/V → 字面 verify "原段 id 不变 / 副本各自新 id"
+
+中途 1 个 followup fix:
+- `dc74a4de` PM split/paste 字面继承 attrs.id 触发 dup-id throw → plugin seen Set 一遍去重
 
 ---
 
-*EM2 verify · 2026-05-21*
+*EM2 verify · 2026-05-21(用户字面通过)*
