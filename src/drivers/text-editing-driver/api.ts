@@ -1008,6 +1008,8 @@ export const textEditingDriverApi = {
       | 'horizontal-rule'
       | 'callout'
       | 'toggle-list',
+    /** 仅 target='code-block' 时生效:codeBlock.attrs.language */
+    codeLanguage?: string,
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
@@ -1043,7 +1045,7 @@ export const textEditingDriverApi = {
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, node.content);
       view.dispatch(tr);
       // 第一个子 block 现在落在 pos 位置(去掉 container 的开标 1 个 token 后)
-      this.turnIntoAt(instanceId, pos, target);
+      this.turnIntoAt(instanceId, pos, target, codeLanguage);
       return;
     }
 
@@ -1118,7 +1120,8 @@ export const textEditingDriverApi = {
       const cb = schema.nodes.codeBlock;
       if (!cb) return;
       const text = node.textContent;
-      const newNode = text ? cb.create(null, schema.text(text)) : cb.create();
+      const attrs = codeLanguage ? { language: codeLanguage } : null;
+      const newNode = text ? cb.create(attrs, schema.text(text)) : cb.create(attrs);
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, newNode);
       // 光标进新 codeBlock 内部(pos + cb开1 = pos+1)
       tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)));
@@ -1206,13 +1209,14 @@ export const textEditingDriverApi = {
       | 'horizontal-rule'
       | 'callout'
       | 'toggle-list',
+    codeLanguage?: string,
   ): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;
     const $from = inst.view.state.selection.$from;
     if ($from.depth === 0) return;
     const blockPos = $from.before($from.depth);
-    this.turnIntoAt(instanceId, blockPos, target);
+    this.turnIntoAt(instanceId, blockPos, target, codeLanguage);
   },
 
   /**

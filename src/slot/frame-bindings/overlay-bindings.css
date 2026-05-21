@@ -76,6 +76,79 @@
   color: #fff;
 }
 
+/* Slash menu — Notion 范式分组渲染(本次美化) */
+.krig-slash-menu--grouped {
+  min-width: 280px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.krig-slash-menu-group-title {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: none;
+  user-select: none;
+}
+
+/* 组标题之间加细分隔(第一个不加) */
+.krig-slash-menu-group-title + * + .krig-slash-menu-group-title,
+.krig-slash-menu-item + .krig-slash-menu-group-title {
+  border-top: 1px solid #3a3a3a;
+  margin-top: 4px;
+}
+
+/* 分组态下的 item:左 icon + 中 label + 右 hint */
+.krig-slash-menu--grouped .krig-slash-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.krig-slash-menu-item__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #bbb;
+  flex-shrink: 0;
+}
+
+.krig-slash-menu-item__label {
+  flex: 1;
+  text-align: left;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.krig-slash-menu-item__suffix {
+  color: #888;
+}
+
+.krig-slash-menu-item.selected .krig-slash-menu-item__suffix {
+  color: #ccc;
+}
+
+.krig-slash-menu-item__hint {
+  margin-left: auto;
+  padding-left: 8px;
+  color: #666;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.krig-slash-menu-item.selected .krig-slash-menu-item__icon,
+.krig-slash-menu-item.selected .krig-slash-menu-item__hint {
+  color: #ddd;
+}
+
 /* L5-B3.1 — block handle wrapper (driver 内部浮动 DOM)
  * L5-B3.9 后 wrapper 内含 + / ⋮⋮ 两按钮,size/cursor/font-* 由 driver
  * 在子按钮 inline style 设置;wrapper 自身只负责定位 + flex 排列(都走 inline) */

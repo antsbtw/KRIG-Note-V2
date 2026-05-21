@@ -17,6 +17,8 @@
  * 业务插入(image/table/audio/video/tweet/file-block/external-ref)留 view 自注册:
  * 它们依赖 mediaStore / tweetFetcher / ytdlp 等业务 capability,非 PM 通用,
  * canvas-text-node / thought-view 不必有(见 C0 §三 §🟢 决议 D-3)。
+ *
+ * Notion 范式(本次美化):每项标注 group(basic/advanced/media) + icon(lucide name) + hint(md 标记)。
  */
 
 import type { SlashItem } from '@slot/interaction-registries/slash-registry/slash-types';
@@ -30,6 +32,8 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-paragraph',
       keywords: ['p', 'paragraph', 'text', 'plain'],
       view: viewId,
+      group: 'basic',
+      icon: 'type',
       order: 10,
     },
     {
@@ -38,6 +42,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-h1',
       keywords: ['h1', 'heading', 'title', 'header'],
       view: viewId,
+      group: 'basic',
+      icon: 'heading-1',
+      hint: '#',
       order: 20,
     },
     {
@@ -46,6 +53,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-h2',
       keywords: ['h2', 'heading', 'header'],
       view: viewId,
+      group: 'basic',
+      icon: 'heading-2',
+      hint: '##',
       order: 30,
     },
     {
@@ -54,6 +64,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-h3',
       keywords: ['h3', 'heading', 'header'],
       view: viewId,
+      group: 'basic',
+      icon: 'heading-3',
+      hint: '###',
       order: 40,
     },
     {
@@ -62,6 +75,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-bullet',
       keywords: ['bullet', 'ul', 'list', 'unordered'],
       view: viewId,
+      group: 'basic',
+      icon: 'list',
+      hint: '-',
       order: 50,
     },
     {
@@ -70,6 +86,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-ordered',
       keywords: ['ordered', 'ol', 'list', 'number'],
       view: viewId,
+      group: 'basic',
+      icon: 'list-ordered',
+      hint: '1.',
       order: 60,
     },
     {
@@ -78,6 +97,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-task',
       keywords: ['task', 'todo', 'checkbox', 'check'],
       view: viewId,
+      group: 'basic',
+      icon: 'list-checks',
+      hint: '[]',
       order: 70,
     },
     {
@@ -86,6 +108,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-quote',
       keywords: ['quote', 'blockquote'],
       view: viewId,
+      group: 'basic',
+      icon: 'quote',
+      hint: '"',
       order: 80,
     },
     {
@@ -94,6 +119,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-code',
       keywords: ['code', 'codeblock', 'pre'],
       view: viewId,
+      group: 'advanced',
+      icon: 'code',
+      hint: '```',
       order: 90,
     },
     {
@@ -102,6 +130,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-divider',
       keywords: ['divider', 'hr', 'horizontal', 'rule', 'separator'],
       view: viewId,
+      group: 'basic',
+      icon: 'minus',
+      hint: '---',
       order: 100,
     },
     {
@@ -110,6 +141,8 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-callout',
       keywords: ['callout', 'tip', 'warning', 'note', 'admonition'],
       view: viewId,
+      group: 'advanced',
+      icon: 'message-square-warning',
       order: 110,
     },
     {
@@ -118,6 +151,9 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       command: 'text-editing.slash-turn-toggle',
       keywords: ['toggle', 'fold', 'collapse', 'expand', 'detail'],
       view: viewId,
+      group: 'basic',
+      icon: 'chevron-right',
+      hint: '>',
       order: 120,
     },
   ];
@@ -136,6 +172,9 @@ export function createMathBlockItem(viewId: string): SlashItem {
     command: 'text-editing.slash-insert-math-block',
     keywords: ['math', 'latex', 'equation', 'formula', '公式'],
     view: viewId,
+    group: 'advanced',
+    icon: 'sigma',
+    hint: '$$',
     order: 140,
   };
 }
@@ -153,6 +192,8 @@ export function createMermaidBlockItem(viewId: string): SlashItem {
     command: 'text-editing.slash-insert-mermaid-block',
     keywords: ['mermaid', 'diagram', 'flowchart', 'sequence', 'chart', 'graph', '图表', '流程图'],
     view: viewId,
+    group: 'advanced',
+    icon: 'workflow',
     order: 142,
   };
 }
@@ -170,6 +211,8 @@ export function createHtmlBlockItem(viewId: string): SlashItem {
     command: 'text-editing.slash-insert-html-block',
     keywords: ['html', 'web', 'preview', 'artifact', '网页', '预览'],
     view: viewId,
+    group: 'advanced',
+    icon: 'code-2',
     order: 144,
   };
 }
@@ -188,6 +231,8 @@ export function createMathVisualBlockItem(viewId: string): SlashItem {
     command: 'text-editing.slash-insert-math-visual',
     keywords: ['graph', 'plot', 'function', 'math', 'visual', 'mafs', '函数图', '绘图'],
     view: viewId,
+    group: 'advanced',
+    icon: 'line-chart',
     order: 146,
   };
 }

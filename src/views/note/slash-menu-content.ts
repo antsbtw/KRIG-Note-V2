@@ -25,6 +25,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-image',
       keywords: ['image', 'picture', 'photo', 'img', '图片'],
       view: VIEW,
+      group: 'media',
+      icon: 'image',
       order: 130,
     },
     // L5-B3.16:audio / video(媒体三兄弟,跟 image 同模式)
@@ -34,6 +36,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-audio',
       keywords: ['audio', 'music', 'sound', 'mp3', 'podcast', '音频'],
       view: VIEW,
+      group: 'media',
+      icon: 'audio-lines',
       order: 145,
     },
     {
@@ -42,6 +46,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-video',
       keywords: ['video', 'movie', 'mp4', 'youtube', '视频'],
       view: VIEW,
+      group: 'media',
+      icon: 'video',
       order: 150,
     },
     // L5-B3.18:tweet-block(X / Twitter 推文嵌入)
@@ -51,6 +57,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-tweet',
       keywords: ['x', 'tweet', 'twitter', 'post', 'social', '推文'],
       view: VIEW,
+      group: 'media',
+      icon: 'twitter',
       order: 155,
     },
     // L5-B3.7:Table 3x3(第一行 header)
@@ -60,6 +68,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-table',
       keywords: ['table', 'grid', '表格'],
       view: VIEW,
+      group: 'advanced',
+      icon: 'table',
       order: 160,
     },
     // columnList:2 Columns(V1 直迁;3 列入口待 v1.5)
@@ -69,6 +79,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-columns',
       keywords: ['column', 'columns', 'split', 'side by side', '分栏', '两列'],
       view: VIEW,
+      group: 'advanced',
+      icon: 'columns-2',
       order: 165,
     },
     // L5-B3.14:fileBlock / externalRef(fileLink 不在 slash — 仅 paste/drag 路径产生)
@@ -78,6 +90,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-file-block',
       keywords: ['file', 'attachment', 'pdf', 'attach', '附件'],
       view: VIEW,
+      group: 'media',
+      icon: 'paperclip',
       order: 170,
     },
     {
@@ -86,6 +100,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       command: 'note-view.slash-insert-external-ref',
       keywords: ['ref', 'link', 'file', 'url', 'reference', '引用'],
       view: VIEW,
+      group: 'media',
+      icon: 'external-link',
       order: 180,
     },
   ];
