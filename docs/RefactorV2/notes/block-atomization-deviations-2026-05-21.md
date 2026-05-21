@@ -323,6 +323,38 @@ V2 字面**没有**现成的 toast capability — grep `toast / Toast` 字面无
 
 ---
 
+---
+
+## D-13 — Stage 6 字面跳过(用户拍板,开发期数据已字面新形态)
+
+**决议字面**(decision 026 §11.2 / 实施计划 §7):
+> "Stage 6:一次性 migration script + 备份 round-trip 测试"
+> "硬门槛:备份数据跑 migration 成功 + 字面文本等价"
+
+**实际事实**(2026-05-21 用户拍板):
+
+- D-11 字面用户已拍板"清空本地旧数据"
+- 开发期 V2 SurrealDB 字面已清,字面所有数据是字面 Stage 2 之后字面新创建的 block atom 形态
+- **字面无 migration 消费者**(旧整篇 1 atom 形态数据字面 0 条)
+
+**字面拍板**(2026-05-21 Stage 5 完成后 AskUserQuestion):
+
+> "字面跳过 (开发期已清数据, EM6 字面 marked 'N/A')"
+
+**字面影响**:
+
+- ✅ 字面 Stage 7 / 8 / 9 字面直接推进,Stage 6 字面**不实施 code**
+- ⚠ future 生产部署字面**必须**先实施 migration script 才能跑当前 L7 代码
+  - 字面留 future commit / sub-phase 字面兑现
+  - 字面 README / Release Note 字面需明示"生产部署字面需 migration"
+- 字面 EM6 报告字面 marked 'N/A',[block-atomization-em6-verify-2026-05-21.md](./block-atomization-em6-verify-2026-05-21.md) 字面登记
+
+**字面留 Stage 9 反向更新**:
+- decision 026 §11.2 字面拆"Stage 6"为"开发期 N/A + 生产 future sub-phase"
+- 实施计划 §7 字面同步
+
+---
+
 ## 汇总(2026-05-21,Stage 1 EM1 通过后修订)
 
 **字面拆账**(grep `id: { default: null }` 实测):
