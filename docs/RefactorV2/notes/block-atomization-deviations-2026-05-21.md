@@ -208,15 +208,53 @@ const fileLinkNodeSpec: NodeSpec = {
 
 ---
 
-**汇总**(2026-05-21):
+## D-09 — 粘贴语义未实施(临时妥协,Stage 7 验收)
 
-实际加 id 的 NodeSpec = decision 026 §3.1.1 字面 24 项 − hardBreak(D-06)− fileLink(D-07)= **22 个 NodeSpec**。
+**决议字面**(decision 026 §5.2):
 
-- 3 个已完成(paragraph / heading / horizontalRule)
-- 13 个待加 id(codeBlock / mathBlock / fileBlock / externalRef / listItem / taskItem / tableCell / tableHeader / callout / blockquote / column / toggleList / unknown)
-- 6 个 rename atomId → id(image / audioBlock / videoBlock / htmlBlock / tweetBlock / mathVisual)
+> "Cmd+X / Cmd+C / Cmd+V 一律生成新 ULID,丢弃原 id"
+> "粘贴 transaction 的 appendTransaction 拦截时,所有有 id 的 node 都重新生成 ULID"
 
-合计 22 个 NodeSpec 改动。
+**实际实施**(`build-auto-block-id-plugin.ts` 字面 header 注释 + 行为):
+
+> "本 plugin 不区分粘贴场景,永远只为无 id 的 node 注入 ULID"
+> "粘贴的 node 字面保留来源 id(违反 §5.2 拍板"粘贴全部生成新 id")"
+
+**原因**:Stage 1 仅做 schema + 默认注入,paste 钩子需识别 transaction 是否为"paste 操作"(用 `tr.getMeta('paste')` 或 input rule 等 PM 机制),增加 Stage 1 复杂度。简化拍板:Stage 1 不处理粘贴语义,留后续 commit 加 paste hook。
+
+**影响**:
+- 用户复制 block A → 粘贴 → 新 block 字面 = 旧 A.id(违反"新 id"语义)
+- 实际后果:同 doc 内两个 block 拿同 id 会让 capability.dissectPmDoc(Stage 2)抛"duplicate id"错;或 storage.putAtom(id 冲突)抛错
+- Stage 1 范围仅 schema + 注入插件,Stage 2 capability diff 算法会暴露此问题
+- Stage 7 测试场景 T5(Copy/Paste)字面 verify 此偏差;若 Stage 2 实施时优先级提升,可加 paste hook
+
+**处理**:
+- 本偏差**字面登记**,Stage 1 不修
+- Stage 2 实施时若 capability 层 dissectPmDoc 抛 duplicate id 错 → 优先加 paste hook(在 build-auto-block-id-plugin.ts 增加 paste 拦截逻辑)
+- 或留 Stage 7 测试 T5 字面 verify + 后续独立 commit 修
+
+**字面位置**:`src/drivers/text-editing-driver/plugins/build-auto-block-id-plugin.ts` 顶部 JSDoc 注释字面登记。
+
+---
+
+## 汇总(2026-05-21,Stage 1 EM1 通过后修订)
+
+**字面拆账**(grep `id: { default: null }` 实测):
+
+- decision 026 §3.1.1 字面拍板 24 项加 id
+- D-06 hardBreak 排除(inline) → 23
+- D-07 fileLink 排除(inline atom) → 22
+- D-04 + ee568236 commit 实际拆分:13 加 id + 6 atomId rename + 2 table NodeSpec(tableCell / tableHeader)
+- 13 + 6 + 2 = **21**(grep 实测:21 NodeSpec 含 `id: { default: null }`)
+- commit message 字面"22 NodeSpec"是双数计(tableCell/tableHeader 在【加 id 13 项】和【table/spec.ts 2 NodeSpec】各算一次),**实测 21**
+
+**实测 NodeSpec 加 id 共 21 个**(2026-05-21 EM1 verify 后 grep 校准,审计偏差 1 个,不影响功能)。
+
+- 3 个 Step 1.2 前已完成(paragraph / heading / horizontalRule)
+- 12 个 Step 1.2 新加(codeBlock / mathBlock / fileBlock / externalRef / listItem / taskItem / tableCell / tableHeader / callout / blockquote / column / toggleList / unknown 共 13 减重复 = 实测)
+- 6 个 Step 1.3 rename atomId → id(image / audioBlock / videoBlock / htmlBlock / tweetBlock / mathVisual)
+
+**审计偏差**:commit message 字面"22"与 grep 实测"21"差 1,根因 tableCell/tableHeader 在子列表双数。**事实层无影响**(NodeSpec 实际改动是正确的 21 + 6 rename,只是 commit message 描述错算了一次)。未来类似 commit 字面声明数字前 grep 校准(沿 [[decision-grep-verify-complete-propagation]])。
 
 ---
 
