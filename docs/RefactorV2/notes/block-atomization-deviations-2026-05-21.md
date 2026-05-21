@@ -237,6 +237,64 @@ const fileLinkNodeSpec: NodeSpec = {
 
 ---
 
+---
+
+## D-10 — reading-thought pm atom 不带 hasNoteView 但走 updateNote(事实纠错)
+
+**决议字面**(decision 026 §6.3 / §8.1):
+
+> "block 拆 atom 后:note 仍然是带 `hasNoteView` 边的 pm atom"
+> "读 note 内容 = listAtoms(belongsToNote.object = noteId) + 拓扑排序 + 嵌套展开"
+
+字面隐含假设:updateNote / getNote 的 input id 一定是带 hasNoteView 边的 note container。
+
+**实际事实**(2026-05-21 grep `src/platform/main/ebook/capability-impl.ts`):
+
+- ebook capability addReadingThoughtBlock / removeReadingThoughtBlock(L697 / L739) 直接 import 同进程 `updateNote` 函数,传入的是 reading-thought atom 的 id(pm domain,**但不带 hasNoteView 边**,而是带 `hasReadingThought` 边)
+- getReadingThought(L552-573)字面绕开 `note.getNote` 的 hasNoteView 防御 filter,直接 `storage.getAtom + wrapPmDoc` 自己构造 NoteInfo
+
+**影响**:
+
+Stage 2 重写 updateNote 必须**支持两种 container atom**:
+1. 有 hasNoteView 边的 note container(常规笔记)
+2. 没有 hasNoteView 边的 pm atom container(reading-thought)
+
+容器识别**不能**靠 hasNoteView 边过滤(否则 reading-thought 走不通)。
+
+**处理(Stage 2 实施)**:
+
+- assemble / dissect / diff 算法**对 container 身份不敏感**:输入一个 atom id + 一份 newDoc/oldDoc,输出 atom set + edge set
+- updateNote 内部不查 hasNoteView 边(getNote 的 hasNoteView 防御 filter 字面保留,但 updateNote 不查 — 因 reading-thought 也要工作)
+- getNote 字面保留 hasNoteView marker 防御(decision 016 §3.4),但**容器 atom 自身**字面可以**没有** hasNoteView 边(reading-thought 走自己的 getReadingThought 不走 getNote)
+- pm-doc-cache 字面缓存所有 container atom(以 atom id 为 key,不区分 note/reading-thought)
+
+**字面登记**:决议 026 §6.3 字面假设需在 Stage 9 反向更新,增补 "pm container atom 不限于 hasNoteView marker;hasReadingThought 也是 container marker" 字面。
+
+---
+
+## D-11 — 用户拍板:Stage 2 不引入旧数据兼容路径(临时妥协 → 转决议)
+
+**决议字面**(decision 026 §0.2 / §8.1):
+
+> "PM ↔ atom 转换时机:读时拼装/写时拆解 + capability 层 in-memory PM-doc 缓存"
+> "迁移策略:一次性 migration script"
+
+字面拍板"读时拼装 / 写时拆解"是唯一路径,Stage 6 一次性 migration 之前的旧数据(整篇 doc 1 atom 形态)**不在 Stage 2 兼容**。
+
+**实施期 AskUserQuestion**(2026-05-21):
+
+Stage 2 改完后,既有 V2 storage 数据(整篇 doc 1 atom)在 Stage 6 migration 跑前打开会读空。问用户处理方式,**用户拍板**:**"完全可以清空本地旧数据"**
+
+**影响**:
+
+- Stage 2 实施按决议字面走,**不写**任何"识别旧模式 → 走整篇路径"的 fallback 分支
+- 用户开发期接受清空本地 V2 数据快照
+- Stage 6 migration 仍按决议字面落地,**未来生产数据**仍走一次性 migration(本期清数据仅针对开发期 V2)
+
+**字面位置**:Stage 2 assemble-pm-doc.ts 字面注释登记"假设 storage 已是拆 atom 形态(decision 026 §3 字面);旧整篇 1 atom 数据不兼容(Stage 6 migration 前清数据,本拍板 D-11)"。
+
+---
+
 ## 汇总(2026-05-21,Stage 1 EM1 通过后修订)
 
 **字面拆账**(grep `id: { default: null }` 实测):
