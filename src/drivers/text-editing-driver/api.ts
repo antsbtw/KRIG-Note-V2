@@ -864,28 +864,20 @@ export const textEditingDriverApi = {
   },
 
   /**
-   * 计算 block 的 anchor(给 Copy Link 命令构造 krig://block/<noteId>/<anchor>)— L5-B3.9
+   * 计算 block 的稳定 id(给 Copy Link 命令构造 krig://block/<noteId>/<blockId>)。
    *
-   * 规则(对齐 V1):
-   * - heading 节点 → 用标题文本前 60 字 encodeURIComponent
-   * - 其他 block → `<idx>:<前 30 字 encodeURIComponent>`
-   *   idx 是该 block 在 doc 中的顺序索引(0-based,只数顶层 block)
+   * L7 block atomization Stage 5 升级(decision 026 §7 + §10.1):
+   * 旧版 `getBlockAnchorAt` 字面用"heading 文本前 60 字"或"idx:文本前 30 字"作 anchor —
+   * 用户编辑(改标题 / 插段 / 改文本)后 anchor 字面漂移定位失效。
+   * 新版字面返 block atom ULID(== PM attrs.id == storage atom.id),跨编辑稳定。
+   *
+   * 沿 Stage 4 字面 helper findBlockIdAtPos(沿 PM 树最近 group='block' + 带 id 的祖先)。
    */
-  getBlockAnchorAt(instanceId: string, pos: number): string | null {
+  getBlockIdAt(instanceId: string, pos: number): string | null {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return null;
-    const node = inst.view.state.doc.nodeAt(pos);
-    if (!node) return null;
-    const text = node.textContent.trim();
-    if (node.type.name === 'heading') {
-      return encodeURIComponent(text.slice(0, 60));
-    }
-    let idx = 0;
-    inst.view.state.doc.forEach((_n, offset, i) => {
-      if (offset === pos) idx = i;
-    });
-    const preview = text.slice(0, 30);
-    return `${idx}:${encodeURIComponent(preview)}`;
+    const found = findBlockIdAtPos(inst.view.state.doc, pos);
+    return found?.blockId ?? null;
   },
 
   /** 复制 block(在原 block 之后插入复本)*/
