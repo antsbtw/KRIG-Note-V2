@@ -8,7 +8,7 @@
  *      ⚠️ 这步必须在 selection 还在的时候调(右键命令触发时选区仍存活,
  *         弹 popup 后 focus 转移 selection 丢)
  *   4. updateThoughtAnchor(thoughtId, {source:'note', resourceId:noteId,
- *      locator:{pmPos, anchorType:'inline', text}})
+ *      locator:{blockId, offset, preview}})  ← L7 升级 decision 026 §10.1
  *      → atom 与 Note 选区双向关联(Thought tab 卡片点击 → Note 跳转,
  *         Note mark 点击 → Thought tab 滚到卡片)
  *   5. 执行 commandRegistry.execute('note-view.open-ask-ai-popup', {
@@ -97,14 +97,14 @@ export async function askAiFromNote(): Promise<void> {
     'ai-response',
   );
   if (markResult) {
-    // 5. 写 anchor 边(source=note,locator=inline pos+text)
+    // 5. 写 anchor 边(source=note,L7 升级:locator = blockId + offset + preview)
     const anchor: ThoughtAnchor = {
       source: 'note',
       resourceId: noteId,
       locator: {
-        pmPos: markResult.pos,
-        anchorType: 'inline',
-        text: markResult.text,
+        blockId: markResult.blockId,
+        offset: markResult.offset,
+        preview: markResult.preview,
       },
     };
     await thoughtCap.updateThoughtAnchor(thoughtId, anchor);

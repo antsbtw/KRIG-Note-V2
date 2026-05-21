@@ -18,10 +18,23 @@ interface ThoughtPanelProps {
   resourceId: string | null;
 }
 
-function getAnchorPos(t: ThoughtInfo): number {
-  if (!t.anchor) return 0;
-  const loc = t.anchor.locator as { pmPos?: number; pageNum?: number };
-  return loc.pmPos ?? loc.pageNum ?? 0;
+/**
+ * 排序 key — 返 [numKey, strKey],supports book(pageNum)和 note(blockId 字典序)混排。
+ *
+ * L7 升级(decision 026 §10.1):note locator pmPos 字面换为 blockId。
+ * - book locator 字面 pageNum(整数页码)= numKey,strKey 空
+ * - note locator blockId 是 ULID(字典序 ≈ 时间序 ≈ 创建顺序)= strKey,numKey 大常数靠后
+ * - 无 anchor → numKey=0 字面最前(独立 thought)
+ *
+ * 字面**不**走 PM doc 内当前位置序(那需 getNote → 找 pos 异步);
+ * 字面用创建顺序近似 — Stage 7 字面 verify 用户体感是否符合预期。
+ */
+function getAnchorSortKey(t: ThoughtInfo): [number, string] {
+  if (!t.anchor) return [0, ''];
+  const loc = t.anchor.locator as { blockId?: string; pageNum?: number };
+  if (typeof loc.pageNum === 'number') return [loc.pageNum, ''];
+  if (typeof loc.blockId === 'string') return [Number.MAX_SAFE_INTEGER, loc.blockId];
+  return [0, ''];
 }
 
 export function ThoughtPanel({
@@ -31,9 +44,15 @@ export function ThoughtPanel({
   source,
   resourceId,
 }: ThoughtPanelProps) {
-  // 按 anchor 位置排序(V1 ThoughtPanel 同模式)
+  // 按 anchor 位置排序(V1 ThoughtPanel 同模式;L7 升级:复合 key [numKey, strKey])
   const sorted = useMemo(
-    () => [...thoughts].sort((a, b) => getAnchorPos(a) - getAnchorPos(b)),
+    () =>
+      [...thoughts].sort((a, b) => {
+        const [an, as] = getAnchorSortKey(a);
+        const [bn, bs] = getAnchorSortKey(b);
+        if (an !== bn) return an - bn;
+        return as < bs ? -1 : as > bs ? 1 : 0;
+      }),
     [thoughts],
   );
 
