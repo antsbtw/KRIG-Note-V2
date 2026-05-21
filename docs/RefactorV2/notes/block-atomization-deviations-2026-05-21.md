@@ -295,6 +295,34 @@ Stage 2 改完后,既有 V2 storage 数据(整篇 doc 1 atom)在 Stage 6 migrati
 
 ---
 
+---
+
+## D-12 — Stage 5 旧 URL 错误提示字面仅 console.warn(临时妥协)
+
+**决议字面**(decision 026 §7.3 + 实施计划 §6.3 EM5):
+
+> "点击旧 URL → 弹 UI 提示'链接已失效,请重新复制'"
+> "EM5 ✅ 点击旧 URL → Toast '链接已失效'"
+
+**实际事实**(2026-05-21 grep V2):
+
+V2 字面**没有**现成的 toast capability — grep `toast / Toast` 字面无命中(仅 emoji 图标列表)。
+要实施 toast UI 字面需新建 capability:Notification / Toast 组件 + 跨 view 调用入口。
+
+**处理(字面妥协)**:
+
+- driver 字面 `console.warn` 字面已暴露(用户开 DevTools 字面能看见错误)
+- LinkClickHandler 字面**已加** `onLegacyBlockAnchor?` 回调接口(预留 hook)
+- view 端 `link-click-integration.ts` 字面**不注册** `onLegacyBlockAnchor`(字面无 toast 可调)
+- 字面**留 future commit / sub-phase** 引入 toast capability 后字面 wire 此 callback
+
+**影响**:
+- 用户点旧 URL 字面静默(driver console.warn 走;无视觉反馈)
+- Stage 7 字面 verify 时字面用 DevTools 看 console 输出确认旧格式被识别
+- 字面登记 Stage 9 反向更新 EM5 第 3 条字面"toast"→"console.warn"
+
+---
+
 ## 汇总(2026-05-21,Stage 1 EM1 通过后修订)
 
 **字面拆账**(grep `id: { default: null }` 实测):

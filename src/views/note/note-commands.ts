@@ -286,16 +286,18 @@ export function registerNoteCommands(): void {
 
   // ── 业务依赖(1):Copy Link(依 noteId)──
 
-  // L5-B3.9:Copy Link(`krig://block/<noteId>/<anchor>` 写剪贴板)
-  // anchor 用 V1 同款规则:heading 用文本 / 普通 block 用 idx:preview
+  // Copy Link(`krig://block/<noteId>/<blockId>` 写剪贴板)
+  // L7 block atomization Stage 5(decision 026 §7.3):
+  // anchor 字面从 V1 "heading text" / "idx:preview" 升级为 block atom ULID(跨编辑稳定)。
   commandRegistry.register('note-view.handle-copy-block-link', () => {
     const ctx = getHandlePos();
     if (!ctx) {
       handleMenuController.hide();
       return;
     }
-    const anchor = tea().getBlockAnchorAt(ctx.instanceId, ctx.pos);
-    if (!anchor) {
+    const blockId = tea().getBlockIdAt(ctx.instanceId, ctx.pos);
+    if (!blockId) {
+      console.warn('[note-commands/copy-block-link] block at pos has no attrs.id');
       handleMenuController.hide();
       return;
     }
@@ -305,7 +307,7 @@ export function registerNoteCommands(): void {
       handleMenuController.hide();
       return;
     }
-    const link = `krig://block/${noteId}/${anchor}`;
+    const link = `krig://block/${noteId}/${blockId}`;
     void navigator.clipboard.writeText(link).catch(() => {});
     handleMenuController.hide();
   });
