@@ -79,6 +79,11 @@ interface DissectContext {
  * @param children — PM 节点列表(可能含结构性容器,需要展开)
  * @param parentAtomId — 最近的拆 atom 祖先 id(顶层时 = containerId,嵌入容器时 = 容器 atom.id)
  * @param parentListType — 若当前 children 来自 bulletList/orderedList/taskList,记录类型供 listItem dissect 写 _assemblyHints
+ * @param drawSiblingChain — 是否在本层尾部画 nextSibling 链。**结构性容器递归调用时必须传
+ *   false** — 因为容器内的 grandchildren 会被外层 `siblingAtomIds.push(...)` 接走,
+ *   外层会统一在更大范围内画链;若内层也画一次,grandchildren 间会出现 2 倍 nextSibling
+ *   边(嵌套结构性容器则 3 倍,以此类推)。**真子级递归(非结构性容器内部)传 true** —
+ *   那是独立的 sibling chain。bug 2026-05-22 修(decision 026 §6 cardinality ≤1 违反)。
  * @returns ordered atom ids(本层生成的 block atom 序列,供 caller 拼 nextSibling 链)
  */
 function processChildren(
@@ -86,6 +91,7 @@ function processChildren(
   parentAtomId: string,
   parentListType: 'bullet' | 'ordered' | null,
   ctx: DissectContext,
+  drawSiblingChain: boolean = true,
 ): string[] {
   if (!Array.isArray(children) || children.length === 0) return [];
 
@@ -98,11 +104,14 @@ function processChildren(
       if (child.type === 'bulletList') childListType = 'bullet';
       else if (child.type === 'orderedList') childListType = 'ordered';
       // taskList 字面其 child 是 taskItem(另一 NodeSpec)无歧义,childListType 为 null
+      // drawSiblingChain=false:grandchildren 会被外层 push(...grandchildIds) 接走,
+      // 外层会统一画链(含跨容器边界的 prev→A、C→next),内层不能再画一次否则双倍。
       const grandchildIds = processChildren(
         child.content,
         parentAtomId,
         childListType,
         ctx,
+        false,
       );
       siblingAtomIds.push(...grandchildIds);
       continue;
@@ -175,11 +184,14 @@ function processChildren(
   }
 
   // 字面生成 nextSibling 链(本层 atom id 序列)
-  for (let i = 0; i < siblingAtomIds.length - 1; i++) {
-    ctx.result.nextSiblingEdges.push({
-      subjectId: siblingAtomIds[i],
-      objectId: siblingAtomIds[i + 1],
-    });
+  // drawSiblingChain=false:本层是结构性容器递归,grandchildren 交给外层画链(否则双倍)
+  if (drawSiblingChain) {
+    for (let i = 0; i < siblingAtomIds.length - 1; i++) {
+      ctx.result.nextSiblingEdges.push({
+        subjectId: siblingAtomIds[i],
+        objectId: siblingAtomIds[i + 1],
+      });
+    }
   }
 
   return siblingAtomIds;

@@ -27,9 +27,12 @@ import { buildImageKeymap } from './keymap';
 
 const imageNodeSpec: NodeSpec = {
   // caption — V1 image content='textBlock'(单段)。V2 拆分后默认 caption 是 paragraph,
-  // 但 content 用 'block' (group) 表示单个 block — 跟 V1 单 caption 行为等价,
-  // 用户实际只会写段落 (paragraph),其他 block 类型(heading / list / 等)允许但不常见。
-  content: 'block',
+  // 但 content 用 'block?' (group, 0 或 1 个) 表示可选单 block — 跟 V1 单 caption 行为等价
+  // 但允许无 caption(extraction / migration 路径常无 caption)。
+  // 修复(2026-05-22):原 'block'(必须 1 个)→ extraction 写入 content=[] 时 PM fromJSON
+  // 容忍,但 setNodeAttribute 走 ReplaceStep 严格校验失败 → throw RangeError →
+  // NoteView 渲染回退 "笔记加载中或已删除"。
+  content: 'block?',
   group: 'block',
   draggable: true,
   selectable: true,
