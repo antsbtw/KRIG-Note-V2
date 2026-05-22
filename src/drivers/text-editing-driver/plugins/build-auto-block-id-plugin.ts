@@ -62,14 +62,24 @@ const STRUCTURAL_CONTAINER_TYPES = new Set<string>([
 
 /**
  * 字面判断:此 node 是否应该有 attrs.id。
- * - inline node 一律否(group='inline')
- * - block 但属于结构性容器 → 否
- * - 其他 group='block' 节点 → 是(沿 decision 026 §3.1.1 字面清单)
+ *
+ * **与 dissect-pm-doc 的 shouldGenerateAtom 同源**(decision 026 §3.1.3 字面清单):
+ * - 结构性容器 → 否(table / tableRow / bulletList / orderedList / taskList / columnList)
+ * - schema attrs 里没声明 id 字段(inline 节点 hardBreak/text/mathInline 等)→ 否
+ * - schema attrs 里声明了 id 字段 + 非结构性 → 是
+ *
+ * 历史 bug(2026-05-21 import 数据触发):
+ * 旧实现字面用 `spec.group !== 'block'` 排除,但 listItem / taskItem 的 spec
+ * 字面无 group 字段(它们是 list 容器内的固定子项,不出现在 'block' 通配位置)。
+ * dissect 字面用 "'id' in attrs" 判定,listItem 字面 schema 声明了 attrs.id
+ * → dissect 字面期望它有 id,但 plugin 字面跳过不注入 → 抛错。
+ * 此处统一二者判定。
  */
 function shouldHaveId(node: PMNode): boolean {
-  if (node.type.spec.group !== 'block') return false;
   if (STRUCTURAL_CONTAINER_TYPES.has(node.type.name)) return false;
-  return true;
+  const specAttrs = node.type.spec.attrs;
+  if (!specAttrs) return false;
+  return 'id' in specAttrs;
 }
 
 /**
