@@ -21,6 +21,7 @@
  */
 
 import { BrowserWindow, ipcMain, type WebContents } from 'electron';
+import * as crypto from 'node:crypto';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getEBookData } from '../ebook/file-loader';
 // sub-phase 022 (§10.B-3): 旧 bookshelfStore JSON store 字面 git rm,
@@ -54,6 +55,17 @@ function isPlatformUrl(url: string): boolean {
  */
 const attachedWebContents = new WeakSet<WebContents>();
 
+/**
+ * KRIG_IMPORT JSON 短窗口去重 — 防用户误双击 / Platform 重发触发 N 个 note(2026-05-22)。
+ *
+ * 策略:对 JSON 字符串 SHA-256,窗口内同 hash 跳过。窗口外(>5s)同 hash 允许通过 —
+ * 用户真想重导同一章节也能再触发,只是要等 5s 冷却。
+ *
+ * 不存盘 — 仅本进程内存,重启 V2 即清。
+ */
+const KRIG_IMPORT_DEDUP_TTL_MS = 5_000;
+const krigImportSeenHashes = new Map<string, number>(); // hash → first seen ts
+
 function attachExtractionToWebContents(wc: WebContents): void {
   if (attachedWebContents.has(wc)) return;
   attachedWebContents.add(wc);
@@ -69,6 +81,22 @@ function attachExtractionToWebContents(wc: WebContents): void {
       (details as unknown as { message?: string }).message ?? messageArg ?? '';
     if (!message.startsWith('KRIG_IMPORT:')) return;
     const json = message.slice('KRIG_IMPORT:'.length);
+
+    // 短窗口去重 — 防用户误双击 / Platform 重发(5s 内同 JSON 内容只处理 1 次)
+    const hash = crypto.createHash('sha256').update(json).digest('hex');
+    const now = Date.now();
+    // 清窗口外过期项(顺手做,N 极小不影响性能)
+    for (const [h, ts] of krigImportSeenHashes) {
+      if (now - ts > KRIG_IMPORT_DEDUP_TTL_MS) krigImportSeenHashes.delete(h);
+    }
+    if (krigImportSeenHashes.has(hash)) {
+      console.log(
+        `[Extraction] dedupe: same KRIG_IMPORT within ${KRIG_IMPORT_DEDUP_TTL_MS}ms, ignored (hash=${hash.slice(0, 12)}...)`,
+      );
+      return;
+    }
+    krigImportSeenHashes.set(hash, now);
+
     try {
       const data = JSON.parse(json);
       console.log(
