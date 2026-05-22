@@ -530,5 +530,61 @@ export interface AtomsToPmInput {
 export async function atomsToProseMirror(input: AtomsToPmInput): Promise<PMNode[]> {
   const nodes = await buildTopLevelNodes(input.atoms);
   if (nodes.length === 0) return [emptyParagraph()];
-  return nodes;
+  return nodes.map(ensureBlockAttrIdField);
+}
+
+/**
+ * 把 PM JSON node 树字面归一化:对每个**非结构性 + 非 inline** block 节点
+ * ensure `attrs.id` 字段存在(值仍为 null,由 injectIdsForCreate / buildAutoBlockIdPlugin
+ * 字面填充真 ULID)。
+ *
+ * 历史 bug(2026-05-21 PDF extraction 导入触发):
+ * - convertAtom 字面手工拼 PM JSON,部分 case(listItem / blockquote / horizontalRule
+ *   / mathBlock 等)不给 attrs 字段。
+ * - dissect-pm-doc 字面用 `'id' in attrs` 判定该 node 是否"该生成 atom",
+ *   attrs 不存在 / id 字段不存在 → false → 整个 block 字面**被跳过不写 storage**。
+ * - 结果:extraction 导入完 createNote 成功(因 dissect 跳过所有 block),
+ *   storage 字面只有 container atom,**全部内容字面丢失**;
+ *   renderer 端 PM schema load doc 时用默认值补 attrs.id = null → 用户编辑触发
+ *   updateNote → dissect 此时 'id' in attrs = true → 取值 null → throw。
+ *
+ * 修复:atomsToProseMirror 字面在出口归一化 — 给所有应有 id 的 block 加 `attrs.id: null`
+ * 占位,字面对齐 PM schema load 默认值行为。
+ *
+ * 与 plugin / capability injectIdsForCreate / dissect shouldGenerateAtom 同源,
+ * 共同遵循 decision 026 §3.1.3 字面拍板(STRUCTURAL_CONTAINER_TYPES + inline 类型外的全部 block)。
+ */
+const STRUCTURAL_CONTAINER_TYPES = new Set([
+  'table',
+  'tableRow',
+  'bulletList',
+  'orderedList',
+  'taskList',
+  'columnList',
+]);
+
+/**
+ * inline 节点类型(group='inline')— 字面无 attrs.id 字段,不归一化。
+ * 来源:driver/blocks 各 spec.ts 中 group:'inline' 或字面用在 mark/inline 位置的类型。
+ */
+const INLINE_TYPES = new Set([
+  'text',
+  'hardBreak',
+  'fileLink',
+  'noteLink',
+  'mathInline',
+]);
+
+function ensureBlockAttrIdField(node: PMNode): PMNode {
+  const out: PMNode = { ...node };
+  if (Array.isArray(node.content)) {
+    out.content = node.content.map(ensureBlockAttrIdField);
+  }
+  if (!STRUCTURAL_CONTAINER_TYPES.has(node.type) && !INLINE_TYPES.has(node.type)) {
+    const attrs = out.attrs ?? {};
+    if (!('id' in attrs)) {
+      out.attrs = { ...attrs, id: null };
+    }
+  }
+  return out;
 }
