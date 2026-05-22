@@ -1,0 +1,168 @@
+/**
+ * EBookFullscreenPanel 样式 — L2 全屏 overlay 沉浸阅读
+ *
+ * 外层 .krig-fullscreen-overlay 已由 shell/fullscreen-overlay/fullscreen-overlay.css
+ * 设 position:fixed inset:0 + 黑底 + flex column。本组件只管内部布局。
+ *
+ * 设计:
+ * - 顶部 toolbar 比 view 内 toolbar 略薄 + 半透明,沉浸感强
+ * - 主区居中(reading 视觉);宽度上限保证 PDF 单页不会被拉得过宽
+ * - sidebar 同 NavSide 暗色调
+ */
+
+.krig-ebook-fullscreen {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: #0f0f10;
+  color: #e8eaed;
+  overflow: hidden;
+}
+
+/* ── Toolbar(沉浸式浮动栏 — fixed 顶置 + transform 滑出)── */
+
+.krig-ebook-fullscreen__toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  background: rgba(20, 20, 22, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid #2a2a2d;
+  gap: 8px;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.krig-ebook-fullscreen__toolbar--hidden {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Search bar 在 toolbar 下方,跟随 toolbar 显隐 */
+.krig-ebook-fullscreen__search-wrap {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  z-index: 9;
+}
+
+.krig-ebook-fullscreen__toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.krig-ebook-fullscreen__toolbar-section--left {
+  flex: 1;
+  min-width: 0;
+}
+
+.krig-ebook-fullscreen__toolbar-section--center {
+  flex: 0 0 auto;
+}
+
+.krig-ebook-fullscreen__toolbar-section--right {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.krig-ebook-fullscreen__filename {
+  font-size: 13px;
+  color: #b8babd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+  margin-left: 4px;
+}
+
+.krig-ebook-fullscreen__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #d0d2d5;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.krig-ebook-fullscreen__btn:hover:not(:disabled) {
+  background: #2a2a2d;
+  border-color: #3a3a3d;
+}
+
+.krig-ebook-fullscreen__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.krig-ebook-fullscreen__btn--active {
+  background: #2a2a2d;
+  border-color: #3a3a3d;
+}
+
+.krig-ebook-fullscreen__btn--bookmark-active {
+  color: #f0c050;
+}
+
+.krig-ebook-fullscreen__btn--exit {
+  margin-left: 8px;
+}
+
+.krig-ebook-fullscreen__page-info,
+.krig-ebook-fullscreen__epub-progress,
+.krig-ebook-fullscreen__font-size {
+  font-size: 12px;
+  color: #b8babd;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.krig-ebook-fullscreen__zoom-select {
+  height: 26px;
+  padding: 0 6px;
+  background: #1c1c1e;
+  border: 1px solid #2a2a2d;
+  border-radius: 4px;
+  color: #d0d2d5;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.krig-ebook-fullscreen__zoom-select:hover {
+  border-color: #3a3a3d;
+}
+
+/* ── 主区(toolbar 浮在上层,body 占满)── */
+
+.krig-ebook-fullscreen__body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.krig-ebook-fullscreen__main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}

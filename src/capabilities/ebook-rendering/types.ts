@@ -241,4 +241,13 @@ export interface EBookRenderingApi {
   /** 工具函数 */
   detectFileType(fileName: string): EBookFileType;
   getRenderMode(fileType: EBookFileType): RenderMode;
+  /**
+   * 打开 L2 全屏沉浸阅读 overlay。
+   * payload 内 bookInfo 直接喂给 panel 内独立 Host;view 端通常用最新 page/cfi
+   * 覆盖 lastPosition,避免 panel 加载到 stale 位置。
+   */
+  openFullscreenReader(payload: {
+    workspaceId: string;
+    bookInfo: import('@shared/ipc/ebook-types').EBookLoadedInfo;
+  }): void;
 }

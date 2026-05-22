@@ -17,11 +17,18 @@ interface FullscreenOverlayState {
   visible: boolean;
   /** 当前可见 overlay ID(对应 fullscreenOverlayRegistry 注册项)*/
   activeId: string | null;
+  /**
+   * hide 后保留上一次的 activeId,用于订阅方判断关闭的是哪一个 overlay
+   * (典型场景:某 view 需要在自己的 overlay 关闭后做收尾,但不关心其他 overlay)。
+   * show 时清空,只在 hide 时记。
+   */
+  lastActiveId: string | null;
 }
 
 const EMPTY_STATE: FullscreenOverlayState = Object.freeze({
   visible: false,
   activeId: null,
+  lastActiveId: null,
 });
 
 class FullscreenOverlayController {
@@ -29,14 +36,18 @@ class FullscreenOverlayController {
   private listeners: Set<() => void> = new Set();
 
   show(activeId: string): void {
-    this.state = { visible: true, activeId };
+    this.state = { visible: true, activeId, lastActiveId: null };
     this.notify();
   }
 
   /** 显式关闭(overlay 内部调 onClose / Esc 触发 / 业务方主动关)*/
   hide(): void {
     if (!this.state.visible) return;
-    this.state = EMPTY_STATE;
+    this.state = {
+      visible: false,
+      activeId: null,
+      lastActiveId: this.state.activeId,
+    };
     this.notify();
   }
 

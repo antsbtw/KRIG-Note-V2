@@ -53,6 +53,8 @@ interface EBookToolbarProps {
   onPrevChapter?: () => void;
   onNextChapter?: () => void;
   onFontSizeChange?: (delta: number) => void;
+  /** 进入全屏沉浸阅读(L2 overlay)*/
+  onFullscreen: () => void;
   /** 关闭当前 ebook view(× 按钮)*/
   onClose: () => void;
 }
@@ -94,6 +96,7 @@ export function EBookToolbar({
   onPrevChapter,
   onNextChapter,
   onFontSizeChange,
+  onFullscreen,
   onClose,
 }: EBookToolbarProps) {
   const [pageInput, setPageInput] = useState('');
@@ -387,6 +390,16 @@ export function EBookToolbar({
         >
           ⊞
         </button>
+        {renderMode && (
+          <button
+            className="krig-ebook-toolbar__btn"
+            onClick={onFullscreen}
+            title="全屏沉浸阅读"
+            aria-label="全屏沉浸阅读"
+          >
+            ⛶
+          </button>
+        )}
         <button
           className="krig-ebook-toolbar__btn krig-ebook-toolbar__btn--close"
           onClick={onClose}

@@ -25,11 +25,18 @@ import {
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
+import type { EBookLoadedInfo } from '@shared/ipc/ebook-types';
 import type {
   EBookRenderingApi,
   EBookHostHandle,
 } from '@capabilities/ebook-rendering/types';
+/**
+ * EBOOK_FULLSCREEN_OVERLAY_ID 与 capability id 一同绑定的"协议常量"
+ * 字面字符串避开 W5 边界(view 不直 import capability 运行时值)
+ */
+const EBOOK_FULLSCREEN_OVERLAY_ID = 'ebook-rendering.fullscreen.reader';
 import { getEBookWsState } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
 import { usePdfAnnotations } from './use-pdf-annotations';
@@ -62,6 +69,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const hostRef = useRef<EBookHostHandle | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  /** 最近一次 onBookOpened 推流 — 全屏触发时复用,补最新位置喂给 panel */
+  const lastBookInfoRef = useRef<EBookLoadedInfo | null>(null);
   const { activeBookIdRef, persistPdfProgress, persistEpubProgress } =
     useEBookProgress(workspaceId);
 
@@ -122,6 +131,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     return library.onBookOpened((info) => {
       setFileName(info.fileName);
       activeBookIdRef.current = info.bookId;
+      lastBookInfoRef.current = info;
       void hostRef.current?.loadFromInfo(info);
       bookmarks.loadOnBookOpen(info.bookId);
       // EPUB:加载已有 annotation 并重绘高亮(loadOnBookOpen 内 await getTOC 等就绪)
@@ -216,6 +226,40 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   }, []);
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
+
+  // 全屏 overlay 关闭时,view 重新 open 当前书 —— panel 已 saveProgress,
+  // 此时 library.open 推流的 lastPosition 即最新位置,view host 同步跳过去
+  useEffect(() => {
+    const unsub = fullscreenOverlayController.subscribe(() => {
+      const s = fullscreenOverlayController.getState();
+      // 仅当从 active 状态切到 inactive 时刷新(忽略首次 + 切其他 overlay)
+      if (!s.visible && s.lastActiveId === EBOOK_FULLSCREEN_OVERLAY_ID) {
+        const bookId = activeBookIdRef.current;
+        if (bookId) {
+          void library.open(bookId).catch((err) => {
+            console.warn('[ebook-view] reopen after fullscreen failed:', err);
+          });
+        }
+      }
+    });
+    return unsub;
+  }, [library, activeBookIdRef]);
+
+  // 全屏沉浸阅读:走 capability api(W5 边界 — view 不直 import capability 运行时值)
+  // 进度回写在 panel 内独立持久化,Esc 退出时 view 重新 open 此书会读到最新位置
+  const onFullscreen = useCallback(() => {
+    const info = lastBookInfoRef.current;
+    if (!info) return;
+    // 用当前 view 内的最新位置覆盖 info.lastPosition(避免 panel 加载到 stale 位置)
+    // PDF 路径强制 fitWidth=true(全屏 Preview 风格,scale 由 host 按 viewport 算)
+    const lastPosition = renderMode === 'reflowable'
+      ? { cfi: hostRef.current?.getCurrentCFI() ?? info.lastPosition?.cfi }
+      : { page: currentPage, fitWidth: true };
+    rendering.openFullscreenReader({
+      workspaceId,
+      bookInfo: { ...info, lastPosition },
+    });
+  }, [rendering, workspaceId, renderMode, currentPage]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
   // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
@@ -341,6 +385,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onPrevChapter={onPrevChapter}
         onNextChapter={onNextChapter}
         onFontSizeChange={onFontSizeChange}
+        onFullscreen={onFullscreen}
         onClose={onClose}
       />
       <SearchBar
