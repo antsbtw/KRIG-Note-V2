@@ -85,8 +85,15 @@ export function NoteView({ workspaceId }: NoteViewProps) {
 
   // allNotes 变化:若 activeNote 被外部删除(LIST_CHANGED 不再含),清空 incomingDoc。
   // 选用方案 b(§5.1):UI 层兜底,不主动改 workspaceManager.activeNoteId;留 followup。
+  //
+  // 守护(2026-05-22 修):**allNotes.length === 0 时不动 incomingDoc** — 初始加载竞态下
+  // useAllNotes hook 的 listNotes IPC 比 NoteView getNote IPC 慢,allNotes 暂时为空。
+  // 此时若 stillExists=false 就清 incomingDoc,会把 getNote 刚拿到的 doc 又设回 null →
+  // 永远走 fallback。等 allNotes 真有数据(>0)再判 stillExists 才安全。
+  // (真删 note 时 allNotes 至少有其它 note;空仓库无 note 可点,不会走到 NoteView 这里。)
   useEffect(() => {
     if (!activeNoteId || !incomingDoc) return;
+    if (allNotes.length === 0) return; // allNotes 尚未拉到,先信任 incomingDoc
     const stillExists = allNotes.some((n) => n.id === activeNoteId);
     if (!stillExists) setIncomingDoc(null);
   }, [allNotes, activeNoteId, incomingDoc]);
