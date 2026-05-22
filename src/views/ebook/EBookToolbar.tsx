@@ -18,6 +18,25 @@ import { useState, useCallback, type KeyboardEvent, type ChangeEvent, type Mouse
 import { popupController } from '@slot/triggers/popup-controller';
 import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID } from './popup-ids';
 
+/** 书签丝带图标(对齐 Apple Books / Kindle 设计)— active=填充,inactive=描边
+ *  与 EBookFullscreenPanel 内同款,view/panel 各自重复一份避免接口膨胀 */
+function BookmarkIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="16"
+      viewBox="0 0 14 16"
+      fill={active ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 1.5h10v13L7 11l-5 3.5V1.5z" />
+    </svg>
+  );
+}
+
 export type EBookToolbarRenderMode = 'fixed-page' | 'reflowable' | null;
 
 interface EBookToolbarProps {
@@ -292,7 +311,7 @@ export function EBookToolbar({
               onClick={onBookmarkToggle}
               title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
             >
-              {isBookmarked ? '★' : '☆'}
+              <BookmarkIcon active={isBookmarked} />
             </button>
             {onExtract && (
               <button
@@ -344,7 +363,7 @@ export function EBookToolbar({
               onClick={onBookmarkToggle}
               title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
             >
-              {isBookmarked ? '★' : '☆'}
+              <BookmarkIcon active={isBookmarked} />
             </button>
             <button
               className="krig-ebook-toolbar__btn"

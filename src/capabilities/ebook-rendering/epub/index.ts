@@ -29,6 +29,8 @@ export class EPUBRenderer implements IReflowableRenderer {
   private container: HTMLElement | null = null;
   private fileData: ArrayBuffer | null = null;
   private fontSize = 100;
+  /** 待应用的 max-column-count (1=单页 / 2=双页) — view 未 ready 时存这,initView 后 apply */
+  private pendingMaxColumnCount: 1 | 2 = 1;
   private currentProgress = { chapter: '', percentage: 0 };
   private lastCFI: string | null = null;
   private lastLocationToRestore: string | null = null;
@@ -76,9 +78,14 @@ export class EPUBRenderer implements IReflowableRenderer {
       // 打开 EPUB
       await this.view.open(file);
 
-      // 单栏布局
+      // 应用 max-column-count(view ready 前可能被 setMaxColumnCount 设过)
       if (this.view.renderer) {
-        this.view.renderer.setAttribute('max-column-count', '1');
+        const count = this.pendingMaxColumnCount;
+        this.view.renderer.setAttribute('max-column-count', String(count));
+        this.view.renderer.setAttribute(
+          'max-inline-size',
+          count === 2 ? '1000px' : '720px',
+        );
       }
 
       // 显示内容(恢复上次位置或从头)
@@ -87,19 +94,8 @@ export class EPUBRenderer implements IReflowableRenderer {
         showTextStart: !this.lastLocationToRestore,
       });
 
-      // 应用字号缩放
-      this.applyZoom();
-
-      // 暗色模式:注入样式到 EPUB iframe 内容(对齐 V2 整体暗色风格)
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        this.view.renderer?.setStyles?.(`
-          html, body {
-            background: #1e1e1e !important;
-            color: #e0e0e0 !important;
-          }
-          a { color: #6baaff !important; }
-        `);
-      }
+      // 应用字号 + 暗色样式(合并注入 — setStyles 是覆盖式,不能分两次调否则后调的会清掉前面的)
+      this.applyContentStyles();
 
       // 监听位置变化 — chapter title + 进度比例 + 最新 CFI
       this.view.addEventListener('relocate', (e: any) => {
@@ -222,13 +218,30 @@ export class EPUBRenderer implements IReflowableRenderer {
 
   setFontSize(size: number): void {
     this.fontSize = size;
-    this.applyZoom();
+    this.applyContentStyles();
   }
 
-  private applyZoom(): void {
-    if (!this.view) return;
-    // CSS zoom 整体缩放(文本+图片都会放大/缩小)— V1 同款
-    this.view.style.zoom = `${this.fontSize}%`;
+  /**
+   * 注入 EPUB iframe 文档样式 — 字号(语义化,让 foliate-js 按字号重新分页)
+   * + 暗色模式(可选)。setStyles 是覆盖式,字号变化时必须连暗色一起重注。
+   *
+   * 字号语义:html { font-size: X% } 让文档基准字号缩放,但**不**像 zoom 那样
+   * 整页拉伸 — foliate-js 会按新字号重新计算分页,一行字数自然增减。
+   */
+  private applyContentStyles(): void {
+    if (!this.view?.renderer?.setStyles) return;
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const css = `
+      html {
+        font-size: ${this.fontSize}% !important;
+        ${dark ? 'background: #1e1e1e !important; color: #e0e0e0 !important;' : ''}
+      }
+      ${dark ? `
+        body { background: #1e1e1e !important; color: #e0e0e0 !important; }
+        a { color: #6baaff !important; }
+      ` : ''}
+    `;
+    this.view.renderer.setStyles(css);
   }
 
   getFontSize(): number {
@@ -254,6 +267,35 @@ export class EPUBRenderer implements IReflowableRenderer {
         mode === 'scrolled' ? 'scrolled' : 'paginated',
       );
     }
+  }
+
+  /**
+   * 设置最大列数(1=单页,2=双页);foliate-js 会按容器宽度自适应实际列数。
+   *
+   * 实际列数 = min(max-column-count, ceil(容器宽 / max-inline-size))。
+   * foliate-js 默认 max-inline-size=720px,意味着 spread 最大宽 = 1440px(双页时),
+   * 超出部分留黑边 — 全屏阅读会显得文字稀疏挤在中间。
+   *
+   * 全屏双页时同步调大 max-inline-size 让 spread 撑满容器(每页~1000px 阅读舒适)。
+   * 单页时恢复 720px(标准阅读宽度,避免行太长伤眼)。
+   */
+  /**
+   * 设置最大列数(1=单页,2=双页);foliate-js 会按容器宽度自适应。
+   *
+   * 关键时序:Panel 在 renderMode='reflowable' 推送时就 setMaxColumnCount,
+   * 但此刻 EPUBRenderer.view 可能还未创建(view 在 ReflowableContent mount
+   * 调 renderTo 时才异步创建)。故总是存 pendingMaxColumnCount,
+   * view ready 时(initView 内)从 pending 读取应用。
+   *
+   * 实际列数 = min(count, ceil(容器宽 / max-inline-size))。
+   * 双页时同步调大 max-inline-size 让 spread 撑满容器;单页时恢复 720px。
+   */
+  setMaxColumnCount(count: 1 | 2): void {
+    this.pendingMaxColumnCount = count;
+    const r = this.view?.renderer;
+    if (!r) return; // view 还未 ready,initView 完成时会读 pending 应用
+    r.setAttribute?.('max-column-count', String(count));
+    r.setAttribute?.('max-inline-size', count === 2 ? '1000px' : '720px');
   }
 
   onResize(): void {

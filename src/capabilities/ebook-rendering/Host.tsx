@@ -70,6 +70,8 @@ export interface EBookHostHandle {
   /** EPUB 字号(默认 100;V1 60~200 范围)*/
   setFontSize(size: number): void;
   getFontSize(): number;
+  /** EPUB 最大列数(1=单页 / 2=双页);foliate-js 按容器宽度自适应 */
+  setEpubMaxColumnCount(count: 1 | 2): void;
 
   // ── TOC + Search(C3 给 outline / search bar 用)──
   /** 取 renderer 提供的 TOC 树(异步:EPUB 等 readyPromise) */
@@ -473,6 +475,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         const r = rendererRef.current;
         if (r && isReflowable(r)) return r.getFontSize();
         return 100;
+      },
+      setEpubMaxColumnCount(count: 1 | 2): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.setMaxColumnCount(count);
       },
       // ── TOC + Search ──
       async getTOC(): Promise<TOCItem[]> {

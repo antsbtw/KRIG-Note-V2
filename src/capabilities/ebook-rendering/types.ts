@@ -138,6 +138,8 @@ export interface IReflowableRenderer extends IBookRenderer {
   prevChapter(): void;
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void;
+  /** 设置最大列数(1=单页 / 2=双页);foliate-js 会按容器宽度自适应 */
+  setMaxColumnCount(count: 1 | 2): void;
   onResize(): void;
 
   getLastCFI(): string | null;
