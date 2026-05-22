@@ -59,7 +59,7 @@ function createBusinessInsertItems(): SlashItem[] {
       keywords: ['tweet', 'twitter', 'x', '推文'],
       view: VIEW,
       group: 'media',
-      icon: 'twitter',
+      icon: 'bird',
       order: 155,
     },
     {
