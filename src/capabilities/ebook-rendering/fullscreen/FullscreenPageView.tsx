@@ -37,7 +37,10 @@ interface FullscreenPageViewProps {
   renderer: IFixedPageRenderer;
   layout: FullscreenPagedLayout;
   initialPage?: number | null;
+  /** 翻页**完成**(动画结束 + currentPage state 更新)— 用于持久化进度 */
   onPageChange: (page: number) => void;
+  /** 翻页**开始**(动画启动前)— 用于即时 UI 反馈(如 page indicator) */
+  onPageChangeStart?: (page: number) => void;
   onScaleChange?: (scale: number) => void;
 }
 
@@ -106,7 +109,7 @@ export const FullscreenPageView = forwardRef<
   FullscreenPageViewHandle,
   FullscreenPageViewProps
 >(function FullscreenPageView(
-  { renderer, layout, initialPage, onPageChange, onScaleChange },
+  { renderer, layout, initialPage, onPageChange, onPageChangeStart, onScaleChange },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -213,10 +216,13 @@ export const FullscreenPageView = forwardRef<
     };
   }, []);
 
-  // dominant page 推送给 panel
+  // dominant page 推送给 panel — 用 ref 包 onPageChange 避免 prop 引用变化重跑 effect
+  // (根因:外层传 inline function 时每次 render 都新引用,effect 重跑 → 一次翻页推 N 次)
+  const onPageChangeRef = useRef(onPageChange);
+  useEffect(() => { onPageChangeRef.current = onPageChange; }, [onPageChange]);
   useEffect(() => {
-    onPageChange(currentPage);
-  }, [currentPage, onPageChange]);
+    onPageChangeRef.current(currentPage);
+  }, [currentPage]);
 
   // ──────────────────────────────────────────────────────
   // 翻书动画:next = 旧滑出/新原地 · prev = 新滑入/旧静止
@@ -225,6 +231,9 @@ export const FullscreenPageView = forwardRef<
     async (targetPage: number, direction: 'next' | 'prev'): Promise<void> => {
       const container = containerRef.current;
       const oldNode = currentNodeRef.current;
+      // 翻页开始即推送目标页 — 用于 page indicator 等需要即时反馈的 UI
+      // (与 onPageChange 区别:此回调在动画启动前;onPageChange 在动画完成后)
+      onPageChangeStart?.(targetPage);
       if (!container || !oldNode || pageDims.length === 0 || scale <= 0) {
         setCurrentPage(targetPage);
         return;
@@ -308,7 +317,7 @@ export const FullscreenPageView = forwardRef<
       // 6) 更新 React state — 静态 useEffect 看到 dataset 匹配会跳过重建
       setCurrentPage(targetPage);
     },
-    [layout, totalPages, pageDims, scale, renderer],
+    [layout, totalPages, pageDims, scale, renderer, onPageChangeStart],
   );
 
   // 命令式 API
@@ -340,28 +349,35 @@ export const FullscreenPageView = forwardRef<
     prevPage,
   ]);
 
-  // ←/→ 键翻页
+  // ←/→ 键翻页 — 同 wheel,用 ref 拿最新版避免每次 currentPage 变都重挂 listener
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        prevPage();
+        prevPageRef.current();
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        nextPage();
+        nextPageRef.current();
       } else if (e.key === 'PageUp') {
         e.preventDefault();
-        prevPage();
+        prevPageRef.current();
       } else if (e.key === 'PageDown' || e.key === ' ') {
         e.preventDefault();
-        nextPage();
+        nextPageRef.current();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [prevPage, nextPage]);
+  }, []);
 
   // trackpad 双指滑动翻页(横纵均接,同手势内只翻一屏)
+  // 关键:wheel listener 只在 mount 时挂一次,prev/nextPage 用 ref 拿最新版本 —
+  // 否则 prevPage/nextPage 依赖 currentPage 每次 setCurrentPage 都新建引用,
+  // effect 重跑 → handler 重挂 → firedInGesture 局部变量归零 → 同手势触发 N 次翻页
+  const prevPageRef = useRef(prevPage);
+  const nextPageRef = useRef(nextPage);
+  useEffect(() => { prevPageRef.current = prevPage; }, [prevPage]);
+  useEffect(() => { nextPageRef.current = nextPage; }, [nextPage]);
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -384,13 +400,13 @@ export const FullscreenPageView = forwardRef<
       const delta = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
       accDelta += delta;
       if (Math.abs(accDelta) < SWIPE_THRESHOLD) return;
-      if (accDelta > 0) nextPage();
-      else prevPage();
+      if (accDelta > 0) nextPageRef.current();
+      else prevPageRef.current();
       firedInGesture = true;
     };
     container.addEventListener('wheel', handler, { passive: false });
     return () => container.removeEventListener('wheel', handler);
-  }, [prevPage, nextPage]);
+  }, []);
 
   if (pageDims.length === 0) {
     return <div className="krig-ebook-loading">Preparing pages...</div>;

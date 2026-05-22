@@ -54,9 +54,9 @@ const FONT_MIN = 60;
 const FONT_MAX = 200;
 const SAVE_PROGRESS_DEBOUNCE_MS = 500;
 
-// Toolbar auto-hide:鼠标进入顶部此高度内触发显示,初始进入显示 2s 后自动隐藏
+// Toolbar auto-hide:鼠标进入顶部此高度内触发显示;离开 hover 区立即隐藏
+// (forceShowToolbar 守门:sidebar / 搜索 / hover toolbar 时强制保留)
 const TOOLBAR_HOVER_ZONE_PX = 60;
-const TOOLBAR_HIDE_DELAY_MS = 500;
 const TOOLBAR_INITIAL_SHOW_MS = 500;
 
 // 翻页指示器(Preview 同款)— 翻页时顶部居中胶囊显示 "Page X of N",
@@ -103,6 +103,9 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   // 翻页指示器(Preview 同款)— 翻页时顶部居中胶囊 1s 自动消失
   const [pageIndicatorVisible, setPageIndicatorVisible] = useState(false);
   const pageIndicatorHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // indicator 显示用的页号 — 翻页**开始**时(onPagedPageChangeStart)即更新到目标页,
+  // 不等动画完成,避免胶囊在翻完后才出现的滞后感
+  const [indicatorPage, setIndicatorPage] = useState<number>(0);
   // 中间页号 input 编辑态(对齐 EBookToolbar 行内 pageInput 交互)
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
@@ -172,7 +175,8 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     }) => {
       setRenderMode(info.renderMode);
       setTotalPages(info.totalPages);
-      setCurrentPage(1);
+      // 注:不在此 setCurrentPage(1) — paged 路径 FullscreenPageView 会按 initialPage(restorePage)
+      // 自动初始化并通过 onPageChange 推送真实起始页,否则会先闪一次 "Page 1-2" 再跳到 "Page 21-22"
       if (info.renderMode === 'reflowable') {
         setFontSize(hostRef.current?.getFontSize() ?? 100);
       }
@@ -307,11 +311,10 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
         setToolbarVisible(true);
         if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
       } else if (toolbarVisible && !forceShowToolbar) {
+        // 离开 hover 区立即隐藏(不延迟)— forceShowToolbar 守门:
+        // sidebar 打开 / 搜索栏可见 / 鼠标 hover 在 toolbar 上时仍强制保留
         if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
-        toolbarHideTimerRef.current = setTimeout(
-          () => setToolbarVisible(false),
-          TOOLBAR_HIDE_DELAY_MS,
-        );
+        setToolbarVisible(false);
       }
     };
     window.addEventListener('mousemove', handler);
@@ -328,11 +331,12 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     }
   }, [forceShowToolbar]);
 
-  // 翻页指示器(Preview 同款):currentPage/totalPages 变化时显示,1s 后自动隐藏。
-  // 连续翻页 stay-extends — 每次变化重启 timer,胶囊不闪烁。
-  // totalPages 进入条件让 loadComplete 后初次也展示一次(用户进全屏即知所在页)。
+  // 翻页指示器(Preview 同款):indicatorPage 变化即显示,1s 后自动隐藏。
+  // indicatorPage 在翻页**开始**时(onPagedPageChangeStart)即更新 — 不等动画完成,
+  // 胶囊与动画同步呈现而非动画结束后才出。连续翻页 stay-extends 不闪烁。
+  // 初次加载:onPageChange 推 currentPage 后,下面那条 effect 同步初始化 indicatorPage。
   useEffect(() => {
-    if (!renderMode || totalPages === 0) return;
+    if (!renderMode || totalPages === 0 || indicatorPage === 0) return;
     setPageIndicatorVisible(true);
     if (pageIndicatorHideTimerRef.current) clearTimeout(pageIndicatorHideTimerRef.current);
     pageIndicatorHideTimerRef.current = setTimeout(() => {
@@ -341,7 +345,18 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     return () => {
       if (pageIndicatorHideTimerRef.current) clearTimeout(pageIndicatorHideTimerRef.current);
     };
-  }, [currentPage, totalPages, renderMode]);
+  }, [indicatorPage, totalPages, renderMode]);
+
+  // currentPage 变化时同步到 indicatorPage(初次加载 / EPUB 翻章 / 动画完成无 start 信号场景兜底)
+  // 注:翻页式 PDF 路径会先经 onPagedPageChangeStart 走 setIndicatorPage(target),
+  // 然后 currentPage 在动画完成时变化到同一值,这里 noop 跳过(已是同值)
+  // indicatorPage 故意不入 deps:避免 setter 触发自身循环;
+  // currentPage 是唯一外部信号源,只跟它走
+  useEffect(() => {
+    if (currentPage > 0 && currentPage !== indicatorPage) {
+      setIndicatorPage(currentPage);
+    }
+  }, [currentPage]);
 
   if (!ctx) return null;
 
@@ -494,9 +509,9 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
           className={`krig-ebook-fullscreen__page-indicator ${pageIndicatorVisible ? '' : 'krig-ebook-fullscreen__page-indicator--hidden'}`}
         >
           {renderMode === 'fixed-page'
-            ? pagedLayout === 'double' && currentPage + 1 <= totalPages
-              ? `Page ${currentPage}-${currentPage + 1} of ${totalPages}`
-              : `Page ${currentPage} of ${totalPages}`
+            ? pagedLayout === 'double' && indicatorPage + 1 <= totalPages
+              ? `Page ${indicatorPage}-${indicatorPage + 1} of ${totalPages}`
+              : `Page ${indicatorPage} of ${totalPages}`
             : epubChapter
               ? `${epubChapter} · ${Math.round((epubPercentage ?? 0) * 100)}%`
               : `${Math.round((epubPercentage ?? 0) * 100)}%`}
@@ -540,6 +555,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             onEpubProgressChange={handleEpubProgressChange}
             pdfLayout="paged"
             pagedLayout={pagedLayout}
+            onPagedPageChangeStart={(p) => setIndicatorPage(p)}
             onPagedScaleChange={(s) => {
               lastScaleRef.current = s;
             }}

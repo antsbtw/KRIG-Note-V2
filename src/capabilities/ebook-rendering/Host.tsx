@@ -161,8 +161,10 @@ export interface EBookHostProps {
   pdfLayout?: 'scroll' | 'paged';
   /** paged 布局下的分页样式 — 'single' 单页 / 'double' 双页并排 */
   pagedLayout?: 'single' | 'double';
-  /** paged 布局下 panel 拿到当前页(spread 起点)用于 toolbar 显示 */
+  /** paged 布局下 panel 拿到当前页(spread 起点)用于 toolbar 显示 — 动画完成后触发 */
   onPagedPageChange?: (page: number) => void;
+  /** paged 布局下翻页**开始**时(动画启动前)推目标页 — 用于 page indicator 即时反馈 */
+  onPagedPageChangeStart?: (page: number) => void;
   /** paged 布局下 panel 拿到自适应 scale 用于 saveProgress */
   onPagedScaleChange?: (scale: number) => void;
 }
@@ -187,6 +189,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     pdfLayout = 'scroll',
     pagedLayout = 'single',
     onPagedPageChange,
+    onPagedPageChangeStart,
     onPagedScaleChange,
   },
   ref,
@@ -546,6 +549,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           layout={pagedLayout}
           initialPage={restorePage}
           onPagedPageChange={onPagedPageChange}
+          onPagedPageChangeStart={onPagedPageChangeStart}
           onPagedScaleChange={onPagedScaleChange}
           onPageChange={onPageChange}
           onRegisterGotoPage={registerGotoPage}
@@ -580,6 +584,7 @@ function PagedHostBranch({
   layout,
   initialPage,
   onPagedPageChange,
+  onPagedPageChangeStart,
   onPagedScaleChange,
   onPageChange,
   onRegisterGotoPage,
@@ -588,6 +593,7 @@ function PagedHostBranch({
   layout: 'single' | 'double';
   initialPage: number | null;
   onPagedPageChange?: (page: number) => void;
+  onPagedPageChangeStart?: (page: number) => void;
   onPagedScaleChange?: (scale: number) => void;
   onPageChange?: (page: number) => void;
   onRegisterGotoPage: (fn: (page: number) => void) => void;
@@ -596,19 +602,24 @@ function PagedHostBranch({
   useEffect(() => {
     onRegisterGotoPage((page) => viewRef.current?.goToPage(page));
   }, [onRegisterGotoPage]);
+  // 用 useCallback 稳定引用 — 不然 FullscreenPageView 的 useEffect([currentPage, onPageChange])
+  // 会因为每次 render 新建函数而重复触发 onPageChange 推送(根因导致一次手势触发 N 次翻页)
+  const handlePageChange = useCallback((p: number) => {
+    onPagedPageChange?.(p);
+    onPageChange?.(p);
+  }, [onPagedPageChange, onPageChange]);
+  const handleScaleChange = useCallback((s: number) => {
+    onPagedScaleChange?.(s);
+  }, [onPagedScaleChange]);
   return (
     <FullscreenPageView
       ref={viewRef}
       renderer={renderer}
       layout={layout}
       initialPage={initialPage}
-      onPageChange={(p) => {
-        onPagedPageChange?.(p);
-        onPageChange?.(p);
-      }}
-      onScaleChange={(s) => {
-        onPagedScaleChange?.(s);
-      }}
+      onPageChange={handlePageChange}
+      onPageChangeStart={onPagedPageChangeStart}
+      onScaleChange={handleScaleChange}
     />
   );
 }
