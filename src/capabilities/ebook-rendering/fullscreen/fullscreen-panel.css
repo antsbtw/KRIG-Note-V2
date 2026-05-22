@@ -236,6 +236,13 @@
   background: #0f0f10;
 }
 
+/* 翻页时旧 spread 像素级快照(cloneNode)— 绝对定位浮在新 spread 之上滑出屏幕 */
+.krig-ebook-paged__spread-clone {
+  /* 大部分 style 在 JS 里 inline 设(left/top/width/height/transform/transition);
+     这里仅做兜底防御样式 */
+  pointer-events: none;
+}
+
 .krig-ebook-paged__spread {
   display: flex;
   flex-direction: row;
