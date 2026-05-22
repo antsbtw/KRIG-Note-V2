@@ -58,7 +58,7 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       keywords: ['x', 'tweet', 'twitter', 'post', 'social', '推文'],
       view: VIEW,
       group: 'media',
-      icon: 'twitter',
+      icon: 'bird',
       order: 155,
     },
     // L5-B3.7:Table 3x3(第一行 header)
