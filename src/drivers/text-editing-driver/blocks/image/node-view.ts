@@ -48,8 +48,21 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
   let currentSrc: string | null = (node.attrs.src as string | null) ?? null;
   let currentIsSvg = isSvgSrc(currentSrc);
 
-  /** 写一组 attrs 到 PM(setNodeAttribute 不重验 content)*/
-  function updateAttrs(patch: Record<string, unknown>): void {
+  /**
+   * 写一组 attrs 到 PM(setNodeAttribute 不重验 content)
+   *
+   * skipPersist=true:仅本进程 PM state 更新,**不发 IPC 不入 DB**。
+   *   img/svg onload 自动测出的 width 用这条路径 —— 这是 NodeView 内部"测量回写",
+   *   不是用户语义编辑,N 张图同时 onload 不应该雪崩 N 次 DB write 把 main transaction
+   *   queue 压死(2026-05-22 PDF extraction 章节 ~30 张图触发的 IPC 风暴根因)。
+   *   后续切笔记回来,attrs.width 仍为 null,onload 会重新测一次,无副作用。
+   *
+   * skipPersist=false(默认):用户产生的编辑(上传/embed/resize 拖动),走 IPC 入 DB。
+   */
+  function updateAttrs(
+    patch: Record<string, unknown>,
+    opts?: { skipPersist?: boolean },
+  ): void {
     const pos = typeof getPos === 'function' ? getPos() : undefined;
     if (pos == null) return;
     let tr = view.state.tr;
@@ -57,6 +70,9 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
       tr = tr.setNodeAttribute(pos, key, value);
     }
     tr.setMeta('addToHistory', false); // 内部 attr 同步不进 undo 栈
+    if (opts?.skipPersist) {
+      tr.setMeta('skipOnChange', true); // Host.tsx onTransaction 看到此 meta 跳过 IPC emit
+    }
     view.dispatch(tr);
   }
 
@@ -165,13 +181,18 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
 
     img.addEventListener('load', () => {
       // 首次加载默认贴合容器宽度(不超过自然宽度,避免低分辨率小图被强行放大模糊)
+      // **不走 PM dispatch**(2026-05-22 修):PM AttrStep.apply 内部用 type.create(attrs, null)
+      // 创建无 content 新 image,走 replaceOuter 时校验 doc.content 失败 → RangeError 80 条刷屏。
+      // width 仅渲染层缓存(非语义),直接改 dom style.width 即可。
+      // 用户 resize 拖动 (makeResizeHandle:258) 仍走 updateAttrs 真正落库,保留语义编辑路径。
+      // 切笔记回来 attrs.width=null → onload 重测一次(成本 0),与 V1 同行为。
       if (!node.attrs.width && !node.attrs.height) {
         const containerWidth = imgWrapper.clientWidth || imgArea.clientWidth || 0;
         const targetWidth =
           containerWidth > 0
             ? Math.min(containerWidth, img.naturalWidth)
             : img.naturalWidth;
-        updateAttrs({ width: targetWidth, height: null });
+        img.style.width = `${targetWidth}px`;
       }
     });
 
@@ -209,7 +230,8 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
             imgArea.clientWidth ||
             0;
           if (containerWidth > 0) {
-            updateAttrs({ width: containerWidth, height: null });
+            // 同 img onload(see line 226 注释):不走 PM dispatch,直接改 dom style
+            canvas.style.width = `${containerWidth}px`;
           }
         }
       } else {
