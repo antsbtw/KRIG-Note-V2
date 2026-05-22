@@ -31,6 +31,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { EBookLibraryApi, EBookLoadedInfo } from '@capabilities/ebook-library/types';
 import {
   type IBookRenderer,
+  type IFixedPageRenderer,
   type EBookFileType,
   type BookPosition,
   type TOCItem,
@@ -42,6 +43,7 @@ import { PDFRenderer } from './pdf';
 import { EPUBRenderer } from './epub';
 import { FixedPageContent } from './fixed-page-content';
 import { ReflowableContent } from './reflowable-content';
+import { FullscreenPageView } from './fullscreen/FullscreenPageView';
 
 /** view 通过 ref 调用的命令式 API(EBookHostHandle)*/
 export interface EBookHostHandle {
@@ -147,6 +149,22 @@ export interface EBookHostProps {
    * (sub-phase 022 Step 5.6: lib.removeReadingThoughtBlock 替代 lib.annotationRemove)
    */
   onPdfAnnotationDelete?: (id: string) => void;
+
+  // ── 全屏阅读路径(2026-05-22)──
+  /**
+   * PDF 渲染模式:
+   * - 'scroll'(默认):FixedPageContent 连续滚动 + 虚拟化(view 主区)
+   * - 'paged':FullscreenPageView 翻页式 + 不滚动(L2 全屏 overlay 专用)
+   *
+   * EPUB 不受此 prop 影响 — foliate-js 自身分页,沿用 ReflowableContent。
+   */
+  pdfLayout?: 'scroll' | 'paged';
+  /** paged 布局下的分页样式 — 'single' 单页 / 'double' 双页并排 */
+  pagedLayout?: 'single' | 'double';
+  /** paged 布局下 panel 拿到当前页(spread 起点)用于 toolbar 显示 */
+  onPagedPageChange?: (page: number) => void;
+  /** paged 布局下 panel 拿到自适应 scale 用于 saveProgress */
+  onPagedScaleChange?: (scale: number) => void;
 }
 
 const FIT_WIDTH_PADDING = 40;
@@ -166,6 +184,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     pdfAnnotations,
     onPdfAnnotationCreate,
     onPdfAnnotationDelete,
+    pdfLayout = 'scroll',
+    pagedLayout = 'single',
+    onPagedPageChange,
+    onPagedScaleChange,
   },
   ref,
 ) {
@@ -503,7 +525,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     <div className="krig-ebook-host" ref={containerRef}>
       {loading && <div className="krig-ebook-loading">Loading...</div>}
 
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && (
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
         <FixedPageContent
           renderer={renderer}
           scale={scale}
@@ -515,6 +537,18 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           annotations={pdfAnnotations}
           onAnnotationCreate={onPdfAnnotationCreate}
           onAnnotationDelete={onPdfAnnotationDelete}
+        />
+      )}
+
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'paged' && (
+        <PagedHostBranch
+          renderer={renderer}
+          layout={pagedLayout}
+          initialPage={restorePage}
+          onPagedPageChange={onPagedPageChange}
+          onPagedScaleChange={onPagedScaleChange}
+          onPageChange={onPageChange}
+          onRegisterGotoPage={registerGotoPage}
         />
       )}
 
@@ -536,6 +570,48 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     </div>
   );
 });
+
+/**
+ * paged 路径分支 — FullscreenPageView 持 ref 的小组件,把 ref.goToPage 注册到
+ * Host 的 gotoPageRef,让 host.goToPage()(outline / 全屏 toolbar)能正常工作。
+ */
+function PagedHostBranch({
+  renderer,
+  layout,
+  initialPage,
+  onPagedPageChange,
+  onPagedScaleChange,
+  onPageChange,
+  onRegisterGotoPage,
+}: {
+  renderer: IFixedPageRenderer;
+  layout: 'single' | 'double';
+  initialPage: number | null;
+  onPagedPageChange?: (page: number) => void;
+  onPagedScaleChange?: (scale: number) => void;
+  onPageChange?: (page: number) => void;
+  onRegisterGotoPage: (fn: (page: number) => void) => void;
+}) {
+  const viewRef = useRef<import('./fullscreen/FullscreenPageView').FullscreenPageViewHandle | null>(null);
+  useEffect(() => {
+    onRegisterGotoPage((page) => viewRef.current?.goToPage(page));
+  }, [onRegisterGotoPage]);
+  return (
+    <FullscreenPageView
+      ref={viewRef}
+      renderer={renderer}
+      layout={layout}
+      initialPage={initialPage}
+      onPageChange={(p) => {
+        onPagedPageChange?.(p);
+        onPageChange?.(p);
+      }}
+      onScaleChange={(s) => {
+        onPagedScaleChange?.(s);
+      }}
+    />
+  );
+}
 
 // ── Renderer 工厂(C2 仅 PDF;C3 加 EPUBRenderer;DjVu/CBZ 留作未来)──
 

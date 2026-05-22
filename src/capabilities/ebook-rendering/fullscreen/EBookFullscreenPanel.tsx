@@ -45,9 +45,10 @@ interface EBookFullscreenPanelProps {
 }
 
 type RenderMode = 'fixed-page' | 'reflowable' | null;
+type PagedLayout = 'single' | 'double';
 
-// 全屏阅读体验决议(2026-05-22):fixed-page 强制 fit-width,不暴露缩放 UI
-// (类似 macOS Preview 全屏 — 用户在大屏上不关心 X%,只关心铺满)
+// 全屏阅读体验决议(2026-05-22):fixed-page 走翻页式(不滚动),自适应 viewport
+// 单页/双页可切换;EPUB 沿用 ReflowableContent(foliate-js 自身分页)
 const FONT_STEP = 10;
 const FONT_MIN = 60;
 const FONT_MAX = 200;
@@ -57,6 +58,10 @@ const SAVE_PROGRESS_DEBOUNCE_MS = 500;
 const TOOLBAR_HOVER_ZONE_PX = 60;
 const TOOLBAR_HIDE_DELAY_MS = 500;
 const TOOLBAR_INITIAL_SHOW_MS = 500;
+
+// 翻页指示器(Preview 同款)— 翻页时顶部居中胶囊显示 "Page X of N",
+// 停留 1s 后淡出 300ms;连续翻页 stay-extends(重新启动 timer 不闪烁)
+const PAGE_INDICATOR_STAY_MS = 1000;
 
 export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const ctx = useMemo(() => getEBookFullscreenContext(), []);
@@ -78,10 +83,29 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const [epubPercentage, setEpubPercentage] = useState(0);
   const [fontSize, setFontSize] = useState(100);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // PDF 翻页式布局:single / double — 按 viewport 宽高比自动选(Preview 哲学)
+  // 宽屏(width >= height)→ double;竖屏 → single
+  // 监听 window resize,跟随尺寸变化
+  const [pagedLayout, setPagedLayout] = useState<PagedLayout>(() =>
+    window.innerWidth >= window.innerHeight ? 'double' : 'single',
+  );
+  useEffect(() => {
+    const handler = (): void => {
+      setPagedLayout(window.innerWidth >= window.innerHeight ? 'double' : 'single');
+    };
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
   // toolbar 沉浸式显隐:进顶部 60px / sidebar 打开 / 搜索打开时 visible
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toolbarHoverRef = useRef(false);
+  // 翻页指示器(Preview 同款)— 翻页时顶部居中胶囊 1s 自动消失
+  const [pageIndicatorVisible, setPageIndicatorVisible] = useState(false);
+  const pageIndicatorHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 中间页号 input 编辑态(对齐 EBookToolbar 行内 pageInput 交互)
+  const [pageInput, setPageInput] = useState('');
+  const [editingPage, setEditingPage] = useState(false);
 
   // 全屏阅读固定 fit-width(Preview 风格,无缩放 UI);scale 由 host 内部按 viewport 算
   const FULLSCREEN_FIT_WIDTH = true;
@@ -180,16 +204,43 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   );
 
   // Toolbar handlers
+  // 注:paged 路径下,host.goToPage 内部会通过 spreadStart 对齐到 spread 起点;
+  // double 模式 spread 起点为奇数 — 翻页要跳 ±2 才能到下一个 spread,
+  // 否则 (currentPage + 1) 是偶数,spreadStart(偶数) = 偶数 - 1 = 回到同一 spread。
+  const pageStep = pagedLayout === 'double' ? 2 : 1;
   const onPrevPage = useCallback(() => {
     if (currentPage > 1) {
-      hostRef.current?.goToPage(currentPage - 1);
+      hostRef.current?.goToPage(Math.max(1, currentPage - pageStep));
     }
-  }, [currentPage]);
+  }, [currentPage, pageStep]);
   const onNextPage = useCallback(() => {
     if (currentPage < totalPages) {
-      hostRef.current?.goToPage(currentPage + 1);
+      hostRef.current?.goToPage(Math.min(totalPages, currentPage + pageStep));
     }
-  }, [currentPage, totalPages]);
+  }, [currentPage, totalPages, pageStep]);
+
+  // 中间页号 input handlers — focus 进入编辑 → 输入 → Enter/blur 提交跳页
+  const handlePageInputFocus = useCallback(() => {
+    setPageInput(String(currentPage));
+    setEditingPage(true);
+  }, [currentPage]);
+  const handlePageInputBlur = useCallback(() => {
+    setEditingPage(false);
+    const page = parseInt(pageInput, 10);
+    if (!isNaN(page) && page >= 1 && page <= totalPages) {
+      // host.goToPage 内部 spreadStart 对齐 — 输入偶数会落到 spread 起点(N-1)
+      hostRef.current?.goToPage(page);
+    }
+  }, [pageInput, totalPages]);
+  const handlePageInputKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      (e.target as HTMLInputElement).blur();
+    } else if (e.key === 'Escape') {
+      setEditingPage(false);
+      setPageInput('');
+      (e.target as HTMLInputElement).blur();
+    }
+  }, []);
 
   const onPrevChapter = useCallback(() => hostRef.current?.prevChapter(), []);
   const onNextChapter = useCallback(() => hostRef.current?.nextChapter(), []);
@@ -277,6 +328,21 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     }
   }, [forceShowToolbar]);
 
+  // 翻页指示器(Preview 同款):currentPage/totalPages 变化时显示,1s 后自动隐藏。
+  // 连续翻页 stay-extends — 每次变化重启 timer,胶囊不闪烁。
+  // totalPages 进入条件让 loadComplete 后初次也展示一次(用户进全屏即知所在页)。
+  useEffect(() => {
+    if (!renderMode || totalPages === 0) return;
+    setPageIndicatorVisible(true);
+    if (pageIndicatorHideTimerRef.current) clearTimeout(pageIndicatorHideTimerRef.current);
+    pageIndicatorHideTimerRef.current = setTimeout(() => {
+      setPageIndicatorVisible(false);
+    }, PAGE_INDICATOR_STAY_MS);
+    return () => {
+      if (pageIndicatorHideTimerRef.current) clearTimeout(pageIndicatorHideTimerRef.current);
+    };
+  }, [currentPage, totalPages, renderMode]);
+
   if (!ctx) return null;
 
   const showFixedNav = renderMode === 'fixed-page' && totalPages > 0;
@@ -322,7 +388,22 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
               ‹
             </button>
             <span className="krig-ebook-fullscreen__page-info">
-              {currentPage} / {totalPages}
+              <input
+                className="krig-ebook-fullscreen__page-input"
+                value={
+                  editingPage
+                    ? pageInput
+                    : pagedLayout === 'double' && currentPage + 1 <= totalPages
+                      ? `${currentPage}-${currentPage + 1}`
+                      : String(currentPage)
+                }
+                onChange={(e) => setPageInput(e.target.value)}
+                onFocus={handlePageInputFocus}
+                onBlur={handlePageInputBlur}
+                onKeyDown={handlePageInputKey}
+                title="点击输入页号跳转"
+              />
+              <span className="krig-ebook-fullscreen__page-total"> / {totalPages}</span>
             </span>
             <button
               className="krig-ebook-fullscreen__btn"
@@ -407,6 +488,21 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
         </div>
       </div>
 
+      {/* 翻页指示器(Preview 同款 — 顶部居中半透明胶囊,翻页时浮现 1s 后淡出)*/}
+      {renderMode && totalPages > 0 && (
+        <div
+          className={`krig-ebook-fullscreen__page-indicator ${pageIndicatorVisible ? '' : 'krig-ebook-fullscreen__page-indicator--hidden'}`}
+        >
+          {renderMode === 'fixed-page'
+            ? pagedLayout === 'double' && currentPage + 1 <= totalPages
+              ? `Page ${currentPage}-${currentPage + 1} of ${totalPages}`
+              : `Page ${currentPage} of ${totalPages}`
+            : epubChapter
+              ? `${epubChapter} · ${Math.round((epubPercentage ?? 0) * 100)}%`
+              : `${Math.round((epubPercentage ?? 0) * 100)}%`}
+        </div>
+      )}
+
       {/* SearchBar 浮在 toolbar 下面(toolbar 高 40 + 间距);搜索打开时 toolbar 强制 visible */}
       <div className="krig-ebook-fullscreen__search-wrap">
         <SearchBar
@@ -442,6 +538,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             onLoadComplete={handleLoadComplete}
             onScaleChange={handleScaleChangeFromHost}
             onEpubProgressChange={handleEpubProgressChange}
+            pdfLayout="paged"
+            pagedLayout={pagedLayout}
+            onPagedScaleChange={(s) => {
+              lastScaleRef.current = s;
+            }}
           />
         </div>
       </div>
