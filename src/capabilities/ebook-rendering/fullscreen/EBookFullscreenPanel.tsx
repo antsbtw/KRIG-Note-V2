@@ -241,12 +241,15 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
       const bookId = bookIdRef.current;
       if (bookId) {
         if (lastEpubCfiRef.current) {
-          // EPUB 全屏 spread 模式 → EBookView 单页模式同步右页位置:
-          // panel relocate 给的 cfi 是 range cfi(`base,start,end`),
-          // 直接 save 会让 view 单页跳到 range start(左页);用 collapse(cfi, true)
-          // 折成单 anchor 取 range end → 跳到右页(spread 后页 = 用户阅读到的位置)
           const collapsed = collapseRangeCfiToEnd(lastEpubCfiRef.current);
-          console.log('[ebook-fullscreen] panel unmount; raw=', lastEpubCfiRef.current.slice(0, 60), 'collapsed=', collapsed.slice(0, 60));
+          // 关键诊断 log:panel 退出时全屏 panel 显示页号 + range cfi + collapsed cfi
+          // EBookView reopen 后显示的页号(看下一条 [ebook-view] onBookOpened 后
+          // 紧跟的 progress.page)与此处 epubPage / epubPage+1 对比看是否对齐
+          console.log(
+            '[ebook-fullscreen] panel unmount;\n  panel.epubPage=', epubPage,
+            '\n  raw=', lastEpubCfiRef.current,
+            '\n  collapsed=', collapsed,
+          );
           void library.saveProgress(bookId, { cfi: collapsed });
         } else if (lastPdfPageRef.current != null) {
           void library.saveProgress(bookId, {
@@ -299,11 +302,12 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
 
   const handleEpubProgressChange = useCallback(
     (progress: { chapter: string; percentage: number; page: number; pages: number }) => {
+      const cfi = hostRef.current?.getCurrentCFI();
+      console.log('[ebook-fullscreen] progress; page=', progress.page, 'pages=', progress.pages, 'cfi=', cfi?.slice(0, 80));
       setEpubChapter(progress.chapter);
       setEpubPercentage(progress.percentage);
       setEpubPage(progress.page);
       setEpubPages(progress.pages);
-      const cfi = hostRef.current?.getCurrentCFI();
       if (cfi) persistEpubProgress(cfi);
     },
     [persistEpubProgress],
