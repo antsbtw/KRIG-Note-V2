@@ -167,36 +167,42 @@ export const PaginatedReflowableContent = forwardRef<
       }
       animatingRef.current = true;
       onPageChangeStart?.();
+      console.log('[paged-epub] runAnimation START dir=', direction);
+      const offset = container.clientWidth + 100;
       try {
-        // 1) 截图当前页作 ghost
+        // 1) 截图当前页作 ghost,并在 append 之前明确层级 + 起点 transform —
+        //    避免 await action 期间 ghost 处于 default stacking 导致 paint 不一致
         const ghost = await captureWrapperGhost();
         if (!ghost) {
-          // 截图失败兜底:直接翻页无动画
+          console.warn('[paged-epub] capture failed → fallback no-animation');
           await action(renderer);
           return;
         }
-        container.appendChild(ghost);
-
-        // 2) 真翻页 — A wrapper 内容立即变新页(被 ghost 挡住,用户看不到瞬切)
-        await action(renderer);
-
-        const offset = container.clientWidth + 100;
-
-        // 3) 层级 + 起点位置
         if (direction === 'next') {
-          // next:ghost(旧页)在上层即将滑出,A wrapper(新页)在底层不动
+          // next:ghost(旧页)在上层显示并随后滑出;wrapper(下面挂的 A view,
+          // await action 后立即变新页)在底层不动
           ghost.style.zIndex = '2';
           ghost.style.transform = 'translateX(0)';
           wrapper.style.zIndex = '1';
         } else {
-          // prev:ghost(旧页)留原位不动,A wrapper(新页)从屏外左侧滑入覆盖
+          // prev:ghost(旧页)留原位不动在底层;wrapper(新页)起点 -offset 从左滑入
           ghost.style.zIndex = '1';
+          ghost.style.transform = 'translateX(0)';
           wrapper.style.zIndex = '2';
           wrapper.style.willChange = 'transform';
           wrapper.style.transform = `translateX(-${offset}px)`;
         }
+        container.appendChild(ghost);
+        // 等 ghost 图层 paint 完一帧(decode dataURL + layout)再开始真翻页,
+        // 避免 ghost 还没 paint 就翻页 → wrapper 变新页时 ghost 还没盖住 → 瞬切感
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        console.log('[paged-epub] ghost painted; running real flip');
 
-        // 4) 下一帧加 transition + 推动 transform(初始 transform 不参与过渡)
+        // 2) 真翻页 — A wrapper 内容立即变新页(被 ghost 挡住,用户看不到瞬切)
+        await action(renderer);
+        console.log('[paged-epub] real flip done; starting transition');
+
+        // 3) 下一帧加 transition + 推动 transform(初始 transform 不参与过渡)
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => {
             if (direction === 'next') {
@@ -225,17 +231,25 @@ export const PaginatedReflowableContent = forwardRef<
     [renderer, captureWrapperGhost, onPageChangeStart],
   );
 
+  // 双页布局下 foliate-paginator view.next/prev 每次只翻一列(半个 spread),
+  // 我们要翻一个完整 spread,所以双页时调两次(spread mode = maxColumnCount==2)
+  const stepPagesForSpread = useCallback((r: IReflowableRenderer): number => {
+    return r.getMaxColumnCount() === 2 ? 2 : 1;
+  }, []);
+
   const animateNext = useCallback(async (): Promise<void> => {
     await runAnimation('next', async (r) => {
-      await r.nextChapter();
+      const steps = stepPagesForSpread(r);
+      for (let i = 0; i < steps; i++) await r.nextChapter();
     });
-  }, [runAnimation]);
+  }, [runAnimation, stepPagesForSpread]);
 
   const animatePrev = useCallback(async (): Promise<void> => {
     await runAnimation('prev', async (r) => {
-      await r.prevChapter();
+      const steps = stepPagesForSpread(r);
+      for (let i = 0; i < steps; i++) await r.prevChapter();
     });
-  }, [runAnimation]);
+  }, [runAnimation, stepPagesForSpread]);
 
   const animateGoToCFI = useCallback(
     async (cfi: string): Promise<void> => {
