@@ -319,22 +319,35 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           // 用内容锚点替代页号是正确策略)
           if (pos?.cfi) {
             r.setRestoreLocation(pos.cfi);
-            // ready 后印 paginator.page + feet 信息验证 anchor 落点
+            // ready 后校正:spread 模式下 paginator.scrollToRect 可能让 anchor
+            // 落到 spread 右页(用户视觉:第一屏看到的左页是 anchor 之前的内容,
+            // 等于"回退一页",违反"打开继续阅读"的预期)。判断 anchor.rect 是否
+            // 在 viewport 右半,如果是 → 调 view.next() 让 spread 前进一列,
+            // 使 anchor 列成为新 spread 左页 = 用户视觉第一屏第一行
             void (async () => {
               try {
                 await r.waitReady();
                 const view = r.getView();
-                const pg = view?.renderer?.page;
-                const pgs = view?.renderer?.pages;
-                const feet = view?.renderer?.feet;
-                console.log(
-                  '[ebook-rendering/Host] EPUB after restore; paginator.page=', pg,
-                  'pages=', pgs,
-                  'feet=', Array.isArray(feet) ? feet.map((f: any) => f.textContent).join('|') : 'none',
-                  'cfi=', pos.cfi?.slice(0, 80),
-                );
+                if (!view) return;
+                // 只在 spread 模式下校正(单页模式 anchor 必在视野第一行)
+                const columnCount = (view.renderer as any)?.columnCount;
+                if (columnCount !== 2) return;
+                // 拿当前 visible range start 的 rect — 即 anchor 落点
+                const range = view.lastLocation?.range;
+                if (!range) return;
+                const rect = range.getBoundingClientRect?.();
+                if (!rect || rect.width === 0) return;
+                // 拿 paginator container 中线 — anchor 在右半则需校正
+                const container = view.renderer;
+                const cRect = container?.getBoundingClientRect?.();
+                if (!cRect) return;
+                const midX = cRect.left + cRect.width / 2;
+                if (rect.left > midX) {
+                  // anchor 在 spread 右页 → 前进一列让 anchor 成为新 spread 左页
+                  await view.renderer.next();
+                }
               } catch (err) {
-                console.warn('[ebook-rendering/Host] restore inspect failed:', err);
+                console.warn('[ebook-rendering/Host] spread anchor align failed:', err);
               }
             })();
           }
