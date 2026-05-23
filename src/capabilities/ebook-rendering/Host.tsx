@@ -32,6 +32,7 @@ import type { EBookLibraryApi, EBookLoadedInfo } from '@capabilities/ebook-libra
 import {
   type IBookRenderer,
   type IFixedPageRenderer,
+  type IReflowableRenderer,
   type EBookFileType,
   type BookPosition,
   type TOCItem,
@@ -43,6 +44,10 @@ import { PDFRenderer } from './pdf';
 import { EPUBRenderer } from './epub';
 import { FixedPageContent } from './fixed-page-content';
 import { ReflowableContent } from './reflowable-content';
+import {
+  PaginatedReflowableContent,
+  type PaginatedReflowableContentHandle,
+} from './reflowable-content/PaginatedReflowableContent';
 import { FullscreenPageView } from './fullscreen/FullscreenPageView';
 
 /** view 通过 ref 调用的命令式 API(EBookHostHandle)*/
@@ -173,6 +178,16 @@ export interface EBookHostProps {
   onPagedPageChangeStart?: (page: number) => void;
   /** paged 布局下 panel 拿到自适应 scale 用于 saveProgress */
   onPagedScaleChange?: (scale: number) => void;
+
+  /**
+   * EPUB 渲染模式:
+   * - 'flow'(默认):ReflowableContent 单 view,foliate-js 默认瞬切翻页(view 主区)
+   * - 'paged':PaginatedReflowableContent 双 view 翻页动画(L2 全屏 overlay 专用)
+   *
+   * paged 模式下翻页会临时创建第二 EPUBRenderer 实例(同一 ArrayBuffer),
+   * 动画完成后销毁旧实例并通过 onEpubRendererSwap 通知 Host 切换 rendererRef。
+   */
+  epubLayout?: 'flow' | 'paged';
 }
 
 const FIT_WIDTH_PADDING = 40;
@@ -197,6 +212,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onPagedPageChange,
     onPagedPageChangeStart,
     onPagedScaleChange,
+    epubLayout = 'flow',
   },
   ref,
 ) {
@@ -222,6 +238,11 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   const registerGotoPage = useCallback((fn: (page: number) => void) => {
     gotoPageRef.current = fn;
   }, []);
+  // paged EPUB 分支注册的 gotoCFI 回调(走带动画的路径,而非裸 view.goTo)
+  const gotoCfiRef = useRef<((cfi: string) => void) | null>(null);
+  // paged EPUB 分支注册的 PaginatedReflowableContentHandle —
+  // prev/nextChapter 走它走带动画路径
+  const paginatedHandleRef = useRef<PaginatedReflowableContentHandle | null>(null);
 
   // 同步 ref(供 useEffect 闭包内拿最新值)
   useEffect(() => {
@@ -455,9 +476,14 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         }
       },
       goToCFI(cfi: string): void {
+        // paged 路径优先走 gotoCfiRef(带翻页动画 + 切 rendererRef);
+        // flow 路径直接调 renderer.goTo
+        if (gotoCfiRef.current) {
+          gotoCfiRef.current(cfi);
+          return;
+        }
         const r = rendererRef.current;
         if (!r) return;
-        // C3 起:isReflowable(r) → r.goTo({type:'cfi', cfi})
         const pos: BookPosition = { type: 'cfi', cfi };
         r.goTo(pos);
       },
@@ -472,11 +498,21 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         return null;
       },
       // ── EPUB 专用 ──
+      // paged 路径下 prev/next 走 PaginatedReflowableContent 的 ref(带动画);
+      // flow 路径直接调当前 renderer
       prevChapter(): void {
+        if (paginatedHandleRef.current) {
+          paginatedHandleRef.current.prevPage();
+          return;
+        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.prevChapter();
       },
       nextChapter(): void {
+        if (paginatedHandleRef.current) {
+          paginatedHandleRef.current.nextPage();
+          return;
+        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.nextChapter();
       },
@@ -520,7 +556,12 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         if (isFixedPage(r)) {
           gotoPageRef.current?.(result.pageNum);
         } else if (isReflowable(r) && result.cfi) {
-          r.goTo({ type: 'cfi', cfi: result.cfi });
+          // paged 路径走 gotoCfiRef(动画);flow 直调
+          if (gotoCfiRef.current) {
+            gotoCfiRef.current(result.cfi);
+          } else {
+            r.goTo({ type: 'cfi', cfi: result.cfi });
+          }
         }
       },
       clearSearch(): void {
@@ -583,10 +624,28 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         />
       )}
 
-      {!loading && rendererReady && renderer && isReflowable(renderer) && (
+      {!loading && rendererReady && renderer && isReflowable(renderer) && epubLayout === 'flow' && (
         <ReflowableContent
           renderer={renderer}
           onProgressChange={onEpubProgressChange}
+        />
+      )}
+
+      {!loading && rendererReady && renderer && isReflowable(renderer) && epubLayout === 'paged' && (
+        <PaginatedReflowableHostBranch
+          renderer={renderer}
+          onProgressChange={onEpubProgressChange}
+          onPageChangeStart={onPagedPageChangeStart}
+          onRendererSwap={(newRenderer) => {
+            rendererRef.current = newRenderer;
+            setRenderer(newRenderer);
+          }}
+          onRegisterGotoCFI={(fn) => {
+            gotoCfiRef.current = fn;
+          }}
+          onRegisterHandle={(h) => {
+            paginatedHandleRef.current = h;
+          }}
         />
       )}
 
@@ -647,6 +706,68 @@ function PagedHostBranch({
       onPageChange={handlePageChange}
       onPageChangeStart={onPagedPageChangeStart}
       onScaleChange={handleScaleChange}
+    />
+  );
+}
+
+/**
+ * EPUB paged 分支 — 把 PaginatedReflowableContentHandle 中转到 Host,
+ * 并提供 createRenderer 工厂(panel 内创建临时第二实例时用)。
+ *
+ * renderer prop 变化(Host loadFromInfo 重新加载时)→ 组件 key 重 mount,
+ * 避免内部 currentRendererRef 残留旧实例引用。
+ */
+function PaginatedReflowableHostBranch({
+  renderer,
+  onProgressChange,
+  onPageChangeStart,
+  onRendererSwap,
+  onRegisterGotoCFI,
+  onRegisterHandle,
+}: {
+  renderer: IReflowableRenderer;
+  onProgressChange?: (progress: {
+    chapter: string;
+    percentage: number;
+    page: number;
+    pages: number;
+  }) => void;
+  onPageChangeStart?: (page: number) => void;
+  onRendererSwap: (newRenderer: IReflowableRenderer) => void;
+  onRegisterGotoCFI: (fn: (cfi: string) => void) => void;
+  onRegisterHandle: (h: PaginatedReflowableContentHandle | null) => void;
+}) {
+  const handleRef = useRef<PaginatedReflowableContentHandle | null>(null);
+  // 工厂:新 EPUBRenderer 实例(同一构造函数;buffer 在 PaginatedReflowableContent
+  // 内部用 currentRendererRef.current.getFileData() 取)
+  // 注:不在此 import EPUBRenderer — 走类型守卫拿 prototype.constructor 反射,
+  // 保持 PaginatedReflowableContent 对 EPUBRenderer 解耦
+  const createRenderer = useCallback((): IReflowableRenderer => {
+    const ctor = (renderer as any).constructor as new () => IReflowableRenderer;
+    return new ctor();
+  }, [renderer]);
+  // 注册 gotoCFI 走 handleRef(handle 由 ref callback 在 mount 时挂上)
+  useEffect(() => {
+    onRegisterGotoCFI((cfi) => handleRef.current?.goToCFI(cfi));
+  }, [onRegisterGotoCFI]);
+  const handleStart = useCallback(() => {
+    onPageChangeStart?.(0); // EPUB 无具体页号;panel indicator 走 epub progress 推流
+  }, [onPageChangeStart]);
+  const handleSetRef = useCallback(
+    (h: PaginatedReflowableContentHandle | null): void => {
+      handleRef.current = h;
+      onRegisterHandle(h);
+    },
+    [onRegisterHandle],
+  );
+  return (
+    <PaginatedReflowableContent
+      ref={handleSetRef}
+      renderer={renderer}
+      onProgressChange={onProgressChange}
+      onPageChangeStart={handleStart}
+      onRendererSwap={onRendererSwap}
+      createRenderer={createRenderer}
     />
   );
 }

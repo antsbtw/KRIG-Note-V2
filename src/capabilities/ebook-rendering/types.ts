@@ -190,6 +190,14 @@ export interface IReflowableRenderer extends IBookRenderer {
   // ── C4 fix:双指水平 swipe 翻页(macOS Books 同款 UX)──
   /** 注册 swipe 翻页回调(由 reflowable-content 消费,触发 prev/nextChapter)*/
   onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void;
+
+  // ── 双实例翻页动画(全屏 paged 路径)──
+  /** 原始 buffer — 新临时实例 init 时复用,避免 IPC 二次拉数据 */
+  getFileData(): ArrayBuffer | null;
+  /** view + foliate 初始化完成的 promise(双实例场景显式等 B 就绪) */
+  waitReady(): Promise<void>;
+  /** 底层 view 对象(命令式动画驱动用 — view.goTo / view.next / view.prev) */
+  getView(): any;
 }
 
 // ── 类型守卫 ──

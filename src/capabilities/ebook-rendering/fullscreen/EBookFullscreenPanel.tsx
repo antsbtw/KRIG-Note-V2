@@ -681,6 +681,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             onEpubProgressChange={handleEpubProgressChange}
             pdfLayout="paged"
             pagedLayout={pagedLayout}
+            epubLayout="paged"
             onPagedPageChangeStart={(p) => {
               setIndicatorPage(p);
               setIndicatorVersion((v) => v + 1);

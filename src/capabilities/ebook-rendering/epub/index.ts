@@ -115,6 +115,21 @@ export class EPUBRenderer implements IReflowableRenderer {
     this.fileData = data;
   }
 
+  /** 暴露原始 ArrayBuffer — 双实例翻页动画用,避免重新 IPC 拉数据 */
+  getFileData(): ArrayBuffer | null {
+    return this.fileData;
+  }
+
+  /** 等待 view + foliate 初始化完成(双实例场景显式等 B 就绪) */
+  waitReady(): Promise<void> {
+    return this.readyPromise;
+  }
+
+  /** view DOM(动画驱动需要直接挂 wrapper)— null 表示还没 initView */
+  getView(): any {
+    return this.view;
+  }
+
   renderTo(container: HTMLElement): void {
     this.container = container;
     void this.initView();
