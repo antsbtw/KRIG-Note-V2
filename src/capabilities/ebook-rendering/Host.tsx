@@ -516,7 +516,13 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.nextChapter();
       },
+      // paged 路径下设置走 applyToAll(current + 任何 incoming 临时实例都 apply)
+      // 避免翻页中改字号/主题/appearance 导致两 view 视觉错位
       setFontSize(size: number): void {
+        if (paginatedHandleRef.current) {
+          paginatedHandleRef.current.applyToAll((r) => r.setFontSize(size));
+          return;
+        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setFontSize(size);
       },
@@ -526,14 +532,26 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         return 100;
       },
       setEpubMaxColumnCount(count: 1 | 2): void {
+        if (paginatedHandleRef.current) {
+          paginatedHandleRef.current.applyToAll((r) => r.setMaxColumnCount(count));
+          return;
+        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setMaxColumnCount(count);
       },
       setEpubTheme(theme): void {
+        if (paginatedHandleRef.current) {
+          paginatedHandleRef.current.applyToAll((r) => r.setTheme(theme));
+          return;
+        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setTheme(theme);
       },
       setEpubAppearance(appearance): void {
+        if (paginatedHandleRef.current) {
+          paginatedHandleRef.current.applyToAll((r) => r.setAppearance(appearance));
+          return;
+        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setAppearance(appearance);
       },
