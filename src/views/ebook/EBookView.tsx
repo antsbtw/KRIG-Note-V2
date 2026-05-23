@@ -92,6 +92,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const [fitWidth, setFitWidth] = useState(true);
   const [epubChapter, setEpubChapter] = useState('');
   const [epubPercentage, setEpubPercentage] = useState(0);
+  const [epubPage, setEpubPage] = useState(0);
+  const [epubPages, setEpubPages] = useState(0);
   // fontSize 现仅作命令式推到 host(不参与 view 自身 render),由 Aa popup 持 state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -200,9 +202,11 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   // C4:EPUB CFI 持久化(C3 已知短板修复)— relocate 时拿 host.getCurrentCFI
   const handleEpubProgressChange = useCallback(
-    (progress: { chapter: string; percentage: number }) => {
+    (progress: { chapter: string; percentage: number; page: number; pages: number }) => {
       setEpubChapter(progress.chapter);
       setEpubPercentage(progress.percentage);
+      setEpubPage(progress.page);
+      setEpubPages(progress.pages);
       const cfi = hostRef.current?.getCurrentCFI();
       if (cfi) persistEpubProgress(cfi);
     },
@@ -391,8 +395,9 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onPdfAnnotationModeChange={pdfAnn.setMode}
         onExtract={handleExtract}
         extractDisabled={extractUploading}
-        epubChapter={epubChapter}
         epubPercentage={epubPercentage}
+        epubPage={epubPage}
+        epubPages={epubPages}
         onPrevChapter={onPrevChapter}
         onNextChapter={onNextChapter}
         onFullscreen={onFullscreen}

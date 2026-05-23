@@ -154,6 +154,8 @@ export interface IReflowableRenderer extends IBookRenderer {
   getProgress(): { chapter: string; percentage: number; page: number; pages: number };
   nextChapter(): void;
   prevChapter(): void;
+  /** 按页号跳转 — EPUB 内部按 fraction 近似定位(page 数随字号变,不是稳定语义)*/
+  goToPage(page: number): Promise<void>;
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void;
   /** 设置最大列数(1=单页 / 2=双页);foliate-js 会按容器宽度自适应 */

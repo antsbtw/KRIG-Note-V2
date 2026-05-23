@@ -165,14 +165,17 @@ export class EPUBRenderer implements IReflowableRenderer {
       // 应用字号 + 暗色样式(合并注入 — setStyles 是覆盖式,不能分两次调否则后调的会清掉前面的)
       this.applyContentStyles();
 
-      // 监听位置变化 — chapter title + 进度比例 + 真实页码(foliate-paginator)
-      // + 最新 CFI + 底部 footer 页码(Books 风)
+      // 监听位置变化 — chapter title + 进度比例 + 全书页码 + 最新 CFI + 底部 footer 页码
+      // 关键:page/pages 用 detail.location.current/total(foliate sectionProgress 按全书
+      // 字符/byte 算出的虚拟位置数,跨字号稳定) — 不用 paginator.page/pages(那是当前
+      // section 内的页码,翻章后会归零)
       this.view.addEventListener('relocate', (e: any) => {
         const detail = e.detail;
-        const paginator = this.view?.renderer;
-        const page = (paginator?.page as number | undefined) ?? 0;
-        const pages = (paginator?.pages as number | undefined) ?? 0;
         if (detail) {
+          const loc = detail.location;
+          // location.current 是 0-based,+1 转成 1-based;total 直接取
+          const page = typeof loc?.current === 'number' ? loc.current + 1 : 0;
+          const pages = typeof loc?.total === 'number' ? loc.total : 0;
           this.currentProgress = {
             chapter: detail.tocItem?.label ?? '',
             percentage: detail.fraction ?? 0,
@@ -283,6 +286,18 @@ export class EPUBRenderer implements IReflowableRenderer {
     if (position.type === 'cfi' && position.cfi) {
       await this.view.goTo(position.cfi);
     }
+  }
+
+  /** 按全书页号跳转 — page/total 来自 foliate sectionProgress 的 location.current/total,
+   *  按全书字符/byte 算出的虚拟位置数(跨字号稳定)。fraction 公式 (page-1)/(total-1)。*/
+  async goToPage(page: number): Promise<void> {
+    await this.readyPromise;
+    if (!this.view?.goToFraction) return;
+    const total = this.currentProgress.pages;
+    if (total <= 0) return;
+    const clamped = Math.max(1, Math.min(page, total));
+    const fraction = total > 1 ? (clamped - 1) / (total - 1) : 0;
+    await this.view.goToFraction(fraction);
   }
 
   async getTOC(): Promise<TOCItem[]> {

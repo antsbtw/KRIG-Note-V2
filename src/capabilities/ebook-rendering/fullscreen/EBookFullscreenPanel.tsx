@@ -271,18 +271,23 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   }, [currentPage, totalPages, pageStep]);
 
   // 中间页号 input handlers — focus 进入编辑 → 输入 → Enter/blur 提交跳页
+  // PDF/EPUB 通用:focus 取当前页(PDF=currentPage, EPUB=epubPage),
+  // blur 调 host.goToPage(host 内部按 renderMode 分发到正确 renderer)
+  const inputCurrentPage = renderMode === 'reflowable' ? epubPage : currentPage;
+  const inputTotalPages = renderMode === 'reflowable' ? epubPages : totalPages;
   const handlePageInputFocus = useCallback(() => {
-    setPageInput(String(currentPage));
+    setPageInput(String(inputCurrentPage));
     setEditingPage(true);
-  }, [currentPage]);
+  }, [inputCurrentPage]);
   const handlePageInputBlur = useCallback(() => {
     setEditingPage(false);
     const page = parseInt(pageInput, 10);
-    if (!isNaN(page) && page >= 1 && page <= totalPages) {
-      // host.goToPage 内部 spreadStart 对齐 — 输入偶数会落到 spread 起点(N-1)
+    if (!isNaN(page) && page >= 1 && page <= inputTotalPages) {
+      // PDF: host.goToPage 内部 spreadStart 对齐
+      // EPUB: host.goToPage 走 renderer.goToPage 按 fraction 跳
       hostRef.current?.goToPage(page);
     }
-  }, [pageInput, totalPages]);
+  }, [pageInput, inputTotalPages]);
   const handlePageInputKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       (e.target as HTMLInputElement).blur();
@@ -491,7 +496,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
                   onKeyDown={handlePageInputKey}
                   title="点击输入页号跳转"
                 />
-                <span className="krig-ebook-fullscreen__page-total"> / {totalPages}</span>
+                <span className="krig-ebook-fullscreen__page-total"> of {totalPages}</span>
               </span>
               <button
                 className="krig-ebook-fullscreen__nav-pill-btn"
@@ -517,8 +522,23 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
                 ‹
               </button>
               <span className="krig-ebook-fullscreen__nav-pill-info">
-                {epubChapter ? `${epubChapter} · ` : ''}
-                {epubPages > 0 ? `${epubPage} / ${epubPages}` : `${Math.round((epubPercentage ?? 0) * 100)}%`}
+                {epubPages > 0 ? (
+                  <>
+                    <input
+                      className="krig-ebook-fullscreen__page-input"
+                      value={editingPage ? pageInput : String(epubPage)}
+                      onChange={(e) => setPageInput(e.target.value)}
+                      onFocus={handlePageInputFocus}
+                      onBlur={handlePageInputBlur}
+                      onKeyDown={handlePageInputKey}
+                      title="点击输入页号跳转"
+                    />
+                    <span className="krig-ebook-fullscreen__page-total"> of {epubPages}</span>
+                  </>
+                ) : (
+                  // EPUB 还没分页就绪时降级显示百分比(很短暂,relocate 后立即变页码)
+                  `${Math.round((epubPercentage ?? 0) * 100)}%`
+                )}
               </span>
               <button
                 className="krig-ebook-fullscreen__nav-pill-btn"
@@ -590,8 +610,8 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             : lastTriggerWasFontSizeRef.current
               ? `字号 ${fontSize}%`
               : epubPages > 0
-                ? (epubChapter ? `${epubChapter} · ${epubPage} / ${epubPages}` : `Page ${epubPage} of ${epubPages}`)
-                : (epubChapter ? `${epubChapter} · ${Math.round((epubPercentage ?? 0) * 100)}%` : `${Math.round((epubPercentage ?? 0) * 100)}%`)}
+                ? `Page ${epubPage} of ${epubPages}`
+                : `${Math.round((epubPercentage ?? 0) * 100)}%`}
         </div>
       )}
 

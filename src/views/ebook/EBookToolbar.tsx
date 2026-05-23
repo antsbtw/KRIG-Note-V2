@@ -66,8 +66,12 @@ interface EBookToolbarProps {
   /** 提取按钮 disabled(上传中)*/
   extractDisabled?: boolean;
   // reflowable 专用
-  epubChapter?: string;
+  /** EPUB 章节进度比例(0-1)— 仅在 epubPages 未就绪时降级显示 */
   epubPercentage?: number;
+  /** EPUB 全书页码(从 foliate location.current,1-based)— 与 PDF currentPage 对齐 */
+  epubPage?: number;
+  /** EPUB 全书总页数(location.total)— 与 PDF pageCount 对齐 */
+  epubPages?: number;
   onPrevChapter?: () => void;
   onNextChapter?: () => void;
   // 注:fontSize / 字号变化已迁到 Aa popup,toolbar 不再接收
@@ -106,8 +110,9 @@ export function EBookToolbar({
   onPdfAnnotationModeChange,
   onExtract,
   extractDisabled = false,
-  epubChapter,
   epubPercentage,
+  epubPage = 0,
+  epubPages = 0,
   onPrevChapter,
   onNextChapter,
   onFullscreen,
@@ -116,28 +121,33 @@ export function EBookToolbar({
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
 
-  // ── fixed-page 导航 ──
+  // ── 页码导航(PDF/EPUB 通用)──
+  // EPUB 路径用 epubPage/epubPages,onPageChange 上层(EBookView)调 host.goToPage
+  // 自动按 renderMode 分发到正确 renderer
+  const isReflow = renderMode === 'reflowable';
+  const inputCurrentPage = isReflow ? epubPage : currentPage;
+  const inputTotalPages = isReflow ? epubPages : pageCount;
 
   const handlePrevPage = useCallback(() => {
-    if (currentPage > 1) onPageChange(currentPage - 1);
-  }, [currentPage, onPageChange]);
+    if (inputCurrentPage > 1) onPageChange(inputCurrentPage - 1);
+  }, [inputCurrentPage, onPageChange]);
 
   const handleNextPage = useCallback(() => {
-    if (currentPage < pageCount) onPageChange(currentPage + 1);
-  }, [currentPage, pageCount, onPageChange]);
+    if (inputCurrentPage < inputTotalPages) onPageChange(inputCurrentPage + 1);
+  }, [inputCurrentPage, inputTotalPages, onPageChange]);
 
   const handlePageInputFocus = useCallback(() => {
-    setPageInput(String(currentPage));
+    setPageInput(String(inputCurrentPage));
     setEditingPage(true);
-  }, [currentPage]);
+  }, [inputCurrentPage]);
 
   const handlePageInputBlur = useCallback(() => {
     setEditingPage(false);
     const page = parseInt(pageInput, 10);
-    if (!isNaN(page) && page >= 1 && page <= pageCount) {
+    if (!isNaN(page) && page >= 1 && page <= inputTotalPages) {
       onPageChange(page);
     }
-  }, [pageInput, pageCount, onPageChange]);
+  }, [pageInput, inputTotalPages, onPageChange]);
 
   const handlePageInputKey = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -254,10 +264,25 @@ export function EBookToolbar({
           >
             ‹
           </button>
-          <span className="krig-ebook-toolbar__epub-progress">
-            {epubChapter ? `${epubChapter} · ` : ''}
-            {Math.round((epubPercentage ?? 0) * 100)}%
-          </span>
+          {epubPages > 0 ? (
+            <>
+              <input
+                className="krig-ebook-toolbar__page-input"
+                value={editingPage ? pageInput : String(epubPage)}
+                onChange={(e) => setPageInput(e.target.value)}
+                onFocus={handlePageInputFocus}
+                onBlur={handlePageInputBlur}
+                onKeyDown={handlePageInputKey}
+                title="点击输入页号跳转"
+              />
+              <span className="krig-ebook-toolbar__page-info">of {epubPages}</span>
+            </>
+          ) : (
+            // EPUB 还没分页就绪时降级显示百分比(很短暂,relocate 后立即变页码)
+            <span className="krig-ebook-toolbar__epub-progress">
+              {Math.round((epubPercentage ?? 0) * 100)}%
+            </span>
+          )}
           <button
             className="krig-ebook-toolbar__btn"
             onClick={onNextChapter}

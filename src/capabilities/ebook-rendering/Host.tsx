@@ -443,7 +443,16 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     () => ({
       loadFromInfo,
       goToPage(page: number): void {
-        gotoPageRef.current?.(page);
+        // PDF: 走 FixedPageContent / FullscreenPageView 注册的 gotoPage 回调
+        // EPUB: renderer.goToPage 按 fraction 近似定位
+        if (gotoPageRef.current) {
+          gotoPageRef.current(page);
+          return;
+        }
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) {
+          void r.goToPage(page);
+        }
       },
       goToCFI(cfi: string): void {
         const r = rendererRef.current;
