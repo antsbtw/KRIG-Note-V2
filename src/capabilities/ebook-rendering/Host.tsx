@@ -317,7 +317,27 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           // 对齐 scroll → 节点落在新 viewport 第一行附近 → 用户视觉感知一致
           // (EPUB reflowable 不同 layout 物理页号无法严格对齐是本质限制,
           // 用内容锚点替代页号是正确策略)
-          if (pos?.cfi) r.setRestoreLocation(pos.cfi);
+          if (pos?.cfi) {
+            r.setRestoreLocation(pos.cfi);
+            // ready 后印 paginator.page + feet 信息验证 anchor 落点
+            void (async () => {
+              try {
+                await r.waitReady();
+                const view = r.getView();
+                const pg = view?.renderer?.page;
+                const pgs = view?.renderer?.pages;
+                const feet = view?.renderer?.feet;
+                console.log(
+                  '[ebook-rendering/Host] EPUB after restore; paginator.page=', pg,
+                  'pages=', pgs,
+                  'feet=', Array.isArray(feet) ? feet.map((f: any) => f.textContent).join('|') : 'none',
+                  'cfi=', pos.cfi?.slice(0, 80),
+                );
+              } catch (err) {
+                console.warn('[ebook-rendering/Host] restore inspect failed:', err);
+              }
+            })();
+          }
 
           // C4:转推 EPUB 选区 / 选区取消 / 标注点击事件给 view
           if (onEpubTextSelected) r.onTextSelected(onEpubTextSelected);

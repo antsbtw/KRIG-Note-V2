@@ -272,6 +272,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     const lastPosition = renderMode === 'reflowable'
       ? { cfi: currentCFI ?? info.lastPosition?.cfi }
       : { page: currentPage, fitWidth: true };
+    console.log('[ebook-view] enter fullscreen; epubPage=', epubPage, 'lastPosition=', lastPosition);
     rendering.openFullscreenReader({
       workspaceId,
       bookInfo: { ...info, lastPosition },
