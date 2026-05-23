@@ -422,6 +422,21 @@ export class EPUBRenderer implements IReflowableRenderer {
     return this.fontSize;
   }
 
+  /** 当前主题(双实例同步用) */
+  getTheme(): EpubTheme {
+    return this.theme;
+  }
+
+  /** 当前明暗模式(双实例同步用) */
+  getAppearance(): EpubAppearance {
+    return this.appearance;
+  }
+
+  /** 当前最大列数(双实例同步用) */
+  getMaxColumnCount(): 1 | 2 {
+    return this.pendingMaxColumnCount;
+  }
+
   getProgress(): { chapter: string; percentage: number; page: number; pages: number } {
     return this.currentProgress;
   }

@@ -198,6 +198,12 @@ export interface IReflowableRenderer extends IBookRenderer {
   waitReady(): Promise<void>;
   /** 底层 view 对象(命令式动画驱动用 — view.goTo / view.next / view.prev) */
   getView(): any;
+  /** 当前主题(双实例同步用) */
+  getTheme(): EpubTheme;
+  /** 当前明暗模式(双实例同步用) */
+  getAppearance(): EpubAppearance;
+  /** 当前最大列数(双实例同步用) */
+  getMaxColumnCount(): 1 | 2;
 }
 
 // ── 类型守卫 ──
