@@ -131,7 +131,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   // 订阅 onBookOpened → 命令式驱动 Host + 加载书签 / 标注
   useEffect(() => {
     return library.onBookOpened((info) => {
-      console.log('[ebook-view] onBookOpened; bookId=', info.bookId, 'lastPosition=', info.lastPosition);
       setFileName(info.fileName);
       activeBookIdRef.current = info.bookId;
       lastBookInfoRef.current = info;
@@ -204,7 +203,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   // C4:EPUB CFI 持久化(C3 已知短板修复)— relocate 时拿 host.getCurrentCFI
   const handleEpubProgressChange = useCallback(
     (progress: { chapter: string; percentage: number; page: number; pages: number }) => {
-      console.log('[ebook-view] handleEpubProgressChange; page=', progress.page, 'pages=', progress.pages, 'chapter=', progress.chapter);
       setEpubChapter(progress.chapter);
       setEpubPercentage(progress.percentage);
       setEpubPage(progress.page);
@@ -254,7 +252,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       if (!s.visible && s.lastActiveId === EBOOK_FULLSCREEN_OVERLAY_ID) {
         const bookId = activeBookIdRef.current;
         if (bookId) {
-          console.log('[ebook-view] exit fullscreen; reopen bookId=', bookId);
           void library.open(bookId).catch((err) => {
             console.warn('[ebook-view] reopen after fullscreen failed:', err);
           });
@@ -275,7 +272,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     const lastPosition = renderMode === 'reflowable'
       ? { cfi: currentCFI ?? info.lastPosition?.cfi }
       : { page: currentPage, fitWidth: true };
-    console.log('[ebook-view] enter fullscreen; renderMode=', renderMode, 'epubPage=', epubPage, 'lastPosition=', lastPosition);
     rendering.openFullscreenReader({
       workspaceId,
       bookInfo: { ...info, lastPosition },

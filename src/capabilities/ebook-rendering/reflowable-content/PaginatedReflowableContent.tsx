@@ -167,7 +167,6 @@ export const PaginatedReflowableContent = forwardRef<
       }
       animatingRef.current = true;
       onPageChangeStart?.();
-      console.log('[paged-epub] runAnimation START dir=', direction);
       const offset = container.clientWidth + 100;
       try {
         // 1) 截图当前页作 ghost,并在 append 之前明确层级 + 起点 transform —
@@ -196,11 +195,9 @@ export const PaginatedReflowableContent = forwardRef<
         // 等 ghost 图层 paint 完一帧(decode dataURL + layout)再开始真翻页,
         // 避免 ghost 还没 paint 就翻页 → wrapper 变新页时 ghost 还没盖住 → 瞬切感
         await new Promise<void>((r) => requestAnimationFrame(() => r()));
-        console.log('[paged-epub] ghost painted; running real flip');
 
         // 2) 真翻页 — A wrapper 内容立即变新页(被 ghost 挡住,用户看不到瞬切)
         await action(renderer);
-        console.log('[paged-epub] real flip done; starting transition');
 
         // 3) 下一帧加 transition + 推动 transform(初始 transform 不参与过渡)
         await new Promise<void>((resolve) => {

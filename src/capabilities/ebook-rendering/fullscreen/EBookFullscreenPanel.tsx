@@ -89,29 +89,31 @@ function BookmarkIcon({ active }: { active: boolean }) {
 }
 
 /**
- * 把 range CFI 折成单 anchor CFI(取 range end)。
+ * 把 range CFI 折成单 anchor CFI(取 range start = 当前 viewport 第一行起点)。
  *
- * EPUB CFI 格式说明:
+ * EPUB CFI 格式:
  * - 单 anchor:`epubcfi(/6/8!/4/38/1:99)` — 一段 path
  * - range:    `epubcfi(/6/8!/4,/30,/38/1:99)` — 用 `,` 分三段:base, start, end
  *
- * 全屏 spread 模式下,paginator relocate 给的是 range CFI(覆盖整个 spread 可见内容)。
- * EBookView 单页模式 reopen 用 view.goTo(rangeCFI) 会跳到 range start(左页起点);
- * 用户期望"打开后回到刚才阅读到的位置(右页)",所以 save 前折成 range end anchor。
+ * 设计哲学(2026-05-23 用户拍板):
+ * EPUB 是 reflowable,跨 layout(单页 ↔ spread 双页 / 字号 / 主题)页号无法对齐
+ * 是物理限制。改用"当前 viewport 第一行内容"作锚点:全屏退出时 save range start
+ * cfi(spread 左页第一行起点),view 单页 reopen 用 view.goTo(cfi) 跳到该节点,
+ * 该节点必落在新 viewport 第一行附近。这样:
+ * - 锚点 layout-independent(以内容定位,而非物理页号)
+ * - 视觉感知一致("刚才读的那段话" 在新模式的第一屏)
  *
- * 不 import foliate-js epubcfi 模块(panel 不该直 import npm)— 字符串拆解足够:
- * 去掉 epubcfi(...) 外壳,split 一级 comma(注意 base 内含 `!` 不含 `,`),
- * 拼 base + end,包回 epubcfi(...).
+ * 不 import foliate-js epubcfi 模块(panel 不该直 import npm)— 字符串拆解:
+ * 去掉 epubcfi(...) 外壳,split 一级 comma,拼 base + start,包回 epubcfi(...).
  */
-function collapseRangeCfiToEnd(cfi: string): string {
+function collapseRangeCfiToStart(cfi: string): string {
   const m = /^epubcfi\((.*)\)$/.exec(cfi);
   if (!m) return cfi;
   const inner = m[1];
-  // range cfi 在外层有两个 `,`(base,start,end)。如果不是 range,直接原样返回
   const parts = inner.split(',');
   if (parts.length !== 3) return cfi;
-  const [base, , end] = parts;
-  return `epubcfi(${base}${end})`;
+  const [base, start] = parts;
+  return `epubcfi(${base}${start})`;
 }
 
 export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
@@ -210,24 +212,16 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   );
   // 最新右页全书 page + total — 用于 panel 翻页 / unmount 时 save right page
   // (cfi 字段保留兼容旧 view,新 epubPage 字段优先用)
-  const lastEpubPageRef = useRef<number>(0);
-  const lastEpubPagesRef = useRef<number>(0);
   const persistEpubProgress = useCallback(
-    (cfi: string, leftPage: number, totalPages: number) => {
+    (cfi: string) => {
       const bookId = bookIdRef.current;
       if (!bookId) return;
-      // panel.progress.page 是 spread 左页全书 page(loc.current+1);双页模式下
-      // 用户阅读位置 = 右页 = 左页+1。立即 save 右页 page + 折叠 cfi 作兜底
-      const rightPage = leftPage + 1;
-      const collapsed = collapseRangeCfiToEnd(cfi);
+      // 以"viewport 第一行内容"作锚点(layout-independent)— 跨模式切换时该
+      // 节点必落在新 viewport 第一行附近,而非纠结物理页号(EPUB reflowable
+      // 不同 layout 下页号本质就不能对齐)。range start = spread 左页第一行起点
+      const collapsed = collapseRangeCfiToStart(cfi);
       lastEpubCfiRef.current = collapsed;
-      lastEpubPageRef.current = rightPage;
-      lastEpubPagesRef.current = totalPages;
-      void library.saveProgress(bookId, {
-        cfi: collapsed,
-        epubPage: rightPage,
-        epubPages: totalPages,
-      });
+      void library.saveProgress(bookId, { cfi: collapsed });
     },
     [library],
   );
@@ -239,12 +233,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
       onClose();
       return;
     }
-    console.log('[ebook-fullscreen] panel mount; bookInfo.lastPosition=', ctx.bookInfo.lastPosition);
     void hostRef.current?.loadFromInfo(ctx.bookInfo);
     bookmarks.loadOnBookOpen(ctx.bookInfo.bookId);
     return () => {
       // EPUB 已在 persistEpubProgress 每次翻页立即 save(无 debounce),lastEpubCfiRef
-      // 是最新右页 cfi;PDF 仍走 debounce,unmount 时兜底 flush 最新位置
+      // 是最新 viewport 第一行 cfi;PDF 仍走 debounce,unmount 时兜底 flush 最新位置
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
@@ -257,9 +250,6 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
           fitWidth: FULLSCREEN_FIT_WIDTH,
         });
       }
-      console.log(
-        '[ebook-fullscreen] panel unmount; lastEpubCfi=', lastEpubCfiRef.current?.slice(0, 80),
-      );
       clearEBookFullscreenContext();
     };
     // mount-only effect: ctx 是 useMemo 一次性快照,bookmarks/onClose 在 panel
@@ -304,12 +294,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const handleEpubProgressChange = useCallback(
     (progress: { chapter: string; percentage: number; page: number; pages: number }) => {
       const cfi = hostRef.current?.getCurrentCFI();
-      console.log('[ebook-fullscreen] progress; page=', progress.page, 'pages=', progress.pages, 'cfi=', cfi?.slice(0, 80));
       setEpubChapter(progress.chapter);
       setEpubPercentage(progress.percentage);
       setEpubPage(progress.page);
       setEpubPages(progress.pages);
-      if (cfi) persistEpubProgress(cfi, progress.page, progress.pages);
+      if (cfi) persistEpubProgress(cfi);
     },
     [persistEpubProgress],
   );
