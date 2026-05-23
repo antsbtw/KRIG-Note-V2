@@ -131,6 +131,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   // 订阅 onBookOpened → 命令式驱动 Host + 加载书签 / 标注
   useEffect(() => {
     return library.onBookOpened((info) => {
+      console.log('[ebook-view] onBookOpened; bookId=', info.bookId, 'lastPosition=', info.lastPosition);
       setFileName(info.fileName);
       activeBookIdRef.current = info.bookId;
       lastBookInfoRef.current = info;
@@ -252,6 +253,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       if (!s.visible && s.lastActiveId === EBOOK_FULLSCREEN_OVERLAY_ID) {
         const bookId = activeBookIdRef.current;
         if (bookId) {
+          console.log('[ebook-view] exit fullscreen; reopen bookId=', bookId);
           void library.open(bookId).catch((err) => {
             console.warn('[ebook-view] reopen after fullscreen failed:', err);
           });
@@ -268,9 +270,11 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     if (!info) return;
     // 用当前 view 内的最新位置覆盖 info.lastPosition(避免 panel 加载到 stale 位置)
     // PDF 路径强制 fitWidth=true(全屏 Preview 风格,scale 由 host 按 viewport 算)
+    const currentCFI = hostRef.current?.getCurrentCFI();
     const lastPosition = renderMode === 'reflowable'
-      ? { cfi: hostRef.current?.getCurrentCFI() ?? info.lastPosition?.cfi }
+      ? { cfi: currentCFI ?? info.lastPosition?.cfi }
       : { page: currentPage, fitWidth: true };
+    console.log('[ebook-view] enter fullscreen; renderMode=', renderMode, 'lastPosition=', lastPosition);
     rendering.openFullscreenReader({
       workspaceId,
       bookInfo: { ...info, lastPosition },

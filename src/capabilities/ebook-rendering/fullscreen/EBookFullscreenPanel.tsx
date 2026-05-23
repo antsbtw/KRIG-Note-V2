@@ -163,10 +163,14 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   // scale 始终随 fit-width(host 内部按 viewport 算),退出全屏时 view 重新 open
   // 此书会读到 lastPosition.fitWidth=true,view 自己也走 fit-width 路径
   const lastScaleRef = useRef(1.0);
+  // 最新位置缓存(unmount flush 用 — debounce 未到时退出全屏,直接 flush 最新值)
+  const lastPdfPageRef = useRef<number | null>(null);
+  const lastEpubCfiRef = useRef<string | null>(null);
   const persistPdfProgress = useCallback(
     (page: number) => {
       const bookId = bookIdRef.current;
       if (!bookId) return;
+      lastPdfPageRef.current = page;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         void library.saveProgress(bookId, {
@@ -182,6 +186,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     (cfi: string) => {
       const bookId = bookIdRef.current;
       if (!bookId) return;
+      lastEpubCfiRef.current = cfi;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         void library.saveProgress(bookId, { cfi });
@@ -190,17 +195,35 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     [library],
   );
 
-  // mount: load book + bookmarks
+  // mount: load book + bookmarks;unmount 时 flush 最新位置(避免 debounce 未触发就退出)
   useEffect(() => {
     if (!ctx) {
       console.warn('[ebook-fullscreen] mount without ctx — closing');
       onClose();
       return;
     }
+    console.log('[ebook-fullscreen] panel mount; bookInfo.lastPosition=', ctx.bookInfo.lastPosition);
     void hostRef.current?.loadFromInfo(ctx.bookInfo);
     bookmarks.loadOnBookOpen(ctx.bookInfo.bookId);
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      // 关键:退出全屏前 flush 最新位置 — 用户翻完页立即退出时 debounce 未触发,
+      // 直接同步 saveProgress 让 EBookView 重新 open 后 host 跳到正确位置
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      const bookId = bookIdRef.current;
+      if (bookId) {
+        if (lastEpubCfiRef.current) {
+          void library.saveProgress(bookId, { cfi: lastEpubCfiRef.current });
+        } else if (lastPdfPageRef.current != null) {
+          void library.saveProgress(bookId, {
+            page: lastPdfPageRef.current,
+            scale: lastScaleRef.current,
+            fitWidth: FULLSCREEN_FIT_WIDTH,
+          });
+        }
+      }
       clearEBookFullscreenContext();
     };
     // mount-only effect: ctx 是 useMemo 一次性快照,bookmarks/onClose 在 panel
