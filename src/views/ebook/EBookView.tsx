@@ -92,7 +92,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const [fitWidth, setFitWidth] = useState(true);
   const [epubChapter, setEpubChapter] = useState('');
   const [epubPercentage, setEpubPercentage] = useState(0);
-  const [fontSize, setFontSize] = useState(100);
+  // fontSize 现仅作命令式推到 host(不参与 view 自身 render),由 Aa popup 持 state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // hooks
@@ -141,6 +141,16 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     });
   }, [library, activeBookIdRef, bookmarks, ann, pdfAnn]);
 
+  // EPUB 字号 / 主题:popup wrapper 改 localStorage 后 notify → 这里推给 host
+  // (popup-registry 的 Component 不能接 view 端 props,只能模块级 event bus 通信)
+  useEffect(() => {
+    return rendering.subscribeEpubReadingSettings((s) => {
+      hostRef.current?.setFontSize(s.fontSize);
+      hostRef.current?.setEpubTheme(s.theme);
+      hostRef.current?.setEpubAppearance(s.appearance);
+    });
+  }, [rendering]);
+
   // 启动 + 切书:有 activeBookId → 主动 open
   useEffect(() => {
     if (!activeBookId || activeBookIdRef.current === activeBookId) return;
@@ -160,10 +170,15 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       setTotalPages(info.totalPages);
       setCurrentPage(1);
       if (info.renderMode === 'reflowable') {
-        setFontSize(hostRef.current?.getFontSize() ?? 100);
+        // EPUB 加载完成 — 把 localStorage 偏好推给 host(字号 + 主题),
+        // 确保非全屏 view 内也呈现用户偏好的字号/主题
+        const s = rendering.loadEpubReadingSettings();
+        hostRef.current?.setFontSize(s.fontSize);
+        hostRef.current?.setEpubTheme(s.theme);
+        hostRef.current?.setEpubAppearance(s.appearance);
       }
     },
-    [],
+    [rendering],
   );
 
   const handlePageChangeFromHost = useCallback(
@@ -220,10 +235,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const onPrevChapter = useCallback(() => hostRef.current?.prevChapter(), []);
   const onNextChapter = useCallback(() => hostRef.current?.nextChapter(), []);
-  const onFontSizeChange = useCallback((size: number) => {
-    hostRef.current?.setFontSize(size);
-    setFontSize(size);
-  }, []);
+  // 字号 +/- 不在 toolbar,迁到 Aa popup;变更通过 subscribeEpubReadingSettings 同步推 host
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
 
@@ -381,10 +393,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         extractDisabled={extractUploading}
         epubChapter={epubChapter}
         epubPercentage={epubPercentage}
-        fontSize={fontSize}
         onPrevChapter={onPrevChapter}
         onNextChapter={onNextChapter}
-        onFontSizeChange={onFontSizeChange}
         onFullscreen={onFullscreen}
         onClose={onClose}
       />

@@ -27,7 +27,8 @@ import { registerEBookCommands } from './bookshelf-commands';
 import { registerNavSide, registerFolderTreeContextMenu } from './nav-side-content';
 import { EBookOpenPopup } from './ebook-open-popup/EBookOpenPopup';
 import { EBookViewSwitchPopup } from './ebook-view-switch-popup/EBookViewSwitchPopup';
-import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID } from './popup-ids';
+import { EBookAaPopup } from './ebook-aa-popup/EBookAaPopup';
+import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
 
 const VIEW = 'ebook-view';
 
@@ -58,4 +59,10 @@ popupRegistry.register({
   view: VIEW,
   Component: EBookViewSwitchPopup,
   estimatedSize: { width: 140, height: 200 },
+});
+popupRegistry.register({
+  id: EBOOK_AA_POPUP_ID,
+  view: VIEW,
+  Component: EBookAaPopup,
+  estimatedSize: { width: 280, height: 240 },
 });

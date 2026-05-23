@@ -24,7 +24,7 @@ import type { IReflowableRenderer } from '../types';
 interface ReflowableContentProps {
   renderer: IReflowableRenderer;
   /** 进度变化回调(view 用作持久化触发)*/
-  onProgressChange?: (progress: { chapter: string; percentage: number }) => void;
+  onProgressChange?: (progress: { chapter: string; percentage: number; page: number; pages: number }) => void;
 }
 
 export function ReflowableContent({

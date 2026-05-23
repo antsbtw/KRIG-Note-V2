@@ -18,7 +18,68 @@ import type {
   BookPosition,
   ToolbarConfig,
   TOCItem,
+  EpubTheme,
+  EpubAppearance,
 } from '../types';
+
+interface ThemeColorSet {
+  bg: string;
+  fg: string;
+  link: string;
+  rule: string; // 双页中缝分隔线
+}
+
+/** 主题配色表(对齐 Apple Books Reading Styles)— 6 主题 × 2 变体(light/dark)
+ *  + weight 字重(主题维度,不随明暗变);
+ *  Quiet 特殊:light/dark 都用暗底灰字(设计意图是沉静低对比,不受模式影响) */
+const THEME_DEFINITIONS: Record<
+  EpubTheme,
+  { weight: number; light: ThemeColorSet; dark: ThemeColorSet }
+> = {
+  original: {
+    weight: 400,
+    light: { bg: '#ffffff', fg: '#1a1a1a', link: '#0066cc', rule: 'rgba(0,0,0,0.12)' },
+    dark:  { bg: '#1e1e1e', fg: '#e8e8eb', link: '#6baaff', rule: 'rgba(255,255,255,0.12)' },
+  },
+  quiet: {
+    weight: 300,
+    // Quiet 永远暗底灰字(Books 设计意图,light/dark 两面同配色)
+    light: { bg: '#262626', fg: '#9a9a9d', link: '#6baaff', rule: 'rgba(255,255,255,0.08)' },
+    dark:  { bg: '#1e1e1e', fg: '#9a9a9d', link: '#6baaff', rule: 'rgba(255,255,255,0.08)' },
+  },
+  paper: {
+    weight: 400,
+    light: { bg: '#f5efe0', fg: '#3a3128', link: '#8b5a2b', rule: 'rgba(58,49,40,0.14)' },
+    dark:  { bg: '#2a2620', fg: '#e8dcc4', link: '#d4b074', rule: 'rgba(232,220,196,0.12)' },
+  },
+  bold: {
+    weight: 700,
+    light: { bg: '#ffffff', fg: '#000000', link: '#0044aa', rule: 'rgba(0,0,0,0.18)' },
+    dark:  { bg: '#1e1e1e', fg: '#ffffff', link: '#7bb5ff', rule: 'rgba(255,255,255,0.20)' },
+  },
+  calm: {
+    weight: 400,
+    light: { bg: '#e8dfc8', fg: '#4a3a2a', link: '#8b5a2b', rule: 'rgba(74,58,42,0.14)' },
+    dark:  { bg: '#3a342c', fg: '#e8dcc4', link: '#d4b074', rule: 'rgba(232,220,196,0.14)' },
+  },
+  focus: {
+    weight: 400,
+    light: { bg: '#f0ead5', fg: '#3a3528', link: '#6b5530', rule: 'rgba(58,53,40,0.14)' },
+    dark:  { bg: '#2a2520', fg: '#d4c8a8', link: '#c4a070', rule: 'rgba(212,200,168,0.12)' },
+  },
+};
+
+/** 解析 appearance — auto 走 prefers-color-scheme 实时判断 */
+function resolveAppearance(appearance: EpubAppearance): 'light' | 'dark' {
+  if (appearance === 'light') return 'light';
+  if (appearance === 'dark') return 'dark';
+  // auto:跟随系统(V2 整体 dark 时返回 dark)
+  if (typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+}
 
 export class EPUBRenderer implements IReflowableRenderer {
   readonly fileType = 'epub' as const;
@@ -31,12 +92,19 @@ export class EPUBRenderer implements IReflowableRenderer {
   private fontSize = 100;
   /** 待应用的 max-column-count (1=单页 / 2=双页) — view 未 ready 时存这,initView 后 apply */
   private pendingMaxColumnCount: 1 | 2 = 1;
-  private currentProgress = { chapter: '', percentage: 0 };
+  /** 当前主题(色调)— 6 种 Reading Style 之一;默认 Original */
+  private theme: EpubTheme = 'original';
+  /** 当前明暗模式 — light/dark/auto;默认 auto 跟随系统(V2 整体 dark 时 = dark)*/
+  private appearance: EpubAppearance = 'auto';
+  /** auto 模式 matchMedia listener — 系统外观切换时重新 apply 样式 */
+  private appearanceMql: MediaQueryList | null = null;
+  private appearanceMqlHandler: ((e: MediaQueryListEvent) => void) | null = null;
+  private currentProgress = { chapter: '', percentage: 0, page: 0, pages: 0 };
   private lastCFI: string | null = null;
   private lastLocationToRestore: string | null = null;
   private tocItems: TOCItem[] = [];
   private relocateCallbacks: Array<
-    (progress: { chapter: string; percentage: number }) => void
+    (progress: { chapter: string; percentage: number; page: number; pages: number }) => void
   > = [];
   private readyResolve: (() => void) | null = null;
   private readyPromise: Promise<void> = new Promise((r) => {
@@ -97,17 +165,24 @@ export class EPUBRenderer implements IReflowableRenderer {
       // 应用字号 + 暗色样式(合并注入 — setStyles 是覆盖式,不能分两次调否则后调的会清掉前面的)
       this.applyContentStyles();
 
-      // 监听位置变化 — chapter title + 进度比例 + 最新 CFI
+      // 监听位置变化 — chapter title + 进度比例 + 真实页码(foliate-paginator)
+      // + 最新 CFI + 底部 footer 页码(Books 风)
       this.view.addEventListener('relocate', (e: any) => {
         const detail = e.detail;
+        const paginator = this.view?.renderer;
+        const page = (paginator?.page as number | undefined) ?? 0;
+        const pages = (paginator?.pages as number | undefined) ?? 0;
         if (detail) {
           this.currentProgress = {
             chapter: detail.tocItem?.label ?? '',
             percentage: detail.fraction ?? 0,
+            page,
+            pages,
           };
           if (detail.cfi) this.lastCFI = detail.cfi;
           this.relocateCallbacks.forEach((cb) => cb(this.currentProgress));
         }
+        this.updateFooterPageNumbers();
       });
 
       // ── C4:文本选择 + 已有标注点击 + 高亮自定义颜色 ──
@@ -176,6 +251,7 @@ export class EPUBRenderer implements IReflowableRenderer {
         // ignore
       }
     }
+    this.detachAppearanceListener();
     this.view = null;
     this.container = null;
     this.fileData = null;
@@ -221,34 +297,102 @@ export class EPUBRenderer implements IReflowableRenderer {
     this.applyContentStyles();
   }
 
+  setTheme(theme: EpubTheme): void {
+    this.theme = theme;
+    // view 未 ready 时 applyContentStyles 内 setStyles 为 noop;initView 完成后会自动 apply
+    this.applyContentStyles();
+  }
+
+  setAppearance(appearance: EpubAppearance): void {
+    this.appearance = appearance;
+    // 重挂 matchMedia listener:auto 模式才需要监听,light/dark 不需要
+    this.detachAppearanceListener();
+    if (appearance === 'auto' && typeof window !== 'undefined' && window.matchMedia) {
+      this.appearanceMql = window.matchMedia('(prefers-color-scheme: dark)');
+      this.appearanceMqlHandler = (): void => this.applyContentStyles();
+      this.appearanceMql.addEventListener('change', this.appearanceMqlHandler);
+    }
+    this.applyContentStyles();
+  }
+
+  private detachAppearanceListener(): void {
+    if (this.appearanceMql && this.appearanceMqlHandler) {
+      this.appearanceMql.removeEventListener('change', this.appearanceMqlHandler);
+    }
+    this.appearanceMql = null;
+    this.appearanceMqlHandler = null;
+  }
+
   /**
-   * 注入 EPUB iframe 文档样式 — 字号(语义化,让 foliate-js 按字号重新分页)
-   * + 暗色模式(可选)。setStyles 是覆盖式,字号变化时必须连暗色一起重注。
+   * 填充 foliate-paginator 的 footer 页码(Books 风:每页底部居中显示页码)。
    *
-   * 字号语义:html { font-size: X% } 让文档基准字号缩放,但**不**像 zoom 那样
-   * 整页拉伸 — foliate-js 会按新字号重新计算分页,一行字数自然增减。
+   * foliate-paginator 提供 page/pages getter(当前页 / 总页数),feet 数组是每列
+   * 一个 div(双页时 length=2,单页时 length=1)。我们直接往 div 写 textContent。
+   *
+   * 注:pages 在 EPUB 内是"虚拟页"(按 column 宽度切分文本),不是物理印刷页;
+   * 跟随字号 / 双页切换会变。
+   */
+  private updateFooterPageNumbers(): void {
+    const paginator = this.view?.renderer;
+    if (!paginator?.feet || !Array.isArray(paginator.feet)) return;
+    const currentPage = paginator.page as number | undefined;
+    const totalPages = paginator.pages as number | undefined;
+    if (!currentPage || !totalPages) return;
+    const feet = paginator.feet as HTMLElement[];
+    feet.forEach((foot, idx) => {
+      const pageNum = currentPage + idx;
+      if (pageNum > 0 && pageNum <= totalPages) {
+        foot.textContent = String(pageNum);
+      } else {
+        foot.textContent = '';
+      }
+    });
+  }
+
+  /**
+   * 注入 EPUB iframe 文档样式 — 字号 + 主题色调一起注入。
+   * setStyles 是覆盖式,字号 / 主题任一变化都要重新整体注入。
+   *
+   * 字号语义:html { font-size: X% } 让 foliate-js 按字号重新分页(不是 zoom 拉伸)。
+   * 主题:背景 + 文字 + 链接配色,白底/米黄/暗色三档,见 THEME_COLORS。
    */
   private applyContentStyles(): void {
     if (!this.view?.renderer?.setStyles) return;
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const def = THEME_DEFINITIONS[this.theme];
+    const mode = resolveAppearance(this.appearance);
+    const c = { ...def[mode], weight: def.weight };
+    // 1) 注入到 iframe 文档内 — 文字 / 背景 / 链接 + 双页中缝细线
+    // 注:column-rule 设在 html 元素(foliate-paginator 把 column-* 都挂这里),
+    // 实际只在 column-count > 1 时显示;rule 颜色低透明度跟主题文字色融合
     const css = `
       html {
         font-size: ${this.fontSize}% !important;
-        ${dark ? 'background: #1e1e1e !important; color: #e0e0e0 !important;' : ''}
+        background: ${c.bg} !important;
+        color: ${c.fg} !important;
+        column-rule: 1px solid ${c.rule} !important;
       }
-      ${dark ? `
-        body { background: #1e1e1e !important; color: #e0e0e0 !important; }
-        a { color: #6baaff !important; }
-      ` : ''}
+      body {
+        background: ${c.bg} !important;
+        color: ${c.fg} !important;
+      }
+      /* 主题字重(Bold=700 / Quiet=300 / 其他=400)— 强制覆盖 EPUB 内容默认 */
+      body, body p, body div, body span, body li {
+        font-weight: ${c.weight} !important;
+      }
+      a { color: ${c.link} !important; }
     `;
     this.view.renderer.setStyles(css);
+    // 2) foliate-view 自身容器背景(spread 边缘的 padding 区也要染色,否则违和)
+    if (this.view) {
+      this.view.style.background = c.bg;
+    }
   }
 
   getFontSize(): number {
     return this.fontSize;
   }
 
-  getProgress(): { chapter: string; percentage: number } {
+  getProgress(): { chapter: string; percentage: number; page: number; pages: number } {
     return this.currentProgress;
   }
 
@@ -313,7 +457,7 @@ export class EPUBRenderer implements IReflowableRenderer {
   }
 
   onRelocate(
-    callback: (progress: { chapter: string; percentage: number }) => void,
+    callback: (progress: { chapter: string; percentage: number; page: number; pages: number }) => void,
   ): void {
     this.relocateCallbacks.push(callback);
   }

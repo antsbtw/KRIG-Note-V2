@@ -125,6 +125,24 @@ export interface IFixedPageRenderer extends IBookRenderer {
 }
 
 /** 可重排渲染引擎(EPUB,C3 起实现;C4 加标注 API)*/
+/** EPUB 阅读色调主题(对齐 Apple Books Reading Styles)— 风格维度
+ *  6 个固定风格,每个有 light/dark 两套变体(由 EpubAppearance 决定)
+ *  - original: 高对比中性,默认
+ *  - quiet:    低对比沉静(注:Quiet 在 light/dark 下都用暗底灰字,不随模式变)
+ *  - paper:    类纸张暖色
+ *  - bold:     加粗字重
+ *  - calm:     暖灰柔和
+ *  - focus:    棕调专注
+ */
+export type EpubTheme = 'original' | 'quiet' | 'paper' | 'bold' | 'calm' | 'focus';
+
+/** EPUB 明暗模式 — 与 EpubTheme 正交的第二维
+ *  - light: 强制亮色变体(各主题白/米白底深字)
+ *  - dark:  强制暗色变体(各主题暗底亮字)
+ *  - auto:  跟随系统 prefers-color-scheme(V2 整体 dark 时 auto = dark)
+ */
+export type EpubAppearance = 'light' | 'dark' | 'auto';
+
 export interface IReflowableRenderer extends IBookRenderer {
   readonly renderMode: 'reflowable';
 
@@ -133,18 +151,22 @@ export interface IReflowableRenderer extends IBookRenderer {
   setFontSize(size: number): void;
   getFontSize(): number;
 
-  getProgress(): { chapter: string; percentage: number };
+  getProgress(): { chapter: string; percentage: number; page: number; pages: number };
   nextChapter(): void;
   prevChapter(): void;
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void;
   /** 设置最大列数(1=单页 / 2=双页);foliate-js 会按容器宽度自适应 */
   setMaxColumnCount(count: 1 | 2): void;
+  /** 设置阅读色调主题 — 改背景+文字色,通过 foliate-js setStyles 注入到 iframe 文档 */
+  setTheme(theme: EpubTheme): void;
+  /** 设置明暗模式 — light/dark/auto;auto 跟随 prefers-color-scheme 动态切换 */
+  setAppearance(appearance: EpubAppearance): void;
   onResize(): void;
 
   getLastCFI(): string | null;
   setRestoreLocation(cfi: string): void;
-  onRelocate(callback: (progress: { chapter: string; percentage: number }) => void): void;
+  onRelocate(callback: (progress: { chapter: string; percentage: number; page: number; pages: number }) => void): void;
 
   searchText(query: string): Promise<Array<{ pageNum: number; index: number; text: string }>>;
   clearSearch(): void;
@@ -248,6 +270,22 @@ export interface EBookRenderingApi {
    * payload 内 bookInfo 直接喂给 panel 内独立 Host;view 端通常用最新 page/cfi
    * 覆盖 lastPosition,避免 panel 加载到 stale 位置。
    */
+  /** EPUB 阅读偏好(字号 + 主题 + 明暗模式)— popup wrapper + EBookView 同步使用 */
+  EpubAaPopup: ComponentType<{
+    fontSize: number;
+    theme: EpubTheme;
+    appearance: EpubAppearance;
+    onFontSizeChange: (size: number) => void;
+    onThemeChange: (theme: EpubTheme) => void;
+    onAppearanceChange: (appearance: EpubAppearance) => void;
+  }>;
+  loadEpubReadingSettings(): { fontSize: number; theme: EpubTheme; appearance: EpubAppearance };
+  saveEpubFontSize(size: number): void;
+  saveEpubTheme(theme: EpubTheme): void;
+  saveEpubAppearance(appearance: EpubAppearance): void;
+  subscribeEpubReadingSettings(
+    listener: (s: { fontSize: number; theme: EpubTheme; appearance: EpubAppearance }) => void,
+  ): () => void;
   openFullscreenReader(payload: {
     workspaceId: string;
     bookInfo: import('@shared/ipc/ebook-types').EBookLoadedInfo;
