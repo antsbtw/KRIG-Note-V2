@@ -654,10 +654,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           renderer={renderer}
           onProgressChange={onEpubProgressChange}
           onPageChangeStart={onPagedPageChangeStart}
-          onRendererSwap={(newRenderer) => {
-            rendererRef.current = newRenderer;
-            setRenderer(newRenderer);
-          }}
           onRegisterGotoCFI={(fn) => {
             gotoCfiRef.current = fn;
           }}
@@ -729,17 +725,15 @@ function PagedHostBranch({
 }
 
 /**
- * EPUB paged 分支 — 把 PaginatedReflowableContentHandle 中转到 Host,
- * 并提供 createRenderer 工厂(panel 内创建临时第二实例时用)。
+ * EPUB paged 分支 — 单 view + capturePage ghost slide 动画
  *
- * renderer prop 变化(Host loadFromInfo 重新加载时)→ 组件 key 重 mount,
- * 避免内部 currentRendererRef 残留旧实例引用。
+ * 把 PaginatedReflowableContentHandle 中转到 Host,Host 的 imperative
+ * prev/nextChapter / goToCFI / goToSearchResult 走 handle 进 slide 动画路径。
  */
 function PaginatedReflowableHostBranch({
   renderer,
   onProgressChange,
   onPageChangeStart,
-  onRendererSwap,
   onRegisterGotoCFI,
   onRegisterHandle,
 }: {
@@ -751,20 +745,10 @@ function PaginatedReflowableHostBranch({
     pages: number;
   }) => void;
   onPageChangeStart?: (page: number) => void;
-  onRendererSwap: (newRenderer: IReflowableRenderer) => void;
   onRegisterGotoCFI: (fn: (cfi: string) => void) => void;
   onRegisterHandle: (h: PaginatedReflowableContentHandle | null) => void;
 }) {
   const handleRef = useRef<PaginatedReflowableContentHandle | null>(null);
-  // 工厂:新 EPUBRenderer 实例(同一构造函数;buffer 在 PaginatedReflowableContent
-  // 内部用 currentRendererRef.current.getFileData() 取)
-  // 注:不在此 import EPUBRenderer — 走类型守卫拿 prototype.constructor 反射,
-  // 保持 PaginatedReflowableContent 对 EPUBRenderer 解耦
-  const createRenderer = useCallback((): IReflowableRenderer => {
-    const ctor = (renderer as any).constructor as new () => IReflowableRenderer;
-    return new ctor();
-  }, [renderer]);
-  // 注册 gotoCFI 走 handleRef(handle 由 ref callback 在 mount 时挂上)
   useEffect(() => {
     onRegisterGotoCFI((cfi) => handleRef.current?.goToCFI(cfi));
   }, [onRegisterGotoCFI]);
@@ -784,8 +768,6 @@ function PaginatedReflowableHostBranch({
       renderer={renderer}
       onProgressChange={onProgressChange}
       onPageChangeStart={handleStart}
-      onRendererSwap={onRendererSwap}
-      createRenderer={createRenderer}
     />
   );
 }

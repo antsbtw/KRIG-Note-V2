@@ -441,12 +441,12 @@ export class EPUBRenderer implements IReflowableRenderer {
     return this.currentProgress;
   }
 
-  nextChapter(): void {
-    this.view?.next?.();
+  async nextChapter(): Promise<void> {
+    await this.view?.next?.();
   }
 
-  prevChapter(): void {
-    this.view?.prev?.();
+  async prevChapter(): Promise<void> {
+    await this.view?.prev?.();
   }
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void {

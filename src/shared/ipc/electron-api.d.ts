@@ -231,6 +231,8 @@ declare global {
       ebookThoughtBlockAdd(bookId: string, spec: unknown): Promise<void>;
       ebookThoughtBlockRemove(bookId: string, blockId: string): Promise<void>;
       ebookThoughtAnnotations(bookId: string): Promise<unknown>;
+      /** EPUB paged 翻页动画 — 截发起窗口指定 rect 为 PNG dataURL(slide ghost 用)*/
+      ebookCaptureRegion(rect: { x: number; y: number; width: number; height: number }): Promise<string | null>;
 
       // ── L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)──
       /** 上传当前打开的 PDF → 返 { uploaded, md5?, platformUrl?, alreadyExists?, reason? } */

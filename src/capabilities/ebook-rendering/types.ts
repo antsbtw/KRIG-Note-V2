@@ -152,8 +152,10 @@ export interface IReflowableRenderer extends IBookRenderer {
   getFontSize(): number;
 
   getProgress(): { chapter: string; percentage: number; page: number; pages: number };
-  nextChapter(): void;
-  prevChapter(): void;
+  /** 翻到下一页(EPUB view.next 是 async,resolve 时翻页完成) */
+  nextChapter(): Promise<void>;
+  /** 翻到上一页(同 nextChapter,async) */
+  prevChapter(): Promise<void>;
   /** 按页号跳转 — EPUB 内部按 fraction 近似定位(page 数随字号变,不是稳定语义)*/
   goToPage(page: number): Promise<void>;
 
