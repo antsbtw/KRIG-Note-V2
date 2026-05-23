@@ -212,11 +212,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     (cfi: string) => {
       const bookId = bookIdRef.current;
       if (!bookId) return;
-      lastEpubCfiRef.current = cfi;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        void library.saveProgress(bookId, { cfi });
-      }, SAVE_PROGRESS_DEBOUNCE_MS);
+      // 翻页时立即把 range cfi 折成右页 cfi 写入 — 不走 panel debounce,
+      // 防止用户翻完立即退出全屏时 view reopen 时 main 文件还是上一次的 cfi
+      const collapsed = collapseRangeCfiToEnd(cfi);
+      lastEpubCfiRef.current = collapsed;
+      void library.saveProgress(bookId, { cfi: collapsed });
     },
     [library],
   );
@@ -232,33 +232,23 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     void hostRef.current?.loadFromInfo(ctx.bookInfo);
     bookmarks.loadOnBookOpen(ctx.bookInfo.bookId);
     return () => {
-      // 关键:退出全屏前 flush 最新位置 — 用户翻完页立即退出时 debounce 未触发,
-      // 直接同步 saveProgress 让 EBookView 重新 open 后 host 跳到正确位置
+      // EPUB 已在 persistEpubProgress 每次翻页立即 save(无 debounce),lastEpubCfiRef
+      // 是最新右页 cfi;PDF 仍走 debounce,unmount 时兜底 flush 最新位置
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
       const bookId = bookIdRef.current;
-      if (bookId) {
-        if (lastEpubCfiRef.current) {
-          const collapsed = collapseRangeCfiToEnd(lastEpubCfiRef.current);
-          // 关键诊断 log:panel 退出时全屏 panel 显示页号 + range cfi + collapsed cfi
-          // EBookView reopen 后显示的页号(看下一条 [ebook-view] onBookOpened 后
-          // 紧跟的 progress.page)与此处 epubPage / epubPage+1 对比看是否对齐
-          console.log(
-            '[ebook-fullscreen] panel unmount;\n  panel.epubPage=', epubPage,
-            '\n  raw=', lastEpubCfiRef.current,
-            '\n  collapsed=', collapsed,
-          );
-          void library.saveProgress(bookId, { cfi: collapsed });
-        } else if (lastPdfPageRef.current != null) {
-          void library.saveProgress(bookId, {
-            page: lastPdfPageRef.current,
-            scale: lastScaleRef.current,
-            fitWidth: FULLSCREEN_FIT_WIDTH,
-          });
-        }
+      if (bookId && lastPdfPageRef.current != null && !lastEpubCfiRef.current) {
+        void library.saveProgress(bookId, {
+          page: lastPdfPageRef.current,
+          scale: lastScaleRef.current,
+          fitWidth: FULLSCREEN_FIT_WIDTH,
+        });
       }
+      console.log(
+        '[ebook-fullscreen] panel unmount; lastEpubCfi=', lastEpubCfiRef.current?.slice(0, 80),
+      );
       clearEBookFullscreenContext();
     };
     // mount-only effect: ctx 是 useMemo 一次性快照,bookmarks/onClose 在 panel

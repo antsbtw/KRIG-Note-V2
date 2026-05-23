@@ -194,7 +194,15 @@ export async function getBook(id: string): Promise<EBookInfo | null> {
   const atom = (await storage.getAtom<'ebook'>(id)) as AtomEntity<'ebook'> | null;
   if (!atom) return null;
   if (atom.payload.domain !== EBOOK_DOMAIN) return null;
-  return atomToEBookInfo(atom);
+  const info = atomToEBookInfo(atom);
+  // 优先返 saveProgress pending 内存值 — 避免 100ms debounce 未触发时 getBook
+  // 读到 storage 旧 lastPosition(用户全屏翻页后立即退出 → reopen 时序与
+  // saveProgress debounce 竞态,导致 view 跳到上一次保存位置)
+  const pending = saveProgressPending.get(id);
+  if (pending) {
+    return { ...info, lastPosition: pending };
+  }
+  return info;
 }
 
 /** managed 模式: copy 文件到 library/ + 创建 ebook+reading-state atom 对 */
