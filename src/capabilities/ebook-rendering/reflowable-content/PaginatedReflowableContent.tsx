@@ -231,8 +231,9 @@ export const PaginatedReflowableContent = forwardRef<
     [renderer, captureWrapperGhost, onPageChangeStart],
   );
 
-  // 双页布局下 foliate-paginator view.next/prev 每次只翻一列(半个 spread),
-  // 我们要翻一个完整 spread,所以双页时调两次(spread mode = maxColumnCount==2)
+  // foliate-paginator 的 view.next/prev 每次只跳一列(单 page,paginator.page+1);
+  // 但 paginator.feet[0]/[1] 分别显示 page X / X+1(spread),所以 +1 只前进半个
+  // spread → 用户感觉"只翻一页"。spread mode 下要翻完整一个 spread 需 step=2。
   const stepPagesForSpread = useCallback((r: IReflowableRenderer): number => {
     return r.getMaxColumnCount() === 2 ? 2 : 1;
   }, []);

@@ -88,6 +88,32 @@ function BookmarkIcon({ active }: { active: boolean }) {
   );
 }
 
+/**
+ * 把 range CFI 折成单 anchor CFI(取 range end)。
+ *
+ * EPUB CFI 格式说明:
+ * - 单 anchor:`epubcfi(/6/8!/4/38/1:99)` — 一段 path
+ * - range:    `epubcfi(/6/8!/4,/30,/38/1:99)` — 用 `,` 分三段:base, start, end
+ *
+ * 全屏 spread 模式下,paginator relocate 给的是 range CFI(覆盖整个 spread 可见内容)。
+ * EBookView 单页模式 reopen 用 view.goTo(rangeCFI) 会跳到 range start(左页起点);
+ * 用户期望"打开后回到刚才阅读到的位置(右页)",所以 save 前折成 range end anchor。
+ *
+ * 不 import foliate-js epubcfi 模块(panel 不该直 import npm)— 字符串拆解足够:
+ * 去掉 epubcfi(...) 外壳,split 一级 comma(注意 base 内含 `!` 不含 `,`),
+ * 拼 base + end,包回 epubcfi(...).
+ */
+function collapseRangeCfiToEnd(cfi: string): string {
+  const m = /^epubcfi\((.*)\)$/.exec(cfi);
+  if (!m) return cfi;
+  const inner = m[1];
+  // range cfi 在外层有两个 `,`(base,start,end)。如果不是 range,直接原样返回
+  const parts = inner.split(',');
+  if (parts.length !== 3) return cfi;
+  const [base, , end] = parts;
+  return `epubcfi(${base}${end})`;
+}
+
 export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const ctx = useMemo(() => getEBookFullscreenContext(), []);
   const library = useMemo(
@@ -215,7 +241,13 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
       const bookId = bookIdRef.current;
       if (bookId) {
         if (lastEpubCfiRef.current) {
-          void library.saveProgress(bookId, { cfi: lastEpubCfiRef.current });
+          // EPUB 全屏 spread 模式 → EBookView 单页模式同步右页位置:
+          // panel relocate 给的 cfi 是 range cfi(`base,start,end`),
+          // 直接 save 会让 view 单页跳到 range start(左页);用 collapse(cfi, true)
+          // 折成单 anchor 取 range end → 跳到右页(spread 后页 = 用户阅读到的位置)
+          const collapsed = collapseRangeCfiToEnd(lastEpubCfiRef.current);
+          console.log('[ebook-fullscreen] panel unmount; raw=', lastEpubCfiRef.current.slice(0, 60), 'collapsed=', collapsed.slice(0, 60));
+          void library.saveProgress(bookId, { cfi: collapsed });
         } else if (lastPdfPageRef.current != null) {
           void library.saveProgress(bookId, {
             page: lastPdfPageRef.current,
