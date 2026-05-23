@@ -208,15 +208,26 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     },
     [library],
   );
+  // 最新右页全书 page + total — 用于 panel 翻页 / unmount 时 save right page
+  // (cfi 字段保留兼容旧 view,新 epubPage 字段优先用)
+  const lastEpubPageRef = useRef<number>(0);
+  const lastEpubPagesRef = useRef<number>(0);
   const persistEpubProgress = useCallback(
-    (cfi: string) => {
+    (cfi: string, leftPage: number, totalPages: number) => {
       const bookId = bookIdRef.current;
       if (!bookId) return;
-      // 翻页时立即把 range cfi 折成右页 cfi 写入 — 不走 panel debounce,
-      // 防止用户翻完立即退出全屏时 view reopen 时 main 文件还是上一次的 cfi
+      // panel.progress.page 是 spread 左页全书 page(loc.current+1);双页模式下
+      // 用户阅读位置 = 右页 = 左页+1。立即 save 右页 page + 折叠 cfi 作兜底
+      const rightPage = leftPage + 1;
       const collapsed = collapseRangeCfiToEnd(cfi);
       lastEpubCfiRef.current = collapsed;
-      void library.saveProgress(bookId, { cfi: collapsed });
+      lastEpubPageRef.current = rightPage;
+      lastEpubPagesRef.current = totalPages;
+      void library.saveProgress(bookId, {
+        cfi: collapsed,
+        epubPage: rightPage,
+        epubPages: totalPages,
+      });
     },
     [library],
   );
@@ -298,7 +309,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
       setEpubPercentage(progress.percentage);
       setEpubPage(progress.page);
       setEpubPages(progress.pages);
-      if (cfi) persistEpubProgress(cfi);
+      if (cfi) persistEpubProgress(cfi, progress.page, progress.pages);
     },
     [persistEpubProgress],
   );

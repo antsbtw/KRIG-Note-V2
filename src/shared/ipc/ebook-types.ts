@@ -24,6 +24,12 @@ export interface ReadingPosition {
   scale?: number;
   fitWidth?: boolean;
   cfi?: string;
+  /** EPUB 全书页号(0-based location.current),全屏 spread 退出时 save 右页全书页号,
+   *  view 单页 reopen 时优先按此 page 走 goToFraction 精确跳转,绕开 cfi → page round
+   *  误差(spread 边界附近的 cfi 可能 round 到隔壁 page) */
+  epubPage?: number;
+  /** EPUB 总页数(与 epubPage 配套,view 端 goToFraction 用 (page-1)/(total-1)) */
+  epubPages?: number;
 }
 
 // ── 业务视图类型 (atom + 派生字段聚合) ──

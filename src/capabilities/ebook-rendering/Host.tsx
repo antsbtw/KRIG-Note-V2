@@ -311,8 +311,29 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
             renderMode: 'fixed-page',
           });
         } else if (isReflowable(r)) {
-          // EPUB 恢复上次 CFI(必须在 renderTo 之前 — V1 EBookView.tsx 同款)
-          if (pos?.cfi) r.setRestoreLocation(pos.cfi);
+          // EPUB 恢复位置优先级:
+          //  1) epubPage + epubPages(全屏 spread 退出 save 的右页全书 page):
+          //     view ready 后调 goToFraction((page-1)/(pages-1)) 精确跳到右页,
+          //     绕开 cfi → page 在 spread 边界 round 误差
+          //  2) cfi:走 setRestoreLocation 让 view.init 直接定位(单页路径常规走法)
+          if (pos?.epubPage && pos?.epubPages && pos.epubPage > 0 && pos.epubPages > 1) {
+            // 用 epubPage 全书页号精确跳转:setRestoreLocation 也设到 cfi(若有)避免
+            // view.init 走 textStart 闪到书首页,然后异步 goToFraction 二次精确定位
+            const fraction = (pos.epubPage - 1) / (pos.epubPages - 1);
+            console.log('[ebook-rendering/Host] EPUB restore via epubPage', pos.epubPage, '/', pos.epubPages, 'fraction=', fraction.toFixed(4));
+            if (pos.cfi) r.setRestoreLocation(pos.cfi);
+            void (async () => {
+              try {
+                await r.waitReady();
+                const view = r.getView();
+                if (view?.goToFraction) await view.goToFraction(fraction);
+              } catch (err) {
+                console.warn('[ebook-rendering/Host] goToFraction restore failed:', err);
+              }
+            })();
+          } else if (pos?.cfi) {
+            r.setRestoreLocation(pos.cfi);
+          }
 
           // C4:转推 EPUB 选区 / 选区取消 / 标注点击事件给 view
           if (onEpubTextSelected) r.onTextSelected(onEpubTextSelected);
