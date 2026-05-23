@@ -191,6 +191,18 @@
   text-align: center;
 }
 
+/* EPUB Aa 按钮 — 小 A 大 A 并排(同全屏 panel 同款,view 路径) */
+.krig-ebook-toolbar__aa-small {
+  font-size: 11px;
+  vertical-align: baseline;
+}
+.krig-ebook-toolbar__aa-large {
+  font-size: 16px;
+  font-weight: 500;
+  margin-left: 1px;
+  vertical-align: baseline;
+}
+
 .krig-ebook-toolbar__page-input {
   width: 44px;
   height: 24px;

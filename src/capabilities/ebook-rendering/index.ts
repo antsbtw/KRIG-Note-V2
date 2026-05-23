@@ -30,6 +30,14 @@ import { useSearch } from './hooks/use-search';
 import { useBookmarks } from './hooks/use-bookmarks';
 import { useEpubAnnotation } from './hooks/use-epub-annotation';
 import { EBookFullscreenPanel } from './fullscreen/EBookFullscreenPanel';
+import { EpubAaPopup } from './fullscreen/EpubAaPopup';
+import {
+  loadEpubReadingSettings,
+  saveEpubFontSize,
+  saveEpubTheme,
+  saveEpubAppearance,
+  subscribeEpubReadingSettings,
+} from './fullscreen/epub-reading-settings';
 import {
   EBOOK_FULLSCREEN_OVERLAY_ID,
   setEBookFullscreenContext,
@@ -106,6 +114,12 @@ capabilityRegistry.register({
     isReflowable,
     detectFileType,
     getRenderMode,
+    EpubAaPopup,
+    loadEpubReadingSettings,
+    saveEpubFontSize,
+    saveEpubTheme,
+    saveEpubAppearance,
+    subscribeEpubReadingSettings,
     openFullscreenReader,
   } satisfies EBookRenderingApi,
 });

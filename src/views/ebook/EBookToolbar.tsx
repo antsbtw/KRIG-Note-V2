@@ -16,7 +16,26 @@
 
 import { useState, useCallback, type KeyboardEvent, type ChangeEvent, type MouseEvent } from 'react';
 import { popupController } from '@slot/triggers/popup-controller';
-import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID } from './popup-ids';
+import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
+
+/** 书签丝带图标(对齐 Apple Books / Kindle 设计)— active=填充,inactive=描边
+ *  与 EBookFullscreenPanel 内同款,view/panel 各自重复一份避免接口膨胀 */
+function BookmarkIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="16"
+      viewBox="0 0 14 16"
+      fill={active ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 1.5h10v13L7 11l-5 3.5V1.5z" />
+    </svg>
+  );
+}
 
 export type EBookToolbarRenderMode = 'fixed-page' | 'reflowable' | null;
 
@@ -47,12 +66,15 @@ interface EBookToolbarProps {
   /** 提取按钮 disabled(上传中)*/
   extractDisabled?: boolean;
   // reflowable 专用
-  epubChapter?: string;
+  /** EPUB 章节进度比例(0-1)— 仅在 epubPages 未就绪时降级显示 */
   epubPercentage?: number;
-  fontSize?: number;
+  /** EPUB 全书页码(从 foliate location.current,1-based)— 与 PDF currentPage 对齐 */
+  epubPage?: number;
+  /** EPUB 全书总页数(location.total)— 与 PDF pageCount 对齐 */
+  epubPages?: number;
   onPrevChapter?: () => void;
   onNextChapter?: () => void;
-  onFontSizeChange?: (delta: number) => void;
+  // 注:fontSize / 字号变化已迁到 Aa popup,toolbar 不再接收
   /** 进入全屏沉浸阅读(L2 overlay)*/
   onFullscreen: () => void;
   /** 关闭当前 ebook view(× 按钮)*/
@@ -68,9 +90,7 @@ const ZOOM_PRESETS = [
   { label: '200%', value: 2.0 },
 ];
 
-const FONT_STEP = 10;
-const FONT_MIN = 60;
-const FONT_MAX = 200;
+// 字号 +/- 已迁到 Aa popup 内部;以下常量留作 props 类型守门(view 仍传 fontSize)
 
 export function EBookToolbar({
   fileName,
@@ -90,40 +110,44 @@ export function EBookToolbar({
   onPdfAnnotationModeChange,
   onExtract,
   extractDisabled = false,
-  epubChapter,
   epubPercentage,
-  fontSize = 100,
+  epubPage = 0,
+  epubPages = 0,
   onPrevChapter,
   onNextChapter,
-  onFontSizeChange,
   onFullscreen,
   onClose,
 }: EBookToolbarProps) {
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
 
-  // ── fixed-page 导航 ──
+  // ── 页码导航(PDF/EPUB 通用)──
+  // EPUB 路径用 epubPage/epubPages,onPageChange 上层(EBookView)调 host.goToPage
+  // 自动按 renderMode 分发到正确 renderer
+  const isReflow = renderMode === 'reflowable';
+  const inputCurrentPage = isReflow ? epubPage : currentPage;
+  const inputTotalPages = isReflow ? epubPages : pageCount;
 
   const handlePrevPage = useCallback(() => {
-    if (currentPage > 1) onPageChange(currentPage - 1);
-  }, [currentPage, onPageChange]);
+    if (inputCurrentPage > 1) onPageChange(inputCurrentPage - 1);
+  }, [inputCurrentPage, onPageChange]);
 
   const handleNextPage = useCallback(() => {
-    if (currentPage < pageCount) onPageChange(currentPage + 1);
-  }, [currentPage, pageCount, onPageChange]);
+    if (inputCurrentPage < inputTotalPages) onPageChange(inputCurrentPage + 1);
+  }, [inputCurrentPage, inputTotalPages, onPageChange]);
 
   const handlePageInputFocus = useCallback(() => {
-    setPageInput(String(currentPage));
+    setPageInput(String(inputCurrentPage));
     setEditingPage(true);
-  }, [currentPage]);
+  }, [inputCurrentPage]);
 
   const handlePageInputBlur = useCallback(() => {
     setEditingPage(false);
     const page = parseInt(pageInput, 10);
-    if (!isNaN(page) && page >= 1 && page <= pageCount) {
+    if (!isNaN(page) && page >= 1 && page <= inputTotalPages) {
       onPageChange(page);
     }
-  }, [pageInput, pageCount, onPageChange]);
+  }, [pageInput, inputTotalPages, onPageChange]);
 
   const handlePageInputKey = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -155,19 +179,7 @@ export function EBookToolbar({
     onScaleChange(Math.round(next * 100) / 100);
   }, [scale, onScaleChange]);
 
-  // ── 字号 ──
-
-  const handleFontMinus = useCallback(() => {
-    if (!onFontSizeChange) return;
-    const next = Math.max(FONT_MIN, fontSize - FONT_STEP);
-    onFontSizeChange(next);
-  }, [fontSize, onFontSizeChange]);
-
-  const handleFontPlus = useCallback(() => {
-    if (!onFontSizeChange) return;
-    const next = Math.min(FONT_MAX, fontSize + FONT_STEP);
-    onFontSizeChange(next);
-  }, [fontSize, onFontSizeChange]);
+  // 字号 +/- 已迁到 Aa popup 内部,toolbar 不再直接操纵
 
   // ── 通用尾部 handlers(Open / ⊞ 走 popup-registry;🔄 仍占位)──
 
@@ -177,6 +189,10 @@ export function EBookToolbar({
 
   const handleViewSwitchClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
     popupController.toggle(EBOOK_VIEW_SWITCH_POPUP_ID, e.currentTarget);
+  }, []);
+
+  const handleAaClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
+    popupController.toggle(EBOOK_AA_POPUP_ID, e.currentTarget);
   }, []);
 
   const handleReloadPlaceholder = useCallback(() => {
@@ -248,10 +264,25 @@ export function EBookToolbar({
           >
             ‹
           </button>
-          <span className="krig-ebook-toolbar__epub-progress">
-            {epubChapter ? `${epubChapter} · ` : ''}
-            {Math.round((epubPercentage ?? 0) * 100)}%
-          </span>
+          {epubPages > 0 ? (
+            <>
+              <input
+                className="krig-ebook-toolbar__page-input"
+                value={editingPage ? pageInput : String(epubPage)}
+                onChange={(e) => setPageInput(e.target.value)}
+                onFocus={handlePageInputFocus}
+                onBlur={handlePageInputBlur}
+                onKeyDown={handlePageInputKey}
+                title="点击输入页号跳转"
+              />
+              <span className="krig-ebook-toolbar__page-info">of {epubPages}</span>
+            </>
+          ) : (
+            // EPUB 还没分页就绪时降级显示百分比(很短暂,relocate 后立即变页码)
+            <span className="krig-ebook-toolbar__epub-progress">
+              {Math.round((epubPercentage ?? 0) * 100)}%
+            </span>
+          )}
           <button
             className="krig-ebook-toolbar__btn"
             onClick={onNextChapter}
@@ -292,7 +323,7 @@ export function EBookToolbar({
               onClick={onBookmarkToggle}
               title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
             >
-              {isBookmarked ? '★' : '☆'}
+              <BookmarkIcon active={isBookmarked} />
             </button>
             {onExtract && (
               <button
@@ -336,32 +367,25 @@ export function EBookToolbar({
           </>
         )}
 
-        {/* — EPUB 专属:书签 + 字号 — */}
+        {/* — EPUB 专属:Aa popup(字号 + 主题)+ 书签 — */}
         {showReflowNav && (
           <>
+            <button
+              className="krig-ebook-toolbar__btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleAaClick}
+              title="字号 / 主题"
+              aria-label="字号 / 主题"
+            >
+              <span className="krig-ebook-toolbar__aa-small">A</span>
+              <span className="krig-ebook-toolbar__aa-large">A</span>
+            </button>
             <button
               className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}
               onClick={onBookmarkToggle}
               title={isBookmarked ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
             >
-              {isBookmarked ? '★' : '☆'}
-            </button>
-            <button
-              className="krig-ebook-toolbar__btn"
-              onClick={handleFontMinus}
-              title="缩小字号"
-              disabled={fontSize <= FONT_MIN}
-            >
-              A−
-            </button>
-            <span className="krig-ebook-toolbar__font-size">{fontSize}%</span>
-            <button
-              className="krig-ebook-toolbar__btn"
-              onClick={handleFontPlus}
-              title="放大字号"
-              disabled={fontSize >= FONT_MAX}
-            >
-              A+
+              <BookmarkIcon active={isBookmarked} />
             </button>
           </>
         )}

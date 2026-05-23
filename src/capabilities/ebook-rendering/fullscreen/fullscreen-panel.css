@@ -56,6 +56,37 @@
   z-index: 9;
 }
 
+/* Aa 按钮(Books 风 — 小 A 大 A 并排)*/
+.krig-ebook-fullscreen__aa-small {
+  font-size: 11px;
+  vertical-align: baseline;
+}
+.krig-ebook-fullscreen__aa-large {
+  font-size: 16px;
+  font-weight: 500;
+  margin-left: 1px;
+  vertical-align: baseline;
+}
+
+/* Aa popup 浮在 toolbar 下方,点 popup 外的 anchor 关闭
+   anchor z-index < toolbar(10),避免覆盖 toolbar 拦截 hover 事件;
+   只覆盖 toolbar 高度(40px)以下区域,顶部留给 toolbar 自己接 hover */
+.krig-ebook-fullscreen__aa-popup-anchor {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9;
+  pointer-events: auto;
+}
+.krig-ebook-fullscreen__aa-popup-position {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  /* popup 自身样式由 epub-aa-popup.css 提供(尺寸+背景+圆角)*/
+}
+
 /* 翻页指示器(Preview 同款半透明胶囊)*/
 .krig-ebook-fullscreen__page-indicator {
   position: absolute;
@@ -163,14 +194,61 @@
   align-items: center;
 }
 
-.krig-ebook-fullscreen__page-input {
-  width: 56px;
-  height: 22px;
+/* ── 中部导航胶囊(PDF 页码 / EPUB 章节进度共用)── */
+
+.krig-ebook-fullscreen__nav-pill {
+  display: inline-flex;
+  align-items: stretch;
+  height: 30px;
+  background: rgba(58, 58, 60, 0.55);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.krig-ebook-fullscreen__nav-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  color: #d0d2d5;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 100ms;
+}
+
+.krig-ebook-fullscreen__nav-pill-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-ebook-fullscreen__nav-pill-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.krig-ebook-fullscreen__nav-pill-info {
+  display: inline-flex;
+  align-items: center;
   padding: 0 4px;
+  font-size: 12px;
+  color: #d0d2d5;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.krig-ebook-fullscreen__page-input {
+  width: 52px;
+  height: 22px;
+  padding: 0 2px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
-  color: #d0d2d5;
+  color: inherit;
   font-size: 12px;
   font-family: inherit;
   text-align: center;
@@ -179,16 +257,16 @@
 }
 
 .krig-ebook-fullscreen__page-input:hover {
-  border-color: #3a3a3d;
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .krig-ebook-fullscreen__page-input:focus {
-  background: #1c1c1e;
-  border-color: #5a5a5d;
+  background: rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.32);
 }
 
 .krig-ebook-fullscreen__page-total {
-  color: #8a8c8f;
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .krig-ebook-fullscreen__zoom-select {

@@ -6,3 +6,4 @@
 
 export const EBOOK_OPEN_POPUP_ID = 'ebook-view.popup.open';
 export const EBOOK_VIEW_SWITCH_POPUP_ID = 'ebook-view.popup.view-switch';
+export const EBOOK_AA_POPUP_ID = 'ebook-view.popup.aa';

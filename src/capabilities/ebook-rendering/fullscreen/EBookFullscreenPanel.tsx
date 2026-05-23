@@ -38,6 +38,14 @@ import {
   getEBookFullscreenContext,
   clearEBookFullscreenContext,
 } from './fullscreen-context';
+import { EpubAaPopup } from './EpubAaPopup';
+import {
+  loadEpubReadingSettings,
+  saveEpubFontSize,
+  saveEpubTheme,
+  saveEpubAppearance,
+} from './epub-reading-settings';
+import type { EpubTheme, EpubAppearance } from '../types';
 import './fullscreen-panel.css';
 
 interface EBookFullscreenPanelProps {
@@ -49,19 +57,36 @@ type PagedLayout = 'single' | 'double';
 
 // 全屏阅读体验决议(2026-05-22):fixed-page 走翻页式(不滚动),自适应 viewport
 // 单页/双页可切换;EPUB 沿用 ReflowableContent(foliate-js 自身分页)
-const FONT_STEP = 10;
-const FONT_MIN = 60;
-const FONT_MAX = 200;
+// 字号常量(FONT_STEP/MIN/MAX)搬到 EpubAaPopup 内部,panel 不再直接调 +/-
 const SAVE_PROGRESS_DEBOUNCE_MS = 500;
 
-// Toolbar auto-hide:鼠标进入顶部此高度内触发显示;离开 hover 区立即隐藏
+// Toolbar auto-hide 阈值 — 必须等于 toolbar 实际高度,否则会出现"死区互踩":
+// hover zone > toolbar 时,鼠标在中间一带:mousemove 持续唤起 + onMouseLeave 持续隐藏,二者打架
 // (forceShowToolbar 守门:sidebar / 搜索 / hover toolbar 时强制保留)
-const TOOLBAR_HOVER_ZONE_PX = 60;
+const TOOLBAR_HOVER_ZONE_PX = 40;
 const TOOLBAR_INITIAL_SHOW_MS = 500;
 
 // 翻页指示器(Preview 同款)— 翻页时顶部居中胶囊显示 "Page X of N",
 // 停留 1s 后淡出 300ms;连续翻页 stay-extends(重新启动 timer 不闪烁)
 const PAGE_INDICATOR_STAY_MS = 1000;
+
+/** 书签丝带图标(对齐 Apple Books / Kindle 设计)— active=填充,inactive=描边 */
+function BookmarkIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="16"
+      viewBox="0 0 14 16"
+      fill={active ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 1.5h10v13L7 11l-5 3.5V1.5z" />
+    </svg>
+  );
+}
 
 export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const ctx = useMemo(() => getEBookFullscreenContext(), []);
@@ -81,8 +106,18 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const [totalPages, setTotalPages] = useState(0);
   const [epubChapter, setEpubChapter] = useState('');
   const [epubPercentage, setEpubPercentage] = useState(0);
-  const [fontSize, setFontSize] = useState(100);
+  const [epubPage, setEpubPage] = useState(0);
+  const [epubPages, setEpubPages] = useState(0);
+  // 字号 + 主题从 localStorage 加载(跨 session 持久);默认 100% / original
+  const initialSettings = useMemo(() => loadEpubReadingSettings(), []);
+  const [fontSize, setFontSize] = useState(initialSettings.fontSize);
+  const [epubTheme, setEpubTheme] = useState<EpubTheme>(initialSettings.theme);
+  const [epubAppearance, setEpubAppearance] = useState<EpubAppearance>(initialSettings.appearance);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Aa popup 自管 visible(workspace 在 panel active 时 display:none,
+  // popup-registry 不可用 — 直接用 React state)
+  const [aaPopupOpen, setAaPopupOpen] = useState(false);
+  const aaButtonRef = useRef<HTMLButtonElement | null>(null);
   // PDF 翻页式布局:single / double — 按 viewport 宽高比自动选(Preview 哲学)
   // 宽屏(width >= height)→ double;竖屏 → single
   // 监听 window resize,跟随尺寸变化
@@ -103,9 +138,15 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   // 翻页指示器(Preview 同款)— 翻页时顶部居中胶囊 1s 自动消失
   const [pageIndicatorVisible, setPageIndicatorVisible] = useState(false);
   const pageIndicatorHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // indicator 显示用的页号 — 翻页**开始**时(onPagedPageChangeStart)即更新到目标页,
+  // indicator 显示用的页号(PDF)— 翻页**开始**时(onPagedPageChangeStart)即更新,
   // 不等动画完成,避免胶囊在翻完后才出现的滞后感
   const [indicatorPage, setIndicatorPage] = useState<number>(0);
+  // 触发 indicator 显现的版本计数 — 任意值变化(PDF 翻页/EPUB 翻章/字号调整)都 +1
+  // 触发 effect,统一信号源
+  const [indicatorVersion, setIndicatorVersion] = useState(0);
+  // EPUB 字号调整时,胶囊内容切到"字号 X%"而非 chapter · progress(短暂态,1s 后自然失效)
+  // — 用 ref 而非 state:不参与 render 时机判断,只在生成胶囊文字时读最近一次触发
+  const lastTriggerWasFontSizeRef = useRef(false);
   // 中间页号 input 编辑态(对齐 EBookToolbar 行内 pageInput 交互)
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
@@ -178,10 +219,14 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
       // 注:不在此 setCurrentPage(1) — paged 路径 FullscreenPageView 会按 initialPage(restorePage)
       // 自动初始化并通过 onPageChange 推送真实起始页,否则会先闪一次 "Page 1-2" 再跳到 "Page 21-22"
       if (info.renderMode === 'reflowable') {
-        setFontSize(hostRef.current?.getFontSize() ?? 100);
+        // 推 localStorage 加载的字号 + 主题 + 明暗模式给 renderer(覆盖 host 内部默认值)
+        // 注:setMaxColumnCount 由 [renderMode, pagedLayout] effect 兜底推
+        hostRef.current?.setFontSize(fontSize);
+        hostRef.current?.setEpubTheme(epubTheme);
+        hostRef.current?.setEpubAppearance(epubAppearance);
       }
     },
-    [],
+    [fontSize, epubTheme, epubAppearance],
   );
 
   const handlePageChangeFromHost = useCallback(
@@ -198,9 +243,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   }, []);
 
   const handleEpubProgressChange = useCallback(
-    (progress: { chapter: string; percentage: number }) => {
+    (progress: { chapter: string; percentage: number; page: number; pages: number }) => {
       setEpubChapter(progress.chapter);
       setEpubPercentage(progress.percentage);
+      setEpubPage(progress.page);
+      setEpubPages(progress.pages);
       const cfi = hostRef.current?.getCurrentCFI();
       if (cfi) persistEpubProgress(cfi);
     },
@@ -224,18 +271,23 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   }, [currentPage, totalPages, pageStep]);
 
   // 中间页号 input handlers — focus 进入编辑 → 输入 → Enter/blur 提交跳页
+  // PDF/EPUB 通用:focus 取当前页(PDF=currentPage, EPUB=epubPage),
+  // blur 调 host.goToPage(host 内部按 renderMode 分发到正确 renderer)
+  const inputCurrentPage = renderMode === 'reflowable' ? epubPage : currentPage;
+  const inputTotalPages = renderMode === 'reflowable' ? epubPages : totalPages;
   const handlePageInputFocus = useCallback(() => {
-    setPageInput(String(currentPage));
+    setPageInput(String(inputCurrentPage));
     setEditingPage(true);
-  }, [currentPage]);
+  }, [inputCurrentPage]);
   const handlePageInputBlur = useCallback(() => {
     setEditingPage(false);
     const page = parseInt(pageInput, 10);
-    if (!isNaN(page) && page >= 1 && page <= totalPages) {
-      // host.goToPage 内部 spreadStart 对齐 — 输入偶数会落到 spread 起点(N-1)
+    if (!isNaN(page) && page >= 1 && page <= inputTotalPages) {
+      // PDF: host.goToPage 内部 spreadStart 对齐
+      // EPUB: host.goToPage 走 renderer.goToPage 按 fraction 跳
       hostRef.current?.goToPage(page);
     }
-  }, [pageInput, totalPages]);
+  }, [pageInput, inputTotalPages]);
   const handlePageInputKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       (e.target as HTMLInputElement).blur();
@@ -248,16 +300,26 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
 
   const onPrevChapter = useCallback(() => hostRef.current?.prevChapter(), []);
   const onNextChapter = useCallback(() => hostRef.current?.nextChapter(), []);
-  const onFontMinus = useCallback(() => {
-    const next = Math.max(FONT_MIN, fontSize - FONT_STEP);
+  // 字号 setter 统一封装 — 写 host + 写本地 state + 写 localStorage + bump indicator
+  // popup 内部直接传目标值(EpubAaPopup 自管 +/- 步长计算),panel toolbar 不再直接调字号
+  const applyFontSize = useCallback((next: number) => {
     hostRef.current?.setFontSize(next);
     setFontSize(next);
-  }, [fontSize]);
-  const onFontPlus = useCallback(() => {
-    const next = Math.min(FONT_MAX, fontSize + FONT_STEP);
-    hostRef.current?.setFontSize(next);
-    setFontSize(next);
-  }, [fontSize]);
+    saveEpubFontSize(next);
+    lastTriggerWasFontSizeRef.current = true;
+    setIndicatorVersion((v) => v + 1); // 字号调整时浮现胶囊(显示当前字号)
+  }, []);
+  // 主题 setter — 写 host + 本地 state + localStorage(不触发 indicator,主题变化是显式视觉反馈)
+  const onThemeChange = useCallback((t: EpubTheme) => {
+    hostRef.current?.setEpubTheme(t);
+    setEpubTheme(t);
+    saveEpubTheme(t);
+  }, []);
+  const onAppearanceChange = useCallback((a: EpubAppearance) => {
+    hostRef.current?.setEpubAppearance(a);
+    setEpubAppearance(a);
+    saveEpubAppearance(a);
+  }, []);
 
   const onBookmarkToggle = useCallback(
     () => void bookmarks.toggle(currentPage),
@@ -293,7 +355,6 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const forceShowToolbar = sidebarOpen || search.visible || toolbarHoverRef.current;
 
   useEffect(() => {
-    // 初始 2s 显示窗口
     if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
     toolbarHideTimerRef.current = setTimeout(() => {
       if (!forceShowToolbar) setToolbarVisible(false);
@@ -301,27 +362,22 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     return () => {
       if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
     };
-    // 只在 mount 跑一次;forceShowToolbar 变化由下面的 effect 处理
   }, []);
 
+  // 唤起:鼠标进入顶部 hover zone(toolbar 高度之内)即显示;
+  // 隐藏由 toolbar 节点的 onMouseLeave 处理(立即收),不再在 mousemove 里做
   useEffect(() => {
     const handler = (e: MouseEvent): void => {
-      const inHoverZone = e.clientY <= TOOLBAR_HOVER_ZONE_PX;
-      if (inHoverZone) {
+      if (e.clientY <= TOOLBAR_HOVER_ZONE_PX) {
         setToolbarVisible(true);
         if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
-      } else if (toolbarVisible && !forceShowToolbar) {
-        // 离开 hover 区立即隐藏(不延迟)— forceShowToolbar 守门:
-        // sidebar 打开 / 搜索栏可见 / 鼠标 hover 在 toolbar 上时仍强制保留
-        if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
-        setToolbarVisible(false);
       }
     };
     window.addEventListener('mousemove', handler);
     return () => {
       window.removeEventListener('mousemove', handler);
     };
-  }, [toolbarVisible, forceShowToolbar]);
+  }, []);
 
   // forceShowToolbar 变 true 时立即显示 + 清隐藏 timer
   useEffect(() => {
@@ -336,7 +392,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   // 胶囊与动画同步呈现而非动画结束后才出。连续翻页 stay-extends 不闪烁。
   // 初次加载:onPageChange 推 currentPage 后,下面那条 effect 同步初始化 indicatorPage。
   useEffect(() => {
-    if (!renderMode || totalPages === 0 || indicatorPage === 0) return;
+    if (!renderMode || indicatorVersion === 0) return;
     setPageIndicatorVisible(true);
     if (pageIndicatorHideTimerRef.current) clearTimeout(pageIndicatorHideTimerRef.current);
     pageIndicatorHideTimerRef.current = setTimeout(() => {
@@ -345,7 +401,7 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     return () => {
       if (pageIndicatorHideTimerRef.current) clearTimeout(pageIndicatorHideTimerRef.current);
     };
-  }, [indicatorPage, totalPages, renderMode]);
+  }, [indicatorVersion, renderMode]);
 
   // currentPage 变化时同步到 indicatorPage(初次加载 / EPUB 翻章 / 动画完成无 start 信号场景兜底)
   // 注:翻页式 PDF 路径会先经 onPagedPageChangeStart 走 setIndicatorPage(target),
@@ -355,8 +411,25 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   useEffect(() => {
     if (currentPage > 0 && currentPage !== indicatorPage) {
       setIndicatorPage(currentPage);
+      setIndicatorVersion((v) => v + 1);
     }
   }, [currentPage]);
+
+  // EPUB 进度变化(翻章/page/percentage 变化)— bump indicator version 让胶囊出现
+  // 注:相同 page+chapter 不重复触发(避免连续 relocate 推流闪烁)
+  useEffect(() => {
+    if (renderMode !== 'reflowable') return;
+    if (!epubChapter && epubPercentage === 0 && epubPage === 0) return;
+    lastTriggerWasFontSizeRef.current = false; // 翻章 → 恢复 progress 显示
+    setIndicatorVersion((v) => v + 1);
+  }, [epubChapter, epubPercentage, epubPage, renderMode]);
+
+  // EPUB 双页布局推送给 renderer:pagedLayout 跟 viewport 宽高比自动算(同 PDF),
+  // 切换/load 完成时调 host.setEpubMaxColumnCount;PDF 路径下此 effect 不触发(renderMode 守门)
+  useEffect(() => {
+    if (renderMode !== 'reflowable') return;
+    hostRef.current?.setEpubMaxColumnCount(pagedLayout === 'double' ? 2 : 1);
+  }, [renderMode, pagedLayout]);
 
   if (!ctx) return null;
 
@@ -374,6 +447,9 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
         }}
         onMouseLeave={() => {
           toolbarHoverRef.current = false;
+          if (!sidebarOpen && !search.visible && !aaPopupOpen) {
+            setToolbarVisible(false);
+          }
         }}
       >
         <div className="krig-ebook-fullscreen__toolbar-section krig-ebook-fullscreen__toolbar-section--left">
@@ -391,65 +467,88 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
           </span>
         </div>
 
-        {/* 中: 导航(fixed-page 页码 / reflowable 章节进度)*/}
+        {/* 中: 导航胶囊(fixed-page 页码可输入 / reflowable 章节进度)— 圆角胶囊包 ‹ 信息 ›*/}
         {showFixedNav && (
           <div className="krig-ebook-fullscreen__toolbar-section krig-ebook-fullscreen__toolbar-section--center">
-            <button
-              className="krig-ebook-fullscreen__btn"
-              onClick={onPrevPage}
-              disabled={currentPage <= 1}
-              title="上一页"
-            >
-              ‹
-            </button>
-            <span className="krig-ebook-fullscreen__page-info">
-              <input
-                className="krig-ebook-fullscreen__page-input"
-                value={
-                  editingPage
-                    ? pageInput
-                    : pagedLayout === 'double' && currentPage + 1 <= totalPages
-                      ? `${currentPage}-${currentPage + 1}`
-                      : String(currentPage)
-                }
-                onChange={(e) => setPageInput(e.target.value)}
-                onFocus={handlePageInputFocus}
-                onBlur={handlePageInputBlur}
-                onKeyDown={handlePageInputKey}
-                title="点击输入页号跳转"
-              />
-              <span className="krig-ebook-fullscreen__page-total"> / {totalPages}</span>
-            </span>
-            <button
-              className="krig-ebook-fullscreen__btn"
-              onClick={onNextPage}
-              disabled={currentPage >= totalPages}
-              title="下一页"
-            >
-              ›
-            </button>
+            <div className="krig-ebook-fullscreen__nav-pill">
+              <button
+                className="krig-ebook-fullscreen__nav-pill-btn"
+                onClick={onPrevPage}
+                disabled={currentPage <= 1}
+                title="上一页"
+                aria-label="上一页"
+              >
+                ‹
+              </button>
+              <span className="krig-ebook-fullscreen__nav-pill-info">
+                <input
+                  className="krig-ebook-fullscreen__page-input"
+                  value={
+                    editingPage
+                      ? pageInput
+                      : pagedLayout === 'double' && currentPage + 1 <= totalPages
+                        ? `${currentPage}-${currentPage + 1}`
+                        : String(currentPage)
+                  }
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onFocus={handlePageInputFocus}
+                  onBlur={handlePageInputBlur}
+                  onKeyDown={handlePageInputKey}
+                  title="点击输入页号跳转"
+                />
+                <span className="krig-ebook-fullscreen__page-total"> of {totalPages}</span>
+              </span>
+              <button
+                className="krig-ebook-fullscreen__nav-pill-btn"
+                onClick={onNextPage}
+                disabled={currentPage >= totalPages}
+                title="下一页"
+                aria-label="下一页"
+              >
+                ›
+              </button>
+            </div>
           </div>
         )}
         {showReflowNav && (
           <div className="krig-ebook-fullscreen__toolbar-section krig-ebook-fullscreen__toolbar-section--center">
-            <button
-              className="krig-ebook-fullscreen__btn"
-              onClick={onPrevChapter}
-              title="上一页 (←)"
-            >
-              ‹
-            </button>
-            <span className="krig-ebook-fullscreen__epub-progress">
-              {epubChapter ? `${epubChapter} · ` : ''}
-              {Math.round((epubPercentage ?? 0) * 100)}%
-            </span>
-            <button
-              className="krig-ebook-fullscreen__btn"
-              onClick={onNextChapter}
-              title="下一页 (→)"
-            >
-              ›
-            </button>
+            <div className="krig-ebook-fullscreen__nav-pill">
+              <button
+                className="krig-ebook-fullscreen__nav-pill-btn"
+                onClick={onPrevChapter}
+                title="上一页 (←)"
+                aria-label="上一页"
+              >
+                ‹
+              </button>
+              <span className="krig-ebook-fullscreen__nav-pill-info">
+                {epubPages > 0 ? (
+                  <>
+                    <input
+                      className="krig-ebook-fullscreen__page-input"
+                      value={editingPage ? pageInput : String(epubPage)}
+                      onChange={(e) => setPageInput(e.target.value)}
+                      onFocus={handlePageInputFocus}
+                      onBlur={handlePageInputBlur}
+                      onKeyDown={handlePageInputKey}
+                      title="点击输入页号跳转"
+                    />
+                    <span className="krig-ebook-fullscreen__page-total"> of {epubPages}</span>
+                  </>
+                ) : (
+                  // EPUB 还没分页就绪时降级显示百分比(很短暂,relocate 后立即变页码)
+                  `${Math.round((epubPercentage ?? 0) * 100)}%`
+                )}
+              </span>
+              <button
+                className="krig-ebook-fullscreen__nav-pill-btn"
+                onClick={onNextChapter}
+                title="下一页 (→)"
+                aria-label="下一页"
+              >
+                ›
+              </button>
+            </div>
           </div>
         )}
 
@@ -461,34 +560,29 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
               onClick={onBookmarkToggle}
               title={bookmarks.isBookmarked(currentPage) ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
             >
-              {bookmarks.isBookmarked(currentPage) ? '★' : '☆'}
+              <BookmarkIcon active={bookmarks.isBookmarked(currentPage)} />
             </button>
           )}
           {showReflowNav && (
             <>
               <button
+                ref={aaButtonRef}
+                className={`krig-ebook-fullscreen__btn ${aaPopupOpen ? 'krig-ebook-fullscreen__btn--active' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setAaPopupOpen((p) => !p)}
+                title="字号 / 主题"
+                aria-label="字号 / 主题"
+                aria-expanded={aaPopupOpen}
+              >
+                <span className="krig-ebook-fullscreen__aa-small">A</span>
+                <span className="krig-ebook-fullscreen__aa-large">A</span>
+              </button>
+              <button
                 className={`krig-ebook-fullscreen__btn ${bookmarks.isBookmarked(currentPage) ? 'krig-ebook-fullscreen__btn--bookmark-active' : ''}`}
                 onClick={onBookmarkToggle}
                 title={bookmarks.isBookmarked(currentPage) ? '移除书签 (⌘D)' : '添加书签 (⌘D)'}
               >
-                {bookmarks.isBookmarked(currentPage) ? '★' : '☆'}
-              </button>
-              <button
-                className="krig-ebook-fullscreen__btn"
-                onClick={onFontMinus}
-                disabled={fontSize <= FONT_MIN}
-                title="缩小字号"
-              >
-                A−
-              </button>
-              <span className="krig-ebook-fullscreen__font-size">{fontSize}%</span>
-              <button
-                className="krig-ebook-fullscreen__btn"
-                onClick={onFontPlus}
-                disabled={fontSize >= FONT_MAX}
-                title="放大字号"
-              >
-                A+
+                <BookmarkIcon active={bookmarks.isBookmarked(currentPage)} />
               </button>
             </>
           )}
@@ -503,8 +597,9 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
         </div>
       </div>
 
-      {/* 翻页指示器(Preview 同款 — 顶部居中半透明胶囊,翻页时浮现 1s 后淡出)*/}
-      {renderMode && totalPages > 0 && (
+      {/* 翻页指示器(Preview 同款 — 顶部居中半透明胶囊,翻页/翻章/字号调整时浮现 1s 后淡出)
+          注:外层条件不含 totalPages > 0(EPUB 没固定总页数,此过滤会让 EPUB 永远不出胶囊)*/}
+      {renderMode && (
         <div
           className={`krig-ebook-fullscreen__page-indicator ${pageIndicatorVisible ? '' : 'krig-ebook-fullscreen__page-indicator--hidden'}`}
         >
@@ -512,9 +607,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             ? pagedLayout === 'double' && indicatorPage + 1 <= totalPages
               ? `Page ${indicatorPage}-${indicatorPage + 1} of ${totalPages}`
               : `Page ${indicatorPage} of ${totalPages}`
-            : epubChapter
-              ? `${epubChapter} · ${Math.round((epubPercentage ?? 0) * 100)}%`
-              : `${Math.round((epubPercentage ?? 0) * 100)}%`}
+            : lastTriggerWasFontSizeRef.current
+              ? `字号 ${fontSize}%`
+              : epubPages > 0
+                ? `Page ${epubPage} of ${epubPages}`
+                : `${Math.round((epubPercentage ?? 0) * 100)}%`}
         </div>
       )}
 
@@ -530,6 +627,35 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
           onClose={search.handleClose}
         />
       </div>
+
+      {/* Aa popup(字号 + 主题)— EPUB 路径 Aa 按钮触发,点外关闭 */}
+      {aaPopupOpen && showReflowNav && (
+        <div
+          className="krig-ebook-fullscreen__aa-popup-anchor"
+          onMouseDown={(e) => {
+            // popup 内部点击不冒泡到 overlay,popup 外部点击(此 wrap 自身)关闭
+            if (e.target === e.currentTarget) {
+              setAaPopupOpen(false);
+              // 点 popup 外关闭时,鼠标必然不在 toolbar 上(toolbar 在 anchor 之上的 0-40px),
+              // 主动让 toolbar 立刻收(否则要等下一次 mousemove 才触发判断)
+              if (!sidebarOpen && !search.visible && !toolbarHoverRef.current) {
+                setToolbarVisible(false);
+              }
+            }
+          }}
+        >
+          <div className="krig-ebook-fullscreen__aa-popup-position">
+            <EpubAaPopup
+              fontSize={fontSize}
+              theme={epubTheme}
+              appearance={epubAppearance}
+              onFontSizeChange={applyFontSize}
+              onThemeChange={onThemeChange}
+              onAppearanceChange={onAppearanceChange}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="krig-ebook-fullscreen__body" ref={bodyRef}>
         {sidebarOpen && (
@@ -555,7 +681,10 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             onEpubProgressChange={handleEpubProgressChange}
             pdfLayout="paged"
             pagedLayout={pagedLayout}
-            onPagedPageChangeStart={(p) => setIndicatorPage(p)}
+            onPagedPageChangeStart={(p) => {
+              setIndicatorPage(p);
+              setIndicatorVersion((v) => v + 1);
+            }}
             onPagedScaleChange={(s) => {
               lastScaleRef.current = s;
             }}

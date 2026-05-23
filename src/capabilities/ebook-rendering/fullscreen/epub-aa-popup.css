@@ -1,0 +1,191 @@
+/**
+ * EpubAaPopup 样式 — Apple Books Reading Styles 风格
+ * 顶部:字号胶囊(A 小 / A 大)+ moon 圆按钮
+ * 中部:6 主题卡(2 行 × 3 列)
+ */
+
+.krig-epub-aa-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  min-width: 320px;
+  background: rgba(28, 28, 30, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  color: #e8eaed;
+}
+
+/* ── 顶部:字号胶囊 + moon ── */
+
+.krig-epub-aa-popup__top-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.krig-epub-aa-popup__font-pill {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  background: rgba(58, 58, 60, 0.7);
+  border-radius: 22px;
+  height: 44px;
+  overflow: hidden;
+}
+
+.krig-epub-aa-popup__pill-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #e8eaed;
+  cursor: pointer;
+  transition: background 100ms;
+}
+
+.krig-epub-aa-popup__pill-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-epub-aa-popup__pill-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.krig-epub-aa-popup__pill-divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  align-self: stretch;
+}
+
+.krig-epub-aa-popup__font-small { font-size: 14px; font-weight: 500; }
+.krig-epub-aa-popup__font-large { font-size: 22px; font-weight: 500; }
+
+.krig-epub-aa-popup__moon-wrap {
+  position: relative;
+  flex: 0 0 44px;
+}
+
+.krig-epub-aa-popup__moon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background: rgba(58, 58, 60, 0.7);
+  border: none;
+  color: #e8eaed;
+  cursor: pointer;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms;
+}
+
+.krig-epub-aa-popup__moon-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* moon 弹出的 Light/Dark/Automatic 三选菜单 */
+.krig-epub-aa-popup__appearance-menu {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  z-index: 5;
+  min-width: 160px;
+  padding: 6px;
+  background: rgba(48, 48, 52, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.krig-epub-aa-popup__appearance-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.krig-epub-aa-popup__appearance-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-epub-aa-popup__appearance-icon {
+  font-size: 13px;
+  width: 16px;
+  text-align: center;
+}
+
+.krig-epub-aa-popup__appearance-check {
+  margin-left: auto;
+  font-size: 12px;
+  color: #6baaff;
+}
+
+/* ── 主题卡片网格 ── */
+
+.krig-epub-aa-popup__theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.krig-epub-aa-popup__theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 6px 10px;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color 120ms, transform 120ms;
+  /* font-weight 通过 inline style 由 theme 配置驱动 */
+}
+
+.krig-epub-aa-popup__theme-card:hover {
+  transform: scale(1.02);
+}
+
+.krig-epub-aa-popup__theme-card--active {
+  border-color: #ffffff;
+}
+
+.krig-epub-aa-popup__theme-preview {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+}
+
+.krig-epub-aa-popup__theme-preview-big {
+  font-size: 22px;
+  /* font-weight 继承自 card 的 inline style */
+}
+
+.krig-epub-aa-popup__theme-preview-small {
+  font-size: 12px;
+}
+
+.krig-epub-aa-popup__theme-label {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.85;
+  letter-spacing: 0.3px;
+}

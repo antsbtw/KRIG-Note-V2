@@ -70,6 +70,12 @@ export interface EBookHostHandle {
   /** EPUB 字号(默认 100;V1 60~200 范围)*/
   setFontSize(size: number): void;
   getFontSize(): number;
+  /** EPUB 最大列数(1=单页 / 2=双页);foliate-js 按容器宽度自适应 */
+  setEpubMaxColumnCount(count: 1 | 2): void;
+  /** EPUB 阅读色调主题(6 个风格之一) */
+  setEpubTheme(theme: import('./types').EpubTheme): void;
+  /** EPUB 明暗模式(light/dark/auto) — 与 theme 正交 */
+  setEpubAppearance(appearance: import('./types').EpubAppearance): void;
 
   // ── TOC + Search(C3 给 outline / search bar 用)──
   /** 取 renderer 提供的 TOC 树(异步:EPUB 等 readyPromise) */
@@ -116,7 +122,7 @@ export interface EBookHostProps {
   /** 加载/未加载 状态变化(view 决定显示空状态)*/
   onReadyChange?: (ready: boolean) => void;
   /** EPUB 进度变化(章节标题 + 比例)— view 持久化 + toolbar 显示 */
-  onEpubProgressChange?: (progress: { chapter: string; percentage: number }) => void;
+  onEpubProgressChange?: (progress: { chapter: string; percentage: number; page: number; pages: number }) => void;
 
   // ── C4:EPUB 文本选择 + 标注事件 ──
   /** 文本选择(mouseup 后)— view 端弹 picker(view 计算位置)*/
@@ -437,7 +443,16 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     () => ({
       loadFromInfo,
       goToPage(page: number): void {
-        gotoPageRef.current?.(page);
+        // PDF: 走 FixedPageContent / FullscreenPageView 注册的 gotoPage 回调
+        // EPUB: renderer.goToPage 按 fraction 近似定位
+        if (gotoPageRef.current) {
+          gotoPageRef.current(page);
+          return;
+        }
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) {
+          void r.goToPage(page);
+        }
       },
       goToCFI(cfi: string): void {
         const r = rendererRef.current;
@@ -473,6 +488,18 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         const r = rendererRef.current;
         if (r && isReflowable(r)) return r.getFontSize();
         return 100;
+      },
+      setEpubMaxColumnCount(count: 1 | 2): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.setMaxColumnCount(count);
+      },
+      setEpubTheme(theme): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.setTheme(theme);
+      },
+      setEpubAppearance(appearance): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.setAppearance(appearance);
       },
       // ── TOC + Search ──
       async getTOC(): Promise<TOCItem[]> {
