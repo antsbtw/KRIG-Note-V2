@@ -49,8 +49,11 @@ export async function askAiFromNote(): Promise<void> {
 
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const cmState = contextMenuController.getState();
+  // L4 重构后 pmInstanceId 走 context.custom(由 text-editing capability provider 贡献)。
+  const ctxPmId = cmState.context.custom.pmInstanceId;
   const instanceId =
-    cmState.context.pmInstanceId ?? textEditing.instanceRegistry.getFocusedInstanceId();
+    (typeof ctxPmId === 'string' ? ctxPmId : null) ??
+    textEditing.instanceRegistry.getFocusedInstanceId();
   if (!instanceId) {
     console.warn('[ask-ai] no active PM instance');
     return;

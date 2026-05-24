@@ -14,6 +14,8 @@
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
+import { contextInfoProviderRegistry } from '@slot/interaction-registries/context-info-provider-registry';
+import { enabledWhenRegistry } from '@slot/interaction-registries/enabled-when-registry';
 import type {
   ThoughtCapabilityApi,
   ThoughtInfo,
@@ -105,3 +107,26 @@ capabilityRegistry.register({
   id: 'thought',
   api: thoughtCapability,
 });
+
+/**
+ * L4 右键体系重构:贡献 thoughtId 业务字段 + has-thought enabledWhen 谓词
+ * (handoff: docs/tasks/context-menu-registry-handoff.md §字段迁移清单)
+ *
+ * thought anchor 三态 DOM 检测(同 V1 形态):
+ *   - inline mark    → <span data-thought-id="...">
+ *   - image attr     → <div data-thought-id="..." class="krig-image-block">
+ *   - block frame    → 节点上挂 data-thought-block-id="..." (decoration)
+ */
+contextInfoProviderRegistry.register({
+  id: 'thought',
+  provider: (target: HTMLElement) => {
+    const el = target.closest('[data-thought-id], [data-thought-block-id]');
+    const thoughtId =
+      el?.getAttribute('data-thought-id') ??
+      el?.getAttribute('data-thought-block-id') ??
+      null;
+    return { thoughtId };
+  },
+});
+
+enabledWhenRegistry.register('has-thought', (ctx) => !!ctx.custom.thoughtId);

@@ -7,7 +7,8 @@
  * - 命中 block 已有框定 → 更新该 block(group 同步) / 删除框定
  * - 命中 block 无框定 → setBlockFrame 当前选区覆盖的所有顶层 block(多块自动 group)
  *
- * instanceId 走 ctx.contextInfo.pmInstanceId(右键触发瞬间快照)。
+ * instanceId 走 ctx.contextInfo.custom.pmInstanceId(右键触发瞬间快照,
+ * 由 text-editing capability 的 contextInfoProvider 贡献到 custom)。
  */
 
 import { useMemo } from 'react';
@@ -21,7 +22,8 @@ interface Props {
 }
 
 export function ContextFrameSubmenu({ ctx }: Props) {
-  const instanceId = ctx.contextInfo.pmInstanceId;
+  const rawPmId = ctx.contextInfo.custom.pmInstanceId;
+  const instanceId = typeof rawPmId === 'string' ? rawPmId : null;
   const api = requireCapabilityApi<TextEditingApi>('text-editing').api;
 
   // 解析当前点击的单 block(用于读 active state 和 update / remove)
