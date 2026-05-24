@@ -154,6 +154,10 @@ export class EPUBRenderer implements IReflowableRenderer {
           'max-inline-size',
           count === 2 ? '1000px' : '720px',
         );
+        // foliate-js 原生翻页动画 — paginator 检 'animated' 属性,翻页时
+        // 用 easeOutQuad 300ms 平滑滚动 container scrollLeft(paginator.js
+        // line 936)。完全 foliate 默认方式,无自定义补丁。
+        this.view.renderer.setAttribute('animated', '');
       }
 
       // 显示内容(恢复上次位置或从头)
