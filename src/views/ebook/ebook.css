@@ -16,6 +16,7 @@
   background: #1a1a1a;
   color: #e8eaed;
   overflow: hidden;
+  position: relative; /* 全屏 toolbar 浮层 + trigger 区 absolute 定位锚点 */
 }
 
 .krig-ebook-view__body {
@@ -78,6 +79,35 @@
   color: #ccc;
   user-select: none;
   gap: 8px;
+}
+
+/* 全屏(navSideCollapsed)期间 toolbar 浮层模式 — 鼠标移到顶部 60px 内露出 */
+.krig-ebook-toolbar--floating {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: transform 200ms ease-out, opacity 200ms ease-out;
+}
+
+.krig-ebook-toolbar--floating-visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* 顶部触发区 — 鼠标进入触发 toolbar 滑下;高度等于 toolbar(36px)避免
+ * "鼠标在触发区但 toolbar 之外"的显隐抖动 */
+.krig-ebook-toolbar-trigger {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  z-index: 5;
+  pointer-events: auto;
 }
 
 .krig-ebook-toolbar__section {

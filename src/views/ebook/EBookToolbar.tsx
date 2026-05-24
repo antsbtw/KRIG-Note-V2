@@ -79,6 +79,10 @@ interface EBookToolbarProps {
   onFullscreen: () => void;
   /** 关闭当前 ebook view(× 按钮)*/
   onClose: () => void;
+  /** 附加 className(全屏浮层模式用)*/
+  className?: string;
+  /** 鼠标离开 toolbar(全屏浮层模式用 — 触发收起)*/
+  onMouseLeave?: () => void;
 }
 
 const ZOOM_PRESETS = [
@@ -117,6 +121,8 @@ export function EBookToolbar({
   onNextChapter,
   onFullscreen,
   onClose,
+  className = '',
+  onMouseLeave,
 }: EBookToolbarProps) {
   const [pageInput, setPageInput] = useState('');
   const [editingPage, setEditingPage] = useState(false);
@@ -205,7 +211,10 @@ export function EBookToolbar({
   const showReflowNav = renderMode === 'reflowable';
 
   return (
-    <div className="krig-ebook-toolbar">
+    <div
+      className={`krig-ebook-toolbar${className ? ` ${className}` : ''}`}
+      onMouseLeave={onMouseLeave}
+    >
       {/* Left: sidebar toggle + 文件名 */}
       <div className="krig-ebook-toolbar__section krig-ebook-toolbar__section--left">
         {renderMode && (

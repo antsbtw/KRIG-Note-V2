@@ -77,6 +77,19 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   );
   const activeBookId = wsState?.activeBookId ?? null;
 
+  // 全屏 = navSideCollapsed (2026-05-23 简化方案,EBookView.tsx:260-269)
+  // 全屏期间 toolbar 默认隐藏,鼠标移到顶部 36px 内自动滑下露出。
+  // boolean 字段天然稳定引用,直接 getSnapshot 安全。
+  const isFullscreen = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => workspaceManager.get(workspaceId)?.navSideCollapsed ?? false,
+  );
+  const [toolbarVisible, setToolbarVisible] = useState(false);
+  // 退出全屏时复位 visible,避免下次进全屏首帧仍是"显示态"
+  useEffect(() => {
+    if (!isFullscreen) setToolbarVisible(false);
+  }, [isFullscreen]);
+
   // toolbar 显示状态
   const [fileName, setFileName] = useState('');
   const [renderMode, setRenderMode] = useState<EBookToolbarRenderMode>(null);
@@ -201,8 +214,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     (page: number) => {
       setCurrentPage(page);
       persistPdfProgress(page, scale, fitWidth);
+      // 翻页时强制收 toolbar 浮层(全屏期 hover 露出后用户翻页 → toolbar 让位)
+      if (isFullscreen) setToolbarVisible(false);
     },
-    [persistPdfProgress, scale, fitWidth],
+    [persistPdfProgress, scale, fitWidth, isFullscreen],
   );
 
   const handleScaleChangeFromHost = useCallback(
@@ -223,8 +238,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       setEpubPages(progress.pages);
       const cfi = hostRef.current?.getCurrentCFI();
       if (cfi) persistEpubProgress(cfi);
+      // 翻页时强制收 toolbar 浮层(全屏期 hover 露出后用户翻页 → toolbar 让位)
+      if (isFullscreen) setToolbarVisible(false);
     },
-    [persistEpubProgress],
+    [persistEpubProgress, isFullscreen],
   );
 
   // ── Toolbar callbacks ──
@@ -366,9 +383,24 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     );
   }
 
+  // 全屏期 toolbar 浮层显隐:鼠标进入顶部 36px 触发区 → 显示;离开 toolbar → 隐
+  // 触发区高度 = toolbar 高度(36px),避免"触发区比 toolbar 高"造成显隐抖动
+  // 非全屏期 toolbarVisible 不消费(toolbar 走常态 flex 流)
+  const toolbarClass = isFullscreen
+    ? `krig-ebook-toolbar--floating${toolbarVisible ? ' krig-ebook-toolbar--floating-visible' : ''}`
+    : '';
+
   return (
     <div className="krig-ebook-view" data-view-id="ebook-view">
+      {isFullscreen && (
+        <div
+          className="krig-ebook-toolbar-trigger"
+          onMouseEnter={() => setToolbarVisible(true)}
+        />
+      )}
       <EBookToolbar
+        className={toolbarClass}
+        onMouseLeave={isFullscreen ? () => setToolbarVisible(false) : undefined}
         fileName={fileName}
         renderMode={renderMode}
         sidebarOpen={sidebarOpen}
