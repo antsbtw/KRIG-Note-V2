@@ -274,3 +274,25 @@
 .krig-ebook-toolbar__zoom-select:hover {
   border-color: #555;
 }
+
+/* PR-α-2:右键菜单 🎨 改颜色 submenu — 5 色按钮横排,对齐 AnnotationLayer 创建 picker 视觉 */
+.krig-ebook-annotation-type-submenu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.krig-ebook-annotation-type-submenu__btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.krig-ebook-annotation-type-submenu__btn:hover {
+  border-color: #fff;
+  transform: scale(1.15);
+}

@@ -25,6 +25,7 @@ import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup
 import { EBookView } from './EBookView';
 import { registerEBookCommands } from './bookshelf-commands';
 import { registerNavSide, registerFolderTreeContextMenu } from './nav-side-content';
+import { registerContextMenu } from './context-menu-content';
 import { EBookOpenPopup } from './ebook-open-popup/EBookOpenPopup';
 import { EBookViewSwitchPopup } from './ebook-view-switch-popup/EBookViewSwitchPopup';
 import { EBookAaPopup } from './ebook-aa-popup/EBookAaPopup';
@@ -47,6 +48,7 @@ registerView({
 registerEBookCommands();
 registerNavSide();
 registerFolderTreeContextMenu();
+registerContextMenu();  // PR-α-2:PDF 标注右键 5 项 + provider + has-pdf-annotation predicate
 
 // Toolbar Open / ⊞ 弹层注册(走 popup-registry,EBookToolbar 用 popupController.toggle 触发)
 popupRegistry.register({

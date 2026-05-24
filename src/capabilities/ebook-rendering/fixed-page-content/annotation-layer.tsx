@@ -12,7 +12,11 @@
  * - 拖拽画框(rect 矩形 / underline 横线)
  * - 显示已有标注(背景色 + 半透明矩形,色从 thoughtType 反查 META)
  * - 选中后弹 5 type picker → 创建标注
- * - 已有标注右键 → 删除
+ *
+ * **PR-α-2 重构**:已有标注的"右键删除"路径删除 — 改走 L4 contextMenuRegistry
+ * 接管(handoff §α-2)。AnnotationLayer 字面只负责渲染 + 创建,标注 div 上挂
+ * `data-pdf-annotation-id={ann.id}`,ebook view 注册的 contextInfoProvider 通过
+ * 此 attr 检测命中标注并构造 ContextInfo.custom.pdfAnnotationId。
  *
  * 坐标系:鼠标位置 / 绘制状态都基于 scale=1 的逻辑坐标(乘 scale 渲染),
  * 让标注在不同缩放下保持稳定。
@@ -51,7 +55,6 @@ interface AnnotationLayerProps {
   /** 跳源后短暂高亮的 annotation.id(thoughtId)— CSS 动画 .--flashing */
   flashAnnotationId?: string | null;
   onAnnotationCreate: (pageNum: number, annotation: AnnotationDraft) => void;
-  onAnnotationDelete: (id: string) => void;
 }
 
 const MIN_SIZE = 5; // 最小尺寸(防误触)
@@ -65,7 +68,6 @@ export function AnnotationLayer({
   annotations,
   flashAnnotationId = null,
   onAnnotationCreate,
-  onAnnotationDelete,
 }: AnnotationLayerProps) {
   const [drawing, setDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
@@ -189,6 +191,7 @@ export function AnnotationLayer({
         return (
           <div
             key={ann.id}
+            data-pdf-annotation-id={ann.id}
             className={classes}
             style={{
               left: ann.rect.x * scale,
@@ -202,11 +205,6 @@ export function AnnotationLayer({
               borderColor: ann.markStyle === 'rect' ? color : 'transparent',
               // flashing 时把 type color 暴露为 CSS var,供动画用
               ['--krig-ann-color' as string]: color,
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onAnnotationDelete(ann.id);
             }}
           />
         );
