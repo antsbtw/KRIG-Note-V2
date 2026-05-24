@@ -143,6 +143,26 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     });
   }, [library, activeBookIdRef, bookmarks, ann, pdfAnn]);
 
+  // EPUB 单/双页布局自适应:容器宽高比 ≥ 1(宽 ≥ 高)→ 双页 spread;< 1 → 单页。
+  // NavSide 收起后 EBookView body 横向变宽,自动进双页 spread;NavSide 展开后
+  // 容器变窄,自动回单页。reflowable 路径才推,PDF 不消费 maxColumnCount。
+  useEffect(() => {
+    if (renderMode !== 'reflowable') return;
+    const el = bodyRef.current;
+    if (!el) return;
+    const compute = (): void => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w <= 0 || h <= 0) return;
+      const count: 1 | 2 = w >= h ? 2 : 1;
+      hostRef.current?.setEpubMaxColumnCount(count);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [renderMode]);
+
   // EPUB 字号 / 主题:popup wrapper 改 localStorage 后 notify → 这里推给 host
   // (popup-registry 的 Component 不能接 view 端 props,只能模块级 event bus 通信)
   useEffect(() => {
