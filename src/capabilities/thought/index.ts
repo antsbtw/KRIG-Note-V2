@@ -59,7 +59,7 @@ async function updateThought(
   updates: Partial<
     Pick<
       ThoughtInfo,
-      'doc' | 'type' | 'resolved' | 'pinned' | 'color' | 'thumbnail' | 'serviceId'
+      'doc' | 'type' | 'resolved' | 'pinned' | 'thumbnail' | 'serviceId'
     >
   >,
 ): Promise<ThoughtInfo | null> {

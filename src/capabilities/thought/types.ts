@@ -38,13 +38,13 @@ export interface ThoughtCapabilityApi {
   listThoughtsBySource(source: ThoughtSource, resourceId: string): Promise<ThoughtInfo[]>;
   /** #4 单条查询 */
   getThought(id: string): Promise<ThoughtInfo | null>;
-  /** #5 改 payload 字段(doc/type/resolved/pinned/color/thumbnail/serviceId) */
+  /** #5 改 payload 字段(doc/type/resolved/pinned/thumbnail/serviceId)*/
   updateThought(
     id: string,
     updates: Partial<
       Pick<
         ThoughtInfo,
-        'doc' | 'type' | 'resolved' | 'pinned' | 'color' | 'thumbnail' | 'serviceId'
+        'doc' | 'type' | 'resolved' | 'pinned' | 'thumbnail' | 'serviceId'
       >
     >,
   ): Promise<ThoughtInfo | null>;

@@ -58,9 +58,9 @@ interface EBookToolbarProps {
   onScaleChange: (scale: number) => void;
   onFitWidthToggle: () => void;
   /** PDF 空间标注模式(C5,fixed-page 专用)*/
-  pdfAnnotationMode?: 'off' | 'rect' | 'underline';
+  pdfAnnotationMode?: 'off' | 'rect';
   /** 切换 PDF 标注模式(同模式再点 = 关闭) */
-  onPdfAnnotationModeChange?: (mode: 'off' | 'rect' | 'underline') => void;
+  onPdfAnnotationModeChange?: (mode: 'off' | 'rect') => void;
   /** PDF 提取(C6,fixed-page 专用)— 上传到 KRIG Knowledge Platform 并打开 web-view */
   onExtract?: () => void;
   /** 提取按钮 disabled(上传中)*/
@@ -312,20 +312,9 @@ export function EBookToolbar({
               onClick={() =>
                 onPdfAnnotationModeChange?.(pdfAnnotationMode === 'rect' ? 'off' : 'rect')
               }
-              title="线框标注(拖拽画矩形)"
+              title="框选加思考(拖拽画矩形 → 选类型)"
             >
               ▢
-            </button>
-            <button
-              className={`krig-ebook-toolbar__btn ${pdfAnnotationMode === 'underline' ? 'krig-ebook-toolbar__btn--active' : ''}`}
-              onClick={() =>
-                onPdfAnnotationModeChange?.(
-                  pdfAnnotationMode === 'underline' ? 'off' : 'underline',
-                )
-              }
-              title="横线标注(拖拽画下划线)"
-            >
-              ▁
             </button>
             <button
               className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}

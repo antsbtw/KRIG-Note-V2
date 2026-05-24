@@ -1,14 +1,17 @@
 /**
- * AnnotationLayer — 空间标注覆盖层(单页,L5-C5)
+ * AnnotationLayer — 空间标注覆盖层(单页)
  *
- * V1 → V2 直迁:src/plugins/ebook/components/AnnotationLayer.tsx(203 行)。
- * 改动:CSS 类前缀对齐 V2(.annotation-* → .krig-ebook-annotation-*)。
+ * 2026-05-24 拍板架构重写:
+ *   - 5 色 picker 字面 = 5 种 ThoughtType(thought/important/question/todo/analysis)
+ *   - 颜色由 type 反查 THOUGHT_TYPE_META.color(单一真相源)
+ *   - PageAnnotation 字段:markStyle (rect|underline 视觉) + thoughtType (语义) — 互不混淆
+ *   - 创建回调 onAnnotationCreate 接 type;view 端 hook 反查颜色 + 截屏存 thumbnail
  *
  * 放在每个 page-wrapper 中,覆盖在 canvas 和 textLayer 之上。
  * 处理:
  * - 拖拽画框(rect 矩形 / underline 横线)
- * - 显示已有标注(背景色 + 半透明矩形)
- * - 点击松手后弹出 5 色 picker → 创建标注
+ * - 显示已有标注(背景色 + 半透明矩形,色从 thoughtType 反查 META)
+ * - 选中后弹 5 type picker → 创建标注
  * - 已有标注右键 → 删除
  *
  * 坐标系:鼠标位置 / 绘制状态都基于 scale=1 的逻辑坐标(乘 scale 渲染),
@@ -16,11 +19,18 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import {
+  THOUGHT_TYPE_META,
+  USER_THOUGHT_TYPES,
+  type ThoughtType,
+} from '@shared/ipc/thought-types';
 
 export interface PageAnnotation {
   id: string;
-  type: 'rect' | 'underline';
-  color: string;
+  /** 视觉形态(rect=矩形框 / underline=横线)— 创建时由 mode 决定,字面不可改 */
+  markStyle: 'rect' | 'underline';
+  /** 语义类型(决定颜色) — TypeSwitcher 可改,改后 div 颜色 onListChanged 回流自动跟变 */
+  thoughtType: ThoughtType;
   /** 哪一页(由父组件按 pageNum 过滤后传入,但保留字段方便上层维护)*/
   pageNum: number;
   /** 坐标基于 scale=1 的页面尺寸 */
@@ -35,14 +45,15 @@ interface AnnotationLayerProps {
   scale: number;
   pageWidth: number; // scale=1 时的页面宽度(预留扩展用)
   pageHeight: number; // scale=1 时的页面高度
-  mode: 'off' | 'rect' | 'underline';
+  /** 2026-05-24 删 'underline' 取值 — 框选 = 加思考(对齐 Note ⌘⇧M 语义) */
+  mode: 'off' | 'rect';
   annotations: PageAnnotation[];
+  /** 跳源后短暂高亮的 annotation.id(thoughtId)— CSS 动画 .--flashing */
+  flashAnnotationId?: string | null;
   onAnnotationCreate: (pageNum: number, annotation: AnnotationDraft) => void;
   onAnnotationDelete: (id: string) => void;
 }
 
-const COLORS = ['#ffd43b', '#69db7c', '#74c0fc', '#b197fc', '#ff6b6b'];
-const UNDERLINE_HEIGHT = 3; // 横线高度(scale=1 下的像素)
 const MIN_SIZE = 5; // 最小尺寸(防误触)
 
 export function AnnotationLayer({
@@ -52,6 +63,7 @@ export function AnnotationLayer({
   pageHeight: _pageHeight,
   mode,
   annotations,
+  flashAnnotationId = null,
   onAnnotationCreate,
   onAnnotationDelete,
 }: AnnotationLayerProps) {
@@ -60,10 +72,9 @@ export function AnnotationLayer({
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 });
   const layerRef = useRef<HTMLDivElement>(null);
 
-  // 绘制完成后的 picker 浮层
-  const [colorPicker, setColorPicker] = useState<{
+  // 绘制完成后的 type picker 浮层(用户从 5 type 中选)
+  const [typePicker, setTypePicker] = useState<{
     rect: { x: number; y: number; w: number; h: number };
-    type: 'rect' | 'underline';
   } | null>(null);
 
   const getScaledPos = useCallback(
@@ -102,64 +113,53 @@ export function AnnotationLayer({
   const handleMouseUp = useCallback(() => {
     if (!drawing) return;
     setDrawing(false);
+    if (mode !== 'rect') return;
 
     const x = Math.min(startPos.x, currentPos.x);
     const y = Math.min(startPos.y, currentPos.y);
     const w = Math.abs(currentPos.x - startPos.x);
-    const h =
-      mode === 'underline' ? UNDERLINE_HEIGHT : Math.abs(currentPos.y - startPos.y);
+    const h = Math.abs(currentPos.y - startPos.y);
 
     // 最小尺寸检查(防误触)
-    if (w < MIN_SIZE || (mode === 'rect' && h < MIN_SIZE)) return;
+    if (w < MIN_SIZE || h < MIN_SIZE) return;
 
-    const rect =
-      mode === 'underline'
-        ? { x, y: startPos.y, w, h: UNDERLINE_HEIGHT }
-        : { x, y, w, h };
-
-    setColorPicker({ rect, type: mode as 'rect' | 'underline' });
+    setTypePicker({ rect: { x, y, w, h } });
   }, [drawing, startPos, currentPos, mode]);
 
   // 点击空白关闭 picker
   useEffect(() => {
-    if (!colorPicker) return;
+    if (!typePicker) return;
     const close = (e: MouseEvent): void => {
       const target = e.target as HTMLElement;
       if (!target.closest('.krig-ebook-annotation-color-picker')) {
-        setColorPicker(null);
+        setTypePicker(null);
       }
     };
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
-  }, [colorPicker]);
+  }, [typePicker]);
 
-  const handleColorSelect = useCallback(
-    (color: string) => {
-      if (!colorPicker) return;
+  const handleTypeSelect = useCallback(
+    (thoughtType: ThoughtType) => {
+      if (!typePicker) return;
       onAnnotationCreate(pageNum, {
-        type: colorPicker.type,
-        color,
-        rect: colorPicker.rect,
+        markStyle: 'rect',
+        thoughtType,
+        rect: typePicker.rect,
       });
-      setColorPicker(null);
+      setTypePicker(null);
     },
-    [colorPicker, pageNum, onAnnotationCreate],
+    [typePicker, pageNum, onAnnotationCreate],
   );
 
   // 当前绘制中的预览矩形(基于 scale=1)
-  const previewRect = drawing
-    ? (() => {
-        const x = Math.min(startPos.x, currentPos.x);
-        const y = Math.min(startPos.y, currentPos.y);
-        const w = Math.abs(currentPos.x - startPos.x);
-        const h =
-          mode === 'underline'
-            ? UNDERLINE_HEIGHT
-            : Math.abs(currentPos.y - startPos.y);
-        return mode === 'underline'
-          ? { x, y: startPos.y, w, h: UNDERLINE_HEIGHT }
-          : { x, y, w, h };
-      })()
+  const previewRect = drawing && mode === 'rect'
+    ? {
+        x: Math.min(startPos.x, currentPos.x),
+        y: Math.min(startPos.y, currentPos.y),
+        w: Math.abs(currentPos.x - startPos.x),
+        h: Math.abs(currentPos.y - startPos.y),
+      }
     : null;
 
   return (
@@ -177,29 +177,40 @@ export function AnnotationLayer({
         if (drawing) setDrawing(false);
       }}
     >
-      {/* 已有标注 */}
-      {annotations.map((ann) => (
-        <div
-          key={ann.id}
-          className={`krig-ebook-annotation krig-ebook-annotation--${ann.type}`}
-          style={{
-            left: ann.rect.x * scale,
-            top: ann.rect.y * scale,
-            width: ann.rect.w * scale,
-            height: ann.rect.h * scale,
-            backgroundColor:
-              ann.type === 'rect'
-                ? `${ann.color}33` // 20% opacity hex
-                : ann.color,
-            borderColor: ann.type === 'rect' ? ann.color : 'transparent',
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onAnnotationDelete(ann.id);
-          }}
-        />
-      ))}
+      {/* 已有标注 — 颜色字面从 thoughtType 反查 META.color */}
+      {annotations.map((ann) => {
+        const color = THOUGHT_TYPE_META[ann.thoughtType].color;
+        const isFlashing = ann.id === flashAnnotationId;
+        const classes = [
+          'krig-ebook-annotation',
+          `krig-ebook-annotation--${ann.markStyle}`,
+          isFlashing ? 'krig-ebook-annotation--flashing' : '',
+        ].filter(Boolean).join(' ');
+        return (
+          <div
+            key={ann.id}
+            className={classes}
+            style={{
+              left: ann.rect.x * scale,
+              top: ann.rect.y * scale,
+              width: ann.rect.w * scale,
+              height: ann.rect.h * scale,
+              backgroundColor:
+                ann.markStyle === 'rect'
+                  ? `${color}33` // 20% opacity hex(rect 半透明填充)
+                  : color,
+              borderColor: ann.markStyle === 'rect' ? color : 'transparent',
+              // flashing 时把 type color 暴露为 CSS var,供动画用
+              ['--krig-ann-color' as string]: color,
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onAnnotationDelete(ann.id);
+            }}
+          />
+        );
+      })}
 
       {/* 绘制中的预览 */}
       {previewRect && (
@@ -214,33 +225,37 @@ export function AnnotationLayer({
         />
       )}
 
-      {/* 颜色选择 picker */}
-      {colorPicker && (
+      {/* 5 type picker — 5 色按钮字面对应 5 种思考分类(单一真相源) */}
+      {typePicker && (
         <div
           className="krig-ebook-annotation-color-picker"
           style={{
-            left: colorPicker.rect.x * scale,
-            top: (colorPicker.rect.y + colorPicker.rect.h) * scale + 8,
+            left: typePicker.rect.x * scale,
+            top: (typePicker.rect.y + typePicker.rect.h) * scale + 8,
           }}
         >
-          {COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className="krig-ebook-annotation-color-picker__btn"
-              style={{ backgroundColor: c }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleColorSelect(c);
-              }}
-            />
-          ))}
+          {USER_THOUGHT_TYPES.map((t) => {
+            const meta = THOUGHT_TYPE_META[t];
+            return (
+              <button
+                key={t}
+                type="button"
+                className="krig-ebook-annotation-color-picker__btn"
+                style={{ backgroundColor: meta.color }}
+                title={`${meta.icon} ${meta.label}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTypeSelect(t);
+                }}
+              />
+            );
+          })}
           <button
             type="button"
             className="krig-ebook-annotation-color-picker__cancel"
             onClick={(e) => {
               e.stopPropagation();
-              setColorPicker(null);
+              setTypePicker(null);
             }}
           >
             ✕

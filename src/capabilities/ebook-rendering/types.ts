@@ -122,6 +122,16 @@ export interface IFixedPageRenderer extends IBookRenderer {
 
   /** 文本搜索(C3 真消费)*/
   searchText(query: string): Promise<Array<{ pageNum: number; index: number; text: string }>>;
+
+  /**
+   * 截 PDF 指定页 rect 区域为 JPEG dataUrl(独立离屏 render,2x DPR)。
+   * rect 坐标基于 scale=1 的页面尺寸(与 PageAnnotation.rect 同坐标系)。
+   * 2026-05-24 拍板:抽象通用截图能力,thumbnail anchor 创建 / 未来其他 view 复用。
+   */
+  capturePageRect(
+    pageNum: number,
+    rect: { x: number; y: number; w: number; h: number },
+  ): Promise<string>;
 }
 
 /** 可重排渲染引擎(EPUB,C3 起实现;C4 加标注 API)*/

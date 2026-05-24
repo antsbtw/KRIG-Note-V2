@@ -77,13 +77,26 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   );
   const activeBookId = wsState?.activeBookId ?? null;
 
-  // 全屏 = navSideCollapsed (2026-05-23 简化方案,EBookView.tsx:260-269)
-  // 全屏期间 toolbar 默认隐藏,鼠标移到顶部 36px 内自动滑下露出。
-  // boolean 字段天然稳定引用,直接 getSnapshot 安全。
-  const isFullscreen = useSyncExternalStore(
-    (cb) => workspaceManager.subscribe(cb),
-    () => workspaceManager.get(workspaceId)?.navSideCollapsed ?? false,
-  );
+  /**
+   * 全屏(PDF 沉浸阅读)— view 内部独立 state(2026-05-24 用户拍板:与 navSideCollapsed 解耦)。
+   *
+   * 进入全屏(⛶ 按钮):
+   *   1. 快照 prevNavSideCollapsed + prevRightSlot
+   *   2. setNavSideCollapsed(true) + closeRight()
+   *   3. PDF 切 paged 双页 spread + toolbar auto-hide
+   *
+   * 退出全屏(再点 ⛶ / ESC):
+   *   1. setNavSideCollapsed(快照值) + openRight(快照 viewId)
+   *   2. PDF 回 scroll + toolbar 常显
+   *
+   * **不再** = navSideCollapsed:用户从 WorkspaceBar 点 NavSide toggle 时,
+   * 仅 navSideCollapsed 变,view 内 PDF 模式字面无感知。
+   */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenSnapshotRef = useRef<{
+    navSideCollapsed: boolean;
+    rightSlot: string | null;
+  } | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   // 退出全屏时复位 visible,避免下次进全屏首帧仍是"显示态"
   useEffect(() => {
@@ -110,7 +123,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const search = useSearch(hostRef);
   const bookmarks = useBookmarks(hostRef, activeBookIdRef, epubChapter);
   const ann = useEpubAnnotation(hostRef, activeBookIdRef);
-  const pdfAnn = usePdfAnnotations(activeBookIdRef);
+  const pdfAnn = usePdfAnnotations(activeBookIdRef, hostRef);
 
   // C6:PDF 提取 — 上传当前书到 Platform → 切右栏 web-view 装 Platform UI
   // (atom batch JSON 落 noteCapability 由 NoteView 内的 useExtractionImport 处理)
@@ -250,6 +263,20 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     [persistEpubProgress, isFullscreen],
   );
 
+  // PDF 标注创建后召唤评论入口:非全屏开右槽 ThoughtView + 高亮新卡片。
+  // 全屏路径(navSideCollapsed=true)的 floating card 留 PR2 实施 — 本 PR
+  // 全屏期标注创建后无 UI 反馈(thought 已落库,展开 NavSide 后可在右槽评论)。
+  const handlePdfAnnotationCreate = useCallback(
+    async (pageNum: number, draft: Parameters<typeof pdfAnn.create>[1]) => {
+      const created = await pdfAnn.create(pageNum, draft);
+      if (!created) return;
+      if (!isFullscreen) {
+        commandRegistry.execute('thought-view.add-from-pdf-annotation', created.thoughtId);
+      }
+    },
+    [pdfAnn, isFullscreen],
+  );
+
   // ── Toolbar callbacks ──
 
   const onPageChange = useCallback((page: number) => {
@@ -280,19 +307,42 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
 
-  // 全屏沉浸阅读(2026-05-23 用户拍板 — 简化方案):
-  //   不再开独立全屏 panel,而是 toggle workspace.navSideCollapsed:
-  //     - true → NavSide 收起,EBookView 横向占满 → "全屏感"
-  //     - false → 恢复 NavSide
-  //   核心优势:同一个 EBookView / EBookHost / EPUBRenderer 实例从头到尾,
-  //     字号/主题/标注/翻页/cfi 全部内部 state,无跨实例同步问题,**零漂移**。
-  //   PDF 路径同理(PDF 不需要 spread,FixedPageContent 在更宽容器自适应)。
+  /**
+   * 全屏 toggle(2026-05-24 用户拍板:与 navSideCollapsed 解耦的独立 view state):
+   *
+   * 进入:快照 navSide / rightSlot 状态 → setNavSideCollapsed(true) + closeRight + setIsFullscreen(true)
+   * 退出:setIsFullscreen(false) + restore navSide + restore rightSlot
+   *
+   * 分层原则:view 通过 workspaceManager.setNavSideCollapsed + bus.slot.openRight/closeRight
+   * 这些"高层提供的明确 API"触发副作用,不直接 mutate workspace state。
+   */
   const onFullscreen = useCallback(() => {
-    workspaceManager.toggleNavSide(workspaceId);
+    const ws = workspaceManager.get(workspaceId);
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!ws || !bus) return;
+    if (!isFullscreen) {
+      // 进入全屏 — 快照 + 强制收 NavSide + 关右槽
+      fullscreenSnapshotRef.current = {
+        navSideCollapsed: ws.navSideCollapsed,
+        rightSlot: ws.slotBinding.right,
+      };
+      workspaceManager.setNavSideCollapsed(workspaceId, true);
+      if (ws.slotBinding.right) bus.slot.closeRight();
+      setIsFullscreen(true);
+    } else {
+      // 退出全屏 — 恢复快照(开右槽前 setIsFullscreen 让 view paged→scroll 先生效)
+      const snap = fullscreenSnapshotRef.current;
+      setIsFullscreen(false);
+      if (snap) {
+        workspaceManager.setNavSideCollapsed(workspaceId, snap.navSideCollapsed);
+        if (snap.rightSlot) bus.slot.openRight(snap.rightSlot);
+      }
+      fullscreenSnapshotRef.current = null;
+    }
     // 释放按钮焦点 — 避免 toolbar 全屏按钮点击后保持 :focus 视觉残留 +
     // ESC 退出后 hover 露出的 toolbar 上仍有焦点环
     (document.activeElement as HTMLElement | null)?.blur();
-  }, [workspaceId]);
+  }, [workspaceId, isFullscreen]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
   // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
@@ -365,30 +415,46 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     const bus = workspaceManager.getBus(workspaceId);
     if (!bus) return;
     const unsub = bus.channels.subscribe('thought.scroll-to-book-source', (payload: unknown) => {
-      const { bookId, pageNum, cfi } = (payload ?? {}) as {
+      const { bookId, pageNum, cfi, thoughtId } = (payload ?? {}) as {
         bookId?: string;
         pageNum?: number;
         cfi?: string;
+        thoughtId?: string;
       };
       if (!bookId) return;
-      // 等 EBookView 加载完该书(scroll-to-source 流程内已调 ebookCap.open,
-      // 此时 onBookOpened 推流可能还没来 — 200ms 重试一次兜底)
+      /**
+       * 跳源重试策略(2026-05-24 修跳源 bug):
+       *   scroll-to-source 流程内会调 ebookCap.open → EBookView 收到 onBookOpened
+       *   → host.loadFromInfo → FixedPageContent 重 mount。这一过程从 channel emit
+       *   到 containerRef 真正绑好可能跨多个 frame(取决于 PDF 大小)。
+       *
+       *   单次 goToPage 调用经常落到 containerRef = null 的窗口期。最稳的策略:
+       *   定时点多次调 goToPage(幂等),让任意一次落到 ready 后的窗口就成功。
+       *
+       *   8 次 * 250ms = 2s 内总会有 1 次落到 ready 之后(若 2s 内仍未 ready
+       *   说明 PDF 加载本身有问题,放弃)。每次调都是幂等 scrollTo(targetTop)。
+       */
       const tryScroll = (attempt: number): void => {
         const host = hostRef.current;
-        if (!host) {
-          if (attempt < 8) window.setTimeout(() => tryScroll(attempt + 1), 200);
-          return;
+        if (host) {
+          if (cfi) {
+            void host.goToCFI(cfi);
+          } else if (pageNum && pageNum > 0) {
+            host.goToPage(pageNum);
+          }
         }
-        if (cfi) {
-          void host.goToCFI(cfi);
-        } else if (pageNum && pageNum > 0) {
-          host.goToPage(pageNum);
+        if (attempt < 8) {
+          window.setTimeout(() => tryScroll(attempt + 1), 250);
         }
       };
       tryScroll(0);
+      if (thoughtId) {
+        // 闪烁延后到第一波 retry 都试过(8*250=2000ms);annotations 此时大概率已就位
+        window.setTimeout(() => pdfAnn.flash(thoughtId), 2200);
+      }
     });
     return unsub;
-  }, [workspaceId]);
+  }, [workspaceId, pdfAnn]);
 
   if (!wsState) {
     return <div className="krig-ebook-empty">Workspace 未就绪</div>;
@@ -483,7 +549,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             onEpubAnnotationClick={ann.handleAnnotationClick}
             pdfAnnotationMode={pdfAnn.mode}
             pdfAnnotations={pdfAnn.annotations}
-            onPdfAnnotationCreate={pdfAnn.create}
+            pdfFlashAnnotationId={pdfAnn.flashId}
+            onPdfAnnotationCreate={handlePdfAnnotationCreate}
             onPdfAnnotationDelete={pdfAnn.remove}
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}
@@ -492,7 +559,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             <EpubAnnotationPicker
               selection={ann.selection}
               containerWidth={bodyRef.current?.clientWidth ?? 400}
-              onColor={ann.createAnnotation}
+              onType={ann.createAnnotation}
               onCancel={ann.dismiss}
             />
           )}

@@ -52,8 +52,8 @@ interface FullscreenPageViewProps {
   initialPage?: number | null;
   onPageChange: (page: number) => void;
   onScaleChange?: (scale: number) => void;
-  /** 标注 props — V2 sub-phase 022 后 PDF 全屏期保留标注 */
-  annotationMode?: 'off' | 'rect' | 'underline';
+  /** 标注 props — V2 sub-phase 022 后 PDF 全屏期保留标注;2026-05-24 删 underline */
+  annotationMode?: 'off' | 'rect';
   annotations?: PageAnnotation[];
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
   onAnnotationDelete?: (id: string) => void;
@@ -101,7 +101,7 @@ function createSpreadNode(
   gap: number,
   pageDims: PageDimension[],
   scale: number,
-  annotationMode: 'off' | 'rect' | 'underline',
+  annotationMode: 'off' | 'rect',
   annotations: PageAnnotation[],
   onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
   onAnnotationDelete: ((id: string) => void) | undefined,
@@ -177,7 +177,7 @@ function updateSpreadAnnotations(
   handle: SpreadHandle,
   pageDims: PageDimension[],
   scale: number,
-  annotationMode: 'off' | 'rect' | 'underline',
+  annotationMode: 'off' | 'rect',
   annotations: PageAnnotation[],
   onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
   onAnnotationDelete: ((id: string) => void) | undefined,

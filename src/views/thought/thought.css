@@ -200,6 +200,17 @@
   -webkit-box-orient: vertical;
 }
 
+/* PDF 框选/划线 anchor 截图缩略图(2x DPR 高清,JPEG 0.85)*/
+.thought-card__anchor-thumb {
+  flex: 1 1 auto;
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 3px;
+  background: #ffffff;
+  display: block;
+}
+
 .thought-card__anchor-jump {
   flex: 0 0 auto;
   font-size: 12px;

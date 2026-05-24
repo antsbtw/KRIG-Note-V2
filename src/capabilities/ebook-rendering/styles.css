@@ -375,6 +375,24 @@
   border: none;
 }
 
+/**
+ * 跳源高亮闪烁(scroll-to-source 跳转后 ~1.5s):
+ *   - 外发光脉冲(box-shadow ring 以 --krig-ann-color 为色)
+ *   - 框线粗细加倍,饱和度临时拉到全色
+ * thoughtId/annotation.id 匹配 flashAnnotationId 时挂 --flashing class。
+ */
+@keyframes krig-ebook-annotation-flash {
+  0%   { box-shadow: 0 0 0 0 var(--krig-ann-color, #4a9eff), 0 0 0 0 rgba(255,255,255,0); }
+  35%  { box-shadow: 0 0 0 2px var(--krig-ann-color, #4a9eff), 0 0 0 4px rgba(255,255,255,0.35); }
+  100% { box-shadow: 0 0 0 0 var(--krig-ann-color, #4a9eff), 0 0 0 0 rgba(255,255,255,0); }
+}
+
+.krig-ebook-annotation--flashing {
+  animation: krig-ebook-annotation-flash 1.5s ease-out;
+  z-index: 5;
+  border-width: 1px !important;
+}
+
 /* 创建后的颜色 picker(挂在 layer 内部,跟随标注位置)*/
 .krig-ebook-annotation-color-picker {
   position: absolute;

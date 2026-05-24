@@ -16,6 +16,7 @@ import { useCollisionPosition } from '@slot/frame-bindings/use-collision-positio
 import type { ThoughtInfo } from '@capabilities/thought/types';
 import {
   THOUGHT_TYPE_META,
+  USER_THOUGHT_TYPES,
   type ThoughtType,
 } from '@shared/ipc/thought-types';
 import { ThoughtCardEditor } from './ThoughtCardEditor';
@@ -137,9 +138,20 @@ function anchorPreviewText(t: ThoughtInfo): string {
   if (!t.anchor) return '';
   // L7 升级(decision 026 §10.1 + 2026-05-21 用户拍板):
   // - note locator 字面 preview 字段(取代 V1 text)— 创建瞬间快照,UI 显示用
-  // - book locator 字面 textContent 字段(本期不动 BookLocator)
+  // - book locator 字面 textContent 字段(EPUB 高亮选区文字;PDF 留 OCR 后续 PR)
   const loc = t.anchor.locator as { preview?: string; textContent?: string };
   return loc.preview ?? loc.textContent ?? '';
+}
+
+/**
+ * 取 book anchor 的页码(简洁文字,2026-05-24 拍板:anchor 区不再大图,改页码)。
+ * 截图字面进 thought.doc 第一行 image 节点(用户可保留/删除),anchor 区只显轻量定位提示。
+ */
+function anchorBookPageLabel(t: ThoughtInfo): string | null {
+  if (t.anchor?.source !== 'book') return null;
+  const loc = t.anchor.locator as { pageNum?: number };
+  if (typeof loc.pageNum !== 'number' || loc.pageNum <= 0) return null;
+  return `第 ${loc.pageNum} 页`;
 }
 
 export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps) {
@@ -165,7 +177,10 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
   const hasTitleContent = titleSegments.length > 0;
   const isAiPending = isAI && !hasTitleContent;
   const anchorText = anchorPreviewText(thought);
+  const anchorPageLabel = anchorBookPageLabel(thought);
   const anchorSegments = useMemo(() => parseInlineMathInText(anchorText), [anchorText]);
+  // book → 页码;note/EPUB → 文字 preview;graph/canvas → 暂无
+  const hasAnchorVisual = Boolean(anchorPageLabel) || Boolean(anchorText);
   const titleFallback = isAI
     ? (isAiPending ? 'AI 思考中...' : 'AI 回复')
     : '空思考';
@@ -236,19 +251,24 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
 
       {expanded && (
         <>
-          {/* Anchor 引文条 — 点 ↗ 跳源 */}
-          {anchorText && (
+          {/* Anchor 锚定凭证 — book 显示页码("第 X 页");note/EPUB 显示文字 preview。
+              截图字面进 doc 第一行 image 节点(用户可保留/删除),不在 anchor 区重复展示。*/}
+          {hasAnchorVisual && (
             <div
               className="thought-card__anchor"
               onClick={handleScrollToSource}
               title="点击跳转到原文位置"
               style={{ borderLeftColor: meta.color }}
             >
-              <InlineSegments
-                segments={anchorSegments}
-                fallback=""
-                className="thought-card__anchor-text"
-              />
+              {anchorPageLabel ? (
+                <span className="thought-card__anchor-text">📖 {anchorPageLabel}</span>
+              ) : (
+                <InlineSegments
+                  segments={anchorSegments}
+                  fallback=""
+                  className="thought-card__anchor-text"
+                />
+              )}
               <span className="thought-card__anchor-jump">↗</span>
             </div>
           )}
@@ -269,17 +289,19 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
             </div>
           )}
 
-          {/* Bottom action bar */}
+          {/* Bottom action bar — ai-response 锁死 type(AI 回复不可伪装成手写思考)*/}
           <div className="thought-card__actions">
-            <TypeSwitcher
-              currentType={thought.type}
-              open={showTypeMenu}
-              onToggle={() => setShowTypeMenu((p) => !p)}
-              onSelect={(t) => {
-                handleTypeChange(t);
-                setShowTypeMenu(false);
-              }}
-            />
+            {!isAI && (
+              <TypeSwitcher
+                currentType={thought.type}
+                open={showTypeMenu}
+                onToggle={() => setShowTypeMenu((p) => !p)}
+                onSelect={(t) => {
+                  handleTypeChange(t);
+                  setShowTypeMenu(false);
+                }}
+              />
+            )}
 
             {isAI && !isAiPending && (
               <button
@@ -435,7 +457,7 @@ function TypeSwitcher({ currentType, open, onToggle, onSelect }: TypeSwitcherPro
           style={{ position: 'fixed', left: x, top: y }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {(Object.keys(THOUGHT_TYPE_META) as ThoughtType[]).map((t) => (
+          {USER_THOUGHT_TYPES.map((t) => (
             <button
               key={t}
               className={`thought-card__type-option ${t === currentType ? 'thought-card__type-option--active' : ''}`}
