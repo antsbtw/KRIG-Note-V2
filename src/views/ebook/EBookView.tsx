@@ -278,6 +278,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     const epubViewColumnWidth = renderMode === 'reflowable'
       ? (hostRef.current?.getEpubColumnWidth() ?? undefined)
       : undefined;
+    console.log(
+      '[ebook-view] enter fullscreen; epubViewColumnWidth=', epubViewColumnWidth,
+      'host font-size=', hostRef.current?.getFontSize(),
+    );
     rendering.openFullscreenReader({
       workspaceId,
       bookInfo: { ...info, lastPosition },

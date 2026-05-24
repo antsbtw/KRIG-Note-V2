@@ -469,6 +469,17 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
       pagedLayout === 'double' ? 2 : 1,
       ctx?.epubViewColumnWidth,
     );
+    // ready 后印 panel 实际 column 宽度 + 字号 + 容器宽,与 view 主区对比
+    setTimeout(() => {
+      const cw = hostRef.current?.getEpubColumnWidth();
+      const fs = hostRef.current?.getFontSize();
+      console.log(
+        '[ebook-fullscreen] panel layout: panelColumnWidth=', cw,
+        'fontSize=', fs,
+        'pagedLayout=', pagedLayout,
+        'maxInlineSize ctx=', ctx?.epubViewColumnWidth,
+      );
+    }, 300);
   }, [renderMode, pagedLayout, ctx?.epubViewColumnWidth]);
 
   if (!ctx) return null;
