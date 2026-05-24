@@ -29,6 +29,7 @@ import type {
   PageAnnotation,
   EBookHostHandle,
 } from '@capabilities/ebook-rendering/types';
+import type { MediaStorageApi } from '@capabilities/media-storage/types';
 
 export type AnnotationMode = 'off' | 'rect';
 
@@ -169,6 +170,38 @@ export function usePdfAnnotations(
         console.warn('[pdf-annotations] capturePageRect failed:', err);
       }
 
+      /**
+       * 2026-05-24 拍板:截图同时走两条路径
+       *   (1) BookLocator.thumbnail base64 — 持久化锚定凭证(不可改,跟随标注本身)
+       *   (2) 上传 mediaStorage → mediaUrl → 写 doc 第一行 image 节点
+       *       用户可在编辑器内 保留 / 删除(删 doc image 不影响 BookLocator.thumbnail)
+       *
+       * mediaStorage 上传失败 / 无截图 → 跳过 image 节点,doc 字面空 paragraph 起手。
+       */
+      let imageMediaUrl: string | null = null;
+      if (thumbnail) {
+        try {
+          const mediaApi = requireCapabilityApi<MediaStorageApi>('media-storage');
+          const r = await mediaApi.mediaPutBase64(
+            thumbnail,
+            'image/jpeg',
+            `pdf-anchor-${Date.now()}.jpg`,
+          );
+          if (r.success && r.mediaUrl) imageMediaUrl = r.mediaUrl;
+        } catch (err) {
+          console.warn('[pdf-annotations] mediaPutBase64 failed:', err);
+        }
+      }
+
+      const docContent: Array<Record<string, unknown>> = [];
+      if (imageMediaUrl) {
+        docContent.push({
+          type: 'image',
+          attrs: { src: imageMediaUrl, alignment: 'center' },
+        });
+      }
+      docContent.push({ type: 'paragraph' });
+
       const createdAt = Date.now();
       const bookLocator: BookLocator = {
         pageNum,
@@ -185,7 +218,7 @@ export function usePdfAnnotations(
         doc: {
           format: 'pm-doc-json',
           version: '0.1',
-          payload: { type: 'doc', content: [{ type: 'paragraph' }] },
+          payload: { type: 'doc', content: docContent },
         },
         folderId: null,
         anchor: { source: 'book', resourceId: bookId, locator: bookLocator },

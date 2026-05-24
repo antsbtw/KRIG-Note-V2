@@ -144,16 +144,14 @@ function anchorPreviewText(t: ThoughtInfo): string {
 }
 
 /**
- * 取 anchor 缩略图(2026-05-24 拍板:PDF 框选/划线 anchor 创建时截屏存
- * BookLocator.thumbnail;EPUB / Note 无)。
- * 优先 anchor.locator.thumbnail,fallback 到 ThoughtInfo.thumbnail 冗余字段。
+ * 取 book anchor 的页码(简洁文字,2026-05-24 拍板:anchor 区不再大图,改页码)。
+ * 截图字面进 thought.doc 第一行 image 节点(用户可保留/删除),anchor 区只显轻量定位提示。
  */
-function anchorThumbnail(t: ThoughtInfo): string | undefined {
-  if (t.anchor?.source === 'book') {
-    const loc = t.anchor.locator as { thumbnail?: string };
-    if (loc.thumbnail) return loc.thumbnail;
-  }
-  return t.thumbnail;
+function anchorBookPageLabel(t: ThoughtInfo): string | null {
+  if (t.anchor?.source !== 'book') return null;
+  const loc = t.anchor.locator as { pageNum?: number };
+  if (typeof loc.pageNum !== 'number' || loc.pageNum <= 0) return null;
+  return `第 ${loc.pageNum} 页`;
 }
 
 export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps) {
@@ -179,9 +177,10 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
   const hasTitleContent = titleSegments.length > 0;
   const isAiPending = isAI && !hasTitleContent;
   const anchorText = anchorPreviewText(thought);
-  const anchorThumb = anchorThumbnail(thought);
+  const anchorPageLabel = anchorBookPageLabel(thought);
   const anchorSegments = useMemo(() => parseInlineMathInText(anchorText), [anchorText]);
-  const hasAnchorVisual = Boolean(anchorThumb) || Boolean(anchorText);
+  // book → 页码;note/EPUB → 文字 preview;graph/canvas → 暂无
+  const hasAnchorVisual = Boolean(anchorPageLabel) || Boolean(anchorText);
   const titleFallback = isAI
     ? (isAiPending ? 'AI 思考中...' : 'AI 回复')
     : '空思考';
@@ -252,7 +251,8 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
 
       {expanded && (
         <>
-          {/* Anchor 锚定凭证 — 优先 thumbnail(PDF 框选/划线截图);否则 文字 preview(Note/EPUB) */}
+          {/* Anchor 锚定凭证 — book 显示页码("第 X 页");note/EPUB 显示文字 preview。
+              截图字面进 doc 第一行 image 节点(用户可保留/删除),不在 anchor 区重复展示。*/}
           {hasAnchorVisual && (
             <div
               className="thought-card__anchor"
@@ -260,12 +260,8 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
               title="点击跳转到原文位置"
               style={{ borderLeftColor: meta.color }}
             >
-              {anchorThumb ? (
-                <img
-                  className="thought-card__anchor-thumb"
-                  src={anchorThumb}
-                  alt="标注引文截图"
-                />
+              {anchorPageLabel ? (
+                <span className="thought-card__anchor-text">📖 {anchorPageLabel}</span>
               ) : (
                 <InlineSegments
                   segments={anchorSegments}
