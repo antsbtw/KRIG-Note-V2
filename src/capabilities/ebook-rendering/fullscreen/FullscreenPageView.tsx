@@ -1,31 +1,29 @@
 /**
  * FullscreenPageView — 全屏翻页式 PDF 渲染(EBookHost paged 分支)
  *
- * 与 FixedPageContent 的区别:
- * - FixedPageContent:滚动 + 虚拟化(view 主区,看大量页)
- * - FullscreenPageView:翻页(不滚动)+ 一次只 mount 1-2 个 canvas(沉浸阅读)
+ * 字面对齐 commit 52ecc290 实现 — 命令式 DOM 管理 spread 节点。
+ * 与原 commit 唯一差异:AnnotationLayer 通过 React createRoot 挂到 page-wrapper
+ * (V2 sub-phase 022 后 PDF 路径多了空间标注层,需要嵌 React 组件)。
  *
- * 翻页动画策略(Preview / Books 同款,源自 commit 52ecc290):
- * - 双 spread 同时 mount 在 React 数组中(new + old),通过 transform translateX 滑动
- * - 翻页时先新建 spread DOM → renderer.renderPage 渲完 → 再启动 transition 动画
- *   ("先渲染再动画"消灭"白纸滑入"问题)
+ * 翻页动画策略(Preview / Books 同款):
+ * - 命令式 DOM 操作 — React 只管 state,spread 节点由本组件直接 appendChild / remove
+ * - 翻页时新建 spread DOM → renderer.renderPage 渲完 → 再启动 transition 动画
+ *   ("先渲染再动画" 完全消灭旧实现的"白纸"问题)
  * - next(向后):新 spread 原地立刻出现 + 旧 spread translateX 滑出屏幕左侧
  * - prev(向前):新 spread 从屏外左侧 translateX 滑入 + 旧 spread 静止(被遮挡)
  *
  * 关键不变量(干净的两状态):
- * - spread 节点永远 absolute 居中(transform: translate(-50%,-50%)),从不切定位
- * - 静止期容器内只 1 个 spread;动画期最多 2 个(old + new)
+ * - spread 节点永远 absolute 居中(transform: translate(-50%,-50%)),
+ *   从不切 position/left/top — 静止/动画期间均同一定位语义
+ * - 容器内同时最多 2 个子节点(old + new),静止时只 1 个
+ * - 静态 useEffect 在 animatingRef.current 期间完全 noop,避免双 source of truth
  *
  * 模型:
  * - layout='single':每次显示 1 页,翻页 currentPage ± 1
  * - layout='double':每次显示 2 页(spread = [n, n+1]),翻页 currentPage ± 2
  *   - page 1 起,spread 起点永远是奇数(1, 3, 5, ...)
  *
- * scale 计算:fit min(clientHeight / pageH, clientWidth / pageW) 取更小一边铺满
- *
- * V2 差异(对比 commit 52ecc290):
- * - 嵌 AnnotationLayer(命令式 DOM 路线不能嵌 React 子组件,改为 React state 驱动 spread)
- * - 透传 PDF 标注 4 个 prop(annotationMode / annotations / onCreate / onDelete)
+ * scale 计算:fit (clientHeight | clientWidth) 取更小一边铺满
  */
 
 import {
@@ -36,7 +34,9 @@ import {
   useMemo,
   forwardRef,
   useImperativeHandle,
+  createElement,
 } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import type { IFixedPageRenderer, PageDimension } from '../types';
 import {
   AnnotationLayer,
@@ -52,7 +52,7 @@ interface FullscreenPageViewProps {
   initialPage?: number | null;
   onPageChange: (page: number) => void;
   onScaleChange?: (scale: number) => void;
-  /** 标注模式 — 同 FixedPageContent */
+  /** 标注 props — V2 sub-phase 022 后 PDF 全屏期保留标注 */
   annotationMode?: 'off' | 'rect' | 'underline';
   annotations?: PageAnnotation[];
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
@@ -67,9 +67,13 @@ export interface FullscreenPageViewHandle {
 
 const GAP_HORIZONTAL = 24;
 const PADDING = 32;
-const SLIDE_MS = 1500;
+const SLIDE_MS = 1000;
 // 翻页曲线 — easeOutQuint(Apple Books / iOS 翻页同款):
 //   开头快速启动 + 末尾长尾衰减,符合"手推书页"的物理直觉
+// 其他可选:
+//   'cubic-bezier(0.4, 0, 0.2, 1)' — Material 标准(头尾对称,机械感强)
+//   'cubic-bezier(0.25, 0.1, 0.25, 1)' — CSS 标准 ease(中庸)
+//   'cubic-bezier(0.16, 1, 0.3, 1)'   — 强 ease-out(弹簧感)
 const SLIDE_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 function spreadStart(page: number, layout: FullscreenPagedLayout): number {
@@ -77,137 +81,123 @@ function spreadStart(page: number, layout: FullscreenPagedLayout): number {
   return page % 2 === 0 ? page - 1 : page;
 }
 
-interface SpreadDescriptor {
-  /** 唯一 key — 由 startPage + scale 拼成,React diff 用 */
-  key: string;
-  startPage: number;
-  pages: number[];
-  pageW: number;
-  pageH: number;
+interface SpreadHandle {
+  node: HTMLDivElement;
+  canvases: HTMLCanvasElement[];
+  textLayers: HTMLDivElement[];
+  /** 每页一个 React root,挂 AnnotationLayer;destroy 时 unmount */
+  annotationRoots: Array<{ root: Root; pageNum: number }>;
 }
 
-function describeSpread(
-  startPage: number,
-  layout: FullscreenPagedLayout,
-  totalPages: number,
+/**
+ * 创建一个 spread DOM 节点 — 永远 absolute 居中,不参与父 flex 布局。
+ * 每个 page-wrapper 内额外用 createRoot 挂 AnnotationLayer(V2 额外加,
+ * 原 52ecc290 没这层)。
+ */
+function createSpreadNode(
+  pages: number[],
+  pageW: number,
+  pageH: number,
+  gap: number,
   pageDims: PageDimension[],
   scale: number,
-): SpreadDescriptor {
-  const pages =
-    layout === 'single'
-      ? [startPage]
-      : startPage + 1 <= totalPages
-        ? [startPage, startPage + 1]
-        : [startPage];
-  const dim = pageDims[Math.min(startPage - 1, pageDims.length - 1)];
-  const pageW = Math.floor(dim.width * scale);
-  const pageH = Math.floor(dim.height * scale);
-  return {
-    key: `${pages.join('-')}@${scale.toFixed(4)}`,
-    startPage,
-    pages,
-    pageW,
-    pageH,
-  };
+  annotationMode: 'off' | 'rect' | 'underline',
+  annotations: PageAnnotation[],
+  onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
+  onAnnotationDelete: ((id: string) => void) | undefined,
+): SpreadHandle {
+  const node = document.createElement('div');
+  node.className = 'krig-ebook-paged__spread';
+  // absolute 居中 — 静止/动画 都用这套定位,从不切换
+  node.style.position = 'absolute';
+  node.style.left = '50%';
+  node.style.top = '50%';
+  node.style.transform = 'translate(-50%, -50%)';
+  node.style.display = 'flex';
+  node.style.flexDirection = 'row';
+  node.style.alignItems = 'center';
+  node.style.justifyContent = 'center';
+  node.style.gap = `${gap}px`;
+  const canvases: HTMLCanvasElement[] = [];
+  const textLayers: HTMLDivElement[] = [];
+  const annotationRoots: Array<{ root: Root; pageNum: number }> = [];
+  pages.forEach((p) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'krig-ebook-paged__page-wrapper';
+    wrap.style.position = 'relative';
+    wrap.style.width = `${pageW}px`;
+    wrap.style.height = `${pageH}px`;
+    wrap.dataset.page = String(p);
+    const canvas = document.createElement('canvas');
+    wrap.appendChild(canvas);
+    canvases.push(canvas);
+    const tl = document.createElement('div');
+    tl.className = 'textLayer';
+    wrap.appendChild(tl);
+    textLayers.push(tl);
+    // AnnotationLayer 挂载点
+    const annHost = document.createElement('div');
+    annHost.className = 'krig-ebook-paged__annotation-host';
+    wrap.appendChild(annHost);
+    const dim = pageDims[p - 1];
+    if (dim) {
+      const root = createRoot(annHost);
+      root.render(
+        createElement(AnnotationLayer, {
+          pageNum: p,
+          scale,
+          pageWidth: dim.width,
+          pageHeight: dim.height,
+          mode: annotationMode,
+          annotations: annotations.filter((a) => a.pageNum === p),
+          onAnnotationCreate: onAnnotationCreate ?? ((): void => {}),
+          onAnnotationDelete: onAnnotationDelete ?? ((): void => {}),
+        }),
+      );
+      annotationRoots.push({ root, pageNum: p });
+    }
+    node.appendChild(wrap);
+  });
+  return { node, canvases, textLayers, annotationRoots };
 }
 
-/** 渲染单个 spread 的内部组件 — canvas / textLayer 命令式渲,标注层 React */
-function Spread({
-  descriptor,
-  renderer,
-  scale,
-  annotationMode,
-  annotations,
-  onAnnotationCreate,
-  onAnnotationDelete,
-  onRendered,
-  nodeRef,
-}: {
-  descriptor: SpreadDescriptor;
-  renderer: IFixedPageRenderer;
-  scale: number;
-  annotationMode: 'off' | 'rect' | 'underline';
-  annotations: PageAnnotation[];
-  onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
-  onAnnotationDelete?: (id: string) => void;
-  /** 像素就位时回调(给 animateTransition 用)*/
-  onRendered?: () => void;
-  /** 把 spread 根 DOM 暴露给父组件(动画期需要直接操作 transform)*/
-  nodeRef: (el: HTMLDivElement | null) => void;
-}) {
-  const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
-  const textLayerRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const onRenderedRef = useRef(onRendered);
-  useEffect(() => {
-    onRenderedRef.current = onRendered;
-  }, [onRendered]);
+/** 销毁 spread — unmount 所有 annotation root,然后从 DOM 移除节点 */
+function destroySpread(handle: SpreadHandle): void {
+  handle.annotationRoots.forEach(({ root }) => {
+    // 异步 unmount 避免 "synchronously unmount during render" 警告
+    queueMicrotask(() => root.unmount());
+  });
+  if (handle.node.parentNode) {
+    handle.node.parentNode.removeChild(handle.node);
+  }
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    const renderPromises = descriptor.pages.map((p) => {
-      const canvas = canvasRefs.current.get(p);
-      if (!canvas) return Promise.resolve();
-      return renderer.renderPage(p, canvas, scale);
-    });
-    void Promise.all(renderPromises).then(() => {
-      if (cancelled) return;
-      // text layer 异步但不阻塞像素就位
-      descriptor.pages.forEach((p) => {
-        const tl = textLayerRefs.current.get(p);
-        if (tl) void renderer.renderTextLayer(p, tl, scale);
-      });
-      onRenderedRef.current?.();
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [descriptor.key, descriptor.pages, renderer, scale]);
-
-  return (
-    <div
-      ref={nodeRef}
-      className="krig-ebook-paged__spread"
-      data-spread-key={descriptor.key}
-    >
-      {descriptor.pages.map((p) => {
-        const dim = renderer.getPageDimensions()[p - 1];
-        return (
-          <div
-            key={p}
-            className="krig-ebook-paged__page-wrapper"
-            data-page={p}
-            style={{ width: descriptor.pageW, height: descriptor.pageH }}
-          >
-            <canvas
-              ref={(el): void => {
-                if (el) canvasRefs.current.set(p, el);
-                else canvasRefs.current.delete(p);
-              }}
-            />
-            <div
-              className="textLayer"
-              ref={(el): void => {
-                if (el) textLayerRefs.current.set(p, el);
-                else textLayerRefs.current.delete(p);
-              }}
-            />
-            {dim && (
-              <AnnotationLayer
-                pageNum={p}
-                scale={scale}
-                pageWidth={dim.width}
-                pageHeight={dim.height}
-                mode={annotationMode}
-                annotations={annotations.filter((a) => a.pageNum === p)}
-                onAnnotationCreate={onAnnotationCreate ?? (() => {})}
-                onAnnotationDelete={onAnnotationDelete ?? (() => {})}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
+/** 重渲 spread 的 AnnotationLayer(annotations / mode / scale 变化时调) */
+function updateSpreadAnnotations(
+  handle: SpreadHandle,
+  pageDims: PageDimension[],
+  scale: number,
+  annotationMode: 'off' | 'rect' | 'underline',
+  annotations: PageAnnotation[],
+  onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
+  onAnnotationDelete: ((id: string) => void) | undefined,
+): void {
+  handle.annotationRoots.forEach(({ root, pageNum }) => {
+    const dim = pageDims[pageNum - 1];
+    if (!dim) return;
+    root.render(
+      createElement(AnnotationLayer, {
+        pageNum,
+        scale,
+        pageWidth: dim.width,
+        pageHeight: dim.height,
+        mode: annotationMode,
+        annotations: annotations.filter((a) => a.pageNum === pageNum),
+        onAnnotationCreate: onAnnotationCreate ?? ((): void => {}),
+        onAnnotationDelete: onAnnotationDelete ?? ((): void => {}),
+      }),
+    );
+  });
 }
 
 export const FullscreenPageView = forwardRef<
@@ -228,6 +218,10 @@ export const FullscreenPageView = forwardRef<
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // 当前主 spread 节点(命令式管理)
+  const currentSpreadRef = useRef<SpreadHandle | null>(null);
+  // 翻页动画进行中标志 — 同时只允许一个动画
+  const animatingRef = useRef(false);
 
   const totalPages = renderer.getTotalPages();
   const pageDims: PageDimension[] = useMemo(
@@ -242,22 +236,31 @@ export const FullscreenPageView = forwardRef<
   const [scale, setScale] = useState(1.0);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
-  // 动画进行中标志:静止 useEffect / state diff 在 animating 期跳过更新
-  const animatingRef = useRef(false);
-
-  /**
-   * spreads 数组:
-   * - 静止期长度 = 1(只 current)
-   * - 动画期长度 = 2([old, new]) — old 留在底层/顶层做滑出/被遮,new 是目标
-   * 动画结束后清回长度 1。
-   */
-  const [spreads, setSpreads] = useState<SpreadDescriptor[]>(() => {
-    if (pageDims.length === 0) return [];
-    return [describeSpread(spreadStart(currentPage, layout), layout, totalPages, pageDims, 1.0)];
-  });
-
-  // current spread 节点引用(动画结束清理 + transition 复位用)
-  const spreadNodesRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  // 标注相关 props 走 ref — createSpreadNode 闭包内拿最新值,避免静态 useEffect
+  // 把整个 spread 重建一遍
+  const annotationModeRef = useRef(annotationMode);
+  const annotationsRef = useRef(annotations);
+  const onAnnotationCreateRef = useRef(onAnnotationCreate);
+  const onAnnotationDeleteRef = useRef(onAnnotationDelete);
+  useEffect(() => {
+    annotationModeRef.current = annotationMode;
+    annotationsRef.current = annotations;
+    onAnnotationCreateRef.current = onAnnotationCreate;
+    onAnnotationDeleteRef.current = onAnnotationDelete;
+    // 标注 props 变化 → 重渲当前 spread 的 AnnotationLayer(不重建 spread)
+    const cur = currentSpreadRef.current;
+    if (cur) {
+      updateSpreadAnnotations(
+        cur,
+        pageDims,
+        scale,
+        annotationMode,
+        annotations,
+        onAnnotationCreate,
+        onAnnotationDelete,
+      );
+    }
+  }, [annotationMode, annotations, onAnnotationCreate, onAnnotationDelete, pageDims, scale]);
 
   // layout 切换时:把 currentPage 对齐到新 layout 的 spread 起点
   useEffect(() => {
@@ -284,7 +287,7 @@ export const FullscreenPageView = forwardRef<
     };
   }, []);
 
-  // 计算最佳 scale(fit min(width, height))
+  // 计算最佳 scale
   useEffect(() => {
     if (pageDims.length === 0 || containerSize.w === 0 || containerSize.h === 0) return;
     const dim = pageDims[0];
@@ -305,27 +308,65 @@ export const FullscreenPageView = forwardRef<
     onScaleChange?.(next);
   }, [pageDims, containerSize, layout, scale, onScaleChange]);
 
-  /**
-   * 静止 useEffect:维护单 spread(currentPage + layout + scale 三元组)。
-   * 动画期跳过(animatingRef.current)— animateTransition 接管节点生命周期。
-   */
+  // 静态渲染当前 spread(无动画):mount 初次 / scale 变 / layout 变 / window resize
+  // 动画进行中跳过 — 节点完全由 animateTransition 接管,避免双 source of truth
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container || pageDims.length === 0 || scale <= 0) return;
     if (animatingRef.current) return;
-    if (pageDims.length === 0 || scale <= 0) return;
-    const desc = describeSpread(
-      spreadStart(currentPage, layout),
-      layout,
-      totalPages,
+    const pages = layout === 'single'
+      ? [currentPage]
+      : currentPage + 1 <= totalPages ? [currentPage, currentPage + 1] : [currentPage];
+    const dim = pageDims[Math.min(currentPage - 1, pageDims.length - 1)];
+    const pageW = Math.floor(dim.width * scale);
+    const pageH = Math.floor(dim.height * scale);
+    const expectedPages = pages.join(',');
+    const existing = currentSpreadRef.current;
+    if (
+      existing &&
+      existing.node.dataset.pages === expectedPages &&
+      existing.node.dataset.scale === String(scale)
+    ) {
+      return; // 已是目标 spread,不动
+    }
+    // 销毁旧 spread(含 React root unmount)
+    if (existing) destroySpread(existing);
+    // 清空 container 内任何残留(防御:理论上 destroySpread 已移除节点)
+    container.innerHTML = '';
+    const handle = createSpreadNode(
+      pages,
+      pageW,
+      pageH,
+      layout === 'double' ? GAP_HORIZONTAL : 0,
       pageDims,
       scale,
+      annotationModeRef.current,
+      annotationsRef.current,
+      onAnnotationCreateRef.current,
+      onAnnotationDeleteRef.current,
     );
-    setSpreads((prev) => {
-      if (prev.length === 1 && prev[0].key === desc.key) return prev;
-      return [desc];
+    handle.node.dataset.pages = expectedPages;
+    handle.node.dataset.scale = String(scale);
+    container.appendChild(handle.node);
+    currentSpreadRef.current = handle;
+    pages.forEach((p, idx) => {
+      void renderer.renderPage(p, handle.canvases[idx], scale);
+      void renderer.renderTextLayer(p, handle.textLayers[idx], scale);
     });
-  }, [currentPage, layout, scale, totalPages, pageDims]);
+  }, [currentPage, layout, scale, totalPages, pageDims, renderer]);
 
-  // dominant page 推送给 host/view
+  // unmount 清理:移除所有 spread 节点 + unmount React root
+  useEffect(() => {
+    return () => {
+      const cur = currentSpreadRef.current;
+      if (cur) destroySpread(cur);
+      currentSpreadRef.current = null;
+      const container = containerRef.current;
+      if (container) container.innerHTML = '';
+    };
+  }, []);
+
+  // dominant page 推送给 panel
   useEffect(() => {
     onPageChange(currentPage);
   }, [currentPage, onPageChange]);
@@ -334,122 +375,105 @@ export const FullscreenPageView = forwardRef<
   // 翻书动画:next = 旧滑出/新原地 · prev = 新滑入/旧静止
   // ──────────────────────────────────────────────────────
   const animateTransition = useCallback(
-    (targetPage: number, direction: 'next' | 'prev'): void => {
+    async (targetPage: number, direction: 'next' | 'prev'): Promise<void> => {
       const container = containerRef.current;
-      if (!container || pageDims.length === 0 || scale <= 0) {
+      const oldHandle = currentSpreadRef.current;
+      if (!container || !oldHandle || pageDims.length === 0 || scale <= 0) {
         setCurrentPage(targetPage);
         return;
       }
       if (animatingRef.current) {
-        // 已有动画在跑:短路到目标 — 简单可预测,避免堆积
+        // 已有动画在跑:直接 short-circuit 跳到目标(避免堆积)
         setCurrentPage(targetPage);
         return;
       }
       animatingRef.current = true;
 
-      const newDesc = describeSpread(
-        spreadStart(targetPage, layout),
-        layout,
-        totalPages,
+      const oldNode = oldHandle.node;
+
+      // 1) 创建新 spread 节点 — createSpreadNode 默认已 absolute 居中(transform: -50%,-50%)
+      const pages = layout === 'single'
+        ? [targetPage]
+        : targetPage + 1 <= totalPages ? [targetPage, targetPage + 1] : [targetPage];
+      const dim = pageDims[Math.min(targetPage - 1, pageDims.length - 1)];
+      const pageW = Math.floor(dim.width * scale);
+      const pageH = Math.floor(dim.height * scale);
+      const newHandle = createSpreadNode(
+        pages,
+        pageW,
+        pageH,
+        layout === 'double' ? GAP_HORIZONTAL : 0,
         pageDims,
         scale,
+        annotationModeRef.current,
+        annotationsRef.current,
+        onAnnotationCreateRef.current,
+        onAnnotationDeleteRef.current,
       );
+      const newNode = newHandle.node;
+      newNode.dataset.pages = pages.join(',');
+      newNode.dataset.scale = String(scale);
 
-      // 1) spreads = [old, new] — React mount new spread,old 保留在 DOM 里做滑出
-      setSpreads((prev) => {
-        if (prev.length === 0) return [newDesc];
-        const oldDesc = prev[prev.length - 1];
-        if (oldDesc.key === newDesc.key) return prev;
-        return [oldDesc, newDesc];
+      // 1.5) **先**确定层级 — 防止 newNode 在 oldNode 上方意外显形(根因:渲染期间用户看到闪屏)
+      //   next:newNode 在底层(1),oldNode 在顶层(2)从上面滑走露出 newNode
+      //   prev:oldNode 在底层(1),newNode 在顶层(2)从屏外滑入盖住 oldNode
+      const offset = container.clientWidth + 100;
+      if (direction === 'next') {
+        oldNode.style.zIndex = '2';
+        oldNode.style.willChange = 'transform';
+        newNode.style.zIndex = '1';
+        // newNode 在中央(默认 transform),被 oldNode 完全盖住 — 但先 visibility:hidden,
+        // 直到渲染完成再 visible(canvas 在 hidden 期间仍可渲染像素,只是不显示)
+        newNode.style.visibility = 'hidden';
+      } else {
+        oldNode.style.zIndex = '1';
+        newNode.style.zIndex = '2';
+        newNode.style.willChange = 'transform';
+        // prev:newNode 起点在屏外左侧 — 本身就不可见,无需额外隐藏
+        newNode.style.transform = `translate(calc(-50% - ${offset}px), -50%)`;
+      }
+      container.appendChild(newNode);
+
+      // 2) 后台渲染新 spread 像素(newNode 当前要么被遮 要么在屏外,渲染期间不可见)
+      await Promise.all(
+        pages.map((p, idx) => renderer.renderPage(p, newHandle.canvases[idx], scale)),
+      );
+      pages.forEach((p, idx) => {
+        void renderer.renderTextLayer(p, newHandle.textLayers[idx], scale);
       });
 
-      // 等下一帧 — 让 React mount new spread DOM 进 spreadNodesRef
-      requestAnimationFrame(() => {
-        const oldNode = spreadNodesRef.current.get(spreads[spreads.length - 1]?.key ?? '') ?? null;
-        const newNode = spreadNodesRef.current.get(newDesc.key) ?? null;
+      // 2.5) next:像素就位,把 newNode 显出来 — 此时 oldNode 在上层挡住它,用户仍看到旧页面
+      if (direction === 'next') {
+        newNode.style.visibility = '';
+      }
 
-        if (!newNode) {
-          // mount 还没到 — 短路到目标(理论上 RAF 后已 mount,这里是防御)
-          animatingRef.current = false;
-          setCurrentPage(targetPage);
-          setSpreads([newDesc]);
-          return;
-        }
-
-        const offset = container.clientWidth + 100;
-
-        // 1.5) 层级 + 起点
-        if (direction === 'next') {
-          if (oldNode) {
-            oldNode.style.zIndex = '2';
-            oldNode.style.willChange = 'transform';
-          }
-          newNode.style.zIndex = '1';
-          // newNode 在中央(默认 transform translate(-50%,-50%)),被 oldNode 完全盖住,
-          // 但先 visibility:hidden,渲染完成回 visible(canvas 像素在 hidden 期间仍渲)
-          newNode.style.visibility = 'hidden';
-        } else {
-          if (oldNode) {
-            oldNode.style.zIndex = '1';
-          }
-          newNode.style.zIndex = '2';
-          newNode.style.willChange = 'transform';
-          // prev:newNode 起点在屏外左侧 — 本身就不可见,无需额外隐藏
-          newNode.style.transform = `translate(calc(-50% - ${offset}px), -50%)`;
-        }
-
-        // 2) 等像素就位再启动动画 — Spread.useEffect 渲完会调 onRendered
-        const startSlide = (): void => {
-          // next:像素就位,把 newNode 显出来 — oldNode 仍在上层挡住它
+      // 4) 启动 transform 动画(下一帧才加 transition,避免初始 transform 也参与过渡)
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
           if (direction === 'next') {
-            newNode.style.visibility = '';
+            oldNode.style.transition = `transform ${SLIDE_MS}ms ${SLIDE_EASING}`;
+            oldNode.style.transform = `translate(calc(-50% - ${offset}px), -50%)`;
+          } else {
+            newNode.style.transition = `transform ${SLIDE_MS}ms ${SLIDE_EASING}`;
+            newNode.style.transform = 'translate(-50%, -50%)';
           }
-          // 下一帧加 transition(避免初始 transform 也参与过渡)
-          requestAnimationFrame(() => {
-            if (direction === 'next') {
-              if (oldNode) {
-                oldNode.style.transition = `transform ${SLIDE_MS}ms ${SLIDE_EASING}`;
-                oldNode.style.transform = `translate(calc(-50% - ${offset}px), -50%)`;
-              }
-            } else {
-              newNode.style.transition = `transform ${SLIDE_MS}ms ${SLIDE_EASING}`;
-              newNode.style.transform = 'translate(-50%, -50%)';
-            }
-            window.setTimeout(() => {
-              // 清理:spreads 缩回单元素,清动画 inline style
-              newNode.style.transition = '';
-              newNode.style.willChange = '';
-              newNode.style.zIndex = '';
-              newNode.style.visibility = '';
-              animatingRef.current = false;
-              setSpreads([newDesc]);
-              setCurrentPage(targetPage);
-            }, SLIDE_MS + 30);
-          });
-        };
-
-        // 像素就位检测:Spread 把 onRendered 设到 pendingRenderedRef
-        // 简化路径:200ms 内 onRendered 触发即启动滑动;否则也启动(防 SDK 异常卡死)
-        let started = false;
-        const start = (): void => {
-          if (started) return;
-          started = true;
-          startSlide();
-        };
-        pendingRenderedRef.current = start;
-        window.setTimeout(start, 600); // 兜底:600ms 内必启动(单页渲一般 < 100ms)
+          setTimeout(resolve, SLIDE_MS + 30);
+        });
       });
-    },
-    [layout, totalPages, pageDims, scale, spreads],
-  );
 
-  /** 新 spread Spread.useEffect 渲完会调这个 */
-  const pendingRenderedRef = useRef<(() => void) | null>(null);
-  const handleSpreadRendered = useCallback(() => {
-    const cb = pendingRenderedRef.current;
-    pendingRenderedRef.current = null;
-    cb?.();
-  }, []);
+      // 5) 清理:销毁旧 handle(unmount React root + remove DOM)+ 重置 newNode 动画相关 inline style
+      destroySpread(oldHandle);
+      newNode.style.transition = '';
+      newNode.style.willChange = '';
+      newNode.style.zIndex = '';
+      currentSpreadRef.current = newHandle;
+      animatingRef.current = false;
+
+      // 6) 更新 React state — 静态 useEffect 看到 dataset 匹配会跳过重建
+      setCurrentPage(targetPage);
+    },
+    [layout, totalPages, pageDims, scale, renderer],
+  );
 
   // 命令式 API
   const goToPage = useCallback(
@@ -457,7 +481,7 @@ export const FullscreenPageView = forwardRef<
       const clamped = Math.max(1, Math.min(totalPages, page));
       const target = spreadStart(clamped, layout);
       if (target === currentPage) return;
-      animateTransition(target, target > currentPage ? 'next' : 'prev');
+      void animateTransition(target, target > currentPage ? 'next' : 'prev');
     },
     [layout, totalPages, currentPage, animateTransition],
   );
@@ -465,13 +489,13 @@ export const FullscreenPageView = forwardRef<
     const step = layout === 'double' ? 2 : 1;
     const target = Math.min(spreadStart(currentPage + step, layout), totalPages);
     if (target === currentPage) return;
-    animateTransition(target, 'next');
+    void animateTransition(target, 'next');
   }, [layout, totalPages, currentPage, animateTransition]);
   const prevPage = useCallback(() => {
     const step = layout === 'double' ? 2 : 1;
     const target = Math.max(spreadStart(currentPage - step, layout), 1);
     if (target === currentPage) return;
-    animateTransition(target, 'prev');
+    void animateTransition(target, 'prev');
   }, [layout, currentPage, animateTransition]);
 
   useImperativeHandle(ref, () => ({ goToPage, nextPage, prevPage }), [
@@ -479,6 +503,16 @@ export const FullscreenPageView = forwardRef<
     nextPage,
     prevPage,
   ]);
+
+  // prevPage / nextPage 走 ref — listener 只挂一次,业务函数变化不重挂
+  // (重挂会丢 firedInGesture / accDelta 局部 state,导致一次 swipe 翻多页;
+  // memory: [[event-listener-must-use-ref-for-business-fn]])
+  const prevPageRef = useRef(prevPage);
+  const nextPageRef = useRef(nextPage);
+  useEffect(() => {
+    prevPageRef.current = prevPage;
+    nextPageRef.current = nextPage;
+  }, [prevPage, nextPage]);
 
   // ←/→ 键翻页
   useEffect(() => {
@@ -489,23 +523,29 @@ export const FullscreenPageView = forwardRef<
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        prevPage();
+        prevPageRef.current();
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        nextPage();
+        nextPageRef.current();
       } else if (e.key === 'PageUp') {
         e.preventDefault();
-        prevPage();
+        prevPageRef.current();
       } else if (e.key === 'PageDown' || e.key === ' ') {
         e.preventDefault();
-        nextPage();
+        nextPageRef.current();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [prevPage, nextPage]);
+  }, []);
 
-  // trackpad 双指滑动翻页(横纵均接,同手势内只翻一屏)
+  // trackpad 双指滑动翻页:
+  // - 同一手势(连续 wheel 事件,gap < GESTURE_GAP_MS)内只翻一屏
+  // - 动画期内 wheel 一律拒绝(firedInGesture 锁死),但**不刷新 lastEventTime** —
+  //   惯性末尾的 wheel 不应被算作"还在手势中",否则用户停手后还要再等 GAP_MS 才能翻页
+  // - listener 只挂一次(空 deps)避免重挂清掉 firedInGesture
+  // - GESTURE_GAP_MS 只需覆盖 trackpad 惯性末尾(~150ms)— 动画期由 animatingRef 守门,
+  //   不需要 GAP_MS 自己扛动画时长
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -513,9 +553,16 @@ export const FullscreenPageView = forwardRef<
     let firedInGesture = false;
     let accDelta = 0;
     const SWIPE_THRESHOLD = 30;
-    const GESTURE_GAP_MS = 120;
+    const GESTURE_GAP_MS = 150;
     const handler = (e: WheelEvent): void => {
       e.preventDefault();
+      if (animatingRef.current) {
+        // 动画期内只锁 firedInGesture,不刷新 lastEventTime —
+        // 让 GAP 从用户真正停手的时刻起算(不是从动画结束起算)
+        firedInGesture = true;
+        accDelta = 0;
+        return;
+      }
       const now = Date.now();
       if (now - lastEventTime > GESTURE_GAP_MS) {
         firedInGesture = false;
@@ -528,38 +575,18 @@ export const FullscreenPageView = forwardRef<
       const delta = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
       accDelta += delta;
       if (Math.abs(accDelta) < SWIPE_THRESHOLD) return;
-      if (accDelta > 0) nextPage();
-      else prevPage();
+      if (accDelta > 0) nextPageRef.current();
+      else prevPageRef.current();
       firedInGesture = true;
     };
     container.addEventListener('wheel', handler, { passive: false });
     return () => container.removeEventListener('wheel', handler);
-  }, [prevPage, nextPage]);
+  }, []);
 
   if (pageDims.length === 0) {
     return <div className="krig-ebook-loading">Preparing pages...</div>;
   }
 
-  return (
-    <div className="krig-ebook-paged" ref={containerRef}>
-      {spreads.map((desc, idx) => (
-        <Spread
-          key={desc.key}
-          descriptor={desc}
-          renderer={renderer}
-          scale={scale}
-          annotationMode={annotationMode}
-          annotations={annotations}
-          onAnnotationCreate={onAnnotationCreate}
-          onAnnotationDelete={onAnnotationDelete}
-          /* spreads[length-1] = 新 spread,渲完才触发动画启动 */
-          onRendered={idx === spreads.length - 1 ? handleSpreadRendered : undefined}
-          nodeRef={(el): void => {
-            if (el) spreadNodesRef.current.set(desc.key, el);
-            else spreadNodesRef.current.delete(desc.key);
-          }}
-        />
-      ))}
-    </div>
-  );
+  // JSX 只渲染 container — spread 节点由命令式 DOM 操作维护
+  return <div className="krig-ebook-paged" ref={containerRef} />;
 });

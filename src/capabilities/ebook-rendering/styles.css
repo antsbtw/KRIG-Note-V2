@@ -462,3 +462,11 @@
   pointer-events: auto;
   user-select: text;
 }
+
+/* annotation 挂载点 — createRoot 渲染 AnnotationLayer 进来,
+ * AnnotationLayer 自身已是 position:absolute + inset:0(.krig-ebook-annotation-layer),
+ * 这里只做语义占位 */
+.krig-ebook-paged__annotation-host {
+  position: absolute;
+  inset: 0;
+}
