@@ -214,8 +214,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     (page: number) => {
       setCurrentPage(page);
       persistPdfProgress(page, scale, fitWidth);
+      // 翻页时强制收 toolbar 浮层(全屏期 hover 露出后用户翻页 → toolbar 让位)
+      if (isFullscreen) setToolbarVisible(false);
     },
-    [persistPdfProgress, scale, fitWidth],
+    [persistPdfProgress, scale, fitWidth, isFullscreen],
   );
 
   const handleScaleChangeFromHost = useCallback(
@@ -236,8 +238,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       setEpubPages(progress.pages);
       const cfi = hostRef.current?.getCurrentCFI();
       if (cfi) persistEpubProgress(cfi);
+      // 翻页时强制收 toolbar 浮层(全屏期 hover 露出后用户翻页 → toolbar 让位)
+      if (isFullscreen) setToolbarVisible(false);
     },
-    [persistEpubProgress],
+    [persistEpubProgress, isFullscreen],
   );
 
   // ── Toolbar callbacks ──
