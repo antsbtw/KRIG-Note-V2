@@ -261,33 +261,16 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     return unsub;
   }, [library, activeBookIdRef]);
 
-  // 全屏沉浸阅读:走 capability api(W5 边界 — view 不直 import capability 运行时值)
-  // 进度回写在 panel 内独立持久化,Esc 退出时 view 重新 open 此书会读到最新位置
-  //
-  // EPUB 布局对齐(2026-05-23 用户拍板):
-  //   view 主区单 column 宽 → 喂给 panel,panel 设 spread 容器 = 2 × 该宽度,居中显示
-  //   → 两 view paginator 切分文字位置精确一致 → 单屏 page N = spread 左页,
-  //     N+1 = 右页 → 翻页对齐无漂移
+  // 全屏沉浸阅读(2026-05-23 用户拍板 — 简化方案):
+  //   不再开独立全屏 panel,而是 toggle workspace.navSideCollapsed:
+  //     - true → NavSide 收起,EBookView 横向占满 → "全屏感"
+  //     - false → 恢复 NavSide
+  //   核心优势:同一个 EBookView / EBookHost / EPUBRenderer 实例从头到尾,
+  //     字号/主题/标注/翻页/cfi 全部内部 state,无跨实例同步问题,**零漂移**。
+  //   PDF 路径同理(PDF 不需要 spread,FixedPageContent 在更宽容器自适应)。
   const onFullscreen = useCallback(() => {
-    const info = lastBookInfoRef.current;
-    if (!info) return;
-    const currentCFI = hostRef.current?.getCurrentCFI();
-    const lastPosition = renderMode === 'reflowable'
-      ? { cfi: currentCFI ?? info.lastPosition?.cfi }
-      : { page: currentPage, fitWidth: true };
-    const epubViewColumnWidth = renderMode === 'reflowable'
-      ? (hostRef.current?.getEpubColumnWidth() ?? undefined)
-      : undefined;
-    console.log(
-      '[ebook-view] enter fullscreen; epubViewColumnWidth=', epubViewColumnWidth,
-      'host font-size=', hostRef.current?.getFontSize(),
-    );
-    rendering.openFullscreenReader({
-      workspaceId,
-      bookInfo: { ...info, lastPosition },
-      epubViewColumnWidth,
-    });
-  }, [rendering, workspaceId, renderMode, currentPage]);
+    workspaceManager.toggleNavSide(workspaceId);
+  }, [workspaceId]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
   // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
