@@ -163,6 +163,20 @@ export class WorkspaceManager {
     if (ws) this.update(id, { navSideCollapsed: !ws.navSideCollapsed });
   }
 
+  /**
+   * NavSide 命令式设值(2026-05-24:供 view 触发"复合操作"用,如 ⛶ 全屏需强制收 NavSide)。
+   *
+   * 分层原则:view 不直接 mutate workspace state;通过本 API 触发高层副作用 —
+   * 与 commandRegistry / bus.slot / channels 同模式(高层提供 API,底层调用)。
+   *
+   * 已是目标值时跳过 update(避免无意义 listener 通知)。
+   */
+  setNavSideCollapsed(id: string, collapsed: boolean): void {
+    const ws = this.get(id);
+    if (!ws || ws.navSideCollapsed === collapsed) return;
+    this.update(id, { navSideCollapsed: collapsed });
+  }
+
   /** 关闭 Workspace */
   close(id: string): string | null {
     if (!this.workspaces.has(id)) return null;

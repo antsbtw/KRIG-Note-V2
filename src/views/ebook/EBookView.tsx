@@ -77,13 +77,26 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   );
   const activeBookId = wsState?.activeBookId ?? null;
 
-  // 全屏 = navSideCollapsed (2026-05-23 简化方案,EBookView.tsx:260-269)
-  // 全屏期间 toolbar 默认隐藏,鼠标移到顶部 36px 内自动滑下露出。
-  // boolean 字段天然稳定引用,直接 getSnapshot 安全。
-  const isFullscreen = useSyncExternalStore(
-    (cb) => workspaceManager.subscribe(cb),
-    () => workspaceManager.get(workspaceId)?.navSideCollapsed ?? false,
-  );
+  /**
+   * 全屏(PDF 沉浸阅读)— view 内部独立 state(2026-05-24 用户拍板:与 navSideCollapsed 解耦)。
+   *
+   * 进入全屏(⛶ 按钮):
+   *   1. 快照 prevNavSideCollapsed + prevRightSlot
+   *   2. setNavSideCollapsed(true) + closeRight()
+   *   3. PDF 切 paged 双页 spread + toolbar auto-hide
+   *
+   * 退出全屏(再点 ⛶ / ESC):
+   *   1. setNavSideCollapsed(快照值) + openRight(快照 viewId)
+   *   2. PDF 回 scroll + toolbar 常显
+   *
+   * **不再** = navSideCollapsed:用户从 WorkspaceBar 点 NavSide toggle 时,
+   * 仅 navSideCollapsed 变,view 内 PDF 模式字面无感知。
+   */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenSnapshotRef = useRef<{
+    navSideCollapsed: boolean;
+    rightSlot: string | null;
+  } | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   // 退出全屏时复位 visible,避免下次进全屏首帧仍是"显示态"
   useEffect(() => {
@@ -294,19 +307,42 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
 
-  // 全屏沉浸阅读(2026-05-23 用户拍板 — 简化方案):
-  //   不再开独立全屏 panel,而是 toggle workspace.navSideCollapsed:
-  //     - true → NavSide 收起,EBookView 横向占满 → "全屏感"
-  //     - false → 恢复 NavSide
-  //   核心优势:同一个 EBookView / EBookHost / EPUBRenderer 实例从头到尾,
-  //     字号/主题/标注/翻页/cfi 全部内部 state,无跨实例同步问题,**零漂移**。
-  //   PDF 路径同理(PDF 不需要 spread,FixedPageContent 在更宽容器自适应)。
+  /**
+   * 全屏 toggle(2026-05-24 用户拍板:与 navSideCollapsed 解耦的独立 view state):
+   *
+   * 进入:快照 navSide / rightSlot 状态 → setNavSideCollapsed(true) + closeRight + setIsFullscreen(true)
+   * 退出:setIsFullscreen(false) + restore navSide + restore rightSlot
+   *
+   * 分层原则:view 通过 workspaceManager.setNavSideCollapsed + bus.slot.openRight/closeRight
+   * 这些"高层提供的明确 API"触发副作用,不直接 mutate workspace state。
+   */
   const onFullscreen = useCallback(() => {
-    workspaceManager.toggleNavSide(workspaceId);
+    const ws = workspaceManager.get(workspaceId);
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!ws || !bus) return;
+    if (!isFullscreen) {
+      // 进入全屏 — 快照 + 强制收 NavSide + 关右槽
+      fullscreenSnapshotRef.current = {
+        navSideCollapsed: ws.navSideCollapsed,
+        rightSlot: ws.slotBinding.right,
+      };
+      workspaceManager.setNavSideCollapsed(workspaceId, true);
+      if (ws.slotBinding.right) bus.slot.closeRight();
+      setIsFullscreen(true);
+    } else {
+      // 退出全屏 — 恢复快照(开右槽前 setIsFullscreen 让 view paged→scroll 先生效)
+      const snap = fullscreenSnapshotRef.current;
+      setIsFullscreen(false);
+      if (snap) {
+        workspaceManager.setNavSideCollapsed(workspaceId, snap.navSideCollapsed);
+        if (snap.rightSlot) bus.slot.openRight(snap.rightSlot);
+      }
+      fullscreenSnapshotRef.current = null;
+    }
     // 释放按钮焦点 — 避免 toolbar 全屏按钮点击后保持 :focus 视觉残留 +
     // ESC 退出后 hover 露出的 toolbar 上仍有焦点环
     (document.activeElement as HTMLElement | null)?.blur();
-  }, [workspaceId]);
+  }, [workspaceId, isFullscreen]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
   // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
