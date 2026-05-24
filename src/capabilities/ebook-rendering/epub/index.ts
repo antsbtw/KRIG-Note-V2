@@ -146,7 +146,7 @@ export class EPUBRenderer implements IReflowableRenderer {
       // 打开 EPUB
       await this.view.open(file);
 
-      // 应用 max-column-count(view ready 前可能被 setMaxColumnCount 设过)
+      // 应用 max-column-count(view ready 前可能被 setMaxColumnCount 设过 pending 值)
       if (this.view.renderer) {
         const count = this.pendingMaxColumnCount;
         this.view.renderer.setAttribute('max-column-count', String(count));
@@ -411,12 +411,12 @@ export class EPUBRenderer implements IReflowableRenderer {
     return this.currentProgress;
   }
 
-  nextChapter(): void {
-    this.view?.next?.();
+  async nextChapter(): Promise<void> {
+    await this.view?.next?.();
   }
 
-  prevChapter(): void {
-    this.view?.prev?.();
+  async prevChapter(): Promise<void> {
+    await this.view?.prev?.();
   }
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void {

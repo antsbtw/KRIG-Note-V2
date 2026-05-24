@@ -25,18 +25,12 @@ import {
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type { EBookLoadedInfo } from '@shared/ipc/ebook-types';
 import type {
   EBookRenderingApi,
   EBookHostHandle,
 } from '@capabilities/ebook-rendering/types';
-/**
- * EBOOK_FULLSCREEN_OVERLAY_ID 与 capability id 一同绑定的"协议常量"
- * 字面字符串避开 W5 边界(view 不直 import capability 运行时值)
- */
-const EBOOK_FULLSCREEN_OVERLAY_ID = 'ebook-rendering.fullscreen.reader';
 import { getEBookWsState } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
 import { usePdfAnnotations } from './use-pdf-annotations';
@@ -143,6 +137,26 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     });
   }, [library, activeBookIdRef, bookmarks, ann, pdfAnn]);
 
+  // EPUB 单/双页布局自适应:容器宽高比 ≥ 1(宽 ≥ 高)→ 双页 spread;< 1 → 单页。
+  // NavSide 收起后 EBookView body 横向变宽,自动进双页 spread;NavSide 展开后
+  // 容器变窄,自动回单页。reflowable 路径才推,PDF 不消费 maxColumnCount。
+  useEffect(() => {
+    if (renderMode !== 'reflowable') return;
+    const el = bodyRef.current;
+    if (!el) return;
+    const compute = (): void => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w <= 0 || h <= 0) return;
+      const count: 1 | 2 = w >= h ? 2 : 1;
+      hostRef.current?.setEpubMaxColumnCount(count);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [renderMode]);
+
   // EPUB 字号 / 主题:popup wrapper 改 localStorage 后 notify → 这里推给 host
   // (popup-registry 的 Component 不能接 view 端 props,只能模块级 event bus 通信)
   useEffect(() => {
@@ -243,39 +257,16 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
 
-  // 全屏 overlay 关闭时,view 重新 open 当前书 —— panel 已 saveProgress,
-  // 此时 library.open 推流的 lastPosition 即最新位置,view host 同步跳过去
-  useEffect(() => {
-    const unsub = fullscreenOverlayController.subscribe(() => {
-      const s = fullscreenOverlayController.getState();
-      // 仅当从 active 状态切到 inactive 时刷新(忽略首次 + 切其他 overlay)
-      if (!s.visible && s.lastActiveId === EBOOK_FULLSCREEN_OVERLAY_ID) {
-        const bookId = activeBookIdRef.current;
-        if (bookId) {
-          void library.open(bookId).catch((err) => {
-            console.warn('[ebook-view] reopen after fullscreen failed:', err);
-          });
-        }
-      }
-    });
-    return unsub;
-  }, [library, activeBookIdRef]);
-
-  // 全屏沉浸阅读:走 capability api(W5 边界 — view 不直 import capability 运行时值)
-  // 进度回写在 panel 内独立持久化,Esc 退出时 view 重新 open 此书会读到最新位置
+  // 全屏沉浸阅读(2026-05-23 用户拍板 — 简化方案):
+  //   不再开独立全屏 panel,而是 toggle workspace.navSideCollapsed:
+  //     - true → NavSide 收起,EBookView 横向占满 → "全屏感"
+  //     - false → 恢复 NavSide
+  //   核心优势:同一个 EBookView / EBookHost / EPUBRenderer 实例从头到尾,
+  //     字号/主题/标注/翻页/cfi 全部内部 state,无跨实例同步问题,**零漂移**。
+  //   PDF 路径同理(PDF 不需要 spread,FixedPageContent 在更宽容器自适应)。
   const onFullscreen = useCallback(() => {
-    const info = lastBookInfoRef.current;
-    if (!info) return;
-    // 用当前 view 内的最新位置覆盖 info.lastPosition(避免 panel 加载到 stale 位置)
-    // PDF 路径强制 fitWidth=true(全屏 Preview 风格,scale 由 host 按 viewport 算)
-    const lastPosition = renderMode === 'reflowable'
-      ? { cfi: hostRef.current?.getCurrentCFI() ?? info.lastPosition?.cfi }
-      : { page: currentPage, fitWidth: true };
-    rendering.openFullscreenReader({
-      workspaceId,
-      bookInfo: { ...info, lastPosition },
-    });
-  }, [rendering, workspaceId, renderMode, currentPage]);
+    workspaceManager.toggleNavSide(workspaceId);
+  }, [workspaceId]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
   // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
