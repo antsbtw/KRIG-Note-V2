@@ -170,12 +170,6 @@ export interface EBookHostProps {
     pageNum: number,
     annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
   ) => void;
-  /**
-   * 右键已有标注 → view 端调 ebook capability 新 thought block API
-   * (sub-phase 022 Step 5.6: lib.removeReadingThoughtBlock 替代 lib.annotationRemove)
-   */
-  onPdfAnnotationDelete?: (id: string) => void;
-
   // ── PDF 全屏翻页式渲染(2026-05-24)──
   /**
    * PDF 渲染模式:
@@ -206,7 +200,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     pdfAnnotations,
     pdfFlashAnnotationId,
     onPdfAnnotationCreate,
-    onPdfAnnotationDelete,
     pdfLayout = 'scroll',
     pagedLayout = 'single',
   },
@@ -613,7 +606,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           annotations={pdfAnnotations}
           flashAnnotationId={pdfFlashAnnotationId}
           onAnnotationCreate={onPdfAnnotationCreate}
-          onAnnotationDelete={onPdfAnnotationDelete}
         />
       )}
 
@@ -627,7 +619,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           annotationMode={pdfAnnotationMode}
           annotations={pdfAnnotations}
           onAnnotationCreate={onPdfAnnotationCreate}
-          onAnnotationDelete={onPdfAnnotationDelete}
         />
       )}
 
@@ -664,7 +655,6 @@ function PagedHostBranch({
   annotationMode,
   annotations,
   onAnnotationCreate,
-  onAnnotationDelete,
 }: {
   renderer: IFixedPageRenderer;
   layout: FullscreenPagedLayout;
@@ -677,7 +667,6 @@ function PagedHostBranch({
     pageNum: number,
     annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
   ) => void;
-  onAnnotationDelete?: (id: string) => void;
 }) {
   const viewRef = useRef<FullscreenPageViewHandle | null>(null);
   useEffect(() => {
@@ -693,7 +682,6 @@ function PagedHostBranch({
       annotationMode={annotationMode}
       annotations={annotations}
       onAnnotationCreate={onAnnotationCreate}
-      onAnnotationDelete={onAnnotationDelete}
     />
   );
 }

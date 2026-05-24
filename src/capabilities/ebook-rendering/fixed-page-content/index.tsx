@@ -33,8 +33,6 @@ interface FixedPageContentProps {
   annotations?: PageAnnotation[];
   /** 创建标注:layer 仅传草稿(type/color/rect),pageNum 由 layer 注入,id 由 main 生成 */
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
-  /** 删除标注 */
-  onAnnotationDelete?: (id: string) => void;
 }
 
 const PAGE_GAP = 8;
@@ -52,7 +50,6 @@ export function FixedPageContent({
   annotations = [],
   flashAnnotationId = null,
   onAnnotationCreate,
-  onAnnotationDelete,
 }: FixedPageContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefsRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -341,7 +338,6 @@ export function FixedPageContent({
                 annotations={annotations.filter((a) => a.pageNum === pageNum)}
                 flashAnnotationId={flashAnnotationId}
                 onAnnotationCreate={onAnnotationCreate ?? (() => {})}
-                onAnnotationDelete={onAnnotationDelete ?? (() => {})}
               />
             </div>
           );

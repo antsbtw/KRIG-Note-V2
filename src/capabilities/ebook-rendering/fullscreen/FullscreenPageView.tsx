@@ -56,7 +56,6 @@ interface FullscreenPageViewProps {
   annotationMode?: 'off' | 'rect';
   annotations?: PageAnnotation[];
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
-  onAnnotationDelete?: (id: string) => void;
 }
 
 export interface FullscreenPageViewHandle {
@@ -104,7 +103,6 @@ function createSpreadNode(
   annotationMode: 'off' | 'rect',
   annotations: PageAnnotation[],
   onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
-  onAnnotationDelete: ((id: string) => void) | undefined,
 ): SpreadHandle {
   const node = document.createElement('div');
   node.className = 'krig-ebook-paged__spread';
@@ -151,7 +149,6 @@ function createSpreadNode(
           mode: annotationMode,
           annotations: annotations.filter((a) => a.pageNum === p),
           onAnnotationCreate: onAnnotationCreate ?? ((): void => {}),
-          onAnnotationDelete: onAnnotationDelete ?? ((): void => {}),
         }),
       );
       annotationRoots.push({ root, pageNum: p });
@@ -180,7 +177,6 @@ function updateSpreadAnnotations(
   annotationMode: 'off' | 'rect',
   annotations: PageAnnotation[],
   onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
-  onAnnotationDelete: ((id: string) => void) | undefined,
 ): void {
   handle.annotationRoots.forEach(({ root, pageNum }) => {
     const dim = pageDims[pageNum - 1];
@@ -194,7 +190,6 @@ function updateSpreadAnnotations(
         mode: annotationMode,
         annotations: annotations.filter((a) => a.pageNum === pageNum),
         onAnnotationCreate: onAnnotationCreate ?? ((): void => {}),
-        onAnnotationDelete: onAnnotationDelete ?? ((): void => {}),
       }),
     );
   });
@@ -213,7 +208,6 @@ export const FullscreenPageView = forwardRef<
     annotationMode = 'off',
     annotations = [],
     onAnnotationCreate,
-    onAnnotationDelete,
   },
   ref,
 ) {
@@ -241,12 +235,10 @@ export const FullscreenPageView = forwardRef<
   const annotationModeRef = useRef(annotationMode);
   const annotationsRef = useRef(annotations);
   const onAnnotationCreateRef = useRef(onAnnotationCreate);
-  const onAnnotationDeleteRef = useRef(onAnnotationDelete);
   useEffect(() => {
     annotationModeRef.current = annotationMode;
     annotationsRef.current = annotations;
     onAnnotationCreateRef.current = onAnnotationCreate;
-    onAnnotationDeleteRef.current = onAnnotationDelete;
     // 标注 props 变化 → 重渲当前 spread 的 AnnotationLayer(不重建 spread)
     const cur = currentSpreadRef.current;
     if (cur) {
@@ -257,10 +249,9 @@ export const FullscreenPageView = forwardRef<
         annotationMode,
         annotations,
         onAnnotationCreate,
-        onAnnotationDelete,
       );
     }
-  }, [annotationMode, annotations, onAnnotationCreate, onAnnotationDelete, pageDims, scale]);
+  }, [annotationMode, annotations, onAnnotationCreate, pageDims, scale]);
 
   // layout 切换时:把 currentPage 对齐到新 layout 的 spread 起点
   useEffect(() => {
@@ -343,7 +334,6 @@ export const FullscreenPageView = forwardRef<
       annotationModeRef.current,
       annotationsRef.current,
       onAnnotationCreateRef.current,
-      onAnnotationDeleteRef.current,
     );
     handle.node.dataset.pages = expectedPages;
     handle.node.dataset.scale = String(scale);
@@ -408,7 +398,6 @@ export const FullscreenPageView = forwardRef<
         annotationModeRef.current,
         annotationsRef.current,
         onAnnotationCreateRef.current,
-        onAnnotationDeleteRef.current,
       );
       const newNode = newHandle.node;
       newNode.dataset.pages = pages.join(',');

@@ -263,18 +263,17 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     [persistEpubProgress, isFullscreen],
   );
 
-  // PDF 标注创建后召唤评论入口:非全屏开右槽 ThoughtView + 高亮新卡片。
-  // 全屏路径(navSideCollapsed=true)的 floating card 留 PR2 实施 — 本 PR
-  // 全屏期标注创建后无 UI 反馈(thought 已落库,展开 NavSide 后可在右槽评论)。
+  // PDF 标注创建后**仅落库**(PR-α-2 行为回退,handoff §α-2 第 1 项):
+  // 用户在标注上右键 "💭 加思考" 才召唤右槽 ThoughtView,不再自动开。
+  //
+  // 历史:0eaafe73 前 create 后会自动 commandRegistry.execute(
+  //   'thought-view.add-from-pdf-annotation', created.thoughtId
+  // ),与"右键 = 显式选择动作"的右键体系不一致;本 PR 回退此自动行为。
   const handlePdfAnnotationCreate = useCallback(
     async (pageNum: number, draft: Parameters<typeof pdfAnn.create>[1]) => {
-      const created = await pdfAnn.create(pageNum, draft);
-      if (!created) return;
-      if (!isFullscreen) {
-        commandRegistry.execute('thought-view.add-from-pdf-annotation', created.thoughtId);
-      }
+      await pdfAnn.create(pageNum, draft);
     },
-    [pdfAnn, isFullscreen],
+    [pdfAnn],
   );
 
   // ── Toolbar callbacks ──
@@ -551,7 +550,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             pdfAnnotations={pdfAnn.annotations}
             pdfFlashAnnotationId={pdfAnn.flashId}
             onPdfAnnotationCreate={handlePdfAnnotationCreate}
-            onPdfAnnotationDelete={pdfAnn.remove}
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}
           />
