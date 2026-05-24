@@ -25,8 +25,10 @@ interface FixedPageContentProps {
   onScaleChange: (scale: number) => void;
   /** 注册跳转回调,view 端通过此回调命令式跳转到指定页 */
   onRegisterGotoPage: (fn: (page: number) => void) => void;
-  /** 标注模式(C5):'off' / 'rect' / 'underline' */
-  annotationMode?: 'off' | 'rect' | 'underline';
+  /** 标注模式(C5):'off' / 'rect' — 2026-05-24 删 underline */
+  annotationMode?: 'off' | 'rect';
+  /** scroll-to-source 跳转后短暂高亮的标注 id(透传给每个 AnnotationLayer) */
+  flashAnnotationId?: string | null;
   /** 已有标注(按页过滤后整体传入,内部按 pageNum 分发)*/
   annotations?: PageAnnotation[];
   /** 创建标注:layer 仅传草稿(type/color/rect),pageNum 由 layer 注入,id 由 main 生成 */
@@ -48,6 +50,7 @@ export function FixedPageContent({
   onRegisterGotoPage,
   annotationMode = 'off',
   annotations = [],
+  flashAnnotationId = null,
   onAnnotationCreate,
   onAnnotationDelete,
 }: FixedPageContentProps) {
@@ -208,13 +211,22 @@ export function FixedPageContent({
     domGeneration,
   ]);
 
-  // 滚动到指定页
+  /**
+   * 滚动到指定页 — 返回 boolean 报告是否真的执行了 scroll。
+   * 失败原因(容器未挂载 / pageOffsets 还没算)→ 上层 retry。
+   *
+   * 2026-05-24 修跳源 bug:scroll-to-source 触发 ebookCap.open,EBookView 重新
+   * load PDF → FixedPageContent 重 mount → containerRef 在新 mount 周期内
+   * 短暂 null;上层 tryScroll 只看 hostRef.current 不够,必须看 scrollToPage 是否
+   * 真正执行(boolean 反馈)。
+   */
   const scrollToPage = useCallback(
-    (pageNum: number) => {
+    (pageNum: number): boolean => {
       const container = containerRef.current;
-      if (!container || pageOffsets.length === 0) return;
+      if (!container || pageOffsets.length === 0) return false;
       const idx = Math.max(0, Math.min(pageNum - 1, pageOffsets.length - 1));
       container.scrollTo({ top: pageOffsets[idx] * scale });
+      return true;
     },
     [pageOffsets, scale],
   );
@@ -327,6 +339,7 @@ export function FixedPageContent({
                 pageHeight={dim.height}
                 mode={annotationMode}
                 annotations={annotations.filter((a) => a.pageNum === pageNum)}
+                flashAnnotationId={flashAnnotationId}
                 onAnnotationCreate={onAnnotationCreate ?? (() => {})}
                 onAnnotationDelete={onAnnotationDelete ?? (() => {})}
               />

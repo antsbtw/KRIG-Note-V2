@@ -99,6 +99,17 @@ export interface EBookHostHandle {
   addHighlight(cfi: string, color: string): Promise<void>;
   /** EPUB 移除 CFI 高亮;PDF noop */
   removeHighlight(cfi: string): void;
+
+  /**
+   * 截 PDF 指定页面 rect 区域为 JPEG dataUrl(独立离屏 render 2x DPR)。
+   * EPUB / 未加载 PDF 字面拒绝(reject)。
+   * rect 坐标基于 scale=1 的页面尺寸(与 PageAnnotation.rect 同坐标系)。
+   * 2026-05-24 拍板:抽象为 host 级 API,后续 EPUB / 其他 view 截图同模式复用。
+   */
+  capturePageRect(
+    pageNum: number,
+    rect: { x: number; y: number; w: number; h: number },
+  ): Promise<string>;
 }
 
 /** 搜索结果(PDF / EPUB 通用结构)*/
@@ -142,10 +153,15 @@ export interface EBookHostProps {
   onEpubAnnotationClick?: (cfi: string) => void;
 
   // ── C5:PDF 空间标注 ──
-  /** 标注模式(off / rect / underline)— PDF 路径,EPUB 不消费 */
-  pdfAnnotationMode?: 'off' | 'rect' | 'underline';
+  /** 标注模式(off / rect)— PDF 路径,EPUB 不消费;2026-05-24 删 underline */
+  pdfAnnotationMode?: 'off' | 'rect';
   /** 已有 PDF 空间标注(view 从 library 加载后传入) */
   pdfAnnotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
+  /**
+   * scroll-to-source 跳转后短暂高亮的标注 id(view 端 useState 持,~1.5s 后自动清空)。
+   * AnnotationLayer 对 id 匹配的标注加 .krig-ebook-annotation--flashing CSS class。
+   */
+  pdfFlashAnnotationId?: string | null;
   /**
    * 用户拖拽创建标注 → view 端调 ebook capability 新 thought block API
    * (sub-phase 022 Step 5.6: lib.addReadingThoughtBlock 替代 lib.annotationAdd)
@@ -188,6 +204,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onEpubAnnotationClick,
     pdfAnnotationMode,
     pdfAnnotations,
+    pdfFlashAnnotationId,
     onPdfAnnotationCreate,
     onPdfAnnotationDelete,
     pdfLayout = 'scroll',
@@ -560,6 +577,16 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.removeHighlight(cfi);
       },
+      async capturePageRect(
+        pageNum: number,
+        rect: { x: number; y: number; w: number; h: number },
+      ): Promise<string> {
+        const r = rendererRef.current;
+        if (!r || !isFixedPage(r)) {
+          throw new Error('capturePageRect requires a loaded fixed-page (PDF) renderer');
+        }
+        return r.capturePageRect(pageNum, rect);
+      },
     }),
     [loadFromInfo, handleScaleChange, handleSetFitWidth],
   );
@@ -584,6 +611,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           onRegisterGotoPage={registerGotoPage}
           annotationMode={pdfAnnotationMode}
           annotations={pdfAnnotations}
+          flashAnnotationId={pdfFlashAnnotationId}
           onAnnotationCreate={onPdfAnnotationCreate}
           onAnnotationDelete={onPdfAnnotationDelete}
         />
@@ -643,7 +671,7 @@ function PagedHostBranch({
   initialPage: number | null;
   onPageChange: (page: number) => void;
   onRegisterGotoPage: (fn: (page: number) => void) => void;
-  annotationMode?: 'off' | 'rect' | 'underline';
+  annotationMode?: 'off' | 'rect';
   annotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
   onAnnotationCreate?: (
     pageNum: number,

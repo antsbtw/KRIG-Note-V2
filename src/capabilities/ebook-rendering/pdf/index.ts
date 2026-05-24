@@ -266,6 +266,59 @@ export class PDFRenderer implements IFixedPageRenderer {
     return results;
   }
 
+  /**
+   * 截 PDF 指定页 rect 区域 → JPEG dataUrl(独立 render,2x DPR 高清)。
+   *
+   * 实现要点:
+   * - 不复用屏上已渲染 canvas(其分辨率取决于当前 scale,可能太低)
+   * - 走 PDFPageProxy.render 到离屏 OffscreenCanvas 大小 = rect * 2x(对齐 retina)
+   * - JPEG 质量 0.85 — 在公式/小字清晰度与体积间折中
+   * - rect 坐标基于 scale=1;render 时 viewport scale=2x,对应 rect 坐标也乘 2x 取像素
+   *
+   * 错误处理:页号非法 / doc 已 destroy → 抛错(view 端 try/catch 容忍)
+   */
+  async capturePageRect(
+    pageNum: number,
+    rect: { x: number; y: number; w: number; h: number },
+  ): Promise<string> {
+    if (!this.doc) throw new Error('PDF document not loaded');
+    if (pageNum < 1 || pageNum > this.doc.numPages) {
+      throw new Error(`page ${pageNum} out of range`);
+    }
+    const captureScale = 2; // 2x DPR 高清
+    const page = await this.getPage(pageNum);
+    const viewport = page.getViewport({ scale: captureScale });
+
+    // 离屏整页 canvas — render 整页再裁剪到 rect。
+    // 备选(先 render 后裁剪)优于"裁剪 viewport"(后者需要 transform 矩阵推导,
+    // 且 pdfjs 对 partial render 的 transform 支持依赖版本)。
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = Math.ceil(viewport.width);
+    pageCanvas.height = Math.ceil(viewport.height);
+    const pageCtx = pageCanvas.getContext('2d');
+    if (!pageCtx) throw new Error('failed to get 2d context');
+
+    await page.render({ canvasContext: pageCtx, viewport }).promise;
+
+    // 裁剪 rect(rect 是 scale=1 坐标,乘 captureScale 得像素)
+    const sx = Math.max(0, Math.floor(rect.x * captureScale));
+    const sy = Math.max(0, Math.floor(rect.y * captureScale));
+    const sw = Math.max(1, Math.ceil(rect.w * captureScale));
+    const sh = Math.max(1, Math.ceil(rect.h * captureScale));
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = sw;
+    cropCanvas.height = sh;
+    const cropCtx = cropCanvas.getContext('2d');
+    if (!cropCtx) throw new Error('failed to get 2d context');
+    // 白底,避免 PDF 透明区域 JPEG 编码后泛黑
+    cropCtx.fillStyle = '#ffffff';
+    cropCtx.fillRect(0, 0, sw, sh);
+    cropCtx.drawImage(pageCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    return cropCanvas.toDataURL('image/jpeg', 0.85);
+  }
+
   // ── Private ──
 
   private async getPage(pageNum: number): Promise<PDFPageProxy> {

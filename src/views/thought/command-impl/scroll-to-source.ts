@@ -28,7 +28,12 @@ export async function scrollToSource(thoughtId: string): Promise<void> {
     return scrollToNoteSource(t.anchor.resourceId, t.anchor.locator as NoteLocator, wsId);
   }
   if (t.anchor.source === 'book') {
-    return scrollToBookSource(t.anchor.resourceId, t.anchor.locator as BookLocator, wsId);
+    return scrollToBookSource(
+      t.anchor.resourceId,
+      t.anchor.locator as BookLocator,
+      wsId,
+      thoughtId,
+    );
   }
 }
 
@@ -64,6 +69,7 @@ async function scrollToBookSource(
   bookId: string,
   locator: BookLocator,
   wsId: string,
+  thoughtId: string,
 ): Promise<void> {
   const ws = workspaceManager.get(wsId);
   if (ws && ws.slotBinding.left !== 'ebook-view') {
@@ -71,15 +77,26 @@ async function scrollToBookSource(
       slotBinding: { ...ws.slotBinding, left: 'ebook-view' },
     });
   }
+  // 仅当目标书 ≠ 当前活动书 时才 open(避免无谓 reload —
+  // open 会触发 EBookView.onBookOpened → host.loadFromInfo →
+  // FixedPageContent 重 mount → containerRef 短暂 null →
+  // scrollToPage BAILED + restore 把页拉回 last position)
   const ebookApi = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-  await ebookApi.open(bookId);
-  // EBookView 订阅 channel 后调 host.goToPage/goToCFI(异步重试已在 EBookView 内做)
+  const ebookState = ws?.pluginStates['ebook-view'] as
+    | { activeBookId?: string | null }
+    | undefined;
+  if (ebookState?.activeBookId !== bookId) {
+    await ebookApi.open(bookId);
+  }
+  // EBookView 订阅 channel 后多次重试 goToPage(幂等),
+  // 直至 containerRef ready 后某一次成功
   const bus = workspaceManager.getBus(wsId);
   if (bus) {
     bus.channels.emit('thought.scroll-to-book-source', {
       bookId,
       pageNum: locator.pageNum,
       cfi: locator.cfi,
+      thoughtId,
     });
   }
 }

@@ -16,6 +16,7 @@ import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { ThoughtType } from '@capabilities/thought/types';
 import { thoughtCap } from './command-impl/shared';
 import { addThoughtFromNote } from './command-impl/add-from-note';
+import { addFromPdfAnnotation } from './command-impl/add-from-pdf-annotation';
 import { askAiFromNote } from './command-impl/ask-ai';
 import { scrollToSource } from './command-impl/scroll-to-source';
 
@@ -53,6 +54,15 @@ export function registerThoughtCommands(): void {
   // 跨 view 命令(Note 侧 ⌘⇧M / 💭 / 🤖 / ThoughtCard 跳源)
   commandRegistry.register('thought-view.add-from-note', () => {
     void addThoughtFromNote();
+  });
+
+  /**
+   * EBook 侧 PDF 标注创建后召唤右槽 ThoughtView + 高亮新 thought 卡片。
+   * pdfAnn.create 已完成 thought atom + anchor 落库,本命令只负责 UI 召唤。
+   */
+  commandRegistry.register('thought-view.add-from-pdf-annotation', (arg: unknown) => {
+    if (typeof arg !== 'string') return;
+    void addFromPdfAnnotation(arg);
   });
 
   commandRegistry.register('thought-view.ask-ai-from-note', () => {

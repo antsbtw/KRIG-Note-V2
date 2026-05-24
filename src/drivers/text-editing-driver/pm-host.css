@@ -4002,7 +4002,8 @@
 
 /* ── thought-view Phase 3:横切思考层 anchor 渲染 ── */
 
-/* inline mark — 9 种 type color(色对齐 THOUGHT_TYPE_META) */
+/* inline mark — 6 种 type color(色对齐 THOUGHT_TYPE_META) */
+/* 2026-05-24 拍板:删除 highlight / underline / rect-frame 三种 — 视觉(颜色) = type 反查 META,单一真相源 */
 .krig-thought-mark {
   background: rgba(74, 158, 255, 0.08);
   border-bottom: 2px dotted var(--krig-thought-color, #4a9eff);
@@ -4017,9 +4018,6 @@
 .krig-thought-mark--todo         { --krig-thought-color: #4caf50; }
 .krig-thought-mark--analysis     { --krig-thought-color: #ab47bc; }
 .krig-thought-mark--ai-response  { --krig-thought-color: #6366f1; }
-.krig-thought-mark--highlight    { --krig-thought-color: #ffd43b; background: rgba(255, 212, 59, 0.18); }
-.krig-thought-mark--underline    { --krig-thought-color: #74c0fc; }
-.krig-thought-mark--rect-frame   { --krig-thought-color: #b197fc; }
 
 /* block frame decoration(frameThoughtId 非空时画外框) */
 .krig-thought-block-frame {

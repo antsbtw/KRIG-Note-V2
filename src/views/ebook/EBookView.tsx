@@ -110,7 +110,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const search = useSearch(hostRef);
   const bookmarks = useBookmarks(hostRef, activeBookIdRef, epubChapter);
   const ann = useEpubAnnotation(hostRef, activeBookIdRef);
-  const pdfAnn = usePdfAnnotations(activeBookIdRef);
+  const pdfAnn = usePdfAnnotations(activeBookIdRef, hostRef);
 
   // C6:PDF 提取 — 上传当前书到 Platform → 切右栏 web-view 装 Platform UI
   // (atom batch JSON 落 noteCapability 由 NoteView 内的 useExtractionImport 处理)
@@ -250,6 +250,20 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     [persistEpubProgress, isFullscreen],
   );
 
+  // PDF 标注创建后召唤评论入口:非全屏开右槽 ThoughtView + 高亮新卡片。
+  // 全屏路径(navSideCollapsed=true)的 floating card 留 PR2 实施 — 本 PR
+  // 全屏期标注创建后无 UI 反馈(thought 已落库,展开 NavSide 后可在右槽评论)。
+  const handlePdfAnnotationCreate = useCallback(
+    async (pageNum: number, draft: Parameters<typeof pdfAnn.create>[1]) => {
+      const created = await pdfAnn.create(pageNum, draft);
+      if (!created) return;
+      if (!isFullscreen) {
+        commandRegistry.execute('thought-view.add-from-pdf-annotation', created.thoughtId);
+      }
+    },
+    [pdfAnn, isFullscreen],
+  );
+
   // ── Toolbar callbacks ──
 
   const onPageChange = useCallback((page: number) => {
@@ -365,30 +379,46 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     const bus = workspaceManager.getBus(workspaceId);
     if (!bus) return;
     const unsub = bus.channels.subscribe('thought.scroll-to-book-source', (payload: unknown) => {
-      const { bookId, pageNum, cfi } = (payload ?? {}) as {
+      const { bookId, pageNum, cfi, thoughtId } = (payload ?? {}) as {
         bookId?: string;
         pageNum?: number;
         cfi?: string;
+        thoughtId?: string;
       };
       if (!bookId) return;
-      // 等 EBookView 加载完该书(scroll-to-source 流程内已调 ebookCap.open,
-      // 此时 onBookOpened 推流可能还没来 — 200ms 重试一次兜底)
+      /**
+       * 跳源重试策略(2026-05-24 修跳源 bug):
+       *   scroll-to-source 流程内会调 ebookCap.open → EBookView 收到 onBookOpened
+       *   → host.loadFromInfo → FixedPageContent 重 mount。这一过程从 channel emit
+       *   到 containerRef 真正绑好可能跨多个 frame(取决于 PDF 大小)。
+       *
+       *   单次 goToPage 调用经常落到 containerRef = null 的窗口期。最稳的策略:
+       *   定时点多次调 goToPage(幂等),让任意一次落到 ready 后的窗口就成功。
+       *
+       *   8 次 * 250ms = 2s 内总会有 1 次落到 ready 之后(若 2s 内仍未 ready
+       *   说明 PDF 加载本身有问题,放弃)。每次调都是幂等 scrollTo(targetTop)。
+       */
       const tryScroll = (attempt: number): void => {
         const host = hostRef.current;
-        if (!host) {
-          if (attempt < 8) window.setTimeout(() => tryScroll(attempt + 1), 200);
-          return;
+        if (host) {
+          if (cfi) {
+            void host.goToCFI(cfi);
+          } else if (pageNum && pageNum > 0) {
+            host.goToPage(pageNum);
+          }
         }
-        if (cfi) {
-          void host.goToCFI(cfi);
-        } else if (pageNum && pageNum > 0) {
-          host.goToPage(pageNum);
+        if (attempt < 8) {
+          window.setTimeout(() => tryScroll(attempt + 1), 250);
         }
       };
       tryScroll(0);
+      if (thoughtId) {
+        // 闪烁延后到第一波 retry 都试过(8*250=2000ms);annotations 此时大概率已就位
+        window.setTimeout(() => pdfAnn.flash(thoughtId), 2200);
+      }
     });
     return unsub;
-  }, [workspaceId]);
+  }, [workspaceId, pdfAnn]);
 
   if (!wsState) {
     return <div className="krig-ebook-empty">Workspace 未就绪</div>;
@@ -483,7 +513,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             onEpubAnnotationClick={ann.handleAnnotationClick}
             pdfAnnotationMode={pdfAnn.mode}
             pdfAnnotations={pdfAnn.annotations}
-            onPdfAnnotationCreate={pdfAnn.create}
+            pdfFlashAnnotationId={pdfAnn.flashId}
+            onPdfAnnotationCreate={handlePdfAnnotationCreate}
             onPdfAnnotationDelete={pdfAnn.remove}
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}
@@ -492,7 +523,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             <EpubAnnotationPicker
               selection={ann.selection}
               containerWidth={bodyRef.current?.clientWidth ?? 400}
-              onColor={ann.createAnnotation}
+              onType={ann.createAnnotation}
               onCancel={ann.dismiss}
             />
           )}

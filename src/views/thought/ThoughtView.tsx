@@ -36,7 +36,9 @@ function deriveSourceFromLeft(
     return { source: 'note', resourceId: s?.activeNoteId ?? null };
   }
   if (leftViewId === 'ebook-view') {
-    const s = ws.pluginStates['ebook'] as { activeBookId?: string } | undefined;
+    // 字面对齐 ebook data-model.ts:18 STORE_KEY='ebook-view'(D-2=A 决策)
+    // 历史误写 'ebook' 致 activeBookId 永远拿不到,ThoughtPanel 显空态
+    const s = ws.pluginStates['ebook-view'] as { activeBookId?: string } | undefined;
     return { source: 'book', resourceId: s?.activeBookId ?? null };
   }
   return { source: null, resourceId: null };

@@ -30,6 +30,7 @@ import type {
   ThoughtInfo,
   BookLocator,
 } from '@capabilities/thought/types';
+import { THOUGHT_TYPE_META, type ThoughtType } from '@shared/ipc/thought-types';
 import type { EBookHostHandle } from '../Host';
 
 export interface EpubSelection {
@@ -62,14 +63,16 @@ function toEpubAnnotationFromLegacy(anchor: BookAnchor): EpubAnnotation | null {
 }
 
 function toEpubAnnotationFromThought(t: ThoughtInfo): EpubAnnotation | null {
-  if (t.type !== 'highlight') return null;
+  // 2026-05-24 拍板:type 不再含 'highlight';EPUB 选区高亮按 anchor.locator
+  // markStyle='highlight' 识别(任意 ThoughtType 都可挂 EPUB 锚点)。
   if (!t.anchor || t.anchor.source !== 'book') return null;
   const loc = t.anchor.locator as BookLocator;
+  if (loc.markStyle !== 'highlight') return null;
   if (!loc.cfi) return null;
   return {
     id: t.id,
     cfi: loc.cfi,
-    color: t.color ?? loc.color,
+    color: THOUGHT_TYPE_META[t.type].color,
     textContent: loc.textContent,
     thoughtId: t.id,
   };
@@ -118,28 +121,30 @@ export function useEpubAnnotation(
     [bookIdRef, hostRef],
   );
 
-  /** 用户选色 → 创建 EPUB highlight(v0.5 §16.3 新路径) */
+  /**
+   * 用户从 picker 选 type → 创建 EPUB 高亮(2026-05-24 拍板:5 type = 5 色)。
+   * 颜色由 type 反查 META.color,EPUB host.addHighlight 字面用 META 色。
+   */
   const createAnnotation = useCallback(
-    async (color: string) => {
+    async (type: ThoughtType) => {
       const bookId = bookIdRef.current;
       const host = hostRef.current;
       if (!selection || !bookId || !host) return;
       const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+      const color = THOUGHT_TYPE_META[type].color;
       const createdAt = Date.now();
       const bookLocator: BookLocator = {
         pageNum: 0,
         cfi: selection.cfi,
         textContent: selection.text,
-        color,
-        type: 'highlight',
+        markStyle: 'highlight',
         createdAt,
       };
       try {
         const t = await thoughtApi.createThought({
-          type: 'highlight',
+          type,
           resolved: false,
           pinned: false,
-          color,
           doc: {
             format: 'pm-doc-json',
             version: '0.1',

@@ -14,11 +14,17 @@
 
 import type { NoteDocEnvelope } from './note-folder-types';
 
-// ── 类型枚举(9 种)──
+// ── 类型枚举(6 种)──
 
 /**
- * Thought 语义类型 — V1 6 种(thought/question/important/todo/analysis/ai-response)
- * + ebook reading-thought 吸收 3 种(highlight/underline/rect-frame)。
+ * Thought 语义类型(2026-05-24 用户拍板:5+1):
+ *   thought / question / important / todo / analysis(用户主动选)
+ *   + ai-response(AI 自动创建,不进 TypeSwitcher)
+ *
+ * 历史曾含 highlight / underline / rect-frame 三种"视觉表征 type" — 已删除:
+ *   - 用户拍板:视觉(颜色)由 type 反查 META.color,不再有独立 color 字段
+ *   - 5 色 picker 字面映射到 5 种 type,**颜色 = 类型**单一真相源
+ *   - 历史数据按 D-11 / 当前拍板"清空旧数据"处理,无 migration
  */
 export type ThoughtType =
   | 'thought'
@@ -26,12 +32,9 @@ export type ThoughtType =
   | 'important'
   | 'todo'
   | 'analysis'
-  | 'ai-response'
-  | 'highlight'
-  | 'underline'
-  | 'rect-frame';
+  | 'ai-response';
 
-/** Thought 元数据(icon / color / label)— UI 渲染单点 */
+/** Thought 元数据(icon / color / label)— UI 渲染单点真相 */
 export const THOUGHT_TYPE_META: Record<
   ThoughtType,
   { icon: string; color: string; label: string }
@@ -42,12 +45,26 @@ export const THOUGHT_TYPE_META: Record<
   todo:          { icon: '☐',  color: '#4caf50', label: '待办' },
   analysis:      { icon: '🔍', color: '#ab47bc', label: '分析' },
   'ai-response': { icon: '🤖', color: '#6366f1', label: 'AI 回复' },
-  // 下面三种 color 由 thought.color payload 字段提供(5 色 picker),
-  // 这里 sentinel 仅作 fallback;UI 渲染时优先用 payload.color
-  highlight:     { icon: '🖍️', color: '__from_payload_color__', label: '高亮' },
-  underline:     { icon: '〰️', color: '__from_payload_color__', label: '划线' },
-  'rect-frame':  { icon: '🔲', color: '__from_payload_color__', label: '框选' },
 };
+
+/**
+ * 用户在 picker 中可选的 5 种 type(ai-response 不进 picker — AI 自动创建)。
+ * 顺序即 picker 渲染顺序;UI 字面用 META[type] 取颜色/图标/标签。
+ *
+ * 2026-05-24 拍板:5 色 picker 字面对齐 5 种 type — 颜色 = 类型(单一真相源)。
+ *   蓝   thought   思考(默认 / 通用引文)
+ *   橙   important 重要
+ *   红   question  疑问
+ *   绿   todo      待办
+ *   紫   analysis  分析
+ */
+export const USER_THOUGHT_TYPES: readonly ThoughtType[] = [
+  'thought',
+  'important',
+  'question',
+  'todo',
+  'analysis',
+] as const;
 
 // ── Source + Locator(discriminated union)──
 
@@ -95,10 +112,14 @@ export interface NoteLocator {
  * - rect:       PDF rect/underline 标注的页面坐标(scale=1);EPUB 无
  * - cfi:        EPUB CFI 锚点;PDF 无
  * - textContent:EPUB 选区文本;PDF 无
- * - thumbnail:  PDF rect 截图 base64 inline(沿决议 D-7=A);EPUB 无
- * - color:      5 色 picker: #ffd43b / #69db7c / #74c0fc / #b197fc / #ff6b6b
- * - type:       rect = PDF 框选, underline = PDF 划线, highlight = EPUB 选区
+ * - thumbnail:  PDF 框选/划线截图 base64 inline(独立 render 2x DPR,JPEG 压缩);EPUB 无
+ * - markStyle:  'rect' | 'underline' — 标注视觉形态(PDF 显示矩形框 vs 横线),
+ *               **不**等同于 thought 语义 type;颜色字面从 thought.type 反查 META.color
  * - createdAt:  时间戳(老 reading-thought block id 复用)
+ *
+ * 2026-05-24 拍板:删 `color` 字段(颜色 = type 反查 META,单一真相源)。
+ * 老字段 `type: 'rect'|'underline'|'highlight'` 重命名为 `markStyle`,
+ * 'highlight' 字面值仅 EPUB 选区用;PDF 仅 'rect'|'underline'。
  */
 export interface BookLocator {
   pageNum: number;
@@ -106,8 +127,7 @@ export interface BookLocator {
   cfi?: string;
   textContent?: string;
   thumbnail?: string;
-  color: string;
-  type: 'rect' | 'underline' | 'highlight';
+  markStyle: 'rect' | 'underline' | 'highlight';
   createdAt: number;
 }
 
@@ -143,14 +163,15 @@ export interface ThoughtInfo {
   type: ThoughtType;
   resolved: boolean;
   pinned: boolean;
-  /**
-   * ebook 高亮场景 5 色:#ffd43b / #69db7c / #74c0fc / #b197fc / #ff6b6b。
-   * 非 ebook 场景可空,UI 按 type 取 THOUGHT_TYPE_META.color。
-   */
-  color?: string;
   /** AI response 服务标识('chatgpt'/'claude'/'gemini'),仅 type='ai-response' 时填 */
   serviceId?: string;
-  /** PDF 框选缩略图 base64,仅 type='rect-frame' 且 source='book' 时填 */
+  /**
+   * 缩略图 base64(PDF 框选/划线 anchor 创建时截屏写入)。
+   * 真实存储位置仍在 BookLocator.thumbnail;此字段在跨进程 ThoughtInfo
+   * 边界类型层保留供 UI 同步读取(创建路径会把 BookLocator.thumbnail 也写入)。
+   *
+   * 2026-05-24 拍板:不再有 thought.color 字段 — 颜色 = type 反查 META 单一真相源。
+   */
   thumbnail?: string;
   /**
    * 思考正文(可空 — ebook 高亮场景全部信息在 anchor,doc 留空对象)。

@@ -165,23 +165,27 @@ export interface ReadingStatePayload {
  * doc 留空)。结构与 NoteInfo.doc 的裸 payload 一致(envelope wrap 在 capability 层做)。
  */
 export interface ThoughtPayload {
+  /**
+   * Thought 语义类型(2026-05-24 用户拍板:5+1)。
+   * 历史含 highlight/underline/rect-frame 已字面删除 — 视觉(颜色)由 type 反查
+   * THOUGHT_TYPE_META.color,不再有 color 独立字段;5 色 picker 字面对应 5 种 type。
+   */
   type:
     | 'thought'
     | 'question'
     | 'important'
     | 'todo'
     | 'analysis'
-    | 'ai-response'
-    | 'highlight'
-    | 'underline'
-    | 'rect-frame';
+    | 'ai-response';
   resolved: boolean;
   pinned: boolean;
-  /** 5 色 picker(ebook 用),非 ebook 留空靠 type 默认色 */
-  color?: string;
   /** AI 服务标识('chatgpt'/'claude'/'gemini'),仅 type='ai-response' */
   serviceId?: string;
-  /** PDF 框选缩略图 base64,仅 type='rect-frame' 且 source='book' */
+  /**
+   * PDF 框选/划线 anchor 创建瞬间截屏 base64(独立 render 2x DPR,JPEG)。
+   * 真实存储位置仍以边 attrs.locator.thumbnail 为准;此字段冗余在 atom payload
+   * 仅 v0.5 历史兼容,新创建走 locator.thumbnail。
+   */
   thumbnail?: string;
   /** 思考正文(裸 PmPayload,可空对象 — capability 层 wrap/unwrap envelope) */
   doc: PmPayload;
