@@ -603,20 +603,11 @@ export class EPUBRenderer implements IReflowableRenderer {
           // Cmd/Ctrl + wheel 留给字号缩放等
           if (e.metaKey || e.ctrlKey) return;
           // 仅水平方向(垂直 wheel 不接管 — paginated 模式不需垂直滚动)
-          const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY);
-          console.log(
-            '[epub-swipe] wheel dx=', e.deltaX.toFixed(1),
-            'dy=', e.deltaY.toFixed(1),
-            'horizontal=', horizontal,
-            'gestureActive=', gestureActive,
-            'accumX=', accumulatedX.toFixed(1),
-          );
-          if (!horizontal) return;
+          if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
 
           // 每次水平 wheel 都重启 "手势结束" 计时器
           if (gestureEndTimer) clearTimeout(gestureEndTimer);
           gestureEndTimer = setTimeout(() => {
-            console.log('[epub-swipe] gesture-end-timer fired → reset accumX, unlock');
             accumulatedX = 0;
             gestureActive = false;
           }, GESTURE_END_MS);
@@ -632,10 +623,6 @@ export class EPUBRenderer implements IReflowableRenderer {
 
           // 触发翻页:deltaX > 0(内容左推)= 下一页;< 0 = 上一页
           const direction: 'next' | 'prev' = accumulatedX > 0 ? 'next' : 'prev';
-          console.log(
-            '[epub-swipe] FIRE direction=', direction,
-            'accumX=', accumulatedX.toFixed(1),
-          );
           this.horizontalSwipeCallback?.(direction);
 
           gestureActive = true;
