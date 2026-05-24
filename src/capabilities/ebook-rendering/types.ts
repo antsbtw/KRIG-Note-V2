@@ -161,7 +161,8 @@ export interface IReflowableRenderer extends IBookRenderer {
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void;
   /** 设置最大列数(1=单页 / 2=双页);foliate-js 会按容器宽度自适应 */
-  setMaxColumnCount(count: 1 | 2): void;
+  /** 设置最大列数 + 可选 max-inline-size(px,全屏布局对齐用) */
+  setMaxColumnCount(count: 1 | 2, maxInlineSizePx?: number): void;
   /** 设置阅读色调主题 — 改背景+文字色,通过 foliate-js setStyles 注入到 iframe 文档 */
   setTheme(theme: EpubTheme): void;
   /** 设置明暗模式 — light/dark/auto;auto 跟随 prefers-color-scheme 动态切换 */
@@ -206,6 +207,9 @@ export interface IReflowableRenderer extends IBookRenderer {
   getAppearance(): EpubAppearance;
   /** 当前最大列数(双实例同步用) */
   getMaxColumnCount(): 1 | 2;
+  /** 当前 EPUB 单 column 的实际渲染宽度(像素);view 未 ready 返 null。
+   *  全屏切换布局对齐用:panel spread 容器宽 = 2 × view 主区单 column 宽 */
+  getColumnWidth(): number | null;
 }
 
 // ── 类型守卫 ──
@@ -307,5 +311,7 @@ export interface EBookRenderingApi {
   openFullscreenReader(payload: {
     workspaceId: string;
     bookInfo: import('@shared/ipc/ebook-types').EBookLoadedInfo;
+    /** EPUB 单 column 宽度,全屏 panel 用 2× 居中布局对齐文字 */
+    epubViewColumnWidth?: number;
   }): void;
 }

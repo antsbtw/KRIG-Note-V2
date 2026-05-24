@@ -92,6 +92,13 @@ export class EPUBRenderer implements IReflowableRenderer {
   private fontSize = 100;
   /** 待应用的 max-column-count (1=单页 / 2=双页) — view 未 ready 时存这,initView 后 apply */
   private pendingMaxColumnCount: 1 | 2 = 1;
+  /**
+   * 全屏布局对齐用 — 调用方明确指定 paginator 的 max-inline-size(px)。
+   * 默认 undefined 走 paginator 内置上限(720/1000px);全屏 panel 接 view 主区
+   * 单 column 宽时传该值,确保 panel 与 view 主区 column 切分一致(用户体验:
+   * 单屏 page N 内容 = spread 左页内容,N+1 = 右页内容)。
+   */
+  private pendingMaxInlineSizePx: number | null = null;
   /** 当前主题(色调)— 6 种 Reading Style 之一;默认 Original */
   private theme: EpubTheme = 'original';
   /** 当前明暗模式 — light/dark/auto;默认 auto 跟随系统(V2 整体 dark 时 = dark)*/
@@ -161,14 +168,15 @@ export class EPUBRenderer implements IReflowableRenderer {
       // 打开 EPUB
       await this.view.open(file);
 
-      // 应用 max-column-count(view ready 前可能被 setMaxColumnCount 设过)
+      // 应用 max-column-count + max-inline-size(view ready 前可能被
+      // setMaxColumnCount 设过 pending 值)— 全屏布局对齐场景下
+      // pendingMaxInlineSizePx 有显式值,确保单 column 渲染宽精确匹配 view 主区
       if (this.view.renderer) {
         const count = this.pendingMaxColumnCount;
+        const inlineSize = this.pendingMaxInlineSizePx
+          ?? (count === 2 ? 1000 : 720);
         this.view.renderer.setAttribute('max-column-count', String(count));
-        this.view.renderer.setAttribute(
-          'max-inline-size',
-          count === 2 ? '1000px' : '720px',
-        );
+        this.view.renderer.setAttribute('max-inline-size', `${inlineSize}px`);
       }
 
       // 显示内容(恢复上次位置或从头)
@@ -437,6 +445,26 @@ export class EPUBRenderer implements IReflowableRenderer {
     return this.pendingMaxColumnCount;
   }
 
+  /**
+   * 当前 EPUB 单 column 的实际渲染宽度(像素)。
+   *
+   * 用于全屏切换时让 panel 的 spread 容器宽度 = 2 × view 主区单 column 宽,
+   * 这样两个 view 的 paginator 切分文字位置一致,翻页内容精确对齐
+   * (避免 EPUB reflowable 跨 layout 漂移)。
+   *
+   * 从 foliate paginator 实时算:paginator.size = 当前容器宽,
+   * paginator.columnCount = 当前列数;单 column 宽 ≈ size / columnCount。
+   * view 未 ready 返 null。
+   */
+  getColumnWidth(): number | null {
+    const r = this.view?.renderer as any;
+    if (!r) return null;
+    const size = r.size;
+    const cc = r.columnCount;
+    if (typeof size !== 'number' || size <= 0 || typeof cc !== 'number' || cc <= 0) return null;
+    return size / cc;
+  }
+
   getProgress(): { chapter: string; percentage: number; page: number; pages: number } {
     return this.currentProgress;
   }
@@ -479,12 +507,19 @@ export class EPUBRenderer implements IReflowableRenderer {
    * 实际列数 = min(count, ceil(容器宽 / max-inline-size))。
    * 双页时同步调大 max-inline-size 让 spread 撑满容器;单页时恢复 720px。
    */
-  setMaxColumnCount(count: 1 | 2): void {
+  setMaxColumnCount(count: 1 | 2, maxInlineSizePx?: number): void {
     this.pendingMaxColumnCount = count;
+    if (typeof maxInlineSizePx === 'number' && maxInlineSizePx > 0) {
+      this.pendingMaxInlineSizePx = maxInlineSizePx;
+    }
     const r = this.view?.renderer;
     if (!r) return; // view 还未 ready,initView 完成时会读 pending 应用
     r.setAttribute?.('max-column-count', String(count));
-    r.setAttribute?.('max-inline-size', count === 2 ? '1000px' : '720px');
+    // 优先用调用方传入的精确像素值(全屏布局对齐用);未传则走默认上限
+    // (1000px 双页 / 720px 单页)
+    const inlineSize = this.pendingMaxInlineSizePx
+      ?? (count === 2 ? 1000 : 720);
+    r.setAttribute?.('max-inline-size', `${inlineSize}px`);
   }
 
   onResize(): void {

@@ -263,19 +263,25 @@ export function EBookView({ workspaceId }: EBookViewProps) {
 
   // 全屏沉浸阅读:走 capability api(W5 边界 — view 不直 import capability 运行时值)
   // 进度回写在 panel 内独立持久化,Esc 退出时 view 重新 open 此书会读到最新位置
+  //
+  // EPUB 布局对齐(2026-05-23 用户拍板):
+  //   view 主区单 column 宽 → 喂给 panel,panel 设 spread 容器 = 2 × 该宽度,居中显示
+  //   → 两 view paginator 切分文字位置精确一致 → 单屏 page N = spread 左页,
+  //     N+1 = 右页 → 翻页对齐无漂移
   const onFullscreen = useCallback(() => {
     const info = lastBookInfoRef.current;
     if (!info) return;
-    // 用当前 view 内的最新位置覆盖 info.lastPosition(避免 panel 加载到 stale 位置)
-    // PDF 路径强制 fitWidth=true(全屏 Preview 风格,scale 由 host 按 viewport 算)
     const currentCFI = hostRef.current?.getCurrentCFI();
     const lastPosition = renderMode === 'reflowable'
       ? { cfi: currentCFI ?? info.lastPosition?.cfi }
       : { page: currentPage, fitWidth: true };
-    console.log('[ebook-view] enter fullscreen; epubPage=', epubPage, 'lastPosition=', lastPosition);
+    const epubViewColumnWidth = renderMode === 'reflowable'
+      ? (hostRef.current?.getEpubColumnWidth() ?? undefined)
+      : undefined;
     rendering.openFullscreenReader({
       workspaceId,
       bookInfo: { ...info, lastPosition },
+      epubViewColumnWidth,
     });
   }, [rendering, workspaceId, renderMode, currentPage]);
 

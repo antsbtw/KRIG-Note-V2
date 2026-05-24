@@ -25,6 +25,7 @@ import {
   useRef,
   useMemo,
   useCallback,
+  type CSSProperties,
 } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
@@ -88,40 +89,26 @@ function BookmarkIcon({ active }: { active: boolean }) {
   );
 }
 
-/**
- * 把 range CFI 折成单 anchor CFI(取 range start = 当前 viewport 第一行起点)。
- *
- * EPUB CFI 格式:
- * - 单 anchor:`epubcfi(/6/8!/4/38/1:99)` — 一段 path
- * - range:    `epubcfi(/6/8!/4,/30,/38/1:99)` — 用 `,` 分三段:base, start, end
- *
- * 设计哲学(2026-05-23 用户拍板):
- * EPUB 是 reflowable,跨 layout(单页 ↔ spread 双页 / 字号 / 主题)页号无法对齐
- * 是物理限制。改用"当前 viewport 第一行内容"作锚点:全屏退出时 save range start
- * cfi(spread 左页第一行起点),view 单页 reopen 用 view.goTo(cfi) 跳到该节点,
- * 该节点必落在新 viewport 第一行附近。这样:
- * - 锚点 layout-independent(以内容定位,而非物理页号)
- * - 视觉感知一致("刚才读的那段话" 在新模式的第一屏)
- *
- * 不 import foliate-js epubcfi 模块(panel 不该直 import npm)— 字符串拆解:
- * 去掉 epubcfi(...) 外壳,split 一级 comma,拼 base + start,包回 epubcfi(...).
- */
-function collapseRangeCfiToStart(cfi: string): string {
-  const m = /^epubcfi\((.*)\)$/.exec(cfi);
-  if (!m) return cfi;
-  const inner = m[1];
-  const parts = inner.split(',');
-  if (parts.length !== 3) return cfi;
-  const [base, start] = parts;
-  return `epubcfi(${base}${start})`;
-}
-
 export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
   const ctx = useMemo(() => getEBookFullscreenContext(), []);
   const library = useMemo(
     () => requireCapabilityApi<EBookLibraryApi>('ebook-library'),
     [],
   );
+  // EPUB 布局对齐:全屏 main 容器宽 = 2 × view 主区单 column 宽,居中两侧留黑边
+  // 这样 panel paginator 切分文字位置与 view 主区一致(单屏 page N = spread 左页,N+1 = 右页)
+  // PDF 路径或 EPUB 未 ready 时 ctx.epubViewColumnWidth=undefined,走默认 flex:1 撑满
+  const epubMainWidthStyle = useMemo<CSSProperties>(() => {
+    const w = ctx?.epubViewColumnWidth;
+    if (!w || w <= 0) return {};
+    // 2 列宽即可(foliate-paginator 内部还有 column-gap / padding,通过
+    // EPUBRenderer 的 max-inline-size 参数传递,让单 column 渲染宽精确 = w)
+    return {
+      flex: '0 0 auto',
+      width: `${Math.round(w * 2)}px`,
+      margin: '0 auto',
+    };
+  }, [ctx?.epubViewColumnWidth]);
   const hostRef = useRef<EBookHostHandle | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const bookIdRef = useRef<string | null>(ctx?.bookInfo.bookId ?? null);
@@ -216,12 +203,11 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
     (cfi: string) => {
       const bookId = bookIdRef.current;
       if (!bookId) return;
-      // 以"viewport 第一行内容"作锚点(layout-independent)— 跨模式切换时该
-      // 节点必落在新 viewport 第一行附近,而非纠结物理页号(EPUB reflowable
-      // 不同 layout 下页号本质就不能对齐)。range start = spread 左页第一行起点
-      const collapsed = collapseRangeCfiToStart(cfi);
-      lastEpubCfiRef.current = collapsed;
-      void library.saveProgress(bookId, { cfi: collapsed });
+      // 立即 save raw cfi(panel spread 单 column 宽 = view 主区单 column 宽,
+      // 两 view paginator 切分一致,raw range cfi 在两 view 解析回相同的
+      // 视觉第一行 → 不再需要折叠 range start)
+      lastEpubCfiRef.current = cfi;
+      void library.saveProgress(bookId, { cfi });
     },
     [library],
   );
@@ -475,10 +461,15 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
 
   // EPUB 双页布局推送给 renderer:pagedLayout 跟 viewport 宽高比自动算(同 PDF),
   // 切换/load 完成时调 host.setEpubMaxColumnCount;PDF 路径下此 effect 不触发(renderMode 守门)
+  // 同时传 ctx.epubViewColumnWidth 作 max-inline-size,确保 panel single-column
+  // 渲染宽度 = view 主区 single-column 宽度(全屏布局对齐)
   useEffect(() => {
     if (renderMode !== 'reflowable') return;
-    hostRef.current?.setEpubMaxColumnCount(pagedLayout === 'double' ? 2 : 1);
-  }, [renderMode, pagedLayout]);
+    hostRef.current?.setEpubMaxColumnCount(
+      pagedLayout === 'double' ? 2 : 1,
+      ctx?.epubViewColumnWidth,
+    );
+  }, [renderMode, pagedLayout, ctx?.epubViewColumnWidth]);
 
   if (!ctx) return null;
 
@@ -720,7 +711,10 @@ export function EBookFullscreenPanel({ onClose }: EBookFullscreenPanelProps) {
             onClose={() => setSidebarOpen(false)}
           />
         )}
-        <div className="krig-ebook-fullscreen__main">
+        <div
+          className="krig-ebook-fullscreen__main"
+          style={epubMainWidthStyle}
+        >
           <EBookHost
             ref={hostRef}
             workspaceId={ctx.workspaceId}

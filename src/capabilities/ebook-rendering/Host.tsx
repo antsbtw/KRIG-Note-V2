@@ -76,7 +76,7 @@ export interface EBookHostHandle {
   setFontSize(size: number): void;
   getFontSize(): number;
   /** EPUB 最大列数(1=单页 / 2=双页);foliate-js 按容器宽度自适应 */
-  setEpubMaxColumnCount(count: 1 | 2): void;
+  setEpubMaxColumnCount(count: 1 | 2, maxInlineSizePx?: number): void;
   /** EPUB 阅读色调主题(6 个风格之一) */
   setEpubTheme(theme: import('./types').EpubTheme): void;
   /** EPUB 明暗模式(light/dark/auto) — 与 theme 正交 */
@@ -100,6 +100,8 @@ export interface EBookHostHandle {
   addHighlight(cfi: string, color: string): Promise<void>;
   /** EPUB 移除 CFI 高亮;PDF noop */
   removeHighlight(cfi: string): void;
+  /** EPUB 单 column 实际渲染宽度(px),全屏布局对齐用;PDF / 未 ready 返 null */
+  getEpubColumnWidth(): number | null;
 }
 
 /** 搜索结果(PDF / EPUB 通用结构)*/
@@ -188,6 +190,15 @@ export interface EBookHostProps {
    * 动画完成后销毁旧实例并通过 onEpubRendererSwap 通知 Host 切换 rendererRef。
    */
   epubLayout?: 'flow' | 'paged';
+
+  /**
+   * EPUB 单 column 渲染宽度上限(px)— 全屏布局对齐用:
+   *   全屏 panel 收到 view 主区 single-column 实际宽度后,setMaxColumnCount
+   *   走该值作 max-inline-size,确保 panel spread 内单 column 渲染宽度 =
+   *   view 主区 single column 宽度 → 文字切分位置精确一致。
+   *   未传(view 主区默认场景)走 foliate 内置上限(720/1000px)。
+   */
+  epubMaxInlineSize?: number;
 }
 
 const FIT_WIDTH_PADDING = 40;
@@ -213,6 +224,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onPagedPageChangeStart,
     onPagedScaleChange,
     epubLayout = 'flow',
+    epubMaxInlineSize: _epubMaxInlineSize, // panel 通过 setEpubMaxColumnCount 直接推,Host 内不需消费
   },
   ref,
 ) {
@@ -311,46 +323,12 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
             renderMode: 'fixed-page',
           });
         } else if (isReflowable(r)) {
-          // EPUB 恢复 — cfi 锚点(以"viewport 第一行内容"为基准,layout-independent):
-          // 全屏 panel 退出时 save 的是 range start cfi(spread 左页第一行起点),
-          // view.init 内 await renderer.goTo(cfi) 跳到该节点,paginator 按 column
-          // 对齐 scroll → 节点落在新 viewport 第一行附近 → 用户视觉感知一致
-          // (EPUB reflowable 不同 layout 物理页号无法严格对齐是本质限制,
-          // 用内容锚点替代页号是正确策略)
-          if (pos?.cfi) {
-            r.setRestoreLocation(pos.cfi);
-            // ready 后校正:spread 模式下 paginator.scrollToRect 可能让 anchor
-            // 落到 spread 右页(用户视觉:第一屏看到的左页是 anchor 之前的内容,
-            // 等于"回退一页",违反"打开继续阅读"的预期)。判断 anchor.rect 是否
-            // 在 viewport 右半,如果是 → 调 view.next() 让 spread 前进一列,
-            // 使 anchor 列成为新 spread 左页 = 用户视觉第一屏第一行
-            void (async () => {
-              try {
-                await r.waitReady();
-                const view = r.getView();
-                if (!view) return;
-                // 只在 spread 模式下校正(单页模式 anchor 必在视野第一行)
-                const columnCount = (view.renderer as any)?.columnCount;
-                if (columnCount !== 2) return;
-                // 拿当前 visible range start 的 rect — 即 anchor 落点
-                const range = view.lastLocation?.range;
-                if (!range) return;
-                const rect = range.getBoundingClientRect?.();
-                if (!rect || rect.width === 0) return;
-                // 拿 paginator container 中线 — anchor 在右半则需校正
-                const container = view.renderer;
-                const cRect = container?.getBoundingClientRect?.();
-                if (!cRect) return;
-                const midX = cRect.left + cRect.width / 2;
-                if (rect.left > midX) {
-                  // anchor 在 spread 右页 → 前进一列让 anchor 成为新 spread 左页
-                  await view.renderer.next();
-                }
-              } catch (err) {
-                console.warn('[ebook-rendering/Host] spread anchor align failed:', err);
-              }
-            })();
-          }
+          // EPUB 恢复 — 走 cfi(用户视觉位置精确锚点):
+          //   全屏布局对齐设计(2026-05-23):panel spread 单 column 宽 = view 主区
+          //   单 column 宽,paginator 切分文字位置一致 → cfi.goTo 在两 view 落到
+          //   相同的"视觉第一行" → 不再需要 anchor 落点校正 / range cfi 折叠
+          //   等任何变通逻辑。完整设计见 docs/tasks/epub-fullscreen-flip-handoff.md
+          if (pos?.cfi) r.setRestoreLocation(pos.cfi);
 
           // C4:转推 EPUB 选区 / 选区取消 / 标注点击事件给 view
           if (onEpubTextSelected) r.onTextSelected(onEpubTextSelected);
@@ -569,13 +547,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         if (r && isReflowable(r)) return r.getFontSize();
         return 100;
       },
-      setEpubMaxColumnCount(count: 1 | 2): void {
+      setEpubMaxColumnCount(count: 1 | 2, maxInlineSizePx?: number): void {
         if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.applyToAll((r) => r.setMaxColumnCount(count));
+          paginatedHandleRef.current.applyToAll(
+            (r) => r.setMaxColumnCount(count, maxInlineSizePx),
+          );
           return;
         }
         const r = rendererRef.current;
-        if (r && isReflowable(r)) r.setMaxColumnCount(count);
+        if (r && isReflowable(r)) r.setMaxColumnCount(count, maxInlineSizePx);
       },
       setEpubTheme(theme): void {
         if (paginatedHandleRef.current) {
@@ -637,6 +617,11 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       removeHighlight(cfi: string): void {
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.removeHighlight(cfi);
+      },
+      getEpubColumnWidth(): number | null {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) return r.getColumnWidth();
+        return null;
       },
     }),
     [loadFromInfo, handleScaleChange, handleSetFitWidth],

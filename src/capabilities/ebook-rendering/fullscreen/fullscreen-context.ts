@@ -26,6 +26,18 @@ export interface EBookFullscreenContext {
   workspaceId: string;
   /** 完整 EBookLoadedInfo — 直接喂给 host.loadFromInfo */
   bookInfo: EBookLoadedInfo;
+  /**
+   * EPUB 全屏布局对齐用 — view 主区当前 EPUB 单 column 实际渲染宽度(像素)。
+   *
+   * 全屏 panel 收到后:
+   * - 限制 EBookHost main 容器宽 = 2 × viewColumnWidth(+ gap + padding),居中显示,两侧黑边
+   * - 同步 max-inline-size 给 foliate paginator,避免 1000px 默认上限截断
+   * - 单 column 宽与 view 主区精确相等 → paginator 切分文字位置一致 →
+   *   单屏 page N 内容 = spread 左页内容,page N+1 = spread 右页内容(物理对齐)
+   *
+   * PDF 路径或 EPUB 未 ready 时 undefined;panel 走默认布局(占满 viewport)。
+   */
+  epubViewColumnWidth?: number;
 }
 
 let current: EBookFullscreenContext | null = null;

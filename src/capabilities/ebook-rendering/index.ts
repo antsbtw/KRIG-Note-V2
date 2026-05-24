@@ -95,6 +95,8 @@ export {
 function openFullscreenReader(payload: {
   workspaceId: string;
   bookInfo: EBookLoadedInfo;
+  /** EPUB 单 column 宽度,全屏 panel 用 2× 居中布局实现 spread 与 view 主区文字对齐 */
+  epubViewColumnWidth?: number;
 }): void {
   setEBookFullscreenContext(payload);
   fullscreenOverlayController.show(EBOOK_FULLSCREEN_OVERLAY_ID);
