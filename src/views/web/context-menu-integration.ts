@@ -33,23 +33,25 @@ interface WebContextMenuPayload {
 
 let currentContext: WebContextMenuPayload | null = null;
 
-/** WebView 监听 webview 的 context-menu 事件后调本函数 */
+/** WebView 监听 webview 的 context-menu 事件后调本函数
+ *
+ * 说明:web view 不走 use-context-menu-trigger(webview 的 DOM 在子 frame 内不可达,
+ * 由 webview 'context-menu' 事件回传)— 手动构造 ContextInfo 调 controller.show。
+ *
+ * L4 重构后 custom 留空:
+ * - text-editing / thought 等 capability provider 跑在 host DOM 上无意义
+ *   (webview 内 a[href] 等不在宿主 DOM 树)
+ * - web view 自己的业务字段(linkURL / srcURL / selectionText)沿用模块级 currentContext
+ *   缓存(PR-α-1 保留既有模式,后续 PR 可考虑迁 custom)
+ */
 export function showWebContextMenu(payload: WebContextMenuPayload): void {
   currentContext = payload;
   contextMenuController.show(payload.x, payload.y, VIEW, {
     hasSelection: payload.selectionText.length > 0,
     isEditable: false,
-    // L5-B3.15:web view 不消费 has-link 条件,默认 false
-    hasLink: false,
-    // web 无 PM mark / block 选区概念,默认 false
-    hasMarks: false,
-    hasBlockSelection: false,
-    // thought-view:web 内容无 thought anchor 概念,默认 null
-    thoughtId: null,
-    // thought-view:web view 不嵌 PM 实例,默认 null
-    pmInstanceId: null,
     x: payload.x,
     y: payload.y,
+    custom: {},
   });
 }
 

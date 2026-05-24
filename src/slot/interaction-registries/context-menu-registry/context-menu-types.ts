@@ -1,30 +1,24 @@
 /**
  * ContextMenu 类型
- */
-
-/**
- * enabledWhen 枚举:
+ *
+ * EnabledWhen 重构(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * - 字面变 string,L4 不知道有哪些值
+ * - 由 enabledWhenRegistry 提供 predicate 判定
+ * - 找不到 predicate → fallback () => true(warn 去重)
+ *
+ * builtin(L4 自管,通用 DOM 概念):
  * - 'always'         总是显示
  * - 'has-selection'  选区非空(光标态隐藏)
  * - 'is-editable'    点击位置在可编辑区域
- * - 'has-link'(L5-B3.15)选区上覆盖 link mark — "移除链接"等条件项用
- * - 'has-thought'    点击位置在 thought anchor 上(inline mark / block frame /
- *                    image node attr 三态任一)— "删除Thought" 条件项用
- * - 'has-marks'      选区上覆盖至少一个 mark — "移除格式" 条件项用(光标态/无 mark 选区隐藏)
- * - 'has-block-selection'  block / multi-block 选区(NodeSelection 或跨多 block 的 text 选区)
- *                    — "删除 Block" 条件项用;光标态 + 单 block 内文本选区隐藏
  *
- * 当 enabledWhen 不满足时:本 item 不渲染(对齐 V1 "条件显示"行为)。
- * 加新枚举时同步 use-context-menu-trigger 的 ContextInfo 计算逻辑。
+ * 业务 enabledWhen(各 capability / view 注册):
+ * - text-editing capability:'has-link' / 'has-marks' / 'has-block-selection'
+ * - thought capability:'has-thought'
+ * - (未来)ebook view:'has-pdf-annotation'
+ *
+ * 注册位置:capability/index.ts(随 capability 加载)/ view/index.ts(view self-register)。
  */
-export type EnabledWhen =
-  | 'always'
-  | 'has-selection'
-  | 'is-editable'
-  | 'has-link'
-  | 'has-thought'
-  | 'has-marks'
-  | 'has-block-selection';
+export type EnabledWhen = string;
 
 export interface ContextMenuItem {
   id: string;
@@ -61,7 +55,8 @@ export interface ContextMenuItem {
    * 而是调本函数取得 ReactNode 渲染(Color swatch grid / FramePicker 等复杂内容用)。
    *
    * 收 ContextSubmenuContext:含 contextInfo / viewId / close。
-   * 内部组件调 driver block-scoped API 时,instanceId 走 ctx.contextInfo.pmInstanceId
+   * 内部组件调 driver block-scoped API 时,instanceId 走
+   *   ctx.contextInfo.custom.pmInstanceId
    * (右键触发瞬间快照,不再走 focus query)。
    */
   submenuRender?: (ctx: ContextSubmenuContext) => import('react').ReactNode;
@@ -74,40 +69,46 @@ export interface ContextMenuItem {
  * - context 不带 blockPos(右键位置不一定对应单 block — 选区可能跨多块);
  *   pos 解析由 submenu 内组件按需用 contextInfo.x/y + driver.resolveBlockAt 取
  *   或走 driver.getSelectedTopLevelBlockPositions 跨多块。
- * - 直接暴露 pmInstanceId(右键触发瞬间快照,避免 focus 转向菜单后 query 失败)。
+ * - 通过 ContextInfo.custom.pmInstanceId 暴露 PM 实例 id(右键触发瞬间快照,避免
+ *   focus 转向菜单后 query 失败)。
  */
 export interface ContextSubmenuContext {
   /** 触发时的 view id */
   viewId: string;
-  /** 触发瞬间的 context info(含 pmInstanceId / x / y / hasSelection 等) */
+  /** 触发瞬间的 context info(含 custom.pmInstanceId / x / y / hasSelection 等) */
   contextInfo: ContextInfo;
   /** 关闭整个 context menu(submenu 内部操作完后调) */
   close: () => void;
 }
 
-/** 触发时的上下文信息(用于 enabledWhen 判断) */
-export interface ContextInfo {
+/**
+ * Base ContextInfo:L4 字面知道的通用 DOM 概念,不含任何 capability / view 业务字段。
+ *
+ * 业务字段全部进 ContextInfo.custom,由 contextInfoProviderRegistry 注册方贡献。
+ */
+export interface BaseContextInfo {
+  /** DOM Selection 非空 */
   hasSelection: boolean;
+  /** target 是 contentEditable / INPUT / TEXTAREA */
   isEditable: boolean;
-  /** L5-B3.15:选区上是否覆盖 link mark(给"移除链接"条件项用) */
-  hasLink: boolean;
-  /** 选区上是否覆盖至少一个 mark — "移除格式"条件项用。
-   *  来源:selection capability activeMarks 非空。光标态/无选区时 false。 */
-  hasMarks: boolean;
-  /** block / multi-block 选区(选区跨多个 block,或 NodeSelection)— "删除 Block"条件项用。
-   *  来源:selection capability kind ∈ {'block','multi-block'}。光标态 + 单 block 内文本选区
-   *  为 false(那种情况退格删字即可)。 */
-  hasBlockSelection: boolean;
-  /** thought-view:点击位置的 thought id(inline mark / block frame / image attr 任一)
-   *  null = 不在 thought anchor 上;非空 = 用作 'has-thought' enabledWhen 判定 +
-   *  传给 "删除Thought" 命令 handler。 */
-  thoughtId: string | null;
-  /** 右键触发时焦点 PM 实例 id(在 contextmenu 事件触发 / focus 转向菜单之前抓拍)。
-   *  thought-view.add-from-note / ask-ai-from-note 等命令从 context menu 触发时,
-   *  焦点已转向菜单,getFocusedInstanceId() 返 null;命令需从 controller.context
-   *  拿本字段而非实时查 focus。null = 右键时本来就无 PM 实例聚焦。 */
-  pmInstanceId: string | null;
   /** 鼠标位置 */
   x: number;
   y: number;
+}
+
+/**
+ * 触发时的上下文信息(用于 enabledWhen 判断 + 命令 handler 取业务字段)。
+ *
+ * 字段分层:
+ * - 顶层 4 个 base 字段:L4 通用 DOM 概念
+ * - custom:各 contextInfoProvider 贡献的业务字段(如 thoughtId / pmInstanceId /
+ *   hasLink / hasMarks / hasBlockSelection / pdfAnnotationId 等)
+ *
+ * 消费方约定:命令 handler / submenuRender 取业务字段走
+ *   ctx.context.custom.<field> as <T>
+ * (custom 字段类型为 unknown,消费方自己 type guard;未来 v1.x 可考虑 generic 模板)
+ */
+export interface ContextInfo extends BaseContextInfo {
+  /** 各 contextInfoProvider 注册方贡献的字段(handoff §目标架构 / §字段迁移清单)*/
+  custom: Record<string, unknown>;
 }

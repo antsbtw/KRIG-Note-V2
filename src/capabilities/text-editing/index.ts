@@ -40,6 +40,7 @@ import { registerNoteLinkSearchIntegration } from './ui/note-link-search/integra
 import { registerCalloutEmojiIntegration } from './ui/emoji-picker/integration';
 import { registerCalloutIconRenderer } from './ui/emoji-picker/callout-icon-renderer';
 import { registerTextEditingCommands } from './commands/register-pm-commands';
+import { registerTextEditingContextInfo } from './ui/context-menu/register-context-info';
 // C8 W-1:PM 通用菜单 item 工厂(view 端通过 api.ui.* 取,W5 合规)
 import * as floatingToolbarFactory from './ui/floating-toolbar/items';
 import * as toolbarFactory from './ui/toolbar/items';
@@ -92,3 +93,7 @@ registerCalloutIconRenderer();
 // C7:capability 加载时一次性注册 PM 通用命令(46 个;原 NoteView 注册全部搬来)。
 // N-1:同 id 全工程唯一 register 调用 — 同步删 NoteView 旧 register。
 registerTextEditingCommands();
+
+// L4 右键体系重构:capability 注册 ContextInfo provider + enabledWhen 谓词
+// (handoff: docs/tasks/context-menu-registry-handoff.md)
+registerTextEditingContextInfo();

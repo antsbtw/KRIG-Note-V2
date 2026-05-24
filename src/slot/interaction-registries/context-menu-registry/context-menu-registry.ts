@@ -5,9 +5,16 @@
  * - 所有 ContextMenu 都归 Workspace,无 scope 字段
  * - 默认 view 为 undefined(全局,所有 view 都显示)
  * - capability 注册时不指定 view(Q6=A:全局过滤)
+ *
+ * enabledWhen 重构(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * - L4 不再硬编码 if 链,统一委托 enabledWhenRegistry.eval
+ * - builtin('always' / 'has-selection' / 'is-editable')在 enabledWhenRegistry 构造时挂
+ * - 业务谓词(has-link / has-marks / has-block-selection / has-thought / ...)由
+ *   各 capability / view 自行注册
  */
 
 import type { ContextMenuItem, ContextInfo } from './context-menu-types';
+import { enabledWhenRegistry } from '../enabled-when-registry';
 
 class ContextMenuRegistry {
   private items: ContextMenuItem[] = [];
@@ -30,18 +37,9 @@ class ContextMenuRegistry {
       .filter((item) => {
         // view 过滤:undefined = 全局,或匹配当前 view
         if (item.view !== undefined && item.view !== viewId) return false;
-        // enabledWhen 过滤
-        if (item.enabledWhen === 'has-selection' && !context.hasSelection) return false;
-        if (item.enabledWhen === 'is-editable' && !context.isEditable) return false;
-        // L5-B3.15:has-link 条件项(如"移除链接")— 选区无 link mark 时隐藏
-        if (item.enabledWhen === 'has-link' && !context.hasLink) return false;
-        // thought-view:has-thought 条件项("删除Thought")— 点击位置无 thought anchor 时隐藏
-        if (item.enabledWhen === 'has-thought' && !context.thoughtId) return false;
-        // "移除格式" 条件项 — 选区无任何 mark 时隐藏
-        if (item.enabledWhen === 'has-marks' && !context.hasMarks) return false;
-        // "删除 Block" 条件项 — 光标态 + 单 block 内文本选区时隐藏
-        if (item.enabledWhen === 'has-block-selection' && !context.hasBlockSelection) return false;
-        return true;
+        // enabledWhen 过滤:不设 → 默认显示;设了 → 走 enabledWhenRegistry
+        if (item.enabledWhen === undefined) return true;
+        return enabledWhenRegistry.eval(item.enabledWhen, context);
       })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }

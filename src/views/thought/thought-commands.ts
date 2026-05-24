@@ -76,12 +76,13 @@ export function registerThoughtCommands(): void {
 
   /**
    * 右键菜单 "删除Thought" 命令 — 从 contextMenuController 拿当前点击位置
-   * 的 thoughtId(由 use-context-menu-trigger DOM 检测填入 context.thoughtId)。
+   * 的 thoughtId(由 thought capability 注册的 contextInfoProvider DOM 检测填入
+   * context.custom.thoughtId)。
    * 删 thought atom 后 capability onListChanged 广播 → Note 侧 note-bridge
    * 检测到 thought 消失 → 调 driver removeThoughtAnchor 清 mark/frame/node attr。
    */
   commandRegistry.register('thought-view.delete-thought-at-cursor', () => {
-    const id = contextMenuController.getState().context.thoughtId;
+    const id = contextMenuController.getState().context.custom.thoughtId;
     if (typeof id !== 'string') return;
     void thoughtCap().deleteThought(id);
   });

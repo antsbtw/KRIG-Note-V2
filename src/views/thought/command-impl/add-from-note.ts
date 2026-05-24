@@ -51,8 +51,10 @@ export async function addThoughtFromNote(): Promise<void> {
   // 优先从 context menu 抓拍的 pmInstanceId(右键场景:focus 已转向菜单,
   // getFocusedInstanceId 此时返 null);否则用当前 focused(floating toolbar
   // / keymap 等触发场景)。
+  // L4 重构后 pmInstanceId 走 context.custom(由 text-editing capability provider 贡献)。
+  const ctxPmId = contextMenuController.getState().context.custom.pmInstanceId;
   const instanceId =
-    contextMenuController.getState().context.pmInstanceId ??
+    (typeof ctxPmId === 'string' ? ctxPmId : null) ??
     textEditing.instanceRegistry.getFocusedInstanceId();
   if (!instanceId) return;
 
