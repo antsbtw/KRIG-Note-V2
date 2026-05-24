@@ -103,6 +103,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const [epubPages, setEpubPages] = useState(0);
   // fontSize 现仅作命令式推到 host(不参与 view 自身 render),由 Aa popup 持 state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // PDF 全屏翻页式布局 — 按容器宽高比自动选(宽屏 double / 竖屏 single)
+  const [pagedLayout, setPagedLayout] = useState<'single' | 'double'>('single');
 
   // hooks
   const search = useSearch(hostRef);
@@ -150,11 +152,11 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     });
   }, [library, activeBookIdRef, bookmarks, ann, pdfAnn]);
 
-  // EPUB 单/双页布局自适应:容器宽高比 ≥ 1(宽 ≥ 高)→ 双页 spread;< 1 → 单页。
-  // NavSide 收起后 EBookView body 横向变宽,自动进双页 spread;NavSide 展开后
-  // 容器变窄,自动回单页。reflowable 路径才推,PDF 不消费 maxColumnCount。
+  // EPUB / PDF 全屏 单/双页布局自适应:容器宽高比 ≥ 1(宽 ≥ 高)→ 双页 spread;< 1 → 单页。
+  // - EPUB(reflowable):始终自适应 — NavSide 收起后容器横向变宽,自动进双页 spread
+  // - PDF(fixed-page):仅全屏 paged 模式消费 pagedLayout state — 非全屏 scroll
+  //   模式不需要(单/双页只在翻页式渲染下有意义)
   useEffect(() => {
-    if (renderMode !== 'reflowable') return;
     const el = bodyRef.current;
     if (!el) return;
     const compute = (): void => {
@@ -162,7 +164,11 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       const h = el.clientHeight;
       if (w <= 0 || h <= 0) return;
       const count: 1 | 2 = w >= h ? 2 : 1;
-      hostRef.current?.setEpubMaxColumnCount(count);
+      if (renderMode === 'reflowable') {
+        hostRef.current?.setEpubMaxColumnCount(count);
+      } else if (renderMode === 'fixed-page') {
+        setPagedLayout(count === 2 ? 'double' : 'single');
+      }
     };
     compute();
     const ro = new ResizeObserver(compute);
@@ -479,6 +485,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             pdfAnnotations={pdfAnn.annotations}
             onPdfAnnotationCreate={pdfAnn.create}
             onPdfAnnotationDelete={pdfAnn.remove}
+            pdfLayout={isFullscreen ? 'paged' : 'scroll'}
+            pagedLayout={pagedLayout}
           />
           {ann.selection && (
             <EpubAnnotationPicker
