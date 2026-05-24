@@ -303,7 +303,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     [bookmarks, currentPage],
   );
 
-  // keymap:Cmd+F 开搜索;Cmd+D 切书签;EPUB ←/→ 翻章节
+  // keymap:Cmd+F 开搜索;Cmd+D 切书签;EPUB ←/→ 翻章节;ESC 退出全屏
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
@@ -312,6 +312,18 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       } else if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
         e.preventDefault();
         onBookmarkToggle();
+      } else if (e.key === 'Escape' && isFullscreen) {
+        // 焦点在输入框/contenteditable 时让位(SearchBar 输入框 ESC 关搜索)
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+        // 多 view 共存 workspace 防重入:同 ESC 被两个 EBookView handler 收到会
+        // toggle 两次互相抵消。用 event 上的 marker(自定义属性)第一处理者占位。
+        const ev = e as KeyboardEvent & { __krigEbookEscHandled?: boolean };
+        if (ev.__krigEbookEscHandled) return;
+        ev.__krigEbookEscHandled = true;
+        e.preventDefault();
+        workspaceManager.toggleNavSide(workspaceId);
       } else if (renderMode === 'reflowable') {
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
@@ -324,7 +336,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [search, onBookmarkToggle, renderMode, onPrevChapter, onNextChapter]);
+  }, [search, onBookmarkToggle, renderMode, onPrevChapter, onNextChapter, isFullscreen, workspaceId]);
 
   // 主区 mousedown 关 EPUB picker(点击 picker 外部时,picker 内部冒泡阻断)
   useEffect(() => {
