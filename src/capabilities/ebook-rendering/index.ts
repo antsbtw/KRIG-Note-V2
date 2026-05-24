@@ -20,8 +20,6 @@
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
-import { fullscreenOverlayRegistry } from '@slot/interaction-registries/fullscreen-overlay-registry/registry';
-import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { EBookHost } from './Host';
 import { OutlinePanel } from './outline-panel';
 import { SearchBar } from './search-bar';
@@ -29,7 +27,6 @@ import { EpubAnnotationPicker } from './epub-annotation-picker';
 import { useSearch } from './hooks/use-search';
 import { useBookmarks } from './hooks/use-bookmarks';
 import { useEpubAnnotation } from './hooks/use-epub-annotation';
-import { EBookFullscreenPanel } from './fullscreen/EBookFullscreenPanel';
 import { EpubAaPopup } from './fullscreen/EpubAaPopup';
 import {
   loadEpubReadingSettings,
@@ -38,11 +35,6 @@ import {
   saveEpubAppearance,
   subscribeEpubReadingSettings,
 } from './fullscreen/epub-reading-settings';
-import {
-  EBOOK_FULLSCREEN_OVERLAY_ID,
-  setEBookFullscreenContext,
-} from './fullscreen/fullscreen-context';
-import type { EBookLoadedInfo } from '@shared/ipc/ebook-types';
 import {
   isFixedPage,
   isReflowable,
@@ -91,17 +83,6 @@ export {
   getRenderMode,
 };
 
-/** view 侧通过 capability api 调起 L2 全屏阅读 overlay(W5 边界:view 不直 import 此函数)*/
-function openFullscreenReader(payload: {
-  workspaceId: string;
-  bookInfo: EBookLoadedInfo;
-  /** EPUB 单 column 宽度,全屏 panel 用 2× 居中布局实现 spread 与 view 主区文字对齐 */
-  epubViewColumnWidth?: number;
-}): void {
-  setEBookFullscreenContext(payload);
-  fullscreenOverlayController.show(EBOOK_FULLSCREEN_OVERLAY_ID);
-}
-
 capabilityRegistry.register({
   id: 'ebook-rendering',
   api: {
@@ -122,12 +103,5 @@ capabilityRegistry.register({
     saveEpubTheme,
     saveEpubAppearance,
     subscribeEpubReadingSettings,
-    openFullscreenReader,
   } satisfies EBookRenderingApi,
-});
-
-// L2 fullscreen overlay 注册(对齐 text-editing fullscreen-overlays.ts 模式)
-fullscreenOverlayRegistry.register({
-  id: EBOOK_FULLSCREEN_OVERLAY_ID,
-  Component: EBookFullscreenPanel,
 });

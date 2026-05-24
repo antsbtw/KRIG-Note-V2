@@ -31,8 +31,6 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { EBookLibraryApi, EBookLoadedInfo } from '@capabilities/ebook-library/types';
 import {
   type IBookRenderer,
-  type IFixedPageRenderer,
-  type IReflowableRenderer,
   type EBookFileType,
   type BookPosition,
   type TOCItem,
@@ -44,11 +42,6 @@ import { PDFRenderer } from './pdf';
 import { EPUBRenderer } from './epub';
 import { FixedPageContent } from './fixed-page-content';
 import { ReflowableContent } from './reflowable-content';
-import {
-  PaginatedReflowableContent,
-  type PaginatedReflowableContentHandle,
-} from './reflowable-content/PaginatedReflowableContent';
-import { FullscreenPageView } from './fullscreen/FullscreenPageView';
 
 /** view 通过 ref 调用的命令式 API(EBookHostHandle)*/
 export interface EBookHostHandle {
@@ -100,8 +93,6 @@ export interface EBookHostHandle {
   addHighlight(cfi: string, color: string): Promise<void>;
   /** EPUB 移除 CFI 高亮;PDF noop */
   removeHighlight(cfi: string): void;
-  /** EPUB 单 column 实际渲染宽度(px),全屏布局对齐用;PDF / 未 ready 返 null */
-  getEpubColumnWidth(): number | null;
 }
 
 /** 搜索结果(PDF / EPUB 通用结构)*/
@@ -163,42 +154,6 @@ export interface EBookHostProps {
    */
   onPdfAnnotationDelete?: (id: string) => void;
 
-  // ── 全屏阅读路径(2026-05-22)──
-  /**
-   * PDF 渲染模式:
-   * - 'scroll'(默认):FixedPageContent 连续滚动 + 虚拟化(view 主区)
-   * - 'paged':FullscreenPageView 翻页式 + 不滚动(L2 全屏 overlay 专用)
-   *
-   * EPUB 不受此 prop 影响 — foliate-js 自身分页,沿用 ReflowableContent。
-   */
-  pdfLayout?: 'scroll' | 'paged';
-  /** paged 布局下的分页样式 — 'single' 单页 / 'double' 双页并排 */
-  pagedLayout?: 'single' | 'double';
-  /** paged 布局下 panel 拿到当前页(spread 起点)用于 toolbar 显示 — 动画完成后触发 */
-  onPagedPageChange?: (page: number) => void;
-  /** paged 布局下翻页**开始**时(动画启动前)推目标页 — 用于 page indicator 即时反馈 */
-  onPagedPageChangeStart?: (page: number) => void;
-  /** paged 布局下 panel 拿到自适应 scale 用于 saveProgress */
-  onPagedScaleChange?: (scale: number) => void;
-
-  /**
-   * EPUB 渲染模式:
-   * - 'flow'(默认):ReflowableContent 单 view,foliate-js 默认瞬切翻页(view 主区)
-   * - 'paged':PaginatedReflowableContent 双 view 翻页动画(L2 全屏 overlay 专用)
-   *
-   * paged 模式下翻页会临时创建第二 EPUBRenderer 实例(同一 ArrayBuffer),
-   * 动画完成后销毁旧实例并通过 onEpubRendererSwap 通知 Host 切换 rendererRef。
-   */
-  epubLayout?: 'flow' | 'paged';
-
-  /**
-   * EPUB 单 column 渲染宽度上限(px)— 全屏布局对齐用:
-   *   全屏 panel 收到 view 主区 single-column 实际宽度后,setMaxColumnCount
-   *   走该值作 max-inline-size,确保 panel spread 内单 column 渲染宽度 =
-   *   view 主区 single column 宽度 → 文字切分位置精确一致。
-   *   未传(view 主区默认场景)走 foliate 内置上限(720/1000px)。
-   */
-  epubMaxInlineSize?: number;
 }
 
 const FIT_WIDTH_PADDING = 40;
@@ -218,13 +173,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     pdfAnnotations,
     onPdfAnnotationCreate,
     onPdfAnnotationDelete,
-    pdfLayout = 'scroll',
-    pagedLayout = 'single',
-    onPagedPageChange,
-    onPagedPageChangeStart,
-    onPagedScaleChange,
-    epubLayout = 'flow',
-    epubMaxInlineSize: _epubMaxInlineSize, // panel 通过 setEpubMaxColumnCount 直接推,Host 内不需消费
   },
   ref,
 ) {
@@ -250,11 +198,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   const registerGotoPage = useCallback((fn: (page: number) => void) => {
     gotoPageRef.current = fn;
   }, []);
-  // paged EPUB 分支注册的 gotoCFI 回调(走带动画的路径,而非裸 view.goTo)
-  const gotoCfiRef = useRef<((cfi: string) => void) | null>(null);
-  // paged EPUB 分支注册的 PaginatedReflowableContentHandle —
-  // prev/nextChapter 走它走带动画路径
-  const paginatedHandleRef = useRef<PaginatedReflowableContentHandle | null>(null);
 
   // 同步 ref(供 useEffect 闭包内拿最新值)
   useEffect(() => {
@@ -492,12 +435,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         }
       },
       goToCFI(cfi: string): void {
-        // paged 路径优先走 gotoCfiRef(带翻页动画 + 切 rendererRef);
-        // flow 路径直接调 renderer.goTo
-        if (gotoCfiRef.current) {
-          gotoCfiRef.current(cfi);
-          return;
-        }
         const r = rendererRef.current;
         if (!r) return;
         const pos: BookPosition = { type: 'cfi', cfi };
@@ -514,31 +451,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         return null;
       },
       // ── EPUB 专用 ──
-      // paged 路径下 prev/next 走 PaginatedReflowableContent 的 ref(带动画);
-      // flow 路径直接调当前 renderer
       prevChapter(): void {
-        if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.prevPage();
-          return;
-        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.prevChapter();
       },
       nextChapter(): void {
-        if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.nextPage();
-          return;
-        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.nextChapter();
       },
-      // paged 路径下设置走 applyToAll(current + 任何 incoming 临时实例都 apply)
-      // 避免翻页中改字号/主题/appearance 导致两 view 视觉错位
       setFontSize(size: number): void {
-        if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.applyToAll((r) => r.setFontSize(size));
-          return;
-        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setFontSize(size);
       },
@@ -547,29 +468,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         if (r && isReflowable(r)) return r.getFontSize();
         return 100;
       },
-      setEpubMaxColumnCount(count: 1 | 2, maxInlineSizePx?: number): void {
-        if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.applyToAll(
-            (r) => r.setMaxColumnCount(count, maxInlineSizePx),
-          );
-          return;
-        }
+      setEpubMaxColumnCount(count: 1 | 2): void {
         const r = rendererRef.current;
-        if (r && isReflowable(r)) r.setMaxColumnCount(count, maxInlineSizePx);
+        if (r && isReflowable(r)) r.setMaxColumnCount(count);
       },
       setEpubTheme(theme): void {
-        if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.applyToAll((r) => r.setTheme(theme));
-          return;
-        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setTheme(theme);
       },
       setEpubAppearance(appearance): void {
-        if (paginatedHandleRef.current) {
-          paginatedHandleRef.current.applyToAll((r) => r.setAppearance(appearance));
-          return;
-        }
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.setAppearance(appearance);
       },
@@ -592,12 +499,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         if (isFixedPage(r)) {
           gotoPageRef.current?.(result.pageNum);
         } else if (isReflowable(r) && result.cfi) {
-          // paged 路径走 gotoCfiRef(动画);flow 直调
-          if (gotoCfiRef.current) {
-            gotoCfiRef.current(result.cfi);
-          } else {
-            r.goTo({ type: 'cfi', cfi: result.cfi });
-          }
+          r.goTo({ type: 'cfi', cfi: result.cfi });
         }
       },
       clearSearch(): void {
@@ -618,11 +520,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.removeHighlight(cfi);
       },
-      getEpubColumnWidth(): number | null {
-        const r = rendererRef.current;
-        if (r && isReflowable(r)) return r.getColumnWidth();
-        return null;
-      },
     }),
     [loadFromInfo, handleScaleChange, handleSetFitWidth],
   );
@@ -637,7 +534,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     <div className="krig-ebook-host" ref={containerRef}>
       {loading && <div className="krig-ebook-loading">Loading...</div>}
 
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && (
         <FixedPageContent
           renderer={renderer}
           scale={scale}
@@ -652,37 +549,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         />
       )}
 
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'paged' && (
-        <PagedHostBranch
-          renderer={renderer}
-          layout={pagedLayout}
-          initialPage={restorePage}
-          onPagedPageChange={onPagedPageChange}
-          onPagedPageChangeStart={onPagedPageChangeStart}
-          onPagedScaleChange={onPagedScaleChange}
-          onPageChange={onPageChange}
-          onRegisterGotoPage={registerGotoPage}
-        />
-      )}
-
-      {!loading && rendererReady && renderer && isReflowable(renderer) && epubLayout === 'flow' && (
+      {!loading && rendererReady && renderer && isReflowable(renderer) && (
         <ReflowableContent
           renderer={renderer}
           onProgressChange={onEpubProgressChange}
-        />
-      )}
-
-      {!loading && rendererReady && renderer && isReflowable(renderer) && epubLayout === 'paged' && (
-        <PaginatedReflowableHostBranch
-          renderer={renderer}
-          onProgressChange={onEpubProgressChange}
-          onPageChangeStart={onPagedPageChangeStart}
-          onRegisterGotoCFI={(fn) => {
-            gotoCfiRef.current = fn;
-          }}
-          onRegisterHandle={(h) => {
-            paginatedHandleRef.current = h;
-          }}
         />
       )}
 
@@ -697,103 +567,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     </div>
   );
 });
-
-/**
- * paged 路径分支 — FullscreenPageView 持 ref 的小组件,把 ref.goToPage 注册到
- * Host 的 gotoPageRef,让 host.goToPage()(outline / 全屏 toolbar)能正常工作。
- */
-function PagedHostBranch({
-  renderer,
-  layout,
-  initialPage,
-  onPagedPageChange,
-  onPagedPageChangeStart,
-  onPagedScaleChange,
-  onPageChange,
-  onRegisterGotoPage,
-}: {
-  renderer: IFixedPageRenderer;
-  layout: 'single' | 'double';
-  initialPage: number | null;
-  onPagedPageChange?: (page: number) => void;
-  onPagedPageChangeStart?: (page: number) => void;
-  onPagedScaleChange?: (scale: number) => void;
-  onPageChange?: (page: number) => void;
-  onRegisterGotoPage: (fn: (page: number) => void) => void;
-}) {
-  const viewRef = useRef<import('./fullscreen/FullscreenPageView').FullscreenPageViewHandle | null>(null);
-  useEffect(() => {
-    onRegisterGotoPage((page) => viewRef.current?.goToPage(page));
-  }, [onRegisterGotoPage]);
-  // 用 useCallback 稳定引用 — 不然 FullscreenPageView 的 useEffect([currentPage, onPageChange])
-  // 会因为每次 render 新建函数而重复触发 onPageChange 推送(根因导致一次手势触发 N 次翻页)
-  const handlePageChange = useCallback((p: number) => {
-    onPagedPageChange?.(p);
-    onPageChange?.(p);
-  }, [onPagedPageChange, onPageChange]);
-  const handleScaleChange = useCallback((s: number) => {
-    onPagedScaleChange?.(s);
-  }, [onPagedScaleChange]);
-  return (
-    <FullscreenPageView
-      ref={viewRef}
-      renderer={renderer}
-      layout={layout}
-      initialPage={initialPage}
-      onPageChange={handlePageChange}
-      onPageChangeStart={onPagedPageChangeStart}
-      onScaleChange={handleScaleChange}
-    />
-  );
-}
-
-/**
- * EPUB paged 分支 — 单 view + capturePage ghost slide 动画
- *
- * 把 PaginatedReflowableContentHandle 中转到 Host,Host 的 imperative
- * prev/nextChapter / goToCFI / goToSearchResult 走 handle 进 slide 动画路径。
- */
-function PaginatedReflowableHostBranch({
-  renderer,
-  onProgressChange,
-  onPageChangeStart,
-  onRegisterGotoCFI,
-  onRegisterHandle,
-}: {
-  renderer: IReflowableRenderer;
-  onProgressChange?: (progress: {
-    chapter: string;
-    percentage: number;
-    page: number;
-    pages: number;
-  }) => void;
-  onPageChangeStart?: (page: number) => void;
-  onRegisterGotoCFI: (fn: (cfi: string) => void) => void;
-  onRegisterHandle: (h: PaginatedReflowableContentHandle | null) => void;
-}) {
-  const handleRef = useRef<PaginatedReflowableContentHandle | null>(null);
-  useEffect(() => {
-    onRegisterGotoCFI((cfi) => handleRef.current?.goToCFI(cfi));
-  }, [onRegisterGotoCFI]);
-  const handleStart = useCallback(() => {
-    onPageChangeStart?.(0); // EPUB 无具体页号;panel indicator 走 epub progress 推流
-  }, [onPageChangeStart]);
-  const handleSetRef = useCallback(
-    (h: PaginatedReflowableContentHandle | null): void => {
-      handleRef.current = h;
-      onRegisterHandle(h);
-    },
-    [onRegisterHandle],
-  );
-  return (
-    <PaginatedReflowableContent
-      ref={handleSetRef}
-      renderer={renderer}
-      onProgressChange={onProgressChange}
-      onPageChangeStart={handleStart}
-    />
-  );
-}
 
 // ── Renderer 工厂(C2 仅 PDF;C3 加 EPUBRenderer;DjVu/CBZ 留作未来)──
 

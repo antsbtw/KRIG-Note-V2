@@ -101,11 +101,6 @@ export const IPC_CHANNELS = {
   EBOOK_THOUGHT_BLOCK_REMOVE: 'ebook.thought-block-remove',     // removeReadingThoughtBlock
   EBOOK_THOUGHT_ANNOTATIONS: 'ebook.thought-annotations',       // getReadingThoughtAnnotations
 
-  // EPUB paged 翻页动画 — 截图当前页作 ghost(主进程 webContents.capturePage)
-  // 用于 PaginatedReflowableContent slide 动画,避免双 EPUBRenderer 实例的
-  // paginator 量化问题(参考 docs/tasks/epub-page-flip-animation-prompt.md)
-  EBOOK_CAPTURE_REGION: 'ebook.capture-region',
-
   // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform 集成)
   EXTRACTION_UPLOAD: 'extraction.upload',           // renderer → main:上传当前 PDF → 返 md5
   EXTRACTION_IMPORT: 'extraction.import',           // renderer → main:主动触发 import(备用入口)

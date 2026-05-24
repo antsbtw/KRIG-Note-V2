@@ -296,34 +296,4 @@ export function registerEBookHandlers(): void {
     if (typeof bookId !== 'string') return [];
     return getReadingThoughtAnnotations(bookId);
   });
-
-  // EPUB paged 翻页动画截图 — renderer 传发起窗口内的 rect(viewport 坐标),
-  // 返 PNG dataURL 作 slide ghost 底图
-  ipcMain.handle(
-    IPC_CHANNELS.EBOOK_CAPTURE_REGION,
-    async (event, rect: unknown): Promise<string | null> => {
-      if (!rect || typeof rect !== 'object') return null;
-      const r = rect as { x?: number; y?: number; width?: number; height?: number };
-      if (
-        typeof r.x !== 'number' || typeof r.y !== 'number'
-        || typeof r.width !== 'number' || typeof r.height !== 'number'
-      ) {
-        return null;
-      }
-      const win = BrowserWindow.fromWebContents(event.sender);
-      if (!win) return null;
-      try {
-        const img = await win.webContents.capturePage({
-          x: Math.max(0, Math.round(r.x)),
-          y: Math.max(0, Math.round(r.y)),
-          width: Math.max(1, Math.round(r.width)),
-          height: Math.max(1, Math.round(r.height)),
-        });
-        return `data:image/png;base64,${img.toPNG().toString('base64')}`;
-      } catch (err) {
-        console.error('[ebook] capture-region failed:', err);
-        return null;
-      }
-    },
-  );
 }

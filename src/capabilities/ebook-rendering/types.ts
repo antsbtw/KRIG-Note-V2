@@ -161,8 +161,7 @@ export interface IReflowableRenderer extends IBookRenderer {
 
   setDisplayMode(mode: 'paginated' | 'scrolled'): void;
   /** 设置最大列数(1=单页 / 2=双页);foliate-js 会按容器宽度自适应 */
-  /** 设置最大列数 + 可选 max-inline-size(px,全屏布局对齐用) */
-  setMaxColumnCount(count: 1 | 2, maxInlineSizePx?: number): void;
+  setMaxColumnCount(count: 1 | 2): void;
   /** 设置阅读色调主题 — 改背景+文字色,通过 foliate-js setStyles 注入到 iframe 文档 */
   setTheme(theme: EpubTheme): void;
   /** 设置明暗模式 — light/dark/auto;auto 跟随 prefers-color-scheme 动态切换 */
@@ -193,23 +192,6 @@ export interface IReflowableRenderer extends IBookRenderer {
   // ── C4 fix:双指水平 swipe 翻页(macOS Books 同款 UX)──
   /** 注册 swipe 翻页回调(由 reflowable-content 消费,触发 prev/nextChapter)*/
   onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void;
-
-  // ── 双实例翻页动画(全屏 paged 路径)──
-  /** 原始 buffer — 新临时实例 init 时复用,避免 IPC 二次拉数据 */
-  getFileData(): ArrayBuffer | null;
-  /** view + foliate 初始化完成的 promise(双实例场景显式等 B 就绪) */
-  waitReady(): Promise<void>;
-  /** 底层 view 对象(命令式动画驱动用 — view.goTo / view.next / view.prev) */
-  getView(): any;
-  /** 当前主题(双实例同步用) */
-  getTheme(): EpubTheme;
-  /** 当前明暗模式(双实例同步用) */
-  getAppearance(): EpubAppearance;
-  /** 当前最大列数(双实例同步用) */
-  getMaxColumnCount(): 1 | 2;
-  /** 当前 EPUB 单 column 的实际渲染宽度(像素);view 未 ready 返 null。
-   *  全屏切换布局对齐用:panel spread 容器宽 = 2 × view 主区单 column 宽 */
-  getColumnWidth(): number | null;
 }
 
 // ── 类型守卫 ──
@@ -308,10 +290,4 @@ export interface EBookRenderingApi {
   subscribeEpubReadingSettings(
     listener: (s: { fontSize: number; theme: EpubTheme; appearance: EpubAppearance }) => void,
   ): () => void;
-  openFullscreenReader(payload: {
-    workspaceId: string;
-    bookInfo: import('@shared/ipc/ebook-types').EBookLoadedInfo;
-    /** EPUB 单 column 宽度,全屏 panel 用 2× 居中布局对齐文字 */
-    epubViewColumnWidth?: number;
-  }): void;
 }

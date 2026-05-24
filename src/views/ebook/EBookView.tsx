@@ -25,18 +25,12 @@ import {
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type { EBookLoadedInfo } from '@shared/ipc/ebook-types';
 import type {
   EBookRenderingApi,
   EBookHostHandle,
 } from '@capabilities/ebook-rendering/types';
-/**
- * EBOOK_FULLSCREEN_OVERLAY_ID 与 capability id 一同绑定的"协议常量"
- * 字面字符串避开 W5 边界(view 不直 import capability 运行时值)
- */
-const EBOOK_FULLSCREEN_OVERLAY_ID = 'ebook-rendering.fullscreen.reader';
 import { getEBookWsState } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
 import { usePdfAnnotations } from './use-pdf-annotations';
@@ -262,24 +256,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   // 字号 +/- 不在 toolbar,迁到 Aa popup;变更通过 subscribeEpubReadingSettings 同步推 host
 
   const onSidebarToggle = useCallback(() => setSidebarOpen((p) => !p), []);
-
-  // 全屏 overlay 关闭时,view 重新 open 当前书 —— panel 已 saveProgress,
-  // 此时 library.open 推流的 lastPosition 即最新位置,view host 同步跳过去
-  useEffect(() => {
-    const unsub = fullscreenOverlayController.subscribe(() => {
-      const s = fullscreenOverlayController.getState();
-      // 仅当从 active 状态切到 inactive 时刷新(忽略首次 + 切其他 overlay)
-      if (!s.visible && s.lastActiveId === EBOOK_FULLSCREEN_OVERLAY_ID) {
-        const bookId = activeBookIdRef.current;
-        if (bookId) {
-          void library.open(bookId).catch((err) => {
-            console.warn('[ebook-view] reopen after fullscreen failed:', err);
-          });
-        }
-      }
-    });
-    return unsub;
-  }, [library, activeBookIdRef]);
 
   // 全屏沉浸阅读(2026-05-23 用户拍板 — 简化方案):
   //   不再开独立全屏 panel,而是 toggle workspace.navSideCollapsed:

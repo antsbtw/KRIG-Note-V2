@@ -289,10 +289,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ebookThoughtAnnotations(bookId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_ANNOTATIONS, bookId);
   },
-  /** EPUB paged 翻页动画 — 截发起窗口指定 rect 为 PNG dataURL(slide ghost 用)*/
-  ebookCaptureRegion(rect: { x: number; y: number; width: number; height: number }): Promise<string | null> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_CAPTURE_REGION, rect);
-  },
 
   // ── L5-C6:PDF 提取 → Note ──
   /** 上传当前打开的 PDF 到 Platform → 返 md5 + platformUrl(view 拿后 bus.openRight)*/
