@@ -283,6 +283,9 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   //   PDF 路径同理(PDF 不需要 spread,FixedPageContent 在更宽容器自适应)。
   const onFullscreen = useCallback(() => {
     workspaceManager.toggleNavSide(workspaceId);
+    // 释放按钮焦点 — 避免 toolbar 全屏按钮点击后保持 :focus 视觉残留 +
+    // ESC 退出后 hover 露出的 toolbar 上仍有焦点环
+    (document.activeElement as HTMLElement | null)?.blur();
   }, [workspaceId]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
@@ -323,7 +326,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         if (ev.__krigEbookEscHandled) return;
         ev.__krigEbookEscHandled = true;
         e.preventDefault();
-        workspaceManager.toggleNavSide(workspaceId);
+        onFullscreen();
       } else if (renderMode === 'reflowable') {
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
@@ -336,7 +339,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [search, onBookmarkToggle, renderMode, onPrevChapter, onNextChapter, isFullscreen, workspaceId]);
+  }, [search, onBookmarkToggle, renderMode, onPrevChapter, onNextChapter, isFullscreen, onFullscreen]);
 
   // 主区 mousedown 关 EPUB picker(点击 picker 外部时,picker 内部冒泡阻断)
   useEffect(() => {
