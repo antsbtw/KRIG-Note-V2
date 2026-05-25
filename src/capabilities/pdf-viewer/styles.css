@@ -10,10 +10,20 @@
 
 @import 'pdfjs-dist/web/pdf_viewer.css';
 
-.pdfViewerContainer {
+/*
+ * 注意:pdfjs PDFViewer 构造内部断言 container 必须 position: absolute,
+ * 否则抛 "The `container` must be absolutely positioned."。
+ * 外层 wrapper 自管 position: relative,本 container 在其内绝对定位铺满。
+ */
+.pdf-viewer-canvas-wrapper {
   position: relative;
   width: 100%;
   height: 100%;
+}
+
+.pdfViewerContainer {
+  position: absolute;
+  inset: 0;
   overflow: auto;
   outline: none; /* tabIndex=0 拿键盘焦点,不要 default focus ring */
 }

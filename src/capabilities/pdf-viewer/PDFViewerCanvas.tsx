@@ -406,12 +406,16 @@ export const PDFViewerCanvas = forwardRef<
   );
 
   return (
-    <div
-      ref={containerRef}
-      className="pdfViewerContainer"
-      tabIndex={0}
-    >
-      <div ref={viewerRef} className="pdfViewer" />
+    // 外层 wrapper 提供 position: relative 让 .pdfViewerContainer absolute 锚定。
+    // pdfjs PDFViewer 构造硬要求 container 必须 position: absolute(否则抛错)。
+    <div className="pdf-viewer-canvas-wrapper">
+      <div
+        ref={containerRef}
+        className="pdfViewerContainer"
+        tabIndex={0}
+      >
+        <div ref={viewerRef} className="pdfViewer" />
+      </div>
     </div>
   );
 });
