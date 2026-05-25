@@ -44,9 +44,23 @@ import { getProxy, resolveDestRef } from './loader';
 // TextLayerMode.ENABLE = 1(不出 pdf_viewer.mjs 顶层 export,用字面量)
 const TEXT_LAYER_MODE_ENABLE = 1;
 
-// 缩放 — Cmd+wheel / 键盘 step 因子
-const WHEEL_SCALE_STEP = 1.1; // 单次 wheel 缩放倍率(与 pdfjs DEFAULT_SCALE_DELTA 一致)
-const KEYBOARD_SCALE_STEP = 1.25; // 键盘 Cmd+= / Cmd+- 单次倍率
+// 键盘 Cmd+= / Cmd+- 单次缩放倍率
+const KEYBOARD_SCALE_STEP = 1.25;
+
+/**
+ * Wheel/pinch 缩放节流参数 — 对齐 mozilla pdfjs viewer.js 的 _accumulateTicks 模式。
+ *
+ * trackpad pinch 在 macOS 派 wheel + ctrlKey=true,每秒 60+ 次,deltaY 小数(0.x~几)。
+ * 单次 wheel 直接乘 1.1 会一秒放大 60 倍 → 抖动 + 视觉飞页。
+ *
+ * 改:把 wheel ticks 当作"deltaY 像素累积器",超过 PIXELS_PER_LINE 才触发一次
+ * scaleFactor=1.1 的 updateScale,且 drawingDelay=400 让真渲染 postpone 到静止。
+ *
+ * 数值参考 mozilla pdfjs:_wheelUnit = 100(pixel/line);LINE_SCALE_FACTOR = 1.1。
+ */
+const PIXELS_PER_LINE = 40;       // 累积阈值 — trackpad pinch 一次 deltaY 0.5~5,~10 次出一 tick
+const WHEEL_SCALE_FACTOR = 1.1;   // 每 tick 缩放倍率(对齐 pdfjs DEFAULT_SCALE_DELTA)
+const WHEEL_DRAWING_DELAY = 400;  // 真渲染 postpone(<1000 才生效,期间走 CSS transform)
 
 export const PDFViewerCanvas = forwardRef<
   PDFViewerCanvasHandle,
@@ -177,20 +191,49 @@ export const PDFViewerCanvas = forwardRef<
   }, [handle]);
 
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch — macOS 派 wheel + ctrlKey=true)──
+  //
+  // 累积 deltaY 模式:多次小 delta 攒到阈值才触发一次 updateScale,避免 60fps
+  // pinch 一秒放大 60 倍。reset 由 100ms 静止超时触发(防止符号反转后残留累积)。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    let accumulatedDelta = 0;
+    let lastWheelTime = 0;
+    let lastOrigin: [number, number] = [0, 0];
+
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const viewer = viewerInstanceRef.current;
       if (!viewer) return;
       e.preventDefault();
-      const scaleFactor = e.deltaY < 0 ? WHEEL_SCALE_STEP : 1 / WHEEL_SCALE_STEP;
-      viewer.updateScale({
-        drawingDelay: 400,
-        scaleFactor,
-        origin: [e.clientX, e.clientY],
-      });
+
+      // 累积器静止超时:>100ms 没收到 wheel → 上一轮已结束,重置累积器
+      const now = performance.now();
+      if (now - lastWheelTime > 100) accumulatedDelta = 0;
+      lastWheelTime = now;
+      lastOrigin = [e.clientX, e.clientY];
+
+      // deltaMode == DOM_DELTA_LINE / PAGE 时把每行/每页折成 PIXELS_PER_LINE 倍
+      // (Chromium 默认 mouse wheel 是 DOM_DELTA_PIXEL,trackpad 是 PIXEL,稳)
+      let delta = e.deltaY;
+      if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
+      else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
+
+      accumulatedDelta += delta;
+
+      // 出 tick:累积超过阈值。多 tick 时一次性应用(罕见,trackpad 慢速基本 ±1 tick)
+      while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
+        const direction = accumulatedDelta < 0 ? 1 : -1;
+        accumulatedDelta -= direction * PIXELS_PER_LINE;
+        const scaleFactor =
+          direction > 0 ? WHEEL_SCALE_FACTOR : 1 / WHEEL_SCALE_FACTOR;
+        viewer.updateScale({
+          drawingDelay: WHEEL_DRAWING_DELAY,
+          scaleFactor,
+          origin: lastOrigin,
+        });
+      }
     };
     container.addEventListener('wheel', handler, { passive: false });
     return () => container.removeEventListener('wheel', handler);
@@ -204,10 +247,10 @@ export const PDFViewerCanvas = forwardRef<
       if (!viewer) return;
       if (e.key === '=' || e.key === '+') {
         e.preventDefault();
-        viewer.updateScale({ drawingDelay: 400, scaleFactor: KEYBOARD_SCALE_STEP });
+        viewer.updateScale({ drawingDelay: -1, scaleFactor: KEYBOARD_SCALE_STEP });
       } else if (e.key === '-') {
         e.preventDefault();
-        viewer.updateScale({ drawingDelay: 400, scaleFactor: 1 / KEYBOARD_SCALE_STEP });
+        viewer.updateScale({ drawingDelay: -1, scaleFactor: 1 / KEYBOARD_SCALE_STEP });
       } else if (e.key === '0') {
         e.preventDefault();
         viewer.currentScaleValue = 'page-width';
@@ -260,7 +303,7 @@ export const PDFViewerCanvas = forwardRef<
       setScale(scaleFactor: number, origin?: [number, number]): void {
         const viewer = viewerInstanceRef.current;
         if (!viewer) return;
-        viewer.updateScale({ drawingDelay: 400, scaleFactor, origin });
+        viewer.updateScale({ drawingDelay: -1, scaleFactor, origin });
       },
       setFitMode(mode: FitMode): void {
         const viewer = viewerInstanceRef.current;
