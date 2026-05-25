@@ -205,6 +205,11 @@ export interface EBookHostProps {
   onPdfTextSelected?: (
     ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,
   ) => void;
+  /**
+   * PDF textLayer 异步渲染完成回调(vocab-highlight 2026-05-25 加)。
+   * 主区 + 全屏两种模式都触发;view 端用于扫 textLayer span 给 vocab 命中词画高亮。
+   */
+  onPdfTextLayerRendered?: (pageNum: number, textLayer: HTMLElement) => void;
   // ── PDF 全屏翻页式渲染(2026-05-24)──
   /**
    * PDF 渲染模式:
@@ -238,6 +243,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     pdfFlashAnnotationId,
     onPdfAnnotationCreate,
     onPdfTextSelected,
+    onPdfTextLayerRendered,
     pdfLayout = 'scroll',
     pagedLayout = 'single',
   },
@@ -659,6 +665,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           flashAnnotationId={pdfFlashAnnotationId}
           onAnnotationCreate={onPdfAnnotationCreate}
           onTextSelected={onPdfTextSelected}
+          onTextLayerRendered={onPdfTextLayerRendered}
         />
       )}
 
@@ -673,6 +680,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           annotations={pdfAnnotations}
           onAnnotationCreate={onPdfAnnotationCreate}
           onTextSelected={onPdfTextSelected}
+          onTextLayerRendered={onPdfTextLayerRendered}
         />
       )}
 
@@ -710,6 +718,7 @@ function PagedHostBranch({
   annotations,
   onAnnotationCreate,
   onTextSelected,
+  onTextLayerRendered,
 }: {
   renderer: IFixedPageRenderer;
   layout: FullscreenPagedLayout;
@@ -725,6 +734,7 @@ function PagedHostBranch({
   onTextSelected?: (
     ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,
   ) => void;
+  onTextLayerRendered?: (pageNum: number, textLayer: HTMLElement) => void;
 }) {
   const viewRef = useRef<FullscreenPageViewHandle | null>(null);
   useEffect(() => {
@@ -741,6 +751,7 @@ function PagedHostBranch({
       annotations={annotations}
       onAnnotationCreate={onAnnotationCreate}
       onTextSelected={onTextSelected}
+      onTextLayerRendered={onTextLayerRendered}
     />
   );
 }
