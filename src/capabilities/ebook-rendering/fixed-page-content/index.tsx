@@ -16,6 +16,10 @@ import {
   type PageAnnotation,
   type AnnotationDraft,
 } from './annotation-layer';
+import {
+  usePdfTextSelection,
+  type PdfTextSelectionEvent,
+} from '../hooks/use-pdf-text-selection';
 
 interface FixedPageContentProps {
   renderer: IFixedPageRenderer;
@@ -33,6 +37,8 @@ interface FixedPageContentProps {
   annotations?: PageAnnotation[];
   /** 创建标注:layer 仅传草稿(type/color/rect),pageNum 由 layer 注入,id 由 main 生成 */
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
+  /** PR-α-3:textLayer 选区触发 — view 端弹 picker */
+  onTextSelected?: (ev: PdfTextSelectionEvent) => void;
 }
 
 const PAGE_GAP = 8;
@@ -50,10 +56,14 @@ export function FixedPageContent({
   annotations = [],
   flashAnnotationId = null,
   onAnnotationCreate,
+  onTextSelected,
 }: FixedPageContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefsRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const textLayerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // PR-α-3:textLayer 选区监听 — window mouseup → emit ev
+  usePdfTextSelection(textLayerRefsRef, scale, onTextSelected);
   const [pageDimensions, setPageDimensions] = useState<PageDimension[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   // 每次 domRange 变化导致 DOM 重建时递增,强制触发渲染 effect

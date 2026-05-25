@@ -57,14 +57,36 @@ function toPageAnnotationFromLegacy(anchor: BookAnchor): PdfAnnotationItem | nul
 function toPageAnnotationFromThought(t: ThoughtInfo): PdfAnnotationItem | null {
   if (!t.anchor || t.anchor.source !== 'book') return null;
   const loc = t.anchor.locator as BookLocator;
-  if (loc.markStyle !== 'rect' && loc.markStyle !== 'underline') return null;
-  if (loc.pageNum <= 0 || !loc.rect) return null;
+  // PR-α-3:markStyle 扩到 4 值(rect/underline/highlight/strikethrough),
+  // highlight/strikethrough 走 textRects 渲染(无 rect 字段时退回单 rect 兜底)。
+  if (
+    loc.markStyle !== 'rect' &&
+    loc.markStyle !== 'underline' &&
+    loc.markStyle !== 'highlight' &&
+    loc.markStyle !== 'strikethrough'
+  ) {
+    return null;
+  }
+  if (loc.pageNum <= 0) return null;
+  // rect 字段:rect/underline 必有,highlight/strikethrough 兜底(boundingRect)推荐有但允许缺
+  if ((loc.markStyle === 'rect' || loc.markStyle === 'underline') && !loc.rect) {
+    return null;
+  }
+  // 文字流模式:rect / textRects 至少有一个,否则无法定位
+  if (
+    (loc.markStyle === 'highlight' || loc.markStyle === 'strikethrough') &&
+    !loc.rect &&
+    (!loc.textRects || loc.textRects.length === 0)
+  ) {
+    return null;
+  }
   return {
     id: t.id,
     markStyle: loc.markStyle,
     thoughtType: t.type,
     pageNum: loc.pageNum,
-    rect: loc.rect,
+    rect: loc.rect ?? { x: 0, y: 0, w: 0, h: 0 },
+    textRects: loc.textRects,
     thoughtId: t.id,
   };
 }

@@ -43,6 +43,7 @@ import {
   type PageAnnotation,
   type AnnotationDraft,
 } from '../fixed-page-content/annotation-layer';
+import { usePdfTextSelection } from '../hooks/use-pdf-text-selection';
 
 export type FullscreenPagedLayout = 'single' | 'double';
 
@@ -56,6 +57,10 @@ interface FullscreenPageViewProps {
   annotationMode?: 'off' | 'rect';
   annotations?: PageAnnotation[];
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
+  /** PR-α-3:textLayer 选区触发 — view 端弹 picker */
+  onTextSelected?: (
+    ev: import('../hooks/use-pdf-text-selection').PdfTextSelectionEvent,
+  ) => void;
 }
 
 export interface FullscreenPageViewHandle {
@@ -84,6 +89,8 @@ interface SpreadHandle {
   node: HTMLDivElement;
   canvases: HTMLCanvasElement[];
   textLayers: HTMLDivElement[];
+  /** spread 内对应的页号(与 textLayers 同顺序;PR-α-3 textLayer Map 同步用)*/
+  pages: number[];
   /** 每页一个 React root,挂 AnnotationLayer;destroy 时 unmount */
   annotationRoots: Array<{ root: Root; pageNum: number }>;
 }
@@ -155,7 +162,25 @@ function createSpreadNode(
     }
     node.appendChild(wrap);
   });
-  return { node, canvases, textLayers, annotationRoots };
+  return { node, canvases, textLayers, pages: pages.slice(), annotationRoots };
+}
+
+/**
+ * PR-α-3:用 spread handle 重建 textLayer Map(pageNum → textLayer DOM)
+ *
+ * 在 currentSpreadRef 切换后调,让 usePdfTextSelection hook 能定位选区命中的 pageNum。
+ * 调时一次性 clear 再填,旧 spread 的 textLayer DOM 已被 destroySpread 移除。
+ */
+function syncTextLayerMap(
+  map: Map<number, HTMLElement>,
+  handle: SpreadHandle | null,
+): void {
+  map.clear();
+  if (!handle) return;
+  handle.pages.forEach((p, idx) => {
+    const tl = handle.textLayers[idx];
+    if (tl) map.set(p, tl);
+  });
 }
 
 /** 销毁 spread — unmount 所有 annotation root,然后从 DOM 移除节点 */
@@ -208,12 +233,16 @@ export const FullscreenPageView = forwardRef<
     annotationMode = 'off',
     annotations = [],
     onAnnotationCreate,
+    onTextSelected,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   // 当前主 spread 节点(命令式管理)
   const currentSpreadRef = useRef<SpreadHandle | null>(null);
+  // PR-α-3:textLayer DOM Map(pageNum → DOM)— spread 创建/销毁时同步,
+  // usePdfTextSelection hook 读此 ref 探测选区命中页
+  const textLayerByPageRef = useRef<Map<number, HTMLElement>>(new Map());
   // 翻页动画进行中标志 — 同时只允许一个动画
   const animatingRef = useRef(false);
 
@@ -229,6 +258,9 @@ export const FullscreenPageView = forwardRef<
   });
   const [scale, setScale] = useState(1.0);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
+
+  // PR-α-3:textLayer 选区监听(走 textLayerByPageRef 反查 pageNum)
+  usePdfTextSelection(textLayerByPageRef, scale, onTextSelected);
 
   // 标注相关 props 走 ref — createSpreadNode 闭包内拿最新值,避免静态 useEffect
   // 把整个 spread 重建一遍
@@ -339,6 +371,7 @@ export const FullscreenPageView = forwardRef<
     handle.node.dataset.scale = String(scale);
     container.appendChild(handle.node);
     currentSpreadRef.current = handle;
+    syncTextLayerMap(textLayerByPageRef.current, handle);
     pages.forEach((p, idx) => {
       void renderer.renderPage(p, handle.canvases[idx], scale);
       void renderer.renderTextLayer(p, handle.textLayers[idx], scale);
@@ -351,6 +384,7 @@ export const FullscreenPageView = forwardRef<
       const cur = currentSpreadRef.current;
       if (cur) destroySpread(cur);
       currentSpreadRef.current = null;
+      syncTextLayerMap(textLayerByPageRef.current, null);
       const container = containerRef.current;
       if (container) container.innerHTML = '';
     };
@@ -456,6 +490,7 @@ export const FullscreenPageView = forwardRef<
       newNode.style.willChange = '';
       newNode.style.zIndex = '';
       currentSpreadRef.current = newHandle;
+      syncTextLayerMap(textLayerByPageRef.current, newHandle);
       animatingRef.current = false;
 
       // 6) 更新 React state — 静态 useEffect 看到 dataset 匹配会跳过重建
