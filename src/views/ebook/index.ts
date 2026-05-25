@@ -41,6 +41,7 @@ registerView({
     'ebook-rendering',  // L5-C2:PDF Canvas 渲染 + 虚拟滚动 + Text Layer
     'thought',          // thought-view Phase 4:横切思考层(EPUB 高亮/PDF 框选走 thought capability)
     'media-storage',    // 2026-05-24:PDF 框选截图 → mediaPutBase64 → mediaUrl 写 thought doc image
+    'learning',         // 2026-05-25:EPUB 选区 📖 查词 / 🌐 翻译(走 learning.ui.dictionaryPanel)
   ],
   component: EBookView,
   navSideTab: { label: 'eBook', icon: '📕', order: 2 },

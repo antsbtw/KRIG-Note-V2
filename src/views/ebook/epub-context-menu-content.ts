@@ -45,6 +45,7 @@ import type {
   ThoughtCapabilityApi,
   BookLocator,
 } from '@capabilities/thought/types';
+import type { LearningApi } from '@capabilities/learning/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import {
   THOUGHT_TYPE_META,
@@ -293,6 +294,24 @@ export function registerEpubContextMenu(): void {
     console.info('[ebook-view.epub-ask-ai] 占位 — 待 AIView 接 EPUB textContent 后实装');
   });
 
+  /** 📖 查词 — EPUB 选区单词 → DictionaryPanel lookup */
+  commandRegistry.register('ebook-view.epub-dictionary-lookup', () => {
+    const { text } = ctx();
+    if (!text) return;
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    learning.ui.dictionaryPanel.showLookup(text);
+    contextMenuController.hide();
+  });
+
+  /** 🌐 翻译 — EPUB 选区句子 → DictionaryPanel translate */
+  commandRegistry.register('ebook-view.epub-translate-text', () => {
+    const { text } = ctx();
+    if (!text) return;
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    learning.ui.dictionaryPanel.showTranslate(text);
+    contextMenuController.hide();
+  });
+
   /** 📋 复制 — clipboard.writeText(选区 / 标注 textContent) */
   commandRegistry.register('ebook-view.epub-copy', () => {
     const { text, annotationCfi } = ctx();
@@ -428,6 +447,25 @@ export function registerEpubContextMenu(): void {
       enabledWhen: 'has-epub-annotation',
       group: 'create',
       order: 41,
+    },
+    // 📖 查词 / 🌐 翻译(选区上,2026-05-25 加;走 learning capability)
+    {
+      id: 'ebook-view.epub.cm.dictionary-lookup',
+      label: '📖 查词',
+      command: 'ebook-view.epub-dictionary-lookup',
+      view: VIEW,
+      enabledWhen: 'has-epub-text-selection',
+      group: 'learning',
+      order: 45,
+    },
+    {
+      id: 'ebook-view.epub.cm.translate-text',
+      label: '🌐 翻译',
+      command: 'ebook-view.epub-translate-text',
+      view: VIEW,
+      enabledWhen: 'has-epub-text-selection',
+      group: 'learning',
+      order: 46,
     },
     // 改颜色(仅已标注):走 EpubColorSubmenu(同高亮 submenu 但 actionCommand 不同)
     {
