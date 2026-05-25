@@ -154,9 +154,11 @@ export const PDFViewerCanvas = forwardRef<
       }
     };
     const onPageChanging = (evt: { pageNumber: number }): void => {
+      console.log(`[pdf-zoom][pagechanging] → page ${evt.pageNumber} scrollTop=${container.scrollTop.toFixed(0)}`);
       callbacksRef.current.onPageChange?.(evt.pageNumber);
     };
     const onScaleChanging = (evt: { scale: number }): void => {
+      console.log(`[pdf-zoom][scalechanging] scale=${evt.scale.toFixed(3)} scrollTop=${container.scrollTop.toFixed(0)} pageNum=${viewer.currentPageNumber}`);
       callbacksRef.current.onScaleChange?.(evt.scale);
     };
     const onPageRendered = (evt: { pageNumber: number }): void => {
@@ -225,9 +227,11 @@ export const PDFViewerCanvas = forwardRef<
 
     let accumulatedDelta = 0;
     let lastWheelTime = 0;
-    // 同一 pinch 手势内锁定锚点(container 局部坐标 mx/my)。
-    // 手指微动 clientX/Y 不会让锚点漂移 → 整个手势鼠标点恒不动。
     let gestureAnchor: { mx: number; my: number } | null = null;
+    // DIAG: 每手势 wheel 计数 + 起止时间(算速度)
+    let gestureWheelCount = 0;
+    let gestureStartTime = 0;
+    let gestureTickCount = 0;
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -238,24 +242,35 @@ export const PDFViewerCanvas = forwardRef<
       const now = performance.now();
       const isNewGesture = now - lastWheelTime > GESTURE_TIMEOUT_MS;
       if (isNewGesture) {
+        // DIAG: 上一手势结束摘要
+        if (gestureWheelCount > 0) {
+          const dur = lastWheelTime - gestureStartTime;
+          console.log(
+            `[pdf-zoom][gesture-end] wheels=${gestureWheelCount} ticks=${gestureTickCount} duration=${dur.toFixed(0)}ms rate=${(gestureWheelCount / (dur / 1000)).toFixed(0)}wheels/s`,
+          );
+        }
         accumulatedDelta = 0;
         const bcr = container.getBoundingClientRect();
         gestureAnchor = {
           mx: e.clientX - bcr.left,
           my: e.clientY - bcr.top,
         };
+        gestureWheelCount = 0;
+        gestureTickCount = 0;
+        gestureStartTime = now;
+        console.log(
+          `[pdf-zoom][gesture-start] anchor mx=${gestureAnchor.mx.toFixed(0)} my=${gestureAnchor.my.toFixed(0)} containerBCR top=${bcr.top.toFixed(0)} scrollTop=${container.scrollTop.toFixed(0)} scale=${viewer.currentScale.toFixed(3)}`,
+        );
       }
       lastWheelTime = now;
+      gestureWheelCount += 1;
 
-      // deltaMode == DOM_DELTA_LINE / PAGE 时把每行/每页折成 PIXELS_PER_LINE 倍
-      // (Chromium 默认 mouse wheel 是 DOM_DELTA_PIXEL,trackpad 是 PIXEL)
       let delta = e.deltaY;
       if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
       else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
 
       accumulatedDelta += delta;
 
-      // 出 tick:累积超过阈值。多 tick 一次性应用(罕见,trackpad 慢速基本 ±1 tick)
       while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
         const direction = accumulatedDelta < 0 ? 1 : -1;
         accumulatedDelta -= direction * PIXELS_PER_LINE;
@@ -263,26 +278,48 @@ export const PDFViewerCanvas = forwardRef<
           direction > 0 ? WHEEL_SCALE_FACTOR : 1 / WHEEL_SCALE_FACTOR;
 
         if (!gestureAnchor) continue;
-        // tick 前 scale + content 坐标
+        gestureTickCount += 1;
+
         const oldScale = viewer.currentScale;
         const { mx, my } = gestureAnchor;
-        const contentX = container.scrollLeft + mx;
-        const contentY = container.scrollTop + my;
+        const scrollBefore = { left: container.scrollLeft, top: container.scrollTop };
+        const contentX = scrollBefore.left + mx;
+        const contentY = scrollBefore.top + my;
 
-        // 不传 origin — 让 pdfjs 完全不做 scroll 修正,我们之后自己设
         viewer.updateScale({
           drawingDelay: WHEEL_DRAWING_DELAY,
           scaleFactor,
         });
 
-        // updateScale 同步设了 _currentScale + scrollPageIntoView 已经跑过
-        // (会把 scroll 移到当前页顶 + _location 偏移)。读 newScale 算 ratio,
-        // 强制把鼠标点位置那个内容像素拉回 (mx, my)。
         const newScale = viewer.currentScale;
+        const scrollAfterPdfjs = { left: container.scrollLeft, top: container.scrollTop };
+
         if (newScale !== oldScale && oldScale > 0) {
           const ratio = newScale / oldScale;
-          container.scrollLeft = contentX * ratio - mx;
-          container.scrollTop = contentY * ratio - my;
+          const targetLeft = contentX * ratio - mx;
+          const targetTop = contentY * ratio - my;
+          container.scrollLeft = targetLeft;
+          container.scrollTop = targetTop;
+          const scrollAfterOurs = { left: container.scrollLeft, top: container.scrollTop };
+
+          console.log(
+            `[pdf-zoom][tick] dir=${direction > 0 ? '+' : '-'} scale ${oldScale.toFixed(3)}→${newScale.toFixed(3)} mxmy=(${mx.toFixed(0)},${my.toFixed(0)}) content=(${contentX.toFixed(0)},${contentY.toFixed(0)}) scroll: before=(${scrollBefore.left.toFixed(0)},${scrollBefore.top.toFixed(0)}) pdfjsAfter=(${scrollAfterPdfjs.left.toFixed(0)},${scrollAfterPdfjs.top.toFixed(0)}) target=(${targetLeft.toFixed(0)},${targetTop.toFixed(0)}) oursSet=(${scrollAfterOurs.left.toFixed(0)},${scrollAfterOurs.top.toFixed(0)})`,
+          );
+
+          // 下一帧再读一次 scrollTop,看是否被 pdfjs 异步逻辑覆盖
+          const expectedTop = scrollAfterOurs.top;
+          const expectedLeft = scrollAfterOurs.left;
+          requestAnimationFrame(() => {
+            const final = { left: container.scrollLeft, top: container.scrollTop };
+            if (
+              Math.abs(final.top - expectedTop) > 1 ||
+              Math.abs(final.left - expectedLeft) > 1
+            ) {
+              console.warn(
+                `[pdf-zoom][raf] scroll DRIFTED after our set: oursSet=(${expectedLeft.toFixed(0)},${expectedTop.toFixed(0)}) → rafFinal=(${final.left.toFixed(0)},${final.top.toFixed(0)}) drift=(${(final.left - expectedLeft).toFixed(0)},${(final.top - expectedTop).toFixed(0)})`,
+              );
+            }
+          });
         }
       }
     };
