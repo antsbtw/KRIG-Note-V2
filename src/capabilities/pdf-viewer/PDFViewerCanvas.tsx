@@ -58,7 +58,9 @@ const KEYBOARD_SCALE_STEP = 1.25;
  *
  * 数值参考 mozilla pdfjs:_wheelUnit = 100(pixel/line);LINE_SCALE_FACTOR = 1.1。
  */
-const PIXELS_PER_LINE = 40;       // 累积阈值 — trackpad pinch 一次 deltaY 0.5~5,~10 次出一 tick
+// 累积阈值 — trackpad pinch 一次 deltaY 0.5~5。120 = 30~80 次累积出一 tick
+// 即两指收/放约 1.5~2 cm 才触发一次 1.1 倍缩放(对齐 macOS Preview / Books 手感)
+const PIXELS_PER_LINE = 120;
 const WHEEL_SCALE_FACTOR = 1.1;   // 每 tick 缩放倍率(对齐 pdfjs DEFAULT_SCALE_DELTA)
 const WHEEL_DRAWING_DELAY = 400;  // 真渲染 postpone(<1000 才生效,期间走 CSS transform)
 
