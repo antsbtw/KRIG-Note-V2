@@ -61,6 +61,11 @@ interface FullscreenPageViewProps {
   onTextSelected?: (
     ev: import('../hooks/use-pdf-text-selection').PdfTextSelectionEvent,
   ) => void;
+  /**
+   * textLayer 异步渲染完成回调(pdf-vocab-highlight 2026-05-25 加)。
+   * 主区 + 全屏共用契约;view 端用于扫 textLayer span 给 vocab 命中词画高亮。
+   */
+  onTextLayerRendered?: (pageNum: number, textLayer: HTMLElement) => void;
 }
 
 export interface FullscreenPageViewHandle {
@@ -243,6 +248,7 @@ export const FullscreenPageView = forwardRef<
     annotations = [],
     onAnnotationCreate,
     onTextSelected,
+    onTextLayerRendered,
   },
   ref,
 ) {
@@ -383,9 +389,15 @@ export const FullscreenPageView = forwardRef<
     syncTextLayerMap(textLayerByPageRef.current, handle);
     pages.forEach((p, idx) => {
       void renderer.renderPage(p, handle.canvases[idx], scale);
-      void renderer.renderTextLayer(p, handle.textLayers[idx], scale);
+      const tl = handle.textLayers[idx];
+      void renderer.renderTextLayer(p, tl, scale).then(() => {
+        // 防御:spread 已被切走 / unmount 后回调
+        if (currentSpreadRef.current?.textLayers[idx] === tl) {
+          onTextLayerRendered?.(p, tl);
+        }
+      });
     });
-  }, [currentPage, layout, scale, totalPages, pageDims, renderer]);
+  }, [currentPage, layout, scale, totalPages, pageDims, renderer, onTextLayerRendered]);
 
   // unmount 清理:移除所有 spread 节点 + unmount React root
   useEffect(() => {
@@ -471,7 +483,14 @@ export const FullscreenPageView = forwardRef<
         pages.map((p, idx) => renderer.renderPage(p, newHandle.canvases[idx], scale)),
       );
       pages.forEach((p, idx) => {
-        void renderer.renderTextLayer(p, newHandle.textLayers[idx], scale);
+        const tl = newHandle.textLayers[idx];
+        void renderer.renderTextLayer(p, tl, scale).then(() => {
+          // 翻页动画期间 spread 切换:用 newHandle 引用判定,不是 currentSpreadRef
+          // (动画结束才赋值 currentSpreadRef = newHandle)
+          if (newHandle.textLayers[idx] === tl) {
+            onTextLayerRendered?.(p, tl);
+          }
+        });
       });
 
       // 2.5) next:像素就位,把 newNode 显出来 — 此时 oldNode 在上层挡住它,用户仍看到旧页面
@@ -505,7 +524,7 @@ export const FullscreenPageView = forwardRef<
       // 6) 更新 React state — 静态 useEffect 看到 dataset 匹配会跳过重建
       setCurrentPage(targetPage);
     },
-    [layout, totalPages, pageDims, scale, renderer],
+    [layout, totalPages, pageDims, scale, renderer, onTextLayerRendered],
   );
 
   // 命令式 API

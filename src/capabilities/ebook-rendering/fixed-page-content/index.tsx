@@ -39,6 +39,12 @@ interface FixedPageContentProps {
   onAnnotationCreate?: (pageNum: number, annotation: AnnotationDraft) => void;
   /** PR-α-3:textLayer 选区触发 — view 端弹 picker */
   onTextSelected?: (ev: PdfTextSelectionEvent) => void;
+  /**
+   * textLayer 异步渲染完成回调(pdf-vocab-highlight 2026-05-25 加)。
+   * 触发时机:每页 textLayer render 完(初次 mount / scale 变 / scroll 新页进可见)。
+   * view 端用此扫 textLayer span 给 vocab 命中词画高亮 div。
+   */
+  onTextLayerRendered?: (pageNum: number, textLayer: HTMLElement) => void;
 }
 
 const PAGE_GAP = 8;
@@ -57,6 +63,7 @@ export function FixedPageContent({
   flashAnnotationId = null,
   onAnnotationCreate,
   onTextSelected,
+  onTextLayerRendered,
 }: FixedPageContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefsRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -205,7 +212,12 @@ export function FixedPageContent({
       }
       const textDiv = textLayerRefsRef.current.get(pageNum);
       if (textDiv) {
-        void renderer.renderTextLayer(pageNum, textDiv, scale);
+        const p = pageNum;
+        void renderer.renderTextLayer(p, textDiv, scale).then(() => {
+          // 防御:effect 再跑导致 ref 被替换 / unmount 后回调
+          const current = textLayerRefsRef.current.get(p);
+          if (current === textDiv) onTextLayerRendered?.(p, textDiv);
+        });
       }
     }
   }, [
@@ -216,6 +228,7 @@ export function FixedPageContent({
     renderer,
     getVisibleRange,
     domGeneration,
+    onTextLayerRendered,
   ]);
 
   /**

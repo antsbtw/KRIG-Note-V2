@@ -33,11 +33,21 @@ import type {
   EBookHostHandle,
   PdfTextSelectionEvent,
 } from '@capabilities/ebook-rendering/types';
+import type { LearningApi } from '@capabilities/learning/types';
 import type { ThoughtType } from '@shared/ipc/thought-types';
 import { getEBookWsState } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
 import { usePdfAnnotations } from './use-pdf-annotations';
 import { EBookToolbar, type EBookToolbarRenderMode } from './EBookToolbar';
+import {
+  init as initVocabHighlight,
+  setVocab as setVocabHighlight,
+  ensureLayer as ensureVocabLayer,
+  scanPage as scanVocabPage,
+  rescanAll as rescanVocabHighlight,
+  clearAll as clearVocabHighlight,
+} from './pdf-vocab-highlight';
+import './pdf-vocab-highlight/styles.css';
 import './ebook.css';
 
 interface EBookViewProps {
@@ -353,6 +363,43 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       dismissPdfTextPicker();
     },
     [pdfAnn, pdfTextSelection, dismissPdfTextPicker],
+  );
+
+  // ── PDF vocab highlight(2026-05-25)──
+  // mount 时挂全局 hover 委托 + 订阅 learning vocab 变化 + 启动拉一次。
+  // 回调内每个 page textLayer render 完后扫该页;vocab 列表变 重扫已渲染所有页。
+  useEffect(() => {
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    initVocabHighlight();
+    let cancelled = false;
+    void learning.vocabList().then((entries) => {
+      if (cancelled) return;
+      setVocabHighlight(entries);
+      rescanVocabHighlight();
+    });
+    const unsubscribe = learning.onVocabChanged((entries) => {
+      setVocabHighlight(entries);
+      rescanVocabHighlight();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      clearVocabHighlight();
+    };
+  }, []);
+  /**
+   * Host onPdfTextLayerRendered 回调:每页 textLayer render 完触发。
+   * 找 textLayer 所在 page-wrapper(主区 / 全屏 sibling 路径不同,统一用 parentElement),
+   * ensureLayer + scanPage 单页扫描。
+   */
+  const handlePdfTextLayerRendered = useCallback(
+    (_pageNum: number, textLayer: HTMLElement): void => {
+      const wrapper = textLayer.parentElement;
+      if (!wrapper) return;
+      const hl = ensureVocabLayer(wrapper);
+      scanVocabPage(textLayer, hl);
+    },
+    [],
   );
 
   // picker 关闭 lifecycle:外部 mousedown / ESC 关
@@ -699,6 +746,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             pdfFlashAnnotationId={pdfAnn.flashId}
             onPdfAnnotationCreate={handlePdfAnnotationCreate}
             onPdfTextSelected={pdfTextMode ? handlePdfTextSelected : undefined}
+            onPdfTextLayerRendered={handlePdfTextLayerRendered}
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}
           />
