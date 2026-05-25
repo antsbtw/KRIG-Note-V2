@@ -110,6 +110,13 @@ export interface EBookHostHandle {
     pageNum: number,
     rect: { x: number; y: number; w: number; h: number },
   ): Promise<string>;
+
+  /**
+   * PR-α-3b followup:检测当前 PDF 某页是否含 text content。
+   * EPUB / 未加载 → false。扫描件 PDF 返 false(用于 ✎ 文字标注启用前判断,
+   * 避免用户在扫描页拖选无效)。
+   */
+  hasTextContent(pageNum: number): Promise<boolean>;
 }
 
 /** 搜索结果(PDF / EPUB 通用结构)*/
@@ -587,6 +594,11 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           throw new Error('capturePageRect requires a loaded fixed-page (PDF) renderer');
         }
         return r.capturePageRect(pageNum, rect);
+      },
+      async hasTextContent(pageNum: number): Promise<boolean> {
+        const r = rendererRef.current;
+        if (!r || !isFixedPage(r)) return false; // EPUB / 未加载 → false
+        return r.hasTextContent(pageNum);
       },
     }),
     [loadFromInfo, handleScaleChange, handleSetFitWidth],

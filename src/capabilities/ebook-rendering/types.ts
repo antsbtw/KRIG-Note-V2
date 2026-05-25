@@ -119,6 +119,8 @@ export interface IFixedPageRenderer extends IBookRenderer {
   /** Text Layer(文本选择 + 复制)*/
   renderTextLayer(pageNum: number, container: HTMLElement, scale: number): Promise<void>;
   clearTextLayer(pageNum: number): void;
+  /** PR-α-3b followup:检测某页是否含 text content(扫描件返 false;✎ 文字标注启用前判断用)*/
+  hasTextContent(pageNum: number): Promise<boolean>;
 
   /** 文本搜索(C3 真消费)*/
   searchText(query: string): Promise<Array<{ pageNum: number; index: number; text: string }>>;

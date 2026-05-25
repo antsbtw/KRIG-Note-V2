@@ -190,6 +190,16 @@ export function registerContextMenu(): void {
       const bus = wsId ? workspaceManager.getBus(wsId) : null;
       if (bus) {
         bus.slot.openRight('thought-view');
+        // 跳到标注所在页(双屏 paged 模式右槽 thought-view 打开后会自动收成单页;
+        // 若 currentPage 仍是左页,用户标注的右页会被挤出视野。emit
+        // scroll-to-book-source 让 EBookView 触发 host.goToPage,把 currentPage
+        // 切到 bookAnchor.pageNum)
+        bus.channels.emit('thought.scroll-to-book-source', {
+          bookId,
+          pageNum: bookAnchor.pageNum,
+          thoughtId: t.id,
+          emittedAt: Date.now(),
+        });
         bus.channels.emit('thought.activate', {
           thoughtId: t.id,
           anchor: t.anchor,
@@ -229,11 +239,20 @@ export function registerContextMenu(): void {
             t.anchor?.source === 'book' &&
             (t.anchor.locator as BookLocator).createdAt === createdAt,
         );
-        if (!matched) return; // 无关联 thought,双击 no-op
+        if (!matched || !matched.anchor) return; // 无关联 thought / 无 anchor,双击 no-op
         const wsId = workspaceManager.getActiveId();
         const bus = wsId ? workspaceManager.getBus(wsId) : null;
         if (bus) {
           bus.slot.openRight('thought-view');
+          // 同 add-thought:双屏 paged 模式右槽打开会收成单页,需跳到标注所在页
+          // 避免用户双击的右页被挤出视野
+          const loc = matched.anchor.locator as BookLocator;
+          bus.channels.emit('thought.scroll-to-book-source', {
+            bookId,
+            pageNum: loc.pageNum,
+            thoughtId: matched.id,
+            emittedAt: Date.now(),
+          });
           bus.channels.emit('thought.activate', {
             thoughtId: matched.id,
             anchor: matched.anchor,

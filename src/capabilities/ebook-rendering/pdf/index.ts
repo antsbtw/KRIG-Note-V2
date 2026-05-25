@@ -196,6 +196,19 @@ export class PDFRenderer implements IFixedPageRenderer {
     this.rendering = false;
   }
 
+  /**
+   * 检测指定页是否含 text content(扫描件 PDF 返 false)。
+   * 用于 ✎ 文字标注按钮启用前判断,避免用户在扫描页拖选无效。
+   * pdfjs.getTextContent 返 items 数组为空 = 该页是扫描图,无文字层。
+   */
+  async hasTextContent(pageNum: number): Promise<boolean> {
+    if (!this.doc) return false;
+    if (pageNum < 1 || pageNum > this.doc.numPages) return false;
+    const page = await this.getPage(pageNum);
+    const tc = await page.getTextContent();
+    return tc.items.length > 0;
+  }
+
   async renderTextLayer(
     pageNum: number,
     container: HTMLElement,

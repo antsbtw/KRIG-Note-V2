@@ -296,3 +296,31 @@
   border-color: #fff;
   transform: scale(1.15);
 }
+
+/* PR-α-3b followup:扫描件提示 toast(锚定 ✎ 按钮正下方,3 秒自动消失,字数 ≤ 5)
+ * 居中走 margin-left: -50%(transform 留给动画自管 fade-in,避免 keyframe transform
+ * 覆盖 inline translateX(-50%) 致位置闪跳)
+ */
+.krig-ebook-toast {
+  position: fixed; /* viewport 坐标,跟 toolbar 同坐标系 */
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #e8eaed;
+  font-size: 13px;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: krig-ebook-toast-in 0.2s ease-out;
+  pointer-events: none;
+}
+
+@keyframes krig-ebook-toast-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
