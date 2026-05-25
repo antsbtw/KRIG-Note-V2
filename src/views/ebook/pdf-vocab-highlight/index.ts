@@ -31,32 +31,56 @@ const TOOLTIP_CLASS = 'krig-pdf-vocab-tooltip';
 
 // ── 模块级 vocab 状态 ─────────────────────────────────
 
-const vocabSet = new Set<string>();        // normalized lowercase, 单词(无空格)
+// 单词集(无空格)— span 内扫描快路径
+const vocabSet = new Set<string>();
+// 词组集(含空格)— 跨 span 拼接扫描慢路径
+const phraseSet = new Set<string>();
+// normalized → 原 word(查 def / phonetic / 显 tooltip)
 const vocabDefs = new Map<string, string>();
 const vocabPhonetics = new Map<string, string>();
-let vocabPattern: RegExp | null = null;
+let vocabPattern: RegExp | null = null;   // 单词 pattern
+let phrasePattern: RegExp | null = null;  // 词组 pattern
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 export function setVocab(entries: VocabEntry[]): void {
   vocabSet.clear();
+  phraseSet.clear();
   vocabDefs.clear();
   vocabPhonetics.clear();
   for (const e of entries) {
-    const w = e.word.toLowerCase().trim();
-    // v1:仅单词,词组跳过(跨 span rect 计算复杂)
-    if (!w || w.includes(' ')) continue;
-    vocabSet.add(w);
+    // normalize:小写 + trim + 多空格压成单空格(用户存 "give  up" 也能匹配 PDF 拼接的 "give up")
+    const w = e.word.toLowerCase().trim().replace(/\s+/g, ' ');
+    if (!w) continue;
+    if (w.includes(' ')) {
+      phraseSet.add(w);
+    } else {
+      vocabSet.add(w);
+    }
     vocabDefs.set(w, e.definition);
     if (e.phonetic) vocabPhonetics.set(w, e.phonetic);
   }
-  // 重建正则:\b(word1|word2|...)\b,大小写不敏感
-  if (vocabSet.size === 0) {
-    vocabPattern = null;
-  } else {
-    const escaped = Array.from(vocabSet).map((w) =>
-      w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-    );
-    vocabPattern = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
-  }
+  vocabPattern =
+    vocabSet.size === 0
+      ? null
+      : new RegExp(
+          `\\b(${Array.from(vocabSet).map(escapeRegex).join('|')})\\b`,
+          'gi',
+        );
+  phrasePattern =
+    phraseSet.size === 0
+      ? null
+      : new RegExp(
+          `\\b(${Array.from(phraseSet).map(escapeRegex).join('|')})\\b`,
+          'gi',
+        );
+}
+
+/** 给 hover 监听用:全集 = 单词 + 词组,共用同套 defs/phonetics */
+function hasAnyVocab(): boolean {
+  return vocabSet.size > 0 || phraseSet.size > 0;
 }
 
 // ── HL layer + 扫描 ─────────────────────────────────
@@ -76,15 +100,15 @@ export function ensureLayer(pageWrapper: HTMLElement): HTMLElement {
 }
 
 /**
- * 扫指定 page 的 textLayer,把命中词的 rect 渲染到 hl-layer。
+ * 扫指定 page 的 textLayer,把命中词 / 词组的 rect 渲染到 hl-layer。
  *
- * 算法:
- * 1. 清空 hl-layer 现有所有 .krig-pdf-vocab-hl 子节点
- * 2. 遍历 textLayer 的所有 span(每个 span 是 pdfjs 渲染的 text item)
- * 3. 对每个 span 的 textContent 跑 vocabPattern,命中位置用 Range + getClientRects 算可视 rect
- * 4. 减 hl-layer 的 BCR 得到相对坐标,绝对定位 div(每个 rect 一个)
+ * 两阶段:
+ *  Phase 1 — 单词扫(span 内):每 span 跑 vocabPattern,命中 createRange + getClientRects
+ *  Phase 2 — 词组扫(跨 span):拼接 fullText + spanIndex 映射,phrasePattern 命中后反查
+ *            起止 span+offset,createRange 横跨多 span,getClientRects 拿 rect 列表
+ *            — **仅 rects.length === 1 才画**(v1 跨行不高亮决议)
  *
- * scale 不参与计算:textLayer span 的 BCR 已含 scale,hl-layer 也作为 sibling 共享 page-wrapper
+ * scale 不参与计算:textLayer span 的 BCR 已含 scale,hl-layer 是 sibling 共享 page-wrapper
  * 坐标系,相对定位天然 scale-aware。
  */
 export function scanPage(
@@ -94,51 +118,142 @@ export function scanPage(
   // 1. 清旧高亮
   hlLayer.innerHTML = '';
 
-  if (!vocabPattern || vocabSet.size === 0) return;
+  if (!hasAnyVocab()) return;
 
-  // 2. 遍历 textLayer 内所有 span
-  // pdfjs 4.x textLayer 内每个 text item 是 <span>,可能套层 <span> 给 transform-origin
-  // querySelectorAll('span') 全收,过滤无文字的(role=presentation 等)
-  const spans = textLayer.querySelectorAll('span');
+  // 2. 收集 span + textNode(后两阶段共享)
+  // pdfjs 4.x textLayer 内每个 text item 是 <span>,可能套层 <span>;
+  // querySelectorAll('span') 全收,findTextNode 找叶子 text node。
+  // 过滤无文字 span。
+  const allSpans = textLayer.querySelectorAll('span');
   const layerBounds = hlLayer.getBoundingClientRect();
-
-  for (const span of spans) {
-    const text = span.textContent;
-    if (!text) continue;
-    // span 内可能还套子 span;只看叶子 text node 才能算 Range
+  interface SpanRec {
+    textNode: Text;
+    str: string; // textNode.data,Phase 2 拼接用
+  }
+  const records: SpanRec[] = [];
+  for (const span of allSpans) {
+    if (!span.textContent) continue;
     const textNode = findTextNode(span);
     if (!textNode) continue;
+    records.push({ textNode, str: textNode.data });
+  }
 
-    // pattern stateful — reset lastIndex 每个 span 独立
-    vocabPattern.lastIndex = 0;
+  // ── Phase 1:单词扫(span 内,fast path)──
+  if (vocabPattern) {
+    for (const rec of records) {
+      vocabPattern.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = vocabPattern.exec(rec.str)) !== null) {
+        const start = m.index;
+        const end = start + m[0].length;
+        const word = m[0].toLowerCase();
+        const range = document.createRange();
+        try {
+          range.setStart(rec.textNode, start);
+          range.setEnd(rec.textNode, end);
+        } catch {
+          continue;
+        }
+        for (const r of range.getClientRects()) {
+          if (r.width === 0 || r.height === 0) continue;
+          appendHl(hlLayer, layerBounds, r, word);
+        }
+      }
+    }
+  }
+
+  // ── Phase 2:词组扫(跨 span,slow path)──
+  if (phrasePattern && records.length > 0) {
+    // 拼接 fullText:span 之间用单空格分隔,避免跨 span 拼成无空格的连串
+    // (V1 决议:跨行不高亮,跨 span 同行依赖空格识别)。
+    // 维护偏移映射 spanRanges[i] = { recIdx, startInFull, endInFull }
+    interface SpanOffset {
+      recIdx: number;
+      startInFull: number;
+      endInFull: number;
+    }
+    const offsets: SpanOffset[] = [];
+    const parts: string[] = [];
+    let fullCursor = 0;
+    records.forEach((rec, i) => {
+      const startInFull = fullCursor;
+      const endInFull = startInFull + rec.str.length;
+      offsets.push({ recIdx: i, startInFull, endInFull });
+      parts.push(rec.str);
+      fullCursor = endInFull;
+      // span 之间补 1 个空格作为隐式分隔;Phase 2 在 fullText 上跑 \b 与正则,空格不参与 match 内部
+      if (i < records.length - 1) {
+        parts.push(' ');
+        fullCursor += 1;
+      }
+    });
+    const fullText = parts.join('');
+
+    phrasePattern.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = vocabPattern.exec(textNode.data)) !== null) {
-      const start = m.index;
-      const end = start + m[0].length;
-      const word = m[0].toLowerCase();
+    while ((m = phrasePattern.exec(fullText)) !== null) {
+      const matchStart = m.index;
+      const matchEnd = matchStart + m[0].length;
+      const phrase = m[0].toLowerCase().replace(/\s+/g, ' ');
 
-      // Range + getClientRects 算可视 rect(span transform 已含 scaleX,client rect 准)
+      // 反查起止 span+offset
+      const startLoc = locateInSpans(offsets, matchStart);
+      const endLoc = locateInSpans(offsets, matchEnd);
+      if (!startLoc || !endLoc) continue;
+      // matchEnd 可能落在 span 之间的人造空格上 — locate 拿到下一 span 的 0 偏移
+      // 跨 span 时 endLoc.recIdx 通常 > startLoc.recIdx;同 span 内直接落
+      const startRec = records[startLoc.recIdx];
+      const endRec = records[endLoc.recIdx];
       const range = document.createRange();
       try {
-        range.setStart(textNode, start);
-        range.setEnd(textNode, end);
+        range.setStart(startRec.textNode, startLoc.offsetInSpan);
+        range.setEnd(endRec.textNode, endLoc.offsetInSpan);
       } catch {
         continue;
       }
       const rects = range.getClientRects();
-      for (const r of rects) {
-        if (r.width === 0 || r.height === 0) continue;
-        const hl = document.createElement('div');
-        hl.className = HL_CLASS;
-        hl.dataset.vocabWord = word;
-        hl.style.left = `${r.left - layerBounds.left}px`;
-        hl.style.top = `${r.top - layerBounds.top}px`;
-        hl.style.width = `${r.width}px`;
-        hl.style.height = `${r.height}px`;
-        hlLayer.appendChild(hl);
-      }
+      // v1 决议:跨行不高亮 — 多 rect 一律跳过
+      if (rects.length !== 1) continue;
+      const r = rects[0];
+      if (r.width === 0 || r.height === 0) continue;
+      appendHl(hlLayer, layerBounds, r, phrase);
     }
   }
+}
+
+/** 拼接坐标 → 命中 span 反查;offset 落在人造空格上时取下一 span 的 0 偏移 */
+function locateInSpans(
+  offsets: Array<{ recIdx: number; startInFull: number; endInFull: number }>,
+  pos: number,
+): { recIdx: number; offsetInSpan: number } | null {
+  // 二分可优化,n 不大线性即可
+  for (let i = 0; i < offsets.length; i++) {
+    const o = offsets[i];
+    if (pos >= o.startInFull && pos <= o.endInFull) {
+      return { recIdx: i, offsetInSpan: pos - o.startInFull };
+    }
+    // 落在 i 与 i+1 之间的人造空格 → 取 i+1 的开头
+    if (pos === o.endInFull + 1 && i + 1 < offsets.length) {
+      return { recIdx: i + 1, offsetInSpan: 0 };
+    }
+  }
+  return null;
+}
+
+function appendHl(
+  hlLayer: HTMLElement,
+  layerBounds: DOMRect,
+  r: DOMRect,
+  word: string,
+): void {
+  const hl = document.createElement('div');
+  hl.className = HL_CLASS;
+  hl.dataset.vocabWord = word;
+  hl.style.left = `${r.left - layerBounds.left}px`;
+  hl.style.top = `${r.top - layerBounds.top}px`;
+  hl.style.width = `${r.width}px`;
+  hl.style.height = `${r.height}px`;
+  hlLayer.appendChild(hl);
 }
 
 function findTextNode(el: Element): Text | null {
@@ -305,7 +420,7 @@ function attachGlobalListeners(): void {
   listenersAttached = true;
   document.addEventListener('mousemove', (e) => {
     // 零 vocab 时早退:全 app mousemove 监听,性能敏感
-    if (vocabSet.size === 0) {
+    if (!hasAnyVocab()) {
       if (hoveredEl) {
         hoveredEl.classList.remove('is-hover');
         scheduleHide();
