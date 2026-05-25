@@ -102,8 +102,8 @@ interface SpreadHandle {
  */
 function createSpreadNode(
   pages: number[],
-  pageW: number,
-  pageH: number,
+  _pageW: number,
+  _pageH: number,
   gap: number,
   pageDims: PageDimension[],
   scale: number,
@@ -111,6 +111,10 @@ function createSpreadNode(
   annotations: PageAnnotation[],
   onAnnotationCreate: ((pageNum: number, ann: AnnotationDraft) => void) | undefined,
 ): SpreadHandle {
+  // 注:pageW / pageH 参数已废弃(2026-05-25 修双页 spread 各页 dim 不同的错位 bug);
+  // 每个 page wrap 字面按自己页的 dim 算 width/height,canvas / textLayer / wrap 三者
+  // 同 dim 派生,sub-pixel 对齐(不会 page 1 高 page 2 矮 → wrap 强拉高一致 → textLayer
+  // span y 错位的问题)。保留参数签名供 caller 不动,实际不消费。
   const node = document.createElement('div');
   node.className = 'krig-ebook-paged__spread';
   // absolute 居中 — 静止/动画 都用这套定位,从不切换
@@ -127,11 +131,19 @@ function createSpreadNode(
   const textLayers: HTMLDivElement[] = [];
   const annotationRoots: Array<{ root: Root; pageNum: number }> = [];
   pages.forEach((p) => {
+    // 关键修复:每页字面按自己的 dim 算 wrap 尺寸,不再共用 page 1 的 dim
+    // 2026-05-25 修选区偏移 bug:wrap 不 floor,与 viewport.width(dim.width * scale,
+    // 浮点)精确一致 — textLayer 内 span 按 viewport 浮点 x 坐标排版,wrap floor 到整数
+    // 时 span 累积误差会向右偏(scale 越大累积越明显;选区视觉跟字形错位)。
+    const pageDim = pageDims[p - 1];
+    if (!pageDim) return;
+    const pageWidth = pageDim.width * scale;
+    const pageHeight = pageDim.height * scale;
     const wrap = document.createElement('div');
     wrap.className = 'krig-ebook-paged__page-wrapper';
     wrap.style.position = 'relative';
-    wrap.style.width = `${pageW}px`;
-    wrap.style.height = `${pageH}px`;
+    wrap.style.width = `${pageWidth}px`;
+    wrap.style.height = `${pageHeight}px`;
     wrap.dataset.page = String(p);
     const canvas = document.createElement('canvas');
     wrap.appendChild(canvas);
@@ -144,22 +156,19 @@ function createSpreadNode(
     const annHost = document.createElement('div');
     annHost.className = 'krig-ebook-paged__annotation-host';
     wrap.appendChild(annHost);
-    const dim = pageDims[p - 1];
-    if (dim) {
-      const root = createRoot(annHost);
-      root.render(
-        createElement(AnnotationLayer, {
-          pageNum: p,
-          scale,
-          pageWidth: dim.width,
-          pageHeight: dim.height,
-          mode: annotationMode,
-          annotations: annotations.filter((a) => a.pageNum === p),
-          onAnnotationCreate: onAnnotationCreate ?? ((): void => {}),
-        }),
-      );
-      annotationRoots.push({ root, pageNum: p });
-    }
+    const root = createRoot(annHost);
+    root.render(
+      createElement(AnnotationLayer, {
+        pageNum: p,
+        scale,
+        pageWidth: pageDim.width,
+        pageHeight: pageDim.height,
+        mode: annotationMode,
+        annotations: annotations.filter((a) => a.pageNum === p),
+        onAnnotationCreate: onAnnotationCreate ?? ((): void => {}),
+      }),
+    );
+    annotationRoots.push({ root, pageNum: p });
     node.appendChild(wrap);
   });
   return { node, canvases, textLayers, pages: pages.slice(), annotationRoots };

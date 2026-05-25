@@ -216,6 +216,11 @@ export class PDFRenderer implements IFixedPageRenderer {
 
     const viewport = page.getViewport({ scale });
     container.innerHTML = '';
+    // pdfjs 4.x TextLayer 字面用 CSS round(down, var(--scale-factor) * dim * 1px, 1px)
+    // 排 width/height,内嵌 span 字号字面也走 --scale-factor。**必须**显式 setProperty,
+    // 否则 var(--scale-factor) 解析为 0 → round → 0 → span 按 scale=1 排在 scale<1 容器内
+    // → 视觉文字位置严重偏右下(选区错位 bug 根因,2026-05-25 全屏 paged 模式诊断到)。
+    container.style.setProperty('--scale-factor', String(scale));
 
     const textLayer = new TextLayer({
       textContentSource: textContent,
@@ -356,11 +361,12 @@ export class PDFRenderer implements IFixedPageRenderer {
         const page = await this.getPage(pageNum);
         const dpr = window.devicePixelRatio || 1;
         const viewport = page.getViewport({ scale: scale * dpr });
-
+        // 像素维度 floor(canvas.width/height 必须是整数);CSS 尺寸保持浮点,
+        // 与 textLayer/wrap 浮点 viewport.width 严格一致(避免 sub-pixel 累积错位)。
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
-        canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
-        canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
+        canvas.style.width = `${viewport.width / dpr}px`;
+        canvas.style.height = `${viewport.height / dpr}px`;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
