@@ -44,6 +44,10 @@ import { EPUBRenderer } from './epub';
 import { FixedPageContent } from './fixed-page-content';
 import { ReflowableContent } from './reflowable-content';
 import {
+  PdfViewerDevBranch,
+  isPdfViewerV2Enabled,
+} from './pdf-viewer-dev-branch';
+import {
   FullscreenPageView,
   type FullscreenPageViewHandle,
   type FullscreenPagedLayout,
@@ -652,7 +656,17 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     <div className="krig-ebook-host" ref={containerRef}>
       {loading && <div className="krig-ebook-loading">Loading...</div>}
 
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
+      {/*
+       * Stage 2 dev 验收开关 — DevTools Console:
+       *   localStorage.setItem('krig.pdfViewerV2', '1'); location.reload();
+       * 关闭:localStorage.removeItem('krig.pdfViewerV2'); location.reload();
+       * Stage 4 删除此分支 + 整合 PdfViewerDevBranch 路径到主 PDF scroll 分支。
+       */}
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && isPdfViewerV2Enabled() && (
+        <PdfViewerDevBranch onPageChange={handlePdfPageChange} />
+      )}
+
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && !isPdfViewerV2Enabled() && (
         <FixedPageContent
           renderer={renderer}
           scale={scale}

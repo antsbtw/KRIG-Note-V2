@@ -36,6 +36,7 @@ import '@capabilities/text-editing';   // W5 C4 新增
 import '@capabilities/learning';        // L5-B3.20a 新增(无 view 直接消费需显式拉,P1 审计修正)
 import '@capabilities/ebook-library';   // L5-C1 新增(view install 声明 + 显式拉副作用,对齐 P1 审计模式)
 import '@capabilities/ebook-rendering'; // L5-C2 新增(pdfjs-dist 4.9.155 + Host + 虚拟滚动)
+import '@capabilities/pdf-viewer';      // PDF View 全量重构(2026-05-25):pdfjs-dist 4.x PDFViewer adapter,Stage 4 接管 ebook-rendering 的 PDF scroll 路径
 import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 + 文件夹,JSON 起步)
 import '@capabilities/shape-library';       // L5-G2 新增(Shape + Substance 资源仓库,0 import three)
 import '@capabilities/canvas-rendering';    // L5-G3 新增(Three.js 单点屏障核心,P1-1 严格屏障)

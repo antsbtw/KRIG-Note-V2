@@ -1,0 +1,19 @@
+/*
+ * pdf-viewer capability — 样式
+ *
+ * 走 pdfjs-dist 4.x 官方 pdf_viewer.css(textLayer / annotationLayer / pageView
+ * 全套 — 含 --scale-factor / span 浮点 width round 等关键 CSS 变量)。
+ * KRIG 自定义层在 ebook-rendering 维护,本文件只保证 pdfjs 高层组件正常工作。
+ *
+ * pdfViewerContainer 容器布局:撑满父元素,内部 PDFViewer 自管 scroll。
+ */
+
+@import 'pdfjs-dist/web/pdf_viewer.css';
+
+.pdfViewerContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  outline: none; /* tabIndex=0 拿键盘焦点,不要 default focus ring */
+}

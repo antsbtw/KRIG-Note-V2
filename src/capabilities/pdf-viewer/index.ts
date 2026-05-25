@@ -18,6 +18,7 @@
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import './worker-setup'; // 副作用:模块加载即初始化 pdfjs Worker
+import './styles.css';   // 副作用:pdfjs 官方 pdf_viewer.css + 容器布局
 import {
   loadDocument,
   destroyDocument,
