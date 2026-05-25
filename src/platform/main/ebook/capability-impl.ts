@@ -52,7 +52,9 @@ import {
   emptyNoteDoc,
   broadcastNoteListChanged,
   broadcastNoteDocContentChanged,
+  assemblePmDoc,
 } from '@platform/main/note';
+import { generateUlid } from '@shared/ulid';
 
 // ── predicate 常量 (沿 V2 现状分散模式 §10.D-3 + decision 022 §4.1.2) ──
 
@@ -561,11 +563,13 @@ export async function getReadingThought(bookId: string): Promise<NoteInfo | null
   const atom = (await storage.getAtom<'pm'>(obj.atomId)) as AtomEntity<'pm'> | null;
   if (!atom) return null;
   if (atom.payload.domain !== PM_DOMAIN) return null;
-  const pmDoc = atom.payload.payload;
+  // L7 block atomization: container atom.payload 字面恒 empty,真实 doc content 拆到
+  // 独立 block atoms,必须走 assemblePmDoc 组装(对齐 note/capability-impl getNote)。
+  const assembled = (await assemblePmDoc(atom.id)) ?? atom.payload.payload;
   return {
     id: atom.id,
     title: '', // thought 字面无 title (沿决议字面 thought 字面是 ebook 内容聚合)
-    doc: wrapPmDoc(pmDoc),
+    doc: wrapPmDoc(assembled),
     folderId: null,
     createdAt: atom.createdAt,
     updatedAt: atom.updatedAt,
@@ -656,25 +660,33 @@ export async function addReadingThoughtBlock(
   const pmDoc = unwrapPmDoc(thought.doc);
   const content = Array.isArray(pmDoc.content) ? [...pmDoc.content] : [];
 
+  // L7 block atomization 要求每个 block 必须有 attrs.id(decision 026 §5.1):
+  // dissectPmDoc 字面会按 id 写 block atom + belongsToNote 边;无 id 字面 throw。
+  // 容器型 block(image / blockquote)内嵌的 paragraph 也必须有 id 字面才能被 dissect
+  // 拆为子 atom + childOf 边(否则 assemblePmDoc 拼回时丢失内嵌结构)。
+  const newBlockId = generateUlid();
   let newBlock: import('@semantic/types').PmPayload;
   if (spec.type === 'image') {
     newBlock = {
       type: 'image',
       attrs: {
+        id: newBlockId,
         src: spec.src ?? spec.bookAnchor.thumbnail ?? '',
         alt: '',
         bookAnchor: spec.bookAnchor,
       },
-      content: [{ type: 'paragraph', attrs: { bookAnchor: null }, content: [] }],
+      content: [
+        { type: 'paragraph', attrs: { id: generateUlid(), bookAnchor: null }, content: [] },
+      ],
     };
   } else if (spec.type === 'blockquote') {
     newBlock = {
       type: 'blockquote',
-      attrs: { bookAnchor: spec.bookAnchor },
+      attrs: { id: newBlockId, bookAnchor: spec.bookAnchor },
       content: [
         {
           type: 'paragraph',
-          attrs: { bookAnchor: null },
+          attrs: { id: generateUlid(), bookAnchor: null },
           content: spec.textContent
             ? [{ type: 'text', text: spec.textContent }]
             : [],
@@ -684,7 +696,7 @@ export async function addReadingThoughtBlock(
   } else {
     newBlock = {
       type: 'paragraph',
-      attrs: { bookAnchor: spec.bookAnchor },
+      attrs: { id: newBlockId, bookAnchor: spec.bookAnchor },
       content: [],
     };
   }
@@ -767,6 +779,73 @@ export async function getReadingThoughtAnnotations(bookId: string): Promise<Book
     if (anchor) out.push(anchor);
   }
   return out;
+}
+
+/**
+ * PR-α-3b: 单读 — 按 bookAnchor.createdAt 找指定 block 的 anchor
+ * (📸 截图复制 / 🎨 改颜色 需要拿 thumbnail / color 字段)
+ * 找不到返 null;reading thought 不存在(book 无标注)亦返 null
+ */
+export async function getReadingThoughtBlock(
+  bookId: string,
+  createdAt: number,
+): Promise<BookAnchor | null> {
+  const thought = await getReadingThought(bookId);
+  if (!thought) return null;
+  const pmDoc = unwrapPmDoc(thought.doc);
+  const content = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+  for (const b of content) {
+    const anchor = (b.attrs as { bookAnchor?: BookAnchor } | undefined)?.bookAnchor;
+    if (anchor && anchor.createdAt === createdAt) return anchor;
+  }
+  return null;
+}
+
+/**
+ * PR-α-3b: 改单块颜色 — 用于 🎨 改颜色 submenu(thoughtType picker → 反查 color)。
+ * 字面只改 attrs.bookAnchor.color 字段,其他字段 / 其他 block 不动。
+ * 全量替换 doc 落库(沿决议 §4.1.3 字面)+ 广播 → renderer 端 onListChanged 回流。
+ *
+ * 找不到匹配 block / reading thought 不存在 → no-op(不报错)
+ */
+export async function updateReadingThoughtBlockColor(
+  bookId: string,
+  createdAt: number,
+  color: string,
+): Promise<void> {
+  const thought = await getReadingThought(bookId);
+  if (!thought) return;
+  const pmDoc = unwrapPmDoc(thought.doc);
+  const content = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+  let hit = false;
+  const updatedContent = content.map((b) => {
+    const anchor = (b.attrs as { bookAnchor?: BookAnchor } | undefined)?.bookAnchor;
+    if (!anchor || anchor.createdAt !== createdAt) return b;
+    hit = true;
+    return {
+      ...b,
+      attrs: {
+        ...(b.attrs as Record<string, unknown>),
+        bookAnchor: { ...anchor, color },
+      },
+    };
+  });
+  if (!hit) return;
+  const updatedDoc: import('@semantic/types').PmPayload = {
+    ...pmDoc,
+    content: updatedContent,
+  };
+  await updateNote(thought.id, wrapPmDoc(updatedDoc));
+  const updated = await getReadingThought(bookId);
+  if (updated) {
+    broadcastNoteDocContentChanged({
+      noteId: updated.id,
+      doc: updated.doc,
+      origin: NOTE_DOC_ORIGIN.EBOOK_READING_THOUGHT,
+      updatedAt: updated.updatedAt,
+    });
+    await broadcastNoteListChanged();
+  }
 }
 
 // ── 类型 re-export (给 handlers 字面用) ──

@@ -139,6 +139,14 @@ export interface EBookLibraryApi {
   removeReadingThoughtBlock(bookId: string, blockId: string): Promise<void>;
   /** 扫 thought PM doc, 返扁平 BookAnchor[] (view 端 PDF/EPUB 标注层 filter 用) */
   getReadingThoughtAnnotations(bookId: string): Promise<BookAnchor[]>;
+  /** PR-α-3b:按 bookAnchor.createdAt 单读 — 📸 截图复制 / 🎨 改颜色 读 thumbnail/color 用 */
+  getReadingThoughtBlock(bookId: string, createdAt: number): Promise<BookAnchor | null>;
+  /** PR-α-3b:改单块 color(字段) — 🎨 改颜色 submenu 走此 */
+  updateReadingThoughtBlockColor(
+    bookId: string,
+    createdAt: number,
+    color: string,
+  ): Promise<void>;
 
   // 注: sub-phase 022 删除 5 folder API (folderList / folderCreate / folderRename /
   // folderDelete / folderMove) — 决议 021 §4.3 兼容约束落地, view caller 改走

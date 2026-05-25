@@ -99,6 +99,8 @@ export const IPC_CHANNELS = {
   EBOOK_THOUGHT_ENSURE: 'ebook.thought-ensure',                 // ensureReadingThought (lazy create)
   EBOOK_THOUGHT_BLOCK_ADD: 'ebook.thought-block-add',           // addReadingThoughtBlock
   EBOOK_THOUGHT_BLOCK_REMOVE: 'ebook.thought-block-remove',     // removeReadingThoughtBlock
+  EBOOK_THOUGHT_BLOCK_GET: 'ebook.thought-block-get',           // PR-α-3b getReadingThoughtBlock(单读)
+  EBOOK_THOUGHT_BLOCK_UPDATE_COLOR: 'ebook.thought-block-update-color', // PR-α-3b updateReadingThoughtBlockColor
   EBOOK_THOUGHT_ANNOTATIONS: 'ebook.thought-annotations',       // getReadingThoughtAnnotations
 
   // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform 集成)

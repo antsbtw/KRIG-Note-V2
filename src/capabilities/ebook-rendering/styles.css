@@ -512,3 +512,105 @@
   position: absolute;
   inset: 0;
 }
+
+/* PR-α-3b:PDF 文字流选区 picker(单行 5 色 + H/S 切换 + ✕) */
+.krig-pdf-text-picker {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.krig-pdf-text-picker__colors {
+  display: flex;
+  gap: 6px;
+}
+
+.krig-pdf-text-picker__color {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.krig-pdf-text-picker__color:hover {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+
+.krig-pdf-text-picker__divider {
+  width: 1px;
+  height: 20px;
+  background: #555;
+}
+
+.krig-pdf-text-picker__styles {
+  display: flex;
+  gap: 4px;
+}
+
+.krig-pdf-text-picker__style {
+  width: 26px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #aaa;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.krig-pdf-text-picker__style:hover {
+  border-color: #888;
+  color: #ddd;
+}
+
+.krig-pdf-text-picker__style--active {
+  background: #4a9eff;
+  border-color: #4a9eff;
+  color: #fff;
+}
+
+.krig-pdf-text-picker__cancel {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.krig-pdf-text-picker__cancel:hover {
+  color: #ccc;
+}
+
+/* AnnotationTypeSubmenu 5 色 swatch(对齐 .krig-pdf-text-picker__color)*/
+.krig-ebook-annotation-type-submenu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.krig-ebook-annotation-type-submenu__btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.krig-ebook-annotation-type-submenu__btn:hover {
+  border-color: #fff;
+  transform: scale(1.15);
+}

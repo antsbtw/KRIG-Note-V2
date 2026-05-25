@@ -9,3 +9,4 @@ export { registerNoteHandlers } from './handlers';
 export * from './capability-impl';
 export { deriveTitle } from './derive-title';
 export { broadcastNoteListChanged, broadcastNoteDocContentChanged } from './broadcast';
+export { assemblePmDoc } from './assemble-pm-doc';

@@ -25,8 +25,13 @@ export interface PdfTextSelectionEvent {
   textContent: string;
   /** 每行一个 rect(scale=1 坐标,逻辑像素)*/
   textRects: Array<{ x: number; y: number; w: number; h: number }>;
-  /** 选区 boundingRect(scale=1)— 作 picker 定位 + AnnotationLayer 兜底渲染 */
+  /** 选区 boundingRect(scale=1)— AnnotationLayer 兜底渲染 */
   boundingRect: { x: number; y: number; w: number; h: number };
+  /**
+   * picker 定位锚点(屏幕坐标 viewport-relative,px)— 已含 scale 与 layer offset,
+   * view 端直接用 position: fixed 渲染。指向选区下边缘中点。
+   */
+  screenAnchor: { x: number; y: number };
 }
 
 /**
@@ -107,11 +112,18 @@ export function usePdfTextSelection(
         h: bRange.height / scale,
       };
 
+      // picker 屏幕锚点(viewport 坐标,选区底部居中)
+      const screenAnchor = {
+        x: bRange.left + bRange.width / 2,
+        y: bRange.bottom,
+      };
+
       onSelected({
         pageNum,
         textContent: text,
         textRects,
         boundingRect,
+        screenAnchor,
       });
     };
 
