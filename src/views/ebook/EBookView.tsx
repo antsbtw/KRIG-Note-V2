@@ -342,6 +342,25 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     };
   }, [pdfTextSelection, dismissPdfTextPicker]);
 
+  // PR-α-3b follow-up:双击 PDF 标注 → activate 关联 thought(召唤右槽 + 滚卡)
+  // 走 closest('[data-pdf-annotation-id]') 检测(同 L4 contextMenu trigger 模式),
+  // 不污染 AnnotationLayer 组件(它是 capability 层,不应知道 thought 概念)。
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const onDblClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      const annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
+      if (!annEl) return;
+      const id = annEl.getAttribute('data-pdf-annotation-id');
+      if (!id) return;
+      e.preventDefault();
+      commandRegistry.execute('ebook-view.activate-thought-from-annotation', id);
+    };
+    el.addEventListener('dblclick', onDblClick);
+    return () => el.removeEventListener('dblclick', onDblClick);
+  }, []);
+
   // ── Toolbar callbacks ──
 
   const onPageChange = useCallback((page: number) => {

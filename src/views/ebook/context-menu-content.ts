@@ -205,6 +205,46 @@ export function registerContextMenu(): void {
   });
 
   /**
+   * 双击标注 → activate 关联 thought(召唤右槽 + 滚动锚定到卡片)。
+   *
+   * 流程:扫 listThoughtsBySource('book', bookId) 找 anchor.locator.createdAt 匹配的
+   * thought atom → 有则 openRight + emit 'thought.activate'(ThoughtView 自动滚卡 + 高亮)。
+   * 没找到 → 静默 return(标注未升级到 thought,双击无反应;用户需先右键 💭 加思考)。
+   *
+   * 参数:annotationId(= bookAnchor.createdAt 字符串)直接传入。
+   * 不从 contextMenuController 取(双击事件不走右键菜单)。
+   */
+  commandRegistry.register(
+    'ebook-view.activate-thought-from-annotation',
+    (arg: unknown) => {
+      if (typeof arg !== 'string') return;
+      const bookId = getActiveBookId();
+      if (!bookId) return;
+      const createdAt = Number(arg);
+      void (async () => {
+        const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+        const thoughts = await thoughtApi.listThoughtsBySource('book', bookId);
+        const matched = thoughts.find(
+          (t) =>
+            t.anchor?.source === 'book' &&
+            (t.anchor.locator as BookLocator).createdAt === createdAt,
+        );
+        if (!matched) return; // 无关联 thought,双击 no-op
+        const wsId = workspaceManager.getActiveId();
+        const bus = wsId ? workspaceManager.getBus(wsId) : null;
+        if (bus) {
+          bus.slot.openRight('thought-view');
+          bus.channels.emit('thought.activate', {
+            thoughtId: matched.id,
+            anchor: matched.anchor,
+            emittedAt: Date.now(),
+          });
+        }
+      })();
+    },
+  );
+
+  /**
    * 📸 截图复制 — 读 bookAnchor.thumbnail base64 → ClipboardItem(image/png)。
    * 文字流标注无 thumbnail → warn + no-op。
    */
