@@ -145,8 +145,18 @@ export const PDFViewerCanvas = forwardRef<
 
     // ── 事件桥接 ──
     const onPagesInit = (): void => {
+      // DIAG: 看 container/wrapper 真实尺寸,pdfjs 算 page-width 是否在合理输入下
+      const bcr = container.getBoundingClientRect();
+      const wrapper = container.parentElement;
+      const wbcr = wrapper?.getBoundingClientRect();
+      console.log(
+        `[pdf-init] container=${bcr.width.toFixed(0)}×${bcr.height.toFixed(0)} wrapper=${wbcr?.width.toFixed(0) ?? '?'}×${wbcr?.height.toFixed(0) ?? '?'} viewerDiv child count=${viewer.pagesCount}`,
+      );
       // initialFitMode — pdfjs currentScaleValue 'page-width' / 'page-fit' / 'auto'
       viewer.currentScaleValue = initialFitMode;
+      console.log(
+        `[pdf-init] after set '${initialFitMode}' → currentScale=${viewer.currentScale.toFixed(3)}`,
+      );
     };
     const onPagesLoaded = (): void => {
       if (initialPage && initialPage >= 1 && initialPage <= pdfDoc.numPages) {
