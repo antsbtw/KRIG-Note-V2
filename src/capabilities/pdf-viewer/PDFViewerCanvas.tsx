@@ -348,25 +348,12 @@ export const PDFViewerCanvas = forwardRef<
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ── 容器宽度变化 → 重算 fit-mode ──
-  // pdfjs PDFViewer 内部已经监听 window resize,但 ResizeObserver 覆盖容器
-  // 在 flex/grid 内非 window resize 触发的尺寸变(如 slot binding 切换)。
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      const viewer = viewerInstanceRef.current;
-      if (!viewer) return;
-      // 仅当当前是 fit 模式("page-width" / "page-fit" / "auto")才重算
-      // 用户手动设的数值 scale 不该被 resize 覆盖
-      const v = viewer.currentScaleValue;
-      if (v === 'page-width' || v === 'page-fit' || v === 'auto') {
-        viewer.currentScaleValue = v;
-      }
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
+  // ── 容器尺寸变化:pdfjs PDFViewer 内部已自挂 ResizeObserver
+  // (#resizeObserverCallback,更新 --viewer-container-height + containerTopLeft 缓存),
+  // 我们不再额外加一层 — 双 RO 在 fit-mode 下回调内 setScaleValue 会形成嵌套
+  // resize → render → resize 死循环(2026-05-25 挂死 bug 根因)。
+  // 如未来发现 fit 模式跟随容器不灵,优先看 pdfjs 内部 RO 没 fire 的根因
+  // (常见:容器在 display:none 树内、CSS 变量没生效),不要直接复活我们的 RO。
 
   // ── ref handle ──
   useImperativeHandle(
