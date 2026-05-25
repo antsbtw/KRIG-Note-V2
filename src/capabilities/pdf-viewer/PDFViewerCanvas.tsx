@@ -58,11 +58,17 @@ const KEYBOARD_SCALE_STEP = 1.25;
  *
  * 数值参考 mozilla pdfjs:_wheelUnit = 100(pixel/line);LINE_SCALE_FACTOR = 1.1。
  */
-// 累积阈值 — trackpad pinch 一次 deltaY 0.5~5。120 = 30~80 次累积出一 tick
-// 即两指收/放约 1.5~2 cm 才触发一次 1.1 倍缩放(对齐 macOS Preview / Books 手感)
-const PIXELS_PER_LINE = 120;
-const WHEEL_SCALE_FACTOR = 1.1;   // 每 tick 缩放倍率(对齐 pdfjs DEFAULT_SCALE_DELTA)
+// pinch 累积阈值 + 单 tick 倍率 — 调参依据:
+// - PIXELS_PER_LINE 60:trackpad pinch deltaY 通常 0.5~5,累积 ~15 次出 tick
+// - 单 tick 1.05(5%)比 1.1(10%)柔和一倍 — 减少视觉"跳一格"感
+// - 整体灵敏度 ≈ 原 1.1×(40 阈值) 的 1/2
+const PIXELS_PER_LINE = 60;
+const WHEEL_SCALE_FACTOR = 1.05;
 const WHEEL_DRAWING_DELAY = 400;  // 真渲染 postpone(<1000 才生效,期间走 CSS transform)
+
+// 同一 pinch 手势内多次 wheel 共用 origin — 否则手指微动鼠标位置变 → updateScale 内部
+// `scrollPageIntoView + origin 偏移修正` 每 tick 锚点不同 → 视觉跳页感的真凶之一
+const GESTURE_TIMEOUT_MS = 100;
 
 export const PDFViewerCanvas = forwardRef<
   PDFViewerCanvasHandle,
@@ -202,7 +208,9 @@ export const PDFViewerCanvas = forwardRef<
 
     let accumulatedDelta = 0;
     let lastWheelTime = 0;
-    let lastOrigin: [number, number] = [0, 0];
+    // 同一 pinch 手势内锁定 origin — 首次 wheel(或 100ms 静止后第一次)定 origin,
+    // 整个手势期间不变。手指微动 clientX/Y 在累积器内被吸收。
+    let gestureOrigin: [number, number] = [0, 0];
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -210,21 +218,23 @@ export const PDFViewerCanvas = forwardRef<
       if (!viewer) return;
       e.preventDefault();
 
-      // 累积器静止超时:>100ms 没收到 wheel → 上一轮已结束,重置累积器
       const now = performance.now();
-      if (now - lastWheelTime > 100) accumulatedDelta = 0;
+      const isNewGesture = now - lastWheelTime > GESTURE_TIMEOUT_MS;
+      if (isNewGesture) {
+        accumulatedDelta = 0;
+        gestureOrigin = [e.clientX, e.clientY];
+      }
       lastWheelTime = now;
-      lastOrigin = [e.clientX, e.clientY];
 
       // deltaMode == DOM_DELTA_LINE / PAGE 时把每行/每页折成 PIXELS_PER_LINE 倍
-      // (Chromium 默认 mouse wheel 是 DOM_DELTA_PIXEL,trackpad 是 PIXEL,稳)
+      // (Chromium 默认 mouse wheel 是 DOM_DELTA_PIXEL,trackpad 是 PIXEL)
       let delta = e.deltaY;
       if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
       else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
 
       accumulatedDelta += delta;
 
-      // 出 tick:累积超过阈值。多 tick 时一次性应用(罕见,trackpad 慢速基本 ±1 tick)
+      // 出 tick:累积超过阈值。多 tick 一次性应用(罕见,trackpad 慢速基本 ±1 tick)
       while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
         const direction = accumulatedDelta < 0 ? 1 : -1;
         accumulatedDelta -= direction * PIXELS_PER_LINE;
@@ -233,7 +243,7 @@ export const PDFViewerCanvas = forwardRef<
         viewer.updateScale({
           drawingDelay: WHEEL_DRAWING_DELAY,
           scaleFactor,
-          origin: lastOrigin,
+          origin: gestureOrigin,
         });
       }
     };
