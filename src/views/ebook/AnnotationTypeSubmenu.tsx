@@ -14,6 +14,10 @@
 import type { ContextSubmenuContext } from '@slot/interaction-registries/context-menu-registry/context-menu-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
+import type {
+  ThoughtCapabilityApi,
+  BookLocator,
+} from '@capabilities/thought/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import {
   THOUGHT_TYPE_META,
@@ -43,9 +47,26 @@ export function AnnotationTypeSubmenu({ ctx }: Props) {
     if (!annotationId) return;
     const bookId = getActiveBookId();
     if (!bookId) return;
+    const createdAt = Number(annotationId);
     const color = THOUGHT_TYPE_META[type].color;
     const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-    void lib.updateReadingThoughtBlockColor(bookId, Number(annotationId), color);
+    const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+    void (async () => {
+      // 双写(handoff 颜色同步 follow-up A):同步改标注 BookAnchor.color + 关联 thought.type
+      // - 标注必改:lib.updateReadingThoughtBlockColor 改 legacy BookAnchor.color
+      // - 关联 thought 可选:扫 listThoughtsBySource 找 anchor.locator.createdAt 匹配的
+      //   thought atom,有则同步改 type;无则跳过(标注未升级到 thought,无 type 概念)
+      await lib.updateReadingThoughtBlockColor(bookId, createdAt, color);
+      const thoughts = await thoughtApi.listThoughtsBySource('book', bookId);
+      const matched = thoughts.find(
+        (t) =>
+          t.anchor?.source === 'book' &&
+          (t.anchor.locator as BookLocator).createdAt === createdAt,
+      );
+      if (matched) {
+        await thoughtApi.updateThought(matched.id, { type });
+      }
+    })();
     ctx.close();
   };
 
