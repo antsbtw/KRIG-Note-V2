@@ -16,6 +16,7 @@ registerView({
     // W4.2 C4:依赖 web-rendering capability(charter § 1.2 注册原则)
     // — driver(web-sync-driver / web-translate-driver)是 capability 内部实现细节,view 不可见
     'web-rendering',
+    'learning',  // 2026-05-25:选区右键 📖 查词 / 🌐 翻译(走 learning.ui.dictionaryPanel)
   ],
   component: WebView,
   navSideTab: { label: 'Web', icon: '🌐', order: 3 },
