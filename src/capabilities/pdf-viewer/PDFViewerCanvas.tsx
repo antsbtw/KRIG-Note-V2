@@ -200,17 +200,34 @@ export const PDFViewerCanvas = forwardRef<
 
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch — macOS 派 wheel + ctrlKey=true)──
   //
-  // 累积 deltaY 模式:多次小 delta 攒到阈值才触发一次 updateScale,避免 60fps
-  // pinch 一秒放大 60 倍。reset 由 100ms 静止超时触发(防止符号反转后残留累积)。
+  // 关键设计:**自管 scrollLeft/scrollTop 守恒**,不传 origin 给 pdfjs。
+  //
+  // pdfjs updateScale 内部 origin 处理路径(7568-7585)是:
+  //   1. scrollPageIntoView(当前页号)   ← 用 _location 把"当前页"重定位到顶
+  //   2. scrollLeft/Top += (origin - containerTopLeft) * scaleDiff
+  //
+  // 第一步会**覆盖**当前 scroll 位置,第二步只是相对小修。在嵌套容器(NavSide /
+  // WorkspaceBar 之下)offsetTop 不为 0 时,origin 与 containerTopLeft 单位不匹配
+  // (origin 是 viewport client,containerTopLeft 是 document offset),修正方向
+  // 错乱 → "跳到页顶 + 偏一点" 的视觉,鼠标点不锚定。
+  //
+  // 自管守恒:
+  //   1. wheel 时记 (mx, my) = 鼠标在 container BCR 局部坐标
+  //   2. 记 contentX = scrollLeft + mx, contentY = scrollTop + my(scale 前像素)
+  //   3. updateScale(scaleFactor) 不传 origin
+  //   4. 等下一 frame,scaleDiff = newScale / oldScale 已知,新 contentX/Y = 旧 ×
+  //      scaleDiff;设 scrollLeft = newContentX - mx,scrollTop 同理
+  //
+  // 这样**鼠标位置那个内容点像素**严格不动 — 真正的"focus zoom"。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let accumulatedDelta = 0;
     let lastWheelTime = 0;
-    // 同一 pinch 手势内锁定 origin — 首次 wheel(或 100ms 静止后第一次)定 origin,
-    // 整个手势期间不变。手指微动 clientX/Y 在累积器内被吸收。
-    let gestureOrigin: [number, number] = [0, 0];
+    // 同一 pinch 手势内锁定锚点(container 局部坐标 mx/my)。
+    // 手指微动 clientX/Y 不会让锚点漂移 → 整个手势鼠标点恒不动。
+    let gestureAnchor: { mx: number; my: number } | null = null;
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -222,7 +239,11 @@ export const PDFViewerCanvas = forwardRef<
       const isNewGesture = now - lastWheelTime > GESTURE_TIMEOUT_MS;
       if (isNewGesture) {
         accumulatedDelta = 0;
-        gestureOrigin = [e.clientX, e.clientY];
+        const bcr = container.getBoundingClientRect();
+        gestureAnchor = {
+          mx: e.clientX - bcr.left,
+          my: e.clientY - bcr.top,
+        };
       }
       lastWheelTime = now;
 
@@ -240,11 +261,29 @@ export const PDFViewerCanvas = forwardRef<
         accumulatedDelta -= direction * PIXELS_PER_LINE;
         const scaleFactor =
           direction > 0 ? WHEEL_SCALE_FACTOR : 1 / WHEEL_SCALE_FACTOR;
+
+        if (!gestureAnchor) continue;
+        // tick 前 scale + content 坐标
+        const oldScale = viewer.currentScale;
+        const { mx, my } = gestureAnchor;
+        const contentX = container.scrollLeft + mx;
+        const contentY = container.scrollTop + my;
+
+        // 不传 origin — 让 pdfjs 完全不做 scroll 修正,我们之后自己设
         viewer.updateScale({
           drawingDelay: WHEEL_DRAWING_DELAY,
           scaleFactor,
-          origin: gestureOrigin,
         });
+
+        // updateScale 同步设了 _currentScale + scrollPageIntoView 已经跑过
+        // (会把 scroll 移到当前页顶 + _location 偏移)。读 newScale 算 ratio,
+        // 强制把鼠标点位置那个内容像素拉回 (mx, my)。
+        const newScale = viewer.currentScale;
+        if (newScale !== oldScale && oldScale > 0) {
+          const ratio = newScale / oldScale;
+          container.scrollLeft = contentX * ratio - mx;
+          container.scrollTop = contentY * ratio - my;
+        }
       }
     };
     container.addEventListener('wheel', handler, { passive: false });
