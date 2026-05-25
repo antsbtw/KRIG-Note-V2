@@ -1,25 +1,26 @@
 /**
- * useEpubAnnotation — EPUB 标注 hook
+ * useEpubAnnotation — EPUB 标注 hook(PR-α-3b followup 重写)
  *
- * thought-view-port.md v0.5 §16.3 双轨实施(Phase 4):
- *   - **新建走 thought capability**(source='book', locator=BookAnchor)
- *   - **加载读双源**:新数据(thoughtListBySource('book',bookId))+ 老数据
- *     (ebook-library.getReadingThoughtAnnotations,legacy block)
- *   - 删除按 internal anchor 来源分支(有 thoughtId → thoughtDelete;否则老 path)
+ * 2026-05-25 用户拍板:EPUB 标注操作全面对齐 PDF α-2/α-3b 注册式右键菜单。
+ * 废除自动弹 picker;创建路径解耦(高亮 / 加思考分开);单击 no-op(右键菜单接管)。
  *
- * 数据流(改造后):
- *   用户选色 → hook.createAnnotation(color) → thoughtCapability.createThought
- *     (type='highlight', color, anchor={source:'book', resourceId:bookId, locator:bookAnchor})
- *     + host.addHighlight(cfi, color) → 重渲高亮
- *   EPUB 内 click 已有标注 → hook.handleAnnotationClick(cfi) →
- *     - 若内部记录有 thoughtId → thoughtCapability.deleteThought(thoughtId)
- *     - 否则(legacy) → ebookLibrary.removeReadingThoughtBlock(bookId, legacyId)
- *     + host.removeHighlight(cfi)
+ * 新数据流:
+ *   ① 用户拖选文字 → host onTextSelected fired,但 hook 不暴露 selection state
+ *      也不弹 picker(EpubAnnotationPicker 废除)。用户必须**右键**才出菜单。
+ *   ② 右键 → EBookView 端调 contextMenuController.show 'ebook-view' viewId
+ *      (走 L4 注册的 epub-context-menu-content.ts items)。
+ *   ③ 菜单项命令调本 hook 的:
+ *        createHighlight(cfi, text, type)  → 只落 legacy block(无 thought atom)
+ *        createThought(cfi, text, type)    → 落 legacy + thought atom + 召唤右槽
+ *        removeAnnotation(cfi)             → 删 legacy + thought + 移除高亮
+ *        findByCfi(cfi)                    → 命令 handler 查关联 thought 用
  *
- * v0.5 §16.4 老数据迁移留独立 Phase 6,本 hook 期间保持兼容读。
+ * 双轨读保留(loadOnBookOpen):
+ *   新数据(thoughtListBySource)+ 老数据(getReadingThoughtAnnotations),
+ *   按 cfi 去重,host.addHighlight 重绘所有。
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   EBookLibraryApi,
@@ -33,21 +34,16 @@ import type {
 import { THOUGHT_TYPE_META, type ThoughtType } from '@shared/ipc/thought-types';
 import type { EBookHostHandle } from '../Host';
 
-export interface EpubSelection {
-  cfi: string;
-  text: string;
-  x: number;
-  y: number;
-}
-
 /** view 端字面 EPUB annotation 投影(支持新/老双源)*/
-interface EpubAnnotation {
-  /** 显示用 id(去重 + key) — 老路径用 legacy createdAt 字符串,新路径用 thoughtId */
+export interface EpubAnnotation {
+  /** 显示用 id(去重 + key) — legacy createdAt 字符串 / thoughtId */
   id: string;
   cfi: string;
   color: string;
   textContent?: string;
-  /** v0.5 §16.3 双轨:新路径独有,删除时走 thoughtCapability.deleteThought */
+  /** legacy block.bookAnchor.createdAt(legacy 删除路径用) */
+  createdAt: number;
+  /** v0.5 §16.3 新路径独有,删除时走 thoughtCapability.deleteThought */
   thoughtId?: string;
 }
 
@@ -59,12 +55,11 @@ function toEpubAnnotationFromLegacy(anchor: BookAnchor): EpubAnnotation | null {
     cfi: anchor.cfi,
     color: anchor.color,
     textContent: anchor.textContent,
+    createdAt: anchor.createdAt,
   };
 }
 
 function toEpubAnnotationFromThought(t: ThoughtInfo): EpubAnnotation | null {
-  // 2026-05-24 拍板:type 不再含 'highlight';EPUB 选区高亮按 anchor.locator
-  // markStyle='highlight' 识别(任意 ThoughtType 都可挂 EPUB 锚点)。
   if (!t.anchor || t.anchor.source !== 'book') return null;
   const loc = t.anchor.locator as BookLocator;
   if (loc.markStyle !== 'highlight') return null;
@@ -74,6 +69,7 @@ function toEpubAnnotationFromThought(t: ThoughtInfo): EpubAnnotation | null {
     cfi: loc.cfi,
     color: THOUGHT_TYPE_META[t.type].color,
     textContent: loc.textContent,
+    createdAt: loc.createdAt,
     thoughtId: t.id,
   };
 }
@@ -82,7 +78,6 @@ export function useEpubAnnotation(
   hostRef: React.RefObject<EBookHostHandle | null>,
   bookIdRef: React.RefObject<string | null>,
 ) {
-  const [selection, setSelectionState] = useState<EpubSelection | null>(null);
   const [annotations, setAnnotations] = useState<EpubAnnotation[]>([]);
   const annotationsRef = useRef(annotations);
 
@@ -90,30 +85,162 @@ export function useEpubAnnotation(
     annotationsRef.current = annotations;
   }, [annotations]);
 
-  const setSelection = useCallback((info: EpubSelection) => {
-    setSelectionState(info);
-  }, []);
+  /**
+   * PR-α-3b followup:订阅 note onListChanged 广播 — legacy block 任何改动
+   * (addReadingThoughtBlock / remove / updateReadingThoughtBlockColor)都触发,
+   * → loadOnBookOpen 重拉数据 + host.addHighlight 重绘所有高亮。
+   * 对齐 use-pdf-annotations 的回流模式。
+   */
+  useEffect(() => {
+    if (!window.electronAPI?.onNoteListChanged) return;
+    const unsub = window.electronAPI.onNoteListChanged(() => {
+      const bookId = bookIdRef.current;
+      if (!bookId) return;
+      void loadOnBookOpenRef.current?.(bookId);
+    });
+    return unsub;
+  }, [bookIdRef]);
+  // loadOnBookOpen 闭包 ref(避免 deps 循环;实际函数在下面声明)
+  const loadOnBookOpenRef = useRef<((bookId: string) => Promise<void>) | null>(null);
 
-  const dismiss = useCallback(() => {
-    setSelectionState(null);
-  }, []);
+  /**
+   * 高亮(只落 legacy block,不创建 thought atom)。
+   * 对齐 PDF α-3b createHighlight 路径 — 用户主动右键 💭 加思考才升级 thought。
+   */
+  const createHighlight = useCallback(
+    async (cfi: string, text: string, type: ThoughtType): Promise<{ id: string } | null> => {
+      const bookId = bookIdRef.current;
+      const host = hostRef.current;
+      if (!bookId || !host) return null;
+      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+      const color = THOUGHT_TYPE_META[type].color;
+      const createdAt = Date.now();
+      const bookAnchor: BookAnchor = {
+        pageNum: 0,
+        cfi,
+        textContent: text,
+        color,
+        type: 'highlight',
+        createdAt,
+      };
+      await lib.addReadingThoughtBlock(bookId, {
+        type: 'blockquote',
+        bookAnchor,
+        textContent: text,
+      });
+      await host.addHighlight(cfi, color);
+      setAnnotations((prev) => [
+        ...prev,
+        { id: String(createdAt), cfi, color, textContent: text, createdAt },
+      ]);
+      return { id: String(createdAt) };
+    },
+    [bookIdRef, hostRef],
+  );
 
-  /** EPUB 内点击已有标注:删该标注 + 移除高亮 */
-  const handleAnnotationClick = useCallback(
-    async (cfi: string) => {
+  /**
+   * 加思考(落 legacy block + 创建 thought atom + 召唤右槽 + activate)。
+   * 对齐 PDF α-3b ebook-view.add-thought-from-annotation 命令路径。
+   *
+   * - 在 EPUB 选区上加思考:bookAnchor.createdAt 由本调用生成,落 legacy + thought atom
+   * - 在 EPUB 已有标注上加思考(升级):existingCreatedAt 传入 legacy id,thought.anchor 关联现有 anchor
+   */
+  const createThought = useCallback(
+    async (
+      cfi: string,
+      text: string,
+      type: ThoughtType,
+      existingCreatedAt?: number,
+    ): Promise<{ thoughtId: string } | null> => {
+      const bookId = bookIdRef.current;
+      const host = hostRef.current;
+      if (!bookId || !host) return null;
+      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+      const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+      const color = THOUGHT_TYPE_META[type].color;
+      const createdAt = existingCreatedAt ?? Date.now();
+      const bookLocator: BookLocator = {
+        pageNum: 0,
+        cfi,
+        textContent: text,
+        markStyle: 'highlight',
+        createdAt,
+      };
+      // 无 existingCreatedAt → 新选区高亮升级,先落 legacy block + host 高亮
+      if (existingCreatedAt === undefined) {
+        const bookAnchor: BookAnchor = {
+          pageNum: 0,
+          cfi,
+          textContent: text,
+          color,
+          type: 'highlight',
+          createdAt,
+        };
+        await lib.addReadingThoughtBlock(bookId, {
+          type: 'blockquote',
+          bookAnchor,
+          textContent: text,
+        });
+        await host.addHighlight(cfi, color);
+        setAnnotations((prev) => [
+          ...prev,
+          {
+            id: String(createdAt),
+            cfi,
+            color,
+            textContent: text,
+            createdAt,
+            thoughtId: undefined,
+          },
+        ]);
+      }
+      // 创 thought atom + anchor 关联 BookLocator
+      const t = await thoughtApi.createThought({
+        type,
+        resolved: false,
+        pinned: false,
+        doc: {
+          format: 'pm-doc-json',
+          version: '0.1',
+          payload: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: text ? [{ type: 'text', text }] : undefined,
+              },
+            ],
+          },
+        },
+        folderId: null,
+        anchor: { source: 'book', resourceId: bookId, locator: bookLocator },
+      });
+      // 更新对应 annotation.thoughtId(已升级)
+      setAnnotations((prev) =>
+        prev.map((a) =>
+          a.cfi === cfi ? { ...a, thoughtId: t.id, id: t.id } : a,
+        ),
+      );
+      return { thoughtId: t.id };
+    },
+    [bookIdRef, hostRef],
+  );
+
+  /** 删除标注:删 legacy(可能 + thought) + 移除高亮 */
+  const removeAnnotation = useCallback(
+    async (cfi: string): Promise<void> => {
       const bookId = bookIdRef.current;
       const host = hostRef.current;
       if (!bookId || !host) return;
       const ann = annotationsRef.current.find((a) => a.cfi === cfi);
       if (!ann) return;
+      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+      // 总删 legacy block(highlight 视觉来源)
+      await lib.removeReadingThoughtBlock(bookId, String(ann.createdAt));
+      // 若有关联 thought atom,也删
       if (ann.thoughtId) {
-        // v0.5 §16.3 新路径
         const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
         await thoughtApi.deleteThought(ann.thoughtId);
-      } else {
-        // 老路径(legacy block)
-        const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-        await lib.removeReadingThoughtBlock(bookId, ann.id);
       }
       host.removeHighlight(cfi);
       setAnnotations((prev) => prev.filter((a) => a.cfi !== cfi));
@@ -121,71 +248,27 @@ export function useEpubAnnotation(
     [bookIdRef, hostRef],
   );
 
-  /**
-   * 用户从 picker 选 type → 创建 EPUB 高亮(2026-05-24 拍板:5 type = 5 色)。
-   * 颜色由 type 反查 META.color,EPUB host.addHighlight 字面用 META 色。
-   */
-  const createAnnotation = useCallback(
-    async (type: ThoughtType) => {
-      const bookId = bookIdRef.current;
-      const host = hostRef.current;
-      if (!selection || !bookId || !host) return;
-      const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
-      const color = THOUGHT_TYPE_META[type].color;
-      const createdAt = Date.now();
-      const bookLocator: BookLocator = {
-        pageNum: 0,
-        cfi: selection.cfi,
-        textContent: selection.text,
-        markStyle: 'highlight',
-        createdAt,
-      };
-      try {
-        const t = await thoughtApi.createThought({
-          type,
-          resolved: false,
-          pinned: false,
-          doc: {
-            format: 'pm-doc-json',
-            version: '0.1',
-            payload: {
-              type: 'doc',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: selection.text
-                    ? [{ type: 'text', text: selection.text }]
-                    : undefined,
-                },
-              ],
-            },
-          },
-          folderId: null,
-          anchor: { source: 'book', resourceId: bookId, locator: bookLocator },
-        });
-        await host.addHighlight(selection.cfi, color);
-        setAnnotations((prev) => [
-          ...prev,
-          {
-            id: t.id,
-            cfi: selection.cfi,
-            color,
-            textContent: selection.text,
-            thoughtId: t.id,
-          },
-        ]);
-        setSelectionState(null);
-      } catch (err) {
-        console.warn('[useEpubAnnotation] createAnnotation failed:', err);
-      }
-    },
-    [selection, bookIdRef, hostRef],
-  );
+  /** PR-α-3b followup:右键菜单命令 handler 查 annotation 用(cfi 反查) */
+  const findByCfi = useCallback((cfi: string): EpubAnnotation | null => {
+    return annotationsRef.current.find((a) => a.cfi === cfi) ?? null;
+  }, []);
 
   /**
-   * 书加载后:拿全部 EPUB annotation(新 + 老双源,按 cfi 去重)+ 重绘高亮。
-   * v0.5 §16.3 双轨:新数据优先(同 cfi 时不再渲老高亮覆盖)。
+   * 旧 handleAnnotationClick 改 no-op — EPUB 单击标注不再删除(用户拍板对齐 PDF)。
+   * 删除走右键菜单 🗑 删除标注;view 端仍传此回调给 Host(签名兼容),内部空函数。
    */
+  const handleAnnotationClick = useCallback((_cfi: string) => {
+    // no-op:单击 EPUB 标注不再触发删除;改走 L4 右键菜单 🗑 删除标注
+  }, []);
+
+  /**
+   * 书加载后 / 数据变化广播后:重拉数据 + diff 重绘高亮。
+   *
+   * 关键修复(2026-05-25):foliate addAnnotation 是状态化的,删数据后若仅 add
+   * 不 remove,foliate 内部仍持有旧 annotation → 视觉残留。删标注后回流到这里
+   * 必须 diff: lastDrawn - newList = 待 removeHighlight cfis。
+   */
+  const lastDrawnCfisRef = useRef<Set<string>>(new Set());
   const loadOnBookOpen = useCallback(
     async (bookId: string) => {
       const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
@@ -200,7 +283,6 @@ export function useEpubAnnotation(
       const list: EpubAnnotation[] = [];
       const seenCfi = new Set<string>();
 
-      // 新数据(优先 — discriminated union 收窄:必 anchor.source='book' + locator.cfi 非空)
       for (const t of newThoughts) {
         const ann = toEpubAnnotationFromThought(t);
         if (!ann) continue;
@@ -208,7 +290,6 @@ export function useEpubAnnotation(
         seenCfi.add(ann.cfi);
         list.push(ann);
       }
-      // 老数据(同 cfi 跳过 — 新建路径已迁,Phase 6 迁移后老 path 清空)
       for (const a of legacyAnchors) {
         const ann = toEpubAnnotationFromLegacy(a);
         if (!ann) continue;
@@ -220,20 +301,32 @@ export function useEpubAnnotation(
 
       if (!host) return;
       await host.getTOC();
+      // diff:上次画过但本次不在 list 的 cfi → removeHighlight
+      const newCfis = new Set(list.map((a) => a.cfi));
+      for (const cfi of lastDrawnCfisRef.current) {
+        if (!newCfis.has(cfi)) host.removeHighlight(cfi);
+      }
+      // 当前列表全 add(foliate addAnnotation 同 cfi 第二次调是覆盖,无害)
       for (const ann of list) {
         await host.addHighlight(ann.cfi, ann.color);
       }
+      lastDrawnCfisRef.current = newCfis;
     },
     [hostRef],
   );
 
+  // 保存 loadOnBookOpen 到 ref 供 onNoteListChanged 调用
+  useEffect(() => {
+    loadOnBookOpenRef.current = loadOnBookOpen;
+  }, [loadOnBookOpen]);
+
   return {
-    selection,
     annotations,
-    setSelection,
-    dismiss,
-    handleAnnotationClick,
-    createAnnotation,
+    createHighlight,
+    createThought,
+    removeAnnotation,
+    findByCfi,
+    handleAnnotationClick, // 保留(no-op),Host onEpubAnnotationClick 仍需绑(签名兼容)
     loadOnBookOpen,
   };
 }

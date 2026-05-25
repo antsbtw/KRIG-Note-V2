@@ -99,6 +99,13 @@ export interface EBookHostHandle {
   addHighlight(cfi: string, color: string): Promise<void>;
   /** EPUB 移除 CFI 高亮;PDF noop */
   removeHighlight(cfi: string): void;
+  /**
+   * PR-α-3b followup fix:推送已知 EPUB 标注 cfi 列表给 renderer。
+   * renderer 在 iframe contextmenu/dblclick 内做几何命中(foliate svg pointer-events:none
+   * 致 closest 路径失效,改用 caretPositionFromPoint + resolveCFI range 包含检测)。
+   * PDF noop。
+   */
+  setKnownEpubAnnotationCfis(cfis: string[]): void;
 
   /**
    * 截 PDF 指定页面 rect 区域为 JPEG dataUrl(独立离屏 render 2x DPR)。
@@ -158,6 +165,20 @@ export interface EBookHostProps {
   onEpubSelectionDismiss?: () => void;
   /** 点击已有标注(show-annotation 事件)→ view 触发删除 */
   onEpubAnnotationClick?: (cfi: string) => void;
+  /**
+   * PR-α-3b followup:EPUB iframe 内右键 → view 端调 contextMenuController.show
+   * 走 L4 右键菜单。x/y 已转 viewport 坐标(fixed position 用)。
+   * annotationCfi 非 null = 右键 target 命中已有标注(走 has-epub-annotation predicate)。
+   */
+  onEpubContextMenu?: (info: {
+    x: number;
+    y: number;
+    text: string;
+    cfi: string | null;
+    annotationCfi: string | null;
+  }) => void;
+  /** PR-α-3b followup:标注双击 → activate 关联 thought */
+  onEpubAnnotationDoubleClick?: (annotationCfi: string) => void;
 
   // ── C5:PDF 空间标注 ──
   /** 标注模式(off / rect)— PDF 路径,EPUB 不消费;2026-05-24 删 underline */
@@ -210,6 +231,8 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onEpubTextSelected,
     onEpubSelectionDismiss,
     onEpubAnnotationClick,
+    onEpubContextMenu,
+    onEpubAnnotationDoubleClick,
     pdfAnnotationMode,
     pdfAnnotations,
     pdfFlashAnnotationId,
@@ -333,6 +356,9 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           if (onEpubTextSelected) r.onTextSelected(onEpubTextSelected);
           if (onEpubSelectionDismiss) r.onSelectionDismiss(onEpubSelectionDismiss);
           if (onEpubAnnotationClick) r.onAnnotationClick(onEpubAnnotationClick);
+          // PR-α-3b followup:EPUB iframe 内右键 / 双击 → 转推给 view
+          if (onEpubContextMenu) r.onContextMenu(onEpubContextMenu);
+          if (onEpubAnnotationDoubleClick) r.onDoubleClick(onEpubAnnotationDoubleClick);
 
           onLoadComplete?.({
             totalPages: 0,
@@ -391,6 +417,8 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       onEpubTextSelected,
       onEpubSelectionDismiss,
       onEpubAnnotationClick,
+      onEpubContextMenu,
+      onEpubAnnotationDoubleClick,
     ],
   );
 
@@ -584,6 +612,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       removeHighlight(cfi: string): void {
         const r = rendererRef.current;
         if (r && isReflowable(r)) r.removeHighlight(cfi);
+      },
+      setKnownEpubAnnotationCfis(cfis: string[]): void {
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.setKnownAnnotationCfis(cfis);
       },
       async capturePageRect(
         pageNum: number,

@@ -196,10 +196,31 @@ export interface IReflowableRenderer extends IBookRenderer {
   onSelectionDismiss(callback: () => void): void;
   /** 点击已有标注(show-annotation 事件)→ 触发删除 */
   onAnnotationClick(callback: (cfi: string) => void): void;
+  /** PR-α-3b followup:EPUB iframe 内右键 → 触发 L4 右键菜单(view 端调 controller.show) */
+  onContextMenu(
+    callback: (info: {
+      x: number;
+      y: number;
+      text: string;
+      cfi: string | null;
+      annotationCfi: string | null;
+    }) => void,
+  ): void;
+  /** PR-α-3b followup:标注双击 → activate 关联 thought */
+  onDoubleClick(callback: (annotationCfi: string) => void): void;
   /** 添加 CFI 高亮(自定义颜色)*/
   addHighlight(cfi: string, color: string): Promise<void>;
   /** 移除 CFI 高亮 */
   removeHighlight(cfi: string): void;
+  /**
+   * PR-α-3b followup fix:推已知标注 cfi 列表给 renderer,
+   * iframe contextmenu/dblclick 时 renderer 内做"点击点是否落在标注 range 内"几何命中。
+   *
+   * 根因:foliate Overlayer 的 svg 整体 `pointerEvents: 'none'`,
+   * iframe 内事件穿透到下层文字,target.closest('[data-foliate-annotation]') 永远 null。
+   * 改走:用 caretPositionFromPoint 拿点击点 textNode+offset → 与 resolveCFI(cfi).anchor(doc) 的 Range 做 isPointInRange。
+   */
+  setKnownAnnotationCfis(cfis: string[]): void;
 
   // ── C4 fix:双指水平 swipe 翻页(macOS Books 同款 UX)──
   /** 注册 swipe 翻页回调(由 reflowable-content 消费,触发 prev/nextChapter)*/
@@ -249,7 +270,7 @@ export function getRenderMode(fileType: EBookFileType): RenderMode {
 import type { EBookHostProps, EBookHostHandle } from './Host';
 import type { OutlinePanel } from './outline-panel';
 import type { SearchBar } from './search-bar';
-import type { EpubAnnotationPicker } from './epub-annotation-picker';
+// EpubAnnotationPicker 废除(PR-α-3b followup:EPUB 选区操作改走 L4 右键菜单)
 import type { PdfTextAnnotationPicker } from './pdf-text-annotation-picker';
 import type { useSearch } from './hooks/use-search';
 import type { useBookmarks } from './hooks/use-bookmarks';
@@ -269,8 +290,6 @@ export interface EBookRenderingApi {
   OutlinePanel: typeof OutlinePanel;
   /** 搜索栏 UI(配 useSearch hook 用)*/
   SearchBar: typeof SearchBar;
-  /** EPUB 选区颜色 picker(配 useEpubAnnotation hook 用)*/
-  EpubAnnotationPicker: typeof EpubAnnotationPicker;
   /** PR-α-3b:PDF 文字流选区 picker(5 色 + H/S markStyle 切换 + ✕)*/
   PdfTextAnnotationPicker: typeof PdfTextAnnotationPicker;
   /** 搜索 hook(view 在内部 useState/useCallback 不暴露 renderer)*/

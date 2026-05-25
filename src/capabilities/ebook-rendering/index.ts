@@ -23,7 +23,7 @@ import { capabilityRegistry } from '@slot/capability-registry/capability-registr
 import { EBookHost } from './Host';
 import { OutlinePanel } from './outline-panel';
 import { SearchBar } from './search-bar';
-import { EpubAnnotationPicker } from './epub-annotation-picker';
+// EpubAnnotationPicker 废除(PR-α-3b followup:EPUB 选区操作改走 L4 右键菜单)
 import { PdfTextAnnotationPicker } from './pdf-text-annotation-picker';
 import { useSearch } from './hooks/use-search';
 import { useBookmarks } from './hooks/use-bookmarks';
@@ -66,7 +66,7 @@ export type {
   ToolbarConfig,
   TOCItem,
 } from './types';
-export type { EpubSelection } from './hooks/use-epub-annotation';
+// EpubSelection 废除(PR-α-3b followup:EPUB 选区操作改走 L4 右键菜单)
 export type { PageAnnotation } from './fixed-page-content/annotation-layer';
 
 // 模块级 export(driver/slot 兜底用,W5 边界 A 临时允许项)
@@ -74,7 +74,6 @@ export {
   EBookHost,
   OutlinePanel,
   SearchBar,
-  EpubAnnotationPicker,
   PdfTextAnnotationPicker,
   useSearch,
   useBookmarks,
@@ -91,7 +90,6 @@ capabilityRegistry.register({
     Host: EBookHost,
     OutlinePanel,
     SearchBar,
-    EpubAnnotationPicker,
     PdfTextAnnotationPicker,
     useSearch,
     useBookmarks,
