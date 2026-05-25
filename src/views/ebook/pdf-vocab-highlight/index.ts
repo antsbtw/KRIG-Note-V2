@@ -286,11 +286,17 @@ async function playTTS(word: string): Promise<void> {
   ttsAudio.play().catch(() => {});
 }
 
-// ── 全局 hover 探测(mousemove + elementsFromPoint):一次性挂在 document ──
+// ── 全局 hover 探测(mousemove + 遍历 BCR 命中检测):一次性挂在 document ──
 //
-// 为什么不用 mouseover 委托:vocab-hl pointer-events:none(避免拦截选区拖选/右键),
-// mouseover 事件不会冒泡到本元素。改用 mousemove + elementsFromPoint 探测光标下的
-// vocab-hl 元素。性能上 elementsFromPoint 在主流浏览器 O(1)~O(可见层数),无忧。
+// 为什么不用 elementsFromPoint:vocab-hl pointer-events:none(避免拦截选区/右键),
+// pointer-events:none 元素**不参与 hit-testing**,elementsFromPoint 不返回它们
+// (2026-05-25 实测确认 — 诊断 log bcrHit=arrow 但 anyHl=false)。
+//
+// 改走 querySelectorAll + BCR 命中检测:n 一般几十到几百,mousemove 每次 O(n)
+// 简单矩形检测,性能可控。第一次命中即 break 不全扫。
+//
+// 为什么不用 mouseover 委托(pointer-events:auto):auto 会拦截 mousedown 让选区
+// 起点变成 vocab-hl(无 text node 选不到),用户拖选 / 右键定位会受影响。
 
 let listenersAttached = false;
 let hoveredEl: HTMLElement | null = null;
@@ -298,7 +304,7 @@ function attachGlobalListeners(): void {
   if (listenersAttached) return;
   listenersAttached = true;
   document.addEventListener('mousemove', (e) => {
-    // 零 vocab 时早退:不调 elementsFromPoint(全 app mousemove 监听,性能敏感)
+    // 零 vocab 时早退:全 app mousemove 监听,性能敏感
     if (vocabSet.size === 0) {
       if (hoveredEl) {
         hoveredEl.classList.remove('is-hover');
@@ -307,11 +313,14 @@ function attachGlobalListeners(): void {
       }
       return;
     }
-    const els = document.elementsFromPoint(e.clientX, e.clientY);
+    const x = e.clientX;
+    const y = e.clientY;
     let hit: HTMLElement | null = null;
-    for (const el of els) {
-      if ((el as HTMLElement).classList?.contains(HL_CLASS)) {
-        hit = el as HTMLElement;
+    const all = document.querySelectorAll<HTMLElement>(`.${HL_CLASS}`);
+    for (const el of all) {
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+        hit = el;
         break;
       }
     }
