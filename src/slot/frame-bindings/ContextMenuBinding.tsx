@@ -59,12 +59,19 @@ export function ContextMenuBinding() {
 
   const [openSub, setOpenSub] = useState<string | null>(null);
   const [subPos, setSubPos] = useState<{ left: number; top: number } | null>(null);
+  /**
+   * 当前展开 submenu 的父 row 元素 — submenu top 锚定 row.top(不是 menu.top),
+   * 这样从 row A hover 到 row B,submenu 跟着 row.y 跳动,视觉上是"跟着鼠标的子菜单"。
+   * (2026-05-25 修:之前 top = mainRect.top 固定,多 row 共用 submenu 看起来像同一个)
+   */
+  const openSubRowRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     return contextMenuController.subscribe(() => {
       setState(contextMenuController.getState());
       setOpenSub(null);
       setSubPos(null);
+      openSubRowRef.current = null;
     });
   }, []);
 
@@ -79,7 +86,9 @@ export function ContextMenuBinding() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     let left = mainRect.right + 4;
-    let top = mainRect.top;
+    // top 锚 row.top(不是 menu.top)— hover 切换主菜单项时 submenu 跟着 row 跳
+    const rowRect = openSubRowRef.current?.getBoundingClientRect();
+    let top = rowRect?.top ?? mainRect.top;
     if (left + subRect.width > vw - VIEWPORT_PAD) {
       left = mainRect.left - subRect.width - 4;
     }
@@ -143,7 +152,10 @@ export function ContextMenuBinding() {
               type="button"
               className={cls.join(' ')}
               disabled={disabled}
-              onMouseEnter={() => {
+              onMouseEnter={(e) => {
+                openSubRowRef.current = hasSubmenu
+                  ? (e.currentTarget as HTMLElement)
+                  : null;
                 setOpenSub(hasSubmenu ? item.submenuId! : null);
               }}
               onClick={() => executeItem(item)}

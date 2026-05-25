@@ -297,6 +297,47 @@
   transform: scale(1.15);
 }
 
+/* PR-α-3b followup:EPUB 右键 5 色 submenu — 视觉对齐 .krig-frame-picker
+ * (section label + 横排色按钮,卡片感独立于主菜单) */
+/* 覆盖 .krig-context-submenu 的 min-width: 180px(主菜单兜底宽度,色板用不到) */
+.krig-context-submenu:has(.krig-epub-color-picker) {
+  min-width: 0;
+}
+
+.krig-epub-color-picker {
+  padding: 6px 8px;
+}
+
+.krig-epub-color-picker__section-label {
+  font-size: 11px;
+  color: #9aa0a6;
+  margin: 0 0 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.krig-epub-color-picker__color-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.krig-epub-color-picker__swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  transition: outline-color 0.1s;
+}
+
+.krig-epub-color-picker__swatch:hover {
+  outline-color: #e8eaed;
+}
+
 /* PR-α-3b followup:扫描件提示 toast(锚定 ✎ 按钮正下方,3 秒自动消失,字数 ≤ 5)
  * 居中走 margin-left: -50%(transform 留给动画自管 fade-in,避免 keyframe transform
  * 覆盖 inline translateX(-50%) 致位置闪跳)

@@ -122,9 +122,18 @@ export class EPUBRenderer implements IReflowableRenderer {
 
   private async initView(): Promise<void> {
     if (!this.container || !this.fileData) return;
+    // snapshot container — async dynamic import 期间 destroy() 可能 nullify this.container
+    // 或者新的 renderTo() 替换了 container;后续操作用 snapshot 防 null/stale 引用
+    const container = this.container;
+    const fileData = this.fileData;
 
     try {
       const { View } = await import('foliate-js/view.js');
+
+      // dynamic import 后再次 check:期间若 destroy 已跑或 container 被换,本 init 跳过
+      if (this.container !== container || this.fileData !== fileData) {
+        return;
+      }
 
       if (!customElements.get('foliate-view')) {
         customElements.define('foliate-view', View);
@@ -134,12 +143,12 @@ export class EPUBRenderer implements IReflowableRenderer {
       this.view.style.display = 'block';
       this.view.style.width = '100%';
       this.view.style.height = '100%';
-      this.container.appendChild(this.view);
+      container.appendChild(this.view);
 
       // 等待 DOM 布局完成
       await new Promise((r) => requestAnimationFrame(r));
 
-      const file = new File([this.fileData], 'book.epub', {
+      const file = new File([fileData], 'book.epub', {
         type: 'application/epub+zip',
       });
 
@@ -206,24 +215,29 @@ export class EPUBRenderer implements IReflowableRenderer {
       });
 
       // 高亮绘制:根据 annotation.color 自定义颜色
+      // 注:foliate Overlayer 的 svg 整体 pointer-events:none,事件不在标注上触发;
+      // 右键/双击 hit-test 改走 view.resolveCFI(cfi).anchor(doc).isPointInRange
+      // (见 hitTestAnnotationAtPoint),不依赖 svg DOM attribute。
       this.view.addEventListener('draw-annotation', (e: any) => {
         const { draw, annotation } = e.detail;
         const color = annotation?.color || '#ffd43b';
         draw((range: any, options: any) => {
           // 优先用 foliate-js Overlayer.highlight(更准的多行高亮)
           const Overlayer = (self as any).__foliateOverlayer?.Overlayer;
-          if (Overlayer) return Overlayer.highlight(range, { ...options, color });
+          if (Overlayer) {
+            return Overlayer.highlight(range, { ...options, color });
+          }
           // fallback:简单矩形(覆盖几乎所有 foliate-js 版本)
           const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
           g.setAttribute('fill', color);
           g.style.opacity = '0.3';
           for (const { left, top, height, width } of range) {
-            const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            el.setAttribute('x', String(left));
-            el.setAttribute('y', String(top));
-            el.setAttribute('height', String(height));
-            el.setAttribute('width', String(width));
-            g.append(el);
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', String(left));
+            rect.setAttribute('y', String(top));
+            rect.setAttribute('height', String(height));
+            rect.setAttribute('width', String(width));
+            g.append(rect);
           }
           return g;
         }, { color });
@@ -526,8 +540,27 @@ export class EPUBRenderer implements IReflowableRenderer {
     | null = null;
   private selectionDismissCallback: (() => void) | null = null;
   private annotationClickCallback: ((cfi: string) => void) | null = null;
+  /** PR-α-3b followup:EPUB iframe 内 contextmenu — 选区/标注右键统一走 L4 右键菜单 */
+  private contextMenuCallback:
+    | ((info: {
+        x: number;
+        y: number;
+        text: string; // 选区文本(空 = 无选区)
+        cfi: string | null; // 选区 CFI(无选区 / 标注命中 = null)
+        annotationCfi: string | null; // 命中已有标注的 CFI(右键 target 在标注 svg 上)
+      }) => void)
+    | null = null;
+  /** PR-α-3b followup:EPUB iframe 内 dblclick — 标注上双击 activate 关联 thought */
+  private doubleClickCallback: ((annotationCfi: string) => void) | null = null;
   /** L5-C4 fix:水平 swipe 推送(macOS Books 同款 UX);direction 为 'next' / 'prev' */
   private horizontalSwipeCallback: ((direction: 'next' | 'prev') => void) | null = null;
+  /**
+   * PR-α-3b followup fix:已知标注 cfi 列表(view 通过 setKnownAnnotationCfis 推)。
+   * 用于 iframe contextmenu/dblclick 内 hit-test — foliate Overlayer svg 整体
+   * pointer-events:none,事件穿透到下层文字,closest('[data-foliate-annotation]')
+   * 永远 null;改走 caretPositionFromPoint + resolveCFI.anchor(doc).isPointInRange。
+   */
+  private knownAnnotationCfis: string[] = [];
 
   onTextSelected(
     callback: (info: { cfi: string; text: string; x: number; y: number }) => void,
@@ -543,9 +576,85 @@ export class EPUBRenderer implements IReflowableRenderer {
     this.annotationClickCallback = callback;
   }
 
+  onContextMenu(
+    callback: (info: {
+      x: number;
+      y: number;
+      text: string;
+      cfi: string | null;
+      annotationCfi: string | null;
+    }) => void,
+  ): void {
+    this.contextMenuCallback = callback;
+  }
+
+  onDoubleClick(callback: (annotationCfi: string) => void): void {
+    this.doubleClickCallback = callback;
+  }
+
   /** L5-C4 fix:注册水平 swipe 翻页回调(reflowable-content 消费) */
   onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void {
     this.horizontalSwipeCallback = callback;
+  }
+
+  setKnownAnnotationCfis(cfis: string[]): void {
+    this.knownAnnotationCfis = cfis;
+  }
+
+  /**
+   * 在 iframe doc 内,以点击点(clientX, clientY)hit-test 已知标注 cfis,
+   * 返回命中的 cfi(无命中 → null)。
+   *
+   * 原理:
+   * 1) caretPositionFromPoint(x, y) 拿点击点的 textNode + offset(用于 isPointInRange)
+   * 2) 遍历 knownAnnotationCfis,foliate view.resolveCFI(cfi) → { index, anchor }
+   *    其中 anchor(doc) 返回 Range(失败抛/返 null)
+   * 3) range.isPointInRange(textNode, offset) 命中则返回 cfi
+   *
+   * 注:foliate 多 section 时同一 cfi 解析需在对应 section doc 上;contextmenu
+   * 触发的 doc 就是用户所看的当前 section,故 anchor(doc) 在错的 doc 上会落
+   * 在 doc 外 → isPointInRange 抛 InvalidNodeTypeError → 用 try/catch 吃掉。
+   */
+  private hitTestAnnotationAtPoint(
+    doc: Document,
+    clientX: number,
+    clientY: number,
+  ): string | null {
+    if (!this.view || !this.knownAnnotationCfis.length) return null;
+    // caretPositionFromPoint(标准) / caretRangeFromPoint(WebKit fallback)
+    let node: Node | null = null;
+    let offset = 0;
+    const docAny = doc as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => CaretPosition | null;
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+    if (typeof docAny.caretPositionFromPoint === 'function') {
+      const cp = docAny.caretPositionFromPoint(clientX, clientY);
+      if (cp) {
+        node = cp.offsetNode;
+        offset = cp.offset;
+      }
+    } else if (typeof docAny.caretRangeFromPoint === 'function') {
+      const r = docAny.caretRangeFromPoint(clientX, clientY);
+      if (r) {
+        node = r.startContainer;
+        offset = r.startOffset;
+      }
+    }
+    if (!node) return null;
+    for (const cfi of this.knownAnnotationCfis) {
+      try {
+        const { anchor } = this.view.resolveCFI(cfi);
+        const range = typeof anchor === 'function' ? anchor(doc) : anchor;
+        if (!range || typeof range.isPointInRange !== 'function') continue;
+        if (range.isPointInRange(node, offset)) {
+          return cfi;
+        }
+      } catch {
+        // 不同 section / range 跨 doc → InvalidNodeTypeError;跳过
+      }
+    }
+    return null;
   }
 
   /**
@@ -568,8 +677,11 @@ export class EPUBRenderer implements IReflowableRenderer {
       if (!doc || doc.__ebookListenersAttached) return;
       doc.__ebookListenersAttached = true;
 
-      // mousedown → 关闭 picker(若产生新选区,mouseup 会重新弹)
-      doc.addEventListener('mousedown', () => {
+      // mousedown → 关闭 picker / L4 右键菜单(若产生新选区,mouseup 会重新弹)
+      // 仅响应左键(button=0):右键 mousedown 是开菜单动作的一部分,左键点 iframe 内
+      // 任何地方都意味着用户已从菜单转移焦点,该 hide
+      doc.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.button !== 0) return;
         this.selectionDismissCallback?.();
       });
 
@@ -593,6 +705,47 @@ export class EPUBRenderer implements IReflowableRenderer {
           const x = rect.left + rect.width / 2 + iframeRect.left - viewRect.left;
           const y = rect.bottom + iframeRect.top - viewRect.top;
           this.annotationCallback({ cfi, text, x, y });
+        }
+      });
+
+      // PR-α-3b followup:EPUB 右键菜单(iframe contextmenu 不冒泡,必须 iframe doc 内挂)
+      // 任何选区/标注右键都走 L4 contextMenuRegistry,view 侧手动调 controller.show
+      // (同 web view showWebContextMenu 模式)
+      //
+      // 标注命中检测:foliate Overlayer 的 svg 整体 pointer-events:none,
+      // closest('[data-foliate-annotation]') 永远 null;改走 caretPositionFromPoint
+      // + view.resolveCFI(cfi).anchor(doc) 的 Range.isPointInRange 几何命中。
+      doc.addEventListener('contextmenu', (e: MouseEvent) => {
+        e.preventDefault();
+        const sel = doc.getSelection();
+        const hasSelection = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
+        let text = '';
+        let cfi: string | null = null;
+        if (hasSelection) {
+          const range = sel.getRangeAt(0);
+          text = sel.toString().trim();
+          if (text) cfi = this.view.getCFI(index, range);
+        }
+        // 标注命中:point-based hit-test(svg pointer-events:none 致 closest 失效)
+        const annotationCfi = this.hitTestAnnotationAtPoint(doc, e.clientX, e.clientY);
+        // iframe 坐标 → viewport 坐标(viewport-level,fixed position 用)
+        const iframeEl = doc.defaultView?.frameElement as HTMLElement | null;
+        const iframeRect =
+          iframeEl?.getBoundingClientRect() ?? { left: 0, top: 0 };
+        const x = e.clientX + iframeRect.left;
+        const y = e.clientY + iframeRect.top;
+        if (this.contextMenuCallback) {
+          this.contextMenuCallback({ x, y, text, cfi, annotationCfi });
+        }
+      });
+
+      // PR-α-3b followup:EPUB 标注双击 → activate 关联 thought
+      // 同 contextmenu — point-based hit-test
+      doc.addEventListener('dblclick', (e: MouseEvent) => {
+        const annotationCfi = this.hitTestAnnotationAtPoint(doc, e.clientX, e.clientY);
+        if (annotationCfi && this.doubleClickCallback) {
+          e.preventDefault();
+          this.doubleClickCallback(annotationCfi);
         }
       });
 

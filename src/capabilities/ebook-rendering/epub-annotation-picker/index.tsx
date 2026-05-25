@@ -1,81 +1,13 @@
 /**
- * EpubAnnotationPicker — EPUB 选区 type picker
+ * EpubAnnotationPicker — 已废除(PR-α-3b followup,2026-05-25 用户拍板)
  *
- * 2026-05-24 拍板:5 色 picker 字面对齐 5 种 ThoughtType,颜色 = 类型(单一真相源)。
- * 用户选按钮 → 回传 ThoughtType,view 调 hook.createAnnotation(type) → META.color 反查。
+ * EPUB 选区操作全面改走 L4 注册式右键菜单(对齐 PDF α-2 体系),
+ * 自动弹 picker 不再存在。本文件保留空 export 防止其他模块的 import 报错。
  *
- * 用法(view 端):
- *   {ann.selection && (
- *     <EpubAnnotationPicker
- *       selection={ann.selection}
- *       containerWidth={containerEl?.clientWidth ?? 400}
- *       onType={ann.createAnnotation}
- *       onCancel={ann.dismiss}
- *     />
- *   )}
+ * 实际入口:
+ *   - 右键 → contextMenuController.show 'ebook-view' viewId
+ *   - 菜单注册:src/views/ebook/epub-context-menu-content.ts
+ *   - 命令实现:同上文件的 ebook-view.* commands
  */
 
-import {
-  THOUGHT_TYPE_META,
-  USER_THOUGHT_TYPES,
-  type ThoughtType,
-} from '@shared/ipc/thought-types';
-import type { EpubSelection } from '../hooks/use-epub-annotation';
-
-interface EpubAnnotationPickerProps {
-  selection: EpubSelection;
-  containerWidth: number;
-  onType: (type: ThoughtType) => void;
-  onCancel: () => void;
-}
-
-export function EpubAnnotationPicker({
-  selection,
-  containerWidth,
-  onType,
-  onCancel,
-}: EpubAnnotationPickerProps) {
-  // 居中固定到选区下方,但水平限制在 [20, containerWidth - 220]
-  const left = Math.max(
-    20,
-    Math.min(selection.x - 100, containerWidth - 220),
-  );
-  const top = selection.y + 8;
-
-  return (
-    <div
-      className="krig-ebook-annotation-picker"
-      style={{
-        position: 'absolute',
-        left,
-        top,
-        bottom: 'auto',
-        transform: 'none',
-      }}
-    >
-      <div className="krig-ebook-annotation-picker__colors">
-        {USER_THOUGHT_TYPES.map((t) => {
-          const meta = THOUGHT_TYPE_META[t];
-          return (
-            <button
-              key={t}
-              type="button"
-              className="krig-ebook-annotation-picker__color"
-              style={{ backgroundColor: meta.color }}
-              onClick={() => onType(t)}
-              title={`${meta.icon} ${meta.label}`}
-            />
-          );
-        })}
-        <button
-          type="button"
-          className="krig-ebook-annotation-picker__cancel"
-          onClick={onCancel}
-          title="取消"
-        >
-          ✕
-        </button>
-      </div>
-    </div>
-  );
-}
+export {};

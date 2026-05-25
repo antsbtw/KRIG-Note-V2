@@ -25,6 +25,7 @@ import {
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type { EBookLoadedInfo } from '@shared/ipc/ebook-types';
 import type {
@@ -57,7 +58,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     Host,
     OutlinePanel,
     SearchBar,
-    EpubAnnotationPicker,
     PdfTextAnnotationPicker,
     useSearch,
     useBookmarks,
@@ -513,17 +513,45 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     return () => window.removeEventListener('keydown', handler);
   }, [search, onBookmarkToggle, renderMode, onPrevChapter, onNextChapter, isFullscreen, onFullscreen]);
 
-  // 主区 mousedown 关 EPUB picker(点击 picker 外部时,picker 内部冒泡阻断)
+  // PR-α-3b followup:EPUB 自动 picker 已废除(右键菜单接管),原 mousedown 关 picker 逻辑删除
+
+  // PR-α-3b followup:EPUB iframe 内右键 → 手动调 L4 contextMenuController.show
+  // (iframe contextmenu 不冒泡,L4 trigger 接不到;同 web view showWebContextMenu 模式)
+  const handleEpubContextMenu = useCallback(
+    (info: { x: number; y: number; text: string; cfi: string | null; annotationCfi: string | null }) => {
+      contextMenuController.show(info.x, info.y, 'ebook-view', {
+        hasSelection: info.text.length > 0,
+        isEditable: false,
+        x: info.x,
+        y: info.y,
+        custom: {
+          // EPUB 专用 — epub-context-menu-content.ts provider 注入,enabledWhen 判 has-epub-text-selection / has-epub-annotation
+          epubSelectionText: info.text,
+          epubSelectionCfi: info.cfi,
+          epubAnnotationCfi: info.annotationCfi,
+        },
+      });
+    },
+    [],
+  );
+  // PR-α-3b followup:EPUB 标注双击 → activate 关联 thought(对齐 PDF 双击 activate)
+  const handleEpubAnnotationDoubleClick = useCallback((annotationCfi: string) => {
+    commandRegistry.execute('ebook-view.activate-thought-from-epub-annotation', annotationCfi);
+  }, []);
+  // PR-α-3b followup fix:iframe 内 mousedown(选区取消通道)同时关 L4 右键菜单
+  // 根因:contextMenuController 自挂的 window mousedown 在 iframe 内 click 时收不到事件
+  // (iframe mousedown 不冒泡到外层 window),菜单失焦不关。改走 capability 的 dismiss 通道。
+  const handleEpubSelectionDismiss = useCallback(() => {
+    contextMenuController.hide();
+  }, []);
+
+  // PR-α-3b followup fix:把 EPUB 已知标注 cfi 列表推给 host renderer,
+  // contextmenu/dblclick 内 hit-test 用(foliate svg pointer-events:none → closest 失效)。
   useEffect(() => {
-    if (!ann.selection) return;
-    const handler = (e: MouseEvent): void => {
-      const target = e.target as HTMLElement;
-      if (target.closest('.krig-ebook-annotation-picker')) return;
-      ann.dismiss();
-    };
-    window.addEventListener('mousedown', handler);
-    return () => window.removeEventListener('mousedown', handler);
-  }, [ann.selection, ann]);
+    const host = hostRef.current;
+    if (!host?.setKnownEpubAnnotationCfis) return;
+    host.setKnownEpubAnnotationCfis(ann.annotations.map((a) => a.cfi));
+  }, [ann.annotations]);
 
   // thought-view Phase 4:订阅 'thought.scroll-to-book-source' channel
   // → ThoughtView 点 anchor 跳转到 ebook 当前 active book 的页/CFI(host.goToPage/goToCFI)
@@ -662,9 +690,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             onLoadComplete={handleLoadComplete}
             onScaleChange={handleScaleChangeFromHost}
             onEpubProgressChange={handleEpubProgressChange}
-            onEpubTextSelected={ann.setSelection}
-            onEpubSelectionDismiss={ann.dismiss}
             onEpubAnnotationClick={ann.handleAnnotationClick}
+            onEpubContextMenu={handleEpubContextMenu}
+            onEpubAnnotationDoubleClick={handleEpubAnnotationDoubleClick}
+            onEpubSelectionDismiss={handleEpubSelectionDismiss}
             pdfAnnotationMode={pdfAnn.mode}
             pdfAnnotations={pdfAnn.annotations}
             pdfFlashAnnotationId={pdfAnn.flashId}
@@ -673,14 +702,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}
           />
-          {ann.selection && (
-            <EpubAnnotationPicker
-              selection={ann.selection}
-              containerWidth={bodyRef.current?.clientWidth ?? 400}
-              onType={ann.createAnnotation}
-              onCancel={ann.dismiss}
-            />
-          )}
           {pdfTextSelection && (
             <PdfTextAnnotationPicker
               anchor={pdfTextSelection.screenAnchor}
