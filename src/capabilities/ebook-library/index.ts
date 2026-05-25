@@ -242,6 +242,25 @@ export async function getReadingThoughtAnnotations(
   return Array.isArray(r) ? (r as BookAnchor[]) : [];
 }
 
+// PR-α-3b:单读 + 改色
+export async function getReadingThoughtBlock(
+  bookId: string,
+  createdAt: number,
+): Promise<BookAnchor | null> {
+  if (!window.electronAPI?.ebookThoughtBlockGet) return null;
+  const r = await window.electronAPI.ebookThoughtBlockGet(bookId, createdAt);
+  return (r as BookAnchor | null) ?? null;
+}
+
+export async function updateReadingThoughtBlockColor(
+  bookId: string,
+  createdAt: number,
+  color: string,
+): Promise<void> {
+  if (!window.electronAPI?.ebookThoughtBlockUpdateColor) return;
+  return window.electronAPI.ebookThoughtBlockUpdateColor(bookId, createdAt, color);
+}
+
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
 // W5 边界 A 临时允许项:同时保留模块级 export(driver/slot 内部消费可直 import)
 capabilityRegistry.register({
@@ -273,5 +292,8 @@ capabilityRegistry.register({
     addReadingThoughtBlock,
     removeReadingThoughtBlock,
     getReadingThoughtAnnotations,
+    // PR-α-3b: 单读 + 改色
+    getReadingThoughtBlock,
+    updateReadingThoughtBlockColor,
   } satisfies EBookLibraryApi,
 });

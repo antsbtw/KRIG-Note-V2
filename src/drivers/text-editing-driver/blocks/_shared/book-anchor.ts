@@ -16,17 +16,24 @@
 export interface BookAnchor {
   /** PDF 页码 (1-based); EPUB 标注此字段 = 0 占位 */
   pageNum: number;
-  /** PDF rect/underline 标注的页面坐标 (scale=1); EPUB 无 */
+  /** rect 模式: PDF 框选页面坐标 (scale=1);
+   *  highlight/strikethrough: 选区 boundingRect (兜底渲染);
+   *  EPUB 无 */
   rect?: { x: number; y: number; w: number; h: number };
+  /** PR-α-3 (highlight/strikethrough): 选区跨行 rects 数组 (scale=1, 每行一 rect);
+   *  rect / underline 不用; EPUB 无 */
+  textRects?: Array<{ x: number; y: number; w: number; h: number }>;
   /** EPUB CFI 锚点; PDF 无 */
   cfi?: string;
-  /** EPUB 选区文本; PDF 无 */
+  /** 选区文本: EPUB 自始, PDF highlight/strikethrough 自 PR-α-3 起也存 */
   textContent?: string;
-  /** PDF rect 截图 base64 inline (沿 D-7=A); EPUB 无 */
+  /** PDF rect 截图 base64 inline (沿 D-7=A); 文字流不需要 */
   thumbnail?: string;
   /** 5 色 picker: #ffd43b / #69db7c / #74c0fc / #b197fc / #ff6b6b */
   color: string;
-  /** rect = PDF 框选, underline = PDF 划线, highlight = EPUB 选区 */
-  type: 'rect' | 'underline' | 'highlight';
+  /** rect = PDF 框选, underline = PDF 划线占位,
+   *  highlight = 半透明文字背景 (EPUB + PDF 文字流),
+   *  strikethrough = PDF 文字中线 (PR-α-3) */
+  type: 'rect' | 'underline' | 'highlight' | 'strikethrough';
   createdAt: number;
 }

@@ -30,7 +30,9 @@ import type { EBookLoadedInfo } from '@shared/ipc/ebook-types';
 import type {
   EBookRenderingApi,
   EBookHostHandle,
+  PdfTextSelectionEvent,
 } from '@capabilities/ebook-rendering/types';
+import type { ThoughtType } from '@shared/ipc/thought-types';
 import { getEBookWsState } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
 import { usePdfAnnotations } from './use-pdf-annotations';
@@ -56,6 +58,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     OutlinePanel,
     SearchBar,
     EpubAnnotationPicker,
+    PdfTextAnnotationPicker,
     useSearch,
     useBookmarks,
     useEpubAnnotation,
@@ -235,6 +238,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       persistPdfProgress(page, scale, fitWidth);
       // 翻页时强制收 toolbar 浮层(全屏期 hover 露出后用户翻页 → toolbar 让位)
       if (isFullscreen) setToolbarVisible(false);
+      // PR-α-3b:翻页关 PDF 文字流 picker(选区已失效)
+      setPdfTextSelection(null);
     },
     [persistPdfProgress, scale, fitWidth, isFullscreen],
   );
@@ -275,6 +280,86 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     },
     [pdfAnn],
   );
+
+  // PR-α-3b:PDF 文字流标注模式 — toolbar ✎ 按钮 toggle
+  // ✎ on 时 textLayer 拖选 → 弹 picker;off 时 hook 的 onPdfTextSelected = undefined
+  // (无 mouseup listener,零开销 — Cmd+C 复制不被打扰)
+  const [pdfTextMode, setPdfTextMode] = useState(false);
+  const togglePdfTextMode = useCallback(
+    (active: boolean) => {
+      setPdfTextMode(active);
+      if (active) pdfAnn.setMode('off'); // 互斥:开文字模式 → 关框选
+    },
+    [pdfAnn],
+  );
+  // 框选模式开 → 关文字模式(反向互斥)
+  useEffect(() => {
+    if (pdfAnn.mode === 'rect') setPdfTextMode(false);
+  }, [pdfAnn.mode]);
+  // 切书 → 重置(新 PDF 默认 off 更安全)
+  useEffect(() => {
+    setPdfTextMode(false);
+  }, [activeBookId]);
+
+  // PDF textLayer 选区 → picker 弹出
+  const [pdfTextSelection, setPdfTextSelection] =
+    useState<PdfTextSelectionEvent | null>(null);
+  const handlePdfTextSelected = useCallback((ev: PdfTextSelectionEvent) => {
+    setPdfTextSelection(ev);
+  }, []);
+  const dismissPdfTextPicker = useCallback(() => {
+    setPdfTextSelection(null);
+    // 清掉浏览器原生选区灰底(否则残留)
+    window.getSelection()?.removeAllRanges();
+  }, []);
+  // picker confirm → 调 pdfAnn.createFromTextSelection(走 legacy,不召右槽)
+  const handlePdfTextPickerConfirm = useCallback(
+    (type: ThoughtType, markStyle: 'highlight' | 'strikethrough') => {
+      const ev = pdfTextSelection;
+      if (!ev) return;
+      void pdfAnn.createFromTextSelection(ev, type, markStyle);
+      dismissPdfTextPicker();
+    },
+    [pdfAnn, pdfTextSelection, dismissPdfTextPicker],
+  );
+
+  // picker 关闭 lifecycle:外部 mousedown / ESC 关
+  useEffect(() => {
+    if (!pdfTextSelection) return;
+    const onMouseDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement;
+      if (target.closest('.krig-pdf-text-picker')) return;
+      dismissPdfTextPicker();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') dismissPdfTextPicker();
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [pdfTextSelection, dismissPdfTextPicker]);
+
+  // PR-α-3b follow-up:双击 PDF 标注 → activate 关联 thought(召唤右槽 + 滚卡)
+  // 走 closest('[data-pdf-annotation-id]') 检测(同 L4 contextMenu trigger 模式),
+  // 不污染 AnnotationLayer 组件(它是 capability 层,不应知道 thought 概念)。
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const onDblClick = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null;
+      const annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
+      if (!annEl) return;
+      const id = annEl.getAttribute('data-pdf-annotation-id');
+      if (!id) return;
+      e.preventDefault();
+      commandRegistry.execute('ebook-view.activate-thought-from-annotation', id);
+    };
+    el.addEventListener('dblclick', onDblClick);
+    return () => el.removeEventListener('dblclick', onDblClick);
+  }, []);
 
   // ── Toolbar callbacks ──
 
@@ -502,6 +587,8 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         onFitWidthToggle={onFitWidthToggle}
         pdfAnnotationMode={pdfAnn.mode}
         onPdfAnnotationModeChange={pdfAnn.setMode}
+        pdfTextMode={pdfTextMode}
+        onPdfTextModeChange={togglePdfTextMode}
         onExtract={handleExtract}
         extractDisabled={extractUploading}
         epubPercentage={epubPercentage}
@@ -550,6 +637,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             pdfAnnotations={pdfAnn.annotations}
             pdfFlashAnnotationId={pdfAnn.flashId}
             onPdfAnnotationCreate={handlePdfAnnotationCreate}
+            onPdfTextSelected={pdfTextMode ? handlePdfTextSelected : undefined}
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}
           />
@@ -559,6 +647,13 @@ export function EBookView({ workspaceId }: EBookViewProps) {
               containerWidth={bodyRef.current?.clientWidth ?? 400}
               onType={ann.createAnnotation}
               onCancel={ann.dismiss}
+            />
+          )}
+          {pdfTextSelection && (
+            <PdfTextAnnotationPicker
+              anchor={pdfTextSelection.screenAnchor}
+              onConfirm={handlePdfTextPickerConfirm}
+              onCancel={dismissPdfTextPicker}
             />
           )}
         </div>

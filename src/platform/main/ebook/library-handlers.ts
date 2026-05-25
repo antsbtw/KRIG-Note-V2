@@ -40,6 +40,8 @@ import {
   addReadingThoughtBlock,
   removeReadingThoughtBlock,
   getReadingThoughtAnnotations,
+  getReadingThoughtBlock,
+  updateReadingThoughtBlockColor,
 } from './capability-impl';
 import type { ThoughtBlockSpec } from './capability-impl';
 import type { EBookFileType, EBookInfo, ReadingPosition } from '@shared/ipc/ebook-types';
@@ -296,4 +298,26 @@ export function registerEBookHandlers(): void {
     if (typeof bookId !== 'string') return [];
     return getReadingThoughtAnnotations(bookId);
   });
+
+  // PR-α-3b:单读 block(📸 截图复制 / 🎨 改颜色 走此读 thumbnail / color)
+  ipcMain.handle(
+    IPC_CHANNELS.EBOOK_THOUGHT_BLOCK_GET,
+    async (_e, bookId: unknown, createdAt: unknown) => {
+      if (typeof bookId !== 'string' || typeof createdAt !== 'number') return null;
+      return getReadingThoughtBlock(bookId, createdAt);
+    },
+  );
+
+  // PR-α-3b:改单块颜色(🎨 改颜色 submenu 走此 update)
+  ipcMain.handle(
+    IPC_CHANNELS.EBOOK_THOUGHT_BLOCK_UPDATE_COLOR,
+    async (_e, bookId: unknown, createdAt: unknown, color: unknown) => {
+      if (
+        typeof bookId !== 'string' ||
+        typeof createdAt !== 'number' ||
+        typeof color !== 'string'
+      ) return;
+      await updateReadingThoughtBlockColor(bookId, createdAt, color);
+    },
+  );
 }

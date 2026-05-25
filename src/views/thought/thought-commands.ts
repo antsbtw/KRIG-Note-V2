@@ -13,7 +13,10 @@
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
-import type { ThoughtType } from '@capabilities/thought/types';
+import { getCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { ThoughtType, BookLocator } from '@capabilities/thought/types';
+import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
+import { THOUGHT_TYPE_META } from '@shared/ipc/thought-types';
 import { thoughtCap } from './command-impl/shared';
 import { addThoughtFromNote } from './command-impl/add-from-note';
 import { addFromPdfAnnotation } from './command-impl/add-from-pdf-annotation';
@@ -30,7 +33,28 @@ export function registerThoughtCommands(): void {
     if (!arg || typeof arg !== 'object') return;
     const { id, type } = arg as { id?: unknown; type?: unknown };
     if (typeof id !== 'string' || typeof type !== 'string') return;
-    void thoughtCap().updateThought(id, { type: type as ThoughtType });
+    const newType = type as ThoughtType;
+    void (async () => {
+      // 双写(handoff 颜色同步 follow-up A):改 thought.type 时,若该 thought 关联
+      // 到 book reading-thought-block(anchor.source='book'),同步改 BookAnchor.color
+      // → PDF 标注层颜色随之变,两边视觉一致。
+      await thoughtCap().updateThought(id, { type: newType });
+      const t = await thoughtCap().getThought(id);
+      if (t?.anchor?.source === 'book') {
+        // ebook-library 是可选依赖(thought-view install list 不含它 —
+        // thought 是横切层,不强绑 ebook);软取 + 缺失静默跳过。
+        const lib = getCapabilityApi<EBookLibraryApi>('ebook-library');
+        if (lib) {
+          const loc = t.anchor.locator as BookLocator;
+          const color = THOUGHT_TYPE_META[newType].color;
+          await lib.updateReadingThoughtBlockColor(
+            t.anchor.resourceId,
+            loc.createdAt,
+            color,
+          );
+        }
+      }
+    })();
   });
 
   commandRegistry.register('thought-view.toggle-resolve', (id: unknown) => {

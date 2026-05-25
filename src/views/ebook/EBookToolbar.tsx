@@ -61,6 +61,10 @@ interface EBookToolbarProps {
   pdfAnnotationMode?: 'off' | 'rect';
   /** 切换 PDF 标注模式(同模式再点 = 关闭) */
   onPdfAnnotationModeChange?: (mode: 'off' | 'rect') => void;
+  /** PR-α-3b:PDF 文字流标注模式开关(active 时 textLayer 拖选 → 弹 picker)*/
+  pdfTextMode?: boolean;
+  /** 切换文字流标注模式(与 ▢ 框选互斥,EBookView 负责互斥逻辑)*/
+  onPdfTextModeChange?: (active: boolean) => void;
   /** PDF 提取(C6,fixed-page 专用)— 上传到 KRIG Knowledge Platform 并打开 web-view */
   onExtract?: () => void;
   /** 提取按钮 disabled(上传中)*/
@@ -112,6 +116,8 @@ export function EBookToolbar({
   onFitWidthToggle,
   pdfAnnotationMode = 'off',
   onPdfAnnotationModeChange,
+  pdfTextMode = false,
+  onPdfTextModeChange,
   onExtract,
   extractDisabled = false,
   epubPercentage,
@@ -315,6 +321,13 @@ export function EBookToolbar({
               title="框选加思考(拖拽画矩形 → 选类型)"
             >
               ▢
+            </button>
+            <button
+              className={`krig-ebook-toolbar__btn ${pdfTextMode ? 'krig-ebook-toolbar__btn--active' : ''}`}
+              onClick={() => onPdfTextModeChange?.(!pdfTextMode)}
+              title="文字标注(拖选文字 → 选颜色 + Highlight/Strikethrough)"
+            >
+              ✎
             </button>
             <button
               className={`krig-ebook-toolbar__btn ${isBookmarked ? 'krig-ebook-toolbar__btn--bookmark-active' : ''}`}

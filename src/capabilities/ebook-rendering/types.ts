@@ -248,6 +248,7 @@ import type { EBookHostProps, EBookHostHandle } from './Host';
 import type { OutlinePanel } from './outline-panel';
 import type { SearchBar } from './search-bar';
 import type { EpubAnnotationPicker } from './epub-annotation-picker';
+import type { PdfTextAnnotationPicker } from './pdf-text-annotation-picker';
 import type { useSearch } from './hooks/use-search';
 import type { useBookmarks } from './hooks/use-bookmarks';
 import type { useEpubAnnotation } from './hooks/use-epub-annotation';
@@ -257,6 +258,7 @@ export type {
   PageAnnotation,
   AnnotationDraft,
 } from './fixed-page-content/annotation-layer';
+export type { PdfTextSelectionEvent } from './hooks/use-pdf-text-selection';
 
 export interface EBookRenderingApi {
   /** Host 主组件(forwardRef EBookHostHandle)— view 通过 ref 命令式驱动 */
@@ -267,6 +269,8 @@ export interface EBookRenderingApi {
   SearchBar: typeof SearchBar;
   /** EPUB 选区颜色 picker(配 useEpubAnnotation hook 用)*/
   EpubAnnotationPicker: typeof EpubAnnotationPicker;
+  /** PR-α-3b:PDF 文字流选区 picker(5 色 + H/S markStyle 切换 + ✕)*/
+  PdfTextAnnotationPicker: typeof PdfTextAnnotationPicker;
   /** 搜索 hook(view 在内部 useState/useCallback 不暴露 renderer)*/
   useSearch: typeof useSearch;
   /** 书签 hook(C4) */

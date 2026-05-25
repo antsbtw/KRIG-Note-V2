@@ -289,6 +289,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ebookThoughtAnnotations(bookId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_ANNOTATIONS, bookId);
   },
+  // PR-α-3b:单读 block + 改单块颜色
+  ebookThoughtBlockGet(bookId: string, createdAt: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_THOUGHT_BLOCK_GET, bookId, createdAt);
+  },
+  ebookThoughtBlockUpdateColor(
+    bookId: string,
+    createdAt: number,
+    color: string,
+  ): Promise<void> {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.EBOOK_THOUGHT_BLOCK_UPDATE_COLOR,
+      bookId,
+      createdAt,
+      color,
+    );
+  },
 
   // ── L5-C6:PDF 提取 → Note ──
   /** 上传当前打开的 PDF 到 Platform → 返 md5 + platformUrl(view 拿后 bus.openRight)*/

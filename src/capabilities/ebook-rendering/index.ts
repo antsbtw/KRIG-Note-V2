@@ -24,6 +24,7 @@ import { EBookHost } from './Host';
 import { OutlinePanel } from './outline-panel';
 import { SearchBar } from './search-bar';
 import { EpubAnnotationPicker } from './epub-annotation-picker';
+import { PdfTextAnnotationPicker } from './pdf-text-annotation-picker';
 import { useSearch } from './hooks/use-search';
 import { useBookmarks } from './hooks/use-bookmarks';
 import { useEpubAnnotation } from './hooks/use-epub-annotation';
@@ -74,6 +75,7 @@ export {
   OutlinePanel,
   SearchBar,
   EpubAnnotationPicker,
+  PdfTextAnnotationPicker,
   useSearch,
   useBookmarks,
   useEpubAnnotation,
@@ -90,6 +92,7 @@ capabilityRegistry.register({
     OutlinePanel,
     SearchBar,
     EpubAnnotationPicker,
+    PdfTextAnnotationPicker,
     useSearch,
     useBookmarks,
     useEpubAnnotation,

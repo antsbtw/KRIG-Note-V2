@@ -231,6 +231,13 @@ declare global {
       ebookThoughtBlockAdd(bookId: string, spec: unknown): Promise<void>;
       ebookThoughtBlockRemove(bookId: string, blockId: string): Promise<void>;
       ebookThoughtAnnotations(bookId: string): Promise<unknown>;
+      // PR-α-3b:单读 block + 改单块颜色
+      ebookThoughtBlockGet(bookId: string, createdAt: number): Promise<unknown>;
+      ebookThoughtBlockUpdateColor(
+        bookId: string,
+        createdAt: number,
+        color: string,
+      ): Promise<void>;
 
       // ── L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)──
       /** 上传当前打开的 PDF → 返 { uploaded, md5?, platformUrl?, alreadyExists?, reason? } */
