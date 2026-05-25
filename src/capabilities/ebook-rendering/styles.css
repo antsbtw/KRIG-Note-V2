@@ -364,6 +364,30 @@
   border: none;
 }
 
+/* PR-α-3:文字流 highlight — 半透明背景色覆盖文字 rect(无 border) */
+.krig-ebook-annotation--highlight {
+  border: none;
+  border-radius: 1px;
+  /* backgroundColor 由 inline style 设(${color}55 半透明) */
+}
+
+/* PR-α-3:文字流 strikethrough — 中线穿过文字 rect(透明背景 + 中线) */
+.krig-ebook-annotation--strikethrough {
+  border: none;
+  background: transparent !important;
+  position: absolute;
+}
+.krig-ebook-annotation--strikethrough::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: var(--krig-ann-color, #4a9eff);
+  transform: translateY(-50%);
+}
+
 .krig-ebook-annotation--preview {
   background: rgba(255, 212, 59, 0.15);
   border: 1px dashed #ffd43b;

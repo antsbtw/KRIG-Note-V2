@@ -170,6 +170,13 @@ export interface EBookHostProps {
     pageNum: number,
     annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
   ) => void;
+  /**
+   * PR-α-3:PDF textLayer 选区命中回调(scroll + paged 两种模式都触发)。
+   * view 端拿到 event → 弹 picker(5 色 + Underline / Strikethrough 切换)。
+   */
+  onPdfTextSelected?: (
+    ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,
+  ) => void;
   // ── PDF 全屏翻页式渲染(2026-05-24)──
   /**
    * PDF 渲染模式:
@@ -200,6 +207,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     pdfAnnotations,
     pdfFlashAnnotationId,
     onPdfAnnotationCreate,
+    onPdfTextSelected,
     pdfLayout = 'scroll',
     pagedLayout = 'single',
   },
@@ -606,6 +614,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           annotations={pdfAnnotations}
           flashAnnotationId={pdfFlashAnnotationId}
           onAnnotationCreate={onPdfAnnotationCreate}
+          onTextSelected={onPdfTextSelected}
         />
       )}
 
@@ -619,6 +628,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           annotationMode={pdfAnnotationMode}
           annotations={pdfAnnotations}
           onAnnotationCreate={onPdfAnnotationCreate}
+          onTextSelected={onPdfTextSelected}
         />
       )}
 
@@ -655,6 +665,7 @@ function PagedHostBranch({
   annotationMode,
   annotations,
   onAnnotationCreate,
+  onTextSelected,
 }: {
   renderer: IFixedPageRenderer;
   layout: FullscreenPagedLayout;
@@ -666,6 +677,9 @@ function PagedHostBranch({
   onAnnotationCreate?: (
     pageNum: number,
     annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
+  ) => void;
+  onTextSelected?: (
+    ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,
   ) => void;
 }) {
   const viewRef = useRef<FullscreenPageViewHandle | null>(null);
@@ -682,6 +696,7 @@ function PagedHostBranch({
       annotationMode={annotationMode}
       annotations={annotations}
       onAnnotationCreate={onAnnotationCreate}
+      onTextSelected={onTextSelected}
     />
   );
 }

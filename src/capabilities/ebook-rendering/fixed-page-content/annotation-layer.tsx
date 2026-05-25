@@ -31,14 +31,31 @@ import {
 
 export interface PageAnnotation {
   id: string;
-  /** 视觉形态(rect=矩形框 / underline=横线)— 创建时由 mode 决定,字面不可改 */
-  markStyle: 'rect' | 'underline';
+  /**
+   * 视觉形态:
+   * - rect           PDF 框选模式拖出的矩形(单 rect 渲染 + bg 半透明 + border)
+   * - underline      框选模式下选 underline(单 rect 底线)— 当前 mode='rect' 不产生此值,留兼容
+   * - highlight      PR-α-3 文字流模式 — textRects 逐 div 半透明 bg
+   * - strikethrough  PR-α-3 文字流模式 — textRects 逐 div 中线
+   * 创建时由 mode + picker 决定,字面不可改(改色只改 thoughtType)。
+   */
+  markStyle: 'rect' | 'underline' | 'highlight' | 'strikethrough';
   /** 语义类型(决定颜色) — TypeSwitcher 可改,改后 div 颜色 onListChanged 回流自动跟变 */
   thoughtType: ThoughtType;
   /** 哪一页(由父组件按 pageNum 过滤后传入,但保留字段方便上层维护)*/
   pageNum: number;
-  /** 坐标基于 scale=1 的页面尺寸 */
+  /**
+   * 坐标基于 scale=1 的页面尺寸。
+   * rect 模式:用户拖出的矩形;
+   * highlight/strikethrough 模式:选区 boundingRect(兜底渲染,主渲染走 textRects)。
+   */
   rect: { x: number; y: number; w: number; h: number };
+  /**
+   * PR-α-3:highlight / strikethrough 选区跨行的 rects 数组(scale=1)。
+   * 每行一个 rect(来自 range.getClientRects 减 textLayer 偏移)。
+   * 缺失/空时退回单 rect 兜底渲染(老数据 / 选区只覆盖单行场景)。
+   */
+  textRects?: Array<{ x: number; y: number; w: number; h: number }>;
 }
 
 /** 创建标注的有效负载(pageNum 由 layer 注入,id 由 main 生成)*/
@@ -179,20 +196,56 @@ export function AnnotationLayer({
         if (drawing) setDrawing(false);
       }}
     >
-      {/* 已有标注 — 颜色字面从 thoughtType 反查 META.color */}
-      {annotations.map((ann) => {
+      {/* 已有标注 — 颜色字面从 thoughtType 反查 META.color
+       *
+       * 渲染分支:
+       * - rect:                          单 div(border + bg 半透明)
+       * - underline:                     单 div(横线 — CSS .--underline 控)
+       * - highlight / strikethrough:     textRects 逐 div(选区跨行多 rect)。
+       *                                  textRects 缺失/空 → 退回单 rect 兜底渲染。
+       *   每个 sub-div 都挂 data-pdf-annotation-id,右键命中走 α-2 contextInfoProvider。
+       */}
+      {annotations.flatMap((ann) => {
         const color = THOUGHT_TYPE_META[ann.thoughtType].color;
         const isFlashing = ann.id === flashAnnotationId;
-        const classes = [
+        const baseCls = [
           'krig-ebook-annotation',
           `krig-ebook-annotation--${ann.markStyle}`,
           isFlashing ? 'krig-ebook-annotation--flashing' : '',
         ].filter(Boolean).join(' ');
-        return (
+
+        // 文字流模式 + textRects 有数据 → 逐 rect 渲染(每行一 div)
+        const isTextFlow =
+          ann.markStyle === 'highlight' || ann.markStyle === 'strikethrough';
+        const useTextRects = isTextFlow && ann.textRects && ann.textRects.length > 0;
+
+        if (useTextRects) {
+          // highlight bg = 半透明色;strikethrough 走 CSS 渲染中线(背景透明)
+          const bg = ann.markStyle === 'highlight' ? `${color}55` : 'transparent';
+          return ann.textRects!.map((r, idx) => (
+            <div
+              key={`${ann.id}.${idx}`}
+              data-pdf-annotation-id={ann.id}
+              className={baseCls}
+              style={{
+                left: r.x * scale,
+                top: r.y * scale,
+                width: r.w * scale,
+                height: r.h * scale,
+                backgroundColor: bg,
+                borderColor: 'transparent',
+                ['--krig-ann-color' as string]: color,
+              }}
+            />
+          ));
+        }
+
+        // rect / underline / 文字流兜底:单 rect
+        return [
           <div
             key={ann.id}
             data-pdf-annotation-id={ann.id}
-            className={classes}
+            className={baseCls}
             style={{
               left: ann.rect.x * scale,
               top: ann.rect.y * scale,
@@ -201,13 +254,14 @@ export function AnnotationLayer({
               backgroundColor:
                 ann.markStyle === 'rect'
                   ? `${color}33` // 20% opacity hex(rect 半透明填充)
-                  : color,
+                  : ann.markStyle === 'highlight'
+                  ? `${color}55` // 文字流兜底走半透明 bg
+                  : color, // underline / strikethrough 走纯色,CSS 控线条位置
               borderColor: ann.markStyle === 'rect' ? color : 'transparent',
-              // flashing 时把 type color 暴露为 CSS var,供动画用
               ['--krig-ann-color' as string]: color,
             }}
-          />
-        );
+          />,
+        ];
       })}
 
       {/* 绘制中的预览 */}

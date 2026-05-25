@@ -109,25 +109,32 @@ export interface NoteLocator {
  *
  * 字段含义:
  * - pageNum:    PDF 页码(1-based);EPUB 标注此字段 = 0 占位
- * - rect:       PDF rect/underline 标注的页面坐标(scale=1);EPUB 无
+ * - rect:       PDF rect/underline 标注的页面坐标(scale=1) — 框选模式用;
+ *               PDF 文字流 highlight/strikethrough 模式 = 选区 boundingRect 兜底;EPUB 无
+ * - textRects:  PR-α-3 新增 — PDF 文字流 highlight/strikethrough 选区跨行的 rects 数组
+ *               (scale=1 坐标)。每行一个 rect(range.getClientRects);
+ *               rect 字段同步存 boundingRect 兜底渲染。EPUB 无;rect/underline 框选不用。
  * - cfi:        EPUB CFI 锚点;PDF 无
- * - textContent:EPUB 选区文本;PDF 无
+ * - textContent:选区文本(EPUB 自始有;PDF 自 PR-α-3 起 highlight/strikethrough 也存)。
+ *               已有标注右键查词/翻译走此字段(对齐 α-2 5 项菜单"已有标注可触发"语义)
  * - thumbnail:  PDF 框选/划线截图 base64 inline(独立 render 2x DPR,JPEG 压缩);EPUB 无
- * - markStyle:  'rect' | 'underline' — 标注视觉形态(PDF 显示矩形框 vs 横线),
+ * - markStyle:  'rect' | 'underline' | 'highlight' | 'strikethrough' — 标注视觉形态
+ *               (rect=框 / underline=底线 / highlight=半透明背景 / strikethrough=中线),
  *               **不**等同于 thought 语义 type;颜色字面从 thought.type 反查 META.color
  * - createdAt:  时间戳(老 reading-thought block id 复用)
  *
  * 2026-05-24 拍板:删 `color` 字段(颜色 = type 反查 META,单一真相源)。
- * 老字段 `type: 'rect'|'underline'|'highlight'` 重命名为 `markStyle`,
- * 'highlight' 字面值仅 EPUB 选区用;PDF 仅 'rect'|'underline'。
+ * 老字段 `type: 'rect'|'underline'|'highlight'` 重命名为 `markStyle`。
+ * PR-α-3 扩 'strikethrough' + textRects;'highlight' 字面同时复用 EPUB 既有路径。
  */
 export interface BookLocator {
   pageNum: number;
   rect?: { x: number; y: number; w: number; h: number };
+  textRects?: Array<{ x: number; y: number; w: number; h: number }>;
   cfi?: string;
   textContent?: string;
   thumbnail?: string;
-  markStyle: 'rect' | 'underline' | 'highlight';
+  markStyle: 'rect' | 'underline' | 'highlight' | 'strikethrough';
   createdAt: number;
 }
 
