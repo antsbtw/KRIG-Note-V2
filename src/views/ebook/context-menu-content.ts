@@ -32,6 +32,7 @@ import type {
   BookLocator,
 } from '@capabilities/thought/types';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
+import type { LearningApi } from '@capabilities/learning/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getEBookWsState } from './data-model';
 import { AnnotationTypeSubmenu } from './AnnotationTypeSubmenu';
@@ -102,7 +103,29 @@ export function registerContextMenu(): void {
     provider: (target: HTMLElement) => {
       const el = target.closest('[data-pdf-annotation-id]');
       const pdfAnnotationId = el?.getAttribute('data-pdf-annotation-id') ?? null;
-      return { pdfAnnotationId };
+
+      // PDF textLayer 选区 → custom.pdfSelectionText(用于 📖 查词 / 🌐 翻译)
+      // 与 usePdfTextSelection hook 解耦:hook 仅在 ✎ 文字流模式开时挂 mouseup
+      // 弹 picker;此处独立判定,无论 ✎ 是否开都允许右键查词(浏览器原生选区始终可用)。
+      let pdfSelectionText: string | null = null;
+      const targetLayer = target.closest('.textLayer');
+      if (targetLayer) {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const ancestor =
+            range.commonAncestorContainer.nodeType === 3
+              ? range.commonAncestorContainer.parentElement
+              : (range.commonAncestorContainer as Element | null);
+          const selLayer = ancestor?.closest('.textLayer');
+          if (selLayer === targetLayer) {
+            const text = range.toString().trim();
+            if (text) pdfSelectionText = text;
+          }
+        }
+      }
+
+      return { pdfAnnotationId, pdfSelectionText };
     },
   });
 
@@ -110,6 +133,12 @@ export function registerContextMenu(): void {
   enabledWhenRegistry.register(
     'has-pdf-annotation',
     (ctx) => !!ctx.custom.pdfAnnotationId,
+  );
+  enabledWhenRegistry.register(
+    'has-pdf-text-selection',
+    (ctx) =>
+      typeof ctx.custom.pdfSelectionText === 'string' &&
+      ctx.custom.pdfSelectionText.length > 0,
   );
 
   // ── 3. 命令注册 ──
@@ -302,6 +331,22 @@ export function registerContextMenu(): void {
     void lib.removeReadingThoughtBlock(bookId, id);
   });
 
+  /** 📖 查词 — PDF textLayer 选区 → DictionaryPanel lookup */
+  commandRegistry.register('ebook-view.pdf-dictionary-lookup', () => {
+    const raw = contextMenuController.getState().context.custom.pdfSelectionText;
+    if (typeof raw !== 'string' || !raw) return;
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    learning.ui.dictionaryPanel.showLookup(raw);
+  });
+
+  /** 🌐 翻译 — PDF textLayer 选区 → DictionaryPanel translate */
+  commandRegistry.register('ebook-view.pdf-translate-text', () => {
+    const raw = contextMenuController.getState().context.custom.pdfSelectionText;
+    if (typeof raw !== 'string' || !raw) return;
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    learning.ui.dictionaryPanel.showTranslate(raw);
+  });
+
   // ── 4. ContextMenu items(5 项,顺序与 α-2 一致)──
   contextMenuRegistry.register([
     {
@@ -342,6 +387,26 @@ export function registerContextMenu(): void {
       enabledWhen: 'has-pdf-annotation',
       group: 'clipboard',
       order: 40,
+    },
+    // 📖 查词 / 🌐 翻译(PDF textLayer 选区,2026-05-25;走 learning capability)
+    // 与标注菜单(has-pdf-annotation)独立 group;PDF 选区 + 命中标注同时存在时两组都显
+    {
+      id: 'ebook-view.cm.pdf-dictionary-lookup',
+      label: '📖 查词',
+      command: 'ebook-view.pdf-dictionary-lookup',
+      view: VIEW,
+      enabledWhen: 'has-pdf-text-selection',
+      group: 'learning',
+      order: 50,
+    },
+    {
+      id: 'ebook-view.cm.pdf-translate-text',
+      label: '🌐 翻译',
+      command: 'ebook-view.pdf-translate-text',
+      view: VIEW,
+      enabledWhen: 'has-pdf-text-selection',
+      group: 'learning',
+      order: 51,
     },
     {
       id: 'ebook-view.cm.delete',

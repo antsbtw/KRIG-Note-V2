@@ -9,16 +9,19 @@
  * 2. 调 contextMenuController.show 弹菜单
  * 3. 菜单项的命令 handler 读 currentWebContext 拿到 linkURL 等
  *
- * 简化版菜单项(对齐设计 § Q7=B,4 项):
+ * 菜单项:
  * - 复制链接(条件:linkURL 非空)
  * - 复制图片地址(条件:srcURL 非空)
  * - 复制选中文字(条件:selectionText 非空)
- * - 翻译选中文字(条件:selectionText 非空,本阶段 placeholder)
+ * - 📖 查词(条件:selectionText 非空 → learning.ui.dictionaryPanel.showLookup)
+ * - 🌐 翻译(条件:selectionText 非空 → learning.ui.dictionaryPanel.showTranslate)
  */
 
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import { contextMenuRegistry } from '@slot/interaction-registries/context-menu-registry/context-menu-registry';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { LearningApi } from '@capabilities/learning/types';
 
 const VIEW = 'web-view';
 
@@ -84,10 +87,20 @@ export function registerWebContextMenu(): void {
     contextMenuController.hide();
   });
 
-  commandRegistry.register('web-view.cm-translate-selection', () => {
-    // L5-B4 placeholder — 翻译 driver 留 L5-B4.2(translate 变体)
+  commandRegistry.register('web-view.cm-dictionary-lookup', () => {
+    const ctx = currentContext;
+    if (!ctx?.selectionText) return;
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    learning.ui.dictionaryPanel.showLookup(ctx.selectionText);
     contextMenuController.hide();
-    console.info('[web-view] 翻译选中文字:留 L5-B4.2 实现');
+  });
+
+  commandRegistry.register('web-view.cm-translate-selection', () => {
+    const ctx = currentContext;
+    if (!ctx?.selectionText) return;
+    const learning = requireCapabilityApi<LearningApi>('learning');
+    learning.ui.dictionaryPanel.showTranslate(ctx.selectionText);
+    contextMenuController.hide();
   });
 
   // ── 菜单项 ──
@@ -119,11 +132,19 @@ export function registerWebContextMenu(): void {
       enabledWhen: 'has-selection',
     },
     {
-      id: 'web-view.cm.translate-selection',
-      label: '翻译选中文字',
-      command: 'web-view.cm-translate-selection',
+      id: 'web-view.cm.dictionary-lookup',
+      label: '📖 查词',
+      command: 'web-view.cm-dictionary-lookup',
       view: VIEW,
       order: 40,
+      enabledWhen: 'has-selection',
+    },
+    {
+      id: 'web-view.cm.translate-selection',
+      label: '🌐 翻译',
+      command: 'web-view.cm-translate-selection',
+      view: VIEW,
+      order: 41,
       enabledWhen: 'has-selection',
     },
   ]);
