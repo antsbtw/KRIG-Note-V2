@@ -323,6 +323,7 @@ export function EBookToolbar({
               ▢
             </button>
             <button
+              data-pdf-text-mode-btn
               className={`krig-ebook-toolbar__btn ${pdfTextMode ? 'krig-ebook-toolbar__btn--active' : ''}`}
               onClick={() => onPdfTextModeChange?.(!pdfTextMode)}
               title="文字标注(拖选文字 → 选颜色 + Highlight/Strikethrough)"

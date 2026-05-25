@@ -285,12 +285,44 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   // ✎ on 时 textLayer 拖选 → 弹 picker;off 时 hook 的 onPdfTextSelected = undefined
   // (无 mouseup listener,零开销 — Cmd+C 复制不被打扰)
   const [pdfTextMode, setPdfTextMode] = useState(false);
+
+  // PR-α-3b followup:扫描件检测 toast — 点 ✎ 时若当前页无 textLayer,
+  // 自动 off ✎ + toast 提示用户改用 ▢ 框选(handoff §扫描件友好提示)
+  // toast 锚定 ✎ 按钮正下方(用户视线焦点处)
+  const [toast, setToast] = useState<{ msg: string; x: number; y: number } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const showToast = useCallback((msg: string): void => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    // 从 DOM 反查 ✎ 按钮位置(toolbar 内 data-pdf-text-mode-btn 标记)
+    const btn = document.querySelector<HTMLElement>('[data-pdf-text-mode-btn]');
+    const bcr = btn?.getBoundingClientRect();
+    const x = bcr ? bcr.left + bcr.width / 2 : window.innerWidth - 100;
+    const y = bcr ? bcr.bottom + 6 : 48;
+    setToast({ msg, x, y });
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3000);
+  }, []);
+
   const togglePdfTextMode = useCallback(
     (active: boolean) => {
-      setPdfTextMode(active);
-      if (active) pdfAnn.setMode('off'); // 互斥:开文字模式 → 关框选
+      if (!active) {
+        setPdfTextMode(false);
+        return;
+      }
+      // 用户开 ✎:先检测当前页是否含 textLayer,无则提示 + 不进入文字模式
+      void (async () => {
+        const has = await hostRef.current?.hasTextContent(currentPage);
+        if (!has) {
+          showToast('无文字层');
+          return;
+        }
+        setPdfTextMode(true);
+        pdfAnn.setMode('off'); // 互斥:开文字模式 → 关框选
+      })();
     },
-    [pdfAnn],
+    [pdfAnn, currentPage, showToast],
   );
   // 框选模式开 → 关文字模式(反向互斥)
   useEffect(() => {
@@ -658,6 +690,14 @@ export function EBookView({ workspaceId }: EBookViewProps) {
           )}
         </div>
       </div>
+      {toast && (
+        <div
+          className="krig-ebook-toast"
+          style={{ left: toast.x, top: toast.y, transform: 'translateX(-50%)' }}
+        >
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
