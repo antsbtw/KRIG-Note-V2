@@ -5,16 +5,15 @@
  * 全套 — 含 --scale-factor / span 浮点 width round 等关键 CSS 变量)。
  * KRIG 自定义层在 ebook-rendering 维护,本文件只保证 pdfjs 高层组件正常工作。
  *
- * pdfViewerContainer 容器布局:撑满父元素,内部 PDFViewer 自管 scroll。
+ * pdfjs PDFViewer 硬要求 container 必须 position: absolute(构造抛错)。
+ * wrapper 提供 position: relative + 撑满父,让 container absolute inset:0 铺满。
+ *
+ * 不加任何对 .pdfViewer / .page 的覆盖 — 完全沿用 pdfjs 默认 CSS,
+ * page 在 viewer 内由 margin:1px auto -8px 自然居中。
  */
 
 @import 'pdfjs-dist/web/pdf_viewer.css';
 
-/*
- * 注意:pdfjs PDFViewer 构造内部断言 container 必须 position: absolute,
- * 否则抛 "The `container` must be absolutely positioned."。
- * 外层 wrapper 自管 position: relative,本 container 在其内绝对定位铺满。
- */
 .pdf-viewer-canvas-wrapper {
   position: relative;
   width: 100%;
@@ -25,28 +24,5 @@
   position: absolute;
   inset: 0;
   overflow: auto;
-  outline: none; /* tabIndex=0 拿键盘焦点,不要 default focus ring */
-}
-
-/*
- * page 水平居中。
- *
- * pdfjs 4.x 默认 `--page-margin: 1px auto -8px`,但有条件规则(scrollMode / spreadMode
- * 相关)把 horizontal auto 改为 0,page 贴左。
- * 强制 `margin: 1px auto -8px !important` 让 page 在 viewer 内始终水平 auto 居中。
- * `.pdfViewer { min-width: 100% }` 保证 viewer 宽 ≥ container,page 比 container 窄
- * 时 margin auto 真实有效。
- */
-.pdfViewerContainer .pdfViewer {
-  min-width: 100%;
-  box-sizing: border-box;
-}
-
-/*
- * page 横向居中 — 直接覆盖 CSS variable --page-margin。
- * pdfjs 4.x 各 .page 用 `margin: var(--page-margin)`,我们改变量同时改所有 page。
- * !important 防 spread/scroll-mode conditional rule 覆盖。
- */
-.pdfViewerContainer .pdfViewer {
-  --page-margin: 1px auto -8px !important;
+  outline: none;
 }
