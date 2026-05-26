@@ -47,6 +47,9 @@ const mathVisualNodeSpec: NodeSpec = {
     integralRegions: { default: [] },
     featurePoints: { default: [] },
     toolMode: { default: 'move' },
+    // PR4(2026-05-26):inline 走 SVG 缩略图模式 — 全屏 ⛶ 退出时生成,
+    // inline dangerouslySetInnerHTML 渲染。缺省 null = 显示 placeholder
+    thumbnail: { default: null },
     // L7 block atomization (decision 026 §3.1.1 / §4 / §4.4 字面 rename atomId→id):
     // block atom 稳定 ULID,与 atom.id 同步
     id: { default: null },
@@ -75,6 +78,7 @@ const mathVisualNodeSpec: NodeSpec = {
         integralRegions: safeJson('data-integral-regions', []),
         featurePoints: safeJson('data-feature-points', []),
         toolMode: el.getAttribute('data-tool-mode') || 'move',
+        thumbnail: el.getAttribute('data-thumbnail') || null,
       };
     },
   }],
@@ -91,6 +95,7 @@ const mathVisualNodeSpec: NodeSpec = {
     if ((node.attrs.integralRegions as unknown[])?.length) attrs['data-integral-regions'] = JSON.stringify(node.attrs.integralRegions);
     if ((node.attrs.featurePoints as unknown[])?.length) attrs['data-feature-points'] = JSON.stringify(node.attrs.featurePoints);
     if (node.attrs.toolMode && node.attrs.toolMode !== 'move') attrs['data-tool-mode'] = node.attrs.toolMode as string;
+    if (node.attrs.thumbnail) attrs['data-thumbnail'] = node.attrs.thumbnail as string;
     return [
       'div', attrs,
       ['figcaption', { class: 'krig-math-visual__caption' }, 0],

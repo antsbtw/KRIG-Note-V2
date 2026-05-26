@@ -3020,6 +3020,74 @@
   justify-content: center;
 }
 
+/* PR4(2026-05-26) inline 薄壳:工具栏浮在画布右上,不占布局空间 */
+.krig-pm-host .ProseMirror .mv-toolbar-row--inline {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  margin-top: 0;
+  background: rgba(30, 30, 30, 0.7);
+  backdrop-filter: blur(4px);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+/* PR4 inline 缩略图容器:撑满 9:6 容器,内部 SVG 等比缩放 */
+.krig-pm-host .ProseMirror .mv-canvas--inline-thumbnail {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* PR4 thumbnail SVG 包装:让全屏导出的 SVG 按 viewBox 等比缩放
+   覆盖原 .mv-canvas svg { width/height 100% !important } 强制规则,
+   让浏览器按 SVG 自身 viewBox 等比缩放(字号、线宽、布局都保留全屏比例)
+
+   同时挂 mafs CSS 变量(--mafs-bg/--mafs-fg/--mafs-line-color)— 全屏导出的
+   SVG outerHTML 不带 .MafsView 类,坐标轴/网格线读不到 CSS 变量会渲染失败 */
+.krig-pm-host .ProseMirror .mv-thumbnail-svg {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  --mafs-bg: #1e1e1e;
+  --mafs-fg: #888;
+  --mafs-line-color: #333;
+}
+.krig-pm-host .ProseMirror .mv-thumbnail-svg > svg {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto !important;
+  height: auto !important;
+  cursor: pointer;
+  background: var(--mafs-bg);
+}
+
+/* PR4 空状态 placeholder:thumbnail 为空时(刚创建 block 还没进过全屏) */
+.krig-pm-host .ProseMirror .mv-empty-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(40, 40, 40, 0.55);
+  border-radius: 4px;
+}
+
+.krig-pm-host .ProseMirror .mv-empty-placeholder__hint {
+  color: #888;
+  font-size: 14px;
+  font-style: italic;
+  user-select: none;
+  pointer-events: none;
+}
+
 /* 参数滑块 — 与函数列表同步真塌缩 */
 .krig-pm-host .ProseMirror .mv-params {
   padding: 6px 12px;
