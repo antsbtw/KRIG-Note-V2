@@ -238,10 +238,7 @@ export const PDFViewerCanvas = forwardRef<
       pinchScale = 1;
       const { x: ax, y: ay } = pinchAnchorContainer;
 
-      // 算锚点在内容坐标系下的位置(scale 前)
-      // contentX = scrollLeft + ax,这是 pinch 开始那一刻该锚点对应的内容像素位置
-      // scale 后,该内容像素的新位置 = contentX × finalScaleFactor
-      // 期望该位置仍在 ax 上 → 新 scrollLeft = contentX × finalScaleFactor - ax
+      // 锚点处内容像素(scale 前)— 在清 transform / updateScale 前先记下
       const scrollLeftBefore = container.scrollLeft;
       const scrollTopBefore = container.scrollTop;
       const contentX = scrollLeftBefore + ax;
@@ -251,17 +248,20 @@ export const PDFViewerCanvas = forwardRef<
       viewerDiv.style.transform = '';
       viewerDiv.style.transformOrigin = '';
 
-      // 不传 origin,让 pdfjs 不做 scroll 修正(它的 origin 公式在嵌套容器里不准)
+      // 不传 origin,自管 scroll(pdfjs origin 公式在嵌套容器里不准)
       viewer.updateScale({
         drawingDelay: -1,
         scaleFactor: finalScaleFactor,
       });
 
-      // 自管 scroll:目标 = 锚点处内容像素 × ratio - ax
-      // 注意 pdfjs 的 scrollPageIntoView 会先把 scroll 改成 _location 那个位置,
-      // 然后我们覆盖,以锚点为准。
-      container.scrollLeft = contentX * finalScaleFactor - ax;
-      container.scrollTop = contentY * finalScaleFactor - ay;
+      // 关键:updateScale 设 --scale-factor CSS var,1212 个 .page 元素 width/height
+      // 都用 round(down, var(--scale-factor) * pageW, 1px) 撑大,**reflow 异步完成**。
+      // 此刻 container.scrollHeight 仍是旧值,直接设 scrollLeft/Top 会被 clamp 到旧 max。
+      // 等 rAF 让浏览器完成 layout 再设 scroll。
+      requestAnimationFrame(() => {
+        container.scrollLeft = contentX * finalScaleFactor - ax;
+        container.scrollTop = contentY * finalScaleFactor - ay;
+      });
     };
 
     const handler = (e: WheelEvent): void => {
