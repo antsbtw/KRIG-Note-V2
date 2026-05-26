@@ -1,16 +1,16 @@
 /**
- * PDF-Viewer-Dev-Branch — Stage 2/3 dev 验收专用,Stage 4 删除
+ * PdfScrollContent — PDF scroll 模式的内容渲染组件(L5)
  *
- * 启用方式:DevTools Console 内:
- *   localStorage.setItem('krig.pdfViewerV2', '1'); location.reload();
- * 关闭:
- *   localStorage.removeItem('krig.pdfViewerV2'); location.reload();
+ * Host 内 PDF scroll 分支挂此组件。职责:
+ * 1. 从 ebook-library 拿 buffer + pdf-viewer.loadDocument 拿 handle
+ * 2. 挂 PDFViewerCanvas(pdfjs PDFViewer 真渲染)
+ * 3. KRIG 自定义层接入(由 PDFViewerCanvas 桥接驱动):
+ *    - AnnotationLayer  React portal 到 pdfjs PDFPageView.div(C5 矩形标注)
+ *    - vocab-highlight  通过 onTextLayerReady 回调每页扫词
+ *    - text selection   通过 usePdfTextSelection hook 监听 window mouseup
  *
- * Stage 3 接入 KRIG 自定义层(由 PDFViewerCanvas 的 onPageMounted /
- * onTextLayerReady 桥接驱动):
- *   - AnnotationLayer  React portal 到 pdfjs PDFPageView.div(C5 矩形标注)
- *   - vocab-highlight  通过 onTextLayerReady 回调每页扫词
- *   - text selection   通过 usePdfTextSelection hook 监听 window mouseup
+ * 对照旧 FixedPageContent(已删):基于 PDFRenderer 命令式 canvas 渲染 +
+ * 虚拟滚动。本组件改走 pdfjs PDFViewer 高层组件,scroll 由 pdfjs 内部管理。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,7 +25,7 @@ import {
   AnnotationLayer,
   type PageAnnotation,
   type AnnotationDraft,
-} from './fixed-page-content/annotation-layer';
+} from './annotation-layer';
 import {
   usePdfTextSelection,
   type PdfTextSelectionEvent,
@@ -48,15 +48,7 @@ interface Props {
   onTextLayerRendered?: (pageNum: number, textLayer: HTMLElement) => void;
 }
 
-export function isPdfViewerV2Enabled(): boolean {
-  try {
-    return window.localStorage.getItem('krig.pdfViewerV2') === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function PdfViewerDevBranch({
+export function PdfScrollContent({
   onPageChange,
   annotationMode = 'off',
   annotations = [],
@@ -110,7 +102,7 @@ export function PdfViewerDevBranch({
         localHandle = h;
         setHandle(h);
       } catch (err) {
-        console.error('[PdfViewerDevBranch] load failed:', err);
+        console.error('[PdfScrollContent] load failed:', err);
         if (!cancelled) setError(String(err));
       }
     })();
@@ -174,13 +166,13 @@ export function PdfViewerDevBranch({
   if (error) {
     return (
       <div className="krig-ebook-empty">
-        <div>PDF-Viewer-Dev-Branch load failed</div>
+        <div>PDF 加载失败</div>
         <pre style={{ fontSize: 11 }}>{error}</pre>
       </div>
     );
   }
   if (!handle) {
-    return <div className="krig-ebook-loading">PDF-Viewer-Dev-Branch loading...</div>;
+    return <div className="krig-ebook-loading">Loading PDF...</div>;
   }
 
   const pdfViewer = requireCapabilityApi<PdfViewerApi>('pdf-viewer');

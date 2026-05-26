@@ -41,12 +41,8 @@ import {
 } from './types';
 import { PDFRenderer } from './pdf';
 import { EPUBRenderer } from './epub';
-import { FixedPageContent } from './fixed-page-content';
 import { ReflowableContent } from './reflowable-content';
-import {
-  PdfViewerDevBranch,
-  isPdfViewerV2Enabled,
-} from './pdf-viewer-dev-branch';
+import { PdfScrollContent } from './pdf-scroll-content';
 import {
   FullscreenPageView,
   type FullscreenPageViewHandle,
@@ -188,7 +184,7 @@ export interface EBookHostProps {
   /** 标注模式(off / rect)— PDF 路径,EPUB 不消费;2026-05-24 删 underline */
   pdfAnnotationMode?: 'off' | 'rect';
   /** 已有 PDF 空间标注(view 从 library 加载后传入) */
-  pdfAnnotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
+  pdfAnnotations?: import('./annotation-layer').PageAnnotation[];
   /**
    * scroll-to-source 跳转后短暂高亮的标注 id(view 端 useState 持,~1.5s 后自动清空)。
    * AnnotationLayer 对 id 匹配的标注加 .krig-ebook-annotation--flashing CSS class。
@@ -200,7 +196,7 @@ export interface EBookHostProps {
    */
   onPdfAnnotationCreate?: (
     pageNum: number,
-    annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
+    annotation: import('./annotation-layer').AnnotationDraft,
   ) => void;
   /**
    * PR-α-3:PDF textLayer 选区命中回调(scroll + paged 两种模式都触发)。
@@ -657,31 +653,13 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       {loading && <div className="krig-ebook-loading">Loading...</div>}
 
       {/*
-       * Stage 2 dev 验收开关 — DevTools Console:
-       *   localStorage.setItem('krig.pdfViewerV2', '1'); location.reload();
-       * 关闭:localStorage.removeItem('krig.pdfViewerV2'); location.reload();
-       * Stage 4 删除此分支 + 整合 PdfViewerDevBranch 路径到主 PDF scroll 分支。
+       * PDF scroll 主分支 — pdfjs PDFViewer adapter(2026-05-25 全量重构)。
+       * 旧 FixedPageContent + 自管 canvas/textLayer 渲染已删,改走 pdf-viewer capability。
+       * 参数 scale / initialPage / scroll 由 pdfjs PDFViewer 内部管理,Host 不再透传。
        */}
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && isPdfViewerV2Enabled() && (
-        <PdfViewerDevBranch
+      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
+        <PdfScrollContent
           onPageChange={handlePdfPageChange}
-          annotationMode={pdfAnnotationMode}
-          annotations={pdfAnnotations}
-          flashAnnotationId={pdfFlashAnnotationId}
-          onAnnotationCreate={onPdfAnnotationCreate}
-          onTextSelected={onPdfTextSelected}
-          onTextLayerRendered={onPdfTextLayerRendered}
-        />
-      )}
-
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && !isPdfViewerV2Enabled() && (
-        <FixedPageContent
-          renderer={renderer}
-          scale={scale}
-          initialPage={lastPdfPageRef.current ?? restorePage}
-          onPageChange={handlePdfPageChange}
-          onScaleChange={handleScaleChange}
-          onRegisterGotoPage={registerGotoPage}
           annotationMode={pdfAnnotationMode}
           annotations={pdfAnnotations}
           flashAnnotationId={pdfFlashAnnotationId}
@@ -748,10 +726,10 @@ function PagedHostBranch({
   onPageChange: (page: number) => void;
   onRegisterGotoPage: (fn: (page: number) => void) => void;
   annotationMode?: 'off' | 'rect';
-  annotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
+  annotations?: import('./annotation-layer').PageAnnotation[];
   onAnnotationCreate?: (
     pageNum: number,
-    annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
+    annotation: import('./annotation-layer').AnnotationDraft,
   ) => void;
   onTextSelected?: (
     ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,

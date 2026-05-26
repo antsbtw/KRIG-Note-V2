@@ -42,7 +42,7 @@ import {
   AnnotationLayer,
   type PageAnnotation,
   type AnnotationDraft,
-} from '../fixed-page-content/annotation-layer';
+} from '../annotation-layer';
 import { usePdfTextSelection } from '../hooks/use-pdf-text-selection';
 
 export type FullscreenPagedLayout = 'single' | 'double';

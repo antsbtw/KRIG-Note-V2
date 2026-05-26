@@ -280,7 +280,7 @@ export type { EBookHostProps, EBookHostHandle, SearchResult } from './Host';
 export type {
   PageAnnotation,
   AnnotationDraft,
-} from './fixed-page-content/annotation-layer';
+} from './annotation-layer';
 export type { PdfTextSelectionEvent } from './hooks/use-pdf-text-selection';
 
 export interface EBookRenderingApi {
