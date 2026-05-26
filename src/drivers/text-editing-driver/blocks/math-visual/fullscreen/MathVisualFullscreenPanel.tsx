@@ -192,7 +192,12 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
 
   const compiledFns: CompiledFn[] = useMemo(() => {
     return fns.map((fn) => {
-      if (fn.plotType === 'parametric' || fn.plotType === 'polar' || fn.plotType === 'vertical-line') {
+      if (
+        fn.plotType === 'parametric' ||
+        fn.plotType === 'polar' ||
+        fn.plotType === 'vertical-line' ||
+        fn.plotType === 'implicit'
+      ) {
         return { fn, evalFn: null, contSegs: [], error: null };
       }
       const result = math.createEvalFn(fn.expression, parameters, fn.sourceLatex);
@@ -213,29 +218,58 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
   // ── 转 curves[] 喂 MathHost(同 inline MathVisualComponent 逻辑) ──
 
   const curves: Curve[] = useMemo(() => {
+    // 曲线 label LaTeX:
+    // - implicit: 仅原方程 (label "f(x)" 对二元方程无意义)
+    // - vertical-line: "x = <c>"
+    // - displayExpression 已含 "y=" / "r=" / 含 "=" 二元方程: 直接用 displayExpression 原样
+    //   (避免 "f(x) = y = x²" 这种二重等号)
+    // - 否则: "<fn.label> = <latex(expr)>" (用户只写右侧表达式时,加上 "f(x) = " 前缀)
+    const labelFor = (fn: FunctionEntry): string | undefined => {
+      const expr = fn.displayExpression ?? fn.expression;
+      if (fn.plotType === 'implicit') {
+        return math.exprToLatex(expr) ?? expr;
+      }
+      if (fn.plotType === 'vertical-line') {
+        return `x = ${fn.expression}`;
+      }
+      // displayExpression 含 = → 用户原写法本身就是方程,直接用
+      if (expr.includes('=')) {
+        return math.exprToLatex(expr) ?? expr;
+      }
+      const tex = math.exprToLatex(expr) ?? expr;
+      return `${fn.label} = ${tex}`;
+    };
+
     const out: Curve[] = [];
     for (const c of compiledFns) {
       const { fn, evalFn, contSegs } = c;
       if (!fn.visible) continue;
+      const label = labelFor(fn);
 
       if (fn.plotType === 'vertical-line') {
         const x = math.makeVerticalLineX(fn.expression);
         if (x == null) continue;
-        out.push({ kind: 'verticalLine', id: fn.id, x, color: fn.color, style: fn.style, lineWidth: fn.lineWidth });
+        out.push({ kind: 'verticalLine', id: fn.id, x, color: fn.color, style: fn.style, lineWidth: fn.lineWidth, label, labelPos: fn.labelPos });
         continue;
       }
       if (fn.plotType === 'parametric') {
         const xy = math.makeParametricFn(fn.expression, parameters);
         if (!xy) continue;
         const [tMin, tMax] = fn.paramDomain || [0, 2 * Math.PI];
-        out.push({ kind: 'parametric', id: fn.id, xy, tDomain: [tMin, tMax], color: fn.color, style: fn.style, lineWidth: fn.lineWidth });
+        out.push({ kind: 'parametric', id: fn.id, xy, tDomain: [tMin, tMax], color: fn.color, style: fn.style, lineWidth: fn.lineWidth, label, labelPos: fn.labelPos });
         continue;
       }
       if (fn.plotType === 'polar') {
         const r = math.makePolarFn(fn.expression, parameters);
         if (!r) continue;
         const [tMin, tMax] = fn.paramDomain || [0, 2 * Math.PI];
-        out.push({ kind: 'polar', id: fn.id, r, thetaDomain: [tMin, tMax], color: fn.color, style: fn.style, lineWidth: fn.lineWidth });
+        out.push({ kind: 'polar', id: fn.id, r, thetaDomain: [tMin, tMax], color: fn.color, style: fn.style, lineWidth: fn.lineWidth, label, labelPos: fn.labelPos });
+        continue;
+      }
+      if (fn.plotType === 'implicit') {
+        const fnImpl = math.makeImplicitFn(fn.expression, parameters);
+        if (!fnImpl) continue;
+        out.push({ kind: 'implicit', id: fn.id, fn: fnImpl, color: fn.color, style: fn.style, lineWidth: fn.lineWidth, label, labelPos: fn.labelPos });
         continue;
       }
       if (!evalFn) continue;
@@ -243,7 +277,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
         kind: 'fnOfX', id: fn.id, fn: evalFn,
         segments: contSegs.length > 0 ? contSegs.map((s) => ({ domain: s.domain })) : undefined,
         derivative: fn.showDerivative,
-        color: fn.color, style: fn.style, lineWidth: fn.lineWidth,
+        color: fn.color, style: fn.style, lineWidth: fn.lineWidth, label, labelPos: fn.labelPos,
       });
     }
     return out;
@@ -546,6 +580,13 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
   }, [onClose, toolMode, setToolMode, selectedAnnotationIdx, selectedAnnotationIdxs, selectedTangentId, selectedNormalId, selectedIntegralId,
       removeAnnotation, removeSelectedAnnotations, removeTangent, removeNormal, removeIntegral]);
 
+  // ── label 拖动:写回对应 fn 的 labelPos ──
+
+  const handleLabelMove = useCallback((curveId: string, pos: [number, number]) => {
+    const newFns = fns.map((f) => (f.id === curveId ? { ...f, labelPos: pos } : f));
+    onChange({ ...data, functions: newFns });
+  }, [data, fns, onChange]);
+
   // ── overlays 配置(传给 capability MathHost) ──
 
   const overlays: OverlaysConfig = useMemo(() => ({
@@ -628,6 +669,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
             preserveAspectRatio={false}
             overlays={overlays}
             overlayCallbacks={overlayCallbacks}
+            onLabelMove={handleLabelMove}
             pointSize={canvas.pointSize || 6}
           />
 

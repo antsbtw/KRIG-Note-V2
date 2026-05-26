@@ -25,6 +25,8 @@ export interface FunctionEntry {
   showDerivative: boolean;
   plotType?: PlotType;      // 默认 'y-of-x'
   paramDomain?: [number, number]; // 参数方程 t 范围 / 极坐标 θ 范围,默认 [0, 2π]
+  /** 曲线 label 位置(数据坐标);用户拖动后写入,缺省由 MathHost 自动计算 */
+  labelPos?: [number, number];
   sourceLatex?: string;     // 来源 LaTeX(拖入时保留,Phase 3 UI 入口)
   sourceAtomId?: string;    // 来源 mathBlock/mathInline 的 atomId(Phase 3 UI 入口)
 }
