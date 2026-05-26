@@ -202,88 +202,88 @@ export const PDFViewerCanvas = forwardRef<
 
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch)──
   //
-  // 性能约束(实测):单次 updateScale ~12ms(1200 页 PDF)。
-  // trackpad pinch ~125Hz × 12ms = 1500ms/s 同步工作 → 主线程死。
-  // rAF 节流 60Hz × 12ms = 720ms/s 仍超 100%。
-  // 必须用更狠的 cooldown:每次 updateScale 后等 80ms 才允许下次。
-  //   12 次/秒 × 12ms = 144ms/s ≈ 14% 主线程占用,稳。
-  // 每 cooldown 间隔合并所有累积 ticks 为综合 scaleFactor。
+  // 方案对齐 mozilla pdf.js 社区解(larsneo gist + issue #18076):
+  // **pinch 期间只动 CSS transform,松手才调 updateScale 一次**。
+  //
+  // 历史:多轮 cooldown / rAF / origin / 自管 scroll 全部挂死 — 因为大 PDF
+  // (1200 页)单次 updateScale ~12ms,任何高频调用都会堵主线程。
+  // 正确做法:pinch 期间 0 次 updateScale,松手(150ms 静止)才一次性应用。
+  //
+  // 视觉:pinch 期间 viewer 整体 CSS scale(瞬时,GPU 加速无成本),松手时
+  // currentScale 更新,pdfjs 真重渲到目标 scale。
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    const viewerDiv = viewerRef.current;
+    if (!container || !viewerDiv) return;
 
-    const COOLDOWN_MS = 80;
-    let lastScaleTime = 0;
-    let pendingTicks = 0;
-    let lastOrigin: [number, number] = [0, 0];
-    let pendingFlushId = 0;
-    let accumulatedDelta = 0;
+    const QUIESCE_MS = 150;     // 静止判定 — 超过此 ms 无新 wheel = 手势结束
+    const WHEEL_DELTA_FACTOR = 0.01; // deltaY → scale 增量比例(pinch 1 像素 = 1% scale 变化)
 
-    let wheelCount = 0;
-    const flush = (): void => {
-      pendingFlushId = 0;
-      if (pendingTicks === 0) return;
+    let pinchScale = 1;          // pinch 期间累积的 scale 比例(1 = 无变化)
+    let pinchOriginClient: [number, number] = [0, 0]; // pinch 开始时鼠标 viewport 坐标
+    let quiesceTimerId = 0;
+
+    const commit = (): void => {
+      quiesceTimerId = 0;
       const viewer = viewerInstanceRef.current;
-      if (!viewer) {
-        pendingTicks = 0;
+      if (!viewer || pinchScale === 1) {
+        pinchScale = 1;
+        viewerDiv.style.transform = '';
+        viewerDiv.style.transformOrigin = '';
         return;
       }
-      const scaleFactor = WHEEL_SCALE_FACTOR ** pendingTicks;
-      const ticksUsed = pendingTicks;
-      pendingTicks = 0;
-      const t0 = performance.now();
-      lastScaleTime = t0;
+      // 计算新 scale + container 内 origin 局部坐标(给 updateScale 用)
+      const finalScaleFactor = pinchScale;
+      pinchScale = 1;
+      // 先清 CSS transform,让 pdfjs 看到的是无变换的 DOM,真渲染重新算尺寸
+      viewerDiv.style.transform = '';
+      viewerDiv.style.transformOrigin = '';
       viewer.updateScale({
-        drawingDelay: WHEEL_DRAWING_DELAY,
-        scaleFactor,
-        origin: lastOrigin,
+        drawingDelay: -1,
+        scaleFactor: finalScaleFactor,
+        origin: pinchOriginClient,
       });
-      const t1 = performance.now();
-      console.log(`[diag-flush] ticks=${ticksUsed} took ${(t1 - t0).toFixed(1)}ms scale=${viewer.currentScale.toFixed(3)} wheelCountSinceStart=${wheelCount}`);
     };
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
-      wheelCount += 1;
-      if (wheelCount % 20 === 0) console.log(`[diag-wheel] cumulative=${wheelCount} pendingTicks=${pendingTicks} pendingFlushId=${pendingFlushId} elapsedSinceLast=${(performance.now() - lastScaleTime).toFixed(0)}ms`);
-      lastOrigin = [e.clientX, e.clientY];
 
-      // 累积 tick — 不每个 wheel 都触发,小 delta 累成一档
-      // pinch deltaY 0.x~5,累 PIXELS_PER_LINE=60 出一 tick
-      // 用模块级 closure 累积(跨 wheel 事件)
+      // pinch 开始(quiesce timer 未跑)— 记 origin + 锁定 transformOrigin
+      if (quiesceTimerId === 0) {
+        pinchOriginClient = [e.clientX, e.clientY];
+        const bcr = viewerDiv.getBoundingClientRect();
+        // transformOrigin 是 viewerDiv 局部坐标(相对 viewerDiv 左上)
+        const ox = e.clientX - bcr.left;
+        const oy = e.clientY - bcr.top;
+        viewerDiv.style.transformOrigin = `${ox}px ${oy}px`;
+      }
+
+      // 累积 pinch scale — deltaY 负 = 放大(pinch open),正 = 缩小
       let delta = e.deltaY;
-      if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
-      else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
+      if (e.deltaMode === 1) delta *= 16; // line → 像素粗折
+      else if (e.deltaMode === 2) delta *= 100;
+      // 反号:pinch open(手指外扩)deltaY 为负,期望放大 → scale 增大
+      pinchScale *= 1 - delta * WHEEL_DELTA_FACTOR;
+      // 钳制(避免单次飞涨)
+      pinchScale = Math.max(0.1, Math.min(10, pinchScale));
 
-      accumulatedDelta += delta;
-      while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
-        const direction = accumulatedDelta < 0 ? 1 : -1;
-        accumulatedDelta -= direction * PIXELS_PER_LINE;
-        pendingTicks += direction;
-      }
+      // 实时 CSS transform(GPU,几乎零成本)
+      viewerDiv.style.transform = `scale(${pinchScale})`;
 
-      if (pendingTicks === 0) return;
-
-      const now = performance.now();
-      const elapsed = now - lastScaleTime;
-      if (elapsed >= COOLDOWN_MS) {
-        // cooldown 过了,立即 flush
-        if (pendingFlushId !== 0) {
-          clearTimeout(pendingFlushId);
-          pendingFlushId = 0;
-        }
-        flush();
-      } else if (pendingFlushId === 0) {
-        // cooldown 内,排队到下一个 cooldown 边界
-        pendingFlushId = window.setTimeout(flush, COOLDOWN_MS - elapsed);
-      }
+      // 重置静止 timer
+      if (quiesceTimerId !== 0) clearTimeout(quiesceTimerId);
+      quiesceTimerId = window.setTimeout(commit, QUIESCE_MS);
     };
 
     container.addEventListener('wheel', handler, { passive: false });
     return () => {
       container.removeEventListener('wheel', handler);
-      if (pendingFlushId !== 0) clearTimeout(pendingFlushId);
+      if (quiesceTimerId !== 0) {
+        clearTimeout(quiesceTimerId);
+        viewerDiv.style.transform = '';
+        viewerDiv.style.transformOrigin = '';
+      }
     };
   }, []);
 
