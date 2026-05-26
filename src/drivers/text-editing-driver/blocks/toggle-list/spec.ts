@@ -9,6 +9,7 @@
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 import { toggleListNodeView } from './node-view';
+import { toggleListKeymapPlugin } from './keymap';
 
 const toggleListNodeSpec: NodeSpec = {
   content: 'block+',
@@ -50,4 +51,5 @@ export const toggleListSpec: BlockSpec = {
   containerRule: 'block+',
   cascadeBoundary: false,
   nodeView: toggleListNodeView,
+  plugin: () => toggleListKeymapPlugin(),
 };
