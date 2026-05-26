@@ -380,10 +380,13 @@ export const PDFViewerCanvas = forwardRef<
         )?.linkService;
         void services?.goToDestination(rawDest as string | unknown[]);
       },
-      setScale(scaleFactor: number, origin?: [number, number]): void {
+      setScale(absoluteScale: number, _origin?: [number, number]): void {
         const viewer = viewerInstanceRef.current;
         if (!viewer) return;
-        viewer.updateScale({ drawingDelay: -1, scaleFactor, origin });
+        // 绝对 scale 设值 — pdfjs currentScale setter 支持字符串("page-width" 等)
+        // 或数值;字符串走 fit 算法,数值直接设 _currentScale + 重渲。
+        // 区分于 updateScale({scaleFactor}) — 后者是相对当前 scale 的乘数。
+        viewer.currentScaleValue = String(absoluteScale);
       },
       setFitMode(mode: FitMode): void {
         const viewer = viewerInstanceRef.current;
