@@ -240,15 +240,26 @@ export function PdfScrollContent({
       if (!pageDiv.isConnected) continue;
       const wrapper = document.createElement('div');
       wrapper.className = 'krig-pdf-annotation-portal';
-      // 不设 pointer-events:none — AnnotationLayer 内部按 mode 切 'auto'/'none'
-      // 自管 hit-test;wrapper 设 none 会挡住内层 auto(✎ 标注模式拖框失效根因)
-      wrapper.style.cssText = 'position:absolute;inset:0;';
+      // wrapper 默认 pointer-events:none — 让 textLayer 选区透过(✎T 模式选文字)
+      // AnnotationLayer 内层按 mode 切 'auto'(✎ 框选)/'none'(默认 textLayer 透过)
+      // CSS 规范:子 pointer-events:auto 可覆盖父 none
+      wrapper.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
       pageDiv.appendChild(wrapper);
       const root = createRoot(wrapper);
       roots.set(pageNum, { root, wrapper });
     }
     // 2) 同步内容(render 现有 root)
     const { annotations: anns, annotationMode: mode, flashAnnotationId: flashId, cssScaleFactor: sf, onAnnotationCreate: onCreate } = annotationsForRender;
+    // DIAG: 看 mode 是否真传到 AnnotationLayer
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).electronAPI?.reportAlive({
+      layer: 'pdf-anno-mode',
+      details: {
+        mode,
+        rootsCount: roots.size,
+        annsCount: anns.length,
+      },
+    });
     for (const [pageNum, entry] of roots) {
       const dim = pageDims.get(pageNum);
       if (!dim) continue;
