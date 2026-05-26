@@ -225,6 +225,16 @@ export interface IReflowableRenderer extends IBookRenderer {
   // ── C4 fix:双指水平 swipe 翻页(macOS Books 同款 UX)──
   /** 注册 swipe 翻页回调(由 reflowable-content 消费,触发 prev/nextChapter)*/
   onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void;
+
+  /**
+   * 2026-05-26:注册 EPUB section(spine item)load 完成回调 —
+   * 对齐 fixed-page 的 onPdfTextLayerRendered;view 端订阅后做生词高亮等"扫文字"业务。
+   *
+   * 触发时机:已加载的 sections 在注册瞬间立即逐个触发(fast-path);
+   * 新 section 加载在 attachListeners 完成所有内部监听后触发。
+   * doc 是 iframe contentDocument;callback 可直接 querySelectorAll 注入 DOM。
+   */
+  onSectionLoad(callback: (doc: Document, index: number) => void): void;
 }
 
 // ── 类型守卫 ──

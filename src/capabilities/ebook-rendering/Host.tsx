@@ -179,6 +179,12 @@ export interface EBookHostProps {
   }) => void;
   /** PR-α-3b followup:标注双击 → activate 关联 thought */
   onEpubAnnotationDoubleClick?: (annotationCfi: string) => void;
+  /**
+   * 2026-05-26:EPUB section(spine item)load 完成回调 —
+   * 对齐 onPdfTextLayerRendered;view 端订阅做生词高亮等 iframe 内扫文字业务。
+   * doc 是 iframe contentDocument,可直接 querySelectorAll 注入 span / 挂 listener。
+   */
+  onEpubSectionLoad?: (doc: Document, index: number) => void;
 
   // ── C5:PDF 空间标注 ──
   /** 标注模式(off / rect)— PDF 路径,EPUB 不消费;2026-05-24 删 underline */
@@ -238,6 +244,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     onEpubAnnotationClick,
     onEpubContextMenu,
     onEpubAnnotationDoubleClick,
+    onEpubSectionLoad,
     pdfAnnotationMode,
     pdfAnnotations,
     pdfFlashAnnotationId,
@@ -382,6 +389,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           // PR-α-3b followup:EPUB iframe 内右键 / 双击 → 转推给 view
           if (onEpubContextMenu) r.onContextMenu(onEpubContextMenu);
           if (onEpubAnnotationDoubleClick) r.onDoubleClick(onEpubAnnotationDoubleClick);
+          if (onEpubSectionLoad) r.onSectionLoad(onEpubSectionLoad);
 
           onLoadComplete?.({
             totalPages: 0,
@@ -442,6 +450,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       onEpubAnnotationClick,
       onEpubContextMenu,
       onEpubAnnotationDoubleClick,
+      onEpubSectionLoad,
     ],
   );
 

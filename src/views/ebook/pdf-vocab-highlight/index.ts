@@ -22,12 +22,15 @@
  * 任意时刻最多一个 vocab hover 状态。
  */
 
-import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { LearningApi, VocabEntry } from '@capabilities/learning/types';
+import type { VocabEntry } from '@capabilities/learning/types';
+import {
+  showTooltip,
+  scheduleHide,
+  hideTooltipNow,
+} from '../vocab-tooltip';
 
 const HL_LAYER_CLASS = 'krig-pdf-vocab-hl-layer';
 const HL_CLASS = 'krig-pdf-vocab-hl';
-const TOOLTIP_CLASS = 'krig-pdf-vocab-tooltip';
 
 // ── 模块级 vocab 状态 ─────────────────────────────────
 
@@ -295,112 +298,6 @@ export function clearAll(): void {
   hideTooltipNow();
 }
 
-// ── Tooltip 单例 ─────────────────────────────────
-
-let tooltipEl: HTMLDivElement | null = null;
-let hideTimer: number | null = null;
-let ttsAudio: HTMLAudioElement | null = null;
-let ttsObjectUrl: string | null = null;
-
-function ensureTooltipEl(): HTMLDivElement {
-  if (tooltipEl) return tooltipEl;
-  tooltipEl = document.createElement('div');
-  tooltipEl.className = TOOLTIP_CLASS;
-  tooltipEl.style.display = 'none';
-  document.body.appendChild(tooltipEl);
-  tooltipEl.addEventListener('mouseenter', () => {
-    if (hideTimer) {
-      window.clearTimeout(hideTimer);
-      hideTimer = null;
-    }
-  });
-  tooltipEl.addEventListener('mouseleave', () => scheduleHide());
-  return tooltipEl;
-}
-
-function showTooltip(word: string, anchor: DOMRect): void {
-  const def = vocabDefs.get(word);
-  if (!def) return;
-  const phonetic = vocabPhonetics.get(word);
-  const el = ensureTooltipEl();
-
-  if (hideTimer) {
-    window.clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-
-  const shortDef = def.length > 200 ? def.slice(0, 200) + '...' : def;
-  el.innerHTML = `
-    <div class="${TOOLTIP_CLASS}__header">
-      <span class="${TOOLTIP_CLASS}__word">${escapeHtml(word)}</span>
-      ${phonetic ? `<span class="${TOOLTIP_CLASS}__phonetic">${escapeHtml(phonetic)}</span>` : ''}
-      <button class="${TOOLTIP_CLASS}__tts" title="发音">&#x1f50a;</button>
-    </div>
-    <div class="${TOOLTIP_CLASS}__def">${escapeHtml(shortDef)}</div>
-  `;
-
-  const ttsBtn = el.querySelector<HTMLButtonElement>(`.${TOOLTIP_CLASS}__tts`);
-  if (ttsBtn) {
-    ttsBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      void playTTS(word);
-    });
-  }
-
-  el.style.display = 'block';
-  el.style.left = `${anchor.left}px`;
-  el.style.top = `${anchor.bottom + 6}px`;
-
-  // 边界检测:右出 / 底出时翻转
-  requestAnimationFrame(() => {
-    if (!tooltipEl) return;
-    const tr = tooltipEl.getBoundingClientRect();
-    if (tr.right > window.innerWidth - 8) {
-      tooltipEl.style.left = `${window.innerWidth - tr.width - 8}px`;
-    }
-    if (tr.bottom > window.innerHeight - 8) {
-      tooltipEl.style.top = `${anchor.top - tr.height - 6}px`;
-    }
-  });
-}
-
-function scheduleHide(): void {
-  if (hideTimer) window.clearTimeout(hideTimer);
-  hideTimer = window.setTimeout(() => {
-    hideTooltipNow();
-  }, 200);
-}
-
-function hideTooltipNow(): void {
-  if (hideTimer) {
-    window.clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-  if (tooltipEl) tooltipEl.style.display = 'none';
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-async function playTTS(word: string): Promise<void> {
-  if (ttsAudio) {
-    ttsAudio.pause();
-    ttsAudio = null;
-  }
-  if (ttsObjectUrl) {
-    URL.revokeObjectURL(ttsObjectUrl);
-    ttsObjectUrl = null;
-  }
-  const learning = requireCapabilityApi<LearningApi>('learning');
-  const buf = await learning.tts(word, 'en');
-  if (!buf) return;
-  const blob = new Blob([buf], { type: 'audio/mpeg' });
-  ttsObjectUrl = URL.createObjectURL(blob);
-  ttsAudio = new Audio(ttsObjectUrl);
-  ttsAudio.play().catch(() => {});
-}
-
 // ── 全局 hover 探测(mousemove + 遍历 BCR 命中检测):一次性挂在 document ──
 //
 // 为什么不用 elementsFromPoint:vocab-hl pointer-events:none(避免拦截选区/右键),
@@ -449,7 +346,13 @@ function attachGlobalListeners(): void {
     if (hit) {
       hit.classList.add('is-hover');
       const word = hit.dataset.vocabWord;
-      if (word) showTooltip(word, hit.getBoundingClientRect());
+      const def = word ? vocabDefs.get(word) : undefined;
+      if (word && def) {
+        showTooltip(
+          { word, definition: def, phonetic: vocabPhonetics.get(word) },
+          hit.getBoundingClientRect(),
+        );
+      }
     }
   });
 }
