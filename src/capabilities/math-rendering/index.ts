@@ -29,6 +29,7 @@ import {
   makeParametricFn,
   makePolarFn,
   makeVerticalLineX,
+  makeImplicitFn,
   exprToLatex,
 } from './compute/evaluator';
 import { detectDiscontinuities, buildSegments } from './compute/discontinuity';
@@ -53,6 +54,7 @@ export type {
   ParametricCurve,
   PolarCurve,
   VerticalLineCurve,
+  ImplicitCurve,
   UnsupportedCurve,
   CurveStyle,
   MathAnnotation,
@@ -78,7 +80,7 @@ export type {
 // 内部可直 import 兜底;view 侧仍走 requireCapabilityApi)
 export { MathHost };
 export { createEvalFn, extractParameters, numericalDerivative };
-export { makeParametricFn, makePolarFn, makeVerticalLineX, exprToLatex };
+export { makeParametricFn, makePolarFn, makeVerticalLineX, makeImplicitFn, exprToLatex };
 export { detectDiscontinuities, buildSegments };
 export { detectPlotType };
 export { latexToMathjs, latexToFunction, latexToFunctionWithEndpoints };
@@ -105,6 +107,7 @@ capabilityRegistry.register({
     makeParametricFn,
     makePolarFn,
     makeVerticalLineX,
+    makeImplicitFn,
     exprToLatex,
     derivative,
     secondDerivative,

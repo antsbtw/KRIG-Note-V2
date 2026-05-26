@@ -9,12 +9,14 @@
  */
 
 /** 函数绘图类型 */
-export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar';
+export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar' | 'implicit';
 
 /** 一条函数曲线 — driver 持的"用户编辑数据"(由 driver 转成 capability Curve 喂给 MathHost) */
 export interface FunctionEntry {
   id: string;
   expression: string;       // mathjs 语法;垂直线为常数值;参数方程为 "x(t);y(t)";极坐标为 "r(theta)"
+  /** 用户原始输入(detectPlotType 归一化前);UI 显示用,缺省 fallback 到 expression */
+  displayExpression?: string;
   label: string;            // 显示标签,如 "f(x)"
   color: string;            // 曲线颜色
   style: 'solid' | 'dashed' | 'dotted';
@@ -23,6 +25,8 @@ export interface FunctionEntry {
   showDerivative: boolean;
   plotType?: PlotType;      // 默认 'y-of-x'
   paramDomain?: [number, number]; // 参数方程 t 范围 / 极坐标 θ 范围,默认 [0, 2π]
+  /** 曲线 label 位置(数据坐标);用户拖动后写入,缺省由 MathHost 自动计算 */
+  labelPos?: [number, number];
   sourceLatex?: string;     // 来源 LaTeX(拖入时保留,Phase 3 UI 入口)
   sourceAtomId?: string;    // 来源 mathBlock/mathInline 的 atomId(Phase 3 UI 入口)
 }
