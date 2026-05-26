@@ -1,0 +1,43 @@
+/*
+ * pdf-viewer capability — 样式
+ *
+ * 走 pdfjs-dist 4.x 官方 pdf_viewer.css(textLayer / annotationLayer / pageView
+ * 全套 — 含 --scale-factor / span 浮点 width round 等关键 CSS 变量)。
+ * KRIG 自定义层在 ebook-rendering 维护,本文件只保证 pdfjs 高层组件正常工作。
+ *
+ * pdfjs PDFViewer 硬要求 container 必须 position: absolute(构造抛错)。
+ * wrapper 提供 position: relative + 撑满父,让 container absolute inset:0 铺满。
+ *
+ * 不加任何对 .pdfViewer / .page 的覆盖 — 完全沿用 pdfjs 默认 CSS,
+ * page 在 viewer 内由 margin:1px auto -8px 自然居中。
+ */
+
+@import 'pdfjs-dist/web/pdf_viewer.css';
+
+.pdf-viewer-canvas-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.pdfViewerContainer {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  outline: none;
+}
+
+/*
+ * 限 viewer 宽度 = container width,小页正常 margin auto 居中。
+ *
+ * pdfjs 默认让 viewer 按 max page width 撑(整本最大页),其他正常页在
+ * viewer 内 margin auto 居中,但 viewer 本身溢出 container → 小页视觉上
+ * 偏右(viewer 中心远离 container 中心)。
+ *
+ * 修:.pdfViewer { max-width: 100% } 限 viewer ≤ container。每页独立按
+ * container 中线居中(margin auto 计算基线 = container width);大开本页
+ * 超出 viewer 部分由 page 自己 horizontal scroll(浏览器默认行为)。
+ */
+.pdfViewerContainer .pdfViewer {
+  max-width: 100%;
+}

@@ -41,8 +41,8 @@ import {
 } from './types';
 import { PDFRenderer } from './pdf';
 import { EPUBRenderer } from './epub';
-import { FixedPageContent } from './fixed-page-content';
 import { ReflowableContent } from './reflowable-content';
+import { PdfScrollContent } from './pdf-scroll-content';
 import {
   FullscreenPageView,
   type FullscreenPageViewHandle,
@@ -184,7 +184,7 @@ export interface EBookHostProps {
   /** 标注模式(off / rect)— PDF 路径,EPUB 不消费;2026-05-24 删 underline */
   pdfAnnotationMode?: 'off' | 'rect';
   /** 已有 PDF 空间标注(view 从 library 加载后传入) */
-  pdfAnnotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
+  pdfAnnotations?: import('./annotation-layer').PageAnnotation[];
   /**
    * scroll-to-source 跳转后短暂高亮的标注 id(view 端 useState 持,~1.5s 后自动清空)。
    * AnnotationLayer 对 id 匹配的标注加 .krig-ebook-annotation--flashing CSS class。
@@ -196,7 +196,7 @@ export interface EBookHostProps {
    */
   onPdfAnnotationCreate?: (
     pageNum: number,
-    annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
+    annotation: import('./annotation-layer').AnnotationDraft,
   ) => void;
   /**
    * PR-α-3:PDF textLayer 选区命中回调(scroll + paged 两种模式都触发)。
@@ -266,11 +266,28 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   const [restorePage, setRestorePage] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // FixedPageContent / FullscreenPageView 注册的 gotoPage 回调
+  // PdfScrollContent / FullscreenPageView 注册的 gotoPage 回调
   const gotoPageRef = useRef<((page: number) => void) | null>(null);
   const registerGotoPage = useCallback((fn: (page: number) => void) => {
     gotoPageRef.current = fn;
   }, []);
+  // PdfScrollContent 注册的完整命令式 API(toolbar 缩放百分比 / fit-width 走此通道)
+  const scrollApiRef = useRef<{
+    setScale: (s: number) => void;
+    setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
+  } | null>(null);
+  const registerScrollApi = useCallback(
+    (api: {
+      goToPage: (page: number) => void;
+      setScale: (s: number) => void;
+      setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
+      getScale: () => number;
+    }) => {
+      gotoPageRef.current = api.goToPage;
+      scrollApiRef.current = { setScale: api.setScale, setFitMode: api.setFitMode };
+    },
+    [],
+  );
 
   // 当前 PDF 页号 — paged ↔ scroll 切换时,FixedPageContent / FullscreenPageView
   // 重 mount,把这个值作为 initialPage 喂回去,保持页面连续(用户在 paged 翻到
@@ -488,8 +505,9 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       if (pdfLayoutRef.current === 'paged') return;
       setFitWidth(false);
       setScale(newScale);
-      const r = rendererRef.current;
-      if (r && isFixedPage(r)) r.setScale(newScale);
+      // scroll 模式:走 PdfScrollContent 注册的 API(pdfjs PDFViewer 真渲染);
+      // 旧 PDFRenderer.setScale 只为 paged 全屏服务,scroll 模式不再调用。
+      scrollApiRef.current?.setScale(newScale);
       onScaleChange?.(newScale);
     },
     [onScaleChange],
@@ -501,20 +519,12 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       if (pdfLayoutRef.current === 'paged') return;
       setFitWidth(on);
       if (on) {
-        requestAnimationFrame(() => {
-          const r = rendererRef.current;
-          if (!r || !isFixedPage(r) || !containerRef.current) return;
-          const dims = r.getPageDimensions();
-          if (dims.length === 0) return;
-          const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
-          const newScale = cw / dims[0].width;
-          setScale(newScale);
-          r.setScale(newScale);
-          onScaleChange?.(newScale);
-        });
+        // scroll 模式:走 PdfScrollContent 注册的 setFitMode(pdfjs PDFViewer
+        // 内部 page-width 算法 + 真渲染),不再自管 dims × 公式。
+        scrollApiRef.current?.setFitMode('page-width');
       }
     },
-    [onScaleChange],
+    [],
   );
 
   useImperativeHandle(
@@ -652,14 +662,21 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     <div className="krig-ebook-host" ref={containerRef}>
       {loading && <div className="krig-ebook-loading">Loading...</div>}
 
+      {/*
+       * PDF scroll 主分支 — pdfjs PDFViewer adapter(2026-05-25 全量重构)。
+       * 旧 FixedPageContent + 自管 canvas/textLayer 渲染已删,改走 pdf-viewer capability。
+       * 参数 scale / initialPage / scroll 由 pdfjs PDFViewer 内部管理,Host 不再透传。
+       */}
       {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
-        <FixedPageContent
-          renderer={renderer}
-          scale={scale}
+        <PdfScrollContent
+          // 恢复上次阅读 scale:
+          //   fitWidth=true  → 'page-width'(fit 关键字让 pdfjs 按 container 算)
+          //   fitWidth=false → 数字字符串(绝对 scale,如 '1.5')
+          initialFitMode={fitWidth ? 'page-width' : String(scale)}
           initialPage={lastPdfPageRef.current ?? restorePage}
           onPageChange={handlePdfPageChange}
           onScaleChange={handleScaleChange}
-          onRegisterGotoPage={registerGotoPage}
+          onRegisterApi={registerScrollApi}
           annotationMode={pdfAnnotationMode}
           annotations={pdfAnnotations}
           flashAnnotationId={pdfFlashAnnotationId}
@@ -726,10 +743,10 @@ function PagedHostBranch({
   onPageChange: (page: number) => void;
   onRegisterGotoPage: (fn: (page: number) => void) => void;
   annotationMode?: 'off' | 'rect';
-  annotations?: import('./fixed-page-content/annotation-layer').PageAnnotation[];
+  annotations?: import('./annotation-layer').PageAnnotation[];
   onAnnotationCreate?: (
     pageNum: number,
-    annotation: import('./fixed-page-content/annotation-layer').AnnotationDraft,
+    annotation: import('./annotation-layer').AnnotationDraft,
   ) => void;
   onTextSelected?: (
     ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,

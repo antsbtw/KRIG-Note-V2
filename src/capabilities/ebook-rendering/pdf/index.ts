@@ -1,17 +1,17 @@
 /**
  * PDFRenderer — PDF 渲染引擎(L5-C2)
  *
- * V1 → V2 直迁:src/plugins/ebook/renderers/pdf/index.ts(298 行)。
- * **本文件是 ebook-rendering capability 内部唯一 import pdfjs-dist 的地方**(npm 屏障)。
+ * **2026-05-25 状态**:Stage 4 全量重构后,PDF scroll 模式改走 `pdf-viewer` capability
+ * 的 PDFViewerCanvas(pdfjs PDFViewer 高层组件)。本文件保留以支持:
+ * - **paged 全屏模式**(FullscreenPageView)仍用 renderPage/renderTextLayer 命令式渲染
+ * - **Host 命令式 API**(getTOC / hasTextContent / capturePageRect / searchText 等)
  *
- * 实现 IFixedPageRenderer 接口,封装 pdfjs-dist 的所有操作:
- * - 加载 PDF + 预计算页尺寸
- * - 单页 Canvas 渲染(渲染队列去重 + 缓存 + cancel)
- * - Text Layer 渲染(选择 + Cmd+C 复制)
- * - 全文搜索(getTextContent + indexOf)
- * - PDF Outline → TOCItem(C3 起 OutlinePanel 消费)
+ * TODO Phase D:paged 全屏切 PDFViewer ScrollMode.PAGE 重写后,本文件整体删除,
+ * 元数据 API(getTOC 等)迁到 pdf-viewer capability。
  *
  * pdfjs-dist 版本锁:^4.9.155(EBookView 设计 v2 § 5 #10:5.x 与 Electron 40 不兼容)
+ *
+ * 历史:V1 → V2 直迁,src/plugins/ebook/renderers/pdf/index.ts(298 行)。
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
@@ -26,12 +26,8 @@ import type {
   TOCItem,
 } from '../types';
 
-// ── pdf.js worker 配置 ──
-// V1 同款,Vite 静态导入 worker URL(import.meta.url 路径运行时解析)
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// 注:Worker 由 `@capabilities/pdf-viewer/worker-setup` 模块顶层副作用初始化
+// (4.x workerPort 风格,见该模块注释)。本文件 import pdfjs-dist 时 worker 已就绪。
 
 export class PDFRenderer implements IFixedPageRenderer {
   readonly fileType = 'pdf' as const;
