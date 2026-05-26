@@ -382,5 +382,5 @@ Stage 5 验收时需手动 `npm run make` 打 dmg 跑一次中日韩 PDF。
 - [x] Stage 1 — commit hash: `819fea5e`
 - [x] Stage 2 — commit hash: `a50ae5fb`
 - [x] Stage 3 — commit hash: `0ba01a92`
-- [ ] Stage 4 — commit hash: ___
+- [x] Stage 4 — commit hash: `3554a7a2`
 - [ ] Stage 5 — commit hash: ___
