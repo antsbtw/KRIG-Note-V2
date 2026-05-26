@@ -202,49 +202,42 @@ export const PDFViewerCanvas = forwardRef<
 
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch)──
   //
-  // 方案对齐 mozilla pdf.js 社区解(larsneo gist + issue #18076):
-  // **pinch 期间只动 CSS transform,松手才调 updateScale 一次**。
+  // 方案对齐 pdfjs 内部 cssTransform 路径(pdf_viewer.mjs 5811-5840):
+  //   updateScale({ drawingDelay: 0~999 }) → pdfjs 内部走 cssTransform 路径:
+  //     - 不真渲染 canvas(零成本 GPU CSS scale)
+  //     - setTimeout(drawingDelay) 后才真重渲
   //
-  // 历史:多轮 cooldown / rAF / origin / 自管 scroll 全部挂死 — 因为大 PDF
-  // (1200 页)单次 updateScale ~12ms,任何高频调用都会堵主线程。
-  // 正确做法:pinch 期间 0 次 updateScale,松手(150ms 静止)才一次性应用。
+  // 这意味着我们**根本不需要自管 CSS transform** — 直接调 updateScale 即可。
+  // 自管 viewerDiv.style.transform 反而跟 pdfjs 内部 cssTransform 双重叠加 →
+  // commit 时清 transform 让位真渲染时视觉 snap 跳回(2026-05-25 用户反馈
+  // "先偏离中间最后跳转回来" 的根因)。
   //
-  // 视觉:pinch 期间 viewer 整体 CSS scale(瞬时,GPU 加速无成本),松手时
-  // currentScale 更新,pdfjs 真重渲到目标 scale。
+  // 性能:pdfjs cssTransform 路径很快(改 style + setTimeout),不再有挂死风险。
+  // 配 rAF 节流(60Hz)就够,不需要 cooldown。
   useEffect(() => {
     const container = containerRef.current;
-    const viewerDiv = viewerRef.current;
-    if (!container || !viewerDiv) return;
+    if (!container) return;
 
-    const QUIESCE_MS = 150;     // 静止判定 — 超过此 ms 无新 wheel = 手势结束
-    const WHEEL_DELTA_FACTOR = 0.01; // deltaY → scale 增量比例(pinch 1 像素 = 1% scale 变化)
+    let accumulatedDelta = 0;
+    let pendingTicks = 0;
+    let rafId = 0;
+    let lastWheelTime = 0;
 
-    let pinchScale = 1;  // pinch 期间累积的 scale 比例(1 = 无变化)
-    let quiesceTimerId = 0;
-
-    const commit = (): void => {
-      quiesceTimerId = 0;
+    const flush = (): void => {
+      rafId = 0;
+      if (pendingTicks === 0) return;
       const viewer = viewerInstanceRef.current;
-      if (!viewer || pinchScale === 1) {
-        pinchScale = 1;
-        viewerDiv.style.transform = '';
-        viewerDiv.style.transformOrigin = '';
+      if (!viewer) {
+        pendingTicks = 0;
         return;
       }
-
-      const finalScaleFactor = pinchScale;
-      pinchScale = 1;
-
-      // 清 CSS transform — 真渲染接管
-      viewerDiv.style.transform = '';
-      viewerDiv.style.transformOrigin = '';
-
-      // 不传 origin → pdfjs 走 _location-based scrollPageIntoView,跟键盘 Cmd+= 同路径
-      // 居中保持"当前页中心",对齐 macOS Preview / pdfjs viewer.js 默认体验。
-      // 自管 origin/scroll 在嵌套容器里始终算不准(已多次踩坑),弃用。
+      const scaleFactor = WHEEL_SCALE_FACTOR ** pendingTicks;
+      pendingTicks = 0;
+      // drawingDelay=400 让 pdfjs 走 cssTransform 路径(零成本 GPU 缩放)+
+      // 400ms 静止后再真重渲。不传 origin,走 _location-based 居中保持。
       viewer.updateScale({
-        drawingDelay: -1,
-        scaleFactor: finalScaleFactor,
+        drawingDelay: WHEEL_DRAWING_DELAY,
+        scaleFactor,
       });
     };
 
@@ -252,36 +245,32 @@ export const PDFViewerCanvas = forwardRef<
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
 
-      // pinch 开始:transformOrigin 设为 viewer 可视中心 — 跟 commit 后真渲染居中行为一致
-      if (quiesceTimerId === 0) {
-        const cx = container.clientWidth / 2 + container.scrollLeft;
-        const cy = container.clientHeight / 2 + container.scrollTop;
-        viewerDiv.style.transformOrigin = `${cx}px ${cy}px`;
+      const now = performance.now();
+      if (now - lastWheelTime > GESTURE_TIMEOUT_MS) {
+        accumulatedDelta = 0;
+      }
+      lastWheelTime = now;
+
+      let delta = e.deltaY;
+      if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
+      else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
+
+      accumulatedDelta += delta;
+      while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
+        const direction = accumulatedDelta < 0 ? 1 : -1;
+        accumulatedDelta -= direction * PIXELS_PER_LINE;
+        pendingTicks += direction;
       }
 
-      // 累积 pinch scale — deltaY 负 = 放大(pinch open),正 = 缩小
-      let delta = e.deltaY;
-      if (e.deltaMode === 1) delta *= 16;
-      else if (e.deltaMode === 2) delta *= 100;
-      pinchScale *= 1 - delta * WHEEL_DELTA_FACTOR;
-      pinchScale = Math.max(0.1, Math.min(10, pinchScale));
-
-      // 实时 CSS transform(GPU,几乎零成本)
-      viewerDiv.style.transform = `scale(${pinchScale})`;
-
-      // 重置静止 timer
-      if (quiesceTimerId !== 0) clearTimeout(quiesceTimerId);
-      quiesceTimerId = window.setTimeout(commit, QUIESCE_MS);
+      if (pendingTicks !== 0 && rafId === 0) {
+        rafId = requestAnimationFrame(flush);
+      }
     };
 
     container.addEventListener('wheel', handler, { passive: false });
     return () => {
       container.removeEventListener('wheel', handler);
-      if (quiesceTimerId !== 0) {
-        clearTimeout(quiesceTimerId);
-        viewerDiv.style.transform = '';
-        viewerDiv.style.transformOrigin = '';
-      }
+      if (rafId !== 0) cancelAnimationFrame(rafId);
     };
   }, []);
 
