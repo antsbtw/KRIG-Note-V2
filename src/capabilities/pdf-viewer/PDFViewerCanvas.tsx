@@ -383,10 +383,13 @@ export const PDFViewerCanvas = forwardRef<
       setScale(absoluteScale: number, _origin?: [number, number]): void {
         const viewer = viewerInstanceRef.current;
         if (!viewer) return;
-        // 绝对 scale 设值 — pdfjs currentScale setter 支持字符串("page-width" 等)
-        // 或数值;字符串走 fit 算法,数值直接设 _currentScale + 重渲。
-        // 区分于 updateScale({scaleFactor}) — 后者是相对当前 scale 的乘数。
+        // pdfjs #isSameScale 早退:若 newScale === currentScale,_setScaleUpdatePages
+        // 直接 return,不重置 scrollPageIntoView → scroll 保留之前的偏移状态。
+        // 当用户:fit-width → toolbar 选 100%,pdfjs 算出的 fit-width scale 可能恰
+        // 接近 1.0,设 "1" 触发 isSameScale 早退,scroll 不重置致 page 偏左。
+        // 解:setScale 后总是 scrollPageIntoView 到当前页强制重置 scroll 居中。
         viewer.currentScaleValue = String(absoluteScale);
+        viewer.scrollPageIntoView({ pageNumber: viewer.currentPageNumber });
       },
       setFitMode(mode: FitMode): void {
         const viewer = viewerInstanceRef.current;
