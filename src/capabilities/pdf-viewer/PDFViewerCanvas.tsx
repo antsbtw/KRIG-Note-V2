@@ -202,87 +202,102 @@ export const PDFViewerCanvas = forwardRef<
 
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch)──
   //
-  // 方案对齐 mozilla pdf.js 社区解(larsneo gist + issue #18076):
-  // **pinch 期间只动 CSS transform,松手才调 updateScale 一次**。
+  // **严格对齐 mozilla pdfjs viewer.js 真实源码 onWheel + _accumulateFactor**
+  // (mozilla/pdf.js master/web/app.js,2026-05-25 查证)。
   //
-  // 历史:多轮 cooldown / rAF / origin / 自管 scroll 全部挂死 — 因为大 PDF
-  // (1200 页)单次 updateScale ~12ms,任何高频调用都会堵主线程。
-  // 正确做法:pinch 期间 0 次 updateScale,松手(150ms 静止)才一次性应用。
+  // pinch (ctrlKey + DOM_DELTA_PIXEL):
+  //   scaleFactor = Math.exp(-deltaY/100)  ← 指数公式,deltaY 小数转近 1 的小因子
+  //   factor = _accumulateFactor(currentScale, scaleFactor, '_wheelUnusedFactor')
+  //   updateScale({ scaleFactor: factor, origin: [clientX, clientY], drawingDelay: 400 })
   //
-  // 视觉:pinch 期间 viewer 整体 CSS scale(瞬时,GPU 加速无成本),松手时
-  // currentScale 更新,pdfjs 真重渲到目标 scale。
+  // wheel (mouse/Cmd+wheel,DOM_DELTA_LINE/PIXEL):
+  //   ticks = _accumulateTicks(delta / 30, '_wheelUnusedTicks')
+  //   updateScale({ steps: ticks, origin: [clientX, clientY], drawingDelay: 400 })
+  //
+  // 关键:**完全不自管 CSS transform** — drawingDelay=400 让 pdfjs 内部
+  // PDFPageView.update 走 cssTransform 路径(GPU 缩放零成本)+ 静止后真重渲。
+  // 节流不靠 rAF/cooldown,靠 _accumulateFactor 数学上把"小因子"乘到 #isSameScale
+  // 早退(0.99/1.01 等小因子 Math.round(scale * factor * 100) / 100 不变 → 早退)。
   useEffect(() => {
     const container = containerRef.current;
-    const viewerDiv = viewerRef.current;
-    if (!container || !viewerDiv) return;
+    if (!container) return;
 
-    const QUIESCE_MS = 150;     // 静止判定 — 超过此 ms 无新 wheel = 手势结束
-    const WHEEL_DELTA_FACTOR = 0.01; // deltaY → scale 增量比例(pinch 1 像素 = 1% scale 变化)
+    // 累积器(对应 mozilla _wheelUnusedFactor / _wheelUnusedTicks)
+    let unusedFactor = 1;
+    let unusedTicks = 0;
 
-    let pinchScale = 1;  // pinch 期间累积的 scale 比例(1 = 无变化)
-    let quiesceTimerId = 0;
-
-    const commit = (): void => {
-      quiesceTimerId = 0;
-      const viewer = viewerInstanceRef.current;
-      if (!viewer || pinchScale === 1) {
-        pinchScale = 1;
-        viewerDiv.style.transform = '';
-        viewerDiv.style.transformOrigin = '';
-        return;
+    // mozilla _accumulateFactor 严格复刻
+    const accumulateFactor = (previousScale: number, factor: number): number => {
+      if (factor === 1) return 1;
+      if ((unusedFactor > 1 && factor < 1) || (unusedFactor < 1 && factor > 1)) {
+        unusedFactor = 1;
       }
+      const newFactor =
+        Math.floor(previousScale * factor * unusedFactor * 100) /
+        (100 * previousScale);
+      unusedFactor = factor / newFactor;
+      return newFactor;
+    };
 
-      const finalScaleFactor = pinchScale;
-      pinchScale = 1;
-
-      // 清 CSS transform — 真渲染接管
-      viewerDiv.style.transform = '';
-      viewerDiv.style.transformOrigin = '';
-
-      // 不传 origin → pdfjs 走 _location-based scrollPageIntoView,跟键盘 Cmd+= 同路径
-      // 居中保持"当前页中心",对齐 macOS Preview / pdfjs viewer.js 默认体验。
-      // 自管 origin/scroll 在嵌套容器里始终算不准(已多次踩坑),弃用。
-      viewer.updateScale({
-        drawingDelay: -1,
-        scaleFactor: finalScaleFactor,
-      });
+    // mozilla _accumulateTicks 严格复刻
+    const accumulateTicks = (ticks: number): number => {
+      if ((unusedTicks > 0 && ticks < 0) || (unusedTicks < 0 && ticks > 0)) {
+        unusedTicks = 0;
+      }
+      unusedTicks += ticks;
+      const wholeTicks = Math.trunc(unusedTicks);
+      unusedTicks -= wholeTicks;
+      return wholeTicks;
     };
 
     const handler = (e: WheelEvent): void => {
-      if (!(e.metaKey || e.ctrlKey)) return;
+      const viewer = viewerInstanceRef.current;
+      if (!viewer) return;
+
+      const deltaMode = e.deltaMode;
+      let scaleFactor = Math.exp(-e.deltaY / 100);
+
+      // mozilla 的 isPinchToZoom 判定(macOS trackpad pinch → ctrlKey + DOM_DELTA_PIXEL)
+      const isPinchToZoom =
+        e.ctrlKey &&
+        deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
+        e.deltaX === 0 &&
+        Math.abs(scaleFactor - 1) < 0.05 &&
+        e.deltaZ === 0;
+
+      // 非 pinch 且非 Cmd/Ctrl + wheel:不处理(让浏览器/容器正常滚动)
+      if (!isPinchToZoom && !e.ctrlKey && !e.metaKey) return;
+
       e.preventDefault();
+      const origin: [number, number] = [e.clientX, e.clientY];
 
-      // pinch 开始:transformOrigin 设为 viewer 可视中心 — 跟 commit 后真渲染居中行为一致
-      if (quiesceTimerId === 0) {
-        const cx = container.clientWidth / 2 + container.scrollLeft;
-        const cy = container.clientHeight / 2 + container.scrollTop;
-        viewerDiv.style.transformOrigin = `${cx}px ${cy}px`;
+      if (isPinchToZoom) {
+        // pinch — 用 factor 累积器
+        const factor = accumulateFactor(viewer.currentScale, scaleFactor);
+        viewer.updateScale({
+          drawingDelay: 400,
+          scaleFactor: factor,
+          origin,
+        });
+      } else {
+        // Cmd+wheel(传统鼠标滚轮缩放)— 用 ticks 累积器
+        let delta = e.deltaY;
+        if (deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
+        else if (deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= 100;
+        const PIXELS_PER_LINE_SCALE = 30;
+        const ticks = accumulateTicks(delta / PIXELS_PER_LINE_SCALE);
+        if (ticks === 0) return;
+        viewer.updateScale({
+          drawingDelay: 400,
+          // ticks 是 mouse wheel "格数",mozilla 用负号:向下滚 → 缩小
+          steps: -ticks,
+          origin,
+        });
       }
-
-      // 累积 pinch scale — deltaY 负 = 放大(pinch open),正 = 缩小
-      let delta = e.deltaY;
-      if (e.deltaMode === 1) delta *= 16;
-      else if (e.deltaMode === 2) delta *= 100;
-      pinchScale *= 1 - delta * WHEEL_DELTA_FACTOR;
-      pinchScale = Math.max(0.1, Math.min(10, pinchScale));
-
-      // 实时 CSS transform(GPU,几乎零成本)
-      viewerDiv.style.transform = `scale(${pinchScale})`;
-
-      // 重置静止 timer
-      if (quiesceTimerId !== 0) clearTimeout(quiesceTimerId);
-      quiesceTimerId = window.setTimeout(commit, QUIESCE_MS);
     };
 
     container.addEventListener('wheel', handler, { passive: false });
-    return () => {
-      container.removeEventListener('wheel', handler);
-      if (quiesceTimerId !== 0) {
-        clearTimeout(quiesceTimerId);
-        viewerDiv.style.transform = '';
-        viewerDiv.style.transformOrigin = '';
-      }
-    };
+    return () => container.removeEventListener('wheel', handler);
   }, []);
 
   // ── 键盘 Cmd+= / Cmd+- / Cmd+0 ──
