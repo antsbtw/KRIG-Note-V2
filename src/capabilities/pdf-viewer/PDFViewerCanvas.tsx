@@ -148,7 +148,12 @@ export const PDFViewerCanvas = forwardRef<
 
     // ── 事件桥接 ──
     const onPagesInit = (): void => {
-      viewer.currentScaleValue = initialFitMode;
+      // 关键:不能直接设 fit mode — pagesinit 触发时 container layout 可能还没就绪,
+      // pdfjs page-width 算法用错误的 clientWidth 算出过大 scale → page 超出 container 贴左。
+      // rAF 等浏览器完成 layout 再设。
+      requestAnimationFrame(() => {
+        viewer.currentScaleValue = initialFitMode;
+      });
     };
     const onPagesLoaded = (): void => {
       if (initialPage && initialPage >= 1 && initialPage <= pdfDoc.numPages) {

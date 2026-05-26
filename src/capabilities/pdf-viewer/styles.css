@@ -42,6 +42,11 @@
   box-sizing: border-box;
 }
 
-.pdfViewerContainer .pdfViewer .page {
-  margin: 1px auto -8px !important;
+/*
+ * page 横向居中 — 直接覆盖 CSS variable --page-margin。
+ * pdfjs 4.x 各 .page 用 `margin: var(--page-margin)`,我们改变量同时改所有 page。
+ * !important 防 spread/scroll-mode conditional rule 覆盖。
+ */
+.pdfViewerContainer .pdfViewer {
+  --page-margin: 1px auto -8px !important;
 }
