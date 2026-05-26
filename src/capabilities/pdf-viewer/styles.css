@@ -28,10 +28,16 @@
 }
 
 /*
- * .pdfViewer 不加 min-width 覆盖 — 对齐 mozilla pdf.js 默认行为。
- * viewer 默认 width=auto=container clientWidth,page 比 container 窄时
- * pdfjs 自带 margin:auto 居中;page 比 container 宽时 viewer 撑到 page
- * 宽度由 container 横向 scroll 自然显示。
- * 之前 min-width: max-content 让 viewer 撑出 container 致 layout 错位
- * (2026-05-25 数据 viewer=1915 vs container=870,page 远偏右)。
+ * 限 viewer 宽度 = container width,小页正常 margin auto 居中。
+ *
+ * pdfjs 默认让 viewer 按 max page width 撑(整本最大页),其他正常页在
+ * viewer 内 margin auto 居中,但 viewer 本身溢出 container → 小页视觉上
+ * 偏右(viewer 中心远离 container 中心)。
+ *
+ * 修:.pdfViewer { max-width: 100% } 限 viewer ≤ container。每页独立按
+ * container 中线居中(margin auto 计算基线 = container width);大开本页
+ * 超出 viewer 部分由 page 自己 horizontal scroll(浏览器默认行为)。
  */
+.pdfViewerContainer .pdfViewer {
+  max-width: 100%;
+}
