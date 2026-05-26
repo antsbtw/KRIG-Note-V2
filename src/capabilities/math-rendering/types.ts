@@ -418,6 +418,12 @@ export interface MathRenderingApi {
   secondDerivative(fn: (x: number) => number, x: number, h?: number): number;
   /** Simpson 法则积分(默认 200 段) */
   integrate(fn: (x: number) => number, a: number, b: number, n?: number): number;
+  /**
+   * Self-contained SVG 导出(PR4 2026-05-26):clone SVG + 内联 mafs/katex CSS
+   * rule + 默认主题变量;返回独立可渲染字符串(不依赖外部 CSS,可直接
+   * dangerouslySetInnerHTML 或下载为文件外部打开)。
+   */
+  exportSelfContainedSvg(svgEl: SVGElement): string;
   /** 特征点扫描(零点 / 极值 / 拐点);types 默认全 4 类 */
   detectFeaturePoints(
     fn: (x: number) => number,

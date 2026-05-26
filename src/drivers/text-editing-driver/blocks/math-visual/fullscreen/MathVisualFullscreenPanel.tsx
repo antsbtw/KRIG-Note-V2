@@ -64,6 +64,7 @@ function readDataFromPM(instanceId: string, nodePos: number): MathVisualData | n
     integralRegions: a.integralRegions || [],
     featurePoints: a.featurePoints || [],
     toolMode: a.toolMode || 'move',
+    thumbnail: a.thumbnail ?? null,
   };
 }
 
@@ -90,12 +91,13 @@ function writeDataToPM(
   tr = tr.setNodeAttribute(nodePos, 'integralRegions', data.integralRegions || []);
   tr = tr.setNodeAttribute(nodePos, 'featurePoints', data.featurePoints || []);
   tr = tr.setNodeAttribute(nodePos, 'toolMode', data.toolMode || 'move');
+  if (data.thumbnail !== undefined) tr = tr.setNodeAttribute(nodePos, 'thumbnail', data.thumbnail);
   view.dispatch(tr);
 }
 
 // ─── Inner Panel(被 ErrorBoundary 包裹) ────────────────
 
-const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
+const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose }) => {
   const math = requireCapabilityApi<MathRenderingApi>('math-rendering');
   const ctxRef = useRef(getMathVisualFullscreenContext());
 
@@ -135,6 +137,22 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
       clearMathVisualFullscreenContext();
     };
   }, []);
+
+  // 关闭前抓 SVG 缩略图写回 PM(inline 静态显示用)
+  // PR4(2026-05-26)走 SVG 缓存方案 — onClose 前在 React 仍 mount 时
+  // querySelector 拿 canvasRef 内 mafs 输出的 svg outerHTML
+  const onClose = useCallback(() => {
+    const ctx = ctxRef.current;
+    const svgEl = canvasRef.current?.querySelector('svg') as SVGElement | null;
+    if (ctx && svgEl) {
+      // 走 capability self-contained 导出 — 内联 mafs/katex CSS,inline 独立渲染
+      const thumbnail = math.exportSelfContainedSvg(svgEl);
+      const nextData = { ...lastDataRef.current, thumbnail };
+      lastDataRef.current = nextData;
+      writeDataToPM(ctx.instanceId, ctx.nodePos, nextData);
+    }
+    rawOnClose();
+  }, [rawOnClose, math]);
 
   const { functions: fns, domain, range, parameters, annotations } = data;
   const tangentLines = data.tangentLines || [];
@@ -443,9 +461,10 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
   }, []);
 
   const handleExportSvg = useCallback(() => {
-    const svgEl = canvasRef.current?.querySelector('svg');
+    const svgEl = canvasRef.current?.querySelector('svg') as SVGElement | null;
     if (!svgEl) return;
-    const svgData = new XMLSerializer().serializeToString(svgEl);
+    // 走 capability self-contained 导出 — 文件外部打开也带样式
+    const svgData = math.exportSelfContainedSvg(svgEl);
     const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -453,7 +472,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose }) => {
     a.download = 'math-visual.svg';
     a.click();
     URL.revokeObjectURL(url);
-  }, []);
+  }, [math]);
 
   // ── 画布交互 ──
 

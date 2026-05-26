@@ -180,6 +180,8 @@ export interface MathVisualData {
   integralRegions?: IntegralRegion[];
   featurePoints?: FeaturePoint[];
   toolMode?: ToolMode;       // Phase 2:跨全屏持久,默认 'move'
+  /** PR4(2026-05-26):全屏 ⛶ 退出时生成的 SVG 缩略图;inline 直接渲染 */
+  thumbnail?: string | null;
 }
 
 /** 自动分配色板 */

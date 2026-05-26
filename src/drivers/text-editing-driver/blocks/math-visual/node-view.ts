@@ -20,10 +20,8 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { createRoot, type Root } from 'react-dom/client';
 import React from 'react';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
-import { helpPanelController } from '@slot/triggers/help-panel-controller';
 import { MathVisualComponent } from './MathVisualComponent';
 import { setMathVisualFullscreenContext } from './fullscreen/menu-context';
-import { setMathVisualHelpContext, MATH_VISUAL_HELP_PANEL_ID } from './help-panel';
 import type { MathVisualData } from './types';
 import { DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from './types';
 
@@ -51,6 +49,7 @@ function getDataFromNode(n: PMNode): MathVisualData {
     integralRegions: n.attrs.integralRegions || [],
     featurePoints: n.attrs.featurePoints || [],
     toolMode: n.attrs.toolMode || 'move',
+    thumbnail: n.attrs.thumbnail ?? null,
   };
 }
 
@@ -89,6 +88,7 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
     if (newData.integralRegions !== undefined) tr = tr.setNodeAttribute(pos, 'integralRegions', newData.integralRegions);
     if (newData.featurePoints !== undefined) tr = tr.setNodeAttribute(pos, 'featurePoints', newData.featurePoints);
     if (newData.toolMode !== undefined) tr = tr.setNodeAttribute(pos, 'toolMode', newData.toolMode);
+    if (newData.thumbnail !== undefined) tr = tr.setNodeAttribute(pos, 'thumbnail', newData.thumbnail);
     // React 内部 attr 同步不进 undo 历史 — 否则 cmd+Z 会把这批 AttrStep 倒回去,
     // 且 history 记的 selection 会让光标跳 doc 末尾(2026-05-20 排查)
     tr.setMeta('addToHistory', false);
@@ -103,11 +103,6 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
     fullscreenOverlayController.show(FULLSCREEN_OVERLAY_ID);
   }
 
-  function onShowHelp(insertFn: (expr: string) => void): void {
-    setMathVisualHelpContext({ insertFn });
-    helpPanelController.show(MATH_VISUAL_HELP_PANEL_ID);
-  }
-
   function render(): void {
     const data = getDataFromNode(node);
     // widthMode 写到外层 NodeView dom 上,CSS 用 .krig-math-visual.mv-width-* 控宽
@@ -119,7 +114,6 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
       data,
       onChange: updateAttrs,
       onFullscreen,
-      onShowHelp,
     });
     if (!root) {
       root = createRoot(renderWrap);

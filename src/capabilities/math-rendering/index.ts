@@ -42,6 +42,7 @@ import {
 import { derivative, secondDerivative } from './compute/derivatives';
 import { integrate } from './compute/integrate';
 import { detectFeaturePoints } from './compute/features';
+import { exportSelfContainedSvg } from './host/export-svg';
 
 export type {
   MathRenderingApi,
@@ -86,6 +87,8 @@ export { detectPlotType };
 export { latexToMathjs, latexToFunction, latexToFunctionWithEndpoints };
 // Phase 2:全屏专用计算
 export { derivative, secondDerivative, integrate, detectFeaturePoints };
+// PR4(2026-05-26):self-contained SVG 导出(inline 缩略图 / 文件下载共用)
+export { exportSelfContainedSvg };
 
 // ── 自我诊断 ──
 console.info('[math-rendering] alive | sdk: mafs + mathjs + compute-engine');
@@ -113,5 +116,6 @@ capabilityRegistry.register({
     secondDerivative,
     integrate,
     detectFeaturePoints,
+    exportSelfContainedSvg,
   } satisfies MathRenderingApi,
 });
