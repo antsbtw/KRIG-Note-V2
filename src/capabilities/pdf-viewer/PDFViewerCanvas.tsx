@@ -382,14 +382,50 @@ export const PDFViewerCanvas = forwardRef<
       },
       setScale(absoluteScale: number, _origin?: [number, number]): void {
         const viewer = viewerInstanceRef.current;
-        if (!viewer) return;
-        // pdfjs #isSameScale 早退:若 newScale === currentScale,_setScaleUpdatePages
-        // 直接 return,不重置 scrollPageIntoView → scroll 保留之前的偏移状态。
-        // 当用户:fit-width → toolbar 选 100%,pdfjs 算出的 fit-width scale 可能恰
-        // 接近 1.0,设 "1" 触发 isSameScale 早退,scroll 不重置致 page 偏左。
-        // 解:setScale 后总是 scrollPageIntoView 到当前页强制重置 scroll 居中。
+        const containerEl = containerRef.current;
+        if (!viewer || !containerEl) return;
+        const before = {
+          scale: viewer.currentScale,
+          scrollLeft: containerEl.scrollLeft,
+          scrollWidth: containerEl.scrollWidth,
+          clientWidth: containerEl.clientWidth,
+        };
         viewer.currentScaleValue = String(absoluteScale);
         viewer.scrollPageIntoView({ pageNumber: viewer.currentPageNumber });
+        // 双 rAF 等 pdfjs 内部 scroll 异步完成
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const after = {
+              scale: viewer.currentScale,
+              scrollLeft: containerEl.scrollLeft,
+              scrollWidth: containerEl.scrollWidth,
+              clientWidth: containerEl.clientWidth,
+            };
+            const page1 = viewerRef.current?.querySelector('.page') as HTMLElement | null;
+            const pbcr = page1?.getBoundingClientRect();
+            const cbcr = containerEl.getBoundingClientRect();
+            const pageCenter = pbcr ? (pbcr.left + pbcr.right) / 2 : 0;
+            const containerCenter = (cbcr.left + cbcr.right) / 2;
+            const offsetFromCenter = pageCenter - containerCenter;
+            window.electronAPI?.reportAlive({
+              layer: 'pdf-zoom',
+              details: {
+                requested: absoluteScale,
+                before_scale: before.scale.toFixed(3),
+                before_scrollLeft: before.scrollLeft,
+                before_scrollWidth: before.scrollWidth,
+                after_scale: after.scale.toFixed(3),
+                after_scrollLeft: after.scrollLeft,
+                after_scrollWidth: after.scrollWidth,
+                clientWidth: after.clientWidth,
+                pageW: pbcr?.width.toFixed(0),
+                pageCenter: pageCenter.toFixed(0),
+                containerCenter: containerCenter.toFixed(0),
+                offsetFromCenter: offsetFromCenter.toFixed(0),
+              },
+            });
+          });
+        });
       },
       setFitMode(mode: FitMode): void {
         const viewer = viewerInstanceRef.current;
