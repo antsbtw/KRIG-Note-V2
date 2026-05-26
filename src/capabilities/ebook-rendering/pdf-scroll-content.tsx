@@ -13,8 +13,8 @@
  * 虚拟滚动。本组件改走 pdfjs PDFViewer 高层组件,scroll 由 pdfjs 内部管理。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type {
@@ -76,9 +76,14 @@ export function PdfScrollContent({
   const canvasRef = useRef<PDFViewerCanvasHandle | null>(null);
   const [handle, setHandle] = useState<DocumentHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 每页 wrapper div 引用(pdfjs PDFPageView.div),给 AnnotationLayer 做 portal target
+  // 每页 wrapper div 引用(pdfjs PDFPageView.div),AnnotationLayer 自管 root 挂在内
   const [mountedPages, setMountedPages] = useState<Map<number, HTMLElement>>(
     () => new Map(),
+  );
+  // 每页一个 React root + 挂载用的 wrapper div(我们创建,直接 append 到 pageDiv)
+  // pdfjs 销毁 pageDiv 时 wrapper 跟着死,我们手动 root.unmount() 容错。
+  const rootsRef = useRef<Map<number, { root: Root; wrapper: HTMLDivElement }>>(
+    new Map(),
   );
   // textLayer ref Map(用于 use-pdf-text-selection hook)
   const textLayerRefsRef = useRef<Map<number, HTMLElement>>(new Map());
@@ -195,6 +200,78 @@ export function PdfScrollContent({
     });
   }, [onRegisterApi]);
 
+  // 命令式 React root 同步 — 不用 createPortal(unmount 时 pdfjs 已销毁 pageDiv,
+  // portal removeChild 找不到 child 崩)。每页一个 root + 自管 wrapper div。
+  // mountedPages / annotations / scale / 等变化时 root.render 重新渲染。
+  // pageDiv 脱离 DOM(virtual scroll 出可视)时 root.unmount() 清理。
+  const annotationsForRender = useMemo(
+    () => ({ annotations, annotationMode, flashAnnotationId, cssScaleFactor, onAnnotationCreate }),
+    [annotations, annotationMode, flashAnnotationId, cssScaleFactor, onAnnotationCreate],
+  );
+  useEffect(() => {
+    const roots = rootsRef.current;
+    // 1) 同步 mountedPages — 新页加 root + wrapper,旧页(已不在 mountedPages)卸载
+    const activePageNums = new Set(mountedPages.keys());
+    // 卸载已不在的 page
+    for (const [pageNum, entry] of roots) {
+      if (!activePageNums.has(pageNum)) {
+        try {
+          entry.root.unmount();
+        } catch {
+          /* pdfjs 已销毁,忽略 */
+        }
+        if (entry.wrapper.parentNode) entry.wrapper.parentNode.removeChild(entry.wrapper);
+        roots.delete(pageNum);
+      }
+    }
+    // 创建新页 root
+    for (const [pageNum, pageDiv] of mountedPages) {
+      if (roots.has(pageNum)) continue;
+      if (!pageDiv.isConnected) continue;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'krig-pdf-annotation-portal';
+      wrapper.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+      pageDiv.appendChild(wrapper);
+      const root = createRoot(wrapper);
+      roots.set(pageNum, { root, wrapper });
+    }
+    // 2) 同步内容(render 现有 root)
+    const { annotations: anns, annotationMode: mode, flashAnnotationId: flashId, cssScaleFactor: sf, onAnnotationCreate: onCreate } = annotationsForRender;
+    for (const [pageNum, entry] of roots) {
+      const dim = pageDims.get(pageNum);
+      if (!dim) continue;
+      const pageAnns = anns.filter((a) => a.pageNum === pageNum);
+      entry.root.render(
+        <AnnotationLayer
+          pageNum={pageNum}
+          scale={sf}
+          pageWidth={dim.w}
+          pageHeight={dim.h}
+          mode={mode}
+          annotations={pageAnns}
+          flashAnnotationId={flashId}
+          onAnnotationCreate={onCreate ?? (() => {})}
+        />,
+      );
+    }
+  }, [mountedPages, pageDims, annotationsForRender]);
+
+  // 组件 unmount 时全清
+  useEffect(() => {
+    const roots = rootsRef.current;
+    return () => {
+      for (const entry of roots.values()) {
+        try {
+          entry.root.unmount();
+        } catch {
+          /* ignore */
+        }
+        if (entry.wrapper.parentNode) entry.wrapper.parentNode.removeChild(entry.wrapper);
+      }
+      roots.clear();
+    };
+  }, []);
+
   if (error) {
     return (
       <div className="krig-ebook-empty">
@@ -226,31 +303,12 @@ export function PdfScrollContent({
        * pdfjs 的 PDFPageView.div 是 position:relative,我们的 AnnotationLayer
        * absolute + inset:0 铺满,与 canvas / textLayer 同层叠加。
        */}
-      {Array.from(mountedPages.entries()).map(([pageNum, pageDiv]) => {
-        const dim = pageDims.get(pageNum);
-        if (!dim) return null;
-        // pdfjs PDFPageView 销毁(scroll/paged 切换 / virtual scroll 出可视)时,
-        // 会把 pageDiv 从父节点移除。我们 mountedPages Map 还持引用,portal 渲染
-        // 时 React 试图 removeChild(scroll → paged 切换) 但 pageDiv 已脱离 DOM
-        // → "Failed to execute 'removeChild': not a child of this node"。
-        // 校验:pageDiv 仍连在 DOM 才 portal,否则跳过(下个 page render 事件会
-        // 推新 ref 进 Map 重建 portal)。
-        if (!pageDiv.isConnected) return null;
-        return createPortal(
-          <AnnotationLayer
-            pageNum={pageNum}
-            scale={cssScaleFactor}
-            pageWidth={dim.w}
-            pageHeight={dim.h}
-            mode={annotationMode}
-            annotations={annotations.filter((a) => a.pageNum === pageNum)}
-            flashAnnotationId={flashAnnotationId}
-            onAnnotationCreate={onAnnotationCreate ?? (() => {})}
-          />,
-          pageDiv,
-          `pdf-anno-layer-${pageNum}`,
-        );
-      })}
+      {/*
+       * AnnotationLayer 走命令式 React root mount(见 useEffect 内 rootsRef),
+       * 不用 createPortal — portal 在 pdfjs 销毁 pageDiv 时会触发 React removeChild
+       * 找不到 child 崩(scroll/paged 切换 / virtual scroll 出可视场景)。
+       * 自管 root 在 pageDiv unmount 时手动 root.unmount(),容错处理 isConnected。
+       */}
     </>
   );
 }
