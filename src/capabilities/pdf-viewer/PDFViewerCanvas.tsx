@@ -338,29 +338,23 @@ export const PDFViewerCanvas = forwardRef<
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ── 容器尺寸变化 → 重新刷新渲染(对齐 mozilla viewer.js onResize)──
+  // ── 容器尺寸变化 → 无条件重 fit-width(用户诉求:每次视图更改重新适应)──
   //
-  // pdfjs 内部 RO 只更新 CSS var + containerTopLeft 缓存,不重算 scale 也不
-  // 重渲可见页。当外层 slot 尺寸变化(thought 弹出/关闭等),PDF 必须:
-  //   1. fit 模式下重算 scale(同 mozilla:auto/page-fit/page-width 三种)
-  //      'page-actual' 是数值常量(100%),不重算 — mozilla 注释 "scale is constant"
-  //   2. 任何情况下 viewer.update() 刷新可见页(重新计算 visible pages + 触发渲染)
+  // pdfjs 内部 RO 只更新 CSS var + containerTopLeft 缓存,不重算 scale。
+  // 用户拍板:每次容器变化都重新让 PDF 适应新尺寸(不保留数值 scale),
+  // 因为 KRIG 是 reading-first 应用,容器变化(slot 切换等)应当让用户始终
+  // 看到 fit-width 的 PDF,而不是滚动 scrollbar 找内容。
   //
-  // 数值 scale(如 1.5x)不重算 — 用户明确选了某个数值,resize 不该改它,
-  // 但 update() 仍要调让"可见页"重新计算(slot 缩小后某些页可能进出可视区)。
+  // 防死循环:在新 ResizeObserver tick 内调 currentScaleValue 会再触发同步
+  // layout reflow,但 container width 不变 → ResizeObserver 不再 fire,稳。
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
       const viewer = viewerInstanceRef.current;
       if (!viewer) return;
-      const v = viewer.currentScaleValue;
-      if (v === 'page-width' || v === 'page-fit' || v === 'auto') {
-        // fit 模式 — 重设同值触发 pdfjs 重算 scale + 重渲
-        viewer.currentScaleValue = v;
-      }
-      // 任何模式都刷新可见页计算(数值 scale 时也要)
-      viewer.update();
+      // 重设 fit-width 让 pdfjs 重算 scale + 重渲可见页
+      viewer.currentScaleValue = 'page-width';
     });
     observer.observe(container);
     return () => observer.disconnect();
