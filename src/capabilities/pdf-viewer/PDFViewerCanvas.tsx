@@ -250,18 +250,21 @@ export const PDFViewerCanvas = forwardRef<
       return wholeTicks;
     };
 
-    // mozilla _centerAtPos 严格复刻(app.js 中的方法,issue #18076 引用)
-    // — 用于 updateScale 后把"鼠标位置"那个内容点锚定在原位。
-    // 公式:scrollLeft += (x - containerTopLeft.left) × scaleDiff
-    // containerTopLeft = [offsetTop, offsetLeft](pdfjs 内置 getter,相对 offsetParent)
+    // 鼠标点聚焦缩放 — 自己用 BCR 算,不用 pdfjs containerTopLeft。
+    //
+    // mozilla _centerAtPos 公式假定 containerTopLeft 与鼠标 clientX 同坐标系,
+    // 在 mozilla viewer.html(container 直接挂 body)成立(offsetLeft = viewport left)。
+    // KRIG 嵌套容器(NavSide 之下)offsetLeft 是相对 offsetParent,跟 viewport 不一致。
+    //
+    // 改用 container.getBoundingClientRect()(viewport 坐标),跟 clientX 同系统。
     const centerAtPos = (previousScale: number, x: number, y: number): void => {
       const v = viewerInstanceRef.current;
       if (!v) return;
       const scaleDiff = v.currentScale / previousScale - 1;
       if (scaleDiff === 0) return;
-      const [top, left] = v.containerTopLeft;
-      container.scrollLeft += (x - left) * scaleDiff;
-      container.scrollTop += (y - top) * scaleDiff;
+      const bcr = container.getBoundingClientRect();
+      container.scrollLeft += (x - bcr.left) * scaleDiff;
+      container.scrollTop += (y - bcr.top) * scaleDiff;
     };
 
     const handler = (e: WheelEvent): void => {
