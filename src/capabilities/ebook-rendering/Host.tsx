@@ -663,7 +663,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
        * Stage 4 删除此分支 + 整合 PdfViewerDevBranch 路径到主 PDF scroll 分支。
        */}
       {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && isPdfViewerV2Enabled() && (
-        <PdfViewerDevBranch onPageChange={handlePdfPageChange} />
+        <PdfViewerDevBranch
+          onPageChange={handlePdfPageChange}
+          annotationMode={pdfAnnotationMode}
+          annotations={pdfAnnotations}
+          flashAnnotationId={pdfFlashAnnotationId}
+          onAnnotationCreate={onPdfAnnotationCreate}
+          onTextSelected={onPdfTextSelected}
+          onTextLayerRendered={onPdfTextLayerRendered}
+        />
       )}
 
       {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && !isPdfViewerV2Enabled() && (
