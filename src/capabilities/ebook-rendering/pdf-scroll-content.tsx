@@ -20,6 +20,7 @@ import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type {
   PdfViewerApi,
   DocumentHandle,
+  PDFViewerCanvasHandle,
 } from '@capabilities/pdf-viewer/types';
 import {
   AnnotationLayer,
@@ -34,6 +35,18 @@ import {
 interface Props {
   /** 当前页号变化 — 转给 Host 的 onPageChange */
   onPageChange?: (page: number) => void;
+  /** scale 变化(view 同步 toolbar)*/
+  onScaleChange?: (scale: number) => void;
+  /**
+   * 注册命令式 API 给 Host — toolbar 页号输入、缩放百分比、跳转都走这里。
+   * Host 通过此回调拿到 PDFViewerCanvas 的命令式接口。
+   */
+  onRegisterApi?: (api: {
+    goToPage: (page: number) => void;
+    setScale: (scale: number) => void;
+    setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
+    getScale: () => number;
+  }) => void;
   /** 标注模式(C5):'off' / 'rect' */
   annotationMode?: 'off' | 'rect';
   /** 已有标注 */
@@ -50,6 +63,8 @@ interface Props {
 
 export function PdfScrollContent({
   onPageChange,
+  onScaleChange,
+  onRegisterApi,
   annotationMode = 'off',
   annotations = [],
   flashAnnotationId = null,
@@ -57,6 +72,8 @@ export function PdfScrollContent({
   onTextSelected,
   onTextLayerRendered,
 }: Props) {
+  // PDFViewerCanvas ref — 给 Host 注册的命令式 API 用
+  const canvasRef = useRef<PDFViewerCanvasHandle | null>(null);
   const [handle, setHandle] = useState<DocumentHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 每页 wrapper div 引用(pdfjs PDFPageView.div),给 AnnotationLayer 做 portal target
@@ -159,9 +176,24 @@ export function PdfScrollContent({
     [onTextLayerRendered],
   );
 
-  const handleScaleChange = useCallback((newScale: number) => {
-    setScale(newScale);
-  }, []);
+  const handleScaleChange = useCallback(
+    (newScale: number) => {
+      setScale(newScale);
+      onScaleChange?.(newScale);
+    },
+    [onScaleChange],
+  );
+
+  // 注册命令式 API 给 Host(toolbar 跳页 / 缩放走此通道)
+  useEffect(() => {
+    if (!onRegisterApi) return;
+    onRegisterApi({
+      goToPage: (page) => canvasRef.current?.goToPage(page),
+      setScale: (s) => canvasRef.current?.setScale(s),
+      setFitMode: (mode) => canvasRef.current?.setFitMode(mode),
+      getScale: () => canvasRef.current?.getScale() ?? 1.0,
+    });
+  }, [onRegisterApi]);
 
   if (error) {
     return (
@@ -181,6 +213,7 @@ export function PdfScrollContent({
   return (
     <>
       <PDFViewerCanvas
+        ref={canvasRef}
         handle={handle}
         initialFitMode="page-width"
         onPageChange={onPageChange}

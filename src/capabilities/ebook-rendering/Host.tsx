@@ -266,11 +266,28 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   const [restorePage, setRestorePage] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // FixedPageContent / FullscreenPageView 注册的 gotoPage 回调
+  // PdfScrollContent / FullscreenPageView 注册的 gotoPage 回调
   const gotoPageRef = useRef<((page: number) => void) | null>(null);
   const registerGotoPage = useCallback((fn: (page: number) => void) => {
     gotoPageRef.current = fn;
   }, []);
+  // PdfScrollContent 注册的完整命令式 API(toolbar 缩放百分比 / fit-width 走此通道)
+  const scrollApiRef = useRef<{
+    setScale: (s: number) => void;
+    setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
+  } | null>(null);
+  const registerScrollApi = useCallback(
+    (api: {
+      goToPage: (page: number) => void;
+      setScale: (s: number) => void;
+      setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
+      getScale: () => number;
+    }) => {
+      gotoPageRef.current = api.goToPage;
+      scrollApiRef.current = { setScale: api.setScale, setFitMode: api.setFitMode };
+    },
+    [],
+  );
 
   // 当前 PDF 页号 — paged ↔ scroll 切换时,FixedPageContent / FullscreenPageView
   // 重 mount,把这个值作为 initialPage 喂回去,保持页面连续(用户在 paged 翻到
@@ -488,8 +505,9 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       if (pdfLayoutRef.current === 'paged') return;
       setFitWidth(false);
       setScale(newScale);
-      const r = rendererRef.current;
-      if (r && isFixedPage(r)) r.setScale(newScale);
+      // scroll 模式:走 PdfScrollContent 注册的 API(pdfjs PDFViewer 真渲染);
+      // 旧 PDFRenderer.setScale 只为 paged 全屏服务,scroll 模式不再调用。
+      scrollApiRef.current?.setScale(newScale);
       onScaleChange?.(newScale);
     },
     [onScaleChange],
@@ -501,20 +519,12 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       if (pdfLayoutRef.current === 'paged') return;
       setFitWidth(on);
       if (on) {
-        requestAnimationFrame(() => {
-          const r = rendererRef.current;
-          if (!r || !isFixedPage(r) || !containerRef.current) return;
-          const dims = r.getPageDimensions();
-          if (dims.length === 0) return;
-          const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
-          const newScale = cw / dims[0].width;
-          setScale(newScale);
-          r.setScale(newScale);
-          onScaleChange?.(newScale);
-        });
+        // scroll 模式:走 PdfScrollContent 注册的 setFitMode(pdfjs PDFViewer
+        // 内部 page-width 算法 + 真渲染),不再自管 dims × 公式。
+        scrollApiRef.current?.setFitMode('page-width');
       }
     },
-    [onScaleChange],
+    [],
   );
 
   useImperativeHandle(
@@ -660,6 +670,8 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
         <PdfScrollContent
           onPageChange={handlePdfPageChange}
+          onScaleChange={handleScaleChange}
+          onRegisterApi={registerScrollApi}
           annotationMode={pdfAnnotationMode}
           annotations={pdfAnnotations}
           flashAnnotationId={pdfFlashAnnotationId}
