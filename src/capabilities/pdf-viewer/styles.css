@@ -27,3 +27,14 @@
   overflow: auto;
   outline: none; /* tabIndex=0 拿键盘焦点,不要 default focus ring */
 }
+
+/*
+ * page 比容器窄时,pdfjs 默认 `.page { margin: 1px auto }` 自动水平居中。
+ * page 比容器宽时(放大后超出 container 宽),margin auto 不生效,page 贴左。
+ * 我们让 .pdfViewer 至少铺满 container 宽,这样窄 page 仍能 margin auto 居中;
+ * 宽 page 则 viewer 宽度跟 page 一致(scrollable),scrollLeft 由 pdfjs 管理。
+ */
+.pdfViewerContainer .pdfViewer {
+  min-width: 100%;
+  box-sizing: border-box;
+}
