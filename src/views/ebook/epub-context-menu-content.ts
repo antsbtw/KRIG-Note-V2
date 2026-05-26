@@ -52,6 +52,7 @@ import {
   USER_THOUGHT_TYPES,
   type ThoughtType,
 } from '@shared/ipc/thought-types';
+import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
 import { getEBookWsState } from './data-model';
 import { EpubColorSubmenu } from './EpubColorSubmenu';
 
@@ -289,9 +290,122 @@ export function registerEpubContextMenu(): void {
     })();
   });
 
-  /** 🤖 问 AI(占位 stub) */
+  /**
+   * 🤖 问 AI — EPUB 选区或已标注 → 复用 note 同款 AskAIPanel popup。
+   *
+   * 流程(对齐 thought/command-impl/ask-ai.ts Note 端模式):
+   *   1. 取 textContent + cfi(选区:custom 字段;已标注:findEpubAnchorByCfi)
+   *   2. 立即 openRight('ai-view')(右槽切到 AI Web,popup 取消也保留切换)
+   *   3. addReadingThoughtBlock 落 ai-response 颜色 highlight 拿 createdAt
+   *      (复用 EPUB 既有标注路径,host 自动画高亮)
+   *   4. preCreate 空 thought atom(type='ai-response')+ anchor 关联 cfi/createdAt
+   *   5. execute 'note-view.open-ask-ai-popup'(view: undefined,EPUB 可弹同款 popup)
+   *      instanceId 留空(EPUB 无 PM 实例,popup cancel 时跳过 PM mark 反清)
+   *
+   * cancel 路径:popup 反清只 deleteThought + clearPendingAIThought;
+   * legacy highlight block 由 thought hook diff 在 atom 删除时移除(同 add-thought 路径)。
+   */
   commandRegistry.register('ebook-view.epub-ask-ai', () => {
-    console.info('[ebook-view.epub-ask-ai] 占位 — 待 AIView 接 EPUB textContent 后实装');
+    const { text, cfi, annotationCfi } = ctx();
+    const bookId = getActiveBookId();
+    if (!bookId) return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+
+    // 入口立即切右槽到 AI View(同 Note 端 ask-ai)
+    const bus = workspaceManager.getBus(wsId);
+    bus?.slot.openRight('ai-view');
+
+    const cmState = contextMenuController.getState();
+    const anchorX = cmState.x;
+    const anchorY = cmState.y;
+    const aiState = ws.pluginStates['ai'] as { currentServiceId?: AIServiceId } | undefined;
+    const defaultServiceId: AIServiceId = aiState?.currentServiceId ?? DEFAULT_AI_SERVICE;
+
+    void (async () => {
+      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+      const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+
+      // 解析 text + cfi + 标注 createdAt:
+      // - 已标注(右键在已有 highlight 上):复用 existing 的 textContent / cfi / createdAt,
+      //   不重复落新 highlight(避免一个选区两条 anchor)
+      // - 选区未标注:用 ctx() 字段,落新 ai-response 颜色 highlight,createdAt = now
+      let resolvedText = text;
+      let resolvedCfi = cfi;
+      let anchorCreatedAt = Date.now();
+      if (annotationCfi) {
+        const existing = await findEpubAnchorByCfi(bookId, annotationCfi);
+        if (existing) {
+          resolvedText = existing.textContent ?? '';
+          resolvedCfi = existing.cfi ?? null;
+          anchorCreatedAt = existing.createdAt;
+        }
+      }
+      if (!resolvedText || !resolvedCfi) {
+        console.warn('[ebook-view.epub-ask-ai] no text/cfi resolved');
+        return;
+      }
+
+      // 选区未标注 → 落 ai-response 颜色 highlight
+      if (!annotationCfi) {
+        const color = THOUGHT_TYPE_META['ai-response'].color;
+        const bookAnchor: BookAnchor = {
+          pageNum: 0,
+          cfi: resolvedCfi,
+          textContent: resolvedText,
+          color,
+          type: 'highlight',
+          createdAt: anchorCreatedAt,
+        };
+        await lib.addReadingThoughtBlock(bookId, {
+          type: 'blockquote',
+          bookAnchor,
+          textContent: resolvedText,
+        });
+      }
+
+      // preCreate 空 thought atom + anchor(同 Note 端 placeholder 模式)
+      const locator: BookLocator = {
+        pageNum: 0,
+        cfi: resolvedCfi,
+        textContent: resolvedText,
+        markStyle: 'highlight',
+        createdAt: anchorCreatedAt,
+      };
+      const placeholder = await thoughtApi.createThought({
+        type: 'ai-response',
+        resolved: false,
+        pinned: false,
+        serviceId: defaultServiceId,
+        doc: {
+          format: 'pm-doc-json',
+          version: '0.1',
+          payload: { type: 'doc', content: [{ type: 'paragraph' }] },
+        },
+        folderId: null,
+        anchor: { source: 'book', resourceId: bookId, locator },
+      });
+
+      // cancel 反清:仅选区路径(未标注)需要删 legacy highlight block;
+      // 已标注路径标注是用户原本就有的,不能 cancel 时误删
+      const onCancel = annotationCfi
+        ? undefined
+        : () => {
+            void lib.removeReadingThoughtBlock(bookId, String(anchorCreatedAt));
+          };
+
+      // 弹同款 popup(view: undefined 全 view 可用;instanceId 不传)
+      commandRegistry.execute('note-view.open-ask-ai-popup', {
+        selectionMarkdown: resolvedText,
+        defaultServiceId,
+        anchorX,
+        anchorY,
+        thoughtId: placeholder.id,
+        onCancel,
+      });
+    })();
   });
 
   /** 📖 查词 — EPUB 选区单词 → DictionaryPanel lookup */

@@ -87,9 +87,14 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
       // cancel:反向清理
       try {
         const thought = requireCapabilityApi<ThoughtCapabilityApi>('thought');
-        const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
         const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
-        textEditing.api.removeThoughtAnchor(ctx.instanceId, ctx.thoughtId);
+        // EPUB / PDF 等 view 无 PM 实例,instanceId 为空 → 跳过 mark 反清
+        if (ctx.instanceId) {
+          const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+          textEditing.api.removeThoughtAnchor(ctx.instanceId, ctx.thoughtId);
+        }
+        // view 自定义反清(EPUB/PDF 删 legacy reading-thought-block + host 视觉刷新)
+        ctx.onCancel?.();
         void thought.deleteThought(ctx.thoughtId);
         ai.clearPendingAIThought(serviceIdRef.current);
       } catch (err) {

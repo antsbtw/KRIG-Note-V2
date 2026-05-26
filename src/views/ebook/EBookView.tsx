@@ -52,6 +52,7 @@ import {
   attachSection as attachEpubVocabSection,
   clearAll as clearEpubVocab,
 } from './epub-vocab-highlight';
+import { setLastPdfSelection } from './pdf-selection-ref';
 import './pdf-vocab-highlight/styles.css';
 import './ebook.css';
 
@@ -343,17 +344,24 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   useEffect(() => {
     if (pdfAnn.mode === 'rect') setPdfTextMode(false);
   }, [pdfAnn.mode]);
-  // 切书 → 重置(新 PDF 默认 off 更安全)
+  // 切书 → 重置(新 PDF 默认 off 更安全)+ 清 PDF 选区 ref(跨书 stale 防护)
   useEffect(() => {
     setPdfTextMode(false);
+    setLastPdfSelection(null);
   }, [activeBookId]);
 
-  // PDF textLayer 选区 → picker 弹出
+  // PDF textLayer 选区 → picker 弹出 + 始终缓存到模块 ref(右键 ask-ai 用)
   const [pdfTextSelection, setPdfTextSelection] =
     useState<PdfTextSelectionEvent | null>(null);
-  const handlePdfTextSelected = useCallback((ev: PdfTextSelectionEvent) => {
-    setPdfTextSelection(ev);
-  }, []);
+  const handlePdfTextSelected = useCallback(
+    (ev: PdfTextSelectionEvent) => {
+      // ref 始终写(右键 ask-ai 不依赖 pdfTextMode):mouseup → write ref → 右键时可读
+      setLastPdfSelection(ev);
+      // picker 弹出只在 ✎ 文字模式开时(原行为不变)
+      if (pdfTextMode) setPdfTextSelection(ev);
+    },
+    [pdfTextMode],
+  );
   const dismissPdfTextPicker = useCallback(() => {
     setPdfTextSelection(null);
     // 清掉浏览器原生选区灰底(否则残留)
@@ -771,7 +779,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             pdfAnnotations={pdfAnn.annotations}
             pdfFlashAnnotationId={pdfAnn.flashId}
             onPdfAnnotationCreate={handlePdfAnnotationCreate}
-            onPdfTextSelected={pdfTextMode ? handlePdfTextSelected : undefined}
+            onPdfTextSelected={handlePdfTextSelected}
             onPdfTextLayerRendered={handlePdfTextLayerRendered}
             pdfLayout={isFullscreen ? 'paged' : 'scroll'}
             pagedLayout={pagedLayout}

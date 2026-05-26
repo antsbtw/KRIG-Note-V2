@@ -34,8 +34,13 @@ import type {
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
 import type { LearningApi } from '@capabilities/learning/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import {
+  THOUGHT_TYPE_META,
+} from '@shared/ipc/thought-types';
+import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
 import { getEBookWsState } from './data-model';
 import { AnnotationTypeSubmenu } from './AnnotationTypeSubmenu';
+import { getLastPdfSelection, setLastPdfSelection } from './pdf-selection-ref';
 
 const VIEW = 'ebook-view';
 
@@ -238,9 +243,170 @@ export function registerContextMenu(): void {
     })();
   });
 
-  /** 🤖 问 AI(占位 — 等 AIView 支持 image input) */
+  /**
+   * 🤖 问 AI(已标注上)— 复用 note 同款 AskAIPanel popup。
+   *
+   * - 文字流标注(highlight/strikethrough):有 textContent → 走完整 ask-ai 流程
+   * - 框选标注(rect):只有 thumbnail 无 textContent → 暂不支持(等 AIView image input)
+   *
+   * 流程对齐 EPUB / Note:openRight → 复用既有 bookAnchor 创 thought atom → 弹 popup。
+   * 不重复落 highlight(已有),thought atom 关联到既有 createdAt。
+   */
   commandRegistry.register('ebook-view.ask-ai-from-annotation', () => {
-    console.info('[ebook-view.ask-ai] 占位 — 待 AIView 支持 image input 后实装');
+    const id = getPdfAnnotationId();
+    if (!id) return;
+    const bookId = getActiveBookId();
+    if (!bookId) return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+
+    const bus = workspaceManager.getBus(wsId);
+    bus?.slot.openRight('ai-view');
+
+    const cmState = contextMenuController.getState();
+    const anchorX = cmState.x;
+    const anchorY = cmState.y;
+    const aiState = ws.pluginStates['ai'] as { currentServiceId?: AIServiceId } | undefined;
+    const defaultServiceId: AIServiceId = aiState?.currentServiceId ?? DEFAULT_AI_SERVICE;
+
+    void (async () => {
+      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+      const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+      const createdAt = Number(id);
+      const bookAnchor = await lib.getReadingThoughtBlock(bookId, createdAt);
+      if (!bookAnchor) {
+        console.warn('[ebook-view.ask-ai-from-annotation] anchor not found', id);
+        return;
+      }
+      const text = bookAnchor.textContent ?? '';
+      if (!text) {
+        // 框选标注无文字 → 待 AIView image input
+        console.info(
+          '[ebook-view.ask-ai-from-annotation] 框选标注无 textContent,等 AIView image input',
+        );
+        return;
+      }
+      const locator = bookAnchorToLocator(bookAnchor);
+      const placeholder = await thoughtApi.createThought({
+        type: 'ai-response',
+        resolved: false,
+        pinned: false,
+        serviceId: defaultServiceId,
+        doc: {
+          format: 'pm-doc-json',
+          version: '0.1',
+          payload: { type: 'doc', content: [{ type: 'paragraph' }] },
+        },
+        folderId: null,
+        anchor: { source: 'book', resourceId: bookId, locator },
+      });
+      commandRegistry.execute('note-view.open-ask-ai-popup', {
+        selectionMarkdown: text,
+        defaultServiceId,
+        anchorX,
+        anchorY,
+        thoughtId: placeholder.id,
+      });
+    })();
+  });
+
+  /**
+   * 🤖 问 AI(PDF 文字流选区)— 选区直接落 ai-response highlight + 创 thought + 弹 popup。
+   *
+   * 数据源:pdf-selection-ref(EBookView mouseup handler 始终写入,不依赖 pdfTextMode)。
+   * 流程同 EPUB 选区路径,但用 PDF 完整 BookAnchor(pageNum + textRects + boundingRect)
+   * 复用 pdfAnnotations hook 的渲染管线(loadOnBookOpen diff 会画 highlight)。
+   *
+   * 校验:右键时 window.getSelection().isCollapsed → ref stale,no-op。
+   * 清除:dismissPdfTextPicker / 切书时清 ref(EBookView 已挂)。
+   */
+  commandRegistry.register('ebook-view.pdf-ask-ai-from-selection', () => {
+    const ev = getLastPdfSelection();
+    if (!ev) {
+      console.warn('[ebook-view.pdf-ask-ai] no cached pdf selection');
+      return;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      // 选区已被清(用户 mouseup 后又点了别处)→ ref stale
+      setLastPdfSelection(null);
+      console.warn('[ebook-view.pdf-ask-ai] selection collapsed, ref stale');
+      return;
+    }
+    const bookId = getActiveBookId();
+    if (!bookId) return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+
+    const bus = workspaceManager.getBus(wsId);
+    bus?.slot.openRight('ai-view');
+
+    const cmState = contextMenuController.getState();
+    const anchorX = cmState.x;
+    const anchorY = cmState.y;
+    const aiState = ws.pluginStates['ai'] as { currentServiceId?: AIServiceId } | undefined;
+    const defaultServiceId: AIServiceId = aiState?.currentServiceId ?? DEFAULT_AI_SERVICE;
+
+    void (async () => {
+      const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+      const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
+      const color = THOUGHT_TYPE_META['ai-response'].color;
+      const createdAt = Date.now();
+      const bookAnchor: BookAnchor = {
+        pageNum: ev.pageNum,
+        rect: ev.boundingRect,
+        textRects: ev.textRects,
+        textContent: ev.textContent,
+        color,
+        type: 'highlight',
+        createdAt,
+      };
+      // 落 legacy highlight block(loadOnBookOpen diff 自动渲染)
+      await lib.addReadingThoughtBlock(bookId, {
+        type: 'blockquote',
+        bookAnchor,
+        textContent: ev.textContent,
+      });
+      const locator: BookLocator = {
+        pageNum: ev.pageNum,
+        rect: ev.boundingRect,
+        textRects: ev.textRects,
+        textContent: ev.textContent,
+        markStyle: 'highlight',
+        createdAt,
+      };
+      const placeholder = await thoughtApi.createThought({
+        type: 'ai-response',
+        resolved: false,
+        pinned: false,
+        serviceId: defaultServiceId,
+        doc: {
+          format: 'pm-doc-json',
+          version: '0.1',
+          payload: { type: 'doc', content: [{ type: 'paragraph' }] },
+        },
+        folderId: null,
+        anchor: { source: 'book', resourceId: bookId, locator },
+      });
+      // 清浏览器选区灰底 + ref(避免再次右键 stale 命中)
+      sel.removeAllRanges();
+      setLastPdfSelection(null);
+      commandRegistry.execute('note-view.open-ask-ai-popup', {
+        selectionMarkdown: ev.textContent,
+        defaultServiceId,
+        anchorX,
+        anchorY,
+        thoughtId: placeholder.id,
+        // cancel:删刚落的 legacy highlight block(loadOnBookOpen onListChanged 自动 diff 移除视觉)
+        onCancel: () => {
+          void lib.removeReadingThoughtBlock(bookId, String(createdAt));
+        },
+      });
+    })();
   });
 
   /**
@@ -407,6 +573,16 @@ export function registerContextMenu(): void {
       enabledWhen: 'has-pdf-text-selection',
       group: 'learning',
       order: 51,
+    },
+    // 🤖 问 AI(PDF 文字流选区)— 走 pdf-selection-ref 拿完整 BookAnchor 落 highlight
+    {
+      id: 'ebook-view.cm.pdf-ask-ai-selection',
+      label: '🤖 问 AI',
+      command: 'ebook-view.pdf-ask-ai-from-selection',
+      view: VIEW,
+      enabledWhen: 'has-pdf-text-selection',
+      group: 'thought',
+      order: 52,
     },
     {
       id: 'ebook-view.cm.delete',

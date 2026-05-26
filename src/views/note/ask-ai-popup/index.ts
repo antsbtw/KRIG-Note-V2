@@ -32,19 +32,22 @@ function isOpenAskAIPopupArg(v: unknown): v is OpenAskAIPopupArg {
     typeof o.anchorY === 'number' &&
     typeof o.defaultServiceId === 'string' &&
     typeof o.thoughtId === 'string' &&
-    typeof o.instanceId === 'string'
+    (o.instanceId === undefined || typeof o.instanceId === 'string') &&
+    (o.onCancel === undefined || typeof o.onCancel === 'function')
   );
 }
 
 export function registerAskAIPopup(): void {
+  // view: undefined → 全 view 可弹(EPUB/PDF 选区 🤖 问 AI 复用此 popup)。
+  // 命令 id 仍带 note-view 前缀(历史命名,改名风险大于收益)。
   popupRegistry.register({
     id: ASK_AI_POPUP_ID,
-    view: 'note-view',
+    view: undefined,
     Component: AskAIPanel,
     estimatedSize: { width: 320, height: 280 },
   });
 
-  // 跨 view 入口命令(thought-view.ask-ai-from-note 等通过 commandRegistry.execute 调)
+  // 跨 view 入口命令(thought-view.ask-ai-from-note / ebook-view.epub-ask-ai 等 execute 调)
   commandRegistry.register('note-view.open-ask-ai-popup', (arg: unknown) => {
     if (!isOpenAskAIPopupArg(arg)) {
       console.warn('[note-view.open-ask-ai-popup] invalid arg', arg);
@@ -55,6 +58,7 @@ export function registerAskAIPopup(): void {
       defaultServiceId: arg.defaultServiceId,
       thoughtId: arg.thoughtId,
       instanceId: arg.instanceId,
+      onCancel: arg.onCancel,
     });
     // fake anchor:1x1 透明 div(同 note-link-search/integration.ts 模式)
     const fake = document.createElement('div');
