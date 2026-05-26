@@ -338,23 +338,34 @@ export const PDFViewerCanvas = forwardRef<
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ── 容器尺寸变化 → 无条件重 fit-width(用户诉求:每次视图更改重新适应)──
+  // ── 容器宽度变化 → 重 fit-width(slot 切换等)──
   //
-  // pdfjs 内部 RO 只更新 CSS var + containerTopLeft 缓存,不重算 scale。
-  // 用户拍板:每次容器变化都重新让 PDF 适应新尺寸(不保留数值 scale),
-  // 因为 KRIG 是 reading-first 应用,容器变化(slot 切换等)应当让用户始终
-  // 看到 fit-width 的 PDF,而不是滚动 scrollbar 找内容。
-  //
-  // 防死循环:在新 ResizeObserver tick 内调 currentScaleValue 会再触发同步
-  // layout reflow,但 container width 不变 → ResizeObserver 不再 fire,稳。
+  // 跳过首次 mount(initial trigger):不能覆盖 restore 的初始 scale。
+  // 仅当 container width 真变化(从 W1 → W2)才重 fit。
+  // 同样不动数值 scale(用户拍板的"容器变重新适应"原意是 fit 模式跟随,
+  // 数值 scale 是用户明确选,resize 不该改)。
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return;
+    let lastWidth = container.clientWidth;
+    let initial = true;
     const observer = new ResizeObserver(() => {
       const viewer = viewerInstanceRef.current;
       if (!viewer) return;
-      // 重设 fit-width 让 pdfjs 重算 scale + 重渲可见页
-      viewer.currentScaleValue = 'page-width';
+      const w = container.clientWidth;
+      if (initial) {
+        initial = false;
+        lastWidth = w;
+        return; // 首次 mount tick 跳过,保护 restore 的 initialFitMode 值
+      }
+      if (w === lastWidth) return;
+      lastWidth = w;
+      const v = viewer.currentScaleValue;
+      // fit 模式(page-width / page-fit / auto)— 重设触发重算
+      // 数值 scale — 不动(用户明确选的)
+      if (v === 'page-width' || v === 'page-fit' || v === 'auto') {
+        viewer.currentScaleValue = v;
+      }
     });
     observer.observe(container);
     return () => observer.disconnect();
