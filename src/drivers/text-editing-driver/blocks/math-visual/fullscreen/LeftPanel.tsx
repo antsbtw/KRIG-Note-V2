@@ -8,11 +8,11 @@
  * 内容:标题输入 + 函数卡片列表 + 参数滑块(动画) + 工具栏(7 件)+ Export 三件套
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { MathRenderingApi } from '@capabilities/math-rendering/types';
-import type { MathVisualData, FunctionEntry, Parameter, ToolMode } from '../types';
-import { createFunctionEntry } from '../types';
+import type { MathVisualData, FunctionEntry, ToolMode } from '../types';
+import { useFunctionManagement } from '../hooks/useFunctionManagement';
 import { KaTeX, LatexDisplay } from '../components/KaTexHelpers';
 
 interface LeftPanelProps {
@@ -51,62 +51,9 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   onStartAnimation,
   onStopAnimation,
 }) => {
-  const math = requireCapabilityApi<MathRenderingApi>('math-rendering');
-  const { functions: fns, parameters, annotations } = data;
-
-  // 函数管理
-  const updateFunction = useCallback(
-    (id: string, updates: Partial<FunctionEntry>) => {
-      if (updates.expression !== undefined) {
-        const detected = math.detectPlotType(updates.expression);
-        updates = { ...updates, plotType: detected.plotType, expression: detected.expression };
-      }
-
-      const newFns = fns.map((f) => (f.id === id ? { ...f, ...updates } : f));
-
-      if (updates.expression !== undefined) {
-        const allExprs = newFns.filter((f) => f.plotType !== 'vertical-line').map((f) => f.expression);
-        const allVarNames = new Set<string>();
-        for (const expr of allExprs) {
-          for (const v of math.extractParameters(expr)) allVarNames.add(v);
-        }
-        const newParams: Parameter[] = [];
-        for (const name of allVarNames) {
-          const existing = parameters.find((p) => p.name === name);
-          newParams.push(existing || { name, value: 1, min: -5, max: 5, step: 0.1 });
-        }
-        onChange({ ...data, functions: newFns, parameters: newParams });
-      } else {
-        onChange({ ...data, functions: newFns });
-      }
-    },
-    [data, fns, parameters, onChange, math],
-  );
-
-  const addFunction = useCallback(() => {
-    const newFn = createFunctionEntry(fns.length);
-    onChange({ ...data, functions: [...fns, newFn] });
-  }, [data, fns, onChange]);
-
-  const removeFunction = useCallback(
-    (id: string) => {
-      if (fns.length <= 1) return;
-      const newFns = fns.filter((f) => f.id !== id);
-      const newAnns = annotations.filter((a) => a.functionId !== id);
-      onChange({ ...data, functions: newFns, annotations: newAnns });
-    },
-    [data, fns, annotations, onChange],
-  );
-
-  const updateParameter = useCallback(
-    (name: string, value: number) => {
-      const newParams = parameters.map((p) =>
-        p.name === name ? { ...p, value } : p,
-      );
-      onChange({ ...data, parameters: newParams });
-    },
-    [data, parameters, onChange],
-  );
+  const { functions: fns, parameters } = data;
+  const { addFunction, updateFunction, removeFunction, updateParameter } =
+    useFunctionManagement(data, onChange);
 
   return (
     <div className="mv-fullscreen-left">
