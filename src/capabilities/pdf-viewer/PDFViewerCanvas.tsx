@@ -382,14 +382,21 @@ export const PDFViewerCanvas = forwardRef<
       },
       setScale(absoluteScale: number, _origin?: [number, number]): void {
         const viewer = viewerInstanceRef.current;
-        if (!viewer) return;
-        // pdfjs #isSameScale 早退:若 newScale === currentScale,_setScaleUpdatePages
-        // 直接 return,不重置 scrollPageIntoView → scroll 保留之前的偏移状态。
-        // 当用户:fit-width → toolbar 选 100%,pdfjs 算出的 fit-width scale 可能恰
-        // 接近 1.0,设 "1" 触发 isSameScale 早退,scroll 不重置致 page 偏左。
-        // 解:setScale 后总是 scrollPageIntoView 到当前页强制重置 scroll 居中。
+        const containerEl = containerRef.current;
+        if (!viewer || !containerEl) return;
         viewer.currentScaleValue = String(absoluteScale);
-        viewer.scrollPageIntoView({ pageNumber: viewer.currentPageNumber });
+        // 由大变小后,scroll 区域缩小但 scrollLeft 保留旧值,致 page 偏左。
+        // pdfjs scrollPageIntoView 用 _location.left(旧 scale 的偏移),不会重置。
+        // rAF 等 layout 完成,如果 page <= container 宽,scrollLeft 归零让
+        // margin auto 居中真实生效(margin auto 仅在 scrollWidth ≤ clientWidth 才能视觉居中)。
+        requestAnimationFrame(() => {
+          if (containerEl.scrollWidth <= containerEl.clientWidth + 1) {
+            containerEl.scrollLeft = 0;
+          } else {
+            // page 比 container 宽 — 居中显示(scrollLeft 设到 page 中心对齐 container 中心)
+            containerEl.scrollLeft = (containerEl.scrollWidth - containerEl.clientWidth) / 2;
+          }
+        });
       },
       setFitMode(mode: FitMode): void {
         const viewer = viewerInstanceRef.current;
