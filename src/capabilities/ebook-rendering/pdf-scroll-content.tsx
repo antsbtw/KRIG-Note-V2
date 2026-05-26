@@ -240,7 +240,9 @@ export function PdfScrollContent({
       if (!pageDiv.isConnected) continue;
       const wrapper = document.createElement('div');
       wrapper.className = 'krig-pdf-annotation-portal';
-      wrapper.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+      // 不设 pointer-events:none — AnnotationLayer 内部按 mode 切 'auto'/'none'
+      // 自管 hit-test;wrapper 设 none 会挡住内层 auto(✎ 标注模式拖框失效根因)
+      wrapper.style.cssText = 'position:absolute;inset:0;';
       pageDiv.appendChild(wrapper);
       const root = createRoot(wrapper);
       roots.set(pageNum, { root, wrapper });
