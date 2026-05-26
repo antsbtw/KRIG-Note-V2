@@ -32,7 +32,7 @@ export function FunctionRow({
   return (
     <div className={`mv-fn-row ${error ? 'mv-fn-row--error' : ''}`}>
       <span
-        className="mv-fn-color mv-fn-color--clickable"
+        className="mv-fn-color mv-fn-color--clickable mv-fn-aux"
         style={{ backgroundColor: error ? '#ef4444' : fn.color }}
         title={error || '点击修改颜色/线型'}
         onClick={() => setStyleOpen(!styleOpen)}
@@ -47,9 +47,6 @@ export function FunctionRow({
           onChangeStyle={(s) => onUpdate({ style: s })}
         />
       )}
-      <span className="mv-fn-label">
-        <KaTeX tex={fn.plotType === 'vertical-line' ? 'x =' : `${fn.label} =`} />
-      </span>
       {editing ? (
         <input
           ref={inputRef}
@@ -136,14 +133,14 @@ export function FunctionRow({
         <span className="mv-fn-error" title={error}>!</span>
       )}
       <button
-        className={`mv-fn-btn mv-fn-btn-tex ${fn.showDerivative ? 'mv-fn-btn--active' : ''}`}
+        className={`mv-fn-btn mv-fn-btn-tex mv-fn-aux ${fn.showDerivative ? 'mv-fn-btn--active' : ''}`}
         onClick={() => onUpdate({ showDerivative: !fn.showDerivative })}
         title="导数"
       >
         <KaTeX tex={`${fn.label.replace('(x)', "'(x)")}`} />
       </button>
       <button
-        className={`mv-fn-btn ${fn.visible ? '' : 'mv-fn-btn--hidden'}`}
+        className={`mv-fn-btn mv-fn-aux ${fn.visible ? '' : 'mv-fn-btn--hidden'}`}
         onClick={() => onUpdate({ visible: !fn.visible })}
         title={fn.visible ? '隐藏' : '显示'}
       >
@@ -151,7 +148,7 @@ export function FunctionRow({
       </button>
       {canRemove && (
         <button
-          className="mv-fn-btn mv-fn-btn--remove"
+          className="mv-fn-btn mv-fn-btn--remove mv-fn-aux"
           onClick={onRemove}
           title="移除"
         >

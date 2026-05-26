@@ -105,10 +105,14 @@ export interface AxisConfig {
   showNumbers: boolean;
 }
 
+/** 画板宽度档位(相对父容器百分比,fit 模式下高度按 4:3 联动) */
+export type WidthMode = 'sm' | 'md' | 'lg' | 'full';
+
 /** 画布显示配置 */
 export interface CanvasConfig {
   height: number;
   scaleMode: ScaleMode;
+  widthMode?: WidthMode;
   showGrid: boolean;
   gridStyle: 'solid' | 'dashed' | 'dotted';
   axis: AxisConfig;
@@ -133,6 +137,7 @@ export const DEFAULT_AXIS_CONFIG: AxisConfig = {
 export const DEFAULT_CANVAS_CONFIG: CanvasConfig = {
   height: 350,
   scaleMode: 'fit',
+  widthMode: 'md',
   showGrid: true,
   gridStyle: 'solid',
   axis: DEFAULT_AXIS_CONFIG,

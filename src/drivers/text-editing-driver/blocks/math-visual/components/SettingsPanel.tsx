@@ -6,24 +6,68 @@
  */
 
 import React from 'react';
-import type { CanvasConfig, AxisConfig, ScaleMode, AngleUnit } from '../types';
+import type { CanvasConfig, AxisConfig, ScaleMode, AngleUnit, WidthMode } from '../types';
 import { RangeInput } from './RangeInput';
 
 export function SettingsPanel({
   canvas,
   axis,
+  domain,
+  range,
   setCanvas,
   setAxis,
+  updateDomain,
+  updateRange,
+  onResetView,
 }: {
   canvas: CanvasConfig;
   axis: AxisConfig;
+  domain: [number, number];
+  range: [number, number];
   setCanvas: (patch: Partial<CanvasConfig>) => void;
   setAxis: (patch: Partial<AxisConfig>) => void;
+  updateDomain: (idx: 0 | 1, value: number) => void;
+  updateRange: (idx: 0 | 1, value: number) => void;
+  onResetView: () => void;
 }) {
   return (
     <div className="mv-settings mv-settings--floating">
+      {/* 视图范围 */}
+      <div className="mv-settings-section">视图范围</div>
+      <div className="mv-settings-row">
+        <span className="mv-settings-label">x</span>
+        <div className="mv-settings-btns">
+          <RangeInput value={domain[0]} onCommit={(v) => updateDomain(0, v)} />
+          <span className="mv-settings-unit">~</span>
+          <RangeInput value={domain[1]} onCommit={(v) => updateDomain(1, v)} />
+        </div>
+      </div>
+      <div className="mv-settings-row">
+        <span className="mv-settings-label">y</span>
+        <div className="mv-settings-btns">
+          <RangeInput value={range[0]} onCommit={(v) => updateRange(0, v)} />
+          <span className="mv-settings-unit">~</span>
+          <RangeInput value={range[1]} onCommit={(v) => updateRange(1, v)} />
+        </div>
+      </div>
+      <div className="mv-settings-row">
+        <span className="mv-settings-label"></span>
+        <div className="mv-settings-btns">
+          <button className="mv-settings-btn" onClick={onResetView}>重置视图</button>
+        </div>
+      </div>
+
       {/* 画布 */}
       <div className="mv-settings-section">画布</div>
+      <div className="mv-settings-row">
+        <span className="mv-settings-label">宽度</span>
+        <div className="mv-settings-btns">
+          {([['sm', '小'], ['md', '中'], ['lg', '大'], ['full', '全宽']] as [WidthMode, string][]).map(([mode, label]) => (
+            <button key={mode} className={`mv-settings-btn ${(canvas.widthMode ?? 'md') === mode ? 'mv-settings-btn--active' : ''}`}
+              onClick={() => setCanvas({ widthMode: mode })}>{label}</button>
+          ))}
+        </div>
+      </div>
       <div className="mv-settings-row">
         <span className="mv-settings-label">比例模式</span>
         <div className="mv-settings-btns">

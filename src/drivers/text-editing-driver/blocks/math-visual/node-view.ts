@@ -110,6 +110,11 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
 
   function render(): void {
     const data = getDataFromNode(node);
+    // widthMode 写到外层 NodeView dom 上,CSS 用 .krig-math-visual.mv-width-* 控宽
+    // 只 toggle 自己加的 mv-width-* 类,保留 PM 加的 ProseMirror-selectednode 等类
+    const widthMode = data.canvas?.widthMode ?? 'md';
+    dom.classList.remove('mv-width-sm', 'mv-width-md', 'mv-width-lg', 'mv-width-full');
+    dom.classList.add(`mv-width-${widthMode}`);
     const element = React.createElement(MathVisualComponent, {
       data,
       onChange: updateAttrs,

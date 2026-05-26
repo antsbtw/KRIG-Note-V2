@@ -24,7 +24,7 @@ import type {
 } from './types';
 import { createFunctionEntry, DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from './types';
 import {
-  FunctionRow, ParameterSlider, RangeInput, SettingsPanel,
+  FunctionRow, ParameterSlider, SettingsPanel,
 } from './components';
 
 // ─── Props ──────────────────────────────────────────────
@@ -57,6 +57,21 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
   };
   const axis = canvas.axis;
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
+
+  // 点击设置面板和按钮之外区域时关闭
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (settingsPanelRef.current?.contains(target)) return;
+      if (settingsBtnRef.current?.contains(target)) return;
+      setSettingsOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [settingsOpen]);
 
   const setCanvas = useCallback(
     (patch: Partial<CanvasConfig>) => onChange({ ...data, canvas: { ...canvas, ...patch } }),
@@ -268,12 +283,16 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(600);
+  const [canvasHeight, setCanvasHeight] = useState(400);
 
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
     const obs = new ResizeObserver((entries) => {
-      for (const entry of entries) setCanvasWidth(entry.contentRect.width || 600);
+      for (const entry of entries) {
+        setCanvasWidth(entry.contentRect.width || 600);
+        setCanvasHeight(entry.contentRect.height || 400);
+      }
     });
     obs.observe(el);
     return () => obs.disconnect();
@@ -289,7 +308,9 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
   let finalHeight = canvas.height;
 
   if (canvas.scaleMode === 'fit') {
-    const aspectRatio = canvasWidth / canvas.height;
+    // 画布高度 = ResizeObserver 实测的容器分配高度(容器 CSS 锁 9:6 后剩余空间)
+    finalHeight = canvasHeight || Math.round(canvasWidth * 6 / 9);
+    const aspectRatio = canvasWidth / finalHeight;
     const dataRatio = xSpan / ySpan;
     if (dataRatio > aspectRatio) {
       const targetYSpan = xSpan / aspectRatio;
@@ -329,19 +350,12 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
 
   // ── 渲染 ──
 
+  const resetView = useCallback(() => {
+    onChange({ ...data, domain: [-5, 5], range: [-5, 5], canvas: { ...canvas, height: 350 } });
+  }, [data, canvas, onChange]);
+
   return (
     <div className="math-visual" onMouseDown={(e) => e.stopPropagation()}>
-      {/* 全屏按钮(absolute 浮层,与函数行错开:函数行 padding-right 留 36px) */}
-      {onFullscreen && (
-        <button
-          className="mv-fullscreen-btn"
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onFullscreen(); }}
-          title="全屏编辑"
-        >
-          ⛶
-        </button>
-      )}
-
       {/* 函数列表 */}
       <div className="mv-fn-list">
         {fns.map((fn) => {
@@ -357,7 +371,44 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
             />
           );
         })}
-        <button className="mv-add-fn" onClick={addFunction}>+ 添加函数</button>
+
+        {/* 工具栏 — 函数列表底部独立一行(idle 隐藏,hover 淡入) */}
+        <div className="mv-toolbar-row">
+          <button
+            className="mv-fn-btn mv-toolbar-btn"
+            onClick={addFunction}
+            title="添加函数"
+          >
+            +
+          </button>
+          <div style={{ flex: 1 }} />
+          {onShowHelp && (
+            <button
+              className="mv-fn-btn mv-toolbar-btn"
+              onClick={() => onShowHelp(insertFromHelp)}
+              title="函数参考"
+            >
+              ?
+            </button>
+          )}
+          <button
+            ref={settingsBtnRef}
+            className={`mv-fn-btn mv-toolbar-btn ${settingsOpen ? 'mv-fn-btn--active' : ''}`}
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            title="设置"
+          >
+            ⚙
+          </button>
+          {onFullscreen && (
+            <button
+              className="mv-fn-btn mv-toolbar-btn"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onFullscreen(); }}
+              title="全屏编辑"
+            >
+              ⛶
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 参数滑块 */}
@@ -383,50 +434,20 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
           preserveAspectRatio={false}
         />
         {settingsOpen && (
-          <SettingsPanel canvas={canvas} axis={axis} setCanvas={setCanvas} setAxis={setAxis} />
+          <div ref={settingsPanelRef} className="mv-settings-anchor">
+            <SettingsPanel
+              canvas={canvas}
+              axis={axis}
+              domain={domain}
+              range={range}
+              setCanvas={setCanvas}
+              setAxis={setAxis}
+              updateDomain={updateDomain}
+              updateRange={updateRange}
+              onResetView={resetView}
+            />
+          </div>
         )}
-      </div>
-
-      {/* 工具栏 — 画布下方独立一行,hover 时显示 */}
-      <div className="mv-floating-toolbar">
-        <div className="mv-range-group">
-          <span className="mv-range-label">x</span>
-          <RangeInput value={domain[0]} onCommit={(v) => updateDomain(0, v)} />
-          <span className="mv-range-sep">~</span>
-          <RangeInput value={domain[1]} onCommit={(v) => updateDomain(1, v)} />
-        </div>
-        <div className="mv-range-group">
-          <span className="mv-range-label">y</span>
-          <RangeInput value={range[0]} onCommit={(v) => updateRange(0, v)} />
-          <span className="mv-range-sep">~</span>
-          <RangeInput value={range[1]} onCommit={(v) => updateRange(1, v)} />
-        </div>
-        <button
-          className="mv-fn-btn"
-          onClick={() =>
-            onChange({ ...data, domain: [-5, 5], range: [-5, 5], canvas: { ...canvas, height: 350 } })
-          }
-          title="重置视图"
-        >
-          重置
-        </button>
-        <div style={{ flex: 1 }} />
-        {onShowHelp && (
-          <button
-            className="mv-fn-btn"
-            onClick={() => onShowHelp(insertFromHelp)}
-            title="函数参考"
-          >
-            ?
-          </button>
-        )}
-        <button
-          className={`mv-fn-btn ${settingsOpen ? 'mv-fn-btn--active' : ''}`}
-          onClick={() => setSettingsOpen(!settingsOpen)}
-          title="显示设置"
-        >
-          设置
-        </button>
       </div>
     </div>
   );
