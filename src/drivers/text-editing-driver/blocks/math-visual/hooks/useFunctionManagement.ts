@@ -69,6 +69,7 @@ export function useFunctionManagement(
           ...updates,
           plotType: detected.plotType,
           expression: detected.expression,
+          displayExpression: detected.displayExpression,
         };
       }
 
@@ -115,6 +116,7 @@ export function useFunctionManagement(
       const detected = math.detectPlotType(expr);
       newFn.plotType = detected.plotType;
       newFn.expression = detected.expression;
+      newFn.displayExpression = detected.displayExpression;
       if (detected.plotType === 'parametric') {
         newFn.label = newFn.label.replace('(x)', '(t)');
       }

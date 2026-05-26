@@ -15,6 +15,8 @@ export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar' | 'im
 export interface FunctionEntry {
   id: string;
   expression: string;       // mathjs 语法;垂直线为常数值;参数方程为 "x(t);y(t)";极坐标为 "r(theta)"
+  /** 用户原始输入(detectPlotType 归一化前);UI 显示用,缺省 fallback 到 expression */
+  displayExpression?: string;
   label: string;            // 显示标签,如 "f(x)"
   color: string;            // 曲线颜色
   style: 'solid' | 'dashed' | 'dotted';
