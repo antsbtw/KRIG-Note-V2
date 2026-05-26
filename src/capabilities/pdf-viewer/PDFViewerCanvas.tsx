@@ -202,23 +202,45 @@ export const PDFViewerCanvas = forwardRef<
 
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch — macOS 派 wheel + ctrlKey=true)──
   //
-  // 走 pdfjs 原生 origin 参数(viewer.updateScale({ origin: [clientX, clientY] }))。
-  // pdfjs 内部用 containerTopLeft 算偏移修正,虽然在嵌套容器里略偏(我们容器嵌
-  // 在 NavSide / WorkspaceBar 下,offsetTop ≠ 0),但不会失控。
+  // 关键挑战:trackpad pinch wheel ~125Hz,每个 wheel 命中阈值即触发 updateScale。
+  // pdfjs updateScale 同步分支(_setScaleUpdatePages)即使 drawingDelay 也会改
+  // CSS var + dispatch event + scrollPageIntoView,每秒 10+ 次堆叠主线程致挂死
+  // (2026-05-25 挂死根因)。
   //
-  // 不再自管 scroll — 之前自管版本 +  pdfjs 内部 scrollPageIntoView 叠加导致
-  // scrollTop 一路飚到 10万 px,内存爆炸卡死(2026-05-25 挂死根因)。
+  // 解法:**rAF 节流** — wheel 只累积 tick 数,真正的 updateScale 调用合并到
+  // rAF 回调内,每帧最多调一次。多 tick 合并为一个综合 scaleFactor(指数累乘)。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let accumulatedDelta = 0;
     let lastWheelTime = 0;
+    // 待处理的 tick 数(>0 放大,<0 缩小);rAF 内消费
+    let pendingTicks = 0;
+    let rafId = 0;
+    // 最近一次 wheel 的鼠标位置 — rAF 内用作 origin
+    let lastOrigin: [number, number] = [0, 0];
+
+    const flush = (): void => {
+      rafId = 0;
+      if (pendingTicks === 0) return;
+      const viewer = viewerInstanceRef.current;
+      if (!viewer) {
+        pendingTicks = 0;
+        return;
+      }
+      // 多 tick 合并为一个综合 scaleFactor(指数累乘)
+      const scaleFactor = WHEEL_SCALE_FACTOR ** pendingTicks;
+      pendingTicks = 0;
+      viewer.updateScale({
+        drawingDelay: WHEEL_DRAWING_DELAY,
+        scaleFactor,
+        origin: lastOrigin,
+      });
+    };
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      const viewer = viewerInstanceRef.current;
-      if (!viewer) return;
       e.preventDefault();
 
       const now = performance.now();
@@ -226,6 +248,7 @@ export const PDFViewerCanvas = forwardRef<
         accumulatedDelta = 0;
       }
       lastWheelTime = now;
+      lastOrigin = [e.clientX, e.clientY];
 
       let delta = e.deltaY;
       if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
@@ -233,21 +256,23 @@ export const PDFViewerCanvas = forwardRef<
 
       accumulatedDelta += delta;
 
+      // 累积出 tick(放大 = 负 deltaY → 正 tick;缩小反之)
       while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
         const direction = accumulatedDelta < 0 ? 1 : -1;
         accumulatedDelta -= direction * PIXELS_PER_LINE;
-        const scaleFactor =
-          direction > 0 ? WHEEL_SCALE_FACTOR : 1 / WHEEL_SCALE_FACTOR;
+        pendingTicks += direction;
+      }
 
-        viewer.updateScale({
-          drawingDelay: WHEEL_DRAWING_DELAY,
-          scaleFactor,
-          origin: [e.clientX, e.clientY],
-        });
+      // rAF 节流:一帧最多一次 updateScale
+      if (pendingTicks !== 0 && rafId === 0) {
+        rafId = requestAnimationFrame(flush);
       }
     };
     container.addEventListener('wheel', handler, { passive: false });
-    return () => container.removeEventListener('wheel', handler);
+    return () => {
+      container.removeEventListener('wheel', handler);
+      if (rafId !== 0) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // ── 键盘 Cmd+= / Cmd+- / Cmd+0 ──
