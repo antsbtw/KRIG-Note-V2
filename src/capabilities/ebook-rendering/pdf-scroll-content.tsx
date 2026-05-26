@@ -33,6 +33,14 @@ import {
 } from './hooks/use-pdf-text-selection';
 
 interface Props {
+  /** 初始 scale 模式或数值(恢复上次阅读 scale 用)
+   *  - 'page-width' / 'page-fit' / 'auto' / 'page-actual' fit 关键字
+   *  - 数字字符串(如 '1.5')绝对 scale
+   *  默认 'page-width'。
+   */
+  initialFitMode?: string;
+  /** 初始页(1-based);未提供 = 1 */
+  initialPage?: number | null;
   /** 当前页号变化 — 转给 Host 的 onPageChange */
   onPageChange?: (page: number) => void;
   /** scale 变化(view 同步 toolbar)*/
@@ -62,6 +70,8 @@ interface Props {
 }
 
 export function PdfScrollContent({
+  initialFitMode = 'page-width',
+  initialPage = null,
   onPageChange,
   onScaleChange,
   onRegisterApi,
@@ -292,7 +302,8 @@ export function PdfScrollContent({
       <PDFViewerCanvas
         ref={canvasRef}
         handle={handle}
-        initialFitMode="page-width"
+        initialFitMode={initialFitMode}
+        initialPage={initialPage}
         onPageChange={onPageChange}
         onScaleChange={handleScaleChange}
         onPageMounted={handlePageMounted}

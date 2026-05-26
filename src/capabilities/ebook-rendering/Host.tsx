@@ -669,6 +669,11 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
        */}
       {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
         <PdfScrollContent
+          // 恢复上次阅读 scale:
+          //   fitWidth=true  → 'page-width'(fit 关键字让 pdfjs 按 container 算)
+          //   fitWidth=false → 数字字符串(绝对 scale,如 '1.5')
+          initialFitMode={fitWidth ? 'page-width' : String(scale)}
+          initialPage={lastPdfPageRef.current ?? restorePage}
           onPageChange={handlePdfPageChange}
           onScaleChange={handleScaleChange}
           onRegisterApi={registerScrollApi}

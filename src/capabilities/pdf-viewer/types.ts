@@ -62,8 +62,11 @@ export interface SearchResult {
  * - 'page-width'   适应容器宽度
  * - 'page-fit'     页面完整可见(高度优先)
  * - 'page-actual'  100%(不缩放)
+ *
+ * 也接受数字字符串(如 '1.5')— pdfjs currentScaleValue setter 原生支持。
+ * 用于恢复上次 scale。
  */
-export type FitMode = 'auto' | 'page-width' | 'page-fit' | 'page-actual';
+export type FitMode = 'auto' | 'page-width' | 'page-fit' | 'page-actual' | string;
 
 // ── 链接 ──
 
