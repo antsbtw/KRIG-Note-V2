@@ -165,16 +165,20 @@ export const PDFViewerCanvas = forwardRef<
     };
     const onScaleChanging = (evt: { scale: number }): void => {
       callbacksRef.current.onScaleChange?.(evt.scale);
-      // 缩放后 page 比 container 宽时,水平自动居中
-      // pdfjs 默认 scrollLeft 保持 _location 值(贴左),用户感觉"PDF 偏左"。
-      // rAF 等 reflow 完成,设 scrollLeft 居中。
+      // 缩放后 page 比 container 宽时强制水平居中。
+      // pdfjs 内部 _setScaleUpdatePages 先 scrollPageIntoView(以页左上为锚)再 origin
+      // 偏移微修 → page 向 container 左下角伸展,视觉"放大向左偏"。
+      // 双 rAF 等 pdfjs 内部异步 scroll 完成再覆盖,避免被 pdfjs scrollPageIntoView 后写覆盖。
       requestAnimationFrame(() => {
-        if (container.scrollWidth > container.clientWidth) {
-          const targetScrollLeft = (container.scrollWidth - container.clientWidth) / 2;
-          if (Math.abs(container.scrollLeft - targetScrollLeft) > 1) {
-            container.scrollLeft = targetScrollLeft;
+        requestAnimationFrame(() => {
+          if (container.scrollWidth > container.clientWidth) {
+            const targetScrollLeft =
+              (container.scrollWidth - container.clientWidth) / 2;
+            if (Math.abs(container.scrollLeft - targetScrollLeft) > 1) {
+              container.scrollLeft = targetScrollLeft;
+            }
           }
-        }
+        });
       });
     };
     const onPageRendered = (evt: { pageNumber: number }): void => {
