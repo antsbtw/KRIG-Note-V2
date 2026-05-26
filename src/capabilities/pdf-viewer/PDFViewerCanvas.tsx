@@ -200,19 +200,31 @@ export const PDFViewerCanvas = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
-  // ── Cmd/Ctrl+wheel 缩放 — **诊断态:wheel handler 暂停 updateScale**
+  // ── Cmd/Ctrl+wheel 缩放 — **诊断态:wheel 最多调 5 次 updateScale**
   //
-  // 多轮 rAF 节流 / 累积 / origin / 自管 scroll 修复均挂死,根因未明。
-  // 现在 wheel 只 preventDefault(阻浏览器整页 zoom),不调 updateScale。
-  // 用于隔离:如果 pinch 不挂死 → 挂死在我们 wheel 路径;反之挂死在 pdfjs 内部。
+  // 已确认 wheel 完全不做缩放时不挂死。本步限制 wheel 内 updateScale 调用上限 5 次,
+  // 验证是否挂死与 updateScale 调用次数线性相关(若 5 次内挂 → 单次 updateScale 即
+  // 重;若 5 次内不挂但全开后挂 → 累积主线程压力问题)。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let callCount = 0;
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
-      // 暂时什么都不做 — 仅诊断
+      if (callCount >= 5) return;
+      const viewer = viewerInstanceRef.current;
+      if (!viewer) return;
+      callCount += 1;
+      const t0 = performance.now();
+      viewer.updateScale({
+        drawingDelay: -1,
+        scaleFactor: e.deltaY < 0 ? 1.1 : 1 / 1.1,
+        origin: [e.clientX, e.clientY],
+      });
+      const t1 = performance.now();
+      console.log(`[diag] updateScale #${callCount} took ${(t1 - t0).toFixed(1)}ms scale=${viewer.currentScale.toFixed(3)}`);
     };
     container.addEventListener('wheel', handler, { passive: false });
     return () => container.removeEventListener('wheel', handler);
