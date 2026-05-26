@@ -250,16 +250,6 @@ export function PdfScrollContent({
     }
     // 2) 同步内容(render 现有 root)
     const { annotations: anns, annotationMode: mode, flashAnnotationId: flashId, cssScaleFactor: sf, onAnnotationCreate: onCreate } = annotationsForRender;
-    // DIAG: 看 mode 是否真传到 AnnotationLayer
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).electronAPI?.reportAlive({
-      layer: 'pdf-anno-mode',
-      details: {
-        mode,
-        rootsCount: roots.size,
-        annsCount: anns.length,
-      },
-    });
     for (const [pageNum, entry] of roots) {
       const dim = pageDims.get(pageNum);
       if (!dim) continue;
