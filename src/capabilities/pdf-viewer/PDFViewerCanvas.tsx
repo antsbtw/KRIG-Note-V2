@@ -148,24 +148,7 @@ export const PDFViewerCanvas = forwardRef<
 
     // ── 事件桥接 ──
     const onPagesInit = (): void => {
-      const bcr = container.getBoundingClientRect();
-      console.log(
-        `[pdf-init] container clientW=${container.clientWidth} clientH=${container.clientHeight} BCR=${bcr.width.toFixed(0)}x${bcr.height.toFixed(0)} top=${bcr.top.toFixed(0)} left=${bcr.left.toFixed(0)}`,
-      );
       viewer.currentScaleValue = initialFitMode;
-      const scaleAfter = viewer.currentScale;
-      const sf = parseFloat(getComputedStyle(viewerDiv).getPropertyValue('--scale-factor')) || 0;
-      console.log(
-        `[pdf-init] after fit '${initialFitMode}' currentScale=${scaleAfter.toFixed(3)} --scale-factor=${sf.toFixed(3)}`,
-      );
-      // 等下一帧 layout 完成读 page 实际尺寸 + scroll
-      requestAnimationFrame(() => {
-        const page1 = viewerDiv.querySelector('.page') as HTMLElement | null;
-        const pbcr = page1?.getBoundingClientRect();
-        console.log(
-          `[pdf-init][rAF1] viewer width=${viewerDiv.getBoundingClientRect().width.toFixed(0)} scrollLeft=${container.scrollLeft} scrollWidth=${container.scrollWidth} page1=(${pbcr?.left.toFixed(0)},${pbcr?.top.toFixed(0)},${pbcr?.width.toFixed(0)}x${pbcr?.height.toFixed(0)}) pageMargin=${page1 ? getComputedStyle(page1).margin : 'n/a'}`,
-        );
-      });
     };
     const onPagesLoaded = (): void => {
       if (initialPage && initialPage >= 1 && initialPage <= pdfDoc.numPages) {
@@ -177,27 +160,6 @@ export const PDFViewerCanvas = forwardRef<
     };
     const onScaleChanging = (evt: { scale: number }): void => {
       callbacksRef.current.onScaleChange?.(evt.scale);
-      // 同步快照(scalechanging 触发瞬间)
-      const sync = {
-        scale: evt.scale,
-        scrollLeft: container.scrollLeft,
-        scrollWidth: container.scrollWidth,
-        clientWidth: container.clientWidth,
-        viewerWidth: viewerDiv.getBoundingClientRect().width,
-      };
-      // 异步快照(pdfjs 内部 scrollPageIntoView 等异步完成)
-      requestAnimationFrame(() => {
-        const page1 = viewerDiv.querySelector('.page') as HTMLElement | null;
-        const pbcr = page1?.getBoundingClientRect();
-        const cbcr = container.getBoundingClientRect();
-        const pageCenterX = pbcr ? (pbcr.left + pbcr.right) / 2 : null;
-        const containerCenterX = (cbcr.left + cbcr.right) / 2;
-        const offsetFromCenter =
-          pageCenterX !== null ? pageCenterX - containerCenterX : null;
-        console.log(
-          `[pdf-scale] scale=${sync.scale.toFixed(3)} sync(scrollLeft=${sync.scrollLeft} scrollWidth=${sync.scrollWidth} clientWidth=${sync.clientWidth} viewerW=${sync.viewerWidth.toFixed(0)}) rAF(scrollLeft=${container.scrollLeft} pageBCR=(${pbcr?.left.toFixed(0)},${pbcr?.width.toFixed(0)}) containerBCR.left=${cbcr.left.toFixed(0)} pageCenterX=${pageCenterX?.toFixed(0)} containerCenterX=${containerCenterX.toFixed(0)} offsetFromCenter=${offsetFromCenter?.toFixed(0)}px)`,
-        );
-      });
     };
     const onPageRendered = (evt: { pageNumber: number }): void => {
       const pageView = viewer.getPageView(evt.pageNumber - 1);
@@ -288,6 +250,20 @@ export const PDFViewerCanvas = forwardRef<
       return wholeTicks;
     };
 
+    // mozilla _centerAtPos 严格复刻(app.js 中的方法,issue #18076 引用)
+    // — 用于 updateScale 后把"鼠标位置"那个内容点锚定在原位。
+    // 公式:scrollLeft += (x - containerTopLeft.left) × scaleDiff
+    // containerTopLeft = [offsetTop, offsetLeft](pdfjs 内置 getter,相对 offsetParent)
+    const centerAtPos = (previousScale: number, x: number, y: number): void => {
+      const v = viewerInstanceRef.current;
+      if (!v) return;
+      const scaleDiff = v.currentScale / previousScale - 1;
+      if (scaleDiff === 0) return;
+      const [top, left] = v.containerTopLeft;
+      container.scrollLeft += (x - left) * scaleDiff;
+      container.scrollTop += (y - top) * scaleDiff;
+    };
+
     const handler = (e: WheelEvent): void => {
       const viewer = viewerInstanceRef.current;
       if (!viewer) return;
@@ -307,18 +283,18 @@ export const PDFViewerCanvas = forwardRef<
       if (!isPinchToZoom && !e.ctrlKey && !e.metaKey) return;
 
       e.preventDefault();
-      const origin: [number, number] = [e.clientX, e.clientY];
+      const previousScale = viewer.currentScale;
 
+      // **不传 origin 给 pdfjs** — pdfjs 内部 _setScaleUpdatePages 在传 origin 时同时调
+      // scrollPageIntoView + origin 偏移累加,嵌套容器内双重写致偏移。
+      // 自己在 updateScale 完成后调 centerAtPos 公式(等效 mozilla _centerAtPos)。
       if (isPinchToZoom) {
-        // pinch — 用 factor 累积器
         const factor = accumulateFactor(viewer.currentScale, scaleFactor);
         viewer.updateScale({
           drawingDelay: 400,
           scaleFactor: factor,
-          origin,
         });
       } else {
-        // Cmd+wheel(传统鼠标滚轮缩放)— 用 ticks 累积器
         let delta = e.deltaY;
         if (deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
         else if (deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= 100;
@@ -327,11 +303,11 @@ export const PDFViewerCanvas = forwardRef<
         if (ticks === 0) return;
         viewer.updateScale({
           drawingDelay: 400,
-          // ticks 是 mouse wheel "格数",mozilla 用负号:向下滚 → 缩小
           steps: -ticks,
-          origin,
         });
       }
+
+      centerAtPos(previousScale, e.clientX, e.clientY);
     };
 
     container.addEventListener('wheel', handler, { passive: false });
