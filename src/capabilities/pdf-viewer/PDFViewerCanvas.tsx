@@ -384,48 +384,14 @@ export const PDFViewerCanvas = forwardRef<
         const viewer = viewerInstanceRef.current;
         const containerEl = containerRef.current;
         if (!viewer || !containerEl) return;
-        const before = {
-          scale: viewer.currentScale,
-          scrollLeft: containerEl.scrollLeft,
-          scrollWidth: containerEl.scrollWidth,
-          clientWidth: containerEl.clientWidth,
-        };
+        // 根因(2026-05-25 终端 log 数据驱动):
+        // pdfjs _setScaleUpdatePages line 7568 在 scale 改时自动用 _location.left/top
+        // 构造 XYZ dest 调 scrollPageIntoView,把上次大 scale 时的 scroll 偏移按
+        // 比例缩放带到新 scale → page 偏离中线。
+        // 修:setScale 前清掉 _location → pdfjs fallback 到不传 XYZ,scrollPageIntoView
+        // 只滚到页顶,scrollLeft 不被强制改 → 配合 margin auto,page 居中。
+        (viewer as unknown as { _location: unknown })._location = null;
         viewer.currentScaleValue = String(absoluteScale);
-        viewer.scrollPageIntoView({ pageNumber: viewer.currentPageNumber });
-        // 双 rAF 等 pdfjs 内部 scroll 异步完成
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const after = {
-              scale: viewer.currentScale,
-              scrollLeft: containerEl.scrollLeft,
-              scrollWidth: containerEl.scrollWidth,
-              clientWidth: containerEl.clientWidth,
-            };
-            const page1 = viewerRef.current?.querySelector('.page') as HTMLElement | null;
-            const pbcr = page1?.getBoundingClientRect();
-            const cbcr = containerEl.getBoundingClientRect();
-            const pageCenter = pbcr ? (pbcr.left + pbcr.right) / 2 : 0;
-            const containerCenter = (cbcr.left + cbcr.right) / 2;
-            const offsetFromCenter = pageCenter - containerCenter;
-            window.electronAPI?.reportAlive({
-              layer: 'pdf-zoom',
-              details: {
-                requested: absoluteScale,
-                before_scale: before.scale.toFixed(3),
-                before_scrollLeft: before.scrollLeft,
-                before_scrollWidth: before.scrollWidth,
-                after_scale: after.scale.toFixed(3),
-                after_scrollLeft: after.scrollLeft,
-                after_scrollWidth: after.scrollWidth,
-                clientWidth: after.clientWidth,
-                pageW: pbcr?.width.toFixed(0),
-                pageCenter: pageCenter.toFixed(0),
-                containerCenter: containerCenter.toFixed(0),
-                offsetFromCenter: offsetFromCenter.toFixed(0),
-              },
-            });
-          });
-        });
       },
       setFitMode(mode: FitMode): void {
         const viewer = viewerInstanceRef.current;
