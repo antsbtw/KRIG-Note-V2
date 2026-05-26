@@ -83,7 +83,7 @@ const BUILTIN_NAMES = new Set([
  * 排除独立变量(x/t/theta)与 mathjs 内置函数 / 常量。
  */
 export function extractParameters(expression: string): string[] {
-  const independentVars = new Set(['x', 't', 'theta']);
+  const independentVars = new Set(['x', 'y', 't', 'theta']);
   try {
     const parts = expression.includes(';') ? expression.split(';') : [expression];
     const vars = new Set<string>();
@@ -180,6 +180,35 @@ export function makePolarFn(
 export function makeVerticalLineX(expression: string): number | null {
   const v = Number(expression);
   return isFinite(v) ? v : null;
+}
+
+/**
+ * 隐式方程 F(x,y) → (x, y) => F | null。
+ * expression 由 detectPlotType 归一化为 "left - (right)" 形式(F(x,y)=0 的左边);
+ * mathjs 单次编译,scope 每次注入 x/y/参数。失败返 null。
+ *
+ * driver 拿到 fn 后构造 `{ kind: 'implicit', fn, resolution }`,
+ * MathHost 内部 marching squares 算等值线。
+ */
+export function makeImplicitFn(
+  expression: string,
+  params: MathParameter[],
+): ((x: number, y: number) => number) | null {
+  try {
+    const compiled = math.compile(expression);
+    return (x: number, y: number) => {
+      try {
+        const scope: Record<string, number> = { x, y };
+        for (const p of params) scope[p.name] = p.value;
+        const v = compiled.evaluate(scope) as number;
+        return typeof v === 'number' && isFinite(v) ? v : NaN;
+      } catch {
+        return NaN;
+      }
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

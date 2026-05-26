@@ -24,6 +24,10 @@ export interface CurveStyle {
   style?: 'solid' | 'dashed' | 'dotted';
   lineWidth?: number;
   opacity?: number;
+  /** 曲线 label(LaTeX 文本,如 "f(x) = x^2");缺省不显示 */
+  label?: string;
+  /** label 位置(数据坐标);缺省由 MathHost 自动计算 */
+  labelPos?: [number, number];
 }
 
 /** y = f(x) — 最常见 */
@@ -60,6 +64,16 @@ export interface VerticalLineCurve extends CurveStyle {
   x: number;
 }
 
+/** 隐式方程 F(x, y) = 0 — 渲染时 marching squares 算等值线
+ * F(x,y) 返回标量,曲线 = { (x,y) | F(x,y) = 0 } */
+export interface ImplicitCurve extends CurveStyle {
+  kind: 'implicit';
+  id: string;
+  fn: (x: number, y: number) => number;
+  /** 网格分辨率(默认 100);x/y 方向各 N 个采样格子 */
+  resolution?: number;
+}
+
 /** 表达式无法解析时的占位 — 不渲染,但保留 id+error 给调用方显示 */
 export interface UnsupportedCurve {
   kind: 'unsupported';
@@ -72,6 +86,7 @@ export type Curve =
   | ParametricCurve
   | PolarCurve
   | VerticalLineCurve
+  | ImplicitCurve
   | UnsupportedCurve;
 
 // ─────────────────────────────────────────────────────────
@@ -257,6 +272,9 @@ export interface MathHostProps {
   /** Transient viewport 通知(pan/zoom 触发);driver 视情况持久化或忽略 */
   onViewportChange?: (vp: ViewportState) => void;
 
+  /** 曲线 label 拖动回调(用户拖到新位置后触发);driver 持久化进 FunctionEntry.labelPos */
+  onLabelMove?: (curveId: string, pos: [number, number]) => void;
+
   // ── Overlay 工具(Phase 2 全屏接入) ──
   /** 工具叠加层配置 — 切线/法线/积分/特征点/标注/黎曼和/HoverCoords/端点 */
   overlays?: OverlaysConfig;
@@ -308,7 +326,7 @@ export interface ContSeg {
 }
 
 /** PlotType 启发式判定 */
-export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar';
+export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar' | 'implicit';
 
 // ─────────────────────────────────────────────────────────
 // Registry API(view/driver 通过 requireCapabilityApi 拿)
@@ -344,7 +362,7 @@ export interface MathRenderingApi {
   ): ContSeg[];
 
   // ── plot type 启发式 ──
-  detectPlotType(expression: string): { plotType: PlotType; expression: string };
+  detectPlotType(expression: string): { plotType: PlotType; expression: string; displayExpression: string };
 
   // ── LaTeX 转换 ──
   /** LaTeX → mathjs 表达式字符串(失败返 null) */
@@ -378,6 +396,15 @@ export interface MathRenderingApi {
    * 实际就是 Number(expression) 包装 + isFinite 校验,纯粹避免 driver 写散落判断。
    */
   makeVerticalLineX(expression: string): number | null;
+  /**
+   * 隐式方程 "F(x,y)=0" → (x, y) => F | null。
+   * expression 必须是已经归一化为 F(x,y) 形式(左 - 右,detectPlotType 已处理);
+   * 失败返 null。driver 拿到后构造 `{ kind: 'implicit', fn: ... }`。
+   */
+  makeImplicitFn(
+    expression: string,
+    params: MathParameter[],
+  ): ((x: number, y: number) => number) | null;
   /**
    * mathjs 表达式 → LaTeX 字符串(供 KaTeX 渲染),失败返 null。
    * driver 拿 latex 字符串后传给 katex.render(supplied externally)。

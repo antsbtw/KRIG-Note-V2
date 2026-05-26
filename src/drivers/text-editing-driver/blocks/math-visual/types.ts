@@ -9,7 +9,7 @@
  */
 
 /** 函数绘图类型 */
-export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar';
+export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar' | 'implicit';
 
 /** 一条函数曲线 — driver 持的"用户编辑数据"(由 driver 转成 capability Curve 喂给 MathHost) */
 export interface FunctionEntry {
