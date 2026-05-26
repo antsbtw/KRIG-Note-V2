@@ -200,34 +200,84 @@ export const PDFViewerCanvas = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
-  // ── Cmd/Ctrl+wheel 缩放 — **诊断态:wheel 最多调 5 次 updateScale**
+  // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch)──
   //
-  // 已确认 wheel 完全不做缩放时不挂死。本步限制 wheel 内 updateScale 调用上限 5 次,
-  // 验证是否挂死与 updateScale 调用次数线性相关(若 5 次内挂 → 单次 updateScale 即
-  // 重;若 5 次内不挂但全开后挂 → 累积主线程压力问题)。
+  // 性能约束(实测):单次 updateScale ~12ms(1200 页 PDF)。
+  // trackpad pinch ~125Hz × 12ms = 1500ms/s 同步工作 → 主线程死。
+  // rAF 节流 60Hz × 12ms = 720ms/s 仍超 100%。
+  // 必须用更狠的 cooldown:每次 updateScale 后等 80ms 才允许下次。
+  //   12 次/秒 × 12ms = 144ms/s ≈ 14% 主线程占用,稳。
+  // 每 cooldown 间隔合并所有累积 ticks 为综合 scaleFactor。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    let callCount = 0;
+
+    const COOLDOWN_MS = 80;
+    let lastScaleTime = 0;
+    let pendingTicks = 0;
+    let lastOrigin: [number, number] = [0, 0];
+    let pendingFlushId = 0;
+    let accumulatedDelta = 0;
+
+    const flush = (): void => {
+      pendingFlushId = 0;
+      if (pendingTicks === 0) return;
+      const viewer = viewerInstanceRef.current;
+      if (!viewer) {
+        pendingTicks = 0;
+        return;
+      }
+      const scaleFactor = WHEEL_SCALE_FACTOR ** pendingTicks;
+      pendingTicks = 0;
+      lastScaleTime = performance.now();
+      viewer.updateScale({
+        drawingDelay: WHEEL_DRAWING_DELAY,
+        scaleFactor,
+        origin: lastOrigin,
+      });
+    };
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
-      if (callCount >= 5) return;
-      const viewer = viewerInstanceRef.current;
-      if (!viewer) return;
-      callCount += 1;
-      const t0 = performance.now();
-      viewer.updateScale({
-        drawingDelay: -1,
-        scaleFactor: e.deltaY < 0 ? 1.1 : 1 / 1.1,
-        origin: [e.clientX, e.clientY],
-      });
-      const t1 = performance.now();
-      console.log(`[diag] updateScale #${callCount} took ${(t1 - t0).toFixed(1)}ms scale=${viewer.currentScale.toFixed(3)}`);
+      lastOrigin = [e.clientX, e.clientY];
+
+      // 累积 tick — 不每个 wheel 都触发,小 delta 累成一档
+      // pinch deltaY 0.x~5,累 PIXELS_PER_LINE=60 出一 tick
+      // 用模块级 closure 累积(跨 wheel 事件)
+      let delta = e.deltaY;
+      if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
+      else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
+
+      accumulatedDelta += delta;
+      while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
+        const direction = accumulatedDelta < 0 ? 1 : -1;
+        accumulatedDelta -= direction * PIXELS_PER_LINE;
+        pendingTicks += direction;
+      }
+
+      if (pendingTicks === 0) return;
+
+      const now = performance.now();
+      const elapsed = now - lastScaleTime;
+      if (elapsed >= COOLDOWN_MS) {
+        // cooldown 过了,立即 flush
+        if (pendingFlushId !== 0) {
+          clearTimeout(pendingFlushId);
+          pendingFlushId = 0;
+        }
+        flush();
+      } else if (pendingFlushId === 0) {
+        // cooldown 内,排队到下一个 cooldown 边界
+        pendingFlushId = window.setTimeout(flush, COOLDOWN_MS - elapsed);
+      }
     };
+
     container.addEventListener('wheel', handler, { passive: false });
-    return () => container.removeEventListener('wheel', handler);
+    return () => {
+      container.removeEventListener('wheel', handler);
+      if (pendingFlushId !== 0) clearTimeout(pendingFlushId);
+    };
   }, []);
 
   // ── 键盘 Cmd+= / Cmd+- / Cmd+0 ──
