@@ -2729,12 +2729,35 @@
  * ──────────────────────────────────────────────────────── */
 
 .krig-pm-host .ProseMirror .krig-math-visual {
-  margin: 12px 0;
+  margin: 12px auto;
   border: 1px solid #3a3a3a;
   border-radius: 8px;
   overflow: hidden;
   background: #1e1e1e;
+  width: 100%;
+  aspect-ratio: 9 / 6;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.18s ease;
 }
+
+/* 内部 render 容器撑满 — 让 .math-visual 内部 flex 拿到剩余高度 */
+.krig-pm-host .ProseMirror .krig-math-visual__render {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.krig-pm-host .ProseMirror .krig-math-visual__render > .math-visual {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 宽度档位 — 整个 NodeView 容器宽度,居中;高度由 canvasWidth*3/4 自动联动 */
+.krig-pm-host .ProseMirror .krig-math-visual.mv-width-sm   { width: 40%; }
+.krig-pm-host .ProseMirror .krig-math-visual.mv-width-md   { width: 60%; }
+.krig-pm-host .ProseMirror .krig-math-visual.mv-width-lg   { width: 80%; }
+.krig-pm-host .ProseMirror .krig-math-visual.mv-width-full { width: 100%; }
 
 .krig-pm-host .ProseMirror .krig-math-visual.ProseMirror-selectednode {
   border-color: #2D7FF9;
@@ -2761,9 +2784,16 @@
   flex-direction: column;
 }
 
-/* 函数列表 — padding-right 36px 给右上角 mv-fullscreen-btn 浮层留位 */
+/* 函数列表 — idle 真塌缩(display:none),hover/focus 才出现
+ * 下一步:方程表达式作为 label 飘在曲线旁(GeoGebra 风格),编辑控件仍 hover 浮出 */
 .krig-pm-host .ProseMirror .mv-fn-list {
-  padding: 8px 36px 8px 12px;
+  padding: 8px 12px;
+  display: none;
+}
+
+.krig-pm-host .ProseMirror .math-visual:hover .mv-fn-list,
+.krig-pm-host .ProseMirror .math-visual:focus-within .mv-fn-list {
+  display: block;
 }
 
 .krig-pm-host .ProseMirror .mv-fn-row {
@@ -2965,24 +2995,41 @@
   cursor: not-allowed;
 }
 
-.krig-pm-host .ProseMirror .mv-add-fn {
-  background: none;
-  border: 1px dashed #444;
-  color: #888;
-  font-size: 12px;
-  padding: 4px 12px;
-  border-radius: 4px;
-  cursor: pointer;
+/* 函数列表底部 toolbar 行(+ ? ⚙ ⛶) — idle 隐藏,hover/focus 淡入 */
+.krig-pm-host .ProseMirror .mv-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-top: 4px;
-  width: 100%;
+  min-height: 24px;
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 
-.krig-pm-host .ProseMirror .mv-add-fn:hover { border-color: #666; color: #bbb; }
+.krig-pm-host .ProseMirror .math-visual:hover .mv-toolbar-row,
+.krig-pm-host .ProseMirror .math-visual:focus-within .mv-toolbar-row {
+  opacity: 1;
+}
 
-/* 参数滑块 */
+.krig-pm-host .ProseMirror .mv-toolbar-btn {
+  font-size: 14px;
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 参数滑块 — 与函数列表同步真塌缩 */
 .krig-pm-host .ProseMirror .mv-params {
   padding: 6px 12px;
   border-bottom: 1px solid #333;
+  display: none;
+}
+
+.krig-pm-host .ProseMirror .math-visual:hover .mv-params,
+.krig-pm-host .ProseMirror .math-visual:focus-within .mv-params {
+  display: block;
 }
 
 .krig-pm-host .ProseMirror .mv-param-row {
@@ -3027,16 +3074,28 @@
   text-align: right;
 }
 
-/* 画布 */
+/* 画布 — flex:1 撑满容器剩余高度;overflow:hidden 防止 Mafs SVG 内部按 viewBox 撑爆 */
 .krig-pm-host .ProseMirror .mv-canvas {
   padding: 4px;
-  min-height: 300px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.krig-pm-host .ProseMirror .mv-canvas .mr-math-host,
+.krig-pm-host .ProseMirror .mv-canvas .MafsView {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .krig-pm-host .ProseMirror .mv-canvas svg {
   border-radius: 4px;
   touch-action: none;
   cursor: grab;
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .krig-pm-host .ProseMirror .mv-canvas svg:active { cursor: grabbing; }
@@ -3059,42 +3118,7 @@
   background: rgba(232, 234, 237, 0.18);
 }
 
-/* 工具栏 — 画布下方独立一行(static),hover 时显示 */
-.krig-pm-host .ProseMirror .mv-floating-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  margin: 4px 8px 8px;
-  background: rgba(26, 26, 26, 0.92);
-  border: 1px solid #3a3a3a;
-  border-radius: 8px;
-  opacity: 0;
-  max-height: 0;
-  overflow: hidden;
-  transition: opacity 0.15s, max-height 0.15s;
-  flex-wrap: wrap;
-}
-
-.krig-pm-host .ProseMirror .math-visual:hover .mv-floating-toolbar,
-.krig-pm-host .ProseMirror .mv-floating-toolbar:focus-within {
-  opacity: 1;
-  max-height: 80px;
-}
-
-.krig-pm-host .ProseMirror .mv-range-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.krig-pm-host .ProseMirror .mv-range-label {
-  font-size: 12px;
-  color: #888;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  font-style: italic;
-  min-width: 10px;
-}
+/* mv-range-* — 旧底部 toolbar 已移除,RangeInput 现仅用于设置面板内部 */
 
 .krig-pm-host .ProseMirror .mv-range-input {
   width: 48px;
@@ -3121,16 +3145,17 @@
 
 .krig-pm-host .ProseMirror .mv-settings--floating {
   position: absolute;
-  bottom: 48px;
-  right: 8px;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 20;
   border: 1px solid #3a3a3a;
   border-radius: 8px;
   background: rgba(26, 26, 26, 0.95);
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  max-width: 380px;
-  max-height: 400px;
+  width: min(420px, calc(100% - 32px));
+  max-height: 70%;
   overflow-y: auto;
 }
 
@@ -3727,39 +3752,6 @@
   font-size: 11px;
   font-family: 'SF Mono', monospace;
   white-space: nowrap;
-}
-
-/* inline 全屏按钮 — absolute 浮层,函数行 padding-right 36px 让位避免重叠 */
-
-.krig-pm-host .ProseMirror .mv-fullscreen-btn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 10;
-  background: rgba(30, 30, 30, 0.8);
-  border: 1px solid #555;
-  color: #aaa;
-  font-size: 14px;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.krig-pm-host .ProseMirror .math-visual:hover .mv-fullscreen-btn,
-.krig-pm-host .ProseMirror .mv-fullscreen-btn:focus {
-  opacity: 1;
-}
-
-.krig-pm-host .ProseMirror .mv-fullscreen-btn:hover {
-  background: #333;
-  color: #fff;
-  border-color: #2D7FF9;
 }
 
 /* ─────────────────────────────────────────────────────────
