@@ -338,28 +338,29 @@ export const PDFViewerCanvas = forwardRef<
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ── 容器宽度变化 → 在 fit 模式下重算 scale ──
+  // ── 容器尺寸变化 → 重新刷新渲染(对齐 mozilla viewer.js onResize)──
   //
-  // pdfjs 内部 RO 只更新 CSS var + containerTopLeft 缓存,不重算 page-width fit。
-  // 当外层 slot 尺寸变化(thought 弹出 → left slot 50% / 关闭 → 100%),
-  // PDF view 必须重算 fit-width,否则保持旧 scale 渲染区域错位。
+  // pdfjs 内部 RO 只更新 CSS var + containerTopLeft 缓存,不重算 scale 也不
+  // 重渲可见页。当外层 slot 尺寸变化(thought 弹出/关闭等),PDF 必须:
+  //   1. fit 模式下重算 scale(同 mozilla:auto/page-fit/page-width 三种)
+  //      'page-actual' 是数值常量(100%),不重算 — mozilla 注释 "scale is constant"
+  //   2. 任何情况下 viewer.update() 刷新可见页(重新计算 visible pages + 触发渲染)
   //
-  // 防死循环:只在 container width 真变了才触发(忽略 height-only 变化)+
-  // 只在 currentScaleValue 是 fit 模式时触发(数值 scale 不重算)。
+  // 数值 scale(如 1.5x)不重算 — 用户明确选了某个数值,resize 不该改它,
+  // 但 update() 仍要调让"可见页"重新计算(slot 缩小后某些页可能进出可视区)。
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return;
-    let lastWidth = container.clientWidth;
     const observer = new ResizeObserver(() => {
       const viewer = viewerInstanceRef.current;
       if (!viewer) return;
-      const w = container.clientWidth;
-      if (w === lastWidth) return;
-      lastWidth = w;
       const v = viewer.currentScaleValue;
-      if (v === 'page-width' || v === 'page-fit' || v === 'page-actual' || v === 'auto') {
+      if (v === 'page-width' || v === 'page-fit' || v === 'auto') {
+        // fit 模式 — 重设同值触发 pdfjs 重算 scale + 重渲
         viewer.currentScaleValue = v;
       }
+      // 任何模式都刷新可见页计算(数值 scale 时也要)
+      viewer.update();
     });
     observer.observe(container);
     return () => observer.disconnect();
