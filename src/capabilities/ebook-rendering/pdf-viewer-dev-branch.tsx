@@ -2,7 +2,7 @@
  * PDF-Viewer-Dev-Branch — Stage 2 dev 验收专用,Stage 4 删除
  *
  * 目的:让 Stage 2(新 pdf-viewer adapter 已就绪 + view 接入还未到 Stage 4)
- * 能手测 pinch / Cmd+缩放 / outline 跳转。
+ * 能手测 pinch / Cmd+缩放。
  *
  * 启用方式:DevTools Console 内:
  *   localStorage.setItem('krig.pdfViewerV2', '1'); location.reload();
@@ -16,17 +16,15 @@
  * 4. unmount 时 destroyDocument
  *
  * **本组件不接 KRIG annotation / vocab-highlight / selection picker**(Stage 3 接);
- * 仅验证 PDFViewer 核心:加载 / 滚动 / 缩放 / outline。
+ * 仅验证 PDFViewer 核心:加载 / 滚动 / 缩放。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type {
   PdfViewerApi,
   DocumentHandle,
-  PDFViewerCanvasHandle,
-  TOCItem,
 } from '@capabilities/pdf-viewer/types';
 
 interface Props {
@@ -49,8 +47,6 @@ export function isPdfViewerV2Enabled(): boolean {
 export function PdfViewerDevBranch({ onPageChange }: Props) {
   const [handle, setHandle] = useState<DocumentHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [outline, setOutline] = useState<TOCItem[]>([]);
-  const canvasRef = useRef<PDFViewerCanvasHandle | null>(null);
 
   // 加载 PDF
   useEffect(() => {
@@ -74,9 +70,6 @@ export function PdfViewerDevBranch({ onPageChange }: Props) {
         }
         localHandle = h;
         setHandle(h);
-
-        const toc = await pdfViewer.getOutline(h);
-        if (!cancelled) setOutline(toc);
       } catch (err) {
         console.error('[PdfViewerDevBranch] load failed:', err);
         if (!cancelled) setError(String(err));
@@ -108,75 +101,10 @@ export function PdfViewerDevBranch({ onPageChange }: Props) {
   const PDFViewerCanvas = pdfViewer.PDFViewerCanvas;
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <PDFViewerCanvas
-        ref={canvasRef}
-        handle={handle}
-        initialFitMode="page-width"
-        onPageChange={onPageChange}
-      />
-      {outline.length > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            zIndex: 100,
-            background: 'rgba(255,255,255,0.95)',
-            border: '1px solid #ddd',
-            borderRadius: 4,
-            padding: 6,
-            maxHeight: 200,
-            overflow: 'auto',
-            fontSize: 11,
-            maxWidth: 240,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            DevBranch Outline(点击跳转)
-          </div>
-          {outline.map((item, i) => (
-            <DevOutlineItem
-              key={i}
-              item={item}
-              onClick={(destRef) => canvasRef.current?.goToDestination(destRef)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DevOutlineItem({
-  item,
-  depth = 0,
-  onClick,
-}: {
-  item: TOCItem;
-  depth?: number;
-  onClick: (destRef: string) => void;
-}) {
-  return (
-    <div style={{ marginLeft: depth * 8 }}>
-      <button
-        type="button"
-        onClick={() => item.destRef && onClick(item.destRef)}
-        style={{
-          background: 'none',
-          border: 'none',
-          padding: '2px 0',
-          cursor: 'pointer',
-          color: '#06c',
-          textAlign: 'left',
-          fontSize: 11,
-        }}
-      >
-        {item.label || '(no title)'}
-      </button>
-      {item.children?.map((c, i) => (
-        <DevOutlineItem key={i} item={c} depth={depth + 1} onClick={onClick} />
-      ))}
-    </div>
+    <PDFViewerCanvas
+      handle={handle}
+      initialFitMode="page-width"
+      onPageChange={onPageChange}
+    />
   );
 }
