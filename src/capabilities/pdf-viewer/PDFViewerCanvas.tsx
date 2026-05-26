@@ -219,9 +219,7 @@ export const PDFViewerCanvas = forwardRef<
     const QUIESCE_MS = 150;     // 静止判定 — 超过此 ms 无新 wheel = 手势结束
     const WHEEL_DELTA_FACTOR = 0.01; // deltaY → scale 增量比例(pinch 1 像素 = 1% scale 变化)
 
-    let pinchScale = 1;                         // pinch 期间累积的 scale 比例(1 = 无变化)
-    // pinch 起始锚点 — container 局部坐标(鼠标相对 container 左上),决定缩放中心
-    let pinchAnchorContainer: { x: number; y: number } = { x: 0, y: 0 };
+    let pinchScale = 1;  // pinch 期间累积的 scale 比例(1 = 无变化)
     let quiesceTimerId = 0;
 
     const commit = (): void => {
@@ -236,31 +234,17 @@ export const PDFViewerCanvas = forwardRef<
 
       const finalScaleFactor = pinchScale;
       pinchScale = 1;
-      const { x: ax, y: ay } = pinchAnchorContainer;
 
-      // 锚点处内容像素(scale 前)— 在清 transform / updateScale 前先记下
-      const scrollLeftBefore = container.scrollLeft;
-      const scrollTopBefore = container.scrollTop;
-      const contentX = scrollLeftBefore + ax;
-      const contentY = scrollTopBefore + ay;
-
-      // 清 CSS transform — 真渲染开始
+      // 清 CSS transform — 真渲染接管
       viewerDiv.style.transform = '';
       viewerDiv.style.transformOrigin = '';
 
-      // 不传 origin,自管 scroll(pdfjs origin 公式在嵌套容器里不准)
+      // 不传 origin → pdfjs 走 _location-based scrollPageIntoView,跟键盘 Cmd+= 同路径
+      // 居中保持"当前页中心",对齐 macOS Preview / pdfjs viewer.js 默认体验。
+      // 自管 origin/scroll 在嵌套容器里始终算不准(已多次踩坑),弃用。
       viewer.updateScale({
         drawingDelay: -1,
         scaleFactor: finalScaleFactor,
-      });
-
-      // 关键:updateScale 设 --scale-factor CSS var,1212 个 .page 元素 width/height
-      // 都用 round(down, var(--scale-factor) * pageW, 1px) 撑大,**reflow 异步完成**。
-      // 此刻 container.scrollHeight 仍是旧值,直接设 scrollLeft/Top 会被 clamp 到旧 max。
-      // 等 rAF 让浏览器完成 layout 再设 scroll。
-      requestAnimationFrame(() => {
-        container.scrollLeft = contentX * finalScaleFactor - ax;
-        container.scrollTop = contentY * finalScaleFactor - ay;
       });
     };
 
@@ -268,22 +252,16 @@ export const PDFViewerCanvas = forwardRef<
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
 
-      // pinch 开始(quiesce timer 未跑)— 记锚点(container 局部) + 设 transformOrigin
+      // pinch 开始:transformOrigin 设为 viewer 可视中心 — 跟 commit 后真渲染居中行为一致
       if (quiesceTimerId === 0) {
-        const bcr = container.getBoundingClientRect();
-        pinchAnchorContainer = {
-          x: e.clientX - bcr.left,
-          y: e.clientY - bcr.top,
-        };
-        // transformOrigin 必须与 commit 时的锚点一致(viewerDiv 局部坐标 = container 局部 + scroll)
-        const viewerOriginX = pinchAnchorContainer.x + container.scrollLeft;
-        const viewerOriginY = pinchAnchorContainer.y + container.scrollTop;
-        viewerDiv.style.transformOrigin = `${viewerOriginX}px ${viewerOriginY}px`;
+        const cx = container.clientWidth / 2 + container.scrollLeft;
+        const cy = container.clientHeight / 2 + container.scrollTop;
+        viewerDiv.style.transformOrigin = `${cx}px ${cy}px`;
       }
 
       // 累积 pinch scale — deltaY 负 = 放大(pinch open),正 = 缩小
       let delta = e.deltaY;
-      if (e.deltaMode === 1) delta *= 16; // line → 像素粗折
+      if (e.deltaMode === 1) delta *= 16;
       else if (e.deltaMode === 2) delta *= 100;
       pinchScale *= 1 - delta * WHEEL_DELTA_FACTOR;
       pinchScale = Math.max(0.1, Math.min(10, pinchScale));
