@@ -18,3 +18,4 @@ export { StylePopover } from './StylePopover';
 export { ParameterSlider } from './ParameterSlider';
 export { RangeInput } from './RangeInput';
 export { SettingsPanel } from './SettingsPanel';
+export { ExpressionDialog } from './ExpressionDialog';

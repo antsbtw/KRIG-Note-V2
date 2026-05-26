@@ -24,7 +24,7 @@ import type {
 } from './types';
 import { createFunctionEntry, DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from './types';
 import {
-  FunctionRow, ParameterSlider, SettingsPanel,
+  FunctionRow, ParameterSlider, SettingsPanel, ExpressionDialog,
 } from './components';
 
 // ─── Props ──────────────────────────────────────────────
@@ -57,6 +57,12 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
   };
   const axis = canvas.axis;
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // dialog 状态:null 关闭 / { mode: 'new' } 添加 / { mode: 'edit', id, value } 编辑现有
+  const [exprDialog, setExprDialog] = useState<
+    | null
+    | { mode: 'new' }
+    | { mode: 'edit'; id: string; initialValue: string }
+  >(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
   const settingsPanelRef = useRef<HTMLDivElement>(null);
 
@@ -88,7 +94,12 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
     (id: string, updates: Partial<FunctionEntry>) => {
       if (updates.expression !== undefined) {
         const detected = math.detectPlotType(updates.expression);
-        updates = { ...updates, plotType: detected.plotType, expression: detected.expression };
+        updates = {
+          ...updates,
+          plotType: detected.plotType,
+          expression: detected.expression,
+          displayExpression: detected.displayExpression,
+        };
       }
 
       const newFns = fns.map((f) => (f.id === id ? { ...f, ...updates } : f));
@@ -112,18 +123,14 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
     [data, fns, parameters, onChange, math],
   );
 
-  const addFunction = useCallback(() => {
-    const newFn = createFunctionEntry(fns.length);
-    onChange({ ...data, functions: [...fns, newFn] });
-  }, [data, fns, onChange]);
-
-  // Phase 3:help-panel Insert 回调 — 接 expr,自动 detectPlotType + extractParameters
+  // help-panel Insert 回调 — 接 expr,自动 detectPlotType + extractParameters
   // 创建新函数 + 同步参数(对齐 V1 insertFromHelp 行为)
   const insertFromHelp = useCallback((expr: string) => {
     const newFn = createFunctionEntry(fns.length, expr);
     const detected = math.detectPlotType(expr);
     newFn.plotType = detected.plotType;
     newFn.expression = detected.expression;
+    newFn.displayExpression = detected.displayExpression;
     if (detected.plotType === 'parametric') {
       newFn.label = newFn.label.replace('(x)', '(t)');
     }
@@ -175,7 +182,8 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
       if (
         fn.plotType === 'parametric' ||
         fn.plotType === 'polar' ||
-        fn.plotType === 'vertical-line'
+        fn.plotType === 'vertical-line' ||
+        fn.plotType === 'implicit'
       ) {
         return { fn, evalFn: null, contSegs: [], error: null };
       }
@@ -194,12 +202,17 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
       const { fn, evalFn, contSegs } = c;
       if (!fn.visible) continue;
 
+      // 通用 label 用 LaTeX 形式;优先用 displayExpression(忠实原貌),否则 expression
+      const labelLatex = math.exprToLatex(fn.displayExpression ?? fn.expression) ??
+        (fn.displayExpression ?? fn.expression);
+      const labelStyle = { label: labelLatex, labelPos: fn.labelPos };
+
       if (fn.plotType === 'vertical-line') {
         const x = math.makeVerticalLineX(fn.expression);
         if (x == null) continue;
         out.push({
           kind: 'verticalLine', id: fn.id, x,
-          color: fn.color, style: fn.style, lineWidth: fn.lineWidth,
+          color: fn.color, style: fn.style, lineWidth: fn.lineWidth, ...labelStyle,
         });
         continue;
       }
@@ -210,7 +223,7 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
         const [tMin, tMax] = fn.paramDomain || [0, 2 * Math.PI];
         out.push({
           kind: 'parametric', id: fn.id, xy, tDomain: [tMin, tMax],
-          color: fn.color, style: fn.style, lineWidth: fn.lineWidth,
+          color: fn.color, style: fn.style, lineWidth: fn.lineWidth, ...labelStyle,
         });
         continue;
       }
@@ -221,7 +234,17 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
         const [tMin, tMax] = fn.paramDomain || [0, 2 * Math.PI];
         out.push({
           kind: 'polar', id: fn.id, r, thetaDomain: [tMin, tMax],
-          color: fn.color, style: fn.style, lineWidth: fn.lineWidth,
+          color: fn.color, style: fn.style, lineWidth: fn.lineWidth, ...labelStyle,
+        });
+        continue;
+      }
+
+      if (fn.plotType === 'implicit') {
+        const fxy = math.makeImplicitFn(fn.expression, parameters);
+        if (!fxy) continue;
+        out.push({
+          kind: 'implicit', id: fn.id, fn: fxy,
+          color: fn.color, style: fn.style, lineWidth: fn.lineWidth, ...labelStyle,
         });
         continue;
       }
@@ -232,7 +255,7 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
         kind: 'fnOfX', id: fn.id, fn: evalFn,
         segments: contSegs.length > 0 ? contSegs.map((s) => ({ domain: s.domain })) : undefined,
         derivative: fn.showDerivative,
-        color: fn.color, style: fn.style, lineWidth: fn.lineWidth,
+        color: fn.color, style: fn.style, lineWidth: fn.lineWidth, ...labelStyle,
       });
     }
     return out;
@@ -368,6 +391,13 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
               onRemove={() => removeFunction(fn.id)}
               canRemove={fns.length > 1}
               error={compiled?.error ?? null}
+              onEditExpression={() =>
+                setExprDialog({
+                  mode: 'edit',
+                  id: fn.id,
+                  initialValue: fn.displayExpression ?? fn.expression,
+                })
+              }
             />
           );
         })}
@@ -376,7 +406,7 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
         <div className="mv-toolbar-row">
           <button
             className="mv-fn-btn mv-toolbar-btn"
-            onClick={addFunction}
+            onClick={() => setExprDialog({ mode: 'new' })}
             title="添加函数"
           >
             +
@@ -432,6 +462,7 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
           zoom={canvas.zoom}
           pan={canvas.pan}
           preserveAspectRatio={false}
+          onLabelMove={(curveId, pos) => updateFunction(curveId, { labelPos: pos })}
         />
         {settingsOpen && (
           <div ref={settingsPanelRef} className="mv-settings-anchor">
@@ -449,6 +480,22 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
           </div>
         )}
       </div>
+
+      {exprDialog && (
+        <ExpressionDialog
+          title={exprDialog.mode === 'new' ? '添加函数' : '编辑表达式'}
+          initialValue={exprDialog.mode === 'edit' ? exprDialog.initialValue : ''}
+          onConfirm={(expr) => {
+            if (exprDialog.mode === 'new') {
+              insertFromHelp(expr);
+            } else {
+              updateFunction(exprDialog.id, { expression: expr });
+            }
+            setExprDialog(null);
+          }}
+          onCancel={() => setExprDialog(null)}
+        />
+      )}
     </div>
   );
 };

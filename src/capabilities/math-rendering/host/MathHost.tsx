@@ -16,8 +16,8 @@
  *   capability 内部子组件渲染 — driver 全屏 Panel 仅传配置 + 回调
  */
 
-import React, { useMemo } from 'react';
-import { Mafs, Plot, Point, Line, Coordinates } from 'mafs';
+import React, { useMemo, useRef } from 'react';
+import { Mafs, Plot, Point, Line, Coordinates, LaTeX } from 'mafs';
 import './mafs-style';
 import type {
   MathHostProps,
@@ -28,6 +28,7 @@ import type {
 } from '../types';
 import { numericalDerivative } from '../compute/evaluator';
 import { buildSegments, detectDiscontinuities } from '../compute/discontinuity';
+import { marchingSquares } from '../compute/marching-squares';
 import {
   TangentTool, NormalTool, IntegralTool, AnnotationTool,
   FeatureTool, RiemannTool, EndpointMarkers, HoverCoords,
@@ -47,6 +48,7 @@ export const MathHost: React.FC<MathHostProps> = ({
   pan = true,
   preserveAspectRatio = false,
   onViewportChange: _onViewportChange,
+  onLabelMove,
   overlays,
   overlayCallbacks,
   pointSize = 6,
@@ -85,8 +87,10 @@ export const MathHost: React.FC<MathHostProps> = ({
     return out;
   }, [overlays?.showEndpoints, curves]);
 
+  const hostRef = useRef<HTMLDivElement>(null);
+
   return (
-    <div className="mr-math-host" style={{ position: 'relative' }}>
+    <div ref={hostRef} className="mr-math-host" style={{ position: 'relative' }}>
       <Mafs
         viewBox={{ x: viewBox.x, y: viewBox.y }}
         preserveAspectRatio={preserveAspectRatio}
@@ -95,7 +99,17 @@ export const MathHost: React.FC<MathHostProps> = ({
         pan={pan}
       >
         {renderAxis(axis)}
-        {curves.map((c) => renderCurve(c))}
+        {curves.map((c) => renderCurve(c, viewBox))}
+        {curves.map((c, i) => (
+          <DraggableLabel
+            key={`${c.id}-label`}
+            curve={c}
+            idx={i}
+            viewBox={viewBox}
+            hostRef={hostRef}
+            onLabelMove={onLabelMove}
+          />
+        ))}
         {endpoints?.map((ep, i) => renderEndpoint(ep, i))}
         {annotations?.map((ann) => renderAnnotation(ann, curves))}
 
@@ -214,7 +228,7 @@ function normalizeStyle(s?: 'solid' | 'dashed' | 'dotted'): 'solid' | 'dashed' {
   return s === 'dashed' || s === 'dotted' ? 'dashed' : 'solid';
 }
 
-function renderCurve(c: Curve): React.ReactNode {
+function renderCurve(c: Curve, viewBox: { x: [number, number]; y: [number, number] }): React.ReactNode {
   switch (c.kind) {
     case 'fnOfX':
       return renderFnOfX(c);
@@ -257,9 +271,126 @@ function renderCurve(c: Curve): React.ReactNode {
           opacity={c.opacity}
         />
       );
+    case 'implicit':
+      return renderImplicit(c, viewBox);
     case 'unsupported':
       return null;
   }
+}
+
+function renderImplicit(
+  c: Extract<Curve, { kind: 'implicit' }>,
+  viewBox: { x: [number, number]; y: [number, number] },
+): React.ReactNode {
+  const segments = marchingSquares(
+    c.fn,
+    viewBox.x[0], viewBox.x[1],
+    viewBox.y[0], viewBox.y[1],
+    c.resolution ?? 100,
+  );
+  return (
+    <React.Fragment key={c.id}>
+      {segments.map((seg, i) => (
+        <Line.Segment
+          key={`${c.id}-${i}`}
+          point1={seg[0]}
+          point2={seg[1]}
+          color={c.color}
+          style={normalizeStyle(c.style)}
+          weight={c.lineWidth}
+          opacity={c.opacity}
+        />
+      ))}
+    </React.Fragment>
+  );
+}
+
+/** DraggableLabel — 曲线 label,单指按住可直接拖动 (无 MovablePoint 小圆点)。
+ *
+ * 默认位置(labelPos 缺省时):
+ * - y-of-x: 曲线上 x = viewBox 左 1/4 处的 (x, f(x)) + 略往上偏
+ * - 其他类型: viewBox 顶部按 index 错开
+ *
+ * 拖动:onPointerDown 启动 → window pointermove 算 px → 数据坐标 delta;
+ * stopPropagation 阻止冒泡到 mafs 的 pan handler。
+ * macOS 双指扩张走 mafs 内置 onPinch(zoom=true 时启用)。
+ */
+function DraggableLabel({
+  curve,
+  idx,
+  viewBox,
+  hostRef,
+  onLabelMove,
+}: {
+  curve: Curve;
+  idx: number;
+  viewBox: { x: [number, number]; y: [number, number] };
+  hostRef: React.RefObject<HTMLDivElement>;
+  onLabelMove?: (curveId: string, pos: [number, number]) => void;
+}) {
+  if (curve.kind === 'unsupported' || !curve.label) return null;
+
+  const defaultPos = curve.labelPos ?? computeDefaultLabelPos(curve, idx, viewBox);
+
+  const onPointerDown = (e: React.PointerEvent<SVGGElement>) => {
+    if (!onLabelMove || !hostRef.current) return;
+    e.stopPropagation(); // 阻止冒泡到 mafs pan handler
+    const host = hostRef.current;
+    const rect = host.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const xSpan = viewBox.x[1] - viewBox.x[0];
+    const ySpan = viewBox.y[1] - viewBox.y[0];
+    const pxPerDataX = rect.width / xSpan;
+    const pxPerDataY = rect.height / ySpan;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startPos = defaultPos;
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = (ev.clientX - startX) / pxPerDataX;
+      const dy = -(ev.clientY - startY) / pxPerDataY; // y 轴翻转
+      onLabelMove(curve.id, [startPos[0] + dx, startPos[1] + dy]);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  return (
+    <g
+      style={{ cursor: onLabelMove ? 'move' : 'default' }}
+      onPointerDown={onPointerDown}
+    >
+      <LaTeX at={defaultPos} tex={curve.label} color={curve.color} />
+    </g>
+  );
+}
+
+function computeDefaultLabelPos(
+  c: Curve,
+  idx: number,
+  viewBox: { x: [number, number]; y: [number, number] },
+): [number, number] {
+  const [xMin, xMax] = viewBox.x;
+  const [yMin, yMax] = viewBox.y;
+  const xSpan = xMax - xMin;
+  const ySpan = yMax - yMin;
+
+  if (c.kind === 'fnOfX') {
+    // 曲线上 x = 左 1/4 的位置 + 略往上偏(避免压曲线)
+    const x = xMin + xSpan * 0.25;
+    const y = c.fn(x);
+    if (Number.isFinite(y) && y >= yMin && y <= yMax) {
+      return [x, y + ySpan * 0.05];
+    }
+  }
+  // 其他类型:viewBox 顶部按 idx 错开,从上往下排
+  const yTop = yMax - ySpan * 0.08;
+  const yStep = ySpan * 0.1;
+  return [xMin + xSpan * 0.1, yTop - idx * yStep];
 }
 
 function renderFnOfX(c: Extract<Curve, { kind: 'fnOfX' }>): React.ReactNode {

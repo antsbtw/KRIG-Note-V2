@@ -1,13 +1,11 @@
 /**
  * FunctionRow — 单条函数编辑行
  *
- * 1:1 迁自 V1 `src/plugins/note/blocks/math-visual/components/FunctionRow.tsx`,
- * **latex-to-mathjs 直 import 改走 capability**(`requireCapabilityApi('math-rendering').latexToMathjs`)。
+ * 点击表达式 → 触发 onEditExpression(父级弹 ExpressionDialog 修改),
+ * 不再 inline input 编辑(统一入口 = 添加新 / 编辑现有 = 同款 dialog 体验)。
  */
 
-import React, { useState, useRef } from 'react';
-import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { MathRenderingApi } from '@capabilities/math-rendering/types';
+import React, { useState } from 'react';
 import type { FunctionEntry } from '../types';
 import { KaTeX, LatexDisplay } from './KaTexHelpers';
 import { StylePopover } from './StylePopover';
@@ -18,16 +16,16 @@ export function FunctionRow({
   onRemove,
   canRemove,
   error,
+  onEditExpression,
 }: {
   fn: FunctionEntry;
   onUpdate: (updated: Partial<FunctionEntry>) => void;
   onRemove: () => void;
   canRemove: boolean;
   error: string | null;
+  onEditExpression: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className={`mv-fn-row ${error ? 'mv-fn-row--error' : ''}`}>
@@ -47,98 +45,26 @@ export function FunctionRow({
           onChangeStyle={(s) => onUpdate({ style: s })}
         />
       )}
-      {editing ? (
-        <input
-          ref={inputRef}
-          className="mv-fn-input"
-          value={fn.expression}
-          onChange={(e) => onUpdate({ expression: e.target.value })}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') setEditing(false);
-            e.stopPropagation();
-          }}
-          onPaste={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const clip = e.clipboardData;
-            let text = '';
-
-            // 1. mirro-blocks LaTeX(V1 -> V2 仍保留同字段名 — clipboard 自定义 MIME)
-            const mirroBlocks = clip.getData('application/mirro-blocks');
-            if (mirroBlocks) {
-              try {
-                const blocks = JSON.parse(mirroBlocks) as Array<Record<string, unknown>>;
-                const findLatex = (nodes: Array<Record<string, unknown>>): string => {
-                  for (const n of nodes) {
-                    if (n.type === 'mathInline') return ((n.attrs as Record<string, unknown>)?.latex as string) || '';
-                    if (n.type === 'mathBlock') {
-                      const content = n.content as Array<Record<string, unknown>> | undefined;
-                      return content?.map(c => (c.text as string) || '').join('') || '';
-                    }
-                    if (Array.isArray(n.content)) {
-                      const found = findLatex(n.content as Array<Record<string, unknown>>);
-                      if (found) return found;
-                    }
-                  }
-                  return '';
-                };
-                text = findLatex(blocks);
-              } catch { /* ignore */ }
-            }
-
-            // 2. HTML data-latex
-            if (!text) {
-              const html = clip.getData('text/html');
-              if (html) {
-                const match = html.match(/data-latex="([^"]+)"/);
-                if (match) text = match[1];
-                if (!text) {
-                  const div = document.createElement('div');
-                  div.innerHTML = html;
-                  text = div.textContent || '';
-                }
-              }
-            }
-
-            // 3. plain text
-            if (!text) text = clip.getData('text/plain') || '';
-
-            text = text.trim();
-            if (!text) return;
-
-            const eqMatch = text.match(/^[a-zA-Z]\s*(?:\([^)]*\))?\s*=\s*(.+)$/);
-            if (eqMatch) text = eqMatch[1].trim();
-
-            const { latexToMathjs } = requireCapabilityApi<MathRenderingApi>('math-rendering');
-            const expr = latexToMathjs(text);
-            if (expr) {
-              onUpdate({ expression: expr, sourceLatex: text });
-            } else {
-              onUpdate({ expression: text, sourceLatex: text });
-            }
-          }}
-          autoFocus
-        />
-      ) : (
-        <span
-          className="mv-fn-expr"
-          onClick={() => setEditing(true)}
-          title="点击编辑表达式"
-        >
-          <LatexDisplay expression={fn.expression} />
-        </span>
-      )}
+      <span
+        className="mv-fn-expr"
+        onClick={onEditExpression}
+        title="点击编辑表达式"
+      >
+        <LatexDisplay expression={fn.displayExpression ?? fn.expression} />
+      </span>
       {error && (
         <span className="mv-fn-error" title={error}>!</span>
       )}
-      <button
-        className={`mv-fn-btn mv-fn-btn-tex mv-fn-aux ${fn.showDerivative ? 'mv-fn-btn--active' : ''}`}
-        onClick={() => onUpdate({ showDerivative: !fn.showDerivative })}
-        title="导数"
-      >
-        <KaTeX tex={`${fn.label.replace('(x)', "'(x)")}`} />
-      </button>
+      {/* 导数按钮 — 只在显式 y-of-x 类型显示;implicit/parametric/polar/vertical-line 不支持数值导数 */}
+      {(fn.plotType === undefined || fn.plotType === 'y-of-x') && (
+        <button
+          className={`mv-fn-btn mv-fn-btn-tex mv-fn-aux ${fn.showDerivative ? 'mv-fn-btn--active' : ''}`}
+          onClick={() => onUpdate({ showDerivative: !fn.showDerivative })}
+          title="导数"
+        >
+          <KaTeX tex={`${fn.label.replace('(x)', "'(x)")}`} />
+        </button>
+      )}
       <button
         className={`mv-fn-btn mv-fn-aux ${fn.visible ? '' : 'mv-fn-btn--hidden'}`}
         onClick={() => onUpdate({ visible: !fn.visible })}
