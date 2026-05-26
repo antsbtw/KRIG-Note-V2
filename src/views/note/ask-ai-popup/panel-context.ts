@@ -16,8 +16,21 @@ export interface AskAIContext {
   defaultServiceId: AIServiceId;
   /** 已 preCreatePlaceholder + addThoughtMark 后的 ai-response thought atom id */
   thoughtId: string;
-  /** PM instance id(cancel 时 removeThoughtAnchor 用) */
-  instanceId: string;
+  /**
+   * PM instance id(cancel 时 removeThoughtAnchor 用)。
+   * Note 端必填;EPUB/PDF 端无 PM 实例 → 留空,cancel 跳过 mark 反清那步。
+   */
+  instanceId?: string;
+  /**
+   * 自定义 cancel 钩子(view 特定的反清逻辑)。
+   *
+   * Note 端不传(走默认 deleteThought + removeThoughtAnchor 即可)。
+   * EPUB/PDF 端传:删除刚落的 legacy reading-thought-block,
+   * 不然 cancel 后 deleteThought 只清 atom,PDF/EPUB 上 highlight 残留。
+   *
+   * 在 AskAIPanel cleanup 内 deleteThought 之前/同步调用(fire-and-forget)。
+   */
+  onCancel?: () => void;
 }
 
 let pending: AskAIContext | null = null;
