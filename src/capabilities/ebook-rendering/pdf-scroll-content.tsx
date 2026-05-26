@@ -229,6 +229,13 @@ export function PdfScrollContent({
       {Array.from(mountedPages.entries()).map(([pageNum, pageDiv]) => {
         const dim = pageDims.get(pageNum);
         if (!dim) return null;
+        // pdfjs PDFPageView 销毁(scroll/paged 切换 / virtual scroll 出可视)时,
+        // 会把 pageDiv 从父节点移除。我们 mountedPages Map 还持引用,portal 渲染
+        // 时 React 试图 removeChild(scroll → paged 切换) 但 pageDiv 已脱离 DOM
+        // → "Failed to execute 'removeChild': not a child of this node"。
+        // 校验:pageDiv 仍连在 DOM 才 portal,否则跳过(下个 page render 事件会
+        // 推新 ref 进 Map 重建 portal)。
+        if (!pageDiv.isConnected) return null;
         return createPortal(
           <AnnotationLayer
             pageNum={pageNum}
