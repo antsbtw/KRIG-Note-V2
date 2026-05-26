@@ -219,6 +219,7 @@ export const PDFViewerCanvas = forwardRef<
     let pendingFlushId = 0;
     let accumulatedDelta = 0;
 
+    let wheelCount = 0;
     const flush = (): void => {
       pendingFlushId = 0;
       if (pendingTicks === 0) return;
@@ -228,18 +229,24 @@ export const PDFViewerCanvas = forwardRef<
         return;
       }
       const scaleFactor = WHEEL_SCALE_FACTOR ** pendingTicks;
+      const ticksUsed = pendingTicks;
       pendingTicks = 0;
-      lastScaleTime = performance.now();
+      const t0 = performance.now();
+      lastScaleTime = t0;
       viewer.updateScale({
         drawingDelay: WHEEL_DRAWING_DELAY,
         scaleFactor,
         origin: lastOrigin,
       });
+      const t1 = performance.now();
+      console.log(`[diag-flush] ticks=${ticksUsed} took ${(t1 - t0).toFixed(1)}ms scale=${viewer.currentScale.toFixed(3)} wheelCountSinceStart=${wheelCount}`);
     };
 
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
+      wheelCount += 1;
+      if (wheelCount % 20 === 0) console.log(`[diag-wheel] cumulative=${wheelCount} pendingTicks=${pendingTicks} pendingFlushId=${pendingFlushId} elapsedSinceLast=${(performance.now() - lastScaleTime).toFixed(0)}ms`);
       lastOrigin = [e.clientX, e.clientY];
 
       // 累积 tick — 不每个 wheel 都触发,小 delta 累成一档
