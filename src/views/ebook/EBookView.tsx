@@ -47,6 +47,11 @@ import {
   rescanAll as rescanVocabHighlight,
   clearAll as clearVocabHighlight,
 } from './pdf-vocab-highlight';
+import {
+  setVocab as setEpubVocab,
+  attachSection as attachEpubVocabSection,
+  clearAll as clearEpubVocab,
+} from './epub-vocab-highlight';
 import './pdf-vocab-highlight/styles.css';
 import './ebook.css';
 
@@ -365,9 +370,10 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     [pdfAnn, pdfTextSelection, dismissPdfTextPicker],
   );
 
-  // ── PDF vocab highlight(2026-05-25)──
-  // mount 时挂全局 hover 委托 + 订阅 learning vocab 变化 + 启动拉一次。
-  // 回调内每个 page textLayer render 完后扫该页;vocab 列表变 重扫已渲染所有页。
+  // ── PDF + EPUB vocab highlight(PDF 2026-05-25 / EPUB 2026-05-26)──
+  // mount 时:PDF 挂全局 hover 委托 + 两个模块共享同份 learning vocab 推送源 + 启动拉一次。
+  // 回调内 PDF 每页 textLayer render 完后扫该页;EPUB section load 后挂 iframe doc。
+  // vocab 列表变 重扫已渲染 PDF 页 + 重扫所有已 attach EPUB doc。
   useEffect(() => {
     const learning = requireCapabilityApi<LearningApi>('learning');
     initVocabHighlight();
@@ -375,16 +381,19 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     void learning.vocabList().then((entries) => {
       if (cancelled) return;
       setVocabHighlight(entries);
+      setEpubVocab(entries);
       rescanVocabHighlight();
     });
     const unsubscribe = learning.onVocabChanged((entries) => {
       setVocabHighlight(entries);
+      setEpubVocab(entries);
       rescanVocabHighlight();
     });
     return () => {
       cancelled = true;
       unsubscribe();
       clearVocabHighlight();
+      clearEpubVocab();
     };
   }, []);
   /**
@@ -401,6 +410,22 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     },
     [],
   );
+  /**
+   * Host onEpubSectionLoad 回调:renderer 完成 attachListeners 后触发,
+   * iframe doc 可直接 querySelectorAll;attachSection 注入 span + 挂 mousemove(幂等)。
+   * 切书 / 重 mount 由 useEffect cleanup 内 clearEpubVocab 清理。
+   */
+  const handleEpubSectionLoad = useCallback((doc: Document): void => {
+    attachEpubVocabSection(doc);
+  }, []);
+
+  // 切书时清掉旧书的 EPUB span — 避免上一本书翻章节遗留的 doc 残留高亮影响新书
+  // (PDF 路径的 textLayer 在切书时由 pdfjs 自然清,这里只补 EPUB 这条线)
+  useEffect(() => {
+    return () => {
+      clearEpubVocab();
+    };
+  }, [activeBookId]);
 
   // picker 关闭 lifecycle:外部 mousedown / ESC 关
   useEffect(() => {
@@ -741,6 +766,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
             onEpubContextMenu={handleEpubContextMenu}
             onEpubAnnotationDoubleClick={handleEpubAnnotationDoubleClick}
             onEpubSelectionDismiss={handleEpubSelectionDismiss}
+            onEpubSectionLoad={handleEpubSectionLoad}
             pdfAnnotationMode={pdfAnn.mode}
             pdfAnnotations={pdfAnn.annotations}
             pdfFlashAnnotationId={pdfAnn.flashId}

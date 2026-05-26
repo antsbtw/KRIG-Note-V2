@@ -278,6 +278,7 @@ export class EPUBRenderer implements IReflowableRenderer {
     this.fileData = null;
     this.tocItems = [];
     this.relocateCallbacks = [];
+    this.sectionLoadCallback = null;
   }
 
   getToolbarConfig(): ToolbarConfig {
@@ -555,6 +556,16 @@ export class EPUBRenderer implements IReflowableRenderer {
   /** L5-C4 fix:水平 swipe 推送(macOS Books 同款 UX);direction 为 'next' / 'prev' */
   private horizontalSwipeCallback: ((direction: 'next' | 'prev') => void) | null = null;
   /**
+   * 2026-05-26 加:EPUB section(spine item)load 完成回调 —
+   * 对齐 PDF 的 onPdfTextLayerRendered;view 端订阅后做生词高亮等"扫文字"业务。
+   *
+   * 每个 EPUB section 是独立 iframe doc;翻章节 / 切书时新 doc 加载触发 'load' 事件,
+   * 此回调在 attachListeners 完成所有选区/右键/swipe 监听后调用一次,view 拿 doc
+   * 可注入 span / 挂 mousemove / 测量 rect。doc cleanup 由 foliate 在 unload 时自管,
+   * view 不必清(__ebookListenersAttached 标记防重附,vocab 也复用此模式)。
+   */
+  private sectionLoadCallback: ((doc: Document, index: number) => void) | null = null;
+  /**
    * PR-α-3b followup fix:已知标注 cfi 列表(view 通过 setKnownAnnotationCfis 推)。
    * 用于 iframe contextmenu/dblclick 内 hit-test — foliate Overlayer svg 整体
    * pointer-events:none,事件穿透到下层文字,closest('[data-foliate-annotation]')
@@ -595,6 +606,26 @@ export class EPUBRenderer implements IReflowableRenderer {
   /** L5-C4 fix:注册水平 swipe 翻页回调(reflowable-content 消费) */
   onHorizontalSwipe(callback: (direction: 'next' | 'prev') => void): void {
     this.horizontalSwipeCallback = callback;
+  }
+
+  /**
+   * 2026-05-26 加:注册 EPUB section load 回调(view 端生词高亮等扫文字业务用)。
+   * 注册时立即对已加载的 sections 触发一次(冷启动 fast-path,同 setupSelectionListener
+   * 的 already-loaded contents 处理);后续新 section load 由 'load' 事件转发。
+   */
+  onSectionLoad(callback: (doc: Document, index: number) => void): void {
+    this.sectionLoadCallback = callback;
+    // 立即对已加载的 section 触发 — 用户在已 mount 的 view 上注册,补打追平
+    const contents = this.view?.renderer?.getContents?.();
+    if (contents) {
+      for (const { doc, index } of contents) {
+        try {
+          callback(doc, index);
+        } catch (err) {
+          console.warn('[ebook-rendering/epub] sectionLoadCallback threw on initial fire:', err);
+        }
+      }
+    }
   }
 
   setKnownAnnotationCfis(cfis: string[]): void {
@@ -787,6 +818,14 @@ export class EPUBRenderer implements IReflowableRenderer {
         },
         { passive: false },
       );
+
+      // 2026-05-26:全部 selection/contextmenu/swipe 监听挂完后,通知 view
+      // 该 section doc 可用 — view 端做 vocab 扫描 / span 注入 / mousemove 挂载等
+      try {
+        this.sectionLoadCallback?.(doc, index);
+      } catch (err) {
+        console.warn('[ebook-rendering/epub] sectionLoadCallback threw:', err);
+      }
     };
 
     // 已加载的 sections
