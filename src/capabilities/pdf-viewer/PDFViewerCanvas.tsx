@@ -200,79 +200,22 @@ export const PDFViewerCanvas = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
-  // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch — macOS 派 wheel + ctrlKey=true)──
+  // ── Cmd/Ctrl+wheel 缩放 — **诊断态:wheel handler 暂停 updateScale**
   //
-  // 关键挑战:trackpad pinch wheel ~125Hz,每个 wheel 命中阈值即触发 updateScale。
-  // pdfjs updateScale 同步分支(_setScaleUpdatePages)即使 drawingDelay 也会改
-  // CSS var + dispatch event + scrollPageIntoView,每秒 10+ 次堆叠主线程致挂死
-  // (2026-05-25 挂死根因)。
-  //
-  // 解法:**rAF 节流** — wheel 只累积 tick 数,真正的 updateScale 调用合并到
-  // rAF 回调内,每帧最多调一次。多 tick 合并为一个综合 scaleFactor(指数累乘)。
+  // 多轮 rAF 节流 / 累积 / origin / 自管 scroll 修复均挂死,根因未明。
+  // 现在 wheel 只 preventDefault(阻浏览器整页 zoom),不调 updateScale。
+  // 用于隔离:如果 pinch 不挂死 → 挂死在我们 wheel 路径;反之挂死在 pdfjs 内部。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    let accumulatedDelta = 0;
-    let lastWheelTime = 0;
-    // 待处理的 tick 数(>0 放大,<0 缩小);rAF 内消费
-    let pendingTicks = 0;
-    let rafId = 0;
-    // 最近一次 wheel 的鼠标位置 — rAF 内用作 origin
-    let lastOrigin: [number, number] = [0, 0];
-
-    const flush = (): void => {
-      rafId = 0;
-      if (pendingTicks === 0) return;
-      const viewer = viewerInstanceRef.current;
-      if (!viewer) {
-        pendingTicks = 0;
-        return;
-      }
-      // 多 tick 合并为一个综合 scaleFactor(指数累乘)
-      const scaleFactor = WHEEL_SCALE_FACTOR ** pendingTicks;
-      pendingTicks = 0;
-      viewer.updateScale({
-        drawingDelay: WHEEL_DRAWING_DELAY,
-        scaleFactor,
-        origin: lastOrigin,
-      });
-    };
-
     const handler = (e: WheelEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return;
       e.preventDefault();
-
-      const now = performance.now();
-      if (now - lastWheelTime > GESTURE_TIMEOUT_MS) {
-        accumulatedDelta = 0;
-      }
-      lastWheelTime = now;
-      lastOrigin = [e.clientX, e.clientY];
-
-      let delta = e.deltaY;
-      if (e.deltaMode === 1) delta *= PIXELS_PER_LINE;
-      else if (e.deltaMode === 2) delta *= PIXELS_PER_LINE * 10;
-
-      accumulatedDelta += delta;
-
-      // 累积出 tick(放大 = 负 deltaY → 正 tick;缩小反之)
-      while (Math.abs(accumulatedDelta) >= PIXELS_PER_LINE) {
-        const direction = accumulatedDelta < 0 ? 1 : -1;
-        accumulatedDelta -= direction * PIXELS_PER_LINE;
-        pendingTicks += direction;
-      }
-
-      // rAF 节流:一帧最多一次 updateScale
-      if (pendingTicks !== 0 && rafId === 0) {
-        rafId = requestAnimationFrame(flush);
-      }
+      // 暂时什么都不做 — 仅诊断
     };
     container.addEventListener('wheel', handler, { passive: false });
-    return () => {
-      container.removeEventListener('wheel', handler);
-      if (rafId !== 0) cancelAnimationFrame(rafId);
-    };
+    return () => container.removeEventListener('wheel', handler);
   }, []);
 
   // ── 键盘 Cmd+= / Cmd+- / Cmd+0 ──
