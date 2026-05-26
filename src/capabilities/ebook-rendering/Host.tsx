@@ -352,17 +352,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         rendererRef.current = r;
 
         const pos = info.lastPosition;
-        // DIAG: 记录 restore 链路
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (window as any).electronAPI?.reportAlive({
-          layer: 'pdf-restore',
-          details: {
-            bookId: info.bookId,
-            pos_page: pos?.page,
-            pos_scale: pos?.scale,
-            pos_fitWidth: pos?.fitWidth,
-          },
-        });
 
         // 恢复缩放模式
         const shouldFitWidth = pos?.fitWidth !== undefined ? pos.fitWidth : true;
