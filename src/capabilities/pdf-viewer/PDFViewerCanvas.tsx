@@ -148,7 +148,24 @@ export const PDFViewerCanvas = forwardRef<
 
     // ── 事件桥接 ──
     const onPagesInit = (): void => {
+      const bcr = container.getBoundingClientRect();
+      console.log(
+        `[pdf-init] container clientW=${container.clientWidth} clientH=${container.clientHeight} BCR=${bcr.width.toFixed(0)}x${bcr.height.toFixed(0)} top=${bcr.top.toFixed(0)} left=${bcr.left.toFixed(0)}`,
+      );
       viewer.currentScaleValue = initialFitMode;
+      const scaleAfter = viewer.currentScale;
+      const sf = parseFloat(getComputedStyle(viewerDiv).getPropertyValue('--scale-factor')) || 0;
+      console.log(
+        `[pdf-init] after fit '${initialFitMode}' currentScale=${scaleAfter.toFixed(3)} --scale-factor=${sf.toFixed(3)}`,
+      );
+      // 等下一帧 layout 完成读 page 实际尺寸 + scroll
+      requestAnimationFrame(() => {
+        const page1 = viewerDiv.querySelector('.page') as HTMLElement | null;
+        const pbcr = page1?.getBoundingClientRect();
+        console.log(
+          `[pdf-init][rAF1] viewer width=${viewerDiv.getBoundingClientRect().width.toFixed(0)} scrollLeft=${container.scrollLeft} scrollWidth=${container.scrollWidth} page1=(${pbcr?.left.toFixed(0)},${pbcr?.top.toFixed(0)},${pbcr?.width.toFixed(0)}x${pbcr?.height.toFixed(0)}) pageMargin=${page1 ? getComputedStyle(page1).margin : 'n/a'}`,
+        );
+      });
     };
     const onPagesLoaded = (): void => {
       if (initialPage && initialPage >= 1 && initialPage <= pdfDoc.numPages) {
@@ -160,18 +177,27 @@ export const PDFViewerCanvas = forwardRef<
     };
     const onScaleChanging = (evt: { scale: number }): void => {
       callbacksRef.current.onScaleChange?.(evt.scale);
-      // 数据观察(2026-05-25 console log):scalechanging 同步触发时 pdfjs 内部
-      // _setScaleUpdatePages → scrollPageIntoView 已经写完 scrollLeft(贴左,page 比
-      // container 宽时让 page 左边缘对齐 container 左)。
-      // 默认 mozilla 行为是"贴左"(用户从左到右读),但 KRIG 期望 page 始终居中。
-      // 在 sync 分支直接覆盖 scrollLeft 居中:scrollWidth > clientWidth 才需要。
-      if (container.scrollWidth > container.clientWidth) {
-        const targetScrollLeft =
-          (container.scrollWidth - container.clientWidth) / 2;
-        if (Math.abs(container.scrollLeft - targetScrollLeft) > 1) {
-          container.scrollLeft = targetScrollLeft;
-        }
-      }
+      // 同步快照(scalechanging 触发瞬间)
+      const sync = {
+        scale: evt.scale,
+        scrollLeft: container.scrollLeft,
+        scrollWidth: container.scrollWidth,
+        clientWidth: container.clientWidth,
+        viewerWidth: viewerDiv.getBoundingClientRect().width,
+      };
+      // 异步快照(pdfjs 内部 scrollPageIntoView 等异步完成)
+      requestAnimationFrame(() => {
+        const page1 = viewerDiv.querySelector('.page') as HTMLElement | null;
+        const pbcr = page1?.getBoundingClientRect();
+        const cbcr = container.getBoundingClientRect();
+        const pageCenterX = pbcr ? (pbcr.left + pbcr.right) / 2 : null;
+        const containerCenterX = (cbcr.left + cbcr.right) / 2;
+        const offsetFromCenter =
+          pageCenterX !== null ? pageCenterX - containerCenterX : null;
+        console.log(
+          `[pdf-scale] scale=${sync.scale.toFixed(3)} sync(scrollLeft=${sync.scrollLeft} scrollWidth=${sync.scrollWidth} clientWidth=${sync.clientWidth} viewerW=${sync.viewerWidth.toFixed(0)}) rAF(scrollLeft=${container.scrollLeft} pageBCR=(${pbcr?.left.toFixed(0)},${pbcr?.width.toFixed(0)}) containerBCR.left=${cbcr.left.toFixed(0)} pageCenterX=${pageCenterX?.toFixed(0)} containerCenterX=${containerCenterX.toFixed(0)} offsetFromCenter=${offsetFromCenter?.toFixed(0)}px)`,
+        );
+      });
     };
     const onPageRendered = (evt: { pageNumber: number }): void => {
       const pageView = viewer.getPageView(evt.pageNumber - 1);
