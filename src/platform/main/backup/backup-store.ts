@@ -25,9 +25,13 @@ import {
   findSurrealBinary,
   getConnectionInfo,
   shutdownSurrealDBAsync,
+  initSurrealDB,
+  getDB,
 } from '@storage/surreal/client';
-import { initStorage } from '@storage/index';
-import { storage } from '@storage/index';
+import { initStorage, storage } from '@storage/index';
+import { runMigrations } from '@storage/migrations/runner';
+import { runCardinalityCheck } from '@storage/health/cardinality-check';
+import { surrealStorage } from '@storage/surreal/storage';
 import type { AtomEntity, EBookPayload } from '@semantic/types';
 
 import type { BackupResult, RestoreResult } from '@shared/ipc/backup-types';
@@ -291,9 +295,18 @@ export const backupStore = {
         fs.copyFileSync(credBackupFromArchive, paths.credentialsFile);
       }
 
-      // 4. 启动 SurrealDB(空 rocksdb)+ schema migration
+      // 4. 启动 SurrealDB(空 rocksdb)— ★ 此处不跑 migration ★
+      //
+      // surreal import 会把备份里完整的 schema + schema_version 数据
+      // 整段塞回新库。如果这里先 runMigrations 写入 schema_version 1.0.0
+      // 等记录,import 时会撞 schema_version_unique 索引(SurrealDB 抛
+      // "Database index schema_version_unique already contains '1.0.0'"
+      // 让整次 import 中止)。
+      //
+      // 正确顺序:启空 server → import 备份 → 再按需补跑 migration
+      // (备份版本低于当前代码时升 schema)+ cardinality 自愈。
       report('初始化新数据库...', 4, TOTAL_STEPS);
-      await initStorage();
+      await initSurrealDB();
 
       // 5. surreal import
       report('导入数据...', 5, TOTAL_STEPS);
@@ -325,6 +338,12 @@ export const backupStore = {
           error: `surreal import failed: ${importResult.stderr}`,
         };
       }
+
+      // 5b. import 完成后补跑 schema migration(应对老备份升 schema)+ cardinality 自愈。
+      // runMigrations 内部按 schema_version 表的最高版本 vs 代码 MIGRATIONS 列表比对,
+      // 只跑增量;同版本不重复执行。
+      await runMigrations(getDB());
+      await runCardinalityCheck(surrealStorage);
 
       // 6. 恢复 media
       report('恢复媒体文件...', 6, TOTAL_STEPS);
