@@ -365,23 +365,24 @@ async function ensureFolderPath(
 }
 
 /**
- * 确保 doc 首块能产出合理 title — V2 createNote 的 deriveTitle 取 content[0]
- * 所有 inline text 拼接,空字符串退回 '未命名'。
+ * 确保 doc 首块是 V2 schema 强制的"isTitle paragraph"
+ * (driver title-guard plugin appendTransaction 会自动补,而 buildNoteInfo
+ *  里的 deriveTitle 取 content[0] inline text — 必须自己产出合规结构)
  *
- * 策略(2026-05-27 反馈 — 修正"双重 heading + Untitled 占位"问题):
- * 1. 从头删 placeholder heading / 空 heading,直到首块非占位
- * 2. 删完后若首块是真 heading → 直接用(deriveTitle 自然抠到正确 title)
- * 3. 若首块不是 heading(纯段落 / 列表 / 等)→ 前插 heading(title) 让 deriveTitle 抠到
- * 4. 整篇全是 placeholder → 用文件名作 title
+ * 策略(2026-05-27 反馈 — 修正"NavSide 显示未命名 + PM 顶部多余 Untitled"问题):
+ * 1. 首块 = `{ type: 'paragraph', attrs: { isTitle: true }, content: [{ type:'text', text: title }] }`
+ * 2. 原文剥掉头部 placeholder heading(`# Untitled` / `# 未命名` 等)
+ * 3. 原文若首块是真 heading 且 text === title → 删掉(避免双重标题视觉)
+ * 4. 其他原文内容原样保留
  */
 function ensureLeadingTitle(content: PMDocNode[], title: string): PMDocNode[] {
   let working = content.slice();
 
-  // 1. 删头部所有 placeholder / 空 heading
+  // 剥头部 placeholder / 空 heading
   while (working.length > 0) {
     const first = working[0];
     if (first.type === 'heading') {
-      const text = extractHeadingText(first).trim();
+      const text = extractInlineText(first).trim();
       if (!text || isPlaceholderTitle(text)) {
         working = working.slice(1);
         continue;
@@ -390,34 +391,32 @@ function ensureLeadingTitle(content: PMDocNode[], title: string): PMDocNode[] {
     break;
   }
 
+  // 若首块是真 heading 且文本 === title — 删它(已经被 title paragraph 表达)
+  if (working.length > 0) {
+    const first = working[0];
+    if (first.type === 'heading') {
+      const text = extractInlineText(first).trim();
+      if (text === title) {
+        working = working.slice(1);
+      }
+    }
+  }
+
+  // 强制首块 = isTitle paragraph(V2 driver 强约束)
   const titleNode: PMDocNode = {
-    type: 'heading',
-    attrs: { level: 1 },
+    type: 'paragraph',
+    attrs: { isTitle: true },
     content: [{ type: 'text', text: title }],
   };
 
-  // 2. 整篇全 placeholder / 空 → 用 title 作整篇唯一 heading
-  if (working.length === 0) {
-    return [titleNode];
-  }
-
-  const first = working[0];
-
-  // 3. 首块是真 heading → 直接用(不重插)
-  if (first.type === 'heading') {
-    return working;
-  }
-
-  // 4. 首块是段落 / 列表 / 等 → 前插 title heading
   return [titleNode, ...working];
 }
 
-/** 抠 heading 节点内拼接文本(忽略 mark/attrs)*/
-function extractHeadingText(node: PMDocNode): string {
+/** 递归抠节点 inline text(text 节点 + 嵌套 content)*/
+function extractInlineText(node: PMDocNode): string {
+  if (node.type === 'text') return node.text ?? '';
   if (!node.content) return '';
-  return node.content
-    .map((c) => (c.type === 'text' ? c.text ?? '' : extractHeadingText(c)))
-    .join('');
+  return node.content.map(extractInlineText).join('');
 }
 
 async function createNoteInFolder(
