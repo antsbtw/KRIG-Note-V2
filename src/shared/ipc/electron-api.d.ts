@@ -27,6 +27,13 @@ import type {
   AISyncAppendTurnPayload,
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
+import type {
+  BackupResult,
+  RestoreResult,
+  ProgressStartPayload,
+  ProgressUpdatePayload,
+  ProgressDonePayload,
+} from './backup-types';
 
 declare global {
   interface Window {
@@ -398,6 +405,18 @@ declare global {
       aiSyncStop(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
       /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
       onAISyncAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
+
+      // ── backup-restore(File 菜单 → Backup All Data / Restore from Backup) ──
+      /** 触发全库备份(tar.gz);长耗时,通过 onProgress* 订阅显示遮罩 */
+      backupRun(destPath: string): Promise<BackupResult>;
+      /** 从备份恢复;长耗时,通过 onProgress* 订阅显示遮罩 */
+      backupRestore(archivePath: string): Promise<RestoreResult>;
+      /** 任务开始 — 显示全屏覆盖层;返 unsubscribe */
+      onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void;
+      /** 任务进度更新;返 unsubscribe */
+      onProgressUpdate(callback: (payload: ProgressUpdatePayload) => void): () => void;
+      /** 任务完成(success/error);返 unsubscribe */
+      onProgressDone(callback: (payload: ProgressDonePayload) => void): () => void;
     };
   }
 }

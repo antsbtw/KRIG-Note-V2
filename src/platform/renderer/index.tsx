@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { WorkspaceBar } from '@shell/workspace-bar/WorkspaceBar';
 import { WorkspaceContainer } from '@shell/workspace-container/WorkspaceContainer';
 import { FullscreenOverlayContainer } from '@shell/fullscreen-overlay/FullscreenOverlayContainer';
+import { GlobalProgressOverlay } from '@shell/global-progress-overlay/GlobalProgressOverlay';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { reportL2Alive } from '@shell/diagnostics/L2-alive';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
@@ -115,6 +116,7 @@ function App() {
         <WorkspaceContainer />
       </div>
       <FullscreenOverlayContainer />
+      <GlobalProgressOverlay />
     </div>
   );
 }
