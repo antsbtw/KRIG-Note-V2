@@ -15,6 +15,11 @@ import type {
   DiagnosticsReportPayload,
   HealthCheckResponse,
 } from '@shared/ipc/message-types';
+import type {
+  ProgressStartPayload,
+  ProgressUpdatePayload,
+  ProgressDonePayload,
+} from '@shared/ipc/backup-types';
 import type { FolderViewType } from '@capabilities/folder/types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -552,5 +557,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, payload: unknown): void => callback(payload);
     ipcRenderer.on(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
+  },
+
+  // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
+  /** 任务开始 — 显示全屏覆盖层 */
+  onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void {
+    const handler = (_event: unknown, payload: ProgressStartPayload): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.PROGRESS_START, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.PROGRESS_START, handler);
+  },
+  /** 任务进度更新 */
+  onProgressUpdate(callback: (payload: ProgressUpdatePayload) => void): () => void {
+    const handler = (_event: unknown, payload: ProgressUpdatePayload): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.PROGRESS_UPDATE, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.PROGRESS_UPDATE, handler);
+  },
+  /** 任务完成(success/error) */
+  onProgressDone(callback: (payload: ProgressDonePayload) => void): () => void {
+    const handler = (_event: unknown, payload: ProgressDonePayload): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.PROGRESS_DONE, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.PROGRESS_DONE, handler);
   },
 });

@@ -1,0 +1,108 @@
+/* GlobalProgressOverlay — 全屏进度遮罩样式 */
+
+.krig-progress-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100000;
+  backdrop-filter: blur(2px);
+}
+
+.krig-progress-overlay__panel {
+  width: 420px;
+  padding: 24px 28px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  color: #eaeaea;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+}
+
+.krig-progress-overlay__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.krig-progress-overlay__message {
+  color: #b0b0b0;
+  margin-bottom: 16px;
+  min-height: 18px;
+}
+
+.krig-progress-overlay__bar-container {
+  margin-bottom: 8px;
+}
+
+.krig-progress-overlay__bar {
+  height: 6px;
+  background: #1a1a1a;
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.krig-progress-overlay__bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a9eff, #6dc7ff);
+  transition: width 200ms ease-out;
+}
+
+.krig-progress-overlay__bar-fill--indeterminate {
+  position: absolute;
+  width: 40%;
+  animation: krig-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes krig-progress-indeterminate {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
+.krig-progress-overlay__percent {
+  font-size: 12px;
+  color: #8a8a8a;
+  text-align: right;
+}
+
+.krig-progress-overlay__hint {
+  margin-top: 16px;
+  font-size: 11px;
+  color: #7a7a7a;
+  text-align: center;
+}
+
+.krig-progress-overlay__done-row {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.krig-progress-overlay__text--success {
+  color: #7dd87d;
+}
+
+.krig-progress-overlay__text--error {
+  color: #ff7d7d;
+}
+
+.krig-progress-overlay__close-btn {
+  padding: 6px 16px;
+  background: #3a3a3a;
+  color: #eaeaea;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.krig-progress-overlay__close-btn:hover {
+  background: #4a4a4a;
+}

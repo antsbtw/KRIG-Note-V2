@@ -53,6 +53,9 @@ export function registerFrameworkMenus(): void {
     order: 1,
     items: [
       { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
+      { id: 'sep-backup', label: '', separator: true },
+      { id: 'backup', label: 'Backup All Data...', command: 'file.backup' },
+      { id: 'restore', label: 'Restore from Backup...', command: 'file.restore' },
     ],
   });
 

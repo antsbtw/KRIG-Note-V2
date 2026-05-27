@@ -184,6 +184,11 @@ export const IPC_CHANNELS = {
   AI_SYNC_START: 'ai-sync.start',                   // renderer → main:启动 ai-sync(serviceId)
   AI_SYNC_STOP: 'ai-sync.stop',                     // renderer → main:停止 ai-sync(serviceId)
   AI_SYNC_APPEND_TURN: 'ai-sync.append-turn',       // main → renderer 推送一个新完成的 turn
+
+  // Progress 反馈通道(backup-restore + 未来其他长耗时任务共用)
+  PROGRESS_START: 'progress.start',                 // main → renderer:任务开始
+  PROGRESS_UPDATE: 'progress.update',               // main → renderer:阶段/百分比更新
+  PROGRESS_DONE: 'progress.done',                   // main → renderer:任务结束(success/error)
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
