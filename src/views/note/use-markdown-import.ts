@@ -11,7 +11,7 @@
  */
 
 import { useEffect } from 'react';
-import { commandRegistry } from '@slot/command-registry/command-registry';
+import { setActiveNote } from './data-model';
 import {
   importMarkdownBatch,
   type MarkdownImportPayload,
@@ -20,14 +20,14 @@ import {
 
 const resolveSplit: SplitDecisionResolver = async (count) => {
   const ok = window.confirm(
-    `Found ${count} large markdown file(s) with many headings.\n\n` +
-      `Split each into multiple notes (one note per top-level section)?\n\n` +
+    `Found ${count} large markdown file(s) (long + many top-level sections).\n\n` +
+      `Split each into multiple notes (one per top-level section)?\n\n` +
       `OK = Split all\nCancel = Keep as single notes`,
   );
   return ok ? 'all' : 'none';
 };
 
-export function useMarkdownImport(): void {
+export function useMarkdownImport(workspaceId: string): void {
   useEffect(() => {
     console.log('[markdown-import] hook mounted, subscribing to onMarkdownImportRun');
     const unsub = window.electronAPI.onMarkdownImportRun((data) => {
@@ -40,10 +40,11 @@ export function useMarkdownImport(): void {
           console.log(
             `[markdown-import] done — notes=${result.createdNoteIds.length} folders=${result.createdFolderIds.length} skipped=${result.skipped.length} splitMode=${result.splitMode}`,
           );
-          // 导入完成后,把最后一个创建的 note 设为活跃(让用户直接看到结果)
+          // 导入完成后,把最后一个创建的 note 设为当前 NoteView 的 active
+          // (不动 slot 状态 — 跟"点 NavSide 里的 note"行为一致)
           const lastId = result.createdNoteIds.at(-1);
           if (lastId) {
-            commandRegistry.execute('note-view.set-active-in-right', lastId);
+            setActiveNote(workspaceId, lastId);
           }
         })
         .catch((err) => {
@@ -51,5 +52,5 @@ export function useMarkdownImport(): void {
         });
     });
     return unsub;
-  }, []);
+  }, [workspaceId]);
 }

@@ -103,7 +103,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
   // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
   useExtractionImport();
   // 同模式:订阅 File → Import Markdown... 推送的 ScannedFile 批
-  useMarkdownImport();
+  useMarkdownImport(workspaceId);
 
   const handleDocChange = useCallback(
     (newDoc: DriverSerialized) => {

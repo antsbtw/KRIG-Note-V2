@@ -67,8 +67,39 @@ export interface ImportResult {
   oversizedCount: number;
 }
 
-/** H1 切分触发阈值(heading 数量,跨 level 计) */
-const H1_SPLIT_THRESHOLD = 10;
+/**
+ * Oversized 判定双阈值(必须同时满足才切):
+ * - 字符数 > OVERSIZED_CHAR_THRESHOLD
+ * - 顶级章节数(level === maxLevel)>= OVERSIZED_TOP_SECTIONS_MIN
+ *
+ * 设计理由(2026-05-27 反馈):
+ * 早期只按"heading 数量 >= 10"判定 → 普通 README/技术文档(几千字 + 10+ H2/H3)
+ * 全部误触发。真实"该切"的标志是"长文档 + 多个独立顶级章节"(典型:cheatsheet、
+ * 日记合集、合并文档),不是 heading 多。
+ */
+const OVERSIZED_CHAR_THRESHOLD = 50000;
+const OVERSIZED_TOP_SECTIONS_MIN = 5;
+
+/**
+ * 占位标题黑名单 — V1 / 其他工具产生的"未命名" heading,inferTitle 跳过它们
+ * 避免 NavSide 显示一堆"Untitled" / "未命名"。
+ */
+const PLACEHOLDER_TITLES = new Set([
+  'untitled',
+  'untitled note',
+  'untitled document',
+  'note',
+  'document',
+  'new note',
+  '未命名',
+  '无标题',
+  '新建笔记',
+  '新笔记',
+]);
+
+function isPlaceholderTitle(text: string): boolean {
+  return PLACEHOLDER_TITLES.has(text.trim().toLowerCase());
+}
 
 /**
  * splitDecisionResolver:由 hook 注入。
@@ -158,9 +189,18 @@ function splitByMaxLevel(
   return chunks;
 }
 
-/** 提取 .md 第一个 heading 文本(任意 level)— title 推断用 */
-function firstHeadingText(parsed: ParsedFile): string | null {
-  return parsed.headings.length > 0 ? parsed.headings[0].text : null;
+/**
+ * 找第一个"非占位"heading 文本 — 跳过 'Untitled' / '未命名' 等占位 title。
+ *
+ * V1 / 其他工具可能产出 `# Untitled\n# 真标题` 的内容,naive 取 first heading
+ * 会让 NavSide 一片 'Untitled'(2026-05-27 反馈)。
+ */
+function firstMeaningfulHeading(parsed: ParsedFile): string | null {
+  for (const h of parsed.headings) {
+    const text = h.text.trim();
+    if (text && !isPlaceholderTitle(text)) return text;
+  }
+  return null;
 }
 
 /** 文件名(去 .md / .markdown 后缀)*/
@@ -169,9 +209,9 @@ function filenameTitle(relPath: string): string {
   return base.replace(/\.(md|markdown)$/i, '');
 }
 
-/** 推 title:优先 first heading,fallback 文件名 */
+/** 推 title:优先第一个非占位 heading,fallback 文件名 */
 function inferTitle(parsed: ParsedFile, relPath: string): string {
-  return firstHeadingText(parsed) ?? filenameTitle(relPath);
+  return firstMeaningfulHeading(parsed) ?? filenameTitle(relPath);
 }
 
 /** 同名冲突:在 takenNames 集合上加 (2) / (3) / ... 直到不冲突;返回最终名 + 更新集合 */
@@ -324,25 +364,60 @@ async function ensureFolderPath(
   return parentId;
 }
 
-/** 把 title 字符串塞进 PM doc 头部:在 content[0] 插一个 heading 作 title — createNote 会派生 */
+/**
+ * 确保 doc 首块能产出合理 title — V2 createNote 的 deriveTitle 取 content[0]
+ * 所有 inline text 拼接,空字符串退回 '未命名'。
+ *
+ * 策略(2026-05-27 反馈 — 修正"双重 heading + Untitled 占位"问题):
+ * 1. 从头删 placeholder heading / 空 heading,直到首块非占位
+ * 2. 删完后若首块是真 heading → 直接用(deriveTitle 自然抠到正确 title)
+ * 3. 若首块不是 heading(纯段落 / 列表 / 等)→ 前插 heading(title) 让 deriveTitle 抠到
+ * 4. 整篇全是 placeholder → 用文件名作 title
+ */
 function ensureLeadingTitle(content: PMDocNode[], title: string): PMDocNode[] {
+  let working = content.slice();
+
+  // 1. 删头部所有 placeholder / 空 heading
+  while (working.length > 0) {
+    const first = working[0];
+    if (first.type === 'heading') {
+      const text = extractHeadingText(first).trim();
+      if (!text || isPlaceholderTitle(text)) {
+        working = working.slice(1);
+        continue;
+      }
+    }
+    break;
+  }
+
   const titleNode: PMDocNode = {
     type: 'heading',
     attrs: { level: 1 },
     content: [{ type: 'text', text: title }],
   };
 
-  if (content.length === 0) {
+  // 2. 整篇全 placeholder / 空 → 用 title 作整篇唯一 heading
+  if (working.length === 0) {
     return [titleNode];
   }
 
-  // 如果原文首块就是 heading 且文本等于推断 title — 无需再插
-  const first = content[0];
-  if (first.type === 'heading' && first.content?.[0]?.text === title) {
-    return content;
+  const first = working[0];
+
+  // 3. 首块是真 heading → 直接用(不重插)
+  if (first.type === 'heading') {
+    return working;
   }
 
-  return [titleNode, ...content];
+  // 4. 首块是段落 / 列表 / 等 → 前插 title heading
+  return [titleNode, ...working];
+}
+
+/** 抠 heading 节点内拼接文本(忽略 mark/attrs)*/
+function extractHeadingText(node: PMDocNode): string {
+  if (!node.content) return '';
+  return node.content
+    .map((c) => (c.type === 'text' ? c.text ?? '' : extractHeadingText(c)))
+    .join('');
 }
 
 async function createNoteInFolder(
@@ -388,14 +463,18 @@ export async function importMarkdownBatch(
     };
   }
 
-  // 1. 预解析 heading,标 oversized
+  // 1. 预解析 heading,标 oversized(双阈值:字符数 + 顶级章节数)
   const parsedAll: ParsedFile[] = files.map((f) => {
     const { headings, maxLevel } = parseHeadings(f.content);
+    const topSections = headings.filter((h) => h.level === maxLevel).length;
+    const oversized =
+      f.content.length > OVERSIZED_CHAR_THRESHOLD &&
+      topSections >= OVERSIZED_TOP_SECTIONS_MIN;
     return {
       scanned: f,
       headings,
       maxLevel,
-      oversized: headings.length >= H1_SPLIT_THRESHOLD,
+      oversized,
     };
   });
 
