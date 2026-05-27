@@ -25,56 +25,119 @@ export interface ConvertResult {
   absPath: string;
   /** 转出来的 markdown 字符串(可直接喂 renderer 端 markdownToProseMirror)*/
   markdown: string;
+  /** 从 Word Title 样式提取的封面标题(优先用作 note title / split folder name)*/
+  coverTitle: string | null;
   /** mammoth 报的 warning 信息(公式跳过 / 不识别样式等)*/
   warnings: string[];
 }
 
-/** 单文件转换:.docx → markdown 字符串 */
+/**
+ * mammoth styleMap 把 Title/Subtitle(中英文)映射到带 class 的 p 元素
+ * 后处理时用 class 抠出来作 coverTitle。
+ *
+ * 注意:**不映射到 h1/h2**,避免被当作正文 heading 干扰章节切分判定。
+ */
+const KRIG_TITLE_CLASS = 'krig-cover-title';
+const KRIG_SUBTITLE_CLASS = 'krig-cover-subtitle';
+
+const CUSTOM_STYLE_MAP = [
+  // 英文 Word
+  `p[style-name='Title'] => p.${KRIG_TITLE_CLASS}:fresh`,
+  `p[style-name='Subtitle'] => p.${KRIG_SUBTITLE_CLASS}:fresh`,
+  // 中文 Word(Office365 / WPS 中文版常见)
+  `p[style-name='标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
+  `p[style-name='副标题'] => p.${KRIG_SUBTITLE_CLASS}:fresh`,
+];
+
+/** 单文件转换:.docx → { markdown, coverTitle } */
 export async function convertDocxToMarkdown(absPath: string): Promise<ConvertResult> {
   const buffer = await fs.readFile(absPath);
 
-  // mammoth 1.12+ 接 NodeJsInput;path 模式会自动读文件,但我们已读了 buffer
-  // (统一走 buffer 避免 mammoth 内部再次读盘 + 方便错误处理)
   const mammothResult = await mammoth.convertToHtml(
     { buffer },
     {
+      styleMap: CUSTOM_STYLE_MAP,
       convertImage: mammoth.images.imgElement(async (image) => {
-        // 把图直接转 base64 data: URL(renderer 端 md-to-pm 会再走 mediaPutBase64)
         const base64 = await image.readAsBase64String();
         return { src: `data:${image.contentType};base64,${base64}` };
       }),
     },
   );
 
-  const html = mammothResult.value;
+  const rawHtml = mammothResult.value;
   const warnings = mammothResult.messages
     .filter((m) => Boolean(m))
     .map((m) => `${m.type}: ${m.message}`);
 
+  // 抠封面标题 + 从 HTML 删除该段落(避免 markdown 里重复出现)
+  const { coverTitle, cleanedHtml } = extractCoverTitle(rawHtml);
+
   // HTML → Markdown
   const turndown = new TurndownService({
-    headingStyle: 'atx',     // # / ## 风格(不用 setext)
-    codeBlockStyle: 'fenced', // ``` 包代码块
-    bulletListMarker: '-',    // 跟我们 md-to-pm 偏好对齐
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    bulletListMarker: '-',
   });
 
-  // GFM 表格支持(turndown 默认不开表格,需 plugin)
-  // turndown-plugin-gfm 没装,简单做法:手写一个 table 规则
   registerTablePlugin(turndown);
 
-  // 删除线(GFM ~~)
   turndown.addRule('strikethrough', {
     filter: ['del', 's', 'strike' as keyof HTMLElementTagNameMap],
     replacement: (content) => `~~${content}~~`,
   });
 
-  const markdown = turndown.turndown(html);
+  const markdown = turndown.turndown(cleanedHtml);
 
   return {
     absPath,
     markdown,
+    coverTitle,
     warnings,
   };
+}
+
+/**
+ * 从 mammoth HTML 抠 Title 样式段落作 coverTitle
+ *
+ * 策略:
+ * 1. 找第一个 `<p class="krig-cover-title">...</p>` 取文本
+ * 2. 删除该段落(避免它出现在 markdown 正文里造成重复)
+ * 3. 不处理 Subtitle(按用户决议:不拼,不单独抽,留在正文中)
+ * 4. 找不到 → coverTitle=null,renderer 端 fallback 文件名 / heading
+ *
+ * 注:正则解析 HTML 通常脆弱,但 mammoth 输出的 HTML 是规整的(<p>...</p>),
+ * 不嵌套、不带怪异属性,正则足够,引 cheerio 是过度工程。
+ */
+function extractCoverTitle(html: string): { coverTitle: string | null; cleanedHtml: string } {
+  const titleRegex = new RegExp(
+    `<p\\s+class="${KRIG_TITLE_CLASS}"[^>]*>([\\s\\S]*?)<\\/p>`,
+    'i',
+  );
+  const match = titleRegex.exec(html);
+  if (!match) {
+    return { coverTitle: null, cleanedHtml: html };
+  }
+
+  // 抠 inner text(去 <strong>/<em>/<br> 等标签 + decode &amp; / &lt; 等)
+  const innerHtml = match[1];
+  const text = innerHtml
+    .replace(/<[^>]+>/g, '')        // 剥所有 HTML 标签
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+
+  if (!text) {
+    // Title 标记但内容为空 — 当作没有
+    return { coverTitle: null, cleanedHtml: html.replace(match[0], '') };
+  }
+
+  // 从 HTML 删掉这一段(避免 markdown 里重复)
+  const cleanedHtml = html.replace(match[0], '');
+  return { coverTitle: text, cleanedHtml };
 }
 
 /**
@@ -108,11 +171,19 @@ function registerTablePlugin(turndown: TurndownService): void {
   });
 }
 
+export interface BatchResult {
+  absPath: string;
+  relPath: string;
+  markdown: string;
+  coverTitle: string | null;
+  warnings: string[];
+}
+
 /** 接收路径数组(可能含目录),递归找出所有 .docx,转成 markdown */
 export async function convertDocxBatch(
   paths: string[],
 ): Promise<{
-  results: Array<{ absPath: string; relPath: string; markdown: string; warnings: string[] }>;
+  results: BatchResult[];
   failed: Array<{ path: string; reason: string }>;
 }> {
   const docxFiles: Array<{ absPath: string; relPath: string }> = [];
@@ -134,13 +205,7 @@ export async function convertDocxBatch(
     }
   }
 
-  // 转换
-  const results: Array<{
-    absPath: string;
-    relPath: string;
-    markdown: string;
-    warnings: string[];
-  }> = [];
+  const results: BatchResult[] = [];
 
   for (const f of docxFiles) {
     try {
@@ -149,6 +214,7 @@ export async function convertDocxBatch(
         absPath: f.absPath,
         relPath: replaceDocxExtWithMd(f.relPath),
         markdown: r.markdown,
+        coverTitle: r.coverTitle,
         warnings: r.warnings,
       });
     } catch (err) {

@@ -112,13 +112,14 @@ async function runImport(): Promise<void> {
   }
 
   // 复用 markdown-import 的 MARKDOWN_IMPORT_RUN 通道
-  // ScannedFile schema 一致:{ absPath, relPath, content }
-  // relPath 已在 converter 里把 .docx 后缀替换成 .md(renderer 端 title 推断会正确去后缀)
+  // ScannedFile schema 一致:{ absPath, relPath, content };再加 coverTitle 走 docx 专属
+  // (markdown 路径下 coverTitle 永远 undefined,renderer 端 fallback 自然走 heading / 文件名)
   const payload = {
     files: results.map((r) => ({
       absPath: r.absPath,
       relPath: r.relPath,
       content: r.markdown,
+      coverTitle: r.coverTitle ?? undefined,
     })),
     hasDirectory,
   };

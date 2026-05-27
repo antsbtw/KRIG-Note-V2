@@ -50,6 +50,11 @@ export interface ScannedFile {
   absPath: string;
   relPath: string;
   content: string;
+  /**
+   * 导入源额外提供的"封面标题"——优先用作 note title / split folder name。
+   * 当前仅 word-import 路径填(从 Word `Title` 样式段落抠);markdown-import 路径不填。
+   */
+  coverTitle?: string;
 }
 
 export interface MarkdownImportPayload {
@@ -222,8 +227,21 @@ function filenameTitle(relPath: string): string {
   return base.replace(/\.(md|markdown)$/i, '');
 }
 
-/** 推 title:优先第一个非占位 heading,fallback 文件名 */
-function inferTitle(parsed: ParsedFile, relPath: string): string {
+/**
+ * 推 title:
+ * 1. 优先 coverTitle(word-import 路径从 Word `Title` 样式抠到的封面标题)
+ * 2. 次选 第一个非占位 heading
+ * 3. 兜底 文件名
+ *
+ * 设计:封面标题在 docx 里是用户显式标注的"文档标题",权威性 > 任何 heading
+ *      (heading 是章节,不是文档标题)。详 2026-05-27 word-import 设计讨论。
+ */
+function inferTitle(
+  parsed: ParsedFile,
+  relPath: string,
+  coverTitle: string | undefined,
+): string {
+  if (coverTitle && coverTitle.trim()) return coverTitle.trim();
   return firstMeaningfulHeading(parsed) ?? filenameTitle(relPath);
 }
 
@@ -557,9 +575,10 @@ export async function importMarkdownBatch(
     const shouldSplit = parsed.oversized && splitMode === 'all';
 
     if (shouldSplit) {
-      // 切分时为该文档建一个以文件名命名的子 folder,N 个 chunk 都进去
+      // 切分时为该文档建一个子 folder,N 个 chunk 都进去
+      // 命名优先级:封面标题(coverTitle)> 文件名
       // (避免扁平化污染 root / 父 folder — 2026-05-27 反馈)
-      const docFolderName = filenameTitle(scanned.relPath);
+      const docFolderName = (scanned.coverTitle?.trim() || filenameTitle(scanned.relPath));
       const docFolderId = await ensureSplitDocFolder(
         docFolderName,
         folderId,
@@ -606,7 +625,7 @@ export async function importMarkdownBatch(
     // 普通文件:1:1 → note
     try {
       const content = await tea.markdownToProseMirror(scanned.content);
-      const title = inferTitle(parsed, scanned.relPath);
+      const title = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
       await createNoteInFolder(title, content, folderId, cache, createdNoteIds);
     } catch (err) {
       console.warn(`[markdown-import] failed: ${scanned.relPath}`, err);
