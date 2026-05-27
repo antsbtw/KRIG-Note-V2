@@ -173,6 +173,14 @@ export interface TextEditingApi {
   readonly sanitizeAtoms: (atoms: AtomInput[]) => AtomInput[];
 
   /**
+   * Markdown → PM doc 节点数组(导入 .md 文件用)
+   *
+   * 行级解析,无外部依赖。base64 图/附件走 mediaPutBase64 → media:// URL。
+   * 输出可直接装 doc.content,再封 DriverSerialized 信封。
+   */
+  readonly markdownToProseMirror: (md: string) => Promise<PMDocNode[]>;
+
+  /**
    * PM 通用菜单 item 工厂(C8 W5 整改 W-1)
    *
    * view 拼装 floating-toolbar / toolbar / slash-menu / handle-menu / context-menu

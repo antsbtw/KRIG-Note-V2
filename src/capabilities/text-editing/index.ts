@@ -33,6 +33,7 @@ import {
 import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry';
 import { atomsToProseMirror } from './converters/atoms-to-pm';
 import { sanitizeAtoms } from './converters/sanitize-atoms';
+import { markdownToProseMirror } from './converters/md-to-pm';
 import { registerTextEditingPopups } from './ui/popups';
 import { registerTextEditingFullscreenOverlays } from './ui/fullscreen-overlays';
 import { registerTextEditingHelpPanels } from './ui/help-panels';
@@ -66,6 +67,7 @@ const api: TextEditingApi = {
   instanceRegistry,
   atomsToProseMirror,
   sanitizeAtoms,
+  markdownToProseMirror,
   ui: {
     floatingToolbar: floatingToolbarFactory,
     toolbar: toolbarFactory,
