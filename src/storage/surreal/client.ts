@@ -96,6 +96,11 @@ export function getMode(): 'sidecar' {
 
 // ── Binary 查找 ──
 
+/** 暴露给 backup-store 复用(避免重复二进制查找逻辑) */
+export function findSurrealBinary(): string | null {
+  return findBinary();
+}
+
 function findBinary(): string | null {
   const exe = process.platform === 'win32' ? 'surreal.exe' : 'surreal';
   const arch = process.arch;
