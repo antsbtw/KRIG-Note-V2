@@ -18,6 +18,7 @@ import { getNoteWsState, updateNote } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
+import { useMarkdownImport } from './use-markdown-import';
 import { useActiveNoteDocSync } from './use-active-note-doc-sync';
 import { TocIndicator } from './toc/TocIndicator';
 import './note.css';
@@ -101,6 +102,8 @@ export function NoteView({ workspaceId }: NoteViewProps) {
   // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteCapability
   // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
   useExtractionImport();
+  // 同模式:订阅 File → Import Markdown... 推送的 ScannedFile 批
+  useMarkdownImport();
 
   const handleDocChange = useCallback(
     (newDoc: DriverSerialized) => {
