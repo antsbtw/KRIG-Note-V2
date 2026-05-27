@@ -322,6 +322,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, handler);
   },
 
+  /** 订阅 main 推送 — 用户已选好且扫好的 markdown 文件批,view 端转 PM + 落 note */
+  onMarkdownImportRun(callback: (data: unknown) => void): () => void {
+    const handler = (_event: unknown, data: unknown): void => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, handler);
+  },
+
   // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
   graphList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_LIST);

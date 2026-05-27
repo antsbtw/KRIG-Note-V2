@@ -108,6 +108,9 @@ export const IPC_CHANNELS = {
   EXTRACTION_IMPORT: 'extraction.import',           // renderer → main:主动触发 import(备用入口)
   EXTRACTION_NOTE_CREATE: 'extraction.note-create', // main → renderer 推送:请 view 端创建 note
 
+  // Markdown 文件 / 目录导入(File → Import Markdown...)
+  MARKDOWN_IMPORT_RUN: 'markdown-import.run',       // main → renderer 推送:已扫好的 ScannedFile[]
+
   // L7-sub2:note + folder capability (decision 012,SurrealDB Sidecar)
   // 业务粒度 IPC + LIST_CHANGED 广播,对齐 ebook / graph 模式
   NOTE_CREATE: 'note.create',

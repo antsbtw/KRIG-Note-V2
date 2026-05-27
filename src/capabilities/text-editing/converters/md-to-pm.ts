@@ -396,7 +396,7 @@ function parseInline(text: string): PMNode[] {
 
   const nodes: PMNode[] = [];
   const regex =
-    /(\*\*([\s\S]+?)\*\*|\*([^\*\n]+?)\*|`([^`\n]+?)`|\[([^\]]+)\]\(([^)]+)\)|\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$)/g;
+    /(\*\*([\s\S]+?)\*\*|~~([\s\S]+?)~~|\*([^\*\n]+?)\*|`([^`\n]+?)`|\[([^\]]+)\]\(([^)]+)\)|\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$)/g;
 
   let lastIndex = 0;
   let match;
@@ -409,18 +409,20 @@ function parseInline(text: string): PMNode[] {
     if (match[2] !== undefined) {
       nodes.push({ type: 'text', text: match[2], marks: [{ type: 'bold' }] });
     } else if (match[3] !== undefined) {
-      nodes.push({ type: 'text', text: match[3], marks: [{ type: 'italic' }] });
+      nodes.push({ type: 'text', text: match[3], marks: [{ type: 'strike' }] });
     } else if (match[4] !== undefined) {
-      nodes.push({ type: 'text', text: match[4], marks: [{ type: 'code' }] });
-    } else if (match[5] && match[6]) {
+      nodes.push({ type: 'text', text: match[4], marks: [{ type: 'italic' }] });
+    } else if (match[5] !== undefined) {
+      nodes.push({ type: 'text', text: match[5], marks: [{ type: 'code' }] });
+    } else if (match[6] && match[7]) {
       nodes.push({
         type: 'text',
-        text: match[5],
-        marks: [{ type: 'link', attrs: { href: match[6] } }],
+        text: match[6],
+        marks: [{ type: 'link', attrs: { href: match[7] } }],
       });
-    } else if (match[7] !== undefined) {
+    } else if (match[8] !== undefined) {
       // V2 schema 未实现 mathInline → 输出目标节点名,等 schema 补齐
-      nodes.push({ type: 'mathInline', attrs: { latex: match[7] } });
+      nodes.push({ type: 'mathInline', attrs: { latex: match[8] } });
     }
 
     lastIndex = match.index + match[0].length;

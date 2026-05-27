@@ -23,6 +23,7 @@ import { createMainWindow } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
+import { registerMarkdownImport } from './markdown-import';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
@@ -104,6 +105,9 @@ app.whenReady().then(async () => {
   mediaStore.registerProtocol();
 
   // L4 — 框架级 Application Menu(取代 Electron 默认 File/Edit/View/Window)
+  // markdown-import 必须先注册 command,再 registerFrameworkMenus 调 rebuild 时菜单
+  // 项的 command 字符串才能查到 handler
+  registerMarkdownImport();
   registerFrameworkMenus();
 
   // L1 — 主窗口
