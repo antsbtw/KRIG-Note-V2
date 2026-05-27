@@ -47,6 +47,11 @@ const CUSTOM_STYLE_MAP = [
   // 中文 Word(Office365 / WPS 中文版常见)
   `p[style-name='标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
   `p[style-name='副标题'] => p.${KRIG_SUBTITLE_CLASS}:fresh`,
+  // 国产内部模板常用 'w' 前缀(如普元等)
+  `p[style-name='w标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
+  `p[style-name='w副标题'] => p.${KRIG_SUBTITLE_CLASS}:fresh`,
+  `p[style-name='封面标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
+  `p[style-name='文档标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
 ];
 
 /** 单文件转换:.docx → { markdown, coverTitle } */
@@ -71,6 +76,10 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
 
   // 抠封面标题 + 从 HTML 删除该段落(避免 markdown 里重复出现)
   const { coverTitle, cleanedHtml } = extractCoverTitle(rawHtml);
+
+  // 诊断 dump:把 mammoth raw HTML 和最终 markdown 写到 /tmp/krig-word-import-debug/
+  // (临时,验证完可删。base64 图替换成 [BASE64_OMITTED] 避免文件几十 MB)
+  await dumpForDebug(absPath, rawHtml, coverTitle, mammothResult.messages);
 
   // HTML → Markdown
   const turndown = new TurndownService({
@@ -97,47 +106,101 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
 }
 
 /**
- * 从 mammoth HTML 抠 Title 样式段落作 coverTitle
+ * 从 mammoth HTML 抠封面标题
  *
- * 策略:
- * 1. 找第一个 `<p class="krig-cover-title">...</p>` 取文本
- * 2. 删除该段落(避免它出现在 markdown 正文里造成重复)
- * 3. 不处理 Subtitle(按用户决议:不拼,不单独抽,留在正文中)
- * 4. 找不到 → coverTitle=null,renderer 端 fallback 文件名 / heading
+ * 两层策略(2026-05-27 反馈 — 国产模板自定义样式 mammoth 不识别):
  *
- * 注:正则解析 HTML 通常脆弱,但 mammoth 输出的 HTML 是规整的(<p>...</p>),
- * 不嵌套、不带怪异属性,正则足够,引 cheerio 是过度工程。
+ * 1. 优先:找 `<p class="krig-cover-title">...</p>`(styleMap 命中的样式)
+ *    覆盖率:Word 原生 Title / 中文标题 / w标题 等已知模板
+ *
+ * 2. Fallback:取**第一个 `<h*>` 之前的第一个非空 `<p>`** 作 coverTitle
+ *    适用场景:docx 用自定义/不识别的样式 — 但封面段落本来就该在正文(H1)之前
+ *    跳过 placeholder("Untitled" / "未命名" / "Confidential" 等)
+ *
+ * 命中后:删除该段落(避免 markdown 里重复出现);两层都不命中 → null。
  */
 function extractCoverTitle(html: string): { coverTitle: string | null; cleanedHtml: string } {
+  // ── 第一层:styleMap 命中的 krig-cover-title class ──
   const titleRegex = new RegExp(
     `<p\\s+class="${KRIG_TITLE_CLASS}"[^>]*>([\\s\\S]*?)<\\/p>`,
     'i',
   );
-  const match = titleRegex.exec(html);
-  if (!match) {
-    return { coverTitle: null, cleanedHtml: html };
+  const classMatch = titleRegex.exec(html);
+  if (classMatch) {
+    const text = decodeHtmlInline(classMatch[1]);
+    if (text) {
+      return { coverTitle: text, cleanedHtml: html.replace(classMatch[0], '') };
+    }
   }
 
-  // 抠 inner text(去 <strong>/<em>/<br> 等标签 + decode &amp; / &lt; 等)
-  const innerHtml = match[1];
-  const text = innerHtml
-    .replace(/<[^>]+>/g, '')        // 剥所有 HTML 标签
+  // ── 第二层 fallback:第一个 <h*> 之前的第一个非空 <p> ──
+  return extractFirstPreHeadingParagraph(html);
+}
+
+/**
+ * 找 HTML 里第一个 `<h*>` 之前的第一个 `<p>` 段落作 coverTitle
+ * (封面标题语义 — 文档正文 heading 开始之前的非空段落)
+ *
+ * 跳过 placeholder 文本(Untitled / 未命名 / Confidential 等)。
+ * 命中 → 删除该 <p> 并返回;否则返回 (null, 原 HTML)。
+ */
+function extractFirstPreHeadingParagraph(
+  html: string,
+): { coverTitle: string | null; cleanedHtml: string } {
+  // 先找到第一个 heading 的位置(没 heading 就是整篇都是 <p>,取首段也行)
+  const firstHeadingMatch = /<h[1-6]\b/i.exec(html);
+  const cutoff = firstHeadingMatch ? firstHeadingMatch.index : html.length;
+  const preHeadingZone = html.slice(0, cutoff);
+
+  const pRegex = /<p(?:\s+[^>]*)?>([\s\S]*?)<\/p>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = pRegex.exec(preHeadingZone)) !== null) {
+    const text = decodeHtmlInline(m[1]);
+    if (!text) continue;
+    if (isLikelyCoverPlaceholder(text)) continue;
+    if (text.length > 200) continue; // 太长不像标题(可能是摘要)
+    // 命中
+    return {
+      coverTitle: text,
+      cleanedHtml: html.slice(0, m.index) + html.slice(m.index + m[0].length),
+    };
+  }
+
+  return { coverTitle: null, cleanedHtml: html };
+}
+
+/** 黑名单:封面常见的非标题段落(免责声明 / 占位 / 涉密标记 等) */
+const COVER_PLACEHOLDER_KEYWORDS = [
+  'untitled',
+  'confidential',
+  '机密',
+  '内部使用',
+  '草稿',
+  'draft',
+  '免责声明',
+  'disclaimer',
+  'copyright',
+  '©',
+  '版权所有',
+];
+
+function isLikelyCoverPlaceholder(text: string): boolean {
+  const lower = text.toLowerCase();
+  return COVER_PLACEHOLDER_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+/** 抠 inner text:剥所有 HTML 标签 + 解 HTML entity */
+function decodeHtmlInline(innerHtml: string): string {
+  return innerHtml
+    .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
     .trim();
-
-  if (!text) {
-    // Title 标记但内容为空 — 当作没有
-    return { coverTitle: null, cleanedHtml: html.replace(match[0], '') };
-  }
-
-  // 从 HTML 删掉这一段(避免 markdown 里重复)
-  const cleanedHtml = html.replace(match[0], '');
-  return { coverTitle: text, cleanedHtml };
 }
 
 /**
@@ -265,4 +328,77 @@ async function walkDirForDocx(
 
     docxFiles.push({ absPath: childAbs, relPath: `${rootSegment}/${name}` });
   }
+}
+
+/**
+ * 诊断 dump:把 mammoth raw HTML / coverTitle 提取结果 / mammoth warnings
+ * 写到 /tmp/krig-word-import-debug/<basename>/{raw.html, summary.txt}
+ *
+ * - base64 图替换成 [BASE64_OMITTED] 避免文件过大
+ * - 临时调试用,验证完可在 converter 里删掉
+ */
+async function dumpForDebug(
+  absPath: string,
+  rawHtml: string,
+  coverTitle: string | null,
+  messages: Array<{ type: string; message: string }>,
+): Promise<void> {
+  try {
+    const baseName = path.basename(absPath, '.docx');
+    const dumpDir = path.join('/tmp', 'krig-word-import-debug', baseName);
+    await fs.mkdir(dumpDir, { recursive: true });
+
+    const htmlSanitized = rawHtml.replace(
+      /data:[a-z]+\/[a-z0-9+.-]+;base64,[A-Za-z0-9+/=]+/gi,
+      '[BASE64_OMITTED]',
+    );
+    await fs.writeFile(path.join(dumpDir, 'raw.html'), htmlSanitized, 'utf-8');
+
+    const summary = [
+      `Source: ${absPath}`,
+      `Cover title extracted: ${coverTitle ?? '(none)'}`,
+      ``,
+      `--- mammoth messages (${messages.length}) ---`,
+      ...messages.map((m) => `[${m.type}] ${m.message}`),
+      ``,
+      `--- HTML length ---`,
+      `Raw (with base64): ${rawHtml.length} chars`,
+      `Sanitized:         ${htmlSanitized.length} chars`,
+      ``,
+      `--- Class scan (krig-cover-*) ---`,
+      ...findClassMatches(rawHtml, ['krig-cover-title', 'krig-cover-subtitle']),
+      ``,
+      `--- First 20 <p>/<h*> tags ---`,
+      ...firstNTags(rawHtml, 20),
+    ].join('\n');
+
+    await fs.writeFile(path.join(dumpDir, 'summary.txt'), summary, 'utf-8');
+
+    console.log(`[word-import:debug] dumped to ${dumpDir}`);
+  } catch (err) {
+    console.warn('[word-import:debug] dump failed:', err);
+  }
+}
+
+function findClassMatches(html: string, classes: string[]): string[] {
+  const lines: string[] = [];
+  for (const cls of classes) {
+    const regex = new RegExp(`class="[^"]*\\b${cls}\\b[^"]*"`, 'gi');
+    const matches = html.match(regex);
+    lines.push(`  ${cls}: ${matches ? matches.length : 0} match(es)`);
+  }
+  return lines;
+}
+
+function firstNTags(html: string, n: number): string[] {
+  const tagRegex = /<(p|h[1-6])(\s+[^>]*)?>([\s\S]*?)<\/\1>/gi;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = tagRegex.exec(html)) !== null && out.length < n) {
+    const tag = m[1];
+    const attrs = (m[2] || '').trim();
+    const inner = m[3].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    out.push(`  <${tag}${attrs ? ' ' + attrs : ''}> ${inner}`);
+  }
+  return out;
 }
