@@ -21,6 +21,7 @@ import { registerNoteHandlers } from '../note';
 import { registerPmContentHandlers } from '../pm-content';
 import { registerThoughtHandlers } from '../thought';
 import { registerAIHandlers } from '../ai';
+import { registerBackupHandlers } from '../backup';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -40,4 +41,5 @@ export function initIpcBus(): void {
   registerPmContentHandlers();      // L7-sub3a-1:pm-content capability (decision 014,view-agnostic pm atom)
   registerThoughtHandlers();        // 横切思考层(thought-view-port.md v0.5)
   registerAIHandlers();             // ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)
+  registerBackupHandlers();         // backup-restore feature(File 菜单 → Backup All Data / Restore from Backup)
 }
