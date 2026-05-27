@@ -5,5 +5,5 @@
  * 菜单项 click 触发由 src/platform/main/menu/framework-menus.ts 调用此模块。
  */
 
-export { registerBackupHandlers } from './handlers';
+export { registerBackupMenu } from './register-backup-menu';
 export { backupStore } from './backup-store';

@@ -185,10 +185,7 @@ export const IPC_CHANNELS = {
   AI_SYNC_STOP: 'ai-sync.stop',                     // renderer → main:停止 ai-sync(serviceId)
   AI_SYNC_APPEND_TURN: 'ai-sync.append-turn',       // main → renderer 推送一个新完成的 turn
 
-  // backup-restore feature(File → Backup All Data / Restore from Backup)
-  // 长耗时任务通过 PROGRESS_* push 推 renderer 显示全屏覆盖层
-  BACKUP_RUN: 'backup.run',                         // renderer → main:开始备份(destPath)→ BackupResult
-  BACKUP_RESTORE: 'backup.restore',                 // renderer → main:开始恢复(archivePath)→ RestoreResult
+  // Progress 反馈通道(backup-restore + 未来其他长耗时任务共用)
   PROGRESS_START: 'progress.start',                 // main → renderer:任务开始
   PROGRESS_UPDATE: 'progress.update',               // main → renderer:阶段/百分比更新
   PROGRESS_DONE: 'progress.done',                   // main → renderer:任务结束(success/error)
