@@ -52,7 +52,7 @@ export function registerFrameworkMenus(): void {
     label: 'File',
     order: 1,
     items: [
-      // L5 view / capability 阶段加各自菜单项(如新建笔记 / 导入等)
+      { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
     ],
   });
 

@@ -247,6 +247,10 @@ declare global {
       /** 订阅 main 推送的拦截到的 atom JSON */
       onExtractionNoteCreate(callback: (data: unknown) => void): () => void;
 
+      // ── Markdown 文件 / 目录导入 ──
+      /** 订阅 main 推送的已扫好的 markdown 批(File → Import Markdown...)*/
+      onMarkdownImportRun(callback: (data: unknown) => void): () => void;
+
       // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
       graphList(): Promise<unknown>;
       graphLoad(id: string): Promise<unknown>;
