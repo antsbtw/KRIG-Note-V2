@@ -77,10 +77,6 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
   // 抠封面标题 + 从 HTML 删除该段落(避免 markdown 里重复出现)
   const { coverTitle, cleanedHtml } = extractCoverTitle(rawHtml);
 
-  // 诊断 dump:把 mammoth raw HTML 和最终 markdown 写到 /tmp/krig-word-import-debug/
-  // (临时,验证完可删。base64 图替换成 [BASE64_OMITTED] 避免文件几十 MB)
-  await dumpForDebug(absPath, rawHtml, coverTitle, mammothResult.messages);
-
   // HTML → Markdown
   const turndown = new TurndownService({
     headingStyle: 'atx',
@@ -328,77 +324,4 @@ async function walkDirForDocx(
 
     docxFiles.push({ absPath: childAbs, relPath: `${rootSegment}/${name}` });
   }
-}
-
-/**
- * 诊断 dump:把 mammoth raw HTML / coverTitle 提取结果 / mammoth warnings
- * 写到 /tmp/krig-word-import-debug/<basename>/{raw.html, summary.txt}
- *
- * - base64 图替换成 [BASE64_OMITTED] 避免文件过大
- * - 临时调试用,验证完可在 converter 里删掉
- */
-async function dumpForDebug(
-  absPath: string,
-  rawHtml: string,
-  coverTitle: string | null,
-  messages: Array<{ type: string; message: string }>,
-): Promise<void> {
-  try {
-    const baseName = path.basename(absPath, '.docx');
-    const dumpDir = path.join('/tmp', 'krig-word-import-debug', baseName);
-    await fs.mkdir(dumpDir, { recursive: true });
-
-    const htmlSanitized = rawHtml.replace(
-      /data:[a-z]+\/[a-z0-9+.-]+;base64,[A-Za-z0-9+/=]+/gi,
-      '[BASE64_OMITTED]',
-    );
-    await fs.writeFile(path.join(dumpDir, 'raw.html'), htmlSanitized, 'utf-8');
-
-    const summary = [
-      `Source: ${absPath}`,
-      `Cover title extracted: ${coverTitle ?? '(none)'}`,
-      ``,
-      `--- mammoth messages (${messages.length}) ---`,
-      ...messages.map((m) => `[${m.type}] ${m.message}`),
-      ``,
-      `--- HTML length ---`,
-      `Raw (with base64): ${rawHtml.length} chars`,
-      `Sanitized:         ${htmlSanitized.length} chars`,
-      ``,
-      `--- Class scan (krig-cover-*) ---`,
-      ...findClassMatches(rawHtml, ['krig-cover-title', 'krig-cover-subtitle']),
-      ``,
-      `--- First 20 <p>/<h*> tags ---`,
-      ...firstNTags(rawHtml, 20),
-    ].join('\n');
-
-    await fs.writeFile(path.join(dumpDir, 'summary.txt'), summary, 'utf-8');
-
-    console.log(`[word-import:debug] dumped to ${dumpDir}`);
-  } catch (err) {
-    console.warn('[word-import:debug] dump failed:', err);
-  }
-}
-
-function findClassMatches(html: string, classes: string[]): string[] {
-  const lines: string[] = [];
-  for (const cls of classes) {
-    const regex = new RegExp(`class="[^"]*\\b${cls}\\b[^"]*"`, 'gi');
-    const matches = html.match(regex);
-    lines.push(`  ${cls}: ${matches ? matches.length : 0} match(es)`);
-  }
-  return lines;
-}
-
-function firstNTags(html: string, n: number): string[] {
-  const tagRegex = /<(p|h[1-6])(\s+[^>]*)?>([\s\S]*?)<\/\1>/gi;
-  const out: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = tagRegex.exec(html)) !== null && out.length < n) {
-    const tag = m[1];
-    const attrs = (m[2] || '').trim();
-    const inner = m[3].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
-    out.push(`  <${tag}${attrs ? ' ' + attrs : ''}> ${inner}`);
-  }
-  return out;
 }
