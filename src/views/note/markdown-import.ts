@@ -609,7 +609,13 @@ export async function importMarkdownBatch(
       // 序号位数:动态(5 章 → 2 位 / 100 章 → 3 位)
       const padWidth = Math.max(2, String(chunks.length).length);
 
+      console.log(
+        `[markdown-import] SPLIT ${scanned.relPath} → ${chunks.length} chunks (folder=${docFolderName})`,
+      );
+
       let chunkIdx = 0;
+      let chunkSuccess = 0;
+      let chunkFail = 0;
       for (const chunk of chunks) {
         const prefix = String(chunkIdx).padStart(padWidth, '0');
 
@@ -625,6 +631,8 @@ export async function importMarkdownBatch(
         }
 
         const chunkTitle = `${prefix} ${rawTitle}`;
+        const chunkStart = performance.now();
+        const chunkBytes = chunk.body.length;
 
         try {
           const content = await tea.markdownToProseMirror(chunk.body);
@@ -635,29 +643,50 @@ export async function importMarkdownBatch(
             cache,
             createdNoteIds,
           );
+          chunkSuccess++;
+          const elapsed = Math.round(performance.now() - chunkStart);
+          console.log(
+            `[markdown-import]   ✓ chunk ${chunkIdx + 1}/${chunks.length} "${chunkTitle}" (${chunkBytes}B, ${elapsed}ms)`,
+          );
         } catch (err) {
-          console.warn(
-            `[markdown-import] split chunk failed (${scanned.relPath} chunk ${chunkIdx}):`,
+          chunkFail++;
+          const elapsed = Math.round(performance.now() - chunkStart);
+          // 升级到 console.error 让终端高亮(WARN 容易被淹没)
+          console.error(
+            `[markdown-import]   ✗ chunk ${chunkIdx + 1}/${chunks.length} "${chunkTitle}" FAILED (${chunkBytes}B, ${elapsed}ms):`,
             err,
           );
           skipped.push({
-            relPath: `${scanned.relPath}::chunk-${chunkIdx}`,
-            reason: String(err),
+            relPath: `${scanned.relPath}::chunk-${chunkIdx} (${chunkTitle})`,
+            reason: errorToString(err),
           });
         }
         chunkIdx++;
       }
+      console.log(
+        `[markdown-import] SPLIT ${scanned.relPath} done — success=${chunkSuccess} fail=${chunkFail}`,
+      );
       continue;
     }
 
     // 普通文件:1:1 → note
+    const fileStart = performance.now();
+    const fileBytes = scanned.content.length;
     try {
       const content = await tea.markdownToProseMirror(scanned.content);
       const title = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
       await createNoteInFolder(title, content, folderId, cache, createdNoteIds);
+      const elapsed = Math.round(performance.now() - fileStart);
+      console.log(
+        `[markdown-import] ✓ ${scanned.relPath} → "${title}" (${fileBytes}B, ${elapsed}ms)`,
+      );
     } catch (err) {
-      console.warn(`[markdown-import] failed: ${scanned.relPath}`, err);
-      skipped.push({ relPath: scanned.relPath, reason: String(err) });
+      const elapsed = Math.round(performance.now() - fileStart);
+      console.error(
+        `[markdown-import] ✗ ${scanned.relPath} FAILED (${fileBytes}B, ${elapsed}ms):`,
+        err,
+      );
+      skipped.push({ relPath: scanned.relPath, reason: errorToString(err) });
     }
   }
 
@@ -668,4 +697,13 @@ export async function importMarkdownBatch(
     splitMode,
     oversizedCount,
   };
+}
+
+/** Error → 紧凑字符串(含 message + 首 3 行 stack,用于 skipped.reason 给用户看)*/
+function errorToString(err: unknown): string {
+  if (err instanceof Error) {
+    const stackHead = err.stack?.split('\n').slice(0, 3).join(' | ') ?? '';
+    return `${err.name}: ${err.message}${stackHead ? ` [${stackHead}]` : ''}`;
+  }
+  return String(err);
 }

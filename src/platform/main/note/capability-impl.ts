@@ -148,6 +148,7 @@ export async function createNote(
   // buildAutoBlockIdPlugin 字面同效;Stage 6 migration 也走此路径。
   const docWithIds = injectIdsForCreate(pmDoc);
 
+  const txStart = Date.now();
   return storage.transaction(async (tx) => {
     // 1. 创建 container atom(payload = empty doc)
     const containerAtom = await tx.putAtom<'pm'>({
@@ -175,12 +176,38 @@ export async function createNote(
 
     // 4. 拆解 + 写 block atoms + 边(走 fullCreateDiff 字面把 newDoc 全当 added)
     const diff = fullCreateDiff(docWithIds, containerAtom.id);
+
+    // 诊断:大文档导入丢数据排查(2026-05-27)— 打印事务规模,
+    // 用户重启后丢一半时可对照 log 看是哪批 atom/edge 写入失败
+    const blockCount = diff.added.length;
+    const edgeCount = diff.addedEdges.length;
+    if (blockCount > 50) {
+      console.log(
+        `[note-capability/createNote] LARGE container=${containerAtom.id.slice(-8)} folder=${folderId ?? 'root'} blocks=${blockCount} edges=${edgeCount}`,
+      );
+    }
+
     await applyDiff(diff, tx);
+
+    const elapsed = Date.now() - txStart;
+    if (blockCount > 50 || elapsed > 500) {
+      console.log(
+        `[note-capability/createNote] container=${containerAtom.id.slice(-8)} blocks=${blockCount} edges=${edgeCount} tx=${elapsed}ms`,
+      );
+    }
 
     // 5. cache + 返回(用 newDoc 字面作为 assembled — 因 dissect ↔ assemble 字面 round-trip
     //    幂等,这里跳过实际 assemble 节省一次 listEdges round-trip)
     pmDocCache.set(containerAtom.id, docWithIds);
     return buildNoteInfo(containerAtom, docWithIds, folderId);
+  }).catch((err) => {
+    const elapsed = Date.now() - txStart;
+    // 关键:事务整体抛错时升级到 error 让用户在 terminal 一眼看到
+    console.error(
+      `[note-capability/createNote] TX FAILED folder=${folderId ?? 'root'} tx=${elapsed}ms:`,
+      err,
+    );
+    throw err; // 抛出去让 markdown-import 走 skipped 路径
   });
 }
 
