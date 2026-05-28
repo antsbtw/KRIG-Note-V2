@@ -20,6 +20,7 @@ import mammoth from 'mammoth';
 import TurndownService from 'turndown';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
+import { splitImageWithTrailingText } from './md-postprocess';
 
 const METAFILE_MIMES = new Set([
   'image/x-emf', 'image/emf', 'image/x-wmf', 'image/wmf',
@@ -142,9 +143,13 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
     replacement: (content) => `~~${content}~~`,
   });
 
-  const markdown = turndown.turndown(cleanedHtml);
+  const markdownRaw = turndown.turndown(cleanedHtml);
+  // 拆 `![](data:image/...)trailing-text` 同行 → 图独占行 + 空行 + 文字独占行
+  // (mammoth 偶发输出图后紧贴 caption 同段无换行;V2 md-to-pm 行级 image regex
+  //  要求 image 独占行,否则整行退化成 raw text — 2026-05-28 反馈)
+  const markdown = splitImageWithTrailingText(markdownRaw);
   // raw 用 rawHtml(未抠 coverTitle)— 诊断 cache 落 01-raw,
-  // postprocessed = markdown(已抠 coverTitle)落 02-postprocessed
+  // postprocessed = markdown(已抠 coverTitle + 拆图行)落 02-postprocessed
   const rawMarkdown = turndown.turndown(rawHtml);
 
   return {

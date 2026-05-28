@@ -26,6 +26,7 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
+import { splitImageWithTrailingText } from './md-postprocess';
 
 /** EMF/WMF 扩展名判定 — JS 生态没有库能正确画 EMF 文字,直接走 placeholder */
 function isMetafileExt(p: string): boolean {
@@ -127,6 +128,8 @@ export async function convertDocxToMarkdownPandoc(
     markdown = flattenHtmlImagesToMarkdown(markdown);
     const metafiles: NonNullable<PandocConvertResult['metafiles']> = [];
     markdown = await inlineExtractedImages(markdown, mediaDir, metafiles);
+    // 防御:图后紧贴 caption 同行(pandoc 通常不会但 figcaption 拍平后可能产生)
+    markdown = splitImageWithTrailingText(markdown);
 
     const { coverTitle, cleanedMarkdown } = extractCoverTitle(markdown);
 
