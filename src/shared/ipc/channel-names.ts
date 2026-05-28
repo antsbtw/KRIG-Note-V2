@@ -119,6 +119,8 @@ export const IPC_CHANNELS = {
   // 业务粒度 IPC + LIST_CHANGED 广播,对齐 ebook / graph 模式
   NOTE_CREATE: 'note.create',
   NOTE_LIST: 'note.list',
+  // 2026-05-28 性能修复:轻量 list,只返 id/title/folderId,不 assemble doc
+  NOTE_LIST_TITLES: 'note.list-titles',
   NOTE_GET: 'note.get',
   NOTE_UPDATE: 'note.update',
   NOTE_MOVE: 'note.move',

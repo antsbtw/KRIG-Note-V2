@@ -299,6 +299,8 @@ declare global {
 
       // ── L7-sub2:note capability (decision 012,SurrealDB) ──
       noteList(): Promise<NoteInfo[]>;
+      /** 轻量 list — 只返 id/title/folderId,不 assemble doc(2026-05-28 性能修复)*/
+      noteListTitles(): Promise<Array<{ id: string; title: string; folderId: string | null }>>;
       noteGet(id: string): Promise<NoteInfo | null>;
       noteCreate(initialDoc: NoteDocEnvelope | null, folderId: string | null): Promise<NoteInfo>;
       noteUpdate(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;

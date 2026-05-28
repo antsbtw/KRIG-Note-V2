@@ -22,6 +22,12 @@ export interface NoteCapabilityApi {
     folderId: string | null,
   ): Promise<NoteInfo>;
   listNotes(): Promise<NoteInfo[]>;
+  /**
+   * 轻量 list — 只返 id/title/folderId,不 assemble doc。
+   * 用于只读 title 去重的场景(markdown-import / extraction-import / NoteLinkSearch 等)。
+   * 2026-05-28 性能修复:listNotes 全文 assemble 在大批 import 后冷启动卡 30s+。
+   */
+  listNoteTitles(): Promise<Array<{ id: string; title: string; folderId: string | null }>>;
   getNote(id: string): Promise<NoteInfo | null>;
   updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
   moveNote(noteId: string, newFolderId: string | null): Promise<void>;

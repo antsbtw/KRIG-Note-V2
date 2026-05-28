@@ -299,9 +299,11 @@ interface FolderTreeCache {
 }
 
 async function buildFolderTreeCache(): Promise<FolderTreeCache> {
+  // listNoteTitles 是 listNotes 的轻量版,只返 id/title/folderId 不 assemble doc
+  // (2026-05-28 性能修复:导入只为去重需要 title+folderId,不需要 doc 全文)
   const [folders, notes] = await Promise.all([
     folderCap().listFolders('note'),
-    noteCap().listNotes(),
+    noteCap().listNoteTitles(),
   ]);
 
   const cache: FolderTreeCache = {

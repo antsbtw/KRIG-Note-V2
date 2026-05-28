@@ -42,6 +42,27 @@ const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
 const HAS_NOTE_VIEW_PREDICATE = 'user:krig:hasNoteView';
 const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
 
+/**
+ * note container atom payload — 含缓存 title(2026-05-28 性能修复)
+ *
+ * container payload 本来恒 empty doc `{type:'doc',content:[]}`。
+ * listNotes 之前为了拿 title 必须 assemblePmDoc 拼全文,导致 N 篇 note × 4 个
+ * 全表 listEdges → 大批 import 后冷启动卡 30s+。
+ *
+ * 修法:在 container payload 的 attrs.title 缓存当前 title。createNote / updateNote
+ * 时用 deriveTitle(doc) 算好写进去;listNotes 优先读 attrs.title 跳过 assemble。
+ * PM schema 对 doc 节点 attrs 透明无副作用(浏览器渲染忽略)。
+ */
+function containerPayloadWithTitle(title: string): PmPayload {
+  return { type: 'doc', attrs: { title }, content: [] };
+}
+
+/** 从 container atom payload 读缓存 title;未命中(老数据)返 null,caller fallback assemble */
+function readCachedTitle(payload: PmPayload): string | null {
+  const t = payload.attrs?.title;
+  return typeof t === 'string' ? t : null;
+}
+
 async function getFolderIdForNote(noteId: string): Promise<string | null> {
   const edges = await storage.listEdges({
     predicate: IN_FOLDER_PREDICATE,
@@ -149,10 +170,12 @@ export async function createNote(
   const docWithIds = injectIdsForCreate(pmDoc);
 
   const txStart = Date.now();
+  // 预算 title 缓存到 container payload,免去 listNotes 时 assemble
+  const cachedTitle = deriveTitle(docWithIds);
   return storage.transaction(async (tx) => {
-    // 1. 创建 container atom(payload = empty doc)
+    // 1. 创建 container atom(payload = empty doc + cached title)
     const containerAtom = await tx.putAtom<'pm'>({
-      payload: { domain: NOTE_DOMAIN, payload: emptyContainerPayload() },
+      payload: { domain: NOTE_DOMAIN, payload: containerPayloadWithTitle(cachedTitle) },
     });
     const now = Date.now();
 
@@ -298,6 +321,64 @@ export async function listNotes(): Promise<NoteInfo[]> {
   return results;
 }
 
+/**
+ * 轻量 list — 只返 id/title/folderId,不 assemble doc。
+ *
+ * 2026-05-28 性能修复:listNotes 全文 assemble(4 个全表 listEdges × N 篇),
+ * 大批 import 后冷启动卡 30s+。
+ * markdown-import / extraction-import 等只为去重读 title+folderId 的场景改用本 API。
+ *
+ * 优先读 container payload.attrs.title 缓存(createNote/updateNote 已写入);
+ * 老数据缓存缺失则 lazy assemble + 写回 title 缓存(下次启动就快了)。
+ */
+export async function listNoteTitles(): Promise<Array<{
+  id: string;
+  title: string;
+  folderId: string | null;
+}>> {
+  const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
+  const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
+  const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
+  const folderEdges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  const folderBySubject = new Map<string, string>();
+  for (const e of folderEdges) {
+    if (e.object.kind === 'atom') {
+      folderBySubject.set(e.subject.atomId, e.object.atomId);
+    }
+  }
+
+  const noteAtoms = atoms.filter((a) => noteAtomIds.has(a.id));
+
+  return Promise.all(
+    noteAtoms.map(async (atom) => {
+      const folderId = folderBySubject.get(atom.id) ?? null;
+      const cachedTitle = readCachedTitle(atom.payload.payload);
+      if (cachedTitle !== null) {
+        return { id: atom.id, title: cachedTitle, folderId };
+      }
+
+      // fallback:老数据(payload 无 attrs.title)→ 必须 assemble
+      const cached = pmDocCache.get(atom.id);
+      const assembled = cached ?? (await assemblePmDoc(atom.id));
+      if (!assembled) {
+        return { id: atom.id, title: '未命名', folderId };
+      }
+      if (!cached) pmDocCache.set(atom.id, assembled);
+
+      const title = deriveTitle(assembled);
+      // lazy 写回 title 缓存,下次启动走快路径
+      void storage.putAtom<'pm'>({
+        id: atom.id,
+        payload: { domain: NOTE_DOMAIN, payload: containerPayloadWithTitle(title) },
+      }).catch((err) => {
+        console.warn(`[note-capability/listNoteTitles] lazy title backfill failed for ${atom.id}:`, err);
+      });
+
+      return { id: atom.id, title, folderId };
+    }),
+  );
+}
+
 export async function getNote(id: string): Promise<NoteInfo | null> {
   const atom = await storage.getAtom<'pm'>(id);
   if (!atom) return null;
@@ -351,14 +432,13 @@ export async function updateNote(
 
   const diff = diffBlockTree(oldDoc, newDoc, id);
 
-  // 字面 transaction:apply diff + 更新 container.updatedAt(空 putAtom 走 storage 内部
-  // updatedAt 字面刷新,字面不动 payload — container.payload 字面恒 empty doc)
+  // 字面 transaction:apply diff + 更新 container payload(刷 title 缓存 + updatedAt)
+  const newCachedTitle = deriveTitle(newDoc);
   const updatedContainer = await storage.transaction(async (tx) => {
     await applyDiff(diff, tx);
-    // 字面刷 container atom 的 updatedAt(payload 字面不变 empty doc)
     const refreshed = await tx.putAtom<'pm'>({
       id,
-      payload: { domain: NOTE_DOMAIN, payload: emptyContainerPayload() },
+      payload: { domain: NOTE_DOMAIN, payload: containerPayloadWithTitle(newCachedTitle) },
     });
     return refreshed;
   });

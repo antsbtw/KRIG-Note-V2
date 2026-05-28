@@ -420,6 +420,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_LIST);
   },
+  noteListTitles(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_LIST_TITLES);
+  },
   noteGet(id: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_GET, id);
   },
