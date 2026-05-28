@@ -63,7 +63,9 @@ export function useMarkdownImport(workspaceId: string): void {
                 `Successful: ${result.createdNoteIds.length} note(s) in ${result.createdFolderIds.length} folder(s)\n` +
                 `Failed:     ${result.skipped.length} item(s)\n\n` +
                 `Failed items:\n${headLines.join('\n')}${tail}\n\n` +
-                `Full diagnostic log in the terminal (npm start window).`,
+                `Full diagnostic log in the terminal (npm start window).\n` +
+                `Stage dumps (raw / postprocessed / chunks / pm-docs) in import-cache/ ` +
+                `(see terminal for full path).`,
             );
           }
 

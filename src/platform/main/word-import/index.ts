@@ -22,6 +22,14 @@ import { convertDocxBatch, convertDocxToMarkdown } from './converter';
 import { convertDocxBatchPandoc, convertDocxToMarkdownPandoc } from './converter-pandoc';
 import { detectPandoc, resetPandocDetectionCache } from './pandoc-detector';
 import { scanDocxPaths } from './scanner';
+import * as path from 'node:path';
+import {
+  beginImport,
+  registerFile,
+  dumpStageContent,
+  endImport,
+  getCacheRoot,
+} from './import-cache';
 
 const CONFIRM_THRESHOLD = 500;
 const PANDOC_INSTALL_URL = 'https://pandoc.org/installing.html';
@@ -35,6 +43,8 @@ interface UnifiedResult {
   coverTitle: string | null;
   warnings: string[];
   converter: ConverterKind;
+  /** import-cache 中的文件 idx(renderer 端用此 idx 透传给 dumpChunk/dumpPmDoc IPC)*/
+  cacheFileIdx?: number;
 }
 
 // ── 共享:选文件 dialog ────────────────────────────────────────
@@ -121,6 +131,9 @@ async function broadcastResults(
       relPath: r.relPath,
       content: r.markdown,
       coverTitle: r.coverTitle ?? undefined,
+      // 2026-05-27 诊断:让 renderer 知道这份文件在 import-cache 的 idx,
+      // 用于落 03-chunks / 04-pm-docs 时透传给 IPC
+      cacheFileIdx: r.cacheFileIdx,
     })),
     hasDirectory,
   };
@@ -143,18 +156,46 @@ async function runImportMammoth(): Promise<void> {
   if (!paths) return;
 
   console.log(`[word-import:mammoth] starting, paths=${paths.length}`);
+  await beginImport('word-mammoth');
+
   const { results, failed } = await convertDocxBatch(paths);
 
-  const unified: UnifiedResult[] = results.map((r) => ({
-    absPath: r.absPath,
-    relPath: r.relPath,
-    markdown: r.markdown,
-    coverTitle: r.coverTitle,
-    warnings: r.warnings,
-    converter: 'mammoth',
-  }));
+  // 落盘 01-raw / 02-postprocessed,同时记 idx 透传 renderer(dump 03/04 时用)
+  const unified: UnifiedResult[] = [];
+  for (const r of results) {
+    const baseName = path.basename(r.absPath, path.extname(r.absPath));
+    const { idx } = await registerFile(baseName, r.absPath, 'mammoth');
+    if (r.rawMarkdown) {
+      await dumpStageContent(idx, '01-raw', r.rawMarkdown, undefined, {
+        note: 'mammoth turndown(rawHtml) — before coverTitle extraction',
+      });
+    }
+    await dumpStageContent(idx, '02-postprocessed', r.markdown, undefined, {
+      coverTitle: r.coverTitle,
+      warnings: r.warnings.length,
+    });
+    unified.push({
+      absPath: r.absPath,
+      relPath: r.relPath,
+      markdown: r.markdown,
+      coverTitle: r.coverTitle,
+      warnings: r.warnings,
+      converter: 'mammoth',
+      cacheFileIdx: idx,
+    });
+  }
 
   await broadcastResults(unified, failed, paths, 'mammoth');
+  await endImport({
+    files: results.length + failed.length,
+    converted: results.length,
+    failed: failed.length,
+  });
+
+  const cacheRoot = getCacheRoot();
+  if (cacheRoot) {
+    console.log(`[word-import:mammoth] cache dump root: ${cacheRoot}`);
+  }
 }
 
 // ── handler 2:pandoc(高保真)──────────────────────────────────
@@ -195,18 +236,46 @@ async function runImportPandoc(): Promise<void> {
   if (!paths) return;
 
   console.log(`[word-import:pandoc] starting, paths=${paths.length}, binary=${pandocStatus.path}`);
+  await beginImport('word-pandoc');
+
   const { results, failed } = await convertDocxBatchPandoc(paths, pandocStatus.path!);
 
-  const unified: UnifiedResult[] = results.map((r) => ({
-    absPath: r.absPath,
-    relPath: r.relPath,
-    markdown: r.markdown,
-    coverTitle: r.coverTitle,
-    warnings: r.warnings,
-    converter: 'pandoc',
-  }));
+  // 落盘 01-raw(pandoc 直出)/ 02-postprocessed(math + html-img flatten + base64 内联后)
+  const unified: UnifiedResult[] = [];
+  for (const r of results) {
+    const baseName = path.basename(r.absPath, path.extname(r.absPath));
+    const { idx } = await registerFile(baseName, r.absPath, 'pandoc');
+    if (r.rawMarkdown) {
+      await dumpStageContent(idx, '01-raw', r.rawMarkdown, undefined, {
+        note: 'pandoc direct output — before math/html/base64 postprocess',
+      });
+    }
+    await dumpStageContent(idx, '02-postprocessed', r.markdown, undefined, {
+      coverTitle: r.coverTitle,
+      warnings: r.warnings.length,
+    });
+    unified.push({
+      absPath: r.absPath,
+      relPath: r.relPath,
+      markdown: r.markdown,
+      coverTitle: r.coverTitle,
+      warnings: r.warnings,
+      converter: 'pandoc',
+      cacheFileIdx: idx,
+    });
+  }
 
   await broadcastResults(unified, failed, paths, 'pandoc');
+  await endImport({
+    files: results.length + failed.length,
+    converted: results.length,
+    failed: failed.length,
+  });
+
+  const cacheRoot = getCacheRoot();
+  if (cacheRoot) {
+    console.log(`[word-import:pandoc] cache dump root: ${cacheRoot}`);
+  }
 }
 
 /** 注册命令 + File 菜单项(被 framework-menus 调用)*/

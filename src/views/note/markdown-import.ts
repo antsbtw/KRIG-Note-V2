@@ -55,6 +55,12 @@ export interface ScannedFile {
    * 当前仅 word-import 路径填(从 Word `Title` 样式段落抠);markdown-import 路径不填。
    */
   coverTitle?: string;
+  /**
+   * import-cache 文件 idx(2026-05-27 长文档乱码诊断)— word-import 路径 main 端注册,
+   * renderer 拿来 dump 03-chunks / 04-pm-docs 时透传给 IPC。
+   * markdown-import 路径暂无 cache,字段为 undefined → renderer 跳过 dump。
+   */
+  cacheFileIdx?: number;
 }
 
 export interface MarkdownImportPayload {
@@ -634,8 +640,27 @@ export async function importMarkdownBatch(
         const chunkStart = performance.now();
         const chunkBytes = chunk.body.length;
 
+        // import-cache 03-chunks 落盘(2026-05-27 长文档乱码诊断)
+        // 在 PM 转换前先落:用户可对照 02-postprocessed 切出来对不对
+        if (scanned.cacheFileIdx !== undefined) {
+          window.electronAPI.importCacheDumpChunk({
+            fileIdx: scanned.cacheFileIdx,
+            chunkIdx,
+            chunkTitle,
+            content: chunk.body,
+          });
+        }
+
         try {
           const content = await tea.markdownToProseMirror(chunk.body);
+          // import-cache 04-pm-docs 落盘:看 md-to-pm 是否在某 chunk 转崩成 raw text
+          if (scanned.cacheFileIdx !== undefined) {
+            window.electronAPI.importCacheDumpPmDoc({
+              fileIdx: scanned.cacheFileIdx,
+              chunkIdx,
+              pmDoc: content,
+            });
+          }
           await createNoteInFolder(
             chunkTitle,
             content,
@@ -672,8 +697,26 @@ export async function importMarkdownBatch(
     // 普通文件:1:1 → note
     const fileStart = performance.now();
     const fileBytes = scanned.content.length;
+
+    // import-cache 03-chunks/00 落盘(1:1 路径无切分,但仍写入第 0 号 chunk 便于对照)
+    if (scanned.cacheFileIdx !== undefined) {
+      window.electronAPI.importCacheDumpChunk({
+        fileIdx: scanned.cacheFileIdx,
+        chunkIdx: 0,
+        chunkTitle: '00-whole',
+        content: scanned.content,
+      });
+    }
+
     try {
       const content = await tea.markdownToProseMirror(scanned.content);
+      if (scanned.cacheFileIdx !== undefined) {
+        window.electronAPI.importCacheDumpPmDoc({
+          fileIdx: scanned.cacheFileIdx,
+          chunkIdx: 0,
+          pmDoc: content,
+        });
+      }
       const title = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
       await createNoteInFolder(title, content, folderId, cache, createdNoteIds);
       const elapsed = Math.round(performance.now() - fileStart);
