@@ -274,6 +274,38 @@ export function getCacheRoot(): string | null {
 }
 
 /**
+ * 落原始 EMF/WMF 二进制到 05-emf-raw/(浏览器无法渲染,placeholder 在 note 里指向这里)
+ *
+ * @param fileIdx     import-cache 文件 idx(同 dumpStageContent)
+ * @param mediaName   形如 "image5.emf"(用 docx 内 word/media 同名)
+ * @param data        二进制
+ * @returns           落盘后的绝对路径(给 placeholder 链接用)
+ */
+export async function dumpRawMetafile(
+  fileIdx: number,
+  mediaName: string,
+  data: Buffer,
+): Promise<string | null> {
+  if (!manifest || !currentRoot) return null;
+  const entry = manifest.files.find((f) => f.idx === fileIdx);
+  if (!entry) return null;
+
+  const dirName = `${String(fileIdx).padStart(4, '0')}-${entry.basename}`;
+  const rawDir = path.join(currentRoot, FILES_DIR_NAME, dirName, '05-emf-raw');
+  await fs.mkdir(rawDir, { recursive: true });
+
+  const safe = sanitizeFsName(mediaName);
+  const absPath = path.join(rawDir, safe);
+  try {
+    await fs.writeFile(absPath, data);
+    return absPath;
+  } catch (err) {
+    console.warn(`[import-cache] dumpRawMetafile failed for ${mediaName}:`, err);
+    return null;
+  }
+}
+
+/**
  * 注册 renderer → main 落盘 IPC handlers(应用启动期调用一次)
  *
  * 三个 channel 全部 fire-and-forget(`ipcMain.on`,无返回),renderer 不阻塞业务。

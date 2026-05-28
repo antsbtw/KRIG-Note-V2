@@ -27,6 +27,7 @@ import {
   beginImport,
   registerFile,
   dumpStageContent,
+  dumpRawMetafile,
   endImport,
   getCacheRoot,
 } from './import-cache';
@@ -174,6 +175,17 @@ async function runImportMammoth(): Promise<void> {
       coverTitle: r.coverTitle,
       warnings: r.warnings.length,
     });
+
+    // EMF/WMF 原文件落 05-emf-raw/(浏览器渲不了,placeholder 已在 markdown 里指向这里)
+    if (r.metafiles && r.metafiles.length > 0) {
+      for (const mf of r.metafiles) {
+        await dumpRawMetafile(idx, mf.label, mf.data);
+      }
+      console.log(
+        `[word-import:mammoth] ${baseName}: ${r.metafiles.length} EMF/WMF saved to 05-emf-raw/`,
+      );
+    }
+
     unified.push({
       absPath: r.absPath,
       relPath: r.relPath,
@@ -254,6 +266,16 @@ async function runImportPandoc(): Promise<void> {
       coverTitle: r.coverTitle,
       warnings: r.warnings.length,
     });
+
+    if (r.metafiles && r.metafiles.length > 0) {
+      for (const mf of r.metafiles) {
+        await dumpRawMetafile(idx, mf.label, mf.data);
+      }
+      console.log(
+        `[word-import:pandoc] ${baseName}: ${r.metafiles.length} EMF/WMF saved to 05-emf-raw/`,
+      );
+    }
+
     unified.push({
       absPath: r.absPath,
       relPath: r.relPath,

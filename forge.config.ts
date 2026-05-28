@@ -5,13 +5,10 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    // asar 启用,但原生二进制必须 unpack:
-    // - ffmpeg-static:spawn 子进程(asar 内的可执行文件 spawn 不了)
-    // - @napi-rs/canvas + 平台子包(canvas-darwin-arm64 等):.node binary
-    //   必须 dlopen 加载,asar 内 require('.node') Electron 也不支持
-    //   (用于 EMF/WMF → PNG 转换 — word-import/emf-decoder)
+    // asar 启用,但 ffmpeg-static binary 必须 unpack 才能 spawn
+    // (Electron asar 内的二进制无法直接执行)
     asar: {
-      unpack: '**/{ffmpeg-static,@napi-rs}/**',
+      unpack: '**/node_modules/ffmpeg-static/**',
     },
     name: 'KRIG Note',
     executableName: 'KRIG Note',

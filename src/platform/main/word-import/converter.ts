@@ -20,7 +20,27 @@ import mammoth from 'mammoth';
 import TurndownService from 'turndown';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
-import { decodeMetafileToPngDataUrl, isMetafileMime } from './emf-decoder';
+
+const METAFILE_MIMES = new Set([
+  'image/x-emf', 'image/emf', 'image/x-wmf', 'image/wmf',
+]);
+
+/** placeholder SVG(EMF/WMF 不可渲染时用):浅灰底 + 中文提示 + 文件名标注 */
+function buildMetafilePlaceholderSvg(label: string, mime: string): string {
+  // 用 V2 主色调,中文提示 + 提示用户去 import-cache/05-emf-raw 找原文件
+  const labelEsc = label.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const mimeShort = mime.replace('image/x-', '').replace('image/', '').toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="160" viewBox="0 0 480 160">
+  <rect x="1" y="1" width="478" height="158" rx="6" fill="#f5f5f5" stroke="#999" stroke-width="1" stroke-dasharray="6 4"/>
+  <text x="240" y="56" font-family="system-ui,sans-serif" font-size="16" font-weight="600" fill="#444" text-anchor="middle">⚠ ${mimeShort} 矢量图无法在浏览器中渲染</text>
+  <text x="240" y="86" font-family="system-ui,sans-serif" font-size="13" fill="#666" text-anchor="middle">原文件:${labelEsc}</text>
+  <text x="240" y="110" font-family="system-ui,sans-serif" font-size="11" fill="#888" text-anchor="middle">可在 import-cache/&lt;此次导入&gt;/05-emf-raw/ 找到原图</text>
+  <text x="240" y="130" font-family="system-ui,sans-serif" font-size="11" fill="#888" text-anchor="middle">用 PowerPoint / Word / Inkscape 打开查看</text>
+</svg>`;
+  // base64-encode SVG so it goes through markdown ![](data:...) path
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}`;
+}
+
 
 export interface ConvertResult {
   /** docx 文件原始路径(诊断用)*/
@@ -33,6 +53,9 @@ export interface ConvertResult {
   coverTitle: string | null;
   /** mammoth 报的 warning 信息(公式跳过 / 不识别样式等)*/
   warnings: string[];
+  /** EMF/WMF 原始二进制(浏览器渲不了,placeholder 已塞 markdown;upstream 把它们
+   *  落 import-cache/05-emf-raw 让用户能找原图)*/
+  metafiles?: Array<{ mime: string; label: string; data: Buffer }>;
 }
 
 /**
@@ -58,37 +81,37 @@ const CUSTOM_STYLE_MAP = [
   `p[style-name='文档标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
 ];
 
-/** 单文件转换:.docx → { markdown, coverTitle } */
+/** 单文件转换:.docx → { markdown, coverTitle, metafiles[] } */
 export async function convertDocxToMarkdown(absPath: string): Promise<ConvertResult> {
   const buffer = await fs.readFile(absPath);
+  const metafiles: ConvertResult['metafiles'] = [];
+  let metafileSeq = 0;
 
   const mammothResult = await mammoth.convertToHtml(
     { buffer },
     {
       styleMap: CUSTOM_STYLE_MAP,
-      // EMF/WMF 矢量图(Office 元文件,Chromium 不渲染)→ 走 emf-decoder 转 PNG;
-      // 失败保留原 base64 + alt 提示,让用户至少看到位置
-      // (2026-05-27 反馈:测试 docx 含 6 EMF + 1 WMF 全部丢图)
+      // EMF/WMF 矢量图(Office 元文件)Chromium 不渲染,JS 生态也无库能正确画 EMF 文字
+      //   (2026-05-27 调研:emf-converter / emfjs / gn-rtf.js 全部跳 EXTTEXTOUTW)
+      // → 插 SVG placeholder + 原文件透传给 caller 落 import-cache/05-emf-raw 给用户用 Office 查看
+      // (用户拍板 2026-05-28)
       convertImage: mammoth.images.imgElement(async (image) => {
-        const base64 = await image.readAsBase64String();
         const contentType = image.contentType;
 
-        if (isMetafileMime(contentType)) {
+        if (METAFILE_MIMES.has(contentType)) {
+          const base64 = await image.readAsBase64String();
           const buf = Buffer.from(base64, 'base64');
-          const png = await decodeMetafileToPngDataUrl(buf, contentType);
-          if (png) {
-            return { src: png, alt: '' };
-          }
-          // 转换失败:留原 base64(用户看到 broken)+ alt 提示这是 EMF/WMF
-          console.warn(
-            `[word-import:mammoth] EMF/WMF (${contentType}) decode failed,leaving raw base64`,
-          );
+          metafileSeq++;
+          const ext = contentType.includes('wmf') ? 'wmf' : 'emf';
+          const label = `image-${String(metafileSeq).padStart(3, '0')}.${ext}`;
+          metafiles.push({ mime: contentType, label, data: buf });
           return {
-            src: `data:${contentType};base64,${base64}`,
-            alt: `[Office vector image (${contentType}) — not renderable in browser]`,
+            src: buildMetafilePlaceholderSvg(label, contentType),
+            alt: `[${contentType}: ${label}]`,
           };
         }
 
+        const base64 = await image.readAsBase64String();
         return { src: `data:${contentType};base64,${base64}` };
       }),
     },
@@ -127,6 +150,7 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
     rawMarkdown,
     coverTitle,
     warnings,
+    metafiles: metafiles.length > 0 ? metafiles : undefined,
   };
 }
 
@@ -267,6 +291,8 @@ export interface BatchResult {
   rawMarkdown?: string;
   coverTitle: string | null;
   warnings: string[];
+  /** EMF/WMF 原始二进制透传给 upstream 落 import-cache */
+  metafiles?: Array<{ mime: string; label: string; data: Buffer }>;
 }
 
 /** 接收路径数组(可能含目录),递归找出所有 .docx,mammoth 转成 markdown */
@@ -289,6 +315,7 @@ export async function convertDocxBatch(
         rawMarkdown: r.rawMarkdown,
         coverTitle: r.coverTitle,
         warnings: r.warnings,
+        metafiles: r.metafiles,
       });
     } catch (err) {
       failed.push({ path: f.absPath, reason: String(err) });

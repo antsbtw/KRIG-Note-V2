@@ -26,7 +26,26 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
-import { decodeMetafileToPngDataUrl, isMetafileExt } from './emf-decoder';
+
+/** EMF/WMF 扩展名判定 — JS 生态没有库能正确画 EMF 文字,直接走 placeholder */
+function isMetafileExt(p: string): boolean {
+  const lower = p.toLowerCase();
+  return lower.endsWith('.emf') || lower.endsWith('.wmf');
+}
+
+/** placeholder SVG(EMF/WMF 不可渲染时用)— 与 mammoth 路径保持一致 */
+function buildMetafilePlaceholderSvg(label: string, mime: string): string {
+  const labelEsc = label.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const mimeShort = mime.replace('image/x-', '').replace('image/', '').toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="160" viewBox="0 0 480 160">
+  <rect x="1" y="1" width="478" height="158" rx="6" fill="#f5f5f5" stroke="#999" stroke-width="1" stroke-dasharray="6 4"/>
+  <text x="240" y="56" font-family="system-ui,sans-serif" font-size="16" font-weight="600" fill="#444" text-anchor="middle">⚠ ${mimeShort} 矢量图无法在浏览器中渲染</text>
+  <text x="240" y="86" font-family="system-ui,sans-serif" font-size="13" fill="#666" text-anchor="middle">原文件:${labelEsc}</text>
+  <text x="240" y="110" font-family="system-ui,sans-serif" font-size="11" fill="#888" text-anchor="middle">可在 import-cache/&lt;此次导入&gt;/05-emf-raw/ 找到原图</text>
+  <text x="240" y="130" font-family="system-ui,sans-serif" font-size="11" fill="#888" text-anchor="middle">用 PowerPoint / Word / Inkscape 打开查看</text>
+</svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}`;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -42,6 +61,8 @@ export interface PandocConvertResult {
   coverTitle: string | null;
   /** Pandoc stderr 收集到的警告(不识别样式 / OOXML quirks 等) */
   warnings: string[];
+  /** EMF/WMF 原始二进制透传给 upstream 落 import-cache/05-emf-raw */
+  metafiles?: Array<{ mime: string; label: string; data: Buffer }>;
 }
 
 export interface PandocBatchResult {
@@ -51,6 +72,7 @@ export interface PandocBatchResult {
   rawMarkdown?: string;
   coverTitle: string | null;
   warnings: string[];
+  metafiles?: Array<{ mime: string; label: string; data: Buffer }>;
 }
 
 /**
@@ -103,7 +125,8 @@ export async function convertDocxToMarkdownPandoc(
     // V2 md-to-pm 只认 markdown ![](src),不解析 HTML 标签
     // → 先把 HTML 图形态拍扁成 ![](src),再走 inlineExtractedImages 读 base64
     markdown = flattenHtmlImagesToMarkdown(markdown);
-    markdown = await inlineExtractedImages(markdown, mediaDir);
+    const metafiles: NonNullable<PandocConvertResult['metafiles']> = [];
+    markdown = await inlineExtractedImages(markdown, mediaDir, metafiles);
 
     const { coverTitle, cleanedMarkdown } = extractCoverTitle(markdown);
 
@@ -113,6 +136,7 @@ export async function convertDocxToMarkdownPandoc(
       rawMarkdown,
       coverTitle,
       warnings,
+      metafiles: metafiles.length > 0 ? metafiles : undefined,
     };
   } finally {
     // 清理临时目录(出错也要清,避免长期占盘)
@@ -230,6 +254,7 @@ function escapeMdAlt(text: string): string {
 export async function inlineExtractedImages(
   markdown: string,
   mediaDir: string,
+  metafilesOut?: Array<{ mime: string; label: string; data: Buffer }>,
 ): Promise<string> {
   const mediaDirNorm = path.resolve(mediaDir);
   if (!mediaDirNorm) return markdown;
@@ -252,32 +277,32 @@ export async function inlineExtractedImages(
   }
 
   let out = markdown;
+  let metafileSeq = 0;
   for (const r of replacements) {
     if (!r.abs) continue; // 外部 url / 解析失败 — 不动
     try {
       const buf = await fs.readFile(r.abs);
       let dataUrl: string;
+      let altOverride: string | null = null;
 
       if (isMetafileExt(r.abs)) {
-        // Office 矢量图(EMF/WMF)→ Chromium 不渲染,先 emf-decoder 转 PNG
-        // (2026-05-27 反馈:测试 docx 含 6 EMF + 1 WMF 全部丢图)
+        // Office 矢量图(EMF/WMF)→ Chromium 不渲染,JS 生态无库能正确画 EMF 文字
+        // (2026-05-27 调研:emf-converter / emfjs / gn-rtf.js 全部跳 EXTTEXTOUTW)
+        // → placeholder + 原文件推给 caller 落 import-cache/05-emf-raw
         const mime = r.abs.toLowerCase().endsWith('.wmf') ? 'image/x-wmf' : 'image/x-emf';
-        const png = await decodeMetafileToPngDataUrl(buf, mime);
-        if (png) {
-          dataUrl = png;
-        } else {
-          console.warn(
-            `[word-import:pandoc] EMF/WMF decode failed (${r.abs}), leaving raw base64`,
-          );
-          dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
-        }
+        metafileSeq++;
+        const ext = mime.includes('wmf') ? 'wmf' : 'emf';
+        const label = `image-${String(metafileSeq).padStart(3, '0')}.${ext}`;
+        metafilesOut?.push({ mime, label, data: buf });
+        dataUrl = buildMetafilePlaceholderSvg(label, mime);
+        altOverride = `[${mime}: ${label}]`;
       } else {
         const mime = guessMimeFromExt(r.abs);
         dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
       }
 
       const replacement = r.kind === 'md'
-        ? `![${r.alt}](${dataUrl})`
+        ? `![${altOverride ?? r.alt}](${dataUrl})`
         : `<img src="${dataUrl}">`;
       out = out.split(r.raw).join(replacement);
     } catch {
@@ -405,6 +430,7 @@ export async function convertDocxBatchPandoc(
         rawMarkdown: r.rawMarkdown,
         coverTitle: r.coverTitle,
         warnings: r.warnings,
+        metafiles: r.metafiles,
       });
     } catch (err) {
       failed.push({ path: f.absPath, reason: String(err) });
