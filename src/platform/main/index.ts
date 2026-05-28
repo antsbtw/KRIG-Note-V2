@@ -25,6 +25,7 @@ import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
 import { registerWordImport } from './word-import';
+import { registerImportCacheIpc } from './word-import/import-cache';
 import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
@@ -111,6 +112,7 @@ app.whenReady().then(async () => {
   // 项的 command 字符串才能查到 handler
   registerMarkdownImport();
   registerWordImport();
+  registerImportCacheIpc(); // 接收 renderer 的诊断落盘(chunk/PM)
   registerBackupMenu();
   registerFrameworkMenus();
 

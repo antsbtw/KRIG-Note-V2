@@ -255,6 +255,25 @@ declare global {
       // ── Markdown 文件 / 目录导入 ──
       /** 订阅 main 推送的已扫好的 markdown 批(File → Import Markdown...)*/
       onMarkdownImportRun(callback: (data: unknown) => void): () => void;
+      /** 诊断落盘(fire-and-forget),2026-05-27 长文档乱码诊断用 */
+      importCacheDumpChunk(args: {
+        fileIdx: number;
+        chunkIdx: number;
+        chunkTitle: string;
+        content: string;
+      }): void;
+      importCacheDumpPmDoc(args: {
+        fileIdx: number;
+        chunkIdx: number;
+        pmDoc: unknown;
+      }): void;
+      importCacheRecordStage(args: {
+        fileIdx: number;
+        stageId: '03-chunks' | '04-pm-docs';
+        bytes: number;
+        elapsedMs?: number;
+        meta?: Record<string, unknown>;
+      }): void;
 
       // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
       graphList(): Promise<unknown>;

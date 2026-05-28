@@ -110,6 +110,10 @@ export const IPC_CHANNELS = {
 
   // Markdown 文件 / 目录导入(File → Import Markdown...)
   MARKDOWN_IMPORT_RUN: 'markdown-import.run',       // main → renderer 推送:已扫好的 ScannedFile[]
+  // import-cache 诊断落盘(renderer → main,fire-and-forget)— 2026-05-27 长文档乱码诊断
+  IMPORT_CACHE_DUMP_CHUNK: 'import-cache.dump-chunk',
+  IMPORT_CACHE_DUMP_PM_DOC: 'import-cache.dump-pm-doc',
+  IMPORT_CACHE_RECORD_STAGE: 'import-cache.record-stage', // chunk/pm 阶段总结落 manifest
 
   // L7-sub2:note + folder capability (decision 012,SurrealDB Sidecar)
   // 业务粒度 IPC + LIST_CHANGED 广播,对齐 ebook / graph 模式
