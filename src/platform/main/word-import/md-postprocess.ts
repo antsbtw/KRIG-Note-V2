@@ -12,34 +12,59 @@
  */
 
 /**
- * 拆 `![](data:image/...)trailing-text` → 图独占一行 + 空行 + trailing-text 独占一行
+ * 把含 inline base64 image 的行拆成"图独占行"的合规结构。
  *
- * 仅处理 src 是 data:image 的 inline base64 图(导入 pipeline 唯一出现的形态)。
- * 不动其他形态(外部 URL / 文件路径 / 已经独占的图)。
+ * V2 md-to-pm parser 的 block image regex 要求 `^!\[..\](..)\s*$` 即图独占整行;
+ * mammoth/pandoc 偶发产出图前/后紧贴文字的形态(docx caption 与图同段同 run),
+ * 命中后整行退化成 raw text → 用户看到 base64 字面字符串。
  *
- * 规则:整行以 `![..](data:image..)` 开头,后面还有非空白字符 → 拆。
+ * 处理三种模式(都用同一 regex 提取):
+ *   1. `LEADING![..](data:..)`           → LEADING / image
+ *   2. `![..](data:..)TRAILING`          → image / TRAILING
+ *   3. `LEADING![..](data:..)TRAILING`   → LEADING / image / TRAILING
+ *   4. `![..](data:..)![..](data:..)`    → 多图同行(罕见但也拆)
+ *
+ * 仅处理 src 是 data:image 的 inline base64 图;其他形态不动。
  */
 export function splitImageWithTrailingText(markdown: string): string {
   const lines = markdown.split('\n');
   const out: string[] = [];
+  const imgPattern = /!\[[^\]]*\]\(data:image\/[a-zA-Z+-]+;base64,[A-Za-z0-9+/=]+\)/g;
 
   for (const line of lines) {
-    // 整行以 image 开头?(允许行首 0..N 空白)
-    const m = /^(\s*)(!\[[^\]]*\]\(data:image\/[a-zA-Z+-]+;base64,[A-Za-z0-9+/=]+\))(.+)$/.exec(line);
-    if (m) {
-      const [, indent, imgPart, trailing] = m;
-      const trailingTrim = trailing.trim();
-      // 尾部全是空白 / 标点之类无意义符号 → 不拆(就让原行原样)
-      if (!trailingTrim) {
-        out.push(line);
-        continue;
-      }
-      out.push(`${indent}${imgPart}`);
-      out.push('');
-      out.push(`${indent}${trailingTrim}`);
-    } else {
+    if (!imgPattern.test(line)) {
       out.push(line);
+      continue;
     }
+    imgPattern.lastIndex = 0; // reset stateful regex
+
+    const indentMatch = /^(\s*)/.exec(line);
+    const indent = indentMatch ? indentMatch[1] : '';
+
+    // 找出所有 image 在该行的范围,然后切片(prefix / img / between / img / suffix)
+    const parts: string[] = [];
+    let lastEnd = 0;
+    let m: RegExpExecArray | null;
+    while ((m = imgPattern.exec(line)) !== null) {
+      const before = line.slice(lastEnd, m.index);
+      const beforeTrim = before.trim();
+      if (beforeTrim) parts.push(beforeTrim);
+      parts.push(m[0]);
+      lastEnd = m.index + m[0].length;
+    }
+    const tail = line.slice(lastEnd).trim();
+    if (tail) parts.push(tail);
+
+    // 如果只有 1 个 part 且就是 image 自己,原样;否则按 image 独占行结构输出
+    if (parts.length === 1) {
+      out.push(line);
+      continue;
+    }
+    // 多 part:每段一行,段间空行(让 PM 当独立 block 处理)
+    parts.forEach((p, i) => {
+      if (i > 0) out.push('');
+      out.push(`${indent}${p}`);
+    });
   }
 
   return out.join('\n');
