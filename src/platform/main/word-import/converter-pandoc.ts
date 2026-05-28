@@ -26,6 +26,7 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
+import { decodeMetafileToPngDataUrl, isMetafileExt } from './emf-decoder';
 
 const execFileAsync = promisify(execFile);
 
@@ -255,8 +256,26 @@ export async function inlineExtractedImages(
     if (!r.abs) continue; // 外部 url / 解析失败 — 不动
     try {
       const buf = await fs.readFile(r.abs);
-      const mime = guessMimeFromExt(r.abs);
-      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+      let dataUrl: string;
+
+      if (isMetafileExt(r.abs)) {
+        // Office 矢量图(EMF/WMF)→ Chromium 不渲染,先 emf-decoder 转 PNG
+        // (2026-05-27 反馈:测试 docx 含 6 EMF + 1 WMF 全部丢图)
+        const mime = r.abs.toLowerCase().endsWith('.wmf') ? 'image/x-wmf' : 'image/x-emf';
+        const png = await decodeMetafileToPngDataUrl(buf, mime);
+        if (png) {
+          dataUrl = png;
+        } else {
+          console.warn(
+            `[word-import:pandoc] EMF/WMF decode failed (${r.abs}), leaving raw base64`,
+          );
+          dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+        }
+      } else {
+        const mime = guessMimeFromExt(r.abs);
+        dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+      }
+
       const replacement = r.kind === 'md'
         ? `![${r.alt}](${dataUrl})`
         : `<img src="${dataUrl}">`;

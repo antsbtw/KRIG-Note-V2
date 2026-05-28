@@ -20,6 +20,7 @@ import mammoth from 'mammoth';
 import TurndownService from 'turndown';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
+import { decodeMetafileToPngDataUrl, isMetafileMime } from './emf-decoder';
 
 export interface ConvertResult {
   /** docx 文件原始路径(诊断用)*/
@@ -65,9 +66,30 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
     { buffer },
     {
       styleMap: CUSTOM_STYLE_MAP,
+      // EMF/WMF 矢量图(Office 元文件,Chromium 不渲染)→ 走 emf-decoder 转 PNG;
+      // 失败保留原 base64 + alt 提示,让用户至少看到位置
+      // (2026-05-27 反馈:测试 docx 含 6 EMF + 1 WMF 全部丢图)
       convertImage: mammoth.images.imgElement(async (image) => {
         const base64 = await image.readAsBase64String();
-        return { src: `data:${image.contentType};base64,${base64}` };
+        const contentType = image.contentType;
+
+        if (isMetafileMime(contentType)) {
+          const buf = Buffer.from(base64, 'base64');
+          const png = await decodeMetafileToPngDataUrl(buf, contentType);
+          if (png) {
+            return { src: png, alt: '' };
+          }
+          // 转换失败:留原 base64(用户看到 broken)+ alt 提示这是 EMF/WMF
+          console.warn(
+            `[word-import:mammoth] EMF/WMF (${contentType}) decode failed,leaving raw base64`,
+          );
+          return {
+            src: `data:${contentType};base64,${base64}`,
+            alt: `[Office vector image (${contentType}) — not renderable in browser]`,
+          };
+        }
+
+        return { src: `data:${contentType};base64,${base64}` };
       }),
     },
   );
