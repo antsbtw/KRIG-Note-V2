@@ -269,7 +269,18 @@ function decodeHtmlInline(innerHtml: string): string {
 function registerTablePlugin(turndown: TurndownService): void {
   turndown.addRule('table-cell', {
     filter: ['th', 'td'],
-    replacement: (content) => ` ${content.replace(/\n/g, ' ').trim()} |`,
+    // turndown 处理 <p> 在父规则里已加 \n\n 分段;cell 内多段 → 多个 "\n\n";
+    // GFM 表格 cell 不能跨行 — 用 <br> 替换段间分隔,renderer 端 md-to-pm
+    // 表格 cell 解析时识别 <br> 拆多段(2026-05-28 反馈:硬件规格表 cell
+    // 多段被压成一行)
+    replacement: (content) => {
+      // 段间(`\n\n` 或更多)→ <br>;段内换行(单 `\n`,通常 GFM <br />)→ 空格
+      const collapsed = content
+        .replace(/\n{2,}/g, '<br>')
+        .replace(/\n/g, ' ')
+        .trim();
+      return ` ${collapsed} |`;
+    },
   });
 
   turndown.addRule('table-row', {

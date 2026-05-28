@@ -360,7 +360,13 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
           type: 'tableRow',
           content: cells.map((cell) => ({
             type: cellType,
-            content: [{ type: 'paragraph', content: parseInline(cell) }],
+            // cell 内允许 <br> 拆多段(2026-05-28 反馈:Word 导入硬件规格表
+            //  cell 多段被压一行;word-import converter 已用 <br> 替换段间)。
+            //  GFM 表格语法本身 cell 只能单行,<br> 是 V2 双方约定。
+            content: splitCellOnBr(cell).map((seg) => ({
+              type: 'paragraph',
+              content: parseInline(seg),
+            })),
           })),
         });
         isFirst = false;
@@ -383,6 +389,17 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
   }
 
   return content;
+}
+
+/**
+ * 拆 table cell 文本中的 <br> 为多段(2026-05-28 反馈)
+ *
+ * 容忍:<br> / <br/> / <br /> / <BR> / 大小写混合,跨多 br 视为一次切断。
+ * 不命中任何 br → 返单段(保持原行为)。
+ */
+function splitCellOnBr(cell: string): string[] {
+  const parts = cell.split(/<br\s*\/?\s*>/i).map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : [cell];
 }
 
 /**
