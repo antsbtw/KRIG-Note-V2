@@ -105,9 +105,12 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
           const ext = contentType.includes('wmf') ? 'wmf' : 'emf';
           const label = `image-${String(metafileSeq).padStart(3, '0')}.${ext}`;
           metafiles.push({ mime: contentType, label, data: buf });
+          // alt 里不能有 [ ] — turndown 会转义成 \[ \] → md-to-pm regex
+          // `[^\]]*` 字符类被 ] 触发截断 → 整段图被当字面文字渲染
+          // (2026-05-28 反馈)
           return {
             src: buildMetafilePlaceholderSvg(label, contentType),
-            alt: `[${contentType}: ${label}]`,
+            alt: `EMF placeholder ${label}`,
           };
         }
 

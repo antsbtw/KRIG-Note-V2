@@ -295,7 +295,8 @@ export async function inlineExtractedImages(
         const label = `image-${String(metafileSeq).padStart(3, '0')}.${ext}`;
         metafilesOut?.push({ mime, label, data: buf });
         dataUrl = buildMetafilePlaceholderSvg(label, mime);
-        altOverride = `[${mime}: ${label}]`;
+        // alt 里不能有 [ ] — 见 converter.ts 同位置注释
+        altOverride = `EMF placeholder ${label}`;
       } else {
         const mime = guessMimeFromExt(r.abs);
         dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
