@@ -334,6 +334,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, handler);
   },
 
+  /** 诊断落盘(2026-05-27 长文档乱码诊断)— fire-and-forget,不阻塞业务 */
+  importCacheDumpChunk(args: {
+    fileIdx: number;
+    chunkIdx: number;
+    chunkTitle: string;
+    content: string;
+  }): void {
+    ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_DUMP_CHUNK, args);
+  },
+  importCacheDumpPmDoc(args: {
+    fileIdx: number;
+    chunkIdx: number;
+    pmDoc: unknown;
+  }): void {
+    ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_DUMP_PM_DOC, args);
+  },
+  importCacheRecordStage(args: {
+    fileIdx: number;
+    stageId: '03-chunks' | '04-pm-docs';
+    bytes: number;
+    elapsedMs?: number;
+    meta?: Record<string, unknown>;
+  }): void {
+    ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_RECORD_STAGE, args);
+  },
+
   // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
   graphList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_LIST);
@@ -393,6 +419,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── L7-sub2:note capability (decision 012,SurrealDB) ──
   noteList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_LIST);
+  },
+  noteListTitles(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_LIST_TITLES);
   },
   noteGet(id: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_GET, id);

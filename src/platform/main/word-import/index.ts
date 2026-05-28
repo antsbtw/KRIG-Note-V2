@@ -1,16 +1,18 @@
 /**
  * word-import 模块入口(主进程)
  *
- * 单菜单入口 `Import Word...` → 自动选择转换器:
- *   1. 探测 pandoc 二进制
- *      ✓ 有 → 走高质量路径(公式 / 自动编号 / 复杂表格保留)
- *      ✗ 没 → 询问用户:用 mammoth 基础版,还是去装 pandoc
- *   2. 转换 + 复用 MARKDOWN_IMPORT_RUN 通道推给 renderer
+ * 两个独立菜单入口(2026-05-27 反馈):**分开诊断**
+ *   - `Import Word...`                    → 走 mammoth(基础,零依赖)
+ *   - `Import Word (High Quality)...`     → 走 pandoc(高保真,需用户装 pandoc)
  *
- * Pandoc 优先 + mammoth 兜底设计(2026-05-27 用户拍板):
- * - 装好 pandoc 的用户透明享受高质量(无需在菜单里选两次)
- * - 没装的用户能立即用兜底,同时知道有更高质量选项可装
- * - 失败逐文件降级:某 docx 用 pandoc 转崩 → 单文件 fallback 到 mammoth(不让一份坏文档拖死整批)
+ * 设计权衡(回归原任务文档方案):
+ * - 早期"单菜单透明降级"方便用户但**遮蔽了 bug 归属**:
+ *   表格/图丢失时无法知道是 mammoth 没踩到的 case 还是 pandoc 引入的回归
+ * - 两个独立入口:用户主动选 → 出问题立刻知道是哪条路径责任,
+ *   两路径可对照测试同一份 docx
+ * - 没装 pandoc → 走 pandoc 入口直接弹安装引导后退出(不再悄悄 fallback)
+ *
+ * 共用 renderer 链路(MARKDOWN_IMPORT_RUN)— renderer 不知道 docx 来自哪条转换器
  */
 
 import { dialog, BrowserWindow, shell } from 'electron';
@@ -19,10 +21,21 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { convertDocxBatch, convertDocxToMarkdown } from './converter';
 import { convertDocxBatchPandoc, convertDocxToMarkdownPandoc } from './converter-pandoc';
 import { detectPandoc, resetPandocDetectionCache } from './pandoc-detector';
-import { scanDocxPaths, replaceDocxExtWithMd } from './scanner';
+import { scanDocxPaths } from './scanner';
+import * as path from 'node:path';
+import {
+  beginImport,
+  registerFile,
+  dumpStageContent,
+  dumpRawMetafile,
+  endImport,
+  getCacheRoot,
+} from './import-cache';
 
 const CONFIRM_THRESHOLD = 500;
 const PANDOC_INSTALL_URL = 'https://pandoc.org/installing.html';
+
+type ConverterKind = 'pandoc' | 'mammoth';
 
 interface UnifiedResult {
   absPath: string;
@@ -30,136 +43,48 @@ interface UnifiedResult {
   markdown: string;
   coverTitle: string | null;
   warnings: string[];
-  /** 实际用了哪条转换器(诊断用)*/
-  converter: 'pandoc' | 'mammoth';
+  converter: ConverterKind;
+  /** import-cache 中的文件 idx(renderer 端用此 idx 透传给 dumpChunk/dumpPmDoc IPC)*/
+  cacheFileIdx?: number;
 }
 
-async function runImport(): Promise<void> {
-  const focusedWin = BrowserWindow.getFocusedWindow();
-
+// ── 共享:选文件 dialog ────────────────────────────────────────
+async function pickDocxFiles(titleSuffix: string): Promise<string[] | null> {
   const dialogResult = await dialog.showOpenDialog({
-    title: 'Import Word',
+    title: `Import Word${titleSuffix}`,
     buttonLabel: 'Import',
     properties: ['openFile', 'openDirectory', 'multiSelections'],
     filters: [{ name: 'Word Document', extensions: ['docx'] }],
   });
+  if (dialogResult.canceled || dialogResult.filePaths.length === 0) return null;
+  return dialogResult.filePaths;
+}
 
-  if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
-    return;
-  }
+// ── 共享:hasDirectory 探测 + broadcast + 大批确认 ─────────────
+async function broadcastResults(
+  unified: UnifiedResult[],
+  failed: Array<{ path: string; reason: string }>,
+  paths: string[],
+  converterTag: string,
+): Promise<void> {
+  const focusedWin = BrowserWindow.getFocusedWindow();
 
-  const paths = dialogResult.filePaths;
-
-  // 探测 pandoc — 每次菜单点击重新探测(用户可能中途装上)
-  resetPandocDetectionCache();
-  const pandocStatus = await detectPandoc();
-  console.log(
-    `[word-import] pandoc detect: available=${pandocStatus.available} path=${pandocStatus.path ?? 'n/a'} version=${pandocStatus.version ?? 'n/a'}`,
-  );
-
-  let useConverter: 'pandoc' | 'mammoth' = pandocStatus.available ? 'pandoc' : 'mammoth';
-
-  if (!pandocStatus.available) {
-    const choice = await dialog.showMessageBox(focusedWin ?? new BrowserWindow(), {
-      type: 'info',
-      title: 'Pandoc Not Installed',
-      message: 'For best quality, install Pandoc.',
-      detail:
-        'Pandoc preserves math formulas, auto-numbering, citations, and complex tables — features the basic converter (mammoth) cannot handle.\n\n' +
-        'Install:\n' +
-        '  • macOS:   brew install pandoc\n' +
-        '  • Windows: download from pandoc.org/installing\n' +
-        '  • Linux:   apt install pandoc / yum install pandoc\n\n' +
-        'You can import now with the basic converter, or cancel and install Pandoc first.',
-      buttons: ['Import with Basic Converter', 'Open Pandoc Website', 'Cancel'],
-      defaultId: 0,
-      cancelId: 2,
-    });
-    if (choice.response === 2) return;
-    if (choice.response === 1) {
-      await shell.openExternal(PANDOC_INSTALL_URL);
-      return;
-    }
-    useConverter = 'mammoth';
-  }
-
-  // 是否包含目录(用于 renderer 端 hasDirectory 判定)
   let hasDirectory = false;
   try {
     const fs = await import('node:fs');
     hasDirectory = paths.some((p) => {
-      try {
-        return fs.statSync(p).isDirectory();
-      } catch {
-        return false;
-      }
+      try { return fs.statSync(p).isDirectory(); } catch { return false; }
     });
   } catch {
     /* default false */
   }
 
-  console.log(`[word-import] starting conversion via ${useConverter}, paths=${paths.length}`);
-
-  let unified: UnifiedResult[] = [];
-  let failed: Array<{ path: string; reason: string }> = [];
-  let pandocFallbackCount = 0;
-
-  if (useConverter === 'pandoc' && pandocStatus.path) {
-    // 走 pandoc 批量;单文件失败时降级到 mammoth(不让一份坏 docx 拖死整批)
-    const { results: pandocResults, failed: pandocFailed } = await convertDocxBatchPandoc(
-      paths,
-      pandocStatus.path,
-    );
-
-    unified.push(
-      ...pandocResults.map<UnifiedResult>((r) => ({
-        absPath: r.absPath,
-        relPath: r.relPath,
-        markdown: r.markdown,
-        coverTitle: r.coverTitle,
-        warnings: r.warnings,
-        converter: 'pandoc',
-      })),
-    );
-
-    // 逐文件 pandoc 失败 → 单文件 mammoth fallback
-    for (const f of pandocFailed) {
-      try {
-        const r = await convertDocxToMarkdown(f.path);
-        unified.push({
-          absPath: f.path,
-          relPath: replaceDocxExtWithMd(deriveRelPath(paths, f.path)),
-          markdown: r.markdown,
-          coverTitle: r.coverTitle,
-          warnings: [`[fallback to mammoth: pandoc failed — ${f.reason}]`, ...r.warnings],
-          converter: 'mammoth',
-        });
-        pandocFallbackCount++;
-      } catch (err) {
-        failed.push({ path: f.path, reason: `pandoc + mammoth both failed: ${String(err)}` });
-      }
-    }
-  } else {
-    const { results: mammothResults, failed: mammothFailed } = await convertDocxBatch(paths);
-    unified.push(
-      ...mammothResults.map<UnifiedResult>((r) => ({
-        absPath: r.absPath,
-        relPath: r.relPath,
-        markdown: r.markdown,
-        coverTitle: r.coverTitle,
-        warnings: r.warnings,
-        converter: 'mammoth',
-      })),
-    );
-    failed = mammothFailed;
-  }
-
-  // warnings 汇总打印
+  // warnings 汇总
   let totalWarnings = 0;
   for (const r of unified) {
     if (r.warnings.length > 0) {
       console.warn(
-        `[word-import] ${r.relPath} (${r.converter}): ${r.warnings.length} warning(s)`,
+        `[word-import:${converterTag}] ${r.relPath}: ${r.warnings.length} warning(s)`,
       );
       for (const w of r.warnings.slice(0, 5)) console.warn(`  - ${w}`);
       if (r.warnings.length > 5) console.warn(`  ... (${r.warnings.length - 5} more)`);
@@ -168,17 +93,17 @@ async function runImport(): Promise<void> {
   }
 
   console.log(
-    `[word-import] conversion done — converted=${unified.length} failed=${failed.length} pandoc-fallback=${pandocFallbackCount}`,
+    `[word-import:${converterTag}] conversion done — converted=${unified.length} failed=${failed.length}`,
   );
 
   if (failed.length > 0) {
-    console.warn(`[word-import] ${failed.length} file(s) failed:`, failed);
+    console.warn(`[word-import:${converterTag}] ${failed.length} file(s) failed:`, failed);
   }
 
   if (unified.length === 0) {
     await dialog.showMessageBox(focusedWin ?? new BrowserWindow(), {
       type: 'info',
-      title: 'Import Word',
+      title: `Import Word (${converterTag})`,
       message: 'No .docx files were converted.',
       detail:
         failed.length > 0
@@ -195,19 +120,21 @@ async function runImport(): Promise<void> {
       defaultId: 0,
       cancelId: 0,
       title: 'Confirm Large Import',
-      message: `Converted ${unified.length} .docx files.`,
+      message: `Converted ${unified.length} .docx files via ${converterTag}.`,
       detail: 'This will create the same number of notes. Continue?',
     });
     if (choice.response !== 1) return;
   }
 
-  // 复用 markdown-import 的 MARKDOWN_IMPORT_RUN 通道(renderer 链路零改动)
   const payload = {
     files: unified.map((r) => ({
       absPath: r.absPath,
       relPath: r.relPath,
       content: r.markdown,
       coverTitle: r.coverTitle ?? undefined,
+      // 2026-05-27 诊断:让 renderer 知道这份文件在 import-cache 的 idx,
+      // 用于落 03-chunks / 04-pm-docs 时透传给 IPC
+      cacheFileIdx: r.cacheFileIdx,
     })),
     hasDirectory,
   };
@@ -220,22 +147,169 @@ async function runImport(): Promise<void> {
     sent++;
   }
   console.log(
-    `[word-import] broadcast MARKDOWN_IMPORT_RUN → ${sent} window(s),files=${unified.length},warnings=${totalWarnings}`,
+    `[word-import:${converterTag}] broadcast MARKDOWN_IMPORT_RUN → ${sent} window(s),files=${unified.length},warnings=${totalWarnings}`,
   );
 }
 
-/** 单文件 mammoth fallback 时需要从原 paths 推一个 relPath(简化:用 basename)*/
-function deriveRelPath(_originalPaths: string[], absPath: string): string {
-  // 用 basename(对单文件 / 文件名唯一就够;批量目录场景 pandoc 失败概率极低)
-  const lastSep = Math.max(absPath.lastIndexOf('/'), absPath.lastIndexOf('\\'));
-  return lastSep >= 0 ? absPath.slice(lastSep + 1) : absPath;
+// ── handler 1:mammoth(基础)────────────────────────────────────
+async function runImportMammoth(): Promise<void> {
+  const paths = await pickDocxFiles('');
+  if (!paths) return;
+
+  console.log(`[word-import:mammoth] starting, paths=${paths.length}`);
+  await beginImport('word-mammoth');
+
+  const { results, failed } = await convertDocxBatch(paths);
+
+  // 落盘 01-raw / 02-postprocessed,同时记 idx 透传 renderer(dump 03/04 时用)
+  const unified: UnifiedResult[] = [];
+  for (const r of results) {
+    const baseName = path.basename(r.absPath, path.extname(r.absPath));
+    const { idx } = await registerFile(baseName, r.absPath, 'mammoth');
+    if (r.rawMarkdown) {
+      await dumpStageContent(idx, '01-raw', r.rawMarkdown, undefined, {
+        note: 'mammoth turndown(rawHtml) — before coverTitle extraction',
+      });
+    }
+    await dumpStageContent(idx, '02-postprocessed', r.markdown, undefined, {
+      coverTitle: r.coverTitle,
+      warnings: r.warnings.length,
+    });
+
+    // EMF/WMF 原文件落 05-emf-raw/(浏览器渲不了,placeholder 已在 markdown 里指向这里)
+    if (r.metafiles && r.metafiles.length > 0) {
+      for (const mf of r.metafiles) {
+        await dumpRawMetafile(idx, mf.label, mf.data);
+      }
+      console.log(
+        `[word-import:mammoth] ${baseName}: ${r.metafiles.length} EMF/WMF saved to 05-emf-raw/`,
+      );
+    }
+
+    unified.push({
+      absPath: r.absPath,
+      relPath: r.relPath,
+      markdown: r.markdown,
+      coverTitle: r.coverTitle,
+      warnings: r.warnings,
+      converter: 'mammoth',
+      cacheFileIdx: idx,
+    });
+  }
+
+  await broadcastResults(unified, failed, paths, 'mammoth');
+  await endImport({
+    files: results.length + failed.length,
+    converted: results.length,
+    failed: failed.length,
+  });
+
+  const cacheRoot = getCacheRoot();
+  if (cacheRoot) {
+    console.log(`[word-import:mammoth] cache dump root: ${cacheRoot}`);
+  }
+}
+
+// ── handler 2:pandoc(高保真)──────────────────────────────────
+async function runImportPandoc(): Promise<void> {
+  const focusedWin = BrowserWindow.getFocusedWindow();
+
+  // 探测 pandoc — 每次菜单点击重新探测(用户可能中途装上)
+  resetPandocDetectionCache();
+  const pandocStatus = await detectPandoc();
+  console.log(
+    `[word-import:pandoc] detect: available=${pandocStatus.available} path=${pandocStatus.path ?? 'n/a'} version=${pandocStatus.version ?? 'n/a'}`,
+  );
+
+  if (!pandocStatus.available) {
+    const choice = await dialog.showMessageBox(focusedWin ?? new BrowserWindow(), {
+      type: 'info',
+      title: 'Pandoc Not Installed',
+      message: 'This menu requires Pandoc.',
+      detail:
+        'For basic (zero-dependency) Word import, use "Import Word..." instead.\n\n' +
+        'For high-quality import (math formulas, auto-numbering, complex tables),' +
+        ' install Pandoc:\n' +
+        '  • macOS:   brew install pandoc\n' +
+        '  • Windows: download from pandoc.org/installing\n' +
+        '  • Linux:   apt install pandoc / yum install pandoc\n\n' +
+        'After installing, restart KRIG Note and try again.',
+      buttons: ['Open Pandoc Website', 'OK'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (choice.response === 0) {
+      await shell.openExternal(PANDOC_INSTALL_URL);
+    }
+    return;
+  }
+
+  const paths = await pickDocxFiles(' (High Quality)');
+  if (!paths) return;
+
+  console.log(`[word-import:pandoc] starting, paths=${paths.length}, binary=${pandocStatus.path}`);
+  await beginImport('word-pandoc');
+
+  const { results, failed } = await convertDocxBatchPandoc(paths, pandocStatus.path!);
+
+  // 落盘 01-raw(pandoc 直出)/ 02-postprocessed(math + html-img flatten + base64 内联后)
+  const unified: UnifiedResult[] = [];
+  for (const r of results) {
+    const baseName = path.basename(r.absPath, path.extname(r.absPath));
+    const { idx } = await registerFile(baseName, r.absPath, 'pandoc');
+    if (r.rawMarkdown) {
+      await dumpStageContent(idx, '01-raw', r.rawMarkdown, undefined, {
+        note: 'pandoc direct output — before math/html/base64 postprocess',
+      });
+    }
+    await dumpStageContent(idx, '02-postprocessed', r.markdown, undefined, {
+      coverTitle: r.coverTitle,
+      warnings: r.warnings.length,
+    });
+
+    if (r.metafiles && r.metafiles.length > 0) {
+      for (const mf of r.metafiles) {
+        await dumpRawMetafile(idx, mf.label, mf.data);
+      }
+      console.log(
+        `[word-import:pandoc] ${baseName}: ${r.metafiles.length} EMF/WMF saved to 05-emf-raw/`,
+      );
+    }
+
+    unified.push({
+      absPath: r.absPath,
+      relPath: r.relPath,
+      markdown: r.markdown,
+      coverTitle: r.coverTitle,
+      warnings: r.warnings,
+      converter: 'pandoc',
+      cacheFileIdx: idx,
+    });
+  }
+
+  await broadcastResults(unified, failed, paths, 'pandoc');
+  await endImport({
+    files: results.length + failed.length,
+    converted: results.length,
+    failed: failed.length,
+  });
+
+  const cacheRoot = getCacheRoot();
+  if (cacheRoot) {
+    console.log(`[word-import:pandoc] cache dump root: ${cacheRoot}`);
+  }
 }
 
 /** 注册命令 + File 菜单项(被 framework-menus 调用)*/
 export function registerWordImport(): void {
   menuRegistry.registerCommand('file.import-word', () => {
-    void runImport().catch((err) => {
-      console.error('[word-import] runImport failed:', err);
+    void runImportMammoth().catch((err) => {
+      console.error('[word-import:mammoth] runImport failed:', err);
+    });
+  });
+  menuRegistry.registerCommand('file.import-word-pandoc', () => {
+    void runImportPandoc().catch((err) => {
+      console.error('[word-import:pandoc] runImport failed:', err);
     });
   });
 }

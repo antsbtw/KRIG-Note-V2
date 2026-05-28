@@ -16,6 +16,7 @@ import { NOTE_DOC_ORIGIN } from '@shared/ipc/note-folder-types';
 import {
   createNote,
   listNotes,
+  listNoteTitles,
   getNote,
   updateNote,
   moveNote,
@@ -31,6 +32,7 @@ function isDocEnvelope(v: unknown): v is NoteDocEnvelope {
 
 export function registerNoteHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.NOTE_LIST, async () => listNotes());
+  ipcMain.handle(IPC_CHANNELS.NOTE_LIST_TITLES, async () => listNoteTitles());
 
   ipcMain.handle(IPC_CHANNELS.NOTE_GET, async (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) return null;

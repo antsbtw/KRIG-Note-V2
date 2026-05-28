@@ -20,16 +20,43 @@ import mammoth from 'mammoth';
 import TurndownService from 'turndown';
 
 import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
+import { splitImageWithTrailingText } from './md-postprocess';
+
+const METAFILE_MIMES = new Set([
+  'image/x-emf', 'image/emf', 'image/x-wmf', 'image/wmf',
+]);
+
+/** placeholder SVG(EMF/WMF 不可渲染时用):浅灰底 + 中文提示 + 文件名标注 */
+function buildMetafilePlaceholderSvg(label: string, mime: string): string {
+  // 用 V2 主色调,中文提示 + 提示用户去 import-cache/05-emf-raw 找原文件
+  const labelEsc = label.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const mimeShort = mime.replace('image/x-', '').replace('image/', '').toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="160" viewBox="0 0 480 160">
+  <rect x="1" y="1" width="478" height="158" rx="6" fill="#f5f5f5" stroke="#999" stroke-width="1" stroke-dasharray="6 4"/>
+  <text x="240" y="56" font-family="system-ui,sans-serif" font-size="16" font-weight="600" fill="#444" text-anchor="middle">⚠ ${mimeShort} 矢量图无法在浏览器中渲染</text>
+  <text x="240" y="86" font-family="system-ui,sans-serif" font-size="13" fill="#666" text-anchor="middle">原文件:${labelEsc}</text>
+  <text x="240" y="110" font-family="system-ui,sans-serif" font-size="11" fill="#888" text-anchor="middle">可在 import-cache/&lt;此次导入&gt;/05-emf-raw/ 找到原图</text>
+  <text x="240" y="130" font-family="system-ui,sans-serif" font-size="11" fill="#888" text-anchor="middle">用 PowerPoint / Word / Inkscape 打开查看</text>
+</svg>`;
+  // base64-encode SVG so it goes through markdown ![](data:...) path
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}`;
+}
+
 
 export interface ConvertResult {
   /** docx 文件原始路径(诊断用)*/
   absPath: string;
   /** 转出来的 markdown 字符串(可直接喂 renderer 端 markdownToProseMirror)*/
   markdown: string;
+  /** raw markdown(coverTitle 抽取前 — 诊断 / cache 落盘用,业务消费 markdown 即可) */
+  rawMarkdown?: string;
   /** 从 Word Title 样式提取的封面标题(优先用作 note title / split folder name)*/
   coverTitle: string | null;
   /** mammoth 报的 warning 信息(公式跳过 / 不识别样式等)*/
   warnings: string[];
+  /** EMF/WMF 原始二进制(浏览器渲不了,placeholder 已塞 markdown;upstream 把它们
+   *  落 import-cache/05-emf-raw 让用户能找原图)*/
+  metafiles?: Array<{ mime: string; label: string; data: Buffer }>;
 }
 
 /**
@@ -55,17 +82,41 @@ const CUSTOM_STYLE_MAP = [
   `p[style-name='文档标题'] => p.${KRIG_TITLE_CLASS}:fresh`,
 ];
 
-/** 单文件转换:.docx → { markdown, coverTitle } */
+/** 单文件转换:.docx → { markdown, coverTitle, metafiles[] } */
 export async function convertDocxToMarkdown(absPath: string): Promise<ConvertResult> {
   const buffer = await fs.readFile(absPath);
+  const metafiles: ConvertResult['metafiles'] = [];
+  let metafileSeq = 0;
 
   const mammothResult = await mammoth.convertToHtml(
     { buffer },
     {
       styleMap: CUSTOM_STYLE_MAP,
+      // EMF/WMF 矢量图(Office 元文件)Chromium 不渲染,JS 生态也无库能正确画 EMF 文字
+      //   (2026-05-27 调研:emf-converter / emfjs / gn-rtf.js 全部跳 EXTTEXTOUTW)
+      // → 插 SVG placeholder + 原文件透传给 caller 落 import-cache/05-emf-raw 给用户用 Office 查看
+      // (用户拍板 2026-05-28)
       convertImage: mammoth.images.imgElement(async (image) => {
+        const contentType = image.contentType;
+
+        if (METAFILE_MIMES.has(contentType)) {
+          const base64 = await image.readAsBase64String();
+          const buf = Buffer.from(base64, 'base64');
+          metafileSeq++;
+          const ext = contentType.includes('wmf') ? 'wmf' : 'emf';
+          const label = `image-${String(metafileSeq).padStart(3, '0')}.${ext}`;
+          metafiles.push({ mime: contentType, label, data: buf });
+          // alt 里不能有 [ ] — turndown 会转义成 \[ \] → md-to-pm regex
+          // `[^\]]*` 字符类被 ] 触发截断 → 整段图被当字面文字渲染
+          // (2026-05-28 反馈)
+          return {
+            src: buildMetafilePlaceholderSvg(label, contentType),
+            alt: `EMF placeholder ${label}`,
+          };
+        }
+
         const base64 = await image.readAsBase64String();
-        return { src: `data:${image.contentType};base64,${base64}` };
+        return { src: `data:${contentType};base64,${base64}` };
       }),
     },
   );
@@ -92,13 +143,22 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
     replacement: (content) => `~~${content}~~`,
   });
 
-  const markdown = turndown.turndown(cleanedHtml);
+  const markdownRaw = turndown.turndown(cleanedHtml);
+  // 拆 `![](data:image/...)trailing-text` 同行 → 图独占行 + 空行 + 文字独占行
+  // (mammoth 偶发输出图后紧贴 caption 同段无换行;V2 md-to-pm 行级 image regex
+  //  要求 image 独占行,否则整行退化成 raw text — 2026-05-28 反馈)
+  const markdown = splitImageWithTrailingText(markdownRaw);
+  // raw 用 rawHtml(未抠 coverTitle)— 诊断 cache 落 01-raw,
+  // postprocessed = markdown(已抠 coverTitle + 拆图行)落 02-postprocessed
+  const rawMarkdown = turndown.turndown(rawHtml);
 
   return {
     absPath,
     markdown,
+    rawMarkdown,
     coverTitle,
     warnings,
+    metafiles: metafiles.length > 0 ? metafiles : undefined,
   };
 }
 
@@ -209,7 +269,58 @@ function decodeHtmlInline(innerHtml: string): string {
 function registerTablePlugin(turndown: TurndownService): void {
   turndown.addRule('table-cell', {
     filter: ['th', 'td'],
-    replacement: (content) => ` ${content.replace(/\n/g, ' ').trim()} |`,
+    // 2026-05-28 反馈 + mammoth HTML probe:
+    //   cell 内 mammoth 输出形如 `<p>●第一段<br />●第二段<br />●第三段</p>`
+    //   (Word 段中 Shift+Enter 软换行 → <br />,不是 </p><p>)
+    //   或多 <p>:`<p>段1</p><p>段2</p>`
+    //
+    // GFM 表格 cell 不能跨行,V2 约定 <br> 作 cell 内段间分隔符,
+    // renderer 端 md-to-pm 表格 cell 解析时 splitCellOnBr 拆多 paragraph。
+    //
+    // 实现:绕过 turndown 默认 cell→content 文字流,直接读 cell DOM,
+    //   抓 child <p>;<p> 内文本以 <br> 拆段,trim 后合并为 cell 字面字符串。
+    replacement: (_content, node) => {
+      const cell = node as HTMLElement;
+      const segments: string[] = [];
+
+      const walk = (n: ChildNode): void => {
+        if (n.nodeType === 3 /* TEXT_NODE */) {
+          const t = n.textContent?.trim();
+          if (t) segments[segments.length - 1] = (segments[segments.length - 1] ?? '') + t;
+          return;
+        }
+        if (n.nodeType !== 1) return;
+        const el = n as HTMLElement;
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'br') {
+          segments.push(''); // 软换行作新段
+          return;
+        }
+        if (tag === 'p') {
+          if (segments.length > 0 && (segments[segments.length - 1] ?? '').length > 0) {
+            segments.push(''); // 跨 <p> 也起新段
+          } else if (segments.length === 0) {
+            segments.push('');
+          }
+          el.childNodes.forEach(walk);
+          // <p> 结束时若末段非空,标记下次新段
+          if ((segments[segments.length - 1] ?? '').length > 0) segments.push('');
+          return;
+        }
+        // 其他 inline 标签(strong/em/code 等)— 让 turndown 处理 inline,
+        // 用 turndown 实例转换该节点的字符串
+        const inline = (turndown as TurndownService).turndown(el.outerHTML).trim();
+        if (inline) segments[segments.length - 1] = ((segments[segments.length - 1] ?? '') + inline);
+      };
+
+      segments.push(''); // 初始段
+      cell.childNodes.forEach(walk);
+
+      const cleaned = segments.map((s) => s.trim()).filter(Boolean);
+      const joined = cleaned.length > 0 ? cleaned.join('<br>') : '';
+
+      return ` ${joined} |`;
+    },
   });
 
   turndown.addRule('table-row', {
@@ -235,8 +346,12 @@ export interface BatchResult {
   absPath: string;
   relPath: string;
   markdown: string;
+  /** raw markdown(coverTitle 抽取前 — 诊断 cache 落盘用)*/
+  rawMarkdown?: string;
   coverTitle: string | null;
   warnings: string[];
+  /** EMF/WMF 原始二进制透传给 upstream 落 import-cache */
+  metafiles?: Array<{ mime: string; label: string; data: Buffer }>;
 }
 
 /** 接收路径数组(可能含目录),递归找出所有 .docx,mammoth 转成 markdown */
@@ -256,8 +371,10 @@ export async function convertDocxBatch(
         absPath: f.absPath,
         relPath: replaceDocxExtWithMd(f.relPath),
         markdown: r.markdown,
+        rawMarkdown: r.rawMarkdown,
         coverTitle: r.coverTitle,
         warnings: r.warnings,
+        metafiles: r.metafiles,
       });
     } catch (err) {
       failed.push({ path: f.absPath, reason: String(err) });

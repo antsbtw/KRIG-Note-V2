@@ -356,11 +356,23 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
           .filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)
           .map((c) => c.trim());
         const cellType = isFirst ? 'tableHeader' : 'tableCell';
+        // 默认 colwidth:V2 table CSS table-layout: fixed 需要 cell width
+        // 才能算列宽,否则 fixed 退化只有第一列显示,其他列消失
+        // (2026-05-28 反馈:pandoc 10 列大表只渲染序号一列)。
+        // 给统一 120 px 默认值,用户可拖动 columnResizing 调整。
+        const DEFAULT_COL_WIDTH = 120;
         tableRows.push({
           type: 'tableRow',
           content: cells.map((cell) => ({
             type: cellType,
-            content: [{ type: 'paragraph', content: parseInline(cell) }],
+            attrs: { colwidth: [DEFAULT_COL_WIDTH] },
+            // cell 内允许 <br> 拆多段(2026-05-28 反馈:Word 导入硬件规格表
+            //  cell 多段被压一行;word-import converter 已用 <br> 替换段间)。
+            //  GFM 表格语法本身 cell 只能单行,<br> 是 V2 双方约定。
+            content: splitCellOnBr(cell).map((seg) => ({
+              type: 'paragraph',
+              content: parseInline(seg),
+            })),
           })),
         });
         isFirst = false;
@@ -383,6 +395,17 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
   }
 
   return content;
+}
+
+/**
+ * 拆 table cell 文本中的 <br> 为多段(2026-05-28 反馈)
+ *
+ * 容忍:<br> / <br/> / <br /> / <BR> / 大小写混合,跨多 br 视为一次切断。
+ * 不命中任何 br → 返单段(保持原行为)。
+ */
+function splitCellOnBr(cell: string): string[] {
+  const parts = cell.split(/<br\s*\/?\s*>/i).map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : [cell];
 }
 
 /**

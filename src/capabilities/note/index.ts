@@ -47,6 +47,13 @@ async function createNote(
 async function listNotes(): Promise<NoteInfo[]> {
   return window.electronAPI.noteList();
 }
+async function listNoteTitles(): Promise<Array<{
+  id: string;
+  title: string;
+  folderId: string | null;
+}>> {
+  return window.electronAPI.noteListTitles();
+}
 async function getNote(id: string): Promise<NoteInfo | null> {
   return window.electronAPI.noteGet(id);
 }
@@ -71,6 +78,7 @@ function onDocContentChanged(
 export const noteCapability: NoteCapabilityApi = {
   createNote,
   listNotes,
+  listNoteTitles,
   getNote,
   updateNote,
   moveNote,

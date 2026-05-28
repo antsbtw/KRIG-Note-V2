@@ -55,6 +55,12 @@ export interface ScannedFile {
    * 当前仅 word-import 路径填(从 Word `Title` 样式段落抠);markdown-import 路径不填。
    */
   coverTitle?: string;
+  /**
+   * import-cache 文件 idx(2026-05-27 长文档乱码诊断)— word-import 路径 main 端注册,
+   * renderer 拿来 dump 03-chunks / 04-pm-docs 时透传给 IPC。
+   * markdown-import 路径暂无 cache,字段为 undefined → renderer 跳过 dump。
+   */
+  cacheFileIdx?: number;
 }
 
 export interface MarkdownImportPayload {
@@ -293,9 +299,11 @@ interface FolderTreeCache {
 }
 
 async function buildFolderTreeCache(): Promise<FolderTreeCache> {
+  // listNoteTitles 是 listNotes 的轻量版,只返 id/title/folderId 不 assemble doc
+  // (2026-05-28 性能修复:导入只为去重需要 title+folderId,不需要 doc 全文)
   const [folders, notes] = await Promise.all([
     folderCap().listFolders('note'),
-    noteCap().listNotes(),
+    noteCap().listNoteTitles(),
   ]);
 
   const cache: FolderTreeCache = {
@@ -609,7 +617,13 @@ export async function importMarkdownBatch(
       // 序号位数:动态(5 章 → 2 位 / 100 章 → 3 位)
       const padWidth = Math.max(2, String(chunks.length).length);
 
+      console.log(
+        `[markdown-import] SPLIT ${scanned.relPath} → ${chunks.length} chunks (folder=${docFolderName})`,
+      );
+
       let chunkIdx = 0;
+      let chunkSuccess = 0;
+      let chunkFail = 0;
       for (const chunk of chunks) {
         const prefix = String(chunkIdx).padStart(padWidth, '0');
 
@@ -625,9 +639,30 @@ export async function importMarkdownBatch(
         }
 
         const chunkTitle = `${prefix} ${rawTitle}`;
+        const chunkStart = performance.now();
+        const chunkBytes = chunk.body.length;
+
+        // import-cache 03-chunks 落盘(2026-05-27 长文档乱码诊断)
+        // 在 PM 转换前先落:用户可对照 02-postprocessed 切出来对不对
+        if (scanned.cacheFileIdx !== undefined) {
+          window.electronAPI.importCacheDumpChunk({
+            fileIdx: scanned.cacheFileIdx,
+            chunkIdx,
+            chunkTitle,
+            content: chunk.body,
+          });
+        }
 
         try {
           const content = await tea.markdownToProseMirror(chunk.body);
+          // import-cache 04-pm-docs 落盘:看 md-to-pm 是否在某 chunk 转崩成 raw text
+          if (scanned.cacheFileIdx !== undefined) {
+            window.electronAPI.importCacheDumpPmDoc({
+              fileIdx: scanned.cacheFileIdx,
+              chunkIdx,
+              pmDoc: content,
+            });
+          }
           await createNoteInFolder(
             chunkTitle,
             content,
@@ -635,29 +670,68 @@ export async function importMarkdownBatch(
             cache,
             createdNoteIds,
           );
+          chunkSuccess++;
+          const elapsed = Math.round(performance.now() - chunkStart);
+          console.log(
+            `[markdown-import]   ✓ chunk ${chunkIdx + 1}/${chunks.length} "${chunkTitle}" (${chunkBytes}B, ${elapsed}ms)`,
+          );
         } catch (err) {
-          console.warn(
-            `[markdown-import] split chunk failed (${scanned.relPath} chunk ${chunkIdx}):`,
+          chunkFail++;
+          const elapsed = Math.round(performance.now() - chunkStart);
+          // 升级到 console.error 让终端高亮(WARN 容易被淹没)
+          console.error(
+            `[markdown-import]   ✗ chunk ${chunkIdx + 1}/${chunks.length} "${chunkTitle}" FAILED (${chunkBytes}B, ${elapsed}ms):`,
             err,
           );
           skipped.push({
-            relPath: `${scanned.relPath}::chunk-${chunkIdx}`,
-            reason: String(err),
+            relPath: `${scanned.relPath}::chunk-${chunkIdx} (${chunkTitle})`,
+            reason: errorToString(err),
           });
         }
         chunkIdx++;
       }
+      console.log(
+        `[markdown-import] SPLIT ${scanned.relPath} done — success=${chunkSuccess} fail=${chunkFail}`,
+      );
       continue;
     }
 
     // 普通文件:1:1 → note
+    const fileStart = performance.now();
+    const fileBytes = scanned.content.length;
+
+    // import-cache 03-chunks/00 落盘(1:1 路径无切分,但仍写入第 0 号 chunk 便于对照)
+    if (scanned.cacheFileIdx !== undefined) {
+      window.electronAPI.importCacheDumpChunk({
+        fileIdx: scanned.cacheFileIdx,
+        chunkIdx: 0,
+        chunkTitle: '00-whole',
+        content: scanned.content,
+      });
+    }
+
     try {
       const content = await tea.markdownToProseMirror(scanned.content);
+      if (scanned.cacheFileIdx !== undefined) {
+        window.electronAPI.importCacheDumpPmDoc({
+          fileIdx: scanned.cacheFileIdx,
+          chunkIdx: 0,
+          pmDoc: content,
+        });
+      }
       const title = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
       await createNoteInFolder(title, content, folderId, cache, createdNoteIds);
+      const elapsed = Math.round(performance.now() - fileStart);
+      console.log(
+        `[markdown-import] ✓ ${scanned.relPath} → "${title}" (${fileBytes}B, ${elapsed}ms)`,
+      );
     } catch (err) {
-      console.warn(`[markdown-import] failed: ${scanned.relPath}`, err);
-      skipped.push({ relPath: scanned.relPath, reason: String(err) });
+      const elapsed = Math.round(performance.now() - fileStart);
+      console.error(
+        `[markdown-import] ✗ ${scanned.relPath} FAILED (${fileBytes}B, ${elapsed}ms):`,
+        err,
+      );
+      skipped.push({ relPath: scanned.relPath, reason: errorToString(err) });
     }
   }
 
@@ -668,4 +742,13 @@ export async function importMarkdownBatch(
     splitMode,
     oversizedCount,
   };
+}
+
+/** Error → 紧凑字符串(含 message + 首 3 行 stack,用于 skipped.reason 给用户看)*/
+function errorToString(err: unknown): string {
+  if (err instanceof Error) {
+    const stackHead = err.stack?.split('\n').slice(0, 3).join(' | ') ?? '';
+    return `${err.name}: ${err.message}${stackHead ? ` [${stackHead}]` : ''}`;
+  }
+  return String(err);
 }
