@@ -34,6 +34,7 @@ import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
 import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
+import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cache';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -102,6 +103,17 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[migration/022] 执行失败,启动下次会重试:', err);
   }
+
+  // sub-phase 023 — 回填老 note attrs.title 缓存(2026-05-28)
+  // listNotes / listNoteTitles 走快路径前提是 container payload 含 attrs.title。
+  // 新建/更新 note 已写入,本 migration 一次性补老数据。
+  //
+  // **不 await** — backfill 可能耗时 N 篇 × 200ms,不阻塞窗口启动;
+  // 进行中若调 listNoteTitles 仍走 fallback assemble(慢但能用),
+  // backfill 完成后下次启动走快路径
+  void runMigration023IfNeeded().catch((err) => {
+    console.error('[migration/023] 后台执行失败,启动下次会重试:', err);
+  });
 
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND

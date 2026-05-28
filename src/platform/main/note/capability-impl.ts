@@ -27,6 +27,7 @@
  */
 
 import { storage } from '@storage/index';
+import { waitForTitleBackfill } from '@storage/migrations/023-note-title-cache';
 import type { AtomEntity, PmPayload } from '@semantic/types';
 import type { NoteInfo, NoteDocEnvelope } from '@shared/ipc/note-folder-types';
 import { generateUlid } from '@shared/ulid';
@@ -294,29 +295,31 @@ export async function listNotes(): Promise<NoteInfo[]> {
   // 字面跳过 block atom(那些 listAtoms 也返回了但不是 note container)
   const noteAtoms = atoms.filter((a) => noteAtomIds.has(a.id));
 
-  // 字面拼装每个 note 的 doc(走 cache;cold 字面调 assemblePmDoc)
-  const results = await Promise.all(
-    noteAtoms.map(async (atom) => {
-      const cached = pmDocCache.get(atom.id);
-      const assembled = cached ?? (await assemblePmDoc(atom.id));
-      if (!assembled) {
-        // 字面拼装 fail(container atom 异常 / 数据库坏)— 字面 fallback 空 doc
-        console.warn(
-          `[note-capability/listNotes] assemble failed for ${atom.id}, fallback empty doc`,
-        );
-        return {
-          id: atom.id,
-          title: '未命名',
-          doc: wrapPmDoc(emptyContainerPayload()),
-          folderId: folderBySubject.get(atom.id) ?? null,
-          createdAt: atom.createdAt,
-          updatedAt: atom.updatedAt,
-        };
-      }
-      if (!cached) pmDocCache.set(atom.id, assembled);
-      return buildNoteInfo(atom, assembled, folderBySubject.get(atom.id) ?? null);
-    }),
-  );
+  // 串行(for await)避免 SurrealDB ws 雪崩(2026-05-28 实测 Promise.all 92 路
+  // 并发触发 NotAllowed auth crash);代价是首次冷启动 N 篇 × 200ms 量级,
+  // 后续走 pmDocCache 命中即快路径。
+  const results: NoteInfo[] = [];
+  for (const atom of noteAtoms) {
+    const folderId = folderBySubject.get(atom.id) ?? null;
+    const cached = pmDocCache.get(atom.id);
+    const assembled = cached ?? (await assemblePmDoc(atom.id));
+    if (!assembled) {
+      console.warn(
+        `[note-capability/listNotes] assemble failed for ${atom.id}, fallback empty doc`,
+      );
+      results.push({
+        id: atom.id,
+        title: '未命名',
+        doc: wrapPmDoc(emptyContainerPayload()),
+        folderId,
+        createdAt: atom.createdAt,
+        updatedAt: atom.updatedAt,
+      });
+      continue;
+    }
+    if (!cached) pmDocCache.set(atom.id, assembled);
+    results.push(buildNoteInfo(atom, assembled, folderId));
+  }
 
   return results;
 }
@@ -324,12 +327,13 @@ export async function listNotes(): Promise<NoteInfo[]> {
 /**
  * 轻量 list — 只返 id/title/folderId,不 assemble doc。
  *
- * 2026-05-28 性能修复:listNotes 全文 assemble(4 个全表 listEdges × N 篇),
- * 大批 import 后冷启动卡 30s+。
- * markdown-import / extraction-import 等只为去重读 title+folderId 的场景改用本 API。
+ * 2026-05-28 性能修复(经历两轮迭代):
+ * - V1 lazy backfill 路径 fire-and-forget putAtom × N 篇,SurrealDB ws 雪崩 → auth crash
+ * - V2 改:**串行**遍历(避免 ws in-flight 风暴),命中 attrs.title 缓存即返,
+ *        老数据缓存缺失 → assemble + deriveTitle 但**不写回**,由
+ *        runColdStartTitleBackfill() 在 init 期单独做。
  *
- * 优先读 container payload.attrs.title 缓存(createNote/updateNote 已写入);
- * 老数据缓存缺失则 lazy assemble + 写回 title 缓存(下次启动就快了)。
+ * markdown-import / extraction-import 等只为去重读 title+folderId 的场景用本 API。
  */
 export async function listNoteTitles(): Promise<Array<{
   id: string;
@@ -349,34 +353,41 @@ export async function listNoteTitles(): Promise<Array<{
 
   const noteAtoms = atoms.filter((a) => noteAtomIds.has(a.id));
 
-  return Promise.all(
-    noteAtoms.map(async (atom) => {
-      const folderId = folderBySubject.get(atom.id) ?? null;
-      const cachedTitle = readCachedTitle(atom.payload.payload);
-      if (cachedTitle !== null) {
-        return { id: atom.id, title: cachedTitle, folderId };
-      }
+  // 若有 note 缺缓存且 migration 023 正在跑 → 等它完成再走 fallback;
+  // 否则两边并发同时 assemble + putAtom 会触发 ws 雪崩
+  const hasUncached = noteAtoms.some((a) => readCachedTitle(a.payload.payload) === null);
+  if (hasUncached) {
+    await waitForTitleBackfill();
+    // backfill 完成后重新拉 atoms(payload 已更新)
+    const refreshed = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
+    noteAtoms.length = 0;
+    for (const a of refreshed) {
+      if (noteAtomIds.has(a.id)) noteAtoms.push(a);
+    }
+  }
 
-      // fallback:老数据(payload 无 attrs.title)→ 必须 assemble
-      const cached = pmDocCache.get(atom.id);
-      const assembled = cached ?? (await assemblePmDoc(atom.id));
-      if (!assembled) {
-        return { id: atom.id, title: '未命名', folderId };
-      }
-      if (!cached) pmDocCache.set(atom.id, assembled);
+  // 串行(for await)避免 SurrealDB ws 雪崩,代价是首次冷启动 N 篇老 note 慢
+  const out: Array<{ id: string; title: string; folderId: string | null }> = [];
+  for (const atom of noteAtoms) {
+    const folderId = folderBySubject.get(atom.id) ?? null;
+    const cachedTitle = readCachedTitle(atom.payload.payload);
+    if (cachedTitle !== null) {
+      out.push({ id: atom.id, title: cachedTitle, folderId });
+      continue;
+    }
 
-      const title = deriveTitle(assembled);
-      // lazy 写回 title 缓存,下次启动走快路径
-      void storage.putAtom<'pm'>({
-        id: atom.id,
-        payload: { domain: NOTE_DOMAIN, payload: containerPayloadWithTitle(title) },
-      }).catch((err) => {
-        console.warn(`[note-capability/listNoteTitles] lazy title backfill failed for ${atom.id}:`, err);
-      });
+    // backfill 跑完后仍缺(migration 中失败的) — 走 fallback assemble,不写回
+    const cached = pmDocCache.get(atom.id);
+    const assembled = cached ?? (await assemblePmDoc(atom.id));
+    if (!assembled) {
+      out.push({ id: atom.id, title: '未命名', folderId });
+      continue;
+    }
+    if (!cached) pmDocCache.set(atom.id, assembled);
+    out.push({ id: atom.id, title: deriveTitle(assembled), folderId });
+  }
 
-      return { id: atom.id, title, folderId };
-    }),
-  );
+  return out;
 }
 
 export async function getNote(id: string): Promise<NoteInfo | null> {
