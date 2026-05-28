@@ -24,6 +24,7 @@ import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
+import { registerWordImport } from './word-import';
 import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
@@ -109,6 +110,7 @@ app.whenReady().then(async () => {
   // markdown-import / backup 必须先注册 command,再 registerFrameworkMenus 调 rebuild 时菜单
   // 项的 command 字符串才能查到 handler
   registerMarkdownImport();
+  registerWordImport();
   registerBackupMenu();
   registerFrameworkMenus();
 

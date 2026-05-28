@@ -50,6 +50,11 @@ export interface ScannedFile {
   absPath: string;
   relPath: string;
   content: string;
+  /**
+   * 导入源额外提供的"封面标题"——优先用作 note title / split folder name。
+   * 当前仅 word-import 路径填(从 Word `Title` 样式段落抠);markdown-import 路径不填。
+   */
+  coverTitle?: string;
 }
 
 export interface MarkdownImportPayload {
@@ -69,16 +74,29 @@ export interface ImportResult {
 
 /**
  * Oversized 判定双阈值(必须同时满足才切):
- * - 字符数 > OVERSIZED_CHAR_THRESHOLD
+ * - **文字字符数**(排除 base64 图)> OVERSIZED_CHAR_THRESHOLD
  * - 顶级章节数(level === maxLevel)>= OVERSIZED_TOP_SECTIONS_MIN
  *
  * 设计理由(2026-05-27 反馈):
- * 早期只按"heading 数量 >= 10"判定 → 普通 README/技术文档(几千字 + 10+ H2/H3)
- * 全部误触发。真实"该切"的标志是"长文档 + 多个独立顶级章节"(典型:cheatsheet、
- * 日记合集、合并文档),不是 heading 多。
+ * - V1.0 只按"heading 数量 >= 10"判定 → 普通 README/技术文档误触发
+ * - V1.1 加字符数阈值 — 但 raw f.content.length 含 base64 图(`![](data:...)`)
+ *   一张图几十~几百 KB 字符,docx 嵌一图就破 50000 → docx 导入误触发
+ * - V1.2 字符数计入前先剥 base64 图,得到"真实文字字符数"
  */
 const OVERSIZED_CHAR_THRESHOLD = 50000;
 const OVERSIZED_TOP_SECTIONS_MIN = 5;
+
+/** 估算文字字符数 — 排除 base64 图(`![](data:...)` / `<img src="data:...">` 等)*/
+function estimateTextCharCount(md: string): number {
+  return md
+    // ![alt](data:image/...;base64,xxxxx)
+    .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '')
+    // <img src="data:..."> (mammoth 输出后 turndown 可能漏掉的)
+    .replace(/<img[^>]+src=["']data:[^"']+["'][^>]*>/gi, '')
+    // 单独的 data: URL(出现在链接 / 行内)
+    .replace(/data:[a-z]+\/[a-z0-9+.-]+;base64,[A-Za-z0-9+/=]+/gi, '')
+    .length;
+}
 
 /**
  * 占位标题黑名单 — V1 / 其他工具产生的"未命名" heading,inferTitle 跳过它们
@@ -209,8 +227,40 @@ function filenameTitle(relPath: string): string {
   return base.replace(/\.(md|markdown)$/i, '');
 }
 
-/** 推 title:优先第一个非占位 heading,fallback 文件名 */
-function inferTitle(parsed: ParsedFile, relPath: string): string {
+/**
+ * 剥掉 H1 文本开头的"数字章节号"前缀(分拆模式 note title 用)
+ *
+ * 匹配:
+ * - `1 需求分析` → `需求分析`
+ * - `1.1 企业服务总线` → `企业服务总线`
+ * - `1.2.3 子节` → `子节`
+ * - `1. 引言` → `引言`(支持末尾点 + 空格)
+ *
+ * 不剥:
+ * - 中文章节号(`第一章` / `第1章` / `一、` 等)— 不是机器化编号,用户有意命名
+ * - `1.A` / `Q1` 等非纯数字混合 — 可能是有意义的标识
+ *
+ * 用途:系统已加 `01 / 02 / 03` 统一编号,避免双重编号视觉(2026-05-27 反馈)
+ */
+function stripLeadingChapterNumber(text: string): string {
+  return text.replace(/^\d+(?:\.\d+)*\.?\s+/, '').trim() || text;
+}
+
+/**
+ * 推 title:
+ * 1. 优先 coverTitle(word-import 路径从 Word `Title` 样式抠到的封面标题)
+ * 2. 次选 第一个非占位 heading
+ * 3. 兜底 文件名
+ *
+ * 设计:封面标题在 docx 里是用户显式标注的"文档标题",权威性 > 任何 heading
+ *      (heading 是章节,不是文档标题)。详 2026-05-27 word-import 设计讨论。
+ */
+function inferTitle(
+  parsed: ParsedFile,
+  relPath: string,
+  coverTitle: string | undefined,
+): string {
+  if (coverTitle && coverTitle.trim()) return coverTitle.trim();
   return firstMeaningfulHeading(parsed) ?? filenameTitle(relPath);
 }
 
@@ -365,6 +415,35 @@ async function ensureFolderPath(
 }
 
 /**
+ * 切分场景下,给该 docx/markdown 文档建一个以文件名命名的子 folder。
+ * N 个 chunk 全部放进去,避免扁平到 parent / root。
+ *
+ * 失败时返回 fallbackParent(让 chunks 至少能落进 parent,不是丢失)。
+ */
+async function ensureSplitDocFolder(
+  docFolderName: string,
+  parentId: string | null,
+  cache: FolderTreeCache,
+  createdFolderIds: string[],
+): Promise<string | null> {
+  const taken = namesAt(cache, parentId);
+  const finalName = uniqueName(docFolderName, taken);
+
+  const folder = await folderCap().createFolder(finalName, parentId, 'note');
+  if (!folder) {
+    console.warn(
+      `[markdown-import] ensureSplitDocFolder failed for ${docFolderName}, chunks fall back to parent`,
+    );
+    return parentId;
+  }
+
+  createdFolderIds.push(folder.id);
+  cache.childFolderNames.set(folder.id, new Set());
+  cache.childNoteTitles.set(folder.id, new Set());
+  return folder.id;
+}
+
+/**
  * 确保 doc 首块是 V2 schema 强制的"isTitle paragraph"
  * (driver title-guard plugin appendTransaction 会自动补,而 buildNoteInfo
  *  里的 deriveTitle 取 content[0] inline text — 必须自己产出合规结构)
@@ -462,12 +541,13 @@ export async function importMarkdownBatch(
     };
   }
 
-  // 1. 预解析 heading,标 oversized(双阈值:字符数 + 顶级章节数)
+  // 1. 预解析 heading,标 oversized(双阈值:文字字符数排除 base64 图 + 顶级章节数)
   const parsedAll: ParsedFile[] = files.map((f) => {
     const { headings, maxLevel } = parseHeadings(f.content);
     const topSections = headings.filter((h) => h.level === maxLevel).length;
+    const textChars = estimateTextCharCount(f.content);
     const oversized =
-      f.content.length > OVERSIZED_CHAR_THRESHOLD &&
+      textChars > OVERSIZED_CHAR_THRESHOLD &&
       topSections >= OVERSIZED_TOP_SECTIONS_MIN;
     return {
       scanned: f,
@@ -514,24 +594,44 @@ export async function importMarkdownBatch(
     const shouldSplit = parsed.oversized && splitMode === 'all';
 
     if (shouldSplit) {
+      // 切分时为该文档建一个子 folder,N 个 chunk 都进去
+      // 命名优先级:封面标题(coverTitle)> 文件名
+      // (避免扁平化污染 root / 父 folder — 2026-05-27 反馈)
+      const docFolderName = (scanned.coverTitle?.trim() || filenameTitle(scanned.relPath));
+      const docFolderId = await ensureSplitDocFolder(
+        docFolderName,
+        folderId,
+        cache,
+        createdFolderIds,
+      );
+
       const chunks = splitByMaxLevel(scanned.content, parsed);
+      // 序号位数:动态(5 章 → 2 位 / 100 章 → 3 位)
+      const padWidth = Math.max(2, String(chunks.length).length);
+
       let chunkIdx = 0;
       for (const chunk of chunks) {
-        let chunkTitle: string;
+        const prefix = String(chunkIdx).padStart(padWidth, '0');
+
+        let rawTitle: string;
         if (chunk.titleHint) {
-          chunkTitle = chunk.titleHint;
+          // 原 H1 文本 — 剥掉用户在 docx 里手敲的章节号(如 "1 需求分析" / "1.1 引言"),
+          // 避免跟系统加的统一编号重复(2026-05-27 反馈)
+          rawTitle = stripLeadingChapterNumber(chunk.titleHint);
         } else if (chunkIdx === 0) {
-          // 序言:用文件名
-          chunkTitle = filenameTitle(scanned.relPath);
+          rawTitle = 'Preamble';
         } else {
-          chunkTitle = `${filenameTitle(scanned.relPath)} (${chunkIdx + 1})`;
+          rawTitle = `Section ${chunkIdx + 1}`;
         }
+
+        const chunkTitle = `${prefix} ${rawTitle}`;
+
         try {
           const content = await tea.markdownToProseMirror(chunk.body);
           await createNoteInFolder(
             chunkTitle,
             content,
-            folderId,
+            docFolderId,
             cache,
             createdNoteIds,
           );
@@ -553,7 +653,7 @@ export async function importMarkdownBatch(
     // 普通文件:1:1 → note
     try {
       const content = await tea.markdownToProseMirror(scanned.content);
-      const title = inferTitle(parsed, scanned.relPath);
+      const title = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
       await createNoteInFolder(title, content, folderId, cache, createdNoteIds);
     } catch (err) {
       console.warn(`[markdown-import] failed: ${scanned.relPath}`, err);
