@@ -128,6 +128,13 @@ export async function convertDocxToMarkdownPandoc(
     markdown = flattenHtmlImagesToMarkdown(markdown);
     const metafiles: NonNullable<PandocConvertResult['metafiles']> = [];
     markdown = await inlineExtractedImages(markdown, mediaDir, metafiles);
+    // pandoc 对带 caption/colgroup/cell 多段的复杂表 → 退化输出 raw HTML
+    //   (GFM 表格语法不支持这些) V2 md-to-pm 不解析 HTML → 整段被当字面文字
+    // 拍扁成 GFM markdown 表(2026-05-28 反馈):
+    //   - cell 内多 <p> → <br> 分隔(跟 mammoth 路径一致,md-to-pm splitCellOnBr 已能拆)
+    //   - caption/colgroup 丢
+    //   - inline <strong>/<em>/<code> → **/*/`
+    markdown = flattenHtmlTablesToMarkdown(markdown);
     // 防御:图后紧贴 caption 同行(pandoc 通常不会但 figcaption 拍平后可能产生)
     markdown = splitImageWithTrailingText(markdown);
 
@@ -219,6 +226,158 @@ export function flattenHtmlImagesToMarkdown(markdown: string): string {
   );
 
   return out;
+}
+
+/**
+ * 把 pandoc 退化输出的 raw HTML 表格拍扁成 GFM markdown 表(2026-05-28 反馈)。
+ *
+ * Pandoc 对带 caption / colgroup / cell 多段的复杂表 → GFM 语法不支持,退化输出
+ * `<table>...<caption>...<colgroup>...<thead>...<tbody>...<tr><td>...</table>`。
+ * V2 md-to-pm 不解析 HTML → 整段被当字面文字渲染。
+ *
+ * 转换策略:
+ * - caption / colgroup / col / thead / tbody 标签丢(GFM 表头本来就在第一行)
+ * - thead 内的 <tr> 作 header 行, tbody 内的 <tr> 作 data 行
+ * - cell 内多 <p> → <br> 分隔(跟 mammoth 路径一致,md-to-pm splitCellOnBr 已能拆)
+ * - inline 标签:<strong>/<b> → **, <em>/<i> → *, <code> → `, <br /> → <br>(保留)
+ * - cell 内 markdown 图 `![](data:...)` 已经被前置 flattenHtmlImagesToMarkdown 处理过,
+ *   走到这里时是 markdown 形态可以原样保留
+ *
+ * 注:本函数不处理嵌套 table(<td> 内含 <table>) — Word 几乎不会产生此结构
+ */
+export function flattenHtmlTablesToMarkdown(markdown: string): string {
+  return markdown.replace(
+    /<table\b[^>]*>([\s\S]*?)<\/table>/g,
+    (_whole, inner: string) => convertOneTableToGfm(inner),
+  );
+}
+
+function convertOneTableToGfm(tableInner: string): string {
+  // 抽 header 行:thead 内的 <tr>
+  const headerRows: string[][] = [];
+  const theadMatch = /<thead\b[^>]*>([\s\S]*?)<\/thead>/i.exec(tableInner);
+  if (theadMatch) {
+    headerRows.push(...extractRows(theadMatch[1]));
+  }
+  // 抽 body 行:tbody 内的 <tr>,或没 tbody 时直接 table 下的 <tr>(skip thead 部分)
+  const bodyRows: string[][] = [];
+  const tbodyMatch = /<tbody\b[^>]*>([\s\S]*?)<\/tbody>/i.exec(tableInner);
+  if (tbodyMatch) {
+    bodyRows.push(...extractRows(tbodyMatch[1]));
+  } else if (!theadMatch) {
+    // 既无 thead 也无 tbody — 直接抽全部 <tr>(简单表)
+    bodyRows.push(...extractRows(tableInner));
+  }
+
+  // 没 header 时,把 body 第一行升级为 header(GFM 必须有 header 行)
+  let headers: string[];
+  let body: string[][];
+  if (headerRows.length > 0) {
+    headers = headerRows[0]; // 多 header 行只取第一行,其余并入 body
+    body = [...headerRows.slice(1), ...bodyRows];
+  } else if (bodyRows.length > 0) {
+    headers = bodyRows[0];
+    body = bodyRows.slice(1);
+  } else {
+    return ''; // 空表
+  }
+
+  // 列数对齐(取最大列数填补)
+  const colCount = Math.max(headers.length, ...body.map((r) => r.length));
+  const pad = (row: string[]): string[] => {
+    const out = [...row];
+    while (out.length < colCount) out.push('');
+    return out;
+  };
+
+  const lines: string[] = [];
+  lines.push('');
+  lines.push(`| ${pad(headers).join(' | ')} |`);
+  lines.push(`|${' --- |'.repeat(colCount)}`);
+  for (const row of body) {
+    lines.push(`| ${pad(row).join(' | ')} |`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** 抽 <tr>...</tr> 列表 → 每行 cell 字串数组 */
+function extractRows(html: string): string[][] {
+  const rows: string[][] = [];
+  const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = trRe.exec(html)) !== null) {
+    rows.push(extractCells(m[1]));
+  }
+  return rows;
+}
+
+/** 抽 <th>/<td>...</> 列表 → cell 内容字串(已 pipe escape,多段 <br> 连)*/
+function extractCells(rowInner: string): string[] {
+  const cells: string[] = [];
+  const cellRe = /<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = cellRe.exec(rowInner)) !== null) {
+    cells.push(cellInnerToMarkdown(m[2]));
+  }
+  return cells;
+}
+
+/** cell HTML 内容 → markdown 字符串(多段 <br> 连 + inline 标签转换 + pipe escape)*/
+function cellInnerToMarkdown(html: string): string {
+  // 1. <p>...</p> → 段内容,多段间用 <br> 分隔
+  const segments: string[] = [];
+  const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+  let lastEnd = 0;
+  let m: RegExpExecArray | null;
+  while ((m = pRe.exec(html)) !== null) {
+    // <p> 前的裸文本(罕见但 Word 偶有)也算一段
+    const before = html.slice(lastEnd, m.index).trim();
+    if (before) segments.push(stripInlineToMd(before));
+    segments.push(stripInlineToMd(m[1]));
+    lastEnd = m.index + m[0].length;
+  }
+  // 末尾裸文本
+  const tail = html.slice(lastEnd).trim();
+  if (tail) segments.push(stripInlineToMd(tail));
+
+  // 没 <p> 标签时直接整段处理
+  if (segments.length === 0) segments.push(stripInlineToMd(html));
+
+  // 过滤空段,用 <br> 连接;最后做 pipe escape
+  const joined = segments
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join('<br>');
+
+  return escapeCellPipe(joined);
+}
+
+/** inline HTML 标签 → markdown marks;裸 text 原样,剥不认识的标签 */
+function stripInlineToMd(html: string): string {
+  return html
+    // <strong>/<b> → **
+    .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_, _t, inner) => `**${inner}**`)
+    // <em>/<i> → *
+    .replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_, _t, inner) => `*${inner}*`)
+    // <code> → `
+    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, inner) => `\`${inner}\``)
+    // <br /> → 保留 <br>(我们就是用 <br> 作 cell 内段间分隔的)
+    .replace(/<br\s*\/?\s*>/gi, '<br>')
+    // 其他 HTML 标签 剥(保留内容):<sub>1</sub> → 1 这种
+    .replace(/<[^>]+>/g, '')
+    // HTML entity 解
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+/** cell 内 | 必须 escape,否则破坏 GFM 表格列分隔 */
+function escapeCellPipe(text: string): string {
+  return text.replace(/\|/g, '\\|');
 }
 
 function extractImgSrc(html: string): string | null {
