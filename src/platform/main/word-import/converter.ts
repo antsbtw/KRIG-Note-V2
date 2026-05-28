@@ -16,9 +16,10 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import mammoth from 'mammoth';
 import TurndownService from 'turndown';
+
+import { scanDocxPaths, replaceDocxExtWithMd, type ScanFailure } from './scanner';
 
 export interface ConvertResult {
   /** docx 文件原始路径(诊断用)*/
@@ -238,35 +239,17 @@ export interface BatchResult {
   warnings: string[];
 }
 
-/** 接收路径数组(可能含目录),递归找出所有 .docx,转成 markdown */
+/** 接收路径数组(可能含目录),递归找出所有 .docx,mammoth 转成 markdown */
 export async function convertDocxBatch(
   paths: string[],
 ): Promise<{
   results: BatchResult[];
-  failed: Array<{ path: string; reason: string }>;
+  failed: ScanFailure[];
 }> {
-  const docxFiles: Array<{ absPath: string; relPath: string }> = [];
-  const failed: Array<{ path: string; reason: string }> = [];
-
-  // 扫描 paths,找 .docx
-  for (const p of paths) {
-    try {
-      const stat = await fs.stat(p);
-      if (stat.isDirectory()) {
-        await walkDirForDocx(p, path.basename(p), docxFiles, failed);
-      } else if (stat.isFile() && isDocxFile(p)) {
-        docxFiles.push({ absPath: p, relPath: path.basename(p) });
-      } else if (stat.isFile()) {
-        failed.push({ path: p, reason: 'not a .docx file' });
-      }
-    } catch (err) {
-      failed.push({ path: p, reason: String(err) });
-    }
-  }
-
+  const { files, failed } = await scanDocxPaths(paths);
   const results: BatchResult[] = [];
 
-  for (const f of docxFiles) {
+  for (const f of files) {
     try {
       const r = await convertDocxToMarkdown(f.absPath);
       results.push({
@@ -282,46 +265,4 @@ export async function convertDocxBatch(
   }
 
   return { results, failed };
-}
-
-function isDocxFile(name: string): boolean {
-  return path.extname(name).toLowerCase() === '.docx';
-}
-
-function replaceDocxExtWithMd(relPath: string): string {
-  return relPath.replace(/\.docx$/i, '.md');
-}
-
-const DIR_BLACKLIST = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.cache']);
-
-async function walkDirForDocx(
-  rootAbs: string,
-  rootSegment: string,
-  docxFiles: Array<{ absPath: string; relPath: string }>,
-  failed: Array<{ path: string; reason: string }>,
-): Promise<void> {
-  let entries;
-  try {
-    entries = await fs.readdir(rootAbs, { withFileTypes: true });
-  } catch (err) {
-    failed.push({ path: rootAbs, reason: String(err) });
-    return;
-  }
-
-  for (const entry of entries) {
-    const name = entry.name;
-    const childAbs = path.join(rootAbs, name);
-
-    if (entry.isDirectory()) {
-      if (DIR_BLACKLIST.has(name) || name.startsWith('.')) continue;
-      await walkDirForDocx(childAbs, `${rootSegment}/${name}`, docxFiles, failed);
-      continue;
-    }
-
-    if (!entry.isFile()) continue;
-    if (name.startsWith('.')) continue;
-    if (!isDocxFile(name)) continue;
-
-    docxFiles.push({ absPath: childAbs, relPath: `${rootSegment}/${name}` });
-  }
 }
