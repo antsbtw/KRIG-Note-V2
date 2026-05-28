@@ -269,17 +269,57 @@ function decodeHtmlInline(innerHtml: string): string {
 function registerTablePlugin(turndown: TurndownService): void {
   turndown.addRule('table-cell', {
     filter: ['th', 'td'],
-    // turndown 处理 <p> 在父规则里已加 \n\n 分段;cell 内多段 → 多个 "\n\n";
-    // GFM 表格 cell 不能跨行 — 用 <br> 替换段间分隔,renderer 端 md-to-pm
-    // 表格 cell 解析时识别 <br> 拆多段(2026-05-28 反馈:硬件规格表 cell
-    // 多段被压成一行)
-    replacement: (content) => {
-      // 段间(`\n\n` 或更多)→ <br>;段内换行(单 `\n`,通常 GFM <br />)→ 空格
-      const collapsed = content
-        .replace(/\n{2,}/g, '<br>')
-        .replace(/\n/g, ' ')
-        .trim();
-      return ` ${collapsed} |`;
+    // 2026-05-28 反馈 + mammoth HTML probe:
+    //   cell 内 mammoth 输出形如 `<p>●第一段<br />●第二段<br />●第三段</p>`
+    //   (Word 段中 Shift+Enter 软换行 → <br />,不是 </p><p>)
+    //   或多 <p>:`<p>段1</p><p>段2</p>`
+    //
+    // GFM 表格 cell 不能跨行,V2 约定 <br> 作 cell 内段间分隔符,
+    // renderer 端 md-to-pm 表格 cell 解析时 splitCellOnBr 拆多 paragraph。
+    //
+    // 实现:绕过 turndown 默认 cell→content 文字流,直接读 cell DOM,
+    //   抓 child <p>;<p> 内文本以 <br> 拆段,trim 后合并为 cell 字面字符串。
+    replacement: (_content, node) => {
+      const cell = node as HTMLElement;
+      const segments: string[] = [];
+
+      const walk = (n: ChildNode): void => {
+        if (n.nodeType === 3 /* TEXT_NODE */) {
+          const t = n.textContent?.trim();
+          if (t) segments[segments.length - 1] = (segments[segments.length - 1] ?? '') + t;
+          return;
+        }
+        if (n.nodeType !== 1) return;
+        const el = n as HTMLElement;
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'br') {
+          segments.push(''); // 软换行作新段
+          return;
+        }
+        if (tag === 'p') {
+          if (segments.length > 0 && (segments[segments.length - 1] ?? '').length > 0) {
+            segments.push(''); // 跨 <p> 也起新段
+          } else if (segments.length === 0) {
+            segments.push('');
+          }
+          el.childNodes.forEach(walk);
+          // <p> 结束时若末段非空,标记下次新段
+          if ((segments[segments.length - 1] ?? '').length > 0) segments.push('');
+          return;
+        }
+        // 其他 inline 标签(strong/em/code 等)— 让 turndown 处理 inline,
+        // 用 turndown 实例转换该节点的字符串
+        const inline = (turndown as TurndownService).turndown(el.outerHTML).trim();
+        if (inline) segments[segments.length - 1] = ((segments[segments.length - 1] ?? '') + inline);
+      };
+
+      segments.push(''); // 初始段
+      cell.childNodes.forEach(walk);
+
+      const cleaned = segments.map((s) => s.trim()).filter(Boolean);
+      const joined = cleaned.length > 0 ? cleaned.join('<br>') : '';
+
+      return ` ${joined} |`;
     },
   });
 
