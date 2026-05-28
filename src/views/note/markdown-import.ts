@@ -228,6 +228,25 @@ function filenameTitle(relPath: string): string {
 }
 
 /**
+ * 剥掉 H1 文本开头的"数字章节号"前缀(分拆模式 note title 用)
+ *
+ * 匹配:
+ * - `1 需求分析` → `需求分析`
+ * - `1.1 企业服务总线` → `企业服务总线`
+ * - `1.2.3 子节` → `子节`
+ * - `1. 引言` → `引言`(支持末尾点 + 空格)
+ *
+ * 不剥:
+ * - 中文章节号(`第一章` / `第1章` / `一、` 等)— 不是机器化编号,用户有意命名
+ * - `1.A` / `Q1` 等非纯数字混合 — 可能是有意义的标识
+ *
+ * 用途:系统已加 `01 / 02 / 03` 统一编号,避免双重编号视觉(2026-05-27 反馈)
+ */
+function stripLeadingChapterNumber(text: string): string {
+  return text.replace(/^\d+(?:\.\d+)*\.?\s+/, '').trim() || text;
+}
+
+/**
  * 推 title:
  * 1. 优先 coverTitle(word-import 路径从 Word `Title` 样式抠到的封面标题)
  * 2. 次选 第一个非占位 heading
@@ -587,17 +606,26 @@ export async function importMarkdownBatch(
       );
 
       const chunks = splitByMaxLevel(scanned.content, parsed);
+      // 序号位数:动态(5 章 → 2 位 / 100 章 → 3 位)
+      const padWidth = Math.max(2, String(chunks.length).length);
+
       let chunkIdx = 0;
       for (const chunk of chunks) {
-        let chunkTitle: string;
+        const prefix = String(chunkIdx).padStart(padWidth, '0');
+
+        let rawTitle: string;
         if (chunk.titleHint) {
-          chunkTitle = chunk.titleHint;
+          // 原 H1 文本 — 剥掉用户在 docx 里手敲的章节号(如 "1 需求分析" / "1.1 引言"),
+          // 避免跟系统加的统一编号重复(2026-05-27 反馈)
+          rawTitle = stripLeadingChapterNumber(chunk.titleHint);
         } else if (chunkIdx === 0) {
-          // 序言 chunk(第一个 heading 之前的内容)
-          chunkTitle = 'Preamble';
+          rawTitle = 'Preamble';
         } else {
-          chunkTitle = `${docFolderName} (${chunkIdx + 1})`;
+          rawTitle = `Section ${chunkIdx + 1}`;
         }
+
+        const chunkTitle = `${prefix} ${rawTitle}`;
+
         try {
           const content = await tea.markdownToProseMirror(chunk.body);
           await createNoteInFolder(
