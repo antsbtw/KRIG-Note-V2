@@ -95,6 +95,10 @@ export async function convertDocxToMarkdownPandoc(
     let markdown = await fs.readFile(outFile, 'utf-8');
 
     markdown = normalizeGfmMathSyntax(markdown);
+    // 关键:pandoc 对带 style/caption 的图输出 HTML <img>/<figure>(跨行),
+    // V2 md-to-pm 只认 markdown ![](src),不解析 HTML 标签
+    // → 先把 HTML 图形态拍扁成 ![](src),再走 inlineExtractedImages 读 base64
+    markdown = flattenHtmlImagesToMarkdown(markdown);
     markdown = await inlineExtractedImages(markdown, mediaDir);
 
     const { coverTitle, cleanedMarkdown } = extractCoverTitle(markdown);
@@ -141,9 +145,80 @@ export function normalizeGfmMathSyntax(markdown: string): string {
 }
 
 /**
+ * 把 pandoc 输出的 HTML 图形态拍扁成标准 markdown `![alt](src)`。
+ *
+ * Pandoc 3.x 对 docx 嵌图的输出形态(2026-05-27 实测):
+ * - **带 caption** 的图:`<figure>\n<img src="..." style="..." />\n<figcaption>CAP</figcaption>\n</figure>`
+ * - **无 caption 单图**:`<img src="..." style="..." />`(常跨行,style 在第二行)
+ * - **markdown 形态**(罕见):`![alt](src)`(无 style 时偶尔走 md 语法)
+ *
+ * V2 md-to-pm 只识别 `![alt](src)`,完全不解析 HTML 标签 → HTML <img> 会被
+ * 当成普通 raw text 渲染(截图证据:base64 一整段当文字显示)。
+ *
+ * 本函数职责:把所有 HTML 图形态拍扁成标准 markdown 行,**保留 src 和 caption(转 alt)**,
+ * 丢弃 style/dimensions 等纯展示属性(下游不消费)。下一步 inlineExtractedImages
+ * 再把 src 路径换 base64。
+ */
+export function flattenHtmlImagesToMarkdown(markdown: string): string {
+  let out = markdown;
+
+  // 1. <figure>...<img src="A" .../>...<figcaption>CAP</figcaption>...</figure>
+  //    跨行+任意空白+多 child;非贪婪 [\s\S]*? 配 g/m 跨行匹配
+  out = out.replace(
+    /<figure\b[^>]*>([\s\S]*?)<\/figure>/g,
+    (whole, inner: string) => {
+      const imgSrc = extractImgSrc(inner);
+      if (!imgSrc) return whole; // 没图的 figure 留着(罕见),不破坏
+      const caption = extractFigcaption(inner);
+      return `\n![${escapeMdAlt(caption)}](${imgSrc})\n`;
+    },
+  );
+
+  // 2. 单 <img src="A" ... />(自闭合 / 非自闭合 / 跨行属性都吃)
+  //    跨行用 [\s\S]*? 而不是 [^>]*(后者不跨行)
+  out = out.replace(
+    /<img\b([\s\S]*?)\/?>/g,
+    (whole, attrs: string) => {
+      const src = extractAttr(attrs, 'src');
+      if (!src) return whole;
+      const alt = extractAttr(attrs, 'alt') ?? '';
+      return `![${escapeMdAlt(alt)}](${src})`;
+    },
+  );
+
+  return out;
+}
+
+function extractImgSrc(html: string): string | null {
+  const m = /<img\b[\s\S]*?\bsrc\s*=\s*["']([^"']+)["']/.exec(html);
+  return m ? m[1] : null;
+}
+
+function extractFigcaption(html: string): string {
+  const m = /<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/.exec(html);
+  if (!m) return '';
+  // 剥 figcaption 内嵌的 tag 取纯文本
+  return m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function extractAttr(attrsBlob: string, name: string): string | null {
+  const re = new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i');
+  const m = re.exec(attrsBlob);
+  return m ? m[1] : null;
+}
+
+/** alt 文本可能含 ] / 反斜杠等会破 markdown 语法的字符,做最小转义 */
+function escapeMdAlt(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/\]/g, '\\]').replace(/\n/g, ' ');
+}
+
+/**
  * 把 pandoc --extract-media 输出的图片路径替换为 data:base64 内联。
  *
- * pandoc 输出格式:`![](TEMPDIR/media/imageN.png)` 或 `<img src="TEMPDIR/media/imageN.png">`
+ * 输入约定:本函数 **在 flattenHtmlImagesToMarkdown 之后** 跑,
+ * 此时 markdown 里只剩标准 `![alt](src)` 形态(HTML 已拍扁)。
+ * HTML <img> 兜底分支保留作防御,不应有命中。
+ *
  * V2 renderer markdownToProseMirror 支持 data:base64,**不支持文件路径**,
  * 临时目录又会在转换完清理,所以必须当场把每张图读成 base64 内联。
  */
@@ -155,8 +230,10 @@ export async function inlineExtractedImages(
   if (!mediaDirNorm) return markdown;
 
   // 匹配 markdown 图(![alt](src))和 HTML 图(<img src="...">),只处理指向 mediaDir 的
+  // 注:pandoc 主路径已被 flattenHtmlImagesToMarkdown 转成 markdown 形态,
+  // HTML 分支是防御兜底(若上游漏匹配也能救);跨行用 [\s\S] 而非 [^>]
   const mdImgRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
-  const htmlImgRegex = /<img\b[^>]*\bsrc="([^"]+)"[^>]*>/g;
+  const htmlImgRegex = /<img\b[\s\S]*?\bsrc=["']([^"']+)["'][\s\S]*?\/?>/g;
 
   // 收集所有 src 候选 → 解析 → 读文件 → 替换
   const replacements: Array<{ raw: string; abs: string; alt: string; kind: 'md' | 'html' }> = [];
