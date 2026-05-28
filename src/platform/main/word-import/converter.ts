@@ -26,6 +26,8 @@ export interface ConvertResult {
   absPath: string;
   /** 转出来的 markdown 字符串(可直接喂 renderer 端 markdownToProseMirror)*/
   markdown: string;
+  /** raw markdown(coverTitle 抽取前 — 诊断 / cache 落盘用,业务消费 markdown 即可) */
+  rawMarkdown?: string;
   /** 从 Word Title 样式提取的封面标题(优先用作 note title / split folder name)*/
   coverTitle: string | null;
   /** mammoth 报的 warning 信息(公式跳过 / 不识别样式等)*/
@@ -93,10 +95,14 @@ export async function convertDocxToMarkdown(absPath: string): Promise<ConvertRes
   });
 
   const markdown = turndown.turndown(cleanedHtml);
+  // raw 用 rawHtml(未抠 coverTitle)— 诊断 cache 落 01-raw,
+  // postprocessed = markdown(已抠 coverTitle)落 02-postprocessed
+  const rawMarkdown = turndown.turndown(rawHtml);
 
   return {
     absPath,
     markdown,
+    rawMarkdown,
     coverTitle,
     warnings,
   };
@@ -235,6 +241,8 @@ export interface BatchResult {
   absPath: string;
   relPath: string;
   markdown: string;
+  /** raw markdown(coverTitle 抽取前 — 诊断 cache 落盘用)*/
+  rawMarkdown?: string;
   coverTitle: string | null;
   warnings: string[];
 }
@@ -256,6 +264,7 @@ export async function convertDocxBatch(
         absPath: f.absPath,
         relPath: replaceDocxExtWithMd(f.relPath),
         markdown: r.markdown,
+        rawMarkdown: r.rawMarkdown,
         coverTitle: r.coverTitle,
         warnings: r.warnings,
       });

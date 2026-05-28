@@ -35,6 +35,8 @@ export interface PandocConvertResult {
   absPath: string;
   /** GFM 后处理过的 markdown(math 转 $..$ / $$..$$,图片 base64 内联)*/
   markdown: string;
+  /** Pandoc 直出的 raw markdown(三步后处理之前 — 诊断 cache 落 01-raw)*/
+  rawMarkdown?: string;
   /** 从 markdown 首段抽出的封面标题(优先 H1 → 首段 italic / 普通段) */
   coverTitle: string | null;
   /** Pandoc stderr 收集到的警告(不识别样式 / OOXML quirks 等) */
@@ -45,6 +47,7 @@ export interface PandocBatchResult {
   absPath: string;
   relPath: string;
   markdown: string;
+  rawMarkdown?: string;
   coverTitle: string | null;
   warnings: string[];
 }
@@ -92,9 +95,9 @@ export async function convertDocxToMarkdownPandoc(
       }
     }
 
-    let markdown = await fs.readFile(outFile, 'utf-8');
+    const rawMarkdown = await fs.readFile(outFile, 'utf-8');
 
-    markdown = normalizeGfmMathSyntax(markdown);
+    let markdown = normalizeGfmMathSyntax(rawMarkdown);
     // 关键:pandoc 对带 style/caption 的图输出 HTML <img>/<figure>(跨行),
     // V2 md-to-pm 只认 markdown ![](src),不解析 HTML 标签
     // → 先把 HTML 图形态拍扁成 ![](src),再走 inlineExtractedImages 读 base64
@@ -106,6 +109,7 @@ export async function convertDocxToMarkdownPandoc(
     return {
       absPath,
       markdown: cleanedMarkdown,
+      rawMarkdown,
       coverTitle,
       warnings,
     };
@@ -379,6 +383,7 @@ export async function convertDocxBatchPandoc(
         absPath: f.absPath,
         relPath: replaceDocxExtWithMd(f.relPath),
         markdown: r.markdown,
+        rawMarkdown: r.rawMarkdown,
         coverTitle: r.coverTitle,
         warnings: r.warnings,
       });
