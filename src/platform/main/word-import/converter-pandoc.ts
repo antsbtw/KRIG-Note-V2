@@ -325,27 +325,38 @@ function extractCells(rowInner: string): string[] {
 
 /** cell HTML 内容 → markdown 字符串(多段 <br> 连 + inline 标签转换 + pipe escape)*/
 function cellInnerToMarkdown(html: string): string {
-  // 1. <p>...</p> → 段内容,多段间用 <br> 分隔
-  const segments: string[] = [];
+  // pandoc cell 实测两种形态(2026-05-28):
+  // A. 含 <p>:  <td><p>段1</p><p>段2</p></td>   ← 复杂表
+  // B. 无 <p> + 多 <br />:  <td>段1<br />段2<br />段3</td>   ← 简单"软换行"段
+  // 两种都要规整成 segments 数组,用 <br> 单一分隔符 join,
+  // 同时把真换行符(GFM 表格 cell 不能含真换行)全部消除
+
+  let segments: string[] = [];
   const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
   let lastEnd = 0;
   let m: RegExpExecArray | null;
   while ((m = pRe.exec(html)) !== null) {
-    // <p> 前的裸文本(罕见但 Word 偶有)也算一段
     const before = html.slice(lastEnd, m.index).trim();
-    if (before) segments.push(stripInlineToMd(before));
-    segments.push(stripInlineToMd(m[1]));
+    if (before) segments.push(before);
+    segments.push(m[1]);
     lastEnd = m.index + m[0].length;
   }
-  // 末尾裸文本
   const tail = html.slice(lastEnd).trim();
-  if (tail) segments.push(stripInlineToMd(tail));
+  if (tail) segments.push(tail);
+  // 形态 B(没 <p>) → 整段当一个 segment
+  if (segments.length === 0) segments.push(html);
 
-  // 没 <p> 标签时直接整段处理
-  if (segments.length === 0) segments.push(stripInlineToMd(html));
+  // 每段:剥 inline 标签 + <br /> 转字面 `<br>` 占位,再按 `<br>` 二次拆段
+  // 这样形态 A 跨 <p> 段 + 形态 B 段内 <br /> 都能拍成单层 segments
+  const expanded: string[] = [];
+  for (const seg of segments) {
+    const md = stripInlineToMd(seg); // <br /> 已被转成 <br>
+    // 按 <br> 拆 + 真换行也算分段(消除真换行 → 关键修复)
+    const parts = md.split(/<br>|\r?\n/);
+    for (const p of parts) expanded.push(p);
+  }
 
-  // 过滤空段,用 <br> 连接;最后做 pipe escape
-  const joined = segments
+  const joined = expanded
     .map((s) => s.trim())
     .filter(Boolean)
     .join('<br>');
