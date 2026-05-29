@@ -290,13 +290,18 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     }
 
     // Task list — V2 schema:taskList > taskItem > paragraph
+    // taskItem attrs.createdAt 字面持久化:不给的话 NodeView mount 时会自动补
+    // (queueMicrotask + dispatch),导入 N 个 taskItem 会触发 N 次 IPC 引发 OCC 风暴。
+    // 用导入时刻作为 createdAt(markdown 文件无创建时间字段;若未来上溯 ScannedFile.mtime
+    // 可更准确,本期沿用导入时刻足够)。
     if (/^\s*[-*]\s+\[([ x])\]\s/.test(line)) {
       const items: PMNode[] = [];
+      const createdAt = new Date().toISOString();
       while (i < lines.length && /^\s*[-*]\s+\[([ x])\]\s/.test(lines[i])) {
         const match = lines[i].match(/^\s*[-*]\s+\[([ x])\]\s(.*)/)!;
         items.push({
           type: 'taskItem',
-          attrs: { checked: match[1] === 'x' },
+          attrs: { checked: match[1] === 'x', createdAt },
           content: [{ type: 'paragraph', content: parseInline(match[2]) }],
         });
         i++;
