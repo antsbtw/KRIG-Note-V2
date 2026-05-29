@@ -128,16 +128,39 @@ async function applyDiff(
   }
 
   // 2. 删剩余边(diff 内已剔除被 removed atom 关联的边)
+  //
+  // P1-2 (2026-05-29 data-layer-audit): 批量 lookup 替代 N 次 listEdges.
+  // 按 predicate 分组(同 predicate 才能合并查),一次拉所有候选,应用层匹配
+  // (subject, object) pair 后批量 deleteEdge.
+  // 选项 A (audit §1.4):用 PR A 已加的 subjectAtomIds/objectAtomIds 字段.
+  // 选项 B (改 BlockDiff schema 加 edgeId)留 future,本期不动.
+  const byPredicate = new Map<string, BlockDiff['removedEdges']>();
   for (const e of diff.removedEdges) {
-    // 字面找到该边的 entity id(storage edge schema 字面单 PUT 是 id-based,
-    // delete 字面需 id;listEdges 字面按 predicate+subject+object filter)
-    const found = await storage.listEdges({
-      predicate: e.predicate,
-      subjectAtomId: e.subjectId,
-      objectAtomId: e.objectId,
+    const arr = byPredicate.get(e.predicate);
+    if (arr) arr.push(e);
+    else byPredicate.set(e.predicate, [e]);
+  }
+
+  for (const [predicate, removals] of byPredicate) {
+    const subjectIds = removals.map((r) => r.subjectId);
+    const objectIds = removals.map((r) => r.objectId);
+
+    // 1 次拉所有候选 edges(同 predicate + subjectIds + objectIds 交集 — SQL 是 AND 不是 OR,
+    // 所以拉的是"subject ∈ subjectIds AND object ∈ objectIds"的笛卡尔集合,可能含本批不删的边;
+    // 应用层按 (subject, object) pair Set 二次过滤即可).
+    const candidates = await storage.listEdges({
+      predicate,
+      subjectAtomIds: subjectIds,
+      objectAtomIds: objectIds,
     });
-    for (const edge of found) {
-      await tx.deleteEdge(edge.id);
+
+    const wanted = new Set(removals.map((r) => `${r.subjectId}|${r.objectId}`));
+    for (const edge of candidates) {
+      if (edge.object.kind !== 'atom') continue;
+      const key = `${edge.subject.atomId}|${edge.object.atomId}`;
+      if (wanted.has(key)) {
+        await tx.deleteEdge(edge.id);
+      }
     }
   }
 
