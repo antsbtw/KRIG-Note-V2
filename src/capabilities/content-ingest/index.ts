@@ -23,7 +23,7 @@ export type {
   KrigBatchToAtomsResult,
   KrigImportBatch,
   KrigImportChapter,
-  Atom,
+  PmAtomDraft,
   AtomFrom,
 } from './types';
 export { markdownToAtoms } from './internal/markdown-to-atoms';
