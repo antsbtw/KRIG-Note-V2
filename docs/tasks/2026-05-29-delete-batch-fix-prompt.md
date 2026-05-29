@@ -1,5 +1,17 @@
 # `deleteNote` / `deleteFolder` 大对象单事务卡死 — Bug Fix Prompt
 
+> ⚠️ **本 prompt 字面已被 superseded (2026-05-29)**
+>
+> 用户字面反馈后发现：删除卡死 + 冷启动 30s 慢 + 批量删失败字面**同根** —
+> 字面**应用层全库扫然后内存 filter 反模式**。本 prompt 字面只修了表面症状
+> （单事务串行删 N 次），字面**没修**真正根因（listEdges 字面全库扫）。
+>
+> **字面接替的 prompt**：[`docs/tasks/2026-05-29-data-layer-audit-prompt.md`](2026-05-29-data-layer-audit-prompt.md)
+>   — 字面**只 audit 不改代码**，产出报告后字面再决定字面修复范围（A2 prompt 待写）。
+>
+> 本 prompt 字面**保留作历史**（字面记录"如果只看删除症状会怎么修"的字面思路），
+> 字面**不要按本 prompt 执行**。
+
 > 这份 prompt 给新会话执行。直接把整份文档作为 user message 发给新对话即可。
 > Self-contained — 新对话没有 5B / 删除诊断 上下文。
 
