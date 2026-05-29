@@ -102,6 +102,20 @@ export function buildTitleGuardPlugin(): Plugin {
 
       // 标记不入 history(用户撤销不应该撤这个自动补 / 转换)
       tr.setMeta('addToHistory', false);
+      // 不触发 onChange/IPC(2026-05-29 修):title-guard 的 appendTransaction 是
+      // **plugin 自动补 title**(用户没编辑),与 auto-block-id-plugin 字面同模式 —
+      // 应跳过 Host onChange handler,**否则字面触发 IPC updateNote -> broadcast ->
+      // 回灌 -> title-guard 又跑 -> 死循环**(view 自打自循环,memory
+      // feedback_view_self_loop_jitter 字面登记的第 3 实例).
+      //
+      // 触发条件:doc 首块不是 isTitle paragraph(常见:"标题有/内容空"的老 note
+      // 加载,storage container.payload 是 empty doc,assemble 后 doc.content 为空,
+      // 走 line 99 `tr.insert(0, emptyTitle)` 补一个空 title).
+      //
+      // 字面副作用:title-guard 字面是 **runtime-only** 补,不持久化 — 每次 doc load
+      // 都补一次空 title.skipOnChange 后此补操作字面不进 storage(预期行为,与
+      // auto-block-id 走 migration 023 一次性补 id 不同).
+      tr.setMeta('skipOnChange', true);
       return tr;
     },
   });
