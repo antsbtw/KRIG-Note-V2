@@ -31,6 +31,7 @@ import { waitForTitleBackfill } from '@storage/migrations/023-note-title-cache';
 import type { AtomEntity, PmPayload } from '@semantic/types';
 import type { NoteInfo, NoteDocEnvelope } from '@shared/ipc/note-folder-types';
 import { generateUlid } from '@shared/ulid';
+import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 import { deriveTitle } from './derive-title';
 import { wrapPmDoc, unwrapPmDoc, emptyNoteDoc } from './envelope';
 import { assemblePmDoc } from './assemble-pm-doc';
@@ -248,14 +249,10 @@ export async function createNote(
  * 通常 doc 已有 id;空文档场景字面只首段 paragraph 需要注入)。
  */
 function injectIdsForCreate(doc: PmPayload): PmPayload {
-  const STRUCTURAL = new Set([
-    'table',
-    'tableRow',
-    'bulletList',
-    'orderedList',
-    'taskList',
-    'columnList',
-  ]);
+  // 5B §7.3.1 拍板: STRUCTURAL_CONTAINER_TYPES 收敛到 semantic 层单点 export
+  // (文件顶部 import). 5A 拍板 table 是 atom -> 集合从 6 项降为 5 项;
+  // injectIdsForCreate 字面会给 table 也注入 id (table.spec.attrs 已加 id 字段,
+  // 5B Stage 1 S1.3.1), 与 plugin / atoms-to-pm 归一化同模式.
 
   function visit(node: PmPayload): PmPayload {
     const out: PmPayload = { type: node.type };
@@ -267,7 +264,7 @@ function injectIdsForCreate(doc: PmPayload): PmPayload {
     }
     // 给非结构性容器、且 attrs 内有 id 字段(即 Stage 1 加 id 的 22 NodeSpec)、
     // 但 attrs.id 为 null/undefined 的 block 注入
-    if (!STRUCTURAL.has(node.type) && out.attrs && 'id' in out.attrs) {
+    if (!STRUCTURAL_CONTAINER_TYPES.has(node.type) && out.attrs && 'id' in out.attrs) {
       if (!out.attrs.id) {
         out.attrs.id = generateUlid();
       }

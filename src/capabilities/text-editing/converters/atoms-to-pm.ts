@@ -49,6 +49,7 @@
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
 import type { PMNode } from './md-to-pm';
+import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
 export type { PMNode };
 
@@ -554,14 +555,12 @@ export async function atomsToProseMirror(input: AtomsToPmInput): Promise<PMNode[
  * 与 plugin / capability injectIdsForCreate / dissect shouldGenerateAtom 同源,
  * 共同遵循 decision 026 §3.1.3 字面拍板(STRUCTURAL_CONTAINER_TYPES + inline 类型外的全部 block)。
  */
-const STRUCTURAL_CONTAINER_TYPES = new Set([
-  'table',
-  'tableRow',
-  'bulletList',
-  'orderedList',
-  'taskList',
-  'columnList',
-]);
+// 5B §7.3.1 拍板: STRUCTURAL_CONTAINER_TYPES 收敛到 semantic 层单点 export
+// (本文件顶部 import). 5A 拍板 table 是 atom -> 集合从 6 项降为 5 项;
+// atomsToProseMirror 归一化字面会给 table 也补 attrs.id 占位
+// (table.spec.attrs 已加 id 字段, 5B Stage 1 S1.3.1).
+// 5B §节 4 Stage 6 字面规划: 本文件未来会迁到 content-ingest capability;
+// 本 Stage 不迁移, 先就地改 import. Stage 6 移路径后 import 仍然有效.
 
 /**
  * inline 节点类型(group='inline')— 字面无 attrs.id 字段,不归一化。

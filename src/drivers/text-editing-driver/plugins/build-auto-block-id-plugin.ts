@@ -40,25 +40,16 @@
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { generateUlid } from '@shared/ulid';
+import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
 export const autoBlockIdKey = new PluginKey('auto-block-id');
 
 /**
- * 结构性容器:用户从不单独引用,childOf 边跨层跳过,本 plugin 不注入 id。
- * 详 decision 026 §3.1.2。
- *
- * ⚠ 同步更新提示:未来引入新结构性容器 block 类型(如 grid / flexbox / layout 等)时,
- * 必须把节点 type.name 加入此 Set,否则 plugin 会错误地给容器注 id。
- * 同步登记到 decision 026 §13.8 硬编码扩展机制。
+ * 5B §7.3.1 拍板: STRUCTURAL_CONTAINER_TYPES 已收敛到 semantic 层单点 export
+ * (本文件顶部 import). 5A 拍板 table 是 atom -> 集合从 6 项降为 5 项,
+ * 现在 plugin 会字面给 table 注入 id (table.spec.attrs 已加 id 字段, S1.3.1).
+ * 新增结构性容器只需改 src/semantic/types/structural.ts, 五处消费方字面跟随.
  */
-const STRUCTURAL_CONTAINER_TYPES = new Set<string>([
-  'table',
-  'tableRow',
-  'bulletList',
-  'orderedList',
-  'taskList',
-  'columnList',
-]);
 
 /**
  * 字面判断:此 node 是否应该有 attrs.id。
