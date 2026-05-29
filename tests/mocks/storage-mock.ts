@@ -122,9 +122,14 @@ export function createMockStorage(): MockStorage {
   }
 
   async function listAtomsImpl(filter: AtomFilter): Promise<AtomEntity[]> {
+    // 空 array 短路（P0-2, 2026-05-29 data-layer-audit）
+    if (filter.atomIds?.length === 0) return [];
+
+    const atomIdSet = filter.atomIds ? new Set(filter.atomIds) : null;
     const out: AtomEntity[] = [];
     for (const a of atoms.values()) {
       if (filter.domain && a.payload.domain !== filter.domain) continue;
+      if (atomIdSet && !atomIdSet.has(a.id)) continue;
       out.push(a);
     }
     return out;
@@ -180,6 +185,25 @@ export function createMockStorage(): MockStorage {
   }
 
   async function listEdgesImpl(filter: EdgeFilter): Promise<EdgeEntity[]> {
+    // 互斥 sanity check（P0-1, 2026-05-29 data-layer-audit）
+    if (filter.subjectAtomId !== undefined && filter.subjectAtomIds !== undefined) {
+      throw new Error(
+        '[mock-storage.listEdges] subjectAtomId and subjectAtomIds are mutually exclusive',
+      );
+    }
+    if (filter.objectAtomId !== undefined && filter.objectAtomIds !== undefined) {
+      throw new Error(
+        '[mock-storage.listEdges] objectAtomId and objectAtomIds are mutually exclusive',
+      );
+    }
+
+    // 空 array 短路（P0-1）— 不要降级为全扫
+    if (filter.subjectAtomIds?.length === 0) return [];
+    if (filter.objectAtomIds?.length === 0) return [];
+
+    const subjectIdSet = filter.subjectAtomIds ? new Set(filter.subjectAtomIds) : null;
+    const objectIdSet = filter.objectAtomIds ? new Set(filter.objectAtomIds) : null;
+
     const out: EdgeEntity[] = [];
     for (const e of edges.values()) {
       if (filter.predicate && e.predicate !== filter.predicate) continue;
@@ -187,6 +211,19 @@ export function createMockStorage(): MockStorage {
       if (filter.objectAtomId) {
         if (e.object.kind !== 'atom') continue;
         if (e.object.atomId !== filter.objectAtomId) continue;
+      }
+      // 批量 subject atom id 过滤（P0-1）
+      if (subjectIdSet && !subjectIdSet.has(e.subject.atomId)) continue;
+      // 批量 object atom id 过滤（P0-1）
+      if (objectIdSet) {
+        if (e.object.kind !== 'atom') continue;
+        if (!objectIdSet.has(e.object.atomId)) continue;
+      }
+      // literal object 过滤（P0-3）
+      if (filter.objectLiteral !== undefined) {
+        if (e.object.kind !== 'literal') continue;
+        if (e.object.type !== filter.objectLiteral.type) continue;
+        if (e.object.value !== filter.objectLiteral.value) continue;
       }
       out.push(e);
     }
