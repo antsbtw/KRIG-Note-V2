@@ -16,6 +16,7 @@ import type {
   AtomFilter,
   PutEdgeInput,
   EdgeFilter,
+  ListMarkerAtomsOpts,
   SubgraphQuery,
   SubgraphResult,
   StorageTransaction,
@@ -152,6 +153,57 @@ class SurrealStorage implements StorageAPI {
     const sql = `SELECT * FROM atom ${whereClause} ORDER BY ${orderBy} ${orderDir} ${limitClause} ${offsetClause}`;
     const result = await db.query<[Array<Record<string, unknown>>]>(sql, bindings);
     return (result[0] ?? []).map((row) => normalizeAtomEntity(row));
+  }
+
+  /**
+   * P1-1 (2026-05-29 data-layer-audit): 按 marker 边过滤的 atom 查询。
+   *
+   * SQL 走 INSIDE subquery —— atom.id INSIDE (SELECT VALUE subject.atomId FROM edge ...).
+   * 字面一次 round-trip,免 caller 走 listAtoms + listEdges + 内存 filter 三步反模式。
+   *
+   * SurrealDB 4.x INSIDE 字面已在本 storage 多处使用 (#142 atomRids / #306 subjectAtomIds),
+   * 同款套路。
+   */
+  async listMarkerAtoms<D extends AtomDomain = AtomDomain>(
+    opts: ListMarkerAtomsOpts,
+  ): Promise<AtomEntity<D>[]> {
+    const db = getDB();
+
+    const bindings: Record<string, unknown> = {
+      domain: opts.domain,
+      marker: opts.markerPredicate,
+    };
+
+    // marker subquery 字面按 markerObjectMatch 形态扩展 WHERE
+    const markerWhere: string[] = [`predicate = $marker`];
+    if (opts.markerObjectMatch) {
+      if (opts.markerObjectMatch.kind === 'literal') {
+        markerWhere.push(
+          `object.kind = 'literal' AND object.type = $markerLitType AND object.value = $markerLitVal`,
+        );
+        bindings.markerLitType = opts.markerObjectMatch.type;
+        bindings.markerLitVal = opts.markerObjectMatch.value;
+      } else {
+        markerWhere.push(`object.kind = 'atom' AND object.atomId = $markerObjAtomId`);
+        bindings.markerObjAtomId = opts.markerObjectMatch.atomId;
+      }
+    }
+
+    // 字面取边的 subject.atomId 是 plain string,需走 atomRid 转 RecordId 才能与 atom.id INSIDE 比较.
+    // SurrealDB 字面 atom.id 是 record id (atom:01K...) 而 subject.atomId 字面是 string,
+    // 直接 INSIDE 字面类型不匹配 — 走 type::thing('atom', x) 转 RecordId.
+    const sql = `
+      SELECT * FROM atom
+      WHERE payload.domain = $domain
+        AND id INSIDE (
+          SELECT VALUE type::thing('atom', subject.atomId) FROM edge
+          WHERE ${markerWhere.join(' AND ')}
+        )
+      ORDER BY createdAt DESC
+    `;
+
+    const result = await db.query<[Array<Record<string, unknown>>]>(sql, bindings);
+    return (result[0] ?? []).map((row) => normalizeAtomEntity<D>(row));
   }
 
   async deleteAtom(id: string): Promise<{ deleted: boolean; cascadedEdges: number }> {

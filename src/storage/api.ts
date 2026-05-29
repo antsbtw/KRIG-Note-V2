@@ -32,6 +32,27 @@ export interface StorageAPI {
 
   listAtoms(filter: AtomFilter, options?: StorageOptions): Promise<AtomEntity[]>;
 
+  /**
+   * 按 marker 边过滤的 atom 查询（P1-1, 2026-05-29 data-layer-audit）
+   *
+   * 语义:拉出所有同时满足以下条件的 atom:
+   *  - atom.payload.domain === domain
+   *  - 存在一条 edge: subject = atom.id, predicate = markerPredicate
+   *  - (可选) edge.object 匹配 markerObjectMatch
+   *
+   * 比 "listAtoms({domain}) + listEdges({predicate}) + Set.has filter" 快得多 —
+   * SQL 走 INSIDE subquery，只返回需要的 atom，不返 N × M 个 block atom。
+   *
+   * 用例:
+   *  - listNotes:  marker = 'user:krig:hasNoteView', object = literal true
+   *  - listFolders(viewType): marker = 'user:krig:folderForView',
+   *    object = literal '__view__/note' (等)
+   */
+  listMarkerAtoms<D extends AtomDomain = AtomDomain>(
+    opts: ListMarkerAtomsOpts,
+    options?: StorageOptions,
+  ): Promise<AtomEntity<D>[]>;
+
   deleteAtom(
     id: string,
     options?: StorageOptions,
@@ -140,6 +161,24 @@ export interface EdgeFilter {
    * 用于 folder.listFolders(viewType)：object 是 string literal "note" / "ebook" 等。
    */
   objectLiteral?: { type: string; value: unknown };
+}
+
+/**
+ * listMarkerAtoms 入参（P1-1, 2026-05-29 data-layer-audit）
+ *
+ * markerObjectMatch 字面两种形态:
+ *  - literal: 匹配 edge.object.kind === 'literal' AND object.type/value
+ *  - atomId:  匹配 edge.object.kind === 'atom' AND object.atomId
+ *
+ * 不传 markerObjectMatch 时:只要存在 (subject=atomId, predicate=markerPredicate) 的边即算命中
+ * (object 任意).
+ */
+export interface ListMarkerAtomsOpts {
+  domain: AtomDomain;
+  markerPredicate: EdgePredicate;
+  markerObjectMatch?:
+    | { kind: 'literal'; type: string; value: unknown }
+    | { kind: 'atom'; atomId: string };
 }
 
 export interface SubgraphQuery {
