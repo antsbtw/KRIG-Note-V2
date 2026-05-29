@@ -108,6 +108,9 @@ export const taskItemNodeView: NodeViewConstructor = (node, view, getPos) => {
   dom.appendChild(dateInput);
 
   // 新建项首次挂载若无 createdAt,补一个(与 V1 行为对齐)
+  // skipOnChange:true — NodeView 内部回写不应触发 onChange → IPC;否则 markdown 导入
+  // 多 taskItem 同 noteId mount 时 N 次 dispatch → N 次 IPC → SurrealDB OCC 风暴
+  // (feedback_pm_internal_attr_write_must_mark_no_history 字面规则)
   if (!node.attrs.createdAt) {
     queueMicrotask(() => {
       const pos = typeof getPos === 'function' ? getPos() : null;
@@ -117,7 +120,8 @@ export const taskItemNodeView: NodeViewConstructor = (node, view, getPos) => {
       view.dispatch(
         view.state.tr
           .setNodeMarkup(pos, undefined, { ...cur.attrs, createdAt: new Date().toISOString() })
-          .setMeta('addToHistory', false),
+          .setMeta('addToHistory', false)
+          .setMeta('skipOnChange', true),
       );
     });
   }

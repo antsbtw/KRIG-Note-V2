@@ -157,6 +157,11 @@ export function Host(props: TextEditingHostProps) {
         // 防御 — 旧 doc 装载完 appendTransaction 给每个无 id block 注 ULID 会触发 N
         // 次 IPC 写入;migration (Stage 6) 一次性补 id 后此路径不再触发,运行期偶发
         // 走这里也只是 0 cost 跳过 IPC。
+        //
+        // 2026-05-29 扩展:NodeView 内部回写(task-list 补 createdAt / note-link 同步
+        // label / tweet-block 补 tweetId)+ applyExternalDoc 套外部 doc 也都走此守门,
+        // 否则 markdown 导入多 taskItem mount 同 noteId N 次 dispatch → N 次 IPC →
+        // SurrealDB OCC 风暴(详 [[feedback_pm_internal_attr_write_must_mark_no_history]])
         if (tr.getMeta('skipOnChange') === true) {
           return; // 不调 onChange,不发 IPC,不动 selection
         }
@@ -274,6 +279,11 @@ export function Host(props: TextEditingHostProps) {
     // 友好(dual-channel §2.4)。
     tr.setSelection(Selection.atStart(tr.doc));
     tr.setMeta('addToHistory', false); // 切笔记不记入 history
+    // applyExternalDoc 把 DB 来的 doc 套进 PM,PM state 已等于 DB state,不需 emit 回 DB。
+    // 不设此 meta 会触发 dispatchTransaction handler emit onChange → IPC updateNote
+    // → broadcast → useActiveNoteDocSync 回灌 setIncomingDoc → 又 applyExternalDoc → 死循环
+    // (2026-05-29 markdown 导入 11 次 spam + OCC 风暴根因;调研详 [[noteview-echo-emit-spam]])
+    tr.setMeta('skipOnChange', true);
     view.dispatch(tr);
     return true;
   };

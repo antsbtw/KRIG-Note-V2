@@ -51,6 +51,10 @@ export const noteLinkNodeView: NodeViewConstructor = (initialNode, view, getPos)
       if (pos != null) {
         const tr = view.state.tr.setNodeAttribute(pos, 'label', trimmed);
         tr.setMeta('addToHistory', false);
+        // skipOnChange:true — NodeView 内部回写不应触发 onChange → IPC;否则切笔记
+        // 加载多 noteLink 时 N 次 dispatch → N 次 IPC → OCC 风暴
+        // (feedback_pm_internal_attr_write_must_mark_no_history 字面规则)
+        tr.setMeta('skipOnChange', true);
         view.dispatch(tr);
         currentLabel = trimmed;
       }

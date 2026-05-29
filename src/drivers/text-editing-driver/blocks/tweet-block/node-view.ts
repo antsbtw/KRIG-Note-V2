@@ -360,8 +360,17 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       browsePanel.appendChild(iframe);
 
       // 若 tweetId 还没存进 attrs,补一次(避免 parseDOM 路径丢失)
+      // 用 inline dispatch + skipOnChange:true — NodeView 内部回写不应触发 onChange → IPC
+      // (跟 updateAttrs 拆开:updateAttrs 是 user-driven 入口必须 emit;本路径是 mount
+      //  自动补字段,与 task-list createdAt / note-link label 字面同模式)
       if (!n.attrs.tweetId) {
-        updateAttrs({ tweetId });
+        const pos = typeof getPos === 'function' ? getPos() : undefined;
+        if (pos != null) {
+          const tr = view.state.tr.setNodeAttribute(pos, 'tweetId', tweetId);
+          tr.setMeta('addToHistory', false);
+          tr.setMeta('skipOnChange', true);
+          view.dispatch(tr);
+        }
       }
     } else {
       browsePanel.innerHTML =
