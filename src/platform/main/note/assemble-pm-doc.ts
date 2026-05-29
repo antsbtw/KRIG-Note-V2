@@ -376,16 +376,12 @@ export async function assemblePmDoc(containerId: string): Promise<PmPayload | nu
 }
 
 /**
- * 辅助常量导出(给 dissect-pm-doc.ts 用)— 集中化结构性容器集合。
+ * 5B §7.3.1 拍板: STRUCTURAL_CONTAINER_TYPES 收敛到 semantic 层单点 export
+ * (5A 拍板 table 是 atom, 集合从 6 项降为 5 项).
+ * 本文件保留 re-export 以维持既有 import 链路向后兼容;
+ * 新代码字面应直接 `import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural'`.
  */
-export const STRUCTURAL_CONTAINER_TYPES = new Set<string>([
-  'table',
-  'tableRow',
-  'bulletList',
-  'orderedList',
-  'taskList',
-  'columnList',
-]);
+export { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
 /** dissect 用:从 PM 节点字面读 list 类型(用于写入 _assemblyHints.listType)*/
 export type ListWrapperType = 'bulletList' | 'orderedList' | 'taskList';

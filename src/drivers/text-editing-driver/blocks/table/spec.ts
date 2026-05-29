@@ -44,11 +44,18 @@ function parseCellAttrs(dom: HTMLElement): Record<string, unknown> {
   const colwidth = widthAttr
     ? widthAttr.split(',').map(Number).filter((n) => !Number.isNaN(n))
     : null;
+  // 5A 拍板 + 5B §节 4 Stage 1 改动点 #2: rowIndex / colIndex 走 cell.attrs
+  // (tableRow 不是 atom, row 边界信息字面落到 cell). dissect 期会重算覆盖
+  // (5B Q2 选项 B), parseDOM 字面承担"复制粘贴 / DOM 入口"路径不丢字段.
+  const rowIndexAttr = dom.getAttribute('data-row-index');
+  const colIndexAttr = dom.getAttribute('data-col-index');
   return {
     colspan: Number(dom.getAttribute('colspan') || 1),
     rowspan: Number(dom.getAttribute('rowspan') || 1),
     colwidth: colwidth && colwidth.length > 0 ? colwidth : null,
     align: parseAlignAttr(dom),
+    rowIndex: rowIndexAttr !== null ? Number(rowIndexAttr) : 0,
+    colIndex: colIndexAttr !== null ? Number(colIndexAttr) : 0,
   };
 }
 
@@ -67,6 +74,12 @@ function cellToDOM(node: import('prosemirror-model').Node, tag: 'td' | 'th'): im
     attrs['data-align'] = align;
     styleParts.push(`text-align: ${align}`);
   }
+  // 5A 拍板 + 5B §节 4 Stage 1 改动点 #2: rowIndex / colIndex 字面序列化到
+  // DOM data-* 以支持 copy/paste round-trip(否则跨 doc 粘贴丢 row/col 定位).
+  const rowIndex = node.attrs.rowIndex as number | null | undefined;
+  const colIndex = node.attrs.colIndex as number | null | undefined;
+  if (typeof rowIndex === 'number') attrs['data-row-index'] = String(rowIndex);
+  if (typeof colIndex === 'number') attrs['data-col-index'] = String(colIndex);
   if (styleParts.length) attrs.style = styleParts.join('; ');
   return [tag, attrs, 0];
 }
@@ -78,9 +91,26 @@ const tableNodeSpec: NodeSpec = {
   group: 'block',
   tableRole: 'table',
   isolating: true,
-  parseDOM: [{ tag: 'table' }],
-  toDOM() {
-    return ['table', { class: 'krig-pm-table' }, ['tbody', 0]];
+  attrs: {
+    // L7 block atomization (decision 026 §3.1.1 / §4 + 5A 拍板 table 是 atom):
+    // table 字面拆 atom, attrs.id 与 atom.id 同步.
+    // 由 buildAutoBlockIdPlugin appendTransaction 注入 ULID(plugin shouldHaveId
+    // 字面看 spec.attrs 是否含 'id', 加完此字段后字面自动覆盖 table).
+    // 5A §6.1 字面要求 table 是 atom; 5B §节 4 Stage 1 改动点 #1 字面登记.
+    id: { default: null },
+  },
+  parseDOM: [{
+    tag: 'table',
+    getAttrs(dom) {
+      const el = dom as HTMLElement;
+      return { id: el.getAttribute('data-id') };
+    },
+  }],
+  toDOM(node) {
+    const attrs: Record<string, string> = { class: 'krig-pm-table' };
+    const id = node.attrs.id as string | null;
+    if (id) attrs['data-id'] = id;
+    return ['table', attrs, ['tbody', 0]];
   },
 };
 
@@ -134,6 +164,12 @@ const tableCellNodeSpec: NodeSpec = {
     // (table/row 字面容器, header 字面跟 cell 同型但实务无标注语义);
     // 字面登记 §10.D 偏离 - "24 种 block 按目录计数 = 24 处 bookAnchor" 字面落实方式
     bookAnchor: { default: null },
+    // 5A 拍板 + 5B §节 4 Stage 1 改动点 #2 字面新增:
+    // tableRow 不是 atom (5A 拍板), row 边界信息走 cell 自带的 rowIndex / colIndex
+    // (0-based 整数). 5B Q2 拍板 dissect 期注入(选项 B); PM editor 内 attrs 字面
+    // 陈旧不出 bug, dissect 时重算覆盖.
+    rowIndex: { default: 0 },
+    colIndex: { default: 0 },
   },
   tableRole: 'cell',
   isolating: true,
@@ -169,6 +205,11 @@ const tableHeaderNodeSpec: NodeSpec = {
     rowspan: { default: 1 },
     colwidth: { default: null },
     align: { default: null },
+    // 5A 拍板: tableHeader 与 tableCell 同模式拆 atom + 同款 rowIndex/colIndex
+    // (rowIndex=0 字面对应表头第 1 行; 5A §13.9 注 1 拍板).
+    // 字面共用 parseCellAttrs / cellToDOM, 与 tableCell 同款.
+    rowIndex: { default: 0 },
+    colIndex: { default: 0 },
   },
   tableRole: 'header_cell',
   isolating: true,

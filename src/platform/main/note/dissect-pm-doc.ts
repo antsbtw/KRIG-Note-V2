@@ -19,7 +19,7 @@
  */
 
 import type { PmPayload } from '@semantic/types';
-import { STRUCTURAL_CONTAINER_TYPES } from './assemble-pm-doc';
+import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
 /** dissect 输出 — 字面交给 capability 走 diff + storage transaction */
 export interface DissectResult {
