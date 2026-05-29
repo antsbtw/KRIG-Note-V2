@@ -107,11 +107,25 @@ export function sanitizeAtoms(atoms: LegacyExtractionAtom[]): LegacyExtractionAt
         }
       }
 
-      // (7) 清洗 tiptapContent
-      if (content && Array.isArray(content.tiptapContent)) {
-        content.tiptapContent = sanitizeTiptapContent(
-          content.tiptapContent as Record<string, unknown>[],
-        );
+      // (7) 清洗 tiptapContent (5B Stage 8 兼容层 — 契约 v2.1 字段名 rename):
+      // - v2.0 后端字面发 `tiptapContent`;v2.1 后端字面发 `pmContent`.
+      // - 读侧字面 `tiptapContent ?? pmContent` 二者均可消费,
+      //   归一化到 `tiptapContent` 字段(下游 atoms-to-pm / table-adapter 字面仍读 tiptapContent).
+      // - 未来 (v2.2 发布 + 1 V2 release) 删除此兼容兜底,仅读 `pmContent` 并相应改下游字段名.
+      // - 字面优先 `tiptapContent` (兼容 v2.0 双发场景:后端同时填 tiptapContent + pmContent 时
+      //   字面保留 v2.0 字段值,与本兜底行为字面对齐).
+      // - 详 docs/10-business-design/ebook/PDF-Note-Atom数据契约-v2.1.md §三 兼容性策略.
+      if (content) {
+        const pmSubtree =
+          (Array.isArray(content.tiptapContent) ? content.tiptapContent : null) ??
+          (Array.isArray(content.pmContent) ? content.pmContent : null);
+        if (pmSubtree) {
+          content.tiptapContent = sanitizeTiptapContent(
+            pmSubtree as Record<string, unknown>[],
+          );
+          // 清掉 pmContent 字段避免下游误读两个不同的源 (归一化字面单字段)
+          delete content.pmContent;
+        }
       }
 
       return atom;
