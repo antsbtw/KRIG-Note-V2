@@ -106,6 +106,10 @@ class SurrealStorage implements StorageAPI {
 
   async listAtoms(filter: AtomFilter): Promise<AtomEntity[]> {
     const db = getDB();
+
+    // 空 array 短路（P0-2, 2026-05-29 data-layer-audit）
+    if (filter.atomIds?.length === 0) return [];
+
     const where: string[] = [];
     const bindings: Record<string, unknown> = {};
 
@@ -132,6 +136,11 @@ class SurrealStorage implements StorageAPI {
     if (filter.updatedAtRange?.to !== undefined) {
       where.push(`updatedAt <= $updatedAtTo`);
       bindings.updatedAtTo = filter.updatedAtRange.to;
+    }
+    // 批量 atom id 过滤（P0-2）— atom.id 是 RecordId,需转 Thing[]
+    if (filter.atomIds !== undefined) {
+      where.push(`id INSIDE $atomRids`);
+      bindings.atomRids = filter.atomIds.map((id) => atomRid(id));
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -252,6 +261,23 @@ class SurrealStorage implements StorageAPI {
 
   async listEdges(filter: EdgeFilter): Promise<EdgeEntity[]> {
     const db = getDB();
+
+    // 互斥 sanity check（P0-1, 2026-05-29 data-layer-audit）
+    if (filter.subjectAtomId !== undefined && filter.subjectAtomIds !== undefined) {
+      throw new Error(
+        '[storage.listEdges] subjectAtomId and subjectAtomIds are mutually exclusive',
+      );
+    }
+    if (filter.objectAtomId !== undefined && filter.objectAtomIds !== undefined) {
+      throw new Error(
+        '[storage.listEdges] objectAtomId and objectAtomIds are mutually exclusive',
+      );
+    }
+
+    // 空 array 短路（P0-1）— 不要降级为全扫
+    if (filter.subjectAtomIds?.length === 0) return [];
+    if (filter.objectAtomIds?.length === 0) return [];
+
     const where: string[] = [];
     const bindings: Record<string, unknown> = {};
 
@@ -274,6 +300,24 @@ class SurrealStorage implements StorageAPI {
     if (filter.objectAtomId !== undefined) {
       where.push(`object.kind = 'atom' AND object.atomId = $objectAtomId`);
       bindings.objectAtomId = filter.objectAtomId;
+    }
+    // 批量 subject atom id 过滤（P0-1）— subject.atomId 是 plain string
+    if (filter.subjectAtomIds !== undefined) {
+      where.push(`subject.atomId INSIDE $subjectAtomIds`);
+      bindings.subjectAtomIds = filter.subjectAtomIds;
+    }
+    // 批量 object atom id 过滤（P0-1）— object.atomId 是 plain string
+    if (filter.objectAtomIds !== undefined) {
+      where.push(`object.kind = 'atom' AND object.atomId INSIDE $objectAtomIds`);
+      bindings.objectAtomIds = filter.objectAtomIds;
+    }
+    // literal object 过滤（P0-3）— 用于 listFolders(viewType)
+    if (filter.objectLiteral !== undefined) {
+      where.push(
+        `object.kind = 'literal' AND object.type = $objLitType AND object.value = $objLitVal`,
+      );
+      bindings.objLitType = filter.objectLiteral.type;
+      bindings.objLitVal = filter.objectLiteral.value;
     }
     if (filter.createdAtRange?.from !== undefined) {
       where.push(`createdAt >= $createdAtFrom`);

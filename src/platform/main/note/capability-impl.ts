@@ -291,7 +291,14 @@ export async function listNotes(): Promise<NoteInfo[]> {
   const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
   const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
   const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
-  const folderEdges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 note 的边,免全库扫
+  const noteIdsArr = [...noteAtomIds];
+  const folderEdges = noteIdsArr.length > 0
+    ? await storage.listEdges({
+        predicate: IN_FOLDER_PREDICATE,
+        subjectAtomIds: noteIdsArr,
+      })
+    : [];
   const folderBySubject = new Map<string, string>();
   for (const e of folderEdges) {
     if (e.object.kind === 'atom') {
@@ -351,7 +358,14 @@ export async function listNoteTitles(): Promise<Array<{
   const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
   const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
   const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
-  const folderEdges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 note 的边,免全库扫
+  const noteIdsArr2 = [...noteAtomIds];
+  const folderEdges = noteIdsArr2.length > 0
+    ? await storage.listEdges({
+        predicate: IN_FOLDER_PREDICATE,
+        subjectAtomIds: noteIdsArr2,
+      })
+    : [];
   const folderBySubject = new Map<string, string>();
   for (const e of folderEdges) {
     if (e.object.kind === 'atom') {

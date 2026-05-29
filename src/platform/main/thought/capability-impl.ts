@@ -142,8 +142,16 @@ export async function listThoughts(): Promise<ThoughtInfo[]> {
   const atoms = (await storage.listAtoms({ domain: THOUGHT_DOMAIN })) as AtomEntity<'thought'>[];
   if (atoms.length === 0) return [];
 
+  // P0-1 (2026-05-29 data-layer-audit #33 + #34): 只拉本批 thought 的边,免全库扫.
+  // audit §一 #33 标注 A 类(thought ~100-5000 行 OK), 但 §二 B1 汇总段列入 — 取后者修法,
+  // 一是与 #34 同模式统一(已用 subjectAtomIds), 二是 thought 量级上 50k+ 后无此修则同样卡.
+  const thoughtIds = atoms.map((a) => a.id);
+
   // 一次性查所有 thoughtOf + inFolder 边,按 subject 索引
-  const thoughtOfEdges = await storage.listEdges({ predicate: THOUGHT_OF_PREDICATE });
+  const thoughtOfEdges = await storage.listEdges({
+    predicate: THOUGHT_OF_PREDICATE,
+    subjectAtomIds: thoughtIds,
+  });
   const anchorBySubject = new Map<string, ThoughtAnchor>();
   for (const e of thoughtOfEdges) {
     if (e.object.kind !== 'atom') continue;
@@ -161,7 +169,10 @@ export async function listThoughts(): Promise<ThoughtInfo[]> {
       } as ThoughtAnchor);
     }
   }
-  const folderEdges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  const folderEdges = await storage.listEdges({
+    predicate: IN_FOLDER_PREDICATE,
+    subjectAtomIds: thoughtIds,
+  });
   const folderBySubject = new Map<string, string>();
   for (const e of folderEdges) {
     if (e.object.kind === 'atom') {
@@ -193,10 +204,52 @@ export async function listThoughtsBySource(
     }
   }
   if (thoughtIds.length === 0) return [];
+
+  // P0-2 (2026-05-29 data-layer-audit): 批量替代 for-loop getThought 串行(B3 T1)
+  // 一次拉全 thought atom + 一次拉 anchorEdges + 一次拉 folderEdges,内存拼装
+  const [thoughtAtomsRaw, anchorEdges, folderEdges] = await Promise.all([
+    storage.listAtoms({ domain: THOUGHT_DOMAIN, atomIds: thoughtIds }),
+    storage.listEdges({
+      predicate: THOUGHT_OF_PREDICATE,
+      subjectAtomIds: thoughtIds,
+    }),
+    storage.listEdges({
+      predicate: IN_FOLDER_PREDICATE,
+      subjectAtomIds: thoughtIds,
+    }),
+  ]);
+
+  const anchorBySubject = new Map<string, ThoughtAnchor>();
+  for (const e of anchorEdges) {
+    if (e.object.kind !== 'atom') continue;
+    const src = e.attrs.source;
+    const locator = e.attrs.locator;
+    if (src !== 'note' && src !== 'book' && src !== 'graph' && src !== 'canvas') continue;
+    if (!locator || typeof locator !== 'object') continue;
+    anchorBySubject.set(e.subject.atomId, {
+      source: src,
+      resourceId: e.object.atomId,
+      locator,
+    } as ThoughtAnchor);
+  }
+
+  const folderBySubject = new Map<string, string>();
+  for (const e of folderEdges) {
+    if (e.object.kind === 'atom') {
+      folderBySubject.set(e.subject.atomId, e.object.atomId);
+    }
+  }
+
   const results: ThoughtInfo[] = [];
-  for (const id of thoughtIds) {
-    const info = await getThought(id);
-    if (info) results.push(info);
+  for (const atom of thoughtAtomsRaw as AtomEntity<'thought'>[]) {
+    if (atom.payload.domain !== THOUGHT_DOMAIN) continue;
+    results.push(
+      atomToThoughtInfo(
+        atom,
+        anchorBySubject.get(atom.id) ?? null,
+        folderBySubject.get(atom.id) ?? null,
+      ),
+    );
   }
   return results;
 }

@@ -84,30 +84,36 @@ export async function createFolder(
 }
 
 export async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
-  // decision 021 §4.1: 应用层 filter folderForView 边的 object literal value
-  // EdgeFilter 字面不支持 objectLiteralValue (§0.4 #8),只能拉全 predicate 后应用层 filter
+  // decision 021 §4.1: folderForView 边表达 view 归属
+  // P0-3 (2026-05-29 data-layer-audit): 走 SQL objectLiteral filter,免应用层全扫 + filter
   const viewMarker = viewMarkerFor(viewType);
-  const allViewEdges = await storage.listEdges({
+  const viewEdges = await storage.listEdges({
     predicate: FOLDER_FOR_VIEW_PREDICATE,
+    objectLiteral: { type: 'string', value: viewMarker },
   });
-  const folderIdsInView = new Set(
-    allViewEdges
-      .filter(
-        (e) =>
-          e.object.kind === 'literal' &&
-          e.object.type === 'string' &&
-          e.object.value === viewMarker,
-      )
-      .map((e) => e.subject.atomId),
-  );
+  const folderIdsInView = viewEdges.map((e) => e.subject.atomId);
+  const folderIdsInViewSet = new Set(folderIdsInView);
 
-  const atoms = (await storage.listAtoms({ domain: FOLDER_DOMAIN })) as AtomEntity<'folder'>[];
-  const inViewAtoms = atoms.filter((a) => folderIdsInView.has(a.id));
+  // 仅拉 in-view 那批 folder atom,免拉全 folder domain 再 filter
+  // P0-2 (2026-05-29 data-layer-audit): atomIds 批量 SQL IN
+  const inViewAtoms = folderIdsInView.length > 0
+    ? ((await storage.listAtoms({
+        domain: FOLDER_DOMAIN,
+        atomIds: folderIdsInView,
+      })) as AtomEntity<'folder'>[])
+    : [];
 
-  // 一次性查所有 inFolder 边,按 subject 索引 (语义不变,沿决议 012)
-  const edges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  // 一次性查 in-view folder 的 outgoing inFolder 边(parent 关系)
+  // P0-1 (2026-05-29 data-layer-audit): SQL IN 替代全扫
+  const edges = folderIdsInView.length > 0
+    ? await storage.listEdges({
+        predicate: IN_FOLDER_PREDICATE,
+        subjectAtomIds: folderIdsInView,
+      })
+    : [];
   const parentBySubject = new Map<string, string>();
   for (const e of edges) {
+    if (!folderIdsInViewSet.has(e.subject.atomId)) continue;
     if (e.object.kind === 'atom') {
       parentBySubject.set(e.subject.atomId, e.object.atomId);
     }
@@ -238,9 +244,14 @@ export async function deleteFolder(id: string): Promise<{
   });
 }
 
-/** BFS 收集 descendant folder ids (含 self) */
+/**
+ * BFS 收集 descendant folder ids (含 self)
+ *
+ * `_tx` 参数保留(签名稳定);函数内部走外部 storage 客户端
+ * (与 storage.listEdges 同事务 db connection,与原代码一致 — 详 audit §5.3 已登记债)
+ */
 async function collectFolderSubtree(
-  tx: StorageTransaction,
+  _tx: StorageTransaction,
   rootFolderId: string,
 ): Promise<string[]> {
   const result: string[] = [rootFolderId];
@@ -248,18 +259,25 @@ async function collectFolderSubtree(
   while (queue.length > 0) {
     const current = queue.shift() as string;
     // 查所有 inFolder current 且 subject 是 folder atom 的边
-    // 注:tx 不暴露 listEdges,走外部 storage.listEdges (同事务 db connection)
     const childEdges = await storage.listEdges({
       predicate: IN_FOLDER_PREDICATE,
       objectAtomId: current,
     });
+    // P0-2 (2026-05-29 data-layer-audit): 批量 atomIds 替代 for getAtom 串行(B3 G2)
+    const candidateIds: string[] = [];
     for (const e of childEdges) {
       if (e.subject.kind !== 'atom') continue;
-      const childAtom = await tx.getAtom(e.subject.atomId);
-      if (childAtom?.payload.domain === FOLDER_DOMAIN) {
-        result.push(e.subject.atomId);
-        queue.push(e.subject.atomId);
-      }
+      candidateIds.push(e.subject.atomId);
+    }
+    if (candidateIds.length === 0) continue;
+    const candidateAtoms = await storage.listAtoms({
+      domain: FOLDER_DOMAIN,
+      atomIds: candidateIds,
+    });
+    for (const a of candidateAtoms) {
+      // listAtoms({ domain, atomIds }) 已按 domain 过滤,只剩 folder
+      result.push(a.id);
+      queue.push(a.id);
     }
   }
   return result;
@@ -278,8 +296,14 @@ async function collectFolderSubtree(
  */
 const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas', 'thought']);
 
+/**
+ * P0-2 (2026-05-29 data-layer-audit): 批量替代 for-loop getAtom 串行(B3 G3)
+ *
+ * `_tx` 参数保留(签名稳定);走外部 storage 与 listEdges 同事务连接
+ * (audit §5.3 已登记债)
+ */
 async function collectResourcesInFolders(
-  tx: StorageTransaction,
+  _tx: StorageTransaction,
   folderIds: string[],
 ): Promise<string[]> {
   const resourceIds: string[] = [];
@@ -288,12 +312,17 @@ async function collectResourcesInFolders(
       predicate: IN_FOLDER_PREDICATE,
       objectAtomId: folderId,
     });
+    const candidateIds: string[] = [];
     for (const e of edges) {
       if (e.subject.kind !== 'atom') continue;
-      const subjAtom = await tx.getAtom(e.subject.atomId);
-      const domain = subjAtom?.payload.domain ?? '';
-      if (CASCADE_RESOURCE_DOMAINS.has(domain)) {
-        resourceIds.push(e.subject.atomId);
+      candidateIds.push(e.subject.atomId);
+    }
+    if (candidateIds.length === 0) continue;
+    // 单 query 拿全候选 atom + 应用层按 domain 白名单过滤
+    const candidateAtoms = await storage.listAtoms({ atomIds: candidateIds });
+    for (const a of candidateAtoms) {
+      if (CASCADE_RESOURCE_DOMAINS.has(a.payload.domain)) {
+        resourceIds.push(a.id);
       }
     }
   }

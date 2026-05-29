@@ -437,10 +437,19 @@ async function canvasAtomToRecord(
   for (const e of inCanvasEdges) {
     if (e.subject.kind === 'atom') instanceIds.push(e.subject.atomId);
   }
-  // 批读 instance atoms
+  // 批读 instance atoms — P0-2 (2026-05-29 data-layer-audit): 一次 SQL IN 替代 for-loop getAtom 串行(B3 C1)
+  // 注:instanceAtomToObject 内部对 text-label 还会 per-instance 查 hasContent + 拉 pm atom;
+  // 那是嵌套 capability call 不在本期 audit P0 范围(audit §1.5 C3 v1.5 工程)。
+  const instanceAtomsRaw = instanceIds.length > 0
+    ? await storage.listAtoms({ domain: INSTANCE_DOMAIN, atomIds: instanceIds })
+    : [];
+  const instanceAtomById = new Map<string, AtomEntity<'graph-instance'>>();
+  for (const a of instanceAtomsRaw) {
+    instanceAtomById.set(a.id, a as AtomEntity<'graph-instance'>);
+  }
   const instances: Array<Record<string, unknown>> = [];
   for (const id of instanceIds) {
-    const a = await storage.getAtom<'graph-instance'>(id);
+    const a = instanceAtomById.get(id);
     if (!a || a.payload.domain !== INSTANCE_DOMAIN) continue;
     instances.push(await instanceAtomToObject(a));
   }

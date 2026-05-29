@@ -90,6 +90,14 @@ export interface AtomFilter {
   offset?: number;
   orderBy?: 'createdAt' | 'updatedAt';
   orderDirection?: 'asc' | 'desc';
+
+  /**
+   * 批量 atom id 过滤（SQL IN）
+   * 新增（P0-2, 2026-05-29 data-layer-audit）:
+   * 替代 `Promise.all(ids.map(id => storage.getAtom(id)))` 雪崩。
+   * 空 array 短路返回 []。
+   */
+  atomIds?: string[];
 }
 
 export interface PutEdgeInput {
@@ -111,6 +119,27 @@ export interface EdgeFilter {
   offset?: number;
   orderBy?: 'createdAt' | 'updatedAt';
   orderDirection?: 'asc' | 'desc';
+
+  /**
+   * 批量 subject atom id 过滤（SQL IN）
+   * 新增（P0-1, 2026-05-29 data-layer-audit）:
+   * 与 `subjectAtomId` 互斥（同时传 throw）；空 array 短路返回 []。
+   */
+  subjectAtomIds?: string[];
+
+  /**
+   * 批量 object atom id 过滤（SQL IN）
+   * 新增（P0-1, 2026-05-29 data-layer-audit）:
+   * 与 `objectAtomId` 互斥（同时传 throw）；空 array 短路返回 []。
+   */
+  objectAtomIds?: string[];
+
+  /**
+   * literal object 过滤（SQL `object.kind='literal' AND object.type=? AND object.value=?`）
+   * 新增（P0-3, 2026-05-29 data-layer-audit）:
+   * 用于 folder.listFolders(viewType)：object 是 string literal "note" / "ebook" 等。
+   */
+  objectLiteral?: { type: string; value: unknown };
 }
 
 export interface SubgraphQuery {
