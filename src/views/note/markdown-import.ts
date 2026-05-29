@@ -31,19 +31,22 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { NoteCapabilityApi } from '@capabilities/note/types';
 import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types';
 import type {
+  AtomInput,
   DriverSerialized,
-  TextEditingApi,
   PMDocNode,
 } from '@capabilities/text-editing/types';
+// 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时删除):
+// 走 content-ingest.markdownToAtoms 产 Atom[] → 临时回 atomsToProseMirror 拼 PMNode[] →
+// 装 DriverSerialized → 旧 createNote 单条入口.
+// Stage 7 整段切到 Atom[] → createNotesBatch,届时本 import + 临时桥代码一并删除.
+import { markdownToAtoms } from '@capabilities/content-ingest';
+import { atomsToProseMirror } from '@capabilities/text-editing/converters/atoms-to-pm';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
 }
 function folderCap(): FolderCapabilityApi {
   return requireCapabilityApi<FolderCapabilityApi>('folder');
-}
-function textEditing(): TextEditingApi {
-  return requireCapabilityApi<TextEditingApi>('text-editing');
 }
 
 export interface ScannedFile {
@@ -582,8 +585,6 @@ export async function importMarkdownBatch(
   const createdFolderIds: string[] = [];
   const skipped: Array<{ relPath: string; reason: string }> = [];
 
-  const tea = textEditing();
-
   // 3. 逐文件:建 folder 链 → 转 PM → 落 note
   for (const parsed of parsedAll) {
     const { scanned } = parsed;
@@ -654,7 +655,15 @@ export async function importMarkdownBatch(
         }
 
         try {
-          const content = await tea.markdownToProseMirror(chunk.body);
+          // 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时删除):
+          // markdownToAtoms 产 Atom[] -> atomsToProseMirror 临时拼回 PMNode[] -> DriverSerialized.
+          const { atoms, warnings } = await markdownToAtoms(chunk.body);
+          if (warnings.length) {
+            console.warn('[markdown-import] markdownToAtoms warnings:', warnings);
+          }
+          // 临时桥 cast:content-ingest Atom.id 是 `string | null` 而 atoms-to-pm 内部
+          // AtomInput.id?: string;形态字面同形,字段 drift 留 Stage 7 收敛 AtomInput SSOT.
+          const content = await atomsToProseMirror({ atoms: atoms as unknown as AtomInput[] });
           // import-cache 04-pm-docs 落盘:看 md-to-pm 是否在某 chunk 转崩成 raw text
           if (scanned.cacheFileIdx !== undefined) {
             window.electronAPI.importCacheDumpPmDoc({
@@ -711,7 +720,15 @@ export async function importMarkdownBatch(
     }
 
     try {
-      const content = await tea.markdownToProseMirror(scanned.content);
+      // 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时删除):
+      // markdownToAtoms 产 Atom[] -> atomsToProseMirror 临时拼回 PMNode[] -> DriverSerialized.
+      const { atoms, warnings } = await markdownToAtoms(scanned.content);
+      if (warnings.length) {
+        console.warn('[markdown-import] markdownToAtoms warnings:', warnings);
+      }
+      // 临时桥 cast:content-ingest Atom.id 是 `string | null` 而 atoms-to-pm 内部
+      // AtomInput.id?: string;形态字面同形,字段 drift 留 Stage 7 收敛 AtomInput SSOT.
+      const content = await atomsToProseMirror({ atoms: atoms as unknown as AtomInput[] });
       if (scanned.cacheFileIdx !== undefined) {
         window.electronAPI.importCacheDumpPmDoc({
           fileIdx: scanned.cacheFileIdx,

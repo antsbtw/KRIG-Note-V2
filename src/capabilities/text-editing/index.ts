@@ -31,9 +31,11 @@ import {
   extractFirstParagraphText,
 } from '@drivers/text-editing-driver';
 import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry';
-import { atomsToProseMirror } from './converters/atoms-to-pm';
-import { sanitizeAtoms } from './converters/sanitize-atoms';
-import { markdownToProseMirror } from './converters/md-to-pm';
+// 5B Stage 6 字面拍板:atoms-to-pm / md-to-pm / sanitize-atoms 三函数从 capability
+// 公开 API 删除。物理文件 converters/atoms-to-pm.ts + converters/md-to-pm.ts 保留
+// 作为 capability 内部工具(canvas-text-node + content-ingest 深路径 import 使用);
+// sanitize-atoms.ts 物理文件本 Stage 删除(content-ingest 已有副本,见
+// `@capabilities/content-ingest/internal/sanitize-atoms`).
 import { registerTextEditingPopups } from './ui/popups';
 import { registerTextEditingFullscreenOverlays } from './ui/fullscreen-overlays';
 import { registerTextEditingHelpPanels } from './ui/help-panels';
@@ -65,9 +67,6 @@ const api: TextEditingApi = {
   createEmptyDoc,
   extractFirstParagraphText,
   instanceRegistry,
-  atomsToProseMirror,
-  sanitizeAtoms,
-  markdownToProseMirror,
   ui: {
     floatingToolbar: floatingToolbarFactory,
     toolbar: toolbarFactory,
