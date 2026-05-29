@@ -288,11 +288,17 @@ function injectIdsForCreate(doc: PmPayload): PmPayload {
 export async function listNotes(): Promise<NoteInfo[]> {
   // sub-phase 1 后 pm domain 不再是 note 专属(canvas-store 也用),
   // 故必须叠加 hasNoteView 边过滤区分 note 与 block atom / graph text-node / reading-thought
-  const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
-  const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
-  const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
+  //
+  // P1-1 (2026-05-29 data-layer-audit): 走 listMarkerAtoms,SQL 走 INSIDE subquery,
+  // 免拉全 pm domain (1000 note + 100000 block atom) 再应用层 filter.
+  const noteAtoms = await storage.listMarkerAtoms<'pm'>({
+    domain: NOTE_DOMAIN,
+    markerPredicate: HAS_NOTE_VIEW_PREDICATE,
+    markerObjectMatch: { kind: 'literal', type: 'boolean', value: true },
+  });
+  const noteIdsArr = noteAtoms.map((a) => a.id);
+
   // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 note 的边,免全库扫
-  const noteIdsArr = [...noteAtomIds];
   const folderEdges = noteIdsArr.length > 0
     ? await storage.listEdges({
         predicate: IN_FOLDER_PREDICATE,
@@ -305,10 +311,6 @@ export async function listNotes(): Promise<NoteInfo[]> {
       folderBySubject.set(e.subject.atomId, e.object.atomId);
     }
   }
-
-  // 字面只对 hasNoteView marker 的 atom 字面 build NoteInfo;
-  // 字面跳过 block atom(那些 listAtoms 也返回了但不是 note container)
-  const noteAtoms = atoms.filter((a) => noteAtomIds.has(a.id));
 
   // 串行(for await)避免 SurrealDB ws 雪崩(2026-05-28 实测 Promise.all 92 路
   // 并发触发 NotAllowed auth crash);代价是首次冷启动 N 篇 × 200ms 量级,
@@ -355,11 +357,16 @@ export async function listNoteTitles(): Promise<Array<{
   title: string;
   folderId: string | null;
 }>> {
-  const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
-  const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
-  const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
+  // P1-1 (2026-05-29 data-layer-audit): 走 listMarkerAtoms,SQL 走 INSIDE subquery,
+  // 免拉全 pm domain (1000 note + 100000 block atom) 再应用层 filter.
+  const noteAtoms = await storage.listMarkerAtoms<'pm'>({
+    domain: NOTE_DOMAIN,
+    markerPredicate: HAS_NOTE_VIEW_PREDICATE,
+    markerObjectMatch: { kind: 'literal', type: 'boolean', value: true },
+  });
+  const noteIdsArr2 = noteAtoms.map((a) => a.id);
+
   // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 note 的边,免全库扫
-  const noteIdsArr2 = [...noteAtomIds];
   const folderEdges = noteIdsArr2.length > 0
     ? await storage.listEdges({
         predicate: IN_FOLDER_PREDICATE,
@@ -373,19 +380,20 @@ export async function listNoteTitles(): Promise<Array<{
     }
   }
 
-  const noteAtoms = atoms.filter((a) => noteAtomIds.has(a.id));
-
   // 若有 note 缺缓存且 migration 023 正在跑 → 等它完成再走 fallback;
   // 否则两边并发同时 assemble + putAtom 会触发 ws 雪崩
   const hasUncached = noteAtoms.some((a) => readCachedTitle(a.payload.payload) === null);
   if (hasUncached) {
     await waitForTitleBackfill();
     // backfill 完成后重新拉 atoms(payload 已更新)
-    const refreshed = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
+    // P1-1: 同走 listMarkerAtoms,免全库扫 + filter
+    const refreshed = await storage.listMarkerAtoms<'pm'>({
+      domain: NOTE_DOMAIN,
+      markerPredicate: HAS_NOTE_VIEW_PREDICATE,
+      markerObjectMatch: { kind: 'literal', type: 'boolean', value: true },
+    });
     noteAtoms.length = 0;
-    for (const a of refreshed) {
-      if (noteAtomIds.has(a.id)) noteAtoms.push(a);
-    }
+    for (const a of refreshed) noteAtoms.push(a);
   }
 
   // 串行(for await)避免 SurrealDB ws 雪崩,代价是首次冷启动 N 篇老 note 慢

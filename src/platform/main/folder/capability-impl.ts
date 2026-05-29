@@ -85,23 +85,16 @@ export async function createFolder(
 
 export async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
   // decision 021 §4.1: folderForView 边表达 view 归属
-  // P0-3 (2026-05-29 data-layer-audit): 走 SQL objectLiteral filter,免应用层全扫 + filter
+  // P1-1 (2026-05-29 data-layer-audit): 走 listMarkerAtoms,SQL 走 INSIDE subquery,
+  // 一次 round-trip 取代 listEdges + listAtoms 两步.
   const viewMarker = viewMarkerFor(viewType);
-  const viewEdges = await storage.listEdges({
-    predicate: FOLDER_FOR_VIEW_PREDICATE,
-    objectLiteral: { type: 'string', value: viewMarker },
+  const inViewAtoms = await storage.listMarkerAtoms<'folder'>({
+    domain: FOLDER_DOMAIN,
+    markerPredicate: FOLDER_FOR_VIEW_PREDICATE,
+    markerObjectMatch: { kind: 'literal', type: 'string', value: viewMarker },
   });
-  const folderIdsInView = viewEdges.map((e) => e.subject.atomId);
+  const folderIdsInView = inViewAtoms.map((a) => a.id);
   const folderIdsInViewSet = new Set(folderIdsInView);
-
-  // 仅拉 in-view 那批 folder atom,免拉全 folder domain 再 filter
-  // P0-2 (2026-05-29 data-layer-audit): atomIds 批量 SQL IN
-  const inViewAtoms = folderIdsInView.length > 0
-    ? ((await storage.listAtoms({
-        domain: FOLDER_DOMAIN,
-        atomIds: folderIdsInView,
-      })) as AtomEntity<'folder'>[])
-    : [];
 
   // 一次性查 in-view folder 的 outgoing inFolder 边(parent 关系)
   // P0-1 (2026-05-29 data-layer-audit): SQL IN 替代全扫
