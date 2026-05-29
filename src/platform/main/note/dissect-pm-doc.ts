@@ -97,6 +97,12 @@ function processChildren(
 
   const siblingAtomIds: string[] = [];
 
+  // 5B Stage 3 (Q2 选项 B) + 5A 拍板: tableRow 不是 atom, 但其在父 table 内的位置 = cells 的 rowIndex.
+  // 这里维护一个 tableRow 计数器, 进 tableRow 分支时字面 ++; 注入到 cell.attrs.rowIndex.
+  // 跨 children 序列只对当前一层 table 有效 (PM schema 不允许 table 嵌 table; tableRow 不会跨非
+  // table 父).
+  let pmTableRowIdx = 0;
+
   for (const child of children) {
     if (isStructuralContainer(child)) {
       // 字面跳层:结构性容器自身不生成 atom,把其 children 字面提升到 parent 层
@@ -104,10 +110,32 @@ function processChildren(
       if (child.type === 'bulletList') childListType = 'bullet';
       else if (child.type === 'orderedList') childListType = 'ordered';
       // taskList 字面其 child 是 taskItem(另一 NodeSpec)无歧义,childListType 为 null
+
+      // 5B Stage 3: tableRow 跳层时, 字面给 cells 注入 rowIndex/colIndex
+      // (Q2 选项 B: dissect 期注入, PM tree 内不实时维护; 决议 026 §6.1 / 5A §5.3).
+      // 注: PM schema (tableRow > (tableCell | tableHeader)+) 保证 tableRow.content 都是 cell/header,
+      // 但本算法字面不假设 — 字面只对带 attrs.id 字段的 child 注入 (非 cell/header 字面跳过, 算法安全).
+      let injectedContent: PmPayload[] | undefined = child.content;
+      if (child.type === 'tableRow' && Array.isArray(child.content)) {
+        const rowIdx = pmTableRowIdx++;
+        injectedContent = child.content.map((cell, colIdx) => {
+          // 仅当 cell 有 attrs 且声明 id 字段 (即 tableCell/tableHeader, S1.3.2/S1.3.3 加的字段) 时注入
+          if (cell.attrs === undefined || !('id' in cell.attrs)) return cell;
+          return {
+            ...cell,
+            attrs: {
+              ...cell.attrs,
+              rowIndex: rowIdx,
+              colIndex: colIdx,
+            },
+          };
+        });
+      }
+
       // drawSiblingChain=false:grandchildren 会被外层 push(...grandchildIds) 接走,
       // 外层会统一画链(含跨容器边界的 prev→A、C→next),内层不能再画一次否则双倍。
       const grandchildIds = processChildren(
-        child.content,
+        injectedContent,
         parentAtomId,
         childListType,
         ctx,
