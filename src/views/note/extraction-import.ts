@@ -22,7 +22,7 @@
  * 2. 每个 chapter:
  *    a. atoms = [noteTitle, ...flatten(pages.map(p => p.atoms with from.pdfPage))]
  *    b. sanitizeAtoms(atoms)
- *    c. atomsToProseMirror({atoms}) → PM doc content
+ *    c. PM doc 拼装(Stage 7 后下沉到 capability/storage 层,view 不再做)
  *    d. 封 DriverSerialized 信封
  *    e. noteCapability.createNote(doc, folderId) (title 派生自 doc 首段)
  * 3. 同名同文件夹章节去重
@@ -32,41 +32,21 @@
  */
 
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { NoteCapabilityApi } from '@capabilities/note/types';
+import type { NoteCapabilityApi, CreateNoteBatchItem } from '@capabilities/note/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
-import type {
-  AtomInput,
-  DriverSerialized,
-} from '@capabilities/text-editing/types';
-// 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时整段走 krigBatchToAtoms):
-// TextEditingApi 不再暴露 sanitizeAtoms / atomsToProseMirror 公开字段.
-// sanitizeAtoms 归属 content-ingest capability(5B §7.1.3);
-// atomsToProseMirror 物理文件留在 text-editing/converters/(capability 内部工具),
-// 通过深路径 import 临时复用 — Stage 7 后整段切换到
-// content-ingest.krigBatchToAtoms → createNotesBatch(KrigImportBatch 入口).
-import { sanitizeAtoms } from '@capabilities/content-ingest/internal/sanitize-atoms';
-import { atomsToProseMirror } from '@capabilities/text-editing/converters/atoms-to-pm';
+// 5B Stage 7 重做(2026-05-29 规范字面对齐):
+// extraction batch → krigBatchToAtoms 产 PmAtomDraft[] (per chapter) →
+// noteCap.createNotesBatch 单事务多 note.
+// 删除 V1 import 中间形态 + V1 atom→PM 转换器 + sanitizeAtoms + buildAtoms + DriverSerialized
+// — view 端不再做 PM doc 拼装.
+import { krigBatchToAtoms } from '@capabilities/content-ingest';
+import type { KrigImportBatch } from '@capabilities/content-ingest';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
 }
 function folderCap(): FolderCapabilityApi {
   return requireCapabilityApi<FolderCapabilityApi>('folder');
-}
-
-interface ChapterInput {
-  fileName?: string;
-  bookName?: string;
-  title?: string;
-  pageStart?: number;
-  pageEnd?: number;
-  pages?: Array<{ pageNumber: number; atoms: unknown[] }>;
-}
-
-interface BatchInput {
-  type?: string;
-  chapters?: ChapterInput[];
-  bookName?: string;
 }
 
 export interface ImportResult {
@@ -76,24 +56,34 @@ export interface ImportResult {
 }
 
 /**
- * 单批导入入口。
+ * 单批导入入口 (5B Stage 7 重做).
  *
- * 不抛异常 — 失败时返回 noteIds=[],skippedTitles 含 'ALL_FAILED' 标记。
+ * 路径:KRIG_IMPORT batch → krigBatchToAtoms 产 chapter × PmAtomDraft[]
+ *      → noteCap.createNotesBatch 单事务多 note.
+ *
+ * 不抛异常 — 失败时返回 noteIds=[], skippedTitles 含 'ALL_FAILED' 标记.
  */
 export async function importExtractionBatch(data: unknown): Promise<ImportResult> {
-  const batch = data as BatchInput;
+  const batch = data as KrigImportBatch;
   const chapters = Array.isArray(batch?.chapters) ? batch.chapters : [];
   if (chapters.length === 0) {
     return { folderId: '', noteIds: [], skippedTitles: [] };
   }
 
-  const bookName = extractBookName(batch);
+  // 1. krigBatchToAtoms 产 章节 × PmAtomDraft[]
+  const { chapters: chapterResults } = await krigBatchToAtoms(batch);
+  if (chapterResults.length === 0) {
+    return { folderId: '', noteIds: [], skippedTitles: ['ALL_FAILED'] };
+  }
+  const bookName = chapterResults[0].bookName;
+
+  // 2. 拿/建文件夹
   const folderId = await getOrCreateFolder(bookName);
   if (!folderId) {
     return { folderId: '', noteIds: [], skippedTitles: ['ALL_FAILED'] };
   }
 
-  // 收集已存在的同文件夹下笔记标题(去重)
+  // 3. 收集已存在的同文件夹下笔记标题(去重)
   const allNotes = await noteCap().listNotes();
   const existingTitles = new Set(
     allNotes
@@ -101,63 +91,46 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
       .map((n) => n.title),
   );
 
-  const noteIds: string[] = [];
+  // 4. 拼 batch items (跳过同名重复)
+  const batchItems: CreateNoteBatchItem[] = [];
+  const batchLabels: string[] = [];
   const skippedTitles: string[] = [];
 
-  for (const ch of chapters) {
-    const title = ch.title || `${bookName} (p${ch.pageStart ?? '?'}-${ch.pageEnd ?? '?'})`;
-    if (existingTitles.has(title)) {
-      skippedTitles.push(title);
+  for (const chRes of chapterResults) {
+    if (chRes.warnings.length) {
+      console.warn(`[extraction-import] chapter "${chRes.title}" warnings:`, chRes.warnings);
+    }
+    if (existingTitles.has(chRes.title)) {
+      skippedTitles.push(chRes.title);
       continue;
     }
+    batchItems.push({
+      atoms: chRes.atoms,
+      folderId,
+      titleHint: chRes.title,
+    });
+    batchLabels.push(chRes.title);
+    existingTitles.add(chRes.title);
+  }
 
-    const atoms = buildAtoms(title, ch);
-    const cleaned = sanitizeAtoms(atoms);
-
-    let pmContent;
-    try {
-      pmContent = await atomsToProseMirror({ atoms: cleaned });
-    } catch (err) {
-      console.error('[extraction-import] atomsToProseMirror failed:', title, err);
-      continue;
-    }
-
-    // 诊断:统计 PM doc 顶层节点 type + 扫描嵌套是否还有 paragraph/heading 漏网
-    const topTypes: Record<string, number> = {};
-    const leaked: string[] = [];
-    const scan = (n: { type?: string; content?: unknown[] }): void => {
-      if (n.type === 'paragraph' || n.type === 'heading') {
-        leaked.push(n.type);
-      }
-      if (Array.isArray(n.content)) {
-        for (const c of n.content as Array<{ type?: string; content?: unknown[] }>) scan(c);
-      }
-    };
-    for (const n of pmContent) {
-      const t = n.type ?? '?';
-      topTypes[t] = (topTypes[t] ?? 0) + 1;
-      scan(n);
-    }
+  // 5. 单事务批量写入
+  const noteIds: string[] = [];
+  if (batchItems.length > 0) {
+    const result = await noteCap().createNotesBatch({
+      items: batchItems,
+      broadcastMode: 'final',
+    });
     console.log(
-      '[extraction-import] PM doc:',
-      title,
-      '| topTypes=',
-      topTypes,
-      '| leaked paragraph/heading=',
-      leaked.length,
+      `[extraction-import] BATCH createNotesBatch: items=${batchItems.length} notes=${result.notes.length} failures=${result.failures.length}`,
     );
-
-    const doc: DriverSerialized = {
-      format: 'pm-doc-json',
-      version: '0.1',
-      payload: { type: 'doc', content: pmContent },
-    };
-
-    // L7-sub2:noteCap().createNote 是 async,title 字段已不可写
-    // (派生自 doc.content[0]),import 路径用 doc 首段文本 (= title) 自然兜底
-    const note = await noteCap().createNote(doc, folderId);
-    noteIds.push(note.id);
-    existingTitles.add(title);
+    for (const note of result.notes) {
+      noteIds.push(note.id);
+    }
+    for (const f of result.failures) {
+      const label = f.index >= 0 ? batchLabels[f.index] ?? `index=${f.index}` : 'tx-failed';
+      console.warn(`[extraction-import] BATCH failure ${label}: ${f.error}`);
+      skippedTitles.push(`${label} (FAILED: ${f.error})`);
+    }
   }
 
   return { folderId, noteIds, skippedTitles };
@@ -165,58 +138,10 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
 
 // ── Helpers ──
 
-function extractBookName(batch: BatchInput): string {
-  // batch.bookName 优先;否则找首个 chapter 的 bookName / fileName
-  if (typeof batch.bookName === 'string' && batch.bookName) {
-    return stripPdfExt(batch.bookName);
-  }
-  const firstCh = batch.chapters?.[0];
-  const candidate = firstCh?.bookName || firstCh?.fileName || 'PDF Extraction';
-  return stripPdfExt(candidate);
-}
-
-function stripPdfExt(name: string): string {
-  return name.replace(/\.pdf$/i, '');
-}
-
 async function getOrCreateFolder(name: string): Promise<string | null> {
   const folders = await folderCap().listFolders('note');
   const existing = folders.find((f) => f.title === name && f.parentId === null);
   if (existing) return existing.id;
   const folder = await folderCap().createFolder(name, null, 'note');
   return folder?.id ?? null;
-}
-
-/**
- * 构造章节 atom 数组:
- * - 首个 atom = noteTitle(章节标题)
- * - 后续 = flatten(pages.map(p => p.atoms 加 from.pdfPage))
- *
- * 不做 sanitize(交给 caller 调 sanitizeAtoms)
- */
-function buildAtoms(title: string, ch: ChapterInput): AtomInput[] {
-  const out: AtomInput[] = [];
-
-  out.push({
-    type: 'noteTitle',
-    content: { children: [{ type: 'text', text: title }] },
-  });
-
-  const pages = Array.isArray(ch.pages) ? ch.pages : [];
-  for (const page of pages) {
-    const pageAtoms = Array.isArray(page.atoms) ? (page.atoms as AtomInput[]) : [];
-    for (const atom of pageAtoms) {
-      const stamped: AtomInput = {
-        ...atom,
-        from: atom.from ?? {
-          extractionType: 'pdf',
-          pdfPage: page.pageNumber,
-          extractedAt: Date.now(),
-        },
-      };
-      out.push(stamped);
-    }
-  }
-
-  return out;
 }

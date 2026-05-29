@@ -23,24 +23,18 @@
  *
  * 跟 extraction-import 的区别:
  * - extraction 单一 root folder(bookName);本模块是 N 层 folder 树
- * - extraction 用 atomsToProseMirror;本模块用 markdownToProseMirror
+ * - extraction 用 krigBatchToAtoms;本模块用 markdownToAtoms (5B Stage 7 重做后)
  * - extraction 同名直接 skip;本模块同名加 (2) 后缀
  */
 
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { NoteCapabilityApi } from '@capabilities/note/types';
+import type { NoteCapabilityApi, CreateNoteBatchItem } from '@capabilities/note/types';
 import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types';
-import type {
-  AtomInput,
-  DriverSerialized,
-  PMDocNode,
-} from '@capabilities/text-editing/types';
-// 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时删除):
-// 走 content-ingest.markdownToAtoms 产 Atom[] → 临时回 atomsToProseMirror 拼 PMNode[] →
-// 装 DriverSerialized → 旧 createNote 单条入口.
-// Stage 7 整段切到 Atom[] → createNotesBatch,届时本 import + 临时桥代码一并删除.
+// 5B Stage 7 重做(2026-05-29 规范字面对齐):
+// markdown → markdownToAtoms 产 PmAtomDraft[] → noteCap.createNotesBatch 单事务多 note.
+// 删除 V1 import 中间形态 + V1 atom→PM 转换器 + DriverSerialized 临时桥 — view 端不再做
+// PM doc 拼装,storage 端 putAtom + putEdge 字面持久化, getNote 走 assemblePmDoc 重建.
 import { markdownToAtoms } from '@capabilities/content-ingest';
-import { atomsToProseMirror } from '@capabilities/text-editing/converters/atoms-to-pm';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
@@ -455,80 +449,17 @@ async function ensureSplitDocFolder(
 }
 
 /**
- * 确保 doc 首块是 V2 schema 强制的"isTitle paragraph"
- * (driver title-guard plugin appendTransaction 会自动补,而 buildNoteInfo
- *  里的 deriveTitle 取 content[0] inline text — 必须自己产出合规结构)
+ * 5B Stage 7 重做: import → createNotesBatch 路径下,title 注入由 markdownToAtoms
+ * 的 titleHint option 字面承担 (drafts[0] 字面为 paragraph isTitle:true / 或前置).
  *
- * 策略(2026-05-27 反馈 — 修正"NavSide 显示未命名 + PM 顶部多余 Untitled"问题):
- * 1. 首块 = `{ type: 'paragraph', attrs: { isTitle: true }, content: [{ type:'text', text: title }] }`
- * 2. 原文剥掉头部 placeholder heading(`# Untitled` / `# 未命名` 等)
- * 3. 原文若首块是真 heading 且 text === title → 删掉(避免双重标题视觉)
- * 4. 其他原文内容原样保留
+ * 故 import 侧字面不再做 PM doc 拼装 — ensureLeadingTitle / createNoteInFolder
+ * 删除, 改为 collectBatchItem 收集 PmAtomDraft[] + folderId + titleHint 到 items
+ * 数组, 末尾调 noteCap.createNotesBatch.
+ *
+ * (旧版本 ensureLeadingTitle 剥头 placeholder heading 的兜底逻辑由 markdown-to-atoms
+ *  保留 — sanitize-atoms 8 条容错本期未跑,但 isTitle 拉到首块 atom 与原 markdown
+ *  首 heading 共存属可接受 view 行为,不再剥.)
  */
-function ensureLeadingTitle(content: PMDocNode[], title: string): PMDocNode[] {
-  let working = content.slice();
-
-  // 剥头部 placeholder / 空 heading
-  while (working.length > 0) {
-    const first = working[0];
-    if (first.type === 'heading') {
-      const text = extractInlineText(first).trim();
-      if (!text || isPlaceholderTitle(text)) {
-        working = working.slice(1);
-        continue;
-      }
-    }
-    break;
-  }
-
-  // 若首块是真 heading 且文本 === title — 删它(已经被 title paragraph 表达)
-  if (working.length > 0) {
-    const first = working[0];
-    if (first.type === 'heading') {
-      const text = extractInlineText(first).trim();
-      if (text === title) {
-        working = working.slice(1);
-      }
-    }
-  }
-
-  // 强制首块 = isTitle paragraph(V2 driver 强约束)
-  const titleNode: PMDocNode = {
-    type: 'paragraph',
-    attrs: { isTitle: true },
-    content: [{ type: 'text', text: title }],
-  };
-
-  return [titleNode, ...working];
-}
-
-/** 递归抠节点 inline text(text 节点 + 嵌套 content)*/
-function extractInlineText(node: PMDocNode): string {
-  if (node.type === 'text') return node.text ?? '';
-  if (!node.content) return '';
-  return node.content.map(extractInlineText).join('');
-}
-
-async function createNoteInFolder(
-  title: string,
-  content: PMDocNode[],
-  folderId: string | null,
-  cache: FolderTreeCache,
-  createdNoteIds: string[],
-): Promise<void> {
-  const taken = noteNamesAt(cache, folderId);
-  const finalTitle = uniqueName(title, taken);
-  const contentWithTitle = ensureLeadingTitle(content, finalTitle);
-
-  const doc: DriverSerialized = {
-    format: 'pm-doc-json',
-    version: '0.1',
-    payload: { type: 'doc', content: contentWithTitle },
-  };
-
-  const note = await noteCap().createNote(doc, folderId);
-  createdNoteIds.push(note.id);
-}
 
 /**
  * 单批导入入口。
@@ -585,7 +516,12 @@ export async function importMarkdownBatch(
   const createdFolderIds: string[] = [];
   const skipped: Array<{ relPath: string; reason: string }> = [];
 
-  // 3. 逐文件:建 folder 链 → 转 PM → 落 note
+  // 5B Stage 7: 收集 batch items, 末尾 1 次 createNotesBatch.
+  // batchItems 与 batchLabels 并行 (i 索引对齐),用于失败时 console.warn 标位.
+  const batchItems: CreateNoteBatchItem[] = [];
+  const batchLabels: string[] = [];
+
+  // 3. 逐文件:建 folder 链 → 转 PmAtomDraft[] → 收集到 batchItems
   for (const parsed of parsedAll) {
     const { scanned } = parsed;
     const { dirSegments } = splitRelPath(scanned.relPath);
@@ -604,8 +540,6 @@ export async function importMarkdownBatch(
 
     if (shouldSplit) {
       // 切分时为该文档建一个子 folder,N 个 chunk 都进去
-      // 命名优先级:封面标题(coverTitle)> 文件名
-      // (避免扁平化污染 root / 父 folder — 2026-05-27 反馈)
       const docFolderName = (scanned.coverTitle?.trim() || filenameTitle(scanned.relPath));
       const docFolderId = await ensureSplitDocFolder(
         docFolderName,
@@ -615,7 +549,6 @@ export async function importMarkdownBatch(
       );
 
       const chunks = splitByMaxLevel(scanned.content, parsed);
-      // 序号位数:动态(5 章 → 2 位 / 100 章 → 3 位)
       const padWidth = Math.max(2, String(chunks.length).length);
 
       console.log(
@@ -623,15 +556,13 @@ export async function importMarkdownBatch(
       );
 
       let chunkIdx = 0;
-      let chunkSuccess = 0;
+      let chunkCollected = 0;
       let chunkFail = 0;
       for (const chunk of chunks) {
         const prefix = String(chunkIdx).padStart(padWidth, '0');
 
         let rawTitle: string;
         if (chunk.titleHint) {
-          // 原 H1 文本 — 剥掉用户在 docx 里手敲的章节号(如 "1 需求分析" / "1.1 引言"),
-          // 避免跟系统加的统一编号重复(2026-05-27 反馈)
           rawTitle = stripLeadingChapterNumber(chunk.titleHint);
         } else if (chunkIdx === 0) {
           rawTitle = 'Preamble';
@@ -640,67 +571,62 @@ export async function importMarkdownBatch(
         }
 
         const chunkTitle = `${prefix} ${rawTitle}`;
-        const chunkStart = performance.now();
         const chunkBytes = chunk.body.length;
+        const chunkStart = performance.now();
 
-        // import-cache 03-chunks 落盘(2026-05-27 长文档乱码诊断)
-        // 在 PM 转换前先落:用户可对照 02-postprocessed 切出来对不对
+        // 同名去重 — 在 cache 里 reserve title (避免下游 batch 多 chunk 同名)
+        const taken = noteNamesAt(cache, docFolderId);
+        const finalTitle = uniqueName(chunkTitle, taken);
+
         if (scanned.cacheFileIdx !== undefined) {
           window.electronAPI.importCacheDumpChunk({
             fileIdx: scanned.cacheFileIdx,
             chunkIdx,
-            chunkTitle,
+            chunkTitle: finalTitle,
             content: chunk.body,
           });
         }
 
         try {
-          // 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时删除):
-          // markdownToAtoms 产 Atom[] -> atomsToProseMirror 临时拼回 PMNode[] -> DriverSerialized.
-          const { atoms, warnings } = await markdownToAtoms(chunk.body);
+          // 5B Stage 7: markdownToAtoms 产 PmAtomDraft[] → 收集到 batchItems.
+          const { atoms, warnings } = await markdownToAtoms(chunk.body, { titleHint: finalTitle });
           if (warnings.length) {
             console.warn('[markdown-import] markdownToAtoms warnings:', warnings);
           }
-          // 临时桥 cast:content-ingest Atom.id 是 `string | null` 而 atoms-to-pm 内部
-          // AtomInput.id?: string;形态字面同形,字段 drift 留 Stage 7 收敛 AtomInput SSOT.
-          const content = await atomsToProseMirror({ atoms: atoms as unknown as AtomInput[] });
-          // import-cache 04-pm-docs 落盘:看 md-to-pm 是否在某 chunk 转崩成 raw text
           if (scanned.cacheFileIdx !== undefined) {
             window.electronAPI.importCacheDumpPmDoc({
               fileIdx: scanned.cacheFileIdx,
               chunkIdx,
-              pmDoc: content,
+              pmDoc: atoms,
             });
           }
-          await createNoteInFolder(
-            chunkTitle,
-            content,
-            docFolderId,
-            cache,
-            createdNoteIds,
-          );
-          chunkSuccess++;
+          batchItems.push({
+            atoms,
+            folderId: docFolderId,
+            titleHint: finalTitle,
+          });
+          batchLabels.push(`${scanned.relPath}::chunk-${chunkIdx} (${finalTitle})`);
+          chunkCollected++;
           const elapsed = Math.round(performance.now() - chunkStart);
           console.log(
-            `[markdown-import]   ✓ chunk ${chunkIdx + 1}/${chunks.length} "${chunkTitle}" (${chunkBytes}B, ${elapsed}ms)`,
+            `[markdown-import]   + chunk ${chunkIdx + 1}/${chunks.length} "${finalTitle}" collected (${chunkBytes}B, ${elapsed}ms)`,
           );
         } catch (err) {
           chunkFail++;
           const elapsed = Math.round(performance.now() - chunkStart);
-          // 升级到 console.error 让终端高亮(WARN 容易被淹没)
           console.error(
-            `[markdown-import]   ✗ chunk ${chunkIdx + 1}/${chunks.length} "${chunkTitle}" FAILED (${chunkBytes}B, ${elapsed}ms):`,
+            `[markdown-import]   ✗ chunk ${chunkIdx + 1}/${chunks.length} "${finalTitle}" markdownToAtoms FAILED (${chunkBytes}B, ${elapsed}ms):`,
             err,
           );
           skipped.push({
-            relPath: `${scanned.relPath}::chunk-${chunkIdx} (${chunkTitle})`,
+            relPath: `${scanned.relPath}::chunk-${chunkIdx} (${finalTitle})`,
             reason: errorToString(err),
           });
         }
         chunkIdx++;
       }
       console.log(
-        `[markdown-import] SPLIT ${scanned.relPath} done — success=${chunkSuccess} fail=${chunkFail}`,
+        `[markdown-import] SPLIT ${scanned.relPath} collected — ok=${chunkCollected} fail=${chunkFail}`,
       );
       continue;
     }
@@ -708,8 +634,11 @@ export async function importMarkdownBatch(
     // 普通文件:1:1 → note
     const fileStart = performance.now();
     const fileBytes = scanned.content.length;
+    const rawTitle = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
+    // 同名去重
+    const taken = noteNamesAt(cache, folderId);
+    const finalTitle = uniqueName(rawTitle, taken);
 
-    // import-cache 03-chunks/00 落盘(1:1 路径无切分,但仍写入第 0 号 chunk 便于对照)
     if (scanned.cacheFileIdx !== undefined) {
       window.electronAPI.importCacheDumpChunk({
         fileIdx: scanned.cacheFileIdx,
@@ -720,35 +649,55 @@ export async function importMarkdownBatch(
     }
 
     try {
-      // 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时删除):
-      // markdownToAtoms 产 Atom[] -> atomsToProseMirror 临时拼回 PMNode[] -> DriverSerialized.
-      const { atoms, warnings } = await markdownToAtoms(scanned.content);
+      const { atoms, warnings } = await markdownToAtoms(scanned.content, { titleHint: finalTitle });
       if (warnings.length) {
         console.warn('[markdown-import] markdownToAtoms warnings:', warnings);
       }
-      // 临时桥 cast:content-ingest Atom.id 是 `string | null` 而 atoms-to-pm 内部
-      // AtomInput.id?: string;形态字面同形,字段 drift 留 Stage 7 收敛 AtomInput SSOT.
-      const content = await atomsToProseMirror({ atoms: atoms as unknown as AtomInput[] });
       if (scanned.cacheFileIdx !== undefined) {
         window.electronAPI.importCacheDumpPmDoc({
           fileIdx: scanned.cacheFileIdx,
           chunkIdx: 0,
-          pmDoc: content,
+          pmDoc: atoms,
         });
       }
-      const title = inferTitle(parsed, scanned.relPath, scanned.coverTitle);
-      await createNoteInFolder(title, content, folderId, cache, createdNoteIds);
+      batchItems.push({
+        atoms,
+        folderId,
+        titleHint: finalTitle,
+      });
+      batchLabels.push(scanned.relPath);
       const elapsed = Math.round(performance.now() - fileStart);
       console.log(
-        `[markdown-import] ✓ ${scanned.relPath} → "${title}" (${fileBytes}B, ${elapsed}ms)`,
+        `[markdown-import] + ${scanned.relPath} → "${finalTitle}" collected (${fileBytes}B, ${elapsed}ms)`,
       );
     } catch (err) {
       const elapsed = Math.round(performance.now() - fileStart);
       console.error(
-        `[markdown-import] ✗ ${scanned.relPath} FAILED (${fileBytes}B, ${elapsed}ms):`,
+        `[markdown-import] ✗ ${scanned.relPath} markdownToAtoms FAILED (${fileBytes}B, ${elapsed}ms):`,
         err,
       );
       skipped.push({ relPath: scanned.relPath, reason: errorToString(err) });
+    }
+  }
+
+  // 4. 末尾 1 次 createNotesBatch (5B Stage 7)
+  if (batchItems.length > 0) {
+    const batchStart = performance.now();
+    const result = await noteCap().createNotesBatch({
+      items: batchItems,
+      broadcastMode: 'final',
+    });
+    const batchElapsed = Math.round(performance.now() - batchStart);
+    console.log(
+      `[markdown-import] BATCH createNotesBatch: items=${batchItems.length} notes=${result.notes.length} failures=${result.failures.length} (${batchElapsed}ms)`,
+    );
+    for (const note of result.notes) {
+      createdNoteIds.push(note.id);
+    }
+    for (const f of result.failures) {
+      const label = f.index >= 0 ? batchLabels[f.index] ?? `index=${f.index}` : 'tx-failed';
+      console.warn(`[markdown-import] BATCH failure ${label}: ${f.error}`);
+      skipped.push({ relPath: label, reason: f.error });
     }
   }
 
