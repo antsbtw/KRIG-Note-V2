@@ -37,8 +37,15 @@ import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import type {
   AtomInput,
   DriverSerialized,
-  TextEditingApi,
 } from '@capabilities/text-editing/types';
+// 5B Stage 6 临时桥(Stage 7 createNotesBatch 实施时整段走 krigBatchToAtoms):
+// TextEditingApi 不再暴露 sanitizeAtoms / atomsToProseMirror 公开字段.
+// sanitizeAtoms 归属 content-ingest capability(5B §7.1.3);
+// atomsToProseMirror 物理文件留在 text-editing/converters/(capability 内部工具),
+// 通过深路径 import 临时复用 — Stage 7 后整段切换到
+// content-ingest.krigBatchToAtoms → createNotesBatch(KrigImportBatch 入口).
+import { sanitizeAtoms } from '@capabilities/content-ingest/internal/sanitize-atoms';
+import { atomsToProseMirror } from '@capabilities/text-editing/converters/atoms-to-pm';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
@@ -105,12 +112,11 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
     }
 
     const atoms = buildAtoms(title, ch);
-    const tea = requireCapabilityApi<TextEditingApi>('text-editing');
-    const cleaned = tea.sanitizeAtoms(atoms);
+    const cleaned = sanitizeAtoms(atoms);
 
     let pmContent;
     try {
-      pmContent = await tea.atomsToProseMirror({ atoms: cleaned });
+      pmContent = await atomsToProseMirror({ atoms: cleaned });
     } catch (err) {
       console.error('[extraction-import] atomsToProseMirror failed:', title, err);
       continue;

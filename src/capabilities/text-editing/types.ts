@@ -155,30 +155,21 @@ export interface TextEditingApi {
   /** 实例注册表(诊断:driver instance 计数)*/
   readonly instanceRegistry: InstanceRegistryDiagnostic;
 
-  /**
-   * L5-C6:Atom JSON → PM doc 节点数组
-   *
-   * 输入契约:docs/10-business-design/ebook/PDF-Note-Atom数据契约-v2.md
-   * 输出可直接装 doc.content,再封 DriverSerialized 信封。
-   * 调用前应先用 sanitizeAtoms 清洗。
-   */
-  readonly atomsToProseMirror: (input: { atoms: AtomInput[] }) => Promise<PMDocNode[]>;
-
-  /**
-   * L5-C6:Atom 清洗(契约 § 9 八条容错)
-   *
-   * 处理 v1→v2 类型迁移、document root 过滤、空 text 节点过滤等。
-   * 必须在 atomsToProseMirror 之前调用。
-   */
-  readonly sanitizeAtoms: (atoms: AtomInput[]) => AtomInput[];
-
-  /**
-   * Markdown → PM doc 节点数组(导入 .md 文件用)
-   *
-   * 行级解析,无外部依赖。base64 图/附件走 mediaPutBase64 → media:// URL。
-   * 输出可直接装 doc.content,再封 DriverSerialized 信封。
-   */
-  readonly markdownToProseMirror: (md: string) => Promise<PMDocNode[]>;
+  // 5B Stage 6 字面拍板:删除 atomsToProseMirror / sanitizeAtoms /
+  // markdownToProseMirror 三个公开字段(TextEditingApi 收敛为纯 PM editor 驱动)。
+  //
+  // - sanitizeAtoms 归属:content-ingest capability(5B §7.1.3),物理副本
+  //   `@capabilities/content-ingest/internal/sanitize-atoms`.
+  // - markdownToProseMirror / atomsToProseMirror 物理文件保留
+  //   (`@capabilities/text-editing/converters/{md-to-pm,atoms-to-pm}.ts`),
+  //   退化为 capability 内部工具 — content-ingest / canvas-text-node 通过
+  //   深路径 import 使用,与 content-ingest 自身 markdownToProseMirror 深路径 import
+  //   模式一致(5B Stage 5)。
+  // - PMDocNode / AtomInput 类型保留(canvas-text-node 等深路径调用方仍需)。
+  //
+  // 仍是临时形态:view 端 markdown-import.ts / extraction-import.ts 走临时桥
+  // (markdownToAtoms → atomsToProseMirror),Stage 7 `createNotesBatch` 入口
+  // 实施后整段切到 Atom[] → batch 入口,届时再决定是否进一步动 atoms-to-pm。
 
   /**
    * PM 通用菜单 item 工厂(C8 W5 整改 W-1)
