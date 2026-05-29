@@ -204,31 +204,39 @@ export async function assemblePmDoc(containerId: string): Promise<PmPayload | nu
   });
   const blockIds = belongsEdges.map((e) => e.subject.atomId);
 
-  // 3. 字面拉所有 block atoms(并行)
-  const blockAtomEntries: Array<AtomEntity<'pm'> | null> = await Promise.all(
-    blockIds.map((id) => storage.getAtom<'pm'>(id)),
-  );
+  // 3. 字面拉所有 block atoms(单 query 替代 Promise.all 雪崩 — P0-2, 2026-05-29 data-layer-audit)
+  const blockAtomsRaw = blockIds.length > 0
+    ? await storage.listAtoms({ domain: 'pm', atomIds: blockIds })
+    : [];
   const blocksById = new Map<string, AtomEntity<'pm'>>();
-  for (let i = 0; i < blockIds.length; i++) {
-    const e = blockAtomEntries[i];
-    if (e) blocksById.set(blockIds[i], e);
+  for (const a of blockAtomsRaw) {
+    blocksById.set(a.id, a as AtomEntity<'pm'>);
   }
 
-  // 4. 拉所有 nextSibling 边 + childOf 边(全局,按 subject 在 blockIds 过滤)
+  // 4. 拉所有 nextSibling 边 + childOf 边(SQL IN 只拉本 note 的 — P0-1, 2026-05-29 data-layer-audit)
+  // 应用层 filter 保留作 sanity(object 也得在 set 内 — 防御跨 note 串边 / childOf 指向 containerId)
   const blockIdSet = new Set(blockIds);
-  const [nextSiblingEdgesRaw, childOfEdgesRaw] = await Promise.all([
-    storage.listEdges({ predicate: NEXT_SIBLING_PREDICATE }),
-    storage.listEdges({ predicate: CHILD_OF_PREDICATE }),
-  ]);
+  let nextSiblingEdgesRaw: EdgeEntity[] = [];
+  let childOfEdgesRaw: EdgeEntity[] = [];
+  if (blockIds.length > 0) {
+    [nextSiblingEdgesRaw, childOfEdgesRaw] = await Promise.all([
+      storage.listEdges({
+        predicate: NEXT_SIBLING_PREDICATE,
+        subjectAtomIds: blockIds,
+      }),
+      storage.listEdges({
+        predicate: CHILD_OF_PREDICATE,
+        subjectAtomIds: blockIds,
+      }),
+    ]);
+  }
   const nextSiblingEdges = nextSiblingEdgesRaw.filter(
     (e) =>
-      blockIdSet.has(e.subject.atomId) &&
       e.object.kind === 'atom' &&
       blockIdSet.has(e.object.atomId),
   );
   const childOfEdges = childOfEdgesRaw.filter(
     (e) =>
-      blockIdSet.has(e.subject.atomId) &&
       e.object.kind === 'atom' &&
       (e.object.atomId === containerId || blockIdSet.has(e.object.atomId)),
   );

@@ -161,7 +161,14 @@ export async function listThoughts(): Promise<ThoughtInfo[]> {
       } as ThoughtAnchor);
     }
   }
-  const folderEdges = await storage.listEdges({ predicate: IN_FOLDER_PREDICATE });
+  // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 thought 的边,免全库扫
+  const thoughtIds = atoms.map((a) => a.id);
+  const folderEdges = thoughtIds.length > 0
+    ? await storage.listEdges({
+        predicate: IN_FOLDER_PREDICATE,
+        subjectAtomIds: thoughtIds,
+      })
+    : [];
   const folderBySubject = new Map<string, string>();
   for (const e of folderEdges) {
     if (e.object.kind === 'atom') {
@@ -193,10 +200,52 @@ export async function listThoughtsBySource(
     }
   }
   if (thoughtIds.length === 0) return [];
+
+  // P0-2 (2026-05-29 data-layer-audit): 批量替代 for-loop getThought 串行(B3 T1)
+  // 一次拉全 thought atom + 一次拉 anchorEdges + 一次拉 folderEdges,内存拼装
+  const [thoughtAtomsRaw, anchorEdges, folderEdges] = await Promise.all([
+    storage.listAtoms({ domain: THOUGHT_DOMAIN, atomIds: thoughtIds }),
+    storage.listEdges({
+      predicate: THOUGHT_OF_PREDICATE,
+      subjectAtomIds: thoughtIds,
+    }),
+    storage.listEdges({
+      predicate: IN_FOLDER_PREDICATE,
+      subjectAtomIds: thoughtIds,
+    }),
+  ]);
+
+  const anchorBySubject = new Map<string, ThoughtAnchor>();
+  for (const e of anchorEdges) {
+    if (e.object.kind !== 'atom') continue;
+    const src = e.attrs.source;
+    const locator = e.attrs.locator;
+    if (src !== 'note' && src !== 'book' && src !== 'graph' && src !== 'canvas') continue;
+    if (!locator || typeof locator !== 'object') continue;
+    anchorBySubject.set(e.subject.atomId, {
+      source: src,
+      resourceId: e.object.atomId,
+      locator,
+    } as ThoughtAnchor);
+  }
+
+  const folderBySubject = new Map<string, string>();
+  for (const e of folderEdges) {
+    if (e.object.kind === 'atom') {
+      folderBySubject.set(e.subject.atomId, e.object.atomId);
+    }
+  }
+
   const results: ThoughtInfo[] = [];
-  for (const id of thoughtIds) {
-    const info = await getThought(id);
-    if (info) results.push(info);
+  for (const atom of thoughtAtomsRaw as AtomEntity<'thought'>[]) {
+    if (atom.payload.domain !== THOUGHT_DOMAIN) continue;
+    results.push(
+      atomToThoughtInfo(
+        atom,
+        anchorBySubject.get(atom.id) ?? null,
+        folderBySubject.get(atom.id) ?? null,
+      ),
+    );
   }
   return results;
 }
