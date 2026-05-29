@@ -26,128 +26,19 @@ import type {
   EdgeEntity,
   PmPayload,
 } from '@semantic/types';
+import { applyRebuildRules } from './structural-rebuild-rules';
+import { assembleTable } from './assemble-table';
+import { stripAssemblyHints, type BlockAtomPayload } from './assemble-pm-doc-helpers';
 
 const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
 const NEXT_SIBLING_PREDICATE = 'user:krig:nextSibling';
 const CHILD_OF_PREDICATE = 'user:krig:childOf';
 
-/**
- * 结构性容器重建规则(decision 026 §3.1.2 / §6.1)。
- *
- * 当 capability 层拼装时,需在拆 atom 父→子之间**重新插入**中间 wrapper,
- * 让输出的 PM doc 字面满足 schema 父→中间→子的嵌套约束。
- *
- * 字面规则:
- * - childType 是拆 atom 的子 block 节点类型
- * - wrapperBuilder 接受同质子集合(全是 childType)+ 上下文,返回中间 wrapper PM 节点
- *
- * ⚠ 同步提示(decision 026 §13.8):未来引入新结构性容器(如 grid / flexbox),
- * 必须在本表登记 wrapper 重建规则,并字面登记到 decision 026 §13.8 增补条目。
- */
-type AssemblyHints = {
-  /** listItem 用 — 区分 bulletList vs orderedList(taskItem 字面是另一 NodeSpec,无此歧义)*/
-  listType?: 'bullet' | 'ordered';
-};
-
-/** payload 顶层非 PM schema 字段的辅助提示(dissect 写入 / assemble 读取后剥除)*/
-interface BlockAtomPayload extends PmPayload {
-  _assemblyHints?: AssemblyHints;
-}
-
-/**
- * 把同质子节点集合包成中间 wrapper(bulletList / orderedList / taskList / table tr / columnList)。
- * 输入字面假设 children 字面已按 nextSibling 链排好序。
- */
-function wrapChildren(children: PmPayload[]): PmPayload[] {
-  if (children.length === 0) return [];
-
-  const result: PmPayload[] = [];
-  let i = 0;
-
-  while (i < children.length) {
-    const child = children[i];
-    const type = child.type;
-
-    // listItem 连续段 → 按 _assemblyHints.listType 包 bulletList / orderedList
-    if (type === 'listItem') {
-      const group: PmPayload[] = [];
-      let listType: 'bullet' | 'ordered' = 'bullet';
-      while (i < children.length && children[i].type === 'listItem') {
-        const hint = (children[i] as BlockAtomPayload)._assemblyHints?.listType;
-        if (hint === 'ordered') listType = 'ordered';
-        group.push(stripAssemblyHints(children[i]));
-        i++;
-      }
-      const wrapType = listType === 'ordered' ? 'orderedList' : 'bulletList';
-      result.push({ type: wrapType, content: group });
-      continue;
-    }
-
-    // taskItem 连续段 → 包 taskList(无歧义)
-    if (type === 'taskItem') {
-      const group: PmPayload[] = [];
-      while (i < children.length && children[i].type === 'taskItem') {
-        group.push(stripAssemblyHints(children[i]));
-        i++;
-      }
-      result.push({ type: 'taskList', content: group });
-      continue;
-    }
-
-    // column 连续段 → 包 columnList(无歧义)
-    if (type === 'column') {
-      const group: PmPayload[] = [];
-      while (i < children.length && children[i].type === 'column') {
-        group.push(stripAssemblyHints(children[i]));
-        i++;
-      }
-      result.push({ type: 'columnList', content: group });
-      continue;
-    }
-
-    // tableCell / tableHeader 不会出现在顶层 child 序列(它们的 childOf 父是 table atom,
-    // 由 assembleTableChildren 单独处理);其它叶子/叶子级容器原样保留
-    result.push(stripAssemblyHints(child));
-    i++;
-  }
-
-  return result;
-}
-
-/**
- * 把一组 tableCell / tableHeader 包装为 table.content = [tableRow, tableRow, ...]。
- *
- * 字面策略(decision 026 §6.1 字面拍板的简化):tableCell / tableHeader 集合在
- * storage 中只通过 childOf 边挂到 table atom 字面无 row 信息。重建时按 cells 的 colspan
- * 或一个**等长行**约定。当前 v1 实施 fallback:**所有 cell 字面单行 tableRow**(单行
- * 容纳全部 cell)— 字面登记为 Stage 2 暂行实施,Stage 7 测试 T7 / 性能测试时验证
- * 是否需补"按 attrs.rowIndex / colIndex 字面"信息(留 future commit + 决议字面)。
- *
- * ⚠ 字面 Open Question(本期不深入):tableCell 跨 row 拼装的真实信息丢失;字面登记到
- * decision 026 §13 待补充。
- */
-function wrapTableCells(cells: PmPayload[]): PmPayload[] {
-  if (cells.length === 0) return [];
-  // v1 简化:所有 cells 字面塞到单个 tableRow(等同 V1 数据迁前空 table 字面状态)
-  const row: PmPayload = {
-    type: 'tableRow',
-    content: cells.map(stripAssemblyHints),
-  };
-  return [row];
-}
-
-/**
- * 剥除非 PM schema 字段(_assemblyHints)。PM nodeFromJSON 字面也会 strip
- * 未声明字段,这里显式做,让输出 PmPayload 干净便于上层 diff / hash。
- */
-function stripAssemblyHints(node: PmPayload): PmPayload {
-  const result: PmPayload = { type: node.type };
-  if (node.attrs !== undefined) result.attrs = node.attrs;
-  if (node.content !== undefined) result.content = node.content;
-  if (node.marks !== undefined) result.marks = node.marks;
-  if (node.text !== undefined) result.text = node.text;
-  return result;
-}
+// 5B Stage 4 重构 (§7.3.2):
+// - 原 wrapChildren / wrapTableCells / stripAssemblyHints 拆出三处:
+//   - 通用 grouping (list/taskList/columnList) -> structural-rebuild-rules.ts
+//   - table 重建 (按 rowIndex/colIndex 分组排序) -> assemble-table.ts
+//   - 共享小工具 (stripAssemblyHints + BlockAtomPayload) -> assemble-pm-doc-helpers.ts
 
 /**
  * 在 atom 集合内按 nextSibling 链拓扑排序(只对 sibling 集合做)。
@@ -238,7 +129,7 @@ function topologicalSortSiblings(
  * - 叶子 block:直接返回 atom.payload(剥 _assemblyHints)
  * - 叶子级容器(callout / blockquote / listItem / taskItem / tableCell / tableHeader /
  *   column / toggleList / unknown):字面用 childOf 边查子 atoms,递归构造,
- *   再用 wrapChildren / wrapTableCells 重建中间 wrapper
+ *   再用 applyRebuildRules / assembleTable 重建中间 wrapper (5B Stage 4)
  *
  * 容器型 block 的 atom payload.content 字面应是 [];若非空字面记 warn(数据可能未 dissect)
  */
@@ -277,12 +168,14 @@ function buildPmNode(
     if (node) childNodes.push(node);
   }
 
-  // 容器类型决定重建策略
+  // 容器类型决定重建策略 (5B Stage 4):
+  // - table: 字面走 assembleTable (按 cell.attrs.rowIndex/colIndex 分组排序重建 tableRow)
+  // - 其它容器: 字面走 applyRebuildRules (list/taskList/columnList 注册式 grouping)
   let content: PmPayload[];
   if (payload.type === 'table') {
-    content = wrapTableCells(childNodes);
+    content = assembleTable(childNodes);
   } else {
-    content = wrapChildren(childNodes);
+    content = applyRebuildRules(childNodes);
   }
 
   // 字面输出:剥 hints + 替换 content
@@ -365,9 +258,9 @@ export async function assemblePmDoc(containerId: string): Promise<PmPayload | nu
     if (node) topNodes.push(node);
   }
 
-  // 9. 顶层 wrapper 重建(listItem / taskItem / column 字面不能直接挂 doc.content,
-  //    要包成 bulletList / taskList / columnList)
-  const docContent = wrapChildren(topNodes);
+  // 9. 顶层 wrapper 重建 (5B Stage 4):listItem / taskItem / column 字面不能直接挂
+  //    doc.content, 要包成 bulletList / taskList / columnList. 走注册式 STRUCTURAL_REBUILD_RULES.
+  const docContent = applyRebuildRules(topNodes);
 
   return {
     type: 'doc',
