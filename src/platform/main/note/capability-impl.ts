@@ -38,11 +38,22 @@ import { assemblePmDoc } from './assemble-pm-doc';
 import { emptyContainerPayload } from './dissect-pm-doc';
 import { diffBlockTree, fullCreateDiff, type BlockDiff } from './diff-block-tree';
 import { pmDocCache } from './pm-doc-cache';
+import type {
+  CreateNoteBatchInput,
+  CreateNoteBatchResult,
+  CreateNoteBatchItem,
+  CreateNoteBatchFailure,
+} from '@capabilities/note/types';
+import type { PmAtomDraft } from '@semantic/types';
+import type { StorageTransaction } from '@storage/api';
+import { broadcastNoteListChanged } from './broadcast';
 
 const NOTE_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
 const HAS_NOTE_VIEW_PREDICATE = 'user:krig:hasNoteView';
 const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
+const CHILD_OF_PREDICATE = 'user:krig:childOf';
+const NEXT_SIBLING_PREDICATE = 'user:krig:nextSibling';
 
 /**
  * note container atom payload — 含缓存 title(2026-05-28 性能修复)
@@ -509,6 +520,210 @@ export async function deleteNote(id: string): Promise<{ cascadedEdges: number }>
 
   pmDocCache.invalidate(id);
   return { cascadedEdges };
+}
+
+/**
+ * createNotesBatch — 批量创建 note (5B Stage 7 重做,规范字面对齐).
+ *
+ * 字面消费 PmAtomDraft[],storage 层分配 ULID 后字面拼:
+ *   - belongsToNote (每 draft → container)
+ *   - childOf (draft.parentTmpId 字面解析为 realId)
+ *   - nextSibling (按 atoms 数组顺序 + parentTmpId 分组隐式表达)
+ *
+ * 单事务,失败整体回滚 (failures 累积每个 item 的失败原因).
+ *
+ * broadcastMode='final' 默认:全 items 写完后 1 次 broadcastNoteListChanged.
+ * broadcastMode='progressive-throttle':字面不实施 (本期接口保留).
+ */
+export async function createNotesBatch(
+  input: CreateNoteBatchInput,
+): Promise<CreateNoteBatchResult> {
+  const { items, broadcastMode = 'final' } = input;
+  const notes: NoteInfo[] = [];
+  const failures: CreateNoteBatchFailure[] = [];
+
+  if (items.length === 0) {
+    return { notes, failures };
+  }
+
+  if (items.length > 500) {
+    console.warn(
+      `[note-capability/createNotesBatch] batch size ${items.length} > 500;` +
+        ` single-tx may hit SurrealDB timeout (Stage 7 字面未实施 chunk)`,
+    );
+  }
+
+  try {
+    await storage.transaction(async (tx) => {
+      for (let i = 0; i < items.length; i++) {
+        try {
+          const note = await createSingleNoteFromDrafts(tx, items[i]);
+          notes.push(note);
+        } catch (err) {
+          failures.push({ index: i, error: String(err), rolledBack: true });
+          throw err;
+        }
+      }
+    });
+  } catch (err) {
+    if (failures.length === 0) {
+      failures.push({ index: -1, error: String(err), rolledBack: true });
+    }
+    // 单事务整体回滚:notes 已 push 的也无效,字面清空
+    return { notes: [], failures };
+  }
+
+  if (broadcastMode === 'final' && notes.length > 0) {
+    await broadcastNoteListChanged();
+  }
+  return { notes, failures };
+}
+
+/**
+ * 单 note 从 PmAtomDraft[] 字面写入 storage.
+ *
+ * 字面算法 (规范字面对齐 docs/RefactorV2/data-model/persistence/spec.md §6 PE4):
+ *  1. createContainer: tx.putAtom 字面创建 container atom (domain='pm', payload empty doc + title)
+ *  2. 字面拼 hasNoteView + inFolder 边
+ *  3. tmpId → realId 字面映射: 遍历 drafts, 每 draft 字面 tx.putAtom (storage 层分配 ULID),
+ *     字面记录 tmpId → realId
+ *  4. 字面 putEdge 拼 3 类边:
+ *     - belongsToNote: 每 draft 的 realId → container.id
+ *     - childOf: draft.parentTmpId 字面解析为 realParentId → 字面 putEdge
+ *     - nextSibling: 按 atoms 数组顺序 + parentTmpId 分组字面链
+ *  5. buildNoteInfo 返回 NoteInfo
+ *
+ * **字面验证**: 算法跑完字面遍历所有 drafts 字面 assert(realIdMap.has(draft.tmpId));
+ *   若 parentTmpId 字面无映射 throw (悬空引用,数据坏).
+ */
+async function createSingleNoteFromDrafts(
+  tx: StorageTransaction,
+  item: CreateNoteBatchItem,
+): Promise<NoteInfo> {
+  // 1. container atom
+  const title = deriveTitleFromDrafts(item.atoms, item.titleHint);
+  const containerAtom = await tx.putAtom<'pm'>({
+    payload: { domain: NOTE_DOMAIN, payload: containerPayloadWithTitle(title) },
+  });
+
+  const now = Date.now();
+
+  // 2. hasNoteView + inFolder 边
+  await tx.putEdge({
+    predicate: HAS_NOTE_VIEW_PREDICATE,
+    subject: { kind: 'atom', atomId: containerAtom.id },
+    object: { kind: 'literal', type: 'boolean', value: true },
+    attrs: { createdBy: 'user-default', createdAt: now },
+  });
+  if (item.folderId) {
+    await tx.putEdge({
+      predicate: IN_FOLDER_PREDICATE,
+      subject: { kind: 'atom', atomId: containerAtom.id },
+      object: { kind: 'atom', atomId: item.folderId },
+      attrs: { createdBy: 'user-default', createdAt: now },
+    });
+  }
+
+  // 3. atoms 字面写入 + 建 tmpId → realId 映射
+  const tmpToReal = new Map<string, string>();
+  for (const draft of item.atoms) {
+    const entity = await tx.putAtom<'pm'>({
+      // 字面 PE4: 不传 id, storage 分配
+      payload: draft.payload,
+    });
+    tmpToReal.set(draft.tmpId, entity.id);
+  }
+
+  // 4a. belongsToNote: 每 draft → container
+  for (const draft of item.atoms) {
+    const realId = tmpToReal.get(draft.tmpId)!;
+    await tx.putEdge({
+      predicate: BELONGS_TO_NOTE_PREDICATE,
+      subject: { kind: 'atom', atomId: realId },
+      object: { kind: 'atom', atomId: containerAtom.id },
+      attrs: { createdBy: 'user-default', createdAt: now },
+    });
+  }
+
+  // 4b. childOf: draft.parentTmpId 字面解析
+  for (const draft of item.atoms) {
+    if (!draft.parentTmpId) continue;
+    const childRealId = tmpToReal.get(draft.tmpId)!;
+    const parentRealId = tmpToReal.get(draft.parentTmpId);
+    if (!parentRealId) {
+      throw new Error(
+        `[createSingleNoteFromDrafts] dangling parentTmpId=${draft.parentTmpId} ` +
+          `on draft.tmpId=${draft.tmpId}`,
+      );
+    }
+    await tx.putEdge({
+      predicate: CHILD_OF_PREDICATE,
+      subject: { kind: 'atom', atomId: childRealId },
+      object: { kind: 'atom', atomId: parentRealId },
+      attrs: { createdBy: 'user-default', createdAt: now },
+    });
+  }
+
+  // 4c. nextSibling: 按 atoms 数组顺序 + parentTmpId 分组
+  // 顶层 = parentTmpId undefined; 嵌套 = 同 parentTmpId 字面是兄弟.
+  // 分组保持原 drafts 数组顺序 (markdownToAtoms 字面深度遍历, parent 先于 child).
+  const siblingGroups = new Map<string, string[]>();
+  const ROOT_KEY = '__root__';
+  for (const draft of item.atoms) {
+    const key = draft.parentTmpId ?? ROOT_KEY;
+    if (!siblingGroups.has(key)) siblingGroups.set(key, []);
+    siblingGroups.get(key)!.push(tmpToReal.get(draft.tmpId)!);
+  }
+  for (const realIds of siblingGroups.values()) {
+    for (let i = 0; i < realIds.length - 1; i++) {
+      await tx.putEdge({
+        predicate: NEXT_SIBLING_PREDICATE,
+        subject: { kind: 'atom', atomId: realIds[i] },
+        object: { kind: 'atom', atomId: realIds[i + 1] },
+        attrs: { createdBy: 'user-default', createdAt: now },
+      });
+    }
+  }
+
+  // 5. NoteInfo (assembled 不再二次拼装 — 字面用 cached title + empty container doc 兜底,
+  //    view 端 getNote 真消费时走 assemblePmDoc 拼全文)
+  // 字面不 cache pmDoc — Stage 7 不重建 PM doc 完整体 (drafts 是 storage 形态,
+  // 不是 PM doc 形态); 后续 getNote 走 assemblePmDoc 字面从 storage 重建.
+  const folderId = item.folderId;
+  return {
+    id: containerAtom.id,
+    title,
+    doc: wrapPmDoc(containerPayloadWithTitle(title)),
+    folderId,
+    createdAt: containerAtom.createdAt,
+    updatedAt: containerAtom.updatedAt,
+  };
+}
+
+/**
+ * 字面从 drafts[0] 派生 title.
+ *
+ * 字面规则:
+ *   - 若 drafts[0].payload.payload.type === 'paragraph' && attrs.isTitle === true
+ *     → 取其 content[0].text (trim)
+ *   - 否则用 titleHint
+ *   - 否则空串
+ */
+function deriveTitleFromDrafts(drafts: PmAtomDraft[], hint?: string): string {
+  const first = drafts[0];
+  if (
+    first &&
+    first.payload.payload.type === 'paragraph' &&
+    (first.payload.payload.attrs as Record<string, unknown> | undefined)?.isTitle === true
+  ) {
+    const content = first.payload.payload.content;
+    if (Array.isArray(content) && content[0] && (content[0] as PmPayload).type === 'text') {
+      const txt = (content[0] as PmPayload).text;
+      const trimmed = typeof txt === 'string' ? txt.trim() : '';
+      if (trimmed) return trimmed;
+    }
+  }
+  return hint ?? '';
 }
 
 /** main 进程内部使用(非 IPC)— 给 extraction handlers 提供同进程直调入口 */

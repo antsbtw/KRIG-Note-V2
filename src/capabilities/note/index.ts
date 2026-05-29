@@ -24,6 +24,8 @@ import type {
   NoteInfo,
   NoteDocEnvelope,
   NoteDocContentChangedPayload,
+  CreateNoteBatchInput,
+  CreateNoteBatchResult,
 } from './types';
 
 export type {
@@ -32,6 +34,10 @@ export type {
   NoteDocEnvelope,
   NoteDocContentChangedPayload,
   NoteDocOrigin,
+  CreateNoteBatchInput,
+  CreateNoteBatchResult,
+  CreateNoteBatchItem,
+  CreateNoteBatchFailure,
 } from './types';
 export { clearLegacyLocalStorage };
 
@@ -43,6 +49,11 @@ async function createNote(
   folderId: string | null = null,
 ): Promise<NoteInfo> {
   return window.electronAPI.noteCreate(initialDoc, folderId);
+}
+async function createNotesBatch(
+  input: CreateNoteBatchInput,
+): Promise<CreateNoteBatchResult> {
+  return window.electronAPI.noteCreateBatch(input);
 }
 async function listNotes(): Promise<NoteInfo[]> {
   return window.electronAPI.noteList();
@@ -77,6 +88,7 @@ function onDocContentChanged(
 
 export const noteCapability: NoteCapabilityApi = {
   createNote,
+  createNotesBatch,
   listNotes,
   listNoteTitles,
   getNote,
