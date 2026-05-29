@@ -55,7 +55,18 @@ export type { PMNode };
 
 // ── Atom 输入类型(契约 § 三)──
 
-interface AtomInput {
+/**
+ * V1 NoteView 持久化形态 — canvas-text-node 兼容专用,**不在 V2 规范范围**.
+ *
+ * 上下文(2026-05-29 5B Stage 7 重做):
+ *  - V1 NoteView 持久化的 doc 字面是 Array<V1NoteViewAtom>(无 atom domain 概念,
+ *    扁平 + parentId 链),canvas-text-node 仍要消费此形态.
+ *  - 与 V2 规范定义的 Atom<D> + AtomEntity<D> 不一致(V1 没有 domain 分类).
+ *  - 仅 atoms-to-pm.ts(canvas 反向 atom → PM 拼装)+ canvas-text-node/atom-bridge.ts
+ *    使用,**禁止其它代码新引用**.
+ *  - 未来 V1 数据迁移完成后字面物理删除.
+ */
+export interface V1NoteViewAtom {
   id?: string;
   type: string;
   content?: Record<string, unknown>;
@@ -98,7 +109,7 @@ function emptyParagraph(): PMNode {
 }
 
 /** 把 Atom.from 字段塞到 PMNode.attrs.from(view 端可读,以后 graph 关系可用)*/
-function attachFrom(node: PMNode, from?: AtomInput['from']): PMNode {
+function attachFrom(node: PMNode, from?: V1NoteViewAtom['from']): PMNode {
   if (!from) return node;
   const next: PMNode = { ...node };
   next.attrs = { ...(next.attrs ?? {}), from };
@@ -228,7 +239,7 @@ function sanitizeTiptapNode(node: PMNode | undefined): PMNode | null {
 
 // ── 单 Atom → PMNode(顶层,异步因 image 可能转 media://)──
 
-async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
+async function convertAtom(atom: V1NoteViewAtom): Promise<PMNode | null> {
   const c = (atom.content ?? {}) as Record<string, unknown>;
 
   switch (atom.type) {
@@ -464,10 +475,10 @@ async function convertAtom(atom: AtomInput): Promise<PMNode | null> {
  *    "已被吞并",从顶层结果中移除
  * 3. 最后:list 容器的 content 不为空才保留(空 list 是非法 PM)
  */
-async function buildTopLevelNodes(atoms: AtomInput[]): Promise<PMNode[]> {
+async function buildTopLevelNodes(atoms: V1NoteViewAtom[]): Promise<PMNode[]> {
   // pass 1:转换全部 atom
   const converted: Array<{
-    atom: AtomInput;
+    atom: V1NoteViewAtom;
     node: PMNode | null;
     consumed: boolean;
   }> = [];
@@ -517,7 +528,7 @@ async function buildTopLevelNodes(atoms: AtomInput[]): Promise<PMNode[]> {
 
 export interface AtomsToPmInput {
   /** 单页或多页合并的 atom 数组(已 sanitize)*/
-  atoms: AtomInput[];
+  atoms: V1NoteViewAtom[];
 }
 
 /**
