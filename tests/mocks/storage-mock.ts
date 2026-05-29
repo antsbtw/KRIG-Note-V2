@@ -25,6 +25,7 @@ import type {
   PutEdgeInput,
   AtomFilter,
   EdgeFilter,
+  ListMarkerAtomsOpts,
   SubgraphQuery,
   SubgraphResult,
 } from '../../src/storage/api';
@@ -131,6 +132,40 @@ export function createMockStorage(): MockStorage {
       if (filter.domain && a.payload.domain !== filter.domain) continue;
       if (atomIdSet && !atomIdSet.has(a.id)) continue;
       out.push(a);
+    }
+    return out;
+  }
+
+  /**
+   * P1-1 (2026-05-29 data-layer-audit): 按 marker 边过滤的 atom 查询.
+   *
+   * mock 走应用层遍历模拟 SurrealStorage INSIDE subquery.
+   */
+  async function listMarkerAtomsImpl<D extends AtomDomain = AtomDomain>(
+    opts: ListMarkerAtomsOpts,
+  ): Promise<AtomEntity<D>[]> {
+    // 字面先扫 edge 拿出符合 markerPredicate (+ markerObjectMatch) 的 subject.atomId 集合
+    const markerSubjectIds = new Set<string>();
+    for (const e of edges.values()) {
+      if (e.predicate !== opts.markerPredicate) continue;
+      if (opts.markerObjectMatch) {
+        if (opts.markerObjectMatch.kind === 'literal') {
+          if (e.object.kind !== 'literal') continue;
+          if (e.object.type !== opts.markerObjectMatch.type) continue;
+          if (e.object.value !== opts.markerObjectMatch.value) continue;
+        } else {
+          if (e.object.kind !== 'atom') continue;
+          if (e.object.atomId !== opts.markerObjectMatch.atomId) continue;
+        }
+      }
+      markerSubjectIds.add(e.subject.atomId);
+    }
+    // 字面再按 domain + atomId 命中过滤 atom
+    const out: AtomEntity<D>[] = [];
+    for (const a of atoms.values()) {
+      if (a.payload.domain !== opts.domain) continue;
+      if (!markerSubjectIds.has(a.id)) continue;
+      out.push(a as AtomEntity<D>);
     }
     return out;
   }
@@ -280,6 +315,7 @@ export function createMockStorage(): MockStorage {
     getAtom: getAtomImpl,
     putAtom: putAtomImpl as StorageAPI['putAtom'],
     listAtoms: listAtomsImpl,
+    listMarkerAtoms: listMarkerAtomsImpl as StorageAPI['listMarkerAtoms'],
     deleteAtom: deleteAtomImpl,
     getEdge: getEdgeImpl,
     putEdge: putEdgeImpl,

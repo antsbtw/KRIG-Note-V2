@@ -16,6 +16,7 @@ import type {
   AtomFilter,
   PutEdgeInput,
   EdgeFilter,
+  ListMarkerAtomsOpts,
   SubgraphQuery,
   SubgraphResult,
   StorageTransaction,
@@ -152,6 +153,47 @@ class SurrealStorage implements StorageAPI {
     const sql = `SELECT * FROM atom ${whereClause} ORDER BY ${orderBy} ${orderDir} ${limitClause} ${offsetClause}`;
     const result = await db.query<[Array<Record<string, unknown>>]>(sql, bindings);
     return (result[0] ?? []).map((row) => normalizeAtomEntity(row));
+  }
+
+  /**
+   * P1-1 (2026-05-29 data-layer-audit): 按 marker 边过滤的 atom 查询。
+   *
+   * 实施走 2 阶段 query(audit §6 风险 1 降级方案):
+   *  1. 拉所有 marker edge 字面拿 subject.atomId 集合
+   *  2. listAtoms({ domain, atomIds }) 一次取目标 atom
+   *
+   * 不走 1-step INSIDE subquery 的原因:atom.id 是 RecordId 而 subject.atomId 是 plain string,
+   * SurrealDB 4.x 没有 type::thing 函数 (实测 V5 报 ValidationError "did you maybe mean type::record"),
+   * 子查询返字符串集合与 atom.id INSIDE 类型不匹配. 2 阶段 query 多 1 次 round-trip,但比"拉全
+   * pm domain 100k 行 + 内存 filter"反模式仍快 ~100×(SQL 真正按 marker 边过滤,不返 block atom).
+   */
+  async listMarkerAtoms<D extends AtomDomain = AtomDomain>(
+    opts: ListMarkerAtomsOpts,
+  ): Promise<AtomEntity<D>[]> {
+    // 阶段 1:按 markerPredicate (+ markerObjectMatch) 拉所有 marker edge
+    const edgeFilter: EdgeFilter = { predicate: opts.markerPredicate };
+    if (opts.markerObjectMatch) {
+      if (opts.markerObjectMatch.kind === 'literal') {
+        edgeFilter.objectLiteral = {
+          type: opts.markerObjectMatch.type,
+          value: opts.markerObjectMatch.value,
+        };
+      } else {
+        edgeFilter.objectAtomId = opts.markerObjectMatch.atomId;
+      }
+    }
+    const markerEdges = await this.listEdges(edgeFilter);
+
+    // 字面去重 subject.atomId (多条 marker 边指向同一 subject 时)
+    const subjectIds = Array.from(new Set(markerEdges.map((e) => e.subject.atomId)));
+    if (subjectIds.length === 0) return [];
+
+    // 阶段 2:按 domain + atomIds 一次取目标 atom (P0-2 字面已 verify)
+    const atoms = await this.listAtoms({
+      domain: opts.domain,
+      atomIds: subjectIds,
+    });
+    return atoms as AtomEntity<D>[];
   }
 
   async deleteAtom(id: string): Promise<{ deleted: boolean; cascadedEdges: number }> {

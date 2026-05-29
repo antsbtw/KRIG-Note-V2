@@ -83,25 +83,111 @@ export async function createFolder(
   });
 }
 
-export async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
-  // decision 021 §4.1: folderForView 边表达 view 归属
-  // P0-3 (2026-05-29 data-layer-audit): 走 SQL objectLiteral filter,免应用层全扫 + filter
-  const viewMarker = viewMarkerFor(viewType);
+/**
+ * P1-3 (2026-05-29 data-layer-audit): broadcastFolderListChanged 收敛专用一次性 helper.
+ *
+ * 字面背景: handlers.ts:broadcastFolderListChanged 字面 Promise.all 调 listFolders 4 次,
+ * 每次内部 1 次 listMarkerAtoms + 1 次 listEdges = 8 次 storage call(P1-1 之前是 12 次).
+ * 本 helper 字面合并到 3 次 storage call:
+ *   1. 拉全部 folder atoms(domain=folder,量 ~50-200)
+ *   2. 拉全部 folderForView 边(按 view 切分)
+ *   3. 拉 inFolder 边(parent 关系,subjectAtomIds=folderIds)
+ * 再内存按 viewType 分 4 组.
+ *
+ * listFolders(viewType) 公开 API 保留(其它 caller 在用),本 helper 仅 broadcast 用.
+ */
+export async function listAllFoldersGroupedByView(): Promise<Record<FolderViewType, FolderInfo[]>> {
+  // 1 次拉所有 folder atoms
+  const atoms = (await storage.listAtoms({
+    domain: FOLDER_DOMAIN,
+  })) as AtomEntity<'folder'>[];
+
+  if (atoms.length === 0) {
+    return { note: [], graph: [], ebook: [], thought: [] };
+  }
+
+  const atomsById = new Map<string, AtomEntity<'folder'>>();
+  for (const a of atoms) atomsById.set(a.id, a);
+  const folderIds = atoms.map((a) => a.id);
+
+  // 1 次拉所有 folderForView 边(全 atoms 量级,~50-200,无 filter 也合理)
   const viewEdges = await storage.listEdges({
     predicate: FOLDER_FOR_VIEW_PREDICATE,
-    objectLiteral: { type: 'string', value: viewMarker },
   });
-  const folderIdsInView = viewEdges.map((e) => e.subject.atomId);
-  const folderIdsInViewSet = new Set(folderIdsInView);
 
-  // 仅拉 in-view 那批 folder atom,免拉全 folder domain 再 filter
-  // P0-2 (2026-05-29 data-layer-audit): atomIds 批量 SQL IN
-  const inViewAtoms = folderIdsInView.length > 0
-    ? ((await storage.listAtoms({
-        domain: FOLDER_DOMAIN,
-        atomIds: folderIdsInView,
-      })) as AtomEntity<'folder'>[])
-    : [];
+  // 字面按 viewType 分组 folderId 集合
+  const idsByView: Record<FolderViewType, Set<string>> = {
+    note: new Set(),
+    graph: new Set(),
+    ebook: new Set(),
+    thought: new Set(),
+  };
+  const NOTE_MARKER = viewMarkerFor('note');
+  const GRAPH_MARKER = viewMarkerFor('graph');
+  const EBOOK_MARKER = viewMarkerFor('ebook');
+  const THOUGHT_MARKER = viewMarkerFor('thought');
+  for (const e of viewEdges) {
+    if (e.object.kind !== 'literal') continue;
+    if (e.object.type !== 'string') continue;
+    switch (e.object.value) {
+      case NOTE_MARKER:
+        idsByView.note.add(e.subject.atomId);
+        break;
+      case GRAPH_MARKER:
+        idsByView.graph.add(e.subject.atomId);
+        break;
+      case EBOOK_MARKER:
+        idsByView.ebook.add(e.subject.atomId);
+        break;
+      case THOUGHT_MARKER:
+        idsByView.thought.add(e.subject.atomId);
+        break;
+    }
+  }
+
+  // 1 次拉 folder 间 parent 关系(P0-1: subjectAtomIds 批量 IN)
+  const parentEdges = await storage.listEdges({
+    predicate: IN_FOLDER_PREDICATE,
+    subjectAtomIds: folderIds,
+  });
+  const parentBySubject = new Map<string, string>();
+  for (const e of parentEdges) {
+    if (e.object.kind === 'atom') {
+      parentBySubject.set(e.subject.atomId, e.object.atomId);
+    }
+  }
+
+  // 字面按 viewType 切分 + 拼 FolderInfo
+  const buildInfos = (ids: Set<string>): FolderInfo[] => {
+    const out: FolderInfo[] = [];
+    for (const id of ids) {
+      const atom = atomsById.get(id);
+      if (!atom) continue; // 孤儿 folderForView 边(atom 已删但边没删) — 跳过
+      out.push(atomToFolderInfo(atom, parentBySubject.get(id) ?? null));
+    }
+    return out;
+  };
+
+  return {
+    note: buildInfos(idsByView.note),
+    graph: buildInfos(idsByView.graph),
+    ebook: buildInfos(idsByView.ebook),
+    thought: buildInfos(idsByView.thought),
+  };
+}
+
+export async function listFolders(viewType: FolderViewType): Promise<FolderInfo[]> {
+  // decision 021 §4.1: folderForView 边表达 view 归属
+  // P1-1 (2026-05-29 data-layer-audit): 走 listMarkerAtoms,SQL 走 INSIDE subquery,
+  // 一次 round-trip 取代 listEdges + listAtoms 两步.
+  const viewMarker = viewMarkerFor(viewType);
+  const inViewAtoms = await storage.listMarkerAtoms<'folder'>({
+    domain: FOLDER_DOMAIN,
+    markerPredicate: FOLDER_FOR_VIEW_PREDICATE,
+    markerObjectMatch: { kind: 'literal', type: 'string', value: viewMarker },
+  });
+  const folderIdsInView = inViewAtoms.map((a) => a.id);
+  const folderIdsInViewSet = new Set(folderIdsInView);
 
   // 一次性查 in-view folder 的 outgoing inFolder 边(parent 关系)
   // P0-1 (2026-05-29 data-layer-audit): SQL IN 替代全扫

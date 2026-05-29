@@ -14,6 +14,7 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import {
   createFolder,
   listFolders,
+  listAllFoldersGroupedByView,
   getFolder,
   renameFolder,
   moveFolder,
@@ -35,18 +36,15 @@ import { broadcastGraphListChanged } from '../graph/broadcast';
  */
 async function broadcastFolderListChanged(): Promise<void> {
   try {
-    const [noteList, graphList, ebookList, thoughtList] = await Promise.all([
-      listFolders('note'),
-      listFolders('graph'),
-      listFolders('ebook'),
-      listFolders('thought'),
-    ]);
+    // P1-3 (2026-05-29 data-layer-audit): 4 次 listFolders → 1 次 listAllFoldersGroupedByView.
+    // 字面 12 次 storage call (P1-1 之前) → 3 次,broadcast 快 4×.
+    const grouped = await listAllFoldersGroupedByView();
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue;
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, noteList);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, graphList);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, ebookList);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, thoughtList);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.note);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.graph);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.ebook);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.thought);
     }
   } catch (err) {
     console.warn('[folder] broadcast list-changed failed:', err);

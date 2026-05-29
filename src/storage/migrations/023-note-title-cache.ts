@@ -22,7 +22,7 @@ import path from 'node:path';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { app } from 'electron';
 import { storage } from '@storage/index';
-import type { AtomEntity, PmPayload } from '@semantic/types';
+import type { PmPayload } from '@semantic/types';
 import { assemblePmDoc } from '@platform/main/note/assemble-pm-doc';
 import { deriveTitle } from '@platform/main/note/derive-title';
 
@@ -62,10 +62,13 @@ export async function runMigration023IfNeeded(): Promise<void> {
 async function doBackfill(): Promise<void> {
 
   // 找所有 note container atom
-  const atoms = (await storage.listAtoms({ domain: NOTE_DOMAIN })) as AtomEntity<'pm'>[];
-  const noteViewEdges = await storage.listEdges({ predicate: HAS_NOTE_VIEW_PREDICATE });
-  const noteAtomIds = new Set<string>(noteViewEdges.map((e) => e.subject.atomId));
-  const noteAtoms = atoms.filter((a) => noteAtomIds.has(a.id));
+  // P1-1 (2026-05-29 data-layer-audit): 走 listMarkerAtoms,SQL 走 INSIDE subquery,
+  // 免拉全 pm domain (含 block atom)再应用层 filter.
+  const noteAtoms = await storage.listMarkerAtoms<'pm'>({
+    domain: NOTE_DOMAIN,
+    markerPredicate: HAS_NOTE_VIEW_PREDICATE,
+    markerObjectMatch: { kind: 'literal', type: 'boolean', value: true },
+  });
 
   // 已缓存 title 的跳过(可能上次 migration 被中断或者 createNote 已写过)
   const pending = noteAtoms.filter((a) => !hasCachedTitle(a.payload.payload));

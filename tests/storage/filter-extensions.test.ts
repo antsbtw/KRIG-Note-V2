@@ -169,6 +169,141 @@ describe('Storage filter extensions (P0)', () => {
     });
   });
 
+  describe('P1-1: storage.listMarkerAtoms', () => {
+    it('基本命中 — atom + marker edge 都满足', async () => {
+      // setup: 3 个 pm atom (note container) + 2 个 block atom (无 marker)
+      const note1 = await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'container' } } });
+      const note2 = await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'container' } } });
+      const note3 = await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'container' } } });
+      const block1 = await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'block' } } });
+      await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'block' } } });
+
+      // note1 / note2 有 hasNoteView marker (object 是 literal true);note3 无
+      await storage.putEdge({
+        predicate: 'user:krig:hasNoteView',
+        subject: { kind: 'atom', atomId: note1.id },
+        object: { kind: 'literal', type: 'boolean', value: true },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+      await storage.putEdge({
+        predicate: 'user:krig:hasNoteView',
+        subject: { kind: 'atom', atomId: note2.id },
+        object: { kind: 'literal', type: 'boolean', value: true },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+      // 干扰 edge: block1 不是 note(无 marker)— 不应被返回
+      void block1;
+
+      const out = await storage.listMarkerAtoms({
+        domain: 'pm',
+        markerPredicate: 'user:krig:hasNoteView',
+        markerObjectMatch: { kind: 'literal', type: 'boolean', value: true },
+      });
+      expect(out).toHaveLength(2);
+      const ids = new Set(out.map((a) => a.id));
+      expect(ids.has(note1.id)).toBe(true);
+      expect(ids.has(note2.id)).toBe(true);
+      expect(ids.has(note3.id)).toBe(false);
+      expect(ids.has(block1.id)).toBe(false);
+    });
+
+    it('不带 markerObjectMatch — 只要 marker 边存在就算命中', async () => {
+      const a1 = await storage.putAtom({ payload: { domain: 'folder', payload: { title: 'A' } } });
+      const a2 = await storage.putAtom({ payload: { domain: 'folder', payload: { title: 'B' } } });
+      const a3 = await storage.putAtom({ payload: { domain: 'folder', payload: { title: 'C' } } });
+
+      // a1 / a2 有 folderForView 边(object 各异),a3 无
+      await storage.putEdge({
+        predicate: 'user:krig:folderForView',
+        subject: { kind: 'atom', atomId: a1.id },
+        object: { kind: 'literal', type: 'string', value: '__view__/note' },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+      await storage.putEdge({
+        predicate: 'user:krig:folderForView',
+        subject: { kind: 'atom', atomId: a2.id },
+        object: { kind: 'literal', type: 'string', value: '__view__/ebook' },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+
+      // 不传 markerObjectMatch — a1 / a2 都应返
+      const out = await storage.listMarkerAtoms({
+        domain: 'folder',
+        markerPredicate: 'user:krig:folderForView',
+      });
+      expect(out).toHaveLength(2);
+      const ids = new Set(out.map((a) => a.id));
+      expect(ids.has(a1.id)).toBe(true);
+      expect(ids.has(a2.id)).toBe(true);
+      expect(ids.has(a3.id)).toBe(false);
+    });
+
+    it('markerObjectMatch literal — 按 view marker 字符串过滤', async () => {
+      const note1 = await storage.putAtom({ payload: { domain: 'folder', payload: { title: 'note-A' } } });
+      const note2 = await storage.putAtom({ payload: { domain: 'folder', payload: { title: 'note-B' } } });
+      const ebook1 = await storage.putAtom({ payload: { domain: 'folder', payload: { title: 'ebook-A' } } });
+
+      await storage.putEdge({
+        predicate: 'user:krig:folderForView',
+        subject: { kind: 'atom', atomId: note1.id },
+        object: { kind: 'literal', type: 'string', value: '__view__/note' },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+      await storage.putEdge({
+        predicate: 'user:krig:folderForView',
+        subject: { kind: 'atom', atomId: note2.id },
+        object: { kind: 'literal', type: 'string', value: '__view__/note' },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+      await storage.putEdge({
+        predicate: 'user:krig:folderForView',
+        subject: { kind: 'atom', atomId: ebook1.id },
+        object: { kind: 'literal', type: 'string', value: '__view__/ebook' },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+
+      const out = await storage.listMarkerAtoms({
+        domain: 'folder',
+        markerPredicate: 'user:krig:folderForView',
+        markerObjectMatch: { kind: 'literal', type: 'string', value: '__view__/note' },
+      });
+      expect(out).toHaveLength(2);
+      const ids = new Set(out.map((a) => a.id));
+      expect(ids.has(note1.id)).toBe(true);
+      expect(ids.has(note2.id)).toBe(true);
+      expect(ids.has(ebook1.id)).toBe(false);
+    });
+
+    it('markerObjectMatch atom — 按指向特定 atom 的 marker 过滤', async () => {
+      const target = await storage.putAtom({ payload: { domain: 'pm', payload: {} } });
+      const other = await storage.putAtom({ payload: { domain: 'pm', payload: {} } });
+      const subj1 = await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'container' } } });
+      const subj2 = await storage.putAtom({ payload: { domain: 'pm', payload: { kind: 'container' } } });
+
+      // subj1 -> target, subj2 -> other
+      await storage.putEdge({
+        predicate: 'user:krig:hasNoteView',
+        subject: { kind: 'atom', atomId: subj1.id },
+        object: { kind: 'atom', atomId: target.id },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+      await storage.putEdge({
+        predicate: 'user:krig:hasNoteView',
+        subject: { kind: 'atom', atomId: subj2.id },
+        object: { kind: 'atom', atomId: other.id },
+        attrs: { createdBy: 'test', createdAt: Date.now() },
+      });
+
+      const out = await storage.listMarkerAtoms({
+        domain: 'pm',
+        markerPredicate: 'user:krig:hasNoteView',
+        markerObjectMatch: { kind: 'atom', atomId: target.id },
+      });
+      expect(out).toHaveLength(1);
+      expect(out[0].id).toBe(subj1.id);
+    });
+  });
+
   describe('P0-3: EdgeFilter.objectLiteral', () => {
     it('命中返回 literal edges', async () => {
       const subj1 = await storage.putAtom({ payload: { domain: 'folder', payload: {} } });
