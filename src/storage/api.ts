@@ -40,8 +40,13 @@ export interface StorageAPI {
    *  - 存在一条 edge: subject = atom.id, predicate = markerPredicate
    *  - (可选) edge.object 匹配 markerObjectMatch
    *
-   * 比 "listAtoms({domain}) + listEdges({predicate}) + Set.has filter" 快得多 —
-   * SQL 走 INSIDE subquery，只返回需要的 atom，不返 N × M 个 block atom。
+   * 实施走 2 阶段 query(commit 218773f0 降级方案):
+   *  1. listEdges({ predicate: markerPredicate, ...markerObjectMatch }) 拉 marker 边
+   *  2. listAtoms({ domain, atomIds: 去重后的 subject.atomId 集合 }) 取目标 atom
+   *
+   * 不走 1-step INSIDE subquery 的原因:atom.id 是 RecordId 而 subject.atomId 是 plain string,
+   * SurrealDB 4.x 无 type::thing 函数(只有 type::record),子查询返字符串集合与 atom.id 类型不匹配.
+   * 2 阶段 query 多 1 次 round-trip,但比"拉 N × M 全 domain + 内存 filter"反模式仍快 ~100×.
    *
    * 用例:
    *  - listNotes:  marker = 'user:krig:hasNoteView', object = literal true
