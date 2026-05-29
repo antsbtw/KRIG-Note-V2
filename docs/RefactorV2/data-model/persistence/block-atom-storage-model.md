@@ -44,16 +44,21 @@
 │                              │         │ externalRef / unknown       │
 │                              │         │ (共 14 个)                  │
 ├──────────────────────────────┼─────────┼────────────────────────────┤
-│  ② 叶子级容器                │   ✅    │ listItem / taskItem /       │
-│     (用户会单独标注/引用    │         │ tableCell / tableHeader /   │
-│      的容器)                │         │ callout / blockquote /      │
-│                              │         │ column / toggleList         │
-│                              │         │ (共 8 个)                   │
+│  ② 叶子级容器                │   ✅    │ table * / listItem /        │
+│     (用户会单独标注/引用    │         │ taskItem / tableCell /      │
+│      的容器)                │         │ tableHeader / callout /     │
+│                              │         │ blockquote / column /       │
+│                              │         │ toggleList                  │
+│                              │         │ (共 9 个)                   │
+│                              │         │ * table 2026-05-28 5A 修订   │
+│                              │         │ 从 ③ 上移(详 §1.3)          │
 ├──────────────────────────────┼─────────┼────────────────────────────┤
-│  ③ 结构性容器                │   ❌    │ table / tableRow /          │
-│     (用户不单独引用,        │   0 atom│ bulletList / orderedList /  │
-│      纯 PM 结构骨架)        │   跳过  │ taskList / columnList       │
-│                              │         │ (共 6 个)                   │
+│  ③ 结构性容器                │   ❌    │ tableRow / bulletList /     │
+│     (用户不单独引用,        │   0 atom│ orderedList / taskList /    │
+│      纯 PM 结构骨架)        │   跳过  │ columnList                  │
+│                              │         │ (共 5 个)                   │
+│                              │         │ ⚠ 5A 修订: table 不再属于   │
+│                              │         │  本类(已上移到 ②)           │
 ├──────────────────────────────┼─────────┼────────────────────────────┤
 │  ④ inline 节点               │   ❌    │ text / hardBreak /          │
 │     (atom 内 PM JSON 一部分)│         │ fileLink(inline)/          │
@@ -63,19 +68,26 @@
 └──────────────────────────────┴─────────┴────────────────────────────┘
 ```
 
-### 1.2 字面识别机制([dissect-pm-doc.ts:60](../../../src/platform/main/note/dissect-pm-doc.ts#L60))
+### 1.2 字面识别机制([dissect-pm-doc.ts:49](../../../src/platform/main/note/dissect-pm-doc.ts#L49))
 
 ```ts
-const STRUCTURAL_CONTAINER_TYPES = new Set([
-  'table', 'tableRow',
-  'bulletList', 'orderedList', 'taskList',
+// 2026-05-28 5B Stage 1-2 收敛:STRUCTURAL_CONTAINER_TYPES 集中到 semantic 层单点 export,
+// 五处消费方 import 不重定义(详 5B 设计 §7.3.1).
+import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
+
+// (semantic/types/structural.ts:23 字面定义 5 项 — 不含 'table',5A 修订)
+export const STRUCTURAL_CONTAINER_TYPES = new Set<string>([
+  'tableRow',
+  'bulletList',
+  'orderedList',
+  'taskList',
   'columnList',
 ]);
 
 function shouldGenerateAtom(node: PmPayload): boolean {
   if (STRUCTURAL_CONTAINER_TYPES.has(node.type)) return false;
   if (node.attrs === undefined) return false;
-  return 'id' in node.attrs;   // ← Stage 1 给 22 NodeSpec 加了 attrs.id 字段
+  return 'id' in node.attrs;   // ← Stage 1 给 22 NodeSpec 加了 attrs.id 字段(table 含)
 }
 ```
 
@@ -83,6 +95,32 @@ function shouldGenerateAtom(node: PmPayload): boolean {
 - 命中 `STRUCTURAL_CONTAINER_TYPES` → 跳过,**0 atom**
 - 没有 `attrs` 或 `attrs` 内无 `id` 字段(inline 节点)→ 跳过
 - 其它(22 NodeSpec)→ **1 atom**
+
+### 1.3 5A 修订 — table 上移为 atom(2026-05-28)
+
+decision 026 §3 原拍板"table 不拆 atom",2026-05-28 5A 修订**字面撤销**该字面,
+table 字面上移为叶子级容器(②),走 atom 化路径:
+
+| 修订前(decision 026 原稿) | 修订后(5A 字面拍板) |
+|---|---|
+| table 字面属于 ③ 结构性容器 | table 字面属于 ② 叶子级容器,1 atom |
+| STRUCTURAL_CONTAINER_TYPES 6 项含 'table' | **5 项** {tableRow, bulletList, orderedList, taskList, columnList},**不含 'table'** |
+| tableCell.childOf → table 父字面无目标 | tableCell.childOf → table atom(目标字面存在) |
+| 表格定位走 PM tree 嵌套 | tableCell.attrs.rowIndex / colIndex (0-based) 字面承载(详 §6.1)|
+
+字面理由(5A §6.1):
+- table **整表用户单独引用语义存在**(拖动、跨表引用、编辑表格属性)
+- 与生产 PDF-Note-Atom 契约 §4.7 字面对齐(契约顶层 atom 字面有 table)
+- tableCell.childOf 字面有目标可指(跨过 tableRow 中间层)
+
+实施在 5B Stage 1-4 字面落地:
+- Stage 1: tableNodeSpec.attrs.id + tableCell/Header.rowIndex/colIndex 加字段
+- Stage 2: STRUCTURAL_CONTAINER_TYPES 五处消费方 import 收敛到 @semantic/types/structural
+- Stage 3: dissect 期 rowIndex/colIndex 注入(Q2 选项 B)
+- Stage 4: assemble 端 assembleTable 算法 + STRUCTURAL_REBUILD_RULES 注册式
+
+→ 详 [decision 026 §3.1 修订附记](decisions/026-block-atomization-sub-phase-design.md) +
+  [5A 拍板汇总](../../../tasks/2026-05-28-stage-5A-decision-026-amendment-summary.md)。
 
 ---
 
@@ -138,7 +176,7 @@ PM tree 嵌套结构:                  storage childOf 边:
      └─ paragraph PK ────────────  PK.childOf → K
 ```
 
-**字面跨层跳过机制**([dissect-pm-doc.ts:95-108](../../../src/platform/main/note/dissect-pm-doc.ts#L95)):
+**字面跨层跳过机制**([dissect-pm-doc.ts:107-145](../../../src/platform/main/note/dissect-pm-doc.ts#L107)):
 - 递归下行时遇到结构性容器(bulletList / tableRow 等),把其 children **直接提升一层**给祖先处理
 - 所以 `tableCell.childOf` 字面指向 `table atom` 而不是 `tableRow`(tableRow 0 atom 不存在)
 - 同理 `listItem.childOf` 字面指向**外层最近的非结构性父**(顶层 listItem 字面无 childOf,因为它直挂 note container — 而 container 不算 childOf 的合法 object)
@@ -442,14 +480,19 @@ container atom.payload = { type:'doc', content:[] }   ← 字面永远空
 1. 被 `hasNoteView` 边标记(让 listNotes 知道哪些 pm atom 是 note 容器)
 2. 被 `belongsToNote` 边指向(让 listEdges 一次查全篇 block)
 
-### 6.2 结构性容器是"虚的"
+### 6.2 结构性容器是"虚的"(5A 修订后 5 类)
 
-table / tableRow / bulletList / orderedList / taskList / columnList 这 6 类
+tableRow / bulletList / orderedList / taskList / columnList 这 **5 类**
 字面**在 storage 里完全不存在**(0 atom),只在 PM 渲染时由 assemble 字面**临时
 重建**包裹层。这是 sub-phase 的**最大简化**(决议 026 §3.1.2):
 - 大幅减少 atom + 边数量(100×10 table 字面省 100 个 tableRow atom + 100 条 childOf)
 - 用户语义层从不引用"第 3 行整行",所以 tableRow 不需要 ID
-- 代价:assemble 时需硬编码重建规则(目前 3 种,未来引新结构性容器需同步)
+- 代价:assemble 时需硬编码重建规则(5B Stage 4 实施: 4 种 STRUCTURAL_REBUILD_RULES
+  + assembleTable 独立路径,详 §1.3 / [@semantic/types/structural](../../../src/semantic/types/structural.ts) 单点)
+
+**2026-05-28 5A 修订**: `table` 字面**从本集合移除**,上升为叶子级容器(② 1 atom)。
+理由: table 整表用户单独引用语义存在(拖动 / 跨表引用 / 编辑表格属性) + 与生产
+PDF-Note-Atom 契约 §4.7 顶层 atom 字面对齐。详 §1.3。
 
 ### 6.3 belongsToNote 扁平 + childOf 嵌套 — 职责分离
 

@@ -35,6 +35,28 @@ V2 现有的零散 atom 概念：
 
 本目录要做的事 = **把上述零散概念统一到 Atom 这个语义层最小单元下**。
 
+### 2026-05-29 收敛快照（5B Stage 1-8 完成后）
+
+| 位置 | 概念 | 状态 |
+|---|---|---|
+| `src/semantic/types/atom.ts` | `Atom<D>` 数据壳 + `PmPayload` + 4 domain 类型 | ✅ 已转正（Phase 1） |
+| `src/semantic/types/atom-entity.ts` | `AtomEntity<D>` 实体壳（id 由 storage 分配，PE4）| ✅ 已转正（Phase 3） |
+| `src/semantic/types/edge.ts` + `edge-entity.ts` | `Edge` + `EdgeEntity` + 三段式 predicate | ✅ 已转正（Phase 3） |
+| `src/semantic/types/structural.ts` | `STRUCTURAL_CONTAINER_TYPES`（5 项，不含 table）| ✅ 5B Stage 1-2 新增单点 export |
+| `src/semantic/types/pm-atom-draft.ts` | `PmAtomDraft` import-pipeline 中间形态（tmpId/parentTmpId）| ✅ 5B Stage 7 redo 新增单点 export |
+| `src/capabilities/text-editing/types.ts` `AtomInput` | ~~PDF 提取契约的宽松输入类型~~ | ❌ **物理删除**（5B Stage 7 redo） |
+| `src/capabilities/text-editing/converters/atoms-to-pm.ts` `V1NoteViewAtom` | V1 NoteView 持久化形态（canvas-text-node 兼容专用） | ⚠️ 保留（规范外，未来 V1 数据迁移完成后删） |
+| `src/capabilities/content-ingest/` | markdown / KRIG_IMPORT → PmAtomDraft[] 转换 capability | ✅ 5B Stage 5-7 redo 新增 |
+| `src/capabilities/note/createNotesBatch` | atoms 直写 storage 批量入口（tx.putAtom + 3 类边 putEdge）| ✅ 5B Stage 7 redo 新增 |
+| `docs/10-business-design/ebook/PDF-Note-Atom数据契约-v2.1.md` | rename `tiptapContent → pmContent`，sanitize 兼容兜底 | ✅ 5B Stage 8 新增 |
+
+**关键收敛**：开工时表的 5 项"未统一"零散概念字面收敛完成：
+- AtomInput 物理删（V1 遗留，被 PmAtomDraft 取代）
+- PMDocNode 保留为内部类型（V1NoteViewAtom 兼容路径 + 测试用）
+- atoms-to-pm 转换器**移出 TextEditingApi 公开 API**（5B Stage 6），物理保留为 canvas-text-node 反向兼容工具
+- PDF-Note-Atom 契约 v2.1 字面登记（v2.0 保留作历史）
+- 9 个 store 在 sub-phase 3a 后字面收敛到 surreal 存储 + 3 个 domain（pm / folder / graph-canvas/instance / ebook / reading-state / thought）。详 [`atom/spec.md`](atom/spec.md) §3
+
 ---
 
 ## Atom + 边的设计哲学
