@@ -158,52 +158,42 @@ class SurrealStorage implements StorageAPI {
   /**
    * P1-1 (2026-05-29 data-layer-audit): 按 marker 边过滤的 atom 查询。
    *
-   * SQL 走 INSIDE subquery —— atom.id INSIDE (SELECT VALUE subject.atomId FROM edge ...).
-   * 字面一次 round-trip,免 caller 走 listAtoms + listEdges + 内存 filter 三步反模式。
+   * 实施走 2 阶段 query(audit §6 风险 1 降级方案):
+   *  1. 拉所有 marker edge 字面拿 subject.atomId 集合
+   *  2. listAtoms({ domain, atomIds }) 一次取目标 atom
    *
-   * SurrealDB 4.x INSIDE 字面已在本 storage 多处使用 (#142 atomRids / #306 subjectAtomIds),
-   * 同款套路。
+   * 不走 1-step INSIDE subquery 的原因:atom.id 是 RecordId 而 subject.atomId 是 plain string,
+   * SurrealDB 4.x 没有 type::thing 函数 (实测 V5 报 ValidationError "did you maybe mean type::record"),
+   * 子查询返字符串集合与 atom.id INSIDE 类型不匹配. 2 阶段 query 多 1 次 round-trip,但比"拉全
+   * pm domain 100k 行 + 内存 filter"反模式仍快 ~100×(SQL 真正按 marker 边过滤,不返 block atom).
    */
   async listMarkerAtoms<D extends AtomDomain = AtomDomain>(
     opts: ListMarkerAtomsOpts,
   ): Promise<AtomEntity<D>[]> {
-    const db = getDB();
-
-    const bindings: Record<string, unknown> = {
-      domain: opts.domain,
-      marker: opts.markerPredicate,
-    };
-
-    // marker subquery 字面按 markerObjectMatch 形态扩展 WHERE
-    const markerWhere: string[] = [`predicate = $marker`];
+    // 阶段 1:按 markerPredicate (+ markerObjectMatch) 拉所有 marker edge
+    const edgeFilter: EdgeFilter = { predicate: opts.markerPredicate };
     if (opts.markerObjectMatch) {
       if (opts.markerObjectMatch.kind === 'literal') {
-        markerWhere.push(
-          `object.kind = 'literal' AND object.type = $markerLitType AND object.value = $markerLitVal`,
-        );
-        bindings.markerLitType = opts.markerObjectMatch.type;
-        bindings.markerLitVal = opts.markerObjectMatch.value;
+        edgeFilter.objectLiteral = {
+          type: opts.markerObjectMatch.type,
+          value: opts.markerObjectMatch.value,
+        };
       } else {
-        markerWhere.push(`object.kind = 'atom' AND object.atomId = $markerObjAtomId`);
-        bindings.markerObjAtomId = opts.markerObjectMatch.atomId;
+        edgeFilter.objectAtomId = opts.markerObjectMatch.atomId;
       }
     }
+    const markerEdges = await this.listEdges(edgeFilter);
 
-    // 字面取边的 subject.atomId 是 plain string,需走 atomRid 转 RecordId 才能与 atom.id INSIDE 比较.
-    // SurrealDB 字面 atom.id 是 record id (atom:01K...) 而 subject.atomId 字面是 string,
-    // 直接 INSIDE 字面类型不匹配 — 走 type::thing('atom', x) 转 RecordId.
-    const sql = `
-      SELECT * FROM atom
-      WHERE payload.domain = $domain
-        AND id INSIDE (
-          SELECT VALUE type::thing('atom', subject.atomId) FROM edge
-          WHERE ${markerWhere.join(' AND ')}
-        )
-      ORDER BY createdAt DESC
-    `;
+    // 字面去重 subject.atomId (多条 marker 边指向同一 subject 时)
+    const subjectIds = Array.from(new Set(markerEdges.map((e) => e.subject.atomId)));
+    if (subjectIds.length === 0) return [];
 
-    const result = await db.query<[Array<Record<string, unknown>>]>(sql, bindings);
-    return (result[0] ?? []).map((row) => normalizeAtomEntity<D>(row));
+    // 阶段 2:按 domain + atomIds 一次取目标 atom (P0-2 字面已 verify)
+    const atoms = await this.listAtoms({
+      domain: opts.domain,
+      atomIds: subjectIds,
+    });
+    return atoms as AtomEntity<D>[];
   }
 
   async deleteAtom(id: string): Promise<{ deleted: boolean; cascadedEdges: number }> {
