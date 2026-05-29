@@ -142,8 +142,16 @@ export async function listThoughts(): Promise<ThoughtInfo[]> {
   const atoms = (await storage.listAtoms({ domain: THOUGHT_DOMAIN })) as AtomEntity<'thought'>[];
   if (atoms.length === 0) return [];
 
+  // P0-1 (2026-05-29 data-layer-audit #33 + #34): 只拉本批 thought 的边,免全库扫.
+  // audit §一 #33 标注 A 类(thought ~100-5000 行 OK), 但 §二 B1 汇总段列入 — 取后者修法,
+  // 一是与 #34 同模式统一(已用 subjectAtomIds), 二是 thought 量级上 50k+ 后无此修则同样卡.
+  const thoughtIds = atoms.map((a) => a.id);
+
   // 一次性查所有 thoughtOf + inFolder 边,按 subject 索引
-  const thoughtOfEdges = await storage.listEdges({ predicate: THOUGHT_OF_PREDICATE });
+  const thoughtOfEdges = await storage.listEdges({
+    predicate: THOUGHT_OF_PREDICATE,
+    subjectAtomIds: thoughtIds,
+  });
   const anchorBySubject = new Map<string, ThoughtAnchor>();
   for (const e of thoughtOfEdges) {
     if (e.object.kind !== 'atom') continue;
@@ -161,14 +169,10 @@ export async function listThoughts(): Promise<ThoughtInfo[]> {
       } as ThoughtAnchor);
     }
   }
-  // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 thought 的边,免全库扫
-  const thoughtIds = atoms.map((a) => a.id);
-  const folderEdges = thoughtIds.length > 0
-    ? await storage.listEdges({
-        predicate: IN_FOLDER_PREDICATE,
-        subjectAtomIds: thoughtIds,
-      })
-    : [];
+  const folderEdges = await storage.listEdges({
+    predicate: IN_FOLDER_PREDICATE,
+    subjectAtomIds: thoughtIds,
+  });
   const folderBySubject = new Map<string, string>();
   for (const e of folderEdges) {
     if (e.object.kind === 'atom') {
