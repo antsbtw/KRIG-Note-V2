@@ -66,19 +66,9 @@ export interface InstanceRegistryDiagnostic {
   readonly getFocusedInstanceId: () => string | null;
 }
 
-/**
- * Atom JSON 输入(L5-C6 PDF 提取契约 § 三)
- *
- * 见 docs/10-business-design/ebook/PDF-Note-Atom数据契约-v2.md
- */
-export interface AtomInput {
-  id?: string;
-  type: string;
-  content?: Record<string, unknown>;
-  parentId?: string;
-  from?: { extractionType?: string; pdfPage?: number; extractedAt?: number };
-  meta?: Record<string, unknown>;
-}
+// 5B Stage 7 重做(2026-05-29):原 V1 atom 输入类型物理删除 — V2 规范字面登记为
+// V1 遗留, 不应出现在 capability 公开 API 层. canvas-text-node 反向兼容走深路径
+// import `atoms-to-pm.ts` 内部 V1NoteViewAtom (规范外 + jsdoc 登记).
 
 /** PM doc 节点(atomsToProseMirror 输出) */
 export interface PMDocNode {
@@ -165,7 +155,9 @@ export interface TextEditingApi {
   //   退化为 capability 内部工具 — content-ingest / canvas-text-node 通过
   //   深路径 import 使用,与 content-ingest 自身 markdownToProseMirror 深路径 import
   //   模式一致(5B Stage 5)。
-  // - PMDocNode / AtomInput 类型保留(canvas-text-node 等深路径调用方仍需)。
+  // - PMDocNode 类型保留(canvas-text-node 等深路径调用方仍需)。
+  // - V1 atom 输入类型已删除(5B Stage 7 重做 2026-05-29) — canvas 走 atoms-to-pm.ts
+  //   内部 V1NoteViewAtom 深路径 import.
   //
   // 仍是临时形态:view 端 markdown-import.ts / extraction-import.ts 走临时桥
   // (markdownToAtoms → atomsToProseMirror),Stage 7 `createNotesBatch` 入口

@@ -15,6 +15,10 @@ import type {
   NoteDocEnvelope,
   NoteDocContentChangedPayload,
 } from './note-folder-types';
+import type {
+  CreateNoteBatchInput,
+  CreateNoteBatchResult,
+} from '@capabilities/note/types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
 import type {
@@ -303,6 +307,8 @@ declare global {
       noteListTitles(): Promise<Array<{ id: string; title: string; folderId: string | null }>>;
       noteGet(id: string): Promise<NoteInfo | null>;
       noteCreate(initialDoc: NoteDocEnvelope | null, folderId: string | null): Promise<NoteInfo>;
+      /** 5B Stage 7: 批量创建 note (PmAtomDraft[] → 单事务多 note) */
+      noteCreateBatch(input: CreateNoteBatchInput): Promise<CreateNoteBatchResult>;
       noteUpdate(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
       noteMove(noteId: string, newFolderId: string | null): Promise<void>;
       noteDelete(id: string): Promise<void>;

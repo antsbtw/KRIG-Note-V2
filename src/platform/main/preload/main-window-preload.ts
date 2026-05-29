@@ -429,6 +429,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteCreate(initialDoc: unknown, folderId: string | null): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_CREATE, { initialDoc, folderId });
   },
+  noteCreateBatch(input: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_CREATE_BATCH, input);
+  },
   noteUpdate(id: string, doc: unknown): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_UPDATE, { id, doc });
   },

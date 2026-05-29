@@ -3,3 +3,4 @@ export * from './atom-entity';
 export * from './edge';
 export * from './edge-entity';
 export * from './structural';
+export * from './pm-atom-draft';

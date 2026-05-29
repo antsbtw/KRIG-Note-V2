@@ -15,6 +15,7 @@ import type { NoteDocEnvelope } from '@shared/ipc/note-folder-types';
 import { NOTE_DOC_ORIGIN } from '@shared/ipc/note-folder-types';
 import {
   createNote,
+  createNotesBatch,
   listNotes,
   listNoteTitles,
   getNote,
@@ -22,6 +23,7 @@ import {
   moveNote,
   deleteNote,
 } from './capability-impl';
+import type { CreateNoteBatchInput } from '@capabilities/note/types';
 import { broadcastNoteListChanged, broadcastNoteDocContentChanged } from './broadcast';
 
 function isDocEnvelope(v: unknown): v is NoteDocEnvelope {
@@ -50,6 +52,20 @@ export function registerNoteHandlers(): void {
       const note = await createNote(initialDoc, folderId);
       await broadcastNoteListChanged();
       return note;
+    },
+  );
+
+  // 5B Stage 7: 批量创建 note (PmAtomDraft[] → 单事务多 note)
+  // broadcastMode='final' 默认:由 createNotesBatch 内部 1 次广播,handler 不重复.
+  ipcMain.handle(
+    IPC_CHANNELS.NOTE_CREATE_BATCH,
+    async (_e, payload: unknown) => {
+      // 字面入参校验 (容错宽松,详细字段校验下沉到 createNotesBatch 内 createSingleNoteFromDrafts)
+      const p = payload as CreateNoteBatchInput | null;
+      if (!p || !Array.isArray(p.items)) {
+        return { notes: [], failures: [{ index: -1, error: 'invalid input', rolledBack: true }] };
+      }
+      return createNotesBatch(p);
     },
   );
 

@@ -21,17 +21,19 @@
  */
 
 import type { Atom as SerializerAtom } from '../../lib/atom-serializers/svg';
-import type {
-  AtomInput,
-  PMDocNode,
-} from '@capabilities/text-editing/types';
+import type { PMDocNode } from '@capabilities/text-editing/types';
 // 5B Stage 6 拍板:走深路径 import(TextEditingApi 不再暴露 sanitizeAtoms /
 // atomsToProseMirror 公开字段)。
 // - sanitizeAtoms 归属 content-ingest capability(5B §7.1.3 单点副本)。
 // - atomsToProseMirror 物理文件保留 text-editing/converters/(capability 内部工具),
 //   canvas-text-node 通过深路径 import 复用 V1 Atom[] → PM doc 拼装逻辑。
+// 5B Stage 7 重做(2026-05-29):V1 import 中间形态物理删, canvas-text-node 走
+// V1NoteViewAtom(atoms-to-pm.ts 内部专用形态)— 同样深路径 import.
 import { sanitizeAtoms } from '@capabilities/content-ingest/internal/sanitize-atoms';
-import { atomsToProseMirror } from '@capabilities/text-editing/converters/atoms-to-pm';
+import {
+  atomsToProseMirror,
+  type V1NoteViewAtom,
+} from '@capabilities/text-editing/converters/atoms-to-pm';
 
 /**
  * 展示态:instance.doc → 序列化器 Atom[](喂给 atomsToSvg)
@@ -51,7 +53,7 @@ export async function atomsToSvgInput(doc: unknown): Promise<SerializerAtom[]> {
   // 分支 2:V1 NoteView Atom[] 形态(向后兼容 V1 持久化)
   if (Array.isArray(doc) && doc.length > 0) {
     try {
-      const sanitized = sanitizeAtoms(doc as AtomInput[]);
+      const sanitized = sanitizeAtoms(doc as V1NoteViewAtom[]);
       const nodes: PMDocNode[] = await atomsToProseMirror({ atoms: sanitized });
       // 滤掉硬补的 noteTitle 节点(画板节点没有 title)
       const filtered = stripNoteTitle(nodes);
@@ -89,7 +91,7 @@ export async function docToDriverSerialized(doc: unknown): Promise<unknown> {
   }
   if (Array.isArray(doc) && doc.length > 0) {
     try {
-      const sanitized = sanitizeAtoms(doc as AtomInput[]);
+      const sanitized = sanitizeAtoms(doc as V1NoteViewAtom[]);
       const nodes = await atomsToProseMirror({ atoms: sanitized });
       const filtered = stripNoteTitle(nodes);
       if (filtered.length === 0) return canvasEmptyDoc();

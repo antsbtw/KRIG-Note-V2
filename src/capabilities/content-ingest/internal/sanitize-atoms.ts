@@ -23,13 +23,25 @@
  * **顺序**:`sanitizeAtoms(raw) → atomsToProseMirror({atoms})`。
  */
 
-interface AtomLike {
+/**
+ * LegacyExtractionAtom — V1 PDF 提取契约形态(L5-C6 PDF-Note-Atom 数据契约 §三).
+ *
+ * **规范外**: 仅 content-ingest/internal/krig-batch-to-atoms.ts + sanitize-atoms.ts 使用,
+ * 是 V1 提取后端给的"PM-JSON 风格 atom"扁平结构(含 id/parentId/content/from/meta).
+ *
+ * 与 V2 规范 Atom<D> 不同(后者是 { domain, payload } 抽象壳).Stage 7 重做后:
+ *  - content-ingest 内部接受 LegacyExtractionAtom 形态(对接 V1 后端字面契约)
+ *  - 经 sanitize / tableAdapter 处理后转 PmAtomDraft 出去(规范字面对齐)
+ *  - 未来 V1 后端切换或字段统一后字面物理删除
+ */
+export interface LegacyExtractionAtom {
   id?: string;
   type: string;
   content?: Record<string, unknown>;
   parentId?: string;
   from?: { extractionType?: string; pdfPage?: number; extractedAt?: number };
   meta?: Record<string, unknown>;
+  attrs?: Record<string, unknown>;
 }
 
 // v1 kebab-case → v2 camelCase
@@ -41,7 +53,7 @@ const TYPE_MIGRATION: Record<string, string> = {
   partTitle: 'noteTitle',
 };
 
-export function sanitizeAtoms(atoms: AtomLike[]): AtomLike[] {
+export function sanitizeAtoms(atoms: LegacyExtractionAtom[]): LegacyExtractionAtom[] {
   if (!Array.isArray(atoms)) return [];
 
   // 收集 document root id(给清理顶层 parentId 用)

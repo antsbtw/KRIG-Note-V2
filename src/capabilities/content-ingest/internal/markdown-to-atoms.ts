@@ -1,58 +1,48 @@
 /**
- * markdownToAtoms — 5B Stage 5 §3.3 + §7.1.3 字面实施
+ * markdownToAtoms — 5B Stage 7 重做(2026-05-29 规范字面对齐)
  *
- * 算法(5B §7.1.3 第 4 点字面):
- *   1. 内部走现有 `markdownToProseMirror` 出 PMNode[]
- *      (import from `@capabilities/text-editing/converters/md-to-pm`)
- *   2. 字面执行 "PM → Atom" 局部转换(对齐 dissect 但**不写库**):
- *      - 顶层每 block → atom(attrs.id 字面 null 占位)
- *      - 容器型 block content = [](决议 026 §3.4)
- *      - 注入 from `{ extractionType:'markdown', extractedAt:Date.now() }`
- *        替代默认 'pdf'
- *   3. 表格节点字面走 `tableAdapter`(table-adapter.ts) 展开为扁平 cells + childOf 边
- *   4. 输出 `{ atoms: Atom[]; warnings: string[] }`
+ * 算法字面:
+ *   1. markdown → markdownToProseMirror(md) → PMNode[]
+ *      (renderer 端已处理 media:// 等)
+ *   2. 遍历 PMNode[] 顶层,每 node 走 pmNodeToDrafts:
+ *      - 跳过 STRUCTURAL_CONTAINER_TYPES (5 项,from @semantic/types/structural)
+ *        其 children 用本 parentTmpId 继续递归
+ *      - 非 STRUCTURAL:分配新 tmpId (tmp-${counter++}),产 PmAtomDraft
+ *        其 children 递归 with parentTmpId = 本 draft's tmpId
+ *      - 叶子 (content 全 inline):payload.payload.content = inline 数组原样
+ *      - 容器:payload.payload.content = [] (决议 026 §3.4)
+ *   3. table 节点字面调 tableAdapter
+ *   4. titleHint:若 atoms[0].payload.payload.type === 'paragraph' 字面在其 attrs
+ *      上设 isTitle = true;否则前置一个 paragraph atom
+ *   5. 每个 draft 字面携 from:{ extractionType:'markdown', extractedAt: now }
+ *      (除非 options.from 覆盖)
  *
  * 边界纪律:
- *   - 字面**不进** PM editor / 不调 noteCap.createNote(capability 边界)
- *   - 字面**只产 Atom**(不产 PM doc / PMNode[] / DriverSerialized)
- *   - pmToAtoms 字面**不依赖 main 进程 IPC** — content-ingest 跑 renderer,
- *     与 markdownToProseMirror 同进程(Q6 留下 sub-phase)
+ *   - 字面**不**复用 dissectPmDoc (PM editor 端 user-edit 后专用,平行路径)
+ *   - 字面**必须** import STRUCTURAL_CONTAINER_TYPES from @semantic/types/structural
+ *   - 字面**不进** PM editor / 不调 noteCap / 不预设 atom.id (PE4)
  *
- * 复用 Stage 1-4 单点:
- *   - STRUCTURAL_CONTAINER_TYPES from `@semantic/types/structural` — 字面 import 不重复定义
+ * 规范依据:
+ *   - Atom<'pm'> = { domain:'pm', payload: PmPayload } (atom/spec.md §1)
+ *   - PmAtomDraft.tmpId 是 draft 阶段专用 (storage 写入后丢弃)
  */
 
 import { markdownToProseMirror } from '@capabilities/text-editing/converters/md-to-pm';
-import type { PmPayload } from '@semantic/types';
+import type { PmPayload, PmAtomDraft, AtomFrom } from '@semantic/types';
 import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 import { tableAdapter } from './table-adapter';
 import type {
-  Atom,
-  AtomFrom,
   MarkdownToAtomsOptions,
   MarkdownToAtomsResult,
 } from '../types';
 
 /**
- * PmPayload 字面**仅在本文件内部**作为 "PM → Atom 局部转换中间表示".
- *
- * 字面**不导出**(types.ts / index.ts 不 re-export — 5B §3.3 字面禁止
- * 对外导出 PM doc / PMNode[] / DriverSerialized 形态的 API,
- * PmPayload 同属"PM 内部表示"系列;V3 grep 接受 PmPayload 仅本文件内部 OK).
- *
- * 类型语义:与 md-to-pm.ts 的 PMNode 字面同形(均是 `{ type, attrs?, content?, marks?, text? }`),
- * 取 @semantic/types 单点定义减少类型 drift. markdownToProseMirror 返回的 PMNode
- * 字面结构兼容 PmPayload(structural typing),无需 cast.
- */
-
-/**
  * markdownToAtoms 入口.
  *
  * options:
- *   - titleHint:若给,首块字面替换为 `{ type:'noteTitle', content:{ children:[
- *     { type:'text', text:titleHint }] } }`(沿用 markdown-import.ts:492 当前逻辑).
- *     未给则原文首块(通常是 heading)保留.
- *   - from:覆盖默认 `{ extractionType:'markdown', extractedAt:Date.now() }`(浅合并).
+ *   - titleHint:若给,首块字面设 attrs.isTitle = true (paragraph) 或前置一个;
+ *     未给则原文首块原样保留 (不强加 title).
+ *   - from:覆盖默认 { extractionType:'markdown', extractedAt: Date.now() } (浅合并).
  */
 export async function markdownToAtoms(
   md: string,
@@ -60,15 +50,14 @@ export async function markdownToAtoms(
 ): Promise<MarkdownToAtomsResult> {
   const warnings: string[] = [];
 
-  // 默认 from(可被 options.from 覆盖). extractedAt 字面在调用时取一次(同 batch 一致).
+  // 默认 from (可被 options.from 覆盖). extractedAt 字面在调用时取一次.
   const defaultFrom: AtomFrom = {
     extractionType: 'markdown',
     extractedAt: Date.now(),
   };
   const from: AtomFrom = { ...defaultFrom, ...(options?.from ?? {}) };
 
-  // Step 1: markdown → PM 节点序列(复用 text-editing converters,字面不动 md-to-pm.ts)
-  // markdownToProseMirror 返回 PMNode[](其私有内部类型),字面与 PmPayload 结构兼容.
+  // Step 1: markdown → PM 节点序列
   let pmNodes: PmPayload[];
   try {
     pmNodes = (await markdownToProseMirror(md)) as PmPayload[];
@@ -77,126 +66,146 @@ export async function markdownToAtoms(
     return { atoms: [], warnings };
   }
 
-  // Step 2-3: PM → Atom 局部转换(顶层每 block → atom;table 走 tableAdapter)
-  const atoms: Atom[] = [];
+  // tmpId 分配器(本批 atoms 内唯一)
+  let counter = 0;
+  const allocTmpId = (): string => `tmp-${counter++}`;
 
-  // titleHint:若给,字面 prepend isTitle paragraph(对齐 view/note/markdown-import.ts
-  // ensureLeadingTitle 行为;本期只产 atom,view 层自己再封 doc 信封).
-  // 注:design 字面写 "强制首块 isTitle paragraph" — 用 paragraph + attrs.isTitle:true
-  // 字面对齐 markdown-import.ts:493 的 PMDocNode shape.
-  if (options?.titleHint && options.titleHint.trim()) {
-    atoms.push({
-      id: null,
-      type: 'paragraph',
-      attrs: { id: null, isTitle: true },
-      content: {
-        tiptapContent: [
-          { type: 'text', text: options.titleHint.trim() } as unknown as Record<string, unknown>,
-        ],
-      },
-      from,
-    });
+  const atoms: PmAtomDraft[] = [];
+
+  // Step 2-3: 顶层遍历 PMNode[]
+  for (const pmNode of pmNodes) {
+    pmNodeToDrafts(pmNode, undefined, atoms, allocTmpId, from);
   }
 
-  for (const pmNode of pmNodes) {
-    if (pmNode.type === 'table') {
-      // table:走 tableAdapter 展开为 table atom + cells + childOf
-      // tableAdapter 入参 tiptapContent 是 PMNode[]:此处是 pmNode.content(tableRow 数组).
-      const adapted = tableAdapter({
-        tiptapContent: pmNode.content ?? [],
-        tableAtomId: undefined, // id 待 inject(5B §7.3.1 第 5 项 injectIdsForCreate)
+  // Step 4: titleHint 处理(字面)
+  if (options?.titleHint && options.titleHint.trim()) {
+    const hint = options.titleHint.trim();
+    if (
+      atoms.length > 0 &&
+      atoms[0].payload.payload.type === 'paragraph' &&
+      atoms[0].parentTmpId === undefined
+    ) {
+      // 首块字面是顶层 paragraph — 在其 attrs 上设 isTitle = true
+      const firstAttrs = (atoms[0].payload.payload.attrs ?? {}) as Record<string, unknown>;
+      atoms[0].payload.payload.attrs = { ...firstAttrs, isTitle: true };
+    } else {
+      // 前置一个 paragraph atom 字面表达 title
+      const titleDraft: PmAtomDraft = {
+        tmpId: allocTmpId(),
+        payload: {
+          domain: 'pm',
+          payload: {
+            type: 'paragraph',
+            attrs: { isTitle: true },
+            content: [{ type: 'text', text: hint }],
+          },
+        },
         from,
-      });
-      atoms.push(adapted.tableAtom);
-      for (const cell of adapted.cellAtoms) {
-        atoms.push(cell);
-      }
-      // 注:childOfEdges 字面在本 capability 不返回(API 契约只有 atoms[] + warnings[]).
-      // 边集由 Stage 7 createNotesBatch 在写库前根据 tableAtomId 注入后字面重建.
-      continue;
+      };
+      atoms.unshift(titleDraft);
     }
-
-    // 非 table 顶层 block → atom
-    atoms.push(pmNodeToAtom(pmNode, from));
   }
 
   return { atoms, warnings };
 }
 
 /**
- * 单个 PMNode → Atom(顶层 block 用).
+ * 递归处理单个 PMNode,产出 PmAtomDraft 写到 atoms 数组.
  *
  * 字面规则:
- *   - 容器型 block(STRUCTURAL_CONTAINER_TYPES + 任何带嵌套 block 的)→ content.tiptapContent = []
- *     (决议 026 §3.4 容器 storage content 空,assemble 时由边重建)
- *   - 叶子 block(text/inline children)→ content.tiptapContent = [...inline 原样]
- *   - attrs.id 字面 null 占位(由 capability 层 inject)
- *
- * 注:本期字面**不**复刻 dissect-pm-doc 的"跨层 childOf + 多 atom 产出"(那是写库时
- * 才需要的;markdownToAtoms 只产顶层 atom 序列,嵌套语义保留在 atom.content.tiptapContent
- * 内由 atomsToProseMirror 再 assemble).
+ *   - STRUCTURAL_CONTAINER_TYPES(5 项):**跳过**本节点,递归其 children 用同 parentTmpId
+ *     (跳层 — children 直接挂最近非结构性祖先 / containerId 走 belongsToNote)
+ *   - table:特例,调 tableAdapter 展开为 table draft + cell drafts
+ *   - 非 STRUCTURAL 非 table:产 draft,其 children 递归 with parentTmpId = 本 draft.tmpId
+ *     - 容器(含嵌套 block child):payload.payload.content = []
+ *     - 叶子(全 inline child):payload.payload.content = inline 原样
  */
-function pmNodeToAtom(node: PmPayload, from: AtomFrom): Atom {
-  const isContainer = isContainerBlock(node);
+function pmNodeToDrafts(
+  node: PmPayload,
+  parentTmpId: string | undefined,
+  out: PmAtomDraft[],
+  allocTmpId: () => string,
+  from: AtomFrom,
+): void {
+  // 结构性容器:跳层,递归 children 用同 parentTmpId
+  if (STRUCTURAL_CONTAINER_TYPES.has(node.type)) {
+    const children = Array.isArray(node.content) ? node.content : [];
+    for (const child of children) {
+      pmNodeToDrafts(child, parentTmpId, out, allocTmpId, from);
+    }
+    return;
+  }
 
-  // attrs:透传原 attrs + 注入 id:null 占位
-  const attrs: Record<string, unknown> = {
-    id: null,
-    ...(node.attrs ?? {}),
-  };
-  // attrs.id 字面强制 null(原 node.attrs.id 字面被覆盖 — 占位由 inject 阶段负责)
-  attrs.id = null;
-
-  if (isContainer) {
-    // 容器:content.tiptapContent 字面空数组(决议 026 §3.4)
-    return {
-      id: null,
-      type: node.type,
-      content: { tiptapContent: [] },
+  // table:特例 — 调 tableAdapter
+  if (node.type === 'table') {
+    const tableTmpId = allocTmpId();
+    const { tableDraft, cellDrafts } = tableAdapter({
+      tablePmNode: node,
+      tableTmpId,
+      allocTmpId,
       from,
-      attrs,
-    };
+    });
+    // tableDraft 顶层 parentTmpId 沿用 caller 传入(顶层 = undefined,嵌套 = 上层 atom.tmpId)
+    if (parentTmpId !== undefined) {
+      tableDraft.parentTmpId = parentTmpId;
+    }
+    out.push(tableDraft);
+    for (const cd of cellDrafts) {
+      out.push(cd);
+    }
+    return;
   }
 
-  // 叶子:content.tiptapContent = inline 原样(text/mathInline/marks 等)
-  // 字面保留 node.content;不展开成 children 形态(那是 atoms-to-pm.ts 的事).
-  return {
-    id: null,
+  // 非 STRUCTURAL 非 table:产 draft
+  const tmpId = allocTmpId();
+  const children = Array.isArray(node.content) ? node.content : [];
+  const hasBlockChild = children.some((c) => isBlockNode(c));
+
+  // 字面构造 payload PmPayload
+  const draftPmPayload: PmPayload = {
     type: node.type,
-    content: { tiptapContent: (node.content ?? []) as unknown as Record<string, unknown>[] },
-    from,
-    attrs,
   };
-}
+  if (node.attrs !== undefined) draftPmPayload.attrs = { ...node.attrs };
+  if (node.marks !== undefined) draftPmPayload.marks = node.marks;
+  if (node.text !== undefined) draftPmPayload.text = node.text;
 
-/**
- * 是否为容器型 block.
- *
- * 字面规则(对齐 dissect-pm-doc.ts:174 isContainerBlock):
- *   - 结构性容器(STRUCTURAL_CONTAINER_TYPES)→ true
- *   - content 含 block-level child(任何 type 在 STRUCTURAL_CONTAINER_TYPES 或不在
- *     已知 inline 列表的)→ true
- *   - 否则(叶子或 inline-only)→ false
- */
-function isContainerBlock(node: PmPayload): boolean {
-  if (STRUCTURAL_CONTAINER_TYPES.has(node.type)) return true;
-  // table 字面是容器(content 全是 tableRow);本算法已在 markdownToAtoms 主循环
-  // 单独 dispatch 到 tableAdapter,这里返回 true 是兜底语义(实际不走到这分支).
-  if (node.type === 'table') return true;
-  // listItem / blockquote / callout / toggleList:含 paragraph 等 block child → 容器
-  // 字面判定:children 中是否有"非 inline"节点
-  const children = node.content ?? [];
-  for (const child of children) {
-    if (isBlockNode(child)) return true;
+  if (hasBlockChild) {
+    // 容器:payload.payload.content = [] (决议 026 §3.4)
+    draftPmPayload.content = [];
+  } else {
+    // 叶子:payload.payload.content = inline 原样
+    draftPmPayload.content = children;
   }
-  return false;
+
+  const draft: PmAtomDraft = {
+    tmpId,
+    payload: {
+      domain: 'pm',
+      payload: draftPmPayload,
+    },
+    from,
+  };
+  if (parentTmpId !== undefined) {
+    draft.parentTmpId = parentTmpId;
+  }
+  out.push(draft);
+
+  // 递归 block 子节点 with parentTmpId = 本 draft.tmpId
+  if (hasBlockChild) {
+    for (const child of children) {
+      if (isBlockNode(child)) {
+        pmNodeToDrafts(child, tmpId, out, allocTmpId, from);
+      }
+      // inline child 不产 draft(已在 hasBlockChild 分支 fallback,见上)
+    }
+  }
 }
 
 /**
  * 是否为 block 节点(粗判:非已知 inline type).
  *
- * 字面已知 inline(对齐 md-to-pm.ts parseInline 产出):
- *   text / mathInline / 任何带 marks 的 text(marks 是 inline 标记不是节点 type)
+ * 已知 inline(对齐 md-to-pm.ts parseInline 产出):
+ *   text / mathInline / hardBreak
  */
 function isBlockNode(node: PmPayload): boolean {
   const inlineTypes = new Set(['text', 'mathInline', 'hardBreak']);

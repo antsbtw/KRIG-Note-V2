@@ -118,6 +118,8 @@ export const IPC_CHANNELS = {
   // L7-sub2:note + folder capability (decision 012,SurrealDB Sidecar)
   // 业务粒度 IPC + LIST_CHANGED 广播,对齐 ebook / graph 模式
   NOTE_CREATE: 'note.create',
+  // 5B Stage 7: 批量 import 入口 (PmAtomDraft[] → 单事务多 note)
+  NOTE_CREATE_BATCH: 'note.create-batch',
   NOTE_LIST: 'note.list',
   // 2026-05-28 性能修复:轻量 list,只返 id/title/folderId,不 assemble doc
   NOTE_LIST_TITLES: 'note.list-titles',
