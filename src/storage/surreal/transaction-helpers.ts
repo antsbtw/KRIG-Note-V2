@@ -164,14 +164,18 @@ export async function putEdgeViaTx(
   const now = nowMs();
   const ownerId = options?.ownerId ?? DEFAULT_OWNER;
 
-  // 校验 subject / object atomId 存在 — 走 tx.query 保证事务内中间态可见
+  // subject 必须是 atom ref(纯 shape 校验,非 round-trip)
   if (input.subject.kind !== 'atom') {
     throw new Error(`Edge subject must be AtomRef, got kind=${(input.subject as { kind: string }).kind}`);
   }
-  await assertAtomExistsViaTx(tx, input.subject.atomId, 'subject');
-  if (input.object.kind === 'atom') {
-    await assertAtomExistsViaTx(tx, input.object.atomId, 'object');
-  }
+  // 档 1 perf:删除原 subject/object 的 assertAtomExistsViaTx(每边 1-2 次 SELECT)。
+  // 单事务内 subject/object 字面就是本事务刚 putAtom 出的 atom,assert 100% 命中(decision 020
+  // §3.5.bis 场景 4 binary verify "事务内读 uncommitted 写" PASS 背书),纯浪费 round-trip。
+  // 正确性契约:caller(受控 capability,如 createNotesBatch import 路径)在应用层构造
+  // tmpToReal 映射并 throw if 悬空引用(capability-impl.ts createSingleNoteFromDrafts),
+  // atomId 引用正确性已由应用层保证,不依赖 storage 层逐边 SELECT 校验。
+  // 未来若新增非受控 caller 需校验,在 storage 层另加批量 tx.assertAtomsExist(ids[]) API,
+  // 不恢复每边逐次 assert。
 
   const baseAttrs: Record<string, unknown> = { ...input.attrs };
   if (baseAttrs.createdBy === undefined || baseAttrs.createdBy === '') {
@@ -234,18 +238,3 @@ export async function deleteEdgeViaTx(
   return { deleted: (result[0]?.length ?? 0) > 0 };
 }
 
-// ── 内部 helper ────────────────────────────────────────────
-
-async function assertAtomExistsViaTx(
-  tx: SurrealTransaction,
-  atomId: string,
-  role: 'subject' | 'object',
-): Promise<void> {
-  const result = await tx.query<[Array<{ id: unknown }>]>(
-    `SELECT id FROM $rid LIMIT 1`,
-    { rid: atomRid(atomId) },
-  );
-  if (!result[0] || result[0].length === 0) {
-    throw new Error(`Edge ${role} atom not found: ${atomId}`);
-  }
-}
