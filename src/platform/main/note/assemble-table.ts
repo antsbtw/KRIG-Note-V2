@@ -62,6 +62,15 @@ export function assembleTable(cells: PmPayload[]): PmPayload[] {
       cellsInRow.push(entry.cell);
     }
 
+    // 空行(cell 全被 dedup 丢)字面跳过 — content:[] 的 tableRow 违反 schema
+    // `(tableCell|tableHeader)+`,会致 setNodeMarkup 重校验崩溃。
+    if (cellsInRow.length === 0) {
+      console.warn(
+        `[assemble-table] row=${rowIdx} has 0 cells after dedup; skipping(空 tableRow 违反 schema)`,
+      );
+      continue;
+    }
+
     rows.push({
       type: 'tableRow',
       content: cellsInRow,

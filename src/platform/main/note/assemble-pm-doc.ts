@@ -149,6 +149,16 @@ function buildPmNode(
 
   // 叶子(无子)→ 原样返回(剥 hints)
   if (!childIds || childIds.length === 0) {
+    // table 无 cell 子 atom → 空 table(content:[])违反 schema `tableRow+`,
+    // 落 doc 后打开时 setNodeMarkup 重校验崩溃。丢弃这个孤立 table atom
+    // (2026-05-29 长 docx 导入崩溃:读侧救存量坏数据,write 侧 md-to-pm 已防新增)。
+    if (payload.type === 'table') {
+      console.warn(
+        `[assemble-pm-doc] table atom ${atomId} has no cell children; ` +
+          `dropping(空 table 违反 schema tableRow+,会致 setNodeMarkup 崩溃)`,
+      );
+      return null;
+    }
     return stripAssemblyHints(payload);
   }
 
@@ -174,6 +184,15 @@ function buildPmNode(
   let content: PmPayload[];
   if (payload.type === 'table') {
     content = assembleTable(childNodes);
+    // assembleTable 可能因 cell 全退化返回 [](或全空行被 assembleTable 内丢)。
+    // 空 table content 违反 schema `tableRow+` → setNodeMarkup 崩溃,丢弃整 table。
+    if (content.length === 0) {
+      console.warn(
+        `[assemble-pm-doc] table atom ${atomId} reassembled to 0 rows; ` +
+          `dropping(空 table 违反 schema tableRow+)`,
+      );
+      return null;
+    }
   } else {
     content = applyRebuildRules(childNodes);
   }
