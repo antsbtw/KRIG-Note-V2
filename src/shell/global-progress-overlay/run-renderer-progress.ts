@@ -38,6 +38,17 @@ interface RunOptions<T> {
   indeterminate?: boolean;
   /** 完成时把结果映射成成功/失败信息 */
   doneMessage?: (result: T) => { success: boolean; message: string };
+  /**
+   * 延迟显示阈值(ms,默认 0 = 立即显示)。
+   *
+   * > 0 时:START 事件延迟 delayMs 才 fire。若 task 在阈值内完成,**完全不显
+   * overlay**(START 都没 fire → 无 DONE)。用于"打开 note"这类多数秒完成、
+   * 只有长任务才该显进度的场景,避免每次快操作都闪一下全屏遮罩。
+   *
+   * 注意:delay 期间的 report() 会被缓冲,START fire 时 flush 最后一条;
+   * 适合无中间进度或只有 indeterminate 的场景(逐项 loop 进度请用 delayMs=0)。
+   */
+  delayMs?: number;
 }
 
 function genTaskId(): string {
@@ -57,27 +68,57 @@ export async function runRendererProgress<T>(
   options: RunOptions<T> = {},
 ): Promise<T> {
   const taskId = genTaskId();
-  const { indeterminate = true, doneMessage } = options;
+  const { indeterminate = true, doneMessage, delayMs = 0 } = options;
 
-  const startPayload: ProgressStartPayload = { taskId, title, indeterminate };
-  window.electronAPI.driveProgress({ kind: 'start', payload: startPayload });
+  // overlay 是否已 fire START。delay 模式下在阈值后或 task 结束前由 ensureStarted() 翻转。
+  let started = false;
+  // delay 期间最后一条 update(START fire 时 flush)
+  let pendingUpdate: ProgressUpdatePayload | null = null;
+  let delayTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const fireStart = (): void => {
+    const startPayload: ProgressStartPayload = { taskId, title, indeterminate };
+    window.electronAPI.driveProgress({ kind: 'start', payload: startPayload });
+    started = true;
+    if (pendingUpdate) {
+      window.electronAPI.driveProgress({ kind: 'update', payload: pendingUpdate });
+      pendingUpdate = null;
+    }
+  };
+
+  if (delayMs > 0) {
+    delayTimer = setTimeout(fireStart, delayMs);
+  } else {
+    fireStart();
+  }
+
+  const pushUpdate = (payload: ProgressUpdatePayload): void => {
+    if (started) {
+      window.electronAPI.driveProgress({ kind: 'update', payload });
+    } else {
+      // 还没 START(delay 期内)→ 缓冲最后一条,START fire 时 flush
+      pendingUpdate = payload;
+    }
+  };
 
   const report: ProgressReporter = (message, current, total) => {
-    const payload: ProgressUpdatePayload = { taskId, message, current, total };
-    window.electronAPI.driveProgress({ kind: 'update', payload });
+    pushUpdate({ taskId, message, current, total });
   };
 
   const reportIndeterminate = (message: string): void => {
     // total 不传 → overlay 保持 indeterminate(GlobalProgressOverlay 的 update
     // 逻辑:p.total == null 时维持原 indeterminate 态)
-    const payload: ProgressUpdatePayload = { taskId, message };
-    window.electronAPI.driveProgress({ kind: 'update', payload });
+    pushUpdate({ taskId, message });
   };
 
   const handle: RendererProgressHandle = { taskId, report, reportIndeterminate };
 
   try {
     const result = await task(handle);
+    // task 在 delay 阈值内就完成 → 取消定时器,从未 fire START → 不显 overlay,直接返回
+    if (delayTimer) clearTimeout(delayTimer);
+    if (!started) return result;
+
     const done = doneMessage
       ? doneMessage(result)
       : { success: true, message: '完成' };
@@ -89,6 +130,9 @@ export async function runRendererProgress<T>(
     window.electronAPI.driveProgress({ kind: 'done', payload: donePayload });
     return result;
   } catch (err) {
+    if (delayTimer) clearTimeout(delayTimer);
+    // 出错时:即便还没到 delay 阈值也要显一个失败 overlay(让用户知道操作失败了)
+    if (!started) fireStart();
     const donePayload: ProgressDonePayload = {
       taskId,
       success: false,

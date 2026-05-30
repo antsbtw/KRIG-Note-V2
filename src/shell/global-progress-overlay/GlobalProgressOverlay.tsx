@@ -11,7 +11,7 @@
  * 不再需要独立的 overlay WebContentsView。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   ProgressStartPayload,
   ProgressUpdatePayload,
@@ -31,11 +31,32 @@ interface ProgressState {
   doneMessage?: string;
 }
 
+/**
+ * 成功完成后自动消失的停留时长(ms)。
+ *
+ * 2026-05-29:导入/打开/删除/backup 这类操作完成只是"告知",不该让用户再点
+ * "关闭"。成功(success===true)→ 停留 SUCCESS_DISMISS_MS 让用户看清结果再
+ * 自动消失;失败(success===false)→ 保留"关闭"键,让用户看清错误后手动关
+ * (尤其 restore 失败这类重要信息不能自动溜走)。
+ */
+const SUCCESS_DISMISS_MS = 1200;
+
 export function GlobalProgressOverlay() {
   const [state, setState] = useState<ProgressState | null>(null);
+  // 自动消失定时器(成功 done 后启动;新任务 START / 手动关闭 / unmount 时清除)
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearDismissTimer = (): void => {
+    if (dismissTimerRef.current) {
+      clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = null;
+    }
+  };
 
   useEffect(() => {
     const unsubStart = window.electronAPI.onProgressStart((p: ProgressStartPayload) => {
+      // 新任务开始 → 取消上一个任务的自动消失定时器(避免它误清掉新 overlay)
+      clearDismissTimer();
       setState({
         taskId: p.taskId,
         title: p.title,
@@ -65,12 +86,22 @@ export function GlobalProgressOverlay() {
         if (!prev || prev.taskId !== p.taskId) return prev;
         return { ...prev, done: true, success: p.success, doneMessage: p.message };
       });
+      // 成功 → 停留片刻后自动消失(只清这个 taskId,且未被新任务/手动关替换时才清)。
+      // 失败 → 不自动消失,保留"关闭"键。
+      if (p.success) {
+        clearDismissTimer();
+        dismissTimerRef.current = setTimeout(() => {
+          dismissTimerRef.current = null;
+          setState((prev) => (prev && prev.taskId === p.taskId ? null : prev));
+        }, SUCCESS_DISMISS_MS);
+      }
     });
 
     return () => {
       unsubStart();
       unsubUpdate();
       unsubDone();
+      clearDismissTimer();
     };
   }, []);
 
@@ -124,12 +155,19 @@ export function GlobalProgressOverlay() {
             >
               {state.doneMessage ?? (state.success ? '完成' : '失败')}
             </div>
-            <button
-              className="krig-progress-overlay__close-btn"
-              onClick={() => setState(null)}
-            >
-              关闭
-            </button>
+            {/* 成功 = 告知性提示,停留 1.2s 自动消失,不给"关闭"键;
+                失败 = 保留"关闭"键让用户看清错误后手动关 */}
+            {!state.success && (
+              <button
+                className="krig-progress-overlay__close-btn"
+                onClick={() => {
+                  clearDismissTimer();
+                  setState(null);
+                }}
+              >
+                关闭
+              </button>
+            )}
           </div>
         )}
         {!state.done && (

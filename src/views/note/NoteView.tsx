@@ -20,6 +20,7 @@ import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
 import { useMarkdownImport } from './use-markdown-import';
 import { useActiveNoteDocSync } from './use-active-note-doc-sync';
+import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 import { TocIndicator } from './toc/TocIndicator';
 import './note.css';
 
@@ -68,10 +69,23 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     }
     let cancelled = false;
     const note = requireCapabilityApi<NoteCapabilityApi>('note');
-    void note.getNote(activeNoteId).then((info) => {
-      if (cancelled) return;
-      setIncomingDoc(info ? info.doc : null);
-    });
+    // 2026-05-29 open-progress:长 note 的 getNote(main 端 assemblePmDoc)慢。
+    // 用 delayMs=300 延迟 overlay — 秒开的 note(绝大多数)不显遮罩,只有 assemble
+    // 慢的长 note 超 300ms 才显"正在打开…"。title 取自当前 meta(可能 null → 兜底)。
+    const title = activeNoteMeta?.title?.trim() || '(无标题)';
+    void runRendererProgress(
+      `正在打开《${title}》…`,
+      () => note.getNote(activeNoteId),
+      { delayMs: 300 },
+    )
+      .then((info) => {
+        if (cancelled) return;
+        setIncomingDoc(info ? info.doc : null);
+      })
+      .catch((err) => {
+        console.error('[NoteView] getNote failed:', err);
+        if (!cancelled) setIncomingDoc(null);
+      });
     return () => { cancelled = true; };
   }, [activeNoteId]);
 
@@ -168,7 +182,13 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     <div className="krig-note-view-frame">
       <div className="krig-note-view" data-view-id="note-view">
         <div className="krig-note-view-content">
+          {/* key=activeNoteId:切 note 时强制重挂编辑器,新实例用新 doc 初始化(走 mount
+              路径,fresh lastEmittedJsonRef=null),从机制上绕开 applyExternalDoc 的指纹
+              echo 守门 —— 该守门只比内容不比 noteId,空 note 内容雷同会撞指纹被误判 echo
+              而跳过切换(2026-05-30 新建/切换 note 主区不更新根因,日志 SKIP fingerprint 坐实)。
+              同篇内 echo / 外部更新 key 不变不重挂,光标防跳逻辑完整保留。 */}
           <Host
+            key={activeNoteId}
             config={{
               instanceId: workspaceId,
               undoScope: 'text-editing.pm',

@@ -20,6 +20,7 @@ import {
   deleteFolder,
 } from './data-model';
 import { decodeTreeId } from './tree-builder';
+import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
@@ -102,8 +103,11 @@ export async function deleteSelected(workspaceId: string): Promise<void> {
   const ids = getNoteWsState(ws).selectedIds;
   if (ids.size === 0) return;
 
-  for (const treeId of ids) {
-    const { type, id } = decodeTreeId(treeId);
+  const treeIds = [...ids];
+  const decoded = treeIds.map(decodeTreeId);
+
+  // 删一个 treeId(note 或 folder)。folder 含资源时弹 confirm(浮在 overlay 之上)。
+  const deleteOne = async (type: string, id: string): Promise<void> => {
     if (type === 'note') {
       await deleteNote(id);
     } else {
@@ -126,7 +130,37 @@ export async function deleteSelected(workspaceId: string): Promise<void> {
       }
       if (shouldDelete) await deleteFolder(id);
     }
+  };
+
+  // 2026-05-29 delete-progress:多项 或 含 folder(folder 删除级联多 note,慢;
+  // 单删大 note 也慢见 project_delete_note_batch_plan)才显 overlay,避免单删小 note 闪。
+  const hasFolder = decoded.some((d) => d.type === 'folder');
+  const useOverlay = ids.size >= 5 || hasFolder;
+
+  if (!useOverlay) {
+    for (const { type, id } of decoded) {
+      await deleteOne(type, id);
+    }
+    setSelectedIds(workspaceId, new Set());
+    return;
   }
+
+  const total = decoded.length;
+  await runRendererProgress(
+    total > 1 ? `正在删除 ${total} 项` : '正在删除',
+    async ({ report }) => {
+      let done = 0;
+      for (const { type, id } of decoded) {
+        await deleteOne(type, id);
+        done++;
+        report(`已删除 ${done}/${total} 项`, done, total);
+      }
+      return done;
+    },
+    {
+      doneMessage: (done) => ({ success: true, message: `已删除 ${done} 项` }),
+    },
+  );
   setSelectedIds(workspaceId, new Set());
 }
 
