@@ -122,6 +122,28 @@ export function createMockStorage(): MockStorage {
     return { deleted, cascadedEdges: cascaded };
   }
 
+  // SP-1:批量删 atom + 级联边(对齐 SurrealStorage.bulkDeleteAtomsAndEdges 语义)
+  async function bulkDeleteAtomsAndEdgesImpl(
+    ids: string[],
+  ): Promise<{ deletedAtoms: number; deletedEdges: number }> {
+    if (ids.length === 0) return { deletedAtoms: 0, deletedEdges: 0 };
+    const idSet = new Set(ids);
+    let deletedEdges = 0;
+    for (const [edgeId, edge] of edges) {
+      const subjHit = idSet.has(edge.subject.atomId);
+      const objHit = edge.object.kind === 'atom' && idSet.has(edge.object.atomId);
+      if (subjHit || objHit) {
+        edges.delete(edgeId);
+        deletedEdges++;
+      }
+    }
+    let deletedAtoms = 0;
+    for (const id of idSet) {
+      if (atoms.delete(id)) deletedAtoms++;
+    }
+    return { deletedAtoms, deletedEdges };
+  }
+
   async function listAtomsImpl(filter: AtomFilter): Promise<AtomEntity[]> {
     // 空 array 短路（P0-2, 2026-05-29 data-layer-audit）
     if (filter.atomIds?.length === 0) return [];
@@ -317,6 +339,7 @@ export function createMockStorage(): MockStorage {
     listAtoms: listAtomsImpl,
     listMarkerAtoms: listMarkerAtomsImpl as StorageAPI['listMarkerAtoms'],
     deleteAtom: deleteAtomImpl,
+    bulkDeleteAtomsAndEdges: bulkDeleteAtomsAndEdgesImpl,
     getEdge: getEdgeImpl,
     putEdge: putEdgeImpl,
     deleteEdge: deleteEdgeImpl,
