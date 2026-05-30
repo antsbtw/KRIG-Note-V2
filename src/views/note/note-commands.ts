@@ -25,11 +25,9 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import {
   createNote,
-  deleteNote,
   setActiveNote,
   getNoteWsState,
   createFolder,
-  deleteFolder,
   cycleSortByTitle,
   cycleSortByDate,
   setSelectedIds,
@@ -38,8 +36,9 @@ import {
   copyToClipboard,
   pasteFromClipboard,
   deleteSelected,
+  deleteTreeIdsWithProgress,
 } from './tree-operations';
-import { decodeTreeId, encodeNoteId, encodeFolderId } from './tree-builder';
+import { encodeNoteId, encodeFolderId } from './tree-builder';
 import { triggerRename } from './context-menu-registrations';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
@@ -125,8 +124,8 @@ export function registerNoteCommands(): void {
       void deleteSelected(wsId);
       return;
     }
-    // fallback:删活跃笔记
-    if (state.activeNoteId) void deleteNote(state.activeNoteId);
+    // fallback:删活跃笔记(走统一进度入口,大 note 显块级进度)
+    if (state.activeNoteId) void deleteTreeIdsWithProgress([encodeNoteId(state.activeNoteId)]);
   });
 
   commandRegistry.register('note-view.set-active', (noteId: unknown) => {
@@ -176,31 +175,14 @@ export function registerNoteCommands(): void {
     })();
   });
 
-  /** 删除单个 treeId(注意跟 delete-active 区分:这条按 treeId 精确删,不依赖 selectedIds)*/
+  /**
+   * 删除单个 treeId(注意跟 delete-active 区分:这条按 treeId 精确删,不依赖 selectedIds)。
+   * 2026-05-30 delete-progress:走统一进度入口(原直接调 deleteNote/deleteFolder 无进度,
+   * 是"右键删大 note/目录无进度条"根因)。folder confirm 在 deleteTreeIdsWithProgress 内弹。
+   */
   commandRegistry.register('note-view.delete-by-tree-id', (treeId: unknown) => {
     if (typeof treeId !== 'string') return;
-    const { type, id } = decodeTreeId(treeId);
-    if (type === 'note') {
-      void deleteNote(id);
-    } else {
-      // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):含资源 folder 删除前 confirm
-      void (async () => {
-        const folderCap = requireCapabilityApi<FolderCapabilityApi>('folder');
-        const [preview, info] = await Promise.all([
-          folderCap.previewDeleteFolder(id),
-          folderCap.getFolder(id),
-        ]);
-        if (preview.resources > 0 || preview.folders > 0) {
-          const folderTitle = info?.title ?? '(未命名)';
-          const message =
-            preview.resources > 0
-              ? `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹 + ${preview.resources} 个文件,操作不可撤销(回收站功能未实施)`
-              : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
-          if (!window.confirm(message)) return;
-        }
-        await deleteFolder(id);
-      })();
-    }
+    void deleteTreeIdsWithProgress([treeId]);
   });
 
   commandRegistry.register('note-view.copy-by-tree-id', (treeId: unknown) => {

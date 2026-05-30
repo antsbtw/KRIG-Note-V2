@@ -97,75 +97,84 @@ function isDescendantOf(
 
 // ── 批量删除 ──
 
-export async function deleteSelected(workspaceId: string): Promise<void> {
-  const ws = workspaceManager.get(workspaceId);
-  if (!ws) return;
-  const ids = getNoteWsState(ws).selectedIds;
-  if (ids.size === 0) return;
-
-  const treeIds = [...ids];
-  const decoded = treeIds.map(decodeTreeId);
-
-  // 删一个 treeId(note 或 folder)。folder 含资源时弹 confirm(浮在 overlay 之上)。
-  // progressTaskId:传给 capability,main 分批删时把"已清理 X/Y 块"块级子进度推到
-  // 这个 overlay(大 note/目录删除进度条逐批跳,不再纹丝不动 — delete-progress)。
-  const deleteOne = async (type: string, id: string, progressTaskId?: string): Promise<void> => {
-    if (type === 'note') {
-      await deleteNote(id, { progressTaskId });
-    } else {
-      // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):批量删除时,含资源 folder 逐个 confirm
-      // 总指挥批复字面:逐个 confirm 字面对齐 Q7 弱处理 + 0 工程量,multi-select batch UX 留 023
-      // 用户在某个 folder 上点"取消"则跳过该 folder,其他继续
-      const cap = folderCap();
-      const [preview, info] = await Promise.all([
-        cap.previewDeleteFolder(id),
-        cap.getFolder(id),
-      ]);
-      let shouldDelete = true;
-      if (preview.resources > 0 || preview.folders > 0) {
-        const folderTitle = info?.title ?? '(未命名)';
-        const message =
-          preview.resources > 0
-            ? `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹 + ${preview.resources} 个文件,操作不可撤销(回收站功能未实施)`
-            : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
-        shouldDelete = window.confirm(message);
-      }
-      if (shouldDelete) await deleteFolder(id, { progressTaskId });
-    }
-  };
-
-  // 2026-05-29 delete-progress:多项 或 含 folder(folder 删除级联多 note,慢;
-  // 单删大 note 也慢见 project_delete_note_batch_plan)才显 overlay,避免单删小 note 闪。
-  const hasFolder = decoded.some((d) => d.type === 'folder');
-  const useOverlay = ids.size >= 5 || hasFolder;
-
-  if (!useOverlay) {
-    for (const { type, id } of decoded) {
-      await deleteOne(type, id);
-    }
-    setSelectedIds(workspaceId, new Set());
-    return;
+/**
+ * 删一个 treeId(note 或 folder)。folder 含资源时弹 confirm(浮在 overlay 之上)。
+ * 返回 true=删了,false=用户取消(folder confirm 点了取消)。
+ * progressTaskId:传给 capability,main 分批删时把"已清理 X/Y 块"块级子进度推到
+ * 这个 overlay(大 note/目录删除进度条逐批跳,不再纹丝不动 — delete-progress)。
+ */
+async function deleteOneTreeItem(
+  type: string,
+  id: string,
+  progressTaskId?: string,
+): Promise<boolean> {
+  if (type === 'note') {
+    await deleteNote(id, { progressTaskId });
+    return true;
   }
+  // decision 021 §5.5 Q7 弱保护:含资源 folder 删除前 confirm(浮在 overlay 之上)
+  const cap = folderCap();
+  const [preview, info] = await Promise.all([
+    cap.previewDeleteFolder(id),
+    cap.getFolder(id),
+  ]);
+  if (preview.resources > 0 || preview.folders > 0) {
+    const folderTitle = info?.title ?? '(未命名)';
+    const message =
+      preview.resources > 0
+        ? `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹 + ${preview.resources} 个文件,操作不可撤销(回收站功能未实施)`
+        : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
+    if (!window.confirm(message)) return false;
+  }
+  await deleteFolder(id, { progressTaskId });
+  return true;
+}
 
+/**
+ * 统一删除入口:一组 treeId 走进度 overlay 删除(所有删除路径——多选 / 单项右键 /
+ * 删活跃——都收敛到这里,确保**任何删除都有进度反馈**)。
+ *
+ * 2026-05-30 delete-progress 修:之前只 deleteSelected 接进度且有 ≥5 门槛,导致
+ * 右键单删目录 / 单删大 note 无进度条(走 delete-by-tree-id 绕过)。现统一 + 用
+ * delayMs=400 延迟:小/快删除不闪 overlay,慢删除(大 note/目录,分批耗时)才显
+ * + 块级子进度逐批跳。
+ *
+ * confirm 时序:folder confirm 在 deleteOneTreeItem 内弹(浏览器原生模态,浮在
+ * overlay 之上)。delayMs 期内 overlay 尚未显,confirm 先弹也正常。
+ */
+export async function deleteTreeIdsWithProgress(treeIds: string[]): Promise<void> {
+  if (treeIds.length === 0) return;
+  const decoded = treeIds.map(decodeTreeId);
   const total = decoded.length;
+
   await runRendererProgress(
     total > 1 ? `正在删除 ${total} 项` : '正在删除',
     async ({ report, taskId }) => {
       let done = 0;
       for (const { type, id } of decoded) {
-        // 把 overlay 的 taskId 透传给 capability:main 分批删时推"已清理 X/Y 块"
-        // 块级子进度到同一 overlay(单项内逐批跳)。项做完后下面 report 切回项级。
-        await deleteOne(type, id, taskId);
+        // taskId 透传给 capability:main 分批删时推"已清理 X/Y 块"块级子进度到同 overlay
+        await deleteOneTreeItem(type, id, taskId);
         done++;
-        // 多项时切回项级进度;单项(大 note/目录)时块级进度已够,这里收尾对齐
         report(`已删除 ${done}/${total} 项`, done, total);
       }
       return done;
     },
     {
+      // 删除快(小 note)时不显 overlay;超 400ms(大 note/目录分批耗时)才显 + 块级进度
+      delayMs: 400,
       doneMessage: (done) => ({ success: true, message: `已删除 ${done} 项` }),
     },
   );
+}
+
+// ── 批量删除(多选 selectedIds)──
+
+export async function deleteSelected(workspaceId: string): Promise<void> {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const ids = getNoteWsState(ws).selectedIds;
+  if (ids.size === 0) return;
+  await deleteTreeIdsWithProgress([...ids]);
   setSelectedIds(workspaceId, new Set());
 }
 
