@@ -222,4 +222,6 @@ export interface StorageTransaction {
   getEdge: StorageAPI['getEdge'];
   putEdge: StorageAPI['putEdge'];
   deleteEdge: StorageAPI['deleteEdge'];
+  /** SP-1/2:事务内批量删 atom+级联边(供分批删每批"删+推游标"同 commit) */
+  bulkDeleteAtomsAndEdges: StorageAPI['bulkDeleteAtomsAndEdges'];
 }

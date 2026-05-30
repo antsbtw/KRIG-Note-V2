@@ -312,6 +312,7 @@ export function createMockStorage(): MockStorage {
       getEdge: getEdgeImpl,
       putEdge: putEdgeImpl,
       deleteEdge: deleteEdgeImpl,
+      bulkDeleteAtomsAndEdges: bulkDeleteAtomsAndEdgesImpl,
     };
 
     try {

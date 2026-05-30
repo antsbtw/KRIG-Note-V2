@@ -43,6 +43,7 @@ import {
   getEdgeViaTx,
   putEdgeViaTx,
   deleteEdgeViaTx,
+  bulkDeleteAtomsAndEdgesViaTx,
 } from './transaction-helpers';
 
 class SurrealStorage implements StorageAPI {
@@ -532,6 +533,7 @@ class SurrealStorage implements StorageAPI {
         getEdge: (id) => getEdgeViaTx(surrealTx, id),
         putEdge: (input, options) => putEdgeViaTx(surrealTx, input, options),
         deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
+        bulkDeleteAtomsAndEdges: (ids) => bulkDeleteAtomsAndEdgesViaTx(surrealTx, ids),
       };
       const result = await fn(tx);
       await surrealTx.commit();

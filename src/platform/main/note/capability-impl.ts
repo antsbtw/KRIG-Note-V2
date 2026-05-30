@@ -47,6 +47,12 @@ import type {
 import type { PmAtomDraft } from '@semantic/types';
 import type { StorageTransaction } from '@storage/api';
 import { broadcastNoteListChanged } from './broadcast';
+import {
+  createIntent,
+  deleteIntent,
+  registerIntentResolver,
+  type IntentEntity,
+} from '@storage/intent-log';
 
 const NOTE_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
@@ -74,6 +80,14 @@ function containerPayloadWithTitle(title: string): PmPayload {
 function readCachedTitle(payload: PmPayload): string | null {
   const t = payload.attrs?.title;
   return typeof t === 'string' ? t : null;
+}
+
+/**
+ * SP-2:读 container payload 的 deletionPending 标记。
+ * true = 该 note 正在后台分批删除(已对用户"消失"),读侧应过滤掉,sweeper 负责删完。
+ */
+function isDeletionPending(payload: PmPayload): boolean {
+  return payload.attrs?.deletionPending === true;
 }
 
 async function getFolderIdForNote(noteId: string): Promise<string | null> {
@@ -384,6 +398,8 @@ async function listNoteMetadata(): Promise<NoteMetadata[]> {
   // 串行(for await)避免 SurrealDB ws 雪崩,代价是首次冷启动 N 篇老 note 慢
   const out: NoteMetadata[] = [];
   for (const atom of noteAtoms) {
+    // SP-2:正在后台分批删除的 note 对用户"已消失",列表过滤掉(sweeper 负责删完)
+    if (isDeletionPending(atom.payload.payload)) continue;
     const folderId = folderBySubject.get(atom.id) ?? null;
     const cachedTitle = readCachedTitle(atom.payload.payload);
     if (cachedTitle !== null) {
@@ -462,6 +478,10 @@ export async function getNote(id: string): Promise<NoteInfo | null> {
   const atom = await storage.getAtom<'pm'>(id);
   if (!atom) return null;
   if (atom.payload.domain !== NOTE_DOMAIN) return null;
+
+  // SP-2:正在后台分批删除的 note 视为"已消失" — getNote 返 null 让 NoteView 回
+  // 空态(不渲染编辑器 = 天然锁编辑,Open Q deletionPending UI 锁编辑),sweeper 删完。
+  if (isDeletionPending(atom.payload.payload)) return null;
 
   // hasNoteView marker 防御性 filter(decision 016 §3.4)— 防止上层用 graph text-node /
   // block atom / reading-thought 的 atom id 调 getNote 拿到 "note" 假阳性
@@ -550,11 +570,54 @@ export async function moveNote(
   });
 }
 
+/**
+ * SP-2 分批删除:单批删多少 block atom。
+ * 单事务受控大小避免超大 note(数千块,常见!)单事务卡死(design §5.1)。
+ * 1000 是经验起步值,后续按目标机内存/耗时实测调档(design Open Q 5)。
+ */
+const DELETE_BATCH_SIZE = 1000;
+
+/**
+ * SP-2 核心:分批删空一篇 note 的所有 block + 删 container + 删 intent。
+ *
+ * 每批一个小事务 = { bulkDelete 这批 block + advance intent.cursor },崩溃时
+ * intent.cursor 必反映已落库进度。幂等:重入时重查 belongsToNote 剩余块续删
+ * (已删的块不再在边集合里)。deleteNote 首次调 + sweeper 续删都走这里。
+ *
+ * @param id       note container atom id
+ * @param intentId 已创建的 delete-note intent id(用于游标推进 + 收尾删除)
+ */
+async function drainNoteAndFinalize(id: string, intentId: string): Promise<void> {
+  // 循环:每轮重查剩余块(幂等续删基础 — 已删的块不再在边集合里),取一批,
+  // 单事务 bulkDelete。每批是独立小事务(不卡死);中断后剩余块仍在,sweeper 重入
+  // 走同一循环续删。cursor 不做精确推进 —— 真值靠重查 belongsToNote 边,天然幂等。
+  for (;;) {
+    const belongsEdges = await storage.listEdges({
+      predicate: BELONGS_TO_NOTE_PREDICATE,
+      objectAtomId: id,
+    });
+    if (belongsEdges.length === 0) break;
+    const batch = belongsEdges.slice(0, DELETE_BATCH_SIZE).map((e) => e.subject.atomId);
+    await storage.transaction(async (tx) => {
+      await tx.bulkDeleteAtomsAndEdges(batch);
+    });
+  }
+
+  // 收尾:删 container atom(级联删 hasNoteView / inFolder 边)
+  await storage.transaction(async (tx) => {
+    await tx.deleteAtom(id);
+  });
+  // 全部删完才删 intent(此前任一步崩溃 → intent 留 pending → sweeper 续)
+  await deleteIntent(intentId).catch(() => {});
+  pmDocCache.invalidate(id);
+}
+
 export async function deleteNote(id: string): Promise<{ cascadedEdges: number }> {
   // 单引用模式下 hasBeenReferenced 恒 false,本 sub-phase 只实施草稿分支
   // (decision 016 §3.5)。
   const atom = await storage.getAtom<'pm'>(id);
-  if (atom?.hasBeenReferenced === true) {
+  if (!atom) return { cascadedEdges: 0 };
+  if (atom.hasBeenReferenced === true) {
     console.error(
       `[noteCapability.deleteNote] pm atom ${id} hasBeenReferenced=true ` +
         `not supported in sub-phase 3a-2.5 (single-ref mode); ` +
@@ -562,25 +625,43 @@ export async function deleteNote(id: string): Promise<{ cascadedEdges: number }>
     );
   }
 
-  // L7 block atomization:先删所有 block atom(by belongsToNote.object=id),
-  // 然后删 container atom(级联删 hasNoteView / inFolder 边)
-  const belongsEdges = await storage.listEdges({
-    predicate: BELONGS_TO_NOTE_PREDICATE,
-    objectAtomId: id,
-  });
-  let cascadedEdges = 0;
+  // SP-2 步 1:标 intent + container.deletionPending=true(同一小事务),让 note
+  // 立即从 UI 消失(listNoteMetadata 过滤 deletionPending)。崩溃后 sweeper 据 intent 续删。
+  const intentId = await createIntent({ op: 'delete-note', targetId: id, cursor: { deleted: 0 } });
   await storage.transaction(async (tx) => {
-    for (const e of belongsEdges) {
-      const res = await tx.deleteAtom(e.subject.atomId);
-      cascadedEdges += res.cascadedEdges;
-    }
-    const containerRes = await tx.deleteAtom(id);
-    cascadedEdges += containerRes.cascadedEdges;
+    const cur = atom.payload.payload as PmPayload;
+    const markedPayload: PmPayload = {
+      ...cur,
+      attrs: { ...(cur.attrs ?? {}), deletionPending: true },
+    };
+    await tx.putAtom<'pm'>({ id, payload: { domain: NOTE_DOMAIN, payload: markedPayload } });
   });
+  // note 已"消失" — 立即广播刷新列表(早于真正删块完成)
+  await broadcastNoteListChanged();
+
+  // SP-2 步 2-3:分批删空 + 删 container + 删 intent(可中断,sweeper 续)
+  await drainNoteAndFinalize(id, intentId);
+
+  const cascadedEdges = 0; // 分批模式下不再精确统计级联边(bulkDelete 已删,值仅历史 API 兼容)
 
   pmDocCache.invalidate(id);
   return { cascadedEdges };
 }
+
+/**
+ * SP-2/3:注册 delete-note 的 sweeper resolver(模块加载即注册 — 在 initIpcBus
+ * 阶段被 handlers import 触发,早于 initStorage 的 sweep)。
+ * 续删逻辑复用 drainNoteAndFinalize(幂等:重查剩余块续删),最终删 intent。
+ */
+registerIntentResolver('delete-note', async (intent: IntentEntity) => {
+  if (!intent.targetId) {
+    console.warn(`[deleteNote/resolver] intent ${intent.id} 无 targetId,删 intent 跳过`);
+    await deleteIntent(intent.id).catch(() => {});
+    return;
+  }
+  console.log(`[deleteNote/resolver] 续删 note ${intent.targetId}(intent ${intent.id})`);
+  await drainNoteAndFinalize(intent.targetId, intent.id);
+});
 
 /**
  * createNotesBatch — 批量创建 note (5B Stage 7 重做,规范字面对齐).
