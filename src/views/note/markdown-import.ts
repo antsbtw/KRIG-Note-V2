@@ -35,6 +35,7 @@ import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types
 // 删除 V1 import 中间形态 + V1 atom→PM 转换器 + DriverSerialized 临时桥 — view 端不再做
 // PM doc 拼装,storage 端 putAtom + putEdge 字面持久化, getNote 走 assemblePmDoc 重建.
 import { markdownToAtoms } from '@capabilities/content-ingest';
+import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
@@ -483,6 +484,22 @@ export async function importMarkdownBatch(
     };
   }
 
+  // 2026-05-29 import UX:全链路进度 overlay。从"点击导入"到"真正完成"显示
+  // 同一个不消失的 overlay,期间阻塞 UI(防用户中途乱操作 → 半成品 note 被编辑)。
+  //
+  // 阶段:① 分析文档(indeterminate)② [若 oversized] 弹切割确认(confirm 原生模态
+  // 浮在 overlay 之上)③ 逐文件/逐切片解析 markdownToAtoms(确定进度条)
+  // ④ 写库(indeterminate)⑤ done。
+  //
+  // 文案按场景区分(用户反馈:单文档切成 N 片 ≠ 目录导入 N 个文件):
+  //  - 单文档切割:标题"正在切分《文档名》",进度"已处理 i/N 段: 章节标题"
+  //  - 目录/多文件:标题"正在导入 N 个文件",进度"已处理 i/N 个文件: 文件名"
+  //
+  // isSingleDocSplit 在 task 内赋值,doneMessage(在 task 外)闭包引用以选完成文案。
+  let isSingleDocSplit = false;
+  return runRendererProgress<ImportResult>(
+    '正在分析文档…',
+    async ({ report, reportIndeterminate }) => {
   // 1. 预解析 heading,标 oversized(双阈值:文字字符数排除 base64 图 + 顶级章节数)
   const parsedAll: ParsedFile[] = files.map((f) => {
     const { headings, maxLevel } = parseHeadings(f.content);
@@ -510,7 +527,18 @@ export async function importMarkdownBatch(
     }
   }
 
+  // 场景判定(文案 + 进度语义用):单文档切割 vs 目录/多文件批量。
+  // 单文档切割 = 只有 1 个文件且它 oversized 且用户选了全切。
+  isSingleDocSplit =
+    files.length === 1 && parsedAll[0].oversized && splitMode === 'all';
+
+  // 进度计数:processed 累加(成功收集的文件/切片),total 在 split 场景按 chunk 数,
+  // 否则按文件数。单文档切割的 total 要等 splitByMaxLevel 后才知道,先占位 files.length。
+  let processed = 0;
+  let progressTotal = files.length;
+
   // 2. 拉一次 folder/note list 建缓存
+  reportIndeterminate('正在准备目录结构…');
   const cache = await buildFolderTreeCache();
   const createdNoteIds: string[] = [];
   const createdFolderIds: string[] = [];
@@ -550,6 +578,11 @@ export async function importMarkdownBatch(
 
       const chunks = splitByMaxLevel(scanned.content, parsed);
       const padWidth = Math.max(2, String(chunks.length).length);
+
+      // 单文档切割场景:total = 该文档的 chunk 数(进度条以"段"为单位)
+      if (isSingleDocSplit) {
+        progressTotal = chunks.length;
+      }
 
       console.log(
         `[markdown-import] SPLIT ${scanned.relPath} → ${chunks.length} chunks (folder=${docFolderName})`,
@@ -607,6 +640,15 @@ export async function importMarkdownBatch(
           });
           batchLabels.push(`${scanned.relPath}::chunk-${chunkIdx} (${finalTitle})`);
           chunkCollected++;
+          // 进度上报:单文档切割说"段",否则(理论上不会进此分支多文档)说"项"
+          processed++;
+          report(
+            isSingleDocSplit
+              ? `已处理 ${processed}/${progressTotal} 段: ${finalTitle}`
+              : `已处理 ${processed}/${progressTotal} 项: ${finalTitle}`,
+            processed,
+            progressTotal,
+          );
           const elapsed = Math.round(performance.now() - chunkStart);
           console.log(
             `[markdown-import]   + chunk ${chunkIdx + 1}/${chunks.length} "${finalTitle}" collected (${chunkBytes}B, ${elapsed}ms)`,
@@ -666,6 +708,13 @@ export async function importMarkdownBatch(
         titleHint: finalTitle,
       });
       batchLabels.push(scanned.relPath);
+      // 进度上报:目录/多文件批量说"个文件"
+      processed++;
+      report(
+        `已处理 ${processed}/${progressTotal} 个文件: ${finalTitle}`,
+        processed,
+        progressTotal,
+      );
       const elapsed = Math.round(performance.now() - fileStart);
       console.log(
         `[markdown-import] + ${scanned.relPath} → "${finalTitle}" collected (${fileBytes}B, ${elapsed}ms)`,
@@ -681,7 +730,10 @@ export async function importMarkdownBatch(
   }
 
   // 4. 末尾 1 次 createNotesBatch (5B Stage 7)
+  // 写库阶段:overlay 切回 indeterminate(单事务在 main 内跑,逐 item 回调跨不出
+  // 进程;写库通常比解析快,整段转圈即可,overlay 全程不消失)。
   if (batchItems.length > 0) {
+    reportIndeterminate(`正在保存 ${batchItems.length} 篇笔记…`);
     const batchStart = performance.now();
     const result = await noteCap().createNotesBatch({
       items: batchItems,
@@ -701,13 +753,29 @@ export async function importMarkdownBatch(
     }
   }
 
-  return {
-    createdNoteIds,
-    createdFolderIds,
-    skipped,
-    splitMode,
-    oversizedCount,
-  };
+      return {
+        createdNoteIds,
+        createdFolderIds,
+        skipped,
+        splitMode,
+        oversizedCount,
+      };
+    },
+    {
+      // 完成文案按场景区分(isSingleDocSplit 闭包引用):
+      //  - 单文档切割:"已切分为 N 段"(失败时附跳过数)
+      //  - 目录/多文件:"已导入 N 篇笔记"(失败时附跳过数)
+      doneMessage: (result) => {
+        const ok = result.createdNoteIds.length;
+        const skip = result.skipped.length;
+        const base = isSingleDocSplit ? `已切分为 ${ok} 段` : `已导入 ${ok} 篇笔记`;
+        return {
+          success: skip === 0,
+          message: skip === 0 ? base : `${base}(${skip} 项失败,详见控制台)`,
+        };
+      },
+    },
+  );
 }
 
 /** Error → 紧凑字符串(含 message + 首 3 行 stack,用于 skipped.reason 给用户看)*/

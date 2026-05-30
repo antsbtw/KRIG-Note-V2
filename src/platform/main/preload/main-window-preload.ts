@@ -19,6 +19,7 @@ import type {
   ProgressStartPayload,
   ProgressUpdatePayload,
   ProgressDonePayload,
+  ProgressDrivePayload,
 } from '@shared/ipc/backup-types';
 import type { FolderViewType } from '@capabilities/folder/types';
 
@@ -358,6 +359,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     meta?: Record<string, unknown>;
   }): void {
     ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_RECORD_STAGE, args);
+  },
+
+  /**
+   * 驱动全屏进度 overlay(renderer → main → overlay)。
+   * 供 renderer 端长任务(import 解析/切割)复用 GlobalProgressOverlay。
+   * fire-and-forget;main 端 progress-bridge 原样回推对应事件到本窗口。
+   */
+  driveProgress(payload: ProgressDrivePayload): void {
+    ipcRenderer.send(IPC_CHANNELS.PROGRESS_DRIVE, payload);
   },
 
   // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──

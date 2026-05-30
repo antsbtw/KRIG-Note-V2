@@ -45,27 +45,13 @@ export function useMarkdownImport(workspaceId: string): void {
 
           // 失败强制可见(2026-05-27 反馈:长 docx Split All 部分 chunk 静默
           //   失败 → 重启 cache 清空后 NoteView 拼出半截。修法:不再吞 skipped)
+          // 2026-05-29 import UX sub-phase: progress overlay 已显示 success/fail toast.
+          // 字面仅保留 console.warn 详细失败清单 (开发者诊断用),删 window.alert (重复 UI).
           if (result.skipped.length > 0) {
-            const headLines = result.skipped.slice(0, 10).map((s) =>
-              `  • ${s.relPath}\n      → ${s.reason}`,
-            );
-            const tail =
-              result.skipped.length > 10
-                ? `\n  ... and ${result.skipped.length - 10} more (see terminal log for full list)`
-                : '';
             console.warn(
               `[markdown-import] SKIPPED ${result.skipped.length} item(s):\n${result.skipped
                 .map((s) => `  - ${s.relPath}: ${s.reason}`)
                 .join('\n')}`,
-            );
-            window.alert(
-              `Import completed with errors.\n\n` +
-                `Successful: ${result.createdNoteIds.length} note(s) in ${result.createdFolderIds.length} folder(s)\n` +
-                `Failed:     ${result.skipped.length} item(s)\n\n` +
-                `Failed items:\n${headLines.join('\n')}${tail}\n\n` +
-                `Full diagnostic log in the terminal (npm start window).\n` +
-                `Stage dumps (raw / postprocessed / chunks / pm-docs) in import-cache/ ` +
-                `(see terminal for full path).`,
             );
           }
 
@@ -77,11 +63,9 @@ export function useMarkdownImport(workspaceId: string): void {
           }
         })
         .catch((err) => {
+          // 2026-05-29 import UX sub-phase: progress overlay 字面已显示 catastrophic 失败.
+          // 字面仅 console.error 留 stack trace (开发者诊断用), 删 window.alert.
           console.error('[markdown-import] BATCH FATAL:', err);
-          window.alert(
-            `Import failed catastrophically.\n\n${String(err)}\n\n` +
-              `See terminal log for stack trace.`,
-          );
         });
     });
     return unsub;

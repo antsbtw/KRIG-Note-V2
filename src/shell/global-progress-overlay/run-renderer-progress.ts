@@ -1,0 +1,100 @@
+/**
+ * runRendererProgress — renderer 端长任务的全屏进度封装
+ *
+ * 与 main 端 run-with-progress.ts 同契约,但任务跑在 renderer(如 import 的
+ * markdown 解析 / 切割阶段)。通过 window.electronAPI.driveProgress 把
+ * start/update/done 事件经 PROGRESS_DRIVE → main progress-bridge 回推,
+ * 驱动同一个 <GlobalProgressOverlay/>。
+ *
+ * 用途:让"点击导入 → 解析 → 切割 → 写库 → 完成"全程显示**同一个**不消失的
+ * overlay,期间 overlay 阻塞 UI(防止用户中途乱操作导致半成品 note 被编辑)。
+ *
+ * 红线:不改 run-with-progress.ts / GlobalProgressOverlay.tsx。
+ */
+
+import type {
+  ProgressStartPayload,
+  ProgressUpdatePayload,
+  ProgressDonePayload,
+} from '@shared/ipc/backup-types';
+
+/** 进度上报回调签名 — 与 main 端 ProgressReporter 一致 */
+export type ProgressReporter = (
+  message: string,
+  current?: number,
+  total?: number,
+) => void;
+
+export interface RendererProgressHandle {
+  taskId: string;
+  /** 上报进度(message + 可选 current/total)*/
+  report: ProgressReporter;
+  /** 切回不定进度(只更 message,清掉百分比)*/
+  reportIndeterminate: (message: string) => void;
+}
+
+interface RunOptions<T> {
+  /** 起始是否不定进度(默认 true — 解析阶段先转圈)*/
+  indeterminate?: boolean;
+  /** 完成时把结果映射成成功/失败信息 */
+  doneMessage?: (result: T) => { success: boolean; message: string };
+}
+
+function genTaskId(): string {
+  return `rtask-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 运行一个 renderer 端长任务,期间显示全屏进度遮罩。
+ *
+ * task 接收一个 handle,可在任务内多次 report / reportIndeterminate,
+ * 甚至改 title 旁的进度语义(单文档切割 vs 批量文件,文案由调用方在 report
+ * message 里自行区分)。
+ */
+export async function runRendererProgress<T>(
+  title: string,
+  task: (handle: RendererProgressHandle) => Promise<T>,
+  options: RunOptions<T> = {},
+): Promise<T> {
+  const taskId = genTaskId();
+  const { indeterminate = true, doneMessage } = options;
+
+  const startPayload: ProgressStartPayload = { taskId, title, indeterminate };
+  window.electronAPI.driveProgress({ kind: 'start', payload: startPayload });
+
+  const report: ProgressReporter = (message, current, total) => {
+    const payload: ProgressUpdatePayload = { taskId, message, current, total };
+    window.electronAPI.driveProgress({ kind: 'update', payload });
+  };
+
+  const reportIndeterminate = (message: string): void => {
+    // total 不传 → overlay 保持 indeterminate(GlobalProgressOverlay 的 update
+    // 逻辑:p.total == null 时维持原 indeterminate 态)
+    const payload: ProgressUpdatePayload = { taskId, message };
+    window.electronAPI.driveProgress({ kind: 'update', payload });
+  };
+
+  const handle: RendererProgressHandle = { taskId, report, reportIndeterminate };
+
+  try {
+    const result = await task(handle);
+    const done = doneMessage
+      ? doneMessage(result)
+      : { success: true, message: '完成' };
+    const donePayload: ProgressDonePayload = {
+      taskId,
+      success: done.success,
+      message: done.message,
+    };
+    window.electronAPI.driveProgress({ kind: 'done', payload: donePayload });
+    return result;
+  } catch (err) {
+    const donePayload: ProgressDonePayload = {
+      taskId,
+      success: false,
+      message: `失败:${(err as Error)?.message ?? String(err)}`,
+    };
+    window.electronAPI.driveProgress({ kind: 'done', payload: donePayload });
+    throw err;
+  }
+}

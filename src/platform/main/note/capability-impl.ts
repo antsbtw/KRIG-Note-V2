@@ -594,6 +594,11 @@ export async function deleteNote(id: string): Promise<{ cascadedEdges: number }>
  *
  * broadcastMode='final' 默认:全 items 写完后 1 次 broadcastNoteListChanged.
  * broadcastMode='progressive-throttle':字面不实施 (本期接口保留).
+ *
+ * 2026-05-29 import UX sub-phase: 进度 overlay 由 renderer 端 importMarkdownBatch
+ * 统管全链路 (解析+切割+写库),本函数**不再自包 runWithProgress** — 否则会与
+ * renderer overlay 嵌套出现双 overlay 闪烁。写库阶段由 renderer 上报 indeterminate
+ * 进度 (单事务在 main 内跑,逐 item 回调跨不出进程,精度收益小)。
  */
 export async function createNotesBatch(
   input: CreateNoteBatchInput,

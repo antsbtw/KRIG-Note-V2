@@ -41,6 +41,7 @@ import type { FolderCapabilityApi } from '@capabilities/folder/types';
 // — view 端不再做 PM doc 拼装.
 import { krigBatchToAtoms } from '@capabilities/content-ingest';
 import type { KrigImportBatch } from '@capabilities/content-ingest';
+import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
@@ -70,6 +71,12 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
     return { folderId: '', noteIds: [], skippedTitles: [] };
   }
 
+  // 2026-05-29 import UX:KRIG_IMPORT (PDF 提取) 链路也走全链路进度 overlay。
+  // 场景固定为"批量章节",文案用"章节"区分于 markdown 的"文件/段"。
+  return runRendererProgress<ImportResult>(
+    `正在导入 ${chapters.length} 个章节`,
+    async ({ report, reportIndeterminate }) => {
+  reportIndeterminate('正在分析提取内容…');
   // 1. krigBatchToAtoms 产 章节 × PmAtomDraft[]
   const { chapters: chapterResults } = await krigBatchToAtoms(batch);
   if (chapterResults.length === 0) {
@@ -96,6 +103,7 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
   const batchLabels: string[] = [];
   const skippedTitles: string[] = [];
 
+  let processed = 0;
   for (const chRes of chapterResults) {
     if (chRes.warnings.length) {
       console.warn(`[extraction-import] chapter "${chRes.title}" warnings:`, chRes.warnings);
@@ -111,11 +119,18 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
     });
     batchLabels.push(chRes.title);
     existingTitles.add(chRes.title);
+    processed++;
+    report(
+      `已处理 ${processed}/${chapterResults.length} 个章节: ${chRes.title}`,
+      processed,
+      chapterResults.length,
+    );
   }
 
   // 5. 单事务批量写入
   const noteIds: string[] = [];
   if (batchItems.length > 0) {
+    reportIndeterminate(`正在保存 ${batchItems.length} 个章节…`);
     const result = await noteCap().createNotesBatch({
       items: batchItems,
       broadcastMode: 'final',
@@ -133,7 +148,20 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
     }
   }
 
-  return { folderId, noteIds, skippedTitles };
+      return { folderId, noteIds, skippedTitles };
+    },
+    {
+      doneMessage: (result) => {
+        const ok = result.noteIds.length;
+        const skip = result.skippedTitles.length;
+        const base = `已导入 ${ok} 个章节`;
+        return {
+          success: skip === 0,
+          message: skip === 0 ? base : `${base}(${skip} 项跳过/失败,详见控制台)`,
+        };
+      },
+    },
+  );
 }
 
 // ── Helpers ──
