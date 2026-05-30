@@ -40,20 +40,40 @@ export async function createIntent(input: CreateIntentInput): Promise<string> {
   const db = getDB();
   const id = generateUlid();
   const now = nowMs();
+  // option 字段(targetId/payload):无值时**不写该字段**(留 NONE),不能写 NULL
+  // (SurrealDB option<T> 拒绝 NULL,只接受 NONE | T)。
+  const clauses = buildOptionClauses(input);
   await db.query(
     `CREATE $rid SET
-      op = $op, targetId = $targetId, status = 'pending',
-      cursor = $cursor, payload = $payload, createdAt = $now, updatedAt = $now`,
+      op = $op, status = 'pending',
+      cursor = $cursor, createdAt = $now, updatedAt = $now${clauses.sql}`,
     {
       rid: intentRid(id),
       op: input.op,
-      targetId: input.targetId ?? null,
       cursor: input.cursor ?? {},
-      payload: input.payload ?? null,
       now,
+      ...clauses.bindings,
     },
   );
   return id;
+}
+
+/** 构造 option 字段(targetId/payload)的 SET 片段 + 绑定 — 有值才写,留 NONE 不写 NULL */
+function buildOptionClauses(input: CreateIntentInput): {
+  sql: string;
+  bindings: Record<string, unknown>;
+} {
+  let sql = '';
+  const bindings: Record<string, unknown> = {};
+  if (input.targetId != null) {
+    sql += ', targetId = $targetId';
+    bindings.targetId = input.targetId;
+  }
+  if (input.payload !== undefined) {
+    sql += ', payload = $payload';
+    bindings.payload = input.payload;
+  }
+  return { sql, bindings };
 }
 
 /** 删 intent(= 标记 done:done 后即删行,留幂等窗口靠"再删已删返 0") */
@@ -80,17 +100,17 @@ export async function createIntentViaTx(
   input: CreateIntentInput,
 ): Promise<void> {
   const now = nowMs();
+  const clauses = buildOptionClauses(input);
   await tx.query(
     `CREATE $rid SET
-      op = $op, targetId = $targetId, status = 'pending',
-      cursor = $cursor, payload = $payload, createdAt = $now, updatedAt = $now`,
+      op = $op, status = 'pending',
+      cursor = $cursor, createdAt = $now, updatedAt = $now${clauses.sql}`,
     {
       rid: intentRid(id),
       op: input.op,
-      targetId: input.targetId ?? null,
       cursor: input.cursor ?? {},
-      payload: input.payload ?? null,
       now,
+      ...clauses.bindings,
     },
   );
 }
