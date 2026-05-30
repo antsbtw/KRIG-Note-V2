@@ -46,3 +46,15 @@ export interface ProgressDonePayload {
   success: boolean;
   message: string;
 }
+
+/**
+ * renderer → main 进度驱动载荷(PROGRESS_DRIVE 通道)。
+ *
+ * 让 renderer 端长任务(如 import 解析/切割阶段在 renderer 跑)也能驱动同一个
+ * GlobalProgressOverlay。main 收到后按 kind 原样回推对应 PROGRESS_START/UPDATE/DONE
+ * 到本窗口。renderer 自己生成 taskId,保证 start/update/done 串成一条任务。
+ */
+export type ProgressDrivePayload =
+  | { kind: 'start'; payload: ProgressStartPayload }
+  | { kind: 'update'; payload: ProgressUpdatePayload }
+  | { kind: 'done'; payload: ProgressDonePayload };

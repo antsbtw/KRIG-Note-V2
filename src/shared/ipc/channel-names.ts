@@ -197,6 +197,9 @@ export const IPC_CHANNELS = {
   PROGRESS_START: 'progress.start',                 // main → renderer:任务开始
   PROGRESS_UPDATE: 'progress.update',               // main → renderer:阶段/百分比更新
   PROGRESS_DONE: 'progress.done',                   // main → renderer:任务结束(success/error)
+  // renderer → main:让 renderer 端长任务(import 解析/切割)也能驱动同一 overlay。
+  // main 收到后原样回推 PROGRESS_START/UPDATE/DONE 到本窗口,复用 GlobalProgressOverlay。
+  PROGRESS_DRIVE: 'progress.drive',                 // renderer → main:驱动进度事件
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

@@ -35,6 +35,7 @@ import type {
   ProgressStartPayload,
   ProgressUpdatePayload,
   ProgressDonePayload,
+  ProgressDrivePayload,
 } from './backup-types';
 
 declare global {
@@ -278,6 +279,9 @@ declare global {
         elapsedMs?: number;
         meta?: Record<string, unknown>;
       }): void;
+
+      /** 驱动全屏进度 overlay(renderer 端长任务复用,fire-and-forget)*/
+      driveProgress(payload: ProgressDrivePayload): void;
 
       // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
       graphList(): Promise<unknown>;

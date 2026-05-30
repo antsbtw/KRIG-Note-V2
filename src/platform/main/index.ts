@@ -26,6 +26,7 @@ import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
 import { registerWordImport } from './word-import';
 import { registerImportCacheIpc } from './word-import/import-cache';
+import { registerProgressBridge } from './window/progress-bridge';
 import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
@@ -125,6 +126,7 @@ app.whenReady().then(async () => {
   registerMarkdownImport();
   registerWordImport();
   registerImportCacheIpc(); // 接收 renderer 的诊断落盘(chunk/PM)
+  registerProgressBridge(); // 接收 renderer 驱动的进度事件,回推 overlay
   registerBackupMenu();
   registerFrameworkMenus();
 
