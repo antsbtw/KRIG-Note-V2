@@ -190,8 +190,11 @@ export async function updateNote(
   // patch.title 在 L7-sub2 已不可写 (派生自 doc.content[0]),忽略
 }
 
-export async function deleteNote(noteId: string): Promise<void> {
-  await noteCap().deleteNote(noteId);
+export async function deleteNote(
+  noteId: string,
+  opts?: { progressTaskId?: string },
+): Promise<void> {
+  await noteCap().deleteNote(noteId, opts);
 }
 
 /**
@@ -283,8 +286,11 @@ function nextAvailableFolderName(base: string, existingTitles: string[]): string
  * 业务契约变更见 decision 012 设计师批复 + decision 014 §6.2.6 (cascade scope 扩展)
  * 返回删除统计(deletedFolders + deletedResources + cascadedEdges),caller 可记账。
  */
-export async function deleteFolder(folderId: string): Promise<FolderDeleteResult> {
-  return folderCap().deleteFolder(folderId);
+export async function deleteFolder(
+  folderId: string,
+  opts?: { progressTaskId?: string },
+): Promise<FolderDeleteResult> {
+  return folderCap().deleteFolder(folderId, opts);
 }
 
 /** 重命名 folder (L7-sub2:title 写 atom.payload.title) */

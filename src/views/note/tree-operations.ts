@@ -107,9 +107,11 @@ export async function deleteSelected(workspaceId: string): Promise<void> {
   const decoded = treeIds.map(decodeTreeId);
 
   // 删一个 treeId(note 或 folder)。folder 含资源时弹 confirm(浮在 overlay 之上)。
-  const deleteOne = async (type: string, id: string): Promise<void> => {
+  // progressTaskId:传给 capability,main 分批删时把"已清理 X/Y 块"块级子进度推到
+  // 这个 overlay(大 note/目录删除进度条逐批跳,不再纹丝不动 — delete-progress)。
+  const deleteOne = async (type: string, id: string, progressTaskId?: string): Promise<void> => {
     if (type === 'note') {
-      await deleteNote(id);
+      await deleteNote(id, { progressTaskId });
     } else {
       // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):批量删除时,含资源 folder 逐个 confirm
       // 总指挥批复字面:逐个 confirm 字面对齐 Q7 弱处理 + 0 工程量,multi-select batch UX 留 023
@@ -128,7 +130,7 @@ export async function deleteSelected(workspaceId: string): Promise<void> {
             : `删除文件夹「${folderTitle}」?包含 ${preview.folders} 个子文件夹,操作不可撤销(回收站功能未实施)`;
         shouldDelete = window.confirm(message);
       }
-      if (shouldDelete) await deleteFolder(id);
+      if (shouldDelete) await deleteFolder(id, { progressTaskId });
     }
   };
 
@@ -148,11 +150,14 @@ export async function deleteSelected(workspaceId: string): Promise<void> {
   const total = decoded.length;
   await runRendererProgress(
     total > 1 ? `正在删除 ${total} 项` : '正在删除',
-    async ({ report }) => {
+    async ({ report, taskId }) => {
       let done = 0;
       for (const { type, id } of decoded) {
-        await deleteOne(type, id);
+        // 把 overlay 的 taskId 透传给 capability:main 分批删时推"已清理 X/Y 块"
+        // 块级子进度到同一 overlay(单项内逐批跳)。项做完后下面 report 切回项级。
+        await deleteOne(type, id, taskId);
         done++;
+        // 多项时切回项级进度;单项(大 note/目录)时块级进度已够,这里收尾对齐
         report(`已删除 ${done}/${total} 项`, done, total);
       }
       return done;

@@ -24,6 +24,7 @@ import {
   registerIntentResolver,
   type IntentEntity,
 } from '@storage/intent-log';
+import { progressUpdate } from '@platform/main/window/progress-bridge';
 
 const FOLDER_DOMAIN = 'folder';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
@@ -328,7 +329,10 @@ export async function previewDeleteFolder(
  * 与 deleteNote 的 deletionPending 标记不同(folder 子树量大,逐 atom 标记成本高,
  * 直接靠"删 folder atom 后 listFolders 不再含它"达成 UI 消失)。
  */
-export async function deleteFolder(id: string): Promise<{
+export async function deleteFolder(
+  id: string,
+  opts?: { progressTaskId?: string },
+): Promise<{
   deletedFolders: number;
   deletedResources: number;
   cascadedEdges: number;
@@ -351,7 +355,22 @@ export async function deleteFolder(id: string): Promise<{
   });
 
   // 3. 分批删(可中断,sweeper 续)
-  await drainFolderDeletion(allAtomIds, intentId);
+  // delete-progress:给了 progressTaskId 时每批向 renderer overlay 推块级子进度。
+  const taskId = opts?.progressTaskId;
+  await drainFolderDeletion(
+    allAtomIds,
+    intentId,
+    taskId
+      ? (deleted, total) => {
+          progressUpdate({
+            taskId,
+            message: `正在删除文件夹: 已清理 ${deleted}/${total} 项`,
+            current: deleted,
+            total,
+          });
+        }
+      : undefined,
+  );
 
   return {
     deletedFolders: allFolderIds.length,
@@ -361,12 +380,18 @@ export async function deleteFolder(id: string): Promise<{
 }
 
 /** SP-4:把一组 atom id 分批删空 + 删 intent(deleteFolder 首删 + sweeper 续删共用) */
-async function drainFolderDeletion(atomIds: string[], intentId: string): Promise<void> {
+async function drainFolderDeletion(
+  atomIds: string[],
+  intentId: string,
+  onProgress?: (deleted: number, total: number) => void,
+): Promise<void> {
+  const total = atomIds.length;
   for (let i = 0; i < atomIds.length; i += FOLDER_DELETE_BATCH_SIZE) {
     const batch = atomIds.slice(i, i + FOLDER_DELETE_BATCH_SIZE);
     await storage.transaction(async (tx) => {
       await tx.bulkDeleteAtomsAndEdges(batch);
     });
+    onProgress?.(Math.min(i + batch.length, total), total);
   }
   await deleteIntent(intentId).catch(() => {});
 }

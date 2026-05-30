@@ -118,11 +118,15 @@ export function registerFolderHandlers(): void {
     return previewDeleteFolder(id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.FOLDER_DELETE, async (_e, id: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.FOLDER_DELETE, async (_e, id: unknown, opts: unknown) => {
     if (typeof id !== 'string' || !id) {
       return { deletedFolders: 0, deletedResources: 0, cascadedEdges: 0 };
     }
-    const result = await deleteFolder(id);
+    const progressTaskId =
+      opts && typeof opts === 'object' && typeof (opts as { progressTaskId?: unknown }).progressTaskId === 'string'
+        ? (opts as { progressTaskId: string }).progressTaskId
+        : undefined;
+    const result = await deleteFolder(id, { progressTaskId });
     // Path Y (decision 014 5.6.bis 扩展):删 folder 递归删 note + graph-canvas,
     // 三条 list-changed 都广播 (folder + note + graph)。
     await broadcastFolderListChanged();

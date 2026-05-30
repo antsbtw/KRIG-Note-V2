@@ -448,8 +448,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteMove(noteId: string, newFolderId: string | null): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_MOVE, { noteId, newFolderId });
   },
-  noteDelete(id: string): Promise<void> {
-    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_DELETE, id);
+  noteDelete(id: string, opts?: { progressTaskId?: string }): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_DELETE, id, opts);
   },
   /** main → renderer 推送:笔记列表变更(create / update / move / delete 后广播)*/
   onNoteListChanged(callback: (list: unknown) => void): () => void {
@@ -524,8 +524,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   folderMove(folderId: string, newParentFolderId: string | null): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_MOVE, { folderId, newParentFolderId });
   },
-  folderDelete(id: string): Promise<{ deletedFolders: number; deletedResources: number; cascadedEdges: number }> {
-    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id);
+  folderDelete(id: string, opts?: { progressTaskId?: string }): Promise<{ deletedFolders: number; deletedResources: number; cascadedEdges: number }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FOLDER_DELETE, id, opts);
   },
   /** decision 021 §5.5 + §10.B-3:Q7 弱保护 dry-run 计数 */
   folderPreviewDelete(id: string): Promise<{ folders: number; resources: number }> {

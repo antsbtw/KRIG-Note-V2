@@ -91,7 +91,7 @@ export interface NoteCapabilityApi {
   getNote(id: string): Promise<NoteInfo | null>;
   updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
   moveNote(noteId: string, newFolderId: string | null): Promise<void>;
-  deleteNote(id: string): Promise<void>;
+  deleteNote(id: string, opts?: { progressTaskId?: string }): Promise<void>;
   /** 订阅笔记列表变更 (IPC 广播);返 unsubscribe */
   onListChanged(callback: (list: NoteInfo[]) => void): () => void;
   /**

@@ -53,6 +53,7 @@ import {
   registerIntentResolver,
   type IntentEntity,
 } from '@storage/intent-log';
+import { progressUpdate } from '@platform/main/window/progress-bridge';
 
 const NOTE_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
@@ -590,7 +591,14 @@ const MAX_BATCH_NOTES = 500;
  * @param id       note container atom id
  * @param intentId 已创建的 delete-note intent id(用于游标推进 + 收尾删除)
  */
-async function drainNoteAndFinalize(id: string, intentId: string): Promise<void> {
+async function drainNoteAndFinalize(
+  id: string,
+  intentId: string,
+  onProgress?: (deleted: number, total: number) => void,
+): Promise<void> {
+  // 块级进度 total:首轮查到的剩余块数(sweeper 续删时是"剩余",非原始 total,可接受)
+  let total = 0;
+  let deleted = 0;
   // 循环:每轮重查剩余块(幂等续删基础 — 已删的块不再在边集合里),取一批,
   // 单事务 bulkDelete。每批是独立小事务(不卡死);中断后剩余块仍在,sweeper 重入
   // 走同一循环续删。cursor 不做精确推进 —— 真值靠重查 belongsToNote 边,天然幂等。
@@ -600,10 +608,13 @@ async function drainNoteAndFinalize(id: string, intentId: string): Promise<void>
       objectAtomId: id,
     });
     if (belongsEdges.length === 0) break;
+    if (total === 0) total = belongsEdges.length; // 首轮锁定 total
     const batch = belongsEdges.slice(0, DELETE_BATCH_SIZE).map((e) => e.subject.atomId);
     await storage.transaction(async (tx) => {
       await tx.bulkDeleteAtomsAndEdges(batch);
     });
+    deleted += batch.length;
+    onProgress?.(Math.min(deleted, total), total);
   }
 
   // 收尾:删 container atom(级联删 hasNoteView / inFolder 边)
@@ -615,7 +626,10 @@ async function drainNoteAndFinalize(id: string, intentId: string): Promise<void>
   pmDocCache.invalidate(id);
 }
 
-export async function deleteNote(id: string): Promise<{ cascadedEdges: number }> {
+export async function deleteNote(
+  id: string,
+  opts?: { progressTaskId?: string },
+): Promise<{ cascadedEdges: number }> {
   // 单引用模式下 hasBeenReferenced 恒 false,本 sub-phase 只实施草稿分支
   // (decision 016 §3.5)。
   const atom = await storage.getAtom<'pm'>(id);
@@ -643,7 +657,24 @@ export async function deleteNote(id: string): Promise<{ cascadedEdges: number }>
   await broadcastNoteListChanged();
 
   // SP-2 步 2-3:分批删空 + 删 container + 删 intent(可中断,sweeper 续)
-  await drainNoteAndFinalize(id, intentId);
+  // delete-progress:给了 progressTaskId 时,每批向 renderer overlay 推块级子进度
+  // (大 note 删除进度条逐批跳,不再纹丝不动像卡死)。
+  const taskId = opts?.progressTaskId;
+  const noteTitle = readCachedTitle(atom.payload.payload) ?? '(无标题)';
+  await drainNoteAndFinalize(
+    id,
+    intentId,
+    taskId
+      ? (deleted, total) => {
+          progressUpdate({
+            taskId,
+            message: `正在删除《${noteTitle}》: 已清理 ${deleted}/${total} 块`,
+            current: deleted,
+            total,
+          });
+        }
+      : undefined,
+  );
 
   const cascadedEdges = 0; // 分批模式下不再精确统计级联边(bulkDelete 已删,值仅历史 API 兼容)
 

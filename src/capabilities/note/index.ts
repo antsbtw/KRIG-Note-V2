@@ -74,8 +74,8 @@ async function updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | 
 async function moveNote(noteId: string, newFolderId: string | null): Promise<void> {
   return window.electronAPI.noteMove(noteId, newFolderId);
 }
-async function deleteNote(id: string): Promise<void> {
-  return window.electronAPI.noteDelete(id);
+async function deleteNote(id: string, opts?: { progressTaskId?: string }): Promise<void> {
+  return window.electronAPI.noteDelete(id, opts);
 }
 function onListChanged(callback: (list: NoteInfo[]) => void): () => void {
   return window.electronAPI.onNoteListChanged(callback);
