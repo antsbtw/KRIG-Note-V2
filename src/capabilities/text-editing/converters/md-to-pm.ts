@@ -360,6 +360,14 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
           .split('|')
           .filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)
           .map((c) => c.trim());
+        // 零单元格行(畸形 `||` / Word→md 退化行)字面跳过 — 否则产出
+        // content:[] 的 tableRow,违反 schema `(tableCell|tableHeader)+`,
+        // 落库后打开 note 时 setNodeMarkup 重校验抛 "Invalid content for node type
+        // table/tableRow" 致编辑器崩溃(2026-05-29 长 docx 导入崩溃根因)。
+        if (cells.length === 0) {
+          i++;
+          continue;
+        }
         const cellType = isFirst ? 'tableHeader' : 'tableCell';
         // 默认 colwidth:V2 table CSS table-layout: fixed 需要 cell width
         // 才能算列宽,否则 fixed 退化只有第一列显示,其他列消失
@@ -383,6 +391,8 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
         isFirst = false;
         i++;
       }
+      // 仅当至少有一行(且经上面过滤后必有 cell)才产 table;否则降级 unknown,
+      // 不产空 table(content:[] 违反 schema `tableRow+`)。
       if (tableRows.length > 0) {
         content.push({ type: 'table', content: tableRows });
       } else {
