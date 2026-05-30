@@ -74,11 +74,18 @@ export interface NoteCapabilityApi {
    * - broadcastMode='progressive-throttle':本期不实施 (字面留接口)
    */
   createNotesBatch(input: CreateNoteBatchInput): Promise<CreateNoteBatchResult>;
+  /**
+   * 列出所有 note。
+   *
+   * ⚠ **NoteInfo.doc 为空 container payload**(metadata-only,decision 027)。
+   * listNotes 不再 assemble 全文(冷启动 66s → ~200ms);需要 doc 内容的调用方
+   * 必须走 getNote(id) 单点拉。与 createNotesBatch 的 NoteInfo.doc 约定一致。
+   */
   listNotes(): Promise<NoteInfo[]>;
   /**
-   * 轻量 list — 只返 id/title/folderId,不 assemble doc。
+   * 轻量 list — 只返 id/title/folderId(listNotes 的子集出参)。
    * 用于只读 title 去重的场景(markdown-import / extraction-import / NoteLinkSearch 等)。
-   * 2026-05-28 性能修复:listNotes 全文 assemble 在大批 import 后冷启动卡 30s+。
+   * decision 027 后与 listNotes 性能等价,保留仅为出参更窄。
    */
   listNoteTitles(): Promise<Array<{ id: string; title: string; folderId: string | null }>>;
   getNote(id: string): Promise<NoteInfo | null>;
