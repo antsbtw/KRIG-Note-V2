@@ -104,6 +104,33 @@ DEFINE FIELD OVERWRITE payload ON atom TYPE object FLEXIBLE ASSERT $value != NON
 `;
 
 /**
+ * 1.4.0 schema — intent 表(SP-3 数据层可靠性 intent-log 体系)。
+ *
+ * intent 是**运维元数据**(不是知识语义),独立表避免污染 atom/listAtoms/图谱查询
+ * 与 backup 语义快照。承载"多步/分批写操作"的中断恢复:每批"数据写 + 游标推进"同一
+ * 小事务,崩溃后 sweeper 按 cursor 续完/回滚(详 data-layer-reliability-design §3)。
+ *
+ * 字段:
+ * - op:       操作类型('delete-note' | 'delete-folder' | 'delete-batch' | 'import-batch')
+ * - targetId: 主目标 id(note id / folder root id;batch 可空,清单在 payload)
+ * - status:   'pending' | 'done'(done 后即删行,留作幂等/调试窗口)
+ * - cursor:   分批游标(FLEXIBLE:{ deleted, phase, lastOffset, ... } 按 op 不同)
+ * - payload:  op 特定数据(FLEXIBLE,可选;batch 的 id 清单 / import 的批次清单)
+ * status 索引让 sweeper 走索引扫 pending,O(pending 数) 而非全表。
+ */
+const SCHEMA_VERSION_1_4_0 = `
+DEFINE TABLE IF NOT EXISTS intent SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS op ON intent TYPE string;
+DEFINE FIELD IF NOT EXISTS targetId ON intent TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS status ON intent TYPE string;
+DEFINE FIELD IF NOT EXISTS cursor ON intent TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS payload ON intent TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS createdAt ON intent TYPE number;
+DEFINE FIELD IF NOT EXISTS updatedAt ON intent TYPE number;
+DEFINE INDEX IF NOT EXISTS intent_status ON intent FIELDS status;
+`;
+
+/**
  * 1.1.0 schema (decision 014 §3.7) — 加 atom.hasBeenReferenced 单向 flag。
  *
  * 用于 decision 013 §3.5.1 单向 flag 模型:
@@ -183,6 +210,23 @@ export async function migration_1_3_0(db: Surreal): Promise<void> {
       appliedAt = $now,
       description = 'Make edge.attrs and atom.payload FLEXIBLE (vocabulary extension support)'`,
     { rid: new RecordId('schema_version', '1.3.0'), now },
+  );
+}
+
+/**
+ * 1.4.0 migration up — 建 intent 表(SP-3 数据层可靠性)。
+ * 幂等:DEFINE ... IF NOT EXISTS 重复执行无副作用。
+ */
+export async function migration_1_4_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_4_0);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.4.0',
+      appliedAt = $now,
+      description = 'Add intent table (data-layer reliability intent-log)'`,
+    { rid: new RecordId('schema_version', '1.4.0'), now },
   );
 }
 
