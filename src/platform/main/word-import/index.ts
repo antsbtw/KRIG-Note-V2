@@ -24,6 +24,11 @@ import { detectPandoc, resetPandocDetectionCache } from './pandoc-detector';
 import { scanDocxPaths } from './scanner';
 import * as path from 'node:path';
 import {
+  progressStart,
+  progressUpdate,
+  progressDone,
+} from '../window/progress-bridge';
+import {
   beginImport,
   registerFile,
   dumpStageContent,
@@ -61,12 +66,18 @@ async function pickDocxFiles(titleSuffix: string): Promise<string[] | null> {
 }
 
 // ── 共享:hasDirectory 探测 + broadcast + 大批确认 ─────────────
+/**
+ * 广播转换结果给 renderer。返回是否真的发出了 MARKDOWN_IMPORT_RUN:
+ *  - 'sent'      已广播 → renderer overlay 会接手(main 端**不要** fire done)
+ *  - 'empty'     无可导入文件 → 调用方 fire done 收掉 main overlay
+ *  - 'cancelled' 大批确认被用户取消 → 同上
+ */
 async function broadcastResults(
   unified: UnifiedResult[],
   failed: Array<{ path: string; reason: string }>,
   paths: string[],
   converterTag: string,
-): Promise<void> {
+): Promise<'sent' | 'empty' | 'cancelled'> {
   const focusedWin = BrowserWindow.getFocusedWindow();
 
   let hasDirectory = false;
@@ -110,7 +121,7 @@ async function broadcastResults(
           ? `${failed.length} file(s) failed. See console for details.`
           : 'Selection contained no .docx files.',
     });
-    return;
+    return 'empty';
   }
 
   if (unified.length > CONFIRM_THRESHOLD) {
@@ -123,7 +134,7 @@ async function broadcastResults(
       message: `Converted ${unified.length} .docx files via ${converterTag}.`,
       detail: 'This will create the same number of notes. Continue?',
     });
-    if (choice.response !== 1) return;
+    if (choice.response !== 1) return 'cancelled';
   }
 
   const payload = {
@@ -149,6 +160,12 @@ async function broadcastResults(
   console.log(
     `[word-import:${converterTag}] broadcast MARKDOWN_IMPORT_RUN → ${sent} window(s),files=${unified.length},warnings=${totalWarnings}`,
   );
+  return 'sent';
+}
+
+/** 跨进程交接用的 taskId 生成(main 端;只 fire start/update,done 由 renderer 接管或失败路径)*/
+function genWordTaskId(): string {
+  return `word-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // ── handler 1:mammoth(基础)────────────────────────────────────
@@ -159,7 +176,22 @@ async function runImportMammoth(): Promise<void> {
   console.log(`[word-import:mammoth] starting, paths=${paths.length}`);
   await beginImport('word-mammoth');
 
-  const { results, failed } = await convertDocxBatch(paths);
+  // 2026-05-29 import UX:docx 解析(main,慢)阶段显示 overlay。只 fire start/update,
+  // **不 fire done** — renderer 收到 MARKDOWN_IMPORT_RUN 后用新 taskId 接手覆盖,无间隙。
+  // 仅在"没东西可导入 / 用户取消大批确认"时由本函数 fire done 收掉 overlay。
+  const taskId = genWordTaskId();
+  progressStart({ taskId, title: '正在转换 Word 文档…', indeterminate: true });
+
+  let results: Awaited<ReturnType<typeof convertDocxBatch>>['results'];
+  let failed: Awaited<ReturnType<typeof convertDocxBatch>>['failed'];
+  try {
+    ({ results, failed } = await convertDocxBatch(paths));
+  } catch (err) {
+    // 解析阶段抛错:main 端收掉 overlay(renderer 永远不会接手)
+    progressDone({ taskId, success: false, message: `转换失败:${(err as Error)?.message ?? String(err)}` });
+    throw err;
+  }
+  progressUpdate({ taskId, message: `已转换 ${results.length} 个文档,正在整理…` });
 
   // 落盘 01-raw / 02-postprocessed,同时记 idx 透传 renderer(dump 03/04 时用)
   const unified: UnifiedResult[] = [];
@@ -197,7 +229,15 @@ async function runImportMammoth(): Promise<void> {
     });
   }
 
-  await broadcastResults(unified, failed, paths, 'mammoth');
+  const outcome = await broadcastResults(unified, failed, paths, 'mammoth');
+  // 没广播给 renderer(空 / 取消)→ main 端自己收掉 overlay,否则会一直转圈。
+  if (outcome !== 'sent') {
+    progressDone({
+      taskId,
+      success: outcome === 'cancelled' ? false : true,
+      message: outcome === 'cancelled' ? '已取消导入' : '没有可导入的文档',
+    });
+  }
   await endImport({
     files: results.length + failed.length,
     converted: results.length,
@@ -250,7 +290,19 @@ async function runImportPandoc(): Promise<void> {
   console.log(`[word-import:pandoc] starting, paths=${paths.length}, binary=${pandocStatus.path}`);
   await beginImport('word-pandoc');
 
-  const { results, failed } = await convertDocxBatchPandoc(paths, pandocStatus.path!);
+  // 见 runImportMammoth 注释:只 fire start/update,done 由 renderer 接管或失败路径。
+  const taskId = genWordTaskId();
+  progressStart({ taskId, title: '正在转换 Word 文档(高保真)…', indeterminate: true });
+
+  let results: Awaited<ReturnType<typeof convertDocxBatchPandoc>>['results'];
+  let failed: Awaited<ReturnType<typeof convertDocxBatchPandoc>>['failed'];
+  try {
+    ({ results, failed } = await convertDocxBatchPandoc(paths, pandocStatus.path!));
+  } catch (err) {
+    progressDone({ taskId, success: false, message: `转换失败:${(err as Error)?.message ?? String(err)}` });
+    throw err;
+  }
+  progressUpdate({ taskId, message: `已转换 ${results.length} 个文档,正在整理…` });
 
   // 落盘 01-raw(pandoc 直出)/ 02-postprocessed(math + html-img flatten + base64 内联后)
   const unified: UnifiedResult[] = [];
@@ -287,7 +339,14 @@ async function runImportPandoc(): Promise<void> {
     });
   }
 
-  await broadcastResults(unified, failed, paths, 'pandoc');
+  const outcome = await broadcastResults(unified, failed, paths, 'pandoc');
+  if (outcome !== 'sent') {
+    progressDone({
+      taskId,
+      success: outcome === 'cancelled' ? false : true,
+      message: outcome === 'cancelled' ? '已取消导入' : '没有可导入的文档',
+    });
+  }
   await endImport({
     files: results.length + failed.length,
     converted: results.length,
