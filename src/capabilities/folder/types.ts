@@ -45,7 +45,7 @@ export interface FolderCapabilityApi {
    * Path Y:递归删 folder + 子 folder + 内含资源 (pm note + graph-canvas + future)。
    * decision 012 设计师批复 + decision 014 §6.2.6 cascade scope 扩展。
    */
-  deleteFolder(id: string): Promise<FolderDeleteResult>;
+  deleteFolder(id: string, opts?: { progressTaskId?: string }): Promise<FolderDeleteResult>;
   /**
    * Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3 新增 8th API).
    *

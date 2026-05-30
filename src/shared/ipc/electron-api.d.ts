@@ -315,7 +315,7 @@ declare global {
       noteCreateBatch(input: CreateNoteBatchInput): Promise<CreateNoteBatchResult>;
       noteUpdate(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
       noteMove(noteId: string, newFolderId: string | null): Promise<void>;
-      noteDelete(id: string): Promise<void>;
+      noteDelete(id: string, opts?: { progressTaskId?: string }): Promise<void>;
       /** main → renderer 推送:笔记列表变更;返 unsubscribe */
       onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
       /**
@@ -372,7 +372,7 @@ declare global {
        * Path Y:删 folder 递归删子 folder + 内含资源 (pm note + graph-canvas + future)。
        * decision 012 设计师批复 + decision 014 §6.2.6 cascade scope 扩展。
        */
-      folderDelete(id: string): Promise<{
+      folderDelete(id: string, opts?: { progressTaskId?: string }): Promise<{
         deletedFolders: number;
         deletedResources: number;
         cascadedEdges: number;

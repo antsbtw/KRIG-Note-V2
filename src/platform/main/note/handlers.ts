@@ -98,9 +98,13 @@ export function registerNoteHandlers(): void {
     await broadcastNoteListChanged();
   });
 
-  ipcMain.handle(IPC_CHANNELS.NOTE_DELETE, async (_e, id: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.NOTE_DELETE, async (_e, id: unknown, opts: unknown) => {
     if (typeof id !== 'string' || !id) return;
-    await deleteNote(id);
+    const progressTaskId =
+      opts && typeof opts === 'object' && typeof (opts as { progressTaskId?: unknown }).progressTaskId === 'string'
+        ? (opts as { progressTaskId: string }).progressTaskId
+        : undefined;
+    await deleteNote(id, { progressTaskId });
     await broadcastNoteListChanged();
   });
 }

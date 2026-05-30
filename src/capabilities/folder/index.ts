@@ -43,8 +43,8 @@ async function moveFolder(folderId: string, newParentFolderId: string | null): P
   return window.electronAPI.folderMove(folderId, newParentFolderId);
 }
 /** Path Y:删 folder 递归删子 folder + 内含笔记 (decision 012 设计师批复) */
-async function deleteFolder(id: string): Promise<FolderDeleteResult> {
-  return window.electronAPI.folderDelete(id);
+async function deleteFolder(id: string, opts?: { progressTaskId?: string }): Promise<FolderDeleteResult> {
+  return window.electronAPI.folderDelete(id, opts);
 }
 /** Q7 弱保护 dry-run 计数 (decision 021 §5.5 + §10.B-3) */
 async function previewDeleteFolder(
