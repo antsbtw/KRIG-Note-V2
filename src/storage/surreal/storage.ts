@@ -43,6 +43,7 @@ import {
   getEdgeViaTx,
   putEdgeViaTx,
   deleteEdgeViaTx,
+  bulkDeleteAtomsAndEdgesViaTx,
 } from './transaction-helpers';
 
 class SurrealStorage implements StorageAPI {
@@ -223,6 +224,44 @@ class SurrealStorage implements StorageAPI {
     );
     const deleted = (delRes[0]?.length ?? 0) > 0;
     return { deleted, cascadedEdges };
+  }
+
+  /**
+   * SP-1 数据层可靠性地基:批量删一批 atom + 级联边。
+   *
+   * 比逐个 deleteAtom 少 round-trip(一批 = 2 条 DELETE)。集合成员用 `INSIDE`
+   * (SurrealDB 数组成员检查;`IN` 是 graph traversal,见 feedback_surrealdb_inside_not_in)。
+   * 边匹配两侧:subject.atomId ∈ ids 或 object(kind=atom).atomId ∈ ids。
+   * RETURN BEFORE 拿到被删行数自校验。
+   *
+   * 注:本方法走 db.query(非事务版),供 deleteAtom-style 直接调用;事务内分批删由
+   * transaction-helpers 的 viaTx 版承载(SP-2 接入时用)。空 ids 直接返回 0。
+   */
+  async bulkDeleteAtomsAndEdges(
+    ids: string[],
+  ): Promise<{ deletedAtoms: number; deletedEdges: number }> {
+    if (ids.length === 0) return { deletedAtoms: 0, deletedEdges: 0 };
+    const db = getDB();
+
+    // 1. 删级联边(string atomId 字段,直接用 string 数组 INSIDE)
+    const edgeRes = await db.query<[Array<unknown>]>(
+      `DELETE edge
+        WHERE subject.atomId INSIDE $ids
+           OR (object.kind = 'atom' AND object.atomId INSIDE $ids)
+        RETURN BEFORE`,
+      { ids },
+    );
+    const deletedEdges = edgeRes[0]?.length ?? 0;
+
+    // 2. 删 atom 本体(id 是 RecordId,转 atomRid 数组后 INSIDE)
+    const rids = ids.map((id) => atomRid(id));
+    const atomRes = await db.query<[Array<unknown>]>(
+      `DELETE atom WHERE id INSIDE $rids RETURN BEFORE`,
+      { rids },
+    );
+    const deletedAtoms = atomRes[0]?.length ?? 0;
+
+    return { deletedAtoms, deletedEdges };
   }
 
   // ── edge CRUD ─────────────────────────────────────────────
@@ -494,6 +533,7 @@ class SurrealStorage implements StorageAPI {
         getEdge: (id) => getEdgeViaTx(surrealTx, id),
         putEdge: (input, options) => putEdgeViaTx(surrealTx, input, options),
         deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
+        bulkDeleteAtomsAndEdges: (ids) => bulkDeleteAtomsAndEdgesViaTx(surrealTx, ids),
       };
       const result = await fn(tx);
       await surrealTx.commit();

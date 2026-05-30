@@ -484,6 +484,39 @@ export async function importMarkdownBatch(
     };
   }
 
+  // SP-5:>500 个源文件硬拦(renderer 主拦,UX 友好;capability 兜底再拦防绕过)。
+  // 篇数过多 = 用户行为边界(一次导入 500+ 文件罕见且会 OCC 卡死),直接拒。
+  // 注:这里拦"源文件数",不拦"单文档切成 N 段"(单篇块数大是正常,design §4)。
+  const HARD_LIMIT = 500;
+  const SOFT_LIMIT = 200;
+  if (files.length > HARD_LIMIT) {
+    window.alert(
+      `本次导入 ${files.length} 个文件,超过单次上限 ${HARD_LIMIT} 个。\n` +
+        `请分批导入(建议每次 ≤ ${SOFT_LIMIT} 个)。`,
+    );
+    return {
+      createdNoteIds: [],
+      createdFolderIds: [],
+      skipped: files.map((f) => ({ relPath: f.relPath, reason: 'BatchTooLarge: 超过单次导入上限' })),
+      splitMode: 'na',
+      oversizedCount: 0,
+    };
+  }
+  if (files.length > SOFT_LIMIT) {
+    const ok = window.confirm(
+      `本次导入 ${files.length} 个文件,数量较大可能耗时较久,确认继续?`,
+    );
+    if (!ok) {
+      return {
+        createdNoteIds: [],
+        createdFolderIds: [],
+        skipped: [],
+        splitMode: 'na',
+        oversizedCount: 0,
+      };
+    }
+  }
+
   // 2026-05-29 import UX:全链路进度 overlay。从"点击导入"到"真正完成"显示
   // 同一个不消失的 overlay,期间阻塞 UI(防用户中途乱操作 → 半成品 note 被编辑)。
   //

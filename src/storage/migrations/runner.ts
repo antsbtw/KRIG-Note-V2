@@ -5,7 +5,7 @@
  * 幂等: DEFINE TABLE/FIELD/INDEX 在 SurrealDB 是 idempotent (重复定义不报错)。
  */
 import type { Surreal } from 'surrealdb';
-import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0 } from '../surreal/schema';
+import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0 } from '../surreal/schema';
 
 interface Migration {
   version: string;
@@ -33,6 +33,11 @@ const MIGRATIONS: Migration[] = [
     version: '1.3.0',
     description: 'Make edge.attrs and atom.payload FLEXIBLE (vocabulary extension support)',
     up: migration_1_3_0,
+  },
+  {
+    version: '1.4.0',
+    description: 'Add intent table (data-layer reliability intent-log, SP-3)',
+    up: migration_1_4_0,
   },
 ];
 

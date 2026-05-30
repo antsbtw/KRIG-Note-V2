@@ -63,6 +63,21 @@ export interface StorageAPI {
     options?: StorageOptions,
   ): Promise<{ deleted: boolean; cascadedEdges: number }>;
 
+  /**
+   * 批量删除一批 atom + 其级联边(SP-1 数据层可靠性地基).
+   *
+   * 一次处理一批 id(集合成员用 SurrealDB `INSIDE` 不是 `IN`),比逐个 deleteAtom
+   * 少 N×2 次 round-trip。供"超大 note/目录分批删除"的每批小事务调用 —— 单批受控
+   * 大小(默认上层传 ≤1000)避免单事务过大卡死(详 data-layer-reliability-design §5).
+   *
+   * 删边覆盖 subject.atomId ∈ ids 或 object(kind=atom).atomId ∈ ids 两侧.
+   * @returns deletedAtoms 实删 atom 数, deletedEdges 级联删边数
+   */
+  bulkDeleteAtomsAndEdges(
+    ids: string[],
+    options?: StorageOptions,
+  ): Promise<{ deletedAtoms: number; deletedEdges: number }>;
+
   // ── edge CRUD ──────────────────────────────────────
   getEdge(id: string, options?: StorageOptions): Promise<EdgeEntity | null>;
   putEdge(edge: PutEdgeInput, options?: StorageOptions): Promise<EdgeEntity>;
@@ -207,4 +222,6 @@ export interface StorageTransaction {
   getEdge: StorageAPI['getEdge'];
   putEdge: StorageAPI['putEdge'];
   deleteEdge: StorageAPI['deleteEdge'];
+  /** SP-1/2:事务内批量删 atom+级联边(供分批删每批"删+推游标"同 commit) */
+  bulkDeleteAtomsAndEdges: StorageAPI['bulkDeleteAtomsAndEdges'];
 }

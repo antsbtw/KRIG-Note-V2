@@ -18,10 +18,23 @@ import type { StorageTransaction } from '@storage/index';
 import type { AtomEntity, FolderPayload } from '@semantic/types';
 import type { FolderInfo } from '@shared/ipc/note-folder-types';
 import type { FolderViewType } from '@capabilities/folder/types';
+import {
+  createIntent,
+  deleteIntent,
+  registerIntentResolver,
+  type IntentEntity,
+} from '@storage/intent-log';
 
 const FOLDER_DOMAIN = 'folder';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
 const FOLDER_FOR_VIEW_PREDICATE = 'user:krig:folderForView';
+const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
+
+/**
+ * SP-4 分批删除每批大小(同 deleteNote DELETE_BATCH_SIZE 量级)。
+ * 删目录子树聚合多篇大 note,块总数可达数万,必须分小事务避免单事务卡死。
+ */
+const FOLDER_DELETE_BATCH_SIZE = 1000;
 
 function viewMarkerFor(viewType: FolderViewType): string {
   return `__view__/${viewType}`;
@@ -299,36 +312,91 @@ export async function previewDeleteFolder(
   });
 }
 
+/**
+ * SP-4:删目录子树 — 分批 + intent 可中断恢复(替代旧"整子树一个大事务"=类 C 卡死)。
+ *
+ * 旧实现把整棵子树(可含多篇 6100 块大 note)逐个 deleteAtom 包进**一个事务** →
+ * 单事务过大 → SurrealDB `Transaction conflict: Resource busy` / 卡死。
+ *
+ * 新实现(对齐 deleteNote SP-2):
+ * 1. 收集子树全部待删 atom id(folder + 资源 container + 资源的所有 block,read-only)
+ * 2. createIntent(delete-folder),payload 存完整 atomIds 清单(供 sweeper 续删)
+ * 3. 分批 bulkDeleteAtomsAndEdges,每批独立小事务(不卡死);幂等(重删已删返 0)
+ * 4. 删 intent;任一步崩溃 → intent 留 pending → 启动 sweeper 续删
+ *
+ * 注:资源/folder 立即从 UI 消失靠 list 不再返回已删 atom + broadcast(view 层);
+ * 与 deleteNote 的 deletionPending 标记不同(folder 子树量大,逐 atom 标记成本高,
+ * 直接靠"删 folder atom 后 listFolders 不再含它"达成 UI 消失)。
+ */
 export async function deleteFolder(id: string): Promise<{
   deletedFolders: number;
   deletedResources: number;
   cascadedEdges: number;
 }> {
-  return storage.transaction(async (tx) => {
-    // 1. 递归收集所有 descendants (含 self)
-    const allFolderIds = await collectFolderSubtree(tx, id);
+  // 1. 收集子树(read-only,不开写事务;collectors 内部走 storage 客户端,_tx 仅签名兼容)
+  const allFolderIds = await collectFolderSubtree(null, id);
+  const allResourceIds = await collectResourcesInFolders(null, allFolderIds);
+  // 资源里的 pm note 还有 block atom 子,一并收集
+  const allBlockIds = await collectNoteBlocks(allResourceIds);
 
-    // 2. 收集所有 inFolder 这些 folder 的资源 (pm note + graph-canvas + future 扩展)
-    const allResourceIds = await collectResourcesInFolders(tx, allFolderIds);
+  // 删除顺序:block → 资源 container → folder(子在前,容器在后)
+  const allAtomIds = [...allBlockIds, ...allResourceIds, ...allFolderIds];
 
-    // 3. 一并删除 (storage.deleteAtom 应用层 cascade 自动删关联 edges)
-    let cascadedEdges = 0;
-    for (const resourceId of allResourceIds) {
-      const res = await tx.deleteAtom(resourceId);
-      cascadedEdges += res.cascadedEdges;
-    }
-    for (const folderId of allFolderIds) {
-      const res = await tx.deleteAtom(folderId);
-      cascadedEdges += res.cascadedEdges;
-    }
-
-    return {
-      deletedFolders: allFolderIds.length,
-      deletedResources: allResourceIds.length,
-      cascadedEdges,
-    };
+  // 2. intent(payload 存完整清单供 sweeper 续删)
+  const intentId = await createIntent({
+    op: 'delete-folder',
+    targetId: id,
+    cursor: { deleted: 0 },
+    payload: { atomIds: allAtomIds },
   });
+
+  // 3. 分批删(可中断,sweeper 续)
+  await drainFolderDeletion(allAtomIds, intentId);
+
+  return {
+    deletedFolders: allFolderIds.length,
+    deletedResources: allResourceIds.length,
+    cascadedEdges: 0, // 分批模式不再精确统计级联边(bulkDelete 已删,值仅 API 兼容)
+  };
 }
+
+/** SP-4:把一组 atom id 分批删空 + 删 intent(deleteFolder 首删 + sweeper 续删共用) */
+async function drainFolderDeletion(atomIds: string[], intentId: string): Promise<void> {
+  for (let i = 0; i < atomIds.length; i += FOLDER_DELETE_BATCH_SIZE) {
+    const batch = atomIds.slice(i, i + FOLDER_DELETE_BATCH_SIZE);
+    await storage.transaction(async (tx) => {
+      await tx.bulkDeleteAtomsAndEdges(batch);
+    });
+  }
+  await deleteIntent(intentId).catch(() => {});
+}
+
+/** SP-4:收集一组 note container 的全部 block atom id(belongsToNote.object = container) */
+async function collectNoteBlocks(containerIds: string[]): Promise<string[]> {
+  const blockIds: string[] = [];
+  for (const containerId of containerIds) {
+    const edges = await storage.listEdges({
+      predicate: BELONGS_TO_NOTE_PREDICATE,
+      objectAtomId: containerId,
+    });
+    for (const e of edges) {
+      if (e.subject.kind === 'atom') blockIds.push(e.subject.atomId);
+    }
+  }
+  return blockIds;
+}
+
+/**
+ * SP-4:注册 delete-folder sweeper resolver(模块加载即注册)。
+ * 续删:payload.atomIds 全清单重删一遍(bulkDelete 幂等),删 intent。
+ */
+registerIntentResolver('delete-folder', async (intent: IntentEntity) => {
+  const atomIds = (intent.payload?.atomIds as string[] | undefined) ?? [];
+  console.log(
+    `[deleteFolder/resolver] 续删 folder 子树 ${atomIds.length} atom(intent ${intent.id})`,
+  );
+  await drainFolderDeletion(atomIds, intent.id);
+});
 
 /**
  * BFS 收集 descendant folder ids (含 self)
@@ -337,7 +405,7 @@ export async function deleteFolder(id: string): Promise<{
  * (与 storage.listEdges 同事务 db connection,与原代码一致 — 详 audit §5.3 已登记债)
  */
 async function collectFolderSubtree(
-  _tx: StorageTransaction,
+  _tx: StorageTransaction | null,
   rootFolderId: string,
 ): Promise<string[]> {
   const result: string[] = [rootFolderId];
@@ -389,7 +457,7 @@ const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas', 'thought']);
  * (audit §5.3 已登记债)
  */
 async function collectResourcesInFolders(
-  _tx: StorageTransaction,
+  _tx: StorageTransaction | null,
   folderIds: string[],
 ): Promise<string[]> {
   const resourceIds: string[] = [];

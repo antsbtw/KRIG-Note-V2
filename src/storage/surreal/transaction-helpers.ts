@@ -115,6 +115,33 @@ export async function deleteAtomViaTx(
   return { deleted, cascadedEdges };
 }
 
+/**
+ * SP-1/SP-2:事务内批量删一批 atom + 级联边(storage.bulkDeleteAtomsAndEdges 的 viaTx 版)。
+ * 供分批删除每批小事务调用("删这批 + 推进 intent 游标"同一 commit)。
+ * INSIDE 数组成员(非 IN)。空 ids 返回 0。
+ */
+export async function bulkDeleteAtomsAndEdgesViaTx(
+  tx: SurrealTransaction,
+  ids: string[],
+): Promise<{ deletedAtoms: number; deletedEdges: number }> {
+  if (ids.length === 0) return { deletedAtoms: 0, deletedEdges: 0 };
+  const edgeRes = await tx.query<[Array<unknown>]>(
+    `DELETE edge
+      WHERE subject.atomId INSIDE $ids
+         OR (object.kind = 'atom' AND object.atomId INSIDE $ids)
+      RETURN BEFORE`,
+    { ids },
+  );
+  const deletedEdges = edgeRes[0]?.length ?? 0;
+  const rids = ids.map((id) => atomRid(id));
+  const atomRes = await tx.query<[Array<unknown>]>(
+    `DELETE atom WHERE id INSIDE $rids RETURN BEFORE`,
+    { rids },
+  );
+  const deletedAtoms = atomRes[0]?.length ?? 0;
+  return { deletedAtoms, deletedEdges };
+}
+
 // ── edge ViaTx ─────────────────────────────────────────────
 
 export async function getEdgeViaTx(
