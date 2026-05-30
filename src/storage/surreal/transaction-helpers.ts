@@ -86,6 +86,53 @@ export async function putAtomViaTx<D extends AtomDomain = AtomDomain>(
   };
 }
 
+/**
+ * 档 3 perf: 批量 putAtom — 单 SQL multi-row INSERT(~N 串行 CREATE → 1 RPC)。
+ *
+ * Phase A binary verify(tests/storage/surreal-multirow-verify.test.ts)PASS:
+ * SurrealDB server 3.0.4 + SDK 2.0.3 下 `INSERT INTO atom $rows`(rows = object array,
+ * 每行 id = RecordId 实例)真批量写入,1000 row ~13-23ms,≥10x serial CREATE。
+ *
+ * 语义差异(对 putAtomViaTx):
+ *  - 仅 CREATE 语义(不支持 id UPSERT —— 批量场景 caller 全是新建 atom)。
+ *    若 input.id 已存在,INSERT 行为由 SurrealDB 决定(本 API 契约仅承诺新建)。
+ *  - ULID 应用层预生成(单 putAtomViaTx 无 id 分支同款 generateUlid),
+ *    caller 拿 entities[i].id 建 tmpToReal 映射。
+ *
+ * 不校验 id 冲突(同 putAtomViaTx CREATE 分支不校验)。空 inputs 短路返回 []。
+ */
+export async function batchPutAtomsViaTx<D extends AtomDomain = AtomDomain>(
+  tx: SurrealTransaction,
+  inputs: PutAtomInput<D>[],
+  options?: StorageOptions,
+): Promise<AtomEntity<D>[]> {
+  if (inputs.length === 0) return [];
+  const now = nowMs();
+  const ownerId = options?.ownerId ?? DEFAULT_OWNER;
+
+  const entities: AtomEntity<D>[] = inputs.map((input) => ({
+    id: input.id ?? generateUlid(),
+    createdAt: now,
+    updatedAt: now,
+    createdBy: ownerId,
+    payload: input.payload,
+  }));
+
+  // row.id 必须是 RecordId 实例(atomRid),不是 string —— Phase A 实测踩坑:
+  // raw string 会被 server 拒("Cannot execute statement using value")。
+  const rows = entities.map((e) => ({
+    id: atomRid(e.id),
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+    createdBy: e.createdBy,
+    payload: e.payload,
+  }));
+
+  await tx.query(`INSERT INTO atom $rows`, { rows });
+
+  return entities;
+}
+
 export async function deleteAtomViaTx(
   tx: SurrealTransaction,
   id: string,
@@ -225,6 +272,67 @@ export async function putEdgeViaTx(
     object: input.object,
     attrs: baseAttrs as EdgeEntity['attrs'],
   };
+}
+
+/**
+ * 档 3 perf: 批量 putEdge — 单 SQL multi-row INSERT(~N 串行 CREATE → 1 RPC)。
+ *
+ * Phase A binary verify 背书(同 batchPutAtomsViaTx)。
+ *
+ * 语义对齐 putEdgeViaTx 的"无 id CREATE 分支":
+ *  - 不做 assertAtomExists(档 1 拍板,caller 应用层保证 atomId 引用正确性,
+ *    见 putEdgeViaTx 正确性契约注释)。
+ *  - attrs.createdBy / createdAt 缺省注入(同单条逻辑)。
+ *  - edge id 应用层 generateUlid 预生成。
+ *  - subject 必须是 atom ref(纯 shape 校验,逐条 throw 暴露 caller 错误意图)。
+ *
+ * 仅 CREATE 语义(不支持 id UPDATE —— 批量场景 caller 全是新建边)。空 inputs 短路返回 []。
+ */
+export async function batchPutEdgesViaTx(
+  tx: SurrealTransaction,
+  inputs: PutEdgeInput[],
+  options?: StorageOptions,
+): Promise<EdgeEntity[]> {
+  if (inputs.length === 0) return [];
+  const now = nowMs();
+  const ownerId = options?.ownerId ?? DEFAULT_OWNER;
+
+  const entities: EdgeEntity[] = inputs.map((input) => {
+    if (input.subject.kind !== 'atom') {
+      throw new Error(
+        `Edge subject must be AtomRef, got kind=${(input.subject as { kind: string }).kind}`,
+      );
+    }
+    const baseAttrs: Record<string, unknown> = { ...input.attrs };
+    if (baseAttrs.createdBy === undefined || baseAttrs.createdBy === '') {
+      baseAttrs.createdBy = ownerId;
+    }
+    if (baseAttrs.createdAt === undefined) baseAttrs.createdAt = now;
+    return {
+      id: generateUlid(),
+      createdAt: now,
+      updatedAt: now,
+      predicate: input.predicate,
+      subject: input.subject,
+      object: input.object,
+      attrs: baseAttrs as EdgeEntity['attrs'],
+    };
+  });
+
+  // row.id 必须是 RecordId 实例(edgeRid),不是 string(同 batchPutAtomsViaTx Phase A 坑)。
+  const rows = entities.map((e) => ({
+    id: edgeRid(e.id),
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+    predicate: e.predicate,
+    subject: e.subject,
+    object: e.object,
+    attrs: e.attrs,
+  }));
+
+  await tx.query(`INSERT INTO edge $rows`, { rows });
+
+  return entities;
 }
 
 export async function deleteEdgeViaTx(

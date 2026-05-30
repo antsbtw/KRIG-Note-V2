@@ -39,9 +39,11 @@ import {
 import {
   getAtomViaTx,
   putAtomViaTx,
+  batchPutAtomsViaTx,
   deleteAtomViaTx,
   getEdgeViaTx,
   putEdgeViaTx,
+  batchPutEdgesViaTx,
   deleteEdgeViaTx,
   bulkDeleteAtomsAndEdgesViaTx,
 } from './transaction-helpers';
@@ -529,9 +531,11 @@ class SurrealStorage implements StorageAPI {
       const tx: StorageTransaction = {
         getAtom: (id) => getAtomViaTx(surrealTx, id),
         putAtom: (input, options) => putAtomViaTx(surrealTx, input, options),
+        batchPutAtoms: (inputs, options) => batchPutAtomsViaTx(surrealTx, inputs, options),
         deleteAtom: (id) => deleteAtomViaTx(surrealTx, id),
         getEdge: (id) => getEdgeViaTx(surrealTx, id),
         putEdge: (input, options) => putEdgeViaTx(surrealTx, input, options),
+        batchPutEdges: (inputs, options) => batchPutEdgesViaTx(surrealTx, inputs, options),
         deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
         bulkDeleteAtomsAndEdges: (ids) => bulkDeleteAtomsAndEdgesViaTx(surrealTx, ids),
       };

@@ -218,9 +218,26 @@ export interface SubgraphResult {
 export interface StorageTransaction {
   getAtom: StorageAPI['getAtom'];
   putAtom: StorageAPI['putAtom'];
+  /**
+   * 档 3 perf:批量 putAtom — 单 SQL multi-row INSERT(~N 串行 → 1 RPC)。
+   * 仅 CREATE 语义(input.id 不传走 ULID 预生成)。空 inputs 返回 []。
+   * Phase A binary verify PASS(tests/storage/surreal-multirow-verify.test.ts)。
+   */
+  batchPutAtoms<D extends AtomDomain = AtomDomain>(
+    inputs: PutAtomInput<D>[],
+    options?: StorageOptions,
+  ): Promise<AtomEntity<D>[]>;
   deleteAtom: StorageAPI['deleteAtom'];
   getEdge: StorageAPI['getEdge'];
   putEdge: StorageAPI['putEdge'];
+  /**
+   * 档 3 perf:批量 putEdge — 单 SQL multi-row INSERT(~N 串行 → 1 RPC)。
+   * 仅 CREATE 语义。不做 assertAtomExists(caller 应用层保证引用正确性)。空 inputs 返回 []。
+   */
+  batchPutEdges(
+    inputs: PutEdgeInput[],
+    options?: StorageOptions,
+  ): Promise<EdgeEntity[]>;
   deleteEdge: StorageAPI['deleteEdge'];
   /** SP-1/2:事务内批量删 atom+级联边(供分批删每批"删+推游标"同 commit) */
   bulkDeleteAtomsAndEdges: StorageAPI['bulkDeleteAtomsAndEdges'];
