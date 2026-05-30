@@ -47,6 +47,7 @@ import type {
 import type { PmAtomDraft } from '@semantic/types';
 import type { StorageTransaction } from '@storage/api';
 import { broadcastNoteListChanged } from './broadcast';
+import { runWithProgress, type ProgressReporter } from '../window/run-with-progress';
 
 const NOTE_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
@@ -594,9 +595,39 @@ export async function deleteNote(id: string): Promise<{ cascadedEdges: number }>
  *
  * broadcastMode='final' 默认:全 items 写完后 1 次 broadcastNoteListChanged.
  * broadcastMode='progressive-throttle':字面不实施 (本期接口保留).
+ *
+ * 2026-05-29 import UX sub-phase: ≥5 items 字面包装 runWithProgress 显示
+ * 全屏 overlay (含进度条 + 标题 + 每篇 note title)。<5 items 短任务字面跳过
+ * overlay 减少打扰 (阈值 = magic number 5,未来调整是另一个决策点)。
+ *
+ * 5B §7.5.2 字面 broadcastMode='progressive-throttle' 字段仍不实施 (那是 list
+ * refresh 频率,与 PROGRESS_UPDATE 是两件事;本 sub-phase 仅接后者)。
  */
 export async function createNotesBatch(
   input: CreateNoteBatchInput,
+): Promise<CreateNoteBatchResult> {
+  // 字面: < 5 篇时不显示 progress overlay (短任务不打扰); ≥5 篇走 runWithProgress
+  if (input.items.length < 5) {
+    return createNotesBatchInternal(input, null);
+  }
+  return runWithProgress(
+    `正在导入 ${input.items.length} 篇笔记`,
+    async (reportProgress) => createNotesBatchInternal(input, reportProgress),
+    {
+      doneMessage: (result) => ({
+        success: result.failures.length === 0,
+        message:
+          result.failures.length === 0
+            ? `已完成 ${result.notes.length} 篇`
+            : `完成 ${result.notes.length} 篇,失败 ${result.failures.length} 篇 (详见控制台)`,
+      }),
+    },
+  );
+}
+
+async function createNotesBatchInternal(
+  input: CreateNoteBatchInput,
+  reportProgress: ProgressReporter | null,
 ): Promise<CreateNoteBatchResult> {
   const { items, broadcastMode = 'final' } = input;
   const notes: NoteInfo[] = [];
@@ -619,6 +650,13 @@ export async function createNotesBatch(
         try {
           const note = await createSingleNoteFromDrafts(tx, items[i]);
           notes.push(note);
+
+          // 字面上报进度 (每 item 完成一次,含 note title)
+          reportProgress?.(
+            `已导入 ${i + 1}/${items.length} 篇: ${note.title || '(无标题)'}`,
+            i + 1,
+            items.length,
+          );
         } catch (err) {
           failures.push({ index: i, error: String(err), rolledBack: true });
           throw err;
