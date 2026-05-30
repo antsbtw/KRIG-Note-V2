@@ -45,7 +45,7 @@ import type {
   CreateNoteBatchFailure,
 } from '@capabilities/note/types';
 import type { PmAtomDraft } from '@semantic/types';
-import type { StorageTransaction } from '@storage/api';
+import type { StorageTransaction, PutEdgeInput } from '@storage/api';
 import { broadcastNoteListChanged } from './broadcast';
 import {
   createIntent,
@@ -806,20 +806,22 @@ async function createSingleNoteFromDrafts(
     });
   }
 
-  // 3. atoms 字面写入 + 建 tmpId → realId 映射
+  // 3. atoms 字面批量写入(档 3 perf: N 次串行 putAtom → 1 次 batchPutAtoms multi-row INSERT)
+  //    + 建 tmpId → realId 映射。entities[i] 字面对应 inputs[i](batchPutAtoms 保序)。
+  const atomEntities = await tx.batchPutAtoms<'pm'>(
+    // 字面 PE4: 不传 id, storage 分配(batchPutAtoms 内部应用层预生成 ULID)
+    item.atoms.map((draft) => ({ payload: draft.payload })),
+  );
   const tmpToReal = new Map<string, string>();
-  for (const draft of item.atoms) {
-    const entity = await tx.putAtom<'pm'>({
-      // 字面 PE4: 不传 id, storage 分配
-      payload: draft.payload,
-    });
-    tmpToReal.set(draft.tmpId, entity.id);
-  }
+  item.atoms.forEach((draft, i) => tmpToReal.set(draft.tmpId, atomEntities[i].id));
+
+  // 4. 三类边收集到一个 array,一次 batchPutEdges(档 3 perf: N 次串行 putEdge → 1 次 multi-row INSERT)
+  const edges: PutEdgeInput[] = [];
 
   // 4a. belongsToNote: 每 draft → container
   for (const draft of item.atoms) {
     const realId = tmpToReal.get(draft.tmpId)!;
-    await tx.putEdge({
+    edges.push({
       predicate: BELONGS_TO_NOTE_PREDICATE,
       subject: { kind: 'atom', atomId: realId },
       object: { kind: 'atom', atomId: containerAtom.id },
@@ -838,7 +840,7 @@ async function createSingleNoteFromDrafts(
           `on draft.tmpId=${draft.tmpId}`,
       );
     }
-    await tx.putEdge({
+    edges.push({
       predicate: CHILD_OF_PREDICATE,
       subject: { kind: 'atom', atomId: childRealId },
       object: { kind: 'atom', atomId: parentRealId },
@@ -858,7 +860,7 @@ async function createSingleNoteFromDrafts(
   }
   for (const realIds of siblingGroups.values()) {
     for (let i = 0; i < realIds.length - 1; i++) {
-      await tx.putEdge({
+      edges.push({
         predicate: NEXT_SIBLING_PREDICATE,
         subject: { kind: 'atom', atomId: realIds[i] },
         object: { kind: 'atom', atomId: realIds[i + 1] },
@@ -866,6 +868,9 @@ async function createSingleNoteFromDrafts(
       });
     }
   }
+
+  // 单 SQL 批量写入所有三类边(belongsToNote + childOf + nextSibling)
+  await tx.batchPutEdges(edges);
 
   // 5. NoteInfo (assembled 不再二次拼装 — 字面用 cached title + empty container doc 兜底,
   //    view 端 getNote 真消费时走 assemblePmDoc 拼全文)

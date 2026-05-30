@@ -98,6 +98,19 @@ export function createMockStorage(): MockStorage {
     return Promise.resolve(entity);
   }
 
+  // 档 3 perf: batchPutAtoms — mock 语义对应即可(应用层 for loop 调 putAtomImpl)。
+  // 真 SurrealStorage 走单 SQL multi-row INSERT;mock 只需保证返回 entities 顺序一致 +
+  // id 分配 + rollback 快照可见(transactionImpl 快照已覆盖 atomCounter)。
+  async function batchPutAtomsImpl<D extends AtomDomain = AtomDomain>(
+    inputs: PutAtomInput<D>[],
+  ): Promise<AtomEntity<D>[]> {
+    const out: AtomEntity<D>[] = [];
+    for (const input of inputs) {
+      out.push(await putAtomImpl(input));
+    }
+    return out;
+  }
+
   async function getAtomImpl<D extends AtomDomain = AtomDomain>(
     id: string,
   ): Promise<AtomEntity<D> | null> {
@@ -233,6 +246,15 @@ export function createMockStorage(): MockStorage {
     return Promise.resolve(entity);
   }
 
+  // 档 3 perf: batchPutEdges — mock 语义对应即可(应用层 for loop 调 putEdgeImpl)。
+  async function batchPutEdgesImpl(inputs: PutEdgeInput[]): Promise<EdgeEntity[]> {
+    const out: EdgeEntity[] = [];
+    for (const input of inputs) {
+      out.push(await putEdgeImpl(input));
+    }
+    return out;
+  }
+
   async function getEdgeImpl(id: string): Promise<EdgeEntity | null> {
     return edges.get(id) ?? null;
   }
@@ -308,9 +330,11 @@ export function createMockStorage(): MockStorage {
     const tx: StorageTransaction = {
       getAtom: getAtomImpl,
       putAtom: putAtomImpl as StorageTransaction['putAtom'],
+      batchPutAtoms: batchPutAtomsImpl as StorageTransaction['batchPutAtoms'],
       deleteAtom: deleteAtomImpl,
       getEdge: getEdgeImpl,
       putEdge: putEdgeImpl,
+      batchPutEdges: batchPutEdgesImpl,
       deleteEdge: deleteEdgeImpl,
       bulkDeleteAtomsAndEdges: bulkDeleteAtomsAndEdgesImpl,
     };
