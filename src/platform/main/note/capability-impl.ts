@@ -577,6 +577,9 @@ export async function moveNote(
  */
 const DELETE_BATCH_SIZE = 1000;
 
+/** SP-5:单次 createNotesBatch 最大篇数(超过硬拒,design §4)。篇数边界,非块数。 */
+const MAX_BATCH_NOTES = 500;
+
 /**
  * SP-2 核心:分批删空一篇 note 的所有 block + 删 container + 删 intent。
  *
@@ -692,11 +695,13 @@ export async function createNotesBatch(
     return { notes, failures };
   }
 
-  if (items.length > 500) {
-    console.warn(
-      `[note-capability/createNotesBatch] batch size ${items.length} > 500;` +
-        ` single-tx may hit SurrealDB timeout (Stage 7 字面未实施 chunk)`,
-    );
+  // SP-5:>500 篇硬拦(capability 兜底层,防 renderer 拦截被绕过)。
+  // 单事务包 >500 篇大批会 SurrealDB 卡死/timeout(类 C)。篇数过多是用户行为边界,
+  // 直接拒(单篇块数大不在此限,由分批删/未来分批导入承载)。design §4。
+  if (items.length > MAX_BATCH_NOTES) {
+    const error = `BatchTooLarge: ${items.length} > ${MAX_BATCH_NOTES} notes per batch`;
+    console.error(`[note-capability/createNotesBatch] ${error}; rejecting`);
+    return { notes: [], failures: [{ index: -1, error, rolledBack: false }] };
   }
 
   try {
