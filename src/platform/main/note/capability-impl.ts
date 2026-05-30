@@ -308,7 +308,37 @@ function injectIdsForCreate(doc: PmPayload): PmPayload {
   return visit(doc);
 }
 
-export async function listNotes(): Promise<NoteInfo[]> {
+/**
+ * note 元数据(id + title + folderId + 时间戳)— 不含 doc。
+ *
+ * listNotes / listNoteTitles 共用核心:都只需要"列出所有 note 的元数据",
+ * 区别只在出参形态(NoteInfo vs {id,title,folderId})。
+ */
+interface NoteMetadata {
+  id: string;
+  title: string;
+  folderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * 列出所有 note 的元数据 — **不 assemble doc**(cold-start 性能契约,2026-05-29)。
+ *
+ * 背景(fix/listnotes-cold-start-slow):
+ * - L7 block atomization 后单 note = container + N block atom,assemblePmDoc 单篇
+ *   ~700ms;listNotes 旧实现逐篇 assemble 92 篇 × 4 并发 caller = 冷启动 66s 卡死。
+ * - listNotes 的所有消费方(NavSide / note-cache / NoteLinkSearch / NoteView 订阅 /
+ *   extraction-import 去重)只读 title/folderId/updatedAt,**从不读 doc**。
+ *   唯一用 doc 的 tree-operations 粘贴路径改走 getNote 单点拉(用户操作,非冷启动)。
+ * - 故 listNotes 改 metadata-only:读 container.attrs.title 缓存(O(1)),doc 留空。
+ *
+ * title 来源(沿 migration 023 缓存策略):
+ * - 命中 attrs.title 缓存 → O(1) 直接用
+ * - 缺缓存(老数据 / migration 023 失败篇)→ 等 backfill,仍缺则 fallback assemble
+ *   + deriveTitle(不写回);串行避免 SurrealDB ws 雪崩
+ */
+async function listNoteMetadata(): Promise<NoteMetadata[]> {
   // sub-phase 1 后 pm domain 不再是 note 专属(canvas-store 也用),
   // 故必须叠加 hasNoteView 边过滤区分 note 与 block atom / graph text-node / reading-thought
   //
@@ -335,74 +365,6 @@ export async function listNotes(): Promise<NoteInfo[]> {
     }
   }
 
-  // 串行(for await)避免 SurrealDB ws 雪崩(2026-05-28 实测 Promise.all 92 路
-  // 并发触发 NotAllowed auth crash);代价是首次冷启动 N 篇 × 200ms 量级,
-  // 后续走 pmDocCache 命中即快路径。
-  const results: NoteInfo[] = [];
-  for (const atom of noteAtoms) {
-    const folderId = folderBySubject.get(atom.id) ?? null;
-    const cached = pmDocCache.get(atom.id);
-    const assembled = cached ?? (await assemblePmDoc(atom.id));
-    if (!assembled) {
-      console.warn(
-        `[note-capability/listNotes] assemble failed for ${atom.id}, fallback empty doc`,
-      );
-      results.push({
-        id: atom.id,
-        title: '未命名',
-        doc: wrapPmDoc(emptyContainerPayload()),
-        folderId,
-        createdAt: atom.createdAt,
-        updatedAt: atom.updatedAt,
-      });
-      continue;
-    }
-    if (!cached) pmDocCache.set(atom.id, assembled);
-    results.push(buildNoteInfo(atom, assembled, folderId));
-  }
-
-  return results;
-}
-
-/**
- * 轻量 list — 只返 id/title/folderId,不 assemble doc。
- *
- * 2026-05-28 性能修复(经历两轮迭代):
- * - V1 lazy backfill 路径 fire-and-forget putAtom × N 篇,SurrealDB ws 雪崩 → auth crash
- * - V2 改:**串行**遍历(避免 ws in-flight 风暴),命中 attrs.title 缓存即返,
- *        老数据缓存缺失 → assemble + deriveTitle 但**不写回**,由
- *        runColdStartTitleBackfill() 在 init 期单独做。
- *
- * markdown-import / extraction-import 等只为去重读 title+folderId 的场景用本 API。
- */
-export async function listNoteTitles(): Promise<Array<{
-  id: string;
-  title: string;
-  folderId: string | null;
-}>> {
-  // P1-1 (2026-05-29 data-layer-audit): 走 listMarkerAtoms,SQL 走 INSIDE subquery,
-  // 免拉全 pm domain (1000 note + 100000 block atom) 再应用层 filter.
-  const noteAtoms = await storage.listMarkerAtoms<'pm'>({
-    domain: NOTE_DOMAIN,
-    markerPredicate: HAS_NOTE_VIEW_PREDICATE,
-    markerObjectMatch: { kind: 'literal', type: 'boolean', value: true },
-  });
-  const noteIdsArr2 = noteAtoms.map((a) => a.id);
-
-  // P0-1 (2026-05-29 data-layer-audit): inFolder 只拉本批 note 的边,免全库扫
-  const folderEdges = noteIdsArr2.length > 0
-    ? await storage.listEdges({
-        predicate: IN_FOLDER_PREDICATE,
-        subjectAtomIds: noteIdsArr2,
-      })
-    : [];
-  const folderBySubject = new Map<string, string>();
-  for (const e of folderEdges) {
-    if (e.object.kind === 'atom') {
-      folderBySubject.set(e.subject.atomId, e.object.atomId);
-    }
-  }
-
   // 若有 note 缺缓存且 migration 023 正在跑 → 等它完成再走 fallback;
   // 否则两边并发同时 assemble + putAtom 会触发 ws 雪崩
   const hasUncached = noteAtoms.some((a) => readCachedTitle(a.payload.payload) === null);
@@ -420,12 +382,18 @@ export async function listNoteTitles(): Promise<Array<{
   }
 
   // 串行(for await)避免 SurrealDB ws 雪崩,代价是首次冷启动 N 篇老 note 慢
-  const out: Array<{ id: string; title: string; folderId: string | null }> = [];
+  const out: NoteMetadata[] = [];
   for (const atom of noteAtoms) {
     const folderId = folderBySubject.get(atom.id) ?? null;
     const cachedTitle = readCachedTitle(atom.payload.payload);
     if (cachedTitle !== null) {
-      out.push({ id: atom.id, title: cachedTitle, folderId });
+      out.push({
+        id: atom.id,
+        title: cachedTitle,
+        folderId,
+        createdAt: atom.createdAt,
+        updatedAt: atom.updatedAt,
+      });
       continue;
     }
 
@@ -433,14 +401,61 @@ export async function listNoteTitles(): Promise<Array<{
     const cached = pmDocCache.get(atom.id);
     const assembled = cached ?? (await assemblePmDoc(atom.id));
     if (!assembled) {
-      out.push({ id: atom.id, title: '未命名', folderId });
+      out.push({
+        id: atom.id,
+        title: '未命名',
+        folderId,
+        createdAt: atom.createdAt,
+        updatedAt: atom.updatedAt,
+      });
       continue;
     }
     if (!cached) pmDocCache.set(atom.id, assembled);
-    out.push({ id: atom.id, title: deriveTitle(assembled), folderId });
+    out.push({
+      id: atom.id,
+      title: deriveTitle(assembled),
+      folderId,
+      createdAt: atom.createdAt,
+      updatedAt: atom.updatedAt,
+    });
   }
 
   return out;
+}
+
+/**
+ * 列出所有 note(NoteInfo 形态)— **doc 字段为空 container payload**。
+ *
+ * ⚠ 2026-05-29 起 listNotes 不再 assemble 全文(cold-start 性能契约,见 listNoteMetadata)。
+ * 需要 doc 内容的调用方(如 tree-operations 粘贴)必须走 getNote(id) 单点拉。
+ * 这与 createNotesBatch 的 NoteInfo.doc 约定一致(见 capabilities/note/types.ts §CreateNoteBatchResult)。
+ */
+export async function listNotes(): Promise<NoteInfo[]> {
+  const meta = await listNoteMetadata();
+  return meta.map((m) => ({
+    id: m.id,
+    title: m.title,
+    doc: wrapPmDoc(emptyContainerPayload()),
+    folderId: m.folderId,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+  }));
+}
+
+/**
+ * 轻量 list — 只返 id/title/folderId(listNotes 的子集出参)。
+ *
+ * 历史上 listNoteTitles 是为绕开 listNotes 全文 assemble 而加的快路径;2026-05-29
+ * listNotes 自身已改 metadata-only,两者性能等价,本 API 保留仅为出参更窄
+ * (markdown-import / extraction-import 等只读 title+folderId 去重场景)。
+ */
+export async function listNoteTitles(): Promise<Array<{
+  id: string;
+  title: string;
+  folderId: string | null;
+}>> {
+  const meta = await listNoteMetadata();
+  return meta.map((m) => ({ id: m.id, title: m.title, folderId: m.folderId }));
 }
 
 export async function getNote(id: string): Promise<NoteInfo | null> {

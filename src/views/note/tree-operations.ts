@@ -176,8 +176,11 @@ async function pasteNote(
 ): Promise<void> {
   const src = noteById.get(sourceNoteId);
   if (!src) return;
+  // listNotes 不再带 doc(metadata-only,fix/listnotes-cold-start-slow);单点拉真 doc
+  const full = await noteCap().getNote(sourceNoteId);
+  if (!full) return;
   // 深拷贝 doc(JSON 序列化 / 反序列化最简单)
-  const docCopy = JSON.parse(JSON.stringify(src.doc));
+  const docCopy = JSON.parse(JSON.stringify(full.doc));
   // note title 派生自 doc.content[0],粘贴前缀 "副本 " 改首段第一个 text 节点
   prefixFirstTextNode(docCopy?.payload, src.title.startsWith('副本 ') ? '' : '副本 ');
   await noteCap().createNote(docCopy, targetFolderId);
@@ -232,7 +235,10 @@ async function pasteFolderTree(
   // 拷贝直属笔记(用快照 noteById,避免重入)
   for (const note of noteById.values()) {
     if (note.folderId === sourceFolderId) {
-      const docCopy = JSON.parse(JSON.stringify(note.doc));
+      // listNotes 不再带 doc(metadata-only);单点拉真 doc 再深拷贝
+      const full = await noteCap().getNote(note.id);
+      if (!full) continue;
+      const docCopy = JSON.parse(JSON.stringify(full.doc));
       await noteCap().createNote(docCopy, newFolderId);
     }
   }
