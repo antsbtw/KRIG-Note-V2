@@ -393,4 +393,170 @@ describe.skipIf(!BINARY)('bulkDelete edge DELETE perf candidates (Phase A)', () 
     expect(remain[0].length).toBe(0);
     expect(deletedAtoms).toBe(N_ATOM);
   }, 180000);
+
+  // ── atom DELETE 修法候选(prompt §2.1 / §2.2)──────────────────
+  // 上面 "atom DELETE 同步 verify" it 是 baseline(`DELETE atom WHERE id INSIDE $rids`,
+  // declineRatio 17× 全表扫签名,27 批累计 ~10912ms)。以下 3 候选各自 seed → 清边 → 跑
+  // 27(或 270)批 atom DELETE,记每批 atom_ms,对照 baseline。
+  // 关键 verify(prompt §2.2 / §5.1):候选 A 的 `DELETE $rids` RecordId array 形式
+  // 是否被 surrealdb@2.0.3 SDK + surreal 3.0.4 server 字面接受 —— 第一 it 若报
+  // ValidationError 即字面 abort 候选 A,数据落在 try/catch 报告里转 B/C。
+
+  it('atom 候选 A: DELETE $rids RecordId array — 27 批', async () => {
+    const { totalEdges } = await seedData();
+    console.log(`[verify] atom-A seeded: ${N_ATOM} atom / ${totalEdges} edge`);
+
+    // 先清边(候选 A 快路径),只为隔离 atom 段计时
+    for (let b = 0; b < N_BATCH; b++) {
+      const { ids } = batchIds(b);
+      await db!.query(`DELETE edge WHERE subject.atomId INSIDE $ids`, { ids });
+      await db!.query(
+        `DELETE edge WHERE object.kind = 'atom' AND object.atomId INSIDE $ids`,
+        { ids },
+      );
+    }
+    // §5.4 边引用交叉验证:atom 还在但边应已清空(隔离前置条件)
+    const edgeRemain = await db!.query<[Array<unknown>]>('SELECT id FROM edge', {});
+    console.log(`[verify] atom-A edge cleared before atom-delete: remain=${edgeRemain[0].length}`);
+    expect(edgeRemain[0].length).toBe(0);
+
+    // ── 语法探针:先单条 `DELETE $rid`(prompt §5.1 字面已知支持)再 array `DELETE $rids` ──
+    let syntaxAccepted = true;
+    let syntaxError = '';
+    let returnShape = 'unknown';
+    try {
+      // 单条探针(不计入计时,只为分离 array vs 单条语法支持性)
+      const probe = await db!.query<unknown>(`DELETE $rid RETURN BEFORE`, {
+        rid: new RecordId('atom', atomIdAt(0)),
+      });
+      returnShape = Array.isArray(probe)
+        ? `outer-array len=${(probe as unknown[]).length} inner=${
+            Array.isArray((probe as unknown[])[0])
+              ? `array len=${((probe as unknown[])[0] as unknown[]).length}`
+              : typeof (probe as unknown[])[0]
+          }`
+        : typeof probe;
+      console.log(`[verify] atom-A single $rid probe ok, returnShape=${returnShape}`);
+    } catch (e) {
+      syntaxAccepted = false;
+      syntaxError = `single $rid: ${(e as Error).message}`;
+      console.log(`[verify] atom-A single $rid probe FAILED: ${syntaxError}`);
+    }
+
+    const atomMs: number[] = [];
+    let deletedAtoms = 0;
+    let arrayFormAccepted = true;
+    try {
+      for (let b = 0; b < N_BATCH; b++) {
+        const { rids } = batchIds(b);
+        const t0 = performance.now();
+        const res = await db!.query<unknown>(`DELETE $rids RETURN BEFORE`, { rids });
+        atomMs.push(performance.now() - t0);
+        // 计数兼容多种返回形态:[[...]] / [...] / 其它
+        const inner = Array.isArray(res) ? (res as unknown[])[0] : res;
+        deletedAtoms += Array.isArray(inner) ? inner.length : 0;
+      }
+    } catch (e) {
+      arrayFormAccepted = false;
+      syntaxError = `array $rids: ${(e as Error).message}`;
+      console.log(`[verify] atom-A array $rids FAILED: ${syntaxError}`);
+    }
+
+    if (syntaxAccepted && arrayFormAccepted) {
+      summarize('atom-A(DELETE $rids array)', atomMs);
+    } else {
+      console.log(
+        `[verify] atom-A SYNTAX NOT ACCEPTED — single=${syntaxAccepted} array=${arrayFormAccepted} err=${syntaxError}`,
+      );
+    }
+    const remain = await db!.query<[Array<unknown>]>('SELECT id FROM atom', {});
+    console.log(
+      `[verify] atom-A deletedAtoms=${deletedAtoms} remain=${remain[0].length} arrayAccepted=${arrayFormAccepted}`,
+    );
+    // 候选 A 若语法被接受:期望删干净。若不接受:此 it 仅为报告语法支持性,不硬断言删空。
+    if (arrayFormAccepted) {
+      expect(remain[0].length).toBe(0);
+    }
+    await db!.query('DELETE atom', {});
+    await db!.query('DELETE edge', {});
+  }, 180000);
+
+  it('atom 候选 B: 逐 RecordId DELETE $rid 循环 — 27 批', async () => {
+    const { totalEdges } = await seedData();
+    console.log(`[verify] atom-B seeded: ${N_ATOM} atom / ${totalEdges} edge`);
+
+    for (let b = 0; b < N_BATCH; b++) {
+      const { ids } = batchIds(b);
+      await db!.query(`DELETE edge WHERE subject.atomId INSIDE $ids`, { ids });
+      await db!.query(
+        `DELETE edge WHERE object.kind = 'atom' AND object.atomId INSIDE $ids`,
+        { ids },
+      );
+    }
+
+    const atomMs: number[] = [];
+    let deletedAtoms = 0;
+    for (let b = 0; b < N_BATCH; b++) {
+      const { rids } = batchIds(b);
+      const t0 = performance.now();
+      for (const rid of rids) {
+        const res = await db!.query<[Array<unknown>]>(`DELETE $rid RETURN BEFORE`, { rid });
+        const inner = res[0];
+        deletedAtoms += Array.isArray(inner) ? inner.length : inner ? 1 : 0;
+      }
+      atomMs.push(performance.now() - t0);
+    }
+    summarize('atom-B(逐 $rid 循环)', atomMs);
+    const remain = await db!.query<[Array<unknown>]>('SELECT id FROM atom', {});
+    console.log(`[verify] atom-B deletedAtoms=${deletedAtoms} remain=${remain[0].length}`);
+    expect(remain[0].length).toBe(0);
+    await db!.query('DELETE edge', {});
+  }, 300000);
+
+  it('atom 候选 C: 改 batch size 1000→100 — 270 批 DELETE atom WHERE id INSIDE $rids100', async () => {
+    const { totalEdges } = await seedData();
+    console.log(`[verify] atom-C seeded: ${N_ATOM} atom / ${totalEdges} edge`);
+
+    for (let b = 0; b < N_BATCH; b++) {
+      const { ids } = batchIds(b);
+      await db!.query(`DELETE edge WHERE subject.atomId INSIDE $ids`, { ids });
+      await db!.query(
+        `DELETE edge WHERE object.kind = 'atom' AND object.atomId INSIDE $ids`,
+        { ids },
+      );
+    }
+
+    // batch size 100 → 270 批,原 SQL 形式(id INSIDE $rids100)不变
+    const SMALL_BATCH = 100;
+    const N_SMALL_BATCH = N_ATOM / SMALL_BATCH; // 270
+    const atomMs: number[] = [];
+    let deletedAtoms = 0;
+    for (let b = 0; b < N_SMALL_BATCH; b++) {
+      const off = b * SMALL_BATCH;
+      const end = Math.min(off + SMALL_BATCH, N_ATOM);
+      const rids100: RecordId[] = [];
+      for (let i = off; i < end; i++) rids100.push(new RecordId('atom', atomIdAt(i)));
+      const t0 = performance.now();
+      const res = await db!.query<[Array<unknown>]>(
+        `DELETE atom WHERE id INSIDE $rids RETURN BEFORE`,
+        { rids: rids100 },
+      );
+      atomMs.push(performance.now() - t0);
+      deletedAtoms += res[0]?.length ?? 0;
+    }
+    // 270 批太多,summarize 打印全 perBatch 会刷屏 → 只打首/末/累计三段
+    const total = atomMs.reduce((a, b) => a + b, 0);
+    const first = atomMs[0];
+    const last = atomMs[atomMs.length - 1];
+    console.log(
+      `[verify] atom-C(batch100,270批): first=${first.toFixed(0)}ms last=${last.toFixed(0)}ms ` +
+        `total=${total.toFixed(0)}ms declineRatio=${(last > 0 ? first / last : Infinity).toFixed(1)}x ` +
+        `deletedAtoms=${deletedAtoms}`,
+    );
+    const remain = await db!.query<[Array<unknown>]>('SELECT id FROM atom', {});
+    console.log(`[verify] atom-C deletedAtoms=${deletedAtoms} remain=${remain[0].length}`);
+    expect(remain[0].length).toBe(0);
+    expect(deletedAtoms).toBe(N_ATOM);
+    await db!.query('DELETE edge', {});
+  }, 300000);
 });
