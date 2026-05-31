@@ -599,30 +599,48 @@ async function drainNoteAndFinalize(
   // 块级进度 total:首轮查到的剩余块数(sweeper 续删时是"剩余",非原始 total,可接受)
   let total = 0;
   let deleted = 0;
+  let round = 0;
   // 循环:每轮重查剩余块(幂等续删基础 — 已删的块不再在边集合里),取一批,
   // 单事务 bulkDelete。每批是独立小事务(不卡死);中断后剩余块仍在,sweeper 重入
   // 走同一循环续删。cursor 不做精确推进 —— 真值靠重查 belongsToNote 边,天然幂等。
   for (;;) {
+    round++;
+    // [delete/perf] drain 每轮 list/del 拆时:list=重查 belongsToNote 边耗时(嫌疑 G 同款 N×RPC
+    // 观测点),del=本批 bulkDelete 耗时。永久留,对称创建路径 BATCH log。
+    const tList = performance.now();
     const belongsEdges = await storage.listEdges({
       predicate: BELONGS_TO_NOTE_PREDICATE,
       objectAtomId: id,
     });
-    if (belongsEdges.length === 0) break;
+    const listMs = Math.round(performance.now() - tList);
+    if (belongsEdges.length === 0) {
+      console.log(`[delete/perf]     drain round=${round} list=${listMs}ms remaining=0 (done)`);
+      break;
+    }
     if (total === 0) total = belongsEdges.length; // 首轮锁定 total
     const batch = belongsEdges.slice(0, DELETE_BATCH_SIZE).map((e) => e.subject.atomId);
+    const tDel = performance.now();
     await storage.transaction(async (tx) => {
       await tx.bulkDeleteAtomsAndEdges(batch);
     });
+    const delMs = Math.round(performance.now() - tDel);
     deleted += batch.length;
     onProgress?.(Math.min(deleted, total), total);
+    console.log(
+      `[delete/perf]     drain round=${round} list=${listMs}ms del=${delMs}ms batch=${batch.length} remaining=${belongsEdges.length - batch.length}`,
+    );
   }
 
   // 收尾:删 container atom(级联删 hasNoteView / inFolder 边)
+  const tFinal = performance.now();
   await storage.transaction(async (tx) => {
     await tx.deleteAtom(id);
   });
+  console.log(`[delete/perf]     drain finalize(deleteContainer) ${Math.round(performance.now() - tFinal)}ms`);
   // 全部删完才删 intent(此前任一步崩溃 → intent 留 pending → sweeper 续)
+  const tIntent = performance.now();
   await deleteIntent(intentId).catch(() => {});
+  console.log(`[delete/perf]     drain deleteIntent ${Math.round(performance.now() - tIntent)}ms`);
   pmDocCache.invalidate(id);
 }
 
@@ -632,6 +650,9 @@ export async function deleteNote(
 ): Promise<{ cascadedEdges: number }> {
   // 单引用模式下 hasBeenReferenced 恒 false,本 sub-phase 只实施草稿分支
   // (decision 016 §3.5)。
+  // [delete/perf] 业务 perf log — deleteNote 3 阶段拆时,永久留。对称 [markdown-import] 创建路径。
+  const tStart = performance.now();
+  console.log(`[delete/perf] deleteNote START id=${id}`);
   const atom = await storage.getAtom<'pm'>(id);
   if (!atom) return { cascadedEdges: 0 };
   if (atom.hasBeenReferenced === true) {
@@ -644,6 +665,8 @@ export async function deleteNote(
 
   // SP-2 步 1:标 intent + container.deletionPending=true(同一小事务),让 note
   // 立即从 UI 消失(listNoteMetadata 过滤 deletionPending)。崩溃后 sweeper 据 intent 续删。
+  // [delete/perf] phase1:createIntent + deletionPending 小事务
+  const tPhase1 = performance.now();
   const intentId = await createIntent({ op: 'delete-note', targetId: id, cursor: { deleted: 0 } });
   await storage.transaction(async (tx) => {
     const cur = atom.payload.payload as PmPayload;
@@ -653,14 +676,20 @@ export async function deleteNote(
     };
     await tx.putAtom<'pm'>({ id, payload: { domain: NOTE_DOMAIN, payload: markedPayload } });
   });
+  console.log(`[delete/perf]   phase1(intent+pending) ${Math.round(performance.now() - tPhase1)}ms`);
   // note 已"消失" — 立即广播刷新列表(早于真正删块完成)
+  // [delete/perf] phase2:早广播(本实施 broadcast 在 drain 之前)
+  const tPhase2 = performance.now();
   await broadcastNoteListChanged();
+  console.log(`[delete/perf]   phase2(broadcast) ${Math.round(performance.now() - tPhase2)}ms`);
 
   // SP-2 步 2-3:分批删空 + 删 container + 删 intent(可中断,sweeper 续)
   // delete-progress:给了 progressTaskId 时,每批向 renderer overlay 推块级子进度
   // (大 note 删除进度条逐批跳,不再纹丝不动像卡死)。
   const taskId = opts?.progressTaskId;
   const noteTitle = readCachedTitle(atom.payload.payload) ?? '(无标题)';
+  // [delete/perf] phase3:drainAndFinalize(分批删块主体,deleteNote 路径耗时大头)
+  const tPhase3 = performance.now();
   await drainNoteAndFinalize(
     id,
     intentId,
@@ -675,10 +704,12 @@ export async function deleteNote(
         }
       : undefined,
   );
+  console.log(`[delete/perf]   phase3(drainAndFinalize) ${Math.round(performance.now() - tPhase3)}ms`);
 
   const cascadedEdges = 0; // 分批模式下不再精确统计级联边(bulkDelete 已删,值仅历史 API 兼容)
 
   pmDocCache.invalidate(id);
+  console.log(`[delete/perf] deleteNote DONE id=${id} total=${Math.round(performance.now() - tStart)}ms`);
   return { cascadedEdges };
 }
 

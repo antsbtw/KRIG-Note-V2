@@ -166,26 +166,70 @@ export async function deleteAtomViaTx(
  * SP-1/SP-2:事务内批量删一批 atom + 级联边(storage.bulkDeleteAtomsAndEdges 的 viaTx 版)。
  * 供分批删除每批小事务调用("删这批 + 推进 intent 游标"同一 commit)。
  * INSIDE 数组成员(非 IN)。空 ids 返回 0。
+ *
+ * 性能修法(2026-05-30 fix/bulk-delete-edge-perf,候选 A):
+ * 原 SQL 把 subject / object 两字段谓词用 `OR` 写一条 DELETE,
+ *   `DELETE edge WHERE subject.atomId INSIDE $ids
+ *      OR (object.kind='atom' AND object.atomId INSIDE $ids)`
+ * 跨字段 OR 让 planner 无法用单一索引覆盖整谓词 → 回退全表扫整张 edge 表。
+ * diagnose 报告 13a744ad §三/四 字面证据:27 批 edge_ms 从 2522→88ms 单调递减(28×),
+ * 但每批实删边数 edge_cnt 恒定 ~2400 —— 耗时只随"表里剩余总边数"变 = 全表扫签名。
+ *
+ * 改:拆 OR 为两条单字段 DELETE,subject 侧命中 edge_subject 索引、object 侧命中
+ * edge_object 索引([schema.ts:66 / 72])。两条 DELETE 在同 tx 内,任一失败整事务
+ * rollback 不变(scenario-9-rollback 覆盖)。deletedEdges = 两 query .length 之和。
+ *
+ * Phase A binary verify(N=27000 atom / 67499 edge / 27 批,真 rocksdb)PASS:
+ *   - 对照(原 OR+INSIDE):edge_ms declineRatio 14.5×(全表扫签名复现)
+ *   - 候选 A(本修法):  edge_ms declineRatio 1.0×(平稳走索引),累计 27572→3782ms (-86.3%)
+ *   - 候选 C(再去 RETURN BEFORE):vs A 无加速(3846 vs 3782,< 1.5× 阈值)→ 字面跳过,
+ *     保留 RETURN BEFORE 作 forward-compat(deletedEdges 计数仍可用)。
+ *
+ * atom 路径(`DELETE atom WHERE id INSIDE $rids`)Phase A verify 同款全表扫
+ * (declineRatio 17.0×,diagnose §1.4 / prompt §5.2 预警兑现),但 SQL 路径独立,
+ * 留独立 followup PR 走自己的 binary verify(`DELETE $rids` RecordId array 候选)+ 修。
+ * 本期不动 atom 路径。
  */
 export async function bulkDeleteAtomsAndEdgesViaTx(
   tx: SurrealTransaction,
   ids: string[],
 ): Promise<{ deletedAtoms: number; deletedEdges: number }> {
   if (ids.length === 0) return { deletedAtoms: 0, deletedEdges: 0 };
-  const edgeRes = await tx.query<[Array<unknown>]>(
-    `DELETE edge
-      WHERE subject.atomId INSIDE $ids
-         OR (object.kind = 'atom' AND object.atomId INSIDE $ids)
-      RETURN BEFORE`,
+  // 边删 subject 侧:命中 edge_subject 索引(subject.atomId)
+  const tEdgeSubject = performance.now();
+  const edgeSubjectRes = await tx.query<[Array<unknown>]>(
+    `DELETE edge WHERE subject.atomId INSIDE $ids RETURN BEFORE`,
     { ids },
   );
-  const deletedEdges = edgeRes[0]?.length ?? 0;
+  const edgeSubjectMs = Math.round(performance.now() - tEdgeSubject);
+  // 边删 object 侧:命中 edge_object 索引(object.atomId);object 是 union,仅 atom kind 有 atomId
+  const tEdgeObject = performance.now();
+  const edgeObjectRes = await tx.query<[Array<unknown>]>(
+    `DELETE edge WHERE object.kind = 'atom' AND object.atomId INSIDE $ids RETURN BEFORE`,
+    { ids },
+  );
+  const edgeObjectMs = Math.round(performance.now() - tEdgeObject);
+  const deletedEdgesSubject = edgeSubjectRes[0]?.length ?? 0;
+  const deletedEdgesObject = edgeObjectRes[0]?.length ?? 0;
+  const deletedEdges = deletedEdgesSubject + deletedEdgesObject;
+  // atom 删:本期不动(同款全表扫待 followup PR,见上方契约注释)
   const rids = ids.map((id) => atomRid(id));
+  const tAtom = performance.now();
   const atomRes = await tx.query<[Array<unknown>]>(
     `DELETE atom WHERE id INSIDE $rids RETURN BEFORE`,
     { rids },
   );
+  const atomMs = Math.round(performance.now() - tAtom);
   const deletedAtoms = atomRes[0]?.length ?? 0;
+  // [delete/perf] 业务 perf log — 三段 SQL 拆时(edge subject / edge object / atom),永久留。
+  // edge 两段已 Phase A verify 走索引(declineRatio ~1.0×);atom 段仍全表扫(~17×)待 followup。
+  // 看这条即可判断"哪段慢"——未来 atom 修法 / 嫌疑 G 调优直接据此对照。
+  console.log(
+    `[delete/perf]       bulkDel ids=${ids.length} ` +
+      `edge_subject=${edgeSubjectMs}ms(${deletedEdgesSubject}) ` +
+      `edge_object=${edgeObjectMs}ms(${deletedEdgesObject}) ` +
+      `atom=${atomMs}ms(${deletedAtoms})`,
+  );
   return { deletedAtoms, deletedEdges };
 }
 

@@ -147,16 +147,28 @@ export async function deleteTreeIdsWithProgress(treeIds: string[]): Promise<void
   const decoded = treeIds.map(decodeTreeId);
   const total = decoded.length;
 
+  // [delete/perf] 业务 perf log — 对称 [markdown-import] BATCH(创建路径),永久留。
+  // 删除性能优化/诊断(atom followup / 嫌疑 G followup)0 成本观测,无需再加临时 diag log。
+  const tAll = performance.now();
+  console.log(`[delete/perf] BATCH START total=${total}`);
+
   await runRendererProgress(
     total > 1 ? `正在删除 ${total} 项` : '正在删除',
     async ({ report, taskId }) => {
       let done = 0;
       for (const { type, id } of decoded) {
         // taskId 透传给 capability:main 分批删时推"已清理 X/Y 块"块级子进度到同 overlay
+        const tItem = performance.now();
         await deleteOneTreeItem(type, id, taskId);
+        console.log(
+          `[delete/perf] item ${done + 1}/${total} type=${type} id=${id} dur=${Math.round(performance.now() - tItem)}ms`,
+        );
         done++;
         report(`已删除 ${done}/${total} 项`, done, total);
       }
+      console.log(
+        `[delete/perf] BATCH DONE total=${total} elapsed=${Math.round(performance.now() - tAll)}ms`,
+      );
       return done;
     },
     {
