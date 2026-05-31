@@ -4,7 +4,12 @@
  * 只测纯逻辑(去重/排序/上限/前缀匹配),localStorage 边缘不测。
  */
 import { describe, it, expect } from 'vitest';
-import { mergeVisit, matchHistory, type WebHistoryEntry } from '@views/web/web-history';
+import {
+  mergeVisit,
+  matchHistory,
+  shouldRecord,
+  type WebHistoryEntry,
+} from '@views/web/web-history';
 
 const E = (url: string, lastVisit: number, visitCount = 1, title = ''): WebHistoryEntry => ({
   url,
@@ -85,5 +90,75 @@ describe('matchHistory', () => {
     const big: WebHistoryEntry[] = [];
     for (let i = 0; i < 20; i++) big.push(E(`https://test${i}.com`, i, i));
     expect(matchHistory(big, 'test')).toHaveLength(8);
+  });
+});
+
+describe('shouldRecord', () => {
+  // 显式注入搜索模板匹配信息(对齐 WEBVIEW_SEARCH_URL=https://www.google.com/search?q=%s),
+  // 不依赖默认 SEARCH_MATCHER,常量改了也不挂。
+  const M = { host: 'www.google.com', path: '/search' };
+
+  describe('scheme 过滤', () => {
+    it('http → 记', () => {
+      expect(shouldRecord('http://example.com/page', M)).toBe(true);
+    });
+    it('https → 记', () => {
+      expect(shouldRecord('https://example.com/page', M)).toBe(true);
+    });
+    it('about:blank → 不记', () => {
+      expect(shouldRecord('about:blank', M)).toBe(false);
+    });
+    it('data: → 不记', () => {
+      expect(shouldRecord('data:text/html,<p>hi</p>', M)).toBe(false);
+    });
+    it('file: → 不记', () => {
+      expect(shouldRecord('file:///Users/x/a.html', M)).toBe(false);
+    });
+    it('blob: → 不记', () => {
+      expect(shouldRecord('blob:https://example.com/uuid', M)).toBe(false);
+    });
+    it('空 URL → 不记', () => {
+      expect(shouldRecord('', M)).toBe(false);
+    });
+    it('非法 URL → 不记', () => {
+      expect(shouldRecord('not a url', M)).toBe(false);
+    });
+  });
+
+  describe('搜索结果页过滤', () => {
+    it('命中搜索页(host+path 前缀) → 不记', () => {
+      expect(shouldRecord('https://www.google.com/search?q=cats', M)).toBe(false);
+    });
+    it('命中搜索页(无 query) → 不记', () => {
+      expect(shouldRecord('https://www.google.com/search', M)).toBe(false);
+    });
+    it('同 host 非搜索路径 → 记', () => {
+      expect(shouldRecord('https://www.google.com/maps', M)).toBe(true);
+    });
+    it('同 host 根路径 → 记', () => {
+      expect(shouldRecord('https://www.google.com/', M)).toBe(true);
+    });
+    it('异 host 的 /search → 记(不误伤其他站点搜索页)', () => {
+      expect(shouldRecord('https://example.com/search?q=cats', M)).toBe(true);
+    });
+    it('host 大小写不敏感', () => {
+      expect(shouldRecord('https://WWW.GOOGLE.COM/search?q=x', M)).toBe(false);
+    });
+  });
+
+  describe('无 matcher(模板解析失败)', () => {
+    it('matcher=null → 只按 scheme 过滤,搜索页也记', () => {
+      expect(shouldRecord('https://www.google.com/search?q=x', null)).toBe(true);
+      expect(shouldRecord('about:blank', null)).toBe(false);
+    });
+  });
+
+  describe('默认 matcher(真实 WEBVIEW_SEARCH_URL)', () => {
+    it('默认参数下 google 搜索页被过滤', () => {
+      expect(shouldRecord('https://www.google.com/search?q=test')).toBe(false);
+    });
+    it('默认参数下普通 https 页被记', () => {
+      expect(shouldRecord('https://github.com/anthropics')).toBe(true);
+    });
   });
 });

@@ -64,7 +64,16 @@ export function getCurrentWebContext(): WebContextMenuPayload | null {
 
 /** view 注册时调一次:菜单项 + 命令 */
 export function registerWebContextMenu(): void {
-  // ── 4 个简化命令 ──
+  // ── 简化命令 ──
+
+  commandRegistry.register('web-view.cm-open-link-external', () => {
+    const ctx = currentContext;
+    if (!ctx?.linkURL) return;
+    // main 端 shell-handler 已做 scheme 白名单(只放 http/https/mailto),
+    // javascript:/file: 会被拒并返回 { ok:false } — 前端静默即可,不重复校验。
+    void window.electronAPI?.openExternal?.(ctx.linkURL);
+    contextMenuController.hide();
+  });
 
   commandRegistry.register('web-view.cm-copy-link', () => {
     const ctx = currentContext;
@@ -107,6 +116,14 @@ export function registerWebContextMenu(): void {
   // 注:V2 ContextMenuItem 的 enabledWhen 只支持 'always' | 'has-selection' | 'is-editable',
   // linkURL/srcURL 条件用 always 显示,命令内部判空 no-op(简化路径)。
   contextMenuRegistry.register([
+    {
+      id: 'web-view.cm.open-link-external',
+      label: '在默认浏览器中打开链接',
+      command: 'web-view.cm-open-link-external',
+      view: VIEW,
+      order: 5,
+      enabledWhen: 'always',
+    },
     {
       id: 'web-view.cm.copy-link',
       label: '复制链接',

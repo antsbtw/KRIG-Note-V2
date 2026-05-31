@@ -11,6 +11,8 @@
  * 纯数据逻辑(record / query / 排序 / 上限)抽成可单测函数,localStorage 读写隔离在边缘。
  */
 
+import { WEBVIEW_SEARCH_URL } from '@shared/constants/webview';
+
 const LS_KEY = 'krig:web:history';
 /** 历史上限(超过裁掉最旧的)*/
 const MAX_ENTRIES = 500;
@@ -27,6 +29,55 @@ export interface WebHistoryEntry {
 }
 
 // ── 纯函数(可单测,不碰 localStorage)──
+
+/**
+ * 从搜索引擎模板(WEBVIEW_SEARCH_URL,如 `https://www.google.com/search?q=%s`)
+ * 解出 { host, path } 用于历史过滤比对。
+ *
+ * 只取 origin host + pathname(query 不参与,模板里的 `%s`/`?q=` 不影响匹配)。
+ * 解析失败(模板被改坏)→ null,过滤时不命中(宁可多记不错过正常页)。
+ */
+function parseSearchTemplate(template: string): { host: string; path: string } | null {
+  try {
+    const u = new URL(template);
+    return { host: u.host.toLowerCase(), path: u.pathname.toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
+const SEARCH_MATCHER = parseSearchTemplate(WEBVIEW_SEARCH_URL);
+
+/**
+ * 判断一个 URL 是否应记入历史(地址栏补全候选)。纯函数,便于单测。
+ *
+ * 规则:
+ * 1. 只记 http:// / https://(about:/data:/file:/blob: 等跳过)。
+ * 2. 跳过搜索结果页:host + pathname 前缀命中 WEBVIEW_SEARCH_URL 模板就不记
+ *    (不 hardcode google.com/search,跟随搜索引擎常量)。
+ *
+ * @param matcher 可选注入搜索模板匹配信息(单测用);默认取模块级 SEARCH_MATCHER。
+ */
+export function shouldRecord(
+  url: string,
+  matcher: { host: string; path: string } | null = SEARCH_MATCHER,
+): boolean {
+  if (!url) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (matcher) {
+    const host = parsed.host.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+    // 同 host 且 pathname 以模板 path 为前缀 → 视作搜索结果页,跳过
+    if (host === matcher.host && path.startsWith(matcher.path)) return false;
+  }
+  return true;
+}
 
 /**
  * 把一次访问合并进历史列表(去重 by url,累加 visitCount,更新 lastVisit/title),
@@ -87,9 +138,15 @@ function save(list: WebHistoryEntry[]): void {
   localStorage.setItem(LS_KEY, JSON.stringify(list));
 }
 
-/** 记录一次访问(导航成功时调用)。about:blank / 空 URL 不记。 */
+/**
+ * 记录一次访问(导航成功时调用)。
+ *
+ * 过滤(shouldRecord):非 http(s) scheme(about:blank/data:/file: 等)、
+ * 搜索结果页(WEBVIEW_SEARCH_URL host+path 命中)不记。SPA 内碎片跳转
+ * 靠 mergeVisit 按 url 去重兜底(同 url 只累加 visitCount 不新增条目)。
+ */
 export function recordVisit(url: string, title: string): void {
-  if (!url || url === 'about:blank') return;
+  if (!shouldRecord(url)) return;
   save(mergeVisit(load(), url, title, Date.now()));
 }
 
