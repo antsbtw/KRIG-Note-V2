@@ -421,15 +421,18 @@ async function drainFolderDeletion(
 
 /** SP-4:收集一组 note container 的全部 block atom id(belongsToNote.object = container) */
 async function collectNoteBlocks(containerIds: string[]): Promise<string[]> {
+  if (containerIds.length === 0) return [];
+  // 字面修法(2026-05-30 fix/collect-note-blocks-batch,嫌疑 G):
+  // 原 N 次串行 listEdges → 1 次 INSIDE 批量查,复用 PR A 加的 objectAtomIds 字段
+  // (加批量 API 必须把热 caller 切过去,见 feedback_fast_path_api_must_migrate_slow_caller)。
+  // V5 baseline: 92 container × 67ms ≈ 6.2s → 1 RPC 应 < 500ms (-92% 预期)。
+  const edges = await storage.listEdges({
+    predicate: BELONGS_TO_NOTE_PREDICATE,
+    objectAtomIds: containerIds,
+  });
   const blockIds: string[] = [];
-  for (const containerId of containerIds) {
-    const edges = await storage.listEdges({
-      predicate: BELONGS_TO_NOTE_PREDICATE,
-      objectAtomId: containerId,
-    });
-    for (const e of edges) {
-      if (e.subject.kind === 'atom') blockIds.push(e.subject.atomId);
-    }
+  for (const e of edges) {
+    if (e.subject.kind === 'atom') blockIds.push(e.subject.atomId);
   }
   return blockIds;
 }
