@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { LANG_OPTIONS } from './translate-view/lang-defaults';
 import { resolveOmniboxInput } from './omnibox';
+import { queryHistory, type WebHistoryEntry } from './web-history';
 
 interface WebToolbarProps {
   url: string;
@@ -61,6 +62,14 @@ export function WebToolbar({
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const langMenuRef = useRef<HTMLDivElement | null>(null);
 
+  // ── 地址栏历史自动补全 ──
+  /** 当前补全候选 */
+  const [suggestions, setSuggestions] = useState<WebHistoryEntry[]>([]);
+  /** 高亮候选索引(-1 = 无高亮,Enter 走当前输入框文字)*/
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+  /** 首次 focus 全选标志:focus 时全选一次,之后正常放光标(对齐 Chrome)*/
+  const selectedOnFocusRef = useRef(false);
+
   // ── 点菜单外区域关闭菜单 ──
   useEffect(() => {
     if (!langMenuOpen) return;
@@ -86,30 +95,89 @@ export function WebToolbar({
     [onSelectLang],
   );
 
-  const handleUrlFocus = useCallback(() => {
-    setInputValue(url);
-    setEditing(true);
-  }, [url]);
+  const handleUrlFocus = useCallback(
+    (e: React.FocusEvent<HTMLInputElement>) => {
+      setInputValue(url);
+      setEditing(true);
+      // 首次 focus 全选(对齐 Chrome:点一下选中整条 URL,方便覆盖输入)
+      e.target.select();
+      selectedOnFocusRef.current = true;
+    },
+    [url],
+  );
+
+  // 阻止 focus 那一下 mouseup 把全选清掉(浏览器默认行为);仅首次拦,之后正常放光标
+  const handleUrlMouseUp = useCallback((e: React.MouseEvent<HTMLInputElement>) => {
+    if (selectedOnFocusRef.current) {
+      e.preventDefault();
+      selectedOnFocusRef.current = false;
+    }
+  }, []);
+
+  const closeSuggestions = useCallback(() => {
+    setSuggestions([]);
+    setHighlightIdx(-1);
+  }, []);
 
   const handleUrlBlur = useCallback(() => {
     setEditing(false);
+    selectedOnFocusRef.current = false;
+    // 延迟关候选,让候选项的 onMouseDown 先触发(否则 blur 先关掉点不到)
+    setTimeout(closeSuggestions, 120);
+  }, [closeSuggestions]);
+
+  // 输入变化 → 查历史候选
+  const handleUrlChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setInputValue(v);
+    setSuggestions(queryHistory(v));
+    setHighlightIdx(-1);
   }, []);
+
+  // 导航到某 URL(候选点击 / 选中回车走这里;原样 url 不再过 omnibox)
+  const navigateToUrl = useCallback(
+    (rawUrl: string, inputEl?: HTMLInputElement) => {
+      if (!rawUrl) return;
+      onNavigate(rawUrl);
+      closeSuggestions();
+      inputEl?.blur();
+    },
+    [onNavigate, closeSuggestions],
+  );
 
   const handleUrlKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        // P0:omnibox 判别 — 像 URL 当 URL,否则拼搜索引擎(见 omnibox.ts)
+      const input = e.target as HTMLInputElement;
+      if (e.key === 'ArrowDown') {
+        if (suggestions.length === 0) return;
+        e.preventDefault();
+        setHighlightIdx((i) => (i + 1) % suggestions.length);
+      } else if (e.key === 'ArrowUp') {
+        if (suggestions.length === 0) return;
+        e.preventDefault();
+        setHighlightIdx((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+      } else if (e.key === 'Enter') {
+        // 有高亮候选 → 直接打开候选 URL(已是完整 URL,不过 omnibox)
+        if (highlightIdx >= 0 && highlightIdx < suggestions.length) {
+          navigateToUrl(suggestions[highlightIdx].url, input);
+          return;
+        }
+        // 否则:omnibox 判别 — 像 URL 当 URL,否则拼搜索引擎(见 omnibox.ts)
         const resolved = resolveOmniboxInput(inputValue);
         if (!resolved) return;
-        onNavigate(resolved);
-        (e.target as HTMLInputElement).blur();
+        navigateToUrl(resolved, input);
       } else if (e.key === 'Escape') {
+        if (suggestions.length > 0) {
+          // 先关候选,不退出编辑
+          closeSuggestions();
+          return;
+        }
         setEditing(false);
         setInputValue('');
-        (e.target as HTMLInputElement).blur();
+        input.blur();
       }
     },
-    [inputValue, onNavigate],
+    [inputValue, suggestions, highlightIdx, navigateToUrl, closeSuggestions],
   );
 
   // 显示简洁 URL(去掉协议前缀,对齐 V1)
@@ -154,13 +222,42 @@ export function WebToolbar({
           ref={urlInputRef}
           className="krig-web-toolbar__url-input"
           value={editing ? inputValue : displayUrl}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={handleUrlChange}
           onFocus={handleUrlFocus}
+          onMouseUp={handleUrlMouseUp}
           onBlur={handleUrlBlur}
           onKeyDown={handleUrlKeyDown}
           placeholder="输入网址..."
           spellCheck={false}
+          autoComplete="off"
         />
+        {editing && suggestions.length > 0 && (
+          <ul className="krig-web-toolbar__suggestions" role="listbox">
+            {suggestions.map((s, i) => (
+              <li
+                key={s.url}
+                role="option"
+                aria-selected={i === highlightIdx}
+                className={`krig-web-toolbar__suggestion${
+                  i === highlightIdx ? ' active' : ''
+                }`}
+                // mousedown(非 click)— 在 input blur 之前触发,否则 blur 先关掉点不到
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  navigateToUrl(s.url, urlInputRef?.current ?? undefined);
+                }}
+                onMouseEnter={() => setHighlightIdx(i)}
+              >
+                <span className="krig-web-toolbar__suggestion-url">
+                  {s.url.replace(/^https?:\/\//, '')}
+                </span>
+                {s.title && (
+                  <span className="krig-web-toolbar__suggestion-title">{s.title}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* 右侧 actions 区(翻译按钮 + 语言下拉箭头)*/}

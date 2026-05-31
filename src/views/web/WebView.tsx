@@ -27,6 +27,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
 import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
 import { getWebWsState, setWebUrl, setWebTargetLang } from './data-model';
+import { recordVisit } from './web-history';
 import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
 import { WebFindBar } from './WebFindBar';
@@ -102,7 +103,11 @@ export function WebView({ workspaceId }: WebViewProps) {
     [],
   );
   const handleUrlChanged = useCallback(
-    (url: string) => setWebUrl(workspaceId, url),
+    (url: string) => {
+      setWebUrl(workspaceId, url);
+      // 轻量全局历史(地址栏补全用,非 per-ws)
+      recordVisit(url, '');
+    },
     [workspaceId],
   );
 
