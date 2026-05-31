@@ -36,6 +36,51 @@ interface WebContextMenuPayload {
 
 let currentContext: WebContextMenuPayload | null = null;
 
+/**
+ * web view 失焦/Esc 关闭监听 —— teardown 句柄(单次注册,弹一次菜单挂一组,关闭即清)。
+ *
+ * 背景:web view 不走 use-context-menu-trigger(它在 trigger 里挂了 mousedown/Esc 关闭),
+ * 而是经 Host 'context-menu' 事件 → showWebContextMenu → controller.show 直接弹,
+ * 所以缺「点外部 / Esc 关闭」。这里把 trigger:68-88 的同款逻辑补到 web 路径。
+ */
+let closeListenersTeardown: (() => void) | null = null;
+
+function detachCloseListeners(): void {
+  if (closeListenersTeardown) {
+    closeListenersTeardown();
+    closeListenersTeardown = null;
+  }
+}
+
+function attachCloseListeners(): void {
+  // 重复弹(没点项直接换位置右键)时先清旧监听,避免泄漏 / 重复挂。
+  detachCloseListeners();
+
+  const handleClickOutside = (e: MouseEvent): void => {
+    const target = e.target as HTMLElement | null;
+    // 点菜单内(命令执行后由 controller.hide 关),不在此处理。
+    if (target?.closest('.krig-context-menu')) return;
+    contextMenuController.hide();
+  };
+
+  const handleEscape = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') contextMenuController.hide();
+  };
+
+  // 防坑:右键事件序列里 mousedown 先于菜单 show,直接挂 mousedown 会被这次右键的
+  // mousedown 立即触发 → 菜单一弹就秒关。setTimeout(0) 推到下一帧再挂(同 WebToolbar 语言菜单技巧)。
+  const t = setTimeout(() => {
+    window.addEventListener('mousedown', handleClickOutside);
+  }, 0);
+  window.addEventListener('keydown', handleEscape);
+
+  closeListenersTeardown = (): void => {
+    clearTimeout(t);
+    window.removeEventListener('mousedown', handleClickOutside);
+    window.removeEventListener('keydown', handleEscape);
+  };
+}
+
 /** WebView 监听 webview 的 context-menu 事件后调本函数
  *
  * 说明:web view 不走 use-context-menu-trigger(webview 的 DOM 在子 frame 内不可达,
@@ -56,6 +101,8 @@ export function showWebContextMenu(payload: WebContextMenuPayload): void {
     y: payload.y,
     custom: {},
   });
+  // 反馈3:补点外部 / Esc 关闭(web view 不走 trigger,需自挂)。
+  attachCloseListeners();
 }
 
 export function getCurrentWebContext(): WebContextMenuPayload | null {
@@ -64,16 +111,15 @@ export function getCurrentWebContext(): WebContextMenuPayload | null {
 
 /** view 注册时调一次:菜单项 + 命令 */
 export function registerWebContextMenu(): void {
-  // ── 简化命令 ──
-
-  commandRegistry.register('web-view.cm-open-link-external', () => {
-    const ctx = currentContext;
-    if (!ctx?.linkURL) return;
-    // main 端 shell-handler 已做 scheme 白名单(只放 http/https/mailto),
-    // javascript:/file: 会被拒并返回 { ok:false } — 前端静默即可,不重复校验。
-    void window.electronAPI?.openExternal?.(ctx.linkURL);
-    contextMenuController.hide();
+  // 菜单一旦关闭(命令执行后的 hide / 点外部 / Esc)→ 拆掉关闭监听,防泄漏。
+  // 单次订阅(view 注册一次),按可见状态切换 attach/detach 的清理。
+  contextMenuController.subscribe(() => {
+    if (!contextMenuController.getState().visible) {
+      detachCloseListeners();
+    }
   });
+
+  // ── 简化命令 ──
 
   commandRegistry.register('web-view.cm-copy-link', () => {
     const ctx = currentContext;
@@ -116,14 +162,6 @@ export function registerWebContextMenu(): void {
   // 注:V2 ContextMenuItem 的 enabledWhen 只支持 'always' | 'has-selection' | 'is-editable',
   // linkURL/srcURL 条件用 always 显示,命令内部判空 no-op(简化路径)。
   contextMenuRegistry.register([
-    {
-      id: 'web-view.cm.open-link-external',
-      label: '在默认浏览器中打开链接',
-      command: 'web-view.cm-open-link-external',
-      view: VIEW,
-      order: 5,
-      enabledWhen: 'always',
-    },
     {
       id: 'web-view.cm.copy-link',
       label: '复制链接',

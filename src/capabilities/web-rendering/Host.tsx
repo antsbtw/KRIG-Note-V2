@@ -189,12 +189,23 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
       if (!params) return;
       // params.x/y 是 webview 内坐标;转 viewport 坐标(加 webview 自身 left/top)
       const rect = wv.getBoundingClientRect();
+      const computedX = rect.left + (params.x ?? 0);
+      const computedY = rect.top + (params.y ?? 0);
+      // [web/ctxmenu-diag] 反馈2 定位偏移实测 — 用户右键多个位置后把这些 log 贴回来,
+      // 据实测确认 params.x/y 坐标系(CSS px / device px / 含滚动?)再定最终换算。
+      // 实测定位后删除本 log(memory: feedback_diag_log_before_speculation)。
+      console.log('[web/ctxmenu-diag]', {
+        paramsXY: { x: params.x, y: params.y },
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        devicePixelRatio: window.devicePixelRatio,
+        computed: { x: computedX, y: computedY },
+      });
       callbacksRef.current.onContextMenu?.({
         linkURL: params.linkURL ?? '',
         srcURL: params.srcURL ?? '',
         selectionText: params.selectionText ?? '',
-        x: rect.left + (params.x ?? 0),
-        y: rect.top + (params.y ?? 0),
+        x: computedX,
+        y: computedY,
       });
     };
 
