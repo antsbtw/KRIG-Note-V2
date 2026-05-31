@@ -247,6 +247,24 @@ async function connectDB(): Promise<void> {
   // 一次性 signin() 不会在重连后重放 → 重连后所有 RPC 报 NotAllowed(Anonymous access not allowed)。
   // connect({ authentication }) 的凭据会被 SDK 在每次(重)连接时复用(见 d.ts ConnectOptions.authentication),
   // namespace/database 同样作为连接配置随重连恢复。
+  // [surreal-ws] WS 连接事件长期观测 — 2026-05-31 排查 AI webview 震荡时确认了
+  // "震荡 → WS 断连"因果不成立(webview 震荡全程 WS 始终 connected),但**真实断连源头仍未知**
+  // (上一轮观察到的 NotAllowed / NavSide 归零背后的触发条件没找到)。
+  // 保留这组 subscribe 作被动埋点:下次正常使用中若再撞断连/归零,终端会有
+  // `[surreal-ws] event=disconnect/reconnect` 时间戳可直接对齐当时操作。成本极低(仅状态翻转时打一行)。
+  // 详见 docs/tasks/2026-05-31-ai-webview-churn-investigation.md。断连真因确认后可移除。
+  {
+    const stamp = (): string => new Date().toISOString();
+    for (const evt of ['connecting', 'connected', 'reconnecting', 'disconnected'] as const) {
+      db.subscribe(evt, () => {
+        console.log(`[surreal-ws] ${stamp()} event=${evt} status=${db?.status}`);
+      });
+    }
+    db.subscribe('error', (err: unknown) => {
+      console.log(`[surreal-ws] ${stamp()} event=error status=${db?.status} err=${String(err)}`);
+    });
+  }
+
   await db.connect(`ws://127.0.0.1:${serverPort}/rpc`, {
     namespace: NAMESPACE,
     database: DATABASE,
