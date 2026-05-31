@@ -185,10 +185,22 @@ export async function deleteAtomViaTx(
  *   - 候选 C(再去 RETURN BEFORE):vs A 无加速(3846 vs 3782,< 1.5× 阈值)→ 字面跳过,
  *     保留 RETURN BEFORE 作 forward-compat(deletedEdges 计数仍可用)。
  *
- * atom 路径(`DELETE atom WHERE id INSIDE $rids`)Phase A verify 同款全表扫
- * (declineRatio 17.0×,diagnose §1.4 / prompt §5.2 预警兑现),但 SQL 路径独立,
- * 留独立 followup PR 走自己的 binary verify(`DELETE $rids` RecordId array 候选)+ 修。
- * 本期不动 atom 路径。
+ * 性能修法(2026-05-30 fix/bulk-delete-atom-perf,候选 atom-A):
+ * atom 路径原 `DELETE atom WHERE id INSIDE $rids RETURN BEFORE` 同款 INSIDE 大数组
+ * 退化扫描整张 atom 表(diagnose 13a744ad §1.4 / prompt §5.2 预警兑现)。
+ * 改:`DELETE $rids RETURN BEFORE` —— rids 仍是 RecordId[],array record-link 删,
+ * 直接走 atom 主键索引(id 是 SurrealDB record 主键,隐式索引),不再经 WHERE 谓词。
+ *
+ * Phase A binary verify(N=27000 atom / 67499 edge / 27 批,真 rocksdb,commit e175d163)PASS:
+ *   - baseline(原 id INSIDE $rids):atom_ms declineRatio 16.8×(758→45ms 单调递减),累计 11464ms(全表扫签名)
+ *   - 候选 atom-A(本修法):       atom_ms declineRatio 1.0×(19→19ms 平稳走主键索引),累计 515ms (-95.5%)
+ *   - 候选 B(逐 $rid 点查):      declineRatio 0.8× 走索引但累计 4613ms(慢 9×)→ 记录不采纳
+ *   - 候选 C(batch 1000→100):    declineRatio 31.6× 累计 16748ms(反向放大 +46%,INSIDE 退化非数组大小问题)→ 字面跳过
+ * `DELETE $rids` array 形式 surrealdb@2.0.3 SDK 字面接受(无 ValidationError),
+ * RETURN BEFORE 返同款 [[...]] array → deletedAtoms = res[0]?.length 计数无需降级。
+ *
+ * 两条 edge DELETE + 一条 atom DELETE 同 tx 内,任一失败整事务 rollback 不变
+ * (scenario-9-rollback 覆盖)。
  */
 export async function bulkDeleteAtomsAndEdgesViaTx(
   tx: SurrealTransaction,
@@ -212,18 +224,18 @@ export async function bulkDeleteAtomsAndEdgesViaTx(
   const deletedEdgesSubject = edgeSubjectRes[0]?.length ?? 0;
   const deletedEdgesObject = edgeObjectRes[0]?.length ?? 0;
   const deletedEdges = deletedEdgesSubject + deletedEdgesObject;
-  // atom 删:本期不动(同款全表扫待 followup PR,见上方契约注释)
+  // atom 删:`DELETE $rids` RecordId array record-link 删,走主键索引(见上方契约注释)
   const rids = ids.map((id) => atomRid(id));
   const tAtom = performance.now();
   const atomRes = await tx.query<[Array<unknown>]>(
-    `DELETE atom WHERE id INSIDE $rids RETURN BEFORE`,
+    `DELETE $rids RETURN BEFORE`,
     { rids },
   );
   const atomMs = Math.round(performance.now() - tAtom);
   const deletedAtoms = atomRes[0]?.length ?? 0;
   // [delete/perf] 业务 perf log — 三段 SQL 拆时(edge subject / edge object / atom),永久留。
-  // edge 两段已 Phase A verify 走索引(declineRatio ~1.0×);atom 段仍全表扫(~17×)待 followup。
-  // 看这条即可判断"哪段慢"——未来 atom 修法 / 嫌疑 G 调优直接据此对照。
+  // 三段均已 Phase A verify 走索引(edge declineRatio ~1.0× / atom declineRatio 1.0×)。
+  // 看这条即可判断"哪段慢"——未来嫌疑 G(collect 串行)调优直接据此对照。
   console.log(
     `[delete/perf]       bulkDel ids=${ids.length} ` +
       `edge_subject=${edgeSubjectMs}ms(${deletedEdgesSubject}) ` +
