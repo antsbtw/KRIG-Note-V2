@@ -99,20 +99,29 @@ export function WebToolbar({
     (e: React.FocusEvent<HTMLInputElement>) => {
       setInputValue(url);
       setEditing(true);
-      // 首次 focus 全选(对齐 Chrome:点一下选中整条 URL,方便覆盖输入)
-      e.target.select();
+      // 首次 focus 全选(对齐 Chrome:点一下选中整条 URL,方便覆盖输入)。
+      // 关键时序:focus 时 setInputValue 触发的重渲还没 commit(value 还是旧
+      // displayUrl),且后续 mouseup 会把光标重新定位 → 同步 select() 必被清掉。
+      // 故 setTimeout(0) 推到事件循环末尾:此时新 value 已 commit、mouseup 已结束,
+      // 再 select() 才稳。selectedOnFocusRef 标记本次为"点击进入",已选过就不重复。
+      const input = e.target;
       selectedOnFocusRef.current = true;
+      setTimeout(() => {
+        if (selectedOnFocusRef.current) {
+          input.select();
+        }
+      }, 0);
     },
     [url],
   );
 
-  // 阻止 focus 那一下 mouseup 把全选清掉(浏览器默认行为);仅首次拦,之后正常放光标
-  const handleUrlMouseUp = useCallback((e: React.MouseEvent<HTMLInputElement>) => {
-    if (selectedOnFocusRef.current) {
-      e.preventDefault();
+  // 用户在已 focus 的 input 内再次点击 → 取消"全选"意图,让浏览器正常放光标
+  const handleUrlMouseDown = useCallback(() => {
+    // 已经 focus(非首次进入)时点击:不全选,正常定位光标
+    if (editing) {
       selectedOnFocusRef.current = false;
     }
-  }, []);
+  }, [editing]);
 
   const closeSuggestions = useCallback(() => {
     setSuggestions([]);
@@ -224,7 +233,7 @@ export function WebToolbar({
           value={editing ? inputValue : displayUrl}
           onChange={handleUrlChange}
           onFocus={handleUrlFocus}
-          onMouseUp={handleUrlMouseUp}
+          onMouseDown={handleUrlMouseDown}
           onBlur={handleUrlBlur}
           onKeyDown={handleUrlKeyDown}
           placeholder="输入网址..."
