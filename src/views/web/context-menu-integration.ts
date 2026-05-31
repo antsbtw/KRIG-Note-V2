@@ -67,17 +67,25 @@ function attachCloseListeners(): void {
     if (e.key === 'Escape') contextMenuController.hide();
   };
 
+  // bug3:点 webview 内部网页时,mousedown / keydown 在 guest 独立渲染进程,不冒泡到宿主
+  // window → 上面两个监听收不到 → 菜单不关。但焦点转入 webview(guest)会让宿主 window 失焦,
+  // 这个 window 'blur' 宿主拿得到 → 借它关菜单,盖住「点 webview 内部」这一进程边界情况。
+  // 权衡:切到别的应用窗口 / 打开 DevTools 也会 blur → 关菜单,对右键菜单是可接受/期望行为。
+  const handleBlur = (): void => contextMenuController.hide();
+
   // 防坑:右键事件序列里 mousedown 先于菜单 show,直接挂 mousedown 会被这次右键的
   // mousedown 立即触发 → 菜单一弹就秒关。setTimeout(0) 推到下一帧再挂(同 WebToolbar 语言菜单技巧)。
   const t = setTimeout(() => {
     window.addEventListener('mousedown', handleClickOutside);
   }, 0);
   window.addEventListener('keydown', handleEscape);
+  window.addEventListener('blur', handleBlur);
 
   closeListenersTeardown = (): void => {
     clearTimeout(t);
     window.removeEventListener('mousedown', handleClickOutside);
     window.removeEventListener('keydown', handleEscape);
+    window.removeEventListener('blur', handleBlur);
   };
 }
 
