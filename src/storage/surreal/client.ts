@@ -242,9 +242,16 @@ async function waitForReady(): Promise<void> {
 async function connectDB(): Promise<void> {
   const { username, password } = credentials();
   db = new Surreal();
-  await db.connect(`ws://127.0.0.1:${serverPort}/rpc`);
-  await db.signin({ username, password });
-  await db.use({ namespace: NAMESPACE, database: DATABASE });
+  // 鉴权 + ns/db 走 connect() 选项而非一次性 signin()/use():
+  // SurrealDB WS 的鉴权态绑定在单条 socket 上,SDK 自动重连后会建立全新匿名会话。
+  // 一次性 signin() 不会在重连后重放 → 重连后所有 RPC 报 NotAllowed(Anonymous access not allowed)。
+  // connect({ authentication }) 的凭据会被 SDK 在每次(重)连接时复用(见 d.ts ConnectOptions.authentication),
+  // namespace/database 同样作为连接配置随重连恢复。
+  await db.connect(`ws://127.0.0.1:${serverPort}/rpc`, {
+    namespace: NAMESPACE,
+    database: DATABASE,
+    authentication: { username, password },
+  });
   console.log(`[storage/surreal] Connected via WebSocket (${NAMESPACE}/${DATABASE})`);
 }
 
