@@ -196,24 +196,40 @@ export async function bulkDeleteAtomsAndEdgesViaTx(
 ): Promise<{ deletedAtoms: number; deletedEdges: number }> {
   if (ids.length === 0) return { deletedAtoms: 0, deletedEdges: 0 };
   // 边删 subject 侧:命中 edge_subject 索引(subject.atomId)
+  const tEdgeSubject = performance.now();
   const edgeSubjectRes = await tx.query<[Array<unknown>]>(
     `DELETE edge WHERE subject.atomId INSIDE $ids RETURN BEFORE`,
     { ids },
   );
+  const edgeSubjectMs = Math.round(performance.now() - tEdgeSubject);
   // 边删 object 侧:命中 edge_object 索引(object.atomId);object 是 union,仅 atom kind 有 atomId
+  const tEdgeObject = performance.now();
   const edgeObjectRes = await tx.query<[Array<unknown>]>(
     `DELETE edge WHERE object.kind = 'atom' AND object.atomId INSIDE $ids RETURN BEFORE`,
     { ids },
   );
-  const deletedEdges =
-    (edgeSubjectRes[0]?.length ?? 0) + (edgeObjectRes[0]?.length ?? 0);
+  const edgeObjectMs = Math.round(performance.now() - tEdgeObject);
+  const deletedEdgesSubject = edgeSubjectRes[0]?.length ?? 0;
+  const deletedEdgesObject = edgeObjectRes[0]?.length ?? 0;
+  const deletedEdges = deletedEdgesSubject + deletedEdgesObject;
   // atom 删:本期不动(同款全表扫待 followup PR,见上方契约注释)
   const rids = ids.map((id) => atomRid(id));
+  const tAtom = performance.now();
   const atomRes = await tx.query<[Array<unknown>]>(
     `DELETE atom WHERE id INSIDE $rids RETURN BEFORE`,
     { rids },
   );
+  const atomMs = Math.round(performance.now() - tAtom);
   const deletedAtoms = atomRes[0]?.length ?? 0;
+  // [delete/perf] 业务 perf log — 三段 SQL 拆时(edge subject / edge object / atom),永久留。
+  // edge 两段已 Phase A verify 走索引(declineRatio ~1.0×);atom 段仍全表扫(~17×)待 followup。
+  // 看这条即可判断"哪段慢"——未来 atom 修法 / 嫌疑 G 调优直接据此对照。
+  console.log(
+    `[delete/perf]       bulkDel ids=${ids.length} ` +
+      `edge_subject=${edgeSubjectMs}ms(${deletedEdgesSubject}) ` +
+      `edge_object=${edgeObjectMs}ms(${deletedEdgesObject}) ` +
+      `atom=${atomMs}ms(${deletedAtoms})`,
+  );
   return { deletedAtoms, deletedEdges };
 }
 

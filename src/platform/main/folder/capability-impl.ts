@@ -337,7 +337,12 @@ export async function deleteFolder(
   deletedResources: number;
   cascadedEdges: number;
 }> {
+  // [delete/perf] 业务 perf log — deleteFolder 路径(diagnose §二实测真路径),永久留。
+  // collect 阶段含嫌疑 G(collectNoteBlocks 串行 listEdges,未来 followup 据此对照)。
+  const tStart = performance.now();
+  console.log(`[delete/perf] deleteFolder START id=${id}`);
   // 1. 收集子树(read-only,不开写事务;collectors 内部走 storage 客户端,_tx 仅签名兼容)
+  const tCollect = performance.now();
   const allFolderIds = await collectFolderSubtree(null, id);
   const allResourceIds = await collectResourcesInFolders(null, allFolderIds);
   // 资源里的 pm note 还有 block atom 子,一并收集
@@ -345,18 +350,25 @@ export async function deleteFolder(
 
   // 删除顺序:block → 资源 container → folder(子在前,容器在后)
   const allAtomIds = [...allBlockIds, ...allResourceIds, ...allFolderIds];
+  console.log(
+    `[delete/perf]   collect(subtree+resources+blocks) ${Math.round(performance.now() - tCollect)}ms ` +
+      `folders=${allFolderIds.length} resources=${allResourceIds.length} blocks=${allBlockIds.length} atoms=${allAtomIds.length}`,
+  );
 
   // 2. intent(payload 存完整清单供 sweeper 续删)
+  const tIntent = performance.now();
   const intentId = await createIntent({
     op: 'delete-folder',
     targetId: id,
     cursor: { deleted: 0 },
     payload: { atomIds: allAtomIds },
   });
+  console.log(`[delete/perf]   createIntent ${Math.round(performance.now() - tIntent)}ms`);
 
   // 3. 分批删(可中断,sweeper 续)
   // delete-progress:给了 progressTaskId 时每批向 renderer overlay 推块级子进度。
   const taskId = opts?.progressTaskId;
+  const tDrain = performance.now();
   await drainFolderDeletion(
     allAtomIds,
     intentId,
@@ -371,6 +383,8 @@ export async function deleteFolder(
         }
       : undefined,
   );
+  console.log(`[delete/perf]   drainFolderDeletion ${Math.round(performance.now() - tDrain)}ms`);
+  console.log(`[delete/perf] deleteFolder DONE id=${id} total=${Math.round(performance.now() - tStart)}ms`);
 
   return {
     deletedFolders: allFolderIds.length,
@@ -386,14 +400,23 @@ async function drainFolderDeletion(
   onProgress?: (deleted: number, total: number) => void,
 ): Promise<void> {
   const total = atomIds.length;
+  let round = 0;
   for (let i = 0; i < atomIds.length; i += FOLDER_DELETE_BATCH_SIZE) {
+    round++;
     const batch = atomIds.slice(i, i + FOLDER_DELETE_BATCH_SIZE);
+    // [delete/perf] drain 每轮 del 拆时(每批 bulkDelete → storage 层 [delete/perf] bulkDel 细分三段 SQL)
+    const tDel = performance.now();
     await storage.transaction(async (tx) => {
       await tx.bulkDeleteAtomsAndEdges(batch);
     });
+    console.log(
+      `[delete/perf]     drain round=${round} del=${Math.round(performance.now() - tDel)}ms batch=${batch.length} remaining=${total - i - batch.length}`,
+    );
     onProgress?.(Math.min(i + batch.length, total), total);
   }
+  const tIntent = performance.now();
   await deleteIntent(intentId).catch(() => {});
+  console.log(`[delete/perf]     drain deleteIntent ${Math.round(performance.now() - tIntent)}ms`);
 }
 
 /** SP-4:收集一组 note container 的全部 block atom id(belongsToNote.object = container) */
