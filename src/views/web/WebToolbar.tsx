@@ -8,8 +8,16 @@
  * L5-B4.2.2 加:翻译按钮旁小箭头 ▾(展开语言下拉,选语言写 per-ws state + banner 重启)
  */
 
-import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type KeyboardEvent,
+  type RefObject,
+} from 'react';
 import { LANG_OPTIONS } from './translate-view/lang-defaults';
+import { resolveOmniboxInput } from './omnibox';
 
 interface WebToolbarProps {
   url: string;
@@ -28,6 +36,8 @@ interface WebToolbarProps {
   onToggleTranslate: () => void;
   /** L5-B4.2.2:用户从下拉菜单选了新语言(参数是 lang code) */
   onSelectLang: (lang: string) => void;
+  /** P0(⌘L):WebView 注入的 URL input ref,用于 focus+select 地址栏 */
+  urlInputRef?: RefObject<HTMLInputElement | null>;
 }
 
 export function WebToolbar({
@@ -43,6 +53,7 @@ export function WebToolbar({
   onReload,
   onToggleTranslate,
   onSelectLang,
+  urlInputRef,
 }: WebToolbarProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -87,11 +98,10 @@ export function WebToolbar({
   const handleUrlKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
-        const trimmed = inputValue.trim();
-        if (!trimmed) return;
-        // 自动补 https://(对齐 V1 行为)
-        const normalized = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
-        onNavigate(normalized);
+        // P0:omnibox 判别 — 像 URL 当 URL,否则拼搜索引擎(见 omnibox.ts)
+        const resolved = resolveOmniboxInput(inputValue);
+        if (!resolved) return;
+        onNavigate(resolved);
         (e.target as HTMLInputElement).blur();
       } else if (e.key === 'Escape') {
         setEditing(false);
@@ -141,6 +151,7 @@ export function WebToolbar({
 
       <div className="krig-web-toolbar__url">
         <input
+          ref={urlInputRef}
           className="krig-web-toolbar__url-input"
           value={editing ? inputValue : displayUrl}
           onChange={(e) => setInputValue(e.target.value)}

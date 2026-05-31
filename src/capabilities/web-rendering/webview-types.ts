@@ -23,6 +23,34 @@ export interface WebviewElement extends HTMLElement {
   isLoading(): boolean;
   /** SyncDriver / TranslateDriver 注入用 */
   executeJavaScript(code: string): Promise<unknown>;
+  /** 页内查找(P0)— 返回 requestId,结果走 'found-in-page' 事件 */
+  findInPage(text: string, options?: WebFindInPageOptions): number;
+  /** 停止页内查找(P0)*/
+  stopFindInPage(action: WebStopFindAction): void;
+  /** 缩放(P0)*/
+  setZoomFactor(factor: number): void;
+  getZoomFactor(): number;
+}
+
+/** webview.findInPage 选项(P0)*/
+export interface WebFindInPageOptions {
+  /** 查找方向,默认 true(向前)*/
+  forward?: boolean;
+  /** 是否查找下一个(继续上次查找);false = 新查找 */
+  findNext?: boolean;
+  /** 大小写敏感,默认 false */
+  matchCase?: boolean;
+}
+
+/** webview.stopFindInPage 的 action(P0)*/
+export type WebStopFindAction = 'clearSelection' | 'keepSelection' | 'activateSelection';
+
+/** 'found-in-page' 事件 result(P0)*/
+export interface WebFoundInPageResult {
+  /** 当前命中是第几个(1-based)*/
+  activeMatchOrdinal: number;
+  /** 总命中数 */
+  matches: number;
 }
 
 /** webview 'context-menu' 事件 params(见 capability Host 的 onContextMenu prop)*/
@@ -44,4 +72,16 @@ export interface HostHandle {
   stop(): void;
   /** 当前 webview 是否 loading 中 */
   isLoading(): boolean;
+  /** 页内查找(P0)— 结果走 HostProps.onFoundInPage 回调 */
+  findInPage(text: string, options?: WebFindInPageOptions): void;
+  /** 停止页内查找(P0)*/
+  stopFindInPage(action?: WebStopFindAction): void;
+  /** 放大(P0,步进 0.1,上限 2.0)→ 返回新 zoom factor */
+  zoomIn(): number;
+  /** 缩小(P0,步进 0.1,下限 0.5)→ 返回新 zoom factor */
+  zoomOut(): number;
+  /** 复位 100%(P0)→ 返回 1.0 */
+  zoomReset(): number;
+  /** 当前 zoom factor(P0)*/
+  getZoom(): number;
 }

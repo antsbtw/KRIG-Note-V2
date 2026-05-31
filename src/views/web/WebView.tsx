@@ -12,14 +12,24 @@
  * - ws 切换时重置 banner
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
+import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
 import { getWebWsState, setWebUrl, setWebTargetLang } from './data-model';
 import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
+import { WebFindBar } from './WebFindBar';
 import { getLangLabel } from './translate-view/lang-defaults';
 import './web.css';
 
@@ -34,6 +44,10 @@ export function WebView({ workspaceId }: WebViewProps) {
     [],
   );
   const hostRef = useRef<HostHandle | null>(null);
+  /** 地址栏 input(⌘L focus)*/
+  const urlInputRef = useRef<HTMLInputElement | null>(null);
+  /** 容器(键盘快捷键挂这里 + focus 兜底)*/
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // 订阅 per-ws state
   const wsState = useSyncExternalStore(
@@ -68,6 +82,17 @@ export function WebView({ workspaceId }: WebViewProps) {
    */
   const [pendingRestartLang, setPendingRestartLang] = useState<string | null>(null);
 
+  // ── P0:页内查找(⌘F)transient state ──
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findResult, setFindResult] = useState<WebFoundInPageResult>({
+    activeMatchOrdinal: 0,
+    matches: 0,
+  });
+
+  // ── P0:缩放指示(非 100% 时显示,transient 不持久化)──
+  const [zoomPercent, setZoomPercent] = useState(100);
+
   // ── Host callback handlers ──
   const handleNavStateChanged = useCallback(
     (state: { canGoBack: boolean; canGoForward: boolean }) => {
@@ -93,6 +118,117 @@ export function WebView({ workspaceId }: WebViewProps) {
     if (host.isLoading()) host.stop();
     else host.reload();
   }, []);
+
+  // ── P0:页内查找回调 ──
+  const handleFoundInPage = useCallback((result: WebFoundInPageResult) => {
+    setFindResult(result);
+  }, []);
+
+  /** 打开查找栏(⌘F)*/
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    // 已有查询词 → 立即重查(打开时 FindBar 会 focus+select)
+    setFindResult({ activeMatchOrdinal: 0, matches: 0 });
+  }, []);
+
+  /** 关闭查找栏 + 清选区 */
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindResult({ activeMatchOrdinal: 0, matches: 0 });
+    hostRef.current?.stopFindInPage('clearSelection');
+  }, []);
+
+  /** 查找词变化 → 新查找(findNext: false) */
+  const handleFindQueryChange = useCallback((q: string) => {
+    setFindQuery(q);
+    if (!q.trim()) {
+      hostRef.current?.stopFindInPage('clearSelection');
+      setFindResult({ activeMatchOrdinal: 0, matches: 0 });
+      return;
+    }
+    hostRef.current?.findInPage(q, { forward: true, findNext: false });
+  }, []);
+
+  /** 下一个 / 上一个(findNext: true) */
+  const handleFindNext = useCallback(
+    (forward: boolean) => {
+      const q = findQuery.trim();
+      if (!q) return;
+      hostRef.current?.findInPage(q, { forward, findNext: true });
+    },
+    [findQuery],
+  );
+
+  // ── P0:缩放回调 ──
+  const handleZoomIn = useCallback(() => {
+    const f = hostRef.current?.zoomIn() ?? 1;
+    setZoomPercent(Math.round(f * 100));
+  }, []);
+  const handleZoomOut = useCallback(() => {
+    const f = hostRef.current?.zoomOut() ?? 1;
+    setZoomPercent(Math.round(f * 100));
+  }, []);
+  const handleZoomReset = useCallback(() => {
+    hostRef.current?.zoomReset();
+    setZoomPercent(100);
+  }, []);
+
+  /** ⌘L:focus + 全选地址栏 */
+  const focusUrlBar = useCallback(() => {
+    const el = urlInputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, []);
+
+  // ── P0:键盘快捷键 ──
+  // 已知坑:页面 focus 在 webview 子 frame 时,key 事件不冒泡到宿主 onKeyDown
+  // (见 context-menu-integration 注释)。先走宿主 onKeyDown 最简路径;若实测
+  // webview 内不触发,后续可上主进程 before-input-event。文档登记在汇报里。
+  const handleKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const mod = e.metaKey || e.ctrlKey;
+      // 后退/前进:⌘[ ⌘]  或  Alt+← Alt+→
+      if (mod && e.key === '[') {
+        e.preventDefault();
+        hostRef.current?.goBack();
+      } else if (mod && e.key === ']') {
+        e.preventDefault();
+        hostRef.current?.goForward();
+      } else if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        hostRef.current?.goBack();
+      } else if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        hostRef.current?.goForward();
+      } else if ((mod && e.key === 'r') || e.key === 'F5') {
+        // 刷新:⌘R / F5
+        e.preventDefault();
+        hostRef.current?.reload();
+      } else if (mod && e.key === 'l') {
+        // focus 地址栏:⌘L
+        e.preventDefault();
+        focusUrlBar();
+      } else if (mod && e.key === 'f') {
+        // 页内查找:⌘F
+        e.preventDefault();
+        openFind();
+      } else if (mod && (e.key === '+' || e.key === '=')) {
+        // 放大:⌘+ (= 同键无 shift)
+        e.preventDefault();
+        handleZoomIn();
+      } else if (mod && e.key === '-') {
+        // 缩小:⌘-
+        e.preventDefault();
+        handleZoomOut();
+      } else if (mod && e.key === '0') {
+        // 复位:⌘0
+        e.preventDefault();
+        handleZoomReset();
+      }
+    },
+    [focusUrlBar, openFind, handleZoomIn, handleZoomOut, handleZoomReset],
+  );
 
   // toggle 双栏翻译模式
   const handleToggleTranslate = useCallback(() => {
@@ -126,9 +262,13 @@ export function WebView({ workspaceId }: WebViewProps) {
     setPendingRestartLang(null);
   }, []);
 
-  // 切 workspace → 重置 banner state(避免 ws-A 切的 lang 在 ws-B 显 banner)
+  // 切 workspace → 重置 banner / 查找 / 缩放 transient state
   useEffect(() => {
     setPendingRestartLang(null);
+    setFindOpen(false);
+    setFindQuery('');
+    setFindResult({ activeMatchOrdinal: 0, matches: 0 });
+    setZoomPercent(100);
   }, [workspaceId]);
 
   if (!wsState) {
@@ -136,7 +276,12 @@ export function WebView({ workspaceId }: WebViewProps) {
   }
 
   return (
-    <div className="krig-web-view">
+    <div
+      className="krig-web-view"
+      ref={containerRef}
+      onKeyDown={handleKeyDown}
+      tabIndex={-1}
+    >
       <WebToolbar
         url={displayUrl}
         loading={loading}
@@ -150,7 +295,28 @@ export function WebView({ workspaceId }: WebViewProps) {
         onReload={handleReload}
         onToggleTranslate={handleToggleTranslate}
         onSelectLang={handleSelectLang}
+        urlInputRef={urlInputRef}
       />
+      {zoomPercent !== 100 && (
+        <button
+          type="button"
+          className="krig-web-view__zoom-badge"
+          onClick={handleZoomReset}
+          title="点击复位 100% (⌘0)"
+        >
+          {zoomPercent}%
+        </button>
+      )}
+      {findOpen && (
+        <WebFindBar
+          query={findQuery}
+          activeMatchOrdinal={findResult.activeMatchOrdinal}
+          matches={findResult.matches}
+          onQueryChange={handleFindQueryChange}
+          onFindNext={handleFindNext}
+          onClose={closeFind}
+        />
+      )}
       {pendingRestartLang && (
         <div className="krig-web-view__restart-banner">
           <span className="krig-web-view__restart-msg">
@@ -186,6 +352,7 @@ export function WebView({ workspaceId }: WebViewProps) {
         onLoadingChanged={setLoading}
         onNavStateChanged={handleNavStateChanged}
         onDisplayUrlChanged={setDisplayUrl}
+        onFoundInPage={handleFoundInPage}
       />
     </div>
   );

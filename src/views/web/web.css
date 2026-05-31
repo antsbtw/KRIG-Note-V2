@@ -7,6 +7,9 @@
   width: 100%;
   background: #1e1e1e;
   color: #e8eaed;
+  /* P0:查找栏 / 缩放徽标 absolute 定位锚点 */
+  position: relative;
+  outline: none;
 }
 
 .krig-web-view__empty {
@@ -235,4 +238,92 @@
 
 .krig-web-toolbar__lang-label {
   flex: 1;
+}
+
+/* ── P0:页内查找栏(⌘F)── overlay 在 webview 右上角,不挤压布局 */
+.krig-web-view__find-bar {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.krig-web-view__find-input {
+  width: 200px;
+  height: 26px;
+  padding: 0 8px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 13px;
+  outline: none;
+}
+
+.krig-web-view__find-input:focus {
+  border-color: #8ab4f8;
+}
+
+.krig-web-view__find-count {
+  min-width: 38px;
+  text-align: center;
+  font-size: 12px;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+}
+
+.krig-web-view__find-btn {
+  background: transparent;
+  border: none;
+  color: #e8eaed;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.1s;
+}
+
+.krig-web-view__find-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-web-view__find-btn:disabled {
+  color: #555;
+  cursor: default;
+}
+
+.krig-web-view__find-close {
+  font-size: 18px;
+  color: #9aa0a6;
+}
+
+/* ── P0:缩放徽标(非 100% 时显示,点一下复位)── */
+.krig-web-view__zoom-badge {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 9;
+  padding: 3px 10px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 12px;
+  color: #8ab4f8;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.krig-web-view__zoom-badge:hover {
+  background: #333;
 }

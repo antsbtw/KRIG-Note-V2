@@ -29,7 +29,17 @@ import type {
   HostHandle,
   WebContextMenuPayload,
   WebviewElement,
+  WebFoundInPageResult,
 } from './webview-types';
+
+/** 缩放范围(P0)*/
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.0;
+const ZOOM_STEP = 0.1;
+/** 浮点步进累加会漂(0.1*3 ≠ 0.3),clamp + round 到 1 位小数 */
+function clampZoom(f: number): number {
+  return Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, f)) * 10) / 10;
+}
 
 export interface HostProps {
   /** 当前 ws id(SyncDriver side / partition / debug 标识用)*/
@@ -52,6 +62,8 @@ export interface HostProps {
   onNavStateChanged?: (state: { canGoBack: boolean; canGoForward: boolean }) => void;
   /** 实时 URL 变化(view 同步显示在 toolbar URL bar)*/
   onDisplayUrlChanged?: (url: string) => void;
+  /** 页内查找结果(P0)— view 渲染 `3/12` 计数 */
+  onFoundInPage?: (result: WebFoundInPageResult) => void;
 }
 
 export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref): ReactElement {
@@ -66,6 +78,7 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     onLoadingChanged,
     onNavStateChanged,
     onDisplayUrlChanged,
+    onFoundInPage,
   } = props;
 
   const webviewRef = useRef<WebviewElement | null>(null);
@@ -88,12 +101,14 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
   const syncDriverRef = useRef<SyncDriver | null>(null);
   /** 对面 NAVIGATE 触发的导航时间窗(防回环)*/
   const remoteNavUntilRef = useRef(0);
+  /** 当前 zoom factor(P0,transient,不持久化)— 导航后 dom-ready 时重新应用 */
+  const zoomFactorRef = useRef(1.0);
 
   // 用 ref 缓存 callback,避免 setupWebview 依赖变化导致 webview 反复 unbind
-  const callbacksRef = useRef({ onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged });
+  const callbacksRef = useRef({ onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage });
   useEffect(() => {
-    callbacksRef.current = { onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged };
-  }, [onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged]);
+    callbacksRef.current = { onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage };
+  }, [onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage]);
 
   /**
    * webview ref bind tick — 每次 setupWebview 拿到新 el 就 bump
@@ -183,9 +198,30 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
       });
     };
 
+    // found-in-page 结果(P0)— 回调给 view 渲染计数
+    const handleFoundInPage = (e: Event) => {
+      const ev = e as Event & {
+        result?: { activeMatchOrdinal?: number; matches?: number };
+      };
+      const r = ev.result;
+      if (!r) return;
+      callbacksRef.current.onFoundInPage?.({
+        activeMatchOrdinal: r.activeMatchOrdinal ?? 0,
+        matches: r.matches ?? 0,
+      });
+    };
+
     // dom-ready 后才允许调 getURL / loadURL 等
     const handleDomReady = () => {
       domReadyRef.current = true;
+      // 重新应用 transient zoom(navigation / 跨域会被 Chromium 复位到 1.0)
+      if (zoomFactorRef.current !== 1.0) {
+        try {
+          wv.setZoomFactor(zoomFactorRef.current);
+        } catch {
+          /* ignore */
+        }
+      }
       try {
         callbacksRef.current.onDisplayUrlChanged?.(wv.getURL());
       } catch {
@@ -209,6 +245,7 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     wv.addEventListener('context-menu', handleContextMenu);
     wv.addEventListener('dom-ready', handleDomReady);
     wv.addEventListener('did-finish-load', handleFinishLoad);
+    wv.addEventListener('found-in-page', handleFoundInPage);
     // workspaceId 当前不直接用(SyncDriver side 写死 'left'),但保留依赖以便未来 per-ws 行为差异
     void workspaceId;
   }, [workspaceId]);
@@ -322,6 +359,38 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
       reload: () => webviewRef.current?.reload(),
       stop: () => webviewRef.current?.stop(),
       isLoading: () => webviewRef.current?.isLoading() ?? false,
+      findInPage: (text, options) => {
+        const wv = webviewRef.current;
+        if (!wv || !domReadyRef.current) return;
+        if (!text) {
+          wv.stopFindInPage('clearSelection');
+          return;
+        }
+        wv.findInPage(text, options);
+      },
+      stopFindInPage: (action = 'clearSelection') => {
+        const wv = webviewRef.current;
+        if (!wv || !domReadyRef.current) return;
+        wv.stopFindInPage(action);
+      },
+      zoomIn: () => {
+        const next = clampZoom(zoomFactorRef.current + ZOOM_STEP);
+        zoomFactorRef.current = next;
+        webviewRef.current?.setZoomFactor(next);
+        return next;
+      },
+      zoomOut: () => {
+        const next = clampZoom(zoomFactorRef.current - ZOOM_STEP);
+        zoomFactorRef.current = next;
+        webviewRef.current?.setZoomFactor(next);
+        return next;
+      },
+      zoomReset: () => {
+        zoomFactorRef.current = 1.0;
+        webviewRef.current?.setZoomFactor(1.0);
+        return 1.0;
+      },
+      getZoom: () => zoomFactorRef.current,
     }),
     [],
   );

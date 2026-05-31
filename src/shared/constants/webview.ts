@@ -12,3 +12,11 @@ export const WEBVIEW_TRANSLATE_PARTITION = 'persist:webview-translate';
 
 /** 默认主页(对齐 V1 默认)*/
 export const WEBVIEW_DEFAULT_URL = 'https://www.google.com';
+
+/**
+ * 地址栏关键词搜索引擎(P0)
+ *
+ * `%s` 占位符 = 已 encodeURIComponent 的查询词。地址栏输入不像 URL 时,
+ * resolveOmniboxInput 用此模板拼搜索 URL(见 src/views/web/omnibox.ts)。
+ */
+export const WEBVIEW_SEARCH_URL = 'https://www.google.com/search?q=%s';
