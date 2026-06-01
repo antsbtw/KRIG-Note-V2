@@ -669,11 +669,11 @@
   flex-shrink: 0;
 }
 
-/* 段标题对齐 note NavSide「笔记目录」橙黄(overlay-bindings.css .krig-nav-side-title #d4a040)*/
+/* 段标题文字色对齐 note FolderTree 行(shared-ui/FolderTree/styles.ts row #ccc)*/
 .krig-web-nav__section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #d4a040;
+  color: #ccc;
   flex: 1;
 }
 

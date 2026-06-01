@@ -56,29 +56,61 @@ function displayTitle(entry: WebHistoryEntry): string {
   }
 }
 
+/** 折叠状态持久化(localStorage,per-section)— 记住上次展开/收起。 */
+const COLLAPSE_KEY_PREFIX = 'krig:web:nav-collapse:';
+
+function readCollapsed(storeKey: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(COLLAPSE_KEY_PREFIX + storeKey);
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+function writeCollapsed(storeKey: string, open: boolean): void {
+  try {
+    localStorage.setItem(COLLAPSE_KEY_PREFIX + storeKey, open ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * 可折叠区(toggle)— 三段共用外壳。点 header 展开/收起。
+ * storeKey:localStorage 持久化展开状态(记住上次)。defaultOpen 仅首次无记录时用。
  * headerExtra:展开时 header 右侧的额外控件(如历史段的「清空」按钮)。
  */
 function CollapsibleSection({
+  storeKey,
   icon,
   title,
   defaultOpen = false,
   headerExtra,
   children,
 }: {
+  storeKey: string;
   icon: string;
   title: string;
   defaultOpen?: boolean;
   headerExtra?: ReactNode;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(() => readCollapsed(storeKey, defaultOpen));
+  const toggle = () => {
+    setOpen((v) => {
+      const next = !v;
+      writeCollapsed(storeKey, next);
+      return next;
+    });
+  };
   return (
     <section className={`krig-web-nav__section${open ? ' krig-web-nav__section--open' : ''}`}>
       <header
         className="krig-web-nav__section-header"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <span className="krig-web-nav__caret">{open ? '▼' : '▶'}</span>
         <span className="krig-web-nav__section-title">
@@ -127,7 +159,7 @@ function HistorySection() {
     ) : undefined;
 
   return (
-    <CollapsibleSection icon="🕘" title="历史" defaultOpen headerExtra={clearBtn}>
+    <CollapsibleSection storeKey="history" icon="🕘" title="历史" defaultOpen headerExtra={clearBtn}>
       {entries.length === 0 ? (
         <div className="krig-web-nav__empty">暂无历史记录</div>
       ) : (
@@ -164,9 +196,19 @@ function HistorySection() {
 }
 
 /** 占位段(书签 / 下载,批3 / 批2 实装)。默认折叠。 */
-function PlaceholderSection({ icon, title, hint }: { icon: string; title: string; hint: string }) {
+function PlaceholderSection({
+  storeKey,
+  icon,
+  title,
+  hint,
+}: {
+  storeKey: string;
+  icon: string;
+  title: string;
+  hint: string;
+}) {
   return (
-    <CollapsibleSection icon={icon} title={title}>
+    <CollapsibleSection storeKey={storeKey} icon={icon} title={title}>
       <div className="krig-web-nav__empty krig-web-nav__placeholder">{hint}</div>
     </CollapsibleSection>
   );
@@ -176,9 +218,9 @@ function PlaceholderSection({ icon, title, hint }: { icon: string; title: string
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
-      <PlaceholderSection icon="📌" title="书签" hint="批3 实装" />
+      <PlaceholderSection storeKey="bookmark" icon="📌" title="书签" hint="批3 实装" />
       <HistorySection />
-      <PlaceholderSection icon="⬇" title="下载" hint="批2 实装" />
+      <PlaceholderSection storeKey="download" icon="⬇" title="下载" hint="批2 实装" />
     </div>
   );
 }
