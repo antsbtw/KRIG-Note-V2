@@ -16,15 +16,34 @@
  * 范本:src/views/note/nav-side-content.tsx:166。
  */
 
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
+import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tree-context-menu-registry';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import {
+  FolderTree,
+  type ItemNode,
+  type TreeNode,
+  type FolderNode,
+  type KeyAction,
+} from '@slot/shared-ui/FolderTree';
+import type { BookmarkApi, BookmarkInfo } from '@capabilities/bookmark/types';
+import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types';
 import {
   getAllHistory,
   removeHistoryEntry,
   clearHistory,
   type WebHistoryEntry,
 } from './web-history';
+import {
+  encodeTreeId,
+  decodeTreeId,
+  setRenameTrigger,
+  setFolderCreatedTrigger,
+  setFolderExpandTrigger,
+  setNoticeTrigger,
+} from './web-bookmark-commands';
 
 /**
  * 相对时间标签(历史项 lastVisit 显示用)。
@@ -195,7 +214,273 @@ function HistorySection() {
   );
 }
 
-/** 占位段(书签 / 下载,批3 / 批2 实装)。默认折叠。 */
+/** 书签叶子显示标题兜底:无 title 用 url 的 hostname,再失败用原始 url。 */
+function bookmarkTitle(b: BookmarkInfo): string {
+  if (b.title) return b.title;
+  try {
+    return new URL(b.url).hostname;
+  } catch {
+    return b.url;
+  }
+}
+
+/**
+ * 书签段:FolderTree 树(文件夹分类 + 拖拽 + 重命名 + 右键菜单)。
+ *
+ * 仿 ebook BookshelfPanel,但包在 CollapsibleSection 里保持垂直折叠(storeKey="bookmark")。
+ * 展开/选中态用组件内 useState(transient UI 态,不持久化 — 不动 tab data-model hydrate cache)。
+ *
+ * ⚠️ 坑(ebook 同款,见 ebook nav-side-content L102-111):必须同时订阅
+ * bookmark.onListChanged + folder.onListChanged 两条流 —— 漏订 folder 流则
+ * 建文件夹后 UI 不刷新。
+ */
+function BookmarkSection() {
+  const bookmarkApi = useMemo(() => requireCapabilityApi<BookmarkApi>('bookmark'), []);
+  const folderApi = useMemo(() => requireCapabilityApi<FolderCapabilityApi>('folder'), []);
+
+  const [bookmarks, setBookmarks] = useState<BookmarkInfo[]>([]);
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
+
+  // per-ws transient UI 态用组件 useState(不动 tab schema 的 hydrate cache 不变量)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    void bookmarkApi.list().then(setBookmarks).catch(() => {});
+    void folderApi.listFolders('web').then(setFolders).catch(() => {});
+  }, [bookmarkApi, folderApi]);
+
+  useEffect(() => {
+    refresh();
+    // 两条流都订阅:bookmark(书签)+ folder(文件夹)。漏 folder 流 → 建文件夹后不刷新。
+    const unsubBm = bookmarkApi.onListChanged(() => refresh());
+    const unsubFolder = folderApi.onListChanged(() => refresh());
+    return () => {
+      unsubBm();
+      unsubFolder();
+    };
+  }, [bookmarkApi, folderApi, refresh]);
+
+  // 桥接 commands → rename / folder-created / expand / notice
+  useEffect(() => {
+    setRenameTrigger((treeId) => {
+      const { type, id } = decodeTreeId(treeId);
+      const cur =
+        type === 'bookmark'
+          ? bookmarks.find((b) => b.id === id)?.title
+          : folders.find((f) => f.id === id)?.title;
+      if (cur === undefined) return;
+      setRenamingId(treeId);
+      setRenameValue(cur);
+    });
+    setFolderCreatedTrigger((folderId) => {
+      const cur = folders.find((f) => f.id === folderId);
+      setRenamingId(encodeTreeId('folder', folderId));
+      setRenameValue(cur?.title ?? '新建文件夹');
+    });
+    setFolderExpandTrigger((folderId) => {
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        next.add(folderId);
+        return next;
+      });
+    });
+    setNoticeTrigger((message) => setNotice(message));
+    return () => {
+      setRenameTrigger(null);
+      setFolderCreatedTrigger(null);
+      setFolderExpandTrigger(null);
+      setNoticeTrigger(null);
+    };
+  }, [bookmarks, folders]);
+
+  // notice 自动消失
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // ── TreeNode[] 组树 ──
+  const buildChildren = (parentId: string | null): TreeNode[] => {
+    const out: TreeNode[] = [];
+    const subFolders = folders
+      .filter((f) => f.parentId === parentId)
+      .sort((a, b) => a.title.localeCompare(b.title));
+    for (const f of subFolders) {
+      const node: FolderNode = {
+        kind: 'folder',
+        id: encodeTreeId('folder', f.id),
+        parentId: parentId ? encodeTreeId('folder', parentId) : null,
+        title: f.title,
+        expanded: expandedFolders.has(f.id),
+        children: buildChildren(f.id),
+      };
+      out.push(node);
+    }
+    const subBookmarks = bookmarks
+      .filter((b) => (b.folderId ?? null) === parentId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    for (const b of subBookmarks) {
+      const node: ItemNode = {
+        kind: 'item',
+        id: encodeTreeId('bookmark', b.id),
+        parentId: parentId ? encodeTreeId('folder', parentId) : null,
+        payload: b,
+      };
+      out.push(node);
+    }
+    return out;
+  };
+  const nodes = buildChildren(null);
+
+  // ── 重命名提交(bookmark 走 bookmarkApi, folder 走 folderApi)──
+  const commitRename = (treeId: string) => {
+    const { type, id } = decodeTreeId(treeId);
+    const trimmed = renameValue.trim();
+    if (trimmed) {
+      if (type === 'bookmark') void bookmarkApi.rename(id, trimmed);
+      else void folderApi.renameFolder(id, trimmed);
+    }
+    setRenamingId(null);
+  };
+
+  // ── 拖拽(含防环:folder 拖进自己子孙拦掉)──
+  const isDescendantFolder = (parentId: string, childId: string): boolean => {
+    let current: string | null = childId;
+    const visited = new Set<string>();
+    while (current) {
+      if (visited.has(current)) return false;
+      visited.add(current);
+      if (current === parentId) return true;
+      const f = folders.find((x) => x.id === current);
+      current = f?.parentId ?? null;
+    }
+    return false;
+  };
+
+  const handleDrop = (draggedTreeIds: string[], targetTreeFolderId: string | null) => {
+    const targetFolderId = targetTreeFolderId ? decodeTreeId(targetTreeFolderId).id : null;
+    let needExpand = false;
+    for (const treeId of draggedTreeIds) {
+      const { type, id } = decodeTreeId(treeId);
+      if (type === 'bookmark') {
+        const b = bookmarks.find((x) => x.id === id);
+        if (b && (b.folderId ?? null) !== targetFolderId) {
+          void bookmarkApi.moveToFolder(id, targetFolderId);
+          if (targetFolderId) needExpand = true;
+        }
+      } else {
+        const f = folders.find((x) => x.id === id);
+        if (f && f.parentId !== targetFolderId) {
+          if (!targetFolderId || !isDescendantFolder(id, targetFolderId)) {
+            void folderApi.moveFolder(id, targetFolderId);
+            if (targetFolderId) needExpand = true;
+          }
+        }
+      }
+    }
+    if (needExpand && targetFolderId) {
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        next.add(targetFolderId);
+        return next;
+      });
+    }
+  };
+
+  // ── 键盘 ──
+  const handleKeyAction = (action: KeyAction, target: TreeNode) => {
+    if (action === 'enter') {
+      if (target.kind === 'item') {
+        commandRegistry.execute('web-view.bm-open', decodeTreeId(target.id).id);
+      }
+    } else if (action === 'rename') {
+      commandRegistry.execute('web-view.bm-rename', target.id);
+    } else if (action === 'delete') {
+      commandRegistry.execute('web-view.bm-delete', target.id);
+    }
+  };
+
+  // ── headerExtra:「+ 文件夹」「+ 书签」按钮(展开时显示;stopPropagation 不触发折叠)──
+  const headerExtra = (
+    <span className="krig-web-nav__bm-actions">
+      <button
+        type="button"
+        className="krig-web-nav__clear-btn"
+        title="新建文件夹"
+        onClick={(e) => {
+          e.stopPropagation();
+          commandRegistry.execute('web-view.bm-create-folder');
+        }}
+      >
+        + 文件夹
+      </button>
+      <button
+        type="button"
+        className="krig-web-nav__clear-btn"
+        title="把当前页加入书签"
+        onClick={(e) => {
+          e.stopPropagation();
+          commandRegistry.execute('web-view.bm-add');
+        }}
+      >
+        + 书签
+      </button>
+    </span>
+  );
+
+  return (
+    <CollapsibleSection storeKey="bookmark" icon="📌" title="书签" headerExtra={headerExtra}>
+      <div className="krig-web-nav__tree">
+        <FolderTree
+          nodes={nodes}
+          selectedIds={selectedIds}
+          onSelectChange={setSelectedIds}
+          onFolderToggle={(treeFolderId, expanded) => {
+            const { id } = decodeTreeId(treeFolderId);
+            setExpandedFolders((prev) => {
+              const next = new Set(prev);
+              if (expanded) next.add(id);
+              else next.delete(id);
+              return next;
+            });
+          }}
+          itemMeta={(item: ItemNode) => {
+            const b = item.payload as BookmarkInfo;
+            return {
+              icon: '🔖',
+              title: bookmarkTitle(b),
+              rightHint: '',
+            };
+          }}
+          onItemClick={(item) => {
+            commandRegistry.execute('web-view.bm-open', decodeTreeId(item.id).id);
+          }}
+          onItemDoubleClick={(item) => {
+            commandRegistry.execute('web-view.bm-rename', item.id);
+          }}
+          draggable
+          onDrop={handleDrop}
+          onKeyAction={handleKeyAction}
+          renamingId={renamingId}
+          renamingValue={renameValue}
+          onRenamingChange={setRenameValue}
+          onRenameCommit={commitRename}
+          onRenameCancel={() => setRenamingId(null)}
+          contextMenuScope="web-view"
+          emptyText="点击上方 + 书签 收藏当前页"
+        />
+      </div>
+      {notice && <div className="krig-web-nav__notice">{notice}</div>}
+    </CollapsibleSection>
+  );
+}
+
+/** 占位段(下载,批2 实装)。默认折叠。 */
 function PlaceholderSection({
   storeKey,
   icon,
@@ -218,7 +503,7 @@ function PlaceholderSection({
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
-      <PlaceholderSection storeKey="bookmark" icon="📌" title="书签" hint="批3 实装" />
+      <BookmarkSection />
       <HistorySection />
       <PlaceholderSection storeKey="download" icon="⬇" title="下载" hint="批2 实装" />
     </div>
@@ -230,5 +515,91 @@ export function registerNavSide(): void {
     view: 'web-view',
     title: 'Web',
     contentRenderer: () => <WebNavPanel />,
+  });
+}
+
+/**
+ * 注册书签 FolderTree 右键菜单(scope='web-view')。
+ *
+ * 精简版(对 ebook 去掉导入 / 重新定位 / 转管理):
+ * 空白处 → 新建文件夹;文件夹 → 在此新建子文件夹 + 重命名 + 删除;
+ * 书签 → 重命名 + 移出文件夹 + 删除。
+ */
+export function registerBookmarkContextMenu(): void {
+  // 空白处右键 — 新建文件夹
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-new-folder-blank',
+    scope: 'web-view',
+    appliesTo: ['blank'],
+    label: '新建文件夹',
+    icon: '📁',
+    command: 'web-view.bm-create-folder',
+    order: 10,
+  });
+
+  // 文件夹右键 — 在此新建子文件夹
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-new-folder-in',
+    scope: 'web-view',
+    appliesTo: ['folder'],
+    label: '在此新建文件夹',
+    icon: '📁',
+    command: 'web-view.bm-create-folder-in',
+    commandArgFn: (ctx) => (ctx.targetId ? decodeTreeId(ctx.targetId).id : null),
+    order: 10,
+  });
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-folder-sep',
+    scope: 'web-view',
+    appliesTo: ['folder'],
+    label: '',
+    separator: true,
+    order: 20,
+  });
+
+  // 重命名 — folder + item 都有
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-rename',
+    scope: 'web-view',
+    appliesTo: ['folder', 'item'],
+    label: '重命名',
+    icon: '✎',
+    disabled: (ctx) => ctx.isMulti,
+    command: 'web-view.bm-rename',
+    commandArgFn: (ctx) => ctx.targetId,
+    order: 30,
+  });
+
+  // 移出文件夹 — 仅书签
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-move-out',
+    scope: 'web-view',
+    appliesTo: ['item'],
+    label: '移出文件夹',
+    icon: '↗',
+    enabledWhen: (ctx) => !ctx.isMulti && ctx.target === 'item',
+    command: 'web-view.bm-move-out',
+    commandArgFn: (ctx) => (ctx.targetId ? decodeTreeId(ctx.targetId).id : null),
+    order: 40,
+  });
+
+  // 分隔符 + 删除
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-delete-sep',
+    scope: 'web-view',
+    appliesTo: ['folder', 'item'],
+    label: '',
+    separator: true,
+    order: 90,
+  });
+  folderTreeContextMenuRegistry.register({
+    id: 'web-bm-delete',
+    scope: 'web-view',
+    appliesTo: ['folder', 'item'],
+    label: (ctx) => (ctx.isMulti ? `删除 ${ctx.selectedCount} 项` : '删除'),
+    icon: '🗑',
+    command: 'web-view.bm-delete',
+    commandArgFn: (ctx) => ctx.targetId,
+    order: 100,
   });
 }

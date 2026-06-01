@@ -9,7 +9,8 @@ import { registerView } from '@slot/view-type-registry/register-view';
 import { WebView } from './WebView';
 import { registerWebContextMenu } from './context-menu-integration';
 import { registerWebCommands } from './web-commands';
-import { registerNavSide } from './nav-side-content';
+import { registerWebBookmarkCommands } from './web-bookmark-commands';
+import { registerNavSide, registerBookmarkContextMenu } from './nav-side-content';
 
 registerView({
   id: 'web-view',
@@ -24,5 +25,7 @@ registerView({
 });
 
 registerWebCommands();
+registerWebBookmarkCommands();
 registerWebContextMenu();
 registerNavSide();
+registerBookmarkContextMenu();
