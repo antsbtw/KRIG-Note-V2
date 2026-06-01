@@ -554,12 +554,15 @@
   flex-shrink: 0;
 }
 
-/* 书签 FolderTree 容器:树是 flex:1 内部滚动,这里给定高度上限,超出树内部滚 */
+/* 书签 FolderTree 容器:树是 flex:1 内部滚动,这里给定高度上限,超出树内部滚。
+   padding-left:整棵树起始左缩进 —— Chrome 导入的顶层容器(Bookmarks Bar 等)是
+   depth=0 会贴边,加起始缩进让顶层不贴边、有层次(对齐 note 视觉舒适度)。*/
 .krig-web-nav__tree {
   display: flex;
   flex-direction: column;
   max-height: 320px;
   min-height: 60px;
+  padding-left: 12px;
 }
 
 /* 「已加入书签」/「无法加入」临时提示 */
