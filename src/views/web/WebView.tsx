@@ -497,6 +497,7 @@ export function WebView({ workspaceId }: WebViewProps) {
         onToggleTranslate={handleToggleTranslate}
         onSelectLang={handleSelectLang}
         urlInputRef={urlInputRef}
+        downloadSlot={<WebDownloadBar />}
       />
       {zoomPercent !== 100 && (
         <button
@@ -541,9 +542,8 @@ export function WebView({ workspaceId }: WebViewProps) {
           </button>
         </div>
       )}
-      {/* Phase 3:下载条 — 跨所有 tab 共享一条(restart-banner 同层,toolbar 下 / hosts 上),
-          常驻渲染不随 tab 切换卸载;列表空时内部 return null 不显示。*/}
-      <WebDownloadBar />
+      {/* Phase 3:下载图标+面板在 WebToolbar actions 区(翻译按钮旁),见上方 downloadSlot。
+          会话有过下载才显图标,列表空时内部 return null。*/}
       {/* 每 tab 一个常驻 Host,display 切换(key=tab.id 保证各自独立 mount,
           initialUrlRef 不变量自动 per-tab 成立 —— 坑2)*/}
       <div className="krig-web-view__hosts">

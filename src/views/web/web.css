@@ -171,52 +171,102 @@
 }
 
 /* ── Phase 3:web view 下载条(restart-banner 同层,跨 tab 共享)── */
-.krig-web-download-bar {
+/* ── Web 下载(Chrome 式:工具栏图标 + 弹出面板)── */
+
+.krig-web-download {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 下载图标按钮:沿用 toolbar__btn 基础样式,加角标定位 */
+.krig-web-download__icon {
+  position: relative;
+}
+
+/* 进行中数量角标 */
+.krig-web-download__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #4a90e2;
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  font-weight: 600;
+  box-sizing: border-box;
+}
+
+/* 弹出面板:相对图标右对齐,悬浮在 toolbar 下方 */
+.krig-web-download__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-height: 380px;
+  overflow-y: auto;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+  z-index: 1000;
+}
+
+.krig-web-download__panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  padding: 4px 6px 8px;
+}
+
+.krig-web-download__item {
   display: flex;
   flex-direction: column;
-  background: #1e2a1e;
-  border-bottom: 1px solid #2f3f2f;
-  flex-shrink: 0;
+  gap: 6px;
+  padding: 8px 6px;
+  font-size: 13px;
 }
 
-.krig-web-download-bar__item {
+.krig-web-download__item + .krig-web-download__item {
+  border-top: 1px solid #3a3a3a;
+}
+
+.krig-web-download__row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 16px;
-  font-size: 13px;
-  color: #cfe8cf;
+  gap: 8px;
 }
 
-.krig-web-download-bar__item + .krig-web-download-bar__item {
-  border-top: 1px solid #2a3a2a;
-}
-
-.krig-web-download-bar__name {
-  flex: 0 1 240px;
+.krig-web-download__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #fff;
+  color: #eee;
   font-weight: 500;
 }
 
-.krig-web-download-bar__track {
-  flex: 1;
-  height: 6px;
-  background: #2f3f2f;
+.krig-web-download__track {
+  height: 5px;
+  background: #1f1f1f;
   border-radius: 3px;
   overflow: hidden;
 }
 
-.krig-web-download-bar__fill {
+.krig-web-download__fill {
   height: 100%;
-  background: #81c784;
+  background: #4a90e2;
   border-radius: 3px;
   transition: width 0.15s ease;
 }
 
-.krig-web-download-bar__fill--indeterminate {
+.krig-web-download__fill--indeterminate {
   width: 30%;
   animation: krig-web-download-indeterminate 1.2s ease-in-out infinite;
 }
@@ -230,25 +280,31 @@
   }
 }
 
-.krig-web-download-bar__meta {
-  flex-shrink: 0;
-  color: #9bbf9b;
+.krig-web-download__done-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.krig-web-download__meta {
+  color: #999;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.krig-web-download-bar__meta--done {
+.krig-web-download__meta--done {
   color: #81c784;
 }
 
-.krig-web-download-bar__meta--failed {
+.krig-web-download__meta--failed {
   color: #e57373;
 }
 
-.krig-web-download-bar__btn {
-  background: #81c784;
+.krig-web-download__btn {
+  background: #4a90e2;
   border: none;
-  color: #14210f;
+  color: #fff;
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px;
@@ -257,14 +313,14 @@
   flex-shrink: 0;
 }
 
-.krig-web-download-bar__btn:hover {
-  background: #a5d6a7;
+.krig-web-download__btn:hover {
+  background: #5b9fee;
 }
 
-.krig-web-download-bar__dismiss {
+.krig-web-download__dismiss {
   background: transparent;
   border: none;
-  color: #9bbf9b;
+  color: #999;
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -272,7 +328,7 @@
   flex-shrink: 0;
 }
 
-.krig-web-download-bar__dismiss:hover {
+.krig-web-download__dismiss:hover {
   color: #fff;
 }
 
