@@ -31,8 +31,13 @@ export function registerWebCommands(): void {
     if (!ws) return;
     // 1. 写 web view 活跃 tab 的 url(per-ws 持久化)
     setWebUrl(wsId, urlArg);
-    // 2. 切右栏到 web view(已是则 update no-op)
-    if (ws.slotBinding.right !== 'web-view') {
+    // 2. 确保 web view 可见 —— 关键:若它**已在任一 slot**(left 或 right)显示,
+    //    就在那个现有 web view 打开,不再动 slot(否则会在另一栏又开一个 web view,
+    //    挤成左右分栏 → web 内容占不满宽度,正是用户反馈的 bug)。
+    //    只有 web view 当前完全不显示时,才切一个 slot 出来(优先 right,不掩盖 left)。
+    const inLeft = ws.slotBinding.left === 'web-view';
+    const inRight = ws.slotBinding.right === 'web-view';
+    if (!inLeft && !inRight) {
       workspaceManager.update(wsId, {
         slotBinding: { ...ws.slotBinding, right: 'web-view' },
       });
