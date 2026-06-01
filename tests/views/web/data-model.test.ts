@@ -186,4 +186,49 @@ describe('getWebWsState — hydrate cache 深比(稳定引用)', () => {
     }));
     expect(r2).not.toBe(r1);
   });
+
+  /**
+   * Phase 4 Commit 1 死循环根因回归测试。
+   *
+   * hydrateWebState 对空数据/旧 currentUrl 迁移分支会 genTabId() 生成**随机
+   * UUID**。旧实现"先 hydrate 再深比 tabs"会因 id 每次不同而永远不等 →
+   * getWebWsState 每次返回新引用 → useSyncExternalStore 死循环 → webview
+   * 无限 attach / 白屏。这里锁住"源没变 → 必返回同一引用"的不变量。
+   */
+  describe('空数据 / 迁移数据也必须返回稳定引用(死循环根因)', () => {
+    it('空持久化(undefined)连续两次 → 同一引用(===),id 不抖', () => {
+      const r1 = getWebWsState(ws('cache-empty-1', undefined));
+      const r2 = getWebWsState(ws('cache-empty-1', undefined));
+      expect(r2).toBe(r1);
+      // 防回归:第二次没有偷偷生成新随机 id
+      expect(r2.tabs[0].id).toBe(r1.tabs[0].id);
+    });
+
+    it('空持久化(pluginStates.web 不存在)连续两次 → 同一引用', () => {
+      const r1 = getWebWsState(ws('cache-empty-2', {}));
+      const r2 = getWebWsState(ws('cache-empty-2', {}));
+      expect(r2).toBe(r1);
+    });
+
+    it('空 tabs 数组连续两次 → 同一引用', () => {
+      const r1 = getWebWsState(ws('cache-empty-3', { tabs: [] }));
+      const r2 = getWebWsState(ws('cache-empty-3', { tabs: [] }));
+      expect(r2).toBe(r1);
+    });
+
+    it('旧 currentUrl 迁移分支连续两次 → 同一引用(id 不每次新生成)', () => {
+      const r1 = getWebWsState(ws('cache-mig-1', { currentUrl: 'https://a.com', targetLang: 'ja' }));
+      const r2 = getWebWsState(ws('cache-mig-1', { currentUrl: 'https://a.com', targetLang: 'ja' }));
+      expect(r2).toBe(r1);
+      expect(r2.tabs[0].id).toBe(r1.tabs[0].id);
+      expect(r2.tabs[0].url).toBe('https://a.com');
+    });
+
+    it('迁移后源字段真变(currentUrl 改)→ 返回新引用', () => {
+      const r1 = getWebWsState(ws('cache-mig-2', { currentUrl: 'https://a.com' }));
+      const r2 = getWebWsState(ws('cache-mig-2', { currentUrl: 'https://b.com' }));
+      expect(r2).not.toBe(r1);
+      expect(r2.tabs[0].url).toBe('https://b.com');
+    });
+  });
 });
