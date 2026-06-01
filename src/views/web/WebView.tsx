@@ -461,9 +461,10 @@ export function WebView({ workspaceId }: WebViewProps) {
     return <div className="krig-web-view__empty">Workspace 未就绪</div>;
   }
 
-  // Commit 1 简化:翻译只在单 tab 时按原逻辑;多 tab 暂不开翻译(留 Commit 2 单活跃约束)。
-  const singleTab = tabs.length === 1;
-  const translateActiveForToolbar = isTranslateMode && singleTab;
+  // Commit 2:翻译 × tab 单活跃 —— 翻译只对**活跃 tab**生效(取代 Commit 1 的
+  // tabs.length===1 兜法）。任一时刻只一个 Host(活跃 tab 且翻译开)translateMode=true,
+  // 即只一个 Host 订阅 slotBus 'left',不串台。toolbar 翻译按钮跟随是否开翻译。
+  const translateActiveForToolbar = isTranslateMode;
 
   return (
     <div
@@ -548,8 +549,10 @@ export function WebView({ workspaceId }: WebViewProps) {
             ref={makeHostRef(tab.id)}
             workspaceId={workspaceId}
             currentUrl={tab.url}
-            // Commit 1:仅单 tab 时跟翻译模式;多 tab 全 false(留 Commit 2)
-            translateMode={singleTab ? isTranslateMode : false}
+            // Commit 2:翻译 × tab 单活跃 —— 只有「活跃 tab 且翻译开」的 Host
+            // translateMode=true,其余 tab false → 走 destroy 分支不订阅 slotBus 'left'。
+            // 任一时刻只一个 Host 活跃订阅 'left',不串台。
+            translateMode={isTranslateMode && tab.id === activeTabId}
             partition={WEBVIEW_PARTITION}
             className="krig-web-view__webview"
             style={{ display: tab.id === activeTabId ? 'inline-flex' : 'none' }}
