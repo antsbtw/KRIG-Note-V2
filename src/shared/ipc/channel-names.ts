@@ -67,6 +67,10 @@ export const IPC_CHANNELS = {
   WEB_PROXY_LIST: 'web.proxy-list',                  // renderer → main invoke → ProxyNode[]
   WEB_PROXY_ADD: 'web.proxy-add',                    // renderer → main invoke({ name, type, host }) → ProxyNode
   WEB_PROXY_REMOVE: 'web.proxy-remove',              // renderer → main invoke({ id })
+  // per-ws 代理阶段3:Web 全局设置(搜索引擎 / 默认主页)+ 清浏览数据。
+  WEB_SETTINGS_GET: 'web.settings-get',              // renderer → main invoke → WebGlobalSettings
+  WEB_SETTINGS_UPDATE: 'web.settings-update',        // renderer → main invoke(Partial<WebGlobalSettings>) → WebGlobalSettings
+  WEB_CLEAR_STORAGE_DATA: 'web.clear-storage-data',  // renderer → main invoke({ workspaceId })
 
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',

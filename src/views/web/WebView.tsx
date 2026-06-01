@@ -30,7 +30,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { WEBVIEW_DEFAULT_URL } from '@shared/constants/webview';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
 import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
@@ -43,7 +42,9 @@ import {
   setActiveTab,
 } from './data-model';
 import { recordVisit } from './web-history';
+import { getWebSettings, initWebSettings } from './web-settings-cache';
 import { WebToolbar } from './WebToolbar';
+import { WebSettingsPanel } from './WebSettingsPanel';
 import { WebTabBar } from './WebTabBar';
 import { WebFindBar } from './WebFindBar';
 import { getLangLabel } from './translate-view/lang-defaults';
@@ -114,6 +115,9 @@ export function WebView({ workspaceId }: WebViewProps) {
 
   // ── P0:缩放指示(非 100% 时显示,transient 不持久化)──
   const [zoomPercent, setZoomPercent] = useState(100);
+
+  // ── 阶段3:设置面板开关(transient)──
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // ── Host callback handlers(坑6:transient 只跟活跃 tab,回调带 tabId 区分)──
   const handleNavStateChanged = useCallback(
@@ -232,7 +236,7 @@ export function WebView({ workspaceId }: WebViewProps) {
 
   // ── tab 操作 ──
   const handleNewTab = useCallback(() => {
-    addTab(workspaceId, WEBVIEW_DEFAULT_URL);
+    addTab(workspaceId, getWebSettings().defaultUrl);
   }, [workspaceId]);
   const handleCloseTab = useCallback(
     (tabId: string) => {
@@ -310,6 +314,11 @@ export function WebView({ workspaceId }: WebViewProps) {
   useEffect(() => {
     console.log('[per-ws] ws=', workspaceId, 'partition=persist:webview-' + workspaceId);
   }, [workspaceId]);
+
+  // 阶段3:全局设置缓存初始化(只跑一次,initialized 守卫;此后 omnibox/data-model 同步读)
+  useEffect(() => {
+    void initWebSettings();
+  }, []);
 
   // [per-ws 代理阶段2] setProxy 正式接入:ws 切换或 proxyId 变化都重设代理出口。
   // 主进程查全局节点表 resolveRules(proxyId)→ session.setProxy。proxyId undefined → 直连。
@@ -460,6 +469,7 @@ export function WebView({ workspaceId }: WebViewProps) {
     setFindQuery('');
     setFindResult({ activeMatchOrdinal: 0, matches: 0 });
     setZoomPercent(100);
+    setSettingsOpen(false);
   }, [workspaceId]);
 
   // 切活跃 tab → 重置随活跃 tab 走的 transient(loading/导航能力/地址栏/查找/缩放)。
@@ -526,6 +536,13 @@ export function WebView({ workspaceId }: WebViewProps) {
         onSelectLang={handleSelectLang}
         urlInputRef={urlInputRef}
         onClose={handleClose}
+        onOpenSettings={() => setSettingsOpen((v) => !v)}
+      />
+      <WebSettingsPanel
+        workspaceId={workspaceId}
+        proxyId={wsState.proxyId}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
       {zoomPercent !== 100 && (
         <button

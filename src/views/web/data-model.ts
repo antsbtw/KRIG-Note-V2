@@ -15,8 +15,8 @@
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
-import { WEBVIEW_DEFAULT_URL } from '@shared/constants/webview';
 import { getDefaultTargetLang } from './translate-view/lang-defaults';
+import { getWebSettings } from './web-settings-cache';
 
 const STORE_KEY = 'web';
 
@@ -51,7 +51,16 @@ interface PersistedWebWsState {
   proxyId?: string;
 }
 
-const DEFAULT_URL = WEBVIEW_DEFAULT_URL;
+/**
+ * 默认主页 / 新 tab URL —— 改读全局设置缓存(阶段3)。
+ *
+ * ⚠️ 必须**函数内调用**取值(getWebSettings().defaultUrl),不能在模块顶层 const
+ * 求值,否则会固化成启动那刻的缓存值(用户改主页后不生效)。默认缓存 = WEBVIEW_DEFAULT_URL,
+ * 缓存未就绪时跟旧行为一致,无回归。
+ */
+function defaultUrl(): string {
+  return getWebSettings().defaultUrl;
+}
 
 /** 生成 tab id(crypto.randomUUID 渲染进程可用,带兜底)*/
 function genTabId(): string {
@@ -137,7 +146,7 @@ export function hydrateWebState(persisted: Partial<PersistedWebWsState> | undefi
         (t): t is WebTab =>
           !!t && typeof t.id === 'string' && t.id.length > 0 && typeof t.url === 'string',
       )
-      .map((t) => ({ id: t.id, url: t.url || DEFAULT_URL }));
+      .map((t) => ({ id: t.id, url: t.url || defaultUrl() }));
     if (tabs.length > 0) {
       const activeTabId =
         typeof p.activeTabId === 'string' && tabs.some((t) => t.id === p.activeTabId)
@@ -155,7 +164,7 @@ export function hydrateWebState(persisted: Partial<PersistedWebWsState> | undefi
 
   // 3. 空 → DEFAULT_URL 单 tab
   const id = genTabId();
-  return { tabs: [{ id, url: DEFAULT_URL }], activeTabId: id, targetLang, proxyId };
+  return { tabs: [{ id, url: defaultUrl() }], activeTabId: id, targetLang, proxyId };
 }
 
 /**
@@ -216,7 +225,7 @@ export function addTab(workspaceId: string, url: string): string | null {
   if (!ws) return null;
   const cur = getWebWsState(ws);
   const id = genTabId();
-  const tabs = [...cur.tabs, { id, url: url || DEFAULT_URL }];
+  const tabs = [...cur.tabs, { id, url: url || defaultUrl() }];
   persist(workspaceId, { ...cur, tabs, activeTabId: id });
   return id;
 }
@@ -234,7 +243,7 @@ export function closeTab(workspaceId: string, tabId: string): void {
     const id = genTabId();
     persist(workspaceId, {
       ...cur,
-      tabs: [{ id, url: DEFAULT_URL }],
+      tabs: [{ id, url: defaultUrl() }],
       activeTabId: id,
     });
     return;

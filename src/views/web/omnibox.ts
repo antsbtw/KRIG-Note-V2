@@ -13,7 +13,7 @@
  * 抽成纯函数便于单测,不依赖 DOM / Electron。
  */
 
-import { WEBVIEW_SEARCH_URL } from '@shared/constants/webview';
+import { getWebSettings } from './web-settings-cache';
 
 /** 已知带协议前缀(这些直接当 URL,不再补 https)*/
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -43,7 +43,8 @@ export function resolveOmniboxInput(raw: string): string {
     return `https://${trimmed}`;
   }
 
-  return WEBVIEW_SEARCH_URL.replace('%s', encodeURIComponent(trimmed));
+  // 搜索引擎模板读全局设置缓存(默认值 = WEBVIEW_SEARCH_URL,缓存未就绪无回归)
+  return getWebSettings().searchEngineTemplate.replace('%s', encodeURIComponent(trimmed));
 }
 
 /** 不带协议时,判断 trimmed 是否"看起来像 URL"(不含空格的 host[/path])*/

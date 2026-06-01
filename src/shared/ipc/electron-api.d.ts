@@ -32,6 +32,7 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
+import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
   ProgressStartPayload,
   ProgressUpdatePayload,
@@ -322,6 +323,12 @@ declare global {
       addProxyNode(args: { name: string; type: ProxyNodeType; host: string }): Promise<ProxyNode>;
       /** per-ws 代理阶段2:删代理节点(by id)*/
       removeProxyNode(id: string): Promise<void>;
+      /** per-ws 代理阶段3:取 Web 全局设置(搜索引擎模板 + 默认主页)*/
+      getWebSettings(): Promise<WebGlobalSettings>;
+      /** per-ws 代理阶段3:更新 Web 全局设置 — 合并 patch 后返回全量 */
+      updateWebSettings(patch: Partial<WebGlobalSettings>): Promise<WebGlobalSettings>;
+      /** per-ws 代理阶段3:清某 ws partition 的浏览数据(cookies/缓存/localStorage 等)*/
+      clearWebStorageData(args: { workspaceId: string }): Promise<void>;
       /** 取下载历史全量(终态记录,按 completedAt 倒序)*/
       webDownloadList(): Promise<WebDownloadHistoryEntry[]>;
       /** 删一条下载历史记录(仅删 JSON 记录,不删磁盘文件,对齐 Chrome)*/

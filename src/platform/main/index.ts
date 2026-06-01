@@ -35,6 +35,7 @@ import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
 import { registerWebDownloadHook } from './web-download/handler';
 import { registerWebProxyHandler } from './web-proxy/handler';
+import { registerWebSettingsHandler } from './web-settings/handler';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -161,6 +162,8 @@ app.whenReady().then(async () => {
   });
   // per-ws 代理阶段1:临时 setProxy IPC(DevTools console 验证不同 ws 不同出口)。
   registerWebProxyHandler();
+  // per-ws 代理阶段3:Web 全局设置(搜索/主页)+ 清浏览数据 IPC。
+  registerWebSettingsHandler();
 });
 
 // macOS:窗口全关后,点 dock 重新打开

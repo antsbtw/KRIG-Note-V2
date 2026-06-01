@@ -744,3 +744,232 @@
 .krig-web-nav__dl-show:hover {
   background: rgba(255, 255, 255, 0.08);
 }
+
+/* ── 阶段3:Web 设置面板(popover 锚 toolbar 右上角)── */
+.krig-web-settings-panel {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  z-index: 200;
+  width: 320px;
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  padding: 4px 0;
+  color: #e8eaed;
+  font-size: 13px;
+}
+
+.krig-web-settings__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.krig-web-settings__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.krig-web-settings__close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.krig-web-settings__close:hover {
+  color: #fff;
+}
+
+.krig-web-settings__section {
+  padding: 12px 14px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.krig-web-settings__section:last-child {
+  border-bottom: none;
+}
+
+.krig-web-settings__section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.krig-web-settings__section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8eaed;
+}
+
+.krig-web-settings__scope {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(138, 180, 248, 0.16);
+  color: #8ab4f8;
+}
+
+.krig-web-settings__scope--global {
+  background: rgba(180, 160, 248, 0.16);
+  color: #b8a6f8;
+}
+
+.krig-web-settings__select,
+.krig-web-settings__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 13px;
+  outline: none;
+}
+
+.krig-web-settings__select:focus,
+.krig-web-settings__input:focus {
+  border-color: #8ab4f8;
+}
+
+.krig-web-settings__node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.krig-web-settings__node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.krig-web-settings__node-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.krig-web-settings__node-name {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.krig-web-settings__node-meta {
+  flex: 1;
+  min-width: 0;
+  color: #9aa0a6;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.krig-web-settings__node-del {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.krig-web-settings__node-del:hover {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
+
+.krig-web-settings__add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+}
+
+.krig-web-settings__form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.krig-web-settings__btn {
+  padding: 5px 12px;
+  background: #333;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8eaed;
+  font-size: 12px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.krig-web-settings__btn:hover {
+  background: #3d3d3d;
+}
+
+.krig-web-settings__btn--primary {
+  background: rgba(138, 180, 248, 0.2);
+  border-color: rgba(138, 180, 248, 0.4);
+  color: #8ab4f8;
+}
+
+.krig-web-settings__btn--primary:hover {
+  background: rgba(138, 180, 248, 0.3);
+}
+
+.krig-web-settings__btn--danger {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #fca5a5;
+}
+
+.krig-web-settings__btn--danger:hover {
+  background: rgba(220, 38, 38, 0.32);
+}
+
+.krig-web-settings__confirm-msg {
+  margin: 0;
+  font-size: 12px;
+  color: #fca5a5;
+  line-height: 1.4;
+}
+
+.krig-web-settings__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.krig-web-settings__toast {
+  font-size: 12px;
+  color: #81c995;
+}
+
+.krig-web-settings__custom-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.krig-web-settings__err {
+  font-size: 11px;
+  color: #fca5a5;
+}

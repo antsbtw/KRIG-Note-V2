@@ -434,6 +434,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.WEB_PROXY_REMOVE, { id });
   },
 
+  // ── per-ws 代理阶段3:Web 全局设置(搜索/主页)+ 清浏览数据 ──
+  /** 取全局设置(renderer 启动缓存初始化用)*/
+  getWebSettings(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_SETTINGS_GET);
+  },
+  /** 更新全局设置 — 合并 patch 后返回全量 */
+  updateWebSettings(patch: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_SETTINGS_UPDATE, patch);
+  },
+  /** 清某 ws partition 的浏览数据(cookies/缓存/localStorage 等)*/
+  async clearWebStorageData(args: { workspaceId: string }): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.WEB_CLEAR_STORAGE_DATA, args);
+  },
+
   /** 取下载历史全量(终态记录)— renderer → main invoke */
   async webDownloadList(): Promise<WebDownloadHistoryEntry[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_LIST);

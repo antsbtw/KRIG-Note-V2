@@ -41,6 +41,8 @@ interface WebToolbarProps {
   urlInputRef?: RefObject<HTMLInputElement | null>;
   /** × 关闭当前 web view(WebView 注入,照 ebook 判 slot 调 closeLeft/closeRight)*/
   onClose: () => void;
+  /** 阶段3:点 ⚙ 打开设置面板(面板由 WebView 渲染,WebToolbar 保持纯 UI)*/
+  onOpenSettings: () => void;
 }
 
 export function WebToolbar({
@@ -58,6 +60,7 @@ export function WebToolbar({
   onSelectLang,
   urlInputRef,
   onClose,
+  onOpenSettings,
 }: WebToolbarProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -322,6 +325,15 @@ export function WebToolbar({
             </div>
           )}
         </div>
+        <button
+          type="button"
+          className="krig-web-toolbar__btn"
+          onClick={onOpenSettings}
+          title="设置"
+          aria-label="设置"
+        >
+          ⚙
+        </button>
         <button
           type="button"
           className="krig-web-toolbar__btn krig-web-toolbar__btn--close"
