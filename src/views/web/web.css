@@ -660,18 +660,20 @@
   background: #262626;
 }
 
+/* caret 对齐 note FolderTree(实心三角 ▼/▶,见 shared-ui/FolderTree/styles.ts caret)*/
 .krig-web-nav__caret {
-  font-size: 10px;
-  color: #777;
   width: 12px;
+  font-size: 10px;
+  color: #888;
+  text-align: center;
   flex-shrink: 0;
 }
 
+/* 段标题对齐 note NavSide「笔记目录」橙黄(overlay-bindings.css .krig-nav-side-title #d4a040)*/
 .krig-web-nav__section-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: #9aa0a6;
-  letter-spacing: 0.3px;
+  color: #d4a040;
   flex: 1;
 }
 

@@ -80,7 +80,7 @@ function CollapsibleSection({
         className="krig-web-nav__section-header"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="krig-web-nav__caret">{open ? '▾' : '▸'}</span>
+        <span className="krig-web-nav__caret">{open ? '▼' : '▶'}</span>
         <span className="krig-web-nav__section-title">
           {icon} {title}
         </span>
