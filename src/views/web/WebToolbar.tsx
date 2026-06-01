@@ -14,7 +14,6 @@ import {
   useEffect,
   useRef,
   type KeyboardEvent,
-  type ReactNode,
   type RefObject,
 } from 'react';
 import { LANG_OPTIONS } from './translate-view/lang-defaults';
@@ -40,8 +39,8 @@ interface WebToolbarProps {
   onSelectLang: (lang: string) => void;
   /** P0(⌘L):WebView 注入的 URL input ref,用于 focus+select 地址栏 */
   urlInputRef?: RefObject<HTMLInputElement | null>;
-  /** Phase 3:下载图标+面板组件(WebView 注入,放 actions 区翻译按钮前)*/
-  downloadSlot?: ReactNode;
+  /** × 关闭当前 web view(WebView 注入,照 ebook 判 slot 调 closeLeft/closeRight)*/
+  onClose: () => void;
 }
 
 export function WebToolbar({
@@ -58,7 +57,7 @@ export function WebToolbar({
   onToggleTranslate,
   onSelectLang,
   urlInputRef,
-  downloadSlot,
+  onClose,
 }: WebToolbarProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -273,9 +272,8 @@ export function WebToolbar({
         )}
       </div>
 
-      {/* 右侧 actions 区(下载图标 + 翻译按钮 + 语言下拉箭头)*/}
+      {/* 右侧 actions 区(翻译按钮 + 语言下拉箭头 + 关闭)*/}
       <div className="krig-web-toolbar__actions">
-        {downloadSlot}
         <div className="krig-web-toolbar__translate-group" ref={langMenuRef}>
           <button
             type="button"
@@ -324,6 +322,15 @@ export function WebToolbar({
             </div>
           )}
         </div>
+        <button
+          type="button"
+          className="krig-web-toolbar__btn krig-web-toolbar__btn--close"
+          onClick={onClose}
+          title="关闭此面板"
+          aria-label="关闭此面板"
+        >
+          ×
+        </button>
       </div>
     </div>
   );

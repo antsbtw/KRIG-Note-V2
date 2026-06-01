@@ -385,6 +385,18 @@
   background: rgba(138, 180, 248, 0.3);
 }
 
+/* × 关闭此面板(照 ebook close 按钮:hover 变红)*/
+.krig-web-toolbar__btn--close {
+  color: #888;
+  font-size: 18px;
+}
+
+.krig-web-toolbar__btn--close:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.18);
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #fca5a5;
+}
+
 .krig-web-toolbar__url {
   flex: 1;
   min-width: 0;

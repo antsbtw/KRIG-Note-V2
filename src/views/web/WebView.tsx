@@ -46,7 +46,6 @@ import { recordVisit } from './web-history';
 import { WebToolbar } from './WebToolbar';
 import { WebTabBar } from './WebTabBar';
 import { WebFindBar } from './WebFindBar';
-import { WebDownloadBar } from './WebDownloadBar';
 import { getLangLabel } from './translate-view/lang-defaults';
 import './web.css';
 
@@ -393,6 +392,20 @@ export function WebView({ workspaceId }: WebViewProps) {
     ],
   );
 
+  // × 关闭当前 web view:根据所在槽位调 closeLeft / closeRight
+  // (照 ebook 模式判 slot,不硬编码 closeLeft —— web 可进 right slot,硬编码会误关 left)
+  // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
+  const handleClose = useCallback(() => {
+    const ws = workspaceManager.get(workspaceId);
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!ws || !bus) return;
+    if (ws.slotBinding.right === 'web-view') {
+      bus.slot.closeRight();
+    } else {
+      bus.slot.closeLeft();
+    }
+  }, [workspaceId]);
+
   // toggle 双栏翻译模式
   const handleToggleTranslate = useCallback(() => {
     const ws = workspaceManager.get(workspaceId);
@@ -497,7 +510,7 @@ export function WebView({ workspaceId }: WebViewProps) {
         onToggleTranslate={handleToggleTranslate}
         onSelectLang={handleSelectLang}
         urlInputRef={urlInputRef}
-        downloadSlot={<WebDownloadBar />}
+        onClose={handleClose}
       />
       {zoomPercent !== 100 && (
         <button
@@ -542,8 +555,7 @@ export function WebView({ workspaceId }: WebViewProps) {
           </button>
         </div>
       )}
-      {/* Phase 3:下载图标+面板在 WebToolbar actions 区(翻译按钮旁),见上方 downloadSlot。
-          会话有过下载才显图标,列表空时内部 return null。*/}
+      {/* 下载 UI 已迁到 NavSide 下载段(进行中 + 历史),工具栏不再有下载图标。 */}
       {/* 每 tab 一个常驻 Host,display 切换(key=tab.id 保证各自独立 mount,
           initialUrlRef 不变量自动 per-tab 成立 —— 坑2)*/}
       <div className="krig-web-view__hosts">
