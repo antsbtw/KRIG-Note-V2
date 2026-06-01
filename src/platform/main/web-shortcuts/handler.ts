@@ -108,6 +108,13 @@ function attachGuest(mainWindow: BrowserWindow, guest: WebContents): void {
     event.preventDefault(); // 阻止网页收到该键(如 ⌘F 触发网页自身查找)
     mainWindow.webContents.send(IPC_CHANNELS.WEB_VIEW_SHORTCUT, { action });
   });
+
+  // ── 弹窗导流:target=_blank / window.open → 在 web view 内新建 tab ──
+  guest.setWindowOpenHandler(({ url }) => {
+    if (!shouldHandle(guest)) return { action: 'allow' }; // AI / 翻译弹窗不接管
+    mainWindow.webContents.send(IPC_CHANNELS.WEB_NEW_TAB, { url });
+    return { action: 'deny' }; // 阻止独立 BrowserWindow 飞出 workspace
+  });
 }
 
 export function registerWebShortcutsHook(mainWindow: BrowserWindow): void {
