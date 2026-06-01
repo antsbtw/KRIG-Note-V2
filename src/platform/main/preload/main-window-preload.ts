@@ -312,6 +312,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     );
   },
 
+  // ── web view 书签树(书签步骤1 数据层)──
+  bookmarkList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_LIST);
+  },
+  bookmarkAdd(url: string, title: string, folderId: string | null): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_ADD, url, title, folderId);
+  },
+  bookmarkRename(id: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_RENAME, id, title);
+  },
+  bookmarkRemove(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_REMOVE, id);
+  },
+  bookmarkMove(id: string, folderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_MOVE, id, folderId);
+  },
+  /** 订阅书签列表变更 — 返回 unsubscribe(对齐 onEbookBookshelfChanged 模式)*/
+  onBookmarkListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.BOOKMARK_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.BOOKMARK_LIST_CHANGED, handler);
+  },
+
   // ── L5-C6:PDF 提取 → Note ──
   /** 上传当前打开的 PDF 到 Platform → 返 md5 + platformUrl(view 拿后 bus.openRight)*/
   extractionUpload(): Promise<unknown> {

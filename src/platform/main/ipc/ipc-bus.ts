@@ -14,6 +14,7 @@ import { registerYtdlpHandlers } from '../ytdlp/handlers';
 import { registerTweetFetcherHandlers } from '../tweet-fetcher/handlers';
 import { registerLearningHandlers } from '../learning/handlers';
 import { registerEBookHandlers } from '../ebook/library-handlers';
+import { registerBookmarkHandlers } from '../bookmark/handlers';
 import { registerExtractionHandlers } from '../extraction/handlers';
 import { registerGraphHandlers } from '../graph';
 import { registerFolderHandlers } from '../folder';
@@ -33,6 +34,7 @@ export function initIpcBus(): void {
   registerTweetFetcherHandlers();   // L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)
   registerLearningHandlers();       // L5-B3.20a:learning(vocab + dictionary + translate + TTS)
   registerEBookHandlers();          // L5-C1:ebook 书架 + 文件夹 + 标注(D-3=B JSON 起步)
+  registerBookmarkHandlers();       // web view 书签树(书签步骤1 数据层:bookmark atom + folder viewType='web')
   registerExtractionHandlers();     // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)
   registerGraphHandlers();          // L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步,模板对齐 ebook)
   registerFolderHandlers();         // L7-sub2:folder capability (decision 012,SurrealDB)

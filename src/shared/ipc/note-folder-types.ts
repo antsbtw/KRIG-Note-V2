@@ -49,13 +49,14 @@ export interface FolderInfo {
  * - 'note'  → object literal '__view__/note'
  * - 'graph' → object literal '__view__/graph'
  * - 'ebook' → object literal '__view__/ebook'  (decision 022, sub-phase 022)
+ * - 'web'   → object literal '__view__/web'    (web view 书签树, 书签步骤1 数据层)
  *
  * SSOT 位置 (§10.C-1 偏离登记, 2026-05-13): 跟 FolderInfo 同模式归到
  * shared/ipc/ IPC 契约层, 避免 shared/ipc/electron-api.d.ts 反向 import @capabilities/
  * (V2 分层 lint 规则 no-restricted-imports 禁止).
  * capability folder/types.ts re-export 该类型给消费者.
  */
-export type FolderViewType = 'note' | 'graph' | 'ebook' | 'thought';
+export type FolderViewType = 'note' | 'graph' | 'ebook' | 'thought' | 'web';
 
 /**
  * NOTE_DOC_CONTENT_CHANGED origin 常量

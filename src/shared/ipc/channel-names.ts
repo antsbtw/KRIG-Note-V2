@@ -121,6 +121,14 @@ export const IPC_CHANNELS = {
   EBOOK_THOUGHT_BLOCK_UPDATE_COLOR: 'ebook.thought-block-update-color', // PR-α-3b updateReadingThoughtBlockColor
   EBOOK_THOUGHT_ANNOTATIONS: 'ebook.thought-annotations',       // getReadingThoughtAnnotations
 
+  // web view 书签(书签步骤1 数据层:bookmark atom + inFolder 边挂 folder viewType='web')
+  BOOKMARK_LIST: 'bookmark.list',
+  BOOKMARK_ADD: 'bookmark.add',
+  BOOKMARK_RENAME: 'bookmark.rename',
+  BOOKMARK_REMOVE: 'bookmark.remove',
+  BOOKMARK_MOVE: 'bookmark.move',
+  BOOKMARK_LIST_CHANGED: 'bookmark.list-changed',               // main → renderer 推送
+
   // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform 集成)
   EXTRACTION_UPLOAD: 'extraction.upload',           // renderer → main:上传当前 PDF → 返 md5
   EXTRACTION_IMPORT: 'extraction.import',           // renderer → main:主动触发 import(备用入口)

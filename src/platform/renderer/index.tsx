@@ -36,6 +36,7 @@ import '@capabilities/web-rendering';
 import '@capabilities/text-editing';   // W5 C4 新增
 import '@capabilities/learning';        // L5-B3.20a 新增(无 view 直接消费需显式拉,P1 审计修正)
 import '@capabilities/ebook-library';   // L5-C1 新增(view install 声明 + 显式拉副作用,对齐 P1 审计模式)
+import '@capabilities/bookmark';         // web view 书签树(书签步骤1 数据层:显式拉副作用注册 capability)
 import '@capabilities/ebook-rendering'; // L5-C2(pdfjs-dist 4.9.155),自带 pdf-viewer 依赖
 import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 + 文件夹,JSON 起步)
 import '@capabilities/shape-library';       // L5-G2 新增(Shape + Substance 资源仓库,0 import three)

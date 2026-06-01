@@ -45,6 +45,7 @@ async function broadcastFolderListChanged(): Promise<void> {
       win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.graph);
       win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.ebook);
       win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.thought);
+      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.web);
     }
   } catch (err) {
     console.warn('[folder] broadcast list-changed failed:', err);
@@ -58,7 +59,8 @@ export function registerFolderHandlers(): void {
       viewType !== 'note' &&
       viewType !== 'graph' &&
       viewType !== 'ebook' &&
-      viewType !== 'thought'
+      viewType !== 'thought' &&
+      viewType !== 'web'
     ) {
       return [];
     }
@@ -72,12 +74,13 @@ export function registerFolderHandlers(): void {
       if (!p || typeof p.title !== 'string' || !p.title) return null;
       const parentFolderId =
         typeof p.parentFolderId === 'string' && p.parentFolderId ? p.parentFolderId : null;
-      // decision 021 §4.1 + sub-phase 022: viewType 必传校验 (含 'ebook' / 'thought')
+      // decision 021 §4.1 + sub-phase 022: viewType 必传校验 (含 'ebook' / 'thought' / 'web')
       if (
         p.viewType !== 'note' &&
         p.viewType !== 'graph' &&
         p.viewType !== 'ebook' &&
-        p.viewType !== 'thought'
+        p.viewType !== 'thought' &&
+        p.viewType !== 'web'
       ) {
         return null;
       }

@@ -117,7 +117,7 @@ export async function listAllFoldersGroupedByView(): Promise<Record<FolderViewTy
   })) as AtomEntity<'folder'>[];
 
   if (atoms.length === 0) {
-    return { note: [], graph: [], ebook: [], thought: [] };
+    return { note: [], graph: [], ebook: [], thought: [], web: [] };
   }
 
   const atomsById = new Map<string, AtomEntity<'folder'>>();
@@ -135,11 +135,13 @@ export async function listAllFoldersGroupedByView(): Promise<Record<FolderViewTy
     graph: new Set(),
     ebook: new Set(),
     thought: new Set(),
+    web: new Set(),
   };
   const NOTE_MARKER = viewMarkerFor('note');
   const GRAPH_MARKER = viewMarkerFor('graph');
   const EBOOK_MARKER = viewMarkerFor('ebook');
   const THOUGHT_MARKER = viewMarkerFor('thought');
+  const WEB_MARKER = viewMarkerFor('web');
   for (const e of viewEdges) {
     if (e.object.kind !== 'literal') continue;
     if (e.object.type !== 'string') continue;
@@ -155,6 +157,9 @@ export async function listAllFoldersGroupedByView(): Promise<Record<FolderViewTy
         break;
       case THOUGHT_MARKER:
         idsByView.thought.add(e.subject.atomId);
+        break;
+      case WEB_MARKER:
+        idsByView.web.add(e.subject.atomId);
         break;
     }
   }
@@ -187,6 +192,7 @@ export async function listAllFoldersGroupedByView(): Promise<Record<FolderViewTy
     graph: buildInfos(idsByView.graph),
     ebook: buildInfos(idsByView.ebook),
     thought: buildInfos(idsByView.thought),
+    web: buildInfos(idsByView.web),
   };
 }
 
@@ -499,7 +505,7 @@ async function collectFolderSubtree(
  * 字面约束 (主对话批 A):本函数只扩展 cascade scope,不改 deleteFolder 对外语义
  * (仍是 Path Y "删 folder + 所有 descendants + 所有内含资源")。
  */
-const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas', 'thought']);
+const CASCADE_RESOURCE_DOMAINS = new Set(['pm', 'graph-canvas', 'thought', 'bookmark']);
 
 /**
  * P0-2 (2026-05-29 data-layer-audit): 批量替代 for-loop getAtom 串行(B3 G3)

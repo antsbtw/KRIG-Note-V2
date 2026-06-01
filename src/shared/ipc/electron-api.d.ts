@@ -249,6 +249,17 @@ declare global {
         color: string,
       ): Promise<void>;
 
+      // ── web view 书签树(书签步骤1 数据层)──
+      /** 全部书签(扁平,按 createdAt 倒序)*/
+      bookmarkList(): Promise<unknown>;
+      /** 添加书签 — 给 folderId 则挂到该 folder(viewType='web')*/
+      bookmarkAdd(url: string, title: string, folderId: string | null): Promise<unknown>;
+      bookmarkRename(id: string, title: string): Promise<void>;
+      bookmarkRemove(id: string): Promise<void>;
+      bookmarkMove(id: string, folderId: string | null): Promise<void>;
+      /** 订阅书签列表变化 — 返回 unsubscribe(对齐 onEbookBookshelfChanged 模式)*/
+      onBookmarkListChanged(callback: (list: unknown) => void): () => void;
+
       // ── L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)──
       /** 上传当前打开的 PDF → 返 { uploaded, md5?, platformUrl?, alreadyExists?, reason? } */
       extractionUpload(): Promise<unknown>;
