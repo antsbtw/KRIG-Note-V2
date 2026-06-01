@@ -696,9 +696,10 @@ function DownloadSection() {
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
+      {/* 顺序:书签 → 下载 → 历史(下载短提到第二,历史内容长放最后)*/}
       <BookmarkSection />
-      <HistorySection />
       <DownloadSection />
+      <HistorySection />
     </div>
   );
 }
