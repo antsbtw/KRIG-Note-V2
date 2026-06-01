@@ -236,10 +236,6 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
   useEffect(() => {
     if (!translateMode) {
       // 退出翻译模式,销毁 driver
-      if (syncDriverRef.current) {
-        // 诊断(Phase 4 Commit 2 翻译×tab 单活跃):验证切 tab 时旧 driver 先 destroy。
-        console.log('[web-rendering Host][translate-single] DESTROY driver ws=%s url=%s', workspaceId, currentUrl);
-      }
       syncDriverRef.current?.destroy();
       syncDriverRef.current = null;
       return;
@@ -250,9 +246,6 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     }
 
     // 创建左侧 SyncDriver(bus 接口注入 — Wave 4.2 C1 决议)
-    // 诊断(Phase 4 Commit 2 翻译×tab 单活跃):验证切 tab 时新 driver START 在旧 DESTROY 之后,
-    // 任一时刻只一行「未配对的 START」存活(无两 driver 同时活 → 不双发 NAVIGATE / 不串台)。
-    console.log('[web-rendering Host][translate-single] START driver ws=%s url=%s', workspaceId, currentUrl);
     const driver = new SyncDriver('left', slotBus);
     driver.bind(wv);
     syncDriverRef.current = driver;
