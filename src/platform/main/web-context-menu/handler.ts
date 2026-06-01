@@ -35,32 +35,13 @@
 import {
   Menu,
   clipboard,
-  session,
   type BrowserWindow,
-  type WebContents,
   type ContextMenuParams,
   type MenuItemConstructorOptions,
 } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
-import { WEBVIEW_TRANSLATE_PARTITION } from '@shared/constants/webview';
-import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
-
-/**
- * 判断该 guest 是否为「普通浏览 webview」(需接管右键菜单)。
- *
- * @returns true = 普通浏览,弹原生菜单;false = 翻译 / AI,放过(保持现状)。
- */
-function shouldHandle(guest: WebContents): boolean {
-  // 1) 翻译 webview:独立 partition,实例身份比较排除。
-  const translateSession = session.fromPartition(WEBVIEW_TRANSLATE_PARTITION);
-  if (guest.session === translateSession) return false;
-
-  // 2) AI webview:共用 persist:webview partition,只能靠 URL 区分。
-  const url = guest.getURL();
-  if (url && detectAIServiceByUrl(url)) return false;
-
-  return true;
-}
+// shouldHandle 抽到 web-shared 共享(右键菜单 / 快捷键 / 弹窗导流 三处复用同一过滤)
+import { shouldHandle } from '../web-shared/should-handle';
 
 export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {

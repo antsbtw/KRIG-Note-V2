@@ -340,6 +340,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.WEB_CONTEXT_MENU_ACTION, handler);
   },
 
+  /** 订阅 main 推送 — web view 快捷键(webview 焦点下主进程 before-input-event 拦截后回推）*/
+  onWebViewShortcut(callback: (payload: { action: string }) => void): () => void {
+    const handler = (_event: unknown, payload: { action: string }): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.WEB_VIEW_SHORTCUT, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WEB_VIEW_SHORTCUT, handler);
+  },
+
+  /** 订阅 main 推送 — webview 内 target=_blank 弹窗导流(view 端在 web view 新建 tab 打开)*/
+  onWebNewTab(callback: (payload: { url: string }) => void): () => void {
+    const handler = (_event: unknown, payload: { url: string }): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.WEB_NEW_TAB, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WEB_NEW_TAB, handler);
+  },
+
   /** 订阅 main 推送 — 用户已选好且扫好的 markdown 文件批,view 端转 PM + 落 note */
   onMarkdownImportRun(callback: (data: unknown) => void): () => void {
     const handler = (_event: unknown, data: unknown): void => callback(data);

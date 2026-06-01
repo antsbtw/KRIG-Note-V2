@@ -82,7 +82,8 @@ export function registerFrameworkMenus(): void {
     order: 4,
     items: [
       { id: 'minimize', label: 'Minimize', command: 'window.minimize', accelerator: 'CmdOrCtrl+M' },
-      { id: 'close', label: 'Close Window', command: 'window.close', accelerator: 'CmdOrCtrl+W' },
+      // Phase 4 Commit 2:⌘W 让给 web view 关 tab(对齐 Chrome),关窗口改 ⇧⌘W。
+      { id: 'close', label: 'Close Window', command: 'window.close', accelerator: 'CmdOrCtrl+Shift+W' },
     ],
   });
 

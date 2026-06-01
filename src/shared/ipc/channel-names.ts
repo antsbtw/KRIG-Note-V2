@@ -42,6 +42,14 @@ export const IPC_CHANNELS = {
   // 由 learning capability 操作 dictionaryPanel(复制类在主进程 clipboard 直接做)
   WEB_CONTEXT_MENU_ACTION: 'web.context-menu-action', // main → renderer 推送
 
+  // Phase 4 Commit 2:web view 快捷键整层 — webview 焦点下宿主 onKeyDown 失效,
+  // 主进程 before-input-event 拦截这套 web 快捷键后 main → renderer 推回,由
+  // WebView.tsx 分发到现有 handler(new-tab/close-tab/focus-url/find/reload/zoom/back/forward)
+  WEB_VIEW_SHORTCUT: 'web.view-shortcut',           // main → renderer 推送
+  // Phase 4 Commit 2:弹窗导流 — guest setWindowOpenHandler 截获 target=_blank,
+  // main → renderer 推回让 web view 内新建 tab 打开(不再飞出独立 BrowserWindow)
+  WEB_NEW_TAB: 'web.new-tab',                        // main → renderer 推送
+
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',
   MEDIA_DOWNLOAD: 'media.download',

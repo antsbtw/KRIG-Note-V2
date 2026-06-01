@@ -247,9 +247,88 @@ export function WebView({ workspaceId }: WebViewProps) {
     [workspaceId],
   );
 
-  // ── P0:键盘快捷键 ──
-  // 已知坑:页面 focus 在 webview 子 frame 时,key 事件不冒泡到宿主 onKeyDown
-  // (见 context-menu-integration 注释)。先走宿主 onKeyDown 最简路径。
+  // ── Phase 4 Commit 2:web 快捷键分发(主进程 before-input-event 回推） ──
+  // 把 action 字符串映射到现有 handler。这些 action 与
+  // src/platform/main/web-shortcuts/handler.ts 的 matchShortcut 一一对应。
+  const dispatchShortcut = useCallback(
+    (action: string) => {
+      switch (action) {
+        case 'new-tab':
+          handleNewTab();
+          break;
+        case 'close-tab':
+          if (activeTabId) handleCloseTab(activeTabId);
+          break;
+        case 'focus-url':
+          focusUrlBar();
+          break;
+        case 'find':
+          openFind();
+          break;
+        case 'reload':
+          handleReload();
+          break;
+        case 'zoom-in':
+          handleZoomIn();
+          break;
+        case 'zoom-out':
+          handleZoomOut();
+          break;
+        case 'zoom-reset':
+          handleZoomReset();
+          break;
+        case 'go-back':
+          getActiveHost()?.goBack();
+          break;
+        case 'go-forward':
+          getActiveHost()?.goForward();
+          break;
+      }
+    },
+    [
+      handleNewTab,
+      handleCloseTab,
+      activeTabId,
+      focusUrlBar,
+      openFind,
+      handleReload,
+      handleZoomIn,
+      handleZoomOut,
+      handleZoomReset,
+      getActiveHost,
+    ],
+  );
+
+  // closure 新鲜度:IPC 订阅只在 mount 时建一次,回调里读 ref 拿最新 dispatch
+  // (别捕获 stale activeTabId/handlers）。每次 dispatchShortcut 变化刷新 ref。
+  const dispatchShortcutRef = useRef(dispatchShortcut);
+  useEffect(() => {
+    dispatchShortcutRef.current = dispatchShortcut;
+  }, [dispatchShortcut]);
+
+  // 订阅主进程快捷键回推 + 弹窗导流(只建一次,回调走 ref 拿最新值）
+  useEffect(() => {
+    const offShortcut = window.electronAPI.onWebViewShortcut(({ action }) => {
+      dispatchShortcutRef.current(action);
+    });
+    const offNewTab = window.electronAPI.onWebNewTab(({ url }) => {
+      // 发弹窗的就是活跃 web view 的 webview → getActiveId 必为该 ws。
+      const activeWsId = workspaceManager.getActiveId();
+      if (!activeWsId || !url) return;
+      addTab(activeWsId, url);
+    });
+    return () => {
+      offShortcut();
+      offNewTab();
+    };
+  }, []);
+
+  // ── P0:键盘快捷键(宿主焦点兜底） ──
+  // webview 焦点下 key 事件不冒泡到宿主 onKeyDown(webview 独立进程)→ 这套快捷键
+  // 主力走主进程 before-input-event(见上方 onWebViewShortcut 订阅）。
+  // 但**宿主焦点时**(刚切 tab、点了 toolbar/地址栏、还没点进网页)before-input-event
+  // 不触发 → 保留宿主 onKeyDown 做兜底。两路靠焦点位置互斥(焦点要么在 webview、
+  // 要么在宿主),不会同一次按键双触发,且都 dispatch 到同组幂等 handler。
   const handleKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       const mod = e.metaKey || e.ctrlKey;

@@ -263,6 +263,12 @@ declare global {
         callback: (payload: { action: 'lookup' | 'translate'; text: string }) => void,
       ): () => void;
 
+      // ── Phase 4 Commit 2:web view 快捷键整层 + 弹窗导流 ──
+      /** 订阅 main 推送的 web 快捷键(webview 焦点下 before-input-event 拦截后回推)*/
+      onWebViewShortcut(callback: (payload: { action: string }) => void): () => void;
+      /** 订阅 main 推送的弹窗导流(target=_blank → web view 内新建 tab)*/
+      onWebNewTab(callback: (payload: { url: string }) => void): () => void;
+
       // ── Markdown 文件 / 目录导入 ──
       /** 订阅 main 推送的已扫好的 markdown 批(File → Import Markdown...)*/
       onMarkdownImportRun(callback: (data: unknown) => void): () => void;
