@@ -1,0 +1,119 @@
+/**
+ * Web view 原生右键菜单 hook(Phase 2 根治)
+ *
+ * 背景 / 真因:
+ * - 渲染进程的 HTML 右键菜单(ContextMenuBinding,z-index:1000)一直在正确渲染,
+ *   但被 Electron `<webview>`(OS 级独立渲染 surface)视觉盖住 —— z-index 对 webview
+ *   无效。用户实际看到的是 Chromium 原生菜单,所以之前改 blur / 坐标都打错目标。
+ * - 解法:把菜单移到主进程,用 `Menu.popup()` 弹原生菜单 —— 原生菜单能盖在 webview
+ *   上、点外部自动关、坐标准(params.x/y 即原生坐标,无需 getBoundingClientRect 换算),
+ *   遮挡 + 坐标两个 bug 一并根治。
+ *
+ * 菜单项迁移(原 src/views/web/context-menu-integration.ts 的 5 项):
+ * - 复制链接 / 复制图片地址 / 复制选中文字 → 主进程 clipboard.writeText 直接做
+ * - 📖 查词 / 🌐 翻译 → IPC(WEB_CONTEXT_MENU_ACTION)推回渲染进程,由 learning
+ *   capability 操作 React dictionaryPanel(只能在渲染进程跑)
+ *
+ * partition 过滤(头号坑):
+ * - 三个 did-attach-webview 钩子(本 hook / ai/webview-hook / extraction/handlers)
+ *   都收到所有 guest webview(普通浏览 / AI / 翻译)。本 hook **只对普通浏览 webview
+ *   弹菜单**,绝不接管 AI / 翻译 webview(本轮用户只管普通浏览)。
+ * - 判定方式(见下方 shouldHandle):
+ *   1. 排除翻译 webview —— 翻译用独立 partition `persist:webview-translate`,
+ *      `session.fromPartition(p)` 对同一 partition 字符串返回同一 Session 实例,
+ *      故用实例身份比较 `guest.session === translateSession` 可靠识别并排除。
+ *   2. 排除 AI webview —— AI webview 与普通浏览**共用** `persist:webview` partition
+ *      (见 capabilities/ai-extraction/Host.tsx),partition 无法区分;改用 URL:
+ *      右键时 `detectAIServiceByUrl(guest.getURL())` 命中 AI 服务则跳过。
+ *
+ * 调用时机:platform/main/index.ts 在 createMainWindow 后调一次,
+ * 跟 registerWebviewExtractionHook / registerAIWebviewHook 平级。
+ */
+
+import {
+  Menu,
+  clipboard,
+  session,
+  type BrowserWindow,
+  type WebContents,
+  type ContextMenuParams,
+  type MenuItemConstructorOptions,
+} from 'electron';
+import { IPC_CHANNELS } from '@shared/ipc/channel-names';
+import { WEBVIEW_TRANSLATE_PARTITION } from '@shared/constants/webview';
+import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
+
+/**
+ * 判断该 guest 是否为「普通浏览 webview」(需接管右键菜单)。
+ *
+ * @returns true = 普通浏览,弹原生菜单;false = 翻译 / AI,放过(保持现状)。
+ */
+function shouldHandle(guest: WebContents): boolean {
+  // 1) 翻译 webview:独立 partition,实例身份比较排除。
+  const translateSession = session.fromPartition(WEBVIEW_TRANSLATE_PARTITION);
+  if (guest.session === translateSession) return false;
+
+  // 2) AI webview:共用 persist:webview partition,只能靠 URL 区分。
+  const url = guest.getURL();
+  if (url && detectAIServiceByUrl(url)) return false;
+
+  return true;
+}
+
+export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
+  mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.on('context-menu', (_e, params: ContextMenuParams) => {
+      // partition 过滤:只接管普通浏览 webview(非翻译、非 AI)。
+      if (!shouldHandle(guest)) return;
+
+      const template: MenuItemConstructorOptions[] = [];
+
+      if (params.linkURL) {
+        template.push({
+          label: '复制链接',
+          click: () => clipboard.writeText(params.linkURL),
+        });
+      }
+      if (params.srcURL) {
+        template.push({
+          label: '复制图片地址',
+          click: () => clipboard.writeText(params.srcURL),
+        });
+      }
+      if (params.selectionText) {
+        template.push({
+          label: '复制选中文字',
+          click: () => clipboard.writeText(params.selectionText),
+        });
+        template.push({ type: 'separator' });
+        template.push({
+          label: '📖 查词',
+          click: () =>
+            mainWindow.webContents.send(IPC_CHANNELS.WEB_CONTEXT_MENU_ACTION, {
+              action: 'lookup',
+              text: params.selectionText,
+            }),
+        });
+        template.push({
+          label: '🌐 翻译',
+          click: () =>
+            mainWindow.webContents.send(IPC_CHANNELS.WEB_CONTEXT_MENU_ACTION, {
+              action: 'translate',
+              text: params.selectionText,
+            }),
+        });
+      }
+
+      // 空白处右键(无 link/src/selection)→ template 为空,不弹。
+      // 注:监听 'context-menu' 并不会自动吞掉默认菜单 —— 默认菜单本就是渲染层自己出的,
+      // 而 webview guest 在独立渲染进程,主进程不弹 = 该位置无原生菜单(可接受)。
+      if (template.length === 0) return;
+
+      // 坐标:不传 x/y,Menu.popup 默认弹在当前鼠标光标位置 —— 这是最稳的定位
+      // (params.x/y 是 guest webview 自身 viewport 坐标,需叠加 webview 在窗口内偏移
+      //  才是 window 坐标;直接用光标位置免去换算且天然贴鼠标,根治坐标 bug)。
+      const menu = Menu.buildFromTemplate(template);
+      menu.popup({ window: mainWindow });
+    });
+  });
+}

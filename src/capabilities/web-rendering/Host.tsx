@@ -11,7 +11,11 @@
  * 历史(W4.2 C3 / 设计文档 § 4.1):
  * - 原 webview 编排在 src/views/web/WebView.tsx L107-L289
  * - 本组件复制粘贴该业务逻辑,通过 props 把 view-specific 的部分抽出来
- *   (setWebUrl / showWebContextMenu 等改成 callback 注入,host 不知道 view 的实现)
+ *   (setWebUrl 等改成 callback 注入,host 不知道 view 的实现)
+ *
+ * Phase 2:web view 右键菜单改由主进程原生菜单接管(Menu.popup),Host 不再监听
+ * webview 'context-menu' 事件、不再有 onContextMenu prop ——
+ * 见 src/platform/main/web-context-menu/handler.ts。
  */
 
 import {
@@ -27,7 +31,6 @@ import { SyncDriver, SYNC_ACTION, WEB_TRANSLATE_PROTOCOL } from '@drivers/web-sy
 import { slotBus } from './slot-bus';
 import type {
   HostHandle,
-  WebContextMenuPayload,
   WebviewElement,
   WebFoundInPageResult,
 } from './webview-types';
@@ -52,8 +55,6 @@ export interface HostProps {
   partition: string;
   /** webview 容器 className(view 通过 CSS 控制布局)*/
   className?: string;
-  /** 右键菜单事件 — view 自己处理 contextMenuController 显示 */
-  onContextMenu?: (payload: WebContextMenuPayload) => void;
   /** URL 持久化(view 写入 per-ws state)*/
   onUrlChanged?: (url: string) => void;
   /** loading 状态变化(view 决定是否显示 spinner / toolbar 状态)*/
@@ -73,7 +74,6 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     translateMode,
     partition,
     className,
-    onContextMenu,
     onUrlChanged,
     onLoadingChanged,
     onNavStateChanged,
@@ -105,10 +105,10 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
   const zoomFactorRef = useRef(1.0);
 
   // 用 ref 缓存 callback,避免 setupWebview 依赖变化导致 webview 反复 unbind
-  const callbacksRef = useRef({ onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage });
+  const callbacksRef = useRef({ onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage });
   useEffect(() => {
-    callbacksRef.current = { onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage };
-  }, [onContextMenu, onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage]);
+    callbacksRef.current = { onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage };
+  }, [onUrlChanged, onLoadingChanged, onNavStateChanged, onDisplayUrlChanged, onFoundInPage]);
 
   /**
    * webview ref bind tick — 每次 setupWebview 拿到新 el 就 bump
@@ -174,40 +174,9 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
       handleDidNavigate(e);
     };
 
-    // 右键菜单 — webview 内的 context-menu 事件
-    const handleContextMenu = (e: Event) => {
-      const ev = e as Event & {
-        params?: {
-          linkURL?: string;
-          srcURL?: string;
-          selectionText?: string;
-          x?: number;
-          y?: number;
-        };
-      };
-      const params = ev.params;
-      if (!params) return;
-      // params.x/y 是 webview 内坐标;转 viewport 坐标(加 webview 自身 left/top)
-      const rect = wv.getBoundingClientRect();
-      const computedX = rect.left + (params.x ?? 0);
-      const computedY = rect.top + (params.y ?? 0);
-      // [web/ctxmenu-diag] 反馈2 定位偏移实测 — 用户右键多个位置后把这些 log 贴回来,
-      // 据实测确认 params.x/y 坐标系(CSS px / device px / 含滚动?)再定最终换算。
-      // 实测定位后删除本 log(memory: feedback_diag_log_before_speculation)。
-      console.log('[web/ctxmenu-diag]', {
-        paramsXY: { x: params.x, y: params.y },
-        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        devicePixelRatio: window.devicePixelRatio,
-        computed: { x: computedX, y: computedY },
-      });
-      callbacksRef.current.onContextMenu?.({
-        linkURL: params.linkURL ?? '',
-        srcURL: params.srcURL ?? '',
-        selectionText: params.selectionText ?? '',
-        x: computedX,
-        y: computedY,
-      });
-    };
+    // 右键菜单:Phase 2 起改由主进程原生菜单接管(webContents.on('context-menu')
+    // + Menu.popup,见 src/platform/main/web-context-menu/handler.ts)。渲染进程不再
+    // 监听 webview 的 context-menu 事件 —— HTML 菜单被 webview OS 层遮挡,根治移走。
 
     // found-in-page 结果(P0)— 回调给 view 渲染计数
     const handleFoundInPage = (e: Event) => {
@@ -253,7 +222,6 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     wv.addEventListener('did-stop-loading', handleStopLoading);
     wv.addEventListener('did-navigate', handleDidNavigate);
     wv.addEventListener('did-navigate-in-page', handleDidNavigateInPage);
-    wv.addEventListener('context-menu', handleContextMenu);
     wv.addEventListener('dom-ready', handleDomReady);
     wv.addEventListener('did-finish-load', handleFinishLoad);
     wv.addEventListener('found-in-page', handleFoundInPage);

@@ -38,6 +38,10 @@ export const IPC_CHANNELS = {
   // L5-B4.2.2:重启 app(切翻译语言后让 widget 用新 lang 重 init)
   APP_RESTART: 'app.restart',
 
+  // Phase 2:web view 原生右键菜单 — 查词/翻译项点击后 main → renderer 推回,
+  // 由 learning capability 操作 dictionaryPanel(复制类在主进程 clipboard 直接做)
+  WEB_CONTEXT_MENU_ACTION: 'web.context-menu-action', // main → renderer 推送
+
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',
   MEDIA_DOWNLOAD: 'media.download',

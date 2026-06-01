@@ -257,6 +257,12 @@ declare global {
       /** 订阅 main 推送的拦截到的 atom JSON */
       onExtractionNoteCreate(callback: (data: unknown) => void): () => void;
 
+      // ── Phase 2:web view 原生右键菜单 ──
+      /** 订阅 main 推送的查词/翻译动作(view 端调 learning dictionaryPanel)*/
+      onWebContextMenuAction(
+        callback: (payload: { action: 'lookup' | 'translate'; text: string }) => void,
+      ): () => void;
+
       // ── Markdown 文件 / 目录导入 ──
       /** 订阅 main 推送的已扫好的 markdown 批(File → Import Markdown...)*/
       onMarkdownImportRun(callback: (data: unknown) => void): () => void;

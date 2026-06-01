@@ -328,6 +328,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.EXTRACTION_NOTE_CREATE, handler);
   },
 
+  /** 订阅 main 推送 — web view 原生右键菜单的查词/翻译项点击(view 端调 learning capability)*/
+  onWebContextMenuAction(
+    callback: (payload: { action: 'lookup' | 'translate'; text: string }) => void,
+  ): () => void {
+    const handler = (
+      _event: unknown,
+      payload: { action: 'lookup' | 'translate'; text: string },
+    ): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.WEB_CONTEXT_MENU_ACTION, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WEB_CONTEXT_MENU_ACTION, handler);
+  },
+
   /** 订阅 main 推送 — 用户已选好且扫好的 markdown 文件批,view 端转 PM + 落 note */
   onMarkdownImportRun(callback: (data: unknown) => void): () => void {
     const handler = (_event: unknown, data: unknown): void => callback(data);

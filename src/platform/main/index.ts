@@ -31,6 +31,7 @@ import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
+import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -138,6 +139,8 @@ app.whenReady().then(async () => {
   // ai-extraction:webview attach hook(AI Host webview did-navigate 到 AI URL 时
   // 注册到 ai-webview-registry,askAI / pasteAndSend 走前台 webContents 而非后台)
   registerAIWebviewHook(mainWindow);
+  // web view 原生右键菜单(Phase 2 根治 HTML 菜单被 webview OS 层遮挡)— 只接管普通浏览 webview
+  registerWebContextMenuHook(mainWindow);
 });
 
 // macOS:窗口全关后,点 dock 重新打开

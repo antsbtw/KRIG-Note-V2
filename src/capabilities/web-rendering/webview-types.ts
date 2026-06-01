@@ -53,7 +53,14 @@ export interface WebFoundInPageResult {
   matches: number;
 }
 
-/** webview 'context-menu' 事件 params(见 capability Host 的 onContextMenu prop)*/
+/**
+ * webview 'context-menu' 事件 params 的渲染进程形态。
+ *
+ * 注:Phase 2 起 web view 右键菜单改由主进程原生菜单接管(见
+ * src/platform/main/web-context-menu/handler.ts),Host 不再有 onContextMenu prop,
+ * 此类型当前无运行时使用方;保留是因 capability index.ts / types.ts 仍对外 re-export,
+ * 删除会动到清单外的公共类型面。后续清理 capability 公共面时一并移除。
+ */
 export interface WebContextMenuPayload {
   linkURL: string;
   srcURL: string;

@@ -28,7 +28,6 @@ import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/ty
 import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
 import { getWebWsState, setWebUrl, setWebTargetLang } from './data-model';
 import { recordVisit } from './web-history';
-import { showWebContextMenu } from './context-menu-integration';
 import { WebToolbar } from './WebToolbar';
 import { WebFindBar } from './WebFindBar';
 import { getLangLabel } from './translate-view/lang-defaults';
@@ -352,7 +351,6 @@ export function WebView({ workspaceId }: WebViewProps) {
         translateMode={isTranslateMode}
         partition={WEBVIEW_PARTITION}
         className="krig-web-view__webview"
-        onContextMenu={showWebContextMenu}
         onUrlChanged={handleUrlChanged}
         onLoadingChanged={setLoading}
         onNavStateChanged={handleNavStateChanged}
