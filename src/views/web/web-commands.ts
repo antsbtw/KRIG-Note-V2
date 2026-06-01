@@ -15,9 +15,11 @@ import { setWebUrl } from './data-model';
 
 export function registerWebCommands(): void {
   /**
-   * 在当前活跃 workspace 的右栏打开指定 URL。
+   * 在当前活跃 workspace 的 web view **活跃 tab** 打开指定 URL。
    *
-   * 等价于:setWebUrl(wsId, url) + slotBinding.right = 'web-view'。
+   * 等价于:setWebUrl(wsId, url)(写活跃 tab 的 url)+ slotBinding.right = 'web-view'。
+   * Phase 4:web view 多 tab 后,open-url 语义为"在活跃 tab 打开"(setWebUrl 内部
+   * 已路由到 activeTabId)。note→web 跳转等调用方语义不变。
    *
    * 跨 ws 跳转留 ActiveResourceManager 抽象到位后处理。
    */
@@ -27,7 +29,7 @@ export function registerWebCommands(): void {
     if (!wsId) return;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
-    // 1. 写 web view 的 currentUrl(per-ws 持久化)
+    // 1. 写 web view 活跃 tab 的 url(per-ws 持久化)
     setWebUrl(wsId, urlArg);
     // 2. 切右栏到 web view(已是则 update no-op)
     if (ws.slotBinding.right !== 'web-view') {

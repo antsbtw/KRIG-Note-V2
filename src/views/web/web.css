@@ -21,11 +21,20 @@
   font-size: 14px;
 }
 
+/* Phase 4:多 tab Host 容器 —— 撑满剩余空间,内部 webview 用 inline style display 切换 */
+.krig-web-view__hosts {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+
 .krig-web-view__webview {
   flex: 1;
   width: 100%;
   border: none;
-  /* electron <webview> 标签默认 inline 元素,需要 block 撑满容器 */
+  /* electron <webview> 标签默认 inline 元素,需要 block 撑满容器。
+     Phase 4:活跃/非活跃由 inline style display(inline-flex / none)覆盖。 */
   display: inline-flex;
 }
 
@@ -75,6 +84,86 @@
   cursor: pointer;
   padding: 2px 6px;
   flex-shrink: 0;
+}
+
+/* ── Phase 4:web view 内部 tab 栏(≥2 tab 才显,在工具栏上方)── */
+.krig-web-tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 8px 0;
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.krig-web-tabbar__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 90px;
+  max-width: 200px;
+  padding: 6px 8px 6px 12px;
+  background: #262626;
+  color: #aaa;
+  border-radius: 8px 8px 0 0;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.krig-web-tabbar__tab:hover {
+  background: #303030;
+}
+
+.krig-web-tabbar__tab--active {
+  background: #383838;
+  color: #fff;
+}
+
+.krig-web-tabbar__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.krig-web-tabbar__close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.krig-web-tabbar__close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.krig-web-tabbar__new {
+  background: transparent;
+  border: none;
+  color: #aaa;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 10px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.krig-web-tabbar__new:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .krig-web-view__restart-dismiss:hover {

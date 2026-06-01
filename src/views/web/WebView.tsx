@@ -1,14 +1,22 @@
 /**
- * WebView — 视图主组件(L5-B4 / W4.2 C4 重构)
+ * WebView — 视图主组件(L5-B4 / W4.2 C4 重构 / Phase 4 多 tab)
  *
  * View 归属(charter § 1.4):仅做"组合 + 状态订阅 + 命令注册"。webview tag 生命周期、
  * SyncDriver lifecycle、URL 同步、context-menu 转发等 webview 编排全部封装在
  * `web-rendering` capability 的 <Host /> 组件内,view 通过 props/callbacks/ref 协作。
  *
+ * Phase 4(Commit 1):web view 加内部 tab。
+ * - 每 tab 一个常驻 <Host key={tab.id}>,display:none 切换(切 tab 不丢页面状态)。
+ * - hostRef 改 Map<tabId, HostHandle>,toolbar 命令路由到活跃 tab。
+ * - transient state(loading/url 等)只跟活跃 tab(回调带 tabId 区分,坑6)。
+ * - ⌘T 新建 tab / ⌘W 关闭当前 tab。
+ * - translateMode(Commit 1 简化):仅 tabs.length===1 时按原逻辑;多 tab 暂不开翻译,
+ *   翻译×tab 单活跃留 Commit 2。
+ *
  * View 仍持有的部分:
- * - per-ws state 订阅(currentUrl / targetLang)+ slotBinding 订阅(translateMode)
- * - WebToolbar UI + 命令路由(命令式 ref 调 host)
- * - 切语言 banner(只是 transient UI 状态,跟翻译能力关系不大)
+ * - per-ws state 订阅(tabs / activeTabId / targetLang)+ slotBinding 订阅(translateMode)
+ * - WebToolbar UI + 命令路由(命令式 ref 调活跃 tab 的 host)
+ * - 切语言 banner(只是 transient UI 状态)
  * - ws 切换时重置 banner
  */
 
@@ -22,13 +30,21 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { WEBVIEW_PARTITION } from '@shared/constants/webview';
+import { WEBVIEW_PARTITION, WEBVIEW_DEFAULT_URL } from '@shared/constants/webview';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
 import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
-import { getWebWsState, setWebUrl, setWebTargetLang } from './data-model';
+import {
+  getWebWsState,
+  setTabUrl,
+  setWebTargetLang,
+  addTab,
+  closeTab,
+  setActiveTab,
+} from './data-model';
 import { recordVisit } from './web-history';
 import { WebToolbar } from './WebToolbar';
+import { WebTabBar } from './WebTabBar';
 import { WebFindBar } from './WebFindBar';
 import { getLangLabel } from './translate-view/lang-defaults';
 import './web.css';
@@ -43,7 +59,8 @@ export function WebView({ workspaceId }: WebViewProps) {
     () => requireCapabilityApi<WebRenderingApi>('web-rendering').Host,
     [],
   );
-  const hostRef = useRef<HostHandle | null>(null);
+  /** 每 tab 一个 HostHandle —— 命令路由到活跃 tab 的那个 */
+  const hostMapRef = useRef<Map<string, HostHandle>>(new Map());
   /** 地址栏 input(⌘L focus)*/
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   /** 容器(键盘快捷键挂这里 + focus 兜底)*/
@@ -67,18 +84,23 @@ export function WebView({ workspaceId }: WebViewProps) {
     },
   );
 
-  // Toolbar 用的 transient state(由 Host callback 推送)
+  const tabs = wsState?.tabs ?? [];
+  const activeTabId = wsState?.activeTabId ?? '';
+
+  /** 活跃 tab 的 host handle */
+  const getActiveHost = useCallback(
+    () => hostMapRef.current.get(activeTabId) ?? null,
+    [activeTabId],
+  );
+
+  // Toolbar 用的 transient state(由活跃 tab 的 Host callback 推送)
   const [loading, setLoading] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
-  const [displayUrl, setDisplayUrl] = useState(wsState?.currentUrl ?? 'about:blank');
+  const [displayUrl, setDisplayUrl] = useState('about:blank');
 
   /**
    * L5-B4.2.2:切语言后到重启 app 前的 banner 标志(transient,不持久化)
-   *
-   * mount 时锁定的 lang(给 TranslateDriver 用)和 wsState.targetLang(用户选的)不一致时,
-   * 表示用户切了语言但还没重启 — 显示 banner。重启后 mount lang = wsState lang,banner 不显。
-   * 切 ws 也会重置(useState 跟 workspaceId 走)
    */
   const [pendingRestartLang, setPendingRestartLang] = useState<string | null>(null);
 
@@ -93,45 +115,65 @@ export function WebView({ workspaceId }: WebViewProps) {
   // ── P0:缩放指示(非 100% 时显示,transient 不持久化)──
   const [zoomPercent, setZoomPercent] = useState(100);
 
-  // ── Host callback handlers ──
+  // ── Host callback handlers(坑6:transient 只跟活跃 tab,回调带 tabId 区分)──
   const handleNavStateChanged = useCallback(
-    (state: { canGoBack: boolean; canGoForward: boolean }) => {
+    (tabId: string, state: { canGoBack: boolean; canGoForward: boolean }) => {
+      if (tabId !== activeTabId) return;
       setCanGoBack(state.canGoBack);
       setCanGoForward(state.canGoForward);
     },
-    [],
+    [activeTabId],
   );
   const handleUrlChanged = useCallback(
-    (url: string) => {
-      setWebUrl(workspaceId, url);
+    (tabId: string, url: string) => {
+      // url 持久化对每个 tab 都要做(非活跃 tab 后台导航也要存)
+      setTabUrl(workspaceId, tabId, url);
       // 轻量全局历史(地址栏补全用,非 per-ws)
       recordVisit(url, '');
     },
     [workspaceId],
   );
+  const handleLoadingChanged = useCallback(
+    (tabId: string, isLoading: boolean) => {
+      if (tabId !== activeTabId) return;
+      setLoading(isLoading);
+    },
+    [activeTabId],
+  );
+  const handleDisplayUrlChanged = useCallback(
+    (tabId: string, url: string) => {
+      if (tabId !== activeTabId) return;
+      setDisplayUrl(url);
+    },
+    [activeTabId],
+  );
+  const handleFoundInPage = useCallback(
+    (tabId: string, result: WebFoundInPageResult) => {
+      if (tabId !== activeTabId) return;
+      setFindResult(result);
+    },
+    [activeTabId],
+  );
 
-  // ── toolbar 命令(走 host imperative API)──
-  const handleNavigate = useCallback((url: string) => {
-    hostRef.current?.loadURL(url);
-  }, []);
-  const handleGoBack = useCallback(() => hostRef.current?.goBack(), []);
-  const handleGoForward = useCallback(() => hostRef.current?.goForward(), []);
+  // ── toolbar 命令(走活跃 tab 的 host imperative API)──
+  const handleNavigate = useCallback(
+    (url: string) => {
+      getActiveHost()?.loadURL(url);
+    },
+    [getActiveHost],
+  );
+  const handleGoBack = useCallback(() => getActiveHost()?.goBack(), [getActiveHost]);
+  const handleGoForward = useCallback(() => getActiveHost()?.goForward(), [getActiveHost]);
   const handleReload = useCallback(() => {
-    const host = hostRef.current;
+    const host = getActiveHost();
     if (!host) return;
     if (host.isLoading()) host.stop();
     else host.reload();
-  }, []);
-
-  // ── P0:页内查找回调 ──
-  const handleFoundInPage = useCallback((result: WebFoundInPageResult) => {
-    setFindResult(result);
-  }, []);
+  }, [getActiveHost]);
 
   /** 打开查找栏(⌘F)*/
   const openFind = useCallback(() => {
     setFindOpen(true);
-    // 已有查询词 → 立即重查(打开时 FindBar 会 focus+select)
     setFindResult({ activeMatchOrdinal: 0, matches: 0 });
   }, []);
 
@@ -139,43 +181,46 @@ export function WebView({ workspaceId }: WebViewProps) {
   const closeFind = useCallback(() => {
     setFindOpen(false);
     setFindResult({ activeMatchOrdinal: 0, matches: 0 });
-    hostRef.current?.stopFindInPage('clearSelection');
-  }, []);
+    getActiveHost()?.stopFindInPage('clearSelection');
+  }, [getActiveHost]);
 
   /** 查找词变化 → 新查找(findNext: false) */
-  const handleFindQueryChange = useCallback((q: string) => {
-    setFindQuery(q);
-    if (!q.trim()) {
-      hostRef.current?.stopFindInPage('clearSelection');
-      setFindResult({ activeMatchOrdinal: 0, matches: 0 });
-      return;
-    }
-    hostRef.current?.findInPage(q, { forward: true, findNext: false });
-  }, []);
+  const handleFindQueryChange = useCallback(
+    (q: string) => {
+      setFindQuery(q);
+      if (!q.trim()) {
+        getActiveHost()?.stopFindInPage('clearSelection');
+        setFindResult({ activeMatchOrdinal: 0, matches: 0 });
+        return;
+      }
+      getActiveHost()?.findInPage(q, { forward: true, findNext: false });
+    },
+    [getActiveHost],
+  );
 
   /** 下一个 / 上一个(findNext: true) */
   const handleFindNext = useCallback(
     (forward: boolean) => {
       const q = findQuery.trim();
       if (!q) return;
-      hostRef.current?.findInPage(q, { forward, findNext: true });
+      getActiveHost()?.findInPage(q, { forward, findNext: true });
     },
-    [findQuery],
+    [findQuery, getActiveHost],
   );
 
   // ── P0:缩放回调 ──
   const handleZoomIn = useCallback(() => {
-    const f = hostRef.current?.zoomIn() ?? 1;
+    const f = getActiveHost()?.zoomIn() ?? 1;
     setZoomPercent(Math.round(f * 100));
-  }, []);
+  }, [getActiveHost]);
   const handleZoomOut = useCallback(() => {
-    const f = hostRef.current?.zoomOut() ?? 1;
+    const f = getActiveHost()?.zoomOut() ?? 1;
     setZoomPercent(Math.round(f * 100));
-  }, []);
+  }, [getActiveHost]);
   const handleZoomReset = useCallback(() => {
-    hostRef.current?.zoomReset();
+    getActiveHost()?.zoomReset();
     setZoomPercent(100);
-  }, []);
+  }, [getActiveHost]);
 
   /** ⌘L:focus + 全选地址栏 */
   const focusUrlBar = useCallback(() => {
@@ -185,30 +230,54 @@ export function WebView({ workspaceId }: WebViewProps) {
     el.select();
   }, []);
 
+  // ── tab 操作 ──
+  const handleNewTab = useCallback(() => {
+    addTab(workspaceId, WEBVIEW_DEFAULT_URL);
+  }, [workspaceId]);
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      closeTab(workspaceId, tabId);
+    },
+    [workspaceId],
+  );
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      setActiveTab(workspaceId, tabId);
+    },
+    [workspaceId],
+  );
+
   // ── P0:键盘快捷键 ──
   // 已知坑:页面 focus 在 webview 子 frame 时,key 事件不冒泡到宿主 onKeyDown
-  // (见 context-menu-integration 注释)。先走宿主 onKeyDown 最简路径;若实测
-  // webview 内不触发,后续可上主进程 before-input-event。文档登记在汇报里。
+  // (见 context-menu-integration 注释)。先走宿主 onKeyDown 最简路径。
   const handleKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       const mod = e.metaKey || e.ctrlKey;
-      // 后退/前进:⌘[ ⌘]  或  Alt+← Alt+→
-      if (mod && e.key === '[') {
+      // 新建 tab:⌘T
+      if (mod && e.key === 't') {
         e.preventDefault();
-        hostRef.current?.goBack();
+        handleNewTab();
+      } else if (mod && e.key === 'w') {
+        // 关闭当前 tab:⌘W(关到剩 1 → closeTab 回 DEFAULT_URL 单 tab,不关 view)
+        e.preventDefault();
+        if (activeTabId) handleCloseTab(activeTabId);
+      } else if (mod && e.key === '[') {
+        // 后退/前进:⌘[ ⌘]  或  Alt+← Alt+→
+        e.preventDefault();
+        getActiveHost()?.goBack();
       } else if (mod && e.key === ']') {
         e.preventDefault();
-        hostRef.current?.goForward();
+        getActiveHost()?.goForward();
       } else if (e.altKey && e.key === 'ArrowLeft') {
         e.preventDefault();
-        hostRef.current?.goBack();
+        getActiveHost()?.goBack();
       } else if (e.altKey && e.key === 'ArrowRight') {
         e.preventDefault();
-        hostRef.current?.goForward();
+        getActiveHost()?.goForward();
       } else if ((mod && e.key === 'r') || e.key === 'F5') {
         // 刷新:⌘R / F5
         e.preventDefault();
-        hostRef.current?.reload();
+        getActiveHost()?.reload();
       } else if (mod && e.key === 'l') {
         // focus 地址栏:⌘L
         e.preventDefault();
@@ -231,7 +300,17 @@ export function WebView({ workspaceId }: WebViewProps) {
         handleZoomReset();
       }
     },
-    [focusUrlBar, openFind, handleZoomIn, handleZoomOut, handleZoomReset],
+    [
+      focusUrlBar,
+      openFind,
+      handleZoomIn,
+      handleZoomOut,
+      handleZoomReset,
+      handleNewTab,
+      handleCloseTab,
+      getActiveHost,
+      activeTabId,
+    ],
   );
 
   // toggle 双栏翻译模式
@@ -275,9 +354,37 @@ export function WebView({ workspaceId }: WebViewProps) {
     setZoomPercent(100);
   }, [workspaceId]);
 
+  // 切活跃 tab → 重置随活跃 tab 走的 transient(loading/导航能力/地址栏/查找/缩放)。
+  // 这些值由新活跃 tab 的 Host dom-ready / 事件重新推送(坑6),先清避免显示旧 tab 的残值。
+  useEffect(() => {
+    setLoading(false);
+    setCanGoBack(false);
+    setCanGoForward(false);
+    setFindOpen(false);
+    setFindQuery('');
+    setFindResult({ activeMatchOrdinal: 0, matches: 0 });
+    setZoomPercent(100);
+    // 地址栏先显示该 tab 持久化的 url(Host dom-ready 后会用真实 getURL 覆盖)
+    const cur = tabs.find((t) => t.id === activeTabId);
+    if (cur) setDisplayUrl(cur.url);
+  }, [activeTabId]);
+
+  /** ref 回调工厂:把每个 tab 的 HostHandle 收进 Map(unmount 时清掉)*/
+  const makeHostRef = useCallback(
+    (tabId: string) => (handle: HostHandle | null) => {
+      if (handle) hostMapRef.current.set(tabId, handle);
+      else hostMapRef.current.delete(tabId);
+    },
+    [],
+  );
+
   if (!wsState) {
     return <div className="krig-web-view__empty">Workspace 未就绪</div>;
   }
+
+  // Commit 1 简化:翻译只在单 tab 时按原逻辑;多 tab 暂不开翻译(留 Commit 2 单活跃约束)。
+  const singleTab = tabs.length === 1;
+  const translateActiveForToolbar = isTranslateMode && singleTab;
 
   return (
     <div
@@ -286,12 +393,21 @@ export function WebView({ workspaceId }: WebViewProps) {
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
+      {tabs.length >= 2 && (
+        <WebTabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelect={handleSelectTab}
+          onClose={handleCloseTab}
+          onNewTab={handleNewTab}
+        />
+      )}
       <WebToolbar
         url={displayUrl}
         loading={loading}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
-        translateActive={isTranslateMode}
+        translateActive={translateActiveForToolbar}
         currentTargetLang={wsState.targetLang}
         onNavigate={handleNavigate}
         onGoBack={handleGoBack}
@@ -344,19 +460,28 @@ export function WebView({ workspaceId }: WebViewProps) {
           </button>
         </div>
       )}
-      <Host
-        ref={hostRef}
-        workspaceId={workspaceId}
-        currentUrl={wsState.currentUrl}
-        translateMode={isTranslateMode}
-        partition={WEBVIEW_PARTITION}
-        className="krig-web-view__webview"
-        onUrlChanged={handleUrlChanged}
-        onLoadingChanged={setLoading}
-        onNavStateChanged={handleNavStateChanged}
-        onDisplayUrlChanged={setDisplayUrl}
-        onFoundInPage={handleFoundInPage}
-      />
+      {/* 每 tab 一个常驻 Host,display 切换(key=tab.id 保证各自独立 mount,
+          initialUrlRef 不变量自动 per-tab 成立 —— 坑2)*/}
+      <div className="krig-web-view__hosts">
+        {tabs.map((tab) => (
+          <Host
+            key={tab.id}
+            ref={makeHostRef(tab.id)}
+            workspaceId={workspaceId}
+            currentUrl={tab.url}
+            // Commit 1:仅单 tab 时跟翻译模式;多 tab 全 false(留 Commit 2)
+            translateMode={singleTab ? isTranslateMode : false}
+            partition={WEBVIEW_PARTITION}
+            className="krig-web-view__webview"
+            style={{ display: tab.id === activeTabId ? 'inline-flex' : 'none' }}
+            onUrlChanged={(url) => handleUrlChanged(tab.id, url)}
+            onLoadingChanged={(l) => handleLoadingChanged(tab.id, l)}
+            onNavStateChanged={(s) => handleNavStateChanged(tab.id, s)}
+            onDisplayUrlChanged={(url) => handleDisplayUrlChanged(tab.id, url)}
+            onFoundInPage={(r) => handleFoundInPage(tab.id, r)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

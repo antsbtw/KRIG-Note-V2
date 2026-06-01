@@ -55,6 +55,8 @@ export interface HostProps {
   partition: string;
   /** webview 容器 className(view 通过 CSS 控制布局)*/
   className?: string;
+  /** webview tag inline style(Phase 4:多 tab display:none 切换用)*/
+  style?: React.CSSProperties;
   /** URL 持久化(view 写入 per-ws state)*/
   onUrlChanged?: (url: string) => void;
   /** loading 状态变化(view 决定是否显示 spinner / toolbar 状态)*/
@@ -74,6 +76,7 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     translateMode,
     partition,
     className,
+    style,
     onUrlChanged,
     onLoadingChanged,
     onNavStateChanged,
@@ -384,6 +387,7 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     partition,
     allowpopups: 'true',
     className,
+    style,
   };
   const Tag = 'webview' as unknown as React.ComponentType<typeof tagProps>;
   return <Tag {...tagProps} />;
