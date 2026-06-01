@@ -9,10 +9,12 @@
  *   上、点外部自动关、坐标准(params.x/y 即原生坐标,无需 getBoundingClientRect 换算),
  *   遮挡 + 坐标两个 bug 一并根治。
  *
- * 菜单项迁移(原 src/views/web/context-menu-integration.ts 的 5 项):
+ * 菜单项:
  * - 复制链接 / 复制图片地址 / 复制选中文字 → 主进程 clipboard.writeText 直接做
  * - 📖 查词 / 🌐 翻译 → IPC(WEB_CONTEXT_MENU_ACTION)推回渲染进程,由 learning
  *   capability 操作 React dictionaryPanel(只能在渲染进程跑)
+ * - 后退 / 前进 / 刷新 / 复制页面地址 → 导航项,主进程直接调 guest webContents
+ *   (navigationHistory / reload / getURL),恒在,对齐 Chrome 空白处也有菜单
  *
  * partition 过滤(头号坑):
  * - 三个 did-attach-webview 钩子(本 hook / ai/webview-hook / extraction/handlers)
@@ -104,9 +106,32 @@ export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
         });
       }
 
-      // 空白处右键(无 link/src/selection)→ template 为空,不弹。
-      // 注:监听 'context-menu' 并不会自动吞掉默认菜单 —— 默认菜单本就是渲染层自己出的,
-      // 而 webview guest 在独立渲染进程,主进程不弹 = 该位置无原生菜单(可接受)。
+      // 导航项(后退/前进/刷新/复制页面地址)—— 对齐 Chrome,空白处右键也有可用项。
+      // 主进程直接持有 guest webContents,导航动作直接调,无需绕回渲染进程。
+      // Electron 40 的 canGoBack/goBack 已迁到 guest.navigationHistory。
+      if (template.length > 0) template.push({ type: 'separator' });
+      const nav = guest.navigationHistory;
+      template.push({
+        label: '后退',
+        enabled: nav.canGoBack(),
+        click: () => nav.goBack(),
+      });
+      template.push({
+        label: '前进',
+        enabled: nav.canGoForward(),
+        click: () => nav.goForward(),
+      });
+      template.push({
+        label: '刷新',
+        click: () => guest.reload(),
+      });
+      template.push({ type: 'separator' });
+      template.push({
+        label: '复制页面地址',
+        click: () => clipboard.writeText(guest.getURL()),
+      });
+
+      // 导航项恒在,template 不会为空 —— 空白处右键也有菜单(对齐 Chrome)。
       if (template.length === 0) return;
 
       // 坐标:不传 x/y,Menu.popup 默认弹在当前鼠标光标位置 —— 这是最稳的定位
