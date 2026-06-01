@@ -646,12 +646,25 @@
 .krig-web-nav__section-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 8px 12px;
   position: sticky;
   top: 0;
   background: #1f1f1f;
   z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.krig-web-nav__section-header:hover {
+  background: #262626;
+}
+
+.krig-web-nav__caret {
+  font-size: 10px;
+  color: #777;
+  width: 12px;
+  flex-shrink: 0;
 }
 
 .krig-web-nav__section-title {
@@ -659,6 +672,7 @@
   font-weight: 600;
   color: #9aa0a6;
   letter-spacing: 0.3px;
+  flex: 1;
 }
 
 .krig-web-nav__clear-btn {

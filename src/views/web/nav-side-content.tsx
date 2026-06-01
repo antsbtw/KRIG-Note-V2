@@ -8,12 +8,15 @@
  * 本批只实装「历史」段(列表 + 点击右栏打开 + hover× 删除 + 清空);
  * 书签 / 下载段先占位(批3 / 批2 实装)。
  *
+ * 三段用**垂直折叠区(toggle)**:每段标题点击展开/收起(▸/▾),竖排。
+ * (用户决策:不用横排 tab — 否则跟 note view 风格不一致。)
+ *
  * 注册机制:navSideRegistry.register({ view: 'web-view', ... });切到 web view 时
  * NavSide 自动显示(WorkspaceInstance 按活跃 viewId 取),基础设施零改动。
  * 范本:src/views/note/nav-side-content.tsx:166。
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import {
@@ -53,6 +56,41 @@ function displayTitle(entry: WebHistoryEntry): string {
   }
 }
 
+/**
+ * 可折叠区(toggle)— 三段共用外壳。点 header 展开/收起。
+ * headerExtra:展开时 header 右侧的额外控件(如历史段的「清空」按钮)。
+ */
+function CollapsibleSection({
+  icon,
+  title,
+  defaultOpen = false,
+  headerExtra,
+  children,
+}: {
+  icon: string;
+  title: string;
+  defaultOpen?: boolean;
+  headerExtra?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={`krig-web-nav__section${open ? ' krig-web-nav__section--open' : ''}`}>
+      <header
+        className="krig-web-nav__section-header"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="krig-web-nav__caret">{open ? '▾' : '▸'}</span>
+        <span className="krig-web-nav__section-title">
+          {icon} {title}
+        </span>
+        {open && headerExtra}
+      </header>
+      {open && children}
+    </section>
+  );
+}
+
 /** 历史段:全量列表 + 点击右栏打开 + hover× 删除 + 清空历史。 */
 function HistorySection() {
   // localStorage 非响应式 — mount 取一次,删除/清空后手动 setState 刷新。
@@ -73,21 +111,23 @@ function HistorySection() {
     setEntries([]);
   };
 
+  const clearBtn =
+    entries.length > 0 ? (
+      <button
+        type="button"
+        className="krig-web-nav__clear-btn"
+        onClick={(e) => {
+          e.stopPropagation(); // 不触发 header 折叠
+          clearAll();
+        }}
+        title="清空全部历史"
+      >
+        清空
+      </button>
+    ) : undefined;
+
   return (
-    <section className="krig-web-nav__section">
-      <header className="krig-web-nav__section-header">
-        <span className="krig-web-nav__section-title">🕘 历史</span>
-        {entries.length > 0 && (
-          <button
-            type="button"
-            className="krig-web-nav__clear-btn"
-            onClick={clearAll}
-            title="清空全部历史"
-          >
-            清空
-          </button>
-        )}
-      </header>
+    <CollapsibleSection icon="🕘" title="历史" defaultOpen headerExtra={clearBtn}>
       {entries.length === 0 ? (
         <div className="krig-web-nav__empty">暂无历史记录</div>
       ) : (
@@ -119,25 +159,20 @@ function HistorySection() {
           ))}
         </ul>
       )}
-    </section>
+    </CollapsibleSection>
   );
 }
 
-/** 占位段(书签 / 下载,批3 / 批2 实装)。 */
+/** 占位段(书签 / 下载,批3 / 批2 实装)。默认折叠。 */
 function PlaceholderSection({ icon, title, hint }: { icon: string; title: string; hint: string }) {
   return (
-    <section className="krig-web-nav__section">
-      <header className="krig-web-nav__section-header">
-        <span className="krig-web-nav__section-title">
-          {icon} {title}
-        </span>
-      </header>
+    <CollapsibleSection icon={icon} title={title}>
       <div className="krig-web-nav__empty krig-web-nav__placeholder">{hint}</div>
-    </section>
+    </CollapsibleSection>
   );
 }
 
-/** Web NavSide 三段式面板:书签 / 历史 / 下载。本批只实装历史段。 */
+/** Web NavSide 三段式折叠面板:书签 / 历史 / 下载。本批只实装历史段。 */
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
