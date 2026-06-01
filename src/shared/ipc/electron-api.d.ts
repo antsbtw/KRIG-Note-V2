@@ -31,6 +31,7 @@ import type {
   AISyncAppendTurnPayload,
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
+import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type {
   ProgressStartPayload,
   ProgressUpdatePayload,
@@ -91,10 +92,12 @@ declare global {
       onYtdlpInstallProgress(
         callback: (progress: { percent: number; installed: boolean; version?: string; error?: string }) => void,
       ): () => void;
-      /** 下载视频(走 spawn yt-dlp,自动抓 YouTube 字幕保存为 .en.srt)*/
+      /** 下载视频(走 spawn yt-dlp,自动抓 YouTube 字幕保存为 .en.srt)
+       *  partition 可选 — 指定取 cookies 的 webview session(per-ws);兜底旧 persist:webview */
       ytdlpDownload(
         url: string,
         outputPath?: string,
+        partition?: string,
       ): Promise<{
         url: string;
         status: 'downloading' | 'complete' | 'error';
@@ -127,8 +130,9 @@ declare global {
         transcriptText: string | null;
         error: string | null;
       }>;
-      /** L5-B3.19.e UX:检 webview partition 是否有 YouTube 登录 cookies */
-      ytdlpCheckYoutubeCookies(): Promise<{
+      /** L5-B3.19.e UX:检 webview partition 是否有 YouTube 登录 cookies
+       *  partition 可选 — per-ws session;兜底旧 persist:webview */
+      ytdlpCheckYoutubeCookies(partition?: string): Promise<{
         hasLogin: boolean;
         count: number;
         error?: string;
@@ -308,10 +312,16 @@ declare global {
       /** web view 下载操作(取消)*/
       webDownloadAction(payload: { id: number; action: 'cancel' }): Promise<void>;
       /**
-       * per-ws 代理阶段1:给某 ws 的 partition session 设代理出口(临时验证用,阶段2 复用)。
-       * rules 空 / 'direct://' → 直连;否则 proxyRules(如 'socks5://host:port')。
+       * per-ws 代理阶段2:给某 ws 的 partition session 设代理出口。renderer 只传 proxyId,
+       * 主进程查全局节点表解析 rules 后 setProxy。proxyId 空/undefined → 直连。
        */
-      setWebProxy(args: { workspaceId: string; rules: string }): Promise<void>;
+      setWebProxy(args: { workspaceId: string; proxyId?: string }): Promise<void>;
+      /** per-ws 代理阶段2:全量代理节点(按 createdAt 升序)*/
+      listProxyNodes(): Promise<ProxyNode[]>;
+      /** per-ws 代理阶段2:加代理节点(主进程生成 id + createdAt,返回新 node)*/
+      addProxyNode(args: { name: string; type: ProxyNodeType; host: string }): Promise<ProxyNode>;
+      /** per-ws 代理阶段2:删代理节点(by id)*/
+      removeProxyNode(id: string): Promise<void>;
       /** 取下载历史全量(终态记录,按 completedAt 倒序)*/
       webDownloadList(): Promise<WebDownloadHistoryEntry[]>;
       /** 删一条下载历史记录(仅删 JSON 记录,不删磁盘文件,对齐 Chrome)*/

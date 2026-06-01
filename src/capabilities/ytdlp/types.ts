@@ -59,8 +59,9 @@ export interface YtdlpApi {
   /** 订阅 install 进度 — 返回取消订阅函数 */
   onInstallProgress(callback: (progress: YtdlpInstallProgress) => void): () => void;
   /** 下载视频(自动抓 YouTube 字幕保存为 .en.srt)
-   *  outputPath 可选,默认 ~/Downloads/<title>.<ext> */
-  download(url: string, outputPath?: string): Promise<YtdlpDownloadProgress>;
+   *  outputPath 可选,默认 ~/Downloads/<title>.<ext>
+   *  partition 可选(per-ws 代理阶段2)— 取 cookies 的 webview session;兜底旧 persist:webview */
+  download(url: string, outputPath?: string, partition?: string): Promise<YtdlpDownloadProgress>;
   /** 订阅 download 进度 — 返回取消订阅函数 */
   onDownloadProgress(callback: (progress: YtdlpDownloadProgress) => void): () => void;
   /** 获取视频元数据(--dump-json,不下载;失败返回 null)*/
@@ -70,6 +71,7 @@ export interface YtdlpApi {
   saveSubtitle(videoFilePath: string, langCode: string, timestampText: string): Promise<string | null>;
   /** L5-B3.19.b:不下载视频抓 YouTube 字幕(供 video-block 📝 import 按钮)*/
   fetchTranscript(url: string): Promise<FetchTranscriptResult>;
-  /** L5-B3.19.e:检 webview YouTube 登录 cookies(供 download-button 提示用户登录)*/
-  checkYoutubeCookies(): Promise<YoutubeCookiesStatus>;
+  /** L5-B3.19.e:检 webview YouTube 登录 cookies(供 download-button 提示用户登录)
+   *  partition 可选(per-ws 代理阶段2);兜底旧 persist:webview */
+  checkYoutubeCookies(partition?: string): Promise<YoutubeCookiesStatus>;
 }

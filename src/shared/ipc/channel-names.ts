@@ -61,8 +61,12 @@ export const IPC_CHANNELS = {
   WEB_DOWNLOAD_HISTORY_CHANGED: 'web.download-history-changed', // main → renderer 推送(历史变更广播)
 
   // per-ws 代理:给某 ws 的 partition(persist:webview-${wsId})session 设代理出口。
-  // 阶段1 临时验证用(DevTools console 调),阶段2 代理 UI/节点管理复用此 channel。
-  WEB_SET_PROXY: 'web.set-proxy',                    // renderer → main invoke({ workspaceId, rules })
+  // 阶段2 升级:入参改 { workspaceId, proxyId };主进程查节点表 resolveRules 后 setProxy。
+  WEB_SET_PROXY: 'web.set-proxy',                    // renderer → main invoke({ workspaceId, proxyId })
+  // per-ws 代理阶段2:全局代理节点表 CRUD(阶段3 UI 复用;阶段2 console 塞测试节点)。
+  WEB_PROXY_LIST: 'web.proxy-list',                  // renderer → main invoke → ProxyNode[]
+  WEB_PROXY_ADD: 'web.proxy-add',                    // renderer → main invoke({ name, type, host }) → ProxyNode
+  WEB_PROXY_REMOVE: 'web.proxy-remove',              // renderer → main invoke({ id })
 
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',

@@ -239,6 +239,10 @@ export const tweetBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         // 2. 已装 → 真下载
         dlBtn.textContent = '⏳';
         dlBtn.disabled = true;
+        // per-ws 代理阶段2:NodeView 工厂签名 (initialNode, view, getPos) 无 ws 上下文,
+        // driver 层未把 workspaceId 透传到 node view。partition 不传 → downloader 兜底
+        // 旧 'persist:webview'(行为同阶段1,不破坏现有下载)。ytdlp per-ws cookies 的
+        // 完整接入待 driver 层能拿到 ws 上下文(留阶段3 / 单独小改)。
         const result = await ytdlpDownload(tweetUrl);
         if (view.isDestroyed) return;
         if (result.status === 'complete' && result.filename) {

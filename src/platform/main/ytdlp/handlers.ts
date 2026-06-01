@@ -38,11 +38,14 @@ export function registerYtdlpHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.YTDLP_DOWNLOAD,
-    async (event, url: unknown, outputPath: unknown) => {
+    async (event, url: unknown, outputPath: unknown, partition: unknown) => {
       if (typeof url !== 'string' || !url) {
         return { url: '', status: 'error', percent: 0, error: 'invalid url' };
       }
       const out = typeof outputPath === 'string' ? outputPath : undefined;
+      // per-ws 代理阶段2:partition 可选,透传给 downloadVideo 取对应 webview session
+      // 的 cookies;拿不到则 undefined,downloader 内兜底旧 persist:webview。
+      const part = typeof partition === 'string' && partition ? partition : undefined;
       const sender = event.sender;
       return downloadVideo(
         url,
@@ -52,6 +55,7 @@ export function registerYtdlpHandlers(): void {
           }
         },
         out,
+        part,
       );
     },
   );
@@ -110,9 +114,10 @@ export function registerYtdlpHandlers(): void {
   // - __Secure-1PSID / __Secure-3PSID(secure session)
   // - LOGIN_INFO(YouTube login marker)
   // 任一存在就视为已登录。
-  ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, async () => {
+  ipcMain.handle(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, async (_event, partition: unknown) => {
     try {
-      const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
+      const part = typeof partition === 'string' && partition ? partition : WEBVIEW_PARTITION;
+      const webviewSession = session.fromPartition(part);
       const yt = await webviewSession.cookies.get({ domain: '.youtube.com' });
       const google = await webviewSession.cookies.get({ domain: '.google.com' });
       const all = [...yt, ...google];

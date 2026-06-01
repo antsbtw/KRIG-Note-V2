@@ -33,6 +33,8 @@ export interface WebWorkspaceState {
   activeTabId: string;
   /** 翻译目标语言(per-ws 持久化;mount 时读,运行时变化要重启 app 才生效)*/
   targetLang: string;
+  /** 选中的全局代理节点 id;空/undefined = 直连(default) */
+  proxyId?: string;
 }
 
 /**
@@ -46,6 +48,7 @@ interface PersistedWebWsState {
   /** 旧 schema 字段,迁移用 */
   currentUrl?: string;
   targetLang?: string;
+  proxyId?: string;
 }
 
 const DEFAULT_URL = WEBVIEW_DEFAULT_URL;
@@ -108,6 +111,10 @@ function sourceSignature(p: Partial<PersistedWebWsState> | undefined): string {
     activeTabId: typeof s.activeTabId === 'string' ? s.activeTabId : null,
     currentUrl: typeof s.currentUrl === 'string' ? s.currentUrl : null,
     targetLang: typeof s.targetLang === 'string' ? s.targetLang : null,
+    // ⚠️ 必须纳入:proxyId 变化要触发重渲(setProxy 接入靠 WebView useEffect 依赖
+    // proxyId 变化)。不加则改 proxyId 不刷新引用 → 不重设代理。proxyId 是纯持久化
+    // 字符串(无随机生成),进签名安全。
+    proxyId: typeof s.proxyId === 'string' ? s.proxyId : null,
   });
 }
 
@@ -119,6 +126,9 @@ export function hydrateWebState(persisted: Partial<PersistedWebWsState> | undefi
   const p = persisted ?? {};
   const targetLang =
     typeof p.targetLang === 'string' && p.targetLang ? p.targetLang : getDefaultTargetLang();
+  // proxyId 是纯持久化字符串 — 空就 undefined,绝不 genXxx() 随机生成(随机 id 是
+  // useSyncExternalStore 死循环根因)。三个 return 分支保持字段存在性一致。
+  const proxyId = typeof p.proxyId === 'string' && p.proxyId ? p.proxyId : undefined;
 
   // 1. 新 schema:有合法 tabs → 用之
   if (Array.isArray(p.tabs) && p.tabs.length > 0) {
@@ -133,19 +143,19 @@ export function hydrateWebState(persisted: Partial<PersistedWebWsState> | undefi
         typeof p.activeTabId === 'string' && tabs.some((t) => t.id === p.activeTabId)
           ? p.activeTabId
           : tabs[0].id;
-      return { tabs, activeTabId, targetLang };
+      return { tabs, activeTabId, targetLang, proxyId };
     }
   }
 
   // 2. 旧 schema:有 currentUrl → 合成单 tab
   if (typeof p.currentUrl === 'string' && p.currentUrl) {
     const id = genTabId();
-    return { tabs: [{ id, url: p.currentUrl }], activeTabId: id, targetLang };
+    return { tabs: [{ id, url: p.currentUrl }], activeTabId: id, targetLang, proxyId };
   }
 
   // 3. 空 → DEFAULT_URL 单 tab
   const id = genTabId();
-  return { tabs: [{ id, url: DEFAULT_URL }], activeTabId: id, targetLang };
+  return { tabs: [{ id, url: DEFAULT_URL }], activeTabId: id, targetLang, proxyId };
 }
 
 /**
@@ -183,6 +193,7 @@ function persist(workspaceId: string, state: WebWorkspaceState): void {
       tabs: state.tabs,
       activeTabId: state.activeTabId,
       targetLang: state.targetLang,
+      proxyId: state.proxyId,
     } satisfies PersistedWebWsState,
   };
   workspaceManager.update(workspaceId, { pluginStates: nextPlugin });
@@ -266,4 +277,21 @@ export function setWebTargetLang(workspaceId: string, lang: string): void {
   const cur = getWebWsState(ws);
   if (cur.targetLang === lang) return;
   persist(workspaceId, { ...cur, targetLang: lang });
+}
+
+/**
+ * 写选中的代理节点 id 到 pluginStates(per-ws 代理工程 · 阶段2)。
+ *
+ * proxyId 传 undefined / '' 表示直连(归一成 undefined 存)。WebView 的 setProxy
+ * 接入 useEffect 依赖 wsState.proxyId 变化触发重设代理出口。
+ *
+ * ⚠️ proxyId 是纯持久化字符串(无随机生成),没变时早返回保证 getWebWsState 返回同引用。
+ */
+export function setWebProxyId(workspaceId: string, proxyId: string | undefined): void {
+  const ws = workspaceManager.get(workspaceId);
+  if (!ws) return;
+  const cur = getWebWsState(ws);
+  const next = proxyId || undefined; // '' → undefined(直连)
+  if (cur.proxyId === next) return;
+  persist(workspaceId, { ...cur, proxyId: next });
 }

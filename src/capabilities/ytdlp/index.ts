@@ -85,11 +85,12 @@ export function onInstallProgress(
 export async function download(
   url: string,
   outputPath?: string,
+  partition?: string,
 ): Promise<YtdlpDownloadProgress> {
   if (!window.electronAPI?.ytdlpDownload) {
     return { url, status: 'error', percent: 0, error: 'electronAPI.ytdlpDownload not available' };
   }
-  return window.electronAPI.ytdlpDownload(url, outputPath);
+  return window.electronAPI.ytdlpDownload(url, outputPath, partition);
 }
 
 /**
@@ -146,11 +147,11 @@ export async function fetchTranscript(url: string): Promise<FetchTranscriptResul
  * - hasLogin: true  → 直接 download(yt-dlp 用 webview 导出的 cookies 过反爬)
  * - hasLogin: false → 显 modal 提示用户先在 web view 登录 YouTube
  */
-export async function checkYoutubeCookies(): Promise<YoutubeCookiesStatus> {
+export async function checkYoutubeCookies(partition?: string): Promise<YoutubeCookiesStatus> {
   if (!window.electronAPI?.ytdlpCheckYoutubeCookies) {
     return { hasLogin: false, count: 0, error: 'electronAPI.ytdlpCheckYoutubeCookies not available' };
   }
-  return window.electronAPI.ytdlpCheckYoutubeCookies() as Promise<YoutubeCookiesStatus>;
+  return window.electronAPI.ytdlpCheckYoutubeCookies(partition) as Promise<YoutubeCookiesStatus>;
 }
 
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)

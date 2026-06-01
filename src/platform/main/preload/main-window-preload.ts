@@ -132,8 +132,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.YTDLP_INSTALL_PROGRESS, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.YTDLP_INSTALL_PROGRESS, handler);
   },
-  ytdlpDownload(url: string, outputPath?: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_DOWNLOAD, url, outputPath);
+  ytdlpDownload(url: string, outputPath?: string, partition?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_DOWNLOAD, url, outputPath, partition);
   },
   onYtdlpDownloadProgress(callback: (progress: unknown) => void): () => void {
     const handler = (_event: unknown, progress: unknown): void => callback(progress);
@@ -154,9 +154,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ytdlpFetchTranscript(url: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_FETCH_TRANSCRIPT, url);
   },
-  // L5-B3.19.e UX:检 webview YouTube 登录 cookies
-  ytdlpCheckYoutubeCookies(): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES);
+  // L5-B3.19.e UX:检 webview YouTube 登录 cookies(partition 可选,兜底旧 persist:webview)
+  ytdlpCheckYoutubeCookies(partition?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.YTDLP_CHECK_YOUTUBE_COOKIES, partition);
   },
 
   // ── L5-B3.18:tweet-fetcher 临时 capability ──
@@ -413,11 +413,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /**
-   * per-ws 代理阶段1:给某 ws 的 partition(persist:webview-${workspaceId})session 设代理。
-   * 临时验证用(DevTools console 调),阶段2 代理 UI 复用。rules 空 / 'direct://' → 直连。
+   * per-ws 代理阶段2:给某 ws 的 partition session 设代理。renderer 只传 proxyId,
+   * 主进程查全局节点表解析 rules 后 setProxy。proxyId 空/undefined → 直连。
    */
-  async setWebProxy(args: { workspaceId: string; rules: string }): Promise<void> {
+  async setWebProxy(args: { workspaceId: string; proxyId?: string }): Promise<void> {
     await ipcRenderer.invoke(IPC_CHANNELS.WEB_SET_PROXY, args);
+  },
+
+  // ── per-ws 代理阶段2:全局代理节点表 CRUD(阶段3 UI 复用)──
+  /** 全量代理节点(按 createdAt 升序)*/
+  listProxyNodes(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_PROXY_LIST);
+  },
+  /** 加代理节点 — 主进程生成 id + createdAt,返回新 node */
+  addProxyNode(args: { name: string; type: 'socks5' | 'http' | 'direct'; host: string }): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_PROXY_ADD, args);
+  },
+  /** 删代理节点(by id)*/
+  removeProxyNode(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_PROXY_REMOVE, { id });
   },
 
   /** 取下载历史全量(终态记录)— renderer → main invoke */

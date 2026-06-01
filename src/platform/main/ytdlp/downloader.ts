@@ -20,18 +20,22 @@ import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname, basename, extname } from 'path';
 
+/** 兜底默认 partition(向后兼容:拿不到 per-ws 上下文时用旧全局 partition)*/
 const WEBVIEW_PARTITION = 'persist:webview';
 
 /**
  * 把 Electron webview partition 的 cookies 导出为 Netscape cookies.txt 格式。
  * yt-dlp 用 --cookies <file> 加载;cookies 来自我们自己的 webview session
- * (用户在 web view 里登录 YouTube,cookies 持久化到 persist:webview partition)。
+ * (用户在 web view 里登录 YouTube,cookies 持久化到对应 partition)。
+ *
+ * partition 可选(per-ws 代理阶段2):指定取哪个 webview session 的 cookies;
+ * 空则兜底用旧全局 'persist:webview'(向后兼容,行为同阶段1)。
  *
  * 失败时返 null,yt-dlp 不传 --cookies,降级走无 cookies 路径。
  */
-async function exportWebviewCookiesForYoutube(): Promise<string | null> {
+async function exportWebviewCookiesForYoutube(partition?: string): Promise<string | null> {
   try {
-    const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
+    const webviewSession = session.fromPartition(partition || WEBVIEW_PARTITION);
     // 取所有 youtube.com / google.com 域 cookies(YouTube 登录态依赖 google.com session)
     const cookies = [
       ...(await webviewSession.cookies.get({ domain: '.youtube.com' })),
@@ -156,6 +160,7 @@ export async function downloadVideo(
   url: string,
   onProgress?: (progress: DownloadProgress) => void,
   outputPath?: string,
+  partition?: string,
 ): Promise<DownloadProgress> {
   const binPath = getYtdlpPath();
   if (!binPath) {
@@ -165,7 +170,7 @@ export async function downloadVideo(
   const outputTemplate = outputPath || join(app.getPath('downloads'), '%(title)s.%(ext)s');
 
   // 导出 cookies(在 Promise 之前完成,Promise executor 非 async)
-  const cookiesFile = await exportWebviewCookiesForYoutube();
+  const cookiesFile = await exportWebviewCookiesForYoutube(partition);
 
   return new Promise((resolve) => {
     let lastPercent = 0;

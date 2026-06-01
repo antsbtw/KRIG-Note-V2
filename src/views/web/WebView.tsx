@@ -311,6 +311,16 @@ export function WebView({ workspaceId }: WebViewProps) {
     console.log('[per-ws] ws=', workspaceId, 'partition=persist:webview-' + workspaceId);
   }, [workspaceId]);
 
+  // [per-ws 代理阶段2] setProxy 正式接入:ws 切换或 proxyId 变化都重设代理出口。
+  // 主进程查全局节点表 resolveRules(proxyId)→ session.setProxy。proxyId undefined → 直连。
+  //
+  // 时序隐患(留观察,阶段2 不做 gate):setProxy 是 async,首次 mount 可能晚于 webview
+  // 首个请求(漏代理首包)。阶段2 验证靠"手动设代理后刷新",可接受;若实测有"设了代理
+  // 但首个页面仍走直连",阶段3 再加 Host 渲染前 await setProxy 的 gate(先观察实测再加复杂度)。
+  useEffect(() => {
+    void window.electronAPI.setWebProxy({ workspaceId, proxyId: wsState?.proxyId });
+  }, [workspaceId, wsState?.proxyId]);
+
   // 订阅主进程快捷键回推 + 弹窗导流(只建一次,回调走 ref 拿最新值）
   useEffect(() => {
     const offShortcut = window.electronAPI.onWebViewShortcut(({ action }) => {
