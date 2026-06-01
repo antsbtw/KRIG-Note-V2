@@ -354,6 +354,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.WEB_NEW_TAB, handler);
   },
 
+  /** 订阅 main 推送 — web view 下载事件(started/progress/done),下载条 UI 用 */
+  onWebDownloadEvent(
+    callback: (payload: {
+      type: 'started' | 'progress' | 'done';
+      id: number;
+      filename: string;
+      received?: number;
+      total?: number;
+      state?: string;
+      savePath?: string;
+    }) => void,
+  ): () => void {
+    const handler = (
+      _event: unknown,
+      payload: {
+        type: 'started' | 'progress' | 'done';
+        id: number;
+        filename: string;
+        received?: number;
+        total?: number;
+        state?: string;
+        savePath?: string;
+      },
+    ): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.WEB_DOWNLOAD_EVENT, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WEB_DOWNLOAD_EVENT, handler);
+  },
+
+  /** web view 下载操作(取消)— renderer → main invoke */
+  async webDownloadAction(payload: { id: number; action: 'cancel' }): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_ACTION, payload);
+  },
+
   /** 订阅 main 推送 — 用户已选好且扫好的 markdown 文件批,view 端转 PM + 落 note */
   onMarkdownImportRun(callback: (data: unknown) => void): () => void {
     const handler = (_event: unknown, data: unknown): void => callback(data);

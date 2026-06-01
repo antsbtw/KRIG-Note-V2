@@ -269,6 +269,22 @@ declare global {
       /** 订阅 main 推送的弹窗导流(target=_blank → web view 内新建 tab)*/
       onWebNewTab(callback: (payload: { url: string }) => void): () => void;
 
+      // ── Phase 3:web view 下载管理 ──
+      /** 订阅 main 推送的下载事件(started/progress/done),下载条 UI 用 */
+      onWebDownloadEvent(
+        callback: (payload: {
+          type: 'started' | 'progress' | 'done';
+          id: number;
+          filename: string;
+          received?: number;
+          total?: number;
+          state?: string;
+          savePath?: string;
+        }) => void,
+      ): () => void;
+      /** web view 下载操作(取消)*/
+      webDownloadAction(payload: { id: number; action: 'cancel' }): Promise<void>;
+
       // ── Markdown 文件 / 目录导入 ──
       /** 订阅 main 推送的已扫好的 markdown 批(File → Import Markdown...)*/
       onMarkdownImportRun(callback: (data: unknown) => void): () => void;

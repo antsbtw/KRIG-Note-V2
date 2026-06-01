@@ -33,6 +33,7 @@ import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
 import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
+import { registerWebDownloadHook } from './web-download/handler';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -146,6 +147,10 @@ app.whenReady().then(async () => {
   // 失效,主进程 before-input-event 拦截快捷键 + setWindowOpenHandler 导流弹窗进新 tab。
   // 只接管普通浏览 webview(shouldHandle 排除 AI / 翻译)。
   registerWebShortcutsHook(mainWindow);
+  // web view 下载管理(Phase 3)— will-download 挂 persist:webview session **一次**
+  // (绝不 per-guest:共享 session per-guest 会 N 倍触发),shouldHandle 排除 AI/翻译,
+  // 不 setSavePath(Electron 自动弹系统保存框),进度/完成回推下载条 UI。
+  registerWebDownloadHook(mainWindow);
 });
 
 // macOS:窗口全关后,点 dock 重新打开

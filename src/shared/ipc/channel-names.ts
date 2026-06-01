@@ -50,6 +50,12 @@ export const IPC_CHANNELS = {
   // main → renderer 推回让 web view 内新建 tab 打开(不再飞出独立 BrowserWindow)
   WEB_NEW_TAB: 'web.new-tab',                        // main → renderer 推送
 
+  // Phase 3:web view 下载管理 — will-download 挂 persist:webview session 一次,
+  // shouldHandle 排除 AI/翻译,不 setSavePath(Electron 自动弹保存框)。
+  // 进度/完成 main → renderer 推送(下载条 UI);取消走 invoke。
+  WEB_DOWNLOAD_EVENT: 'web.download-event',          // main → renderer 推送(started/progress/done)
+  WEB_DOWNLOAD_ACTION: 'web.download-action',        // renderer → main invoke(cancel)
+
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',
   MEDIA_DOWNLOAD: 'media.download',
