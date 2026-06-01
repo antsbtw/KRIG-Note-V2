@@ -56,6 +56,8 @@ export function registerWebBookmarkCommands(): void {
     const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
     const created = await folder.createFolder('新建文件夹', null, 'web');
     if (created) {
+      // 自动展开书签段,让用户看到新建结果(用户反馈)
+      pendingSectionOpenTrigger?.();
       // 创建后进重命名态(走 setFolderCreatedTrigger 桥)
       pendingFolderCreatedTrigger?.(created.id);
     }
@@ -67,6 +69,7 @@ export function registerWebBookmarkCommands(): void {
     const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
     const created = await folder.createFolder('新建文件夹', parentId, 'web');
     if (created) {
+      pendingSectionOpenTrigger?.();
       // 自动展开父(由 view 端 trigger 接管 — 见 nav-side-content)
       pendingFolderExpandTrigger?.(parentId);
       pendingFolderCreatedTrigger?.(created.id);
@@ -90,6 +93,8 @@ export function registerWebBookmarkCommands(): void {
     const bookmark = requireCapabilityApi<BookmarkApi>('bookmark');
     const created = await bookmark.add(url, titleForUrl(url), folderId);
     if (created) {
+      // 自动展开书签段,让用户看到新增结果(用户反馈)
+      pendingSectionOpenTrigger?.();
       pendingNoticeTrigger?.('已加入书签');
     }
   });
@@ -139,9 +144,15 @@ let pendingRenameTrigger: ((treeId: string) => void) | null = null;
 let pendingFolderCreatedTrigger: ((folderId: string) => void) | null = null;
 let pendingFolderExpandTrigger: ((folderId: string) => void) | null = null;
 let pendingNoticeTrigger: ((message: string) => void) | null = null;
+let pendingSectionOpenTrigger: (() => void) | null = null;
 
 export function setRenameTrigger(cb: ((treeId: string) => void) | null): void {
   pendingRenameTrigger = cb;
+}
+
+/** 展开书签折叠段(加书签/建文件夹后调,让用户看到结果)。 */
+export function setSectionOpenTrigger(cb: (() => void) | null): void {
+  pendingSectionOpenTrigger = cb;
 }
 
 export function setFolderCreatedTrigger(cb: ((folderId: string) => void) | null): void {

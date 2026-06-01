@@ -43,6 +43,7 @@ import {
   setFolderCreatedTrigger,
   setFolderExpandTrigger,
   setNoticeTrigger,
+  setSectionOpenTrigger,
 } from './web-bookmark-commands';
 
 /**
@@ -109,6 +110,7 @@ function CollapsibleSection({
   title,
   defaultOpen = false,
   headerExtra,
+  openSignal,
   children,
 }: {
   storeKey: string;
@@ -116,6 +118,8 @@ function CollapsibleSection({
   title: string;
   defaultOpen?: boolean;
   headerExtra?: ReactNode;
+  /** 外部信号:值变化(>0)时强制展开本段(如加书签/建文件夹后让用户看到结果)。 */
+  openSignal?: number;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(() => readCollapsed(storeKey, defaultOpen));
@@ -126,6 +130,14 @@ function CollapsibleSection({
       return next;
     });
   };
+
+  // openSignal 变化(>0)→ 强制展开 + 持久化
+  useEffect(() => {
+    if (openSignal && openSignal > 0) {
+      setOpen(true);
+      writeCollapsed(storeKey, true);
+    }
+  }, [openSignal, storeKey]);
   return (
     <section className={`krig-web-nav__section${open ? ' krig-web-nav__section--open' : ''}`}>
       <header
@@ -248,6 +260,8 @@ function BookmarkSection() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  // 加书签/建文件夹后 bump → CollapsibleSection 强制展开(让用户看到结果)
+  const [openSignal, setOpenSignal] = useState(0);
 
   const refresh = useCallback(() => {
     void bookmarkApi.list().then(setBookmarks).catch(() => {});
@@ -290,11 +304,13 @@ function BookmarkSection() {
       });
     });
     setNoticeTrigger((message) => setNotice(message));
+    setSectionOpenTrigger(() => setOpenSignal((n) => n + 1));
     return () => {
       setRenameTrigger(null);
       setFolderCreatedTrigger(null);
       setFolderExpandTrigger(null);
       setNoticeTrigger(null);
+      setSectionOpenTrigger(null);
     };
   }, [bookmarks, folders]);
 
@@ -410,7 +426,7 @@ function BookmarkSection() {
   // 跟 note/ebook 的「笔记目录 +笔记 +文件夹」对称,不放折叠段 header。
 
   return (
-    <CollapsibleSection storeKey="bookmark" icon="📌" title="书签">
+    <CollapsibleSection storeKey="bookmark" icon="📌" title="书签" openSignal={openSignal}>
       <div className="krig-web-nav__tree">
         <FolderTree
           nodes={nodes}
