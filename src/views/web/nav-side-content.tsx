@@ -100,7 +100,8 @@ function writeCollapsed(storeKey: string, open: boolean): void {
 /**
  * 可折叠区(toggle)— 三段共用外壳。点 header 展开/收起。
  * storeKey:localStorage 持久化展开状态(记住上次)。defaultOpen 仅首次无记录时用。
- * headerExtra:展开时 header 右侧的额外控件(如历史段的「清空」按钮)。
+ * headerExtra:展开时 header 右侧的额外控件(如历史段「清空」按钮)。
+ *   注:书签的「+书签/+文件夹」不在这,而在 NavSide 面板顶 actions(跟 note/ebook 对称)。
  */
 function CollapsibleSection({
   storeKey,
@@ -405,36 +406,11 @@ function BookmarkSection() {
     }
   };
 
-  // ── headerExtra:「+ 文件夹」「+ 书签」按钮(展开时显示;stopPropagation 不触发折叠)──
-  const headerExtra = (
-    <span className="krig-web-nav__bm-actions">
-      <button
-        type="button"
-        className="krig-web-nav__clear-btn"
-        title="新建文件夹"
-        onClick={(e) => {
-          e.stopPropagation();
-          commandRegistry.execute('web-view.bm-create-folder');
-        }}
-      >
-        + 文件夹
-      </button>
-      <button
-        type="button"
-        className="krig-web-nav__clear-btn"
-        title="把当前页加入书签"
-        onClick={(e) => {
-          e.stopPropagation();
-          commandRegistry.execute('web-view.bm-add');
-        }}
-      >
-        + 书签
-      </button>
-    </span>
-  );
+  // 注:「+ 书签」「+ 文件夹」按钮在 NavSide 面板顶 actions(registerNavSide),
+  // 跟 note/ebook 的「笔记目录 +笔记 +文件夹」对称,不放折叠段 header。
 
   return (
-    <CollapsibleSection storeKey="bookmark" icon="📌" title="书签" headerExtra={headerExtra}>
+    <CollapsibleSection storeKey="bookmark" icon="📌" title="书签">
       <div className="krig-web-nav__tree">
         <FolderTree
           nodes={nodes}
@@ -514,6 +490,11 @@ export function registerNavSide(): void {
   navSideRegistry.register({
     view: 'web-view',
     title: 'Web',
+    // 面板顶 actions(跟 note「+笔记 +文件夹」/ ebook「+文件夹 +导入」对称)。
+    actions: [
+      { id: 'bm-add', label: '+ 书签', command: 'web-view.bm-add' },
+      { id: 'bm-create-folder', label: '+ 文件夹', command: 'web-view.bm-create-folder' },
+    ],
     contentRenderer: () => <WebNavPanel />,
   });
 }
