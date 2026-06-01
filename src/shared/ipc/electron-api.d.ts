@@ -39,6 +39,17 @@ import type {
 } from './backup-types';
 
 declare global {
+  /** Web 下载历史条目(主进程 download-store 落盘的终态记录)*/
+  interface WebDownloadHistoryEntry {
+    id: string;
+    filename: string;
+    url: string;
+    savePath: string;
+    total: number;
+    completedAt: number;
+    state: 'completed' | 'cancelled' | 'interrupted';
+  }
+
   interface Window {
     electronAPI: {
       reportAlive(payload: DiagnosticsReportPayload): void;
@@ -287,6 +298,7 @@ declare global {
           type: 'started' | 'progress' | 'done';
           id: number;
           filename: string;
+          url?: string;
           received?: number;
           total?: number;
           state?: string;
@@ -295,6 +307,14 @@ declare global {
       ): () => void;
       /** web view 下载操作(取消)*/
       webDownloadAction(payload: { id: number; action: 'cancel' }): Promise<void>;
+      /** 取下载历史全量(终态记录,按 completedAt 倒序)*/
+      webDownloadList(): Promise<WebDownloadHistoryEntry[]>;
+      /** 删一条下载历史记录(仅删 JSON 记录,不删磁盘文件,对齐 Chrome)*/
+      webDownloadRemove(id: string): Promise<void>;
+      /** 订阅 main 推送的下载历史变更(落盘/删记录后刷新),NavSide 下载段用 */
+      onWebDownloadHistoryChanged(
+        callback: (entries: WebDownloadHistoryEntry[]) => void,
+      ): () => void;
 
       // ── Markdown 文件 / 目录导入 ──
       /** 订阅 main 推送的已扫好的 markdown 批(File → Import Markdown...)*/

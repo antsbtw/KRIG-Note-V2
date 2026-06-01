@@ -472,32 +472,233 @@ function BookmarkSection() {
   );
 }
 
-/** 占位段(下载,批2 实装)。默认折叠。 */
-function PlaceholderSection({
-  storeKey,
-  icon,
-  title,
-  hint,
-}: {
-  storeKey: string;
-  icon: string;
-  title: string;
-  hint: string;
-}) {
+/** 字节数人类可读(下载段用)。 */
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
+}
+
+/** 进行中下载(renderer 内存态,从主进程 onWebDownloadEvent 维护)。 */
+interface ActiveDownload {
+  id: number;
+  filename: string;
+  received: number;
+  total: number;
+}
+
+/** 下载文件名兜底:历史条 filename 为空时用 url 末段。 */
+function downloadDisplayName(entry: WebDownloadHistoryEntry): string {
+  if (entry.filename) return entry.filename;
+  try {
+    const u = new URL(entry.url);
+    const seg = u.pathname.split('/').filter(Boolean).pop();
+    return seg || u.hostname;
+  } catch {
+    return entry.url || '(未知文件)';
+  }
+}
+
+/**
+ * 下载段:同时显**进行中**(进度条 + 取消)+ **已完成历史**(在 Finder 显示 / 删记录 / 清空)。
+ * 像 Chrome 下载页。
+ *
+ * - 进行中:订阅 onWebDownloadEvent(started/progress/done,内存态)。
+ * - 历史:mount 调 webDownloadList() + 订阅 onWebDownloadHistoryChanged 刷新。
+ * - 去重:done 落盘后主进程广播 history-changed,本段从进行中内存移除该 id
+ *   (done 事件本身也立即移除进行中,broadcast 只负责把它落到历史列表)。
+ */
+function DownloadSection() {
+  const [active, setActive] = useState<ActiveDownload[]>([]);
+  const [history, setHistory] = useState<WebDownloadHistoryEntry[]>([]);
+
+  // 历史:mount 取一次 + 订阅广播刷新。
+  useEffect(() => {
+    let alive = true;
+    void window.electronAPI
+      .webDownloadList()
+      .then((list) => {
+        if (alive) setHistory(list);
+      })
+      .catch(() => {});
+    const off = window.electronAPI.onWebDownloadHistoryChanged((entries) => {
+      setHistory(entries);
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  // 进行中:订阅下载事件。done → 从进行中移除(落到历史由 history-changed 广播刷新)。
+  useEffect(() => {
+    const off = window.electronAPI.onWebDownloadEvent((payload) => {
+      if (payload.type === 'started') {
+        setActive((prev) => {
+          const without = prev.filter((d) => d.id !== payload.id);
+          return [
+            ...without,
+            {
+              id: payload.id,
+              filename: payload.filename,
+              received: 0,
+              total: payload.total ?? 0,
+            },
+          ];
+        });
+      } else if (payload.type === 'progress') {
+        setActive((prev) =>
+          prev.map((d) =>
+            d.id === payload.id
+              ? {
+                  ...d,
+                  received: payload.received ?? d.received,
+                  total: payload.total ?? d.total,
+                }
+              : d,
+          ),
+        );
+      } else {
+        // done(completed/cancelled/interrupted):从进行中移除(去重),终态进历史。
+        setActive((prev) => prev.filter((d) => d.id !== payload.id));
+      }
+    });
+    return off;
+  }, []);
+
+  const cancel = (id: number) => {
+    void window.electronAPI.webDownloadAction({ id, action: 'cancel' });
+  };
+
+  const removeHistory = (id: string) => {
+    void window.electronAPI.webDownloadRemove(id);
+    // 乐观更新(broadcast 也会刷,双保险)
+    setHistory((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  const clearAll = () => {
+    // 逐条删(无批量 channel)。broadcast 刷新历史。
+    for (const e of history) void window.electronAPI.webDownloadRemove(e.id);
+    setHistory([]);
+  };
+
+  const clearBtn =
+    history.length > 0 ? (
+      <button
+        type="button"
+        className="krig-web-nav__clear-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          clearAll();
+        }}
+        title="清空下载历史(不删磁盘文件)"
+      >
+        清空
+      </button>
+    ) : undefined;
+
   return (
-    <CollapsibleSection storeKey={storeKey} icon={icon} title={title}>
-      <div className="krig-web-nav__empty krig-web-nav__placeholder">{hint}</div>
+    <CollapsibleSection storeKey="download" icon="⬇" title="下载" headerExtra={clearBtn}>
+      {active.length === 0 && history.length === 0 ? (
+        <div className="krig-web-nav__empty">暂无下载</div>
+      ) : (
+        <ul className="krig-web-nav__list">
+          {/* 进行中 */}
+          {active.map((d) => {
+            const hasTotal = d.total > 0;
+            const percent = hasTotal
+              ? Math.min(100, Math.round((d.received / d.total) * 100))
+              : 0;
+            return (
+              <li key={`active-${d.id}`} className="krig-web-nav__dl-item">
+                <div className="krig-web-nav__dl-row">
+                  <span className="krig-web-nav__dl-name" title={d.filename}>
+                    {d.filename}
+                  </span>
+                  <button
+                    type="button"
+                    className="krig-web-nav__dl-cancel"
+                    onClick={() => cancel(d.id)}
+                  >
+                    取消
+                  </button>
+                </div>
+                <div className="krig-web-nav__dl-track">
+                  {hasTotal ? (
+                    <div
+                      className="krig-web-nav__dl-fill"
+                      style={{ width: `${percent}%` }}
+                    />
+                  ) : (
+                    <div className="krig-web-nav__dl-fill krig-web-nav__dl-fill--indeterminate" />
+                  )}
+                </div>
+                <span className="krig-web-nav__dl-meta">
+                  {hasTotal
+                    ? `${percent}% · ${formatBytes(d.received)} / ${formatBytes(d.total)}`
+                    : `下载中… ${formatBytes(d.received)}`}
+                </span>
+              </li>
+            );
+          })}
+
+          {/* 已完成历史 */}
+          {history.map((entry) => (
+            <li key={`hist-${entry.id}`} className="krig-web-nav__dl-item">
+              <div className="krig-web-nav__dl-row">
+                <span className="krig-web-nav__dl-name" title={entry.url}>
+                  {downloadDisplayName(entry)}
+                </span>
+                <button
+                  type="button"
+                  className="krig-web-nav__item-del"
+                  title="删除此记录(不删磁盘文件)"
+                  onClick={() => removeHistory(entry.id)}
+                >
+                  ×
+                </button>
+              </div>
+              {entry.state === 'completed' ? (
+                <div className="krig-web-nav__dl-done-row">
+                  <span className="krig-web-nav__dl-meta krig-web-nav__dl-meta--done">
+                    ✓ 已完成
+                  </span>
+                  {entry.savePath && (
+                    <button
+                      type="button"
+                      className="krig-web-nav__dl-show"
+                      onClick={() => void window.electronAPI.showItemInFolder(entry.savePath)}
+                    >
+                      在 Finder 显示
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <span className="krig-web-nav__dl-meta krig-web-nav__dl-meta--failed">
+                  {entry.state === 'cancelled' ? '已取消' : '下载中断'}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </CollapsibleSection>
   );
 }
 
-/** Web NavSide 三段式折叠面板:书签 / 历史 / 下载。本批只实装历史段。 */
+/** Web NavSide 三段式折叠面板:书签 / 历史 / 下载。 */
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
       <BookmarkSection />
       <HistorySection />
-      <PlaceholderSection storeKey="download" icon="⬇" title="下载" hint="批2 实装" />
+      <DownloadSection />
     </div>
   );
 }

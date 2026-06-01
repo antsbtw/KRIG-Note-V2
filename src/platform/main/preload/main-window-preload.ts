@@ -383,6 +383,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       type: 'started' | 'progress' | 'done';
       id: number;
       filename: string;
+      url?: string;
       received?: number;
       total?: number;
       state?: string;
@@ -395,6 +396,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         type: 'started' | 'progress' | 'done';
         id: number;
         filename: string;
+        url?: string;
         received?: number;
         total?: number;
         state?: string;
@@ -408,6 +410,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** web view 下载操作(取消)— renderer → main invoke */
   async webDownloadAction(payload: { id: number; action: 'cancel' }): Promise<void> {
     await ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_ACTION, payload);
+  },
+
+  /** 取下载历史全量(终态记录)— renderer → main invoke */
+  async webDownloadList(): Promise<WebDownloadHistoryEntry[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_LIST);
+  },
+
+  /** 删一条下载历史记录(仅删 JSON 记录,不删磁盘文件)— renderer → main invoke */
+  async webDownloadRemove(id: string): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_REMOVE, id);
+  },
+
+  /** 订阅 main 推送 — 下载历史变更(落盘/删记录后),NavSide 下载段刷新 */
+  onWebDownloadHistoryChanged(
+    callback: (entries: WebDownloadHistoryEntry[]) => void,
+  ): () => void {
+    const handler = (_event: unknown, entries: WebDownloadHistoryEntry[]): void =>
+      callback(entries);
+    ipcRenderer.on(IPC_CHANNELS.WEB_DOWNLOAD_HISTORY_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WEB_DOWNLOAD_HISTORY_CHANGED, handler);
   },
 
   /** 订阅 main 推送 — 用户已选好且扫好的 markdown 文件批,view 端转 PM + 落 note */

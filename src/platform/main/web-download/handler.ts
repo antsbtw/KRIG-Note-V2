@@ -40,12 +40,16 @@ import {
 import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { shouldHandle } from '../web-shared/should-handle';
+import { downloadStore, type DownloadEntry } from './download-store';
+import { broadcastDownloadHistoryChanged } from './handlers';
 
 /** main → renderer 推送的下载事件 payload(与 electron-api.d.ts 声明保持一致)*/
 interface WebDownloadEvent {
   type: 'started' | 'progress' | 'done';
   id: number;
   filename: string;
+  /** 下载来源 URL(进行中显示用,started 起即带)*/
+  url?: string;
   received?: number;
   total?: number;
   /** 'progressing' | 'completed' | 'cancelled' | 'interrupted' */
@@ -99,7 +103,7 @@ export function registerWebDownloadHook(mainWindow: BrowserWindow): void {
       } satisfies WebDownloadEvent);
     };
 
-    send('started', { total: item.getTotalBytes() });
+    send('started', { total: item.getTotalBytes(), url: item.getURL() });
 
     item.on('updated', (_e, state) => {
       send('progress', {
@@ -111,10 +115,32 @@ export function registerWebDownloadHook(mainWindow: BrowserWindow): void {
 
     item.on('done', (_e, state) => {
       // state 可能是 completed / cancelled / interrupted。savePath 仅 completed 有效。
-      send('done', {
-        state,
-        savePath: state === 'completed' ? item.getSavePath() : '',
-      });
+      const savePath = state === 'completed' ? item.getSavePath() : '';
+      send('done', { state, savePath });
+
+      // 终态落盘(同进程,无 IPC 时序丢失)。只存 completed/cancelled/interrupted。
+      // renderer 收到 done 后凭这条历史(history-changed 广播)把进行中态去重移除。
+      const entryState: DownloadEntry['state'] =
+        state === 'completed'
+          ? 'completed'
+          : state === 'interrupted'
+            ? 'interrupted'
+            : 'cancelled';
+      downloadStore
+        .add({
+          id: String(id),
+          filename: item.getFilename(),
+          url: item.getURL(),
+          savePath,
+          total: item.getTotalBytes(),
+          completedAt: Date.now(),
+          state: entryState,
+        })
+        .then((added) => {
+          if (added) broadcastDownloadHistoryChanged(mainWindow);
+        })
+        .catch((err) => console.warn('[web-download] 落盘失败:', err));
+
       active.delete(id);
     });
   });

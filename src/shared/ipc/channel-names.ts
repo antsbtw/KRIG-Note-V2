@@ -55,6 +55,10 @@ export const IPC_CHANNELS = {
   // 进度/完成 main → renderer 推送(下载条 UI);取消走 invoke。
   WEB_DOWNLOAD_EVENT: 'web.download-event',          // main → renderer 推送(started/progress/done)
   WEB_DOWNLOAD_ACTION: 'web.download-action',        // renderer → main invoke(cancel)
+  // 下载持久化(收尾):done 终态落盘 JSON,NavSide 下载段显历史。
+  WEB_DOWNLOAD_LIST: 'web.download-list',            // renderer → main invoke(取全量历史)
+  WEB_DOWNLOAD_REMOVE: 'web.download-remove',        // renderer → main invoke(删一条记录,不删磁盘文件)
+  WEB_DOWNLOAD_HISTORY_CHANGED: 'web.download-history-changed', // main → renderer 推送(历史变更广播)
 
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',
