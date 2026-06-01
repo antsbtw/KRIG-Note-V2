@@ -9,48 +9,20 @@
  * 注册入口:src/platform/main/ipc/ipc-bus.ts.initIpcBus()
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import {
   createFolder,
   listFolders,
-  listAllFoldersGroupedByView,
   getFolder,
   renameFolder,
   moveFolder,
   deleteFolder,
   previewDeleteFolder,
 } from './capability-impl';
+import { broadcastFolderListChanged } from './broadcast';
 import { broadcastNoteListChanged } from '../note/broadcast';
 import { broadcastGraphListChanged } from '../graph/broadcast';
-
-/**
- * decision 021 §4.2 不变约束 #2 + §0.2 第 4 条:onListChanged callback 签名字面不动
- * ((list: FolderInfo[]) => void).
- *
- * 方案 C (决议 §10.B-2 偏离,2026-05-13 总指挥批复):
- * - main 端按 view 分别广播 2 次 (note + graph),renderer 端 useAllFolders(viewType) hook
- *   在 onListChanged callback 内调 listFolders(viewType) 重拉,只保留当前 view folder.
- * - 字面合规:onListChanged 签名不动 (renderer 端 hook 上下文 viewType 已知,不依赖 callback 参数).
- * - 隔离语义:每个 view 只收到自己 view 的 folder list,不污染对端 view 缓存.
- */
-async function broadcastFolderListChanged(): Promise<void> {
-  try {
-    // P1-3 (2026-05-29 data-layer-audit): 4 次 listFolders → 1 次 listAllFoldersGroupedByView.
-    // 字面 12 次 storage call (P1-1 之前) → 3 次,broadcast 快 4×.
-    const grouped = await listAllFoldersGroupedByView();
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (win.isDestroyed()) continue;
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.note);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.graph);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.ebook);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.thought);
-      win.webContents.send(IPC_CHANNELS.FOLDER_LIST_CHANGED, grouped.web);
-    }
-  } catch (err) {
-    console.warn('[folder] broadcast list-changed failed:', err);
-  }
-}
 
 export function registerFolderHandlers(): void {
   // decision 021 §4.1: FOLDER_LIST handler 透传 viewType 入参

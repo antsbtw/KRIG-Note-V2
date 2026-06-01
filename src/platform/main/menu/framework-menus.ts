@@ -10,6 +10,7 @@
 
 import { app, BrowserWindow } from 'electron';
 import { menuRegistry } from '@slot/menu-registry/menu-registry';
+import { importChromeBookmarks } from '../bookmark/chrome-import';
 
 /** 注册框架级 Application Menu */
 export function registerFrameworkMenus(): void {
@@ -20,6 +21,11 @@ export function registerFrameworkMenus(): void {
   });
   menuRegistry.registerCommand('window.close', () => {
     BrowserWindow.getFocusedWindow()?.close();
+  });
+  menuRegistry.registerCommand('file.import-chrome-bookmarks', () => {
+    void importChromeBookmarks(BrowserWindow.getFocusedWindow()).catch((err) => {
+      console.error('[chrome-import] importChromeBookmarks failed:', err);
+    });
   });
   menuRegistry.registerCommand('view.devtools.toggle', () => {
     BrowserWindow.getFocusedWindow()?.webContents.toggleDevTools();
@@ -55,6 +61,7 @@ export function registerFrameworkMenus(): void {
       { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
       { id: 'import-word', label: 'Import Word...', command: 'file.import-word' },
       { id: 'import-word-pandoc', label: 'Import Word (High Quality)...', command: 'file.import-word-pandoc' },
+      { id: 'import-chrome-bookmarks', label: 'Import Chrome Bookmarks...', command: 'file.import-chrome-bookmarks' },
       { id: 'sep-backup', label: '', separator: true },
       { id: 'backup', label: 'Backup All Data...', command: 'file.backup' },
       { id: 'restore', label: 'Restore from Backup...', command: 'file.restore' },

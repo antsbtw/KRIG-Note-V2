@@ -9,19 +9,10 @@
  * 注册入口:src/platform/main/ipc/ipc-bus.ts.initIpcBus()
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { add, list, rename, remove, moveToFolder } from './capability-impl';
-
-/** 广播书签列表变更到所有 renderer (照 ebook broadcastBookshelfChanged) */
-async function broadcastBookmarkListChanged(): Promise<void> {
-  const all = await list();
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
-      win.webContents.send(IPC_CHANNELS.BOOKMARK_LIST_CHANGED, all);
-    }
-  }
-}
+import { broadcastBookmarkListChanged } from './broadcast';
 
 export function registerBookmarkHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.BOOKMARK_LIST, async () => list());
