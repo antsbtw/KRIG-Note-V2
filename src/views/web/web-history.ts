@@ -154,3 +154,28 @@ export function recordVisit(url: string, title: string): void {
 export function queryHistory(rawInput: string): WebHistoryEntry[] {
   return matchHistory(load(), rawInput);
 }
+
+// ── NavSide 历史段:全量读 / 删除 / 清空(批1)──
+
+/**
+ * 取全部历史(NavSide 历史段列表用)。
+ *
+ * 已存储顺序即 lastVisit 降序(load() 返回 save 时已排序的数组;recordVisit
+ * 经 mergeVisit 按 lastVisit 降序写回)。为防外部写脏顺序,这里再排一次兜底,
+ * 保证「最近访问在前」。
+ */
+export function getAllHistory(): WebHistoryEntry[] {
+  return load().sort((a, b) => b.lastVisit - a.lastVisit);
+}
+
+/** 删除单条历史(by url)。命中即写回;无命中也无副作用。 */
+export function removeHistoryEntry(url: string): void {
+  const list = load();
+  const next = list.filter((e) => e.url !== url);
+  if (next.length !== list.length) save(next);
+}
+
+/** 清空全部历史。 */
+export function clearHistory(): void {
+  save([]);
+}

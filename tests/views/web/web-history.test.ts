@@ -3,11 +3,14 @@
  *
  * 只测纯逻辑(去重/排序/上限/前缀匹配),localStorage 边缘不测。
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   mergeVisit,
   matchHistory,
   shouldRecord,
+  getAllHistory,
+  removeHistoryEntry,
+  clearHistory,
   type WebHistoryEntry,
 } from '@views/web/web-history';
 
@@ -159,6 +162,81 @@ describe('shouldRecord', () => {
     });
     it('默认参数下普通 https 页被记', () => {
       expect(shouldRecord('https://github.com/anthropics')).toBe(true);
+    });
+  });
+});
+
+// ── NavSide 历史段:getAllHistory / removeHistoryEntry / clearHistory(批1)──
+// node 环境无 localStorage → 局部 mock 一个最小实现(只读/写 string key→value)。
+
+const LS_KEY = 'krig:web:history';
+
+class MockStorage {
+  private store = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.store.has(key) ? (this.store.get(key) as string) : null;
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+  clear(): void {
+    this.store.clear();
+  }
+}
+
+function seed(list: WebHistoryEntry[]): void {
+  (globalThis as { localStorage: MockStorage }).localStorage.setItem(LS_KEY, JSON.stringify(list));
+}
+
+describe('NavSide 历史段读写(getAllHistory / remove / clear)', () => {
+  beforeEach(() => {
+    (globalThis as { localStorage?: MockStorage }).localStorage = new MockStorage();
+  });
+
+  describe('getAllHistory', () => {
+    it('空 localStorage → []', () => {
+      expect(getAllHistory()).toEqual([]);
+    });
+
+    it('返回全部条目,按 lastVisit 降序(最近在前)', () => {
+      seed([E('https://a.com', 1000, 1, 'A'), E('https://b.com', 3000, 1, 'B'), E('https://c.com', 2000, 1, 'C')]);
+      expect(getAllHistory().map((e) => e.url)).toEqual([
+        'https://b.com',
+        'https://c.com',
+        'https://a.com',
+      ]);
+    });
+
+    it('过滤掉结构损坏的条目(load 防御)', () => {
+      (globalThis as { localStorage: MockStorage }).localStorage.setItem(
+        LS_KEY,
+        JSON.stringify([{ url: 'https://ok.com', title: 'ok', lastVisit: 5000, visitCount: 1 }, { bad: true }, null]),
+      );
+      const out = getAllHistory();
+      expect(out).toHaveLength(1);
+      expect(out[0].url).toBe('https://ok.com');
+    });
+  });
+
+  describe('removeHistoryEntry', () => {
+    it('删除命中的条目', () => {
+      seed([E('https://a.com', 2000, 1, 'A'), E('https://b.com', 1000, 1, 'B')]);
+      removeHistoryEntry('https://a.com');
+      expect(getAllHistory().map((e) => e.url)).toEqual(['https://b.com']);
+    });
+
+    it('无命中 → 不变', () => {
+      seed([E('https://a.com', 1000, 1, 'A')]);
+      removeHistoryEntry('https://nope.com');
+      expect(getAllHistory().map((e) => e.url)).toEqual(['https://a.com']);
+    });
+  });
+
+  describe('clearHistory', () => {
+    it('清空全部', () => {
+      seed([E('https://a.com', 1000, 1, 'A'), E('https://b.com', 2000, 1, 'B')]);
+      clearHistory();
+      expect(getAllHistory()).toEqual([]);
     });
   });
 });

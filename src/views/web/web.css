@@ -626,3 +626,131 @@
 .krig-web-view__zoom-badge:hover {
   background: #333;
 }
+
+/* ── NavSide:Web 三段式面板(书签 / 历史 / 下载),批1 实装历史 ── */
+.krig-web-nav {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  font-size: 13px;
+  color: #c8c8c8;
+}
+
+.krig-web-nav__section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.krig-web-nav__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  position: sticky;
+  top: 0;
+  background: #1f1f1f;
+  z-index: 1;
+}
+
+.krig-web-nav__section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aa0a6;
+  letter-spacing: 0.3px;
+}
+
+.krig-web-nav__clear-btn {
+  border: none;
+  background: transparent;
+  color: #8ab4f8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.krig-web-nav__clear-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-web-nav__empty {
+  padding: 10px 12px;
+  color: #6b6b6b;
+  font-size: 12px;
+}
+
+.krig-web-nav__placeholder {
+  font-style: italic;
+}
+
+.krig-web-nav__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.krig-web-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-web-nav__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.krig-web-nav__item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.krig-web-nav__item-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #e0e0e0;
+}
+
+.krig-web-nav__item-url {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #6b6b6b;
+  font-size: 11px;
+}
+
+.krig-web-nav__item-time {
+  flex-shrink: 0;
+  color: #6b6b6b;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.krig-web-nav__item-del {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #9aa0a6;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  visibility: hidden;
+}
+
+.krig-web-nav__item:hover .krig-web-nav__item-del {
+  visibility: visible;
+}
+
+.krig-web-nav__item-del:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f28b82;
+}
