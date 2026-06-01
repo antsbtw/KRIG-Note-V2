@@ -65,23 +65,21 @@ const active = new Map<number, DownloadItem>();
 /** cancel invoke handler 只注册一次(防热重载 / 多窗口重复注册)*/
 let actionHandlerRegistered = false;
 
-export function registerWebDownloadHook(mainWindow: BrowserWindow): void {
-  const sess = session.fromPartition(WEBVIEW_PARTITION);
+/**
+ * per-ws 代理阶段1:partition 改 `persist:webview-${wsId}` 后,每个 ws 是不同 session
+ * 实例,will-download 必须按 session 实例去重挂(同一 session 只挂一次,否则共享 session
+ * 的 N 个 guest 会 N 倍触发——见文件头注释警告)。每个 ws 的 webview 首次 attach 时,
+ * 在 registerWebDownloadHook 的 did-attach-webview 回调里对 guest.session 补挂。
+ */
+const wiredDownloadSessions = new WeakSet<Electron.Session>();
 
-  // ── 取消 invoke(renderer → main):{ id, action:'cancel' } → item.cancel() ──
-  // 注册一次即可,不随 hook 多次调用重复挂。
-  if (!actionHandlerRegistered) {
-    actionHandlerRegistered = true;
-    ipcMain.handle(
-      IPC_CHANNELS.WEB_DOWNLOAD_ACTION,
-      (_event, payload: { id: number; action: string }) => {
-        const item = active.get(payload?.id);
-        if (item && payload?.action === 'cancel') {
-          item.cancel();
-        }
-      },
-    );
-  }
+/** 对某个 session 挂一次 will-download(WeakSet 去重)。逻辑体照搬原单挂实现,不变。*/
+function wireDownloadForSession(
+  sess: Electron.Session,
+  mainWindow: BrowserWindow,
+): void {
+  if (wiredDownloadSessions.has(sess)) return;
+  wiredDownloadSessions.add(sess);
 
   sess.on('will-download', (_event, item, webContents) => {
     // shouldHandle 过滤:只接管普通浏览 webview(排除 AI / 翻译)。
@@ -144,4 +142,30 @@ export function registerWebDownloadHook(mainWindow: BrowserWindow): void {
       active.delete(id);
     });
   });
+}
+
+export function registerWebDownloadHook(mainWindow: BrowserWindow): void {
+  // ── 取消 invoke(renderer → main):{ id, action:'cancel' } → item.cancel() ──
+  // 注册一次即可,不随 hook 多次调用重复挂。
+  if (!actionHandlerRegistered) {
+    actionHandlerRegistered = true;
+    ipcMain.handle(
+      IPC_CHANNELS.WEB_DOWNLOAD_ACTION,
+      (_event, payload: { id: number; action: string }) => {
+        const item = active.get(payload?.id);
+        if (item && payload?.action === 'cancel') {
+          item.cancel();
+        }
+      },
+    );
+  }
+
+  // per-ws:每个 ws 的 webview 首次 attach 时,按 guest.session 去重挂 will-download。
+  mainWindow.webContents.on('did-attach-webview', (_e, guest) => {
+    wireDownloadForSession(guest.session, mainWindow);
+  });
+
+  // 兼容:旧 `persist:webview`(AI 共用 partition)也挂一次,保持行为一致(AI 下载本被
+  // shouldHandle 排除,挂着无害)。
+  wireDownloadForSession(session.fromPartition(WEBVIEW_PARTITION), mainWindow);
 }

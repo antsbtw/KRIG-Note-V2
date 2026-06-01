@@ -323,6 +323,18 @@ function sizeLimitForBucket(bucket: 'images' | 'audio' | 'video' | 'files'): num
 class MediaStore {
   private index: MediaIndex = { version: 1, entries: {} };
 
+  /**
+   * media:// 协议 handler(default + 每个 webview partition session 复用同一函数)。
+   * registerProtocol 时构建一次。
+   */
+  private mediaHandler: ((request: Request) => Promise<Response>) | null = null;
+
+  /**
+   * per-ws 代理阶段1:partition 改 `persist:webview-${wsId}` 后,每个 ws 是不同 session,
+   * media:// 协议必须按 session 实例补注册(去重),否则 webview 图片 ERR_UNKNOWN_URL_SCHEME。
+   */
+  private wiredMediaSessions = new WeakSet<Electron.Session>();
+
   constructor() {
     this.ensureLoaded();
   }
@@ -382,8 +394,29 @@ class MediaStore {
       return net.fetch(`file://${filePath}`);
     };
 
+    this.mediaHandler = handler;
+
     protocol.handle('media', handler);
-    session.fromPartition(WEBVIEW_PARTITION).protocol.handle('media', handler);
+    // default session 不进 wiredMediaSessions(它走 protocol.handle 全局,不是 partition session)。
+    const legacySess = session.fromPartition(WEBVIEW_PARTITION);
+    legacySess.protocol.handle('media', handler);
+    this.wiredMediaSessions.add(legacySess);
+  }
+
+  /**
+   * per-ws:某个 ws 的 webview 首次 attach 时,对其 partition session 补注册 media:// 协议
+   * (WeakSet 去重)。在主进程 did-attach-webview 钩子里对 guest.session 调。
+   * protocol.handle 同步,且 did-attach-webview 早于 guest 内页面发 media:// 请求,时序安全。
+   */
+  registerMediaForSession(sess: Electron.Session): void {
+    if (this.wiredMediaSessions.has(sess)) return;
+    if (!this.mediaHandler) {
+      // registerProtocol 必在 createMainWindow 前调,理论不会走到这。防御性 warn。
+      console.warn('[media] registerMediaForSession 在 registerProtocol 之前调用,跳过');
+      return;
+    }
+    this.wiredMediaSessions.add(sess);
+    sess.protocol.handle('media', this.mediaHandler);
   }
 
   /**

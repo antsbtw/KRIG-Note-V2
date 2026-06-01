@@ -307,6 +307,11 @@ declare global {
       ): () => void;
       /** web view 下载操作(取消)*/
       webDownloadAction(payload: { id: number; action: 'cancel' }): Promise<void>;
+      /**
+       * per-ws 代理阶段1:给某 ws 的 partition session 设代理出口(临时验证用,阶段2 复用)。
+       * rules 空 / 'direct://' → 直连;否则 proxyRules(如 'socks5://host:port')。
+       */
+      setWebProxy(args: { workspaceId: string; rules: string }): Promise<void>;
       /** 取下载历史全量(终态记录,按 completedAt 倒序)*/
       webDownloadList(): Promise<WebDownloadHistoryEntry[]>;
       /** 删一条下载历史记录(仅删 JSON 记录,不删磁盘文件,对齐 Chrome)*/

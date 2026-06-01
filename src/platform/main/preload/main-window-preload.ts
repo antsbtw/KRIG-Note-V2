@@ -412,6 +412,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     await ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_ACTION, payload);
   },
 
+  /**
+   * per-ws 代理阶段1:给某 ws 的 partition(persist:webview-${workspaceId})session 设代理。
+   * 临时验证用(DevTools console 调),阶段2 代理 UI 复用。rules 空 / 'direct://' → 直连。
+   */
+  async setWebProxy(args: { workspaceId: string; rules: string }): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.WEB_SET_PROXY, args);
+  },
+
   /** 取下载历史全量(终态记录)— renderer → main invoke */
   async webDownloadList(): Promise<WebDownloadHistoryEntry[]> {
     return ipcRenderer.invoke(IPC_CHANNELS.WEB_DOWNLOAD_LIST);

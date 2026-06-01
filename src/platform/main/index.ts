@@ -34,6 +34,7 @@ import { registerAIWebviewHook } from './ai';
 import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
 import { registerWebDownloadHook } from './web-download/handler';
+import { registerWebProxyHandler } from './web-proxy/handler';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -151,6 +152,15 @@ app.whenReady().then(async () => {
   // (绝不 per-guest:共享 session per-guest 会 N 倍触发),shouldHandle 排除 AI/翻译,
   // 不 setSavePath(Electron 自动弹系统保存框),进度/完成回推下载条 UI。
   registerWebDownloadHook(mainWindow);
+  // per-ws 代理阶段1:partition 改 persist:webview-${wsId} 后,每个 ws 是独立 session。
+  // 每个 ws 的 webview 首次 attach 时,对其 session 补注册 media:// 协议(去重),
+  // 否则新 partition 里图片 ERR_UNKNOWN_URL_SCHEME(default + 旧 partition 已在
+  // registerProtocol 注册)。下载 will-download 的补挂在 registerWebDownloadHook 内部做。
+  mainWindow.webContents.on('did-attach-webview', (_e, guest) => {
+    mediaStore.registerMediaForSession(guest.session);
+  });
+  // per-ws 代理阶段1:临时 setProxy IPC(DevTools console 验证不同 ws 不同出口)。
+  registerWebProxyHandler();
 });
 
 // macOS:窗口全关后,点 dock 重新打开

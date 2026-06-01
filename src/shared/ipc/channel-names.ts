@@ -60,6 +60,10 @@ export const IPC_CHANNELS = {
   WEB_DOWNLOAD_REMOVE: 'web.download-remove',        // renderer → main invoke(删一条记录,不删磁盘文件)
   WEB_DOWNLOAD_HISTORY_CHANGED: 'web.download-history-changed', // main → renderer 推送(历史变更广播)
 
+  // per-ws 代理:给某 ws 的 partition(persist:webview-${wsId})session 设代理出口。
+  // 阶段1 临时验证用(DevTools console 调),阶段2 代理 UI/节点管理复用此 channel。
+  WEB_SET_PROXY: 'web.set-proxy',                    // renderer → main invoke({ workspaceId, rules })
+
   // L5-B4.3.1:Media 存储(base64 / 远程下载 → media:// URL)
   MEDIA_PUT_BASE64: 'media.put-base64',
   MEDIA_DOWNLOAD: 'media.download',

@@ -30,7 +30,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { WEBVIEW_PARTITION, WEBVIEW_DEFAULT_URL } from '@shared/constants/webview';
+import { WEBVIEW_DEFAULT_URL } from '@shared/constants/webview';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
 import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
@@ -306,6 +306,11 @@ export function WebView({ workspaceId }: WebViewProps) {
     dispatchShortcutRef.current = dispatchShortcut;
   }, [dispatchShortcut]);
 
+  // [per-ws] 诊断:确认每个 ws 拿到独立 partition(per-ws 代理阶段1)
+  useEffect(() => {
+    console.log('[per-ws] ws=', workspaceId, 'partition=persist:webview-' + workspaceId);
+  }, [workspaceId]);
+
   // 订阅主进程快捷键回推 + 弹窗导流(只建一次,回调走 ref 拿最新值）
   useEffect(() => {
     const offShortcut = window.electronAPI.onWebViewShortcut(({ action }) => {
@@ -569,7 +574,7 @@ export function WebView({ workspaceId }: WebViewProps) {
             // translateMode=true,其余 tab false → 走 destroy 分支不订阅 slotBus 'left'。
             // 任一时刻只一个 Host 活跃订阅 'left',不串台。
             translateMode={isTranslateMode && tab.id === activeTabId}
-            partition={WEBVIEW_PARTITION}
+            partition={`persist:webview-${workspaceId}`}
             className="krig-web-view__webview"
             style={{ display: tab.id === activeTabId ? 'inline-flex' : 'none' }}
             onUrlChanged={(url) => handleUrlChanged(tab.id, url)}
