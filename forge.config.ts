@@ -6,9 +6,10 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 const config: ForgeConfig = {
   packagerConfig: {
     // asar 启用,但 ffmpeg-static binary 必须 unpack 才能 spawn
-    // (Electron asar 内的二进制无法直接执行)
+    // (Electron asar 内的二进制无法直接执行);defuddle 的 UMD bundle
+    // (index.full.js)在 main 进程 readFileSync 注入,也须 unpack 才能读盘。
     asar: {
-      unpack: '**/node_modules/ffmpeg-static/**',
+      unpack: '**/node_modules/(ffmpeg-static|defuddle)/**',
     },
     name: 'KRIG Note',
     executableName: 'KRIG Note',
