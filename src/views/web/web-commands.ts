@@ -12,8 +12,6 @@
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { setWebUrl } from './data-model';
-// Stage 1 spike(临时,验证后删除):挂 window.__krigSpikeClip
-import '@capabilities/content-extraction/internal/_spike-draft-builders';
 
 export function registerWebCommands(): void {
   /**

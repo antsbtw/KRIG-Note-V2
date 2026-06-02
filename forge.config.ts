@@ -6,11 +6,17 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 const config: ForgeConfig = {
   packagerConfig: {
     // asar 启用,但 ffmpeg-static binary 必须 unpack 才能 spawn
-    // (Electron asar 内的二进制无法直接执行);defuddle 的 UMD bundle
-    // (index.full.js)在 main 进程 readFileSync 注入,也须 unpack 才能读盘。
+    // (Electron asar 内的二进制无法直接执行)。
     asar: {
-      unpack: '**/node_modules/(ffmpeg-static|defuddle)/**',
+      unpack: '**/node_modules/ffmpeg-static/**',
     },
+    // 网页剪藏:defuddle 的 UMD bundle(index.full.js)在 main 进程 readFileSync
+    // 注入。Vite-forge 打包不拷 node_modules,asar.unpack glob 对它无效(node_modules
+    // 根本没进包),故把单个 bundle 文件作为 extraResource 拷进 Contents/Resources/。
+    // defuddle-bundle.ts 运行时优先探 process.resourcesPath,dev 回退 node_modules。
+    extraResource: [
+      'node_modules/defuddle/dist/index.full.js',
+    ],
     name: 'KRIG Note',
     executableName: 'KRIG Note',
     icon: 'build/icon',  // forge 自动加平台后缀:macOS=.icns / Windows=.ico / Linux=.png

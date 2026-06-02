@@ -15,17 +15,20 @@ import { app } from 'electron';
 
 let defuddleBundleCache: string | null = null;
 
-/** 解析 defuddle UMD bundle 的磁盘路径(dev + 打包都可靠);找不到返回 null。 */
+/**
+ * 解析 defuddle UMD bundle 的磁盘路径(dev + 打包都可靠);找不到返回 null。
+ *
+ * Vite-forge 打包**不拷 node_modules**(全 JS 依赖 bundle 进 .vite/build),故
+ * asar.unpack 对 node_modules 无效。打包路径走 forge extraResource:把单个
+ * index.full.js 拷进 Contents/Resources/(= process.resourcesPath)。
+ * dev 环境 process.resourcesPath 指向 Electron.app 内,无此文件 → 回退 node_modules。
+ */
 function resolveDefuddleBundlePath(): string | null {
-  const appPath = app.getAppPath();
   const candidates = [
-    // dev 环境
-    join(appPath, 'node_modules', 'defuddle', 'dist', 'index.full.js'),
-    // 打包后(asar.unpack 自动重定向)
-    join(
-      appPath.replace('app.asar', 'app.asar.unpacked'),
-      'node_modules', 'defuddle', 'dist', 'index.full.js',
-    ),
+    // 打包后(forge extraResource 拷到 Contents/Resources/index.full.js)
+    join(process.resourcesPath, 'index.full.js'),
+    // dev 环境(app.getAppPath() = 项目根)
+    join(app.getAppPath(), 'node_modules', 'defuddle', 'dist', 'index.full.js'),
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
