@@ -68,6 +68,34 @@ async function localizeAudio(url: string): Promise<string> {
 const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
 /**
+ * 规整 Defuddle markdown:把**与文字同行的图片** `![](url)` 拆到独立行。
+ *
+ * 背景:Defuddle 常把首图内联在首段开头(如 `![](img.jpg) The Fire TV app...`)。
+ * 下游 markdownToProseMirror 的 block-image 只认**独占一行**的 `![](url)`,内联的会
+ * 当纯文本留下(用户看到裸 `![](media://...)`)。本函数在内联图前后补换行,使其独占
+ * 一行 → md-to-pm 转成 image block,文字另起段落。
+ */
+function isolateInlineImages(markdown: string): string {
+  // 在「行内非行首的 ![](...)」前补 \n\n;在其后若紧跟非空白也补 \n\n。
+  // 逐行处理避免误伤已独占行的图片。
+  return markdown
+    .split('\n')
+    .map((line) => {
+      // 整行已是单张图片(可含前后空白)→ 不动
+      if (/^\s*!\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\)\s*$/.test(line)) return line;
+      // 行内含图片 → 用换行把每个图片隔成独立行
+      if (MD_IMAGE_RE.test(line)) {
+        MD_IMAGE_RE.lastIndex = 0;
+        return line.replace(MD_IMAGE_RE, (m) => `\n\n${m}\n\n`);
+      }
+      return line;
+    })
+    .join('\n')
+    // 压掉因拆分产生的多余空行
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+/**
  * 正文内嵌图本地化:扫描 markdown 所有 `![]()`,逐个 mediaDownload('image'),
  * 把 url 改写为 media://(失败降级远程)。返回改写后的 markdown。
  * 跳过 data: / media:(data: 留给 md-to-pm 自己 putBase64;media: 已本地)。
@@ -107,29 +135,53 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     return;
   }
 
-  const title = payload.title || payload.domain || 'Web Clip';
+  const title = (payload.title || '').trim() || payload.domain || 'Web Clip';
   const from: AtomFrom = {
     extractionType: 'web-clip',
     extractedAt: Date.now(),
   };
 
-  // ① 正文内嵌图本地化(改写 markdown 后再转 atom)
-  const localizedMarkdown = await localizeInlineImages(payload.content || '');
+  // 诊断日志:看 Defuddle 实际抓到的 title + 正文头部(定位标题/markdown 解析问题)。
+  console.log(
+    '[content-extraction] clip payload — title=%o domain=%o contentLen=%d head=%o',
+    payload.title,
+    payload.domain,
+    (payload.content || '').length,
+    (payload.content || '').slice(0, 200),
+  );
 
-  // ② markdownToAtoms 正文 drafts(内嵌图已 media://)
+  // ① 规整 markdown(把内联图拆到独立行,使其能被识别成 image block)+ 正文内嵌图本地化
+  const normalized = isolateInlineImages(payload.content || '');
+  const localizedMarkdown = await localizeInlineImages(normalized);
+
+  // ② markdownToAtoms 正文 drafts。**不传 titleHint** —— 否则它会把正文首段(可能是
+  //    图片/噪音行)误标为 title。标题改由下方用 Defuddle 的 payload.title 显式前置。
   const { atoms: bodyAtoms, warnings } = await ingestCap().markdownToAtoms(localizedMarkdown, {
-    titleHint: title,
     from,
   });
   if (warnings.length) {
     console.warn('[content-extraction] markdownToAtoms warnings:', warnings);
   }
 
-  const atoms: PmAtomDraft[] = [...bodyAtoms];
-
   // tmpId 分配器:从正文 atoms 数量续号,保证整数组内唯一(对齐 markdown-to-atoms 命名)
   let counter = bodyAtoms.length;
   const alloc: TmpIdAllocator = () => `tmp-${counter++}`;
+
+  // 显式标题段落(isTitle):用 Defuddle 的 result.title,前置到正文最前。
+  // 顶层 paragraph + isTitle 是 V2 note 标题约定(对齐 markdown-to-atoms titleHint 分支产物)。
+  const titleDraft: PmAtomDraft = {
+    tmpId: alloc(),
+    payload: {
+      domain: 'pm',
+      payload: {
+        type: 'paragraph',
+        attrs: { isTitle: true },
+        content: [{ type: 'text', text: title }],
+      },
+    },
+    from,
+  };
+  const atoms: PmAtomDraft[] = [titleDraft, ...bodyAtoms];
 
   // ③a contentImages(Defuddle 遗漏的正文图)→ image block draft(本地化)
   for (const img of payload.contentImages ?? []) {
