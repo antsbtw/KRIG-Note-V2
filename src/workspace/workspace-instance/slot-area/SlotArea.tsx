@@ -48,9 +48,11 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
     return 'hidden';
   };
 
-  // grid-template-columns 按 ratio 分配
+  // grid-template-columns 按 ratio 分配。
+  // 用 fr 分配剩余空间(扣掉 4px divider 后),避免 `r*100% 4px (1-r)*100%`
+  // 总和 = 100%+4px 溢出容器(被 overflow:hidden 裁掉右侧 4px)。
   const gridColumns = hasRight
-    ? `${dividerRatio * 100}% 4px ${(1 - dividerRatio) * 100}%`
+    ? `minmax(0, ${dividerRatio}fr) 4px minmax(0, ${1 - dividerRatio}fr)`
     : '100% 0 0';
 
   return (

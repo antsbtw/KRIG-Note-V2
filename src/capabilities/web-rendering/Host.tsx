@@ -232,6 +232,44 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     void workspaceId;
   }, [workspaceId]);
 
+  // webview 尺寸同步 — Electron <webview> 是 OS 级独立渲染 surface,容器(slot)
+  // 由全宽缩成左/右半宽时,guest 进程不总会收到新尺寸 → 仍按旧宽 layout 页面,
+  // 元素 box 已变窄 → 右侧内容被 overflow:hidden 裁掉 / 或留白(剪藏左右分栏后暴露)。
+  //
+  // 修复:ResizeObserver 观测 webview 元素 box,变化时强制 reflow —— 用 1px 瞬时
+  // 扰动(min-height ±1px)逼 Chromium 重测 guest 视口,使页面按新宽度重新 layout。
+  // 不改可见尺寸(下一帧还原),无闪烁。
+  useEffect(() => {
+    const wv = webviewRef.current as HTMLElement | null;
+    if (!wv || typeof ResizeObserver === 'undefined') return;
+
+    let raf = 0;
+    let lastW = 0;
+    let lastH = 0;
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      // 只在真正变化时 nudge(避免初次 / 同尺寸抖动循环)
+      if (Math.round(box.width) === lastW && Math.round(box.height) === lastH) return;
+      lastW = Math.round(box.width);
+      lastH = Math.round(box.height);
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // 瞬时 ±1px 扰动 → 强制 Chromium 重新测量 guest 视口宽度
+        const prev = wv.style.minHeight;
+        wv.style.minHeight = 'calc(100% + 1px)';
+        raf = requestAnimationFrame(() => {
+          wv.style.minHeight = prev;
+        });
+      });
+    });
+    ro.observe(wv);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [webviewTick]);
+
   // SyncDriver 生命周期 — 双栏翻译模式启用,离开销毁
   useEffect(() => {
     if (!translateMode) {
