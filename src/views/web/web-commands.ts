@@ -43,4 +43,23 @@ export function registerWebCommands(): void {
       });
     }
   });
+
+  /**
+   * 把 web view 钉到 **left slot**(若当前在 right 则搬过来;left 当前装别的就替换)。
+   *
+   * 网页剪藏用:提取成功后让 web 留 left、note 开 right(left/right 对照阅读)。
+   * 只动 slotBinding,不改 url(剪藏的是当前页,url 不变)。
+   */
+  commandRegistry.register('web-view.pin-left', () => {
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+    if (ws.slotBinding.left === 'web-view') return; // 已在 left
+    // 若 web 当前在 right,腾出 right(置 null,稍后由 note 占);否则只设 left。
+    const right = ws.slotBinding.right === 'web-view' ? null : ws.slotBinding.right;
+    workspaceManager.update(wsId, {
+      slotBinding: { ...ws.slotBinding, left: 'web-view', right },
+    });
+  });
 }

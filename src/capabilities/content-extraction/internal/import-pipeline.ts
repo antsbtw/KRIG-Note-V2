@@ -183,8 +183,11 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     return;
   }
 
-  // ⑤ 打开新 note
+  // ⑤ 打开新 note —— 对照布局:web 钉 left,note 开 right(方便左右比对原网页与剪藏稿)。
+  //    web-view.pin-left 把 web 搬到 left(若在 right 则腾出 right);
+  //    note-view.set-active-in-right 把 note 装到 right slot 并设为 active(不掩盖 left)。
   const noteId = result.notes[0].id;
   console.log('[content-extraction] clip → note', noteId, `(${atoms.length} atoms)`);
-  commandRegistry.execute('note-view.set-active', noteId);
+  commandRegistry.execute('web-view.pin-left');
+  commandRegistry.execute('note-view.set-active-in-right', noteId);
 }
