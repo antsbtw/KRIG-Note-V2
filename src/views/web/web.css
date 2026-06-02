@@ -37,12 +37,13 @@
   flex: 1;
   width: 100%;
   border: none;
-  /* 同上:webview 作为 flex item 必须能缩到容器宽度,否则右侧被裁。 */
+  /* webview 作为 flex item 能缩到容器宽度(配合 slot grid track min-width:0)。 */
   min-width: 0;
   min-height: 0;
-  /* electron <webview> 标签默认 inline 元素,需要 block 撑满容器。
-     Phase 4:活跃/非活跃由 inline style display(inline-flex / none)覆盖。 */
-  display: inline-flex;
+  /* electron <webview> 标签默认 inline 元素。用 block 级 flex 撑满容器
+     (inline-flex 是 shrink-to-fit,分栏收窄后撑不满 slot)。
+     Phase 4:活跃/非活跃由 inline style display(flex / none)覆盖。 */
+  display: flex;
 }
 
 /* L5-B4.2.2:切语言后 banner — 提示需重启 app */
