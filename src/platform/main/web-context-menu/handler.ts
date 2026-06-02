@@ -42,6 +42,8 @@ import {
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 // shouldHandle 抽到 web-shared 共享(右键菜单 / 快捷键 / 弹窗导流 三处复用同一过滤)
 import { shouldHandle } from '../web-shared/should-handle';
+// 网页剪藏(Defuddle → Note):右键「📥 提取到笔记」click 调用,抓页 → 推回 renderer。
+import { clipPageToRenderer } from '../content-extraction/handlers';
 
 export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
@@ -86,6 +88,16 @@ export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
             }),
         });
       }
+
+      // 网页剪藏:把当前页用 Defuddle 提取正文 + 图片/视频/音频/字幕,落成一篇 note。
+      // 恒在(整页提取,不依赖选区/链接);click 在 main 抓页后经 WEB_CLIP_RESULT 推回 renderer。
+      if (template.length > 0) template.push({ type: 'separator' });
+      template.push({
+        label: '📥 提取到笔记',
+        click: () => {
+          void clipPageToRenderer(mainWindow, guest);
+        },
+      });
 
       // 导航项(后退/前进/刷新/复制页面地址)—— 对齐 Chrome,空白处右键也有可用项。
       // 主进程直接持有 guest webContents,导航动作直接调,无需绕回渲染进程。
