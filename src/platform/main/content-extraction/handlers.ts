@@ -15,6 +15,7 @@
 import type { BrowserWindow, WebContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { captureFullPage } from './capture';
+import { cacheClipResult } from './clip-cache';
 
 /**
  * 右键菜单「📥 提取到笔记」click 回调:抓当前 guest 页面 → 推回 renderer。
@@ -29,6 +30,9 @@ export async function clipPageToRenderer(
   guest: WebContents,
 ): Promise<void> {
   const result = await captureFullPage(guest);
+  // 落盘缓存原始 FullPageResult(离线观察 Defuddle 真实格式 / 调优 import-pipeline);
+  // fire-and-forget,失败不阻断剪藏。
+  void cacheClipResult(result);
   if (mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(IPC_CHANNELS.WEB_CLIP_RESULT, result);
 }
