@@ -141,14 +141,16 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     extractedAt: Date.now(),
   };
 
-  // 诊断日志:看 Defuddle 实际抓到的 title + 正文头部(定位标题/markdown 解析问题)。
+  // 诊断日志:看 Defuddle 实际抓到的 title + 正文(JSON 编码以暴露真实换行/分隔符)。
+  // 定位 inline 链接/加粗/列表被当纯文本残留的根因(转换器对干净 markdown 正常,
+  // 故疑 Defuddle 输出的换行/结构异常)。临时,定位后删。
   console.log(
-    '[content-extraction] clip payload — title=%o domain=%o contentLen=%d head=%o',
+    '[content-extraction] clip payload — title=%o domain=%o contentLen=%d',
     payload.title,
     payload.domain,
     (payload.content || '').length,
-    (payload.content || '').slice(0, 200),
   );
+  console.log('[content-extraction] RAW content (JSON):', JSON.stringify((payload.content || '').slice(0, 1500)));
 
   // ① 规整 markdown(把内联图拆到独立行,使其能被识别成 image block)+ 正文内嵌图本地化
   const normalized = isolateInlineImages(payload.content || '');
