@@ -19,6 +19,7 @@ registerView({
     // — driver(web-sync-driver / web-translate-driver)是 capability 内部实现细节,view 不可见
     'web-rendering',
     'learning',  // 2026-05-25:选区右键 📖 查词 / 🌐 翻译(走 learning.ui.dictionaryPanel)
+    'content-extraction',  // 网页剪藏:右键「📥 提取到笔记」→ Defuddle 抓页 → note
   ],
   component: WebView,
   navSideTab: { label: 'Web', icon: '🌐', order: 3 },
