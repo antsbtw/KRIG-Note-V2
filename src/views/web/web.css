@@ -26,6 +26,10 @@
   flex: 1;
   display: flex;
   min-height: 0;
+  /* flex item 默认 min-width:auto(= 内容固有宽),slot 由全宽缩成左半宽时
+     webview 撑不下去 → 按旧宽渲染,右侧被裁(剪藏左右分栏后暴露)。
+     min-width:0 允许本容器随父级(slot)收窄。 */
+  min-width: 0;
   position: relative;
 }
 
@@ -33,6 +37,9 @@
   flex: 1;
   width: 100%;
   border: none;
+  /* 同上:webview 作为 flex item 必须能缩到容器宽度,否则右侧被裁。 */
+  min-width: 0;
+  min-height: 0;
   /* electron <webview> 标签默认 inline 元素,需要 block 撑满容器。
      Phase 4:活跃/非活跃由 inline style display(inline-flex / none)覆盖。 */
   display: inline-flex;
