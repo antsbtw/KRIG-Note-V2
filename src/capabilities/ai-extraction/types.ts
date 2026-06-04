@@ -52,6 +52,24 @@ export interface AIExtractFullResult {
   error?: string;
 }
 
+/** 右键单条提取结果(本期仅 Claude)*/
+export interface AIExtractTurnResult {
+  success: boolean;
+  /** 配对的用户提问(成功时)*/
+  userMessage?: string;
+  /** 该条 AI 回复 markdown(含 artifact → media:// 图 / fence)*/
+  markdown?: string;
+  artifactCount?: number;
+  error?: string;
+}
+
+/** 原生右键菜单点击推送 payload(guest viewport 坐标)*/
+export interface AIExtractTurnRequest {
+  serviceId: AIServiceId;
+  x: number;
+  y: number;
+}
+
 /** AI Host(嵌 claude.ai / chatgpt.com / gemini.google.com 的 webview)imperative API */
 export interface AIHostHandle {
   /** 导航到指定服务的 newChatUrl(切服务用) */
@@ -101,6 +119,10 @@ export interface AIConversationApi {
   getLatestResponse(): Promise<string | null>;
   /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)— 提取按钮主路径 */
   extractFull(serviceId: AIServiceId): Promise<AIExtractFullResult>;
+  /** 右键单条提取:按 guest viewport 坐标定位 + 抽该条对话(本期仅 Claude)*/
+  extractTurn(serviceId: AIServiceId, x: number, y: number): Promise<AIExtractTurnResult>;
+  /** 订阅原生右键菜单点击(main 推送 guest 坐标);返 unsubscribe */
+  onExtractTurnRequest(callback: (payload: AIExtractTurnRequest) => void): () => void;
   // ── pending thought 路由(场景 A: Note Ask AI 用) ──
   /** 在 Note Ask AI 流程发送时调,把已创建的 ai-response thought atom id 暂存,
    *  供后续"提取整页对话"按钮取出 update 而非重复 createNew */

@@ -702,6 +702,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiExtractFull(serviceId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, serviceId);
   },
+  aiExtractTurn(serviceId: string, x: number, y: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_TURN, { serviceId, x, y });
+  },
+  onAIExtractTurnRequest(
+    callback: (payload: { serviceId: string; x: number; y: number }) => void,
+  ): () => void {
+    const handler = (_event: unknown, payload: unknown): void =>
+      callback(payload as { serviceId: string; x: number; y: number });
+    ipcRenderer.on(IPC_CHANNELS.AI_EXTRACT_TURN_REQUEST, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AI_EXTRACT_TURN_REQUEST, handler);
+  },
   aiOpenSession(serviceId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, serviceId);
   },

@@ -262,3 +262,46 @@ export async function extractFullConversation(
 
   return result;
 }
+
+/**
+ * 右键「提取此对话到笔记」单条提取入口(本期仅 Claude)。
+ *
+ * 与 extractFullConversation 同源:复用活跃 webContents + image-proxy 把跨域图换 media://。
+ * x/y 是 guest webview viewport 坐标(原生 context-menu params.x/y),直接喂 guest 自己的
+ * elementFromPoint 定位被点的 assistant 回复 —— 与 V1 一致,无需坐标换算。
+ */
+export async function extractConversationTurn(
+  serviceId: AIServiceId,
+  x: number,
+  y: number,
+): Promise<{
+  success: boolean;
+  userMessage?: string;
+  markdown?: string;
+  artifactCount?: number;
+  error?: string;
+}> {
+  if (serviceId !== 'claude') {
+    return { success: false, error: `右键单条提取本期仅支持 Claude(当前:${serviceId})` };
+  }
+
+  const wc = getActiveAIWebContents(serviceId);
+  if (!wc) {
+    return { success: false, error: `No active ${serviceId} webview — open AI tab first` };
+  }
+
+  const { extractClaudeTurnAt } = await import('./extractors/claude-extract-turn');
+  const result = await extractClaudeTurnAt(wc, x, y);
+
+  // 同整页路径:把跨域 img URL 下载入 mediaStore 换 media://(离线/cookie 失效仍可见)
+  if (result.success && result.markdown) {
+    try {
+      const { proxyImagesInMarkdown } = await import('./extractors/image-proxy');
+      result.markdown = await proxyImagesInMarkdown(result.markdown);
+    } catch (err) {
+      console.warn('[ask-orchestrator] turn image proxy failed (non-fatal):', err);
+    }
+  }
+
+  return result;
+}

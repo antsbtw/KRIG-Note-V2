@@ -493,6 +493,22 @@ declare global {
         artifactCount?: number;
         error?: string;
       }>;
+      /** 右键「提取此对话到笔记」:按 guest viewport 坐标定位 + 抽单条(本期仅 Claude)*/
+      aiExtractTurn(
+        serviceId: AIServiceId,
+        x: number,
+        y: number,
+      ): Promise<{
+        success: boolean;
+        userMessage?: string;
+        markdown?: string;
+        artifactCount?: number;
+        error?: string;
+      }>;
+      /** main → renderer 推送:原生右键菜单点击,带 guest viewport 坐标;返 unsubscribe */
+      onAIExtractTurnRequest(
+        callback: (payload: { serviceId: AIServiceId; x: number; y: number }) => void,
+      ): () => void;
       /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
       aiOpenSession(
         serviceId: AIServiceId,

@@ -21,11 +21,14 @@
  * - local_resource(非 .svg/.html 文件)→ 下载到 sandbox 后按 ext 走 code fence
  */
 
+import type { WebContents } from 'electron';
 import { mediaStore } from '../../media/media-store-impl';
-import type {
-  ConversationData,
-  ConversationMessage,
-  MessageArtifact,
+import { fetchClaudeConversationRaw } from './claude-api-extractor';
+import {
+  getConversationData,
+  type ConversationData,
+  type ConversationMessage,
+  type MessageArtifact,
 } from './claude-conversation-query';
 
 // ── Public types ──
@@ -453,6 +456,209 @@ export async function extractFullConversationFromData(
  *   ## 🤖 AI (model)
  *   ... AI markdown(含 artifact image / fence)...
  */
+// ── 单条 turn 提取(右键「提取此对话到笔记」)──
+
+/**
+ * Claude assistant 回复节点 selector(V1 字面对齐:精确类 + 部分匹配但排除 response-body)。
+ * 单一 `.font-claude-response` 在某些 DOM 版本下数量/顺序与 API assistant message 不齐,
+ * 导致 ordinal 错位 —— 故对齐 V1 两段选择器,且改用「文本预览匹配」做主路径(见下)。
+ */
+const CLAUDE_ASSISTANT_SELECTOR =
+  '.font-claude-response, [class*="font-claude-response"]:not([class*="response-body"])';
+
+export type ExtractedSingleTurn = {
+  success: boolean;
+  userMessage?: string;
+  markdown?: string;
+  artifactCount?: number;
+  error?: string;
+};
+
+type ResolvedTarget = {
+  /** 被点回复在所有 assistant 回复节点中的序号(DOM 顺序)*/
+  ordinal: number;
+  /** 被点回复的纯文本预览(去空白,截断)— 用于跟 API message 文本匹配 */
+  preview: string;
+};
+
+/**
+ * 在 guest 页里用 (x,y) 定位被右键的 assistant 回复,返回 { ordinal, preview }。
+ *
+ * 定位策略(V1 字面):
+ *   1. elementFromPoint(x,y).closest(selector) 命中即用
+ *   2. miss 时(点在回复之间的留白)按 y 距离就近匹配最近的回复块
+ * ordinal=-1 表示点击不在任何 assistant 回复内(或附近)。
+ */
+async function resolveAssistantTarget(
+  wc: WebContents,
+  x: number,
+  y: number,
+): Promise<ResolvedTarget> {
+  const script = `(function() {
+    var sel = ${JSON.stringify(CLAUDE_ASSISTANT_SELECTOR)};
+    var parts = sel.split(',').map(function(s){ return s.trim(); });
+    // 主选择器匹配优先,次选择器只补不与主匹配重叠(祖先/后代)的节点,按 DOM 顺序插入
+    var list = Array.prototype.slice.call(document.querySelectorAll(parts[0]));
+    for (var j = 1; j < parts.length; j++) {
+      var extra = document.querySelectorAll(parts[j]);
+      for (var k = 0; k < extra.length; k++) {
+        var dup = false;
+        for (var p = 0; p < list.length; p++) {
+          if (list[p].contains(extra[k]) || extra[k].contains(list[p])) { dup = true; break; }
+        }
+        if (dup) continue;
+        var inserted = false;
+        for (var p2 = 0; p2 < list.length; p2++) {
+          if (list[p2].compareDocumentPosition(extra[k]) & Node.DOCUMENT_POSITION_PRECEDING) {
+            list.splice(p2, 0, extra[k]); inserted = true; break;
+          }
+        }
+        if (!inserted) list.push(extra[k]);
+      }
+    }
+    if (list.length === 0) return { ordinal: -1, preview: '' };
+    var el = document.elementFromPoint(${x}, ${y});
+    var hit = null;
+    for (var i = 0; i < parts.length && !hit; i++) {
+      hit = el && el.closest ? el.closest(parts[i]) : null;
+    }
+    if (!hit) {
+      var best = null;
+      for (var n = 0; n < list.length; n++) {
+        var rect = list[n].getBoundingClientRect();
+        var dy = 0;
+        if (${y} < rect.top) dy = rect.top - ${y};
+        else if (${y} > rect.bottom) dy = ${y} - rect.bottom;
+        var insideBand = ${y} >= rect.top - 24 && ${y} <= rect.bottom + 24;
+        if (!insideBand && dy > 240) continue;
+        if (!best || dy < best.dy) best = { node: list[n], dy: dy };
+      }
+      hit = best ? best.node : null;
+    }
+    if (!hit) return { ordinal: -1, preview: '' };
+    var text = (hit.innerText || hit.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    return { ordinal: list.indexOf(hit), preview: text };
+  })()`;
+  try {
+    const r = await wc.executeJavaScript(script);
+    if (r && typeof r.ordinal === 'number') {
+      return { ordinal: r.ordinal, preview: typeof r.preview === 'string' ? r.preview : '' };
+    }
+    return { ordinal: -1, preview: '' };
+  } catch {
+    return { ordinal: -1, preview: '' };
+  }
+}
+
+/**
+ * 把一条 message 的纯文本(textContent + contentParts text)归一化用于匹配。
+ */
+function normalizeForMatch(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 右键单条提取入口:定位 (x,y) 命中的 assistant 回复 → 取对应结构化 message →
+ * 转 markdown(含 artifact → mediaStore)+ 配对前一条 human 提问。
+ *
+ * message 定位:DOM ordinal 在某些 Claude DOM 版本下与 API assistant message 顺序/数量
+ * 不齐(导致错位),故**主路径用文本预览匹配**:拿被点回复的 innerText 预览,跟每条
+ * assistant message 的 textContent 求最佳前缀重叠;匹配不到才回退 ordinal。
+ */
+export async function extractClaudeTurnAt(
+  wc: WebContents,
+  x: number,
+  y: number,
+): Promise<ExtractedSingleTurn> {
+  const target = await resolveAssistantTarget(wc, x, y);
+  if (target.ordinal < 0) {
+    return { success: false, error: '右键位置不在任何 AI 回复内,请对准某条回复再试' };
+  }
+  const ordinal = target.ordinal;
+
+  const raw = await fetchClaudeConversationRaw(wc);
+  if (!raw) {
+    return {
+      success: false,
+      error: '抓取对话失败(不在 claude.ai/chat/{id}?未登录?)',
+    };
+  }
+  const conversation = getConversationData(raw);
+  if (!conversation || conversation.messages.length === 0) {
+    return { success: false, error: '对话为空或无法解析' };
+  }
+
+  const assistantMsgs = conversation.messages.filter((m) => m.sender === 'assistant');
+  if (assistantMsgs.length === 0) {
+    return { success: false, error: '对话内没有 AI 回复可提取' };
+  }
+
+  // ── message 定位:文本预览匹配优先,ordinal 兜底 ──
+  // 被点回复的 DOM innerText 预览(target.preview)跟每条 assistant message 的 textContent
+  // 求重叠;preview 是 DOM 渲染后文本(可能含 artifact 占位/格式差异),故用「双向前缀
+  // 包含 + 公共前缀长度」打分,取分最高者。匹配可信(命中较长公共前缀)才用,否则回退
+  // ordinal,避免短文本/纯 artifact 回复误配。
+  let msg: ConversationMessage | undefined;
+  let matchedBy: 'preview' | 'ordinal' = 'ordinal';
+  const preview = normalizeForMatch(target.preview);
+  if (preview.length >= 12) {
+    let bestScore = 0;
+    let bestMsg: ConversationMessage | undefined;
+    for (const m of assistantMsgs) {
+      const body = normalizeForMatch(m.textContent);
+      if (!body) continue;
+      // 公共前缀长度(被点预览 vs message 正文)
+      const lim = Math.min(preview.length, body.length);
+      let common = 0;
+      while (common < lim && preview[common] === body[common]) common++;
+      // 或一方包含另一方(预览可能被截断,正文更长)
+      const contains = body.startsWith(preview) || preview.startsWith(body.slice(0, preview.length));
+      const score = contains ? Math.max(common, preview.length) : common;
+      if (score > bestScore) { bestScore = score; bestMsg = m; }
+    }
+    // 命中至少 12 字符公共前缀才认匹配(经验阈值,避免开头雷同的不同回复误配)
+    if (bestMsg && bestScore >= 12) {
+      msg = bestMsg;
+      matchedBy = 'preview';
+    }
+  }
+  if (!msg) {
+    msg = assistantMsgs[ordinal];
+  }
+  if (!msg) {
+    return {
+      success: false,
+      error: `定位到第 ${ordinal + 1} 条回复,但对话数据仅 ${assistantMsgs.length} 条(页面与数据不同步?请刷新后重试)`,
+    };
+  }
+
+  let markdown = await messageToMarkdown(msg);
+
+  // 空兜底:匹配命中的 message 转空(罕见:contentParts 解析缺漏)→ 退回 ordinal message 再试
+  if (!markdown.trim() && matchedBy === 'preview' && assistantMsgs[ordinal] && assistantMsgs[ordinal] !== msg) {
+    console.warn('[ai-extract-turn] preview-matched message empty, fallback to ordinal');
+    msg = assistantMsgs[ordinal];
+    markdown = await messageToMarkdown(msg);
+  }
+  if (!markdown.trim()) {
+    return { success: false, error: '该回复无可提取内容(可能仍在生成中?请等回复完成再试)' };
+  }
+
+  // 配对前一条 human 提问(V1 / 整页提取同款:index 小于本条的最后一个 human)
+  // —— 用最终 msg.index 算,确保空兜底换 message 后提问也跟着对
+  const humanMsgs = conversation.messages.filter(
+    (m) => m.sender === 'human' && m.index < msg.index,
+  );
+  const humanMsg = humanMsgs.length > 0 ? humanMsgs[humanMsgs.length - 1] : null;
+
+  return {
+    success: true,
+    userMessage: humanMsg?.textContent.trim() ?? '',
+    markdown,
+    artifactCount: msg.artifacts.length,
+  };
+}
+
 export function buildFullMarkdownFromExtracted(extracted: ExtractedConversation): string {
   const headerLines = [`# ${extracted.title}`];
   if (extracted.model) headerLines.push(`> 模型: \`${extracted.model}\``);

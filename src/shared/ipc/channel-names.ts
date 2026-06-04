@@ -221,6 +221,8 @@ export const IPC_CHANNELS = {
   AI_PASTE_AND_SEND: 'ai.paste-and-send',           // renderer → main:只 paste + send 不等回复(Phase 6 问 AI 路径)
   AI_GET_LATEST_RESPONSE: 'ai.get-latest-response', // renderer → main:取 SSE 缓存最新一次回复(提取按钮用)
   AI_EXTRACT_FULL: 'ai.extract-full',               // renderer → main:整页对话提取(多 turn + artifact + 图片)
+  AI_EXTRACT_TURN: 'ai.extract-turn',               // renderer → main:按坐标定位 + 抽单条对话(右键提取,本期仅 Claude)
+  AI_EXTRACT_TURN_REQUEST: 'ai.extract-turn-request', // main → renderer 推送:原生右键菜单点击,带 guest viewport 坐标 {x,y}
   AI_OPEN_SESSION: 'ai.open-session',               // renderer → main:把后台 webview 转前台 (AI View Host 用,本期占位)
   AI_SERVICE_LIST: 'ai.service-list',               // renderer → main:取三服务清单(可直接读 ai-service-types,留作扩展)
   AI_SSE_STATUS: 'ai.sse-status',                   // renderer → main:debug 用

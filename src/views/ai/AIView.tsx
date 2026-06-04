@@ -33,11 +33,12 @@ interface AIViewProps {
 }
 
 export function AIView({ workspaceId }: AIViewProps) {
-  // 间接路由拿 Host 组件(useMemo 缓存避免每次渲染重 require + 保持 React identity)
-  const Host = useMemo(
-    () => requireCapabilityApi<AIConversationApi>('ai-extraction').Host,
+  // 间接路由拿 capability api(useMemo 缓存避免每次渲染重 require + 保持 React identity)
+  const aiApi = useMemo(
+    () => requireCapabilityApi<AIConversationApi>('ai-extraction'),
     [],
   );
+  const Host = aiApi.Host;
   const hostRef = useRef<AIHostHandle | null>(null);
 
   // 订阅 per-ws state(currentServiceId)
@@ -132,6 +133,23 @@ export function AIView({ workspaceId }: AIViewProps) {
     const unsub = bus.channels.subscribe('ai.paste-and-send', handle);
     return () => unsub();
   }, [workspaceId]);
+
+  /**
+   * 订阅原生右键菜单「📥 提取此对话到笔记」点击(main 经 AI_EXTRACT_TURN_REQUEST 推送
+   * guest viewport 坐标)→ 触发 ai-view.extract-turn 命令完成「定位单条 → 抽取 → 落右槽 Note」。
+   *
+   * 命令内部用 workspaceManager.getActiveId 取当前 ws,与本 AIView 实例 workspaceId 可能不同
+   * (多 ws 场景),但右键发生在用户当前可见的 webview = active ws,故走 active 即正确。
+   */
+  useEffect(() => {
+    const unsub = aiApi.onExtractTurnRequest((payload) => {
+      void commandRegistry.execute('ai-view.extract-turn', {
+        x: payload.x,
+        y: payload.y,
+      });
+    });
+    return () => unsub();
+  }, [aiApi]);
 
   /**
    * "提取整页对话" — 走 ai-view.extract-conversation 命令(Phase 6.5 实施)。

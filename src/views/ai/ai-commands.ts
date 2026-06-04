@@ -181,6 +181,65 @@ export function registerAICommands(): void {
   });
 
   /**
+   * 右键「提取此对话到笔记」单条提取 → 插入右槽 Note(本期仅 Claude)。
+   *
+   * 与「提取整页对话」的差异(用户定调):单条提取专门往右槽打开的 Note 里塞,
+   * 不像整页会 fallback 建 Thought 卡片。右槽不是 Note 时弹提示请用户先开 Note,
+   * 不静默建卡片 / 不新建文档 —— 语义就是「把这条对话接到我正在写的 Note」。
+   *
+   * 参数:{ x, y } guest viewport 坐标(由 AIView 订阅 onExtractTurnRequest 透传)。
+   */
+  commandRegistry.register('ai-view.extract-turn', async (arg: unknown) => {
+    const p = (arg ?? {}) as { x?: unknown; y?: unknown };
+    if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
+    const wsId = workspaceManager.getActiveId();
+    if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+
+    // 落地前置:右槽必须是 Note(用户定调:单条提取只塞右槽 Note)
+    if (ws.slotBinding.right !== 'note-view') {
+      window.alert('请先在右栏打开 Note,再提取此对话');
+      return;
+    }
+
+    const serviceId = getAIWsState(ws).currentServiceId;
+    const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
+    const result = await ai.extractTurn(serviceId, p.x, p.y);
+    if (!result.success || !result.markdown) {
+      window.alert(`提取失败:${result.error || '未知错误'}`);
+      return;
+    }
+
+    // 单条包成 ## 👤 用户 / ## 🤖 AI 的小 markdown(wrapAITurnsInToggle 按这俩 H2 识别 turn)
+    const serviceName = getAIServiceProfile(serviceId).name;
+    const blocks: string[] = [];
+    if (result.userMessage && result.userMessage.trim()) {
+      blocks.push(`## 👤 用户\n\n${result.userMessage.trim()}`);
+    }
+    blocks.push(`## 🤖 AI (${serviceName})\n\n${result.markdown}`);
+    const turnMarkdown = blocks.join('\n\n');
+
+    const envelope = aiMarkdownToNoteDoc(turnMarkdown);
+    const pmDoc = envelope.payload as { content?: unknown[] };
+    const rawNodes = Array.isArray(pmDoc.content) ? pmDoc.content : [];
+    const nodes = wrapAITurnsInToggle(rawNodes, serviceName);
+    if (nodes.length === 0) {
+      window.alert('提取失败:该对话转空文档');
+      return;
+    }
+
+    const ok = commandRegistry.execute('note-view.append-pm-nodes', {
+      nodes,
+      mode: 'cursor-or-end',
+    });
+    if (!ok) {
+      // PM 实例没挂(罕见,Note 还没加载完?)— 不静默丢,提示用户
+      window.alert('插入失败:右栏 Note 尚未就绪,请稍候再试');
+    }
+  });
+
+  /**
    * 端到端 askAI:给当前 ws 的活跃 AI 服务发 prompt,等回复(broadcast 自动推 onAIResponseReady)。
    *
    * Phase 6 改"问 AI"为对话式(开 AI Web + paste + 用户主导)后,本命令保留作为

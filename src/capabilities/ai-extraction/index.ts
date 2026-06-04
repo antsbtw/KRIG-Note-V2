@@ -32,6 +32,7 @@ import type {
   AISSEStatus,
   AIServiceListItem,
   AISyncAppendTurnPayload,
+  AIExtractTurnRequest,
 } from './types';
 import { Host } from './Host';
 import {
@@ -54,6 +55,9 @@ export type {
   AIHostProps,
   AISyncAppendTurnPayload,
   AISyncTurn,
+  AIExtractFullResult,
+  AIExtractTurnResult,
+  AIExtractTurnRequest,
 } from './types';
 
 async function askAI(
@@ -85,6 +89,16 @@ async function getLatestResponse(): Promise<string | null> {
 
 async function extractFull(serviceId: AIServiceId) {
   return window.electronAPI.aiExtractFull(serviceId);
+}
+
+async function extractTurn(serviceId: AIServiceId, x: number, y: number) {
+  return window.electronAPI.aiExtractTurn(serviceId, x, y);
+}
+
+function onExtractTurnRequest(
+  callback: (payload: AIExtractTurnRequest) => void,
+): () => void {
+  return window.electronAPI.onAIExtractTurnRequest(callback);
 }
 
 function onResponseReady(
@@ -122,6 +136,8 @@ export const aiExtractionCapability: AIConversationApi = {
   getSSEStatus,
   getLatestResponse,
   extractFull,
+  extractTurn,
+  onExtractTurnRequest,
   onResponseReady,
   onError,
   Host,

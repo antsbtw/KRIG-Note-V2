@@ -10,7 +10,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
 import type { AIAskOptions, AIAskResult } from '@shared/ipc/ai-types';
-import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse, extractFullConversation } from './ask-orchestrator';
+import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse, extractFullConversation, extractConversationTurn } from './ask-orchestrator';
 import { getActiveAIWebContents } from './webview-registry';
 import { registerAISyncHandlers } from './ai-sync-orchestrator';
 
@@ -85,6 +85,15 @@ export function registerAIHandlers(): void {
       return { success: false, error: 'invalid serviceId' };
     }
     return extractFullConversation(serviceId);
+  });
+
+  // #7b ai.extract-turn — 右键「提取此对话到笔记」:按坐标定位 + 抽单条(本期仅 Claude)
+  ipcMain.handle(IPC_CHANNELS.AI_EXTRACT_TURN, async (_e, payload: unknown) => {
+    const p = payload as { serviceId?: unknown; x?: unknown; y?: unknown } | null;
+    if (!p || !isServiceId(p.serviceId) || typeof p.x !== 'number' || typeof p.y !== 'number') {
+      return { success: false, error: 'invalid extractTurn payload' };
+    }
+    return extractConversationTurn(p.serviceId, p.x, p.y);
   });
 
   // #8/#9 ai-sync.start / ai-sync.stop — renderer 端 ai-sync-integration 控制
