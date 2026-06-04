@@ -64,6 +64,49 @@ async function localizeAudio(url: string): Promise<string> {
   return url;
 }
 
+/**
+ * 去重折叠/disclosure 控件造成的重复(折叠态 + 展开态两份相同内容都在 DOM 里 →
+ * Defuddle 把要点抓两遍,如 WSJ "Quick Summary":3 条要点 + AI 脚注后,首条要点
+ * 又作为"展开态 teaser"重复出现 + "View more")。重复**不一定相邻**(中间隔脚注)。
+ *
+ * 两条保守规则,避免误删正文正常内容:
+ *  1) 相邻完全相同的可去重行 → 去后一份(同段重复)。
+ *  2) **列表项**全局去重:某 `- `/`1. ` 列表项的文本若与**先前出现过的列表项**完全
+ *     相同(trim 后),去掉后一份。正文极少有两条一字不差的完整要点,而折叠控件
+ *     的双份要点必然字面相同 → 精准命中。非列表行不做全局去重(段落可能合理重复)。
+ *  另:顺带去掉孤立的 "View more" / "Show more" 残留行(折叠控件 teaser 噪音)。
+ */
+export function dedupeConsecutiveLines(markdown: string): string {
+  const lines = markdown.split('\n');
+  const out: string[] = [];
+  let prevKey: string | null = null;
+  const seenListItems = new Set<string>();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isListItem = /^([-*]|\d+\.)\s+/.test(trimmed);
+    const dedupable = trimmed.length > 0 && (isListItem || trimmed.length >= 12);
+
+    // 折叠控件 teaser 噪音:孤立的 "View more" / "Show more"
+    if (/^(view|show)\s+more$/i.test(trimmed)) continue;
+
+    // 规则 1:相邻完全相同
+    if (dedupable && trimmed === prevKey) continue;
+
+    // 规则 2:列表项全局去重(去掉文本完全相同的后续列表项)
+    if (isListItem) {
+      const body = trimmed.replace(/^([-*]|\d+\.)\s+/, '');
+      if (seenListItems.has(body)) continue;
+      seenListItems.add(body);
+    }
+
+    out.push(line);
+    if (dedupable) prevKey = trimmed;
+    else if (trimmed.length === 0) { /* 空行不重置 prevKey */ }
+    else prevKey = null;
+  }
+  return out.join('\n');
+}
+
 /** 匹配 markdown 中独立成行或内联的图片 `![alt](url)`(url 不含空格/右括号)。 */
 const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
@@ -75,7 +118,7 @@ const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
  * 当纯文本留下(用户看到裸 `![](media://...)`)。本函数在内联图前后补换行,使其独占
  * 一行 → md-to-pm 转成 image block,文字另起段落。
  */
-function isolateInlineImages(markdown: string): string {
+export function isolateInlineImages(markdown: string): string {
   // 在「行内非行首的 ![](...)」前补 \n\n;在其后若紧跟非空白也补 \n\n。
   // 逐行处理避免误伤已独占行的图片。
   return markdown
@@ -150,8 +193,9 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     (payload.content || '').length,
   );
 
-  // ① 规整 markdown(把内联图拆到独立行,使其能被识别成 image block)+ 正文内嵌图本地化
-  const normalized = isolateInlineImages(payload.content || '');
+  // ① 规整 markdown:去相邻重复行(折叠控件双份) → 内联图拆行 → 内嵌图本地化
+  const deduped = dedupeConsecutiveLines(payload.content || '');
+  const normalized = isolateInlineImages(deduped);
   const localizedMarkdown = await localizeInlineImages(normalized);
 
   // ② markdownToAtoms 正文 drafts。**不传 titleHint** —— 否则它会把正文首段(可能是
