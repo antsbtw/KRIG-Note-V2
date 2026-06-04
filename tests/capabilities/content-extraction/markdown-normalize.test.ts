@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   dedupeConsecutiveLines,
   isolateInlineImages,
+  stripRedundantImageAlt,
 } from '@capabilities/content-extraction/internal/import-pipeline';
 
 describe('dedupeConsecutiveLines', () => {
@@ -72,5 +73,45 @@ describe('isolateInlineImages', () => {
   it('已独占一行的图片不动', () => {
     const md = '![alt](https://x.test/a.jpg)';
     expect(isolateInlineImages(md).trim()).toBe(md);
+  });
+});
+
+describe('stripRedundantImageAlt', () => {
+  it('删图片后紧跟的、与 alt 相同的冗余回显段(WSJ alt 回显),保留真 caption', () => {
+    const md = [
+      '![President Trump points his finger at a cabinet meeting.](https://x.test/im.jpg)',
+      '',
+      'President Trump points his finger at a cabinet meeting.', // ← alt 回显,删
+      '',
+      'President Trump has said he is in no rush. Evan Vucci/Reuters', // ← 真 caption,留
+      '',
+      'But U.S. officials said the attacks ratcheted up pressure.',
+    ].join('\n');
+    const out = stripRedundantImageAlt(md);
+    // alt 文本在正文里不再出现(只剩图片 ![alt] 属性内那次)
+    const bodyOnly = out.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+    expect(bodyOnly).not.toContain('points his finger at a cabinet meeting.');
+    // caption + 正文保留
+    expect(out).toContain('Evan Vucci/Reuters');
+    expect(out).toContain('ratcheted up pressure');
+    // 图片本身保留
+    expect(out).toContain('](https://x.test/im.jpg)');
+  });
+
+  it('不误删:图片后的段落与 alt 不同则保留', () => {
+    const md = ['![a cat](https://x.test/c.jpg)', '', 'A completely different caption sentence here.'].join('\n');
+    expect(stripRedundantImageAlt(md)).toContain('A completely different caption sentence here.');
+  });
+
+  it('不误删:正文里恰好与某图 alt 同文但不紧邻图片 → 保留', () => {
+    const md = [
+      '![hello world](https://x.test/h.jpg)',
+      '',
+      'real caption different text',
+      '',
+      'hello world', // 离图片不紧邻(中间隔了 caption)→ 不删
+    ].join('\n');
+    const out = stripRedundantImageAlt(md);
+    expect(out.split('hello world').length - 1).toBe(2); // alt 属性 1 次 + 正文 1 次
   });
 });

@@ -138,6 +138,36 @@ export function isolateInlineImages(markdown: string): string {
     .replace(/\n{3,}/g, '\n\n');
 }
 
+/** 独占一行的图片 `![alt](url)`,捕获 alt(group 1)。 */
+const MD_IMAGE_LINE_RE = /^\s*!\[([^\]]*)\]\([^)\s]+(?:\s+"[^"]*")?\)\s*$/;
+
+/**
+ * 去掉「图片后紧跟的、与该图 alt 完全相同的冗余段落」。
+ *
+ * Defuddle 对部分站点会在 `![alt](url)` 之后又把 alt 原样输出成一段纯文本(无障碍
+ * 描述回显,原网页不显示),如 WSJ 图片下重复出现 "U.S. President Donald Trump,
+ * in a blue suit..."。该段是冗余噪音(图片已带 alt),删之;真 caption(图注+署名)
+ * 文本与 alt 不同,不受影响,保留为正文。
+ *
+ * 保守:只删**紧邻图片的下一个非空行**且**完全等于 alt**(trim);不全局删,避免误伤
+ * 正文里恰好与某 alt 同文的句子。需在 isolateInlineImages 之后调(图片已独占行)。
+ */
+export function stripRedundantImageAlt(markdown: string): string {
+  const lines = markdown.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(MD_IMAGE_LINE_RE);
+    if (!m) continue;
+    const alt = m[1].trim();
+    if (!alt) continue;
+    // 找紧邻图片的下一个非空行
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === '') j++;
+    // 完全等于 alt → 置空(join 后即空行,被 markdownToProseMirror 忽略)
+    if (j < lines.length && lines[j].trim() === alt) lines[j] = '';
+  }
+  return lines.join('\n');
+}
+
 /**
  * 正文内嵌图本地化:扫描 markdown 所有 `![]()`,逐个 mediaDownload('image'),
  * 把 url 改写为 media://(失败降级远程)。返回改写后的 markdown。
@@ -193,9 +223,11 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     (payload.content || '').length,
   );
 
-  // ① 规整 markdown:去相邻重复行(折叠控件双份) → 内联图拆行 → 内嵌图本地化
+  // ① 规整 markdown:去相邻重复行(折叠控件双份) → 内联图拆行 → 去图片 alt 冗余回显
+  //    → 内嵌图本地化
   const deduped = dedupeConsecutiveLines(payload.content || '');
-  const normalized = isolateInlineImages(deduped);
+  const isolated = isolateInlineImages(deduped);
+  const normalized = stripRedundantImageAlt(isolated);
   const localizedMarkdown = await localizeInlineImages(normalized);
 
   // ② markdownToAtoms 正文 drafts。**不传 titleHint** —— 否则它会把正文首段(可能是
