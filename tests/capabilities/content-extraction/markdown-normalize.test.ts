@@ -9,6 +9,7 @@ import {
   dedupeConsecutiveLines,
   isolateInlineImages,
   stripRedundantImageAlt,
+  joinSplitLinkedImages,
 } from '@capabilities/content-extraction/internal/import-pipeline';
 
 describe('dedupeConsecutiveLines', () => {
@@ -73,6 +74,26 @@ describe('isolateInlineImages', () => {
   it('已独占一行的图片不动', () => {
     const md = '![alt](https://x.test/a.jpg)';
     expect(isolateInlineImages(md).trim()).toBe(md);
+  });
+});
+
+describe('joinSplitLinkedImages', () => {
+  it('合并被拆多行的链接图片 [ \\n\\n ![](img) \\n\\n ](url) → 单行', () => {
+    const md = '[\n\n![](https://x.test/im.jpg)\n\n](https://x.test/article)';
+    const out = joinSplitLinkedImages(md);
+    expect(out).toBe('[![](https://x.test/im.jpg)](https://x.test/article)');
+    // 无孤立括号
+    expect(out.split('\n').some((l) => l.trim() === '[')).toBe(false);
+  });
+
+  it('带 alt 的多行链接图片也合并', () => {
+    const md = '[\n\n![Headline](https://x.test/c.jpg)\n\n](https://x.test/a)';
+    expect(joinSplitLinkedImages(md)).toBe('[![Headline](https://x.test/c.jpg)](https://x.test/a)');
+  });
+
+  it('不动正常的单行链接图片', () => {
+    const md = '[![a](https://x.test/a.jpg)](https://x.test/p)';
+    expect(joinSplitLinkedImages(md)).toBe(md);
   });
 });
 

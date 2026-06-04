@@ -111,6 +111,19 @@ export function dedupeConsecutiveLines(markdown: string): string {
 const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
 /**
+ * 合并被 Defuddle 拆成多行的链接图片(列表/卡片页常见):
+ *   `[`\n\n`![alt](img)`\n\n`](url)`  →  `[![alt](img)](url)`(单行)
+ * 不合并 → isolate/md-to-pm 会留下孤立 `[` 与 `](url)` 断裂行。合并后整行交给
+ * md-to-pm 的 block linked-image 分支转成 image。
+ */
+export function joinSplitLinkedImages(markdown: string): string {
+  return markdown.replace(
+    /\[\s*\n\s*\n\s*(!\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\))\s*\n\s*\n\s*\](\([^)\s]+(?:\s+"[^"]*")?\))/g,
+    (_full, img: string, link: string) => `[${img}]${link}`,
+  );
+}
+
+/**
  * 规整 Defuddle markdown:把**与文字同行的图片** `![](url)` 拆到独立行。
  *
  * 背景:Defuddle 常把首图内联在首段开头(如 `![](img.jpg) The Fire TV app...`)。
@@ -126,6 +139,12 @@ export function isolateInlineImages(markdown: string): string {
     .map((line) => {
       // 整行已是单张图片(可含前后空白)→ 不动
       if (/^\s*!\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\)\s*$/.test(line)) return line;
+      // 整行是链接图片 [![alt](img)](url)(列表/卡片页)→ **不拆**,整行留给
+      //   md-to-pm 的 block linked-image 分支(拆了会把外层 [ 和 ](url) 拆散成
+      //   孤立 [ + 图片 + 孤立 ](url),断裂)。
+      if (/^\s*\[!\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\)\]\([^)\s]+(?:\s+"[^"]*")?\)\s*$/.test(line)) {
+        return line;
+      }
       // 行内含图片 → 用换行把每个图片隔成独立行
       if (MD_IMAGE_RE.test(line)) {
         MD_IMAGE_RE.lastIndex = 0;
@@ -223,9 +242,10 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     (payload.content || '').length,
   );
 
-  // ① 规整 markdown:去相邻重复行(折叠控件双份) → 内联图拆行 → 去图片 alt 冗余回显
-  //    → 内嵌图本地化
-  const deduped = dedupeConsecutiveLines(payload.content || '');
+  // ① 规整 markdown:合并被拆多行的链接图片 → 去相邻重复行(折叠控件双份)
+  //    → 内联图拆行 → 去图片 alt 冗余回显 → 内嵌图本地化
+  const joined = joinSplitLinkedImages(payload.content || '');
+  const deduped = dedupeConsecutiveLines(joined);
   const isolated = isolateInlineImages(deduped);
   const normalized = stripRedundantImageAlt(isolated);
   const localizedMarkdown = await localizeInlineImages(normalized);
