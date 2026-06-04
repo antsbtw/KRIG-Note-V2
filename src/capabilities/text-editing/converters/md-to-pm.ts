@@ -190,6 +190,28 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
+    // Block-level 链接图片 [![alt](img)](url) — 列表/卡片页常见(WSJ 栏目页等),
+    // 一张可点击封面图。V2 image schema 无 link attr → 输出 image 节点(丢外层链接,
+    // 图片是剪藏的主体)。必须在裸 block-image 之前判,否则 ![ 不匹配 [ 开头会落到
+    // 默认 paragraph → parseInline 的链接正则被 [ ] ( ) 嵌套打乱产出断裂 ](url)。
+    const linkedImg = line.trim().match(/^\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)\s*$/);
+    if (linkedImg) {
+      const alt = linkedImg[1] || '';
+      const rawSrc = linkedImg[2];
+      const resolved = await resolvePMImageSrc(rawSrc);
+      if (resolved.ok && resolved.url) {
+        content.push({
+          type: 'image',
+          attrs: { src: resolved.url, alt },
+          content: [{ type: 'paragraph' }],
+        });
+      } else {
+        content.push(unknownNode('image', line, resolved.reason || 'mediaPutBase64 failed'));
+      }
+      i++;
+      continue;
+    }
+
     // Block-level image — V2 未实现 image,输出 image 节点(schema 补齐时直接生效)
     const imgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (imgMatch) {

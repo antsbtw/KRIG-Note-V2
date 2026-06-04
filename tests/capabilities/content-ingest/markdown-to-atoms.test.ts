@@ -137,6 +137,22 @@ describe('markdownToAtoms', () => {
     expect(link?.attrs?.href).toBe('https://x.test/imdb');
   });
 
+  it('链接图片 [![alt](img)](url) → image draft(列表/卡片页),不产断裂 ](url)', async () => {
+    const md = '[![Headline Alt](https://x.test/cover.jpg)](https://x.test/article)';
+    const { atoms } = await markdownToAtoms(md);
+    const img = atoms.find((a) => a.payload.payload.type === 'image');
+    expect(img).toBeDefined();
+    const attrs = img!.payload.payload.attrs as Record<string, unknown>;
+    expect(attrs.src).toBe('https://x.test/cover.jpg');
+    expect(attrs.alt).toBe('Headline Alt');
+    // 不应残留断裂的 ](url) 纯文本
+    const allText = atoms
+      .flatMap((a) => (a.payload.payload.content ?? []) as Array<{ text?: string }>)
+      .map((n) => n.text ?? '')
+      .join('');
+    expect(allText).not.toContain('](http');
+  });
+
   it('扁平 inline(无嵌套)仍正确 — bold/italic/code/link 不回归', async () => {
     const { atoms } = await markdownToAtoms(
       'a **b** c *d* e `f` g [h](https://x.test/h)',

@@ -275,7 +275,40 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
         ]
       : [];
 
-  const atoms: PmAtomDraft[] = [titleDraft, ...lead, ...bodyAtoms];
+  // 列表页/无正文页提示:Defuddle 为单篇文章正文设计,栏目页/首页/搜索页这类
+  // "卡片流"没有正文,wordCount 极低(如 WSJ /world 仅 33)。仍允许剪(用户主动
+  // 触发),但前置一行斜体提示,说明这页可能不是文章、内容可能不完整。
+  const LOW_CONTENT_WORDS = 50;
+  const lowContent = (payload.wordCount ?? 0) < LOW_CONTENT_WORDS;
+  if (lowContent) {
+    console.warn(
+      `[content-extraction] low word count (${payload.wordCount}); 可能是列表/栏目页而非文章,剪藏内容可能不完整`,
+    );
+  }
+  const notice: PmAtomDraft[] = lowContent
+    ? [
+        {
+          tmpId: alloc(),
+          payload: {
+            domain: 'pm',
+            payload: {
+              type: 'paragraph',
+              attrs: {},
+              content: [
+                {
+                  type: 'text',
+                  text: '⚠️ 此页正文很少(可能是列表/栏目页而非文章),剪藏内容可能不完整。',
+                  marks: [{ type: 'italic' }],
+                },
+              ],
+            },
+          },
+          from,
+        },
+      ]
+    : [];
+
+  const atoms: PmAtomDraft[] = [titleDraft, ...lead, ...notice, ...bodyAtoms];
 
   // ③a contentImages(Defuddle 遗漏的正文图)→ image block draft(本地化)
   for (const img of payload.contentImages ?? []) {
