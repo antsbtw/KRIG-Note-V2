@@ -603,7 +603,9 @@ export function WebView({ workspaceId }: WebViewProps) {
             translateMode={isTranslateMode && tab.id === activeTabId}
             partition={`persist:webview-${workspaceId}`}
             className="krig-web-view__webview"
-            style={{ display: tab.id === activeTabId ? 'inline-flex' : 'none' }}
+            // 活跃 tab 用 block 级 flex 撑满容器(inline-flex 是 shrink-to-fit,
+            // 左右分栏收窄后撑不满 slot,右侧留白)。非活跃 none 隐藏。
+            style={{ display: tab.id === activeTabId ? 'flex' : 'none' }}
             onUrlChanged={(url) => handleUrlChanged(tab.id, url)}
             onLoadingChanged={(l) => handleLoadingChanged(tab.id, l)}
             onNavStateChanged={(s) => handleNavStateChanged(tab.id, s)}

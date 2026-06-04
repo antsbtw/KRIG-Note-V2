@@ -190,6 +190,28 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
+    // Block-level 链接图片 [![alt](img)](url) — 列表/卡片页常见(WSJ 栏目页等),
+    // 一张可点击封面图。V2 image schema 无 link attr → 输出 image 节点(丢外层链接,
+    // 图片是剪藏的主体)。必须在裸 block-image 之前判,否则 ![ 不匹配 [ 开头会落到
+    // 默认 paragraph → parseInline 的链接正则被 [ ] ( ) 嵌套打乱产出断裂 ](url)。
+    const linkedImg = line.trim().match(/^\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)\s*$/);
+    if (linkedImg) {
+      const alt = linkedImg[1] || '';
+      const rawSrc = linkedImg[2];
+      const resolved = await resolvePMImageSrc(rawSrc);
+      if (resolved.ok && resolved.url) {
+        content.push({
+          type: 'image',
+          attrs: { src: resolved.url, alt },
+          content: [{ type: 'paragraph' }],
+        });
+      } else {
+        content.push(unknownNode('image', line, resolved.reason || 'mediaPutBase64 failed'));
+      }
+      i++;
+      continue;
+    }
+
     // Block-level image — V2 未实现 image,输出 image 节点(schema 补齐时直接生效)
     const imgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (imgMatch) {
@@ -423,8 +445,32 @@ function splitCellOnBr(cell: string): string[] {
   return parts.length > 0 ? parts : [cell];
 }
 
+type Mark = NonNullable<PMNode['marks']>[number];
+
 /**
- * 解析 inline:bold / italic / code / link / inline math
+ * 给一组 inline node 叠加一个外层 mark(递归 mark 嵌套用)。
+ *
+ * - text 节点:把 mark 加进 marks(同 type 已存在则不重复;link 以外层为准不覆盖内层)。
+ * - 非 text(如 mathInline):mark 不适用,原样返回。
+ *
+ * mark 顺序:外层 mark 追加在内层 marks 之后(PM 不依赖 marks 顺序,渲染等价)。
+ */
+function applyMark(nodes: PMNode[], mark: Mark): PMNode[] {
+  return nodes.map((n) => {
+    if (n.type !== 'text') return n;
+    const existing = n.marks ?? [];
+    if (existing.some((m) => m.type === mark.type)) return n; // 同类型不重复叠
+    return { ...n, marks: [...existing, mark] };
+  });
+}
+
+/**
+ * 解析 inline:bold / italic / strike / code / link / inline math
+ *
+ * **支持 mark 嵌套**(2026-06:网页剪藏暴露 Defuddle 输出 `[**X**](url)` /
+ * `**[X](url)**` 这类 link↔bold 互套)。算法:匹配到一个 mark 分隔符后,**递归**
+ * 解析其内部文本,再把当前 mark 叠加到每个子 node 上 → 任意层嵌套都正确展开。
+ * code(代码内容字面)与 mathInline(节点,非 mark)为叶子,不再递归。
  *
  * V2 已实现 marks:bold / italic / code / link / underline / strike / highlight
  * V2 未实现 inline node:mathInline → 输出 `{ type: 'mathInline', ... }`(等待 schema 补齐)
@@ -445,19 +491,25 @@ function parseInline(text: string): PMNode[] {
     }
 
     if (match[2] !== undefined) {
-      nodes.push({ type: 'text', text: match[2], marks: [{ type: 'bold' }] });
+      // **bold** — 递归解析内部(可含 link / italic / …),叠 bold
+      nodes.push(...applyMark(parseInline(match[2]), { type: 'bold' }));
     } else if (match[3] !== undefined) {
-      nodes.push({ type: 'text', text: match[3], marks: [{ type: 'strike' }] });
+      // ~~strike~~
+      nodes.push(...applyMark(parseInline(match[3]), { type: 'strike' }));
     } else if (match[4] !== undefined) {
-      nodes.push({ type: 'text', text: match[4], marks: [{ type: 'italic' }] });
+      // *italic*
+      nodes.push(...applyMark(parseInline(match[4]), { type: 'italic' }));
     } else if (match[5] !== undefined) {
+      // `code` — 内容字面,叶子(不递归)
       nodes.push({ type: 'text', text: match[5], marks: [{ type: 'code' }] });
     } else if (match[6] && match[7]) {
-      nodes.push({
-        type: 'text',
-        text: match[6],
-        marks: [{ type: 'link', attrs: { href: match[7] } }],
-      });
+      // [text](url) — 递归解析链接文字(可含 **bold** / *italic*),叠 link
+      nodes.push(
+        ...applyMark(parseInline(match[6]), {
+          type: 'link',
+          attrs: { href: match[7] },
+        }),
+      );
     } else if (match[8] !== undefined) {
       // V2 schema 未实现 mathInline → 输出目标节点名,等 schema 补齐
       nodes.push({ type: 'mathInline', attrs: { latex: match[8] } });

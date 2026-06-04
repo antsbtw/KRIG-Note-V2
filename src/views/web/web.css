@@ -26,16 +26,25 @@
   flex: 1;
   display: flex;
   min-height: 0;
+  /* flex item 默认 min-width:auto(= 内容固有宽),slot 由全宽缩成左半宽时
+     webview 撑不下去 → 按旧宽渲染,右侧被裁(剪藏左右分栏后暴露)。
+     min-width:0 允许本容器随父级(slot)收窄。 */
+  min-width: 0;
   position: relative;
 }
 
 .krig-web-view__webview {
   flex: 1;
   width: 100%;
+  height: 100%;
   border: none;
-  /* electron <webview> 标签默认 inline 元素,需要 block 撑满容器。
-     Phase 4:活跃/非活跃由 inline style display(inline-flex / none)覆盖。 */
-  display: inline-flex;
+  /* webview 作为 flex item 能缩到容器宽度(配合 slot grid track min-width:0)。 */
+  min-width: 0;
+  min-height: 0;
+  /* electron <webview> 标签默认 inline 元素。用 block 级 flex 撑满容器
+     (inline-flex 是 shrink-to-fit,分栏收窄后撑不满 slot)。
+     Phase 4:活跃/非活跃由 inline style display(flex / none)覆盖。 */
+  display: flex;
 }
 
 /* L5-B4.2.2:切语言后 banner — 提示需重启 app */
