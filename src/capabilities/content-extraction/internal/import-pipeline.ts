@@ -181,7 +181,25 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     },
     from,
   };
-  const atoms: PmAtomDraft[] = [titleDraft, ...bodyAtoms];
+  // 副标题/导语(Defuddle 的 description)→ 标题下一段普通正文。
+  // Defuddle 常把文章 deck(如 WSJ 标题下那句)放 description 而非正文 content;
+  // 去重:与 title 相同(部分站点拿 title 填 description)则不插,避免重复。
+  const deck = (payload.description || '').trim();
+  const lead: PmAtomDraft[] =
+    deck && deck !== title
+      ? [
+          {
+            tmpId: alloc(),
+            payload: {
+              domain: 'pm',
+              payload: { type: 'paragraph', attrs: {}, content: [{ type: 'text', text: deck }] },
+            },
+            from,
+          },
+        ]
+      : [];
+
+  const atoms: PmAtomDraft[] = [titleDraft, ...lead, ...bodyAtoms];
 
   // ③a contentImages(Defuddle 遗漏的正文图)→ image block draft(本地化)
   for (const img of payload.contentImages ?? []) {
