@@ -20,6 +20,22 @@ import './defuddle-engine';
 import type { FullPageResult } from './types';
 
 const CAPTURE_TIMEOUT_MS = 10000;
+const TRANSCRIPT_TIMEOUT_MS = 8000;
+
+/** Promise + 超时 race;超时返回 null,并清掉定时器(不泄漏 timer)。 */
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * 整页提取:用当前活跃引擎抽取,套超时,补 YouTube 字幕。
@@ -36,10 +52,7 @@ export async function captureFullPage(
 
   let result: FullPageResult | null;
   try {
-    result = await Promise.race([
-      engine.extract(guest),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), CAPTURE_TIMEOUT_MS)),
-    ]);
+    result = await withTimeout(engine.extract(guest), CAPTURE_TIMEOUT_MS);
   } catch (err) {
     console.error(`[content-extraction] engine '${engine.id}' threw:`, err);
     return null;
@@ -53,7 +66,9 @@ export async function captureFullPage(
   if (isYouTube && result.url) {
     try {
       console.log('[content-extraction] Fetching YouTube transcript via InnerTube API...');
-      const segments = await fetchTranscript(result.url);
+      // 超时保护:youtube-transcript 内部无超时,YouTube 限流/挂连接会让它永不 settle
+      // → captureFullPage 永不返回 → 剪藏静默卡死。套 8s race,超时按"无字幕"降级。
+      const segments = await withTimeout(fetchTranscript(result.url), TRANSCRIPT_TIMEOUT_MS);
       if (segments && segments.length > 0) {
         const transcriptData = segments.map((s) => ({
           time: Math.round(s.offset / 1000), // offset 是 ms → 秒

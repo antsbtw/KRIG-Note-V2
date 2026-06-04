@@ -33,8 +33,17 @@ export async function clipPageToRenderer(
   // 落盘缓存原始 FullPageResult(离线观察 Defuddle 真实格式 / 调优 import-pipeline);
   // fire-and-forget,失败不阻断剪藏。
   void cacheClipResult(result);
-  if (mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(IPC_CHANNELS.WEB_CLIP_RESULT, result);
+  // send 防护:win.isDestroyed() 只查 BrowserWindow,不查 webContents —— 抓取最长 10s,
+  // 期间主窗口若开始拆除(关窗/退出),webContents 可能已销毁/崩溃,send 抛 "Object has
+  // been destroyed";payload 含页面任意 schemaOrgData,极端情况结构化克隆也可能抛。
+  // 本函数被调用方 `void clipPageToRenderer(...)` fire-and-forget,抛出会成未处理 rejection,
+  // 故这里吞掉(剪藏失败,记日志,不崩主进程)。
+  try {
+    if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+    mainWindow.webContents.send(IPC_CHANNELS.WEB_CLIP_RESULT, result);
+  } catch (err) {
+    console.error('[content-extraction] WEB_CLIP_RESULT send failed:', err);
+  }
 }
 
 /**

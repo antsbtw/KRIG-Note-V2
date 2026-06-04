@@ -33,7 +33,11 @@ function init(): () => void {
     return () => {};
   }
   unsubscribe = window.electronAPI.onWebClipResult((payload) => {
-    void runImportPipeline(payload as WebClipPayload | null);
+    // fire-and-forget 但兜 .catch:runImportPipeline 自身已有 top-level try/catch,
+    // 这里再兜一层,确保任何意外抛出不成未处理 promise rejection。
+    runImportPipeline(payload as WebClipPayload | null).catch((err) => {
+      console.error('[content-extraction] import pipeline failed:', err);
+    });
   });
   return unsubscribe;
 }

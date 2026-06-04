@@ -221,13 +221,27 @@ async function localizeInlineImages(markdown: string): Promise<string> {
  * 并静默返回(本期不做 toast,D5 TODO)。
  */
 export async function runImportPipeline(payload: WebClipPayload | null): Promise<void> {
+  // top-level 兜底:任何下游(requireCapabilityApi 未注册 / markdownToAtoms /
+  // createNotesBatch / mediaDownload / commandRegistry.execute)抛出,都收敛成
+  // "记日志 + 静默返回"的降级(对齐既有失败策略),绝不外抛成未处理 rejection。
+  try {
+    await runImportPipelineInner(payload);
+  } catch (err) {
+    console.error('[content-extraction] clip pipeline error (degraded, no note):', err);
+  }
+}
+
+async function runImportPipelineInner(payload: WebClipPayload | null): Promise<void> {
   // TODO(D5):此处首版无"剪藏中…" toast;后续接 V2 进度/通知机制。
   if (!payload) {
     console.error('[content-extraction] clip failed: empty payload (capture returned null)');
     return;
   }
 
-  const title = (payload.title || '').trim() || payload.domain || 'Web Clip';
+  // 防护:title/domain 可能非字符串(IPC payload 被改)— 收敛成字符串再用。
+  const safeTitle = typeof payload.title === 'string' ? payload.title : '';
+  const safeDomain = typeof payload.domain === 'string' ? payload.domain : '';
+  const title = safeTitle.trim() || safeDomain || 'Web Clip';
   const from: AtomFrom = {
     extractionType: 'web-clip',
     extractedAt: Date.now(),
@@ -242,9 +256,20 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
     (payload.content || '').length,
   );
 
+  // 防护:content 必须是字符串(IPC payload 可能被改);并对超大正文设上限,
+  // 避免正文超长(MB 级)时一串 regex 规整耗时过长。超限截断 + 记日志(降级,不崩)。
+  const MAX_CONTENT_CHARS = 2_000_000; // ~2MB markdown;正常文章远低于此
+  let rawContent = typeof payload.content === 'string' ? payload.content : '';
+  if (rawContent.length > MAX_CONTENT_CHARS) {
+    console.warn(
+      `[content-extraction] content ${rawContent.length} chars > cap ${MAX_CONTENT_CHARS}, 截断`,
+    );
+    rawContent = rawContent.slice(0, MAX_CONTENT_CHARS);
+  }
+
   // ① 规整 markdown:合并被拆多行的链接图片 → 去相邻重复行(折叠控件双份)
   //    → 内联图拆行 → 去图片 alt 冗余回显 → 内嵌图本地化
-  const joined = joinSplitLinkedImages(payload.content || '');
+  const joined = joinSplitLinkedImages(rawContent);
   const deduped = dedupeConsecutiveLines(joined);
   const isolated = isolateInlineImages(deduped);
   const normalized = stripRedundantImageAlt(isolated);
@@ -280,7 +305,7 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
   // 副标题/导语(Defuddle 的 description)→ 标题下一段普通正文。
   // Defuddle 常把文章 deck(如 WSJ 标题下那句)放 description 而非正文 content;
   // 去重:与 title 相同(部分站点拿 title 填 description)则不插,避免重复。
-  const deck = (payload.description || '').trim();
+  const deck = (typeof payload.description === 'string' ? payload.description : '').trim();
   const lead: PmAtomDraft[] =
     deck && deck !== title
       ? [
@@ -331,8 +356,10 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
   const atoms: PmAtomDraft[] = [titleDraft, ...lead, ...notice, ...bodyAtoms];
 
   // ③a contentImages(Defuddle 遗漏的正文图)→ image block draft(本地化)
-  for (const img of payload.contentImages ?? []) {
-    if (!img.src || img.src.startsWith('data:')) continue;
+  // 防护:IPC payload 可能字段缺失/被改成非数组/含 null 元素 — 一律收敛,不崩。
+  const images = Array.isArray(payload.contentImages) ? payload.contentImages : [];
+  for (const img of images) {
+    if (!img || typeof img.src !== 'string' || !img.src || img.src.startsWith('data:')) continue;
     const src = await localizeImage(img.src);
     atoms.push(
       buildImageBlockDraft(
@@ -344,9 +371,9 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
   }
 
   // ③b contentVideos → video block drafts(默认远程 + embedType;字幕进首个 video)
-  const videos = payload.contentVideos ?? [];
+  const videos = Array.isArray(payload.contentVideos) ? payload.contentVideos : [];
   videos.forEach((v, idx) => {
-    if (!v.src) return;
+    if (!v || typeof v.src !== 'string' || !v.src) return;
     atoms.push(
       ...buildVideoBlockDrafts(
         {
@@ -364,7 +391,7 @@ export async function runImportPipeline(payload: WebClipPayload | null): Promise
   });
 
   // ③c extractedAudioUrl → audio block draft(本地化,失败降级远程)
-  if (payload.extractedAudioUrl) {
+  if (typeof payload.extractedAudioUrl === 'string' && payload.extractedAudioUrl) {
     const src = await localizeAudio(payload.extractedAudioUrl);
     atoms.push(...buildAudioBlockDrafts({ src, title: 'Audio' }, alloc, from));
   }
