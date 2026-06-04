@@ -103,4 +103,53 @@ describe('markdownToAtoms', () => {
     expect(Array.isArray(atoms)).toBe(true);
     expect(Array.isArray(warnings)).toBe(true);
   });
+
+  // mark 嵌套(2026-06 网页剪藏暴露:Defuddle 输出 [**X**](url) / **[X](url)**,
+  // 原 parseInline 单层非递归 → 内层 mark 当纯文本残留)。
+  it('link 内嵌 bold [**X**](url) → text 同时带 link + bold,无字面残留', async () => {
+    const { atoms } = await markdownToAtoms('[**Fire TV**](https://x.test/fire) app');
+    const para = atoms.find((a) => a.payload.payload.type === 'paragraph');
+    expect(para).toBeDefined();
+    const inline = para!.payload.payload.content as Array<{
+      type: string; text?: string; marks?: Array<{ type: string }>;
+    }>;
+    const fireTv = inline.find((n) => n.text === 'Fire TV');
+    expect(fireTv).toBeDefined();
+    const markTypes = (fireTv!.marks ?? []).map((m) => m.type).sort();
+    expect(markTypes).toEqual(['bold', 'link']);
+    // 无残留的字面 ** 或 [ ]( )
+    const joined = inline.map((n) => n.text ?? '').join('');
+    expect(joined).not.toContain('**');
+    expect(joined).not.toContain('](');
+  });
+
+  it('bold 内嵌 link **[X](url)** → text 同时带 bold + link', async () => {
+    const { atoms } = await markdownToAtoms('**[IMDb](https://x.test/imdb)**');
+    const para = atoms.find((a) => a.payload.payload.type === 'paragraph');
+    const inline = para!.payload.payload.content as Array<{
+      type: string; text?: string; marks?: Array<{ type: string; attrs?: { href?: string } }>;
+    }>;
+    const imdb = inline.find((n) => n.text === 'IMDb');
+    expect(imdb).toBeDefined();
+    const markTypes = (imdb!.marks ?? []).map((m) => m.type).sort();
+    expect(markTypes).toEqual(['bold', 'link']);
+    const link = (imdb!.marks ?? []).find((m) => m.type === 'link');
+    expect(link?.attrs?.href).toBe('https://x.test/imdb');
+  });
+
+  it('扁平 inline(无嵌套)仍正确 — bold/italic/code/link 不回归', async () => {
+    const { atoms } = await markdownToAtoms(
+      'a **b** c *d* e `f` g [h](https://x.test/h)',
+    );
+    const para = atoms.find((a) => a.payload.payload.type === 'paragraph');
+    const inline = para!.payload.payload.content as Array<{
+      text?: string; marks?: Array<{ type: string }>;
+    }>;
+    const markOf = (t: string) =>
+      (inline.find((n) => n.text === t)?.marks ?? []).map((m) => m.type);
+    expect(markOf('b')).toEqual(['bold']);
+    expect(markOf('d')).toEqual(['italic']);
+    expect(markOf('f')).toEqual(['code']);
+    expect(markOf('h')).toEqual(['link']);
+  });
 });
