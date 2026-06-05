@@ -2194,6 +2194,23 @@
   box-shadow: 0 0 0 2px rgba(77, 154, 255, 0.22);
 }
 
+/* codeBlock 选中修正:
+ * codeBlock 的 NodeView wrapper(div.krig-code-block / pre.krig-code-block)有
+ * **实底背景**(#1e1e1e),会把 .krig-block-selected 的半透明蓝底 background-color
+ * 完全盖掉 —— 表现为"ESC 选块时代码块没被选上"(其实逻辑已选中,只是看不见)。
+ *
+ * 修复:被选中时用 background-image 叠一层半透明蓝(linear-gradient 作为 image 层
+ * 合成在 background-color 实底之上),让蓝底透出来;同时 box-shadow 保留外框。
+ * background-image 不替换原 background-color,代码区配色不受影响。 */
+.krig-pm-host .ProseMirror div.krig-code-block.krig-block-selected,
+.krig-pm-host .ProseMirror pre.krig-code-block.krig-block-selected {
+  background-image: linear-gradient(
+    rgba(77, 154, 255, 0.22),
+    rgba(77, 154, 255, 0.22)
+  );
+  box-shadow: 0 0 0 2px rgba(77, 154, 255, 0.45);
+}
+
 /* 选块期间抑制字符级文本选区高亮(避免双层底色叠加)
  *
  * MultipleNodeSelection 时 PM 把 selection from/to 仍交给 PM 父类,浏览器
