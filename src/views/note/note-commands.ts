@@ -314,13 +314,18 @@ export function registerNoteCommands(): void {
 
   // ── Toolbar 操作命令 ──
 
-  /** × 关闭 NoteView(走 bus.slot.closeLeft;最后一个 view 时 closeLeft 自身拒绝)*/
+  /** × 关闭 NoteView(按 note-view 实际所在 slot 关;右侧则 closeRight,否则 closeLeft;最后一个 view 时自身拒绝)*/
   commandRegistry.register('note-view.close-view', () => {
     const wsId = workspaceManager.getActiveId();
     if (!wsId) return;
+    const ws = workspaceManager.get(wsId);
     const bus = workspaceManager.getBus(wsId);
-    if (!bus) return;
-    bus.slot.closeLeft();
+    if (!ws || !bus) return;
+    if (ws.slotBinding.right === 'note-view') {
+      bus.slot.closeRight();
+    } else {
+      bus.slot.closeLeft();
+    }
   });
 
   /** 已保存 button 的 no-op handler — V2 已 auto-persist,这里只占位提示状态 */

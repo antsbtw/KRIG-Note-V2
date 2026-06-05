@@ -285,14 +285,14 @@ export function registerNavSide(): void {
     title: '画板',
     actions: [
       {
-        id: 'create-folder',
-        label: '+ 文件夹',
-        command: 'graph-canvas-view.create-folder',
-      },
-      {
         id: 'create-canvas',
         label: '+ 画板',
         command: 'graph-canvas-view.create-canvas',
+      },
+      {
+        id: 'create-folder',
+        label: '+ 文件夹',
+        command: 'graph-canvas-view.create-folder',
       },
     ],
     searchPlaceholder: '搜索画板...',

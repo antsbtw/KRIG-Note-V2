@@ -417,8 +417,8 @@ export function registerNavSide(): void {
     view: 'ebook-view',
     title: '书架',
     actions: [
-      { id: 'create-folder', label: '+ 文件夹', command: 'ebook-view.create-folder' },
       { id: 'import', label: '+ 导入', command: 'ebook-view.import' },
+      { id: 'create-folder', label: '+ 文件夹', command: 'ebook-view.create-folder' },
     ],
     searchPlaceholder: '搜索书库...',
     onSearch: () => {
