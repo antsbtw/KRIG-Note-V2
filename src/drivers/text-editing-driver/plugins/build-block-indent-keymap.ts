@@ -44,6 +44,25 @@ function getTopLevelBlock(state: EditorState): { pos: number; node: ReturnType<E
   return { pos, node };
 }
 
+/**
+ * 取光标所在「带 textIndent attr 的最近祖先块」(paragraph/heading)。
+ *
+ * 不固定 depth=1:首行缩进作用的是光标所在的那个 paragraph/heading,它可能嵌在
+ * toggleList / 列表 / callout 内(toggleList content='block+',内部 paragraph 是
+ * 嵌套块)。从 $from.depth 向上找第一个 attrs 含 textIndent 的节点 —— 顶层段落
+ * depth=1 命中,toggle 内段落在更深 depth 命中。
+ */
+function getTextIndentBlock(state: EditorState): { pos: number; node: ReturnType<EditorState['doc']['nodeAt']> } | null {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d >= 1; d--) {
+    const node = $from.node(d);
+    if (node.attrs && node.attrs.textIndent !== undefined) {
+      return { pos: $from.before(d), node };
+    }
+  }
+  return null;
+}
+
 function indentCmd(delta: 1 | -1): Command {
   return (state, dispatch) => {
     if (shouldSkip(state)) return false;
@@ -81,9 +100,11 @@ const shiftTabCmd: Command = indentCmd(-1);
 
 const toggleTextIndentCmd: Command = (state, dispatch) => {
   if (shouldSkip(state)) return false;
-  const target = getTopLevelBlock(state);
+  // 用「最近的带 textIndent 块」而非固定顶层 block —— toggle/列表/callout 内嵌套的
+  // paragraph/heading 也能命中(顶层 toggleList 没有 textIndent attr,旧 getTopLevelBlock
+  // 取到它 → return false → toggle 内 cmd+shift+i 不生效,本修复点)。
+  const target = getTextIndentBlock(state);
   if (!target || !target.node) return false;
-  if (target.node.attrs.textIndent === undefined) return false;
   if (dispatch) {
     dispatch(
       state.tr.setNodeMarkup(target.pos, null, {

@@ -1877,10 +1877,13 @@ export const textEditingDriverApi = {
    * 行为:
    * - PM hasFocus()=true → 在 selection.from 当前 block 之后插(safe replace 当前 block
    *   或 split,语义对齐用户"在光标位置插块")
-   * - hasFocus()=false → fallback 到 insertNodesAtEnd 同款"末尾插+空段替换"
+   * - hasFocus()=false 但用户之前在 Note 里点过(lastUserSelectionFrom 有值)→ 插到那个
+   *   记录的光标位置之后(场景:用户在 AI webview 右键提取,Note 此刻失焦但光标停在某处)
+   * - hasFocus()=false 且从没点过 Note → fallback 末尾插+空段替换
    *
-   * 为啥用 hasFocus 而不是单看 selection.from:刚打开 note 时 selection 默认在
-   * 标题后(非 0)— hasFocus=false 时还是该判"用户没碰过 Note 编辑器"→ 走末尾。
+   * 不单看当前 state.selection.from 的原因:刚打开 note 时 selection 默认在标题后(非 0),
+   * 那是冷启动默认而非用户意图;故用 Host onTransaction 记录的 lastUserSelectionFrom
+   * (仅 tr.selectionSet && hasFocus 时更新 = 真·用户点击/打字)区分。
    *
    * 返 true=插入成功;false=instance 不存在 / 全节点无效。
    */
@@ -1903,7 +1906,22 @@ export const textEditingDriverApi = {
     const hasFocus = inst.view.hasFocus();
     let tr = state.tr;
 
-    if (!hasFocus) {
+    // 决定「在哪个 doc 位置插」:
+    // - Note 有焦点 → 用当前 selection.from(光标实时位置)
+    // - Note 失焦 → 用记录的「用户上次主动放置的光标位置」(AI webview 右键提取时 Note 没焦点,
+    //   但用户之前在 Note 里点过 → 仍插到那)。从没点过(undefined)或位置已越界 → 末尾。
+    let cursorPos: number | null = null;
+    if (hasFocus) {
+      cursorPos = state.selection.from;
+    } else if (
+      inst.lastUserSelectionFrom != null &&
+      inst.lastUserSelectionFrom >= 0 &&
+      inst.lastUserSelectionFrom <= state.doc.content.size
+    ) {
+      cursorPos = inst.lastUserSelectionFrom;
+    }
+
+    if (cursorPos == null) {
       // ── fallback 末尾插(逻辑同 insertNodesAtEnd)──
       const lastChild = state.doc.lastChild;
       const lastChildIsEmptyPara =
@@ -1918,10 +1936,10 @@ export const textEditingDriverApi = {
         tr = tr.insert(state.doc.content.size, nodes);
       }
     } else {
-      // ── 光标位置插(在 selection.from 所在 top-level block 之后)──
-      const $from = state.selection.$from;
+      // ── 光标位置插(在 cursorPos 所在 top-level block 之后)──
+      const $from = state.doc.resolve(cursorPos);
       if ($from.depth === 0) {
-        tr = tr.insert(state.selection.from, nodes);
+        tr = tr.insert(cursorPos, nodes);
       } else {
         const depth = 1; // top-level block boundary
         const blockNode = $from.node(depth);

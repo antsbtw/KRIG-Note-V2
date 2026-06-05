@@ -183,6 +183,13 @@ export function Host(props: TextEditingHostProps) {
         // selection 变化:emit 到 selection capability(带实例 source)
         // L5-B2:Snapshot diff 真变才 emit
         emitSelectionChanged(v, config.instanceId);
+
+        // 记录用户主动放置的光标位置(tr.selectionSet 且有焦点 = 真·用户点击/打字移动光标,
+        // 排除程序化 dispatch / 冷启动默认 selection)。供 AI 提取在 Note 失焦时仍插到
+        // 用户上次点过的位置(insertNodesAtCursorOrEnd 的 !hasFocus 分支用)。
+        if (tr.selectionSet && v.hasFocus()) {
+          instanceRegistry.setLastUserSelection(config.instanceId, v.state.selection.from);
+        }
       },
       config.viewId,
       config.instanceId,

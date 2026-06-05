@@ -15,6 +15,17 @@ import type { EditorView } from 'prosemirror-view';
 interface InstanceEntry {
   view: EditorView;
   workspaceId: string;
+  /**
+   * 用户最后一次主动放置光标的位置(selection.from)。
+   *
+   * 由 Host onTransaction 在「tr.selectionSet 且 view.hasFocus()」时更新 —— 即真正由
+   * 用户点击/打字造成的选区移动(排除程序化 / 冷启动默认 selection)。
+   *
+   * 用途:insertNodesAtCursorOrEnd 在 Note 失焦(如用户在 AI webview 右键提取)时,
+   * 仍能插到用户上次在 Note 里点过的光标位置,而不是无脑插末尾。
+   * undefined = 用户从未在本实例点过 → 插末尾。
+   */
+  lastUserSelectionFrom?: number;
 }
 
 class InstanceRegistry {
@@ -30,6 +41,12 @@ class InstanceRegistry {
 
   delete(instanceId: string): void {
     this.instances.delete(instanceId);
+  }
+
+  /** 记录用户最后一次主动放置的光标位置(Host onTransaction 调)*/
+  setLastUserSelection(instanceId: string, from: number): void {
+    const entry = this.instances.get(instanceId);
+    if (entry) entry.lastUserSelectionFrom = from;
   }
 
   get count(): number {
