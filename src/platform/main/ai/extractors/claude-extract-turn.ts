@@ -142,7 +142,7 @@ const CLAUDE_CSS_VARS: Record<string, string> = {
  *   3. CSS 变量替换成具体色值
  *   4. 注入 <style> 块(若 SVG 无自带 style)
  */
-function prepareSvgForDom(raw: string): string {
+export function prepareSvgForDom(raw: string): string {
   let svg = raw;
 
   if (!svg.includes('xmlns=')) {

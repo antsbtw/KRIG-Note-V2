@@ -29,10 +29,10 @@ export function registerAIWebviewHook(mainWindow: BrowserWindow): void {
     console.log('[ai-webview-hook] did-attach-webview, guest id=', guestWebContents.id);
     trackWebContentsForAIService(guestWebContents);
 
-    // 原生右键菜单(Claude / ChatGPT;Gemini 待数据源补齐后接入)
+    // 原生右键菜单(Claude / ChatGPT / Gemini)
     guestWebContents.on('context-menu', (_e, params: ContextMenuParams) => {
       const service = detectAIServiceByUrl(guestWebContents.getURL());
-      if (!service || (service.id !== 'claude' && service.id !== 'chatgpt')) return;
+      if (!service) return;
 
       const template: MenuItemConstructorOptions[] = [
         {

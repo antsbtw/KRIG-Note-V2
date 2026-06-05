@@ -237,13 +237,7 @@ export async function extractFullConversation(
     result = await extractChatGPTFullConversation(wc);
   } else if (serviceId === 'gemini') {
     const { extractGeminiFullConversation } = await import('./extractors/gemini-full-extraction');
-    result = await extractGeminiFullConversation(wc, () => {
-      if (!captureManager) return [];
-      return captureManager.getAllGeminiResponses().map((r) => ({
-        markdown: r.markdown,
-        timestamp: r.timestamp,
-      }));
-    });
+    result = await extractGeminiFullConversation(wc);
   } else {
     return { success: false, error: `Unknown serviceId: ${serviceId}` };
   }
@@ -281,10 +275,6 @@ export async function extractConversationTurn(
   artifactCount?: number;
   error?: string;
 }> {
-  if (serviceId !== 'claude' && serviceId !== 'chatgpt') {
-    return { success: false, error: `右键单条提取本期支持 Claude / ChatGPT(当前:${serviceId})` };
-  }
-
   const wc = getActiveAIWebContents(serviceId);
   if (!wc) {
     return { success: false, error: `No active ${serviceId} webview — open AI tab first` };
@@ -294,9 +284,13 @@ export async function extractConversationTurn(
   if (serviceId === 'claude') {
     const { extractClaudeTurnAt } = await import('./extractors/claude-extract-turn');
     result = await extractClaudeTurnAt(wc, x, y);
-  } else {
+  } else if (serviceId === 'chatgpt') {
     const { extractChatGPTTurnAt } = await import('./extractors/chatgpt-extract-turn');
     result = await extractChatGPTTurnAt(wc, x, y);
+  } else {
+    // gemini:主动 fetch hNvQHb 拿完整历史,DOM 仅定位序号(extractGeminiTurnAt 内部拉取)
+    const { extractGeminiTurnAt } = await import('./extractors/gemini-extract-turn');
+    result = await extractGeminiTurnAt(wc, x, y);
   }
 
   // 同整页路径:把跨域 img URL 下载入 mediaStore 换 media://(离线/cookie 失效仍可见)
