@@ -38,6 +38,7 @@ import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
+import { buildBottomPadPlugin } from './plugins/build-bottom-pad-plugin';
 
 /**
  * 装配 EditorView
@@ -87,6 +88,9 @@ export function buildEditorView(
   // fallback(NoteView 暂未显式传该 toggle 即可零回归);未来所有 view 显式声明
   // 后可删 fallback。详见 plugins/build-title-guard-plugin.ts。
   const requiresTitleGuard = pluginToggles?.titleGuard ?? (viewId === 'note-view');
+  // bottom-pad(底部留白 + 双击空白新增段 + 失焦 Enter 新增段)—— 连续文档专属能力,
+  // 仅 NoteView 装(对齐 titleGuard 守门;Thought 单段卡片不适用)。
+  const requiresBottomPad = pluginToggles?.bottomPad ?? (viewId === 'note-view');
   // opt-out 默认值 — 未传开关时 = true(NoteView 零回归契约)
   const optIn = (v: boolean | undefined): boolean => v !== false;
   const enableBlockHandle = optIn(pluginToggles?.blockHandle);
@@ -112,6 +116,7 @@ export function buildEditorView(
     ] : []),
     ...blockPlugins,
     ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
+    ...(requiresBottomPad ? [buildBottomPadPlugin()] : []),
     buildInputRules(schema),     // headings + 4 mark markdown(始终开)
     ...(enableSlash ? [buildSlashPlugin(viewId)] : []),
     ...(enableBlockHandle ? [buildBlockHandlePlugin(viewId, instanceId)] : []),

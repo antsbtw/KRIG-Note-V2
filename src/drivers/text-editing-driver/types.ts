@@ -89,6 +89,11 @@ export interface TextEditingPluginToggles {
   headingCollapse?: boolean;
   // opt-in(默认 false,view 显式 true 开启)
   titleGuard?: boolean;
+  /**
+   * 底部留白 + 双击空白尾区新增段落 + 失焦 Enter 新增段落(连续文档专属)。
+   * fallback:viewId === 'note-view' 时默认开;Thought 等单段 view 不适用,默认关。
+   */
+  bottomPad?: boolean;
 }
 
 export interface TextEditingConfig {

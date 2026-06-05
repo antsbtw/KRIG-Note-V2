@@ -26,6 +26,16 @@
   position: relative;
 }
 
+/* 底部留白(bottom-pad plugin 给 .ProseMirror 打 .krig-pm-bottom-pad)——
+   连续文档(NoteView)滚动到底时正文仍有呼吸空间,且这段 padding 是"双击新增
+   段落"的空白尾区点击靶区(落点解析到 doc 末尾 → 追加空段)。
+   单段编辑器(Thought)不挂本 plugin,故不受影响。 */
+.krig-pm-host .ProseMirror.krig-pm-bottom-pad {
+  padding-bottom: 240px;
+  /* 让空白尾区有"可点"的语义提示:光标变文本插入态 */
+  cursor: text;
+}
+
 /* Block 统一行间距(对齐 V1)*/
 .krig-pm-host .ProseMirror > * {
   margin: 1px 0;
