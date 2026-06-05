@@ -281,8 +281,8 @@ export async function extractConversationTurn(
   artifactCount?: number;
   error?: string;
 }> {
-  if (serviceId !== 'claude') {
-    return { success: false, error: `右键单条提取本期仅支持 Claude(当前:${serviceId})` };
+  if (serviceId !== 'claude' && serviceId !== 'chatgpt') {
+    return { success: false, error: `右键单条提取本期支持 Claude / ChatGPT(当前:${serviceId})` };
   }
 
   const wc = getActiveAIWebContents(serviceId);
@@ -290,8 +290,14 @@ export async function extractConversationTurn(
     return { success: false, error: `No active ${serviceId} webview — open AI tab first` };
   }
 
-  const { extractClaudeTurnAt } = await import('./extractors/claude-extract-turn');
-  const result = await extractClaudeTurnAt(wc, x, y);
+  let result: { success: boolean; userMessage?: string; markdown?: string; artifactCount?: number; error?: string };
+  if (serviceId === 'claude') {
+    const { extractClaudeTurnAt } = await import('./extractors/claude-extract-turn');
+    result = await extractClaudeTurnAt(wc, x, y);
+  } else {
+    const { extractChatGPTTurnAt } = await import('./extractors/chatgpt-extract-turn');
+    result = await extractChatGPTTurnAt(wc, x, y);
+  }
 
   // 同整页路径:把跨域 img URL 下载入 mediaStore 换 media://(离线/cookie 失效仍可见)
   if (result.success && result.markdown) {

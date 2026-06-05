@@ -45,6 +45,19 @@ function readWorkspaceAIService(ws: WorkspaceState): AIServiceId {
 const AI_VIEW_ID = 'ai-view';
 const NOTE_VIEW_ID = 'note-view';
 
+/**
+ * ai-sync 自动同步总开关。
+ *
+ * ⚠️ 关闭(2026-06-04):ai-sync 自动同步与「右键手动单条提取」语义冲突 —— 左 AI +
+ * 右 Note 布局下 ai-sync 会自动把 AI 回复追加进 Note,用户没右键却"自动提取了一条",
+ * 体验混乱。改为全面走用户右键主动提取(ai-view.extract-turn)。
+ *
+ * 关闭方式:matchesAISyncCombo 永远返回 false → reconcileForActive 始终走 stop 分支,
+ * 永不 startAISync;onAppendTurn 即便有残留推送 handleAppendTurn 也因组合不符早退。
+ * 想恢复:把本开关设回 true 即可,其余订阅/轮询机制原样保留。
+ */
+const AI_SYNC_ENABLED = false;
+
 /** 当前 ai-sync 锁定的 (workspaceId, serviceId);null = 未启动 */
 let active: { workspaceId: string; serviceId: AIServiceId } | null = null;
 
@@ -62,6 +75,7 @@ let workspaceUnsub: (() => void) | null = null;
  * 反向(left=note + right=ai)不触发 — 那是 V1 "問 AI" 路径,用户不期望 ai-sync。
  */
 function matchesAISyncCombo(ws: WorkspaceState): boolean {
+  if (!AI_SYNC_ENABLED) return false; // 总开关关闭 → 永不触发自动同步
   return ws.slotBinding.left === AI_VIEW_ID && ws.slotBinding.right === NOTE_VIEW_ID;
 }
 
@@ -142,7 +156,8 @@ function handleAppendTurn(payload: AISyncAppendTurnPayload): void {
 /**
  * 副作用入口 — note view index.ts 起 import 触发模块级 subscribe。
  *
- * 幂等:多次调用安全(workspaceUnsub 防重)。
+ * 幂等:多次调用安全(workspaceUnsub 防重)。AI_SYNC_ENABLED=false 时订阅仍挂,
+ * 但 matchesAISyncCombo 恒 false 使其永不真正启动同步(零自动追加)。
  */
 export function registerAISyncIntegration(): void {
   if (workspaceUnsub) return; // 已注册
