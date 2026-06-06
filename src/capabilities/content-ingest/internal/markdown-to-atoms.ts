@@ -29,8 +29,7 @@
 
 import { markdownToProseMirror } from '@capabilities/text-editing/converters/md-to-pm';
 import type { PmPayload, PmAtomDraft, AtomFrom } from '@semantic/types';
-import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
-import { tableAdapter } from './table-adapter';
+import { pmNodeToDrafts } from './pm-nodes-to-drafts';
 import type {
   MarkdownToAtomsOptions,
   MarkdownToAtomsResult,
@@ -109,105 +108,4 @@ export async function markdownToAtoms(
   return { atoms, warnings };
 }
 
-/**
- * 递归处理单个 PMNode,产出 PmAtomDraft 写到 atoms 数组.
- *
- * 字面规则:
- *   - STRUCTURAL_CONTAINER_TYPES(5 项):**跳过**本节点,递归其 children 用同 parentTmpId
- *     (跳层 — children 直接挂最近非结构性祖先 / containerId 走 belongsToNote)
- *   - table:特例,调 tableAdapter 展开为 table draft + cell drafts
- *   - 非 STRUCTURAL 非 table:产 draft,其 children 递归 with parentTmpId = 本 draft.tmpId
- *     - 容器(含嵌套 block child):payload.payload.content = []
- *     - 叶子(全 inline child):payload.payload.content = inline 原样
- */
-function pmNodeToDrafts(
-  node: PmPayload,
-  parentTmpId: string | undefined,
-  out: PmAtomDraft[],
-  allocTmpId: () => string,
-  from: AtomFrom,
-): void {
-  // 结构性容器:跳层,递归 children 用同 parentTmpId
-  if (STRUCTURAL_CONTAINER_TYPES.has(node.type)) {
-    const children = Array.isArray(node.content) ? node.content : [];
-    for (const child of children) {
-      pmNodeToDrafts(child, parentTmpId, out, allocTmpId, from);
-    }
-    return;
-  }
-
-  // table:特例 — 调 tableAdapter
-  if (node.type === 'table') {
-    const tableTmpId = allocTmpId();
-    const { tableDraft, cellDrafts } = tableAdapter({
-      tablePmNode: node,
-      tableTmpId,
-      allocTmpId,
-      from,
-    });
-    // tableDraft 顶层 parentTmpId 沿用 caller 传入(顶层 = undefined,嵌套 = 上层 atom.tmpId)
-    if (parentTmpId !== undefined) {
-      tableDraft.parentTmpId = parentTmpId;
-    }
-    out.push(tableDraft);
-    for (const cd of cellDrafts) {
-      out.push(cd);
-    }
-    return;
-  }
-
-  // 非 STRUCTURAL 非 table:产 draft
-  const tmpId = allocTmpId();
-  const children = Array.isArray(node.content) ? node.content : [];
-  const hasBlockChild = children.some((c) => isBlockNode(c));
-
-  // 字面构造 payload PmPayload
-  const draftPmPayload: PmPayload = {
-    type: node.type,
-  };
-  if (node.attrs !== undefined) draftPmPayload.attrs = { ...node.attrs };
-  if (node.marks !== undefined) draftPmPayload.marks = node.marks;
-  if (node.text !== undefined) draftPmPayload.text = node.text;
-
-  if (hasBlockChild) {
-    // 容器:payload.payload.content = [] (决议 026 §3.4)
-    draftPmPayload.content = [];
-  } else {
-    // 叶子:payload.payload.content = inline 原样
-    draftPmPayload.content = children;
-  }
-
-  const draft: PmAtomDraft = {
-    tmpId,
-    payload: {
-      domain: 'pm',
-      payload: draftPmPayload,
-    },
-    from,
-  };
-  if (parentTmpId !== undefined) {
-    draft.parentTmpId = parentTmpId;
-  }
-  out.push(draft);
-
-  // 递归 block 子节点 with parentTmpId = 本 draft.tmpId
-  if (hasBlockChild) {
-    for (const child of children) {
-      if (isBlockNode(child)) {
-        pmNodeToDrafts(child, tmpId, out, allocTmpId, from);
-      }
-      // inline child 不产 draft(已在 hasBlockChild 分支 fallback,见上)
-    }
-  }
-}
-
-/**
- * 是否为 block 节点(粗判:非已知 inline type).
- *
- * 已知 inline(对齐 md-to-pm.ts parseInline 产出):
- *   text / mathInline / hardBreak
- */
-function isBlockNode(node: PmPayload): boolean {
-  const inlineTypes = new Set(['text', 'mathInline', 'hardBreak']);
-  return !inlineTypes.has(node.type);
-}
+// pmNodeToDrafts / isBlockNode 已抽到 ./pm-nodes-to-drafts(markdown + PDF 共用)。
