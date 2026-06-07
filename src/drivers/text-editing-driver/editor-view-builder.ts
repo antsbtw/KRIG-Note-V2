@@ -36,6 +36,7 @@ import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-sele
 import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
 import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
+import { buildSplitIndentKeymap } from './plugins/build-split-indent-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
 import { buildBottomPadPlugin } from './plugins/build-bottom-pad-plugin';
@@ -169,6 +170,10 @@ export function buildEditorView(
     ...(enableHeadingCollapse ? [buildHeadingCollapsePlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
+    // split-indent:顶层 textblock(paragraph/heading)indent>0 时 Enter 拆块让新块继承
+    // 缩进。装在 baseKeymap 之前(覆盖默认 splitBlock 丢 indent 的行为),但在所有容器/
+    // 列表/toggle 的 Enter keymap(blockPlugins / list-keymap)之后 —— 那些先拦截各自场景。
+    buildSplitIndentKeymap(),
     // block-selection keymap 抢在 baseKeymap 之前(Esc/Shift+Arrow/Arrow)
     ...(enableBlockSelection ? [buildBlockSelectionKeymap()] : []),
     keymap(baseKeymap),
