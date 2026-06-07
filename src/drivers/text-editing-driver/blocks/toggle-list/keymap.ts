@@ -40,7 +40,13 @@ const exitClosedToggleOnEnter: Command = (state, dispatch) => {
 
   if (dispatch) {
     const toggleListEnd = $from.after(tlDepth);
-    const newToggle = toggleListType.create({ open: true }, paragraphType.create());
+    // 继承当前 toggle 的视觉缩进(indent attr)—— 缩进过的 toggle 回车新建下一个,
+    // 应与上一个对齐,而非回到 indent=0 起点(对齐 V1 / Notion 同级延续)。
+    const inheritedIndent = (toggleList.attrs.indent as number | undefined) ?? 0;
+    const newToggle = toggleListType.create(
+      { open: true, indent: inheritedIndent },
+      paragraphType.create(),
+    );
     const tr = state.tr.insert(toggleListEnd, newToggle);
     // 光标进新 toggle 内首段:toggleListEnd(进 toggleList) + 1 + (进 paragraph) + 1 = +2
     tr.setSelection(TextSelection.create(tr.doc, toggleListEnd + 2));
