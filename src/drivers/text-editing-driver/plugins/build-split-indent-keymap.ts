@@ -24,40 +24,45 @@ import { keymap } from 'prosemirror-keymap';
 import { splitBlock } from 'prosemirror-commands';
 import type { Command, Plugin, Transaction } from 'prosemirror-state';
 
-/** 取顶层 block(depth=1)的 node + indent;光标不在顶层 textblock 内返回 null */
-function topLevelIndent(
+/**
+ * 取光标所在 textblock 的 indent(>0 才返回,否则 null)。
+ * **不固定 depth=1** —— 容器(callout/blockquote/toggle/column)内缩进过的段落回车,
+ * 新段也要继承该段的 indent(对齐「容器内 Tab 缩进内部块」的语义)。$from.depth 即光标
+ * 所在 textblock 的深度。
+ */
+function cursorTextblockIndent(
   state: import('prosemirror-state').EditorState,
 ): number | null {
   const { $from, empty } = state.selection;
   if (!empty) return null;
   if ($from.depth < 1) return null;
-  // 只处理「光标直接在顶层 textblock 内」(paragraph/heading 等),depth===1 的 textblock。
-  // 嵌套在容器(列表/toggle/callout)里的块由各自 keymap 处理,不在此拦截。
-  if ($from.depth !== 1) return null;
-  const node = $from.node(1);
+  const node = $from.node($from.depth);
   if (!node.isTextblock) return null;
   const indent = (node.attrs.indent as number | undefined) ?? 0;
   return indent > 0 ? indent : null;
 }
 
 const splitInheritIndent: Command = (state, dispatch, view) => {
-  const sourceIndent = topLevelIndent(state);
-  if (sourceIndent === null) return false; // 无缩进 / 非顶层 textblock → 放行默认 splitBlock
+  const sourceIndent = cursorTextblockIndent(state);
+  if (sourceIndent === null) return false; // 无缩进 textblock → 放行默认 splitBlock
 
   if (!dispatch) return splitBlock(state, undefined, view);
+
+  const srcDepth = state.selection.$from.depth;
 
   let captured: Transaction | null = null;
   const ok = splitBlock(state, (t) => { captured = t; }, view);
   if (!ok || !captured) return false;
 
   const tr = captured as Transaction;
-  // split 后选区落在新块内。取新块(顶层 depth=1)的 before pos,若 indent 与源不同则补齐。
+  // split 后选区落在新块内。取新块(光标所在 textblock,与源同深度)若 indent 与源不同则补齐。
   const $pos = tr.selection.$from;
-  if ($pos.depth >= 1) {
-    const newBlock = $pos.node(1);
+  const depth = Math.min(srcDepth, $pos.depth);
+  if (depth >= 1) {
+    const newBlock = $pos.node(depth);
     const cur = (newBlock.attrs.indent as number | undefined) ?? 0;
-    if (cur !== sourceIndent) {
-      tr.setNodeMarkup($pos.before(1), null, { ...newBlock.attrs, indent: sourceIndent });
+    if (newBlock.attrs.indent !== undefined && cur !== sourceIndent) {
+      tr.setNodeMarkup($pos.before(depth), null, { ...newBlock.attrs, indent: sourceIndent });
     }
   }
   dispatch(tr.scrollIntoView());

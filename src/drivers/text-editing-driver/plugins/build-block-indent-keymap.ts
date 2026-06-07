@@ -23,7 +23,7 @@
  */
 
 import { keymap } from 'prosemirror-keymap';
-import type { Command, EditorState, Transaction } from 'prosemirror-state';
+import { NodeSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
 import { MultipleNodeSelection } from './_shared/multiple-node-selection';
 
 const MAX_INDENT = 8;
@@ -38,16 +38,6 @@ function shouldSkip(state: EditorState): boolean {
     if (name === 'table') break;
   }
   return false;
-}
-
-/** 取顶层 block(depth=1)pos + node */
-function getTopLevelBlock(state: EditorState): { pos: number; node: ReturnType<EditorState['doc']['nodeAt']> } | null {
-  const { $from } = state.selection;
-  if ($from.depth < 1) return null;
-  const pos = $from.before(1);
-  const node = state.doc.nodeAt(pos);
-  if (!node) return null;
-  return { pos, node };
 }
 
 /**
@@ -113,43 +103,57 @@ function indentMultiBlock(state: EditorState, dispatch: ((tr: Transaction) => vo
   return true;
 }
 
-function indentCmd(delta: 1 | -1): Command {
-  return (state, dispatch) => {
-    if (indentMultiBlock(state, dispatch, delta)) return true;
-    if (shouldSkip(state)) return false;
-    const target = getTopLevelBlock(state);
-    if (!target || !target.node) return false;
-    const current = (target.node.attrs.indent as number | undefined) ?? 0;
-    const next = Math.max(0, Math.min(MAX_INDENT, current + delta));
-    if (next === current) {
-      // outdent 在 0 时返 false 让上游处理;indent 到 8 返 true 吃掉键(防误插字符)
-      return delta === 1;
-    }
-    if (dispatch) {
-      dispatch(
-        state.tr.setNodeMarkup(target.pos, null, { ...target.node.attrs, indent: next }),
-      );
-    }
-    return true;
-  };
+/**
+ * 块缩进的单块 NodeSelection 分支:选中单个块节点(如 NodeSelection 框住一个 block /
+ * atom)时,对该块 indent ±1。MNS 由 indentMultiBlock 处理;二者合起来覆盖「块选区」。
+ */
+function indentNodeSelection(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  delta: 1 | -1,
+): boolean {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection)) return false;
+  if (!sel.node.isBlock) return false;
+  if (sel.node.attrs.indent === undefined) return true; // 该块无 indent 语义 → 吃掉键不动
+  const current = (sel.node.attrs.indent as number | undefined) ?? 0;
+  const next = Math.max(0, Math.min(MAX_INDENT, current + delta));
+  if (next !== current && dispatch) {
+    dispatch(state.tr.setNodeMarkup(sel.from, null, { ...sel.node.attrs, indent: next }));
+  }
+  return true; // 块选区下 Tab/Shift-Tab 始终吃掉键(不回退到插字符)
 }
 
-const tabCmd: Command = (state, dispatch, view) => {
-  // 多块选区:整体缩进,优先于「段内插全角空格」(否则 insertText 会替换删掉整个选区)
-  if (indentMultiBlock(state, dispatch, 1)) return true;
+/**
+ * 块缩进总入口:**仅当存在块选区**(MultipleNodeSelection 或 NodeSelection-on-block)
+ * 时才缩进。纯文本光标返回 false —— 行为 1(块缩进)以「选中块」为硬前提,不选不动块。
+ */
+function indentBlockSelection(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  delta: 1 | -1,
+): boolean {
+  if (indentMultiBlock(state, dispatch, delta)) return true;
+  if (indentNodeSelection(state, dispatch, delta)) return true;
+  return false;
+}
+
+const tabCmd: Command = (state, dispatch) => {
+  // 行为 1:块选区(MNS / NodeSelection-on-block)→ 缩进选中块。**以选中为硬前提**。
+  if (indentBlockSelection(state, dispatch, 1)) return true;
   if (shouldSkip(state)) return false;
+  // 行为 3:纯文本光标 → 从光标处插两个全角空格(任意 offset,含行首)。
+  // 注:行为 2(块内文字首行缩进)走 cmd+shift+i(toggleTextIndentCmd),不归 Tab。
   const { $from } = state.selection;
-  // paragraph 内、光标不在行首 → 插两个全角空格(对齐 V1)
-  if ($from.parent.type.name === 'paragraph' && $from.parentOffset > 0) {
-    if (dispatch) {
-      dispatch(state.tr.insertText('　　'));
-    }
+  if (state.selection.empty && $from.parent.isTextblock) {
+    if (dispatch) dispatch(state.tr.insertText('　　'));
     return true;
   }
-  return indentCmd(1)(state, dispatch, view);
+  return false;
 };
 
-const shiftTabCmd: Command = indentCmd(-1);
+// Shift-Tab:只对块选区做 outdent;纯文本光标无对应行为 → 放行(return false)。
+const shiftTabCmd: Command = (state, dispatch) => indentBlockSelection(state, dispatch, -1);
 
 const toggleTextIndentCmd: Command = (state, dispatch) => {
   if (shouldSkip(state)) return false;
