@@ -1,283 +1,140 @@
-# Indent System — Block 缩进系统
+# Indent System — 缩进系统设计契约
 
-> **状态**：P1-P5 已实现
-> **涉及模块**：键盘交互（Tab/Shift+Tab）、Block Selection、SlashMenu、Container 嵌套
->
-> ### 实现完成情况
->
-> | 阶段 | 状态 | 实现位置 |
-> |------|------|---------|
-> | **P1** 普通 block 视觉缩进 | ✅ 完成 | `plugins/indent.ts` — indentBlock/outdentBlock + Decoration 渲染 |
-> | **P2** 列表嵌套缩进 | ✅ 完成 | `plugins/indent.ts` — nestListItem |
-> | **P3** 列表提升 | ✅ 完成 | `plugins/indent.ts` — liftListItem |
-> | **P4** Block Selection 批量缩进 | ✅ 完成 | `plugins/block-selection.ts` — Tab/Shift-Tab 处理 |
-> | **P5** SlashMenu Container 内嵌套 | ✅ 完成 | `components/SlashMenu.tsx` — 通过 `$from.depth` 自然实现 |
->
-> **备注**：
-> - 当前 `indent` attr 仅定义在 textBlock 上。codeBlock/mathBlock/image 等节点暂不支持块级视觉缩进，后续按需补充 schema attr 即可自动生效（indent plugin 的 Decoration 和 Block Selection 逻辑已就绪）
-> - codeBlock 内部 Tab 为代码制表符，块级缩进通过 Block Selection 模式操作
+> **状态**：V2 现行设计（2026-06-07 重写，取代旧 P1–P5 sink 嵌套方案）
+> **维护**：本文档是缩进行为的**单一事实来源**，持续迭代。改缩进逻辑前先改本文档。
+> **涉及模块**：
+> - `plugins/build-block-indent-keymap.ts` — Tab / Shift-Tab / Cmd+Shift+I 入口
+> - `plugins/build-block-indent-plugin.ts` — indent attr → margin 装饰渲染（descendants 全树）
+> - `plugins/build-list-keymap.ts` — 列表 Enter（**不含 Tab**）
+> - `plugins/build-split-indent-keymap.ts` — Enter 拆块继承缩进
+> - `blocks/list-item/spec.ts`、`blocks/task-list/spec.ts` + `node-view.ts` — listItem/taskItem 的 indent attr 渲染
+> - `blocks/toggle-list/keymap.ts` — 收起 toggle Enter 继承缩进
+> - `_shared/multiple-node-selection.ts` — 块选区类型
 
 ---
 
-## 一、概览
+## 〇、核心原则（最高优先级，冲突时以此为准）
 
-缩进分为两种，**互斥**：
-
-| 类型 | 定义 | 操作对象 |
-|------|------|---------|
-| **视觉缩进** | `indent` attr 控制 `padding-left`，Block 整体右移 | 整个 Block 作为单元 |
-| **结构缩进** | 列表内嵌套/提升，改变容器的父子结构 | 列表容器内部的某一项 |
-
-Tab/Shift+Tab 的行为由上下文决定：
-
-| 上下文 | Tab | Shift+Tab | 类型 |
-|--------|-----|-----------|------|
-| 普通 textBlock | indent +1 | indent -1 | 视觉缩进 |
-| 列表内某一项 | 嵌套为子列表 | 提升到父列表 | 结构缩进 |
-| Container 内（blockquote/callout 等） | indent +1 | indent -1 | 视觉缩进 |
-| **Block Selection 模式** | **所有选中 block indent +1** | **indent -1** | **视觉缩进（永远）** |
-
-### 关键规则
-
-- **列表内光标 = 结构缩进**：操作的是列表的一项，Tab 嵌套、Shift+Tab 提升
-- **Block Selection = 视觉缩进（永远）**：选中的是整个 block（包括整个列表容器），Tab 改 indent attr
-- **两者互斥**：列表内不做视觉缩进，Block Selection 不做结构缩进
+1. **块缩进以「选中块」为硬前提：不选中，不允许任何块的缩进操作。**
+   纯文本光标永远不缩进块。要缩进块必须先有块选区（Esc 选块 / 拖选 / 选中容器）。
+2. **块缩进统一走 `indent` attr（margin 右移），不做 sink 列表结构嵌套。**
+   列表项、容器、普通段落同构：都是 `indent` attr 0–8，每级 24px。
+3. **以选中为准决定缩进对象**：选谁缩谁，容器内选单块只缩那个块、不碰上一级容器。
+4. **缩进随 dissect / assemble 原样持久化**（`indent` 在 block atom payload.attrs 内，无白名单过滤）。
 
 ---
 
-## 二、普通 Block 缩进（视觉缩进）
+## 一、Tab 缩进的三种行为（契约）
 
-### 2.1 机制
+Tab 的行为由「当前选择状态」决定，三者互斥：
 
-textBlock 的 `indent` attr 控制视觉缩进：
+| # | 行为 | 触发条件 | 效果 | 机制 |
+|---|------|---------|------|------|
+| **1** | **整块缩进** | **存在块选区**（MNS / NodeSelection-on-block） | 对**选中的块**（单块/多块）indent ±1 | `indent` attr |
+| **2** | **块内文字首行缩进** | 触发键是 **Cmd+Shift+I**（不是 Tab） | 切换块的首行缩进 | `textIndent` attr |
+| **3** | **光标处段内缩进** | **纯文本光标**（无块选区）在 textblock 内 | 从光标处插入两个全角空格 `　　` | 插入文本 |
 
-```typescript
-attrs: {
-  indent: { default: 0 },  // 0-8，每级 24px
-}
-```
+### 行为 1 —— 整块缩进（以选中为准）
 
-CSS 渲染：
-```css
-/* 由 indent attr 动态设置 */
-style="padding-left: ${indent * 24}px"
-```
+**硬前提：必须有块选区。** 纯文本光标按 Tab 永远走行为 3，绝不缩进块。
 
-### 2.2 键盘
+选中决定缩进对象：
 
-| 按键 | 行为 |
-|------|------|
-| Tab | `indent = Math.min(indent + 1, 8)` |
-| Shift+Tab | `indent = Math.max(indent - 1, 0)` |
+| 选中的是 | Tab 缩进对象 |
+|---------|------------|
+| 容器块（callout / blockquote / toggleList / columnList 本身） | 整个容器块 |
+| 容器内嵌套的容器 | 那个嵌套容器 |
+| 容器内的单个块（如 callout 内某段落） | **只这个块**，不碰上一级容器 |
+| 多个同级块（MNS 跨块） | 每个选中块一起 ±1 |
+| 列表项（单/多） | 选中的列表项 ±1（整项右移，**非** sink 嵌套；含列表首项也能右移） |
 
-### 2.3 适用范围
+- Tab = `indent = min(indent+1, 8)`；Shift-Tab = `indent = max(indent-1, 0)`。
+- 块选区下 Tab/Shift-Tab **始终吃掉键**，不回退到插字符 / 移焦。
+- 实现：`indentBlockSelection` = `indentMultiBlock`(MNS) + `indentNodeSelection`(单块 NodeSelection)。MNS 用 `sel.parent.child(i)` 取选中块，天然只动选中块、不动父容器。
 
-- textBlock（普通段落、heading）
-- RenderBlock（codeBlock、mathBlock、image 等）
-- Container 整体（blockquote、callout 等作为一个 block 缩进）
+### 行为 2 —— 块内文字首行缩进
 
----
+- 触发键：**Cmd+Shift+I**（`toggleTextIndentCmd`），**不是 Tab**。
+- 作用：切换光标所在 textblock 的 `textIndent` attr（首行缩进）。
+- 不固定 depth=1：toggle / 列表 / callout 内嵌套的 paragraph/heading 也能命中（向上找最近带 textIndent attr 的块）。
 
-## 三、列表缩进（嵌套）
+### 行为 3 —— 光标处段内缩进
 
-### 3.1 核心规则
-
-列表内的 Tab **不是视觉缩进，而是结构嵌套**：
-
-```
-Tab 前：                          Tab 后：
-orderedList                       orderedList
-  1. 第一项                         1. 第一项
-  2. 第二项  ← 光标在这里              orderedList（嵌套）
-  3. 第三项                             1. 第二项  ← 光标
-                                  2. 第三项
-
-Shift+Tab 前：                    Shift+Tab 后：
-orderedList                       orderedList
-  1. 第一项                         1. 第一项
-    orderedList                     2. 第二项  ← 提升到父级
-      1. 第二项  ← 光标              3. 第三项
-  2. 第三项
-```
-
-### 3.2 嵌套规则
-
-| 列表类型 | Tab 嵌套 | 嵌套后的子列表类型 |
-|----------|---------|-----------------|
-| bulletList | 当前项包裹进新 bulletList | 同类型（bulletList） |
-| orderedList | 当前项包裹进新 orderedList | 同类型（orderedList） |
-| taskList | 当前 taskItem 包裹进新 taskList | 同类型（taskList） |
-
-### 3.3 前提条件
-
-- Tab 嵌套要求**当前项不是列表的第一项**（第一项没有上一个兄弟可以合并）
-- 或者当前项和上一项一起嵌套
-
-### 3.4 实现方式
-
-```
-Tab（列表内）：
-  1. 找到当前 block 在列表中的位置
-  2. 创建新的同类型子列表
-  3. 将当前 block 移入子列表
-  4. 如果上一项已经有子列表，合并进去
-
-Shift+Tab（嵌套列表内）：
-  1. 将当前 block 从子列表中提取出来
-  2. 插入到父列表中（子列表的下一个位置）
-  3. 如果子列表变空，删除子列表
-```
+- 触发：纯文本光标（`selection.empty && $from.parent.isTextblock`），任意 offset（含行首）。
+- 作用：从光标处插入两个全角空格 `　　`（中文段内缩进习惯，对齐 V1）。
+- 这是「不选中块」时 Tab 的唯一块无关行为。
 
 ---
 
-## 四、Container 内嵌套（SlashMenu）
+## 二、indent attr 渲染
 
-### 4.1 规则
+| 块类型 | indent 来源 | 渲染方式 |
+|--------|------------|---------|
+| 顶层 group='block' 节点 | schema-builder `injectFrameworkAttrs` 注入 | `build-block-indent-plugin` 的 Decoration（descendants 全树，含容器内块） |
+| listItem | spec 显式加 `indent` attr | spec.toDOM 出 `margin-left`（自渲染，plugin 跳过避免叠加） |
+| taskItem | spec 显式加 `indent` attr | node-view `syncDom` 设 `marginLeft`（有 nodeView，自渲染） |
 
-在 Container 内通过 SlashMenu 创建新 Container = **在当前位置嵌套**：
-
-```
-操作：在 orderedList 第 2 项输入 /bullet → 选择 Bullet List
-
-结果：
-orderedList
-  1. 第一项
-  2.                    ← 当前项保留（或删除如果为空）
-    bulletList          ← 嵌套在 orderedList 内部
-      • 光标在这里
-  3. 第三项
-```
-
-### 4.2 SlashMenu 改造
-
-当前 SlashMenu 的 `executeItem` 总是在**顶层替换** block。需要改为：
-
-```
-if (光标在 Container 内部) {
-  在当前位置嵌套新 Container（作为子节点）
-} else {
-  在顶层替换当前 block（现有行为）
-}
-```
+- 每级 24px（`INDENT_STEP_PX`）。
+- **关键**：block-indent-plugin 用 `descendants` 全树遍历，否则容器内块的 indent 不渲染。
 
 ---
 
-## 五、Block Selection 批量缩进
+## 三、回车（Enter）与缩进继承
 
-### 5.1 规则
+原则：**在一个 indent>0 的块里「回车延续」新建的下一个同级块，继承该块的 indent。**
 
-选中多个 block 后 Tab/Shift+Tab：
+| 场景 | 处理 | 继承？ |
+|------|------|--------|
+| 顶层 / 容器内 textblock（段落、heading）回车延续 | `build-split-indent-keymap`：跑默认 splitBlock 后把新块 indent 补成源块 indent | ✅ |
+| 收起 toggle（▶）回车新建下一个 toggle | `toggle-list/keymap.ts`：新 toggle attrs 带 `indent: inheritedIndent` | ✅ |
+| 列表项回车分裂出新项 | `splitListItem`（PM 库 node.copy 保留 attrs） | ✅ |
+| caption 跳出（图片/数学/代码块小标题回车） | 各自 keymap，新段是全新块 | ❌ 不继承 |
+| slash 插入全新块、bottom-pad 末尾新段、粘贴媒体 caption | — | ❌ 不继承（非延续） |
 
-```
-ESC 选中 block B、C、D：
-  A
-  [B]  ← 选中
-  [C]  ← 选中
-  [D]  ← 选中
-  E
-
-Tab → 所有选中 block indent +1：
-  A
-    B
-    C
-    D
-  E
-
-Shift+Tab → 所有选中 block indent -1
-```
-
-### 5.2 列表内的批量缩进
-
-如果选中的 block 都在同一个列表内，Tab = 批量嵌套：
-
-```
-bulletList
-  [• B]  ← 选中
-  [• C]  ← 选中
-
-Tab →
-bulletList
-  • A
-    bulletList
-      • B
-      • C
-```
-
-### 5.3 实现
-
-在 `block-selection.ts` 的 `handleKeyDown` 中增加 Tab/Shift+Tab 处理：
-
-```typescript
-if (event.key === 'Tab' && active) {
-  event.preventDefault();
-  if (event.shiftKey) {
-    outdentSelectedBlocks(view, selectedPositions);
-  } else {
-    indentSelectedBlocks(view, selectedPositions);
-  }
-  return true;
-}
-```
+> 注：PM 默认 splitBlock 在「光标在块尾按 Enter」时用 defaultBlockAt 产出全新 paragraph，**不带 attrs** → 这是必须用 split-indent-keymap 兜的根因。
 
 ---
 
-## 六、与手柄的关系
+## 四、持久化
 
-缩进是 Block 基类共享能力（CLAUDE.md §二），不受具体 block 类型影响：
+`indent` attr 随标准存储链路持久化，无需特殊处理：
 
-- 手柄始终在固定垂直线上（不因缩进偏移）
-- 缩进后的 block 通过 `padding-left` 视觉右移，手柄位置不变
-- 列表嵌套后，内层列表是新的 Container，手柄对齐到内层 block
+1. 编辑器 `serializeDoc`（PM `doc.toJSON()`）原样带上每个节点 attrs（含 indent）。
+2. main 进程 `dissect-pm-doc` 拆 block atom：`payload.attrs = child.attrs` **原样保留，无白名单**。
+3. `diffBlockTree`：indent 变化 → block payload stableStringify 变 → 判为 `modified` → 写库。
+4. 读回 `assemble-pm-doc` + `PMNode.fromJSON` 原样还原。
 
----
-
-## 七、文件结构
-
-```
-src/plugins/note/
-├── plugins/
-│   ├── indent.ts              ← 缩进 Plugin（Tab/Shift+Tab 处理）
-│   └── block-selection.ts     ← 扩展：批量缩进
-├── commands.ts                ← indent/outdent 命令函数
-└── components/
-    └── SlashMenu.tsx           ← 改造：Container 内嵌套
-```
+> 验证：listItem indent 0→1 离线 dissect 产出 `modified:['<id>']`，重启保留。
 
 ---
 
-## 八、实施顺序
+## 五、与旧设计（V1 / 旧 P1–P5）的差异
 
-| 阶段 | 内容 | 依赖 |
-|------|------|------|
-| **P1** | 普通 block 视觉缩进（Tab → indent attr） | 无 |
-| **P2** | 列表嵌套缩进（Tab → 嵌套同类型子列表） | P1 |
-| **P3** | Shift+Tab 列表提升（从子列表提取到父列表） | P2 |
-| **P4** | Block Selection 批量缩进 | P1 |
-| **P5** | SlashMenu Container 内嵌套 | P2 |
+| 维度 | 旧设计 | V2 现行 |
+|------|--------|---------|
+| 列表项 Tab | 结构缩进（sink 嵌套子列表） | indent attr 整项右移 |
+| 单光标在块内 Tab | 缩进当前块 | **不缩块**（行为 3 插字符）；缩块必须先选中 |
+| 容器内 Tab | 缩进当前块（但旧实现 bug：取 depth=1 缩了整个容器） | 以选中为准，选内部块只缩内部块 |
+| Tab 语义判定 | 由「上下文」决定（列表/容器/普通各异） | 由「是否块选区」决定（统一） |
 
-### P1 检查清单
-
-- [ ] `commands.ts` — `indentBlock(view, pos)` / `outdentBlock(view, pos)` 命令
-- [ ] `plugins/indent.ts` — Tab/Shift+Tab 键盘处理 Plugin
-- [ ] `NoteEditor.tsx` — 注册 indent Plugin
-- [ ] `note.css` — indent 视觉渲染（`padding-left: ${indent * 24}px`）
-- [ ] 验证：textBlock、heading、codeBlock、mathBlock 都支持缩进
-- [ ] 验证：indent 0-8 范围限制
-
-### P2 检查清单
-
-- [ ] `commands.ts` — `nestListItem(view, pos)` / `liftListItem(view, pos)` 命令
-- [ ] `plugins/indent.ts` — 检测列表上下文，Tab 走嵌套而非视觉缩进
-- [ ] 验证：bulletList、orderedList、taskList 嵌套/提升
-- [ ] 验证：嵌套后编号重置（orderedList 子列表从 1 开始）
-- [ ] 验证：Shift+Tab 从嵌套列表提升到父列表
+废弃：旧 `plugins/indent.ts` 的 `nestListItem`/`liftListItem` sink 路径、列表内光标自动缩进。
 
 ---
 
-## 九、设计原则
+## 六、设计原则
 
-1. **Tab 语义由上下文决定**：列表内 = 嵌套，其他 = 视觉缩进
-2. **缩进是基类能力**：所有 Block 都支持，不需要各 block 单独实现
-3. **列表嵌套保持同类型**：bulletList 内 Tab → 嵌套 bulletList，不混合类型
-4. **手柄不受影响**：缩进用 `padding-left`，不改变 `getBoundingClientRect().left`（手柄固定）
-5. **结构操作不可逆要谨慎**：列表嵌套是结构变化，必须支持 Undo
+1. **不选中不动块**：块缩进必须有块选区，杜绝误操作。
+2. **统一 indent attr**：列表/容器/段落同构，不做结构 sink，简化心智 + 保证持久化。
+3. **以选中为准**：选谁缩谁，容器内选单块不波及容器。
+4. **回车延续继承缩进**：缩进块里回车，新同级块对齐。
+5. **缩进是基类能力**：所有 group='block' 节点自动支持，不需各 block 单独实现。
+
+---
+
+## 七、待思考 / 迭代点
+
+> 本节供持续优化时记录开放问题（用户主导）。
+
+- 列表项「以选中为准缩进」与「视觉嵌套层级」的关系：indent attr 右移 vs 真·子列表，是否未来需要并存两种语义？
+- Shift-Tab 对纯文本光标当前无行为（放行）；是否需要「outdent 段内全角空格」的对称行为？
+- 容器深层嵌套时 indent 上限（8 级）是否够用。

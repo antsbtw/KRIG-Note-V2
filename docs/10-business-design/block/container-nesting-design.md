@@ -110,7 +110,8 @@ SlashMenu、Markdown 快捷、HandleMenu 改为创建 Container 节点。
 
 ### Phase 3：键盘交互
 
-Enter 分裂/退出、Tab 嵌套/提升、Backspace 退出。
+Enter 分裂/退出、Backspace 退出、块缩进（块选中时 indent attr ±1，统一走
+[`indent-system.md`](./indent-system.md)，**不做 Tab sink 嵌套**）。
 统一的 Container 键盘行为（类似 enter-handler.ts 的 enterBehavior 声明）。
 
 ### Phase 4：废弃 groupType

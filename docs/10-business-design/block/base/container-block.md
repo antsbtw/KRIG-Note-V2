@@ -218,11 +218,18 @@ textBlock ""                 ← 退出 callout
 
 ### 6.2 Tab / Shift+Tab
 
+> **已废弃旧 sink 嵌套方案**（2026-06-07）。Container 内不再做「Tab 包裹进子 Container」的
+> 结构嵌套。缩进统一走 indent attr，详见 [`block/indent-system.md`](../indent-system.md)。
+
 | 操作 | 行为 |
 |------|------|
-| Tab（在 Container 内） | 将当前 TextBlock 包裹进新的子 Container（嵌套一级） |
-| Shift+Tab（在嵌套 Container 内） | 将当前 TextBlock 提升到父 Container |
-| Shift+Tab（在顶层 Container 内） | 退出 Container |
+| Tab + **块选中**（选中 Container 内某块） | **只缩进选中的那个块**（indent +1，margin 右移），不碰上一级 Container |
+| Tab + **块选中**（选中整个 Container） | 整个 Container 块缩进 |
+| Shift+Tab + 块选中 | 选中块 indent -1 |
+| Tab + **纯文本光标**（无选中） | 不缩块 → 从光标处插两个全角空格 |
+
+**关键**：块缩进以「选中块」为硬前提；以选中为准（选内部块只缩内部块，不波及容器）。
+退出 Container 由 Backspace（§6.3）/ 空行 Enter（§6.1）处理,不再用 Shift+Tab。
 
 ### 6.3 Backspace（行首）
 
@@ -482,7 +489,7 @@ Tab 能力由三个共享模块提供：
 ### Phase 3：键盘交互
 
 1. Enter 分裂/退出 Container
-2. Tab 嵌套 / Shift+Tab 提升
+2. 块缩进（块选中时 Tab/Shift+Tab → indent attr ±1；不做 sink 嵌套，见 §6.2 / indent-system.md）
 3. Backspace 行首退出
 
 ### Phase 4：废弃 groupType
@@ -503,7 +510,7 @@ Tab 能力由三个共享模块提供：
 - [ ] 子节点标记渲染（CSS / Decoration / NodeView 内部逻辑）
 - [ ] Enter 退出逻辑（空行 → 退出到父级）
 - [ ] Backspace 行首退出
-- [ ] Tab 嵌套 / Shift+Tab 提升
+- [ ] 块缩进（块选中时 indent attr ±1，统一走 indent-system.md，不做 sink 嵌套）
 - [ ] turnInto paragraph（溶解）
 - [ ] HandleMenu / SlashMenu 注册
 - [ ] CSS 暗色主题

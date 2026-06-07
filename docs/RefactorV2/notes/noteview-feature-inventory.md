@@ -40,7 +40,7 @@
 - [Marks] TextColor — 6 色 cycle 命令 + 10×2 swatch popup (L5B3.3/3.4)
 - [Marks] Highlight — 背景色 cycle + popup (L5B3.3)
 - [Mark.Link] URL link — Cmd+K 弹 LinkPanel,inclusive:false (L5B3.4)
-- [List] 无序列表 — `-/*/+` input rule,Tab/Shift-Tab 嵌套 (L5B3.2)
+- [List] 无序列表 — `-/*/+` input rule;缩进=块选中后 Tab(indent attr 整项右移,非 sink 嵌套,2026-06-07 契约) (L5B3.2)
 - [List] 有序列表 — `1.` input rule,二级 a. 三级 i. (L5B3.2)
 - [List] 任务列表 — checkbox toggle,createdAt/completedAt/deadline (L5B3.2)
 - [Block] Blockquote — `> ` input rule,灰色 italic (L5B3.2)

@@ -49,7 +49,14 @@ V2 实际 id 是驼峰 `taskItem`。
 
 ### 3.3 框架级注入 attrs
 
-⚠ `taskItem` 没有 `group: 'block'` 字段（只能作为 taskList 子节点），**不被框架级 indent 注入**。
+`taskItem` 没有 `group: 'block'` 字段（只能作为 taskList 子节点），**不被框架级 indent 注入** ——
+故在 **spec 节点级显式声明 `indent` attr**（默认 `0`，0–8），由 node-view 的 `syncDom` 设
+`marginLeft` 渲染。2026-06-07 新增（与 listItem 同步，契约见
+[`block/indent-system.md`](../../../../../10-business-design/block/indent-system.md)）。
+
+| 字段 | 默认值 | 含义 |
+|------|-------|------|
+| `indent` | `0` | 块级缩进层级（0–8，每级 24px，整项右移） |
 
 ### 3.4 V1 兼容字段（已删除）
 

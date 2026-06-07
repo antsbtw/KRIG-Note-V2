@@ -124,14 +124,17 @@ interface TextBlockAttrs {
 
 > **在 Container 内**首子节点行首 Backspace → unwrap 退出 Container。
 
-### 5.4 Tab / Shift-Tab
+### 5.4 Tab / Shift-Tab / Cmd+Shift+I
 
-```
-Tab → indent += 1（最大 8）
-Shift-Tab → indent -= 1（最小 0）
-```
+缩进遵循 [`block/indent-system.md`](../indent-system.md) 的三种行为契约（互斥）：
 
-indent 用 `padding-left`（纯文字缩进）。
+| 触发 | 行为 | 机制 |
+|------|------|------|
+| Tab / Shift-Tab + **块选中** | 整块缩进 indent ±1（0–8，每级 24px margin-left） | indent attr |
+| **Cmd+Shift+I** | 切换首行缩进 | textIndent attr |
+| Tab + **纯文本光标**（无块选中） | 从光标处插两个全角空格 `　　` | 插入文本 |
+
+> **块缩进以「选中块」为硬前提**：纯文本光标按 Tab 不缩块（走插字符）。详见 indent-system.md。
 
 ### 5.5 快捷键
 

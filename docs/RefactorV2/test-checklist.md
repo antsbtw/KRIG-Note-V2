@@ -75,13 +75,19 @@
 
 #### 嵌套与跳出
 
+> ⚠️ **2026-06-07 契约变更**：列表 Tab 不再是 sink 嵌套。新规则见
+> [`10-business-design/block/indent-system.md`](../../10-business-design/block/indent-system.md)：
+> - 光标在项内（未选中）按 Tab = 插两个全角空格（不缩项）。
+> - 缩进整项 = 先 `Esc` 选中该项（或拖选多项）再 Tab → 整项 indent 右移（margin，非嵌套）。
+> 下方 5.1.15–5.1.17 三条为**旧 sink 行为，已废弃**，按新契约重写期望。
+
 | # | 操作 | 期望 | 状态 |
 |---|---|---|---|
 | 5.1.13 | 在 bullet list 项内输内容,行末按 Enter | 新建第二个 bullet 项,光标移到新项 | ⏳ |
 | 5.1.14 | 在第二项空状态按 Enter(空项 Enter) | **跳出列表**,变回 paragraph,光标在新 paragraph 内 | ⏳ |
-| 5.1.15 | bullet 项内按 **Tab** | 该项嵌套到第二层(空心圆标记) | ⏳ |
-| 5.1.16 | 嵌套项内再按 Tab | 第三层(方块标记) | ⏳ |
-| 5.1.17 | 嵌套项内按 **Shift-Tab** | 反嵌套(回上一层) | ⏳ |
+| 5.1.15 | bullet 项内光标按 **Tab**（未选中） | 从光标处插两个全角空格（**不**嵌套） | ⏳ |
+| 5.1.16 | `Esc` 选中某项 → 按 **Tab** | 整项 indent +1（margin 右移 24px，仍同级圆点） | ⏳ |
+| 5.1.17 | 选中项 → 按 **Shift-Tab** | 整项 indent -1 | ⏳ |
 | 5.1.18 | 顶层 list 项按 Shift-Tab | 跳出列表变 paragraph | ⏳ |
 
 #### handle / 拖拽
@@ -118,7 +124,7 @@
 | 5.1.31 | 从浏览器/外部复制 `<ul><li>a</li><li>b</li></ul>` 粘贴到空段 | 解析成 bulletList 两项(spec 已声明 parseDOM: ul/li,需验证) | ⏳ |
 | 5.1.32 | 两个 bulletList 之间用 ↑/↓ 方向键 | 能停在 list 间隙(GapCursor)且能输文字插新段落 | ⏳ |
 | 5.1.33 | 在 bulletList 项内 → Turn Into "Ordered List" / "Task List" | 整个 list 类型互转,内容/嵌套保留 | ⏳ |
-| 5.1.34 | 选中跨多个 listItem 的范围 → 按 Tab | 选中的所有项整体嵌套(整批 sinkListItem) | ⏳ |
+| 5.1.34 | `Esc`/拖选选中多个 listItem → 按 Tab | 选中所有项整体 indent +1(margin 右移,**非** sinkListItem 嵌套;2026-06-07 契约) | ⏳ |
 | 5.1.35 | bulletList 内 Cmd+A | 选中**当前项内全部文字**(非整文档,PM 标准 list 行为) | ⏳ |
 | 5.1.36 | 顶层项 Backspace 删空 | 该项删除,光标进上一项末尾(跨项合并) | ⏳ |
 
@@ -174,13 +180,16 @@
 
 #### 嵌套与跳出(继承 list-keymap,共享 bulletList 验证)
 
+> ⚠️ **2026-06-07 契约变更**：OL 项 Tab 不再 sink 嵌套。同 bulletList：光标在项内 Tab = 插全角空格；
+> 选中项后 Tab = 整项 indent 右移。见 [`indent-system.md`](../../10-business-design/block/indent-system.md)。
+
 | # | 操作 | 期望 | 状态 |
 |---|---|---|---|
 | 5.2.13 | OL 项内 Enter | 新建第二项,**计数自动到 2.** | ⏳ |
 | 5.2.14 | 空项 Enter | 跳出 list 变 paragraph | ⏳ |
-| 5.2.15 | OL 项 Tab | 嵌套到第二层(变 a.) | ⏳ |
-| 5.2.16 | 嵌套项再 Tab | 第三层(变 i.) | ⏳ |
-| 5.2.17 | 嵌套项 Shift-Tab | 反嵌套(回上一层) | ⏳ |
+| 5.2.15 | OL 项内光标按 Tab（未选中） | 从光标处插两个全角空格（**不**嵌套） | ⏳ |
+| 5.2.16 | `Esc` 选中 OL 项 → Tab | 整项 indent +1（margin 右移，仍同级编号） | ⏳ |
+| 5.2.17 | 选中项 → Shift-Tab | 整项 indent -1 | ⏳ |
 | 5.2.18 | 顶层项 Shift-Tab | 跳出变 paragraph | ⏳ |
 
 #### handle / 拖拽
@@ -272,12 +281,15 @@
 
 #### 嵌套与跳出(继承 list-keymap)
 
+> ⚠️ **2026-06-07 契约变更**：task-item Tab 不再 sink 嵌套。光标在项内 Tab = 插全角空格；
+> 选中项后 Tab = 整项 indent 右移。见 [`indent-system.md`](../../10-business-design/block/indent-system.md)。
+
 | # | 操作 | 期望 | 状态 |
 |---|---|---|---|
 | 5.3.23 | task-item 内 Enter | 新建第二项 | ⏳ |
 | 5.3.24 | 空 task-item Enter | 跳出 task-list 变 paragraph | ⏳ |
-| 5.3.25 | task-item Tab | 嵌套(走 sinkListItem(taskItem)) | ⏳ |
-| 5.3.26 | 嵌套项 Shift-Tab | 反嵌套 | ⏳ |
+| 5.3.25 | task-item 内光标按 Tab（未选中） | 从光标处插两个全角空格（**不**嵌套） | ⏳ |
+| 5.3.26 | `Esc` 选中 task-item → Tab/Shift-Tab | 整项 indent ±1（margin 右移/左移） | ⏳ |
 | 5.3.27 | 顶层 task Shift-Tab | 跳出 list 变 paragraph | ⏳ |
 | 5.3.28 | task-item 内嵌 task-list 后,新建子项 attrs.checked | 默认 false(独立 attr,不继承父) | ⏳ |
 
