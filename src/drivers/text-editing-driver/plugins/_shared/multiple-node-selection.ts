@@ -30,6 +30,28 @@ import {
 import type { Mappable } from 'prosemirror-transform';
 
 /**
+ * 内向偏置映射 anchor/head。
+ *
+ * anchor/head 是「块的 before-pos / after-pos」边界。after-pos 同时是下一块的 before-pos
+ * (块边界点),用默认 assoc(+1)映射会把它推进下一块内部 → 选区从单块错扩成双块
+ * (Tab 缩进 / Cmd+Z 撤销后选区染到相邻块的根因)。
+ *
+ * 修法:两端各自向**选区内侧**收 —— 数值大的一端用 assoc=-1(咬住本块尾,不进下一块),
+ * 数值小的一端用 assoc=+1(咬住本块头)。这样块边界点稳定停在选中范围内,不漂移。
+ */
+function mapInward(
+  mapping: Mappable,
+  anchor: number,
+  head: number,
+): { anchor: number; head: number } {
+  const anchorIsHigher = anchor >= head;
+  return {
+    anchor: mapping.map(anchor, anchorIsHigher ? -1 : 1),
+    head: mapping.map(head, anchorIsHigher ? 1 : -1),
+  };
+}
+
+/**
  * MultipleNodeSelection bookmark — 持久化锚点(history / collab 用)
  */
 class MultipleNodeSelectionBookmark implements SelectionBookmark {
@@ -39,10 +61,8 @@ class MultipleNodeSelectionBookmark implements SelectionBookmark {
   ) {}
 
   map(mapping: Mappable): MultipleNodeSelectionBookmark {
-    return new MultipleNodeSelectionBookmark(
-      mapping.map(this.anchor),
-      mapping.map(this.head),
-    );
+    const m = mapInward(mapping, this.anchor, this.head);
+    return new MultipleNodeSelectionBookmark(m.anchor, m.head);
   }
 
   resolve(doc: PMNode): Selection {
@@ -175,8 +195,13 @@ export class MultipleNodeSelection extends Selection {
   }
 
   override map(doc: PMNode, mapping: Mappable): Selection {
-    const $anchor = doc.resolve(mapping.map(this.anchor));
-    const $head = doc.resolve(mapping.map(this.head));
+    // 映射用**内部** $anchorPos/$headPos(指向块内容内部 / atom 间隙),而非基类 anchor/head
+    // (= 归一化后的 from/to 块边界)。块边界点同时是相邻块边界,任何 assoc 都可能漂进相邻块
+    // (Tab 缩进 / Cmd+Z 后单块错扩双块的根因);内部位不在块边界上,映射稳定不漂。
+    // 仍叠加内向偏置兜底 atom 间隙端。
+    const m = mapInward(mapping, this.$anchorPos.pos, this.$headPos.pos);
+    const $anchor = doc.resolve(m.anchor);
+    const $head = doc.resolve(m.head);
     try {
       return MultipleNodeSelection.create($anchor, $head);
     } catch {
@@ -186,7 +211,9 @@ export class MultipleNodeSelection extends Selection {
   }
 
   override getBookmark(): SelectionBookmark {
-    return new MultipleNodeSelectionBookmark(this.anchor, this.head);
+    // 存**内部** $anchorPos/$headPos(非块边界 from/to)—— 与 map 同理,边界点 undo 后会漂进
+    // 相邻块。内部位稳定,bookmark.resolve 还原选区精确不扩块(Cmd+Z 单块错扩双块的修复)。
+    return new MultipleNodeSelectionBookmark(this.$anchorPos.pos, this.$headPos.pos);
   }
 
   override toJSON(): { type: 'multiple-node'; anchor: number; head: number } {

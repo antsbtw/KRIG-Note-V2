@@ -98,6 +98,9 @@ function indentMultiBlock(state: EditorState, dispatch: ((tr: Transaction) => vo
     pos += node.nodeSize;
   }
 
+  // 选区保持:setNodeMarkup 不改块尺寸,选区由 MultipleNodeSelection.map 的内向偏置
+  // 映射(_shared/multiple-node-selection.ts mapInward)保持在同一批块,不漂进相邻块。
+  // 撤销(Cmd+Z)同理由 bookmark.map 的内向偏置保证。
   if (changed && dispatch) dispatch(tr);
   // 即使本次无变化(全到 0 / 全到 8)也吃掉键 —— 多块选区下 Tab 不应回退到插字符/移焦
   return true;
