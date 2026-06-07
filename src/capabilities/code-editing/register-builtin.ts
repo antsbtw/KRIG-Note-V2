@@ -15,6 +15,7 @@ import { pythonLanguage } from './languages/python';
 import { jsonLanguage } from './languages/json';
 import { markdownLanguage } from './languages/markdown';
 import { goLanguage } from './languages/go';
+import { yamlLanguage, ymlLanguage } from './languages/yaml';
 
 export function registerBuiltinLanguages(): void {
   // mermaid:StreamLanguage 已 module-level 同步构造,loader 返回包好的 Promise
@@ -29,4 +30,6 @@ export function registerBuiltinLanguages(): void {
   registerLanguage(jsonLanguage);
   registerLanguage(markdownLanguage);
   registerLanguage(goLanguage);
+  registerLanguage(yamlLanguage);
+  registerLanguage(ymlLanguage);
 }

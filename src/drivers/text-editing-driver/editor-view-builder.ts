@@ -9,7 +9,7 @@
 
 import { EditorState, type Plugin, type Transaction } from 'prosemirror-state';
 import { EditorView, type NodeViewConstructor } from 'prosemirror-view';
-import type { Schema, Node as PMNode } from 'prosemirror-model';
+import { type Schema, type Node as PMNode, Slice } from 'prosemirror-model';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
 import { buildThrottledDropCursorPlugin } from './plugins/build-throttled-dropcursor-plugin';
@@ -39,6 +39,36 @@ import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
 import { buildBottomPadPlugin } from './plugins/build-bottom-pad-plugin';
+
+/**
+ * 拷贝归一化:纯 inline 选区(选区落在单个 textblock 内部、没跨块)→ 剥掉外层块壳,
+ * 只留 inline fragment。
+ *
+ * 默认 PM 把「列表项/段落内的文字选区」序列化成带块包裹的 html(`<ul><li><p>...`),
+ * 粘到富文本目标会带出列表符号 / 块结构。用户预期:拖拽选文字 = 只拷文字内容 + inline
+ * 格式(code/bold/link),不带 •/1. 列表符号、不带块壳。
+ *
+ * 判定:slice 内容是单个顶层 block 且两端都 open(openStart>0 && openEnd>0 = 选区在
+ * 该 block 内部,没含完整块边界)。是 textblock(段落/heading)→ 直接用其 inline 内容;
+ * 是容器(listItem 等单子)→ 递归往里剥到 textblock。跨块 / 选整块 → 原样(保留结构)。
+ *
+ * 在 transformCopied 里调:改 slice 本身,PM 后续序列化 plain+html 都不带块壳。
+ */
+function stripBlockWrapperForInlineSlice(slice: Slice): Slice {
+  const content = slice.content;
+  if (content.childCount === 1 && slice.openStart > 0 && slice.openEnd > 0) {
+    const only = content.child(0);
+    if (only.isTextblock) {
+      return new Slice(only.content, slice.openStart - 1, slice.openEnd - 1);
+    }
+    if (only.childCount === 1) {
+      return stripBlockWrapperForInlineSlice(
+        new Slice(only.content, slice.openStart - 1, slice.openEnd - 1),
+      );
+    }
+  }
+  return slice;
+}
 
 /**
  * 装配 EditorView
@@ -149,6 +179,8 @@ export function buildEditorView(
   const view: EditorView = new EditorView(container, {
     state,
     nodeViews,
+    // 拷贝时:纯 inline 选区(单 textblock 内)剥块壳,避免列表符号/块结构带进剪贴板
+    transformCopied: stripBlockWrapperForInlineSlice,
     dispatchTransaction(tr) {
       if (view.isDestroyed) return;
       const newState = view.state.apply(tr);

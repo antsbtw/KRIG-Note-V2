@@ -328,7 +328,11 @@ function WebTab({
       e.preventDefault();
       const trimmed = input.trim();
       if (!trimmed) return;
-      const href = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+      // 已知协议(块/笔记链接 krig://、本地 file://、媒体 media://、http(s)://)原样保留;
+      // 只对裸域名补 https://。否则粘贴「🔗 复制块链接」的 krig://block/... 会被破坏成
+      // https://krig://block/...,链接失效。
+      const hasScheme = /^(krig|https?|file|media):\/\//.test(trimmed);
+      const href = hasScheme ? trimmed : `https://${trimmed}`;
       onApply(href);
     }
   };
@@ -338,7 +342,7 @@ function WebTab({
       <input
         ref={inputRef}
         className="krig-link-panel__input"
-        placeholder="输入网页地址..."
+        placeholder="输入网页地址,或粘贴块链接(🔗 复制链接)..."
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
