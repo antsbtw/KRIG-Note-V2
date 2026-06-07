@@ -98,6 +98,9 @@ export const taskItemNodeView: NodeViewConstructor = (node, view, getPos) => {
     dom.className = cls.join(' ');
     checkbox.checked = !!attrs.checked;
     timeLabel.textContent = buildTimeLabel(attrs);
+    // 视觉缩进(Tab 整项右移,2026-06-07):indent attr → margin-left
+    const indent = (attrs.indent as number | undefined) ?? 0;
+    dom.style.marginLeft = indent > 0 ? `${indent * 24}px` : '';
   }
 
   syncDom(node.attrs);

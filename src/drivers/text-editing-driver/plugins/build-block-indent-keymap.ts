@@ -7,8 +7,14 @@
  * - Shift-Mod-i:切换顶层 block 的 textIndent attr(仅 paragraph/heading)
  *
  * 与列表 keymap 的协作:本 keymap 装载顺序在 buildListKeymap 之后,
- * list-keymap 命中 Tab/Shift-Tab 时返回 true 抢断,本 keymap 不会触发。
- * codeBlock 自己有 Tab 处理,table 也有自己的 Tab keymap,优先级同理。
+ * list-keymap 命中 Tab/Shift-Tab(单光标落在列表项内 → 改该项 indent attr)时返回 true
+ * 抢断,本 keymap 不会触发。codeBlock 自己有 Tab 处理,table 也有自己的 Tab keymap,
+ * 优先级同理。
+ *
+ * 多块选区(MultipleNodeSelection,Esc 选块 + Shift+Arrow 扩选产生):list-keymap 只处理
+ * 单光标,对多块选区不命中 → 放行到本 keymap。本 keymap 在 tabCmd/shiftTabCmd 最前面拦截
+ * MNS(见 indentMultiBlock):对所有选中块(含列表项)统一 indent attr ±1 —— 列表项
+ * 与普通块同构(listItem/taskItem spec 已加 indent attr),整组「所有项整体右移一级」。
  *
  * 边界处理:
  * - 在 tableCell / tableHeader 内 → 不接管(返回 false 让 table-keymap 走)
@@ -18,7 +24,7 @@
 
 import { keymap } from 'prosemirror-keymap';
 import type { Command, EditorState, Transaction } from 'prosemirror-state';
-import type { EditorView } from 'prosemirror-view';
+import { MultipleNodeSelection } from './_shared/multiple-node-selection';
 
 const MAX_INDENT = 8;
 
@@ -63,8 +69,53 @@ function getTextIndentBlock(state: EditorState): { pos: number; node: ReturnType
   return null;
 }
 
+/**
+ * 多块选区(MultipleNodeSelection)整体缩进 —— 对每个选中块统一 indent attr ±1。
+ *
+ * 关键修复历史:此前多块选中按 Tab,事件穿过 list-keymap(sinkListItem 不命中多块选区)
+ * 落到本 keymap 的 tabCmd → 命中「paragraph 内插全角空格」分支 → insertText 把整个跨块
+ * 选区**替换**成两个全角空格 → 表现为「Tab 后所有选中块被删除」。
+ *
+ * 缩进语义(用户拍板「所有项整体右移一级」,含列表首项):统一走 indent attr margin,
+ * **不**走 sink 列表嵌套 —— sink 做不到首项右移,且 PM sink 含首项时整段失败。
+ * listItem / taskItem 已在各自 spec 加 indent attr(toDOM 出 margin-left),与普通块同构,
+ * 故这里对所有选中块一视同仁:setNodeMarkup 改 indent。attrs 随 dissect/assemble 持久化。
+ *
+ * setNodeMarkup 不改节点尺寸,故各块 pos 在同一 tr 内累积时无需重映射。
+ */
+function indentMultiBlock(state: EditorState, dispatch: ((tr: Transaction) => void) | undefined, delta: 1 | -1): boolean {
+  const sel = state.selection;
+  if (!(sel instanceof MultipleNodeSelection)) return false;
+
+  const minIdx = Math.min(sel.anchorIdx, sel.headIdx);
+  const maxIdx = Math.max(sel.anchorIdx, sel.headIdx);
+
+  const tr = state.tr;
+  let pos = sel.from;
+  let changed = false;
+  for (let i = minIdx; i <= maxIdx; i++) {
+    const node = sel.parent.child(i);
+    // indent attr:普通块由 schema-builder 框架注入;listItem/taskItem 在各自 spec 显式加。
+    // 防御:个别无该 attr 的块跳过(不阻断其余块缩进)。
+    if (node.attrs.indent !== undefined) {
+      const current = (node.attrs.indent as number | undefined) ?? 0;
+      const next = Math.max(0, Math.min(MAX_INDENT, current + delta));
+      if (next !== current) {
+        tr.setNodeMarkup(pos, null, { ...node.attrs, indent: next });
+        changed = true;
+      }
+    }
+    pos += node.nodeSize;
+  }
+
+  if (changed && dispatch) dispatch(tr);
+  // 即使本次无变化(全到 0 / 全到 8)也吃掉键 —— 多块选区下 Tab 不应回退到插字符/移焦
+  return true;
+}
+
 function indentCmd(delta: 1 | -1): Command {
   return (state, dispatch) => {
+    if (indentMultiBlock(state, dispatch, delta)) return true;
     if (shouldSkip(state)) return false;
     const target = getTopLevelBlock(state);
     if (!target || !target.node) return false;
@@ -84,6 +135,8 @@ function indentCmd(delta: 1 | -1): Command {
 }
 
 const tabCmd: Command = (state, dispatch, view) => {
+  // 多块选区:整体缩进,优先于「段内插全角空格」(否则 insertText 会替换删掉整个选区)
+  if (indentMultiBlock(state, dispatch, 1)) return true;
   if (shouldSkip(state)) return false;
   const { $from } = state.selection;
   // paragraph 内、光标不在行首 → 插两个全角空格(对齐 V1)

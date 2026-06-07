@@ -32,17 +32,24 @@ const taskItemNodeSpec: NodeSpec = {
     // task-list 目录 2 NodeSpec 字面仅 taskItem receiver bookAnchor (字面标注落到 item,
     // 不在容器 taskList 上); 字面登记 §10.D 偏离同 table 模式
     bookAnchor: { default: null },
+    // 视觉缩进级数(0-8)。taskItem Tab = 整项右移(对齐 listItem,2026-06-07 用户拍板)。
+    // 有 nodeView,故 margin-left 在 node-view.ts 的 dom 上按本 attr 渲染。attrs 随
+    // dissect/assemble 持久化。
+    indent: { default: 0 },
   },
   parseDOM: [
     {
       tag: 'li[data-type="task-item"]',
       getAttrs(node) {
         const el = node as HTMLElement;
+        const rawIndent = el.getAttribute('data-indent');
+        const ind = rawIndent ? parseInt(rawIndent, 10) : 0;
         return {
           checked: el.getAttribute('data-checked') === 'true',
           createdAt: el.getAttribute('data-created-at') || null,
           completedAt: el.getAttribute('data-completed-at') || null,
           deadline: el.getAttribute('data-deadline') || null,
+          indent: Number.isFinite(ind) ? Math.max(0, Math.min(8, ind)) : 0,
         };
       },
     },
@@ -62,6 +69,11 @@ const taskItemNodeSpec: NodeSpec = {
     if (node.attrs.createdAt) attrs['data-created-at'] = node.attrs.createdAt as string;
     if (node.attrs.completedAt) attrs['data-completed-at'] = node.attrs.completedAt as string;
     if (node.attrs.deadline) attrs['data-deadline'] = node.attrs.deadline as string;
+    const indent = (node.attrs.indent as number | undefined) ?? 0;
+    if (indent > 0) {
+      attrs['data-indent'] = String(indent);
+      attrs.style = `margin-left: ${indent * 24}px`;
+    }
     return ['li', attrs, 0];
   },
 };
