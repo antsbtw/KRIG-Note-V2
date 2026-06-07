@@ -31,6 +31,35 @@ export interface BlockSpec {
   readonly containerRule?: 'leaf' | 'inline-only' | 'block+';
   /** cascadeBoundary:整体不可拆 */
   readonly cascadeBoundary?: boolean;
+  /**
+   * 键盘行为元数据(keyboard-system.md §5.3)。
+   *
+   * 集中键盘模块(keyboard/)的决策链按这些声明分支,使 Enter/Backspace 行为**数据驱动**,
+   * 不再每块各写 keymap。新增 block 只声明本字段即获正确键盘行为。详见 keyboard-system.md。
+   *
+   * Phase 0(脚手架)仅定义字段 + 标注,**不挂载**;Phase 1/2 决策链才消费。
+   */
+  readonly keyboard?: KeyboardMeta;
+}
+
+/**
+ * 块键盘行为声明(keyboard-system.md §5.3)。全部可选,默认按「普通 textblock」处理。
+ */
+export interface KeyboardMeta {
+  /** 内部是小 note(键盘行为递归适用 + 边界可穿越):blockquote/callout/toggle/column */
+  readonly isContainer?: boolean;
+  /** 小 note 但硬墙不可退出(Enter 不跳出 / Backspace 不退出):tableCell/tableHeader */
+  readonly isCellLike?: boolean;
+  /** 单段 caption(Enter 跳出块下方建段 / Backspace 不删块):image/html/math-visual/audio/video/tweet */
+  readonly isCaption?: boolean;
+  /** 内部代码区(Enter=softBreak,双回车跳出):codeBlock/math-block */
+  readonly isCodeArea?: boolean;
+  /** 原子卡片(仅选中/handle 删块):hr/file-block/external-ref */
+  readonly isAtomCard?: boolean;
+  /** 块首退格保护(不删不合并):isTitle 段落(运行时按 attrs.isTitle 判定,见决策链) */
+  readonly protectStart?: boolean;
+  /** 拆块/退格继承的格式 attr 列表:paragraph/heading 用 ['indent','textIndent','align'] */
+  readonly formatAttrs?: readonly string[];
 }
 
 export type NodeViewFactory = NonNullable<NodeSpec['toDOM']> extends never
