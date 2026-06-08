@@ -137,7 +137,7 @@ function buildPmNode(
   atomId: string,
   blocksById: Map<string, AtomEntity<'pm'>>,
   childrenByParent: Map<string, string[]>,
-  nextSiblingEdges: EdgeEntity[],
+  sortSiblings: (ids: string[]) => string[],
 ): PmPayload | null {
   const atom = blocksById.get(atomId);
   if (!atom) {
@@ -170,11 +170,11 @@ function buildPmNode(
     );
   }
 
-  // 按 nextSibling 链排序子 atoms
-  const orderedChildIds = topologicalSortSiblings(childIds, nextSiblingEdges);
+  // 按提供的排序策略排序子 atoms(属性路径=order 升序;边路径=nextSibling 拓扑排序)
+  const orderedChildIds = sortSiblings(childIds);
   const childNodes: PmPayload[] = [];
   for (const cid of orderedChildIds) {
-    const node = buildPmNode(cid, blocksById, childrenByParent, nextSiblingEdges);
+    const node = buildPmNode(cid, blocksById, childrenByParent, sortSiblings);
     if (node) childNodes.push(node);
   }
 
@@ -206,6 +206,84 @@ function buildPmNode(
 }
 
 /**
+ * Decision 028:读取 block atom 的结构属性(noteId/parentId/order)。
+ * payload.attrs 是 FLEXIBLE 自由字段,这里窄化读取。
+ */
+function readStructAttrs(atom: AtomEntity<'pm'>): {
+  parentId: string | null;
+  order: string | undefined;
+} {
+  const attrs = (atom.payload.payload as PmPayload).attrs;
+  const parentId =
+    attrs && typeof attrs.parentId === 'string' ? attrs.parentId : null;
+  const order =
+    attrs && typeof attrs.order === 'string' ? attrs.order : undefined;
+  return { parentId, order };
+}
+
+/**
+ * Decision 028 Phase 1 判定:本批 block atom 是否全部带 order 属性。
+ * 全带 → 走属性路径;任一缺(旧数据/混合)→ fallback 边路径(向后兼容)。
+ */
+function allHaveOrder(atoms: AtomEntity[]): boolean {
+  for (const a of atoms) {
+    if (readStructAttrs(a as AtomEntity<'pm'>).order === undefined) return false;
+  }
+  return true;
+}
+
+/**
+ * Decision 028 Phase 1 — 纯属性拼装(零结构边遍历)。
+ *
+ * 输入:本笔记所有 block atom(已按 noteId 拉好,且全部带 order/parentId 属性)。
+ * 算法:
+ *  1. 按 parentId 建 parent→children 映射(parentId=null 即顶层)
+ *  2. 同级按 order 字典序升序排
+ *  3. 复用 buildPmNode + applyRebuildRules/assembleTable 重建中间容器壳(逻辑不变,
+ *     只是排序/分组的输入从边变属性)
+ */
+function assembleViaAttrs(blockAtoms: AtomEntity<'pm'>[]): PmPayload {
+  const blocksById = new Map<string, AtomEntity<'pm'>>();
+  for (const a of blockAtoms) blocksById.set(a.id, a);
+
+  // parentId → children ids(null 父归为顶层 key）
+  const TOP = '__top__';
+  const childrenByParent = new Map<string, string[]>();
+  const orderById = new Map<string, string>();
+  for (const a of blockAtoms) {
+    const { parentId, order } = readStructAttrs(a);
+    orderById.set(a.id, order ?? '');
+    const key = parentId ?? TOP;
+    const arr = childrenByParent.get(key);
+    if (arr) arr.push(a.id);
+    else childrenByParent.set(key, [a.id]);
+  }
+
+  // 同级按 order 字典序升序(稳定:order 相同时按 id 兜底,正常数据 order 互异)
+  const sortByOrder = (ids: string[]): string[] =>
+    [...ids].sort((x, y) => {
+      const ox = orderById.get(x) ?? '';
+      const oy = orderById.get(y) ?? '';
+      if (ox < oy) return -1;
+      if (ox > oy) return 1;
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+
+  // buildPmNode 的 childrenByParent 用 atom id 做 key,顶层用 TOP —— 但 buildPmNode
+  // 递归时用 atomId(真实 id)查 children,顶层不经 buildPmNode(直接遍历 TOP 组),
+  // 故 childrenByParent 的非顶层 key 必须是真实 parent atom id(上面已如此)。
+  const topIds = sortByOrder(childrenByParent.get(TOP) ?? []);
+  const topNodes: PmPayload[] = [];
+  for (const id of topIds) {
+    const node = buildPmNode(id, blocksById, childrenByParent, sortByOrder);
+    if (node) topNodes.push(node);
+  }
+
+  const docContent = applyRebuildRules(topNodes);
+  return { type: 'doc', content: docContent };
+}
+
+/**
  * 从 storage 字面拼装一个 container atom 对应的完整 PM doc。
  *
  * @param containerId — note container atom id 或 reading-thought atom id(D-10:不要求 hasNoteView)
@@ -215,6 +293,14 @@ export async function assemblePmDoc(containerId: string): Promise<PmPayload | nu
   // 1. 字面拉容器 atom
   const containerAtom = await storage.getAtom<'pm'>(containerId);
   if (!containerAtom) return null;
+
+  // Decision 028 Phase 1:属性优先 —— 先按 noteId 一次拉本笔记所有 block atom。
+  // 若拉到 atom 且全部带 order 属性(Phase 0 起新写入/已迁移数据)→ 走纯属性路径(零边遍历)。
+  // 否则(旧数据无属性,或混合)→ fallback 旧边逻辑(向后兼容,迁移前不破坏读取)。
+  const attrBlocks = await storage.listAtoms({ domain: 'pm', noteId: containerId });
+  if (attrBlocks.length > 0 && allHaveOrder(attrBlocks)) {
+    return assembleViaAttrs(attrBlocks as AtomEntity<'pm'>[]);
+  }
 
   // 2. 拉所有 belongsToNote 边(object = containerId)
   const belongsEdges = await storage.listEdges({
@@ -275,13 +361,17 @@ export async function assemblePmDoc(containerId: string): Promise<PmPayload | nu
   // 6. 顶层 block = 在 blockIds 中但没有 childOf 出边的(即直接挂 note container)
   const topLevelIds = blockIds.filter((id) => !hasChildOf.has(id));
 
+  // 边路径排序策略:nextSibling 链拓扑排序(闭包捕获本 note 的 nextSiblingEdges)
+  const sortByEdges = (ids: string[]): string[] =>
+    topologicalSortSiblings(ids, nextSiblingEdges);
+
   // 7. 顶层 block 按 nextSibling 排序
-  const orderedTopIds = topologicalSortSiblings(topLevelIds, nextSiblingEdges);
+  const orderedTopIds = sortByEdges(topLevelIds);
 
   // 8. 递归构造每个顶层 block 节点
   const topNodes: PmPayload[] = [];
   for (const id of orderedTopIds) {
-    const node = buildPmNode(id, blocksById, childrenByParent, nextSiblingEdges);
+    const node = buildPmNode(id, blocksById, childrenByParent, sortByEdges);
     if (node) topNodes.push(node);
   }
 

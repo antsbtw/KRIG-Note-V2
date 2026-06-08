@@ -166,6 +166,11 @@ export function createMockStorage(): MockStorage {
     for (const a of atoms.values()) {
       if (filter.domain && a.payload.domain !== filter.domain) continue;
       if (atomIdSet && !atomIdSet.has(a.id)) continue;
+      // Decision 028:noteId 过滤(对齐 SurrealStorage payload.payload.attrs.noteId 谓词)
+      if (filter.noteId !== undefined) {
+        const pl = a.payload.payload as { attrs?: { noteId?: unknown } } | undefined;
+        if (pl?.attrs?.noteId !== filter.noteId) continue;
+      }
       out.push(a);
     }
     return out;
