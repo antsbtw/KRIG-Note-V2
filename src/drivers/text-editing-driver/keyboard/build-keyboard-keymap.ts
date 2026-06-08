@@ -37,9 +37,11 @@ export function buildKeyboardMetaLookup(blocks: BlockSpec[]): KeyboardMetaLookup
 /**
  * 装配集中键盘 keymap。
  *
- * Phase 1:只接管 **Enter**(Backspace 暂不绑定,留给 Phase 2,避免干扰现状退格)。
- * 装载在旧 Enter keymap 之前;Enter 决策链命中即吃掉,旧 Enter keymap 对 Enter 变死路
- * (但其 Backspace/Tab 仍由旧 plugin 处理,Phase 2/3 再清理)。
+ * Phase 1/2:接管 **Enter + Backspace**。装载在旧 Enter/Backspace keymap 之前;
+ * 决策链命中即吃掉,未命中放行兜底(baseKeymap / 现有 block keymap)。
+ *
+ * Backspace 只在「块首」介入(脱壳/退出容器);非块首及未覆盖情形放行,删字符 / 合并 /
+ * 现有 code-block 空块、column 空列 等仍由原 keymap + baseKeymap 处理。
  *
  * @param blocks 启用的 BlockSpec(取 keyboard 元数据)
  */
@@ -47,9 +49,6 @@ export function buildKeyboardKeymap(blocks: BlockSpec[]): Plugin {
   const metaLookup = buildKeyboardMetaLookup(blocks);
   return keymap({
     Enter: buildEnterCommand(metaLookup),
-    // Backspace: buildBackspaceCommand(metaLookup),  // Phase 2 启用
+    Backspace: buildBackspaceCommand(metaLookup),
   });
 }
-
-// 保留 import 引用(Phase 2 启用 Backspace 时去掉本行）
-void buildBackspaceCommand;
