@@ -17,47 +17,15 @@
  */
 
 import type { PmPayload } from '@semantic/types';
-import { dissectPmDoc, type DissectResult } from './dissect-pm-doc';
+import { dissectPmDoc } from './dissect-pm-doc';
 
 export interface BlockDiff {
   /** newDoc 有 / oldDoc 没有 — putAtom(create with id) */
   added: Array<{ id: string; payload: PmPayload }>;
-  /** 都有但 payload 字面变 — putAtom(update by id) */
+  /** 都有但 payload 字面变(含 028 结构属性 order/parentId 变化)— putAtom(update by id) */
   modified: Array<{ id: string; payload: PmPayload }>;
-  /** oldDoc 有 / newDoc 没有 — deleteAtom(级联删边)*/
+  /** oldDoc 有 / newDoc 没有 — deleteAtom */
   removedIds: string[];
-  /** newDoc 有的边集合(predicate / subjectId / objectId)— 字面待 putEdge */
-  addedEdges: Array<{ predicate: string; subjectId: string; objectId: string }>;
-  /** oldDoc 有 / newDoc 没有的边集合 — 字面待 deleteEdge */
-  removedEdges: Array<{ predicate: string; subjectId: string; objectId: string }>;
-}
-
-const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
-const NEXT_SIBLING_PREDICATE = 'user:krig:nextSibling';
-const CHILD_OF_PREDICATE = 'user:krig:childOf';
-
-interface EdgeRecord {
-  predicate: string;
-  subjectId: string;
-  objectId: string;
-}
-
-function dissectToEdgeRecords(d: DissectResult): EdgeRecord[] {
-  const records: EdgeRecord[] = [];
-  for (const e of d.belongsEdges) {
-    records.push({ predicate: BELONGS_TO_NOTE_PREDICATE, ...e });
-  }
-  for (const e of d.nextSiblingEdges) {
-    records.push({ predicate: NEXT_SIBLING_PREDICATE, ...e });
-  }
-  for (const e of d.childOfEdges) {
-    records.push({ predicate: CHILD_OF_PREDICATE, ...e });
-  }
-  return records;
-}
-
-function edgeKey(r: EdgeRecord): string {
-  return `${r.predicate}|${r.subjectId}|${r.objectId}`;
 }
 
 /**
@@ -123,36 +91,9 @@ export function diffBlockTree(
     }
   }
 
-  // edge diff(按规范化字符串 key 索引)
-  const oldEdges = dissectToEdgeRecords(oldDis);
-  const newEdges = dissectToEdgeRecords(newDis);
-  const oldEdgeKeys = new Set(oldEdges.map(edgeKey));
-  const newEdgeKeys = new Set(newEdges.map(edgeKey));
-
-  const addedEdges: BlockDiff['addedEdges'] = [];
-  const removedEdges: BlockDiff['removedEdges'] = [];
-
-  for (const e of newEdges) {
-    if (!oldEdgeKeys.has(edgeKey(e))) addedEdges.push(e);
-  }
-  for (const e of oldEdges) {
-    if (!newEdgeKeys.has(edgeKey(e))) removedEdges.push(e);
-  }
-
-  // 字面优化:被 removed 的 atom 字面级联删所有相关边(storage.deleteAtom 字面已做),
-  // 这里**剔除**已在 removedIds 内的 atom 的边记录,避免事务内冗余 deleteEdge → putEdge cycle
-  const removedIdSet = new Set(removedIds);
-  const filteredRemovedEdges = removedEdges.filter(
-    (e) => !removedIdSet.has(e.subjectId) && !removedIdSet.has(e.objectId),
-  );
-
-  return {
-    added,
-    modified,
-    removedIds,
-    addedEdges,
-    removedEdges: filteredRemovedEdges,
-  };
+  // Decision 028:零结构边。文档结构(order/parentId/noteId)由 dissect 写进 block atom
+  // 的 attrs —— 位置/父级变化 = atom payload 变化 = 上方 modified 路径自然捕获(stableStringify 含 attrs)。
+  return { added, modified, removedIds };
 }
 
 /**
@@ -165,12 +106,7 @@ export function fullCreateDiff(
   containerId: string,
 ): BlockDiff {
   const dis = dissectPmDoc(containerId, newDoc);
-  const edges = dissectToEdgeRecords(dis);
-  return {
-    added: dis.blocks,
-    modified: [],
-    removedIds: [],
-    addedEdges: edges,
-    removedEdges: [],
-  };
+  // Decision 028:零结构边 —— block atom 自带 noteId/parentId/order 属性,
+  // 结构完整自洽,createNote 只 putAtom(全 added)。
+  return { added: dis.blocks, modified: [], removedIds: [] };
 }

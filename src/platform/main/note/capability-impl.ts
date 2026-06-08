@@ -45,7 +45,8 @@ import type {
   CreateNoteBatchFailure,
 } from '@capabilities/note/types';
 import type { PmAtomDraft } from '@semantic/types';
-import type { StorageTransaction, PutEdgeInput } from '@storage/api';
+import type { StorageTransaction } from '@storage/api';
+import { initialRanks } from './lexrank';
 import { broadcastNoteListChanged } from './broadcast';
 import {
   createIntent,
@@ -58,9 +59,9 @@ import { progressUpdate } from '@platform/main/window/progress-bridge';
 const NOTE_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
 const HAS_NOTE_VIEW_PREDICATE = 'user:krig:hasNoteView';
+// Decision 028 Phase 2:本文件不再写 childOf / nextSibling 结构边。
+// belongsToNote 仅 deleteNote 过渡期兼容查询(迁移前老笔记 block)仍用,Phase 4 删。
 const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
-const CHILD_OF_PREDICATE = 'user:krig:childOf';
-const NEXT_SIBLING_PREDICATE = 'user:krig:nextSibling';
 
 /**
  * note container atom payload — 含缓存 title(2026-05-28 性能修复)
@@ -121,65 +122,23 @@ function buildNoteInfo(
 }
 
 /**
- * 在 storage transaction 内字面应用 diff。
+ * 在 storage transaction 内应用 diff(Decision 028 Phase 4:零结构边,纯 atom 增删改)。
  *
  * 顺序:
- * 1. removedIds:deleteAtom(级联删该 atom 的所有边 — 沿 storage.deleteAtom 字面行为)
- * 2. removedEdges:deleteEdge(残余边 — diff 内已剔除被 removed atom 的边,这里是
- *    "atom 未删但 sibling/childOf 关系变了"的边)
- * 3. added:putAtom(create with explicit id)+ added 的属于本 atom 的边
- * 4. modified:putAtom(update by id)
- * 5. addedEdges:putEdge(新边集合,字面已在 dissect 算)
+ * 1. removedIds:deleteAtom(级联删该 atom 的关系边 — storage.deleteAtom 行为不变)
+ * 2. added:putAtom(create with explicit id;atom.id == PM attrs.id,decision 026 §4.1)
+ * 3. modified:putAtom(update by id;含 028 结构属性 order/parentId/noteId 变化)
  */
 async function applyDiff(
   diff: BlockDiff,
   tx: import('@storage/api').StorageTransaction,
 ): Promise<void> {
-  const now = Date.now();
-
-  // 1. 删 atom(级联删边)
+  // 1. 删 atom(级联删该 atom 上的关系边)
   for (const id of diff.removedIds) {
     await tx.deleteAtom(id);
   }
 
-  // 2. 删剩余边(diff 内已剔除被 removed atom 关联的边)
-  //
-  // P1-2 (2026-05-29 data-layer-audit): 批量 lookup 替代 N 次 listEdges.
-  // 按 predicate 分组(同 predicate 才能合并查),一次拉所有候选,应用层匹配
-  // (subject, object) pair 后批量 deleteEdge.
-  // 选项 A (audit §1.4):用 PR A 已加的 subjectAtomIds/objectAtomIds 字段.
-  // 选项 B (改 BlockDiff schema 加 edgeId)留 future,本期不动.
-  const byPredicate = new Map<string, BlockDiff['removedEdges']>();
-  for (const e of diff.removedEdges) {
-    const arr = byPredicate.get(e.predicate);
-    if (arr) arr.push(e);
-    else byPredicate.set(e.predicate, [e]);
-  }
-
-  for (const [predicate, removals] of byPredicate) {
-    const subjectIds = removals.map((r) => r.subjectId);
-    const objectIds = removals.map((r) => r.objectId);
-
-    // 1 次拉所有候选 edges(同 predicate + subjectIds + objectIds 交集 — SQL 是 AND 不是 OR,
-    // 所以拉的是"subject ∈ subjectIds AND object ∈ objectIds"的笛卡尔集合,可能含本批不删的边;
-    // 应用层按 (subject, object) pair Set 二次过滤即可).
-    const candidates = await storage.listEdges({
-      predicate,
-      subjectAtomIds: subjectIds,
-      objectAtomIds: objectIds,
-    });
-
-    const wanted = new Set(removals.map((r) => `${r.subjectId}|${r.objectId}`));
-    for (const edge of candidates) {
-      if (edge.object.kind !== 'atom') continue;
-      const key = `${edge.subject.atomId}|${edge.object.atomId}`;
-      if (wanted.has(key)) {
-        await tx.deleteEdge(edge.id);
-      }
-    }
-  }
-
-  // 3. added atom(显式 id putAtom — atom.id 字面 = PM attrs.id,沿 decision 026 §4.1)
+  // 2. added atom
   for (const a of diff.added) {
     await tx.putAtom<'pm'>({
       id: a.id,
@@ -187,24 +146,11 @@ async function applyDiff(
     });
   }
 
-  // 4. modified atom
+  // 3. modified atom(结构变化已含在 payload.attrs 里)
   for (const m of diff.modified) {
     await tx.putAtom<'pm'>({
       id: m.id,
       payload: { domain: NOTE_DOMAIN, payload: m.payload },
-    });
-  }
-
-  // 5. 新边(去重:有些 added 边可能字面已存在 — 字面 putEdge 是 idempotent if id
-  //    given,但本路径未带 edge id;字面 listEdges 检查是 N^2 开销,先字面直接 putEdge,
-  //    若 storage 字面允许 duplicate predicate+subject+object 字面会重复;后续 Stage 3
-  //    cardinality 检查字面会发现)
-  for (const e of diff.addedEdges) {
-    await tx.putEdge({
-      predicate: e.predicate,
-      subject: { kind: 'atom', atomId: e.subjectId },
-      object: { kind: 'atom', atomId: e.objectId },
-      attrs: { createdBy: 'user-default', createdAt: now },
     });
   }
 }
@@ -248,16 +194,14 @@ export async function createNote(
       });
     }
 
-    // 4. 拆解 + 写 block atoms + 边(走 fullCreateDiff 字面把 newDoc 全当 added)
+    // 4. 拆解 + 写 block atoms(走 fullCreateDiff 把 newDoc 全当 added;Decision 028 零结构边)
     const diff = fullCreateDiff(docWithIds, containerAtom.id);
 
-    // 诊断:大文档导入丢数据排查(2026-05-27)— 打印事务规模,
-    // 用户重启后丢一半时可对照 log 看是哪批 atom/edge 写入失败
+    // 诊断:大文档导入丢数据排查(2026-05-27)— 打印事务规模
     const blockCount = diff.added.length;
-    const edgeCount = diff.addedEdges.length;
     if (blockCount > 50) {
       console.log(
-        `[note-capability/createNote] LARGE container=${containerAtom.id.slice(-8)} folder=${folderId ?? 'root'} blocks=${blockCount} edges=${edgeCount}`,
+        `[note-capability/createNote] LARGE container=${containerAtom.id.slice(-8)} folder=${folderId ?? 'root'} blocks=${blockCount}`,
       );
     }
 
@@ -266,7 +210,7 @@ export async function createNote(
     const elapsed = Date.now() - txStart;
     if (blockCount > 50 || elapsed > 500) {
       console.log(
-        `[note-capability/createNote] container=${containerAtom.id.slice(-8)} blocks=${blockCount} edges=${edgeCount} tx=${elapsed}ms`,
+        `[note-capability/createNote] container=${containerAtom.id.slice(-8)} blocks=${blockCount} tx=${elapsed}ms`,
       );
     }
 
@@ -605,20 +549,26 @@ async function drainNoteAndFinalize(
   // 走同一循环续删。cursor 不做精确推进 —— 真值靠重查 belongsToNote 边,天然幂等。
   for (;;) {
     round++;
-    // [delete/perf] drain 每轮 list/del 拆时:list=重查 belongsToNote 边耗时(嫌疑 G 同款 N×RPC
-    // 观测点),del=本批 bulkDelete 耗时。永久留,对称创建路径 BATCH log。
+    // Decision 028 Phase 2:级联改按 noteId 属性查 block atom(替代 belongsToNote 边)。
+    // 过渡期兼容:同时查旧 belongsToNote 边(迁移前的老笔记 block 无 noteId 属性,只能靠边找),
+    // 两路 id 取并集。Phase 3 迁移后老边清空、新数据走属性;Phase 4 删边查。
+    // [delete/perf] drain 每轮 list/del 拆时:list=查 block 耗时,del=本批 bulkDelete 耗时。
     const tList = performance.now();
-    const belongsEdges = await storage.listEdges({
-      predicate: BELONGS_TO_NOTE_PREDICATE,
-      objectAtomId: id,
-    });
+    const [blockAtoms, belongsEdges] = await Promise.all([
+      storage.listAtoms({ domain: NOTE_DOMAIN, noteId: id }),
+      storage.listEdges({ predicate: BELONGS_TO_NOTE_PREDICATE, objectAtomId: id }),
+    ]);
+    const idUnion = new Set<string>();
+    for (const a of blockAtoms) idUnion.add(a.id);
+    for (const e of belongsEdges) idUnion.add(e.subject.atomId);
+    const remainingIds = [...idUnion];
     const listMs = Math.round(performance.now() - tList);
-    if (belongsEdges.length === 0) {
+    if (remainingIds.length === 0) {
       console.log(`[delete/perf]     drain round=${round} list=${listMs}ms remaining=0 (done)`);
       break;
     }
-    if (total === 0) total = belongsEdges.length; // 首轮锁定 total
-    const batch = belongsEdges.slice(0, DELETE_BATCH_SIZE).map((e) => e.subject.atomId);
+    if (total === 0) total = remainingIds.length; // 首轮锁定 total
+    const batch = remainingIds.slice(0, DELETE_BATCH_SIZE);
     const tDel = performance.now();
     await storage.transaction(async (tx) => {
       await tx.bulkDeleteAtomsAndEdges(batch);
@@ -627,7 +577,7 @@ async function drainNoteAndFinalize(
     deleted += batch.length;
     onProgress?.(Math.min(deleted, total), total);
     console.log(
-      `[delete/perf]     drain round=${round} list=${listMs}ms del=${delMs}ms batch=${batch.length} remaining=${belongsEdges.length - batch.length}`,
+      `[delete/perf]     drain round=${round} list=${listMs}ms del=${delMs}ms batch=${batch.length} remaining=${remainingIds.length - batch.length}`,
     );
   }
 
@@ -837,71 +787,64 @@ async function createSingleNoteFromDrafts(
     });
   }
 
-  // 3. atoms 字面批量写入(档 3 perf: N 次串行 putAtom → 1 次 batchPutAtoms multi-row INSERT)
-  //    + 建 tmpId → realId 映射。entities[i] 字面对应 inputs[i](batchPutAtoms 保序)。
-  const atomEntities = await tx.batchPutAtoms<'pm'>(
-    // 字面 PE4: 不传 id, storage 分配(batchPutAtoms 内部应用层预生成 ULID)
-    item.atoms.map((draft) => ({ payload: draft.payload })),
-  );
+  // 3. Decision 028 Phase 2:导入路径也改"零结构边",结构靠 atom 属性
+  //    (noteId/parentId/order)。realId 需先于属性算出 —— 故应用层预生成 ULID,
+  //    把三属性注入各 draft payload.attrs,再带显式 id 一次 batchPutAtoms。
+  // 3a. 预生成 realId + tmpId→realId 映射(顺序对应 item.atoms)
+  const realIds = item.atoms.map(() => generateUlid());
   const tmpToReal = new Map<string, string>();
-  item.atoms.forEach((draft, i) => tmpToReal.set(draft.tmpId, atomEntities[i].id));
+  item.atoms.forEach((draft, i) => tmpToReal.set(draft.tmpId, realIds[i]));
 
-  // 4. 三类边收集到一个 array,一次 batchPutEdges(档 3 perf: N 次串行 putEdge → 1 次 multi-row INSERT)
-  const edges: PutEdgeInput[] = [];
-
-  // 4a. belongsToNote: 每 draft → container
-  for (const draft of item.atoms) {
-    const realId = tmpToReal.get(draft.tmpId)!;
-    edges.push({
-      predicate: BELONGS_TO_NOTE_PREDICATE,
-      subject: { kind: 'atom', atomId: realId },
-      object: { kind: 'atom', atomId: containerAtom.id },
-      attrs: { createdBy: 'user-default', createdAt: now },
-    });
-  }
-
-  // 4b. childOf: draft.parentTmpId 字面解析
-  for (const draft of item.atoms) {
-    if (!draft.parentTmpId) continue;
-    const childRealId = tmpToReal.get(draft.tmpId)!;
-    const parentRealId = tmpToReal.get(draft.parentTmpId);
-    if (!parentRealId) {
-      throw new Error(
-        `[createSingleNoteFromDrafts] dangling parentTmpId=${draft.parentTmpId} ` +
-          `on draft.tmpId=${draft.tmpId}`,
-      );
-    }
-    edges.push({
-      predicate: CHILD_OF_PREDICATE,
-      subject: { kind: 'atom', atomId: childRealId },
-      object: { kind: 'atom', atomId: parentRealId },
-      attrs: { createdBy: 'user-default', createdAt: now },
-    });
-  }
-
-  // 4c. nextSibling: 按 atoms 数组顺序 + parentTmpId 分组
-  // 顶层 = parentTmpId undefined; 嵌套 = 同 parentTmpId 字面是兄弟.
-  // 分组保持原 drafts 数组顺序 (markdownToAtoms 字面深度遍历, parent 先于 child).
-  const siblingGroups = new Map<string, string[]>();
+  // 3b. 按 parentTmpId 分组算同级 order(drafts 保持源顺序:parent 先于 child,
+  //     同 parentTmpId 即兄弟,组内数组序 = 文档序)。先收集各组 draft 下标。
   const ROOT_KEY = '__root__';
-  for (const draft of item.atoms) {
+  const groupIdx = new Map<string, number[]>();
+  item.atoms.forEach((draft, i) => {
     const key = draft.parentTmpId ?? ROOT_KEY;
-    if (!siblingGroups.has(key)) siblingGroups.set(key, []);
-    siblingGroups.get(key)!.push(tmpToReal.get(draft.tmpId)!);
-  }
-  for (const realIds of siblingGroups.values()) {
-    for (let i = 0; i < realIds.length - 1; i++) {
-      edges.push({
-        predicate: NEXT_SIBLING_PREDICATE,
-        subject: { kind: 'atom', atomId: realIds[i] },
-        object: { kind: 'atom', atomId: realIds[i + 1] },
-        attrs: { createdBy: 'user-default', createdAt: now },
-      });
-    }
+    const arr = groupIdx.get(key);
+    if (arr) arr.push(i);
+    else groupIdx.set(key, [i]);
+  });
+  // orderByIdx[i] = 第 i 个 draft 的 order rank
+  const orderByIdx = new Array<string>(item.atoms.length);
+  for (const idxs of groupIdx.values()) {
+    const ranks = initialRanks(idxs.length);
+    idxs.forEach((idx, k) => (orderByIdx[idx] = ranks[k]));
   }
 
-  // 单 SQL 批量写入所有三类边(belongsToNote + childOf + nextSibling)
-  await tx.batchPutEdges(edges);
+  // 3c. 注入属性 + 校验 parentTmpId 不悬空,组装显式 id 的 putAtom 输入
+  const atomInputs = item.atoms.map((draft, i) => {
+    const realId = realIds[i];
+    let parentId: string | null = null;
+    if (draft.parentTmpId) {
+      const parentRealId = tmpToReal.get(draft.parentTmpId);
+      if (!parentRealId) {
+        throw new Error(
+          `[createSingleNoteFromDrafts] dangling parentTmpId=${draft.parentTmpId} ` +
+            `on draft.tmpId=${draft.tmpId}`,
+        );
+      }
+      parentId = parentRealId;
+    }
+    const basePayload = draft.payload.payload as PmPayload;
+    const mergedPayload: PmPayload = {
+      ...basePayload,
+      attrs: {
+        ...(basePayload.attrs ?? {}),
+        id: realId, // atom.id == PM attrs.id 不变量(decision 026 §4.1)
+        noteId: containerAtom.id,
+        parentId,
+        order: orderByIdx[i],
+      },
+    };
+    return {
+      id: realId,
+      payload: { domain: NOTE_DOMAIN, payload: mergedPayload } as PmAtomDraft['payload'],
+    };
+  });
+
+  // 3d. 一次 batchPutAtoms(显式 id;零结构边 —— 不再 batchPutEdges 三类结构边)
+  await tx.batchPutAtoms<'pm'>(atomInputs);
 
   // 5. NoteInfo (assembled 不再二次拼装 — 字面用 cached title + empty container doc 兜底,
   //    view 端 getNote 真消费时走 assemblePmDoc 拼全文)

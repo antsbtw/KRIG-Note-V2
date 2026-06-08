@@ -104,11 +104,8 @@ const CARDINALITY_SCAN_PREDICATES = [
   { predicate: 'user:krig:hasReadingState', cardinality: '1:1' as const },
   // hasReadingThought: ebook → pm-as-thought, cardinality 0..1 (lazy create, 最多 1 条)
   { predicate: 'user:krig:hasReadingThought', cardinality: '0..1' as const },
-  // L7 block atomization (decision 026 §6) — 仅扫描+告警,不自愈
-  // belongsToNote: 每 block 字面 1 条 outgoing → 多条字面违反(数据可能 dup-id 残留)
-  { predicate: 'user:krig:belongsToNote', cardinality: '1:1' as const },
-  // childOf:每 block 字面 ≤1 outgoing(顶层 0,嵌套 1)→ >1 字面违反
-  { predicate: 'user:krig:childOf', cardinality: '0..1' as const },
+  // Decision 028 Phase 4:结构边(belongsToNote / childOf / nextSibling)已整体移除
+  // —— 文档结构改由 block atom 属性(noteId/parentId/order)表达,不再有结构边可扫。
 ];
 
 interface ScanResult {
@@ -154,78 +151,6 @@ async function scanCardinality(
   return { predicate, cardinality, scannedEdges: allEdges.length, multiViolations };
 }
 
-// ── L7 block atomization (decision 026 §6.2) — nextSibling 双向 ≤1 扫描 ──
-
-/**
- * nextSibling 边 cardinality 双向扫描(decision 026 §6.2 字面):
- * - 每 atom outgoing nextSibling ≤ 1(每 block 字面下一邻居唯一)
- * - 每 atom incoming nextSibling ≤ 1(每 block 字面上一邻居唯一)
- *
- * 现有 scanCardinality / checkPredicate 字面只扫 subject 一边(outgoing),
- * 字面不覆盖 incoming 维度 — 本 helper 字面双向扫。
- *
- * L2 字面消费:仅 warn 告警不自愈(链断裂 / 双 incoming 字面是数据完整性问题,
- * 自动清理可能丢用户数据;留管理员决断)。
- */
-interface NextSiblingScanResult {
-  scannedEdges: number;
-  outgoingViolations: number;
-  incomingViolations: number;
-}
-
-async function scanNextSiblingCardinality(
-  storage: StorageAPI,
-): Promise<NextSiblingScanResult> {
-  const allEdges = await storage.listEdges({ predicate: 'user:krig:nextSibling' });
-
-  // outgoing 维度:按 subject.atomId 分组
-  const outgoingGrouped = new Map<string, number>();
-  // incoming 维度:按 object.atomId 分组(object 必须是 atom 端点)
-  const incomingGrouped = new Map<string, number>();
-
-  for (const edge of allEdges) {
-    if (edge.subject.kind === 'atom') {
-      outgoingGrouped.set(
-        edge.subject.atomId,
-        (outgoingGrouped.get(edge.subject.atomId) ?? 0) + 1,
-      );
-    }
-    if (edge.object.kind === 'atom') {
-      incomingGrouped.set(
-        edge.object.atomId,
-        (incomingGrouped.get(edge.object.atomId) ?? 0) + 1,
-      );
-    }
-  }
-
-  let outgoingViolations = 0;
-  for (const [atomId, count] of outgoingGrouped) {
-    if (count > 1) {
-      outgoingViolations++;
-      console.warn(
-        `[storage/cardinality-check] CARDINALITY_VIOLATION_NEXT_SIBLING_OUTGOING ` +
-          `atom ${atomId}: ${count} outgoing nextSibling edges (expected ≤1)`,
-      );
-    }
-  }
-  let incomingViolations = 0;
-  for (const [atomId, count] of incomingGrouped) {
-    if (count > 1) {
-      incomingViolations++;
-      console.warn(
-        `[storage/cardinality-check] CARDINALITY_VIOLATION_NEXT_SIBLING_INCOMING ` +
-          `atom ${atomId}: ${count} incoming nextSibling edges (expected ≤1)`,
-      );
-    }
-  }
-
-  return {
-    scannedEdges: allEdges.length,
-    outgoingViolations,
-    incomingViolations,
-  };
-}
-
 /**
  * 启动 self-check 入口(initStorage 后调用)。
  *
@@ -258,16 +183,8 @@ export async function runCardinalityCheck(storage: StorageAPI): Promise<void> {
     }
   }
 
-  // L7 block atomization (decision 026 §6.2) — nextSibling 双向 ≤1 扫描
-  try {
-    const r = await scanNextSiblingCardinality(storage);
-    console.log(
-      `[storage/cardinality-check] user:krig:nextSibling: scanned ${r.scannedEdges} edges, ` +
-        `outgoing violations=${r.outgoingViolations}, incoming violations=${r.incomingViolations}`,
-    );
-  } catch (err) {
-    console.warn('[storage/cardinality-check] nextSibling scan failed:', err);
-  }
+  // Decision 028 Phase 4:nextSibling / belongsToNote / childOf 结构边已移除,
+  // 不再扫描(结构改由 block atom 属性表达)。
 
   // sub-phase 022 L2 marker 边互斥扫描 (decision 022 §4.3.1-L2)
   // 复用 Step 5.7 抽的 scanMarkerEdgeMutexViolations helper.

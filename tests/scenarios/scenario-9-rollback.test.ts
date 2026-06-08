@@ -65,9 +65,15 @@ describe('Scenario 9 — KRIG_IMPORT 5 chapter all-or-nothing 回滚', () => {
 
     // 5 container + 5 block = 10 atom
     expect(mockStorage._atoms.size).toBe(10);
-    // 字面 5 hasNoteView + 5 belongsToNote (无 inFolder / childOf / nextSibling 单 atom 内)
+    // Decision 028:5 hasNoteView marker(保留);belongsToNote 等结构边不再写(归属靠 noteId 属性)。
     const edges = [...mockStorage._edges.values()];
     expect(edges.filter((e) => e.predicate === 'user:krig:hasNoteView').length).toBe(5);
-    expect(edges.filter((e) => e.predicate === 'user:krig:belongsToNote').length).toBe(5);
+    expect(
+      edges.filter((e) =>
+        ['user:krig:belongsToNote', 'user:krig:childOf', 'user:krig:nextSibling'].includes(
+          e.predicate,
+        ),
+      ).length,
+    ).toBe(0);
   });
 });
