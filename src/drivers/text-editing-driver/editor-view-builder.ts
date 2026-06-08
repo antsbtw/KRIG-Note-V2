@@ -37,6 +37,7 @@ import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
 import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 import { buildSplitIndentKeymap } from './plugins/build-split-indent-keymap';
+import { buildKeyboardKeymap } from './keyboard/build-keyboard-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
 import { buildBottomPadPlugin } from './plugins/build-bottom-pad-plugin';
@@ -145,6 +146,11 @@ export function buildEditorView(
       buildBlockSelectionPlugin(),
       buildBlockSelectionContextMenuPlugin(),
     ] : []),
+    // 集中键盘 keymap(keyboard-system.md,第三步汇聚 Phase 1):**接管 Enter**。
+    // 装在所有旧 Enter keymap(blockPlugins / list / code / split-indent / baseKeymap)之前,
+    // 决策链命中即吃掉;统一各块 Enter 行为并修 audio/video/tweet caption 回车删块 bug。
+    // (Backspace 暂未接管,Phase 2 启用;旧 plugin 的 Backspace/Tab 仍生效。)
+    buildKeyboardKeymap(blocks),
     ...blockPlugins,
     ...(requiresTitleGuard ? [buildTitleGuardPlugin()] : []),
     ...(requiresBottomPad ? [buildBottomPadPlugin()] : []),
