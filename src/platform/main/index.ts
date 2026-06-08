@@ -41,6 +41,7 @@ import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
 import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
 import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cache';
+import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -108,6 +109,16 @@ app.whenReady().then(async () => {
     await runMigration022IfNeeded();
   } catch (err) {
     console.error('[migration/022] 执行失败,启动下次会重试:', err);
+  }
+
+  // Decision 028 Phase 3 — 文档结构边 → block atom 属性(noteId/parentId/order)迁移。
+  // 必须在 023 title backfill 之前(awaited):028 重写 block atom,023 assemble 拼 title;
+  // 若并发会 race(两边同时 assemble + putAtom)。028 内部串行 + round-trip 校验 + 保守删边。
+  // 失败 / round-trip 不一致不写 flag,启动下次重试(边仍在,Phase 1 fallback 仍可读)。
+  try {
+    await runMigration028IfNeeded();
+  } catch (err) {
+    console.error('[migration/028] 执行失败,启动下次会重试:', err);
   }
 
   // sub-phase 023 — 回填老 note attrs.title 缓存(2026-05-28)
