@@ -23,32 +23,28 @@ function para(id: string | null, text: string): PmPayload {
 }
 
 describe('dissectPmDoc', () => {
-  it('空 doc → 0 blocks / 0 edges', () => {
+  it('空 doc → 0 blocks(Decision 028:零结构边)', () => {
     const doc: PmPayload = { type: 'doc', content: [] };
     const r = dissectPmDoc(C, doc);
     expect(r.blocks).toHaveLength(0);
-    expect(r.belongsEdges).toHaveLength(0);
-    expect(r.nextSiblingEdges).toHaveLength(0);
-    expect(r.childOfEdges).toHaveLength(0);
   });
 
-  it('顶层 3 paragraph → 3 blocks + 3 belongs + 2 nextSibling + 0 childOf', () => {
+  it('顶层 3 paragraph → 3 blocks,顺序属性升序,noteId/parentId 正确', () => {
     const doc: PmPayload = {
       type: 'doc',
       content: [para('p1', 'A'), para('p2', 'B'), para('p3', 'C')],
     };
     const r = dissectPmDoc(C, doc);
     expect(r.blocks.map((b) => b.id)).toEqual(['p1', 'p2', 'p3']);
-    expect(r.belongsEdges).toHaveLength(3);
-    expect(r.belongsEdges.every((e) => e.objectId === C)).toBe(true);
-    expect(r.nextSiblingEdges).toEqual([
-      { subjectId: 'p1', objectId: 'p2' },
-      { subjectId: 'p2', objectId: 'p3' },
-    ]);
-    expect(r.childOfEdges).toHaveLength(0);
+    // 归属/层级/顺序全在属性上(零边)
+    expect(r.blocks.every((b) => b.payload.attrs?.noteId === C)).toBe(true);
+    expect(r.blocks.every((b) => b.payload.attrs?.parentId === null)).toBe(true);
+    const orders = r.blocks.map((b) => b.payload.attrs!.order as string);
+    expect(orders[0] < orders[1]).toBe(true);
+    expect(orders[1] < orders[2]).toBe(true);
   });
 
-  it('bulletList > listItem > paragraph 嵌套 → listItem 顶层 (无 childOf) + paragraph.childOf → listItem', () => {
+  it('bulletList > listItem > paragraph 嵌套 → listItem 顶层 (parentId null) + paragraph.parentId → listItem', () => {
     const innerPara: PmPayload = {
       type: 'paragraph',
       attrs: { id: 'inner' },
@@ -67,17 +63,15 @@ describe('dissectPmDoc', () => {
     const r = dissectPmDoc(C, doc);
 
     // bulletList 字面跳层 — listItem 上提到顶层
-    const ids = r.blocks.map((b) => b.id).sort();
-    expect(ids).toEqual(['inner', 'li1']);
-    // listItem 顶层 — 无 childOf
-    const liChildOf = r.childOfEdges.find((e) => e.subjectId === 'li1');
-    expect(liChildOf).toBeUndefined();
-    // inner paragraph.childOf → li1
-    const innerChildOf = r.childOfEdges.find((e) => e.subjectId === 'inner');
-    expect(innerChildOf).toEqual({ subjectId: 'inner', objectId: 'li1' });
-    // belongsToNote 字面每 atom 1 条 → container
-    expect(r.belongsEdges).toHaveLength(2);
-    expect(r.belongsEdges.every((e) => e.objectId === C)).toBe(true);
+    const byId = new Map(r.blocks.map((b) => [b.id, b.payload]));
+    expect([...byId.keys()].sort()).toEqual(['inner', 'li1']);
+    // listItem 顶层 — parentId null(跳过 bulletList)
+    expect(byId.get('li1')!.attrs?.parentId).toBe(null);
+    // inner paragraph.parentId → li1
+    expect(byId.get('inner')!.attrs?.parentId).toBe('li1');
+    // noteId 每 atom 都是 container
+    expect(byId.get('li1')!.attrs?.noteId).toBe(C);
+    expect(byId.get('inner')!.attrs?.noteId).toBe(C);
   });
 
   it('table → table atom + tableRow 跳层 + cells 注入 rowIndex/colIndex + cell.childOf → table', () => {
@@ -103,11 +97,12 @@ describe('dissectPmDoc', () => {
     expect(ids.has('c00')).toBe(true);
     expect(ids.has('c11')).toBe(true);
 
-    // cells childOf → table (跳 tableRow)
-    const c00ChildOf = r.childOfEdges.find((e) => e.subjectId === 'c00');
-    expect(c00ChildOf).toEqual({ subjectId: 'c00', objectId: 't1' });
-    const c11ChildOf = r.childOfEdges.find((e) => e.subjectId === 'c11');
-    expect(c11ChildOf).toEqual({ subjectId: 'c11', objectId: 't1' });
+    // cells parentId → table (跳 tableRow)
+    const byId = new Map(r.blocks.map((b) => [b.id, b.payload]));
+    expect(byId.get('c00')!.attrs?.parentId).toBe('t1');
+    expect(byId.get('c11')!.attrs?.parentId).toBe('t1');
+    // table 顶层 → parentId null
+    expect(byId.get('t1')!.attrs?.parentId).toBe(null);
 
     // rowIndex / colIndex 字面注入
     const c00 = r.blocks.find((b) => b.id === 'c00')!;
@@ -178,8 +173,8 @@ describe('dissectPmDoc', () => {
       expect(byId.get('inner')!.attrs?.noteId).toBe(C);
     });
 
-    it('attrs.parentId 与 childOfEdges 完全等价(双写一致性)', () => {
-      // 含 table + cells + list,验证所有 parentId == 对应 childOf 边
+    it('parentId 跨结构容器跳层正确(table cell→table,cell 内 paragraph→cell)', () => {
+      // 含 table + cells + cell 内 paragraph,验证 parentId 跳层语义
       const cell = (id: string): PmPayload => ({
         type: 'tableCell',
         attrs: { id },
@@ -192,11 +187,12 @@ describe('dissectPmDoc', () => {
       };
       const doc: PmPayload = { type: 'doc', content: [para('p0', 'top'), table] };
       const r = dissectPmDoc(C, doc);
-      const childOfByChild = new Map(r.childOfEdges.map((e) => [e.subjectId, e.objectId]));
-      for (const b of r.blocks) {
-        const expectedParent = childOfByChild.get(b.id) ?? null;
-        expect(b.payload.attrs?.parentId).toBe(expectedParent);
-      }
+      const byId = new Map(r.blocks.map((b) => [b.id, b.payload]));
+      expect(byId.get('p0')!.attrs?.parentId).toBe(null); // 顶层
+      expect(byId.get('t1')!.attrs?.parentId).toBe(null); // 顶层
+      expect(byId.get('c00')!.attrs?.parentId).toBe('t1'); // cell 跳 tableRow → table
+      expect(byId.get('c01')!.attrs?.parentId).toBe('t1');
+      expect(byId.get('c00-p')!.attrs?.parentId).toBe('c00'); // cell 内 paragraph → cell
     });
 
     it('不污染输入 doc(attrs 浅拷贝)', () => {

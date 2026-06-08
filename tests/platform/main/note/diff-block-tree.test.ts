@@ -2,7 +2,6 @@
  * Unit test: diffBlockTree / fullCreateDiff (Decision 028 Phase 2)
  *
  * 验收 Phase 2:写入只写属性,**零结构边**。
- *  - 任何 diff 的 addedEdges / removedEdges 恒为 []
  *  - 改顺序(交换两块)→ 受影响块的 order 属性变 → 走 modified 路径(非加删边)
  *  - 插块 / 删块 → added / removedIds 正确,且仍零边
  */
@@ -23,8 +22,6 @@ describe('diffBlockTree — Decision 028 Phase 2 零结构边', () => {
   it('fullCreateDiff: 全 added,零边', () => {
     const d = fullCreateDiff(doc(para('p1', 'A'), para('p2', 'B')), C);
     expect(d.added.map((a) => a.id)).toEqual(['p1', 'p2']);
-    expect(d.addedEdges).toEqual([]);
-    expect(d.removedEdges).toEqual([]);
   });
 
   it('内容修改 → modified,零边', () => {
@@ -34,8 +31,6 @@ describe('diffBlockTree — Decision 028 Phase 2 零结构边', () => {
     expect(d.modified.map((m) => m.id)).toEqual(['p1']);
     expect(d.added).toEqual([]);
     expect(d.removedIds).toEqual([]);
-    expect(d.addedEdges).toEqual([]);
-    expect(d.removedEdges).toEqual([]);
   });
 
   it('改顺序(交换 p1/p2)→ order 属性变 → 两块 modified,零边', () => {
@@ -47,8 +42,6 @@ describe('diffBlockTree — Decision 028 Phase 2 零结构边', () => {
     // 关键断言:全程零结构边,且没有 added/removed(只是重排)。
     expect(d.added).toEqual([]);
     expect(d.removedIds).toEqual([]);
-    expect(d.addedEdges).toEqual([]);
-    expect(d.removedEdges).toEqual([]);
     // 至少 p1、p2 被标 modified(order 变)
     const modIds = new Set(d.modified.map((m) => m.id));
     expect(modIds.has('p1')).toBe(true);
@@ -60,8 +53,6 @@ describe('diffBlockTree — Decision 028 Phase 2 零结构边', () => {
     const newDoc = doc(para('p1', 'A'), para('pNew', 'NEW'), para('p2', 'B'));
     const d = diffBlockTree(oldDoc, newDoc, C);
     expect(d.added.map((a) => a.id)).toContain('pNew');
-    expect(d.addedEdges).toEqual([]);
-    expect(d.removedEdges).toEqual([]);
   });
 
   it('删块 → removedIds,零边', () => {
@@ -69,7 +60,5 @@ describe('diffBlockTree — Decision 028 Phase 2 零结构边', () => {
     const newDoc = doc(para('p1', 'A'), para('p3', 'C'));
     const d = diffBlockTree(oldDoc, newDoc, C);
     expect(d.removedIds).toContain('p2');
-    expect(d.addedEdges).toEqual([]);
-    expect(d.removedEdges).toEqual([]);
   });
 });

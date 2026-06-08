@@ -59,7 +59,8 @@ describe('Scenario 1 — GFM 表格 round-trip (5A §6.3)', () => {
     const containerId = 'container-1';
     const result = dissectPmDoc(containerId, doc);
 
-    // 3. 写 mock storage (container + blocks + 边)
+    // 3. 写 mock storage (container + blocks)。Decision 028:零结构边 —— block atom
+    //    自带 noteId/parentId/order 属性(dissect 已写入 b.payload.attrs),无需写边。
     await mockStorage.putAtom<'pm'>({
       id: containerId,
       payload: { domain: 'pm', payload: { type: 'doc', content: [] } } as Atom<'pm'>,
@@ -68,30 +69,6 @@ describe('Scenario 1 — GFM 表格 round-trip (5A §6.3)', () => {
       await mockStorage.putAtom<'pm'>({
         id: b.id,
         payload: { domain: 'pm', payload: b.payload },
-      });
-    }
-    for (const e of result.belongsEdges) {
-      await mockStorage.putEdge({
-        predicate: 'user:krig:belongsToNote',
-        subject: { kind: 'atom', atomId: e.subjectId },
-        object: { kind: 'atom', atomId: e.objectId },
-        attrs: { createdBy: 'test', createdAt: Date.now() },
-      });
-    }
-    for (const e of result.nextSiblingEdges) {
-      await mockStorage.putEdge({
-        predicate: 'user:krig:nextSibling',
-        subject: { kind: 'atom', atomId: e.subjectId },
-        object: { kind: 'atom', atomId: e.objectId },
-        attrs: { createdBy: 'test', createdAt: Date.now() },
-      });
-    }
-    for (const e of result.childOfEdges) {
-      await mockStorage.putEdge({
-        predicate: 'user:krig:childOf',
-        subject: { kind: 'atom', atomId: e.subjectId },
-        object: { kind: 'atom', atomId: e.objectId },
-        attrs: { createdBy: 'test', createdAt: Date.now() },
       });
     }
 

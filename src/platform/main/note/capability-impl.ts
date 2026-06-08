@@ -122,65 +122,23 @@ function buildNoteInfo(
 }
 
 /**
- * 在 storage transaction 内字面应用 diff。
+ * 在 storage transaction 内应用 diff(Decision 028 Phase 4:零结构边,纯 atom 增删改)。
  *
  * 顺序:
- * 1. removedIds:deleteAtom(级联删该 atom 的所有边 — 沿 storage.deleteAtom 字面行为)
- * 2. removedEdges:deleteEdge(残余边 — diff 内已剔除被 removed atom 的边,这里是
- *    "atom 未删但 sibling/childOf 关系变了"的边)
- * 3. added:putAtom(create with explicit id)+ added 的属于本 atom 的边
- * 4. modified:putAtom(update by id)
- * 5. addedEdges:putEdge(新边集合,字面已在 dissect 算)
+ * 1. removedIds:deleteAtom(级联删该 atom 的关系边 — storage.deleteAtom 行为不变)
+ * 2. added:putAtom(create with explicit id;atom.id == PM attrs.id,decision 026 §4.1)
+ * 3. modified:putAtom(update by id;含 028 结构属性 order/parentId/noteId 变化)
  */
 async function applyDiff(
   diff: BlockDiff,
   tx: import('@storage/api').StorageTransaction,
 ): Promise<void> {
-  const now = Date.now();
-
-  // 1. 删 atom(级联删边)
+  // 1. 删 atom(级联删该 atom 上的关系边)
   for (const id of diff.removedIds) {
     await tx.deleteAtom(id);
   }
 
-  // 2. 删剩余边(diff 内已剔除被 removed atom 关联的边)
-  //
-  // P1-2 (2026-05-29 data-layer-audit): 批量 lookup 替代 N 次 listEdges.
-  // 按 predicate 分组(同 predicate 才能合并查),一次拉所有候选,应用层匹配
-  // (subject, object) pair 后批量 deleteEdge.
-  // 选项 A (audit §1.4):用 PR A 已加的 subjectAtomIds/objectAtomIds 字段.
-  // 选项 B (改 BlockDiff schema 加 edgeId)留 future,本期不动.
-  const byPredicate = new Map<string, BlockDiff['removedEdges']>();
-  for (const e of diff.removedEdges) {
-    const arr = byPredicate.get(e.predicate);
-    if (arr) arr.push(e);
-    else byPredicate.set(e.predicate, [e]);
-  }
-
-  for (const [predicate, removals] of byPredicate) {
-    const subjectIds = removals.map((r) => r.subjectId);
-    const objectIds = removals.map((r) => r.objectId);
-
-    // 1 次拉所有候选 edges(同 predicate + subjectIds + objectIds 交集 — SQL 是 AND 不是 OR,
-    // 所以拉的是"subject ∈ subjectIds AND object ∈ objectIds"的笛卡尔集合,可能含本批不删的边;
-    // 应用层按 (subject, object) pair Set 二次过滤即可).
-    const candidates = await storage.listEdges({
-      predicate,
-      subjectAtomIds: subjectIds,
-      objectAtomIds: objectIds,
-    });
-
-    const wanted = new Set(removals.map((r) => `${r.subjectId}|${r.objectId}`));
-    for (const edge of candidates) {
-      if (edge.object.kind !== 'atom') continue;
-      const key = `${edge.subject.atomId}|${edge.object.atomId}`;
-      if (wanted.has(key)) {
-        await tx.deleteEdge(edge.id);
-      }
-    }
-  }
-
-  // 3. added atom(显式 id putAtom — atom.id 字面 = PM attrs.id,沿 decision 026 §4.1)
+  // 2. added atom
   for (const a of diff.added) {
     await tx.putAtom<'pm'>({
       id: a.id,
@@ -188,24 +146,11 @@ async function applyDiff(
     });
   }
 
-  // 4. modified atom
+  // 3. modified atom(结构变化已含在 payload.attrs 里)
   for (const m of diff.modified) {
     await tx.putAtom<'pm'>({
       id: m.id,
       payload: { domain: NOTE_DOMAIN, payload: m.payload },
-    });
-  }
-
-  // 5. 新边(去重:有些 added 边可能字面已存在 — 字面 putEdge 是 idempotent if id
-  //    given,但本路径未带 edge id;字面 listEdges 检查是 N^2 开销,先字面直接 putEdge,
-  //    若 storage 字面允许 duplicate predicate+subject+object 字面会重复;后续 Stage 3
-  //    cardinality 检查字面会发现)
-  for (const e of diff.addedEdges) {
-    await tx.putEdge({
-      predicate: e.predicate,
-      subject: { kind: 'atom', atomId: e.subjectId },
-      object: { kind: 'atom', atomId: e.objectId },
-      attrs: { createdBy: 'user-default', createdAt: now },
     });
   }
 }
@@ -249,16 +194,14 @@ export async function createNote(
       });
     }
 
-    // 4. 拆解 + 写 block atoms + 边(走 fullCreateDiff 字面把 newDoc 全当 added)
+    // 4. 拆解 + 写 block atoms(走 fullCreateDiff 把 newDoc 全当 added;Decision 028 零结构边)
     const diff = fullCreateDiff(docWithIds, containerAtom.id);
 
-    // 诊断:大文档导入丢数据排查(2026-05-27)— 打印事务规模,
-    // 用户重启后丢一半时可对照 log 看是哪批 atom/edge 写入失败
+    // 诊断:大文档导入丢数据排查(2026-05-27)— 打印事务规模
     const blockCount = diff.added.length;
-    const edgeCount = diff.addedEdges.length;
     if (blockCount > 50) {
       console.log(
-        `[note-capability/createNote] LARGE container=${containerAtom.id.slice(-8)} folder=${folderId ?? 'root'} blocks=${blockCount} edges=${edgeCount}`,
+        `[note-capability/createNote] LARGE container=${containerAtom.id.slice(-8)} folder=${folderId ?? 'root'} blocks=${blockCount}`,
       );
     }
 
@@ -267,7 +210,7 @@ export async function createNote(
     const elapsed = Date.now() - txStart;
     if (blockCount > 50 || elapsed > 500) {
       console.log(
-        `[note-capability/createNote] container=${containerAtom.id.slice(-8)} blocks=${blockCount} edges=${edgeCount} tx=${elapsed}ms`,
+        `[note-capability/createNote] container=${containerAtom.id.slice(-8)} blocks=${blockCount} tx=${elapsed}ms`,
       );
     }
 

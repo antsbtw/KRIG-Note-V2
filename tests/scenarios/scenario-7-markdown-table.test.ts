@@ -36,7 +36,6 @@ describe('Scenario 7 — markdown 含 GFM 表格 → atoms → createNote', () =
     expect(result.notes).toHaveLength(1);
     expect(result.notes[0].title).toBe('Test Note');
 
-    // table 的 childOf 边 = cell 数
     const tableDrafts = atoms.filter((a) => a.payload.payload.type === 'table');
     expect(tableDrafts).toHaveLength(1);
     const cellDrafts = atoms.filter(
@@ -46,15 +45,36 @@ describe('Scenario 7 — markdown 含 GFM 表格 → atoms → createNote', () =
     );
     expect(cellDrafts.length).toBe(6); // 2 header + 4 cell
 
-    const childOf = [...mockStorage._edges.values()].filter(
-      (e) => e.predicate === 'user:krig:childOf',
+    // Decision 028:零结构边。childOf / belongsToNote 边不再写。
+    const structuralEdges = [...mockStorage._edges.values()].filter((e) =>
+      ['user:krig:childOf', 'user:krig:belongsToNote', 'user:krig:nextSibling'].includes(
+        e.predicate,
+      ),
     );
-    expect(childOf.length).toBe(cellDrafts.length);
+    expect(structuralEdges).toHaveLength(0);
 
-    // 字面 belongsToNote 每 draft 1 条
-    const belongs = [...mockStorage._edges.values()].filter(
-      (e) => e.predicate === 'user:krig:belongsToNote',
+    // 结构靠属性:每个 block atom 带 noteId(= container id);cell 的 parentId 指 table。
+    const containerId = result.notes[0].id;
+    const blockAtoms = [...mockStorage._atoms.values()].filter((a) => a.id !== containerId);
+    expect(blockAtoms.length).toBe(atoms.length);
+    expect(
+      blockAtoms.every(
+        (a) => (a.payload.payload as { attrs?: { noteId?: string } }).attrs?.noteId === containerId,
+      ),
+    ).toBe(true);
+    // 每个 cell 的 parentId 指向某个 table atom
+    const tableIds = new Set(
+      blockAtoms
+        .filter((a) => a.payload.payload.type === 'table')
+        .map((a) => a.id),
     );
-    expect(belongs.length).toBe(atoms.length);
+    const cells = blockAtoms.filter(
+      (a) => a.payload.payload.type === 'tableCell' || a.payload.payload.type === 'tableHeader',
+    );
+    expect(
+      cells.every((a) =>
+        tableIds.has((a.payload.payload as { attrs?: { parentId?: string } }).attrs?.parentId ?? ''),
+      ),
+    ).toBe(true);
   });
 });

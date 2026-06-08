@@ -1,127 +1,37 @@
 /**
- * assemble-pm-doc — L7 block atomization Stage 2 Step 2.1
+ * assemble-pm-doc — 从 storage 内拆散的 block atom 拼装回完整 PM doc。
  *
- * 从 storage 内拆散的 block atom + 边集合,拼装回完整 PM doc。
- *
- * 实施依据:
- * - decision 026 §3 颗粒度边界(叶子 + 叶子级容器拆 atom;结构性容器不拆)
- * - decision 026 §6 嵌套与边集(belongsToNote / nextSibling / childOf)
- * - decision 026 §6.1 跨层 wrapper 重建(tableCell.childOf → table atom,
- *   跳过 tableRow;listItem 在 bulletList 内,childOf 跳过 bulletList → note)
- * - decision 026 §8.1 读时拼装
- * - decision 026 §13.8 STRUCTURAL_REBUILD_RULES 集中化提示
+ * Decision 028 Phase 4:**纯属性路径,零结构边**。
+ *  - 按 noteId 一次拉本笔记所有 block atom
+ *  - 按 parentId 建树(顶层 = parentId null;跨结构容器跳层语义沿用)
+ *  - 同级按 order 字典序升序排
+ *  - 用 applyRebuildRules / assembleTable 重建中间结构容器壳(逻辑不变,026 §6.1)
  *
  * 入参契约:
- * - containerId = note container atom id(可以有 hasNoteView 边 = 笔记,也可以无 = reading-thought,详 D-10)
- * - 假设 storage 已是拆 atom 形态(decision 026 §3 字面);
- *   旧整篇 1 atom 数据**不兼容**(Stage 6 migration 前清数据,详 D-11)
+ * - containerId = note container atom id(D-10:也可是 reading-thought,不要求 hasNoteView)
+ * - 数据须已迁移成属性形态(migration 028)。若仍是旧边形态(0 属性块 + belongsToNote 边),
+ *   **fail loud 抛错**(边 fallback 已移除,不静默返回空 doc 丢内容)。
  *
- * 输出:完整 PmPayload(type='doc',content 含所有 top-level block,
- * 容器型 block 已通过 childOf 边展开 + 中间 wrapper 重建)。
+ * 输出:完整 PmPayload(type='doc')。container 不存在 → null。
  */
 
 import { storage } from '@storage/index';
 import type {
   AtomEntity,
-  EdgeEntity,
   PmPayload,
 } from '@semantic/types';
 import { applyRebuildRules } from './structural-rebuild-rules';
 import { assembleTable } from './assemble-table';
 import { stripAssemblyHints, type BlockAtomPayload } from './assemble-pm-doc-helpers';
 
+// Decision 028 Phase 4:assemble 纯属性路径。belongsToNote 仅用于"未迁移 note" fail-loud 检测。
 const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
-const NEXT_SIBLING_PREDICATE = 'user:krig:nextSibling';
-const CHILD_OF_PREDICATE = 'user:krig:childOf';
 
 // 5B Stage 4 重构 (§7.3.2):
 // - 原 wrapChildren / wrapTableCells / stripAssemblyHints 拆出三处:
 //   - 通用 grouping (list/taskList/columnList) -> structural-rebuild-rules.ts
 //   - table 重建 (按 rowIndex/colIndex 分组排序) -> assemble-table.ts
 //   - 共享小工具 (stripAssemblyHints + BlockAtomPayload) -> assemble-pm-doc-helpers.ts
-
-/**
- * 在 atom 集合内按 nextSibling 链拓扑排序(只对 sibling 集合做)。
- *
- * 输入:atomIds = 同一 childOf 父 / 同一 belongsToNote 容器的 sibling 集合
- * 输出:按 nextSibling 链顺序的 atomId 数组
- *
- * 算法:
- * 1. 在 nextSibling 边集合中找 incoming = 0 的 atomId(链头)
- * 2. 从链头开始,逐步 follow nextSibling.object
- * 3. 链断裂 fallback:剩余按字典序 append(沿 decision 026 §13.3 临时默认)
- */
-function topologicalSortSiblings(
-  atomIds: string[],
-  nextSiblingEdges: EdgeEntity[],
-): string[] {
-  if (atomIds.length === 0) return [];
-  const idSet = new Set(atomIds);
-
-  // 只看 subject + object 都在本 sibling 集合内的 nextSibling 边
-  const nextMap = new Map<string, string>();
-  const hasIncoming = new Set<string>();
-  for (const e of nextSiblingEdges) {
-    const subjId = e.subject.atomId;
-    if (e.object.kind !== 'atom') continue;
-    const objId = e.object.atomId;
-    if (!idSet.has(subjId) || !idSet.has(objId)) continue;
-    // 字面 cardinality:每 atom outgoing ≤ 1,这里取首条边(后续若有 dup 字面 console.warn)
-    if (nextMap.has(subjId)) {
-      console.warn(
-        `[assemble-pm-doc] nextSibling duplicate outgoing on atom ${subjId}, ` +
-          `dropping second edge(decision 026 §13.3 临时 fallback)`,
-      );
-      continue;
-    }
-    nextMap.set(subjId, objId);
-    hasIncoming.add(objId);
-  }
-
-  // 链头:无 incoming 的 atomId
-  const heads = atomIds.filter((id) => !hasIncoming.has(id));
-  if (heads.length === 0 && atomIds.length > 0) {
-    // 全循环字面(数据坏)— fallback 按字典序
-    console.error(
-      `[assemble-pm-doc] nextSibling chain has no head (all atoms have incoming), ` +
-        `fallback to lexicographic order(decision 026 §13.3)`,
-    );
-    return [...atomIds].sort();
-  }
-  if (heads.length > 1) {
-    // 多链头字面 — 字面 fallback:按字典序 append(链头先放,残余按字典序)
-    console.warn(
-      `[assemble-pm-doc] nextSibling chain has ${heads.length} heads, ` +
-        `chain may be broken(decision 026 §13.3)`,
-    );
-  }
-
-  // 从第 1 个链头沿链遍历;其它链头按字典序在尾部串接
-  heads.sort();
-  const visited = new Set<string>();
-  const result: string[] = [];
-
-  for (const head of heads) {
-    let cursor: string | undefined = head;
-    while (cursor && !visited.has(cursor)) {
-      visited.add(cursor);
-      result.push(cursor);
-      cursor = nextMap.get(cursor);
-    }
-  }
-
-  // 剩余未访问字面 fallback(数据异常)
-  if (visited.size < atomIds.length) {
-    const leftover = atomIds.filter((id) => !visited.has(id)).sort();
-    console.error(
-      `[assemble-pm-doc] ${leftover.length} atoms not reachable via nextSibling chain, ` +
-        `appending in lexicographic order(decision 026 §13.3)`,
-    );
-    result.push(...leftover);
-  }
-
-  return result;
-}
 
 /**
  * 递归构造一个 block atom 的输出 PM 节点(含子内容展开)。
@@ -132,8 +42,11 @@ function topologicalSortSiblings(
  *   再用 applyRebuildRules / assembleTable 重建中间 wrapper (5B Stage 4)
  *
  * 容器型 block 的 atom payload.content 字面应是 [];若非空字面记 warn(数据可能未 dissect)
+ *
+ * export:migration 028(legacy 边读取)复用同一节点构造逻辑,只换 childrenByParent /
+ * sortSiblings 的来源(边 vs 属性)。生产 assemble 只走属性。
  */
-function buildPmNode(
+export function buildPmNode(
   atomId: string,
   blocksById: Map<string, AtomEntity<'pm'>>,
   childrenByParent: Map<string, string[]>,
@@ -222,8 +135,8 @@ function readStructAttrs(atom: AtomEntity<'pm'>): {
 }
 
 /**
- * Decision 028 Phase 1 判定:本批 block atom 是否全部带 order 属性。
- * 全带 → 走属性路径;任一缺(旧数据/混合)→ fallback 边路径(向后兼容)。
+ * Decision 028:本批 block atom 是否全部带 order 属性。
+ * 任一缺 → 数据未迁移 / 半迁移,assemblePmDoc 抛错(Phase 4 已无边 fallback)。
  */
 function allHaveOrder(atoms: AtomEntity[]): boolean {
   for (const a of atoms) {
@@ -290,99 +203,42 @@ function assembleViaAttrs(blockAtoms: AtomEntity<'pm'>[]): PmPayload {
  * @returns 完整 PmPayload(type='doc');若 container atom 不存在,返回 null
  */
 export async function assemblePmDoc(containerId: string): Promise<PmPayload | null> {
-  // 1. 字面拉容器 atom
+  // 1. 拉容器 atom
   const containerAtom = await storage.getAtom<'pm'>(containerId);
   if (!containerAtom) return null;
 
-  // Decision 028 Phase 1:属性优先 —— 先按 noteId 一次拉本笔记所有 block atom。
-  // 若拉到 atom 且全部带 order 属性(Phase 0 起新写入/已迁移数据)→ 走纯属性路径(零边遍历)。
-  // 否则(旧数据无属性,或混合)→ fallback 旧边逻辑(向后兼容,迁移前不破坏读取)。
+  // Decision 028 Phase 4:纯属性路径(无边 fallback)。按 noteId 一次拉本笔记所有 block atom。
   const attrBlocks = await storage.listAtoms({ domain: 'pm', noteId: containerId });
-  if (attrBlocks.length > 0 && allHaveOrder(attrBlocks)) {
-    return assembleViaAttrs(attrBlocks as AtomEntity<'pm'>[]);
+
+  if (attrBlocks.length === 0) {
+    // 0 block:可能是(a)真空 note,或(b)未迁移的老 note(结构仍在边上)。
+    // fail loud 区分:若仍存在 belongsToNote 结构边 → 该 note 未迁移,**抛错**而非
+    // 静默返回空 doc 丢内容(沿 §6 排查规范 / 028 Phase 4 边 fallback 已删)。
+    const staleEdges = await storage.listEdges({
+      predicate: BELONGS_TO_NOTE_PREDICATE,
+      objectAtomId: containerId,
+      limit: 1,
+    });
+    if (staleEdges.length > 0) {
+      throw new Error(
+        `[assemble-pm-doc] note ${containerId} 仍有 belongsToNote 结构边但无 noteId 属性块 —— ` +
+          `migration 028 未完成。边 fallback 已在 Phase 4 移除,拒绝静默返回空 doc(会丢内容)。` +
+          `请确认 migration-028 已跑完(flag 文件)。`,
+      );
+    }
+    // 真空 note
+    return { type: 'doc', content: [] };
   }
 
-  // 2. 拉所有 belongsToNote 边(object = containerId)
-  const belongsEdges = await storage.listEdges({
-    predicate: BELONGS_TO_NOTE_PREDICATE,
-    objectAtomId: containerId,
-  });
-  const blockIds = belongsEdges.map((e) => e.subject.atomId);
-
-  // 3. 字面拉所有 block atoms(单 query 替代 Promise.all 雪崩 — P0-2, 2026-05-29 data-layer-audit)
-  const blockAtomsRaw = blockIds.length > 0
-    ? await storage.listAtoms({ domain: 'pm', atomIds: blockIds })
-    : [];
-  const blocksById = new Map<string, AtomEntity<'pm'>>();
-  for (const a of blockAtomsRaw) {
-    blocksById.set(a.id, a as AtomEntity<'pm'>);
+  // fail loud:有块但缺 order 属性(半迁移 / 脏数据)—— 不静默乱序,抛错暴露。
+  if (!allHaveOrder(attrBlocks)) {
+    throw new Error(
+      `[assemble-pm-doc] note ${containerId} 的 block atom 缺 order 属性(半迁移?)。` +
+        `边 fallback 已移除,拒绝无序拼装。请重跑 migration 028。`,
+    );
   }
 
-  // 4. 拉所有 nextSibling 边 + childOf 边(SQL IN 只拉本 note 的 — P0-1, 2026-05-29 data-layer-audit)
-  // 应用层 filter 保留作 sanity(object 也得在 set 内 — 防御跨 note 串边 / childOf 指向 containerId)
-  const blockIdSet = new Set(blockIds);
-  let nextSiblingEdgesRaw: EdgeEntity[] = [];
-  let childOfEdgesRaw: EdgeEntity[] = [];
-  if (blockIds.length > 0) {
-    [nextSiblingEdgesRaw, childOfEdgesRaw] = await Promise.all([
-      storage.listEdges({
-        predicate: NEXT_SIBLING_PREDICATE,
-        subjectAtomIds: blockIds,
-      }),
-      storage.listEdges({
-        predicate: CHILD_OF_PREDICATE,
-        subjectAtomIds: blockIds,
-      }),
-    ]);
-  }
-  const nextSiblingEdges = nextSiblingEdgesRaw.filter(
-    (e) =>
-      e.object.kind === 'atom' &&
-      blockIdSet.has(e.object.atomId),
-  );
-  const childOfEdges = childOfEdgesRaw.filter(
-    (e) =>
-      e.object.kind === 'atom' &&
-      (e.object.atomId === containerId || blockIdSet.has(e.object.atomId)),
-  );
-
-  // 5. childOf 索引:parent → children
-  const childrenByParent = new Map<string, string[]>();
-  const hasChildOf = new Set<string>(); // block ids 有 childOf 出边(说明是嵌套子,不是顶层)
-  for (const e of childOfEdges) {
-    if (e.object.kind !== 'atom') continue;
-    const parent = e.object.atomId;
-    const child = e.subject.atomId;
-    if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
-    childrenByParent.get(parent)!.push(child);
-    hasChildOf.add(child);
-  }
-
-  // 6. 顶层 block = 在 blockIds 中但没有 childOf 出边的(即直接挂 note container)
-  const topLevelIds = blockIds.filter((id) => !hasChildOf.has(id));
-
-  // 边路径排序策略:nextSibling 链拓扑排序(闭包捕获本 note 的 nextSiblingEdges)
-  const sortByEdges = (ids: string[]): string[] =>
-    topologicalSortSiblings(ids, nextSiblingEdges);
-
-  // 7. 顶层 block 按 nextSibling 排序
-  const orderedTopIds = sortByEdges(topLevelIds);
-
-  // 8. 递归构造每个顶层 block 节点
-  const topNodes: PmPayload[] = [];
-  for (const id of orderedTopIds) {
-    const node = buildPmNode(id, blocksById, childrenByParent, sortByEdges);
-    if (node) topNodes.push(node);
-  }
-
-  // 9. 顶层 wrapper 重建 (5B Stage 4):listItem / taskItem / column 字面不能直接挂
-  //    doc.content, 要包成 bulletList / taskList / columnList. 走注册式 STRUCTURAL_REBUILD_RULES.
-  const docContent = applyRebuildRules(topNodes);
-
-  return {
-    type: 'doc',
-    content: docContent,
-  };
+  return assembleViaAttrs(attrBlocks as AtomEntity<'pm'>[]);
 }
 
 /**

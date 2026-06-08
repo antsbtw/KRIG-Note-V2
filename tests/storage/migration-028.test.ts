@@ -68,9 +68,8 @@ function structuralEdgeCount(): number {
 describe('Migration 028 core', () => {
   it('老笔记(纯边)→ 迁移后带属性 + 结构边清零 + 顺序不变', async () => {
     await seedOldNote('n1');
-    const before = texts(await assemblePmDoc('n1'));
-    expect(before).toEqual(['A', 'B', 'C']);
-
+    // 注:迁移前是纯边数据,assemblePmDoc(属性路径)会 fail loud 拒读 —— 这正是 Phase 4
+    // 的预期(边 fallback 已移除)。迁移内部走 legacy 边读取,迁移后才能用属性路径读。
     const r = await migrateNote('n1');
     expect(r).toBe('migrated');
 

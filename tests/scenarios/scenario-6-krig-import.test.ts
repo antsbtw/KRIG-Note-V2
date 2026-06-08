@@ -97,20 +97,35 @@ describe('Scenario 6 — KRIG_IMPORT → atoms → createNote → storage', () =
     }).length;
     expect(containerCount).toBe(1);
 
-    // 字面 belongsToNote 边 (每 draft → container)
-    const belongs = [...mockStorage._edges.values()].filter(
-      (e) => e.predicate === 'user:krig:belongsToNote',
+    // Decision 028:零结构边。belongsToNote / childOf / nextSibling 不再写。
+    const structuralEdges = [...mockStorage._edges.values()].filter((e) =>
+      ['user:krig:belongsToNote', 'user:krig:childOf', 'user:krig:nextSibling'].includes(
+        e.predicate,
+      ),
     );
-    expect(belongs.length).toBe(chapters[0].atoms.length);
+    expect(structuralEdges).toHaveLength(0);
 
-    // 字面 childOf 边: cells → table
-    const childOf = [...mockStorage._edges.values()].filter(
-      (e) => e.predicate === 'user:krig:childOf',
+    // 结构靠属性:每 block atom noteId = container;cell 的 parentId 指 table。
+    const containerId = result.notes[0].id;
+    const blockAtoms = [...mockStorage._atoms.values()].filter((a) => a.id !== containerId);
+    expect(blockAtoms.length).toBe(chapters[0].atoms.length);
+    expect(
+      blockAtoms.every(
+        (a) => (a.payload.payload as { attrs?: { noteId?: string } }).attrs?.noteId === containerId,
+      ),
+    ).toBe(true);
+    const tableIds = new Set(
+      blockAtoms.filter((a) => a.payload.payload.type === 'table').map((a) => a.id),
     );
-    // 2 cells → 1 table = 2 childOf
-    expect(childOf.length).toBeGreaterThanOrEqual(2);
+    const cells = blockAtoms.filter((a) => a.payload.payload.type === 'tableCell');
+    expect(cells.length).toBeGreaterThanOrEqual(2);
+    expect(
+      cells.every((a) =>
+        tableIds.has((a.payload.payload as { attrs?: { parentId?: string } }).attrs?.parentId ?? ''),
+      ),
+    ).toBe(true);
 
-    // hasNoteView marker 1 条
+    // hasNoteView marker 1 条(非结构边,保留)
     const hasView = [...mockStorage._edges.values()].filter(
       (e) => e.predicate === 'user:krig:hasNoteView',
     );

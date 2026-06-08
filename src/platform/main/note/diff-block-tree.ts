@@ -24,15 +24,8 @@ export interface BlockDiff {
   added: Array<{ id: string; payload: PmPayload }>;
   /** 都有但 payload 字面变(含 028 结构属性 order/parentId 变化)— putAtom(update by id) */
   modified: Array<{ id: string; payload: PmPayload }>;
-  /** oldDoc 有 / newDoc 没有 — deleteAtom(级联删边)*/
+  /** oldDoc 有 / newDoc 没有 — deleteAtom */
   removedIds: string[];
-  /**
-   * Decision 028 Phase 2 起恒为 []:结构边不再写。字段保留供 applyDiff 现有签名兼容,
-   * Phase 4 清理(届时连同 applyDiff 的 put/deleteEdge 路径一起删)。
-   */
-  addedEdges: Array<{ predicate: string; subjectId: string; objectId: string }>;
-  /** Decision 028 Phase 2 起恒为 []。同上。*/
-  removedEdges: Array<{ predicate: string; subjectId: string; objectId: string }>;
 }
 
 /**
@@ -98,17 +91,9 @@ export function diffBlockTree(
     }
   }
 
-  // Decision 028 Phase 2:**不再写结构边**。文档结构(order/parentId/noteId)已由
-  // dissect 写进 block atom 的 attrs —— 位置/父级变化 = atom payload 变化 = 上方 modified
-  // 路径自然捕获(stableStringify 含 attrs)。故结构边 diff 整体置空,applyDiff 不再 put/deleteEdge。
-  // 旧 dissectToEdgeRecords / edgeKey 仅迁移脚本(Phase 3)仍可能用,本路径不调。
-  return {
-    added,
-    modified,
-    removedIds,
-    addedEdges: [],
-    removedEdges: [],
-  };
+  // Decision 028:零结构边。文档结构(order/parentId/noteId)由 dissect 写进 block atom
+  // 的 attrs —— 位置/父级变化 = atom payload 变化 = 上方 modified 路径自然捕获(stableStringify 含 attrs)。
+  return { added, modified, removedIds };
 }
 
 /**
@@ -121,13 +106,7 @@ export function fullCreateDiff(
   containerId: string,
 ): BlockDiff {
   const dis = dissectPmDoc(containerId, newDoc);
-  // Decision 028 Phase 2:零结构边 —— block atom 自带 noteId/parentId/order 属性,
-  // 结构完整自洽,createNote 只 putAtom(全 added),不写任何结构边。
-  return {
-    added: dis.blocks,
-    modified: [],
-    removedIds: [],
-    addedEdges: [],
-    removedEdges: [],
-  };
+  // Decision 028:零结构边 —— block atom 自带 noteId/parentId/order 属性,
+  // 结构完整自洽,createNote 只 putAtom(全 added)。
+  return { added: dis.blocks, modified: [], removedIds: [] };
 }
