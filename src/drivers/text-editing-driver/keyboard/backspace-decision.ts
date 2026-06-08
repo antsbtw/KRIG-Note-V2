@@ -17,7 +17,7 @@
  * 注:实现保守——只接管能明确判定的脱壳步骤;判不定一律放行,绝不破坏「删字符」。
  */
 
-import type { Command, EditorState } from 'prosemirror-state';
+import { TextSelection, type Command, type EditorState } from 'prosemirror-state';
 import { setBlockType, lift, joinTextblockBackward } from 'prosemirror-commands';
 import { liftListItem } from 'prosemirror-schema-list';
 import type { KeyboardMetaLookup } from './resolve-context';
@@ -50,12 +50,19 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
       return true; // 吃掉键,什么都不做
     }
 
-    // —— 2. 媒体 caption(image/video/...):**光标停在 caption 内不动,永不删块**(用户拍板)——
-    // caption 首退格(无论空 / 非空):吃掉键、什么都不做。删块只走选中块退格 / handle 菜单。
+    // —— 2. 媒体 caption(image/video/...):**光标在 caption 行首退格 → 退到媒体块上方**
+    //        (不分 caption 空/非空,统一;媒体块本身不删)。(2026-06-08 用户拍板)——
     if ($from.depth >= 2) {
       const parent = $from.node(-1);
       if (metaLookup(parent.type.name)?.isCaption) {
-        return true; // noop:不删块、光标不动
+        if (dispatch) {
+          const mediaBefore = $from.before(-1); // 媒体块的 before pos
+          const $mediaBefore = state.doc.resolve(mediaBefore);
+          // 光标落到媒体块**之前**最近的文本位(= 上方块末尾)
+          const target = TextSelection.near($mediaBefore, -1);
+          dispatch(state.tr.setSelection(target).scrollIntoView());
+        }
+        return true;
       }
     }
 

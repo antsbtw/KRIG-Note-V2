@@ -116,6 +116,36 @@ export function buildEnterCommand(metaLookup: KeyboardMetaLookup): Command {
       if ($from.parent.content.size === 0 && column.childCount <= 1) return false;
     }
 
+    // —— 5.5 通用容器(blockquote/callout/toggle 展开)空段末段回车 → 跳出容器 ——
+    // enter-system §2.3「容器内空段回车 = 退出容器,在容器下方新建正文段」。
+    // 仅当:当前段空 + 是该容器最末子块 + 该容器是 isContainer(非 column,column 已上面处理)。
+    if ($from.parent.content.size === 0) {
+      for (let d = $from.depth - 1; d >= 1; d--) {
+        const node = $from.node(d);
+        const name = node.type.name;
+        if (name === 'column' || name === 'columnList') break; // column 专属,已处理
+        const nodeMeta = metaLookup(name);
+        if (nodeMeta?.isContainer) {
+          const isLast = $from.indexAfter(d) === node.childCount;
+          if (isLast) {
+            const para = state.schema.nodes.paragraph;
+            if (para && dispatch) {
+              const containerEnd = $from.after(d);
+              const blockStart = $from.before($from.depth);
+              // 删空段 + 在容器后插正文段
+              const tr = state.tr.delete(blockStart, blockStart + $from.parent.nodeSize);
+              const insertPos = tr.mapping.map(containerEnd);
+              tr.insert(insertPos, para.create());
+              tr.setSelection(TextSelection.create(tr.doc, insertPos + 1)).scrollIntoView();
+              dispatch(tr);
+            }
+            return true;
+          }
+          break; // 非末段 → 不跳出,落到通用 split(容器内拆段)
+        }
+      }
+    }
+
     // —— 6. 普通 textblock:splitBlock + 继承格式(标题块尾→正文段由 PM defaultBlockAt 自然产出)——
     const formatAttrs = meta?.formatAttrs ?? DEFAULT_FORMAT_ATTRS;
     return splitBlockInheritFormat(formatAttrs)(state, dispatch);
