@@ -1,6 +1,12 @@
 # Block Atom 存储模型可视化(L7 sub-phase 落地态)
 
-> **状态**:✅ 已实施(feature/L7-block-atomization,2026-05-21)
+> ⚠️ **结构模型已变更(Decision 028,2026-06-08)**:本文档描述的「3 条结构边
+> (belongsToNote / childOf / nextSibling)表达归属/层级/顺序」**已被取代** —— 改用 block atom
+> 属性 `noteId` / `parentId` / `order`(字典序 rank)表达,**三条结构边已删除**。
+> assemble 改为 `listAtoms({ noteId })` + 按 parentId 建树 + order 排序,零边遍历。
+> 详见 [Decision 028](decisions/028-block-structure-via-attrs.md)。本文 §2「三条边」部分仅作历史参考。
+>
+> **状态**:✅ 已实施(feature/L7-block-atomization,2026-05-21;结构边部分 028 已废止)
 > **代码依据**:
 >   - [`src/platform/main/note/capability-impl.ts`](../../../src/platform/main/note/capability-impl.ts) — createNote / getNote / updateNote / deleteNote
 >   - [`src/platform/main/note/dissect-pm-doc.ts`](../../../src/platform/main/note/dissect-pm-doc.ts) — PM doc → atom + edge
@@ -17,7 +23,7 @@
 | 问题 | 速答 |
 |---|---|
 | **每个 block 对应一个 atom 吗?** | 不完全。叶子 + 叶子级容器(22 类 NodeSpec)= 1 atom;结构性容器(6 类)= 0 atom |
-| **容器内的 atom 关系怎么建?** | 3 条独立边:`belongsToNote`(归属)+ `childOf`(嵌套)+ `nextSibling`(顺序) |
+| **文档结构(归属/层级/顺序)怎么表达?** | ~~3 条边~~ → **block atom 属性**(Decision 028):`noteId`(归属)+ `parentId`(层级)+ `order`(字典序排序)。**零结构边。** |
 | **note atom 怎么建立?** | createNote 走 5 步:container atom + hasNoteView 边 + (inFolder 边) + dissect → applyDiff + cache |
 
 详见 §1 / §2 / §3 全图。

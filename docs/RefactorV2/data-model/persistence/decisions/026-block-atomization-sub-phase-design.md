@@ -1,5 +1,11 @@
 # Decision 026 — Block 独立化 sub-phase 设计(核心决议)
 
+> ⚠️ **部分取代(2026-06-08)**:本决议 **§6 边集结构设计**(`belongsToNote` / `childOf` /
+> `nextSibling` 三条结构边表达文档归属/层级/顺序)**已被 [Decision 028](./028-block-structure-via-attrs.md)
+> 整体取代** —— 文档结构改用 block atom 属性(`noteId` / `parentId` / `order`)表达,三条结构边已删除。
+> 根因:边表达结构脆弱(putEdge 不幂等 → 重复边累积 → 长笔记重加载位置错乱)。
+> **§3 atom 拆分粒度仍有效**(028 保留)。读本文 §6 / §13.3 / §13.8 时以 028 为准。
+>
 > **类型**:核心设计决议(纯文档,不写代码)
 > **决议日期**:2026-05-21
 > **前置依赖**:[`decision 025`](../../atom/decisions/025-atom-granularity-current-form-acknowledgment.md)(承接 v1.3 工程妥协 + 注销 decision 030 占位)

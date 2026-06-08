@@ -401,9 +401,9 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 | `user:krig:inCanvas` | graph-instance | graph-canvas | 一对一(归属边,P0a-bis 机制化保证)| sub-phase 3a-1(+ P0a-bis hotfix)| [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) + [decision 019](../persistence/decisions/019-graph-instance-cardinality-hotfix.md) |
 | `user:krig:hasContent` | graph-instance(text-node ref)| pm | 一对一(单引用约束,sub-phase 3a-1..3a-5)| sub-phase 3a-1 | [decision 014 §3.3](../persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) |
 | `user:krig:hasNoteView` | pm | literal `boolean` (value 恒 true) | 一对一(应用层契约,详 decision 016 §3.1)| sub-phase 3a-2.5 ✅ 已实施 | [decision 016 §3.1](../persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) |
-| `user:krig:belongsToNote` | pm(block atom)| pm(note / reading-thought container atom)| 一对一(每 block 字面 1 条 outgoing)| L7 block atomization ✅ Stage 2 实施 | [decision 026 §6.3](../persistence/decisions/026-block-atomization-sub-phase-design.md) |
-| `user:krig:nextSibling` | pm(block atom)| pm(block atom)| 0..1 outgoing + 0..1 incoming(链表;首 block 无 incoming,末 block 无 outgoing)| L7 block atomization ✅ Stage 2 实施 | [decision 026 §6.2](../persistence/decisions/026-block-atomization-sub-phase-design.md) |
-| `user:krig:childOf` | pm(嵌套 block atom)| pm(最近非结构性祖先:叶子级容器 atom 或 container atom 本身)| 0..1 outgoing(顶层 block 无,嵌套 block 字面 1 条)| L7 block atomization ✅ Stage 2 实施 | [decision 026 §6.1](../persistence/decisions/026-block-atomization-sub-phase-design.md) |
+| ~~`user:krig:belongsToNote`~~ | ~~block→note~~ | ~~~~ | **❌ 已删除** → 改 block atom `noteId` 属性 | ~~L7 Stage 2~~ → **[decision 028](../persistence/decisions/028-block-structure-via-attrs.md) 取代** | 见 §10.2 |
+| ~~`user:krig:nextSibling`~~ | ~~block→block~~ | ~~~~ | **❌ 已删除** → 改 block atom `order` 属性(字典序 rank) | ~~L7 Stage 2~~ → **decision 028 取代** | 见 §10.2 |
+| ~~`user:krig:childOf`~~ | ~~block→parent~~ | ~~~~ | **❌ 已删除** → 改 block atom `parentId` 属性 | ~~L7 Stage 2~~ → **decision 028 取代** | 见 §10.2 |
 
 **单引用约束说明**:`hasContent` 边 cardinality 在 sub-phase 3a-1..3a-5 阶段强制为"一对一"(一段 pm content 只被 1 个 wrapper 引用)。多引用(浅引用 / 跨 view 复用)留 sub-phase 3a-shared-ref 子任务,前置 sub-phase 3a-tx 解决真原子性(详 [decision 013 §3.5.1.bis](../persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md))。
 
@@ -431,32 +431,67 @@ Vocabulary 自身的版本通过 `relations/<vocabulary>/README.md` 顶部 SemVe
 
 **当前 sub-phase 不引入 `referencedIn` 边**(避免死代码占位),仅决议 §9 留接口。
 
-### 10.2 block atomization 三条边语义(L7 block atomization Stage 3 反向更新)
+### 10.2 文档结构:已从边改为属性(Decision 028,2026-06-08)
 
-L7 block atomization sub-phase 把 `pm atom = 整篇 doc` 升级为 `pm atom = 单 block`(详 [decision 026](../persistence/decisions/026-block-atomization-sub-phase-design.md))。三条新 predicate 字面定义:
+> **历史**:L7 block atomization(decision 026 §6)曾用三条结构边 `belongsToNote`/`childOf`/
+> `nextSibling` 表达文档的归属/层级/顺序。**[Decision 028](../persistence/decisions/028-block-structure-via-attrs.md)
+> 已整体取代** —— 文档结构改用 block atom 的属性表达,**三条结构边已删除**。
 
-**`user:krig:belongsToNote`** — block 归属容器:
-- 字面拍板"全部叶子 + 叶子级容器拆 atom;结构性容器(table/tableRow/3 list 容器/columnList)不拆"(decision 026 §3.1)
-- 每个拆出的 block atom 字面 1 条 outgoing 指向容器 atom(note container 或 reading-thought container)
-- 容器 atom 字面**可以**不带 hasNoteView marker(D-10:reading-thought 字面是 pm atom 但带 hasReadingThought 而非 hasNoteView,也使用 belongsToNote 子节点)
-- cardinality 一对一硬约束(`assemble-pm-doc.ts` 字面假设)
+**根因**:用几百条边表达文档线性结构 → putEdge 不幂等 + 链易断 → 重复边累积、结构损坏
+(长笔记新建 image 后重加载位置错乱)。Decision 028 把结构改属性,复用 putAtom 幂等写入,根治。
 
-**`user:krig:nextSibling`** — block 顺序:
-- 字面拍板用边表达顺序(非 `order` 字段,decision 026 §6.2 方案 A)
-- subject = 上一 block atom,object = 下一 block atom
-- 同一容器 / 同一 childOf 父下,字面构成链表(首 atom 无 incoming;末 atom 无 outgoing)
-- 链断裂字面 fallback:assemble 时 `console.error` + 字典序 append(decision 026 §13.3 临时默认)
+**新模型**:每个 block atom 的 `payload.attrs` 带三个结构属性:
 
-**`user:krig:childOf`** — 嵌套(跨结构性容器跳层):
-- subject = 嵌套子 block atom,object = **最近的拆 atom 祖先**(可能是叶子级容器 atom 或容器 atom 本身)
-- **跨结构性容器跳层**(decision 026 §6.1):
-  - tableCell.childOf → table atom(跳过 tableRow / tableHeader 的中间层)
-  - listItem.childOf → callout / blockquote / 上层 listItem / 容器 atom(跳过 bulletList / orderedList / taskList)
-  - column.childOf → 容器 atom(跳过 columnList)
-- 顶层 block 字面**无** childOf(由 belongsToNote 表达归属)
-- cardinality 0..1 outgoing(嵌套 block 字面 1 条,顶层 block 字面 0 条)
+| 属性 | 替代边 | 含义 |
+|------|--------|------|
+| `noteId` | belongsToNote | 该 block 所属笔记/容器 id(归属是本体固有事实,非关系) |
+| `parentId` | childOf | 父 block id;顶层为 null(跨结构容器跳层语义沿用旧 childOf) |
+| `order` | nextSibling | 同级排序键 —— 字典序 rank(base-62,插入中间取中点 O(1)) |
 
-**拼装规则**(assemble-pm-doc.ts 字面落地):
-- 读时拼装:listAtoms(belongsToNote.object=containerId)+ listEdges(nextSibling/childOf)+ 拓扑排序 + 跨层 wrapper 重建(`STRUCTURAL_REBUILD_RULES`,decision 026 §13.8)
-- listItem 字面用 `_assemblyHints.listType` 区分 bullet/ordered(dissect 时写,assemble 时读,PM nodeFromJSON 字面再 strip — 不污染 PM schema)
-- tableCell 字面**单行 tableRow 重建**(v1 简化,真实 row × col 信息字面丢;Stage 9 反向更新登记)
+**assemble**:`listAtoms({ domain:'pm', noteId })` 拉本笔记所有 atom → 按 `parentId` 建树 →
+同级按 `order` 排序 → 现有 `STRUCTURAL_REBUILD_RULES` 重建中间容器壳。**零边遍历,零拓扑排序。**
+
+**收益**:文档本体零边 → 可靠(去脆弱边链)+ 性能(读省拓扑排序/写零边/改序 O(1))+ 简洁,三者同向。
+详见 decision 028。
+
+---
+
+## 11. 边的分层：业务结构边 vs 分析图谱边（架构原则,2026-06-08 用户拍板）
+
+Decision 028 把**文档本体结构**从边里剥离（改属性）后,边回归「表达关系」本职。但**关系边本身
+还要再分两类**,生命周期 / 可变性截然不同 —— 这决定了它们能否被随意增删:
+
+| | **A 类：业务结构边** | **B 类：分析图谱边** |
+|---|---|---|
+| 定义 | 编辑 / 思考 / 组织时**自然产生**的业务关系 | 构建知识图谱 / 数据分析时**按某模型额外生成**的关系 |
+| 例子 | inFolder（归属文件夹）、hasNoteView、hasReadingState、hasReadingThought、inCanvas、hasContent、thoughtOf（thought 锚定到 note/ebook/canvas） | 主题归类、相似度、引用网络、共现…（**当前系统尚无,为未来预留**） |
+| 可变性 | **不可随意变动** —— 动了破坏业务关系 | **可随意增删,甚至完全清除** —— 只是某次分析的产物 |
+| 生命周期 | 跟随业务实体长期持久 | 临时 / 可重建,某次可视化用完即可丢 |
+| 产生者 | 用户编辑 / capability（业务逻辑） | 分析模型 / AI / 系统计算 |
+
+### 11.1 落地机制：predicate 命名空间隔离
+
+用 **predicate 的 `<source>:<vocabulary>` 段**物理隔离两类,使「清空某次分析」= 一句按前缀删,
+**不可能误伤业务边**：
+
+| 类 | predicate 命名空间 | source 段 | 清除方式 |
+|----|-------------------|----------|---------|
+| **A 业务结构边** | `user:krig:*`（现状不变） | `user` | **不可批量清除**;由业务逻辑/级联管理 |
+| **B 分析图谱边** | `analysis:<model>:*` / `sys:<model>:*`（按分析模型分 vocabulary） | `sys` / `ai`（非 `user`） | **可整批清除**：`DELETE edge WHERE source ∈ {sys,ai} AND vocabulary = <model>` |
+
+要点:
+- B 类用**独立 source 段**（`sys`/`ai`,非 `user`）+ 独立 vocabulary（按分析模型命名,如 `analysis:topic`、
+  `analysis:similarity`）。每种分析模型一套 B 类边,互不干扰、可独立重建/清除。
+- **物理隔离保证**:删某次分析只动其 vocabulary 前缀,`user:krig:*` 业务边在命名空间上不可能被波及。
+- **为图谱/临时可视化铺路**:某个可视化想要一套关系 → 按模型生成 B 类边 → 用完整批清空;
+  不污染文档本体（已零边）也不碰业务关系边。
+
+### 11.2 三层数据模型全景
+
+至此 KRIG 的数据模型分三层,各司其职:
+
+1. **文档本体**（零边）：block atom + 结构属性（noteId/parentId/order）+ 内容。导入即完整,可靠 + 快。
+2. **业务结构边**（A 类,`user:krig:*`）：编辑思考产生的业务关系,持久,不可随意动。
+3. **分析图谱边**（B 类,`sys/ai:<model>:*`）：分析模型按需生成,可随意增删清除,服务临时图谱/可视化。
+
+> 一句话:**本体靠属性（铁打的）,业务关系靠 A 类边（长期的）,分析图谱靠 B 类边（随用随建随清的）。**
