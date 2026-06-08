@@ -1,13 +1,10 @@
 /**
- * columnList keymap — column 内 Enter / Backspace 特化
+ * columnList keymap — column 内 Backspace 特化
  *
- * 复用 PM 现成 helper(用户拍板):
- * - 只处理 column 内才有的两个边界场景,失败 return false 让 PM baseKeymap 接力
- * - 不重写 splitBlock / joinBackward 等通用行为
+ * (Enter「column 末段空跳出」已并入集中 keyboard 模块,enter-decision step 5;本文件 Phase 3
+ * 起只处理 Backspace。)
  *
- * 两个场景:
- *  1. Enter 在 column 末段且当前段为空 → 退出 columnList,在其后插入空 paragraph
- *  2. Backspace 在 column 首段段首,且该 column 只剩一个空段 → 删除该 column
+ * 场景:Backspace 在 column 首段段首,且该 column 只剩一个空段 → 删除该 column
  *     - 删后剩 ≥2 列:重置 width = null(等宽)
  *     - 删后剩 1 列:解散 columnList,内容平铺到原位
  *
@@ -18,7 +15,7 @@
 import { keymap } from 'prosemirror-keymap';
 import type { Command } from 'prosemirror-state';
 import type { ResolvedPos } from 'prosemirror-model';
-import { TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
+import { TextSelection, type EditorState } from 'prosemirror-state';
 import { Fragment } from 'prosemirror-model';
 
 /** 找祖先中 column / columnList 的 depth(-1 = 不在 column 内) */
@@ -33,45 +30,6 @@ function findColumnContext($from: ResolvedPos): { columnDepth: number; columnLis
   }
   return null;
 }
-
-/**
- * Enter: column 内末段且当前段空 → 退出 columnList
- */
-const exitColumnListOnEnter: Command = (state, dispatch) => {
-  const { $from, empty } = state.selection;
-  if (!empty) return false;
-
-  const ctx = findColumnContext($from);
-  if (!ctx) return false;
-
-  const column = $from.node(ctx.columnDepth);
-  const currentBlock = $from.parent;
-
-  // 必须当前段为空,且是 column 的最后一个 child
-  if (currentBlock.content.size !== 0) return false;
-  const isLastChild = $from.indexAfter(ctx.columnDepth) === column.childCount;
-  if (!isLastChild) return false;
-  // column 只剩这一个空段时,把退出工作让给 column-collapse(它会解散 column)
-  // 否则会重复操作。这里只处理"column 有多内容时末尾追空段 Enter 跳出"。
-  if (column.childCount <= 1) return false;
-
-  if (dispatch) {
-    const columnList = $from.node(ctx.columnListDepth);
-    const columnListEnd = $from.before(ctx.columnListDepth) + columnList.nodeSize;
-    const paragraphType = state.schema.nodes.paragraph;
-
-    const tr: Transaction = state.tr;
-    // 删除 column 末尾的空段
-    const blockStart = $from.before($from.depth);
-    tr.delete(blockStart, blockStart + currentBlock.nodeSize);
-    // 在 columnList 之后插入空 paragraph
-    const insertPos = tr.mapping.map(columnListEnd);
-    tr.insert(insertPos, paragraphType.create());
-    tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
-    dispatch(tr);
-  }
-  return true;
-};
 
 /**
  * Backspace: column 首段段首且该 column 只剩一个空段 → 删该 column
@@ -169,7 +127,7 @@ function deleteColumnAt(
 /** 导出 PM Plugin(driver editor-view-builder 通过 BlockSpec.plugin 收集) */
 export function columnListKeymapPlugin() {
   return keymap({
-    Enter: exitColumnListOnEnter,
+    // Enter(column 末段空跳出)已并入集中 keyboard 模块(enter-decision step 5)。
     Backspace: deleteEmptyColumnOnBackspace,
   });
 }

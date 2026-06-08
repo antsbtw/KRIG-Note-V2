@@ -1,12 +1,13 @@
 /**
- * codeBlock keymap — 代码块专用键盘处理
+ * codeBlock keymap — 代码块专用键盘处理(Tab / Shift-Tab / Backspace)
  *
  * 行为(对齐 V1):
- * - Enter           → 插入换行(\n),不出 codeBlock
- * - Enter(末尾且最后字符是 \n)→ 删末尾 \n,在 codeBlock 之后插新 paragraph(double-enter 跳出)
  * - Tab             → 插 2 空格(代码缩进)
  * - Shift-Tab       → 删行首 2 空格(反缩进)
  * - Backspace(空 codeBlock)→ 替换为 paragraph
+ *
+ * **Enter 已并入集中 keyboard 模块**(keyboard/enter-decision §4.1 step 1,isCodeArea):
+ * 插 \n / 末尾双回车跳出。本文件 Phase 3 起不再处理 Enter。
  *
  * 注:V2 paragraph 节点 id 是 'paragraph'(PM 标准命名)。
  */
@@ -33,36 +34,7 @@ export function buildCodeBlockKeymap(schema: Schema): Plugin {
         const blockNode = $from.node($from.depth);
         if (!blockNode || blockNode.type.name !== 'codeBlock') return false;
 
-        // ── Enter ──
-        if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
-          event.preventDefault();
-          const textContent = blockNode.textContent;
-          const cursorOffset = $from.parentOffset;
-
-          // double-enter 跳出:光标在末尾 + 最后一字符是 \n
-          if (cursorOffset === textContent.length && textContent.endsWith('\n')) {
-            const blockPos = $from.before($from.depth);
-            const blockEnd = $from.after($from.depth);
-            let tr = state.tr;
-            tr = tr.delete($from.pos - 1, $from.pos); // 删末尾 \n
-            const mappedEnd = tr.mapping.map(blockEnd);
-            tr = tr.insert(mappedEnd, paragraph.create());
-            tr = tr.setSelection(TextSelection.create(tr.doc, mappedEnd + 1));
-
-            // 若 codeBlock 已空,删除它
-            const mappedBlockPos = tr.mapping.map(blockPos);
-            const updatedBlock = tr.doc.nodeAt(mappedBlockPos);
-            if (updatedBlock && updatedBlock.textContent === '') {
-              tr = tr.delete(mappedBlockPos, mappedBlockPos + updatedBlock.nodeSize);
-            }
-            view.dispatch(tr);
-            return true;
-          }
-
-          // 普通 Enter:插 \n
-          view.dispatch(state.tr.replaceSelectionWith(state.schema.text('\n')));
-          return true;
-        }
+        // Enter 已由集中 keyboard 模块接管(isCodeArea),本文件不再处理。
 
         // ── Tab → 缩进 ──
         if (event.key === 'Tab' && !event.shiftKey) {

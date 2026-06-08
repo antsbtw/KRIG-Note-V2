@@ -23,7 +23,6 @@
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 import { imageNodeView } from './node-view';
-import { buildImageKeymap } from './keymap';
 
 const imageNodeSpec: NodeSpec = {
   // caption — V1 image content='textBlock'(单段)。V2 拆分后默认 caption 是 paragraph,
@@ -100,7 +99,6 @@ export const imageSpec: BlockSpec = {
   nodeView: imageNodeView,
   // L5-B3.5:caption 内 Enter 跳出 image 插入新段落(替代 PM 默认 splitBlock,
   // 默认 split 会在 image content='block'(单)约束下被拒,导致用户感觉"按 Enter 删了图")
-  plugin: () => buildImageKeymap(),
   containerRule: 'inline-only',
   cascadeBoundary: false,
 };

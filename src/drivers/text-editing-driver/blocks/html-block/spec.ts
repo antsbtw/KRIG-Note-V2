@@ -17,7 +17,6 @@
 import type { NodeSpec } from 'prosemirror-model';
 import type { BlockSpec } from '../../types';
 import { htmlBlockNodeView } from './node-view';
-import { buildHtmlBlockKeymap } from './keymap';
 
 const htmlBlockNodeSpec: NodeSpec = {
   group: 'block',
@@ -66,7 +65,6 @@ export const htmlBlockSpec: BlockSpec = {
   nodeView: htmlBlockNodeView,
   // caption 内 Enter 跳出 htmlBlock 插入新段落(同 image 模式 — 防 PM 默认
   // splitBlock 在 content:'block' 单段约束下删整块)。
-  plugin: () => buildHtmlBlockKeymap(),
   containerRule: 'inline-only',
   cascadeBoundary: false,
 };

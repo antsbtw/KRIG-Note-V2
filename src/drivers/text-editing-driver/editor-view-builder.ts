@@ -20,7 +20,6 @@ import { buildMarkKeymap } from './plugins/build-mark-keymap';
 import { buildHeadingKeymap } from './plugins/build-heading-keymap';
 import { buildSlashPlugin } from './plugins/build-slash-plugin';
 import { buildBlockHandlePlugin } from './plugins/build-block-handle-plugin';
-import { buildListKeymap } from './plugins/build-list-keymap';
 import { buildCodeBlockKeymap } from './plugins/build-code-block-keymap';
 import { buildHardBreakKeymap } from './plugins/build-hard-break-keymap';
 import { buildLinkClickPlugin } from './plugins/build-link-click-plugin';
@@ -36,7 +35,6 @@ import { buildBlockSelectionContextMenuPlugin } from './plugins/build-block-sele
 import { buildBlockFramePlugin } from './plugins/build-block-frame-plugin';
 import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
-import { buildSplitIndentKeymap } from './plugins/build-split-indent-keymap';
 import { buildKeyboardKeymap } from './keyboard/build-keyboard-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
@@ -161,9 +159,9 @@ export function buildEditorView(
     // block 框定 + 视觉缩进装饰(读 node attrs 渲染,纯视觉,始终开)
     buildBlockFramePlugin(),
     buildBlockIndentPlugin(),
-    buildListKeymap(schema),
-    // block-indent keymap 顺序在 list-keymap 之后:列表/codeblock/table 优先抢断 Tab,
-    // 落到这里都是普通顶层 block(paragraph/heading/blockquote/callout/...)的视觉缩进。
+    // block-indent keymap:列表/codeblock/table 优先抢断 Tab(它们在 blockPlugins / code-block
+    // keymap 内处理 Tab),落到这里都是普通顶层 block 的视觉缩进。
+    // (Phase 3:list-keymap 的 Enter 已被集中 keyboard 模块接管,文件已删。)
     buildBlockIndentKeymap(),
     buildCodeBlockKeymap(schema),
     buildHardBreakKeymap(schema),
@@ -176,10 +174,8 @@ export function buildEditorView(
     ...(enableHeadingCollapse ? [buildHeadingCollapsePlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
-    // split-indent:顶层 textblock(paragraph/heading)indent>0 时 Enter 拆块让新块继承
-    // 缩进。装在 baseKeymap 之前(覆盖默认 splitBlock 丢 indent 的行为),但在所有容器/
-    // 列表/toggle 的 Enter keymap(blockPlugins / list-keymap)之后 —— 那些先拦截各自场景。
-    buildSplitIndentKeymap(),
+    // (Phase 3:split-indent keymap 的 Enter 继承缩进已并入集中 keyboard 模块的
+    //  splitBlockInheritFormat,文件已删。)
     // block-selection keymap 抢在 baseKeymap 之前(Esc/Shift+Arrow/Arrow)
     ...(enableBlockSelection ? [buildBlockSelectionKeymap()] : []),
     keymap(baseKeymap),
