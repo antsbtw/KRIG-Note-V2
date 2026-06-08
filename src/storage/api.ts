@@ -139,6 +139,13 @@ export interface AtomFilter {
    * 空 array 短路返回 []。
    */
   atomIds?: string[];
+
+  /**
+   * 按 block atom 的结构属性 noteId 过滤（SQL `payload.payload.attrs.noteId = ?`）。
+   * 新增（Decision 028 Phase 0）:替代 belongsToNote 边的"拉本笔记所有 block atom"查询。
+   * 走 atom_note_id 索引（见 schema 1.5.0）。空字符串不短路（合法 noteId 总非空）。
+   */
+  noteId?: string;
 }
 
 export interface PutEdgeInput {

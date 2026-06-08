@@ -20,6 +20,7 @@
 
 import type { PmPayload } from '@semantic/types';
 import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
+import { initialRanks } from './lexrank';
 
 /** dissect 输出 — 字面交给 capability 走 diff + storage transaction */
 export interface DissectResult {
@@ -69,6 +70,23 @@ interface DissectContext {
   containerId: string;
   /** 出错累积位置信息(便于 caller 抛 duplicate id 等错时定位)*/
   duplicateIds: Set<string>;
+  /**
+   * Decision 028 Phase 0 双写:id → 该 block atom payload 引用,
+   * 供 nextSibling 链定稿时回填 `order` 属性(同级 lexrank 升序串)。
+   */
+  payloadById: Map<string, PmPayload>;
+}
+
+/**
+ * Decision 028:block atom 结构属性(写入 payload.attrs,与边并行双写)。
+ * - noteId   替代 belongsToNote 边(顶层归属固有事实)
+ * - parentId 替代 childOf 边(父 atom id;顶层块为 null)
+ * - order    替代 nextSibling 边(同级字典序 rank,见 lexrank.ts)
+ */
+export interface BlockStructureAttrs {
+  noteId: string;
+  parentId: string | null;
+  order: string;
 }
 
 /**
@@ -179,7 +197,9 @@ function processChildren(
     );
 
     const payload: PmPayload = { type: child.type };
-    if (child.attrs !== undefined) payload.attrs = child.attrs;
+    // 浅拷贝 attrs —— 下方要写 noteId/parentId/order(028 Phase 0),不能改 caller 的输入 doc
+    // (输入可能是 PM 缓存共享对象,原地改会污染 view)。
+    if (child.attrs !== undefined) payload.attrs = { ...child.attrs };
     if (child.marks !== undefined) payload.marks = child.marks;
 
     if (isContainerBlock) {
@@ -195,8 +215,17 @@ function processChildren(
       // listItem 即使叶子也写 listType 提示(罕见场景:listItem 内只 inline 字面不合法,字面跳过)
     }
 
+    // Decision 028 Phase 0 双写:把 noteId / parentId 写入 atom attrs(order 见下方链循环回填)。
+    // parentId 语义同 childOf:parentAtomId === containerId(顶层)时为 null,否则指父 atom。
+    // 不破坏边生成 —— belongsEdges / childOfEdges 仍照写(双写过渡,assemble 仍读边)。
+    if (payload.attrs === undefined) payload.attrs = {};
+    payload.attrs.noteId = ctx.containerId;
+    payload.attrs.parentId =
+      parentAtomId !== ctx.containerId ? parentAtomId : null;
+
     ctx.result.blocks.push({ id, payload });
     ctx.result.belongsEdges.push({ subjectId: id, objectId: ctx.containerId });
+    ctx.payloadById.set(id, payload);
     siblingAtomIds.push(id);
 
     if (parentAtomId !== ctx.containerId) {
@@ -219,6 +248,19 @@ function processChildren(
         subjectId: siblingAtomIds[i],
         objectId: siblingAtomIds[i + 1],
       });
+    }
+
+    // Decision 028 Phase 0 双写:本层是真正的 sibling group(画 nextSibling 链的同一层),
+    // 按序给每个 block 的 attrs.order 分配递增 lexrank。drawSiblingChain=false 的结构性容器
+    // 递归层不在此分配 —— 其 grandchildren 被外层接走,由外层这一层统一定序(与 nextSibling 链
+    // 完全一致,保证 order 顺序 == nextSibling 链顺序,双写无歧义)。
+    const ranks = initialRanks(siblingAtomIds.length);
+    for (let i = 0; i < siblingAtomIds.length; i++) {
+      const p = ctx.payloadById.get(siblingAtomIds[i]);
+      if (p) {
+        if (p.attrs === undefined) p.attrs = {};
+        p.attrs.order = ranks[i];
+      }
     }
   }
 
@@ -247,6 +289,7 @@ export function dissectPmDoc(containerId: string, doc: PmPayload): DissectResult
     },
     containerId,
     duplicateIds: new Set(),
+    payloadById: new Map(),
   };
   processChildren(doc.content, containerId, null, ctx);
   return ctx.result;

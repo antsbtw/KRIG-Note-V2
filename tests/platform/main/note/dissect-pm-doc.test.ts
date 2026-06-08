@@ -135,4 +135,77 @@ describe('dissectPmDoc', () => {
   it('root 非 doc 字面 throw', () => {
     expect(() => dissectPmDoc(C, { type: 'paragraph' } as PmPayload)).toThrow(/root must be type='doc'/);
   });
+
+  // ── Decision 028 Phase 0:结构属性双写(noteId / parentId / order)──
+  describe('Decision 028 结构属性双写', () => {
+    it('顶层 block:noteId=containerId, parentId=null, order 严格升序', () => {
+      const doc: PmPayload = {
+        type: 'doc',
+        content: [para('p1', 'A'), para('p2', 'B'), para('p3', 'C')],
+      };
+      const r = dissectPmDoc(C, doc);
+      const byId = new Map(r.blocks.map((b) => [b.id, b.payload]));
+      for (const id of ['p1', 'p2', 'p3']) {
+        expect(byId.get(id)!.attrs?.noteId).toBe(C);
+        expect(byId.get(id)!.attrs?.parentId).toBe(null);
+        expect(typeof byId.get(id)!.attrs?.order).toBe('string');
+      }
+      // order 顺序 == 文档顺序(与 nextSibling 链一致)
+      const o1 = byId.get('p1')!.attrs!.order as string;
+      const o2 = byId.get('p2')!.attrs!.order as string;
+      const o3 = byId.get('p3')!.attrs!.order as string;
+      expect(o1 < o2).toBe(true);
+      expect(o2 < o3).toBe(true);
+    });
+
+    it('嵌套 block:parentId == childOf 目标(跳层语义一致)', () => {
+      const innerPara: PmPayload = {
+        type: 'paragraph',
+        attrs: { id: 'inner' },
+        content: [{ type: 'text', text: 'X' }],
+      };
+      const listItem: PmPayload = { type: 'listItem', attrs: { id: 'li1' }, content: [innerPara] };
+      const bulletList: PmPayload = { type: 'bulletList', content: [listItem] };
+      const doc: PmPayload = { type: 'doc', content: [bulletList] };
+      const r = dissectPmDoc(C, doc);
+      const byId = new Map(r.blocks.map((b) => [b.id, b.payload]));
+      // li1 顶层(childOf 跳过 bulletList → 顶层)→ parentId=null
+      expect(byId.get('li1')!.attrs?.parentId).toBe(null);
+      // inner.childOf → li1 → parentId='li1'
+      expect(byId.get('inner')!.attrs?.parentId).toBe('li1');
+      // 两者 noteId 都是 container
+      expect(byId.get('li1')!.attrs?.noteId).toBe(C);
+      expect(byId.get('inner')!.attrs?.noteId).toBe(C);
+    });
+
+    it('attrs.parentId 与 childOfEdges 完全等价(双写一致性)', () => {
+      // 含 table + cells + list,验证所有 parentId == 对应 childOf 边
+      const cell = (id: string): PmPayload => ({
+        type: 'tableCell',
+        attrs: { id },
+        content: [{ type: 'paragraph', attrs: { id: `${id}-p` }, content: [{ type: 'text', text: id }] }],
+      });
+      const table: PmPayload = {
+        type: 'table',
+        attrs: { id: 't1' },
+        content: [{ type: 'tableRow', content: [cell('c00'), cell('c01')] }],
+      };
+      const doc: PmPayload = { type: 'doc', content: [para('p0', 'top'), table] };
+      const r = dissectPmDoc(C, doc);
+      const childOfByChild = new Map(r.childOfEdges.map((e) => [e.subjectId, e.objectId]));
+      for (const b of r.blocks) {
+        const expectedParent = childOfByChild.get(b.id) ?? null;
+        expect(b.payload.attrs?.parentId).toBe(expectedParent);
+      }
+    });
+
+    it('不污染输入 doc(attrs 浅拷贝)', () => {
+      const p = para('p1', 'A');
+      const doc: PmPayload = { type: 'doc', content: [p] };
+      dissectPmDoc(C, doc);
+      // 输入 paragraph 的 attrs 不应被写入 noteId/order/parentId
+      expect('noteId' in (p.attrs ?? {})).toBe(false);
+      expect('order' in (p.attrs ?? {})).toBe(false);
+    });
+  });
 });

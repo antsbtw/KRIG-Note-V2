@@ -146,6 +146,11 @@ class SurrealStorage implements StorageAPI {
       where.push(`id INSIDE $atomRids`);
       bindings.atomRids = filter.atomIds.map((id) => atomRid(id));
     }
+    // Decision 028 Phase 0:按 block atom 结构属性 noteId 过滤(走 atom_note_id 索引)
+    if (filter.noteId !== undefined) {
+      where.push(`payload.payload.attrs.noteId = $noteId`);
+      bindings.noteId = filter.noteId;
+    }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const orderBy = filter.orderBy ?? 'createdAt';

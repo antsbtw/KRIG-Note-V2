@@ -131,6 +131,21 @@ DEFINE INDEX IF NOT EXISTS intent_status ON intent FIELDS status;
 `;
 
 /**
+ * 1.5.0 schema — Decision 028 Phase 0:block atom 结构属性 noteId 索引。
+ *
+ * 028 把文档结构(归属/层级/顺序)从边改成 block atom 的 payload.attrs 属性。
+ * assemble 改为 `listAtoms({ domain:'pm', noteId })` 一次拉本笔记所有 block atom
+ * (替代 belongsToNote 边查询)。该查询走 `payload.payload.attrs.noteId` 谓词,
+ * 无索引则全 atom 表扫描(10 万+ block atom)→ 必须建索引。
+ *
+ * payload 已是 FLEXIBLE(1.3.0),attrs.noteId 是 vocabulary 扩展字段无需 DEFINE FIELD;
+ * 直接对嵌套路径建索引(SurrealDB 支持嵌套字段索引)。
+ */
+const SCHEMA_VERSION_1_5_0 = `
+DEFINE INDEX IF NOT EXISTS atom_note_id ON atom FIELDS payload.payload.attrs.noteId;
+`;
+
+/**
  * 1.1.0 schema (decision 014 §3.7) — 加 atom.hasBeenReferenced 单向 flag。
  *
  * 用于 decision 013 §3.5.1 单向 flag 模型:
@@ -227,6 +242,25 @@ export async function migration_1_4_0(db: Surreal): Promise<void> {
       appliedAt = $now,
       description = 'Add intent table (data-layer reliability intent-log)'`,
     { rid: new RecordId('schema_version', '1.4.0'), now },
+  );
+}
+
+/**
+ * 1.5.0 migration up — 建 atom_note_id 索引(Decision 028 Phase 0)。
+ * 幂等:DEFINE INDEX IF NOT EXISTS 重复执行无副作用。
+ * 现有 atom 表 attrs.noteId 此时多为空(老数据无属性),索引仍合法建立;
+ * Phase 0 起新写入的 block atom 带 noteId,即被索引。
+ */
+export async function migration_1_5_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_5_0);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.5.0',
+      appliedAt = $now,
+      description = 'Add atom_note_id index (Decision 028 block structure attrs)'`,
+    { rid: new RecordId('schema_version', '1.5.0'), now },
   );
 }
 
