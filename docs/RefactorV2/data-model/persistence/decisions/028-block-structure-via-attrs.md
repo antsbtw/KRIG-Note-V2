@@ -185,3 +185,31 @@ Decision 026 §3 的「结构性容器不拆 atom」（bulletList/orderedList/ta
 - Phase 1 双读（属性优先 + 边 fallback）的过渡期一致性。
 - 迁移 round-trip 校验：迁移后 assemble 出的 doc 必须与迁移前逐块相等（可加 hash 比对作为迁移验收）。
 - belongsToNote 改属性后,listNotes 的「按 hasNoteView 反查」路径要适配。
+
+---
+
+## 七、实施记录（2026-06-08 完成 Phase 0–4，与方案的偏差/补充）
+
+> 代码已落地（分支 feat/decision-028-block-structure-attrs）。以下是实施中相对本文设计的**补充与细化**,文档=事实来源,据此更新。
+
+1. **order = base-62 字典序 rank**:工具 `src/platform/main/note/lexrank.ts`,中点法不退化(整数位无空隙时末尾追加,字符串加长但永不撞)。单测含连续中插 1000 次 + 2000 次随机中插压力。
+
+2. **storage**:`AtomFilter.noteId` 过滤(`payload.payload.attrs.noteId` 谓词);schema migration **1.5.0** 建 `atom_note_id` 索引。
+
+3. **assemble 纯属性路径无边 fallback(Phase 4 后)**:`assemblePmDoc` 只走属性。**fail loud**:0 属性块但仍有 belongsToNote 边 → 抛错(未迁移,拒绝静默返回空 doc 丢内容);有块缺 order → 抛错(半迁移)。即「边 fallback 已删,迁移成硬前提」(用户 2026-06-08 拍板「全删靠迁移兑现」)。
+
+4. **legacy 边读取移入迁移**(关键补充):assemble 删掉边路径后,迁移本身仍需读旧边数据 → `assembleViaEdges` + `topologicalSortSiblings`(带 keep-latest 去重)迁到 `src/storage/migrations/028-block-structure-attrs-core.ts`,复用 export 的 `buildPmNode`。`readPreMigration` 按「有无 belongsToNote 边」分流(老数据走边、已迁走属性)。
+
+5. **迁移覆盖 reading-thought container**(关键补充):迁移除 `hasNoteView` note 外,还须迁 `hasReadingThought` 边的 object(thought pm container)—— D-10 同 assemble/dissect 结构路径,否则 Phase 4 删边 fallback 后旧 thought doc 不可读。
+
+6. **迁移保守删边 + 重跑**:round-trip hash(剥 noteId/parentId/order/rowIndex/colIndex)一致才删该 note 的结构边;不一致 warn + 保留边 + 不写 flag → 下次启动重试。中断幂等(已写属性的 note 步 1 走属性路径、步 4 自比对必过)。
+
+7. **migration 启动顺序**:028 在 022 之后、023 title backfill 之前 awaited(避免与 023 的 assemble+putAtom 并发 race)。
+
+8. **导入路径(createNotesBatch)**:应用层预生成 ULID → 注入 noteId/parentId/order 到 draft payload.attrs → 一次 batchPutAtoms(显式 id),不再 batchPutEdges 三类结构边。
+
+9. **deleteNote 级联**:按 noteId 属性查 block + 过渡期兼容旧 belongsToNote 边查询取并集(迁移前老笔记 block 仍可删);Phase 4 保留边查询作兼容(未迁注记不丢)。
+
+10. **cardinality-check**:移除 belongsToNote/childOf/nextSibling 三类结构边扫描(无边可扫)。
+
+> 关于 `listNotes 按 hasNoteView 反查`(本文 §六最后一条):**未受影响** —— hasNoteView 是 marker 边(非结构边),不动;listNotes 仍走 listMarkerAtoms,无需适配。
