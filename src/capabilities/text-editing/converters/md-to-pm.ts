@@ -391,16 +391,17 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
           continue;
         }
         const cellType = isFirst ? 'tableHeader' : 'tableCell';
-        // 默认 colwidth:V2 table CSS table-layout: fixed 需要 cell width
-        // 才能算列宽,否则 fixed 退化只有第一列显示,其他列消失
-        // (2026-05-28 反馈:pandoc 10 列大表只渲染序号一列)。
-        // 给统一 120 px 默认值,用户可拖动 columnResizing 调整。
-        const DEFAULT_COL_WIDTH = 120;
+        // colwidth 不预设(留 null)—— 与 PDF/JSON 导入统一为「纯导入态」,
+        // 由 table NodeView 挂载时 fillWidthIfImported 按编辑区宽度均分各列
+        // (2026-06-09:导入 table 默认占满 view 宽度的设计要求,覆盖所有导入源)。
+        //
+        // 历史(2026-05-28):曾写死 colwidth:[120] 防 table-layout:fixed 退化成单列
+        // (pandoc 10 列大表只渲染序号一列)—— 那是 colgroup 未同步的旧 bug,已由
+        // node-view syncColgroup 根治;现在无 colwidth 也会被 fillWidth 均分+同步,不退化。
         tableRows.push({
           type: 'tableRow',
           content: cells.map((cell) => ({
             type: cellType,
-            attrs: { colwidth: [DEFAULT_COL_WIDTH] },
             // cell 内允许 <br> 拆多段(2026-05-28 反馈:Word 导入硬件规格表
             //  cell 多段被压一行;word-import converter 已用 <br> 替换段间)。
             //  GFM 表格语法本身 cell 只能单行,<br> 是 V2 双方约定。
