@@ -284,6 +284,51 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   // 均分写回各 cell.colwidth。用户随后拖动列宽即覆盖,本逻辑只跑一次(写后即有 colwidth)。
   //
   // 仅当**所有 cell 都无 colwidth**(纯导入态)才动 —— 避免覆盖用户调整 / round-trip 宽度。
+  // ── colgroup 同步 ───────────────────────────────────────
+  //
+  // 根因(2026-06-09 定位):本 table 用自定义 NodeView,覆盖了 prosemirror-tables 自带
+  // TableView,于是库内置的「colwidth attr → <colgroup><col width> 同步」没生效 —— 手动建的
+  // colgroup 一直是空的。table-layout:fixed + 空 colgroup → 列宽只认 cell toDOM 里的
+  // inline width,而 setNodeMarkup 改 colwidth attr 后 PM 不重渲已有 cell DOM → 改了不显示。
+  // 故 node-view 自己按 cell.colwidth 重建 <col>(对齐 prosemirror-tables updateColumns 语义)。
+  const syncColgroup = (): void => {
+    const pos = typeof getPos === 'function' ? getPos() : undefined;
+    if (pos == null) return;
+    const tableNode = view.state.doc.nodeAt(pos);
+    if (!tableNode || tableNode.type.name !== 'table') return;
+    const firstRow = tableNode.firstChild;
+    if (!firstRow) return;
+
+    // 按首行各 cell 的 colspan + colwidth 展开成「每列一个宽度」
+    const widths: (number | null)[] = [];
+    firstRow.forEach((cell) => {
+      const span = (cell.attrs.colspan as number) || 1;
+      const cw = cell.attrs.colwidth as number[] | null;
+      for (let i = 0; i < span; i++) {
+        widths.push(cw && cw[i] != null ? cw[i] : null);
+      }
+    });
+
+    // 重建 <col>(数量/宽度变了才动 — 避免每帧 churn)
+    const existing = colgroup.children;
+    const sameCount = existing.length === widths.length;
+    let same = sameCount;
+    if (sameCount) {
+      for (let i = 0; i < widths.length; i++) {
+        const want = widths[i] != null ? `${widths[i]}px` : '';
+        if ((existing[i] as HTMLElement).style.width !== want) { same = false; break; }
+      }
+    }
+    if (same) return;
+
+    colgroup.replaceChildren();
+    for (const w of widths) {
+      const col = document.createElement('col');
+      if (w != null) col.style.width = `${w}px`;
+      colgroup.appendChild(col);
+    }
+  };
+
   let fillWidthDone = false;
   const fillWidthIfImported = (): void => {
     if (fillWidthDone) return;
@@ -342,6 +387,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
     tr = tr.setMeta('addToHistory', false);
     tr = tr.setMeta('skipOnChange', true);
     view.dispatch(tr);
+    syncColgroup(); // 立刻把新 colwidth 同步到 <colgroup>(不等 update RAF)
     fillWidthDone = true;
   };
 
@@ -350,6 +396,7 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   // 首次 build(NodeViewConstructor 返回后 tbody 才被 PM 填充,延后一帧)
   requestAnimationFrame(() => {
     fillWidthIfImported();
+    syncColgroup();
     rebuildColumnDots();
     rebuildRowDots();
     updateCellSelectionHandle();
@@ -366,6 +413,8 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
         // 挂载时若编辑区宽度为 0(隐藏 tab 等)fillWidth 会跳过且不置 done,
         // 此处再试一次(已 done / 已有 colwidth 都会内部短路,幂等无害)
         fillWidthIfImported();
+        // colwidth 变化(fillWidth 写入 / 用户拖拽 columnResizing)同步到 colgroup
+        syncColgroup();
         rebuildColumnDots();
         rebuildRowDots();
         updateCellSelectionHandle();
