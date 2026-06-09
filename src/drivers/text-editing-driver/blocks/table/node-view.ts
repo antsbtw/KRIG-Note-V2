@@ -275,10 +275,81 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
   view.dom.addEventListener('keyup', onUserAction);
   view.dom.addEventListener('mousedown', onUserAction);
 
+  // ── 导入 table 首次挂载:无 colwidth → 按 view 可用宽均分各列 ──────
+  //
+  // 需求(2026-06-09):导入的 table 默认总宽对齐编辑区宽度,而非按内容收缩留白
+  // (本地新建 table 走 commands 补 colwidth=[120];导入的 cell 无 colwidth →
+  // table-layout:fixed 下塌到 min-width:80px/列 → 窄表 + 右侧大片留白)。
+  // 列宽依赖真实 view 宽度,故放在编辑器挂载时算(此刻 scroll.clientWidth 已知),
+  // 均分写回各 cell.colwidth。用户随后拖动列宽即覆盖,本逻辑只跑一次(写后即有 colwidth)。
+  //
+  // 仅当**所有 cell 都无 colwidth**(纯导入态)才动 —— 避免覆盖用户调整 / round-trip 宽度。
+  let fillWidthDone = false;
+  const fillWidthIfImported = (): void => {
+    if (fillWidthDone) return;
+    const pos = typeof getPos === 'function' ? getPos() : undefined;
+    if (pos == null) return;
+    const tableNode = view.state.doc.nodeAt(pos);
+    if (!tableNode || tableNode.type.name !== 'table') return;
+
+    // 扫全表:任一 cell 已有 colwidth → 非纯导入态,跳过(不覆盖)
+    let anyColwidth = false;
+    let colCount = 0;
+    tableNode.forEach((row) => {
+      let rowCols = 0;
+      row.forEach((cell) => {
+        rowCols += (cell.attrs.colspan as number) || 1;
+        if (Array.isArray(cell.attrs.colwidth) && cell.attrs.colwidth.some((w) => w != null)) {
+          anyColwidth = true;
+        }
+      });
+      colCount = Math.max(colCount, rowCols);
+    });
+    if (anyColwidth || colCount === 0) {
+      fillWidthDone = true;
+      return;
+    }
+
+    // 可用宽 = scroll 容器内宽(= 编辑区正文宽);量不到则跳过等下一帧
+    const availWidth = scroll.clientWidth;
+    if (availWidth <= 0) return;
+
+    const MIN_COL = 48;
+    const per = Math.max(MIN_COL, Math.floor(availWidth / colCount));
+
+    // 逐 cell 写 colwidth=[per]*colspan(colspan>1 的合并单元格按比例占多列宽)
+    let tr = view.state.tr;
+    const base = pos + 1; // table 内偏移
+    let changed = false;
+    tableNode.forEach((row, rowOffset) => {
+      row.forEach((cell, cellOffset) => {
+        const span = (cell.attrs.colspan as number) || 1;
+        const cellPos = base + rowOffset + 1 + cellOffset;
+        tr = tr.setNodeMarkup(cellPos, undefined, {
+          ...cell.attrs,
+          colwidth: new Array(span).fill(per),
+        });
+        changed = true;
+      });
+    });
+    if (!changed) {
+      fillWidthDone = true;
+      return;
+    }
+
+    // 与 auto-block-id-plugin 同款防御(decision 026 §12.2):
+    // colwidth 注入是结构性 noise — 不进 undo 栈,且 Host onChange 见 skipOnChange 不发 IPC。
+    tr = tr.setMeta('addToHistory', false);
+    tr = tr.setMeta('skipOnChange', true);
+    view.dispatch(tr);
+    fillWidthDone = true;
+  };
+
   // ── 初始 / update / destroy ─────────────────────────────
 
   // 首次 build(NodeViewConstructor 返回后 tbody 才被 PM 填充,延后一帧)
   requestAnimationFrame(() => {
+    fillWidthIfImported();
     rebuildColumnDots();
     rebuildRowDots();
     updateCellSelectionHandle();
@@ -292,6 +363,9 @@ export const tableNodeView: NodeViewConstructor = (initialNode, view, getPos) =>
       // 行数 / 列数 / colwidth 变化都进这里(PM 会在节点变更时调 update)
       // 延后一帧避免 colgroup 还没 sync,DOM rect 计算误差
       requestAnimationFrame(() => {
+        // 挂载时若编辑区宽度为 0(隐藏 tab 等)fillWidth 会跳过且不置 done,
+        // 此处再试一次(已 done / 已有 colwidth 都会内部短路,幂等无害)
+        fillWidthIfImported();
         rebuildColumnDots();
         rebuildRowDots();
         updateCellSelectionHandle();
