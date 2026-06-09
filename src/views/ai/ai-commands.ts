@@ -276,4 +276,30 @@ export function registerAICommands(): void {
     // fire-and-forget — 结果通过 onAIResponseReady / onAIError 广播
     void ai.askAI(serviceId, prompt);
   });
+
+  // ── 右键「📥 提取此对话到笔记」(AI_EXTRACT_TURN_REQUEST 广播)单订阅 ──
+  //
+  // 主进程 AI_EXTRACT_TURN_REQUEST 是宿主 webContents 广播。曾订阅在 AIView 的
+  // useEffect 里 → 每个并存 AIView 实例(每 ws 一个,非活跃 display:none 但未卸载)
+  // 各订阅一次 → 一次右键 N 次 execute → 并发抽取同一 active webview、并发往右槽
+  // Note 塞节点(实测开 ws-1+ws-8 右键一次 → 右槽出现重复回答块)。
+  //
+  // 收口:订阅提升到模块级单例入口(registerAICommands 由 ai/index.ts import 时只调
+  // 一次),全宿主只一个 handler → 只 execute 一次。命令体 'ai-view.extract-turn'
+  // 内部已用 getActiveId 定向到活跃 ws,故无需在此再加守卫。
+  // (规则:命令型广播一律在模块级 registerXxx 订阅一次,不进 view 组件 useEffect。)
+  if (!extractTurnUnsub) {
+    const ai = getCapabilityApi<AIConversationApi>('ai-extraction');
+    if (ai) {
+      extractTurnUnsub = ai.onExtractTurnRequest((payload) => {
+        void commandRegistry.execute('ai-view.extract-turn', {
+          x: payload.x,
+          y: payload.y,
+        });
+      });
+    }
+  }
 }
+
+/** 模块级单订阅句柄(防 registerAICommands 万一被调多次重复订阅)*/
+let extractTurnUnsub: (() => void) | null = null;

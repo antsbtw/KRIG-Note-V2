@@ -336,10 +336,12 @@ export function WebView({ workspaceId }: WebViewProps) {
       dispatchShortcutRef.current(action);
     });
     const offNewTab = window.electronAPI.onWebNewTab(({ url }) => {
-      // 发弹窗的就是活跃 web view 的 webview → getActiveId 必为该 ws。
-      const activeWsId = workspaceManager.getActiveId();
-      if (!activeWsId || !url) return;
-      addTab(activeWsId, url);
+      // WEB_NEW_TAB 是宿主 webContents 广播,每个并存的 WebView 实例(每 ws 一个,
+      // 非活跃的 display:none 但未卸载)都会收到。只有「自己就是活跃 ws」的实例才处理,
+      // 否则 N 个 workspace → 一次弹窗开 N 个 tab(实测 ws-1/ws-8 各收一次)。
+      if (workspaceManager.getActiveId() !== workspaceId) return;
+      if (!url) return;
+      addTab(workspaceId, url);
     });
     return () => {
       offShortcut();
