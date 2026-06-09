@@ -24,11 +24,19 @@ export function useActiveWorkspace(): WorkspaceState | undefined {
   );
 }
 
-/** 订阅所有 Workspace 列表 */
+/** 订阅所有 Workspace 列表(库,含未打开的;NavSide 工作空间区用)*/
 export function useAllWorkspaces(): WorkspaceState[] {
   return useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
     () => workspaceManager.getAll(),
+  );
+}
+
+/** 订阅在顶部 bar 打开的 Workspace(isOpen;顶部 bar / container 用)*/
+export function useOpenWorkspaces(): WorkspaceState[] {
+  return useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => workspaceManager.getOpen(),
   );
 }
 

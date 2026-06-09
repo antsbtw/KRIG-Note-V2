@@ -144,3 +144,16 @@
   background-color: #2a2a2a;
   color: #ccc;
 }
+
+/* 工作空间标签 inline 重命名输入框(双击触发) */
+.krig-workspace-tab-rename {
+  background: #1a1a1a;
+  border: 1px solid rgba(138, 180, 248, 0.6);
+  border-radius: 3px;
+  color: #eee;
+  font-size: 12px;
+  padding: 0 4px;
+  height: 18px;
+  width: 90px;
+  outline: none;
+}

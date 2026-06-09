@@ -44,6 +44,13 @@ export interface WorkspaceState {
   pluginStates: Record<string, unknown>;
   /** 创建时间戳(ms)*/
   createdAt: number;
+  /**
+   * 是否在顶部 bar 打开。
+   * - true:在顶部 bar 显示(默认,新建即打开)
+   * - false:仅存在于 NavSide 工作空间库(已从顶部「×」收起,数据/cookie 保留)
+   * 缺省(老数据无此字段)视为 true。
+   */
+  isOpen: boolean;
 }
 
 /** WorkspaceManager 整体状态(用于持久化)*/

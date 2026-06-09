@@ -563,14 +563,13 @@
   flex-shrink: 0;
 }
 
-/* 书签 FolderTree 容器:树是 flex:1 内部滚动,这里给定高度上限,超出树内部滚。
+/* 书签 FolderTree 容器:不限高 —— 展开多少撑多高,像 note 文件夹一路展开,
+   超出由整个 NavSide(.krig-web-nav overflow-y:auto)统一滚动。
    padding-left:整棵树起始左缩进 —— Chrome 导入的顶层容器(Bookmarks Bar 等)是
    depth=0 会贴边,加起始缩进让顶层不贴边、有层次(对齐 note 视觉舒适度)。*/
 .krig-web-nav__tree {
   display: flex;
   flex-direction: column;
-  max-height: 320px;
-  min-height: 60px;
   padding-left: 12px;
 }
 
@@ -981,4 +980,22 @@
 .krig-web-settings__err {
   font-size: 11px;
   color: #fca5a5;
+}
+
+/* NavSide 工作空间项 inline 重命名输入框(双击触发) */
+.krig-web-nav__rename-input {
+  background: #1a1a1a;
+  border: 1px solid rgba(138, 180, 248, 0.6);
+  border-radius: 3px;
+  color: #eee;
+  font-size: 12px;
+  padding: 1px 4px;
+  width: 100%;
+  outline: none;
+}
+
+/* 工作空间列表项:未打开(已从顶部收起)的字暗化,区分打开状态 */
+.krig-ws-item:not(.krig-ws-item--open) .krig-web-nav__item-title {
+  color: #666;
+  font-style: italic;
 }

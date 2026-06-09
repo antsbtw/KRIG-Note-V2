@@ -29,5 +29,6 @@ export function createDefaultWorkspaceState(id: string, label: string, customLab
     },
     pluginStates: {},
     createdAt: Date.now(),
+    isOpen: true, // 新建即在顶部 bar 打开
   };
 }

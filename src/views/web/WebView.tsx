@@ -512,15 +512,14 @@ export function WebView({ workspaceId }: WebViewProps) {
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      {tabs.length >= 2 && (
-        <WebTabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onSelect={handleSelectTab}
-          onClose={handleCloseTab}
-          onNewTab={handleNewTab}
-        />
-      )}
+      {/* tab 栏常显(含 + 新建):单 tab 也显示,像 Chrome,布局稳定 + 跟顶部工作空间标签栏统一 */}
+      <WebTabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onSelect={handleSelectTab}
+        onClose={handleCloseTab}
+        onNewTab={handleNewTab}
+      />
       <WebToolbar
         url={displayUrl}
         loading={loading}

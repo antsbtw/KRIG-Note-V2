@@ -42,6 +42,8 @@ export class WorkspaceManager {
    * 缓存在数据变化时(notify 内)失效。
    */
   private cachedAll: WorkspaceState[] | null = null;
+  /** getOpen 缓存(同 cachedAll,notify 时失效)*/
+  private cachedOpen: WorkspaceState[] | null = null;
 
   /** 注入持久化实现(允许测试 / 未来切 SurrealDB) */
   setPersistence(persistence: PersistenceAPI | null): void {
@@ -111,6 +113,18 @@ export class WorkspaceManager {
   }
 
   /**
+   * 获取在顶部 bar 打开的 Workspace(isOpen=true,按创建顺序)。
+   *
+   * 顶部 bar / WorkspaceContainer 用。同 getAll 的引用稳定要求:带缓存,notify 时失效。
+   */
+  getOpen(): WorkspaceState[] {
+    if (this.cachedOpen === null) {
+      this.cachedOpen = this.getAll().filter((w) => w.isOpen);
+    }
+    return this.cachedOpen;
+  }
+
+  /**
    * 部分更新 Workspace(id 不可变,触发 notify)
    *
    * @param meta 可选元数据 — `source` 标记 slotBinding 修改来源(L3.5):
@@ -177,9 +191,32 @@ export class WorkspaceManager {
     this.update(id, { navSideCollapsed: collapsed });
   }
 
-  /** 关闭 Workspace */
+  /**
+   * 关闭 Workspace(顶部 bar 「×」)= 从顶部收起,**不删数据**。
+   *
+   * 工作空间连同 cookie/配置保留在库里(NavSide 工作空间列表仍可见,点击可重新打开)。
+   * bus 不在收起时 dispose(重新打开要复用);真删见 remove()。
+   */
   close(id: string): string | null {
-    if (!this.workspaces.has(id)) return null;
+    const ws = this.workspaces.get(id);
+    if (!ws || ws.isOpen === false) return this.activeId;
+
+    this.update(id, { isOpen: false });
+
+    // 收起的若是活跃,切到另一个【打开的】;无则至少打开一个
+    if (this.activeId === id) this.activateAnotherOpen();
+
+    return this.activeId;
+  }
+
+  /**
+   * 从库彻底删除 Workspace(NavSide 删除入口)= 真删 + 释放 bus。
+   *
+   * cookie 真删需主进程 session API(renderer 不能直接动 session)— 暂留 TODO,
+   * 后续随 IPC 接通。先做写库删除(fail loud:删不掉不静默)。
+   */
+  remove(id: string): string | null {
+    if (!this.workspaces.has(id)) return this.activeId;
 
     // L3.5:释放 bus 实例(channel listeners / request handlers / lastValues 全清)
     const bus = this.buses.get(id);
@@ -190,20 +227,36 @@ export class WorkspaceManager {
 
     this.workspaces.delete(id);
 
-    // 关闭活跃 Workspace 时切到相邻
-    if (this.activeId === id) {
-      const remaining = this.getAll();
-      if (remaining.length > 0) {
-        this.activeId = remaining[remaining.length - 1].id;
-      } else {
-        // 至少保留一个 Workspace
-        const newWs = this.create();
-        this.activeId = newWs.id;
-      }
-    }
+    // 删的是活跃 → 切到另一个打开的
+    if (this.activeId === id) this.activateAnotherOpen();
+
+    // TODO: 清该 ws 的 webview partition cookie(主进程 session.clearStorageData)
 
     this.notify();
     return this.activeId;
+  }
+
+  /**
+   * 重新打开一个已收起的 Workspace(NavSide 点击列表项时用)。
+   * 标记 isOpen=true,使其重新出现在顶部 bar。
+   */
+  open(id: string): void {
+    const ws = this.workspaces.get(id);
+    if (!ws || ws.isOpen) return;
+    this.update(id, { isOpen: true });
+  }
+
+  /** 活跃被收起/删除后,切到任一仍打开的;一个打开的都没有则新建一个保底 */
+  private activateAnotherOpen(): void {
+    const open = this.getAll().filter((w) => w.isOpen);
+    if (open.length > 0) {
+      this.activeId = open[open.length - 1].id;
+      this.notify();
+    } else {
+      const ws = this.create(); // create 内已 notify
+      this.activeId = ws.id;
+      this.notify(); // 落 activeId(create 那次 notify 时 activeId 还是旧的)
+    }
   }
 
   /** 重命名 Workspace */
@@ -229,6 +282,7 @@ export class WorkspaceManager {
   /** 内部通知所有订阅者 + 自动持久化 + 失效缓存 */
   private notify(): void {
     this.cachedAll = null; // 数据变化,失效缓存(下次 getAll 重建)
+    this.cachedOpen = null; // 同失效 open 缓存
     this.listeners.forEach((l) => l());
     this.saveToPersistence();
   }
@@ -241,7 +295,10 @@ export class WorkspaceManager {
     const state = this.persistence.load();
     if (!state) return;
 
-    state.workspaces.forEach((ws) => this.workspaces.set(ws.id, ws));
+    // 老数据无 isOpen → 视为 true(向后兼容)
+    state.workspaces.forEach((ws) =>
+      this.workspaces.set(ws.id, { ...ws, isOpen: ws.isOpen ?? true }),
+    );
     this.activeId = state.activeId;
     this.counter = state.counter;
     this.notify();
@@ -258,14 +315,22 @@ export class WorkspaceManager {
     this.persistence.save(state);
   }
 
-  /** 确保至少有一个 Workspace(应用启动时,持久化加载后调) */
+  /** 确保至少有一个【打开的】 Workspace,且 active 指向打开的(启动时,持久化加载后调) */
   ensureMinimum(): void {
     if (this.count === 0) {
       const ws = this.create();
       this.setActive(ws.id);
-    } else if (!this.activeId || !this.workspaces.has(this.activeId)) {
+      return;
+    }
+    const open = this.getAll().filter((w) => w.isOpen);
+    if (open.length === 0) {
+      // 库里有,但全收起了 → 打开第一个(顶部 bar 不能空)
       const first = this.getAll()[0];
+      this.update(first.id, { isOpen: true });
       this.setActive(first.id);
+    } else if (!this.activeId || !this.workspaces.get(this.activeId)?.isOpen) {
+      // active 缺失或指向已收起的 → 切到一个打开的
+      this.setActive(open[0].id);
     }
   }
 }

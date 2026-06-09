@@ -13,12 +13,12 @@ import { NavSideToggle } from './NavSideToggle';
 import { AddWorkspaceButton } from './AddWorkspaceButton';
 import { WorkspaceTab } from './WorkspaceTab';
 import { useFullscreen } from './use-fullscreen';
-import { useAllWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { useOpenWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
 import './workspace-bar.css';
 
 export function WorkspaceBar() {
   const isFullscreen = useFullscreen();
-  const workspaces = useAllWorkspaces();
+  const workspaces = useOpenWorkspaces(); // 顶部 bar 只显打开的(收起的留 NavSide 库)
   const activeId = useActiveWorkspaceId();
   const className = `krig-workspace-bar ${isFullscreen ? 'krig-workspace-bar--fullscreen' : ''}`;
 

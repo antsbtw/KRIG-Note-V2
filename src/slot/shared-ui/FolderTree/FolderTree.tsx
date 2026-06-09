@@ -45,7 +45,9 @@ export function FolderTree({
   contextMenuScope,
   contextMenuCtxExtra,
   emptyText = '暂无内容',
+  containerStyle,
 }: FolderTreeProps) {
+  const rootStyle = containerStyle ? { ...styles.container, ...containerStyle } : styles.container;
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dragHoverFolderId, setDragHoverFolderId] = useState<string | null | 'root'>(null);
 
@@ -219,7 +221,7 @@ export function FolderTree({
     return (
       <div
         data-krig-context-menu-handled
-        style={styles.container}
+        style={rootStyle}
         onContextMenu={(e) => handleContextMenu(null, e)}
         onDragOver={(e) => handleDragOverFolder(null, e)}
         onDragLeave={(e) => handleDragLeaveFolder(null, e)}
@@ -235,7 +237,7 @@ export function FolderTree({
     <div
       ref={containerRef}
       data-krig-context-menu-handled
-      style={styles.container}
+      style={rootStyle}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onContextMenu={(e) => {

@@ -16,7 +16,10 @@
  * 范本:src/views/note/nav-side-content.tsx:166。
  */
 
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useAllWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { ContextMenuPopover, type ContextMenuItem } from '@slot/shared-ui/ContextMenuPopover';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tree-context-menu-registry';
 import { commandRegistry } from '@slot/command-registry/command-registry';
@@ -155,6 +158,133 @@ function CollapsibleSection({
   );
 }
 
+/**
+ * 工作空间段:列出所有工作空间,点击切换并强制进 web view,双击重命名。
+ *
+ * 工作空间本身已由 workspaceManager 自动持久化(localStorage),这里是「库列表 +
+ * 切换 + 重命名」入口。复用 CollapsibleSection 外壳,与书签/下载/历史同组对齐。
+ *
+ * 用户决策(交互与 note / 书签一致):
+ * - 点击列表项 → setActive + 强制 slotBinding.left='web-view'(从 web NavSide 进,默认看 web)
+ * - 双击列表项 → inline 重命名(顶部 tab 也可重命名,两处对称)
+ * - 右键列表项 → 菜单「重命名 / 删除」(删除 = 从库彻底删,跟 note 删除同走右键菜单)
+ */
+function WorkspaceSection() {
+  const workspaces = useAllWorkspaces();
+  const activeId = useActiveWorkspaceId();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+
+  const openWorkspace = (id: string) => {
+    workspaceManager.open(id); // 若已收起,重新打开到顶部 bar
+    workspaceManager.setActive(id);
+    // 强制进 web view(铁律 9:切主 view 关 right slot)
+    workspaceManager.update(
+      id,
+      {
+        slotBinding: {
+          left: 'web-view',
+          leftPayload: undefined,
+          right: null,
+          rightPayload: undefined,
+        },
+      },
+      { source: 'navside' },
+    );
+  };
+
+  const startRename = (id: string, label: string) => {
+    setEditingId(id);
+    setDraft(label);
+  };
+  const commitRename = () => {
+    if (editingId) {
+      const name = draft.trim();
+      if (name) workspaceManager.rename(editingId, name);
+    }
+    setEditingId(null);
+  };
+
+  const openMenu = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, id });
+  };
+
+  const menuItems: ContextMenuItem[] = menu
+    ? [
+        {
+          id: 'ws-rename',
+          label: '重命名',
+          icon: '✏️',
+          onClick: () => {
+            const ws = workspaceManager.get(menu.id);
+            if (ws) startRename(ws.id, ws.label);
+          },
+        },
+        { id: 'ws-del-sep', label: '', separator: true },
+        {
+          id: 'ws-delete',
+          label: '删除',
+          icon: '🗑',
+          onClick: () => workspaceManager.remove(menu.id),
+        },
+      ]
+    : [];
+
+  return (
+    <CollapsibleSection storeKey="workspace" icon="🗂" title="工作空间" defaultOpen>
+      <ul className="krig-web-nav__list">
+        {workspaces.map((ws) => (
+          <li
+            key={ws.id}
+            className={`krig-web-nav__item krig-ws-item${
+              ws.isOpen ? ' krig-ws-item--open' : ''
+            }`}
+            onClick={() => editingId !== ws.id && openWorkspace(ws.id)}
+            onDoubleClick={() => startRename(ws.id, ws.label)}
+            onContextMenu={(e) => openMenu(e, ws.id)}
+            title={ws.isOpen ? ws.label : `${ws.label}(已收起,点击重新打开)`}
+            style={
+              ws.id === activeId
+                ? { background: 'rgba(138, 180, 248, 0.18)' }
+                : undefined
+            }
+          >
+            <div className="krig-web-nav__item-main">
+              {editingId === ws.id ? (
+                <input
+                  className="krig-web-nav__rename-input"
+                  value={draft}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename();
+                    else if (e.key === 'Escape') setEditingId(null);
+                  }}
+                />
+              ) : (
+                <span className="krig-web-nav__item-title">{ws.label}</span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {menu && (
+        <ContextMenuPopover
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </CollapsibleSection>
+  );
+}
+
 /** 历史段:全量列表 + 点击右栏打开 + hover× 删除 + 清空历史。 */
 function HistorySection() {
   // localStorage 非响应式 — mount 取一次,删除/清空后手动 setState 刷新。
@@ -254,6 +384,13 @@ function BookmarkSection() {
   const [bookmarks, setBookmarks] = useState<BookmarkInfo[]>([]);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
 
+  // ref 持有最新 bookmarks/folders:全局单例 trigger 回调读 ref,避免捕获过期闭包
+  // (rename「看手气」的根因:闭包里 folders 偶尔是旧/空的 → 找不到 cur → 放弃重命名)
+  const bookmarksRef = useRef(bookmarks);
+  const foldersRef = useRef(folders);
+  bookmarksRef.current = bookmarks;
+  foldersRef.current = folders;
+
   // per-ws transient UI 态用组件 useState(不动 tab schema 的 hydrate cache 不变量)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -280,19 +417,21 @@ function BookmarkSection() {
   }, [bookmarkApi, folderApi, refresh]);
 
   // 桥接 commands → rename / folder-created / expand / notice
+  // 注:trigger 是全局单例,回调内读 ref(bookmarksRef/foldersRef)拿最新值,
+  // 故本 effect 只需挂载一次([]),避免随 bookmarks/folders 频繁重注册引入竞态。
   useEffect(() => {
     setRenameTrigger((treeId) => {
       const { type, id } = decodeTreeId(treeId);
       const cur =
         type === 'bookmark'
-          ? bookmarks.find((b) => b.id === id)?.title
-          : folders.find((f) => f.id === id)?.title;
-      if (cur === undefined) return;
+          ? bookmarksRef.current.find((b) => b.id === id)?.title
+          : foldersRef.current.find((f) => f.id === id)?.title;
+      // 找不到旧标题也照常进编辑态(不放弃重命名);预填用旧值,缺则留空
       setRenamingId(treeId);
-      setRenameValue(cur);
+      setRenameValue(cur ?? '');
     });
     setFolderCreatedTrigger((folderId) => {
-      const cur = folders.find((f) => f.id === folderId);
+      const cur = foldersRef.current.find((f) => f.id === folderId);
       setRenamingId(encodeTreeId('folder', folderId));
       setRenameValue(cur?.title ?? '新建文件夹');
     });
@@ -312,7 +451,7 @@ function BookmarkSection() {
       setNoticeTrigger(null);
       setSectionOpenTrigger(null);
     };
-  }, [bookmarks, folders]);
+  }, []);
 
   // notice 自动消失
   useEffect(() => {
@@ -416,7 +555,15 @@ function BookmarkSection() {
         commandRegistry.execute('web-view.bm-open', decodeTreeId(target.id).id);
       }
     } else if (action === 'rename') {
-      commandRegistry.execute('web-view.bm-rename', target.id);
+      // 与 note 一致:重命名是纯本地 UI 操作,直接 setRenamingId,不绕命令 +
+      // 全局单例 trigger(那条链路时序脆弱,是双击「看手气」的根因)。
+      const { type, id } = decodeTreeId(target.id);
+      const cur =
+        type === 'bookmark'
+          ? bookmarksRef.current.find((b) => b.id === id)?.title
+          : foldersRef.current.find((f) => f.id === id)?.title;
+      setRenamingId(target.id);
+      setRenameValue(cur ?? (target.kind === 'folder' ? target.title : ''));
     } else if (action === 'delete') {
       commandRegistry.execute('web-view.bm-delete', target.id);
     }
@@ -465,6 +612,8 @@ function BookmarkSection() {
           onRenameCancel={() => setRenamingId(null)}
           contextMenuScope="web-view"
           emptyText="点击上方 + 书签 收藏当前页"
+          /* 不内部滚:树自然撑高,由整个 NavSide 统一滚动(像 note 文件夹一路展开)*/
+          containerStyle={{ flex: 'none', overflowY: 'visible' }}
         />
       </div>
       {notice && <div className="krig-web-nav__notice">{notice}</div>}
@@ -696,7 +845,8 @@ function DownloadSection() {
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
-      {/* 顺序:书签 → 下载 → 历史(下载短提到第二,历史内容长放最后)*/}
+      {/* 顺序:工作空间 → 书签 → 下载 → 历史 */}
+      <WorkspaceSection />
       <BookmarkSection />
       <DownloadSection />
       <HistorySection />

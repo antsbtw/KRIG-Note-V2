@@ -5,7 +5,7 @@
  * V2 改造:contextMenu callback 改为 contextMenuScope + registry(Q7=方案 2)。
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode, CSSProperties } from 'react';
 
 export type TreeNode = FolderNode | ItemNode;
 
@@ -82,4 +82,10 @@ export interface FolderTreeProps {
   contextMenuCtxExtra?: () => Record<string, unknown>;
 
   emptyText?: string;
+  /**
+   * 覆盖根容器样式(浅合并到默认 styles.container)。
+   * 用途:书签树要「不内部滚、自然撑高」(传 { flex: 'none', overflowY: 'visible' }),
+   * 由外层 NavSide 统一滚动;note 树不传,保持默认 flex:1 内部滚。
+   */
+  containerStyle?: CSSProperties;
 }

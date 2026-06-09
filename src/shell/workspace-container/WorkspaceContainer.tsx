@@ -9,12 +9,13 @@
  * L3 阶段:接入 WorkspaceManager,渲染所有 Workspace 实例
  */
 
-import { useAllWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { useOpenWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
 import { WorkspaceInstance } from '@workspace/workspace-instance/WorkspaceInstance';
 import './workspace-container.css';
 
 export function WorkspaceContainer() {
-  const workspaces = useAllWorkspaces();
+  // 只挂载打开的工作空间实例(收起的不挂,省内存;cookie 持久,重开重载但登录态在)
+  const workspaces = useOpenWorkspaces();
   const activeId = useActiveWorkspaceId();
 
   if (workspaces.length === 0) {
