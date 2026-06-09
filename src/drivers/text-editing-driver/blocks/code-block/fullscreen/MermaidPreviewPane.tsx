@@ -35,7 +35,20 @@ import {
 } from './MermaidPreview';
 
 const LS_THEME = 'krig-mermaid-fs-theme';
+const LS_SCALE = 'krig-mermaid-fs-scale';
 const VALID_THEMES: readonly MermaidTheme[] = ['dark', 'default', 'forest', 'neutral', 'base'];
+
+/**
+ * 读上次手动调整后的缩放(全局共用,所有图共享一份)。
+ * 返回 null 表示「无记忆」—— 首帧应按宽度铺满,而非 100%。
+ */
+function readStoredScale(): number | null {
+  const raw = localStorage.getItem(LS_SCALE);
+  if (raw === null) return null;
+  const v = parseFloat(raw);
+  if (isNaN(v) || v < 0.1 || v > 5) return null;
+  return v;
+}
 
 const DIRECTIONS = ['TB', 'LR', 'RL', 'BT'] as const;
 type Direction = (typeof DIRECTIONS)[number];
@@ -112,7 +125,10 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
   const previewRef = useRef<MermaidPreviewHandle | null>(null);
 
   const [theme, setTheme] = useState<MermaidTheme>(readInitialTheme);
-  const [scale, setScale] = useState<number>(1);
+  // 初始 scale:有记忆→用记忆值;无记忆→先占位 1,首帧渲染后按宽度铺满覆盖
+  const [scale, setScale] = useState<number>(() => readStoredScale() ?? 1);
+  // 是否已对本次全屏会话应用过「初始 scale」(记忆恢复 or 首帧 fit-width)——只跑一次
+  const initialScaleAppliedRef = useRef(readStoredScale() !== null);
   const [downloadFormat, setDownloadFormat] = useState<ExportFormat>('PNG');
   const [copyFormat, setCopyFormat] = useState<ExportFormat>('PNG');
   const [copyJustSucceeded, setCopyJustSucceeded] = useState(false);
@@ -189,24 +205,56 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
     }
   }, [copyFormat, flashCopyOk]);
 
-  const onFit = useCallback(() => setScale(1), []);
-  const onZoomIn = useCallback(
-    () => setScale((s) => Math.min(5, Math.round((s + 0.1) * 100) / 100)),
-    [],
-  );
-  const onZoomOut = useCallback(
-    () => setScale((s) => Math.max(0.1, Math.round((s - 0.1) * 100) / 100)),
-    [],
-  );
+  // 用户手动调整后:记忆该值(全局共用),并标记初始 scale 已定(阻止 fit-width 再覆盖)
+  const persistScale = useCallback((s: number) => {
+    initialScaleAppliedRef.current = true;
+    localStorage.setItem(LS_SCALE, String(s));
+  }, []);
+
+  // 「适应屏幕」= 按宽度铺满当前预览区(并记忆)
+  const onFit = useCallback(() => {
+    const fit = previewRef.current?.computeFitWidthScale();
+    const next = fit && fit > 0 ? Math.max(0.1, Math.min(5, fit)) : 1;
+    setScale(next);
+    persistScale(next);
+  }, [persistScale]);
+  const onZoomIn = useCallback(() => {
+    setScale((s) => {
+      const next = Math.min(5, Math.round((s + 0.1) * 100) / 100);
+      persistScale(next);
+      return next;
+    });
+  }, [persistScale]);
+  const onZoomOut = useCallback(() => {
+    setScale((s) => {
+      const next = Math.max(0.1, Math.round((s - 0.1) * 100) / 100);
+      persistScale(next);
+      return next;
+    });
+  }, [persistScale]);
   const startZoomEdit = () => {
     setZoomInputValue(String(Math.round(scale * 100)));
     setZoomEditing(true);
   };
   const commitZoom = () => {
     const v = parseInt(zoomInputValue, 10);
-    if (!isNaN(v) && v > 0) setScale(Math.max(0.1, Math.min(5, v / 100)));
+    if (!isNaN(v) && v > 0) {
+      const next = Math.max(0.1, Math.min(5, v / 100));
+      setScale(next);
+      persistScale(next);
+    }
     setZoomEditing(false);
   };
+
+  // 首帧渲染回调:无记忆时按宽度铺满(只跑一次;之后任何手动调整都跳过)
+  const handleRendered = useCallback(() => {
+    if (initialScaleAppliedRef.current) return;
+    const fit = previewRef.current?.computeFitWidthScale();
+    if (fit && fit > 0) {
+      initialScaleAppliedRef.current = true;
+      setScale(Math.max(0.1, Math.min(5, fit)));
+    }
+  }, []);
 
   /** 点 .label 切格式 / 点其他位置触发动作 — 同 V1 / 原 MermaidToolbar 语义 */
   const isLabelClick = (e: ReactMouseEvent<HTMLButtonElement>): boolean => {
@@ -375,6 +423,7 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
         theme={theme}
         scale={scale}
         onStatusChange={setRenderStatus}
+        onRendered={handleRendered}
       />
 
       {/* 状态栏(idle / ok / error) */}

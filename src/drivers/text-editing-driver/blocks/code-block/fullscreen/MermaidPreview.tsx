@@ -20,6 +20,11 @@ import {
 
 export interface MermaidPreviewHandle {
   getSvgEl: () => SVGElement | null;
+  /**
+   * 计算「按宽度铺满预览区」所需 scale —— 预览区可用宽 / SVG 自然宽。
+   * 无 SVG / 取不到尺寸时返回 null(调用方保持当前 scale)。
+   */
+  computeFitWidthScale: () => number | null;
 }
 
 export type RenderStatus =
@@ -32,19 +37,46 @@ interface MermaidPreviewProps {
   theme: MermaidTheme;
   scale: number;
   onStatusChange: (status: RenderStatus) => void;
+  /** 每次渲染出新 SVG 后触发(父用于首帧 fit-width;此时 computeFitWidthScale 已可用) */
+  onRendered?: () => void;
 }
 
 let fsIdCounter = 0;
 
 export const MermaidPreview = forwardRef<MermaidPreviewHandle, MermaidPreviewProps>(
-  function MermaidPreview({ source, theme, scale, onStatusChange }, ref) {
+  function MermaidPreview({ source, theme, scale, onStatusChange, onRendered }, ref) {
+    const previewRef = useRef<HTMLDivElement | null>(null);
     const wrapperRef = useRef<HTMLDivElement | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onStatusChangeRef = useRef(onStatusChange);
     onStatusChangeRef.current = onStatusChange;
+    const onRenderedRef = useRef(onRendered);
+    onRenderedRef.current = onRendered;
 
     useImperativeHandle(ref, () => ({
       getSvgEl: () => wrapperRef.current?.querySelector('svg') ?? null,
+      computeFitWidthScale: () => {
+        const preview = previewRef.current;
+        const svg = wrapperRef.current?.querySelector('svg');
+        if (!preview || !svg) return null;
+        // SVG 自然宽:优先 viewBox(不受外层 scale 影响),退回 getBBox
+        const vb = svg.viewBox?.baseVal;
+        let naturalW = vb && vb.width ? vb.width : 0;
+        if (!naturalW) {
+          try {
+            naturalW = svg.getBBox().width;
+          } catch {
+            naturalW = 0;
+          }
+        }
+        if (!naturalW) return null;
+        // 预览区可用宽 = clientWidth - 左右 padding(见 .krig-mermaid-fs__preview)
+        const cs = getComputedStyle(preview);
+        const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+        const availW = preview.clientWidth - padX;
+        if (availW <= 0) return null;
+        return availW / naturalW;
+      },
     }));
 
     useEffect(() => {
@@ -77,6 +109,7 @@ export const MermaidPreview = forwardRef<MermaidPreviewHandle, MermaidPreviewPro
             if (!wrapperRef.current) return;
             wrapperRef.current.innerHTML = svg;
             onStatusChangeRef.current({ state: 'ok' });
+            onRenderedRef.current?.();
           } catch (err) {
             const e = err as { message?: string; toString?: () => string };
             const msg = e?.message || e?.toString?.() || 'Mermaid 语法错误';
@@ -105,7 +138,7 @@ export const MermaidPreview = forwardRef<MermaidPreviewHandle, MermaidPreviewPro
     }, [source, theme]);
 
     return (
-      <div className="krig-mermaid-fs__preview">
+      <div className="krig-mermaid-fs__preview" ref={previewRef}>
         <div
           ref={wrapperRef}
           className="krig-mermaid-fs__preview-wrapper"
