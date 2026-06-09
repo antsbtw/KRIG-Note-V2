@@ -35,6 +35,26 @@ import type {
   WebFoundInPageResult,
 } from './webview-types';
 
+/**
+ * 「只能作为父页面 iframe 存在」的内嵌 widget URL(如 Gmail 联系人 hovercard)。
+ *
+ * 背景(实测根因):Gmail 内部用 gapi.iframes 加载 contacts.google.com/widget/hovercard
+ * 作为隐藏 iframe。Electron `<webview>` 的 did-navigate / did-navigate-in-page 会把
+ * 这个 iframe 的 URL 也报上来,handleDidNavigate 一旦把它当主页面 URL 持久化 →
+ * currentUrl prop 变 → useEffect 调 wv.loadURL(widget) → 主 frame 真的导航过去 →
+ * 该 URL 自带 CSP `frame-ancestors`,顶层打开必被拒 → 整页白屏。
+ *
+ * 这类 URL 永远不该成为 tab 的导航目标,持久化/地址栏更新前一律跳过。
+ */
+function isEmbedOnlyWidget(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.searchParams.get('usegapi') === '1' || u.pathname.includes('/widget/');
+  } catch {
+    return false;
+  }
+}
+
 /** 缩放范围(P0)*/
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
@@ -146,6 +166,9 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
     const handleDidNavigate = (e: Event) => {
       const ev = e as Event & { url?: string };
       const newUrl = ev.url ?? wv.getURL();
+      // 内嵌 widget(hovercard 等)的 iframe URL 不该污染 tab:既不更新地址栏
+      // 也不持久化,否则会触发 loadURL 把主 frame 导航过去 → 白屏(见 isEmbedOnlyWidget)。
+      if (isEmbedOnlyWidget(newUrl)) return;
       callbacksRef.current.onDisplayUrlChanged?.(newUrl);
       callbacksRef.current.onNavStateChanged?.({
         canGoBack: wv.canGoBack(),
@@ -173,7 +196,11 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
       }
     };
     const handleDidNavigateInPage = (e: Event) => {
-      // SPA 路由变化(如 google search 翻页),也持久化
+      // did-navigate-in-page 对子 frame(iframe)也会触发。只有主 frame 的 SPA 路由
+      // 变化(如 google search 翻页)才该持久化;iframe 的 in-page 导航跳过,
+      // 否则 hovercard 等内嵌 widget 会污染当前 tab 的 URL。
+      const ev = e as Event & { isMainFrame?: boolean };
+      if (ev.isMainFrame === false) return;
       handleDidNavigate(e);
     };
 

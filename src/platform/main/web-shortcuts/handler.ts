@@ -10,13 +10,13 @@
  *   (WEB_VIEW_SHORTCUT),由 WebView.tsx 分发到现有 handler —— 与 Phase 2 右键菜单
  *   同一套 did-attach-webview + shouldHandle + IPC 回推基建。
  *
- * 弹窗导流(Commit B):
- * - 普通浏览 webview 内 target=_blank / window.open 默认弹独立 BrowserWindow(飞出
- *   workspace,用户痛点)。这里 setWindowOpenHandler 截获,deny 独立窗口 + IPC 回推
- *   (WEB_NEW_TAB)让渲染进程在 web view 内新建 tab 打开。
+ * 弹窗导流(分三类,见 setWindowOpenHandler 处详注):
+ * - gapi 内嵌 widget(hovercard 等)→ deny,留在父页面当 iframe;
+ * - OAuth 登录弹窗(accounts.google.com 等)→ allow,走原生 popup;
+ * - 其余普通 target=_blank / window.open → 外抛成 app 内新 tab,不飞出 workspace。
  *
  * 过滤(shouldHandle,共享 web-shared):
- * - 快捷键 + 弹窗都只接管**普通浏览 webview**,绝不接管 AI / 翻译 webview。
+ * - 快捷键只接管**普通浏览 webview**,绝不接管 AI / 翻译 webview。
  *
  * 调用时机:platform/main/index.ts 在 createMainWindow 后调一次,跟
  * registerWebContextMenuHook 平级。
@@ -109,12 +109,63 @@ function attachGuest(mainWindow: BrowserWindow, guest: WebContents): void {
     mainWindow.webContents.send(IPC_CHANNELS.WEB_VIEW_SHORTCUT, { action });
   });
 
-  // ── 弹窗导流:target=_blank / window.open → 在 web view 内新建 tab ──
+  // ── 弹窗导流(实测 Gmail 白屏根因后的最终策略)──
+  // 同一个 setWindowOpenHandler 要分清三类 window.open,处理各不相同:
+  //
+  // 1) gapi 内嵌 widget(如 Gmail 联系人 hovercard,带 usegapi=1 / /widget/):
+  //    本是页面内 <iframe>,自带 `X-Frame-Options: ALLOW-FROM` + CSP
+  //    `frame-ancestors`,只能嵌在父页面里。若 allow 成独立页 → 脱离父 frame
+  //    上下文 → 白屏(实测 contacts.google.com/widget/hovercard 即此)。故 deny
+  //    且不外抛 tab,让 Gmail 走它自己的 iframe 渲染。
+  //
+  // 2) OAuth / 登录弹窗(accounts.google.com 等):依赖 opener↔popup 的
+  //    postMessage / window.close 完成认证,必须 allow 走原生 popup,否则
+  //    外抛成 tab 会 opener 断裂 → 登录回跳 ERR_ABORTED → 白屏。
+  //
+  // 3) 其余普通 target=_blank / window.open:导流成 app 内新 tab,不让独立窗口
+  //    飞出 workspace。
   guest.setWindowOpenHandler(({ url }) => {
-    if (!shouldHandle(guest)) return { action: 'allow' }; // AI / 翻译弹窗不接管
-    mainWindow.webContents.send(IPC_CHANNELS.WEB_NEW_TAB, { url });
-    return { action: 'deny' }; // 阻止独立 BrowserWindow 飞出 workspace
+    if (isEmbedWidget(url)) return { action: 'deny' }; // 1) 内嵌 widget:留在父页
+    if (isOAuthPopup(url)) return { action: 'allow' }; // 2) 登录弹窗:走原生
+    mainWindow.webContents.send(IPC_CHANNELS.WEB_NEW_TAB, { url }); // 3) 普通:开 tab
+    return { action: 'deny' };
   });
+}
+
+/**
+ * gapi / Google widget 内嵌 iframe(本质是页面内 iframe,误经 window.open 冒出来)。
+ * 判据:usegapi=1 或路径 /widget/。这类自带 frame-ancestors,单独打开必白屏,
+ * 故 deny 让其留在父页面里。
+ */
+function isEmbedWidget(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    return u.searchParams.get('usegapi') === '1' || u.pathname.includes('/widget/');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * OAuth / 第三方登录弹窗。这类靠 opener↔popup 的 postMessage / window.close 完成
+ * 认证,必须 allow 走原生 popup,外抛成 tab 会 opener 断裂 → 登录白屏。
+ * 仅匹配已知认证域,避免误放普通 target=_blank。
+ */
+const OAUTH_HOSTS = [
+  'accounts.google.com',
+  'login.microsoftonline.com',
+  'login.live.com',
+  'appleid.apple.com',
+  'github.com', // github.com/login/oauth/authorize
+];
+
+function isOAuthPopup(rawUrl: string): boolean {
+  try {
+    const host = new URL(rawUrl).hostname;
+    return OAUTH_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
 }
 
 export function registerWebShortcutsHook(mainWindow: BrowserWindow): void {

@@ -19,6 +19,22 @@
  */
 
 import { app, BrowserWindow, protocol } from 'electron';
+
+// ── stdout/stderr EPIPE 防护(进程退出边界,非业务兜底)──
+// app 关闭时,接收主进程 stdout 的父进程(dev 下是 electron-forge,prod 下是终端/
+// launchd)可能先退出 → 管道关闭。此后任何 console.log(残留的 webContents /
+// child_process / SSE 事件回调里的日志)写入已断管道 → stdout/stderr 流抛 EPIPE。
+// 这两个流默认没有 'error' 监听器,未处理的流错误会冒泡成 uncaughtException →
+// Electron 弹 "A JavaScript error occurred in the main process"。
+//
+// 在流上直接监听 'error' 并只忽略 EPIPE(此刻进程在退、日志本无意义),错误就被
+// 流自身消费、不再冒泡;其余真实异常不经此路径,fail-loud 行为不受影响。
+const ignoreEpipe = (err: NodeJS.ErrnoException): void => {
+  if (err.code === 'EPIPE') return;
+  throw err; // 非 EPIPE 的流错误:照常抛出
+};
+process.stdout.on('error', ignoreEpipe);
+process.stderr.on('error', ignoreEpipe);
 import { createMainWindow } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
 import { reportL0Alive } from './diagnostics/L0-alive';
