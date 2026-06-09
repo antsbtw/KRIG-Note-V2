@@ -37,6 +37,7 @@ import { wrapPmDoc, unwrapPmDoc, emptyNoteDoc } from './envelope';
 import { assemblePmDoc } from './assemble-pm-doc';
 import { emptyContainerPayload } from './dissect-pm-doc';
 import { diffBlockTree, fullCreateDiff, type BlockDiff } from './diff-block-tree';
+import { enforceSingleTitleInDoc, enforceSingleTitleInDrafts } from './enforce-single-title';
 import { pmDocCache } from './pm-doc-cache';
 import type {
   CreateNoteBatchInput,
@@ -455,7 +456,8 @@ export async function updateNote(
   id: string,
   doc: NoteDocEnvelope,
 ): Promise<NoteInfo | null> {
-  const newDoc = unwrapPmDoc(doc);
+  // 硬不变量:一篇 note 至多一个 isTitle 首块 —— 写库必经处单点强制(任何来源都过此关)
+  const newDoc = enforceSingleTitleInDoc(unwrapPmDoc(doc));
 
   // 字面拿 container atom — D-10:不要求 hasNoteView,reading-thought 也走这里
   const containerAtom = await storage.getAtom<'pm'>(id);
@@ -761,8 +763,15 @@ export async function createNotesBatch(
  */
 async function createSingleNoteFromDrafts(
   tx: StorageTransaction,
-  item: CreateNoteBatchItem,
+  rawItem: CreateNoteBatchItem,
 ): Promise<NoteInfo> {
+  // 硬不变量:一篇 note 至多一个 isTitle —— 写库必经处单点强制(任何导入来源都过此关)。
+  // 跨页 PDF 提取等会夹带多个 noteTitle,此处把多余的降级为正文(保文本 + 大声 warn)。
+  const item: CreateNoteBatchItem = {
+    ...rawItem,
+    atoms: enforceSingleTitleInDrafts(rawItem.atoms),
+  };
+
   // 1. container atom
   const title = deriveTitleFromDrafts(item.atoms, item.titleHint);
   const containerAtom = await tx.putAtom<'pm'>({

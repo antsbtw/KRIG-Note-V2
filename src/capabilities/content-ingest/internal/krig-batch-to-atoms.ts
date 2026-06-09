@@ -82,6 +82,9 @@ async function processChapter(
 
   const defaultFrom: AtomFrom = { extractionType: 'pdf', extractedAt: Date.now() };
   const pages = Array.isArray(ch.pages) ? ch.pages : [];
+  // 注:跨页 PDF 提取会夹带多个页内 noteTitle(实测 Go 书第 1 章 p17/p18 各一个 "第1章")。
+  // 「一篇 note 至多一个 isTitle」不变量**不在此处**强制 —— 已收口到 note 写库必经处
+  // (capability 层 enforceSingleTitleInDrafts / enforceSingleTitleInDoc),任何来源单点覆盖。
   for (const page of pages) {
     const pageAtoms = Array.isArray(page.atoms) ? (page.atoms as LegacyExtractionAtom[]) : [];
     for (const atom of pageAtoms) {

@@ -22,6 +22,40 @@
 import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 import type { PmAtomDraft, AtomFrom } from '@semantic/types';
 import type { PmPayload } from '@semantic/types';
+import { generateUlid } from '@shared/ulid';
+
+/** inline 类型(不带 attrs.id 字段)—— 与 atoms-to-pm INLINE_TYPES / dissect 同源 */
+const INLINE_TYPES = new Set(['text', 'hardBreak', 'fileLink', 'noteLink', 'mathInline']);
+
+/**
+ * 递归给 cell 内的「应有 id 的 block」注入真 ULID。
+ *
+ * 根因(2026-06-09 真实数据定位 / Go 书 PDF 第 1 章 table):
+ * PDF/markdown 提取的 table,cell 内容是 [{type:'paragraph',content:[...]}] —— 这些
+ * 嵌套 paragraph **无 attrs.id**。tableAdapter 原先把 cellContent 原样塞进 cell payload
+ * (本文件第 112 行 content: cellContent),cell 内 paragraph 既不是独立 draft(拿不到
+ * createSingleNoteFromDrafts 分配的 realId),也没人补 id → 落库后 dissect 该 cell 内容时
+ * 命中无 id block 直接 throw(decision 026 §5.1)。
+ *
+ * 故在此处一次性补真 id:结构性容器(tableRow/list 等)/ inline 不补,其余 block 补
+ * 真 generateUlid()(已有真 id 幂等保留)—— 与 buildAutoBlockIdPlugin shouldHaveId 同源。
+ */
+function injectCellContentIds(nodes: PmPayload[]): PmPayload[] {
+  const visit = (node: PmPayload): PmPayload => {
+    const out: PmPayload = { ...node };
+    if (Array.isArray(node.content)) {
+      out.content = node.content.map(visit);
+    }
+    if (!STRUCTURAL_CONTAINER_TYPES.has(node.type) && !INLINE_TYPES.has(node.type)) {
+      const attrs = (out.attrs ?? {}) as Record<string, unknown>;
+      if (attrs.id == null) {
+        out.attrs = { ...attrs, id: generateUlid() };
+      }
+    }
+    return out;
+  };
+  return nodes.map(visit);
+}
 
 // 静态断言:tableRow 仍是结构性容器(5A 拍板硬契约);否则本算法的"跳层"前提失效.
 if (!STRUCTURAL_CONTAINER_TYPES.has('tableRow')) {
@@ -94,7 +128,10 @@ export function tableAdapter(input: TableAdapterInput): TableAdapterOutput {
       }
 
       const cellAttrs = (cellNode.attrs ?? {}) as Record<string, unknown>;
-      const cellContent = Array.isArray(cellNode.content) ? cellNode.content : [];
+      // cell 内嵌套 block(paragraph 等)补真 id —— 否则落库后 dissect 命中无 id block throw
+      const cellContent = injectCellContentIds(
+        Array.isArray(cellNode.content) ? cellNode.content : [],
+      );
 
       // (4) cellDraft
       const cellDraft: PmAtomDraft = {

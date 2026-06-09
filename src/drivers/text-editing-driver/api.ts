@@ -36,8 +36,54 @@ import {
 } from './plugins/build-heading-collapse-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
 import { insertColumnList as insertColumnListCommand } from './blocks/column-list';
+import { generateUlid } from '@shared/ulid';
+import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
 export type MarkName = 'bold' | 'italic' | 'underline' | 'strike' | 'code';
+
+/**
+ * inline 类型 —— 不带 attrs.id 字段(与 atoms-to-pm.ts INLINE_TYPES / dissect 同源)。
+ */
+const INSERT_INLINE_TYPES = new Set([
+  'text',
+  'hardBreak',
+  'fileLink',
+  'noteLink',
+  'mathInline',
+]);
+
+/**
+ * 程序化插入节点前,递归给「应有 id 的 block」注入**真 ULID**。
+ *
+ * 根因(2026-06-08 真实数据定位):AI-sync / markdown / 剪藏等非交互路径
+ * 经 insertNodesAtEnd / insertNodesAtCursorOrEnd 把 PM JSON 直接 dispatch 进 doc,
+ * 这些 JSON 的嵌套 block(callout/listItem 内的 paragraph 等)**不带 attrs.id**。
+ * 插入 tr 触发 Host onChange → updateNote **早于** buildAutoBlockIdPlugin 补 id 那一轮
+ * (补 id tr 带 skipOnChange 不再 emit)→ dissect 收到 id=null 块直接 throw。
+ *
+ * 故在插入前一次性补真 id(非 null 占位):doc 里永不出现 id=null 块,race 根除。
+ * 已有 id 的块保留(幂等);结构性容器 / inline 不补(与 plugin shouldHaveId 同源)。
+ */
+function injectBlockIdsIntoJson(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const node = raw as { type?: string; attrs?: Record<string, unknown>; content?: unknown[] };
+  if (typeof node.type !== 'string') return raw;
+
+  const out: typeof node = { ...node };
+  if (Array.isArray(node.content)) {
+    out.content = node.content.map(injectBlockIdsIntoJson);
+  }
+  const isStructural = STRUCTURAL_CONTAINER_TYPES.has(node.type);
+  const isInline = INSERT_INLINE_TYPES.has(node.type);
+  if (!isStructural && !isInline) {
+    const attrs = out.attrs ?? {};
+    // id 缺失或为 null/空 → 注入真 ULID(已有真 id 的保留,幂等)
+    if (attrs.id == null) {
+      out.attrs = { ...attrs, id: generateUlid() };
+    }
+  }
+  return out;
+}
 
 export interface ActiveBlockType {
   name: string;
@@ -1839,7 +1885,9 @@ export const textEditingDriverApi = {
     const nodes: PMNode[] = [];
     for (const raw of nodesJson) {
       try {
-        const node = PMNode.fromJSON(schema, raw as Parameters<typeof PMNode.fromJSON>[1]);
+        // 插入前补真 ULID(根除 id=null block emit 早于 plugin 补 id 的 race)
+        const withIds = injectBlockIdsIntoJson(raw);
+        const node = PMNode.fromJSON(schema, withIds as Parameters<typeof PMNode.fromJSON>[1]);
         nodes.push(node);
       } catch (err) {
         // 单节点解析失败不阻断其他节点(防御 schema 漂移 / parser 输出异常)
@@ -1896,7 +1944,9 @@ export const textEditingDriverApi = {
     const nodes: PMNode[] = [];
     for (const raw of nodesJson) {
       try {
-        nodes.push(PMNode.fromJSON(schema, raw as Parameters<typeof PMNode.fromJSON>[1]));
+        // 插入前补真 ULID(根除 id=null block emit 早于 plugin 补 id 的 race)
+        const withIds = injectBlockIdsIntoJson(raw);
+        nodes.push(PMNode.fromJSON(schema, withIds as Parameters<typeof PMNode.fromJSON>[1]));
       } catch (err) {
         console.warn('[insertNodesAtCursorOrEnd] node parse failed, skipping:', err);
       }
