@@ -114,9 +114,10 @@ export function NoteView({ workspaceId }: NoteViewProps) {
   }, [allNotes, activeNoteId, incomingDoc]);
 
   // L5-C6:订阅 main 推送的 atom batch JSON → 落 noteCapability
-  // (主进程广播,所有 NoteView 都收到 — 创建逻辑幂等去重,多挂无害)
-  useExtractionImport();
-  // 同模式:订阅 File → Import Markdown... 推送的 ScannedFile 批
+  // (主进程广播,每个并存 NoteView 都收到 — hook 内按 activeId 认领,只活跃 ws 处理,
+  //  否则 N 个 ws 各跑一遍导入并发写库抢锁。去重只防"重跑同章"不防"两批并发")
+  useExtractionImport(workspaceId);
+  // 同模式:订阅 File → Import Markdown... 推送的 ScannedFile 批(同样 hook 内认领)
   useMarkdownImport(workspaceId);
 
   const handleDocChange = useCallback(

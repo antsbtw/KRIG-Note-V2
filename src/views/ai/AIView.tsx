@@ -134,22 +134,10 @@ export function AIView({ workspaceId }: AIViewProps) {
     return () => unsub();
   }, [workspaceId]);
 
-  /**
-   * 订阅原生右键菜单「📥 提取此对话到笔记」点击(main 经 AI_EXTRACT_TURN_REQUEST 推送
-   * guest viewport 坐标)→ 触发 ai-view.extract-turn 命令完成「定位单条 → 抽取 → 落右槽 Note」。
-   *
-   * 命令内部用 workspaceManager.getActiveId 取当前 ws,与本 AIView 实例 workspaceId 可能不同
-   * (多 ws 场景),但右键发生在用户当前可见的 webview = active ws,故走 active 即正确。
-   */
-  useEffect(() => {
-    const unsub = aiApi.onExtractTurnRequest((payload) => {
-      void commandRegistry.execute('ai-view.extract-turn', {
-        x: payload.x,
-        y: payload.y,
-      });
-    });
-    return () => unsub();
-  }, [aiApi]);
+  // 右键「📥 提取此对话到笔记」(AI_EXTRACT_TURN_REQUEST 广播)的订阅**不在此处**:
+  // 它曾在 useEffect 里订阅 → 每个并存 AIView 实例各订阅一次 → 一次右键 N 次 execute、
+  // 并发往右槽 Note 塞重复块。已收口为模块级单订阅,见 ai-commands.ts registerAICommands()。
+  // (规则:命令型广播一律在模块级 registerXxx 订阅一次,不进 view 组件 useEffect。)
 
   /**
    * "提取整页对话" — 走 ai-view.extract-conversation 命令(Phase 6.5 实施)。
