@@ -46,6 +46,12 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   win.webContents.on('will-attach-webview', (_event, webPreferences) => {
     webPreferences.contextIsolation = true;
     webPreferences.nodeIntegration = false;
+    // 网页视频 HTML5 全屏 与 app 窗口原生全屏 解耦:
+    // 默认 Electron 会让 guest 的 requestFullscreen 连带把宿主 BrowserWindow 也推进
+    // macOS 原生全屏 → 两层绑定,一次 ESC 同时塌缩(退视频又退 app 全屏,体验突兀)。
+    // 设此项后,网页全屏只在 webview 区域内进行、不动宿主窗口 → ESC 只退视频全屏,
+    // app 窗口全屏成为完全独立的事(走系统绿灯)。
+    webPreferences.disableHtmlFullscreenWindowResize = true;
   });
 
   // 加载 renderer
