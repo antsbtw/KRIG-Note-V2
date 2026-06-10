@@ -24,6 +24,7 @@ import { registerNoteHandlers } from '../note';
 import { registerPmContentHandlers } from '../pm-content';
 import { registerThoughtHandlers } from '../thought';
 import { registerAIHandlers } from '../ai';
+import { registerXHandlers } from '../x';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -46,4 +47,5 @@ export function initIpcBus(): void {
   registerPmContentHandlers();      // L7-sub3a-1:pm-content capability (decision 014,view-agnostic pm atom)
   registerThoughtHandlers();        // 横切思考层(thought-view-port.md v0.5)
   registerAIHandlers();             // ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)
+  registerXHandlers();              // X 集成 阶段 1:右键 X webview 提取推文 → tweetBlock
 }

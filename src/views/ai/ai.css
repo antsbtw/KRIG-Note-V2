@@ -132,6 +132,14 @@
   background: #2d4a7a;
 }
 
+/* X 模式提示(替代"提取整页对话"按钮位) */
+.krig-ai-toolbar__hint {
+  color: #777;
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 0 6px;
+}
+
 /* SlotToggle dropdown 容器 */
 .krig-ai-toolbar__slot-group {
   position: relative;
@@ -198,6 +206,52 @@
 .krig-ai-toolbar__btn--close:hover:not(:disabled) {
   background: rgba(220, 38, 38, 0.18);
   color: #fca5a5;
+}
+
+/* ── navSide 四入口快速导航(Claude/ChatGPT/Gemini/X)── */
+
+.krig-ai-launcher {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.krig-ai-launcher__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #e8eaed;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.krig-ai-launcher__item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.krig-ai-launcher__item.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.krig-ai-launcher__icon {
+  font-size: 15px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.krig-ai-launcher__label {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ── webview 占满剩余 ── */

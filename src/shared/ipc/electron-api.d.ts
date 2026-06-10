@@ -31,6 +31,7 @@ import type {
   AISyncAppendTurnPayload,
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
+import type { XServiceId } from '../types/x-service-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
@@ -535,6 +536,37 @@ declare global {
       aiSyncStop(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
       /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
       onAISyncAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
+
+      // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
+      /** 按 guest viewport 坐标定位 + 抽该条推文 */
+      xExtractTweet(
+        serviceId: XServiceId,
+        x: number,
+        y: number,
+      ): Promise<{
+        success: boolean;
+        data?: {
+          authorName?: string;
+          authorHandle?: string;
+          authorAvatar?: string;
+          text?: string;
+          createdAt?: string;
+          lang?: string;
+          media?: Array<{ type: 'image' | 'video'; url: string; thumbUrl?: string }>;
+          metrics?: { replies?: number; retweets?: number; likes?: number; views?: number };
+          quotedTweet?: string;
+          inReplyTo?: string;
+          tweetUrl?: string;
+          tweetId?: string;
+        };
+        error?: string;
+      }>;
+      /** main → renderer 推送:X webview 原生右键「提取此推文」点击,带 guest 坐标;返 unsubscribe */
+      onXExtractTweetRequest(
+        callback: (payload: { serviceId: XServiceId; x: number; y: number }) => void,
+      ): () => void;
+      /** main → renderer 推送:宿主 iframe(tweet 卡片)弹 x.com 链接 → 改在 X webview 打开;返 unsubscribe */
+      onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
 
       // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
       /** 任务开始 — 显示全屏覆盖层;返 unsubscribe */

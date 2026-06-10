@@ -11,7 +11,7 @@
  * "操作 AI 对话"的 API);capability id 已改为 'ai-extraction',对齐目录命名原则。
  */
 
-import type { ComponentType, Ref } from 'react';
+import type { ComponentType, CSSProperties, Ref } from 'react';
 import type { AIServiceId } from '@shared/types/ai-service-types';
 import type {
   AIAskOptions,
@@ -99,6 +99,8 @@ export interface AIHostProps {
   serviceId: AIServiceId;
   /** webview 容器 className */
   className?: string;
+  /** webview 容器 inline style(AI/X 共存切显隐用 display) */
+  style?: CSSProperties;
   /** 用户在 webview 内导航(SPA 路由切换)时回传 URL,view 决定是否持久化 */
   onUrlChanged?: (url: string) => void;
   /** loading 状态推送(view 显 spinner / toolbar 状态) */

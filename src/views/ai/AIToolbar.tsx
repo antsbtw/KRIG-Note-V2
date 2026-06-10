@@ -8,11 +8,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AI_SERVICE_PROFILES,
-  type AIServiceId,
-} from '@shared/types/ai-service-types';
+import { AI_SERVICE_PROFILES } from '@shared/types/ai-service-types';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import type { AIServiceId } from '@shared/types/ai-service-types';
+import type { LauncherId } from './data-model';
 
 /** SlotToggle 下拉的 5 个跨 view 选项(V1 字面对齐:Note/eBook/Web/AI/Thought) */
 const SLOT_TARGETS: Array<{ viewId: string; icon: string; label: string }> = [
@@ -24,8 +23,10 @@ const SLOT_TARGETS: Array<{ viewId: string; icon: string; label: string }> = [
 ];
 
 export interface AIToolbarProps {
-  /** 当前显示的服务 */
+  /** 当前显示的 AI 服务(切换器在 AI 服务时高亮用) */
   serviceId: AIServiceId;
+  /** 当前服务切换器选中的入口(AI 服务 或 'x') */
+  activeLauncher: LauncherId;
   /** 实时 URL(显示用) */
   url: string;
   /** loading 状态(显 spinner) */
@@ -34,13 +35,13 @@ export interface AIToolbarProps {
   activeRightViewId: string | null;
   /** 本 view 是否在右槽中显示(决定 ✕ 按钮是否显示) */
   isInRightSlot: boolean;
-  /** 用户切服务 */
-  onSelectService: (id: AIServiceId) => void;
-  /** 用户点"新对话"(reload 到 newChatUrl) */
+  /** 用户在服务切换器选了入口(AI 服务 或 'x') */
+  onSelectLauncher: (id: LauncherId) => void;
+  /** 用户点"新对话"(AI:reload 到 newChatUrl;X:回主页) */
   onNewChat: () => void;
   /** 用户点"重载" */
   onReload: () => void;
-  /** 用户点"提取整页对话"(V1 batch extractor — V2 占位待迁移) */
+  /** 用户点"提取整页对话"(仅 AI;X 时隐藏) */
   onExtractFull: () => void;
   /** 用户点 ✕ 关闭右槽(仅 isInRightSlot=true 时显示) */
   onCloseRightSlot: () => void;
@@ -49,16 +50,19 @@ export interface AIToolbarProps {
 export function AIToolbar(props: AIToolbarProps) {
   const {
     serviceId,
+    activeLauncher,
     url,
     loading,
     activeRightViewId,
     isInRightSlot,
-    onSelectService,
+    onSelectLauncher,
     onNewChat,
     onReload,
     onExtractFull,
     onCloseRightSlot,
   } = props;
+
+  const isX = activeLauncher === 'x';
 
   const [slotMenuOpen, setSlotMenuOpen] = useState(false);
   const slotMenuRef = useRef<HTMLDivElement | null>(null);
@@ -80,12 +84,13 @@ export function AIToolbar(props: AIToolbarProps) {
     };
   }, [slotMenuOpen]);
 
+  // toolbar 下拉只管三家 AI 服务(X 入口在 navSide 四导航里);选某 AI → 切到该服务
+  // (同时把 activeLauncher 从可能的 'x' 切回该 AI 服务)。
   const handleSelect = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const next = e.target.value as AIServiceId;
-      onSelectService(next);
+      onSelectLauncher(e.target.value as AIServiceId as LauncherId);
     },
-    [onSelectService],
+    [onSelectLauncher],
   );
 
   const handleSlotPick = useCallback(
@@ -123,8 +128,8 @@ export function AIToolbar(props: AIToolbarProps) {
           type="button"
           className="krig-ai-toolbar__btn"
           onClick={onNewChat}
-          title="新对话"
-          aria-label="新对话"
+          title={isX ? 'X 主页' : '新对话'}
+          aria-label={isX ? 'X 主页' : '新对话'}
         >
           ＋
         </button>
@@ -136,14 +141,22 @@ export function AIToolbar(props: AIToolbarProps) {
 
       {/* 右侧 actions 区(V1 字面:提取整页对话 + SlotToggle + 重载 + 关闭) */}
       <div className="krig-ai-toolbar__actions">
-        <button
-          type="button"
-          className="krig-ai-toolbar__btn krig-ai-toolbar__btn--primary"
-          onClick={onExtractFull}
-          title="提取整个对话(含所有 artifact)到 Note"
-        >
-          提取整页对话
-        </button>
+        {/* 提取整页对话 — 仅 AI 服务;X 走右键单条提取推文(无整页语义),此处隐藏 */}
+        {!isX && (
+          <button
+            type="button"
+            className="krig-ai-toolbar__btn krig-ai-toolbar__btn--primary"
+            onClick={onExtractFull}
+            title="提取整个对话(含所有 artifact)到 Note"
+          >
+            提取整页对话
+          </button>
+        )}
+        {isX && (
+          <span className="krig-ai-toolbar__hint" title="在 X 推文上右键即可提取到 Note">
+            右键推文 → 提取
+          </span>
+        )}
 
         {/* SlotToggle dropdown — V1 SlotToggle.tsx 字面对齐 */}
         <div className="krig-ai-toolbar__slot-group" ref={slotMenuRef}>

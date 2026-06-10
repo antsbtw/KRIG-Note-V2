@@ -8,9 +8,10 @@
  */
 
 import path from 'node:path';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, shell } from 'electron';
 import { reportL1Alive } from '../diagnostics/L1-alive';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
+import { detectXServiceByUrl } from '@shared/types/x-service-types';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -52,6 +53,26 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     // 设此项后,网页全屏只在 webview 区域内进行、不动宿主窗口 → ESC 只退视频全屏,
     // app 窗口全屏成为完全独立的事(走系统绿灯)。
     webPreferences.disableHtmlFullscreenWindowResize = true;
+  });
+
+  // ── 宿主 renderer 自身的 window.open 拦截 ──
+  //
+  // 注意:webview 的 window.open 由 web-shortcuts/handler 在 guest 上 setWindowOpenHandler
+  // 处理;但**宿主页面内的 <iframe>**(如 Note 里 tweet block 的 platform.twitter.com 官方
+  // 嵌入卡片)发起的 window.open 冒到的是**宿主 win.webContents**,不经那套 → Electron
+  // 默认开一个独立 BrowserWindow 弹窗(无登录态、飞出工作空间)。这里统一兜底:
+  // - x.com / twitter.com 链接(tweet 卡片点「Read replies」/ 作者 / 原推)→ deny 弹窗,
+  //   改经 IPC 通知 renderer 用 x-view.open-tweet 在 X webview 内打开(登录态 + 留在 app);
+  // - 其余外链 → 系统浏览器(openExternal),不开裸 BrowserWindow。
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (detectXServiceByUrl(url)) {
+      win.webContents.send(IPC_CHANNELS.X_OPEN_TWEET_REQUEST, { url });
+      return { action: 'deny' };
+    }
+    if (/^https?:\/\//.test(url)) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
   });
 
   // 加载 renderer

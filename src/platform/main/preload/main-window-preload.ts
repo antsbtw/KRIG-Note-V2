@@ -759,6 +759,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
   },
 
+  // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
+  /** 按坐标定位 + 抽该条推文(返 { success, data?, error? }) */
+  xExtractTweet(serviceId: string, x: number, y: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_EXTRACT_TWEET, { serviceId, x, y });
+  },
+  /** 订阅 X webview 原生右键「提取此推文」点击(main 推 guest 坐标);返 unsubscribe */
+  onXExtractTweetRequest(
+    callback: (payload: { serviceId: string; x: number; y: number }) => void,
+  ): () => void {
+    const handler = (_event: unknown, payload: unknown): void =>
+      callback(payload as { serviceId: string; x: number; y: number });
+    ipcRenderer.on(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, handler);
+  },
+  /** 订阅:宿主页内 iframe(tweet block 嵌入卡片)弹 x.com 链接 → 改在 X webview 打开 */
+  onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void =>
+      callback(payload as { url: string });
+    ipcRenderer.on(IPC_CHANNELS.X_OPEN_TWEET_REQUEST, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.X_OPEN_TWEET_REQUEST, handler);
+  },
+
   // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
   /** 任务开始 — 显示全屏覆盖层 */
   onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void {

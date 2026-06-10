@@ -21,6 +21,7 @@
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import { fetchTweetData } from '@capabilities/tweet-fetcher';
 import {
   checkStatus as ytdlpCheckStatus,
@@ -554,18 +555,26 @@ function buildDataCard(panel: HTMLElement, attrs: Record<string, unknown>): void
     panel.appendChild(quoteEl);
   }
 
-  // 打开原文
+  // 打开原文 —— 在 X webview 内打开(不飞出工作空间)
   if (tweetUrl) {
     const link = document.createElement('a');
     link.className = 'krig-tweet-block__open-link';
-    link.href = tweetUrl;
-    link.target = '_blank';
+    // 注意:**不设 href / target="_blank"** —— <a target=_blank> 的原生导航在 click 时触发,
+    // mousedown 的 preventDefault 拦不住它(实测:旧代码就是因此仍弹出工作空间外的 web tab)。
+    // 改用 button 语义的 <a>(role=button)+ click 处理,彻底杜绝原生跳转。
+    link.setAttribute('role', 'button');
+    link.style.cursor = 'pointer';
     link.textContent = 'Open original ↗';
-    link.addEventListener('mousedown', (e) => {
+    const openInX = (e: Event): void => {
       e.preventDefault();
       e.stopPropagation();
-      void window.electronAPI?.openExternal?.(tweetUrl);
-    });
+      // x-view.open-tweet 由 X 集成注册;X 未注册(命令不存在)→ 回退系统浏览器。
+      const opened = commandRegistry.execute('x-view.open-tweet', tweetUrl);
+      if (!opened) void window.electronAPI?.openExternal?.(tweetUrl);
+    };
+    // mousedown 阻止 PM 选区;click 真正触发(避免任何残留原生跳转)
+    link.addEventListener('mousedown', (e) => e.preventDefault());
+    link.addEventListener('click', openInX);
     panel.appendChild(link);
   }
 }

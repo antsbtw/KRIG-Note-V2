@@ -47,6 +47,7 @@ import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
+import { registerXWebviewHook } from './x';
 import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
 import { registerWebDownloadHook } from './web-download/handler';
@@ -85,6 +86,20 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
+
+// ── 关闭 Chromium FedCM(Federated Credential Management)──
+//
+// X / 部分用 Google Identity Services 的站点,「Continue with Google」默认走 FedCM:
+// 由 Chromium 在内容区渲染一个**浏览器原生账号选择浮层**(navigator.credentials.get),
+// 不经 window.open → setWindowOpenHandler 拦不到、也无法关闭/钉窗,体验不可控。
+//
+// 关掉 FedCM 后,GIS 退回传统 window.open 弹窗流程 → 命中 setWindowOpenHandler 的 OAuth
+// 分支 → 钉成主窗口的子/模态 sheet(parent+modal,见 web-shortcuts/handler.ts):在 app 内、
+// 可关闭、cookie 同源。注:GSI 的 /gsi/select?ux_mode=popup 这类 URL 专为 popup 设计,
+// 整页 loadURL 会白屏,故只能走 popup(钉窗),无法做成 Gemini 那样的整页登录。
+//
+// 必须在 app ready 前设(Chromium 启动参数)。
+app.commandLine.appendSwitch('disable-features', 'FedCm');
 
 app.whenReady().then(async () => {
   // L0 — 平台层就绪
@@ -170,6 +185,9 @@ app.whenReady().then(async () => {
   // ai-extraction:webview attach hook(AI Host webview did-navigate 到 AI URL 时
   // 注册到 ai-webview-registry,askAI / pasteAndSend 走前台 webContents 而非后台)
   registerAIWebviewHook(mainWindow);
+  // X 集成 阶段 0/1:X Host webview did-navigate 到 x.com 时注册到 x-webview-registry,
+  // 并挂原生右键菜单「提取此推文到笔记」(复用 web-service-base 底座,与 AI hook 同模式)。
+  registerXWebviewHook(mainWindow);
   // web view 原生右键菜单(Phase 2 根治 HTML 菜单被 webview OS 层遮挡)— 只接管普通浏览 webview
   registerWebContextMenuHook(mainWindow);
   // web view 快捷键整层 + 弹窗导流(Phase 4 Commit 2)— webview 焦点下宿主 onKeyDown

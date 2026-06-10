@@ -37,7 +37,7 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
   props,
   ref,
 ): ReactElement {
-  const { workspaceId, serviceId, className, onUrlChanged, onLoadingChanged } = props;
+  const { workspaceId, serviceId, className, style, onUrlChanged, onLoadingChanged } = props;
 
   const webviewRef = useRef<WebviewElement | null>(null);
   const domReadyRef = useRef(false);
@@ -192,6 +192,7 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     partition: WEBVIEW_PARTITION,
     allowpopups: 'true',
     className,
+    style,
   };
   const Tag = 'webview' as unknown as React.ComponentType<typeof tagProps>;
   return <Tag {...tagProps} />;
