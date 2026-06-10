@@ -568,6 +568,23 @@ declare global {
       /** main → renderer 推送:宿主 iframe(tweet 卡片)弹 x.com 链接 → 改在 X webview 打开;返 unsubscribe */
       onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
 
+      // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
+      /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布) */
+      xPasteTweet(
+        serviceId: XServiceId,
+        text: string,
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
+      /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布) */
+      xPasteReply(
+        serviceId: XServiceId,
+        tweetUrl: string,
+        text: string,
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
+      /** main → renderer 推送:X webview 右键「在 note 里写回复」点击,带 guest 坐标;返 unsubscribe */
+      onXWriteReplyRequest(
+        callback: (payload: { serviceId: XServiceId; x: number; y: number }) => void,
+      ): () => void;
+
       // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
       /** 任务开始 — 显示全屏覆盖层;返 unsubscribe */
       onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void;

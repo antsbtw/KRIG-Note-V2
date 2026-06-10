@@ -42,6 +42,21 @@ export interface XExtractTweetRequest {
   y: number;
 }
 
+/** 写方向注入结果(发推 / 回复)— 阶段 2 */
+export interface XWriteResult {
+  success: boolean;
+  error?: string;
+  /** 发布按钮是否已就位(辅助确认内容落进正确的框,不代表已发布)*/
+  publishReady?: boolean;
+}
+
+/** 右键「在 note 里写回复」推送 payload(guest viewport 坐标)— 阶段 2 */
+export interface XWriteReplyRequest {
+  serviceId: XServiceId;
+  x: number;
+  y: number;
+}
+
 /** X Host(嵌 x.com 的 webview)imperative API */
 export interface XHostHandle {
   /** 导航到 homeUrl(刷新到主页) */
@@ -71,6 +86,13 @@ export interface XExtractionApi {
   extractTweet(serviceId: XServiceId, x: number, y: number): Promise<XExtractTweetResult>;
   /** 订阅 X webview 原生右键菜单点击(main 推 guest 坐标);返 unsubscribe */
   onExtractTweetRequest(callback: (payload: XExtractTweetRequest) => void): () => void;
+  // ── 写方向(阶段 2)— 填充内容,用户点发布 ──
+  /** 发推:把纯文本填进 X compose 框(用户随后手动点发布)*/
+  pasteTweet(serviceId: XServiceId, text: string): Promise<XWriteResult>;
+  /** 回复:导航到目标推 + 把纯文本填进 reply 框(用户随后手动点回复)*/
+  pasteReply(serviceId: XServiceId, tweetUrl: string, text: string): Promise<XWriteResult>;
+  /** 订阅 X webview 右键「在 note 里写回复」点击(main 推 guest 坐标);返 unsubscribe */
+  onWriteReplyRequest(callback: (payload: XWriteReplyRequest) => void): () => void;
   /**
    * X Host(嵌 x.com 的 webview)— forwardRef XHostHandle。
    * 封装 webview 生命周期 + per-ws partition + per-ws 代理接入。

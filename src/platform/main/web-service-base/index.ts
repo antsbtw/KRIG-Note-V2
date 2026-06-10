@@ -5,9 +5,11 @@
  * - createWebviewServiceRegistry:泛型 webview 注册表(did-navigate → detect → setActive)
  * - attachWebviewContextMenu:泛型原生右键菜单(坐标上送 renderer)
  * - buildHitTestScript:按坐标 elementFromPoint → closest 容器 的纯 DOM 定位原语
+ * - focusInputBox / pasteTextToWebview / locateSendButton:服务无关的「focus 输入框 +
+ *   OS 级 Cmd+V 真粘贴 + 发送按钮定位(不点击)」发布原语(AI 问答 / X 发推共用)
  *
- * 加第三种 webview 服务时,只需提供「URL → serviceKey 识别」+「菜单项模板」,不必再抄
- * 注册/识别/坐标上送链路。
+ * 加第三种 webview 服务时,只需提供「URL → serviceKey 识别」+「菜单项模板」+ selector,
+ * 不必再抄注册/识别/坐标上送/粘贴链路。
  */
 
 export {
@@ -19,3 +21,9 @@ export {
   type WebviewContextMenuOptions,
 } from './webview-context-menu-base';
 export { buildHitTestScript } from './element-locate';
+export {
+  focusInputBox,
+  pasteTextToWebview,
+  locateSendButton,
+  PASTE_MODIFIER,
+} from './webview-input';

@@ -16,6 +16,8 @@ import type {
   XServiceId,
   XExtractTweetResult,
   XExtractTweetRequest,
+  XWriteResult,
+  XWriteReplyRequest,
 } from './types';
 import { Host } from './Host';
 
@@ -25,6 +27,8 @@ export type {
   XTweetData,
   XExtractTweetResult,
   XExtractTweetRequest,
+  XWriteResult,
+  XWriteReplyRequest,
   XHostHandle,
   XHostProps,
 } from './types';
@@ -43,9 +47,31 @@ function onExtractTweetRequest(
   return window.electronAPI.onXExtractTweetRequest(callback);
 }
 
+// ── 写方向(阶段 2)──
+async function pasteTweet(serviceId: XServiceId, text: string): Promise<XWriteResult> {
+  return window.electronAPI.xPasteTweet(serviceId, text);
+}
+
+async function pasteReply(
+  serviceId: XServiceId,
+  tweetUrl: string,
+  text: string,
+): Promise<XWriteResult> {
+  return window.electronAPI.xPasteReply(serviceId, tweetUrl, text);
+}
+
+function onWriteReplyRequest(
+  callback: (payload: XWriteReplyRequest) => void,
+): () => void {
+  return window.electronAPI.onXWriteReplyRequest(callback);
+}
+
 export const xExtractionCapability: XExtractionApi = {
   extractTweet,
   onExtractTweetRequest,
+  pasteTweet,
+  pasteReply,
+  onWriteReplyRequest,
   Host,
 };
 

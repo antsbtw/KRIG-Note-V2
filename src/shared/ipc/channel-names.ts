@@ -246,6 +246,10 @@ export const IPC_CHANNELS = {
   X_EXTRACT_TWEET: 'x.extract-tweet',               // renderer → main:按坐标定位 + 抽该条推文(返 tweet 字段)
   X_EXTRACT_TWEET_REQUEST: 'x.extract-tweet-request', // main → renderer 推送:X webview 原生右键点击,带 guest 坐标 {x,y}
   X_OPEN_TWEET_REQUEST: 'x.open-tweet-request',      // main → renderer 推送:宿主页内 iframe(tweet block 嵌入)弹 x.com 链接,改在 X webview 打开
+  // X 集成 阶段 2(写方向)— 注入「填充内容,用户点发布」(绝不程序点发布)
+  X_PASTE_TWEET: 'x.paste-tweet',                   // renderer → main:把纯文本填进 X compose 框(发推)
+  X_PASTE_REPLY: 'x.paste-reply',                   // renderer → main:导航到目标推 + 把纯文本填进 reply 框(回复)
+  X_WRITE_REPLY_REQUEST: 'x.write-reply-request',    // main → renderer 推送:X webview 右键「在 note 里写回复」,带 guest 坐标 {x,y}
 
   // Progress 反馈通道(backup-restore + 未来其他长耗时任务共用)
   PROGRESS_START: 'progress.start',                 // main → renderer:任务开始

@@ -46,6 +46,17 @@ export function registerXWebviewHook(mainWindow: BrowserWindow): void {
               });
             },
           },
+          {
+            // 阶段 2(写方向):在 note 里写回复 → 抓被点中推文坐标 → renderer 起草 → 注入 reply 框
+            label: '✍️ 在 note 里写回复',
+            click: () => {
+              mainWindow.webContents.send(IPC_CHANNELS.X_WRITE_REPLY_REQUEST, {
+                serviceId: service.id,
+                x: params.x,
+                y: params.y,
+              });
+            },
+          },
         ];
         return template;
       },

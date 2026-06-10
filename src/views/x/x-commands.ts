@@ -16,6 +16,7 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XTweetData } from '@capabilities/x-extraction';
+import { sendToX, startReplyDraft } from './send-to-x';
 
 /**
  * 把抓到的推文字段构造成 tweetBlock 的 PM 节点 JSON。
@@ -123,6 +124,28 @@ export function registerXCommands(): void {
     }
   });
 
+  /**
+   * 「𝕏 发到 X」(写方向,阶段 2):note 选区/整篇 → 降级纯文本 → 注入 X compose 框
+   * (或有 pending 回复目标时注入该推 reply 框)。全程「填充内容,用户点发布」。
+   *
+   * 实现见 send-to-x.ts(选区/整篇取 markdown + 降级 + 超长 fail loud + 剪贴板降级)。
+   */
+  commandRegistry.register('x-view.send-to-x', () => {
+    void sendToX();
+  });
+
+  /**
+   * 「在 note 里写回复」(写方向,阶段 2):X webview 某推右键 → 抓该推 URL/预览 →
+   * 记 pending 回复目标 → 提示用户去 note 写内容再「发到 X」即注入该推 reply 框。
+   *
+   * 参数:{ x, y } guest viewport 坐标(由 X webview-hook 经 X_WRITE_REPLY_REQUEST 透传)。
+   */
+  commandRegistry.register('x-view.write-reply', (arg: unknown) => {
+    const p = (arg ?? {}) as { x?: unknown; y?: unknown };
+    if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
+    void startReplyDraft(p.x, p.y);
+  });
+
   // ── 右键「提取此推文到笔记」(X_EXTRACT_TWEET_REQUEST 广播)模块级单订阅 ──
   // (铁律 5:命令型广播一律在模块级 registerXxx 订阅一次,不进 view 组件 useEffect;
   //  命令体内用 getActiveId 定向到活跃 ws。)
@@ -131,6 +154,20 @@ export function registerXCommands(): void {
     if (x) {
       extractTweetUnsub = x.onExtractTweetRequest((payload) => {
         void commandRegistry.execute('x-view.extract-tweet', {
+          x: payload.x,
+          y: payload.y,
+        });
+      });
+    }
+  }
+
+  // ── 右键「在 note 里写回复」(X_WRITE_REPLY_REQUEST 广播)模块级单订阅 ──
+  // (铁律 5:命令型广播一律模块级单订阅,命令体内用 getActiveId 守卫;同 extract 写法。)
+  if (!writeReplyUnsub) {
+    const x = getCapabilityApi<XExtractionApi>('x-extraction');
+    if (x) {
+      writeReplyUnsub = x.onWriteReplyRequest((payload) => {
+        void commandRegistry.execute('x-view.write-reply', {
           x: payload.x,
           y: payload.y,
         });
@@ -151,3 +188,4 @@ export function registerXCommands(): void {
 /** 模块级单订阅句柄(防 registerXCommands 万一被调多次重复订阅)*/
 let extractTweetUnsub: (() => void) | null = null;
 let openTweetUnsub: (() => void) | null = null;
+let writeReplyUnsub: (() => void) | null = null;

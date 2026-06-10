@@ -12,7 +12,7 @@ import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
 import { DOMSerializer, Fragment, Node as PMNode } from 'prosemirror-model';
-import { sliceToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
+import { sliceToMarkdown, docNodeToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
@@ -1850,6 +1850,18 @@ export const textEditingDriverApi = {
     if (state.selection.empty) return { markdown: '', images: [] };
     const slice = state.selection.content();
     return sliceToMarkdown(slice);
+  },
+
+  /**
+   * 取整篇文档的 Markdown 序列化结果(X 集成 阶段 2「发整篇推到 X」用)。
+   *
+   * 与 getSelectionMarkdown 同源,只是序列化整个 doc 而非选区 slice。
+   * 复用 docNodeToMarkdown(纯函数 serializer),不引入新的导出逻辑。
+   */
+  getDocMarkdown(instanceId: string): SerializeResult {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return { markdown: '', images: [] };
+    return docNodeToMarkdown(inst.view.state.doc);
   },
 
   setVocabWords(entries: Array<{ word: string; definition: string }>): void {

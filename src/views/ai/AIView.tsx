@@ -188,6 +188,30 @@ export function AIView({ workspaceId }: AIViewProps) {
     return () => unsub();
   }, [workspaceId]);
 
+  /**
+   * 订阅 'x.activate-launcher' — 「发到 X」(x-view.send-to-x)注入前发的:
+   * 让 AIView 切到 X 入口(setActiveLauncher('x'))把 X webview 显示出来 + 注册,
+   * main 侧 pasteTweet/pasteReply 才能拿到活跃 X webContents。
+   *
+   * 与 x.open-tweet 同款 last-known pull + emittedAt 去重(应对 mount/切 ws 边角)。
+   */
+  const lastXActivateAtRef = useRef(0);
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const handle = (payload: unknown): void => {
+      const p = (payload ?? {}) as { emittedAt?: number };
+      const ts = typeof p.emittedAt === 'number' ? p.emittedAt : Date.now();
+      if (ts <= lastXActivateAtRef.current) return;
+      lastXActivateAtRef.current = ts;
+      setActiveLauncher(workspaceId, 'x');
+    };
+    const last = bus.channels.getLastValue('x.activate-launcher');
+    if (last) handle(last);
+    const unsub = bus.channels.subscribe('x.activate-launcher', handle);
+    return () => unsub();
+  }, [workspaceId]);
+
   // 右键「📥 提取此对话到笔记」(AI_EXTRACT_TURN_REQUEST 广播)的订阅**不在此处**:
   // 它曾在 useEffect 里订阅 → 每个并存 AIView 实例各订阅一次 → 一次右键 N 次 execute、
   // 并发往右槽 Note 塞重复块。已收口为模块级单订阅,见 ai-commands.ts registerAICommands()。
