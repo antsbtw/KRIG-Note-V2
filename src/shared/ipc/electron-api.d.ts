@@ -480,16 +480,20 @@ declare global {
         serviceId: AIServiceId,
         prompt: string,
         options?: AIAskOptions,
+        /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向注入,治多实例串扰)*/
+        targetWcId?: number,
       ): Promise<AIAskResult>;
       /** 只 paste prompt + click send,不等回复(用户在 AI Web 实时看聊天) */
       aiPasteAndSend(
         serviceId: AIServiceId,
         prompt: string,
+        /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向注入,治多实例串扰)*/
+        targetWcId?: number,
       ): Promise<{ success: boolean; error?: string }>;
       /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
       aiGetLatestResponse(): Promise<string | null>;
       /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)*/
-      aiExtractFull(serviceId: AIServiceId): Promise<{
+      aiExtractFull(serviceId: AIServiceId, targetWcId?: number): Promise<{
         success: boolean;
         markdown?: string;
         title?: string;
@@ -503,6 +507,8 @@ declare global {
         serviceId: AIServiceId,
         x: number,
         y: number,
+        /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向抓取,治多实例串扰)*/
+        targetWcId?: number,
       ): Promise<{
         success: boolean;
         userMessage?: string;
@@ -517,6 +523,7 @@ declare global {
       /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
       aiOpenSession(
         serviceId: AIServiceId,
+        targetWcId?: number,
       ): Promise<{ success: boolean; status?: string; serviceId?: AIServiceId | null; url?: string | null; error?: string }>;
       /** 取三服务清单(UI 下拉菜单用) */
       aiServiceList(): Promise<Array<{ id: AIServiceId; name: string; icon: string }>>;
@@ -531,7 +538,7 @@ declare global {
 
       // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
       /** 启动 ai-sync:让 main 端 orchestrator 开始轮询 SSE,turn 完成时 emit AI_SYNC_APPEND_TURN */
-      aiSyncStart(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+      aiSyncStart(serviceId: AIServiceId, targetWcId?: number): Promise<{ success: boolean; error?: string }>;
       /** 停止 ai-sync */
       aiSyncStop(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
       /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */

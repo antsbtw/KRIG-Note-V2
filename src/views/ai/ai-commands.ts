@@ -80,8 +80,9 @@ export function registerAICommands(): void {
     const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
 
     // Phase 10.B 主路径:整页对话提取(Claude:多 turn + artifact 真 API;
-    // ChatGPT/Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn)
-    const extraction = await ai.extractFull(serviceId);
+    // ChatGPT/Gemini:Phase 10.B.2/3 待补,目前回退 SSE 单 turn)。
+    // 按活跃 ws 取本 ws 的 AI Host wc 定向(治多实例串扰);未登记 → null,main fail loud。
+    const extraction = await ai.extractFull(serviceId, ai.getAIHostWcId(wsId));
     if (!extraction.success || !extraction.markdown) {
       window.alert(
         `提取失败:${extraction.error || '未知错误'}\n\n` +
@@ -205,7 +206,8 @@ export function registerAICommands(): void {
 
     const serviceId = getAIWsState(ws).currentServiceId;
     const ai = requireCapabilityApi<AIConversationApi>('ai-extraction');
-    const result = await ai.extractTurn(serviceId, p.x, p.y);
+    // 按活跃 ws 取本 ws 的 AI Host wc 定向(治多实例串扰);未登记 → null,main fail loud。
+    const result = await ai.extractTurn(serviceId, p.x, p.y, ai.getAIHostWcId(wsId));
     if (!result.success || !result.markdown) {
       window.alert(`提取失败:${result.error || '未知错误'}`);
       return;
@@ -273,8 +275,9 @@ export function registerAICommands(): void {
     } else {
       return;
     }
-    // fire-and-forget — 结果通过 onAIResponseReady / onAIError 广播
-    void ai.askAI(serviceId, prompt);
+    // fire-and-forget — 结果通过 onAIResponseReady / onAIError 广播。
+    // 按活跃 ws 取本 ws 的 AI Host wc 定向(治多实例串扰);未登记 → null,main fail loud。
+    void ai.askAI(serviceId, prompt, undefined, ai.getAIHostWcId(wsId));
   });
 
   // ── 右键「📥 提取此对话到笔记」(AI_EXTRACT_TURN_REQUEST 广播)单订阅 ──

@@ -41,6 +41,7 @@ import {
   peekPendingAIThought,
   clearPendingAIThought,
 } from './pending-thought';
+import { getAIHostWcId, clearAIHostWcId } from './ai-host-registry';
 
 export type {
   AIConversationApi,
@@ -64,14 +65,16 @@ async function askAI(
   serviceId: AIServiceId,
   prompt: string,
   options?: AIAskOptions,
+  targetWcId?: number | null,
 ): Promise<AIAskResult> {
-  return window.electronAPI.aiAsk(serviceId, prompt, options);
+  return window.electronAPI.aiAsk(serviceId, prompt, options, targetWcId ?? undefined);
 }
 
 async function openSession(
   serviceId: AIServiceId,
+  targetWcId?: number | null,
 ): Promise<{ success: boolean; error?: string }> {
-  const r = await window.electronAPI.aiOpenSession(serviceId);
+  const r = await window.electronAPI.aiOpenSession(serviceId, targetWcId ?? undefined);
   return { success: r.success, error: r.error };
 }
 
@@ -87,12 +90,12 @@ async function getLatestResponse(): Promise<string | null> {
   return window.electronAPI.aiGetLatestResponse();
 }
 
-async function extractFull(serviceId: AIServiceId) {
-  return window.electronAPI.aiExtractFull(serviceId);
+async function extractFull(serviceId: AIServiceId, targetWcId?: number | null) {
+  return window.electronAPI.aiExtractFull(serviceId, targetWcId ?? undefined);
 }
 
-async function extractTurn(serviceId: AIServiceId, x: number, y: number) {
-  return window.electronAPI.aiExtractTurn(serviceId, x, y);
+async function extractTurn(serviceId: AIServiceId, x: number, y: number, targetWcId?: number | null) {
+  return window.electronAPI.aiExtractTurn(serviceId, x, y, targetWcId ?? undefined);
 }
 
 function onExtractTurnRequest(
@@ -113,8 +116,9 @@ function onError(callback: (payload: AIErrorPayload) => void): () => void {
 
 async function startAISync(
   serviceId: AIServiceId,
+  targetWcId?: number | null,
 ): Promise<{ success: boolean; error?: string }> {
-  return window.electronAPI.aiSyncStart(serviceId);
+  return window.electronAPI.aiSyncStart(serviceId, targetWcId ?? undefined);
 }
 
 async function stopAISync(
@@ -148,6 +152,8 @@ export const aiExtractionCapability: AIConversationApi = {
   startAISync,
   stopAISync,
   onAppendTurn,
+  getAIHostWcId,
+  clearAIHostWcId,
 };
 
 // W5 严格态:Registry 注册 — view 通过 requireCapabilityApi<AIConversationApi>('ai-extraction')

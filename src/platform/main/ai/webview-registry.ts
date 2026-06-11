@@ -17,7 +17,7 @@
  * 绑定 + 保留历史导出名(consumers 依赖)。X view 复用同一底座。
  */
 
-import type { WebContents } from 'electron';
+import { webContents, type WebContents } from 'electron';
 import {
   detectAIServiceByUrl,
   type AIServiceId,
@@ -30,11 +30,70 @@ const aiRegistry = createWebviewServiceRegistry<AIServiceId>(
 );
 
 /**
- * 取某服务的活跃 webContents(askAI / pasteAndSend 用)。
- * 返 null 表示该服务的 AI Host webview 尚未挂载或还未 navigate 到对应 URL。
+ * 取某服务的活跃 webContents(全局「最后 navigate 胜出」单例)。
+ *
+ * @deprecated 多 ws / 内置浏览器+AI-view 并存时会取错实例(注入打到用户没在看的框)。
+ *   业务调用一律改走 {@link resolveAIWebContents}(按 renderer 传来的 targetWcId 定向)。
+ *   本函数仅留给底座内部 detect 链路;新代码勿用。
  */
 export function getActiveAIWebContents(serviceId: AIServiceId): WebContents | null {
   return aiRegistry.getActive(serviceId);
+}
+
+/**
+ * 按 renderer 指定的 guest wc id 精确定位 AI Host webContents(按活跃 ws 定向)。
+ *
+ * 治多实例串扰 bug:renderer 侧 ai-host-registry 按活跃 ws 查出本 ws 的 AI Host guest
+ * wc id,经 IPC 透传到这里 webContents.fromId 精确取 —— 不再用全局「最后 navigate」猜。
+ *
+ * **fail loud(§3.2 总指挥拍板,与 X 的「回退全局」不同)**:targetWcId 缺失 / 对应 wc
+ * 已销毁 / 当前不是该 AI 服务页 → 返回明确 error,**绝不静默回退 getActiveAIWebContents**
+ * (回退等于没修)。调用方据 error 决定 fail loud(broadcast / 返回失败)。
+ *
+ * @param serviceId 期望的 AI 服务(校验目标 wc 当前 URL 属于该服务)
+ * @param targetWcId renderer 传来的本活跃 ws 的 AI Host guest wc id(undefined/null = 未登记)
+ */
+export function resolveAIWebContents(
+  serviceId: AIServiceId,
+  targetWcId: number | null | undefined,
+): { wc: WebContents } | { error: string } {
+  if (typeof targetWcId !== 'number') {
+    return {
+      error: `当前 workspace 的 ${serviceId} AI 实例未就绪(未登记 wc id)— 请确保 AI 页已加载`,
+    };
+  }
+  const wc = webContents.fromId(targetWcId);
+  if (!wc || wc.isDestroyed()) {
+    return {
+      error: `指定的 AI 实例(wc#${targetWcId})不存在或已销毁 — 请重新打开 AI 页`,
+    };
+  }
+  const detected = detectAIServiceByUrl(wc.getURL());
+  if (detected?.id !== serviceId) {
+    return {
+      error: `指定的 AI 实例(wc#${targetWcId})当前不是 ${serviceId} 页面(实为 ${detected?.id ?? '非 AI 页'}),无法操作`,
+    };
+  }
+  return { wc };
+}
+
+/**
+ * 同 {@link resolveAIWebContents} 但带 poll —— 给「问 AI / paste+send」用:
+ * renderer 点「问 AI」后 AIView mount → webview navigate → dom-ready 才登记 wc id,
+ * 这条链路 1-3s;poll 等本 ws 的 wc 就绪(仍 fail loud,只是给足等待窗口)。
+ */
+export async function resolveAIWebContentsWithWait(
+  serviceId: AIServiceId,
+  targetWcId: number | null | undefined,
+  timeoutMs = 10_000,
+): Promise<{ wc: WebContents } | { error: string }> {
+  const start = Date.now();
+  let last = resolveAIWebContents(serviceId, targetWcId);
+  while ('error' in last && Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    last = resolveAIWebContents(serviceId, targetWcId);
+  }
+  return last;
 }
 
 /**

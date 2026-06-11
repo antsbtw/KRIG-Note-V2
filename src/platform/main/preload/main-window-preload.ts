@@ -697,20 +697,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)──
   // 4 invoke + 3 broadcast 订阅 = 7 表面
-  aiAsk(serviceId: string, prompt: string, options?: unknown): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options });
+  // targetWcId:本活跃 ws 的 AI Host guest wc id(按 ws 定向注入/抓取,治多实例串扰)
+  aiAsk(serviceId: string, prompt: string, options?: unknown, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options, targetWcId });
   },
-  aiPasteAndSend(serviceId: string, prompt: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt });
+  aiPasteAndSend(serviceId: string, prompt: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt, targetWcId });
   },
   aiGetLatestResponse(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE);
   },
-  aiExtractFull(serviceId: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, serviceId);
+  aiExtractFull(serviceId: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, { serviceId, targetWcId });
   },
-  aiExtractTurn(serviceId: string, x: number, y: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_TURN, { serviceId, x, y });
+  aiExtractTurn(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_TURN, { serviceId, x, y, targetWcId });
   },
   onAIExtractTurnRequest(
     callback: (payload: { serviceId: string; x: number; y: number }) => void,
@@ -720,8 +721,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.AI_EXTRACT_TURN_REQUEST, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.AI_EXTRACT_TURN_REQUEST, handler);
   },
-  aiOpenSession(serviceId: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, serviceId);
+  aiOpenSession(serviceId: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, { serviceId, targetWcId });
   },
   aiServiceList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_SERVICE_LIST);
@@ -746,8 +747,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
-  aiSyncStart(serviceId: string): Promise<{ success: boolean; error?: string }> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_START, serviceId);
+  aiSyncStart(serviceId: string, targetWcId?: number): Promise<{ success: boolean; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_START, { serviceId, targetWcId });
   },
   aiSyncStop(serviceId: string): Promise<{ success: boolean; error?: string }> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_STOP, serviceId);

@@ -78,6 +78,8 @@ export interface AIHostHandle {
   reload(): void;
   /** 取当前 URL */
   getURL(): string;
+  /** 取 guest webContents id(注入/抓取按 ws 定向用);未 dom-ready / 取不到返 null */
+  getWebContentsId(): number | null;
   /**
    * 把 prompt 粘贴到 AI 输入框并自动发送(走 main 进程 writer.ts pasteText + clickSend)。
    *
@@ -109,10 +111,12 @@ export interface AIHostProps {
 
 export interface AIConversationApi {
   // ── 业务方法 ──
+  // targetWcId:本活跃 ws 的 AI Host guest wc id(命令侧经 getAIHostWcId 取出后透传,
+  // main 据此按 ws 定向;未传/未命中 → main fail loud,不回退全局 active)。
   /** 给 AI 服务发 prompt 等完整 Markdown 回复 */
-  askAI(serviceId: AIServiceId, prompt: string, options?: AIAskOptions): Promise<AIAskResult>;
+  askAI(serviceId: AIServiceId, prompt: string, options?: AIAskOptions, targetWcId?: number | null): Promise<AIAskResult>;
   /** 把后台 webview 转前台 (AI View Host 用,本期占位) */
-  openSession(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+  openSession(serviceId: AIServiceId, targetWcId?: number | null): Promise<{ success: boolean; error?: string }>;
   /** 取三服务清单 */
   getServiceList(): Promise<AIServiceListItem[]>;
   /** debug:SSE 拦截状态 */
@@ -120,9 +124,9 @@ export interface AIConversationApi {
   /** 取 SSE 缓存最新一次 AI 完整回复 markdown(供"提取整页对话"用) */
   getLatestResponse(): Promise<string | null>;
   /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)— 提取按钮主路径 */
-  extractFull(serviceId: AIServiceId): Promise<AIExtractFullResult>;
+  extractFull(serviceId: AIServiceId, targetWcId?: number | null): Promise<AIExtractFullResult>;
   /** 右键单条提取:按 guest viewport 坐标定位 + 抽该条对话(本期仅 Claude)*/
-  extractTurn(serviceId: AIServiceId, x: number, y: number): Promise<AIExtractTurnResult>;
+  extractTurn(serviceId: AIServiceId, x: number, y: number, targetWcId?: number | null): Promise<AIExtractTurnResult>;
   /** 订阅原生右键菜单点击(main 推送 guest 坐标);返 unsubscribe */
   onExtractTurnRequest(callback: (payload: AIExtractTurnRequest) => void): () => void;
   // ── pending thought 路由(场景 A: Note Ask AI 用) ──
@@ -142,11 +146,16 @@ export interface AIConversationApi {
   onError(callback: (payload: AIErrorPayload) => void): () => void;
   // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加) ──
   /** 启动 ai-sync(让 main 端开始为该 serviceId 轮询并 emit AI_SYNC_APPEND_TURN)*/
-  startAISync(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+  startAISync(serviceId: AIServiceId, targetWcId?: number | null): Promise<{ success: boolean; error?: string }>;
   /** 停止 ai-sync */
   stopAISync(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
   /** 订阅"某 turn 完成"事件(view 端拿去 build PM nodes 插入到 Note);返 unsubscribe */
   onAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
+  // ── AI Host wc 按 ws 登记(注入/抓取按活跃 ws 定向,治多实例串扰;对称 x-host-registry)──
+  /** 取某 ws 的 AI Host guest wc id(命令侧透传 targetWcId 给 main 定向用);未登记返 null */
+  getAIHostWcId(wsId: string): number | null;
+  /** 清除某 ws 的登记(AIView 卸载调,避免 stale wc id 残留)*/
+  clearAIHostWcId(wsId: string): void;
   // ── UI 组件 ──
   /**
    * AI Host(嵌三大 AI 服务网站的 webview)— forwardRef AIHostHandle

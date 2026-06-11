@@ -66,6 +66,12 @@ export function AIView({ workspaceId }: AIViewProps) {
     return () => xApi.clearXHostWcId(workspaceId);
   }, [xApi, workspaceId]);
 
+  // AI Host wc 登记由 capability Host 内部在 dom-ready/navigate 时做(对称 X 但更内聚:
+  // Host 自己知道 wc id);AIView 只负责卸载时清掉本 ws 登记,避免 stale wc id 残留。
+  useEffect(() => {
+    return () => aiApi.clearAIHostWcId(workspaceId);
+  }, [aiApi, workspaceId]);
+
   // 订阅 per-ws state(currentServiceId + activeLauncher)
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
