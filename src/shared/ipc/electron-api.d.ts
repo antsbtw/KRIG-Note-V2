@@ -550,6 +550,7 @@ declare global {
         serviceId: XServiceId,
         x: number,
         y: number,
+        targetWcId?: number,
       ): Promise<{
         success: boolean;
         data?: {

@@ -20,19 +20,24 @@
  *
  * 生命周期:AI Host dom-ready / url 变化时 set(那时 guest wc id 可取);AIView 卸载时 clear。
  * 模块级单例(renderer 侧)。
+ *
+ * 收口 ①(2026-06-11):底层 `Map<wsId,wcId>` + 三函数模板下沉到 shared 的
+ * `createWsHostRegistry` 工厂,与 x-host-registry 合一;本文件只 new 一个 AI 专属实例 +
+ * 保留历史导出名(consumers 不动)。
  */
 
-/** wsId → 该 ws 的 AI Host guest webContents id */
-const wsToAIWcId = new Map<string, number>();
+import { createWsHostRegistry } from '@shared/ws-host-registry';
+
+const aiHostRegistry = createWsHostRegistry('ai-host');
 
 export function registerAIHostWcId(wsId: string, wcId: number): void {
-  wsToAIWcId.set(wsId, wcId);
+  aiHostRegistry.register(wsId, wcId);
 }
 
 export function clearAIHostWcId(wsId: string): void {
-  wsToAIWcId.delete(wsId);
+  aiHostRegistry.clear(wsId);
 }
 
 export function getAIHostWcId(wsId: string): number | null {
-  return wsToAIWcId.get(wsId) ?? null;
+  return aiHostRegistry.get(wsId);
 }

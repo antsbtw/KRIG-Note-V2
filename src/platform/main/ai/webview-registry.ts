@@ -17,12 +17,17 @@
  * 绑定 + 保留历史导出名(consumers 依赖)。X view 复用同一底座。
  */
 
-import { webContents, type WebContents } from 'electron';
+import { type WebContents } from 'electron';
 import {
   detectAIServiceByUrl,
   type AIServiceId,
 } from '@shared/types/ai-service-types';
-import { createWebviewServiceRegistry } from '../web-service-base';
+import {
+  createWebviewServiceRegistry,
+  resolveWsWebContents,
+  resolveWsWebContentsWithWait,
+  type WsResolveResult,
+} from '../web-service-base';
 
 const aiRegistry = createWebviewServiceRegistry<AIServiceId>(
   'ai-webview-registry',
@@ -56,25 +61,14 @@ export function getActiveAIWebContents(serviceId: AIServiceId): WebContents | nu
 export function resolveAIWebContents(
   serviceId: AIServiceId,
   targetWcId: number | null | undefined,
-): { wc: WebContents } | { error: string } {
-  if (typeof targetWcId !== 'number') {
-    return {
-      error: `当前 workspace 的 ${serviceId} AI 实例未就绪(未登记 wc id)— 请确保 AI 页已加载`,
-    };
-  }
-  const wc = webContents.fromId(targetWcId);
-  if (!wc || wc.isDestroyed()) {
-    return {
-      error: `指定的 AI 实例(wc#${targetWcId})不存在或已销毁 — 请重新打开 AI 页`,
-    };
-  }
-  const detected = detectAIServiceByUrl(wc.getURL());
-  if (detected?.id !== serviceId) {
-    return {
-      error: `指定的 AI 实例(wc#${targetWcId})当前不是 ${serviceId} 页面(实为 ${detected?.id ?? '非 AI 页'}),无法操作`,
-    };
-  }
-  return { wc };
+): WsResolveResult {
+  // 收口 ①(2026-06-11):定位 + fail loud 逻辑下沉到 web-service-base 公共
+  // resolveWsWebContents(与 X 共用);本函数只绑 AI 专属 URL 校验 + 服务标签。
+  return resolveWsWebContents(
+    targetWcId,
+    (url) => detectAIServiceByUrl(url)?.id === serviceId,
+    { service: `${serviceId} AI`, pageName: `${serviceId} AI 页` },
+  );
 }
 
 /**
@@ -86,14 +80,13 @@ export async function resolveAIWebContentsWithWait(
   serviceId: AIServiceId,
   targetWcId: number | null | undefined,
   timeoutMs = 10_000,
-): Promise<{ wc: WebContents } | { error: string }> {
-  const start = Date.now();
-  let last = resolveAIWebContents(serviceId, targetWcId);
-  while ('error' in last && Date.now() - start < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    last = resolveAIWebContents(serviceId, targetWcId);
-  }
-  return last;
+): Promise<WsResolveResult> {
+  return resolveWsWebContentsWithWait(
+    targetWcId,
+    (url) => detectAIServiceByUrl(url)?.id === serviceId,
+    { service: `${serviceId} AI`, pageName: `${serviceId} AI 页` },
+    timeoutMs,
+  );
 }
 
 /**

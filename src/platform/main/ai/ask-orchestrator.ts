@@ -29,27 +29,50 @@ import {
   subscribeAttachAIWebContents,
 } from './webview-registry';
 
-/** 单例 SSE 拦截 manager — 跟随活跃 webContents 更换 */
-let captureManager: SSECaptureManager | null = null;
+/**
+ * SSE 拦截 manager 池 —— **per-ws(按 guest wcId 持有)**(收口 ③,2026-06-11 决策 A)。
+ *
+ * 旧实现是单例「跟随全局 active 最后 navigate 胜出」:多 ws 并存时只有一个 wc 被 attach,
+ * 另一个 ws 的 Gemini 完全没 CDP 偷听,且全局 active 注入打到 A 而偷听绑在 B → 错位。
+ *
+ * 改为按 wcId 一个 manager:每个 attach 的 AI webview 各自持有 SSECaptureManager,各自注入
+ * hook(Claude/ChatGPT page-cache)/ attach CDP(Gemini)。读取时按本 ws 的 wcId 取对应
+ * manager —— 偷听实例与定向注入实例必然一致。
+ *
+ * §B 风险对冲(裁定):Claude/ChatGPT 的 SSE 数据在 guest page-cache(随 wc 走),本改动
+ * 只是把「单 manager」拆成「per-wc manager」,每个 manager 的 inject/读逻辑(interceptor.ts)
+ * 一字未改,Claude/ChatGPT 路径不受影响。真正受益的是 Gemini(main 端 CDP 缓存按 wc 各存)。
+ */
+const captureManagers = new Map<number, SSECaptureManager>();
 
 /**
- * 给外部模块(ai-sync-orchestrator 等)访问当前 SSE 拦截 manager。
+ * 取某 wc 的 SSE 拦截 manager(ai-sync-orchestrator 等按本 ws 的 wcId 取)。
  *
- * 注:返回值随 webview 切换变更,调用方每次轮询前都重新调,不要缓存本地。
+ * @param targetWcId 本 ws 的 AI Host guest wcId;未传 / 无对应 manager → null。
  */
-export function getSSECaptureManager(): SSECaptureManager | null {
-  return captureManager;
+export function getSSECaptureManager(targetWcId?: number): SSECaptureManager | null {
+  if (typeof targetWcId !== 'number') return null;
+  return captureManagers.get(targetWcId) ?? null;
 }
 
 /**
- * 订阅 registry 的"活跃 webContents 变更",自动 stop 旧 manager + new + start。
+ * 订阅 registry 的"活跃 webContents 变更":为新 attach 的 wc 建并 start 一个 manager
+ * (已有则跳过,不再 stop 别的 ws 的 manager)。wc destroyed 时清出池(stop + 释放 debugger)。
  * 模块加载时立即订阅(IIFE,确保 main 启动后任何 AI webview navigate 都被拦截)。
  */
 subscribeAttachAIWebContents((_serviceId, wc) => {
-  if (captureManager?.getWebContents() === wc) return;
-  captureManager?.stop();
-  captureManager = new SSECaptureManager(wc);
-  captureManager.start();
+  if (captureManagers.has(wc.id)) return;
+  const manager = new SSECaptureManager(wc);
+  captureManagers.set(wc.id, manager);
+  manager.start();
+  // wc 销毁时清出池,避免 stale manager + debugger 泄漏(per-ws 生命周期,§B 第 3 条)
+  wc.once('destroyed', () => {
+    const m = captureManagers.get(wc.id);
+    if (m) {
+      m.stop();
+      captureManagers.delete(wc.id);
+    }
+  });
 });
 
 /**
@@ -75,11 +98,12 @@ export async function askAI(
     }
     const webContents = got.wc;
 
-    // SSE manager 已通过 subscribeAttachAIWebContents 自动 attach,无需手动 start
+    // 取本 wc 的 SSE manager(已通过 subscribeAttachAIWebContents 自动 attach + start)
+    const manager = getSSECaptureManager(webContents.id);
 
     // 清掉之前的 response 缓存
-    if (captureManager) {
-      await captureManager.clearResponses();
+    if (manager) {
+      await manager.clearResponses();
     }
 
     // 粘贴 prompt
@@ -97,12 +121,12 @@ export async function askAI(
     await clickSendButton(webContents, serviceId);
 
     // 等回复
-    if (!captureManager) {
+    if (!manager) {
       const err = 'SSE capture manager not initialized';
       broadcastAIError({ serviceId, error: err });
       return { success: false, error: err };
     }
-    const markdown = await captureManager.waitForResponse(timeoutMs);
+    const markdown = await manager.waitForResponse(timeoutMs);
     if (!markdown) {
       const err = 'AI response timed out';
       broadcastAIError({ serviceId, error: err });
@@ -120,12 +144,15 @@ export async function askAI(
 
 /**
  * 取 SSE 拦截状态(debug 用)。
+ *
+ * 收口 ③:per-ws 池后按本 ws 的 wcId 取对应 manager;未传 wcId / 无对应 manager → 空状态。
  */
-export async function getSSEStatus(): Promise<AISSEStatus> {
-  if (!captureManager) {
+export async function getSSEStatus(targetWcId?: number): Promise<AISSEStatus> {
+  const manager = getSSECaptureManager(targetWcId);
+  if (!manager) {
     return { count: 0, latestStreaming: false, hooked: false };
   }
-  return captureManager.getStatus();
+  return manager.getStatus();
 }
 
 /**
@@ -172,9 +199,10 @@ export async function pasteAndSend(
  *
  * Phase 10.B 后:仅用作 ChatGPT/Gemini 的兜底(Claude 走 extractFullConversation 真 API)。
  */
-export async function getLatestCapturedResponse(): Promise<string | null> {
-  if (!captureManager) return null;
-  return captureManager.getLatestResponse();
+export async function getLatestCapturedResponse(targetWcId?: number): Promise<string | null> {
+  const manager = getSSECaptureManager(targetWcId);
+  if (!manager) return null;
+  return manager.getLatestResponse();
 }
 
 /**

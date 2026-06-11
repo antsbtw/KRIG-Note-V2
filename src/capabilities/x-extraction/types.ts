@@ -85,8 +85,17 @@ export interface XHostProps {
 }
 
 export interface XExtractionApi {
-  /** 右键单条提取:按 guest viewport 坐标定位 + 抓全字段 → tweet 数据 */
-  extractTweet(serviceId: XServiceId, x: number, y: number): Promise<XExtractTweetResult>;
+  /**
+   * 右键单条提取:按 guest viewport 坐标定位 + 抓全字段 → tweet 数据。
+   * targetWcId:本活跃 ws 的 X Host guest wcId(命令侧经 getXHostWcId 取出后透传,
+   * 按活跃 ws 定向,治多 X 实例串扰;收口 ②)。
+   */
+  extractTweet(
+    serviceId: XServiceId,
+    x: number,
+    y: number,
+    targetWcId?: number | null,
+  ): Promise<XExtractTweetResult>;
   /** 订阅 X webview 原生右键菜单点击(main 推 guest 坐标);返 unsubscribe */
   onExtractTweetRequest(callback: (payload: XExtractTweetRequest) => void): () => void;
   // ── 写方向(阶段 2)— 填充内容,用户点发布 ──

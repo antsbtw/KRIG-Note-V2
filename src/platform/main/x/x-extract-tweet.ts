@@ -2,8 +2,8 @@
  * X 推文提取(阶段 1)— 按 guest viewport 坐标定位 + 抓全字段
  *
  * 流程(铁律 1:直接抓当前前台 X webview,不开隐藏窗口):
- * 1. 拿 X 服务活跃 webContents(getActiveXWebContents);未挂载 → fail。
- * 2. 不是 X 页 → fail(铁律 4 fail loud,不静默)。
+ * 1. 按活跃 ws 定向取本 ws 的 X Host webContents(resolveXWebContents,收口 ②);
+ *    未登记 / 已销毁 / 非 X 页 → fail loud(不再走全局 getActiveXWebContents)。
  * 3. 对该 webContents executeJavaScript:elementFromPoint(x,y) 向上 closest 到
  *    article[data-testid="tweet"],命中后用 tweet-fetcher 的 TWEET_SCRAPE_FN_BODY
  *    抓全字段(复用而非复制,铁律 1)。
@@ -12,8 +12,8 @@
  * 返 XExtractTweetResult,renderer 侧 x-commands 据 success 决定构造 tweetBlock 或 toast。
  */
 
-import { getActiveXWebContents } from './webview-registry';
-import { detectXServiceByUrl, getXServiceProfile, type XServiceId } from '@shared/types/x-service-types';
+import { resolveXWebContents } from './x-webcontents';
+import { getXServiceProfile, type XServiceId } from '@shared/types/x-service-types';
 import { TWEET_SCRAPE_FN_BODY } from '../tweet-fetcher/extract-script';
 
 /** 抓到的推文字段(对齐 tweet-block schema attrs + tweet-fetcher TweetFetchData)*/
@@ -80,23 +80,23 @@ function buildExtractScript(x: number, y: number, tweetSelector: string): string
 /**
  * 提取 (x,y) 坐标命中的推文。
  *
- * @param serviceId X 服务 id(目前固定 'x')
- * @param x         guest viewport x
- * @param y         guest viewport y
+ * @param serviceId  X 服务 id(目前固定 'x')
+ * @param x          guest viewport x
+ * @param y          guest viewport y
+ * @param targetWcId 本活跃 ws 的 X Host guest wcId(renderer x-host-registry 按活跃 ws 查出
+ *   后透传;收口 ② 治多 X 实例串扰)。未命中 → fail loud,不回退全局 active。
  */
 export async function extractTweetAt(
   serviceId: XServiceId,
   x: number,
   y: number,
+  targetWcId?: number,
 ): Promise<XExtractTweetResult> {
-  const wc = getActiveXWebContents(serviceId);
-  if (!wc) {
-    return { success: false, error: '没有活跃的 X 页面 — 请先在右栏打开 X 并加载到 x.com' };
+  const got = resolveXWebContents(targetWcId);
+  if ('error' in got) {
+    return { success: false, error: got.error };
   }
-  const url = wc.getURL();
-  if (!detectXServiceByUrl(url)) {
-    return { success: false, error: '当前不是 X 页面,无法提取推文' };
-  }
+  const wc = got.wc;
 
   const profile = getXServiceProfile(serviceId);
   let raw: unknown;

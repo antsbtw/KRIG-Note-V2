@@ -115,7 +115,8 @@ export function registerXCommands(): void {
     }
 
     const x = requireCapabilityApi<XExtractionApi>('x-extraction');
-    const result = await x.extractTweet('x', p.x, p.y);
+    // 按活跃 ws 定向取本 ws 的 X Host wcId(收口 ②:治多 X 实例串扰,提取打到正确实例)
+    const result = await x.extractTweet('x', p.x, p.y, x.getXHostWcId(wsId));
     if (!result.success || !result.data) {
       window.alert(`提取失败:${result.error || '未知错误'}`);
       return;

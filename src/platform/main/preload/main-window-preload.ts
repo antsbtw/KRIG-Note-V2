@@ -761,9 +761,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
-  /** 按坐标定位 + 抽该条推文(返 { success, data?, error? }) */
-  xExtractTweet(serviceId: string, x: number, y: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_EXTRACT_TWEET, { serviceId, x, y });
+  /** 按坐标定位 + 抽该条推文(返 { success, data?, error? });targetWcId 按活跃 ws 定向 */
+  xExtractTweet(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_EXTRACT_TWEET, { serviceId, x, y, targetWcId });
   },
   /** 订阅 X webview 原生右键「提取此推文」点击(main 推 guest 坐标);返 unsubscribe */
   onXExtractTweetRequest(

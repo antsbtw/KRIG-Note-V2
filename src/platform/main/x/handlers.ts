@@ -23,11 +23,12 @@ function isXServiceId(v: unknown): v is 'x' {
 export function registerXHandlers(): void {
   // X_EXTRACT_TWEET — 右键「提取此推文到笔记」:按坐标定位 + 抓全字段
   ipcMain.handle(IPC_CHANNELS.X_EXTRACT_TWEET, async (_e, payload: unknown) => {
-    const p = payload as { serviceId?: unknown; x?: unknown; y?: unknown } | null;
+    const p = payload as { serviceId?: unknown; x?: unknown; y?: unknown; targetWcId?: unknown } | null;
     if (!p || !isXServiceId(p.serviceId) || typeof p.x !== 'number' || typeof p.y !== 'number') {
       return { success: false, error: 'invalid extractTweet payload' };
     }
-    return extractTweetAt(p.serviceId, p.x, p.y);
+    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
+    return extractTweetAt(p.serviceId, p.x, p.y, targetWcId);
   });
 
   // X_PASTE_TWEET — 发推:把纯文本填进 compose 框(用户随后手动点发布)

@@ -93,14 +93,18 @@ async function seedBaseline(serviceId: AIServiceId): Promise<void> {
   const state = running.get(serviceId);
   if (!state) return;
 
-  const manager = getSSECaptureManager();
   // 按 ws 定向取本 ws 的 AI Host wc(治多实例串扰);未就绪 → baseline 留空,
   // 后续 pollOnce 自然会把 first record 当 baseline(非错误,故此处不 fail loud broadcast)。
   const got = resolveAIWebContents(serviceId, state.targetWcId);
-  if (!manager || 'error' in got) {
+  if ('error' in got) {
     return;
   }
   const wc = got.wc;
+  // 收口 ③:按本 ws 的 wcId 取对应 manager(per-ws 池),不再取全局单 manager
+  const manager = getSSECaptureManager(wc.id);
+  if (!manager) {
+    return;
+  }
 
   if (serviceId === 'gemini') {
     for (const rec of manager.getAllGeminiResponses()) {
@@ -149,7 +153,9 @@ async function pollOnce(serviceId: AIServiceId): Promise<void> {
   if ('error' in got) return;
   const wc = got.wc;
 
-  const manager = getSSECaptureManager();
+  // 收口 ③:按本 ws 的 wcId 取对应 manager(per-ws 池)— gemini 的 CDP 缓存与定向注入实例
+  // 必然一致,不再可能「注入打 A、偷听截 B」。claude/chatgpt 走 page-cache(在 wc 内)本就正确。
+  const manager = getSSECaptureManager(wc.id);
   if (!manager) return;
 
   // 取 records — gemini 走 main 端缓存,claude/chatgpt 走 page-cache

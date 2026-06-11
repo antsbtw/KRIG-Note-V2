@@ -3,6 +3,8 @@
  *
  * AI view / X view 共用的 webview 生命周期原语:
  * - createWebviewServiceRegistry:泛型 webview 注册表(did-navigate → detect → setActive)
+ * - resolveWsWebContents:按 renderer 传来的 guest wcId 精确定位 webContents(fail loud,
+ *   治多 ws 串扰;AI 问答 / X 发推回复 / X extract 共用)
  * - attachWebviewContextMenu:泛型原生右键菜单(坐标上送 renderer)
  * - buildHitTestScript:按坐标 elementFromPoint → closest 容器 的纯 DOM 定位原语
  * - focusInputBox / pasteTextToWebview / locateSendButton:服务无关的「focus 输入框 +
@@ -16,6 +18,11 @@ export {
   createWebviewServiceRegistry,
   type WebviewServiceRegistry,
 } from './webview-registry-base';
+export {
+  resolveWsWebContents,
+  resolveWsWebContentsWithWait,
+  type WsResolveResult,
+} from './ws-webcontents-resolver';
 export {
   attachWebviewContextMenu,
   type WebviewContextMenuOptions,

@@ -23,16 +23,14 @@ const xRegistry = createWebviewServiceRegistry<XServiceId>(
 );
 
 /**
- * 取 X 服务的活跃 webContents(提取推文用)。
- * 返 null 表示 X Host webview 尚未挂载或还未 navigate 到 x.com / twitter.com。
- */
-export function getActiveXWebContents(serviceId: XServiceId): WebContents | null {
-  return xRegistry.getActive(serviceId);
-}
-
-/**
  * 给 webContents 挂「X URL 检测」— did-navigate 到 X 页时注册到 registry。
  * 在 main window did-attach-webview 钩子内对每个 guest webContents 调一次。
+ *
+ * 注(收口 ②③,2026-06-11):旧 `getActiveXWebContents`(全局「最后 navigate 胜出」)已删
+ * —— 业务取实例一律走 x-webcontents 的 resolveXWebContents / requireXWebContents(按活跃 ws
+ * 定向,fail loud)。本 registry 仅保留 track:did-attach-webview 钩子挂 URL 检测(底座
+ * setActive 仍在跑,但不再有业务读 getActive),与 AI 侧对称(AI 的 getActive 还供 SSE
+ * subscribeAttach 用,X 无 SSE 故只剩 track)。
  */
 export function trackWebContentsForXService(wc: WebContents): void {
   xRegistry.track(wc);

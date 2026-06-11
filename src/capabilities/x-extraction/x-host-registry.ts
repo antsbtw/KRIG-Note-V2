@@ -8,26 +8,31 @@
  * 成功,但右栏框是空的」。
  *
  * 修法(总指挥拍板:只打当前活跃 ws 的 AI-view X):每个 AIView 实例(per-ws)把自己挂的
- * X Host 的 guest wc id 登记到本 registry(键 = wsId);发推时按活跃 ws 取对应 wc id,
- * 明确传给 main 注入,**不再依赖全局「最后 navigate」**。归属本 capability(而非 views/x)
- * 是因 view 间不能互相 import,AIView(views/ai)与 send-to-x(views/x)都经 capability API
- * 读写本 registry。
+ * X Host 的 guest wc id 登记到本 registry(键 = wsId);发推 / 提取推文时按活跃 ws 取对应
+ * wc id,明确传给 main 注入,**不再依赖全局「最后 navigate」**。归属本 capability(而非
+ * views/x)是因 view 间不能互相 import,AIView(views/ai)与 send-to-x(views/x)都经
+ * capability API 读写本 registry。
  *
  * 生命周期:AIView 的 X Host dom-ready / url 变化时 set(那时 guest wc id 可取);
  * AIView 卸载时 clear。模块级单例(renderer 侧)。
+ *
+ * 收口 ①(2026-06-11):底层 `Map<wsId,wcId>` + 三函数模板下沉到 shared 的
+ * `createWsHostRegistry` 工厂,与 ai-host-registry 合一;本文件只 new 一个 X 专属实例 +
+ * 保留历史导出名(consumers 不动)。
  */
 
-/** wsId → 该 ws 的 AI-view X Host guest webContents id */
-const wsToXWcId = new Map<string, number>();
+import { createWsHostRegistry } from '@shared/ws-host-registry';
+
+const xHostRegistry = createWsHostRegistry('x-host');
 
 export function registerXHostWcId(wsId: string, wcId: number): void {
-  wsToXWcId.set(wsId, wcId);
+  xHostRegistry.register(wsId, wcId);
 }
 
 export function clearXHostWcId(wsId: string): void {
-  wsToXWcId.delete(wsId);
+  xHostRegistry.clear(wsId);
 }
 
 export function getXHostWcId(wsId: string): number | null {
-  return wsToXWcId.get(wsId) ?? null;
+  return xHostRegistry.get(wsId);
 }

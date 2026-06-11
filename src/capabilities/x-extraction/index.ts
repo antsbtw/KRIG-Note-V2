@@ -38,8 +38,9 @@ async function extractTweet(
   serviceId: XServiceId,
   x: number,
   y: number,
+  targetWcId?: number | null,
 ): Promise<XExtractTweetResult> {
-  return window.electronAPI.xExtractTweet(serviceId, x, y);
+  return window.electronAPI.xExtractTweet(serviceId, x, y, targetWcId ?? undefined);
 }
 
 function onExtractTweetRequest(
