@@ -10,7 +10,8 @@
  * 与 AI hook 同一底座,只换 X 专属的 URL 判定 + 菜单文案。
  *
  * 注:普通浏览的 web-context-menu / 快捷键 / 弹窗导流 钩子的 shouldHandle 已按 X URL 排除
- * X webview(X 与 AI 共用 persist:webview partition),故这里弹的菜单与那边不冲突。
+ * X webview(X 与 AI / 浏览器同 ws 共用 persist:webview-${ws} partition,靠 URL 而非
+ * partition 区分),故这里弹的菜单与那边不冲突。
  *
  * 调用时机:platform/main/index.ts 在 createMainWindow 后调一次,跟 registerAIWebviewHook 平级。
  */
