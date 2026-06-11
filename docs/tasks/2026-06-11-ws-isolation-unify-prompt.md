@@ -8,6 +8,32 @@
 
 ---
 
+## ★ 总指挥裁定（2026-06-11，针对你调查后提的 7 决策 —— 以此为准，照此动手）
+
+你的调查很到位，尤其**纠正了 SSE 现状**（已核实属实）：Claude/ChatGPT 的 SSE 走 guest page-cache + `resolveAIWebContents(targetWcId)` 读，**已按 ws 正确**；真正还全局的只有 **Gemini（main 端 CDP 缓存）+ captureManager 生命周期**。基于此裁定：
+
+| 决策 | 裁定 | 说明 |
+|---|---|---|
+| 1 工厂落点 | 按你文档倾向（web-service-base 出公共 ws-host-registry 工厂） | renderer 侧合一 + main 侧 resolver 泛化 |
+| 2 **fail loud 统一** | **统一为 fail loud** | X 的 `requireXWebContents`（`x-write.ts:103-105`）**删掉回退全局 active 那段**，未命中返 error。**但 poll 等待逻辑必须保留**（覆盖切 X 的 1-3s 窗口）。⚠️ 改 X 行为 → §A 必须实机验。 |
+| 3 ② X extract 透传 | 按你倾向，纯透传 | `x-extract-tweet.ts:92` 改用 `getXHostWcId(wsId)`（命令侧 `x-commands.ts:106` 现成），收口，爆破半径最小 |
+| 4 **③ Gemini SSE** | **选 A：per-ws manager 池，现在彻底清零** | 用户拍板"现在不想留尾巴"。见下方 §B 风险对冲——**A 唯一红线：绝不碰坏 Claude/ChatGPT 的 SSE** |
+| 5 X Host 登记时机 | 保持现状（X 是 AIView 外挂、AI 是 Host 自内聚），不顺手重构 | 只在 registry 工厂层合一，守爆破半径 |
+| 6 旧全局函数 | 业务零调用后删 `getActiveXWebContents`；`getActiveAIWebContents` 若仅底座 detect 用则 @deprecated | track/subscribeAttach 保留 |
+| 7 其余 | 按你文档倾向 | — |
+
+### §A 决策 2 改 X 行为 → 必须实机验（无 GUI 则明确列给总指挥）
+X 发推 / X 回复 / X 提取推文，在"切到 X 的 1-3s 窗口内"和"正常态"都要验仍正常（poll 保留是关键）。未命中要明确报错不静默。
+
+### §B 决策 4 选 A 的风险对冲（最高优先，A 的成败在此）
+**A 的处境**：ai-sync 当前 `AI_SYNC_ENABLED=false`，所以 **A 改完你自己实机验不了 Gemini 多 ws**（功能是关的）。这是已知代价（用户接受盲提）。因此 A 必须靠**结构性保证**而非实机验来兜底：
+
+1. **绝对红线：A 不得改坏 Claude/ChatGPT 的 SSE。** captureManager 里 `geminiResponses`/`geminiDebuggerAttached`/`startGeminiCDP` 是 **Gemini 专属字段**（已核 `interceptor.ts:31-32,57`），Claude/ChatGPT 不碰它们。改 per-ws 池时，**Claude/ChatGPT 的 SSE 路径（guest page-cache，已正确）尽量零改动或仅随工厂签名透传**——任何会动到两家的改法，停下来问总指挥。
+2. **回归证明**：Claude/ChatGPT 的"问 AI + 提取整页对话"**实机验通过**（这两家能验，是 A 没伤及它们的实证）。Gemini 因 ai-sync 关无法实机验 → 在交付说明里**明确标注"Gemini per-ws SSE 为盲提、待开 ai-sync 时实机验"**，并说清代码上为什么应当正确。
+3. **生命周期**：per-ws manager 池要处理 ws 销毁时 detach CDP / 清缓存（别泄漏 debugger）。`subscribeAttach`/`track` 是 track 新 webview 的命脉，**保留**，只改"按 ws 持有 manager + 读对应 ws 的缓存"。
+
+---
+
 ## 0. 背景：这是同一个 bug 家族的最后清扫
 
 **bug 模式**（同一个错误反复出现）：代码判断"当前要操作哪个 webview"时，靠 main 侧全局单例 `getActive(serviceKey)` —— **"最后 navigate 的那个胜出"，不绑 workspace**。多 ws / 多实例时会取错实例（"日志说成功，但用户看的框是空的"）。
