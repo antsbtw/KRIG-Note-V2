@@ -241,6 +241,19 @@ export const IPC_CHANNELS = {
   AI_SYNC_STOP: 'ai-sync.stop',                     // renderer → main:停止 ai-sync(serviceId)
   AI_SYNC_APPEND_TURN: 'ai-sync.append-turn',       // main → renderer 推送一个新完成的 turn
 
+  // X(Twitter)集成(阶段 0/1)— X = AI view「左 note / 右 slot」模式里的一个新服务,
+  // 复用 web-service-base 底座,走独立 X 代码路径(铁律 1/3)。
+  X_EXTRACT_TWEET: 'x.extract-tweet',               // renderer → main:按坐标定位 + 抽该条推文(返 tweet 字段)
+  X_EXTRACT_TWEET_REQUEST: 'x.extract-tweet-request', // main → renderer 推送:X webview 原生右键点击,带 guest 坐标 {x,y}
+  X_OPEN_TWEET_REQUEST: 'x.open-tweet-request',      // main → renderer 推送:宿主页内 iframe(tweet block 嵌入)弹 x.com 链接,改在 X webview 打开
+  // X 集成 阶段 2(写方向)— 注入「填充内容,用户点发布」(绝不程序点发布)
+  X_PASTE_TWEET: 'x.paste-tweet',                   // renderer → main:把纯文本填进 X compose 框(发推)
+  X_PASTE_REPLY: 'x.paste-reply',                   // renderer → main:导航到目标推 + 把纯文本填进 reply 框(回复)
+  // 拖拽落点(拖 note block 到 X)— renderer → main
+  X_DRAG_ARM: 'x.drag-arm',                          // note 拖起:往 X guest 装 mousemove 监听记录最后坐标
+  X_DRAG_RESOLVE: 'x.drag-resolve',                  // 松手:读回最后坐标 + 解析落点(compose/tweet/...)
+  X_DRAG_REPLY_HERE: 'x.drag-reply-here',            // 落推文:就地点该推回复按钮弹 reply 框(不跳详情页)
+
   // Progress 反馈通道(backup-restore + 未来其他长耗时任务共用)
   PROGRESS_START: 'progress.start',                 // main → renderer:任务开始
   PROGRESS_UPDATE: 'progress.update',               // main → renderer:阶段/百分比更新

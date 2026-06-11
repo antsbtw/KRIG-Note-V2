@@ -64,6 +64,16 @@ export function registerContextMenu(): void {
       order: 191,
     },
     {
+      // X 集成 阶段 2(写方向):选区/整篇 → 注入 X compose 框(或 pending 回复目标的 reply 框);
+      // always 可见(命令内部三态:无选区取整篇 / 有 pending 走回复 / 否则发普通推)。
+      id: 'note-view.send-to-x',
+      label: '𝕏 发到 X',
+      command: 'x-view.send-to-x',
+      view: VIEW,
+      group: 'thought',
+      order: 192,
+    },
+    {
       id: 'note-view.delete-thought-at-cursor',
       label: '💭 删除 Thought',
       command: 'thought-view.delete-thought-at-cursor',

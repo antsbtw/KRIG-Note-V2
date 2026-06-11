@@ -697,20 +697,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)──
   // 4 invoke + 3 broadcast 订阅 = 7 表面
-  aiAsk(serviceId: string, prompt: string, options?: unknown): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options });
+  // targetWcId:本活跃 ws 的 AI Host guest wc id(按 ws 定向注入/抓取,治多实例串扰)
+  aiAsk(serviceId: string, prompt: string, options?: unknown, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options, targetWcId });
   },
-  aiPasteAndSend(serviceId: string, prompt: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt });
+  aiPasteAndSend(serviceId: string, prompt: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt, targetWcId });
   },
   aiGetLatestResponse(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE);
   },
-  aiExtractFull(serviceId: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, serviceId);
+  aiExtractFull(serviceId: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, { serviceId, targetWcId });
   },
-  aiExtractTurn(serviceId: string, x: number, y: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_TURN, { serviceId, x, y });
+  aiExtractTurn(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_TURN, { serviceId, x, y, targetWcId });
   },
   onAIExtractTurnRequest(
     callback: (payload: { serviceId: string; x: number; y: number }) => void,
@@ -720,8 +721,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.AI_EXTRACT_TURN_REQUEST, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.AI_EXTRACT_TURN_REQUEST, handler);
   },
-  aiOpenSession(serviceId: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, serviceId);
+  aiOpenSession(serviceId: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_OPEN_SESSION, { serviceId, targetWcId });
   },
   aiServiceList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_SERVICE_LIST);
@@ -746,8 +747,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
-  aiSyncStart(serviceId: string): Promise<{ success: boolean; error?: string }> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_START, serviceId);
+  aiSyncStart(serviceId: string, targetWcId?: number): Promise<{ success: boolean; error?: string }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_START, { serviceId, targetWcId });
   },
   aiSyncStop(serviceId: string): Promise<{ success: boolean; error?: string }> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_SYNC_STOP, serviceId);
@@ -759,6 +760,49 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
   },
 
+  // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
+  /** 按坐标定位 + 抽该条推文(返 { success, data?, error? });targetWcId 按活跃 ws 定向 */
+  xExtractTweet(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_EXTRACT_TWEET, { serviceId, x, y, targetWcId });
+  },
+  /** 订阅 X webview 原生右键「提取此推文」点击(main 推 guest 坐标);返 unsubscribe */
+  onXExtractTweetRequest(
+    callback: (payload: { serviceId: string; x: number; y: number }) => void,
+  ): () => void {
+    const handler = (_event: unknown, payload: unknown): void =>
+      callback(payload as { serviceId: string; x: number; y: number });
+    ipcRenderer.on(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, handler);
+  },
+  /** 订阅:宿主页内 iframe(tweet block 嵌入卡片)弹 x.com 链接 → 改在 X webview 打开 */
+  onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void =>
+      callback(payload as { url: string });
+    ipcRenderer.on(IPC_CHANNELS.X_OPEN_TWEET_REQUEST, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.X_OPEN_TWEET_REQUEST, handler);
+  },
+
+  // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
+  /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)*/
+  xPasteTweet(serviceId: string, text: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId });
+  },
+  /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)*/
+  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId });
+  },
+  /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
+  xDragArm(targetWcId: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_ARM, { targetWcId });
+  },
+  /** 拖拽:松手,读回最后坐标 + 解析落点 */
+  xDragResolve(serviceId: string, targetWcId: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_RESOLVE, { serviceId, targetWcId });
+  },
+  /** 拖拽落推文:就地点该推回复按钮弹 reply 框(不跳详情页)*/
+  xDragReplyHere(serviceId: string, targetWcId: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_REPLY_HERE, { serviceId, targetWcId });
+  },
   // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
   /** 任务开始 — 显示全屏覆盖层 */
   onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void {

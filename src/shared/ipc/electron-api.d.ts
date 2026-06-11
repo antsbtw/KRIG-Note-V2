@@ -31,6 +31,7 @@ import type {
   AISyncAppendTurnPayload,
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
+import type { XServiceId } from '../types/x-service-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
@@ -479,16 +480,20 @@ declare global {
         serviceId: AIServiceId,
         prompt: string,
         options?: AIAskOptions,
+        /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向注入,治多实例串扰)*/
+        targetWcId?: number,
       ): Promise<AIAskResult>;
       /** 只 paste prompt + click send,不等回复(用户在 AI Web 实时看聊天) */
       aiPasteAndSend(
         serviceId: AIServiceId,
         prompt: string,
+        /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向注入,治多实例串扰)*/
+        targetWcId?: number,
       ): Promise<{ success: boolean; error?: string }>;
       /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
       aiGetLatestResponse(): Promise<string | null>;
       /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)*/
-      aiExtractFull(serviceId: AIServiceId): Promise<{
+      aiExtractFull(serviceId: AIServiceId, targetWcId?: number): Promise<{
         success: boolean;
         markdown?: string;
         title?: string;
@@ -502,6 +507,8 @@ declare global {
         serviceId: AIServiceId,
         x: number,
         y: number,
+        /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向抓取,治多实例串扰)*/
+        targetWcId?: number,
       ): Promise<{
         success: boolean;
         userMessage?: string;
@@ -516,6 +523,7 @@ declare global {
       /** 把后台 webview 转前台 (AI View Host 用,本期占位返回 status) */
       aiOpenSession(
         serviceId: AIServiceId,
+        targetWcId?: number,
       ): Promise<{ success: boolean; status?: string; serviceId?: AIServiceId | null; url?: string | null; error?: string }>;
       /** 取三服务清单(UI 下拉菜单用) */
       aiServiceList(): Promise<Array<{ id: AIServiceId; name: string; icon: string }>>;
@@ -530,11 +538,75 @@ declare global {
 
       // ── ai-sync feature(AI 对话 → 右槽 Note 自动追加 ❓ Callout + 🔀 Toggle) ──
       /** 启动 ai-sync:让 main 端 orchestrator 开始轮询 SSE,turn 完成时 emit AI_SYNC_APPEND_TURN */
-      aiSyncStart(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
+      aiSyncStart(serviceId: AIServiceId, targetWcId?: number): Promise<{ success: boolean; error?: string }>;
       /** 停止 ai-sync */
       aiSyncStop(serviceId: AIServiceId): Promise<{ success: boolean; error?: string }>;
       /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
       onAISyncAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
+
+      // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
+      /** 按 guest viewport 坐标定位 + 抽该条推文 */
+      xExtractTweet(
+        serviceId: XServiceId,
+        x: number,
+        y: number,
+        targetWcId?: number,
+      ): Promise<{
+        success: boolean;
+        data?: {
+          authorName?: string;
+          authorHandle?: string;
+          authorAvatar?: string;
+          text?: string;
+          createdAt?: string;
+          lang?: string;
+          media?: Array<{ type: 'image' | 'video'; url: string; thumbUrl?: string }>;
+          metrics?: { replies?: number; retweets?: number; likes?: number; views?: number };
+          quotedTweet?: string;
+          inReplyTo?: string;
+          tweetUrl?: string;
+          tweetId?: string;
+        };
+        error?: string;
+      }>;
+      /** main → renderer 推送:X webview 原生右键「提取此推文」点击,带 guest 坐标;返 unsubscribe */
+      onXExtractTweetRequest(
+        callback: (payload: { serviceId: XServiceId; x: number; y: number }) => void,
+      ): () => void;
+      /** main → renderer 推送:宿主 iframe(tweet 卡片)弹 x.com 链接 → 改在 X webview 打开;返 unsubscribe */
+      onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
+
+      // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
+      /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布) */
+      xPasteTweet(
+        serviceId: XServiceId,
+        text: string,
+        targetWcId?: number,
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
+      /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布) */
+      xPasteReply(
+        serviceId: XServiceId,
+        tweetUrl: string,
+        text: string,
+        targetWcId?: number,
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
+      /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
+      xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
+      /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/
+      xDragResolve(
+        serviceId: XServiceId,
+        targetWcId: number,
+      ): Promise<
+        | { kind: 'compose' }
+        | { kind: 'tweet'; author: string | null; statusHref: string | null; hasReplyButton: boolean }
+        | { kind: 'other' }
+        | { kind: 'none' }
+      >;
+      /** 拖拽落推文:就地点该推回复按钮弹 reply 框(不跳详情页)*/
+      xDragReplyHere(
+        serviceId: XServiceId,
+        targetWcId: number,
+      ): Promise<{ ok: boolean; error?: string }>;
 
       // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
       /** 任务开始 — 显示全屏覆盖层;返 unsubscribe */

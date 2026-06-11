@@ -1,0 +1,166 @@
+/**
+ * XSendConfirmPanel 样式(X 集成 阶段 2.5-a)
+ *
+ * 沿用 ask-ai-popup 的深色主题(#2a2a2a / #555 / 圆角 10),独立 class 前缀
+ * krig-x-send-confirm 避免与 ask-ai-popup 串扰(不污染 AI 弹窗)。
+ */
+
+.krig-x-send-confirm {
+  width: 360px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: #e8eaed;
+}
+
+.krig-x-send-confirm__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.krig-x-send-confirm__title {
+  color: #e8eaed;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.krig-x-send-confirm__close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.krig-x-send-confirm__close:hover {
+  color: #fca5a5;
+}
+
+/* 发送类型 / 来源 */
+.krig-x-send-confirm__meta {
+  font-size: 11px;
+  color: #9aa0a6;
+}
+
+.krig-x-send-confirm__reply-to {
+  color: #7cb3f5;
+  word-break: break-word;
+}
+
+/* 可编辑预览 */
+.krig-x-send-confirm__textarea {
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  min-height: 96px;
+  max-height: 320px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.krig-x-send-confirm__textarea:focus {
+  border-color: #1d9bf0; /* X 蓝 */
+}
+
+.krig-x-send-confirm__textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 字数行 */
+.krig-x-send-confirm__count-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.krig-x-send-confirm__count {
+  font-size: 12px;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+}
+
+.krig-x-send-confirm__count--over {
+  color: #f4212e; /* X 超限红 */
+  font-weight: 600;
+}
+
+.krig-x-send-confirm__warn {
+  font-size: 11px;
+  color: #f4212e;
+  line-height: 1.3;
+}
+
+/* 写方向红线提示 */
+.krig-x-send-confirm__hint {
+  margin: 0;
+  font-size: 11px;
+  color: #888;
+  line-height: 1.4;
+}
+
+/* 操作区 */
+.krig-x-send-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.krig-x-send-confirm__cancel {
+  background: #333;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.krig-x-send-confirm__cancel:hover:not(:disabled) {
+  background: #3a3a3a;
+}
+
+.krig-x-send-confirm__cancel:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.krig-x-send-confirm__confirm {
+  background: #1d9bf0; /* X 蓝 */
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.krig-x-send-confirm__confirm:hover:not(:disabled) {
+  background: #3aa9f2;
+}
+
+.krig-x-send-confirm__confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

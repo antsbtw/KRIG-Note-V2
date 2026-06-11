@@ -49,13 +49,15 @@ import '@capabilities/note';                // L7-sub2 新增(note CRUD via IPC 
 import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IPC bridge,decision 012)
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)
 import '@capabilities/ai-extraction';       // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability(原 ai-conversation,2026-05-19 改名)
+import '@capabilities/x-extraction';        // X 集成 阶段 0/1:嵌 x.com webview + 右键提取推文 → tweetBlock(铁律 3 独立 capability)
 import '@capabilities/content-extraction';  // 网页剪藏(Defuddle → Note);模块 load 即订阅 WEB_CLIP_RESULT 跑 import-pipeline
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
 import '@views/ebook';  // L5-C1:EBookView self-register
-import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4)
+import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4;含 X 子入口)
+import '@views/x';      // X 集成:注册 X 提取命令(X 渲染在 AI navSide 服务切换器内,非独立 tab)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
 import './app.css';

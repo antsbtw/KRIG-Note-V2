@@ -12,7 +12,9 @@
  *
  * 弹窗导流(分三类,见 setWindowOpenHandler 处详注):
  * - gapi 内嵌 widget(hovercard 等)→ deny,留在父页面当 iframe;
- * - OAuth 登录弹窗(accounts.google.com 等)→ allow,走原生 popup;
+ * - OAuth 登录(accounts.google.com 等)→ allow 走真 popup,但钉成主窗口的子/模态 sheet
+ *   (parent+modal,不飘出 app、可关闭)。GSI 的 popup 流靠 opener postMessage 回传,整页
+ *   loadURL 会白屏,故只能 popup(配合 index.ts 关 FedCM 让 GIS 退回此 popup 流);
  * - 其余普通 target=_blank / window.open → 外抛成 app 内新 tab,不飞出 workspace。
  *
  * 过滤(shouldHandle,共享 web-shared):
@@ -24,6 +26,7 @@
 
 import type { BrowserWindow, WebContents, Event as ElectronEvent, Input } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
+import { detectXServiceByUrl } from '@shared/types/x-service-types';
 import { shouldHandle } from '../web-shared/should-handle';
 
 /** 快捷键 action 字符串(与渲染进程 WebView.tsx 分发表一一对应) */
@@ -126,8 +129,41 @@ function attachGuest(mainWindow: BrowserWindow, guest: WebContents): void {
   //    飞出 workspace。
   guest.setWindowOpenHandler(({ url }) => {
     if (isEmbedWidget(url)) return { action: 'deny' }; // 1) 内嵌 widget:留在父页
-    if (isOAuthPopup(url)) return { action: 'allow' }; // 2) 登录弹窗:走原生
-    mainWindow.webContents.send(IPC_CHANNELS.WEB_NEW_TAB, { url }); // 3) 普通:开 tab
+    if (isOAuthPopup(url)) {
+      // 2) 登录弹窗:必须 allow 走真 popup —— GSI 的 /gsi/select?ux_mode=popup&ui_mode=card
+      //    这类 URL 专为 popup 设计,靠 opener↔popup postMessage 回传认证结果;若改成
+      //    整页 loadURL 会脱离 opener 上下文 → 白屏(实测)。故保留 popup,但用
+      //    overrideBrowserWindowOptions 钉成主窗口的子/模态窗(parent+modal):macOS 下
+      //    挂成依附主窗口的 sheet,不飘出 app,登录完 window.close 自动收起。
+      //    popup 继承 opener(webview)的 partition,cookie 与 X/AI 同源。
+      //    ⚠️ 必须显式 webPreferences.javascript=true:不设的话 popup 默认 JS 关闭,
+      //    Google 报「浏览器不支持/关闭了 JavaScript」无法登录(实测)。
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          parent: mainWindow,
+          modal: true,
+          backgroundColor: '#1e1e1e',
+          webPreferences: {
+            // 必须显式开 JS:否则 Google 报「浏览器不支持 / 关闭了 JavaScript」无法登录。
+            // 不显式设 partition —— popup 自动继承 opener(guest webview)的 partition,
+            // X/AI 走 persist:webview、普通浏览走 persist:webview-<wsId>,各自 cookie 同源。
+            javascript: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+          },
+        },
+      };
+    }
+    // 3) 目标是 x.com/twitter.com 的 window.open(X 内点「Read replies」/ 用户主页 /
+    //    图片放大等):**在 opener guest 内同页导航**(loadURL),留在原 webview(登录态、
+    //    KRIG 外壳都在);不开新窗/新 tab、不脱离 partition。只看 target 是不是 X(不依赖
+    //    opener URL 判定 —— opener 可能是 X 内嵌 iframe / about:blank 中转,判不准)。
+    if (detectXServiceByUrl(url)) {
+      guest.loadURL(url);
+      return { action: 'deny' };
+    }
+    mainWindow.webContents.send(IPC_CHANNELS.WEB_NEW_TAB, { url }); // 4) 普通:开 tab
     return { action: 'deny' };
   });
 }

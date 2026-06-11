@@ -22,7 +22,8 @@ import {
   getAIServiceProfile,
   type AIServiceId,
 } from '@shared/types/ai-service-types';
-import { getAIWsState, setAIServiceId } from './data-model';
+import type { XExtractionApi, XHostHandle } from '@capabilities/x-extraction';
+import { getAIWsState, setAIServiceId, setActiveLauncher, type LauncherId } from './data-model';
 import { AIToolbar } from './AIToolbar';
 import './ai.css';
 
@@ -41,7 +42,37 @@ export function AIView({ workspaceId }: AIViewProps) {
   const Host = aiApi.Host;
   const hostRef = useRef<AIHostHandle | null>(null);
 
-  // 订阅 per-ws state(currentServiceId)
+  // X 集成:X 当 AI navSide 服务切换器里的一个入口,但走独立 x-extraction capability
+  // 渲染(铁律 3:X 不是 AIServiceId,只借 AI view 外壳做导航)。
+  const xApi = useMemo(
+    () => requireCapabilityApi<XExtractionApi>('x-extraction'),
+    [],
+  );
+  const XHost = xApi.Host;
+  const xHostRef = useRef<XHostHandle | null>(null);
+
+  /**
+   * 把本 ws 的 X Host guest wc id 登记到 x-extraction registry(注入按活跃 ws 定向,
+   * 治「多 X 实例串扰 → 注入打到内置浏览器 X / 别的 ws」的 bug)。
+   * X Host dom-ready / url 变化后 getWebContentsId 才有值,故在那时机调。
+   */
+  const registerXWc = useCallback(() => {
+    const wcId = xHostRef.current?.getWebContentsId() ?? null;
+    if (wcId != null) xApi.registerXHostWcId(workspaceId, wcId);
+  }, [xApi, workspaceId]);
+
+  // 卸载时清除本 ws 登记(避免 stale wc id 残留)
+  useEffect(() => {
+    return () => xApi.clearXHostWcId(workspaceId);
+  }, [xApi, workspaceId]);
+
+  // AI Host wc 登记由 capability Host 内部在 dom-ready/navigate 时做(对称 X 但更内聚:
+  // Host 自己知道 wc id);AIView 只负责卸载时清掉本 ws 登记,避免 stale wc id 残留。
+  useEffect(() => {
+    return () => aiApi.clearAIHostWcId(workspaceId);
+  }, [aiApi, workspaceId]);
+
+  // 订阅 per-ws state(currentServiceId + activeLauncher)
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
     () => {
@@ -73,27 +104,44 @@ export function AIView({ workspaceId }: AIViewProps) {
    */
   const isInRightSlot = activeRightViewId === VIEW_ID;
 
+  const isX = wsState?.activeLauncher === 'x';
+
   // Toolbar 用的 transient state(由 Host callback 推送)
   const [loading, setLoading] = useState(false);
   const [displayUrl, setDisplayUrl] = useState(
     wsState ? getAIServiceProfile(wsState.currentServiceId).newChatUrl : '',
   );
 
-  const handleSelectService = useCallback(
-    (id: AIServiceId) => {
-      setAIServiceId(workspaceId, id);
+  // 切到 X 时 displayUrl 复位(X Host dom-ready 会回推真实 URL)
+  const handleSelectLauncher = useCallback(
+    (id: LauncherId) => {
+      if (id === 'x') {
+        setActiveLauncher(workspaceId, 'x');
+        setDisplayUrl('');
+      } else {
+        setAIServiceId(workspaceId, id);
+      }
     },
     [workspaceId],
   );
 
   const handleNewChat = useCallback(() => {
     if (!wsState) return;
-    const host = hostRef.current;
-    if (!host) return;
-    host.switchService(wsState.currentServiceId);
-  }, [wsState]);
+    if (isX) {
+      // X 没有"新对话"语义,复用按钮回 X 主页
+      xHostRef.current?.goHome();
+      return;
+    }
+    hostRef.current?.switchService(wsState.currentServiceId);
+  }, [wsState, isX]);
 
-  const handleReload = useCallback(() => hostRef.current?.reload(), []);
+  const handleReload = useCallback(() => {
+    if (isX) {
+      xHostRef.current?.reload();
+    } else {
+      hostRef.current?.reload();
+    }
+  }, [isX]);
 
   /**
    * 订阅跨槽消息 'ai.paste-and-send' — Note "🤖 问 AI" 触发 ask-ai.ts 发的:
@@ -134,6 +182,57 @@ export function AIView({ workspaceId }: AIViewProps) {
     return () => unsub();
   }, [workspaceId]);
 
+  /**
+   * 订阅 'x.open-tweet' — tweet block「Open original」触发 x-view.open-tweet 命令发的:
+   * payload: { url: string, emittedAt: number }
+   *
+   * 收到 → 把 X webview 导航到该推文(命令已先 setActiveLauncher('x') + 确保 AI view 在台上)。
+   * 与 ai.paste-and-send 同款 last-known pull + emittedAt 去重(应对 mount/切 ws 边角)。
+   */
+  const lastXNavAtRef = useRef(0);
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const handle = (payload: unknown): void => {
+      const p = (payload ?? {}) as { url?: string; emittedAt?: number };
+      if (typeof p.url !== 'string' || !p.url) return;
+      const ts = typeof p.emittedAt === 'number' ? p.emittedAt : Date.now();
+      if (ts <= lastXNavAtRef.current) return;
+      lastXNavAtRef.current = ts;
+      // 切到 X 入口(让 X webview 显示出来)再导航
+      setActiveLauncher(workspaceId, 'x');
+      xHostRef.current?.navigate(p.url);
+    };
+    const last = bus.channels.getLastValue('x.open-tweet');
+    if (last) handle(last);
+    const unsub = bus.channels.subscribe('x.open-tweet', handle);
+    return () => unsub();
+  }, [workspaceId]);
+
+  /**
+   * 订阅 'x.activate-launcher' — 「发到 X」(x-view.send-to-x)注入前发的:
+   * 让 AIView 切到 X 入口(setActiveLauncher('x'))把 X webview 显示出来 + 注册,
+   * main 侧 pasteTweet/pasteReply 才能拿到活跃 X webContents。
+   *
+   * 与 x.open-tweet 同款 last-known pull + emittedAt 去重(应对 mount/切 ws 边角)。
+   */
+  const lastXActivateAtRef = useRef(0);
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const handle = (payload: unknown): void => {
+      const p = (payload ?? {}) as { emittedAt?: number };
+      const ts = typeof p.emittedAt === 'number' ? p.emittedAt : Date.now();
+      if (ts <= lastXActivateAtRef.current) return;
+      lastXActivateAtRef.current = ts;
+      setActiveLauncher(workspaceId, 'x');
+    };
+    const last = bus.channels.getLastValue('x.activate-launcher');
+    if (last) handle(last);
+    const unsub = bus.channels.subscribe('x.activate-launcher', handle);
+    return () => unsub();
+  }, [workspaceId]);
+
   // 右键「📥 提取此对话到笔记」(AI_EXTRACT_TURN_REQUEST 广播)的订阅**不在此处**:
   // 它曾在 useEffect 里订阅 → 每个并存 AIView 实例各订阅一次 → 一次右键 N 次 execute、
   // 并发往右槽 Note 塞重复块。已收口为模块级单订阅,见 ai-commands.ts registerAICommands()。
@@ -164,23 +263,39 @@ export function AIView({ workspaceId }: AIViewProps) {
     <div className="krig-ai-view">
       <AIToolbar
         serviceId={wsState.currentServiceId}
+        activeLauncher={wsState.activeLauncher}
         url={displayUrl}
         loading={loading}
         activeRightViewId={activeRightViewId}
         isInRightSlot={isInRightSlot}
-        onSelectService={handleSelectService}
+        onSelectLauncher={handleSelectLauncher}
         onNewChat={handleNewChat}
         onReload={handleReload}
         onExtractFull={handleExtractFull}
         onCloseRightSlot={handleCloseRightSlot}
       />
+      {/* AI Host 与 X Host 都常驻,只切显隐(保留各自登录态/页面状态;切回不重载)。
+          X webview 走独立 x-extraction capability(铁律 3)。 */}
       <Host
         ref={hostRef}
         workspaceId={workspaceId}
         serviceId={wsState.currentServiceId}
         className="krig-ai-view__webview"
-        onUrlChanged={setDisplayUrl}
-        onLoadingChanged={setLoading}
+        style={{ display: isX ? 'none' : 'flex' }}
+        onUrlChanged={(u) => { if (!isX) setDisplayUrl(u); }}
+        onLoadingChanged={(l) => { if (!isX) setLoading(l); }}
+      />
+      <XHost
+        ref={xHostRef}
+        workspaceId={workspaceId}
+        className="krig-ai-view__webview"
+        style={{ display: isX ? 'flex' : 'none' }}
+        onUrlChanged={(u) => {
+          if (isX) setDisplayUrl(u);
+          // dom-ready / 每次导航后 guest wc id 可取 → 登记本 ws 的注入目标
+          registerXWc();
+        }}
+        onLoadingChanged={(l) => { if (isX) setLoading(l); }}
       />
     </div>
   );

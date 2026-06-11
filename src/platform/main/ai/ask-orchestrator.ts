@@ -18,84 +18,92 @@
  * background-webview 模块已删除(被前台 webview-registry 取代,git rm)。
  */
 
-import type { WebContents } from 'electron';
 import type { AIServiceId } from '@shared/types/ai-service-types';
 import type { AIAskResult, AISSEStatus } from '@shared/ipc/ai-types';
 import { SSECaptureManager } from './interceptor';
 import { pasteTextToAI, clickSendButton } from './writer';
 import { broadcastAIResponseReady, broadcastAIError } from './broadcast';
 import {
-  getActiveAIWebContents,
+  resolveAIWebContents,
+  resolveAIWebContentsWithWait,
   subscribeAttachAIWebContents,
 } from './webview-registry';
 
-/** 单例 SSE 拦截 manager — 跟随活跃 webContents 更换 */
-let captureManager: SSECaptureManager | null = null;
+/**
+ * SSE 拦截 manager 池 —— **per-ws(按 guest wcId 持有)**(收口 ③,2026-06-11 决策 A)。
+ *
+ * 旧实现是单例「跟随全局 active 最后 navigate 胜出」:多 ws 并存时只有一个 wc 被 attach,
+ * 另一个 ws 的 Gemini 完全没 CDP 偷听,且全局 active 注入打到 A 而偷听绑在 B → 错位。
+ *
+ * 改为按 wcId 一个 manager:每个 attach 的 AI webview 各自持有 SSECaptureManager,各自注入
+ * hook(Claude/ChatGPT page-cache)/ attach CDP(Gemini)。读取时按本 ws 的 wcId 取对应
+ * manager —— 偷听实例与定向注入实例必然一致。
+ *
+ * §B 风险对冲(裁定):Claude/ChatGPT 的 SSE 数据在 guest page-cache(随 wc 走),本改动
+ * 只是把「单 manager」拆成「per-wc manager」,每个 manager 的 inject/读逻辑(interceptor.ts)
+ * 一字未改,Claude/ChatGPT 路径不受影响。真正受益的是 Gemini(main 端 CDP 缓存按 wc 各存)。
+ */
+const captureManagers = new Map<number, SSECaptureManager>();
 
 /**
- * 给外部模块(ai-sync-orchestrator 等)访问当前 SSE 拦截 manager。
+ * 取某 wc 的 SSE 拦截 manager(ai-sync-orchestrator 等按本 ws 的 wcId 取)。
  *
- * 注:返回值随 webview 切换变更,调用方每次轮询前都重新调,不要缓存本地。
+ * @param targetWcId 本 ws 的 AI Host guest wcId;未传 / 无对应 manager → null。
  */
-export function getSSECaptureManager(): SSECaptureManager | null {
-  return captureManager;
+export function getSSECaptureManager(targetWcId?: number): SSECaptureManager | null {
+  if (typeof targetWcId !== 'number') return null;
+  return captureManagers.get(targetWcId) ?? null;
 }
 
 /**
- * 订阅 registry 的"活跃 webContents 变更",自动 stop 旧 manager + new + start。
+ * 订阅 registry 的"活跃 webContents 变更":为新 attach 的 wc 建并 start 一个 manager
+ * (已有则跳过,不再 stop 别的 ws 的 manager)。wc destroyed 时清出池(stop + 释放 debugger)。
  * 模块加载时立即订阅(IIFE,确保 main 启动后任何 AI webview navigate 都被拦截)。
  */
 subscribeAttachAIWebContents((_serviceId, wc) => {
-  if (captureManager?.getWebContents() === wc) return;
-  captureManager?.stop();
-  captureManager = new SSECaptureManager(wc);
-  captureManager.start();
+  if (captureManagers.has(wc.id)) return;
+  const manager = new SSECaptureManager(wc);
+  captureManagers.set(wc.id, manager);
+  manager.start();
+  // wc 销毁时清出池,避免 stale manager + debugger 泄漏(per-ws 生命周期,§B 第 3 条)
+  wc.once('destroyed', () => {
+    const m = captureManagers.get(wc.id);
+    if (m) {
+      m.stop();
+      captureManagers.delete(wc.id);
+    }
+  });
 });
-
-/**
- * Poll 等待前台 AI Host webview 注册。
- *
- * 用户点 🤖 问 AI → AskAIPanel handleSend → bus.slot.openRight('ai-view') →
- * AIView mount → webview navigate 到 claude.ai/new → did-navigate → registry。
- * 这条链路 1-3s 不等(取决于网络);timeoutMs 给足。
- */
-async function waitForAIWebContents(
-  serviceId: AIServiceId,
-  timeoutMs = 10_000,
-): Promise<WebContents | null> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const wc = getActiveAIWebContents(serviceId);
-    if (wc) return wc;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  return null;
-}
 
 /**
  * 给 AI 服务发 prompt 等完整回复返回。
  *
  * 注:本期"问 AI"走的是 pasteAndSend(用户主导),不再走 askAI 这个"自动等回复"
  * 路径。askAI 保留供测试 / 程序化调用 / 未来快问快答场景。
+ *
+ * targetWcId:本活跃 ws 的 AI Host guest wc id(renderer 按 ws 定向传来)。poll 等本
+ * ws 的 wc 就绪(AIView mount → navigate → dom-ready 链路 1-3s);未命中 fail loud。
  */
 export async function askAI(
   serviceId: AIServiceId,
   prompt: string,
+  targetWcId?: number,
   timeoutMs = 60_000,
 ): Promise<AIAskResult> {
   try {
-    const webContents = await waitForAIWebContents(serviceId);
-    if (!webContents) {
-      const err = `No active ${serviceId} webview — open AI tab and navigate first`;
-      broadcastAIError({ serviceId, error: err });
-      return { success: false, error: err };
+    const got = await resolveAIWebContentsWithWait(serviceId, targetWcId);
+    if ('error' in got) {
+      broadcastAIError({ serviceId, error: got.error });
+      return { success: false, error: got.error };
     }
+    const webContents = got.wc;
 
-    // SSE manager 已通过 subscribeAttachAIWebContents 自动 attach,无需手动 start
+    // 取本 wc 的 SSE manager(已通过 subscribeAttachAIWebContents 自动 attach + start)
+    const manager = getSSECaptureManager(webContents.id);
 
     // 清掉之前的 response 缓存
-    if (captureManager) {
-      await captureManager.clearResponses();
+    if (manager) {
+      await manager.clearResponses();
     }
 
     // 粘贴 prompt
@@ -113,12 +121,12 @@ export async function askAI(
     await clickSendButton(webContents, serviceId);
 
     // 等回复
-    if (!captureManager) {
+    if (!manager) {
       const err = 'SSE capture manager not initialized';
       broadcastAIError({ serviceId, error: err });
       return { success: false, error: err };
     }
-    const markdown = await captureManager.waitForResponse(timeoutMs);
+    const markdown = await manager.waitForResponse(timeoutMs);
     if (!markdown) {
       const err = 'AI response timed out';
       broadcastAIError({ serviceId, error: err });
@@ -136,12 +144,15 @@ export async function askAI(
 
 /**
  * 取 SSE 拦截状态(debug 用)。
+ *
+ * 收口 ③:per-ws 池后按本 ws 的 wcId 取对应 manager;未传 wcId / 无对应 manager → 空状态。
  */
-export async function getSSEStatus(): Promise<AISSEStatus> {
-  if (!captureManager) {
+export async function getSSEStatus(targetWcId?: number): Promise<AISSEStatus> {
+  const manager = getSSECaptureManager(targetWcId);
+  if (!manager) {
     return { count: 0, latestStreaming: false, hooked: false };
   }
-  return captureManager.getStatus();
+  return manager.getStatus();
 }
 
 /**
@@ -155,17 +166,16 @@ export async function getSSEStatus(): Promise<AISSEStatus> {
 export async function pasteAndSend(
   serviceId: AIServiceId,
   prompt: string,
+  targetWcId?: number,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // 等前台 AI Host webview 就绪(用户点"问 AI"后,AIView mount → webview navigate
-    // → did-navigate → registry 注册,链路 1-3s)
-    const webContents = await waitForAIWebContents(serviceId);
-    if (!webContents) {
-      return {
-        success: false,
-        error: `No active ${serviceId} webview — wait for AI tab to load`,
-      };
+    // 等本 ws 的 AI Host webview 就绪(用户点"问 AI"后,AIView mount → webview navigate
+    // → dom-ready → 登记 wc id,链路 1-3s);按 ws 定向,未命中 fail loud。
+    const got = await resolveAIWebContentsWithWait(serviceId, targetWcId);
+    if ('error' in got) {
+      return { success: false, error: got.error };
     }
+    const webContents = got.wc;
 
     // SSE manager 已通过 subscribeAttachAIWebContents 自动 attach 到这个 wc
 
@@ -189,9 +199,10 @@ export async function pasteAndSend(
  *
  * Phase 10.B 后:仅用作 ChatGPT/Gemini 的兜底(Claude 走 extractFullConversation 真 API)。
  */
-export async function getLatestCapturedResponse(): Promise<string | null> {
-  if (!captureManager) return null;
-  return captureManager.getLatestResponse();
+export async function getLatestCapturedResponse(targetWcId?: number): Promise<string | null> {
+  const manager = getSSECaptureManager(targetWcId);
+  if (!manager) return null;
+  return manager.getLatestResponse();
 }
 
 /**
@@ -210,6 +221,7 @@ export async function getLatestCapturedResponse(): Promise<string | null> {
  */
 export async function extractFullConversation(
   serviceId: AIServiceId,
+  targetWcId?: number,
 ): Promise<{
   success: boolean;
   markdown?: string;
@@ -219,13 +231,12 @@ export async function extractFullConversation(
   artifactCount?: number;
   error?: string;
 }> {
-  const wc = getActiveAIWebContents(serviceId);
-  if (!wc) {
-    return {
-      success: false,
-      error: `No active ${serviceId} webview — open AI tab first`,
-    };
+  // 按 ws 定向取本 ws 的 AI Host wc(治多实例串扰);未命中 fail loud,不回退全局。
+  const got = resolveAIWebContents(serviceId, targetWcId);
+  if ('error' in got) {
+    return { success: false, error: got.error };
   }
+  const wc = got.wc;
 
   let result: { success: boolean; markdown?: string; title?: string; model?: string; turnCount?: number; artifactCount?: number; error?: string };
 
@@ -268,6 +279,7 @@ export async function extractConversationTurn(
   serviceId: AIServiceId,
   x: number,
   y: number,
+  targetWcId?: number,
 ): Promise<{
   success: boolean;
   userMessage?: string;
@@ -275,10 +287,12 @@ export async function extractConversationTurn(
   artifactCount?: number;
   error?: string;
 }> {
-  const wc = getActiveAIWebContents(serviceId);
-  if (!wc) {
-    return { success: false, error: `No active ${serviceId} webview — open AI tab first` };
+  // 按 ws 定向取本 ws 的 AI Host wc(治多实例串扰);未命中 fail loud,不回退全局。
+  const got = resolveAIWebContents(serviceId, targetWcId);
+  if ('error' in got) {
+    return { success: false, error: got.error };
   }
+  const wc = got.wc;
 
   let result: { success: boolean; userMessage?: string; markdown?: string; artifactCount?: number; error?: string };
   if (serviceId === 'claude') {

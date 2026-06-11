@@ -23,7 +23,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { AIServiceId } from '@shared/types/ai-service-types';
 import {
-  getActiveAIWebContents,
+  resolveAIWebContents,
   subscribeAttachAIWebContents,
 } from './webview-registry';
 import { getSSECaptureManager } from './ask-orchestrator';
@@ -36,6 +36,8 @@ const POLL_INTERVAL_MS = 1_500;
 
 interface RunningState {
   serviceId: AIServiceId;
+  /** 本 ws 的 AI Host guest wc id(按 ws 定向轮询/抓取,治多实例串扰)*/
+  targetWcId: number | undefined;
   timer: NodeJS.Timeout;
   /** 已 emit 过的 SSE record id 集合(去重,跟 page-cache MAX_RESPONSES=20 同量级,无需淘汰)*/
   syncedRecordIds: Set<string>;
@@ -55,14 +57,15 @@ const running = new Map<AIServiceId, RunningState>();
  *
  * 多次调用同 serviceId 幂等;调用后 1.5s 内开始检测 SSE 完成跃迁。
  */
-export function startAISync(serviceId: AIServiceId): void {
+export function startAISync(serviceId: AIServiceId, targetWcId?: number): void {
   if (running.has(serviceId)) return;
 
-  console.log(`[ai-sync] start serviceId=${serviceId}`);
+  console.log(`[ai-sync] start serviceId=${serviceId} targetWcId=${targetWcId ?? 'none'}`);
 
   // 初次 poll 前先记下当前 baseline,避免把"启动前已存在的旧回复"误当新 turn emit
   const state: RunningState = {
     serviceId,
+    targetWcId,
     timer: setInterval(() => void pollOnce(serviceId), POLL_INTERVAL_MS),
     syncedRecordIds: new Set(),
     syncedAssistantUuids: new Set(),
@@ -90,10 +93,16 @@ async function seedBaseline(serviceId: AIServiceId): Promise<void> {
   const state = running.get(serviceId);
   if (!state) return;
 
-  const manager = getSSECaptureManager();
-  const wc = getActiveAIWebContents(serviceId);
-  if (!manager || !wc) {
-    // webview 还没 ready,baseline 留空 — 后续 pollOnce 自然会把 first record 当 baseline
+  // 按 ws 定向取本 ws 的 AI Host wc(治多实例串扰);未就绪 → baseline 留空,
+  // 后续 pollOnce 自然会把 first record 当 baseline(非错误,故此处不 fail loud broadcast)。
+  const got = resolveAIWebContents(serviceId, state.targetWcId);
+  if ('error' in got) {
+    return;
+  }
+  const wc = got.wc;
+  // 收口 ③:按本 ws 的 wcId 取对应 manager(per-ws 池),不再取全局单 manager
+  const manager = getSSECaptureManager(wc.id);
+  if (!manager) {
     return;
   }
 
@@ -138,10 +147,15 @@ async function pollOnce(serviceId: AIServiceId): Promise<void> {
   const state = running.get(serviceId);
   if (!state) return;
 
-  const wc = getActiveAIWebContents(serviceId);
-  if (!wc) return; // webview 还没注册,等下次
+  // 按 ws 定向取本 ws 的 AI Host wc;未就绪/未命中 → 等下次轮询(本 ws 实例尚未 ready,
+  // 非用户可见错误,轮询型路径静默等待而非 broadcast error)。
+  const got = resolveAIWebContents(serviceId, state.targetWcId);
+  if ('error' in got) return;
+  const wc = got.wc;
 
-  const manager = getSSECaptureManager();
+  // 收口 ③:按本 ws 的 wcId 取对应 manager(per-ws 池)— gemini 的 CDP 缓存与定向注入实例
+  // 必然一致,不再可能「注入打 A、偷听截 B」。claude/chatgpt 走 page-cache(在 wc 内)本就正确。
+  const manager = getSSECaptureManager(wc.id);
   if (!manager) return;
 
   // 取 records — gemini 走 main 端缓存,claude/chatgpt 走 page-cache
@@ -233,9 +247,11 @@ async function emitTurn(
  * 调用入口:src/platform/main/ai/handlers.ts registerAIHandlers() 内挂接。
  */
 export function registerAISyncHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.AI_SYNC_START, (_e, serviceId: unknown) => {
-    if (!isServiceId(serviceId)) return { success: false, error: 'invalid serviceId' };
-    startAISync(serviceId);
+  ipcMain.handle(IPC_CHANNELS.AI_SYNC_START, (_e, payload: unknown) => {
+    const p = payload as { serviceId?: unknown; targetWcId?: unknown } | null;
+    if (!p || !isServiceId(p.serviceId)) return { success: false, error: 'invalid serviceId' };
+    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
+    startAISync(p.serviceId, targetWcId);
     return { success: true };
   });
   ipcMain.handle(IPC_CHANNELS.AI_SYNC_STOP, (_e, serviceId: unknown) => {

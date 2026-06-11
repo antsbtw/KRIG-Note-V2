@@ -116,7 +116,8 @@ function reconcileForActive(): void {
   console.log(
     `[ai-sync-integration] start ai-sync ws=${activeId} service=${serviceId}`,
   );
-  void aiCap.startAISync(serviceId);
+  // 按本 ws 取 AI Host wc 定向(治多实例串扰);未登记 → null,main 轮询型路径静默等待。
+  void aiCap.startAISync(serviceId, aiCap.getAIHostWcId(activeId));
 }
 
 async function stopActive(aiCap: AIConversationApi): Promise<void> {

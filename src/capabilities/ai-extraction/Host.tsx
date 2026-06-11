@@ -24,6 +24,7 @@ import {
 } from '@shared/types/ai-service-types';
 import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import type { AIHostHandle, AIHostProps } from './types';
+import { registerAIHostWcId, getAIHostWcId } from './ai-host-registry';
 
 interface WebviewElement extends HTMLElement {
   src: string;
@@ -31,13 +32,15 @@ interface WebviewElement extends HTMLElement {
   getURL(): string;
   reload(): void;
   isLoading(): boolean;
+  /** Electron <webview> 标准方法:取 guest 的 webContents id(注入按 ws 定向用)*/
+  getWebContentsId(): number;
 }
 
 export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
   props,
   ref,
 ): ReactElement {
-  const { workspaceId, serviceId, className, onUrlChanged, onLoadingChanged } = props;
+  const { workspaceId, serviceId, className, style, onUrlChanged, onLoadingChanged } = props;
 
   const webviewRef = useRef<WebviewElement | null>(null);
   const domReadyRef = useRef(false);
@@ -61,6 +64,20 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     if (webviewRef.current === wv) return;
     webviewRef.current = wv;
 
+    /**
+     * 把本 ws 的 AI Host guest wc id 登记到 ai-host-registry(注入/抓取按活跃 ws 定向,
+     * 治多 ws / 内置浏览器+AI-view 并存时打错 AI 实例的 bug,对称 X)。
+     * dom-ready / 每次导航后 guest wc id 才可取,故在那时机调。
+     */
+    const registerWc = (): void => {
+      if (!domReadyRef.current) return;
+      try {
+        registerAIHostWcId(workspaceId, wv.getWebContentsId());
+      } catch {
+        /* guest 尚未就绪,忽略;下次 dom-ready / navigate 再登记 */
+      }
+    };
+
     const handleStartLoading = (): void => {
       callbacksRef.current.onLoadingChanged?.(true);
     };
@@ -73,6 +90,8 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
       if (newUrl && newUrl !== 'about:blank') {
         callbacksRef.current.onUrlChanged?.(newUrl);
       }
+      // SPA 路由切换 / 重导航后 guest wc id 可能变,重登记本 ws 目标
+      registerWc();
     };
     const handleDidNavigateInPage = (e: Event): void => {
       // AI 网站是 SPA,路由切换走 in-page navigation
@@ -85,6 +104,8 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
       } catch {
         /* ignore */
       }
+      // dom-ready 后 guest wc id 可取 → 登记本 ws 的注入/抓取目标
+      registerWc();
       // flush pending prompt(pasteAndSend 在 dom-ready 前调时排的队)
       // 延迟 800ms 让 AI 网站脚本初始化完(否则输入框 selector 找不到)
       const flush = flushPendingRef.current;
@@ -98,8 +119,6 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     wv.addEventListener('did-navigate', handleDidNavigate);
     wv.addEventListener('did-navigate-in-page', handleDidNavigateInPage);
     wv.addEventListener('dom-ready', handleDomReady);
-    // workspaceId 当前不直接用,保留依赖以便未来 per-ws 差异
-    void workspaceId;
   }, [workspaceId]);
 
   // 切服务 — 外部改 serviceId → loadURL 到对应 newChatUrl
@@ -137,8 +156,11 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
       console.warn('[ai Host] electronAPI.aiPasteAndSend not available');
       return;
     }
-    await api.aiPasteAndSend(targetService, prompt);
-  }, []);
+    // 注入目标 = 本 ws 的 AI Host guest(治多实例串扰:不再依赖 main 全局「最后 navigate」)。
+    // sendNow 只在 dom-ready 后调,故此时本 ws 已登记;未命中 → 传 null,main fail loud。
+    const targetWcId = getAIHostWcId(workspaceId);
+    await api.aiPasteAndSend(targetService, prompt, targetWcId ?? undefined);
+  }, [workspaceId]);
 
   // imperative API
   useImperativeHandle(
@@ -151,6 +173,15 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
       },
       reload: () => webviewRef.current?.reload(),
       getURL: () => webviewRef.current?.getURL() ?? '',
+      getWebContentsId: () => {
+        const wv = webviewRef.current;
+        if (!wv || !domReadyRef.current) return null;
+        try {
+          return wv.getWebContentsId();
+        } catch {
+          return null;
+        }
+      },
       pasteAndSend: async (prompt: string, targetServiceId?: AIServiceId) => {
         if (!prompt) return;
         const finalService = targetServiceId ?? serviceId;
@@ -192,6 +223,7 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     partition: WEBVIEW_PARTITION,
     allowpopups: 'true',
     className,
+    style,
   };
   const Tag = 'webview' as unknown as React.ComponentType<typeof tagProps>;
   return <Tag {...tagProps} />;

@@ -16,70 +16,35 @@
  *
  * 发送:也走 OS 级 — focus 输入框 + sendInputEvent Enter(Gemini Ctrl+Enter)。
  * fallback:Step 1 OS Enter / Step 2 querySelector click button / Step 3 JS dispatch Enter。
+ *
+ * 铁律 1(底座复用):focus + OS 级 Cmd+V 真粘贴 这套**服务无关**逻辑已下沉到
+ * web-service-base/webview-input(focusInputBox / pasteTextToWebview),AI 与 X 共用。
+ * 本文件 focusInput / pasteTextToAI 退化为传 AI profile selector 的薄包装;
+ * clickSendButton 是 AI 问答专属的「自动发送」语义(X 写方向绝不自动点发布),保留在此。
  */
 
-import { clipboard } from 'electron';
+import {
+  focusInputBox,
+  pasteTextToWebview,
+} from '../web-service-base';
 import { getAIServiceProfile, type AIServiceId } from '@shared/types/ai-service-types';
 
-const IS_MAC = process.platform === 'darwin';
-const PASTE_MODIFIER: Array<'control' | 'meta'> = IS_MAC ? ['meta'] : ['control'];
-
 /**
- * focus 输入框 — sendInputEvent Cmd+V 需要 webContents 内焦点在输入框上,
- * 否则 OS 级粘贴会落到无效目标。
+ * focus AI 输入框 — 薄包装:取 AI profile 的 inputBox selector,委托公共 focusInputBox。
  */
 async function focusInput(
   webContents: Electron.WebContents,
   serviceId: AIServiceId,
 ): Promise<boolean> {
   const profile = getAIServiceProfile(serviceId);
-  const script = `
-    (function() {
-      var sel = ${JSON.stringify(profile.selectors.inputBox)};
-      var selectors = sel.split(',').map(function(s) { return s.trim(); });
-      for (var i = 0; i < selectors.length; i++) {
-        var el = document.querySelector(selectors[i]);
-        if (el) {
-          // 确保元素在视野内 + scroll into view
-          try { el.scrollIntoView({block:'center'}); } catch(e) {}
-          try { el.focus(); } catch(e) {}
-          // 若是 contenteditable,把光标移到内容末尾
-          if (el.contentEditable === 'true' && document.createRange) {
-            try {
-              var range = document.createRange();
-              range.selectNodeContents(el);
-              range.collapse(false);
-              var sel2 = window.getSelection();
-              if (sel2) {
-                sel2.removeAllRanges();
-                sel2.addRange(range);
-              }
-            } catch(e) {}
-          }
-          return true;
-        }
-      }
-      return false;
-    })();
-  `;
-  try {
-    return Boolean(await webContents.executeJavaScript(script));
-  } catch (err) {
-    console.error('[ContentSender] focusInput failed:', err);
-    return false;
-  }
+  return focusInputBox(webContents, profile.selectors.inputBox);
 }
 
 /**
- * Paste text into the AI service input box.
+ * Paste text into the AI service input box —— 薄包装:取 AI profile 的 inputBox selector,
+ * 委托公共 pasteTextToWebview(focus + 备份剪贴板 + OS Cmd+V + 验证落地 + 兜底 + 还原)。
  *
- * 流程:
- *   1. focus 输入框
- *   2. 备份用户剪贴板
- *   3. clipboard.writeText(prompt)
- *   4. webContents.sendInputEvent Cmd+V(模拟真 OS 级粘贴)
- *   5. 短暂等待让 React 状态更新 + 检验内容是否落地
- *   6. 还原剪贴板
+ * 行为与抽取前一致(原内联逻辑一字未改,只把 selector 提成入参下沉到公共原语)。
  */
 export async function pasteTextToAI(
   webContents: Electron.WebContents,
@@ -87,121 +52,7 @@ export async function pasteTextToAI(
   text: string,
 ): Promise<boolean> {
   const profile = getAIServiceProfile(serviceId);
-
-  // 1. focus input
-  const focused = await focusInput(webContents, serviceId);
-  if (!focused) {
-    console.warn(`[ContentSender] ${profile.name} input element not found`);
-    return false;
-  }
-
-  // 2. 备份剪贴板(发送后还原,避免污染用户剪贴板)
-  const originalClipboard = clipboard.readText();
-
-  try {
-    // 3. 写新内容到剪贴板
-    clipboard.writeText(text);
-
-    // 4. OS 级 Cmd+V / Ctrl+V — Chromium 走真 native paste 流程,React state 同步
-    webContents.sendInputEvent({
-      type: 'keyDown',
-      keyCode: 'V',
-      modifiers: PASTE_MODIFIER,
-    });
-    webContents.sendInputEvent({
-      type: 'char',
-      keyCode: 'V',
-      modifiers: PASTE_MODIFIER,
-    });
-    webContents.sendInputEvent({
-      type: 'keyUp',
-      keyCode: 'V',
-      modifiers: PASTE_MODIFIER,
-    });
-
-    // 5. 等 React 接收 paste event + state update(实测 200-400ms 足够)
-    await new Promise((resolve) => setTimeout(resolve, 400));
-
-    // 6. 检验内容是否落地(返 true 表示输入框 textContent 非空 + 含 prompt 头)
-    const verifyScript = `
-      (function() {
-        var sel = ${JSON.stringify(profile.selectors.inputBox)};
-        var selectors = sel.split(',').map(function(s) { return s.trim(); });
-        for (var i = 0; i < selectors.length; i++) {
-          var el = document.querySelector(selectors[i]);
-          if (el) {
-            var content = (el.value !== undefined ? el.value : el.textContent) || '';
-            return content.trim().length > 0;
-          }
-        }
-        return false;
-      })();
-    `;
-    let landed = false;
-    try {
-      landed = Boolean(await webContents.executeJavaScript(verifyScript));
-    } catch { /* ignore */ }
-
-    if (landed) {
-      console.log(`[ContentSender] Pasted text into ${profile.name} input via OS Cmd+V (length: ${text.length})`);
-      return true;
-    }
-
-    // 兜底:OS Cmd+V 也没生效 → 走 JS execCommand('insertText')
-    // (V1 ClipboardEvent 模式作为最后兜底,某些 textarea-only 输入框可能反而对这个敏感)
-    console.warn(`[ContentSender] OS Cmd+V didn't populate ${profile.name} input, falling back to JS execCommand`);
-    const fallbackScript = `
-      (function() {
-        var sel = ${JSON.stringify(profile.selectors.inputBox)};
-        var selectors = sel.split(',').map(function(s) { return s.trim(); });
-        var el = null;
-        for (var i = 0; i < selectors.length; i++) {
-          el = document.querySelector(selectors[i]);
-          if (el) break;
-        }
-        if (!el) return false;
-        try { el.focus(); } catch(e) {}
-        var text = ${JSON.stringify(text)};
-        if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-          // React 控制的 input:用 native setter 触发 React onChange
-          var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value') ||
-                             Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-          if (nativeSetter && nativeSetter.set) {
-            nativeSetter.set.call(el, text);
-          } else {
-            el.value = text;
-          }
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        } else if (el.contentEditable === 'true') {
-          // contenteditable:用 execCommand('insertText') — 走 native input event
-          try {
-            document.execCommand('insertText', false, text);
-          } catch(e) {
-            // execCommand 失败 → 直接写 textContent + dispatch input
-            el.textContent = text;
-            el.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: text, bubbles: true }));
-          }
-        }
-        return true;
-      })();
-    `;
-    try {
-      await webContents.executeJavaScript(fallbackScript);
-      console.log(`[ContentSender] Pasted text into ${profile.name} via JS execCommand fallback`);
-      return true;
-    } catch (err) {
-      console.error(`[ContentSender] Fallback failed for ${profile.name}:`, err);
-      return false;
-    }
-  } finally {
-    // 7. 还原剪贴板(避免污染用户)— 延迟 500ms 确保 paste 已被消费
-    setTimeout(() => {
-      try {
-        clipboard.writeText(originalClipboard);
-      } catch { /* ignore */ }
-    }, 500);
-  }
+  return pasteTextToWebview(webContents, profile.selectors.inputBox, text);
 }
 
 /**
