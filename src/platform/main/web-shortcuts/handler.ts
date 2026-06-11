@@ -100,8 +100,63 @@ export function matchShortcut(input: Input): WebShortcutAction | null {
   }
 }
 
+/**
+ * 给 OAuth popup 原生窗补「可关闭」逃生口(根治死路:popup 是 parent+modal sheet,
+ * macOS 下无原生标题栏/关闭按钮,盖住整窗后用户若不想用此方式登录会被卡死 ——
+ * NavSide / tab 全被遮、无法返回)。
+ *
+ * 两层保险:
+ *  1) ESC 关闭:popup webContents before-input-event 拦 Escape → win.close()。必中、零风险。
+ *  2) 注入一个 fixed 右上角「✕」关闭按钮:dom-ready 后 executeJavaScript 在页面主世界跑
+ *     DOM 创建,叠一个绝对定位的按钮,点击 window.close()。executeJavaScript 是受信代码注入,
+ *     不受页面 CSP script-src 限制(CSP 管的是页面自己加载/inline 的脚本,不管宿主注入);
+ *     按钮纯靠 element.onclick,不依赖 inline script。失败(理论不会)也无碍,ESC 仍可关。
+ *
+ * 不改 modal/parent/partition —— 登录流(opener↔popup postMessage)完全不动,只加逃生口。
+ */
+function wireOAuthPopupEscape(popupWin: BrowserWindow): void {
+  const wc = popupWin.webContents;
+
+  // 1) ESC 关闭
+  wc.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') {
+      event.preventDefault();
+      if (!popupWin.isDestroyed()) popupWin.close();
+    }
+  });
+
+  // 2) 注入右上角关闭按钮(domReady 后,确保 document.body 在)
+  wc.on('dom-ready', () => {
+    wc.executeJavaScript(
+      `(function(){
+        if (document.getElementById('__krig_oauth_close__')) return;
+        var b = document.createElement('button');
+        b.id = '__krig_oauth_close__';
+        b.textContent = '\\u2715';
+        b.title = '\\u5173\\u95ed (Esc)';
+        b.setAttribute('style',
+          'position:fixed;top:10px;right:10px;z-index:2147483647;' +
+          'width:28px;height:28px;line-height:28px;padding:0;' +
+          'border:none;border-radius:50%;cursor:pointer;' +
+          'background:rgba(0,0,0,.55);color:#fff;font-size:15px;' +
+          'box-shadow:0 1px 4px rgba(0,0,0,.3);');
+        b.onclick = function(){ window.close(); };
+        document.body.appendChild(b);
+      })();`,
+    ).catch(() => { /* CSP/时序极端情况:静默,ESC 仍可关 */ });
+  });
+}
+
 /** 在单个 guest 上挂快捷键拦截 + 弹窗导流 */
 function attachGuest(mainWindow: BrowserWindow, guest: WebContents): void {
+  // ── OAuth popup 逃生口:setWindowOpenHandler 返回 allow 后,Electron 用
+  //    overrideBrowserWindowOptions 开 popup BrowserWindow,但 handler 返回值拿不到该
+  //    window 引用 —— 用 did-create-window 捕获。仅对 OAuth popup(isOAuthPopup)挂
+  //    ESC + 关闭按钮,堵住「modal sheet 盖整窗、无法返回」的死路。──
+  guest.on('did-create-window', (popupWin, details) => {
+    if (isOAuthPopup(details.url)) wireOAuthPopupEscape(popupWin);
+  });
+
   // ── 快捷键:before-input-event(webview 焦点下唯一能拿到键盘的入口) ──
   guest.on('before-input-event', (event: ElectronEvent, input: Input) => {
     if (input.type !== 'keyDown') return;
@@ -135,7 +190,7 @@ function attachGuest(mainWindow: BrowserWindow, guest: WebContents): void {
       //    整页 loadURL 会脱离 opener 上下文 → 白屏(实测)。故保留 popup,但用
       //    overrideBrowserWindowOptions 钉成主窗口的子/模态窗(parent+modal):macOS 下
       //    挂成依附主窗口的 sheet,不飘出 app,登录完 window.close 自动收起。
-      //    popup 继承 opener(webview)的 partition,cookie 与 X/AI 同源。
+      //    popup 继承 opener(webview)的 per-ws partition,cookie 与该 ws 的 X/AI/浏览器同源。
       //    ⚠️ 必须显式 webPreferences.javascript=true:不设的话 popup 默认 JS 关闭,
       //    Google 报「浏览器不支持/关闭了 JavaScript」无法登录(实测)。
       return {
@@ -147,7 +202,7 @@ function attachGuest(mainWindow: BrowserWindow, guest: WebContents): void {
           webPreferences: {
             // 必须显式开 JS:否则 Google 报「浏览器不支持 / 关闭了 JavaScript」无法登录。
             // 不显式设 partition —— popup 自动继承 opener(guest webview)的 partition,
-            // X/AI 走 persist:webview、普通浏览走 persist:webview-<wsId>,各自 cookie 同源。
+            // AI/X/普通浏览同 ws 都走 persist:webview-${wsId},各 ws 各自 cookie 同源。
             javascript: true,
             contextIsolation: true,
             nodeIntegration: false,

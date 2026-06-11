@@ -3,8 +3,9 @@
  *
  * 与 ai-extraction Host 同思路(把 webview 生命周期封装到 capability,view 用
  * props/callbacks/ref 协作),提取/产物仍走 X 独立代码路径(铁律 3):
- * - partition 用 WEBVIEW_PARTITION('persist:webview')—— 与 AI webview / 内置浏览器
- *   完全共享 session(用户拍板:复用已有 Google/X 登录态;OAuth 弹窗行为跟 AI 一致);
+ * - partition per-ws 化(2026-06-11):`persist:webview-${workspaceId}`,与 AI webview /
+ *   内置浏览器同 ws 同名 → 同 ws 内共享 session(浏览器登的 X / Google 让 X view 一键认出;
+ *   OAuth 弹窗行为跟 AI 一致),跨 ws 完全隔离(独立身份 / 可走不同 per-ws 代理出口);
  * - 初始 URL = X profile homeUrl;
  * - 无 SSE 拦截 / 无 pasteAndSend(那是 AI 问答语义,X 阶段 0 用不上)。
  *
@@ -23,7 +24,6 @@ import {
   type ReactElement,
 } from 'react';
 import { getXServiceProfile, DEFAULT_X_SERVICE } from '@shared/types/x-service-types';
-import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import type { XHostHandle, XHostProps } from './types';
 
 interface WebviewElement extends HTMLElement {
@@ -41,7 +41,6 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
   ref,
 ): ReactElement {
   const { workspaceId, className, style, onUrlChanged, onLoadingChanged } = props;
-  void workspaceId; // X 用与 AI / 内置浏览器共享的 persist:webview partition,不按 ws 隔离
 
   const webviewRef = useRef<WebviewElement | null>(null);
   const domReadyRef = useRef(false);
@@ -122,13 +121,13 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
   );
 
   // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型。
-  // partition 用 WEBVIEW_PARTITION('persist:webview')—— 与 AI webview / 内置浏览器
-  // 完全共享 session(用户拍板:X 复用内置浏览器已有 Google/X 登录态;OAuth 弹窗行为
-  // 跟 AI 一致,inherit 同 partition,Continue with Google 直接认出已登账号)。
+  // partition per-ws 化(2026-06-11):`persist:webview-${workspaceId}`,与 AI webview /
+  // 内置浏览器同 ws 同名 → 同 ws 内共享 session(X 复用浏览器已有 Google/X 登录态,
+  // Continue with Google 一键认出;OAuth 弹窗继承同 partition),跨 ws 完全隔离。
   const tagProps = {
     ref: setupWebview,
     src: homeUrl,
-    partition: WEBVIEW_PARTITION,
+    partition: `persist:webview-${workspaceId}`,
     allowpopups: 'true',
     className,
     style,

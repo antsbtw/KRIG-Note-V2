@@ -24,8 +24,8 @@
  *   1. 排除翻译 webview —— 翻译用独立 partition `persist:webview-translate`,
  *      `session.fromPartition(p)` 对同一 partition 字符串返回同一 Session 实例,
  *      故用实例身份比较 `guest.session === translateSession` 可靠识别并排除。
- *   2. 排除 AI webview —— AI webview 与普通浏览**共用** `persist:webview` partition
- *      (见 capabilities/ai-extraction/Host.tsx),partition 无法区分;改用 URL:
+ *   2. 排除 AI webview —— AI webview 与普通浏览**同 ws 共用** `persist:webview-${ws}`
+ *      partition(见 capabilities/ai-extraction/Host.tsx),partition 无法区分;改用 URL:
  *      右键时 `detectAIServiceByUrl(guest.getURL())` 命中 AI 服务则跳过。
  *
  * 调用时机:platform/main/index.ts 在 createMainWindow 后调一次,

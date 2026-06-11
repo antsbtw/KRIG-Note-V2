@@ -1,8 +1,8 @@
 /**
  * Web view 下载管理 hook(Phase 3)
  *
- * 给普通浏览 webview(partition `persist:webview`)加下载:点下载链接 → 弹系统
- * 原生保存对话框 → 推送进度 → 完成后 UI 提供「在 Finder 显示」+ 可取消。
+ * 给普通浏览 webview(partition per-ws `persist:webview-${ws}`)加下载:点下载链接 →
+ * 弹系统原生保存对话框 → 推送进度 → 完成后 UI 提供「在 Finder 显示」+ 可取消。
  *
  * ⚠️ 头号架构点:will-download 挂 session 一次,绝不 per-guest
  * - `will-download` 是 **Session 级**事件(签名 `(event, item, webContents)`),
@@ -15,7 +15,7 @@
  *   **挂一次** will-download(全局单次)。
  *
  * shouldHandle 过滤(必须,排除 AI webview):
- * - AI webview 与普通浏览**共用** `persist:webview`(capabilities/ai-extraction/Host.tsx),
+ * - AI webview 与普通浏览**同 ws 共用** `persist:webview-${ws}`(capabilities/ai-extraction/Host.tsx),
  *   所以 AI 触发的下载也会进本 session 的 will-download 回调。will-download 回调第三参
  *   `webContents` = 发起下载的 webContents,直接 `shouldHandle(webContents)` 排除 AI /
  *   翻译;不命中(普通浏览)才接管。不接管时直接 return(不 preventDefault,让 Chromium
@@ -165,7 +165,7 @@ export function registerWebDownloadHook(mainWindow: BrowserWindow): void {
     wireDownloadForSession(guest.session, mainWindow);
   });
 
-  // 兼容:旧 `persist:webview`(AI 共用 partition)也挂一次,保持行为一致(AI 下载本被
-  // shouldHandle 排除,挂着无害)。
+  // legacy:旧全局 `persist:webview` 也挂一次(per-ws 化后已无 webview 走它,纯防御 /
+  // 向后兼容,挂着无害)。各 ws 的 persist:webview-${ws} 由上方 did-attach-webview 补挂。
   wireDownloadForSession(session.fromPartition(WEBVIEW_PARTITION), mainWindow);
 }

@@ -362,9 +362,11 @@ class MediaStore {
   /**
    * 注册 media:// 协议
    *
-   * 双 session 注册:
+   * 注册范围:
    * - default session:主 renderer 内 iframe / img / video / audio 等
-   * - persist:webview partition:右栏 web-view 加载 media:// 链接 / 本地资源
+   * - 旧全局 persist:webview partition:legacy/防御性补一次(per-ws 化后 AI/X/浏览器
+   *   都走 persist:webview-${ws},各 ws session 由 did-attach-webview →
+   *   registerMediaForSession 补注册,见下方)。
    *
    * Electron `protocol.handle` 默认只在 default session 生效;webview 用独立
    * partition session,**必须显式再注册一次**,否则 webview 加载 media:// 会

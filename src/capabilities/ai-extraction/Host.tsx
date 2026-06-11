@@ -22,7 +22,6 @@ import {
   getAIServiceProfile,
   type AIServiceId,
 } from '@shared/types/ai-service-types';
-import { WEBVIEW_PARTITION } from '@shared/constants/webview';
 import type { AIHostHandle, AIHostProps } from './types';
 import { registerAIHostWcId, getAIHostWcId } from './ai-host-registry';
 
@@ -216,11 +215,16 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     void sendNow(pending.prompt, pending.serviceId ?? serviceId);
   };
 
-  // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型
+  // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型。
+  // partition per-ws 化(2026-06-11):用 `persist:webview-${workspaceId}`,与内置浏览器
+  // (WebView.tsx)/ X Host 同 ws 同名 → 同 ws 内 AI/X/浏览器共享登录态(浏览器登的
+  // Google 让 AI 一键认出)、跨 ws 完全隔离(独立身份 / 可走不同 per-ws 代理出口)。
+  // 主进程钩子(右键/快捷键/下载/media://)靠 URL 判定或 per-session 实例补挂,partition
+  // 改名对其透明 —— 详见 web-shared/should-handle.ts。
   const tagProps = {
     ref: setupWebview,
     src: initialUrl,
-    partition: WEBVIEW_PARTITION,
+    partition: `persist:webview-${workspaceId}`,
     allowpopups: 'true',
     className,
     style,

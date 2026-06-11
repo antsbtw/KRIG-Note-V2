@@ -10,10 +10,11 @@
  *  1. 排除翻译 webview —— 翻译用独立 partition `persist:webview-translate`,
  *     `session.fromPartition(p)` 对同一 partition 字符串返回同一 Session 实例,
  *     故用实例身份比较 `guest.session === translateSession` 可靠识别并排除。
- *  2. 排除 AI webview —— AI webview 与普通浏览**共用** `persist:webview` partition
- *     (见 capabilities/ai-extraction/Host.tsx),partition 无法区分;改用 URL:
- *     `detectAIServiceByUrl(guest.getURL())` 命中 AI 服务则跳过。
- *  3. 排除 X webview —— X 与 AI / 普通浏览**共用** `persist:webview` partition(见
+ *  2. 排除 AI webview —— AI webview 与普通浏览**同 ws 共用** `persist:webview-${ws}`
+ *     partition(见 capabilities/ai-extraction/Host.tsx,per-ws 化后同 ws 同名),partition
+ *     无法区分 AI vs 普通浏览;改用 URL:`detectAIServiceByUrl(guest.getURL())` 命中 AI
+ *     服务则跳过。
+ *  3. 排除 X webview —— X 与 AI / 普通浏览**同 ws 共用** `persist:webview-${ws}`(见
  *     capabilities/x-extraction/Host.tsx),partition 无法区分;改用 URL:
  *     `detectXServiceByUrl` 命中 x.com / twitter.com 则跳过(对齐 AI 的 URL 判定)。
  *     X 自带原生右键菜单(x/webview-hook.ts),不能让普通浏览的右键/快捷键/弹窗导流接管。
@@ -34,7 +35,7 @@ export function shouldHandle(guest: WebContents): boolean {
   const translateSession = session.fromPartition(WEBVIEW_TRANSLATE_PARTITION);
   if (guest.session === translateSession) return false;
 
-  // 2) AI webview:共用 persist:webview partition,只能靠 URL 区分。
+  // 2) AI webview:与普通浏览同 ws 共用 persist:webview-${ws},只能靠 URL 区分。
   const url = guest.getURL();
   if (url && detectAIServiceByUrl(url)) return false;
 
