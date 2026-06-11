@@ -249,7 +249,10 @@ export const IPC_CHANNELS = {
   // X 集成 阶段 2(写方向)— 注入「填充内容,用户点发布」(绝不程序点发布)
   X_PASTE_TWEET: 'x.paste-tweet',                   // renderer → main:把纯文本填进 X compose 框(发推)
   X_PASTE_REPLY: 'x.paste-reply',                   // renderer → main:导航到目标推 + 把纯文本填进 reply 框(回复)
-  X_WRITE_REPLY_REQUEST: 'x.write-reply-request',    // main → renderer 推送:X webview 右键「在 note 里写回复」,带 guest 坐标 {x,y}
+  // 拖拽落点(拖 note block 到 X)— renderer → main
+  X_DRAG_ARM: 'x.drag-arm',                          // note 拖起:往 X guest 装 mousemove 监听记录最后坐标
+  X_DRAG_RESOLVE: 'x.drag-resolve',                  // 松手:读回最后坐标 + 解析落点(compose/tweet/...)
+  X_DRAG_REPLY_HERE: 'x.drag-reply-here',            // 落推文:就地点该推回复按钮弹 reply 框(不跳详情页)
 
   // Progress 反馈通道(backup-restore + 未来其他长耗时任务共用)
   PROGRESS_START: 'progress.start',                 // main → renderer:任务开始

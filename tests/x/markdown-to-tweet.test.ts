@@ -74,8 +74,9 @@ describe('markdownToTweetText — 块级结构', () => {
   it('有序列表保留序号', () => {
     expect(markdownToTweetText('1. 第一\n2. 第二')).toBe('1. 第一\n2. 第二');
   });
-  it('水平线删除', () => {
-    expect(markdownToTweetText('上\n\n---\n\n下')).toBe('上\n\n下');
+  it('水平线删除(空行折叠为单换行)', () => {
+    // 总指挥:多 block 发 X 行行相连不留空行 → 连续空行折叠成单换行
+    expect(markdownToTweetText('上\n\n---\n\n下')).toBe('上\n下');
   });
   it('代码围栏去 ``` 保留代码', () => {
     expect(markdownToTweetText('```js\nconst a = 1;\n```')).toBe('const a = 1;');
@@ -83,8 +84,9 @@ describe('markdownToTweetText — 块级结构', () => {
 });
 
 describe('markdownToTweetText — 收尾', () => {
-  it('折叠 3+ 空行为 1 个空行并 trim', () => {
-    expect(markdownToTweetText('\n\na\n\n\n\nb\n\n')).toBe('a\n\nb');
+  it('折叠所有连续空行为单换行并 trim(行行相连)', () => {
+    // 总指挥拍板:多 block 发到 X 紧凑相连,block 间段落空行压成单换行
+    expect(markdownToTweetText('\n\na\n\n\n\nb\n\n')).toBe('a\nb');
   });
   it('空输入 → 空串', () => {
     expect(markdownToTweetText('')).toBe('');

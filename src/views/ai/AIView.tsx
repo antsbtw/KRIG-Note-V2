@@ -51,6 +51,21 @@ export function AIView({ workspaceId }: AIViewProps) {
   const XHost = xApi.Host;
   const xHostRef = useRef<XHostHandle | null>(null);
 
+  /**
+   * 把本 ws 的 X Host guest wc id 登记到 x-extraction registry(注入按活跃 ws 定向,
+   * 治「多 X 实例串扰 → 注入打到内置浏览器 X / 别的 ws」的 bug)。
+   * X Host dom-ready / url 变化后 getWebContentsId 才有值,故在那时机调。
+   */
+  const registerXWc = useCallback(() => {
+    const wcId = xHostRef.current?.getWebContentsId() ?? null;
+    if (wcId != null) xApi.registerXHostWcId(workspaceId, wcId);
+  }, [xApi, workspaceId]);
+
+  // 卸载时清除本 ws 登记(避免 stale wc id 残留)
+  useEffect(() => {
+    return () => xApi.clearXHostWcId(workspaceId);
+  }, [xApi, workspaceId]);
+
   // 订阅 per-ws state(currentServiceId + activeLauncher)
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
@@ -269,7 +284,11 @@ export function AIView({ workspaceId }: AIViewProps) {
         workspaceId={workspaceId}
         className="krig-ai-view__webview"
         style={{ display: isX ? 'flex' : 'none' }}
-        onUrlChanged={(u) => { if (isX) setDisplayUrl(u); }}
+        onUrlChanged={(u) => {
+          if (isX) setDisplayUrl(u);
+          // dom-ready / 每次导航后 guest wc id 可取 → 登记本 ws 的注入目标
+          registerXWc();
+        }}
         onLoadingChanged={(l) => { if (isX) setLoading(l); }}
       />
     </div>

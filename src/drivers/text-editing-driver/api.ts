@@ -11,7 +11,8 @@ import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
-import { DOMSerializer, Fragment, Node as PMNode } from 'prosemirror-model';
+import { DOMSerializer, Fragment, Slice, Node as PMNode } from 'prosemirror-model';
+import { MultipleNodeSelection } from './plugins/_shared/multiple-node-selection';
 import { sliceToMarkdown, docNodeToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
@@ -1862,6 +1863,32 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return { markdown: '', images: [] };
     return docNodeToMarkdown(inst.view.state.doc);
+  },
+
+  /**
+   * 取「被拖起的 block」的 Markdown(拖 block 到 X 发推/回复用)。
+   *
+   * 语义对齐 handle 拖拽源(build-block-handle-plugin):
+   * - 若当前是 MultipleNodeSelection 且 pos 落在选区内 → 取整组多选块(slice = sel.content());
+   * - 否则 → 取 pos 处那一个 block 节点。
+   * 复用 sliceToMarkdown 纯 serializer,不引入新导出逻辑。pos 无效返回空。
+   */
+  getBlockMarkdownAt(instanceId: string, pos: number): SerializeResult {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return { markdown: '', images: [] };
+    const { state } = inst.view;
+    const sel = state.selection;
+    if (
+      sel instanceof MultipleNodeSelection &&
+      pos >= sel.from &&
+      pos < sel.to
+    ) {
+      return sliceToMarkdown(sel.content());
+    }
+    const node = state.doc.nodeAt(pos);
+    if (!node) return { markdown: '', images: [] };
+    const slice = new Slice(Fragment.from(node.copy(node.content)), 0, 0);
+    return sliceToMarkdown(slice);
   },
 
   setVocabWords(entries: Array<{ word: string; definition: string }>): void {

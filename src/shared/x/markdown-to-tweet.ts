@@ -74,8 +74,9 @@ export function markdownToTweetText(markdown: string): string {
     out.push(line);
   }
 
-  // 收尾:trim 首尾空行,折叠 3+ 连续空行为 1 个空行
-  let text = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // 收尾:trim 首尾空行,**折叠所有连续空行为单换行**(总指挥拍板:多 block 发到 X
+  // 行行相连不留空行 —— note 里 block 间的段落空行降级后压成紧凑单换行)。
+  const text = out.join('\n').replace(/\n{2,}/g, '\n').trim();
   return text;
 }
 

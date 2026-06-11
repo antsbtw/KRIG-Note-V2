@@ -32,6 +32,8 @@ interface WebviewElement extends HTMLElement {
   getURL(): string;
   reload(): void;
   isLoading(): boolean;
+  /** Electron <webview> 标准方法:取 guest 的 webContents id(注入定向用)*/
+  getWebContentsId(): number;
 }
 
 export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
@@ -106,6 +108,15 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
       },
       reload: () => webviewRef.current?.reload(),
       getURL: () => webviewRef.current?.getURL() ?? '',
+      getWebContentsId: () => {
+        const wv = webviewRef.current;
+        if (!wv || !domReadyRef.current) return null;
+        try {
+          return wv.getWebContentsId();
+        } catch {
+          return null;
+        }
+      },
     }),
     [],
   );

@@ -16,7 +16,15 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XTweetData } from '@capabilities/x-extraction';
-import { sendToX, startReplyDraft } from './send-to-x';
+import { sendToX, sendToXAtDropTarget, stashDraggedBlockText } from './send-to-x';
+
+/** dnd capability 的最小接口(subscribe)— 走 requireCapabilityApi 间接路由,不直接 import 运行时值 */
+interface DndApiLite {
+  subscribe(
+    channel: 'dnd.started' | 'dnd.over' | 'dnd.completed',
+    listener: (payload: unknown) => void,
+  ): () => void;
+}
 
 /**
  * 把抓到的推文字段构造成 tweetBlock 的 PM 节点 JSON。
@@ -134,18 +142,6 @@ export function registerXCommands(): void {
     void sendToX();
   });
 
-  /**
-   * 「在 note 里写回复」(写方向,阶段 2):X webview 某推右键 → 抓该推 URL/预览 →
-   * 记 pending 回复目标 → 提示用户去 note 写内容再「发到 X」即注入该推 reply 框。
-   *
-   * 参数:{ x, y } guest viewport 坐标(由 X webview-hook 经 X_WRITE_REPLY_REQUEST 透传)。
-   */
-  commandRegistry.register('x-view.write-reply', (arg: unknown) => {
-    const p = (arg ?? {}) as { x?: unknown; y?: unknown };
-    if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
-    void startReplyDraft(p.x, p.y);
-  });
-
   // ── 右键「提取此推文到笔记」(X_EXTRACT_TWEET_REQUEST 广播)模块级单订阅 ──
   // (铁律 5:命令型广播一律在模块级 registerXxx 订阅一次,不进 view 组件 useEffect;
   //  命令体内用 getActiveId 定向到活跃 ws。)
@@ -161,18 +157,34 @@ export function registerXCommands(): void {
     }
   }
 
-  // ── 右键「在 note 里写回复」(X_WRITE_REPLY_REQUEST 广播)模块级单订阅 ──
-  // (铁律 5:命令型广播一律模块级单订阅,命令体内用 getActiveId 守卫;同 extract 写法。)
-  if (!writeReplyUnsub) {
-    const x = getCapabilityApi<XExtractionApi>('x-extraction');
-    if (x) {
-      writeReplyUnsub = x.onWriteReplyRequest((payload) => {
-        void commandRegistry.execute('x-view.write-reply', {
-          x: payload.x,
-          y: payload.y,
-        });
-      });
-    }
+  // ── 拖 note block 到 X view:订阅 dnd.started / dnd.completed(模块级单订阅) ──
+  // started:若当前活跃 ws 的 X Host 在台上,往其 guest 装 mousemove 监听(记录拖拽期最后坐标)。
+  // completed:读回最后坐标解析落点 → compose=发推 / tweet=回复(走 sendToXAtDropTarget)。
+  // (X guest 收不到原生 drag 事件,故靠 guest 自报 mousemove —— 见落点定位 spike 结论。)
+  const dndApi = getCapabilityApi<DndApiLite>('drag-and-drop');
+  if (dndApi && !dndStartUnsub) {
+    dndStartUnsub = dndApi.subscribe('dnd.started', (payload: unknown) => {
+      const x = getCapabilityApi<XExtractionApi>('x-extraction');
+      const wsId = workspaceManager.getActiveId();
+      if (!x || !wsId) return;
+      // 抓「被拖起的 block」内容(总指挥:发的是拖的那些 block,不是选区/整篇)→ 暂存,
+      // 松手时用。payload.source.data = { fromPos, instanceId }(handle 插件 emit)。
+      const src = (payload as { source?: { type?: string; data?: unknown } } | null)?.source;
+      if (src?.type === 'block') {
+        const d = src.data as { fromPos?: unknown; instanceId?: unknown } | undefined;
+        if (d && typeof d.fromPos === 'number' && typeof d.instanceId === 'string') {
+          stashDraggedBlockText(d.instanceId, d.fromPos);
+        }
+      }
+      const wcId = x.getXHostWcId(wsId);
+      if (wcId == null) return; // 本 ws X Host 未登记(没切到 X)→ 不 arm
+      void x.dragArm(wcId);
+    });
+  }
+  if (dndApi && !dndDoneUnsub) {
+    dndDoneUnsub = dndApi.subscribe('dnd.completed', () => {
+      void sendToXAtDropTarget();
+    });
   }
 
   // ── 宿主 iframe(tweet block 嵌入卡片)弹 x.com 链接 → 改在 X webview 打开 ──
@@ -188,4 +200,5 @@ export function registerXCommands(): void {
 /** 模块级单订阅句柄(防 registerXCommands 万一被调多次重复订阅)*/
 let extractTweetUnsub: (() => void) | null = null;
 let openTweetUnsub: (() => void) | null = null;
-let writeReplyUnsub: (() => void) | null = null;
+let dndStartUnsub: (() => void) | null = null;
+let dndDoneUnsub: (() => void) | null = null;

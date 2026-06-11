@@ -99,49 +99,78 @@ export async function pasteTextToWebview(
     return false;
   }
 
-  // 2. 备份剪贴板(粘贴后还原,避免污染用户剪贴板)
+  // 2. 备份剪贴板(OS Cmd+V 兜底会写剪贴板,用完还原避免污染用户剪贴板)
   const originalClipboard = clipboard.readText();
 
   try {
-    // 3. 写新内容到剪贴板
-    clipboard.writeText(text);
-
-    // 4. OS 级 Cmd+V / Ctrl+V — Chromium 走真 native paste 流程,React state 同步
-    webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: PASTE_MODIFIER });
-    webContents.sendInputEvent({ type: 'char', keyCode: 'V', modifiers: PASTE_MODIFIER });
-    webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: PASTE_MODIFIER });
-
-    // 5. 等 React 接收 paste event + state update(实测 200-400ms 足够)
-    await new Promise((resolve) => setTimeout(resolve, 400));
-
-    // 6. 校验内容是否落地
-    const verifyScript = `
+    // 3. 主路径:在 guest 自己的 JS 上下文里**合成一个真实 paste 事件**(带 text/plain
+    //    DataTransfer),dispatch 到输入框上。
+    //
+    //    为什么这是主路径(实机 spike 验证):
+    //    - X 用 Electron <webview> 挂载,DOM/焦点与宿主隔离。主进程 sendInputEvent 的
+    //      OS 级 Cmd+V 焦点打不进 guest 输入框 → 完全没送达(实测 textContent 为空)。
+    //    - X reply/compose 框是 DraftJS(contenteditable),document.execCommand('insertText',
+    //      多行) 在 DraftJS 下会丢行 / URL 被 link decorator 渲染重复(就是那个 bug)。
+    //    - 合成 paste 事件在 guest 自身上下文 dispatch,不依赖 OS 焦点送达;DraftJS 的
+    //      paste handler 会把 text/plain 按 \n 正确拆 block 插入 —— 文字 + 单条链接都对。
+    //    textarea/input(value 型)也吃 paste 事件,故统一走这条;不吃时下面两级兜底接。
+    const synthPasteScript = `
       (function() {
         var sel = ${JSON.stringify(inputSelector)};
+        var text = ${JSON.stringify(text)};
         var selectors = sel.split(',').map(function(s) { return s.trim(); });
+        var el = null;
         for (var i = 0; i < selectors.length; i++) {
           if (!selectors[i]) continue;
-          var el = document.querySelector(selectors[i]);
-          if (el) {
-            var content = (el.value !== undefined ? el.value : el.textContent) || '';
-            return content.trim().length > 0;
-          }
+          el = document.querySelector(selectors[i]);
+          if (el) break;
         }
-        return false;
+        if (!el) return false;
+        try { el.focus(); } catch(e) {}
+        try {
+          var dt = new DataTransfer();
+          dt.setData('text/plain', text);
+          var evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+          el.dispatchEvent(evt);
+          return true;
+        } catch(e) {
+          return false; // 环境不支持 ClipboardEvent/DataTransfer 构造 → 调用方走兜底
+        }
       })();
     `;
-    let landed = false;
     try {
-      landed = Boolean(await webContents.executeJavaScript(verifyScript));
-    } catch { /* ignore */ }
+      await webContents.executeJavaScript(synthPasteScript);
+    } catch (err) {
+      console.warn('[webview-input] synthetic paste dispatch failed:', err);
+    }
 
-    if (landed) {
-      console.log(`[webview-input] Pasted text via OS Cmd+V (length: ${text.length})`);
+    // 4. 等框接收 paste + 重渲染(DraftJS state update,实测 ~300ms 足够)
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // 5. 校验内容是否真落地 —— 不只看 length>0(那会把"粘歪了但有内容"误判成功),
+    //    而是看框内容**包含预期文本的可辨识片段**(取降级文本首 12 个非空白字符)。
+    const verifyScript = buildVerifyScript(inputSelector, text);
+    if (await isLanded(webContents, verifyScript)) {
+      console.log(`[webview-input] Pasted via synthetic paste event (length: ${text.length})`);
       return true;
     }
 
-    // 兜底:OS Cmd+V 没生效 → JS execCommand('insertText') / native value setter
-    console.warn('[webview-input] OS Cmd+V did not populate input, falling back to JS execCommand');
+    // 6. 兜底 A:OS 级 Cmd+V(某些 webview / 普通 input 焦点态下才需要,且会真走 native
+    //    paste)。需先把内容写进系统剪贴板。
+    console.warn('[webview-input] synthetic paste did not land, falling back to OS Cmd+V');
+    clipboard.writeText(text);
+    webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: PASTE_MODIFIER });
+    webContents.sendInputEvent({ type: 'char', keyCode: 'V', modifiers: PASTE_MODIFIER });
+    webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: PASTE_MODIFIER });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    if (await isLanded(webContents, verifyScript)) {
+      console.log(`[webview-input] Pasted via OS Cmd+V fallback (length: ${text.length})`);
+      return true;
+    }
+
+    // 7. 兜底 B:JS 直写(execCommand / native value setter)。最后手段——contenteditable
+    //    多行可能有瑕疵(DraftJS \n 坑),但总比完全没内容强,且仍过下面的落地校验。
+    console.warn('[webview-input] OS Cmd+V did not land, falling back to JS execCommand / setter');
     const fallbackScript = `
       (function() {
         var sel = ${JSON.stringify(inputSelector)};
@@ -177,9 +206,13 @@ export async function pasteTextToWebview(
       })();
     `;
     try {
-      const ok = Boolean(await webContents.executeJavaScript(fallbackScript));
+      await webContents.executeJavaScript(fallbackScript);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const ok = await isLanded(webContents, verifyScript);
       if (ok) {
-        console.log('[webview-input] Pasted text via JS execCommand fallback');
+        console.log('[webview-input] Pasted via JS execCommand / setter fallback');
+      } else {
+        console.warn('[webview-input] all paste paths exhausted, content did not land');
       }
       return ok;
     } catch (err) {
@@ -187,12 +220,49 @@ export async function pasteTextToWebview(
       return false;
     }
   } finally {
-    // 7. 还原剪贴板(延迟 500ms 确保 paste 已被消费)
+    // 还原剪贴板(延迟 500ms 确保 OS Cmd+V 兜底若用了已被消费)
     setTimeout(() => {
       try {
         clipboard.writeText(originalClipboard);
       } catch { /* ignore */ }
     }, 500);
+  }
+}
+
+/**
+ * 构造「内容落地校验」脚本:框内容(value 或 textContent)是否**包含预期文本的可辨识片段**。
+ *
+ * 不用「length>0」:那会把「粘歪了但框里有别的内容」误判成功(就是 X DraftJS 把 URL 渲染
+ * 成卡片、文字丢失却 length>0 的坑)。取降级文本首 12 个非空白字符做包含匹配 —— 足以区分
+ * 「我们的内容真进去了」vs「框里是别的/空的」,又不至于因 DraftJS 规范化空白而误判。
+ */
+function buildVerifyScript(inputSelector: string, text: string): string {
+  const needle = [...text].filter((c) => !/\s/.test(c)).slice(0, 12).join('');
+  return `
+    (function() {
+      var sel = ${JSON.stringify(inputSelector)};
+      var needle = ${JSON.stringify(needle)};
+      var selectors = sel.split(',').map(function(s) { return s.trim(); });
+      for (var i = 0; i < selectors.length; i++) {
+        if (!selectors[i]) continue;
+        var el = document.querySelector(selectors[i]);
+        if (el) {
+          var content = (el.value !== undefined && el.value !== null ? el.value : el.textContent) || '';
+          var stripped = content.replace(/\\s/g, '');
+          return needle.length === 0 ? content.trim().length > 0 : stripped.indexOf(needle) !== -1;
+        }
+      }
+      return false;
+    })();
+  `;
+}
+
+/** 跑校验脚本,返回内容是否落地(异常按未落地处理) */
+async function isLanded(webContents: WebContents, verifyScript: string): Promise<boolean> {
+  try {
+    return Boolean(await webContents.executeJavaScript(verifyScript));
+  } catch {
+    return false;
   }
 }
 

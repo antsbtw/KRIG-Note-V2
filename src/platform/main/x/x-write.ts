@@ -72,10 +72,35 @@ async function waitForSelector(
  * poll 等待:renderer 侧「发到 X」会先切 X 入口让 XHost 显示 + navigate,X webview
  * did-navigate 后才注册进 registry(链路 1-3s,仿 AI 的 waitForAIWebContents)。
  */
+/**
+ * 取注入目标 X webContents。
+ *
+ * @param targetWcId 指定的 guest wc id(本活跃 ws 的 AI-view X,renderer x-host-registry
+ *   按活跃 ws 查出后传来)。**优先**用它精确定位 —— 治「多 X 实例(内置浏览器 X + AI-view X)
+ *   串扰,全局 active 拿错实例,注入打到用户没在看的那个」的 bug。
+ *   省略 / 找不到对应 wc → 回退旧的全局 getActiveXWebContents(单实例场景仍 OK,并 warn)。
+ */
 async function requireXWebContents(
   serviceId: XServiceId,
+  targetWcId?: number,
   timeoutMs = 10_000,
 ): Promise<{ wc: Electron.WebContents } | { error: string }> {
+  // 优先:按 renderer 指定的 wc id 精确定位(本活跃 ws 的 X)
+  if (typeof targetWcId === 'number') {
+    const { webContents } = await import('electron');
+    const wc = webContents.fromId(targetWcId);
+    if (wc && !wc.isDestroyed()) {
+      if (!detectXServiceByUrl(wc.getURL())) {
+        return { error: '指定的 X 实例当前不是 X 页面,无法注入' };
+      }
+      return { wc };
+    }
+    console.warn(
+      `[x-write] 指定 targetWcId#${targetWcId} 不存在/已销毁,回退全局 active(多实例可能串扰)`,
+    );
+  }
+
+  // 回退:全局 active(最后 navigate 的)— 单实例场景 OK
   const start = Date.now();
   let wc = getActiveXWebContents(serviceId);
   while (!wc && Date.now() - start < timeoutMs) {
@@ -100,11 +125,12 @@ async function requireXWebContents(
 export async function pasteTweet(
   serviceId: XServiceId,
   text: string,
+  targetWcId?: number,
 ): Promise<XWriteResult> {
   if (!text || !text.trim()) {
     return { success: false, error: '内容为空,无法发推' };
   }
-  const got = await requireXWebContents(serviceId);
+  const got = await requireXWebContents(serviceId, targetWcId);
   if ('error' in got) return { success: false, error: got.error };
   const wc = got.wc;
 
@@ -154,6 +180,7 @@ export async function pasteReply(
   serviceId: XServiceId,
   tweetUrl: string,
   text: string,
+  targetWcId?: number,
 ): Promise<XWriteResult> {
   if (!text || !text.trim()) {
     return { success: false, error: '回复内容为空' };
@@ -161,7 +188,7 @@ export async function pasteReply(
   if (!tweetUrl) {
     return { success: false, error: '缺少被回复推文的链接(无法定位 reply 框)' };
   }
-  const got = await requireXWebContents(serviceId);
+  const got = await requireXWebContents(serviceId, targetWcId);
   if ('error' in got) return { success: false, error: got.error };
   const wc = got.wc;
 

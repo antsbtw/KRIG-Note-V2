@@ -50,12 +50,13 @@ export interface XWriteResult {
   publishReady?: boolean;
 }
 
-/** 右键「在 note 里写回复」推送 payload(guest viewport 坐标)— 阶段 2 */
-export interface XWriteReplyRequest {
-  serviceId: XServiceId;
-  x: number;
-  y: number;
-}
+
+/** 拖拽落点解析结果(拖 note block 到 X 松手时,guest 内 elementFromPoint 定位)*/
+export type XDropTarget =
+  | { kind: 'compose' }
+  | { kind: 'tweet'; author: string | null; statusHref: string | null; hasReplyButton: boolean }
+  | { kind: 'other' }
+  | { kind: 'none' };
 
 /** X Host(嵌 x.com 的 webview)imperative API */
 export interface XHostHandle {
@@ -67,6 +68,8 @@ export interface XHostHandle {
   reload(): void;
   /** 取当前 URL */
   getURL(): string;
+  /** 取 guest webContents id(注入按 ws 定向用);未 dom-ready / 取不到返 null */
+  getWebContentsId(): number | null;
 }
 
 export interface XHostProps {
@@ -87,12 +90,35 @@ export interface XExtractionApi {
   /** 订阅 X webview 原生右键菜单点击(main 推 guest 坐标);返 unsubscribe */
   onExtractTweetRequest(callback: (payload: XExtractTweetRequest) => void): () => void;
   // ── 写方向(阶段 2)— 填充内容,用户点发布 ──
-  /** 发推:把纯文本填进 X compose 框(用户随后手动点发布)*/
-  pasteTweet(serviceId: XServiceId, text: string): Promise<XWriteResult>;
-  /** 回复:导航到目标推 + 把纯文本填进 reply 框(用户随后手动点回复)*/
-  pasteReply(serviceId: XServiceId, tweetUrl: string, text: string): Promise<XWriteResult>;
-  /** 订阅 X webview 右键「在 note 里写回复」点击(main 推 guest 坐标);返 unsubscribe */
-  onWriteReplyRequest(callback: (payload: XWriteReplyRequest) => void): () => void;
+  /**
+   * 发推:把纯文本填进 X compose 框(用户随后手动点发布)。
+   * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
+   */
+  pasteTweet(serviceId: XServiceId, text: string, targetWcId?: number | null): Promise<XWriteResult>;
+  /**
+   * 回复:导航到目标推 + 把纯文本填进 reply 框(用户随后手动点回复)。
+   * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
+   */
+  pasteReply(
+    serviceId: XServiceId,
+    tweetUrl: string,
+    text: string,
+    targetWcId?: number | null,
+  ): Promise<XWriteResult>;
+  // ── X Host wc 按 ws 登记(注入按活跃 ws 定向,治多实例串扰)──
+  /** 登记某 ws 的 AI-view X Host guest wc id(AIView 调)*/
+  registerXHostWcId(wsId: string, wcId: number): void;
+  /** 清除某 ws 的登记(AIView 卸载调)*/
+  clearXHostWcId(wsId: string): void;
+  /** 取某 ws 的 X Host guest wc id(send-to-x 注入定向用);未登记返 null */
+  getXHostWcId(wsId: string): number | null;
+  // ── 拖拽落点(拖 note block 到 X)──
+  /** note 拖起:往指定 X guest(targetWcId)装 mousemove 监听记录最后坐标 */
+  dragArm(targetWcId: number): Promise<void>;
+  /** 松手:读回最后坐标 + 解析落点(compose / tweet / other / none)*/
+  dragResolve(serviceId: XServiceId, targetWcId: number): Promise<XDropTarget>;
+  /** 落推文:就地点该推回复按钮弹 reply 框(不跳详情页),返就绪与否 */
+  dragReplyHere(serviceId: XServiceId, targetWcId: number): Promise<{ ok: boolean; error?: string }>;
   /**
    * X Host(嵌 x.com 的 webview)— forwardRef XHostHandle。
    * 封装 webview 生命周期 + per-ws partition + per-ws 代理接入。

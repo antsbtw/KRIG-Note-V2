@@ -573,17 +573,32 @@ declare global {
       xPasteTweet(
         serviceId: XServiceId,
         text: string,
+        targetWcId?: number,
       ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
       /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布) */
       xPasteReply(
         serviceId: XServiceId,
         tweetUrl: string,
         text: string,
+        targetWcId?: number,
       ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
-      /** main → renderer 推送:X webview 右键「在 note 里写回复」点击,带 guest 坐标;返 unsubscribe */
-      onXWriteReplyRequest(
-        callback: (payload: { serviceId: XServiceId; x: number; y: number }) => void,
-      ): () => void;
+      /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
+      xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
+      /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/
+      xDragResolve(
+        serviceId: XServiceId,
+        targetWcId: number,
+      ): Promise<
+        | { kind: 'compose' }
+        | { kind: 'tweet'; author: string | null; statusHref: string | null; hasReplyButton: boolean }
+        | { kind: 'other' }
+        | { kind: 'none' }
+      >;
+      /** 拖拽落推文:就地点该推回复按钮弹 reply 框(不跳详情页)*/
+      xDragReplyHere(
+        serviceId: XServiceId,
+        targetWcId: number,
+      ): Promise<{ ok: boolean; error?: string }>;
 
       // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
       /** 任务开始 — 显示全屏覆盖层;返 unsubscribe */

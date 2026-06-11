@@ -9,5 +9,8 @@
  */
 
 import { registerXCommands } from './x-commands';
+import { registerXSendConfirmPopup } from './send-confirm-popup';
 
 registerXCommands();
+// 阶段 2.5-a:注册「发到 X」发送前确认弹窗(发推/回复注入前预览 + 确认)。
+registerXSendConfirmPopup();

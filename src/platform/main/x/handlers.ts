@@ -14,6 +14,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { extractTweetAt } from './x-extract-tweet';
 import { pasteTweet, pasteReply } from './x-write';
+import { armXDragListener, resolveXDropAt, clickReplyAtDrop } from './x-drag-drop';
 
 function isXServiceId(v: unknown): v is 'x' {
   return v === 'x';
@@ -31,22 +32,52 @@ export function registerXHandlers(): void {
 
   // X_PASTE_TWEET — 发推:把纯文本填进 compose 框(用户随后手动点发布)
   ipcMain.handle(IPC_CHANNELS.X_PASTE_TWEET, async (_e, payload: unknown) => {
-    const p = payload as { serviceId?: unknown; text?: unknown } | null;
+    const p = payload as { serviceId?: unknown; text?: unknown; targetWcId?: unknown } | null;
     if (!p || !isXServiceId(p.serviceId) || typeof p.text !== 'string') {
       return { success: false, error: 'invalid pasteTweet payload' };
     }
-    return pasteTweet(p.serviceId, p.text);
+    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
+    return pasteTweet(p.serviceId, p.text, targetWcId);
   });
 
   // X_PASTE_REPLY — 回复:导航到目标推 + 填进 reply 框(用户随后手动点回复)
   ipcMain.handle(IPC_CHANNELS.X_PASTE_REPLY, async (_e, payload: unknown) => {
-    const p = payload as { serviceId?: unknown; tweetUrl?: unknown; text?: unknown } | null;
+    const p = payload as
+      | { serviceId?: unknown; tweetUrl?: unknown; text?: unknown; targetWcId?: unknown }
+      | null;
     if (
       !p || !isXServiceId(p.serviceId) ||
       typeof p.tweetUrl !== 'string' || typeof p.text !== 'string'
     ) {
       return { success: false, error: 'invalid pasteReply payload' };
     }
-    return pasteReply(p.serviceId, p.tweetUrl, p.text);
+    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
+    return pasteReply(p.serviceId, p.tweetUrl, p.text, targetWcId);
+  });
+
+  // X_DRAG_ARM — note 拖起:往指定 X guest 装 mousemove 监听(记录最后坐标)
+  ipcMain.handle(IPC_CHANNELS.X_DRAG_ARM, async (_e, payload: unknown) => {
+    const p = payload as { targetWcId?: unknown } | null;
+    if (!p || typeof p.targetWcId !== 'number') return { ok: false };
+    await armXDragListener(p.targetWcId);
+    return { ok: true };
+  });
+
+  // X_DRAG_RESOLVE — 松手:读回最后坐标 + 解析落点(compose / tweet / other / none)
+  ipcMain.handle(IPC_CHANNELS.X_DRAG_RESOLVE, async (_e, payload: unknown) => {
+    const p = payload as { serviceId?: unknown; targetWcId?: unknown } | null;
+    if (!p || !isXServiceId(p.serviceId) || typeof p.targetWcId !== 'number') {
+      return { kind: 'none' };
+    }
+    return resolveXDropAt(p.serviceId, p.targetWcId);
+  });
+
+  // X_DRAG_REPLY_HERE — 落推文:就地点该推回复按钮弹 reply 框(不跳详情页)
+  ipcMain.handle(IPC_CHANNELS.X_DRAG_REPLY_HERE, async (_e, payload: unknown) => {
+    const p = payload as { serviceId?: unknown; targetWcId?: unknown } | null;
+    if (!p || !isXServiceId(p.serviceId) || typeof p.targetWcId !== 'number') {
+      return { ok: false, error: 'invalid replyHere payload' };
+    }
+    return clickReplyAtDrop(p.serviceId, p.targetWcId);
   });
 }

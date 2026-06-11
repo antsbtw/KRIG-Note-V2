@@ -782,24 +782,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
-  /** 发推:把纯文本填进 X compose 框 */
-  xPasteTweet(serviceId: string, text: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text });
+  /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)*/
+  xPasteTweet(serviceId: string, text: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId });
   },
-  /** 回复:导航到目标推 + 把纯文本填进 reply 框 */
-  xPasteReply(serviceId: string, tweetUrl: string, text: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text });
+  /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)*/
+  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId });
   },
-  /** 订阅:X webview 右键「在 note 里写回复」点击(main 推 guest 坐标);返 unsubscribe */
-  onXWriteReplyRequest(
-    callback: (payload: { serviceId: string; x: number; y: number }) => void,
-  ): () => void {
-    const handler = (_event: unknown, payload: unknown): void =>
-      callback(payload as { serviceId: string; x: number; y: number });
-    ipcRenderer.on(IPC_CHANNELS.X_WRITE_REPLY_REQUEST, handler);
-    return () => ipcRenderer.off(IPC_CHANNELS.X_WRITE_REPLY_REQUEST, handler);
+  /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
+  xDragArm(targetWcId: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_ARM, { targetWcId });
   },
-
+  /** 拖拽:松手,读回最后坐标 + 解析落点 */
+  xDragResolve(serviceId: string, targetWcId: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_RESOLVE, { serviceId, targetWcId });
+  },
+  /** 拖拽落推文:就地点该推回复按钮弹 reply 框(不跳详情页)*/
+  xDragReplyHere(serviceId: string, targetWcId: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_REPLY_HERE, { serviceId, targetWcId });
+  },
   // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
   /** 任务开始 — 显示全屏覆盖层 */
   onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void {

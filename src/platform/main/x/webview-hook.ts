@@ -35,22 +35,14 @@ export function registerXWebviewHook(mainWindow: BrowserWindow): void {
       ({ guest, params }) => {
         const service = detectXServiceByUrl(guest.getURL());
         if (!service) return [];
+        // 写方向(发推/回复)已改为「拖 note block 到 X」交互,故右键只保留读方向的
+        // 「提取此推文到笔记」。原「✍️ 在 note 里写回复」「𝕏 发到这里(发推)」两项已去掉
+        // (拖拽验证通过,总指挥拍板移除)。
         const template: MenuItemConstructorOptions[] = [
           {
             label: '📥 提取此推文到笔记',
             click: () => {
               mainWindow.webContents.send(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, {
-                serviceId: service.id,
-                x: params.x,
-                y: params.y,
-              });
-            },
-          },
-          {
-            // 阶段 2(写方向):在 note 里写回复 → 抓被点中推文坐标 → renderer 起草 → 注入 reply 框
-            label: '✍️ 在 note 里写回复',
-            click: () => {
-              mainWindow.webContents.send(IPC_CHANNELS.X_WRITE_REPLY_REQUEST, {
                 serviceId: service.id,
                 x: params.x,
                 y: params.y,

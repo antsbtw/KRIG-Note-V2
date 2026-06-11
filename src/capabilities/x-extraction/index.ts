@@ -17,9 +17,10 @@ import type {
   XExtractTweetResult,
   XExtractTweetRequest,
   XWriteResult,
-  XWriteReplyRequest,
+  XDropTarget,
 } from './types';
 import { Host } from './Host';
+import { registerXHostWcId, clearXHostWcId, getXHostWcId } from './x-host-registry';
 
 export type {
   XExtractionApi,
@@ -28,7 +29,7 @@ export type {
   XExtractTweetResult,
   XExtractTweetRequest,
   XWriteResult,
-  XWriteReplyRequest,
+  XDropTarget,
   XHostHandle,
   XHostProps,
 } from './types';
@@ -48,22 +49,37 @@ function onExtractTweetRequest(
 }
 
 // ── 写方向(阶段 2)──
-async function pasteTweet(serviceId: XServiceId, text: string): Promise<XWriteResult> {
-  return window.electronAPI.xPasteTweet(serviceId, text);
+async function pasteTweet(
+  serviceId: XServiceId,
+  text: string,
+  targetWcId?: number | null,
+): Promise<XWriteResult> {
+  return window.electronAPI.xPasteTweet(serviceId, text, targetWcId ?? undefined);
 }
 
 async function pasteReply(
   serviceId: XServiceId,
   tweetUrl: string,
   text: string,
+  targetWcId?: number | null,
 ): Promise<XWriteResult> {
-  return window.electronAPI.xPasteReply(serviceId, tweetUrl, text);
+  return window.electronAPI.xPasteReply(serviceId, tweetUrl, text, targetWcId ?? undefined);
 }
 
-function onWriteReplyRequest(
-  callback: (payload: XWriteReplyRequest) => void,
-): () => void {
-  return window.electronAPI.onXWriteReplyRequest(callback);
+// ── 拖拽落点 ──
+async function dragArm(targetWcId: number): Promise<void> {
+  await window.electronAPI.xDragArm(targetWcId);
+}
+
+async function dragResolve(serviceId: XServiceId, targetWcId: number): Promise<XDropTarget> {
+  return window.electronAPI.xDragResolve(serviceId, targetWcId) as Promise<XDropTarget>;
+}
+
+async function dragReplyHere(
+  serviceId: XServiceId,
+  targetWcId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  return window.electronAPI.xDragReplyHere(serviceId, targetWcId);
 }
 
 export const xExtractionCapability: XExtractionApi = {
@@ -71,7 +87,12 @@ export const xExtractionCapability: XExtractionApi = {
   onExtractTweetRequest,
   pasteTweet,
   pasteReply,
-  onWriteReplyRequest,
+  registerXHostWcId,
+  clearXHostWcId,
+  getXHostWcId,
+  dragArm,
+  dragResolve,
+  dragReplyHere,
   Host,
 };
 
