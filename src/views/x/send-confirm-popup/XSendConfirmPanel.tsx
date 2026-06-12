@@ -31,6 +31,8 @@ export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
   // mount 时读 pending ctx;读完即清(useMemo 保仅跑一次)。
   const ctx = useMemo<XSendConfirmContext | null>(() => consumePendingXSendConfirm(), []);
   const [text, setText] = useState(() => ctx?.text ?? '');
+  /** 用户当前保留的媒体清单(可移除某张,只影响本次发送)*/
+  const [mediaUrls, setMediaUrls] = useState<string[]>(() => ctx?.mediaUrls ?? []);
   /** 注入进行中(await onConfirm 期间禁按钮防重复点)*/
   const [injecting, setInjecting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -67,7 +69,8 @@ export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
     setInjecting(true);
     try {
       // 注入 + 失败降级全在 onConfirm 内(send-to-x 侧)。本弹窗只负责确认 + 关闭。
-      await ctx.onConfirm(finalText);
+      // 第二参回传用户保留下的媒体清单(可能已移除某张)。
+      await ctx.onConfirm(finalText, mediaUrls);
     } catch (err) {
       // onConfirm 内部已 fail-loud 降级处理;此处兜底防未捕获异常吞掉关闭。
       console.warn('[XSendConfirmPanel] onConfirm threw:', err);
@@ -117,6 +120,38 @@ export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
           </span>
         )}
       </div>
+
+      {/* 媒体缩略图栏(阶段 2.5-b):显示将带的图 + 可移除某张(只影响本次发送)。
+          media:// 是 privileged scheme,<img> 可直接渲染。*/}
+      {mediaUrls.length > 0 && (
+        <div className="krig-x-send-confirm__media">
+          <div className="krig-x-send-confirm__media-label">
+            将带 {mediaUrls.length} 张图
+            {ctx.totalImageCount > 4 && (
+              <span className="krig-x-send-confirm__media-trunc">
+                (共 {ctx.totalImageCount} 张,X 限 4 张,仅带前 4 张)
+              </span>
+            )}
+          </div>
+          <div className="krig-x-send-confirm__media-thumbs">
+            {mediaUrls.map((url, i) => (
+              <div key={url + i} className="krig-x-send-confirm__thumb">
+                <img src={url} alt={`媒体 ${i + 1}`} className="krig-x-send-confirm__thumb-img" />
+                <button
+                  type="button"
+                  className="krig-x-send-confirm__thumb-remove"
+                  onClick={() => setMediaUrls((prev) => prev.filter((_, j) => j !== i))}
+                  title="不带这张图(只影响本次发送)"
+                  aria-label="移除此图"
+                  disabled={injecting}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 可编辑预览(所见即所发;改动不回写 note)*/}
       <textarea

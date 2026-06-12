@@ -48,6 +48,26 @@ function ensureXVisible(wsId: string): void {
   bus?.channels.emit('x.activate-launcher', { emittedAt: Date.now() });
 }
 
+/** X 推文媒体上限(图片)。超出只带前 N 张,其余提示用户(不静默丢)。*/
+const X_MAX_IMAGES = 4;
+
+/**
+ * 从 SerializeResult.images 收集 note 图清单(阶段 2.5-b,路线 B)。
+ *
+ * images 是序列化器收集的所有 image src(media:// URL,见 pm-to-markdown serializeImage)。
+ * 只取 media:// 的(http(s) 外链图无法当本地文件喂给 X);截至 X_MAX_IMAGES 张。
+ * 视频本期不做(总指挥定:本期只图片),videoBlock 序列化成占位不进 images,天然不混入。
+ *
+ * @returns { mediaUrls: 截后的 media:// 清单, totalImageCount: 截前总数(>4 时提示用)}
+ */
+function collectNoteImages(images: string[]): { mediaUrls: string[]; totalImageCount: number } {
+  const mediaImages = images.filter((src) => typeof src === 'string' && src.startsWith('media://'));
+  return {
+    mediaUrls: mediaImages.slice(0, X_MAX_IMAGES),
+    totalImageCount: mediaImages.length,
+  };
+}
+
 /** 注入失败统一降级:复制到剪贴板 + alert 明示(fail loud)*/
 function fallbackToClipboard(text: string, reason: string): void {
   try {
@@ -75,11 +95,13 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 1. 选区优先,无选区取整篇
-  let { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
+  // 1. 选区优先,无选区取整篇。同源拿 images(media:// 图清单,阶段 2.5-b)。
+  let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
-    markdown = textEditing.api.getDocMarkdown(instanceId).markdown;
+    const doc = textEditing.api.getDocMarkdown(instanceId);
+    markdown = doc.markdown;
+    images = doc.images;
     usedWholeDoc = true;
   }
   if (!markdown || !markdown.trim()) {
@@ -94,12 +116,17 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 3. 弹发送前确认弹窗(预览/字数/可编辑)。确认 → onConfirm 注入;取消 → 不注入。
+  // 3. 收集 note 图(media://,截至 4 张)。
+  const { mediaUrls, totalImageCount } = collectNoteImages(images);
+
+  // 4. 弹发送前确认弹窗(预览/字数/缩略图/可编辑)。确认 → onConfirm 注入;取消 → 不注入。
   showXSendConfirm({
     text,
     usedWholeDoc,
     replyPreview: null,
-    onConfirm: (finalText) => performXInjection(wsId, finalText),
+    mediaUrls,
+    totalImageCount,
+    onConfirm: (finalText, finalMedia) => performXInjection(wsId, finalText, finalMedia),
   });
 }
 
@@ -112,7 +139,11 @@ export async function sendToX(): Promise<void> {
  * ⚠️ 写方向红线:只注入到 X 框,绝不程序点发布。
  * (回复注入走 sendToXAtDropTarget 里的就地弹框 + pasteTweet 链路,不经本函数。)
  */
-async function performXInjection(wsId: string, finalText: string): Promise<void> {
+async function performXInjection(
+  wsId: string,
+  finalText: string,
+  mediaUrls: string[] = [],
+): Promise<void> {
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
 
   // 让 X webview 显示 + 注册(main 侧 pasteTweet 内部还会 poll 等待)
@@ -125,31 +156,47 @@ async function performXInjection(wsId: string, finalText: string): Promise<void>
     console.warn('[send-to-x] 未取到本 ws 的 X Host wc id,回退 main 全局 active(多实例可能串扰)');
   }
 
-  const result = await x.pasteTweet('x', finalText, targetWcId);
+  const result = await x.pasteTweet('x', finalText, targetWcId, mediaUrls);
   if (!result.success) {
     fallbackToClipboard(finalText, result.error || '未知错误');
     return;
   }
-  // 注入成功:内容已可见地填进 X 发推框,确认弹窗里已有「需你自己点发布」红线文案,
+  // 文字落地成功,但图没带上(selector 失效 / X 没接住)→ fail loud 明示,让用户手动拖图。
+  // 不当成完全失败(文字已在框里),也不静默假装图也成功了(铁律 4)。
+  if (result.mediaWarning) {
+    window.alert(
+      `文字已填入 X,但图片没能带上(${result.mediaWarning})。\n\n` +
+        `请在 X 发推框手动拖入图片,再检查后点发布。`,
+    );
+    return;
+  }
+  // 全部成功:内容(含图)已可见地填进 X 发推框,确认弹窗里已有「需你自己点发布」红线文案,
   // 不再弹阻塞 alert 打扰(总指挥:成功告知无必要)。失败仍 fail loud(上面 fallback)。
 }
 
 /**
  * 「被拖起的 block」内容暂存(拖 block 到 X 用)。dnd.started 时抓 → 松手时用。
  * 总指挥:发的是**拖的那些 block**,不是 note 选区/整篇。
+ * 阶段 2.5-b:同时暂存被拖 block 里的图(media://,截至 4 张),拖什么发什么(含图)。
  */
 let draggedBlockText: string | null = null;
+let draggedBlockMedia: { mediaUrls: string[]; totalImageCount: number } = {
+  mediaUrls: [],
+  totalImageCount: 0,
+};
 
-/** dnd.started 时调:抓被拖起 block(单块或多选块)的降级纯文本暂存。*/
+/** dnd.started 时调:抓被拖起 block(单块或多选块)的降级纯文本 + 图清单暂存。*/
 export function stashDraggedBlockText(instanceId: string, fromPos: number): void {
   draggedBlockText = null;
+  draggedBlockMedia = { mediaUrls: [], totalImageCount: 0 };
   try {
     const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-    const { markdown } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
+    const { markdown, images } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
     if (markdown && markdown.trim()) {
       const text = markdownToTweetText(markdown);
       if (text.trim()) draggedBlockText = text;
     }
+    draggedBlockMedia = collectNoteImages(images);
   } catch (err) {
     console.warn('[send-to-x] stashDraggedBlockText failed:', err);
   }
@@ -162,18 +209,29 @@ function consumeDraggedBlockText(): string | null {
   return t;
 }
 
-/** 取当前活跃 note 的待发纯文本(选区优先,无选区取整篇)。失败 alert 并返 null。*/
-function getPendingTweetText(): { text: string; usedWholeDoc: boolean } | null {
+/** 取并清空暂存的被拖 block 图清单(松手消费一次,与 consumeDraggedBlockText 配对)*/
+function consumeDraggedBlockMedia(): { mediaUrls: string[]; totalImageCount: number } {
+  const m = draggedBlockMedia;
+  draggedBlockMedia = { mediaUrls: [], totalImageCount: 0 };
+  return m;
+}
+
+/** 取当前活跃 note 的待发纯文本 + 图清单(选区优先,无选区取整篇)。失败 alert 并返 null。*/
+function getPendingTweetText():
+  | { text: string; usedWholeDoc: boolean; mediaUrls: string[]; totalImageCount: number }
+  | null {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const instanceId = getActiveNoteInstanceId(textEditing);
   if (!instanceId) {
     window.alert('没有活跃的 Note —— 请先在 Note 里选中要发的内容(或打开要发的整篇)');
     return null;
   }
-  let { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
+  let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
-    markdown = textEditing.api.getDocMarkdown(instanceId).markdown;
+    const doc = textEditing.api.getDocMarkdown(instanceId);
+    markdown = doc.markdown;
+    images = doc.images;
     usedWholeDoc = true;
   }
   if (!markdown || !markdown.trim()) {
@@ -185,7 +243,8 @@ function getPendingTweetText(): { text: string; usedWholeDoc: boolean } | null {
     window.alert('转换后内容为空,无法发到 X');
     return null;
   }
-  return { text, usedWholeDoc };
+  const { mediaUrls, totalImageCount } = collectNoteImages(images);
+  return { text, usedWholeDoc, mediaUrls, totalImageCount };
 }
 
 /**
@@ -199,6 +258,7 @@ function getPendingTweetText(): { text: string; usedWholeDoc: boolean } | null {
  */
 export async function sendToXAtDropTarget(): Promise<void> {
   const draggedText = consumeDraggedBlockText(); // 消费本次拖拽 stash(无论落点如何都清掉)
+  const draggedMedia = consumeDraggedBlockMedia(); // 同步消费图清单(与文本配对)
   const wsId = workspaceManager.getActiveId();
   if (!wsId) return;
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
@@ -211,10 +271,14 @@ export async function sendToXAtDropTarget(): Promise<void> {
 
   // 内容 = 被拖起的 block(总指挥:拖什么发什么)。stash 没拿到(罕见)→ 退回选区/整篇兜底。
   let text = draggedText;
+  let mediaUrls = draggedMedia.mediaUrls;
+  let totalImageCount = draggedMedia.totalImageCount;
   if (!text) {
     const pending = getPendingTweetText();
     if (!pending) return; // 内容为空已 alert
     text = pending.text;
+    mediaUrls = pending.mediaUrls;
+    totalImageCount = pending.totalImageCount;
   }
 
   if (drop.kind === 'compose') {
@@ -223,7 +287,9 @@ export async function sendToXAtDropTarget(): Promise<void> {
       text,
       usedWholeDoc: false,
       replyPreview: null,
-      onConfirm: (finalText) => performXInjection(wsId, finalText),
+      mediaUrls,
+      totalImageCount,
+      onConfirm: (finalText, finalMedia) => performXInjection(wsId, finalText, finalMedia),
     });
     return;
   }
@@ -233,20 +299,30 @@ export async function sendToXAtDropTarget(): Promise<void> {
     text,
     usedWholeDoc: false,
     replyPreview: drop.author || '该推文',
-    onConfirm: async (finalText) => {
+    mediaUrls,
+    totalImageCount,
+    onConfirm: async (finalText, finalMedia) => {
       // 1. 就地点回复按钮弹 reply 框(main 侧 poll 等框出现)
       const r = await x.dragReplyHere('x', targetWcId);
       if (!r.ok) {
         fallbackToClipboard(finalText, r.error || '回复框未弹出');
         return;
       }
-      // 2. reply 框已弹出(= 当前 compose 框)→ 注入。复用 pasteTweet(填的就是这个 reply 框)。
-      const result = await x.pasteTweet('x', finalText, targetWcId);
+      // 2. reply 框已弹出(= 当前 compose 框)→ 注入(含图)。复用 pasteTweet(填的就是这个 reply 框)。
+      const result = await x.pasteTweet('x', finalText, targetWcId, finalMedia);
       if (!result.success) {
         fallbackToClipboard(finalText, result.error || '未知错误');
         return;
       }
-      // 成功:内容已可见填进回复框,确认弹窗已有「需你点回复」红线,不弹阻塞 alert(同发推)。
+      // 文字落地但图没带上 → fail loud 明示(同 performXInjection),让用户手动拖图。
+      if (result.mediaWarning) {
+        window.alert(
+          `回复文字已填入 X,但图片没能带上(${result.mediaWarning})。\n\n` +
+            `请在回复框手动拖入图片,再检查后点回复。`,
+        );
+        return;
+      }
+      // 成功:内容(含图)已可见填进回复框,确认弹窗已有「需你点回复」红线,不弹阻塞 alert(同发推)。
     },
   });
 }

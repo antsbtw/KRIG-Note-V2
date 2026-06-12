@@ -32,6 +32,20 @@ export interface XServiceSelectors {
   replyBox?: string;
   /** 发布按钮(阶段 2)— ⚠️ 仅用于「定位 / 校验内容落地」,写方向红线:绝不程序 click */
   publishButton?: string;
+  // ── 媒体上传 selector(阶段 2.5-b,路线 B:喂文件给 X 自己的上传控件)──
+  /**
+   * 发推/回复框的文件上传 `<input type=file>`(阶段 2.5-b)。
+   * 路线 B 关键:把 note 的图喂给这个 input(DataTransfer 注入 + change 事件),
+   * 由 X 前端自己完成 INIT/APPEND/FINALIZE,我们绝不碰官方 API。
+   * ⚠️ 待实机 spike 校验(X 改版频繁,失效 fail loud 降级「请手动拖图」)。
+   */
+  fileInput?: string;
+  /**
+   * 喂文件后 X 生成的「已上传媒体缩略图 / 移除按钮」(阶段 2.5-b)。
+   * 喂完 poll 等它出现 = X 真接住了文件的证明;没出现 → fail loud(不假装成功)。
+   * ⚠️ 待实机 spike 校验。
+   */
+  uploadedMediaThumb?: string;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -99,6 +113,20 @@ const X_PROFILE: XServiceProfile = {
     composeBox: '[data-testid="tweetTextarea_0"], [data-testid^="tweetTextarea_"][contenteditable="true"], div[role="textbox"][data-testid^="tweetTextarea_"]',
     replyBox: '[data-testid="tweetTextarea_0"], [data-testid^="tweetTextarea_"][contenteditable="true"], div[role="textbox"][data-testid^="tweetTextarea_"]',
     publishButton: '[data-testid="tweetButtonInline"], [data-testid="tweetButton"]',
+    // ── 媒体上传 selector(阶段 2.5-b)──
+    //
+    // ⚠️ SPIKE 待实机校验(总指挥本地 spike 后核对/替换):以下取自开源 X 自动化库
+    //   (XActions / twitter-automation-ai,见 roadmap §5)的已知起点,X 的发推/回复框
+    //   媒体上传按钮背后都是一个隐藏的 <input type=file multiple accept="image/*,video/*">。
+    //   - fileInput:X compose / reply 框的文件上传 input。官方 testid 长期是 fileInput。
+    //       多候选兜底:accept 含 image 的隐藏 file input(testid 失效时)。
+    //   - uploadedMediaThumb:喂文件后 X 在编辑器里渲染的已上传媒体缩略图 + 移除按钮容器。
+    //       常见 testid:attachments(整组)/ removeMedia(单张移除按钮)。poll 它出现 =
+    //       X 真把文件接住并开始上传的证明;没出现 → fail loud。
+    //
+    // selector 清单同时誊抄进交付说明(X 改版会失效,要可查)。
+    fileInput: 'input[data-testid="fileInput"], input[type="file"][accept*="image"]',
+    uploadedMediaThumb: '[data-testid="attachments"], [data-testid="removeMedia"], [aria-label*="Remove media"], [data-testid="media"]',
   },
 };
 

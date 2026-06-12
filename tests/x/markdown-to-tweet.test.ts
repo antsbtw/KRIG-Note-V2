@@ -52,10 +52,41 @@ describe('markdownToTweetText — 链接 / 图片', () => {
   it('空 label → 仅 url', () => {
     expect(markdownToTweetText('[](https://x.com)')).toBe('https://x.com');
   });
-  it('图片 ![alt](url) → url', () => {
+  it('http(s) 图片 ![alt](url) → url（外链图无法当附件，保留 URL）', () => {
     expect(markdownToTweetText('![cat](https://x.com/cat.png)')).toBe(
       'https://x.com/cat.png',
     );
+  });
+});
+
+describe('markdownToTweetText — media:// 图片删除（阶段 2.5-b：图走附件，正文不留 URL）', () => {
+  it('整行 media:// 图片 → 删（不留任何 URL 文本）', () => {
+    expect(
+      markdownToTweetText('![](media://images/img-abc123.jpeg)'),
+    ).toBe('');
+  });
+  it('带 alt 的 media:// 图片整行 → 删', () => {
+    expect(
+      markdownToTweetText('![截图](media://images/x.png)'),
+    ).toBe('');
+  });
+  it('文字 + 多张 media:// 图：只留文字，图全删（复现并锁死你报的 bug）', () => {
+    const md = [
+      '自己开发的app，做发图测试',
+      '![](media://images/img-da448ea7ceb36355.jpeg)',
+      '![](media://images/img-28e6998e60b21580.jpeg)',
+      '![](media://images/img-8794724a830ff6ce.png)',
+    ].join('\n');
+    expect(markdownToTweetText(md)).toBe('自己开发的app，做发图测试');
+  });
+  it('行内混排 media:// 图 → 删图保文字', () => {
+    expect(
+      markdownToTweetText('看这张 ![](media://a.png) 不错'),
+    ).toBe('看这张  不错');
+  });
+  it('media:// 图删除后不残留空行（与空行折叠协同）', () => {
+    const md = '第一段\n![](media://a.png)\n第二段';
+    expect(markdownToTweetText(md)).toBe('第一段\n第二段');
   });
 });
 

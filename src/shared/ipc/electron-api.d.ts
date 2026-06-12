@@ -577,19 +577,24 @@ declare global {
       onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
 
       // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
-      /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布) */
+      /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布)。
+       *  mediaUrls(阶段 2.5-b):note 图 media:// 数组,main 侧解析路径后先喂图再填字;
+       *  mediaWarning 非空 = 文字落地但图没带上(fail loud 降级提示)。 */
       xPasteTweet(
         serviceId: XServiceId,
         text: string,
         targetWcId?: number,
-      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
-      /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布) */
+        mediaUrls?: string[],
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
+      /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布)。
+       *  mediaUrls(阶段 2.5-b):同 xPasteTweet。 */
       xPasteReply(
         serviceId: XServiceId,
         tweetUrl: string,
         text: string,
         targetWcId?: number,
-      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
+        mediaUrls?: string[],
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
       /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
       xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
       /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/

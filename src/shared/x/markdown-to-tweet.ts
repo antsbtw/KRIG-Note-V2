@@ -55,6 +55,13 @@ export function markdownToTweetText(markdown: string): string {
       continue;
     }
 
+    // 阶段 2.5-b:整行是 media:// 图片(单张,可前后空白)→ 删掉。
+    // 这些图已走「附件上传」(collectNoteImages → 喂 X 上传控件),正文不该再留 media:// URL
+    // (本地协议贴给读者打不开、纯噪音,且与附件重复)。总指挥拍板:一律从正文删。
+    if (/^\s*!\[[^\]]*\]\(\s*media:\/\/[^)\s]+(?:\s+"[^"]*")?\s*\)\s*$/.test(raw)) {
+      continue;
+    }
+
     let line = raw;
 
     // 标题:去前导 # (保留文字)
@@ -86,8 +93,12 @@ export function markdownToTweetText(markdown: string): string {
 function stripInlineMarkdown(line: string): string {
   let s = line;
 
-  // 图片 ![alt](url) → url(先于链接处理,因语法前缀 ! 区分)
-  s = s.replace(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, url: string) => url);
+  // 图片 ![alt](url)（先于链接处理,因语法前缀 ! 区分):
+  // - media:// 图（本地图）已走附件上传 → 删掉，不留 URL（与整行删除规则一致，覆盖行内残留）
+  // - http(s) 外链图无法当附件喂 X → 保留 URL（X 可能展开为卡片）
+  s = s.replace(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, url: string) =>
+    url.startsWith('media://') ? '' : url,
+  );
 
   // 链接 [label](url) → label (url);label==url 或空 → url
   s = s.replace(/\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, label: string, url: string) => {

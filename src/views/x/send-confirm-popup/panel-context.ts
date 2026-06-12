@@ -23,12 +23,23 @@ export interface XSendConfirmContext {
    */
   replyPreview: string | null;
   /**
-   * 确认回调:用户点「填入 X」时调,传当前(可能已编辑的)文本。
+   * 媒体图清单(阶段 2.5-b,路线 B):note 选区/整篇里的图 media:// URL(已截至 4 张)。
+   * 弹窗渲染缩略图(media:// 是 privileged scheme,<img> 可直接显)+ 允许用户移除某张
+   *(只影响本次发送)。onConfirm 第二参回传用户保留下的最终清单。空数组 = 无图(纯文字推)。
+   */
+  mediaUrls: string[];
+  /**
+   * 收集到的图超过 4 张被截断的总数(>4 时非 0)。非 0 → 弹窗提示「共 N 张,X 限 4 张,
+   * 仅带前 4 张」(不静默丢,铁律 4)。
+   */
+  totalImageCount: number;
+  /**
+   * 确认回调:用户点「填入 X」时调,传当前(可能已编辑的)文本 + 用户保留的媒体清单。
    * send-to-x 在此回调里做 ensureXVisible + 注入(发推 / 就地弹回复框)+ 失败降级。
    *
    * 返回 Promise<void>:弹窗会在 await 期间禁用按钮(防重复点),完成后由弹窗自行 close。
    */
-  onConfirm: (finalText: string) => void | Promise<void>;
+  onConfirm: (finalText: string, mediaUrls: string[]) => void | Promise<void>;
 }
 
 let pending: XSendConfirmContext | null = null;

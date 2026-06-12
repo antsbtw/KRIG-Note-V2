@@ -48,6 +48,11 @@ export interface XWriteResult {
   error?: string;
   /** 发布按钮是否已就位(辅助确认内容落进正确的框,不代表已发布)*/
   publishReady?: boolean;
+  /**
+   * 媒体降级提示(阶段 2.5-b):文字落地但喂图失败 / 部分图无法解析时附带。
+   * 非空 = view 侧应明示「文字已填入,但图没带上,请手动拖图」(fail loud,不假装成功)。
+   */
+  mediaWarning?: string;
 }
 
 
@@ -102,17 +107,26 @@ export interface XExtractionApi {
   /**
    * 发推:把纯文本填进 X compose 框(用户随后手动点发布)。
    * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
+   * @param mediaUrls 媒体 media:// URL 数组(阶段 2.5-b,路线 B);main 侧解析磁盘路径后
+   *   先喂图(等缩略图)再填字。喂图失败 → result.mediaWarning(文字仍填,fail loud)。
    */
-  pasteTweet(serviceId: XServiceId, text: string, targetWcId?: number | null): Promise<XWriteResult>;
+  pasteTweet(
+    serviceId: XServiceId,
+    text: string,
+    targetWcId?: number | null,
+    mediaUrls?: string[],
+  ): Promise<XWriteResult>;
   /**
    * 回复:导航到目标推 + 把纯文本填进 reply 框(用户随后手动点回复)。
    * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
+   * @param mediaUrls 同 pasteTweet(阶段 2.5-b)。
    */
   pasteReply(
     serviceId: XServiceId,
     tweetUrl: string,
     text: string,
     targetWcId?: number | null,
+    mediaUrls?: string[],
   ): Promise<XWriteResult>;
   // ── X Host wc 按 ws 登记(注入按活跃 ws 定向,治多实例串扰)──
   /** 登记某 ws 的 AI-view X Host guest wc id(AIView 调)*/

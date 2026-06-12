@@ -783,13 +783,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
-  /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)*/
-  xPasteTweet(serviceId: string, text: string, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId });
+  /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)。
+   *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。*/
+  xPasteTweet(serviceId: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId, mediaUrls });
   },
-  /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)*/
-  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId });
+  /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)。
+   *  mediaUrls(阶段 2.5-b):同 xPasteTweet。*/
+  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId, mediaUrls });
   },
   /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
   xDragArm(targetWcId: number): Promise<unknown> {
