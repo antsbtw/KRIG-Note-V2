@@ -1,47 +1,12 @@
 /**
  * toc.css — note view 目录侧边面板样式
  *
- * 左侧窄 hover 触发区:24px 宽,全高;hover 时显示淡背景渐变。
- * 浮层面板:240px 宽,从左侧滑出。
+ * 浮层面板:240px 宽,从左侧滑出。由 toolbar 📑 按钮 toggle 显示,点外部关闭
+ * (原 hover 触发区已移除——易反复误弹框,改显式按钮)。
  *
- * 与 V1 一致(src/plugins/note/toc/toc.css),仅 top 改为 0(V2 NoteView 自身
- * 没有 toolbar bar 高,顶部留给 hotzone 直接铺到容器顶)。
+ * TOC 用 absolute 锚到 NoteView 内(.krig-note-view overflow:auto +
+ * position:relative),避免 fixed 在分屏布局下越界。
  */
-
-/* ─── Hover 触发区 ─── */
-/* NoteView 自身是滚动容器(.krig-note-view overflow:auto + position:relative),
-   TOC 用 absolute 锚到 NoteView 内,避免 fixed 在分屏布局下越界。*/
-.toc-hotzone {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 24px;
-  z-index: 10;
-  cursor: pointer;
-  background: transparent;
-  transition: background 0.15s;
-}
-
-.toc-hotzone::after {
-  content: '';
-  position: absolute;
-  left: 10px;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(255, 255, 255, 0.15);
-  pointer-events: none;
-}
-
-.toc-hotzone:hover {
-  background: linear-gradient(
-    to right,
-    rgba(255, 255, 255, 0.06) 0%,
-    rgba(255, 255, 255, 0.02) 60%,
-    transparent 100%
-  );
-}
 
 /* ─── 浮层面板 ─── */
 .toc-panel {

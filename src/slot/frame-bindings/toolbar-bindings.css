@@ -69,6 +69,14 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* ‹ › 字形(U+2039/203A)在自身 em-box 内偏上,flex 居中后仍显高 —
+   line-height:1 + 1px 光学下移,使其与同排 SVG 图标(目录)真正对齐 */
+.krig-toolbar-button[data-toolbar-item='note-view.nav-back'],
+.krig-toolbar-button[data-toolbar-item='note-view.nav-forward'] {
+  line-height: 1;
+  padding-top: 1px;
+}
+
 /* close variant:透明无边框 + 灰色(V1 closeSlotBtn × 同款,height 28 / font 16 / #888) */
 .krig-toolbar-button--close {
   border: 1px solid transparent;
