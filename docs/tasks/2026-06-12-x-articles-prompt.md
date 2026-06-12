@@ -1,168 +1,128 @@
-# 实施 Prompt：X 集成 阶段 3 — Articles 长文发布（note → X Article 块序列注入）
+# 实施 Prompt：X Articles — 经「Article 呈现态」发布长文
 
-> 交接日期：2026-06-12
-> 交接人：总指挥
-> 验收人：总指挥
-> 设计依据：**先通读** [设计文档 §5 阶段3](./2026-06-09-x-integration-design.md#L121)（能力边界、映射三分类、块序列注入器，已写得很全 —— 本 prompt 是把它激活成可执行实施单）
+> 交接日期：2026-06-12（阶段 A 调研完成后，总指挥重构方向）
+> 交接人：总指挥｜验收人：总指挥
+> 依据：调研报告 [2026-06-12-x-articles-format-matrix.md](./2026-06-12-x-articles-format-matrix.md)（note×X 格式矩阵，已审，可信）；技术可行性调研（note 多实例/readOnly/render-blocks-to-media 现状）
 > 当前分支 `docs/x-integration-design`（已含逐block成图零件 `2b337d4e`）。
 
 ---
 
-## 0. 为什么是这个：回到最初的核心痛点
+## 0. 方向（总指挥拍板，已从「直接块序列注入 X」改为「呈现态」）
 
-用户做整个 X 集成的**第一诉求**就是："Articles 长文在 web 上很难编辑，想在 note 里组织好一键发布"。前面阶段（发推/回复/媒体）都是铺垫，**Articles 才是核心目标**。
+用户核心痛点：note 长文一键发 X Article。**新路径不再"逐块点 X 工具栏注入"（最脆弱、最易被 X 改版搞崩），而是：**
 
-X Article 编辑器（`x.com/compose/articles/edit/<id>`）本身**吃富文本**（标题/粗斜删/列表/引用/链接/图片）—— 所以 Articles **绕开了"公式/表格渲图发推被裁"那个死结**：正文富文本直接注入，不支持的块走内嵌图。
+> **note → 转成「Article 呈现态」（同一份内容的预览视图：X 支持的格式正常显示，X 不支持的（公式/代码/表格/Mermaid）当场渲成图片就地组织）→ 用户在呈现态里做小调整核验（所见即所得，看到的 == 发出去的）→ 从这个干净结构发布到 X。**
 
----
-
-## ★★ 本任务分两阶段（总指挥拍板：调研先行，决策前置）
-
-> **阶段 A（本次先做，纯调研，不写实现代码）**：产出「note 格式 × X Article 格式 对齐矩阵 + 每格处理建议 + 待总指挥实机核对清单」，**停下来交总指挥逐格拍板**。
-> **阶段 B（拍板后另起）**：按拍定的矩阵实现块序列注入器。
-
-**本次交付物 = 阶段 A 的调研报告。不要进入 §2 之后的实现。** §1-§8 是阶段 B 的实现说明，阶段 A 调研时作为背景读，但**先别动手实现**。
-
-### 阶段 A 调研要求（产出 `docs/tasks/2026-06-12-x-articles-format-matrix.md`）
-
-**A-1｜note 侧格式全集（查代码，不靠记忆 —— 项目铁律「别猜看真实数据」）**
-- 列出 note 所有 block node + mark（已知约 32 node + 9 mark，去 `src/drivers/text-editing-driver/blocks/*/spec.ts` + `marks/` 核准当前真实集合）。
-- 每项：是什么、note 里长什么样、典型用途。
-
-**A-2｜X Article 侧支持情况（实机查不到 → 给推测 + 标「待实机核对」）**
-- 基于 2026-06-09 截图（设计文档 §5）+ 开源库 + 你的判断，**推测** X Article 对每种格式的支持情况。
-- **每一项都标注状态**：`已截图确认` / `推测-待总指挥实机核对`。X 改版频繁，推测有时效性。
-- 汇总一份独立的「⚠️ 待总指挥实机核对项」清单（列出哪些格式需要用户对着真实 X Article 编辑器逐项确认）。
-
-**A-3｜对齐矩阵 + 每格处理建议**
-一张表，每行一个 note 格式，列出：
-| note 格式 | X Article 是否支持（A-2 状态） | 建议处理（原生映射 / 文本降级 / 内嵌图 / 其他） | 理由 / 风险 / 待定 |
-
-处理三分类沿用 §3，但**逐格给建议、标出拿不准的让总指挥定**。尤其这些容易模糊的，重点调研：
-- 标题：X Article 支持几级？note 6 级怎么降？
-- 列表：X 支持嵌套吗？note 多层列表怎么办？
-- 引用：X 支持多层引用吗？
-- 链接：X Article 怎么插链接（选中文字点🔗？粘 markdown？）
-- 行内 mark 组合（粗+斜+链接叠加）X 怎么处理？
-
-**A-4｜不做实现**：阶段 A 只读代码 + 出报告，**不改任何源码、不写注入器**。报告末尾列「阶段 B 待总指挥拍板后开工」。
-
----
-（以下 §1-§8 为阶段 B 实现说明，阶段 A 时作背景，勿提前实现）
+为什么这条更优（调研证实）：
+- **所见即所得**：呈现态里公式/表格已经是图，用户看到的就是 X 上的样子，零意外。
+- **避开最脆弱环节**：发布时输入已是「只含 X 支持格式 + 图」的干净 doc，注入大幅简化（甚至可能直接粘贴，见 §4 待核 #7/#8）。
+- **几乎全复用**（调研证实）：note 多实例 ✅、image block 吃 media:// ✅、render-blocks-to-media ✅；只需补 `readOnly` 实现 + doc 转换 + table→图。
+- **同源未来能力**：与 Canvas 长图、问 AI 都是「note→呈现/视觉态」，是「先复用后抽象」要长出的第二消费者。
 
 ---
 
-## 1. X Article 能力边界（2026-06-09 截图实锤）
+## 1. 三阶段
 
-**支持**：标题层级（Body▾，可能 H1/H2/H3）、**粗 B / 斜 I / 删除线 S**、引用 ❝、有序/无序列表、链接 🔗、emoji、Insert 插图、cover image（5:2 封面）+ 独立标题字段（"Add a title"）。
+> **阶段 1：Article 呈现态（本期核心）** — note → Article 兼容 doc → 只读呈现 + 用户小调
+> **阶段 2：从呈现态发布到 X** — 把呈现态内容送进 X Article（spike 后定注入 vs 粘贴）
+> **阶段 3（增强，可后做）**：完善降级细节
 
-**不支持**：表格、代码块/语法高亮、数学公式、Mermaid、callout、toggle、下划线、高亮、字色、多列。
-
----
-
-## 2. 核心工程：块序列注入器（不是 pasteAndSend）
-
-> AI 的 `pasteAndSend` 是"一坨文本粘进一个框、点发送"——**单次整块**。
-> X Article 是**逐块构造富文本**：遍历 note block → 每块按 §3 决策（原生映射 / 文本降级 / 内嵌图）→ 按序操作 X Article 编辑器（聚焦正文 → 粘这段 → 选样式 → 插图 → 下一块）。
-> **这是本期核心新工程。** `focusInputBox`/`pasteTextToWebview`（`web-service-base/webview-input.ts`）只能复用其"聚焦 + OS/合成 粘贴"原语。
+本期目标 = **阶段 1 跑通 + 阶段 2 能发出**。
 
 ---
 
-## 3. note → X Article 映射三分类（设计文档已定，照做）
+## 2. 阶段 1：Article 呈现态（复用为主，别造新轮子）
 
-**① 原生映射**（X Article 支持，注入对应富文本）：
-paragraph / heading（>3 级降级）/ bold / italic / strike / link / bulletList / orderedList / blockquote / image / 标题 block→标题字段 / 封面图
+### 2.1 doc → Article 兼容 doc（新增转换，核心新代码）
+新增 `doc-to-article-doc.ts`（serializers 下）：遍历 note doc，按**调研矩阵 A-3**逐 block 转换：
+- **原生映射**（X 支持）：paragraph / heading / bold·italic·strike / link / list / blockquote / image → 原样保留
+- **文本降级**（X 无对应）：underline·highlight·字色·thought 丢格式留字；callout→引用+emoji；toggle 展开；task→☐☑；多列拍平；audioBlock/fileBlock/noteLink→文字
+- **③ 内嵌图**（视觉即内容）：codeBlock / mathBlock / mermaid / mathInline / mathVisual / **table** → 调 `render-blocks-to-media` 得 media:// → **替换成 image block(src=media://)**
+- 转换产出一个新 doc（不改原 note），供呈现态渲染。
 
-**② 文本降级**（X 无对应、保文字）：underline/highlight/字色 丢格式留字；callout→引用+emoji；toggle 展开；task→☐☑ 列表；多列拍平；行内 code 去标记
+### 2.2 「布局可调态」呈现（不是纯只读 —— 总指挥拍板）
+呈现态**不是只读预览**，是**「布局/尺寸可调态」**：
+- **文字内容不可改**（要改去 note 改完再转）——避免与 note 本体编辑职责重叠
+- **可调的是布局/尺寸**：① **table 行列宽高、表格宽高**（总指挥明确要求）② 图片大小/顺序 ③ 删掉不想要的块
+- 实现：用 note 现有 Host **第二个实例**（instance-registry 支持，edit-overlay 是先例）渲染 Article 兼容 doc；**不是 `editable:false` 全锁**，而是「锁文字编辑、放开布局/尺寸交互」——具体怎么做（受限 plugin 组合 / 自定义交互层）spike 时定，拿不准列给总指挥。
+- `readOnly` 属性（`types.ts:74`）已定义未实现，可参考其落点，但本期要的是「半受限」非「全只读」。
 
-**③ 内嵌图（★ 复用刚做的零件，别重新造）**（"视觉即内容"、X Article 装不下）：
-- **codeBlock / mathBlock / mathInline / Mermaid / table** → 渲染成图，**作为 Article 内嵌图片插入**（X Article 支持插图！不像发推会被多图裁）。
-- **复用 `render-blocks-to-media`（`src/capabilities/x-extraction/render-blocks-to-media.ts`，`2b337d4e` 已落地）** → 得 media:// → 走 X Article 的插图控件喂进去。
-- 注意：发推那条"多图被裁"的死结**在 Article 不存在**（Article 是文档流插图，不是推文多图网格）—— 所以这些零件**在 Article 场景终于能正常用**。
-- 渲染失败 → fail loud，退源码文本插入 + 提示。
+### 2.3 ★★ table → 图：呈现态里 table 是「活的可调真表格」，发布瞬间才截图（总指挥拍板，关键约束）
+> **table 不能转换时就变成图**（位图改不了行列宽高）。正确流程：
+> **呈现态里 table = 真实可调表格**（复用 note table 的行列宽高调整能力，tableCell 有 `colwidth` attr）→ 用户拖调行列宽高/表格尺寸 → **点发布的那一刻，才 `capturePage` 截「用户调好的那个真实 table DOM」成图** → 喂 X。
 
----
+- **这否决了 atomsToSvg 手搓表格那条路**（数据→svg 绕过真实 DOM，用户没法在上面拖拽调整）。
+- **选型锁定：Electron `capturePage` 截呈现态真实 table DOM**（pdf-viewer `capturePageRect` 是先例，无需引 html2canvas）。截的是"调好之后"的 DOM → 所见即所得。
+- 所以 table→图 是**发布时（阶段 2）做**，不是转换时（阶段 1）做；阶段 1 的 table 保持真实可调表格。
+- `render-blocks-to-media` 加 `table` kind 时注意：它走 capturePage 而非 svg 路（与 math/code 的 svg 路不同），可能要独立函数。
 
-## 4. 实施步骤（设计文档已定：spike 先行 → MVP → 完善）
+> 注：公式/代码/Mermaid 这类**用户不需要调布局**的，仍可转换时(阶段1)就成图（走现有 render-blocks-to-media svg 路）；唯 table（及将来类似可调元素）走"发布时截真实 DOM"。
 
-### 4.1 spike：摸清 X Article 编辑器 DOM（动手前必做）
-观察并记录进 `x-service-types.ts` 的 profile（加 Article 专属 selector 段）：
-- 标题字段（"Add a title"）selector
-- 正文编辑区 selector（contenteditable？）
-- 工具栏各按钮：标题样式（Body▾）、B/I/S、引用、有序/无序列表、链接 —— 各自的**触发方式**（快捷键？点按钮？）
-- Insert 插图的交互 + fileInput selector（可能复用发推的 fileInput，spike 确认）
-- cover image 上传 selector
-- 进入 Article 编辑器的入口（如何 new 一篇 Article / 导航到 compose/articles）
-- **spike 结论有时效性**（X 改版频繁），失效 fail loud。
+### 2.4 「用户小调整」范围（总指挥拍板：仅布局类）
+- ✅ table 行列宽高/表格宽高、图片大小/顺序、删块
+- ❌ 不改文字内容（去 note 改）
+- 不追求全功能编辑。
 
-### 4.2 MVP：原生映射主链路
-先跑通：标题/段落/粗斜删/列表/引用/链接/图片 的块序列注入。代码块/表格/公式先统一走 §3③ 内嵌图。**打通"note 整篇 Article → X Article"主链路**。
-
-### 4.3 完善：②文本降级 + ③内嵌图细化
-按三分类补齐。
-
----
-
-## 5. 红线（贯穿，违反即返工）
-
-> **写方向最高红线**：块序列注入完成后**绝不程序点 Publish**。用户在 X Article 编辑器里检查、自己点发布。注入只到"内容填好"。
-> **fail loud**：selector 失效 / 某块注入失败 / 渲图失败 → 明确提示 + 降级（退文本/退源码），不静默假装成功、不崩中断整篇。
-> **复用不重复造**：内嵌图复用 `render-blocks-to-media` + `svgToPng`；注入复用 `webview-input` 原语；selector 进 profile。**别新造第二套渲图/注入**。
-> **按 ws 定向**：复用 `requireXWebContents`，打到当前 ws 的 X 实例。
-> **爆破半径**：只做 Article 注入。不改发推/回复/媒体已跑通的链路。
+### 2.4 其余内嵌图缺口（render-blocks-to-media 扩展）
+调研指出当前不收 mathInline / mathVisual / htmlBlock：
+- mathInline → 按矩阵建议**降级 `$latex$` 文本**（行内成图打断文字流，本期不做图，留 TODO）
+- mathVisual → 有 `thumbnail`(SVG) attr **直接用**，省重渲
+- htmlBlock → 本期降级"标题+提示文字"，截图留 TODO
 
 ---
 
-## 6. 需你定的决策点（拿不准列出来问总指挥）
-
-1. **入口**：从哪触发"发到 X Article"？note 工具栏命令？右键？建议加一个 note 级命令"发布为 X 文章"。
-2. **内容来源**：整篇 note → 一篇 Article（最自然）。选区也支持吗？建议先整篇。
-3. **标题来源**：note 的首个 isTitle block → Article 标题字段？还是让用户在 X 里填？建议自动填 note 标题。
-4. **封面图**：note 首图 → Article cover？还是不自动设？建议本期不自动设封面，留 TODO。
-5. **块序列注入的健壮性**：X Article 是 contenteditable 富文本编辑器，逐块注入时序/光标位置容易乱 —— spike 时重点验证"注入一段→换行→下一段样式不串"。
+## 3. 阶段 2：从呈现态发布到 X
+- 呈现态内容已是「X 支持格式 + image(media://)」干净结构。
+- spike X Article 编辑器后定注入方式（见 §4）。复用 `webview-input` 原语 + `requireXWebContents` 按 ws 定向 + 图走 Insert/fileInput 喂。
+- **写方向红线：注入完不自动点 Publish**，用户在 X 检查后手动发。
 
 ---
 
-## 7. 验收清单（自检，总指挥据此审计）
-
-**质量门禁**：
-- [ ] `npm run typecheck` 0 错
-- [ ] `npm run lint` 无新增（基线 10 pre-existing，本期不得新增）
-- [ ] `npx vitest run` **全量、如实报数**。基线 257 passed。已知 `bulk-delete-perf-verify` 8 个 order-dependent flaky（与本期无关，单跑全过），与真实结果分开写，不得笼统"全绿"。补单测（块→Article 映射决策、降级逻辑）。
-- [ ] 应用启动无新增控制台报错
-
-**功能自检**（无 GUI 则列出待总指挥实机验）：
-- [ ] note 整篇 → X Article：标题/段落/粗斜/列表/引用/链接/图片 正确注入
-- [ ] 代码块/公式/表格 → 内嵌图插入（复用 render-blocks-to-media）
-- [ ] 文本降级（callout/toggle/task/下划线等）按 §3② 正确
-- [ ] 注入失败 / 渲图失败 → fail loud 提示 + 降级
-- [ ] **注入完不自动点 Publish**（写方向红线）
-- [ ] 发推/回复/媒体（前面阶段）不回归
-
-**架构自检**：
-- [ ] 块序列注入器复用 webview-input 原语，没另造注入
-- [ ] 内嵌图复用 render-blocks-to-media + svgToPng，没重复造渲图
-- [ ] Article selector 进 profile，失效 fail loud
-- [ ] 按 ws 定向（requireXWebContents）
-- [ ] 没改坏发推/回复/媒体链路
-
-**交回总指挥时请附**：
-1. 改动文件清单（+ 一句话职责）
-2. **spike 结论**：X Article 全套 selector + 各按钮触发方式 + 注入时序怎么解决的
-3. §6 决策点的决定
-4. 三分类映射各 block 的处理逐条说明
-5. 回归保证 + 必须实机验的点（Article 注入几乎全靠实机验，列详细）
-6. 如实测试报数（真实 + 8 flaky 单列）
+## 4. spike（动手前，对真实 X Article 编辑器，调研报告 A-2 列了 11 项）
+重点优先验（**#7/#8 若为真，阶段 2 可极大简化**）：
+- **#7 粘贴富文本是否保留格式** / **#8 粘 markdown 是否自动解析** → 若是，呈现态 doc→markdown/HTML 一粘即可，省逐块注入
+- #1 标题层级数、#2 列表嵌套、#4 链接交互、#6 Insert 能插什么 + fileInput
+- 入口：怎么 new 一篇 Article / 导航到 compose/articles
+- 结论填 profile（`x-service-types.ts` 加 Article selector 段），失效 fail loud
 
 ---
 
-## 8. 红线汇总
+## 5. 那 9 个 ⚠️ 的处理（呈现态让大部分降为「默认值，用户可调」）
 
+总指挥裁定：**有了呈现态用户可调，多数 ⚠️ 给默认转换即可，不必现在拍死**。默认值：
+- heading 超 X 层级 → 降到 X 最低标题级（spike 定层级数；若只到 H3，note H4–H6→H3）
+- 多层列表/引用 → spike 定 X 是否支持嵌套；不支持则拍平
+- **codeBlock → 内嵌图**（你之前已认可截图兜底；好看优先）
+- mathInline → `$latex$` 文本（行内不做图）
+- highlight/underline/字色 → 丢格式留字
+- 行内 code → 反引号包裹
+- callout 非 emoji 图标 → 忽略图标留正文
+- video/tweet/html → 本期降级文字（tweet 可试注入 URL 让 X 自嵌，spike 定）
+- **table → 图（§2.3）**
+
+**仍需总指挥拍的（默认值不够明确的）见 §8 提问。** 其余按上面默认值实现，用户在呈现态不满意可调。
+
+---
+
+## 6. 红线
 - ❌ 注入完程序自动点 Publish（写方向最高红线）
-- ❌ 重新造渲图/注入（复用 render-blocks-to-media / webview-input）
-- ❌ 某块失败就整篇中断 / 静默丢（fail loud，单块降级不影响其余）
-- ❌ 改坏发推/回复/媒体（回归）
-- ❌ 凭记忆写 X Article selector —— 先 spike
-- ❌ 顺手做 Canvas 长图（那是独立大工程，见 `2026-06-12-x-note-to-longimage-design.md`，本期不碰）
+- ❌ 重新造渲图/注入（复用 render-blocks-to-media / webview-input / atomsToSvg）
+- ❌ table→图 盲目引重依赖（先评估 capturePage 那条）
+- ❌ 改坏发推/回复/媒体/呈现态以外的链路（回归）
+- ❌ 凭记忆写 X selector / table 渲图手段 —— 先 spike / 先评估
+- ❌ 顺手做 Canvas 长图（独立大工程，见 `2026-06-12-x-note-to-longimage-design.md`）
 
-有架构判断拿不准（块序列注入时序、入口、标题/封面来源）——**停下来在交付说明里列问题**让总指挥定，别闷头大改。
+## 7. 验收清单
+**门禁**：typecheck 0 / lint 无新增（基线10）/ vitest 全量如实报数（基线 257；bulk-delete 8 flaky 单列）+ 补单测（doc→article-doc 转换映射）/ 启动无新增报错。
+**功能**（无 GUI 列待实机验）：note→呈现态各类 block 正确转换；公式/代码/表格→图就地显示；呈现态==发布结果；用户能小调；从呈现态发 X；不自动 Publish；发推/回复不回归。
+**架构**：readOnly 真实现；doc 转换复用 render-blocks-to-media；table→图选型有理由；按 ws 定向；没造重复渲图/注入。
+**交付附**：改动清单 / table→图选型理由 / spike 结论(#7#8 等) / readOnly 实现方式 / §8 决策 / 回归与实机验点 / 如实测试报数 / atomsToSvg·render-blocks-to-media 复用与扩展说明（抽象素材）。
+
+## 8. 需总指挥拍板（默认值不够明确的）
+> 已拍板（写死，别再问）：小调范围=仅布局类（table行列宽高/图大小顺序/删块，不改文字）；table→图走「呈现态真实可调表格 + 发布时 capturePage 截图」。
+1. **入口 + 来源**：note 命令「预览为 X 文章」整篇 → 呈现态。选区暂不做。确认？
+2. **标题/封面**：note isTitle 首块 → Article 标题；封面本期不自动设。确认？
+3. **呈现态是独立 view 还是 note 内的预览 tab/弹层**？建议弹层/侧栏预览（轻），不新建顶层 view。你定。
+4. **「半受限」实现方式**（锁文字、放开 table/图布局调整）spike 后给方案 —— 这是阶段 1 的技术难点，拿不准列出来。
+
+拿不准的（呈现态半受限怎么实现、capturePage 截 table 时序）—— **停下来在交付说明列问题**让总指挥定。
