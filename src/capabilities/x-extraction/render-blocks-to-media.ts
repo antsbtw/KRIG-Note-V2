@@ -173,6 +173,19 @@ async function renderMermaidToSvgString(source: string): Promise<string> {
   }
 }
 
+/**
+ * mathVisual(函数图像):直接拿 thumbnail(SVG)attr,**不重渲**(矩阵建议,省 Canvas 重画)。
+ * thumbnail 已是渲好的 SVG 字符串(画板缩略图);拿不到则 fail loud(调用方降级文本)。
+ */
+function mathVisualSvg(block: RenderableBlock): string {
+  const atom = atomOf(block);
+  const thumb = (atom.attrs?.thumbnail as string) || block.source || '';
+  if (!thumb || !thumb.includes('<svg')) {
+    throw new Error('mathVisual 无 thumbnail SVG(无法内嵌图,降级文本)');
+  }
+  return thumb;
+}
+
 /** 单个 block → media://(成功)或抛错(失败,由调用方 catch 记 failed)。 */
 async function renderOneBlock(block: RenderableBlock): Promise<string> {
   let svgString: string;
@@ -180,6 +193,8 @@ async function renderOneBlock(block: RenderableBlock): Promise<string> {
     svgString = await renderMermaidToSvgString(block.source);
   } else if (block.kind === 'math') {
     svgString = renderMathToSvg(block); // 紧凑 MathJax SVG(自带正确 viewBox + px 宽高)
+  } else if (block.kind === 'mathVisual') {
+    svgString = mathVisualSvg(block); // 直接用 thumbnail SVG,不重渲
   } else {
     svgString = await renderCodeToSvg(block);
   }

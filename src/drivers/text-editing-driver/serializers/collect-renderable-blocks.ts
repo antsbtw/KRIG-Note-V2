@@ -24,8 +24,11 @@ import type { Node as PMNode, Slice } from 'prosemirror-model';
 
 /** 一个待渲染成图的 block。atom 是 node.toJSON()(atomsToSvg 直接消费的形态)。 */
 export interface RenderableBlock {
-  /** math = 块级公式;code = 普通代码块;mermaid = mermaid 代码块(走专用渲染) */
-  kind: 'math' | 'code' | 'mermaid';
+  /**
+   * math = 块级公式;code = 普通代码块;mermaid = mermaid 代码块(走专用渲染);
+   * mathVisual = 函数图像(直接拿 thumbnail SVG attr,X Articles 内嵌图扩展,2026-06-12)。
+   */
+  kind: 'math' | 'code' | 'mermaid' | 'mathVisual';
   /** node.toJSON() —— 即 atomsToSvg 消费的 Atom 形态(mathBlock/codeBlock) */
   atom: Record<string, unknown>;
   /** 代码块语言(code/mermaid 用;math 为空)。 */
@@ -40,8 +43,17 @@ function nodeSource(node: PMNode): string {
   return ((node.attrs?.latex as string) || node.textContent || '');
 }
 
+/**
+ * 收集选项。
+ * - includeMathVisual:额外收 mathVisual(函数图像)→ X Articles 内嵌图扩展用。
+ *   **默认 false**:发推/回复路径(原消费者)不收 mathVisual,行为零变化(防回归)。
+ */
+export interface CollectOptions {
+  includeMathVisual?: boolean;
+}
+
 /** 单个 node:若是公式/代码块 → push 到 out;否则递归其子(收容器内的)。 */
-function walkNode(node: PMNode, out: RenderableBlock[]): void {
+function walkNode(node: PMNode, out: RenderableBlock[], opts: CollectOptions): void {
   const name = node.type.name;
   if (name === 'mathBlock') {
     out.push({ kind: 'math', atom: node.toJSON() as Record<string, unknown>, source: nodeSource(node) });
@@ -57,21 +69,30 @@ function walkNode(node: PMNode, out: RenderableBlock[]): void {
     });
     return;
   }
+  if (name === 'mathVisual' && opts.includeMathVisual) {
+    // 函数图像:source 用 thumbnail(SVG)—— render 时直接拿,不重渲(矩阵建议)。
+    out.push({
+      kind: 'mathVisual',
+      atom: node.toJSON() as Record<string, unknown>,
+      source: (node.attrs?.thumbnail as string) || '',
+    });
+    return; // mathVisual 内 caption 不收渲
+  }
   // 其他:递归子节点(容器 block 里也可能嵌公式/代码)。
-  node.forEach((child) => walkNode(child, out));
+  node.forEach((child) => walkNode(child, out, opts));
 }
 
 /** 从整篇 doc 收集。 */
-export function collectRenderableBlocksFromDoc(doc: PMNode): RenderableBlock[] {
+export function collectRenderableBlocksFromDoc(doc: PMNode, opts: CollectOptions = {}): RenderableBlock[] {
   const out: RenderableBlock[] = [];
-  doc.forEach((child) => walkNode(child, out));
+  doc.forEach((child) => walkNode(child, out, opts));
   return out;
 }
 
 /** 从选区 slice 收集(与 getSelectionMarkdown 同源 state.selection.content())。 */
-export function collectRenderableBlocksFromSlice(slice: Slice): RenderableBlock[] {
+export function collectRenderableBlocksFromSlice(slice: Slice, opts: CollectOptions = {}): RenderableBlock[] {
   const out: RenderableBlock[] = [];
   if (!slice || slice.size === 0) return out;
-  slice.content.forEach((child) => walkNode(child, out));
+  slice.content.forEach((child) => walkNode(child, out, opts));
   return out;
 }

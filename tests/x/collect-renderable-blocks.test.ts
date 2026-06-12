@@ -39,11 +39,17 @@ const schema = new Schema({
     },
     blockquote: { content: 'block+', group: 'block', toDOM: () => ['blockquote', 0] },
     bulletList: { content: 'block+', group: 'block', toDOM: () => ['ul', 0] },
+    mathVisual: {
+      group: 'block',
+      atom: true,
+      attrs: { thumbnail: { default: '' } },
+      toDOM: () => ['div'],
+    },
   },
   marks: {},
 });
 
-const { paragraph, mathBlock, codeBlock, mathInline, blockquote, bulletList } = schema.nodes;
+const { paragraph, mathBlock, codeBlock, mathInline, blockquote, bulletList, mathVisual } = schema.nodes;
 
 describe('collectRenderableBlocksFromDoc', () => {
   it('收 mathBlock(kind=math)+ source 是 latex', () => {
@@ -103,6 +109,23 @@ describe('collectRenderableBlocksFromDoc', () => {
   it('无公式/代码 → 空数组', () => {
     const doc = schema.node('doc', null, [paragraph.create(null, schema.text('纯文字'))]);
     expect(collectRenderableBlocksFromDoc(doc)).toEqual([]);
+  });
+
+  // ── mathVisual opt-in(X Articles 内嵌图扩展,2026-06-12)──
+  it('默认不收 mathVisual(发推路径零变化,防回归)', () => {
+    const doc = schema.node('doc', null, [mathVisual.create({ thumbnail: '<svg></svg>' })]);
+    expect(collectRenderableBlocksFromDoc(doc)).toEqual([]);
+  });
+
+  it('includeMathVisual=true 才收 mathVisual,source=thumbnail', () => {
+    const doc = schema.node('doc', null, [
+      paragraph.create(null, schema.text('图前')),
+      mathVisual.create({ thumbnail: '<svg>fn</svg>' }),
+    ]);
+    const out = collectRenderableBlocksFromDoc(doc, { includeMathVisual: true });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('mathVisual');
+    expect(out[0].source).toBe('<svg>fn</svg>');
   });
 });
 
