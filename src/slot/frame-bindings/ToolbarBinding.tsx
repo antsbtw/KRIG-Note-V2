@@ -87,6 +87,7 @@ function renderItem(item: ToolbarItem, ctx: ToolbarItemContext) {
     <button
       key={item.id}
       type="button"
+      data-toolbar-item={item.id}
       className={className}
       onMouseDown={(e) => e.preventDefault()} // 不抢编辑器焦点
       onClick={(e) => {

@@ -44,6 +44,7 @@ import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { goBack as historyGoBack, goForward as historyGoForward, canGoBack, canGoForward } from './note-navigation-history';
 import { buildAITurnPmNodes } from './ai-sync-blocks';
 import type { AISyncTurn, AIServiceId } from '@capabilities/ai-extraction/types';
+import { tocToggleStore } from './toc/toc-toggle-store';
 
 /**
  * lazy getter — 命令 handler 内部用,避免 module load 时 require
@@ -311,6 +312,12 @@ export function registerNoteCommands(): void {
   commandRegistry.register('note-view.go-forward', () => {
     if (canGoForward()) historyGoForward();
   });
+
+  // ── 目录面板开关(toolbar 📑 按钮)──
+  // hover 触发易反复弹框,改显式 toggle;面板侧自带点外部关闭。
+  commandRegistry.register('note-view.toggle-toc', withInstance((instanceId) => {
+    tocToggleStore.toggle(instanceId);
+  }));
 
   // ── Toolbar 操作命令 ──
 

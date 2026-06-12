@@ -1,8 +1,13 @@
 /**
  * TocIndicator — note view 目录侧边面板
  *
- * 左侧有一条窄 hover 触发区;鼠标进入 → 滑出全量目录面板。
+ * 开关方式:toolbar 📑 按钮(note-view.toggle-toc 命令)显式开 → 滑出全量目录面板;
+ * 点击面板以外任意处(失焦)自动关闭。
  * 顶部 H1/H2/H3/📖 4 按钮控制正文展开级别;主体可滚动 heading 列表。
+ *
+ * 历史:原先靠左侧窄 hover 区触发,易反复误弹框,已改为按钮 toggle + 点外部关
+ * (决议见 toc-toggle-store.ts)。开关状态走 tocToggleStore(per-instance,
+ * 桥接 toolbar 命令与本组件——两者不在同一 React 树)。
  *
  * 数据源:text-editing capability.api.getTocHeadings(instanceId)
  * 订阅:capability.api.subscribeTocChange(instanceId, cb) — doc 变 / collapsed 变都触发
@@ -15,8 +20,9 @@
  *   - 折叠状态:V1 写 PM attrs.open 持久化;V2 仅存 plugin state(切笔记重置,决议拍板)
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
+import { tocToggleStore } from './toc-toggle-store';
 import './toc.css';
 
 interface TocEntry {
@@ -42,10 +48,15 @@ const LEVELS = [
 export function TocIndicator({ instanceId, textEditing }: TocIndicatorProps) {
   const [entries, setEntries] = useState<TocEntry[]>([]);
   const [expandLevel, setExpandLevel] = useState<number>(Infinity);
-  const [panelVisible, setPanelVisible] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // 面板可见性 = toolbar 📑 按钮驱动的 per-instance store
+  const panelVisible = useSyncExternalStore(
+    (cb) => tocToggleStore.subscribe(instanceId, cb),
+    () => tocToggleStore.isOpen(instanceId),
+  );
 
   // ── 拉数据 ──
   const refresh = useCallback(() => {
@@ -103,19 +114,23 @@ export function TocIndicator({ instanceId, textEditing }: TocIndicatorProps) {
     return () => { observer.disconnect(); };
   }, [entries]);
 
-  // ── hover 隐藏延时 ──
-  const clearLeaveTimer = useCallback(() => {
-    if (leaveTimerRef.current) {
-      clearTimeout(leaveTimerRef.current);
-      leaveTimerRef.current = null;
-    }
-  }, []);
-  const scheduleHide = useCallback(() => {
-    clearLeaveTimer();
-    leaveTimerRef.current = setTimeout(() => setPanelVisible(false), 200);
-  }, [clearLeaveTimer]);
-
-  useEffect(() => () => clearLeaveTimer(), [clearLeaveTimer]);
+  // ── 点击面板以外(失焦)→ 关闭 ──
+  // 仅在可见时挂监听;按钮自身的点击在 toggle 命令里同帧处理,这里用 pointerdown
+  // 且排除 panel 内部,避免「点按钮开 → 同次点击又被判定为外部点击关掉」。
+  useEffect(() => {
+    if (!panelVisible) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (panelRef.current && target && panelRef.current.contains(target)) return;
+      // 点 toolbar 上的目录按钮:让命令自己 toggle,这里不抢着关
+      const el = target as HTMLElement | null;
+      if (el && el.closest?.('[data-toolbar-item="note-view.toggle-toc"]')) return;
+      tocToggleStore.set(instanceId, false);
+    };
+    // 捕获阶段:抢在 PM/其他 stopPropagation 之前拿到
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [panelVisible, instanceId]);
 
   // ── 事件 ──
   const onLevelClick = (level: number) => {
@@ -129,14 +144,8 @@ export function TocIndicator({ instanceId, textEditing }: TocIndicatorProps) {
   return (
     <>
       <div
-        className="toc-hotzone"
-        onMouseEnter={() => { clearLeaveTimer(); setPanelVisible(true); }}
-        onMouseLeave={scheduleHide}
-      />
-      <div
+        ref={panelRef}
         className={`toc-panel${panelVisible ? ' toc-panel--visible' : ''}`}
-        onMouseEnter={clearLeaveTimer}
-        onMouseLeave={scheduleHide}
       >
         <div className="toc-panel__levels">
           {LEVELS.map((lv) => (
