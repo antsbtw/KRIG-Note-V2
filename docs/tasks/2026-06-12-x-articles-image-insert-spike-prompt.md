@@ -1,3 +1,23 @@
+# 调研 Prompt：X Article Insert 菜单原生能力（能否程序驱动 Code/LaTeX/Table/Media）
+
+## ★★ 重大方向更新（2026-06-12，总指挥实机发现 Insert 菜单）
+
+总指挥实机点开 X Article 的 **Insert ▾** 菜单，发现它**原生支持**：
+**Media（图）、GIF、Posts（嵌推）、Divider、Code、LaTeX、Table**。
+
+**这可能颠覆"渲成图"的前提！** 之前以为 X Article 不支持代码/公式/表格 → 渲成图（图不可搜索/不可复制/损质量）。但既然 X **原生有 Code / LaTeX / Table**，总指挥拍板：
+
+> **优先用 X 原生 Insert（代码→Code、公式→LaTeX、表格→Table、图→Media），渲图只做实在驱动不了的兜底。** 质量最高、保真、可搜索可复制。
+
+**但**（总指挥拍板「像 AI view 提取那样研究清楚再操作」）：现在只看到菜单名字，**完全不知道每项点开是什么交互、能不能程序驱动**。**本调研先把 Insert 整套交互机制摸透**，再定哪些走原生、哪些兜底渲图。
+
+**调研目标变更**：从「图怎么落位」扩大为「**X Article Insert 菜单（Media/Code/LaTeX/Table/Divider/Posts）每项的交互机制 + 能否程序驱动**」。原"图落位"并入其中（图 = Media 项）。
+
+**技术可行性已核（代码侧）**：驱动 X DOM 的能力齐全 —— `executeJavaScript` 查元素/填值、`btn.click()` 点菜单项（x-drag-drop.ts:190 点 reply 按钮是先例）、AI extractors（`platform/main/ai/extractors/`）是"深入 X DOM 多步操作"的成熟范式可借鉴。所以"点 Insert→选 Code→填源码"这类多步驱动**技术上可行**，关键是摸清每项的真实 DOM 交互。
+
+---
+（以下为原"图落位"调研要点，仍有效，作为 Media 项的子集）
+
 # 调研 Prompt：X Article 怎么接受图片（落位策略前置研究，纯调研不写实现）
 
 > 交接日期：2026-06-12
@@ -13,7 +33,27 @@
 - X Article 图片 → 粘贴**不保留**（变 📷 占位符）❌ → 图得走 feedFilesToInput
 - 2.5-b 发推喂图：`feedFilesToInput`（`web-service-base/webview-file-input.ts`，CDP `DOM.setFileInputFiles`）靠 `fileInput` selector（`x-service-types.ts:128`，`input[data-testid="fileInput"]`）—— **但这是为发推 compose 框设的，Article 编辑器是否同一个 input 未知**。
 
-## 1. 要查清的（代码侧能查的先查，X 真实行为标「待总指挥实机」）
+## ★ 1-NEW. Insert 菜单整套调研（新重点，每项「待总指挥实机」+ 代码侧给驱动假设）
+
+对 Insert 菜单 7 项逐项调研（X 真实交互标「待实机」，代码侧给"能否程序驱动 + 怎么驱动"的假设）：
+
+| Insert 项 | 对应 note block | 要查清（待实机 + 代码侧驱动假设） |
+|---|---|---|
+| **Code** | codeBlock（普通语言） | 点开是什么？弹输入框填代码 + 选语言？还是插空 code 块编辑？能否程序填入代码源码 + 语言？→ 若能，**代码走原生不渲图** |
+| **LaTeX** | mathBlock / mathInline | ★ 点开怎么填 latex？粘 latex 源码即渲染？→ 若能，**公式走原生（你最早报的公式裸奔 bug 的最优解！）** |
+| **Table** | table | 点开怎么定行列？能否程序填 N×M + 单元格内容？→ 若能，**表格走原生（且天然可调，不用 capturePage 截图！）** |
+| **Media** | image + 渲图兜底 | = 原下方"图落位"调研。fileInput 还是 OS 框？插光标处还是末尾？ |
+| **Posts** | tweetBlock | 嵌 X 推文 —— 填 tweetUrl 即嵌？→ tweetBlock 走原生 |
+| **Divider** | horizontalRule | 分割线，简单 |
+| **GIF** | （note 无直接对应） | 本期可忽略 |
+
+**每项的裁决逻辑**：能程序驱动 → 走原生（高质量）；驱动不了（如只能弹 OS 文件框/只能人手填）→ 渲图兜底 或 降级文本 或 fail-loud 提示用户手动。
+
+**Table 尤其关键**：若能原生插 Table，则之前"table 保持可调真表格 + 发布时 capturePage 截图"那套（§2.3）**整个不用做了** —— 直接原生插表格，X 自己的表格本就可调。这是又一次大简化，重点验。
+
+---
+
+## 1. 要查清的（原图落位部分，并入 Media 项；代码侧能查的先查，X 真实行为标「待总指挥实机」）
 
 **A｜代码侧（你能查）**：
 1. `feedFilesToInput` 整条链路是否与"哪个编辑器"无关 —— 只要给对 fileInput selector + 目标 wc，就能喂？还是隐含了 compose 框的假设？（读 `webview-file-input.ts` 全文）
