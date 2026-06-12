@@ -20,6 +20,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { NoteOpenPopup } from './note-open-popup/NoteOpenPopup';
 import { useAllNotes } from './use-notes-folders';
 import { getNoteWsState } from './data-model';
+import { TocToolbarButton } from './toc/TocToolbarButton';
 
 const VIEW = 'note-view';
 
@@ -74,6 +75,17 @@ export function registerToolbar(): void {
       command: 'note-view.go-forward',
       variant: 'plain',
       order: 20,
+    },
+    // ── 目录开关(紧挨导航箭头,体验一致)──
+    // custom-render:用 lucide 线性图标对齐 ‹ › 箭头,不用 emoji(风格割裂)
+    {
+      id: 'note-view.toggle-toc',
+      view: VIEW,
+      group: 'left',
+      label: '目录',
+      kind: 'custom-render',
+      Component: TocToolbarButton,
+      order: 25,
     },
     // ── 笔记标题(V1 NoteView toolbar 同款)──
     {
