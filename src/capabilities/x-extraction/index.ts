@@ -21,6 +21,7 @@ import type {
 } from './types';
 import { Host } from './Host';
 import { registerXHostWcId, clearXHostWcId, getXHostWcId } from './x-host-registry';
+import { renderBlocksToMedia } from './render-blocks-to-media';
 
 export type {
   XExtractionApi,
@@ -32,6 +33,10 @@ export type {
   XDropTarget,
   XHostHandle,
   XHostProps,
+  RenderableBlock,
+  RenderBlocksResult,
+  RenderedBlockMedia,
+  BlockRenderFailure,
 } from './types';
 
 async function extractTweet(
@@ -96,6 +101,7 @@ export const xExtractionCapability: XExtractionApi = {
   dragArm,
   dragResolve,
   dragReplyHere,
+  renderBlocksToMedia,
   Host,
 };
 

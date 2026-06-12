@@ -116,7 +116,10 @@ export async function pasteTweet(
   targetWcId?: number,
   mediaPaths?: string[],
 ): Promise<XWriteResult> {
-  if (!text || !text.trim()) {
+  // 文字与媒体至少有一项(X 截图后:纯公式/纯图推正文为空但带图,也应可发)。
+  const hasText = !!(text && text.trim());
+  const hasMedia = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  if (!hasText && !hasMedia) {
     return { success: false, error: '内容为空,无法发推' };
   }
   const got = await requireXWebContents(serviceId, targetWcId);
@@ -148,9 +151,12 @@ export async function pasteTweet(
   // 阶段 2.5-b:先喂图(等缩略图出现),再填文字。喂图失败 → 记 warning,文字仍填(fail loud)。
   const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths);
 
-  const pasted = await pasteTextToWebview(wc, composeSel, text);
-  if (!pasted) {
-    return { success: false, error: '内容未能落进 X 发推框(粘贴校验失败)', mediaWarning: mediaWarning ?? undefined };
+  // 纯图/纯公式推(text 为空):只喂图,不粘贴空串(空串粘贴校验必失败)。
+  if (hasText) {
+    const pasted = await pasteTextToWebview(wc, composeSel, text);
+    if (!pasted) {
+      return { success: false, error: '内容未能落进 X 发推框(粘贴校验失败)', mediaWarning: mediaWarning ?? undefined };
+    }
   }
 
   // 仅校验发布按钮已出现(确认内容落进了正确的框)— 绝不 click(写方向红线)
@@ -175,7 +181,9 @@ export async function pasteReply(
   targetWcId?: number,
   mediaPaths?: string[],
 ): Promise<XWriteResult> {
-  if (!text || !text.trim()) {
+  const hasText = !!(text && text.trim());
+  const hasMedia = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  if (!hasText && !hasMedia) {
     return { success: false, error: '回复内容为空' };
   }
   if (!tweetUrl) {
@@ -214,9 +222,12 @@ export async function pasteReply(
   // 阶段 2.5-b:先喂图(等缩略图),再填文字。喂图失败 → warning,文字仍填(fail loud)。
   const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths);
 
-  const pasted = await pasteTextToWebview(wc, replySel, text);
-  if (!pasted) {
-    return { success: false, error: '回复内容未能落进 reply 框(粘贴校验失败)', mediaWarning: mediaWarning ?? undefined };
+  // 纯图/纯公式回复(text 为空):只喂图,不粘贴空串。
+  if (hasText) {
+    const pasted = await pasteTextToWebview(wc, replySel, text);
+    if (!pasted) {
+      return { success: false, error: '回复内容未能落进 reply 框(粘贴校验失败)', mediaWarning: mediaWarning ?? undefined };
+    }
   }
 
   const publish = profile.selectors.publishButton

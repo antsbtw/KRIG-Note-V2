@@ -60,12 +60,14 @@ export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
 
   const len = checkTweetLength(text);
   const isReply = ctx.replyPreview != null;
-  const canSend = text.trim().length > 0 && !injecting;
+  // 可发 = 有文字**或**有媒体(X 截图后:纯公式/纯图推正文为空但带图,也应可发)。
+  const canSend = (text.trim().length > 0 || mediaUrls.length > 0) && !injecting;
 
   async function handleConfirm(): Promise<void> {
     if (!ctx || injecting) return;
     const finalText = text.trim();
-    if (!finalText) return;
+    // 文字为空但有媒体(纯公式/纯图推)仍可发;两者皆空才挡。
+    if (!finalText && mediaUrls.length === 0) return;
     setInjecting(true);
     try {
       // 注入 + 失败降级全在 onConfirm 内(send-to-x 侧)。本弹窗只负责确认 + 关闭。

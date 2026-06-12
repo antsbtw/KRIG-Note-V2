@@ -17,9 +17,10 @@
 | **Markdown** | `sliceToMarkdown(slice)` / `docNodeToMarkdown(doc)` → `{markdown, images}` | `src/drivers/text-editing-driver/serializers/pm-to-markdown.ts:33,70` | note 导出、**X 发推**(getSelectionMarkdown)、剪贴板 |
 | **SVG（视觉图）** ⭐ | `atomsToSvg(atoms, opts)` / `atomsToSvgWithLinks` → SVG 字符串（字体转 path、自包含、LRU 缓存） | `src/lib/atom-serializers/svg/index.ts:112,63` | **Graph 画板**（canvas-rendering / canvas-text-node / graph-canvas-view）；**X 截图（新，2026-06）** |
 | ↳ 公式子渲染 | `renderMathBlock` / `renderMathInline` / `renderTeX(tex,size,display)` | `src/lib/atom-serializers/svg/blocks/mathBlock.ts`、`mathInline.ts`、`mathjax-svg.ts:59` | atomsToSvg 内部 |
-| ↳ 支持的 block | textBlock / list / mathBlock / mathInline（**无 codeBlock**） | `src/lib/atom-serializers/svg/blocks/` | — |
+| ↳ 支持的 block | textBlock / list / mathBlock / mathInline / **codeBlock**(2026-06 X 截图补,深色等宽图，复用 textToPath；Mermaid 不走这条) | `src/lib/atom-serializers/svg/blocks/` | — |
 | **纯文本** | `extractPlainText(atoms)` | `src/lib/atom-serializers/extract.ts:11` | 标签/预览 |
-| **PNG** | ❌ 全仓暂无 svg→png（X 截图期将新增一个公共 `svgToPng`） | — | — |
+| **PNG**（SVG字符串→PNG） | `svgToPngDataUrl(svgString, opts)`（Retina 2x，width/height/viewBox 量尺寸；与 MermaidPreviewPane / MathVisualFullscreenPanel 的私有 `svgToPngBlob`（元素入、bbox 量尺寸）是同职责两形态，将来可归并） | `src/lib/svg-to-png.ts`（2026-06 X 截图新增） | **X 截图** |
+| **block→图(media://)** | `renderBlocksToMedia(blocks)`（公式/代码/Mermaid → atomsToSvg/mermaid → svgToPng → mediaPutBase64 → media://，走 2.5-b 附件管道）；待渲染 block 由 `textEditing.api.get*RenderableBlocks` 收(`collect-renderable-blocks.ts`) | `src/capabilities/x-extraction/render-blocks-to-media.ts` | **X 发推截图兜底** |
 | **Mermaid PNG/SVG** | `ExportFormat` 导出 + `mermaid-renderer` | `src/drivers/text-editing-driver/blocks/code-block/fullscreen/MermaidPreviewPane.tsx`、同目录 `mermaid-renderer` | 代码块全屏面板；X 截图（代码/Mermaid 走这条） |
 
 ## 三、反向 / 存储（markdown / atom → block）

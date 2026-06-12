@@ -9,8 +9,12 @@
 
 import type { ComponentType, CSSProperties, Ref } from 'react';
 import type { XServiceId } from '@shared/types/x-service-types';
+import type { RenderableBlock } from '@drivers/text-editing-driver/serializers/collect-renderable-blocks';
+import type { RenderBlocksResult } from './render-blocks-to-media';
 
 export type { XServiceId };
+export type { RenderableBlock };
+export type { RenderBlocksResult, RenderedBlockMedia, BlockRenderFailure } from './render-blocks-to-media';
 
 /** 抓到的推文字段(与主进程 XTweetData / tweet-block schema attrs 对齐)*/
 export interface XTweetData {
@@ -142,6 +146,13 @@ export interface XExtractionApi {
   dragResolve(serviceId: XServiceId, targetWcId: number): Promise<XDropTarget>;
   /** 落推文:就地点该推回复按钮弹 reply 框(不跳详情页),返就绪与否 */
   dragReplyHere(serviceId: XServiceId, targetWcId: number): Promise<{ ok: boolean; error?: string }>;
+  // ── 不支持格式渲染成图(X 截图,2026-06):公式/代码/Mermaid → media:// 附件 ──
+  /**
+   * 把「纯文本装不下」的 block(公式/代码/Mermaid)渲染成图,存进 media store,
+   * 返回 media:// URL(走 2.5-b 附件管道)。失败的记 failed(fail loud,正文退源码)。
+   * 入参 blocks 由 textEditing.api.get*RenderableBlocks 取(与 markdown 同源)。
+   */
+  renderBlocksToMedia(blocks: RenderableBlock[]): Promise<RenderBlocksResult>;
   /**
    * X Host(嵌 x.com 的 webview)— forwardRef XHostHandle。
    * 封装 webview 生命周期 + per-ws partition + per-ws 代理接入。

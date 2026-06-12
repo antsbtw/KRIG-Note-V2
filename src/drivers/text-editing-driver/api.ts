@@ -14,6 +14,11 @@ import { wrapInList } from 'prosemirror-schema-list';
 import { DOMSerializer, Fragment, Slice, Node as PMNode } from 'prosemirror-model';
 import { MultipleNodeSelection } from './plugins/_shared/multiple-node-selection';
 import { sliceToMarkdown, docNodeToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
+import {
+  collectRenderableBlocksFromDoc,
+  collectRenderableBlocksFromSlice,
+  type RenderableBlock,
+} from './serializers/collect-renderable-blocks';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
@@ -1889,6 +1894,45 @@ export const textEditingDriverApi = {
     if (!node) return { markdown: '', images: [] };
     const slice = new Slice(Fragment.from(node.copy(node.content)), 0, 0);
     return sliceToMarkdown(slice);
+  },
+
+  /**
+   * 收集选区里「装不下纯文本」的 block(公式 / 代码 / Mermaid)→ 供 X 发推渲染成图。
+   *
+   * 与 getSelectionMarkdown 同源(同一 state.selection.content() slice),保证「正文删源码」
+   * 与「转图清单」对得上。选区空 → []。详见 collect-renderable-blocks。
+   */
+  getSelectionRenderableBlocks(instanceId: string): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const { state } = inst.view;
+    if (state.selection.empty) return [];
+    return collectRenderableBlocksFromSlice(state.selection.content());
+  },
+
+  /** 整篇文档的可渲染 block(「发整篇推」与 getDocMarkdown 同源)。 */
+  getDocRenderableBlocks(instanceId: string): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    return collectRenderableBlocksFromDoc(inst.view.state.doc);
+  },
+
+  /**
+   * 被拖起 block 的可渲染 block(拖 block 到 X,与 getBlockMarkdownAt 同源)。
+   * MultipleNodeSelection 命中 → 取整组多选;否则取 pos 处单块。
+   */
+  getBlockRenderableBlocksAt(instanceId: string, pos: number): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const { state } = inst.view;
+    const sel = state.selection;
+    if (sel instanceof MultipleNodeSelection && pos >= sel.from && pos < sel.to) {
+      return collectRenderableBlocksFromSlice(sel.content());
+    }
+    const node = state.doc.nodeAt(pos);
+    if (!node) return [];
+    const slice = new Slice(Fragment.from(node.copy(node.content)), 0, 0);
+    return collectRenderableBlocksFromSlice(slice);
   },
 
   setVocabWords(entries: Array<{ word: string; definition: string }>): void {

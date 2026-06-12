@@ -25,28 +25,92 @@
 /** X 普通推文字数上限(非 Premium)。Premium 更长,本期按基础上限提示。 */
 export const TWEET_CHAR_LIMIT = 280;
 
+/** markdownToTweetText 选项。 */
+export interface MarkdownToTweetOptions {
+  /**
+   * 已被渲染成图(走附件)的 block 源码(latex / 代码原文,X 截图 2026-06)。
+   * 命中的 `$$..$$` 公式块 / ```` ``` ```` 代码块**整块从正文删除**(图已当附件发,
+   * 正文不该再裸奔源码 —— 与 2.5-b media:// 图行删除同理)。
+   * 未命中的(渲染失败、fail loud 退源码的)公式/代码 → 保留(见下)。
+   * 比较时对源码做 trim 容差(序列化的 prefix/缩进)。
+   */
+  renderedBlockSources?: string[];
+}
+
+/** 源码归一(去首尾空白 + 折叠内部空白)便于跨「序列化加 prefix/缩进」匹配。 */
+function normalizeSource(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 /**
  * markdown → 推文纯文本。
  *
  * @param markdown note 选区 / 整篇导出的 markdown
+ * @param options renderedBlockSources:已转图的公式/代码块源码(整块删,见 MarkdownToTweetOptions)
  * @returns 降级后的纯文本(已 trim,行间最多保留一个空行)
  */
-export function markdownToTweetText(markdown: string): string {
+export function markdownToTweetText(markdown: string, options: MarkdownToTweetOptions = {}): string {
   if (!markdown) return '';
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
 
+  const renderedSet = new Set((options.renderedBlockSources ?? []).map(normalizeSource));
+
   const out: string[] = [];
   let inFence = false;
+  // 代码围栏缓冲:进 fence 时攒内容,出 fence 时判定「已转图→丢」或「保留代码原文」。
+  let fenceBuf: string[] = [];
+  // 公式块 $$..$$ 缓冲:同理(公式块单独成行,$$ 起止)。
+  let inMathFence = false;
+  let mathBuf: string[] = [];
 
   for (const raw of lines) {
-    // 代码围栏:进/出 fence 时丢掉围栏行本身,fence 内的内容原文保留
+    // ── 公式块 $$ 起止(独占一行的 $$)──
+    // note 序列化的 mathBlock 形态:`$$` / latex / `$$`(serializeMathBlock)。
+    if (/^\s*\$\$\s*$/.test(raw)) {
+      if (!inMathFence) {
+        inMathFence = true;
+        mathBuf = [];
+      } else {
+        // 出 $$:判定该公式块是否已转图
+        inMathFence = false;
+        const latex = mathBuf.join('\n');
+        if (renderedSet.has(normalizeSource(latex))) {
+          // 已转图 → 整块删(图走附件,正文不裸奔源码)
+        } else {
+          // 未转图(渲染失败退源码 / 未启用转图)→ 保留 latex 文本(去 $$ 包裹,至少可读)
+          for (const l of mathBuf) out.push(l);
+        }
+        mathBuf = [];
+      }
+      continue;
+    }
+    if (inMathFence) {
+      mathBuf.push(raw);
+      continue;
+    }
+
+    // ── 代码围栏 ``` 起止 ──
     const fenceMatch = raw.match(/^\s*```/);
     if (fenceMatch) {
-      inFence = !inFence;
+      if (!inFence) {
+        inFence = true;
+        fenceBuf = [];
+      } else {
+        // 出 fence:判定该代码块是否已转图
+        inFence = false;
+        const code = fenceBuf.join('\n');
+        if (renderedSet.has(normalizeSource(code))) {
+          // 已转图 → 整块删
+        } else {
+          // 未转图 → 保留代码原文(去围栏行,保持 2.5-b 前的行为)
+          for (const l of fenceBuf) out.push(l);
+        }
+        fenceBuf = [];
+      }
       continue;
     }
     if (inFence) {
-      out.push(raw);
+      fenceBuf.push(raw);
       continue;
     }
 
@@ -80,6 +144,10 @@ export function markdownToTweetText(markdown: string): string {
 
     out.push(line);
   }
+
+  // 未闭合的围栏(markdown 不规整)→ 把缓冲内容当文本保留,别静默丢(fail loud 精神)。
+  if (inMathFence) for (const l of mathBuf) out.push(l);
+  if (inFence) for (const l of fenceBuf) out.push(l);
 
   // 收尾:trim 首尾空行,**折叠所有连续空行为单换行**(总指挥拍板:多 block 发到 X
   // 行行相连不留空行 —— note 里 block 间的段落空行降级后压成紧凑单换行)。

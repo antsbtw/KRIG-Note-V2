@@ -2,6 +2,7 @@ import type { Atom } from '../types';
 export type { Atom } from '../types';
 import { renderTextBlock, type LinkRect } from './blocks/textBlock';
 import { renderMathBlock } from './blocks/mathBlock';
+import { renderCodeBlock } from './blocks/codeBlock';
 import { renderList } from './blocks/list';
 import { LruCache } from '../lru';
 
@@ -139,6 +140,9 @@ async function renderAtom(
         || '';
       return renderMathBlock(latex, FONT_SIZE, yOffset, defaultTextColor);
     }
+    case 'codeBlock':
+      // 等宽代码图(深色圆角底,逐行 JetBrains Mono);X 截图复用此渲染。
+      return renderCodeBlock(atom, yOffset, contentWidth);
     case 'bulletList':
       return renderList(atom, yOffset, false, 0, contentWidth, links, defaultTextColor);
     case 'orderedList':

@@ -24,6 +24,7 @@ import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import { markdownToTweetText } from '@shared/x/markdown-to-tweet';
+import type { RenderableBlock, BlockRenderFailure } from '@capabilities/x-extraction';
 import { showXSendConfirm } from './send-confirm-popup';
 
 /** 取当前 note 的活跃 PM instanceId(右键命令瞬间快照优先,fallback focused) */
@@ -52,20 +53,72 @@ function ensureXVisible(wsId: string): void {
 const X_MAX_IMAGES = 4;
 
 /**
- * 从 SerializeResult.images 收集 note 图清单(阶段 2.5-b,路线 B)。
+ * 把 note 图 + 渲染图(公式/代码/Mermaid 转的图)合并成最终媒体清单。
  *
- * images 是序列化器收集的所有 image src(media:// URL,见 pm-to-markdown serializeImage)。
- * 只取 media:// 的(http(s) 外链图无法当本地文件喂给 X);截至 X_MAX_IMAGES 张。
- * 视频本期不做(总指挥定:本期只图片),videoBlock 序列化成占位不进 images,天然不混入。
+ * - note 图(media://,2.5-b)在前,渲染图在后,按各自文档顺序;合并后截至 X_MAX_IMAGES。
+ *   (真正的「note 图与渲染图交错的全局文档顺序」需位置信息,本期简化为「先 note 图后渲染图」,
+ *    记 TODO;两者都已各自按文档先后,超 4 张时弹窗会提示总数。)
+ * - 公式/代码图与普通图**共占 4 张额度**(总指挥拍板:渲染图也算附件数)。
+ * - http(s) 外链图无法当本地文件喂 X,不进(只取 media://)。
  *
- * @returns { mediaUrls: 截后的 media:// 清单, totalImageCount: 截前总数(>4 时提示用)}
+ * @returns { mediaUrls: 截后清单, totalImageCount: 截前总数(>4 时弹窗提示用)}
  */
-function collectNoteImages(images: string[]): { mediaUrls: string[]; totalImageCount: number } {
-  const mediaImages = images.filter((src) => typeof src === 'string' && src.startsWith('media://'));
+function combineMedia(
+  noteImages: string[],
+  renderedMediaUrls: string[],
+): { mediaUrls: string[]; totalImageCount: number } {
+  const noteMedia = noteImages.filter((src) => typeof src === 'string' && src.startsWith('media://'));
+  const all = [...noteMedia, ...renderedMediaUrls];
   return {
-    mediaUrls: mediaImages.slice(0, X_MAX_IMAGES),
-    totalImageCount: mediaImages.length,
+    mediaUrls: all.slice(0, X_MAX_IMAGES),
+    totalImageCount: all.length,
   };
+}
+
+/**
+ * 统一构造「发到 X」载荷:渲染公式/代码/Mermaid block → media:// 图,合并 note 图,
+ * 同时把已转图的 block 源码从正文删掉(不裸奔 $$..$$ / 代码),fail loud 退源码。
+ *
+ * @param markdown    选区/整篇/拖块的 markdown
+ * @param noteImages  序列化器收集的 image src(media:// 清单)
+ * @param blocks      可渲染 block(公式/代码/Mermaid),与 markdown 同源
+ */
+async function buildXPayload(
+  markdown: string,
+  noteImages: string[],
+  blocks: RenderableBlock[],
+): Promise<{
+  text: string;
+  mediaUrls: string[];
+  totalImageCount: number;
+  renderFailures: BlockRenderFailure[];
+}> {
+  // 1. 渲染公式/代码/Mermaid → media://(失败的记 failed,不中断)。走 x-extraction capability
+  //    (渲染要 import driver mermaid + media-storage 运行时,view 不可直 import,故归 capability)。
+  const { rendered, failed } = blocks.length > 0
+    ? await requireCapabilityApi<XExtractionApi>('x-extraction').renderBlocksToMedia(blocks)
+    : { rendered: [] as { mediaUrl: string; source: string }[], failed: [] as BlockRenderFailure[] };
+
+  // 2. 正文:已转图的 block 源码整块删(图走附件);失败的保留源码(fail loud)。
+  const text = markdownToTweetText(markdown, {
+    renderedBlockSources: rendered.map((r) => r.source),
+  });
+
+  // 3. 媒体清单:note 图 + 渲染图,合并截 4。
+  const { mediaUrls, totalImageCount } = combineMedia(
+    noteImages,
+    rendered.map((r) => r.mediaUrl),
+  );
+
+  return { text, mediaUrls, totalImageCount, renderFailures: failed };
+}
+
+/** 把渲染失败的 block 汇成一句提示(fail loud:告知用户哪些没转成图、以源码发出)。 */
+function renderFailureNote(failures: BlockRenderFailure[]): string | null {
+  if (failures.length === 0) return null;
+  const kinds = failures.map((f) => (f.kind === 'mermaid' ? 'Mermaid' : f.kind === 'math' ? '公式' : '代码'));
+  const uniq = [...new Set(kinds)].join(' / ');
+  return `有 ${failures.length} 处${uniq}未能渲染成图,已以源码文本发出(可在 X 手动处理)`;
 }
 
 /** 注入失败统一降级:复制到剪贴板 + alert 明示(fail loud)*/
@@ -95,13 +148,15 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 1. 选区优先,无选区取整篇。同源拿 images(media:// 图清单,阶段 2.5-b)。
+  // 1. 选区优先,无选区取整篇。同源拿 images(media:// 图清单)+ renderableBlocks(公式/代码)。
   let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
+  let blocks = textEditing.api.getSelectionRenderableBlocks(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
     const doc = textEditing.api.getDocMarkdown(instanceId);
     markdown = doc.markdown;
     images = doc.images;
+    blocks = textEditing.api.getDocRenderableBlocks(instanceId);
     usedWholeDoc = true;
   }
   if (!markdown || !markdown.trim()) {
@@ -109,15 +164,20 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 2. markdown → 推文纯文本
-  const text = markdownToTweetText(markdown);
-  if (!text.trim()) {
+  // 2. 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图(2.5-b 同管道)。
+  const { text, mediaUrls, totalImageCount, renderFailures } = await buildXPayload(
+    markdown,
+    images,
+    blocks,
+  );
+  if (!text.trim() && mediaUrls.length === 0) {
     window.alert('转换后内容为空,无法发到 X');
     return;
   }
 
-  // 3. 收集 note 图(media://,截至 4 张)。
-  const { mediaUrls, totalImageCount } = collectNoteImages(images);
+  // 3. 渲染失败 fail loud:先告知用户哪些以源码发出(不静默),再进确认弹窗。
+  const failNote = renderFailureNote(renderFailures);
+  if (failNote) window.alert(`${failNote}。`);
 
   // 4. 弹发送前确认弹窗(预览/字数/缩略图/可编辑)。确认 → onConfirm 注入;取消 → 不注入。
   showXSendConfirm({
@@ -175,51 +235,43 @@ async function performXInjection(
 }
 
 /**
- * 「被拖起的 block」内容暂存(拖 block 到 X 用)。dnd.started 时抓 → 松手时用。
+ * 「被拖起的 block」原始载荷暂存(拖 block 到 X 用)。dnd.started 时抓 → 松手时用。
  * 总指挥:发的是**拖的那些 block**,不是 note 选区/整篇。
- * 阶段 2.5-b:同时暂存被拖 block 里的图(media://,截至 4 张),拖什么发什么(含图)。
+ *
+ * 注:渲染图是异步 + 较重,放松手(drop)时做,不卡 drag-start;故此处只暂存
+ * **原始 markdown / images / renderableBlocks**,buildXPayload 在 drop 时统一跑。
  */
-let draggedBlockText: string | null = null;
-let draggedBlockMedia: { mediaUrls: string[]; totalImageCount: number } = {
-  mediaUrls: [],
-  totalImageCount: 0,
-};
+interface DraggedRaw {
+  markdown: string;
+  images: string[];
+  blocks: RenderableBlock[];
+}
+let draggedRaw: DraggedRaw | null = null;
 
-/** dnd.started 时调:抓被拖起 block(单块或多选块)的降级纯文本 + 图清单暂存。*/
+/** dnd.started 时调:抓被拖起 block(单块或多选块)的原始 markdown / 图 / 可渲染块暂存。*/
 export function stashDraggedBlockText(instanceId: string, fromPos: number): void {
-  draggedBlockText = null;
-  draggedBlockMedia = { mediaUrls: [], totalImageCount: 0 };
+  draggedRaw = null;
   try {
     const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
     const { markdown, images } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
     if (markdown && markdown.trim()) {
-      const text = markdownToTweetText(markdown);
-      if (text.trim()) draggedBlockText = text;
+      const blocks = textEditing.api.getBlockRenderableBlocksAt(instanceId, fromPos);
+      draggedRaw = { markdown, images, blocks };
     }
-    draggedBlockMedia = collectNoteImages(images);
   } catch (err) {
     console.warn('[send-to-x] stashDraggedBlockText failed:', err);
   }
 }
 
-/** 取并清空暂存的被拖 block 文本(松手消费一次)*/
-function consumeDraggedBlockText(): string | null {
-  const t = draggedBlockText;
-  draggedBlockText = null;
-  return t;
+/** 取并清空暂存的被拖 block 原始载荷(松手消费一次)*/
+function consumeDraggedRaw(): DraggedRaw | null {
+  const r = draggedRaw;
+  draggedRaw = null;
+  return r;
 }
 
-/** 取并清空暂存的被拖 block 图清单(松手消费一次,与 consumeDraggedBlockText 配对)*/
-function consumeDraggedBlockMedia(): { mediaUrls: string[]; totalImageCount: number } {
-  const m = draggedBlockMedia;
-  draggedBlockMedia = { mediaUrls: [], totalImageCount: 0 };
-  return m;
-}
-
-/** 取当前活跃 note 的待发纯文本 + 图清单(选区优先,无选区取整篇)。失败 alert 并返 null。*/
-function getPendingTweetText():
-  | { text: string; usedWholeDoc: boolean; mediaUrls: string[]; totalImageCount: number }
-  | null {
+/** 取当前活跃 note 的原始待发载荷(选区优先,无选区取整篇)。失败 alert 并返 null。*/
+function getPendingRaw(): { raw: DraggedRaw; usedWholeDoc: boolean } | null {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const instanceId = getActiveNoteInstanceId(textEditing);
   if (!instanceId) {
@@ -227,24 +279,20 @@ function getPendingTweetText():
     return null;
   }
   let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
+  let blocks = textEditing.api.getSelectionRenderableBlocks(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
     const doc = textEditing.api.getDocMarkdown(instanceId);
     markdown = doc.markdown;
     images = doc.images;
+    blocks = textEditing.api.getDocRenderableBlocks(instanceId);
     usedWholeDoc = true;
   }
   if (!markdown || !markdown.trim()) {
     window.alert('Note 内容为空,没有可发到 X 的文字');
     return null;
   }
-  const text = markdownToTweetText(markdown);
-  if (!text.trim()) {
-    window.alert('转换后内容为空,无法发到 X');
-    return null;
-  }
-  const { mediaUrls, totalImageCount } = collectNoteImages(images);
-  return { text, usedWholeDoc, mediaUrls, totalImageCount };
+  return { raw: { markdown, images, blocks }, usedWholeDoc };
 }
 
 /**
@@ -257,8 +305,7 @@ function getPendingTweetText():
  * 写方向红线:只填入,用户点发布/回复。
  */
 export async function sendToXAtDropTarget(): Promise<void> {
-  const draggedText = consumeDraggedBlockText(); // 消费本次拖拽 stash(无论落点如何都清掉)
-  const draggedMedia = consumeDraggedBlockMedia(); // 同步消费图清单(与文本配对)
+  const draggedRawPayload = consumeDraggedRaw(); // 消费本次拖拽 stash(无论落点如何都清掉)
   const wsId = workspaceManager.getActiveId();
   if (!wsId) return;
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
@@ -270,16 +317,21 @@ export async function sendToXAtDropTarget(): Promise<void> {
   if (drop.kind !== 'compose' && drop.kind !== 'tweet') return;
 
   // 内容 = 被拖起的 block(总指挥:拖什么发什么)。stash 没拿到(罕见)→ 退回选区/整篇兜底。
-  let text = draggedText;
-  let mediaUrls = draggedMedia.mediaUrls;
-  let totalImageCount = draggedMedia.totalImageCount;
-  if (!text) {
-    const pending = getPendingTweetText();
-    if (!pending) return; // 内容为空已 alert
-    text = pending.text;
-    mediaUrls = pending.mediaUrls;
-    totalImageCount = pending.totalImageCount;
+  const raw = draggedRawPayload ?? getPendingRaw()?.raw;
+  if (!raw) return; // 内容为空已 alert(getPendingRaw 内)
+
+  // 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图(与发推主链同管道)。
+  const { text, mediaUrls, totalImageCount, renderFailures } = await buildXPayload(
+    raw.markdown,
+    raw.images,
+    raw.blocks,
+  );
+  if (!text.trim() && mediaUrls.length === 0) {
+    window.alert('转换后内容为空,无法发到 X');
+    return;
   }
+  const failNote = renderFailureNote(renderFailures);
+  if (failNote) window.alert(`${failNote}。`);
 
   if (drop.kind === 'compose') {
     // 落发推框 → 发普通推
