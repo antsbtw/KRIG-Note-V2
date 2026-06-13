@@ -104,21 +104,15 @@ export async function renderMermaidToExportSvg(source: string): Promise<string> 
   if (!mermaidModule) throw new Error('mermaid 模块未初始化');
   const renderId = `mermaid-export-${++mermaidIdCounter}`;
   try {
-    // 切到 htmlLabels:false(纯 SVG 标签,canvas 不污染)。
-    // ★ 字号根因(2026-06-13 实机):导出图字大,**真因不是 fontSize,是整张图被撑大了** ——
-    //   `useMaxWidth:true` + 渲染容器固定 720 宽 → mermaid 把图撑到 720,再 ×2 光栅 = 1440 大图,
-    //   X 按大图显示 → 字也跟着大。**治本 = `useMaxWidth:false`**:mermaid 用内容**自然尺寸**出图
-    //   (节点/字号比例 = 编辑器一致),字号回默认即可,不再靠压 fontSize 治标。
-    const cfg = buildMermaidConfig('dark');
-    mermaidModule.initialize({
-      ...cfg,
-      flowchart: { ...cfg.flowchart, htmlLabels: false, useMaxWidth: false },
-    });
+    // ★ 字号 = 编辑器一致(2026-06-13 第三轮):导出**完全照搬编辑器配置**(htmlLabels:true +
+    //   useMaxWidth:true + 默认 fontSize)→ SVG 与编辑器里那张**一模一样**(字号/节点比例完全相同)。
+    //   之前切 htmlLabels:false 改变了文字度量 = 字号对不上;现靠 svgToPngDataUrl 的 **data URI**
+    //   解 canvas 污染(blob URL 才污染,data URI 同源不污染),所以可以放心用 htmlLabels:true。
+    //   ⚠️ 若 foreignObject 仍致 tainted(HTML 引外部字体)→ svgToPng 会抛错,届时再考虑内联字体。
+    mermaidModule.initialize(buildMermaidConfig('dark'));
     const { svg } = await mermaidModule.render(renderId, trimmed);
     return svg;
   } finally {
-    // 恢复编辑器用的默认配置(htmlLabels:true)
-    mermaidModule.initialize(buildMermaidConfig('dark'));
     document.getElementById('d' + renderId)?.remove();
   }
 }

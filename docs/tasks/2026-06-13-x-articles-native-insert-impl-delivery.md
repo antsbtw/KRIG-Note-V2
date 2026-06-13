@@ -179,7 +179,29 @@ note 整篇 → `buildArticlePlan`（纯逻辑，产有序 InsertStep）→ IPC 
 - **Table 是网格不是 markdown**（重大更正）：dump 显示 Table 模态是一堆 `aria-label="Insert a N by M table"` 网格按钮（1×1..10×10）。`driveTable` 重写：解析 markdown 拿行列数 → 点对应网格格（"N by M" 行列朝向待实机，两种都试）→ 逐格 Tab+paste 填内容（best-effort）；超 10×10 夹到 10 并 warn。
 - **诊断 dump 已可关闭**：selector 对齐后正常应不再触发；保留以备 X 改版。
 
-### 本轮增量（2026-06-13 回退验证闭环 + 行内公式提示）
+### 本轮增量（2026-06-13 Mermaid 字号解决=SVG 留白！+ table/divider 丢失诊断）
+- **★ Mermaid 字号解决（总指挥拍板「用 SVG 约定字号」是正解）**：字号真因 = X 文章图**一律 fit 到列宽**显示，显示字号 = 列宽 ×（字/图宽比例），与 PNG 像素无关（改 PNG 尺寸没用，已证）。唯一杠杆 = **把「字/图宽比例」做小**。实现：`renderMermaidToSvgString` 给 mermaid 图**两侧留白**——把图框进 `图宽 × MERMAID_FRAME_FACTOR(1.9)` 宽的画布居中，字/总宽比例缩到 1/1.9 → X fit 列宽时字 ≈ 编辑器观感。**实机确认字号对了**。留白系数是单一旋钮（大了加、小了减）。
+- **table / divider 丢失（新问题，诊断中）**：实机 mermaid 后六级表格、七级分割线都没了。table 上轮改走 html 粘贴（`<table>` 富文本）—— 但「X 接受 `<table>`」的前提其实**从未真正确认**（之前 krig-pm-table 是量错 context = note 的表）。已加诊断日志：`driveHtml` 打印每段 html 的 `len/hasTable/preview/paste结果`，`driveDivider` 打印执行 —— 下次实跑即可定位 table HTML 是否产出、paste 成没成、divider 有没有执行。
+看对 console（**宿主主窗口**，非 X webview）后真相全出：
+- `[render-mermaid] 自然=253×369` —— **mermaid SVG 自然只有 253px（很小）**！之前以为 1500/3168 全错。`natural=3168` 是**旧草稿里旧代码的旧图**（content-hash 不同名 `img-e936669d`），一直被误量。
+- **真 bug**：`Math.min(natW, 640)` 把 253px 的图**锁死在 253 没放大** → X 把小图放大到列宽 → 字大。改为**始终固定 640**（SVG 矢量放大不糊，字:图比例不变）。`[render-mermaid] 固定 SVG=640×931` 确认生效。
+- **量图脚本一直跑错 context**：返回 `table0: krig-pm-table`（我们 note 的表）+ `img-e936669d`（旧图）= 脚本在**宿主主窗口**跑，不是 X webview → X 文章里 mermaid/table 的真实尺寸**至今没真正量到**。需在 devtools 的 context 下拉选中 x.com 那个 webview 再量。
+- ⚠️ Mermaid 字号是**兜底功能的 cosmetic 问题**，且精确标定卡在「量不到 X webview 真实显示尺寸」；核心功能（各 block 插入）不受影响。建议优先级下调，先保功能。
+
+### 上一轮（2026-06-13 Mermaid 尺寸:直接写死 SVG 宽,绕开 readSvgSize 量不准）
+上轮「按 640 算 scale」没生效（实机 natural 仍 3168）—— 根因 = `readSvgSize` 读 mermaid SVG 的 width 不准（useMaxWidth 把 width 设成 "100%"/style，量到的不是真实渲染宽 → scale 算错）。**改法**：`renderMermaidToSvgString` 离屏量真实尺寸（viewBox/getBBox）后，**直接把 SVG 的 width/height 写死成目标宽 640 等比**（去掉 style 的 max-width/width/height 干扰），rasterScale 固定 1.5 → PNG ≈ 960px，X 列宽（~480）缩到 ~0.5、字号 ≈ 编辑器观感。加 `[render-mermaid] 自然=…→固定=…` 诊断日志。⚠️ 仍需实机 + **新草稿 + 重载 app** 验（上轮疑似旧草稿/未重载导致 natural 没变）。
+
+### 上一轮（2026-06-13 devtools 真实数据：Mermaid 尺寸 / Table 改 HTML 粘贴）
+盲改两轮失败 → 总指挥 devtools 抓真实数据，两个真相都颠覆之前判断：
+- **Mermaid 字号**：真实数据 `naturalW=3168 × displayW=480` —— **X 是把图缩小显示，不是放大**！图本身 3168px 太大（mermaid SVG 自然宽 ~1500 × RASTER_SCALE 2），X 强缩到 480 → 字号失真。修：mermaid 按**目标显示宽 640** 算 scale（`scale = 640 / SVG自然宽`，clamp 0.3~2），PNG 宽 ≈ 640、X 几乎不缩，字号 = 编辑器观感。（编辑器配置照搬那版保留——同 SVG，只是出图尺寸对了。）
+- **Table 改走 HTML 粘贴**（重大简化）：真实数据 `<table class="krig-pm-table"><th><p>序号</p></th>...内容全在>` —— 说明 **`<table>` 富文本粘贴 X 能接住带内容**！而我驱动的 X 原生网格反而是个**空表填不进**（极脆）。故 **table 不再走 driveTable 网格驱动**，改回 html step（`articleDocToHtml` 的 `tableToHtml` 产 `<table>`，随文字段一起粘）。驱动网格 + 逐格填那套（driveTable/parseMarkdownTable/fillTableCells）保留代码但计划不再产 table step（dead path，留作 revert 备份）。+ 更新单测（table → html step）。
+
+### 已废弃（2026-06-13 commit 后：Mermaid htmlLabels / Table 网格 cell 等待）—— 见下方上一轮，已被本轮真实数据取代
+- **Mermaid 字号还是大**：前两轮（htmlLabels:false + useMaxWidth:false）都没对齐 —— 因 `htmlLabels:false` 改变了文字度量（SVG text vs 编辑器 foreignObject HTML），字号天生对不上。**这轮换思路**：导出**完全照搬编辑器配置**（htmlLabels:true + useMaxWidth:true + 默认 fontSize）→ SVG 与编辑器里那张**一模一样**；靠 `svgToPngDataUrl` 的 **data URI** 解 canvas 污染（blob URL 才污染）。⚠️ 待实机验：若 foreignObject 引外部字体仍 tainted → svgToPng 抛错退源码，届时需内联字体。
+- **Table 没填进内容**（空网格）：根因 = `table` 元素出现 ≠ cell 渲染好（X 异步建 cell），过早 fillTableCells → 填空。修：插表后**再 poll 等「表格里出现可编辑 cell」**（td/th/role=cell/contenteditable）+ 300ms 稳定，再填；等不到 cell → `dumpTableStructure` dump 真实 cell DOM 到日志供 spike（X 表格 cell 可能不是 td/th，待真实结构校 selector）。
+- **七级黏连（疑受 table 影响）**（你的判断对）：table 插完光标卡在 cell 内 → 后面文字插进表格里/黏连。修：`ensureCleanState` 末尾**把光标归位到正文最外层末尾**（每步前），确保下一块从正文顶层开始，不卡在上一个块（表格/引用）里。
+
+### 上一轮增量（2026-06-13 回退验证闭环 + 行内公式提示）
 - **回退「正文验证重试闭环」**：实机暴露闭环的**验证信号本身不可靠** —— `measureBody`（querySelector composer 数 children + innerText）量不准 X 的异步/虚拟渲染正文，**执行明明成功也判「正文未见该块」** → 白重试 3 次 + 重复插（比开环更糟）。坏验证比不验更糟，故撤掉验证闭环。**保留可靠的部分**：`ensureCleanState`（防残留模态级联）+ 模态开/关的局部重试（基于 `modalOpenMarker` 这个**可靠**信号，不依赖正文验证）。
   - 教训：验证信号必须比执行更可靠才有意义；X 正文的 DOM 结构（虚拟渲染/嵌套容器）让「数正文块」这个信号不可靠 → 该方向若要重来，得先 spike 出可靠的「正文真插了块」判据（如特定 testid 计数），否则不如不验。
 - **行内公式提示**（总指挥：监测到时提示）：`buildArticlePlan` 加 `docHasInlineMath` 检测 —— 文中有 mathInline 则 `warnings` 提示「X 文章不支持行内公式，会以 `$latex$` 纯文本发出，建议改块级 `$$...$$`」。发布前 confirm 弹出。+2 单测。

@@ -261,6 +261,20 @@ async function ensureCleanState(wc: Electron.WebContents, art: XArticleSelectors
     await focusInputBox(wc, art.body);
     await waitForSelectorGone(wc, art.menuItem, 1500);
   }
+  // ★ 光标归位(2026-06-13:table 等块插入后光标可能卡在 cell 内 → 后面文字插进表格里/黏连)。
+  //   每步前把光标移到**正文最外层末尾**,确保下一块从正文顶层开始,不卡在上一个块(表格/引用)里。
+  await wc.executeJavaScript(`
+    (function(){
+      try {
+        var el = document.querySelector(${JSON.stringify(art.body)});
+        if (!el) return false;
+        el.focus();
+        var range = document.createRange(); range.selectNodeContents(el); range.collapse(false);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        return true;
+      } catch(e){ return false; }
+    })();
+  `).catch(() => false);
 }
 
 async function openInsertItem(
@@ -476,6 +490,42 @@ async function dumpModalControls(wc: Electron.WebContents, which: string): Promi
   }
 }
 
+/**
+ * 诊断:dump 正文里最后一个 table 的真实结构(tag / role / cell 标签 / contenteditable),
+ * 用于 spike X 表格 cell 的真实 selector(填格失败时调用,纯读不改)。
+ */
+async function dumpTableStructure(wc: Electron.WebContents): Promise<void> {
+  const script = `
+    (function() {
+      try {
+        var tables = document.querySelectorAll('table, [role="table"]');
+        if (!tables.length) return JSON.stringify({ noTable: true });
+        var t = tables[tables.length - 1];
+        // 取表格内前若干可能是 cell 的元素的标签/role/ce 特征
+        var sample = [];
+        var kids = t.querySelectorAll('*');
+        var seen = {};
+        for (var i=0;i<kids.length && sample.length<12;i++){
+          var el = kids[i];
+          var key = el.tagName.toLowerCase() + '|' + (el.getAttribute('role')||'') + '|' + (el.getAttribute('contenteditable')||'');
+          if (seen[key]) continue; seen[key] = 1;
+          sample.push({ tag: el.tagName.toLowerCase(), role: el.getAttribute('role')||null, ce: el.getAttribute('contenteditable')||null, testid: el.getAttribute('data-testid')||null, text:(el.innerText||'').trim().slice(0,12)||null });
+        }
+        return JSON.stringify({ tableTag: t.tagName.toLowerCase(), tableRole: t.getAttribute('role')||null, tableHtml: t.outerHTML.slice(0, 600), distinctChildren: sample });
+      } catch(e){ return JSON.stringify({ err: String(e) }); }
+    })();
+  `;
+  try {
+    const raw = (await wc.executeJavaScript(script)) as string;
+    console.warn(
+      '[x-article-driver] 表格 cell 未就绪/结构不符。正文最后一个 table 真实结构(spike 用,挑 cell 的真实 selector)：\n' +
+        raw,
+    );
+  } catch (err) {
+    console.warn('[x-article-driver] dumpTableStructure 失败:', String(err));
+  }
+}
+
 // ═══════════════════════════════════════════════════════
 // §3  各 step 驱动
 // ═══════════════════════════════════════════════════════
@@ -506,7 +556,13 @@ async function driveHtml(
   //   X 收到时先起新块再放正文 → 不黏连。**单次 paste**(不再双 paste 抢焦点,那会扰乱时序 = 可靠性问题)。
   const plain = '\n' + htmlToPlainText(html);
   const htmlWithSep = '<p><br></p>' + html;
+  // 诊断(table/divider 丢失排查):打印这段 html 的长度 / 是否含 table / 前 80 字。
+  console.log(
+    `[x-article-driver] driveHtml: len=${html.length} hasTable=${html.includes('<table')} ` +
+      `preview="${html.slice(0, 80).replace(/\n/g, ' ')}"`,
+  );
   const ok = await pasteTextToWebview(wc, art.body, plain, htmlWithSep);
+  console.log(`[x-article-driver] driveHtml paste ${ok ? '成功' : '失败'}`);
   if (!ok) return { ok: false, warning: '正文文字段落粘贴未落地' };
   return { ok: true };
 }
@@ -611,6 +667,12 @@ async function driveTable(
   if (!(await waitForSelector(wc, 'table, [role="table"]', 5000))) {
     return { ok: true, warning: '表格网格已点但正文未见表格(请在 X 手动核对)' };
   }
+  // ⚠️ 表格出现 ≠ 单元格渲染好:再 poll 等「表格里出现可编辑 cell」(X 异步建 cell),否则填空。
+  if (!(await waitForSelector(wc, 'table td, table th, [role="table"] [role="cell"], [role="table"] [contenteditable="true"]', 4000))) {
+    await dumpTableStructure(wc); // dump 真实 cell DOM 供 spike
+    return { ok: true, warning: '表格已插入但单元格未就绪/结构不符(已 dump DOM 到日志供 spike,请在 X 手动填)' };
+  }
+  await sleep(300); // 给 cell 渲染稳定
 
   // 逐格填内容:定位正文里刚插入的表格各 cell 直填(best-effort,失败只 warn)。
   const filled = await fillTableCells(wc, cells);
@@ -725,8 +787,13 @@ async function driveDivider(
   wc: Electron.WebContents,
   art: XArticleSelectors,
 ): Promise<StepResult> {
+  console.log('[x-article-driver] driveDivider 开始');
   const opened = await openInsertItem(wc, art, art.menuLabels.divider, false); // 不弹模态
-  if (opened) return { ok: false, warning: `分割线插入失败:${opened}` };
+  if (opened) {
+    console.log(`[x-article-driver] driveDivider 失败: ${opened}`);
+    return { ok: false, warning: `分割线插入失败:${opened}` };
+  }
+  console.log('[x-article-driver] driveDivider 成功');
   return { ok: true };
 }
 

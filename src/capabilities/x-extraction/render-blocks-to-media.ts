@@ -163,10 +163,14 @@ async function renderCodeToSvg(block: RenderableBlock): Promise<string> {
  *   容器撑大)。故离屏容器**不再固定 720 宽**(那会干扰自然布局),用自适应宽。
  */
 async function renderMermaidToSvgString(source: string): Promise<string> {
-  // 1. 纯 SVG 渲染(无 foreignObject,canvas 不污染;useMaxWidth:false → 自然尺寸)
+  // 1. 纯 SVG 渲染
   const rawSvg = await renderMermaidToExportSvg(source);
 
-  // 2. 解析进离屏 DOM 补显式 width/height(兜底:若某图仍缺数值宽高)
+  // 2. 离屏挂载,**量真实渲染尺寸(getBBox/viewBox),把 SVG 的 width/height 直接固定成
+  //    留白系数**(2026-06-13 实机:之前靠 readSvgSize 读 SVG width 算 scale,
+  //    但 mermaid useMaxWidth 把 width 设成 "100%"/style 量不准 → scale 算错出 3168px 大图。
+  //    这里**直接把 SVG 宽高写死成目标宽 + 等比高**,svgToPng 按 scale=1 出图 = 正好目标宽,
+  //    彻底绕开 readSvgSize 量不准的坑)。
   const host = document.createElement('div');
   host.style.position = 'absolute';
   host.style.left = '-99999px';
@@ -176,29 +180,43 @@ async function renderMermaidToSvgString(source: string): Promise<string> {
   try {
     const svgEl = host.querySelector('svg');
     if (!svgEl) throw new Error('Mermaid 渲染后未找到 <svg>');
-    const hasW = /^[\d.]+$/.test((svgEl.getAttribute('width') || '').trim());
-    const hasH = /^[\d.]+$/.test((svgEl.getAttribute('height') || '').trim());
-    if (!hasW || !hasH) {
-      let w = 0;
-      let h = 0;
-      const vb = (svgEl.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
-      if (vb.length === 4 && vb.every((n) => Number.isFinite(n)) && vb[2] > 0 && vb[3] > 0) {
-        w = vb[2];
-        h = vb[3];
-      } else {
-        try {
-          const bb = (svgEl as SVGGraphicsElement).getBBox();
-          w = bb.width;
-          h = bb.height;
-        } catch { /* ignore */ }
-      }
-      if (w > 0 && h > 0) {
-        svgEl.setAttribute('width', String(Math.ceil(w)));
-        svgEl.setAttribute('height', String(Math.ceil(h)));
-        svgEl.style.removeProperty('max-width');
-      }
+    // 量真实宽高:优先 viewBox(mermaid 一定有),兜底 getBBox。
+    let natW = 0;
+    let natH = 0;
+    const vb = (svgEl.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+      natW = vb[2];
+      natH = vb[3];
+    } else {
+      try {
+        const bb = (svgEl as SVGGraphicsElement).getBBox();
+        natW = bb.width;
+        natH = bb.height;
+      } catch { /* ignore */ }
     }
-    return new XMLSerializer().serializeToString(svgEl);
+    // ★★ 字号真解(2026-06-13 定论):X 文章图**一律 fit 到列宽显示**(与 PNG 像素大小无关)→
+    //   显示字号 = 列宽 × (字/图宽比例)。所以**改图的像素大小没用**(矢量,比例恒定),唯一能让字变小的
+    //   办法是 **把图的「字/图总宽比例」做小** —— 即给 mermaid 图**两侧留白**,让图内容只占总宽一部分,
+    //   fit 到列宽时图(连字)就显得小。把 253px 的图框进留白画布居中,
+    //   字/总宽比例 = 253/FRAME 倍缩小 → 显示字号同比缩小。
+    const safeW = natW > 0 ? natW : 253;
+    const safeH = natH > 0 ? natH : 180;
+    const FRAME_W = Math.round(safeW * MERMAID_FRAME_FACTOR); // 外框宽 = 图宽 × 留白系数
+    const frameH = safeH; // 高度=图高(只左右留白,不竖向留白)
+    const offsetX = Math.max(0, Math.round((FRAME_W - safeW) / 2));
+    // 把原 SVG 内容包进一个 FRAME_W 宽的外层 SVG,居中。
+    svgEl.setAttribute('width', String(safeW));
+    svgEl.setAttribute('height', String(safeH));
+    svgEl.style.removeProperty('max-width');
+    svgEl.style.removeProperty('width');
+    svgEl.style.removeProperty('height');
+    const inner = new XMLSerializer().serializeToString(svgEl);
+    const framed =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${FRAME_W}" height="${frameH}" viewBox="0 0 ${FRAME_W} ${frameH}">` +
+      `<g transform="translate(${offsetX},0)">${inner}</g>` +
+      `</svg>`;
+    console.log(`[render-mermaid] 自然=${Math.round(natW)}×${Math.round(natH)} → 框进 ${FRAME_W}px 画布(左右留白,字按 ${(safeW / FRAME_W).toFixed(2)} 缩小)`);
+    return framed;
   } finally {
     host.remove();
   }
@@ -217,11 +235,25 @@ function mathVisualSvg(block: RenderableBlock): string {
   return thumb;
 }
 
+/**
+ * Mermaid 图「留白系数」:外框宽 = 图内容宽 × 此系数。>1 = 左右留白,把「字/图总宽」比例做小,
+ * X fit 到列宽显示时字就小。1.9 ≈ 把字号缩到原来的 1/1.9(实机微调:大了再加,小了再减)。
+ * 实测:图自然 253px、字 ~16px(占 6.3%);×1.9 框成 480px → 字占 3.3% → X 列宽 ~600 显示时字 ~20px。
+ */
+const MERMAID_FRAME_FACTOR = 1.9;
+
 /** 单个 block → media://(成功)或抛错(失败,由调用方 catch 记 failed)。 */
 async function renderOneBlock(block: RenderableBlock): Promise<string> {
   let svgString: string;
+  let rasterScale: number = RASTER_SCALE;
   if (block.kind === 'mermaid') {
+    // ★★ 代码生效自检(2026-06-13 v3 标记):若此行没在【宿主窗口】控制台出现,说明这段没跑到
+    //   (旧代码/未重载/跑在别的 instance)→ 一切 mermaid 改动都不会生效。注:此 log 在**宿主主窗口**
+    //   控制台,不是 X webview 那个 devtools。
+    console.log('[MERMAID-EXPORT v4] renderOneBlock(mermaid) 开始 — 留白系数 ' + MERMAID_FRAME_FACTOR);
+    // SVG 已在 renderMermaidToSvgString 框进留白画布(字/总宽比例做小)→ scale 1.5 光栅保清晰。
     svgString = await renderMermaidToSvgString(block.source);
+    rasterScale = 1.5;
   } else if (block.kind === 'math') {
     svgString = renderMathToSvg(block); // 紧凑 MathJax SVG(自带正确 viewBox + px 宽高)
   } else if (block.kind === 'mathVisual') {
@@ -230,10 +262,8 @@ async function renderOneBlock(block: RenderableBlock): Promise<string> {
     svgString = await renderCodeToSvg(block);
   }
 
-  // 光栅化:RASTER_SCALE 放大保清晰(X 会再压)。各 SVG 已自带正确尺寸(公式紧贴、代码按
-  // 最长行裁、Mermaid 本就紧凑)→ 不再用 getBBox tightCrop(实机证明 getBBox 对带 transform
-  // 的 MathJax SVG 量不准,导致错切)。透明底(X 深色主题自配底)。
-  const dataUrl = await svgToPngDataUrl(svgString, { scale: RASTER_SCALE });
+  // 光栅化:mermaid 按目标宽算的 scale;其余 RASTER_SCALE 放大保清晰(X 会再压)。
+  const dataUrl = await svgToPngDataUrl(svgString, { scale: rasterScale });
 
   const put = await mediaPutBase64(dataUrl, 'image/png', `x-block-${block.kind}.png`);
   if (!put.success || !put.mediaUrl) {
