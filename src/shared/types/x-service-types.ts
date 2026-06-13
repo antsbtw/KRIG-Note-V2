@@ -69,7 +69,15 @@ export interface XServiceSelectors {
  *   X 改版/本地实测后务必逐个 devtools 核对替换;失效时驱动器 fail loud(不静默假装成功)。
  */
 export interface XArticleSelectors {
-  /** Article 正文编辑区(合成 paste 文字 HTML 落点)。 */
+  /**
+   * Article 编辑器直达 URL(总指挥实机确认,2026-06-13):
+   * `https://x.com/compose/articles` 直接进**空白 Article 编辑器**(有 "Add a title" + 正文区 +
+   * Insert 菜单),不是列表页,无需再点「新建」。grep 到入口 `aria-label="Articles" href=/compose/articles`。
+   * ⚠️ Article 是 X 权限功能:无权限账号访问该 URL **进不了编辑器**(驱动器导航后 poll 等不到正文/Insert
+   * → fail loud 提示「该账号可能无 Article 发布权限」)。
+   */
+  composeUrl: string;
+  /** Article 正文编辑区(合成 paste 文字 HTML 落点;也是「编辑器就绪 + 权限通过」的判据之一)。 */
   body: string;
   /** Article 标题输入框(note isTitle → 填这里)。 */
   titleInput: string;
@@ -208,6 +216,9 @@ const X_PROFILE: XServiceProfile = {
     //   失效时驱动器 fail loud(XArticleDriver 每步 selector 命不中 → 报错降级,不静默)。
     //   清单同时誊抄进交付说明(X 改版会失效,要可查)。
     article: {
+      // Article 编辑器直达 URL(总指挥实机确认):直接进空白编辑器,无需点「新建」。
+      // 无权限账号访问进不了编辑器 → 驱动器导航后 poll 等不到正文/Insert → fail loud 提示无权限。
+      composeUrl: 'https://x.com/compose/articles',
       // 正文 / 标题:Article 编辑器富文本区与标题输入。data-testid 待抓,先用通用 contenteditable + 文章容器兜底。
       body: '[data-testid="editorParagraph"], div[role="textbox"][contenteditable="true"], article div[contenteditable="true"]',
       titleInput: '[data-testid="articleTitleInput"], textarea[placeholder*="Title" i], input[placeholder*="Title" i]',

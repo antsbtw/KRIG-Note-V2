@@ -207,6 +207,43 @@ async function confirmModal(
   return null;
 }
 
+/**
+ * 打开 X Article 空白编辑器并等就绪（总指挥实机确认：composeUrl 直达编辑器，无需点「新建」）。
+ *
+ * - 已在 Article compose 页（URL 含 /compose/articles）则不重载，直接 poll 编辑器就绪；
+ * - 否则 loadURL(composeUrl) 再 poll。
+ * - 就绪判据：**正文编辑区 + Insert 按钮都出现**（两者齐 = 空白编辑器渲染完 + 有发文章权限）。
+ *
+ * ⚠️ 红线：loadURL 进的是 draft 编辑器（非发布），不碰写方向红线。
+ * @returns true = 编辑器就绪；false = 导航后超时仍等不到（大概率无 Article 权限 / X 改版）。
+ */
+async function openArticleEditor(
+  wc: Electron.WebContents,
+  art: XArticleSelectors,
+): Promise<boolean> {
+  const onArticlePage = (() => {
+    try {
+      return wc.getURL().includes('/compose/articles');
+    } catch {
+      return false;
+    }
+  })();
+  if (!onArticlePage) {
+    try {
+      wc.loadURL(art.composeUrl);
+    } catch {
+      return false;
+    }
+  }
+  // 等编辑器就绪：正文区 + Insert 按钮都在场。给足超时（SPA 加载 + 渲染较重）。
+  // 任一等不到都判失败（无权限账号该 URL 进不了编辑器，正文/Insert 永不出现）。
+  const EDITOR_READY_MS = 12000;
+  const bodyReady = await waitForSelector(wc, art.body, EDITOR_READY_MS);
+  if (!bodyReady) return false;
+  const insertReady = await waitForSelector(wc, art.insertTrigger, 4000);
+  return insertReady;
+}
+
 // ═══════════════════════════════════════════════════════
 // §3  各 step 驱动
 // ═══════════════════════════════════════════════════════
@@ -429,11 +466,17 @@ export async function driveArticlePlan(
     return { success: false, error: 'X Article selector 未配置(需 spike 后填入 profile)' };
   }
 
-  // 等 Article 正文编辑区在场（用户须先在 X 打开/新建一篇 Article 草稿）。
-  if (!(await waitForSelector(wc, art.body, 4000))) {
+  // ── 先打开 Article 编辑器（总指挥实机确认：composeUrl 直达空白编辑器，无需点「新建」）──
+  // 导航到 Article compose 页，再 poll 等空白编辑器就绪（正文区 + Insert 按钮都出现）。
+  // 给足超时（页面加载 + Article SPA 渲染较重，参考发推 loadURL 后 8s 量级，这里放宽到 12s）。
+  // ⚠️ 红线：loadURL 进的是 **draft 编辑器（非发布）**，不碰写方向红线。
+  const ready = await openArticleEditor(wc, art);
+  if (!ready) {
+    // 导航后等不到编辑器 = 大概率无 Article 发布权限（该 URL 无权限进不去），或 X 改版 selector 失效。
     return {
       success: false,
-      error: '未定位到 X Article 正文编辑区(请先在 X 打开/新建一篇 Article 草稿,再发布)',
+      error:
+        '该 X 账号可能没有 Article(文章)发布权限,或 X 改版 —— 请确认账号有发文章权限',
     };
   }
 

@@ -244,8 +244,9 @@ async function performXInjection(
  *  1. 取活跃 note 整篇。
  *  2. 取「渲图兜底块」(只 Mermaid/mathVisual,X 无原生对应)→ renderBlocksToMedia 渲成 media://。
  *  3. buildDocArticlePlan(注入兜底 mediaMap)→ 纯数据计划(title + 有序 steps)。
- *  4. ensureXVisible(让 X webview 在台上;用户须先在 X 打开/新建一篇 Article 草稿)。
- *  5. driveArticle(按 ws 定向)→ 驱动 X 逐 block 插入。
+ *  4. ensureXVisible(让 X webview 在台上)。
+ *  5. driveArticle(按 ws 定向)→ 驱动器自动导航到 Article 编辑器(composeUrl)+ 等就绪 +
+ *     逐 block 插入(无权限账号 → 等不到编辑器 fail loud 提示无 Article 权限)。
  *  6. 部分块降级/失败 → fail loud 汇总提示(用户在 X 手动补);整体失败 → alert。
  *
  * ⚠️ 写方向红线:driveArticle 全程只插内容,绝不程序点 Publish —— 用户在 X 编辑器看成品 + 手动发布。
@@ -294,11 +295,9 @@ export async function publishToXArticle(): Promise<void> {
   const result = await x.driveArticle('x', plan, targetWcId);
 
   // 6. 结果处理(fail loud)。
+  // 驱动器已自动导航到 Article 编辑器;失败时 result.error 多为「无 Article 权限 / X 改版」,直接透出。
   if (!result.success) {
-    window.alert(
-      `发布为 X 文章失败(${result.error || '未知错误'})。\n\n` +
-        `请确认已在 X 打开/新建一篇 Article 草稿(Insert 菜单可见),再重试。`,
-    );
+    window.alert(`发布为 X 文章失败:${result.error || '未知错误'}`);
     return;
   }
   if (result.warnings && result.warnings.length > 0) {
