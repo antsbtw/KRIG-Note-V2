@@ -30,7 +30,7 @@ import type { RenderableBlock } from '@drivers/text-editing-driver/serializers/c
 import { atomsToSvg, type Atom } from '../../lib/atom-serializers/svg';
 import { renderTeX } from '../../lib/atom-serializers/svg/mathjax-svg';
 import { svgToPngDataUrl } from '../../lib/svg-to-png';
-import { renderMermaidDiagram } from '@drivers/text-editing-driver/blocks/code-block/mermaid-renderer';
+import { renderMermaidToExportSvg } from '@drivers/text-editing-driver/blocks/code-block/mermaid-renderer';
 import { mediaPutBase64 } from '../media-storage';
 
 /** 代码块 atomsToSvg viewBox 宽(背景铺满此宽内;短代码按最长行裁,见 renderCodeBlock)。 */
@@ -152,21 +152,52 @@ async function renderCodeToSvg(block: RenderableBlock): Promise<string> {
 }
 
 /**
- * Mermaid:renderMermaidDiagram 往离屏容器注 SVG,取 <svg> 元素序列化成字符串。
- * 离屏 div 挂进 document(off-screen)让 mermaid 能测量布局,用后即移除。
+ * Mermaid → 纯 SVG 字符串(导出成图)。
+ *
+ * ★ 用 `renderMermaidToExportSvg`(htmlLabels:false,纯 SVG `<text>` 标签,**无 foreignObject**)——
+ *   编辑器默认 htmlLabels:true 会让 SVG 带 foreignObject(嵌 HTML),画进 canvas 时污染 canvas →
+ *   `toDataURL()` 报 "Tainted canvases may not be exported"(实机暴露的真根因)。纯 SVG 标签不污染。
+ *
+ * ★ 字号/尺寸(2026-06-13 实机):导出用 `useMaxWidth:false`,mermaid 出**内容自然尺寸**的 SVG
+ *   (自带 px 宽高)→ ×2 光栅后是「2倍清晰的原尺寸图」,节点/字号比例 = 编辑器一致(不再被 720
+ *   容器撑大)。故离屏容器**不再固定 720 宽**(那会干扰自然布局),用自适应宽。
  */
 async function renderMermaidToSvgString(source: string): Promise<string> {
+  // 1. 纯 SVG 渲染(无 foreignObject,canvas 不污染;useMaxWidth:false → 自然尺寸)
+  const rawSvg = await renderMermaidToExportSvg(source);
+
+  // 2. 解析进离屏 DOM 补显式 width/height(兜底:若某图仍缺数值宽高)
   const host = document.createElement('div');
   host.style.position = 'absolute';
   host.style.left = '-99999px';
   host.style.top = '0';
-  host.style.width = `${CODE_CANVAS_WIDTH}px`;
+  host.innerHTML = rawSvg;
   document.body.appendChild(host);
   try {
-    await renderMermaidDiagram(source, host); // 语法错会 throw → fail loud 往上抛
     const svgEl = host.querySelector('svg');
     if (!svgEl) throw new Error('Mermaid 渲染后未找到 <svg>');
-    // 确保有显式宽高(svgToPng 量尺寸用);mermaid 输出常带 viewBox,svgToPng 也能回退。
+    const hasW = /^[\d.]+$/.test((svgEl.getAttribute('width') || '').trim());
+    const hasH = /^[\d.]+$/.test((svgEl.getAttribute('height') || '').trim());
+    if (!hasW || !hasH) {
+      let w = 0;
+      let h = 0;
+      const vb = (svgEl.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+      if (vb.length === 4 && vb.every((n) => Number.isFinite(n)) && vb[2] > 0 && vb[3] > 0) {
+        w = vb[2];
+        h = vb[3];
+      } else {
+        try {
+          const bb = (svgEl as SVGGraphicsElement).getBBox();
+          w = bb.width;
+          h = bb.height;
+        } catch { /* ignore */ }
+      }
+      if (w > 0 && h > 0) {
+        svgEl.setAttribute('width', String(Math.ceil(w)));
+        svgEl.setAttribute('height', String(Math.ceil(h)));
+        svgEl.style.removeProperty('max-width');
+      }
+    }
     return new XMLSerializer().serializeToString(svgEl);
   } finally {
     host.remove();

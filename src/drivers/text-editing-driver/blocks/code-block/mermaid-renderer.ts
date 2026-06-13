@@ -84,6 +84,45 @@ async function ensureMermaidInit(): Promise<void> {
   mermaidModule.initialize(buildMermaidConfig('dark'));
 }
 
+/**
+ * 渲染 Mermaid 为**纯 SVG 字符串**(导出成图用,X Articles 渲图兜底)。
+ *
+ * ★ 关键(2026-06-13 实机修「Tainted canvases may not be exported」):编辑器渲染用
+ *   `htmlLabels:true`(节点标签走 `<foreignObject>` 包 HTML)→ 该 HTML 引外部样式/字体
+ *   → 把 SVG 画进 canvas 时**污染 canvas**,`canvas.toDataURL()` 被安全策略拒 → SVG→PNG 失败。
+ *   导出这条路改用 `htmlLabels:false`(纯 SVG `<text>` 标签,无 foreignObject)→ canvas 不污染。
+ *
+ * 临时把全局 mermaid 切到 htmlLabels:false 渲一次,渲完恢复(编辑器渲染是 lazy 的,
+ * 这个短暂窗口不影响;X 导出是一次性操作)。语法错 throw(调用方 fail loud)。
+ *
+ * @returns 纯 SVG 字符串(无 foreignObject)。
+ */
+export async function renderMermaidToExportSvg(source: string): Promise<string> {
+  const trimmed = source.replace(/[​‌‍﻿]/g, '').trim();
+  if (!trimmed) throw new Error('Mermaid 源为空');
+  await ensureMermaidInit();
+  if (!mermaidModule) throw new Error('mermaid 模块未初始化');
+  const renderId = `mermaid-export-${++mermaidIdCounter}`;
+  try {
+    // 切到 htmlLabels:false(纯 SVG 标签,canvas 不污染)。
+    // ★ 字号根因(2026-06-13 实机):导出图字大,**真因不是 fontSize,是整张图被撑大了** ——
+    //   `useMaxWidth:true` + 渲染容器固定 720 宽 → mermaid 把图撑到 720,再 ×2 光栅 = 1440 大图,
+    //   X 按大图显示 → 字也跟着大。**治本 = `useMaxWidth:false`**:mermaid 用内容**自然尺寸**出图
+    //   (节点/字号比例 = 编辑器一致),字号回默认即可,不再靠压 fontSize 治标。
+    const cfg = buildMermaidConfig('dark');
+    mermaidModule.initialize({
+      ...cfg,
+      flowchart: { ...cfg.flowchart, htmlLabels: false, useMaxWidth: false },
+    });
+    const { svg } = await mermaidModule.render(renderId, trimmed);
+    return svg;
+  } finally {
+    // 恢复编辑器用的默认配置(htmlLabels:true)
+    mermaidModule.initialize(buildMermaidConfig('dark'));
+    document.getElementById('d' + renderId)?.remove();
+  }
+}
+
 /** 渲染 Mermaid 图表到容器 */
 export async function renderMermaidDiagram(
   source: string,

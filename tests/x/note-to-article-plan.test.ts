@@ -36,6 +36,7 @@ const schema = new Schema({
       toDOM: () => ['h1', 0],
     },
     hardBreak: { inline: true, group: 'inline', selectable: false, toDOM: () => ['br'] },
+    mathInline: { inline: true, group: 'inline', atom: true, attrs: { latex: { default: '' } }, toDOM: () => ['span'] },
     image: {
       group: 'block',
       atom: true,
@@ -62,6 +63,8 @@ const schema = new Schema({
     },
     bulletList: { content: 'listItem+', group: 'block', toDOM: () => ['ul', 0] },
     listItem: { content: 'block+', group: 'listItem', toDOM: () => ['li', 0] },
+    blockquote: { content: 'block+', group: 'block', toDOM: () => ['blockquote', 0] },
+    callout: { content: 'block+', group: 'block', attrs: { emoji: { default: '💡' } }, toDOM: () => ['div', 0] },
     horizontalRule: { group: 'block', atom: true, toDOM: () => ['hr'] },
     tweetBlock: {
       content: 'block',
@@ -231,6 +234,57 @@ describe('buildArticlePlan — mediaMap 兜底(Mermaid/mathVisual → media step
     expect(plan.steps).toHaveLength(1);
     expect(plan.steps[0].kind).toBe('code');
     expect((plan.steps[0] as { degraded?: boolean }).degraded).toBe(true);
+  });
+});
+
+describe('buildArticlePlan — 嵌套拍平(X 不支持深嵌套)', () => {
+  it('blockquote 内嵌图 → 图提到顶层 media step(不留在 html)', () => {
+    const quoteWithImage = schema.node('blockquote', null, [
+      para('引用文字'),
+      image('media://images/in-quote.png'),
+    ]);
+    const plan = buildArticlePlan(doc(title('t'), quoteWithImage), schema);
+    // 图被拍平提出来成独立 media step
+    const mediaSteps = plan.steps.filter((s) => s.kind === 'media');
+    expect(mediaSteps).toHaveLength(1);
+    expect((mediaSteps[0] as { mediaUrl: string }).mediaUrl).toBe('media://images/in-quote.png');
+    // html step 里不应再含该图 src
+    const htmlSteps = plan.steps.filter((s) => s.kind === 'html') as { html: string }[];
+    expect(htmlSteps.every((s) => !s.html.includes('in-quote.png'))).toBe(true);
+  });
+
+  it('callout 内嵌代码块 → 代码提到顶层 code step', () => {
+    const calloutWithCode = schema.node('callout', null, [
+      para('提示'),
+      codeBlock('js', 'x=1'),
+    ]);
+    const plan = buildArticlePlan(doc(title('t'), calloutWithCode), schema);
+    expect(plan.steps.some((s) => s.kind === 'code')).toBe(true);
+  });
+
+  it('纯文本 blockquote(无 native 块)→ 整体走 html,不拍平', () => {
+    const plainQuote = schema.node('blockquote', null, [para('纯引用')]);
+    const plan = buildArticlePlan(doc(title('t'), plainQuote), schema);
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0].kind).toBe('html');
+    expect((plan.steps[0] as { html: string }).html).toContain('blockquote');
+  });
+});
+
+describe('buildArticlePlan — 发布前预检 warnings', () => {
+  it('行内公式(mathInline)→ warnings 提示不支持行内公式', () => {
+    const paraWithInlineMath = schema.node('paragraph', null, [
+      t('勾股 '),
+      schema.node('mathInline', { latex: 'a^2+b^2=c^2' }),
+      t(' 完'),
+    ]);
+    const plan = buildArticlePlan(doc(title('t'), paraWithInlineMath), schema);
+    expect(plan.warnings.some((w) => w.includes('行内公式'))).toBe(true);
+  });
+
+  it('无行内公式 → 不提示', () => {
+    const plan = buildArticlePlan(doc(title('t'), para('纯文字')), schema);
+    expect(plan.warnings.some((w) => w.includes('行内公式'))).toBe(false);
   });
 });
 

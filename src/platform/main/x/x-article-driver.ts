@@ -31,7 +31,7 @@ import {
   type XServiceId,
   type XArticleSelectors,
 } from '@shared/types/x-service-types';
-import { pasteTextToWebview } from '../web-service-base';
+import { pasteTextToWebview, focusInputBox } from '../web-service-base';
 import { feedFilesToInput } from '../web-service-base';
 import { requireXWebContents } from './x-webcontents';
 import { resolveMediaPath } from '../media/media-store-impl';
@@ -131,17 +131,32 @@ function clickSelector(wc: Electron.WebContents, selector: string): Promise<bool
 /**
  * 在 menuItem/button 容器列表里按**可见文本**匹配并点击(纯 CSS 选不中文本)。
  * 用 textContent trim 后大小写不敏感「包含」匹配 label。
+ * @param excludeAria 命中的元素若 aria-label 等于此值则跳过(用于排除「Insert 触发钮」aria="Add Media"
+ *   与模态确认钮文本同为 "Insert" 的碰撞 —— 确认模态时排掉工具栏那个触发钮)。
  */
 function clickByText(
   wc: Electron.WebContents,
   containerSelector: string,
   label: string,
+  excludeAria?: string,
 ): Promise<boolean> {
   const script = `
     (function() {
       var sel = ${JSON.stringify(containerSelector)};
       var label = ${JSON.stringify(label)}.toLowerCase();
+      var excludeAria = ${JSON.stringify(excludeAria ?? '')}.toLowerCase();
       var parts = sel.split(',').map(function(s){return s.trim();}).filter(Boolean);
+      // ⚠️⚠️ 写方向最高红线硬守卫:绝不点任何含「发布/Publish/Post」语义的按钮。
+      //   X Article 编辑器里 "Publish" 按钮与模态确认钮同在 DOM(spike 实测),
+      //   本守卫确保无论传入什么 label,带发布语义文本/aria 的元素一律跳过(双保险)。
+      var FORBIDDEN = ['publish','发布','post','发推','tweet'];
+      function isForbidden(el, txt){
+        var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        for (var k=0;k<FORBIDDEN.length;k++){
+          if (txt === FORBIDDEN[k] || aria === FORBIDDEN[k]) return true;
+        }
+        return false;
+      }
       var seen = [];
       for (var i=0;i<parts.length;i++){
         var list;
@@ -151,6 +166,11 @@ function clickByText(
           if (seen.indexOf(el) !== -1) continue;
           seen.push(el);
           var txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+          if (isForbidden(el, txt)) continue; // 红线:跳过发布类按钮
+          if (excludeAria) {
+            var ea = (el.getAttribute('aria-label') || '').toLowerCase();
+            if (ea === excludeAria) continue; // 排除工具栏 Insert 触发钮(aria="Add Media")
+          }
           // 精确或包含匹配(菜单项文本短,包含足够;避免 "Code" 命中 "Add code here" 这类长文本:
           // 限定文本长度接近 label,或完全相等)。
           if (txt === label || (txt.indexOf(label) !== -1 && txt.length <= label.length + 4)) {
@@ -166,56 +186,182 @@ function clickByText(
   return wc.executeJavaScript(script).then((v) => !!v).catch(() => false);
 }
 
+/**
+ * 往**模态里的纯 textarea/input**直接填值(实机日志显示合成 paste 在这些框上不落地、走慢兜底
+ * 甚至抛错 → 这些是普通受控 textarea/input,不是 DraftJS;用 React 兼容的 native value setter
+ * 直填 + dispatch input 事件最稳)。focus + 设值 + 派发 input/change,React 受控组件能接住。
+ */
+function fillModalInput(
+  wc: Electron.WebContents,
+  selector: string,
+  text: string,
+): Promise<boolean> {
+  const script = `
+    (function() {
+      var sel = ${JSON.stringify(selector)};
+      var text = ${JSON.stringify(text)};
+      var parts = sel.split(',').map(function(s){return s.trim();}).filter(Boolean);
+      var el = null;
+      for (var i=0;i<parts.length;i++){ try { el = document.querySelector(parts[i]); } catch(e){} if (el) break; }
+      if (!el) return false;
+      try {
+        el.focus();
+        var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+        setter.call(el, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return (el.value === text);
+      } catch(e) { return false; }
+    })();
+  `;
+  return wc.executeJavaScript(script).then((v) => !!v).catch(() => false);
+}
+
 // ═══════════════════════════════════════════════════════
 // §2  Insert 模态统一编排:点 Insert → 选项 → 等模态 → 填 → Update → 等关闭
 // ═══════════════════════════════════════════════════════
 
-/** 打开 Insert 菜单并点某项。失败返回原因。 */
+/**
+ * 打开 Insert 菜单并点某项,**等模态真打开**(以 modalOpenMarker 出现为判据)。失败返回原因。
+ * ⚠️ 时序可靠性(2026-06-13 实机修「时好时坏」):全程用 poll 等实际状态,不靠固定 sleep
+ *   —— X 异步快慢不定,固定等待赌不准。
+ */
+/**
+ * ★ 串行可靠性根治(2026-06-13 实机:操作时好时坏):**每个 step 前确保「干净态」**。
+ *
+ * 根因:某 step 中途失败(如模态没关)→ 下一 step 在脏态(模态还开着 / 菜单还弹着)上启动 →
+ *   点 Insert 打不开新菜单、填值填错地方 → **级联失败**(前面成、后面一连串崩)。
+ *
+ * 本守卫:step 开始前,若发现有残留模态(modalOpenMarker 在场)或残留菜单(menuItem 在场),
+ *   先关掉(点 app-bar-close,兜底合成 Escape),等其消失,再让 step 开干。让每步从干净态启动、
+ *   彼此独立,一步失败不拖垮后面。
+ */
+async function ensureCleanState(wc: Electron.WebContents, art: XArticleSelectors): Promise<void> {
+  // 残留模态 → 关
+  if (await selExists(wc, art.modalOpenMarker)) {
+    await clickSelector(wc, art.modalOpenMarker); // 点关闭按钮
+    if (!(await waitForSelectorGone(wc, art.modalOpenMarker, 2500))) {
+      // 兜底:合成 Escape(往 body 派发)
+      await wc.executeJavaScript(`
+        (function(){
+          try {
+            var el = document.querySelector(${JSON.stringify(art.body)}) || document.body;
+            ['keydown','keyup'].forEach(function(t){
+              el.dispatchEvent(new KeyboardEvent(t, { key:'Escape', code:'Escape', keyCode:27, which:27, bubbles:true, cancelable:true }));
+            });
+          } catch(e){}
+        })();
+      `).catch(() => {});
+      await waitForSelectorGone(wc, art.modalOpenMarker, 2000);
+    }
+  }
+  // 残留菜单 → 点正文收起
+  if (await selExists(wc, art.menuItem)) {
+    await focusInputBox(wc, art.body);
+    await waitForSelectorGone(wc, art.menuItem, 1500);
+  }
+}
+
 async function openInsertItem(
   wc: Electron.WebContents,
   art: XArticleSelectors,
   menuLabel: string,
+  expectModal = true,
 ): Promise<string | null> {
-  // 1. 点 Insert 触发钮
+  // 1. 聚焦正文（X 工具栏/Insert 钮通常需正文有焦点才激活）。
+  await focusInputBox(wc, art.body);
+  // 2. 点 Insert 触发钮
   if (!(await clickSelector(wc, art.insertTrigger))) {
     return 'Insert 触发钮未点中(selector 失效?)';
   }
-  // 2. 等菜单项出现
-  if (!(await waitForSelector(wc, art.menuItem, 3000))) {
+  // 3. 等菜单项出现(poll,菜单真弹出才点项)
+  if (!(await waitForSelector(wc, art.menuItem, 4000))) {
     return 'Insert 菜单未弹出';
   }
-  // 3. 按文本点对应项
+  // 4. 按文本点对应项
   if (!(await clickByText(wc, art.menuItem, menuLabel))) {
     return `Insert 菜单项「${menuLabel}」未找到/未点中`;
   }
-  return null;
-}
-
-/** 点模态 Update 并等模态(以输入框 selector 为判据)关闭。 */
-async function confirmModal(
-  wc: Electron.WebContents,
-  art: XArticleSelectors,
-  modalInputSelector: string,
-): Promise<string | null> {
-  if (!(await clickByText(wc, art.modalButton, art.modalButtonLabels.update))) {
-    return 'Update 按钮未点中';
+  // 5. 弹模态的项(LaTeX/Table/Code/Posts/Media)→ 等模态真打开(modalOpenMarker 出现);
+  //    不弹模态的项(Divider 直接插)→ 等菜单收起即可。均 poll,不靠固定 sleep。
+  if (expectModal) {
+    if (await waitForSelector(wc, art.modalOpenMarker, 4000)) return null;
+    // ⚠️ 可靠性:点菜单项偶发没命中(菜单动画/重渲)→ 模态没开。**重开一次**:重点 Insert→菜单项。
+    if (await clickSelector(wc, art.insertTrigger)) {
+      if (await waitForSelector(wc, art.menuItem, 3000)) {
+        await clickByText(wc, art.menuItem, menuLabel);
+        if (await waitForSelector(wc, art.modalOpenMarker, 4000)) return null;
+      }
+    }
+    return `点了「${menuLabel}」但模态未打开`;
   }
-  // 模态关闭判据:输入框消失
-  if (!(await waitForSelectorGone(wc, modalInputSelector, 4000))) {
-    return 'Update 后模态未关闭(可能内容非法 / 按钮 disabled)';
-  }
+  await waitForSelectorGone(wc, art.menuItem, 3000); // 菜单收起 = Divider 已插
   return null;
 }
 
 /**
- * 打开 X Article 空白编辑器并等就绪（总指挥实机确认：composeUrl 直达编辑器，无需点「新建」）。
+ * 点模态确认按钮(★ 实测文本是 "Insert"，不是 "Update")并等模态关闭。
  *
- * - 已在 Article compose 页（URL 含 /compose/articles）则不重载，直接 poll 编辑器就绪；
- * - 否则 loadURL(composeUrl) 再 poll。
- * - 就绪判据：**正文编辑区 + Insert 按钮都出现**（两者齐 = 空白编辑器渲染完 + 有发文章权限）。
+ * ⚠️ 碰撞处理:工具栏 Insert 触发钮文本也是 "Insert"(aria="Add Media")→ 确认时
+ *   excludeAria="Add Media" 排掉它,只点模态底部那个真正的确认 "Insert"。
+ */
+async function confirmModal(
+  wc: Electron.WebContents,
+  art: XArticleSelectors,
+  _modalInputSelector: string,
+): Promise<string | null> {
+  void _modalInputSelector;
+  // 点确认 + 等模态关。⚠️ 可靠性:点一次没关(点空/Insert 钮还没 enable)→ **重试一次**再判失败,
+  //   避免「点 Insert 那一下偶发没命中」造成的假失败(时好时坏)。
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!(await clickByText(wc, art.modalButton, art.modalButtonLabels.update, 'Add Media'))) {
+      if (attempt === 0) {
+        await sleep(300); // 等 Insert 钮 enable 再重试
+        continue;
+      }
+      return '确认按钮(Insert)未点中';
+    }
+    // 模态关闭判据:modalOpenMarker(app-bar-close)消失(可靠:模态关了关闭按钮就没了)。
+    if (await waitForSelectorGone(wc, art.modalOpenMarker, 4000)) return null;
+    // 没关 → 再试一次(可能上次 click 落空)
+    await sleep(300);
+  }
+  return '确认后模态未关闭(可能内容非法 / 按钮 disabled)';
+}
+
+/**
+ * 编辑器就绪判据：**正文区在场**（编辑器的定义性特征）。
  *
- * ⚠️ 红线：loadURL 进的是 draft 编辑器（非发布），不碰写方向红线。
- * @returns true = 编辑器就绪；false = 导航后超时仍等不到（大概率无 Article 权限 / X 改版）。
+ * ⚠️ 故意只 gate 正文区、不 gate Insert 按钮：body/insertTrigger 都是 待spike 猜测 selector，
+ *   若 insertTrigger 猜错而强行 gate 它，有权限账号也会被卡在「打开编辑器」这步误判无权限
+ *   （这次实机的 false negative 教训）。Insert 按钮真缺 → 留给逐 step 驱动 fail-loud 暴露，
+ *   不在「开编辑器」这步一票否决整篇。Insert 在场则记一条 ✓（不影响就绪判定）。
+ */
+async function articleEditorReady(
+  wc: Electron.WebContents,
+  art: XArticleSelectors,
+  bodyTimeoutMs: number,
+): Promise<boolean> {
+  return waitForSelector(wc, art.body, bodyTimeoutMs);
+}
+
+/**
+ * 打开 X Article 空白编辑器并等就绪。
+ *
+ * ⚠️ 实机修正（2026-06-13，总指挥实测有权限账号被误判无权限）：`/compose/articles` 行为不稳定 ——
+ *   **有时直达空白编辑器，有时落 Articles 列表页**（"Drafts/Published/Your drafts live here"，
+ *   右上角铅笔=「新建文章」）。原逻辑只等编辑器、等不到就判无权限 → 落列表页时 false negative。
+ *
+ * 修正流程：
+ *  1. 已在 /compose/articles 页则不重载；否则 loadURL(composeUrl)。
+ *  2. 先等编辑器就绪（较短窗口 8s）。直达编辑器 → 成功返回。
+ *  3. 没直达（落列表页）→ 找「新建文章」按钮（newArticleButton）点它 → 再等编辑器就绪。
+ *  4. **只有**「编辑器没出现 **且** 新建按钮也没有」才判无权限（无权限账号既进不了编辑器、
+ *     也没有写文章入口）。
+ *
+ * ⚠️ 红线：loadURL / 点新建 进的都是 draft 编辑器（非发布），不碰写方向红线。
+ * @returns true = 编辑器就绪；false = 编辑器 + 新建按钮都没有（大概率无 Article 权限 / X 改版）。
  */
 async function openArticleEditor(
   wc: Electron.WebContents,
@@ -235,13 +381,99 @@ async function openArticleEditor(
       return false;
     }
   }
-  // 等编辑器就绪：正文区 + Insert 按钮都在场。给足超时（SPA 加载 + 渲染较重）。
-  // 任一等不到都判失败（无权限账号该 URL 进不了编辑器，正文/Insert 永不出现）。
-  const EDITOR_READY_MS = 12000;
-  const bodyReady = await waitForSelector(wc, art.body, EDITOR_READY_MS);
-  if (!bodyReady) return false;
-  const insertReady = await waitForSelector(wc, art.insertTrigger, 4000);
-  return insertReady;
+
+  // 2. 先等编辑器直达就绪（较短窗口，留时间给「落列表页→点新建」分支）。
+  if (await articleEditorReady(wc, art, 8000)) return true;
+
+  // 3. 没直达 → 大概率落了 Articles 列表页。找「新建文章」按钮点它进编辑器。
+  if (await clickSelector(wc, art.newArticleButton)) {
+    // 点了新建 → 再等编辑器就绪（这次是从列表页进编辑器）。
+    if (await articleEditorReady(wc, art, 8000)) return true;
+  }
+
+  // 4. 编辑器没出现、新建按钮也没有/点了也没进。
+  //    ★ 诊断（铁律：别猜、看真实数据）：把列表页右上角的候选「可点元素」属性 dump 到日志，
+  //    让一次真实运行就暴露那个铅笔的真实 selector（newArticleButton 待 spike，靠这个收敛）。
+  await dumpTopRightClickables(wc);
+  return false;
+}
+
+/**
+ * 诊断：dump 当前页右上角（视口右上 1/3 宽、上 1/4 高）的可点元素（button/link/role=button）
+ * 的关键属性到主进程日志。用于 spike「新建文章」铅笔的真实 selector（不改任何 DOM，纯读）。
+ */
+async function dumpTopRightClickables(wc: Electron.WebContents): Promise<void> {
+  const script = `
+    (function() {
+      try {
+        var vw = window.innerWidth, vh = window.innerHeight;
+        var nodes = document.querySelectorAll('button, a, [role="button"], [role="link"]');
+        var out = [];
+        for (var i=0;i<nodes.length;i++){
+          var el = nodes[i];
+          var r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          // 只取右上角区域（铅笔在那）
+          if (r.left < vw * 0.66 || r.top > vh * 0.25) continue;
+          out.push({
+            tag: el.tagName.toLowerCase(),
+            testid: el.getAttribute('data-testid') || null,
+            aria: el.getAttribute('aria-label') || null,
+            href: el.getAttribute('href') || null,
+            role: el.getAttribute('role') || null,
+            text: (el.innerText || el.textContent || '').trim().slice(0, 24) || null,
+          });
+        }
+        return JSON.stringify(out);
+      } catch(e) { return '[]'; }
+    })();
+  `;
+  try {
+    const raw = (await wc.executeJavaScript(script)) as string;
+    console.warn(
+      '[x-article-driver] 未找到「新建文章」按钮。Articles 列表页右上角候选可点元素（spike 用，挑铅笔那个把真实 selector 填进 profile.article.newArticleButton）：\n' +
+        raw,
+    );
+  } catch (err) {
+    console.warn('[x-article-driver] dumpTopRightClickables 失败:', String(err));
+  }
+}
+
+/**
+ * 诊断：模态没等到输入框时，dump 当前页所有 textarea/input/可点按钮的属性到日志。
+ * 用于 spike 各模态(LaTeX/Table/Code/Posts)的真实输入框 placeholder + Update 钮（纯读不改）。
+ */
+async function dumpModalControls(wc: Electron.WebContents, which: string): Promise<void> {
+  const script = `
+    (function() {
+      try {
+        var els = document.querySelectorAll('textarea, input, button, [role="button"]');
+        var out = [];
+        for (var i=0;i<els.length;i++){
+          var el = els[i];
+          var r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          out.push({
+            tag: el.tagName.toLowerCase(),
+            testid: el.getAttribute('data-testid') || null,
+            aria: el.getAttribute('aria-label') || null,
+            ph: el.getAttribute('placeholder') || el.getAttribute('data-placeholder') || null,
+            text: (el.innerText || el.textContent || '').trim().slice(0, 24) || null,
+          });
+        }
+        return JSON.stringify(out);
+      } catch(e) { return '[]'; }
+    })();
+  `;
+  try {
+    const raw = (await wc.executeJavaScript(script)) as string;
+    console.warn(
+      `[x-article-driver] ${which} 模态输入框未找到。当前页 textarea/input/button 候选(spike 用，挑该模态的输入框/Update 钮把真实 selector 填进 profile.article)：\n` +
+        raw,
+    );
+  } catch (err) {
+    console.warn('[x-article-driver] dumpModalControls 失败:', String(err));
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -268,11 +500,13 @@ async function driveHtml(
   art: XArticleSelectors,
   html: string,
 ): Promise<StepResult> {
-  // 复用底座 pasteTextToWebview(合成 paste,认 DraftJS):传 text/plain(兜底+校验片段)
-  // + text/html(富格式,X Article 正文认富文本粘贴 —— 实测 #7)。底座扩了 htmlText 参,
-  // 不在驱动器里重造合成 paste。⚠️ 富格式是否保留待实机(见交付说明)。
-  const plain = htmlToPlainText(html);
-  const ok = await pasteTextToWebview(wc, art.body, plain, html);
+  // ★ 段落黏连修(2026-06-13 实机:相邻 html 段/标题被黏成一坨):X 把 HTML 粘到正文**当前光标处**,
+  //   若光标在上一块行尾,粘进来的首块会**并进那一行** → 标题黏一起。
+  //   修法:**把空段落分隔直接拼进同一次 paste**(text/html 前置 `<p><br></p>`,text/plain 前置 `\n`),
+  //   X 收到时先起新块再放正文 → 不黏连。**单次 paste**(不再双 paste 抢焦点,那会扰乱时序 = 可靠性问题)。
+  const plain = '\n' + htmlToPlainText(html);
+  const htmlWithSep = '<p><br></p>' + html;
+  const ok = await pasteTextToWebview(wc, art.body, plain, htmlWithSep);
   if (!ok) return { ok: false, warning: '正文文字段落粘贴未落地' };
   return { ok: true };
 }
@@ -286,11 +520,13 @@ async function driveLatex(
   const opened = await openInsertItem(wc, art, art.menuLabels.latex);
   if (opened) return { ok: false, warning: `公式插入失败:${opened}` };
   if (!(await waitForSelector(wc, art.latexInput, 4000))) {
-    return { ok: false, warning: '公式插入失败:LaTeX 模态输入框未出现' };
+    await dumpModalControls(wc, 'LaTeX');
+    return { ok: false, warning: '公式插入失败:LaTeX 模态输入框未出现(已 dump DOM 到日志供 spike)' };
   }
-  if (!(await pasteTextToWebview(wc, art.latexInput, latex))) {
+  if (!(await fillModalInput(wc, art.latexInput, latex))) {
     return { ok: false, warning: '公式插入失败:latex 未填入' };
   }
+  await sleep(STEP_SETTLE_MS);
   const confirmed = await confirmModal(wc, art, art.latexInput);
   if (confirmed) return { ok: false, warning: `公式插入失败:${confirmed}` };
   return { ok: true };
@@ -306,39 +542,156 @@ async function driveCode(
   const opened = await openInsertItem(wc, art, art.menuLabels.code);
   if (opened) return { ok: false, warning: `代码插入失败:${opened}` };
   if (!(await waitForSelector(wc, art.codeInput, 4000))) {
-    return { ok: false, warning: '代码插入失败:Code 模态未出现' };
+    await dumpModalControls(wc, 'Code');
+    return { ok: false, warning: '代码插入失败:Code 模态未出现(已 dump DOM 到日志供 spike)' };
   }
   // 语言:有则填语言搜索框(可空 —— X 找不到语言就无高亮,非阻断)。
   if (language && (await selExists(wc, art.codeLangInput))) {
-    await pasteTextToWebview(wc, art.codeLangInput, language);
+    await fillModalInput(wc, art.codeLangInput, language);
     await sleep(STEP_SETTLE_MS); // 等语言下拉过滤
     // ⚠️ 待实机:语言可能需从下拉选中(再点一下首选项)。本期只填搜索框,选中待 spike。
   }
-  if (!(await pasteTextToWebview(wc, art.codeInput, code))) {
+  if (!(await fillModalInput(wc, art.codeInput, code))) {
     return { ok: false, warning: '代码插入失败:源码未填入' };
   }
+  await sleep(STEP_SETTLE_MS);
   const confirmed = await confirmModal(wc, art, art.codeInput);
   if (confirmed) return { ok: false, warning: `代码插入失败:${confirmed}` };
   return { ok: true };
 }
 
-/** Table:Insert→Table→填 markdown→Update。 */
+/**
+ * 解析 markdown 表格 → 行数/列数 + 单元格文本(去掉分隔行 `| --- |`)。
+ * 行数 = 数据行（含表头）数；列数 = 最大列数。X 网格上限 10×10,超出夹到 10 并标警告。
+ */
+function parseMarkdownTable(markdown: string): { rows: number; cols: number; cells: string[][] } {
+  const lines = markdown.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('|'));
+  // 去掉分隔行(全是 --- / : / | / 空白)
+  const dataLines = lines.filter((l) => !/^\|[\s:|-]+\|$/.test(l));
+  const cells = dataLines.map((l) =>
+    l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim()),
+  );
+  const rows = cells.length;
+  const cols = cells.reduce((m, r) => Math.max(m, r.length), 0);
+  return { rows, cols, cells };
+}
+
+/**
+ * Table(★ 实测:不是填 markdown,是网格选行列):Insert→Table→点 "Insert a {rows} by {cols} table"
+ * 网格按钮 → X 在正文插入对应尺寸空表 → 逐格 Tab+paste 填内容(best-effort)。
+ */
 async function driveTable(
   wc: Electron.WebContents,
   art: XArticleSelectors,
   markdown: string,
 ): Promise<StepResult> {
+  const { rows, cols, cells } = parseMarkdownTable(markdown);
+  if (rows === 0 || cols === 0) return { ok: false, warning: '表格插入失败:解析不到行列' };
+  const GRID_MAX = 10;
+  const r = Math.min(rows, GRID_MAX);
+  const c = Math.min(cols, GRID_MAX);
+  const truncated = rows > GRID_MAX || cols > GRID_MAX;
+
   const opened = await openInsertItem(wc, art, art.menuLabels.table);
   if (opened) return { ok: false, warning: `表格插入失败:${opened}` };
-  if (!(await waitForSelector(wc, art.tableInput, 4000))) {
-    return { ok: false, warning: '表格插入失败:Table 模态(markdown 输入框)未出现' };
+
+  // 网格按钮 aria-label: "Insert a {rows} by {cols} table"。⚠️ "N by M" 的 N/M 究竟是
+  //   行×列还是列×行待实机 —— 故两种朝向都试(先 r×c 后 c×r),命中即点。
+  const labelRC = art.tableGridCellLabel.replace('{rows}', String(r)).replace('{cols}', String(c));
+  const labelCR = art.tableGridCellLabel.replace('{rows}', String(c)).replace('{cols}', String(r));
+  if (!(await waitForSelector(wc, `[aria-label="${cssEscape(labelRC)}"], [aria-label="${cssEscape(labelCR)}"]`, 4000))) {
+    await dumpModalControls(wc, 'Table');
+    return { ok: false, warning: `表格插入失败:Table 网格未出现 / 无 "${labelRC}" 格(已 dump DOM 供 spike)` };
   }
-  if (!(await pasteTextToWebview(wc, art.tableInput, markdown))) {
-    return { ok: false, warning: '表格插入失败:markdown 未填入' };
+  if (!(await clickSelector(wc, `[aria-label="${cssEscape(labelRC)}"], [aria-label="${cssEscape(labelCR)}"]`))) {
+    return { ok: false, warning: `表格插入失败:网格 "${labelRC}" 未点中` };
   }
-  const confirmed = await confirmModal(wc, art, art.tableInput);
-  if (confirmed) return { ok: false, warning: `表格插入失败:${confirmed}` };
+  // 等模态关闭(网格点完模态就关)+ 等正文里表格真出现 —— 不靠固定 sleep。
+  await waitForSelectorGone(wc, art.modalOpenMarker, 5000);
+  if (!(await waitForSelector(wc, 'table, [role="table"]', 5000))) {
+    return { ok: true, warning: '表格网格已点但正文未见表格(请在 X 手动核对)' };
+  }
+
+  // 逐格填内容:定位正文里刚插入的表格各 cell 直填(best-effort,失败只 warn)。
+  const filled = await fillTableCells(wc, cells);
+  if (truncated) {
+    return { ok: true, warning: `表格超 10×10 已夹到 ${r}×${c}(X 网格上限),部分行列丢失,请在 X 手动补` };
+  }
+  if (!filled) {
+    return { ok: true, warning: '表格已插入但单元格内容可能未全填入,请在 X 手动核对' };
+  }
   return { ok: true };
+}
+
+/** CSS attribute 值转义(用于 [aria-label="..."]，转义引号/反斜杠)。 */
+function cssEscape(s: string): string {
+  return s.replace(/["\\]/g, '\\$&');
+}
+
+/**
+ * 逐格填表内容:**定位正文里最后一个插入的 table 的各 cell**(td/th/[role=cell]),按行主序
+ * 把文本写进每个 cell 的 contenteditable —— 比「焦点+Tab+合成paste」稳(实机那条 paste 不落地)。
+ *
+ * 每 cell:聚焦 → 把光标放进去 → execCommand insertText(contenteditable 友好) + 直写 textContent 兜底。
+ * @returns 实际填到的 cell 数 ≥ 期望数则 true(best-effort,X cell DOM 待实机,失败只 warn)。
+ */
+async function fillTableCells(
+  wc: Electron.WebContents,
+  cells: string[][],
+): Promise<boolean> {
+  // 把二维 cells 拍平成行主序文本数组(空串也占位,保持 cell 对位)。
+  const flat: string[] = [];
+  for (const row of cells) for (const cell of row) flat.push(cell);
+  const script = `
+    (function() {
+      var texts = ${JSON.stringify(flat)};
+      // 取正文里最后一个 table(刚插入的那个)。多候选:table / [role=table]。
+      var tables = document.querySelectorAll('table, [role="table"]');
+      if (!tables.length) return { ok:false, reason:'no-table', filled:0 };
+      var table = tables[tables.length - 1];
+      // cell 候选:td/th 优先,其次 role=cell/gridcell,再次 contenteditable 叶子。
+      var cells = table.querySelectorAll('td, th, [role="cell"], [role="gridcell"]');
+      if (!cells.length) cells = table.querySelectorAll('[contenteditable="true"]');
+      var n = Math.min(cells.length, texts.length);
+      var filled = 0;
+      for (var i=0;i<n;i++){
+        var text = texts[i];
+        if (!text) { filled++; continue; }
+        var cell = cells[i];
+        // 真正可编辑的目标:cell 自身或其内的 contenteditable
+        var editable = (cell.getAttribute('contenteditable') === 'true') ? cell
+                      : (cell.querySelector('[contenteditable="true"]') || cell);
+        try {
+          editable.focus();
+          // 光标置入
+          var range = document.createRange(); range.selectNodeContents(editable); range.collapse(false);
+          var selc = window.getSelection(); selc.removeAllRanges(); selc.addRange(range);
+          var done = false;
+          try { done = document.execCommand('insertText', false, text); } catch(e){}
+          if (!done || (editable.innerText||'').trim() === '') {
+            // 兜底:合成 paste(DraftJS cell 认)+ 直写
+            try {
+              var dt = new DataTransfer(); dt.setData('text/plain', text);
+              editable.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles:true, cancelable:true }));
+            } catch(e){}
+            if ((editable.innerText||'').trim() === '') { editable.textContent = text; editable.dispatchEvent(new Event('input',{bubbles:true})); }
+          }
+          filled++;
+        } catch(e) {}
+      }
+      return { ok: filled >= n, filled: filled, cells: cells.length, want: texts.length };
+    })();
+  `;
+  try {
+    const res = (await wc.executeJavaScript(script)) as { ok: boolean; filled?: number; cells?: number; want?: number; reason?: string };
+    if (!res?.ok) {
+      console.warn(`[x-article-driver] 表格填格不全/失败:`, JSON.stringify(res));
+    }
+    return !!res?.ok;
+  } catch (err) {
+    console.warn('[x-article-driver] fillTableCells 异常:', String(err));
+    return false;
+  }
 }
 
 /** Posts:Insert→Posts→填 tweetUrl→(自动嵌或 Update)。 */
@@ -350,7 +703,8 @@ async function drivePosts(
   const opened = await openInsertItem(wc, art, art.menuLabels.posts);
   if (opened) return { ok: false, warning: `嵌推插入失败:${opened}` };
   if (!(await waitForSelector(wc, art.postsUrlInput, 4000))) {
-    return { ok: false, warning: '嵌推插入失败:Posts 模态(URL 输入框)未出现' };
+    await dumpModalControls(wc, 'Posts');
+    return { ok: false, warning: '嵌推插入失败:Posts 模态(URL 输入框)未出现(已 dump DOM 到日志供 spike)' };
   }
   if (!(await pasteTextToWebview(wc, art.postsUrlInput, tweetUrl))) {
     return { ok: false, warning: '嵌推插入失败:URL 未填入' };
@@ -366,12 +720,12 @@ async function drivePosts(
   return { ok: true };
 }
 
-/** Divider:Insert→Divider(仅点击,无填值)。 */
+/** Divider:Insert→Divider(仅点击,无模态)。 */
 async function driveDivider(
   wc: Electron.WebContents,
   art: XArticleSelectors,
 ): Promise<StepResult> {
-  const opened = await openInsertItem(wc, art, art.menuLabels.divider);
+  const opened = await openInsertItem(wc, art, art.menuLabels.divider, false); // 不弹模态
   if (opened) return { ok: false, warning: `分割线插入失败:${opened}` };
   return { ok: true };
 }
@@ -392,17 +746,28 @@ async function driveMedia(
   if (!(await waitForSelector(wc, art.mediaFileInput, 4000))) {
     return { ok: false, warning: '图插入失败:Media 文件 input 未出现(可能弹了 OS 框?待实机)' };
   }
-  const fed = await feedFilesToInput(wc, art.mediaFileInput, [filePath], art.mediaInsertedThumb);
+  // 喂文件。⚠️ 不传 thumb selector(传 undefined):X Article 喂图后走「网页内 Crop media」
+  //   流程,图不会立刻以 <figure>/<img> 落进正文 → 用发推那套缩略图判据会误判失败(实机暴露
+  //   "uploadedMediaThumb 失效")。这里只让 CDP 把文件喂进 input(setFileInputFiles 成功即文件已交),
+  //   落图校验改由下面的 Crop→Save + 软校验处理。
+  const fed = await feedFilesToInput(wc, art.mediaFileInput, [filePath]);
   if (!fed.ok) {
     return { ok: false, warning: `图插入失败:${fed.error || '喂文件失败'}` };
   }
-  // ⚠️ 待实机:Crop media 界面是否需点 Save 落图。若需,这里 clickByText(modalButton, save)。
-  //   本期先尝试点 Save(若没有该按钮 clickByText 返 false,不阻断)。
-  await clickByText(wc, art.modalButton, art.modalButtonLabels.save);
+  // Crop media 界面:点 Save 落图 → **等模态(app-bar-close)关闭**(确保落图完才下一步,不靠固定 sleep)。
+  await clickByText(wc, art.modalButton, art.modalButtonLabels.save, 'Add Media');
+  if (!(await waitForSelectorGone(wc, art.modalOpenMarker, 8000))) {
+    // 模态没关:可能 Save selector 待校 / Crop 界面没收 → warn 不阻断(文件已喂进)。
+    return { ok: true, warning: '图已喂入但 Crop 界面未关闭(请在 X 手动确认 Save / 缩略图判据待实机校)' };
+  }
+  // 软校验:正文里是否出现图。
+  if (art.mediaInsertedThumb && !(await selExists(wc, art.mediaInsertedThumb))) {
+    return { ok: true, warning: '图已喂入但未确认落进正文(缩略图判据待实机校)' };
+  }
   return { ok: true };
 }
 
-/** 分发一个 step。 */
+/** 分发一个 step（执行）。 */
 async function driveStep(
   wc: Electron.WebContents,
   art: XArticleSelectors,
@@ -490,23 +855,28 @@ export async function driveArticlePlan(
     warnings.push('未定位到 Article 标题框,标题未填(请手动填)');
   }
 
-  // 2. 正文：逐 step 驱动。单 step 失败 fail loud 记 warning，继续下一个（不中断整篇）。
+  // 2. 正文：逐 step 驱动。
+  //    ⚠️ 架构回退(2026-06-13:正文计数/指纹验证信号不可靠 —— measureBody 量不准 X 的异步/虚拟
+  //    渲染正文,执行明明成功也判失败 → 白重试 3 次 + 重复插。坏验证比不验更糟,故撤掉「正文验证
+  //    重试闭环」)。保留**可靠的部分**:`ensureCleanState`(防残留模态级联)+ 模态开/关的局部重试
+  //    (基于 modalOpenMarker 这个可靠信号,不依赖正文验证)。每步失败 fail loud,不中断整篇。
   let driven = 0;
   for (const step of plan.steps) {
     let res: StepResult;
     try {
+      await ensureCleanState(wc, art); // 干净态进入,防上一步残留拖垮这步
       res = await driveStep(wc, art, step);
     } catch (err) {
       res = { ok: false, warning: `驱动异常:${String(err)}` };
     }
     if (res.ok) {
       driven++;
-      // 降级标记的 step（如 mermaid 退普通代码块）虽然驱动成功，也提示用户。
       if (step.degraded) warnings.push('有内容以降级形式插入(如 Mermaid 以源码代码块插入,非图)');
+      if (res.warning) warnings.push(res.warning);
     } else if (res.warning) {
       warnings.push(res.warning);
     }
-    await sleep(STEP_SETTLE_MS); // 每步喘息，等 X 异步渲染/光标复位（待实机校准）
+    await sleep(STEP_SETTLE_MS);
   }
 
   // 红线：到此为止。绝不点 Publish —— 用户在 X 编辑器里看成品、调整、手动发布。

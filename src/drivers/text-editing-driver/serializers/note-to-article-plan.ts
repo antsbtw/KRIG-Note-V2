@@ -114,6 +114,11 @@ export interface ArticlePlan {
   title: string;
   /** 有序驱动步骤。驱动器按序逐个执行(每步等模态关闭再下一个)。 */
   steps: ArticleInsertStep[];
+  /**
+   * 发布前预检警告(格式有问题/会降级的点)。非空 = publishToXArticle 弹确认让用户决定
+   * 「先回 note 调整」还是「继续发布(接受降级)」。纯文案,不阻断逻辑。
+   */
+  warnings: string[];
 }
 
 export interface BuildArticlePlanOptions {
@@ -146,6 +151,77 @@ function isNativeInsertBlock(node: PMNode): boolean {
     name === 'horizontalRule' ||
     name === 'mathVisual' // 兜底转图(若 mediaMap 有)→ media step;否则降级
   );
+}
+
+/**
+ * 容器块类型(可能嵌套 native 块,需拍平)。X Article 不支持深层嵌套(实测:callout 嵌图传不上),
+ * 故这些容器若内含 native 块,拍平把 native 块提到顶层各成 step,容器其余文本走 html。
+ */
+function isContainerBlock(node: PMNode): boolean {
+  const name = node.type.name;
+  return (
+    name === 'blockquote' ||
+    name === 'callout' ||
+    name === 'toggleList' ||
+    name === 'bulletList' ||
+    name === 'orderedList' ||
+    name === 'listItem' ||
+    name === 'columnList' ||
+    name === 'column' ||
+    name === 'taskList' ||
+    name === 'taskItem'
+  );
+}
+
+/** 整篇 doc 里是否含行内公式(mathInline)—— X 文章不支持,会降级文本,发布前提示。 */
+function docHasInlineMath(doc: PMNode): boolean {
+  let found = false;
+  doc.descendants((node) => {
+    if (found) return false;
+    if (node.type.name === 'mathInline') {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+/** 这个块(含其后代)里是否含 native Insert 块(图/公式/代码/表/嵌推/分隔/mathVisual)。 */
+function containsNativeBlock(node: PMNode): boolean {
+  let found = false;
+  node.descendants((child) => {
+    if (found) return false;
+    if (isNativeInsertBlock(child)) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+/**
+ * 把顶层块序列拍平成「驱动器可逐块处理」的扁平序列:
+ *  - native 块(图/公式/代码/表…)→ 原样保留(各成 step);
+ *  - 容器块**且内含 native 块** → 拍平:递归把其子块按序展开(native 提出来,文本块保留);
+ *  - 其余(纯文本容器 / 段落 / 标题等)→ 原样保留(走 html 段,富格式不丢)。
+ * 保文档顺序。X Article 不支持深嵌套,拍平是正确降级。
+ */
+function flattenBlocks(node: PMNode): PMNode[] {
+  const out: PMNode[] = [];
+  node.forEach((child) => {
+    if (isNativeInsertBlock(child)) {
+      out.push(child);
+    } else if (isContainerBlock(child) && containsNativeBlock(child)) {
+      // 容器内含 native 块 → 拍平递归(图等提到顶层,文本块各自保留走 html)
+      out.push(...flattenBlocks(child));
+    } else {
+      // 纯文本块 / 不含 native 的容器 → 原样(走 html 段,保富格式/嵌套渲染)
+      out.push(child);
+    }
+  });
+  return out;
 }
 
 /** image caption 纯文本(content='block?' 单段 paragraph,可空)。 */
@@ -297,20 +373,68 @@ export function buildArticlePlan(
     htmlBuffer = [];
   };
 
+  // 先拍平:把容器里嵌套的 native 块(图/公式/代码/表…)提到顶层(X Article 不支持深嵌套,
+  //   实测 callout 嵌图传不上)。拍平后逐块处理。isTitle 首块在拍平前先剥掉。
+  const topBlocks: PMNode[] = [];
   doc.forEach((child, _offset, index) => {
-    // 跳过 isTitle 首块（→ Article 标题字段，不进正文）
-    if (index === 0 && child.attrs?.isTitle) return;
+    if (index === 0 && child.attrs?.isTitle) return; // 跳过标题(→ 标题字段)
+    topBlocks.push(child);
+  });
+  // 预检:有容器内含 native 块(会被拍平,丢嵌套结构)→ 警告。
+  const warnSet = new Set<string>();
+  for (const b of topBlocks) {
+    if (isContainerBlock(b) && containsNativeBlock(b)) {
+      warnSet.add('有「引用/标注/列表」里嵌了图片/代码/表格等 —— X 文章不支持嵌套,会被拆平到顶层(嵌套结构丢失)。建议先在 note 里把它们移到容器外。');
+    }
+  }
+  // 预检:行内公式(mathInline)—— X 文章不支持行内公式,会降级成 `$latex$` 纯文本(不渲染)。
+  //   监测到就提示用户(总指挥 2026-06-13:行内公式监测到时提示)。
+  if (docHasInlineMath(doc)) {
+    warnSet.add('文中有**行内公式**($...$)—— X 文章不支持行内公式,会以纯文本 `$latex$` 发出(不渲染成公式)。如需公式渲染,请在 note 里改成**独立成行的块级公式**($$...$$)。');
+  }
+  const flat = topBlocks.length ? flattenBlocks(makeDocLike(doc.type.schema, topBlocks)) : [];
 
+  for (const child of flat) {
     if (isNativeInsertBlock(child)) {
       flushHtml(); // 先把累积的可粘贴段刷成 html step（保文档顺序）
       const step = nativeBlockToStep(child, mediaMap);
-      if (step) steps.push(step);
-      return;
+      if (step) {
+        steps.push(step);
+        collectStepWarning(step, child, warnSet);
+      }
+      continue;
     }
     // 普通可粘贴块 → 进缓冲，等遇到 native 块或结尾再批量序列化
     htmlBuffer.push(child);
-  });
+  }
   flushHtml(); // 收尾
 
-  return { title, steps };
+  return { title, steps, warnings: [...warnSet] };
+}
+
+/** 按 step 收集发布前预检警告(降级/超限点)。 */
+function collectStepWarning(step: ArticleInsertStep, node: PMNode, warnSet: Set<string>): void {
+  if (step.kind === 'code' && step.degraded) {
+    warnSet.add('Mermaid 图表未渲染成图,以源码代码块发出(X 文章不渲 Mermaid)。');
+  }
+  if (step.kind === 'html' && step.degraded) {
+    warnSet.add('有函数图像/特殊块未能转图,以占位文本发出。');
+  }
+  if (step.kind === 'table') {
+    // 数表格行列,超 10×10 X 网格放不下
+    const rows = (step.markdown.match(/\n/g)?.length ?? 0); // 粗略
+    const cols = (step.markdown.split('\n')[0]?.split('|').length ?? 0) - 2;
+    if (rows > 11 || cols > 10) {
+      warnSet.add(`表格超 10×10(X 表格网格上限),超出部分会丢失。建议拆小表格。`);
+    }
+  }
+  void node;
+}
+
+/** 用一组块构造一个临时 doc(供 flattenBlocks 的 forEach 遍历)。 */
+function makeDocLike(schema: Schema, blocks: PMNode[]): PMNode {
+  const docType = schema.nodes.doc;
+  if (!docType) throw new Error('note-to-article-plan: schema 缺 doc 节点');
+  // 空块数组 → 放一个空段落(doc content='block+' 不能空)
+  return docType.create(null, blocks.length ? blocks : [schema.nodes.paragraph.create()]);
 }

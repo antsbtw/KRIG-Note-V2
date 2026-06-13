@@ -113,12 +113,20 @@ async function buildXPayload(
   return { text, mediaUrls, totalImageCount, renderFailures: failed };
 }
 
-/** 把渲染失败的 block 汇成一句提示(fail loud:告知用户哪些没转成图、以源码发出)。 */
+/**
+ * 把渲染失败的 block 汇成可操作的提示(fail loud:告知哪些没转成图、以源码插入、怎么手动补)。
+ * 含失败原因(reason)便于排查;给出明确的「手动处理」步骤。
+ */
 function renderFailureNote(failures: BlockRenderFailure[]): string | null {
   if (failures.length === 0) return null;
-  const kinds = failures.map((f) => (f.kind === 'mermaid' ? 'Mermaid' : f.kind === 'math' ? '公式' : '代码'));
-  const uniq = [...new Set(kinds)].join(' / ');
-  return `有 ${failures.length} 处${uniq}未能渲染成图,已以源码文本发出(可在 X 手动处理)`;
+  const label = (k: string) => (k === 'mermaid' ? 'Mermaid 图表' : k === 'math' ? '公式' : '代码图');
+  const lines = failures.map((f) => `· ${label(f.kind)}:${f.reason || '未知原因'}`);
+  return (
+    `有 ${failures.length} 处内容未能渲染成图,已以**源码代码块**形式插进 X 文章:\n` +
+    lines.join('\n') +
+    `\n\n怎么手动处理:在 X 文章里找到对应的代码块 —— 要么保留(源码可读),` +
+    `要么删掉它、用 Insert→Media 手动插一张你自己截/导的图替代。`
+  );
 }
 
 /** 注入失败统一降级:复制到剪贴板 + alert 明示(fail loud)*/
@@ -272,6 +280,11 @@ export async function publishToXArticle(): Promise<void> {
     rendered = res.rendered.map((r) => ({ kind: r.kind, source: r.source, mediaUrl: r.mediaUrl }));
     renderFailures = res.failed;
   }
+  // 诊断(Mermaid 没转图排查):打印兜底块/渲染结果计数 + kind。
+  console.log(
+    `[publish-x-article] 兜底块=${fallbackBlocks.length} (kinds=${fallbackBlocks.map((b) => b.kind).join(',')}), ` +
+      `渲染成功=${rendered.length} (kinds=${rendered.map((r) => r.kind).join(',')}), 失败=${renderFailures.length}`,
+  );
 
   // 3. 构计划(纯数据,IPC 可序列化)。
   const plan = textEditing.api.buildDocArticlePlan(instanceId, rendered);
@@ -283,6 +296,17 @@ export async function publishToXArticle(): Promise<void> {
   // 渲图失败 fail loud:先告知哪些兜底图没渲出(已以源码/占位形式插入)。
   const failNote = renderFailureNote(renderFailures);
   if (failNote) window.alert(`${failNote}。`);
+
+  // 3.5 发布前预检:有格式问题(嵌套拍平 / Mermaid 降级 / 超大表 等)→ 弹确认,
+  //     让用户选「先回 note 调整」(取消)还是「继续发布(接受降级)」(确定)。
+  if (plan.warnings.length > 0) {
+    const proceed = window.confirm(
+      '这篇 note 有些格式 X 文章撑不住,继续发布会降级处理:\n\n' +
+        plan.warnings.map((w) => `· ${w}`).join('\n') +
+        '\n\n点「取消」先回 note 调整;点「确定」按上述降级继续发布。',
+    );
+    if (!proceed) return; // 用户选择先调整
+  }
 
   // 4. 让 X webview 在台上。
   ensureXVisible(wsId);

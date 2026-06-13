@@ -83,8 +83,17 @@ export function svgToPngDataUrl(svgString: string, options: SvgToPngOptions = {}
   const baseH = size.height;
 
   return new Promise((resolve, reject) => {
-    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
+    // ★ 用 base64 data URI 而非 URL.createObjectURL(blob)(2026-06-13 实机修
+    //   "Tainted canvases may not be exported"):blob URL 画进 canvas 会污染 → toDataURL 被拒;
+    //   同源 base64 data:image/svg+xml 不污染(这正是编辑器 MermaidPreviewPane.svgToPngBlob 用 data URI
+    //   能成功导出、本份用 blob URL 却失败的差别)。unescape(encodeURIComponent) 处理 SVG 里的非 ASCII。
+    let dataUri: string;
+    try {
+      dataUri = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgString)));
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error('svgToPng: SVG base64 编码失败'));
+      return;
+    }
     const img = new Image();
 
     img.onload = () => {
@@ -94,7 +103,6 @@ export function svgToPngDataUrl(svgString: string, options: SvgToPngOptions = {}
         canvas.height = Math.max(1, Math.round(baseH * scale));
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          URL.revokeObjectURL(url);
           reject(new Error('svgToPng: canvas 2d context 不可用'));
           return;
         }
@@ -104,17 +112,14 @@ export function svgToPngDataUrl(svgString: string, options: SvgToPngOptions = {}
         }
         ctx.scale(scale, scale);
         ctx.drawImage(img, 0, 0, baseW, baseH);
-        URL.revokeObjectURL(url);
         resolve(canvas.toDataURL('image/png'));
       } catch (err) {
-        URL.revokeObjectURL(url);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     };
     img.onerror = () => {
-      URL.revokeObjectURL(url);
       reject(new Error('svgToPng: SVG 解码为图像失败(SVG 语法错 / 字体外链等)'));
     };
-    img.src = url;
+    img.src = dataUri;
   });
 }

@@ -77,6 +77,13 @@ export interface XArticleSelectors {
    * → fail loud 提示「该账号可能无 Article 发布权限」)。
    */
   composeUrl: string;
+  /**
+   * 「新建文章」按钮(实机发现:`/compose/articles` 有时落 **Articles 列表页**而非直达编辑器,
+   * 列表页右上角有个铅笔图标要点它才进空白编辑器)。驱动器:导航后若没直达编辑器、但此按钮在场
+   * → 点它进编辑器;两者都没有才判无权限。
+   * ⚠️ 待 spike 抓真实 selector;先用 href/aria-label 兜底。
+   */
+  newArticleButton: string;
   /** Article 正文编辑区(合成 paste 文字 HTML 落点;也是「编辑器就绪 + 权限通过」的判据之一)。 */
   body: string;
   /** Article 标题输入框(note isTitle → 填这里)。 */
@@ -101,27 +108,38 @@ export interface XArticleSelectors {
     media: string;
     divider: string;
   };
-  // ── 各模态的输入框 + 确认按钮 + 关闭判据 ──
-  /** LaTeX 模态输入框(placeholder "Add a LaTeX expression here") */
+  // ── 各模态的输入框 + 确认按钮 + 关闭判据(★ 实测:模态 textarea 无 placeholder,用 :not([placeholder])) ──
+  /** LaTeX 模态输入框(模态内无 placeholder 的 textarea)。 */
   latexInput: string;
-  /** Table 模态 markdown 输入框(placeholder "Add markdown here") */
+  /** Table 模态输入框兜底(★ 实测 Table 实为网格选行列,见 tableGridCellLabel;此为兼容兜底)。 */
   tableInput: string;
-  /** Code 模态语言搜索框(placeholder "Search programming language") */
+  /** Code 模态语言搜索框(实测 input[data-testid="programming-language-input"])。 */
   codeLangInput: string;
-  /** Code 模态代码框(placeholder "Add code here") */
+  /** Code 模态代码框(模态内无 placeholder 的 textarea)。 */
   codeInput: string;
-  /** Posts 模态 URL 输入框(placeholder "Paste post URL") */
+  /** Posts 模态 URL 输入框(待 spike)。 */
   postsUrlInput: string;
   /**
+   * Table 网格按钮 aria-label 模板(★ 实测:Table 模态是网格,button aria-label
+   * "Insert a {rows} by {cols} table")。驱动器按 note 表格行列数填模板点对应格。
+   */
+  tableGridCellLabel: string;
+  /**
    * 模态确认按钮容器 selector(底部按钮，如 [role="button"]/button)。驱动器用它 + 下面
-   * modalButtonLabels 按可见文本(Update/Save)匹配点击(同菜单项,纯 CSS 选不中文本)。
+   * modalButtonLabels 按可见文本匹配点击(同菜单项,纯 CSS 选不中文本)。
    */
   modalButton: string;
-  /** 模态确认按钮可见文本标签(实测:LaTeX/Table/Code 模态底部 "Update";Media Crop "Save")。 */
+  /** 模态确认按钮可见文本标签(★ 实测更正:底部蓝按钮是 "Insert"，不是 "Update";Media Crop "Save")。 */
   modalButtonLabels: {
     update: string;
     save: string;
   };
+  /**
+   * 模态「打开中」判据(★ 实测:所有 Insert 模态顶部有 `[data-testid="app-bar-close"]` 关闭按钮)。
+   * 驱动器靠它做可靠时序:点 Insert→等它**出现**(模态真开了)再填;点确认→等它**消失**(模态真关了)
+   * 再下一步。比固定 sleep 可靠(X 异步快慢不定,固定等待赌不准 = 时好时坏的根因)。
+   */
+  modalOpenMarker: string;
   /** Media 模态(网页内 Crop media)的文件 input(喂文件)。 */
   mediaFileInput: string;
   /** 喂图成功后正文里图块的判据(poll 等它出现 = X 真接住)。可空(空则只 warn 不 fail)。 */
@@ -219,12 +237,29 @@ const X_PROFILE: XServiceProfile = {
       // Article 编辑器直达 URL(总指挥实机确认):直接进空白编辑器,无需点「新建」。
       // 无权限账号访问进不了编辑器 → 驱动器导航后 poll 等不到正文/Insert → fail loud 提示无权限。
       composeUrl: 'https://x.com/compose/articles',
-      // 正文 / 标题:Article 编辑器富文本区与标题输入。data-testid 待抓,先用通用 contenteditable + 文章容器兜底。
-      body: '[data-testid="editorParagraph"], div[role="textbox"][contenteditable="true"], article div[contenteditable="true"]',
-      titleInput: '[data-testid="articleTitleInput"], textarea[placeholder*="Title" i], input[placeholder*="Title" i]',
-      // Insert 触发钮:工具栏里的 ＋/Insert。待抓 testid;先用 aria-label 兜底。
-      insertTrigger: '[data-testid="insertButton"], button[aria-label*="Insert" i], button[aria-label*="Add" i]',
-      // 菜单项:点 Insert 后弹的可点项(role=menuitem 常见)。驱动器按 menuLabels 文本筛(见类型注释)。
+      // 「新建文章」按钮:列表页右上角铅笔图标(实机 spike 2026-06-13:devtools 抓到
+      //   `<button aria-label="create">` 即此铅笔)。主候选 aria-label="create";辅以拓宽兜底。
+      newArticleButton: [
+        'button[aria-label="create"]',          // ★ spike 实测命中(列表页右上角铅笔)
+        '[role="button"][aria-label="create" i]',
+        '[data-testid="articleComposeButton"]',
+        'a[href="/compose/articles"][role="button"]',
+        '[role="button"][aria-label*="Write" i]',
+        '[role="button"][aria-label*="Compose" i]',
+        '[role="button"][aria-label*="撰写"]',
+      ].join(', '),
+      // 正文 / 标题(★ spike 实测,2026-06-13):
+      //   正文 = [data-testid="composer"](div role=textbox contenteditable=true);
+      //   标题 = textarea[placeholder="Add a title"](★ 第二轮 spike 更正:真正的标题输入框是
+      //     这个 textarea,不是 [data-testid="twitter-article-title"] —— 那个是展示用 div "(Needs title)")。
+      body: '[data-testid="composer"], div[data-testid="composerRichTextInputContainer"] [contenteditable="true"], div[role="textbox"][contenteditable="true"]',
+      titleInput: 'textarea[placeholder="Add a title"], textarea[placeholder*="title" i], [data-testid="twitter-article-title"] [contenteditable="true"]',
+      // Insert 触发钮(★ spike 实测 2026-06-13):工具栏里那个钮**无 data-testid**,
+      //   是 `aria-label="Add Media"` + 可见文本 "Insert" 的 button。主候选 aria-label="Add Media";
+      //   辅以 aria-label/文本兜底(X 改版可能改 aria,留 Insert/Add 兜底)。
+      insertTrigger: 'button[aria-label="Add Media"], [role="button"][aria-label="Add Media"], button[aria-label*="Insert" i], button[aria-label*="Add" i]',
+      // 菜单项(★ spike 实测):点 Insert 后弹 7 个 [role="menuitem"],文本 Media/GIF/Posts/Divider/
+      //   Code/LaTeX/Table —— 与 menuLabels 文本筛完全吻合。
       menuItem: '[role="menuitem"], [role="option"], [data-testid="Dropdown"] [role="button"]',
       // 各 Insert 项可见文本(实测 §6 菜单:Media/GIF/Posts/Divider/Code/LaTeX/Table)。
       menuLabels: {
@@ -235,16 +270,29 @@ const X_PROFILE: XServiceProfile = {
         media: 'Media',
         divider: 'Divider',
       },
-      // 各模态输入框:§6 实测 placeholder 文本(真实证据)作主候选,辅以模糊 placeholder 兜底。
-      latexInput: 'textarea[placeholder="Add a LaTeX expression here"], textarea[placeholder*="LaTeX" i]',
-      tableInput: 'textarea[placeholder="Add markdown here"], textarea[placeholder*="markdown" i]',
-      codeLangInput: 'input[placeholder="Search programming language"], input[placeholder*="programming language" i]',
-      codeInput: 'textarea[placeholder="Add code here"], textarea[placeholder*="code" i]',
-      postsUrlInput: 'input[placeholder="Paste post URL"], input[placeholder*="post URL" i]',
-      // Update/Save:模态底部按钮容器(驱动器按 modalButtonLabels 文本筛)。
+      // 各模态输入框(★ 第三轮 spike 实测,dump 真实 DOM 2026-06-13):
+      //   ⚠️ 重大更正:模态里的 textarea **没有 placeholder 属性**(占位文字 "Add a LaTeX expression
+      //   here" / "Add code here" 是单独浮层元素,不在 textarea 上)→ 旧 placeholder selector 永久落空。
+      //   真实结构:模态内唯一一个**无 placeholder 的可见 textarea**(标题框才有 placeholder="Add a title")。
+      //   故 LaTeX/Code 输入框都用 `textarea:not([placeholder])` 命中(模态弹出时它就是当前那个)。
+      latexInput: 'textarea:not([placeholder])',
+      // Code 语言搜索框 = 真 testid `programming-language-input`;代码框 = 模态内无 placeholder textarea。
+      codeLangInput: 'input[data-testid="programming-language-input"], input[placeholder*="programming language" i]',
+      codeInput: 'textarea:not([placeholder])',
+      // Posts URL 框待 spike(本轮未点到 Posts);先按 placeholder 兜底(同模态 textarea/input)。
+      postsUrlInput: 'input[placeholder*="post URL" i], input[placeholder*="Paste" i], input[data-testid="postUrlInput"]',
+      // ★ Table **不是填 markdown**(dump 实测更正):是「网格选行列」—— 一堆 button
+      //   aria-label="Insert a N by M table"。驱动器特判走网格点击(见 tableInput 不用于 Table)。
+      //   tableInput 保留作兜底(万一某版本是 markdown 输入);Table 主路走 tableGridCellLabel 模板。
+      tableInput: 'textarea:not([placeholder])',
+      // Table 网格按钮 aria-label 模板(N=行 M=列):"Insert a {rows} by {cols} table"。
+      tableGridCellLabel: 'Insert a {rows} by {cols} table',
+      // 模态确认按钮(★ 实测更正):底部蓝按钮文本是 **"Insert"**(不是 "Update");Media Crop 可能 "Save"。
       modalButton: 'button, [role="button"]',
-      modalButtonLabels: { update: 'Update', save: 'Save' },
-      // Media(网页内 Crop media):文件 input。复用通用隐藏 image input 兜底。
+      modalButtonLabels: { update: 'Insert', save: 'Save' },
+      // 模态打开判据(★ 实测:所有 Insert 模态顶部都有 app-bar-close 关闭按钮)。出现=模态开,消失=模态关。
+      modalOpenMarker: '[data-testid="app-bar-close"]',
+      // Media(网页内 Crop media):文件 input(★ 实测确认 fileInput 在编辑器内)。
       mediaFileInput: 'input[type="file"][accept*="image"], input[data-testid="fileInput"]',
       // 喂图成功判据:正文里出现图块(待抓 testid;空 = 只 warn 不 fail)。
       mediaInsertedThumb: 'article img, figure img',
