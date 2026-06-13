@@ -10,11 +10,23 @@
 import type { ComponentType, CSSProperties, Ref } from 'react';
 import type { XServiceId } from '@shared/types/x-service-types';
 import type { RenderableBlock } from '@drivers/text-editing-driver/serializers/collect-renderable-blocks';
+import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
 import type { RenderBlocksResult } from './render-blocks-to-media';
 
 export type { XServiceId };
 export type { RenderableBlock };
+export type { ArticlePlan };
 export type { RenderBlocksResult, RenderedBlockMedia, BlockRenderFailure } from './render-blocks-to-media';
+
+/** 驱动 X 原生 Insert 发长文结果(终态,2026-06-13)。 */
+export interface XDriveArticleResult {
+  success: boolean;
+  error?: string;
+  /** 成功驱动的 step 数。 */
+  drivenSteps?: number;
+  /** 单 step 降级/失败汇总(非空 = 部分块没成功,用户需在 X 手动补;fail loud)。 */
+  warnings?: string[];
+}
 
 /** 抓到的推文字段(与主进程 XTweetData / tweet-block schema attrs 对齐)*/
 export interface XTweetData {
@@ -132,6 +144,17 @@ export interface XExtractionApi {
     targetWcId?: number | null,
     mediaUrls?: string[],
   ): Promise<XWriteResult>;
+  /**
+   * 发长文:驱动 X 原生 Insert 菜单逐 block 插入(终态,2026-06-13)。
+   * plan 由 note 侧 buildArticlePlan 产(title + 有序 steps)。
+   * ⚠️ 写方向红线:只插内容,绝不程序点 Publish —— 用户在 X 编辑器看成品 + 手动发布。
+   * warnings 非空 = 部分块降级/失败(fail loud,提示用户手动补)。
+   */
+  driveArticle(
+    serviceId: XServiceId,
+    plan: ArticlePlan,
+    targetWcId?: number | null,
+  ): Promise<XDriveArticleResult>;
   // ── X Host wc 按 ws 登记(注入按活跃 ws 定向,治多实例串扰)──
   /** 登记某 ws 的 AI-view X Host guest wc id(AIView 调)*/
   registerXHostWcId(wsId: string, wcId: number): void;

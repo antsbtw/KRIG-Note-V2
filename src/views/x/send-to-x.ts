@@ -235,6 +235,88 @@ async function performXInjection(
 }
 
 /**
+ * 「𝕏 发布为 X 文章」(终态,2026-06-13):整篇 note → 驱动 X 原生 Insert 发长文。
+ *
+ * 与「发到 X」(发推/回复,纯文本降级)不同:这条走 X Article 编辑器,逐 block 驱动原生
+ * Insert(LaTeX/Table/Code/Posts/Media),保真、可搜索可复制。
+ *
+ * 流程:
+ *  1. 取活跃 note 整篇。
+ *  2. 取「渲图兜底块」(只 Mermaid/mathVisual,X 无原生对应)→ renderBlocksToMedia 渲成 media://。
+ *  3. buildDocArticlePlan(注入兜底 mediaMap)→ 纯数据计划(title + 有序 steps)。
+ *  4. ensureXVisible(让 X webview 在台上;用户须先在 X 打开/新建一篇 Article 草稿)。
+ *  5. driveArticle(按 ws 定向)→ 驱动 X 逐 block 插入。
+ *  6. 部分块降级/失败 → fail loud 汇总提示(用户在 X 手动补);整体失败 → alert。
+ *
+ * ⚠️ 写方向红线:driveArticle 全程只插内容,绝不程序点 Publish —— 用户在 X 编辑器看成品 + 手动发布。
+ */
+export async function publishToXArticle(): Promise<void> {
+  const wsId = workspaceManager.getActiveId();
+  if (!wsId) return;
+
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const instanceId = getActiveNoteInstanceId(textEditing);
+  if (!instanceId) {
+    window.alert('没有活跃的 Note —— 请先打开要发布为 X 文章的整篇 Note');
+    return;
+  }
+
+  // 1+2. 渲图兜底块(只 Mermaid/mathVisual)→ media://。其余块走 X 原生 Insert,不渲。
+  const x = requireCapabilityApi<XExtractionApi>('x-extraction');
+  const fallbackBlocks = textEditing.api.getDocArticleFallbackBlocks(instanceId);
+  let rendered: { kind: string; source: string; mediaUrl: string }[] = [];
+  let renderFailures: BlockRenderFailure[] = [];
+  if (fallbackBlocks.length > 0) {
+    const res = await x.renderBlocksToMedia(fallbackBlocks);
+    rendered = res.rendered.map((r) => ({ kind: r.kind, source: r.source, mediaUrl: r.mediaUrl }));
+    renderFailures = res.failed;
+  }
+
+  // 3. 构计划(纯数据,IPC 可序列化)。
+  const plan = textEditing.api.buildDocArticlePlan(instanceId, rendered);
+  if (!plan || plan.steps.length === 0) {
+    window.alert('Note 内容为空,没有可发布为 X 文章的内容');
+    return;
+  }
+
+  // 渲图失败 fail loud:先告知哪些兜底图没渲出(已以源码/占位形式插入)。
+  const failNote = renderFailureNote(renderFailures);
+  if (failNote) window.alert(`${failNote}。`);
+
+  // 4. 让 X webview 在台上。
+  ensureXVisible(wsId);
+
+  // 5. 驱动。按 ws 定向取本 ws 的 X Host wcId。
+  const targetWcId = x.getXHostWcId(wsId);
+  if (targetWcId == null) {
+    console.warn('[publish-x-article] 未取到本 ws 的 X Host wc id,回退 main 全局 active');
+  }
+  const result = await x.driveArticle('x', plan, targetWcId);
+
+  // 6. 结果处理(fail loud)。
+  if (!result.success) {
+    window.alert(
+      `发布为 X 文章失败(${result.error || '未知错误'})。\n\n` +
+        `请确认已在 X 打开/新建一篇 Article 草稿(Insert 菜单可见),再重试。`,
+    );
+    return;
+  }
+  if (result.warnings && result.warnings.length > 0) {
+    window.alert(
+      `已驱动 ${result.drivenSteps ?? 0} 处内容进 X 文章,但有部分块没成功(请在 X 手动补):\n\n` +
+        result.warnings.map((w) => `· ${w}`).join('\n') +
+        `\n\n⚠️ 内容已插入 X Article 编辑器,请检查/调整后**自己手动点 Publish**(本工具绝不自动发布)。`,
+    );
+    return;
+  }
+  // 全部成功:内容已插进 X Article 编辑器。红线:用户自己点 Publish。
+  window.alert(
+    `已把整篇驱动进 X Article 编辑器(${result.drivenSteps ?? 0} 处内容)。\n\n` +
+      `请在 X 检查/调整后**自己手动点 Publish**(本工具只插内容,绝不自动发布)。`,
+  );
+}
+
+/**
  * 「被拖起的 block」原始载荷暂存(拖 block 到 X 用)。dnd.started 时抓 → 松手时用。
  * 总指挥:发的是**拖的那些 block**,不是 note 选区/整篇。
  *

@@ -32,6 +32,7 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
+import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
@@ -595,6 +596,13 @@ declare global {
         targetWcId?: number,
         mediaUrls?: string[],
       ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
+      /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
+       *  ⚠️ 只插内容,绝不程序点 Publish。warnings 非空 = 部分块降级/失败(fail loud,用户手动补)。 */
+      xDriveArticle(
+        serviceId: XServiceId,
+        plan: ArticlePlan,
+        targetWcId?: number,
+      ): Promise<{ success: boolean; error?: string; drivenSteps?: number; warnings?: string[] }>;
       /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
       xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
       /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/

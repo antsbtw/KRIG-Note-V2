@@ -74,6 +74,16 @@ export function registerContextMenu(): void {
       order: 192,
     },
     {
+      // X Articles 终态发布(2026-06-13):整篇 note → 驱动 X 原生 Insert 发长文
+      // (LaTeX/Table/Code/Posts/Media 走原生)。⚠️ 只插内容,用户在 X 手动点 Publish。
+      id: 'note-view.publish-x-article',
+      label: '𝕏 发布为 X 文章',
+      command: 'x-view.publish-article',
+      view: VIEW,
+      group: 'thought',
+      order: 193,
+    },
+    {
       id: 'note-view.delete-thought-at-cursor',
       label: '💭 删除 Thought',
       command: 'thought-view.delete-thought-at-cursor',

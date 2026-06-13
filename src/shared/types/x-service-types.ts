@@ -46,6 +46,78 @@ export interface XServiceSelectors {
    * ⚠️ 待实机 spike 校验。
    */
   uploadedMediaThumb?: string;
+
+  // ── X Articles 原生 Insert 驱动 selector(终态发布,2026-06-13)──
+  /**
+   * X Article 编辑器各模态/按钮的 selector(驱动原生 Insert 发长文用)。
+   * 与发推/回复那组**完全独立**(别污染):Article 是独立编辑器(独立路由/富文本引擎),
+   * 其 Insert 模态 DOM 与 compose 框无关。失效 fail loud(驱动器据此降级提示)。
+   * ⚠️⚠️ 全部「待总指挥实机 spike 抓真实 data-testid」—— 见下方 ARTICLE_SELECTORS 注释。
+   */
+  article?: XArticleSelectors;
+}
+
+/**
+ * X Article 原生 Insert 驱动所需的 selector 集合。
+ *
+ * 交互模式(总指挥实测,见 docs/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §6):
+ *   点 Insert 触发钮 → 弹菜单 → 点项(LaTeX/Table/Code/Posts/Media/Divider)→ 弹模态
+ *   → 往文本框填内容 → 点 Update/确认 → 模态关闭 → 块插入完成。
+ *
+ * ⚠️⚠️ 红线:**全部待实机 spike 抓真实 data-testid**。下面的初值多用「实测可见 placeholder 文本」
+ *   (§6 总指挥已见,是真实证据)作主候选,辅以常见 aria-label/role,**不是抓到的 data-testid**。
+ *   X 改版/本地实测后务必逐个 devtools 核对替换;失效时驱动器 fail loud(不静默假装成功)。
+ */
+export interface XArticleSelectors {
+  /** Article 正文编辑区(合成 paste 文字 HTML 落点)。 */
+  body: string;
+  /** Article 标题输入框(note isTitle → 填这里)。 */
+  titleInput: string;
+  /** Insert 菜单触发钮(＋ / Insert ▾)。 */
+  insertTrigger: string;
+  /**
+   * 菜单项容器 selector(点 insertTrigger 后出现的可点项,如 [role="menuitem"])。
+   * 驱动器用 querySelectorAll(menuItem) 拿全部项,再按**可见文本**(下面 menuLabels)匹配点击
+   * —— 因 `document.querySelector` 不支持 `:has-text()`,菜单项必须靠文本筛而非纯 CSS。
+   */
+  menuItem: string;
+  /**
+   * 各 Insert 项的**可见文本标签**(驱动器在 menuItem 列表里按 textContent 包含匹配)。
+   * 实测 §6 菜单项:Media / GIF / Posts / Divider / Code / LaTeX / Table。
+   */
+  menuLabels: {
+    latex: string;
+    table: string;
+    code: string;
+    posts: string;
+    media: string;
+    divider: string;
+  };
+  // ── 各模态的输入框 + 确认按钮 + 关闭判据 ──
+  /** LaTeX 模态输入框(placeholder "Add a LaTeX expression here") */
+  latexInput: string;
+  /** Table 模态 markdown 输入框(placeholder "Add markdown here") */
+  tableInput: string;
+  /** Code 模态语言搜索框(placeholder "Search programming language") */
+  codeLangInput: string;
+  /** Code 模态代码框(placeholder "Add code here") */
+  codeInput: string;
+  /** Posts 模态 URL 输入框(placeholder "Paste post URL") */
+  postsUrlInput: string;
+  /**
+   * 模态确认按钮容器 selector(底部按钮，如 [role="button"]/button)。驱动器用它 + 下面
+   * modalButtonLabels 按可见文本(Update/Save)匹配点击(同菜单项,纯 CSS 选不中文本)。
+   */
+  modalButton: string;
+  /** 模态确认按钮可见文本标签(实测:LaTeX/Table/Code 模态底部 "Update";Media Crop "Save")。 */
+  modalButtonLabels: {
+    update: string;
+    save: string;
+  };
+  /** Media 模态(网页内 Crop media)的文件 input(喂文件)。 */
+  mediaFileInput: string;
+  /** 喂图成功后正文里图块的判据(poll 等它出现 = X 真接住)。可空(空则只 warn 不 fail)。 */
+  mediaInsertedThumb?: string;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -127,6 +199,45 @@ const X_PROFILE: XServiceProfile = {
     // selector 清单同时誊抄进交付说明(X 改版会失效,要可查)。
     fileInput: 'input[data-testid="fileInput"], input[type="file"][accept*="image"]',
     uploadedMediaThumb: '[data-testid="attachments"], [data-testid="removeMedia"], [aria-label*="Remove media"], [data-testid="media"]',
+
+    // ── X Articles 原生 Insert 驱动 selector(终态发布,2026-06-13)──
+    //
+    // ⚠️⚠️ 全部「待总指挥实机 spike」:下面多用 §6 实测可见的 placeholder 文本(真实证据)
+    //   作主候选 [placeholder="..."],辅以 aria-label/role 兜底。**这些不是抓到的 data-testid**
+    //   —— 红线不凭记忆编 testid。本地 devtools 逐个核对后,把更稳的 data-testid 加到候选最前。
+    //   失效时驱动器 fail loud(XArticleDriver 每步 selector 命不中 → 报错降级,不静默)。
+    //   清单同时誊抄进交付说明(X 改版会失效,要可查)。
+    article: {
+      // 正文 / 标题:Article 编辑器富文本区与标题输入。data-testid 待抓,先用通用 contenteditable + 文章容器兜底。
+      body: '[data-testid="editorParagraph"], div[role="textbox"][contenteditable="true"], article div[contenteditable="true"]',
+      titleInput: '[data-testid="articleTitleInput"], textarea[placeholder*="Title" i], input[placeholder*="Title" i]',
+      // Insert 触发钮:工具栏里的 ＋/Insert。待抓 testid;先用 aria-label 兜底。
+      insertTrigger: '[data-testid="insertButton"], button[aria-label*="Insert" i], button[aria-label*="Add" i]',
+      // 菜单项:点 Insert 后弹的可点项(role=menuitem 常见)。驱动器按 menuLabels 文本筛(见类型注释)。
+      menuItem: '[role="menuitem"], [role="option"], [data-testid="Dropdown"] [role="button"]',
+      // 各 Insert 项可见文本(实测 §6 菜单:Media/GIF/Posts/Divider/Code/LaTeX/Table)。
+      menuLabels: {
+        latex: 'LaTeX',
+        table: 'Table',
+        code: 'Code',
+        posts: 'Posts',
+        media: 'Media',
+        divider: 'Divider',
+      },
+      // 各模态输入框:§6 实测 placeholder 文本(真实证据)作主候选,辅以模糊 placeholder 兜底。
+      latexInput: 'textarea[placeholder="Add a LaTeX expression here"], textarea[placeholder*="LaTeX" i]',
+      tableInput: 'textarea[placeholder="Add markdown here"], textarea[placeholder*="markdown" i]',
+      codeLangInput: 'input[placeholder="Search programming language"], input[placeholder*="programming language" i]',
+      codeInput: 'textarea[placeholder="Add code here"], textarea[placeholder*="code" i]',
+      postsUrlInput: 'input[placeholder="Paste post URL"], input[placeholder*="post URL" i]',
+      // Update/Save:模态底部按钮容器(驱动器按 modalButtonLabels 文本筛)。
+      modalButton: 'button, [role="button"]',
+      modalButtonLabels: { update: 'Update', save: 'Save' },
+      // Media(网页内 Crop media):文件 input。复用通用隐藏 image input 兜底。
+      mediaFileInput: 'input[type="file"][accept*="image"], input[data-testid="fileInput"]',
+      // 喂图成功判据:正文里出现图块(待抓 testid;空 = 只 warn 不 fail)。
+      mediaInsertedThumb: 'article img, figure img',
+    },
   },
 };
 

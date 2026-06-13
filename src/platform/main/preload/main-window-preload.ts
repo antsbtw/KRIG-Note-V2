@@ -793,6 +793,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId, mediaUrls });
   },
+  /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
+   *  ⚠️ 写方向红线:只插内容,绝不程序点 Publish。 */
+  xDriveArticle(serviceId: string, plan: unknown, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRIVE_ARTICLE, { serviceId, plan, targetWcId });
+  },
   /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
   xDragArm(targetWcId: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_ARM, { targetWcId });

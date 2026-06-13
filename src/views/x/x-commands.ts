@@ -16,7 +16,7 @@ import { commandRegistry } from '@slot/command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XTweetData } from '@capabilities/x-extraction';
-import { sendToX, sendToXAtDropTarget, stashDraggedBlockText } from './send-to-x';
+import { sendToX, sendToXAtDropTarget, stashDraggedBlockText, publishToXArticle } from './send-to-x';
 
 /** dnd capability 的最小接口(subscribe)— 走 requireCapabilityApi 间接路由,不直接 import 运行时值 */
 interface DndApiLite {
@@ -141,6 +141,15 @@ export function registerXCommands(): void {
    */
   commandRegistry.register('x-view.send-to-x', () => {
     void sendToX();
+  });
+
+  /**
+   * 「𝕏 发布为 X 文章」(终态,2026-06-13):整篇 note → 驱动 X 原生 Insert 发长文
+   * (LaTeX/Table/Code/Posts/Media 走原生,Mermaid/mathVisual 渲图兜底)。
+   * 实现见 send-to-x.ts publishToXArticle。⚠️ 只插内容,用户在 X 手动点 Publish。
+   */
+  commandRegistry.register('x-view.publish-article', () => {
+    void publishToXArticle();
   });
 
   // ── 右键「提取此推文到笔记」(X_EXTRACT_TWEET_REQUEST 广播)模块级单订阅 ──

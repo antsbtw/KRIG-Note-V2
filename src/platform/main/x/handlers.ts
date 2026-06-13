@@ -14,6 +14,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { extractTweetAt } from './x-extract-tweet';
 import { pasteTweet, pasteReply } from './x-write';
+import { driveArticlePlan, type ArticlePlanPayload } from './x-article-driver';
 import { armXDragListener, resolveXDropAt, clickReplyAtDrop } from './x-drag-drop';
 import { resolveMediaPath } from '../media/media-store-impl';
 
@@ -101,6 +102,24 @@ export function registerXHandlers(): void {
     const { paths, unresolved } = resolveMediaUrlsToPaths(p.mediaUrls);
     const result = await pasteReply(p.serviceId, p.tweetUrl, p.text, targetWcId, paths);
     return mergeUnresolvedWarning(result, unresolved);
+  });
+
+  // X_DRIVE_ARTICLE — 驱动 X 原生 Insert 发长文(终态,2026-06-13)。
+  // renderer 侧 buildArticlePlan 产好计划(title + 有序 steps)透传;main 侧逐 step 驱动 X DOM。
+  // ⚠️ 写方向红线:driveArticlePlan 全程只插内容,绝不点 Publish。
+  ipcMain.handle(IPC_CHANNELS.X_DRIVE_ARTICLE, async (_e, payload: unknown) => {
+    const p = payload as
+      | { serviceId?: unknown; plan?: unknown; targetWcId?: unknown }
+      | null;
+    if (!p || !isXServiceId(p.serviceId)) {
+      return { success: false, error: 'invalid driveArticle payload' };
+    }
+    const plan = p.plan as ArticlePlanPayload | undefined;
+    if (!plan || typeof plan !== 'object' || !Array.isArray(plan.steps)) {
+      return { success: false, error: 'invalid Article plan(缺 steps)' };
+    }
+    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
+    return driveArticlePlan(p.serviceId, plan, targetWcId);
   });
 
   // X_DRAG_ARM — note 拖起:往指定 X guest 装 mousemove 监听(记录最后坐标)

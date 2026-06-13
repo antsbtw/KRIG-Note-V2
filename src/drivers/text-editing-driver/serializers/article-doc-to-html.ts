@@ -104,6 +104,9 @@ function blockToHtml(node: PMNode): string {
     case 'listItem':
       return `<li>${childrenToHtml(node)}</li>`;
     case 'image': {
+      // ⚠️ 终态(2026-06-13):note-to-article-plan 已把 image 切成独立 media step 喂文件
+      //    (总指挥实测 <img src=media://> 粘不进 X)→ 终态路径下不会走到这里。
+      //    保留此 case 仅作通用序列化器的防御(若 article doc 直接含 image)。
       const src = esc((node.attrs?.src as string) || '');
       const alt = esc((node.attrs?.alt as string) || '');
       return `<img src="${src}" alt="${alt}">`;

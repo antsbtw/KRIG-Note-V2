@@ -17,8 +17,10 @@ import type {
   XExtractTweetResult,
   XExtractTweetRequest,
   XWriteResult,
+  XDriveArticleResult,
   XDropTarget,
 } from './types';
+import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
 import { Host } from './Host';
 import { registerXHostWcId, clearXHostWcId, getXHostWcId } from './x-host-registry';
 import { renderBlocksToMedia } from './render-blocks-to-media';
@@ -30,10 +32,12 @@ export type {
   XExtractTweetResult,
   XExtractTweetRequest,
   XWriteResult,
+  XDriveArticleResult,
   XDropTarget,
   XHostHandle,
   XHostProps,
   RenderableBlock,
+  ArticlePlan,
   RenderBlocksResult,
   RenderedBlockMedia,
   BlockRenderFailure,
@@ -74,6 +78,14 @@ async function pasteReply(
   return window.electronAPI.xPasteReply(serviceId, tweetUrl, text, targetWcId ?? undefined, mediaUrls);
 }
 
+async function driveArticle(
+  serviceId: XServiceId,
+  plan: ArticlePlan,
+  targetWcId?: number | null,
+): Promise<XDriveArticleResult> {
+  return window.electronAPI.xDriveArticle(serviceId, plan, targetWcId ?? undefined);
+}
+
 // ── 拖拽落点 ──
 async function dragArm(targetWcId: number): Promise<void> {
   await window.electronAPI.xDragArm(targetWcId);
@@ -95,6 +107,7 @@ export const xExtractionCapability: XExtractionApi = {
   onExtractTweetRequest,
   pasteTweet,
   pasteReply,
+  driveArticle,
   registerXHostWcId,
   clearXHostWcId,
   getXHostWcId,

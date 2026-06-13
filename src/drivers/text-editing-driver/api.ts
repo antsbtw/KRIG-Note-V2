@@ -19,6 +19,11 @@ import {
   collectRenderableBlocksFromSlice,
   type RenderableBlock,
 } from './serializers/collect-renderable-blocks';
+import {
+  buildArticlePlan,
+  type ArticlePlan,
+} from './serializers/note-to-article-plan';
+import { blockMediaKey, type ArticleMediaMap } from './serializers/doc-to-article-doc';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
@@ -1915,6 +1920,54 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return [];
     return collectRenderableBlocksFromDoc(inst.view.state.doc);
+  },
+
+  /**
+   * X Articles 终态发布(2026-06-13):整篇文档里需「渲图兜底」的 block —— **只 Mermaid + mathVisual**
+   * (X 无原生对应)。其余 mathBlock/codeBlock/table 走 X 原生 Insert,不渲图。
+   *
+   * 返回给 view 层渲成 media://(renderBlocksToMedia),再喂回 buildDocArticlePlan 当 mediaMap。
+   * 与 getDocRenderableBlocks 同源(collectRenderableBlocksFromDoc),只过滤出兜底两类。
+   */
+  getDocArticleFallbackBlocks(instanceId: string): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const all = collectRenderableBlocksFromDoc(inst.view.state.doc, { includeMathVisual: true });
+    return all.filter((b) => b.kind === 'mermaid' || b.kind === 'mathVisual');
+  },
+
+  /**
+   * X Articles 终态发布(2026-06-13):整篇 note doc → 「X 原生 Insert 驱动计划」。
+   *
+   * @param rendered 已渲染的兜底块(Mermaid/mathVisual)→ media:// 清单(view 层先 renderBlocksToMedia
+   *   渲好;getDocArticleFallbackBlocks 取的块)。按 (kind, source) 匹配回 doc 节点构 mediaMap。
+   *   不传 = 无兜底图(纯原生 + 文字)。
+   *
+   * 纯逻辑层 buildArticlePlan 产 { title, steps },steps 是 IPC 可序列化的纯数据(无 PMNode)。
+   * driver 侧(x-article-driver)消费驱动 X。
+   */
+  buildDocArticlePlan(
+    instanceId: string,
+    rendered?: Array<{ kind: string; source: string; mediaUrl: string }>,
+  ): ArticlePlan | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const doc = inst.view.state.doc;
+    // 重建 mediaMap:walk doc,对每个 Mermaid/mathVisual 节点,按 (kind, source) 找渲染结果。
+    const mediaMap: ArticleMediaMap = new Map<string, string>();
+    if (rendered && rendered.length) {
+      doc.descendants((node) => {
+        const name = node.type.name;
+        const isMermaid = name === 'codeBlock' && (node.attrs?.language as string)?.toLowerCase() === 'mermaid';
+        const isMathVisual = name === 'mathVisual';
+        if (!isMermaid && !isMathVisual) return;
+        const kind = isMermaid ? 'mermaid' : 'mathVisual';
+        const src = isMathVisual ? ((node.attrs?.thumbnail as string) || '') : (node.textContent || '');
+        const hit = rendered.find((r) => r.kind === kind && r.source === src);
+        if (hit) mediaMap.set(blockMediaKey(node), hit.mediaUrl);
+      });
+    }
+    return buildArticlePlan(doc, inst.view.state.schema, { mediaMap });
   },
 
   /**
