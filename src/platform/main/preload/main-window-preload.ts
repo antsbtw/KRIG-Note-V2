@@ -22,6 +22,7 @@ import type {
   ProgressDrivePayload,
 } from '@shared/ipc/backup-types';
 import type { FolderViewType } from '@capabilities/folder/types';
+import type { XPlanCacheEnvelope } from '@shared/ipc/x-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /** 诊断上报(renderer → main) */
@@ -506,6 +507,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     meta?: Record<string, unknown>;
   }): void {
     ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_RECORD_STAGE, args);
+  },
+  /** X 发布中间态(ArticlePlan + 渲图结果)落盘缓存,fire-and-forget,诊断用。 */
+  xPlanCacheDump(env: XPlanCacheEnvelope): void {
+    ipcRenderer.send(IPC_CHANNELS.X_PLAN_CACHE_DUMP, env);
   },
 
   /**

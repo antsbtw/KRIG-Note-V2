@@ -281,7 +281,24 @@ data URI 修复生效 —— **Mermaid 真渲成图了，图片上传也成了**
 - **Mermaid 没渲成图**（提示文案先改为列出 reason + 可操作）：实机暴露**真根因 = `Tainted canvases may not be exported`**（不是 width/height）。mermaid 编辑器渲染用 `htmlLabels:true` → 节点标签走 `<foreignObject>` 包 HTML（引外部样式/字体）→ 把 SVG 画进 canvas 时**污染 canvas** → `toDataURL()` 被安全策略拒。**修**：新增 `renderMermaidToExportSvg`（临时切 `htmlLabels:false` 渲纯 SVG `<text>` 标签、无 foreignObject、canvas 不污染，渲完恢复编辑器配置）；`render-blocks-to-media` 的 mermaid 路改用它（再补显式 width/height 兜 useMaxWidth）。→ Mermaid **直接渲染成图**，不再退源码让用户手动。
 - **Table 列宽**：X Article 表格列宽是**X 编辑器自身行为**（Insert 流程只有网格选行列，无列宽控制项）—— 驱动器插入+填内容后，列宽由 X 自动/用户在 X 里手动调（X 是否支持拖列宽看 X 能力）。无程序化杠杆，属 X 侧。
 
-### ★★ 最新增量（2026-06-14 实机【完整链路全链验证】—— Table 终于跑通,正解链路 + 多表格安全)
+### ★★★ 最新增量（2026-06-14 中间态缓存落地 + 一举定案标题丢失 bug)
+
+**总指挥架构洞察**:发布链路修 bug 难,根因是**没有可检查的中间态缓存,只能肉眼看 X 渲染反推,每次半截验证**。解法 = 三段式(① 规范化转图/提示 → ② 缓存中间态诊断 → ③ 标准上传口)。调研发现「先转再传」已是现状、中间态 `ArticlePlan` 已存在且与来源零耦合,**真正缺的只有「缓存中间态」**。
+
+**实施(阶段 A,照 clip-cache.ts + import-cache.ts 模板)**:
+- 新增 `src/platform/main/x/x-plan-cache.ts`:每次发布把 `ArticlePlan` + 渲图清单 + renderFailures 落盘成 pretty JSON 到 `{userData}/x-plan-cache/<ts>-<title>.json`,保留最近 20 份,fire-and-forget。
+- 新增 `src/shared/ipc/x-types.ts`:`XPlanCacheEnvelope` 数据契约(放 shared 守架构边界,renderFailures 内联避免跨层)。
+- channel `X_PLAN_CACHE_DUMP` + main `registerXPlanCacheIpc` + preload `xPlanCacheDump` + d.ts 类型。
+- `send-to-x.ts`:拿到 plan 后、warning 框**之前** dump(取消也有缓存)。
+- 门禁:typecheck 0 / lint 零新增 / X 测试 110 全绿。
+
+**一举定案(阶段 D,缓存的价值立现)**:跑一次发布,读缓存 JSON 即钉死「六级标题(紧跟 Mermaid 图后)丢失」是**上传阶段**问题,非规范化:
+- `renderFailures: []`(Mermaid 渲图成功);steps 切分**完全正确**:`[12] html <h2>五级…Mermaid</h2>` → `[13] media`(Mermaid图)→ `[14] html <h2>六级…表格</h2>`(一字不差) → `[15] table` → `[16] html <h2>七级…</h2>`。
+- 即:**plan 里六级标题完整存在**,丢失发生在 driver 把 step[14] paste 进 X 时——media step(step[13])喂图后光标停在 Mermaid 图卡内(caption),六级标题被图卡吞。
+- 日志佐证:media step 只有 `fed 1 file`,**没等 Crop→Save→图落定就返回**,六级标题紧跟 paste 时图卡状态未稳。对比 step[16]七级(在 divider 前,好)、step[18]八级(标题在图**前**,好)—— **只有紧跟 media step 后的 html 被吞**,精确同源。
+- **下一步修法方向(待实机)**:driveMedia 收尾(或 ensureCleanState 对 media 后)强制把光标移出图卡、归位正文顶层新段落。`ensureTrailingParagraph` 的合成 Enter 已证无效,需换可靠方式(待 spike 哪种光标归位能让图卡后标题保住)。
+
+### ★★ 上一轮增量（2026-06-14 实机【完整链路全链验证】—— Table 终于跑通,正解链路 + 多表格安全)
 
 **正解链路(实机从零到带内容表格、一次跑通、退出重进不丢)**:
 ```

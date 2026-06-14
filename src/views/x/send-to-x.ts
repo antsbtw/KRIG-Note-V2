@@ -293,6 +293,20 @@ export async function publishToXArticle(): Promise<void> {
     return;
   }
 
+  // 3.1 ★ 中间态落盘(2026-06-14 总指挥:发布链路修 bug 难,根因是没有可检查的中间态缓存)。
+  //   拿到 plan 立刻 dump(在下面 warning 确认框**之前** —— 即使用户取消也有缓存可诊断)。
+  //   缓存里 plan.steps + rendered + renderFailures 并排,定 bug 时一眼分清「渲图失败」vs「切分错」。
+  //   fire-and-forget,落盘失败不阻断发布。看 main console 的 `[x/x-plan-cache] cached → …` 路径。
+  window.electronAPI.xPlanCacheDump({
+    capturedAt: Date.now(),
+    noteTitle: plan.title || '(untitled)',
+    instanceId,
+    plan,
+    rendered,
+    renderFailures,
+    fallbackBlockKinds: fallbackBlocks.map((b) => b.kind),
+  });
+
   // 渲图失败 fail loud:先告知哪些兜底图没渲出(已以源码/占位形式插入)。
   const failNote = renderFailureNote(renderFailures);
   if (failNote) window.alert(`${failNote}。`);

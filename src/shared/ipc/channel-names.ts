@@ -250,6 +250,7 @@ export const IPC_CHANNELS = {
   X_PASTE_TWEET: 'x.paste-tweet',                   // renderer → main:把纯文本填进 X compose 框(发推)
   X_PASTE_REPLY: 'x.paste-reply',                   // renderer → main:导航到目标推 + 把纯文本填进 reply 框(回复)
   X_DRIVE_ARTICLE: 'x.drive-article',               // renderer → main:驱动 X 原生 Insert 发长文(终态,2026-06-13;只插内容绝不点 Publish)
+  X_PLAN_CACHE_DUMP: 'x-plan-cache.dump',           // renderer → main:发布中间态(ArticlePlan+渲图结果)落盘缓存,fire-and-forget,诊断用
   // 拖拽落点(拖 note block 到 X)— renderer → main
   X_DRAG_ARM: 'x.drag-arm',                          // note 拖起:往 X guest 装 mousemove 监听记录最后坐标
   X_DRAG_RESOLVE: 'x.drag-resolve',                  // 松手:读回最后坐标 + 解析落点(compose/tweet/...)

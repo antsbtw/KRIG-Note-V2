@@ -20,6 +20,7 @@ import type {
   CreateNoteBatchResult,
 } from '@capabilities/note/types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
+import type { XPlanCacheEnvelope } from './x-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
 import type {
   AIAskOptions,
@@ -366,6 +367,8 @@ declare global {
         elapsedMs?: number;
         meta?: Record<string, unknown>;
       }): void;
+      /** X 发布中间态(ArticlePlan + 渲图结果)落盘缓存,fire-and-forget,诊断用。 */
+      xPlanCacheDump(env: XPlanCacheEnvelope): void;
 
       /** 驱动全屏进度 overlay(renderer 端长任务复用,fire-and-forget)*/
       driveProgress(payload: ProgressDrivePayload): void;
