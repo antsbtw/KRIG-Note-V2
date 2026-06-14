@@ -146,9 +146,10 @@ function isNativeInsertBlock(node: PMNode): boolean {
     name === 'image' || // 总指挥实测:img 粘不进 X → 走 Media 喂文件
     name === 'mathBlock' ||
     name === 'codeBlock' ||
-    // ★ table 改走 HTML 粘贴(2026-06-13 实机:驱动 X 原生 Table 网格 = 空表填不进,极脆;
-    //   而 articleDocToHtml 产 <table> 富文本粘贴 X 能接住带内容 → 远比驱动网格可靠)。
-    //   故 table **不**算 native insert,随 html 段一起粘(不再走 driveTable 网格+逐格填)。
+    // ★ table 走 X 原生 Table 网格驱动(2026-06-13 实机日志铁证:`<table>` 富文本粘贴 X **不认** ——
+    //   合成 paste 的 text/html 被 X 剥成 text/plain 纯文本(375字 HTML 只粘进 126字纯文本,表格塌成
+    //   几行字)。故 table 必须走原生网格(点 Insert→Table→选行列→逐格填),不能走 html 粘贴)。
+    name === 'table' ||
     name === 'tweetBlock' ||
     name === 'horizontalRule' ||
     name === 'mathVisual' // 兜底转图(若 mediaMap 有)→ media step;否则降级

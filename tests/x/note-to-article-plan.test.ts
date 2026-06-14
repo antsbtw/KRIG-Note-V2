@@ -148,14 +148,13 @@ describe('buildArticlePlan — 各 block → 对应原生 step', () => {
     ]);
   });
 
-  it('table → html step(走 <table> 富文本粘贴,不再驱动 X 网格)', () => {
+  it('table → table step(走 X 原生网格;实机:<table> 富文本粘贴 X 不认)', () => {
     const plan = buildArticlePlan(doc(title('t'), tableNode([['A', 'B'], ['1', '2']])), schema);
     expect(plan.steps).toHaveLength(1);
-    expect(plan.steps[0].kind).toBe('html');
-    const html = (plan.steps[0] as { html: string }).html;
-    expect(html).toContain('<table>');
-    expect(html).toContain('A');
-    expect(html).toContain('HK'.length ? '1' : ''); // 内容在
+    expect(plan.steps[0].kind).toBe('table');
+    const md = (plan.steps[0] as { markdown: string }).markdown;
+    expect(md).toContain('| A | B |');
+    expect(md).toContain('| 1 | 2 |');
   });
 
   it('tweetBlock → posts step(tweetUrl)', () => {

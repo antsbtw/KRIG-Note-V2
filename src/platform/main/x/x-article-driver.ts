@@ -129,7 +129,30 @@ function clickSelector(wc: Electron.WebContents, selector: string): Promise<bool
 }
 
 /**
- * 在 menuItem/button 容器列表里按**可见文本**匹配并点击(纯 CSS 选不中文本)。
+ * 完整人工鼠标序列点一个 selector(X 表格网格按钮等需 hover+full mouse 序列才提交,光 .click() 不行)。
+ * 在元素中心派发 pointerover→…→pointerdown→mousedown→pointerup→mouseup→click。
+ */
+function mouseClickSelector(wc: Electron.WebContents, selector: string): Promise<boolean> {
+  const script = `
+    (function() {
+      var sel = ${JSON.stringify(selector)};
+      var parts = sel.split(',').map(function(s){return s.trim();}).filter(Boolean);
+      var el = null;
+      for (var i=0;i<parts.length;i++){ try { el = document.querySelector(parts[i]); } catch(e){} if (el) break; }
+      if (!el) return false;
+      try { el.scrollIntoView({block:'center'}); } catch(e){}
+      var r = el.getBoundingClientRect(), cx = r.left+r.width/2, cy = r.top+r.height/2;
+      ['pointerover','mouseover','mouseenter','mousemove','pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){
+        try { el.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy,button:0})); } catch(e){}
+      });
+      return true;
+    })();
+  `;
+  return wc.executeJavaScript(script).then((v) => !!v).catch(() => false);
+}
+
+/**
+ * 在 menuItem/容器列表里按**可见文本**匹配并点击(纯 CSS 选不中文本)。
  * 用 textContent trim 后大小写不敏感「包含」匹配 label。
  * @param excludeAria 命中的元素若 aria-label 等于此值则跳过(用于排除「Insert 触发钮」aria="Add Media"
  *   与模态确认钮文本同为 "Insert" 的碰撞 —— 确认模态时排掉工具栏那个触发钮)。
@@ -275,6 +298,62 @@ async function ensureCleanState(wc: Electron.WebContents, art: XArticleSelectors
       } catch(e){ return false; }
     })();
   `).catch(() => false);
+  // ★★ 嵌入块边界修(2026-06-14 实机截图铁证):正文末尾若是**嵌入块**(table/figure/img/hr/Mermaid 图卡),
+  //   collapse(false) 把光标落进了那个嵌入块**内部**末尾 → 下一段 html 粘进嵌入块里(表格内容泄漏出框)、
+  //   或紧贴嵌入块致首块 <h?> 标题被 X 并进上一块(标题被吞/降级正文)。三个症状(五级标题降级/六级标题消失/
+  //   七级标题降级+表格文字泄漏)同源。修法:像人一样在文末「按一次回车」起一个**正文顶层空段落**,让光标落在
+  //   嵌入块之后的独立段落里,下一段从干净的顶层块开始。仅当末块是非段落嵌入块时补,避免累积空行。
+  await ensureTrailingParagraph(wc, art);
+}
+
+/**
+ * 确保正文末尾是一个**正文顶层空段落**(光标落在其中),而非嵌入块内部。
+ * 末块若已是空段落 → 不动;若是嵌入块(table/figure/img/hr/含 svg 的图卡)→ 在文末模拟 Enter 起新段落。
+ */
+async function ensureTrailingParagraph(wc: Electron.WebContents, art: XArticleSelectors): Promise<void> {
+  const needNewline = (await wc
+    .executeJavaScript(`
+      (function(){
+        try {
+          var el = document.querySelector(${JSON.stringify(art.body)});
+          if (!el) return false;
+          var last = el.lastElementChild;
+          // 一路下钻到正文最末层(X 可能包一层 contenteditable 容器)
+          while (last && last.lastElementChild && /^(DIV|SECTION|ARTICLE)$/.test(last.tagName) && !last.isContentEditable) {
+            last = last.lastElementChild;
+          }
+          if (!last) return true; // 没有末块 → 补一个安全
+          var tag = last.tagName;
+          // 末块是段落/标题/列表项类纯文本块 → 已在顶层文本块,无需补
+          if (/^(P|H1|H2|H3|H4|H5|H6|LI|BLOCKQUOTE)$/.test(tag)) {
+            // 但若它是空段落已经 OK;若非空段落也 OK(光标在其末尾,粘贴另起块由 driveHtml 的 <p><br></p> 分隔保证)
+            return false;
+          }
+          // 末块是嵌入块(TABLE/FIGURE/IMG/HR/含 svg 的图卡/DIV 包的嵌入块)→ 需起新段落
+          return true;
+        } catch(e){ return true; }
+      })();
+    `)
+    .catch(() => false)) as boolean;
+  if (!needNewline) return;
+  // 文末模拟「按回车」:先确保光标在 body 末尾,再 dispatch Enter keydown(X 的编辑器据此另起顶层段落)。
+  await wc.executeJavaScript(`
+    (function(){
+      try {
+        var el = document.querySelector(${JSON.stringify(art.body)});
+        if (!el) return false;
+        el.focus();
+        var range = document.createRange(); range.selectNodeContents(el); range.collapse(false);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        var target = (sel.anchorNode && sel.anchorNode.nodeType===1 ? sel.anchorNode : el);
+        ['keydown','keypress','keyup'].forEach(function(t){
+          el.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
+        });
+        return true;
+      } catch(e){ return false; }
+    })();
+  `).catch(() => false);
+  await sleep(200);
 }
 
 async function openInsertItem(
@@ -324,17 +403,25 @@ async function confirmModal(
   wc: Electron.WebContents,
   art: XArticleSelectors,
   _modalInputSelector: string,
+  labelCandidates?: readonly string[],
 ): Promise<string | null> {
   void _modalInputSelector;
+  // 确认按钮文案:默认 modalButtonLabels.update(="Insert");个别模态文案不同可传 labelCandidates
+  //   覆盖(★ 实测:Table 的 Markdown 模态底部按钮是 "Update" 不是 "Insert" → 表格传 ['Update','Insert'])。
+  const labels = labelCandidates ?? [art.modalButtonLabels.update];
   // 点确认 + 等模态关。⚠️ 可靠性:点一次没关(点空/Insert 钮还没 enable)→ **重试一次**再判失败,
   //   避免「点 Insert 那一下偶发没命中」造成的假失败(时好时坏)。
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (!(await clickByText(wc, art.modalButton, art.modalButtonLabels.update, 'Add Media'))) {
+    let clicked = false;
+    for (const lb of labels) {
+      if (await clickByText(wc, art.modalButton, lb, 'Add Media')) { clicked = true; break; }
+    }
+    if (!clicked) {
       if (attempt === 0) {
-        await sleep(300); // 等 Insert 钮 enable 再重试
+        await sleep(300); // 等确认钮 enable 再重试
         continue;
       }
-      return '确认按钮(Insert)未点中';
+      return `确认按钮(${labels.join('/')})未点中`;
     }
     // 模态关闭判据:modalOpenMarker(app-bar-close)消失(可靠:模态关了关闭按钮就没了)。
     if (await waitForSelectorGone(wc, art.modalOpenMarker, 4000)) return null;
@@ -490,42 +577,6 @@ async function dumpModalControls(wc: Electron.WebContents, which: string): Promi
   }
 }
 
-/**
- * 诊断:dump 正文里最后一个 table 的真实结构(tag / role / cell 标签 / contenteditable),
- * 用于 spike X 表格 cell 的真实 selector(填格失败时调用,纯读不改)。
- */
-async function dumpTableStructure(wc: Electron.WebContents): Promise<void> {
-  const script = `
-    (function() {
-      try {
-        var tables = document.querySelectorAll('table, [role="table"]');
-        if (!tables.length) return JSON.stringify({ noTable: true });
-        var t = tables[tables.length - 1];
-        // 取表格内前若干可能是 cell 的元素的标签/role/ce 特征
-        var sample = [];
-        var kids = t.querySelectorAll('*');
-        var seen = {};
-        for (var i=0;i<kids.length && sample.length<12;i++){
-          var el = kids[i];
-          var key = el.tagName.toLowerCase() + '|' + (el.getAttribute('role')||'') + '|' + (el.getAttribute('contenteditable')||'');
-          if (seen[key]) continue; seen[key] = 1;
-          sample.push({ tag: el.tagName.toLowerCase(), role: el.getAttribute('role')||null, ce: el.getAttribute('contenteditable')||null, testid: el.getAttribute('data-testid')||null, text:(el.innerText||'').trim().slice(0,12)||null });
-        }
-        return JSON.stringify({ tableTag: t.tagName.toLowerCase(), tableRole: t.getAttribute('role')||null, tableHtml: t.outerHTML.slice(0, 600), distinctChildren: sample });
-      } catch(e){ return JSON.stringify({ err: String(e) }); }
-    })();
-  `;
-  try {
-    const raw = (await wc.executeJavaScript(script)) as string;
-    console.warn(
-      '[x-article-driver] 表格 cell 未就绪/结构不符。正文最后一个 table 真实结构(spike 用,挑 cell 的真实 selector)：\n' +
-        raw,
-    );
-  } catch (err) {
-    console.warn('[x-article-driver] dumpTableStructure 失败:', String(err));
-  }
-}
-
 // ═══════════════════════════════════════════════════════
 // §3  各 step 驱动
 // ═══════════════════════════════════════════════════════
@@ -617,143 +668,157 @@ async function driveCode(
 }
 
 /**
- * 解析 markdown 表格 → 行数/列数 + 单元格文本(去掉分隔行 `| --- |`)。
- * 行数 = 数据行（含表头）数；列数 = 最大列数。X 网格上限 10×10,超出夹到 10 并标警告。
+ * 解析 markdown 表格 → 行数/列数(数据行含表头;列数取最大列)。用于点 X 的 N×M 网格按钮。
+ * X 网格上限 10×10,本函数不夹取(由调用方夹),空表/无效返回 0。
  */
-function parseMarkdownTable(markdown: string): { rows: number; cols: number; cells: string[][] } {
+function parseTableSize(markdown: string): { rows: number; cols: number } {
   const lines = markdown.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('|'));
-  // 去掉分隔行(全是 --- / : / | / 空白)
-  const dataLines = lines.filter((l) => !/^\|[\s:|-]+\|$/.test(l));
-  const cells = dataLines.map((l) =>
-    l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim()),
+  const dataLines = lines.filter((l) => !/^\|[\s:|-]+\|$/.test(l)); // 去分隔行 | --- |
+  const rows = dataLines.length;
+  const cols = dataLines.reduce(
+    (m, l) => Math.max(m, l.replace(/^\||\|$/g, '').split('|').length),
+    0,
   );
-  const rows = cells.length;
-  const cols = cells.reduce((m, r) => Math.max(m, r.length), 0);
-  return { rows, cols, cells };
+  return { rows, cols };
+}
+
+/** CSS attribute 值转义(用于 [aria-label="..."],转义引号/反斜杠)。 */
+function cssAttrEscape(s: string): string {
+  return s.replace(/["\\]/g, '\\$&');
 }
 
 /**
- * Table(★ 实测:不是填 markdown,是网格选行列):Insert→Table→点 "Insert a {rows} by {cols} table"
- * 网格按钮 → X 在正文插入对应尺寸空表 → 逐格 Tab+paste 填内容(best-effort)。
+ * Table(★★ 2026-06-14 实机【完整链路验证】最终确认正解 —— 见 delivery 文档):
+ * X 的 Insert→Table 弹的是**网格模态**(N×M 选行列),**不是** markdown 模态。真正的 markdown
+ * 输入口在「插入空表后,点表格的铅笔 Edit block」弹出的**编辑模态**里。完整链路:
+ *   ① Insert→Table → ② 点 N×M 网格按钮(插空表,预览态)→ ③ 点新表格的铅笔 Edit block
+ *   → ④ 弹出 Markdown 编辑模态(textarea placeholder=""/Markdown·Preview tab)
+ *   → ⑤ 覆盖写整段 markdown(原生 value setter+input)→ ⑥ 点 Update。
+ * X 据此渲原生表格 + **进文档模型(退出重进不丢)**。
+ *
+ * 旧坑(已弃):逐格 humanClick 直写 cell.textContent —— DOM 直写不进文档模型 → 退出丢失。
+ *
+ * ★ 多表格安全:文档可能已有 N 个表格。用 `<table>` 总数 N→N+1 确认新表插入;铅笔/校验都**定位
+ *   到最后一个 table**(刚插的那个),不会误点之前已填好的表格。
  */
 async function driveTable(
   wc: Electron.WebContents,
   art: XArticleSelectors,
   markdown: string,
 ): Promise<StepResult> {
-  const { rows, cols, cells } = parseMarkdownTable(markdown);
-  if (rows === 0 || cols === 0) return { ok: false, warning: '表格插入失败:解析不到行列' };
+  const md = markdown.trim();
+  if (!md) return { ok: false, warning: '表格插入失败:markdown 为空' };
+  const { rows, cols } = parseTableSize(md);
+  if (!rows || !cols) return { ok: false, warning: '表格插入失败:解析不到行列' };
   const GRID_MAX = 10;
   const r = Math.min(rows, GRID_MAX);
   const c = Math.min(cols, GRID_MAX);
   const truncated = rows > GRID_MAX || cols > GRID_MAX;
 
+  console.log(`[x-article-driver] driveTable 开始: ${r}×${c}, md ${md.length} 字`);
+
+  // —— ① 记录插表前的 <table> 数(多表格定位用)——
+  const tableCount = (): Promise<number> =>
+    wc.executeJavaScript(`document.querySelectorAll('table').length`).then((v) => Number(v) || 0).catch(() => 0);
+  const before = await tableCount();
+
+  // —— ② Insert→Table 开网格模态 → 点 N×M 网格按钮插空表 ——
   const opened = await openInsertItem(wc, art, art.menuLabels.table);
   if (opened) return { ok: false, warning: `表格插入失败:${opened}` };
-
-  // 网格按钮 aria-label: "Insert a {rows} by {cols} table"。⚠️ "N by M" 的 N/M 究竟是
-  //   行×列还是列×行待实机 —— 故两种朝向都试(先 r×c 后 c×r),命中即点。
+  // 网格按钮 aria-label = "Insert a {rows} by {cols} table"。⚠️ N/M 朝向待定,两向都试。
   const labelRC = art.tableGridCellLabel.replace('{rows}', String(r)).replace('{cols}', String(c));
   const labelCR = art.tableGridCellLabel.replace('{rows}', String(c)).replace('{cols}', String(r));
-  if (!(await waitForSelector(wc, `[aria-label="${cssEscape(labelRC)}"], [aria-label="${cssEscape(labelCR)}"]`, 4000))) {
+  const gridSel = `[aria-label="${cssAttrEscape(labelRC)}"], [aria-label="${cssAttrEscape(labelCR)}"]`;
+  if (!(await waitForSelector(wc, gridSel, 4000))) {
     await dumpModalControls(wc, 'Table');
-    return { ok: false, warning: `表格插入失败:Table 网格未出现 / 无 "${labelRC}" 格(已 dump DOM 供 spike)` };
+    return { ok: false, warning: `表格插入失败:网格按钮 "${labelRC}" 未出现(已 dump DOM 供 spike)` };
   }
-  if (!(await clickSelector(wc, `[aria-label="${cssEscape(labelRC)}"], [aria-label="${cssEscape(labelCR)}"]`))) {
-    return { ok: false, warning: `表格插入失败:网格 "${labelRC}" 未点中` };
+  await sleep(STEP_SETTLE_MS);
+  if (!(await mouseClickSelector(wc, gridSel))) {
+    return { ok: false, warning: '表格插入失败:网格按钮点击未命中' };
   }
-  // 等模态关闭(网格点完模态就关)+ 等正文里表格真出现 —— 不靠固定 sleep。
-  await waitForSelectorGone(wc, art.modalOpenMarker, 5000);
-  if (!(await waitForSelector(wc, 'table, [role="table"]', 5000))) {
-    return { ok: true, warning: '表格网格已点但正文未见表格(请在 X 手动核对)' };
-  }
-  // ⚠️ 表格出现 ≠ 单元格渲染好:再 poll 等「表格里出现可编辑 cell」(X 异步建 cell),否则填空。
-  if (!(await waitForSelector(wc, 'table td, table th, [role="table"] [role="cell"], [role="table"] [contenteditable="true"]', 4000))) {
-    await dumpTableStructure(wc); // dump 真实 cell DOM 供 spike
-    return { ok: true, warning: '表格已插入但单元格未就绪/结构不符(已 dump DOM 到日志供 spike,请在 X 手动填)' };
-  }
-  await sleep(300); // 给 cell 渲染稳定
+  await waitForSelectorGone(wc, art.modalOpenMarker, 3000); // 网格模态关
+  // 等 <table> 数 +1(空表落入正文)
+  let inserted = false;
+  for (let i = 0; i < 15 && !inserted; i++) { await sleep(200); inserted = (await tableCount()) > before; }
+  if (!inserted) return { ok: false, warning: '表格插入失败:点网格后正文未多出表格' };
+  console.log(`[x-article-driver] driveTable: 空表已插, table ${before}→${before + 1}`);
 
-  // 逐格填内容:定位正文里刚插入的表格各 cell 直填(best-effort,失败只 warn)。
-  const filled = await fillTableCells(wc, cells);
+  // —— ③ 点【最后一个 table】的铅笔 Edit block → 弹 Markdown 编辑模态 ——
+  //   多表格安全:激活+找铅笔都只针对最后一个 table(刚插的)。
+  if (!(await clickLastTablePencil(wc))) {
+    return { ok: false, warning: '表格插入失败:未能点开新表格的 Edit block 铅笔(进不了 Markdown 模态)' };
+  }
+
+  // —— ④ 等 Markdown 模态 textarea(模态内、非标题框)——
+  if (!(await waitForSelector(wc, art.tableInput, 4000))) {
+    await dumpModalControls(wc, 'TableEdit');
+    return { ok: false, warning: '表格插入失败:点铅笔后 Markdown 编辑框未出现(已 dump DOM 供 spike)' };
+  }
+
+  // —— ⑤ 覆盖写整段 markdown(原生 value setter+input;直接 setter.call 即覆盖旧 | | | | 模板)——
+  if (!(await fillModalInput(wc, art.tableInput, md))) {
+    return { ok: false, warning: '表格插入失败:markdown 未写入编辑框' };
+  }
+  console.log('[x-article-driver] driveTable: markdown 已写入,点 Update');
+  await sleep(STEP_SETTLE_MS);
+
+  // —— ⑥ 点 Update(模态文案是 "Update";"Insert" 兜底)——
+  const confirmed = await confirmModal(wc, art, art.tableInput, ['Update', 'Insert']);
+  if (confirmed) return { ok: false, warning: `表格插入失败:${confirmed}` };
+
   if (truncated) {
     return { ok: true, warning: `表格超 10×10 已夹到 ${r}×${c}(X 网格上限),部分行列丢失,请在 X 手动补` };
-  }
-  if (!filled) {
-    return { ok: true, warning: '表格已插入但单元格内容可能未全填入,请在 X 手动核对' };
   }
   return { ok: true };
 }
 
-/** CSS attribute 值转义(用于 [aria-label="..."]，转义引号/反斜杠)。 */
-function cssEscape(s: string): string {
-  return s.replace(/["\\]/g, '\\$&');
-}
-
 /**
- * 逐格填表内容:**定位正文里最后一个插入的 table 的各 cell**(td/th/[role=cell]),按行主序
- * 把文本写进每个 cell 的 contenteditable —— 比「焦点+Tab+合成paste」稳(实机那条 paste 不落地)。
- *
- * 每 cell:聚焦 → 把光标放进去 → execCommand insertText(contenteditable 友好) + 直写 textContent 兜底。
- * @returns 实际填到的 cell 数 ≥ 期望数则 true(best-effort,X cell DOM 待实机,失败只 warn)。
+ * 点【正文里最后一个 table】的铅笔(Edit block)进编辑态 —— 多表格安全:先激活最后一个 table 让
+ * 其铅笔出现,再点**该 table 关联的** Edit block 按钮(非全局第一个,避免误点前面已填好的表格)。
  */
-async function fillTableCells(
-  wc: Electron.WebContents,
-  cells: string[][],
-): Promise<boolean> {
-  // 把二维 cells 拍平成行主序文本数组(空串也占位,保持 cell 对位)。
-  const flat: string[] = [];
-  for (const row of cells) for (const cell of row) flat.push(cell);
-  const script = `
-    (function() {
-      var texts = ${JSON.stringify(flat)};
-      // 取正文里最后一个 table(刚插入的那个)。多候选:table / [role=table]。
-      var tables = document.querySelectorAll('table, [role="table"]');
-      if (!tables.length) return { ok:false, reason:'no-table', filled:0 };
-      var table = tables[tables.length - 1];
-      // cell 候选:td/th 优先,其次 role=cell/gridcell,再次 contenteditable 叶子。
-      var cells = table.querySelectorAll('td, th, [role="cell"], [role="gridcell"]');
-      if (!cells.length) cells = table.querySelectorAll('[contenteditable="true"]');
-      var n = Math.min(cells.length, texts.length);
-      var filled = 0;
-      for (var i=0;i<n;i++){
-        var text = texts[i];
-        if (!text) { filled++; continue; }
-        var cell = cells[i];
-        // 真正可编辑的目标:cell 自身或其内的 contenteditable
-        var editable = (cell.getAttribute('contenteditable') === 'true') ? cell
-                      : (cell.querySelector('[contenteditable="true"]') || cell);
+function clickLastTablePencil(wc: Electron.WebContents): Promise<boolean> {
+  const editLabel = 'Edit block';
+  return wc
+    .executeJavaScript(`
+      (function(){
         try {
-          editable.focus();
-          // 光标置入
-          var range = document.createRange(); range.selectNodeContents(editable); range.collapse(false);
-          var selc = window.getSelection(); selc.removeAllRanges(); selc.addRange(range);
-          var done = false;
-          try { done = document.execCommand('insertText', false, text); } catch(e){}
-          if (!done || (editable.innerText||'').trim() === '') {
-            // 兜底:合成 paste(DraftJS cell 认)+ 直写
-            try {
-              var dt = new DataTransfer(); dt.setData('text/plain', text);
-              editable.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles:true, cancelable:true }));
-            } catch(e){}
-            if ((editable.innerText||'').trim() === '') { editable.textContent = text; editable.dispatchEvent(new Event('input',{bubbles:true})); }
+          var tables = document.querySelectorAll('table');
+          if (!tables.length) return false;
+          var t = tables[tables.length-1]; // 刚插的那个
+          // 激活:完整鼠标序列点 table 中心,让它的工具按钮(铅笔)显示
+          var tr = t.getBoundingClientRect(), tcx = tr.left+tr.width/2, tcy = tr.top+tr.height/2;
+          ['pointerover','mouseover','mousemove','pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(tp){
+            try { t.dispatchEvent(new MouseEvent(tp,{bubbles:true,cancelable:true,view:window,clientX:tcx,clientY:tcy,button:0})); } catch(e){}
+          });
+          // 找这个 table 的「Edit block」铅笔:从 table 往上找它所在的块容器,在容器内找按钮;
+          //   找不到再退而取全局最后一个可见 Edit block(嵌入块工具条通常紧邻其块,取最后一个 = 新表的)。
+          var pencil = null;
+          var block = t.closest('[role="group"], figure, [data-block], div');
+          var scopes = [];
+          // 往上几层都作为候选作用域(X 块结构未知,逐层找)
+          var p = t;
+          for (var k=0;k<5 && p;k++){ scopes.push(p); p = p.parentElement; }
+          for (var s=0;s<scopes.length && !pencil;s++){
+            var btns = scopes[s].querySelectorAll('button[aria-label=${JSON.stringify(editLabel)}], [role="button"][aria-label=${JSON.stringify(editLabel)}]');
+            if (btns.length) pencil = btns[btns.length-1];
           }
-          filled++;
-        } catch(e) {}
-      }
-      return { ok: filled >= n, filled: filled, cells: cells.length, want: texts.length };
-    })();
-  `;
-  try {
-    const res = (await wc.executeJavaScript(script)) as { ok: boolean; filled?: number; cells?: number; want?: number; reason?: string };
-    if (!res?.ok) {
-      console.warn(`[x-article-driver] 表格填格不全/失败:`, JSON.stringify(res));
-    }
-    return !!res?.ok;
-  } catch (err) {
-    console.warn('[x-article-driver] fillTableCells 异常:', String(err));
-    return false;
-  }
+          if (!pencil) {
+            var all = document.querySelectorAll('button[aria-label=${JSON.stringify(editLabel)}], [role="button"][aria-label=${JSON.stringify(editLabel)}]');
+            var vis = Array.prototype.filter.call(all, function(b){ return b.offsetParent !== null; });
+            if (vis.length) pencil = vis[vis.length-1]; // 全局最后一个可见铅笔 = 新表
+          }
+          if (!pencil) return false;
+          var pr = pencil.getBoundingClientRect(), pcx = pr.left+pr.width/2, pcy = pr.top+pr.height/2;
+          ['pointerover','mouseover','mousemove','pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(tp){
+            try { pencil.dispatchEvent(new MouseEvent(tp,{bubbles:true,cancelable:true,view:window,clientX:pcx,clientY:pcy,button:0})); } catch(e){}
+          });
+          return true;
+        } catch(e){ return false; }
+      })();
+    `)
+    .then((v) => !!v)
+    .catch(() => false);
 }
 
 /** Posts:Insert→Posts→填 tweetUrl→(自动嵌或 Update)。 */

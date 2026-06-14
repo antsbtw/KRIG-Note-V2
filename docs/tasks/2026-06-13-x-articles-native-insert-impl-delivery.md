@@ -179,7 +179,39 @@ note 整篇 → `buildArticlePlan`（纯逻辑，产有序 InsertStep）→ IPC 
 - **Table 是网格不是 markdown**（重大更正）：dump 显示 Table 模态是一堆 `aria-label="Insert a N by M table"` 网格按钮（1×1..10×10）。`driveTable` 重写：解析 markdown 拿行列数 → 点对应网格格（"N by M" 行列朝向待实机，两种都试）→ 逐格 Tab+paste 填内容（best-effort）；超 10×10 夹到 10 并 warn。
 - **诊断 dump 已可关闭**：selector 对齐后正常应不再触发；保留以备 X 改版。
 
-### 本轮增量（2026-06-13 Mermaid 字号解决=SVG 留白！+ table/divider 丢失诊断）
+### 本轮增量（2026-06-13 ★ table 填成 12/12！但填完没提交就被打断 → 修「等提交+退出编辑态」）
+实机 **table 终于填成 12/12**（settle+重试+直写 textContent 三修叠加生效）！但总指挥发现「编辑表格这步很快被淹没、没完成就关闭」—— 填完格后**没等内容提交进文档模型就进下一步** → 预览时表格内容跑到表格外/丢。
+- **修**：填完格后 **`sleep(500)` 等 X 提交内容 + 校验「表格里有非空内容」(persisted) + `exitTableEdit`(点正文外+光标移正文末尾,退出编辑态) + `sleep(300)`** 再进下一块。确保填的内容真提交、编辑态真退出，后续内容不跑进表格。
+
+### 上一轮（2026-06-13 table 网格点击 flaky:加 settle + 重试）
+实机这次 `table 出现=false`（上次 true）—— 网格 humanClick 点了但表格没插入 = **flaky**。devtools 手动点（有自然停顿）能成 0→1；代码点太快、网格刚弹出在动画 → 坐标不稳打空。
+- **修**：网格出现后**等 500ms 稳定**再 humanClick；网格点击→等表格出现加 **3 次重试**（没成就再点/重开模态再点，模拟人手「没成再点一下」）。
+- 注：`wc` 在 driveArticlePlan 入口一次取定全程复用（排除了单次驱动内 wc 漂移）；多 X 实例 wc#2/wc#5 是不同 ws 的，本次驱动只打一个。
+- 上轮已恢复 `fillTableCells` 的直写 textContent 兜底（91e0c63f 成功版做法）。
+
+### 上一轮（2026-06-13 table 填格:误删了 91e0c63f 成功版的「直写 textContent」兜底）
+总指挥「前面成功过，现在怎么不知道做了」点醒 —— git 对比发现：**91e0c63f（截图填成功那版）的 `fillTableCells` 有个关键兜底 `editable.textContent = text` 直写，被我后来重写时误删** → 表格填空（execCommand/合成 paste 进不去 X 表格 cell 时，靠直写 textContent 才真填上）。
+- **修**：恢复「直写 textContent + dispatch input」兜底（execCommand/paste 都失败时）；count 查询统一用 `'table' + 'td,th'`（与逐格填一致，避免 `noTable` 不一致）+ retry 5×300ms 防表格渲染延迟。
+- devtools 逐步验证确认：表格确实插进 composer（cell=12），cell 内层是 contenteditable DIV —— 直写其 textContent 可填（这正是成功版做法）。
+- ⚠️ 待实机：恢复直写兜底后表格内容应回来；`waitForSelector(table)=true` 但 app 内 `noTable` 的疑似多实例(wc#2/wc#5)漂移仍需关注（devtools 单实例验证是好的）。
+
+### 上一轮（2026-06-13 ★★ table 填格:嵌入块预览态需先点「Edit block」进编辑态）
+总指挥「先点开编辑才行」点破最后一环，devtools 逐步验证：
+- **插表**：网格按钮 `humanClick`（完整鼠标序列）→ 正文 table 数 0→1，插入成功（标准 `<table><tr><th>/<td>`，12 格）。
+- **填格真因**：插入后表格是**预览态**——`<th>/<td>` 本身 `contenteditable=null` 不可编辑，直接点 cell 焦点跑回正文 composer（`焦点不在表格内`）。**必须先点 `<button aria-label="Edit block">` 铅笔进编辑态**，cell 才可填（X 嵌入块通用模式：表格/Mermaid/代码插入后都是预览态 + Edit block 铅笔）。
+- **修**：profile 加 `editBlockButton: '[aria-label="Edit block"]'`；`driveTable` 表格出现后**先 humanClick Edit block 进编辑态**，再 `fillTableCells`；`fillTableCells` 每格改为**完整鼠标序列点 cell**（进编辑态）+ activeElement 输入。
+- 方法论印证（总指挥定的）：**完整模拟人工每一步**——插表→点 Edit 铅笔→逐格点击+输入，跟人手填表一模一样;遇到「直接操作不行」先 devtools 逐步验证人工真实流程,而非猜。
+总指挥「人工能做的机器就能做」+「先用 devtools 测」—— 验证了真因:
+- **devtools 实测**:在 X 网格选择器上,对 `<button aria-label="Insert a 4 by 3 table">` 派发**完整人工鼠标序列**（pointerover→mouseover→mouseenter→mousemove→pointerdown→mousedown→pointerup→mouseup→click）→ **正文 table 数 0→1，插入成功！** 而之前代码用简单 `.click()` → 网格只进预览态不提交 → 闪现即消失（= noTable 真因）。
+- **修**：新增 `humanClick`（完整鼠标序列,带真实坐标,跟人手一样），`driveTable` 网格点击从 `clickSelector`(简单 click) 改用 `humanClick`。selector `[aria-label="Insert a N by M table"]` 实测正确。
+- 教训:X 的网格/hover 类交互**简单 `.click()` 不够**，需完整鼠标事件序列模拟真人；这类交互优先 devtools 实测验证再写代码。
+table 改回原生网格后，日志 `fillTableCells: 表格 cell 数=0` + `{"noTable":true}` —— 点了网格但正文**没出现 `<table>`**（grid 点击没真插入表格，或插在别处）。但缺 driveTable 各步日志无法定位是哪步断的。**加全链路诊断**：`driveTable` 打印「开始 r×c / 模态已开 / 网格按钮出现 / 网格已点 / table 出现=true/false」逐步状态 —— 下次实跑即可定位是「网格按钮没找到」「点了没插表」还是「插了但 cell 没渲染」。其余功能（富文本/公式/代码/Mermaid字号/分割线/图）实机均正常。
+诊断日志铁证 table 丢失真因，**总指挥判断对了「原来添加的方法有效」**：
+- `driveHtml: len=375 hasTable=true` 但 `synthetic paste length:126` —— **X 不认 `<table>` 富文本粘贴**，把它剥成 126 字纯文本（表格塌成几行字）。我上轮「table 走 HTML 粘贴」的前提（以为 X 接受 `<table>`）是误判（之前 krig-pm-table 是量错 context = note 的表）。`driveDivider 成功` 证明分割线其实插了，是表格塌陷视觉上像没了。
+- **改回**：table 算 native insert → 走 `driveTable`（点 Insert→Table→网格选行列→逐格填）。+ `fillTableCells` 重写为**逐格单独执行 + await 小停顿**（一次性同步填全格 React/DraftJS 来不及 settle 易丢 → 逐格给反应时间，稳得多）+ cell 数诊断日志。
+- ★ **Mermaid 字号已解决**（上轮 SVG 留白系数 1.9，实机确认字号对了）。
+
+### 已废弃（2026-06-13：table 走 HTML 粘贴）—— X 不认 `<table>` 富文本，已回退原生网格（见上）
 - **★ Mermaid 字号解决（总指挥拍板「用 SVG 约定字号」是正解）**：字号真因 = X 文章图**一律 fit 到列宽**显示，显示字号 = 列宽 ×（字/图宽比例），与 PNG 像素无关（改 PNG 尺寸没用，已证）。唯一杠杆 = **把「字/图宽比例」做小**。实现：`renderMermaidToSvgString` 给 mermaid 图**两侧留白**——把图框进 `图宽 × MERMAID_FRAME_FACTOR(1.9)` 宽的画布居中，字/总宽比例缩到 1/1.9 → X fit 列宽时字 ≈ 编辑器观感。**实机确认字号对了**。留白系数是单一旋钮（大了加、小了减）。
 - **table / divider 丢失（新问题，诊断中）**：实机 mermaid 后六级表格、七级分割线都没了。table 上轮改走 html 粘贴（`<table>` 富文本）—— 但「X 接受 `<table>`」的前提其实**从未真正确认**（之前 krig-pm-table 是量错 context = note 的表）。已加诊断日志：`driveHtml` 打印每段 html 的 `len/hasTable/preview/paste结果`，`driveDivider` 打印执行 —— 下次实跑即可定位 table HTML 是否产出、paste 成没成、divider 有没有执行。
 看对 console（**宿主主窗口**，非 X webview）后真相全出：
@@ -248,6 +280,39 @@ data URI 修复生效 —— **Mermaid 真渲成图了，图片上传也成了**
 实跑确认：**公式/代码模态填充成功、Table cell 内容填进去了（序号/地区/出口数量 + 3 行全对）、之前的 Mermaid 渲成图**。剩两点：
 - **Mermaid 没渲成图**（提示文案先改为列出 reason + 可操作）：实机暴露**真根因 = `Tainted canvases may not be exported`**（不是 width/height）。mermaid 编辑器渲染用 `htmlLabels:true` → 节点标签走 `<foreignObject>` 包 HTML（引外部样式/字体）→ 把 SVG 画进 canvas 时**污染 canvas** → `toDataURL()` 被安全策略拒。**修**：新增 `renderMermaidToExportSvg`（临时切 `htmlLabels:false` 渲纯 SVG `<text>` 标签、无 foreignObject、canvas 不污染，渲完恢复编辑器配置）；`render-blocks-to-media` 的 mermaid 路改用它（再补显式 width/height 兜 useMaxWidth）。→ Mermaid **直接渲染成图**，不再退源码让用户手动。
 - **Table 列宽**：X Article 表格列宽是**X 编辑器自身行为**（Insert 流程只有网格选行列，无列宽控制项）—— 驱动器插入+填内容后，列宽由 X 自动/用户在 X 里手动调（X 是否支持拖列宽看 X 能力）。无程序化杠杆，属 X 侧。
+
+### ★★ 最新增量（2026-06-14 实机【完整链路全链验证】—— Table 终于跑通,正解链路 + 多表格安全)
+
+**正解链路(实机从零到带内容表格、一次跑通、退出重进不丢)**:
+```
+① Insert→Table        → 弹【网格模态】(N×M 选行列,不是 markdown!)
+② 点 N×M 网格按钮      → 插入【空表】(预览态),<table> 数 +1
+③ 点空表的铅笔 Edit block → 弹出【Markdown 编辑模态】(★ 真正的 markdown 输入口在这,不在 ①!)
+④ 等模态 textarea      → 模态(dialog)内、可见、placeholder **空** 的 textarea(实测 ph=""，非"Add markdown here"；"Add a title"是标题框要排除)
+⑤ 覆盖写整段 markdown  → 原生 value setter+input(直接 setter.call 即覆盖旧 | | | | 模板)
+⑥ 点 Update            → X 渲原生表格 + 进文档模型(退出重进不丢)
+```
+
+**纠正前一条增量的错误判断**:上一版以为「Insert→Table 直接弹 markdown 模态」——**错**。实机 devtools 全链脚本(/tmp/x-table-create.js → fill.js → final.js)逐步验证铁证:Insert→Table 弹的是**网格模态**(100 个 `Insert a N by M table` 按钮,无 textarea);markdown 框是**点空表铅笔后**的编辑模态才出现。我之前手动"成功"过的 markdown 模态,正是手滑点到了铅笔编辑态,误以为是 Table 菜单直出。**教训(再次):半截验证害死人——必须验证「从点 Insert 到内容写入并持久化」的完整链路,任一步真实复现,才算数。**
+
+**多表格安全(总指挥特别提醒)**:文档含 ≥2 表格时,`clickLastTablePencil` 只定位 `tables[tables.length-1]`(刚插的),铅笔从该 table 祖先作用域内找(退化才取全局最后一个可见铅笔),`<table>` 数 before→before+1 确认新表插入 —— 不会误点前面已填好表格的铅笔。
+
+**改动**:`driveTable` 按上述六步重写;新增 `parseTableSize`(算行列点网格)、`mouseClickSelector`(完整鼠标序列点网格/铅笔)、`clickLastTablePencil`(多表格安全的铅笔定位);`tableInput` selector 校准为 `[role="dialog"] textarea:not([placeholder]), [role="dialog"] textarea[placeholder=""]`;`confirmModal` 加 `labelCandidates`(表格按钮文案 "Update")。门禁:typecheck 0 / lint 0 / X 测试 110 全绿。
+
+### 上一轮增量（2026-06-14 实机:Table 方向性翻转 —— 网格逐格填 → Markdown 模态,根治"退出重进内容消失")
+
+**症状链**:网格逐格填 cell 的方案,实机出三个连锁问题:① 五级/七级标题降级成正文、② 六级标题消失、③ 表格内容(`3PWK口数量区`碎片)泄漏到表格外;**且退出 Article 再重进,整个表格内容全部消失**。
+
+**根因(devtools 实证,非脑补)**:逐格填 cell 走的是「humanClick 进编辑态 → 往 cell 的 contenteditable 直写 textContent/execCommand」。这套**只改了 DOM,没进 X 的文档模型(草稿存储)**——所以 DOM 上看着填上了(`填成 12/12`、`persisted=true` 都是查 DOM),但 X 持久化按文档模型走 → **保存/重进即丢**。文字泄漏则是 paste 焦点没真进 cell,内容落到了表格外。
+
+**正解(总指挥截图发现 + devtools 逐步验证)**:X 的 `Insert→Table` 弹的是一个**「Markdown / Preview」两 tab 的模态**,Markdown tab 里一个 `placeholder="Add markdown here"` 的 `<textarea>`。把整段 markdown 表格用「原生 value setter + input 事件」(与 LaTeX/Code 同款 `fillModalInput`)写进去,再点底部 **Update** 按钮 → **X 自己渲成原生表格 + 进文档模型(退出重进不丢,实机三连验证✅:输入框变 markdown→Update 后正文出带内容 3×3 表→重进还在)**。
+
+**改动**:
+- `driveTable` **整段重写**:Insert→Table→`fillModalInput(tableInput, markdown)`→`confirmModal(['Update','Insert'])`。从 ~100 行(网格 3-retry + Edit block 铅笔 + 逐格 humanClick + persist 校验 + exitTableEdit)**砍到 ~20 行**。
+- **删死代码**:`parseMarkdownTable` / `fillTableCells` / `humanClick` / `cssEscape` / `dumpTableStructure` / `exitTableEdit`(逐格填那套全废)。
+- `x-service-types.ts`:`tableInput` selector 从 `textarea:not([placeholder])`(选不中,markdown 框有 placeholder)校准为 `textarea[placeholder="Add markdown here" i], textarea[placeholder*="markdown" i]`。
+- `confirmModal` 加可选 `labelCandidates` 参(表格按钮文案是 "Update" 不是其他模态的 "Insert",传 `['Update','Insert']` 两者都试;"Finish update" 因长度超限不会误命中)。
+- **教训**:X 这类受控编辑器,**任何"往输入区写内容"都必须走它认的输入事件(原生 value setter+input,或合成 paste 视控件而定),DOM 直写一律不进模型 → 持久化丢失**。这与发推/标题/LaTeX/Code 一脉相承,表格是最后一个踩这个坑的。
 
 ### 上一轮增量（2026-06-13 第三次实跑：核心跑通，修 5 个真问题）
 实跑「已驱动 13 处」—— **代码块/Mermaid/表格网格/分割线/图/标题全渲进 X 了**（右侧截图为证）。修了 5 个问题：

@@ -125,6 +125,11 @@ export interface XArticleSelectors {
    */
   tableGridCellLabel: string;
   /**
+   * 嵌入块(表格/Mermaid/代码等)的「编辑」铅笔按钮(★ 实测 2026-06-13:X 嵌入块插入后是**预览态**,
+   * 要先点这个 `[aria-label="Edit block"]` 铅笔进**编辑态**,cell 才可填。直接点 cell 焦点进不去)。
+   */
+  editBlockButton: string;
+  /**
    * 模态确认按钮容器 selector(底部按钮，如 [role="button"]/button)。驱动器用它 + 下面
    * modalButtonLabels 按可见文本匹配点击(同菜单项,纯 CSS 选不中文本)。
    */
@@ -281,12 +286,17 @@ const X_PROFILE: XServiceProfile = {
       codeInput: 'textarea:not([placeholder])',
       // Posts URL 框待 spike(本轮未点到 Posts);先按 placeholder 兜底(同模态 textarea/input)。
       postsUrlInput: 'input[placeholder*="post URL" i], input[placeholder*="Paste" i], input[data-testid="postUrlInput"]',
-      // ★ Table **不是填 markdown**(dump 实测更正):是「网格选行列」—— 一堆 button
-      //   aria-label="Insert a N by M table"。驱动器特判走网格点击(见 tableInput 不用于 Table)。
-      //   tableInput 保留作兜底(万一某版本是 markdown 输入);Table 主路走 tableGridCellLabel 模板。
-      tableInput: 'textarea:not([placeholder])',
+      // ★★ Table 完整链路(2026-06-14 实机【全链验证】最终确认):Insert→Table 弹**网格模态**
+      //   (N×M 选行列),点网格插**空表**;再点空表的**铅笔 Edit block** 才弹出 Markdown 编辑模态。
+      //   markdown 编辑框 = 该模态内、可见、placeholder **空**的 <textarea>(实测 placeholder=""
+      //   不是 "Add markdown here";"Add a title" 是文章标题框,需排除)。故选「模态(dialog)内、
+      //   placeholder 为空的 textarea」。把整段 markdown 用原生 value setter+input 覆盖写,点 Update。
+      //   driveTable 走 tableGridCellLabel(点网格)+ editBlockButton(点铅笔)+ 本框(写 md)三件套。
+      tableInput: '[role="dialog"] textarea:not([placeholder]), [role="dialog"] textarea[placeholder=""]',
       // Table 网格按钮 aria-label 模板(N=行 M=列):"Insert a {rows} by {cols} table"。
       tableGridCellLabel: 'Insert a {rows} by {cols} table',
+      // 嵌入块编辑铅笔(★ 实测 2026-06-13):X 嵌入块(表格等)插入后是预览态,先点这个进编辑态 cell 才可填。
+      editBlockButton: 'button[aria-label="Edit block"], [role="button"][aria-label="Edit block"]',
       // 模态确认按钮(★ 实测更正):底部蓝按钮文本是 **"Insert"**(不是 "Update");Media Crop 可能 "Save"。
       modalButton: 'button, [role="button"]',
       modalButtonLabels: { update: 'Insert', save: 'Save' },
