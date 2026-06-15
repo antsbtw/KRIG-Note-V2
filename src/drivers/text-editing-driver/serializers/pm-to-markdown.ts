@@ -23,6 +23,36 @@ export interface SerializeResult {
   markdown: string;
   /** 选区内所有 image src 列表(供 multimodal AI 使用) */
   images: string[];
+  /**
+   * 选区内「有本地文件、能当 X 推文附件」的 videoBlock 源(X 集成 阶段 2.5-b 视频)。
+   *
+   * 收集判据(video ≠ image,见 prompt §2②):
+   * - `localFilePath`(ytdlp 下载的本地**绝对路径**)优先;无则取 `src` 且 src 是 `media://`。
+   * - `embedType: 'youtube'/'vimeo'/'generic'`(纯外链嵌入,无本地文件)**不收**——
+   *   调用方(send-to-x)据「序列化收到正文里有 videoBlock 但 videos 为空」可 fail loud
+   *   提示「外链视频无法作附件」。本序列化层只负责收**能喂的源**,不做提示。
+   *
+   * 与 images 同源(同一次序列化遍历),保证「正文/附件清单」对得上。
+   */
+  videos: string[];
+}
+
+/**
+ * 从一个 videoBlock 节点取「能当 X 附件的本地源」(X 阶段 2.5-b)。
+ *
+ * 决策点 §4.2(本期定):**localFilePath 优先**(明确是 ytdlp 下载好的本地文件),
+ * 无则退 `src` 且仅当 src 是 `media://`(note 内导入的本地视频)。
+ * 外链(http(s) / youtube / vimeo / generic embed)无本地文件 → 返 null(不收)。
+ *
+ * 注:localFilePath 是磁盘绝对路径(在系统 Downloads,非 media://);main 侧 resolve 时
+ * 走「绝对路径存在性校验」分支(见 x/handlers.ts resolveVideoUrlsToPaths),不经 resolveMediaPath。
+ */
+function videoLocalSource(node: PMNode): string | null {
+  const localFilePath = node.attrs.localFilePath as string | null;
+  if (localFilePath && localFilePath.trim()) return localFilePath;
+  const src = node.attrs.src as string | null;
+  if (src && src.startsWith('media://')) return src;
+  return null;
 }
 
 /**
@@ -31,7 +61,7 @@ export interface SerializeResult {
  * @param slice PM Slice(state.selection.content() 取)
  */
 export function sliceToMarkdown(slice: Slice): SerializeResult {
-  if (!slice || slice.size === 0) return { markdown: '', images: [] };
+  if (!slice || slice.size === 0) return { markdown: '', images: [], videos: [] };
 
   const images: string[] = [];
   const lines: string[] = [];
@@ -59,6 +89,7 @@ export function sliceToMarkdown(slice: Slice): SerializeResult {
   return {
     markdown: lines.join('\n\n'),
     images,
+    videos: collectVideosFromFragment(slice.content),
   };
 }
 
@@ -74,7 +105,42 @@ export function docNodeToMarkdown(doc: PMNode): SerializeResult {
     const md = serializeBlock(child, 0, images);
     if (md !== null) lines.push(md);
   });
-  return { markdown: lines.join('\n\n'), images };
+  return { markdown: lines.join('\n\n'), images, videos: collectVideosFromNode(doc) };
+}
+
+/**
+ * 深度遍历一个 Fragment(slice.content)收集所有 videoBlock 的「可喂本地源」(X 阶段 2.5-b)。
+ *
+ * 单独成一遍 descendant 遍历(不与 serializeBlock 的文本序列化耦合):video 附件收集
+ * 与「正文 markdown」正交,且 videoBlock 可嵌在 callout/list/column 等容器里,descendants
+ * 一把抓全。外链视频 videoLocalSource 返 null → 自然过滤(不收)。
+ */
+function collectVideosFromFragment(content: PMNode['content']): string[] {
+  const videos: string[] = [];
+  content.forEach((node) => collectVideosInto(node, videos));
+  return videos;
+}
+
+function collectVideosFromNode(node: PMNode): string[] {
+  const videos: string[] = [];
+  collectVideosInto(node, videos);
+  return videos;
+}
+
+function collectVideosInto(node: PMNode, out: string[]): void {
+  if (node.type.name === 'videoBlock') {
+    const src = videoLocalSource(node);
+    if (src) out.push(src);
+    return; // videoBlock 内只有 caption,无嵌套 video,不再下钻
+  }
+  node.descendants((child) => {
+    if (child.type.name === 'videoBlock') {
+      const src = videoLocalSource(child);
+      if (src) out.push(src);
+      return false; // 不下钻进 videoBlock 内部
+    }
+    return true;
+  });
 }
 
 // ─── Block 序列化(V1 字面对齐 + V2 textBlock 拆分适配)──────────

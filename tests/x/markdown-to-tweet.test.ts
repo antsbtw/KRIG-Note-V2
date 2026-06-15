@@ -178,6 +178,22 @@ describe('markdownToTweetText — 公式/代码块转图后删源码(X 截图 20
   });
 });
 
+describe('markdownToTweetText — 视频占位 [Video: …] 行删除(阶段 2.5-b 视频)', () => {
+  it('整行 [Video: title] 占位删掉(本地视频走附件,正文不留噪音)', () => {
+    expect(markdownToTweetText('看这个\n[Video: 我的视频]\n很有意思')).toBe('看这个\n很有意思');
+  });
+  it('[Video: ] 空标题也删', () => {
+    expect(markdownToTweetText('a\n[Video: ]\nb')).toBe('a\nb');
+  });
+  it('前后空白的占位行也删', () => {
+    expect(markdownToTweetText('a\n  [Video: x]  \nb')).toBe('a\nb');
+  });
+  it('行内出现 [Video: x](非整行)不误删(只删独占一行的占位)', () => {
+    // 非整行占位:保留(避免误伤正文里恰好出现的方括号文本)
+    expect(markdownToTweetText('文字 [Video: x] 尾巴')).toBe('文字 [Video: x] 尾巴');
+  });
+});
+
 describe('checkTweetLength — 超长校验(不截断)', () => {
   it('短文本 not overLimit', () => {
     const r = checkTweetLength('hello');

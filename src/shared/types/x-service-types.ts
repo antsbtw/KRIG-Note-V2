@@ -47,6 +47,24 @@ export interface XServiceSelectors {
    */
   uploadedMediaThumb?: string;
 
+  // ── 视频上传 selector(阶段 2.5-b 视频,路线 B)──
+  //
+  // 视频 ≠ 图片:X 视频喂完要**转码**,判据是「转码完成 / 可发布」而非「缩略图出现」,
+  // 超时也要给足(转码慢,建议 60s+,见 feedVideoToInput / VIDEO_TRANSCODE_TIMEOUT_MS)。
+  /**
+   * 「视频转码完成 / 可发布」判据(阶段 2.5-b 视频)。
+   * 喂完视频后 poll 等它出现 = X 转码完成、视频可随推发出的证明;超时没出现 → fail loud。
+   * ⚠️⚠️ 红线:**待实机 spike 抓真实 data-testid**。下面是「待 spike 确认」的初值
+   *   (X 视频上传完成后通常出现可移除媒体 / 进度条消失 / 缩略图就绪),X 改版/实测后逐个核对替换。
+   */
+  videoUploadComplete?: string;
+  /**
+   * 「视频上传/转码进行中」判据(阶段 2.5-b 视频,可选)。
+   * 用于区分「正在转码(等)」vs「根本没接住(早 fail)」:喂完先看它出现(X 开始处理),
+   * 再等 videoUploadComplete。两者都待 spike;失效时退化为只等 videoUploadComplete。
+   */
+  videoUploadProgress?: string;
+
   // ── X Articles 原生 Insert 驱动 selector(终态发布,2026-06-13)──
   /**
    * X Article 编辑器各模态/按钮的 selector(驱动原生 Insert 发长文用)。
@@ -245,8 +263,19 @@ const X_PROFILE: XServiceProfile = {
     //       X 真把文件接住并开始上传的证明;没出现 → fail loud。
     //
     // selector 清单同时誊抄进交付说明(X 改版会失效,要可查)。
-    fileInput: 'input[data-testid="fileInput"], input[type="file"][accept*="image"]',
+    fileInput: 'input[data-testid="fileInput"], input[type="file"][accept*="image"], input[type="file"][accept*="video"]',
     uploadedMediaThumb: '[data-testid="attachments"], [data-testid="removeMedia"], [aria-label*="Remove media"], [data-testid="media"]',
+    // ── 视频上传 selector(阶段 2.5-b 视频)──
+    //
+    // ⚠️⚠️ SPIKE 待实机校验(本地 spike 后核对/替换;红线不凭记忆编 testid):
+    //   X 视频喂进 fileInput 后:
+    //   - 先出现上传/转码**进度**(进度条 / "Processing" / aria-label 含 progress)→ videoUploadProgress;
+    //   - 转码完成后,媒体区出现**可移除的视频缩略图**(同图的 removeMedia / 媒体容器),且发布按钮可用
+    //     → videoUploadComplete。判据与图共用 attachments/removeMedia 容器(X 媒体区图视频同构),
+    //     但**超时给足**(转码慢,见 VIDEO_TRANSCODE_TIMEOUT_MS)。
+    //   清单同时誊抄进交付说明(X 改版会失效,要可查)。
+    videoUploadProgress: '[role="progressbar"], [data-testid="media"] [role="progressbar"], [aria-label*="rocessing"], [aria-label*="rogress"]',
+    videoUploadComplete: '[data-testid="removeMedia"], [aria-label*="Remove media"], [data-testid="attachments"] video, [data-testid="media"] video',
 
     // ── X Articles 原生 Insert 驱动 selector(终态发布,2026-06-13)──
     //

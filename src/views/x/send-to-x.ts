@@ -24,6 +24,7 @@ import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import { markdownToTweetText } from '@shared/x/markdown-to-tweet';
+import { combineExclusiveMedia, mediaTradeoffNote } from '@shared/x/x-media-selection';
 import type { RenderableBlock, BlockRenderFailure } from '@capabilities/x-extraction';
 import { showXSendConfirm } from './send-confirm-popup';
 
@@ -49,32 +50,6 @@ function ensureXVisible(wsId: string): void {
   bus?.channels.emit('x.activate-launcher', { emittedAt: Date.now() });
 }
 
-/** X 推文媒体上限(图片)。超出只带前 N 张,其余提示用户(不静默丢)。*/
-const X_MAX_IMAGES = 4;
-
-/**
- * 把 note 图 + 渲染图(公式/代码/Mermaid 转的图)合并成最终媒体清单。
- *
- * - note 图(media://,2.5-b)在前,渲染图在后,按各自文档顺序;合并后截至 X_MAX_IMAGES。
- *   (真正的「note 图与渲染图交错的全局文档顺序」需位置信息,本期简化为「先 note 图后渲染图」,
- *    记 TODO;两者都已各自按文档先后,超 4 张时弹窗会提示总数。)
- * - 公式/代码图与普通图**共占 4 张额度**(总指挥拍板:渲染图也算附件数)。
- * - http(s) 外链图无法当本地文件喂 X,不进(只取 media://)。
- *
- * @returns { mediaUrls: 截后清单, totalImageCount: 截前总数(>4 时弹窗提示用)}
- */
-function combineMedia(
-  noteImages: string[],
-  renderedMediaUrls: string[],
-): { mediaUrls: string[]; totalImageCount: number } {
-  const noteMedia = noteImages.filter((src) => typeof src === 'string' && src.startsWith('media://'));
-  const all = [...noteMedia, ...renderedMediaUrls];
-  return {
-    mediaUrls: all.slice(0, X_MAX_IMAGES),
-    totalImageCount: all.length,
-  };
-}
-
 /**
  * 统一构造「发到 X」载荷:渲染公式/代码/Mermaid block → media:// 图,合并 note 图,
  * 同时把已转图的 block 源码从正文删掉(不裸奔 $$..$$ / 代码),fail loud 退源码。
@@ -87,10 +62,14 @@ async function buildXPayload(
   markdown: string,
   noteImages: string[],
   blocks: RenderableBlock[],
+  serializedVideos: string[] = [],
 ): Promise<{
   text: string;
   mediaUrls: string[];
   totalImageCount: number;
+  videoUrls: string[];
+  totalVideoCount: number;
+  droppedImageCount: number;
   renderFailures: BlockRenderFailure[];
 }> {
   // 1. 渲染公式/代码/Mermaid → media://(失败的记 failed,不中断)。走 x-extraction capability
@@ -104,13 +83,20 @@ async function buildXPayload(
     renderedBlockSources: rendered.map((r) => r.source),
   });
 
-  // 3. 媒体清单:note 图 + 渲染图,合并截 4。
-  const { mediaUrls, totalImageCount } = combineMedia(
-    noteImages,
-    rendered.map((r) => r.mediaUrl),
-  );
+  // 3. 媒体清单:note 图 + 渲染图(截 4)+ note 视频(截 1),按 X 互斥规则取舍
+  //    (有视频 → 弃图,见 combineExclusiveMedia)。
+  const { mediaUrls, totalImageCount, videoUrls, totalVideoCount, droppedImageCount } =
+    combineExclusiveMedia(noteImages, rendered.map((r) => r.mediaUrl), serializedVideos);
 
-  return { text, mediaUrls, totalImageCount, renderFailures: failed };
+  return {
+    text,
+    mediaUrls,
+    totalImageCount,
+    videoUrls,
+    totalVideoCount,
+    droppedImageCount,
+    renderFailures: failed,
+  };
 }
 
 /**
@@ -156,14 +142,16 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 1. 选区优先,无选区取整篇。同源拿 images(media:// 图清单)+ renderableBlocks(公式/代码)。
-  let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
+  // 1. 选区优先,无选区取整篇。同源拿 images(media:// 图清单)+ videos(本地视频源)+
+  //    renderableBlocks(公式/代码)。
+  let { markdown, images, videos } = textEditing.api.getSelectionMarkdown(instanceId);
   let blocks = textEditing.api.getSelectionRenderableBlocks(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
     const doc = textEditing.api.getDocMarkdown(instanceId);
     markdown = doc.markdown;
     images = doc.images;
+    videos = doc.videos;
     blocks = textEditing.api.getDocRenderableBlocks(instanceId);
     usedWholeDoc = true;
   }
@@ -172,20 +160,20 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 2. 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图(2.5-b 同管道)。
-  const { text, mediaUrls, totalImageCount, renderFailures } = await buildXPayload(
-    markdown,
-    images,
-    blocks,
-  );
-  if (!text.trim() && mediaUrls.length === 0) {
+  // 2. 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图/视频(2.5-b 同管道,含图视频互斥)。
+  const {
+    text, mediaUrls, totalImageCount, videoUrls, totalVideoCount, droppedImageCount, renderFailures,
+  } = await buildXPayload(markdown, images, blocks, videos);
+  if (!text.trim() && mediaUrls.length === 0 && videoUrls.length === 0) {
     window.alert('转换后内容为空,无法发到 X');
     return;
   }
 
-  // 3. 渲染失败 fail loud:先告知用户哪些以源码发出(不静默),再进确认弹窗。
+  // 3. 渲染失败 / 媒体互斥取舍 fail loud:先告知用户(不静默),再进确认弹窗。
   const failNote = renderFailureNote(renderFailures);
   if (failNote) window.alert(`${failNote}。`);
+  const tradeoffNote = mediaTradeoffNote(droppedImageCount, totalVideoCount);
+  if (tradeoffNote) window.alert(tradeoffNote);
 
   // 4. 弹发送前确认弹窗(预览/字数/缩略图/可编辑)。确认 → onConfirm 注入;取消 → 不注入。
   showXSendConfirm({
@@ -194,7 +182,10 @@ export async function sendToX(): Promise<void> {
     replyPreview: null,
     mediaUrls,
     totalImageCount,
-    onConfirm: (finalText, finalMedia) => performXInjection(wsId, finalText, finalMedia),
+    videoUrls,
+    totalVideoCount,
+    onConfirm: (finalText, finalMedia, finalVideos) =>
+      performXInjection(wsId, finalText, finalMedia, finalVideos),
   });
 }
 
@@ -211,6 +202,7 @@ async function performXInjection(
   wsId: string,
   finalText: string,
   mediaUrls: string[] = [],
+  videoUrls: string[] = [],
 ): Promise<void> {
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
 
@@ -224,17 +216,17 @@ async function performXInjection(
     console.warn('[send-to-x] 未取到本 ws 的 X Host wc id,回退 main 全局 active(多实例可能串扰)');
   }
 
-  const result = await x.pasteTweet('x', finalText, targetWcId, mediaUrls);
+  const result = await x.pasteTweet('x', finalText, targetWcId, mediaUrls, videoUrls);
   if (!result.success) {
     fallbackToClipboard(finalText, result.error || '未知错误');
     return;
   }
-  // 文字落地成功,但图没带上(selector 失效 / X 没接住)→ fail loud 明示,让用户手动拖图。
-  // 不当成完全失败(文字已在框里),也不静默假装图也成功了(铁律 4)。
+  // 文字落地成功,但图/视频没带上(selector 失效 / X 没接住 / 转码超时)→ fail loud 明示,让用户手动拖入。
+  // 不当成完全失败(文字已在框里),也不静默假装媒体也成功了(铁律 4)。
   if (result.mediaWarning) {
     window.alert(
-      `文字已填入 X,但图片没能带上(${result.mediaWarning})。\n\n` +
-        `请在 X 发推框手动拖入图片,再检查后点发布。`,
+      `文字已填入 X,但媒体没能带上(${result.mediaWarning})。\n\n` +
+        `请在 X 发推框手动拖入图片/视频,再检查后点发布。`,
     );
     return;
   }
@@ -378,19 +370,20 @@ export async function publishToXArticle(): Promise<void> {
 interface DraggedRaw {
   markdown: string;
   images: string[];
+  videos: string[];
   blocks: RenderableBlock[];
 }
 let draggedRaw: DraggedRaw | null = null;
 
-/** dnd.started 时调:抓被拖起 block(单块或多选块)的原始 markdown / 图 / 可渲染块暂存。*/
+/** dnd.started 时调:抓被拖起 block(单块或多选块)的原始 markdown / 图 / 视频 / 可渲染块暂存。*/
 export function stashDraggedBlockText(instanceId: string, fromPos: number): void {
   draggedRaw = null;
   try {
     const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-    const { markdown, images } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
+    const { markdown, images, videos } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
     if (markdown && markdown.trim()) {
       const blocks = textEditing.api.getBlockRenderableBlocksAt(instanceId, fromPos);
-      draggedRaw = { markdown, images, blocks };
+      draggedRaw = { markdown, images, videos, blocks };
     }
   } catch (err) {
     console.warn('[send-to-x] stashDraggedBlockText failed:', err);
@@ -412,13 +405,14 @@ function getPendingRaw(): { raw: DraggedRaw; usedWholeDoc: boolean } | null {
     window.alert('没有活跃的 Note —— 请先在 Note 里选中要发的内容(或打开要发的整篇)');
     return null;
   }
-  let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
+  let { markdown, images, videos } = textEditing.api.getSelectionMarkdown(instanceId);
   let blocks = textEditing.api.getSelectionRenderableBlocks(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
     const doc = textEditing.api.getDocMarkdown(instanceId);
     markdown = doc.markdown;
     images = doc.images;
+    videos = doc.videos;
     blocks = textEditing.api.getDocRenderableBlocks(instanceId);
     usedWholeDoc = true;
   }
@@ -426,7 +420,7 @@ function getPendingRaw(): { raw: DraggedRaw; usedWholeDoc: boolean } | null {
     window.alert('Note 内容为空,没有可发到 X 的文字');
     return null;
   }
-  return { raw: { markdown, images, blocks }, usedWholeDoc };
+  return { raw: { markdown, images, videos, blocks }, usedWholeDoc };
 }
 
 /**
@@ -454,18 +448,18 @@ export async function sendToXAtDropTarget(): Promise<void> {
   const raw = draggedRawPayload ?? getPendingRaw()?.raw;
   if (!raw) return; // 内容为空已 alert(getPendingRaw 内)
 
-  // 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图(与发推主链同管道)。
-  const { text, mediaUrls, totalImageCount, renderFailures } = await buildXPayload(
-    raw.markdown,
-    raw.images,
-    raw.blocks,
-  );
-  if (!text.trim() && mediaUrls.length === 0) {
+  // 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图/视频(与发推主链同管道,含互斥)。
+  const {
+    text, mediaUrls, totalImageCount, videoUrls, totalVideoCount, droppedImageCount, renderFailures,
+  } = await buildXPayload(raw.markdown, raw.images, raw.blocks, raw.videos);
+  if (!text.trim() && mediaUrls.length === 0 && videoUrls.length === 0) {
     window.alert('转换后内容为空,无法发到 X');
     return;
   }
   const failNote = renderFailureNote(renderFailures);
   if (failNote) window.alert(`${failNote}。`);
+  const tradeoffNote = mediaTradeoffNote(droppedImageCount, totalVideoCount);
+  if (tradeoffNote) window.alert(tradeoffNote);
 
   if (drop.kind === 'compose') {
     // 落发推框 → 发普通推
@@ -475,7 +469,10 @@ export async function sendToXAtDropTarget(): Promise<void> {
       replyPreview: null,
       mediaUrls,
       totalImageCount,
-      onConfirm: (finalText, finalMedia) => performXInjection(wsId, finalText, finalMedia),
+      videoUrls,
+      totalVideoCount,
+      onConfirm: (finalText, finalMedia, finalVideos) =>
+        performXInjection(wsId, finalText, finalMedia, finalVideos),
     });
     return;
   }
@@ -487,28 +484,30 @@ export async function sendToXAtDropTarget(): Promise<void> {
     replyPreview: drop.author || '该推文',
     mediaUrls,
     totalImageCount,
-    onConfirm: async (finalText, finalMedia) => {
+    videoUrls,
+    totalVideoCount,
+    onConfirm: async (finalText, finalMedia, finalVideos) => {
       // 1. 就地点回复按钮弹 reply 框(main 侧 poll 等框出现)
       const r = await x.dragReplyHere('x', targetWcId);
       if (!r.ok) {
         fallbackToClipboard(finalText, r.error || '回复框未弹出');
         return;
       }
-      // 2. reply 框已弹出(= 当前 compose 框)→ 注入(含图)。复用 pasteTweet(填的就是这个 reply 框)。
-      const result = await x.pasteTweet('x', finalText, targetWcId, finalMedia);
+      // 2. reply 框已弹出(= 当前 compose 框)→ 注入(含图/视频)。复用 pasteTweet(填的就是这个 reply 框)。
+      const result = await x.pasteTweet('x', finalText, targetWcId, finalMedia, finalVideos);
       if (!result.success) {
         fallbackToClipboard(finalText, result.error || '未知错误');
         return;
       }
-      // 文字落地但图没带上 → fail loud 明示(同 performXInjection),让用户手动拖图。
+      // 文字落地但媒体没带上 → fail loud 明示(同 performXInjection),让用户手动拖入。
       if (result.mediaWarning) {
         window.alert(
-          `回复文字已填入 X,但图片没能带上(${result.mediaWarning})。\n\n` +
-            `请在回复框手动拖入图片,再检查后点回复。`,
+          `回复文字已填入 X,但媒体没能带上(${result.mediaWarning})。\n\n` +
+            `请在回复框手动拖入图片/视频,再检查后点回复。`,
         );
         return;
       }
-      // 成功:内容(含图)已可见填进回复框,确认弹窗已有「需你点回复」红线,不弹阻塞 alert(同发推)。
+      // 成功:内容(含媒体)已可见填进回复框,确认弹窗已有「需你点回复」红线,不弹阻塞 alert(同发推)。
     },
   });
 }

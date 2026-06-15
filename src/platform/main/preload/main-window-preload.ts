@@ -789,14 +789,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
   /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)。
-   *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。*/
-  xPasteTweet(serviceId: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId, mediaUrls });
+   *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。
+   *  videoUrls(阶段 2.5-b 视频):note 视频源(media:// / 绝对路径),main 侧解析后走视频喂文件(转码 poll)。*/
+  xPasteTweet(serviceId: string, text: string, targetWcId?: number, mediaUrls?: string[], videoUrls?: string[]): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId, mediaUrls, videoUrls });
   },
   /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)。
-   *  mediaUrls(阶段 2.5-b):同 xPasteTweet。*/
-  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId, mediaUrls });
+   *  mediaUrls / videoUrls(阶段 2.5-b):同 xPasteTweet。*/
+  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number, mediaUrls?: string[], videoUrls?: string[]): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId, mediaUrls, videoUrls });
   },
   /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
    *  ⚠️ 写方向红线:只插内容,绝不程序点 Publish。 */

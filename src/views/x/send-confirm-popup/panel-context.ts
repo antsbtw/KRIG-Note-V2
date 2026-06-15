@@ -34,12 +34,26 @@ export interface XSendConfirmContext {
    */
   totalImageCount: number;
   /**
-   * 确认回调:用户点「填入 X」时调,传当前(可能已编辑的)文本 + 用户保留的媒体清单。
+   * 视频清单(X 阶段 2.5-b 视频,路线 B):note 里「有本地文件能作附件」的视频源
+   *(localFilePath 绝对路径 / media://,已按 X 互斥规则截至 1 个;有视频时 mediaUrls 为空)。
+   * 弹窗展示视频项(文件名 + 可移除,只影响本次发送)。onConfirm 第三参回传保留的最终清单。
+   */
+  videoUrls: string[];
+  /**
+   * 收集到的本地视频总数(>1 时被截断到 1)。仅用于弹窗文案(已在 send-to-x fail loud 提示过)。
+   */
+  totalVideoCount: number;
+  /**
+   * 确认回调:用户点「填入 X」时调,传当前(可能已编辑的)文本 + 用户保留的图清单 + 视频清单。
    * send-to-x 在此回调里做 ensureXVisible + 注入(发推 / 就地弹回复框)+ 失败降级。
    *
    * 返回 Promise<void>:弹窗会在 await 期间禁用按钮(防重复点),完成后由弹窗自行 close。
    */
-  onConfirm: (finalText: string, mediaUrls: string[]) => void | Promise<void>;
+  onConfirm: (
+    finalText: string,
+    mediaUrls: string[],
+    videoUrls: string[],
+  ) => void | Promise<void>;
 }
 
 let pending: XSendConfirmContext | null = null;

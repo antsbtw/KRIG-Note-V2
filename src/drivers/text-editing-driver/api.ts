@@ -1856,9 +1856,9 @@ export const textEditingDriverApi = {
    */
   getSelectionMarkdown(instanceId: string): SerializeResult {
     const inst = instanceRegistry.get(instanceId);
-    if (!inst) return { markdown: '', images: [] };
+    if (!inst) return { markdown: '', images: [], videos: [] };
     const { state } = inst.view;
-    if (state.selection.empty) return { markdown: '', images: [] };
+    if (state.selection.empty) return { markdown: '', images: [], videos: [] };
     const slice = state.selection.content();
     return sliceToMarkdown(slice);
   },
@@ -1871,7 +1871,7 @@ export const textEditingDriverApi = {
    */
   getDocMarkdown(instanceId: string): SerializeResult {
     const inst = instanceRegistry.get(instanceId);
-    if (!inst) return { markdown: '', images: [] };
+    if (!inst) return { markdown: '', images: [], videos: [] };
     return docNodeToMarkdown(inst.view.state.doc);
   },
 
@@ -1885,7 +1885,7 @@ export const textEditingDriverApi = {
    */
   getBlockMarkdownAt(instanceId: string, pos: number): SerializeResult {
     const inst = instanceRegistry.get(instanceId);
-    if (!inst) return { markdown: '', images: [] };
+    if (!inst) return { markdown: '', images: [], videos: [] };
     const { state } = inst.view;
     const sel = state.selection;
     if (
@@ -1896,7 +1896,7 @@ export const textEditingDriverApi = {
       return sliceToMarkdown(sel.content());
     }
     const node = state.doc.nodeAt(pos);
-    if (!node) return { markdown: '', images: [] };
+    if (!node) return { markdown: '', images: [], videos: [] };
     const slice = new Slice(Fragment.from(node.copy(node.content)), 0, 0);
     return sliceToMarkdown(slice);
   },

@@ -589,15 +589,17 @@ declare global {
         text: string,
         targetWcId?: number,
         mediaUrls?: string[],
+        videoUrls?: string[],
       ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
       /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布)。
-       *  mediaUrls(阶段 2.5-b):同 xPasteTweet。 */
+       *  mediaUrls / videoUrls(阶段 2.5-b):同 xPasteTweet。 */
       xPasteReply(
         serviceId: XServiceId,
         tweetUrl: string,
         text: string,
         targetWcId?: number,
         mediaUrls?: string[],
+        videoUrls?: string[],
       ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
       /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
        *  ⚠️ 只插内容,绝不程序点 Publish。warnings 非空 = 部分块降级/失败(fail loud,用户手动补)。 */

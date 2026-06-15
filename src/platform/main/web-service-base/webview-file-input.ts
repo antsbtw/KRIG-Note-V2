@@ -30,6 +30,15 @@ export interface FeedFilesResult {
   fedCount?: number;
 }
 
+/**
+ * X 视频转码 poll 超时(阶段 2.5-b 视频)。
+ *
+ * 图片喂完 poll 等「缩略图出现」是秒级(feedFilesToInput 用 10s);视频喂完 X 要**转码**,
+ * 大视频可能数十秒。决策点 §4.3(本期定):给 **90s** —— 覆盖常见短视频转码,超时仍 fail loud
+ *(不无限等;真超大/超时让用户在 X 自己看进度后手动发)。spike 实测后可调。
+ */
+export const VIDEO_TRANSCODE_TIMEOUT_MS = 90_000;
+
 /** 在 guest 内按 selector(逗号分隔多候选)定位元素是否存在 */
 function buildSelectorExistsScript(selector: string): string {
   return `
@@ -82,6 +91,94 @@ export async function feedFilesToInput(
   fileInputSelector: string,
   filePaths: string[],
   uploadedThumbSelector?: string,
+): Promise<FeedFilesResult> {
+  return feedToInputInternal(wc, fileInputSelector, filePaths, async () => {
+    // 校验 X 真接住:poll 等已上传缩略图出现。X 要时间读文件 + 生成预览,给 10s。
+    //    没配 uploadedThumbSelector(spike 未填)→ 退一步只确认无异常,但仍标注 thumb 未校验。
+    if (uploadedThumbSelector) {
+      const landed = await waitForSelectorInGuest(wc, uploadedThumbSelector, 10000);
+      if (!landed) {
+        return '喂文件后 X 未出现已上传缩略图(X 没接住 / uploadedMediaThumb selector 失效)';
+      }
+    } else {
+      console.warn(
+        '[webview-file-input] uploadedMediaThumb selector 未配置,无法校验 X 是否接住文件(spike 待补)',
+      );
+    }
+    return null;
+  });
+}
+
+/**
+ * 把视频喂给 X 上传控件,并 poll 等**转码完成**(路线 B,X 集成 2.5-b 视频)。
+ *
+ * 与图片(feedFilesToInput)共用「CDP 定位 input + setFileInputFiles 喂文件」机械层
+ *(feedToInputInternal),**只校验环节不同**(这是 video ≠ image 的核心差异,见 prompt §2③):
+ *   - 图片:poll 等「缩略图出现」(秒级,10s)。
+ *   - 视频:X 要转码 —— 先(可选)确认进入「处理中」(videoUploadProgressSelector,证明 X 接住开始转码),
+ *     再用**更长超时**(VIDEO_TRANSCODE_TIMEOUT_MS=90s)poll 等「转码完成 / 可发布」
+ *     (videoUploadCompleteSelector)。超时 / 没接住 → fail loud(绝不当成功)。
+ *
+ * ⚠️ 写方向红线:只「喂文件 + 等转码」,绝不触碰发布按钮。
+ *
+ * @param videoUploadCompleteSelector 转码完成判据(profile.selectors.videoUploadComplete)
+ * @param videoUploadProgressSelector 转码进行中判据(可选;profile.selectors.videoUploadProgress)
+ */
+export async function feedVideoToInput(
+  wc: WebContents,
+  fileInputSelector: string,
+  videoPaths: string[],
+  videoUploadCompleteSelector?: string,
+  videoUploadProgressSelector?: string,
+): Promise<FeedFilesResult> {
+  return feedToInputInternal(wc, fileInputSelector, videoPaths, async () => {
+    // 1.(可选)先确认 X 进入「处理中」——证明文件被接住、开始转码。短超时(8s),
+    //    没出现不直接判失败(X 可能转码极快、或 progress selector 失效),继续等「完成」判据。
+    if (videoUploadProgressSelector) {
+      const started = await waitForSelectorInGuest(wc, videoUploadProgressSelector, 8000);
+      if (!started) {
+        console.warn(
+          '[webview-file-input] 视频未检出「处理中」标志(progress selector 失效 / 转码极快),继续等完成判据',
+        );
+      }
+    }
+
+    // 2. poll 等「转码完成 / 可发布」。视频转码慢,给足超时(VIDEO_TRANSCODE_TIMEOUT_MS)。
+    if (videoUploadCompleteSelector) {
+      const done = await waitForSelectorInGuest(
+        wc,
+        videoUploadCompleteSelector,
+        VIDEO_TRANSCODE_TIMEOUT_MS,
+      );
+      if (!done) {
+        return (
+          `视频上传后未在 ${Math.round(VIDEO_TRANSCODE_TIMEOUT_MS / 1000)}s 内转码完成` +
+          `(X 没接住 / 转码超时 / videoUploadComplete selector 失效)`
+        );
+      }
+    } else {
+      console.warn(
+        '[webview-file-input] videoUploadComplete selector 未配置,无法校验视频转码完成(spike 待补)',
+      );
+    }
+    return null;
+  });
+}
+
+/**
+ * 「喂文件进 <input type=file>」机械层(图/视频共用,X 集成 2.5-b)。
+ *
+ * 流程固定:确认 input 在场 → CDP attach(复用已 attach 的不抢)→ DOM.querySelector 定位 nodeId
+ *   → DOM.setFileInputFiles 喂磁盘绝对路径 → 调 verifyLanded 校验「X 真接住」。
+ *
+ * verifyLanded 是**唯一分流点**:图片 poll 缩略图(秒级),视频 poll 转码完成(更长超时)。
+ * 返 null = 校验通过;返 string = fail loud 原因。这样视频的转码 poll/超时**不污染**图片路径。
+ */
+async function feedToInputInternal(
+  wc: WebContents,
+  fileInputSelector: string,
+  filePaths: string[],
+  verifyLanded: () => Promise<string | null>,
 ): Promise<FeedFilesResult> {
   if (!fileInputSelector) {
     return { ok: false, error: 'fileInput selector 未配置(需 spike 后填入 profile)' };
@@ -157,20 +254,10 @@ export async function feedFilesToInput(
       return { ok: false, error: `喂文件进 input 失败(CDP setFileInputFiles):${String(err)}` };
     }
 
-    // 5. 校验 X 真接住:poll 等已上传缩略图出现。X 要时间读文件 + 生成预览,给 10s。
-    //    没配 uploadedThumbSelector(spike 未填)→ 退一步只确认无异常,但仍标注 thumb 未校验。
-    if (uploadedThumbSelector) {
-      const landed = await waitForSelectorInGuest(wc, uploadedThumbSelector, 10000);
-      if (!landed) {
-        return {
-          ok: false,
-          error: '喂文件后 X 未出现已上传缩略图(X 没接住 / uploadedMediaThumb selector 失效)',
-        };
-      }
-    } else {
-      console.warn(
-        '[webview-file-input] uploadedMediaThumb selector 未配置,无法校验 X 是否接住文件(spike 待补)',
-      );
+    // 5. 校验「X 真接住」(图/视频判据不同,由 verifyLanded 分流)。
+    const verifyError = await verifyLanded();
+    if (verifyError) {
+      return { ok: false, error: verifyError };
     }
 
     console.log(`[webview-file-input] fed ${filePaths.length} file(s) to X upload input`);

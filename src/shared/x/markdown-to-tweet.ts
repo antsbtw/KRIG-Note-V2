@@ -119,6 +119,13 @@ export function markdownToTweetText(markdown: string, options: MarkdownToTweetOp
       continue;
     }
 
+    // 阶段 2.5-b(视频):整行是 videoBlock 占位 `[Video: title]`(serializeMediaPlaceholder 产)→ 删。
+    // 本地视频已走附件上传(collectNoteVideos → 喂 X 上传控件),正文留 `[Video: …]` 是纯噪音;
+    // 外链视频无法作附件,send-to-x 已 fail loud 提示用户(不靠这行占位文本承载链接)。
+    if (/^\s*\[Video:[^\]]*\]\s*$/.test(raw)) {
+      continue;
+    }
+
     // 阶段 2.5-b:整行是 media:// 图片(单张,可前后空白)→ 删掉。
     // 这些图已走「附件上传」(collectNoteImages → 喂 X 上传控件),正文不该再留 media:// URL
     // (本地协议贴给读者打不开、纯噪音,且与附件重复)。总指挥拍板:一律从正文删。

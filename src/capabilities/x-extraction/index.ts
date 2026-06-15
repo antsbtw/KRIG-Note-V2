@@ -64,8 +64,9 @@ async function pasteTweet(
   text: string,
   targetWcId?: number | null,
   mediaUrls?: string[],
+  videoUrls?: string[],
 ): Promise<XWriteResult> {
-  return window.electronAPI.xPasteTweet(serviceId, text, targetWcId ?? undefined, mediaUrls);
+  return window.electronAPI.xPasteTweet(serviceId, text, targetWcId ?? undefined, mediaUrls, videoUrls);
 }
 
 async function pasteReply(
@@ -74,8 +75,16 @@ async function pasteReply(
   text: string,
   targetWcId?: number | null,
   mediaUrls?: string[],
+  videoUrls?: string[],
 ): Promise<XWriteResult> {
-  return window.electronAPI.xPasteReply(serviceId, tweetUrl, text, targetWcId ?? undefined, mediaUrls);
+  return window.electronAPI.xPasteReply(
+    serviceId,
+    tweetUrl,
+    text,
+    targetWcId ?? undefined,
+    mediaUrls,
+    videoUrls,
+  );
 }
 
 async function driveArticle(
