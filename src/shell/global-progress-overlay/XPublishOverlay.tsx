@@ -1,17 +1,17 @@
 /**
- * GlobalProgressOverlay — 全屏进度遮罩(renderer)
+ * XPublishOverlay — X 发布的**局部**进度遮罩(只盖 X view 区,不锁全屏 note)
  *
- * 通过 window.electronAPI.onProgress* 订阅 main 端任务事件,
- * 在任务存活期间渲染一层 fixed inset:0 的覆盖层,阻塞 UI 并显示进度。
+ * 动机(总指挥 2026-06-14):X 发布耗时长,需进度反馈 + **冻结 X webview**(防驱动期间用户点 X
+ *   破坏正在执行的脚本);但上传后跟 note 无关,故只遮 X view,不锁整个 app。
  *
- * 主要使用场景:File → Backup All Data / Restore from Backup。
+ * 复用 GlobalProgressOverlay 的订阅逻辑 + 视觉(同套 .krig-progress-overlay 样式),区别:
+ * - 只接 `scope==='x-view'` 的进度任务(全屏 overlay 跳过这些,见 GlobalProgressOverlay)。
+ * - 外层加 `--local` 修饰类(absolute 盖父容器,父容器 .krig-ai-view 需 position:relative)。
  *
- * V1 参考:src/renderer/shell/GlobalProgressOverlay.tsx;V2 简化点 —
- * V2 直接挂在主 BrowserWindow renderer 内(<App> 的 sibling),
- * 不再需要独立的 overlay WebContentsView。
+ * 渲染位置:AIView 的 .krig-ai-view 容器内(X webview 所在区)。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type {
   ProgressStartPayload,
   ProgressUpdatePayload,
@@ -31,19 +31,8 @@ interface ProgressState {
   doneMessage?: string;
 }
 
-/**
- * 成功完成后自动消失的停留时长(ms)。
- *
- * 2026-05-29:导入/打开/删除/backup 这类操作完成只是"告知",不该让用户再点
- * "关闭"。成功(success===true)→ 停留 SUCCESS_DISMISS_MS 让用户看清结果再
- * 自动消失;失败(success===false)→ 保留"关闭"键,让用户看清错误后手动关
- * (尤其 restore 失败这类重要信息不能自动溜走)。
- */
-const SUCCESS_DISMISS_MS = 1200;
-
-export function GlobalProgressOverlay() {
+export function XPublishOverlay(): ReactElement | null {
   const [state, setState] = useState<ProgressState | null>(null);
-  // 自动消失定时器(成功 done 后启动;新任务 START / 手动关闭 / unmount 时清除)
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearDismissTimer = (): void => {
@@ -55,9 +44,7 @@ export function GlobalProgressOverlay() {
 
   useEffect(() => {
     const unsubStart = window.electronAPI.onProgressStart((p: ProgressStartPayload) => {
-      // ★ 作用域过滤:'x-view' 的进度只遮 X view(由 XPublishOverlay 接),全屏 overlay 跳过。
-      if (p.scope === 'x-view') return;
-      // 新任务开始 → 取消上一个任务的自动消失定时器(避免它误清掉新 overlay)
+      if (p.scope !== 'x-view') return; // 只接 X view 作用域(其余给全屏 overlay)
       clearDismissTimer();
       setState({
         taskId: p.taskId,
@@ -88,14 +75,9 @@ export function GlobalProgressOverlay() {
         if (!prev || prev.taskId !== p.taskId) return prev;
         return { ...prev, done: true, success: p.success, doneMessage: p.message };
       });
-      // 成功 → 停留片刻后自动消失(只清这个 taskId,且未被新任务/手动关替换时才清)。
-      // 失败 → 不自动消失,保留"关闭"键。
       if (p.success) {
         clearDismissTimer();
-        dismissTimerRef.current = setTimeout(() => {
-          dismissTimerRef.current = null;
-          setState((prev) => (prev && prev.taskId === p.taskId ? null : prev));
-        }, SUCCESS_DISMISS_MS);
+        dismissTimerRef.current = setTimeout(() => setState(null), 1200);
       }
     });
 
@@ -116,14 +98,12 @@ export function GlobalProgressOverlay() {
 
   return (
     <div
-      className="krig-progress-overlay"
+      className="krig-progress-overlay krig-progress-overlay--local"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="krig-progress-overlay__panel">
         <div className="krig-progress-overlay__title">{state.title}</div>
-        {state.message && (
-          <div className="krig-progress-overlay__message">{state.message}</div>
-        )}
+        {state.message && <div className="krig-progress-overlay__message">{state.message}</div>}
 
         <div className="krig-progress-overlay__bar-container">
           {state.indeterminate ? (
@@ -132,10 +112,7 @@ export function GlobalProgressOverlay() {
             </div>
           ) : (
             <div className="krig-progress-overlay__bar">
-              <div
-                className="krig-progress-overlay__bar-fill"
-                style={{ width: `${percent}%` }}
-              />
+              <div className="krig-progress-overlay__bar-fill" style={{ width: `${percent}%` }} />
             </div>
           )}
         </div>
@@ -157,8 +134,6 @@ export function GlobalProgressOverlay() {
             >
               {state.doneMessage ?? (state.success ? '完成' : '失败')}
             </div>
-            {/* 成功 = 告知性提示,停留 1.2s 自动消失,不给"关闭"键;
-                失败 = 保留"关闭"键让用户看清错误后手动关 */}
             {!state.success && (
               <button
                 className="krig-progress-overlay__close-btn"
@@ -173,7 +148,7 @@ export function GlobalProgressOverlay() {
           </div>
         )}
         {!state.done && (
-          <div className="krig-progress-overlay__hint">请勿关闭窗口或操作应用</div>
+          <div className="krig-progress-overlay__hint">正在驱动 X 文章,请勿操作 X 页面</div>
         )}
       </div>
     </div>

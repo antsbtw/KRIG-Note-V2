@@ -28,6 +28,11 @@ export interface ProgressStartPayload {
   /** 起始时是否为不定进度(主标题旁不显示百分比) */
   indeterminate?: boolean;
   message?: string;
+  /**
+   * 作用域:'global'(默认)→ 全屏 GlobalProgressOverlay(备份/导入等);
+   * 'x-view' → 只遮 X view 区(X 发布:驱动期间冻结 X webview 防破坏脚本,不锁 note 区)。
+   */
+  scope?: 'global' | 'x-view';
 }
 
 /** 进度更新载荷 */

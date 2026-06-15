@@ -335,7 +335,7 @@ export async function publishToXArticle(): Promise<void> {
   const taskId = crypto.randomUUID();
   window.electronAPI.driveProgress({
     kind: 'start',
-    payload: { taskId, title: '正在发布为 X 文章', indeterminate: false, message: '准备驱动…' },
+    payload: { taskId, title: '正在发布为 X 文章', indeterminate: false, message: '准备驱动…', scope: 'x-view' },
   });
   let result: Awaited<ReturnType<typeof x.driveArticle>>;
   try {

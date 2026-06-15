@@ -12,6 +12,8 @@
   flex-direction: column;
   height: 100%;
   background: #1e1e1e;
+  /* 局部进度遮罩(XPublishOverlay,--local absolute)的定位锚 */
+  position: relative;
 }
 
 .krig-ai-view__empty {
