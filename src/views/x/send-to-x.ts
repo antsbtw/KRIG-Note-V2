@@ -330,7 +330,22 @@ export async function publishToXArticle(): Promise<void> {
   if (targetWcId == null) {
     console.warn('[publish-x-article] 未取到本 ws 的 X Host wc id,回退 main 全局 active');
   }
-  const result = await x.driveArticle('x', plan, targetWcId);
+  // 进度 overlay(复用 GlobalProgressOverlay,与备份/导入同一套):start 起全屏遮挡 + 进度条
+  //   → main 逐 step 推 PROGRESS_UPDATE 显示「第 X/Y 块」→ done 收尾。遮挡防用户驱动期间操作破坏脚本。
+  const taskId = crypto.randomUUID();
+  window.electronAPI.driveProgress({
+    kind: 'start',
+    payload: { taskId, title: '正在发布为 X 文章', indeterminate: false, message: '准备驱动…' },
+  });
+  let result: Awaited<ReturnType<typeof x.driveArticle>>;
+  try {
+    result = await x.driveArticle('x', plan, targetWcId, taskId);
+  } finally {
+    window.electronAPI.driveProgress({
+      kind: 'done',
+      payload: { taskId, success: true, message: '驱动完成' },
+    });
+  }
 
   // 6. 结果处理(fail loud)。
   // 驱动器已自动导航到 Article 编辑器;失败时 result.error 多为「无 Article 权限 / X 改版」,直接透出。

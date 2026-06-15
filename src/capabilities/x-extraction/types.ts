@@ -154,6 +154,8 @@ export interface XExtractionApi {
     serviceId: XServiceId,
     plan: ArticlePlan,
     targetWcId?: number | null,
+    /** 进度 overlay 的 taskId(传则 main 逐 step 推 PROGRESS_UPDATE)。 */
+    taskId?: string,
   ): Promise<XDriveArticleResult>;
   // ── X Host wc 按 ws 登记(注入按活跃 ws 定向,治多实例串扰)──
   /** 登记某 ws 的 AI-view X Host guest wc id(AIView 调)*/

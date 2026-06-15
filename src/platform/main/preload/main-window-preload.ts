@@ -800,8 +800,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
    *  ⚠️ 写方向红线:只插内容,绝不程序点 Publish。 */
-  xDriveArticle(serviceId: string, plan: unknown, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_DRIVE_ARTICLE, { serviceId, plan, targetWcId });
+  xDriveArticle(serviceId: string, plan: unknown, targetWcId?: number, taskId?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRIVE_ARTICLE, { serviceId, plan, targetWcId, taskId });
   },
   /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。 */
   xTestDriveStep(serviceId: string, step: unknown, targetWcId?: number): Promise<unknown> {

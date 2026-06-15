@@ -605,6 +605,7 @@ declare global {
         serviceId: XServiceId,
         plan: ArticlePlan,
         targetWcId?: number,
+        taskId?: string,
       ): Promise<{ success: boolean; error?: string; drivenSteps?: number; warnings?: string[] }>;
       /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。media 的 mediaUrl 可传磁盘绝对路径。 */
       xTestDriveStep(

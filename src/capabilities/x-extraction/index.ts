@@ -82,8 +82,10 @@ async function driveArticle(
   serviceId: XServiceId,
   plan: ArticlePlan,
   targetWcId?: number | null,
+  /** 进度 overlay 的 taskId(传则 main 逐 step 推 PROGRESS_UPDATE)。 */
+  taskId?: string,
 ): Promise<XDriveArticleResult> {
-  return window.electronAPI.xDriveArticle(serviceId, plan, targetWcId ?? undefined);
+  return window.electronAPI.xDriveArticle(serviceId, plan, targetWcId ?? undefined, taskId);
 }
 
 // ── 拖拽落点 ──

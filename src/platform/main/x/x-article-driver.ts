@@ -1215,10 +1215,24 @@ export async function prepareArticleContext(
 export { ensureCleanState, driveStep, getDataBlockCount, confirmBlockLanded, verifyMediaContent, verifyTableContent };
 export type { StepResult };
 
+/** step kind → 进度文案的中文块名。 */
+const STEP_LABEL: Record<ArticleInsertStep['kind'], string> = {
+  html: '文字段落',
+  heading: '标题',
+  latex: '公式',
+  code: '代码',
+  table: '表格',
+  posts: '嵌推',
+  divider: '分割线',
+  media: '图片',
+};
+
 export async function driveArticlePlan(
   serviceId: XServiceId,
   plan: ArticlePlanPayload,
   targetWcId?: number,
+  /** 逐 step 进度回调(current 从 1 起,total = 步数)。用于驱动 renderer 的进度 overlay。 */
+  onProgress?: (current: number, total: number, label: string) => void,
 ): Promise<DriveArticleResult> {
   if (!plan || !Array.isArray(plan.steps)) {
     return { success: false, error: '无效的 Article 计划' };
@@ -1264,7 +1278,10 @@ export async function driveArticlePlan(
   //    重试闭环」)。保留**可靠的部分**:`ensureCleanState`(防残留模态级联)+ 模态开/关的局部重试
   //    (基于 modalOpenMarker 这个可靠信号,不依赖正文验证)。每步失败 fail loud,不中断整篇。
   let driven = 0;
-  for (const step of plan.steps) {
+  const total = plan.steps.length;
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i];
+    onProgress?.(i + 1, total, STEP_LABEL[step.kind] || step.kind); // 进度:第 i+1/total 块
     let res: StepResult;
     try {
       await ensureCleanState(wc, art); // 干净态进入,防上一步残留拖垮这步

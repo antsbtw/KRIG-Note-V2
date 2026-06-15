@@ -109,7 +109,7 @@ export function registerXHandlers(): void {
   // ⚠️ 写方向红线:driveArticlePlan 全程只插内容,绝不点 Publish。
   ipcMain.handle(IPC_CHANNELS.X_DRIVE_ARTICLE, async (_e, payload: unknown) => {
     const p = payload as
-      | { serviceId?: unknown; plan?: unknown; targetWcId?: unknown }
+      | { serviceId?: unknown; plan?: unknown; targetWcId?: unknown; taskId?: unknown }
       | null;
     if (!p || !isXServiceId(p.serviceId)) {
       return { success: false, error: 'invalid driveArticle payload' };
@@ -119,7 +119,20 @@ export function registerXHandlers(): void {
       return { success: false, error: 'invalid Article plan(缺 steps)' };
     }
     const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
-    return driveArticlePlan(p.serviceId, plan, targetWcId);
+    // 进度:renderer 传 taskId 则逐 step 推 PROGRESS_UPDATE 回发起窗口(复用 GlobalProgressOverlay)。
+    const taskId = typeof p.taskId === 'string' ? p.taskId : undefined;
+    const onProgress = taskId
+      ? (current: number, total: number, label: string): void => {
+          if (_e.sender.isDestroyed()) return;
+          _e.sender.send(IPC_CHANNELS.PROGRESS_UPDATE, {
+            taskId,
+            message: `正在驱动第 ${current}/${total} 块:${label}`,
+            current,
+            total,
+          });
+        }
+      : undefined;
+    return driveArticlePlan(p.serviceId, plan, targetWcId, onProgress);
   });
 
   // X_DRAG_ARM — note 拖起:往指定 X guest 装 mousemove 监听(记录最后坐标)
