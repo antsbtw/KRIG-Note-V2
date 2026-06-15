@@ -749,6 +749,66 @@ async function driveHtml(
   return { ok: true };
 }
 
+/**
+ * 标题块(★ 2026-06-14 总指挥正解):**不靠 paste `<h1>/<h2>` 让 X 识别**(图块边界后 X 会降级正文),
+ * 而是**填纯文本 → 选中该块全文 → 点工具栏块类型下拉选 Heading/Subheading**(X 自己格式化,不受块边界影响)。
+ *   level 1 → Heading(大标题);2+ → Subheading(X 只有这两级)。
+ */
+async function driveHeading(
+  wc: Electron.WebContents,
+  art: XArticleSelectors,
+  level: number,
+  text: string,
+): Promise<StepResult> {
+  const t = text.trim();
+  if (!t) return { ok: false, warning: '标题为空' };
+  const wantLabel = level <= 1 ? art.blockTypeLabels.heading : art.blockTypeLabels.subheading;
+  console.log(`[x-article-driver] driveHeading: level=${level} → ${wantLabel} "${t.slice(0, 20)}"`);
+
+  // ① paste 标题纯文本(零宽前缀起新块;text/plain 即可,标题格式靠下面工具栏设)。
+  const before = await getDataBlockCount(wc, art);
+  const ok = await pasteTextToWebview(wc, art.body, '\n' + t, '<p>' + String.fromCharCode(0x200b) + '</p><p>' + t + '</p>');
+  if (!ok) return { ok: false, warning: '标题文字未粘贴落地' };
+  const landed = await confirmBlockLanded(wc, art, { beforeCount: before, minDelta: 1, label: 'heading' });
+  if (!landed.landed) return { ok: true, warning: `X块[heading]文字未落地(请在 X 手动设标题)` };
+  await sleep(STEP_SETTLE_MS);
+
+  // ② 选中刚 paste 的标题块全文(光标应在该块末尾;选中整块文字让工具栏作用于它)。
+  await wc.executeJavaScript(`
+    (function(){
+      try {
+        var blocks = document.querySelectorAll(${JSON.stringify(blockSelectorOf(art))});
+        if (!blocks.length) return false;
+        var last = blocks[blocks.length-1];
+        last.focus && last.focus();
+        var range = document.createRange(); range.selectNodeContents(last);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        return true;
+      } catch(e){ return false; }
+    })();
+  `).catch(() => false);
+  await sleep(STEP_SETTLE_MS);
+
+  // ③ 点工具栏块类型下拉(当前显示 Body/Subheading)→ 点开。
+  //    下拉触发钮文本 = 当前块类型(Body/Heading/Subheading 任一),三个都试着点开。
+  const opened =
+    (await clickByText(wc, art.blockTypeDropdown, art.blockTypeLabels.body)) ||
+    (await clickByText(wc, art.blockTypeDropdown, art.blockTypeLabels.subheading)) ||
+    (await clickByText(wc, art.blockTypeDropdown, art.blockTypeLabels.heading));
+  if (!opened) {
+    return { ok: true, warning: '标题已填但未找到工具栏块类型下拉(请在 X 手动设 Heading;selector 待校)' };
+  }
+  await sleep(STEP_SETTLE_MS);
+
+  // ④ 点目标块类型选项(Heading / Subheading)。
+  const picked = await clickByText(wc, art.menuItem + ', [role="option"], button, [role="button"]', wantLabel);
+  if (!picked) {
+    return { ok: true, warning: `标题已填但未点中「${wantLabel}」选项(请在 X 手动设;selector 待校)` };
+  }
+  await sleep(STEP_SETTLE_MS);
+  return { ok: true };
+}
+
 /** LaTeX:Insert→LaTeX→填 latex→Update。 */
 async function driveLatex(
   wc: Electron.WebContents,
@@ -1092,6 +1152,8 @@ async function driveStep(
   switch (step.kind) {
     case 'html':
       return driveHtml(wc, art, step.html);
+    case 'heading':
+      return driveHeading(wc, art, step.level, step.text);
     case 'latex':
       return driveLatex(wc, art, step.latex);
     case 'code':

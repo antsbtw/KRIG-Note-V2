@@ -169,19 +169,23 @@ describe('buildArticlePlan — 各 block → 对应原生 step', () => {
   });
 });
 
-describe('buildArticlePlan — 连续可粘贴块批量成一个 html step', () => {
-  it('连续标题/段落/列表 → 合并为单个 html step', () => {
+describe('buildArticlePlan — 标题独立成 heading step,其余可粘贴块批量 html', () => {
+  it('标题 → 独立 heading step(★ 2026-06-14:标题走工具栏格式化,不进 html paste);段落/列表 → html step', () => {
     const list = schema.node('bulletList', null, [
       schema.node('listItem', null, [para('项一')]),
       schema.node('listItem', null, [para('项二')]),
     ]);
     const plan = buildArticlePlan(doc(title('t'), heading(2, '小标题'), para('段落'), list), schema);
-    expect(plan.steps).toHaveLength(1);
-    expect(plan.steps[0].kind).toBe('html');
-    const html = (plan.steps[0] as { html: string }).html;
-    expect(html).toContain('<h2>小标题</h2>');
+    // 标题独立成 heading step;段落+列表合并成一个 html step。
+    expect(plan.steps).toHaveLength(2);
+    expect(plan.steps[0].kind).toBe('heading');
+    expect((plan.steps[0] as { level: number; text: string }).level).toBe(2);
+    expect((plan.steps[0] as { level: number; text: string }).text).toBe('小标题');
+    expect(plan.steps[1].kind).toBe('html');
+    const html = (plan.steps[1] as { html: string }).html;
     expect(html).toContain('<p>段落</p>');
     expect(html).toContain('<li>');
+    expect(html).not.toContain('<h2>'); // 标题不再进 html
   });
 
   it('普通 image → media step(总指挥实测 <img> 粘不进 X,走 Media 喂文件)', () => {

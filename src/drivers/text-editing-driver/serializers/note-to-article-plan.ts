@@ -42,7 +42,7 @@ import { serializeTableToMarkdown } from './pm-to-markdown';
 // ═══════════════════════════════════════════════════════
 
 /** X Article 原生 Insert 菜单项(驱动器据此选菜单 + 填模态)。 */
-export type ArticleInsertKind = 'html' | 'latex' | 'code' | 'table' | 'posts' | 'divider' | 'media';
+export type ArticleInsertKind = 'html' | 'heading' | 'latex' | 'code' | 'table' | 'posts' | 'divider' | 'media';
 
 interface BaseStep {
   kind: ArticleInsertKind;
@@ -57,6 +57,17 @@ interface BaseStep {
 export interface HtmlStep extends BaseStep {
   kind: 'html';
   html: string;
+}
+
+/**
+ * 标题块(★ 2026-06-14 总指挥正解):**不靠 paste `<h1>/<h2>` 让 X 识别**(图块边界后 X 不可靠,
+ * 会降级正文),而是**填纯文本 → 选中该块 → 点工具栏块类型下拉选 Heading/Subheading**(X 自己格式化,
+ * 不受块边界影响)。level:1 → Heading(大标题),2+ → Subheading(X 只有这两级 + Body)。
+ */
+export interface HeadingStep extends BaseStep {
+  kind: 'heading';
+  level: number; // note heading level(driver 据此选 Heading=1 / Subheading=2+)
+  text: string; // 标题纯文本
 }
 
 /** 块级公式 → 填 X LaTeX 模态文本框(latex 源码,无 `$` 包裹)→ Update。 */
@@ -101,6 +112,7 @@ export interface MediaStep extends BaseStep {
 
 export type ArticleInsertStep =
   | HtmlStep
+  | HeadingStep
   | LatexStep
   | CodeStep
   | TableStep
@@ -404,6 +416,16 @@ export function buildArticlePlan(
       if (step) {
         steps.push(step);
         collectStepWarning(step, child, warnSet);
+      }
+      continue;
+    }
+    // ★ 标题块单独成 heading step(2026-06-14 总指挥正解:填文本+选中+点工具栏格式化,
+    //   不靠 paste <h1>/<h2> —— 图块边界后 X 会把 heading 降级正文)。
+    if (child.type.name === 'heading') {
+      flushHtml(); // 保文档顺序:先刷前面累积的可粘贴段
+      const text = (child.textContent || '').trim();
+      if (text) {
+        steps.push({ kind: 'heading', level: (child.attrs?.level as number) || 1, text });
       }
       continue;
     }

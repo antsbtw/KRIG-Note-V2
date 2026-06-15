@@ -136,6 +136,17 @@ export interface XArticleSelectors {
    */
   editBlockButton: string;
   /**
+   * 工具栏「块类型下拉」触发钮(★ 2026-06-14 总指挥正解:标题=选中块+点这里选 Heading/Subheading)。
+   * 实测它显示当前块类型文本(Body/Heading/Subheading)。驱动器靠 blockTypeLabels 按文本匹配点开。
+   */
+  blockTypeDropdown: string;
+  /** 块类型下拉的选项可见文本(点开下拉后按文本匹配选)。 */
+  blockTypeLabels: {
+    heading: string; // 大标题(note level 1)
+    subheading: string; // 副标题(note level 2+)
+    body: string; // 正文
+  };
+  /**
    * 模态确认按钮容器 selector(底部按钮，如 [role="button"]/button)。驱动器用它 + 下面
    * modalButtonLabels 按可见文本匹配点击(同菜单项,纯 CSS 选不中文本)。
    */
@@ -303,6 +314,10 @@ const X_PROFILE: XServiceProfile = {
       tableGridCellLabel: 'Insert a {rows} by {cols} table',
       // 嵌入块编辑铅笔(★ 实测 2026-06-13):X 嵌入块(表格等)插入后是预览态,先点这个进编辑态 cell 才可填。
       editBlockButton: 'button[aria-label="Edit block"], [role="button"][aria-label="Edit block"]',
+      // 工具栏块类型下拉(★ 2026-06-14 正解):显示 Body/Heading/Subheading 文本的可点元素。
+      //   driver 用 blockTypeLabels 按文本匹配点开(纯 CSS 选不中文本)。容器给宽松候选。
+      blockTypeDropdown: 'button, [role="button"], [aria-haspopup]',
+      blockTypeLabels: { heading: 'Heading', subheading: 'Subheading', body: 'Body' },
       // 模态确认按钮(★ 实测更正):底部蓝按钮文本是 **"Insert"**(不是 "Update");Media Crop 可能 "Save"。
       modalButton: 'button, [role="button"]',
       modalButtonLabels: { update: 'Insert', save: 'Save' },

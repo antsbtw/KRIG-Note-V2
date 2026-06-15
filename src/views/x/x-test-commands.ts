@@ -19,7 +19,10 @@ import type { ArticleInsertStep } from '@drivers/text-editing-driver/serializers
 const TEST_DATA: Record<string, ArticleInsertStep> = {
   // ★ 标题用 <h2>:X Article 标题只到 H3(article-doc-to-html 把 note heading 夹到 X_MAX_HEADING_LEVEL=3)。
   //   <h6> 超 X 标题范围会被降级成近正文样式(非 bug,是层级超限)。真实发布走 articleDocToHtml 自动夹到 h2/h3。
-  html: { kind: 'html', html: '<h2>二级标题测试</h2><p>这是正文段落 hello world。</p>' },
+  html: { kind: 'html', html: '<p>这是正文段落 hello world。</p>' },
+  // 标题走 heading step(★ 工具栏格式化):level 1→Heading 大标题、2+→Subheading。
+  heading1: { kind: 'heading', level: 1, text: '一级大标题测试HEADING' },
+  heading2: { kind: 'heading', level: 2, text: '二级副标题测试SUBHEADING' },
   latex: { kind: 'latex', latex: 'E = mc^2' },
   code: { kind: 'code', language: 'javascript', code: 'const sum = (a, b) => a + b;\nconsole.log(sum(1, 2));' },
   table: { kind: 'table', markdown: '| 序号 | 地区 | 出口数量 |\n| --- | --- | --- |\n| 1 | HK | 1 |\n| 2 | TW | 2 |' },
@@ -78,6 +81,8 @@ export function registerXTestCommands(): void {
   //   也可 __xtest.run('custom', {kind:'media', mediaUrl:'/abs/path.png'}) 自定义。
   (window as unknown as { __xtest?: Record<string, unknown> }).__xtest = {
     html: () => runTestStep('html', TEST_DATA.html),
+    heading1: () => runTestStep('heading1', TEST_DATA.heading1),
+    heading2: () => runTestStep('heading2', TEST_DATA.heading2),
     latex: () => runTestStep('latex', TEST_DATA.latex),
     code: () => runTestStep('code', TEST_DATA.code),
     table: () => runTestStep('table', TEST_DATA.table),
@@ -86,7 +91,22 @@ export function registerXTestCommands(): void {
     image: () => runTestStep('media-image', TEST_DATA.mediaImage),
     video: () => runTestStep('media-video', TEST_DATA.mediaVideo),
     run: (name: string, step: ArticleInsertStep) => runTestStep(name, step),
-    /** 诊断:图(media)后紧跟标题(html)连调 —— 复现整篇里"图后标题重复/失格"。 */
+    /** ★ 验证正解:图(media)后紧跟 heading step(工具栏格式化),看图后标题是否成格。 */
+    mediaHeading: async () => {
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) { window.alert('无活跃 ws'); return; }
+      const x = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = x.getXHostWcId(wsId);
+      const steps: ArticleInsertStep[] = [
+        { kind: 'media', mediaUrl: '/Users/wenwu/Downloads/GRIG-NoteManner.png' },
+        { kind: 'heading', level: 2, text: '图后标题SUB走工具栏' },
+        { kind: 'html', html: '<p>图后正文</p>' },
+      ];
+      const r = await window.electronAPI.xTestDriveSequence('x', steps, wcId ?? undefined);
+      console.log('[x-test] mediaHeading 结果:', r);
+      window.alert('[mediaHeading] 看右边:图后「图后标题SUB走工具栏」是否是 Subheading 标题格式\n' + JSON.stringify(r, null, 2));
+    },
+    /** 诊断:图(media)后紧跟标题(html paste)—— 旧方式对照(应失格)。 */
     mediaSeq: async () => {
       const wsId = workspaceManager.getActiveId();
       if (!wsId) { window.alert('无活跃 ws'); return; }
