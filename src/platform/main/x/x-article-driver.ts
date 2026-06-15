@@ -736,9 +736,13 @@ async function driveHtml(
     `[x-article-driver] driveHtml: len=${html.length} hasTable=${html.includes('<table')} ` +
       `preview="${html.slice(0, 80).replace(/\n/g, ' ')}"`,
   );
+  const before = await getDataBlockCount(wc, art);
   const ok = await pasteTextToWebview(wc, art.body, plain, htmlWithSep);
   console.log(`[x-article-driver] driveHtml paste ${ok ? '成功' : '失败'}`);
   if (!ok) return { ok: false, warning: '正文文字段落粘贴未落地' };
+  // 块落地后验:html 段至少新增 1 块(可能 +N,minDelta=1 即算落地;免 paste 返成功但 DraftJS 没收进)。
+  const landed = await confirmBlockLanded(wc, art, { beforeCount: before, minDelta: 1, label: 'html' });
+  if (!landed.landed) return { ok: true, warning: 'X块[html]粘贴后块数未增(内容可能丢失,请在 X 手动核对)' };
   return { ok: true };
 }
 
@@ -748,6 +752,7 @@ async function driveLatex(
   art: XArticleSelectors,
   latex: string,
 ): Promise<StepResult> {
+  const before = await getDataBlockCount(wc, art);
   const opened = await openInsertItem(wc, art, art.menuLabels.latex);
   if (opened) return { ok: false, warning: `公式插入失败:${opened}` };
   if (!(await waitForSelector(wc, art.latexInput, 4000))) {
@@ -760,6 +765,9 @@ async function driveLatex(
   await sleep(STEP_SETTLE_MS);
   const confirmed = await confirmModal(wc, art, art.latexInput);
   if (confirmed) return { ok: false, warning: `公式插入失败:${confirmed}` };
+  // 块落地后验:模态关 ≠ 公式块真插入。
+  const landed = await confirmBlockLanded(wc, art, { beforeCount: before, minDelta: 1, label: 'latex' });
+  if (!landed.landed) return { ok: true, warning: 'X块[latex]模态已关但块数未增(公式可能未插入,请在 X 手动核对)' };
   return { ok: true };
 }
 
@@ -770,6 +778,7 @@ async function driveCode(
   language: string,
   code: string,
 ): Promise<StepResult> {
+  const before = await getDataBlockCount(wc, art);
   const opened = await openInsertItem(wc, art, art.menuLabels.code);
   if (opened) return { ok: false, warning: `代码插入失败:${opened}` };
   if (!(await waitForSelector(wc, art.codeInput, 4000))) {
@@ -788,6 +797,9 @@ async function driveCode(
   await sleep(STEP_SETTLE_MS);
   const confirmed = await confirmModal(wc, art, art.codeInput);
   if (confirmed) return { ok: false, warning: `代码插入失败:${confirmed}` };
+  // 块落地后验:模态关 ≠ 代码块真插入。
+  const landed = await confirmBlockLanded(wc, art, { beforeCount: before, minDelta: 1, label: 'code' });
+  if (!landed.landed) return { ok: true, warning: 'X块[code]模态已关但块数未增(代码可能未插入,请在 X 手动核对)' };
   return { ok: true };
 }
 
@@ -891,6 +903,15 @@ async function driveTable(
   const confirmed = await confirmModal(wc, art, art.tableInput, ['Update', 'Insert']);
   if (confirmed) return { ok: false, warning: `表格插入失败:${confirmed}` };
 
+  // —— ⑦ 内容验证:确认表格真有内容(非空表)。Update 后 X 渲 markdown 进表格需点时间,verifyTableContent 内部 poll。
+  if (!(await verifyTableContent(wc, art))) {
+    // 给 X 渲染一点时间再验一次(markdown→table 异步)。
+    await sleep(500);
+    if (!(await verifyTableContent(wc, art))) {
+      return { ok: true, warning: 'X块[table]已插入但未检测到 cell 内容(markdown 格式可能非法,请在 X 手动核对)' };
+    }
+  }
+
   if (truncated) {
     return { ok: true, warning: `表格超 10×10 已夹到 ${r}×${c}(X 网格上限),部分行列丢失,请在 X 手动补` };
   }
@@ -951,6 +972,7 @@ async function drivePosts(
   art: XArticleSelectors,
   tweetUrl: string,
 ): Promise<StepResult> {
+  const before = await getDataBlockCount(wc, art);
   const opened = await openInsertItem(wc, art, art.menuLabels.posts);
   if (opened) return { ok: false, warning: `嵌推插入失败:${opened}` };
   if (!(await waitForSelector(wc, art.postsUrlInput, 4000))) {
@@ -968,6 +990,9 @@ async function drivePosts(
       return { ok: false, warning: '嵌推插入失败:模态未关闭(URL 格式被拒?)' };
     }
   }
+  // 块落地后验:框消失 ≠ 推文块落地(URL 无效时框也会收起但无块)。嵌推卡片异步抓取,timeout 放宽。
+  const landed = await confirmBlockLanded(wc, art, { beforeCount: before, minDelta: 1, timeoutMs: 8000, label: 'posts' });
+  if (!landed.landed) return { ok: true, warning: 'X块[posts]URL 框已关但块数未增(URL 可能被拒,请在 X 手动核对)' };
   return { ok: true };
 }
 
@@ -977,10 +1002,16 @@ async function driveDivider(
   art: XArticleSelectors,
 ): Promise<StepResult> {
   console.log('[x-article-driver] driveDivider 开始');
+  const before = await getDataBlockCount(wc, art);
   const opened = await openInsertItem(wc, art, art.menuLabels.divider, false); // 不弹模态
   if (opened) {
     console.log(`[x-article-driver] driveDivider 失败: ${opened}`);
     return { ok: false, warning: `分割线插入失败:${opened}` };
+  }
+  // 块落地后验:分割线落定 = 块数 +2(分割线块 + X 自动补的空文字块,实测)。菜单收起 ≠ 真插入。
+  const landed = await confirmBlockLanded(wc, art, { beforeCount: before, minDelta: 2, label: 'divider' });
+  if (!landed.landed) {
+    return { ok: true, warning: 'X块[divider]菜单已收但块数未+2(分割线可能未插入,请在 X 手动核对)' };
   }
   console.log('[x-article-driver] driveDivider 成功');
   return { ok: true };

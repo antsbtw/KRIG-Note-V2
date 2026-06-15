@@ -281,7 +281,25 @@ data URI 修复生效 —— **Mermaid 真渲成图了，图片上传也成了**
 - **Mermaid 没渲成图**（提示文案先改为列出 reason + 可操作）：实机暴露**真根因 = `Tainted canvases may not be exported`**（不是 width/height）。mermaid 编辑器渲染用 `htmlLabels:true` → 节点标签走 `<foreignObject>` 包 HTML（引外部样式/字体）→ 把 SVG 画进 canvas 时**污染 canvas** → `toDataURL()` 被安全策略拒。**修**：新增 `renderMermaidToExportSvg`（临时切 `htmlLabels:false` 渲纯 SVG `<text>` 标签、无 foreignObject、canvas 不污染，渲完恢复编辑器配置）；`render-blocks-to-media` 的 mermaid 路改用它（再补显式 width/height 兜 useMaxWidth）。→ Mermaid **直接渲染成图**，不再退源码让用户手动。
 - **Table 列宽**：X Article 表格列宽是**X 编辑器自身行为**（Insert 流程只有网格选行列，无列宽控制项）—— 驱动器插入+填内容后，列宽由 X 自动/用户在 X 里手动调（X 是否支持拖列宽看 X 能力）。无程序化杠杆，属 X 侧。
 
-### ★★★ 最新增量（2026-06-14 中间态缓存落地 + 一举定案标题丢失 bug)
+### ★★★★ 最新增量（2026-06-14 逐块完成确认 + 逐块底层测试模块 + 六级标题根治)
+
+**总指挥架构原则**:X 每段 = note block,必须确认块**完整内容真正落进文档**再进下一块,杜绝 fire-and-forget。并要求「写每种块的底层测试模块,直到所有块都独立测试成功」,固化为可跨平台(未来 Reddit/微博)的范式。
+
+**spike 实测铁证(X Article = DraftJS)**:正文容器 `[data-contents="true"]`,每块 `[data-block="true"]` 有唯一 `data-offset-key`。块落定 = `[data-block]` 计数增加:文字/标题+1、divider+2(线+自动空文字块)、table+1、媒体每个+1。媒体块是 `<SECTION data-block>` 含 img/video;图 src=blob:(本地预览,不能用 src 判上传完成)。
+
+**实施**:
+- **A 确认函数库**(x-article-driver.ts §1.5):`getDataBlockCount`(数 DraftJS 块)+ `confirmBlockLanded`(poll 等块数 +N 且可选验内容,**免疫"waitForSelectorGone 假成功"陷阱**——要求计数真涨)+ `verifyTableContent`(cell 非空)+ `verifyMediaContent`(末块含 img/video src)。
+- **C ensureTrailingParagraph 重写**(六级标题被吞 bug 根治):旧版 `lastElementChild` 下钻 + `/^(P|H1..H6)$/` 判据对 DraftJS **永久失配**(顶层 wrapper 永远是 div)。改用最后一个 `[data-block]`,仅末块是嵌入块(SECTION/含 img·video·table·hr)才补空段,文字块不补 → 媒体块后另起干净段落,后续标题不被吞。**实机已验证:图后六级标题不再消失。**
+- **B driveMedia 重写**:抽 `driveMediaWithPath`(磁盘绝对路径,生产经 resolveMediaPath、测试直喂,逻辑不漂移);点 Save 前先 `waitForSelector(modalOpenMarker)` 确认 Crop 真弹(旧版盲点空);末尾 `confirmBlockLanded` 验块真落+含图。mediaInsertedThumb 修正为 `section[data-block] img/video`。
+- **D 逐块底层测试模块**:`test-drivers.ts`(`testDriveStep` 独立驱动一个块+验证完整落定,media 走 driveMediaWithPath 喂绝对路径**全自动**)+ `X_TEST_DRIVE_STEP` IPC + dev 命令 `x-view.test-drive-<kind>` + window 助手 `__xtest.image()/table()/...`(devtools 直调,自动取 wcId)。**测试代码隔离独立文件,可摘除**。
+- **第二部分加固**:html/latex/code/table/posts/divider 各 driveXxx 生产路径也接 `confirmBlockLanded`(table 验内容、divider 验 +2),失败 warn 不阻断。
+- **预留**:`XArticleSelectors.blockSelector`(跨平台接缝,默认 DraftJS;未来 Reddit/微博填各自块判据)。
+
+**✅ 逐块独立测通(实机 `__xtest`)**:图/视频/html/divider/table/latex/code **7 块全部 landed=true + contentOk=true**;divider 块数+2、table contentOk(有内容)、媒体 contentOk(含图)。这套"逐块输入+完成确认"即总指挥要的**可复用范式**。
+
+**门禁**:typecheck 0 / lint 0 / X 测试 110 全绿。
+
+### ★★★ 上一轮增量（2026-06-14 中间态缓存落地 + 一举定案标题丢失 bug)
 
 **总指挥架构洞察**:发布链路修 bug 难,根因是**没有可检查的中间态缓存,只能肉眼看 X 渲染反推,每次半截验证**。解法 = 三段式(① 规范化转图/提示 → ② 缓存中间态诊断 → ③ 标准上传口)。调研发现「先转再传」已是现状、中间态 `ArticlePlan` 已存在且与来源零耦合,**真正缺的只有「缓存中间态」**。
 

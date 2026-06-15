@@ -17,7 +17,9 @@ import type { ArticleInsertStep } from '@drivers/text-editing-driver/serializers
 
 /** 各块的固定测试数据(每块一条命令独立驱动)。media 用绝对路径(总指挥提供)。 */
 const TEST_DATA: Record<string, ArticleInsertStep> = {
-  html: { kind: 'html', html: '<h6>六级标题测试</h6><p>这是正文段落 hello world。</p>' },
+  // ★ 标题用 <h2>:X Article 标题只到 H3(article-doc-to-html 把 note heading 夹到 X_MAX_HEADING_LEVEL=3)。
+  //   <h6> 超 X 标题范围会被降级成近正文样式(非 bug,是层级超限)。真实发布走 articleDocToHtml 自动夹到 h2/h3。
+  html: { kind: 'html', html: '<h2>二级标题测试</h2><p>这是正文段落 hello world。</p>' },
   latex: { kind: 'latex', latex: 'E = mc^2' },
   code: { kind: 'code', language: 'javascript', code: 'const sum = (a, b) => a + b;\nconsole.log(sum(1, 2));' },
   table: { kind: 'table', markdown: '| 序号 | 地区 | 出口数量 |\n| --- | --- | --- |\n| 1 | HK | 1 |\n| 2 | TW | 2 |' },
@@ -70,4 +72,19 @@ export function registerXTestCommands(): void {
   commandRegistry.register('x-view.test-drive-posts', () => void runTestStep('posts', TEST_DATA.posts));
   commandRegistry.register('x-view.test-drive-media-image', () => void runTestStep('media-image', TEST_DATA.mediaImage));
   commandRegistry.register('x-view.test-drive-media-video', () => void runTestStep('media-video', TEST_DATA.mediaVideo));
+
+  // ★ dev 便捷:挂到 window 供 devtools console 直接调(自动取当前 ws 的 X wcId)。
+  //   用法:__xtest.image() / __xtest.table() / __xtest.divider() / __xtest.html() ...
+  //   也可 __xtest.run('custom', {kind:'media', mediaUrl:'/abs/path.png'}) 自定义。
+  (window as unknown as { __xtest?: Record<string, unknown> }).__xtest = {
+    html: () => runTestStep('html', TEST_DATA.html),
+    latex: () => runTestStep('latex', TEST_DATA.latex),
+    code: () => runTestStep('code', TEST_DATA.code),
+    table: () => runTestStep('table', TEST_DATA.table),
+    divider: () => runTestStep('divider', TEST_DATA.divider),
+    posts: () => runTestStep('posts', TEST_DATA.posts),
+    image: () => runTestStep('media-image', TEST_DATA.mediaImage),
+    video: () => runTestStep('media-video', TEST_DATA.mediaVideo),
+    run: (name: string, step: ArticleInsertStep) => runTestStep(name, step),
+  };
 }
