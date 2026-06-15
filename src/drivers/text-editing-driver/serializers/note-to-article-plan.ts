@@ -163,6 +163,7 @@ function isNativeInsertBlock(node: PMNode): boolean {
     //   几行字)。故 table 必须走原生网格(点 Insert→Table→选行列→逐格填),不能走 html 粘贴)。
     name === 'table' ||
     name === 'tweetBlock' ||
+    name === 'videoBlock' || // 视频:有外链 → 链接文本;本地 media:// → media 喂文件(见 nativeBlockToStep)
     name === 'horizontalRule' ||
     name === 'mathVisual' // 兜底转图(若 mediaMap 有)→ media step;否则降级
   );
@@ -287,6 +288,15 @@ function pasteableBlocksToHtml(
  * mediaMap 命中(Mermaid/mathVisual 已渲图)→ media step;否则按类型走原生 / 降级。
  * @returns step,或 null(本块无内容可发,如空表)。
  */
+/** HTML 属性/文本转义(链接 URL 里可能有 & 等)。 */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function nativeBlockToStep(
   node: PMNode,
   mediaMap: ArticleMediaMap,
@@ -331,12 +341,24 @@ function nativeBlockToStep(
     }
     case 'tweetBlock': {
       const tweetUrl = ((node.attrs?.tweetUrl as string) || '').trim();
-      if (!tweetUrl) {
-        // 无 URL（罕见）→ 降级文本（作者 + 正文）走 html 段更合适，这里返 null，由调用方上层
-        // 不会走到（tweetBlock 总有 url）。保守降级为空跳过。
-        return null;
+      if (!tweetUrl) return null; // 无 URL（罕见）→ 跳过
+      // ★ 2026-06-15 总指挥拍板:tweetBlock **不走 Posts 嵌推模态**(X Article 草稿编辑器里嵌推/视频
+      //   卡片不渲染 + Posts selector 待 spike 不稳),而是**把推文链接当独立链接 paste 进正文**,
+      //   100% 可靠(链接就是文字),剩下让用户在 X 里自行决定要不要嵌入。video 有链接同理(见下 videoBlock)。
+      const safe = escapeHtml(tweetUrl);
+      return { kind: 'html', html: `<p><a href="${safe}">${safe}</a></p>` };
+    }
+    case 'videoBlock': {
+      // 视频(2026-06-15 总指挥方案):**有外链(http/youtube/...)→ 链接文本**(用户自行决定);
+      //   **本地 media:// → media 喂文件**(走 X 原生 Media 上传,已通)。
+      const src = ((node.attrs?.src as string) || '').trim();
+      if (!src) return null;
+      if (src.startsWith('media://')) {
+        return { kind: 'media', mediaUrl: src, alt: '视频' };
       }
-      return { kind: 'posts', tweetUrl };
+      // 外链视频:Article 草稿不渲染播放器,直接放链接,用户自行编辑/嵌入。
+      const safe = escapeHtml(src);
+      return { kind: 'html', html: `<p><a href="${safe}">${safe}</a></p>` };
     }
     case 'horizontalRule':
       return { kind: 'divider' };

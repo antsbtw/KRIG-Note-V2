@@ -27,8 +27,8 @@ const TEST_DATA: Record<string, ArticleInsertStep> = {
   code: { kind: 'code', language: 'javascript', code: 'const sum = (a, b) => a + b;\nconsole.log(sum(1, 2));' },
   table: { kind: 'table', markdown: '| 序号 | 地区 | 出口数量 |\n| --- | --- | --- |\n| 1 | HK | 1 |\n| 2 | TW | 2 |' },
   divider: { kind: 'divider' },
-  // posts:换成你的真实可嵌推文 URL
-  posts: { kind: 'posts', tweetUrl: 'https://x.com/X/status/1234567890123456789' },
+  // posts:真实可嵌推文 URL(从缓存 step[15] 取的实际 tweetBlock URL)。
+  posts: { kind: 'posts', tweetUrl: 'https://x.com/ElvaMusclecat/status/2066386703456289270' },
   // media:绝对路径(main 直喂,绕 resolveMediaPath)
   mediaImage: { kind: 'media', mediaUrl: '/Users/wenwu/Downloads/GRIG-NoteManner.png' },
   mediaVideo: { kind: 'media', mediaUrl: '/Users/wenwu/Downloads/yapmışız.mp4' },

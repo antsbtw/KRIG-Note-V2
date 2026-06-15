@@ -157,10 +157,12 @@ describe('buildArticlePlan — 各 block → 对应原生 step', () => {
     expect(md).toContain('| 1 | 2 |');
   });
 
-  it('tweetBlock → posts step(tweetUrl)', () => {
+  it('tweetBlock → 链接文本 html step(★ 2026-06-15:Article 草稿不渲染嵌推卡片,放链接让用户自行编辑)', () => {
     const url = 'https://x.com/a/status/123';
     const plan = buildArticlePlan(doc(title('t'), tweetBlock(url)), schema);
-    expect(plan.steps).toEqual<ArticleInsertStep[]>([{ kind: 'posts', tweetUrl: url }]);
+    expect(plan.steps).toEqual<ArticleInsertStep[]>([
+      { kind: 'html', html: `<p><a href="${url}">${url}</a></p>` },
+    ]);
   });
 
   it('horizontalRule → divider step', () => {
