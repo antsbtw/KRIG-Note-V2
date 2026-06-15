@@ -22,6 +22,7 @@ import type {
   ProgressDrivePayload,
 } from '@shared/ipc/backup-types';
 import type { FolderViewType } from '@capabilities/folder/types';
+import type { XPlanCacheEnvelope } from '@shared/ipc/x-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /** 诊断上报(renderer → main) */
@@ -507,6 +508,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }): void {
     ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_RECORD_STAGE, args);
   },
+  /** X 发布中间态(ArticlePlan + 渲图结果)落盘缓存,fire-and-forget,诊断用。 */
+  xPlanCacheDump(env: XPlanCacheEnvelope): void {
+    ipcRenderer.send(IPC_CHANNELS.X_PLAN_CACHE_DUMP, env);
+  },
 
   /**
    * 驱动全屏进度 overlay(renderer → main → overlay)。
@@ -783,13 +788,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
-  /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)*/
-  xPasteTweet(serviceId: string, text: string, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId });
+  /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)。
+   *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。*/
+  xPasteTweet(serviceId: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId, mediaUrls });
   },
-  /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)*/
-  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId });
+  /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)。
+   *  mediaUrls(阶段 2.5-b):同 xPasteTweet。*/
+  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number, mediaUrls?: string[]): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId, mediaUrls });
+  },
+  /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
+   *  ⚠️ 写方向红线:只插内容,绝不程序点 Publish。 */
+  xDriveArticle(serviceId: string, plan: unknown, targetWcId?: number, taskId?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DRIVE_ARTICLE, { serviceId, plan, targetWcId, taskId });
+  },
+  /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。 */
+  xTestDriveStep(serviceId: string, step: unknown, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, step, targetWcId });
+  },
+  /** 连续驱动多块(诊断块边界,如 media 后紧跟标题的重复/失格;dev 用)。 */
+  xTestDriveSequence(serviceId: string, steps: unknown[], targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, steps, targetWcId });
   },
   /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
   xDragArm(targetWcId: number): Promise<unknown> {

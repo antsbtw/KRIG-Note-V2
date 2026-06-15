@@ -9,8 +9,24 @@
 
 import type { ComponentType, CSSProperties, Ref } from 'react';
 import type { XServiceId } from '@shared/types/x-service-types';
+import type { RenderableBlock } from '@drivers/text-editing-driver/serializers/collect-renderable-blocks';
+import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
+import type { RenderBlocksResult } from './render-blocks-to-media';
 
 export type { XServiceId };
+export type { RenderableBlock };
+export type { ArticlePlan };
+export type { RenderBlocksResult, RenderedBlockMedia, BlockRenderFailure } from './render-blocks-to-media';
+
+/** 驱动 X 原生 Insert 发长文结果(终态,2026-06-13)。 */
+export interface XDriveArticleResult {
+  success: boolean;
+  error?: string;
+  /** 成功驱动的 step 数。 */
+  drivenSteps?: number;
+  /** 单 step 降级/失败汇总(非空 = 部分块没成功,用户需在 X 手动补;fail loud)。 */
+  warnings?: string[];
+}
 
 /** 抓到的推文字段(与主进程 XTweetData / tweet-block schema attrs 对齐)*/
 export interface XTweetData {
@@ -48,6 +64,11 @@ export interface XWriteResult {
   error?: string;
   /** 发布按钮是否已就位(辅助确认内容落进正确的框,不代表已发布)*/
   publishReady?: boolean;
+  /**
+   * 媒体降级提示(阶段 2.5-b):文字落地但喂图失败 / 部分图无法解析时附带。
+   * 非空 = view 侧应明示「文字已填入,但图没带上,请手动拖图」(fail loud,不假装成功)。
+   */
+  mediaWarning?: string;
 }
 
 
@@ -102,18 +123,40 @@ export interface XExtractionApi {
   /**
    * 发推:把纯文本填进 X compose 框(用户随后手动点发布)。
    * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
+   * @param mediaUrls 媒体 media:// URL 数组(阶段 2.5-b,路线 B);main 侧解析磁盘路径后
+   *   先喂图(等缩略图)再填字。喂图失败 → result.mediaWarning(文字仍填,fail loud)。
    */
-  pasteTweet(serviceId: XServiceId, text: string, targetWcId?: number | null): Promise<XWriteResult>;
+  pasteTweet(
+    serviceId: XServiceId,
+    text: string,
+    targetWcId?: number | null,
+    mediaUrls?: string[],
+  ): Promise<XWriteResult>;
   /**
    * 回复:导航到目标推 + 把纯文本填进 reply 框(用户随后手动点回复)。
    * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
+   * @param mediaUrls 同 pasteTweet(阶段 2.5-b)。
    */
   pasteReply(
     serviceId: XServiceId,
     tweetUrl: string,
     text: string,
     targetWcId?: number | null,
+    mediaUrls?: string[],
   ): Promise<XWriteResult>;
+  /**
+   * 发长文:驱动 X 原生 Insert 菜单逐 block 插入(终态,2026-06-13)。
+   * plan 由 note 侧 buildArticlePlan 产(title + 有序 steps)。
+   * ⚠️ 写方向红线:只插内容,绝不程序点 Publish —— 用户在 X 编辑器看成品 + 手动发布。
+   * warnings 非空 = 部分块降级/失败(fail loud,提示用户手动补)。
+   */
+  driveArticle(
+    serviceId: XServiceId,
+    plan: ArticlePlan,
+    targetWcId?: number | null,
+    /** 进度 overlay 的 taskId(传则 main 逐 step 推 PROGRESS_UPDATE)。 */
+    taskId?: string,
+  ): Promise<XDriveArticleResult>;
   // ── X Host wc 按 ws 登记(注入按活跃 ws 定向,治多实例串扰)──
   /** 登记某 ws 的 AI-view X Host guest wc id(AIView 调)*/
   registerXHostWcId(wsId: string, wcId: number): void;
@@ -128,6 +171,13 @@ export interface XExtractionApi {
   dragResolve(serviceId: XServiceId, targetWcId: number): Promise<XDropTarget>;
   /** 落推文:就地点该推回复按钮弹 reply 框(不跳详情页),返就绪与否 */
   dragReplyHere(serviceId: XServiceId, targetWcId: number): Promise<{ ok: boolean; error?: string }>;
+  // ── 不支持格式渲染成图(X 截图,2026-06):公式/代码/Mermaid → media:// 附件 ──
+  /**
+   * 把「纯文本装不下」的 block(公式/代码/Mermaid)渲染成图,存进 media store,
+   * 返回 media:// URL(走 2.5-b 附件管道)。失败的记 failed(fail loud,正文退源码)。
+   * 入参 blocks 由 textEditing.api.get*RenderableBlocks 取(与 markdown 同源)。
+   */
+  renderBlocksToMedia(blocks: RenderableBlock[]): Promise<RenderBlocksResult>;
   /**
    * X Host(嵌 x.com 的 webview)— forwardRef XHostHandle。
    * 封装 webview 生命周期 + per-ws partition + per-ws 代理接入。

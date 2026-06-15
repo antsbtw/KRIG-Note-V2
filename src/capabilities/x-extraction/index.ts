@@ -17,10 +17,13 @@ import type {
   XExtractTweetResult,
   XExtractTweetRequest,
   XWriteResult,
+  XDriveArticleResult,
   XDropTarget,
 } from './types';
+import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
 import { Host } from './Host';
 import { registerXHostWcId, clearXHostWcId, getXHostWcId } from './x-host-registry';
+import { renderBlocksToMedia } from './render-blocks-to-media';
 
 export type {
   XExtractionApi,
@@ -29,9 +32,15 @@ export type {
   XExtractTweetResult,
   XExtractTweetRequest,
   XWriteResult,
+  XDriveArticleResult,
   XDropTarget,
   XHostHandle,
   XHostProps,
+  RenderableBlock,
+  ArticlePlan,
+  RenderBlocksResult,
+  RenderedBlockMedia,
+  BlockRenderFailure,
 } from './types';
 
 async function extractTweet(
@@ -54,8 +63,9 @@ async function pasteTweet(
   serviceId: XServiceId,
   text: string,
   targetWcId?: number | null,
+  mediaUrls?: string[],
 ): Promise<XWriteResult> {
-  return window.electronAPI.xPasteTweet(serviceId, text, targetWcId ?? undefined);
+  return window.electronAPI.xPasteTweet(serviceId, text, targetWcId ?? undefined, mediaUrls);
 }
 
 async function pasteReply(
@@ -63,8 +73,19 @@ async function pasteReply(
   tweetUrl: string,
   text: string,
   targetWcId?: number | null,
+  mediaUrls?: string[],
 ): Promise<XWriteResult> {
-  return window.electronAPI.xPasteReply(serviceId, tweetUrl, text, targetWcId ?? undefined);
+  return window.electronAPI.xPasteReply(serviceId, tweetUrl, text, targetWcId ?? undefined, mediaUrls);
+}
+
+async function driveArticle(
+  serviceId: XServiceId,
+  plan: ArticlePlan,
+  targetWcId?: number | null,
+  /** 进度 overlay 的 taskId(传则 main 逐 step 推 PROGRESS_UPDATE)。 */
+  taskId?: string,
+): Promise<XDriveArticleResult> {
+  return window.electronAPI.xDriveArticle(serviceId, plan, targetWcId ?? undefined, taskId);
 }
 
 // ── 拖拽落点 ──
@@ -88,12 +109,14 @@ export const xExtractionCapability: XExtractionApi = {
   onExtractTweetRequest,
   pasteTweet,
   pasteReply,
+  driveArticle,
   registerXHostWcId,
   clearXHostWcId,
   getXHostWcId,
   dragArm,
   dragResolve,
   dragReplyHere,
+  renderBlocksToMedia,
   Host,
 };
 

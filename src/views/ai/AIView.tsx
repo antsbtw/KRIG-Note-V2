@@ -25,6 +25,7 @@ import {
 import type { XExtractionApi, XHostHandle } from '@capabilities/x-extraction';
 import { getAIWsState, setAIServiceId, setActiveLauncher, type LauncherId } from './data-model';
 import { AIToolbar } from './AIToolbar';
+import { XPublishOverlay } from '@shell/global-progress-overlay/XPublishOverlay';
 import './ai.css';
 
 const VIEW_ID = 'ai-view';
@@ -297,6 +298,8 @@ export function AIView({ workspaceId }: AIViewProps) {
         }}
         onLoadingChanged={(l) => { if (isX) setLoading(l); }}
       />
+      {/* X 发布局部进度遮罩(只盖本 view 区,冻结 X webview 防驱动期间破坏脚本;note 区不受影响)。 */}
+      <XPublishOverlay />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import { markdownToTweetText } from '@shared/x/markdown-to-tweet';
+import type { RenderableBlock, BlockRenderFailure } from '@capabilities/x-extraction';
 import { showXSendConfirm } from './send-confirm-popup';
 
 /** 取当前 note 的活跃 PM instanceId(右键命令瞬间快照优先,fallback focused) */
@@ -46,6 +47,86 @@ function ensureXVisible(wsId: string): void {
   }
   // 通过 bus 通知 AIView 切到 X 入口(setActiveLauncher('x') 在 AIView 侧执行)
   bus?.channels.emit('x.activate-launcher', { emittedAt: Date.now() });
+}
+
+/** X 推文媒体上限(图片)。超出只带前 N 张,其余提示用户(不静默丢)。*/
+const X_MAX_IMAGES = 4;
+
+/**
+ * 把 note 图 + 渲染图(公式/代码/Mermaid 转的图)合并成最终媒体清单。
+ *
+ * - note 图(media://,2.5-b)在前,渲染图在后,按各自文档顺序;合并后截至 X_MAX_IMAGES。
+ *   (真正的「note 图与渲染图交错的全局文档顺序」需位置信息,本期简化为「先 note 图后渲染图」,
+ *    记 TODO;两者都已各自按文档先后,超 4 张时弹窗会提示总数。)
+ * - 公式/代码图与普通图**共占 4 张额度**(总指挥拍板:渲染图也算附件数)。
+ * - http(s) 外链图无法当本地文件喂 X,不进(只取 media://)。
+ *
+ * @returns { mediaUrls: 截后清单, totalImageCount: 截前总数(>4 时弹窗提示用)}
+ */
+function combineMedia(
+  noteImages: string[],
+  renderedMediaUrls: string[],
+): { mediaUrls: string[]; totalImageCount: number } {
+  const noteMedia = noteImages.filter((src) => typeof src === 'string' && src.startsWith('media://'));
+  const all = [...noteMedia, ...renderedMediaUrls];
+  return {
+    mediaUrls: all.slice(0, X_MAX_IMAGES),
+    totalImageCount: all.length,
+  };
+}
+
+/**
+ * 统一构造「发到 X」载荷:渲染公式/代码/Mermaid block → media:// 图,合并 note 图,
+ * 同时把已转图的 block 源码从正文删掉(不裸奔 $$..$$ / 代码),fail loud 退源码。
+ *
+ * @param markdown    选区/整篇/拖块的 markdown
+ * @param noteImages  序列化器收集的 image src(media:// 清单)
+ * @param blocks      可渲染 block(公式/代码/Mermaid),与 markdown 同源
+ */
+async function buildXPayload(
+  markdown: string,
+  noteImages: string[],
+  blocks: RenderableBlock[],
+): Promise<{
+  text: string;
+  mediaUrls: string[];
+  totalImageCount: number;
+  renderFailures: BlockRenderFailure[];
+}> {
+  // 1. 渲染公式/代码/Mermaid → media://(失败的记 failed,不中断)。走 x-extraction capability
+  //    (渲染要 import driver mermaid + media-storage 运行时,view 不可直 import,故归 capability)。
+  const { rendered, failed } = blocks.length > 0
+    ? await requireCapabilityApi<XExtractionApi>('x-extraction').renderBlocksToMedia(blocks)
+    : { rendered: [] as { mediaUrl: string; source: string }[], failed: [] as BlockRenderFailure[] };
+
+  // 2. 正文:已转图的 block 源码整块删(图走附件);失败的保留源码(fail loud)。
+  const text = markdownToTweetText(markdown, {
+    renderedBlockSources: rendered.map((r) => r.source),
+  });
+
+  // 3. 媒体清单:note 图 + 渲染图,合并截 4。
+  const { mediaUrls, totalImageCount } = combineMedia(
+    noteImages,
+    rendered.map((r) => r.mediaUrl),
+  );
+
+  return { text, mediaUrls, totalImageCount, renderFailures: failed };
+}
+
+/**
+ * 把渲染失败的 block 汇成可操作的提示(fail loud:告知哪些没转成图、以源码插入、怎么手动补)。
+ * 含失败原因(reason)便于排查;给出明确的「手动处理」步骤。
+ */
+function renderFailureNote(failures: BlockRenderFailure[]): string | null {
+  if (failures.length === 0) return null;
+  const label = (k: string) => (k === 'mermaid' ? 'Mermaid 图表' : k === 'math' ? '公式' : '代码图');
+  const lines = failures.map((f) => `· ${label(f.kind)}:${f.reason || '未知原因'}`);
+  return (
+    `有 ${failures.length} 处内容未能渲染成图,已以**源码代码块**形式插进 X 文章:\n` +
+    lines.join('\n') +
+    `\n\n怎么手动处理:在 X 文章里找到对应的代码块 —— 要么保留(源码可读),` +
+    `要么删掉它、用 Insert→Media 手动插一张你自己截/导的图替代。`
+  );
 }
 
 /** 注入失败统一降级:复制到剪贴板 + alert 明示(fail loud)*/
@@ -75,11 +156,15 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 1. 选区优先,无选区取整篇
-  let { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
+  // 1. 选区优先,无选区取整篇。同源拿 images(media:// 图清单)+ renderableBlocks(公式/代码)。
+  let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
+  let blocks = textEditing.api.getSelectionRenderableBlocks(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
-    markdown = textEditing.api.getDocMarkdown(instanceId).markdown;
+    const doc = textEditing.api.getDocMarkdown(instanceId);
+    markdown = doc.markdown;
+    images = doc.images;
+    blocks = textEditing.api.getDocRenderableBlocks(instanceId);
     usedWholeDoc = true;
   }
   if (!markdown || !markdown.trim()) {
@@ -87,19 +172,29 @@ export async function sendToX(): Promise<void> {
     return;
   }
 
-  // 2. markdown → 推文纯文本
-  const text = markdownToTweetText(markdown);
-  if (!text.trim()) {
+  // 2. 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图(2.5-b 同管道)。
+  const { text, mediaUrls, totalImageCount, renderFailures } = await buildXPayload(
+    markdown,
+    images,
+    blocks,
+  );
+  if (!text.trim() && mediaUrls.length === 0) {
     window.alert('转换后内容为空,无法发到 X');
     return;
   }
 
-  // 3. 弹发送前确认弹窗(预览/字数/可编辑)。确认 → onConfirm 注入;取消 → 不注入。
+  // 3. 渲染失败 fail loud:先告知用户哪些以源码发出(不静默),再进确认弹窗。
+  const failNote = renderFailureNote(renderFailures);
+  if (failNote) window.alert(`${failNote}。`);
+
+  // 4. 弹发送前确认弹窗(预览/字数/缩略图/可编辑)。确认 → onConfirm 注入;取消 → 不注入。
   showXSendConfirm({
     text,
     usedWholeDoc,
     replyPreview: null,
-    onConfirm: (finalText) => performXInjection(wsId, finalText),
+    mediaUrls,
+    totalImageCount,
+    onConfirm: (finalText, finalMedia) => performXInjection(wsId, finalText, finalMedia),
   });
 }
 
@@ -112,7 +207,11 @@ export async function sendToX(): Promise<void> {
  * ⚠️ 写方向红线:只注入到 X 框,绝不程序点发布。
  * (回复注入走 sendToXAtDropTarget 里的就地弹框 + pasteTweet 链路,不经本函数。)
  */
-async function performXInjection(wsId: string, finalText: string): Promise<void> {
+async function performXInjection(
+  wsId: string,
+  finalText: string,
+  mediaUrls: string[] = [],
+): Promise<void> {
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
 
   // 让 X webview 显示 + 注册(main 侧 pasteTweet 内部还会 poll 等待)
@@ -125,67 +224,209 @@ async function performXInjection(wsId: string, finalText: string): Promise<void>
     console.warn('[send-to-x] 未取到本 ws 的 X Host wc id,回退 main 全局 active(多实例可能串扰)');
   }
 
-  const result = await x.pasteTweet('x', finalText, targetWcId);
+  const result = await x.pasteTweet('x', finalText, targetWcId, mediaUrls);
   if (!result.success) {
     fallbackToClipboard(finalText, result.error || '未知错误');
     return;
   }
-  // 注入成功:内容已可见地填进 X 发推框,确认弹窗里已有「需你自己点发布」红线文案,
+  // 文字落地成功,但图没带上(selector 失效 / X 没接住)→ fail loud 明示,让用户手动拖图。
+  // 不当成完全失败(文字已在框里),也不静默假装图也成功了(铁律 4)。
+  if (result.mediaWarning) {
+    window.alert(
+      `文字已填入 X,但图片没能带上(${result.mediaWarning})。\n\n` +
+        `请在 X 发推框手动拖入图片,再检查后点发布。`,
+    );
+    return;
+  }
+  // 全部成功:内容(含图)已可见地填进 X 发推框,确认弹窗里已有「需你自己点发布」红线文案,
   // 不再弹阻塞 alert 打扰(总指挥:成功告知无必要)。失败仍 fail loud(上面 fallback)。
 }
 
 /**
- * 「被拖起的 block」内容暂存(拖 block 到 X 用)。dnd.started 时抓 → 松手时用。
- * 总指挥:发的是**拖的那些 block**,不是 note 选区/整篇。
+ * 「𝕏 发布为 X 文章」(终态,2026-06-13):整篇 note → 驱动 X 原生 Insert 发长文。
+ *
+ * 与「发到 X」(发推/回复,纯文本降级)不同:这条走 X Article 编辑器,逐 block 驱动原生
+ * Insert(LaTeX/Table/Code/Posts/Media),保真、可搜索可复制。
+ *
+ * 流程:
+ *  1. 取活跃 note 整篇。
+ *  2. 取「渲图兜底块」(只 Mermaid/mathVisual,X 无原生对应)→ renderBlocksToMedia 渲成 media://。
+ *  3. buildDocArticlePlan(注入兜底 mediaMap)→ 纯数据计划(title + 有序 steps)。
+ *  4. ensureXVisible(让 X webview 在台上)。
+ *  5. driveArticle(按 ws 定向)→ 驱动器自动导航到 Article 编辑器(composeUrl)+ 等就绪 +
+ *     逐 block 插入(无权限账号 → 等不到编辑器 fail loud 提示无 Article 权限)。
+ *  6. 部分块降级/失败 → fail loud 汇总提示(用户在 X 手动补);整体失败 → alert。
+ *
+ * ⚠️ 写方向红线:driveArticle 全程只插内容,绝不程序点 Publish —— 用户在 X 编辑器看成品 + 手动发布。
  */
-let draggedBlockText: string | null = null;
+export async function publishToXArticle(): Promise<void> {
+  const wsId = workspaceManager.getActiveId();
+  if (!wsId) return;
 
-/** dnd.started 时调:抓被拖起 block(单块或多选块)的降级纯文本暂存。*/
+  const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
+  const instanceId = getActiveNoteInstanceId(textEditing);
+  if (!instanceId) {
+    window.alert('没有活跃的 Note —— 请先打开要发布为 X 文章的整篇 Note');
+    return;
+  }
+
+  // 1+2. 渲图兜底块(只 Mermaid/mathVisual)→ media://。其余块走 X 原生 Insert,不渲。
+  const x = requireCapabilityApi<XExtractionApi>('x-extraction');
+  const fallbackBlocks = textEditing.api.getDocArticleFallbackBlocks(instanceId);
+  let rendered: { kind: string; source: string; mediaUrl: string }[] = [];
+  let renderFailures: BlockRenderFailure[] = [];
+  if (fallbackBlocks.length > 0) {
+    const res = await x.renderBlocksToMedia(fallbackBlocks);
+    rendered = res.rendered.map((r) => ({ kind: r.kind, source: r.source, mediaUrl: r.mediaUrl }));
+    renderFailures = res.failed;
+  }
+  // 诊断(Mermaid 没转图排查):打印兜底块/渲染结果计数 + kind。
+  console.log(
+    `[publish-x-article] 兜底块=${fallbackBlocks.length} (kinds=${fallbackBlocks.map((b) => b.kind).join(',')}), ` +
+      `渲染成功=${rendered.length} (kinds=${rendered.map((r) => r.kind).join(',')}), 失败=${renderFailures.length}`,
+  );
+
+  // 3. 构计划(纯数据,IPC 可序列化)。
+  const plan = textEditing.api.buildDocArticlePlan(instanceId, rendered);
+  if (!plan || plan.steps.length === 0) {
+    window.alert('Note 内容为空,没有可发布为 X 文章的内容');
+    return;
+  }
+
+  // 3.1 ★ 中间态落盘(2026-06-14 总指挥:发布链路修 bug 难,根因是没有可检查的中间态缓存)。
+  //   拿到 plan 立刻 dump(在下面 warning 确认框**之前** —— 即使用户取消也有缓存可诊断)。
+  //   缓存里 plan.steps + rendered + renderFailures 并排,定 bug 时一眼分清「渲图失败」vs「切分错」。
+  //   fire-and-forget,落盘失败不阻断发布。看 main console 的 `[x/x-plan-cache] cached → …` 路径。
+  window.electronAPI.xPlanCacheDump({
+    capturedAt: Date.now(),
+    noteTitle: plan.title || '(untitled)',
+    instanceId,
+    plan,
+    rendered,
+    renderFailures,
+    fallbackBlockKinds: fallbackBlocks.map((b) => b.kind),
+  });
+
+  // 渲图失败 fail loud:先告知哪些兜底图没渲出(已以源码/占位形式插入)。
+  const failNote = renderFailureNote(renderFailures);
+  if (failNote) window.alert(`${failNote}。`);
+
+  // 3.5 发布前预检:有格式问题(嵌套拍平 / Mermaid 降级 / 超大表 等)→ 弹确认,
+  //     让用户选「先回 note 调整」(取消)还是「继续发布(接受降级)」(确定)。
+  if (plan.warnings.length > 0) {
+    const proceed = window.confirm(
+      '这篇 note 有些格式 X 文章撑不住,继续发布会降级处理:\n\n' +
+        plan.warnings.map((w) => `· ${w}`).join('\n') +
+        '\n\n点「取消」先回 note 调整;点「确定」按上述降级继续发布。',
+    );
+    if (!proceed) return; // 用户选择先调整
+  }
+
+  // 4. 让 X webview 在台上。
+  ensureXVisible(wsId);
+
+  // 5. 驱动。按 ws 定向取本 ws 的 X Host wcId。
+  const targetWcId = x.getXHostWcId(wsId);
+  if (targetWcId == null) {
+    console.warn('[publish-x-article] 未取到本 ws 的 X Host wc id,回退 main 全局 active');
+  }
+  // 进度 overlay(复用 GlobalProgressOverlay,与备份/导入同一套):start 起全屏遮挡 + 进度条
+  //   → main 逐 step 推 PROGRESS_UPDATE 显示「第 X/Y 块」→ done 收尾。遮挡防用户驱动期间操作破坏脚本。
+  const taskId = crypto.randomUUID();
+  window.electronAPI.driveProgress({
+    kind: 'start',
+    payload: { taskId, title: '正在发布为 X 文章', indeterminate: false, message: '准备驱动…', scope: 'x-view' },
+  });
+  let result: Awaited<ReturnType<typeof x.driveArticle>>;
+  try {
+    result = await x.driveArticle('x', plan, targetWcId, taskId);
+  } finally {
+    window.electronAPI.driveProgress({
+      kind: 'done',
+      payload: { taskId, success: true, message: '驱动完成' },
+    });
+  }
+
+  // 6. 结果处理(fail loud)。
+  // 驱动器已自动导航到 Article 编辑器;失败时 result.error 多为「无 Article 权限 / X 改版」,直接透出。
+  if (!result.success) {
+    window.alert(`发布为 X 文章失败:${result.error || '未知错误'}`);
+    return;
+  }
+  if (result.warnings && result.warnings.length > 0) {
+    window.alert(
+      `已驱动 ${result.drivenSteps ?? 0} 处内容进 X 文章,但有部分块没成功(请在 X 手动补):\n\n` +
+        result.warnings.map((w) => `· ${w}`).join('\n') +
+        `\n\n⚠️ 内容已插入 X Article 编辑器,请检查/调整后**自己手动点 Publish**(本工具绝不自动发布)。`,
+    );
+    return;
+  }
+  // 全部成功:内容已插进 X Article 编辑器。红线:用户自己点 Publish。
+  window.alert(
+    `已把整篇驱动进 X Article 编辑器(${result.drivenSteps ?? 0} 处内容)。\n\n` +
+      `请在 X 检查/调整后**自己手动点 Publish**(本工具只插内容,绝不自动发布)。`,
+  );
+}
+
+/**
+ * 「被拖起的 block」原始载荷暂存(拖 block 到 X 用)。dnd.started 时抓 → 松手时用。
+ * 总指挥:发的是**拖的那些 block**,不是 note 选区/整篇。
+ *
+ * 注:渲染图是异步 + 较重,放松手(drop)时做,不卡 drag-start;故此处只暂存
+ * **原始 markdown / images / renderableBlocks**,buildXPayload 在 drop 时统一跑。
+ */
+interface DraggedRaw {
+  markdown: string;
+  images: string[];
+  blocks: RenderableBlock[];
+}
+let draggedRaw: DraggedRaw | null = null;
+
+/** dnd.started 时调:抓被拖起 block(单块或多选块)的原始 markdown / 图 / 可渲染块暂存。*/
 export function stashDraggedBlockText(instanceId: string, fromPos: number): void {
-  draggedBlockText = null;
+  draggedRaw = null;
   try {
     const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
-    const { markdown } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
+    const { markdown, images } = textEditing.api.getBlockMarkdownAt(instanceId, fromPos);
     if (markdown && markdown.trim()) {
-      const text = markdownToTweetText(markdown);
-      if (text.trim()) draggedBlockText = text;
+      const blocks = textEditing.api.getBlockRenderableBlocksAt(instanceId, fromPos);
+      draggedRaw = { markdown, images, blocks };
     }
   } catch (err) {
     console.warn('[send-to-x] stashDraggedBlockText failed:', err);
   }
 }
 
-/** 取并清空暂存的被拖 block 文本(松手消费一次)*/
-function consumeDraggedBlockText(): string | null {
-  const t = draggedBlockText;
-  draggedBlockText = null;
-  return t;
+/** 取并清空暂存的被拖 block 原始载荷(松手消费一次)*/
+function consumeDraggedRaw(): DraggedRaw | null {
+  const r = draggedRaw;
+  draggedRaw = null;
+  return r;
 }
 
-/** 取当前活跃 note 的待发纯文本(选区优先,无选区取整篇)。失败 alert 并返 null。*/
-function getPendingTweetText(): { text: string; usedWholeDoc: boolean } | null {
+/** 取当前活跃 note 的原始待发载荷(选区优先,无选区取整篇)。失败 alert 并返 null。*/
+function getPendingRaw(): { raw: DraggedRaw; usedWholeDoc: boolean } | null {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const instanceId = getActiveNoteInstanceId(textEditing);
   if (!instanceId) {
     window.alert('没有活跃的 Note —— 请先在 Note 里选中要发的内容(或打开要发的整篇)');
     return null;
   }
-  let { markdown } = textEditing.api.getSelectionMarkdown(instanceId);
+  let { markdown, images } = textEditing.api.getSelectionMarkdown(instanceId);
+  let blocks = textEditing.api.getSelectionRenderableBlocks(instanceId);
   let usedWholeDoc = false;
   if (!markdown || !markdown.trim()) {
-    markdown = textEditing.api.getDocMarkdown(instanceId).markdown;
+    const doc = textEditing.api.getDocMarkdown(instanceId);
+    markdown = doc.markdown;
+    images = doc.images;
+    blocks = textEditing.api.getDocRenderableBlocks(instanceId);
     usedWholeDoc = true;
   }
   if (!markdown || !markdown.trim()) {
     window.alert('Note 内容为空,没有可发到 X 的文字');
     return null;
   }
-  const text = markdownToTweetText(markdown);
-  if (!text.trim()) {
-    window.alert('转换后内容为空,无法发到 X');
-    return null;
-  }
-  return { text, usedWholeDoc };
+  return { raw: { markdown, images, blocks }, usedWholeDoc };
 }
 
 /**
@@ -198,7 +439,7 @@ function getPendingTweetText(): { text: string; usedWholeDoc: boolean } | null {
  * 写方向红线:只填入,用户点发布/回复。
  */
 export async function sendToXAtDropTarget(): Promise<void> {
-  const draggedText = consumeDraggedBlockText(); // 消费本次拖拽 stash(无论落点如何都清掉)
+  const draggedRawPayload = consumeDraggedRaw(); // 消费本次拖拽 stash(无论落点如何都清掉)
   const wsId = workspaceManager.getActiveId();
   if (!wsId) return;
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
@@ -210,12 +451,21 @@ export async function sendToXAtDropTarget(): Promise<void> {
   if (drop.kind !== 'compose' && drop.kind !== 'tweet') return;
 
   // 内容 = 被拖起的 block(总指挥:拖什么发什么)。stash 没拿到(罕见)→ 退回选区/整篇兜底。
-  let text = draggedText;
-  if (!text) {
-    const pending = getPendingTweetText();
-    if (!pending) return; // 内容为空已 alert
-    text = pending.text;
+  const raw = draggedRawPayload ?? getPendingRaw()?.raw;
+  if (!raw) return; // 内容为空已 alert(getPendingRaw 内)
+
+  // 渲染公式/代码/Mermaid → media:// 图 + 删源码 + 合并 note 图(与发推主链同管道)。
+  const { text, mediaUrls, totalImageCount, renderFailures } = await buildXPayload(
+    raw.markdown,
+    raw.images,
+    raw.blocks,
+  );
+  if (!text.trim() && mediaUrls.length === 0) {
+    window.alert('转换后内容为空,无法发到 X');
+    return;
   }
+  const failNote = renderFailureNote(renderFailures);
+  if (failNote) window.alert(`${failNote}。`);
 
   if (drop.kind === 'compose') {
     // 落发推框 → 发普通推
@@ -223,7 +473,9 @@ export async function sendToXAtDropTarget(): Promise<void> {
       text,
       usedWholeDoc: false,
       replyPreview: null,
-      onConfirm: (finalText) => performXInjection(wsId, finalText),
+      mediaUrls,
+      totalImageCount,
+      onConfirm: (finalText, finalMedia) => performXInjection(wsId, finalText, finalMedia),
     });
     return;
   }
@@ -233,20 +485,30 @@ export async function sendToXAtDropTarget(): Promise<void> {
     text,
     usedWholeDoc: false,
     replyPreview: drop.author || '该推文',
-    onConfirm: async (finalText) => {
+    mediaUrls,
+    totalImageCount,
+    onConfirm: async (finalText, finalMedia) => {
       // 1. 就地点回复按钮弹 reply 框(main 侧 poll 等框出现)
       const r = await x.dragReplyHere('x', targetWcId);
       if (!r.ok) {
         fallbackToClipboard(finalText, r.error || '回复框未弹出');
         return;
       }
-      // 2. reply 框已弹出(= 当前 compose 框)→ 注入。复用 pasteTweet(填的就是这个 reply 框)。
-      const result = await x.pasteTweet('x', finalText, targetWcId);
+      // 2. reply 框已弹出(= 当前 compose 框)→ 注入(含图)。复用 pasteTweet(填的就是这个 reply 框)。
+      const result = await x.pasteTweet('x', finalText, targetWcId, finalMedia);
       if (!result.success) {
         fallbackToClipboard(finalText, result.error || '未知错误');
         return;
       }
-      // 成功:内容已可见填进回复框,确认弹窗已有「需你点回复」红线,不弹阻塞 alert(同发推)。
+      // 文字落地但图没带上 → fail loud 明示(同 performXInjection),让用户手动拖图。
+      if (result.mediaWarning) {
+        window.alert(
+          `回复文字已填入 X,但图片没能带上(${result.mediaWarning})。\n\n` +
+            `请在回复框手动拖入图片,再检查后点回复。`,
+        );
+        return;
+      }
+      // 成功:内容(含图)已可见填进回复框,确认弹窗已有「需你点回复」红线,不弹阻塞 alert(同发推)。
     },
   });
 }

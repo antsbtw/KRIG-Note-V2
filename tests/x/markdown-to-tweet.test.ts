@@ -52,10 +52,41 @@ describe('markdownToTweetText — 链接 / 图片', () => {
   it('空 label → 仅 url', () => {
     expect(markdownToTweetText('[](https://x.com)')).toBe('https://x.com');
   });
-  it('图片 ![alt](url) → url', () => {
+  it('http(s) 图片 ![alt](url) → url（外链图无法当附件，保留 URL）', () => {
     expect(markdownToTweetText('![cat](https://x.com/cat.png)')).toBe(
       'https://x.com/cat.png',
     );
+  });
+});
+
+describe('markdownToTweetText — media:// 图片删除（阶段 2.5-b：图走附件，正文不留 URL）', () => {
+  it('整行 media:// 图片 → 删（不留任何 URL 文本）', () => {
+    expect(
+      markdownToTweetText('![](media://images/img-abc123.jpeg)'),
+    ).toBe('');
+  });
+  it('带 alt 的 media:// 图片整行 → 删', () => {
+    expect(
+      markdownToTweetText('![截图](media://images/x.png)'),
+    ).toBe('');
+  });
+  it('文字 + 多张 media:// 图：只留文字，图全删（复现并锁死你报的 bug）', () => {
+    const md = [
+      '自己开发的app，做发图测试',
+      '![](media://images/img-da448ea7ceb36355.jpeg)',
+      '![](media://images/img-28e6998e60b21580.jpeg)',
+      '![](media://images/img-8794724a830ff6ce.png)',
+    ].join('\n');
+    expect(markdownToTweetText(md)).toBe('自己开发的app，做发图测试');
+  });
+  it('行内混排 media:// 图 → 删图保文字', () => {
+    expect(
+      markdownToTweetText('看这张 ![](media://a.png) 不错'),
+    ).toBe('看这张  不错');
+  });
+  it('media:// 图删除后不残留空行（与空行折叠协同）', () => {
+    const md = '第一段\n![](media://a.png)\n第二段';
+    expect(markdownToTweetText(md)).toBe('第一段\n第二段');
   });
 });
 
@@ -90,6 +121,60 @@ describe('markdownToTweetText — 收尾', () => {
   });
   it('空输入 → 空串', () => {
     expect(markdownToTweetText('')).toBe('');
+  });
+});
+
+describe('markdownToTweetText — 公式/代码块转图后删源码(X 截图 2026-06)', () => {
+  it('公式块 $$..$$:无 renderedBlockSources 时去 $$ 包裹保 latex(不裸奔 $$)', () => {
+    // 旧行为是把 $$ 行原样漏出;新行为:去掉 $$ 围栏行,latex 当文本保留(至少可读)
+    const md = '前文\n$$\n\\int_0^1 x dx\n$$\n后文';
+    expect(markdownToTweetText(md)).toBe('前文\n\\int_0^1 x dx\n后文');
+  });
+
+  it('公式块已转图(命中 renderedBlockSources)→ 整块从正文删', () => {
+    const md = '前文\n$$\n\\int_0^1 x dx\n$$\n后文';
+    expect(
+      markdownToTweetText(md, { renderedBlockSources: ['\\int_0^1 x dx'] }),
+    ).toBe('前文\n后文');
+  });
+
+  it('公式块匹配做空白容差(序列化 prefix/缩进不影响命中)', () => {
+    const md = '$$\n  \\frac{a}{b}  \n$$';
+    expect(
+      markdownToTweetText(md, { renderedBlockSources: ['\\frac{a}{b}'] }),
+    ).toBe('');
+  });
+
+  it('两个公式块:一个转图删、一个失败保留', () => {
+    const md = '$$\nA = 1\n$$\n中间\n$$\nB = 2\n$$';
+    // 只有 A 转图成功 → A 删,B 保留 latex
+    expect(
+      markdownToTweetText(md, { renderedBlockSources: ['A = 1'] }),
+    ).toBe('中间\nB = 2');
+  });
+
+  it('代码块已转图(命中)→ 整块删', () => {
+    const md = '说明\n```js\nconst a = 1;\n```\n结尾';
+    expect(
+      markdownToTweetText(md, { renderedBlockSources: ['const a = 1;'] }),
+    ).toBe('说明\n结尾');
+  });
+
+  it('代码块未转图(未命中)→ 保留代码原文(回归 2.5-b 前行为)', () => {
+    const md = '```js\nconst a = 1;\n```';
+    expect(markdownToTweetText(md, { renderedBlockSources: [] })).toBe('const a = 1;');
+  });
+
+  it('多行代码块转图:整块删(含多行)', () => {
+    const md = '```py\nx = 1\ny = 2\n```';
+    expect(
+      markdownToTweetText(md, { renderedBlockSources: ['x = 1\ny = 2'] }),
+    ).toBe('');
+  });
+
+  it('未闭合 $$ 围栏:缓冲内容当文本保留(不静默丢)', () => {
+    const md = '$$\nx + y';
+    expect(markdownToTweetText(md)).toBe('x + y');
   });
 });
 

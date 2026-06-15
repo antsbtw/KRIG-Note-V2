@@ -9,6 +9,8 @@
  * - buildHitTestScript:按坐标 elementFromPoint → closest 容器 的纯 DOM 定位原语
  * - focusInputBox / pasteTextToWebview / locateSendButton:服务无关的「focus 输入框 +
  *   OS 级 Cmd+V 真粘贴 + 发送按钮定位(不点击)」发布原语(AI 问答 / X 发推共用)
+ * - feedFilesToInput:服务无关的「把真实磁盘文件喂给网页 <input type=file>」原语
+ *   (路线 B 媒体上传,X 集成 2.5-b;目前只 X 用,加在底座供未来复用)
  *
  * 加第三种 webview 服务时,只需提供「URL → serviceKey 识别」+「菜单项模板」+ selector,
  * 不必再抄注册/识别/坐标上送/粘贴链路。
@@ -34,3 +36,7 @@ export {
   locateSendButton,
   PASTE_MODIFIER,
 } from './webview-input';
+export {
+  feedFilesToInput,
+  type FeedFilesResult,
+} from './webview-file-input';

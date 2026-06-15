@@ -365,6 +365,17 @@ function serializeToggleList(node: PMNode, indent: number, images: string[]): st
 
 // ─── Table ─────────────────────────────────────────────────────────
 
+/**
+ * 表格 node → markdown 表格字符串(公开入口)。
+ *
+ * X Articles 终态发布(2026-06-13)：X Table 模态 placeholder "Add markdown here"，
+ * 实测就吃这种 `| a | b |` + `| --- |` 的 markdown 表格 —— 驱动器直接填本函数产物。
+ * 内部复用 serializeTable（与选区/整篇 markdown 序列化同一套，零分叉），prefix 空。
+ */
+export function serializeTableToMarkdown(node: PMNode): string {
+  return serializeTable(node, '');
+}
+
 function serializeTable(node: PMNode, prefix: string): string {
   const rows: string[][] = [];
 

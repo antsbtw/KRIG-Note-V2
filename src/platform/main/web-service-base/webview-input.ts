@@ -85,12 +85,17 @@ export async function focusInputBox(
  *   6. 落地失败 → JS execCommand('insertText') / native value setter 兜底
  *   7. finally 还原剪贴板(延迟 500ms 确保 paste 已被消费)
  *
+ * @param htmlText 可选富文本 HTML —— 传了则合成 paste 的 DataTransfer 额外带 `text/html`
+ *   (X Article 正文等认富文本粘贴的编辑器用;X Articles 终态发布 2026-06-13)。
+ *   主路径合成 paste 才用到;OS Cmd+V / execCommand 兜底仍只走 text/plain(富格式那两级不保证,
+ *   富文本目标应命中主路径。校验仍按 text/plain 片段判落地)。不传 = 纯文本行为完全不变(防回归)。
  * @returns 内容是否成功落进输入框(true = 落地;false = 输入框没找到或两条路径都没生效)
  */
 export async function pasteTextToWebview(
   webContents: WebContents,
   inputSelector: string,
   text: string,
+  htmlText?: string,
 ): Promise<boolean> {
   // 1. focus input
   const focused = await focusInputBox(webContents, inputSelector);
@@ -118,6 +123,7 @@ export async function pasteTextToWebview(
       (function() {
         var sel = ${JSON.stringify(inputSelector)};
         var text = ${JSON.stringify(text)};
+        var html = ${JSON.stringify(htmlText ?? '')};
         var selectors = sel.split(',').map(function(s) { return s.trim(); });
         var el = null;
         for (var i = 0; i < selectors.length; i++) {
@@ -130,6 +136,8 @@ export async function pasteTextToWebview(
         try {
           var dt = new DataTransfer();
           dt.setData('text/plain', text);
+          // 富文本目标(X Article 正文)：额外带 text/html，编辑器 paste handler 认富格式。
+          if (html) dt.setData('text/html', html);
           var evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
           el.dispatchEvent(evt);
           return true;

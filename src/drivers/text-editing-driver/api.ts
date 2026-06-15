@@ -14,6 +14,16 @@ import { wrapInList } from 'prosemirror-schema-list';
 import { DOMSerializer, Fragment, Slice, Node as PMNode } from 'prosemirror-model';
 import { MultipleNodeSelection } from './plugins/_shared/multiple-node-selection';
 import { sliceToMarkdown, docNodeToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
+import {
+  collectRenderableBlocksFromDoc,
+  collectRenderableBlocksFromSlice,
+  type RenderableBlock,
+} from './serializers/collect-renderable-blocks';
+import {
+  buildArticlePlan,
+  type ArticlePlan,
+} from './serializers/note-to-article-plan';
+import { blockMediaKey, type ArticleMediaMap } from './serializers/doc-to-article-doc';
 import { instanceRegistry } from './instance-registry';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
@@ -1889,6 +1899,93 @@ export const textEditingDriverApi = {
     if (!node) return { markdown: '', images: [] };
     const slice = new Slice(Fragment.from(node.copy(node.content)), 0, 0);
     return sliceToMarkdown(slice);
+  },
+
+  /**
+   * 收集选区里「装不下纯文本」的 block(公式 / 代码 / Mermaid)→ 供 X 发推渲染成图。
+   *
+   * 与 getSelectionMarkdown 同源(同一 state.selection.content() slice),保证「正文删源码」
+   * 与「转图清单」对得上。选区空 → []。详见 collect-renderable-blocks。
+   */
+  getSelectionRenderableBlocks(instanceId: string): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const { state } = inst.view;
+    if (state.selection.empty) return [];
+    return collectRenderableBlocksFromSlice(state.selection.content());
+  },
+
+  /** 整篇文档的可渲染 block(「发整篇推」与 getDocMarkdown 同源)。 */
+  getDocRenderableBlocks(instanceId: string): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    return collectRenderableBlocksFromDoc(inst.view.state.doc);
+  },
+
+  /**
+   * X Articles 终态发布(2026-06-13):整篇文档里需「渲图兜底」的 block —— **只 Mermaid + mathVisual**
+   * (X 无原生对应)。其余 mathBlock/codeBlock/table 走 X 原生 Insert,不渲图。
+   *
+   * 返回给 view 层渲成 media://(renderBlocksToMedia),再喂回 buildDocArticlePlan 当 mediaMap。
+   * 与 getDocRenderableBlocks 同源(collectRenderableBlocksFromDoc),只过滤出兜底两类。
+   */
+  getDocArticleFallbackBlocks(instanceId: string): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const all = collectRenderableBlocksFromDoc(inst.view.state.doc, { includeMathVisual: true });
+    return all.filter((b) => b.kind === 'mermaid' || b.kind === 'mathVisual');
+  },
+
+  /**
+   * X Articles 终态发布(2026-06-13):整篇 note doc → 「X 原生 Insert 驱动计划」。
+   *
+   * @param rendered 已渲染的兜底块(Mermaid/mathVisual)→ media:// 清单(view 层先 renderBlocksToMedia
+   *   渲好;getDocArticleFallbackBlocks 取的块)。按 (kind, source) 匹配回 doc 节点构 mediaMap。
+   *   不传 = 无兜底图(纯原生 + 文字)。
+   *
+   * 纯逻辑层 buildArticlePlan 产 { title, steps },steps 是 IPC 可序列化的纯数据(无 PMNode)。
+   * driver 侧(x-article-driver)消费驱动 X。
+   */
+  buildDocArticlePlan(
+    instanceId: string,
+    rendered?: Array<{ kind: string; source: string; mediaUrl: string }>,
+  ): ArticlePlan | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const doc = inst.view.state.doc;
+    // 重建 mediaMap:walk doc,对每个 Mermaid/mathVisual 节点,按 (kind, source) 找渲染结果。
+    const mediaMap: ArticleMediaMap = new Map<string, string>();
+    if (rendered && rendered.length) {
+      doc.descendants((node) => {
+        const name = node.type.name;
+        const isMermaid = name === 'codeBlock' && (node.attrs?.language as string)?.toLowerCase() === 'mermaid';
+        const isMathVisual = name === 'mathVisual';
+        if (!isMermaid && !isMathVisual) return;
+        const kind = isMermaid ? 'mermaid' : 'mathVisual';
+        const src = isMathVisual ? ((node.attrs?.thumbnail as string) || '') : (node.textContent || '');
+        const hit = rendered.find((r) => r.kind === kind && r.source === src);
+        if (hit) mediaMap.set(blockMediaKey(node), hit.mediaUrl);
+      });
+    }
+    return buildArticlePlan(doc, inst.view.state.schema, { mediaMap });
+  },
+
+  /**
+   * 被拖起 block 的可渲染 block(拖 block 到 X,与 getBlockMarkdownAt 同源)。
+   * MultipleNodeSelection 命中 → 取整组多选;否则取 pos 处单块。
+   */
+  getBlockRenderableBlocksAt(instanceId: string, pos: number): RenderableBlock[] {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return [];
+    const { state } = inst.view;
+    const sel = state.selection;
+    if (sel instanceof MultipleNodeSelection && pos >= sel.from && pos < sel.to) {
+      return collectRenderableBlocksFromSlice(sel.content());
+    }
+    const node = state.doc.nodeAt(pos);
+    if (!node) return [];
+    const slice = new Slice(Fragment.from(node.copy(node.content)), 0, 0);
+    return collectRenderableBlocksFromSlice(slice);
   },
 
   setVocabWords(entries: Array<{ word: string; definition: string }>): void {

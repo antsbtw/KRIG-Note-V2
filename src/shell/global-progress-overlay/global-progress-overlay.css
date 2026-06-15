@@ -11,6 +11,13 @@
   backdrop-filter: blur(2px);
 }
 
+/* 局部遮罩(只盖父容器,如 X view 区):absolute 而非 fixed,不锁全屏。
+   用于 X 发布:驱动期间冻结 X webview 防破坏脚本,note 区不受影响。 */
+.krig-progress-overlay--local {
+  position: absolute;
+  z-index: 1000;
+}
+
 .krig-progress-overlay__panel {
   width: 420px;
   padding: 24px 28px;

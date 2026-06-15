@@ -20,6 +20,7 @@ import type {
   CreateNoteBatchResult,
 } from '@capabilities/note/types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
+import type { XPlanCacheEnvelope } from './x-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
 import type {
   AIAskOptions,
@@ -32,6 +33,7 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
+import type { ArticlePlan, ArticleInsertStep } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
@@ -365,6 +367,8 @@ declare global {
         elapsedMs?: number;
         meta?: Record<string, unknown>;
       }): void;
+      /** X 发布中间态(ArticlePlan + 渲图结果)落盘缓存,fire-and-forget,诊断用。 */
+      xPlanCacheDump(env: XPlanCacheEnvelope): void;
 
       /** 驱动全屏进度 overlay(renderer 端长任务复用,fire-and-forget)*/
       driveProgress(payload: ProgressDrivePayload): void;
@@ -577,19 +581,44 @@ declare global {
       onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
 
       // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
-      /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布) */
+      /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布)。
+       *  mediaUrls(阶段 2.5-b):note 图 media:// 数组,main 侧解析路径后先喂图再填字;
+       *  mediaWarning 非空 = 文字落地但图没带上(fail loud 降级提示)。 */
       xPasteTweet(
         serviceId: XServiceId,
         text: string,
         targetWcId?: number,
-      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
-      /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布) */
+        mediaUrls?: string[],
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
+      /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布)。
+       *  mediaUrls(阶段 2.5-b):同 xPasteTweet。 */
       xPasteReply(
         serviceId: XServiceId,
         tweetUrl: string,
         text: string,
         targetWcId?: number,
-      ): Promise<{ success: boolean; error?: string; publishReady?: boolean }>;
+        mediaUrls?: string[],
+      ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
+      /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
+       *  ⚠️ 只插内容,绝不程序点 Publish。warnings 非空 = 部分块降级/失败(fail loud,用户手动补)。 */
+      xDriveArticle(
+        serviceId: XServiceId,
+        plan: ArticlePlan,
+        targetWcId?: number,
+        taskId?: string,
+      ): Promise<{ success: boolean; error?: string; drivenSteps?: number; warnings?: string[] }>;
+      /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。media 的 mediaUrl 可传磁盘绝对路径。 */
+      xTestDriveStep(
+        serviceId: XServiceId,
+        step: ArticleInsertStep,
+        targetWcId?: number,
+      ): Promise<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string; error?: string }>;
+      /** 连续驱动多块(诊断块边界,如 media 后紧跟标题的重复/失格;dev 用)。 */
+      xTestDriveSequence(
+        serviceId: XServiceId,
+        steps: ArticleInsertStep[],
+        targetWcId?: number,
+      ): Promise<{ error?: string; results: Array<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string }>; finalBlockCount: number }>;
       /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
       xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
       /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/

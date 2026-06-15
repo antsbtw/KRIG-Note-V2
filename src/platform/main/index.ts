@@ -42,6 +42,7 @@ import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
 import { registerWordImport } from './word-import';
 import { registerImportCacheIpc } from './word-import/import-cache';
+import { registerXPlanCacheIpc } from './x/x-plan-cache';
 import { registerProgressBridge } from './window/progress-bridge';
 import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
@@ -173,6 +174,7 @@ app.whenReady().then(async () => {
   registerMarkdownImport();
   registerWordImport();
   registerImportCacheIpc(); // 接收 renderer 的诊断落盘(chunk/PM)
+  registerXPlanCacheIpc(); // 接收 renderer 的 X 发布中间态(ArticlePlan)落盘,诊断用
   registerProgressBridge(); // 接收 renderer 驱动的进度事件,回推 overlay
   registerBackupMenu();
   registerFrameworkMenus();

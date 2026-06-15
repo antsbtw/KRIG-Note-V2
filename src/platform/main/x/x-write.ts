@@ -27,6 +27,7 @@ import {
 import {
   pasteTextToWebview,
   locateSendButton,
+  feedFilesToInput,
 } from '../web-service-base';
 import { requireXWebContents } from './x-webcontents';
 
@@ -36,6 +37,41 @@ export interface XWriteResult {
   error?: string;
   /** 发布按钮是否已就位(成功时附带,辅助确认内容落进正确的框;不代表已发布)*/
   publishReady?: boolean;
+  /**
+   * 媒体降级提示(阶段 2.5-b):文字成功落地但喂图失败时附带。
+   * 非空 = 文字已填入但图没带上 → renderer 侧明示「请手动拖图」(fail loud 不假装成功)。
+   */
+  mediaWarning?: string;
+}
+
+/**
+ * 把媒体文件喂进当前 X 发推/回复框(阶段 2.5-b,路线 B)。
+ *
+ * ⚠️ 顺序很重要:**图先喂、文字后填**。X 要时间读文件 + 转码生成缩略图,先把图喂进去
+ * 等缩略图出现,再填文字,避免竞态(文字先填 → 喂图时框焦点/状态变动可能扰乱)。
+ *
+ * fail loud:喂图任一步失败(selector 失效 / X 没接住)→ 返回 warning 字符串,
+ * 调用方据此「文字仍填、但明示图没带上」,绝不静默吞掉。成功返 null。
+ *
+ * @returns null = 无图或喂图成功;string = 喂图失败的人类可读原因(用于降级提示)
+ */
+async function feedMediaIfAny(
+  wc: Electron.WebContents,
+  profile: ReturnType<typeof getXServiceProfile>,
+  mediaPaths: string[] | undefined,
+): Promise<string | null> {
+  if (!mediaPaths || mediaPaths.length === 0) return null;
+  const fileInputSel = profile.selectors.fileInput;
+  if (!fileInputSel) {
+    return 'X 文件上传 selector 未配置(需 spike 后填入 profile)';
+  }
+  const fed = await feedFilesToInput(
+    wc,
+    fileInputSel,
+    mediaPaths,
+    profile.selectors.uploadedMediaThumb,
+  );
+  return fed.ok ? null : fed.error || '喂图失败';
 }
 
 /** poll 等某个 selector 在 X webview 内出现(compose / reply 框加载需要时间)*/
@@ -70,13 +106,20 @@ async function waitForSelector(
  *
  * @param serviceId X 服务 id('x')
  * @param text 已降级好的纯文本(markdown→tweet 在 renderer 侧做)
+ * @param targetWcId 注入目标 guest wc(本活跃 ws 的 X)
+ * @param mediaPaths 媒体文件磁盘绝对路径(阶段 2.5-b,路线 B;renderer 侧已 resolveMediaPath
+ *   解析好)。有图 → 先喂图等缩略图,再填文字(顺序见 feedMediaIfAny)。
  */
 export async function pasteTweet(
   serviceId: XServiceId,
   text: string,
   targetWcId?: number,
+  mediaPaths?: string[],
 ): Promise<XWriteResult> {
-  if (!text || !text.trim()) {
+  // 文字与媒体至少有一项(X 截图后:纯公式/纯图推正文为空但带图,也应可发)。
+  const hasText = !!(text && text.trim());
+  const hasMedia = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  if (!hasText && !hasMedia) {
     return { success: false, error: '内容为空,无法发推' };
   }
   const got = await requireXWebContents(serviceId, targetWcId);
@@ -105,9 +148,15 @@ export async function pasteTweet(
     return { success: false, error: '未能定位 X 发推框(可能 X 改版 / 未登录 / selector 失效)' };
   }
 
-  const pasted = await pasteTextToWebview(wc, composeSel, text);
-  if (!pasted) {
-    return { success: false, error: '内容未能落进 X 发推框(粘贴校验失败)' };
+  // 阶段 2.5-b:先喂图(等缩略图出现),再填文字。喂图失败 → 记 warning,文字仍填(fail loud)。
+  const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths);
+
+  // 纯图/纯公式推(text 为空):只喂图,不粘贴空串(空串粘贴校验必失败)。
+  if (hasText) {
+    const pasted = await pasteTextToWebview(wc, composeSel, text);
+    if (!pasted) {
+      return { success: false, error: '内容未能落进 X 发推框(粘贴校验失败)', mediaWarning: mediaWarning ?? undefined };
+    }
   }
 
   // 仅校验发布按钮已出现(确认内容落进了正确的框)— 绝不 click(写方向红线)
@@ -115,7 +164,7 @@ export async function pasteTweet(
     ? await locateSendButton(wc, profile.selectors.publishButton)
     : { found: false, enabled: false };
 
-  return { success: true, publishReady: publish.found };
+  return { success: true, publishReady: publish.found, mediaWarning: mediaWarning ?? undefined };
 }
 
 /**
@@ -130,8 +179,11 @@ export async function pasteReply(
   tweetUrl: string,
   text: string,
   targetWcId?: number,
+  mediaPaths?: string[],
 ): Promise<XWriteResult> {
-  if (!text || !text.trim()) {
+  const hasText = !!(text && text.trim());
+  const hasMedia = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  if (!hasText && !hasMedia) {
     return { success: false, error: '回复内容为空' };
   }
   if (!tweetUrl) {
@@ -167,16 +219,22 @@ export async function pasteReply(
     };
   }
 
-  const pasted = await pasteTextToWebview(wc, replySel, text);
-  if (!pasted) {
-    return { success: false, error: '回复内容未能落进 reply 框(粘贴校验失败)' };
+  // 阶段 2.5-b:先喂图(等缩略图),再填文字。喂图失败 → warning,文字仍填(fail loud)。
+  const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths);
+
+  // 纯图/纯公式回复(text 为空):只喂图,不粘贴空串。
+  if (hasText) {
+    const pasted = await pasteTextToWebview(wc, replySel, text);
+    if (!pasted) {
+      return { success: false, error: '回复内容未能落进 reply 框(粘贴校验失败)', mediaWarning: mediaWarning ?? undefined };
+    }
   }
 
   const publish = profile.selectors.publishButton
     ? await locateSendButton(wc, profile.selectors.publishButton)
     : { found: false, enabled: false };
 
-  return { success: true, publishReady: publish.found };
+  return { success: true, publishReady: publish.found, mediaWarning: mediaWarning ?? undefined };
 }
 
 /** 从 tweet URL 取 `/<handle>/status/<id>` 片段,用于「是否已在该推页」判定 */
