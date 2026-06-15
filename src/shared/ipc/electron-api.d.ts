@@ -612,6 +612,12 @@ declare global {
         step: ArticleInsertStep,
         targetWcId?: number,
       ): Promise<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string; error?: string }>;
+      /** 连续驱动多块(诊断块边界,如 media 后紧跟标题的重复/失格;dev 用)。 */
+      xTestDriveSequence(
+        serviceId: XServiceId,
+        steps: ArticleInsertStep[],
+        targetWcId?: number,
+      ): Promise<{ error?: string; results: Array<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string }>; finalBlockCount: number }>;
       /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
       xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
       /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/

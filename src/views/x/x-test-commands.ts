@@ -86,5 +86,19 @@ export function registerXTestCommands(): void {
     image: () => runTestStep('media-image', TEST_DATA.mediaImage),
     video: () => runTestStep('media-video', TEST_DATA.mediaVideo),
     run: (name: string, step: ArticleInsertStep) => runTestStep(name, step),
+    /** 诊断:图(media)后紧跟标题(html)连调 —— 复现整篇里"图后标题重复/失格"。 */
+    mediaSeq: async () => {
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) { window.alert('无活跃 ws'); return; }
+      const x = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = x.getXHostWcId(wsId);
+      const steps: ArticleInsertStep[] = [
+        { kind: 'media', mediaUrl: '/Users/wenwu/Downloads/GRIG-NoteManner.png' },
+        { kind: 'html', html: '<h2>图后标题测试SEQ</h2><p>图后正文</p>' },
+      ];
+      const r = await window.electronAPI.xTestDriveSequence('x', steps, wcId ?? undefined);
+      console.log('[x-test] mediaSeq 结果:', r);
+      window.alert('[mediaSeq] 看右边:图后「图后标题测试SEQ」是否重复/失格\n' + JSON.stringify(r, null, 2));
+    },
   };
 }

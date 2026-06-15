@@ -807,6 +807,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xTestDriveStep(serviceId: string, step: unknown, targetWcId?: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, step, targetWcId });
   },
+  /** 连续驱动多块(诊断块边界,如 media 后紧跟标题的重复/失格;dev 用)。 */
+  xTestDriveSequence(serviceId: string, steps: unknown[], targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, steps, targetWcId });
+  },
   /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
   xDragArm(targetWcId: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_ARM, { targetWcId });

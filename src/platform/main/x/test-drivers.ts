@@ -112,18 +112,56 @@ export async function testDriveStep(
   };
 }
 
+/**
+ * 连续驱动**多个块**(同一编辑器上下文,每步前 ensureCleanState)—— 复现真实整篇序列,
+ * 用于诊断「块边界」问题(如 media 图后紧跟标题的重复/失格)。返回每步结果 + 最终块数序列。
+ */
+export async function testDriveSequence(
+  serviceId: XServiceId,
+  steps: ArticleInsertStep[],
+  targetWcId?: number,
+): Promise<{ error?: string; results: TestDriveStepResult[]; finalBlockCount: number }> {
+  const ctx = await prepareArticleContext(serviceId, targetWcId);
+  if ('error' in ctx) return { error: ctx.error, results: [], finalBlockCount: -1 };
+  const { wc, art } = ctx;
+
+  const results: TestDriveStepResult[] = [];
+  for (const step of steps) {
+    await ensureCleanState(wc, art); // ★ 每步前干净态(同整篇 driveArticlePlan 循环)
+    const before = await getDataBlockCount(wc, art);
+    const isAbsPath = step.kind === 'media' && typeof step.mediaUrl === 'string' && step.mediaUrl.startsWith('/');
+    const res =
+      isAbsPath && step.kind === 'media'
+        ? await driveMediaWithPath(wc, art, step.mediaUrl)
+        : await driveStep(wc, art, step);
+    const after = await getDataBlockCount(wc, art);
+    results.push({
+      ok: res.ok,
+      blockDelta: before >= 0 && after >= 0 ? after - before : -1,
+      landed: after - before >= 1,
+      contentOk: true,
+      warning: res.warning,
+    });
+  }
+  return { results, finalBlockCount: await getDataBlockCount(wc, art) };
+}
+
 /** 注册逐块测试 IPC(独立于 registerXHandlers,便于隔离/dev-only gate)。 */
 export function registerXTestHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.X_TEST_DRIVE_STEP, async (_e, payload: unknown) => {
-    const p = payload as { serviceId?: unknown; step?: unknown; targetWcId?: unknown } | null;
+    const p = payload as { serviceId?: unknown; step?: unknown; steps?: unknown; targetWcId?: unknown } | null;
     if (!p || !isXServiceId(p.serviceId)) {
       return { ok: false, blockDelta: 0, landed: false, contentOk: false, error: 'invalid test-drive payload' };
+    }
+    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
+    // 序列模式(诊断块边界,如 media 后紧跟标题):传 steps[] 走 testDriveSequence。
+    if (Array.isArray(p.steps)) {
+      return testDriveSequence(p.serviceId, p.steps as ArticleInsertStep[], targetWcId);
     }
     const step = p.step as ArticleInsertStep | undefined;
     if (!step || typeof step !== 'object' || typeof (step as { kind?: unknown }).kind !== 'string') {
       return { ok: false, blockDelta: 0, landed: false, contentOk: false, error: 'invalid step(缺 kind)' };
     }
-    const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
     return testDriveStep(p.serviceId, step, targetWcId);
   });
 }
