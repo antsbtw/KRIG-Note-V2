@@ -1,11 +1,14 @@
 # 实施 Prompt：X 集成 阶段 2.5-b（视频上传，承接图片）
 
-> 交接日期：2026-06-12
-> 交接人：总指挥
-> 验收人：总指挥
+> ★★ 现状更新(2026-06-15,总指挥)：本 prompt 方案仍有效(路线B喂文件+复用 feedFilesToInput+视频要 poll X 转码)，但**前置已变**——X 集成核心(读/写/媒体图片/Articles)**已全部合进 main**(merge `098d3d52`)：
+> - **从最新 main 切新分支做**：`git checkout main && git pull && git checkout -b feat/x-video`(不再用旧的 docs/x-integration-design)。
+> - `feedFilesToInput`(`web-service-base/webview-file-input.ts`)、图片上传链路都已在 main，现成可复用。
+> - 测试基线以当前 main `npx vitest run` 实际数为准(bulk-delete 8 个 pre-existing flaky 单列)。
+> 下方原文(2026-06-12)的方案/红线/视频差异分析全部仍适用，只「分支/前置」按此更新。
+
+> 交接日期：2026-06-12（方案）｜交接人：总指挥｜验收人：总指挥
 > 蓝图：[`roadmap`](./2026-06-10-x-integration-roadmap.md) §2.A / §7（"视频 X 要 poll 转码完成"已点）
-> 前置（已合并/验收/实机通过）：阶段 2.5-b **图片**上传（`791e6ef6`，路线 B + CDP 喂文件 + media:// 正文删除 fix）。本期在其上加**视频**。
-> 当前分支 `docs/x-integration-design`，与 main 齐平。
+> 前置：图片上传 + Articles 已合 main（见上方现状更新）。本期在其上加**视频**。
 
 ---
 
