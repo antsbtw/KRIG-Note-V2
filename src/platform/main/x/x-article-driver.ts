@@ -110,6 +110,127 @@ async function waitForSelectorGone(
   return false;
 }
 
+// ───────────────────────────────────────────────────────
+// §1.5  「块完成确认」原语(★ 2026-06-14 实测:X Article = DraftJS,块模型铁证)
+//   X 正文是 DraftJS:容器 [data-contents="true"],每块 [data-block="true"](有唯一 data-offset-key)。
+//   块落定 = [data-block="true"] 计数增加(文字/标题+1、divider+2、table+1、媒体每个+1)。
+//   核心架构原则(总指挥):每块必须确认「完整内容真正落进文档」再进下一块,杜绝 fire-and-forget。
+// ───────────────────────────────────────────────────────
+
+/** DraftJS 块判据(默认)。未来跨平台:由 profile 提供各自的块 selector(见 blockSelectorOf)。 */
+const DEFAULT_BLOCK_SELECTOR = '[data-contents="true"] [data-block="true"]';
+
+/** 取本服务的块 selector(profile 可覆盖;缺省走 DraftJS 默认)。 */
+function blockSelectorOf(art: XArticleSelectors): string {
+  return art.blockSelector || DEFAULT_BLOCK_SELECTOR;
+}
+
+/**
+ * 数正文里的块数(DraftJS [data-block="true"])。找不到块容器 → 回退全文档 [data-block="true"]。
+ * @returns 块数;查询异常 → -1(表示「数不到」,confirmBlockLanded 据此判不可验)。
+ */
+function getDataBlockCount(wc: Electron.WebContents, art: XArticleSelectors): Promise<number> {
+  const sel = blockSelectorOf(art);
+  const script = `
+    (function(){
+      try {
+        var n = document.querySelectorAll(${JSON.stringify(sel)}).length;
+        if (n === 0) {
+          // 容器没匹配到 → 回退数全文档的 data-block(防 selector 偏差)
+          var fb = document.querySelectorAll('[data-block="true"]').length;
+          return fb;
+        }
+        return n;
+      } catch(e){ return -1; }
+    })();
+  `;
+  return wc.executeJavaScript(script).then((v) => (typeof v === 'number' ? v : -1)).catch(() => -1);
+}
+
+interface ConfirmBlockOpts {
+  /** step 执行前的块数基线(getDataBlockCount 取) */
+  beforeCount: number;
+  /** 期望至少新增几块(文字/latex/code/posts/table+1;divider+2;media+1) */
+  minDelta: number;
+  /** poll 超时;media 上传慢,放宽 12000 */
+  timeoutMs?: number;
+  /** 块类型标签(warning 文案用) */
+  label: string;
+  /** 可选「有内容」验证(table 验 cell 非空 / media 验末块含 img·video)。块数够了但内容没过会续 poll。 */
+  verifyContent?: (wc: Electron.WebContents, art: XArticleSelectors) => Promise<boolean>;
+}
+
+/**
+ * poll 等「块真落定」:块数 ≥ before+minDelta,且(若给)verifyContent 通过。
+ * ★ 免疫「waitForSelectorGone 假成功」陷阱:要求计数**真涨上去**;数不到块(-1)→ landed=false(不抛)。
+ * @returns { landed, delta, contentOk } —— landed=块数够;contentOk=内容验证过(无验证则随 landed)。
+ */
+async function confirmBlockLanded(
+  wc: Electron.WebContents,
+  art: XArticleSelectors,
+  opts: ConfirmBlockOpts,
+): Promise<{ landed: boolean; delta: number; contentOk: boolean }> {
+  const timeout = opts.timeoutMs ?? DEFAULT_WAIT_MS;
+  const start = Date.now();
+  let lastDelta = -1;
+  while (Date.now() - start < timeout) {
+    const cur = await getDataBlockCount(wc, art);
+    if (cur >= 0) {
+      lastDelta = cur - opts.beforeCount;
+      if (lastDelta >= opts.minDelta) {
+        if (!opts.verifyContent) return { landed: true, delta: lastDelta, contentOk: true };
+        const ok = await opts.verifyContent(wc, art).catch(() => false);
+        if (ok) return { landed: true, delta: lastDelta, contentOk: true };
+        // 块到了但内容没验过(异步渲染)→ 续 poll
+      }
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  return { landed: lastDelta >= opts.minDelta, delta: lastDelta, contentOk: false };
+}
+
+/** 内容验证:正文里最后一个 <table> 至少有一个 cell 非空(验"有内容"而非空表)。 */
+function verifyTableContent(wc: Electron.WebContents, _art: XArticleSelectors): Promise<boolean> {
+  void _art;
+  return wc
+    .executeJavaScript(`
+      (function(){
+        try {
+          var ts = document.querySelectorAll('table');
+          if (!ts.length) return false;
+          var t = ts[ts.length-1];
+          var cells = t.querySelectorAll('td, th');
+          for (var i=0;i<cells.length;i++){ if ((cells[i].textContent||'').trim().length>0) return true; }
+          return false;
+        } catch(e){ return false; }
+      })();
+    `)
+    .then((v) => !!v)
+    .catch(() => false);
+}
+
+/** 内容验证:正文末块(data-block)真含 img/video 且 src 非空(验"图块真落进文档")。 */
+function verifyMediaContent(wc: Electron.WebContents, art: XArticleSelectors): Promise<boolean> {
+  const sel = blockSelectorOf(art);
+  return wc
+    .executeJavaScript(`
+      (function(){
+        try {
+          var blocks = document.querySelectorAll(${JSON.stringify(sel)});
+          if (!blocks.length) return false;
+          // 末块或其后若干块里找媒体(媒体块后常自动补空文字块,故扫末尾几块)
+          for (var i=blocks.length-1; i>=0 && i>=blocks.length-3; i--){
+            var m = blocks[i].querySelector('img, video');
+            if (m){ var s = m.src || m.currentSrc || ''; if (s) return true; }
+          }
+          return false;
+        } catch(e){ return false; }
+      })();
+    `)
+    .then((v) => !!v)
+    .catch(() => false);
+}
+
 /** 点 selector 命中的第一个元素(多候选顺序尝试)。返回是否点到。 */
 function clickSelector(wc: Electron.WebContents, selector: string): Promise<boolean> {
   const script = `
@@ -308,30 +429,33 @@ async function ensureCleanState(wc: Electron.WebContents, art: XArticleSelectors
 
 /**
  * 确保正文末尾是一个**正文顶层空段落**(光标落在其中),而非嵌入块内部。
- * 末块若已是空段落 → 不动;若是嵌入块(table/figure/img/hr/含 svg 的图卡)→ 在文末模拟 Enter 起新段落。
+ *
+ * ★ 2026-06-14 重写(六级标题被吞 bug 根治):X = DraftJS,正文每块是 `[data-block="true"]`,
+ *   顶层 wrapper 永远是 `<div>`(块类型在内层)。旧版用 `lastElementChild` 下钻 + `/^(P|H1..H6)$/`
+ *   判据**永久失配**(DraftJS 不用裸 <p><h6>),误判末块、累积空行、紧跟媒体块的标题被吞。
+ *   新判据:直接取最后一个 `[data-block="true"]`;**仅当末块是嵌入块**(SECTION 或内部含
+ *   img/video/table/hr/svg/figure)才补一次空段;文字块(空或非空)一律不补 → 媒体块后另起干净段落,
+ *   后续标题从顶层落,不被吞。
  */
 async function ensureTrailingParagraph(wc: Electron.WebContents, art: XArticleSelectors): Promise<void> {
+  const blockSel = blockSelectorOf(art);
   const needNewline = (await wc
     .executeJavaScript(`
       (function(){
         try {
-          var el = document.querySelector(${JSON.stringify(art.body)});
-          if (!el) return false;
-          var last = el.lastElementChild;
-          // 一路下钻到正文最末层(X 可能包一层 contenteditable 容器)
-          while (last && last.lastElementChild && /^(DIV|SECTION|ARTICLE)$/.test(last.tagName) && !last.isContentEditable) {
-            last = last.lastElementChild;
+          var blocks = document.querySelectorAll(${JSON.stringify(blockSel)});
+          if (!blocks.length) {
+            // 没找到 DraftJS 块 → 回退全文档
+            blocks = document.querySelectorAll('[data-block="true"]');
           }
-          if (!last) return true; // 没有末块 → 补一个安全
-          var tag = last.tagName;
-          // 末块是段落/标题/列表项类纯文本块 → 已在顶层文本块,无需补
-          if (/^(P|H1|H2|H3|H4|H5|H6|LI|BLOCKQUOTE)$/.test(tag)) {
-            // 但若它是空段落已经 OK;若非空段落也 OK(光标在其末尾,粘贴另起块由 driveHtml 的 <p><br></p> 分隔保证)
-            return false;
-          }
-          // 末块是嵌入块(TABLE/FIGURE/IMG/HR/含 svg 的图卡/DIV 包的嵌入块)→ 需起新段落
-          return true;
-        } catch(e){ return true; }
+          if (!blocks.length) return false; // 真没块 → 不补(避免乱补)
+          var last = blocks[blocks.length-1];
+          // 末块是嵌入块(媒体/表/分割线):tagName SECTION,或内部含 img/video/table/hr/svg/figure → 需补空段
+          var isEmbed = last.tagName === 'SECTION'
+            || !!last.querySelector('img, video, table, hr, svg, figure');
+          // 文字块(DIV/含文本,空或非空)→ 不补:粘下一块由 driveHtml 的 <p><br></p> 分隔另起
+          return isEmbed;
+        } catch(e){ return false; }
       })();
     `)
     .catch(() => false)) as boolean;
@@ -862,7 +986,7 @@ async function driveDivider(
   return { ok: true };
 }
 
-/** Media:Insert→Media→喂文件(网页内 Crop media)。 */
+/** Media:Insert→Media→喂文件(网页内 Crop media)。生产入口:media:// → 磁盘路径 → driveMediaWithPath。 */
 async function driveMedia(
   wc: Electron.WebContents,
   art: XArticleSelectors,
@@ -872,29 +996,55 @@ async function driveMedia(
   if (!filePath) {
     return { ok: false, warning: `图插入失败:media:// 解析不到本地文件(${mediaUrl})` };
   }
+  return driveMediaWithPath(wc, art, filePath);
+}
+
+/**
+ * Media 主体(喂文件 → 等 Crop 弹 → Save → 等模态关 → 确认块落定)。
+ * ★ 入参是**磁盘绝对路径**(不是 media://)—— 生产经 driveMedia 解析后调;测试可直喂绝对路径调
+ *   (绕过 resolveMediaPath,实现喂任意本地文件全自动测试)。两路共用此主体,逻辑不漂移。
+ *
+ * ★ 完成确认(2026-06-14 总指挥架构原则,根治 fire-and-forget):
+ *   ① 喂文件后**先等 Crop 模态弹出**再点 Save(旧版盲点 Save,模态没弹就点空);
+ *   ② 点 Save 后等模态关(Crop 流程走完);
+ *   ③ confirmBlockLanded 等**块数 +1 且末块真含 img/video**(块真落进文档,非 fire-and-forget)。
+ */
+export async function driveMediaWithPath(
+  wc: Electron.WebContents,
+  art: XArticleSelectors,
+  filePath: string,
+): Promise<StepResult> {
+  const before = await getDataBlockCount(wc, art);
   const opened = await openInsertItem(wc, art, art.menuLabels.media);
   if (opened) return { ok: false, warning: `图插入失败:${opened}` };
-  // 等文件 input 出现(网页内 Crop media,非 OS 框 —— 实测 §6)。
+  // 等文件 input 出现(网页内 Crop media,非 OS 框)。
   if (!(await waitForSelector(wc, art.mediaFileInput, 4000))) {
     return { ok: false, warning: '图插入失败:Media 文件 input 未出现(可能弹了 OS 框?待实机)' };
   }
-  // 喂文件。⚠️ 不传 thumb selector(传 undefined):X Article 喂图后走「网页内 Crop media」
-  //   流程,图不会立刻以 <figure>/<img> 落进正文 → 用发推那套缩略图判据会误判失败(实机暴露
-  //   "uploadedMediaThumb 失效")。这里只让 CDP 把文件喂进 input(setFileInputFiles 成功即文件已交),
-  //   落图校验改由下面的 Crop→Save + 软校验处理。
+  // 喂文件(CDP setFileInputFiles,绝对路径)。ok 只代表文件喂进 input,落地由下游块确认。
   const fed = await feedFilesToInput(wc, art.mediaFileInput, [filePath]);
   if (!fed.ok) {
     return { ok: false, warning: `图插入失败:${fed.error || '喂文件失败'}` };
   }
-  // Crop media 界面:点 Save 落图 → **等模态(app-bar-close)关闭**(确保落图完才下一步,不靠固定 sleep)。
-  await clickByText(wc, art.modalButton, art.modalButtonLabels.save, 'Add Media');
-  if (!(await waitForSelectorGone(wc, art.modalOpenMarker, 8000))) {
-    // 模态没关:可能 Save selector 待校 / Crop 界面没收 → warn 不阻断(文件已喂进)。
-    return { ok: true, warning: '图已喂入但 Crop 界面未关闭(请在 X 手动确认 Save / 缩略图判据待实机校)' };
+  // ① 点 Save 前**先确认 Crop 模态真弹出**(避免盲点空)。没弹 → 可能 X 直接落图,不点 Save,交给 ③ 判。
+  if (await waitForSelector(wc, art.modalOpenMarker, 4000)) {
+    await clickByText(wc, art.modalButton, art.modalButtonLabels.save, 'Add Media');
+    // ② 等 Crop 模态关(落图链路走完)。
+    await waitForSelectorGone(wc, art.modalOpenMarker, 8000);
   }
-  // 软校验:正文里是否出现图。
-  if (art.mediaInsertedThumb && !(await selExists(wc, art.mediaInsertedThumb))) {
-    return { ok: true, warning: '图已喂入但未确认落进正文(缩略图判据待实机校)' };
+  // ③ 终判:块数 +1 且末块真含 img/video(块真落进文档)。media 上传慢,timeout 放宽。
+  const landed = await confirmBlockLanded(wc, art, {
+    beforeCount: before,
+    minDelta: 1,
+    timeoutMs: 12000,
+    label: 'media',
+    verifyContent: verifyMediaContent,
+  });
+  if (!landed.landed) {
+    return { ok: true, warning: `X块[media]未确认落进正文(块数未增,delta=${landed.delta};可能仍在上传,请在 X 手动确认)` };
+  }
+  if (!landed.contentOk) {
+    return { ok: true, warning: 'X媒体块已落但未确认含图(src 验证未过,请在 X 手动核对)' };
   }
   return { ok: true };
 }
@@ -944,6 +1094,31 @@ export interface ArticlePlanPayload {
  * ⚠️ 写方向红线：全程只插内容，**绝不点 Publish**。
  * fail loud：单 step 失败 → 记 warning 继续；阻断性问题（无 wc / selector 未配置）→ 直接 fail。
  */
+/**
+ * 准备 Article 驱动上下文:定位 wc + 取 art selector + 打开/确认编辑器就绪。
+ * driveArticlePlan 与逐块测试模块(test-drivers.ts)共用,避免重复定位逻辑。
+ */
+export async function prepareArticleContext(
+  serviceId: XServiceId,
+  targetWcId?: number,
+): Promise<{ wc: Electron.WebContents; art: XArticleSelectors } | { error: string }> {
+  const got = await requireXWebContents(serviceId, targetWcId);
+  if ('error' in got) return { error: got.error };
+  const wc = got.wc;
+  const profile = getXServiceProfile(serviceId);
+  const art = profile.selectors.article;
+  if (!art) return { error: 'X Article selector 未配置(需 spike 后填入 profile)' };
+  const ready = await openArticleEditor(wc, art);
+  if (!ready) {
+    return { error: '该 X 账号可能没有 Article(文章)发布权限,或 X 改版 —— 请确认账号有发文章权限' };
+  }
+  return { wc, art };
+}
+
+/** 测试模块复用:单块驱动 + 干净态 + 块计数,均 export(测试代码隔离在 test-drivers.ts)。 */
+export { ensureCleanState, driveStep, getDataBlockCount, confirmBlockLanded, verifyMediaContent, verifyTableContent };
+export type { StepResult };
+
 export async function driveArticlePlan(
   serviceId: XServiceId,
   plan: ArticlePlanPayload,

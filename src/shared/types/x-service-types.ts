@@ -86,6 +86,12 @@ export interface XArticleSelectors {
   newArticleButton: string;
   /** Article 正文编辑区(合成 paste 文字 HTML 落点;也是「编辑器就绪 + 权限通过」的判据之一)。 */
   body: string;
+  /**
+   * 「块」selector(★ 2026-06-14 实测 X = DraftJS:每块 `[data-block="true"]`)。驱动器用它数块
+   * 落定(块数 +N = 块真插入)。缺省走 DraftJS 默认 `[data-contents="true"] [data-block="true"]`。
+   * 跨平台预留:未来 Reddit/微博各填自己的块判据(各编辑器块模型不同)。
+   */
+  blockSelector?: string;
   /** Article 标题输入框(note isTitle → 填这里)。 */
   titleInput: string;
   /** Insert 菜单触发钮(＋ / Insert ▾)。 */
@@ -303,9 +309,11 @@ const X_PROFILE: XServiceProfile = {
       // 模态打开判据(★ 实测:所有 Insert 模态顶部都有 app-bar-close 关闭按钮)。出现=模态开,消失=模态关。
       modalOpenMarker: '[data-testid="app-bar-close"]',
       // Media(网页内 Crop media):文件 input(★ 实测确认 fileInput 在编辑器内)。
-      mediaFileInput: 'input[type="file"][accept*="image"], input[data-testid="fileInput"]',
-      // 喂图成功判据:正文里出现图块(待抓 testid;空 = 只 warn 不 fail)。
-      mediaInsertedThumb: 'article img, figure img',
+      mediaFileInput: 'input[type="file"][accept*="image"], input[type="file"][accept*="video"], input[data-testid="fileInput"]',
+      // 喂图成功判据(★ 2026-06-14 修正:X = DraftJS,媒体块是 <section data-block> 含 img/video;
+      //   旧 'article img' 对 Article 编辑器永久失效)。driveMediaWithPath 实际用 verifyMediaContent
+      //   (走 blockSelector)判落定,此字段保留作兼容/诊断。
+      mediaInsertedThumb: 'section[data-block] img, section[data-block] video',
     },
   },
 };

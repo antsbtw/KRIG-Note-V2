@@ -803,6 +803,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xDriveArticle(serviceId: string, plan: unknown, targetWcId?: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_DRIVE_ARTICLE, { serviceId, plan, targetWcId });
   },
+  /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。 */
+  xTestDriveStep(serviceId: string, step: unknown, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, step, targetWcId });
+  },
   /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
   xDragArm(targetWcId: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_ARM, { targetWcId });

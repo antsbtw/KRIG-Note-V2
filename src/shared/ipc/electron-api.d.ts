@@ -33,7 +33,7 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
-import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
+import type { ArticlePlan, ArticleInsertStep } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
@@ -606,6 +606,12 @@ declare global {
         plan: ArticlePlan,
         targetWcId?: number,
       ): Promise<{ success: boolean; error?: string; drivenSteps?: number; warnings?: string[] }>;
+      /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。media 的 mediaUrl 可传磁盘绝对路径。 */
+      xTestDriveStep(
+        serviceId: XServiceId,
+        step: ArticleInsertStep,
+        targetWcId?: number,
+      ): Promise<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string; error?: string }>;
       /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
       xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
       /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/
