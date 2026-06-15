@@ -38,5 +38,7 @@ export {
 } from './webview-input';
 export {
   feedFilesToInput,
+  feedVideoToInput,
+  VIDEO_TRANSCODE_TIMEOUT_MS,
   type FeedFilesResult,
 } from './webview-file-input';

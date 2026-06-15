@@ -28,6 +28,7 @@ import {
   pasteTextToWebview,
   locateSendButton,
   feedFilesToInput,
+  feedVideoToInput,
 } from '../web-service-base';
 import { requireXWebContents } from './x-webcontents';
 
@@ -38,37 +39,64 @@ export interface XWriteResult {
   /** 发布按钮是否已就位(成功时附带,辅助确认内容落进正确的框;不代表已发布)*/
   publishReady?: boolean;
   /**
-   * 媒体降级提示(阶段 2.5-b):文字成功落地但喂图失败时附带。
-   * 非空 = 文字已填入但图没带上 → renderer 侧明示「请手动拖图」(fail loud 不假装成功)。
+   * 媒体降级提示(阶段 2.5-b):文字成功落地但喂图/视频失败(或视频转码超时)时附带。
+   * 非空 = 文字已填入但媒体没带上 → renderer 侧明示「请手动拖入图片/视频」(fail loud 不假装成功)。
    */
   mediaWarning?: string;
 }
 
 /**
- * 把媒体文件喂进当前 X 发推/回复框(阶段 2.5-b,路线 B)。
+ * 把媒体(图 **或** 视频)喂进当前 X 发推/回复框(阶段 2.5-b,路线 B)。
  *
- * ⚠️ 顺序很重要:**图先喂、文字后填**。X 要时间读文件 + 转码生成缩略图,先把图喂进去
- * 等缩略图出现,再填文字,避免竞态(文字先填 → 喂图时框焦点/状态变动可能扰乱)。
+ * ⚠️ 顺序很重要:**媒体先喂、文字后填**。X 要时间读文件 + 生成缩略图 / 转码,先把媒体喂进去
+ * 等就绪,再填文字,避免竞态(文字先填 → 喂媒体时框焦点/状态变动可能扰乱)。
  *
- * fail loud:喂图任一步失败(selector 失效 / X 没接住)→ 返回 warning 字符串,
- * 调用方据此「文字仍填、但明示图没带上」,绝不静默吞掉。成功返 null。
+ * 图视频互斥(防御性二道关):X 不许图视频混发,view 侧已收口为「有视频则不传图」。这里再断言一次
+ * —— 若两者都非空,**优先视频、丢图并 warn**(与 view 决策一致),绝不同时喂(违反 X 规则会报错)。
  *
- * @returns null = 无图或喂图成功;string = 喂图失败的人类可读原因(用于降级提示)
+ * - 有视频 → feedVideoToInput(转码 poll + 长超时,独立于图片路径,不污染)。
+ * - 否则有图 → feedFilesToInput(缩略图 poll,秒级)。
+ *
+ * fail loud:喂任一步失败(selector 失效 / X 没接住 / 转码超时)→ 返回 warning 字符串,
+ * 调用方据此「文字仍填、但明示媒体没带上」,绝不静默吞掉。成功返 null。
+ *
+ * @returns null = 无媒体或喂成功;string = 喂媒体失败 / 互斥取舍的人类可读原因(降级提示)
  */
 async function feedMediaIfAny(
   wc: Electron.WebContents,
   profile: ReturnType<typeof getXServiceProfile>,
   mediaPaths: string[] | undefined,
+  videoPaths: string[] | undefined,
 ): Promise<string | null> {
-  if (!mediaPaths || mediaPaths.length === 0) return null;
+  const hasImages = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  const hasVideos = Array.isArray(videoPaths) && videoPaths.length > 0;
+  if (!hasImages && !hasVideos) return null;
+
   const fileInputSel = profile.selectors.fileInput;
   if (!fileInputSel) {
     return 'X 文件上传 selector 未配置(需 spike 后填入 profile)';
   }
+
+  // 互斥:有视频 → 只喂视频(X 一推最多 1 视频)。droppedImages 拼进 warning(不静默)。
+  if (hasVideos) {
+    // X 一条推最多 1 个视频(view 侧已截);这里再保险只取第 1 个。
+    const fed = await feedVideoToInput(
+      wc,
+      fileInputSel,
+      videoPaths!.slice(0, 1),
+      profile.selectors.videoUploadComplete,
+      profile.selectors.videoUploadProgress,
+    );
+    const droppedNote = hasImages ? `;另忽略了 ${mediaPaths!.length} 张图(X 不许图视频混发)` : '';
+    if (!fed.ok) return `${fed.error || '喂视频失败'}${droppedNote}`;
+    return droppedNote ? `已发视频${droppedNote}` : null;
+  }
+
+  // 纯图:走图片缩略图 poll(秒级)。
   const fed = await feedFilesToInput(
     wc,
     fileInputSel,
-    mediaPaths,
+    mediaPaths!,
     profile.selectors.uploadedMediaThumb,
   );
   return fed.ok ? null : fed.error || '喂图失败';
@@ -115,10 +143,13 @@ export async function pasteTweet(
   text: string,
   targetWcId?: number,
   mediaPaths?: string[],
+  videoPaths?: string[],
 ): Promise<XWriteResult> {
-  // 文字与媒体至少有一项(X 截图后:纯公式/纯图推正文为空但带图,也应可发)。
+  // 文字与媒体至少有一项(X 截图后:纯公式/纯图/纯视频推正文为空但带媒体,也应可发)。
   const hasText = !!(text && text.trim());
-  const hasMedia = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  const hasMedia =
+    (Array.isArray(mediaPaths) && mediaPaths.length > 0) ||
+    (Array.isArray(videoPaths) && videoPaths.length > 0);
   if (!hasText && !hasMedia) {
     return { success: false, error: '内容为空,无法发推' };
   }
@@ -148,10 +179,10 @@ export async function pasteTweet(
     return { success: false, error: '未能定位 X 发推框(可能 X 改版 / 未登录 / selector 失效)' };
   }
 
-  // 阶段 2.5-b:先喂图(等缩略图出现),再填文字。喂图失败 → 记 warning,文字仍填(fail loud)。
-  const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths);
+  // 阶段 2.5-b:先喂媒体(图等缩略图 / 视频等转码),再填文字。喂失败 → 记 warning,文字仍填(fail loud)。
+  const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths, videoPaths);
 
-  // 纯图/纯公式推(text 为空):只喂图,不粘贴空串(空串粘贴校验必失败)。
+  // 纯图/纯视频/纯公式推(text 为空):只喂媒体,不粘贴空串(空串粘贴校验必失败)。
   if (hasText) {
     const pasted = await pasteTextToWebview(wc, composeSel, text);
     if (!pasted) {
@@ -180,9 +211,12 @@ export async function pasteReply(
   text: string,
   targetWcId?: number,
   mediaPaths?: string[],
+  videoPaths?: string[],
 ): Promise<XWriteResult> {
   const hasText = !!(text && text.trim());
-  const hasMedia = Array.isArray(mediaPaths) && mediaPaths.length > 0;
+  const hasMedia =
+    (Array.isArray(mediaPaths) && mediaPaths.length > 0) ||
+    (Array.isArray(videoPaths) && videoPaths.length > 0);
   if (!hasText && !hasMedia) {
     return { success: false, error: '回复内容为空' };
   }
@@ -219,10 +253,10 @@ export async function pasteReply(
     };
   }
 
-  // 阶段 2.5-b:先喂图(等缩略图),再填文字。喂图失败 → warning,文字仍填(fail loud)。
-  const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths);
+  // 阶段 2.5-b:先喂媒体(图等缩略图 / 视频等转码),再填文字。喂失败 → warning,文字仍填(fail loud)。
+  const mediaWarning = await feedMediaIfAny(wc, profile, mediaPaths, videoPaths);
 
-  // 纯图/纯公式回复(text 为空):只喂图,不粘贴空串。
+  // 纯图/纯视频/纯公式回复(text 为空):只喂媒体,不粘贴空串。
   if (hasText) {
     const pasted = await pasteTextToWebview(wc, replySel, text);
     if (!pasted) {

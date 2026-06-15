@@ -27,12 +27,21 @@ import { checkTweetLength } from '@shared/x/markdown-to-tweet';
 import { consumePendingXSendConfirm, type XSendConfirmContext } from './panel-context';
 import './x-send-confirm-popup.css';
 
+/** 从视频源(media:// 或磁盘绝对路径)取末段文件名,供弹窗显示(取不到则原样)。 */
+function videoFileName(url: string): string {
+  const clean = url.replace(/^media:\/\//, '').split(/[?#]/)[0];
+  const seg = clean.split(/[/\\]/).filter(Boolean).pop();
+  return seg || url;
+}
+
 export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
   // mount 时读 pending ctx;读完即清(useMemo 保仅跑一次)。
   const ctx = useMemo<XSendConfirmContext | null>(() => consumePendingXSendConfirm(), []);
   const [text, setText] = useState(() => ctx?.text ?? '');
   /** 用户当前保留的媒体清单(可移除某张,只影响本次发送)*/
   const [mediaUrls, setMediaUrls] = useState<string[]>(() => ctx?.mediaUrls ?? []);
+  /** 用户当前保留的视频清单(X 互斥:有视频时图为空;可移除,只影响本次发送)*/
+  const [videoUrls, setVideoUrls] = useState<string[]>(() => ctx?.videoUrls ?? []);
   /** 注入进行中(await onConfirm 期间禁按钮防重复点)*/
   const [injecting, setInjecting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -60,19 +69,20 @@ export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
 
   const len = checkTweetLength(text);
   const isReply = ctx.replyPreview != null;
-  // 可发 = 有文字**或**有媒体(X 截图后:纯公式/纯图推正文为空但带图,也应可发)。
-  const canSend = (text.trim().length > 0 || mediaUrls.length > 0) && !injecting;
+  const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
+  // 可发 = 有文字**或**有媒体(X 截图后:纯公式/纯图/纯视频推正文为空但带媒体,也应可发)。
+  const canSend = (text.trim().length > 0 || hasMedia) && !injecting;
 
   async function handleConfirm(): Promise<void> {
     if (!ctx || injecting) return;
     const finalText = text.trim();
-    // 文字为空但有媒体(纯公式/纯图推)仍可发;两者皆空才挡。
-    if (!finalText && mediaUrls.length === 0) return;
+    // 文字为空但有媒体(纯公式/纯图/纯视频推)仍可发;皆空才挡。
+    if (!finalText && mediaUrls.length === 0 && videoUrls.length === 0) return;
     setInjecting(true);
     try {
       // 注入 + 失败降级全在 onConfirm 内(send-to-x 侧)。本弹窗只负责确认 + 关闭。
-      // 第二参回传用户保留下的媒体清单(可能已移除某张)。
-      await ctx.onConfirm(finalText, mediaUrls);
+      // 第二/三参回传用户保留下的图/视频清单(可能已移除某项)。
+      await ctx.onConfirm(finalText, mediaUrls, videoUrls);
     } catch (err) {
       // onConfirm 内部已 fail-loud 降级处理;此处兜底防未捕获异常吞掉关闭。
       console.warn('[XSendConfirmPanel] onConfirm threw:', err);
@@ -145,6 +155,41 @@ export function XSendConfirmPanel({ onClose }: PopupCloseProps) {
                   onClick={() => setMediaUrls((prev) => prev.filter((_, j) => j !== i))}
                   title="不带这张图(只影响本次发送)"
                   aria-label="移除此图"
+                  disabled={injecting}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 视频项栏(阶段 2.5-b 视频):X 一条推最多 1 个视频,且与图互斥(有视频时上面图栏为空)。
+          视频源可能是 localFilePath 绝对路径(渲染进程无法 file:// 取),故只显文件名 + 可移除,不显缩略图。*/}
+      {videoUrls.length > 0 && (
+        <div className="krig-x-send-confirm__media">
+          <div className="krig-x-send-confirm__media-label">
+            将带 1 个视频
+            {ctx.totalVideoCount > 1 && (
+              <span className="krig-x-send-confirm__media-trunc">
+                (共 {ctx.totalVideoCount} 个,X 限 1 个,仅带第 1 个)
+              </span>
+            )}
+          </div>
+          <div className="krig-x-send-confirm__media-thumbs">
+            {videoUrls.map((url, i) => (
+              <div key={url + i} className="krig-x-send-confirm__video-item">
+                <span className="krig-x-send-confirm__video-icon" aria-hidden>🎬</span>
+                <span className="krig-x-send-confirm__video-name" title={url}>
+                  {videoFileName(url)}
+                </span>
+                <button
+                  type="button"
+                  className="krig-x-send-confirm__thumb-remove"
+                  onClick={() => setVideoUrls((prev) => prev.filter((_, j) => j !== i))}
+                  title="不带这个视频(只影响本次发送)"
+                  aria-label="移除此视频"
                   disabled={injecting}
                 >
                   ×

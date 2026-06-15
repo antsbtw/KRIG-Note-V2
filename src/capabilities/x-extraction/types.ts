@@ -131,11 +131,18 @@ export interface XExtractionApi {
     text: string,
     targetWcId?: number | null,
     mediaUrls?: string[],
+    /**
+     * 视频源数组(阶段 2.5-b 视频,路线 B):media:// 或磁盘绝对路径(ytdlp localFilePath)。
+     * main 侧解析后走**视频喂文件**(feedVideoToInput,转码 poll)。与 mediaUrls 互斥
+     *(X 不许图视频混发,view 侧已收口为「有视频则不传图」)。喂失败 → result.mediaWarning。
+     */
+    videoUrls?: string[],
   ): Promise<XWriteResult>;
   /**
    * 回复:导航到目标推 + 把纯文本填进 reply 框(用户随后手动点回复)。
    * @param targetWcId 指定注入目标 guest wc(本活跃 ws 的 X);省略 → main 回退全局 active。
    * @param mediaUrls 同 pasteTweet(阶段 2.5-b)。
+   * @param videoUrls 同 pasteTweet(阶段 2.5-b 视频)。
    */
   pasteReply(
     serviceId: XServiceId,
@@ -143,6 +150,7 @@ export interface XExtractionApi {
     text: string,
     targetWcId?: number | null,
     mediaUrls?: string[],
+    videoUrls?: string[],
   ): Promise<XWriteResult>;
   /**
    * 发长文:驱动 X 原生 Insert 菜单逐 block 插入(终态,2026-06-13)。
