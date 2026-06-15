@@ -48,9 +48,14 @@ describe('articleDocToHtml', () => {
     expect(html).toBe('<p>hi</p><h2>标题</h2>');
   });
 
-  it('heading level > 3 夹到 h3', () => {
+  it('heading level > 2 夹到 h2（★ 实测 X Article 只有 Heading=h1 / Subheading=h2，无 h3）', () => {
     const html = articleDocToHtml(doc(N.heading.create({ level: 5 }, schema.text('深'))));
-    expect(html).toBe('<h3>深</h3>');
+    expect(html).toBe('<h2>深</h2>');
+  });
+
+  it('heading level 1 → h1（Heading 大标题）', () => {
+    const html = articleDocToHtml(doc(N.heading.create({ level: 1 }, schema.text('大'))));
+    expect(html).toBe('<h1>大</h1>');
   });
 
   it('bold/italic/strike/link → 语义标签', () => {

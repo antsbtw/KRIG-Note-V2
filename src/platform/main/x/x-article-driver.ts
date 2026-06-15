@@ -726,11 +726,14 @@ async function driveHtml(
   html: string,
 ): Promise<StepResult> {
   // ★ 段落黏连修(2026-06-13 实机:相邻 html 段/标题被黏成一坨):X 把 HTML 粘到正文**当前光标处**,
-  //   若光标在上一块行尾,粘进来的首块会**并进那一行** → 标题黏一起。
-  //   修法:**把空段落分隔直接拼进同一次 paste**(text/html 前置 `<p><br></p>`,text/plain 前置 `\n`),
-  //   X 收到时先起新块再放正文 → 不黏连。**单次 paste**(不再双 paste 抢焦点,那会扰乱时序 = 可靠性问题)。
+  //   若光标在上一块行尾,粘进来的首块会**并进那一行** → 标题黏一起。修法:前置一个分隔段落。
+  // ★★ 标题失格修(2026-06-14 实机 __xtest 铁证):前缀**不能用空段落 `<p><br></p>`** —— X(DraftJS)
+  //   把空段落和紧跟的 `<h1>/<h2>` 合并,丢掉 heading 格式降级成正文。实测:前缀必须是「有内容的 `<p>`」
+  //   才让标题另起块成 Heading(`<p>前置正文</p><h1>X</h1>` ✅ 大标题;`<p><br></p><h1>X</h1>` ❌ 降级)。
+  //   故前缀用**零宽字符段落**(U+200B):对 X 是有内容真段落(标题不被并),视觉不可见(不留空行)。
+  const ZW_SEP = '<p>' + String.fromCharCode(0x200b) + '</p>'; // 零宽空格占位段落(用 charCode 避免源码不可见字符)
   const plain = '\n' + htmlToPlainText(html);
-  const htmlWithSep = '<p><br></p>' + html;
+  const htmlWithSep = ZW_SEP + html;
   // 诊断(table/divider 丢失排查):打印这段 html 的长度 / 是否含 table / 前 80 字。
   console.log(
     `[x-article-driver] driveHtml: len=${html.length} hasTable=${html.includes('<table')} ` +

@@ -24,8 +24,12 @@
 
 import type { Node as PMNode, Mark } from 'prosemirror-model';
 
-/** X Article 支持的最深标题级(实测 #1 待精确;矩阵默认夹到 3)。 */
-const X_MAX_HEADING_LEVEL = 3;
+/**
+ * X Article 支持的最深标题级。★ 2026-06-14 实机 __xtest 铁证修正:X Article 工具栏只有
+ * **2 级标题** Heading(`<h1>`)/ Subheading(`<h2>`)+ Body,**没有 h3**(`<h3>` 会被当 Body 正文)。
+ * 故夹到 2:note 1 级 → `<h1>`(Heading 大标题),2 级及以下 → `<h2>`(Subheading)。
+ */
+const X_MAX_HEADING_LEVEL = 2;
 
 /** HTML 实体转义(文本节点 + 属性值)。 */
 function esc(s: string): string {
