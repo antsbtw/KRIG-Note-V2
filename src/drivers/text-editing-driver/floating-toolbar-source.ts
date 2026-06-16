@@ -32,6 +32,14 @@ export function setupFloatingToolbarTrigger(
       return;
     }
     if (view.isDestroyed) return;
+    // 当前块完全禁 mark(code-block/math-block 的 spec.marks === '')时,
+    // 浮条上 8 个按钮全是 toggleMark/插 mark 类操作,被 schema 挡掉点了没反应 ——
+    // 整条隐藏,不留空壳工具栏。靠 schema 事实判定,新增任何 marks:'' 的块自动适用。
+    const $from = view.state.selection.$from;
+    if ($from.node($from.depth).type.spec.marks === '') {
+      floatingToolbarController.hide();
+      return;
+    }
     // 计算选区屏幕坐标(选区上方居中)
     // FLOATING_TOOLBAR_HEIGHT 跟 overlay-bindings.css .krig-floating-toolbar 实际高度一致(行高+padding+border)
     // 用估算值是因为浮条 mount 前算不出真实高度,微调 ±2px 用户感知不到
