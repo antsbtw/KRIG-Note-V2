@@ -1,0 +1,222 @@
+/**
+ * Auth UI 样式(LoginScreen 全屏 gate + 占位)
+ *
+ * 对齐 V2 深色主题(#1e1e1e / #2a2a2a / #555 / #e8eaed,圆角 10),
+ * 范式照 ask-ai-popup.css。
+ */
+
+.krig-auth-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e1e1e;
+  color: #e8eaed;
+  font-size: 13px;
+  -webkit-app-region: drag; /* 整层可拖窗(无标题栏时仍能挪窗)*/
+}
+
+/* 占位(loading 态):不闪登录页,只显轻量提示 */
+.krig-auth-gate--loading .krig-auth-gate__placeholder {
+  color: #888;
+  font-size: 13px;
+}
+
+.krig-auth-card {
+  -webkit-app-region: no-drag; /* 卡片内可交互 */
+  width: 340px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.krig-auth-card__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.krig-auth-card__subtitle {
+  color: #aaa;
+  font-size: 12px;
+  margin: 0;
+}
+
+.krig-auth-card__tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.krig-auth-card__tab {
+  flex: 1;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #aaa;
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.krig-auth-card__tab--active {
+  background: #3a6df0;
+  border-color: #3a6df0;
+  color: #fff;
+}
+
+.krig-auth-card__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.krig-auth-card__label {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.krig-auth-card__input {
+  background: #1e1e1e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #e8eaed;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.krig-auth-card__input:focus {
+  border-color: #3a6df0;
+}
+
+.krig-auth-card__code-row {
+  display: flex;
+  gap: 8px;
+}
+
+.krig-auth-card__code-row .krig-auth-card__input {
+  flex: 1;
+}
+
+.krig-auth-card__send-code {
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #e8eaed;
+  padding: 0 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.krig-auth-card__send-code:disabled {
+  color: #666;
+  cursor: default;
+}
+
+.krig-auth-card__submit {
+  background: #3a6df0;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  padding: 10px 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.krig-auth-card__submit:disabled {
+  background: #2c4a9e;
+  color: #bbb;
+  cursor: default;
+}
+
+/* fail loud:错误明确显示,不静默 */
+.krig-auth-card__error {
+  color: #ff6b6b;
+  font-size: 12px;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.krig-auth-card__hint {
+  color: #6bcf83;
+  font-size: 12px;
+  margin: 0;
+}
+
+/* ── AuthStatusBadge(WorkspaceBar 最右端)── */
+
+.krig-auth-badge {
+  flex: none; /* 不参与 tabs 的 flex:1 伸缩,固定贴最右 */
+  margin-left: auto; /* 把自己推到最右端,与 tabs / [+] 拉开(总指挥要求)*/
+  position: relative;
+  -webkit-app-region: no-drag; /* badge 可点,不触发拖窗 */
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+}
+
+.krig-auth-badge__chip {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #b8c4d8;
+  font-size: 11px;
+  height: 20px;
+  padding: 0 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.krig-auth-badge__chip:hover {
+  background: #2e2e2e;
+  color: #e8eaed;
+}
+
+.krig-auth-badge__menu {
+  position: absolute;
+  top: 24px;
+  right: 4px;
+  z-index: 10000;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.krig-auth-badge__email {
+  color: #aaa;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+.krig-auth-badge__logout {
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #ff8a8a;
+  font-size: 12px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.krig-auth-badge__logout:hover {
+  background: #3a2a2a;
+  color: #ff6b6b;
+}

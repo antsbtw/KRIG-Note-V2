@@ -14,6 +14,8 @@ import { AddWorkspaceButton } from './AddWorkspaceButton';
 import { WorkspaceTab } from './WorkspaceTab';
 import { useFullscreen } from './use-fullscreen';
 import { useOpenWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { AuthApi } from '@capabilities/auth/types';
 import './workspace-bar.css';
 
 export function WorkspaceBar() {
@@ -21,6 +23,8 @@ export function WorkspaceBar() {
   const workspaces = useOpenWorkspaces(); // 顶部 bar 只显打开的(收起的留 NavSide 库)
   const activeId = useActiveWorkspaceId();
   const className = `krig-workspace-bar ${isFullscreen ? 'krig-workspace-bar--fullscreen' : ''}`;
+  // 授权徽标走 capability api(shell 不直 import capability 运行时值,W5 §5)
+  const AuthStatusBadge = requireCapabilityApi<AuthApi>('auth').StatusBadge;
 
   return (
     <div className={className} role="toolbar" aria-label="Workspace Bar">
@@ -41,6 +45,8 @@ export function WorkspaceBar() {
         {/* [+] 按钮紧贴最后一个 Tab,不再靠最右端 */}
         <AddWorkspaceButton />
       </div>
+      {/* 授权徽标:最右端(margin-left:auto 推到右,与 tabs/[+] 拉开)*/}
+      <AuthStatusBadge />
     </div>
   );
 }

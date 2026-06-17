@@ -23,6 +23,13 @@ import type {
 } from '@shared/ipc/backup-types';
 import type { FolderViewType } from '@capabilities/folder/types';
 import type { XPlanCacheEnvelope } from '@shared/ipc/x-types';
+import type {
+  AuthState,
+  AuthSendCodeInput,
+  AuthRegisterInput,
+  AuthLoginInput,
+  AuthActionResult,
+} from '@shared/auth/auth-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /** 诊断上报(renderer → main) */
@@ -824,6 +831,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xDragReplyHere(serviceId: string, targetWcId: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_REPLY_HERE, { serviceId, targetWcId });
   },
+  // ── 账号登录 + 归因(本期不做授权) ──
+  // renderer 永远只拿 public AuthState(不含 token);邮箱注册两步(先 authSendCode 拿码)。
+  /** 取当前 public 授权态(不含 token) */
+  authGetState(): Promise<AuthState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTH_GET_STATE);
+  },
+  /** 发邮箱验证码(注册前置,purpose=register) */
+  authSendCode(input: AuthSendCodeInput): Promise<AuthActionResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTH_SEND_CODE, input);
+  },
+  /** 注册(email+password+6 位 code) */
+  authRegister(input: AuthRegisterInput): Promise<AuthActionResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTH_REGISTER, input);
+  },
+  /** 登录(老用户,email+password) */
+  authLogin(input: AuthLoginInput): Promise<AuthActionResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTH_LOGIN, input);
+  },
+  /** 登出 + 清本地 token,回 anonymous */
+  authLogout(): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTH_LOGOUT);
+  },
+  /** 刷 token(轮换;启动 / 恢复前台时) */
+  authRefresh(): Promise<AuthActionResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTH_REFRESH);
+  },
+  /** main → renderer 推送:授权态变化;返 unsubscribe(多 ws 守卫由 renderer 侧加) */
+  onAuthChanged(callback: (state: AuthState) => void): () => void {
+    const handler = (_event: unknown, state: AuthState): void => callback(state);
+    ipcRenderer.on(IPC_CHANNELS.AUTH_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.AUTH_CHANGED, handler);
+  },
+
   // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
   /** 任务开始 — 显示全屏覆盖层 */
   onProgressStart(callback: (payload: ProgressStartPayload) => void): () => void {

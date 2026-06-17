@@ -12,6 +12,7 @@ import { WorkspaceBar } from '@shell/workspace-bar/WorkspaceBar';
 import { WorkspaceContainer } from '@shell/workspace-container/WorkspaceContainer';
 import { FullscreenOverlayContainer } from '@shell/fullscreen-overlay/FullscreenOverlayContainer';
 import { GlobalProgressOverlay } from '@shell/global-progress-overlay/GlobalProgressOverlay';
+import { AuthGate } from '@capabilities/auth/AuthGate';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { reportL2Alive } from '@shell/diagnostics/L2-alive';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
@@ -51,6 +52,7 @@ import '@capabilities/thought';             // 横切思考层(thought-view-port
 import '@capabilities/ai-extraction';       // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability(原 ai-conversation,2026-05-19 改名)
 import '@capabilities/x-extraction';        // X 集成 阶段 0/1:嵌 x.com webview + 右键提取推文 → tweetBlock(铁律 3 独立 capability)
 import '@capabilities/content-extraction';  // 网页剪藏(Defuddle → Note);模块 load 即订阅 WEB_CLIP_RESULT 跑 import-pipeline
+import '@capabilities/auth';                 // 授权:注册 auth capability(暴露 StatusBadge),模块 load 即挂 onAuthChanged 单订阅
 
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
@@ -115,12 +117,15 @@ function App() {
 
   return (
     <div className="krig-app">
-      <div className="krig-app__workspace-layer" style={workspaceStyle}>
-        <WorkspaceBar />
-        <WorkspaceContainer />
-      </div>
-      <FullscreenOverlayContainer />
-      <GlobalProgressOverlay />
+      {/* AuthGate:未登录/loading 时只显登录页/占位,登录后才渲染工作区(包住全部 UI)*/}
+      <AuthGate>
+        <div className="krig-app__workspace-layer" style={workspaceStyle}>
+          <WorkspaceBar />
+          <WorkspaceContainer />
+        </div>
+        <FullscreenOverlayContainer />
+        <GlobalProgressOverlay />
+      </AuthGate>
     </div>
   );
 }
