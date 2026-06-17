@@ -264,6 +264,17 @@ export const IPC_CHANNELS = {
   // renderer → main:让 renderer 端长任务(import 解析/切割)也能驱动同一 overlay。
   // main 收到后原样回推 PROGRESS_START/UPDATE/DONE 到本窗口,复用 GlobalProgressOverlay。
   PROGRESS_DRIVE: 'progress.drive',                 // renderer → main:驱动进度事件
+
+  // 账号登录 + 归因(本期不做授权)— authorization-management-design.md
+  // 邮箱注册两步:先 AUTH_SEND_CODE 拿 6 位码,再 AUTH_REGISTER 带 code。
+  // device 嵌套对象 + app_source 顶层由主进程补;token 只在主进程,renderer 拿 public state。
+  AUTH_GET_STATE: 'auth.get-state',                 // renderer → main:拿当前 public 状态(不含 token)
+  AUTH_SEND_CODE: 'auth.send-code',                 // renderer → main:发邮箱验证码(POST /auth/code,purpose=register)
+  AUTH_REGISTER: 'auth.register',                   // renderer → main:注册(email+password+code)
+  AUTH_LOGIN: 'auth.login',                         // renderer → main:登录(老用户,email+password)
+  AUTH_LOGOUT: 'auth.logout',                       // renderer → main:登出 + 清本地 token
+  AUTH_REFRESH: 'auth.refresh',                     // renderer → main:刷 token(轮换;启动/恢复前台)
+  AUTH_CHANGED: 'auth.changed',                     // main → renderer 广播:登录态变化(多 ws 扇出守卫)
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

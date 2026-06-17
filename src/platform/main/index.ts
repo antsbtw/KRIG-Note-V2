@@ -54,6 +54,7 @@ import { registerWebShortcutsHook } from './web-shortcuts/handler';
 import { registerWebDownloadHook } from './web-download/handler';
 import { registerWebProxyHandler } from './web-proxy/handler';
 import { registerWebSettingsHandler } from './web-settings/handler';
+import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -211,6 +212,13 @@ app.whenReady().then(async () => {
   registerWebProxyHandler();
   // per-ws 代理阶段3:Web 全局设置(搜索/主页)+ 清浏览数据 IPC。
   registerWebSettingsHandler();
+
+  // 登录:从磁盘恢复 session(有 token → authenticated,无 → anonymous)。
+  // **不 await**:窗口照常起,AuthState 初始 loading,restore 完成后经
+  // authService.subscribe → broadcastAuthChanged 推到已创建的窗口(冷启动不闪屏)。
+  void authService.restore().catch((err) => {
+    console.error('[auth] restore 失败(按未登录处理,可重新登录):', err);
+  });
 });
 
 // macOS:窗口全关后,点 dock 重新打开

@@ -42,6 +42,13 @@ import type {
   ProgressDonePayload,
   ProgressDrivePayload,
 } from './backup-types';
+import type {
+  AuthState,
+  AuthSendCodeInput,
+  AuthRegisterInput,
+  AuthLoginInput,
+  AuthActionResult,
+} from '../auth/auth-types';
 
 declare global {
   /** Web 下载历史条目(主进程 download-store 落盘的终态记录)*/
@@ -638,6 +645,23 @@ declare global {
         serviceId: XServiceId,
         targetWcId: number,
       ): Promise<{ ok: boolean; error?: string }>;
+
+      // ── 账号登录 + 归因(本期不做授权) ──
+      // renderer 永远只拿 public AuthState(不含 token);邮箱注册两步(先 authSendCode 拿码)。
+      /** 取当前 public 登录态(不含 token)*/
+      authGetState(): Promise<AuthState>;
+      /** 发邮箱验证码(注册前置步骤,purpose=register)*/
+      authSendCode(input: AuthSendCodeInput): Promise<AuthActionResult>;
+      /** 注册(email+password+6 位 code);成功后 result.state 为最新登录态 */
+      authRegister(input: AuthRegisterInput): Promise<AuthActionResult>;
+      /** 登录(老用户,email+password);成功后 result.state 为最新登录态 */
+      authLogin(input: AuthLoginInput): Promise<AuthActionResult>;
+      /** 登出 + 清本地 token,回 anonymous */
+      authLogout(): Promise<void>;
+      /** 刷 token(轮换;启动 / 恢复前台时)*/
+      authRefresh(): Promise<AuthActionResult>;
+      /** main → renderer 推送:登录态变化(登录/登出/刷新);返 unsubscribe */
+      onAuthChanged(callback: (state: AuthState) => void): () => void;
 
       // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──
       /** 任务开始 — 显示全屏覆盖层;返 unsubscribe */
