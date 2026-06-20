@@ -1,0 +1,234 @@
+/**
+ * node-toolbar 样式(L5-G5)— Freeform 风格 pill 浮条 + 展开面板
+ *
+ * 对齐 V2 既有浮层视觉(深色面板 #2a2a2a / 边 #444 / 蓝高亮 #8ab4f8),
+ * 用 --krig-* token 兜底硬编码值。
+ */
+
+.krig-node-toolbar {
+  position: absolute;
+  /* left/top 由组件设;以底边中点为锚,水平居中 */
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  pointer-events: auto;
+}
+
+/* ── 主条(pill) ── */
+.krig-node-toolbar__pill {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--krig-overlay-bg, #2a2a2a);
+  border: 1px solid var(--krig-overlay-border, #444);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+.krig-node-toolbar__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--krig-text-primary, #ddd);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.krig-node-toolbar__trigger:hover {
+  background: var(--krig-hover-bg, rgba(255, 255, 255, 0.08));
+}
+
+.krig-node-toolbar__trigger.is-active {
+  background: var(--krig-accent-bg, rgba(138, 180, 248, 0.22));
+  color: var(--krig-accent-fg, #8ab4f8);
+}
+
+/* ── 展开面板 ── */
+.krig-node-toolbar__panel {
+  position: relative;
+  margin-top: 8px;
+  padding: 10px;
+  min-width: 220px;
+  background: var(--krig-overlay-bg, #2a2a2a);
+  border: 1px solid var(--krig-overlay-border, #444);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--krig-text-primary, #ddd);
+}
+
+.krig-node-toolbar__panel-arrow {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 10px;
+  height: 10px;
+  background: var(--krig-overlay-bg, #2a2a2a);
+  border-left: 1px solid var(--krig-overlay-border, #444);
+  border-top: 1px solid var(--krig-overlay-border, #444);
+}
+
+/* ── 面板内通用件(各 section 复用) ── */
+.krig-node-toolbar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.krig-node-toolbar__row:last-child {
+  margin-bottom: 0;
+}
+
+.krig-node-toolbar__label {
+  font-size: 11px;
+  color: var(--krig-text-muted, #888);
+  min-width: 40px;
+}
+
+/* 色板格(直迁 V1 色板视觉) */
+.krig-node-toolbar__swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.krig-node-toolbar__swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--krig-overlay-border, #555);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.krig-node-toolbar__swatch:hover {
+  transform: scale(1.1);
+  border-color: var(--krig-accent-fg, #8ab4f8);
+}
+
+.krig-node-toolbar__swatch.is-active {
+  border-color: var(--krig-accent-fg, #8ab4f8);
+  box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.4);
+}
+
+/* "无填充" / 自定义取色等横条按钮 */
+.krig-node-toolbar__bar-btn {
+  flex: 1;
+  height: 28px;
+  border: 1px solid var(--krig-overlay-border, #555);
+  border-radius: 6px;
+  background: var(--krig-hover-bg, rgba(255, 255, 255, 0.04));
+  color: var(--krig-text-primary, #ddd);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.krig-node-toolbar__bar-btn:hover {
+  border-color: var(--krig-accent-fg, #8ab4f8);
+}
+
+.krig-node-toolbar__bar-btn.is-active {
+  border-color: var(--krig-accent-fg, #8ab4f8);
+  color: var(--krig-accent-fg, #8ab4f8);
+}
+
+/* 线型 / 对齐等图标按钮组 */
+.krig-node-toolbar__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--krig-overlay-border, #555);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--krig-text-primary, #ddd);
+  cursor: pointer;
+}
+
+.krig-node-toolbar__icon-btn:hover {
+  border-color: var(--krig-accent-fg, #8ab4f8);
+}
+
+.krig-node-toolbar__icon-btn.is-active {
+  border-color: var(--krig-accent-fg, #8ab4f8);
+  background: var(--krig-accent-bg, rgba(138, 180, 248, 0.18));
+  color: var(--krig-accent-fg, #8ab4f8);
+}
+
+/* 数字步进(pt / 字号) */
+.krig-node-toolbar__stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--krig-overlay-border, #555);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.krig-node-toolbar__stepper input {
+  width: 44px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--krig-text-primary, #ddd);
+  text-align: center;
+  font-size: 12px;
+}
+
+.krig-node-toolbar__stepper input::-webkit-outer-spin-button,
+.krig-node-toolbar__stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.krig-node-toolbar__stepper button {
+  width: 22px;
+  height: 26px;
+  border: none;
+  background: var(--krig-hover-bg, rgba(255, 255, 255, 0.04));
+  color: var(--krig-text-primary, #ddd);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.krig-node-toolbar__stepper button:hover {
+  background: var(--krig-accent-bg, rgba(138, 180, 248, 0.18));
+}
+
+/* 下拉(字体族) */
+.krig-node-toolbar__select {
+  flex: 1;
+  height: 28px;
+  border: 1px solid var(--krig-overlay-border, #555);
+  border-radius: 6px;
+  background: var(--krig-hover-bg, rgba(255, 255, 255, 0.04));
+  color: var(--krig-text-primary, #ddd);
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+/* 原生取色 input 包装 */
+.krig-node-toolbar__color-input {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--krig-overlay-border, #555);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
