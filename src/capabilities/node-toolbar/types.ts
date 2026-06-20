@@ -78,6 +78,25 @@ export type TextNodeStyleCommand =
 // ─────────────────────────────────────────────────────────
 
 /**
+ * 一条可选系统字体(L5-G7;view 注入 listSystemFonts 时回传)。
+ * 形态与 main 进程 SystemFontEntry / IPC DTO 同形,此处独立声明保 view-agnostic。
+ */
+export interface SystemFontInfo {
+  family: string;
+  style: string;
+  path: string;
+  fontIndex: number;
+  format: 'ttf' | 'otf' | 'ttc';
+  supported: boolean;
+}
+
+/** 嵌入结果(view 注入 embedSystemFont 的返回;null = 用户取消 / 失败) */
+export interface SystemFontEmbedResult {
+  fontId: string;
+  family: string;
+}
+
+/**
  * 容器给 section 的上下文(section 只认这个,不认具体 view).
  */
 export interface SectionContext {
@@ -91,6 +110,16 @@ export interface SectionContext {
   runTextCommand: (cmd: TextNodeStyleCommand) => void;
   /** 收起当前面板 */
   close: () => void;
+  /**
+   * L5-G7:列本机系统字体(view 注入,走 font-storage capability IPC)。
+   * 未注入 = 该 view 不支持系统字体导入,Text section 只显打包字体。
+   */
+  listSystemFonts?: () => Promise<SystemFontInfo[]>;
+  /**
+   * L5-G7:嵌入选中系统字体(view 注入)。view 端弹 8MB 守卫 + license 确认弹窗,
+   * 用户确认才嵌入并返回 { fontId };取消 / 失败返回 null。
+   */
+  embedSystemFont?: (font: SystemFontInfo) => Promise<SystemFontEmbedResult | null>;
 }
 
 /**
@@ -143,6 +172,10 @@ export interface NodeToolbarProps {
   onPatchInstance: (patch: Partial<NodeSnapshot>) => void;
   /** 落地:改文字 mark */
   onTextCommand: (cmd: TextNodeStyleCommand) => void;
+  /** L5-G7:列系统字体(可选;不传 = Text section 不显系统字体分组) */
+  onListSystemFonts?: () => Promise<SystemFontInfo[]>;
+  /** L5-G7:嵌入系统字体(可选;view 端含 8MB+license 确认弹窗) */
+  onEmbedSystemFont?: (font: SystemFontInfo) => Promise<SystemFontEmbedResult | null>;
 }
 
 /**

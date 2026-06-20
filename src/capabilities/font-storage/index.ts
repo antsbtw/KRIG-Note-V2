@@ -43,6 +43,20 @@ export async function fontListSystem(): Promise<SystemFontEntryDTO[]> {
   }
 }
 
+/** 嵌入前预估体积(KB);失败返回 { success:false }(该字体不可嵌入,UI fail loud) */
+export async function fontProbeSize(
+  sourcePath: string,
+  fontIndex: number,
+): Promise<{ success: boolean; sizeKb: number }> {
+  if (!window.electronAPI?.fontProbeSize) return { success: false, sizeKb: 0 };
+  try {
+    const r = await window.electronAPI.fontProbeSize(sourcePath, fontIndex);
+    return { success: r.success, sizeKb: r.sizeKb };
+  } catch {
+    return { success: false, sizeKb: 0 };
+  }
+}
+
 /**
  * 嵌入一个系统字体(.ttc 抽指定子字体)→ font:// + fontId。
  * 调用前 UI 应已过 8MB 体积守卫 + license 提示确认(G7.4)。
@@ -60,5 +74,5 @@ export async function fontEmbed(
 
 capabilityRegistry.register({
   id: 'font-storage',
-  api: { fontListSystem, fontEmbed },
+  api: { fontListSystem, fontProbeSize, fontEmbed },
 });

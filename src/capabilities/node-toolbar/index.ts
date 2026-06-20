@@ -40,6 +40,8 @@ export type {
   NodeBinding,
   ToolbarAnchor,
   TextNodeStyleCommand,
+  SystemFontInfo,
+  SystemFontEmbedResult,
 } from './types';
 
 export { NodeToolbar } from './NodeToolbar';

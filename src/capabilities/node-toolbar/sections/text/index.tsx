@@ -12,7 +12,8 @@
  * - 字体族 / 字号 → ctx.patchInstance(画板专属 instance 字段 text_font/text_size)
  */
 
-import type { NodeSnapshot, SectionContext, SectionDef } from '../../types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { NodeSnapshot, SectionContext, SectionDef, SystemFontInfo } from '../../types';
 import { PALETTE_14, normalizeHex } from '../palette';
 
 type FontFamily = NonNullable<NodeSnapshot['text_font']>;
@@ -115,21 +116,30 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
         </button>
       </div>
 
-      {/* 字体族(原 Type section 合并入) */}
+      {/* 字体族:打包字体下拉 + 系统字体(L5-G7,可搜索 + 嵌入) */}
       <div className="krig-node-toolbar__row">
         <span className="krig-node-toolbar__label">字体</span>
         <select
           className="krig-node-toolbar__select"
-          value={curFont}
-          onChange={(e) => ctx.patchInstance({ text_font: e.target.value as FontFamily })}
+          value={curFont.startsWith('embed:') ? '__embedded__' : curFont}
+          onChange={(e) => {
+            if (e.target.value === '__embedded__') return; // 当前嵌入字体占位项,不动作
+            ctx.patchInstance({ text_font: e.target.value as FontFamily });
+          }}
         >
           {FONT_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
           ))}
+          {curFont.startsWith('embed:') && (
+            <option value="__embedded__">已嵌入系统字体</option>
+          )}
         </select>
       </div>
+
+      {/* 系统字体导入(view 注入 listSystemFonts 才显) */}
+      {ctx.listSystemFonts && ctx.embedSystemFont && <SystemFontGroup ctx={ctx} />}
 
       {/* 字号(原 Type section 合并入) */}
       <div className="krig-node-toolbar__row">
@@ -155,6 +165,115 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
         </div>
         <span className="krig-node-toolbar__label">pt</span>
       </div>
+    </div>
+  );
+}
+
+/** license 常驻提示文案(设计 §6 锁定;系统字体分组下方 ⓘ) */
+const LICENSE_HINT =
+  '嵌入字体会随画板内容一起保存和分发。系统预装的商业字体(如苹方、微软雅黑等)' +
+  '可能限制再分发,导出 / 分享前请确认你拥有分发权利。';
+
+/**
+ * 系统字体分组(L5-G7.4):折叠区 → 展开懒加载本机系统字体 → 可搜索 → 点击嵌入。
+ * 嵌入走 view 注入的 ctx.embedSystemFont(view 端弹 8MB 守卫 + license 确认弹窗)。
+ * 同 family 多 style 折叠成一项(默认选 Regular,无则取第一条),避免列表爆炸。
+ */
+function SystemFontGroup({ ctx }: { ctx: SectionContext }): React.ReactElement {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [fonts, setFonts] = useState<SystemFontInfo[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [embedding, setEmbedding] = useState<string | null>(null);
+  const loadedRef = useRef(false);
+
+  // 首次展开懒加载
+  useEffect(() => {
+    if (!expanded || loadedRef.current || !ctx.listSystemFonts) return;
+    loadedRef.current = true;
+    setLoading(true);
+    ctx
+      .listSystemFonts()
+      .then((list) => setFonts(list))
+      .catch(() => setFonts([]))
+      .finally(() => setLoading(false));
+  }, [expanded, ctx]);
+
+  // family 去重:每 family 选一条代表(优先 Regular),供列表展示
+  const families = useMemo(() => {
+    if (!fonts) return [];
+    const byFamily = new Map<string, SystemFontInfo>();
+    for (const f of fonts) {
+      const prev = byFamily.get(f.family);
+      if (!prev) byFamily.set(f.family, f);
+      else if (/regular/i.test(f.style) && !/regular/i.test(prev.style)) byFamily.set(f.family, f);
+    }
+    let arr = [...byFamily.values()];
+    const q = query.trim().toLowerCase();
+    if (q) arr = arr.filter((f) => f.family.toLowerCase().includes(q));
+    return arr.slice(0, 300); // 上限防极端长列表卡 DOM
+  }, [fonts, query]);
+
+  const onPick = async (font: SystemFontInfo): Promise<void> => {
+    if (!ctx.embedSystemFont || embedding) return;
+    setEmbedding(font.family);
+    try {
+      const res = await ctx.embedSystemFont(font);
+      if (res) ctx.patchInstance({ text_font: `embed:${res.fontId}` });
+    } finally {
+      setEmbedding(null);
+    }
+  };
+
+  return (
+    <div className="krig-node-toolbar__sysfont">
+      <button
+        type="button"
+        className="krig-node-toolbar__sysfont-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {expanded ? '▾' : '▸'} 系统字体
+        <span className="krig-node-toolbar__sysfont-info" title={LICENSE_HINT} aria-label={LICENSE_HINT}>
+          ⓘ
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="krig-node-toolbar__sysfont-body">
+          <input
+            type="text"
+            className="krig-node-toolbar__sysfont-search"
+            placeholder="搜索字体…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {loading && <div className="krig-node-toolbar__sysfont-hint">扫描本机字体中…</div>}
+          {!loading && families.length === 0 && (
+            <div className="krig-node-toolbar__sysfont-hint">无匹配字体</div>
+          )}
+          {!loading && families.length > 0 && (
+            <ul className="krig-node-toolbar__sysfont-list">
+              {families.map((f) => (
+                <li key={`${f.family}@${f.path}#${f.fontIndex}`}>
+                  <button
+                    type="button"
+                    className="krig-node-toolbar__sysfont-item"
+                    disabled={embedding !== null}
+                    onClick={() => void onPick(f)}
+                  >
+                    <span className="krig-node-toolbar__sysfont-name">{f.family}</span>
+                    {embedding === f.family && (
+                      <span className="krig-node-toolbar__sysfont-spin">嵌入中…</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="krig-node-toolbar__sysfont-license">{LICENSE_HINT}</div>
+        </div>
+      )}
     </div>
   );
 }

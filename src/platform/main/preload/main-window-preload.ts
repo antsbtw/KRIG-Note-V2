@@ -124,6 +124,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.FONT_LIST_SYSTEM);
   },
 
+  /** L5-G7.4:嵌入前预估体积(8MB 守卫用,不落盘) */
+  async fontProbeSize(
+    sourcePath: string,
+    fontIndex: number,
+  ): Promise<{ success: boolean; error?: string; sizeKb: number }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FONT_PROBE_SIZE, sourcePath, fontIndex);
+  },
+
   /** L5-G7.2:嵌入选中系统字体 → font:// + fontId(写 text_font='embed:<fontId>') */
   async fontEmbed(
     sourcePath: string,
