@@ -101,11 +101,21 @@ class FontStore {
    */
   registerProtocol(): void {
     const handler = async (request: Request): Promise<Response> => {
-      const urlPath = request.url.replace('font://', '');
+      // 支持两种 URL:
+      //  - 完整文件名 font://font-<hash>.ttf
+      //  - 裸 fontId   font://font-<hash>(无 ext)→ 按前缀查实际文件
+      // 渲染进程的 text_font 只存 fontId(不含 ext),故 loadFont 走裸 fontId 这条。
+      let urlPath = request.url.replace('font://', '').replace(/\/+$/, '');
+      let filePath = path.resolve(FONT_DIR, urlPath);
       // 越界防御:解析后必须仍在 FONT_DIR 内
-      const filePath = path.resolve(FONT_DIR, urlPath);
-      if (!filePath.startsWith(FONT_DIR + path.sep)) {
+      if (filePath !== FONT_DIR && !filePath.startsWith(FONT_DIR + path.sep)) {
         return new Response('forbidden', { status: 403 });
+      }
+      // 裸 fontId(无 .ttf/.otf 后缀且文件不存在)→ 前缀查找
+      if (!/\.(ttf|otf)$/i.test(urlPath) || !fs.existsSync(filePath)) {
+        const resolved = this.resolveByPrefix(urlPath);
+        if (!resolved) return new Response('not found', { status: 404 });
+        filePath = resolved;
       }
       return net.fetch(`file://${filePath}`);
     };
@@ -115,6 +125,25 @@ class FontStore {
     const legacySess = session.fromPartition(WEBVIEW_PARTITION);
     legacySess.protocol.handle('font', handler);
     this.wiredSessions.add(legacySess);
+  }
+
+  /**
+   * 按 fontId 前缀(无 ext)查实际落盘文件。先查索引 ext,回退目录扫描。
+   * 防越界:basename 必须以 fontId + '.' 起且无路径分隔。
+   */
+  private resolveByPrefix(fontId: string): string | null {
+    if (!/^font-[a-f0-9]{6,}$/i.test(fontId)) return null;
+    const ent = this.index.entries[fontId];
+    if (ent) {
+      const p = path.join(FONT_DIR, `${fontId}.${ent.ext}`);
+      if (fs.existsSync(p)) return p;
+    }
+    // 回退:扫目录找 `${fontId}.ttf|otf`(索引丢失 / 未刷新时兜底)
+    for (const ext of ['ttf', 'otf']) {
+      const p = path.join(FONT_DIR, `${fontId}.${ext}`);
+      if (fs.existsSync(p)) return p;
+    }
+    return null;
   }
 
   /** per-ws:某 ws webview 首次 attach 时对其 session 补注册 font://(WeakSet 去重) */

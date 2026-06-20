@@ -127,10 +127,10 @@ export interface Instance {
    * 字体族(L5-G5 Type section,画板专属).仅 ref='krig.text.label' 用.
    * 透传到 atomsToSvg fontFamily(CJK 字符仍强制中文字体).
    * - undefined / 'auto':自动选字(维持现状)
-   * - 'sans' | 'serif' | 'mono' | 'handwriting':按族覆盖(本期仅 sans/mono 有专属字体,
-   *   serif/handwriting 字体文件待打包,先优雅回退,§5.4)
+   * - 'sans' | 'serif' | 'mono' | 'handwriting':按打包字体族覆盖(§5.4)
+   * - 'embed:<fontId>':用户嵌入的系统字体(L5-G7,可移植;CJK 缺字回退打包字体)
    */
-  text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting';
+  text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `embed:${string}`;
 }
 
 // ─────────────────────────────────────────────────────────

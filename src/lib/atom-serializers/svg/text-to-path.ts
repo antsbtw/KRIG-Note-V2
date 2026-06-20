@@ -1,5 +1,11 @@
-import { loadFont, pickFontForChar, type MarkSet } from './font-loader';
-import type { FontKey } from './fonts';
+import {
+  loadFont,
+  pickFontForChar,
+  pickPackagedFallbackForChar,
+  isEmbedKey,
+  type MarkSet,
+  type FontCacheKey,
+} from './font-loader';
 
 /**
  * F1 路径：opentype.js 把文字 outline 化为 SVG path。
@@ -28,7 +34,7 @@ export async function textToPath(
 ): Promise<{ svg: string; advance: number }> {
   if (!text) return { svg: '', advance: 0 };
 
-  const segments = splitByFont(text, marks);
+  const segments = await splitByFont(text, marks);
   const parts: string[] = [];
   let x = startX;
 
@@ -48,15 +54,24 @@ export async function textToPath(
 
 interface FontSegment {
   text: string;
-  fontKey: FontKey;
+  fontKey: FontCacheKey;
 }
 
-function splitByFont(text: string, marks?: MarkSet): FontSegment[] {
+/**
+ * 按字符选字体分段。嵌入字体(L5-G7)缺字回退:若选中的是 embed 字体但该字符
+ * 在嵌入字体里没有字形(charToGlyphIndex === 0),回退到打包字体(G7-8,不丢字)。
+ * 因需探测嵌入字体字形 → 异步(loadFont 有缓存,探测廉价)。
+ */
+async function splitByFont(text: string, marks?: MarkSet): Promise<FontSegment[]> {
   const out: FontSegment[] = [];
   let current: FontSegment | null = null;
 
   for (const ch of text) {
-    const fontKey = pickFontForChar(ch, marks);
+    let fontKey = pickFontForChar(ch, marks);
+    // 嵌入字体缺字 → 回退打包字体(保证 CJK / 任意字符不丢)
+    if (isEmbedKey(fontKey) && !(await embedHasGlyph(fontKey, ch))) {
+      fontKey = pickPackagedFallbackForChar(ch, marks);
+    }
     if (current && current.fontKey === fontKey) {
       current.text += ch;
     } else {
@@ -66,4 +81,14 @@ function splitByFont(text: string, marks?: MarkSet): FontSegment[] {
   }
   if (current) out.push(current);
   return out;
+}
+
+/** 嵌入字体是否含某字符字形(glyph index !== 0 = 非 .notdef)。加载失败按"无字形"回退。 */
+async function embedHasGlyph(fontKey: `embed:${string}`, ch: string): Promise<boolean> {
+  try {
+    const font = await loadFont(fontKey);
+    return font.charToGlyphIndex(ch) !== 0;
+  } catch {
+    return false;
+  }
 }

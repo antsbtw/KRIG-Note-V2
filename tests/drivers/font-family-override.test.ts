@@ -4,7 +4,11 @@
  * 锁住关键不变量:Type section 选西文字体时,中文字符仍强制走中文字体(不丢字)。
  */
 import { describe, it, expect } from 'vitest';
-import { pickFontForChar } from '../../src/lib/atom-serializers/svg/font-loader';
+import {
+  pickFontForChar,
+  pickPackagedFallbackForChar,
+  isEmbedKey,
+} from '../../src/lib/atom-serializers/svg/font-loader';
 
 describe('pickFontForChar fontFamily 覆盖(G5.6)', () => {
   it('无覆盖:维持自动选字(西文 inter / 中文 notoSansSc)', () => {
@@ -47,5 +51,29 @@ describe('pickFontForChar fontFamily 覆盖(G5.6)', () => {
 
   it('code mark 优先于 fontFamily(语义不被字体族盖)', () => {
     expect(pickFontForChar('x', { fontFamily: 'serif', code: true })).toBe('jetBrainsMono');
+  });
+});
+
+describe('L5-G7.3:嵌入字体 embed: 前缀', () => {
+  it('embed: 字体族 → 直接返回该 embed key(西文 + 中文都先用嵌入字体)', () => {
+    expect(pickFontForChar('a', { fontFamily: 'embed:font-abc123' })).toBe('embed:font-abc123');
+    expect(pickFontForChar('中', { fontFamily: 'embed:font-abc123' })).toBe('embed:font-abc123');
+  });
+
+  it('code mark 仍优先(嵌入字体不盖 code 语义)', () => {
+    expect(pickFontForChar('x', { fontFamily: 'embed:font-abc123', code: true })).toBe('jetBrainsMono');
+  });
+
+  it('isEmbedKey 正确识别', () => {
+    expect(isEmbedKey('embed:font-abc')).toBe(true);
+    expect(isEmbedKey('inter')).toBe(false);
+    expect(isEmbedKey('notoSansSc')).toBe(false);
+  });
+
+  it('pickPackagedFallbackForChar:嵌入字体缺字时的打包兜底(中文→notoSansSc,西文→inter)', () => {
+    // 即便 marks 里带 embed,fallback 也强制走打包(等价 auto 自动选字),保证不丢字
+    expect(pickPackagedFallbackForChar('中', { fontFamily: 'embed:font-x' })).toBe('notoSansSc');
+    expect(pickPackagedFallbackForChar('a', { fontFamily: 'embed:font-x' })).toBe('inter');
+    expect(pickPackagedFallbackForChar('粗', { fontFamily: 'embed:font-x', bold: true })).toBe('notoSansScBold');
   });
 });

@@ -1,21 +1,45 @@
 import * as opentype from 'opentype.js';
 import { FONT_URLS, type FontKey } from './fonts';
 
-const cache = new Map<FontKey, Promise<opentype.Font>>();
+/**
+ * 字体缓存键:打包字体 FontKey,或嵌入字体 `embed:<fontId>`(L5-G7)。
+ * 嵌入字体经 font:// 协议从 main 进程 font-store 取 buffer(可移植,墙 3)。
+ */
+export type FontCacheKey = FontKey | `embed:${string}`;
+
+const EMBED_PREFIX = 'embed:';
+
+/** key 是否嵌入字体 */
+export function isEmbedKey(key: string): key is `embed:${string}` {
+  return key.startsWith(EMBED_PREFIX);
+}
+
+/** `embed:<fontId>` → fontId(`font-<hash>`) */
+function fontIdOf(key: `embed:${string}`): string {
+  return key.slice(EMBED_PREFIX.length);
+}
+
+const cache = new Map<FontCacheKey, Promise<opentype.Font>>();
 
 /** 字体加载耗时（v1.3 § 10.2 perf 指标） */
-const loadStats: Partial<Record<FontKey, { ms: number; sizeKb: number }>> = {};
+const loadStats: Partial<Record<string, { ms: number; sizeKb: number }>> = {};
 
-export function getFontLoadStats(): Partial<Record<FontKey, { ms: number; sizeKb: number }>> {
+export function getFontLoadStats(): Partial<Record<string, { ms: number; sizeKb: number }>> {
   return { ...loadStats };
 }
 
-export function loadFont(key: FontKey): Promise<opentype.Font> {
+/**
+ * 加载字体(打包 FontKey 或嵌入 `embed:<fontId>`)。
+ * - 打包:fetch(FONT_URLS[key])
+ * - 嵌入:fetch('font://<fontId>')(main 进程 font:// 协议解析,无 ext 走前缀查找)
+ * 结果按 key 进 Map 缓存(打包 / 嵌入键互不撞)。
+ */
+export function loadFont(key: FontCacheKey): Promise<opentype.Font> {
   let p = cache.get(key);
   if (p) return p;
 
   p = (async () => {
-    const url = FONT_URLS[key];
+    const url = isEmbedKey(key) ? `font://${fontIdOf(key)}` : FONT_URLS[key];
     const t0 = performance.now();
     const buffer = await fetch(url).then((r) => r.arrayBuffer());
     const font = opentype.parse(buffer);
@@ -78,8 +102,11 @@ export interface MarkSet {
  * L5-G6 已打包(全 SIL OFL 1.1):中文 黑(Noto Sans SC)/ 宋(Noto Serif SC)/ 楷手写(LXGW 文楷);
  * 西文 Sans(Inter)/ Serif(Source Serif 4)/ Mono(JetBrains)/ 手写(Caveat)。
  * 仅 Regular 字重有专属文件;bold/italic 暂回退已装变体(见 resolveFamilyFont),不丢字不伪粗。
+ *
+ * L5-G7:新增 `embed:<fontId>` —— 用户系统字体嵌进画板内容(可移植)。
+ * pickFontForChar 识别前缀直接用嵌入字体;CJK 缺字仍回退打包字体(G7-8,见 text-to-path)。
  */
-export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting';
+export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `embed:${string}`;
 
 /**
  * 字体族 + CJK + bold/italic → FontKey。
@@ -138,17 +165,19 @@ function resolveFamilyFont(family: FontFamily, cjk: boolean, marks?: MarkSet): F
  * 注：当前未装 BoldItalic 变体，bold + italic 同时存在时优先 bold；
  * 未来需要时再加 Inter-BoldItalic.ttf。
  */
-export function pickFontForChar(ch: string, marks?: MarkSet): FontKey {
+export function pickFontForChar(ch: string, marks?: MarkSet): FontCacheKey {
   const cjk = isCjk(ch);
 
   // Type section 字体族覆盖优先(code mark 仍强制等宽,语义不被字体族盖)
   const family = marks?.fontFamily;
   if (family && family !== 'auto' && !marks?.code) {
+    // L5-G7:嵌入字体直接用其 key;CJK 缺字回退由 text-to-path 在加载后探测处理(G7-8)。
+    if (isEmbedKey(family)) return family;
     return resolveFamilyFont(family, cjk, marks);
   }
 
   if (marks?.code) {
-    // code mark 用等宽字体；CJK 没等宽变体，fallback Noto SC
+    // code mark 用等宽字体;CJK 没等宽变体,fallback Noto SC
     return cjk ? 'notoSansSc' : 'jetBrainsMono';
   }
 
@@ -159,4 +188,16 @@ export function pickFontForChar(ch: string, marks?: MarkSet): FontKey {
   if (marks?.bold) return 'interBold';
   if (marks?.italic) return 'interItalic';
   return 'inter';
+}
+
+/**
+ * L5-G7.3(G7-8 缺字回退):当嵌入字体没有某字符字形时,选哪个**打包**字体兜底。
+ * 等价于把 fontFamily 当 'auto' 重新走自动选字(打包 CJK / Inter 等),保证不丢字。
+ * 仅 text-to-path 在探测到嵌入字体缺字时调用。
+ */
+export function pickPackagedFallbackForChar(ch: string, marks?: MarkSet): FontKey {
+  const noEmbed: MarkSet | undefined = marks ? { ...marks, fontFamily: 'auto' } : undefined;
+  const key = pickFontForChar(ch, noEmbed);
+  // noEmbed 后 pickFontForChar 不会再返回 embed key,这里收窄类型
+  return isEmbedKey(key) ? 'notoSansSc' : key;
 }
