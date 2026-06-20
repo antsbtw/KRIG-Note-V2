@@ -4,6 +4,7 @@ import { renderTextBlock, type LinkRect } from './blocks/textBlock';
 import { renderMathBlock } from './blocks/mathBlock';
 import { renderCodeBlock } from './blocks/codeBlock';
 import { renderList } from './blocks/list';
+import type { FontFamily } from './font-loader';
 import { LruCache } from '../lru';
 
 export type { LinkRect } from './blocks/textBlock';
@@ -51,6 +52,16 @@ export interface AtomsToSvgOptions {
    * 仅当 targetHeight > contentH(节点高度大于内容)时生效.
    */
   valign?: 'top' | 'middle' | 'bottom';
+  /**
+   * 基准字号(L5-G5 Type section):画板文字节点 instance.text_size 透传至此,
+   * 覆盖默认 14。heading 仍在此基础上乘 level 倍率。不传 = 14(老画板视觉不变)。
+   */
+  baseFontSize?: number;
+  /**
+   * 字体族覆盖(L5-G5 Type section):instance.text_font 透传至此,注入每个 run 的
+   * MarkSet.fontFamily,优先于自动选字(CJK 字符仍强制中文字体)。不传 / 'auto' = 自动。
+   */
+  fontFamily?: FontFamily;
 }
 
 /**
@@ -69,8 +80,10 @@ export async function atomsToSvgWithLinks(
   const defaultTextColor = options.defaultTextColor;
   const targetHeight = options.targetHeight;
   const valign = options.valign ?? 'top';
-  // 缓存 key 含 width / 主题色 / 目标高度 / valign(任一变化都得重渲)
-  const key = `w=${viewBoxW}|c=${defaultTextColor ?? ''}|th=${targetHeight ?? 'auto'}|va=${valign}|${JSON.stringify(atoms)}`;
+  const baseFontSize = options.baseFontSize ?? FONT_SIZE;
+  const fontFamily = options.fontFamily;
+  // 缓存 key 含 width / 主题色 / 目标高度 / valign / 字号 / 字体族(任一变化都得重渲)
+  const key = `w=${viewBoxW}|c=${defaultTextColor ?? ''}|th=${targetHeight ?? 'auto'}|va=${valign}|fs=${baseFontSize}|ff=${fontFamily ?? 'auto'}|${JSON.stringify(atoms)}`;
   const cached = SVG_CACHE.get(key);
   if (cached !== undefined) return cached;
 
@@ -81,7 +94,7 @@ export async function atomsToSvgWithLinks(
   const links: LinkRect[] = [];
   let y = 0;
   for (const atom of atoms) {
-    const { svg, height } = await renderAtom(atom, y, contentWidth, links, defaultTextColor);
+    const { svg, height } = await renderAtom(atom, y, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     if (svg) parts.push(svg);
     y += height;
   }
@@ -124,12 +137,14 @@ async function renderAtom(
   contentWidth: number,
   links: LinkRect[],
   defaultTextColor?: string,
+  baseFontSize: number = FONT_SIZE,
+  fontFamily?: FontFamily,
 ): Promise<{ svg: string; height: number }> {
   switch (atom.type) {
     case 'textBlock':        // 旧 atom 格式兼容(V1 NoteView)
     case 'paragraph':        // V2 BlockSpec.id 拆分后:paragraph
     case 'heading':          // V2 BlockSpec.id 拆分后:heading (level 走 attrs.level)
-      return renderTextBlock(atom, yOffset, contentWidth, links, defaultTextColor);
+      return renderTextBlock(atom, yOffset, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     case 'mathBlock': {
       // NoteView mathBlock schema:content: 'text*',LaTeX 存在 PM 子 text 节点里
       // 兼容老 attrs.latex / attrs.tex 数据(若 content 为空)
@@ -138,15 +153,15 @@ async function renderAtom(
         || (atom.attrs?.latex as string)
         || (atom.attrs?.tex as string)
         || '';
-      return renderMathBlock(latex, FONT_SIZE, yOffset, defaultTextColor);
+      return renderMathBlock(latex, baseFontSize, yOffset, defaultTextColor);
     }
     case 'codeBlock':
       // 等宽代码图(深色圆角底,逐行 JetBrains Mono);X 截图复用此渲染。
       return renderCodeBlock(atom, yOffset, contentWidth);
     case 'bulletList':
-      return renderList(atom, yOffset, false, 0, contentWidth, links, defaultTextColor);
+      return renderList(atom, yOffset, false, 0, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     case 'orderedList':
-      return renderList(atom, yOffset, true, 0, contentWidth, links, defaultTextColor);
+      return renderList(atom, yOffset, true, 0, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     default:
       // 未识别的 block:渲染一行灰字占位
       return renderUnknownAtom(atom, yOffset, contentWidth);
