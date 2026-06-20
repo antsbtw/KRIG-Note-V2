@@ -2403,7 +2403,9 @@
   padding: 0;
   border: none;
   outline: none;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .krig-pm-host .ProseMirror .krig-code-block__preview {
