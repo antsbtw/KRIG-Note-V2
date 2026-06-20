@@ -46,6 +46,7 @@ import { registerXPlanCacheIpc } from './x/x-plan-cache';
 import { registerProgressBridge } from './window/progress-bridge';
 import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
+import { fontStore } from './fonts/font-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
 import { registerXWebviewHook } from './x';
@@ -79,6 +80,18 @@ import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+  // L5-G7.2:font:// 嵌入字体协议(渲染进程 loadFont fetch 取 buffer)。
+  // supportFetchAPI + corsEnabled 让 fetch('font://...').arrayBuffer() 可用(opentype.parse 喂这个)。
+  {
+    scheme: 'font',
     privileges: {
       standard: true,
       secure: true,
@@ -169,6 +182,10 @@ app.whenReady().then(async () => {
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
   mediaStore.registerProtocol();
 
+  // L5-G7.2 — 注册 font:// 协议(嵌入字体可移植渲染)
+  // 同 media:必须早于 createMainWindow,渲染进程 loadFont fetch('font://...') 才能命中
+  fontStore.registerProtocol();
+
   // L4 — 框架级 Application Menu(取代 Electron 默认 File/Edit/View/Window)
   // markdown-import / backup 必须先注册 command,再 registerFrameworkMenus 调 rebuild 时菜单
   // 项的 command 字符串才能查到 handler
@@ -207,6 +224,8 @@ app.whenReady().then(async () => {
   // registerProtocol 注册)。下载 will-download 的补挂在 registerWebDownloadHook 内部做。
   mainWindow.webContents.on('did-attach-webview', (_e, guest) => {
     mediaStore.registerMediaForSession(guest.session);
+    // L5-G7.2:同理对 ws session 补注册 font://(嵌入字体在各 partition 也能取)
+    fontStore.registerFontForSession(guest.session);
   });
   // per-ws 代理阶段1:临时 setProxy IPC(DevTools console 验证不同 ws 不同出口)。
   registerWebProxyHandler();

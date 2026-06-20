@@ -97,6 +97,20 @@ declare global {
         error?: string;
         fonts: SystemFontEntryDTO[];
       }>;
+      /** L5-G7.2:嵌入选中系统字体 → font:// + fontId(text_font 写 'embed:<fontId>') */
+      fontEmbed(
+        sourcePath: string,
+        fontIndex: number,
+        meta?: { family?: string; style?: string },
+      ): Promise<{
+        success: boolean;
+        error?: string;
+        fontId?: string;
+        fontUrl?: string;
+        sizeKb?: number;
+        family?: string;
+        style?: string;
+      }>;
       /** L5-B3.14:在 Finder 高亮显示文件 */
       showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }>;
       /** L5-B3.14:File → 绝对路径(同步;Electron 32+ webUtils.getPathForFile 包装)*/

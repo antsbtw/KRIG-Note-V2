@@ -31,9 +31,11 @@
       htmlBlock(2026-05-19): NoteView 内嵌 .html 走 iframe.src=media://,
         frame-src 必须加 media:,否则 framing 被 block。media:// 跨 origin 加载
         让 iframe 文档脱离 parent CSP,获得 AI artifact 所需 inline script 能力。
+      L5-G7.2 嵌入字体:画板 loadFont 走 fetch('font://...').arrayBuffer() 喂 opentype,
+        受 connect-src 管(非 font-src;font-src 只管 CSS @font-face)。connect-src 必须加 font:。
       其他(脚本)走严格策略,default-src 仍 'self'
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' blob:; script-src 'self'; img-src 'self' data: media: https: blob:; media-src 'self' data: media: https: blob:; connect-src 'self' media: https: blob:; font-src 'self' data: blob:; frame-src 'self' media: blob: https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' blob:; script-src 'self'; img-src 'self' data: media: https: blob:; media-src 'self' data: media: https: blob:; connect-src 'self' media: font: https: blob:; font-src 'self' data: blob:; frame-src 'self' media: blob: https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com" />
     <title>KRIG Note</title>
   </head>
   <body>

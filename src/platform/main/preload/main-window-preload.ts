@@ -124,6 +124,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.FONT_LIST_SYSTEM);
   },
 
+  /** L5-G7.2:嵌入选中系统字体 → font:// + fontId(写 text_font='embed:<fontId>') */
+  async fontEmbed(
+    sourcePath: string,
+    fontIndex: number,
+    meta?: { family?: string; style?: string },
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    fontId?: string;
+    fontUrl?: string;
+    sizeKb?: number;
+    family?: string;
+    style?: string;
+  }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FONT_EMBED, sourcePath, fontIndex, meta);
+  },
+
   /** L5-B3.14:在 Finder 高亮显示文件 */
   async showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }> {
     return ipcRenderer.invoke(IPC_CHANNELS.SHELL_SHOW_ITEM_IN_FOLDER, filePath);
