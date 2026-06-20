@@ -43,6 +43,7 @@ import '@capabilities/graph-library-store'; // L5-G1 新增(graph 画板列表 +
 import '@capabilities/shape-library';       // L5-G2 新增(Shape + Substance 资源仓库,0 import three)
 import '@capabilities/canvas-rendering';    // L5-G3 新增(Three.js 单点屏障核心,P1-1 严格屏障)
 import '@capabilities/canvas-text-node';    // L5-G4.5 新增(画板文字节点 PM 桥接 + EditOverlay,路径 A 嵌 text-editing.Host)
+import '@capabilities/node-toolbar';        // L5-G5 新增(Graph 节点浮条,view-agnostic 注册式 section;与 canvas-rendering/Host 集成)
 import '@capabilities/code-editing';        // Phase 1A 新增(CM6 单点屏障,封装 @codemirror/* + @lezer/*;mermaid 全屏 Phase 2 接入)
 import '@capabilities/graph-layout';        // Phase 1B 新增(ELK 单点屏障,封装 elkjs + @mermaid-js/layout-elk;mermaid + 未来画板/BPMN/Mind/知识图谱共用)
 import '@capabilities/math-rendering';      // math-visual Phase 1A 新增(Mafs + mathjs + @cortex-js/compute-engine 单点屏障)

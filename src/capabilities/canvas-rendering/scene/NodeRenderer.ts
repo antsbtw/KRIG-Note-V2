@@ -490,7 +490,13 @@ export class NodeRenderer {
       if (atoms.length === 0) return;
       if (this.textRenderTokens.get(inst.id) !== token) return;
       try {
-        const svgGroup = await this.textRenderer.render(atoms, { width: safeSize.w });
+        const svgGroup = await this.textRenderer.render(atoms, {
+          width: safeSize.w,
+          // L5-G5 Type section:字号/字体族透传。老画板无 text_size 字段 → 兜底 14
+          // (§5.4b,视觉不变);text_font 缺省 → 自动选字。
+          baseFontSize: typeof inst.text_size === 'number' ? inst.text_size : 14,
+          fontFamily: inst.text_font,
+        });
         if (this.textRenderTokens.get(inst.id) !== token) {
           this.textRenderer.dispose(svgGroup);
           return;

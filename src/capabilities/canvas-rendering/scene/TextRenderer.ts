@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 import { atomsToSvgWithLinks, type Atom, type LinkRect } from '../../../lib/atom-serializers/svg';
+import type { FontFamily } from '../../../lib/atom-serializers/svg/font-loader';
 import { extractPlainText } from '../../../lib/atom-serializers/extract';
 import { LruCache } from '../../../lib/atom-serializers/lru';
 
@@ -67,6 +68,10 @@ export class TextRenderer {
     defaultTextColor?: string;
     valign?: 'top' | 'middle' | 'bottom';
     targetHeight?: number;
+    /** L5-G5 Type section:基准字号(instance.text_size 透传);不传 = 默认 14 */
+    baseFontSize?: number;
+    /** L5-G5 Type section:字体族(instance.text_font 透传);不传 = 自动选字 */
+    fontFamily?: FontFamily;
   } = {}): Promise<THREE.Object3D> {
     let svgString: string;
     let links: LinkRect[] = [];
@@ -76,6 +81,8 @@ export class TextRenderer {
         defaultTextColor: options.defaultTextColor,
         valign: options.valign,
         targetHeight: options.targetHeight,
+        baseFontSize: options.baseFontSize,
+        fontFamily: options.fontFamily,
       });
       svgString = out.svg;
       links = out.links;

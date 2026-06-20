@@ -30,7 +30,6 @@ import { REVISION as THREE_REVISION } from 'three';
 import type { CanvasRenderingApi } from './types';
 import { CanvasHost } from './Host';
 import { LibraryPicker } from './ui/library-picker';
-import { FloatingInspector } from './ui/floating-inspector';
 import { CreateSubstanceDialog } from './ui/create-substance-dialog';
 
 // 类型 re-export(view 端走 `import type from '@capabilities/canvas-rendering/types'`
@@ -55,8 +54,8 @@ export { CanvasHost };
 // view 端直接 import 使用(open / anchorRect / onPick / onClose 全 view 控制)
 export { LibraryPicker } from './ui/library-picker';
 export type { LibraryPickerProps } from './ui/library-picker';
-export { FloatingInspector } from './ui/floating-inspector';
-export type { FloatingInspectorProps } from './ui/floating-inspector';
+// FloatingInspector(右上角 Format Shape 浮窗)L5-G5 删除 — 被 node-toolbar
+// (选中框跟随浮条)取代,view 早已不引用(GraphCanvasView.tsx commit 5833c17e)。
 export { CreateSubstanceDialog } from './ui/create-substance-dialog';
 export type {
   CreateSubstanceDialogProps,
@@ -75,7 +74,6 @@ capabilityRegistry.register({
   api: {
     Host: CanvasHost,
     LibraryPicker,
-    FloatingInspector,
     CreateSubstanceDialog,
   } satisfies CanvasRenderingApi,
 });

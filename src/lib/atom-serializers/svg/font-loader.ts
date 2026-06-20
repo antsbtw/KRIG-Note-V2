@@ -64,10 +64,54 @@ export interface MarkSet {
   bgColor?: string;
   /** link mark.attrs.href — 渲染时加下划线 + 链接色(若没显式 textColor) */
   linkHref?: string;
+  /**
+   * 字体族覆盖(L5-G5 Type section)。画板文字节点 instance.text_font 透传至此,
+   * 优先于自动选择(仅作用于该字体覆盖的字符集 — CJK 字符仍强制走中文字体,
+   * 西文字体无中文字形必丢字)。undefined / 'auto' = 维持自动选择。
+   */
+  fontFamily?: FontFamily;
+}
+
+/**
+ * 字体族(L5-G5 §5.4,用户选项)。'auto' = 不覆盖,走 mark/CJK 自动选择。
+ *
+ * 注:本期仅打包 Inter / Noto Sans SC / JetBrains Mono(用户拍板 G5.7 只上已装字体)。
+ * 'serif' / 'handwriting' 已建模并接好覆盖管线,但字体文件待后续打包(SIL OFL 核 license);
+ * 在文件落地前,它们在 resolveFamilyFont 里优雅回退到已装字体(见下),不丢字。
+ */
+export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting';
+
+/**
+ * 字体族 + CJK + bold/italic → FontKey。
+ *
+ * CJK 强制走中文字体(西文字体无中文字形);西文按 family 选。
+ * serif/handwriting 文件未打包时回退(serif→sans,handwriting→sans),见 §5.4。
+ */
+function resolveFamilyFont(family: FontFamily, cjk: boolean, marks?: MarkSet): FontKey {
+  if (cjk) {
+    // 中文:本期只有 Noto Sans SC(黑体);serif/手写中文字体待打包,先回退黑体不丢字
+    return marks?.bold ? 'notoSansScBold' : 'notoSansSc';
+  }
+  switch (family) {
+    case 'mono':
+      return 'jetBrainsMono';
+    case 'serif':
+    case 'handwriting':
+      // 西文 serif / 手写体待打包 → 暂回退 Inter(G5.7 落地字体文件后改这里)
+      if (marks?.bold) return 'interBold';
+      if (marks?.italic) return 'interItalic';
+      return 'inter';
+    case 'sans':
+    default:
+      if (marks?.bold) return 'interBold';
+      if (marks?.italic) return 'interItalic';
+      return 'inter';
+  }
 }
 
 /**
  * 根据字符 + mark 集合选字体：
+ * - marks.fontFamily(Type section 覆盖,非 'auto')→ resolveFamilyFont
  * - code mark: JetBrains Mono（CJK 字符 fallback 到 Noto SC，因为 mono 没中文）
  * - CJK + bold: Noto SC Bold
  * - CJK: Noto SC Regular
@@ -80,6 +124,12 @@ export interface MarkSet {
  */
 export function pickFontForChar(ch: string, marks?: MarkSet): FontKey {
   const cjk = isCjk(ch);
+
+  // Type section 字体族覆盖优先(code mark 仍强制等宽,语义不被字体族盖)
+  const family = marks?.fontFamily;
+  if (family && family !== 'auto' && !marks?.code) {
+    return resolveFamilyFont(family, cjk, marks);
+  }
 
   if (marks?.code) {
     // code mark 用等宽字体；CJK 没等宽变体，fallback Noto SC

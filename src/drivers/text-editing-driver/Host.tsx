@@ -18,84 +18,11 @@ import { registerUndoScope } from './capability-integrations/undo-scope';
 import { registerDropTargets } from './capability-integrations/dnd-targets';
 import { registerInsertionSafeguards } from './capability-integrations/insertion-safeguards';
 import { setupFloatingToolbarTrigger } from './floating-toolbar-source';
-import { paragraphSpec } from './blocks/paragraph/spec';
-import { headingSpec } from './blocks/heading/spec';
-import { listItemSpec } from './blocks/list-item/spec';
-import { bulletListSpec } from './blocks/bullet-list/spec';
-import { orderedListSpec } from './blocks/ordered-list/spec';
-import { taskListSpec, taskItemSpec } from './blocks/task-list/spec';
-import { blockquoteSpec } from './blocks/blockquote/spec';
-import { codeBlockSpec } from './blocks/code-block/spec';
-import { horizontalRuleSpec } from './blocks/horizontal-rule/spec';
-import { hardBreakSpec } from './blocks/hard-break/spec';
-import { calloutSpec } from './blocks/callout/spec';
-import { toggleListSpec } from './blocks/toggle-list/spec';
-import { unknownSpec } from './blocks/unknown/spec';
-import { imageSpec } from './blocks/image/spec';
-import { mathBlockSpec } from './blocks/math-block/spec';
-import { mathInlineSpec } from './blocks/math-inline/spec';
-import { noteLinkSpec } from './blocks/note-link/spec';
-import { fileBlockSpec } from './blocks/file-block/spec';
-import { fileLinkSpec } from './blocks/file-link/spec';
-import { externalRefSpec } from './blocks/external-ref/spec';
-import { audioBlockSpec } from './blocks/audio-block/spec';
-import { videoBlockSpec } from './blocks/video-block/spec';
-import { tweetBlockSpec } from './blocks/tweet-block/spec';
-import { htmlBlockSpec } from './blocks/html-block/spec';
-import { mathVisualSpec } from './blocks/math-visual/spec';
-import {
-  tableSpec,
-  tableRowSpec,
-  tableCellSpec,
-  tableHeaderSpec,
-} from './blocks/table';
-import { columnListSpec, columnSpec } from './blocks/column-list';
-import type { TextEditingHostProps, BlockSpec, DriverSerialized } from './types';
+import { ENABLED_BLOCKS } from './enabled-blocks';
+import type { TextEditingHostProps, DriverSerialized } from './types';
 
-// L5-B3.2:全部启用的 block 列表(paragraph + heading + 6 新类 + 2 项 list-item/task-item)
-// L5-B3.3:+ hardBreak(inline)
-// L5-B4.3.1:+ unknown(schema 缺失节点占位 — md-to-pm 等转换层用)
-// L5-B3.5:+ image(图片 block,3 态:placeholder / 普通图 / SVG;mediaStore 集成)
-// L5-B3.6:+ mathBlock / mathInline(KaTeX 渲染,块级 + 行内 atom)
-// L5-B3.7:+ table 系列 4 节点(table/tableRow/tableHeader/tableCell;
-//          走 prosemirror-tables 库:tableEditing + columnResizing + 自定义 keymap)
-// L5-B3.12:+ noteLink(inline atom — `[[note-title]]` 双链 KRIG 知识图谱基础)
-// L5-B3.14:+ fileBlock / fileLink / externalRef(文件附件三件套;前两者字节进 mediaStore,
-//          externalRef 仅存 URL — KRIG Graph 外部引用关系)
-const ENABLED_BLOCKS: BlockSpec[] = [
-  paragraphSpec,
-  headingSpec,
-  listItemSpec,
-  bulletListSpec,
-  orderedListSpec,
-  taskItemSpec,
-  taskListSpec,
-  blockquoteSpec,
-  codeBlockSpec,
-  horizontalRuleSpec,
-  hardBreakSpec,
-  calloutSpec,
-  toggleListSpec,
-  unknownSpec,
-  imageSpec,
-  mathBlockSpec,
-  mathInlineSpec,
-  tableSpec,
-  tableRowSpec,
-  tableCellSpec,
-  tableHeaderSpec,
-  columnListSpec,
-  columnSpec,
-  noteLinkSpec,
-  fileBlockSpec,
-  fileLinkSpec,
-  externalRefSpec,
-  audioBlockSpec,
-  videoBlockSpec,
-  tweetBlockSpec,
-  htmlBlockSpec,
-  mathVisualSpec,
-];
+// ENABLED_BLOCKS(全启用 block spec 列表)已抽到 ./enabled-blocks(L5-G5;
+// node-style-command headless 改样式需同一套 schema,单一来源避免漂移)。
 
 export function Host(props: TextEditingHostProps) {
   const { config, doc, onChange } = props;

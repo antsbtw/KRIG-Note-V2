@@ -114,6 +114,23 @@ export interface Instance {
    * - 'bottom':内容底部对齐
    */
   text_valign?: 'top' | 'middle' | 'bottom';
+
+  /**
+   * 字号 pt(L5-G5 Type section,画板专属).仅 ref='krig.text.label' 用.
+   * 透传到 atomsToSvg baseFontSize 覆盖默认渲染字号.
+   * - undefined:老画板无此字段 → sanitize 兜底 14(视觉不变,§5.4b)
+   * - 新建文字节点默认 16(对齐 note 正文)
+   */
+  text_size?: number;
+
+  /**
+   * 字体族(L5-G5 Type section,画板专属).仅 ref='krig.text.label' 用.
+   * 透传到 atomsToSvg fontFamily(CJK 字符仍强制中文字体).
+   * - undefined / 'auto':自动选字(维持现状)
+   * - 'sans' | 'serif' | 'mono' | 'handwriting':按族覆盖(本期仅 sans/mono 有专属字体,
+   *   serif/handwriting 字体文件待打包,先优雅回退,§5.4)
+   */
+  text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -239,6 +256,12 @@ export interface CanvasHostHandle {
    * 不调时 text 节点降级为占位灰矩形.
    */
   setAtomBridge(fn: ((doc: unknown) => Promise<unknown[]>) | null): void;
+  /**
+   * G5 node-toolbar:选中节点的屏幕 AABB(容器内 CSS 像素,已处理旋转 OBB).
+   * 浮条贴选中框正下方居中用.无选中 / 拿不到 mesh 返 null.
+   * view 在 onSelectionChange / onViewportChange 时拉一次重定位.
+   */
+  getSelectedScreenAABB(): { x: number; y: number; w: number; h: number } | null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -249,10 +272,10 @@ export interface CanvasRenderingApi {
   Host: ForwardRefExoticComponent<CanvasHostProps & RefAttributes<CanvasHostHandle>>;
   /** Library Picker(画板内浮层,view 控 open/anchor 状态;G4.4a) */
   LibraryPicker: ComponentType<LibraryPickerComponentProps>;
-  /** Floating Inspector(画板内浮层,view 控 open + 选区;G4.4b) */
-  FloatingInspector: ComponentType<FloatingInspectorComponentProps>;
   /** Create Substance Dialog(模态;G4.4c) */
   CreateSubstanceDialog: ComponentType<CreateSubstanceDialogComponentProps>;
+  // FloatingInspector(G4.4b 右上角 Format Shape 浮窗)L5-G5 删除 — 被 node-toolbar
+  // 选中框跟随浮条取代。
 }
 
 // UI 组件 props 形态(给 CanvasRenderingApi 用,实际类型在各组件文件)
@@ -262,15 +285,6 @@ export interface LibraryPickerComponentProps {
   anchorRect: { left: number; top: number; width: number; height: number } | null;
   onPick: (spec: AddModeSpec) => void;
   onClose: () => void;
-}
-
-export interface FloatingInspectorComponentProps {
-  open: boolean;
-  selectedIds: string[];
-  getInstance: (id: string) => Instance | null;
-  onUpdate: (id: string, patch: Partial<Instance>) => void;
-  onClose: () => void;
-  onCombine?: () => void;
 }
 
 export interface CreateSubstanceDialogComponentProps {

@@ -731,6 +731,9 @@ export class InteractionController {
         version: '0.1',
         payload: { type: 'doc', content: [] },
       };
+      // L5-G5 §5.4b:新建文字节点默认字号 16(对齐 note 正文)。老画板节点无此字段,
+      // 渲染端兜底 14(视觉不变)。
+      instance.text_size = 16;
     }
     this.nodeRenderer.add(instance);
     // 防御:shape/substance 找不到时 add 不渲染也不存数据,此时不要选中孤儿 id

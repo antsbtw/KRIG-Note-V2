@@ -304,6 +304,42 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       onInstancesChange?.(renderer.listInstances());
     }, [onInstancesChange]);
 
+    /**
+     * 选中节点的屏幕 AABB(容器内 CSS 像素).node-toolbar(L5-G5)用它把浮条
+     * 贴到选中框正下方居中.单选 / 多选都取并集 AABB;无选中 / 拿不到 mesh 返 null.
+     *
+     * 走 SceneManager.projectMeshToScreenAABB(已处理旋转 OBB),view 在
+     * onSelectionChange / onViewportChange 时拉一次重定位.
+     */
+    const getSelectedScreenAABB = useCallback((): {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    } | null => {
+      const scene = sceneRef.current;
+      const renderer = nodeRendererRef.current;
+      const interaction = interactionRef.current;
+      if (!scene || !renderer || !interaction) return null;
+      const ids = interaction.getSelection();
+      if (ids.length === 0) return null;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const id of ids) {
+        const rn = renderer.get(id);
+        if (!rn) continue;
+        const aabb = scene.projectMeshToScreenAABB(rn.group);
+        minX = Math.min(minX, aabb.minX);
+        minY = Math.min(minY, aabb.minY);
+        maxX = Math.max(maxX, aabb.maxX);
+        maxY = Math.max(maxY, aabb.maxY);
+      }
+      if (!Number.isFinite(minX)) return null;
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -322,6 +358,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         updateInstance,
         combineSelected,
         setAtomBridge,
+        getSelectedScreenAABB,
       }),
       [
         loadDocument,
@@ -339,6 +376,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         updateInstance,
         combineSelected,
         setAtomBridge,
+        getSelectedScreenAABB,
       ],
     );
 
