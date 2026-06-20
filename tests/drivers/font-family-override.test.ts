@@ -20,12 +20,19 @@ describe('pickFontForChar fontFamily 覆盖(G5.6)', () => {
     expect(pickFontForChar('中', { fontFamily: 'mono' })).toBe('notoSansSc');
   });
 
-  it('fontFamily=serif(本期未打包):西文优雅回退 inter,不报错', () => {
-    expect(pickFontForChar('a', { fontFamily: 'serif' })).toBe('inter');
+  it('fontFamily=serif:西文走 Source Serif,中文走 Noto Serif SC(L5-G6 已打包)', () => {
+    expect(pickFontForChar('a', { fontFamily: 'serif' })).toBe('sourceSerif');
+    expect(pickFontForChar('好', { fontFamily: 'serif' })).toBe('notoSerifSc');
   });
 
-  it('fontFamily=serif:中文仍走中文字体', () => {
-    expect(pickFontForChar('好', { fontFamily: 'serif' })).toBe('notoSansSc');
+  it('fontFamily=handwriting:西文走 Caveat,中文走 LXGW 文楷(L5-G6 已打包)', () => {
+    expect(pickFontForChar('a', { fontFamily: 'handwriting' })).toBe('caveat');
+    expect(pickFontForChar('字', { fontFamily: 'handwriting' })).toBe('lxgwWenKai');
+  });
+
+  it('serif/handwriting bold:无专属粗体文件 → 中文回退黑体 Bold,不伪粗', () => {
+    expect(pickFontForChar('粗', { fontFamily: 'serif', bold: true })).toBe('notoSansScBold');
+    expect(pickFontForChar('粗', { fontFamily: 'handwriting', bold: true })).toBe('notoSansScBold');
   });
 
   it('fontFamily=auto:等同无覆盖', () => {

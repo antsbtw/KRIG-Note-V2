@@ -13,10 +13,12 @@ import type { NodeSnapshot, SectionContext, SectionDef } from '../../types';
 
 type FontFamily = NonNullable<NodeSnapshot['text_font']>;
 
-/** 本期可选字体族(只列有专属字体文件的;serif/handwriting 待打包) */
+/** 可选字体族(L5-G6 全部打包,中英文按字符自动选对应字体) */
 const FONT_OPTIONS: ReadonlyArray<{ value: FontFamily; label: string }> = [
   { value: 'auto', label: '默认(自动)' },
-  { value: 'sans', label: '黑体 / Sans(Inter · 思源黑)' },
+  { value: 'sans', label: '黑体 / Sans(思源黑 · Inter)' },
+  { value: 'serif', label: '宋体 / Serif(思源宋 · Source Serif)' },
+  { value: 'handwriting', label: '手写 / 楷(文楷 · Caveat)' },
   { value: 'mono', label: '等宽 / Mono(JetBrains Mono)' },
 ];
 

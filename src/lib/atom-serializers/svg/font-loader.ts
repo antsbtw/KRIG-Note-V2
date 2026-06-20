@@ -75,9 +75,9 @@ export interface MarkSet {
 /**
  * 字体族(L5-G5 §5.4,用户选项)。'auto' = 不覆盖,走 mark/CJK 自动选择。
  *
- * 注:本期仅打包 Inter / Noto Sans SC / JetBrains Mono(用户拍板 G5.7 只上已装字体)。
- * 'serif' / 'handwriting' 已建模并接好覆盖管线,但字体文件待后续打包(SIL OFL 核 license);
- * 在文件落地前,它们在 resolveFamilyFont 里优雅回退到已装字体(见下),不丢字。
+ * L5-G6 已打包(全 SIL OFL 1.1):中文 黑(Noto Sans SC)/ 宋(Noto Serif SC)/ 楷手写(LXGW 文楷);
+ * 西文 Sans(Inter)/ Serif(Source Serif 4)/ Mono(JetBrains)/ 手写(Caveat)。
+ * 仅 Regular 字重有专属文件;bold/italic 暂回退已装变体(见 resolveFamilyFont),不丢字不伪粗。
  */
 export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting';
 
@@ -85,22 +85,38 @@ export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting';
  * 字体族 + CJK + bold/italic → FontKey。
  *
  * CJK 强制走中文字体(西文字体无中文字形);西文按 family 选。
- * serif/handwriting 文件未打包时回退(serif→sans,handwriting→sans),见 §5.4。
+ * serif→中文宋/西文 Source Serif;handwriting→中文楷(LXGW)/西文 Caveat。
  */
 function resolveFamilyFont(family: FontFamily, cjk: boolean, marks?: MarkSet): FontKey {
   if (cjk) {
-    // 中文:本期只有 Noto Sans SC(黑体);serif/手写中文字体待打包,先回退黑体不丢字
-    return marks?.bold ? 'notoSansScBold' : 'notoSansSc';
+    // 中文:按字体族选对应中文字体(L5-G6 已打包 黑/宋/楷)。
+    // 注:Serif/楷 暂无专属 Bold 文件 → bold 时回退黑体 Bold(有真粗体笔形,不伪粗)。
+    switch (family) {
+      case 'serif':
+        return marks?.bold ? 'notoSansScBold' : 'notoSerifSc';
+      case 'handwriting':
+        return marks?.bold ? 'notoSansScBold' : 'lxgwWenKai';
+      case 'mono':
+        // 中文无等宽变体 → 黑体(对齐 code mark 既有 fallback)
+        return marks?.bold ? 'notoSansScBold' : 'notoSansSc';
+      case 'sans':
+      default:
+        return marks?.bold ? 'notoSansScBold' : 'notoSansSc';
+    }
   }
   switch (family) {
     case 'mono':
       return 'jetBrainsMono';
     case 'serif':
-    case 'handwriting':
-      // 西文 serif / 手写体待打包 → 暂回退 Inter(G5.7 落地字体文件后改这里)
+      // 西文衡线体(Source Serif 4);暂无专属 Bold/Italic 文件 → 回退 Inter 变体
       if (marks?.bold) return 'interBold';
       if (marks?.italic) return 'interItalic';
-      return 'inter';
+      return 'sourceSerif';
+    case 'handwriting':
+      // 西文手写(Caveat);暂无专属变体 → bold/italic 回退 Inter
+      if (marks?.bold) return 'interBold';
+      if (marks?.italic) return 'interItalic';
+      return 'caveat';
     case 'sans':
     default:
       if (marks?.bold) return 'interBold';
