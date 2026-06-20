@@ -40,6 +40,28 @@ view 提供:
 2. `toSnapshot(instance)` → NodeSnapshot(view 解析语义 kind:shape/line/text)
 3. onPatchStyle / onPatchInstance / onTextCommand 落地回调
 
+## runTextCommand view 落地契约(G5.4 — family-tree 等接入必须照做)
+
+> **背景**:画板文字节点平时只渲染为 SVG mesh,**无挂载 EditorView** → text-editing driver
+> 用 instanceId 路由不到它的 doc(instanceRegistry 只登记活跃 view 实例)。故 driver 暴露的
+> `runNodeStyleCommand(doc, cmd)` 是 **headless 纯函数**(进 doc → 出新 doc,不碰任何状态)。
+> 这意味着"取 doc / 写回 / 刷新"的责任在 **view**,不在 driver。
+
+任何 view 接入 Text section 时,`onTextCommand` 回调**必须走完这四步**(否则不报错,但会"改了界面不更新"):
+
+```
+1) 取 doc      const inst = host.getInstance(id); if (!inst?.doc) { warn; return; }
+2) 调纯函数    const next = textEditing.api.runNodeStyleCommand(inst.doc, cmd);
+               if (!next) { warn; return; }        // null = 无变化 / 脏数据,fail loud
+3) 写回        host.updateInstance(id, { doc: next });
+4) 刷新快照    setNode(buildSnapshot(id));          // ← 漏这步浮条不更新
+```
+
+参考实现:[../../views/graph-canvas-view/GraphCanvasNodeToolbar.tsx](../../views/graph-canvas-view/GraphCanvasNodeToolbar.tsx) `handleTextCommand`。
+
+> **undo 语义注意**:文字改样式经 step 3 进的是**画板 G4 整 instance 快照栈**(Cmd+Z 撤销"上一个画板操作"),
+> 不是 note 的字符级 PM history。对画板场景合理,但与"双击进编辑态改字"的 PM undo 粒度不同 —— 设计取舍,非 bug。
+
 ## 扩展(其它 view / 插件)
 
 `registerSection(def)` + `registerNodeBinding({ match, sections })`,容器零改动。

@@ -135,19 +135,27 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
 
   const handleTextCommand = useCallback(
     (cmd: TextNodeStyleCommand): void => {
+      // ── runTextCommand view 落地契约(G5.4,family-tree 等接入照此四步)──
+      // 1) 取 doc  2) 调 driver headless 纯函数  3) updateInstance 写回  4) 刷新浮条快照
       if (!singleId) return;
       const inst = hostRef.current?.getInstance(singleId);
-      if (!inst?.doc) return;
+      if (!inst?.doc) {
+        console.warn('[node-toolbar] runTextCommand 跳过:节点无 doc', { id: singleId, cmd });
+        return;
+      }
       // G5.4:headless 整 doc 改 note mark/命令(画板文字节点平时无挂载 PM 实例)。
       // TextNodeStyleCommand 与 driver NodeStyleCommand 同形,直接透传。
       const nextDoc = textEditing.api.runNodeStyleCommand(
         inst.doc as Parameters<TextEditingApi['api']['runNodeStyleCommand']>[0],
         cmd as Parameters<TextEditingApi['api']['runNodeStyleCommand']>[1],
       );
-      if (!nextDoc) return; // doc 不可解析 / 命令无变化 → 不写盘(fail loud)
+      if (!nextDoc) {
+        // 不写盘:命令无变化属正常;doc 不可解析属脏数据 —— fail loud 留痕便于排查
+        console.warn('[node-toolbar] runTextCommand 无结果(命令无变化或 doc 不可解析)', { id: singleId, cmd });
+        return;
+      }
       hostRef.current?.updateInstance(singleId, { doc: nextDoc } as Partial<Instance>);
-      setNode(buildSnapshot(singleId));
-      onChanged();
+      setNode(buildSnapshot(singleId)); // 第 4 步:刷新浮条快照,漏了会"改了但浮条不更新"
     },
     [singleId, hostRef, textEditing, buildSnapshot, onChanged],
   );

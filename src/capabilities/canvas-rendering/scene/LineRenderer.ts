@@ -3,6 +3,7 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { LineStyle } from '@capabilities/shape-library/types';
+import { dashParamsFor } from './path-to-three';
 
 /**
  * LineRenderer — 端点驱动的 line 渲染
@@ -42,13 +43,18 @@ export function renderLine(ref: string, opts: LineRenderOptions): THREE.Group {
   const positions = pointsToFlatArray(points);
   const geom = new LineGeometry();
   geom.setPositions(positions);
+  const lineWidth = style?.width ?? 1.5;
+  // dashType → 虚线参数(复用 path-to-three 同一映射,line 节点与 shape 描边观感一致)
+  const dash = dashParamsFor(style?.dashType ?? 'solid', lineWidth);
   const mat = new LineMaterial({
     color: new THREE.Color(style?.color ?? '#2E5C8A').getHex(),
-    linewidth: style?.width ?? 1.5,         // 屏幕像素
+    linewidth: lineWidth,                   // 屏幕像素
     worldUnits: false,
     resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
     transparent: false,
     depthTest: false,
+    dashed: dash !== null,
+    ...(dash ? { dashSize: dash.dashSize, gapSize: dash.gapSize } : {}),
   });
   const line = new Line2(geom, mat);
   line.computeLineDistances();

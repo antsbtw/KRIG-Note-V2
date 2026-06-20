@@ -53,6 +53,30 @@ const Z_FILL = 0;
 const Z_STROKE = 0.01;
 
 /**
+ * dashType → Line2 (LineMaterial) 虚线参数.
+ *
+ * LineMaterial 用 `dashed` + `dashSize`/`gapSize`(沿线距离单位,世界坐标;
+ * computeLineDistances 已在创建时调用)。solid 返回 null(不开虚线)。
+ * dash/gap 取值为经验值,贴近 SVG 预览观感;真机可再微调.
+ */
+export function dashParamsFor(
+  dashType: LineStyle['dashType'],
+  width: number,
+): { dashSize: number; gapSize: number } | null {
+  // 以线宽为基准缩放,细线短划、粗线长划,观感更稳
+  const u = Math.max(2, width * 3);
+  switch (dashType) {
+    case 'dash':     return { dashSize: u * 2,   gapSize: u * 1.5 };
+    case 'dot':      return { dashSize: u * 0.4, gapSize: u * 1.2 };
+    case 'dashDot':  return { dashSize: u * 1.6, gapSize: u * 1.2 }; // 近似:用中等划+间隔
+    case 'longDash': return { dashSize: u * 4,   gapSize: u * 2 };
+    case 'solid':
+    default:
+      return null;
+  }
+}
+
+/**
  * EvaluatedPath → Three 对象;主入口.
  *
  * G3 主路径:NodeRenderer 通过 requireCapabilityApi('shape-library') 调
@@ -98,16 +122,23 @@ export function pathToThree(
       }
       const geom = new LineGeometry();
       geom.setPositions(positions);
+      const strokeWidth = opts.stroke.width ?? 1.5;
+      // dashType → 虚线参数(solid 返 null);'solid' 默认值兼容老数据无 dashType 字段
+      const dash = dashParamsFor(opts.stroke.dashType ?? 'solid', strokeWidth);
       const mat = new LineMaterial({
         color: new THREE.Color(opts.stroke.color ?? '#2E5C8A').getHex(),
-        linewidth: opts.stroke.width ?? 1.5, // 屏幕像素
+        linewidth: strokeWidth, // 屏幕像素
         worldUnits: false,
         // resolution 由 SceneManager 在 RAF 内每帧同步(走 LineMaterial.resolution.set)
         resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
         transparent: false,
         depthTest: false, // 在 z=0.01 上,不需要深度测试
+        dashed: dash !== null,
+        ...(dash ? { dashSize: dash.dashSize, gapSize: dash.gapSize } : {}),
       });
       stroke = new Line2(geom, mat);
+      // 虚线必须 computeLineDistances(LineMaterial USE_DASH 读 instanceDistance);
+      // 实线调了也无害(不开 dashed 不参与片元丢弃)
       stroke.computeLineDistances();
       stroke.position.z = Z_STROKE;
       stroke.renderOrder = 1; // stroke 渲染在 fill 之上
