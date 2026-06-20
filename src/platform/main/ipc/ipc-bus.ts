@@ -10,6 +10,7 @@ import { registerShellHandlers } from './shell-handler';
 import { registerWebTranslateHandlers } from './web-translate-handler';
 import { registerAppHandlers } from './app-handler';
 import { registerMediaHandlers } from '../media/media-handlers';
+import { registerFontHandlers } from '../fonts/font-handlers';
 import { registerYtdlpHandlers } from '../ytdlp/handlers';
 import { registerTweetFetcherHandlers } from '../tweet-fetcher/handlers';
 import { registerContentExtractionHandlers } from '../content-extraction/handlers';
@@ -34,6 +35,7 @@ export function initIpcBus(): void {
   registerWebTranslateHandlers();
   registerAppHandlers();
   registerMediaHandlers();
+  registerFontHandlers();           // L5-G7:系统字体扫描 + 嵌入(可移植画板字体)
   registerYtdlpHandlers();          // L5-B3.17:yt-dlp capability
   registerTweetFetcherHandlers();   // L5-B3.18:tweet-fetcher 临时 capability(Phase D 被吸收)
   registerContentExtractionHandlers(); // 网页剪藏(Defuddle → Note);触发走 web 右键菜单 → main→renderer 推

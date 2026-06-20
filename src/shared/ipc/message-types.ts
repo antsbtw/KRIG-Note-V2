@@ -21,3 +21,22 @@ export interface DiagnosticsReportPayload {
   /** 可选详情(如 size / version / 等) */
   details?: Record<string, unknown>;
 }
+
+/**
+ * L5-G7.1:一条可选系统字体(IPC 跨进程 DTO;.ttc 已展开为 per-subfont 条目)。
+ * 与 main 进程 SystemFontEntry 结构同形,此处独立声明避免 renderer 反依赖 platform/main。
+ */
+export interface SystemFontEntryDTO {
+  /** 字体族名(如 "PingFang SC") */
+  family: string;
+  /** 字重 / 样式(如 "Regular" / "Bold") */
+  style: string;
+  /** 源文件绝对路径 */
+  path: string;
+  /** .ttc 内子字体序号;非 ttc 恒为 0 */
+  fontIndex: number;
+  /** 文件格式 */
+  format: 'ttf' | 'otf' | 'ttc';
+  /** opentype 能否解析(false 的不可嵌入) */
+  supported: boolean;
+}

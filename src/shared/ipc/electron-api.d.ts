@@ -7,6 +7,7 @@
 import type {
   DiagnosticsReportPayload,
   HealthCheckResponse,
+  SystemFontEntryDTO,
 } from './message-types';
 import type {
   NoteInfo,
@@ -89,6 +90,13 @@ declare global {
       ): Promise<{ success: boolean; mediaUrl?: string; mediaId?: string; error?: string }>;
       /** L5-B3.14:media:// URL → 本地文件系统绝对路径(file-block / file-link / external-ref 用)*/
       mediaResolvePath(mediaUrl: string): Promise<{ success: boolean; path?: string }>;
+
+      /** L5-G7.1:扫本机系统字体(可选字体清单;.ttc 已展开为 per-subfont 条目) */
+      fontListSystem(): Promise<{
+        success: boolean;
+        error?: string;
+        fonts: SystemFontEntryDTO[];
+      }>;
       /** L5-B3.14:在 Finder 高亮显示文件 */
       showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }>;
       /** L5-B3.14:File → 绝对路径(同步;Electron 32+ webUtils.getPathForFile 包装)*/

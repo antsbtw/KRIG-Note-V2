@@ -82,6 +82,10 @@ export const IPC_CHANNELS = {
   // L5-B3.14:media:// URL → 本地路径解析(file-block / file-link / external-ref 打开/Finder 显示用)
   MEDIA_RESOLVE_PATH: 'media.resolve-path',
 
+  // L5-G7:系统字体导入 + 嵌入画板内容(可移植)
+  FONT_LIST_SYSTEM: 'font.list-system',   // renderer → main invoke → SystemFontEntry[](扫本机系统字体)
+  FONT_EMBED: 'font.embed',               // renderer → main invoke({ path, fontIndex }) → 嵌入 → { fontId, fontUrl, ... }
+
   // L5-B3.17:yt-dlp 能力(checkStatus / install / download / getInfo / saveSubtitle)
   YTDLP_CHECK_STATUS: 'ytdlp.check-status',
   YTDLP_INSTALL: 'ytdlp.install',
