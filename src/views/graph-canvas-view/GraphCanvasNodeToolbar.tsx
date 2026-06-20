@@ -124,9 +124,17 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
   const handlePatchInstance = useCallback(
     (patch: Partial<NodeSnapshot>): void => {
       if (!singleId) return;
-      // 只透传画板专属字段(text_font/text_size);id/kind/ref/style 不经此路
-      const { text_font, text_size } = patch;
-      hostRef.current?.updateInstance(singleId, { text_font, text_size } as Partial<Instance>);
+      // 只透传画板专属字段(text_font/text_size);id/kind/ref/style 不经此路。
+      // ★ 只挑 patch 里**真正出现**的 key,绝不补 undefined —— 否则只改字体时
+      //   text_size=undefined 会被 updateInstance 的 {...current,...patch} 覆盖掉真值,
+      //   导致"换字体把字号重置成默认 14"(bug 修复)。
+      // NodeSnapshot.text_font 是 view-agnostic 的 string;Instance.text_font 是窄枚举,
+      // 边界处收窄(下拉选项就是这几个值,运行时安全)。
+      const next: Partial<Instance> = {};
+      if ('text_font' in patch) next.text_font = patch.text_font as Instance['text_font'];
+      if ('text_size' in patch) next.text_size = patch.text_size;
+      if (Object.keys(next).length === 0) return;
+      hostRef.current?.updateInstance(singleId, next);
       setNode(buildSnapshot(singleId));
       onChanged();
     },
@@ -155,7 +163,8 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
         return;
       }
       hostRef.current?.updateInstance(singleId, { doc: nextDoc } as Partial<Instance>);
-      setNode(buildSnapshot(singleId)); // 第 4 步:刷新浮条快照,漏了会"改了但浮条不更新"
+      setNode(buildSnapshot(singleId)); // 刷新浮条快照,漏了会"改了但浮条不更新"
+      onChanged();                      // 触发防抖保存(与 patchStyle/patchInstance 一致,持久化文字色/对齐)
     },
     [singleId, hostRef, textEditing, buildSnapshot, onChanged],
   );

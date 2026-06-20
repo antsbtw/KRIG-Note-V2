@@ -212,6 +212,8 @@ async function instanceAtomToObject(
   if (payload.props !== undefined) instance.props = payload.props;
   if (payload.size_lock !== undefined) instance.size_lock = payload.size_lock;
   if (payload.text_valign !== undefined) instance.text_valign = payload.text_valign;
+  if (payload.text_size !== undefined) instance.text_size = payload.text_size;
+  if (payload.text_font !== undefined) instance.text_font = payload.text_font;
 
   // text-node 特例:从 hasContent 边 + pm atom 拼回 doc 字段
   // V2 view 端契约(decision 018 P0d hotfix):instance.doc 是 DriverSerialized 信封,
@@ -259,6 +261,8 @@ function incomingInstanceToPayload(inst: Record<string, unknown>): import('@sema
   if (inst.text_valign !== undefined) {
     p.text_valign = inst.text_valign as 'top' | 'middle' | 'bottom';
   }
+  if (inst.text_size !== undefined) p.text_size = inst.text_size as number;
+  if (inst.text_font !== undefined) p.text_font = inst.text_font as string;
   return p;
 }
 

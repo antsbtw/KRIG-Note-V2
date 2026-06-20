@@ -111,6 +111,10 @@ export interface GraphInstancePayload {
   props?: Record<string, unknown>;
   size_lock?: { w?: boolean; h?: boolean };
   text_valign?: 'top' | 'middle' | 'bottom';
+  /** 文字节点字号 pt(L5-G5 Type/Text section,画板专属) */
+  text_size?: number;
+  /** 文字节点字体族(L5-G5;'auto'|'sans'|'serif'|'mono'|'handwriting') */
+  text_font?: string;
 }
 
 /** 留 future line 实例,本 sub-phase 不实施 line — semantic 层保持 unknown 兜底 */
