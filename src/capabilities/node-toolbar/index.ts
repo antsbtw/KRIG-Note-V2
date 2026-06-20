@@ -27,7 +27,6 @@ import {
 import { fillSection } from './sections/fill';
 import { lineSection } from './sections/line';
 import { textSection } from './sections/text';
-import { typeSection } from './sections/type';
 import type { NodeToolbarApi } from './types';
 
 export type {
@@ -46,11 +45,11 @@ export type {
 export { NodeToolbar } from './NodeToolbar';
 export { registerSection, registerNodeBinding, resolveSections } from './registry';
 
-// ── 内置 4 section 注册 ──
+// ── 内置 section 注册 ──
+// Text section(G6 合并)已含 文字色 + 对齐 + 字体 + 字号;原独立 Type section 已并入。
 registerSection(fillSection);
 registerSection(lineSection);
 registerSection(textSection);
-registerSection(typeSection);
 
 // ── 内置 canvas 节点类型 → section 绑定(其它 view 可继续 registerNodeBinding 扩展)──
 // 容器零硬编码:浮条上有哪几个 button 完全由这些声明决定。
@@ -65,9 +64,9 @@ registerNodeBinding({
   sections: ['line'],
 });
 registerNodeBinding({
-  // 文字节点:Fill(底色)+ Text(复用 note)+ Type(画板字体字号)
+  // 文字节点:Fill(底色)+ Text(文字色 + 对齐 + 字体 + 字号,G6 合并 Type)
   match: (node) => node.kind === 'text',
-  sections: ['fill', 'text', 'type'],
+  sections: ['fill', 'text'],
 });
 
 // ── W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)──
@@ -81,4 +80,4 @@ capabilityRegistry.register({
   } satisfies NodeToolbarApi,
 });
 
-console.info('[node-toolbar] alive | sections: fill/line/text/type, registry ready');
+console.info('[node-toolbar] alive | sections: fill/line/text, registry ready');
