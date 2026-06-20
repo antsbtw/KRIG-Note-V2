@@ -25,6 +25,11 @@ import {
 } from './serializers/note-to-article-plan';
 import { blockMediaKey, type ArticleMediaMap } from './serializers/doc-to-article-doc';
 import { instanceRegistry } from './instance-registry';
+import {
+  applyNodeStyleCommand,
+  type NodeStyleCommand,
+} from './node-style-command';
+import type { DriverSerialized } from './types';
 import { clearSlashTrigger } from './plugins/build-slash-plugin';
 import { scrollToBlockAnchor } from './plugins/build-link-click-plugin';
 import {
@@ -2221,6 +2226,23 @@ export const textEditingDriverApi = {
    */
   subscribeTocChange(instanceId: string, cb: () => void): () => void {
     return subscribeHeadingChange(instanceId, cb);
+  },
+
+  /**
+   * L5-G5 — 对一个文字节点整 doc 应用 note 复用样式(headless,无需 EditorView)。
+   *
+   * 画板文字节点平时没有挂载的 PM 实例(只渲染 SVG mesh),不能走 instanceRegistry。
+   * 本命令纯 doc 变换:解析 doc → 整 doc 选中 → 跑 toggleMark/setTextColor/align/list
+   * → 返回新 DriverSerialized。调用方(canvas view)拿到新 doc 后走
+   * host.updateInstance(id, { doc }) 落地 + SVG 重渲染。
+   *
+   * **只复用 note 既有 mark/命令**(bold/italic/underline/textColor/align/list),
+   * 不含字号字体(那归 Type section instance 字段)。
+   *
+   * @returns 新 doc(成功),或 null(doc 不可解析 / 命令无变化)。view 收到 null 不写盘。
+   */
+  runNodeStyleCommand(doc: DriverSerialized, cmd: NodeStyleCommand): DriverSerialized | null {
+    return applyNodeStyleCommand(doc, cmd);
   },
 };
 
