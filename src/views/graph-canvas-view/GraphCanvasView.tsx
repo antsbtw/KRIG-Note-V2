@@ -43,6 +43,7 @@ import type {
 } from '@capabilities/graph-library-store/types';
 import { getGraphCanvasWsState } from './data-model';
 import { GraphCanvasToolbar } from './GraphCanvasToolbar';
+import { GraphCanvasNodeToolbar } from './GraphCanvasNodeToolbar';
 import './graph-canvas-view.css';
 
 interface GraphCanvasViewProps {
@@ -296,6 +297,14 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
             onViewportChange={handleViewportChange}
             onSelectionChange={handleSelectionChange}
             onNodeDoubleClick={handleNodeDoubleClick}
+          />
+        )}
+        {/* G5 节点浮条(单选时贴选中框下方;view-agnostic node-toolbar capability) */}
+        {activeGraphId != null && (
+          <GraphCanvasNodeToolbar
+            hostRef={hostRef}
+            selectedIds={selectedIds}
+            onChanged={scheduleSave}
           />
         )}
       </div>

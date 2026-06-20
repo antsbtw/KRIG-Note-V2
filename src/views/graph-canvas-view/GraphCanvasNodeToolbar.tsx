@@ -1,0 +1,166 @@
+/**
+ * GraphCanvasNodeToolbar — canvas view 侧的 node-toolbar 接入(L5-G5)
+ *
+ * 把 node-toolbar(view-agnostic 共享 capability)接到 canvas:
+ * - 锚定:RAF 循环拉 host.getSelectedScreenAABB() 持续重定位浮条
+ *   (一把覆盖 拖/缩/转节点 + pan/zoom,无需分别订阅各事件)
+ * - 快照:把选中 instance 拍平成 view-agnostic NodeSnapshot,解析语义 kind
+ *   (shape / line / text)给 registry match
+ * - 落地:patchStyle/patchInstance → host.updateInstance;
+ *         textCommand → text-editing.runNodeStyleCommand(G5.4 接)
+ *
+ * 单选才出浮条;多选 / 无选不出(design §7)。把 G5 接入从 GraphCanvasView 主体拆出,
+ * 保主体 LOC 红线 + G5 wiring 收敛在一处。
+ *
+ * **W5 边界**:view 层,允许 requireCapabilityApi 各 capability;0 import three/PM。
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { CanvasHostHandle, Instance } from '@capabilities/canvas-rendering/types';
+import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
+import type {
+  NodeToolbarApi,
+  NodeSnapshot,
+  NodeSemanticKind,
+  NodeStyleOverrides,
+  ToolbarAnchor,
+  TextNodeStyleCommand,
+} from '@capabilities/node-toolbar';
+
+interface Props {
+  hostRef: React.RefObject<CanvasHostHandle | null>;
+  /** 当前选中 id 列表(view 主体订阅 onSelectionChange 拿) */
+  selectedIds: string[];
+  /** patch 落地后通知 view 触发防抖保存 */
+  onChanged: () => void;
+}
+
+const TEXT_NODE_REF = 'krig.text.label';
+
+/** 解析 instance 的语义 kind(registry match 用) */
+function resolveKind(inst: Instance, shapeApi: ShapeLibraryApi): NodeSemanticKind {
+  if (inst.ref === TEXT_NODE_REF) return 'text';
+  if (inst.type === 'shape') {
+    const shape = shapeApi.shapes.get(inst.ref);
+    if (shape?.category === 'line') return 'line';
+  }
+  return 'shape';
+}
+
+export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Props): React.ReactElement | null {
+  const { NodeToolbar } = useMemo(
+    () => requireCapabilityApi<NodeToolbarApi>('node-toolbar'),
+    [],
+  );
+  const shapeApi = useMemo(() => requireCapabilityApi<ShapeLibraryApi>('shape-library'), []);
+  const textEditing = useMemo(() => requireCapabilityApi<TextEditingApi>('text-editing'), []);
+
+  const [anchor, setAnchor] = useState<ToolbarAnchor | null>(null);
+  const [node, setNode] = useState<NodeSnapshot | null>(null);
+
+  // 单选才出浮条(多选 / 无选不出)
+  const singleId = selectedIds.length === 1 ? selectedIds[0] : null;
+
+  // 快照:选中 id 变化时重建(样式实时更新靠 RAF 循环里 refresh)
+  const buildSnapshot = useCallback(
+    (id: string): NodeSnapshot | null => {
+      const inst = hostRef.current?.getInstance(id);
+      if (!inst) return null;
+      return {
+        id: inst.id,
+        kind: resolveKind(inst, shapeApi),
+        ref: inst.ref,
+        style_overrides: inst.style_overrides as NodeSnapshot['style_overrides'],
+        text_font: (inst as Instance & { text_font?: string }).text_font,
+        text_size: (inst as Instance & { text_size?: number }).text_size,
+      };
+    },
+    [hostRef, shapeApi],
+  );
+
+  // ── 锚定 + 快照刷新:RAF 循环,单选期间持续跑 ──
+  const rafRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!singleId) {
+      setAnchor(null);
+      setNode(null);
+      return;
+    }
+    let lastKey = '';
+    const tick = (): void => {
+      const host = hostRef.current;
+      if (host) {
+        const aabb = host.getSelectedScreenAABB();
+        // 只在变化时 setState(避免每帧 re-render)
+        const key = aabb ? `${aabb.x | 0},${aabb.y | 0},${aabb.w | 0},${aabb.h | 0}` : 'null';
+        if (key !== lastKey) {
+          lastKey = key;
+          setAnchor(aabb);
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    setNode(buildSnapshot(singleId));
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [singleId, hostRef, buildSnapshot]);
+
+  // ── 落地回调 ──
+  const handlePatchStyle = useCallback(
+    (patch: NodeStyleOverrides): void => {
+      if (!singleId) return;
+      hostRef.current?.updateInstance(singleId, { style_overrides: patch } as Partial<Instance>);
+      setNode(buildSnapshot(singleId));
+      onChanged();
+    },
+    [singleId, hostRef, buildSnapshot, onChanged],
+  );
+
+  const handlePatchInstance = useCallback(
+    (patch: Partial<NodeSnapshot>): void => {
+      if (!singleId) return;
+      // 只透传画板专属字段(text_font/text_size);id/kind/ref/style 不经此路
+      const { text_font, text_size } = patch;
+      hostRef.current?.updateInstance(singleId, { text_font, text_size } as Partial<Instance>);
+      setNode(buildSnapshot(singleId));
+      onChanged();
+    },
+    [singleId, hostRef, buildSnapshot, onChanged],
+  );
+
+  const handleTextCommand = useCallback(
+    (cmd: TextNodeStyleCommand): void => {
+      if (!singleId) return;
+      const inst = hostRef.current?.getInstance(singleId);
+      if (!inst?.doc) return;
+      // G5.4:headless 整 doc 改 note mark/命令(画板文字节点平时无挂载 PM 实例)。
+      // TextNodeStyleCommand 与 driver NodeStyleCommand 同形,直接透传。
+      const nextDoc = textEditing.api.runNodeStyleCommand(
+        inst.doc as Parameters<TextEditingApi['api']['runNodeStyleCommand']>[0],
+        cmd as Parameters<TextEditingApi['api']['runNodeStyleCommand']>[1],
+      );
+      if (!nextDoc) return; // doc 不可解析 / 命令无变化 → 不写盘(fail loud)
+      hostRef.current?.updateInstance(singleId, { doc: nextDoc } as Partial<Instance>);
+      setNode(buildSnapshot(singleId));
+      onChanged();
+    },
+    [singleId, hostRef, textEditing, buildSnapshot, onChanged],
+  );
+
+  if (!singleId || !anchor || !node) return null;
+
+  return (
+    <NodeToolbar
+      anchor={anchor}
+      node={node}
+      onPatchStyle={handlePatchStyle}
+      onPatchInstance={handlePatchInstance}
+      onTextCommand={handleTextCommand}
+    />
+  );
+}
