@@ -13,3 +13,9 @@ docs/temp/
 
 # Test checklist prompt drafts (临时 prompt 模板,不入仓)
 docs/RefactorV2/test-checklists/*-prompt.md
+
+# 会话级 / 临时产物(不入仓)
+# .claude/settings.json = Claude Code 会话授权配置,逐会话累积,本机生效即可
+# history.txt = surreal CLI 等工具自动生成的命令历史
+.claude/settings.json
+history.txt
