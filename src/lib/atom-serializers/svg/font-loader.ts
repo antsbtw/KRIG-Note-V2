@@ -2,21 +2,24 @@ import * as opentype from 'opentype.js';
 import { FONT_URLS, type FontKey } from './fonts';
 
 /**
- * 字体缓存键:打包字体 FontKey,或嵌入字体 `embed:<fontId>`(L5-G7)。
- * 嵌入字体经 font:// 协议从 main 进程 font-store 取 buffer(可移植,墙 3)。
+ * 字体缓存键:打包字体 FontKey,或系统字体 `sysname:<family>`(L5-G7b 记名方案)。
+ *
+ * 转向(L5-G7b):画板**不嵌入字体本体**,只记 `sysname:<family>`。本机渲染 / 导出时
+ * 经 IPC(fontReadByName)按 family 名实时向主进程要 buffer 喂 opentype。
+ * 对方没装该字体 → 读不到 → 回退**打包字体**(打包字体字符全覆盖,红线:不乱码)。
  */
-export type FontCacheKey = FontKey | `embed:${string}`;
+export type FontCacheKey = FontKey | `sysname:${string}`;
 
-const EMBED_PREFIX = 'embed:';
+const SYSNAME_PREFIX = 'sysname:';
 
-/** key 是否嵌入字体 */
-export function isEmbedKey(key: string): key is `embed:${string}` {
-  return key.startsWith(EMBED_PREFIX);
+/** key 是否系统字体(记名) */
+export function isSysnameKey(key: string): key is `sysname:${string}` {
+  return key.startsWith(SYSNAME_PREFIX);
 }
 
-/** `embed:<fontId>` → fontId(`font-<hash>`) */
-function fontIdOf(key: `embed:${string}`): string {
-  return key.slice(EMBED_PREFIX.length);
+/** `sysname:<family>` → family 名 */
+function familyOf(key: `sysname:${string}`): string {
+  return key.slice(SYSNAME_PREFIX.length);
 }
 
 const cache = new Map<FontCacheKey, Promise<opentype.Font>>();
@@ -29,19 +32,31 @@ export function getFontLoadStats(): Partial<Record<string, { ms: number; sizeKb:
 }
 
 /**
- * 加载字体(打包 FontKey 或嵌入 `embed:<fontId>`)。
+ * 加载字体(打包 FontKey 或系统字体 `sysname:<family>`)。
  * - 打包:fetch(FONT_URLS[key])
- * - 嵌入:fetch('font://<fontId>')(main 进程 font:// 协议解析,无 ext 走前缀查找)
- * 结果按 key 进 Map 缓存(打包 / 嵌入键互不撞)。
+ * - 系统字体(记名):IPC fontReadByName(family) 向主进程要 buffer(主进程按名查扫描结果
+ *   → readFontBinary 抽 sfnt)。读不到(对方没装 / 读失败)→ **throw**,由 text-to-path
+ *   的 splitByFont 捕获并回退打包字体(红线:不乱码)。
+ * 结果按 key 进 Map 缓存(打包 / 系统键互不撞)。
  */
 export function loadFont(key: FontCacheKey): Promise<opentype.Font> {
   let p = cache.get(key);
   if (p) return p;
 
   p = (async () => {
-    const url = isEmbedKey(key) ? `font://${fontIdOf(key)}` : FONT_URLS[key];
     const t0 = performance.now();
-    const buffer = await fetch(url).then((r) => r.arrayBuffer());
+    let buffer: ArrayBuffer;
+    if (isSysnameKey(key)) {
+      const family = familyOf(key);
+      const ab = (await window.electronAPI?.fontReadByName?.(family)) ?? null;
+      if (!ab) {
+        // 对方没装该字体 / 读失败 → fail loud + throw(splitByFont 回退打包字体)
+        throw new Error(`[font-loader] 系统字体不可用,回退打包: ${family}`);
+      }
+      buffer = ab;
+    } else {
+      buffer = await fetch(FONT_URLS[key]).then((r) => r.arrayBuffer());
+    }
     const font = opentype.parse(buffer);
     const dt = performance.now() - t0;
     const sizeKb = buffer.byteLength / 1024;
@@ -51,6 +66,9 @@ export function loadFont(key: FontCacheKey): Promise<opentype.Font> {
   })();
 
   cache.set(key, p);
+  // 系统字体读失败(对方没装)→ 从缓存剔除,下次仍可重试(用户后续装了 / 换字体)。
+  // 打包字体加载失败属真异常,保留缓存以免反复重试。
+  if (isSysnameKey(key)) p.catch(() => cache.delete(key));
   return p;
 }
 
@@ -103,10 +121,11 @@ export interface MarkSet {
  * 西文 Sans(Inter)/ Serif(Source Serif 4)/ Mono(JetBrains)/ 手写(Caveat)。
  * 仅 Regular 字重有专属文件;bold/italic 暂回退已装变体(见 resolveFamilyFont),不丢字不伪粗。
  *
- * L5-G7:新增 `embed:<fontId>` —— 用户系统字体嵌进画板内容(可移植)。
- * pickFontForChar 识别前缀直接用嵌入字体;CJK 缺字仍回退打包字体(G7-8,见 text-to-path)。
+ * L5-G7b:新增 `sysname:<family>` —— 记用户系统字体的 family 名(**不嵌入**)。
+ * pickFontForChar 识别前缀直接用该系统字体;本机渲染按名 IPC 读 buffer,对方没装 /
+ * 缺字 → 回退打包字体(G7-8 + 记名回退,见 text-to-path)。
  */
-export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `embed:${string}`;
+export type FontFamily = 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `sysname:${string}`;
 
 /**
  * 字体族 + CJK + bold/italic → FontKey。
@@ -171,8 +190,9 @@ export function pickFontForChar(ch: string, marks?: MarkSet): FontCacheKey {
   // Type section 字体族覆盖优先(code mark 仍强制等宽,语义不被字体族盖)
   const family = marks?.fontFamily;
   if (family && family !== 'auto' && !marks?.code) {
-    // L5-G7:嵌入字体直接用其 key;CJK 缺字回退由 text-to-path 在加载后探测处理(G7-8)。
-    if (isEmbedKey(family)) return family;
+    // L5-G7b:系统字体(记名)直接用其 key;对方没装 / CJK 缺字回退由 text-to-path
+    // 在加载后探测处理(G7-8 + 记名回退)。
+    if (isSysnameKey(family)) return family;
     return resolveFamilyFont(family, cjk, marks);
   }
 
@@ -191,13 +211,14 @@ export function pickFontForChar(ch: string, marks?: MarkSet): FontCacheKey {
 }
 
 /**
- * L5-G7.3(G7-8 缺字回退):当嵌入字体没有某字符字形时,选哪个**打包**字体兜底。
- * 等价于把 fontFamily 当 'auto' 重新走自动选字(打包 CJK / Inter 等),保证不丢字。
- * 仅 text-to-path 在探测到嵌入字体缺字时调用。
+ * L5-G7b(G7-8 缺字回退 + 记名回退):当系统字体没有某字符字形、或对方根本没装该
+ * 系统字体时,选哪个**打包**字体兜底。等价于把 fontFamily 当 'auto' 重新走自动选字
+ * (打包 CJK / Inter 等),保证不乱码不丢字(红线:回退落到打包字体)。
+ * text-to-path 在探测到系统字体缺字 / 加载失败时调用。
  */
 export function pickPackagedFallbackForChar(ch: string, marks?: MarkSet): FontKey {
-  const noEmbed: MarkSet | undefined = marks ? { ...marks, fontFamily: 'auto' } : undefined;
-  const key = pickFontForChar(ch, noEmbed);
-  // noEmbed 后 pickFontForChar 不会再返回 embed key,这里收窄类型
-  return isEmbedKey(key) ? 'notoSansSc' : key;
+  const noSys: MarkSet | undefined = marks ? { ...marks, fontFamily: 'auto' } : undefined;
+  const key = pickFontForChar(ch, noSys);
+  // noSys 后 pickFontForChar 不会再返回 sysname key,这里收窄类型
+  return isSysnameKey(key) ? 'notoSansSc' : key;
 }

@@ -2,7 +2,7 @@ import {
   loadFont,
   pickFontForChar,
   pickPackagedFallbackForChar,
-  isEmbedKey,
+  isSysnameKey,
   type MarkSet,
   type FontCacheKey,
 } from './font-loader';
@@ -39,7 +39,14 @@ export async function textToPath(
   let x = startX;
 
   for (const seg of segments) {
-    const font = await loadFont(seg.fontKey);
+    // 记名方案:系统字体可能加载失败(对方没装)→ 回退打包字体重选(红线:不乱码)。
+    let font;
+    try {
+      font = await loadFont(seg.fontKey);
+    } catch {
+      const fb = pickPackagedFallbackForChar(seg.text[0] ?? 'A', marks);
+      font = await loadFont(fb);
+    }
     const path = font.getPath(seg.text, x, baselineY, fontSize);
     const d = path.toPathData(2);
     if (d) {
@@ -58,9 +65,11 @@ interface FontSegment {
 }
 
 /**
- * 按字符选字体分段。嵌入字体(L5-G7)缺字回退:若选中的是 embed 字体但该字符
- * 在嵌入字体里没有字形(charToGlyphIndex === 0),回退到打包字体(G7-8,不丢字)。
- * 因需探测嵌入字体字形 → 异步(loadFont 有缓存,探测廉价)。
+ * 按字符选字体分段。系统字体(L5-G7b 记名)回退:若选中的是 sysname 字体,但
+ *  - 对方没装该字体(loadFont 抛错),或
+ *  - 该字符在系统字体里没有字形(charToGlyphIndex === 0),
+ * 则回退到**打包字体**(G7-8 + 记名回退,红线:不乱码不丢字)。
+ * 因需探测系统字体字形 → 异步(loadFont 有缓存,探测廉价)。
  */
 async function splitByFont(text: string, marks?: MarkSet): Promise<FontSegment[]> {
   const out: FontSegment[] = [];
@@ -68,8 +77,8 @@ async function splitByFont(text: string, marks?: MarkSet): Promise<FontSegment[]
 
   for (const ch of text) {
     let fontKey = pickFontForChar(ch, marks);
-    // 嵌入字体缺字 → 回退打包字体(保证 CJK / 任意字符不丢)
-    if (isEmbedKey(fontKey) && !(await embedHasGlyph(fontKey, ch))) {
+    // 系统字体没装 / 缺字 → 回退打包字体(保证任意字符不乱码)
+    if (isSysnameKey(fontKey) && !(await sysnameHasGlyph(fontKey, ch))) {
       fontKey = pickPackagedFallbackForChar(ch, marks);
     }
     if (current && current.fontKey === fontKey) {
@@ -83,8 +92,11 @@ async function splitByFont(text: string, marks?: MarkSet): Promise<FontSegment[]
   return out;
 }
 
-/** 嵌入字体是否含某字符字形(glyph index !== 0 = 非 .notdef)。加载失败按"无字形"回退。 */
-async function embedHasGlyph(fontKey: `embed:${string}`, ch: string): Promise<boolean> {
+/**
+ * 系统字体(记名)是否含某字符字形(glyph index !== 0 = 非 .notdef)。
+ * 加载失败(对方没装该字体)→ 按"无字形"回退打包字体(红线:不乱码)。
+ */
+async function sysnameHasGlyph(fontKey: `sysname:${string}`, ch: string): Promise<boolean> {
   try {
     const font = await loadFont(fontKey);
     return font.charToGlyphIndex(ch) !== 0;

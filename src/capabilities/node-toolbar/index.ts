@@ -41,7 +41,6 @@ export type {
   ToolbarAnchor,
   TextNodeStyleCommand,
   SystemFontInfo,
-  SystemFontEmbedResult,
 } from './types';
 
 export { NodeToolbar } from './NodeToolbar';

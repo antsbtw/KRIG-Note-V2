@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   pickFontForChar,
   pickPackagedFallbackForChar,
-  isEmbedKey,
+  isSysnameKey,
 } from '../../src/lib/atom-serializers/svg/font-loader';
 
 describe('pickFontForChar fontFamily 覆盖(G5.6)', () => {
@@ -54,26 +54,27 @@ describe('pickFontForChar fontFamily 覆盖(G5.6)', () => {
   });
 });
 
-describe('L5-G7.3:嵌入字体 embed: 前缀', () => {
-  it('embed: 字体族 → 直接返回该 embed key(西文 + 中文都先用嵌入字体)', () => {
-    expect(pickFontForChar('a', { fontFamily: 'embed:font-abc123' })).toBe('embed:font-abc123');
-    expect(pickFontForChar('中', { fontFamily: 'embed:font-abc123' })).toBe('embed:font-abc123');
+describe('L5-G7b:系统字体记名 sysname: 前缀', () => {
+  it('sysname: 字体族 → 直接返回该 sysname key(西文 + 中文都先用系统字体)', () => {
+    expect(pickFontForChar('a', { fontFamily: 'sysname:PingFang SC' })).toBe('sysname:PingFang SC');
+    expect(pickFontForChar('中', { fontFamily: 'sysname:PingFang SC' })).toBe('sysname:PingFang SC');
   });
 
-  it('code mark 仍优先(嵌入字体不盖 code 语义)', () => {
-    expect(pickFontForChar('x', { fontFamily: 'embed:font-abc123', code: true })).toBe('jetBrainsMono');
+  it('code mark 仍优先(系统字体不盖 code 语义)', () => {
+    expect(pickFontForChar('x', { fontFamily: 'sysname:PingFang SC', code: true })).toBe('jetBrainsMono');
   });
 
-  it('isEmbedKey 正确识别', () => {
-    expect(isEmbedKey('embed:font-abc')).toBe(true);
-    expect(isEmbedKey('inter')).toBe(false);
-    expect(isEmbedKey('notoSansSc')).toBe(false);
+  it('isSysnameKey 正确识别', () => {
+    expect(isSysnameKey('sysname:PingFang SC')).toBe(true);
+    expect(isSysnameKey('inter')).toBe(false);
+    expect(isSysnameKey('notoSansSc')).toBe(false);
   });
 
-  it('pickPackagedFallbackForChar:嵌入字体缺字时的打包兜底(中文→notoSansSc,西文→inter)', () => {
-    // 即便 marks 里带 embed,fallback 也强制走打包(等价 auto 自动选字),保证不丢字
-    expect(pickPackagedFallbackForChar('中', { fontFamily: 'embed:font-x' })).toBe('notoSansSc');
-    expect(pickPackagedFallbackForChar('a', { fontFamily: 'embed:font-x' })).toBe('inter');
-    expect(pickPackagedFallbackForChar('粗', { fontFamily: 'embed:font-x', bold: true })).toBe('notoSansScBold');
+  it('pickPackagedFallbackForChar:系统字体缺字 / 对方没装时的打包兜底(中文→notoSansSc,西文→inter)', () => {
+    // 红线:回退必须落到**打包字体**(字符全覆盖,不乱码)。即便 marks 带 sysname,
+    // fallback 也强制走打包(等价 auto 自动选字),保证不丢字不豆腐块。
+    expect(pickPackagedFallbackForChar('中', { fontFamily: 'sysname:X Font' })).toBe('notoSansSc');
+    expect(pickPackagedFallbackForChar('a', { fontFamily: 'sysname:X Font' })).toBe('inter');
+    expect(pickPackagedFallbackForChar('粗', { fontFamily: 'sysname:X Font', bold: true })).toBe('notoSansScBold');
   });
 });

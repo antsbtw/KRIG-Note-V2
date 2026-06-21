@@ -28,17 +28,12 @@ import type {
   ToolbarAnchor,
   TextNodeStyleCommand,
   SystemFontInfo,
-  SystemFontEmbedResult,
 } from '@capabilities/node-toolbar';
-import type {
-  fontListSystem as FontListSystemFn,
-  fontEmbed as FontEmbedFn,
-} from '@capabilities/font-storage';
+import type { fontListSystem as FontListSystemFn } from '@capabilities/font-storage';
 
 /** font-storage capability api 形态(requireCapabilityApi 间接拿,W5) */
 interface FontStorageApi {
   fontListSystem: typeof FontListSystemFn;
-  fontEmbed: typeof FontEmbedFn;
 }
 
 interface Props {
@@ -182,27 +177,10 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
     [singleId, hostRef, textEditing, buildSnapshot, onChanged],
   );
 
-  // ── L5-G7:字体列表 + 嵌入。用户拍板「选了就用,零弹窗」→ 直接嵌入,不预估不确认。
-  //    防病态超大文件的硬上限在主进程 fontStore.embed 内(静默拒 + warn,正常字体不触发)。──
+  // ── L5-G7b:字体列表(记名方案)。选字体 = section 直接记 text_font='sysname:<family>',
+  //    **无嵌入步骤**;本机渲染时 loadFont 按名经 IPC 读 buffer,对方没装回退打包字体。──
   const handleListSystemFonts = useCallback(
     (): Promise<SystemFontInfo[]> => fontStorage.fontListSystem(),
-    [fontStorage],
-  );
-
-  const handleEmbedSystemFont = useCallback(
-    async (font: SystemFontInfo): Promise<SystemFontEmbedResult | null> => {
-      // 直接嵌入 → 落盘 font:// → 返回 fontId(无弹窗、无确认)
-      const res = await fontStorage.fontEmbed(font.path, font.fontIndex, {
-        family: font.family,
-        style: font.style,
-      });
-      if (!res.success || !res.fontId) {
-        // fail loud:不可嵌入(格式不支持 / 抽取失败 / 超硬上限)
-        console.warn('[font-embed] 嵌入失败', font.family, res.error);
-        return null;
-      }
-      return { fontId: res.fontId, family: font.family };
-    },
     [fontStorage],
   );
 
@@ -216,7 +194,6 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
       onPatchInstance={handlePatchInstance}
       onTextCommand={handleTextCommand}
       onListSystemFonts={handleListSystemFonts}
-      onEmbedSystemFont={handleEmbedSystemFont}
     />
   );
 }

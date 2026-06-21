@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NodeSnapshot, SectionContext, SectionDef, SystemFontInfo } from '../../types';
 import { PALETTE_14, normalizeHex } from '../palette';
 
-/** 字体值(打包族枚举 / 'auto' / 'embed:<id>');打包族下拉已删,仅作类型 + fallback */
+/** 字体值(打包族枚举 / 'auto' / 'sysname:<family>');打包族下拉已删,仅作类型 + fallback */
 type FontFamily = NonNullable<NodeSnapshot['text_font']>;
 
 const DEFAULT_SIZE = 16; // §5.4b:新建文字节点默认 16(对齐 note 正文)
@@ -109,9 +109,10 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
       </div>
 
       {/* 字体:内切字体列表(第一项「默认」+ 本机字体,可搜索)。
-          对用户透明 —— 不暴露"系统字体"概念,选了就用(底层按需嵌入)。
+          对用户透明 —— 不暴露"系统字体"概念,选了就用(L5-G7b 记名:只记 family 名,
+          不嵌入字体本体;本机按名渲染,对方没装回退打包字体不乱码)。
           打包字体仍作底层 fallback 隐式存在(text_font 缺省=自动选字 + CJK 缺字回退)。 */}
-      {ctx.listSystemFonts && ctx.embedSystemFont && <FontList ctx={ctx} curFont={curFont} />}
+      {ctx.listSystemFonts && <FontList ctx={ctx} curFont={curFont} />}
 
       {/* 字号(原 Type section 合并入) */}
       <div className="krig-node-toolbar__row">
@@ -143,15 +144,16 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
 
 /** license 提示(设计 §6;降级为「字体」标题旁 ⓘ tooltip,不占视觉、保提示义务) */
 const LICENSE_HINT =
-  '选用本机字体会随画板内容一起保存和分发。系统预装的商业字体(如苹方、微软雅黑等)' +
-  '可能限制再分发,导出 / 分享前请确认你拥有分发权利。';
+  '选用本机字体后,导出 PNG/SVG 会把该字体轮廓写进产物分发。系统预装的商业字体' +
+  '(如苹方、微软雅黑等)可能限制再分发,导出 / 分享前请确认你拥有分发权利。';
 
 /**
- * 字体列表(L5-G7.4 内切版):标题 + 搜索 + 列表,直接铺进 Aa 面板,与颜色 / 对齐同级。
+ * 字体列表(L5-G7b 记名版):标题 + 搜索 + 列表,直接铺进 Aa 面板,与颜色 / 对齐同级。
  *
  * 对用户透明 —— 不暴露"系统字体"概念,就是一个「字体」列表:
  * - 第一项「默认」= text_font:'auto'(回到自动选字)
- * - 其余 = 本机字体名;点击即用(底层 embedSystemFont 按需嵌入,无感)
+ * - 其余 = 本机字体名;点击即用(L5-G7b:直接记 text_font='sysname:<family>',**不嵌入**;
+ *   本机按名渲染,对方没装回退打包字体不乱码)
  * - 当前选中项打勾高亮
  * - 首次挂载懒加载(扫描 ~0.5s);可搜索
  */
@@ -159,7 +161,6 @@ function FontList({ ctx, curFont }: { ctx: SectionContext; curFont: FontFamily }
   const [loading, setLoading] = useState(true);
   const [fonts, setFonts] = useState<SystemFontInfo[] | null>(null);
   const [query, setQuery] = useState('');
-  const [embedding, setEmbedding] = useState<string | null>(null);
   const loadedRef = useRef(false);
 
   // 首次挂载懒加载本机字体
@@ -189,19 +190,14 @@ function FontList({ ctx, curFont }: { ctx: SectionContext; curFont: FontFamily }
     return arr.slice(0, 300); // 上限防极端长列表卡 DOM
   }, [fonts, query]);
 
-  const isDefault = !curFont.startsWith('embed:');
+  const isDefault = !curFont.startsWith('sysname:');
+  const curFamily = isDefault ? null : curFont.slice('sysname:'.length);
 
   const pickDefault = (): void => ctx.patchInstance({ text_font: 'auto' });
 
-  const onPick = async (font: SystemFontInfo): Promise<void> => {
-    if (!ctx.embedSystemFont || embedding) return;
-    setEmbedding(font.family);
-    try {
-      const res = await ctx.embedSystemFont(font);
-      if (res) ctx.patchInstance({ text_font: `embed:${res.fontId}` });
-    } finally {
-      setEmbedding(null);
-    }
+  // L5-G7b 记名:选字体 = 直接记 family 名,**无嵌入步骤、无异步**(本机按名渲染)。
+  const onPick = (font: SystemFontInfo): void => {
+    ctx.patchInstance({ text_font: `sysname:${font.family}` });
   };
 
   return (
@@ -242,21 +238,23 @@ function FontList({ ctx, curFont }: { ctx: SectionContext; curFont: FontFamily }
           <li className="krig-node-toolbar__fontlist-hint">加载字体…</li>
         )}
         {!loading &&
-          families.map((f) => (
-            <li key={`${f.family}@${f.path}#${f.fontIndex}`}>
-              <button
-                type="button"
-                className="krig-node-toolbar__fontlist-item"
-                disabled={embedding !== null}
-                onClick={() => void onPick(f)}
-              >
-                <span className="krig-node-toolbar__fontlist-name">{f.family}</span>
-                {embedding === f.family && (
-                  <span className="krig-node-toolbar__fontlist-spin">…</span>
-                )}
-              </button>
-            </li>
-          ))}
+          families.map((f) => {
+            const active = curFamily === f.family;
+            return (
+              <li key={`${f.family}@${f.path}#${f.fontIndex}`}>
+                <button
+                  type="button"
+                  className={
+                    'krig-node-toolbar__fontlist-item' + (active ? ' is-active' : '')
+                  }
+                  onClick={() => onPick(f)}
+                >
+                  <span className="krig-node-toolbar__fontlist-name">{f.family}</span>
+                  {active && <span className="krig-node-toolbar__fontlist-check">✓</span>}
+                </button>
+              </li>
+            );
+          })}
       </ul>
     </div>
   );

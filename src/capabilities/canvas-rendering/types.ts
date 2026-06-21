@@ -128,9 +128,10 @@ export interface Instance {
    * 透传到 atomsToSvg fontFamily(CJK 字符仍强制中文字体).
    * - undefined / 'auto':自动选字(维持现状)
    * - 'sans' | 'serif' | 'mono' | 'handwriting':按打包字体族覆盖(§5.4)
-   * - 'embed:<fontId>':用户嵌入的系统字体(L5-G7,可移植;CJK 缺字回退打包字体)
+   * - 'sysname:<family>':用户系统字体**记名**(L5-G7b,不嵌入;本机按名读 buffer 渲染,
+   *   对方没装 / 缺字回退打包字体,不乱码;唯导出 PNG/SVG 时本机 outline 进产物)
    */
-  text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `embed:${string}`;
+  text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `sysname:${string}`;
 }
 
 // ─────────────────────────────────────────────────────────
