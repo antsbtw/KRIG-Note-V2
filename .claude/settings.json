@@ -38,7 +38,9 @@
       "Bash(echo \"lint exit on MAIN: $?\")",
       "Bash(node -e \"console.log\\(Object.keys\\(require\\('./package.json'\\).scripts\\).filter\\(s=>/build|package|make/.test\\(s\\)\\)\\)\")",
       "Bash(sed -n '160,190p' src/platform/main/fonts/font-store-impl.ts)",
-      "Bash(sed -n '1,40p' tests/lib/embed-font-export-invariant.test.ts)"
+      "Bash(sed -n '1,40p' tests/lib/embed-font-export-invariant.test.ts)",
+      "Bash(grep -rn \"'embed:\\\\|\\\\`embed:\\\\|embed:\\\\${\" src/ tests/ --include=\"*.ts\" --include=\"*.tsx\")",
+      "Bash(git commit *)"
     ]
   }
 }
