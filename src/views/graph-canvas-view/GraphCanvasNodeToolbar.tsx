@@ -32,18 +32,12 @@ import type {
 } from '@capabilities/node-toolbar';
 import type {
   fontListSystem as FontListSystemFn,
-  fontProbeSize as FontProbeSizeFn,
   fontEmbed as FontEmbedFn,
 } from '@capabilities/font-storage';
-import { showFontEmbedConfirm } from './font-embed-confirm-popup';
-
-/** 8MB 体积守卫阈值(设计 §10 拍板);超阈值才弹"较大"警示 */
-const FONT_EMBED_WARN_BYTES = 8 * 1024 * 1024;
 
 /** font-storage capability api 形态(requireCapabilityApi 间接拿,W5) */
 interface FontStorageApi {
   fontListSystem: typeof FontListSystemFn;
-  fontProbeSize: typeof FontProbeSizeFn;
   fontEmbed: typeof FontEmbedFn;
 }
 
@@ -188,7 +182,8 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
     [singleId, hostRef, textEditing, buildSnapshot, onChanged],
   );
 
-  // ── L5-G7:字体列表 + 嵌入。用户拍板「选了就用,别每次弹窗」→ 只在体积超 8MB 才弹守卫确认 ──
+  // ── L5-G7:字体列表 + 嵌入。用户拍板「选了就用,零弹窗」→ 直接嵌入,不预估不确认。
+  //    防病态超大文件的硬上限在主进程 fontStore.embed 内(静默拒 + warn,正常字体不触发)。──
   const handleListSystemFonts = useCallback(
     (): Promise<SystemFontInfo[]> => fontStorage.fontListSystem(),
     [fontStorage],
@@ -196,29 +191,13 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
 
   const handleEmbedSystemFont = useCallback(
     async (font: SystemFontInfo): Promise<SystemFontEmbedResult | null> => {
-      // 1) 预估体积(.ttc 抽出子字体的真实大小)→ 决定是否超 8MB 阈值
-      const probe = await fontStorage.fontProbeSize(font.path, font.fontIndex);
-      if (!probe.success) {
-        // fail loud:该字体不可嵌入(格式不支持 / 抽取失败)
-        console.warn('[font-embed] 该字体不可嵌入(probe 失败)', font.family);
-        return null;
-      }
-      // 2) 体积守卫:仅超 8MB 才弹确认(普通字体直接用,无弹窗);license 降级为面板 ⓘ。
-      //    用户取消则不嵌。
-      if (probe.sizeKb * 1024 > FONT_EMBED_WARN_BYTES) {
-        const confirmed = await showFontEmbedConfirm({
-          family: font.family,
-          sizeKb: probe.sizeKb,
-          overThreshold: true,
-        });
-        if (!confirmed) return null;
-      }
-      // 3) 真嵌入 → 落盘 font:// → 返回 fontId
+      // 直接嵌入 → 落盘 font:// → 返回 fontId(无弹窗、无确认)
       const res = await fontStorage.fontEmbed(font.path, font.fontIndex, {
         family: font.family,
         style: font.style,
       });
       if (!res.success || !res.fontId) {
+        // fail loud:不可嵌入(格式不支持 / 抽取失败 / 超硬上限)
         console.warn('[font-embed] 嵌入失败', font.family, res.error);
         return null;
       }

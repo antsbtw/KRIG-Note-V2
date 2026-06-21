@@ -84,7 +84,6 @@ export const IPC_CHANNELS = {
 
   // L5-G7:系统字体导入 + 嵌入画板内容(可移植)
   FONT_LIST_SYSTEM: 'font.list-system',   // renderer → main invoke → SystemFontEntry[](扫本机系统字体)
-  FONT_PROBE_SIZE: 'font.probe-size',     // renderer → main invoke({ path, fontIndex }) → { sizeKb }(嵌入前预估,8MB 守卫用)
   FONT_EMBED: 'font.embed',               // renderer → main invoke({ path, fontIndex }) → 嵌入 → { fontId, fontUrl, ... }
 
   // L5-B3.17:yt-dlp 能力(checkStatus / install / download / getInfo / saveSubtitle)

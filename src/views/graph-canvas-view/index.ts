@@ -42,7 +42,6 @@ import {
   registerNavSide,
   registerFolderTreeContextMenu,
 } from './nav-side-content';
-import { registerFontEmbedConfirmPopup } from './font-embed-confirm-popup';
 
 const VIEW = 'graph-canvas-view';
 
@@ -63,7 +62,6 @@ registerView({
 registerGraphCanvasCommands();
 registerNavSide();
 registerFolderTreeContextMenu();
-registerFontEmbedConfirmPopup(); // L5-G7.4:嵌入系统字体确认弹窗(8MB 守卫 + license)
 
 // canvas-text-node popup 编辑器(viewId='graph-canvas-view')自注册 PM 通用菜单
 // 见 docs/refactor/stages/04-lift-pm-editing-to-capability/c8-d-c-design.md(方案 A)

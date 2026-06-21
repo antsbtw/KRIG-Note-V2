@@ -97,11 +97,6 @@ declare global {
         error?: string;
         fonts: SystemFontEntryDTO[];
       }>;
-      /** L5-G7.4:嵌入前预估体积(8MB 守卫用,不落盘) */
-      fontProbeSize(
-        sourcePath: string,
-        fontIndex: number,
-      ): Promise<{ success: boolean; error?: string; sizeKb: number }>;
       /** L5-G7.2:嵌入选中系统字体 → font:// + fontId(text_font 写 'embed:<fontId>') */
       fontEmbed(
         sourcePath: string,

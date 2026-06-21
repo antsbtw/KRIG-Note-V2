@@ -10,7 +10,7 @@
 
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
-import { scanSystemFonts, readFontBinary } from './system-font-scan';
+import { scanSystemFonts } from './system-font-scan';
 import { fontStore } from './font-store-impl';
 
 export function registerFontHandlers(): void {
@@ -24,25 +24,6 @@ export function registerFontHandlers(): void {
       return { success: false, error: String(err), fonts: [] };
     }
   });
-
-  // G7.4:嵌入前预估体积(.ttc 抽出子字体的实际大小)→ 8MB 守卫弹窗用,不落盘
-  ipcMain.handle(
-    IPC_CHANNELS.FONT_PROBE_SIZE,
-    async (_event, sourcePath: unknown, fontIndex: unknown) => {
-      if (typeof sourcePath !== 'string' || !sourcePath) {
-        return { success: false, error: 'invalid sourcePath', sizeKb: 0 };
-      }
-      const idx = typeof fontIndex === 'number' && Number.isInteger(fontIndex) ? fontIndex : 0;
-      try {
-        const { buffer } = readFontBinary(sourcePath, idx);
-        return { success: true, sizeKb: Math.round(buffer.length / 1024) };
-      } catch (err) {
-        // fail loud:不支持的格式 / 抽取失败 —— UI 据此提示该字体不可嵌入
-        console.warn(`[font] FONT_PROBE_SIZE 失败 path=${sourcePath} idx=${idx}:`, err);
-        return { success: false, error: String(err), sizeKb: 0 };
-      }
-    },
-  );
 
   // G7.2:嵌入选中系统字体(.ttc 抽子字体)→ 落盘 font:// → 返回 fontId/URL/sizeKb
   ipcMain.handle(
