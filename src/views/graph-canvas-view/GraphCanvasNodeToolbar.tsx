@@ -188,7 +188,7 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
     [singleId, hostRef, textEditing, buildSnapshot, onChanged],
   );
 
-  // ── L5-G7:系统字体列表 + 嵌入(带 8MB 守卫 + license 确认弹窗)──
+  // ── L5-G7:字体列表 + 嵌入。用户拍板「选了就用,别每次弹窗」→ 只在体积超 8MB 才弹守卫确认 ──
   const handleListSystemFonts = useCallback(
     (): Promise<SystemFontInfo[]> => fontStorage.fontListSystem(),
     [fontStorage],
@@ -203,13 +203,16 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
         console.warn('[font-embed] 该字体不可嵌入(probe 失败)', font.family);
         return null;
       }
-      // 2) 确认弹窗(8MB 守卫 + license 提示);用户取消则不嵌
-      const confirmed = await showFontEmbedConfirm({
-        family: font.family,
-        sizeKb: probe.sizeKb,
-        overThreshold: probe.sizeKb * 1024 > FONT_EMBED_WARN_BYTES,
-      });
-      if (!confirmed) return null;
+      // 2) 体积守卫:仅超 8MB 才弹确认(普通字体直接用,无弹窗);license 降级为面板 ⓘ。
+      //    用户取消则不嵌。
+      if (probe.sizeKb * 1024 > FONT_EMBED_WARN_BYTES) {
+        const confirmed = await showFontEmbedConfirm({
+          family: font.family,
+          sizeKb: probe.sizeKb,
+          overThreshold: true,
+        });
+        if (!confirmed) return null;
+      }
       // 3) 真嵌入 → 落盘 font:// → 返回 fontId
       const res = await fontStorage.fontEmbed(font.path, font.fontIndex, {
         family: font.family,

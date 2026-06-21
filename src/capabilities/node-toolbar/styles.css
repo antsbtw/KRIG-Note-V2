@@ -233,33 +233,22 @@
   cursor: pointer;
 }
 
-/* ── 系统字体分组(L5-G7.4)── */
-.krig-node-toolbar__sysfont {
-  margin-top: 8px;
-  border-top: 1px solid var(--krig-overlay-border, #4a4a4a);
-  padding-top: 8px;
+/* ── 字体列表(L5-G7.4 内切版,与颜色/对齐同级)── */
+.krig-node-toolbar__fontlist {
+  margin-top: 4px;
 }
-.krig-node-toolbar__sysfont-toggle {
+.krig-node-toolbar__fontlist-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  background: none;
-  border: none;
-  color: var(--krig-text-primary, #ddd);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 0;
+  margin-bottom: 6px;
 }
-.krig-node-toolbar__sysfont-info {
-  margin-left: auto;
-  opacity: 0.6;
+.krig-node-toolbar__fontlist-info {
+  opacity: 0.5;
   cursor: help;
+  font-size: 11px;
 }
-.krig-node-toolbar__sysfont-body {
-  margin-top: 6px;
-}
-.krig-node-toolbar__sysfont-search {
+.krig-node-toolbar__fontlist-search {
   width: 100%;
   height: 26px;
   box-sizing: border-box;
@@ -270,19 +259,14 @@
   font-size: 12px;
   padding: 0 6px;
 }
-.krig-node-toolbar__sysfont-hint {
-  font-size: 11px;
-  opacity: 0.6;
-  padding: 8px 0;
-}
-.krig-node-toolbar__sysfont-list {
+.krig-node-toolbar__fontlist-items {
   list-style: none;
   margin: 6px 0 0;
   padding: 0;
   max-height: 200px;
   overflow-y: auto;
 }
-.krig-node-toolbar__sysfont-item {
+.krig-node-toolbar__fontlist-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -296,50 +280,35 @@
   border-radius: 5px;
   cursor: pointer;
 }
-.krig-node-toolbar__sysfont-item:hover:not(:disabled) {
+.krig-node-toolbar__fontlist-item:hover:not(:disabled) {
   background: var(--krig-hover-bg, rgba(255, 255, 255, 0.06));
 }
-.krig-node-toolbar__sysfont-item:disabled {
+.krig-node-toolbar__fontlist-item.is-active {
+  background: var(--krig-accent-bg, rgba(138, 180, 248, 0.18));
+}
+.krig-node-toolbar__fontlist-item:disabled {
   opacity: 0.5;
   cursor: default;
 }
-.krig-node-toolbar__sysfont-name {
+.krig-node-toolbar__fontlist-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.krig-node-toolbar__sysfont-spin {
+.krig-node-toolbar__fontlist-check {
+  flex-shrink: 0;
+  margin-left: 8px;
+  opacity: 0.8;
+}
+.krig-node-toolbar__fontlist-spin {
   font-size: 10px;
   opacity: 0.7;
   flex-shrink: 0;
   margin-left: 8px;
 }
-.krig-node-toolbar__sysfont-license {
-  font-size: 10px;
-  line-height: 1.4;
-  opacity: 0.5;
-  margin-top: 8px;
-  padding: 6px;
-  border-radius: 5px;
-  background: var(--krig-warning-bg, rgba(232, 168, 32, 0.08));
-}
-
-/* 字体当前状态行(L5-G7:删打包下拉后,显当前字体 + 恢复默认) */
-.krig-node-toolbar__fontcur {
-  flex: 1;
-  font-size: 12px;
-  color: var(--krig-text-primary, #ddd);
-  opacity: 0.85;
-}
-.krig-node-toolbar__fontreset {
-  background: none;
-  border: 1px solid var(--krig-overlay-border, #555);
-  border-radius: 5px;
-  color: var(--krig-text-primary, #ddd);
+.krig-node-toolbar__fontlist-hint {
   font-size: 11px;
-  padding: 3px 8px;
-  cursor: pointer;
-}
-.krig-node-toolbar__fontreset:hover {
-  background: var(--krig-hover-bg, rgba(255, 255, 255, 0.06));
+  opacity: 0.6;
+  padding: 6px;
+  list-style: none;
 }
