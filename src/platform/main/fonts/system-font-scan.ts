@@ -178,11 +178,13 @@ export function scanSystemFonts(): SystemFontEntry[] {
  * readFontBinary 抽出独立 sfnt buffer。
  *
  * - 扫描结果模块级缓存(首调扫一次,~0.5s;后续命中缓存),避免每字形探测重扫。
- * - 同 family 多 style:优先 Regular(渲染默认字重;bold/italic 暂不分,沿用记名方案
- *   "只记 family"的粒度,字重靠 opentype 合成 / 后续扩)。
+ * - 同 family 多 style:`bold` 时优先选含 Bold(非 Oblique/Italic)的 style 文件;
+ *   否则优先 Regular。该 family 无对应字重文件时回退 Regular / 第一条(不伪粗,有真粗笔形才粗)。
  * - 查不到(对方没装该字体)→ 返回 null(渲染层据此回退**打包字体**,红线:不乱码)。
  * - 读取 / 抽取失败 → fail loud(console.warn)+ 返回 null。
  *
+ * @param family 字体 family 名
+ * @param bold   是否要粗体变体(L5-G7b bold 修复:系统字体 bold mark 此前丢失)
  * @returns ArrayBuffer(可直接 transfer 给渲染进程喂 opentype.parse)或 null(没装 / 读失败)
  */
 let _scanCache: SystemFontEntry[] | null = null;
@@ -192,7 +194,7 @@ function cachedScan(): SystemFontEntry[] {
   return _scanCache;
 }
 
-export function readFontByName(family: string): ArrayBuffer | null {
+export function readFontByName(family: string, bold = false): ArrayBuffer | null {
   if (!family) return null;
   const fonts = cachedScan();
   const matches = fonts.filter((f) => f.family === family);
@@ -200,8 +202,11 @@ export function readFontByName(family: string): ArrayBuffer | null {
     // 对方没装该字体 —— 正常路径,渲染层回退打包字体(非错误,不 warn)
     return null;
   }
-  // 优先 Regular 字重;无 Regular 取第一条
-  const pick = matches.find((f) => /regular/i.test(f.style)) ?? matches[0];
+  // bold:优先含 "bold" 且非斜体的 style 文件;无则回退 Regular / 第一条(不伪粗)
+  const regular = matches.find((f) => /regular/i.test(f.style)) ?? matches[0];
+  const pick = bold
+    ? (matches.find((f) => /bold/i.test(f.style) && !/italic|oblique/i.test(f.style)) ?? regular)
+    : regular;
   try {
     const { buffer } = readFontBinary(pick.path, pick.fontIndex);
     // 拷成独立 ArrayBuffer(避免把整个 Node Buffer 底层池 / SharedArrayBuffer 透传)

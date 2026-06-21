@@ -28,8 +28,8 @@ export function registerFontHandlers(): void {
   // L5-G7b:按 family 名读字体 buffer(记名方案核心,替代 font:// fetch)。
   // 渲染进程 loadFont 识别 sysname: 前缀 → 走此 IPC 拿 ArrayBuffer 喂 opentype。
   // 没装该字体 → 返回 null,渲染层回退打包字体(红线:不乱码)。
-  ipcMain.handle(IPC_CHANNELS.FONT_READ_BY_NAME, async (_event, family: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.FONT_READ_BY_NAME, async (_event, family: unknown, bold: unknown) => {
     if (typeof family !== 'string' || !family) return null;
-    return readFontByName(family);
+    return readFontByName(family, bold === true);
   });
 }

@@ -76,8 +76,9 @@ describe('L5-G7b:导出 SVG 纯 path 不变量(墙 3 可移植)', () => {
     const { svg } = await textToPath('Embed Aa', 16, 0, 16, '#fff', {
       fontFamily: 'sysname:My Font',
     });
-    // 按 family 名问主进程要 buffer(URL 推导/协议都没了,纯 IPC by-name)
-    expect(readByName).toHaveBeenCalledWith('My Font');
+    // 按 family 名问主进程要 buffer(URL 推导/协议都没了,纯 IPC by-name)。
+    // L5-G7b bold 修复:第二参 bold,非加粗文本应为 false。
+    expect(readByName).toHaveBeenCalledWith('My Font', false);
     // 输出仍纯 path,无字体引用泄漏 → 导出/换机自包含
     expect(svg).toContain('<path');
     expect(svg).not.toContain('font://');
@@ -87,5 +88,15 @@ describe('L5-G7b:导出 SVG 纯 path 不变量(墙 3 可移植)', () => {
   it('isSysnameKey:sysname key 与打包 key 区分(loadFont 据此分流 IPC vs FONT_URLS)', () => {
     expect(isSysnameKey('sysname:PingFang SC')).toBe(true);
     expect(isSysnameKey('inter')).toBe(false);
+  });
+
+  it('bold + 系统字体:fontReadByName 带 bold=true(L5-G7b bold 修复端到端)', async () => {
+    const readByName = vi.fn(async () => interBuf);
+    (globalThis as unknown as { window: { electronAPI: { fontReadByName: unknown } } }).window = {
+      electronAPI: { fontReadByName: readByName },
+    };
+    await textToPath('Bold Aa', 16, 0, 16, '#fff', { fontFamily: 'sysname:My Font', bold: true });
+    // 修复前:bold 被丢,只传 family Regular → 加粗不生效。修复后:带 bold=true 取 Bold 文件。
+    expect(readByName).toHaveBeenCalledWith('My Font', true);
   });
 });

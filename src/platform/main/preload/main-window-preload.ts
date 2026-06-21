@@ -124,9 +124,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.FONT_LIST_SYSTEM);
   },
 
-  /** L5-G7b:按 family 名读字体二进制(记名方案;没装该字体 → null,渲染层回退打包) */
-  async fontReadByName(family: string): Promise<ArrayBuffer | null> {
-    return ipcRenderer.invoke(IPC_CHANNELS.FONT_READ_BY_NAME, family);
+  /** L5-G7b:按 family 名读字体二进制(记名方案;没装该字体 → null,渲染层回退打包)。bold=要粗体变体 */
+  async fontReadByName(family: string, bold?: boolean): Promise<ArrayBuffer | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FONT_READ_BY_NAME, family, bold === true);
   },
 
   /** L5-B3.14:在 Finder 高亮显示文件 */

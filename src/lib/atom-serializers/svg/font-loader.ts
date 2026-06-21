@@ -11,15 +11,24 @@ import { FONT_URLS, type FontKey } from './fonts';
 export type FontCacheKey = FontKey | `sysname:${string}`;
 
 const SYSNAME_PREFIX = 'sysname:';
+const SYSNAME_BOLD_PREFIX = 'sysname:bold:';
 
-/** key 是否系统字体(记名) */
+/** key 是否系统字体(记名;含 bold 变体 `sysname:bold:<family>`) */
 export function isSysnameKey(key: string): key is `sysname:${string}` {
   return key.startsWith(SYSNAME_PREFIX);
 }
 
-/** `sysname:<family>` → family 名 */
-function familyOf(key: `sysname:${string}`): string {
-  return key.slice(SYSNAME_PREFIX.length);
+/** sysname key → { family, bold }(`sysname:bold:<family>` = 粗体变体) */
+function parseSysnameKey(key: `sysname:${string}`): { family: string; bold: boolean } {
+  if (key.startsWith(SYSNAME_BOLD_PREFIX)) {
+    return { family: key.slice(SYSNAME_BOLD_PREFIX.length), bold: true };
+  }
+  return { family: key.slice(SYSNAME_PREFIX.length), bold: false };
+}
+
+/** family + bold → sysname 缓存键(bold 变体独立键,缓存不撞)。供 pickFontForChar 用 */
+function sysnameKeyOf(family: string, bold: boolean): `sysname:${string}` {
+  return bold ? `${SYSNAME_BOLD_PREFIX}${family}` : `${SYSNAME_PREFIX}${family}`;
 }
 
 const cache = new Map<FontCacheKey, Promise<opentype.Font>>();
@@ -47,11 +56,12 @@ export function loadFont(key: FontCacheKey): Promise<opentype.Font> {
     const t0 = performance.now();
     let buffer: ArrayBuffer;
     if (isSysnameKey(key)) {
-      const family = familyOf(key);
-      const ab = (await window.electronAPI?.fontReadByName?.(family)) ?? null;
+      const { family, bold } = parseSysnameKey(key);
+      // bold 变体:IPC 带 bold,主进程优先取该 family 的 Bold style 文件(无则回退 Regular)
+      const ab = (await window.electronAPI?.fontReadByName?.(family, bold)) ?? null;
       if (!ab) {
         // 对方没装该字体 / 读失败 → fail loud + throw(splitByFont 回退打包字体)
-        throw new Error(`[font-loader] 系统字体不可用,回退打包: ${family}`);
+        throw new Error(`[font-loader] 系统字体不可用,回退打包: ${family}${bold ? ' (bold)' : ''}`);
       }
       buffer = ab;
     } else {
@@ -190,9 +200,13 @@ export function pickFontForChar(ch: string, marks?: MarkSet): FontCacheKey {
   // Type section 字体族覆盖优先(code mark 仍强制等宽,语义不被字体族盖)
   const family = marks?.fontFamily;
   if (family && family !== 'auto' && !marks?.code) {
-    // L5-G7b:系统字体(记名)直接用其 key;对方没装 / CJK 缺字回退由 text-to-path
-    // 在加载后探测处理(G7-8 + 记名回退)。
-    if (isSysnameKey(family)) return family;
+    // L5-G7b:系统字体(记名)。bold 修复:按 marks.bold 切粗体变体 key
+    // (`sysname:bold:<family>` → IPC 取该 family 的 Bold style 文件)。
+    // 对方没装 / 无 Bold 文件 / CJK 缺字 → 回退由 loadFont throw + text-to-path 兜底。
+    if (isSysnameKey(family)) {
+      const { family: fam } = parseSysnameKey(family);
+      return sysnameKeyOf(fam, marks?.bold === true);
+    }
     return resolveFamilyFont(family, cjk, marks);
   }
 

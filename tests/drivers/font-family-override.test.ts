@@ -55,9 +55,22 @@ describe('pickFontForChar fontFamily 覆盖(G5.6)', () => {
 });
 
 describe('L5-G7b:系统字体记名 sysname: 前缀', () => {
-  it('sysname: 字体族 → 直接返回该 sysname key(西文 + 中文都先用系统字体)', () => {
+  it('sysname: 字体族 → 返回该 sysname key(西文 + 中文都先用系统字体)', () => {
     expect(pickFontForChar('a', { fontFamily: 'sysname:PingFang SC' })).toBe('sysname:PingFang SC');
     expect(pickFontForChar('中', { fontFamily: 'sysname:PingFang SC' })).toBe('sysname:PingFang SC');
+  });
+
+  it('bold + sysname: → 切粗体变体 key sysname:bold:<family>(L5-G7b bold 修复)', () => {
+    // 修复前 bug:sysname 分支裸返回 family,无视 marks.bold → 编辑态点 B 不生效。
+    // 修复后:bold 切到独立 key,loadFont 据此 IPC 取该 family 的 Bold style 文件。
+    expect(pickFontForChar('a', { fontFamily: 'sysname:PingFang SC', bold: true }))
+      .toBe('sysname:bold:PingFang SC');
+    expect(pickFontForChar('中', { fontFamily: 'sysname:PingFang SC', bold: true }))
+      .toBe('sysname:bold:PingFang SC');
+  });
+
+  it('bold 变体 key 仍是 sysname(isSysnameKey 真)', () => {
+    expect(isSysnameKey('sysname:bold:PingFang SC')).toBe(true);
   });
 
   it('code mark 仍优先(系统字体不盖 code 语义)', () => {
