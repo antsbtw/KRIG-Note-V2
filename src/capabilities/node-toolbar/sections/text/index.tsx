@@ -16,16 +16,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NodeSnapshot, SectionContext, SectionDef, SystemFontInfo } from '../../types';
 import { PALETTE_14, normalizeHex } from '../palette';
 
+/** 字体值(打包族枚举 / 'auto' / 'embed:<id>');打包族下拉已删,仅作类型 + fallback */
 type FontFamily = NonNullable<NodeSnapshot['text_font']>;
-
-/** 字体族下拉(L5-G6 全字体已打包,中英文按字符自动选对应字体) */
-const FONT_OPTIONS: ReadonlyArray<{ value: FontFamily; label: string }> = [
-  { value: 'auto', label: '默认(自动)' },
-  { value: 'sans', label: '黑体 / Sans(思源黑 · Inter)' },
-  { value: 'serif', label: '宋体 / Serif(思源宋 · Source Serif)' },
-  { value: 'handwriting', label: '手写 / 楷(文楷 · Caveat)' },
-  { value: 'mono', label: '等宽 / Mono(JetBrains Mono)' },
-];
 
 const DEFAULT_SIZE = 16; // §5.4b:新建文字节点默认 16(对齐 note 正文)
 const MIN_SIZE = 6;
@@ -116,29 +108,27 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
         </button>
       </div>
 
-      {/* 字体族:打包字体下拉 + 系统字体(L5-G7,可搜索 + 嵌入) */}
+      {/* 字体:当前状态行(默认自动 / 已嵌入字体名 + 恢复默认)。
+          打包字体下拉已删(用户拍板:只留系统字体);打包字体仍作底层 fallback 隐式存在
+          (text_font 缺省=自动选字 + CJK 缺字回退,见 font-loader resolveFamilyFont)。 */}
       <div className="krig-node-toolbar__row">
         <span className="krig-node-toolbar__label">字体</span>
-        <select
-          className="krig-node-toolbar__select"
-          value={curFont.startsWith('embed:') ? '__embedded__' : curFont}
-          onChange={(e) => {
-            if (e.target.value === '__embedded__') return; // 当前嵌入字体占位项,不动作
-            ctx.patchInstance({ text_font: e.target.value as FontFamily });
-          }}
-        >
-          {FONT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-          {curFont.startsWith('embed:') && (
-            <option value="__embedded__">已嵌入系统字体</option>
-          )}
-        </select>
+        <span className="krig-node-toolbar__fontcur">
+          {curFont.startsWith('embed:') ? '已嵌入系统字体' : '默认(自动)'}
+        </span>
+        {curFont.startsWith('embed:') && (
+          <button
+            type="button"
+            className="krig-node-toolbar__fontreset"
+            title="恢复默认字体"
+            onClick={() => ctx.patchInstance({ text_font: 'auto' })}
+          >
+            恢复默认
+          </button>
+        )}
       </div>
 
-      {/* 系统字体导入(view 注入 listSystemFonts 才显) */}
+      {/* 系统字体选择(view 注入 listSystemFonts 才显);默认展开,作为唯一字体选择入口 */}
       {ctx.listSystemFonts && ctx.embedSystemFont && <SystemFontGroup ctx={ctx} />}
 
       {/* 字号(原 Type section 合并入) */}

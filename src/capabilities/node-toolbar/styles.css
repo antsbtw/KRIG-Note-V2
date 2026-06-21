@@ -323,3 +323,23 @@
   border-radius: 5px;
   background: var(--krig-warning-bg, rgba(232, 168, 32, 0.08));
 }
+
+/* 字体当前状态行(L5-G7:删打包下拉后,显当前字体 + 恢复默认) */
+.krig-node-toolbar__fontcur {
+  flex: 1;
+  font-size: 12px;
+  color: var(--krig-text-primary, #ddd);
+  opacity: 0.85;
+}
+.krig-node-toolbar__fontreset {
+  background: none;
+  border: 1px solid var(--krig-overlay-border, #555);
+  border-radius: 5px;
+  color: var(--krig-text-primary, #ddd);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.krig-node-toolbar__fontreset:hover {
+  background: var(--krig-hover-bg, rgba(255, 255, 255, 0.06));
+}
