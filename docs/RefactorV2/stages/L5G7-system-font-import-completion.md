@@ -1,8 +1,11 @@
-# L5-G7 系统字体导入 + 嵌入内容(可移植)完成报告
+# L5-G7 系统字体导入完成报告（含 L5-G7b 策略转向:嵌入 → 记名）
 
-> 阶段:L5-G7 — Graph 画板字体来源从「7 套打包」扩到「用户系统已装字体」,选了就**嵌进画板内容**(可移植)
+> 阶段:L5-G7 — Graph 画板字体来源从「7 套打包」扩到「用户系统已装字体」。
+> **⚠️ 策略转向(L5-G7b,2026-06-21,见 §8)**:原方案「选了就嵌进画板内容(可移植)」已被用户改为
+>   「**只记字体名不嵌入** + 唯导出时 outline 进产物」。§1~§7 描述原嵌入方案(部分被 §8 取代),
+>   **现行终态以 §8 为准**。
 > 分支:`feature/L5G7-system-font-import`(**不合 main**)
-> 起草日期:2026-06-20 · 末次更新:2026-06-21(用户三轮 UI 复盘后同步终态)
+> 起草日期:2026-06-20 · 末次更新:2026-06-21(L5-G7b 记名转向,新增 §8)
 > 设计:[./L5G7-system-font-import-design.md](./L5G7-system-font-import-design.md) v0.2(4 拍板点全决 §10 + G7.0 前置 §11)
 > 执行指令:[../../tasks/2026-06-20-L5G7-system-font-import-embed-prompt.md](../../tasks/2026-06-20-L5G7-system-font-import-embed-prompt.md)
 > G7.0 兼容性清单:[./L5G7-G7.0-opentype-compat-report.md](./L5G7-G7.0-opentype-compat-report.md)
@@ -169,3 +172,102 @@ Songti SC
 - 分支 `feature/L5G7-system-font-import`,**10 commit**,**不合 main**
 - 等总指挥验收 + 用户真机视觉确认(npm start → 画板文字节点 → Aa 面板「字体」→ 搜 / 选苹方 → **直接渲染(无弹窗)** → 中文是否统一 → 导出 PNG 换机字不乱)
 - **待总指挥拍 D4/D5**:license 弱化为 ⓘ tooltip + 8MB 守弹窗取消 —— 是否接受这两个对设计 §6/§10 的 UI 偏离(用户已拍,产品取舍)
+
+---
+
+## 8. L5-G7b 策略转向:嵌入 → 记名 + 唯导出时嵌入(2026-06-21)
+
+> 转向指令:[../../tasks/2026-06-21-L5G7b-record-name-not-embed-pivot-prompt.md](../../tasks/2026-06-21-L5G7b-record-name-not-embed-pivot-prompt.md)
+> 衔接:接在原 10 commit 后(**不 rebase 抹历史**),新增 3 个自包含绿 commit(G7b.1~G7b.3)。**仍不合 main**。
+
+### 8.0 为什么转向(用户拍板)
+
+L5-G7 原方案 = 选系统字体即把**字体二进制嵌进画板文档**(墙 3 可移植)。用户复盘后改策略:
+
+- **平时存画板:只记字体名,不嵌入本体** → 文档小、**无商业字体 license 风险**、不会乱码(对方没装就回退打包默认字体,打包字体字符全覆盖)。
+- **唯独导出 PNG/SVG 时:把用到的字体读出来 outline 进产物** → 导出绝对一致(几乎免费,见下)。
+- **取舍(用户已接受)**:放弃「换机/分享时系统字体一致」—— 对方没装该系统字体 → 回退打包默认字体,字能读、不乱码、但长相变 / 字长相变。
+
+### 8.1 关键技术现实(决定改动量极小)
+
+1. **本机渲染仍要读字体 outline**:WebGL 那道墙没变,即使「只记名」,渲染时仍要「按 family 名 → 找系统字体文件 → 读 buffer → opentype.getPath」。所以**系统字体扫描/读取能力全部保留**,只是结果**不落盘进文档**。
+2. **导出天然就一致**:`atomsToSvg`/`textToPath` 输出是 `<path d="..."/>` **纯矢量,字已 outline 进 path,产物零字体引用**。且跑在渲染进程(本机)。**所以「导出时嵌入」几乎免费**:只要导出在本机、按名读到字体,产物就自带字形(G7.5 纯 path 不变量单测,本段改语义后仍守)。
+
+### 8.2 改动盘点(保留 / 废 / 改 / 新增)
+
+**✅ 保留(原样不动)**:`system-font-scan` 扫描、`sfnt-name-reader` / `ttc-extract`(.ttc 抽子字体)、Aa 面板字体列表 UI、license ⓘ tooltip、零守卫弹窗(D4/D5 终态)、CJK 缺字回退打包(G7-8)、`atomsToSvg` 纯 path 导出收口。
+
+**❌ 废(嵌入专属,记名不需要)** — commit G7b.3 删净:
+| 废掉 | 文件 |
+|---|---|
+| 落盘 + SHA256 去重 + `font://` 协议 + 硬上限 | `font-store-impl.ts`(整文件删) |
+| `font://` scheme 注册 + per-ws session 补注册 | `platform/main/index.ts` |
+| `FONT_EMBED` IPC + handler + preload + d.ts | `font-handlers.ts` / preload / `electron-api.d.ts` / `channel-names.ts` |
+| CSP `connect-src font:` | `renderer/index.html` |
+| `fontEmbed` capability fn + `FontEmbedResult` | `capabilities/font-storage` |
+| `embedSystemFont` 回调 + `SystemFontEmbedResult` | `node-toolbar/types.ts` / `NodeToolbar.tsx` / view |
+
+> ⚠️ **红线遵守**:font-store 里「按 path/fontIndex 读字体 buffer」(`readFontBinary`)的能力**没删**,搬出来保留在 `system-font-scan.ts`(本机渲染 + 导出按名读都要)。
+
+**🔧 改** — commit G7b.2:
+| 改 | 落点 |
+|---|---|
+| `text_font` 编码 `embed:<fontId>` → `sysname:<family>` | `canvas-rendering/types.ts` + `node-toolbar/types.ts` + `font-loader.FontFamily` |
+| `loadFont` embed 分支(fetch `font://`)→ sysname 分支(IPC `fontReadByName(family)`);读不到 → throw → 回退打包 | `font-loader.ts` |
+| `pickFontForChar`/`isEmbedKey`/`pickPackagedFallbackForChar` → sysname 口径 | `font-loader.ts` |
+| `splitByFont` 嵌入缺字回退 → 系统字体**没装 / 缺字**回退打包(`sysnameHasGlyph`) | `text-to-path.ts` |
+| section 选字体:`embedSystemFont` 异步嵌入 → 直接 `patchInstance({text_font:'sysname:<family>'})`(无嵌入步骤、无异步) | `sections/text/index.tsx` |
+| 墙 3 测试改语义 | `embed-font-export-invariant.test.ts` / `font-family-override.test.ts` |
+
+**🆕 新增** — commit G7b.1:
+- `FONT_READ_BY_NAME` IPC + `readFontByName(family)`:family → 扫描查 path+fontIndex(模块级缓存)→ `readFontBinary` 抽独立 sfnt → ArrayBuffer。没装 → null(渲染层回退打包,红线:不乱码);读失败 fail loud + null。**替代原 `font://` fetch 这条链**。
+
+### 8.3 新 IPC 链(替代 font://)
+
+```
+存盘:text_font = 'sysname:PingFang SC'(只记名,文档不含字体二进制)
+本机渲染 / 导出:
+  loadFont('sysname:PingFang SC')
+   → window.electronAPI.fontReadByName('PingFang SC')   ← IPC(替代 fetch('font://'))
+   → 主进程 readFontByName:扫描查 path+fontIndex → readFontBinary 抽 sfnt → ArrayBuffer
+   → opentype.parse → getPath → <path>(纯轮廓,导出自带字形)
+  对方没装 → fontReadByName 返回 null → loadFont throw
+   → splitByFont 逐字符回退**打包字体**(字符全覆盖,不乱码 / 不豆腐块)
+```
+
+### 8.4 红线对照(转向指令 §3)
+
+| 红线 | 落点 |
+|---|---|
+| ① 回退落**打包字体**(不乱码是新卖点,不回退到豆腐块) | `splitByFont` 没装/缺字 → `pickPackagedFallbackForChar`;新增单测「对方没装 → 回退打包仍纯 path」 |
+| ② W5 边界(扫描/读取主进程,渲染经 IPC) | `readFontByName` 纯 main;渲染经 `FONT_READ_BY_NAME` |
+| ③ 不破打包字体 + G5/G6 | 打包路径零改;`font-family-override` 9 回归绿 |
+| ④ fail loud | `readFontByName` 读失败 warn + null;`loadFont` sysname 读不到 throw(不静默崩) |
+| ⑤ 每 commit 自包含绿 | G7b.1~3 各自 tsc 0 / eslint baseline / 单测绿 |
+
+### 8.5 质量门(转向后)
+
+- **tsc**:0 error。
+- **eslint**:仅 1 既有 baseline(`electron-api.d.ts` 的 `@capabilities/note/types`,本段未碰),新增 0。
+- **单测**:`vitest run` → 408 绿(font 相关 17 绿:含新「没装回退打包不乱码」);8 失败 = `bulk-delete-perf-verify.test.ts` 既有 SurrealDB 环境基线(clean main 同样红,与本段无关)。
+- 源码 grep:`font-store`/`fontStore`/`FONT_EMBED`/`fontEmbed`/`font://`/`embed:` 零残留。
+
+### 8.6 转向后验收(待总指挥逐条核 + 真机)
+
+- [ ] 选系统字体 → 本机渲染正确(按名读 buffer outline)
+- [ ] 存盘 text_font = `sysname:<family>`,**文档不含字体二进制**(对比嵌入方案显著变小)
+- [ ] **对方没装该字体(清缓存/换机模拟)→ 回退打包默认字体,不乱码不豆腐块**(新卖点核心)
+- [ ] 导出 PNG/SVG → 本机字体 outline 进产物,呈现正确
+- [ ] X 长图 / graph 截图无回归;CJK 缺字仍回退不丢字;打包字体 / G5/G6 无回归
+- [ ] tsc 0 / eslint baseline / 单测绿
+- [ ] 真机 npm start 视觉确认(总指挥环境无 GUI,留用户)
+
+### 8.7 偏差记录(待总指挥确认)
+
+| # | 偏差 | 处置 |
+|---|---|---|
+| **D6(实施侧自决,记录待确认)** | 转向指令说 `text_font` 改「记名,如 `'sysname:<family>'`」。实施按此采用 `sysname:` 前缀(对齐原 `embed:` 前缀分流模式,`pickFontForChar`/`loadFont` 判前缀)。 | 编码细节,非产品决策;前缀法零迁移、与既有分流模式一致 |
+| **D7(实施侧自决,记录待确认)** | `readFontByName` 同 family 多 style 时**优先 Regular**(无 Regular 取第一条)。记名粒度只到 family(不记 style),故 bold/italic 暂不按系统字重切分文件 —— 沿用「记名方案只记 family」的粒度,字重靠 opentype 合成 / 后续扩(原嵌入方案也只嵌选中那一个子字体)。 | 与记名粒度自洽;若后续要系统字体真粗体,需把 style 也记进 text_font(列 backlog) |
+| **D8(实施侧自决,记录待确认)** | 扫描结果在主进程**模块级缓存**(首次 `readFontByName` 触发扫一次 ~0.5s,后续命中)。避免每字形探测重扫。代价:本进程生命周期内新装的系统字体不刷新(需重启 app)。 | 性能取舍;字体安装是低频操作,重启刷新可接受。若要热刷新可加 invalidate IPC(backlog) |
+
+> 转向后分支共 **13 commit**(原 10 + G7b.1~3 + 本报告更新)。**仍不合 main**,等总指挥验收 + 用户真机。
