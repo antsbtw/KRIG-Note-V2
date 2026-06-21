@@ -252,15 +252,21 @@ L5-G7 原方案 = 选系统字体即把**字体二进制嵌进画板文档**(墙
 - **单测**:`vitest run` → 408 绿(font 相关 17 绿:含新「没装回退打包不乱码」);8 失败 = `bulk-delete-perf-verify.test.ts` 既有 SurrealDB 环境基线(clean main 同样红,与本段无关)。
 - 源码 grep:`font-store`/`fontStore`/`FONT_EMBED`/`fontEmbed`/`font://`/`embed:` 零残留。
 
-### 8.6 转向后验收(待总指挥逐条核 + 真机)
+### 8.6 转向后验收(总指挥 2026-06-21 逐条核 ✅ 通过)
 
-- [ ] 选系统字体 → 本机渲染正确(按名读 buffer outline)
-- [ ] 存盘 text_font = `sysname:<family>`,**文档不含字体二进制**(对比嵌入方案显著变小)
-- [ ] **对方没装该字体(清缓存/换机模拟)→ 回退打包默认字体,不乱码不豆腐块**(新卖点核心)
-- [ ] 导出 PNG/SVG → 本机字体 outline 进产物,呈现正确
-- [ ] X 长图 / graph 截图无回归;CJK 缺字仍回退不丢字;打包字体 / G5/G6 无回归
-- [ ] tsc 0 / eslint baseline / 单测绿
-- [ ] 真机 npm start 视觉确认(总指挥环境无 GUI,留用户)
+总指挥拿真实代码 + 真实运行逐条核(非采信自述):
+
+- [x] **死代码零残留**:活代码 0 命中 font-store/font:///FONT_EMBED/embed:(71KB grep 全是注释/文档"已删"文字);font-store-impl.ts 整文件删 ✅
+- [x] text_font 改 `sysname:<family>`(types.ts:134 + UI 写 `sysname:${family}`)✅
+- [x] **读不到 throw 不静默**(loadFont:54 真 throw,守"不要兜底"铁律)✅
+- [x] **回退打包不乱码(核心卖点)**:双保险 —— 缺字提前探测回退(text-to-path:81)+ 整字体读不到 catch 回退打包(:44-48),落点打包字体字符全覆盖,渲染不崩 ✅
+- [x] W5 边界:渲染经 `fontReadByName` IPC,不直 import 主进程 ✅
+- [x] tsc 0 / font 24 单测绿(含回退新单测)/ 4 转向 commit 接原 10 后未 rebase ✅
+- [x] D6/D7/D8 偏差合理,总指挥认可 ✅
+- ⏸️ **导出 PNG/SVG outline — 暂缓(非 G7b 范围)**:画板「导出 PNG/SVG」功能**尚未开发**(grep 无导出代码),此项针对不存在的功能,无从测。**未来做画板导出时记名字体天然支持**(记名接在 loadFont 层,导出走 atomsToSvg 本机跑即自动 outline),G7b 不欠债。X长图/graph截图那条 svgToPng 管线已存在且本机跑无回归。
+- ⏳ 真机 npm start 视觉确认(选字体/存盘 sysname:/换机回退)— 留用户,不阻塞认可
+
+> **总指挥结论:L5-G7b 代码层验收通过,正式认可完成。** 导出 outline 暂缓(依赖未开发的画板导出功能);真机视觉留用户点。
 
 ### 8.7 偏差记录(待总指挥确认)
 
