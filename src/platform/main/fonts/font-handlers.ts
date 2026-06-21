@@ -10,7 +10,7 @@
 
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
-import { scanSystemFonts } from './system-font-scan';
+import { scanSystemFonts, readFontByName } from './system-font-scan';
 import { fontStore } from './font-store-impl';
 
 export function registerFontHandlers(): void {
@@ -23,6 +23,14 @@ export function registerFontHandlers(): void {
       console.error('[font] FONT_LIST_SYSTEM 扫描失败', err);
       return { success: false, error: String(err), fonts: [] };
     }
+  });
+
+  // L5-G7b:按 family 名读字体 buffer(记名方案核心,替代 font:// fetch)。
+  // 渲染进程 loadFont 识别 sysname: 前缀 → 走此 IPC 拿 ArrayBuffer 喂 opentype。
+  // 没装该字体 → 返回 null,渲染层回退打包字体(红线:不乱码)。
+  ipcMain.handle(IPC_CHANNELS.FONT_READ_BY_NAME, async (_event, family: unknown) => {
+    if (typeof family !== 'string' || !family) return null;
+    return readFontByName(family);
   });
 
   // G7.2:嵌入选中系统字体(.ttc 抽子字体)→ 落盘 font:// → 返回 fontId/URL/sizeKb

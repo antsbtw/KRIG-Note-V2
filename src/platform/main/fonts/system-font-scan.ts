@@ -171,9 +171,54 @@ export function scanSystemFonts(): SystemFontEntry[] {
 }
 
 /**
+ * 按 family 名读出字体二进制(L5-G7b 记名方案核心)。
+ *
+ * 转向后画板**不嵌入字体本体**,只记 `sysname:<family>`;本机渲染 / 导出时按名
+ * 实时把该字体读出来 outline。本函数:family 名 → 扫描结果里查 path+fontIndex →
+ * readFontBinary 抽出独立 sfnt buffer。
+ *
+ * - 扫描结果模块级缓存(首调扫一次,~0.5s;后续命中缓存),避免每字形探测重扫。
+ * - 同 family 多 style:优先 Regular(渲染默认字重;bold/italic 暂不分,沿用记名方案
+ *   "只记 family"的粒度,字重靠 opentype 合成 / 后续扩)。
+ * - 查不到(对方没装该字体)→ 返回 null(渲染层据此回退**打包字体**,红线:不乱码)。
+ * - 读取 / 抽取失败 → fail loud(console.warn)+ 返回 null。
+ *
+ * @returns ArrayBuffer(可直接 transfer 给渲染进程喂 opentype.parse)或 null(没装 / 读失败)
+ */
+let _scanCache: SystemFontEntry[] | null = null;
+
+function cachedScan(): SystemFontEntry[] {
+  if (!_scanCache) _scanCache = scanSystemFonts();
+  return _scanCache;
+}
+
+export function readFontByName(family: string): ArrayBuffer | null {
+  if (!family) return null;
+  const fonts = cachedScan();
+  const matches = fonts.filter((f) => f.family === family);
+  if (matches.length === 0) {
+    // 对方没装该字体 —— 正常路径,渲染层回退打包字体(非错误,不 warn)
+    return null;
+  }
+  // 优先 Regular 字重;无 Regular 取第一条
+  const pick = matches.find((f) => /regular/i.test(f.style)) ?? matches[0];
+  try {
+    const { buffer } = readFontBinary(pick.path, pick.fontIndex);
+    // 拷成独立 ArrayBuffer(避免把整个 Node Buffer 底层池 / SharedArrayBuffer 透传)
+    const ab = new ArrayBuffer(buffer.byteLength);
+    new Uint8Array(ab).set(buffer);
+    return ab;
+  } catch (err) {
+    // fail loud:命中了 family 但读取 / ttc 抽取失败(红线:不静默崩)
+    console.warn(`[font] readFontByName 读取失败 family=${family} path=${pick.path}:`, err);
+    return null;
+  }
+}
+
+/**
  * 按 path + fontIndex 读出字体二进制,统一为可被 opentype.parse 的独立 sfnt。
  * .ttc 经 extractSfntFromTtc 抽出指定子字体;.ttf/.otf 原样返回。
- * 供 G7.2 font-store embed 用(读完落盘)。
+ * 供 readFontByName(本机渲染 / 导出按名读)用。
  *
  * @returns { buffer, ext } ext 是落盘文件后缀(按 sfnt version 判 ttf/otf)
  * @throws 读取失败 / ttc 抽取失败

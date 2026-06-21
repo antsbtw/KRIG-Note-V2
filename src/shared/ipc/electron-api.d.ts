@@ -97,6 +97,8 @@ declare global {
         error?: string;
         fonts: SystemFontEntryDTO[];
       }>;
+      /** L5-G7b:按 family 名读字体二进制(记名方案;没装该字体 → null,渲染层回退打包字体) */
+      fontReadByName(family: string): Promise<ArrayBuffer | null>;
       /** L5-G7.2:嵌入选中系统字体 → font:// + fontId(text_font 写 'embed:<fontId>') */
       fontEmbed(
         sourcePath: string,
