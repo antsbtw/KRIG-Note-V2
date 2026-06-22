@@ -12,19 +12,12 @@
  * - 字体族 / 字号 → ctx.patchInstance(画板专属 instance 字段 text_font/text_size)
  */
 
-import type { NodeSnapshot, SectionContext, SectionDef } from '../../types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { NodeSnapshot, SectionContext, SectionDef, SystemFontInfo } from '../../types';
 import { PALETTE_14, normalizeHex } from '../palette';
 
+/** 字体值(打包族枚举 / 'auto' / 'sysname:<family>');打包族下拉已删,仅作类型 + fallback */
 type FontFamily = NonNullable<NodeSnapshot['text_font']>;
-
-/** 字体族下拉(L5-G6 全字体已打包,中英文按字符自动选对应字体) */
-const FONT_OPTIONS: ReadonlyArray<{ value: FontFamily; label: string }> = [
-  { value: 'auto', label: '默认(自动)' },
-  { value: 'sans', label: '黑体 / Sans(思源黑 · Inter)' },
-  { value: 'serif', label: '宋体 / Serif(思源宋 · Source Serif)' },
-  { value: 'handwriting', label: '手写 / 楷(文楷 · Caveat)' },
-  { value: 'mono', label: '等宽 / Mono(JetBrains Mono)' },
-];
 
 const DEFAULT_SIZE = 16; // §5.4b:新建文字节点默认 16(对齐 note 正文)
 const MIN_SIZE = 6;
@@ -115,21 +108,11 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
         </button>
       </div>
 
-      {/* 字体族(原 Type section 合并入) */}
-      <div className="krig-node-toolbar__row">
-        <span className="krig-node-toolbar__label">字体</span>
-        <select
-          className="krig-node-toolbar__select"
-          value={curFont}
-          onChange={(e) => ctx.patchInstance({ text_font: e.target.value as FontFamily })}
-        >
-          {FONT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* 字体:内切字体列表(第一项「默认」+ 本机字体,可搜索)。
+          对用户透明 —— 不暴露"系统字体"概念,选了就用(L5-G7b 记名:只记 family 名,
+          不嵌入字体本体;本机按名渲染,对方没装回退打包字体不乱码)。
+          打包字体仍作底层 fallback 隐式存在(text_font 缺省=自动选字 + CJK 缺字回退)。 */}
+      {ctx.listSystemFonts && <FontList ctx={ctx} curFont={curFont} />}
 
       {/* 字号(原 Type section 合并入) */}
       <div className="krig-node-toolbar__row">
@@ -155,6 +138,124 @@ function TextPanel(ctx: SectionContext): React.ReactElement {
         </div>
         <span className="krig-node-toolbar__label">pt</span>
       </div>
+    </div>
+  );
+}
+
+/** license 提示(设计 §6;降级为「字体」标题旁 ⓘ tooltip,不占视觉、保提示义务) */
+const LICENSE_HINT =
+  '选用本机字体后,导出 PNG/SVG 会把该字体轮廓写进产物分发。系统预装的商业字体' +
+  '(如苹方、微软雅黑等)可能限制再分发,导出 / 分享前请确认你拥有分发权利。';
+
+/**
+ * 字体列表(L5-G7b 记名版):标题 + 搜索 + 列表,直接铺进 Aa 面板,与颜色 / 对齐同级。
+ *
+ * 对用户透明 —— 不暴露"系统字体"概念,就是一个「字体」列表:
+ * - 第一项「默认」= text_font:'auto'(回到自动选字)
+ * - 其余 = 本机字体名;点击即用(L5-G7b:直接记 text_font='sysname:<family>',**不嵌入**;
+ *   本机按名渲染,对方没装回退打包字体不乱码)
+ * - 当前选中项打勾高亮
+ * - 首次挂载懒加载(扫描 ~0.5s);可搜索
+ */
+function FontList({ ctx, curFont }: { ctx: SectionContext; curFont: FontFamily }): React.ReactElement {
+  const [loading, setLoading] = useState(true);
+  const [fonts, setFonts] = useState<SystemFontInfo[] | null>(null);
+  const [query, setQuery] = useState('');
+  const loadedRef = useRef(false);
+
+  // 首次挂载懒加载本机字体
+  useEffect(() => {
+    if (loadedRef.current || !ctx.listSystemFonts) return;
+    loadedRef.current = true;
+    setLoading(true);
+    ctx
+      .listSystemFonts()
+      .then((list) => setFonts(list))
+      .catch(() => setFonts([]))
+      .finally(() => setLoading(false));
+  }, [ctx]);
+
+  // family 去重(每 family 留一条代表,优先 Regular)+ 搜索过滤
+  const families = useMemo(() => {
+    if (!fonts) return [];
+    const byFamily = new Map<string, SystemFontInfo>();
+    for (const f of fonts) {
+      const prev = byFamily.get(f.family);
+      if (!prev) byFamily.set(f.family, f);
+      else if (/regular/i.test(f.style) && !/regular/i.test(prev.style)) byFamily.set(f.family, f);
+    }
+    let arr = [...byFamily.values()];
+    const q = query.trim().toLowerCase();
+    if (q) arr = arr.filter((f) => f.family.toLowerCase().includes(q));
+    return arr.slice(0, 300); // 上限防极端长列表卡 DOM
+  }, [fonts, query]);
+
+  const isDefault = !curFont.startsWith('sysname:');
+  const curFamily = isDefault ? null : curFont.slice('sysname:'.length);
+
+  const pickDefault = (): void => ctx.patchInstance({ text_font: 'auto' });
+
+  // L5-G7b 记名:选字体 = 直接记 family 名,**无嵌入步骤、无异步**(本机按名渲染)。
+  const onPick = (font: SystemFontInfo): void => {
+    ctx.patchInstance({ text_font: `sysname:${font.family}` });
+  };
+
+  return (
+    <div className="krig-node-toolbar__fontlist">
+      <div className="krig-node-toolbar__fontlist-head">
+        <span className="krig-node-toolbar__label">字体</span>
+        <span className="krig-node-toolbar__fontlist-info" title={LICENSE_HINT} aria-label={LICENSE_HINT}>
+          ⓘ
+        </span>
+      </div>
+
+      <input
+        type="text"
+        className="krig-node-toolbar__fontlist-search"
+        placeholder="搜索字体…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+
+      <ul className="krig-node-toolbar__fontlist-items">
+        {/* 第一项:默认(回到自动选字)。搜索时无关键词或匹配"默认"才显。 */}
+        {(!query.trim() || '默认'.includes(query.trim())) && (
+          <li>
+            <button
+              type="button"
+              className={
+                'krig-node-toolbar__fontlist-item' + (isDefault ? ' is-active' : '')
+              }
+              onClick={pickDefault}
+            >
+              <span className="krig-node-toolbar__fontlist-name">默认</span>
+              {isDefault && <span className="krig-node-toolbar__fontlist-check">✓</span>}
+            </button>
+          </li>
+        )}
+
+        {loading && (
+          <li className="krig-node-toolbar__fontlist-hint">加载字体…</li>
+        )}
+        {!loading &&
+          families.map((f) => {
+            const active = curFamily === f.family;
+            return (
+              <li key={`${f.family}@${f.path}#${f.fontIndex}`}>
+                <button
+                  type="button"
+                  className={
+                    'krig-node-toolbar__fontlist-item' + (active ? ' is-active' : '')
+                  }
+                  onClick={() => onPick(f)}
+                >
+                  <span className="krig-node-toolbar__fontlist-name">{f.family}</span>
+                  {active && <span className="krig-node-toolbar__fontlist-check">✓</span>}
+                </button>
+              </li>
+            );
+          })}
+      </ul>
     </div>
   );
 }

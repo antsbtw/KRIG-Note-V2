@@ -33,6 +33,7 @@ export function NodeToolbar({
   onPatchStyle,
   onPatchInstance,
   onTextCommand,
+  onListSystemFonts,
 }: NodeToolbarProps): React.ReactElement | null {
   const [openSectionId, setOpenSectionId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -80,8 +81,9 @@ export function NodeToolbar({
       patchInstance: (patch: Partial<NodeSnapshot>) => onPatchInstance(patch),
       runTextCommand: (cmd: TextNodeStyleCommand) => onTextCommand(cmd),
       close,
+      listSystemFonts: onListSystemFonts,
     }),
-    [onPatchStyle, onPatchInstance, onTextCommand, close],
+    [onPatchStyle, onPatchInstance, onTextCommand, close, onListSystemFonts],
   );
 
   // registry 解析:有哪几个 section 完全由节点类型声明

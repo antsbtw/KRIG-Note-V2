@@ -53,6 +53,7 @@ registerView({
     'canvas-rendering',    // 🚧 L5-G3:Three.js Host(P1-1 单点屏障)
     'canvas-text-node',    // ✅ L5-G4.5:文字节点 PM 桥接(text-editing.Host 嵌入,路径 A)
     'node-toolbar',        // ✅ L5-G5:节点浮条(view-agnostic 注册式 section)
+    'font-storage',        // ✅ L5-G7:系统字体导入 + 嵌入(node-toolbar Aa 面板系统字体分组)
   ],
   component: GraphCanvasView,
   navSideTab: { label: 'Graph', icon: '🎨', order: 5 },

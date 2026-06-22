@@ -27,7 +27,14 @@ import type {
   NodeStyleOverrides,
   ToolbarAnchor,
   TextNodeStyleCommand,
+  SystemFontInfo,
 } from '@capabilities/node-toolbar';
+import type { fontListSystem as FontListSystemFn } from '@capabilities/font-storage';
+
+/** font-storage capability api 形态(requireCapabilityApi 间接拿,W5) */
+interface FontStorageApi {
+  fontListSystem: typeof FontListSystemFn;
+}
 
 interface Props {
   hostRef: React.RefObject<CanvasHostHandle | null>;
@@ -56,6 +63,7 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
   );
   const shapeApi = useMemo(() => requireCapabilityApi<ShapeLibraryApi>('shape-library'), []);
   const textEditing = useMemo(() => requireCapabilityApi<TextEditingApi>('text-editing'), []);
+  const fontStorage = useMemo(() => requireCapabilityApi<FontStorageApi>('font-storage'), []);
 
   const [anchor, setAnchor] = useState<ToolbarAnchor | null>(null);
   const [node, setNode] = useState<NodeSnapshot | null>(null);
@@ -169,6 +177,13 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
     [singleId, hostRef, textEditing, buildSnapshot, onChanged],
   );
 
+  // ── L5-G7b:字体列表(记名方案)。选字体 = section 直接记 text_font='sysname:<family>',
+  //    **无嵌入步骤**;本机渲染时 loadFont 按名经 IPC 读 buffer,对方没装回退打包字体。──
+  const handleListSystemFonts = useCallback(
+    (): Promise<SystemFontInfo[]> => fontStorage.fontListSystem(),
+    [fontStorage],
+  );
+
   if (!singleId || !anchor || !node) return null;
 
   return (
@@ -178,6 +193,7 @@ export function GraphCanvasNodeToolbar({ hostRef, selectedIds, onChanged }: Prop
       onPatchStyle={handlePatchStyle}
       onPatchInstance={handlePatchInstance}
       onTextCommand={handleTextCommand}
+      onListSystemFonts={handleListSystemFonts}
     />
   );
 }

@@ -87,6 +87,8 @@ protocol.registerSchemesAsPrivileged([
       stream: true,
     },
   },
+  // L5-G7b:font:// 嵌入协议已废(改记名方案,字体经 IPC fontReadByName 按名读 buffer,
+  // 不再走 fetch 协议),此处无需注册任何 font scheme。
 ]);
 
 // ── 关闭 Chromium FedCM(Federated Credential Management)──
@@ -169,6 +171,9 @@ app.whenReady().then(async () => {
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
   mediaStore.registerProtocol();
 
+  // L5-G7b — 字体改记名方案(sysname:<family>),不再嵌入 → 无 font:// 协议要注册。
+  // 本机渲染 / 导出经 IPC FONT_READ_BY_NAME 按名读 buffer(registerFontHandlers 接)。
+
   // L4 — 框架级 Application Menu(取代 Electron 默认 File/Edit/View/Window)
   // markdown-import / backup 必须先注册 command,再 registerFrameworkMenus 调 rebuild 时菜单
   // 项的 command 字符串才能查到 handler
@@ -207,6 +212,7 @@ app.whenReady().then(async () => {
   // registerProtocol 注册)。下载 will-download 的补挂在 registerWebDownloadHook 内部做。
   mainWindow.webContents.on('did-attach-webview', (_e, guest) => {
     mediaStore.registerMediaForSession(guest.session);
+    // L5-G7b:字体记名方案无 font:// 协议,无需 per-ws session 补注册(渲染走 IPC 按名读)。
   });
   // per-ws 代理阶段1:临时 setProxy IPC(DevTools console 验证不同 ws 不同出口)。
   registerWebProxyHandler();

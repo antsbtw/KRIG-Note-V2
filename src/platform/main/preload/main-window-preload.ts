@@ -108,6 +108,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.MEDIA_RESOLVE_PATH, mediaUrl);
   },
 
+  /** L5-G7.1:扫本机系统字体(可选字体清单,.ttc 已展开子字体) */
+  async fontListSystem(): Promise<{
+    success: boolean;
+    error?: string;
+    fonts: Array<{
+      family: string;
+      style: string;
+      path: string;
+      fontIndex: number;
+      format: 'ttf' | 'otf' | 'ttc';
+      supported: boolean;
+    }>;
+  }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FONT_LIST_SYSTEM);
+  },
+
+  /** L5-G7b:按 family 名读字体二进制(记名方案;没装该字体 → null,渲染层回退打包)。bold=要粗体变体 */
+  async fontReadByName(family: string, bold?: boolean): Promise<ArrayBuffer | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.FONT_READ_BY_NAME, family, bold === true);
+  },
+
   /** L5-B3.14:在 Finder 高亮显示文件 */
   async showItemInFolder(filePath: string): Promise<{ ok: boolean; reason?: string }> {
     return ipcRenderer.invoke(IPC_CHANNELS.SHELL_SHOW_ITEM_IN_FOLDER, filePath);

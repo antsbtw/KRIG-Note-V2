@@ -33,6 +33,7 @@ import '@capabilities/undo-redo';
 import '@capabilities/drag-and-drop';
 import '@capabilities/insertion';
 import '@capabilities/media-storage';
+import '@capabilities/font-storage';     // L5-G7:系统字体导入 + 嵌入(IPC 封装;node-toolbar 经 requireCapabilityApi 拿)
 import '@capabilities/web-rendering';
 import '@capabilities/text-editing';   // W5 C4 新增
 import '@capabilities/learning';        // L5-B3.20a 新增(无 view 直接消费需显式拉,P1 审计修正)

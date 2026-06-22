@@ -1,5 +1,11 @@
-import { loadFont, pickFontForChar, type MarkSet } from './font-loader';
-import type { FontKey } from './fonts';
+import {
+  loadFont,
+  pickFontForChar,
+  pickPackagedFallbackForChar,
+  isSysnameKey,
+  type MarkSet,
+  type FontCacheKey,
+} from './font-loader';
 
 /**
  * F1 路径：opentype.js 把文字 outline 化为 SVG path。
@@ -28,12 +34,19 @@ export async function textToPath(
 ): Promise<{ svg: string; advance: number }> {
   if (!text) return { svg: '', advance: 0 };
 
-  const segments = splitByFont(text, marks);
+  const segments = await splitByFont(text, marks);
   const parts: string[] = [];
   let x = startX;
 
   for (const seg of segments) {
-    const font = await loadFont(seg.fontKey);
+    // 记名方案:系统字体可能加载失败(对方没装)→ 回退打包字体重选(红线:不乱码)。
+    let font;
+    try {
+      font = await loadFont(seg.fontKey);
+    } catch {
+      const fb = pickPackagedFallbackForChar(seg.text[0] ?? 'A', marks);
+      font = await loadFont(fb);
+    }
     const path = font.getPath(seg.text, x, baselineY, fontSize);
     const d = path.toPathData(2);
     if (d) {
@@ -48,15 +61,26 @@ export async function textToPath(
 
 interface FontSegment {
   text: string;
-  fontKey: FontKey;
+  fontKey: FontCacheKey;
 }
 
-function splitByFont(text: string, marks?: MarkSet): FontSegment[] {
+/**
+ * 按字符选字体分段。系统字体(L5-G7b 记名)回退:若选中的是 sysname 字体,但
+ *  - 对方没装该字体(loadFont 抛错),或
+ *  - 该字符在系统字体里没有字形(charToGlyphIndex === 0),
+ * 则回退到**打包字体**(G7-8 + 记名回退,红线:不乱码不丢字)。
+ * 因需探测系统字体字形 → 异步(loadFont 有缓存,探测廉价)。
+ */
+async function splitByFont(text: string, marks?: MarkSet): Promise<FontSegment[]> {
   const out: FontSegment[] = [];
   let current: FontSegment | null = null;
 
   for (const ch of text) {
-    const fontKey = pickFontForChar(ch, marks);
+    let fontKey = pickFontForChar(ch, marks);
+    // 系统字体没装 / 缺字 → 回退打包字体(保证任意字符不乱码)
+    if (isSysnameKey(fontKey) && !(await sysnameHasGlyph(fontKey, ch))) {
+      fontKey = pickPackagedFallbackForChar(ch, marks);
+    }
     if (current && current.fontKey === fontKey) {
       current.text += ch;
     } else {
@@ -66,4 +90,17 @@ function splitByFont(text: string, marks?: MarkSet): FontSegment[] {
   }
   if (current) out.push(current);
   return out;
+}
+
+/**
+ * 系统字体(记名)是否含某字符字形(glyph index !== 0 = 非 .notdef)。
+ * 加载失败(对方没装该字体)→ 按"无字形"回退打包字体(红线:不乱码)。
+ */
+async function sysnameHasGlyph(fontKey: `sysname:${string}`, ch: string): Promise<boolean> {
+  try {
+    const font = await loadFont(fontKey);
+    return font.charToGlyphIndex(ch) !== 0;
+  } catch {
+    return false;
+  }
 }

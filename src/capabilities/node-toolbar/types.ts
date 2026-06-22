@@ -78,6 +78,19 @@ export type TextNodeStyleCommand =
 // ─────────────────────────────────────────────────────────
 
 /**
+ * 一条可选系统字体(L5-G7;view 注入 listSystemFonts 时回传)。
+ * 形态与 main 进程 SystemFontEntry / IPC DTO 同形,此处独立声明保 view-agnostic。
+ */
+export interface SystemFontInfo {
+  family: string;
+  style: string;
+  path: string;
+  fontIndex: number;
+  format: 'ttf' | 'otf' | 'ttc';
+  supported: boolean;
+}
+
+/**
  * 容器给 section 的上下文(section 只认这个,不认具体 view).
  */
 export interface SectionContext {
@@ -91,6 +104,13 @@ export interface SectionContext {
   runTextCommand: (cmd: TextNodeStyleCommand) => void;
   /** 收起当前面板 */
   close: () => void;
+  /**
+   * L5-G7b:列本机系统字体(view 注入,走 font-storage capability IPC)。
+   * 未注入 = 该 view 不支持系统字体,Text section 只显「默认」。
+   * 记名方案:选一个 → 直接 patchInstance({ text_font: 'sysname:<family>' }),**不嵌入**
+   * (本机渲染按名读 buffer,对方没装回退打包字体,唯导出时 outline 进产物)。
+   */
+  listSystemFonts?: () => Promise<SystemFontInfo[]>;
 }
 
 /**
@@ -143,6 +163,8 @@ export interface NodeToolbarProps {
   onPatchInstance: (patch: Partial<NodeSnapshot>) => void;
   /** 落地:改文字 mark */
   onTextCommand: (cmd: TextNodeStyleCommand) => void;
+  /** L5-G7b:列系统字体(可选;不传 = Text section 只显「默认」)。选了直接记名,无嵌入步骤。 */
+  onListSystemFonts?: () => Promise<SystemFontInfo[]>;
 }
 
 /**

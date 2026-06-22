@@ -82,6 +82,10 @@ export const IPC_CHANNELS = {
   // L5-B3.14:media:// URL → 本地路径解析(file-block / file-link / external-ref 打开/Finder 显示用)
   MEDIA_RESOLVE_PATH: 'media.resolve-path',
 
+  // L5-G7b:系统字体记名方案(只记 family 名,本机渲染 / 导出按名实时读 buffer,不嵌入)
+  FONT_LIST_SYSTEM: 'font.list-system',   // renderer → main invoke → SystemFontEntry[](扫本机系统字体)
+  FONT_READ_BY_NAME: 'font.read-by-name', // renderer → main invoke(family) → ArrayBuffer | null(按名读字体,没装回 null → 渲染层回退打包)
+
   // L5-B3.17:yt-dlp 能力(checkStatus / install / download / getInfo / saveSubtitle)
   YTDLP_CHECK_STATUS: 'ytdlp.check-status',
   YTDLP_INSTALL: 'ytdlp.install',
