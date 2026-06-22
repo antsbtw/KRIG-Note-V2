@@ -4,6 +4,7 @@ import { renderTextBlock, type LinkRect } from './blocks/textBlock';
 import { renderMathBlock } from './blocks/mathBlock';
 import { renderCodeBlock } from './blocks/codeBlock';
 import { renderList } from './blocks/list';
+import { renderBlockquote, renderCallout } from './blocks/quoteCallout';
 import type { FontFamily } from './font-loader';
 import { LruCache } from '../lru';
 
@@ -162,6 +163,12 @@ async function renderAtom(
       return renderList(atom, yOffset, false, 0, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     case 'orderedList':
       return renderList(atom, yOffset, true, 0, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
+    case 'blockquote':
+      // 递归子块 + 左竖条(L5-G6c bug1:不再降级 [Quote] 丢内容)
+      return renderBlockquote(atom, yOffset, contentWidth, renderAtom, links, defaultTextColor, baseFontSize, fontFamily);
+    case 'callout':
+      // 递归子块 + 圆角底框 + 图标(L5-G6c bug1:不再降级 [Callout] 丢内容)
+      return renderCallout(atom, yOffset, contentWidth, renderAtom, links, defaultTextColor, baseFontSize, fontFamily);
     default:
       // 未识别的 block:渲染一行灰字占位
       return renderUnknownAtom(atom, yOffset, contentWidth);
