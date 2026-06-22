@@ -28,6 +28,25 @@ export type RenderChild = (
   fontFamily?: FontFamily,
 ) => Promise<{ svg: string; height: number }>;
 
+/**
+ * callout 图标占位(L5-G6c:忠实还原用户选的 emoji/lucide/上传图)。
+ *
+ * 渲染链 SVGLoader 渲不出 emoji 彩色字形 / <image> / stroke → callout 在 SVG 里
+ * **只预留图标列矩形**(不画图标),emit 一个 IconRect(含来源 + bbox);TextRenderer
+ * 据此把图标栅格成纹理贴到该 bbox(同 LinkRect 的 hit-rect quad 套路)。
+ * 坐标系:SVG viewBox 局部(x 右 / y 下),随 valign yOffset 平移。
+ */
+export interface IconRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 三选一来源(优先级 imageSrc > iconName > emoji,对齐编辑器 NodeView) */
+  emoji?: string;
+  iconName?: string;
+  imageSrc?: string;
+}
+
 const QUOTE_BAR_WIDTH = 3;
 const QUOTE_BAR_FILL = '#7aa2f7';
 const QUOTE_INDENT = 12;
@@ -96,13 +115,14 @@ export async function renderBlockquote(
   return { svg: bar + body.svg, height: totalHeight };
 }
 
-/** callout:圆角底框 + 图标 + 子块右缩 */
+/** callout:圆角底框 + 图标(预留 IconRect,TextRenderer 贴纹理)+ 子块右缩 */
 export async function renderCallout(
   atom: Atom,
   yOffset: number,
   contentWidth: number,
   renderChild: RenderChild,
   links: LinkRect[],
+  icons: IconRect[],
   defaultTextColor?: string,
   baseFontSize?: number,
   fontFamily?: FontFamily,
@@ -122,26 +142,19 @@ export async function renderCallout(
     `<rect x="0" y="${yOffset}" width="${contentWidth}" height="${Math.max(1, totalHeight)}" ` +
     `rx="${CALLOUT_BG_RADIUS}" ry="${CALLOUT_BG_RADIUS}" fill="${CALLOUT_BG_FILL}" />`;
 
-  // 图标:callout 的 emoji(💡 等)是彩色字体字形,本链路 TextRenderer 用 SVGLoader.createShapes
-  // 只渲**填充** path/circle(fill:none 的 stroke 被跳过,见 TextRenderer:142-143),且无 emoji 字体,
-  // <text>emoji 会被 SVGLoader 静默丢弃 → 渲不出(实机 bug)。故画一个**填充矢量灯泡**代替 emoji,
-  // 稳定可渲、读作 callout 标记。(忠实显示用户选的 emoji/lucide/image 需走 <image> 链路,留后)
-  const icon = lightbulbIcon(CALLOUT_PAD_X + 3, yOffset + CALLOUT_PAD_Y + 2, defaultTextColor ?? '#f5c542');
+  // 图标:SVG 里只**预留图标列方框**(不画图标 — 渲染链渲不出 emoji/<image>);
+  // emit IconRect(来源 emoji/iconName/imageSrc + bbox),TextRenderer 栅格成纹理贴此 bbox。
+  // 优先级对齐编辑器 NodeView:imageSrc > iconName > emoji(default 💡)。
+  const ICON_SIZE = 16;
+  const iconX = CALLOUT_PAD_X + 2;
+  const iconY = yOffset + CALLOUT_PAD_Y + 2;
+  const a = (atom.attrs ?? {}) as { emoji?: unknown; iconName?: unknown; imageSrc?: unknown };
+  icons.push({
+    x: iconX, y: iconY, w: ICON_SIZE, h: ICON_SIZE,
+    emoji: typeof a.emoji === 'string' ? a.emoji : '💡',
+    iconName: typeof a.iconName === 'string' ? a.iconName : undefined,
+    imageSrc: typeof a.imageSrc === 'string' ? a.imageSrc : undefined,
+  });
 
-  return { svg: bg + icon + body.svg, height: totalHeight };
-}
-
-/**
- * 填充矢量灯泡图标(callout 标记)— ~16px,平移到 (x,y)。**纯填充**(circle + path,无 stroke),
- * 适配 TextRenderer 只渲填充几何;灯泡圆 + 灯座梯形,简笔可辨识。
- */
-function lightbulbIcon(x: number, y: number, fill: string): string {
-  return (
-    `<g transform="translate(${x}, ${y})">` +
-    // 灯泡(填充圆)
-    `<circle cx="8" cy="6" r="5.2" fill="${fill}" />` +
-    // 灯座(填充梯形:上宽下窄)
-    `<path d="M 5 11 L 11 11 L 10 14 L 6 14 Z" fill="${fill}" />` +
-    `</g>`
-  );
+  return { svg: bg + body.svg, height: totalHeight };
 }

@@ -835,10 +835,15 @@ function disposeGroup(group: THREE.Object3D): void {
       const m = obj as THREE.Mesh | THREE.Line;
       m.geometry?.dispose?.();
       const mat = m.material;
+      // material.dispose() 不释放 material.map(纹理),callout 图标 CanvasTexture 须单独 dispose
+      const disposeMat = (mm: THREE.Material): void => {
+        (mm as THREE.MeshBasicMaterial).map?.dispose?.();
+        mm.dispose?.();
+      };
       if (Array.isArray(mat)) {
-        mat.forEach((mm) => mm.dispose?.());
-      } else {
-        mat?.dispose?.();
+        mat.forEach((mm) => disposeMat(mm));
+      } else if (mat) {
+        disposeMat(mat);
       }
     }
   });

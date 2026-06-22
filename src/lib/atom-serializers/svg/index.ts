@@ -4,11 +4,12 @@ import { renderTextBlock, type LinkRect } from './blocks/textBlock';
 import { renderMathBlock } from './blocks/mathBlock';
 import { renderCodeBlock } from './blocks/codeBlock';
 import { renderList } from './blocks/list';
-import { renderBlockquote, renderCallout } from './blocks/quoteCallout';
+import { renderBlockquote, renderCallout, type IconRect, type RenderChild } from './blocks/quoteCallout';
 import type { FontFamily } from './font-loader';
 import { LruCache } from '../lru';
 
 export type { LinkRect } from './blocks/textBlock';
+export type { IconRect } from './blocks/quoteCallout';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEFAULT_VIEWBOX_W = 200;
@@ -18,7 +19,7 @@ const FONT_SIZE = 14;
 const HORIZONTAL_PADDING = 8;
 
 /** L1 SvgCache(spec § 5.1):atoms hash → { svg, links } */
-const SVG_CACHE = new LruCache<string, { svg: string; links: LinkRect[] }>(1000);
+const SVG_CACHE = new LruCache<string, { svg: string; links: LinkRect[]; icons: IconRect[] }>(1000);
 
 /** 暴露给上层用于性能监控 / 调试 */
 export function getSvgCacheStats(): { size: number; hits: number; misses: number; hitRate: number } {
@@ -76,7 +77,7 @@ export interface AtomsToSvgOptions {
 export async function atomsToSvgWithLinks(
   atoms: Atom[],
   options: AtomsToSvgOptions = {},
-): Promise<{ svg: string; links: LinkRect[] }> {
+): Promise<{ svg: string; links: LinkRect[]; icons: IconRect[] }> {
   const viewBoxW = options.width ?? DEFAULT_VIEWBOX_W;
   const defaultTextColor = options.defaultTextColor;
   const targetHeight = options.targetHeight;
@@ -93,9 +94,10 @@ export async function atomsToSvgWithLinks(
 
   const parts: string[] = [];
   const links: LinkRect[] = [];
+  const icons: IconRect[] = [];
   let y = 0;
   for (const atom of atoms) {
-    const { svg, height } = await renderAtom(atom, y, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
+    const { svg, height } = await renderAtom(atom, y, contentWidth, links, icons, defaultTextColor, baseFontSize, fontFamily);
     if (svg) parts.push(svg);
     y += height;
   }
@@ -103,22 +105,23 @@ export async function atomsToSvgWithLinks(
   // viewBox 高度:targetHeight 优先(让 valign 有空间);否则 max(VIEWBOX_H, contentH)
   const viewBoxH = targetHeight ?? Math.max(VIEWBOX_H, contentH);
   // F-10 valign:有富余空间(viewBoxH > contentH)时,按 valign 在顶部留偏移
-  // 用 <g transform> 包裹所有内容(包括 link bbox 也得跟着偏移)
+  // 用 <g transform> 包裹所有内容(包括 link / icon bbox 也得跟着偏移)
   const slack = Math.max(0, viewBoxH - contentH);
   let yOffset = 0;
   if (slack > 0) {
     if (valign === 'middle') yOffset = slack / 2;
     else if (valign === 'bottom') yOffset = slack;
   }
-  // link bbox 也按 yOffset 平移(与 SVG transform 同步)
+  // link / icon bbox 也按 yOffset 平移(与 SVG transform 同步)
   if (yOffset !== 0) {
     for (const r of links) r.y += yOffset;
+    for (const ic of icons) ic.y += yOffset;
   }
   const innerSvg = yOffset !== 0
     ? `<g transform="translate(0, ${yOffset})">${parts.join('\n')}</g>`
     : parts.join('\n');
   const svg = wrapSvg(innerSvg, viewBoxW, viewBoxH);
-  const result = { svg, links };
+  const result = { svg, links, icons };
   SVG_CACHE.set(key, result);
   return result;
 }
@@ -137,10 +140,15 @@ async function renderAtom(
   yOffset: number,
   contentWidth: number,
   links: LinkRect[],
+  icons: IconRect[],
   defaultTextColor?: string,
   baseFontSize: number = FONT_SIZE,
   fontFamily?: FontFamily,
 ): Promise<{ svg: string; height: number }> {
+  // RenderChild 适配:blockquote/callout 子块递归回 renderAtom,把 icons 经闭包透传
+  // (RenderChild 签名只到 links,nested callout 的图标也能 emit)
+  const childRender: RenderChild = (a, y, cw, lks, dtc, bfs, ff) =>
+    renderAtom(a, y, cw, lks, icons, dtc, bfs, ff);
   switch (atom.type) {
     case 'textBlock':        // 旧 atom 格式兼容(V1 NoteView)
     case 'paragraph':        // V2 BlockSpec.id 拆分后:paragraph
@@ -165,10 +173,10 @@ async function renderAtom(
       return renderList(atom, yOffset, true, 0, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     case 'blockquote':
       // 递归子块 + 左竖条(L5-G6c bug1:不再降级 [Quote] 丢内容)
-      return renderBlockquote(atom, yOffset, contentWidth, renderAtom, links, defaultTextColor, baseFontSize, fontFamily);
+      return renderBlockquote(atom, yOffset, contentWidth, childRender, links, defaultTextColor, baseFontSize, fontFamily);
     case 'callout':
-      // 递归子块 + 圆角底框 + 图标(L5-G6c bug1:不再降级 [Callout] 丢内容)
-      return renderCallout(atom, yOffset, contentWidth, renderAtom, links, defaultTextColor, baseFontSize, fontFamily);
+      // 递归子块 + 圆角底框 + 图标 IconRect(L5-G6c:忠实还原 emoji/lucide/上传图)
+      return renderCallout(atom, yOffset, contentWidth, childRender, links, icons, defaultTextColor, baseFontSize, fontFamily);
     default:
       // 未识别的 block:渲染一行灰字占位
       return renderUnknownAtom(atom, yOffset, contentWidth);

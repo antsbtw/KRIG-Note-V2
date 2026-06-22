@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { atomsToSvg } from '../../src/lib/atom-serializers/svg';
+import { atomsToSvg, atomsToSvgWithLinks } from '../../src/lib/atom-serializers/svg';
 import type { Atom } from '../../src/lib/atom-serializers/types';
 
 // 打包字体 fetch(Vite ?url 路径)在 node 不认 → mock 成真 Inter-Regular.ttf,
@@ -54,7 +54,7 @@ describe('L5-G6c bug1 — blockquote 子内容渲染', () => {
 });
 
 describe('L5-G6c bug1 — callout 子内容渲染', () => {
-  it('callout 含段落 → 渲染子文字 path + 圆角底框 rect + 填充灯泡图标(circle),不降级占位', async () => {
+  it('callout 含段落 → 渲染子文字 path + 圆角底框 rect,不降级占位', async () => {
     const callout: Atom = {
       type: 'callout',
       attrs: { emoji: '💡' },
@@ -62,11 +62,32 @@ describe('L5-G6c bug1 — callout 子内容渲染', () => {
     };
     const svg = await atomsToSvg([callout]);
     expect(countRects(svg)).toBeGreaterThanOrEqual(1); // 圆角底框
-    expect((svg.match(/<circle/g) ?? []).length).toBeGreaterThanOrEqual(1); // 灯泡图标(填充圆,可渲)
-    expect(svg).not.toContain('<text'); // 不用 <text>emoji(SVGLoader 丢弃 → 渲不出)
-    expect(countPaths(svg)).toBeGreaterThan(0);        // 子文字 + 灯泡灯座成 path
+    expect(svg).not.toContain('<text'); // 不用 <text>emoji(SVGLoader 丢弃)
+    expect(countPaths(svg)).toBeGreaterThan(0);        // 子文字成 path
     const placeholder = await atomsToSvg([para('[Callout]')]);
     expect(countPaths(svg)).toBeGreaterThanOrEqual(countPaths(placeholder));
+  });
+
+  it('callout 图标走 IconRect(忠实还原 emoji/lucide/上传图)— SVG 不画图标,emit icons', async () => {
+    // emoji
+    const e = await atomsToSvgWithLinks([{ type: 'callout', attrs: { emoji: '🔑' }, content: [para('X')] }]);
+    expect(e.icons).toHaveLength(1);
+    expect(e.icons[0].emoji).toBe('🔑');
+    expect(e.icons[0].w).toBeGreaterThan(0);
+    // lucide iconName 优先于 emoji
+    const l = await atomsToSvgWithLinks([{ type: 'callout', attrs: { emoji: '💡', iconName: 'Star' }, content: [para('X')] }]);
+    expect(l.icons[0].iconName).toBe('Star');
+    // imageSrc 最高优先(透传)
+    const i = await atomsToSvgWithLinks([{ type: 'callout', attrs: { emoji: '💡', imageSrc: 'media://abc' }, content: [para('X')] }]);
+    expect(i.icons[0].imageSrc).toBe('media://abc');
+    // 缺省 emoji 兜底 💡
+    const d = await atomsToSvgWithLinks([{ type: 'callout', attrs: {}, content: [para('X')] }]);
+    expect(d.icons[0].emoji).toBe('💡');
+  });
+
+  it('blockquote 不 emit icon(只 callout 有)', async () => {
+    const q = await atomsToSvgWithLinks([{ type: 'blockquote', content: [para('X')] }]);
+    expect(q.icons).toHaveLength(0);
   });
 
   it('callout 嵌 mathBlock 子块也不丢(递归任意子块)', async () => {

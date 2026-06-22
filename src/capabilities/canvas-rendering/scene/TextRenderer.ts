@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
-import { atomsToSvgWithLinks, type Atom, type LinkRect } from '../../../lib/atom-serializers/svg';
+import { atomsToSvgWithLinks, type Atom, type LinkRect, type IconRect } from '../../../lib/atom-serializers/svg';
 import type { FontFamily } from '../../../lib/atom-serializers/svg/font-loader';
 import { extractPlainText } from '../../../lib/atom-serializers/extract';
 import { LruCache } from '../../../lib/atom-serializers/lru';
+import { rasterizeIcon } from './icon-raster';
 
 /**
  * TextRenderer — 文字节点 SVG → Three.js Mesh 渲染器(L5-G4.5 P2)
@@ -75,6 +76,7 @@ export class TextRenderer {
   } = {}): Promise<THREE.Object3D> {
     let svgString: string;
     let links: LinkRect[] = [];
+    let icons: IconRect[] = [];
     try {
       const out = await atomsToSvgWithLinks(atoms, {
         width: options.width,
@@ -86,6 +88,7 @@ export class TextRenderer {
       });
       svgString = out.svg;
       links = out.links;
+      icons = out.icons;
     } catch (e) {
       console.warn('[TextRenderer] atomsToSvg failed, falling back', e);
       svgString = this.fallbackSvg(atoms);
@@ -121,6 +124,32 @@ export class TextRenderer {
       mesh.position.set(r.x + r.w / 2, r.y + r.h / 2, 0.005);
       mesh.userData.linkHref = r.href;
       mesh.userData.isLinkHit = true;
+      group.add(mesh);
+    }
+
+    // L5-G6c:callout 图标纹理 quad(emoji/lucide/上传图栅格成 canvas → CanvasTexture)。
+    // 渲染链 SVGLoader 渲不出 emoji/位图/stroke,故图标走纹理路,定位到 IconRect bbox。
+    for (const ic of icons) {
+      const canvas = await rasterizeIcon(
+        { emoji: ic.emoji, iconName: ic.iconName, imageSrc: ic.imageSrc },
+        Math.max(8, Math.round(ic.w)),
+      );
+      if (!canvas) continue; // 栅格失败 → 跳过(fail loud 已在 rasterizeIcon warn)
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearFilter; // 非 2 次幂 canvas:线性,免 mipmap 警告
+      const geom = new THREE.PlaneGeometry(ic.w, ic.h);
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.set(ic.x + ic.w / 2, ic.y + ic.h / 2, 0.01);
+      // 抵消下方 group.scale.y=-1(否则纹理上下颠倒);local 翻一次 → 正立
+      mesh.scale.y = -1;
+      mesh.userData.isCalloutIcon = true;
       group.add(mesh);
     }
 
