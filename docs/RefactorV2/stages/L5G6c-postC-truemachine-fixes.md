@@ -75,6 +75,28 @@
 ---
 
 ## 5. 验收
-- [ ] 总指挥代码层:本批 9 commit,tsc 0 / eslint 新增 0 / 115 单测绿 / W5 守住 / 屏障 0。
+
+- [x] 总指挥代码层:本批 9 commit,tsc 0 / eslint 新增 0 / 115 单测绿 / W5 守住 / 屏障 0。
 - [ ] 用户真机(本批重头):callout 文字不丢 + 图标忠实(emoji/lucide/上传)+ 图标大小一致;双击几何 shape 透明编辑能打字无重影;单击出 fill/line/text 浮条;Picker 两分类。
 - [ ] 编辑↔渲染一致性专项:立项后系统对齐(本批不覆盖)。
+
+---
+
+## 6. 总指挥验收结论(2026-06-22,拿真实代码逐条核,非采信自述)
+
+**✅ 阶段 C 本体 + postC 真机修复批,代码层合并验收通过。**(C 完成报告先前未补总指挥结论,本结论一并涵盖 C 主线达成 + 本批 9 commit。)
+
+| 核验项 | 方法 | 结论 |
+|---|---|---|
+| **bug1 callout/blockquote 文字丢失** | 读 quoteCallout.ts + 单测 | ✅ 原落 renderUnknownAtom 降级 `[Quote]` 丢子内容;新模块递归渲子块(renderChild 注入避循环 import,嵌 math/list 不丢)+81 测。 |
+| **bug2 诊断 log 删净** | grep canvas-rendering/serializers | ✅ 0 残留临时 `console.log/debug`(唯一命中是 charter §5 自我诊断常驻,非临时)。守"别猜+定位后删"铁律。 |
+| **callout 图标纹理 quad(新渲染路,最易泄漏)** | 读 icon-raster + disposeGroup | ✅ 缓存层存 HTMLCanvasElement(LRU 上限不泄漏);**disposeGroup 专门加 `material.map?.dispose()`**(注释明写"material.dispose 不释放纹理,CanvasTexture 须单独 dispose")——主动堵了 three 纹理泄漏坑。 |
+| **W5 边界** | grep atom-serializers import three | ✅ atom-serializers(SVG 层)0 import three;icon-raster 在 canvas-rendering(three 合法位)。 |
+| **质量门** | 亲跑 | ✅ tsc 0;单测 477 绿(全量;含本批相关);8 红=`bulk-delete-perf-verify` pre-existing rocksdb 环境。工作树干净。 |
+| **专项边界判断** | 读 §3 交接 | ✅ **认可主动止损**:把"两套渲染(编辑 PM NodeView / 渲染 atomsToSvg)视觉规格各自硬编码、无共享真源"识别为**系统性根因**,另立专项是对的——零散修永远修不完。**没把本批该修的功能性 bug 推走**(bug1/bug2/浮条/图标渲不出都在本批修了),推走的是"视觉规格统一(字号/行高/padding/squircle)"这层架构动作。 |
+
+**裁决:**
+1. **阶段 C + postC 批代码层通过。** 整条 Graph shape 库重建线(A 清空+范式 / B SVG+拖点 / C 分类+首批+substance / postC 真机修复)**主线收口**。
+2. **✅ 准予「编辑↔渲染一致性」立项为独立专项**(§3 边界认可:对照差异清单 → 抽共享视觉规格常量两套同源消费 → 逐条真机截图比对)。正确的架构方向,不该塞进 shape 重建线。
+3. **真机验收留用户**(本批重头在真机)。总指挥环境无 GUI。
+4. **仍不合 main**:待编辑↔渲染专项 + 整条线真机稳后再议(沿 A/B/C 节奏)。
