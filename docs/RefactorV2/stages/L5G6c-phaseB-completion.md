@@ -3,7 +3,31 @@
 > 执行人:实施对话 · 验收人:总指挥 · 日期:2026-06-22
 > 分支:`feature/graph-shape-library-rebuild`(阶段 A 之上;**不合 main**)
 > 权威:[L5G6c §3.1 SVG / §3.5 handles](./L5G6c-shape-library-nocode-design.md) · [phaseB-prompt](../../tasks/2026-06-22-graph-shape-rebuild-phaseB-prompt.md) · [phaseB 拆解+决策](../../tasks/2026-06-22-graph-shape-rebuild-phaseB-breakdown.md)
-> 状态:**B1+B2 全绿,待总指挥核 + 用户真机(箭头不变形 / SVG 拖入 / 双击文字层)**
+> 状态:**✅ 总指挥代码层验收通过(2026-06-22,见 §9)+ 用户真机留待(箭头不变形 / SVG 拖入 / 双击文字层)**
+
+---
+
+## 9. 总指挥验收结论(2026-06-22,拿真实代码逐条核,非采信自述)
+
+**✅ 阶段 B 代码层验收通过,正式认可完成。**
+
+| 核验项 | 方法 | 结论 |
+|---|---|---|
+| **核心诉求:箭头不变形** | 读 px-ratio 单测断言原文 + 跑 | ✅ 真断言:px 箭头 `hl 恒定 30`(w 拉大不变)、箭身 `w-hl` 变长(370>小);**反证** ratio 箭头 `hlLarge/hlSmall≈w 比`(等比=变形)锁住语义。非空验。 |
+| **B2.2 反算逻辑** | 读 `reverseParamFromDrag` | ✅ 数值微分求灵敏度(`(posAt(p0+ε)-posAt(p0-ε))/2ε`)+ `axisDelta/sensitivity`,夹 min/max,灵敏度≈0 fail-safe。通用正确(不假设线性/不需符号反演),px/ratio 自然各归各。 |
+| **B1 SVG fail loud** | 读 svg-to-shapedef | ✅ 不支持元素(gradient/filter/image/text/use/mask/clippath…)→ warn+null,不静默吞。 |
+| **W5 边界** | grep 6 处 shape-library import 逐个核 | ✅ 全 `import type {`(多行);canvas-rendering 运行时走 requireCapabilityApi,零运行时 import。实施者自述属实。 |
+| **质量门** | 亲跑 | ✅ tsc 0;单测 452 绿(含 A 回归);8 红=`bulk-delete-perf-verify`(pre-existing rocksdb,与本刀无关)。 |
+| **probe 污染 Picker** | find definitions | ⛔→✅ **已裁决并代办**:probe 在 `definitions/basic/` 会被 bootstrap 扫进用户 Picker。总指挥 `git mv` 移到 `shapes/__fixtures__/`(单测 path.resolve 直读、不靠 bootstrap,同步改路径后 33 单测仍绿);`definitions/` 现仅 `.gitkeep`,Picker 干净。 |
+
+**裁决:probe 处置 = 移出 definitions 到 `__fixtures__`(总指挥代办,非保留进 Picker / 非删——保作回归 fixture)。**
+
+**欠条兑现 / 顺延确认**:
+- ✅ **M3 欠条(阶段 A)代码层已兑现**:probe shape 可拖入 + 双击编辑,文字层路径打通。**真机视觉**(SVG 拖入渲染 / 双击文字落 textBox / 箭头拖点不变形)→ 用户 npm start 实测(总指挥环境无 GUI)。
+- ✅ 顺带修了 A2 遗留(Host setInstanceLookup 漏传 doc → 文字节点 handle 判定失效),B2.1 补上——认可。
+- 诊断 log 改数值契约单测:无 GUI 环境合理替代,真机坐标留用户。
+
+**裁决:阶段 B 通过。** 准予起草阶段 C(分类骨架 + 首批真 shape + substance 重建)prompt。**仍不合 main。**
 
 ---
 

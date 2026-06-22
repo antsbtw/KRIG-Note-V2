@@ -202,7 +202,7 @@ describe('L5-G6c B2 验收 — probe 箭头 def 端到端(真 fixture)', () => {
     const path = await import('node:path');
     const p = path.resolve(
       __dirname,
-      '../../src/capabilities/shape-library/shapes/definitions/basic/__b_probe_arrow.json',
+      '../../src/capabilities/shape-library/shapes/__fixtures__/__b_probe_arrow.json',
     );
     arrowDef = JSON.parse(fs.readFileSync(p, 'utf-8'));
   });

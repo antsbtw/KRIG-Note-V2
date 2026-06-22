@@ -144,7 +144,7 @@ describe('L5-G6c B1.3 — probe .svg 端到端(bootstrap 加载链)', () => {
   it('真 probe .svg(含 H 命令)→ 导入器解析 + evaluate 出可渲染 d', () => {
     const probePath = path.resolve(
       __dirname,
-      '../../src/capabilities/shape-library/shapes/definitions/basic/__b_probe_svg.svg',
+      '../../src/capabilities/shape-library/shapes/__fixtures__/__b_probe_svg.svg',
     );
     const svg = readFileSync(probePath, 'utf-8');
     // bootstrap 的文件名约定:basic/__b_probe_svg.svg → krig.basic.__b_probe_svg
