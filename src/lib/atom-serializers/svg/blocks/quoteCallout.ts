@@ -16,6 +16,7 @@
 import type { Atom } from '../../types';
 import type { LinkRect } from './textBlock';
 import type { FontFamily } from '../font-loader';
+import { BLOCK_VISUAL_SPEC } from '../../../visual-spec/block-visual-spec';
 
 /** 子块渲染回调(index.ts renderAtom 注入)*/
 export type RenderChild = (
@@ -47,18 +48,20 @@ export interface IconRect {
   imageSrc?: string;
 }
 
-const QUOTE_BAR_WIDTH = 3;
-const QUOTE_BAR_FILL = '#7aa2f7';
-const QUOTE_INDENT = 12;
+// L5 一致性 E3:quote/callout 视觉常量接 block-visual-spec 向 note(pm-host.css)看齐。
+const QUOTE_BAR_WIDTH = BLOCK_VISUAL_SPEC.quote.barWidth;   // 3(= note border-left)
+const QUOTE_BAR_FILL = BLOCK_VISUAL_SPEC.quote.barColor;    // #555(原 #7aa2f7 蓝,note 是灰)
+const QUOTE_TEXT_FILL = BLOCK_VISUAL_SPEC.quote.textColor;  // #aaa(note 引用文字灰)
+const QUOTE_INDENT = BLOCK_VISUAL_SPEC.quote.indent;        // 16(原 12)
 const QUOTE_PAD_Y = 2;
 
-const CALLOUT_BG_FILL = '#2a2f3a';
-const CALLOUT_BG_RADIUS = 6;
-const CALLOUT_PAD_X = 12;
-const CALLOUT_PAD_Y = 10;
-// 图标框 = baseFontSize × ICON_SCALE(对齐编辑器 callout emoji 框 24/文字16 ≈ 1.5×)
-const ICON_SCALE = 1.5;
-const CALLOUT_ICON_GAP = 6; // 图标列与文字间距
+const CALLOUT_BG_FILL = BLOCK_VISUAL_SPEC.callout.bgFill;     // rgba(255,255,255,0.04)(原 #2a2f3a 实色)
+const CALLOUT_BG_RADIUS = BLOCK_VISUAL_SPEC.callout.radius;   // 4(原 6)
+const CALLOUT_PAD_X = BLOCK_VISUAL_SPEC.callout.padX;        // 16(原 12)
+const CALLOUT_PAD_Y = BLOCK_VISUAL_SPEC.callout.padY;        // 16(原 10)
+// 图标框 = baseFontSize × ICON_SCALE;note callout emoji 框 24 / 正文 16 = 1.5×。
+const ICON_SCALE = BLOCK_VISUAL_SPEC.callout.iconBox / BLOCK_VISUAL_SPEC.body.fontSize; // 24/16=1.5
+const CALLOUT_ICON_GAP = BLOCK_VISUAL_SPEC.callout.iconGap;  // 8(原 6)
 
 /** 渲染子块序列,统一向右平移 indent;返回 {svg, height}(从 yOffset 起的总高)*/
 async function renderChildren(
@@ -105,9 +108,12 @@ export async function renderBlockquote(
   if (children.length === 0) return { svg: '', height: 0 };
 
   const innerWidth = Math.max(20, contentWidth - QUOTE_INDENT);
+  // L5 一致性 E3:note 引用文字是灰(#aaa)。无显式主题色(Sticky)时,子块用引用灰色;
+  // Sticky 主题色(defaultTextColor 传入)优先,不被覆盖。italic 属 refinement 留 backlog。
+  const quoteTextColor = defaultTextColor ?? QUOTE_TEXT_FILL;
   const body = await renderChildren(
     children, renderChild, yOffset + QUOTE_PAD_Y, QUOTE_INDENT, innerWidth,
-    links, defaultTextColor, baseFontSize, fontFamily,
+    links, quoteTextColor, baseFontSize, fontFamily,
   );
   const totalHeight = body.height + QUOTE_PAD_Y * 2;
   // 左竖条铺满块高
@@ -134,7 +140,7 @@ export async function renderCallout(
 
   // 图标框尺寸对齐编辑态:编辑器 callout emoji 框 24px / 文字 ~16px(pm-host.css ≈ 1.5× font)。
   // 故图标框 = baseFontSize × ICON_SCALE,随文字字号缩放 → 渲染态与编辑态视觉一致。
-  const baseFs = baseFontSize ?? 14;
+  const baseFs = baseFontSize ?? BLOCK_VISUAL_SPEC.body.fontSize; // 16(原硬编码 14)
   const iconBox = Math.round(baseFs * ICON_SCALE);
   const indent = CALLOUT_PAD_X + iconBox + CALLOUT_ICON_GAP; // 文字让出图标列 + 间距
   const innerWidth = Math.max(20, contentWidth - indent - CALLOUT_PAD_X);
@@ -152,8 +158,9 @@ export async function renderCallout(
   // emit IconRect(来源 emoji/iconName/imageSrc + bbox),TextRenderer 栅格成纹理贴此 bbox。
   // 优先级对齐编辑器 NodeView:imageSrc > iconName > emoji(default 💡)。
   const iconX = CALLOUT_PAD_X;
-  // 图标垂直居中到首行文字(首行行高 ≈ baseFs × 1.4)
-  const iconY = yOffset + CALLOUT_PAD_Y + Math.max(0, (baseFs * 1.4 - iconBox) / 2);
+  // 图标垂直居中到首行文字(首行行高 = baseFs × spec 行高倍率 1.7,对齐 textBlock)
+  const firstLineHeight = baseFs * BLOCK_VISUAL_SPEC.body.lineHeight;
+  const iconY = yOffset + CALLOUT_PAD_Y + Math.max(0, (firstLineHeight - iconBox) / 2);
   const a = (atom.attrs ?? {}) as { emoji?: unknown; iconName?: unknown; imageSrc?: unknown };
   icons.push({
     x: iconX, y: iconY, w: iconBox, h: iconBox,
