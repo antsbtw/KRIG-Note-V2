@@ -120,6 +120,35 @@ describe('E2 防漂 — block-visual-spec == pm-host.css', () => {
     expect(prop(c, 'color').toLowerCase()).toBe(BLOCK_VISUAL_SPEC.code.textColor);
   });
 
+  it('horizontalRule(线宽/色;margin 1.5em@16=24px)', () => {
+    const hr = block('.krig-pm-host .ProseMirror hr.krig-horizontal-rule');
+    const borderTop = prop(hr, 'border-top'); // "1px solid #444"
+    expect(px(borderTop.split(/\s+/)[0])).toBe(BLOCK_VISUAL_SPEC.horizontalRule.thickness);
+    expect(borderTop.split(/\s+/)[2].toLowerCase()).toBe(BLOCK_VISUAL_SPEC.horizontalRule.color);
+    // margin:1.5em 0 → 1.5 × 16(基准字号)= 24px
+    const em = parseFloat(prop(hr, 'margin').split(/\s+/)[0]); // "1.5em"
+    expect(em * BLOCK_VISUAL_SPEC.body.fontSize).toBe(BLOCK_VISUAL_SPEC.horizontalRule.marginY);
+  });
+
+  it('taskList(checkbox 尺寸/accent / gap / checked 色)', () => {
+    const cb = block('.krig-pm-host .ProseMirror .krig-task-item__checkbox');
+    expect(px(prop(cb, 'width'))).toBe(BLOCK_VISUAL_SPEC.taskList.checkboxSize);
+    expect(px(prop(cb, 'height'))).toBe(BLOCK_VISUAL_SPEC.taskList.checkboxSize);
+    expect(prop(cb, 'accent-color').toLowerCase()).toBe(BLOCK_VISUAL_SPEC.taskList.accentColor);
+    const item = block('.krig-pm-host .ProseMirror li.krig-task-item');
+    expect(px(prop(item, 'gap'))).toBe(BLOCK_VISUAL_SPEC.taskList.gap);
+    const checked = block('.krig-pm-host .ProseMirror li.krig-task-item.checked > .krig-task-item__content');
+    expect(prop(checked, 'color').toLowerCase()).toBe(BLOCK_VISUAL_SPEC.taskList.checkedColor);
+  });
+
+  it('toggleList(箭头列宽/色 / gap)', () => {
+    const arrow = block('.krig-pm-host .ProseMirror .krig-toggle-list__arrow');
+    expect(px(prop(arrow, 'width'))).toBe(BLOCK_VISUAL_SPEC.toggle.arrowBox);
+    expect(prop(arrow, 'color').toLowerCase()).toBe(BLOCK_VISUAL_SPEC.toggle.arrowColor);
+    const tl = block('.krig-pm-host .ProseMirror div.krig-toggle-list');
+    expect(px(prop(tl, 'gap'))).toBe(BLOCK_VISUAL_SPEC.toggle.gap);
+  });
+
   it('inline marks(code 橙字背景圆角 / link 蓝)', () => {
     const code = block('.krig-pm-host .ProseMirror code');
     expect(prop(code, 'background').toLowerCase()).toBe(BLOCK_VISUAL_SPEC.marks.inlineCode.bgFill);

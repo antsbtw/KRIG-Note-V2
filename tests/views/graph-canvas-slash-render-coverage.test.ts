@@ -52,21 +52,17 @@ describe('E1 不变量 — graph 可插块 ⊆ 渲染态可渲块', () => {
     }
   });
 
-  it('过滤确实剔除渲染态当前不支持的块(divider/task/toggle)', () => {
+  it('E4 后:divider/task/toggle 渲染态已补 → slash 闸放开(不再剔)', () => {
     const all = createTurnIntoItems(VIEW);
     const filtered = filterSlashItemsToRenderable(all);
-    const droppedCommands = all
-      .filter((i) => !filtered.includes(i))
-      .map((i) => i.command);
-    // 渲染态当前(E4 前)不支持 horizontalRule/taskList/toggleList → 必被剔
-    expect(droppedCommands).toContain('text-editing.slash-turn-divider');
-    expect(droppedCommands).toContain('text-editing.slash-turn-task');
-    expect(droppedCommands).toContain('text-editing.slash-turn-toggle');
-    // 已有 8 块代表(paragraph/quote/code/callout)必保留
-    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-paragraph')).toBe(true);
-    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-quote')).toBe(true);
-    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-code')).toBe(true);
-    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-callout')).toBe(true);
+    // E4 补了 horizontalRule/taskList/toggleList 渲染器 + RENDERABLE_ATOM_TYPES 追加
+    // → 闸自动放开,这三项现在保留(对齐「编辑⊆渲染」:渲染能渲了就放）。
+    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-divider')).toBe(true);
+    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-task')).toBe(true);
+    expect(filtered.some((i) => i.command === 'text-editing.slash-turn-toggle')).toBe(true);
+    // 当前 createTurnIntoItems 全部 12 项渲染态都支持 → 一个不剔(全覆盖)。
+    // 此断言锁定「闸不空转误剔可渲块」;将来若加渲染态不支持的 turn-into,本测会提醒更新。
+    expect(filtered.length).toBe(all.length);
   });
 
   it('isSlashItemRenderable:非 turn-into item(math-block)放行', () => {

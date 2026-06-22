@@ -5,6 +5,9 @@ import { renderMathBlock } from './blocks/mathBlock';
 import { renderCodeBlock } from './blocks/codeBlock';
 import { renderList } from './blocks/list';
 import { renderBlockquote, renderCallout, type IconRect, type RenderChild } from './blocks/quoteCallout';
+import { renderHorizontalRule } from './blocks/horizontalRule';
+import { renderTaskList } from './blocks/taskList';
+import { renderToggleList } from './blocks/toggleList';
 import type { FontFamily } from './font-loader';
 import { LruCache } from '../lru';
 import { BLOCK_VISUAL_SPEC } from '../../visual-spec/block-visual-spec';
@@ -20,7 +23,7 @@ export type { IconRect } from './blocks/quoteCallout';
  * (防"功能黑洞":能插却渲不出 → Esc 后灰字占位/丢内容)。
  *
  * 'textBlock' 是 V1 NoteView 旧 atom 命名(= paragraph),保留兼容。
- * 注:E4 补 horizontalRule/taskList/toggleList 渲染器时,在此集合 + switch 同步追加。
+ * E4 已补 horizontalRule/taskList/toggleList(轻量矢量块)→ graph slash 闸自动放开。
  */
 export const RENDERABLE_ATOM_TYPES: ReadonlySet<string> = new Set([
   'textBlock',
@@ -33,6 +36,9 @@ export const RENDERABLE_ATOM_TYPES: ReadonlySet<string> = new Set([
   'orderedList',
   'blockquote',
   'callout',
+  'horizontalRule', // E4
+  'taskList',        // E4
+  'toggleList',      // E4
 ]);
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -204,6 +210,15 @@ async function renderAtom(
     case 'callout':
       // 递归子块 + 圆角底框 + 图标 IconRect(L5-G6c:忠实还原 emoji/lucide/上传图)
       return renderCallout(atom, yOffset, contentWidth, childRender, links, icons, defaultTextColor, baseFontSize, fontFamily);
+    case 'horizontalRule':
+      // L5 一致性 E4:1px 分隔线(矢量,无 content)
+      return renderHorizontalRule(yOffset, contentWidth);
+    case 'taskList':
+      // L5 一致性 E4:checkbox + 子块(递归);taskItem 在内部处理
+      return renderTaskList(atom, yOffset, contentWidth, childRender, links, defaultTextColor, baseFontSize, fontFamily);
+    case 'toggleList':
+      // L5 一致性 E4:箭头 + 折叠体(open 时渲全部子块,closed 只渲首子)
+      return renderToggleList(atom, yOffset, contentWidth, childRender, links, defaultTextColor, baseFontSize, fontFamily);
     default:
       // 未识别的 block:渲染一行灰字占位
       return renderUnknownAtom(atom, yOffset, contentWidth);

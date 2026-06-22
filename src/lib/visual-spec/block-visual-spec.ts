@@ -100,6 +100,37 @@ export interface BlockVisualSpec {
     /** 文字色(#e8eaed) */
     readonly textColor: string;
   };
+  /** horizontalRule(pm-host.css `.krig-horizontal-rule` L399-405) */
+  readonly horizontalRule: {
+    /** 线高 px(border-top 1px) */
+    readonly thickness: number;
+    /** 线色(#444) */
+    readonly color: string;
+    /** 上下 margin px(1.5em @16 = 24px) */
+    readonly marginY: number;
+  };
+  /** taskList(pm-host.css `.krig-task-item` / __checkbox L176-241) */
+  readonly taskList: {
+    /** checkbox 边长 px(16px) */
+    readonly checkboxSize: number;
+    /** checkbox 选中色(accent #8ab4f8) */
+    readonly accentColor: string;
+    /** checkbox-文字间距 px(flex gap 8px) */
+    readonly gap: number;
+    /** item 视觉缩进每级 px(node-view margin-left 24px) */
+    readonly indentPerLevel: number;
+    /** 已完成文字色(#9aa0a6,带删除线) */
+    readonly checkedColor: string;
+  };
+  /** toggleList(pm-host.css `.krig-toggle-list` / __arrow L290-333) */
+  readonly toggle: {
+    /** 箭头列宽 px(arrow width 20px) */
+    readonly arrowBox: number;
+    /** 箭头-内容间距 px(flex gap 4px) */
+    readonly gap: number;
+    /** 箭头色(#e8eaed) */
+    readonly arrowColor: string;
+  };
   /** inline marks */
   readonly marks: {
     /** inline code:bg #2a2a2a / 字 #f78c6c 橙 / 圆角 3px(pm-host.css `.ProseMirror code` L76-83) */
@@ -158,6 +189,23 @@ export const BLOCK_VISUAL_SPEC: BlockVisualSpec = {
     padX: 16,            // padding:12px 16px → x16
     padY: 12,            //                   → y12
     textColor: '#e8eaed', // color:#e8eaed
+  },
+  horizontalRule: {
+    thickness: 1,        // .krig-horizontal-rule border-top:1px
+    color: '#444',       // border-top color #444
+    marginY: 24,         // margin:1.5em 0 @16 = 24px
+  },
+  taskList: {
+    checkboxSize: 16,    // .krig-task-item__checkbox 16px
+    accentColor: '#8ab4f8', // accent-color:#8ab4f8
+    gap: 8,              // .krig-task-item gap:8px
+    indentPerLevel: 24,  // node-view margin-left: indent*24px
+    checkedColor: '#9aa0a6', // .checked 文字 #9aa0a6 + 删除线
+  },
+  toggle: {
+    arrowBox: 20,        // .krig-toggle-list__arrow width:20px
+    gap: 4,              // .krig-toggle-list gap:4px
+    arrowColor: '#e8eaed', // arrow color #e8eaed
   },
   marks: {
     inlineCode: {
