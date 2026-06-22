@@ -20,7 +20,7 @@ let bootstrapped = false;
 
 /** 已知 ShapeCategory(目录名约定校验;未知 category 的 svg fail loud 跳过) */
 const KNOWN_CATEGORIES: ReadonlySet<string> = new Set<ShapeCategory>([
-  'basic', 'arrow', 'flowchart', 'line', 'text',
+  'basic', 'geometry', 'arrow', 'flowchart', 'line', 'text',
 ]);
 
 export function bootstrapShapes(): void {

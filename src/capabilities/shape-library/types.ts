@@ -16,7 +16,7 @@
 // Shape
 // ─────────────────────────────────────────────────────────
 
-export type ShapeCategory = 'basic' | 'arrow' | 'flowchart' | 'line' | 'text';
+export type ShapeCategory = 'basic' | 'geometry' | 'arrow' | 'flowchart' | 'line' | 'text';
 
 /**
  * 几何范式(L5-G6c §2 统一范式;取代旧 `renderer: parametric|static-svg|custom`)。

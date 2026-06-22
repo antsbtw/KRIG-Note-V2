@@ -254,7 +254,7 @@ function collectLibrary(): { groups: CategoryGroup[]; allItems: PickerItem[] } {
     });
   }
 
-  const SHAPE_ORDER: ShapeCategory[] = ['basic', 'arrow', 'flowchart', 'line', 'text'];
+  const SHAPE_ORDER: ShapeCategory[] = ['basic', 'geometry', 'arrow', 'flowchart', 'line', 'text'];
   const SUBSTANCE_ORDER: string[] = ['library', 'family', 'user'];
 
   const groups: CategoryGroup[] = [];
