@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { evaluateShape, evaluateHandles } from '@capabilities/shape-library/shapes/renderers';
 import { parseSvgToShapeDef } from '@capabilities/shape-library/shapes/svg-to-shapedef';
+import { displayBucket } from '@capabilities/canvas-rendering/ui/library-picker/index';
 import type { ShapeDef } from '@capabilities/shape-library/types';
 
 const DEFS = path.resolve(__dirname, '../../src/capabilities/shape-library/shapes/definitions');
@@ -69,6 +70,24 @@ describe('L5-G6c C2 — Basic 最小集 parametric def', () => {
     expect(def.handles?.length).toBeGreaterThan(0);
     const hs = evaluateHandles(def, { width: 200, height: 200 });
     expect(hs.length).toBeGreaterThan(0);
+  });
+});
+
+describe('L5-G6c 分类收敛 — Picker 只显 Basic + Geometry(Freeform 式)', () => {
+  it('geometry → Geometry;basic/arrow/line/flowchart/text 全归 Basic 混排', () => {
+    // Freeform 式:只两个展示桶,arrow/line 不独立 tab
+    expect(displayBucket('geometry')).toBe('geometry');
+    expect(displayBucket('basic')).toBe('basic');
+    expect(displayBucket('arrow')).toBe('basic');
+    expect(displayBucket('line')).toBe('basic');
+    expect(displayBucket('flowchart')).toBe('basic');
+    expect(displayBucket('text')).toBe('basic');
+  });
+
+  it('最小集映射:7 个 shape → Basic 桶(rect/roundRect/ellipse/text/arrow/line×2);star → Geometry', () => {
+    const basicSet = ['basic', 'basic', 'basic', 'basic', 'arrow', 'line', 'line'] as const;
+    expect(basicSet.map(displayBucket).every((b) => b === 'basic')).toBe(true);
+    expect(displayBucket('geometry')).toBe('geometry');
   });
 });
 
