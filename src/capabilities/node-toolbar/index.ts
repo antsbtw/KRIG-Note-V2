@@ -55,9 +55,10 @@ registerSection(textSection);
 // ── 内置 canvas 节点类型 → section 绑定(其它 view 可继续 registerNodeBinding 扩展)──
 // 容器零硬编码:浮条上有哪几个 button 完全由这些声明决定。
 registerNodeBinding({
-  // 普通几何形:Fill + Line
+  // 几何形(对齐 Freeform):Fill + Line + Text —— shape 自带文字层,字体/字色/对齐也可调。
+  // 双击进文字编辑;单击选中出此三 section(线条/颜色/字体都能改)。
   match: (node) => node.kind === 'shape',
-  sections: ['fill', 'line'],
+  sections: ['fill', 'line', 'text'],
 });
 registerNodeBinding({
   // 线条:Line + Arrow(无 Fill);arrow section 待后续,先只 line
