@@ -6,8 +6,8 @@
  * V2 evaluateShape 直接返 EvaluatedPath 或 null).
  *
  * 不接入测试框架,直接 ts-node 风格运行(或开发面板上调一次).
- * 检查:
- * 1. 所有 22 个 shape 都被 bootstrap 收齐
+ * 检查(L5-G6c 阶段 A 已清空旧库,当前 0 shape;阶段 C 填回后此 smoke 重新有料):
+ * 1. 所有 bootstrap 收齐的 shape
  * 2. id 不重复
  * 3. 每个 shape 在 200x100 尺寸下能渲染出非空 d 字符串
  *    (geometry.kind 非 parametric — text / svg — 跳过几何求值)

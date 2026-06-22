@@ -322,7 +322,15 @@ export class NodeRenderer {
       return this.renderLineShape(inst, shape);
     }
 
-    // 几何 shape:走 evaluate → path-to-three
+    // svg kind 渲染走 path-to-three(阶段 B 真消费 svgPath);A 未实现 → fail loud 降级跳过
+    if (shape.geometry.kind === 'svg') {
+      console.warn(
+        `[canvas-rendering/NodeRenderer] geometry.kind 'svg' 渲染留阶段 B,跳过 ${inst.ref} (instance ${inst.id})`,
+      );
+      return null;
+    }
+
+    // 几何 shape(geometry.kind:'parametric'):走 evaluate → path-to-three
     const { position, size } = ensurePositionSize(inst, shape);
     const evalPath = api.shapes.evaluate(
       inst.ref,

@@ -1,7 +1,7 @@
 /**
  * shape-library capability — Shape + Substance 资源仓库(L5-G2)
  *
- * 职责:Shape 定义(22 个内置)+ Substance 定义(5 个内置)+ 通用参数化求值器
+ * 职责:Shape 定义(L5-G6c 阶段 A 已清空,目录扫描保留待阶段 C 填)+ Substance 定义 + 通用参数化求值器
  * (evaluateShape)+ OOXML 17 操作符公式求值器,**对外只输出纯数据**
  * (EvaluatedPath),**0 import three**(P1-1 严格版屏障核心).
  *
