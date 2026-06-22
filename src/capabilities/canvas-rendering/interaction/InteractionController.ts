@@ -724,8 +724,7 @@ export class InteractionController {
     };
     // 文字框节点(geometry.kind:'text',L5-G6c 统一范式;不再特判 ref):
     // 创建时初始化空 DriverSerialized 信封(decision 018 P0d hotfix 形态对齐 —
-    // 与 view 端编辑结束写回 inst.doc 的 DriverSerialized 信封一致,
-    // 防 incomingDocToPmPayload 走 fallback 触发 warn 噪音化)。
+    // 与 view 端编辑结束写回 inst.doc 的 DriverSerialized 信封一致,持久化层直接内联 payload.doc)。
     const placedShape = spec.kind === 'shape' ? getShapeApi().shapes.get(spec.ref) : null;
     if (placedShape?.geometry.kind === 'text') {
       instance.doc = {
