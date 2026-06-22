@@ -253,10 +253,14 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     (info: { instanceId: string; screenX: number; screenY: number; screenW: number; screenH: number }): void => {
       const inst = hostRef.current?.getInstance(info.instanceId);
       if (!inst) return;
-      // line 类不可编辑(端点驱动、无文字层);其余 shape(含几何)双击均可起 doc 编辑
+      // line 类不可编辑(端点驱动、无文字层);其余 shape(含几何)双击均可起 doc 编辑。
+      // 几何 shape(parametric/svg)= 在其上叠文字层 → popup 透明,几何透出不被遮挡;
+      // 文字框(kind:'text')/ Sticky 有自身底色 → 不透明(沿旧视觉)。
+      let transparent = false;
       if (inst.type === 'shape') {
         const shape = shapeApi.shapes.get(inst.ref);
         if (shape?.category === 'line') return;
+        transparent = shape?.geometry.kind !== 'text';
       }
       textNode.enterEdit({
         instanceId: info.instanceId,
@@ -266,6 +270,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         width: info.screenW,
         height: info.screenH,
         backgroundColor: inst.style_overrides?.fill?.color,
+        transparent,
         heightFixed: !!inst.size_lock?.h,
         workspaceId,
         viewId: 'graph-canvas-view',

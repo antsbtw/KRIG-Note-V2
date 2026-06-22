@@ -43,6 +43,11 @@ export interface EnterEditOptions {
   height: number;
   /** Sticky 节点背景色(可选,popup 同色) */
   backgroundColor?: string;
+  /**
+   * 透明 popup(L5-G6c:编辑覆盖在几何 shape 上时透明,几何透出、只编辑文字层)。
+   * true → popup 无底色/无边框/无阴影;文字框/Sticky(有自身底色)= false。
+   */
+  transparent?: boolean;
   /** 是否固定高度(true: height + overflow auto;false: min-height 自然撑高) */
   heightFixed?: boolean;
   /** workspace id(text-editing.Host config.instanceId 用) */

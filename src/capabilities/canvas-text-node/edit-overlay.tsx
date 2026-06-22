@@ -82,6 +82,8 @@ export function EditOverlay(): ReactElement | null {
   const [initialDoc, setInitialDoc] = useState<DriverSerialized | null>(null);
   // 编辑期间最新的 doc(commit 时写回 instance.doc)
   const latestDocRef = useRef<DriverSerialized | null>(null);
+  // popup 容器 ref(挂载后聚焦内部 PM contenteditable,否则双击进编辑却打不了字)
+  const popupRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -128,20 +130,49 @@ export function EditOverlay(): ReactElement | null {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [session, exit]);
 
+  // 挂载后聚焦 PM 编辑器(否则双击进编辑但焦点仍在 canvas → 打不了字)。
+  // Host 内部 EditorView 异步建好后,.ProseMirror contenteditable 才在 DOM 里;
+  // 用 RAF + 重试覆盖 mount 时序(initialDoc 就绪 → Host render → EditorView mount)。
+  useEffect(() => {
+    if (!session || !initialDoc) return;
+    let raf = 0;
+    let tries = 0;
+    const tryFocus = (): void => {
+      const pm = popupRef.current?.querySelector<HTMLElement>('.ProseMirror');
+      if (pm) { pm.focus(); return; }
+      if (tries++ < 20) raf = requestAnimationFrame(tryFocus); // ~20 帧内重试
+    };
+    raf = requestAnimationFrame(tryFocus);
+    return () => cancelAnimationFrame(raf);
+  }, [session, initialDoc]);
+
   if (!session || !initialDoc) return null;
 
   const Host = textEditing.Host;
   const t = session.opts;
-  // V1 体验:popup 完全贴合 mesh 屏幕投影,编辑态与展示态视觉无缝过渡(M2.1 §4.2)
-  const popupStyle: CSSProperties = {
-    ...styles.popup,
-    left: t.screenX,
-    top: t.screenY,
-    width: t.width,
-    [t.heightFixed ? 'height' : 'minHeight']: t.height,
-    background: t.backgroundColor ?? 'rgba(40, 40, 40, 0.98)',
-    color: t.backgroundColor ? '#222' : 'var(--krig-text-primary)',
-  };
+  // V1 体验:popup 完全贴合 mesh 屏幕投影,编辑态与展示态视觉无缝过渡(M2.1 §4.2)。
+  // L5-G6c:transparent(编辑覆盖几何 shape)→ 无底色/边框/阴影,几何透出、只编辑文字层。
+  const popupStyle: CSSProperties = t.transparent
+    ? {
+        ...styles.popup,
+        left: t.screenX,
+        top: t.screenY,
+        width: t.width,
+        [t.heightFixed ? 'height' : 'minHeight']: t.height,
+        background: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
+        color: 'var(--krig-text-primary)',
+      }
+    : {
+        ...styles.popup,
+        left: t.screenX,
+        top: t.screenY,
+        width: t.width,
+        [t.heightFixed ? 'height' : 'minHeight']: t.height,
+        background: t.backgroundColor ?? 'rgba(40, 40, 40, 0.98)',
+        color: t.backgroundColor ? '#222' : 'var(--krig-text-primary)',
+      };
 
   return (
     <div
@@ -151,6 +182,7 @@ export function EditOverlay(): ReactElement | null {
       }}
     >
       <div
+        ref={popupRef}
         className="krig-canvas-edit-popup"
         style={popupStyle}
         onMouseDown={(e) => e.stopPropagation()}
