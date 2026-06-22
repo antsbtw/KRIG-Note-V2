@@ -51,41 +51,74 @@ export async function renderList(
   // 缩进后,可用文字宽度收窄(嵌套越深越窄)
   const innerWidth = Math.max(20, contentWidth - indent);
 
-  // NoteView schema(权威源):bulletList/orderedList content='block+',
-  // 子元素直接是 paragraph/heading/嵌套 list,**没有 listItem 中间层**.
-  // 序列化器适配此结构:每个 paragraph/heading child = 一个列表项,嵌套 list 缩进递归.
-  // (兼容旧 atom 'textBlock' 命名)
+  // note schema(权威源,bullet-list/spec.ts):content='listItem+';listItem content='block+'.
+  // 即真实结构是 bulletList > listItem > paragraph(**有 listItem 中间层**,
+  // 原注释「没有 listItem」是陈旧错误,导致渲染器跳过 listItem → 整列表渲空,L5 修复)。
+  // 兼容三种子形态:① listItem 包装(权威);② 直接 paragraph/heading(V1 旧 atom);
+  // ③ 直接嵌套 list。
+
+  // 画一个列表项:首块画 bullet/number,后续块(嵌套 list / 多段)缩进续渲。
+  const renderItem = async (blocks: Atom[]): Promise<number> => {
+    const itemYStart = y;
+    let drewMarker = false;
+    for (const blk of blocks) {
+      if (!blk) continue;
+      if (blk.type === 'textBlock' || blk.type === 'paragraph' || blk.type === 'heading') {
+        const { svg, height } = await renderIndentedTextBlock(blk, y, indent, innerWidth, links, defaultTextColor, baseFontSize, fontFamily);
+        if (svg) parts.push(svg);
+        // bullet/number 只在该 item 首块基线画一次(对齐 note:marker 对首行)
+        if (!drewMarker) {
+          await drawMarker(itemYStart);
+          drewMarker = true;
+        }
+        y += height;
+      } else if (blk.type === 'bulletList') {
+        const { svg, height } = await renderList(blk, y, false, depth + 1, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
+        if (svg) parts.push(svg);
+        y += height;
+      } else if (blk.type === 'orderedList') {
+        const { svg, height } = await renderList(blk, y, true, depth + 1, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
+        if (svg) parts.push(svg);
+        y += height;
+      }
+      // 其他块(callout/math 嵌列表项)暂跳过,不破坏布局
+    }
+    return y - itemYStart;
+  };
+
+  // 在 item 首块基线画 bullet / number(颜色跟随主题色;字号/偏移随 base 缩放,L5)
+  const drawMarker = async (markerYStart: number): Promise<void> => {
+    const bulletFill = defaultTextColor ?? BULLET_FILL;
+    const base = baseFontSize ?? SPEC_BASE_FONT_SIZE;
+    const numberFontSize = NUMBER_FONT_SIZE * (base / SPEC_BASE_FONT_SIZE);
+    const baselineY = markerYStart + base + 2;
+    if (ordered) {
+      const text = `${index}.`;
+      const numX = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET;
+      const r = await textToPath(text, numberFontSize, numX, baselineY, bulletFill);
+      if (r.svg) parts.push(r.svg);
+    } else {
+      const bulletDiameter = BULLET_DIAMETER * (base / SPEC_BASE_FONT_SIZE);
+      const cx = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET + bulletDiameter / 2;
+      const cy = baselineY - base / 2 + 1;
+      parts.push(circlePath(cx, cy, bulletDiameter / 2, bulletFill));
+    }
+  };
+
   for (const child of atom.content) {
     if (!child) continue;
-    const childYStart = y;
 
-    if (child.type === 'textBlock' || child.type === 'paragraph' || child.type === 'heading') {
-      const { svg, height } = await renderIndentedTextBlock(child, y, indent, innerWidth, links, defaultTextColor, baseFontSize, fontFamily);
-      if (svg) parts.push(svg);
-
-      // 在文本基线位置画 bullet / number(baselineY 与 textBlock 内 baseline 算法一致)
-      // bullet/number 颜色跟随节点主题色(Sticky 黄底深色,默认 note 文字色 #e8eaed)
-      const bulletFill = defaultTextColor ?? BULLET_FILL;
-      // L5 一致性 E3:序号字号 / baseline 偏移随实际 base 缩放(原硬编码 14 → 大字号 bullet 错位)。
-      const base = baseFontSize ?? SPEC_BASE_FONT_SIZE;
-      const numberFontSize = NUMBER_FONT_SIZE * (base / SPEC_BASE_FONT_SIZE);
-      const baselineY = childYStart + base + 2;
-      if (ordered) {
-        const text = `${index}.`;
-        const numX = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET;
-        const r = await textToPath(text, numberFontSize, numX, baselineY, bulletFill);
-        if (r.svg) parts.push(r.svg);
-      } else {
-        const bulletDiameter = BULLET_DIAMETER * (base / SPEC_BASE_FONT_SIZE);
-        const cx = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET + bulletDiameter / 2;
-        const cy = baselineY - base / 2 + 1;
-        parts.push(circlePath(cx, cy, bulletDiameter / 2, bulletFill));
-      }
-
-      y += height;
+    if (child.type === 'listItem') {
+      // 权威结构:listItem > block+,整项缩进、首块画 marker
+      const blocks = Array.isArray(child.content) ? child.content : [];
+      await renderItem(blocks);
+      index++;
+    } else if (child.type === 'textBlock' || child.type === 'paragraph' || child.type === 'heading') {
+      // V1 旧 atom:list 直接含 paragraph(无 listItem 包装)
+      await renderItem([child]);
       index++;
     } else if (child.type === 'bulletList') {
-      // 嵌套无序列表:缩进 +1 级,index 不增,可用宽度也收窄
+      // 直接嵌套无序列表(无 listItem 包装的旧形态)
       const { svg, height } = await renderList(child, y, false, depth + 1, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
       if (svg) parts.push(svg);
       y += height;
