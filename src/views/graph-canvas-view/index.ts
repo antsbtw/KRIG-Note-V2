@@ -38,6 +38,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { GraphCanvasView } from './GraphCanvasView';
 import { registerGraphCanvasCommands } from './canvas-commands';
+import { filterSlashItemsToRenderable } from './slash-render-gate';
 import {
   registerNavSide,
   registerFolderTreeContextMenu,
@@ -74,10 +75,16 @@ function registerTextEditingMenusForCanvas(): void {
     ui.floatingToolbar.createLinkButton(VIEW),
     ui.floatingToolbar.createColorButton(VIEW),
   ]);
-  slashRegistry.register([
-    ...ui.slashMenu.createTurnIntoItems(VIEW),
-    ui.slashMenu.createMathBlockItem(VIEW),
-  ]);
+  // L5 编辑↔渲染一致性专项 E1:slash/turn-into 闸 —— 只放渲染态(atomsToSvg)本期支持块,
+  // 守「编辑能插 ⊆ 渲染能渲」不变量(防"功能黑洞":能插却渲不出 → Esc 后灰字占位)。
+  // 当前剔除 divider/task/toggle(渲染态未支持);E4 补它们渲染器后 RENDERABLE_ATOM_TYPES
+  // 追加 → 本闸自动放开。math-block 恒可渲,放行。见 slash-render-gate.ts。
+  slashRegistry.register(
+    filterSlashItemsToRenderable([
+      ...ui.slashMenu.createTurnIntoItems(VIEW),
+      ui.slashMenu.createMathBlockItem(VIEW),
+    ]),
+  );
 }
 
 registerTextEditingMenusForCanvas();

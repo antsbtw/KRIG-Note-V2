@@ -11,6 +11,29 @@ import { LruCache } from '../lru';
 export type { LinkRect } from './blocks/textBlock';
 export type { IconRect } from './blocks/quoteCallout';
 
+/**
+ * 渲染态可渲染块集(atom.type)— **单一真源**(L5 编辑↔渲染一致性专项 E1)。
+ *
+ * 与下方 `renderAtom` switch 的 case 一一对应:**改 switch 必同步改此集合**(单测守)。
+ * 用途:graph 编辑态 slash/turn-into 白名单据此过滤,守「编辑能插 ⊆ 渲染能渲」不变量
+ * (防"功能黑洞":能插却渲不出 → Esc 后灰字占位/丢内容)。
+ *
+ * 'textBlock' 是 V1 NoteView 旧 atom 命名(= paragraph),保留兼容。
+ * 注:E4 补 horizontalRule/taskList/toggleList 渲染器时,在此集合 + switch 同步追加。
+ */
+export const RENDERABLE_ATOM_TYPES: ReadonlySet<string> = new Set([
+  'textBlock',
+  'paragraph',
+  'heading',
+  'mathBlock',
+  'mathInline',
+  'codeBlock',
+  'bulletList',
+  'orderedList',
+  'blockquote',
+  'callout',
+]);
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEFAULT_VIEWBOX_W = 200;
 const VIEWBOX_H = 30;
