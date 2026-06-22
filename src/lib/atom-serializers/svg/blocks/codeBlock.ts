@@ -17,14 +17,17 @@
 import type { Atom } from '../../types';
 import { textToPath } from '../text-to-path';
 import type { MarkSet } from '../font-loader';
+import { BLOCK_VISUAL_SPEC } from '../../../visual-spec/block-visual-spec';
 
-const FONT_SIZE = 13;
-const LINE_HEIGHT = 18;
-const PADDING_X = 10;
-const PADDING_Y = 10;
-const BG_FILL = '#1e1e1e';
-const BG_RADIUS = 6;
-const CODE_TEXT_FILL = '#d4d4d4';
+// L5 一致性 E3:codeBlock 视觉常量接 block-visual-spec 向 note(pm-host.css)看齐。
+const FONT_SIZE = BLOCK_VISUAL_SPEC.code.fontSize;                    // 14(原 13)
+const LINE_HEIGHT = BLOCK_VISUAL_SPEC.code.fontSize * BLOCK_VISUAL_SPEC.code.lineHeight; // 14×1.5=21(原 18)
+const PADDING_X = BLOCK_VISUAL_SPEC.code.padX;                        // 16(原 10)
+const PADDING_Y = BLOCK_VISUAL_SPEC.code.padY;                        // 12(原 10)
+const BG_FILL = BLOCK_VISUAL_SPEC.code.bgFill;                        // #2a2a2a(原 #1e1e1e)
+const BORDER_COLOR = BLOCK_VISUAL_SPEC.code.borderColor;              // #3a3a3a(note 有 1px 边框,原无)
+const BG_RADIUS = BLOCK_VISUAL_SPEC.code.radius;                      // 4(原 6)
+const CODE_TEXT_FILL = BLOCK_VISUAL_SPEC.code.textColor;              // #e8eaed(原 #d4d4d4)
 const CODE_MARKS: MarkSet = { code: true };
 
 /**
@@ -65,10 +68,11 @@ export async function renderCodeBlock(
   // 背景宽 = 最长行宽 + 左右 padding,封顶 contentWidth(短代码不铺满整宽 → 不留右侧大空白,
   // 配合 svgToPng tightCrop 让代码图也贴合内容,实机修「又宽又扁」)。
   const bgWidth = Math.min(contentWidth, Math.ceil(maxLineWidth) + PADDING_X * 2);
-  // 背景圆角矩形铺在文字之下(parts 之前)
+  // 背景圆角矩形铺在文字之下(parts 之前)+ note 的 1px 边框(stroke)
   const bg =
     `<rect x="0" y="${yOffset}" width="${bgWidth}" height="${totalHeight}" ` +
-    `rx="${BG_RADIUS}" ry="${BG_RADIUS}" fill="${BG_FILL}" />`;
+    `rx="${BG_RADIUS}" ry="${BG_RADIUS}" fill="${BG_FILL}" ` +
+    `stroke="${BORDER_COLOR}" stroke-width="1" />`;
 
   return { svg: bg + parts.join(''), height: totalHeight };
 }
