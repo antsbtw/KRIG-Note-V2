@@ -1,8 +1,16 @@
 # 阶段 A 实施拆解 — Graph Shape 库重建(清空 + 统一范式)
 
-> 实施者出,**待总指挥审过再大改动**(对齐 prompt §5 开工 checklist)。
+> 实施者出,**总指挥已审 + 准予开工**(2026-06-22,带 3 条强制修正,见 §0.5)。
 > 权威:[L5G6c 总纲](../RefactorV2/stages/L5G6c-shape-library-nocode-design.md) · [L5G6b text 统一](../RefactorV2/stages/L5G6b-shape-composition-text-unify-design.md) · [实施 prompt](./2026-06-22-graph-shape-rebuild-phaseA-prompt.md)
 > 基线:tsc 0(已核)/ 干净 main G4.5 态 / 分支 `feature/graph-shape-library-rebuild`
+
+## 0.5 总指挥审计裁决(2026-06-22,强制,已核实落地)
+
+- **M1 — hasContent predicate 绝不删**(否决实施者倾向)。核实:`user:krig:hasContent` 是跨文件通用语义边,被 `storage/surreal/schema.ts`(migration_1_2_0 pm GC 判据)、`storage/health/cardinality-check.ts`(1:1 自愈扫描硬列)、`semantic/types/atom-entity.ts`(refcount flag)消费;且 hasContent 边仅 graph canvas-store 创建(schema.ts:271 是 reader)。→ **A3 只拆 graph canvas-store 那 5 处 doc 存储用法,predicate 常量定义 + schema GC + cardinality-check 一律不碰。**(`x-extract-tweet.ts`/`ThoughtCard.tsx` 的 `hasContent` 是局部布尔同名,无关。)
+- **M2 — 清孤儿边,不选"不管"**(否决 D2=(a))。graph 旧画板 doc 走 hasContent 边 + pm atom;A3 后新写内联,旧边成健康检查悬空对象 → **加一次性 graph-scoped migration 清孤儿 hasContent 边 + 其悬空 pm atom**(幂等,沿 `migration_1_X_0` 模式)。
+- **M3 — A2 真机验证欠条**。P-textframe 全清空 → 文字层本阶段无真 shape 可验;接受"单测 + fixtures",**完成报告必须挂账:真机文字层验证顺延阶段 C。**
+- **D1 = (b)**(geometry 只放 kind,载荷留顶层)✅ · **D3 = 确认**(A4 仅 px 地基 + 单测)✅ · commit 顺序 A1→A5 ✅
+- **补红线 R8**:不删通用 predicate(删边先 grep 全仓)。**R9**:健康检查零新噪音(M2 清理后启动 cardinality-check 不报 hasContent 违规噪音)。
 
 ---
 
