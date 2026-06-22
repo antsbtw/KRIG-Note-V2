@@ -63,6 +63,20 @@ const CALLOUT_PAD_Y = BLOCK_VISUAL_SPEC.callout.padY;        // 16(原 10)
 const ICON_SCALE = BLOCK_VISUAL_SPEC.callout.iconBox / BLOCK_VISUAL_SPEC.body.fontSize; // 24/16=1.5
 const CALLOUT_ICON_GAP = BLOCK_VISUAL_SPEC.callout.iconGap;  // 8(原 6)
 
+/**
+ * 把 `rgba(r,g,b,a)` 拆成 SVG 的 `fill`(#rrggbb)+ `fill-opacity`(a)。
+ * 渲染链(SVGLoader/THREE.Color)丢 alpha,必须用 fill-opacity 单独表达透明度。
+ * 非 rgba 输入(#hex / 命名色)原样返回、opacity=1。
+ */
+function splitRgba(c: string): { color: string; opacity: number } {
+  const m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(c);
+  if (!m) return { color: c, opacity: 1 };
+  const [r, g, b] = [m[1], m[2], m[3]].map((v) => Math.max(0, Math.min(255, Math.round(parseFloat(v)))));
+  const a = m[4] !== undefined ? Math.max(0, Math.min(1, parseFloat(m[4]))) : 1;
+  const hex = '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+  return { color: hex, opacity: a };
+}
+
 /** 渲染子块序列,统一向右平移 indent;返回 {svg, height}(从 yOffset 起的总高)*/
 async function renderChildren(
   children: Atom[],
@@ -150,9 +164,13 @@ export async function renderCallout(
   );
   const totalHeight = body.height + CALLOUT_PAD_Y * 2;
 
+  // CALLOUT_BG_FILL 是 note 值 rgba(255,255,255,0.04)(深底上微提亮)。SVGLoader/THREE.Color
+  // 丢 alpha → 退化纯白(实机刺眼根因)。拆成 fill + fill-opacity,渲染链 TextRenderer 读
+  // fillOpacity 设 material 透明度,忠实还原半透明。
+  const { color: bgColor, opacity: bgOpacity } = splitRgba(CALLOUT_BG_FILL);
   const bg =
     `<rect x="0" y="${yOffset}" width="${contentWidth}" height="${Math.max(1, totalHeight)}" ` +
-    `rx="${CALLOUT_BG_RADIUS}" ry="${CALLOUT_BG_RADIUS}" fill="${CALLOUT_BG_FILL}" />`;
+    `rx="${CALLOUT_BG_RADIUS}" ry="${CALLOUT_BG_RADIUS}" fill="${bgColor}" fill-opacity="${bgOpacity}" />`;
 
   // 图标:SVG 里只**预留图标列方框**(不画图标 — 渲染链渲不出 emoji/<image>);
   // emit IconRect(来源 emoji/iconName/imageSrc + bbox),TextRenderer 栅格成纹理贴此 bbox。

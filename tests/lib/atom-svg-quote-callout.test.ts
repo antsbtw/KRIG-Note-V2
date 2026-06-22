@@ -68,6 +68,15 @@ describe('L5-G6c bug1 — callout 子内容渲染', () => {
     expect(countPaths(svg)).toBeGreaterThanOrEqual(countPaths(placeholder));
   });
 
+  it('callout 底框输出 fill + fill-opacity(半透明,非纯 rgba → 防渲染链丢 alpha 退白)', async () => {
+    const callout: Atom = { type: 'callout', attrs: { emoji: '💡' }, content: [para('X')] };
+    const svg = await atomsToSvg([callout]);
+    // note callout 底是 rgba(255,255,255,0.04) → 拆成 fill="#ffffff" fill-opacity="0.04"
+    expect(svg).toMatch(/<rect[^>]*fill="#ffffff"[^>]*fill-opacity="0.04"/);
+    // 不再把 alpha 烤进 rgba(渲染链 THREE.Color 丢 alpha → 退纯白刺眼)
+    expect(svg).not.toContain('rgba(255,255,255,0.04)');
+  });
+
   it('callout 图标走 IconRect(忠实还原 emoji/lucide/上传图)— SVG 不画图标,emit icons', async () => {
     // emoji
     const e = await atomsToSvgWithLinks([{ type: 'callout', attrs: { emoji: '🔑' }, content: [para('X')] }]);

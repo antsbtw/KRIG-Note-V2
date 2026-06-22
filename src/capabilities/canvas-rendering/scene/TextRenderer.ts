@@ -176,10 +176,21 @@ export class TextRenderer {
           ? new THREE.Color().setStyle(fillColor)
           : new THREE.Color(DEFAULT_FILL);
 
+      // fill-opacity 支持(callout 半透明白底等):THREE.Color 丢 alpha,SVGLoader 把
+      // fill-opacity 单独解析到 style.fillOpacity。读它设 material transparent/opacity,
+      // 否则 rgba(...,0.04) 会退化成纯不透明色(实机 callout 白底刺眼根因)。
+      const fillOpacityRaw = path.userData?.style?.fillOpacity;
+      const fillOpacity = typeof fillOpacityRaw === 'number'
+        ? fillOpacityRaw
+        : (typeof fillOpacityRaw === 'string' && fillOpacityRaw !== '' ? parseFloat(fillOpacityRaw) : 1);
+      const opacity = Number.isFinite(fillOpacity) ? Math.max(0, Math.min(1, fillOpacity)) : 1;
+
       const material = new THREE.MeshBasicMaterial({
         color,
         side: THREE.DoubleSide,
         depthWrite: false,
+        transparent: opacity < 1,
+        opacity,
       });
 
       const shapes = SVGLoader.createShapes(path);
