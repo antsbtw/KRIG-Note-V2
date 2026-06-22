@@ -130,6 +130,17 @@ export class InteractionController {
     startRotation: number;
   } | null = null;
 
+  /** Param 拖点状态(L5-G6c B2.2:拖 shape.handles[handleIdx] 改 param)*/
+  private paramDragging: {
+    instanceId: string;
+    handleIdx: number;
+    axis: 'x' | 'y';
+    startWorld: { x: number; y: number };
+    startRotation: number;
+    startSize: { w: number; h: number };
+    startParams: Record<string, number>;
+  } | null = null;
+
   /** Clipboard:Cmd+C 时存当前选中 instances 全量快照(view-scoped,不跨画板) */
   private clipboard: Instance[] = [];
 
@@ -388,7 +399,15 @@ export class InteractionController {
 
     // [G4.4 砍] raycastLinkHref → dispatchLinkHref
 
-    // ── 1. 优先命中 HandlesOverlay(resize / rotate)──
+    // ── 0. 优先命中 param 拖点(L5-G6c B2.2;在 bbox 内,先于 resize/rotate 判)──
+    const paramHit = this.handlesOverlay.paramHitTest(screen.x, screen.y);
+    const paramTarget = this.handlesOverlay.getTarget();
+    if (paramHit && paramTarget) {
+      this.startParamDrag(paramTarget, paramHit.index, world);
+      return;
+    }
+
+    // ── 1. 命中 HandlesOverlay(resize / rotate)──
     const handleHit = this.handlesOverlay.hitTest(screen.x, screen.y);
     const handleTarget = this.handlesOverlay.getTarget();
     if (handleHit && handleTarget) {
@@ -465,6 +484,10 @@ export class InteractionController {
       this.applyRotate(world, e.shiftKey);
       return;
     }
+    if (this.paramDragging) {
+      this.applyParamDrag(world);
+      return;
+    }
     if (this.rewiring) {
       this.updateRewire(world);
       return;
@@ -513,6 +536,12 @@ export class InteractionController {
     }
     if (this.rotating) {
       this.rotating = null;
+      this.refreshHandles();
+      this.onInstancesChange?.();
+      return;
+    }
+    if (this.paramDragging) {
+      this.paramDragging = null;
       this.refreshHandles();
       this.onInstancesChange?.();
       return;
@@ -1292,6 +1321,73 @@ export class InteractionController {
       startAngle,
       startRotation: node.rotation ?? 0,
     };
+  }
+
+  /**
+   * 起手 param 拖点(L5-G6c B2.2):快照起始 params/size/rotation,对齐 startResize 模式。
+   */
+  private startParamDrag(
+    node: RenderedNode,
+    handleIdx: number,
+    startWorld: { x: number; y: number },
+  ): void {
+    const inst = this.getInstance(node.instanceId);
+    if (!inst || !inst.size) return;
+    const api = getShapeApi();
+    const shape = api.shapes.get(inst.ref);
+    const handle = shape?.handles?.[handleIdx];
+    if (!handle) return;
+    this.pushHistory();
+    // 起始 params:def.default 应用 + inst.params 覆盖(reverseParamFromDrag 需完整起始值)
+    const startParams: Record<string, number> = {};
+    if (shape?.params) {
+      for (const name in shape.params) {
+        startParams[name] = inst.params?.[name] ?? shape.params[name].default;
+      }
+    }
+    this.paramDragging = {
+      instanceId: node.instanceId,
+      handleIdx,
+      axis: handle.axis,
+      startWorld,
+      startRotation: node.rotation ?? 0,
+      startSize: { w: inst.size.w, h: inst.size.h },
+      startParams,
+    };
+  }
+
+  /**
+   * 应用 param 拖动:world 位移去 rotation → shape-local → 取 axis 分量 → 反算 param。
+   * reverseParamFromDrag 数值灵敏度处理 px/ratio(px≈1 / ratio≈refDim),夹 min/max。
+   */
+  private applyParamDrag(world: { x: number; y: number }): void {
+    const p = this.paramDragging;
+    if (!p) return;
+    const inst = this.getInstance(p.instanceId);
+    if (!inst) return;
+    // 位移去 rotation → shape-local(与 applyResize 同变换)
+    const dx = world.x - p.startWorld.x;
+    const dy = world.y - p.startWorld.y;
+    const rad = (-p.startRotation * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const ldx = dx * cos - dy * sin;
+    const ldy = dx * sin + dy * cos;
+    const axisDelta = p.axis === 'x' ? ldx : ldy;
+
+    const api = getShapeApi();
+    const res = api.shapes.reverseParamFromDrag(
+      inst.ref,
+      { width: p.startSize.w, height: p.startSize.h, params: p.startParams },
+      p.handleIdx,
+      axisDelta,
+      p.startParams,
+    );
+    if (!res) return;
+    // 对齐 applyResize:就地改 inst.params + nodeRenderer.update 重渲(几何随 param 重求值)
+    inst.params = { ...(inst.params ?? {}), [res.param]: res.value };
+    this.nodeRenderer.update(inst);
+    // 重渲后 handle 跟随(overlay RAF layout 自动按新 params 重求 paramProvider 位置)
+    this.handlesOverlay.setTarget(this.nodeRenderer.get(p.instanceId) ?? null);
   }
 
   /**

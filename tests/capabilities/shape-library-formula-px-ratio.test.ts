@@ -11,7 +11,7 @@
  * 纯 buildEnv + scaleParam,node 直测(D3:本阶段只验地基,真箭头 def 留阶段 C)。
  */
 import { describe, it, expect } from 'vitest';
-import { buildEnv, scaleParam, evaluateHandles } from '@capabilities/shape-library/shapes/renderers';
+import { buildEnv, scaleParam, evaluateHandles, reverseParamFromDrag } from '@capabilities/shape-library/shapes/renderers';
 import type { ShapeDef } from '@capabilities/shape-library/types';
 
 /** 同名 param,一个 ratio 一个 px,验证 scaleParam 区分 */
@@ -141,5 +141,55 @@ describe('L5-G6c B2.1 — evaluateHandles(param 拖点位置求值)', () => {
     expect(evaluateHandles(noHandle, { width: 10, height: 10 })).toEqual([]);
     const svg: ShapeDef = { ...noHandle, geometry: { kind: 'svg', svgPath: 'M 0 0' } };
     expect(evaluateHandles(svg, { width: 10, height: 10 })).toEqual([]);
+  });
+});
+
+describe('L5-G6c B2.2 — reverseParamFromDrag(拖动反算 param)', () => {
+  /** handle from='x1'(=w-headLenPx);拖 handle 沿 x 改 headLenPx(px) */
+  function arrowPx(): ShapeDef {
+    return {
+      id: 'k.basic.arrow', category: 'basic', name: 'a',
+      geometry: { kind: 'parametric' }, viewBox: { w: 100, h: 100 }, aspect: 'variable',
+      params: { headLenPx: { type: 'number', default: 30, min: 10, max: 80, unit: 'px' } },
+      guides: [{ name: 'x1', op: '+-', args: ['w', 0, 'headLenPx'] }],
+      path: [{ cmd: 'M', x: 0, y: 0 }], handles: [{ param: 'headLenPx', axis: 'x', from: 'x1', unit: 'px' }],
+      source: 'builtin',
+    };
+  }
+
+  it('px:handle 位置 = w - headLenPx,拖右(+dx)→ headLenPx 减小(sensitivity = -1)', () => {
+    const def = arrowPx();
+    const ctx = { width: 200, height: 100, params: { headLenPx: 30 } };
+    // 向右拖 +10px:from = w - headLenPx,dPos/dParam = -1 → newParam = 30 + 10/(-1) = 20
+    const res = reverseParamFromDrag(def, ctx, 0, 10, { headLenPx: 30 });
+    expect(res!.param).toBe('headLenPx');
+    expect(res!.value).toBeCloseTo(20, 4);
+  });
+
+  it('夹 min/max:拖过头被夹在 [10,80]', () => {
+    const def = arrowPx();
+    const ctx = { width: 200, height: 100, params: { headLenPx: 30 } };
+    // 向左拖 -100(headLenPx 增大到 130)→ 夹到 max 80
+    const res = reverseParamFromDrag(def, ctx, 0, -100, { headLenPx: 30 });
+    expect(res!.value).toBe(80);
+  });
+
+  it('ratio param:sensitivity ≈ refDim(拖 1px → param 变 1/w)', () => {
+    const def: ShapeDef = {
+      id: 'k.basic.r2', category: 'basic', name: 'r2',
+      geometry: { kind: 'parametric' }, viewBox: { w: 100, h: 100 }, aspect: 'variable',
+      params: { frac: { type: 'number', default: 0.3, min: 0, max: 1, unit: 'ratio' } },
+      guides: [{ name: 'gx', op: '*/', args: ['w', 'frac', 1] }],
+      path: [{ cmd: 'M', x: 0, y: 0 }], handles: [{ param: 'frac', axis: 'x', from: 'gx', unit: 'ratio' }],
+      source: 'builtin',
+    };
+    const ctx = { width: 200, height: 100, params: { frac: 0.3 } };
+    // from = w*frac,dPos/dParam = w = 200 → 拖 +20px → frac 变 +0.1
+    const res = reverseParamFromDrag(def, ctx, 0, 20, { frac: 0.3 });
+    expect(res!.value).toBeCloseTo(0.4, 4);
+  });
+
+  it('handle 不存在 → null', () => {
+    expect(reverseParamFromDrag(arrowPx(), { width: 100, height: 100 }, 5, 10, { headLenPx: 30 })).toBeNull();
   });
 });

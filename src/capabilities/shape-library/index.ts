@@ -44,7 +44,7 @@ import { ShapeRegistry } from './shapes/registry';
 import { SubstanceRegistry } from './substances/registry';
 import { bootstrapShapes } from './shapes/bootstrap';
 import { bootstrapSubstances } from './substances/bootstrap';
-import { evaluateShape, evaluateHandles } from './shapes/renderers';
+import { evaluateShape, evaluateHandles, reverseParamFromDrag } from './shapes/renderers';
 
 export type {
   ShapeLibraryApi,
@@ -86,7 +86,7 @@ export type {
 // 模块级 export(W5 边界 A 临时允许项 — driver/slot 内部可直 import)
 export { ShapeRegistry, SubstanceRegistry };
 export { evaluateShape } from './shapes/renderers';
-export { evalFormula, buildEnv, scaleParam, evaluateHandles } from './shapes/renderers';
+export { evalFormula, buildEnv, scaleParam, evaluateHandles, reverseParamFromDrag } from './shapes/renderers';
 export type { EvalEnv } from './shapes/renderers';
 export { runShapeSmoke, printSmoke } from './shapes/__smoke__/run';
 export type { SmokeReport } from './shapes/__smoke__/run';
@@ -154,6 +154,17 @@ const shapesApi: ShapeLibraryApi['shapes'] = {
     const shape = ShapeRegistry.get(id);
     if (!shape) return [];
     return evaluateHandles(shape, ctx);
+  },
+  reverseParamFromDrag(
+    id: string,
+    ctx: EvaluateContext,
+    handleIdx: number,
+    axisDelta: number,
+    startParams: Record<string, number>,
+  ): { param: string; value: number } | null {
+    const shape = ShapeRegistry.get(id);
+    if (!shape) return null;
+    return reverseParamFromDrag(shape, ctx, handleIdx, axisDelta, startParams);
   },
 };
 

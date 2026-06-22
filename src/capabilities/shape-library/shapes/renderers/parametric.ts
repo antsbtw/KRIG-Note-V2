@@ -136,6 +136,49 @@ function pathToSvg(path: PathCmd[], env: EvalEnv): string {
   return parts.join(' ');
 }
 
+/**
+ * 拖动反算 param(L5-G6c §3.5 B2.2)。
+ *
+ * handle 沿 axis 的位置 = `from(param)`(任意单调公式)。拖动给出沿 axis 的
+ * shape-local 位移 `axisDelta`(px)。用**数值灵敏度** `dPos/dParam`(在起始 param
+ * 处 ±ε 求导)把位移换算回 param 增量,夹 min/max:
+ *   newParam = startParam + axisDelta / sensitivity
+ *
+ * 这样无需符号反演,px(sensitivity≈±1)/ ratio(sensitivity≈±w/h)自然各归各:
+ * px 拖 1px → param 变 1;ratio 拖 1px → param 变 1/refDim。灵敏度≈0(from 与该
+ * param 无关)→ 返 startParam 不动(fail safe)。
+ *
+ * @param startParams 拖动起始时的完整 params(应用 default + override 后)
+ * @param handleIdx   shape.handles[] 下标
+ * @param axisDelta   沿 handle.axis 的 shape-local 位移(px)
+ */
+export function reverseParamFromDrag(
+  shape: ShapeDef,
+  ctx: EvaluateContext,
+  handleIdx: number,
+  axisDelta: number,
+  startParams: Record<string, number>,
+): { param: string; value: number } | null {
+  const h = shape.handles?.[handleIdx];
+  if (!h || !shape.params?.[h.param]) return null;
+  const def = shape.params[h.param];
+  const p0 = startParams[h.param] ?? def.default;
+
+  const posAt = (pv: number): number => {
+    const env = buildEnv(shape, ctx.width, ctx.height, { ...startParams, [h.param]: pv });
+    return evalFormula(h.from, env);
+  };
+  const eps = 0.001;
+  const sensitivity = (posAt(p0 + eps) - posAt(p0 - eps)) / (2 * eps);
+  if (!Number.isFinite(sensitivity) || Math.abs(sensitivity) < 1e-6) {
+    return { param: h.param, value: p0 }; // from 与该 param 无关 → 不动(fail safe)
+  }
+  let value = p0 + axisDelta / sensitivity;
+  if (def.min !== undefined) value = Math.max(def.min, value);
+  if (def.max !== undefined) value = Math.min(def.max, value);
+  return { param: h.param, value };
+}
+
 /** 4 位小数 */
 function num(v: number): number {
   return Math.round(v * 10000) / 10000;

@@ -341,6 +341,17 @@ export interface ShapeLibraryApi {
      * 输出 EvaluatedHandle[](shape-local px 纯数据,0 含 THREE).
      */
     evaluateHandles(id: string, ctx: EvaluateContext): EvaluatedHandle[];
+    /**
+     * 拖动反算 param(L5-G6c §3.5 B2.2):沿 handle.axis 的 shape-local 位移 axisDelta(px)
+     * → 新 param 值(数值灵敏度反算,夹 min/max)。id/handle 不存在 → null.
+     */
+    reverseParamFromDrag(
+      id: string,
+      ctx: EvaluateContext,
+      handleIdx: number,
+      axisDelta: number,
+      startParams: Record<string, number>,
+    ): { param: string; value: number } | null;
   };
   substances: {
     register(def: SubstanceDef): void;
