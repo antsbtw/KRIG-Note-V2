@@ -2,7 +2,7 @@
   "id": "krig.flowchart.document",
   "category": "flowchart",
   "name": "Document",
-  "renderer": "parametric",
+  "geometry": { "kind": "parametric" },
   "viewBox": { "w": 100, "h": 100 },
   "aspect": "variable",
   "guides": [

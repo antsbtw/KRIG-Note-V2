@@ -10,7 +10,7 @@
  * 1. 所有 22 个 shape 都被 bootstrap 收齐
  * 2. id 不重复
  * 3. 每个 shape 在 200x100 尺寸下能渲染出非空 d 字符串
- *    (text label 走 static-svg / custom 跳过)
+ *    (geometry.kind 非 parametric — text / svg — 跳过几何求值)
  * 4. d 字符串不含 NaN / Infinity
  * 5. magnets 数值有限
  *
@@ -62,9 +62,8 @@ export function runShapeSmoke(): SmokeReport {
 }
 
 function checkShape(shape: ShapeDef): string | null {
-  // text label 走 static-svg / custom 不参与几何求值,跳过
-  if (shape.renderer === 'static-svg') return null;
-  if (shape.renderer === 'custom') return null;
+  // text / svg kind 不参与 parametric 几何求值,跳过(L5-G6c 统一范式)
+  if (shape.geometry.kind !== 'parametric') return null;
 
   let out;
   try {

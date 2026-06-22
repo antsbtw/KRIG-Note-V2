@@ -26,14 +26,14 @@ import { buildEnv, evalFormula, type EvalEnv } from './formula-eval';
 
 /**
  * 求值入口.
- * - id 不存在 / shape.renderer !== 'parametric' / shape.path 缺失 → 返 null
- *   (调用方需要 fallback 渲染 — 如 text label 走 static-svg / custom)
+ * - id 不存在 / shape.geometry.kind !== 'parametric' / shape.path 缺失 → 返 null
+ *   (调用方需要 fallback 渲染 — 如 svg 走 path-to-three、text 走文字层)
  */
 export function evaluateShape(
   shape: ShapeDef,
   ctx: EvaluateContext,
 ): EvaluatedPath | null {
-  if (shape.renderer !== 'parametric') return null;
+  if (shape.geometry.kind !== 'parametric') return null;
   if (!shape.path) return null;
 
   const env = buildEnv(shape, ctx.width, ctx.height, ctx.params);

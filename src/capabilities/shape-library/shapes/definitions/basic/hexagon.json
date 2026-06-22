@@ -2,7 +2,7 @@
   "id": "krig.basic.hexagon",
   "category": "basic",
   "name": "Hexagon",
-  "renderer": "parametric",
+  "geometry": { "kind": "parametric" },
   "viewBox": { "w": 100, "h": 100 },
   "aspect": "variable",
   "guides": [

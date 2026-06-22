@@ -32,10 +32,11 @@ export function shapeToSVG(shapeId: string): string | null {
   const api = getShapeApi();
   const shape = api.shapes.get(shapeId);
   if (!shape) return null;
-  if (shape.renderer === 'static-svg') {
+  if (shape.geometry.kind === 'text') {
     return textPlaceholderSVG();
   }
-  if (shape.renderer === 'custom') {
+  if (shape.geometry.kind === 'svg') {
+    // 阶段 B 真渲 svgPath;A 先退化矩形占位
     return rectFallbackSVG(shape);
   }
   if (shape.category === 'line') {

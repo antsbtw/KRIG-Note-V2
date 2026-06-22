@@ -2,7 +2,7 @@
   "id": "krig.basic.triangle",
   "category": "basic",
   "name": "Triangle",
-  "renderer": "parametric",
+  "geometry": { "kind": "parametric" },
   "viewBox": { "w": 100, "h": 100 },
   "aspect": "variable",
   "path": [

@@ -2,9 +2,10 @@
   "id": "krig.text.label",
   "category": "text",
   "name": "Text Label",
-  "renderer": "static-svg",
+  "geometry": { "kind": "text" },
   "viewBox": { "w": 100, "h": 30 },
   "aspect": "variable",
+  "textGrows": true,
   "params": {
     "fontSize": {
       "type": "number",

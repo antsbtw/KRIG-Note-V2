@@ -2,7 +2,7 @@
   "id": "krig.basic.trapezoid",
   "category": "basic",
   "name": "Trapezoid",
-  "renderer": "parametric",
+  "geometry": { "kind": "parametric" },
   "viewBox": { "w": 100, "h": 100 },
   "aspect": "variable",
   "params": {

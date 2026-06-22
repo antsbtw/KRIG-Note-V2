@@ -2,7 +2,7 @@
   "id": "krig.arrow.bent",
   "category": "arrow",
   "name": "Bent Arrow",
-  "renderer": "parametric",
+  "geometry": { "kind": "parametric" },
   "viewBox": { "w": 100, "h": 100 },
   "aspect": "variable",
   "params": {
