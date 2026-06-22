@@ -12,6 +12,8 @@
  * jsdom 环境(DOMParser);normalizePathD/bboxOf 纯逻辑也一并测。
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { parseSvgToShapeDef, normalizePathD } from '@capabilities/shape-library/shapes/svg-to-shapedef';
 import { evaluateShape } from '@capabilities/shape-library/shapes/renderers';
 
@@ -135,5 +137,30 @@ describe('L5-G6c B1.2 — evaluateShape(svg kind)缩放到节点尺寸', () => {
     // 人为破坏 viewBox
     const broken = { ...def, geometry: { ...def.geometry, viewBox: { w: 0, h: 0 } } };
     expect(evaluateShape(broken, { width: 100, height: 100 })).toBeNull();
+  });
+});
+
+describe('L5-G6c B1.3 — probe .svg 端到端(bootstrap 加载链)', () => {
+  it('真 probe .svg(含 H 命令)→ 导入器解析 + evaluate 出可渲染 d', () => {
+    const probePath = path.resolve(
+      __dirname,
+      '../../src/capabilities/shape-library/shapes/definitions/basic/__b_probe_svg.svg',
+    );
+    const svg = readFileSync(probePath, 'utf-8');
+    // bootstrap 的文件名约定:basic/__b_probe_svg.svg → krig.basic.__b_probe_svg
+    const def = parseSvgToShapeDef(svg, {
+      id: 'krig.basic.__b_probe_svg',
+      category: 'basic',
+      name: '__b_probe_svg',
+    });
+    expect(def).not.toBeNull();
+    expect(def!.geometry.kind).toBe('svg');
+    expect(def!.viewBox).toEqual({ w: 100, h: 100 });
+    // H 命令已归一化为 L(svgPath 不应残留 H)
+    expect(def!.geometry.svgPath).not.toMatch(/\bH\b/);
+    // evaluate 出可渲染 d(无 NaN)
+    const out = evaluateShape(def!, { width: 200, height: 200 });
+    expect(out!.d.length).toBeGreaterThan(0);
+    expect(/NaN|Infinity/.test(out!.d)).toBe(false);
   });
 });
