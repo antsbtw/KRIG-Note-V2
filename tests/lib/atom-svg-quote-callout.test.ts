@@ -54,15 +54,17 @@ describe('L5-G6c bug1 — blockquote 子内容渲染', () => {
 });
 
 describe('L5-G6c bug1 — callout 子内容渲染', () => {
-  it('callout 含段落 → 渲染子文字 path + 圆角底框 rect,不降级占位', async () => {
+  it('callout 含段落 → 渲染子文字 path + 圆角底框 rect + 填充灯泡图标(circle),不降级占位', async () => {
     const callout: Atom = {
       type: 'callout',
-      attrs: { emoji: '' }, // 空 emoji → 退化小圆点(node 无 emoji 字体,避免回退缺失)
+      attrs: { emoji: '💡' },
       content: [para('CALLOUTBODY')],
     };
     const svg = await atomsToSvg([callout]);
     expect(countRects(svg)).toBeGreaterThanOrEqual(1); // 圆角底框
-    expect(countPaths(svg)).toBeGreaterThan(0);        // 子文字成 path
+    expect((svg.match(/<circle/g) ?? []).length).toBeGreaterThanOrEqual(1); // 灯泡图标(填充圆,可渲)
+    expect(svg).not.toContain('<text'); // 不用 <text>emoji(SVGLoader 丢弃 → 渲不出)
+    expect(countPaths(svg)).toBeGreaterThan(0);        // 子文字 + 灯泡灯座成 path
     const placeholder = await atomsToSvg([para('[Callout]')]);
     expect(countPaths(svg)).toBeGreaterThanOrEqual(countPaths(placeholder));
   });

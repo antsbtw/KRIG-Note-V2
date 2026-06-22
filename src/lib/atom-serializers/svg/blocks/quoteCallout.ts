@@ -122,17 +122,26 @@ export async function renderCallout(
     `<rect x="0" y="${yOffset}" width="${contentWidth}" height="${Math.max(1, totalHeight)}" ` +
     `rx="${CALLOUT_BG_RADIUS}" ry="${CALLOUT_BG_RADIUS}" fill="${CALLOUT_BG_FILL}" />`;
 
-  // 图标:emoji(默认 💡)放图标列居中。emoji 字体回退缺失时退化为小圆点(纯 ASCII 安全)。
-  const emoji = typeof atom.attrs?.emoji === 'string' ? atom.attrs.emoji : '';
-  const iconCx = CALLOUT_PAD_X + CALLOUT_ICON_W / 2;
-  const iconCy = yOffset + CALLOUT_PAD_Y + 10;
-  const icon = emoji
-    ? `<text x="${iconCx}" y="${iconCy + 5}" font-size="14" text-anchor="middle" fill="${defaultTextColor ?? '#dddddd'}">${escapeXml(emoji)}</text>`
-    : `<circle cx="${iconCx}" cy="${iconCy}" r="3" fill="${QUOTE_BAR_FILL}" />`;
+  // 图标:callout 的 emoji(💡 等)是彩色字体字形,本链路 TextRenderer 用 SVGLoader.createShapes
+  // 只渲**填充** path/circle(fill:none 的 stroke 被跳过,见 TextRenderer:142-143),且无 emoji 字体,
+  // <text>emoji 会被 SVGLoader 静默丢弃 → 渲不出(实机 bug)。故画一个**填充矢量灯泡**代替 emoji,
+  // 稳定可渲、读作 callout 标记。(忠实显示用户选的 emoji/lucide/image 需走 <image> 链路,留后)
+  const icon = lightbulbIcon(CALLOUT_PAD_X + 3, yOffset + CALLOUT_PAD_Y + 2, defaultTextColor ?? '#f5c542');
 
   return { svg: bg + icon + body.svg, height: totalHeight };
 }
 
-function escapeXml(s: string): string {
-  return s.replace(/[<>&]/g, (c) => (c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;'));
+/**
+ * 填充矢量灯泡图标(callout 标记)— ~16px,平移到 (x,y)。**纯填充**(circle + path,无 stroke),
+ * 适配 TextRenderer 只渲填充几何;灯泡圆 + 灯座梯形,简笔可辨识。
+ */
+function lightbulbIcon(x: number, y: number, fill: string): string {
+  return (
+    `<g transform="translate(${x}, ${y})">` +
+    // 灯泡(填充圆)
+    `<circle cx="8" cy="6" r="5.2" fill="${fill}" />` +
+    // 灯座(填充梯形:上宽下窄)
+    `<path d="M 5 11 L 11 11 L 10 14 L 6 14 Z" fill="${fill}" />` +
+    `</g>`
+  );
 }
