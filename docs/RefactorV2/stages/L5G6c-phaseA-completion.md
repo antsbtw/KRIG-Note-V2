@@ -3,7 +3,27 @@
 > 执行人:实施对话 · 验收人:总指挥 · 日期:2026-06-22
 > 分支:`feature/graph-shape-library-rebuild`(**不合 main**)
 > 权威:[L5G6c 总纲](./L5G6c-shape-library-nocode-design.md) · [L5G6b text 统一](./L5G6b-shape-composition-text-unify-design.md) · [实施 prompt](../../tasks/2026-06-22-graph-shape-rebuild-phaseA-prompt.md) · [拆解+裁决](../../tasks/2026-06-22-graph-shape-rebuild-phaseA-breakdown.md)
-> 状态:**A1~A5 全绿,待总指挥核 + 用户真机**
+> 状态:**✅ 总指挥代码层验收通过(2026-06-22,见 §9)+ 用户真机留待阶段 C**
+
+---
+
+## 9. 总指挥验收结论(2026-06-22,拿真实代码逐条核,非采信自述)
+
+**✅ 阶段 A 代码层验收通过,正式认可完成。**
+
+| 核验项 | 方法 | 结论 |
+|---|---|---|
+| **M1 不删通用 predicate** | `git diff ec5c981d..HEAD` 核 6 共用文件 | ✅ x-extract-tweet / ThoughtCard / cardinality-check / atom-entity **零改动**;schema.ts 的 +81 行是**新增 migration_1_6_0 函数**(代码内明写「不删 hasContent predicate 本身」),非动定义。汇报「schema 一字未动」措辞不准(实指 predicate 定义未动,属实)——记为**汇报措辞偏差,非违规**。 |
+| **M2 清孤儿边** | 读 migration_1_6_0 + runner 注册 | ✅ graph-scoped(只迁 `domain==='graph-instance'` 主体,note pm 不误迁)、幂等、清边+清孤儿 pm;正确注册进 runner('1.6.0');4 例 in-memory 单测绿。 |
+| **M3 真机欠条** | 读 §3 欠条 | ✅ 老实挂账:文字层真机验证顺延阶段 C。 |
+| **A2 屏障** | `grep TEXT_REF/isTextNodeRef/TEXT_NODE_REF` 活代码 | ✅ **0 命中**;fillTextLayer 收编 renderTextInstance;统一判定 `inst.doc!==undefined ‖ kind==='text'`。 |
+| **A1 范式 D1(b)** | 读 types.ts | ✅ geometry.kind 锚点 + 载荷留顶层,旧 renderer 取代干净。 |
+| **A4 px/ratio** | 读 scaleParam | ✅ ratio 乘 refDim / px 不乘 / 未知 param **throw(fail loud 不兜底)**。 |
+| **质量门** | 亲跑 | ✅ tsc 0;单测 425 绿;8 红 = `bulk-delete-perf-verify`(pre-existing rocksdb 环境,与本刀无关,已核 stash 后同红)。 |
+
+**欠条/遗留挂账确认**(还,别忘):① M3 文字层真机验证 → 阶段 C;② D1 范式未完全收口(载荷留顶层)→ 阶段 B 真做 SVG 时收;③ substance frame/label 悬空 → 阶段 C 填回 shape 或 substance 专项。
+
+**裁决:阶段 A 通过。** 准予以总指挥身份起草阶段 B(SVG 链路 + 拖动点 handles UI)实施 prompt。**仍不合 main**(graph 系列阶段验收节奏,合 main 待整条线稳)。
 
 ---
 
