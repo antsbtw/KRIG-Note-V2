@@ -9,5 +9,5 @@
  */
 
 export { evaluateShape } from './parametric';
-export { evalFormula, buildEnv } from './formula-eval';
+export { evalFormula, buildEnv, scaleParam } from './formula-eval';
 export type { EvalEnv } from './formula-eval';

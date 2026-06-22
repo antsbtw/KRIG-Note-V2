@@ -1,4 +1,4 @@
-import type { FormulaOp, FormulaValue, ShapeDef } from '../../types';
+import type { FormulaOp, FormulaValue, ParamUnit, ShapeDef } from '../../types';
 
 /**
  * Formula evaluator — 实现 OOXML 17 个操作符 + 内置标识符(L5-G2)
@@ -31,9 +31,35 @@ export interface EvalEnv {
   params: Record<string, number>;
   /** 已求值的 guides */
   guides: Record<string, number>;
+  /**
+   * 各 param 的单位(L5-G6c §3.5 箭头不变形地基)。
+   * `ratio`(默认)= 相对尺寸,scaleParam 乘 refDim;`px` = 绝对像素,scaleParam 不乘;
+   * `deg` = 角度(几何缩放无关)。缺省视作 ratio(兼容老 def 无 unit 字段)。
+   */
+  paramUnits: Record<string, ParamUnit>;
 }
 
 const DEG = Math.PI / 180;
+
+/**
+ * 按 param 单位决定是否归一化(L5-G6c §3.5「px 不归一化 / ratio 乘 w·h」)。
+ *
+ * - `ratio` param(如 headLen=0.3)→ 返回 value × refDim(随节点尺寸缩放)
+ * - `px` param(如 headLenPx=30)→ 返回 value 绝对像素(**不乘 refDim**,整体拉长不变形)
+ * - 无 unit / 未知 param → 兜底当 ratio(兼容老 def)
+ *
+ * 用途:箭头头部用 px → `hL = scaleParam('headLenPx', w)` = 常量 → 拉长 w 时
+ * 箭身(w - hL)变长、箭头三角(hL)固定不变形(用户拍板「拉长只加长箭身」)。
+ * 阶段 B handles 反算拖动也复用此语义(px 拖绝对像素 / ratio 拖相对)。
+ */
+export function scaleParam(name: string, refDim: number, env: EvalEnv): number {
+  const v = env.params[name];
+  if (v === undefined) {
+    throw new Error(`[formula-eval] scaleParam: unknown param: ${name}`);
+  }
+  const unit = env.paramUnits[name] ?? 'ratio';
+  return unit === 'px' ? v : v * refDim;
+}
 
 /** 内置标识符(只读,根据 w/h 动态计算) */
 function builtinIdent(name: string, env: EvalEnv): number | undefined {
@@ -178,6 +204,7 @@ export function buildEnv(
   paramOverrides?: Record<string, number>,
 ): EvalEnv {
   const params: Record<string, number> = {};
+  const paramUnits: Record<string, ParamUnit> = {};
   if (shape.params) {
     for (const name in shape.params) {
       const def = shape.params[name];
@@ -187,10 +214,12 @@ export function buildEnv(
         def.min,
         def.max,
       );
+      // 记录单位(L5-G6c §3.5):scaleParam 据此决定 px 不归一化 / ratio 乘 refDim
+      paramUnits[name] = def.unit ?? 'ratio';
     }
   }
   const guides: Record<string, number> = {};
-  const env: EvalEnv = { w: width, h: height, params, guides };
+  const env: EvalEnv = { w: width, h: height, params, guides, paramUnits };
   if (shape.guides) {
     for (const g of shape.guides) {
       // guide 体本身就是一个 op(只是字段名拆开存):重组成 FormulaOp 求值
