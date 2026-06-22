@@ -10,8 +10,8 @@
  *
  * 纯 buildEnv + scaleParam,node 直测(D3:本阶段只验地基,真箭头 def 留阶段 C)。
  */
-import { describe, it, expect } from 'vitest';
-import { buildEnv, scaleParam, evaluateHandles, reverseParamFromDrag } from '@capabilities/shape-library/shapes/renderers';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { buildEnv, scaleParam, evaluateHandles, reverseParamFromDrag, evaluateShape } from '@capabilities/shape-library/shapes/renderers';
 import type { ShapeDef } from '@capabilities/shape-library/types';
 
 /** 同名 param,一个 ratio 一个 px,验证 scaleParam 区分 */
@@ -191,5 +191,38 @@ describe('L5-G6c B2.2 — reverseParamFromDrag(拖动反算 param)', () => {
 
   it('handle 不存在 → null', () => {
     expect(reverseParamFromDrag(arrowPx(), { width: 100, height: 100 }, 5, 10, { headLenPx: 30 })).toBeNull();
+  });
+});
+
+describe('L5-G6c B2 验收 — probe 箭头 def 端到端(真 fixture)', () => {
+  // 真 probe def(__b_probe_arrow.json):headLenPx px handle,验收箭头不变形
+  let arrowDef: ShapeDef;
+  beforeAll(async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const p = path.resolve(
+      __dirname,
+      '../../src/capabilities/shape-library/shapes/definitions/basic/__b_probe_arrow.json',
+    );
+    arrowDef = JSON.parse(fs.readFileSync(p, 'utf-8'));
+  });
+
+  it('probe 箭头 evaluate 出可渲染 d + handle 位置 + 拖点反算', () => {
+    const out = evaluateShape(arrowDef, { width: 320, height: 100 });
+    expect(out!.d.length).toBeGreaterThan(0);
+    expect(/NaN|Infinity/.test(out!.d)).toBe(false);
+
+    const hs = evaluateHandles(arrowDef, { width: 320, height: 100 });
+    expect(hs).toHaveLength(1);
+    // headLenPx default 40,x1 = w - 40 = 280
+    expect(hs[0].x).toBe(280);
+  });
+
+  it('核心:整体拉长 w,箭头三角(w - x1 = headLenPx)恒定不变形', () => {
+    const h1 = evaluateHandles(arrowDef, { width: 200, height: 100 })[0];
+    const h2 = evaluateHandles(arrowDef, { width: 500, height: 100 })[0];
+    // 箭头宽 = w - x1 = headLenPx 恒定 40(px 不变形核心诉求)
+    expect(200 - h1.x).toBe(40);
+    expect(500 - h2.x).toBe(40);
   });
 });
