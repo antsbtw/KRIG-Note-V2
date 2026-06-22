@@ -70,10 +70,10 @@ function makeCanvas(sizePx: number): { canvas: HTMLCanvasElement; ctx: CanvasRen
   return { canvas, ctx, dpr };
 }
 
-/** emoji → canvas fillText(系统彩色 emoji);字号略小于框留边 */
+/** emoji → canvas fillText(系统彩色 emoji)。glyph/框比 0.75 对齐编辑器(框 24 / 字 18)*/
 function rasterEmoji(emoji: string, sizePx: number): HTMLCanvasElement {
   const { canvas, ctx } = makeCanvas(sizePx);
-  ctx.font = `${Math.round(sizePx * 0.86)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+  ctx.font = `${Math.round(sizePx * 0.75)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(emoji, sizePx / 2, sizePx / 2 + sizePx * 0.04);

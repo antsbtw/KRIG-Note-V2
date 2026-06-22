@@ -56,7 +56,9 @@ const CALLOUT_BG_FILL = '#2a2f3a';
 const CALLOUT_BG_RADIUS = 6;
 const CALLOUT_PAD_X = 12;
 const CALLOUT_PAD_Y = 10;
-const CALLOUT_ICON_W = 22; // 图标列宽(emoji/icon 占位)
+// 图标框 = baseFontSize × ICON_SCALE(对齐编辑器 callout emoji 框 24/文字16 ≈ 1.5×)
+const ICON_SCALE = 1.5;
+const CALLOUT_ICON_GAP = 6; // 图标列与文字间距
 
 /** 渲染子块序列,统一向右平移 indent;返回 {svg, height}(从 yOffset 起的总高)*/
 async function renderChildren(
@@ -130,7 +132,11 @@ export async function renderCallout(
   const children = Array.isArray(atom.content) ? atom.content : [];
   if (children.length === 0) return { svg: '', height: 0 };
 
-  const indent = CALLOUT_PAD_X + CALLOUT_ICON_W;
+  // 图标框尺寸对齐编辑态:编辑器 callout emoji 框 24px / 文字 ~16px(pm-host.css ≈ 1.5× font)。
+  // 故图标框 = baseFontSize × ICON_SCALE,随文字字号缩放 → 渲染态与编辑态视觉一致。
+  const baseFs = baseFontSize ?? 14;
+  const iconBox = Math.round(baseFs * ICON_SCALE);
+  const indent = CALLOUT_PAD_X + iconBox + CALLOUT_ICON_GAP; // 文字让出图标列 + 间距
   const innerWidth = Math.max(20, contentWidth - indent - CALLOUT_PAD_X);
   const body = await renderChildren(
     children, renderChild, yOffset + CALLOUT_PAD_Y, indent, innerWidth,
@@ -145,12 +151,12 @@ export async function renderCallout(
   // 图标:SVG 里只**预留图标列方框**(不画图标 — 渲染链渲不出 emoji/<image>);
   // emit IconRect(来源 emoji/iconName/imageSrc + bbox),TextRenderer 栅格成纹理贴此 bbox。
   // 优先级对齐编辑器 NodeView:imageSrc > iconName > emoji(default 💡)。
-  const ICON_SIZE = 16;
-  const iconX = CALLOUT_PAD_X + 2;
-  const iconY = yOffset + CALLOUT_PAD_Y + 2;
+  const iconX = CALLOUT_PAD_X;
+  // 图标垂直居中到首行文字(首行行高 ≈ baseFs × 1.4)
+  const iconY = yOffset + CALLOUT_PAD_Y + Math.max(0, (baseFs * 1.4 - iconBox) / 2);
   const a = (atom.attrs ?? {}) as { emoji?: unknown; iconName?: unknown; imageSrc?: unknown };
   icons.push({
-    x: iconX, y: iconY, w: ICON_SIZE, h: ICON_SIZE,
+    x: iconX, y: iconY, w: iconBox, h: iconBox,
     emoji: typeof a.emoji === 'string' ? a.emoji : '💡',
     iconName: typeof a.iconName === 'string' ? a.iconName : undefined,
     imageSrc: typeof a.imageSrc === 'string' ? a.imageSrc : undefined,

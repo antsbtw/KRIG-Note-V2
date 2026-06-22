@@ -90,6 +90,15 @@ describe('L5-G6c bug1 — callout 子内容渲染', () => {
     expect(q.icons).toHaveLength(0);
   });
 
+  it('图标框随 baseFontSize 缩放(对齐编辑态 ≈1.5× font),消除大小不一致', async () => {
+    const c: Atom = { type: 'callout', attrs: { emoji: '💡' }, content: [para('X')] };
+    const small = await atomsToSvgWithLinks([c], { baseFontSize: 14 });
+    const large = await atomsToSvgWithLinks([c], { baseFontSize: 24 });
+    expect(small.icons[0].w).toBe(Math.round(14 * 1.5)); // 21
+    expect(large.icons[0].w).toBe(Math.round(24 * 1.5)); // 36
+    expect(large.icons[0].w).toBeGreaterThan(small.icons[0].w); // 随字号缩放
+  });
+
   it('callout 嵌 mathBlock 子块也不丢(递归任意子块)', async () => {
     const callout: Atom = {
       type: 'callout',
