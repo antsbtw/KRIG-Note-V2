@@ -262,6 +262,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         if (shape?.category === 'line') return;
         transparent = shape?.geometry.kind !== 'text';
       }
+      // 进编辑:隐藏渲染态文字层,避免与透明编辑浮层的文字重影(退出恢复)
+      hostRef.current?.setNodeTextLayerVisible(info.instanceId, false);
       textNode.enterEdit({
         instanceId: info.instanceId,
         initialDoc: inst.doc, // undefined(几何 shape 首次)→ canvas-text-node 起空 doc
@@ -276,8 +278,12 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         viewId: 'graph-canvas-view',
         onExit: (id, newDoc) => {
           if (newDoc !== null) {
+            // updateInstance 内部 remove+add 重建节点(含新文字层),自然恢复可见 —— 无需显式 show
             hostRef.current?.updateInstance(id, { doc: newDoc } as Partial<Instance>);
             scheduleSave();
+          } else {
+            // 取消编辑(无新 doc)→ 节点未重建,显式恢复文字层可见
+            hostRef.current?.setNodeTextLayerVisible(id, true);
           }
         },
       });

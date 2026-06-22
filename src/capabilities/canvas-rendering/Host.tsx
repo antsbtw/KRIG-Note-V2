@@ -355,6 +355,10 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
     }, []);
 
+    const setNodeTextLayerVisible = useCallback((id: string, visible: boolean): void => {
+      nodeRendererRef.current?.setTextLayerVisible(id, visible);
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -374,6 +378,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         combineSelected,
         setAtomBridge,
         getSelectedScreenAABB,
+        setNodeTextLayerVisible,
       }),
       [
         loadDocument,
@@ -392,6 +397,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         combineSelected,
         setAtomBridge,
         getSelectedScreenAABB,
+        setNodeTextLayerVisible,
       ],
     );
 

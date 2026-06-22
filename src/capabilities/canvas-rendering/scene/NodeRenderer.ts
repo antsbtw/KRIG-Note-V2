@@ -245,6 +245,20 @@ export class NodeRenderer {
     return this.byId.get(id);
   }
 
+  /**
+   * 显隐某 instance 的文字层 contentSlot(L5-G6c:双击进编辑时隐藏渲染态文字,
+   * 避免与透明编辑浮层的文字重影;退出编辑恢复)。无文字层 / 无此 instance 静默忽略。
+   */
+  setTextLayerVisible(id: string, visible: boolean): void {
+    const rn = this.byId.get(id);
+    if (!rn) return;
+    rn.group.traverse((obj) => {
+      if ((obj.userData as { isTextContentSlot?: boolean })?.isTextContentSlot) {
+        obj.visible = visible;
+      }
+    });
+  }
+
   /** 查询原始 Instance */
   getInstance(id: string): Instance | undefined {
     return this.instances.get(id);

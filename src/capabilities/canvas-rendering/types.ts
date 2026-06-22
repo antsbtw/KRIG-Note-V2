@@ -265,6 +265,11 @@ export interface CanvasHostHandle {
    * view 在 onSelectionChange / onViewportChange 时拉一次重定位.
    */
   getSelectedScreenAABB(): { x: number; y: number; w: number; h: number } | null;
+  /**
+   * L5-G6c:显隐某节点的文字层(双击进编辑时隐藏渲染态文字,避免与透明编辑浮层重影;
+   * 退出编辑恢复)。无文字层 / 无此 instance 静默忽略.
+   */
+  setNodeTextLayerVisible(id: string, visible: boolean): void;
 }
 
 // ─────────────────────────────────────────────────────────
