@@ -18,11 +18,39 @@
 
 import type {
   EvaluateContext,
+  EvaluatedHandle,
   EvaluatedPath,
   PathCmd,
   ShapeDef,
 } from '../../types';
 import { buildEnv, evalFormula, type EvalEnv } from './formula-eval';
+
+/**
+ * 求值 shape 的 param 拖点位置(L5-G6c §3.5 B2.1)。
+ *
+ * 每个 handle 的 `from` 公式求值出沿 axis 的坐标;cross-axis 取 shape 中心
+ * (axis='x' → y=vc;axis='y' → x=hc),便于看见与拖动。
+ * 无 handles / 非 parametric(svg/text 无 param)→ 返空数组。
+ */
+export function evaluateHandles(shape: ShapeDef, ctx: EvaluateContext): EvaluatedHandle[] {
+  if (shape.geometry.kind !== 'parametric' || !shape.handles?.length) return [];
+  const env = buildEnv(shape, ctx.width, ctx.height, ctx.params);
+  const out: EvaluatedHandle[] = [];
+  shape.handles.forEach((h, index) => {
+    let pos: number;
+    try {
+      pos = evalFormula(h.from, env);
+    } catch (e) {
+      console.warn(`[shape-library] handle[${index}] from 求值失败 (${shape.id}):`, e);
+      return;
+    }
+    const x = h.axis === 'x' ? pos : ctx.width / 2;
+    const y = h.axis === 'y' ? pos : ctx.height / 2;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    out.push({ index, param: h.param, axis: h.axis, unit: h.unit, x, y });
+  });
+  return out;
+}
 
 /**
  * 求值入口.

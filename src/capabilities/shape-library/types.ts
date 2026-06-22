@@ -294,6 +294,19 @@ export interface EvaluatedPath {
   textBox?: { l: number; t: number; r: number; b: number };
 }
 
+/**
+ * 求值后的 param 拖点位置(L5-G6c §3.5 B2;shape-local px,原点 bbox 左上 / Y 向下)。
+ * canvas-rendering HandlesOverlay 据此画拖点,InteractionController 据此反算 param。
+ */
+export interface EvaluatedHandle {
+  index: number;          // shape.handles[] 下标
+  param: string;
+  axis: 'x' | 'y';
+  unit?: 'px' | 'ratio';
+  x: number;
+  y: number;
+}
+
 export interface ShapePack {
   id: string;                           // pack 自己的 id(命名空间)
   shapes: ShapeDef[];
@@ -323,6 +336,11 @@ export interface ShapeLibraryApi {
       props: EvaluateInput,
       ctx: EvaluateContext,
     ): EvaluatedPath | null;
+    /**
+     * 求值 param 拖点位置(L5-G6c §3.5 B2)。id 不存在 / 无 handles / 非 parametric → 空数组.
+     * 输出 EvaluatedHandle[](shape-local px 纯数据,0 含 THREE).
+     */
+    evaluateHandles(id: string, ctx: EvaluateContext): EvaluatedHandle[];
   };
   substances: {
     register(def: SubstanceDef): void;

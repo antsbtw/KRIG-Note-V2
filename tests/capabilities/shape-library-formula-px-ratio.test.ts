@@ -11,7 +11,7 @@
  * 纯 buildEnv + scaleParam,node 直测(D3:本阶段只验地基,真箭头 def 留阶段 C)。
  */
 import { describe, it, expect } from 'vitest';
-import { buildEnv, scaleParam } from '@capabilities/shape-library/shapes/renderers';
+import { buildEnv, scaleParam, evaluateHandles } from '@capabilities/shape-library/shapes/renderers';
 import type { ShapeDef } from '@capabilities/shape-library/types';
 
 /** 同名 param,一个 ratio 一个 px,验证 scaleParam 区分 */
@@ -92,5 +92,54 @@ describe('L5-G6c A4 — px/ratio scaleParam 区分', () => {
   it('未知 param → scaleParam 抛错(fail loud,不静默)', () => {
     const env = buildEnv(arrowLike('px', 30), 100, 100);
     expect(() => scaleParam('missing', 100, env)).toThrow(/unknown param/);
+  });
+});
+
+describe('L5-G6c B2.1 — evaluateHandles(param 拖点位置求值)', () => {
+  /** 箭头:headLenPx px + handle from='w - headLenPx'(箭身/箭头分界 x),axis x */
+  function arrowWithHandle(): ShapeDef {
+    return {
+      id: 'krig.basic.probe_arrow',
+      category: 'basic',
+      name: 'Probe Arrow',
+      geometry: { kind: 'parametric' },
+      viewBox: { w: 100, h: 100 },
+      aspect: 'variable',
+      params: { headLenPx: { type: 'number', default: 30, min: 10, max: 80, unit: 'px' } },
+      guides: [{ name: 'x1', op: '+-', args: ['w', 0, 'headLenPx'] }],
+      path: [{ cmd: 'M', x: 0, y: 0 }, { cmd: 'L', x: 'w', y: 'vc' }, { cmd: 'Z' }],
+      handles: [{ param: 'headLenPx', axis: 'x', from: 'x1', unit: 'px' }],
+      source: 'builtin',
+    };
+  }
+
+  it('handle from 公式求值出 shape-local x;cross-axis 取中心', () => {
+    const def = arrowWithHandle();
+    // w=200 → x1 = 200 - 30 = 170;axis x → y = h/2 = 50
+    const hs = evaluateHandles(def, { width: 200, height: 100 });
+    expect(hs).toHaveLength(1);
+    expect(hs[0]).toMatchObject({ index: 0, param: 'headLenPx', axis: 'x', unit: 'px' });
+    expect(hs[0].x).toBe(170);
+    expect(hs[0].y).toBe(50);
+  });
+
+  it('px handle 不变形:整体拉长 w,handle x 随箭身分界右移、与右边距恒定 headLenPx', () => {
+    const def = arrowWithHandle();
+    const small = evaluateHandles(def, { width: 100, height: 100 })[0];
+    const large = evaluateHandles(def, { width: 400, height: 100 })[0];
+    // 箭头三角宽 = w - x1 = headLenPx 恒定 30(不变形核心)
+    expect(100 - small.x).toBe(30);
+    expect(400 - large.x).toBe(30);
+  });
+
+  it('无 handles / svg / text → 空数组', () => {
+    const noHandle: ShapeDef = {
+      id: 'k.basic.rect', category: 'basic', name: 'r',
+      geometry: { kind: 'parametric' }, viewBox: { w: 1, h: 1 }, aspect: 'variable',
+      path: [{ cmd: 'M', x: 0, y: 0 }], source: 'builtin',
+    };
+    expect(evaluateHandles(noHandle, { width: 10, height: 10 })).toEqual([]);
+    const svg: ShapeDef = { ...noHandle, geometry: { kind: 'svg', svgPath: 'M 0 0' } };
+    expect(evaluateHandles(svg, { width: 10, height: 10 })).toEqual([]);
   });
 });

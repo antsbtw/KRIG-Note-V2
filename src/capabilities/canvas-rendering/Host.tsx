@@ -60,10 +60,24 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       const scene = new SceneManager(container);
       const nodeRenderer = new NodeRenderer(scene);
       const handles = new HandlesOverlay(scene);
-      // size_lock 反查给 HandlesOverlay(文字节点 size_lock 维度隐藏对应 handle)
+      // size_lock + doc 反查给 HandlesOverlay(文字节点 = 带 doc;size_lock 维度隐藏对应 handle)
       handles.setInstanceLookup((id) => {
         const inst = nodeRenderer.getInstance(id);
-        return inst?.size_lock ? { size_lock: inst.size_lock } : undefined;
+        if (!inst) return undefined;
+        return { size_lock: inst.size_lock, doc: inst.doc };
+      });
+      // param 拖点 provider(L5-G6c B2):走 shape-library evaluateHandles 求 handle 位置
+      handles.setParamHandleProvider((id) => {
+        const inst = nodeRenderer.getInstance(id);
+        if (!inst || inst.type !== 'shape' || !inst.size) return [];
+        const shapeApi = requireCapabilityApi<ShapeLibraryApi>('shape-library');
+        const shape = shapeApi.shapes.get(inst.ref);
+        if (!shape?.handles?.length) return [];
+        return shapeApi.shapes.evaluateHandles(inst.ref, {
+          width: inst.size.w,
+          height: inst.size.h,
+          params: inst.params,
+        }).map((h) => ({ index: h.index, localX: h.x, localY: h.y }));
       });
       const interaction = new InteractionController({
         container,

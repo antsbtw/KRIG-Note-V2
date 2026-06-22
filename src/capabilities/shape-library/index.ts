@@ -38,12 +38,13 @@ import type {
   EvaluateContext,
   EvaluateInput,
   EvaluatedPath,
+  EvaluatedHandle,
 } from './types';
 import { ShapeRegistry } from './shapes/registry';
 import { SubstanceRegistry } from './substances/registry';
 import { bootstrapShapes } from './shapes/bootstrap';
 import { bootstrapSubstances } from './substances/bootstrap';
-import { evaluateShape } from './shapes/renderers';
+import { evaluateShape, evaluateHandles } from './shapes/renderers';
 
 export type {
   ShapeLibraryApi,
@@ -53,6 +54,7 @@ export type {
   EvaluateContext,
   EvaluateInput,
   EvaluatedPath,
+  EvaluatedHandle,
   GeometryKind,
   ShapeGeometry,
   AspectKind,
@@ -84,7 +86,7 @@ export type {
 // 模块级 export(W5 边界 A 临时允许项 — driver/slot 内部可直 import)
 export { ShapeRegistry, SubstanceRegistry };
 export { evaluateShape } from './shapes/renderers';
-export { evalFormula, buildEnv, scaleParam } from './shapes/renderers';
+export { evalFormula, buildEnv, scaleParam, evaluateHandles } from './shapes/renderers';
 export type { EvalEnv } from './shapes/renderers';
 export { runShapeSmoke, printSmoke } from './shapes/__smoke__/run';
 export type { SmokeReport } from './shapes/__smoke__/run';
@@ -147,6 +149,11 @@ const shapesApi: ShapeLibraryApi['shapes'] = {
     const shape = ShapeRegistry.get(id);
     if (!shape) return null;
     return evaluateShape(shape, ctx);
+  },
+  evaluateHandles(id: string, ctx: EvaluateContext): EvaluatedHandle[] {
+    const shape = ShapeRegistry.get(id);
+    if (!shape) return [];
+    return evaluateHandles(shape, ctx);
   },
 };
 
