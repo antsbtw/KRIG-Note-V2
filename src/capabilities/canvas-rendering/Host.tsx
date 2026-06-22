@@ -252,10 +252,11 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         if (!renderer) return;
         // SerializerAtom == AtomBridgeHook 输出 — cast 走 atom-serializers Atom 形态
         renderer.setAtomBridge(fn as Parameters<typeof renderer.setAtomBridge>[0]);
-        // 注入后:重新渲染所有 text 节点(让降级灰矩形升级为真 SVG mesh)
+        // 注入后:重新渲染所有带 doc 的节点(让降级灰矩形升级为真 SVG mesh)。
+        // L5-G6c 统一范式:文字层 = 带 doc 的 shape,不再特判 ref === 'krig.text.label'。
         const list = renderer.listInstances();
         for (const inst of list) {
-          if (inst.ref === 'krig.text.label') renderer.update(inst);
+          if (inst.doc !== undefined) renderer.update(inst);
         }
       },
       [],

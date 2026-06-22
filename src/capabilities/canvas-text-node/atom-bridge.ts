@@ -127,10 +127,8 @@ function canvasEmptyDoc(): { format: string; version: string; payload: { type: s
   };
 }
 
-/** ref 是否为文字节点 */
-export function isTextNodeRef(ref: string | null | undefined): boolean {
-  return ref === 'krig.text.label';
-}
+// isTextNodeRef 已删(L5-G6c 统一范式):文字 = 带 doc 的 shape,
+// 消费方直接判 inst.doc !== undefined,不再有 ref === 'krig.text.label' 特判。
 
 // ─────────────────────────────────────────────────────────
 // 内部

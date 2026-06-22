@@ -243,11 +243,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   );
 
   // ── G4.5 P4 双击节点 → 文字节点进入编辑(其他节点暂忽略) ──
+  // L5-G6c 统一范式:可编辑 = 带 doc 的节点(不再 ref === 'krig.text.label';
+  // "双击任意 shape 起 doc 编辑" 留阶段 B/C)。
   const handleNodeDoubleClick = useCallback(
     (info: { instanceId: string; screenX: number; screenY: number; screenW: number; screenH: number }): void => {
       const inst = hostRef.current?.getInstance(info.instanceId);
       if (!inst) return;
-      if (!textNode.atomBridge.isTextNodeRef(inst.ref)) return;
+      if (inst.doc === undefined) return;
       textNode.enterEdit({
         instanceId: info.instanceId,
         initialDoc: inst.doc,

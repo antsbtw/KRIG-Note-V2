@@ -95,20 +95,22 @@ export interface Instance {
   /**
    * 文字节点语义内容(V1 M2.1 引入,G4 真消费).
    *
-   * 仅当 ref === 'krig.text.label' 时生效;格式 = NoteView 同源 Atom[].
+   * L5-G6c 统一范式:**带 doc = 带文字层的 shape**(不再仅 ref === 'krig.text.label').
+   * 文字框(geometry.kind:'text')与带 doc 的几何 shape 都用此字段,走统一文字层.
+   * 格式 = DriverSerialized 信封 { format:'pm-doc-json', payload:{ type:'doc', content } }.
    * 详见 docs/10-business-design/graph/canvas/Canvas-M2.1-TextNode-Spec.md §1.
    */
   doc?: TextNodeAtoms;
 
   /**
-   * 文字节点 size 锁(V1 M2.x 引入).仅 ref='krig.text.label' 用.
+   * 文字节点 size 锁(V1 M2.x 引入).带 doc 的节点用(L5-G6c 不再特判 ref).
    * - undefined 或 false:维度未锁,adaptTextNodeSizeToContent 自动撑
    * - true:维度被用户主动 resize 锁住,内容溢出时不再自动改 size
    */
   size_lock?: { w?: boolean; h?: boolean };
 
   /**
-   * 文字垂直对齐(V1 F-10).仅 ref='krig.text.label' 用 + size_lock.h=true 时生效.
+   * 文字垂直对齐(V1 F-10).带 doc 的节点用 + size_lock.h=true 时生效.
    * - 'top'(默认 / undefined):内容顶部对齐
    * - 'middle':内容垂直居中(Sticky 默认)
    * - 'bottom':内容底部对齐
@@ -116,15 +118,15 @@ export interface Instance {
   text_valign?: 'top' | 'middle' | 'bottom';
 
   /**
-   * 字号 pt(L5-G5 Type section,画板专属).仅 ref='krig.text.label' 用.
+   * 字号 pt(L5-G5 Type section,画板专属).带 doc 的节点用(L5-G6c 不再特判 ref).
    * 透传到 atomsToSvg baseFontSize 覆盖默认渲染字号.
    * - undefined:老画板无此字段 → sanitize 兜底 14(视觉不变,§5.4b)
-   * - 新建文字节点默认 16(对齐 note 正文)
+   * - 新建文字框默认 16(对齐 note 正文)
    */
   text_size?: number;
 
   /**
-   * 字体族(L5-G5 Type section,画板专属).仅 ref='krig.text.label' 用.
+   * 字体族(L5-G5 Type section,画板专属).带 doc 的节点用(L5-G6c 不再特判 ref).
    * 透传到 atomsToSvg fontFamily(CJK 字符仍强制中文字体).
    * - undefined / 'auto':自动选字(维持现状)
    * - 'sans' | 'serif' | 'mono' | 'handwriting':按打包字体族覆盖(§5.4)

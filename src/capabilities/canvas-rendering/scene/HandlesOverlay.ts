@@ -3,14 +3,6 @@ import type { SceneManager } from './SceneManager';
 import type { RenderedNode } from './NodeRenderer';
 
 /**
- * V1 atom-bridge.isTextNodeRef 简化版(canvas-text-node capability 在 G4.5 才搬,
- * 在此提供本地 helper 避免 G4.2 提前依赖 canvas-text-node)
- */
-function isTextNodeRef(ref: string): boolean {
-  return ref === 'krig.text.label';
-}
-
-/**
  * HandlesOverlay — 选中节点的 resize / rotation handles
  *
  * 视觉对齐 macOS Freeform / Figma:
@@ -37,7 +29,7 @@ export type HandleKind =
   | 'rotate';
 
 /**
- * 文字节点 handle 配置:
+ * 文字节点 handle 配置(L5-G6c:文字节点 = 带 doc 的 instance,不再特判 ref):
  * - Text(无 size_lock):4 handle (N/S/E/W) + rotate
  *   拉宽 → wrap;拉高 → 高度变 fixed(空白接受 / 内容滚动)
  * - Sticky(size_lock={w,h:true}):8 handle 全部 + rotate,任意拉伸固定大小
@@ -54,11 +46,14 @@ const ALL_HANDLES_SET = new Set<HandleKind>(
  */
 function allowedHandlesFor(
   node: RenderedNode,
-  getInstance: ((id: string) => { size_lock?: { w?: boolean; h?: boolean } } | undefined) | null,
+  getInstance:
+    | ((id: string) => { size_lock?: { w?: boolean; h?: boolean }; doc?: unknown } | undefined)
+    | null,
 ): Set<HandleKind> {
-  if (!isTextNodeRef(node.shapeRef)) return ALL_HANDLES_SET;
-  // 文字节点:看 size_lock
+  // 文字节点 = 带 doc 的 instance(L5-G6c 统一范式,不再 ref === 'krig.text.label')
   const inst = getInstance?.(node.instanceId);
+  if (inst?.doc === undefined) return ALL_HANDLES_SET;
+  // 文字节点:看 size_lock
   const hLock = !!inst?.size_lock?.h;
   const wLock = !!inst?.size_lock?.w;
   if (hLock && wLock) return ALL_HANDLES_SET;  // Sticky 全部 8 handle
@@ -84,7 +79,7 @@ export class HandlesOverlay {
   private disposed = false;
 
   /** 反查 instance(给 allowedHandlesFor 判断 size_lock 用);由外部注入 */
-  private getInstance: ((id: string) => { size_lock?: { w?: boolean; h?: boolean } } | undefined) | null = null;
+  private getInstance: ((id: string) => { size_lock?: { w?: boolean; h?: boolean }; doc?: unknown } | undefined) | null = null;
 
   constructor(private sceneManager: SceneManager) {
     this.group = new THREE.Group();
@@ -96,7 +91,7 @@ export class HandlesOverlay {
   }
 
   /** 注入 getInstance 反查接口(由 CanvasView 设置) */
-  setInstanceLookup(fn: ((id: string) => { size_lock?: { w?: boolean; h?: boolean } } | undefined) | null): void {
+  setInstanceLookup(fn: ((id: string) => { size_lock?: { w?: boolean; h?: boolean }; doc?: unknown } | undefined) | null): void {
     this.getInstance = fn;
   }
 

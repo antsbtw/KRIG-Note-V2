@@ -26,8 +26,8 @@ import type { Atom as SerializerAtom } from '../../lib/atom-serializers/svg';
 export interface AtomBridgeApi {
   /** 展示态:instance.doc → 序列化器 Atom[](TextRenderer 消费) */
   atomsToSvgInput(doc: unknown): Promise<SerializerAtom[]>;
-  /** ref 判断 helper(NodeRenderer / InteractionController 共享) */
-  isTextNodeRef(ref: string | null | undefined): boolean;
+  // isTextNodeRef 已删(L5-G6c 统一范式):文字 = 带 doc 的 shape,
+  // 消费方直接判 inst.doc !== undefined,不再靠 ref === 'krig.text.label'。
 }
 
 /** 编辑会话入口选项 */

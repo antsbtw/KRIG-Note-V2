@@ -44,11 +44,14 @@ interface Props {
   onChanged: () => void;
 }
 
-const TEXT_NODE_REF = 'krig.text.label';
-
-/** 解析 instance 的语义 kind(registry match 用) */
+/**
+ * 解析 instance 的语义 kind(registry match 用).
+ *
+ * L5-G6c 统一范式:文字 = 带 doc 的节点(不再 ref === 'krig.text.label').
+ * 浮条 Text/Type section 据此出(完整 registry hasText 派生留阶段 B).
+ */
 function resolveKind(inst: Instance, shapeApi: ShapeLibraryApi): NodeSemanticKind {
-  if (inst.ref === TEXT_NODE_REF) return 'text';
+  if (inst.doc !== undefined) return 'text';
   if (inst.type === 'shape') {
     const shape = shapeApi.shapes.get(inst.ref);
     if (shape?.category === 'line') return 'line';

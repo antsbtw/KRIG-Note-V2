@@ -722,10 +722,12 @@ export class InteractionController {
       position,
       size,
     };
-    // 文字节点:创建时初始化空 DriverSerialized 信封(decision 018 P0d hotfix
-    // 形态对齐 — 与 view 端编辑结束写回 inst.doc 的 DriverSerialized 信封一致,
+    // 文字框节点(geometry.kind:'text',L5-G6c 统一范式;不再特判 ref):
+    // 创建时初始化空 DriverSerialized 信封(decision 018 P0d hotfix 形态对齐 —
+    // 与 view 端编辑结束写回 inst.doc 的 DriverSerialized 信封一致,
     // 防 incomingDocToPmPayload 走 fallback 触发 warn 噪音化)。
-    if (spec.ref === 'krig.text.label') {
+    const placedShape = spec.kind === 'shape' ? getShapeApi().shapes.get(spec.ref) : null;
+    if (placedShape?.geometry.kind === 'text') {
       instance.doc = {
         format: 'pm-doc-json',
         version: '0.1',
@@ -1648,9 +1650,9 @@ function getShapeApi(): ShapeLibraryApi {
 }
 
 /**
- * 解析新实例的 size(V1 1643-1672 直迁):
+ * 解析新实例的 size(V1 1643-1672 直迁;L5-G6c 文字框走 geometry.kind):
  * - 优先 spec.defaultSize
- * - shape:line 类默认 200×100;text.label 默认 200×40;其他默认 160×100
+ * - shape:line 类默认 200×100;文字框(kind:'text')默认 200×40;其他默认 160×100
  * - substance:从 components transform 估 bbox
  * - 兜底 100×100
  */
@@ -1658,9 +1660,9 @@ function resolveDefaultSize(spec: AddModeSpec): { w: number; h: number } {
   if (spec.defaultSize) return spec.defaultSize;
   const api = getShapeApi();
   if (spec.kind === 'shape') {
-    if (spec.ref === 'krig.text.label') return { w: 200, h: 40 };
     const shape = api.shapes.get(spec.ref);
     if (shape) {
+      if (shape.geometry.kind === 'text') return { w: 200, h: 40 };
       if (shape.category === 'line') return { w: 200, h: 100 };
       return { w: 160, h: 100 };
     }
