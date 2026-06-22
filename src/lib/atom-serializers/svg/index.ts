@@ -7,6 +7,7 @@ import { renderList } from './blocks/list';
 import { renderBlockquote, renderCallout, type IconRect, type RenderChild } from './blocks/quoteCallout';
 import type { FontFamily } from './font-loader';
 import { LruCache } from '../lru';
+import { BLOCK_VISUAL_SPEC } from '../../visual-spec/block-visual-spec';
 
 export type { LinkRect } from './blocks/textBlock';
 export type { IconRect } from './blocks/quoteCallout';
@@ -37,7 +38,9 @@ export const RENDERABLE_ATOM_TYPES: ReadonlySet<string> = new Set([
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEFAULT_VIEWBOX_W = 200;
 const VIEWBOX_H = 30;
-const FONT_SIZE = 14;
+// L5 一致性 E3:默认基准字号 14→16,向 note 正文(spec.body.fontSize)看齐。
+// instance.text_size 仍优先覆盖;缺省的老画板节点现按 note 正文 16 渲染。
+const FONT_SIZE = BLOCK_VISUAL_SPEC.body.fontSize;
 /** 内容区左右各留白(textBlock x 起点 4 + 右边 4),对齐 textBlock 内 x = 4 起算 */
 const HORIZONTAL_PADDING = 8;
 
@@ -79,7 +82,8 @@ export interface AtomsToSvgOptions {
   valign?: 'top' | 'middle' | 'bottom';
   /**
    * 基准字号(L5-G5 Type section):画板文字节点 instance.text_size 透传至此,
-   * 覆盖默认 14。heading 仍在此基础上乘 level 倍率。不传 = 14(老画板视觉不变)。
+   * 覆盖默认。heading 走绝对 px 模型(L5 一致性 E3:38/28/22 × base/16)。
+   * 不传 = spec.body.fontSize(16,向 note 正文看齐;原 14)。
    */
   baseFontSize?: number;
   /**

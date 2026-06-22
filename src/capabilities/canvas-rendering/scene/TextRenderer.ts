@@ -69,7 +69,7 @@ export class TextRenderer {
     defaultTextColor?: string;
     valign?: 'top' | 'middle' | 'bottom';
     targetHeight?: number;
-    /** L5-G5 Type section:基准字号(instance.text_size 透传);不传 = 默认 14 */
+    /** L5-G5 Type section:基准字号(instance.text_size 透传);不传 = spec 正文 16(L5 一致性 E3,原 14)*/
     baseFontSize?: number;
     /** L5-G5 Type section:字体族(instance.text_font 透传);不传 = 自动选字 */
     fontFamily?: FontFamily;

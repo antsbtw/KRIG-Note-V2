@@ -14,6 +14,7 @@
  * 平移到我们的坐标系基线。
  */
 import { renderTeX } from '../mathjax-svg';
+import { BLOCK_VISUAL_SPEC } from '../../../visual-spec/block-visual-spec';
 
 export async function renderMathInline(
   tex: string,
@@ -39,8 +40,8 @@ export async function renderMathInline(
   const [vbX, vbY, vbW, vbH] = viewBoxMatch[1].split(/\s+/).map(parseFloat);
 
   // 提取根 svg 的内容(去掉 <svg ...> 和 </svg>)
-  // currentColor 替换为节点主题色(Sticky 用 '#222',默认 '#dddddd')
-  const fill = defaultTextColor ?? '#dddddd';
+  // currentColor 替换为节点主题色(Sticky 用 '#222',默认 spec 正文色 #e8eaed,向 note 看齐)
+  const fill = defaultTextColor ?? BLOCK_VISUAL_SPEC.body.color;
   let inner = extractInnerSvg(result.svg);
   if (!inner) return { svg: '', advance: 0 };
   inner = inner.replace(/currentColor/g, fill);

@@ -7,6 +7,7 @@
  * - 返回 height 给 atomsToSvg 用于垂直堆叠
  */
 import { renderTeX } from '../mathjax-svg';
+import { BLOCK_VISUAL_SPEC } from '../../../visual-spec/block-visual-spec';
 
 const PADDING_X = 4;
 const PADDING_Y = 4;
@@ -34,8 +35,8 @@ export async function renderMathBlock(
 
   let inner = extractInnerSvg(result.svg);
   if (!inner) return { svg: '', height: 0 };
-  // 替换 currentColor 为节点主题色(Sticky 黄底用 '#222',默认 '#dddddd')
-  const fill = defaultTextColor ?? '#dddddd';
+  // 替换 currentColor 为节点主题色(Sticky 黄底用 '#222',默认 spec 正文色 #e8eaed,向 note 看齐)
+  const fill = defaultTextColor ?? BLOCK_VISUAL_SPEC.body.color;
   inner = inner.replace(/currentColor/g, fill);
 
   const scaleX = result.width / vbW;

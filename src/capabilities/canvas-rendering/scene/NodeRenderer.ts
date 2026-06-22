@@ -38,6 +38,7 @@ import { renderLine, updateLineGeometry } from './LineRenderer';
 import { resolveLineEndpoints } from '../interaction/magnet-snap';
 import { TextRenderer } from './TextRenderer';
 import type { Atom as SerializerAtom } from '../../../lib/atom-serializers/svg';
+import { BLOCK_VISUAL_SPEC } from '../../../lib/visual-spec/block-visual-spec';
 
 /**
  * 文字层统一(L5-G6c 阶段 A):不再靠 ref === 'krig.text.label' 特判。
@@ -571,9 +572,9 @@ export class NodeRenderer {
       try {
         const svgGroup = await this.textRenderer.render(atoms, {
           width: safeRegion.w,
-          // L5-G5 Type section:字号/字体族透传。老画板无 text_size 字段 → 兜底 14
-          // (§5.4b,视觉不变);text_font 缺省 → 自动选字。
-          baseFontSize: typeof inst.text_size === 'number' ? inst.text_size : 14,
+          // L5-G5 Type section:字号/字体族透传。老画板无 text_size 字段 → 兜底
+          // spec 正文 16(L5 一致性 E3:向 note 正文看齐,原 14);text_font 缺省 → 自动选字。
+          baseFontSize: typeof inst.text_size === 'number' ? inst.text_size : BLOCK_VISUAL_SPEC.body.fontSize,
           fontFamily: inst.text_font,
         });
         if (this.textRenderTokens.get(inst.id) !== token) {
