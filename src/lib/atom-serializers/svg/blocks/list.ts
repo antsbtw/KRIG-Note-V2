@@ -21,12 +21,14 @@ import type { Atom } from '../../types';
 import { renderTextBlock, type LinkRect } from './textBlock';
 import { textToPath } from '../text-to-path';
 import type { FontFamily } from '../font-loader';
+import { BLOCK_VISUAL_SPEC, BASE_FONT_SIZE as SPEC_BASE_FONT_SIZE } from '../../../visual-spec/block-visual-spec';
 
-const INDENT_PER_LEVEL = 16;
-const BULLET_DIAMETER = 4;
+// L5 一致性 E3:list 视觉常量接 block-visual-spec 向 note(pm-host.css)看齐。
+const INDENT_PER_LEVEL = BLOCK_VISUAL_SPEC.list.indentPerLevel; // 24(原 16,= note li padding-left)
+const BULLET_DIAMETER = BLOCK_VISUAL_SPEC.list.bulletDiameter;  // 6(原 4,= note bullet 6px)
 const BULLET_X_OFFSET = 4; // bullet 中心相对 indent 起点的偏移
-const BULLET_FILL = '#cccccc';
-const NUMBER_FONT_SIZE = 14;
+const BULLET_FILL = BLOCK_VISUAL_SPEC.body.color; // #e8eaed(原 #cccccc,note bullet = currentColor 文字色)
+const NUMBER_FONT_SIZE = BLOCK_VISUAL_SPEC.list.numberFontSize; // 16(原 14,= note 序号继承正文)
 
 export async function renderList(
   atom: Atom,
@@ -62,18 +64,22 @@ export async function renderList(
       if (svg) parts.push(svg);
 
       // 在文本基线位置画 bullet / number(baselineY 与 textBlock 内 baseline 算法一致)
-      // bullet/number 颜色跟随节点主题色(Sticky 黄底深色,默认浅灰)
+      // bullet/number 颜色跟随节点主题色(Sticky 黄底深色,默认 note 文字色 #e8eaed)
       const bulletFill = defaultTextColor ?? BULLET_FILL;
-      const baselineY = childYStart + 14 + 2;
+      // L5 一致性 E3:序号字号 / baseline 偏移随实际 base 缩放(原硬编码 14 → 大字号 bullet 错位)。
+      const base = baseFontSize ?? SPEC_BASE_FONT_SIZE;
+      const numberFontSize = NUMBER_FONT_SIZE * (base / SPEC_BASE_FONT_SIZE);
+      const baselineY = childYStart + base + 2;
       if (ordered) {
         const text = `${index}.`;
         const numX = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET;
-        const r = await textToPath(text, NUMBER_FONT_SIZE, numX, baselineY, bulletFill);
+        const r = await textToPath(text, numberFontSize, numX, baselineY, bulletFill);
         if (r.svg) parts.push(r.svg);
       } else {
-        const cx = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET + BULLET_DIAMETER / 2;
-        const cy = baselineY - NUMBER_FONT_SIZE / 2 + 1;
-        parts.push(circlePath(cx, cy, BULLET_DIAMETER / 2, bulletFill));
+        const bulletDiameter = BULLET_DIAMETER * (base / SPEC_BASE_FONT_SIZE);
+        const cx = indent - INDENT_PER_LEVEL + BULLET_X_OFFSET + bulletDiameter / 2;
+        const cy = baselineY - base / 2 + 1;
+        parts.push(circlePath(cx, cy, bulletDiameter / 2, bulletFill));
       }
 
       y += height;
