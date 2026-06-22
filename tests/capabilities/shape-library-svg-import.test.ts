@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { parseSvgToShapeDef, normalizePathD } from '@capabilities/shape-library/shapes/svg-to-shapedef';
+import { evaluateShape } from '@capabilities/shape-library/shapes/renderers';
 
 const META = { id: 'krig.basic.probe', category: 'basic' as const, name: 'Probe' };
 
@@ -111,5 +112,28 @@ describe('L5-G6c B1.1 — parseSvgToShapeDef', () => {
     const def = parseSvgToShapeDef(svg, { ...META, textBox: { l: 5, t: 5, r: 95, b: 95 }, magnets: [{ id: 'C', x: 0.5, y: 0.5 }] });
     expect(def!.textBox).toEqual({ l: 5, t: 5, r: 95, b: 95 });
     expect(def!.magnets).toHaveLength(1);
+  });
+});
+
+describe('L5-G6c B1.2 — evaluateShape(svg kind)缩放到节点尺寸', () => {
+  it('svgPath 从 viewBox 空间缩放到 target 尺寸 + magnets×尺寸', () => {
+    const svg = '<svg viewBox="0 0 100 50"><path d="M0 0 L100 0 L100 50 Z"/></svg>';
+    const def = parseSvgToShapeDef(svg, META)!;
+    // 节点渲染 200×100 = viewBox 2×2 倍
+    const out = evaluateShape(def, { width: 200, height: 100 });
+    expect(out).not.toBeNull();
+    // L100 0 → ×2 = L 200 0;L100 50 → L 200 100
+    expect(out!.d).toBe('M 0 0 L 200 0 L 200 100 Z');
+    // magnets E = (1,0.5) → (200, 50)
+    const e = out!.magnets.find((m) => m.id === 'E')!;
+    expect(e).toEqual({ id: 'E', x: 200, y: 50 });
+    expect(/NaN|Infinity/.test(out!.d)).toBe(false);
+  });
+
+  it('svgPath 空 / viewBox 退化 → null(fail safe)', () => {
+    const def = parseSvgToShapeDef('<svg viewBox="0 0 10 10"><path d="M0 0 L10 10"/></svg>', META)!;
+    // 人为破坏 viewBox
+    const broken = { ...def, geometry: { ...def.geometry, viewBox: { w: 0, h: 0 } } };
+    expect(evaluateShape(broken, { width: 100, height: 100 })).toBeNull();
   });
 });
