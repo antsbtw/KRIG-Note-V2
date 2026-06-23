@@ -195,7 +195,13 @@ async function renderAtom(
         || (atom.attrs?.latex as string)
         || (atom.attrs?.tex as string)
         || '';
-      return renderMathBlock(latex, baseFontSize, yOffset, defaultTextColor);
+      // L5 一致性:mathBlock 颜色优先级 = 节点级 attrs.color(用户给该块上的色)
+      // > defaultTextColor(Sticky 主题)> 默认。原只读 defaultTextColor、漏 attrs.color
+      // → 用户给数学块上色不生效(真机暴露)。
+      const mathColor = (typeof atom.attrs?.color === 'string' && atom.attrs.color)
+        ? (atom.attrs.color as string)
+        : defaultTextColor;
+      return renderMathBlock(latex, baseFontSize, yOffset, mathColor);
     }
     case 'codeBlock':
       // 等宽代码图(深色圆角底,逐行 JetBrains Mono);X 截图复用此渲染。
