@@ -39,6 +39,7 @@ import { resolveLineEndpoints } from '../interaction/magnet-snap';
 import { TextRenderer } from './TextRenderer';
 import type { Atom as SerializerAtom } from '../../../lib/atom-serializers/svg';
 import { BLOCK_VISUAL_SPEC } from '../../../lib/visual-spec/block-visual-spec';
+import { injectCodeSyntaxTokens } from './code-syntax-inject';
 
 /**
  * 文字层统一(L5-G6c 阶段 A):不再靠 ref === 'krig.text.label' 特判。
@@ -569,8 +570,14 @@ export class NodeRenderer {
     void this.atomBridge(inst.doc).then(async (atoms) => {
       if (atoms.length === 0) return;
       if (this.textRenderTokens.get(inst.id) !== token) return;
+      // L5 一致性:code 块语法高亮 token 预注入(W5:tokenize 在本层做,渲染层只吃数据)。
+      // 语言未 load → 本次纯色,load 完回调重渲本节点(届时语言已 load,高亮补上)。
+      const atomsForRender = injectCodeSyntaxTokens(atoms, () => {
+        const cur = this.instances.get(inst.id);
+        if (cur) this.update(cur);
+      });
       try {
-        const svgGroup = await this.textRenderer.render(atoms, {
+        const svgGroup = await this.textRenderer.render(atomsForRender, {
           width: safeRegion.w,
           // L5-G5 Type section:字号/字体族透传。老画板无 text_size 字段 → 兜底
           // spec 正文 16(L5 一致性 E3:向 note 正文看齐,原 14);text_font 缺省 → 自动选字。

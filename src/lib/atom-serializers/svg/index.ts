@@ -2,7 +2,7 @@ import type { Atom } from '../types';
 export type { Atom } from '../types';
 import { renderTextBlock, type LinkRect } from './blocks/textBlock';
 import { renderMathBlock } from './blocks/mathBlock';
-import { renderCodeBlock } from './blocks/codeBlock';
+import { renderCodeBlock, type CodeBlockRenderOptions } from './blocks/codeBlock';
 import { renderList } from './blocks/list';
 import { renderBlockquote, renderCallout, type IconRect, type RenderChild } from './blocks/quoteCallout';
 import { renderHorizontalRule } from './blocks/horizontalRule';
@@ -97,6 +97,16 @@ export interface AtomsToSvgOptions {
    * MarkSet.fontFamily,优先于自动选字(CJK 字符仍强制中文字体)。不传 / 'auto' = 自动。
    */
   fontFamily?: FontFamily;
+  /**
+   * codeBlock 自动换行(L5 一致性 2026-06-23):画板节点宽有限,长行原溢出被裁 → true 等宽
+   * 断行。不传 = false(X 截图路径原不裁行为不变)。
+   */
+  codeWrap?: boolean;
+  /**
+   * codeBlock 背景不透明度(L5 一致性):画板叠彩色 shape 上,0.7 半透明更融合。
+   * 不传 = 1(不透明,对齐 note)。
+   */
+  codeBgOpacity?: number;
 }
 
 /**
@@ -117,8 +127,9 @@ export async function atomsToSvgWithLinks(
   const valign = options.valign ?? 'top';
   const baseFontSize = options.baseFontSize ?? FONT_SIZE;
   const fontFamily = options.fontFamily;
-  // 缓存 key 含 width / 主题色 / 目标高度 / valign / 字号 / 字体族(任一变化都得重渲)
-  const key = `w=${viewBoxW}|c=${defaultTextColor ?? ''}|th=${targetHeight ?? 'auto'}|va=${valign}|fs=${baseFontSize}|ff=${fontFamily ?? 'auto'}|${JSON.stringify(atoms)}`;
+  const codeOpts: CodeBlockRenderOptions = { wrap: options.codeWrap, bgOpacity: options.codeBgOpacity };
+  // 缓存 key 含 width / 主题色 / 目标高度 / valign / 字号 / 字体族 / code 换行·透明度(任一变化都得重渲)
+  const key = `w=${viewBoxW}|c=${defaultTextColor ?? ''}|th=${targetHeight ?? 'auto'}|va=${valign}|fs=${baseFontSize}|ff=${fontFamily ?? 'auto'}|cw=${options.codeWrap ? 1 : 0}|co=${options.codeBgOpacity ?? 1}|${JSON.stringify(atoms)}`;
   const cached = SVG_CACHE.get(key);
   if (cached !== undefined) return cached;
 
@@ -130,7 +141,7 @@ export async function atomsToSvgWithLinks(
   const icons: IconRect[] = [];
   let y = 0;
   for (const atom of atoms) {
-    const { svg, height } = await renderAtom(atom, y, contentWidth, links, icons, defaultTextColor, baseFontSize, fontFamily);
+    const { svg, height } = await renderAtom(atom, y, contentWidth, links, icons, defaultTextColor, baseFontSize, fontFamily, codeOpts);
     if (svg) parts.push(svg);
     y += height;
   }
@@ -177,11 +188,12 @@ async function renderAtom(
   defaultTextColor?: string,
   baseFontSize: number = FONT_SIZE,
   fontFamily?: FontFamily,
+  codeOpts: CodeBlockRenderOptions = {},
 ): Promise<{ svg: string; height: number }> {
-  // RenderChild 适配:blockquote/callout 子块递归回 renderAtom,把 icons 经闭包透传
-  // (RenderChild 签名只到 links,nested callout 的图标也能 emit)
+  // RenderChild 适配:blockquote/callout 子块递归回 renderAtom,把 icons + codeOpts 经闭包透传
+  // (RenderChild 签名只到 links,nested callout 的图标 / 嵌套 code 的 wrap 也能继承)
   const childRender: RenderChild = (a, y, cw, lks, dtc, bfs, ff) =>
-    renderAtom(a, y, cw, lks, icons, dtc, bfs, ff);
+    renderAtom(a, y, cw, lks, icons, dtc, bfs, ff, codeOpts);
   switch (atom.type) {
     case 'textBlock':        // 旧 atom 格式兼容(V1 NoteView)
     case 'paragraph':        // V2 BlockSpec.id 拆分后:paragraph
@@ -205,7 +217,8 @@ async function renderAtom(
     }
     case 'codeBlock':
       // 等宽代码图(深色圆角底,逐行 JetBrains Mono);X 截图复用此渲染。
-      return renderCodeBlock(atom, yOffset, contentWidth);
+      // L5:画板透传 wrap/半透明;语法 tokens 走 atom.attrs._syntaxTokens(上层注入)。
+      return renderCodeBlock(atom, yOffset, contentWidth, codeOpts);
     case 'bulletList':
       return renderList(atom, yOffset, false, 0, contentWidth, links, defaultTextColor, baseFontSize, fontFamily);
     case 'orderedList':

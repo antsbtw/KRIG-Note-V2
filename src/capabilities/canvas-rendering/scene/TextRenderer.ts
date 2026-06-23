@@ -77,6 +77,8 @@ export class TextRenderer {
     let svgString: string;
     let links: LinkRect[] = [];
     let icons: IconRect[] = [];
+    // 注:code 块语法高亮 token 由调用方(NodeRenderer)在 atom.attrs._syntaxTokens 预注入
+    // (W5:atom-serializers 不依赖 code-editing;tokenize 在能用 capability 的层做)。
     try {
       const out = await atomsToSvgWithLinks(atoms, {
         width: options.width,
@@ -85,6 +87,9 @@ export class TextRenderer {
         targetHeight: options.targetHeight,
         baseFontSize: options.baseFontSize,
         fontFamily: options.fontFamily,
+        // 画板 code 块:自动换行 + 半透明底(融入彩色 shape)
+        codeWrap: true,
+        codeBgOpacity: 0.7,
       });
       svgString = out.svg;
       links = out.links;

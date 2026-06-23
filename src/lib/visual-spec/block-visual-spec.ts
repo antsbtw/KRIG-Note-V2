@@ -99,6 +99,12 @@ export interface BlockVisualSpec {
     readonly padY: number;
     /** 文字色(#e8eaed) */
     readonly textColor: string;
+    /**
+     * 语法高亮 token 配色(tag → 色),对齐 note `.krig-code-syntax-token--<tag>`
+     * (pm-host.css L2454-2465)。tag 归一值见 code-editing tokenize.ts(12 类)。
+     * 未命中 tag → 回落 code.textColor。
+     */
+    readonly syntax: Readonly<Record<string, string>>;
   };
   /** horizontalRule(pm-host.css `.krig-horizontal-rule` L399-405) */
   readonly horizontalRule: {
@@ -189,6 +195,21 @@ export const BLOCK_VISUAL_SPEC: BlockVisualSpec = {
     padX: 16,            // padding:12px 16px → x16
     padY: 12,            //                   → y12
     textColor: '#e8eaed', // color:#e8eaed
+    // 8/12 类 token 配色,逐条 = note .krig-code-syntax-token--<tag>(pm-host.css L2454-2465)
+    syntax: {
+      storage: '#c586c0',       // import/export/type/as — 紫
+      keyword: '#569cd6',       // if/return/for — 蓝
+      typeName: '#4ec9b0',      // 类型名 — 青绿
+      functionName: '#dcdcaa',  // 函数名 — 浅黄
+      variableName: '#9cdcfe',  // 变量/参数 — 浅蓝
+      propertyName: '#9cdcfe',  // obj.prop — 浅蓝
+      string: '#ce9178',        // 'x' "x" — 橙
+      number: '#b5cea8',        // 1 2.0 true null — 浅绿
+      comment: '#6a9955',       // // /* */ — 绿(note 另带斜体,渲染态暂不斜)
+      operator: '#d4d4d4',      // + - * / = — 浅灰
+      attributeName: '#92c5f8', // JSX/HTML 属性 — 淡蓝
+      punctuation: '#808080',   // ( ) { } ; , — 灰
+    },
   },
   horizontalRule: {
     thickness: 1,        // .krig-horizontal-rule border-top:1px
