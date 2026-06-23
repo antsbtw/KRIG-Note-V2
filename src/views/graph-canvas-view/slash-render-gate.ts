@@ -41,9 +41,26 @@ const SLASH_TURN_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
 };
 
 /**
- * 某 slash item 的目标块是否渲染态可渲。
+ * 画板 slash **主动屏蔽**的块(渲染态可渲,但在画板语境无意义/误导,故不让插)。
  *
- * - turn-into item(在映射表内):查目标 atom.type 是否 ∈ RENDERABLE_ATOM_TYPES。
+ * 与「渲染不出来」不同:这些块渲染态能渲(留在 RENDERABLE_ATOM_TYPES,旧 doc 仍静态
+ * 渲出不丢内容),但画板渲染态**无交互** → 某些块的核心语义不成立:
+ * - toggleList:核心价值是点箭头折叠/展开;画板 mesh 静态不可点 → 退化成"假折叠"
+ *   (▶/▼ 箭头点不动,误导)。用户拍板:画板撤掉 toggle(2026-06-23)。
+ *
+ * 维护:这是"能渲但语境无意义"主动屏蔽集,区别于 RENDERABLE_ATOM_TYPES(能否渲)。
+ */
+const GRAPH_SLASH_DENY_ATOM_TYPES: ReadonlySet<string> = new Set([
+  'toggleList',
+]);
+
+/**
+ * 某 slash item 在画板是否该放出。
+ *
+ * 两关:① 渲染态可渲(∈ RENDERABLE_ATOM_TYPES,守"编辑⊆渲染"防黑洞);
+ *       ② 不在画板主动屏蔽集(GRAPH_SLASH_DENY,排"能渲但语境无意义"的块)。
+ *
+ * - turn-into item(在映射表内):两关都过才放。
  * - 非 turn-into item(如 math-block,命令不在表内):放行 — 这些块本身就在渲染态支持内
  *   (mathBlock ∈ RENDERABLE_ATOM_TYPES),且不属本闸过滤对象。**未来若注册了
  *   渲染态不支持的非 turn-into 块,需在此显式登记其 atom.type 再判**(fail loud:
@@ -55,7 +72,7 @@ export function isSlashItemRenderable(item: SlashItem): boolean {
     // 非 turn-into item(math-block 等);当前注册的此类项目标块均可渲,放行。
     return true;
   }
-  return RENDERABLE_ATOM_TYPES.has(atomType);
+  return RENDERABLE_ATOM_TYPES.has(atomType) && !GRAPH_SLASH_DENY_ATOM_TYPES.has(atomType);
 }
 
 /** 过滤掉渲染态渲不出的 slash item(守「编辑 ⊆ 渲染」不变量)。 */
@@ -63,5 +80,5 @@ export function filterSlashItemsToRenderable(items: SlashItem[]): SlashItem[] {
   return items.filter(isSlashItemRenderable);
 }
 
-/** 单测用:导出映射表(断言「graph 可插块 ⊆ 渲染态可渲块」时对照)。 */
-export { SLASH_TURN_COMMAND_TO_ATOM_TYPE };
+/** 单测用:导出映射表 + 画板主动屏蔽集(断言闸行为时对照)。 */
+export { SLASH_TURN_COMMAND_TO_ATOM_TYPE, GRAPH_SLASH_DENY_ATOM_TYPES };
