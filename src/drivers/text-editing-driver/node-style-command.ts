@@ -107,6 +107,19 @@ function applyTextColor(state: EditorState, color: string): PMNode | null {
   const tr = state.tr;
   tr.removeMark(from, to, markType); // 先清旧色避免叠加
   if (color) tr.addMark(from, to, markType.create({ color }));
+
+  // L5 一致性(用户拍板:着色应统一):文字 textStyle mark 之外,**带 color attr 的块**
+  // (mathBlock 等,颜色是节点级 attr 而非 inline mark)也整 doc 同步设 attrs.color,
+  // 否则节点上色时数学块不跟变(真机暴露)。color='' 清色 → attrs.color 设 null。
+  // node-toolbar 整节点上色专用(graph),不影响 note 选区上色路径。
+  const attrColor = color || null;
+  state.doc.descendants((node, pos) => {
+    if (node.attrs && 'color' in node.attrs && node.attrs.color !== attrColor) {
+      tr.setNodeMarkup(pos, null, { ...node.attrs, color: attrColor });
+    }
+    return true;
+  });
+
   return state.apply(tr).doc;
 }
 

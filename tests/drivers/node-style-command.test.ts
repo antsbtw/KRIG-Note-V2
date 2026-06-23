@@ -126,4 +126,43 @@ describe('applyNodeStyleCommand (headless 整 doc 改样式 — G5.4)', () => {
     const bad = { format: 'nope', version: '0.1', payload: {} } as unknown as DriverSerialized;
     expect(applyNodeStyleCommand(bad, { kind: 'toggleMark', mark: 'bold' })).toBeNull();
   });
+
+  // L5 一致性(用户拍板:着色应统一):setTextColor 同步设带 color attr 的块(mathBlock),
+  // 否则节点上色时数学块不跟变(真机暴露)。
+  it('setTextColor:mathBlock.attrs.color 跟着设(数学块跟文字色)', () => {
+    const doc: DriverSerialized = {
+      format: 'pm-doc-json',
+      version: '0.1',
+      payload: {
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'hi' }] },
+          { type: 'mathBlock', attrs: { color: null }, content: [{ type: 'text', text: 'x^2' }] },
+        ],
+      },
+    };
+    const out = applyNodeStyleCommand(doc, { kind: 'setTextColor', color: '#1a1a1a' });
+    expect(out).not.toBeNull();
+    const payload = out!.payload as { content: { type: string; attrs?: { color?: string | null } }[] };
+    const math = payload.content.find((n) => n.type === 'mathBlock');
+    expect(math?.attrs?.color).toBe('#1a1a1a');
+  });
+
+  it('setTextColor 空色:mathBlock.attrs.color 清回 null', () => {
+    const doc: DriverSerialized = {
+      format: 'pm-doc-json',
+      version: '0.1',
+      payload: {
+        type: 'doc',
+        content: [
+          { type: 'mathBlock', attrs: { color: '#1a1a1a' }, content: [{ type: 'text', text: 'x^2' }] },
+        ],
+      },
+    };
+    const out = applyNodeStyleCommand(doc, { kind: 'setTextColor', color: '' });
+    expect(out).not.toBeNull();
+    const payload = out!.payload as { content: { type: string; attrs?: { color?: string | null } }[] };
+    const math = payload.content.find((n) => n.type === 'mathBlock');
+    expect(math?.attrs?.color ?? null).toBeNull();
+  });
 });
