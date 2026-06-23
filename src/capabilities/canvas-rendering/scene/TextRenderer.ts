@@ -87,9 +87,9 @@ export class TextRenderer {
         targetHeight: options.targetHeight,
         baseFontSize: options.baseFontSize,
         fontFamily: options.fontFamily,
-        // 画板 code 块:自动换行 + 半透明底(融入彩色 shape)
+        // 画板 code 块:自动换行(长行不裁)。背景保持不透明 #2a2a2a 对齐 note —— 半透明
+        // 实测(2026-06-23 真机)透出彩色 shape 致代码字对比度低、糊,撤回不透明。
         codeWrap: true,
-        codeBgOpacity: 0.7,
       });
       svgString = out.svg;
       links = out.links;

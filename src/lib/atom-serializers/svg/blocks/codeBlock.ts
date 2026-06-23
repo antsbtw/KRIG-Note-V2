@@ -3,9 +3,11 @@
  *
  * 缘起(X 截图 2026-06):atomsToSvg 原本无 codeBlock 渲染。X 发推 / Graph 画板复用此渲染。
  *
- * L5 一致性(2026-06-23 真机三改):
- * - **半透明底**:画板叠彩色 shape 上,不透明深块突兀 → fill-opacity(codeBgOpacity option)。
+ * L5 一致性(2026-06-23 真机):
  * - **自动换行**:画板节点宽有限,长行原溢出被裁 → 等宽字符断行 wrap(codeWrap option)。
+ * - **背景**:保持不透明 #2a2a2a 对齐 note(深底浅字对比高、代码清晰)。半透明机制
+ *   (codeBgOpacity/fill-opacity)保留备用,但画板**不传**——实测半透明透出彩色 shape
+ *   致代码字对比低、糊(用户拍板回不透明)。
  * - **语法高亮**:tokens 由上层(canvas-rendering)预算注入 atom.attrs._syntaxTokens
  *   (W5:本层纯净不 import code-editing;tokenize 在能用 capability 的层做),按 tag→色
  *   逐段上色;无 tokens / 语言未 load → 回落纯色(fail loud 不崩)。
