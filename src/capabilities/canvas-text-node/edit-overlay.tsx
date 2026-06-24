@@ -63,6 +63,10 @@ export const CANVAS_TEXT_NODE_PLUGIN_PRESET: TextEditingPluginToggles = {
   slash: true,
   // headingCollapse:canvas 文字节点 doc 短,无 TOC 面板,关
   headingCollapse: false,
+  // bottomPad:遵循 note —— 末尾 atom 块(code/公式/divider)下方双击空白可补新普通段落
+  // (否则末块是 atom/leaf 时光标无处可落)。bottomPad 默认按 viewId==='note-view' 守门,
+  // 画板非 note-view 故显式开。L5 一致性 2026-06-24:graph 编辑态向 note 对齐此交互。
+  bottomPad: true,
 };
 
 export function EditOverlay(): ReactElement | null {
