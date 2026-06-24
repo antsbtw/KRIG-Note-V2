@@ -10,7 +10,8 @@
  *
  * 渲染策略(对齐 note):每个 taskItem 一行起 —— 左侧 checkbox 方框(未选空框/已选实心
  * 打勾)+ 右侧子块(block+)。checkbox 与文字 gap 8px;item 视觉缩进 indent×24。
- * 已完成项文字走灰色(删除线属 refinement,渲染链画删除线需额外 path,留 backlog)。
+ * 已完成项文字走灰色 #9aa0a6 + **删除线**(对齐 note .checked color+line-through;
+ * 删除线靠给子块文字注入 strike mark,textBlock 渲删除线 path)。
  *
  * 子块递归走调用方注入的 RenderChild(= index.ts renderAtom),避免循环 import。
  */
@@ -21,6 +22,22 @@ import type { RenderChild } from './quoteCallout';
 import { BLOCK_VISUAL_SPEC, BASE_FONT_SIZE as SPEC_BASE_FONT_SIZE } from '../../../visual-spec/block-visual-spec';
 
 const { checkboxSize, accentColor, gap, indentPerLevel, checkedColor } = BLOCK_VISUAL_SPEC.taskList;
+
+/**
+ * 给一个 atom 子树里所有 text 节点注入 strike mark(已完成 task 删除线)。
+ * 不可变拷贝:不改原 atom。text 节点 marks 追加 {type:'strike'}(去重)。
+ */
+function addStrikeMark(atom: Atom): Atom {
+  if (atom.type === 'text') {
+    const marks = Array.isArray(atom.marks) ? atom.marks : [];
+    if (marks.some((m) => m?.type === 'strike')) return atom;
+    return { ...atom, marks: [...marks, { type: 'strike' }] };
+  }
+  if (Array.isArray(atom.content) && atom.content.length > 0) {
+    return { ...atom, content: atom.content.map(addStrikeMark) };
+  }
+  return atom;
+}
 
 export async function renderTaskList(
   atom: Atom,
@@ -64,9 +81,11 @@ export async function renderTaskList(
     const childParts: string[] = [];
     for (const kid of childKids) {
       if (!kid) continue;
+      // 已完成项:给子块文字注入 strike mark → textBlock 渲删除线(对齐 note .checked)
+      const kidToRender = checked ? addStrikeMark(kid) : kid;
       const localLinks: LinkRect[] = [];
       const { svg, height } = await renderChild(
-        kid, childY, innerWidth, localLinks, childColor, baseFontSize, fontFamily,
+        kidToRender, childY, innerWidth, localLinks, childColor, baseFontSize, fontFamily,
       );
       if (svg) {
         childParts.push(

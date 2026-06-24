@@ -109,6 +109,8 @@ export interface MarkSet {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  /** strike mark — 渲染画删除线(对齐 note strike mark / task 已完成项 line-through) */
+  strike?: boolean;
   code?: boolean;
   /** textStyle mark.attrs.color — 文字颜色(CSS 颜色字符串) */
   textColor?: string;

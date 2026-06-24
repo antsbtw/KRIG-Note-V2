@@ -63,6 +63,22 @@ describe('E4 — taskList', () => {
     expect(countPaths(svg)).toBeGreaterThan(0); // 对勾 + 文字
   });
 
+  it('已选项:文字灰色 #9aa0a6 + 删除线(对齐 note .checked)', async () => {
+    const checked: Atom = {
+      type: 'taskList',
+      content: [{ type: 'taskItem', attrs: { checked: true }, content: [para('done task')] }],
+    };
+    const unchecked: Atom = {
+      type: 'taskList',
+      content: [{ type: 'taskItem', attrs: { checked: false }, content: [para('done task')] }],
+    };
+    const cSvg = await atomsToSvg([checked], { width: 200 });
+    const uSvg = await atomsToSvg([unchecked], { width: 200 });
+    expect(cSvg).toContain('#9aa0a6'); // 已完成文字灰(checkedColor)
+    // 删除线:已选比未选多画线 path → path 数更多
+    expect(countPaths(cSvg)).toBeGreaterThan(countPaths(uSvg));
+  });
+
   it('多项:每项各画 checkbox', async () => {
     const atom: Atom = {
       type: 'taskList',
