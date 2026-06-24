@@ -121,6 +121,16 @@ export function EditOverlay(): ReactElement | null {
     if (!session) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
+        // Esc 上下文化(对齐 note 删块流程):光标在块内(未选块)时,Esc 让给 PM →
+        // blockSelection 选中整块(蓝框),用户可接 Backspace 删块;**不退出编辑**。
+        // 仅当已是"块选中态"(.ProseMirror 有 is-block-selecting)或拿不到编辑器时,
+        // Esc 才退出编辑。避免 Esc 一律退出,夺走 note 的「Esc 选块」入口。
+        const pm = popupRef.current?.querySelector<HTMLElement>('.ProseMirror');
+        const blockSelected = pm?.classList.contains('is-block-selecting') ?? false;
+        if (pm && !blockSelected) {
+          // 放行给 PM(它选中整块);本 handler 不拦、不退出
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         exit(false);
