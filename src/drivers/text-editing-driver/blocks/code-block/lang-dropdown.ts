@@ -150,17 +150,22 @@ export function openLangDropdown(opts: LangDropdownOptions): LangDropdownHandle 
 
   // mousedown 比 click 早 — 用 mousedown,防止 dropdown 内 mousedown 触发 doc-level 监听过早关掉
   // 解法:用 mousedown 但延后挂一帧(避免本轮 open 的 mousedown 被 doc 监听到自己)
+  //
+  // **capture 阶段**(第三参 true):dropdown mount 在 body,但宿主可能在 stopPropagation
+  // 的容器内(如画板编辑浮层 popup onMouseDown stopPropagation 防 InteractionController)——
+  // bubble 阶段 doc 监听会被吞、菜单关不掉。capture 阶段 document 先收到,绕过 bubble 吞噬。
+  // root.contains 守门保证点 dropdown 内不误关(note 无 stopPropagation,capture/bubble 行为一致)。
   document.body.appendChild(root);
   requestAnimationFrame(() => {
-    document.addEventListener('mousedown', onDocMouseDown);
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onDocMouseDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
     search.focus();
   });
 
   const handle: LangDropdownHandle = {
     close: () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onDocMouseDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
       if (root.parentNode) root.parentNode.removeChild(root);
       if (currentDropdown === handle) currentDropdown = null;
     },
