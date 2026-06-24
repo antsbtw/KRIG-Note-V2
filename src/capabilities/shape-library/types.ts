@@ -16,8 +16,15 @@
 // Shape
 // ─────────────────────────────────────────────────────────
 
-export type ShapeCategory = 'basic' | 'arrow' | 'flowchart' | 'line' | 'text';
-export type RendererKind = 'parametric' | 'static-svg' | 'custom';
+export type ShapeCategory = 'basic' | 'geometry' | 'arrow' | 'flowchart' | 'line' | 'text';
+
+/**
+ * 几何范式(L5-G6c §2 统一范式;取代旧 `renderer: parametric|static-svg|custom`)。
+ * - `parametric`:path/params/guides/handles 公式驱动(现状能力,载荷留 ShapeDef 顶层,D1=(b))
+ * - `svg`:svgPath + viewBox(阶段 B 真消费;A 先留字段)
+ * - `text`:无几何(纯文字框);文字层走 NodeRenderer 统一 fillTextLayer
+ */
+export type GeometryKind = 'parametric' | 'svg' | 'text';
 export type AspectKind = 'variable' | 'fixed';
 export type ParamUnit = 'ratio' | 'px' | 'deg';
 export type ShapeSource = 'builtin' | 'plugin' | 'imported';
@@ -89,6 +96,12 @@ export interface ShapeHandle {
   from: FormulaValue;
   min?: FormulaValue;
   max?: FormulaValue;
+  /**
+   * 拖点单位(L5-G6c §3.5;阶段 A 定字段,阶段 B 接 UI)。
+   * - `'ratio'`:相对节点尺寸(拖动反算时乘 w/h)
+   * - `'px'`:绝对像素(箭头固定像素 → 拉长只加长箭身、三角不变形)
+   */
+  unit?: 'px' | 'ratio';
 }
 
 export interface TextBox {
@@ -127,31 +140,54 @@ export interface DefaultStyle {
 }
 
 /**
- * Shape 定义(JSON schema 镜像)
- * 90% shape 用 parametric renderer,纯 JSON 描述;custom 用 implementation 字段
+ * Geometry — 几何范式锚点(L5-G6c §2 统一范式,D1=(b))。
+ *
+ * `kind` 是单一判定锚点(取代旧 `renderer` 字段);几何载荷(path/params/guides/
+ * handles)按 D1=(b) 保留在 ShapeDef 顶层不下沉,阶段 A 改动最小、平移风险低,
+ * 完全收口留阶段 B/C。
+ */
+export interface ShapeGeometry {
+  kind: GeometryKind;
+  /** `kind:'svg'` 用(阶段 B 真消费;A 先留字段):贴 SVG 抽出的 path d 字符串 */
+  svgPath?: string;
+  /** `kind:'svg'` 的视框(缺省时由 bbox 算,阶段 B) */
+  viewBox?: { w: number; h: number };
+}
+
+/**
+ * Shape 定义(JSON schema 镜像;L5-G6c 统一范式)。
+ * - `geometry.kind:'parametric'`:90% shape,纯 JSON path/params/guides 公式描述
+ * - `geometry.kind:'svg'`:贴 SVG path(阶段 B)
+ * - `geometry.kind:'text'`:无几何,纯文字框(textGrows:true)
  */
 export interface ShapeDef {
   id: string;                  // krig.{category}.{name}
   category: ShapeCategory;
   name: string;
-  renderer: RendererKind;
+  /** 几何范式锚点(取代旧 renderer 字段;L5-G6c §2) */
+  geometry: ShapeGeometry;
 
   viewBox: { w: number; h: number };
   aspect: AspectKind;
 
+  /** parametric 几何载荷(D1=(b) 保留顶层) */
   params?: Record<string, ShapeParam>;
   guides?: ShapeGuide[];
   path?: PathCmd[];
 
-  /** static-svg renderer 用 */
-  svg_string?: string;
-
-  /** custom renderer 用,指向 TS 模块路径 */
-  implementation?: string;
-
   magnets?: MagnetPoint[];
   handles?: ShapeHandle[];
   textBox?: TextBox;
+
+  /**
+   * 文字溢出是否撑高节点(L5-G6c §2 / L5G6b §3.2)。
+   * - 文字框(kind:'text')= true:内容多自动撑高
+   * - 几何 shape = false / 缺省:文字固定框,溢出可见(不改几何)
+   */
+  textGrows?: boolean;
+  /** Picker 自由归类备用(L5-G6c §2;阶段 C 用) */
+  tags?: string[];
+
   default_style?: DefaultStyle;
 
   source: ShapeSource;
@@ -258,6 +294,19 @@ export interface EvaluatedPath {
   textBox?: { l: number; t: number; r: number; b: number };
 }
 
+/**
+ * 求值后的 param 拖点位置(L5-G6c §3.5 B2;shape-local px,原点 bbox 左上 / Y 向下)。
+ * canvas-rendering HandlesOverlay 据此画拖点,InteractionController 据此反算 param。
+ */
+export interface EvaluatedHandle {
+  index: number;          // shape.handles[] 下标
+  param: string;
+  axis: 'x' | 'y';
+  unit?: 'px' | 'ratio';
+  x: number;
+  y: number;
+}
+
 export interface ShapePack {
   id: string;                           // pack 自己的 id(命名空间)
   shapes: ShapeDef[];
@@ -280,13 +329,29 @@ export interface ShapeLibraryApi {
     listByCategory(category: ShapeCategory): ShapeDef[];
     /**
      * 求值:把 ShapeDef.path + params + guides 求值成"路径表达式数据".
-     * 输出 EvaluatedPath(0 含 THREE 类型);id 不存在或 renderer != 'parametric' 返 null.
+     * 输出 EvaluatedPath(0 含 THREE 类型);id 不存在或 geometry.kind != 'parametric' 返 null.
      */
     evaluate(
       id: string,
       props: EvaluateInput,
       ctx: EvaluateContext,
     ): EvaluatedPath | null;
+    /**
+     * 求值 param 拖点位置(L5-G6c §3.5 B2)。id 不存在 / 无 handles / 非 parametric → 空数组.
+     * 输出 EvaluatedHandle[](shape-local px 纯数据,0 含 THREE).
+     */
+    evaluateHandles(id: string, ctx: EvaluateContext): EvaluatedHandle[];
+    /**
+     * 拖动反算 param(L5-G6c §3.5 B2.2):沿 handle.axis 的 shape-local 位移 axisDelta(px)
+     * → 新 param 值(数值灵敏度反算,夹 min/max)。id/handle 不存在 → null.
+     */
+    reverseParamFromDrag(
+      id: string,
+      ctx: EvaluateContext,
+      handleIdx: number,
+      axisDelta: number,
+      startParams: Record<string, number>,
+    ): { param: string; value: number } | null;
   };
   substances: {
     register(def: SubstanceDef): void;

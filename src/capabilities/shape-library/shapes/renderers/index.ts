@@ -8,6 +8,6 @@
  * (G3 段实施).
  */
 
-export { evaluateShape } from './parametric';
-export { evalFormula, buildEnv } from './formula-eval';
+export { evaluateShape, evaluateHandles, reverseParamFromDrag } from './parametric';
+export { evalFormula, buildEnv, scaleParam } from './formula-eval';
 export type { EvalEnv } from './formula-eval';

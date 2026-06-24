@@ -63,6 +63,10 @@ export const CANVAS_TEXT_NODE_PLUGIN_PRESET: TextEditingPluginToggles = {
   slash: true,
   // headingCollapse:canvas 文字节点 doc 短,无 TOC 面板,关
   headingCollapse: false,
+  // bottomPad:遵循 note —— 末尾 atom 块(code/公式/divider)下方双击空白可补新普通段落
+  // (否则末块是 atom/leaf 时光标无处可落)。bottomPad 默认按 viewId==='note-view' 守门,
+  // 画板非 note-view 故显式开。L5 一致性 2026-06-24:graph 编辑态向 note 对齐此交互。
+  bottomPad: true,
 };
 
 export function EditOverlay(): ReactElement | null {
@@ -82,6 +86,8 @@ export function EditOverlay(): ReactElement | null {
   const [initialDoc, setInitialDoc] = useState<DriverSerialized | null>(null);
   // 编辑期间最新的 doc(commit 时写回 instance.doc)
   const latestDocRef = useRef<DriverSerialized | null>(null);
+  // popup 容器 ref(挂载后聚焦内部 PM contenteditable,否则双击进编辑却打不了字)
+  const popupRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -115,6 +121,16 @@ export function EditOverlay(): ReactElement | null {
     if (!session) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
+        // Esc 上下文化(对齐 note 删块流程):光标在块内(未选块)时,Esc 让给 PM →
+        // blockSelection 选中整块(蓝框),用户可接 Backspace 删块;**不退出编辑**。
+        // 仅当已是"块选中态"(.ProseMirror 有 is-block-selecting)或拿不到编辑器时,
+        // Esc 才退出编辑。避免 Esc 一律退出,夺走 note 的「Esc 选块」入口。
+        const pm = popupRef.current?.querySelector<HTMLElement>('.ProseMirror');
+        const blockSelected = pm?.classList.contains('is-block-selecting') ?? false;
+        if (pm && !blockSelected) {
+          // 放行给 PM(它选中整块);本 handler 不拦、不退出
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         exit(false);
@@ -128,20 +144,49 @@ export function EditOverlay(): ReactElement | null {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [session, exit]);
 
+  // 挂载后聚焦 PM 编辑器(否则双击进编辑但焦点仍在 canvas → 打不了字)。
+  // Host 内部 EditorView 异步建好后,.ProseMirror contenteditable 才在 DOM 里;
+  // 用 RAF + 重试覆盖 mount 时序(initialDoc 就绪 → Host render → EditorView mount)。
+  useEffect(() => {
+    if (!session || !initialDoc) return;
+    let raf = 0;
+    let tries = 0;
+    const tryFocus = (): void => {
+      const pm = popupRef.current?.querySelector<HTMLElement>('.ProseMirror');
+      if (pm) { pm.focus(); return; }
+      if (tries++ < 20) raf = requestAnimationFrame(tryFocus); // ~20 帧内重试
+    };
+    raf = requestAnimationFrame(tryFocus);
+    return () => cancelAnimationFrame(raf);
+  }, [session, initialDoc]);
+
   if (!session || !initialDoc) return null;
 
   const Host = textEditing.Host;
   const t = session.opts;
-  // V1 体验:popup 完全贴合 mesh 屏幕投影,编辑态与展示态视觉无缝过渡(M2.1 §4.2)
-  const popupStyle: CSSProperties = {
-    ...styles.popup,
-    left: t.screenX,
-    top: t.screenY,
-    width: t.width,
-    [t.heightFixed ? 'height' : 'minHeight']: t.height,
-    background: t.backgroundColor ?? 'rgba(40, 40, 40, 0.98)',
-    color: t.backgroundColor ? '#222' : 'var(--krig-text-primary)',
-  };
+  // V1 体验:popup 完全贴合 mesh 屏幕投影,编辑态与展示态视觉无缝过渡(M2.1 §4.2)。
+  // L5-G6c:transparent(编辑覆盖几何 shape)→ 无底色/边框/阴影,几何透出、只编辑文字层。
+  const popupStyle: CSSProperties = t.transparent
+    ? {
+        ...styles.popup,
+        left: t.screenX,
+        top: t.screenY,
+        width: t.width,
+        [t.heightFixed ? 'height' : 'minHeight']: t.height,
+        background: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
+        color: 'var(--krig-text-primary)',
+      }
+    : {
+        ...styles.popup,
+        left: t.screenX,
+        top: t.screenY,
+        width: t.width,
+        [t.heightFixed ? 'height' : 'minHeight']: t.height,
+        background: t.backgroundColor ?? 'rgba(40, 40, 40, 0.98)',
+        color: t.backgroundColor ? '#222' : 'var(--krig-text-primary)',
+      };
 
   return (
     <div
@@ -151,6 +196,7 @@ export function EditOverlay(): ReactElement | null {
       }}
     >
       <div
+        ref={popupRef}
         className="krig-canvas-edit-popup"
         style={popupStyle}
         onMouseDown={(e) => e.stopPropagation()}

@@ -44,14 +44,19 @@ interface Props {
   onChanged: () => void;
 }
 
-const TEXT_NODE_REF = 'krig.text.label';
-
-/** 解析 instance 的语义 kind(registry match 用) */
+/**
+ * 解析 instance 的语义 kind(registry match 用).
+ *
+ * L5-G6c(对齐 Freeform):**几何 shape 永远是 'shape'**(单击出 fill/line/text 浮条,
+ * 能改填充/线条/字体),不因「带 doc」就变 'text' 类丢掉 line/fill —— 文字是几何 shape
+ * 的一个层,不是独立节点。只有**纯文字框**(geometry.kind:'text')才是 'text'。
+ * 编辑文字走双击(不靠 kind)。
+ */
 function resolveKind(inst: Instance, shapeApi: ShapeLibraryApi): NodeSemanticKind {
-  if (inst.ref === TEXT_NODE_REF) return 'text';
   if (inst.type === 'shape') {
     const shape = shapeApi.shapes.get(inst.ref);
     if (shape?.category === 'line') return 'line';
+    if (shape?.geometry.kind === 'text') return 'text'; // 纯文字框
   }
   return 'shape';
 }

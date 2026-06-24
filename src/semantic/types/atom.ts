@@ -92,9 +92,11 @@ export interface GraphCanvasPayload {
  * 是"类",画板内 Instance 是"实例")。所有节点共享同一 domain,
  * 通过 payload.type + payload.ref 区分形态。
  *
- * ⚠ doc 字段不在本 payload — text-node (ref === 'krig.text.label') 的 PM 内容
- * 走 user:krig:hasContent 边 + pm atom 表达 (decision 014 §3.3)。view 端拼装
- * 仍按 Instance.doc 形态消费 (capability 内适配,view 透明)。
+ * L5-G6c 文档本体零边/属性化(对齐 note,2026-06-22 总指挥拍板):
+ * **doc 内联 payload.doc 属性**,不再走 user:krig:hasContent 边 + 独立 pm atom。
+ * 任意带 doc 的 shape(文字框 / 带文字层的几何 shape)统一用此字段;view 端
+ * Instance.doc ↔ payload.doc 直透(DriverSerialized 信封)。
+ * (user:krig:hasContent predicate 本身保留 — 它是跨能力通用语义边,见 canvas-store M1。)
  *
  * InstanceEndpoint / StyleOverrides 在 semantic 层保持 unknown 兜底
  * (避免跨层依赖 @capabilities);capability 拼装 Instance 时做窄化。
@@ -115,6 +117,12 @@ export interface GraphInstancePayload {
   text_size?: number;
   /** 文字节点字体族(L5-G5;'auto'|'sans'|'serif'|'mono'|'handwriting') */
   text_font?: string;
+  /**
+   * 文字内容 doc(L5-G6c:内联属性,取代 hasContent 边 + pm atom)。
+   * DriverSerialized 信封 { format:'pm-doc-json', version, payload:{ type:'doc', content } }。
+   * 缺省 = 无文字层的纯几何 shape。
+   */
+  doc?: unknown;
 }
 
 /** 留 future line 实例,本 sub-phase 不实施 line — semantic 层保持 unknown 兜底 */

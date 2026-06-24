@@ -38,9 +38,17 @@ import { renderLine, updateLineGeometry } from './LineRenderer';
 import { resolveLineEndpoints } from '../interaction/magnet-snap';
 import { TextRenderer } from './TextRenderer';
 import type { Atom as SerializerAtom } from '../../../lib/atom-serializers/svg';
+import { BLOCK_VISUAL_SPEC } from '../../../lib/visual-spec/block-visual-spec';
+import { injectCodeSyntaxTokens } from './code-syntax-inject';
 
-/** ref === 'krig.text.label' 时走 TextRenderer SVG → mesh 真渲染(G4.5 P4) */
-const TEXT_REF = 'krig.text.label';
+/**
+ * 文字层统一(L5-G6c 阶段 A):不再靠 ref === 'krig.text.label' 特判。
+ * 任意带 `doc` 的 shape、或 `geometry.kind === 'text'` 的纯文字框,
+ * 都在其 textBox(缺省整框)渲一条统一文字层(fillTextLayer)。
+ */
+function hasTextLayer(inst: Instance, shape: ShapeDef): boolean {
+  return inst.doc !== undefined || shape.geometry.kind === 'text';
+}
 
 /**
  * canvas-text-node atom-bridge 注入(view 端 mount 时通过 NodeRenderer.setAtomBridge 设).
@@ -239,6 +247,20 @@ export class NodeRenderer {
     return this.byId.get(id);
   }
 
+  /**
+   * 显隐某 instance 的文字层 contentSlot(L5-G6c:双击进编辑时隐藏渲染态文字,
+   * 避免与透明编辑浮层的文字重影;退出编辑恢复)。无文字层 / 无此 instance 静默忽略。
+   */
+  setTextLayerVisible(id: string, visible: boolean): void {
+    const rn = this.byId.get(id);
+    if (!rn) return;
+    rn.group.traverse((obj) => {
+      if ((obj.userData as { isTextContentSlot?: boolean })?.isTextContentSlot) {
+        obj.visible = visible;
+      }
+    });
+  }
+
   /** 查询原始 Instance */
   getInstance(id: string): Instance | undefined {
     return this.instances.get(id);
@@ -303,11 +325,11 @@ export class NodeRenderer {
       return null;
     }
 
-    // G4.5 文字节点:走 TextRenderer + canvas-text-node.atomBridge 真渲染
+    // 文字框(geometry.kind:'text',无几何):纯文字层一条路径
     // (atomBridge 未注入时降级灰色占位)
-    if (inst.ref === TEXT_REF) {
+    if (shape.geometry.kind === 'text') {
       return this.atomBridge
-        ? this.renderTextInstance(inst)
+        ? this.renderTextLayerNode(inst, shape)
         : this.renderPlaceholder(inst, shape, 'text');
     }
 
@@ -316,7 +338,8 @@ export class NodeRenderer {
       return this.renderLineShape(inst, shape);
     }
 
-    // 正常 shape:走 evaluate → path-to-three
+    // 几何 shape(geometry.kind:'parametric' | 'svg'):走 evaluate → path-to-three
+    // (B1.2:svg kind evaluate 把 svgPath 缩放到节点尺寸,与 parametric 同一条渲染)
     const { position, size } = ensurePositionSize(inst, shape);
     const evalPath = api.shapes.evaluate(
       inst.ref,
@@ -331,6 +354,20 @@ export class NodeRenderer {
       fill: mergeFill(shape.default_style?.fill, inst.style_overrides?.fill),
       stroke: mergeLine(shape.default_style?.line, inst.style_overrides?.line),
     });
+
+    // 文字层统一:带 doc 的几何 shape → 在其 textBox(缺省整框)叠一条文字层.
+    // 几何层先渲(out.group),文字层叠在其上(z 更高).几何 shape textGrows
+    // 缺省 false → 文字溢出可见,不撑高几何.
+    if (this.atomBridge && hasTextLayer(inst, shape)) {
+      const tb = evalPath.textBox ?? { l: 0, t: 0, r: size.w, b: size.h };
+      this.fillTextLayer(inst, out.group, {
+        x: tb.l,
+        y: tb.t,
+        w: Math.max(1, tb.r - tb.l),
+        h: Math.max(1, tb.b - tb.t),
+      }, false);
+    }
+
     // outer/inner 嵌套实现 bbox 中心旋转
     const outerGroup = wrapForRotation(out.group, position, size, inst.rotation ?? 0);
     outerGroup.userData.instanceId = inst.id;
@@ -407,9 +444,9 @@ export class NodeRenderer {
       if (comp.type !== 'shape') continue;
       const compShape = api.shapes.get(comp.ref);
       if (!compShape) continue;
-      // line / text 子组件 G4 实施,G3 跳过
+      // line / text 子组件 G4 实施,G3 跳过(text 走统一 geometry.kind,不再特判 ref)
       if (compShape.category === 'line') continue;
-      if (comp.ref === TEXT_REF) continue;
+      if (compShape.geometry.kind === 'text') continue;
 
       const compGroup = renderComponent(comp, compShape, scale, api);
       if (compGroup) innerGroup.add(compGroup);
@@ -429,22 +466,20 @@ export class NodeRenderer {
   }
 
   /**
-   * 文字节点真渲染(V1 NodeRenderer:336-453 直迁简化):
-   * - inner group 三层:bg(可选 sticky)+ hitArea(透明覆盖)+ contentSlot(SVG mesh 异步填入)
-   * - 异步 textRenderer.render(atoms) → 填入 contentSlot
-   * - token 防同 instance 多次刷新过期回调污染
+   * 文字框节点真渲染(geometry.kind:'text',无几何;L5-G6c 统一范式).
    *
-   * 砍掉(留 v1.1):adaptTextNodeSizeToContent / pickReadableTextColor 智能配色 /
-   * size_lock + text_valign 高度自适应
+   * 原 renderTextInstance 的"整框文字 + 自动撑高"行为退化为:文字层填整框
+   * (region = 整 size),撑高与否由 shape.textGrows 决定(文字框缺省 true).
+   * Sticky 背景(style_overrides.fill 实色底)在此渲(并入 fill 渲染语义).
    */
-  private renderTextInstance(inst: Instance): RenderedNode | null {
+  private renderTextLayerNode(inst: Instance, shape: ShapeDef): RenderedNode | null {
     if (!this.atomBridge) return null;
-    const { position, size } = ensurePositionSize(inst, null);
+    const { position, size } = ensurePositionSize(inst, shape);
     const safeSize = { w: Math.max(1, size.w), h: Math.max(1, size.h) };
 
     const innerGroup = new THREE.Group();
 
-    // 背景(Sticky):style_overrides.fill 实色背景
+    // 背景(Sticky):style_overrides.fill 实色背景 — 文字框的 fill 渲染(整框)
     const bgFill = inst.style_overrides?.fill;
     if (bgFill?.type === 'solid' && bgFill.color) {
       const bgGeo = new THREE.PlaneGeometry(safeSize.w, safeSize.h);
@@ -459,8 +494,56 @@ export class NodeRenderer {
       innerGroup.add(bgMesh);
     }
 
-    // 透明 hit-area(覆盖整个 size,捕获 glyph 间空隙点击 + 双击进入编辑)
-    const hitGeo = new THREE.PlaneGeometry(safeSize.w, safeSize.h);
+    // 文字层填整框;撑高与否读 shape.textGrows(文字框缺省 true)
+    this.fillTextLayer(
+      inst,
+      innerGroup,
+      { x: 0, y: 0, w: safeSize.w, h: safeSize.h },
+      shape.textGrows ?? true,
+    );
+
+    const outerGroup = wrapForRotation(innerGroup, position, safeSize, inst.rotation ?? 0);
+    outerGroup.userData.instanceId = inst.id;
+    outerGroup.userData.isTextNode = true;
+
+    return {
+      instanceId: inst.id,
+      kind: 'shape',
+      group: outerGroup,
+      shapeRef: inst.ref,
+      position: { ...position },
+      size: { ...safeSize },
+      rotation: inst.rotation ?? 0,
+    };
+  }
+
+  /**
+   * 通用文字层(L5-G6c 统一范式核心):给定 innerGroup + textBox 子区域,
+   * 往该区域填一条文字层(hitArea + contentSlot + 异步 SVG mesh).
+   *
+   * 收编自原 renderTextInstance — 文字框走整框 region、几何 shape 走 textBox 子区域,
+   * 同一条路径,不再分叉.
+   *
+   * @param region 文字层在 innerGroup 局部坐标的子区域 { x, y, w, h }
+   *               (几何 shape = evalPath.textBox;文字框 = 整框 {0,0,w,h})
+   * @param autogrow 内容溢出是否撑高节点(shape.textGrows;文字框 true / 几何 shape false)
+   */
+  private fillTextLayer(
+    inst: Instance,
+    innerGroup: THREE.Group,
+    region: { x: number; y: number; w: number; h: number },
+    autogrow: boolean,
+  ): void {
+    if (!this.atomBridge) return;
+    const safeRegion = {
+      x: region.x,
+      y: region.y,
+      w: Math.max(1, region.w),
+      h: Math.max(1, region.h),
+    };
+
+    // 透明 hit-area(覆盖 region,捕获 glyph 间空隙点击 + 双击进入编辑)
+    const hitGeo = new THREE.PlaneGeometry(safeRegion.w, safeRegion.h);
     const hitMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -469,18 +552,16 @@ export class NodeRenderer {
       side: THREE.DoubleSide,
     });
     const hitMesh = new THREE.Mesh(hitGeo, hitMat);
-    hitMesh.position.set(safeSize.w / 2, safeSize.h / 2, 0);
+    hitMesh.position.set(safeRegion.x + safeRegion.w / 2, safeRegion.y + safeRegion.h / 2, 0);
     hitMesh.userData.isTextHitArea = true;
     innerGroup.add(hitMesh);
 
-    // content slot(SVG mesh 异步填入)
+    // content slot(SVG mesh 异步填入);slot 原点 = region 左上角,
+    // 内部 SVG 局部坐标系自身从 (0,0) 起,故 slot 平移到 region 偏移即可对齐 textBox.
     const contentSlot = new THREE.Group();
     contentSlot.userData.isTextContentSlot = true;
+    contentSlot.position.set(safeRegion.x, safeRegion.y, 0);
     innerGroup.add(contentSlot);
-
-    const outerGroup = wrapForRotation(innerGroup, position, safeSize, inst.rotation ?? 0);
-    outerGroup.userData.instanceId = inst.id;
-    outerGroup.userData.isTextNode = true;
 
     // 异步 SVG mesh
     const token = (this.textRenderTokens.get(inst.id) ?? 0) + 1;
@@ -489,12 +570,18 @@ export class NodeRenderer {
     void this.atomBridge(inst.doc).then(async (atoms) => {
       if (atoms.length === 0) return;
       if (this.textRenderTokens.get(inst.id) !== token) return;
+      // L5 一致性:code 块语法高亮 token 预注入(W5:tokenize 在本层做,渲染层只吃数据)。
+      // 语言未 load → 本次纯色,load 完回调重渲本节点(届时语言已 load,高亮补上)。
+      const atomsForRender = injectCodeSyntaxTokens(atoms, () => {
+        const cur = this.instances.get(inst.id);
+        if (cur) this.update(cur);
+      });
       try {
-        const svgGroup = await this.textRenderer.render(atoms, {
-          width: safeSize.w,
-          // L5-G5 Type section:字号/字体族透传。老画板无 text_size 字段 → 兜底 14
-          // (§5.4b,视觉不变);text_font 缺省 → 自动选字。
-          baseFontSize: typeof inst.text_size === 'number' ? inst.text_size : 14,
+        const svgGroup = await this.textRenderer.render(atomsForRender, {
+          width: safeRegion.w,
+          // L5-G5 Type section:字号/字体族透传。老画板无 text_size 字段 → 兜底
+          // spec 正文 16(L5 一致性 E3:向 note 正文看齐,原 14);text_font 缺省 → 自动选字。
+          baseFontSize: typeof inst.text_size === 'number' ? inst.text_size : BLOCK_VISUAL_SPEC.body.fontSize,
           fontFamily: inst.text_font,
         });
         if (this.textRenderTokens.get(inst.id) !== token) {
@@ -515,15 +602,15 @@ export class NodeRenderer {
           ? localBbox.max.y - localBbox.min.y
           : 0;
 
-        // 2. 抵消 TextRenderer 内的 group.scale.y=-1(SceneManager frustum 已 Y 翻转)
+        // 2. 抵消 TextRenderer 内的 group.scale.y=-1(SceneManager frustum 已 Y 翻转).
+        //    contentSlot 已平移到 region 左上,svgGroup 在 slot 内从 (0,0) 起 → 落在 textBox.
         svgGroup.scale.y = 1;
         svgGroup.position.set(0, 0, 0.01);
         svgGroup.traverse((obj) => { obj.renderOrder = 1; });
         contentSlot.add(svgGroup);
 
-        // 3. 内容溢出 → 自适应高度(V1 adaptTextNodeSizeToContent 直迁简化)
-        //    bbox / hit-area / 渲染框三者尺寸一致,用户点 mesh 任意位置都能命中.
-        if (contentH > 0) {
+        // 3. 内容溢出 → 自适应高度(仅 autogrow=true,即文字框;几何 shape 文字溢出可见).
+        if (autogrow && contentH > 0) {
           this.adaptTextNodeSizeToContent(inst.id, current, contentH);
         }
       } catch (e) {
@@ -532,16 +619,6 @@ export class NodeRenderer {
     }).catch((e) => {
       console.warn(`[NodeRenderer] atomBridge failed for ${inst.id}`, e);
     });
-
-    return {
-      instanceId: inst.id,
-      kind: 'shape',
-      group: outerGroup,
-      shapeRef: inst.ref,
-      position: { ...position },
-      size: { ...safeSize },
-      rotation: inst.rotation ?? 0,
-    };
   }
 
   /**
@@ -766,10 +843,15 @@ function disposeGroup(group: THREE.Object3D): void {
       const m = obj as THREE.Mesh | THREE.Line;
       m.geometry?.dispose?.();
       const mat = m.material;
+      // material.dispose() 不释放 material.map(纹理),callout 图标 CanvasTexture 须单独 dispose
+      const disposeMat = (mm: THREE.Material): void => {
+        (mm as THREE.MeshBasicMaterial).map?.dispose?.();
+        mm.dispose?.();
+      };
       if (Array.isArray(mat)) {
-        mat.forEach((mm) => mm.dispose?.());
-      } else {
-        mat?.dispose?.();
+        mat.forEach((mm) => disposeMat(mm));
+      } else if (mat) {
+        disposeMat(mat);
       }
     }
   });

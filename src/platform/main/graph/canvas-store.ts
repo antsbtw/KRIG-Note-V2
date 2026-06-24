@@ -6,20 +6,19 @@
  *
  * 数据模型(decision 014 §3.1-§3.3):
  * - atom domain 'graph-canvas' — 画板容器 (title, variant, view, schemaVersion, 可选字段)
- * - atom domain 'graph-instance' — 画板内节点 (Instance + ref 模式,无 doc 字段)
+ * - atom domain 'graph-instance' — 画板内节点 (Instance + ref 模式;L5-G6c:doc 内联 payload.doc)
  * - 边 user:krig:inFolder (canvas → folder atom) — 复用 sub-phase 2
  * - 边 user:krig:inCanvas (instance → canvas atom) — 本 sub-phase 新增
- * - 边 user:krig:hasContent (text-node instance → pm atom) — 本 sub-phase 新增 (仅 ref==='krig.text.label')
  *
- * 单引用约束 (decision 013 §3.5.1.bis):一段 pm content 只被 1 个 Instance 引用;
- * 浅引用 / 跨 view 复用留 3a-shared-ref 子任务。
+ * L5-G6c 文档本体零边(2026-06-22):text doc 从 user:krig:hasContent 边 + 独立 pm atom
+ * 改为内联 payload.doc 属性(对齐 note)。旧边存量由 migration_1_6_0 一次性迁移清理。
  *
- * Step 5.5a 范围 (本 commit):
+ * Step 5.5a 范围:
  * - list / get / create / rename / moveToFolder / delete
- * - get 实现完整 instance + hasContent + pm 拼装 (空 canvas 时 instances=[])
+ * - get 实现完整 instance(doc 内联随 payload 返;空 canvas 时 instances=[])
  *
- * Step 5.5b 范围 (后续):
- * - update diff 算法 (增/删/改 instance + hasContent + pm)
+ * Step 5.5b 范围:
+ * - update diff 算法 (增/删/改 instance,doc 随 payload)
  *
  * Step 5.5c 范围 (后续):
  * - duplicate 深拷贝
@@ -33,7 +32,6 @@ import type { StorageTransaction } from '@storage/index';
 import type {
   AtomEntity,
   GraphCanvasPayload,
-  PmPayload,
 } from '@semantic/types';
 import {
   adapterFolderList,
@@ -81,11 +79,11 @@ export interface GraphFolderRecord {
 
 const CANVAS_DOMAIN = 'graph-canvas';
 const INSTANCE_DOMAIN = 'graph-instance';
-const PM_DOMAIN = 'pm';
 const IN_FOLDER_PREDICATE = 'user:krig:inFolder';
 const IN_CANVAS_PREDICATE = 'user:krig:inCanvas';
-const HAS_CONTENT_PREDICATE = 'user:krig:hasContent';
-const TEXT_LABEL_REF = 'krig.text.label';
+// L5-G6c:doc 内联 payload.doc 后,canvas-store 不再读写 PM_DOMAIN / hasContent 边 / TEXT_LABEL_REF。
+// (user:krig:hasContent predicate 仍是跨能力通用语义边,canonical 定义在 cardinality-check.ts;
+//  旧画板 doc 边存量由 migration_1_6_0 一次性迁移,见 src/storage/surreal/schema.ts。)
 const DEFAULT_SCHEMA_VERSION = 2;
 
 function defaultView(): GraphCanvasPayload['view'] {
@@ -161,38 +159,14 @@ async function getFolderIdForCanvas(canvasId: string): Promise<string | null> {
   return edges[0].objectAtomId;
 }
 
-// ── hasContent 边查询辅助 (同 inFolder keep-latest 收敛) ──
-
-async function getPmAtomIdForInstance(instanceId: string): Promise<string | null> {
-  const edges = await storage.listEdges({
-    predicate: HAS_CONTENT_PREDICATE,
-    subjectAtomId: instanceId,
-  });
-  const candidates: EdgeSummary[] = [];
-  for (const e of edges) {
-    if (e.object.kind !== 'atom') continue;
-    candidates.push({ id: e.id, objectAtomId: e.object.atomId, createdAt: e.createdAt });
-  }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt;
-    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-  });
-  if (candidates.length > 1) {
-    console.warn(
-      `[graph/canvas-store] instance ${instanceId} has ${candidates.length} hasContent edges`
-        + ` (single-ref violation), keeping latest`,
-    );
-    asyncCleanupStaleEdges(candidates.slice(1).map((c) => c.id), 'hasContent');
-  }
-  return candidates[0].objectAtomId;
-}
+// (getPmAtomIdForInstance / hasContent 边读取已删 — L5-G6c doc 内联 payload,
+//  canvas-store 不再读写 hasContent 边;旧边存量由 migration_1_6_0 一次性迁移清理。)
 
 // ── instance atom → Instance object (view 期望形态) ──
 
 /**
  * 把 graph-instance atom 反序列化为 view 期望的 Instance object。
- * 加 id 字段 (atom.id) + 可选 doc 字段 (text-node 时通过 hasContent + pm atom 拼装)。
+ * 加 id 字段 (atom.id) + 可选 doc 字段 (L5-G6c:内联 payload.doc 直读)。
  */
 async function instanceAtomToObject(
   atom: AtomEntity<'graph-instance'>,
@@ -215,23 +189,11 @@ async function instanceAtomToObject(
   if (payload.text_size !== undefined) instance.text_size = payload.text_size;
   if (payload.text_font !== undefined) instance.text_font = payload.text_font;
 
-  // text-node 特例:从 hasContent 边 + pm atom 拼回 doc 字段
-  // V2 view 端契约(decision 018 P0d hotfix):instance.doc 是 DriverSerialized 信封,
-  // view 透明消费(canvas-text-node atom-bridge / NodeRenderer atomBridge 字面识别
-  // format==='pm-doc-json')。读写两端形态对齐,view 端无需处理多形态。
-  if (payload.ref === TEXT_LABEL_REF) {
-    const pmAtomId = await getPmAtomIdForInstance(atom.id);
-    if (pmAtomId) {
-      const pmAtom = await storage.getAtom<'pm'>(pmAtomId);
-      if (pmAtom && pmAtom.payload.domain === PM_DOMAIN) {
-        instance.doc = {
-          format: 'pm-doc-json',
-          version: '0.1',
-          payload: pmAtom.payload.payload as PmPayload,
-        };
-      }
-    }
-  }
+  // L5-G6c:doc 内联属性(取代 hasContent 边 + pm atom 拼装)。
+  // payload.doc 是 DriverSerialized 信封,view 透明消费(canvas-text-node atom-bridge /
+  // NodeRenderer atomBridge 字面识别 format==='pm-doc-json')。
+  // 旧画板 doc 走 hasContent 边的存量已由 migration_1_6_0 一次性迁回 payload.doc(M2)。
+  if (payload.doc !== undefined) instance.doc = payload.doc;
   return instance;
 }
 
@@ -239,7 +201,7 @@ async function instanceAtomToObject(
 
 /**
  * 从 view 端 incoming Instance 对象提取 graph-instance payload。
- * 不带 id (由 storage 生成或调用方传入);不带 doc (text-node 走 hasContent 边)。
+ * 不带 id (由 storage 生成或调用方传入);doc 内联(L5-G6c:取代 hasContent 边)。
  */
 function incomingInstanceToPayload(inst: Record<string, unknown>): import('@semantic/types').GraphInstancePayload {
   const p: import('@semantic/types').GraphInstancePayload = {
@@ -263,44 +225,13 @@ function incomingInstanceToPayload(inst: Record<string, unknown>): import('@sema
   }
   if (inst.text_size !== undefined) p.text_size = inst.text_size as number;
   if (inst.text_font !== undefined) p.text_font = inst.text_font as string;
+  // L5-G6c:doc 内联进 payload(取代 hasContent 边 + 独立 pm atom)
+  if (inst.doc !== undefined) p.doc = inst.doc;
   return p;
 }
 
 /**
- * 从 view 端 incoming Instance 提取 doc,返完整 PmPayload(供 pm atom 持久化)。
- *
- * V2 view 端契约(decision 018 P0d hotfix):inst.doc 是 DriverSerialized 信封对象
- *   { format:'pm-doc-json', version:'0.1', payload:{ type:'doc', content:[...] } }
- * 直接拆 payload(本身就是 PmPayload 形态)返。
- *
- * 旧契约(unknown[] 数组)在 sub-phase 3a-1 与 view 端的 DriverSerialized 透传
- * 不一致 — 真实 inst.doc 是对象,Array.isArray 返 false → 空数组兜底 → pm atom
- * 写空 doc → 重启后文字消失(P0d 根因)。
- *
- * 不静默兜底:格式不认时 warn(沿 P0c 修法纪律),返空 doc 但确保问题暴露。
- *
- * 仅 text-node (ref==='krig.text.label') 调用。
- */
-function incomingDocToPmPayload(inst: Record<string, unknown>): PmPayload {
-  const doc = inst.doc as unknown;
-  // V2 view 端契约:DriverSerialized 信封 { format:'pm-doc-json', payload:PmPayload }
-  if (doc && typeof doc === 'object' && (doc as Record<string, unknown>).format === 'pm-doc-json') {
-    const payload = (doc as { payload?: unknown }).payload;
-    if (
-      payload && typeof payload === 'object' &&
-      (payload as { type?: string }).type === 'doc' &&
-      Array.isArray((payload as { content?: unknown }).content)
-    ) {
-      return payload as PmPayload;
-    }
-  }
-  // 兜底:格式不认 = view 端契约破裂,记 warn,返空 doc(沿 P0c 修法纪律不静默)
-  console.warn('[graph/canvas-store] incomingDocToPmPayload: unexpected inst.doc shape', doc);
-  return { type: 'doc', content: [] };
-}
-
-/**
- * 新建 instance atom + inCanvas 边;若 text-node 同步建 pm atom + hasContent 边。
+ * 新建 instance atom + inCanvas 边(L5-G6c:doc 已内联 payload,不再建 pm atom + hasContent 边)。
  * @param targetId 指定 atom id (view 端预生成);null = storage 生成
  *
  * P0a-bis K2 守门:写 inCanvas 边前先查 subject=instanceId 已有 inCanvas 边。
@@ -343,23 +274,11 @@ async function createInstance(
     object: { kind: 'atom', atomId: canvasId },
     attrs: { createdBy: 'user-default', createdAt: Date.now() },
   });
-  // text-node 特例:建 pm atom + hasContent 边
-  if (payload.ref === TEXT_LABEL_REF && inst.doc !== undefined) {
-    const pmPayload = incomingDocToPmPayload(inst);
-    const pmAtom = await tx.putAtom<'pm'>({
-      payload: { domain: PM_DOMAIN, payload: pmPayload },
-    });
-    await tx.putEdge({
-      predicate: HAS_CONTENT_PREDICATE,
-      subject: { kind: 'atom', atomId: created.id },
-      object: { kind: 'atom', atomId: pmAtom.id },
-      attrs: { createdBy: 'user-default', createdAt: Date.now() },
-    });
-  }
+  // L5-G6c:doc 已内联 payload.doc(随 instance atom 一并落盘),不再建 pm atom + hasContent 边。
 }
 
 /**
- * 更新现有 instance atom payload;若 text-node 同步更新或建立 pm atom。
+ * 更新现有 instance atom payload(L5-G6c:doc 内联 payload,随 atom 一并落盘)。
  */
 async function updateInstance(
   tx: StorageTransaction,
@@ -371,49 +290,16 @@ async function updateInstance(
     id: instanceId,
     payload: { domain: INSTANCE_DOMAIN, payload },
   });
-  // text-node 特例
-  if (payload.ref === TEXT_LABEL_REF && inst.doc !== undefined) {
-    const pmAtomId = await getPmAtomIdForInstance(instanceId);
-    const pmPayload = incomingDocToPmPayload(inst);
-    if (pmAtomId) {
-      // 更新现有 pm atom
-      await tx.putAtom<'pm'>({
-        id: pmAtomId,
-        payload: { domain: PM_DOMAIN, payload: pmPayload },
-      });
-    } else {
-      // hasContent 边不存在 (text-node 之前没 doc 或迁移残缺) → 新建 pm atom + hasContent
-      const pmAtom = await tx.putAtom<'pm'>({
-        payload: { domain: PM_DOMAIN, payload: pmPayload },
-      });
-      await tx.putEdge({
-        predicate: HAS_CONTENT_PREDICATE,
-        subject: { kind: 'atom', atomId: instanceId },
-        object: { kind: 'atom', atomId: pmAtom.id },
-        attrs: { createdBy: 'user-default', createdAt: Date.now() },
-      });
-    }
-  }
 }
 
 /**
- * 删 instance atom + cascade 边;若 text-node 单引用 pm 同步删 pm atom。
- * 单引用约束 (decision 013 §3.5.1.bis):本 sub-phase hasBeenReferenced 必为 false。
+ * 删 instance atom + cascade 边(L5-G6c:doc 内联,随 instance atom 一并删,无独立 pm atom)。
  */
 async function deleteInstanceWithCascade(
   tx: StorageTransaction,
   instanceId: string,
 ): Promise<void> {
-  const instanceAtom = await tx.getAtom<'graph-instance'>(instanceId);
-  if (instanceAtom?.payload.domain === INSTANCE_DOMAIN
-      && instanceAtom.payload.payload.ref === TEXT_LABEL_REF) {
-    const pmAtomId = await getPmAtomIdForInstance(instanceId);
-    if (pmAtomId) {
-      // 单引用模式:本 sub-phase pm 必为 false → 直接删
-      await tx.deleteAtom(pmAtomId);
-    }
-  }
-  // 删 instance atom (storage cascade 删 inCanvas + hasContent 边)
+  // 删 instance atom (storage cascade 删 inCanvas 边;doc 内联无独立 pm atom 要清)
   await tx.deleteAtom(instanceId);
 }
 
@@ -448,8 +334,8 @@ async function canvasAtomToRecord(
     if (e.subject.kind === 'atom') instanceIds.push(e.subject.atomId);
   }
   // 批读 instance atoms — P0-2 (2026-05-29 data-layer-audit): 一次 SQL IN 替代 for-loop getAtom 串行(B3 C1)
-  // 注:instanceAtomToObject 内部对 text-label 还会 per-instance 查 hasContent + 拉 pm atom;
-  // 那是嵌套 capability call 不在本期 audit P0 范围(audit §1.5 C3 v1.5 工程)。
+  // L5-G6c:doc 内联 payload 后,instanceAtomToObject 不再 per-instance 查 hasContent + 拉 pm atom
+  //（原 audit §1.5 C3 标记的嵌套 capability call 已随 doc 内联消除）。
   const instanceAtomsRaw = instanceIds.length > 0
     ? await storage.listAtoms({ domain: INSTANCE_DOMAIN, atomIds: instanceIds })
     : [];
@@ -549,10 +435,10 @@ class CanvasStore {
    * 实施流程 (decision 014 §3.5.2):
    * 1. 更新 canvas atom payload (title / view / schemaVersion)
    * 2. 读现有 instance atoms (查 inCanvas 边 object=canvas)
-   * 3. diff docContent.instances vs 现有 instances:
-   *    - 新增: putAtom(graph-instance) + putEdge(inCanvas);若 text-node 同步建 pm + hasContent
-   *    - 修改: putAtom 更新 payload;若 text-node 同步更新 pm
-   *    - 删除: deleteAtom(instance) + storage cascade 边;若 text-node 单引用同步删 pm
+   * 3. diff docContent.instances vs 现有 instances(L5-G6c:doc 内联 payload,无独立 pm/hasContent):
+   *    - 新增: putAtom(graph-instance) + putEdge(inCanvas)
+   *    - 修改: putAtom 更新 payload(含内联 doc)
+   *    - 删除: deleteAtom(instance) + storage cascade 边
    * 4. handler 层广播 onGraphListChanged
    *
    * ⚠ 性能 (Q1):1000 节点画板软目标 < 200ms,实测超标停下汇报。
@@ -689,19 +575,16 @@ class CanvasStore {
   }
 
   /**
-   * 复制画板 (Step 5.5c) — 深拷贝 canvas + instance + pm atom (单引用约束 Q5)。
+   * 复制画板 (Step 5.5c) — 深拷贝 canvas + instance (L5-G6c:doc 内联 payload,随 payload 拷贝)。
    *
    * 步骤:
    * 1. 读源 canvas atom + 源 inFolder 边
    * 2. 创建新 canvas atom (新 ULID;title 加"(副本)";其他字段拷贝)
    * 3. 决定新 inFolder:targetFolderId 优先 (undefined 时跟源 canvas 同 folder)
    * 4. 遍历源 inCanvas 边 → 对每个源 instance:
-   *    a. 读源 instance atom payload
+   *    a. 读源 instance atom payload(含内联 doc)
    *    b. 创建新 instance atom (新 ULID,payload 复制)
    *    c. 建新 inCanvas 边 (新 instance → 新 canvas)
-   *    d. text-node 特例:读源 pm atom payload → 创建新 pm atom + 新 hasContent 边
-   *
-   * 单引用保持:每条 pm atom 在 duplicate 后仍只被 1 个 Instance 引用 (深拷贝避免 shared-ref)。
    */
   async duplicate(
     id: string,
@@ -744,14 +627,14 @@ class CanvasStore {
         });
       }
 
-      // 3. 拷贝所有 instance + text-node 的 pm atom
+      // 3. 拷贝所有 instance(L5-G6c:doc 内联 payload,随 payload 一并拷贝,无独立 pm atom)
       for (const e of srcInCanvasEdges) {
         if (e.subject.kind !== 'atom') continue;
         const srcInst = await storage.getAtom<'graph-instance'>(e.subject.atomId);
         if (!srcInst || srcInst.payload.domain !== INSTANCE_DOMAIN) continue;
         const instP = srcInst.payload.payload;
 
-        // 新 instance atom (深拷贝 payload,新 ULID)
+        // 新 instance atom (深拷贝 payload 含内联 doc,新 ULID)
         const newInst = await tx.putAtom<'graph-instance'>({
           payload: { domain: INSTANCE_DOMAIN, payload: { ...instP } },
         });
@@ -762,25 +645,6 @@ class CanvasStore {
           object: { kind: 'atom', atomId: newCanvas.id },
           attrs: { createdBy: 'user-default', createdAt: Date.now() },
         });
-
-        // text-node 特例:深拷贝 pm atom + 新 hasContent 边
-        if (instP.ref === TEXT_LABEL_REF) {
-          const srcPmId = await getPmAtomIdForInstance(e.subject.atomId);
-          if (srcPmId) {
-            const srcPm = await storage.getAtom<'pm'>(srcPmId);
-            if (srcPm && srcPm.payload.domain === PM_DOMAIN) {
-              const newPm = await tx.putAtom<'pm'>({
-                payload: { domain: PM_DOMAIN, payload: srcPm.payload.payload as PmPayload },
-              });
-              await tx.putEdge({
-                predicate: HAS_CONTENT_PREDICATE,
-                subject: { kind: 'atom', atomId: newInst.id },
-                object: { kind: 'atom', atomId: newPm.id },
-                attrs: { createdBy: 'user-default', createdAt: Date.now() },
-              });
-            }
-          }
-        }
       }
       return newCanvas;
     });

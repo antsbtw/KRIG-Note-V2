@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
-import { atomsToSvgWithLinks, type Atom, type LinkRect } from '../../../lib/atom-serializers/svg';
+import { atomsToSvgWithLinks, type Atom, type LinkRect, type IconRect } from '../../../lib/atom-serializers/svg';
 import type { FontFamily } from '../../../lib/atom-serializers/svg/font-loader';
 import { extractPlainText } from '../../../lib/atom-serializers/extract';
 import { LruCache } from '../../../lib/atom-serializers/lru';
+import { rasterizeIcon } from './icon-raster';
 
 /**
  * TextRenderer — 文字节点 SVG → Three.js Mesh 渲染器(L5-G4.5 P2)
@@ -68,13 +69,16 @@ export class TextRenderer {
     defaultTextColor?: string;
     valign?: 'top' | 'middle' | 'bottom';
     targetHeight?: number;
-    /** L5-G5 Type section:基准字号(instance.text_size 透传);不传 = 默认 14 */
+    /** L5-G5 Type section:基准字号(instance.text_size 透传);不传 = spec 正文 16(L5 一致性 E3,原 14)*/
     baseFontSize?: number;
     /** L5-G5 Type section:字体族(instance.text_font 透传);不传 = 自动选字 */
     fontFamily?: FontFamily;
   } = {}): Promise<THREE.Object3D> {
     let svgString: string;
     let links: LinkRect[] = [];
+    let icons: IconRect[] = [];
+    // 注:code 块语法高亮 token 由调用方(NodeRenderer)在 atom.attrs._syntaxTokens 预注入
+    // (W5:atom-serializers 不依赖 code-editing;tokenize 在能用 capability 的层做)。
     try {
       const out = await atomsToSvgWithLinks(atoms, {
         width: options.width,
@@ -83,9 +87,13 @@ export class TextRenderer {
         targetHeight: options.targetHeight,
         baseFontSize: options.baseFontSize,
         fontFamily: options.fontFamily,
+        // 画板 code 块:自动换行(长行不裁)。背景保持不透明 #2a2a2a 对齐 note —— 半透明
+        // 实测(2026-06-23 真机)透出彩色 shape 致代码字对比度低、糊,撤回不透明。
+        codeWrap: true,
       });
       svgString = out.svg;
       links = out.links;
+      icons = out.icons;
     } catch (e) {
       console.warn('[TextRenderer] atomsToSvg failed, falling back', e);
       svgString = this.fallbackSvg(atoms);
@@ -124,6 +132,32 @@ export class TextRenderer {
       group.add(mesh);
     }
 
+    // L5-G6c:callout 图标纹理 quad(emoji/lucide/上传图栅格成 canvas → CanvasTexture)。
+    // 渲染链 SVGLoader 渲不出 emoji/位图/stroke,故图标走纹理路,定位到 IconRect bbox。
+    for (const ic of icons) {
+      const canvas = await rasterizeIcon(
+        { emoji: ic.emoji, iconName: ic.iconName, imageSrc: ic.imageSrc },
+        Math.max(8, Math.round(ic.w)),
+      );
+      if (!canvas) continue; // 栅格失败 → 跳过(fail loud 已在 rasterizeIcon warn)
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearFilter; // 非 2 次幂 canvas:线性,免 mipmap 警告
+      const geom = new THREE.PlaneGeometry(ic.w, ic.h);
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.set(ic.x + ic.w / 2, ic.y + ic.h / 2, 0.01);
+      // 抵消下方 group.scale.y=-1(否则纹理上下颠倒);local 翻一次 → 正立
+      mesh.scale.y = -1;
+      mesh.userData.isCalloutIcon = true;
+      group.add(mesh);
+    }
+
     // SVG y 轴向下,Three.js y 轴向上 — 翻转
     // (canvas 里 SceneManager 已通过 frustum top<bottom 实现 Y 翻转,这里 y=-1 抵消)
     group.scale.y = -1;
@@ -147,10 +181,21 @@ export class TextRenderer {
           ? new THREE.Color().setStyle(fillColor)
           : new THREE.Color(DEFAULT_FILL);
 
+      // fill-opacity 支持(callout 半透明白底等):THREE.Color 丢 alpha,SVGLoader 把
+      // fill-opacity 单独解析到 style.fillOpacity。读它设 material transparent/opacity,
+      // 否则 rgba(...,0.04) 会退化成纯不透明色(实机 callout 白底刺眼根因)。
+      const fillOpacityRaw = path.userData?.style?.fillOpacity;
+      const fillOpacity = typeof fillOpacityRaw === 'number'
+        ? fillOpacityRaw
+        : (typeof fillOpacityRaw === 'string' && fillOpacityRaw !== '' ? parseFloat(fillOpacityRaw) : 1);
+      const opacity = Number.isFinite(fillOpacity) ? Math.max(0, Math.min(1, fillOpacity)) : 1;
+
       const material = new THREE.MeshBasicMaterial({
         color,
         side: THREE.DoubleSide,
         depthWrite: false,
+        transparent: opacity < 1,
+        opacity,
       });
 
       const shapes = SVGLoader.createShapes(path);

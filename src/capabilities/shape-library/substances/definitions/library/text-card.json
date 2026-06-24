@@ -12,7 +12,7 @@
     },
     {
       "type": "shape",
-      "ref": "krig.text.label",
+      "ref": "krig.basic.text",
       "transform": { "x": 100, "y": 40, "anchor": "center" },
       "style_overrides": { "fontSize": 14 },
       "binding": "label"

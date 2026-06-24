@@ -1,20 +1,11 @@
 {
-  "id": "krig.text.label",
-  "category": "text",
-  "name": "Text Label",
-  "renderer": "static-svg",
-  "viewBox": { "w": 100, "h": 30 },
+  "id": "krig.basic.text",
+  "category": "basic",
+  "name": "Text",
+  "geometry": { "kind": "text" },
+  "viewBox": { "w": 120, "h": 40 },
   "aspect": "variable",
-  "params": {
-    "fontSize": {
-      "type": "number",
-      "default": 14,
-      "min": 8,
-      "max": 72,
-      "label": "Font size",
-      "unit": "px"
-    }
-  },
+  "textGrows": true,
   "magnets": [
     { "id": "N", "x": 0.5, "y": 0   },
     { "id": "E", "x": 1,   "y": 0.5 },

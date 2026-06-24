@@ -16,7 +16,7 @@
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import type { CanvasTextNodeApi } from './types';
-import { atomsToSvgInput, isTextNodeRef } from './atom-bridge';
+import { atomsToSvgInput } from './atom-bridge';
 import { EditOverlay } from './edit-overlay';
 import { sessionStore } from './session-store';
 
@@ -39,7 +39,6 @@ const api: CanvasTextNodeApi = {
   },
   atomBridge: {
     atomsToSvgInput,
-    isTextNodeRef,
   },
   EditOverlay,
 };

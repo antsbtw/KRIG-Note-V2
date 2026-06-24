@@ -3,14 +3,6 @@ import type { SceneManager } from './SceneManager';
 import type { RenderedNode } from './NodeRenderer';
 
 /**
- * V1 atom-bridge.isTextNodeRef 简化版(canvas-text-node capability 在 G4.5 才搬,
- * 在此提供本地 helper 避免 G4.2 提前依赖 canvas-text-node)
- */
-function isTextNodeRef(ref: string): boolean {
-  return ref === 'krig.text.label';
-}
-
-/**
  * HandlesOverlay — 选中节点的 resize / rotation handles
  *
  * 视觉对齐 macOS Freeform / Figma:
@@ -37,7 +29,7 @@ export type HandleKind =
   | 'rotate';
 
 /**
- * 文字节点 handle 配置:
+ * 文字节点 handle 配置(L5-G6c:文字节点 = 带 doc 的 instance,不再特判 ref):
  * - Text(无 size_lock):4 handle (N/S/E/W) + rotate
  *   拉宽 → wrap;拉高 → 高度变 fixed(空白接受 / 内容滚动)
  * - Sticky(size_lock={w,h:true}):8 handle 全部 + rotate,任意拉伸固定大小
@@ -54,11 +46,14 @@ const ALL_HANDLES_SET = new Set<HandleKind>(
  */
 function allowedHandlesFor(
   node: RenderedNode,
-  getInstance: ((id: string) => { size_lock?: { w?: boolean; h?: boolean } } | undefined) | null,
+  getInstance:
+    | ((id: string) => { size_lock?: { w?: boolean; h?: boolean }; doc?: unknown } | undefined)
+    | null,
 ): Set<HandleKind> {
-  if (!isTextNodeRef(node.shapeRef)) return ALL_HANDLES_SET;
-  // 文字节点:看 size_lock
+  // 文字节点 = 带 doc 的 instance(L5-G6c 统一范式,不再 ref === 'krig.text.label')
   const inst = getInstance?.(node.instanceId);
+  if (inst?.doc === undefined) return ALL_HANDLES_SET;
+  // 文字节点:看 size_lock
   const hLock = !!inst?.size_lock?.h;
   const wLock = !!inst?.size_lock?.w;
   if (hLock && wLock) return ALL_HANDLES_SET;  // Sticky 全部 8 handle
@@ -75,6 +70,26 @@ const ROTATION_COLOR = 0x4ade80;        // 旋转 handle 绿
 const ROTATION_BORDER = 0x16a34a;
 const Z_HANDLE = 0.05;            // 比选中边框 0.02 更上层
 
+// param 拖点(L5-G6c B2,HV2:黄方点,区别 resize 白圆 / rotate 绿圆)
+const PARAM_COLOR = 0xfacc15;           // 内部黄
+const PARAM_BORDER_COLOR = 0x4A90E2;    // 边框蓝(同选中色,视觉成组)
+const PARAM_HALF = 4;                   // 方点半边(像素)
+
+/**
+ * param 拖点位置(L5-G6c §3.5):由外部 provider 给出(shape-local px 坐标),
+ * HandlesOverlay 只负责按节点 transform 画 + hitTest,不依赖 shape-library/公式
+ * (W5:公式求值在 provider 侧,overlay 保持 shape 无关)。
+ * Y 向下与几何 group 一致(NodeRenderer/path-to-three 同语境)。
+ */
+export interface ParamHandlePoint {
+  /** shape.handles[] 的下标(拖动落地反查用) */
+  index: number;
+  /** shape-local 坐标(px,原点 = bbox 左上,Y 向下) */
+  localX: number;
+  localY: number;
+}
+export type ParamHandleProvider = (instanceId: string) => ParamHandlePoint[];
+
 export class HandlesOverlay {
   private group: THREE.Group;
   private handles = new Map<HandleKind, THREE.Group>();  // handle 内含外圆 border + 内圆 fill
@@ -84,7 +99,14 @@ export class HandlesOverlay {
   private disposed = false;
 
   /** 反查 instance(给 allowedHandlesFor 判断 size_lock 用);由外部注入 */
-  private getInstance: ((id: string) => { size_lock?: { w?: boolean; h?: boolean } } | undefined) | null = null;
+  private getInstance: ((id: string) => { size_lock?: { w?: boolean; h?: boolean }; doc?: unknown } | undefined) | null = null;
+
+  /** param 拖点 provider(由 Host 注入,内部走 shape-library 求值 handle 位置)*/
+  private paramProvider: ParamHandleProvider | null = null;
+  /** 动态 param 拖点 mesh 列表(数量随 shape.handles 变;每帧按当前节点 transform 重布)*/
+  private paramHandles: THREE.Group[] = [];
+  /** 当前节点的 param 拖点位置缓存(layout 求一次,hitTest 复用)*/
+  private paramPoints: ParamHandlePoint[] = [];
 
   constructor(private sceneManager: SceneManager) {
     this.group = new THREE.Group();
@@ -96,8 +118,13 @@ export class HandlesOverlay {
   }
 
   /** 注入 getInstance 反查接口(由 CanvasView 设置) */
-  setInstanceLookup(fn: ((id: string) => { size_lock?: { w?: boolean; h?: boolean } } | undefined) | null): void {
+  setInstanceLookup(fn: ((id: string) => { size_lock?: { w?: boolean; h?: boolean }; doc?: unknown } | undefined) | null): void {
     this.getInstance = fn;
+  }
+
+  /** 注入 param 拖点 provider(L5-G6c B2;由 Host 走 shape-library 求值)*/
+  setParamHandleProvider(fn: ParamHandleProvider | null): void {
+    this.paramProvider = fn;
   }
 
   /** 显示某节点的 handles;传 null 隐藏 */
@@ -244,6 +271,58 @@ export class HandlesOverlay {
       arr[3] = 0; arr[4] = -halfH - ROTATION_OFFSET; arr[5] = Z_HANDLE;
       positions2.needsUpdate = true;
     }
+
+    // param 拖点(L5-G6c B2):provider 给 shape-local px 点 → 转 bbox 中心相对屏幕像素。
+    // localX/Y 原点 = bbox 左上、Y 向下;相对中心 = (local - size/2) * zoom。
+    this.layoutParamHandles(node, view.zoom);
+  }
+
+  /** 重建/复用 param 拖点 mesh,布到 provider 给出的 shape-local 位置 */
+  private layoutParamHandles(node: RenderedNode, zoom: number): void {
+    this.paramPoints = this.paramProvider?.(node.instanceId) ?? [];
+    // mesh 池按需扩容
+    while (this.paramHandles.length < this.paramPoints.length) {
+      const mesh = makeParamHandleMesh();
+      this.paramHandles.push(mesh);
+      this.group.add(mesh);
+    }
+    for (let i = 0; i < this.paramHandles.length; i++) {
+      const mesh = this.paramHandles[i];
+      const pt = this.paramPoints[i];
+      if (!pt) { mesh.visible = false; continue; }
+      const px = (pt.localX - node.size.w / 2) * zoom;
+      const py = (pt.localY - node.size.h / 2) * zoom;
+      mesh.position.set(px, py, Z_HANDLE);
+      mesh.visible = true;
+    }
+  }
+
+  /**
+   * param 拖点 hit-test(L5-G6c B2):屏幕坐标 → 命中的 handle index。
+   * 复用 hitTest 的坐标变换(转 handle 局部屏幕像素),与 paramPoints 比距离。
+   */
+  paramHitTest(screenX: number, screenY: number): { index: number } | null {
+    if (!this.currentNode || this.paramPoints.length === 0) return null;
+    const node = this.currentNode;
+    const view = this.sceneManager.getView();
+    const world = this.sceneManager.screenToWorld(screenX, screenY);
+    const cx = node.position.x + node.size.w / 2;
+    const cy = node.position.y + node.size.h / 2;
+    const dx = world.x - cx;
+    const dy = world.y - cy;
+    const rad = -((node.rotation ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const lx = (dx * cos - dy * sin) * view.zoom;
+    const ly = (dx * sin + dy * cos) * view.zoom;
+    const HIT = PARAM_HALF + 8;
+    let closest: { index: number; dist: number } | null = null;
+    for (const pt of this.paramPoints) {
+      const hx = (pt.localX - node.size.w / 2) * view.zoom;
+      const hy = (pt.localY - node.size.h / 2) * view.zoom;
+      const d = Math.hypot(lx - hx, ly - hy);
+      if (d <= HIT && (!closest || d < closest.dist)) closest = { index: pt.index, dist: d };
+    }
+    return closest ? { index: closest.index } : null;
   }
 }
 
@@ -282,5 +361,21 @@ function makeHandleMesh(fillColor: number, borderColor: number): THREE.Group {
   const fillMesh = new THREE.Mesh(fillGeom, fillMat);
   group.add(fillMesh);
 
+  return group;
+}
+
+/** param 拖点 = 黄方块 + 蓝边(HV2:形状[方]+色相[黄] 双区别 resize 白圆 / rotate 绿圆)*/
+function makeParamHandleMesh(): THREE.Group {
+  const group = new THREE.Group();
+  const side = (PARAM_HALF + HANDLE_BORDER) * 2;
+  const borderGeom = new THREE.PlaneGeometry(side, side);
+  const borderMat = new THREE.MeshBasicMaterial({ color: PARAM_BORDER_COLOR, side: THREE.DoubleSide });
+  const borderMesh = new THREE.Mesh(borderGeom, borderMat);
+  borderMesh.position.z = -0.001;
+  group.add(borderMesh);
+
+  const fillGeom = new THREE.PlaneGeometry(PARAM_HALF * 2, PARAM_HALF * 2);
+  const fillMat = new THREE.MeshBasicMaterial({ color: PARAM_COLOR, side: THREE.DoubleSide });
+  group.add(new THREE.Mesh(fillGeom, fillMat));
   return group;
 }

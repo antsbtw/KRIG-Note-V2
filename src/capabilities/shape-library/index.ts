@@ -1,7 +1,7 @@
 /**
  * shape-library capability — Shape + Substance 资源仓库(L5-G2)
  *
- * 职责:Shape 定义(22 个内置)+ Substance 定义(5 个内置)+ 通用参数化求值器
+ * 职责:Shape 定义(L5-G6c 阶段 A 已清空,目录扫描保留待阶段 C 填)+ Substance 定义 + 通用参数化求值器
  * (evaluateShape)+ OOXML 17 操作符公式求值器,**对外只输出纯数据**
  * (EvaluatedPath),**0 import three**(P1-1 严格版屏障核心).
  *
@@ -38,12 +38,13 @@ import type {
   EvaluateContext,
   EvaluateInput,
   EvaluatedPath,
+  EvaluatedHandle,
 } from './types';
 import { ShapeRegistry } from './shapes/registry';
 import { SubstanceRegistry } from './substances/registry';
 import { bootstrapShapes } from './shapes/bootstrap';
 import { bootstrapSubstances } from './substances/bootstrap';
-import { evaluateShape } from './shapes/renderers';
+import { evaluateShape, evaluateHandles, reverseParamFromDrag } from './shapes/renderers';
 
 export type {
   ShapeLibraryApi,
@@ -53,7 +54,9 @@ export type {
   EvaluateContext,
   EvaluateInput,
   EvaluatedPath,
-  RendererKind,
+  EvaluatedHandle,
+  GeometryKind,
+  ShapeGeometry,
   AspectKind,
   ParamUnit,
   ShapeSource,
@@ -83,7 +86,7 @@ export type {
 // 模块级 export(W5 边界 A 临时允许项 — driver/slot 内部可直 import)
 export { ShapeRegistry, SubstanceRegistry };
 export { evaluateShape } from './shapes/renderers';
-export { evalFormula, buildEnv } from './shapes/renderers';
+export { evalFormula, buildEnv, scaleParam, evaluateHandles, reverseParamFromDrag } from './shapes/renderers';
 export type { EvalEnv } from './shapes/renderers';
 export { runShapeSmoke, printSmoke } from './shapes/__smoke__/run';
 export type { SmokeReport } from './shapes/__smoke__/run';
@@ -146,6 +149,22 @@ const shapesApi: ShapeLibraryApi['shapes'] = {
     const shape = ShapeRegistry.get(id);
     if (!shape) return null;
     return evaluateShape(shape, ctx);
+  },
+  evaluateHandles(id: string, ctx: EvaluateContext): EvaluatedHandle[] {
+    const shape = ShapeRegistry.get(id);
+    if (!shape) return [];
+    return evaluateHandles(shape, ctx);
+  },
+  reverseParamFromDrag(
+    id: string,
+    ctx: EvaluateContext,
+    handleIdx: number,
+    axisDelta: number,
+    startParams: Record<string, number>,
+  ): { param: string; value: number } | null {
+    const shape = ShapeRegistry.get(id);
+    if (!shape) return null;
+    return reverseParamFromDrag(shape, ctx, handleIdx, axisDelta, startParams);
   },
 };
 

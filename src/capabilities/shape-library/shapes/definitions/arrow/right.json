@@ -2,30 +2,29 @@
   "id": "krig.arrow.right",
   "category": "arrow",
   "name": "Right Arrow",
-  "renderer": "parametric",
-  "viewBox": { "w": 100, "h": 100 },
+  "geometry": { "kind": "parametric" },
+  "viewBox": { "w": 160, "h": 100 },
   "aspect": "variable",
   "params": {
-    "headLen": {
+    "headLenPx": {
       "type": "number",
-      "default": 0.3,
-      "min": 0.1,
-      "max": 0.5,
-      "label": "Head length",
-      "unit": "ratio"
+      "default": 40,
+      "min": 12,
+      "max": 120,
+      "label": "Head length (px)",
+      "unit": "px"
     },
     "headWidth": {
       "type": "number",
-      "default": 0.5,
-      "min": 0.5,
+      "default": 0.6,
+      "min": 0.4,
       "max": 1,
       "label": "Head width",
       "unit": "ratio"
     }
   },
   "guides": [
-    { "name": "hL", "op": "*/", "args": ["w", "headLen", 1] },
-    { "name": "x1", "op": "+-", "args": ["w", 0, "hL"] },
+    { "name": "x1", "op": "+-", "args": ["w", 0, "headLenPx"] },
     { "name": "hW", "op": "*/", "args": ["h", "headWidth", 1] },
     { "name": "y1", "op": "+/", "args": ["h", { "op": "*/", "args": ["hW", -1, 1] }, 2] },
     { "name": "y2", "op": "+/", "args": ["h", "hW", 2] }
@@ -43,8 +42,11 @@
   "magnets": [
     { "id": "W",   "x": 0,    "y": 0.5 },
     { "id": "TIP", "x": 1,    "y": 0.5 },
-    { "id": "N",   "x": 0.35, "y": 0.25 },
-    { "id": "S",   "x": 0.35, "y": 0.75 }
+    { "id": "N",   "x": 0.4,  "y": 0.25 },
+    { "id": "S",   "x": 0.4,  "y": 0.75 }
+  ],
+  "handles": [
+    { "param": "headLenPx", "axis": "x", "from": "x1", "unit": "px" }
   ],
   "textBox": { "l": 0, "t": "y1", "r": "x1", "b": "y2" },
   "default_style": {

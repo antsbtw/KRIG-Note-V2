@@ -1,0 +1,3 @@
+# L5-G6c 阶段 A:shape 库清空(全清 22 个测试脚手架 def)。
+# bootstrap.ts 的 import.meta.glob('./definitions/**/*.json') 保留 — 丢 JSON 进此目录即自动注册(无代码加载)。
+# 阶段 C 在此建 basic/ geometry/ 等分类目录 + 首批 shape。当前空库:Picker 空、画板 fail-loud 不崩。

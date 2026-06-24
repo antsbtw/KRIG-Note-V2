@@ -233,6 +233,19 @@ export function LibraryPicker(props: LibraryPickerProps): ReactElement | null {
 // 数据收集 + label 映射
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Picker 展示分类收敛(对齐 Freeform):只显 **Basic + Geometry** 两栏。
+ *
+ * - 展示分类 = def.category 的**展示桶**(`geometry` → Geometry,其余 basic/arrow/line/
+ *   flowchart/text 全归 Basic 混排,像 Freeform)。**不改 def.category**(line 渲染靠
+ *   category==='line' 驱动,改字段会断线渲染)——纯展示层映射。
+ * - substance(Library/Family)不进 Picker(总指挥 2026-06-22:清掉 Library/Family;
+ *   substance def 保留、渲染能力在,只是暂不给 Picker 入口)。
+ */
+export function displayBucket(cat: ShapeCategory): 'basic' | 'geometry' {
+  return cat === 'geometry' ? 'geometry' : 'basic';
+}
+
 function collectLibrary(): { groups: CategoryGroup[]; allItems: PickerItem[] } {
   const api = getShapeApi();
   const items: PickerItem[] = [];
@@ -242,32 +255,17 @@ function collectLibrary(): { groups: CategoryGroup[]; allItems: PickerItem[] } {
       section: 'shape',
       ref: def.id,
       name: def.name,
-      category: def.category,
+      category: displayBucket(def.category), // 展示桶,非 def.category
     });
   }
-  for (const def of api.substances.list()) {
-    items.push({
-      section: 'substance',
-      ref: def.id,
-      name: def.name,
-      category: def.category ?? 'user',
-    });
-  }
+  // substance 不进 Picker(总指挥指示)
 
-  const SHAPE_ORDER: ShapeCategory[] = ['basic', 'arrow', 'flowchart', 'line', 'text'];
-  const SUBSTANCE_ORDER: string[] = ['library', 'family', 'user'];
-
+  const DISPLAY_ORDER: Array<'basic' | 'geometry'> = ['basic', 'geometry'];
   const groups: CategoryGroup[] = [];
-  for (const cat of SHAPE_ORDER) {
+  for (const cat of DISPLAY_ORDER) {
     const count = items.filter((i) => i.section === 'shape' && i.category === cat).length;
     if (count > 0) {
       groups.push({ section: 'shape', category: cat, label: capitalize(cat), count });
-    }
-  }
-  for (const cat of SUBSTANCE_ORDER) {
-    const count = items.filter((i) => i.section === 'substance' && i.category === cat).length;
-    if (count > 0) {
-      groups.push({ section: 'substance', category: cat, label: capitalize(cat), count });
     }
   }
   return { groups, allItems: items };

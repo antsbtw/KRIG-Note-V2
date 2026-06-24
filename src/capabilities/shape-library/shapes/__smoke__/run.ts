@@ -6,11 +6,11 @@
  * V2 evaluateShape 直接返 EvaluatedPath 或 null).
  *
  * 不接入测试框架,直接 ts-node 风格运行(或开发面板上调一次).
- * 检查:
- * 1. 所有 22 个 shape 都被 bootstrap 收齐
+ * 检查(L5-G6c 阶段 A 已清空旧库,当前 0 shape;阶段 C 填回后此 smoke 重新有料):
+ * 1. 所有 bootstrap 收齐的 shape
  * 2. id 不重复
  * 3. 每个 shape 在 200x100 尺寸下能渲染出非空 d 字符串
- *    (text label 走 static-svg / custom 跳过)
+ *    (geometry.kind 非 parametric — text / svg — 跳过几何求值)
  * 4. d 字符串不含 NaN / Infinity
  * 5. magnets 数值有限
  *
@@ -62,9 +62,8 @@ export function runShapeSmoke(): SmokeReport {
 }
 
 function checkShape(shape: ShapeDef): string | null {
-  // text label 走 static-svg / custom 不参与几何求值,跳过
-  if (shape.renderer === 'static-svg') return null;
-  if (shape.renderer === 'custom') return null;
+  // text / svg kind 不参与 parametric 几何求值,跳过(L5-G6c 统一范式)
+  if (shape.geometry.kind !== 'parametric') return null;
 
   let out;
   try {

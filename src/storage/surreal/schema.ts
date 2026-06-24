@@ -264,6 +264,87 @@ export async function migration_1_5_0(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * 1.6.0 migration up — graph text doc 边→属性内联 + 清孤儿 hasContent 边/pm atom
+ * (L5-G6c 阶段 A,M2:文档本体零边/属性化;2026-06-22 总指挥拍板)。
+ *
+ * 背景:旧画板 text-node 的 doc 走 user:krig:hasContent 边 + 独立 pm atom 表达;
+ * L5-G6c 改为内联 graph-instance payload.doc。本迁移把存量边/pm 一次性迁回内联,
+ * 并清掉孤儿(否则成 cardinality-check 悬空对象 → 持续噪音,违反 R9)。
+ *
+ * 每条 subject 为 graph-instance atom 的 hasContent 边:
+ *   ① 读 pm atom payload → 包成 DriverSerialized 信封写进 instance.payload.doc(若未内联)
+ *   ② 删该 hasContent 边
+ *   ③ 删孤儿 pm atom(单引用约束 decision 013:迁移后该 pm 不再被任何边引用)
+ *
+ * graph-scoped:只处理 subject 为 graph-instance 的 hasContent 边(note pm 走 hasNoteView,
+ * 不在此列)。幂等:迁移后无 graph-instance 主体的 hasContent 边 → 重跑 added=0。
+ * **不删 user:krig:hasContent predicate 本身**(R8:跨能力通用语义边,canonical 见 cardinality-check.ts)。
+ */
+export async function migration_1_6_0(db: Surreal): Promise<void> {
+  const hasContentEdges = await surrealStorage.listEdges({
+    predicate: 'user:krig:hasContent',
+  });
+
+  let inlined = 0;
+  let edgesDeleted = 0;
+  let pmDeleted = 0;
+  for (const e of hasContentEdges) {
+    if (e.subject.kind !== 'atom' || e.object.kind !== 'atom') continue;
+    const inst = await surrealStorage.getAtom<'graph-instance'>(e.subject.atomId);
+    // graph-scoped:只迁 graph-instance 主体(其余 hasContent 边非本刀范围,跳过)
+    if (!inst || inst.payload.domain !== 'graph-instance') continue;
+
+    const instPayload = inst.payload.payload;
+    // ① 内联 doc(若尚未内联):读 pm atom payload 包 DriverSerialized 信封
+    if (instPayload.doc === undefined) {
+      const pmAtom = await surrealStorage.getAtom(e.object.atomId);
+      if (pmAtom && pmAtom.payload.domain === 'pm') {
+        await surrealStorage.putAtom<'graph-instance'>({
+          id: inst.id,
+          payload: {
+            domain: 'graph-instance',
+            payload: {
+              ...instPayload,
+              doc: {
+                format: 'pm-doc-json',
+                version: '0.1',
+                payload: pmAtom.payload.payload,
+              },
+            },
+          },
+        });
+        inlined++;
+      }
+    }
+    // ② 删 hasContent 边
+    await surrealStorage.deleteEdge(e.id);
+    edgesDeleted++;
+    // ③ 删孤儿 pm atom(单引用:迁移后不再被任何 hasContent 边引用)
+    const pmId = e.object.atomId;
+    const remaining = await surrealStorage.listEdges({
+      predicate: 'user:krig:hasContent',
+      objectAtomId: pmId,
+    });
+    if (remaining.length === 0) {
+      await surrealStorage.deleteAtom(pmId);
+      pmDeleted++;
+    }
+  }
+  console.log(
+    `[migration 1.6.0] graph doc 边→属性:inlined=${inlined}, hasContent 边删=${edgesDeleted}, 孤儿 pm 删=${pmDeleted}`,
+  );
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.6.0',
+      appliedAt = $now,
+      description = 'Inline graph text doc into payload + drop orphan hasContent edges/pm atoms (L5-G6c A3/M2)'`,
+    { rid: new RecordId('schema_version', '1.6.0'), now },
+  );
+}
+
 export async function migration_1_2_0(_db: Surreal): Promise<void> {
   const pmAtoms = await surrealStorage.listAtoms({ domain: 'pm' });
 

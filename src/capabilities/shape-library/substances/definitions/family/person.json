@@ -16,14 +16,14 @@
     },
     {
       "type": "shape",
-      "ref": "krig.text.label",
+      "ref": "krig.basic.text",
       "transform": { "x": 80, "y": 22, "anchor": "center" },
       "style_overrides": { "fontSize": 14, "color": "#1a3a5c" },
       "binding": "label"
     },
     {
       "type": "shape",
-      "ref": "krig.text.label",
+      "ref": "krig.basic.text",
       "transform": { "x": 80, "y": 42, "anchor": "center" },
       "style_overrides": { "fontSize": 11, "color": "#5a7a9c" },
       "binding": "dates"

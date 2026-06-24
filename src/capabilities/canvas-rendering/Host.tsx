@@ -60,10 +60,24 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       const scene = new SceneManager(container);
       const nodeRenderer = new NodeRenderer(scene);
       const handles = new HandlesOverlay(scene);
-      // size_lock 反查给 HandlesOverlay(文字节点 size_lock 维度隐藏对应 handle)
+      // size_lock + doc 反查给 HandlesOverlay(文字节点 = 带 doc;size_lock 维度隐藏对应 handle)
       handles.setInstanceLookup((id) => {
         const inst = nodeRenderer.getInstance(id);
-        return inst?.size_lock ? { size_lock: inst.size_lock } : undefined;
+        if (!inst) return undefined;
+        return { size_lock: inst.size_lock, doc: inst.doc };
+      });
+      // param 拖点 provider(L5-G6c B2):走 shape-library evaluateHandles 求 handle 位置
+      handles.setParamHandleProvider((id) => {
+        const inst = nodeRenderer.getInstance(id);
+        if (!inst || inst.type !== 'shape' || !inst.size) return [];
+        const shapeApi = requireCapabilityApi<ShapeLibraryApi>('shape-library');
+        const shape = shapeApi.shapes.get(inst.ref);
+        if (!shape?.handles?.length) return [];
+        return shapeApi.shapes.evaluateHandles(inst.ref, {
+          width: inst.size.w,
+          height: inst.size.h,
+          params: inst.params,
+        }).map((h) => ({ index: h.index, localX: h.x, localY: h.y }));
       });
       const interaction = new InteractionController({
         container,
@@ -252,10 +266,11 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         if (!renderer) return;
         // SerializerAtom == AtomBridgeHook 输出 — cast 走 atom-serializers Atom 形态
         renderer.setAtomBridge(fn as Parameters<typeof renderer.setAtomBridge>[0]);
-        // 注入后:重新渲染所有 text 节点(让降级灰矩形升级为真 SVG mesh)
+        // 注入后:重新渲染所有带 doc 的节点(让降级灰矩形升级为真 SVG mesh)。
+        // L5-G6c 统一范式:文字层 = 带 doc 的 shape,不再特判 ref === 'krig.text.label'。
         const list = renderer.listInstances();
         for (const inst of list) {
-          if (inst.ref === 'krig.text.label') renderer.update(inst);
+          if (inst.doc !== undefined) renderer.update(inst);
         }
       },
       [],
@@ -340,6 +355,10 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
     }, []);
 
+    const setNodeTextLayerVisible = useCallback((id: string, visible: boolean): void => {
+      nodeRendererRef.current?.setTextLayerVisible(id, visible);
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -359,6 +378,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         combineSelected,
         setAtomBridge,
         getSelectedScreenAABB,
+        setNodeTextLayerVisible,
       }),
       [
         loadDocument,
@@ -377,6 +397,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         combineSelected,
         setAtomBridge,
         getSelectedScreenAABB,
+        setNodeTextLayerVisible,
       ],
     );
 

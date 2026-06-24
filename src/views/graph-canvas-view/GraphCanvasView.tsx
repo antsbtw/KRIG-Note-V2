@@ -37,6 +37,7 @@ import type {
   AddModeSpec,
 } from '@capabilities/canvas-rendering/types';
 import type { CanvasTextNodeApi } from '@capabilities/canvas-text-node';
+import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasRecord,
@@ -68,6 +69,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     () => requireCapabilityApi<CanvasTextNodeApi>('canvas-text-node'),
     [],
   );
+  // 双击编辑用:判 line 类(line 无文字层不可编辑);对齐 GraphCanvasNodeToolbar 模式
+  const shapeApi = useMemo(() => requireCapabilityApi<ShapeLibraryApi>('shape-library'), []);
   const TextEditOverlay = textNode.EditOverlay;
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
@@ -242,32 +245,50 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     [scheduleSave],
   );
 
-  // ── G4.5 P4 双击节点 → 文字节点进入编辑(其他节点暂忽略) ──
+  // ── 双击节点 → 进入文字编辑(L5-G6c:双击任意 shape 起 doc 编辑) ──
+  // 统一范式:文字 = shape 的文字层。带 doc 的节点(文字框 / 已编辑过的几何 shape)直接编辑;
+  // 没 doc 的几何 shape → 惰性起空 doc 进编辑(initialDoc undefined → canvas-text-node
+  // 给空 doc),编辑内容落该 shape 的 textBox 文字层。line 无 textBox,不进编辑。
   const handleNodeDoubleClick = useCallback(
     (info: { instanceId: string; screenX: number; screenY: number; screenW: number; screenH: number }): void => {
       const inst = hostRef.current?.getInstance(info.instanceId);
       if (!inst) return;
-      if (!textNode.atomBridge.isTextNodeRef(inst.ref)) return;
+      // line 类不可编辑(端点驱动、无文字层);其余 shape(含几何)双击均可起 doc 编辑。
+      // 几何 shape(parametric/svg)= 在其上叠文字层 → popup 透明,几何透出不被遮挡;
+      // 文字框(kind:'text')/ Sticky 有自身底色 → 不透明(沿旧视觉)。
+      let transparent = false;
+      if (inst.type === 'shape') {
+        const shape = shapeApi.shapes.get(inst.ref);
+        if (shape?.category === 'line') return;
+        transparent = shape?.geometry.kind !== 'text';
+      }
+      // 进编辑:隐藏渲染态文字层,避免与透明编辑浮层的文字重影(退出恢复)
+      hostRef.current?.setNodeTextLayerVisible(info.instanceId, false);
       textNode.enterEdit({
         instanceId: info.instanceId,
-        initialDoc: inst.doc,
+        initialDoc: inst.doc, // undefined(几何 shape 首次)→ canvas-text-node 起空 doc
         screenX: info.screenX,
         screenY: info.screenY,
         width: info.screenW,
         height: info.screenH,
         backgroundColor: inst.style_overrides?.fill?.color,
+        transparent,
         heightFixed: !!inst.size_lock?.h,
         workspaceId,
         viewId: 'graph-canvas-view',
         onExit: (id, newDoc) => {
           if (newDoc !== null) {
+            // updateInstance 内部 remove+add 重建节点(含新文字层),自然恢复可见 —— 无需显式 show
             hostRef.current?.updateInstance(id, { doc: newDoc } as Partial<Instance>);
             scheduleSave();
+          } else {
+            // 取消编辑(无新 doc)→ 节点未重建,显式恢复文字层可见
+            hostRef.current?.setNodeTextLayerVisible(id, true);
           }
         },
       });
     },
-    [textNode, workspaceId, scheduleSave],
+    [textNode, shapeApi, workspaceId, scheduleSave],
   );
 
   return (
