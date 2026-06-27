@@ -37,6 +37,7 @@ export interface CodeEditingHostProps {
     lineNumbers?: boolean;
     tabIndent?: boolean;
     defaultKeymap?: boolean;
+    lineWrap?: boolean;
   };
 }
 

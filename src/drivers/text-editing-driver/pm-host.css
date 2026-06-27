@@ -2388,6 +2388,12 @@
 .krig-pm-host .ProseMirror .krig-code-block__toolbar-btn--copied {
   color: #4caf50 !important;
 }
+.krig-pm-host .ProseMirror .krig-code-block__toolbar-btn--theme {
+  width: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
 
 .krig-pm-host .ProseMirror .krig-code-block__pre {
   padding: 12px 16px;

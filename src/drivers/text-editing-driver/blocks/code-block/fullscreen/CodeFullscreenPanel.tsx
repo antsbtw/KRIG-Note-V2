@@ -310,6 +310,7 @@ export function CodeFullscreenPanel({ onClose }: FullscreenOverlayCloseProps) {
             onMount={(handle) => {
               editorRef.current = handle;
             }}
+            features={{ lineWrap: true }}
           />
         </div>
 

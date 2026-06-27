@@ -22,7 +22,13 @@
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
-import { renderMermaidDiagram } from './mermaid-renderer';
+import {
+  renderMermaidDiagram,
+  MERMAID_THEMES,
+  readMermaidTheme,
+  saveMermaidTheme,
+  type MermaidTheme,
+} from './mermaid-renderer';
 import { downloadBlob } from './save-blob';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { setCodeFullscreenContext } from './fullscreen/menu-context';
@@ -121,6 +127,8 @@ function buildMermaidCodeBlockView(
 ): ReturnType<NodeViewConstructor> {
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let viewMode: ViewMode = (localStorage.getItem(LS_VIEW_KEY) as ViewMode) || 'split';
+  let currentTheme: MermaidTheme = readMermaidTheme();
+  let themeDropdown: { close: () => void } | null = null;
 
   const dom = document.createElement('div');
   dom.classList.add('krig-code-block', 'krig-code-block--mermaid');
@@ -150,11 +158,73 @@ function buildMermaidCodeBlockView(
   const btnToggle = createBtn(ICON_EYE, '切换代码 / 预览');
   const btnCopy = createBtn(ICON_COPY, '复制代码');
   const btnDownload = createBtn(ICON_DOWNLOAD, '下载 PNG');
+
+  const btnTheme = document.createElement('button');
+  btnTheme.classList.add('krig-code-block__toolbar-btn', 'krig-code-block__toolbar-btn--theme');
+  btnTheme.title = '主题';
+  const updateThemeLabel = (t: MermaidTheme) => { btnTheme.textContent = t; };
+  updateThemeLabel(currentTheme);
+
   const btnFullscreen = createBtn(ICON_FULLSCREEN, '全屏编辑');
   toolbar.appendChild(btnToggle);
   toolbar.appendChild(btnCopy);
   toolbar.appendChild(btnDownload);
+  toolbar.appendChild(btnTheme);
   toolbar.appendChild(btnFullscreen);
+
+  const openThemeDropdown = () => {
+    if (themeDropdown) { themeDropdown.close(); themeDropdown = null; return; }
+    const root = document.createElement('div');
+    root.className = 'krig-code-lang-dropdown';
+    root.setAttribute('contenteditable', 'false');
+    const r = btnTheme.getBoundingClientRect();
+    root.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom + 4}px;z-index:9999;`;
+
+    for (const t of MERMAID_THEMES) {
+      const item = document.createElement('div');
+      item.className = 'krig-code-lang-dropdown__item';
+      if (t === currentTheme) item.classList.add('krig-code-lang-dropdown__item--current');
+      const check = document.createElement('span');
+      check.className = 'krig-code-lang-dropdown__check';
+      check.textContent = t === currentTheme ? '✓' : '';
+      const label = document.createElement('span');
+      label.className = 'krig-code-lang-dropdown__label';
+      label.textContent = t;
+      item.appendChild(check);
+      item.appendChild(label);
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        currentTheme = t;
+        saveMermaidTheme(t);
+        updateThemeLabel(t);
+        handle.close();
+        renderMermaid(code.textContent || '');
+      });
+      root.appendChild(item);
+    }
+
+    document.body.appendChild(root);
+    const onOutside = (e: MouseEvent) => {
+      if (!root.contains(e.target as Node)) handle.close();
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); handle.close(); }
+    };
+    requestAnimationFrame(() => {
+      document.addEventListener('mousedown', onOutside, true);
+      document.addEventListener('keydown', onEsc, true);
+    });
+    const handle = {
+      close: () => {
+        document.removeEventListener('mousedown', onOutside, true);
+        document.removeEventListener('keydown', onEsc, true);
+        root.parentNode?.removeChild(root);
+        themeDropdown = null;
+      },
+    };
+    themeDropdown = handle;
+  };
 
   const pre = document.createElement('pre');
   pre.classList.add('krig-code-block__pre');
@@ -178,7 +248,7 @@ function buildMermaidCodeBlockView(
   };
 
   const renderMermaid = (source: string): void => {
-    void renderMermaidDiagram(source, preview);
+    void renderMermaidDiagram(source, preview, currentTheme);
   };
 
   const scheduleRender = (): void => {
@@ -237,6 +307,12 @@ function buildMermaidCodeBlockView(
     img.src = dataUri;
   });
 
+  btnTheme.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openThemeDropdown();
+  });
+
   // 全屏编辑器:走 L2 fullscreen-overlay 体系
   btnFullscreen.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -270,6 +346,7 @@ function buildMermaidCodeBlockView(
     destroy() {
       observer.disconnect();
       if (renderTimer) clearTimeout(renderTimer);
+      themeDropdown?.close();
     },
   };
 }

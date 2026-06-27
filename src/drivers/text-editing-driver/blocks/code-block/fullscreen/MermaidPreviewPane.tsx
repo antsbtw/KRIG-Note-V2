@@ -25,6 +25,8 @@ import {
   MERMAID_TEMPLATES,
   buildMermaidConfig,
   getMermaidModule,
+  readMermaidTheme,
+  saveMermaidTheme,
   type MermaidTheme,
 } from '../mermaid-renderer';
 import { downloadBlob, downloadText } from '../save-blob';
@@ -34,9 +36,13 @@ import {
   type RenderStatus,
 } from './MermaidPreview';
 
-const LS_THEME = 'krig-mermaid-fs-theme';
 const LS_SCALE = 'krig-mermaid-fs-scale';
-const VALID_THEMES: readonly MermaidTheme[] = ['dark', 'default', 'forest', 'neutral', 'base'];
+
+const ZOOM = {
+  min: 0.1,   // 10%
+  max: 8,     // 800%
+  step: 0.1,  // 每次 +/- 10%
+} as const;
 
 /**
  * 读上次手动调整后的缩放(全局共用,所有图共享一份)。
@@ -46,7 +52,7 @@ function readStoredScale(): number | null {
   const raw = localStorage.getItem(LS_SCALE);
   if (raw === null) return null;
   const v = parseFloat(raw);
-  if (isNaN(v) || v < 0.1 || v > 5) return null;
+  if (isNaN(v) || v < ZOOM.min || v > ZOOM.max) return null;
   return v;
 }
 
@@ -62,13 +68,6 @@ const ICON_CLIPBOARD =
 const ICON_FIT =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
 
-function readInitialTheme(): MermaidTheme {
-  const raw = localStorage.getItem(LS_THEME) as MermaidTheme | null;
-  if (raw && (VALID_THEMES as readonly string[]).includes(raw)) {
-    return raw;
-  }
-  return 'dark';
-}
 
 function svgToPngBlob(svgEl: SVGElement): Promise<Blob | null> {
   return new Promise((resolve) => {
@@ -124,7 +123,7 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
   function MermaidPreviewPane({ source, onSourceChange }, ref) {
   const previewRef = useRef<MermaidPreviewHandle | null>(null);
 
-  const [theme, setTheme] = useState<MermaidTheme>(readInitialTheme);
+  const [theme, setTheme] = useState<MermaidTheme>(readMermaidTheme);
   // 初始 scale:有记忆→用记忆值;无记忆→先占位 1,首帧渲染后按宽度铺满覆盖
   const [scale, setScale] = useState<number>(() => readStoredScale() ?? 1);
   // 是否已对本次全屏会话应用过「初始 scale」(记忆恢复 or 首帧 fit-width)——只跑一次
@@ -142,7 +141,7 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
 
   // theme 持久 + 恢复 dark theme 单例(unmount 时跑 — 避免污染 inline 预览)
   useEffect(() => {
-    localStorage.setItem(LS_THEME, theme);
+    saveMermaidTheme(theme);
   }, [theme]);
   useEffect(() => {
     return () => {
@@ -214,20 +213,20 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
   // 「适应屏幕」= 按宽度铺满当前预览区(并记忆)
   const onFit = useCallback(() => {
     const fit = previewRef.current?.computeFitWidthScale();
-    const next = fit && fit > 0 ? Math.max(0.1, Math.min(5, fit)) : 1;
+    const next = fit && fit > 0 ? Math.max(ZOOM.min, Math.min(ZOOM.max, fit)) : 1;
     setScale(next);
     persistScale(next);
   }, [persistScale]);
   const onZoomIn = useCallback(() => {
     setScale((s) => {
-      const next = Math.min(5, Math.round((s + 0.1) * 100) / 100);
+      const next = Math.min(ZOOM.max, Math.round((s + ZOOM.step) * 100) / 100);
       persistScale(next);
       return next;
     });
   }, [persistScale]);
   const onZoomOut = useCallback(() => {
     setScale((s) => {
-      const next = Math.max(0.1, Math.round((s - 0.1) * 100) / 100);
+      const next = Math.max(ZOOM.min, Math.round((s - ZOOM.step) * 100) / 100);
       persistScale(next);
       return next;
     });
@@ -239,7 +238,7 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
   const commitZoom = () => {
     const v = parseInt(zoomInputValue, 10);
     if (!isNaN(v) && v > 0) {
-      const next = Math.max(0.1, Math.min(5, v / 100));
+      const next = Math.max(ZOOM.min, Math.min(ZOOM.max, v / 100));
       setScale(next);
       persistScale(next);
     }
@@ -252,7 +251,7 @@ export const MermaidPreviewPane = forwardRef<HTMLDivElement, MermaidPreviewPaneP
     const fit = previewRef.current?.computeFitWidthScale();
     if (fit && fit > 0) {
       initialScaleAppliedRef.current = true;
-      setScale(Math.max(0.1, Math.min(5, fit)));
+      setScale(Math.max(ZOOM.min, Math.min(ZOOM.max, fit)));
     }
   }, []);
 

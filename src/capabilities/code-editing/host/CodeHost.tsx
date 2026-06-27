@@ -48,6 +48,7 @@ export function CodeHost({
   const showLineNumbers = features?.lineNumbers ?? true;
   const enableTabIndent = features?.tabIndent ?? true;
   const enableDefaultKeymap = features?.defaultKeymap ?? true;
+  const enableLineWrap = features?.lineWrap ?? false;
 
   useEffect(() => {
     const parent = containerRef.current;
@@ -90,6 +91,7 @@ export function CodeHost({
         if (enableTabIndent) keys.push(indentWithTab);
         extensions.push(cmKeymap.of(keys));
       }
+      if (enableLineWrap) extensions.push(CMView.lineWrapping);
       if (readOnly) extensions.push(CMState.readOnly.of(true));
 
       const state = CMState.create({ doc: initialValue, extensions });

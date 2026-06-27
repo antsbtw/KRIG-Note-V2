@@ -117,10 +117,22 @@ export async function renderMermaidToExportSvg(source: string): Promise<string> 
   }
 }
 
+export const LS_MERMAID_THEME = 'krig-mermaid-theme';
+
+export function readMermaidTheme(): MermaidTheme {
+  const raw = localStorage.getItem(LS_MERMAID_THEME) as MermaidTheme | null;
+  return raw && (MERMAID_THEMES as readonly string[]).includes(raw) ? raw : 'default';
+}
+
+export function saveMermaidTheme(theme: MermaidTheme): void {
+  localStorage.setItem(LS_MERMAID_THEME, theme);
+}
+
 /** 渲染 Mermaid 图表到容器 */
 export async function renderMermaidDiagram(
   source: string,
   container: HTMLElement,
+  theme?: MermaidTheme,
 ): Promise<void> {
   const trimmed = source.replace(/[​‌‍﻿]/g, '').trim();
   if (!trimmed) {
@@ -131,6 +143,8 @@ export async function renderMermaidDiagram(
 
   await ensureMermaidInit();
   if (!mermaidModule) return;
+  const resolvedTheme = theme ?? readMermaidTheme();
+  mermaidModule.initialize(buildMermaidConfig(resolvedTheme));
   const renderId = `mermaid-${++mermaidIdCounter}`;
   try {
     const { svg } = await mermaidModule.render(renderId, trimmed);
