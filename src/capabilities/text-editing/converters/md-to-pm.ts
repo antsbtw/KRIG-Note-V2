@@ -300,7 +300,11 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     if (line.trimStart().startsWith('> ')) {
       const quoteLines: string[] = [];
       while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
-        quoteLines.push(lines[i].replace(/^>\s?/, ''));
+        // 剥引用前缀:检测用 trimStart() 容忍行首缩进(如列表内 `   > 权衡…`),
+        // 剥离也必须同样容忍前导空白 —— 否则锚在 col0 的 /^>\s?/ 对缩进行剥不掉,
+        // 递归 markdownToProseMirror 会再判成 blockquote → 无限递归 → 栈溢出 →
+        // markdownToAtoms 吞成 warning 产空 note(2026-06-30 relay-design-v2.md 导入空白根因)。
+        quoteLines.push(lines[i].replace(/^\s*>\s?/, ''));
         i++;
       }
       const innerContent = await markdownToProseMirror(quoteLines.join('\n'));

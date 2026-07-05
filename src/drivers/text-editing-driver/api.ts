@@ -12,6 +12,7 @@ import { undo, redo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
 import { DOMSerializer, Fragment, Slice, Node as PMNode } from 'prosemirror-model';
+import { liftTarget } from 'prosemirror-transform';
 import { MultipleNodeSelection } from './plugins/_shared/multiple-node-selection';
 import { sliceToMarkdown, docNodeToMarkdown, type SerializeResult } from './serializers/pm-to-markdown';
 import {
@@ -1108,6 +1109,36 @@ export const textEditingDriverApi = {
       view.dispatch(tr);
       // 第一个子 block 现在落在 pos 位置(去掉 container 的开标 1 个 token 后)
       this.turnIntoAt(instanceId, pos, target, codeLanguage);
+      return;
+    }
+
+    // 源节点是列表项(listItem / taskItem)turn into:
+    // handle 落在 list 内时 pos 指向 listItem/taskItem(见 build-block-handle-plugin 的
+    // "list 内优先取 listItem/taskItem 层")。语义(用户已拍板):**只转当前 item**——
+    // 把这一项从所在 list 里 lift 出来解包成普通 block(其余 item 留在原 list,list 按需
+    // 拆分),再对**第一个子 block**递归 turnInto 到真实目标。
+    //   - target 本身就是列表 → lift 后落成 paragraph,递归命中下方 list 分支重新包成新类型;
+    //   - 非列表 target → lift 后递归命中对应分支(h3 / quote / code / callout ...)。
+    if (node.type.name === 'listItem' || node.type.name === 'taskItem') {
+      // blockRange 端点须落在 item **内容内部**(pos 本身在 list-open 与 item 之间,
+      // 用它构 range 只到 list 层 → liftTarget=null)。取 pos+1 .. pos+nodeSize-1 → item 层。
+      const doc = view.state.doc;
+      const range = doc.resolve(pos + 1).blockRange(doc.resolve(pos + node.nodeSize - 1));
+      const liftDepth = range ? liftTarget(range) : null;
+      if (!range || liftDepth == null) {
+        console.warn('[text-editing-driver] turnIntoAt: listItem 无法 lift,跳过转换');
+        return;
+      }
+      const tr = view.state.tr.lift(range, liftDepth);
+      // lift 后 item 内容落到外层。**不能**直接映射 item 边界 pos(list 拆分会插入
+      // 结构 token,item-start 映射落不到 paragraph 上)。改为映射一个落在 item 内容
+      // **内部**的位置(pos+2 = item 首子 block 内),再 resolve 回它的 block 起点。
+      const innerPos = tr.mapping.map(pos + 2, 1);
+      const $inner = tr.doc.resolve(innerPos);
+      const newPos = $inner.before($inner.depth);
+      view.dispatch(tr);
+      // 递归:此时 newPos 指向解包后的第一个子 block(通常 paragraph)
+      this.turnIntoAt(instanceId, newPos, target, codeLanguage);
       return;
     }
 

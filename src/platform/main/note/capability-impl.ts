@@ -269,6 +269,44 @@ function injectIdsForCreate(doc: PmPayload): PmPayload {
 }
 
 /**
+ * 写库边界兜底:补齐缺 attrs.id 的 block(updateNote 调,防"改动静默丢失不保存")。
+ *
+ * 复用 injectIdsForCreate(递归、跳结构性容器、只补 null/缺失 id)。额外:若真的补了
+ * 至少一个块,warn **留痕**(reliability 纲领)——这样上游前端某条编辑路径没经过
+ * auto-block-id-plugin 就 emit 的 bug 依旧可见,不被兜底静默掩盖。
+ *
+ * @param doc     待写库的 PM doc
+ * @param noteId  仅用于日志定位
+ */
+function ensureBlockIds(doc: PmPayload, noteId: string): PmPayload {
+  const before = countIdlessBlocks(doc);
+  if (before === 0) return doc; // 无缺失,原样返回(热路径零开销)
+  const fixed = injectIdsForCreate(doc);
+  console.warn(
+    `[note-capability/updateNote] note=${noteId} 写库前补齐了 ${before} 个缺 attrs.id 的 block ` +
+      `— 上游某编辑路径未经 auto-block-id-plugin 补 id 就 emit(数据已兜底不丢,但请排查前端路径)`,
+  );
+  return fixed;
+}
+
+/** 统计缺 attrs.id 的 block 数(非结构性容器、attrs 声明了 id 字段、但 id 为空)。 */
+function countIdlessBlocks(node: PmPayload): number {
+  let n = 0;
+  if (
+    !STRUCTURAL_CONTAINER_TYPES.has(node.type) &&
+    node.attrs &&
+    'id' in node.attrs &&
+    !node.attrs.id
+  ) {
+    n += 1;
+  }
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) n += countIdlessBlocks(child);
+  }
+  return n;
+}
+
+/**
  * note 元数据(id + title + folderId + 时间戳)— 不含 doc。
  *
  * listNotes / listNoteTitles 共用核心:都只需要"列出所有 note 的元数据",
@@ -457,7 +495,15 @@ export async function updateNote(
   doc: NoteDocEnvelope,
 ): Promise<NoteInfo | null> {
   // 硬不变量:一篇 note 至多一个 isTitle 首块 —— 写库必经处单点强制(任何来源都过此关)
-  const newDoc = enforceSingleTitleInDoc(unwrapPmDoc(doc));
+  const titleEnforced = enforceSingleTitleInDoc(unwrapPmDoc(doc));
+
+  // 写库边界兜底:补齐缺 attrs.id 的 block(与 createNote 同一 injectIdsForCreate)。
+  // 背景:导入文档的块可能带 attrs.id=null,若前端某条编辑路径(handle 删块 / turn-into
+  // 等程序化 dispatch)在 auto-block-id-plugin 补 id 之前就 emit,下面 dissectPmDoc 会因
+  // "block has no attrs.id" throw → note.update handler 抛未捕获 rejection → renderer 无感
+  // → **改动静默丢失不保存**(reliability 纲领:反静默坍缩;写库必经处 fail-safe 而非 fail)。
+  // 这里在必经的写库入口把缺 id 单点补齐,任何前端路径漏补都由此兜住,数据不丢。
+  const newDoc = ensureBlockIds(titleEnforced, id);
 
   // 字面拿 container atom — D-10:不要求 hasNoteView,reading-thought 也走这里
   const containerAtom = await storage.getAtom<'pm'>(id);
@@ -473,8 +519,14 @@ export async function updateNote(
   }
 
   // 字面取 oldDoc 基线 — cache 命中字面用,否则 assemble
-  const oldDoc =
+  const oldDocRaw =
     pmDocCache.get(id) ?? (await assemblePmDoc(id)) ?? emptyContainerPayload();
+
+  // diffBlockTree 会**同时 dissect oldDoc 和 newDoc**(diff-block-tree.ts:67-68),两侧都
+  // 要求块有 attrs.id。导入 note 的基线(cache 里前端 emit 的 doc / assemble 早期数据)可能
+  // 也带 attrs.id=null → 仅补 newDoc 不够,dissect oldDoc 先 throw。故 oldDoc 同样补齐。
+  // injectIdsForCreate 只补缺失 id、保留已有 id,故正常基线不受影响(零 churn)。
+  const oldDoc = ensureBlockIds(oldDocRaw, id);
 
   const diff = diffBlockTree(oldDoc, newDoc, id);
 
