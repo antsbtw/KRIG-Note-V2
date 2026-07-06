@@ -6,11 +6,12 @@
  * 优先级链(每按一次只走一步,命中即停):
  *   1. isTitle 文档标题 → noop(保护)
  *   2. 媒体 caption 内、已空 → 光标移出到块上方(不删块);非空只删字符(放行)
- *   3. 当前块 indent>0 → indent−1(减缩进)
- *   4. 当前块是标题 → 降级为正文段(保留文字)
- *   5. 当前块是列表项 → 退出列表(liftListItem)
- *   6. 在容器内、已到该层顶级首块 → 退出容器(lift);tableCell → noop(硬墙)
- *   7. 否则放行 → baseKeymap joinBackward(与上一块合并)
+ *   3. 当前块 textIndent → 清首行缩进(2026-07-06 用户拍板:先清格式再合并)
+ *   4. 当前块 indent>0 → indent−1(减缩进)
+ *   5. 当前块是标题 → 降级为正文段(保留文字)
+ *   6. 当前块是列表项 → 退出列表(liftListItem)
+ *   7. 在容器内、已到该层顶级首块 → 退出容器(lift);tableCell → noop(硬墙)
+ *   8. 否则放行 → baseKeymap joinBackward(与上一块合并)
  *
  * 「上提对齐」由 PM lift 的逐层语义自然体现:每按一次 lift 一层,到顶级再退才 joinBackward。
  *
@@ -66,7 +67,19 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
       }
     }
 
-    // —— 3. 当前块 indent>0 → 减一级缩进 ——
+    // —— 3. 当前块首行缩进(textIndent)开着 → 先清首行缩进 ——
+    //   用户拍板:光标在首行第一个位置退格,应「先清掉首行缩进格式,再回上一行行末」。
+    //   textIndent(text-indent:2em,paragraph/heading 独有)是最贴光标首字的排版格式,
+    //   优先于块级 indent 和后续脱壳步骤。命中即停,下一次退格才继续走块级 indent/合并。
+    if (block.attrs.textIndent === true) {
+      if (dispatch) {
+        const pos = $from.before($from.depth);
+        dispatch(state.tr.setNodeMarkup(pos, null, { ...block.attrs, textIndent: false }));
+      }
+      return true;
+    }
+
+    // —— 4. 当前块 indent>0 → 减一级缩进 ——
     const curIndent = (block.attrs.indent as number | undefined) ?? 0;
     if (curIndent > 0) {
       if (dispatch) {
@@ -76,13 +89,13 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
       return true;
     }
 
-    // —— 4. 标题 → 降级为正文段(保留文字)——
+    // —— 5. 标题 → 降级为正文段(保留文字)——
     if (blockType === 'heading') {
       const para = state.schema.nodes.paragraph;
       if (para) return setBlockType(para)(state, dispatch);
     }
 
-    // —— 5. 列表项 → 退出列表(liftListItem)——
+    // —— 6. 列表项 → 退出列表(liftListItem)——
     const listItem = state.schema.nodes.listItem;
     const taskItem = state.schema.nodes.taskItem;
     if (listItem && ancestorDepthOfType(state, 'listItem') >= 0) {
@@ -92,7 +105,7 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
       if (liftListItem(taskItem)(state, dispatch)) return true;
     }
 
-    // —— 6. 容器内、该层首块 → 退出容器(lift);tableCell → 硬墙 noop ——
+    // —— 7. 容器内、该层首块 → 退出容器(lift);tableCell → 硬墙 noop ——
     // 最近的「真容器」祖先(跳过结构性 list 外壳;cell 单独判)。
     for (let d = $from.depth - 1; d >= 1; d--) {
       const node = $from.node(d);
@@ -118,7 +131,7 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
       // 非容器、非 cell 的中间层(理论少见)→ 继续向外
     }
 
-    // —— 7. 与上一块合并 ——
+    // —— 8. 与上一块合并 ——
     // 仅对「普通 paragraph」主动接管合并;codeBlock / math-block / 其它特殊块放行,
     // 由各自 keymap(如 code-block 空块→段落)+ baseKeymap 处理,避免抢掉它们的退格。
     if (blockType === 'paragraph') {

@@ -15,6 +15,7 @@ import type { NodeViewConstructor } from 'prosemirror-view';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { helpPanelController } from '@slot/triggers/help-panel-controller';
+import { floatingToolbarController } from '@slot/triggers/floating-toolbar-controller';
 import {
   setLatexHelpContext,
   clearLatexHelpContext,
@@ -70,6 +71,12 @@ export const mathInlineNodeView: NodeViewConstructor = (initialNode, view, getPo
   function openEditor(currentLatex: string): void {
     // 移除已存在的编辑器(确保只一个 mathInline 在编辑)
     document.querySelector('.krig-math-inline-editor')?.remove();
+
+    // 进编辑态收起浮条:双击 atom 会形成 NodeSelection(非空选区),
+    // floating-toolbar-source 据此把浮条挂在公式上 —— 但公式编辑弹窗自带
+    // input/preview,浮条那 8 个 mark 按钮对 atom 无意义,盖在弹窗上是干扰。
+    // 编辑结束后 view.focus() 触发的下一次真实文字选区会自然重新唤出浮条。
+    floatingToolbarController.hide();
 
     const editor = document.createElement('div');
     editor.classList.add('krig-math-inline-editor');
