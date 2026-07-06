@@ -20,11 +20,21 @@
   height: 100%;
 }
 
+/*
+ * page-fit 单页垂直居中(2026-07-06 用户拍板):
+ * page-fit 让整页可见,单页高度常小于视口 → 默认 pdfjs 页列贴顶,底部大片留白。
+ * 用 flex column 把页列在垂直方向居中;`justify-content: safe center` 保证内容
+ * **溢出时退化为贴顶**(safe 关键字:内容比容器高时不居中、不裁掉顶部),多页长文档
+ * 滚动照常。水平居中仍由 .pdfViewer 内每页 margin auto 负责,不受影响。
+ */
 .pdfViewerContainer {
   position: absolute;
   inset: 0;
   overflow: auto;
   outline: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
 }
 
 /*

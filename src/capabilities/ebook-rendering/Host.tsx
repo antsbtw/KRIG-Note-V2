@@ -360,15 +360,14 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
 
         const pos = info.lastPosition;
 
-        // 恢复缩放模式
-        const shouldFitWidth = pos?.fitWidth !== undefined ? pos.fitWidth : true;
-        setFitWidth(shouldFitWidth);
+        // 缩放模式:打开一律回默认整页适配(用户拍板 2026-07-06)——
+        // 不再恢复上次的绝对 scale(残留 150% 会截掉一大页)。PDF 走 page-fit
+        // 由 PdfScrollContent 消费;fitWidth=true 保持「适配模式(非绝对 scale)」语义,
+        // scale 状态保持 1.0(仅当用户手动缩放后经 onScaleChange 更新)。
+        setFitWidth(true);
 
         if (isFixedPage(r)) {
-          if (!shouldFitWidth && pos?.scale) {
-            setScale(pos.scale);
-            r.setScale(pos.scale);
-          }
+          // 不消费 pos.scale:初始渲染统一 page-fit,避免首屏被截。
           onLoadComplete?.({
             totalPages: r.getTotalPages(),
             fileType,
@@ -404,8 +403,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         setLoading(false);
         onReadyChange?.(true);
 
-        // 适应宽度:等 DOM 更新后计算
-        if (shouldFitWidth && isFixedPage(r)) {
+        // 适应宽度:等 DOM 更新后计算(**仅 paged 全屏用旧 PDFRenderer 路径**)。
+        // scroll 主分支的初始适配走 pdfjs page-fit(见 render 处 initialFitMode),
+        // 不经这段自管 scale 计算 —— 否则会把 width-fit 百分比错报给 toolbar。
+        if (pdfLayoutRef.current === 'paged' && isFixedPage(r)) {
           const fr = r;
           requestAnimationFrame(() => {
             const dims = fr.getPageDimensions();
@@ -470,9 +471,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     };
   }, []);
 
-  // fit-width 跟随容器宽度变化(window resize + ResizeObserver — 后者覆盖
-  // slot binding 切换 / 双栏布局变化 / Flex 异步 layout 等不触发 window resize 的场景)
+  // fit-width 跟随容器宽度变化 —— **仅 paged 全屏用旧 PDFRenderer 路径**。
+  //
+  // ⚠️ scroll 主分支的适配走 pdfjs page-fit(PDFViewerCanvas 内的 fit-controller),
+  // 绝不能跑这段:它用旧 PDFRenderer 的 width-fit 公式 `cw / pageWidth` 算出**绝对
+  // scale**(如 135%)并经 onScaleChange 覆盖上去,把 page-fit 冲掉 → 真机现象:
+  // 打开是 135% 溢出而非整页(2026-07-06)。这是「旧 PDFRenderer width-fit」散点未清干净
+  // 的最后一处,与 loadFromInfo 里那段同源,一并 gate 到 paged。
   useEffect(() => {
+    if (pdfLayout !== 'paged') return; // scroll 走 pdfjs page-fit,不跑旧 width-fit
     if (!fitWidth || !rendererReady) return;
     const handle = (): void => {
       const r = rendererRef.current;
@@ -499,7 +506,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       window.removeEventListener('resize', handle);
       observer?.disconnect();
     };
-  }, [fitWidth, rendererReady, onScaleChange]);
+  }, [pdfLayout, fitWidth, rendererReady, onScaleChange]);
 
   // ── view 命令式 API ──
 
@@ -512,11 +519,11 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     (newScale: number) => {
       // paged 模式 scale 完全自动(viewport fit)— toolbar 调 scale 在全屏期 noop
       if (pdfLayoutRef.current === 'paged') return;
-      setFitWidth(false);
+      // 这是 **onScaleChange 回调**:pdfjs 已经把 scale 变了(用户手势 / fit 重算都会发),
+      // 本函数只**同步 React state + toolbar 百分比**,绝不能再调 scrollApiRef.setScale
+      // 把 scale **回推 pdfjs** —— 那既是冗余回声,又会经 canvas setScale 误清 fitModeRef,
+      // 导致 fit 模式在首屏重算/换屏时被清成 null、后续 resize 全部失效(2026-07-06 诊断实锤)。
       setScale(newScale);
-      // scroll 模式:走 PdfScrollContent 注册的 API(pdfjs PDFViewer 真渲染);
-      // 旧 PDFRenderer.setScale 只为 paged 全屏服务,scroll 模式不再调用。
-      scrollApiRef.current?.setScale(newScale);
       onScaleChange?.(newScale);
     },
     [onScaleChange],
@@ -678,10 +685,12 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
        */}
       {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
         <PdfScrollContent
-          // 恢复上次阅读 scale:
-          //   fitWidth=true  → 'page-width'(fit 关键字让 pdfjs 按 container 算)
-          //   fitWidth=false → 数字字符串(绝对 scale,如 '1.5')
-          initialFitMode={fitWidth ? 'page-width' : String(scale)}
+          // 打开一律用默认整页适配(用户拍板 2026-07-06):
+          //   'page-fit' 让 pdfjs 按 container 宽高算,一整页刚好放进可视区、不截。
+          //   **忽略上次残留的绝对 scale**(如 150% → 之前会截掉一大块);view 尺寸
+          //   变化(含进/出全屏)由 PDFViewerCanvas 内 page-fit 重算逻辑自动跟随。
+          //   用户之后手动缩放走命令式 API,不改这里的初始值。
+          initialFitMode="page-fit"
           initialPage={lastPdfPageRef.current ?? restorePage}
           onPageChange={handlePdfPageChange}
           onScaleChange={handleScaleChange}

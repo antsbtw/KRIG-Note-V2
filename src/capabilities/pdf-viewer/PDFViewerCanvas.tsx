@@ -40,6 +40,7 @@ import type {
 } from './types';
 import { createServices } from './services';
 import { getProxy, resolveDestRef } from './loader';
+import { createFitController, type PdfFitController } from './fit-controller';
 
 // TextLayerMode.ENABLE = 1(不出 pdf_viewer.mjs 顶层 export,用字面量)
 const TEXT_LAYER_MODE_ENABLE = 1;
@@ -91,6 +92,13 @@ export const PDFViewerCanvas = forwardRef<
 
   // 持当前 PDFViewer 实例(unmount cleanup 用)
   const viewerInstanceRef = useRef<PDFViewer | null>(null);
+
+  // ── fit 意图单一真源:所有「设 fit / 清 fit / 几何变更重算」收敛到本控制器 ──
+  // (背景与坑详见 fit-controller.ts;不读 viewer.currentScaleValue,它会退化成数字)
+  const fitRef = useRef<PdfFitController>(
+    createFitController(() => viewerInstanceRef.current),
+  );
+  const fit = fitRef.current;
 
   // 把最新 callbacks 存 ref,避免 useEffect 重跑(callbacks 变化只更 ref,不触发 cleanup)
   const callbacksRef = useRef({
@@ -157,9 +165,23 @@ export const PDFViewerCanvas = forwardRef<
     // 且 pdfjs 自己不重试。于是「不滚动就不渲染」,直到第一次 wheel 的 scroll 事件
     // 再触发一次 update()。
     //
-    // 修:容器一有非零尺寸就补调一次 viewer.update()。rAF 先试(多数情况下一帧
-    // 后布局已成);若仍为 0,挂 ResizeObserver 等第一次非零尺寸,update() 后即断开。
-    // 只补渲染,不动 scale / scroll 位置。
+    // 修:容器一有非零尺寸就补调一次。rAF 先试(多数情况下一帧后布局已成);
+    // 若仍为 0,挂 ResizeObserver 等第一次非零尺寸,处理后即断开。
+    //
+    // ⚠️ fit 关键字(page-fit / page-width / auto)必须**重设一次**再 update():
+    //   page-fit = min(宽约束 scale, 高约束 scale)。onPagesInit 设 page-fit 时容器
+    //   clientHeight≈0,pdfjs 拿错高度算出偏小 scale(真机现象:一屏平铺三页 58%),
+    //   之后不会自己按真高重算。等真尺寸就绪后重设 currentScaleValue=同一关键字,
+    //   逼 pdfjs 按正确宽高重算 → 一整页刚好占满高度(2026-07-06 用户拍板:一屏一页)。
+    //   数值 scale(用户明确选的)不重设,只 update() 补渲染。
+    const reapplyFitAndPaint = (): void => {
+      // 首屏容器尺寸就绪:reflow 按真实宽高重算 fit;非 fit 则补一次渲染。
+      if (fit.current()) {
+        fit.reflow();
+      } else {
+        viewer.update();
+      }
+    };
     let firstPaintRaf: number | null = null;
     let firstPaintObserver: ResizeObserver | null = null;
     const disposeFirstPaintGuard = (): void => {
@@ -175,7 +197,7 @@ export const PDFViewerCanvas = forwardRef<
     const ensureFirstPaint = (): void => {
       if (viewerInstanceRef.current !== viewer) return; // 已被新 handle 替换/卸载
       if (container.clientHeight > 0 && container.clientWidth > 0) {
-        viewer.update();
+        reapplyFitAndPaint();
         disposeFirstPaintGuard();
         return;
       }
@@ -187,7 +209,7 @@ export const PDFViewerCanvas = forwardRef<
             return;
           }
           if (container.clientHeight > 0 && container.clientWidth > 0) {
-            viewer.update();
+            reapplyFitAndPaint();
             disposeFirstPaintGuard();
           }
         });
@@ -197,7 +219,8 @@ export const PDFViewerCanvas = forwardRef<
 
     // ── 事件桥接 ──
     const onPagesInit = (): void => {
-      viewer.currentScaleValue = initialFitMode;
+      // 初始 fit:setFit 内部记意图 + 应用关键字(数值串会被识别为非 fit,清意图)。
+      fit.setFit(initialFitMode);
       // 初始 scale 定好后,下一帧检查容器是否已有尺寸 → 补渲染(见上方守卫说明)
       firstPaintRaf = requestAnimationFrame(ensureFirstPaint);
     };
@@ -338,6 +361,7 @@ export const PDFViewerCanvas = forwardRef<
       if (!isPinchToZoom && !e.ctrlKey && !e.metaKey) return;
 
       e.preventDefault();
+      fit.clearFit(); // wheel/pinch 手动缩放 → 退出 fit 意图
       const previousScale = viewer.currentScale;
 
       // **不传 origin 给 pdfjs** — pdfjs 内部 _setScaleUpdatePages 在传 origin 时同时调
@@ -378,12 +402,14 @@ export const PDFViewerCanvas = forwardRef<
       if (e.key === '=' || e.key === '+') {
         e.preventDefault();
         viewer.updateScale({ drawingDelay: -1, scaleFactor: KEYBOARD_SCALE_STEP });
+        fit.clearFit(); // 手动缩放 → 退出 fit 意图
       } else if (e.key === '-') {
         e.preventDefault();
         viewer.updateScale({ drawingDelay: -1, scaleFactor: 1 / KEYBOARD_SCALE_STEP });
+        fit.clearFit(); // 手动缩放 → 退出 fit 意图
       } else if (e.key === '0') {
         e.preventDefault();
-        viewer.currentScaleValue = 'page-width';
+        fit.setFit('page-width'); // Cmd+0 = fit-width,记住意图供几何变更重算
       }
     };
     window.addEventListener('keydown', handler);
@@ -400,27 +426,74 @@ export const PDFViewerCanvas = forwardRef<
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return;
     let lastWidth = container.clientWidth;
+    let lastHeight = container.clientHeight;
     let initial = true;
     const observer = new ResizeObserver(() => {
       const viewer = viewerInstanceRef.current;
       if (!viewer) return;
       const w = container.clientWidth;
+      const h = container.clientHeight;
       if (initial) {
         initial = false;
         lastWidth = w;
+        lastHeight = h;
         return; // 首次 mount tick 跳过,保护 restore 的 initialFitMode 值
       }
-      if (w === lastWidth) return;
+      // 宽**或**高变化都要重 fit:page-fit 受高度约束(进/出全屏主要变高度),
+      // 只盯宽度会漏掉全屏切换时的整页重算(2026-07-06 用户拍板:全屏也要刚好放下一页)。
+      if (w === lastWidth && h === lastHeight) return;
       lastWidth = w;
-      const v = viewer.currentScaleValue;
-      // fit 模式(page-width / page-fit / auto)— 重设触发重算
-      // 数值 scale — 不动(用户明确选的)
-      if (v === 'page-width' || v === 'page-fit' || v === 'auto') {
-        viewer.currentScaleValue = v;
-      }
+      lastHeight = h;
+      // 容器尺寸变 → reflow(fit 模式按新宽高重算;数值 scale 不动)。
+      fit.reflow();
     });
     observer.observe(container);
     return () => observer.disconnect();
+  }, []);
+
+  // ── 拖到新屏幕 / 进出全屏 → 重 fit(2026-07-06 用户拍板)──
+  //
+  // ResizeObserver 只在 container 的 CSS 逻辑尺寸(clientWidth/Height)变化时触发。
+  // 但**拖到另一块屏幕**(不同 DPR/分辨率)时逻辑像素可能不变 → observer 不响,
+  // page-fit 不重算,页面停在旧屏算出的 scale(真机:一屏平铺三页)。**OS/浏览器
+  // 全屏**切换有时也走窗口层不改 container clientHeight。故显式监听这几个几何变更
+  // 事件,每次都重设 fit 关键字逼 pdfjs 按当前真实宽高重算。数值 scale 不动。
+  useEffect(() => {
+    const reapplyFit = (): void => {
+      const viewer = viewerInstanceRef.current;
+      if (!viewer) return;
+      if (!fit.current()) return;
+      // 下一帧执行:全屏/换屏后布局尺寸可能这一拍还没稳定,等一帧再 reflow。
+      requestAnimationFrame(() => {
+        if (viewerInstanceRef.current !== viewer) return;
+        fit.reflow();
+      });
+    };
+
+    const onResize = (): void => reapplyFit();
+    const onFsChange = (): void => reapplyFit();
+    window.addEventListener('resize', onResize);
+    document.addEventListener('fullscreenchange', onFsChange);
+
+    // DPR 变化 = 拖到不同缩放/分辨率的屏幕。matchMedia 阈值绑当前 dpr,
+    // 一旦 dpr 越过就 fire;fire 后阈值已过期,重新绑一个新的(递归续订)。
+    let dprMql: MediaQueryList | null = null;
+    const onDprChange = (): void => {
+      reapplyFit();
+      subscribeDpr(); // 重新按新 dpr 绑阈值
+    };
+    const subscribeDpr = (): void => {
+      if (dprMql) dprMql.removeEventListener('change', onDprChange);
+      dprMql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprMql.addEventListener('change', onDprChange);
+    };
+    subscribeDpr();
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('fullscreenchange', onFsChange);
+      if (dprMql) dprMql.removeEventListener('change', onDprChange);
+    };
   }, []);
 
   // ── ref handle ──
@@ -455,11 +528,11 @@ export const PDFViewerCanvas = forwardRef<
         // 只滚到页顶,scrollLeft 不被强制改 → 配合 margin auto,page 居中。
         (viewer as unknown as { _location: unknown })._location = null;
         viewer.currentScaleValue = String(absoluteScale);
+        fit.clearFit(); // 用户手选绝对 scale → 退出 fit 意图
       },
       setFitMode(mode: FitMode): void {
-        const viewer = viewerInstanceRef.current;
-        if (!viewer) return;
-        viewer.currentScaleValue = mode;
+        // setFit 内部记意图 + 应用关键字(几何变更时据此重算)。
+        fit.setFit(mode);
       },
       getScale(): number {
         return viewerInstanceRef.current?.currentScale ?? 1.0;
