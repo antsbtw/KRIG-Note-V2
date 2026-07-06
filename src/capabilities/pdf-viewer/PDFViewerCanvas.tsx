@@ -146,9 +146,60 @@ export const PDFViewerCanvas = forwardRef<
 
     viewerInstanceRef.current = viewer;
 
+    // ── 首屏渲染兜底守卫(2026-07-05)──
+    //
+    // 根因:pdfjs PDFViewer 的渲染是「按可视页触发」。setDocument 完成后 pdfjs
+    // 只在初始 update()(pagesinit 内)+ 之后每次容器 scroll 时调 update()。而
+    // update() 首行 `if (numVisiblePages === 0) return` —— 一页都不可见就直接
+    // 返回、不排队渲染。可见页由 getVisibleElements 用 container.clientHeight/Width
+    // 算出。初始 update() 在 pdfjs 异步取完页后同步派发,此时嵌套 slot/flex 容器
+    // 高度常还没被布局器算出(clientHeight≈0)→ numVisiblePages=0 → 直接 return,
+    // 且 pdfjs 自己不重试。于是「不滚动就不渲染」,直到第一次 wheel 的 scroll 事件
+    // 再触发一次 update()。
+    //
+    // 修:容器一有非零尺寸就补调一次 viewer.update()。rAF 先试(多数情况下一帧
+    // 后布局已成);若仍为 0,挂 ResizeObserver 等第一次非零尺寸,update() 后即断开。
+    // 只补渲染,不动 scale / scroll 位置。
+    let firstPaintRaf: number | null = null;
+    let firstPaintObserver: ResizeObserver | null = null;
+    const disposeFirstPaintGuard = (): void => {
+      if (firstPaintRaf !== null) {
+        cancelAnimationFrame(firstPaintRaf);
+        firstPaintRaf = null;
+      }
+      if (firstPaintObserver) {
+        firstPaintObserver.disconnect();
+        firstPaintObserver = null;
+      }
+    };
+    const ensureFirstPaint = (): void => {
+      if (viewerInstanceRef.current !== viewer) return; // 已被新 handle 替换/卸载
+      if (container.clientHeight > 0 && container.clientWidth > 0) {
+        viewer.update();
+        disposeFirstPaintGuard();
+        return;
+      }
+      // 尺寸仍为 0 → 等 ResizeObserver 首次非零尺寸(rAF 已用过,不再重排)
+      if (!firstPaintObserver && typeof ResizeObserver !== 'undefined') {
+        firstPaintObserver = new ResizeObserver(() => {
+          if (viewerInstanceRef.current !== viewer) {
+            disposeFirstPaintGuard();
+            return;
+          }
+          if (container.clientHeight > 0 && container.clientWidth > 0) {
+            viewer.update();
+            disposeFirstPaintGuard();
+          }
+        });
+        firstPaintObserver.observe(container);
+      }
+    };
+
     // ── 事件桥接 ──
     const onPagesInit = (): void => {
       viewer.currentScaleValue = initialFitMode;
+      // 初始 scale 定好后,下一帧检查容器是否已有尺寸 → 补渲染(见上方守卫说明)
+      firstPaintRaf = requestAnimationFrame(ensureFirstPaint);
     };
     const onPagesLoaded = (): void => {
       if (initialPage && initialPage >= 1 && initialPage <= pdfDoc.numPages) {
@@ -186,6 +237,7 @@ export const PDFViewerCanvas = forwardRef<
     viewer.setDocument(pdfDoc);
 
     return () => {
+      disposeFirstPaintGuard();
       services.eventBus.off('pagesinit', onPagesInit);
       services.eventBus.off('pagesloaded', onPagesLoaded);
       services.eventBus.off('pagechanging', onPageChanging);

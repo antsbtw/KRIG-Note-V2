@@ -188,6 +188,23 @@ export const textEditingDriverApi = {
       tr.removeMark(from, to, markType); // 先清旧色,避免叠加
       tr.addMark(from, to, markType.create({ color }));
     }
+
+    // L5 一致性(用户拍板:着色应统一,同 node-style-command 的 graph 路径):
+    // mathBlock 等**颜色是节点级 attr(非 inline mark)**的块,textStyle mark 对它无效
+    // (marks:'' 禁 inline mark)。选区跨到这类块时同步 setNodeMarkup attrs.color,
+    // 否则选中上色时数学块不跟变(真机暴露:公式框不跟随选定改色)。color='' → null。
+    const attrColor = color || null;
+    inst.view.state.doc.nodesBetween(from, to, (node, pos) => {
+      if (
+        node.attrs &&
+        'color' in node.attrs &&
+        node.attrs.color !== attrColor
+      ) {
+        tr.setNodeMarkup(pos, null, { ...node.attrs, color: attrColor });
+      }
+      return true;
+    });
+
     inst.view.dispatch(tr);
     inst.view.focus();
   },
@@ -211,6 +228,21 @@ export const textEditingDriverApi = {
       tr.removeMark(from, to, markType);
       tr.addMark(from, to, markType.create({ color }));
     }
+
+    // L5 一致性(同 setTextColor):highlight mark 对 mathBlock 无效(marks:'' 禁 inline
+    // mark),背景色是节点级 attr `bgColor`。选区跨到这类块时同步 setNodeMarkup。
+    const attrBgColor = color || null;
+    inst.view.state.doc.nodesBetween(from, to, (node, pos) => {
+      if (
+        node.attrs &&
+        'bgColor' in node.attrs &&
+        node.attrs.bgColor !== attrBgColor
+      ) {
+        tr.setNodeMarkup(pos, null, { ...node.attrs, bgColor: attrBgColor });
+      }
+      return true;
+    });
+
     inst.view.dispatch(tr);
     inst.view.focus();
   },
