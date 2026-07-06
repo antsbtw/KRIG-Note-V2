@@ -691,6 +691,56 @@
   text-indent: 0;
 }
 
+/* KaTeX 内部 span 硬编码 color,会挡住 textStyle color mark(红字里的公式仍是
+   KaTeX 默认前景色)。inherit 让公式字形跟随 color mark,与周围文字同色;
+   text-decoration-color 也随 currentColor,下横线与文字同色。 */
+.krig-pm-host .ProseMirror .krig-math-inline .katex,
+.krig-pm-host .ProseMirror .krig-math-inline .katex * {
+  color: inherit;
+}
+
+/* 行内公式(KaTeX)下横线/删除线:连贯 + 与文字同色 + 对齐 + 离字形远一点。
+   排查记录(全程 live DevTools 实测定位,非猜):
+   ① text-decoration 默认不穿 inline-block 盒;KaTeX 又在多层内层盒(.katex/.base/.mord…)
+      硬置 text-decoration:none 层层重置 → 必须把装饰覆盖到 `.katex *` 全后代才画得出;
+   ② <u> 在色 mark span 外层,<u> 自画线取默认白 currentColor,与内层色 span 画的红线不同色
+      → 让色 span 自己重画整条文字线(currentColor 随文字色,盖过白线);
+   ③ 对齐:实测(probe)公式在 `.katex *` + offset 1px 时,画出的线 y 与文字线(offset 3px)
+      完全重合(同一像素行)→ 公式用 1px、文字用 3px 是对齐的;
+   ④ 之前看着「不齐」实为两个视觉噪声:skip-ink 绕开 x/y/f 下伸笔画使线断续、公式盒 padding
+      切小缺口 → 全链 text-decoration-skip-ink:none 使线实心连续,消除断续错觉。
+   ⚠️ 曾试「线画外层盒 + .katex 置 none」:inline-block 盒的 text-decoration 装饰的是其文本
+      内容,而内容(.katex)被置 none → 线无处可画、公式全无线。故必须画在 `.katex *` 上。 */
+.krig-pm-host .ProseMirror u {
+  text-decoration-color: currentColor;
+  text-underline-offset: 4px;
+  text-decoration-skip-ink: none;
+}
+.krig-pm-host .ProseMirror u span[style*="color"] {
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 4px;
+  text-decoration-skip-ink: none;
+}
+/* 公式内层 KaTeX 后代:强制画线(盖 KaTeX 多层 none),skip-ink none 实心。
+   offset 比文字线小 2px(文字 4px / 公式 2px):补偿公式 .katex 盒底比文字低约 2px,
+   这样两条线仍在同一水平对齐。整组(4/2)比早先(3/1)统一下移 1px → 线离字形更透气。 */
+.krig-pm-host .ProseMirror u .krig-math-inline .katex,
+.krig-pm-host .ProseMirror u .krig-math-inline .katex * {
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
+  text-decoration-skip-ink: none;
+}
+/* 删除线同理:span 重画整条 + KaTeX 后代覆盖;line-through 在字中间,不涉 offset 对齐 */
+.krig-pm-host .ProseMirror :is(s, del, strike) span[style*="color"],
+.krig-pm-host .ProseMirror :is(s, del, strike) .krig-math-inline .katex,
+.krig-pm-host .ProseMirror :is(s, del, strike) .krig-math-inline .katex * {
+  text-decoration: line-through;
+  text-decoration-color: currentColor;
+  text-decoration-skip-ink: none;
+}
+
 .krig-pm-host .ProseMirror .krig-math-inline:hover {
   background: rgba(255, 255, 255, 0.08);
 }
