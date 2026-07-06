@@ -177,24 +177,15 @@ export const imageNodeView: NodeViewConstructor = (node, view, getPos) => {
     img.src = src;
     img.alt = (node.attrs.alt as string) || '';
     if (node.attrs.title) img.title = node.attrs.title as string;
+    // width=null(未 resize):**纯 CSS 自适应** —— img 自然宽显示,超容器由 CSS
+    //   max-width:100% + height:auto 自动缩。不设 inline width。
+    // width 有值(用户 resize 过,已落库):按存值渲染。
+    //
+    // ⚠️ 2026-07-06 根因修复:原先 img.onload 里测 imgWrapper.clientWidth 现算 px 宽。
+    // 图在 **2-column 内**时,onload 常早于 column 的 flex 布局完成 → 测到塌陷列宽 →
+    // min(塌陷宽, 自然宽) 把图**写死成小尺寸 inline width**,重渲染又变回正常(时好时坏、
+    // 从 DB 恢复后变小)。改纯 CSS 后,尺寸不再依赖 onload 那一刻的容器测量,竞态失效。
     if (node.attrs.width) img.style.width = `${node.attrs.width}px`;
-
-    img.addEventListener('load', () => {
-      // 首次加载默认贴合容器宽度(不超过自然宽度,避免低分辨率小图被强行放大模糊)
-      // **不走 PM dispatch**(2026-05-22 修):PM AttrStep.apply 内部用 type.create(attrs, null)
-      // 创建无 content 新 image,走 replaceOuter 时校验 doc.content 失败 → RangeError 80 条刷屏。
-      // width 仅渲染层缓存(非语义),直接改 dom style.width 即可。
-      // 用户 resize 拖动 (makeResizeHandle:258) 仍走 updateAttrs 真正落库,保留语义编辑路径。
-      // 切笔记回来 attrs.width=null → onload 重测一次(成本 0),与 V1 同行为。
-      if (!node.attrs.width && !node.attrs.height) {
-        const containerWidth = imgWrapper.clientWidth || imgArea.clientWidth || 0;
-        const targetWidth =
-          containerWidth > 0
-            ? Math.min(containerWidth, img.naturalWidth)
-            : img.naturalWidth;
-        img.style.width = `${targetWidth}px`;
-      }
-    });
 
     imgArea.appendChild(makeResizeHandle('left', img, imgArea));
     imgArea.appendChild(img);
