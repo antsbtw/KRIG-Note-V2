@@ -83,12 +83,14 @@ import { fetchTranscript } from 'youtube-transcript';
  */
 function getFfmpegPath(): string | null {
   const appPath = app.getAppPath();
+  // Windows 版二进制名为 ffmpeg.exe,其余平台为 ffmpeg
+  const binName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
   // 打包后 appPath 是 app.asar 路径,需要走 asar.unpack
   const candidates = [
     // dev 环境
-    join(appPath, 'node_modules', 'ffmpeg-static', 'ffmpeg'),
+    join(appPath, 'node_modules', 'ffmpeg-static', binName),
     // 打包后(asar.unpack 自动重定向)
-    join(appPath.replace('app.asar', 'app.asar.unpacked'), 'node_modules', 'ffmpeg-static', 'ffmpeg'),
+    join(appPath.replace('app.asar', 'app.asar.unpacked'), 'node_modules', 'ffmpeg-static', binName),
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;

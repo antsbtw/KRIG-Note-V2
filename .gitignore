@@ -3,6 +3,8 @@ node_modules/
 dist/
 out/
 build/icon.iconset/
+# 平台 sidecar 二进制(surreal.exe 等,~90MB)不入仓;make-win.sh 打包时按需下载。
+build/surreal/
 .DS_Store
 *.log
 tmp/

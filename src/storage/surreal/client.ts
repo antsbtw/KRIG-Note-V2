@@ -147,28 +147,52 @@ function cleanLock(): void {
 
 const execFileAsync = promisify(execFile);
 
-async function killOrphanSurrealProcesses(reason: string): Promise<void> {
-  const dbDir = getDbDir();
-  try {
-    const { stdout } = await execFileAsync('pgrep', [
-      '-f',
-      `surreal start.*rocksdb://.*${dbDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+/**
+ * 找到「命令行含本 dbDir 的 surreal start」孤儿进程的 PID 列表。
+ * Windows 无 pgrep,改用 PowerShell CIM 查 CommandLine;Unix 走 pgrep -f。
+ */
+async function findOrphanSurrealPids(dbDir: string): Promise<number[]> {
+  if (process.platform === 'win32') {
+    // CommandLine 里同时含 "surreal" 与 dbDir 的进程即目标(路径分隔符 win 下为 \)
+    const needle = dbDir.replace(/'/g, "''");
+    const ps =
+      `Get-CimInstance Win32_Process -Filter "Name='surreal.exe'" | ` +
+      `Where-Object { $_.CommandLine -like '*${needle}*' } | ` +
+      `Select-Object -ExpandProperty ProcessId`;
+    const { stdout } = await execFileAsync('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command', ps,
     ]);
-    const pids = stdout
+    return stdout
       .split('\n')
       .map((s) => parseInt(s.trim(), 10))
       .filter((n) => Number.isFinite(n) && n > 0);
+  }
+  const { stdout } = await execFileAsync('pgrep', [
+    '-f',
+    `surreal start.*rocksdb://.*${dbDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+  ]);
+  return stdout
+    .split('\n')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+async function killOrphanSurrealProcesses(reason: string): Promise<void> {
+  const dbDir = getDbDir();
+  try {
+    const pids = await findOrphanSurrealPids(dbDir);
     const ownPid = serverProcess?.pid;
     const orphanPids = pids.filter((pid) => pid !== ownPid);
     if (orphanPids.length === 0) return;
 
     console.log(`[storage/surreal] Killing orphan server(s) [${reason}]: PIDs=${orphanPids.join(',')}`);
     for (const pid of orphanPids) {
+      // process.kill 在 Windows 上忽略 SIGKILL 语义但仍会强制终止;跨平台可用
       try { process.kill(pid, 'SIGKILL'); } catch { /* 已死或权限不足 */ }
     }
     await new Promise((r) => setTimeout(r, 500));
   } catch {
-    // pgrep 无匹配,静默
+    // 查不到匹配进程(pgrep 无匹配 / CIM 空),静默
   }
 }
 
