@@ -18,6 +18,7 @@ import { useSlashTrigger } from '@slot/triggers/use-slash-trigger';
 import { useHandleTrigger } from '@slot/triggers/use-handle-trigger';
 import { useFloatingToolbarTrigger } from '@slot/triggers/use-floating-toolbar-trigger';
 import { WorkspaceBusContext } from '@slot/workspace-bus/use-workspace-bus';
+import { WorkspaceIdContext } from '../workspace-context/ws-id-context';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import type { WorkspaceState } from '../workspace-state/workspace-state';
 import './workspace-instance.css';
@@ -57,28 +58,30 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
   const bus = workspaceManager.getBus(state.id) ?? null;
 
   return (
-    <WorkspaceBusContext.Provider value={bus}>
-      <div
-        ref={rootRef}
-        className="krig-workspace-instance"
-        style={{ display: isActive ? 'flex' : 'none' }}
-        data-workspace-id={state.id}
-      >
-        {!state.navSideCollapsed && (
-          <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
-        )}
-        <div className="krig-workspace-main">
-          {/* per-slot toolbar(fix/per-slot-toolbar):ToolbarFrame 下沉进 SlotArea 的
-              每个 slot 容器内,left/right view 各自有独立 toolbar 不再越界。*/}
-          <SlotArea
-            workspaceId={state.id}
-            slotBinding={effectiveSlotBinding}
-            dividerRatio={state.dividerRatio}
-            onDividerChange={handleDividerChange}
-          />
+    <WorkspaceIdContext.Provider value={state.id}>
+      <WorkspaceBusContext.Provider value={bus}>
+        <div
+          ref={rootRef}
+          className="krig-workspace-instance"
+          style={{ display: isActive ? 'flex' : 'none' }}
+          data-workspace-id={state.id}
+        >
+          {!state.navSideCollapsed && (
+            <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
+          )}
+          <div className="krig-workspace-main">
+            {/* per-slot toolbar(fix/per-slot-toolbar):ToolbarFrame 下沉进 SlotArea 的
+                每个 slot 容器内,left/right view 各自有独立 toolbar 不再越界。*/}
+            <SlotArea
+              workspaceId={state.id}
+              slotBinding={effectiveSlotBinding}
+              dividerRatio={state.dividerRatio}
+              onDividerChange={handleDividerChange}
+            />
+          </div>
+          <OverlayFrames viewId={activeViewId} />
         </div>
-        <OverlayFrames viewId={activeViewId} />
-      </div>
-    </WorkspaceBusContext.Provider>
+      </WorkspaceBusContext.Provider>
+    </WorkspaceIdContext.Provider>
   );
 }
