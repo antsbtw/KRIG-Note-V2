@@ -34,7 +34,7 @@
   - `U1-a-ws-context-injection.md` + `.prompt.md` — ws 上下文注入链（地基）✅ **已交付验收**（commit 0741b78d）
   - `U1-b-component-inject.md` + `.prompt.md` — views nav-side 改注入（5 文件）✅ **已交付验收**（commit a96419c9）
   - `U1-c-command-ctx.md` — U1-c 地形排查 + c2 陷阱判定 + 关键收敛 ✅
-  - `U1-c1-a2-interface.prompt.md` — 建 A2 注入接口(registerWsCommand)+1命令试水 ✅ prompt 就绪待执行
+  - `U1-c1-a2-interface.prompt.md` — 建 A2 注入接口(registerWsCommand)+1命令试水 ✅ **已交付验收**（commit c553e55a）
   - **归多窗口 step2**：40 命令批量注入 / c2-defer(ai-sync×2+keymap) / U1-b shell 3点删
   - U1-c2-inject(link-click/note-bridge/context-menu ~10)— ⏳ 待评估是否也依赖窗口独立性
   - U4/U5（独立小单元）、U2 收尾、U3 二次评估 — ⏳
