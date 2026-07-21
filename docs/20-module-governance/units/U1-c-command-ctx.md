@@ -28,20 +28,32 @@
 **判定价值**：拦下 3 处「给即将消失的『全局 active』概念精心接线」的白费功+埋债。同 U1-b shell 陷阱
 规律——有些点不是改注入，是属于要重构的旧结构。
 
-## 拆分（据判定）
+## ⭐⭐ 关键收敛（2026-07-21，看真实 command 系统 + 深层讨论后）
 
-- **U1-c1**：Bucket A 命令处理器 ctx 注入（~40 处，一个模式）。**抽象 A2**：command handler 加 ctx
-  参数、`commandRegistry.execute` 注入 wsId。低风险，先打。
-- **U1-c2-inject**：可注入陷阱（link-click / note-bridge / context-menu，~10 处）。各自机制：
-  context-menu 走 context.custom 带 wsId；link-click/note-bridge 绑注册时 wsId。
-- **U1-c2-defer**：`ai-sync ×2` + `keymap 兜底`（3 处）——**不改，标 TODO**，留多窗口 step2 随
-  「全局 active 概念消亡」一起重构。**⚠️ 多窗口 step2 勿忘这 3 处。**
+**规律浮现**：凡依赖「每窗口独立性」才能正确做的注入，现在做 = 打补丁，该随多窗口 step2 做。
+三例同此模式：c2-defer（追全局 active，概念消失）/ **U1-c1 批量 40 命令（正确注入依赖每窗口
+独立注册）** / U1-b shell 3点（tab 残骸）。→ **U1 的边界 = 「不依赖多窗口就能解耦」的部分**；
+依赖窗口独立性的天然归 step2。这不是 U1 没做完，是 U1 边界本就到这（自洽「先解耦内部再套壳」）。
 
-## 抽象 A2 决策（command ctx 注入机制，c1 前先定）
+**为何 40 命令批量注入归 step2**（看真实代码得出）：
+- 现状 `CommandHandler=(...args)=>unknown` + `execute(id,...args)` + **80 个 execute 调用点** +
+  40 注册点。探查建议 Option B（`handler(args,ctx)`）会牵连 **80 调用点全改**、driver 层无 Context 拿不到 wsId → **否决**。
+- 正解 = **方案乙：注册时闭包捕获本窗口 wsId**（command 每窗口 renderer 各注册一遍 → 注册时机所在
+  窗口 = 执行时所属窗口 → 闭包 wsId 天然正确，execute/80 调用点**一行不改**）。
+- **但方案乙依赖「每窗口独立注册 + 注册时能拿到本窗 Context」= 多窗口 step2 才就位**。单窗口下
+  注册时机与 Provider 对不齐 → 现在批量做要打补丁。→ **批量迁移归 step2。**
 
-探查给三选项，倾向 **Option B**：扩展 handler 签名带可选 ctx —
-`type CommandHandler = (args, ctx?) => unknown`；`execute(id, args, ctx)` 注入 wsId。
-清晰、集中、一处改 registry。（Option A 包装器到处样板；Option C 首参约定不一致。）待 c1 prompt 前定死。
+## 拆分（据收敛修订）
+
+- **U1-c1（轻量·现在做）**：只建 **A2 接口**（`CommandContext={wsId}` + `registerWsCommand` 工厂，
+  方案乙）+ **1~2 个命令试水**（如 note-view.create-note 走通新注册器，验证+立范本）。
+  **不强制迁 40 命令。**
+- **U1-c1-batch（归 step2）**：40 命令批量走 registerWsCommand（每窗口独立注册就位后照范本迁）。
+- **U1-c2-inject**：可注入陷阱（link-click / note-bridge / context-menu，~10 处）——待评估是否也
+  依赖窗口独立性（context-menu 走 context.custom 可能现在可做；link-click/note-bridge 待判）。
+- **U1-c2-defer**：`ai-sync ×2` + `keymap 兜底`（3 处）——不改标 TODO，归 step2。
+
+**⚠️ 多窗口 step2 待办清单**：40 命令批量注入 + c2-defer 3处 + U1-b shell 3点删。
 
 ## 验收判据
 
