@@ -19,12 +19,7 @@ Gemma 从中剥离，成为可视化端**之下/之旁**的独立层。这条重
 flowchart TB
     User([用户])
 
-    subgraph DataLayer["数据 / 智能层 · 跨所有可视化端 · 单一真源 · 本机 or 云"]
-        direction LR
-        DM["<b>数据管理层</b><br/>缓存 / 一致性检查<br/>★必须构建 · 架构底座 · 不可替换"]
-        Gemma["智能插件 Gemma<br/>可选 · 可替换 · 可无<br/>(本地 / 大模型 API)"]
-        Gemma -.调用.-> DM
-    end
+    Gemma["<b>智能插件 Gemma</b> · 可插拔<br/>可选 · 可替换 · 可无 (本地 / 大模型 API)<br/>指挥/控制可视化端 · 不碰数据层"]
 
     subgraph VizLocal["本机可视化端 · 同一台 PC 多窗口 · 连本机 (IPC)"]
         direction LR
@@ -38,31 +33,46 @@ flowchart TB
         R1["手机 / 其他终端<br/>L0~L5"]
     end
 
+    subgraph DataLayer["数据管理层 · 缓存 / 一致性检查 · ★必须构建 · 架构底座 · 不可替换"]
+        DM["跨所有可视化端 · 单一真源 · 本机 or 云"]
+    end
+
     DB[("数据持久化层 · DB")]
 
     User --> VizLocal
     User --> VizRemote
+    Gemma -. 指挥/控制 .-> VizLocal
+    Gemma -. 指挥/控制 .-> VizRemote
     VizLocal -- IPC --> DataLayer
     VizRemote -- 网络 --> DataLayer
     DataLayer --> DB
 
-    classDef must fill:#1b5e7a,stroke:#0d2f3f,color:#fff,stroke-width:2px;
     classDef plugin fill:#1b5e7a,stroke:#0d2f3f,color:#fff,stroke-width:1px,stroke-dasharray:5 4;
     classDef viz fill:#1b5e7a,stroke:#0d2f3f,color:#fff;
-    class DM must;
+    classDef must fill:#1b5e7a,stroke:#0d2f3f,color:#fff,stroke-width:2px;
     class Gemma plugin;
     class W1,W2,W3,R1 viz;
+    class DM must;
 ```
 
-**根本分界线（切割的那条线）**：**「单端可视化(L0~L5)」 vs 「跨端数据/智能」**。
+**根本分界线（切割的那条线）**：**「单端可视化(L0~L5)」 vs 「跨端数据管理层」**
+（智能插件 Gemma 不在数据侧，它站在可视化端之上指挥可视化端——见下「依赖流」）。
 - **「端」= 本机窗口 or 远程终端，一视同仁**（用户补充）。分界线对多窗口/多终端是**同一条**；
   只是可视化端↔数据层的连接方式变（IPC ↔ 网络），分层不变。
 - 这是「多窗口 = 多终端 B/S 本机预演」（[[multi-window-process-isolation]] 终局愿景）的**结构化**。
 - **可视化端剥离得足够干净（只依赖注入的数据、不抓全局）→ 跑本机窗口还是手机，代码一样** =
   「模块可独立部署」的终极兑现。
 
-**层中有层**：顶层四大层（用户 / 可视化端 / [数据管理层 + 智能插件] / DB）；「可视化端」内部再分
+**层中有层**：顶层（用户 / 智能插件 Gemma / 可视化端 / 数据管理层 / DB）；「可视化端」内部再分
 L0~L5（视图→能力→语义）。勿混淆两级。
+
+**★依赖流（用户校正 2026-07-21，图已改）**：`Gemma → 可视化端 → 数据管理层 → DB`。
+- **Gemma 只指挥/控制可视化端（window），与数据管理层零连接、不碰数据**。= 落实
+  [[multi-window-process-isolation]] §零铁律「Gemma 只指挥 window、不直写 DB；window 是唯一
+  执行者兼唯一写入者」。
+- 意义：① 所有数据变更唯一入口=window → 可追溯（[[reliability-charter]] 留痕/对账）；
+  ② Gemma 不依赖数据层 → 保住「可插拔」（连了数据层就成数据层依赖方，与可选定位冲突）；
+  ③ Gemma = **一个自动化的可视化端操作者**，与「手机终端也是可视化端」同构（B/S）。
 
 **★关键原则：数据管理层 ≠ 智能插件（用户校正，非并列兄弟）**
 | | 数据管理层（缓存/一致性） | 智能插件 Gemma |
