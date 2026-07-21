@@ -19,6 +19,7 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
@@ -99,9 +100,8 @@ function getHandlePos(): { instanceId: string; pos: number } | null {
 export function registerNoteCommands(): void {
   // ── 笔记 CRUD(4) ──
 
-  commandRegistry.register('note-view.create-note', (folderId: unknown) => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.create-note', () => workspaceManager.getActiveId(), (ctx, folderId) => {
+    const wsId = ctx.wsId;
     const fid = typeof folderId === 'string' ? folderId : null;
     // L7-sub2:createNote 是 async,handler 是 sync,用 IIFE 包装拿 id 走后续选中
     void (async () => {
