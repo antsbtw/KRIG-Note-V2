@@ -412,10 +412,62 @@ counter）。多窗口下**互相覆盖**——因为 **localStorage 按 origin 
 - **兜底靠 git 分支**：main 上旧 tab 架构随时可回退 → 设计分支里可大胆深解，中间跑不起来不要紧，
   成了验证过再整体合并。**不需要「旧架构解耦期还活着」的双模式复杂性。**
 - **步骤（用户「先解耦后建框架」定序）**：
-  0. 定「净化后 L2/L3 目标形态」（每窗 Shell / 无 activeId / 单 ws 渲染的契约）
-  1. **解耦 L2/L3**（拔单窗假设，深解）
+  0. 定「净化后 L2/L3 目标形态」（每窗 Shell / 无 activeId / 单 ws 渲染的契约）→ 见 §12.0
+  1. **解耦 L2/L3**（拔单窗假设，深解）→ 详细设计见 §12.1.1
   2. 建新多窗口框架（L0~L1'，接口照净化后的 L2/L3）
   3. 迁 L4/L5 入新框架，旧架构退场
+
+### 12.1.1 步骤 1 详细设计 —— 解耦 L2/L3 = 依赖注入（用户拍板「彻底规范化」）
+
+> **用户核心目标校正**：不是「改动量少」，是**干净隔离 + 规范化模块间调用 → 模块可独立部署**。
+> 故 `getActiveId()`「换实现不换名」被否决（留语义谎言、未真切耦合）。正解 = **依赖注入**：
+> 模块不再「伸手抓全局 `workspaceManager`」，而是**被动接收**其 ws 上下文。
+
+**病根（爆炸半径实测）**：`workspaceManager.getActiveId()` 被 **60+ 处调用**、散在 **~35 个 L5 文件**
+（note-commands 18、ebook context-menu 15、ai/x/thought/web 等）。它们不是为「切 tab」，是问
+「**我这命令该作用在哪个 ws**」。病根 = 模块**反向依赖全局单例** → **无法独立部署/测试**。
+
+**正解 = 上下文注入**（对照）：
+```
+❌ 现在：const wsId = workspaceManager.getActiveId()   // 伸手抓全局单例
+✅ 规范：const wsId = ctx.wsId                          // ws 由外层注入,模块不知 workspaceManager 存在
+```
+→ 模块喂一个假 ctx 就能单测 = 独立部署成立；且契合 B/S 终局（终端注入自己的 ws 上下文，模块代码不改）。
+
+**注入链：源头唯一，两路分发**（爆炸半径证调用点分三种执行环境）：
+```
+窗口根部（房客）：唯一 ws 上下文源「我是 ws-X」
+  ├─→ React 树：<WorkspaceContext.Provider value=ws-X>
+  │      └→ 组件 useWsId() 取           ← 环境 A（React 组件，如 nav-side-content）
+  │                                        环境 C 组件部分（如 LinkPanel）
+  └─→ command-registry：调 handler 时绑 ws-X
+         └→ handler(ctx{wsId})           ← 环境 B（命令纯函数，如 note-commands，无 hook）
+                                            环境 C 函数部分（如 resolveInstanceId）
+```
+
+**三种环境的改法**：
+| 环境 | 现状 | 改成 |
+|------|------|------|
+| A. React 组件 | `useActiveWorkspaceId()` | `useWsId()`（取 WorkspaceContext） |
+| B. command handler（纯函数） | `workspaceManager.getActiveId()` | `handler(ctx)`，读 `ctx.wsId` |
+| C. capability API / 弹层 | 混合 | 组件取 Context / 工具函数收参 |
+
+**command 接口宽改（用户拍板）**：**所有** command handler 统一签名 `handler(ctx)`（ctx 携 wsId 及将来
+其他上下文），非「只给需要的传」。→ 彻底一致，代价 = 动 **L4 command-registry 调用约定 + 所有命令注册**。
+step 1 范围因此从「L3 activeId」正式扩到「L4 command 接口统一」。
+
+**动作清单（按爆炸半径，分步可验证，每步过 §12.3 关模块隔离测试）**：
+| # | 动作 | 拔/改 | 牵动 |
+|---|------|-------|------|
+| 1a | 建 ws 上下文源 + 两路分发 | 窗口根 Provider + command ctx 注入 | 新增注入链 |
+| 1b | 环境 A 组件改 `useWsId()` | `useActiveWorkspaceId`→`useWsId` | ~11 组件 |
+| 1c | 环境 B command 宽改 `handler(ctx)` | L4 registry 调用约定 + 60+ 调用 | ~35 文件 + L4 |
+| 1d | 删 Shell tab UI | WorkspaceBar 及子件 | ~4 文件删；楼长 API 走 IPC |
+| 1e | `WorkspaceContainer.map`→单 ws | 删 `.map`/`isActive`/`display:none` | WorkspaceInstance |
+| 1f | fullscreenOverlay 去全局 | app-scoped→window-scoped「隐藏我这窗」 | index.tsx |
+| 1g | 楼长 API 上移主进程 | create/close/remove/open/rename/persistence→IPC | ~8 调用点 |
+
+**完整性判据**：全仓 `grep workspaceManager.getActiveId` **必须归零**（残留=解耦不完整，编译/grep 当场现形）。
 
 ### 12.2 头号风险 = 解耦不完整 → 长期技术债（用户点出）
 
