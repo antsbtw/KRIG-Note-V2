@@ -31,8 +31,8 @@
 - `problems.md` — 第 1 步产出：完整问题清单（U1~U5，按可独立优化单元）✅
 - `plan.md` — 第 2 步产出：总体优化规划（目标态/抽象点/规范化点/顺序/验收）✅
 - `units/` — 第 3 步产出：每个优化单元的细化文档 + 执行 prompt 🔶 进行中
-  - `U1-a-ws-context-injection.md` + `.prompt.md` — ws 上下文注入链（地基）✅ prompt 就绪，待执行
-  - U1-b（10 组件改注入）、U1-c（command 统一 ctx + 38 纯函数）— ⏳ 待 U1-a 完成后出
+  - `U1-a-ws-context-injection.md` + `.prompt.md` — ws 上下文注入链（地基）✅ **已交付验收**（commit 0741b78d）
+  - U1-b（10 组件改注入）、U1-c（command 统一 ctx + 38 纯函数）— 🔶 下一步出 prompt
   - U4/U5（独立小单元）、U2 收尾、U3 二次评估 — ⏳
 
 ## 关联（现有素材，将被本专项吸收/取代）
