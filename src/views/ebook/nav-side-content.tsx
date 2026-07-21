@@ -22,10 +22,8 @@ import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tr
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { FolderTree, type ItemNode, type TreeNode, type FolderNode, type KeyAction } from '@slot/shared-ui/FolderTree';
-import {
-  useActiveWorkspaceId,
-  useWorkspace,
-} from '@workspace/workspace-instance/use-workspace';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
+import { useWorkspace } from '@workspace/workspace-instance/use-workspace';
 import type {
   EBookLibraryApi,
   EBookInfo,
@@ -75,7 +73,7 @@ function relativeTime(ts: number): string {
 }
 
 function BookshelfPanel() {
-  const wsId = useActiveWorkspaceId();
+  const wsId = useWsId();
   const ws = useWorkspace(wsId);
 
   const library = useMemo(

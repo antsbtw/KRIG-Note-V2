@@ -18,7 +18,8 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { useAllWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
+import { useAllWorkspaces } from '@workspace/workspace-instance/use-workspace';
 import { ContextMenuPopover, type ContextMenuItem } from '@slot/shared-ui/ContextMenuPopover';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tree-context-menu-registry';
@@ -171,7 +172,7 @@ function CollapsibleSection({
  */
 function WorkspaceSection() {
   const workspaces = useAllWorkspaces();
-  const activeId = useActiveWorkspaceId();
+  const activeId = useWsId();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);

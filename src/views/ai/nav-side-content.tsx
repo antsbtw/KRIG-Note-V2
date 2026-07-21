@@ -12,7 +12,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { AI_SERVICE_PROFILES } from '@shared/types/ai-service-types';
 import { getXServiceProfile, DEFAULT_X_SERVICE } from '@shared/types/x-service-types';
@@ -32,7 +32,7 @@ const LAUNCHERS: Array<{ id: LauncherId; name: string; icon: string }> = [
 ];
 
 function AILauncherPanel(): React.ReactElement {
-  const wsId = useActiveWorkspaceId();
+  const wsId = useWsId();
 
   // 订阅 activeLauncher(高亮当前入口)
   const activeLauncher = useSyncExternalStore(

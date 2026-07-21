@@ -28,10 +28,8 @@ import {
   type FolderNode,
   type KeyAction,
 } from '@slot/shared-ui/FolderTree';
-import {
-  useActiveWorkspaceId,
-  useWorkspace,
-} from '@workspace/workspace-instance/use-workspace';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
+import { useWorkspace } from '@workspace/workspace-instance/use-workspace';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasListItem,
@@ -66,7 +64,7 @@ function relativeTime(ts: number): string {
 }
 
 function CanvasListPanel() {
-  const wsId = useActiveWorkspaceId();
+  const wsId = useWsId();
   const ws = useWorkspace(wsId);
 
   const library = useMemo(

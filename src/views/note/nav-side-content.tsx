@@ -9,10 +9,8 @@ import { useState, useEffect, useSyncExternalStore } from 'react';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { FolderTree, type ItemNode, type TreeNode, type KeyAction } from '@slot/shared-ui/FolderTree';
-import {
-  useActiveWorkspaceId,
-  useWorkspace,
-} from '@workspace/workspace-instance/use-workspace';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
+import { useWorkspace } from '@workspace/workspace-instance/use-workspace';
 import type { NoteInfo as Note } from '@capabilities/note/types';
 import { useAllNotes, useAllFolders } from './use-notes-folders';
 import {
@@ -29,7 +27,7 @@ import { handleDrop } from './tree-operations';
 import { setRenameTrigger } from './context-menu-registrations';
 
 function FolderTreePanel() {
-  const wsId = useActiveWorkspaceId();
+  const wsId = useWsId();
   const ws = useWorkspace(wsId);
 
   // 订阅 noteCapability / folderCapability(IPC 广播)
