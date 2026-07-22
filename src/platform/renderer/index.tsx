@@ -170,7 +170,7 @@ if (rootEl) {
   reportL4Alive();
   reportL5Alive();
   // W4.1:启动全局 keymap 路由(view 通过 ViewDefinition.keymap 字段声明绑定)
-  startKeymapListener();
+  startKeymapListener(workspaceManager.get.bind(workspaceManager));
   if (import.meta.env.DEV) {
     reportInstallCoverage();
   }

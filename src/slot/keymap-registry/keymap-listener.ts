@@ -12,10 +12,10 @@
  */
 
 import { commandRegistry } from '../command-registry/command-registry';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { keymapRegistry, normalizeKey } from './keymap-registry';
 import type { KeymapBinding, KeymapCondition } from './keymap-types';
+import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
 
 /** keydown event → 'mod+k' / 'mod+shift+k' / 'mod+[' 等 */
 function eventToKey(e: KeyboardEvent): string | null {
@@ -40,11 +40,14 @@ function findTargetViewId(target: EventTarget | null): string | null {
   return el?.dataset.viewId ?? null;
 }
 
+type GetWs = (id: string) => WorkspaceState | null | undefined;
+let _getWs: GetWs = () => null;
+
 /** 退化路径:活跃 ws 的 slotBinding.left(charter:主 view 在 left)*/
 function fallbackActiveViewId(): string | null {
   const wsId = getActiveWorkspaceIdSync();
   if (!wsId) return null;
-  const ws = workspaceManager.get(wsId);
+  const ws = _getWs(wsId);
   return ws?.slotBinding.left ?? null;
 }
 
@@ -103,8 +106,10 @@ let started = false;
 /**
  * 启动全局 keymap 监听。idempotent — 重复调用不会装多个 listener。
  * 返回 dispose 函数(测试 / HMR 用,生产路径不需要 dispose)。
+ * getWs — 注入的 ws 查询函数(通常 workspaceManager.get.bind(workspaceManager))。
  */
-export function startKeymapListener(): () => void {
+export function startKeymapListener(getWs: GetWs): () => void {
+  _getWs = getWs;
   if (started) return () => {};
   started = true;
   window.addEventListener('keydown', handler);
