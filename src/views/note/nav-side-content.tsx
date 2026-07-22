@@ -22,7 +22,8 @@ import {
   renameFolder,
   renameNote,
 } from './data-model';
-import { buildTreeNodes, decodeTreeId, relativeTime } from './tree-builder';
+import { buildTreeNodes, decodeTreeId } from './tree-builder';
+import { relativeTime } from '@shared/date-utils';
 import { handleDrop } from './tree-operations';
 import { setRenameTrigger } from './context-menu-registrations';
 

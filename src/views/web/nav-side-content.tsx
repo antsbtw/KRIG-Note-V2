@@ -49,26 +49,7 @@ import {
   setNoticeTrigger,
   setSectionOpenTrigger,
 } from './web-bookmark-commands';
-
-/**
- * 相对时间标签(历史项 lastVisit 显示用)。
- *
- * 本地实现 — 不跨 view import note/tree-builder(eslint no-restricted-imports:
- * view 间不直接 import)。逻辑与之等价,体量小,自包含即可。
- */
-function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes}分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return days === 1 ? '昨天' : `${days}天前`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}周前`;
-  return new Date(ts).toLocaleDateString();
-}
+import { relativeTime } from '@shared/date-utils';
 
 /** 历史项 title 兜底:无 title 用 url 的 hostname,再失败用原始 url。 */
 function displayTitle(entry: WebHistoryEntry): string {
