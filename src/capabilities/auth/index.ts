@@ -12,7 +12,6 @@
  * 实现位置:src/platform/main/auth/(auth-service + auth-handler)。
  */
 
-import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import type {
   AuthState,
   AuthSendCodeInput,
@@ -20,10 +19,7 @@ import type {
   AuthLoginInput,
   AuthActionResult,
 } from '@shared/auth/auth-types';
-import type { AuthApi } from './types';
-import { AuthStatusBadge } from './AuthStatusBadge';
 
-export type { AuthApi } from './types';
 export type {
   AuthState,
   AuthStatus,
@@ -123,8 +119,3 @@ class AuthStore {
 
 /** 模块级单例 store(全 renderer 共享一份快照 + 一个订阅)*/
 export const authStore = new AuthStore();
-
-// 注册 auth capability:暴露 UI 组件给 shell/view 经 requireCapabilityApi<AuthApi>('auth') 取
-// (shell/view 不直 import capability 运行时值,eslint W5 §5 硬约束;对齐 web-rendering.Host 范式)。
-const authApi: AuthApi = { StatusBadge: AuthStatusBadge };
-capabilityRegistry.register({ id: 'auth', api: authApi });
