@@ -29,7 +29,10 @@ function AccountButton() {
       <button
         type="button"
         className={`krig-activity-bar__account${isAuthenticated ? ' krig-activity-bar__account--authed' : ''}`}
-        onMouseDown={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          setMenuOpen((v) => !v);
+        }}
         title={account?.email ?? '未登录'}
         aria-label="账号"
       >
