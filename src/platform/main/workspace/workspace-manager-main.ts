@@ -47,7 +47,8 @@ async function persistState(state: WorkspaceManagerState): Promise<void> {
       {
         rid: WS_RECORD_ID,
         workspaces: state.workspaces,
-        activeId: state.activeId,
+        // SurrealDB option<string> 需要 undefined（NONE），不接受 null
+        activeId: state.activeId ?? undefined,
         counter: state.counter,
       },
     );
@@ -86,7 +87,7 @@ export async function initWorkspaceManager(): Promise<void> {
     saved.workspaces.forEach((ws) =>
       workspaces.set(ws.id, { ...ws, isOpen: ws.isOpen ?? true }),
     );
-    activeId = saved.activeId;
+    activeId = saved.activeId ?? null;
     counter = saved.counter;
   }
   ensureMinimum();

@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { onWorkspaceStateChanged, ipcWorkspaceGetState } from '../ipc/workspace-ipc';
 import type { WorkspaceState, WorkspaceManagerState } from '../workspace-state/workspace-state';
+import { workspaceManager } from '../workspace-state/workspace-manager';
 
 // ── 模块级快照 ──────────────────────────────────────────────────
 
@@ -27,14 +28,23 @@ let initialized = false;
 function ensureInit(): void {
   if (initialized) return;
   initialized = true;
-  // 拉一次全量状态作为初始值
-  void ipcWorkspaceGetState().then((state) => {
+  const applyState = (state: WorkspaceManagerState): void => {
     snapshot = state;
+    // 同步填充 renderer 本地 workspaceManager（房客 API get/update 依赖此 Map）
+    state.workspaces.forEach((ws) => workspaceManager.restore(ws));
     notifyListeners();
-  });
-  // 订阅广播
-  onWorkspaceStateChanged((state) => {
-    snapshot = state;
+  };
+
+  // 拉一次全量状态作为初始值
+  void ipcWorkspaceGetState().then(applyState);
+  // 订阅主进程广播（ws 创建/删除/切换等楼长操作）
+  onWorkspaceStateChanged(applyState);
+  // 订阅本地 workspaceManager 变化（pluginStates/slotBinding 等房客操作）
+  workspaceManager.subscribe(() => {
+    snapshot = {
+      ...snapshot,
+      workspaces: workspaceManager.getAll(),
+    };
     notifyListeners();
   });
 }
@@ -78,4 +88,10 @@ export function useOpenWorkspaces(): WorkspaceState[] {
 export function useActiveWorkspaceId(): string | null {
   ensureInit();
   return useSyncExternalStore(subscribe, () => snapshot.activeId);
+}
+
+/** 同步读活跃 ws ID（供命令 getWsId getter 用，非 hook）*/
+export function getActiveWorkspaceIdSync(): string | null {
+  ensureInit();
+  return snapshot.activeId;
 }

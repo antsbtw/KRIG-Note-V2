@@ -5,7 +5,7 @@
  * 幂等: DEFINE TABLE/FIELD/INDEX 在 SurrealDB 是 idempotent (重复定义不报错)。
  */
 import type { Surreal } from 'surrealdb';
-import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0 } from '../surreal/schema';
+import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1 } from '../surreal/schema';
 
 interface Migration {
   version: string;
@@ -53,6 +53,11 @@ const MIGRATIONS: Migration[] = [
     version: '1.7.0',
     description: 'Add workspace table (S3-b landlord persistence in SurrealDB)',
     up: migration_1_7_0,
+  },
+  {
+    version: '1.7.1',
+    description: 'Fix workspace table: SCHEMAFULL -> SCHEMALESS (WorkspaceState subfields)',
+    up: migration_1_7_1,
   },
 ];
 

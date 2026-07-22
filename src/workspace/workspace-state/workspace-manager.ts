@@ -14,6 +14,7 @@
 
 import type { WorkspaceState, WorkspaceManagerState } from './workspace-state';
 import { createDefaultWorkspaceState, DIVIDER_RATIO_MIN, DIVIDER_RATIO_MAX } from './default-state';
+import { getActiveWorkspaceIdSync } from '../workspace-instance/use-workspace';
 import type { PersistenceAPI } from '../persistence/persistence-api';
 import type { SlotUpdateSource } from '@slot/workspace-bus/bus-types';
 import { WorkspaceBus } from '@slot/workspace-bus/workspace-bus';
@@ -89,9 +90,9 @@ export class WorkspaceManager {
     return this.workspaces.get(this.activeId);
   }
 
-  /** 获取活跃 Workspace ID */
+  /** 获取活跃 Workspace ID（读 IPC 快照，S3-a 后本地 activeId 不再更新）*/
   getActiveId(): string | null {
-    return this.activeId;
+    return getActiveWorkspaceIdSync();
   }
 
   /** 获取指定 Workspace */

@@ -403,11 +403,14 @@ export async function migration_1_2_0(_db: Surreal): Promise<void> {
  * - 整体原子替换比逐行 upsert 简单，避免孤儿行
  * - 和 JSON 文件语义一比一对齐
  */
+// workspace 是运行态快照，SCHEMALESS 避免 WorkspaceState 子字段逐一声明
 const SCHEMA_VERSION_1_7_0 = `
-DEFINE TABLE IF NOT EXISTS workspace SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS workspaces ON workspace TYPE array;
-DEFINE FIELD IF NOT EXISTS activeId ON workspace TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS counter ON workspace TYPE int;
+DEFINE TABLE IF NOT EXISTS workspace SCHEMALESS;
+`;
+
+// 修复 1.7.0 建错了 SCHEMAFULL：用 OVERWRITE 改成 SCHEMALESS
+const SCHEMA_VERSION_1_7_1 = `
+DEFINE TABLE OVERWRITE workspace SCHEMALESS;
 `;
 
 export async function migration_1_7_0(db: Surreal): Promise<void> {
@@ -420,5 +423,18 @@ export async function migration_1_7_0(db: Surreal): Promise<void> {
       appliedAt = $now,
       description = 'Add workspace table (S3-b landlord persistence in SurrealDB)'`,
     { rid: new RecordId('schema_version', '1.7.0'), now },
+  );
+}
+
+export async function migration_1_7_1(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_7_1);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.7.1',
+      appliedAt = $now,
+      description = 'Fix workspace table: SCHEMAFULL -> SCHEMALESS (WorkspaceState subfields)'`,
+    { rid: new RecordId('schema_version', '1.7.1'), now },
   );
 }

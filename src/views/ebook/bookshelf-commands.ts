@@ -49,15 +49,18 @@ export function registerEBookCommands(): void {
     }
   });
 
-  // 打开书(单击书项)— 失败由 view 端 toast 处理
-  registerWsCommand('ebook-view.open-book', () => workspaceManager.getActiveId(), async (ctx, bookId: unknown) => {
+  // 打开书(单击书项)
+  // 只写 activeBookId + 确保 slot，不在命令层调 library.open。
+  // EBookView 的 useEffect 监测 activeBookId 变化后自己 open，那时 Host 已挂载。
+  registerWsCommand('ebook-view.open-book', () => workspaceManager.getActiveId(), (ctx, bookId: unknown) => {
     if (typeof bookId !== 'string' || !bookId) return;
-    const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-    const result = await library.open(bookId);
-    if (result.success) {
-      setActiveBookId(ctx.wsId, bookId);
-    } else {
-      pendingOpenFailedTrigger?.(bookId, result.error ?? 'unknown');
+    setActiveBookId(ctx.wsId, bookId);
+    // 确保 ebook-view 挂载到 slot（slotBinding 为空时切到 left）
+    const ws = workspaceManager.get(ctx.wsId);
+    if (ws && ws.slotBinding.left !== 'ebook-view' && ws.slotBinding.right !== 'ebook-view') {
+      workspaceManager.update(ctx.wsId, {
+        slotBinding: { ...ws.slotBinding, left: 'ebook-view' },
+      });
     }
   });
 

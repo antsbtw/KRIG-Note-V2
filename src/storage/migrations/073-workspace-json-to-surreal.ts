@@ -41,7 +41,8 @@ export async function runMigration073IfNeeded(): Promise<void> {
     {
       rid: WS_RECORD_ID,
       workspaces: state.workspaces,
-      activeId: state.activeId,
+      // SurrealDB option<string> 需要 undefined（NONE），不接受 null
+      activeId: state.activeId ?? undefined,
       counter: state.counter,
     },
   );
