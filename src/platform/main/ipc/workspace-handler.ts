@@ -17,8 +17,8 @@ import {
 } from '../workspace/workspace-manager-main';
 
 export function registerWorkspaceHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.WORKSPACE_CREATE, (_event, label?: string) => {
-    return wsCreate(label);
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_CREATE, (_event, _label?: string) => {
+    return wsCreate();
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_CLOSE, (_event, id: string) => {

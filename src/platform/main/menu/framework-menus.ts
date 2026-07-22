@@ -11,8 +11,7 @@
 import { app, BrowserWindow } from 'electron';
 import { menuRegistry } from '@slot/menu-registry/menu-registry';
 import { importChromeBookmarks } from '../bookmark/chrome-import';
-import { wsCreate, wsCreateWithProfile } from '../workspace/workspace-manager-main';
-import { WORKSPACE_PROFILES } from '../workspace/workspace-profiles';
+import { wsCreate, getActiveWorkspace } from '../workspace/workspace-manager-main';
 import { createWindow } from '../window/main-window';
 
 /** 注册框架级 Application Menu */
@@ -20,15 +19,14 @@ export function registerFrameworkMenus(): void {
   // 注册框架级命令
   menuRegistry.registerCommand('app.quit', () => app.quit());
   menuRegistry.registerCommand('window.new', () => {
-    const ws = wsCreate();
+    const active = getActiveWorkspace();
+    const ws = wsCreate(active?.slotBinding);
     void createWindow(ws.id);
   });
-  for (const profile of WORKSPACE_PROFILES) {
-    menuRegistry.registerCommand(`window.new-profile-${profile.id}`, () => {
-      const ws = wsCreateWithProfile(profile.id);
-      void createWindow(ws.id);
-    });
-  }
+  menuRegistry.registerCommand('window.settings', () => {
+    // TODO(settings): 打开 Settings 窗口，配置 Web Profile（proxy/partition/账号隔离）
+    console.log('[settings] placeholder — Settings window not yet implemented');
+  });
   menuRegistry.registerCommand('window.minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize();
   });
@@ -72,15 +70,7 @@ export function registerFrameworkMenus(): void {
     order: 1,
     items: [
       { id: 'new-window', label: 'New Window', command: 'window.new', accelerator: 'CmdOrCtrl+Shift+N' },
-      {
-        id: 'new-window-profile',
-        label: 'New Window with Profile',
-        submenu: WORKSPACE_PROFILES.map((p) => ({
-          id: `new-profile-${p.id}`,
-          label: p.label,
-          command: `window.new-profile-${p.id}`,
-        })),
-      },
+      { id: 'settings', label: 'Settings...', command: 'window.settings' },
       { id: 'sep-new', label: '', separator: true },
       { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
       { id: 'import-word', label: 'Import Word...', command: 'file.import-word' },
