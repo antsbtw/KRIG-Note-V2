@@ -279,6 +279,18 @@ export const IPC_CHANNELS = {
   AUTH_LOGOUT: 'auth.logout',                       // renderer → main:登出 + 清本地 token
   AUTH_REFRESH: 'auth.refresh',                     // renderer → main:刷 token(轮换;启动/恢复前台)
   AUTH_CHANGED: 'auth.changed',                     // main → renderer 广播:登录态变化(多 ws 扇出守卫)
+
+  // ── Workspace 楼长 IPC（S3-a，多窗口）──
+  // renderer → main（invoke，请求-响应）
+  WORKSPACE_CREATE:        'workspace.create',
+  WORKSPACE_CLOSE:         'workspace.close',
+  WORKSPACE_REMOVE:        'workspace.remove',
+  WORKSPACE_OPEN:          'workspace.open',
+  WORKSPACE_RENAME:        'workspace.rename',
+  WORKSPACE_SET_ACTIVE:    'workspace.set-active',
+  WORKSPACE_GET_STATE:     'workspace.get-state',
+  // main → renderer（on，广播）
+  WORKSPACE_STATE_CHANGED: 'workspace.state-changed',
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

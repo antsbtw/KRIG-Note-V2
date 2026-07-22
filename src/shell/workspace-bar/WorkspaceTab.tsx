@@ -3,10 +3,15 @@
  *
  * L3 阶段:接入 WorkspaceManager,点击切 active,× 关闭
  * 双击标签 → inline 重命名(与 NavSide 工作空间列表的重命名对称,同走 rename())
+ * S3-a:楼长 API 改走 IPC(setActive/close/rename → ipcWorkspace*)
  */
 
 import { useState } from 'react';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import {
+  ipcWorkspaceSetActive,
+  ipcWorkspaceClose,
+  ipcWorkspaceRename,
+} from '@workspace/ipc/workspace-ipc';
 
 interface WorkspaceTabProps {
   id: string;
@@ -19,12 +24,12 @@ export function WorkspaceTab({ id, label, active }: WorkspaceTabProps) {
   const [draft, setDraft] = useState(label);
 
   const handleClick = () => {
-    if (!editing) workspaceManager.setActive(id);
+    if (!editing) void ipcWorkspaceSetActive(id);
   };
 
   const handleClose = (e: React.MouseEvent) => {
     e.stopPropagation();
-    workspaceManager.close(id);
+    void ipcWorkspaceClose(id);
   };
 
   const startEdit = () => {
@@ -33,7 +38,7 @@ export function WorkspaceTab({ id, label, active }: WorkspaceTabProps) {
   };
   const commit = () => {
     const name = draft.trim();
-    if (name) workspaceManager.rename(id, name);
+    if (name) void ipcWorkspaceRename(id, name);
     setEditing(false);
   };
 

@@ -680,6 +680,17 @@ declare global {
       onProgressUpdate(callback: (payload: ProgressUpdatePayload) => void): () => void;
       /** 任务完成(success/error);返 unsubscribe */
       onProgressDone(callback: (payload: ProgressDonePayload) => void): () => void;
+
+      // ── Workspace 楼长 IPC（S3-a）──
+      workspaceCreate(label?: string): Promise<unknown>;
+      workspaceClose(id: string): Promise<void>;
+      workspaceRemove(id: string): Promise<void>;
+      workspaceOpen(id: string): Promise<void>;
+      workspaceRename(id: string, label: string): Promise<void>;
+      workspaceSetActive(id: string): Promise<void>;
+      workspaceGetState(): Promise<unknown>;
+      /** main → renderer 广播：ws 状态变化；返 unsubscribe */
+      onWorkspaceStateChanged(callback: (state: unknown) => void): () => void;
     };
   }
 }

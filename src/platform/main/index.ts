@@ -37,6 +37,7 @@ process.stdout.on('error', ignoreEpipe);
 process.stderr.on('error', ignoreEpipe);
 import { createMainWindow } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
+import { initWorkspaceManager } from './workspace/workspace-manager-main';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
@@ -108,6 +109,9 @@ app.commandLine.appendSwitch('disable-features', 'FedCm');
 app.whenReady().then(async () => {
   // L0 — 平台层就绪
   reportL0Alive();
+
+  // S3-a — 主进程楼长（必须在 createMainWindow 之前，renderer 加载即可 invoke WORKSPACE_GET_STATE）
+  initWorkspaceManager();
 
   // L0 — IPC 总线(含健康检查 handlers)
   initIpcBus();

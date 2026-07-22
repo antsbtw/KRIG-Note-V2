@@ -16,7 +16,6 @@ import { AuthGate } from '@capabilities/auth/AuthGate';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { reportL2Alive } from '@shell/diagnostics/L2-alive';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { localStoragePersistence } from '@workspace/persistence/local-storage';
 import { reportL3Alive } from '@workspace/diagnostics/L3-alive';
 import { reportL3_5Alive } from '@slot/workspace-bus/L3.5-alive';
 import { reportL4Alive } from '@slot/diagnostics/L4-alive';
@@ -66,10 +65,8 @@ import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
 import './app.css';
 
-// L3 启动:配置持久化 + 加载已存的 Workspaces + 确保至少一个
-workspaceManager.setPersistence(localStoragePersistence);
-workspaceManager.loadFromPersistence();
-workspaceManager.ensureMinimum();
+// S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。
+// 此处仍保留 getBus 初始化供 L3.5 alive 计数。
 
 // L3.5 启动:为活跃 Workspace 创建 bus(lazy 创建,首个 getBus 调用触发)
 // 这里主动调一次,让 alive 计数 >= 1

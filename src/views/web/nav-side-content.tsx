@@ -20,6 +20,12 @@ import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } fro
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { useAllWorkspaces } from '@workspace/workspace-instance/use-workspace';
+import {
+  ipcWorkspaceOpen,
+  ipcWorkspaceSetActive,
+  ipcWorkspaceRename,
+  ipcWorkspaceRemove,
+} from '@workspace/ipc/workspace-ipc';
 import { ContextMenuPopover, type ContextMenuItem } from '@slot/shared-ui/ContextMenuPopover';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tree-context-menu-registry';
@@ -159,8 +165,8 @@ function WorkspaceSection() {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const openWorkspace = (id: string) => {
-    workspaceManager.open(id); // 若已收起,重新打开到顶部 bar
-    workspaceManager.setActive(id);
+    void ipcWorkspaceOpen(id); // 若已收起,重新打开到顶部 bar
+    void ipcWorkspaceSetActive(id);
     // 强制进 web view(铁律 9:切主 view 关 right slot)
     workspaceManager.update(
       id,
@@ -183,7 +189,7 @@ function WorkspaceSection() {
   const commitRename = () => {
     if (editingId) {
       const name = draft.trim();
-      if (name) workspaceManager.rename(editingId, name);
+      if (name) void ipcWorkspaceRename(editingId, name);
     }
     setEditingId(null);
   };
@@ -210,7 +216,7 @@ function WorkspaceSection() {
           id: 'ws-delete',
           label: '删除',
           icon: '🗑',
-          onClick: () => workspaceManager.remove(menu.id),
+          onClick: () => void ipcWorkspaceRemove(menu.id),
         },
       ]
     : [];

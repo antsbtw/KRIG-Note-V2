@@ -852,6 +852,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xDragReplyHere(serviceId: string, targetWcId: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_REPLY_HERE, { serviceId, targetWcId });
   },
+  // ── Workspace 楼长 IPC（S3-a）──
+  workspaceCreate(label?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, label);
+  },
+  workspaceClose(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CLOSE, id);
+  },
+  workspaceRemove(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_REMOVE, id);
+  },
+  workspaceOpen(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_OPEN, id);
+  },
+  workspaceRename(id: string, label: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_RENAME, id, label);
+  },
+  workspaceSetActive(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SET_ACTIVE, id);
+  },
+  workspaceGetState(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_STATE);
+  },
+  /** main → renderer 广播：ws 状态变化（create/close/remove/open/rename/setActive 后）*/
+  onWorkspaceStateChanged(callback: (state: unknown) => void): () => void {
+    const handler = (_event: unknown, state: unknown): void => callback(state);
+    ipcRenderer.on(IPC_CHANNELS.WORKSPACE_STATE_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WORKSPACE_STATE_CHANGED, handler);
+  },
+
   // ── 账号登录 + 归因(本期不做授权) ──
   // renderer 永远只拿 public AuthState(不含 token);邮箱注册两步(先 authSendCode 拿码)。
   /** 取当前 public 授权态(不含 token) */
