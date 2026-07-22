@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { NoteInfo as Note } from '@capabilities/note/types';
@@ -77,7 +77,7 @@ function extractHeadings(docJson: unknown): HeadingItem[] {
 }
 
 export function LinkPanel({ onClose }: PopupCloseProps) {
-  const wsId = workspaceManager.getActiveId();
+  const wsId = useWsId();
   const currentHref = useMemo(
     () => (wsId ? requireCapabilityApi<TextEditingApi>('text-editing').api.getActiveLinkHref(wsId) : null),
     [wsId],

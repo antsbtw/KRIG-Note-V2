@@ -19,7 +19,7 @@
 import type { HandleSubmenuContext } from '@slot/interaction-registries/handle-registry/handle-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 
 interface Props {
   ctx: HandleSubmenuContext;
@@ -33,7 +33,7 @@ const ALIGN_LABELS: Array<['left' | 'center' | 'right', string]> = [
 ];
 
 export function HandleFormatSubmenu({ ctx }: Props) {
-  const instanceId = workspaceManager.getActiveId();
+  const instanceId = useWsId();
   const api = requireCapabilityApi<TextEditingApi>('text-editing').api;
   const format = instanceId ? api.getBlockFormat(instanceId, ctx.blockPos) : null;
 

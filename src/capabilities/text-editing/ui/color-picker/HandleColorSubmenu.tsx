@@ -16,7 +16,7 @@
 import type { HandleSubmenuContext } from '@slot/interaction-registries/handle-registry/handle-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { ColorSwatchGrid, TEXT_COLORS, BG_COLORS } from './ColorSwatchGrid';
 
 interface HandleColorSubmenuProps {
@@ -24,7 +24,7 @@ interface HandleColorSubmenuProps {
 }
 
 export function HandleColorSubmenu({ ctx }: HandleColorSubmenuProps) {
-  const instanceId = workspaceManager.getActiveId();
+  const instanceId = useWsId();
   const api = requireCapabilityApi<TextEditingApi>('text-editing').api;
   const currentText = instanceId ? api.getBlockTextColor(instanceId, ctx.blockPos) : null;
   const currentBg = instanceId ? api.getBlockBgColor(instanceId, ctx.blockPos) : null;
