@@ -609,6 +609,9 @@ export function EBookView({ workspaceId }: EBookViewProps) {
           epubSelectionText: info.text,
           epubSelectionCfi: info.cfi,
           epubAnnotationCfi: info.annotationCfi,
+          // 注入 wsId + activeBookId,让命令内不再直接调 workspaceManager.getActiveId()
+          wsId: workspaceId,
+          activeBookId,
         },
       });
     },

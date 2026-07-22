@@ -18,25 +18,14 @@ import type {
   ThoughtCapabilityApi,
   BookLocator,
 } from '@capabilities/thought/types';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import {
   THOUGHT_TYPE_META,
   USER_THOUGHT_TYPES,
   type ThoughtType,
 } from '@shared/ipc/thought-types';
-import { getEBookWsState } from './data-model';
 
 interface Props {
   ctx: ContextSubmenuContext;
-}
-
-function getActiveBookId(): string | null {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return null;
-  const ws = workspaceManager.get(wsId);
-  if (!ws) return null;
-  const state = getEBookWsState(ws);
-  return state?.activeBookId ?? null;
 }
 
 export function AnnotationTypeSubmenu({ ctx }: Props) {
@@ -45,7 +34,8 @@ export function AnnotationTypeSubmenu({ ctx }: Props) {
 
   const apply = (type: ThoughtType): void => {
     if (!annotationId) return;
-    const bookId = getActiveBookId();
+    const rawBookId = ctx.contextInfo.custom.activeBookId;
+    const bookId = typeof rawBookId === 'string' ? rawBookId : null;
     if (!bookId) return;
     const createdAt = Number(annotationId);
     const color = THOUGHT_TYPE_META[type].color;

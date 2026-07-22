@@ -47,6 +47,7 @@ import type {
 } from '@capabilities/thought/types';
 import type { LearningApi } from '@capabilities/learning/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import {
   THOUGHT_TYPE_META,
   USER_THOUGHT_TYPES,
@@ -72,13 +73,16 @@ function ctx(): {
   };
 }
 
+/** 取 active bookId(从 contextMenuController.custom.activeBookId 读,由 EBookView.show 注入) */
 function getActiveBookId(): string | null {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return null;
-  const ws = workspaceManager.get(wsId);
-  if (!ws) return null;
-  const state = getEBookWsState(ws);
-  return state?.activeBookId ?? null;
+  const raw = contextMenuController.getState().context.custom.activeBookId;
+  return typeof raw === 'string' ? raw : null;
+}
+
+/** 取 wsId(从 contextMenuController.custom.wsId 读,由 EBookView.show 注入) */
+function getContextWsId(): string | null {
+  const raw = contextMenuController.getState().context.custom.wsId;
+  return typeof raw === 'string' ? raw : null;
 }
 
 /** 从 cfi 查 EPUB legacy bookAnchor(用于改色 / 加思考升级时取 createdAt 与现有字段) */
@@ -212,7 +216,7 @@ export function registerEpubContextMenu(): void {
         folderId: null,
         anchor: { source: 'book', resourceId: bookId, locator },
       });
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getContextWsId();
       const bus = wsId ? workspaceManager.getBus(wsId) : null;
       if (bus) {
         bus.slot.openRight('thought-view');
@@ -271,7 +275,7 @@ export function registerEpubContextMenu(): void {
         folderId: null,
         anchor: { source: 'book', resourceId: bookId, locator },
       });
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getContextWsId();
       const bus = wsId ? workspaceManager.getBus(wsId) : null;
       if (bus) {
         bus.slot.openRight('thought-view');
@@ -309,7 +313,7 @@ export function registerEpubContextMenu(): void {
     const { text, cfi, annotationCfi } = ctx();
     const bookId = getActiveBookId();
     if (!bookId) return;
-    const wsId = workspaceManager.getActiveId();
+    const wsId = getContextWsId();
     if (!wsId) return;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
@@ -478,7 +482,7 @@ export function registerEpubContextMenu(): void {
       void (async () => {
         const matched = await findEpubThoughtByCfi(bookId, cfi);
         if (!matched || !matched.anchor) return;
-        const wsId = workspaceManager.getActiveId();
+        const wsId = getActiveWorkspaceIdSync();
         const bus = wsId ? workspaceManager.getBus(wsId) : null;
         if (bus) {
           bus.slot.openRight('thought-view');

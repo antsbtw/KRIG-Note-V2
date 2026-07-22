@@ -30,6 +30,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { HostHandle, WebRenderingApi } from '@capabilities/web-rendering/types';
 import type { WebFoundInPageResult } from '@capabilities/web-rendering/webview-types';
@@ -339,7 +340,7 @@ export function WebView({ workspaceId }: WebViewProps) {
       // WEB_NEW_TAB 是宿主 webContents 广播,每个并存的 WebView 实例(每 ws 一个,
       // 非活跃的 display:none 但未卸载)都会收到。只有「自己就是活跃 ws」的实例才处理,
       // 否则 N 个 workspace → 一次弹窗开 N 个 tab(实测 ws-1/ws-8 各收一次)。
-      if (workspaceManager.getActiveId() !== workspaceId) return;
+      if (getActiveWorkspaceIdSync() !== workspaceId) return;
       if (!url) return;
       addTab(workspaceId, url);
     });

@@ -13,7 +13,7 @@
 
 import { useEffect } from 'react';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { importExtractionBatch } from './extraction-import';
 
 export function useExtractionImport(workspaceId: string): void {
@@ -23,7 +23,7 @@ export function useExtractionImport(workspaceId: string): void {
       // onExtractionNoteCreate 是宿主 webContents 广播,每个并存 NoteView 实例(每 ws
       // 一个,非活跃 display:none 但未卸载)都会收到。只让活跃 ws 处理,否则 N 个 ws
       // 各跑一遍导入 → 并发写库抢锁。(去重只防"重跑同章",不防"两批并发"。)
-      if (workspaceManager.getActiveId() !== workspaceId) return;
+      if (getActiveWorkspaceIdSync() !== workspaceId) return;
       console.log('[extraction-import] received data from main:', data);
       void importExtractionBatch(data)
         .then((result) => {

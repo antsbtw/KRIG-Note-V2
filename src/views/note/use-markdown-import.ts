@@ -11,7 +11,7 @@
  */
 
 import { useEffect } from 'react';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { setActiveNote } from './data-model';
 import {
   importMarkdownBatch,
@@ -35,7 +35,7 @@ export function useMarkdownImport(workspaceId: string): void {
       // onMarkdownImportRun 是宿主 webContents 广播,每个并存的 NoteView 实例(每 ws
       // 一个,非活跃 display:none 但未卸载)都会收到。若不认领,N 个 ws 各跑一遍完整
       // 导入 → 两批并发写库抢锁(撞 SurrealDB 乐观锁 → 卡住/重复建)。只让活跃 ws 处理。
-      if (workspaceManager.getActiveId() !== workspaceId) return;
+      if (getActiveWorkspaceIdSync() !== workspaceId) return;
       const payload = data as MarkdownImportPayload;
       console.log(
         `[markdown-import] received batch: files=${payload?.files?.length ?? 0}`,

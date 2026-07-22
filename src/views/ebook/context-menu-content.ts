@@ -34,6 +34,7 @@ import type {
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
 import type { LearningApi } from '@capabilities/learning/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import {
   THOUGHT_TYPE_META,
 } from '@shared/ipc/thought-types';
@@ -50,14 +51,16 @@ function getPdfAnnotationId(): string | null {
   return typeof raw === 'string' ? raw : null;
 }
 
-/** 取当前 active bookId(legacy 路径所有操作都需要) */
+/** 取当前 active bookId(从 contextMenuController.custom 读,由 provider 注入) */
 function getActiveBookId(): string | null {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return null;
-  const ws = workspaceManager.get(wsId);
-  if (!ws) return null;
-  const state = getEBookWsState(ws);
-  return state?.activeBookId ?? null;
+  const raw = contextMenuController.getState().context.custom.activeBookId;
+  return typeof raw === 'string' ? raw : null;
+}
+
+/** 取当前 wsId(从 contextMenuController.custom 读,由 provider 注入) */
+function getContextWsId(): string | null {
+  const raw = contextMenuController.getState().context.custom.wsId;
+  return typeof raw === 'string' ? raw : null;
 }
 
 /** BookAnchor (legacy) → BookLocator (thought atom),用于 💭 加思考创建 thought */
@@ -130,7 +133,12 @@ export function registerContextMenu(): void {
         }
       }
 
-      return { pdfAnnotationId, pdfSelectionText };
+      // 注入 wsId + activeBookId,让命令内不再直接调 workspaceManager.getActiveId()
+      const wsId = getActiveWorkspaceIdSync();
+      const ws = wsId ? workspaceManager.get(wsId) : null;
+      const activeBookId = ws ? (getEBookWsState(ws).activeBookId ?? null) : null;
+
+      return { pdfAnnotationId, pdfSelectionText, wsId, activeBookId };
     },
   });
 
@@ -220,7 +228,7 @@ export function registerContextMenu(): void {
         folderId: null,
         anchor: { source: 'book', resourceId: bookId, locator },
       });
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getContextWsId();
       const bus = wsId ? workspaceManager.getBus(wsId) : null;
       if (bus) {
         bus.slot.openRight('thought-view');
@@ -257,7 +265,7 @@ export function registerContextMenu(): void {
     if (!id) return;
     const bookId = getActiveBookId();
     if (!bookId) return;
-    const wsId = workspaceManager.getActiveId();
+    const wsId = getContextWsId();
     if (!wsId) return;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
@@ -337,7 +345,7 @@ export function registerContextMenu(): void {
     }
     const bookId = getActiveBookId();
     if (!bookId) return;
-    const wsId = workspaceManager.getActiveId();
+    const wsId = getContextWsId();
     if (!wsId) return;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
@@ -435,7 +443,7 @@ export function registerContextMenu(): void {
             (t.anchor.locator as BookLocator).createdAt === createdAt,
         );
         if (!matched || !matched.anchor) return; // 无关联 thought / 无 anchor,双击 no-op
-        const wsId = workspaceManager.getActiveId();
+        const wsId = getContextWsId();
         const bus = wsId ? workspaceManager.getBus(wsId) : null;
         if (bus) {
           bus.slot.openRight('thought-view');

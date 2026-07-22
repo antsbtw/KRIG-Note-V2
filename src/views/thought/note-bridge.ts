@@ -20,6 +20,7 @@
 
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type {
   ThoughtCapabilityApi,
@@ -68,7 +69,7 @@ function buildDiffHandler(textEditing: TextEditingApi) {
 
     const instanceId =
       textEditing.instanceRegistry.getFocusedInstanceId() ??
-      workspaceManager.getActiveId();
+      getActiveWorkspaceIdSync();
     if (!instanceId) return;
 
     for (const id of deletedIds) {
@@ -93,7 +94,7 @@ export function registerNoteBridge(): void {
   // 注册 thought-anchor handler(driver 内点击 mark/node 时回调)
   textEditing.setThoughtAnchorHandler({
     onAnchorClick: ({ thoughtId }) => {
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!wsId) return;
       const bus = workspaceManager.getBus(wsId);
       if (!bus) return;

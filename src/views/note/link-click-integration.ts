@@ -17,6 +17,7 @@
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { setActiveNote, getNoteWsState } from './data-model';
 import { startNoteCache, getNoteTitle } from './note-cache';
@@ -43,7 +44,7 @@ export function registerLinkClickIntegration(): void {
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   textEditing.setLinkClickHandler({
     onOpenNote(noteId, blockAnchor) {
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!wsId) return;
       // 历史栈推进
       navigateToNote(noteId);
@@ -53,7 +54,7 @@ export function registerLinkClickIntegration(): void {
       pendingAnchor = blockAnchor ?? null;
     },
     getCurrentNoteId() {
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!wsId) return null;
       const ws = workspaceManager.get(wsId);
       if (!ws) return null;
@@ -77,7 +78,7 @@ export function registerLinkClickIntegration(): void {
   });
 
   // 当前 active note id 同步到历史栈(初始化时取一次,后续靠 navigateToNote 更新)
-  const wsId = workspaceManager.getActiveId();
+  const wsId = getActiveWorkspaceIdSync();
   if (wsId) {
     const ws = workspaceManager.get(wsId);
     if (ws) {
