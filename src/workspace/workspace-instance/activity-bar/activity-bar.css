@@ -85,3 +85,96 @@
   align-items: center;
   justify-content: center;
 }
+
+/* ── 底部账号区 ── */
+
+.krig-activity-bar__bottom {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0 8px;
+  border-top: 1px solid #222;
+}
+
+.krig-activity-bar__account-wrap {
+  position: relative;
+}
+
+.krig-activity-bar__account {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #1f1f1f;
+  cursor: pointer;
+  color: #666;
+  transition: background 0.12s, color 0.12s;
+}
+
+.krig-activity-bar__account:hover {
+  background: #2a2a2a;
+  color: #aaa;
+}
+
+.krig-activity-bar__account--authed {
+  background: #1e3050;
+  color: #6b9fff;
+}
+
+.krig-activity-bar__account--authed:hover {
+  background: #243a60;
+  color: #8ab4ff;
+}
+
+.krig-activity-bar__avatar {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.krig-activity-bar__account-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+  white-space: nowrap;
+}
+
+.krig-activity-bar__account-email {
+  color: #aaa;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 4px;
+}
+
+.krig-activity-bar__account-logout {
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #ff8a8a;
+  font-size: 12px;
+  padding: 5px 0;
+  cursor: pointer;
+  width: 100%;
+}
+
+.krig-activity-bar__account-logout:hover {
+  background: #3a2a2a;
+  color: #ff6b6b;
+}
