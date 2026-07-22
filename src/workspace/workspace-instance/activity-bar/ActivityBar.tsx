@@ -5,7 +5,7 @@
  * 交互：点已激活 tab → toggle NavSide 折叠；点未激活 tab → 切 view + 展开 NavSide。
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavSideTabs } from '@slot/frame-bindings/use-registry';
 import { useAuthState } from '@capabilities/auth/use-auth-state';
 import logoUrl from '../view-switcher-frame/assets/logo.jpeg';
@@ -14,6 +14,18 @@ import './activity-bar.css';
 function AccountButton() {
   const { status, account } = useAuthState();
   const [menuOpen, setMenuOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   const isAuthenticated = status === 'authenticated';
   const avatarLabel =
@@ -25,7 +37,7 @@ function AccountButton() {
   };
 
   return (
-    <div className="krig-activity-bar__account-wrap">
+    <div className="krig-activity-bar__account-wrap" ref={wrapRef}>
       <button
         type="button"
         className={`krig-activity-bar__account${isAuthenticated ? ' krig-activity-bar__account--authed' : ''}`}
