@@ -1,7 +1,7 @@
 # 模块化治理迭代（专项）
 
 > **本目录** = 这一次「模块边界治理 / 可独立部署」专项优化的**唯一工作区**。
-> **状态**：🔶 第 1 步「问题具体化」进行中（2026-07-21 起）。
+> **状态**：🔶 U1/U3/U4 主体已交付；U2/step2 待新分支（2026-07-22）。
 > **总指挥**：用户。**执行**：每个模块/抽象的优化交由新对话按 prompt 完成并验收。
 
 ## 工作法（用户拍板的四步）
@@ -35,13 +35,12 @@
   - `U1-b-component-inject.md` + `.prompt.md` — views nav-side 改注入（5 文件）✅ **已交付验收**（commit a96419c9）
   - `U1-c-command-ctx.md` — U1-c 地形排查 + c2 陷阱判定 + 关键收敛 ✅
   - `U1-c1-a2-interface.prompt.md` — 建 A2 注入接口(registerWsCommand)+1命令试水 ✅ **已交付验收**（commit c553e55a）
-  - **归多窗口 step2**：40 命令批量注入 / c2-defer(ai-sync×2+keymap) / U1-b shell 3点删
-  - U1-c2-inject(link-click/note-bridge/context-menu ~10)— ⏳ 待评估是否也依赖窗口独立性
+  - `U1-c2-inject` — link-click/note-bridge/context-menu/epub/AnnotationTypeSubmenu/use-*-import/WebView 改注入，c2-defer 3处加 TODO ✅ **已交付验收**（commit 4b60faa9）
+  - **归多窗口 step2（新分支待开）**：40 命令批量注入(registerWsCommand) / c2-defer 重构(ai-sync×2+keymap) / U1-b shell 3点删 / U2 收尾(slot/无运行时 workspaceManager)
   - `U4-U5-shared-leaf-and-logo.md` + `U4a-U5-shared-leaf-logo.prompt.md` — U4-a(ArticlePlan 下沉)+U5(logo 移位)✅ **已交付验收**（commit 93d2f881）
   - `U4b-createnotebatch-downsink.prompt.md` — CreateNoteBatch 下沉 shared ✅ **已交付验收**（commit 0f6354e1）
   - **✅ U4 彻底闭合**：shared 纯 leaf 终检全绿（@capabilities/@drivers/@views/@shell/@workspace/@slot/@platform 全 0，仅 @semantic 合法）
   - `U3-views-reaudit.md` + `U3-relativetime-dedup.prompt.md` — views 重扫**判定健康**（零跨view/合理下调），relativeTime 4处去重 ✅ **已交付验收**（commit ed248e57）
-  - U4/U5（独立小单元）、U2 收尾、U3 二次评估 — ⏳
 
 ## 关联（现有素材，将被本专项吸收/取代）
 
