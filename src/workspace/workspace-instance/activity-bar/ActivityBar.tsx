@@ -3,15 +3,61 @@
  *
  * 布局：logo 顶部固定 → view icon 列表居中撑满 → 账号按钮底部固定。
  * 交互：点已激活 tab → toggle NavSide 折叠；点未激活 tab → 切 view + 展开 NavSide。
- *        账号按钮：已登录显示邮箱首字母圆圈，点出弹窗（登出）；未登录显示 👤。
  */
 
 import { useState } from 'react';
 import { useNavSideTabs } from '@slot/frame-bindings/use-registry';
 import { useAuthState } from '@capabilities/auth/use-auth-state';
-import { authStore } from '@capabilities/auth';
 import logoUrl from '../view-switcher-frame/assets/logo.jpeg';
 import './activity-bar.css';
+
+function AccountButton() {
+  const { status, account } = useAuthState();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const isAuthenticated = status === 'authenticated';
+  const avatarLabel =
+    isAuthenticated && account?.email ? account.email[0].toUpperCase() : '?';
+
+  const handleLogout = async () => {
+    setMenuOpen(false);
+    await window.electronAPI?.authLogout?.();
+  };
+
+  return (
+    <div className="krig-activity-bar__account-wrap">
+      <button
+        type="button"
+        className={`krig-activity-bar__account${isAuthenticated ? ' krig-activity-bar__account--authed' : ''}`}
+        onMouseDown={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+        title={account?.email ?? '未登录'}
+        aria-label="账号"
+      >
+        {isAuthenticated ? (
+          <span className="krig-activity-bar__avatar">{avatarLabel}</span>
+        ) : (
+          <span className="krig-activity-bar__icon">👤</span>
+        )}
+      </button>
+      {menuOpen && (
+        <div className="krig-activity-bar__account-menu">
+          {account?.email && (
+            <div className="krig-activity-bar__account-email" title={account.email}>
+              {account.email}
+            </div>
+          )}
+          <button
+            type="button"
+            className="krig-activity-bar__account-logout"
+            onMouseDown={handleLogout}
+          >
+            登出
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ActivityBarProps {
   activeViewId: string | null;
@@ -27,8 +73,6 @@ export function ActivityBar({
   onToggleCollapse,
 }: ActivityBarProps) {
   const tabs = useNavSideTabs();
-  const { status, account } = useAuthState();
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleClick = (viewId: string) => {
     if (viewId === activeViewId) {
@@ -37,18 +81,6 @@ export function ActivityBar({
       onSwitch(viewId);
     }
   };
-
-  const handleLogout = async () => {
-    setMenuOpen(false);
-    await authStore.logout();
-  };
-
-  const avatarLabel =
-    status === 'authenticated' && account?.email
-      ? account.email[0].toUpperCase()
-      : '?';
-
-  const isAuthenticated = status === 'authenticated';
 
   return (
     <div className="krig-activity-bar">
@@ -73,37 +105,7 @@ export function ActivityBar({
         })}
       </div>
       <div className="krig-activity-bar__bottom">
-        <div className="krig-activity-bar__account-wrap">
-          <button
-            type="button"
-            className={`krig-activity-bar__account${isAuthenticated ? ' krig-activity-bar__account--authed' : ''}`}
-            onClick={() => setMenuOpen((v) => !v)}
-            title={account?.email ?? '未登录'}
-            aria-label="账号"
-          >
-            {isAuthenticated ? (
-              <span className="krig-activity-bar__avatar">{avatarLabel}</span>
-            ) : (
-              <span className="krig-activity-bar__icon">👤</span>
-            )}
-          </button>
-          {menuOpen && (
-            <div className="krig-activity-bar__account-menu">
-              {account?.email && (
-                <div className="krig-activity-bar__account-email" title={account.email}>
-                  {account.email}
-                </div>
-              )}
-              <button
-                type="button"
-                className="krig-activity-bar__account-logout"
-                onClick={handleLogout}
-              >
-                登出
-              </button>
-            </div>
-          )}
-        </div>
+        <AccountButton />
       </div>
     </div>
   );
