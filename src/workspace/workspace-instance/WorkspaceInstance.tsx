@@ -5,10 +5,12 @@
  * - 应用级 UI 全在 Workspace Container 内(NavSide / Toolbar / Slot / 5 大交互浮层 / 通用 Overlay)
  * - view 平等(所有 Workspace 共享同一套式样)
  *
- * 切 Workspace 时:旧实例 hide(visibility),新实例 show — 状态保留(不销毁不重建)
+ * S4:删除 isActive prop 和 display:none 切换（Container 直接渲染活跃 ws）。
+ *    NavSideToggle 从 WorkspaceBar 移入，折叠时在 WorkspaceInstance 内部渲染展开按钮。
  */
 
 import { useRef } from 'react';
+import { PanelLeft } from 'lucide-react';
 import { NavSideFrame } from './nav-side-frame/NavSideFrame';
 import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
@@ -25,10 +27,9 @@ import './workspace-instance.css';
 
 interface WorkspaceInstanceProps {
   state: WorkspaceState;
-  isActive: boolean;
 }
 
-export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
+export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const handleDividerChange = (ratio: number) => {
@@ -63,10 +64,20 @@ export function WorkspaceInstance({ state, isActive }: WorkspaceInstanceProps) {
         <div
           ref={rootRef}
           className="krig-workspace-instance"
-          style={{ display: isActive ? 'flex' : 'none' }}
           data-workspace-id={state.id}
         >
-          {!state.navSideCollapsed && (
+          {state.navSideCollapsed ? (
+            // NavSide 折叠时显示展开按钮（原 WorkspaceBar 的 NavSideToggle 职责）
+            <button
+              type="button"
+              className="krig-navside-toggle"
+              onClick={() => workspaceManager.toggleNavSide(state.id)}
+              title="展开 NavSide"
+              aria-label="Toggle NavSide"
+            >
+              <PanelLeft size={16} />
+            </button>
+          ) : (
             <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
           )}
           <div className="krig-workspace-main">

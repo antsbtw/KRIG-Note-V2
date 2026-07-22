@@ -1,41 +1,29 @@
 /**
  * Workspace Container — 全屏容器
  *
- * 按 charter § 1.4 + view-hierarchy-v2.md:
- * - 渲染所有 Workspace 实例
- * - 通过 visibility 切换显示活跃 Workspace
- * - 非活跃 Workspace 状态保留(不销毁不重建)
- *
- * L3 阶段:接入 WorkspaceManager,渲染所有 Workspace 实例
+ * S4:单 ws 直接渲染（活跃 ws 由主进程楼长决定，IPC 快照驱动）。
+ * 启动时 IPC 状态尚未到达会短暂显示 Loading。
  */
 
-import { useOpenWorkspaces, useActiveWorkspaceId } from '@workspace/workspace-instance/use-workspace';
+import { useActiveWorkspace } from '@workspace/workspace-instance/use-workspace';
 import { WorkspaceInstance } from '@workspace/workspace-instance/WorkspaceInstance';
 import './workspace-container.css';
 
 export function WorkspaceContainer() {
-  // 只挂载打开的工作空间实例(收起的不挂,省内存;cookie 持久,重开重载但登录态在)
-  const workspaces = useOpenWorkspaces();
-  const activeId = useActiveWorkspaceId();
+  const ws = useActiveWorkspace();
 
-  if (workspaces.length === 0) {
-    // 应该不会出现(WorkspaceManager.ensureMinimum 保证至少一个)
+  if (!ws) {
+    // 启动时 IPC 状态尚未到达的短暂空窗
     return (
       <div className="krig-workspace-container krig-workspace-container--empty">
-        <div className="krig-workspace-container-empty">No workspace</div>
+        <div className="krig-workspace-container-empty">Loading…</div>
       </div>
     );
   }
 
   return (
     <div className="krig-workspace-container">
-      {workspaces.map((ws) => (
-        <WorkspaceInstance
-          key={ws.id}
-          state={ws}
-          isActive={ws.id === activeId}
-        />
-      ))}
+      <WorkspaceInstance state={ws} />
     </div>
   );
 }

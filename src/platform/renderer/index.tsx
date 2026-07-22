@@ -8,7 +8,6 @@
 
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { WorkspaceBar } from '@shell/workspace-bar/WorkspaceBar';
 import { WorkspaceContainer } from '@shell/workspace-container/WorkspaceContainer';
 import { FullscreenOverlayContainer } from '@shell/fullscreen-overlay/FullscreenOverlayContainer';
 import { GlobalProgressOverlay } from '@shell/global-progress-overlay/GlobalProgressOverlay';
@@ -119,7 +118,6 @@ function App() {
       {/* AuthGate:未登录/loading 时只显登录页/占位,登录后才渲染工作区(包住全部 UI)*/}
       <AuthGate>
         <div className="krig-app__workspace-layer" style={workspaceStyle}>
-          <WorkspaceBar />
           <WorkspaceContainer />
         </div>
         <FullscreenOverlayContainer />
@@ -135,7 +133,7 @@ if (rootEl) {
   root.render(<App />);
   reportRendererAlive();
   reportL2Alive();
-  reportL3Alive(workspaceManager.count, workspaceManager.getActiveId());
+  reportL3Alive(workspaceManager.count, null);
   reportL3_5Alive(workspaceManager.busCount);
   reportL4Alive();
   reportL5Alive();
