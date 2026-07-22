@@ -15,7 +15,7 @@
 
 import { workspaceManager } from '../../workspace-state/workspace-manager';
 import { ViewSwitcherBinding } from '@slot/frame-bindings/ViewSwitcherBinding';
-import logoUrl from '@shell/assets/logo.jpeg';
+import logoUrl from './assets/logo.jpeg';
 import './view-switcher-frame.css';
 
 interface ViewSwitcherFrameProps {

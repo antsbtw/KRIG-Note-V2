@@ -6,7 +6,7 @@
  * 要么内联结构。
  */
 
-import type { ArticlePlan } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
+import type { ArticlePlan } from './article-plan-types';
 
 /**
  * 一次 note→X Article 发布的「中间态」诊断信封(X_PLAN_CACHE_DUMP 的载荷)。

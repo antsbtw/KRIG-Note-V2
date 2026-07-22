@@ -34,7 +34,7 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
-import type { ArticlePlan, ArticleInsertStep } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
+import type { ArticlePlan, ArticleInsertStep } from './article-plan-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
 import type {
