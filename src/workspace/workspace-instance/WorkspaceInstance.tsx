@@ -10,8 +10,8 @@
  */
 
 import { useRef } from 'react';
-import { PanelLeft } from 'lucide-react';
 import { NavSideFrame } from './nav-side-frame/NavSideFrame';
+import { ActivityBar } from './activity-bar/ActivityBar';
 import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
 import { workspaceManager } from '../workspace-state/workspace-manager';
@@ -34,6 +34,26 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
 
   const handleDividerChange = (ratio: number) => {
     workspaceManager.update(state.id, { dividerRatio: ratio });
+  };
+
+  const handleSwitch = (viewId: string) => {
+    workspaceManager.update(
+      state.id,
+      {
+        slotBinding: {
+          left: viewId,
+          leftPayload: undefined,
+          right: null,
+          rightPayload: undefined,
+        },
+        navSideCollapsed: false,
+      },
+      { source: 'navside' },
+    );
+  };
+
+  const handleToggleCollapse = () => {
+    workspaceManager.toggleNavSide(state.id);
   };
 
   // L4 阶段:取当前活跃 view ID(优先 left slot)— 用作 NavSide / Toolbar / Overlay 的过滤参考
@@ -66,18 +86,13 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
           className="krig-workspace-instance"
           data-workspace-id={state.id}
         >
-          {state.navSideCollapsed ? (
-            // NavSide 折叠时显示展开按钮（原 WorkspaceBar 的 NavSideToggle 职责）
-            <button
-              type="button"
-              className="krig-navside-toggle"
-              onClick={() => workspaceManager.toggleNavSide(state.id)}
-              title="展开 NavSide"
-              aria-label="Toggle NavSide"
-            >
-              <PanelLeft size={16} />
-            </button>
-          ) : (
+          <ActivityBar
+            activeViewId={activeViewId}
+            navSideCollapsed={state.navSideCollapsed}
+            onSwitch={handleSwitch}
+            onToggleCollapse={handleToggleCollapse}
+          />
+          {!state.navSideCollapsed && (
             <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
           )}
           <div className="krig-workspace-main">

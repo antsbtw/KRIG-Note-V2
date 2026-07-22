@@ -15,7 +15,6 @@ import { useCallback, useRef } from 'react';
 import { DEFAULT_NAVSIDE_WIDTH } from '../../workspace-state/default-state';
 import { workspaceManager } from '../../workspace-state/workspace-manager';
 import { NavSideBinding } from '@slot/frame-bindings/NavSideBinding';
-import { ViewSwitcherFrame } from '../view-switcher-frame/ViewSwitcherFrame';
 import './nav-side-frame.css';
 
 const MIN_WIDTH = 160;
@@ -86,7 +85,6 @@ export function NavSideFrame({ workspaceId, width, viewId }: NavSideFrameProps) 
 
   return (
     <div className="krig-nav-side-frame" style={{ width: w }}>
-      <ViewSwitcherFrame workspaceId={workspaceId} activeViewId={viewId} />
       <NavSideBinding viewId={viewId} />
       <div
         className="krig-nav-side-frame__divider"

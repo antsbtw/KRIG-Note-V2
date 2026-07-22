@@ -1,0 +1,87 @@
+.krig-activity-bar {
+  flex: none;
+  width: 48px;
+  height: 100%;
+  background-color: #111;
+  border-right: 1px solid #2a2a2a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.krig-activity-bar__logo {
+  flex: none;
+  padding: 10px 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.krig-activity-bar__logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.krig-activity-bar__tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.krig-activity-bar__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.krig-activity-bar__tab {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: #666;
+  transition: background 0.12s, color 0.12s;
+  position: relative;
+}
+
+.krig-activity-bar__tab:hover {
+  background: #1f1f1f;
+  color: #aaa;
+}
+
+.krig-activity-bar__tab--active {
+  color: #ddd;
+  background: #252525;
+}
+
+.krig-activity-bar__tab--active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 20px;
+  background: #6b9fff;
+  border-radius: 0 2px 2px 0;
+}
+
+.krig-activity-bar__icon {
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
