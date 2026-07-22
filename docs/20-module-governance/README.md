@@ -39,7 +39,7 @@
   - U1-c2-inject(link-click/note-bridge/context-menu ~10)— ⏳ 待评估是否也依赖窗口独立性
   - `U4-U5-shared-leaf-and-logo.md` + `U4a-U5-shared-leaf-logo.prompt.md` — U4-a(ArticlePlan 下沉)+U5(logo 移位)✅ **已交付验收**（commit 93d2f881）
   - **U4-b 暂缓**：CreateNoteBatch 会拖 NoteInfo 进 shared，需设计 IPC 最小契约（非机械活）
-  - `U3-views-reaudit.md` + `U3-relativetime-dedup.prompt.md` — views 重扫**判定健康**（零跨view/合理下调），唯一实活=relativeTime 4处去重 ✅ prompt 就绪待执行
+  - `U3-views-reaudit.md` + `U3-relativetime-dedup.prompt.md` — views 重扫**判定健康**（零跨view/合理下调），relativeTime 4处去重 ✅ **已交付验收**（commit ed248e57）
   - U4/U5（独立小单元）、U2 收尾、U3 二次评估 — ⏳
 
 ## 关联（现有素材，将被本专项吸收/取代）
