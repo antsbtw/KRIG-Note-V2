@@ -29,7 +29,7 @@
 
 import type { HandleItem } from '@slot/interaction-registries/handle-registry/handle-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import type { TextEditingApi } from '../../types';
 import { HandleColorSubmenu } from '../color-picker/HandleColorSubmenu';
 import { HandleFormatSubmenu } from './HandleFormatSubmenu';
@@ -139,7 +139,7 @@ export function createTurnIntoSubmenu(viewId: string): HandleItem[] {
  */
 export function createHeadingCollapseItem(viewId: string): HandleItem {
   const getInstanceId = (): string | null =>
-    workspaceManager.getActiveId();
+    getActiveWorkspaceIdSync();
   return {
     id: `${viewId}.h.heading-collapse`,
     icon: '⌃',

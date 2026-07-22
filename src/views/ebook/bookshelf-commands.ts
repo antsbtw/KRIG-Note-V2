@@ -21,7 +21,7 @@ export function setImportTrigger(cb: (() => void) | null): void {
   pendingImportTrigger = cb;
 }
 
-export function registerEBookCommands(): void {
+export function registerEBookCommands(wsId: string): void {
   // 导入电子书 — 触发 modal,真实导入由 modal confirm 走 library.add()
   commandRegistry.register('ebook-view.import', () => {
     pendingImportTrigger?.();
@@ -38,7 +38,7 @@ export function registerEBookCommands(): void {
   });
 
   // 在指定文件夹下新建子文件夹(右键 → "在此新建文件夹")
-  registerWsCommand('ebook-view.create-folder-in', () => workspaceManager.getActiveId(), async (ctx, parentId: unknown) => {
+  registerWsCommand('ebook-view.create-folder-in', () => wsId, async (ctx, parentId: unknown) => {
     if (typeof parentId !== 'string' || !parentId) return;
     const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
     const created = await folder.createFolder('新建文件夹', parentId, 'ebook');
@@ -52,7 +52,7 @@ export function registerEBookCommands(): void {
   // 打开书(单击书项)
   // 只写 activeBookId + 确保 slot，不在命令层调 library.open。
   // EBookView 的 useEffect 监测 activeBookId 变化后自己 open，那时 Host 已挂载。
-  registerWsCommand('ebook-view.open-book', () => workspaceManager.getActiveId(), (ctx, bookId: unknown) => {
+  registerWsCommand('ebook-view.open-book', () => wsId, (ctx, bookId: unknown) => {
     if (typeof bookId !== 'string' || !bookId) return;
     setActiveBookId(ctx.wsId, bookId);
     // 确保 ebook-view 挂载到 slot（slotBinding 为空时切到 left）
@@ -71,7 +71,7 @@ export function registerEBookCommands(): void {
   });
 
   // 删除单项
-  registerWsCommand('ebook-view.delete', () => workspaceManager.getActiveId(), async (ctx, treeId: unknown) => {
+  registerWsCommand('ebook-view.delete', () => wsId, async (ctx, treeId: unknown) => {
     if (typeof treeId !== 'string' || !treeId) return;
     const { type, id } = decodeTreeId(treeId);
     const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
@@ -110,7 +110,7 @@ export function registerEBookCommands(): void {
   });
 
   // ⊞ Toolbar 视图切换:在右槽打开 commandArg=viewId(对齐 note-view.open-right-slot)
-  registerWsCommand('ebook-view.open-right-slot', () => workspaceManager.getActiveId(), (ctx, viewId: unknown) => {
+  registerWsCommand('ebook-view.open-right-slot', () => wsId, (ctx, viewId: unknown) => {
     if (typeof viewId !== 'string') return;
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;

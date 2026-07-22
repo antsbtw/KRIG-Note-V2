@@ -8,8 +8,6 @@
 import { registerView } from '@slot/view-type-registry/register-view';
 import { WebView } from './WebView';
 import { registerWebContextMenu } from './context-menu-integration';
-import { registerWebCommands } from './web-commands';
-import { registerWebBookmarkCommands } from './web-bookmark-commands';
 import { registerNavSide, registerBookmarkContextMenu } from './nav-side-content';
 
 registerView({
@@ -25,8 +23,7 @@ registerView({
   navSideTab: { label: 'Web', icon: '🌐', order: 3 },
 });
 
-registerWebCommands();
-registerWebBookmarkCommands();
+// registerWebCommands / registerWebBookmarkCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
 registerWebContextMenu();
 registerNavSide();
 registerBookmarkContextMenu();

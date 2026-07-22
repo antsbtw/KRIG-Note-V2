@@ -10,7 +10,7 @@
  * - 跨 ws 跳转留 ActiveResourceManager 抽象后补
  */
 
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { setActiveNote } from './data-model';
 
 interface NavigationHistory {
@@ -82,7 +82,7 @@ export function goForward(wsId?: string): string | null {
 }
 
 function applyToActiveWs(noteId: string, wsId?: string): void {
-  const id = wsId ?? workspaceManager.getActiveId();
+  const id = wsId ?? getActiveWorkspaceIdSync();
   if (!id) return;
   setActiveNote(id, noteId);
 }

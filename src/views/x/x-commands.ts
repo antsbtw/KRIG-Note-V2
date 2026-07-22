@@ -15,6 +15,7 @@
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XTweetData } from '@capabilities/x-extraction';
 import { sendToX, sendToXAtDropTarget, stashDraggedBlockText, publishToXArticle } from './send-to-x';
@@ -62,7 +63,7 @@ function noteIsOpen(slotBinding: { left: string | null; right: string | null }):
   return slotBinding.left === 'note-view' || slotBinding.right === 'note-view';
 }
 
-export function registerXCommands(): void {
+export function registerXCommands(wsId: string): void {
   /**
    * 在 X webview 里打开某条推文(tweet block「Open original」用,替代弹外部/系统浏览器)。
    *
@@ -72,7 +73,7 @@ export function registerXCommands(): void {
    *
    * 走 bus 而非直接拿 X Host ref:tweet block 在 Note 里,跨 view 不直接持有 X Host。
    */
-  registerWsCommand('x-view.open-tweet', () => workspaceManager.getActiveId(), (ctx, arg: unknown): boolean => {
+  registerWsCommand('x-view.open-tweet', () => wsId, (ctx, arg: unknown): boolean => {
     const url = typeof arg === 'string' ? arg : '';
     if (!url) return false;
     const wsId = ctx.wsId;
@@ -100,7 +101,7 @@ export function registerXCommands(): void {
    *
    * fail loud(铁律 4):非推文 / 抓空 / 没开 Note / PM 未挂 → alert 明确报错,不插空 block。
    */
-  registerWsCommand('x-view.extract-tweet', () => workspaceManager.getActiveId(), async (ctx, arg: unknown) => {
+  registerWsCommand('x-view.extract-tweet', () => wsId, async (ctx, arg: unknown) => {
     const p = (arg ?? {}) as { x?: unknown; y?: unknown };
     if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
     const wsId = ctx.wsId;
@@ -138,7 +139,7 @@ export function registerXCommands(): void {
    *
    * 实现见 send-to-x.ts(选区/整篇取 markdown + 降级 + 超长 fail loud + 剪贴板降级)。
    */
-  registerWsCommand('x-view.send-to-x', () => workspaceManager.getActiveId(), (ctx) => {
+  registerWsCommand('x-view.send-to-x', () => wsId, (ctx) => {
     void sendToX(ctx.wsId);
   });
 
@@ -147,7 +148,7 @@ export function registerXCommands(): void {
    * (LaTeX/Table/Code/Posts/Media 走原生,Mermaid/mathVisual 渲图兜底)。
    * 实现见 send-to-x.ts publishToXArticle。⚠️ 只插内容,用户在 X 手动点 Publish。
    */
-  registerWsCommand('x-view.publish-article', () => workspaceManager.getActiveId(), (ctx) => {
+  registerWsCommand('x-view.publish-article', () => wsId, (ctx) => {
     void publishToXArticle(ctx.wsId);
   });
 
@@ -174,7 +175,7 @@ export function registerXCommands(): void {
   if (dndApi && !dndStartUnsub) {
     dndStartUnsub = dndApi.subscribe('dnd.started', (payload: unknown) => {
       const x = getCapabilityApi<XExtractionApi>('x-extraction');
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!x || !wsId) return;
       // 抓「被拖起的 block」内容(总指挥:发的是拖的那些 block,不是选区/整篇)→ 暂存,
       // 松手时用。payload.source.data = { fromPos, instanceId }(handle 插件 emit)。
@@ -192,7 +193,7 @@ export function registerXCommands(): void {
   }
   if (dndApi && !dndDoneUnsub) {
     dndDoneUnsub = dndApi.subscribe('dnd.completed', () => {
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!wsId) return;
       void sendToXAtDropTarget(wsId);
     });

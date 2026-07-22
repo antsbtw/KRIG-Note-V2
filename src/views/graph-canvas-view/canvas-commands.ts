@@ -25,10 +25,10 @@ import {
   setFolderExpanded,
 } from './data-model';
 
-export function registerGraphCanvasCommands(): void {
+export function registerGraphCanvasCommands(wsId: string): void {
   // ── 创建画板 ──
   // 直接 library.create + 自动 setActiveGraphId(创建即打开)+ 进重命名态
-  registerWsCommand('graph-canvas-view.create-canvas', () => workspaceManager.getActiveId(), async (ctx) => {
+  registerWsCommand('graph-canvas-view.create-canvas', () => wsId, async (ctx) => {
     const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
     const record = await library.create('Untitled Canvas', 'canvas', null);
     if (!record) return;
@@ -46,7 +46,7 @@ export function registerGraphCanvasCommands(): void {
 
   registerWsCommand(
     'graph-canvas-view.create-folder-in',
-    () => workspaceManager.getActiveId(),
+    () => wsId,
     async (ctx, parentId: unknown) => {
       if (typeof parentId !== 'string' || !parentId) return;
       const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
@@ -62,7 +62,7 @@ export function registerGraphCanvasCommands(): void {
 
   registerWsCommand(
     'graph-canvas-view.open-canvas',
-    () => workspaceManager.getActiveId(),
+    () => wsId,
     (ctx, graphId: unknown) => {
       if (typeof graphId !== 'string' || !graphId) return;
       setActiveGraphId(ctx.wsId, graphId);
@@ -81,7 +81,7 @@ export function registerGraphCanvasCommands(): void {
 
   registerWsCommand(
     'graph-canvas-view.delete',
-    () => workspaceManager.getActiveId(),
+    () => wsId,
     async (ctx, treeId: unknown) => {
       if (typeof treeId !== 'string' || !treeId) return;
       const { type, id } = decodeTreeId(treeId);

@@ -13,6 +13,7 @@
 
 import { commandRegistry } from '../command-registry/command-registry';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { keymapRegistry, normalizeKey } from './keymap-registry';
 import type { KeymapBinding, KeymapCondition } from './keymap-types';
 
@@ -41,8 +42,7 @@ function findTargetViewId(target: EventTarget | null): string | null {
 
 /** 退化路径:活跃 ws 的 slotBinding.left(charter:主 view 在 left)*/
 function fallbackActiveViewId(): string | null {
-  // TODO(multi-window-step2): 全局 active 概念消亡后重构(每 renderer 自己那份 ws 就是本窗口 ws)
-  const wsId = workspaceManager.getActiveId();
+  const wsId = getActiveWorkspaceIdSync();
   if (!wsId) return null;
   const ws = workspaceManager.get(wsId);
   return ws?.slotBinding.left ?? null;

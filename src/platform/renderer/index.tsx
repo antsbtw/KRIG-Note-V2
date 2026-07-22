@@ -22,6 +22,16 @@ import { reportL5Alive } from '@views/L5-alive';
 import { reportInstallCoverage } from '@slot/diagnostics/install-coverage';
 import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
+import { registerNoteCommands } from '@views/note/note-commands';
+import { registerWebCommands } from '@views/web/web-commands';
+import { registerWebBookmarkCommands } from '@views/web/web-bookmark-commands';
+import { registerEBookCommands } from '@views/ebook/bookshelf-commands';
+import { registerAICommands } from '@views/ai/ai-commands';
+import { registerXCommands } from '@views/x/x-commands';
+import { registerXTestCommands } from '@views/x/x-test-commands';
+import { registerGraphCanvasCommands } from '@views/graph-canvas-view/canvas-commands';
+import { registerThoughtCommands } from '@views/thought/thought-commands';
 // W5:capability 显式 side-effect import — 触发各 capability 的
 // capabilityRegistry.register 副作用(原本由 L5-alive 直 import 触发,L5-alive
 // 改 getCapabilityApi 后 import 链断,需要在 renderer 显式拉)
@@ -67,9 +77,24 @@ import './app.css';
 // S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。
 // 此处仍保留 getBus 初始化供 L3.5 alive 计数。
 
+// U1-c1-batch:命令注册函数需要在拿到本 renderer 的 wsId 后显式调用(闭包捕获,不再运行时 getActiveId)
+// view import(上方)只触发 registerView / registerNavSide 等非命令注册,命令注册在此统一显式传入 wsId。
+const rendererWsId = getActiveWorkspaceIdSync();
+if (rendererWsId) {
+  registerNoteCommands(rendererWsId);
+  registerWebCommands(rendererWsId);
+  registerWebBookmarkCommands(rendererWsId);
+  registerEBookCommands(rendererWsId);
+  registerAICommands(rendererWsId);
+  registerXCommands(rendererWsId);
+  registerXTestCommands(rendererWsId);
+  registerGraphCanvasCommands(rendererWsId);
+  registerThoughtCommands(rendererWsId);
+}
+
 // L3.5 启动:为活跃 Workspace 创建 bus(lazy 创建,首个 getBus 调用触发)
 // 这里主动调一次,让 alive 计数 >= 1
-const _activeId = workspaceManager.getActiveId();
+const _activeId = rendererWsId;
 if (_activeId) workspaceManager.getBus(_activeId);
 
 // dev-only:DevTools 调试钩子 — 让 `window.__krig.bus` / `__krig.wm` 直接可用
@@ -85,7 +110,7 @@ if (import.meta.env.DEV) {
     ...(win.__krig ?? {}),
     wm: workspaceManager,
     get bus() {
-      const id = workspaceManager.getActiveId();
+      const id = getActiveWorkspaceIdSync();
       return id ? workspaceManager.getBus(id) : undefined;
     },
   };

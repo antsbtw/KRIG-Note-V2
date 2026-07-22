@@ -19,7 +19,6 @@
 
 import { registerView } from '@slot/view-type-registry/register-view';
 import { ThoughtView } from './ThoughtView';
-import { registerThoughtCommands } from './thought-commands';
 import { registerNoteBridge } from './note-bridge';
 import { registerFloatingToolbar } from './floating-toolbar-content';
 import { registerSlashMenu } from './slash-menu-content';
@@ -48,7 +47,7 @@ registerView({
   // 不设 navSideTab — V1 形态 thought 是 hidden view(只被动召唤右槽)
 });
 
-registerThoughtCommands();
+// registerThoughtCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
 registerNoteBridge();
 // 5 大交互注册(charter §1.4 view 平等 — thought-view 同款获得 PM 编辑全套能力)
 registerFloatingToolbar();

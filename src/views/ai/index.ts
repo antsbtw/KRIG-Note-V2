@@ -7,7 +7,6 @@
 
 import { registerView } from '@slot/view-type-registry/register-view';
 import { AIView } from './AIView';
-import { registerAICommands } from './ai-commands';
 import { registerAINavSide } from './nav-side-content';
 
 registerView({
@@ -22,5 +21,4 @@ registerView({
   navSideTab: { label: 'AI', icon: '🤖', order: 4 },
 });
 
-registerAICommands();
 registerAINavSide(); // navSide 四入口快速导航(Claude/ChatGPT/Gemini/X)

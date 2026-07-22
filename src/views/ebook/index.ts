@@ -23,7 +23,6 @@
 import { registerView } from '@slot/view-type-registry/register-view';
 import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
 import { EBookView } from './EBookView';
-import { registerEBookCommands } from './bookshelf-commands';
 import { registerNavSide, registerFolderTreeContextMenu } from './nav-side-content';
 import { registerContextMenu } from './context-menu-content';
 import { registerEpubContextMenu } from './epub-context-menu-content';
@@ -47,7 +46,7 @@ registerView({
   navSideTab: { label: 'eBook', icon: '📕', order: 2 },
 });
 
-registerEBookCommands();
+// registerEBookCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
 registerNavSide();
 registerFolderTreeContextMenu();
 registerContextMenu();  // PR-α-2:PDF 标注右键 5 项 + provider + has-pdf-annotation predicate

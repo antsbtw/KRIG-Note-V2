@@ -46,7 +46,7 @@ function isBookmarkable(url: string): boolean {
   }
 }
 
-export function registerWebBookmarkCommands(): void {
+export function registerWebBookmarkCommands(wsId: string): void {
   // 创建文件夹(根目录)— folder capability + viewType='web'
   commandRegistry.register('web-view.bm-create-folder', async () => {
     const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
@@ -73,7 +73,7 @@ export function registerWebBookmarkCommands(): void {
   });
 
   // 加书签(当前活跃 tab 的 url + title;about:blank 等非 http(s) → no-op + 提示)
-  registerWsCommand('web-view.bm-add', () => workspaceManager.getActiveId(), async (ctx, folderArg: unknown) => {
+  registerWsCommand('web-view.bm-add', () => wsId, async (ctx, folderArg: unknown) => {
     const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;

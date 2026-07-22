@@ -13,7 +13,6 @@
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { registerWsCommand } from '@slot/command-registry/register-ws-command';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import { getCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { ThoughtType, BookLocator } from '@capabilities/thought/types';
@@ -25,7 +24,7 @@ import { addFromPdfAnnotation } from './command-impl/add-from-pdf-annotation';
 import { askAiFromNote } from './command-impl/ask-ai';
 import { scrollToSource } from './command-impl/scroll-to-source';
 
-export function registerThoughtCommands(): void {
+export function registerThoughtCommands(wsId: string): void {
   commandRegistry.register('thought-view.delete-thought', (id: unknown) => {
     if (typeof id !== 'string') return;
     void thoughtCap().deleteThought(id);
@@ -78,7 +77,7 @@ export function registerThoughtCommands(): void {
   });
 
   // 跨 view 命令(Note 侧 ⌘⇧M / 💭 / 🤖 / ThoughtCard 跳源)
-  registerWsCommand('thought-view.add-from-note', () => workspaceManager.getActiveId(), (ctx) => {
+  registerWsCommand('thought-view.add-from-note', () => wsId, (ctx) => {
     void addThoughtFromNote(ctx.wsId);
   });
 
@@ -86,16 +85,16 @@ export function registerThoughtCommands(): void {
    * EBook 侧 PDF 标注创建后召唤右槽 ThoughtView + 高亮新 thought 卡片。
    * pdfAnn.create 已完成 thought atom + anchor 落库,本命令只负责 UI 召唤。
    */
-  registerWsCommand('thought-view.add-from-pdf-annotation', () => workspaceManager.getActiveId(), (ctx, arg: unknown) => {
+  registerWsCommand('thought-view.add-from-pdf-annotation', () => wsId, (ctx, arg: unknown) => {
     if (typeof arg !== 'string') return;
     void addFromPdfAnnotation(arg, ctx.wsId);
   });
 
-  registerWsCommand('thought-view.ask-ai-from-note', () => workspaceManager.getActiveId(), (ctx) => {
+  registerWsCommand('thought-view.ask-ai-from-note', () => wsId, (ctx) => {
     void askAiFromNote(ctx.wsId);
   });
 
-  registerWsCommand('thought-view.scroll-to-source', () => workspaceManager.getActiveId(), (ctx, thoughtId: unknown) => {
+  registerWsCommand('thought-view.scroll-to-source', () => wsId, (ctx, thoughtId: unknown) => {
     if (typeof thoughtId !== 'string') return;
     void scrollToSource(thoughtId, ctx.wsId);
   });

@@ -10,13 +10,13 @@
  * - D-B 命令实现走 driver capability api(requireCapabilityApi.api)
  * - N-1 唯一注册源 — 同 command id 全工程仅一处 register;C7 同步删 NoteView 旧 register
  * - L5-G4.5 focus-first instanceId 路径(canvas-text-node 嵌入 popup 复合 id 场景):
- *   优先用 instanceRegistry.getFocusedInstanceId();fallback 走 workspaceManager.getActiveId()
+ *   优先用 instanceRegistry.getFocusedInstanceId();fallback 走 getActiveWorkspaceIdSync()
  *
  * 入口:capability/text-editing/index.ts 加载时调 registerTextEditingCommands()
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import { popupController } from '@slot/triggers/popup-controller';
@@ -39,7 +39,7 @@ type TurnTarget =
  * Fallback:无 PM 实例聚焦时走 workspace activeId(等价 NoteView 单 PM 实例场景)。
  */
 function resolveInstanceId(): string | null {
-  return instanceRegistry.getFocusedInstanceId() ?? workspaceManager.getActiveId();
+  return instanceRegistry.getFocusedInstanceId() ?? getActiveWorkspaceIdSync();
 }
 
 function withInstance(fn: (instanceId: string) => void): () => void {

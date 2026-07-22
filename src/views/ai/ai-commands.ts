@@ -22,11 +22,11 @@ function isServiceId(v: unknown): v is AIServiceId {
   return v === 'chatgpt' || v === 'claude' || v === 'gemini';
 }
 
-export function registerAICommands(): void {
+export function registerAICommands(wsId: string): void {
   /**
    * 把当前 ws 的活跃 AI 服务切到 serviceId。
    */
-  registerWsCommand('ai-view.switch-service', () => workspaceManager.getActiveId(), (ctx, idArg: unknown) => {
+  registerWsCommand('ai-view.switch-service', () => wsId, (ctx, idArg: unknown) => {
     if (!isServiceId(idArg)) return;
     setAIServiceId(ctx.wsId, idArg);
   });
@@ -36,7 +36,7 @@ export function registerAICommands(): void {
    * commandArg = 目标 viewId(e.g. 'note-view' / 'thought-view')。
    * 仿 note-view.open-right-slot 模式,本地版本服务 AI View 自身 toolbar SlotToggle。
    */
-  registerWsCommand('ai-view.open-right-slot', () => workspaceManager.getActiveId(), (ctx, viewId: unknown) => {
+  registerWsCommand('ai-view.open-right-slot', () => wsId, (ctx, viewId: unknown) => {
     if (typeof viewId !== 'string' || !viewId) return;
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
@@ -46,7 +46,7 @@ export function registerAICommands(): void {
   /**
    * 关 right slot。SlotToggle 再次点击已激活项时触发。
    */
-  registerWsCommand('ai-view.close-right-slot', () => workspaceManager.getActiveId(), (ctx) => {
+  registerWsCommand('ai-view.close-right-slot', () => wsId, (ctx) => {
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
     bus.slot.closeRight();
@@ -62,7 +62,7 @@ export function registerAICommands(): void {
    * - 后续 sub-phase 接 V1 chatgpt-content-extractor / claude-api-extractor 等
    *   做完整 conversation 抓取(含所有 turn / artifact)
    */
-  registerWsCommand('ai-view.extract-conversation', () => workspaceManager.getActiveId(), async (ctx) => {
+  registerWsCommand('ai-view.extract-conversation', () => wsId, async (ctx) => {
     const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
@@ -184,7 +184,7 @@ export function registerAICommands(): void {
    *
    * 参数:{ x, y } guest viewport 坐标(由 AIView 订阅 onExtractTurnRequest 透传)。
    */
-  registerWsCommand('ai-view.extract-turn', () => workspaceManager.getActiveId(), async (ctx, arg: unknown) => {
+  registerWsCommand('ai-view.extract-turn', () => wsId, async (ctx, arg: unknown) => {
     const p = (arg ?? {}) as { x?: unknown; y?: unknown };
     if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
     const wsId = ctx.wsId;
@@ -244,7 +244,7 @@ export function registerAICommands(): void {
    *   commandRegistry.execute('ai-view.ask', '请总结这段话')
    *   commandRegistry.execute('ai-view.ask', { prompt: '...', serviceId: 'chatgpt' })
    */
-  registerWsCommand('ai-view.ask', () => workspaceManager.getActiveId(), async (ctx, arg: unknown) => {
+  registerWsCommand('ai-view.ask', () => wsId, async (ctx, arg: unknown) => {
     const ai = getCapabilityApi<AIConversationApi>('ai-extraction');
     if (!ai) {
       console.warn('[ai-view.ask] ai-extraction capability not registered');

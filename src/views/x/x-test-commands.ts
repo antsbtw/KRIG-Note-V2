@@ -11,7 +11,7 @@
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { registerWsCommand } from '@slot/command-registry/register-ws-command';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { ArticleInsertStep } from '@drivers/text-editing-driver/serializers/note-to-article-plan';
@@ -62,34 +62,34 @@ async function runTestStep(name: string, step: ArticleInsertStep, wsId: string):
 }
 
 /** 注册逐块测试命令(每块一条 x-view.test-drive-<kind>)。 */
-export function registerXTestCommands(): void {
-  registerWsCommand('x-view.test-drive-html', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('html', TEST_DATA.html, ctx.wsId));
-  registerWsCommand('x-view.test-drive-latex', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('latex', TEST_DATA.latex, ctx.wsId));
-  registerWsCommand('x-view.test-drive-code', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('code', TEST_DATA.code, ctx.wsId));
-  registerWsCommand('x-view.test-drive-table', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('table', TEST_DATA.table, ctx.wsId));
-  registerWsCommand('x-view.test-drive-divider', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('divider', TEST_DATA.divider, ctx.wsId));
-  registerWsCommand('x-view.test-drive-posts', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('posts', TEST_DATA.posts, ctx.wsId));
-  registerWsCommand('x-view.test-drive-media-image', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('media-image', TEST_DATA.mediaImage, ctx.wsId));
-  registerWsCommand('x-view.test-drive-media-video', () => workspaceManager.getActiveId(), (ctx) => void runTestStep('media-video', TEST_DATA.mediaVideo, ctx.wsId));
+export function registerXTestCommands(wsId: string): void {
+  registerWsCommand('x-view.test-drive-html', () => wsId, (ctx) => void runTestStep('html', TEST_DATA.html, ctx.wsId));
+  registerWsCommand('x-view.test-drive-latex', () => wsId, (ctx) => void runTestStep('latex', TEST_DATA.latex, ctx.wsId));
+  registerWsCommand('x-view.test-drive-code', () => wsId, (ctx) => void runTestStep('code', TEST_DATA.code, ctx.wsId));
+  registerWsCommand('x-view.test-drive-table', () => wsId, (ctx) => void runTestStep('table', TEST_DATA.table, ctx.wsId));
+  registerWsCommand('x-view.test-drive-divider', () => wsId, (ctx) => void runTestStep('divider', TEST_DATA.divider, ctx.wsId));
+  registerWsCommand('x-view.test-drive-posts', () => wsId, (ctx) => void runTestStep('posts', TEST_DATA.posts, ctx.wsId));
+  registerWsCommand('x-view.test-drive-media-image', () => wsId, (ctx) => void runTestStep('media-image', TEST_DATA.mediaImage, ctx.wsId));
+  registerWsCommand('x-view.test-drive-media-video', () => wsId, (ctx) => void runTestStep('media-video', TEST_DATA.mediaVideo, ctx.wsId));
 
   // ★ dev 便捷:挂到 window 供 devtools console 直接调(自动取当前 ws 的 X wcId)。
   //   用法:__xtest.image() / __xtest.table() / __xtest.divider() / __xtest.html() ...
   //   也可 __xtest.run('custom', {kind:'media', mediaUrl:'/abs/path.png'}) 自定义。
   (window as unknown as { __xtest?: Record<string, unknown> }).__xtest = {
-    html: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('html', TEST_DATA.html, w); },
-    heading1: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('heading1', TEST_DATA.heading1, w); },
-    heading2: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('heading2', TEST_DATA.heading2, w); },
-    latex: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('latex', TEST_DATA.latex, w); },
-    code: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('code', TEST_DATA.code, w); },
-    table: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('table', TEST_DATA.table, w); },
-    divider: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('divider', TEST_DATA.divider, w); },
-    posts: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('posts', TEST_DATA.posts, w); },
-    image: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('media-image', TEST_DATA.mediaImage, w); },
-    video: () => { const w = workspaceManager.getActiveId(); if (w) void runTestStep('media-video', TEST_DATA.mediaVideo, w); },
-    run: (name: string, step: ArticleInsertStep) => { const w = workspaceManager.getActiveId(); if (w) void runTestStep(name, step, w); },
+    html: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('html', TEST_DATA.html, w); },
+    heading1: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('heading1', TEST_DATA.heading1, w); },
+    heading2: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('heading2', TEST_DATA.heading2, w); },
+    latex: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('latex', TEST_DATA.latex, w); },
+    code: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('code', TEST_DATA.code, w); },
+    table: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('table', TEST_DATA.table, w); },
+    divider: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('divider', TEST_DATA.divider, w); },
+    posts: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('posts', TEST_DATA.posts, w); },
+    image: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('media-image', TEST_DATA.mediaImage, w); },
+    video: () => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep('media-video', TEST_DATA.mediaVideo, w); },
+    run: (name: string, step: ArticleInsertStep) => { const w = getActiveWorkspaceIdSync(); if (w) void runTestStep(name, step, w); },
     /** ★ 验证正解:图(media)后紧跟 heading step(工具栏格式化),看图后标题是否成格。 */
     mediaHeading: async () => {
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!wsId) { window.alert('无活跃 ws'); return; }
       const x = requireCapabilityApi<XExtractionApi>('x-extraction');
       const wcId = x.getXHostWcId(wsId);
@@ -104,7 +104,7 @@ export function registerXTestCommands(): void {
     },
     /** 诊断:图(media)后紧跟标题(html paste)—— 旧方式对照(应失格)。 */
     mediaSeq: async () => {
-      const wsId = workspaceManager.getActiveId();
+      const wsId = getActiveWorkspaceIdSync();
       if (!wsId) { window.alert('无活跃 ws'); return; }
       const x = requireCapabilityApi<XExtractionApi>('x-extraction');
       const wcId = x.getXHostWcId(wsId);

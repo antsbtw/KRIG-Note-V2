@@ -8,7 +8,6 @@
 
 import { registerView } from '@slot/view-type-registry/register-view';
 import { NoteView } from './NoteView';
-import { registerNoteCommands } from './note-commands';
 import { registerNavSide } from './nav-side-content';
 import { registerContextMenuItems } from './context-menu-registrations';
 import { registerToolbar } from './toolbar-content';
@@ -67,7 +66,6 @@ registerView({
   // L5-B2 真有 PM 编辑区菜单需求时(粘贴/格式化等)在此重新注册
 });
 
-registerNoteCommands();
 registerNavSide();
 registerContextMenuItems();
 registerToolbar();

@@ -8,12 +8,8 @@
  * import 时机:platform/renderer/index.tsx 显式拉一次(触发命令注册副作用)。
  */
 
-import { registerXCommands } from './x-commands';
 import { registerXSendConfirmPopup } from './send-confirm-popup';
-import { registerXTestCommands } from './x-test-commands';
 
-registerXCommands();
 // 阶段 2.5-a:注册「发到 X」发送前确认弹窗(发推/回复注入前预览 + 确认)。
 registerXSendConfirmPopup();
-// 2026-06-14:逐块底层测试命令(dev,x-view.test-drive-<kind>;每块独立驱动+验证完整落定)。
-registerXTestCommands();
+// registerXCommands / registerXTestCommands 已迁到 renderer/index.tsx 显式传 wsId 调用

@@ -22,6 +22,7 @@
  */
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
@@ -84,8 +85,7 @@ function matchesAISyncCombo(ws: WorkspaceState): boolean {
  */
 function reconcileForActive(): void {
   const aiCap = requireCapabilityApi<AIConversationApi>('ai-extraction');
-  // TODO(multi-window-step2): 全局 active 概念消亡后重构(每 renderer 自己那份 ws 就是本窗口 ws)
-  const activeId = workspaceManager.getActiveId();
+  const activeId = getActiveWorkspaceIdSync();
   if (!activeId) {
     void stopActive(aiCap);
     return;
@@ -135,8 +135,7 @@ async function stopActive(aiCap: AIConversationApi): Promise<void> {
 function handleAppendTurn(payload: AISyncAppendTurnPayload): void {
   if (!active) return; // 已停止,跳过
   if (payload.serviceId !== active.serviceId) return; // 别的 service 的回复(并发场景)
-  // TODO(multi-window-step2): 全局 active 概念消亡后重构(每 renderer 自己那份 ws 就是本窗口 ws)
-  const activeId = workspaceManager.getActiveId();
+  const activeId = getActiveWorkspaceIdSync();
   if (!activeId || activeId !== active.workspaceId) return; // active ws 已切
 
   const ws = workspaceManager.get(activeId);

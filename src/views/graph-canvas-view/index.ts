@@ -37,7 +37,6 @@ import { slashRegistry } from '@slot/interaction-registries/slash-registry/slash
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { GraphCanvasView } from './GraphCanvasView';
-import { registerGraphCanvasCommands } from './canvas-commands';
 import { filterSlashItemsToRenderable } from './slash-render-gate';
 import {
   registerNavSide,
@@ -60,7 +59,7 @@ registerView({
   navSideTab: { label: 'Graph', icon: '🎨', order: 5 },
 });
 
-registerGraphCanvasCommands();
+// registerGraphCanvasCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
 registerNavSide();
 registerFolderTreeContextMenu();
 
