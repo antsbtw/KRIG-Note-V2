@@ -138,9 +138,8 @@
 
 .krig-activity-bar__account-menu {
   position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 0;
+  left: calc(100% + 8px);
   z-index: 10000;
   background: #2a2a2a;
   border: 1px solid #444;
