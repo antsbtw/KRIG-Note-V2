@@ -77,10 +77,15 @@ import './app.css';
 // S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。
 // 此处仍保留 getBus 初始化供 L3.5 alive 计数。
 
-// U1-c1-batch:命令注册函数需要在拿到本 renderer 的 wsId 后显式调用(闭包捕获,不再运行时 getActiveId)
-// view import(上方)只触发 registerView / registerNavSide 等非命令注册,命令注册在此统一显式传入 wsId。
-const rendererWsId = getActiveWorkspaceIdSync();
-if (rendererWsId) {
+// U1-c1-batch:命令注册需要在 activeId 就绪后执行一次(wsId 从 IPC 异步拉取,模块加载时可能还是 null)。
+// 用 workspaceManager.subscribe 等首次 activeId 非 null 时注册,之后取消订阅(幂等)。
+let _commandsRegistered = false;
+const _unsubCommands = workspaceManager.subscribe(() => {
+  if (_commandsRegistered) return;
+  const rendererWsId = getActiveWorkspaceIdSync();
+  if (!rendererWsId) return;
+  _commandsRegistered = true;
+  _unsubCommands();
   registerNoteCommands(rendererWsId);
   registerWebCommands(rendererWsId);
   registerWebBookmarkCommands(rendererWsId);
@@ -90,11 +95,13 @@ if (rendererWsId) {
   registerXTestCommands(rendererWsId);
   registerGraphCanvasCommands(rendererWsId);
   registerThoughtCommands(rendererWsId);
-}
+  // L3.5 bus 初始化(首次 activeId 就绪时补一次,确保 alive 计数 >= 1)
+  workspaceManager.getBus(rendererWsId);
+});
 
 // L3.5 启动:为活跃 Workspace 创建 bus(lazy 创建,首个 getBus 调用触发)
-// 这里主动调一次,让 alive 计数 >= 1
-const _activeId = rendererWsId;
+// 这里主动调一次,让 alive 计数 >= 1(若 activeId 已同步就绪则立即触发)
+const _activeId = getActiveWorkspaceIdSync();
 if (_activeId) workspaceManager.getBus(_activeId);
 
 // dev-only:DevTools 调试钩子 — 让 `window.__krig.bus` / `__krig.wm` 直接可用
