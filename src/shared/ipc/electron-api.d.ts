@@ -19,7 +19,7 @@ import type {
 import type {
   CreateNoteBatchInput,
   CreateNoteBatchResult,
-} from '@capabilities/note/types';
+} from './note-batch-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
 import type { XPlanCacheEnvelope } from './x-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
