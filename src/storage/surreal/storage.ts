@@ -48,6 +48,25 @@ import {
   bulkDeleteAtomsAndEdgesViaTx,
 } from './transaction-helpers';
 
+// OCC 重试参数（指数退避，探针实测最大重试深度仅 1 次）
+const OCC_MAX_RETRIES = 5;
+const OCC_BASE_DELAY_MS = 20;
+
+/** 判断错误是否为 SurrealDB OCC 冲突（Transaction conflict: Resource busy）*/
+function isOccConflict(err: unknown): boolean {
+  if (err instanceof Error) {
+    return (
+      err.message.includes('Transaction conflict') ||
+      err.message.includes('Resource busy')
+    );
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 class SurrealStorage implements StorageAPI {
   // ── atom CRUD ─────────────────────────────────────────────
 
@@ -529,32 +548,46 @@ class SurrealStorage implements StorageAPI {
   async transaction<T>(fn: (tx: StorageTransaction) => Promise<T>): Promise<T> {
     // sub-phase 3a-tx 启用真原子性 (decision 020):
     // SDK 2.x beginTransaction + commit / cancel 包整段。
-    // OCC 冲突 (Transaction conflict) 不在本 sub-phase 处理 (decision 020 §9.4)。
-    const db = getDB();
-    const surrealTx = await db.beginTransaction();
-    try {
-      const tx: StorageTransaction = {
-        getAtom: (id) => getAtomViaTx(surrealTx, id),
-        putAtom: (input, options) => putAtomViaTx(surrealTx, input, options),
-        batchPutAtoms: (inputs, options) => batchPutAtomsViaTx(surrealTx, inputs, options),
-        deleteAtom: (id) => deleteAtomViaTx(surrealTx, id),
-        getEdge: (id) => getEdgeViaTx(surrealTx, id),
-        putEdge: (input, options) => putEdgeViaTx(surrealTx, input, options),
-        batchPutEdges: (inputs, options) => batchPutEdgesViaTx(surrealTx, inputs, options),
-        deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
-        bulkDeleteAtomsAndEdges: (ids) => bulkDeleteAtomsAndEdgesViaTx(surrealTx, ids),
-      };
-      const result = await fn(tx);
-      await surrealTx.commit();
-      return result;
-    } catch (err) {
+    // OCC 冲突：指数退避重试，最多 OCC_MAX_RETRIES 次。
+    let attempt = 0;
+    while (true) {
+      const db = getDB();
+      const surrealTx = await db.beginTransaction();
       try {
-        await surrealTx.cancel();
-      } catch (cancelErr) {
-        // cancel 失败不遮盖原 fn 错误 (decision 020 §4.1 / §9.5)
-        console.error('[storage.transaction] cancel failed after fn error', cancelErr);
+        const tx: StorageTransaction = {
+          getAtom: (id) => getAtomViaTx(surrealTx, id),
+          putAtom: (input, options) => putAtomViaTx(surrealTx, input, options),
+          batchPutAtoms: (inputs, options) => batchPutAtomsViaTx(surrealTx, inputs, options),
+          deleteAtom: (id) => deleteAtomViaTx(surrealTx, id),
+          getEdge: (id) => getEdgeViaTx(surrealTx, id),
+          putEdge: (input, options) => putEdgeViaTx(surrealTx, input, options),
+          batchPutEdges: (inputs, options) => batchPutEdgesViaTx(surrealTx, inputs, options),
+          deleteEdge: (id) => deleteEdgeViaTx(surrealTx, id),
+          bulkDeleteAtomsAndEdges: (ids) => bulkDeleteAtomsAndEdgesViaTx(surrealTx, ids),
+        };
+        const result = await fn(tx);
+        await surrealTx.commit();
+        return result;
+      } catch (err) {
+        // cancel 当前事务（不遮盖原错误，decision 020 §4.1 / §9.5）
+        try {
+          await surrealTx.cancel();
+        } catch (cancelErr) {
+          console.error('[storage.transaction] cancel failed after fn error', cancelErr);
+        }
+
+        if (isOccConflict(err) && attempt < OCC_MAX_RETRIES) {
+          const delay = OCC_BASE_DELAY_MS * Math.pow(2, attempt);
+          console.warn(
+            `[storage.transaction] OCC conflict, retry ${attempt + 1}/${OCC_MAX_RETRIES} in ${delay}ms`,
+          );
+          await sleep(delay);
+          attempt++;
+          continue;
+        }
+
+        throw err;
       }
-      throw err;
     }
   }
 
