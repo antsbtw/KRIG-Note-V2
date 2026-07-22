@@ -14,6 +14,7 @@ import { getDB } from '@storage/surreal/client';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { createDefaultWorkspaceState } from '@workspace/workspace-state/default-state';
 import type { WorkspaceState, WorkspaceManagerState } from '@workspace/workspace-state/workspace-state';
+import { getProfile } from './workspace-profiles';
 
 // ── 状态 ────────────────────────────────────────────────────────
 
@@ -96,6 +97,20 @@ export async function initWorkspaceManager(): Promise<void> {
 export function wsCreate(label?: string): WorkspaceState {
   const id = `ws-${++counter}`;
   const ws = createDefaultWorkspaceState(id, label ?? `Workspace ${counter}`, !!label);
+  workspaces.set(id, ws);
+  void broadcast();
+  return ws;
+}
+
+export function wsCreateWithProfile(profileId: string): WorkspaceState {
+  const profile = getProfile(profileId);
+  if (!profile) {
+    console.warn(`[wsCreateWithProfile] unknown profile "${profileId}", falling back to blank`);
+    return wsCreate();
+  }
+  const id = `ws-${++counter}`;
+  const ws = createDefaultWorkspaceState(id, profile.label, true);
+  ws.slotBinding = profile.slotBinding;
   workspaces.set(id, ws);
   void broadcast();
   return ws;

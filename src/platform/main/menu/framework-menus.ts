@@ -11,7 +11,8 @@
 import { app, BrowserWindow } from 'electron';
 import { menuRegistry } from '@slot/menu-registry/menu-registry';
 import { importChromeBookmarks } from '../bookmark/chrome-import';
-import { wsCreate } from '../workspace/workspace-manager-main';
+import { wsCreate, wsCreateWithProfile } from '../workspace/workspace-manager-main';
+import { WORKSPACE_PROFILES } from '../workspace/workspace-profiles';
 import { createWindow } from '../window/main-window';
 
 /** 注册框架级 Application Menu */
@@ -22,18 +23,12 @@ export function registerFrameworkMenus(): void {
     const ws = wsCreate();
     void createWindow(ws.id);
   });
-  menuRegistry.registerCommand('window.new-profile-note', () => {
-    const ws = wsCreate('Note');
-    void createWindow(ws.id);
-  });
-  menuRegistry.registerCommand('window.new-profile-web', () => {
-    const ws = wsCreate('Web');
-    void createWindow(ws.id);
-  });
-  menuRegistry.registerCommand('window.new-profile-ai', () => {
-    const ws = wsCreate('AI');
-    void createWindow(ws.id);
-  });
+  for (const profile of WORKSPACE_PROFILES) {
+    menuRegistry.registerCommand(`window.new-profile-${profile.id}`, () => {
+      const ws = wsCreateWithProfile(profile.id);
+      void createWindow(ws.id);
+    });
+  }
   menuRegistry.registerCommand('window.minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize();
   });
@@ -80,11 +75,11 @@ export function registerFrameworkMenus(): void {
       {
         id: 'new-window-profile',
         label: 'New Window with Profile',
-        submenu: [
-          { id: 'new-profile-note', label: 'Note', command: 'window.new-profile-note' },
-          { id: 'new-profile-web', label: 'Web', command: 'window.new-profile-web' },
-          { id: 'new-profile-ai', label: 'AI', command: 'window.new-profile-ai' },
-        ],
+        submenu: WORKSPACE_PROFILES.map((p) => ({
+          id: `new-profile-${p.id}`,
+          label: p.label,
+          command: `window.new-profile-${p.id}`,
+        })),
       },
       { id: 'sep-new', label: '', separator: true },
       { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
