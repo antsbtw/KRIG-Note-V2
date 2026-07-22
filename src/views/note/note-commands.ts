@@ -73,10 +73,10 @@ function ensureNoteViewActive(wsId: string): void {
 }
 
 /** focus-first instanceId(同 capability/commands 风格,业务命令也用) */
-function resolveInstanceId(): string | null {
+function resolveInstanceId(wsId?: string): string | null {
   return (
     requireCapabilityApi<TextEditingApi>('text-editing')
-      .instanceRegistry.getFocusedInstanceId() ?? workspaceManager.getActiveId()
+      .instanceRegistry.getFocusedInstanceId() ?? wsId ?? null
   );
 }
 
@@ -114,9 +114,8 @@ export function registerNoteCommands(): void {
     ensureNoteViewActive(wsId);
   });
 
-  commandRegistry.register('note-view.delete-active', () => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.delete-active', () => workspaceManager.getActiveId(), (ctx) => {
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     const state = getNoteWsState(ws);
@@ -129,10 +128,9 @@ export function registerNoteCommands(): void {
     if (state.activeNoteId) void deleteTreeIdsWithProgress([encodeNoteId(state.activeNoteId)]);
   });
 
-  commandRegistry.register('note-view.set-active', (noteId: unknown) => {
+  registerWsCommand('note-view.set-active', () => workspaceManager.getActiveId(), (ctx, noteId) => {
     if (typeof noteId !== 'string') return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    const wsId = ctx.wsId;
     setActiveNote(wsId, noteId);
     ensureNoteViewActive(wsId);
   });
@@ -147,10 +145,9 @@ export function registerNoteCommands(): void {
    * 适用场景:left slot 当前是用户主导的 view(如 EBookView 看 PDF),需要在右栏
    * 跳到刚导入的 note 而不打断左栏 — 走"left 不被系统自动关"约定。
    */
-  commandRegistry.register('note-view.set-active-in-right', (noteId: unknown) => {
+  registerWsCommand('note-view.set-active-in-right', () => workspaceManager.getActiveId(), (ctx, noteId) => {
     if (typeof noteId !== 'string') return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     setActiveNote(wsId, noteId);
@@ -163,9 +160,8 @@ export function registerNoteCommands(): void {
 
   // ── 文件夹 CRUD(4) ──
 
-  commandRegistry.register('note-view.create-folder', (parentId: unknown) => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.create-folder', () => workspaceManager.getActiveId(), (ctx, parentId) => {
+    const wsId = ctx.wsId;
     const pid = typeof parentId === 'string' ? parentId : null;
     ensureNoteViewActive(wsId);
     void (async () => {
@@ -186,35 +182,27 @@ export function registerNoteCommands(): void {
     void deleteTreeIdsWithProgress([treeId]);
   });
 
-  commandRegistry.register('note-view.copy-by-tree-id', (treeId: unknown) => {
+  registerWsCommand('note-view.copy-by-tree-id', () => workspaceManager.getActiveId(), (ctx, treeId) => {
     if (typeof treeId !== 'string') return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
-    copyToClipboard(wsId, treeId);
+    copyToClipboard(ctx.wsId, treeId);
   });
 
   /** 粘贴到目标 folder(commandArg 可以是 folderId 字符串 / null)*/
-  commandRegistry.register('note-view.paste', (targetFolderId: unknown) => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.paste', () => workspaceManager.getActiveId(), (ctx, targetFolderId) => {
     const fid = typeof targetFolderId === 'string' ? targetFolderId : null;
-    void pasteFromClipboard(wsId, fid);
+    void pasteFromClipboard(ctx.wsId, fid);
   });
 
   // ── 文件夹排序(2) ──
 
-  commandRegistry.register('note-view.sort-cycle-title', (folderKey: unknown) => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.sort-cycle-title', () => workspaceManager.getActiveId(), (ctx, folderKey) => {
     const key = typeof folderKey === 'string' ? folderKey : '__root__';
-    cycleSortByTitle(wsId, key);
+    cycleSortByTitle(ctx.wsId, key);
   });
 
-  commandRegistry.register('note-view.sort-cycle-date', (folderKey: unknown) => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.sort-cycle-date', () => workspaceManager.getActiveId(), (ctx, folderKey) => {
     const key = typeof folderKey === 'string' ? folderKey : '__root__';
-    cycleSortByDate(wsId, key);
+    cycleSortByDate(ctx.wsId, key);
   });
 
   // ── 业务插入(7):依赖 mediaStore / tweetFetcher / ytdlp 等业务 capability ──
@@ -322,9 +310,8 @@ export function registerNoteCommands(): void {
   // ── Toolbar 操作命令 ──
 
   /** × 关闭 NoteView(按 note-view 实际所在 slot 关;右侧则 closeRight,否则 closeLeft;最后一个 view 时自身拒绝)*/
-  commandRegistry.register('note-view.close-view', () => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('note-view.close-view', () => workspaceManager.getActiveId(), (ctx) => {
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     const bus = workspaceManager.getBus(wsId);
     if (!ws || !bus) return;
@@ -350,11 +337,9 @@ export function registerNoteCommands(): void {
    * commandArg = 目标 viewId(e.g. 'note-view' / 'ebook-view' / 'web-view')。
    * 已装同类直接覆盖重开(openRight 是幂等的)。
    */
-  commandRegistry.register('note-view.open-right-slot', (viewId: unknown) => {
+  registerWsCommand('note-view.open-right-slot', () => workspaceManager.getActiveId(), (ctx, viewId) => {
     if (typeof viewId !== 'string') return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
-    const bus = workspaceManager.getBus(wsId);
+    const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
     bus.slot.openRight(viewId);
   });
@@ -375,15 +360,14 @@ export function registerNoteCommands(): void {
    * 返:boolean(true=插入成功;false=未插入,典型场景 instance 未注册 / 节点全失败)
    * 边界:命令不校验 slot 组合(由调用方判);只要 active workspace 有 PM 实例就插。
    */
-  commandRegistry.register('note-view.append-ai-turn', (arg: unknown) => {
+  registerWsCommand('note-view.append-ai-turn', () => workspaceManager.getActiveId(), (ctx, arg) => {
     const p = (arg ?? {}) as {
       serviceId?: AIServiceId;
       turn?: AISyncTurn;
       mode?: 'end' | 'cursor-or-end';
     };
     if (!p.serviceId || !p.turn) return false;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return false;
+    const wsId = ctx.wsId;
 
     const nodes = buildAITurnPmNodes(p.serviceId, p.turn);
     if (nodes.length === 0) return false;
@@ -408,11 +392,10 @@ export function registerNoteCommands(): void {
    *
    * 返:boolean
    */
-  commandRegistry.register('note-view.append-pm-nodes', (arg: unknown) => {
+  registerWsCommand('note-view.append-pm-nodes', () => workspaceManager.getActiveId(), (ctx, arg) => {
     const p = (arg ?? {}) as { nodes?: unknown; mode?: 'end' | 'cursor-or-end' };
     if (!Array.isArray(p.nodes) || p.nodes.length === 0) return false;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return false;
+    const wsId = ctx.wsId;
     const api = tea();
     if (p.mode === 'cursor-or-end') {
       return api.insertNodesAtCursorOrEnd(wsId, p.nodes);

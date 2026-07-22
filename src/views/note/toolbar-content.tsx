@@ -17,6 +17,7 @@ import { toolbarRegistry } from '@slot/toolbar-registry/toolbar-registry';
 import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
 import { useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { NoteOpenPopup } from './note-open-popup/NoteOpenPopup';
 import { useAllNotes } from './use-notes-folders';
 import { getNoteWsState } from './data-model';
@@ -28,15 +29,12 @@ const OPEN_POPUP_ID = 'note-view.popup.open';
 
 /** Toolbar title 组件 — 显示当前 active note 的标题(V1 NoteView.tsx:772 同款)*/
 function NoteToolbarTitle() {
-  const wsId = useSyncExternalStore(
-    (cb) => workspaceManager.subscribe(cb),
-    () => workspaceManager.getActiveId(),
-  );
+  const wsId = useWsId();
   const allNotes = useAllNotes();
   const activeNoteId = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
     () => {
-      const ws = wsId ? workspaceManager.get(wsId) : undefined;
+      const ws = workspaceManager.get(wsId);
       return ws ? getNoteWsState(ws).activeNoteId : null;
     },
   );

@@ -14,13 +14,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { useAllNotes } from '../use-notes-folders';
 import { setActiveNote } from '../data-model';
 import { navigateToNote } from '../note-navigation-history';
 import './note-open-popup.css';
 
 export function NoteOpenPopup({ onClose }: PopupCloseProps) {
+  const wsId = useWsId();
   const allNotes = useAllNotes();
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -55,8 +56,6 @@ export function NoteOpenPopup({ onClose }: PopupCloseProps) {
   }, [selectedIdx]);
 
   function openNote(noteId: string): void {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
     navigateToNote(noteId);
     setActiveNote(wsId, noteId);
     onClose();

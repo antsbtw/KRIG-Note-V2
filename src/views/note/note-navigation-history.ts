@@ -63,28 +63,28 @@ export function navigateToNote(noteId: string): void {
  *
  * 内部直接 setActiveNote 切当前 ws(降级 V1 noteOpenInEditor IPC)。
  */
-export function goBack(): string | null {
+export function goBack(wsId?: string): string | null {
   if (history.back.length === 0) return null;
   if (history.current) history.forward.push(history.current);
   const prev = history.back.pop()!;
   history.current = prev;
-  applyToActiveWs(prev);
+  applyToActiveWs(prev, wsId);
   return prev;
 }
 
-export function goForward(): string | null {
+export function goForward(wsId?: string): string | null {
   if (history.forward.length === 0) return null;
   if (history.current) history.back.push(history.current);
   const next = history.forward.pop()!;
   history.current = next;
-  applyToActiveWs(next);
+  applyToActiveWs(next, wsId);
   return next;
 }
 
-function applyToActiveWs(noteId: string): void {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
-  setActiveNote(wsId, noteId);
+function applyToActiveWs(noteId: string, wsId?: string): void {
+  const id = wsId ?? workspaceManager.getActiveId();
+  if (!id) return;
+  setActiveNote(id, noteId);
 }
 
 /** 给诊断 / 测试用 */

@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { AI_SERVICE_PROFILES, type AIServiceId } from '@shared/types/ai-service-types';
 import type { AIConversationApi } from '@capabilities/ai-extraction/types';
@@ -40,6 +41,7 @@ function buildPrompt(instruction: string, markdown: string): string {
 }
 
 export function AskAIPanel({ onClose }: PopupCloseProps) {
+  const wsId = useWsId();
   // mount 时读 pending ctx;读完即清。useMemo 保 SSR 安全 + 仅跑一次。
   const ctx = useMemo<AskAIContext | null>(() => consumePendingAskAIContext(), []);
   const [instruction, setInstruction] = useState('');
@@ -106,11 +108,6 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
   function handleSend(): void {
     if (!ctx) return;
     const prompt = buildPrompt(instruction, ctx.selectionMarkdown);
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) {
-      onClose();
-      return;
-    }
     const bus = workspaceManager.getBus(wsId);
     if (!bus) {
       onClose();
