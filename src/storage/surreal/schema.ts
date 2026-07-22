@@ -386,3 +386,39 @@ export async function migration_1_2_0(_db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.2.0'), now },
   );
 }
+
+/**
+ * 1.7.0 schema — workspace 表（S3-b：楼长持久化迁 SurrealDB）
+ *
+ * workspace 是 Electron 运行态（workspace bar 状态），不是知识图谱语义层，
+ * 独立表隔离，不污染 atom/edge 图谱查询。
+ *
+ * 一行 = 整个 WorkspaceManagerState（单记录快照模式，id 固定为 'current'）：
+ * - workspaces: array of WorkspaceState（所有已知 ws）
+ * - activeId: string | null
+ * - counter: number（自增 id 种子）
+ *
+ * 选择单记录快照而非逐 ws 行：
+ * - ws 数量极少（典型 1-5 个），无需索引查询
+ * - 整体原子替换比逐行 upsert 简单，避免孤儿行
+ * - 和 JSON 文件语义一比一对齐
+ */
+const SCHEMA_VERSION_1_7_0 = `
+DEFINE TABLE IF NOT EXISTS workspace SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS workspaces ON workspace TYPE array;
+DEFINE FIELD IF NOT EXISTS activeId ON workspace TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS counter ON workspace TYPE int;
+`;
+
+export async function migration_1_7_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_7_0);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.7.0',
+      appliedAt = $now,
+      description = 'Add workspace table (S3-b landlord persistence in SurrealDB)'`,
+    { rid: new RecordId('schema_version', '1.7.0'), now },
+  );
+}

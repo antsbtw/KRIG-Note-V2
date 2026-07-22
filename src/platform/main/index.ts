@@ -62,6 +62,7 @@ import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
 import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
 import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cache';
 import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
+import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -109,9 +110,6 @@ app.commandLine.appendSwitch('disable-features', 'FedCm');
 app.whenReady().then(async () => {
   // L0 — 平台层就绪
   reportL0Alive();
-
-  // S3-a — 主进程楼长（必须在 createMainWindow 之前，renderer 加载即可 invoke WORKSPACE_GET_STATE）
-  initWorkspaceManager();
 
   // L0 — IPC 总线(含健康检查 handlers)
   initIpcBus();
@@ -170,6 +168,17 @@ app.whenReady().then(async () => {
   void runMigration023IfNeeded().catch((err) => {
     console.error('[migration/023] 后台执行失败,启动下次会重试:', err);
   });
+
+  // S3-b migration073 — workspace JSON → SurrealDB（必须在 initStorage 后）
+  try {
+    await runMigration073IfNeeded();
+  } catch (err) {
+    console.error('[migration/073] 执行失败,启动下次会重试:', err);
+  }
+
+  // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
+  // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。
+  await initWorkspaceManager();
 
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
