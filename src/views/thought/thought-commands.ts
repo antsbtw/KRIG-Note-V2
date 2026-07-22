@@ -12,6 +12,8 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import { getCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { ThoughtType, BookLocator } from '@capabilities/thought/types';
@@ -76,26 +78,26 @@ export function registerThoughtCommands(): void {
   });
 
   // 跨 view 命令(Note 侧 ⌘⇧M / 💭 / 🤖 / ThoughtCard 跳源)
-  commandRegistry.register('thought-view.add-from-note', () => {
-    void addThoughtFromNote();
+  registerWsCommand('thought-view.add-from-note', () => workspaceManager.getActiveId(), (ctx) => {
+    void addThoughtFromNote(ctx.wsId);
   });
 
   /**
    * EBook 侧 PDF 标注创建后召唤右槽 ThoughtView + 高亮新 thought 卡片。
    * pdfAnn.create 已完成 thought atom + anchor 落库,本命令只负责 UI 召唤。
    */
-  commandRegistry.register('thought-view.add-from-pdf-annotation', (arg: unknown) => {
+  registerWsCommand('thought-view.add-from-pdf-annotation', () => workspaceManager.getActiveId(), (ctx, arg: unknown) => {
     if (typeof arg !== 'string') return;
-    void addFromPdfAnnotation(arg);
+    void addFromPdfAnnotation(arg, ctx.wsId);
   });
 
-  commandRegistry.register('thought-view.ask-ai-from-note', () => {
-    void askAiFromNote();
+  registerWsCommand('thought-view.ask-ai-from-note', () => workspaceManager.getActiveId(), (ctx) => {
+    void askAiFromNote(ctx.wsId);
   });
 
-  commandRegistry.register('thought-view.scroll-to-source', (thoughtId: unknown) => {
+  registerWsCommand('thought-view.scroll-to-source', () => workspaceManager.getActiveId(), (ctx, thoughtId: unknown) => {
     if (typeof thoughtId !== 'string') return;
-    void scrollToSource(thoughtId);
+    void scrollToSource(thoughtId, ctx.wsId);
   });
 
   /**

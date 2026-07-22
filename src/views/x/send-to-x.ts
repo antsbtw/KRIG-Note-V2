@@ -131,9 +131,7 @@ function fallbackToClipboard(text: string, reason: string): void {
  * 「𝕏 发到 X」note 右键入口:把 note 选区/整篇发成普通推(确认弹窗 → 注入 compose 框)。
  * (回复改走「拖 block 到某条推」交互,见 sendToXAtDropTarget;故此入口只发普通推。)
  */
-export async function sendToX(): Promise<void> {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
+export async function sendToX(wsId: string): Promise<void> {
 
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const instanceId = getActiveNoteInstanceId(textEditing);
@@ -251,9 +249,7 @@ async function performXInjection(
  *
  * ⚠️ 写方向红线:driveArticle 全程只插内容,绝不程序点 Publish —— 用户在 X 编辑器看成品 + 手动发布。
  */
-export async function publishToXArticle(): Promise<void> {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
+export async function publishToXArticle(wsId: string): Promise<void> {
 
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const instanceId = getActiveNoteInstanceId(textEditing);
@@ -432,10 +428,8 @@ function getPendingRaw(): { raw: DraggedRaw; usedWholeDoc: boolean } | null {
  * ⚠️ 落点不是发推框/推文(拖到空白/导航栏、或 guest 没收到坐标)→ 静默不发。
  * 写方向红线:只填入,用户点发布/回复。
  */
-export async function sendToXAtDropTarget(): Promise<void> {
+export async function sendToXAtDropTarget(wsId: string): Promise<void> {
   const draggedRawPayload = consumeDraggedRaw(); // 消费本次拖拽 stash(无论落点如何都清掉)
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
   const x = requireCapabilityApi<XExtractionApi>('x-extraction');
   const targetWcId = x.getXHostWcId(wsId);
   if (targetWcId == null) return; // 本 ws 无在台上的 X Host → 非拖到 X,忽略

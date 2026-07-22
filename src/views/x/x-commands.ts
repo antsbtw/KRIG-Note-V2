@@ -13,6 +13,7 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XTweetData } from '@capabilities/x-extraction';
@@ -71,11 +72,10 @@ export function registerXCommands(): void {
    *
    * 走 bus 而非直接拿 X Host ref:tweet block 在 Note 里,跨 view 不直接持有 X Host。
    */
-  commandRegistry.register('x-view.open-tweet', (arg: unknown): boolean => {
+  registerWsCommand('x-view.open-tweet', () => workspaceManager.getActiveId(), (ctx, arg: unknown): boolean => {
     const url = typeof arg === 'string' ? arg : '';
     if (!url) return false;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return false;
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return false;
     // 确保 AI view 在台上(它承载 X webview)
@@ -100,11 +100,10 @@ export function registerXCommands(): void {
    *
    * fail loud(铁律 4):非推文 / 抓空 / 没开 Note / PM 未挂 → alert 明确报错,不插空 block。
    */
-  commandRegistry.register('x-view.extract-tweet', async (arg: unknown) => {
+  registerWsCommand('x-view.extract-tweet', () => workspaceManager.getActiveId(), async (ctx, arg: unknown) => {
     const p = (arg ?? {}) as { x?: unknown; y?: unknown };
     if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
 
@@ -139,8 +138,8 @@ export function registerXCommands(): void {
    *
    * 实现见 send-to-x.ts(选区/整篇取 markdown + 降级 + 超长 fail loud + 剪贴板降级)。
    */
-  commandRegistry.register('x-view.send-to-x', () => {
-    void sendToX();
+  registerWsCommand('x-view.send-to-x', () => workspaceManager.getActiveId(), (ctx) => {
+    void sendToX(ctx.wsId);
   });
 
   /**
@@ -148,8 +147,8 @@ export function registerXCommands(): void {
    * (LaTeX/Table/Code/Posts/Media 走原生,Mermaid/mathVisual 渲图兜底)。
    * 实现见 send-to-x.ts publishToXArticle。⚠️ 只插内容,用户在 X 手动点 Publish。
    */
-  commandRegistry.register('x-view.publish-article', () => {
-    void publishToXArticle();
+  registerWsCommand('x-view.publish-article', () => workspaceManager.getActiveId(), (ctx) => {
+    void publishToXArticle(ctx.wsId);
   });
 
   // ── 右键「提取此推文到笔记」(X_EXTRACT_TWEET_REQUEST 广播)模块级单订阅 ──
@@ -193,7 +192,9 @@ export function registerXCommands(): void {
   }
   if (dndApi && !dndDoneUnsub) {
     dndDoneUnsub = dndApi.subscribe('dnd.completed', () => {
-      void sendToXAtDropTarget();
+      const wsId = workspaceManager.getActiveId();
+      if (!wsId) return;
+      void sendToXAtDropTarget(wsId);
     });
   }
 

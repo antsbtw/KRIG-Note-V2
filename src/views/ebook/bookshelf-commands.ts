@@ -6,16 +6,12 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { getEBookWsState, setActiveBookId, setFolderExpanded } from './data-model';
-
-/** 拿当前活跃 workspace id(commands 由用户在某 ws 触发,默认作用于活跃 ws)*/
-function getActiveWorkspaceId(): string | null {
-  return workspaceManager.getActiveId();
-}
 
 /** import 流程:pickFile + 弹 ImportModal(由 nav-side-content 接管 modal UI) */
 let pendingImportTrigger: (() => void) | null = null;
@@ -42,26 +38,24 @@ export function registerEBookCommands(): void {
   });
 
   // 在指定文件夹下新建子文件夹(右键 → "在此新建文件夹")
-  commandRegistry.register('ebook-view.create-folder-in', async (parentId: unknown) => {
+  registerWsCommand('ebook-view.create-folder-in', () => workspaceManager.getActiveId(), async (ctx, parentId: unknown) => {
     if (typeof parentId !== 'string' || !parentId) return;
     const folder = requireCapabilityApi<FolderCapabilityApi>('folder');
     const created = await folder.createFolder('新建文件夹', parentId, 'ebook');
     if (created) {
       // 自动展开父
-      const wsId = getActiveWorkspaceId();
-      if (wsId) setFolderExpanded(wsId, parentId, true);
+      setFolderExpanded(ctx.wsId, parentId, true);
       pendingFolderCreatedTrigger?.(created.id);
     }
   });
 
   // 打开书(单击书项)— 失败由 view 端 toast 处理
-  commandRegistry.register('ebook-view.open-book', async (bookId: unknown) => {
+  registerWsCommand('ebook-view.open-book', () => workspaceManager.getActiveId(), async (ctx, bookId: unknown) => {
     if (typeof bookId !== 'string' || !bookId) return;
     const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
     const result = await library.open(bookId);
     if (result.success) {
-      const wsId = getActiveWorkspaceId();
-      if (wsId) setActiveBookId(wsId, bookId);
+      setActiveBookId(ctx.wsId, bookId);
     } else {
       pendingOpenFailedTrigger?.(bookId, result.error ?? 'unknown');
     }
@@ -74,18 +68,15 @@ export function registerEBookCommands(): void {
   });
 
   // 删除单项
-  commandRegistry.register('ebook-view.delete', async (treeId: unknown) => {
+  registerWsCommand('ebook-view.delete', () => workspaceManager.getActiveId(), async (ctx, treeId: unknown) => {
     if (typeof treeId !== 'string' || !treeId) return;
     const { type, id } = decodeTreeId(treeId);
     const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
     if (type === 'book') {
       await library.remove(id);
-      const wsId = getActiveWorkspaceId();
-      if (wsId) {
-        const ws = workspaceManager.get(wsId);
-        if (ws && getEBookWsState(ws).activeBookId === id) {
-          setActiveBookId(wsId, null);
-        }
+      const ws = workspaceManager.get(ctx.wsId);
+      if (ws && getEBookWsState(ws).activeBookId === id) {
+        setActiveBookId(ctx.wsId, null);
       }
     } else {
       // sub-phase 022: folder 删除走 folder capability (FolderViewType='ebook' 已自带 cascade)
@@ -116,11 +107,9 @@ export function registerEBookCommands(): void {
   });
 
   // ⊞ Toolbar 视图切换:在右槽打开 commandArg=viewId(对齐 note-view.open-right-slot)
-  commandRegistry.register('ebook-view.open-right-slot', (viewId: unknown) => {
+  registerWsCommand('ebook-view.open-right-slot', () => workspaceManager.getActiveId(), (ctx, viewId: unknown) => {
     if (typeof viewId !== 'string') return;
-    const wsId = getActiveWorkspaceId();
-    if (!wsId) return;
-    const bus = workspaceManager.getBus(wsId);
+    const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
     bus.slot.openRight(viewId);
   });

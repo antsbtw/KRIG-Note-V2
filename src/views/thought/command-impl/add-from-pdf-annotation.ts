@@ -15,9 +15,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { ThoughtAnchor } from '@capabilities/thought/types';
 import { thoughtCap } from './shared';
 
-export async function addFromPdfAnnotation(thoughtId: string): Promise<void> {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
+export async function addFromPdfAnnotation(thoughtId: string, wsId: string): Promise<void> {
   const bus = workspaceManager.getBus(wsId);
   if (!bus) return;
 

@@ -10,6 +10,7 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { setWebUrl } from './data-model';
 
@@ -23,10 +24,9 @@ export function registerWebCommands(): void {
    *
    * 跨 ws 跳转留 ActiveResourceManager 抽象到位后处理。
    */
-  commandRegistry.register('web-view.open-url', (urlArg: unknown) => {
+  registerWsCommand('web-view.open-url', () => workspaceManager.getActiveId(), (ctx, urlArg: unknown) => {
     if (typeof urlArg !== 'string' || urlArg.length === 0) return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     // 1. 写 web view 活跃 tab 的 url(per-ws 持久化)
@@ -50,9 +50,8 @@ export function registerWebCommands(): void {
    * 网页剪藏用:提取成功后让 web 留 left、note 开 right(left/right 对照阅读)。
    * 只动 slotBinding,不改 url(剪藏的是当前页,url 不变)。
    */
-  commandRegistry.register('web-view.pin-left', () => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('web-view.pin-left', () => workspaceManager.getActiveId(), (ctx) => {
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     if (ws.slotBinding.left === 'web-view') return; // 已在 left

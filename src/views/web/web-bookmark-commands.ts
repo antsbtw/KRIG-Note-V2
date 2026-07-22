@@ -14,17 +14,13 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { BookmarkApi } from '@capabilities/bookmark/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { getWebWsState } from './data-model';
 import { getAllHistory } from './web-history';
-
-/** 拿当前活跃 workspace id(commands 由用户在某 ws 触发,默认作用于活跃 ws)*/
-function getActiveWorkspaceId(): string | null {
-  return workspaceManager.getActiveId();
-}
 
 /**
  * 「+书签」标题来源:活跃 tab 的 url 在历史里能查到 title 就用之,
@@ -77,9 +73,8 @@ export function registerWebBookmarkCommands(): void {
   });
 
   // 加书签(当前活跃 tab 的 url + title;about:blank 等非 http(s) → no-op + 提示)
-  commandRegistry.register('web-view.bm-add', async (folderArg: unknown) => {
-    const wsId = getActiveWorkspaceId();
-    if (!wsId) return;
+  registerWsCommand('web-view.bm-add', () => workspaceManager.getActiveId(), async (ctx, folderArg: unknown) => {
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     const state = getWebWsState(ws);

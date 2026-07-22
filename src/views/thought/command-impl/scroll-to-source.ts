@@ -10,19 +10,17 @@
  *   source='graph'/'canvas':本期预留(Phase 6+ 接入)
  */
 
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { NoteLocator, BookLocator } from '@capabilities/thought/types';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { thoughtCap } from './shared';
 
-export async function scrollToSource(thoughtId: string): Promise<void> {
+export async function scrollToSource(thoughtId: string, wsId: string): Promise<void> {
   const t = await thoughtCap().getThought(thoughtId);
   if (!t || !t.anchor) return;
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
 
   if (t.anchor.source === 'note') {
     return scrollToNoteSource(t.anchor.resourceId, t.anchor.locator as NoteLocator, wsId);

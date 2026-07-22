@@ -9,11 +9,11 @@
  * 流程见 thought-view-port.md v0.5 §5.5。
  */
 
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { ThoughtAnchor, NoteLocator } from '@capabilities/thought/types';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { thoughtCap, preCreatePlaceholder } from './shared';
 
 const NODE_ANCHOR_TYPES = new Set(['image']);
@@ -38,9 +38,7 @@ function probeSelection(
   return got?.view.state.selection ?? null;
 }
 
-export async function addThoughtFromNote(): Promise<void> {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
+export async function addThoughtFromNote(wsId: string): Promise<void> {
   const ws = workspaceManager.get(wsId);
   if (!ws) return;
   const noteState = ws.pluginStates['note'] as { activeNoteId?: string } | undefined;

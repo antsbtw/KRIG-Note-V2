@@ -9,6 +9,7 @@
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { AIConversationApi } from '@capabilities/ai-extraction/types';
@@ -25,11 +26,9 @@ export function registerAICommands(): void {
   /**
    * 把当前 ws 的活跃 AI 服务切到 serviceId。
    */
-  commandRegistry.register('ai-view.switch-service', (idArg: unknown) => {
+  registerWsCommand('ai-view.switch-service', () => workspaceManager.getActiveId(), (ctx, idArg: unknown) => {
     if (!isServiceId(idArg)) return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
-    setAIServiceId(wsId, idArg);
+    setAIServiceId(ctx.wsId, idArg);
   });
 
   /**
@@ -37,11 +36,9 @@ export function registerAICommands(): void {
    * commandArg = 目标 viewId(e.g. 'note-view' / 'thought-view')。
    * 仿 note-view.open-right-slot 模式,本地版本服务 AI View 自身 toolbar SlotToggle。
    */
-  commandRegistry.register('ai-view.open-right-slot', (viewId: unknown) => {
+  registerWsCommand('ai-view.open-right-slot', () => workspaceManager.getActiveId(), (ctx, viewId: unknown) => {
     if (typeof viewId !== 'string' || !viewId) return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
-    const bus = workspaceManager.getBus(wsId);
+    const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
     bus.slot.openRight(viewId);
   });
@@ -49,10 +46,8 @@ export function registerAICommands(): void {
   /**
    * 关 right slot。SlotToggle 再次点击已激活项时触发。
    */
-  commandRegistry.register('ai-view.close-right-slot', () => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
-    const bus = workspaceManager.getBus(wsId);
+  registerWsCommand('ai-view.close-right-slot', () => workspaceManager.getActiveId(), (ctx) => {
+    const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
     bus.slot.closeRight();
   });
@@ -67,9 +62,8 @@ export function registerAICommands(): void {
    * - 后续 sub-phase 接 V1 chatgpt-content-extractor / claude-api-extractor 等
    *   做完整 conversation 抓取(含所有 turn / artifact)
    */
-  commandRegistry.register('ai-view.extract-conversation', async () => {
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+  registerWsCommand('ai-view.extract-conversation', () => workspaceManager.getActiveId(), async (ctx) => {
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     // 走 getAIWsState fallback 到 DEFAULT_AI_SERVICE — 跟 AIView/Toolbar 显示同源
@@ -190,11 +184,10 @@ export function registerAICommands(): void {
    *
    * 参数:{ x, y } guest viewport 坐标(由 AIView 订阅 onExtractTurnRequest 透传)。
    */
-  commandRegistry.register('ai-view.extract-turn', async (arg: unknown) => {
+  registerWsCommand('ai-view.extract-turn', () => workspaceManager.getActiveId(), async (ctx, arg: unknown) => {
     const p = (arg ?? {}) as { x?: unknown; y?: unknown };
     if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
 
@@ -251,14 +244,13 @@ export function registerAICommands(): void {
    *   commandRegistry.execute('ai-view.ask', '请总结这段话')
    *   commandRegistry.execute('ai-view.ask', { prompt: '...', serviceId: 'chatgpt' })
    */
-  commandRegistry.register('ai-view.ask', async (arg: unknown) => {
+  registerWsCommand('ai-view.ask', () => workspaceManager.getActiveId(), async (ctx, arg: unknown) => {
     const ai = getCapabilityApi<AIConversationApi>('ai-extraction');
     if (!ai) {
       console.warn('[ai-view.ask] ai-extraction capability not registered');
       return;
     }
-    const wsId = workspaceManager.getActiveId();
-    if (!wsId) return;
+    const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
     const wsState = getAIWsState(ws);

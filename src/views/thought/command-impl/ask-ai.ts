@@ -27,17 +27,15 @@
  *   空 atom + 无人引用 mark = 数据垃圾,主动清除。
  */
 
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { ThoughtAnchor, ThoughtCapabilityApi } from '@capabilities/thought/types';
 import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 
-export async function askAiFromNote(): Promise<void> {
-  const wsId = workspaceManager.getActiveId();
-  if (!wsId) return;
+export async function askAiFromNote(wsId: string): Promise<void> {
   const ws = workspaceManager.get(wsId);
   if (!ws) return;
   const noteState = ws.pluginStates['note'] as { activeNoteId?: string } | undefined;
