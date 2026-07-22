@@ -16,12 +16,12 @@ import { detectXServiceByUrl } from '@shared/types/x-service-types';
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
-let mainWindow: BrowserWindow | null = null;
+const windowRegistry = new Map<number, { win: BrowserWindow; wsId: string | null }>();
 
 const DEFAULT_WIDTH = 1200;
 const DEFAULT_HEIGHT = 800;
 
-export async function createMainWindow(): Promise<BrowserWindow> {
+export async function createWindow(wsId?: string): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
@@ -90,12 +90,12 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     win.webContents.send(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, false);
   });
 
-  // 窗口关闭时清理引用
+  // 窗口关闭时从注册表移除自己（不影响其他窗口）
   win.on('closed', () => {
-    mainWindow = null;
+    windowRegistry.delete(win.id);
   });
 
-  mainWindow = win;
+  windowRegistry.set(win.id, { win, wsId: wsId ?? null });
   reportL1Alive({
     windowId: win.id,
     width: DEFAULT_WIDTH,
@@ -105,6 +105,28 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   return win;
 }
 
+// 向后兼容，S3/S4 完成后再删
+export async function createMainWindow(): Promise<BrowserWindow> {
+  return createWindow();
+}
+
+export function getWindow(windowId: number): BrowserWindow | null {
+  return windowRegistry.get(windowId)?.win ?? null;
+}
+
+export function getAllWindows(): BrowserWindow[] {
+  return Array.from(windowRegistry.values()).map((e) => e.win);
+}
+
+export function getWindowByWsId(wsId: string): BrowserWindow | null {
+  for (const { win, wsId: wid } of windowRegistry.values()) {
+    if (wid === wsId) return win;
+  }
+  return null;
+}
+
+// 向后兼容：返回注册表第一个窗口，S3/S4 完成后逐步替换调用方
 export function getMainWindow(): BrowserWindow | null {
-  return mainWindow;
+  const first = windowRegistry.values().next().value;
+  return first?.win ?? null;
 }
