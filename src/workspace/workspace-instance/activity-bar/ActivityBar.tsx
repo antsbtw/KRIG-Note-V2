@@ -121,6 +121,18 @@ export function ActivityBar({
       </div>
       <div className="krig-activity-bar__bottom">
         <AccountButton />
+        <button
+          type="button"
+          className="krig-activity-bar__settings"
+          title="Settings"
+          aria-label="Settings"
+          onClick={() => {
+            // TODO(settings): 打开 Settings 窗口
+            console.log('[settings] placeholder — Settings window not yet implemented');
+          }}
+        >
+          ⚙
+        </button>
       </div>
     </div>
   );

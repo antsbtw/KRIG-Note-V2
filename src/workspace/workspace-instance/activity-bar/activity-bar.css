@@ -93,8 +93,29 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 4px;
   padding: 6px 0 8px;
   border-top: 1px solid #222;
+}
+
+.krig-activity-bar__settings {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: #555;
+  font-size: 16px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.krig-activity-bar__settings:hover {
+  background: #1f1f1f;
+  color: #aaa;
 }
 
 .krig-activity-bar__account-wrap {

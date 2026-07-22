@@ -23,9 +23,9 @@ export function registerFrameworkMenus(): void {
     const ws = wsCreate(active?.slotBinding);
     void createWindow(ws.id);
   });
-  menuRegistry.registerCommand('window.settings', () => {
-    // TODO(settings): 打开 Settings 窗口，配置 Web Profile（proxy/partition/账号隔离）
-    console.log('[settings] placeholder — Settings window not yet implemented');
+  menuRegistry.registerCommand('window.new-profile', () => {
+    // TODO(settings): 按选定 Profile 建窗口（proxy/partition/账号隔离），Settings 窗口实现后接入
+    console.log('[new-window-profile] placeholder — Profile settings not yet implemented');
   });
   menuRegistry.registerCommand('window.minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize();
@@ -70,7 +70,7 @@ export function registerFrameworkMenus(): void {
     order: 1,
     items: [
       { id: 'new-window', label: 'New Window', command: 'window.new', accelerator: 'CmdOrCtrl+Shift+N' },
-      { id: 'settings', label: 'Settings...', command: 'window.settings' },
+      { id: 'new-window-profile', label: 'New Window with Profile', command: 'window.new-profile' },
       { id: 'sep-new', label: '', separator: true },
       { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
       { id: 'import-word', label: 'Import Word...', command: 'file.import-word' },
