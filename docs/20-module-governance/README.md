@@ -38,7 +38,8 @@
   - **归多窗口 step2**：40 命令批量注入 / c2-defer(ai-sync×2+keymap) / U1-b shell 3点删
   - U1-c2-inject(link-click/note-bridge/context-menu ~10)— ⏳ 待评估是否也依赖窗口独立性
   - `U4-U5-shared-leaf-and-logo.md` + `U4a-U5-shared-leaf-logo.prompt.md` — U4-a(ArticlePlan 下沉)+U5(logo 移位)✅ **已交付验收**（commit 93d2f881）
-  - `U4b-createnotebatch-downsink.prompt.md` — CreateNoteBatch 下沉 shared ✅ prompt 就绪（**昨判暂缓→今排查推翻**：NoteInfo 早在 shared，实为干净下沉；用户拍板 shared 可依赖 semantic）
+  - `U4b-createnotebatch-downsink.prompt.md` — CreateNoteBatch 下沉 shared ✅ **已交付验收**（commit 0f6354e1）
+  - **✅ U4 彻底闭合**：shared 纯 leaf 终检全绿（@capabilities/@drivers/@views/@shell/@workspace/@slot/@platform 全 0，仅 @semantic 合法）
   - `U3-views-reaudit.md` + `U3-relativetime-dedup.prompt.md` — views 重扫**判定健康**（零跨view/合理下调），relativeTime 4处去重 ✅ **已交付验收**（commit ed248e57）
   - U4/U5（独立小单元）、U2 收尾、U3 二次评估 — ⏳
 
