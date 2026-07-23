@@ -56,7 +56,7 @@ registerView({
     'font-storage',        // ✅ L5-G7:系统字体导入 + 嵌入(node-toolbar Aa 面板系统字体分组)
   ],
   component: GraphCanvasView,
-  navSideTab: { label: 'Graph', icon: '🎨', order: 5 },
+  navSideTab: { label: 'Graph', icon: '🎨', order: 4 },
 });
 
 // registerGraphCanvasCommands 已迁到 renderer/index.tsx 显式传 wsId 调用

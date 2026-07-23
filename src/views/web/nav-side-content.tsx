@@ -17,16 +17,6 @@
  */
 
 import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
-import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { useWsId } from '@workspace/workspace-context/ws-id-context';
-import { useAllWorkspaces } from '@workspace/workspace-instance/use-workspace';
-import {
-  ipcWorkspaceOpen,
-  ipcWorkspaceSetActive,
-  ipcWorkspaceRename,
-  ipcWorkspaceRemove,
-} from '@workspace/ipc/workspace-ipc';
-import { ContextMenuPopover, type ContextMenuItem } from '@slot/shared-ui/ContextMenuPopover';
 import { navSideRegistry } from '@slot/nav-side-registry/nav-side-registry';
 import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tree-context-menu-registry';
 import { commandRegistry } from '@slot/command-registry/command-registry';
@@ -143,133 +133,6 @@ function CollapsibleSection({
       </header>
       {open && children}
     </section>
-  );
-}
-
-/**
- * 工作空间段:列出所有工作空间,点击切换并强制进 web view,双击重命名。
- *
- * 工作空间本身已由 workspaceManager 自动持久化(localStorage),这里是「库列表 +
- * 切换 + 重命名」入口。复用 CollapsibleSection 外壳,与书签/下载/历史同组对齐。
- *
- * 用户决策(交互与 note / 书签一致):
- * - 点击列表项 → setActive + 强制 slotBinding.left='web-view'(从 web NavSide 进,默认看 web)
- * - 双击列表项 → inline 重命名(顶部 tab 也可重命名,两处对称)
- * - 右键列表项 → 菜单「重命名 / 删除」(删除 = 从库彻底删,跟 note 删除同走右键菜单)
- */
-function WorkspaceSection() {
-  const workspaces = useAllWorkspaces();
-  const activeId = useWsId();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-
-  const openWorkspace = (id: string) => {
-    void ipcWorkspaceOpen(id); // 若已收起,重新打开到顶部 bar
-    void ipcWorkspaceSetActive(id);
-    // 强制进 web view(铁律 9:切主 view 关 right slot)
-    workspaceManager.update(
-      id,
-      {
-        slotBinding: {
-          left: 'web-view',
-          leftPayload: undefined,
-          right: null,
-          rightPayload: undefined,
-        },
-      },
-      { source: 'navside' },
-    );
-  };
-
-  const startRename = (id: string, label: string) => {
-    setEditingId(id);
-    setDraft(label);
-  };
-  const commitRename = () => {
-    if (editingId) {
-      const name = draft.trim();
-      if (name) void ipcWorkspaceRename(editingId, name);
-    }
-    setEditingId(null);
-  };
-
-  const openMenu = (e: React.MouseEvent, id: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, id });
-  };
-
-  const menuItems: ContextMenuItem[] = menu
-    ? [
-        {
-          id: 'ws-rename',
-          label: '重命名',
-          icon: '✏️',
-          onClick: () => {
-            const ws = workspaceManager.get(menu.id);
-            if (ws) startRename(ws.id, ws.label);
-          },
-        },
-        { id: 'ws-del-sep', label: '', separator: true },
-        {
-          id: 'ws-delete',
-          label: '删除',
-          icon: '🗑',
-          onClick: () => void ipcWorkspaceRemove(menu.id),
-        },
-      ]
-    : [];
-
-  return (
-    <CollapsibleSection storeKey="workspace" icon="🗂" title="工作空间" defaultOpen>
-      <ul className="krig-web-nav__list">
-        {workspaces.map((ws) => (
-          <li
-            key={ws.id}
-            className={`krig-web-nav__item krig-ws-item${
-              ws.isOpen ? ' krig-ws-item--open' : ''
-            }`}
-            onClick={() => editingId !== ws.id && openWorkspace(ws.id)}
-            onDoubleClick={() => startRename(ws.id, ws.label)}
-            onContextMenu={(e) => openMenu(e, ws.id)}
-            title={ws.isOpen ? ws.label : `${ws.label}(已收起,点击重新打开)`}
-            style={
-              ws.id === activeId
-                ? { background: 'rgba(138, 180, 248, 0.18)' }
-                : undefined
-            }
-          >
-            <div className="krig-web-nav__item-main">
-              {editingId === ws.id ? (
-                <input
-                  className="krig-web-nav__rename-input"
-                  value={draft}
-                  autoFocus
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename();
-                    else if (e.key === 'Escape') setEditingId(null);
-                  }}
-                />
-              ) : (
-                <span className="krig-web-nav__item-title">{ws.label}</span>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-      {menu && (
-        <ContextMenuPopover
-          x={menu.x}
-          y={menu.y}
-          items={menuItems}
-          onClose={() => setMenu(null)}
-        />
-      )}
-    </CollapsibleSection>
   );
 }
 
@@ -829,12 +692,10 @@ function DownloadSection() {
   );
 }
 
-/** Web NavSide 三段式折叠面板:书签 / 历史 / 下载。 */
+/** Web NavSide 三段式折叠面板:书签 / 下载 / 历史。 */
 function WebNavPanel() {
   return (
     <div className="krig-web-nav">
-      {/* 顺序:工作空间 → 书签 → 下载 → 历史 */}
-      <WorkspaceSection />
       <BookmarkSection />
       <DownloadSection />
       <HistorySection />

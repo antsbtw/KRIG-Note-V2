@@ -22,7 +22,8 @@ import { reportL5Alive } from '@views/L5-alive';
 import { reportInstallCoverage } from '@slot/diagnostics/install-coverage';
 import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
-import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
+import { getActiveWorkspaceIdSync, onMyWsIdReady } from '@workspace/workspace-instance/use-workspace';
+import { initNoteBaseSnapshotSync } from '@views/note/data-model';
 import { registerNoteCommands } from '@views/note/note-commands';
 import { registerWebCommands } from '@views/web/web-commands';
 import { registerWebBookmarkCommands } from '@views/web/web-bookmark-commands';
@@ -68,8 +69,9 @@ import '@views/note';   // L5-A:NoteView self-register(触发 viewType / command
 import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
 import '@views/ebook';  // L5-C1:EBookView self-register
-import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4;含 X 子入口)
-import '@views/x';      // X 集成:注册 X 提取命令(X 渲染在 AI navSide 服务切换器内,非独立 tab)
+import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4)
+import '@views/x';      // X 集成:注册 X 提取命令
+import '@views/social'; // Social View self-register(NavSide tab 💬 order=6;含 X 平台)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
 import './app.css';
@@ -77,15 +79,13 @@ import './app.css';
 // S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。
 // 此处仍保留 getBus 初始化供 L3.5 alive 计数。
 
-// U1-c1-batch:命令注册需要在 activeId 就绪后执行一次(wsId 从 IPC 异步拉取,模块加载时可能还是 null)。
-// 用 workspaceManager.subscribe 等首次 activeId 非 null 时注册,之后取消订阅(幂等)。
-let _commandsRegistered = false;
-const _unsubCommands = workspaceManager.subscribe(() => {
-  if (_commandsRegistered) return;
-  const rendererWsId = getActiveWorkspaceIdSync();
-  if (!rendererWsId) return;
-  _commandsRegistered = true;
-  _unsubCommands();
+// Phase 1 多窗口 merge:订阅其他窗口写成功后的 blockHashes 基线广播（全局一次性）
+initNoteBaseSnapshotSync();
+
+// U1-c1-batch + 多窗口(S3-b):命令注册必须在本窗口 myWsId 确定后才能执行。
+// 用 onMyWsIdReady 订阅——仅在本窗口 IPC 确认的 wsId 就绪后触发一次，
+// 避免新窗口用 snapshot.activeId（ws-1）注册命令。
+onMyWsIdReady((rendererWsId) => {
   registerNoteCommands(rendererWsId);
   registerWebCommands(rendererWsId);
   registerWebBookmarkCommands(rendererWsId);
@@ -95,7 +95,7 @@ const _unsubCommands = workspaceManager.subscribe(() => {
   registerXTestCommands(rendererWsId);
   registerGraphCanvasCommands(rendererWsId);
   registerThoughtCommands(rendererWsId);
-  // L3.5 bus 初始化(首次 activeId 就绪时补一次,确保 alive 计数 >= 1)
+  // L3.5 bus 初始化(首次 wsId 就绪时补一次,确保 alive 计数 >= 1)
   workspaceManager.getBus(rendererWsId);
 });
 

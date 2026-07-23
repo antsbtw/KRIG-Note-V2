@@ -20,7 +20,7 @@ registerView({
     'content-extraction',  // 网页剪藏:右键「📥 提取到笔记」→ Defuddle 抓页 → note
   ],
   component: WebView,
-  navSideTab: { label: 'Web', icon: '🌐', order: 3 },
+  navSideTab: { label: 'Web', icon: '🌐', order: 3, navSideOnSwitch: 'collapse' },
 });
 
 // registerWebCommands / registerWebBookmarkCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
