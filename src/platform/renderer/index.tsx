@@ -65,6 +65,8 @@ import '@capabilities/x-extraction';        // X 集成 阶段 0/1:嵌 x.com web
 import '@capabilities/content-extraction';  // 网页剪藏(Defuddle → Note);模块 load 即订阅 WEB_CLIP_RESULT 跑 import-pipeline
 import '@capabilities/auth';                 // 授权:注册 auth capability(暴露 StatusBadge),模块 load 即挂 onAuthChanged 单订阅
 
+import '@shell/slot-picker'; // 全局 SlotPicker popup 注册(right slot view 命令板)
+
 import '@views/note';   // L5-A:NoteView self-register(触发 viewType / commands / NavSide 注册)
 import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)

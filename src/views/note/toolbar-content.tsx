@@ -15,12 +15,14 @@
 
 import { toolbarRegistry } from '@slot/toolbar-registry/toolbar-registry';
 import { popupRegistry } from '@slot/interaction-registries/popup-registry/popup-registry';
+import { popupController } from '@slot/triggers/popup-controller';
 import { useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { NoteOpenPopup } from './note-open-popup/NoteOpenPopup';
 import { useAllNotes } from './use-notes-folders';
 import { getNoteWsState } from './data-model';
+import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import { TocToolbarButton } from './toc/TocToolbarButton';
 
 const VIEW = 'note-view';
@@ -41,6 +43,24 @@ function NoteToolbarTitle() {
   const note = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) : null;
   const title = note?.title || 'Note';
   return <span className="krig-toolbar-title">{title}</span>;
+}
+
+/** ⊞ 按钮 — 点击先注入 commandId 再弹 SlotPicker */
+function NoteSlotSwitchButton() {
+  return (
+    <button
+      type="button"
+      className="krig-toolbar-button krig-toolbar-button--default"
+      title="在右栏打开视图"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => {
+        slotPickerContext.setCommandId('note-view.open-right-slot');
+        popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
+      }}
+    >
+      ⊞
+    </button>
+  );
 }
 
 export function registerToolbar(): void {
@@ -139,42 +159,9 @@ export function registerToolbar(): void {
       id: 'note-view.view-switch',
       view: VIEW,
       group: 'right',
-      label: '切换视图(占位)',
-      kind: 'dropdown',
-      icon: '⊞',
-      currentLabel: () => '⊞',
-      options: [
-        {
-          id: 'switch-note',
-          label: '📝 Note',
-          command: 'note-view.open-right-slot',
-          commandArg: 'note-view',
-        },
-        {
-          id: 'switch-ebook',
-          label: '📕 eBook',
-          command: 'note-view.open-right-slot',
-          commandArg: 'ebook-view',
-        },
-        {
-          id: 'switch-web',
-          label: '🌐 Web',
-          command: 'note-view.open-right-slot',
-          commandArg: 'web-view',
-        },
-        {
-          id: 'switch-ai',
-          label: '🤖 AI',
-          command: 'note-view.open-right-slot',
-          commandArg: 'ai-view',
-        },
-        {
-          id: 'switch-thought',
-          label: '💭 Thought',
-          command: 'note-view.open-right-slot',
-          commandArg: 'thought-view',
-        },
-      ],
+      label: '在右栏打开视图',
+      kind: 'custom-render',
+      Component: NoteSlotSwitchButton,
       order: 50,
     },
     {

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+
+const VIEW_ID = 'social-view';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XHostHandle } from '@capabilities/x-extraction';
@@ -14,6 +16,7 @@ const PLATFORMS: Array<{ id: PlatformId; name: string; icon: string }> = [
 
 interface SocialViewProps {
   workspaceId: string;
+  payload?: unknown;
 }
 
 function getActivePlatform(workspaceId: string): PlatformId {
@@ -33,7 +36,7 @@ function setActivePlatform(workspaceId: string, platform: PlatformId): void {
   });
 }
 
-export function SocialView({ workspaceId }: SocialViewProps) {
+export function SocialView({ workspaceId, payload }: SocialViewProps) {
   const xApi = useMemo(
     () => requireCapabilityApi<XExtractionApi>('x-extraction'),
     [],
@@ -46,6 +49,16 @@ export function SocialView({ workspaceId }: SocialViewProps) {
     () => getActivePlatform(workspaceId),
   );
 
+  const isInRightSlot = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => workspaceManager.get(workspaceId)?.slotBinding.right === VIEW_ID,
+  );
+
+  const handleCloseRightSlot = useCallback(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    bus?.slot.closeRight();
+  }, [workspaceId]);
+
   const registerXWc = useCallback(() => {
     const wcId = xHostRef.current?.getWebContentsId() ?? null;
     if (wcId != null) xApi.registerXHostWcId(workspaceId, wcId);
@@ -54,6 +67,13 @@ export function SocialView({ workspaceId }: SocialViewProps) {
   useEffect(() => {
     return () => xApi.clearXHostWcId(workspaceId);
   }, [xApi, workspaceId]);
+
+  // payload.subId → 切换到指定平台（SlotPicker 子项选择时传入）
+  useEffect(() => {
+    if (!payload || typeof payload !== 'object') return;
+    const { subId } = payload as { subId?: string };
+    if (subId === 'x') setActivePlatform(workspaceId, 'x');
+  }, [payload, workspaceId]);
 
   /**
    * 订阅 'x.open-tweet' — tweet block「Open original」触发 x-view.open-tweet 命令发的:
@@ -119,6 +139,16 @@ export function SocialView({ workspaceId }: SocialViewProps) {
             </button>
           ))}
         </div>
+        {isInRightSlot && (
+          <button
+            type="button"
+            className="krig-social-view__close-btn"
+            onClick={handleCloseRightSlot}
+            title="关闭此面板"
+          >
+            ✕
+          </button>
+        )}
       </div>
       <XHost
         ref={xHostRef}

@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavSideTabs } from '@slot/frame-bindings/use-registry';
 import { useAuthState } from '@capabilities/auth/use-auth-state';
+import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import { settingsController } from '../settings/settings-controller';
 import logoUrl from '../view-switcher-frame/assets/logo.jpeg';
 import './activity-bar.css';
@@ -92,7 +93,11 @@ export function ActivityBar({
 
   const handleClick = (viewId: string) => {
     if (viewId === activeViewId) {
-      onToggleCollapse();
+      // navSideDisabled=true 的 view 没有 NavSide 内容，禁止 toggle 展开
+      const navSideDisabled = viewTypeRegistry.get(viewId)?.navSideTab?.navSideDisabled;
+      if (!navSideDisabled) {
+        onToggleCollapse();
+      }
     } else {
       onSwitch(viewId);
     }

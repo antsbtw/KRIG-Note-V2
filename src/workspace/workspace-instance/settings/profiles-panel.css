@@ -1,0 +1,246 @@
+/* ProfilesPanel — Workspace 列表 + 展开编辑 */
+
+.krig-profiles-ws-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Workspace 行 ── */
+
+.krig-ws-profile-row {
+  border-radius: 8px;
+  background: #222;
+  border: 1px solid #2a2a2a;
+  overflow: hidden;
+  transition: border-color 0.1s;
+}
+
+.krig-ws-profile-row--expanded {
+  border-color: #3a4a6a;
+}
+
+.krig-ws-profile-row__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.krig-ws-profile-row__header:hover {
+  background: #272727;
+}
+
+.krig-ws-profile-row__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.krig-ws-profile-row__name {
+  flex: 1;
+  color: #ccc;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.krig-ws-profile-row__badges {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.krig-ws-profile-row__badge {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #666;
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.krig-ws-profile-row__badge--dim {
+  color: #444;
+  border-color: #2e2e2e;
+}
+
+.krig-ws-profile-row__chevron {
+  color: #444;
+  font-size: 10px;
+  flex: none;
+}
+
+.krig-ws-profile-row--current {
+  border-color: #2a4a6a;
+  background: #1e2a3a;
+}
+
+/* ── 展开编辑区 ── */
+
+.krig-ws-profile-row__body {
+  border-top: 1px solid #2a2a2a;
+  padding: 16px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #1e1e1e;
+}
+
+.krig-ws-profile-edit__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.krig-ws-profile-edit__label {
+  font-size: 11px;
+  color: #555;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.krig-ws-profile-edit__input {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.1s;
+}
+
+.krig-ws-profile-edit__input:focus {
+  border-color: #4a6a9a;
+}
+
+.krig-ws-profile-edit__input::placeholder {
+  color: #3a3a3a;
+}
+
+/* 颜色选择 */
+
+.krig-ws-profile-edit__colors {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.krig-ws-profile-edit__color-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.1s, transform 0.1s;
+}
+
+.krig-ws-profile-edit__color-dot:hover {
+  transform: scale(1.15);
+}
+
+.krig-ws-profile-edit__color-dot--active {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+
+/* Session partition 显示 */
+
+.krig-ws-profile-edit__partition {
+  color: #444;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+/* 操作按钮 */
+
+.krig-ws-profile-edit__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.krig-ws-profile-edit__btn-cancel {
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #666;
+  font-size: 12px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+}
+
+.krig-ws-profile-edit__btn-cancel:hover {
+  border-color: #555;
+  color: #999;
+}
+
+.krig-ws-profile-edit__btn-save {
+  background: #2a3a5a;
+  border: 1px solid #4a6a9a;
+  border-radius: 6px;
+  color: #6b9fff;
+  font-size: 12px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-ws-profile-edit__btn-save:hover:not(:disabled) {
+  background: #324570;
+}
+
+.krig-ws-profile-edit__btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.krig-ws-profile-edit__btn-delete {
+  background: transparent;
+  border: 1px solid #4a2222;
+  border-radius: 6px;
+  color: #8a4040;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+}
+
+.krig-ws-profile-edit__btn-delete:hover:not(:disabled) {
+  border-color: #7a3030;
+  color: #cc5555;
+}
+
+.krig-ws-profile-edit__btn-delete:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.krig-ws-profile-edit__delete-confirm-text {
+  font-size: 12px;
+  color: #cc5555;
+}
+
+.krig-ws-profile-edit__btn-delete-confirm {
+  background: #4a2020;
+  border: 1px solid #7a3a3a;
+  border-radius: 6px;
+  color: #e07070;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.krig-ws-profile-edit__btn-delete-confirm:hover {
+  background: #5a2828;
+}

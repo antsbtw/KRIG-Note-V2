@@ -110,11 +110,15 @@ export function registerEBookCommands(wsId: string): void {
   });
 
   // ⊞ Toolbar 视图切换:在右槽打开 commandArg=viewId(对齐 note-view.open-right-slot)
-  registerWsCommand('ebook-view.open-right-slot', () => wsId, (ctx, viewId: unknown) => {
-    if (typeof viewId !== 'string') return;
+  registerWsCommand('ebook-view.open-right-slot', () => wsId, (ctx, arg: unknown) => {
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
-    bus.slot.openRight(viewId);
+    if (typeof arg === 'string') {
+      bus.slot.openRight(arg);
+    } else if (arg && typeof arg === 'object' && 'viewId' in arg) {
+      const { viewId, subId } = arg as { viewId: string; subId: string };
+      bus.slot.openRight(viewId, { subId });
+    }
   });
 }
 

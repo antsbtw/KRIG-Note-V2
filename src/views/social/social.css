@@ -61,6 +61,23 @@
   color: #8ab4f8;
 }
 
+.krig-social-view__close-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.krig-social-view__close-btn:hover {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
+
 /* ── webview 占满剩余 ── */
 
 .krig-social-view__webview {

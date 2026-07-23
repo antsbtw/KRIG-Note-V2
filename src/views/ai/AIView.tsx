@@ -29,9 +29,10 @@ const VIEW_ID = 'ai-view';
 
 interface AIViewProps {
   workspaceId: string;
+  payload?: unknown;
 }
 
-export function AIView({ workspaceId }: AIViewProps) {
+export function AIView({ workspaceId, payload }: AIViewProps) {
   const aiApi = useMemo(
     () => requireCapabilityApi<AIConversationApi>('ai-extraction'),
     [],
@@ -44,6 +45,15 @@ export function AIView({ workspaceId }: AIViewProps) {
   useEffect(() => {
     return () => aiApi.clearAIHostWcId(workspaceId);
   }, [aiApi, workspaceId]);
+
+  // payload.subId → 切换到指定 AI 服务（SlotPicker 子项选择时传入）
+  useEffect(() => {
+    if (!payload || typeof payload !== 'object') return;
+    const { subId } = payload as { subId?: string };
+    if (subId && (subId === 'claude' || subId === 'chatgpt' || subId === 'gemini')) {
+      setAIServiceId(workspaceId, subId);
+    }
+  }, [payload, workspaceId]);
 
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),

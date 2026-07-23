@@ -27,9 +27,8 @@ import { registerNavSide, registerFolderTreeContextMenu } from './nav-side-conte
 import { registerContextMenu } from './context-menu-content';
 import { registerEpubContextMenu } from './epub-context-menu-content';
 import { EBookOpenPopup } from './ebook-open-popup/EBookOpenPopup';
-import { EBookViewSwitchPopup } from './ebook-view-switch-popup/EBookViewSwitchPopup';
 import { EBookAaPopup } from './ebook-aa-popup/EBookAaPopup';
-import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
+import { EBOOK_OPEN_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
 
 const VIEW = 'ebook-view';
 
@@ -58,12 +57,6 @@ popupRegistry.register({
   view: VIEW,
   Component: EBookOpenPopup,
   estimatedSize: { width: 320, height: 420 },
-});
-popupRegistry.register({
-  id: EBOOK_VIEW_SWITCH_POPUP_ID,
-  view: VIEW,
-  Component: EBookViewSwitchPopup,
-  estimatedSize: { width: 140, height: 200 },
 });
 popupRegistry.register({
   id: EBOOK_AA_POPUP_ID,

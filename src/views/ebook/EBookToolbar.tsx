@@ -16,7 +16,8 @@
 
 import { useState, useCallback, type KeyboardEvent, type ChangeEvent, type MouseEvent } from 'react';
 import { popupController } from '@slot/triggers/popup-controller';
-import { EBOOK_OPEN_POPUP_ID, EBOOK_VIEW_SWITCH_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
+import { EBOOK_OPEN_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
+import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 
 /** 书签丝带图标(对齐 Apple Books / Kindle 设计)— active=填充,inactive=描边
  *  与 EBookFullscreenPanel 内同款,view/panel 各自重复一份避免接口膨胀 */
@@ -200,7 +201,8 @@ export function EBookToolbar({
   }, []);
 
   const handleViewSwitchClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
-    popupController.toggle(EBOOK_VIEW_SWITCH_POPUP_ID, e.currentTarget);
+    slotPickerContext.setCommandId('ebook-view.open-right-slot');
+    popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
   }, []);
 
   const handleAaClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {

@@ -337,11 +337,15 @@ export function registerNoteCommands(wsId: string): void {
    * commandArg = 目标 viewId(e.g. 'note-view' / 'ebook-view' / 'web-view')。
    * 已装同类直接覆盖重开(openRight 是幂等的)。
    */
-  registerWsCommand('note-view.open-right-slot', () => wsId, (ctx, viewId) => {
-    if (typeof viewId !== 'string') return;
+  registerWsCommand('note-view.open-right-slot', () => wsId, (ctx, arg) => {
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
-    bus.slot.openRight(viewId);
+    if (typeof arg === 'string') {
+      bus.slot.openRight(arg);
+    } else if (arg && typeof arg === 'object' && 'viewId' in arg) {
+      const { viewId, subId } = arg as { viewId: string; subId: string };
+      bus.slot.openRight(viewId, { subId });
+    }
   });
 
   /**

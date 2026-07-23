@@ -34,6 +34,17 @@ export interface NavSideTab {
    * - 'collapse'：强制折叠 NavSide
    */
   navSideOnSwitch?: 'expand' | 'collapse';
+  /**
+   * 此 view 没有 NavSide 内容，禁止通过点击已激活 tab 展开 NavSide。
+   * 独立于 navSideOnSwitch（Web 切换时收起但仍可手动 toggle）。
+   */
+  navSideDisabled?: boolean;
+  /**
+   * SlotPicker 展开子项（可选）。
+   * 填写后 SlotPicker 不显示 view 本身，而是展开为这些子项。
+   * 子项点击时打开 right slot 并通过 payload 传递 subId。
+   */
+  slotPickerChildren?: Array<{ subId: string; label: string; icon: string }>;
 }
 
 export interface ViewDefinition {
