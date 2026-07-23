@@ -14,6 +14,7 @@ import { NavSideFrame } from './nav-side-frame/NavSideFrame';
 import { ActivityBar } from './activity-bar/ActivityBar';
 import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
+import { SettingsModal } from './settings/SettingsModal';
 import { workspaceManager } from '../workspace-state/workspace-manager';
 import { useContextMenuTrigger } from '@slot/triggers/use-context-menu-trigger';
 import { useSlashTrigger } from '@slot/triggers/use-slash-trigger';
@@ -37,6 +38,10 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
   };
 
   const handleSwitch = (viewId: string) => {
+    const viewDef = viewTypeRegistry.get(viewId);
+    const navSideOnSwitch = viewDef?.navSideTab?.navSideOnSwitch ?? 'expand';
+    const nextCollapsed = navSideOnSwitch === 'collapse';
+    console.log(`[handleSwitch] view=${viewId} navSideOnSwitch=${navSideOnSwitch} → navSideCollapsed=${nextCollapsed} (当前=${state.navSideCollapsed})`);
     workspaceManager.update(
       state.id,
       {
@@ -46,7 +51,7 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
           right: null,
           rightPayload: undefined,
         },
-        navSideCollapsed: false,
+        navSideCollapsed: nextCollapsed,
       },
       { source: 'navside' },
     );
@@ -93,7 +98,7 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
             onToggleCollapse={handleToggleCollapse}
           />
           {!state.navSideCollapsed && (
-            <NavSideFrame workspaceId={state.id} width={state.navSideWidth} viewId={activeViewId} />
+            <NavSideFrame workspaceId={state.id} navSideWidths={state.navSideWidths ?? {}} viewId={activeViewId} />
           )}
           <div className="krig-workspace-main">
             {/* per-slot toolbar(fix/per-slot-toolbar):ToolbarFrame 下沉进 SlotArea 的
@@ -106,6 +111,7 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
             />
           </div>
           <OverlayFrames viewId={activeViewId} />
+          <SettingsModal />
         </div>
       </WorkspaceBusContext.Provider>
     </WorkspaceIdContext.Provider>

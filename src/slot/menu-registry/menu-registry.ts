@@ -74,11 +74,12 @@ class MenuRegistry {
     if (item.separator) {
       return { type: 'separator' };
     }
+    const submenu = (item.dynamicSubmenu?.() ?? item.submenu)?.map((sub) => this.itemToTemplate(sub));
     return {
       label: item.label,
       accelerator: item.accelerator,
       click: item.command ? () => this.executeCommand(item.command!) : undefined,
-      submenu: item.submenu?.map((sub) => this.itemToTemplate(sub)),
+      submenu,
     };
   }
 

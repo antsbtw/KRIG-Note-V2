@@ -286,6 +286,27 @@ export class WorkspaceManager {
     this.cachedOpen = null; // 同失效 open 缓存
     this.listeners.forEach((l) => l());
     this.saveToPersistence();
+    this.schedulePersistToMain();
+  }
+
+  /** debounce 回写主进程（renderer 环境下）*/
+  private _persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private schedulePersistToMain(): void {
+    const api = (window as unknown as { electronAPI?: { workspacePersistState?: (id: string, patch: Record<string, unknown>) => void } }).electronAPI;
+    if (!api?.workspacePersistState) return;
+    if (this._persistTimer !== null) clearTimeout(this._persistTimer);
+    this._persistTimer = setTimeout(() => {
+      this._persistTimer = null;
+      this.workspaces.forEach((ws) => {
+        api.workspacePersistState!(ws.id, {
+          pluginStates:      ws.pluginStates,
+          navSideCollapsed:  ws.navSideCollapsed,
+          navSideWidths:     ws.navSideWidths,
+          dividerRatio:      ws.dividerRatio,
+          slotBinding:       ws.slotBinding,
+        });
+      });
+    }, 500);
   }
 
   // ── 持久化 ──
@@ -296,10 +317,21 @@ export class WorkspaceManager {
     const state = this.persistence.load();
     if (!state) return;
 
-    // 老数据无 isOpen → 视为 true(向后兼容)
-    state.workspaces.forEach((ws) =>
-      this.workspaces.set(ws.id, { ...ws, isOpen: ws.isOpen ?? true }),
-    );
+    // 向后兼容:老数据无 isOpen → true;老数据有 navSideWidth(旧字段)→ 迁入 navSideWidths
+    state.workspaces.forEach((ws) => {
+      const legacy = ws as typeof ws & { navSideWidth?: number | null };
+      const navSideWidths: Record<string, number> =
+        ws.navSideWidths && Object.keys(ws.navSideWidths).length > 0
+          ? ws.navSideWidths
+          : {};
+      this.workspaces.set(ws.id, {
+        ...ws,
+        isOpen: ws.isOpen ?? true,
+        navSideWidths,
+      });
+      // 删掉可能残留的旧字段(不影响类型,只防止序列化冗余)
+      delete legacy.navSideWidth;
+    });
     this.activeId = state.activeId;
     this.counter = state.counter;
     this.notify();

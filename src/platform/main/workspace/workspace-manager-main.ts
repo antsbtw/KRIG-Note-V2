@@ -8,12 +8,13 @@
  * S3-b：从 JSON 文件换成 SurrealDB（schema 1.7.0）。
  */
 
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, session } from 'electron';
 import { RecordId } from 'surrealdb';
 import { getDB } from '@storage/surreal/client';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { createDefaultWorkspaceState } from '@workspace/workspace-state/default-state';
 import type { WorkspaceState, WorkspaceManagerState } from '@workspace/workspace-state/workspace-state';
+import { proxyNodeStore } from '../web-proxy/proxy-node-store';
 
 // ── 状态 ────────────────────────────────────────────────────────
 
@@ -59,6 +60,11 @@ async function persistState(state: WorkspaceManagerState): Promise<void> {
 
 // ── 广播 ────────────────────────────────────────────────────────
 
+const _wsChangeListeners = new Set<() => void>();
+export function onWorkspacesChanged(cb: () => void): void {
+  _wsChangeListeners.add(cb);
+}
+
 async function broadcast(): Promise<void> {
   const state = getFullState();
   // 持久化（异步，不阻塞广播）
@@ -69,6 +75,8 @@ async function broadcast(): Promise<void> {
       win.webContents.send(IPC_CHANNELS.WORKSPACE_STATE_CHANGED, state);
     }
   }
+  // 通知主进程内订阅者（如菜单重建）
+  _wsChangeListeners.forEach((cb) => cb());
 }
 
 // ── 公共 API ────────────────────────────────────────────────────
@@ -93,15 +101,44 @@ export async function initWorkspaceManager(): Promise<void> {
   ensureMinimum();
 }
 
-export function wsCreate(inheritSlotBinding?: WorkspaceState['slotBinding']): WorkspaceState {
+export function wsCreate(
+  inheritSlotBinding?: WorkspaceState['slotBinding'],
+): WorkspaceState {
   const id = `ws-${++counter}`;
-  const ws = createDefaultWorkspaceState(id, `Workspace ${counter}`, false);
+  const ws = createDefaultWorkspaceState(id, `Workspace ${workspaces.size + 1}`, false);
   if (inheritSlotBinding) {
     ws.slotBinding = { left: inheritSlotBinding.left, right: null };
   }
   workspaces.set(id, ws);
   void broadcast();
   return ws;
+}
+
+/**
+ * 窗口 ready 后将 workspace 的代理/UA 配置应用到其 session。
+ * 在 createWindow(wsId) loadURL 完成后调用，此时 session 已初始化。
+ */
+export async function applyWsConfigToSession(wsId: string): Promise<void> {
+  const ws = workspaces.get(wsId);
+  if (!ws) return;
+
+  const partition = `persist:webview-${wsId}`;
+  const sess = session.fromPartition(partition);
+
+  // 应用代理
+  if (ws.proxyId) {
+    const rules = await proxyNodeStore.resolveRules(ws.proxyId);
+    await sess.setProxy(rules === 'direct://' ? { mode: 'direct' } : { proxyRules: rules });
+  } else {
+    await sess.setProxy({ mode: 'direct' });
+  }
+
+  // 应用 User-Agent
+  if (ws.userAgent) {
+    sess.setUserAgent(ws.userAgent);
+  }
+
+  console.log('[ws-config] applied ws=', wsId, 'proxy=', ws.proxyId ?? 'direct', 'ua=', ws.userAgent ?? '(default)');
 }
 
 export function getActiveWorkspace(): WorkspaceState | null {
@@ -114,6 +151,14 @@ export function wsClose(id: string): void {
   workspaces.set(id, { ...ws, isOpen: false });
   if (activeId === id) activateAnotherOpen();
   void broadcast();
+}
+
+/** BrowserWindow 创建/关闭时同步更新 hasWindow 并持久化 */
+export function wsSetHasWindow(id: string, value: boolean): void {
+  const ws = workspaces.get(id);
+  if (!ws) return;
+  workspaces.set(id, { ...ws, hasWindow: value });
+  void persistState(getFullState());
 }
 
 export function wsRemove(id: string): void {
@@ -141,6 +186,34 @@ export function wsSetActive(id: string): void {
   if (!workspaces.has(id)) return;
   activeId = id;
   void broadcast();
+}
+
+export function wsSetConfig(
+  wsId: string,
+  config: { color?: string; proxyId?: string | null; userAgent?: string | null },
+): void {
+  const ws = workspaces.get(wsId);
+  if (!ws) return;
+  const next = { ...ws };
+  if ('color' in config) next.color = config.color;
+  if ('proxyId' in config) {
+    if (config.proxyId) next.proxyId = config.proxyId;
+    else delete next.proxyId;
+  }
+  if ('userAgent' in config) {
+    if (config.userAgent) next.userAgent = config.userAgent;
+    else delete next.userAgent;
+  }
+  workspaces.set(wsId, next);
+  void broadcast();
+}
+
+/** renderer 回写布局字段 + pluginStates，只持久化不广播（避免循环）*/
+export function wsPersistState(wsId: string, patch: Record<string, unknown>): void {
+  const ws = workspaces.get(wsId);
+  if (!ws) return;
+  workspaces.set(wsId, { ...ws, ...patch } as typeof ws);
+  void persistState(getFullState());
 }
 
 // ── 内部工具 ────────────────────────────────────────────────────

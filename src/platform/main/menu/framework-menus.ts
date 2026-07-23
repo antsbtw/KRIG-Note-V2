@@ -11,8 +11,9 @@
 import { app, BrowserWindow } from 'electron';
 import { menuRegistry } from '@slot/menu-registry/menu-registry';
 import { importChromeBookmarks } from '../bookmark/chrome-import';
-import { wsCreate, getActiveWorkspace } from '../workspace/workspace-manager-main';
-import { createWindow } from '../window/main-window';
+import { wsCreate, getActiveWorkspace, getFullState, onWorkspacesChanged } from '../workspace/workspace-manager-main';
+import { createWindow, getFocusedWindowWsId } from '../window/main-window';
+import type { MenuItem } from '@slot/menu-registry/menu-types';
 
 /** 注册框架级 Application Menu */
 export function registerFrameworkMenus(): void {
@@ -23,10 +24,8 @@ export function registerFrameworkMenus(): void {
     const ws = wsCreate(active?.slotBinding);
     void createWindow(ws.id);
   });
-  menuRegistry.registerCommand('window.new-profile', () => {
-    // TODO(settings): 按选定 Profile 建窗口（proxy/partition/账号隔离），Settings 窗口实现后接入
-    console.log('[new-window-profile] placeholder — Profile settings not yet implemented');
-  });
+  // window.open-profile.<wsId> — 动态注册，ws 列表变化时会整批替换
+  // 不需要预注册；buildProfileSubmenu 每次重建时重新注册所有命令
   menuRegistry.registerCommand('window.minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize();
   });
@@ -63,6 +62,18 @@ export function registerFrameworkMenus(): void {
     });
   }
 
+  const buildProfileSubmenu = (): MenuItem[] => {
+    const { workspaces } = getFullState();
+    const currentWsId = getFocusedWindowWsId();
+    return workspaces
+      .filter((ws) => ws.id !== currentWsId)
+      .map((ws) => {
+        const cmdId = `window.open-profile.${ws.id}`;
+        menuRegistry.registerCommand(cmdId, () => void createWindow(ws.id));
+        return { id: cmdId, label: ws.label, command: cmdId };
+      });
+  };
+
   // File 菜单
   menuRegistry.register({
     id: 'file',
@@ -70,7 +81,7 @@ export function registerFrameworkMenus(): void {
     order: 1,
     items: [
       { id: 'new-window', label: 'New Window', command: 'window.new', accelerator: 'CmdOrCtrl+Shift+N' },
-      { id: 'new-window-profile', label: 'New Window with Profile', command: 'window.new-profile' },
+      { id: 'new-window-profile', label: 'New Window with Profile', dynamicSubmenu: buildProfileSubmenu },
       { id: 'sep-new', label: '', separator: true },
       { id: 'import-markdown', label: 'Import Markdown...', command: 'file.import-markdown' },
       { id: 'import-word', label: 'Import Word...', command: 'file.import-word' },
@@ -117,6 +128,12 @@ export function registerFrameworkMenus(): void {
       { id: 'about', label: 'About KRIG Note', command: 'help.about' },
     ],
   });
+
+  // workspace 增删改名 → 重建菜单（dynamicSubmenu 重新计算）
+  onWorkspacesChanged(() => menuRegistry.rebuild());
+
+  // 焦点窗口切换 → 重建菜单（过滤的 currentWsId 随之变化）
+  app.on('browser-window-focus', () => menuRegistry.rebuild());
 
   // 重建菜单
   menuRegistry.rebuild();

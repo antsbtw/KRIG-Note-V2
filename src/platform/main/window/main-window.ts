@@ -8,15 +8,30 @@
  */
 
 import path from 'node:path';
-import { BrowserWindow, shell } from 'electron';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 import { reportL1Alive } from '../diagnostics/L1-alive';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { detectXServiceByUrl } from '@shared/types/x-service-types';
+import { applyWsConfigToSession, wsSetHasWindow } from '../workspace/workspace-manager-main';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 const windowRegistry = new Map<number, { win: BrowserWindow; wsId: string | null }>();
+
+// app.quit() 时所有窗口连带关闭，此时不应清除 hasWindow（否则重启后只剩一个窗口）
+let appIsQuitting = false;
+export function markAppQuitting(): void { appIsQuitting = true; }
+
+// renderer 启动后主动 invoke 来获取自己的 wsId（比 push 方式更可靠，避免 loadURL 完成
+// 与 preload 脚本注册监听器之间的竞态）。
+ipcMain.handle(IPC_CHANNELS.WINDOW_GET_WS_ID, (event) => {
+  const webContentsId = event.sender.id;
+  for (const { win, wsId } of windowRegistry.values()) {
+    if (win.webContents.id === webContentsId) return wsId ?? null;
+  }
+  return null;
+});
 
 const DEFAULT_WIDTH = 1200;
 const DEFAULT_HEIGHT = 800;
@@ -75,11 +90,32 @@ export async function createWindow(wsId?: string): Promise<BrowserWindow> {
     return { action: 'deny' };
   });
 
+  // loadURL 前先入注册表：renderer 在 loadURL 过程中可能 invoke WINDOW_GET_WS_ID，
+  // handler 需要能在 windowRegistry 里找到这个窗口。
+  windowRegistry.set(win.id, { win, wsId: wsId ?? null });
+
+  // 窗口有独立 BrowserWindow — 记录到 ws 状态，启动恢复时据此判断开几个窗口
+  if (wsId) wsSetHasWindow(wsId, true);
+
+  // 窗口关闭时：清注册表；仅在用户手动关单窗口时清 hasWindow（app 退出时保留状态供下次恢复）
+  win.on('closed', () => {
+    const entry = windowRegistry.get(win.id);
+    windowRegistry.delete(win.id);
+    if (entry?.wsId && !appIsQuitting) wsSetHasWindow(entry.wsId, false);
+  });
+
   // 加载 renderer
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     await win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
     await win.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+  }
+
+  // 多窗口:renderer 就绪后立即推送本窗口绑定的 wsId(push 补充路径，invoke 是主路径)
+  if (wsId) {
+    win.webContents.send(IPC_CHANNELS.WINDOW_WS_ID, wsId);
+    // 应用 workspace 代理/UA 配置到 session（异步，不阻塞窗口显示）
+    void applyWsConfigToSession(wsId);
   }
 
   // 窗口全屏状态变化 → 通知 renderer(用于 UI 自适应,如 NavSide Toggle 位置)
@@ -89,13 +125,6 @@ export async function createWindow(wsId?: string): Promise<BrowserWindow> {
   win.on('leave-full-screen', () => {
     win.webContents.send(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, false);
   });
-
-  // 窗口关闭时从注册表移除自己（不影响其他窗口）
-  win.on('closed', () => {
-    windowRegistry.delete(win.id);
-  });
-
-  windowRegistry.set(win.id, { win, wsId: wsId ?? null });
   reportL1Alive({
     windowId: win.id,
     width: DEFAULT_WIDTH,
@@ -116,6 +145,12 @@ export function getWindow(windowId: number): BrowserWindow | null {
 
 export function getAllWindows(): BrowserWindow[] {
   return Array.from(windowRegistry.values()).map((e) => e.win);
+}
+
+export function getFocusedWindowWsId(): string | null {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (!focused) return null;
+  return windowRegistry.get(focused.id)?.wsId ?? null;
 }
 
 export function getWindowByWsId(wsId: string): BrowserWindow | null {

@@ -62,6 +62,15 @@ body.krig-navside-resizing .krig-nav-side-frame__divider {
 
 .krig-nav-side-header {
   flex: none;
+  -webkit-app-region: drag; /* hiddenInset 窗口:header 条可拖动 */
+}
+
+/* header 内所有可交互元素不参与拖窗 */
+.krig-nav-side-header button,
+.krig-nav-side-header input,
+.krig-nav-side-header a,
+.krig-nav-side-header [role="button"] {
+  -webkit-app-region: no-drag;
 }
 
 .krig-nav-side-content {

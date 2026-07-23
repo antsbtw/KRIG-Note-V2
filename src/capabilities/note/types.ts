@@ -58,7 +58,7 @@ export interface NoteCapabilityApi {
    */
   listNoteTitles(): Promise<Array<{ id: string; title: string; folderId: string | null }>>;
   getNote(id: string): Promise<NoteInfo | null>;
-  updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
+  updateNote(id: string, doc: NoteDocEnvelope, clientId?: string, wsId?: string, expectedVersion?: number): Promise<NoteInfo | null>;
   moveNote(noteId: string, newFolderId: string | null): Promise<void>;
   deleteNote(id: string, opts?: { progressTaskId?: string }): Promise<void>;
   /** 订阅笔记列表变更 (IPC 广播);返 unsubscribe */

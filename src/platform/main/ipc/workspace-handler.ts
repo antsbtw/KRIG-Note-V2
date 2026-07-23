@@ -13,6 +13,8 @@ import {
   wsOpen,
   wsRename,
   wsSetActive,
+  wsSetConfig,
+  wsPersistState,
   getFullState,
 } from '../workspace/workspace-manager-main';
 
@@ -41,8 +43,17 @@ export function registerWorkspaceHandlers(): void {
     wsSetActive(id);
   });
 
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_SET_CONFIG, (_event, wsId: string, config: { color?: string; proxyId?: string | null; userAgent?: string | null }) => {
+    wsSetConfig(wsId, config);
+  });
+
   // renderer 启动时拉一次全量状态
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_STATE, () => {
     return getFullState();
+  });
+
+  // renderer 回写布局 + pluginStates（单向 send，不广播避免循环）
+  ipcMain.on(IPC_CHANNELS.WORKSPACE_PERSIST_STATE, (_event, wsId: string, patch: Record<string, unknown>) => {
+    wsPersistState(wsId, patch);
   });
 }

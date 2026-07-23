@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavSideTabs } from '@slot/frame-bindings/use-registry';
 import { useAuthState } from '@capabilities/auth/use-auth-state';
+import { settingsController } from '../settings/settings-controller';
 import logoUrl from '../view-switcher-frame/assets/logo.jpeg';
 import './activity-bar.css';
 
@@ -126,10 +127,7 @@ export function ActivityBar({
           className="krig-activity-bar__settings"
           title="Settings"
           aria-label="Settings"
-          onClick={() => {
-            // TODO(settings): 打开 Settings 窗口
-            console.log('[settings] placeholder — Settings window not yet implemented');
-          }}
+          onClick={() => settingsController.open('profiles')}
         >
           ⚙
         </button>

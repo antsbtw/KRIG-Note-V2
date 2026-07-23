@@ -126,9 +126,10 @@ export function NoteView({ workspaceId }: NoteViewProps) {
       // L7-sub2:title 派生自 doc 首段文本 (capability 内自动算),view 不传 title
       // 注意:这里只发 IPC,**不动 incomingDoc** — Host 内部 PM state 已是最新,
       // 自家编辑不需要回灌;若回灌反而触发 useEffect[doc] 跳光标。
-      void updateNote(wsState.activeNoteId, { doc: newDoc });
+      // Phase 0:透传 workspaceId 作为 wsId，供 baseSnapshot 更新定向。
+      void updateNote(wsState.activeNoteId, { doc: newDoc }, workspaceId);
     },
-    [wsState?.activeNoteId],
+    [wsState?.activeNoteId, workspaceId],
   );
 
   // L5-B3.4:同步当前 noteId 到导航历史栈(切笔记时)

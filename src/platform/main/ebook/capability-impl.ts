@@ -573,6 +573,8 @@ export async function getReadingThought(bookId: string): Promise<NoteInfo | null
     folderId: null,
     createdAt: atom.createdAt,
     updatedAt: atom.updatedAt,
+    docVersion: 0,
+    blockHashes: {},
   };
 }
 
@@ -627,6 +629,8 @@ export async function ensureReadingThought(bookId: string): Promise<NoteInfo> {
     folderId: null,
     createdAt: created.createdAt,
     updatedAt: created.updatedAt,
+    docVersion: 0,
+    blockHashes: {},
   };
 }
 

@@ -68,8 +68,8 @@ async function listNoteTitles(): Promise<Array<{
 async function getNote(id: string): Promise<NoteInfo | null> {
   return window.electronAPI.noteGet(id);
 }
-async function updateNote(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null> {
-  return window.electronAPI.noteUpdate(id, doc);
+async function updateNote(id: string, doc: NoteDocEnvelope, clientId?: string, wsId?: string, expectedVersion?: number): Promise<NoteInfo | null> {
+  return window.electronAPI.noteUpdate(id, doc, clientId, wsId, expectedVersion);
 }
 async function moveNote(noteId: string, newFolderId: string | null): Promise<void> {
   return window.electronAPI.noteMove(noteId, newFolderId);

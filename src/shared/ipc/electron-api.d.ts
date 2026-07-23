@@ -9,6 +9,7 @@ import type {
   HealthCheckResponse,
   SystemFontEntryDTO,
 } from './message-types';
+import type { Profile, ProfileColor } from '../types/profile-types';
 import type {
   NoteInfo,
   FolderInfo,
@@ -69,6 +70,10 @@ declare global {
       health(layer: 'L0' | 'L1' | 'L2' | 'L3' | 'L3.5' | 'L4' | 'L5' | 'platform'): Promise<HealthCheckResponse>;
       /** 订阅窗口全屏状态变化,返回取消订阅函数 */
       onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void;
+      /** 多窗口：renderer 主动拉取自己绑定的 wsId（push 方式竞态时的补偿路径）*/
+      onWindowWsId(callback: (wsId: string) => void): () => void;
+      /** 多窗口：renderer 主动 invoke 获取自己的 wsId（最可靠路径）*/
+      getWindowWsId(): Promise<string | null>;
       /** L5-B3.4:打开外部 URL(http/https/mailto)— shell.openExternal */
       openExternal(url: string): Promise<{ ok: boolean; reason?: string }>;
       /** L5-B3.4:打开文件路径(系统默认应用)— shell.openPath */
@@ -420,9 +425,11 @@ declare global {
       noteCreate(initialDoc: NoteDocEnvelope | null, folderId: string | null): Promise<NoteInfo>;
       /** 5B Stage 7: 批量创建 note (PmAtomDraft[] → 单事务多 note) */
       noteCreateBatch(input: CreateNoteBatchInput): Promise<CreateNoteBatchResult>;
-      noteUpdate(id: string, doc: NoteDocEnvelope): Promise<NoteInfo | null>;
+      noteUpdate(id: string, doc: NoteDocEnvelope, clientId?: string, wsId?: string, expectedVersion?: number): Promise<NoteInfo | null>;
       noteMove(noteId: string, newFolderId: string | null): Promise<void>;
       noteDelete(id: string, opts?: { progressTaskId?: string }): Promise<void>;
+      /** Phase 1 多窗口 merge:保存前拉取数据库当前版本快照(轻量,不 assemble 全文) */
+      noteGetVersionInfo(id: string): Promise<{ docVersion: number; docHash: string; blockHashes: Record<string, string> } | null>;
       /** main → renderer 推送:笔记列表变更;返 unsubscribe */
       onNoteListChanged(callback: (list: NoteInfo[]) => void): () => void;
       /**
@@ -433,6 +440,13 @@ declare global {
        */
       onNoteDocContentChanged(
         callback: (payload: NoteDocContentChangedPayload) => void,
+      ): () => void;
+      /**
+       * Phase 1 多窗口 merge:其他窗口写成功后广播的 blockHashes 基线更新;返 unsubscribe。
+       * 收到后更新本窗口的 baseSnapshot（不覆盖本地编辑，只更新基线）。
+       */
+      onNoteBaseSnapshotUpdated(
+        callback: (payload: { noteId: string; docVersion: number; blockHashes: Record<string, string>; fromSession: string }) => void,
       ): () => void;
 
       // ── thought capability (横切思考层 — thought-view-port.md v0.5 §5.3) ──
@@ -681,6 +695,14 @@ declare global {
       /** 任务完成(success/error);返 unsubscribe */
       onProgressDone(callback: (payload: ProgressDonePayload) => void): () => void;
 
+      // ── Window Profile ──
+      profileList(): Promise<Profile[]>;
+      profileGet(id: string): Promise<Profile | null>;
+      profileCreate(input: { name: string; color: ProfileColor; proxyId?: string; userAgent?: string }): Promise<Profile>;
+      profileUpdate(id: string, patch: Partial<{ name: string; color: ProfileColor; proxyId: string; userAgent: string }>): Promise<Profile | null>;
+      profileDelete(id: string): Promise<void>;
+      onProfileListChanged(callback: (list: Profile[]) => void): () => void;
+
       // ── Workspace 楼长 IPC（S3-a）──
       workspaceCreate(label?: string): Promise<unknown>;
       workspaceClose(id: string): Promise<void>;
@@ -689,6 +711,8 @@ declare global {
       workspaceRename(id: string, label: string): Promise<void>;
       workspaceSetActive(id: string): Promise<void>;
       workspaceGetState(): Promise<unknown>;
+      workspaceSetConfig(wsId: string, config: { color?: string; proxyId?: string | null; userAgent?: string | null }): Promise<void>;
+      workspacePersistState(wsId: string, patch: Record<string, unknown>): void;
       /** main → renderer 广播：ws 状态变化；返 unsubscribe */
       onWorkspaceStateChanged(callback: (state: unknown) => void): () => void;
     };

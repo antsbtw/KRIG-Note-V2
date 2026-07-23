@@ -30,6 +30,12 @@ export function ipcWorkspaceSetActive(id: string): Promise<void> {
 export function ipcWorkspaceGetState(): Promise<WorkspaceManagerState> {
   return api().workspaceGetState() as Promise<WorkspaceManagerState>;
 }
+export function ipcWorkspaceSetConfig(
+  wsId: string,
+  config: { color?: string; proxyId?: string | null; userAgent?: string | null },
+): Promise<void> {
+  return api().workspaceSetConfig(wsId, config) as Promise<void>;
+}
 export function onWorkspaceStateChanged(
   callback: (state: WorkspaceManagerState) => void,
 ): () => void {

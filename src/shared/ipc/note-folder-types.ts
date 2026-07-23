@@ -29,6 +29,10 @@ export interface NoteInfo {
   folderId: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Phase 0 多窗口同步:container 的单调递增版本号;初始值 1 */
+  docVersion: number;
+  /** Phase 0 多窗口同步:blockId → blockHash(SHA-1 hex 40 字符)映射 */
+  blockHashes: Record<string, string>;
 }
 
 /** 文件夹业务视图 (atom + 派生 parentId) */

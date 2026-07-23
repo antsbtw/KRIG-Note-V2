@@ -28,6 +28,12 @@ export interface NavSideTab {
   icon: string;
   /** 排序(小的在前,5 个内置 view 顺序固定:Note<eBook<Web<AI<Graph)*/
   order: number;
+  /**
+   * 切到此 view 时 NavSide 的行为。
+   * - 'expand'（默认）：强制展开 NavSide
+   * - 'collapse'：强制折叠 NavSide
+   */
+  navSideOnSwitch?: 'expand' | 'collapse';
 }
 
 export interface ViewDefinition {

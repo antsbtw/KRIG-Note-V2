@@ -3,10 +3,8 @@
  *
  * 按 charter § 1.4:式样在本组件,内容由 navSideRegistry 通过 NavSideBinding 渲染。
  *
- * V1 vs V2:
- * - V1 NavSide 是 Shell 全局 WebContentsView,resize 走主进程 IPC(NAVSIDE_RESIZE_*)
- * - V2 NavSide 是每个 Workspace 自带的 React 组件 — resize 走纯 React mouse 事件,
- *   宽度持久化到 workspaceState.navSideWidth(per-ws)
+ * 宽度按 viewId 独立记忆(navSideWidths: Record<string, number>),
+ * 切 view 时自动恢复该 view 上次的宽度,互不干扰。
  *
  * L5-B3.8:加右侧 divider 可拖拽改宽
  */
@@ -21,20 +19,16 @@ const MIN_WIDTH = 160;
 const MAX_WIDTH = 600;
 
 interface NavSideFrameProps {
-  /** Workspace ID(给 ViewSwitcher 切 view 用)*/
   workspaceId: string;
-  /** NavSide 宽度(null = 默认 224px)*/
-  width: number | null;
-  /** 当前 view ID(用于按 view 取 NavSide 内容 + 高亮 ViewSwitcher tab)*/
+  /** NavSide 宽度字典(按 viewId 独立记忆) */
+  navSideWidths: Record<string, number>;
+  /** 当前 view ID */
   viewId: string | null;
 }
 
-export function NavSideFrame({ workspaceId, width, viewId }: NavSideFrameProps) {
-  const w = width ?? DEFAULT_NAVSIDE_WIDTH;
+export function NavSideFrame({ workspaceId, navSideWidths, viewId }: NavSideFrameProps) {
+  const w = (viewId != null ? (navSideWidths ?? {})[viewId] : undefined) ?? DEFAULT_NAVSIDE_WIDTH;
 
-  // ── divider 拖拽 ──
-  // mousedown 进入拖拽态;mousemove 实时改 width(throttle 由 requestAnimationFrame 保护);
-  // mouseup 落库 + 移除 listener。拖拽期间 body class 改光标 / 禁文本选中。
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
   const rafRef = useRef<number | null>(null);
@@ -56,8 +50,12 @@ export function NavSideFrame({ workspaceId, width, viewId }: NavSideFrameProps) 
         if (rafRef.current == null) {
           rafRef.current = requestAnimationFrame(() => {
             rafRef.current = null;
-            if (pendingWidthRef.current != null) {
-              workspaceManager.update(workspaceId, { navSideWidth: pendingWidthRef.current });
+            if (pendingWidthRef.current != null && viewId != null) {
+              const ws = workspaceManager.get(workspaceId);
+              if (!ws) return;
+              workspaceManager.update(workspaceId, {
+                navSideWidths: { ...(ws.navSideWidths ?? {}), [viewId]: pendingWidthRef.current },
+              });
             }
           });
         }
@@ -71,8 +69,13 @@ export function NavSideFrame({ workspaceId, width, viewId }: NavSideFrameProps) 
           cancelAnimationFrame(rafRef.current);
           rafRef.current = null;
         }
-        if (pendingWidthRef.current != null) {
-          workspaceManager.update(workspaceId, { navSideWidth: pendingWidthRef.current });
+        if (pendingWidthRef.current != null && viewId != null) {
+          const ws = workspaceManager.get(workspaceId);
+          if (ws) {
+            workspaceManager.update(workspaceId, {
+              navSideWidths: { ...ws.navSideWidths, [viewId]: pendingWidthRef.current },
+            });
+          }
           pendingWidthRef.current = null;
         }
       };
@@ -80,7 +83,7 @@ export function NavSideFrame({ workspaceId, width, viewId }: NavSideFrameProps) 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [w, workspaceId],
+    [w, workspaceId, viewId],
   );
 
   return (

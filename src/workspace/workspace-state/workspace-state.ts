@@ -34,8 +34,8 @@ export interface WorkspaceState {
   customLabel: boolean;
   /** NavSide 折叠状态(true = 折叠隐藏)*/
   navSideCollapsed: boolean;
-  /** NavSide 宽度(可拖拽,null = 用默认 224px)*/
-  navSideWidth: number | null;
+  /** NavSide 宽度(按 viewId 独立记忆,缺失 = 用默认 224px)*/
+  navSideWidths: Record<string, number>;
   /** Slot Area 内 Left/Right 比例(0~1,默认 0.5;限制 0.2~0.8)*/
   dividerRatio: number;
   /** Slot 装载形式 */
@@ -51,6 +51,19 @@ export interface WorkspaceState {
    * 缺省(老数据无此字段)视为 true。
    */
   isOpen: boolean;
+  /**
+   * 退出前是否有独立 BrowserWindow。
+   * - 窗口创建时设 true,窗口关闭时设 false。
+   * - 启动恢复用:只有 hasWindow=true 的 ws 才恢复为独立窗口（至少保留 1 个兜底）。
+   * - 缺省(老数据无此字段)视为 false,由启动逻辑决定是否给它开窗口。
+   */
+  hasWindow?: boolean;
+  /** Workspace 标识色（在 Settings 列表显示）*/
+  color?: string;
+  /** 代理节点 ID（对应 proxy-node-store 中的节点；undefined = 直连）*/
+  proxyId?: string;
+  /** 自定义 User-Agent（undefined = 使用 Electron 默认 UA）*/
+  userAgent?: string;
 }
 
 /** WorkspaceManager 整体状态(用于持久化)*/

@@ -15,8 +15,10 @@ export interface MenuItem {
   accelerator?: string;
   /** 分隔线(label / command 等不生效)*/
   separator?: boolean;
-  /** 子菜单 */
+  /** 子菜单（静态）*/
   submenu?: MenuItem[];
+  /** 子菜单（动态，rebuild 时调用）*/
+  dynamicSubmenu?: () => MenuItem[];
 }
 
 export interface MenuRegistration {

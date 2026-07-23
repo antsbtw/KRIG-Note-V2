@@ -19,12 +19,13 @@ import {
   listNotes,
   listNoteTitles,
   getNote,
+  getNoteVersionInfo,
   updateNote,
   moveNote,
   deleteNote,
 } from './capability-impl';
 import type { CreateNoteBatchInput } from '@capabilities/note/types';
-import { broadcastNoteListChanged, broadcastNoteDocContentChanged } from './broadcast';
+import { broadcastNoteListChanged, broadcastNoteDocContentChanged, broadcastNoteBaseSnapshotUpdated } from './broadcast';
 
 function isDocEnvelope(v: unknown): v is NoteDocEnvelope {
   if (!v || typeof v !== 'object') return false;
@@ -39,6 +40,12 @@ export function registerNoteHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.NOTE_GET, async (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) return null;
     return getNote(id);
+  });
+
+  // Phase 1:轻量版本查询(merge 引擎用,不 assemble 全文)
+  ipcMain.handle(IPC_CHANNELS.NOTE_GET_VERSION_INFO, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) return null;
+    return getNoteVersionInfo(id);
   });
 
   ipcMain.handle(
@@ -70,10 +77,13 @@ export function registerNoteHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.NOTE_UPDATE, async (e, payload: unknown) => {
-    const p = payload as { id?: unknown; doc?: unknown } | null;
+    const p = payload as { id?: unknown; doc?: unknown; clientId?: unknown; wsId?: unknown; expectedVersion?: unknown } | null;
     if (!p || typeof p.id !== 'string' || !p.id) return null;
     if (!isDocEnvelope(p.doc)) return null;
-    const note = await updateNote(p.id, p.doc);
+    const clientId = typeof p.clientId === 'string' ? p.clientId : undefined;
+    const wsId = typeof p.wsId === 'string' ? p.wsId : undefined;
+    const expectedVersion = typeof p.expectedVersion === 'number' ? p.expectedVersion : undefined;
+    const note = await updateNote(p.id, p.doc, clientId, wsId, expectedVersion);
     if (note) {
       // 新 channel:发起者(e.sender.id)不收;NavSide / TOC 等仍走老 channel
       // 顺序:先 DOC_CONTENT_CHANGED (内容), 后 LIST_CHANGED (元数据派生)
@@ -84,6 +94,13 @@ export function registerNoteHandlers(): void {
         updatedAt: note.updatedAt,
         emitterId: e.sender.id,
       });
+      // Phase 1:广播新 blockHashes 给其他窗口更新基线(发起者不收 — 自己已在 updateNote 后刷快照)
+      broadcastNoteBaseSnapshotUpdated({
+        noteId: note.id,
+        docVersion: note.docVersion,
+        blockHashes: note.blockHashes,
+        fromSession: wsId ?? '',
+      }, e.sender.id);
     }
     await broadcastNoteListChanged();
     return note;

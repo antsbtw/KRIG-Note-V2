@@ -21,7 +21,7 @@ export function createDefaultWorkspaceState(id: string, label: string, customLab
     label,
     customLabel,
     navSideCollapsed: false,
-    navSideWidth: null,
+    navSideWidths: {},
     dividerRatio: DEFAULT_DIVIDER_RATIO,
     slotBinding: {
       left: null,

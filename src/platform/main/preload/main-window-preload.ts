@@ -30,6 +30,7 @@ import type {
   AuthLoginInput,
   AuthActionResult,
 } from '@shared/auth/auth-types';
+import type { Profile, ProfileColor } from '@shared/types/profile-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /** 诊断上报(renderer → main) */
@@ -52,6 +53,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       platform: IPC_CHANNELS.HEALTH_PLATFORM,
     }[layer];
     return ipcRenderer.invoke(channel);
+  },
+
+  /** 多窗口:订阅主进程推送本窗口绑定的 wsId — 触发一次后 renderer 持有 myWsId */
+  onWindowWsId(callback: (wsId: string) => void): () => void {
+    const handler = (_event: unknown, wsId: string) => callback(wsId);
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_WS_ID, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WINDOW_WS_ID, handler);
+  },
+  /** 多窗口:renderer 主动 invoke 获取自己的 wsId（比 push 方式可靠，无竞态）*/
+  getWindowWsId(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_GET_WS_ID);
   },
 
   /** 订阅窗口全屏状态变化 — 返回取消订阅函数 */
@@ -622,8 +634,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteCreateBatch(input: unknown): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_CREATE_BATCH, input);
   },
-  noteUpdate(id: string, doc: unknown): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_UPDATE, { id, doc });
+  noteUpdate(id: string, doc: unknown, clientId?: string, wsId?: string, expectedVersion?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_UPDATE, { id, doc, clientId, wsId, expectedVersion });
+  },
+  /** Phase 1 多窗口 merge:保存前拉取数据库当前版本快照(轻量,不 assemble 全文) */
+  noteGetVersionInfo(id: string): Promise<{ docVersion: number; docHash: string; blockHashes: Record<string, string> } | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NOTE_GET_VERSION_INFO, id);
+  },
+  /** Phase 1 多窗口 merge:订阅其他窗口写成功后推送的 blockHashes 基线更新 */
+  onNoteBaseSnapshotUpdated(
+    callback: (payload: { noteId: string; docVersion: number; blockHashes: Record<string, string>; fromSession: string }) => void,
+  ): () => void {
+    const handler = (_event: unknown, payload: { noteId: string; docVersion: number; blockHashes: Record<string, string>; fromSession: string }): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.NOTE_BASE_SNAPSHOT_UPDATED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.NOTE_BASE_SNAPSHOT_UPDATED, handler);
   },
   noteMove(noteId: string, newFolderId: string | null): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.NOTE_MOVE, { noteId, newFolderId });
@@ -874,6 +898,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   workspaceGetState(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_STATE);
   },
+  workspaceSetConfig(wsId: string, config: { color?: string; proxyId?: string | null; userAgent?: string | null }): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SET_CONFIG, wsId, config);
+  },
+  workspacePersistState(wsId: string, patch: Record<string, unknown>): void {
+    ipcRenderer.send(IPC_CHANNELS.WORKSPACE_PERSIST_STATE, wsId, patch);
+  },
   /** main → renderer 广播：ws 状态变化（create/close/remove/open/rename/setActive 后）*/
   onWorkspaceStateChanged(callback: (state: unknown) => void): () => void {
     const handler = (_event: unknown, state: unknown): void => callback(state);
@@ -912,6 +942,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, state: AuthState): void => callback(state);
     ipcRenderer.on(IPC_CHANNELS.AUTH_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.AUTH_CHANGED, handler);
+  },
+
+  // ── Window Profile ──
+  profileList(): Promise<Profile[]> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROFILE_LIST);
+  },
+  profileGet(id: string): Promise<Profile | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROFILE_GET, id);
+  },
+  profileCreate(input: { name: string; color: ProfileColor; proxyId?: string; userAgent?: string }): Promise<Profile> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROFILE_CREATE, input);
+  },
+  profileUpdate(
+    id: string,
+    patch: Partial<{ name: string; color: ProfileColor; proxyId: string; userAgent: string }>,
+  ): Promise<Profile | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROFILE_UPDATE, id, patch);
+  },
+  profileDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROFILE_DELETE, id);
+  },
+  onProfileListChanged(callback: (list: Profile[]) => void): () => void {
+    const handler = (_event: unknown, list: Profile[]): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.PROFILE_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.PROFILE_LIST_CHANGED, handler);
   },
 
   // ── Progress 反馈订阅(backup-restore + 未来长耗时任务共用) ──

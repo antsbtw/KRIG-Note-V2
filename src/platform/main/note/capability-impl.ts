@@ -26,6 +26,7 @@
  * - title 派生自 assemble 后 doc.content[0] 首段文本(走 deriveTitle 不变)
  */
 
+import { createHash } from 'crypto';
 import { storage } from '@storage/index';
 import { waitForTitleBackfill } from '@storage/migrations/023-note-title-cache';
 import type { AtomEntity, PmPayload } from '@semantic/types';
@@ -64,6 +65,25 @@ const HAS_NOTE_VIEW_PREDICATE = 'user:krig:hasNoteView';
 // belongsToNote 仅 deleteNote 过渡期兼容查询(迁移前老笔记 block)仍用,Phase 4 删。
 const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
 
+// ── Phase 0 多窗口同步:hash 工具 ──────────────────────────────────────────────
+
+/** block payload 的 SHA-1 hex 摘要(40 字符) */
+function computeBlockHash(payload: PmPayload): string {
+  return createHash('sha1').update(JSON.stringify(payload)).digest('hex');
+}
+
+/**
+ * 所有 blockHash 按 blockId 字典序排序后拼接，再做 SHA-1 — docHash。
+ * 快速全文指纹，任意一块变化即整体变化。
+ */
+function computeDocHash(blockHashes: Record<string, string>): string {
+  const sorted = Object.keys(blockHashes)
+    .sort()
+    .map((k) => `${k}:${blockHashes[k]}`)
+    .join(',');
+  return createHash('sha1').update(sorted).digest('hex');
+}
+
 /**
  * note container atom payload — 含缓存 title(2026-05-28 性能修复)
  *
@@ -75,8 +95,16 @@ const BELONGS_TO_NOTE_PREDICATE = 'user:krig:belongsToNote';
  * 时用 deriveTitle(doc) 算好写进去;listNotes 优先读 attrs.title 跳过 assemble。
  * PM schema 对 doc 节点 attrs 透明无副作用(浏览器渲染忽略)。
  */
-function containerPayloadWithTitle(title: string): PmPayload {
-  return { type: 'doc', attrs: { title }, content: [] };
+function containerPayloadWithTitle(
+  title: string,
+  syncMeta?: { docVersion: number; docHash: string },
+): PmPayload {
+  const attrs: Record<string, unknown> = { title };
+  if (syncMeta) {
+    attrs.docVersion = syncMeta.docVersion;
+    attrs.docHash = syncMeta.docHash;
+  }
+  return { type: 'doc', attrs, content: [] };
 }
 
 /** 从 container atom payload 读缓存 title;未命中(老数据)返 null,caller fallback assemble */
@@ -111,6 +139,8 @@ function buildNoteInfo(
   containerAtom: AtomEntity<'pm'>,
   assembledDoc: PmPayload,
   folderId: string | null,
+  docVersion: number,
+  blockHashes: Record<string, string>,
 ): NoteInfo {
   return {
     id: containerAtom.id,
@@ -119,6 +149,8 @@ function buildNoteInfo(
     folderId,
     createdAt: containerAtom.createdAt,
     updatedAt: containerAtom.updatedAt,
+    docVersion,
+    blockHashes,
   };
 }
 
@@ -129,11 +161,17 @@ function buildNoteInfo(
  * 1. removedIds:deleteAtom(级联删该 atom 的关系边 — storage.deleteAtom 行为不变)
  * 2. added:putAtom(create with explicit id;atom.id == PM attrs.id,decision 026 §4.1)
  * 3. modified:putAtom(update by id;含 028 结构属性 order/parentId/noteId 变化)
+ *
+ * Phase 0 同步元字段:每个 added/modified block atom 的 payload.attrs 写入
+ * blockHash / lastEditedBy / lastEditedBySession / lastEditedAt。
  */
 async function applyDiff(
   diff: BlockDiff,
   tx: import('@storage/api').StorageTransaction,
-): Promise<void> {
+  syncMeta?: { clientId: string; wsId: string; now: number },
+): Promise<Map<string, string>> {
+  const updatedHashes = new Map<string, string>();
+
   // 1. 删 atom(级联删该 atom 上的关系边)
   for (const id of diff.removedIds) {
     await tx.deleteAtom(id);
@@ -141,19 +179,49 @@ async function applyDiff(
 
   // 2. added atom
   for (const a of diff.added) {
+    const blockHash = computeBlockHash(a.payload);
+    const stampedPayload: PmPayload = syncMeta
+      ? {
+          ...a.payload,
+          attrs: {
+            ...(a.payload.attrs ?? {}),
+            blockHash,
+            lastEditedBy: syncMeta.clientId,
+            lastEditedBySession: syncMeta.wsId,
+            lastEditedAt: syncMeta.now,
+          },
+        }
+      : a.payload;
     await tx.putAtom<'pm'>({
       id: a.id,
-      payload: { domain: NOTE_DOMAIN, payload: a.payload },
+      payload: { domain: NOTE_DOMAIN, payload: stampedPayload },
     });
+    updatedHashes.set(a.id, blockHash);
   }
 
   // 3. modified atom(结构变化已含在 payload.attrs 里)
   for (const m of diff.modified) {
+    const blockHash = computeBlockHash(m.payload);
+    const stampedPayload: PmPayload = syncMeta
+      ? {
+          ...m.payload,
+          attrs: {
+            ...(m.payload.attrs ?? {}),
+            blockHash,
+            lastEditedBy: syncMeta.clientId,
+            lastEditedBySession: syncMeta.wsId,
+            lastEditedAt: syncMeta.now,
+          },
+        }
+      : m.payload;
     await tx.putAtom<'pm'>({
       id: m.id,
-      payload: { domain: NOTE_DOMAIN, payload: m.payload },
+      payload: { domain: NOTE_DOMAIN, payload: stampedPayload },
     });
+    updatedHashes.set(m.id, blockHash);
   }
+
+  return updatedHashes;
 }
 
 export async function createNote(
@@ -206,7 +274,7 @@ export async function createNote(
       );
     }
 
-    await applyDiff(diff, tx);
+    const createHashes = await applyDiff(diff, tx);
 
     const elapsed = Date.now() - txStart;
     if (blockCount > 50 || elapsed > 500) {
@@ -215,10 +283,23 @@ export async function createNote(
       );
     }
 
+    // Phase 0:初始 docVersion=1,blockHashes 从 applyDiff 结果构建
+    const initBlockHashes: Record<string, string> = {};
+    for (const [bid, bh] of createHashes) initBlockHashes[bid] = bh;
+    const initDocHash = computeDocHash(initBlockHashes);
+    // 回填 container docVersion + docHash(createNote 同步写,单事务内已完成 block 写入)
+    await tx.putAtom<'pm'>({
+      id: containerAtom.id,
+      payload: {
+        domain: NOTE_DOMAIN,
+        payload: containerPayloadWithTitle(cachedTitle, { docVersion: 1, docHash: initDocHash }),
+      },
+    });
+
     // 5. cache + 返回(用 newDoc 字面作为 assembled — 因 dissect ↔ assemble 字面 round-trip
     //    幂等,这里跳过实际 assemble 节省一次 listEdges round-trip)
     pmDocCache.set(containerAtom.id, docWithIds);
-    return buildNoteInfo(containerAtom, docWithIds, folderId);
+    return buildNoteInfo(containerAtom, docWithIds, folderId, 1, initBlockHashes);
   }).catch((err) => {
     const elapsed = Date.now() - txStart;
     // 关键:事务整体抛错时升级到 error 让用户在 terminal 一眼看到
@@ -432,6 +513,8 @@ async function listNoteMetadata(): Promise<NoteMetadata[]> {
  */
 export async function listNotes(): Promise<NoteInfo[]> {
   const meta = await listNoteMetadata();
+  // Phase 0:listNotes 是 metadata-only(cold-start 性能契约),blockHashes 留空;
+  // view 端需要完整快照时走 getNote(id) 单点拉。
   return meta.map((m) => ({
     id: m.id,
     title: m.title,
@@ -439,6 +522,8 @@ export async function listNotes(): Promise<NoteInfo[]> {
     folderId: m.folderId,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
+    docVersion: 0,
+    blockHashes: {},
   }));
 }
 
@@ -456,6 +541,42 @@ export async function listNoteTitles(): Promise<Array<{
 }>> {
   const meta = await listNoteMetadata();
   return meta.map((m) => ({ id: m.id, title: m.title, folderId: m.folderId }));
+}
+
+/**
+ * Phase 1 多窗口 merge:轻量版本查询。
+ * renderer 在保存前调此接口拉取数据库当前快照——只读 container attrs + block attrs.blockHash,
+ * 不 assemble 全文，比 getNote 快 10x 以上（无需拼 PM doc）。
+ */
+export async function getNoteVersionInfo(noteId: string): Promise<{
+  docVersion: number;
+  docHash: string;
+  blockHashes: Record<string, string>;
+} | null> {
+  const atom = await storage.getAtom<'pm'>(noteId);
+  if (!atom) return null;
+  if (atom.payload.domain !== NOTE_DOMAIN) return null;
+  const containerPayload = atom.payload.payload as PmPayload;
+  if (isDeletionPending(containerPayload)) return null;
+
+  const docVersion =
+    typeof containerPayload.attrs?.docVersion === 'number'
+      ? (containerPayload.attrs.docVersion as number)
+      : 0;
+  const docHash =
+    typeof containerPayload.attrs?.docHash === 'string'
+      ? (containerPayload.attrs.docHash as string)
+      : '';
+
+  const blockAtoms = await storage.listAtoms({ domain: NOTE_DOMAIN, noteId });
+  const blockHashes: Record<string, string> = {};
+  for (const ba of blockAtoms) {
+    const stored = (ba.payload.payload as PmPayload).attrs?.blockHash;
+    blockHashes[ba.id] =
+      typeof stored === 'string' ? stored : computeBlockHash(ba.payload.payload as PmPayload);
+  }
+
+  return { docVersion, docHash, blockHashes };
 }
 
 export async function getNote(id: string): Promise<NoteInfo | null> {
@@ -487,12 +608,29 @@ export async function getNote(id: string): Promise<NoteInfo | null> {
   }
   if (!cached) pmDocCache.set(id, assembled);
 
-  return buildNoteInfo(atom, assembled, folderId);
+  // Phase 0:读 docVersion + blockHashes
+  const containerPayload = atom.payload.payload as PmPayload;
+  const docVersion =
+    typeof containerPayload.attrs?.docVersion === 'number'
+      ? (containerPayload.attrs.docVersion as number)
+      : 0;
+  const blockAtoms = await storage.listAtoms({ domain: NOTE_DOMAIN, noteId: id });
+  const blockHashes: Record<string, string> = {};
+  for (const ba of blockAtoms) {
+    const stored = (ba.payload.payload as PmPayload).attrs?.blockHash;
+    blockHashes[ba.id] =
+      typeof stored === 'string' ? stored : computeBlockHash(ba.payload.payload as PmPayload);
+  }
+
+  return buildNoteInfo(atom, assembled, folderId, docVersion, blockHashes);
 }
 
 export async function updateNote(
   id: string,
   doc: NoteDocEnvelope,
+  clientId?: string,
+  wsId?: string,
+  expectedVersion?: number,
 ): Promise<NoteInfo | null> {
   // 硬不变量:一篇 note 至多一个 isTitle 首块 —— 写库必经处单点强制(任何来源都过此关)
   const titleEnforced = enforceSingleTitleInDoc(unwrapPmDoc(doc));
@@ -530,20 +668,84 @@ export async function updateNote(
 
   const diff = diffBlockTree(oldDoc, newDoc, id);
 
+  // Phase 0:读旧 container 的 docVersion(未存在时初始为 0,本次写入变 1)
+  const oldContainerPayload = containerAtom.payload.payload as PmPayload;
+  const oldDocVersion =
+    typeof oldContainerPayload.attrs?.docVersion === 'number'
+      ? (oldContainerPayload.attrs.docVersion as number)
+      : 0;
+
+  // Phase 1 乐观锁:若 renderer 传入 expectedVersion 且与当前 db 版本不符,
+  // 返回 null 通知 renderer 重试（数据库在 Step 4/6 期间又被其他窗口写了一次）
+  if (expectedVersion !== undefined && oldDocVersion !== expectedVersion) {
+    console.info(
+      `[sync/occ] noteId=${id} expectedVersion=${expectedVersion} dbVersion=${oldDocVersion} → 版本冲突,返 null 让 renderer 重试`,
+    );
+    return null;
+  }
+
+  const newDocVersion = oldDocVersion + 1;
+  const now = Date.now();
+
+  // Phase 0 syncMeta — clientId/wsId 由 renderer 随 IPC payload 传入;缺失时降级空串
+  const syncMeta =
+    clientId && wsId
+      ? { clientId, wsId, now }
+      : { clientId: clientId ?? '', wsId: wsId ?? '', now };
+
   // 字面 transaction:apply diff + 更新 container payload(刷 title 缓存 + updatedAt)
   const newCachedTitle = deriveTitle(newDoc);
+  let diffHashes: Map<string, string>;
   const updatedContainer = await storage.transaction(async (tx) => {
-    await applyDiff(diff, tx);
+    diffHashes = await applyDiff(diff, tx, syncMeta);
+    // container 的 docVersion/docHash 在事务后补(需先知道完整 blockHashes);
+    // 先写一次带 newDocVersion 占位(docHash 事务后回填不影响 Phase 0 — Phase 1 用乐观锁)
     const refreshed = await tx.putAtom<'pm'>({
       id,
-      payload: { domain: NOTE_DOMAIN, payload: containerPayloadWithTitle(newCachedTitle) },
+      payload: {
+        domain: NOTE_DOMAIN,
+        payload: containerPayloadWithTitle(newCachedTitle, {
+          docVersion: newDocVersion,
+          docHash: '', // Phase 1 起用乐观锁;Phase 0 事务后回填
+        }),
+      },
     });
     return refreshed;
   });
 
+  // Phase 0:事务完成后拉所有存活 block 原子,拼完整 blockHashes 映射
+  // (diff.removedIds 已删,added/modified 走 diffHashes,其余为未变 block)
+  const allBlockAtoms = await storage.listAtoms({ domain: NOTE_DOMAIN, noteId: id });
+  const blockHashes: Record<string, string> = {};
+  const removedSet = new Set(diff.removedIds);
+  for (const ba of allBlockAtoms) {
+    if (removedSet.has(ba.id)) continue;
+    const fromDiff = diffHashes!.get(ba.id);
+    if (fromDiff) {
+      blockHashes[ba.id] = fromDiff;
+    } else {
+      // 未变 block:从已存 attrs.blockHash 读;若老数据无此字段则实时计算
+      const stored = (ba.payload.payload as PmPayload).attrs?.blockHash;
+      blockHashes[ba.id] =
+        typeof stored === 'string' ? stored : computeBlockHash(ba.payload.payload as PmPayload);
+    }
+  }
+
+  // 回填 docHash 到 container(不开新事务,直接 putAtom — Phase 1 乐观锁替换此路径)
+  const docHash = computeDocHash(blockHashes);
+  const finalContainer = await storage.transaction(async (tx) => {
+    return tx.putAtom<'pm'>({
+      id,
+      payload: {
+        domain: NOTE_DOMAIN,
+        payload: containerPayloadWithTitle(newCachedTitle, { docVersion: newDocVersion, docHash }),
+      },
+    });
+  });
+
   pmDocCache.set(id, newDoc);
   const folderId = await getFolderIdForNote(id);
-  return buildNoteInfo(updatedContainer, newDoc, folderId);
+  return buildNoteInfo(finalContainer, newDoc, folderId, newDocVersion, blockHashes);
 }
 
 export async function moveNote(
@@ -911,6 +1113,7 @@ async function createSingleNoteFromDrafts(
   //    view 端 getNote 真消费时走 assemblePmDoc 拼全文)
   // 字面不 cache pmDoc — Stage 7 不重建 PM doc 完整体 (drafts 是 storage 形态,
   // 不是 PM doc 形态); 后续 getNote 走 assemblePmDoc 字面从 storage 重建.
+  // Phase 0:批量导入路径 blockHashes 留空(性能优先;view 端 getNote 时再拉完整快照)
   const folderId = item.folderId;
   return {
     id: containerAtom.id,
@@ -919,6 +1122,8 @@ async function createSingleNoteFromDrafts(
     folderId,
     createdAt: containerAtom.createdAt,
     updatedAt: containerAtom.updatedAt,
+    docVersion: 1,
+    blockHashes: {},
   };
 }
 

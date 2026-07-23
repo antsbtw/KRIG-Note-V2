@@ -5,12 +5,14 @@
  * 启动时 IPC 状态尚未到达会短暂显示 Loading。
  */
 
-import { useActiveWorkspace } from '@workspace/workspace-instance/use-workspace';
+import { useWorkspace, getMyWsId } from '@workspace/workspace-instance/use-workspace';
 import { WorkspaceInstance } from '@workspace/workspace-instance/WorkspaceInstance';
 import './workspace-container.css';
 
 export function WorkspaceContainer() {
-  const ws = useActiveWorkspace();
+  // 多窗口：每个窗口渲染自己绑定的 ws（myWsId），而非全局 snapshot.activeId。
+  // myWsId 在 onMyWsIdReady 触发前为 null → 显示 Loading，就绪后重渲染。
+  const ws = useWorkspace(getMyWsId());
 
   if (!ws) {
     // 启动时 IPC 状态尚未到达的短暂空窗

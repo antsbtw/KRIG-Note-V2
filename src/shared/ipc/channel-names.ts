@@ -25,6 +25,9 @@ export const IPC_CHANNELS = {
 
   // 窗口状态变化(main → renderer,L2 阶段引入)
   WINDOW_FULLSCREEN_CHANGED: 'window.fullscreen-changed',
+  // 多窗口:主进程在窗口就绪后 push 本窗口绑定的 wsId(main → renderer,一次性)
+  WINDOW_WS_ID:         'window.ws-id',          // main → renderer push（deprecated path）
+  WINDOW_GET_WS_ID:     'window.get-ws-id',       // renderer → main invoke → returns wsId
 
   // L5-B3.4:外部链接 / 文件打开(给 link-click plugin 用)
   SHELL_OPEN_EXTERNAL: 'shell.open-external',
@@ -179,6 +182,10 @@ export const IPC_CHANNELS = {
   NOTE_DELETE: 'note.delete',
   NOTE_LIST_CHANGED: 'note.list-changed',           // main → renderer 推送
   NOTE_DOC_CONTENT_CHANGED: 'note.doc-content-changed', // main → renderer 推送(单 note doc 变化,发起者除外)
+  // Phase 1 多窗口 merge:轻量版本查询(renderer 保存前拉取当前 docVersion/docHash/blockHashes)
+  NOTE_GET_VERSION_INFO: 'note.get-version-info',   // renderer → main invoke → { docVersion, docHash, blockHashes } | null
+  // Phase 1 多窗口 merge:写成功后广播新 blockHashes 给其他窗口更新基线
+  NOTE_BASE_SNAPSHOT_UPDATED: 'note.base-snapshot-updated', // main → renderer 推送
 
   // thought capability(横切思考层 — thought-view-port.md v0.5 §5.3)
   // 9 channel-names = 8 invoke(对应 §5.3 API #1–#8) + 1 broadcast
@@ -280,6 +287,16 @@ export const IPC_CHANNELS = {
   AUTH_REFRESH: 'auth.refresh',                     // renderer → main:刷 token(轮换;启动/恢复前台)
   AUTH_CHANGED: 'auth.changed',                     // main → renderer 广播:登录态变化(多 ws 扇出守卫)
 
+  // ── Window Profile IPC ──
+  // renderer → main invoke
+  PROFILE_LIST:   'profile.list',    // → Profile[]
+  PROFILE_GET:    'profile.get',     // (id) → Profile | null
+  PROFILE_CREATE: 'profile.create',  // (input) → Profile
+  PROFILE_UPDATE: 'profile.update',  // (id, patch) → Profile | null
+  PROFILE_DELETE: 'profile.delete',  // (id) → void
+  // main → renderer 广播（create/update/delete 后）
+  PROFILE_LIST_CHANGED: 'profile.list-changed',
+
   // ── Workspace 楼长 IPC（S3-a，多窗口）──
   // renderer → main（invoke，请求-响应）
   WORKSPACE_CREATE:        'workspace.create',
@@ -289,6 +306,8 @@ export const IPC_CHANNELS = {
   WORKSPACE_RENAME:        'workspace.rename',
   WORKSPACE_SET_ACTIVE:    'workspace.set-active',
   WORKSPACE_GET_STATE:     'workspace.get-state',
+  WORKSPACE_SET_CONFIG:    'workspace.set-config',   // renderer → main invoke(wsId, config)
+  WORKSPACE_PERSIST_STATE: 'workspace.persist-state', // renderer → main send(wsId, patch) 回写布局+pluginStates
   // main → renderer（on，广播）
   WORKSPACE_STATE_CHANGED: 'workspace.state-changed',
 } as const;

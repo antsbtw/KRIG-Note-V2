@@ -35,9 +35,9 @@ const ignoreEpipe = (err: NodeJS.ErrnoException): void => {
 };
 process.stdout.on('error', ignoreEpipe);
 process.stderr.on('error', ignoreEpipe);
-import { createMainWindow } from './window/main-window';
+import { createWindow, markAppQuitting } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
-import { initWorkspaceManager } from './workspace/workspace-manager-main';
+import { initWorkspaceManager, getFullState } from './workspace/workspace-manager-main';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
@@ -54,6 +54,7 @@ import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
 import { registerWebDownloadHook } from './web-download/handler';
 import { registerWebProxyHandler } from './web-proxy/handler';
+import { registerProfileHandlers } from './profile/profile-handlers';
 import { registerWebSettingsHandler } from './web-settings/handler';
 import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
@@ -198,8 +199,18 @@ app.whenReady().then(async () => {
   registerBackupMenu();
   registerFrameworkMenus();
 
-  // L1 — 主窗口
-  const mainWindow = await createMainWindow();
+  // L1 — 恢复上次打开的窗口
+  // 使用 hasWindow 字段（退出前有独立窗口的 ws）而非 isOpen（tab bar 可见性）来决定开几个窗口。
+  // 兜底：至少保证 activeId 对应的窗口被打开。
+  const { workspaces: allWs, activeId: initialActiveId } = getFullState();
+  if (!initialActiveId) throw new Error('[main] initWorkspaceManager 后 activeId 仍为 null，无法创建首窗口');
+
+  // 先开 activeId 对应的主窗口，hooks 需要它的引用
+  const mainWindow = await createWindow(initialActiveId);
+
+  // 其余退出前有独立窗口的 ws 并行恢复（跳过已开的 activeId）
+  const otherWindowWs = allWs.filter((ws) => ws.hasWindow && ws.id !== initialActiveId);
+  await Promise.all(otherWindowWs.map((ws) => createWindow(ws.id)));
 
   // L5-C6:webview attach hook(PDF 提取 download 拦截)— 必须在 mainWindow 创建后挂
   registerWebviewExtractionHook(mainWindow);
@@ -227,6 +238,8 @@ app.whenReady().then(async () => {
     mediaStore.registerMediaForSession(guest.session);
     // L5-G7b:字体记名方案无 font:// 协议,无需 per-ws session 补注册(渲染走 IPC 按名读)。
   });
+  // Window Profile CRUD IPC。
+  registerProfileHandlers();
   // per-ws 代理阶段1:临时 setProxy IPC(DevTools console 验证不同 ws 不同出口)。
   registerWebProxyHandler();
   // per-ws 代理阶段3:Web 全局设置(搜索/主页)+ 清浏览数据 IPC。
@@ -243,7 +256,9 @@ app.whenReady().then(async () => {
 // macOS:窗口全关后,点 dock 重新打开
 app.on('activate', async () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    await createMainWindow();
+    const wsId = getFullState().activeId;
+    if (!wsId) throw new Error('[main] activate: activeId 为 null，无法重新创建窗口');
+    await createWindow(wsId);
   }
 });
 
@@ -254,7 +269,8 @@ app.on('window-all-closed', () => {
   }
 });
 
-// 退出前同步关 SurrealDB (300ms SIGTERM,超时 SIGKILL,避免孤儿)
+// 退出前：标记 app 正在退出（窗口 closed 回调跳过清 hasWindow）+ 关 SurrealDB
 app.on('before-quit', () => {
+  markAppQuitting();
   shutdownStorageSync();
 });

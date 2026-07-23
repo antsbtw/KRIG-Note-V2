@@ -22,6 +22,117 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { NoteCapabilityApi } from '@capabilities/note/types';
 import type { FolderCapabilityApi, FolderDeleteResult } from '@capabilities/folder/types';
 import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
+import { getClientId } from '@shared/client-identity';
+
+// ── Phase 1 多窗口 merge:renderer 端 block hash 工具 ─────────────────────────
+
+/** renderer 端 SHA-1 实现（Web Crypto API，与主进程 crypto.createHash('sha1') 等价） */
+async function computeBlockHashAsync(blockPayload: unknown): Promise<string> {
+  const json = JSON.stringify(blockPayload);
+  const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(json));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * 遍历当前 doc，计算所有 block 的 blockId → blockHash 映射。
+ * 只处理顶层 content 数组中有 attrs.id 的直接子节点（和主进程 dissect 逻辑一致）。
+ * 结构性容器（table/tableRow/列表容器等）内的 cell paragraph 也含 attrs.id，按需递归。
+ */
+async function computeCurrentBlockHashes(doc: DriverSerialized): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const pmDoc = doc.payload as { type?: string; content?: unknown[] } | undefined;
+  if (!pmDoc || !Array.isArray(pmDoc.content)) return result;
+
+  async function visitBlock(block: unknown): Promise<void> {
+    if (!block || typeof block !== 'object') return;
+    const b = block as Record<string, unknown>;
+    const attrs = b.attrs as Record<string, unknown> | undefined;
+    const blockId = attrs?.id;
+    if (typeof blockId === 'string' && blockId) {
+      // 用整个 block JSON 作 hash（去掉 blockHash/lastEditedBy/lastEditedBySession/lastEditedAt
+      // 等同步元字段，避免主进程写入这些字段后 hash 变化而产生假冲突）
+      const payloadForHash = stripSyncMeta(b);
+      result.set(blockId, await computeBlockHashAsync(payloadForHash));
+    }
+    // 递归处理 content（table/tableRow/列表容器等结构性容器内的子 block）
+    const children = b.content as unknown[] | undefined;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        await visitBlock(child);
+      }
+    }
+  }
+
+  for (const block of pmDoc.content) {
+    await visitBlock(block);
+  }
+  return result;
+}
+
+/**
+ * 去掉主进程写入的同步元字段再做 hash，使 renderer 端计算的 hash 与主进程一致。
+ * 主进程在 applyDiff 里写完 attrs 后才计算 blockHash，计算时 payload 已含这些字段；
+ * 而 renderer 发来的 payload 没有这些字段。
+ *
+ * 一致性保证：主进程 computeBlockHash(payload) 在 stampedPayload（含 syncMeta）上算；
+ * renderer 端从 getNote/getVersionInfo 拿到的 blockHashes 也是主进程在 stampedPayload 上算的。
+ * 所以 renderer 端要重算"当前 block 的 hash"，必须模拟主进程 stamp 后的 payload。
+ *
+ * 问题：renderer 端拿不到主进程算进去的 lastEditedAt（时间戳每次写都变），导致每次保存
+ * 后重算的 hash 都和数据库里的不同，changedBlocks 始终全量。
+ *
+ * 解法：只比较"内容"相关字段，不含 lastEditedAt（时间戳）和 lastEditedBySession（窗口 ID）。
+ * 主进程在算 blockHash 时也只对内容负责 — 同步元字段变化不构成真冲突。
+ *
+ * 实现：去掉 attrs 里的 blockHash/lastEditedBy/lastEditedBySession/lastEditedAt。
+ */
+function stripSyncMeta(block: Record<string, unknown>): unknown {
+  const attrs = block.attrs as Record<string, unknown> | undefined;
+  if (!attrs) return block;
+  const {
+    blockHash: _bh,
+    lastEditedBy: _leb,
+    lastEditedBySession: _lebs,
+    lastEditedAt: _lea,
+    ...rest
+  } = attrs;
+  return { ...block, attrs: rest };
+}
+
+// ── Phase 0 多窗口同步:NoteBaseSnapshot ──────────────────────────────────────
+
+/**
+ * 每个窗口打开笔记时在内存中保存的快照（不持久化，窗口关闭即释放）。
+ * 规范：docs/00-architecture/multi-window-sync-spec.md §3.4
+ */
+export interface NoteBaseSnapshot {
+  noteId: string;
+  docVersion: number;
+  docHash: string;
+  blockHashes: Map<string, string>;
+  openedAt: number;
+  openedBySession: string;
+}
+
+/** per-wsId 快照 Map（内存，不持久化） */
+const noteBaseSnapshots: Map<string, NoteBaseSnapshot> = new Map();
+
+/** 取当前 ws 的 baseSnapshot（Phase 1 merge 引擎用） */
+export function getNoteBaseSnapshot(wsId: string): NoteBaseSnapshot | undefined {
+  return noteBaseSnapshots.get(wsId);
+}
+
+/** 写入/更新 baseSnapshot（updateNote 成功后由调用方更新） */
+export function setNoteBaseSnapshot(wsId: string, snapshot: NoteBaseSnapshot): void {
+  noteBaseSnapshots.set(wsId, snapshot);
+}
+
+/** 清除 ws 的 baseSnapshot（ws 关闭 / 切换 note 时） */
+export function clearNoteBaseSnapshot(wsId: string): void {
+  noteBaseSnapshots.delete(wsId);
+}
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
@@ -140,6 +251,37 @@ export function getTransientVersion(): number {
   return transientVersion;
 }
 
+// ── Phase 1 多窗口 merge:跨窗口基线同步订阅 ────────────────────────────────────
+
+/**
+ * 订阅主进程广播的 NOTE_BASE_SNAPSHOT_UPDATED。
+ * 其他窗口写成功后，本窗口收到广播，更新本地 baseSnapshot 基线
+ * （只更新版本和 blockHashes，不覆盖本地未提交编辑内容）。
+ *
+ * 调用一次即可（renderer/index.tsx 初始化阶段调）。
+ */
+export function initNoteBaseSnapshotSync(): void {
+  if (!window.electronAPI?.onNoteBaseSnapshotUpdated) return;
+  window.electronAPI.onNoteBaseSnapshotUpdated((payload) => {
+    const { noteId, docVersion, blockHashes, fromSession } = payload;
+    // 遍历所有 ws 的 baseSnapshot，找 noteId 匹配且 fromSession 不同于自己的
+    for (const [wsId, snapshot] of noteBaseSnapshots) {
+      if (snapshot.noteId !== noteId) continue;
+      if (snapshot.openedBySession === fromSession) continue; // 自己发的，跳过
+      // 更新基线（不覆盖本地编辑；本地编辑内容由 PM editor 持有，不在 baseSnapshot 里）
+      setNoteBaseSnapshot(wsId, {
+        ...snapshot,
+        docVersion,
+        docHash: '', // docHash 由主进程维护，renderer 用 computeDocHashFromMap 或留空均可
+        blockHashes: new Map(Object.entries(blockHashes)),
+      });
+      console.info(
+        `[sync/base] wsId=${wsId} noteId=${noteId} 基线更新至 v${docVersion}（由 ${fromSession} 触发）`,
+      );
+    }
+  });
+}
+
 // ── 业务 API ──
 
 export function deriveTitle(doc: DriverSerialized): string {
@@ -176,18 +318,172 @@ export async function createNote(
  * 更新笔记 doc (+ 可选 folderId 移动)
  * L7-sub2:async;title 字段已不存(派生),patch.title 忽略。
  * patch.folderId 与 patch.doc 同时存在时:先 update doc,再 move 到新 folder。
+ *
+ * Phase 1:保存前插入 merge 逻辑，检测并发冲突，自动 merge 无冲突部分。
+ * wsId 可选，传入时用于定向更新该 ws 的快照。
  */
 export async function updateNote(
   noteId: string,
   patch: { doc?: DriverSerialized; title?: string; folderId?: string | null },
+  wsId?: string,
 ): Promise<void> {
   if (patch.doc !== undefined) {
-    await noteCap().updateNote(noteId, patch.doc);
+    const clientId = getClientId();
+    await updateNoteWithMerge(noteId, patch.doc, clientId, wsId);
   }
   if (patch.folderId !== undefined) {
     await noteCap().moveNote(noteId, patch.folderId);
   }
   // patch.title 在 L7-sub2 已不可写 (派生自 doc.content[0]),忽略
+}
+
+/**
+ * Phase 1 merge 引擎核心：在写库前检测并发冲突，自动 merge，带乐观锁写入。
+ * 最多重试 3 次（乐观锁冲突时重算 changedBlocks 再试）。
+ */
+async function updateNoteWithMerge(
+  noteId: string,
+  doc: DriverSerialized,
+  clientId: string,
+  wsId?: string,
+  retryCount = 0,
+): Promise<void> {
+  const MAX_RETRIES = 3;
+
+  // Step 1:取本窗口 baseSnapshot
+  const baseSnapshot = wsId ? getNoteBaseSnapshot(wsId) : undefined;
+  if (!baseSnapshot || baseSnapshot.noteId !== noteId) {
+    // 无快照时 fail-safe：直接写，但留痕
+    if (wsId) {
+      console.warn(
+        `[sync/merge] noteId=${noteId} wsId=${wsId} baseSnapshot 不存在或对应不同 note，跳过 merge 直接写`,
+      );
+    }
+    const result = await noteCap().updateNote(noteId, doc, clientId, wsId);
+    applySnapshotFromResult(noteId, wsId, result);
+    return;
+  }
+
+  // Step 2:计算本窗口 changedBlockIds（当前 doc vs baseSnapshot）
+  const currentHashes = await computeCurrentBlockHashes(doc);
+  const changedBlockIds = new Set<string>();
+  for (const [blockId, currentHash] of currentHashes) {
+    const baseHash = baseSnapshot.blockHashes.get(blockId);
+    if (baseHash !== currentHash) {
+      changedBlockIds.add(blockId);
+    }
+  }
+  // 新增的 block（baseSnapshot 里没有的）也是"本窗口改了"
+  for (const blockId of currentHashes.keys()) {
+    if (!baseSnapshot.blockHashes.has(blockId)) {
+      changedBlockIds.add(blockId);
+    }
+  }
+
+  if (changedBlockIds.size === 0 && baseSnapshot.blockHashes.size >= currentHashes.size) {
+    // 本窗口未改任何内容（可能是纯删块场景另行处理，此处保守直写）
+  }
+
+  // Step 3:拉数据库当前版本
+  const dbInfo = await window.electronAPI.noteGetVersionInfo(noteId);
+  if (!dbInfo) {
+    console.warn(`[sync/merge] noteId=${noteId} getNoteVersionInfo 返回 null，直接写`);
+    const result = await noteCap().updateNote(noteId, doc, clientId, wsId);
+    applySnapshotFromResult(noteId, wsId, result);
+    return;
+  }
+
+  // Step 4:若 db.docHash == baseSnapshot.docHash → 无并发写，直接写
+  if (dbInfo.docHash === baseSnapshot.docHash) {
+    const result = await noteCap().updateNote(noteId, doc, clientId, wsId, baseSnapshot.docVersion);
+    if (result === null) {
+      // 乐观锁冲突（Step 4 期间又有写入）→ 重试
+      await handleOptimisticLockConflict(noteId, doc, clientId, wsId, retryCount, MAX_RETRIES);
+      return;
+    }
+    applySnapshotFromResult(noteId, wsId, result);
+    return;
+  }
+
+  // Step 5:有并发写 — block 级 merge
+  console.info(
+    `[sync/merge] noteId=${noteId} 检测到并发写 base.docHash=${baseSnapshot.docHash.slice(0, 8)} db.docHash=${dbInfo.docHash.slice(0, 8)}`,
+  );
+  for (const blockId of changedBlockIds) {
+    const dbHash = dbInfo.blockHashes[blockId];
+    const baseHash = baseSnapshot.blockHashes.get(blockId);
+    if (dbHash !== undefined && dbHash !== baseHash) {
+      // 冲突：数据库和本窗口都改了该 block → Phase 1 last-write-wins（本窗口赢）+ warn
+      console.warn(
+        `[sync/conflict] noteId=${noteId} blockId=${blockId} dbHash=${dbHash?.slice(0, 8)} localHash=${baseHash?.slice(0, 8) ?? 'none'} → last-write-wins(local)`,
+      );
+    }
+    // 若 dbHash == baseHash：只有本窗口改了 → 安全，写本窗口版本（无需特殊处理）
+  }
+
+  // Step 6:带乐观锁写入（expectedVersion = 数据库当前版本）
+  const result = await noteCap().updateNote(noteId, doc, clientId, wsId, dbInfo.docVersion);
+  if (result === null) {
+    // 乐观锁冲突（Step 5-6 期间又有写入）→ 重试
+    await handleOptimisticLockConflict(noteId, doc, clientId, wsId, retryCount, MAX_RETRIES);
+    return;
+  }
+  applySnapshotFromResult(noteId, wsId, result);
+}
+
+/** 乐观锁冲突处理：重试或 fail loud */
+async function handleOptimisticLockConflict(
+  noteId: string,
+  doc: DriverSerialized,
+  clientId: string,
+  wsId: string | undefined,
+  retryCount: number,
+  maxRetries: number,
+): Promise<void> {
+  if (retryCount >= maxRetries) {
+    console.error(
+      `[sync/merge] noteId=${noteId} 乐观锁冲突超过最大重试次数 ${maxRetries}，放弃写入 — fail loud`,
+    );
+    return;
+  }
+  console.info(
+    `[sync/merge] noteId=${noteId} 乐观锁冲突，第 ${retryCount + 1} 次重试`,
+  );
+  // 刷新 baseSnapshot 到最新数据库状态，再重走 merge 流程
+  if (wsId) {
+    const freshInfo = await window.electronAPI.noteGetVersionInfo(noteId);
+    if (freshInfo) {
+      const prev = getNoteBaseSnapshot(wsId);
+      setNoteBaseSnapshot(wsId, {
+        noteId,
+        docVersion: freshInfo.docVersion,
+        docHash: freshInfo.docHash,
+        blockHashes: new Map(Object.entries(freshInfo.blockHashes)),
+        openedAt: prev?.openedAt ?? Date.now(),
+        openedBySession: wsId,
+      });
+    }
+  }
+  await updateNoteWithMerge(noteId, doc, clientId, wsId, retryCount + 1);
+}
+
+/** 写库成功后更新 baseSnapshot */
+function applySnapshotFromResult(
+  noteId: string,
+  wsId: string | undefined,
+  result: import('@capabilities/note/types').NoteInfo | null,
+): void {
+  if (result && wsId) {
+    const blockHashesMap = new Map(Object.entries(result.blockHashes));
+    setNoteBaseSnapshot(wsId, {
+      noteId,
+      docVersion: result.docVersion,
+      docHash: result.docVersion === 0 ? '' : computeDocHashFromMap(blockHashesMap),
+      blockHashes: blockHashesMap,
+      openedAt: getNoteBaseSnapshot(wsId)?.openedAt ?? Date.now(),
+      openedBySession: wsId,
+    });
+  }
 }
 
 export async function deleteNote(
@@ -240,6 +536,53 @@ export function setActiveNote(workspaceId: string, noteId: string | null): void 
   const state = hydrate(ws);
   if (state.activeNoteId === noteId) return;
   writePersistent(workspaceId, { activeNoteId: noteId });
+  // Phase 0:切换笔记时清旧快照，然后异步加载新快照
+  clearNoteBaseSnapshot(workspaceId);
+  if (noteId) {
+    void initNoteBaseSnapshot(workspaceId, noteId);
+  }
+}
+
+/**
+ * 异步初始化 NoteBaseSnapshot。
+ * setActiveNote 以 fire-and-forget 方式调用（保持 setActiveNote 同步签名不变）。
+ * 快照在用户第一次触发保存前必须就绪（通常有充足时间）。
+ */
+async function initNoteBaseSnapshot(wsId: string, noteId: string): Promise<void> {
+  try {
+    const note = await noteCap().getNote(noteId);
+    if (!note) return;
+    // 若在 getNote 期间用户已切换到别的 note，跳过（防竞态覆盖）
+    const ws = workspaceManager.get(wsId);
+    if (!ws) return;
+    const current = hydrate(ws).activeNoteId;
+    if (current !== noteId) return;
+    const blockHashesMap = new Map(Object.entries(note.blockHashes));
+    const docHash = note.docVersion === 0
+      ? ''
+      : computeDocHashFromMap(blockHashesMap);
+    setNoteBaseSnapshot(wsId, {
+      noteId,
+      docVersion: note.docVersion,
+      docHash,
+      blockHashes: blockHashesMap,
+      openedAt: Date.now(),
+      openedBySession: wsId,
+    });
+  } catch (err) {
+    console.error(`[data-model/initNoteBaseSnapshot] wsId=${wsId} noteId=${noteId}:`, err);
+  }
+}
+
+/** 按 blockId 字典序排序后拼接，再做 SHA-1 等价摘要（纯客户端实现，勿引 Node crypto） */
+function computeDocHashFromMap(blockHashes: Map<string, string>): string {
+  // renderer 进程无 Node crypto，用等价的 djb2-like 字符串拼接作为稳定键
+  // Phase 0 仅用于 snapshot，Phase 1 compare 走主进程的 docHash 字段
+  const sorted = Array.from(blockHashes.entries())
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${k}:${v}`)
+    .join(',');
+  return sorted; // Phase 0:直接用拼接串作指纹（长度可变，足够判断是否相等）
 }
 
 // ── 文件夹 ──

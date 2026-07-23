@@ -40,6 +40,25 @@ export async function broadcastNoteListChanged(): Promise<void> {
  * - ebook capability addReadingThoughtBlock / removeReadingThoughtBlock
  *   (emitterId 不传, origin='ebook-reading-thought')
  */
+/**
+ * Phase 1 多窗口 merge:写成功后广播新 blockHashes 给所有其他窗口更新基线快照。
+ * 发起窗口（emitterId）不收，自己已在 updateNote 后刷过快照。
+ */
+export function broadcastNoteBaseSnapshotUpdated(
+  payload: { noteId: string; docVersion: number; blockHashes: Record<string, string>; fromSession: string },
+  emitterId: number,
+): void {
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      if (win.webContents.id === emitterId) continue;
+      win.webContents.send(IPC_CHANNELS.NOTE_BASE_SNAPSHOT_UPDATED, payload);
+    }
+  } catch (err) {
+    console.warn('[note] broadcast base-snapshot-updated failed:', err);
+  }
+}
+
 export function broadcastNoteDocContentChanged(payload: NoteDocContentChangedPayload): void {
   try {
     for (const win of BrowserWindow.getAllWindows()) {
