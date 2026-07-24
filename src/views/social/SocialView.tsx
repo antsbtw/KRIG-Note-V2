@@ -138,6 +138,18 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
               <span>{item.name}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="krig-social-view__tab krig-social-view__tab--inbox"
+            onClick={() => {
+              const bus = workspaceManager.getBus(workspaceId);
+              bus?.slot.openRight('x-inbox-view');
+            }}
+            title="X Inbox — 打开智能筛选面板"
+          >
+            <span>📥</span>
+            <span>Inbox</span>
+          </button>
         </div>
         {isInRightSlot && (
           <button

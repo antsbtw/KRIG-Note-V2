@@ -438,3 +438,132 @@ export async function migration_1_7_1(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.7.1'), now },
   );
 }
+
+// ── 1.8.0：X 时间线智能筛选（Phase 1）——————————————————————————————————————
+// tweet_inbox：推文收件箱（采集 → 过滤 → AI 判断 → 回复追踪）
+// search_recipes：搜索配方（关键词/账号/时间窗/互动阈值组合）
+const SCHEMA_VERSION_1_8_0 = `
+-- tweet_inbox
+DEFINE TABLE IF NOT EXISTS tweet_inbox SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS tweet_id        ON tweet_inbox TYPE string;
+DEFINE FIELD IF NOT EXISTS text            ON tweet_inbox TYPE string;
+DEFINE FIELD IF NOT EXISTS author_name     ON tweet_inbox TYPE string;
+DEFINE FIELD IF NOT EXISTS author_handle   ON tweet_inbox TYPE string;
+DEFINE FIELD IF NOT EXISTS author_avatar   ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS tweet_url       ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS lang            ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS metrics         ON tweet_inbox TYPE object;
+DEFINE FIELD IF NOT EXISTS fetched_at      ON tweet_inbox TYPE datetime;
+DEFINE FIELD IF NOT EXISTS expires_at      ON tweet_inbox TYPE datetime;
+DEFINE FIELD IF NOT EXISTS source          ON tweet_inbox TYPE string;
+DEFINE FIELD IF NOT EXISTS search_recipe   ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS filter_score    ON tweet_inbox TYPE float;
+DEFINE FIELD IF NOT EXISTS filter_reason   ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ai_verdict      ON tweet_inbox TYPE option<object>;
+DEFINE FIELD IF NOT EXISTS status          ON tweet_inbox TYPE string;
+DEFINE FIELD IF NOT EXISTS replied_at      ON tweet_inbox TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS reply_draft     ON tweet_inbox TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_tweet_id    ON tweet_inbox FIELDS tweet_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_status      ON tweet_inbox FIELDS status;
+DEFINE INDEX IF NOT EXISTS idx_expires     ON tweet_inbox FIELDS expires_at;
+
+-- search_recipes
+DEFINE TABLE IF NOT EXISTS search_recipes SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS recipe_id         ON search_recipes TYPE string;
+DEFINE FIELD IF NOT EXISTS name              ON search_recipes TYPE string;
+DEFINE FIELD IF NOT EXISTS enabled           ON search_recipes TYPE bool;
+DEFINE FIELD IF NOT EXISTS template          ON search_recipes TYPE string;
+DEFINE FIELD IF NOT EXISTS keywords          ON search_recipes TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS from_accounts     ON search_recipes TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS help_signals      ON search_recipes TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS min_likes         ON search_recipes TYPE int;
+DEFINE FIELD IF NOT EXISTS min_retweets      ON search_recipes TYPE int;
+DEFINE FIELD IF NOT EXISTS lang              ON search_recipes TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS since_hours       ON search_recipes TYPE int;
+DEFINE FIELD IF NOT EXISTS result_type       ON search_recipes TYPE string;
+DEFINE FIELD IF NOT EXISTS interval_minutes  ON search_recipes TYPE int;
+DEFINE FIELD IF NOT EXISTS last_run_at       ON search_recipes TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_recipe_id     ON search_recipes FIELDS recipe_id UNIQUE;
+`;
+
+export async function migration_1_8_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_0);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.8.0',
+      appliedAt = $now,
+      description = 'Add tweet_inbox + search_recipes tables (X timeline intelligence Phase 1)'`,
+    { rid: new RecordId('schema_version', '1.8.0'), now },
+  );
+}
+
+const SCHEMA_VERSION_1_8_1 = `
+DEFINE FIELD IF NOT EXISTS ws_id ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id ON search_recipes TYPE option<string>;
+`;
+
+export async function migration_1_8_1(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_1);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.1', appliedAt = $now,
+     description = 'Add ws_id field to tweet_inbox and search_recipes'`,
+    { rid: new RecordId('schema_version', '1.8.1'), now },
+  );
+}
+
+const SCHEMA_VERSION_1_8_2 = `
+DEFINE FIELD OVERWRITE metrics    ON tweet_inbox TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE ai_verdict ON tweet_inbox TYPE option<object> FLEXIBLE;
+`;
+
+export async function migration_1_8_2(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_2);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.2', appliedAt = $now,
+     description = 'Make tweet_inbox metrics and ai_verdict FLEXIBLE to allow subfields'`,
+    { rid: new RecordId('schema_version', '1.8.2'), now },
+  );
+}
+
+const SCHEMA_VERSION_1_8_3 = `
+DEFINE TABLE IF NOT EXISTS tweet_feedback SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS tweet_id       ON tweet_feedback TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS text           ON tweet_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS lang           ON tweet_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS author_handle  ON tweet_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS verdict        ON tweet_feedback TYPE string ASSERT $value INSIDE ['accept', 'reject'];
+DEFINE FIELD IF NOT EXISTS reason_tag     ON tweet_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS source_recipe  ON tweet_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at     ON tweet_feedback TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_fb_tweet_id ON tweet_feedback FIELDS tweet_id;
+DEFINE INDEX IF NOT EXISTS idx_fb_verdict  ON tweet_feedback FIELDS verdict;
+DEFINE INDEX IF NOT EXISTS idx_fb_lang     ON tweet_feedback FIELDS lang;
+`;
+
+export async function migration_1_8_3(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_3);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.3', appliedAt = $now,
+     description = 'Add tweet_feedback table for human verdict training data'`,
+    { rid: new RecordId('schema_version', '1.8.3'), now },
+  );
+}
+
+const SCHEMA_VERSION_1_8_4 = `
+DEFINE FIELD IF NOT EXISTS translation ON tweet_inbox TYPE option<string>;
+`;
+
+export async function migration_1_8_4(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_4);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.4', appliedAt = $now,
+     description = 'Add translation field to tweet_inbox for non-Chinese tweets'`,
+    { rid: new RecordId('schema_version', '1.8.4'), now },
+  );
+}

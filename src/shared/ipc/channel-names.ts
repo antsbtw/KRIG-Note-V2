@@ -297,6 +297,20 @@ export const IPC_CHANNELS = {
   // main → renderer 广播（create/update/delete 后）
   PROFILE_LIST_CHANGED: 'profile.list-changed',
 
+  // X 时间线智能筛选（Phase 1 + Phase 2）— 搜索配方驱动采集 + AI 判断 + Review Queue
+  X_RUN_RECIPE:      'x:run-recipe',       // renderer → main invoke：手动触发指定配方（recipeId + wsId）
+  X_SCAN_PAUSE:      'x:scan-pause',       // renderer → main invoke：暂停指定 ws 扫描（Phase 2: 改为 invoke + wsId）
+  X_AI_JUDGE_BATCH:  'x:ai-judge-batch',  // renderer → main invoke / main 内部触发批判断
+  X_INBOX_QUERY:     'x:inbox-query',      // renderer → main invoke：查询 tweet_inbox（支持 wsId 过滤）
+  X_LIST_RECIPES:    'x:list-recipes',     // renderer → main invoke：取所有配方
+  X_REPLY_TWEET:     'x:reply-tweet',      // renderer → main invoke：导航 X webview 到目标推文（wsId + tweetUrl）
+  X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
+  X_SUBMIT_FEEDBACK: 'x:submit-feedback', // renderer → main invoke：写入人工 verdict
+  X_QUERY_FEEDBACK:  'x:query-feedback',  // renderer → main invoke：查询 feedback 样本（Phase 3b 用）
+  X_UPSERT_RECIPE:   'x:upsert-recipe',   // renderer → main invoke：新建或更新配方
+  X_DELETE_RECIPE:   'x:delete-recipe',   // renderer → main invoke：删除配方
+  X_GET_RECIPE_STATS:'x:get-recipe-stats',// renderer → main invoke：查配方采纳率统计
+
   // ── Workspace 楼长 IPC（S3-a，多窗口）──
   // renderer → main（invoke，请求-响应）
   WORKSPACE_CREATE:        'workspace.create',

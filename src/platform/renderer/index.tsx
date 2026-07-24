@@ -74,6 +74,7 @@ import '@views/ebook';  // L5-C1:EBookView self-register
 import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4)
 import '@views/x';      // X 集成:注册 X 提取命令
 import '@views/social'; // Social View self-register(NavSide tab 💬 order=6;含 X 平台)
+import '@views/x-inbox'; // X Inbox View self-register(right slot，从 SocialView tabbar 触发)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
 import './app.css';

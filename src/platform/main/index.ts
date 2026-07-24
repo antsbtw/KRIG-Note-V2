@@ -64,6 +64,9 @@ import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
 import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cache';
 import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
+import { seedRecipes } from './db/search-recipe-repo';
+import { startXSearchScheduler } from './x';
+import { registerXInboxProtocol, registerXInboxForSession } from './x-inbox-protocol';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -88,6 +91,15 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       corsEnabled: true,
       stream: true,
+    },
+  },
+  {
+    scheme: 'x-inbox',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: false,
     },
   },
   // L5-G7b:font:// 嵌入协议已废(改记名方案,字体经 IPC fontReadByName 按名读 buffer,
@@ -177,6 +189,12 @@ app.whenReady().then(async () => {
     console.error('[migration/073] 执行失败,启动下次会重试:', err);
   }
 
+  // X 时间线智能筛选 Phase 1 — 种子配方 + 调度器（必须在 migration_1_8_0 之后）
+  await seedRecipes().catch((err) => {
+    console.error('[x-timeline] seedRecipes failed:', err);
+  });
+  startXSearchScheduler();
+
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
   // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。
   await initWorkspaceManager();
@@ -184,6 +202,9 @@ app.whenReady().then(async () => {
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
   mediaStore.registerProtocol();
+
+  // X 时间线 Review Queue — 注册 x-inbox:// 协议（内置浏览器输入 x-inbox://index.html?wsId=xxx）
+  registerXInboxProtocol();
 
   // L5-G7b — 字体改记名方案(sysname:<family>),不再嵌入 → 无 font:// 协议要注册。
   // 本机渲染 / 导出经 IPC FONT_READ_BY_NAME 按名读 buffer(registerFontHandlers 接)。
@@ -236,6 +257,8 @@ app.whenReady().then(async () => {
   // registerProtocol 注册)。下载 will-download 的补挂在 registerWebDownloadHook 内部做。
   mainWindow.webContents.on('did-attach-webview', (_e, guest) => {
     mediaStore.registerMediaForSession(guest.session);
+    // x-inbox:// 协议对每个 webview partition（独立 session）补注册，确保内置浏览器能访问 Review Queue。
+    registerXInboxForSession(guest.session);
     // L5-G7b:字体记名方案无 font:// 协议,无需 per-ws session 补注册(渲染走 IPC 按名读)。
   });
   // Window Profile CRUD IPC。

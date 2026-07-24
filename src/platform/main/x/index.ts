@@ -9,3 +9,6 @@
 export { registerXHandlers } from './handlers';
 export { registerXWebviewHook } from './webview-hook';
 export { registerXTestHandlers } from './test-drivers'; // 逐块底层测试(dev-only,ipc-bus 按需注册)
+// X 时间线智能筛选（Phase 1）
+export { registerXTimelineHandlers } from './x-timeline-handlers';
+export { startScheduler as startXSearchScheduler, stopScheduler as stopXSearchScheduler, setActiveXWcId, getActiveWcId } from './x-search-scheduler';

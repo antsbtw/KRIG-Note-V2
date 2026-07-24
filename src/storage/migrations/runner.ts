@@ -5,7 +5,7 @@
  * 幂等: DEFINE TABLE/FIELD/INDEX 在 SurrealDB 是 idempotent (重复定义不报错)。
  */
 import type { Surreal } from 'surrealdb';
-import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1 } from '../surreal/schema';
+import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1, migration_1_8_0, migration_1_8_1, migration_1_8_2, migration_1_8_3, migration_1_8_4 } from '../surreal/schema';
 
 interface Migration {
   version: string;
@@ -58,6 +58,31 @@ const MIGRATIONS: Migration[] = [
     version: '1.7.1',
     description: 'Fix workspace table: SCHEMAFULL -> SCHEMALESS (WorkspaceState subfields)',
     up: migration_1_7_1,
+  },
+  {
+    version: '1.8.0',
+    description: 'Add tweet_inbox + search_recipes tables (X timeline intelligence Phase 1)',
+    up: migration_1_8_0,
+  },
+  {
+    version: '1.8.1',
+    description: 'Add ws_id field to tweet_inbox and search_recipes (Phase 2 multi-window)',
+    up: migration_1_8_1,
+  },
+  {
+    version: '1.8.2',
+    description: 'Make tweet_inbox metrics and ai_verdict FLEXIBLE to allow subfields',
+    up: migration_1_8_2,
+  },
+  {
+    version: '1.8.3',
+    description: 'Add tweet_feedback table for human verdict training data',
+    up: migration_1_8_3,
+  },
+  {
+    version: '1.8.4',
+    description: 'Add translation field to tweet_inbox for non-Chinese tweets',
+    up: migration_1_8_4,
   },
 ];
 

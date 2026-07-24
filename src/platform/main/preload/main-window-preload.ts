@@ -988,4 +988,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.PROGRESS_DONE, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.PROGRESS_DONE, handler);
   },
+
+  // ── X 时间线智能筛选 Review Queue（Phase 2）──
+  xTimeline: {
+    queryInbox(opts: { status?: string; wsId?: string; limit?: number; offset?: number }) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
+    },
+    runRecipe(recipeId: string, wsId: string, targetWcId: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_RUN_RECIPE, { recipeId, wsId, targetWcId });
+    },
+    pauseScan(wsId: string) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_SCAN_PAUSE, { wsId });
+    },
+    judgeNow() {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_AI_JUDGE_BATCH);
+    },
+    listRecipes() {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_LIST_RECIPES);
+    },
+    getActiveWcId(wsId: string) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_GET_ACTIVE_WC, { wsId });
+    },
+    replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_TWEET, { tweetUrl, tweetId, wsId, wcId });
+    },
+    submitFeedback: (payload: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
+    queryFeedback: (payload: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_QUERY_FEEDBACK, payload),
+    upsertRecipe: (payload: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_UPSERT_RECIPE, payload),
+    deleteRecipe: (recipeId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_DELETE_RECIPE, { recipeId }),
+    getRecipeStats: (recipeId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_GET_RECIPE_STATS, { recipeId }),
+  },
 });

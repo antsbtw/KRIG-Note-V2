@@ -715,6 +715,22 @@ declare global {
       workspacePersistState(wsId: string, patch: Record<string, unknown>): void;
       /** main → renderer 广播：ws 状态变化；返 unsubscribe */
       onWorkspaceStateChanged(callback: (state: unknown) => void): () => void;
+
+      // ── X 时间线智能筛选 Review Queue（Phase 2）──
+      xTimeline: {
+        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; limit?: number; offset?: number }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
+        runRecipe(recipeId: string, wsId: string, targetWcId: number): Promise<{ success: boolean; fetched?: number; saved?: number; filteredOut?: number; error?: string }>;
+        pauseScan(wsId: string): Promise<void>;
+        judgeNow(): Promise<{ success: boolean; error?: string }>;
+        listRecipes(): Promise<{ success: boolean; recipes: import('@shared/types/x-timeline-types').SearchRecipe[]; error?: string }>;
+        getActiveWcId(wsId: string): Promise<{ wcId: number | null }>;
+        replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number): Promise<{ success: boolean; error?: string }>;
+        submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
+        queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
+        upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;
+        deleteRecipe(recipeId: string): Promise<{ success: boolean; error?: string }>;
+        getRecipeStats(recipeId: string): Promise<{ success: boolean; stats: { recipeId: string; total: number; gemmaPass: number; adopted: number; rejected: number; adoptRate: number }; error?: string }>;
+      };
     };
   }
 }

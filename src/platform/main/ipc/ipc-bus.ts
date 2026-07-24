@@ -25,7 +25,7 @@ import { registerNoteHandlers } from '../note';
 import { registerPmContentHandlers } from '../pm-content';
 import { registerThoughtHandlers } from '../thought';
 import { registerAIHandlers } from '../ai';
-import { registerXHandlers, registerXTestHandlers } from '../x';
+import { registerXHandlers, registerXTestHandlers, registerXTimelineHandlers } from '../x';
 import { registerAuthHandlers } from './auth-handler';
 import { registerWorkspaceHandlers } from './workspace-handler';
 
@@ -53,6 +53,7 @@ export function initIpcBus(): void {
   registerAIHandlers();             // ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)
   registerXHandlers();              // X 集成 阶段 1:右键 X webview 提取推文 → tweetBlock
   registerXTestHandlers();          // X Article 逐块底层测试(独立驱动+验证完整落定);只注册 listener,renderer 主动调才跑
+  registerXTimelineHandlers();      // X 时间线智能筛选 Phase 1:搜索配方采集 + AI 判断 + inbox 查询
   registerAuthHandlers();           // 账号登录 + 归因(authorization-management-design.md;本期不做授权)
   registerWorkspaceHandlers();      // S3-a:Workspace 楼长 IPC(create/close/remove/open/rename/setActive/getState)
 }
