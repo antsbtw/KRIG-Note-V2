@@ -66,6 +66,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_GET_WS_ID);
   },
 
+  /** 系统主题变化订阅 — 返回取消订阅函数 */
+  onNativeThemeChanged(callback: (payload: { dark: boolean }) => void): () => void {
+    const handler = (_event: unknown, payload: { dark: boolean }) => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.NATIVE_THEME_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.NATIVE_THEME_CHANGED, handler);
+  },
+
   /** 订阅窗口全屏状态变化 — 返回取消订阅函数 */
   onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void {
     const handler = (_event: unknown, isFullscreen: boolean) => callback(isFullscreen);

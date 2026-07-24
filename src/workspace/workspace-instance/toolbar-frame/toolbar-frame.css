@@ -2,26 +2,17 @@
 .krig-toolbar-frame {
   flex: none;
   height: 36px;
-  background-color: #252525;
-  border-bottom: 1px solid #333;
+  background-color: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-muted);
   display: flex;
   align-items: center;
   padding: 0 12px;
-  color: #e8eaed;
-  -webkit-app-region: drag; /* hiddenInset 窗口:toolbar 条可拖动 */
-}
-
-/* toolbar 内所有可交互元素不参与拖窗 */
-.krig-toolbar-frame button,
-.krig-toolbar-frame input,
-.krig-toolbar-frame a,
-.krig-toolbar-frame [role="button"],
-.krig-toolbar-frame select {
-  -webkit-app-region: no-drag;
+  color: var(--text);
+  /* drag 规则集中在 app.css 管理 */
 }
 
 .krig-toolbar-empty {
   font-size: 12px;
   font-style: italic;
-  color: #555;
+  color: var(--text-subtle);
 }

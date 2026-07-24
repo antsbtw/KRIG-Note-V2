@@ -4,11 +4,67 @@
  * L2 阶段:垂直 flex(WorkspaceBar 顶部 + WorkspaceContainer 撑满剩余)
  */
 
+/* ── 主题 CSS 变量 ── */
+/* 暗色（默认）— data-theme="dark" 或 :root 未被覆盖时生效 */
+:root,
+[data-theme="dark"] {
+  --bg:           #0f172a;
+  --bg-card:      #1e293b;
+  --bg-elevated:  #252525;
+  --bg-shell:     #1e1e1e;
+  --bg-divider:   #2a2a2a;
+  --border:       #334155;
+  --border-muted: #333;
+  --text:         #e2e8f0;
+  --text-muted:   #94a3b8;
+  --text-disabled:#64748b;
+  --text-faint:   #475569;
+  --text-subtle:  #555;
+  --text-icon:    #888;
+  --text-bright:  #f1f5f9;
+  --accent:       #1d4ed8;
+  --accent-hover: #334155;
+  --accent-text:  #8ab4f8;
+  --accent-bg:    rgba(138,180,248,0.15);
+  --hover-overlay:rgba(255,255,255,0.08);
+  --danger-bg:    rgba(220,38,38,0.18);
+  --danger-text:  #fca5a5;
+  --close-hover:  #3a3a3a;
+  --text-light:   #ddd;
+}
+
+/* 亮色 — data-theme="light" 时覆盖 */
+[data-theme="light"] {
+  --bg:           #f8fafc;
+  --bg-card:      #f1f5f9;
+  --bg-elevated:  #ffffff;
+  --bg-shell:     #ffffff;
+  --bg-divider:   #e2e8f0;
+  --border:       #e2e8f0;
+  --border-muted: #cbd5e1;
+  --text:         #0f172a;
+  --text-muted:   #64748b;
+  --text-disabled:#94a3b8;
+  --text-faint:   #94a3b8;
+  --text-subtle:  #64748b;
+  --text-icon:    #64748b;
+  --text-bright:  #0f172a;
+  --accent:       #2563eb;
+  --accent-hover: #e2e8f0;
+  --accent-text:  #2563eb;
+  --accent-bg:    rgba(37,99,235,0.10);
+  --hover-overlay:rgba(0,0,0,0.06);
+  --danger-bg:    rgba(220,38,38,0.10);
+  --danger-text:  #ef4444;
+  --close-hover:  #e2e8f0;
+  --text-light:   #334155;
+}
+
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background-color: #1e1e1e;
+  background-color: var(--bg-shell);
 }
 
 #root {
@@ -20,6 +76,62 @@ html, body {
    * 撑满 viewport,不参与 flex 布局)*/
   height: 100%;
   position: relative;
+}
+
+
+/* ── 拖窗区域集中管理 ──────────────────────────────────────────────────
+ * macOS hiddenInset 模式下，所有 view 顶部栏需要 -webkit-app-region: drag。
+ * 各顶部栏内部的可交互元素（button/a/input）统一声明 no-drag。
+ * 新增 view 若有自定义顶部栏，在此处追加其 CSS class 即可。
+ * ─────────────────────────────────────────────────────────────────── */
+
+/* 已走 ToolbarFrame 的 view（note/web/ebook/graph 等）*/
+.krig-toolbar-frame,
+/* Social view tabbar */
+.krig-social-view__tabbar,
+/* AI view tabbar */
+.krig-ai-view__tabbar,
+/* Thought view toolbar */
+.thought-view__toolbar,
+/* Web view tab bar + address bar */
+.krig-web-tabbar,
+.krig-web-toolbar,
+/* EBook view toolbar */
+.krig-ebook-toolbar,
+/* Graph Canvas view toolbar */
+.krig-graph-canvas-toolbar {
+  -webkit-app-region: drag;
+}
+
+/* 所有顶部栏内可交互元素取消 drag，保证点击正常 */
+.krig-toolbar-frame button,
+.krig-toolbar-frame input,
+.krig-toolbar-frame a,
+.krig-toolbar-frame select,
+.krig-toolbar-frame [role="button"],
+.krig-social-view__tabbar button,
+.krig-social-view__tabbar input,
+.krig-social-view__tabbar a,
+.krig-social-view__tabs,
+.krig-ai-view__tabbar button,
+.krig-ai-view__tabbar input,
+.krig-ai-view__tabbar a,
+.thought-view__toolbar button,
+.thought-view__toolbar input,
+.thought-view__toolbar a,
+.krig-web-tabbar button,
+.krig-web-tabbar input,
+.krig-web-tabbar a,
+.krig-web-toolbar button,
+.krig-web-toolbar input,
+.krig-web-toolbar a,
+.krig-ebook-toolbar button,
+.krig-ebook-toolbar input,
+.krig-ebook-toolbar a,
+.krig-graph-canvas-toolbar button,
+.krig-graph-canvas-toolbar input,
+.krig-graph-canvas-toolbar a {
+  -webkit-app-region: no-drag;
 }
 
 .krig-app__workspace-layer {

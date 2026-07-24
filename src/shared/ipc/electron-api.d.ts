@@ -68,6 +68,8 @@ declare global {
     electronAPI: {
       reportAlive(payload: DiagnosticsReportPayload): void;
       health(layer: 'L0' | 'L1' | 'L2' | 'L3' | 'L3.5' | 'L4' | 'L5' | 'platform'): Promise<HealthCheckResponse>;
+      /** 系统主题变化订阅，返回取消订阅函数 */
+      onNativeThemeChanged(callback: (payload: { dark: boolean }) => void): () => void;
       /** 订阅窗口全屏状态变化,返回取消订阅函数 */
       onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void;
       /** 多窗口：renderer 主动拉取自己绑定的 wsId（push 方式竞态时的补偿路径）*/

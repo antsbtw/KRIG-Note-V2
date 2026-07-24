@@ -5,7 +5,7 @@
   display: grid;
   grid-template-rows: 1fr;
   /* grid-template-columns 由 inline style 提供(ratio 动态)*/
-  background-color: #1e1e1e;
+  background-color: var(--bg-shell);
   overflow: hidden;
   min-height: 0;
 }
@@ -82,7 +82,7 @@
   align-items: center;
   justify-content: center;
   background-color: transparent;
-  color: #555;
+  color: var(--text-subtle);
   overflow: visible;
   grid-row: 1;
   pointer-events: none;
@@ -111,7 +111,7 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #888;
+  color: var(--text-icon);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -119,8 +119,8 @@
 }
 
 .krig-slot-close:hover:not(:disabled) {
-  background-color: #3a3a3a;
-  color: #ddd;
+  background-color: var(--close-hover);
+  color: var(--text-light);
 }
 
 .krig-slot-close:disabled {
@@ -135,13 +135,13 @@
   font-style: italic;
   text-align: center;
   padding: 16px;
-  color: #555;
+  color: var(--text-subtle);
 }
 
 /* 拖拽分隔线 */
 .krig-divider {
   flex: none;
-  background-color: #2a2a2a;
+  background-color: var(--bg-divider);
   cursor: col-resize;
   transition: background-color 0.15s;
   grid-column: 2;
@@ -149,5 +149,5 @@
 }
 
 .krig-divider:hover {
-  background-color: #555;
+  background-color: var(--text-subtle);
 }

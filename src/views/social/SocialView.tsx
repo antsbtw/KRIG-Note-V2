@@ -151,6 +151,7 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
             <span>Inbox</span>
           </button>
         </div>
+        <div className="krig-social-view__drag-spacer" />
         {isInRightSlot && (
           <button
             type="button"

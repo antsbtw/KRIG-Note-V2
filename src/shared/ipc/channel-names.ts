@@ -311,6 +311,9 @@ export const IPC_CHANNELS = {
   X_DELETE_RECIPE:   'x:delete-recipe',   // renderer → main invoke：删除配方
   X_GET_RECIPE_STATS:'x:get-recipe-stats',// renderer → main invoke：查配方采纳率统计
 
+  // 系统主题（nativeTheme）— main → renderer 广播
+  NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }
+
   // ── Workspace 楼长 IPC（S3-a，多窗口）──
   // renderer → main（invoke，请求-响应）
   WORKSPACE_CREATE:        'workspace.create',

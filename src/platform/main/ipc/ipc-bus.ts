@@ -5,6 +5,7 @@
  */
 
 import { registerHealthCheckHandlers } from './health-check';
+import { registerNativeThemeHandler } from './native-theme-handler';
 import { registerDiagnosticsHandlers } from './diagnostics-handler';
 import { registerShellHandlers } from './shell-handler';
 import { registerWebTranslateHandlers } from './web-translate-handler';
@@ -31,6 +32,7 @@ import { registerWorkspaceHandlers } from './workspace-handler';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
+  registerNativeThemeHandler();
   registerDiagnosticsHandlers();
   registerShellHandlers();
   registerWebTranslateHandlers();

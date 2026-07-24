@@ -117,11 +117,11 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
       background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        background: '#1e293b', borderRadius: 10, border: '1px solid #334155',
+        background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border)',
         width: 480, maxHeight: '90vh', overflowY: 'auto', padding: '20px 24px',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: '#f1f5f9' }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-bright)' }}>
           {draft.id ? '编辑配方' : '新建配方'}
         </div>
 
@@ -139,7 +139,7 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
         <Field label="语言">
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {(['', 'zh', 'en'] as const).map((l) => (
-              <label key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: '#cbd5e1' }}>
+              <label key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
                 <input
                   type="radio"
                   checked={(draft.lang ?? '') === l}
@@ -148,7 +148,7 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
                 {l === '' ? '不限' : l}
               </label>
             ))}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: '#cbd5e1' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
               <input
                 type="radio"
                 checked={!!draft.lang && draft.lang !== 'zh' && draft.lang !== 'en'}
@@ -243,7 +243,7 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
             <input type="number" min={1} value={draft.sinceHours ?? 24}
               onChange={(e) => set('sinceHours', Number(e.target.value))}
               style={{ ...inputStyle, width: 60 }} />
-            <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>小时内</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>小时内</span>
           </Field>
           <Field label="采集频率" inline>
             每
@@ -258,7 +258,7 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
         <Field label="结果类型">
           <div style={{ display: 'flex', gap: 14 }}>
             {(['latest', 'top'] as const).map((rt) => (
-              <label key={rt} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: '#cbd5e1' }}>
+              <label key={rt} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
                 <input type="radio" checked={draft.resultType === rt} onChange={() => set('resultType', rt)} />
                 {rt === 'latest' ? '最新' : '热门'}
               </label>
@@ -268,14 +268,14 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
 
         {/* 启用 */}
         <Field label="启用">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#cbd5e1' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
             <input type="checkbox" checked={draft.enabled} onChange={(e) => set('enabled', e.target.checked)} />
             {draft.enabled ? '是' : '否'}
           </label>
         </Field>
 
         {/* 操作按钮 */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 6, borderTop: '1px solid #334155' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
           {draft.id && onDelete && (
             <Btn onClick={handleDelete} disabled={deleting} style={{ background: '#7f1d1d', borderColor: '#7f1d1d', color: '#fca5a5' }}>
               {deleting ? '删除中...' : '删除'}
@@ -355,20 +355,20 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: '#e2e8f0', fontSize: 12, position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, position: 'relative' }}>
       {/* 顶部栏 */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: '#1e293b', borderBottom: '1px solid #334155', flexShrink: 0, gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
         <Btn sm onClick={() => setEditTarget('new')}>+ 新建配方</Btn>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {statusMsg && <span style={{ fontSize: 11, color: '#94a3b8' }}>{statusMsg}</span>}
+          {statusMsg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{statusMsg}</span>}
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>
         </div>
       </div>
 
       {/* 配方列表 */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg)' }}>
         {recipes.length === 0 && (
-          <div style={{ color: '#475569', textAlign: 'center', marginTop: 40 }}>暂无配方，点击「+ 新建配方」创建</div>
+          <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>暂无配方，点击「+ 新建配方」创建</div>
         )}
         {recipes.map((recipe) => {
           const stats = statsMap[recipe.id as string];
@@ -380,15 +380,15 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
 
           return (
             <div key={recipe.id as string} style={{
-              background: '#1e293b', borderRadius: 8, padding: '10px 14px',
+              background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
               borderLeft: `3px solid ${recipe.enabled ? '#22c55e' : '#475569'}`,
             }}>
               {/* 名称行 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 13, color: recipe.enabled ? '#22c55e' : '#64748b' }}>
+                <span style={{ fontSize: 13, color: recipe.enabled ? '#22c55e' : 'var(--text-disabled)' }}>
                   {recipe.enabled ? '●' : '○'}
                 </span>
-                <span style={{ fontWeight: 600, fontSize: 13, color: '#f1f5f9', flex: 1 }}>{recipe.name}</span>
+                <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-bright)', flex: 1 }}>{recipe.name}</span>
                 <Btn sm onClick={() => handleRunRecipe(recipe)} disabled={isRunning}>
                   {isRunning ? '运行中...' : '▶ 立即运行'}
                 </Btn>
@@ -396,26 +396,26 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
               </div>
 
               {/* 关键词预览 */}
-              <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 5, lineHeight: 1.4 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 5, lineHeight: 1.4 }}>
                 关键词: {(recipe.keywords ?? []).slice(0, 8).join(' · ')}
                 {(recipe.keywords ?? []).length > 8 && ' ...'}
               </div>
 
               {/* 调度信息 */}
-              <div style={{ fontSize: 11, color: '#64748b', display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-disabled)', display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
                 <span>每 {recipe.intervalMinutes} 分钟</span>
                 {recipe.lastRunAt && <span>上次: {timeAgo(recipe.lastRunAt)}</span>}
                 {nextRunAt && <span>下次: {timeFromNow(nextRunAt)}</span>}
-                {!recipe.lastRunAt && <span style={{ color: '#475569' }}>尚未运行</span>}
+                {!recipe.lastRunAt && <span style={{ color: 'var(--text-faint)' }}>尚未运行</span>}
               </div>
 
               {/* 统计行 */}
               {stats && (
-                <div style={{ fontSize: 11, color: '#64748b', display: 'flex', gap: 12, flexWrap: 'wrap', borderTop: '1px solid #1e293b', paddingTop: 6 }}>
-                  <span>采集 <strong style={{ color: '#94a3b8' }}>{stats.total}</strong> 条</span>
+                <div style={{ fontSize: 11, color: 'var(--text-disabled)', display: 'flex', gap: 12, flexWrap: 'wrap', borderTop: '1px solid var(--bg-card)', paddingTop: 6 }}>
+                  <span>采集 <strong style={{ color: 'var(--text-muted)' }}>{stats.total}</strong> 条</span>
                   <span>Gemma通过 <strong style={{ color: '#7dd3fc' }}>{stats.gemmaPass}</strong></span>
                   <span>人工采纳 <strong style={{ color: '#86efac' }}>{stats.adopted}</strong></span>
-                  <span>采纳率 <strong style={{ color: stats.adoptRate > 0 ? '#fbbf24' : '#475569' }}>{stats.adoptRate}%</strong></span>
+                  <span>采纳率 <strong style={{ color: stats.adoptRate > 0 ? '#fbbf24' : 'var(--text-faint)' }}>{stats.adoptRate}%</strong></span>
                 </div>
               )}
             </div>
@@ -648,19 +648,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     if (status === 'worth') return '#22c55e';
     if (status === 'pending') return '#f59e0b';
     if (status === 'ai_judging') return '#8b5cf6';
-    return '#334155';
+    return 'var(--border)';
   };
 
   const cardOpacity = (status: string) =>
     status === 'skip' || status === 'filtered_out' ? 0.5 : 1;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: '#e2e8f0', fontSize: 12, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
       {/* 顶部栏 */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: '#1e293b', borderBottom: '1px solid #334155', flexShrink: 0, gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
         <span style={{ fontWeight: 600, fontSize: 13 }}>📥 X Inbox</span>
-        <span style={{ background: '#334155', color: '#94a3b8', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>{workspaceId}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <span style={{ background: 'var(--border)', color: 'var(--text-muted)', padding: '1px 6px', borderRadius: 4, fontSize: 11 }}>{workspaceId}</span>
+        <div style={{ flex: 1, height: '100%', WebkitAppRegion: 'drag' as never }} />
+        <div style={{ display: 'flex', gap: 6 }}>
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
@@ -672,7 +673,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* 左侧栏 */}
-        <div style={{ width: 160, minWidth: 160, background: '#1e293b', borderRight: '1px solid #334155', padding: 10, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+        <div style={{ width: 160, minWidth: 160, background: 'var(--bg-card)', borderRight: '1px solid var(--border)', padding: 10, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
           {/* 语言过滤 */}
           <div>
             <div style={sectionTitle}>语言</div>
@@ -684,7 +685,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                   display: 'flex', alignItems: 'center', gap: 6, padding: '4px 7px',
                   borderRadius: 5, cursor: 'pointer', marginBottom: 2,
                   background: currentLang === lang ? '#0f4c75' : 'transparent',
-                  color: currentLang === lang ? '#7dd3fc' : '#94a3b8',
+                  color: currentLang === lang ? '#7dd3fc' : 'var(--text-muted)',
                 }}
               >
                 <span>{icon}</span>
@@ -703,13 +704,13 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '4px 7px',
                   borderRadius: 5, cursor: 'pointer', marginBottom: 2,
-                  background: currentStatus === status ? '#1d4ed8' : 'transparent',
-                  color: currentStatus === status ? '#fff' : '#94a3b8',
+                  background: currentStatus === status ? 'var(--accent)' : 'transparent',
+                  color: currentStatus === status ? '#fff' : 'var(--text-muted)',
                 }}
               >
                 <span>{icon}</span>
                 <span style={{ fontSize: 11 }}>{label}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 10, background: currentStatus === status ? 'rgba(255,255,255,0.2)' : '#334155', padding: '1px 5px', borderRadius: 8 }}>
+                <span style={{ marginLeft: 'auto', fontSize: 10, background: currentStatus === status ? 'rgba(255,255,255,0.2)' : 'var(--border)', padding: '1px 5px', borderRadius: 8 }}>
                   {status === 'all' ? Object.values(counts).reduce((a, b) => a + b, 0) : (counts[status] ?? '-')}
                 </span>
               </div>
@@ -722,7 +723,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             <select
               value={selectedRecipeId}
               onChange={(e) => setSelectedRecipeId(e.target.value)}
-              style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
             >
               {recipes.length === 0
                 ? <option value="">加载中...</option>
@@ -735,12 +736,12 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
               </Btn>
               <Btn onClick={stopScan}>停</Btn>
             </div>
-            {scanStatus && <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>{scanStatus}</div>}
+            {scanStatus && <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{scanStatus}</div>}
           </div>
 
           {/* Ollama 状态 */}
-          <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid #334155', fontSize: 11, color: '#64748b' }}>
-            Ollama: <span style={{ fontWeight: 500, color: ollamaOk === true ? '#22c55e' : ollamaOk === false ? '#ef4444' : '#94a3b8' }}>
+          <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-disabled)' }}>
+            Ollama: <span style={{ fontWeight: 500, color: ollamaOk === true ? '#22c55e' : ollamaOk === false ? '#ef4444' : 'var(--text-muted)' }}>
               {ollamaOk === true ? '✅ 就绪' : ollamaOk === false ? '❌ 不可用' : '检测中...'}
             </span>
           </div>
@@ -748,9 +749,9 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
         {/* 右侧推文列表 + 分页 */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg)' }}>
             {tweets.length === 0 && (
-              <div style={{ color: '#475569', textAlign: 'center', marginTop: 40 }}>暂无推文</div>
+              <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>暂无推文</div>
             )}
             {tweets.map((t) => {
               const expanded = expandedIds.has(t.tweet_id);
@@ -758,19 +759,19 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
               const reason = t.ai_verdict?.reason ?? '';
               return (
                 <div key={t.tweet_id} style={{
-                  background: '#1e293b', borderRadius: 8, padding: 10,
+                  background: 'var(--bg-card)', borderRadius: 8, padding: 10,
                   borderLeft: `3px solid ${cardBorderColor(t.status)}`,
                   opacity: cardOpacity(t.status),
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-                    <span style={{ fontWeight: 600, color: '#f1f5f9', fontSize: 12 }}>{t.author_name}</span>
-                    <span style={{ color: '#64748b', fontSize: 11 }}>@{t.author_handle}</span>
-                    <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 11 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: 12 }}>{t.author_name}</span>
+                    <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{t.author_handle}</span>
+                    <span style={{ marginLeft: 'auto', color: 'var(--text-disabled)', fontSize: 11 }}>
                       {t.fetched_at ? timeAgo(t.fetched_at) : ''} · ❤ {t.metrics?.likes ?? 0}
                     </span>
                   </div>
                   <div style={{
-                    color: '#cbd5e1', lineHeight: 1.5, fontSize: 12,
+                    color: 'var(--text)', lineHeight: 1.5, fontSize: 12,
                     overflow: expanded ? 'visible' : 'hidden',
                     display: expanded ? 'block' : '-webkit-box',
                     WebkitLineClamp: expanded ? undefined : 3,
@@ -786,17 +787,17 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                   {tags.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
                       {tags.map((tag: string) => (
-                        <span key={tag} style={{ background: '#1d4ed8', color: '#bfdbfe', fontSize: 10, padding: '1px 6px', borderRadius: 10 }}>{tag}</span>
+                        <span key={tag} style={{ background: 'var(--accent)', color: '#bfdbfe', fontSize: 10, padding: '1px 6px', borderRadius: 10 }}>{tag}</span>
                       ))}
                     </div>
                   )}
                   {t.translation && (
-                    <div style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: 11, marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #334155' }}>
+                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 11, marginTop: 4, paddingLeft: 8, borderLeft: '2px solid var(--border)' }}>
                       🌐 {t.translation}
                     </div>
                   )}
                   {reason && (
-                    <div style={{ color: '#6b7280', fontStyle: 'italic', fontSize: 11, marginTop: 3 }}>✦ {reason}</div>
+                    <div style={{ color: 'var(--text-disabled)', fontStyle: 'italic', fontSize: 11, marginTop: 3 }}>✦ {reason}</div>
                   )}
                   <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap', alignItems: 'center' }}>
                     {t.tweet_url && (
@@ -826,11 +827,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             })}
           </div>
           {totalCount > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid #1e293b', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--bg-card)', flexShrink: 0 }}>
               <Btn sm onClick={() => loadPage(page - 1)} disabled={page === 0}>‹ 上一页</Btn>
-              <span style={{ fontSize: 11, color: '#64748b' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
                 第 {page + 1} / {Math.ceil(totalCount / PAGE_SIZE)} 页
-                <span style={{ marginLeft: 6, color: '#475569' }}>({totalCount} 条)</span>
+                <span style={{ marginLeft: 6, color: 'var(--text-faint)' }}>({totalCount} 条)</span>
               </span>
               <Btn sm onClick={() => loadPage(page + 1)} disabled={(page + 1) * PAGE_SIZE >= totalCount}>下一页 ›</Btn>
             </div>
@@ -844,17 +845,17 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 // ── 小组件 ──────────────────────────────────────────────────────────
 
 const sectionTitle: React.CSSProperties = {
-  fontSize: 10, fontWeight: 600, color: '#64748b',
+  fontSize: 10, fontWeight: 600, color: 'var(--text-disabled)',
   textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
 };
 
 const closeBtn: React.CSSProperties = {
-  background: 'none', border: 'none', color: '#94a3b8',
+  background: 'none', border: 'none', color: 'var(--text-muted)',
   cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '2px 4px',
 };
 
 const inputStyle: React.CSSProperties = {
-  background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0',
+  background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)',
   padding: '4px 8px', borderRadius: 5, fontSize: 12, outline: 'none',
 };
 
@@ -866,7 +867,7 @@ interface FieldProps {
 function Field({ label, inline, children }: FieldProps) {
   return (
     <div style={{ display: inline ? 'flex' : 'block', alignItems: inline ? 'center' : undefined, gap: inline ? 6 : undefined }}>
-      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: inline ? 0 : 4, whiteSpace: 'nowrap' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-disabled)', fontWeight: 600, marginBottom: inline ? 0 : 4, whiteSpace: 'nowrap' }}>{label}</div>
       {children}
     </div>
   );
@@ -892,9 +893,9 @@ function Btn({ onClick, primary, sm, disabled, children, style }: BtnProps) {
         padding: sm ? '2px 7px' : '3px 10px',
         borderRadius: 5, fontSize: sm ? 11 : 12, cursor: disabled ? 'not-allowed' : 'pointer',
         border: '1px solid',
-        background: primary ? '#1d4ed8' : '#334155',
-        color: primary ? '#fff' : '#e2e8f0',
-        borderColor: primary ? '#1d4ed8' : '#475569',
+        background: primary ? 'var(--accent)' : 'var(--border)',
+        color: primary ? '#fff' : 'var(--text)',
+        borderColor: primary ? 'var(--accent)' : 'var(--text-faint)',
         opacity: disabled ? 0.5 : 1,
         ...style,
       }}

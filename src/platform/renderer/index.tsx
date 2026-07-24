@@ -24,6 +24,15 @@ import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import { getActiveWorkspaceIdSync, onMyWsIdReady } from '@workspace/workspace-instance/use-workspace';
 import { initNoteBaseSnapshotSync } from '@views/note/data-model';
+
+// ── 系统主题同步（跟随 nativeTheme）──
+// 初始值用 matchMedia prefers-color-scheme（Electron/Chromium 会同步 OS 主题）。
+// 后续变化由主进程 nativeTheme 'updated' 事件经 IPC 推送。
+function applyTheme(dark: boolean): void {
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+}
+applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
+window.electronAPI?.onNativeThemeChanged(({ dark }) => applyTheme(dark));
 import { registerNoteCommands } from '@views/note/note-commands';
 import { registerWebCommands } from '@views/web/web-commands';
 import { registerWebBookmarkCommands } from '@views/web/web-bookmark-commands';
