@@ -567,3 +567,18 @@ export async function migration_1_8_4(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.8.4'), now },
   );
 }
+
+const SCHEMA_VERSION_1_8_5 = `
+DEFINE FIELD IF NOT EXISTS task_id ON tweet_inbox TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_task ON tweet_inbox FIELDS task_id;
+`;
+
+export async function migration_1_8_5(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_5);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.5', appliedAt = $now,
+     description = 'Add task_id dimension to tweet_inbox'`,
+    { rid: new RecordId('schema_version', '1.8.5'), now },
+  );
+}

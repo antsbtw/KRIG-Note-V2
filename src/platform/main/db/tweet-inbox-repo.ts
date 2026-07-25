@@ -6,6 +6,7 @@
 
 import { getDB } from '@storage/surreal/client';
 import type { TweetInboxRecord, AIVerdict, TweetInboxStatus, TweetFeedback, FeedbackVerdict } from '@shared/types/x-timeline-types';
+import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
 
 /** 写入或忽略（tweet_id 唯一索引冲突 = 重复，直接跳过） */
 export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
@@ -24,6 +25,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       expires_at: $expires_at,
       source: $source,
       search_recipe: $search_recipe,
+      task_id: $task_id,
       ws_id: $ws_id,
       filter_score: $filter_score,
       filter_reason: $filter_reason,
@@ -46,6 +48,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       expires_at: new Date(record.expires_at),
       source: record.source,
       search_recipe: record.search_recipe ?? undefined,
+      task_id: record.task_id ?? DEFAULT_TASK_ID,
       ws_id: record.ws_id ?? undefined,
       filter_score: record.filter_score,
       filter_reason: record.filter_reason ?? undefined,
@@ -83,12 +86,16 @@ export async function getTweetIdSet(_windowHours: number): Promise<Set<string>> 
   return new Set(rows.map((r) => r.tweet_id));
 }
 
-/** 查询 pending 推文（AI 判断前批量拉取） */
-export async function queryPending(limit = 50): Promise<TweetInboxRecord[]> {
+/** 查询 pending 推文（AI 判断前批量拉取）
+ *  - 传 wsId → 只取该 ws 的 pending（AI 判断 per-ws 隔离，防跨 ws 混批）
+ *  - 不传 wsId → 保持原全局行为（向后兼容）
+ */
+export async function queryPending(limit = 50, wsId?: string): Promise<TweetInboxRecord[]> {
   const db = getDB();
+  const wsFilter = wsId ? 'AND ws_id = $wsId' : '';
   const res = await db.query<[TweetInboxRecord[]]>(
-    `SELECT * FROM tweet_inbox WHERE status = 'pending' ORDER BY fetched_at ASC LIMIT $limit`,
-    { limit },
+    `SELECT * FROM tweet_inbox WHERE status = 'pending' ${wsFilter} ORDER BY fetched_at ASC LIMIT $limit`,
+    { limit, wsId: wsId ?? null },
   );
   return res[0] ?? [];
 }
@@ -119,6 +126,8 @@ export async function queryInbox(opts: {
   statuses?: TweetInboxStatus[];   // 多状态 IN 过滤（与 status 互斥，优先级更高）
   wsId?: string;
   lang?: string;
+  searchRecipe?: string;           // 按配方切片
+  taskId?: string;                 // 按处理任务维度切片（阶段B恒 'judge-value'）
   limit?: number;
   offset?: number;
 }): Promise<TweetInboxRecord[]> {
@@ -131,11 +140,13 @@ export async function queryInbox(opts: {
   else if (opts.status)            conditions.push('status = $status');
   if (opts.wsId)                   conditions.push('ws_id = $wsId');
   if (opts.lang)                   conditions.push('lang = $lang');
+  if (opts.searchRecipe)           conditions.push('search_recipe = $searchRecipe');
+  if (opts.taskId)                 conditions.push('task_id = $taskId');
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const res = await db.query<[TweetInboxRecord[]]>(
     `SELECT * FROM tweet_inbox ${where} ORDER BY fetched_at DESC LIMIT $limit START $offset`,
-    { status: opts.status, statuses: opts.statuses ?? null, wsId: opts.wsId ?? null, lang: opts.lang ?? null, limit, offset },
+    { status: opts.status, statuses: opts.statuses ?? null, wsId: opts.wsId ?? null, lang: opts.lang ?? null, searchRecipe: opts.searchRecipe ?? null, taskId: opts.taskId ?? null, limit, offset },
   );
   return res[0] ?? [];
 }

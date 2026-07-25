@@ -3,6 +3,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { SearchRecipe, TweetInboxRecord, TweetInboxStatus, FeedbackVerdict } from '@shared/types/x-timeline-types';
+import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
 
 interface XInboxViewProps {
   workspaceId: string;
@@ -455,6 +456,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const [view, setView] = useState<'inbox' | 'recipes'>('inbox');
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
+  const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
+  const [filterTaskId, setFilterTaskId] = useState('');       // '' = 全部任务；阶段B唯一具体任务为 DEFAULT_TASK_ID
   const [currentStatus, setCurrentStatus] = useState<TweetInboxStatus | 'all'>('pending');
   const [currentLang, setCurrentLang] = useState<'zh' | 'en' | 'all'>('all');
   const [tweets, setTweets] = useState<TweetInboxRecord[]>([]);
@@ -486,12 +489,16 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     setLoading(true);
     try {
       const langFilter = currentLang === 'all' ? undefined : currentLang;
+      const recipeFilter = filterRecipeId || undefined;
+      const taskFilter = filterTaskId || undefined;
       const offset = targetPage * PAGE_SIZE;
       const r = await xApiT.queryInbox({
         ...(currentStatus === 'all'
           ? { statuses: ['pending', 'worth'] }
           : { status: currentStatus }),
         lang: langFilter,
+        searchRecipe: recipeFilter,
+        taskId: taskFilter,
         limit: PAGE_SIZE,
         offset,
       });
@@ -505,7 +512,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const visibleStatuses: TweetInboxStatus[] = ['pending', 'worth'];
       const newCounts: Record<string, number> = {};
       await Promise.all(visibleStatuses.map(async (s) => {
-        const cr = await xApiT.queryInbox({ status: s, lang: langFilter, limit: 5000, offset: 0 });
+        const cr = await xApiT.queryInbox({ status: s, lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, limit: 5000, offset: 0 });
         newCounts[s] = cr?.records?.length ?? 0;
       }));
       setCounts(newCounts);
@@ -517,12 +524,12 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [currentStatus, currentLang]);
+  }, [currentStatus, currentLang, filterRecipeId, filterTaskId]);
 
   useEffect(() => {
     loadPage(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStatus, currentLang, workspaceId]);
+  }, [currentStatus, currentLang, filterRecipeId, filterTaskId, workspaceId]);
 
   useEffect(() => {
     const check = async () => {
@@ -565,7 +572,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     const tApi = api();
     if (!tApi) return;
     setScanStatus('AI 判断中...');
-    const r = await tApi.judgeNow();
+    const r = await tApi.judgeNow(workspaceId);
     setScanStatus(r?.success ? 'AI 判断完成' : `判断失败：${r?.error}`);
     loadPage(0);
   };
@@ -715,6 +722,32 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                 </span>
               </div>
             ))}
+          </div>
+
+          {/* 配方切片 */}
+          <div>
+            <div style={sectionTitle}>配方</div>
+            <select
+              value={filterRecipeId}
+              onChange={(e) => setFilterRecipeId(e.target.value)}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
+            >
+              <option value="">🌐 全部</option>
+              {recipes.map((r) => <option key={String(r.id)} value={String(r.id)}>{r.name}</option>)}
+            </select>
+          </div>
+
+          {/* 任务切片（阶段B占位维度，唯一具体任务 = judge-value）*/}
+          <div>
+            <div style={sectionTitle}>任务</div>
+            <select
+              value={filterTaskId}
+              onChange={(e) => setFilterTaskId(e.target.value)}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
+            >
+              <option value="">🌐 全部</option>
+              <option value={DEFAULT_TASK_ID}>判断价值</option>
+            </select>
           </div>
 
           {/* 触发采集 */}

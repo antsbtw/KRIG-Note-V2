@@ -145,11 +145,14 @@ export async function judgeWithOllama(
 /**
  * 从 tweet_inbox 拉取 pending 推文并批量判断。
  * 供调度器和 IPC handler（X_AI_JUDGE_BATCH）调用。
+ *
+ * @param wsId 传入时只判该 ws 的 pending（per-ws 隔离，防跨 ws 混批）；
+ *             不传时判全部 ws 的 pending（向后兼容，但生产路径应始终传 wsId）。
  */
-export async function runJudgeBatch(config: JudgeConfig): Promise<void> {
-  const pending = await queryPending(config.batchSize);
+export async function runJudgeBatch(config: JudgeConfig, wsId?: string): Promise<void> {
+  const pending = await queryPending(config.batchSize, wsId);
   if (pending.length === 0) {
-    console.log('[x-ai-judge] no pending tweets, skip');
+    console.log(`[x-ai-judge] no pending tweets${wsId ? ` for ws=${wsId}` : ''}, skip`);
     return;
   }
   await judgeWithOllama(pending, config);

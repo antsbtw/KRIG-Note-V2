@@ -722,10 +722,10 @@ declare global {
 
       // ── X 时间线智能筛选 Review Queue（Phase 2）──
       xTimeline: {
-        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; limit?: number; offset?: number }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
+        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; limit?: number; offset?: number }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
         runRecipe(recipeId: string, wsId: string, targetWcId: number): Promise<{ success: boolean; fetched?: number; saved?: number; filteredOut?: number; error?: string }>;
         pauseScan(wsId: string): Promise<void>;
-        judgeNow(): Promise<{ success: boolean; error?: string }>;
+        judgeNow(wsId: string): Promise<{ success: boolean; error?: string }>;
         listRecipes(): Promise<{ success: boolean; recipes: import('@shared/types/x-timeline-types').SearchRecipe[]; error?: string }>;
         getActiveWcId(wsId: string): Promise<{ wcId: number | null }>;
         replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number): Promise<{ success: boolean; error?: string }>;

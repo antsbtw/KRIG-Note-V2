@@ -29,8 +29,28 @@ export function getActiveWcId(wsId: string): number | null {
 let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let ttlTimer: ReturnType<typeof setInterval> | null = null;
 
-/** 累计待判断 pending 条数 */
-let pendingAccumulated = 0;
+/** 累计待判断 pending 条数（per-ws：各 ws 各自累计、各自达阈值、各自清零，防跨 ws 混批） */
+const pendingAccumulated = new Map<string, number>();
+
+/**
+ * 纯函数：给某 ws 累加 saved 条数，判断是否达到 batchSize。
+ * 达到 → 返回 { fire:true }，并把该 ws 计数清零（调用方负责真正触发判断）。
+ * 抽成纯函数便于离线单测计数器隔离逻辑（不依赖 Electron 主进程）。
+ */
+export function accumulatePending(
+  counters: Map<string, number>,
+  wsId: string,
+  saved: number,
+  batchSize: number,
+): { fire: boolean; accumulated: number } {
+  const next = (counters.get(wsId) ?? 0) + saved;
+  if (next >= batchSize) {
+    counters.set(wsId, 0);
+    return { fire: true, accumulated: next };
+  }
+  counters.set(wsId, next);
+  return { fire: false, accumulated: next };
+}
 
 const filterConfig: TimelineFilterConfig = DEFAULT_FILTER_CONFIG;
 const judgeConfig: JudgeConfig = DEFAULT_JUDGE_CONFIG;
@@ -68,11 +88,11 @@ async function runEnabledRecipes(): Promise<void> {
           wcId,
           filterConfig,
           (saved) => {
-            pendingAccumulated += saved;
-            if (pendingAccumulated >= judgeConfig.batchSize) {
-              pendingAccumulated = 0;
-              runJudgeBatch(judgeConfig).catch((err) => {
-                console.error('[x-search-scheduler] judge batch failed:', err);
+            // per-ws 累计：只判触发它的那个 ws，绝不跨 ws 混批
+            const { fire } = accumulatePending(pendingAccumulated, wsId, saved, judgeConfig.batchSize);
+            if (fire) {
+              runJudgeBatch(judgeConfig, wsId).catch((err) => {
+                console.error(`[x-search-scheduler] judge batch ws=${wsId} failed:`, err);
               });
             }
           },
@@ -84,12 +104,14 @@ async function runEnabledRecipes(): Promise<void> {
     await updateLastRunAt(recipe.id, new Date().toISOString());
   }
 
-  // maxWaitMinutes 超时触发：若有积累但未满 batchSize
-  if (pendingAccumulated > 0) {
-    pendingAccumulated = 0;
-    runJudgeBatch(judgeConfig).catch((err) => {
-      console.error('[x-search-scheduler] judge batch (timeout trigger) failed:', err);
-    });
+  // maxWaitMinutes 超时触发：逐 ws 处理未满 batchSize 的残留积累，各判各的
+  for (const [wsId, count] of pendingAccumulated.entries()) {
+    if (count > 0) {
+      pendingAccumulated.set(wsId, 0);
+      runJudgeBatch(judgeConfig, wsId).catch((err) => {
+        console.error(`[x-search-scheduler] judge batch (timeout trigger) ws=${wsId} failed:`, err);
+      });
+    }
   }
 }
 

@@ -47,8 +47,9 @@ export function registerXTimelineHandlers(): void {
     try {
       const result = await scanRecipe(recipe, p.wsId, targetWcId, DEFAULT_FILTER_CONFIG);
       if (result.saved > 0) {
-        runJudgeBatch(DEFAULT_JUDGE_CONFIG).catch((err) => {
-          console.error('[x-timeline-handlers] judge batch after manual run failed:', err);
+        // 只判触发它的那个 ws（p.wsId 已在上方校验为 string），防跨 ws 混批
+        runJudgeBatch(DEFAULT_JUDGE_CONFIG, p.wsId).catch((err) => {
+          console.error(`[x-timeline-handlers] judge batch after manual run ws=${p.wsId} failed:`, err);
         });
       }
       return { success: true, ...result };
@@ -66,10 +67,16 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
-  // X_AI_JUDGE_BATCH — 手动触发 AI 批判断
-  ipcMain.handle(IPC_CHANNELS.X_AI_JUDGE_BATCH, async () => {
+  // X_AI_JUDGE_BATCH — 手动触发 AI 批判断（面板自己知道 ws，须带 wsId 只判本 ws）
+  ipcMain.handle(IPC_CHANNELS.X_AI_JUDGE_BATCH, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown } | null;
+    if (!p || typeof p.wsId !== 'string' || !p.wsId) {
+      // fail loud：缺 wsId 是调用方 bug，留痕不静默退回全局混判
+      console.error('[x-timeline-handlers] X_AI_JUDGE_BATCH missing wsId, refusing to run (would mix cross-ws)');
+      return { success: false, error: 'wsId required' };
+    }
     try {
-      await runJudgeBatch(DEFAULT_JUDGE_CONFIG);
+      await runJudgeBatch(DEFAULT_JUDGE_CONFIG, p.wsId);
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
@@ -78,13 +85,15 @@ export function registerXTimelineHandlers(): void {
 
   // X_INBOX_QUERY — 查询 tweet_inbox（Review Queue 用）
   ipcMain.handle(IPC_CHANNELS.X_INBOX_QUERY, async (_e, payload: unknown) => {
-    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; limit?: unknown; offset?: unknown } | null;
+    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; limit?: unknown; offset?: unknown } | null;
     try {
       const records = await queryInbox({
         status: typeof p?.status === 'string' ? (p.status as TweetInboxStatus) : undefined,
         statuses: Array.isArray(p?.statuses) ? (p.statuses as TweetInboxStatus[]) : undefined,
         wsId: typeof p?.wsId === 'string' ? p.wsId : undefined,
         lang: typeof p?.lang === 'string' ? p.lang : undefined,
+        searchRecipe: typeof p?.searchRecipe === 'string' ? p.searchRecipe : undefined,
+        taskId: typeof p?.taskId === 'string' ? p.taskId : undefined,
         limit: typeof p?.limit === 'number' ? p.limit : 50,
         offset: typeof p?.offset === 'number' ? p.offset : 0,
       });

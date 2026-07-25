@@ -6,6 +6,9 @@
 
 export type RecipeTemplate = 'trending' | 'vip-tracking' | 'help-wanted' | 'custom';
 
+/** 默认处理任务维度：阶段 B 只有「判断价值」一个动作，恒填此值；阶段 C 起为工单 task_id */
+export const DEFAULT_TASK_ID = 'judge-value';
+
 export interface SearchRecipe {
   id: string;                    // ULID
   name: string;
@@ -71,6 +74,7 @@ export interface TweetInboxRecord {
   expires_at: string;            // fetched_at + 7 天
   source: 'timeline' | 'search';
   search_recipe?: string;        // recipe.id
+  task_id?: string;              // 处理任务维度，阶段B恒 'judge-value'，阶段C 起为工单 task
   ws_id?: string;                // workspace id（Phase 2 多窗口隔离）
   filter_score: number;          // 0-1，暂存 1.0
   filter_reason?: string;        // filtered_out 原因
