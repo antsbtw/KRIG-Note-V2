@@ -8,11 +8,12 @@
  */
 
 import path from 'node:path';
-import { BrowserWindow, ipcMain, shell } from 'electron';
+import { BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
 import { reportL1Alive } from '../diagnostics/L1-alive';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { detectXServiceByUrl } from '@shared/types/x-service-types';
 import { applyWsConfigToSession, wsSetHasWindow } from '../workspace/workspace-manager-main';
+import { themeBgColor } from '../ipc/native-theme-handler';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -44,7 +45,7 @@ export async function createWindow(wsId?: string): Promise<BrowserWindow> {
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 12, y: 10 },
-    backgroundColor: '#1e1e1e',
+    backgroundColor: themeBgColor(nativeTheme.shouldUseDarkColors),
     webPreferences: {
       // forge-vite 把 preload 输出到主进程构建目录(.vite/build/),
       // entry 'src/platform/main/preload/main-window-preload.ts' → 'main-window-preload.js'

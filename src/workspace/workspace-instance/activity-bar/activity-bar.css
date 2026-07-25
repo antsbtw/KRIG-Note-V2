@@ -2,8 +2,8 @@
   flex: none;
   width: 48px;
   height: 100%;
-  background-color: #111;
-  border-right: 1px solid #2a2a2a;
+  background-color: var(--bg-activity);
+  border-right: 1px solid var(--bg-divider);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -51,19 +51,19 @@
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  color: #666;
+  color: var(--text-subtle);
   transition: background 0.12s, color 0.12s;
   position: relative;
 }
 
 .krig-activity-bar__tab:hover {
-  background: #1f1f1f;
-  color: #aaa;
+  background: var(--bg-item-hover);
+  color: var(--text-icon-hover);
 }
 
 .krig-activity-bar__tab--active {
-  color: #ddd;
-  background: #252525;
+  color: var(--text-light);
+  background: var(--bg-item-active);
 }
 
 .krig-activity-bar__tab--active::before {
@@ -74,7 +74,7 @@
   transform: translateY(-50%);
   width: 2px;
   height: 20px;
-  background: #6b9fff;
+  background: var(--accent-bar);
   border-radius: 0 2px 2px 0;
 }
 
@@ -95,7 +95,7 @@
   align-items: center;
   gap: 4px;
   padding: 6px 0 8px;
-  border-top: 1px solid #222;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .krig-activity-bar__settings {
@@ -108,14 +108,14 @@
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  color: #555;
+  color: var(--text-subtle);
   font-size: 16px;
   transition: background 0.12s, color 0.12s;
 }
 
 .krig-activity-bar__settings:hover {
-  background: #1f1f1f;
-  color: #aaa;
+  background: var(--bg-item-hover);
+  color: var(--text-icon-hover);
 }
 
 .krig-activity-bar__account-wrap {
@@ -130,25 +130,25 @@
   justify-content: center;
   border: none;
   border-radius: 50%;
-  background: #1f1f1f;
+  background: var(--bg-item-hover);
   cursor: pointer;
-  color: #666;
+  color: var(--text-subtle);
   transition: background 0.12s, color 0.12s;
 }
 
 .krig-activity-bar__account:hover {
-  background: #2a2a2a;
-  color: #aaa;
+  background: var(--bg-divider);
+  color: var(--text-icon-hover);
 }
 
 .krig-activity-bar__account--authed {
-  background: #1e3050;
-  color: #6b9fff;
+  background: var(--authed-bg);
+  color: var(--authed-text);
 }
 
 .krig-activity-bar__account--authed:hover {
-  background: #243a60;
-  color: #8ab4ff;
+  background: var(--authed-bg-hover);
+  color: var(--authed-text-hover);
 }
 
 .krig-activity-bar__avatar {
@@ -162,8 +162,8 @@
   bottom: 0;
   left: calc(100% + 8px);
   z-index: 10000;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   padding: 8px;
@@ -175,7 +175,7 @@
 }
 
 .krig-activity-bar__account-email {
-  color: #aaa;
+  color: var(--text-icon-hover);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -185,9 +185,9 @@
 
 .krig-activity-bar__account-logout {
   background: transparent;
-  border: 1px solid #555;
+  border: 1px solid var(--logout-border);
   border-radius: 4px;
-  color: #ff8a8a;
+  color: var(--logout-text);
   font-size: 12px;
   padding: 5px 0;
   cursor: pointer;
@@ -195,6 +195,6 @@
 }
 
 .krig-activity-bar__account-logout:hover {
-  background: #3a2a2a;
-  color: #ff6b6b;
+  background: var(--logout-bg-hover);
+  color: var(--logout-text-hover);
 }

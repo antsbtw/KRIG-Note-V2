@@ -1,7 +1,7 @@
 .krig-slot-picker {
   width: 260px;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -11,7 +11,7 @@
   display: flex;
   align-items: center;
   padding: 8px 10px;
-  border-bottom: 1px solid #383838;
+  border-bottom: 1px solid var(--border-muted);
 }
 
 .krig-slot-picker__input {
@@ -19,13 +19,13 @@
   background: transparent;
   border: none;
   outline: none;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
-  caret-color: #8ab4f8;
+  caret-color: var(--accent-text);
 }
 
 .krig-slot-picker__input::placeholder {
-  color: #666;
+  color: var(--text-subtle);
 }
 
 .krig-slot-picker__list {
@@ -42,7 +42,7 @@
   padding: 7px 12px;
   background: transparent;
   border: none;
-  color: #c8cacd;
+  color: var(--text-list);
   font-size: 13px;
   cursor: pointer;
   text-align: left;
@@ -51,8 +51,8 @@
 
 .krig-slot-picker__item:hover,
 .krig-slot-picker__item--active {
-  background: rgba(138, 180, 248, 0.15);
-  color: #e8eaed;
+  background: var(--accent-bg);
+  color: var(--text);
 }
 
 .krig-slot-picker__icon {
@@ -68,13 +68,13 @@
 
 .krig-slot-picker__hint {
   font-size: 11px;
-  color: #555;
+  color: var(--text-subtle);
   flex-shrink: 0;
 }
 
 .krig-slot-picker__empty {
   padding: 20px 12px;
   text-align: center;
-  color: #555;
+  color: var(--text-subtle);
   font-size: 12px;
 }

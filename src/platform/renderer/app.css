@@ -4,61 +4,7 @@
  * L2 阶段:垂直 flex(WorkspaceBar 顶部 + WorkspaceContainer 撑满剩余)
  */
 
-/* ── 主题 CSS 变量 ── */
-/* 暗色（默认）— data-theme="dark" 或 :root 未被覆盖时生效 */
-:root,
-[data-theme="dark"] {
-  --bg:           #0f172a;
-  --bg-card:      #1e293b;
-  --bg-elevated:  #252525;
-  --bg-shell:     #1e1e1e;
-  --bg-divider:   #2a2a2a;
-  --border:       #334155;
-  --border-muted: #333;
-  --text:         #e2e8f0;
-  --text-muted:   #94a3b8;
-  --text-disabled:#64748b;
-  --text-faint:   #475569;
-  --text-subtle:  #555;
-  --text-icon:    #888;
-  --text-bright:  #f1f5f9;
-  --accent:       #1d4ed8;
-  --accent-hover: #334155;
-  --accent-text:  #8ab4f8;
-  --accent-bg:    rgba(138,180,248,0.15);
-  --hover-overlay:rgba(255,255,255,0.08);
-  --danger-bg:    rgba(220,38,38,0.18);
-  --danger-text:  #fca5a5;
-  --close-hover:  #3a3a3a;
-  --text-light:   #ddd;
-}
-
-/* 亮色 — data-theme="light" 时覆盖 */
-[data-theme="light"] {
-  --bg:           #f8fafc;
-  --bg-card:      #f1f5f9;
-  --bg-elevated:  #ffffff;
-  --bg-shell:     #ffffff;
-  --bg-divider:   #e2e8f0;
-  --border:       #e2e8f0;
-  --border-muted: #cbd5e1;
-  --text:         #0f172a;
-  --text-muted:   #64748b;
-  --text-disabled:#94a3b8;
-  --text-faint:   #94a3b8;
-  --text-subtle:  #64748b;
-  --text-icon:    #64748b;
-  --text-bright:  #0f172a;
-  --accent:       #2563eb;
-  --accent-hover: #e2e8f0;
-  --accent-text:  #2563eb;
-  --accent-bg:    rgba(37,99,235,0.10);
-  --hover-overlay:rgba(0,0,0,0.06);
-  --danger-bg:    rgba(220,38,38,0.10);
-  --danger-text:  #ef4444;
-  --close-hover:  #e2e8f0;
-  --text-light:   #334155;
-}
+@import './theme.css';
 
 html, body {
   margin: 0;

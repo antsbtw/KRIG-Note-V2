@@ -1,0 +1,122 @@
+/**
+ * 主题 CSS 变量
+ *
+ * 所有颜色 token 集中在此文件，按 data-theme 属性切换。
+ * 由 index.tsx 在 <html> 上写 data-theme="dark" | "light"（跟随 nativeTheme）。
+ * 新增颜色变量统一在此文件追加。
+ */
+
+/* 暗色（默认）— data-theme="dark" 或 :root 未被覆盖时生效 */
+:root,
+[data-theme="dark"] {
+  /* ── 背景 ── */
+  --bg:             #0f172a;
+  --bg-card:        #1e293b;
+  --bg-elevated:    #252525;
+  --bg-shell:       #1e1e1e;
+  --bg-sidebar:     #1a1a1a;
+  --bg-activity:    #111;
+  --bg-divider:     #2a2a2a;
+  --bg-item-hover:  #1f1f1f;
+  --bg-item-active: #252525;
+  --bg-popup:       #2a2a2a;
+
+  /* ── 边框 ── */
+  --border:         #334155;
+  --border-muted:   #333;
+  --border-popup:   #444;
+  --border-subtle:  #222;
+
+  /* ── 文字 ── */
+  --text:           #e2e8f0;
+  --text-muted:     #94a3b8;
+  --text-disabled:  #64748b;
+  --text-faint:     #475569;
+  --text-subtle:    #555;
+  --text-icon:      #888;
+  --text-icon-hover:#aaa;
+  --text-bright:    #f1f5f9;
+  --text-list:      #c8cacd;
+  --text-light:     #ddd;
+
+  /* ── 强调色 ── */
+  --accent:         #1d4ed8;
+  --accent-hover:   #334155;
+  --accent-text:    #8ab4f8;
+  --accent-bar:     #6b9fff;
+  --accent-bg:      rgba(138,180,248,0.15);
+  --accent-bg-hover:rgba(138,180,248,0.4);
+
+  /* ── 通用交互 ── */
+  --hover-overlay:  rgba(255,255,255,0.08);
+  --danger-bg:      rgba(220,38,38,0.18);
+  --danger-text:    #fca5a5;
+  --close-hover:    #3a3a3a;
+
+  /* ── 账号/登出 ── */
+  --authed-bg:         #1e3050;
+  --authed-text:       #6b9fff;
+  --authed-bg-hover:   #243a60;
+  --authed-text-hover: #8ab4ff;
+  --logout-border:     #555;
+  --logout-text:       #ff8a8a;
+  --logout-bg-hover:   #3a2a2a;
+  --logout-text-hover: #ff6b6b;
+}
+
+/* 亮色 — data-theme="light" 时覆盖 */
+[data-theme="light"] {
+  /* ── 背景 ── */
+  --bg:             #f8fafc;
+  --bg-card:        #f1f5f9;
+  --bg-elevated:    #ffffff;
+  --bg-shell:       #ffffff;
+  --bg-sidebar:     #f1f5f9;
+  --bg-activity:    #e2e8f0;
+  --bg-divider:     #e2e8f0;
+  --bg-item-hover:  #e9eef5;
+  --bg-item-active: #dde4ef;
+  --bg-popup:       #ffffff;
+
+  /* ── 边框 ── */
+  --border:         #e2e8f0;
+  --border-muted:   #cbd5e1;
+  --border-popup:   #cbd5e1;
+  --border-subtle:  #e2e8f0;
+
+  /* ── 文字 ── */
+  --text:           #0f172a;
+  --text-muted:     #64748b;
+  --text-disabled:  #94a3b8;
+  --text-faint:     #94a3b8;
+  --text-subtle:    #64748b;
+  --text-icon:      #64748b;
+  --text-icon-hover:#334155;
+  --text-bright:    #0f172a;
+  --text-list:      #334155;
+  --text-light:     #334155;
+
+  /* ── 强调色 ── */
+  --accent:         #2563eb;
+  --accent-hover:   #e2e8f0;
+  --accent-text:    #2563eb;
+  --accent-bar:     #2563eb;
+  --accent-bg:      rgba(37,99,235,0.10);
+  --accent-bg-hover:rgba(37,99,235,0.2);
+
+  /* ── 通用交互 ── */
+  --hover-overlay:  rgba(0,0,0,0.06);
+  --danger-bg:      rgba(220,38,38,0.10);
+  --danger-text:    #ef4444;
+  --close-hover:    #e2e8f0;
+
+  /* ── 账号/登出 ── */
+  --authed-bg:         #dbeafe;
+  --authed-text:       #2563eb;
+  --authed-bg-hover:   #bfdbfe;
+  --authed-text-hover: #1d4ed8;
+  --logout-border:     #cbd5e1;
+  --logout-text:       #ef4444;
+  --logout-bg-hover:   #fee2e2;
+  --logout-text-hover: #dc2626;
+}

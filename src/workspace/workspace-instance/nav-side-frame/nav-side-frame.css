@@ -1,11 +1,11 @@
 .krig-nav-side-frame {
   flex: none;
   height: 100%;
-  background-color: #1a1a1a;
-  border-right: 1px solid #2a2a2a;
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--bg-divider);
   display: flex;
   flex-direction: column;
-  color: #888;
+  color: var(--text-icon);
   overflow: hidden;
   position: relative; /* L5-B3.8:给 divider 做 anchor */
 }
@@ -24,7 +24,7 @@
 }
 
 .krig-nav-side-frame__divider:hover {
-  background: rgba(138, 180, 248, 0.4);
+  background: var(--accent-bg-hover);
 }
 
 /* 拖拽中:全局光标 col-resize + 禁文本选中(避免拖拽时选到内容)*/
@@ -36,7 +36,7 @@ body.krig-navside-resizing * {
 
 /* 拖拽中 divider 始终高亮 */
 body.krig-navside-resizing .krig-nav-side-frame__divider {
-  background: rgba(138, 180, 248, 0.6);
+  background: rgba(138, 180, 248, 0.6); /* 拖拽中固定蓝色高亮，不跟主题变 */
 }
 
 .krig-nav-side-empty {
@@ -46,7 +46,7 @@ body.krig-navside-resizing .krig-nav-side-frame__divider {
   justify-content: center;
   font-style: italic;
   font-size: 12px;
-  color: #555;
+  color: var(--text-subtle);
   padding: 16px;
   text-align: center;
 }

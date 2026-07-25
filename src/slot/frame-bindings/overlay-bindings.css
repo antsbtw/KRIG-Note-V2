@@ -11,15 +11,15 @@
 .krig-floating-toolbar {
   position: fixed;
   z-index: 1000;
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background-color: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   padding: 4px;
   min-width: 160px;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  color: #ddd;
+  color: var(--text);
 }
 
 /* FloatingToolbar 横向 */
@@ -61,7 +61,7 @@
 .krig-slash-menu-item:hover,
 .krig-handle-menu-item:hover,
 .krig-floating-toolbar-item:hover {
-  background-color: #3a3a3a;
+  background-color: var(--bg-item-hover);
 }
 
 /* L5-B3.1 — floating-toolbar active 高亮 */
@@ -88,7 +88,7 @@
   padding: 8px 12px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #888;
+  color: var(--text-icon);
   text-transform: none;
   user-select: none;
 }
@@ -96,7 +96,7 @@
 /* 组标题之间加细分隔(第一个不加) */
 .krig-slash-menu-group-title + * + .krig-slash-menu-group-title,
 .krig-slash-menu-item + .krig-slash-menu-group-title {
-  border-top: 1px solid #3a3a3a;
+  border-top: 1px solid var(--border-muted);
   margin-top: 4px;
 }
 
@@ -114,7 +114,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  color: #bbb;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -128,7 +128,7 @@
 }
 
 .krig-slash-menu-item__suffix {
-  color: #888;
+  color: var(--text-icon);
 }
 
 .krig-slash-menu-item.selected .krig-slash-menu-item__suffix {
@@ -138,7 +138,7 @@
 .krig-slash-menu-item__hint {
   margin-left: auto;
   padding-left: 8px;
-  color: #666;
+  color: var(--text-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   flex-shrink: 0;
@@ -168,8 +168,8 @@
 }
 
 .krig-overlay-content {
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background-color: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
   padding: 24px;
@@ -177,7 +177,7 @@
   max-width: 80vw;
   max-height: 80vh;
   overflow: auto;
-  color: #ddd;
+  color: var(--text);
 }
 
 /* NavSide Binding */
@@ -191,7 +191,7 @@
 .krig-nav-side-header {
   flex: none;
   padding: 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--bg-divider);
 }
 
 .krig-nav-side-title-row {
@@ -205,7 +205,7 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: #d4a040;
+  color: var(--accent-text);
   flex: none;
 }
 
@@ -219,12 +219,12 @@
   border: none;
   padding: 0;
   font-size: 12px;
-  color: #d4a040;
+  color: var(--accent-text);
   cursor: pointer;
 }
 
 .krig-nav-side-action:hover {
-  color: #f0c060;
+  color: var(--text-bright);
 }
 
 .krig-nav-side-content {
@@ -240,7 +240,7 @@
   grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 4px;
   padding: 8px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--bg-divider);
 }
 
 .krig-view-switcher-empty {
@@ -248,9 +248,9 @@
   padding: 16px 8px;
   font-size: 11px;
   font-style: italic;
-  color: #555;
+  color: var(--text-subtle);
   text-align: center;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--bg-divider);
 }
 
 .krig-view-switcher-tab {
@@ -263,20 +263,20 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #aaa;
+  color: var(--text-icon);
   cursor: pointer;
   font-family: inherit;
   min-width: 0;
 }
 
 .krig-view-switcher-tab:hover {
-  background-color: #2a2a2a;
+  background-color: var(--bg-item-hover);
 }
 
 .krig-view-switcher-tab--active {
-  background-color: #2a2a2a;
-  border-color: #3a3a3a;
-  color: #ddd;
+  background-color: var(--bg-item-active);
+  border-color: var(--border-muted);
+  color: var(--text);
 }
 
 .krig-view-switcher-icon {
@@ -300,23 +300,23 @@
 
 .krig-nav-side-search-input {
   width: 100%;
-  background-color: #1f1f1f;
-  border: 1px solid #2f2f2f;
+  background-color: var(--bg);
+  border: 1px solid var(--border-muted);
   border-radius: 4px;
   padding: 6px 10px;
   font-size: 12px;
-  color: #ddd;
+  color: var(--text);
   font-family: inherit;
   box-sizing: border-box;
 }
 
 .krig-nav-side-search-input:focus {
   outline: none;
-  border-color: #4a4a4a;
+  border-color: var(--accent-text);
 }
 
 .krig-nav-side-search-input::placeholder {
-  color: #555;
+  color: var(--text-subtle);
 }
 
 /* Toolbar Binding */
@@ -345,7 +345,7 @@
 .krig-toolbar-item {
   background: transparent;
   border: none;
-  color: #ccc;
+  color: var(--text-list);
   padding: 4px 10px;
   border-radius: 4px;
   cursor: pointer;
@@ -353,14 +353,14 @@
 }
 
 .krig-toolbar-item:hover {
-  background-color: #2a2a2a;
+  background-color: var(--bg-item-hover);
 }
 
 /* L5-B3.9:菜单分组分隔符(handle / context menu)*/
 .krig-handle-menu-divider,
 .krig-context-menu-divider {
   height: 1px;
-  background: #3a3a3a;
+  background: var(--border-muted);
   margin: 4px 0;
 }
 
@@ -368,7 +368,7 @@
 .krig-floating-toolbar-divider {
   width: 1px;
   height: 18px;
-  background: #3a3a3a;
+  background: var(--border-muted);
   margin: 0 2px;
   align-self: center;
 }
@@ -394,11 +394,11 @@
 .krig-handle-menu-item__arrow {
   flex-shrink: 0;
   font-size: 12px;
-  color: #888;
+  color: var(--text-icon);
 }
 
 .krig-handle-menu-item--disabled {
-  color: #555;
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 .krig-handle-menu-item--disabled:hover {
@@ -412,8 +412,8 @@
 .krig-handle-submenu {
   position: fixed;
   z-index: 1001;
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background-color: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   padding: 4px;
@@ -422,7 +422,7 @@
   overflow-y: auto;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  color: #ddd;
+  color: var(--text);
 }
 
 /* Context menu 子菜单(frame-format step 加,对齐 handle submenu)*/
@@ -440,10 +440,10 @@
 .krig-context-menu-item__arrow {
   flex-shrink: 0;
   font-size: 12px;
-  color: #888;
+  color: var(--text-icon);
 }
 .krig-context-menu-item--disabled {
-  color: #555;
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 .krig-context-menu-item--disabled:hover {
@@ -456,8 +456,8 @@
 .krig-context-submenu {
   position: fixed;
   z-index: 1001;
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background-color: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   padding: 4px;
@@ -466,6 +466,6 @@
   overflow-y: auto;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  color: #ddd;
+  color: var(--text);
 }
 

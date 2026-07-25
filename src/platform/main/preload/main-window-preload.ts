@@ -73,6 +73,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.NATIVE_THEME_CHANGED, handler);
   },
 
+  /** 主动查询当前系统主题(权威值，来自主进程 nativeTheme.shouldUseDarkColors) */
+  getNativeTheme(): Promise<{ dark: boolean }> {
+    return ipcRenderer.invoke(IPC_CHANNELS.NATIVE_THEME_GET);
+  },
+
   /** 订阅窗口全屏状态变化 — 返回取消订阅函数 */
   onFullscreenChanged(callback: (isFullscreen: boolean) => void): () => void {
     const handler = (_event: unknown, isFullscreen: boolean) => callback(isFullscreen);

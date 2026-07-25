@@ -313,6 +313,7 @@ export const IPC_CHANNELS = {
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }
+  NATIVE_THEME_GET: 'native-theme.get',           // renderer → main invoke: returns { dark: boolean }
 
   // ── Workspace 楼长 IPC（S3-a，多窗口）──
   // renderer → main（invoke，请求-响应）

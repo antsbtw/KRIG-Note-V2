@@ -5,8 +5,8 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: #1e1e1e;
-  color: #e8eaed;
+  background: var(--bg-shell);
+  color: var(--text);
   /* P0:查找栏 / 缩放徽标 absolute 定位锚点 */
   position: relative;
   outline: none;
@@ -17,7 +17,7 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #888;
+  color: var(--text-icon);
   font-size: 14px;
 }
 
@@ -69,9 +69,9 @@
 }
 
 .krig-web-view__restart-btn {
-  background: #8ab4f8;
+  background: var(--accent-text);
   border: none;
-  color: #1e1e1e;
+  color: var(--bg-shell);
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px;
@@ -101,8 +101,8 @@
   align-items: stretch;
   gap: 2px;
   padding: 4px 8px 0;
-  background: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--bg-popup);
   flex-shrink: 0;
   overflow-x: auto;
 }
@@ -114,8 +114,8 @@
   min-width: 90px;
   max-width: 200px;
   padding: 6px 8px 6px 12px;
-  background: #262626;
-  color: #aaa;
+  background: var(--bg-item-hover);
+  color: var(--text-muted);
   border-radius: 8px 8px 0 0;
   font-size: 12px;
   cursor: pointer;
@@ -124,12 +124,12 @@
 }
 
 .krig-web-tabbar__tab:hover {
-  background: #303030;
+  background: var(--bg-item-hover);
 }
 
 .krig-web-tabbar__tab--active {
-  background: #383838;
-  color: #fff;
+  background: var(--bg-item-active);
+  color: var(--text-bright);
 }
 
 .krig-web-tabbar__title {
@@ -154,13 +154,13 @@
 
 .krig-web-tabbar__close:hover {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--hover-overlay);
 }
 
 .krig-web-tabbar__new {
   background: transparent;
   border: none;
-  color: #aaa;
+  color: var(--text-muted);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -171,12 +171,12 @@
 }
 
 .krig-web-tabbar__new:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--hover-overlay);
+  color: var(--text-bright);
 }
 
 .krig-web-view__restart-dismiss:hover {
-  color: #fff;
+  color: var(--text-bright);
 }
 
 /* ── WebToolbar ── */
@@ -186,8 +186,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: #252525;
-  border-bottom: 1px solid #333;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-muted);
   flex-shrink: 0;
 }
 
@@ -200,7 +200,7 @@
 .krig-web-toolbar__btn {
   background: transparent;
   border: 1px solid transparent;
-  color: #e8eaed;
+  color: var(--text);
   cursor: pointer;
   padding: 4px 10px;
   border-radius: 4px;
@@ -211,37 +211,37 @@
 }
 
 .krig-web-toolbar__btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-overlay);
 }
 
 .krig-web-toolbar__btn:active:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--hover-overlay);
 }
 
 .krig-web-toolbar__btn:disabled {
-  color: #555;
+  color: var(--text-faint);
   cursor: not-allowed;
 }
 
 .krig-web-toolbar__btn.active {
-  background: rgba(138, 180, 248, 0.2);
-  color: #8ab4f8;
+  background: var(--accent-bg);
+  color: var(--accent-text);
 }
 
 .krig-web-toolbar__btn.active:hover {
-  background: rgba(138, 180, 248, 0.3);
+  background: var(--accent-bg-hover);
 }
 
 /* × 关闭此面板(照 ebook close 按钮:hover 变红)*/
 .krig-web-toolbar__btn--close {
-  color: #888;
+  color: var(--text-icon);
   font-size: 18px;
 }
 
 .krig-web-toolbar__btn--close:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.18);
+  background: var(--danger-bg);
   border-color: rgba(220, 38, 38, 0.3);
-  color: #fca5a5;
+  color: var(--danger-text);
 }
 
 .krig-web-toolbar__url {
@@ -260,8 +260,8 @@
   margin: 0;
   padding: 4px 0;
   list-style: none;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
   max-height: 320px;
@@ -279,18 +279,18 @@
 }
 
 .krig-web-toolbar__suggestion.active {
-  background: rgba(138, 180, 248, 0.18);
+  background: var(--accent-bg);
 }
 
 .krig-web-toolbar__suggestion-url {
-  color: #e8eaed;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .krig-web-toolbar__suggestion-title {
-  color: #9aa0a6;
+  color: var(--text-icon);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -300,17 +300,17 @@
 .krig-web-toolbar__url-input {
   width: 100%;
   padding: 4px 10px;
-  background: #1e1e1e;
-  border: 1px solid #444;
+  background: var(--bg);
+  border: 1px solid var(--border-popup);
   border-radius: 4px;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
   outline: none;
   box-sizing: border-box;
 }
 
 .krig-web-toolbar__url-input:focus {
-  border-color: #8ab4f8;
+  border-color: var(--accent-text);
 }
 
 /*
@@ -353,8 +353,8 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-muted);
   border-radius: 6px;
   padding: 4px 0;
   min-width: 140px;
@@ -370,7 +370,7 @@
   gap: 8px;
   background: transparent;
   border: none;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
   padding: 6px 12px;
   cursor: pointer;
@@ -379,11 +379,11 @@
 }
 
 .krig-web-toolbar__lang-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover-overlay);
 }
 
 .krig-web-toolbar__lang-item.active {
-  color: #8ab4f8;
+  color: var(--accent-text);
 }
 
 .krig-web-toolbar__lang-check {
@@ -391,7 +391,7 @@
   width: 12px;
   flex-shrink: 0;
   font-size: 12px;
-  color: #8ab4f8;
+  color: var(--accent-text);
 }
 
 .krig-web-toolbar__lang-label {
@@ -408,8 +408,8 @@
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -418,30 +418,30 @@
   width: 200px;
   height: 26px;
   padding: 0 8px;
-  background: #1e1e1e;
-  border: 1px solid #444;
+  background: var(--bg);
+  border: 1px solid var(--border-popup);
   border-radius: 4px;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
   outline: none;
 }
 
 .krig-web-view__find-input:focus {
-  border-color: #8ab4f8;
+  border-color: var(--accent-text);
 }
 
 .krig-web-view__find-count {
   min-width: 38px;
   text-align: center;
   font-size: 12px;
-  color: #9aa0a6;
+  color: var(--text-icon);
   font-variant-numeric: tabular-nums;
 }
 
 .krig-web-view__find-btn {
   background: transparent;
   border: none;
-  color: #e8eaed;
+  color: var(--text);
   width: 26px;
   height: 26px;
   border-radius: 4px;
@@ -452,17 +452,17 @@
 }
 
 .krig-web-view__find-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-overlay);
 }
 
 .krig-web-view__find-btn:disabled {
-  color: #555;
+  color: var(--text-faint);
   cursor: default;
 }
 
 .krig-web-view__find-close {
   font-size: 18px;
-  color: #9aa0a6;
+  color: var(--text-icon);
 }
 
 /* ── P0:缩放徽标(非 100% 时显示,点一下复位)── */
@@ -472,10 +472,10 @@
   right: 12px;
   z-index: 9;
   padding: 3px 10px;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 12px;
-  color: #8ab4f8;
+  color: var(--accent-text);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -483,7 +483,7 @@
 }
 
 .krig-web-view__zoom-badge:hover {
-  background: #333;
+  background: var(--border-muted);
 }
 
 /* ── NavSide:Web 三段式面板(书签 / 历史 / 下载),批1 实装历史 ── */
@@ -493,13 +493,13 @@
   height: 100%;
   overflow-y: auto;
   font-size: 13px;
-  color: #c8c8c8;
+  color: var(--text-list);
 }
 
 .krig-web-nav__section {
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--hover-overlay);
 }
 
 .krig-web-nav__section-header {
@@ -509,21 +509,21 @@
   padding: 8px 12px;
   position: sticky;
   top: 0;
-  background: #1f1f1f;
+  background: var(--bg-sidebar);
   z-index: 1;
   cursor: pointer;
   user-select: none;
 }
 
 .krig-web-nav__section-header:hover {
-  background: #262626;
+  background: var(--bg-item-hover);
 }
 
 /* caret 对齐 note FolderTree(实心三角 ▼/▶,见 shared-ui/FolderTree/styles.ts caret)*/
 .krig-web-nav__caret {
   width: 12px;
   font-size: 10px;
-  color: #888;
+  color: var(--text-icon);
   text-align: center;
   flex-shrink: 0;
 }
@@ -532,14 +532,14 @@
 .krig-web-nav__section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #ccc;
+  color: var(--text-list);
   flex: 1;
 }
 
 .krig-web-nav__clear-btn {
   border: none;
   background: transparent;
-  color: #8ab4f8;
+  color: var(--accent-text);
   font-size: 12px;
   cursor: pointer;
   padding: 2px 6px;
@@ -547,12 +547,12 @@
 }
 
 .krig-web-nav__clear-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-overlay);
 }
 
 .krig-web-nav__empty {
   padding: 10px 12px;
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 12px;
 }
 
@@ -576,9 +576,9 @@
 /* 「已加入书签」/「无法加入」临时提示 */
 .krig-web-nav__notice {
   padding: 6px 12px;
-  color: #8ab4f8;
+  color: var(--accent-text);
   font-size: 12px;
-  background: rgba(138, 180, 248, 0.08);
+  background: var(--accent-bg);
 }
 
 .krig-web-nav__placeholder {
@@ -602,7 +602,7 @@
 }
 
 .krig-web-nav__item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover-overlay);
 }
 
 .krig-web-nav__item-main {
@@ -616,20 +616,20 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #e0e0e0;
+  color: var(--text-list);
 }
 
 .krig-web-nav__item-url {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 11px;
 }
 
 .krig-web-nav__item-time {
   flex-shrink: 0;
-  color: #6b6b6b;
+  color: var(--text-faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -638,7 +638,7 @@
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: #9aa0a6;
+  color: var(--text-icon);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -652,7 +652,7 @@
 }
 
 .krig-web-nav__item-del:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--hover-overlay);
   color: #f28b82;
 }
 
@@ -668,7 +668,7 @@
 }
 
 .krig-web-nav__dl-item + .krig-web-nav__dl-item {
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--hover-overlay);
 }
 
 .krig-web-nav__dl-row {
@@ -683,13 +683,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #e0e0e0;
+  color: var(--text-list);
   font-weight: 500;
 }
 
 .krig-web-nav__dl-track {
   height: 5px;
-  background: #1f1f1f;
+  background: var(--bg-sidebar);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -723,7 +723,7 @@
 }
 
 .krig-web-nav__dl-meta {
-  color: #999;
+  color: var(--text-icon);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -741,7 +741,7 @@
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: #8ab4f8;
+  color: var(--accent-text);
   font-size: 12px;
   cursor: pointer;
   padding: 2px 6px;
@@ -750,7 +750,7 @@
 
 .krig-web-nav__dl-cancel:hover,
 .krig-web-nav__dl-show:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-overlay);
 }
 
 /* ── 阶段3:Web 设置面板(popover 锚 toolbar 右上角)── */
@@ -762,12 +762,12 @@
   width: 320px;
   max-height: calc(100% - 64px);
   overflow-y: auto;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-muted);
   border-radius: 8px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
   padding: 4px 0;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -776,7 +776,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px;
-  border-bottom: 1px solid #3a3a3a;
+  border-bottom: 1px solid var(--border-muted);
 }
 
 .krig-web-settings__title {
@@ -787,7 +787,7 @@
 .krig-web-settings__close {
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--text-icon);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -795,12 +795,12 @@
 }
 
 .krig-web-settings__close:hover {
-  color: #fff;
+  color: var(--text-bright);
 }
 
 .krig-web-settings__section {
   padding: 12px 14px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-muted);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -819,15 +819,15 @@
 .krig-web-settings__section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #e8eaed;
+  color: var(--text);
 }
 
 .krig-web-settings__scope {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 8px;
-  background: rgba(138, 180, 248, 0.16);
-  color: #8ab4f8;
+  background: var(--accent-bg);
+  color: var(--accent-text);
 }
 
 .krig-web-settings__scope--global {
@@ -840,17 +840,17 @@
   width: 100%;
   box-sizing: border-box;
   padding: 6px 10px;
-  background: #1e1e1e;
-  border: 1px solid #444;
+  background: var(--bg);
+  border: 1px solid var(--border-popup);
   border-radius: 4px;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
   outline: none;
 }
 
 .krig-web-settings__select:focus,
 .krig-web-settings__input:focus {
-  border-color: #8ab4f8;
+  border-color: var(--accent-text);
 }
 
 .krig-web-settings__node-list {
@@ -865,11 +865,11 @@
   gap: 8px;
   padding: 4px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--hover-overlay);
 }
 
 .krig-web-settings__node-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover-overlay);
 }
 
 .krig-web-settings__node-name {
@@ -880,7 +880,7 @@
 .krig-web-settings__node-meta {
   flex: 1;
   min-width: 0;
-  color: #9aa0a6;
+  color: var(--text-icon);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -891,7 +891,7 @@
   flex-shrink: 0;
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--text-icon);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -900,8 +900,8 @@
 }
 
 .krig-web-settings__node-del:hover {
-  background: rgba(220, 38, 38, 0.18);
-  color: #fca5a5;
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 .krig-web-settings__add-form {
@@ -909,7 +909,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  border: 1px solid #3a3a3a;
+  border: 1px solid var(--border-muted);
   border-radius: 6px;
 }
 
@@ -920,33 +920,33 @@
 
 .krig-web-settings__btn {
   padding: 5px 12px;
-  background: #333;
-  border: 1px solid #444;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-popup);
   border-radius: 4px;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 12px;
   cursor: pointer;
   align-self: flex-start;
 }
 
 .krig-web-settings__btn:hover {
-  background: #3d3d3d;
+  background: var(--bg-item-hover);
 }
 
 .krig-web-settings__btn--primary {
-  background: rgba(138, 180, 248, 0.2);
+  background: var(--accent-bg);
   border-color: rgba(138, 180, 248, 0.4);
-  color: #8ab4f8;
+  color: var(--accent-text);
 }
 
 .krig-web-settings__btn--primary:hover {
-  background: rgba(138, 180, 248, 0.3);
+  background: var(--accent-bg-hover);
 }
 
 .krig-web-settings__btn--danger {
-  background: rgba(220, 38, 38, 0.2);
+  background: var(--danger-bg);
   border-color: rgba(220, 38, 38, 0.4);
-  color: #fca5a5;
+  color: var(--danger-text);
 }
 
 .krig-web-settings__btn--danger:hover {
@@ -956,7 +956,7 @@
 .krig-web-settings__confirm-msg {
   margin: 0;
   font-size: 12px;
-  color: #fca5a5;
+  color: var(--danger-text);
   line-height: 1.4;
 }
 
@@ -979,15 +979,15 @@
 
 .krig-web-settings__err {
   font-size: 11px;
-  color: #fca5a5;
+  color: var(--danger-text);
 }
 
 /* NavSide 工作空间项 inline 重命名输入框(双击触发) */
 .krig-web-nav__rename-input {
-  background: #1a1a1a;
+  background: var(--bg-sidebar);
   border: 1px solid rgba(138, 180, 248, 0.6);
   border-radius: 3px;
-  color: #eee;
+  color: var(--text);
   font-size: 12px;
   padding: 1px 4px;
   width: 100%;
@@ -996,6 +996,6 @@
 
 /* 工作空间列表项:未打开(已从顶部收起)的字暗化,区分打开状态 */
 .krig-ws-item:not(.krig-ws-item--open) .krig-web-nav__item-title {
-  color: #666;
+  color: var(--text-subtle);
   font-style: italic;
 }

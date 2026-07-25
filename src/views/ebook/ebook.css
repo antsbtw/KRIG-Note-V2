@@ -13,8 +13,8 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: #1a1a1a;
-  color: #e8eaed;
+  background: var(--bg-sidebar);
+  color: var(--text);
   overflow: hidden;
   position: relative; /* 全屏 toolbar 浮层 + trigger 区 absolute 定位锚点 */
 }
@@ -45,8 +45,8 @@
   justify-content: center;
   width: 100%;
   height: 100%;
-  background: #1a1a1a;
-  color: #888;
+  background: var(--bg-sidebar);
+  color: var(--text-icon);
   gap: 8px;
 }
 
@@ -57,12 +57,12 @@
 
 .krig-ebook-empty-text {
   font-size: 14px;
-  color: #aaa;
+  color: var(--text-muted);
 }
 
 .krig-ebook-empty-hint {
   font-size: 12px;
-  color: #666;
+  color: var(--text-subtle);
 }
 
 /* ── Toolbar(L5-C2)── */
@@ -72,11 +72,11 @@
   align-items: center;
   height: 36px;
   flex-shrink: 0;
-  background: #252525;
-  border-bottom: 1px solid #333;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-muted);
   padding: 0 8px;
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-list);
   user-select: none;
   gap: 8px;
 }
@@ -137,15 +137,15 @@
 }
 
 .krig-ebook-toolbar__btn--close {
-  color: #888;
+  color: var(--text-icon);
   font-size: 18px;
   line-height: 1;
 }
 
 .krig-ebook-toolbar__btn--close:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.18);
+  background: var(--danger-bg);
   border-color: rgba(220, 38, 38, 0.3);
-  color: #fca5a5;
+  color: var(--danger-text);
 }
 
 .krig-ebook-toolbar__filename {
@@ -154,7 +154,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #ddd;
+  color: var(--text);
   font-weight: 500;
 }
 
@@ -163,7 +163,7 @@
   min-width: 24px;
   background: transparent;
   border: 1px solid transparent;
-  color: #ccc;
+  color: var(--text-list);
   font-size: 14px;
   padding: 0 6px;
   border-radius: 4px;
@@ -176,8 +176,8 @@
 }
 
 .krig-ebook-toolbar__btn:hover:not(:disabled) {
-  background: #333;
-  border-color: #444;
+  background: var(--border-muted);
+  border-color: var(--border-popup);
 }
 
 .krig-ebook-toolbar__btn:disabled {
@@ -186,14 +186,14 @@
 }
 
 .krig-ebook-toolbar__btn--active {
-  background: #2a3a5a;
-  border-color: #3b5a8a;
-  color: #e8eaed;
+  background: var(--accent-bg);
+  border-color: var(--border-popup);
+  color: var(--text);
 }
 
 .krig-ebook-toolbar__btn--active:hover:not(:disabled) {
-  background: #2a3a5a;
-  border-color: #4b6a9a;
+  background: var(--accent-bg);
+  border-color: var(--border-popup);
 }
 
 .krig-ebook-toolbar__btn--bookmark-active {
@@ -206,7 +206,7 @@
 
 .krig-ebook-toolbar__epub-progress {
   font-size: 12px;
-  color: #aaa;
+  color: var(--text-muted);
   margin: 0 8px;
   max-width: 320px;
   overflow: hidden;
@@ -216,7 +216,7 @@
 
 .krig-ebook-toolbar__font-size {
   font-size: 12px;
-  color: #888;
+  color: var(--text-icon);
   min-width: 36px;
   text-align: center;
 }
@@ -236,10 +236,10 @@
 .krig-ebook-toolbar__page-input {
   width: 44px;
   height: 24px;
-  background: #1a1a1a;
-  border: 1px solid #444;
+  background: var(--bg);
+  border: 1px solid var(--border-popup);
   border-radius: 4px;
-  color: #ccc;
+  color: var(--text-list);
   font-size: 12px;
   text-align: center;
   padding: 0 4px;
@@ -253,17 +253,17 @@
 }
 
 .krig-ebook-toolbar__page-info {
-  color: #888;
+  color: var(--text-icon);
   margin-left: 2px;
   margin-right: 4px;
 }
 
 .krig-ebook-toolbar__zoom-select {
   height: 24px;
-  background: #1a1a1a;
-  border: 1px solid #444;
+  background: var(--bg);
+  border: 1px solid var(--border-popup);
   border-radius: 4px;
-  color: #ccc;
+  color: var(--text-list);
   font-size: 12px;
   padding: 0 4px;
   outline: none;
@@ -272,7 +272,7 @@
 }
 
 .krig-ebook-toolbar__zoom-select:hover {
-  border-color: #555;
+  border-color: var(--text-faint);
 }
 
 /* PR-α-2:右键菜单 🎨 改颜色 submenu — 5 色按钮横排,对齐 AnnotationLayer 创建 picker 视觉 */
@@ -293,7 +293,7 @@
 }
 
 .krig-ebook-annotation-type-submenu__btn:hover {
-  border-color: #fff;
+  border-color: var(--text);
   transform: scale(1.15);
 }
 
@@ -310,7 +310,7 @@
 
 .krig-epub-color-picker__section-label {
   font-size: 11px;
-  color: #9aa0a6;
+  color: var(--text-icon);
   margin: 0 0 4px 0;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -335,7 +335,7 @@
 }
 
 .krig-epub-color-picker__swatch:hover {
-  outline-color: #e8eaed;
+  outline-color: var(--text);
 }
 
 /* PR-α-3b followup:扫描件提示 toast(锚定 ✎ 按钮正下方,3 秒自动消失,字数 ≤ 5)
@@ -344,11 +344,11 @@
  */
 .krig-ebook-toast {
   position: fixed; /* viewport 坐标,跟 toolbar 同坐标系 */
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
   border-radius: 6px;
   padding: 6px 12px;
-  color: #e8eaed;
+  color: var(--text);
   font-size: 13px;
   white-space: nowrap;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
