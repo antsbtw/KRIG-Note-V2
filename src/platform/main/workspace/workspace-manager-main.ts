@@ -15,7 +15,6 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { createDefaultWorkspaceState } from '@workspace/workspace-state/default-state';
 import type { WorkspaceState, WorkspaceManagerState } from '@workspace/workspace-state/workspace-state';
 import { proxyNodeStore } from '../web-proxy/proxy-node-store';
-import { registerXInboxForSession } from '../x-inbox-protocol';
 
 // ── 状态 ────────────────────────────────────────────────────────
 
@@ -125,9 +124,6 @@ export async function applyWsConfigToSession(wsId: string): Promise<void> {
 
   const partition = `persist:webview-${wsId}`;
   const sess = session.fromPartition(partition);
-
-  // 每个 ws session 创建时补注册 x-inbox:// 协议，使内置浏览器能访问 Review Queue
-  registerXInboxForSession(sess);
 
   // 应用代理
   if (ws.proxyId) {
