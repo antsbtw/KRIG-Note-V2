@@ -51,7 +51,37 @@ export class ResultParser {
     trimmed = this.normalizeLatexDelimiters(trimmed);
 
     // Parse as markdown (most common AI output format)
-    return this.parseMarkdown(trimmed);
+    const blocks = this.parseMarkdown(trimmed);
+    // ChatGPT 常把整段回复(或其中一段)渲染成一个「markdown」代码块,里面才是真正的
+    // ```mermaid / ```python 等。展开这类 markdown/md 包裹块,让内层 fence 浮出为真代码块
+    // (否则用户看到的是一个 markdown 代码块里塞着 mermaid 源码,而非 mermaid 图)。
+    return this.unwrapMarkdownWrapperBlocks(blocks);
+  }
+
+  /**
+   * 展开 language 为 markdown/md 的「包裹型」代码块:其文本本身是 markdown(常含嵌套
+   * ```mermaid 等 fence)。对这类块把 text 再 parseMarkdown 一遍,用结果替换原块。
+   *
+   * 仅对 markdown/md 语言生效 → 不误伤 python/js 等真代码块;再解析产出的内层块语言
+   * 不会是 markdown(mermaid/python/…),故无限递归风险为零(最多展一层)。
+   */
+  private unwrapMarkdownWrapperBlocks(blocks: ExtractedBlock[]): ExtractedBlock[] {
+    const out: ExtractedBlock[] = [];
+    for (const b of blocks) {
+      const isMarkdownWrapper =
+        (b as { type?: string }).type === 'code' &&
+        typeof (b as { language?: string }).language === 'string' &&
+        ['markdown', 'md'].includes(((b as { language?: string }).language ?? '').toLowerCase()) &&
+        typeof (b as { text?: string }).text === 'string' &&
+        ((b as { text?: string }).text ?? '').trim().length > 0;
+      if (isMarkdownWrapper) {
+        const inner = this.parseMarkdown(((b as { text?: string }).text ?? '').trim());
+        out.push(...inner);
+      } else {
+        out.push(b);
+      }
+    }
+    return out;
   }
 
   /**
@@ -442,19 +472,36 @@ export class ResultParser {
     // Extract language and optional title from opening fence:
     // ```python  or  ```javascript title="React Counter"
     const fenceLine = lines[lineIdx].trim();
+    // CommonMark:开栏用 N 个 backtick(N≥3);闭栏必须是 ≥N 个 backtick、且除空白外无其它内容。
+    // 关键:嵌套 fence(如 AI 把整段回复包成 ````markdown 里再套 ```mermaid)必须按栏长配对,
+    // 否则内层 ```mermaid 会被误当闭栏 → 产出空 codeBlock、内容漏成正文(实测 ChatGPT 提取 bug)。
+    const openMatch = fenceLine.match(/^(`{3,})(.*)$/);
+    const openLen = openMatch ? openMatch[1].length : 3;
     const langMatch = fenceLine.match(/^`{3,}(\w+)/);
     const language = langMatch ? langMatch[1] : undefined;
     // title="..." attribute on the fence line
     const titleMatch = fenceLine.match(/title="([^"]+)"/);
     const codeTitle = titleMatch ? titleMatch[1] : undefined;
 
+    // 闭栏判定:行首(trim 后)的连续 backtick 数 ≥ 开栏长度即闭合。
+    //
+    // 只比「起始连续 backtick 数 ≥ openLen」,**不要求整行纯 backtick**:
+    //   - 内层 ```mermaid(3 个)遇外层开栏 ```` (4 个)时 3<4 → 不误闭,嵌套安全;
+    //   - 但真实 AI / extractor 的闭栏行常带残留(如 ``` 后跟空格/文字、甚至 ```mermaid),
+    //     若强求整行纯 backtick 会把这些行当正文 → 从首个 fence 一路吞到文末,
+    //     后续段落全被吃进代码块(实测「提取只出第一段」回归的根因)。放宽即避免。
+    const isClosingFence = (raw: string): boolean => {
+      const m = raw.trim().match(/^(`{3,})/);
+      return m !== null && m[1].length >= openLen;
+    };
+
     const codeLines: string[] = [];
     let j = lineIdx + 1;
-    while (j < lines.length && !lines[j].trim().startsWith('```')) {
+    while (j < lines.length && !isClosingFence(lines[j])) {
       codeLines.push(lines[j]);
       j++;
     }
-    if (j < lines.length) j++; // skip closing ```
+    if (j < lines.length) j++; // skip closing fence
     return {
       block: { type: 'code', tag: 'pre', text: codeLines.join('\n'), headingLevel: 0, language, codeTitle },
       nextIndex: j,

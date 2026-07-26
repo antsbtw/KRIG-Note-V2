@@ -127,16 +127,27 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Code block (```) — V2 已实现
-    if (line.trimStart().startsWith('```')) {
-      const lang = line.trim().slice(3).trim();
+    // Code block (```) — 按 CommonMark 栏长配对(与 ai-markdown-parser ResultParser 同规则)。
+    // 开栏 N 个 backtick(N≥3);闭栏起始连续 backtick 数须 ≥N。关键:嵌套 fence
+    // (如 ````markdown 里再套 ```mermaid)必须按长度配对,否则内层 ```mermaid 会被误当闭栏
+    // → 产出空 codeBlock + 内容漏成正文(与 AI 提取同款 bug,影响 markdown 导入/网页剪藏)。
+    // 闭栏只看「起始 backtick 数 ≥ 开栏」,不要求整行纯 backtick —— 否则闭栏行带残留
+    // (``` 后跟空格/文字)会从首个 fence 吞到文末(AI 侧踩过的回归)。
+    const openFence = line.trimStart().match(/^(`{3,})/);
+    if (openFence) {
+      const openLen = openFence[1].length;
+      const lang = line.trimStart().slice(openLen).trim().split(/\s+/)[0] ?? '';
+      const isClosingFence = (raw: string): boolean => {
+        const m = raw.trimStart().match(/^(`{3,})/);
+        return m !== null && m[1].length >= openLen;
+      };
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+      while (i < lines.length && !isClosingFence(lines[i])) {
         codeLines.push(lines[i]);
         i++;
       }
-      i++; // skip closing ```
+      i++; // skip closing fence
       const textContent = codeLines.join('\n');
       content.push({
         type: 'codeBlock',
