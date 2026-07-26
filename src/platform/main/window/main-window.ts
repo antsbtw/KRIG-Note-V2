@@ -20,6 +20,23 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 
 const windowRegistry = new Map<number, { win: BrowserWindow; wsId: string | null }>();
 
+/**
+ * 每窗口 webview 钩子回调 —— 多窗口(S3-b)根治点。
+ *
+ * 背景:AI / X / 普通 web 的原生右键菜单、快捷键、PDF 提取拦截、media:// 补注册 全部
+ * 走 `mainWindow.webContents.on('did-attach-webview')`。历史上这些 hook 只在**第一个**
+ * mainWindow 上挂一次(index.ts),导致 New Window / 恢复出的**次级窗口**里的 webview
+ * 没有 did-attach-webview 监听 → 右键菜单弹不出来 / 快捷键失效 / 提取失效。
+ *
+ * 修法:index.ts 注入本回调,createWindow 对**每个**新窗口调一次,把纯 per-window 的
+ * did-attach-webview 类 hook 挂到该窗口。全局单例 hook(will-download 会话级、各 ipcMain
+ * handler)仍在 index.ts 一次性注册,不进本回调。
+ */
+let perWindowWebviewHooks: ((win: BrowserWindow) => void) | null = null;
+export function setPerWindowWebviewHooks(cb: (win: BrowserWindow) => void): void {
+  perWindowWebviewHooks = cb;
+}
+
 // app.quit() 时所有窗口连带关闭，此时不应清除 hasWindow（否则重启后只剩一个窗口）
 let appIsQuitting = false;
 export function markAppQuitting(): void { appIsQuitting = true; }
@@ -104,6 +121,11 @@ export async function createWindow(wsId?: string): Promise<BrowserWindow> {
     windowRegistry.delete(win.id);
     if (entry?.wsId && !appIsQuitting) wsSetHasWindow(entry.wsId, false);
   });
+
+  // 多窗口(S3-b)：每个窗口都挂 per-window webview 钩子（右键菜单/快捷键/提取/media）。
+  // 必须在 loadURL 之前挂 —— did-attach-webview 在 renderer 加载 <webview> 时即触发，
+  // 晚挂会漏掉首个 guest（次级窗口右键菜单弹不出来的历史根因）。
+  perWindowWebviewHooks?.(win);
 
   // 加载 renderer
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {

@@ -35,7 +35,7 @@ const ignoreEpipe = (err: NodeJS.ErrnoException): void => {
 };
 process.stdout.on('error', ignoreEpipe);
 process.stderr.on('error', ignoreEpipe);
-import { createWindow, markAppQuitting } from './window/main-window';
+import { createWindow, markAppQuitting, setPerWindowWebviewHooks } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
 import { initWorkspaceManager, getFullState } from './workspace/workspace-manager-main';
 import { reportL0Alive } from './diagnostics/L0-alive';
@@ -213,39 +213,42 @@ app.whenReady().then(async () => {
   const { workspaces: allWs, activeId: initialActiveId } = getFullState();
   if (!initialActiveId) throw new Error('[main] initWorkspaceManager 后 activeId 仍为 null，无法创建首窗口');
 
-  // 先开 activeId 对应的主窗口，hooks 需要它的引用
-  const mainWindow = await createWindow(initialActiveId);
+  // 多窗口(S3-b)根治:per-window webview 钩子经 setPerWindowWebviewHooks 注入,
+  // createWindow 对**每个**窗口(含次级 New Window / 恢复窗口)在 loadURL 前挂一遍。
+  // 历史 bug:这些 hook 只在第一个 mainWindow 挂 → 次级窗口 webview 无 did-attach-webview
+  // 监听 → 右键菜单弹不出来 / 快捷键失效 / 提取失效。全部为纯 per-window did-attach-webview
+  // 类 hook,无全局单例副作用(ipcMain / will-download 会话级仍在下方一次性注册)。
+  setPerWindowWebviewHooks((win) => {
+    // L5-C6:webview attach hook(PDF 提取 download 拦截)
+    registerWebviewExtractionHook(win);
+    // ai-extraction:AI Host webview did-navigate 到 AI URL 时注册到 ai-webview-registry,
+    // 并挂原生右键菜单「📥 提取此对话到笔记」(复用 web-service-base 底座)。
+    registerAIWebviewHook(win);
+    // X 集成 阶段 0/1:X Host webview 注册 + 原生右键「提取此推文到笔记」(同 AI 底座)。
+    registerXWebviewHook(win);
+    // web view 原生右键菜单(Phase 2 根治 HTML 菜单被 webview OS 层遮挡)— 只接管普通浏览 webview
+    registerWebContextMenuHook(win);
+    // web view 快捷键整层 + 弹窗导流(Phase 4 Commit 2)— 只接管普通浏览 webview(排除 AI/翻译)。
+    registerWebShortcutsHook(win);
+    // web view 下载管理(Phase 3)— per-window did-attach-webview 里按 guest.session 挂
+    // will-download;会话级 WeakSet 去重,故次级窗口/新 partition 也能触发下载而不会 N 倍回调。
+    registerWebDownloadHook(win);
+    // per-ws 代理阶段1:每个 ws 的 webview 首次 attach 时对其 session 补注册 media:// 协议(去重),
+    // 否则新 partition 里图片 ERR_UNKNOWN_URL_SCHEME。
+    win.webContents.on('did-attach-webview', (_e, guest) => {
+      mediaStore.registerMediaForSession(guest.session);
+      // L5-G7b:字体记名方案无 font:// 协议,无需 per-ws session 补注册(渲染走 IPC 按名读)。
+    });
+  });
+
+  // 先开 activeId 对应的主窗口(per-window webview 钩子已由上方 setPerWindowWebviewHooks 注入,
+  // createWindow 内部对每个窗口自动挂;此处不再需要窗口引用做一次性 hook)。
+  await createWindow(initialActiveId);
 
   // 其余退出前有独立窗口的 ws 并行恢复（跳过已开的 activeId）
   const otherWindowWs = allWs.filter((ws) => ws.hasWindow && ws.id !== initialActiveId);
   await Promise.all(otherWindowWs.map((ws) => createWindow(ws.id)));
 
-  // L5-C6:webview attach hook(PDF 提取 download 拦截)— 必须在 mainWindow 创建后挂
-  registerWebviewExtractionHook(mainWindow);
-  // ai-extraction:webview attach hook(AI Host webview did-navigate 到 AI URL 时
-  // 注册到 ai-webview-registry,askAI / pasteAndSend 走前台 webContents 而非后台)
-  registerAIWebviewHook(mainWindow);
-  // X 集成 阶段 0/1:X Host webview did-navigate 到 x.com 时注册到 x-webview-registry,
-  // 并挂原生右键菜单「提取此推文到笔记」(复用 web-service-base 底座,与 AI hook 同模式)。
-  registerXWebviewHook(mainWindow);
-  // web view 原生右键菜单(Phase 2 根治 HTML 菜单被 webview OS 层遮挡)— 只接管普通浏览 webview
-  registerWebContextMenuHook(mainWindow);
-  // web view 快捷键整层 + 弹窗导流(Phase 4 Commit 2)— webview 焦点下宿主 onKeyDown
-  // 失效,主进程 before-input-event 拦截快捷键 + setWindowOpenHandler 导流弹窗进新 tab。
-  // 只接管普通浏览 webview(shouldHandle 排除 AI / 翻译)。
-  registerWebShortcutsHook(mainWindow);
-  // web view 下载管理(Phase 3)— will-download 挂 persist:webview session **一次**
-  // (绝不 per-guest:共享 session per-guest 会 N 倍触发),shouldHandle 排除 AI/翻译,
-  // 不 setSavePath(Electron 自动弹系统保存框),进度/完成回推下载条 UI。
-  registerWebDownloadHook(mainWindow);
-  // per-ws 代理阶段1:partition 改 persist:webview-${wsId} 后,每个 ws 是独立 session。
-  // 每个 ws 的 webview 首次 attach 时,对其 session 补注册 media:// 协议(去重),
-  // 否则新 partition 里图片 ERR_UNKNOWN_URL_SCHEME(default + 旧 partition 已在
-  // registerProtocol 注册)。下载 will-download 的补挂在 registerWebDownloadHook 内部做。
-  mainWindow.webContents.on('did-attach-webview', (_e, guest) => {
-    mediaStore.registerMediaForSession(guest.session);
-    // L5-G7b:字体记名方案无 font:// 协议,无需 per-ws session 补注册(渲染走 IPC 按名读)。
-  });
   // Window Profile CRUD IPC。
   registerProfileHandlers();
   // per-ws 代理阶段1:临时 setProxy IPC(DevTools console 验证不同 ws 不同出口)。
