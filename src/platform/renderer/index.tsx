@@ -73,6 +73,7 @@ import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IP
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)
 import '@capabilities/ai-extraction';       // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability(原 ai-conversation,2026-05-19 改名)
 import '@capabilities/x-extraction';        // X 集成 阶段 0/1:嵌 x.com webview + 右键提取推文 → tweetBlock(铁律 3 独立 capability)
+import '@capabilities/import-orchestrator'; // 阶段 C:统一批量落库编排(markdown/PDF/剪藏三处 view 走 importDraftsToNotes)
 import '@capabilities/content-extraction';  // 网页剪藏(Defuddle → Note);模块 load 即订阅 WEB_CLIP_RESULT 跑 import-pipeline
 import '@capabilities/auth';                 // 授权:注册 auth capability(暴露 StatusBadge),模块 load 即挂 onAuthChanged 单订阅
 

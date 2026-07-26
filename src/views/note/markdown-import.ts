@@ -35,10 +35,16 @@ import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types
 // 删除 V1 import 中间形态 + V1 atom→PM 转换器 + DriverSerialized 临时桥 — view 端不再做
 // PM doc 拼装,storage 端 putAtom + putEdge 字面持久化, getNote 走 assemblePmDoc 重建.
 import { markdownToAtoms } from '@capabilities/content-ingest';
+// 阶段 C:落库编排(调 batch + failures 归一)统一走 import-orchestrator。
+// splitMode 切分 / 同名去重 / folder 树仍在本 view(怎么组装 items 是 view 业务)。
+import type { ImportOrchestratorApi } from '@capabilities/import-orchestrator';
 import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
+}
+function importOrchestrator(): ImportOrchestratorApi {
+  return requireCapabilityApi<ImportOrchestratorApi>('import-orchestrator');
 }
 function folderCap(): FolderCapabilityApi {
   return requireCapabilityApi<FolderCapabilityApi>('folder');
@@ -762,27 +768,19 @@ export async function importMarkdownBatch(
     }
   }
 
-  // 4. 末尾 1 次 createNotesBatch (5B Stage 7)
-  // 写库阶段:overlay 切回 indeterminate(单事务在 main 内跑,逐 item 回调跨不出
-  // 进程;写库通常比解析快,整段转圈即可,overlay 全程不消失)。
-  if (batchItems.length > 0) {
-    reportIndeterminate(`正在保存 ${batchItems.length} 篇笔记…`);
-    const batchStart = performance.now();
-    const result = await noteCap().createNotesBatch({
-      items: batchItems,
+  // 4. 末尾 1 次落库(阶段 C:走统一编排 importDraftsToNotes)。
+  // 写库阶段:overlay 切回 indeterminate(经 onSaving 回调,文案仍 view 决定 ——
+  // 单事务在 main 内跑,逐 item 回调跨不出进程,写库通常比解析快,整段转圈即可)。
+  {
+    const result = await importOrchestrator().importDraftsToNotes(batchItems, {
       broadcastMode: 'final',
+      labels: batchLabels,
+      logTag: 'markdown-import',
+      onSaving: (n) => reportIndeterminate(`正在保存 ${n} 篇笔记…`),
     });
-    const batchElapsed = Math.round(performance.now() - batchStart);
-    console.log(
-      `[markdown-import] BATCH createNotesBatch: items=${batchItems.length} notes=${result.notes.length} failures=${result.failures.length} (${batchElapsed}ms)`,
-    );
-    for (const note of result.notes) {
-      createdNoteIds.push(note.id);
-    }
+    createdNoteIds.push(...result.noteIds);
     for (const f of result.failures) {
-      const label = f.index >= 0 ? batchLabels[f.index] ?? `index=${f.index}` : 'tx-failed';
-      console.warn(`[markdown-import] BATCH failure ${label}: ${f.error}`);
-      skipped.push({ relPath: label, reason: f.error });
+      skipped.push({ relPath: f.label, reason: f.error });
     }
   }
 

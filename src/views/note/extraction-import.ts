@@ -41,10 +41,16 @@ import type { FolderCapabilityApi } from '@capabilities/folder/types';
 // — view 端不再做 PM doc 拼装.
 import { krigBatchToAtoms } from '@capabilities/content-ingest';
 import type { KrigImportBatch } from '@capabilities/content-ingest';
+// 阶段 C:落库编排统一走 import-orchestrator。同名章节去重仍在本 view(业务规则),
+// 只把「拿到标准 items 后的调 batch + failures 归一」交编排层。
+import type { ImportOrchestratorApi } from '@capabilities/import-orchestrator';
 import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 
 function noteCap(): NoteCapabilityApi {
   return requireCapabilityApi<NoteCapabilityApi>('note');
+}
+function importOrchestrator(): ImportOrchestratorApi {
+  return requireCapabilityApi<ImportOrchestratorApi>('import-orchestrator');
 }
 function folderCap(): FolderCapabilityApi {
   return requireCapabilityApi<FolderCapabilityApi>('folder');
@@ -127,25 +133,16 @@ export async function importExtractionBatch(data: unknown): Promise<ImportResult
     );
   }
 
-  // 5. 单事务批量写入
-  const noteIds: string[] = [];
-  if (batchItems.length > 0) {
-    reportIndeterminate(`正在保存 ${batchItems.length} 个章节…`);
-    const result = await noteCap().createNotesBatch({
-      items: batchItems,
-      broadcastMode: 'final',
-    });
-    console.log(
-      `[extraction-import] BATCH createNotesBatch: items=${batchItems.length} notes=${result.notes.length} failures=${result.failures.length}`,
-    );
-    for (const note of result.notes) {
-      noteIds.push(note.id);
-    }
-    for (const f of result.failures) {
-      const label = f.index >= 0 ? batchLabels[f.index] ?? `index=${f.index}` : 'tx-failed';
-      console.warn(`[extraction-import] BATCH failure ${label}: ${f.error}`);
-      skippedTitles.push(`${label} (FAILED: ${f.error})`);
-    }
+  // 5. 单事务批量写入(阶段 C:走统一编排 importDraftsToNotes)
+  const result = await importOrchestrator().importDraftsToNotes(batchItems, {
+    broadcastMode: 'final',
+    labels: batchLabels,
+    logTag: 'extraction-import',
+    onSaving: (n) => reportIndeterminate(`正在保存 ${n} 个章节…`),
+  });
+  const noteIds: string[] = [...result.noteIds];
+  for (const f of result.failures) {
+    skippedTitles.push(`${f.label} (FAILED: ${f.error})`);
   }
 
       return { folderId, noteIds, skippedTitles };

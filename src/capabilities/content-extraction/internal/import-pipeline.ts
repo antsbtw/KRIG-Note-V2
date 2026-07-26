@@ -20,7 +20,9 @@
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import type { ContentIngestApi } from '@capabilities/content-ingest/types';
-import type { NoteCapabilityApi, CreateNoteBatchItem } from '@capabilities/note/types';
+import type { CreateNoteBatchItem } from '@capabilities/note/types';
+// 阶段 C:单篇剪藏落库也走统一编排 import-orchestrator(不再直调 noteCap.createNotesBatch)。
+import type { ImportOrchestratorApi } from '@capabilities/import-orchestrator';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
 import { detectEmbedType } from '@drivers/text-editing-driver/blocks/video-block/helpers/embed-detection';
 import type { PmAtomDraft, AtomFrom } from '@semantic/types';
@@ -35,8 +37,8 @@ import type { WebClipPayload } from '../types';
 function ingestCap(): ContentIngestApi {
   return requireCapabilityApi<ContentIngestApi>('content-ingest');
 }
-function noteCap(): NoteCapabilityApi {
-  return requireCapabilityApi<NoteCapabilityApi>('note');
+function importOrchestrator(): ImportOrchestratorApi {
+  return requireCapabilityApi<ImportOrchestratorApi>('import-orchestrator');
 }
 function mediaCap(): MediaStorageApi {
   return requireCapabilityApi<MediaStorageApi>('media-storage');
@@ -401,10 +403,12 @@ async function runImportPipelineInner(payload: WebClipPayload | null): Promise<v
     return;
   }
 
-  // ④ createNotesBatch(根级,不去重 — D4)
+  // ④ 落库(根级,不去重 — D4;阶段 C:走统一编排 importDraftsToNotes)
   const item: CreateNoteBatchItem = { atoms, folderId: null, titleHint: title };
-  const result = await noteCap().createNotesBatch({ items: [item] });
-  if (result.failures.length > 0 || result.notes.length === 0) {
+  const result = await importOrchestrator().importDraftsToNotes([item], {
+    logTag: 'content-extraction',
+  });
+  if (result.failures.length > 0 || result.noteIds.length === 0) {
     console.error('[content-extraction] createNotesBatch failed:', result.failures);
     return;
   }
@@ -412,7 +416,7 @@ async function runImportPipelineInner(payload: WebClipPayload | null): Promise<v
   // ⑤ 打开新 note —— 对照布局:web 钉 left,note 开 right(方便左右比对原网页与剪藏稿)。
   //    web-view.pin-left 把 web 搬到 left(若在 right 则腾出 right);
   //    note-view.set-active-in-right 把 note 装到 right slot 并设为 active(不掩盖 left)。
-  const noteId = result.notes[0].id;
+  const noteId = result.noteIds[0];
   console.log('[content-extraction] clip → note', noteId, `(${atoms.length} atoms)`);
   commandRegistry.execute('web-view.pin-left');
   commandRegistry.execute('note-view.set-active-in-right', noteId);
