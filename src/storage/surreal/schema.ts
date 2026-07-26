@@ -21,7 +21,12 @@ import { surrealStorage } from './storage';
 const SCHEMA_VERSION_1_0_0 = `
 -- atom 表
 DEFINE TABLE IF NOT EXISTS atom SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS id ON atom TYPE string ASSERT $value != NONE;
+-- 注:绝不 DEFINE FIELD id —— id 是 SurrealDB 内建 record 标识,不是普通字段。
+-- 曾把它声明成 'TYPE string'(1.0.0),在 SurrealDB 3.x 下与内建 record id 语义冲突:
+-- CREATE(record 型 id)后同事务内再 UPSERT 同一 id 回填(createNote 回填 docHash /
+-- updateNote 保存)时,readonly 校验发现 id 从 record 被"改成" string → 抛
+-- "Found changed value for field id ... readonly" → 事务回滚 → 新建/保存笔记静默失败。
+-- 修正:base schema 不再声明,存量库由 migration 1.8.6 REMOVE FIELD 收口(见 runner)。
 DEFINE FIELD IF NOT EXISTS createdAt ON atom TYPE number ASSERT $value > 0;
 DEFINE FIELD IF NOT EXISTS updatedAt ON atom TYPE number ASSERT $value >= createdAt;
 DEFINE FIELD IF NOT EXISTS createdBy ON atom TYPE string ASSERT $value != "";
@@ -38,7 +43,7 @@ DEFINE INDEX IF NOT EXISTS atom_updatedAt ON atom FIELDS updatedAt;
 
 -- edge 表
 DEFINE TABLE IF NOT EXISTS edge SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS id ON edge TYPE string ASSERT $value != NONE;
+-- 同 atom:不声明 id 字段(内建 record 标识),避免 3.x readonly 冲突。migration 1.8.6 清存量。
 DEFINE FIELD IF NOT EXISTS createdAt ON edge TYPE number ASSERT $value > 0;
 DEFINE FIELD IF NOT EXISTS updatedAt ON edge TYPE number ASSERT $value >= createdAt;
 DEFINE FIELD IF NOT EXISTS predicate ON edge TYPE string
@@ -580,5 +585,37 @@ export async function migration_1_8_5(db: Surreal): Promise<void> {
     `UPSERT $rid SET version = '1.8.5', appliedAt = $now,
      description = 'Add task_id dimension to tweet_inbox'`,
     { rid: new RecordId('schema_version', '1.8.5'), now },
+  );
+}
+
+/**
+ * 1.8.6 migration up — 删除 atom / edge 表的显式 `id` 字段声明(readonly 回归根治)。
+ *
+ * 背景:1.0.0 base schema 曾 `DEFINE FIELD id ON atom/edge TYPE string`,把 SurrealDB
+ * 内建 record 标识当普通字段声明。SurrealDB 3.x(本机 binary 3.0.4)下这会导致:
+ * CREATE 一条记录(id 为 record 型)后,同一事务内再 UPSERT 同一 id(createNote 回填
+ * docVersion/docHash;updateNote 每次保存回写 container / modified block),readonly 校验
+ * 发现 id 从 record "变成" string,抛
+ *   `Found changed value for field id, with record atom:xxx, but field is readonly`
+ * → 整个事务回滚 → **新建笔记 / 保存笔记静默失败**(用户侧「点新建完全没反应」)。
+ *
+ * 修正:`REMOVE FIELD id` 后,id 回归纯内建 record 标识,CREATE+UPSERT 同事务不再冲突。
+ * 幂等 / 数据安全已离线验证(REMOVE FIELD 仅去约束,record id 与全部字段数据不变):
+ *   - REMOVE FIELD IF EXISTS 重复执行无副作用;
+ *   - 存量 atom/edge 的 id 与 payload 完整保留(SELECT * 仍返回 id)。
+ * normalizeAtomEntity/normalizeEdgeEntity 从 row.id(内建标识)派生 id,不依赖此字段声明。
+ */
+const SCHEMA_VERSION_1_8_6 = `
+REMOVE FIELD IF EXISTS id ON atom;
+REMOVE FIELD IF EXISTS id ON edge;
+`;
+
+export async function migration_1_8_6(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_6);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.6', appliedAt = $now,
+     description = 'Drop explicit id field on atom/edge (SurrealDB 3.x record-id readonly conflict; fixes silent note create/save failure)'`,
+    { rid: new RecordId('schema_version', '1.8.6'), now },
   );
 }
