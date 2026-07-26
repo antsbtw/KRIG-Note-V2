@@ -191,7 +191,7 @@ flowchart TB
     direction LR
     p1["① ResultParser<br/>+ blocks-to-pm-doc（AI）"]
     p2["② markdownToProseMirror（导入）"]
-    p4["④ atomsToProseMirror<br/>（PDF，输入 V1Atom[]）"]
+    p4["④ atomsToProseMirror<br/>（PDF · 过渡态·待收编）"]
   end
 
   pmnodes(["PMNode[] ★收敛点★"])
@@ -220,10 +220,14 @@ flowchart TB
   classDef frag fill:#5a2a2a,stroke:#c0392b,color:#fff;
   classDef pivot fill:#1f3a5f,stroke:#2980b9,color:#fff;
   classDef ok fill:#234d20,stroke:#27ae60,color:#fff;
+  classDef transitional fill:#4a3f1a,stroke:#c8a415,color:#fff,stroke-dasharray:5 4;
   class p1,p2 frag;
   class pmnodes pivot;
   class p2d,wrap,batch,ins ok;
+  class p4 transitional;
 ```
+
+> **PDF(④) 为过渡态（黄色虚线框）**：当前保留 `atomsToProseMirror`，未来后端契约改 markdown 后收进 markdownCore、删此路。详见「收敛总目标与总数据流」节。
 
 **三条铁律级结论**：
 1. **PMNode[] 是唯一天然收敛点**。它上游有两套解析（①②），它下游（pmNodeToDrafts→落库）**已完全统一**。B 只需收敛「→PMNode[]」这一段。
@@ -314,7 +318,7 @@ flowchart TB
   aiMd["AI markdown"] -->|"AI前处理: LaTeX标准化/widget清理"| core
   fileMd["文件 / 剪藏 / Word markdown"] --> core
   core(["markdownCore(md): PMNode[]<br/>★唯一真源 · 超集 · 契约测试护栏★"])
-  pdfAtom["PDF V1Atom[]"] -->|"atomsToProseMirror<br/>(不经 markdownCore)"| pmnodes["PMNode[]"]
+  pdfAtom["PDF V1Atom[]<br/>（过渡态·待收编）"] -.->|"atomsToProseMirror（暂不经 markdownCore）<br/>⚠ 过渡：后端契约改 markdown 后收进核、删此路"| pmnodes["PMNode[]"]
   core --> pmnodes
 
   pmnodes -->|"①外壳: wrapAITurnsInToggle"| append["append-pm-nodes<br/>（插活跃 note）"]
@@ -322,9 +326,26 @@ flowchart TB
 
   classDef pivot fill:#1f3a5f,stroke:#2980b9,color:#fff;
   classDef ok fill:#234d20,stroke:#27ae60,color:#fff;
+  classDef transitional fill:#4a3f1a,stroke:#c8a415,color:#fff,stroke-dasharray:5 4;
   class core pivot;
   class append,batch ok;
+  class pdfAtom transitional;
 ```
+
+> **PDF 支路是过渡态（黄色虚线），非终态设计**——它是图上唯一「不经 markdownCore」的例外。分步收编见下。
+
+### PDF 支路的分步收编（为什么先不动、未来怎么收）
+
+**先不动的理由**（这是有依赖顺序的分步，不是遗漏）：
+1. **PDF 走 markdown 的前提是后端改契约**——GLM-OCR 原生就出 markdown，但后端当前把它翻译成我们的私有 Atom JSON 契约（见 `PDF-Note-Atom数据契约-v2.1.md`）。让 PDF 走 markdownCore = 要后端**直接吐 markdown**，这是**跨项目、破坏性变更**（老 Atom 备份失效），非前端单方面可做。
+2. **前端 B 阶段不依赖 PDF**——AI(①)、文件/剪藏(②) 本就是 markdown，先收敛这两套价值已很大；PDF 现走 `atomsToProseMirror → PMNode[]`，**已汇入统一下游**（pmNodeToDrafts→落库），能用、不是痛点。
+3. **bbox/pageRef 是死数据**（`atoms-to-pm:342` 丢弃、schema 未声明、零消费方；调研证实），PDF 真需求就是「文字+图片」，markdown 足以承载——**证明收编在技术上无损**，只是时机问题。
+
+**未来收编（触发点 = 需要「OCR 引擎可插拔」时）**：
+- 推动**后端契约从 Atom JSON 改为 KRIG Markdown**（[[krig-markdown-dialect-spec]]）。
+- PDF 支路收进 markdownCore，**删 `atomsToProseMirror`(542行) + `krigBatchToAtoms` 翻译层 + sanitize-atoms 兼容层**。
+- **战略红利**：契约变 markdown 后，OCR 引擎变可插拔（Marker/MinerU/视觉大模型皆原生出 md），从「私有集成锁死」变「标准接口可替换」。
+- **代价/取舍**：放弃 bbox 承载的未来「note↔PDF 空间视图/知识图谱」能力（当前无此功能，设计文档为 V2/V3 预留）。
 
 **分层原则**：
 - **解析核 `markdownCore`**：纯 `string → PMNode[]`，**sync、无副作用、无媒体本地化**（媒体是异步 I/O，留在外壳）。这是 B 的产物。
