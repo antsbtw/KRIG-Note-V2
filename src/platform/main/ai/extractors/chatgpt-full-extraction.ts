@@ -23,7 +23,10 @@
  */
 
 import type { WebContents } from 'electron';
-import { getChatGPTReadCacheScript } from '../inject-scripts/chatgpt-conversation-hook';
+import {
+  getChatGPTReadCacheScript,
+  getChatGPTFetchConversationScript,
+} from '../inject-scripts/chatgpt-conversation-hook';
 
 interface CacheEntry {
   url: string;
@@ -301,6 +304,36 @@ async function readCache(
   }
 }
 
+/**
+ * 提取时在页面上下文**实时**拉取当前对话树 JSON(stale-cache 修复,见 hook 脚本注释)。
+ * 成功返回 body 字符串;失败(网络/鉴权/离线)返回 null,caller 回退 hook 陈旧缓存。
+ */
+async function fetchConversationLive(
+  wc: WebContents,
+  conversationId: string,
+): Promise<string | null> {
+  try {
+    const script = getChatGPTFetchConversationScript(conversationId);
+    const result = (await wc.executeJavaScript(script)) as {
+      ok: boolean;
+      body?: string;
+      status?: number;
+      error?: string;
+      hadToken?: boolean;
+    };
+    if (result?.ok && typeof result.body === 'string' && result.body.length > 0) {
+      return result.body;
+    }
+    console.warn(
+      `[chatgpt-extract] 实时拉对话树失败(status=${result?.status ?? '?'} hadToken=${result?.hadToken ?? '?'} err=${result?.error ?? ''}),回退 hook 缓存`,
+    );
+    return null;
+  } catch (err) {
+    console.warn('[chatgpt-extract] 实时拉对话树异常,回退 hook 缓存:', err);
+    return null;
+  }
+}
+
 // ─── 消息序列化 ─────────────────────────────────────────────────────
 
 interface NormalizedMessage {
@@ -425,14 +458,20 @@ export async function loadChatGPTConversation(
     return { error: 'Not on a ChatGPT conversation page (no /c/{uuid} in URL)' };
   }
 
-  // 1. 读对话 cache(必须排除 /textdocs / /stream_status 后缀)
-  const convMatches = await readCache(wc, `/backend-api/conversation/${conversationId}`, 'all');
-  const bareConvMatches = convMatches.filter((m) => {
-    const tail = m.url.split(conversationId)[1] || '';
-    return tail === '' || tail.startsWith('?');
-  });
-  const convEntry = bareConvMatches[bareConvMatches.length - 1];
-  if (!convEntry?.body) {
+  // 1. 取对话树 JSON —— **优先实时拉**(stale-cache 修复:hook 缓存冻结在进页面那一刻,
+  //    继续聊天走 SSE 不更新整树 → 旧数据。实时 fetch 拿当前最新全量)。
+  //    实时失败(网络/鉴权/离线)才回退 hook 缓存(至少给个旧结果,不硬失败)。
+  let convBody = await fetchConversationLive(wc, conversationId);
+  if (!convBody) {
+    // 回退:读 hook cache(必须排除 /textdocs / /stream_status 后缀)
+    const convMatches = await readCache(wc, `/backend-api/conversation/${conversationId}`, 'all');
+    const bareConvMatches = convMatches.filter((m) => {
+      const tail = m.url.split(conversationId)[1] || '';
+      return tail === '' || tail.startsWith('?');
+    });
+    convBody = bareConvMatches[bareConvMatches.length - 1]?.body ?? null;
+  }
+  if (!convBody) {
     return {
       error: `对话数据未捕获:请重新加载页面让 hook 截 /backend-api/conversation/${conversationId}`,
     };
@@ -440,7 +479,7 @@ export async function loadChatGPTConversation(
 
   let conv: { title?: string; mapping?: Record<string, { parent?: string | null; children?: string[]; message?: unknown }> };
   try {
-    conv = JSON.parse(convEntry.body);
+    conv = JSON.parse(convBody);
   } catch (err) {
     return { error: `解析对话 JSON 失败: ${String(err)}` };
   }
