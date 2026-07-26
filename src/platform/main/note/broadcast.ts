@@ -45,7 +45,7 @@ export async function broadcastNoteListChanged(): Promise<void> {
  * 发起窗口（emitterId）不收，自己已在 updateNote 后刷过快照。
  */
 export function broadcastNoteBaseSnapshotUpdated(
-  payload: { noteId: string; docVersion: number; blockHashes: Record<string, string>; fromSession: string },
+  payload: { noteId: string; docVersion: number; docHash: string; blockHashes: Record<string, string>; fromSession: string },
   emitterId: number,
 ): void {
   try {

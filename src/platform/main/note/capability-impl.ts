@@ -151,6 +151,9 @@ function buildNoteInfo(
     updatedAt: containerAtom.updatedAt,
     docVersion,
     blockHashes,
+    // 权威 docHash 与 getNoteVersionInfo 同算法(computeDocHash=SHA-1);docVersion=0(list
+    // metadata-only 场景)时无 block 快照,留空。renderer baseSnapshot 直接存此值,不自算。
+    docHash: docVersion === 0 ? '' : computeDocHash(blockHashes),
   };
 }
 
@@ -524,6 +527,7 @@ export async function listNotes(): Promise<NoteInfo[]> {
     updatedAt: m.updatedAt,
     docVersion: 0,
     blockHashes: {},
+    docHash: '', // metadata-only(无 block 快照);view 端需完整快照走 getNote 单点拉
   }));
 }
 
@@ -1124,6 +1128,7 @@ async function createSingleNoteFromDrafts(
     updatedAt: containerAtom.updatedAt,
     docVersion: 1,
     blockHashes: {},
+    docHash: '', // 批量导入路径 blockHashes 留空,docHash 同留空;view 端 getNote 时拉完整快照
   };
 }
 

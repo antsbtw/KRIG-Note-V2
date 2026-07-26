@@ -263,7 +263,7 @@ export function getTransientVersion(): number {
 export function initNoteBaseSnapshotSync(): void {
   if (!window.electronAPI?.onNoteBaseSnapshotUpdated) return;
   window.electronAPI.onNoteBaseSnapshotUpdated((payload) => {
-    const { noteId, docVersion, blockHashes, fromSession } = payload;
+    const { noteId, docVersion, docHash, blockHashes, fromSession } = payload;
     // 遍历所有 ws 的 baseSnapshot，找 noteId 匹配且 fromSession 不同于自己的
     for (const [wsId, snapshot] of noteBaseSnapshots) {
       if (snapshot.noteId !== noteId) continue;
@@ -272,7 +272,9 @@ export function initNoteBaseSnapshotSync(): void {
       setNoteBaseSnapshot(wsId, {
         ...snapshot,
         docVersion,
-        docHash: '', // docHash 由主进程维护，renderer 用 computeDocHashFromMap 或留空均可
+        // 存主进程权威 docHash（SHA-1），本窗口下次写时 Step 4 快路径才能正确命中；
+        // 之前留空 '' → 快路径永远失败 → 每次写误判并发写（刷屏 bug 的另一半）。
+        docHash,
         blockHashes: new Map(Object.entries(blockHashes)),
       });
       console.info(
@@ -478,7 +480,10 @@ function applySnapshotFromResult(
     setNoteBaseSnapshot(wsId, {
       noteId,
       docVersion: result.docVersion,
-      docHash: result.docVersion === 0 ? '' : computeDocHashFromMap(blockHashesMap),
+      // 直接存主进程返回的**权威** docHash(SHA-1,与 getNoteVersionInfo 同算法)。
+      // 绝不本地用 computeDocHashFromMap 重算 —— 那是裸拼接串,与 db 的 SHA-1 永不相等,
+      // 会让 updateNoteWithMerge Step 4 快路径永远失败 → 每次写都误判并发写(日志刷屏 bug)。
+      docHash: result.docHash,
       blockHashes: blockHashesMap,
       openedAt: getNoteBaseSnapshot(wsId)?.openedAt ?? Date.now(),
       openedBySession: wsId,
@@ -558,13 +563,12 @@ async function initNoteBaseSnapshot(wsId: string, noteId: string): Promise<void>
     const current = hydrate(ws).activeNoteId;
     if (current !== noteId) return;
     const blockHashesMap = new Map(Object.entries(note.blockHashes));
-    const docHash = note.docVersion === 0
-      ? ''
-      : computeDocHashFromMap(blockHashesMap);
     setNoteBaseSnapshot(wsId, {
       noteId,
       docVersion: note.docVersion,
-      docHash,
+      // 存 getNote 返回的**权威** docHash（SHA-1，与 getNoteVersionInfo 同算法）。
+      // 不本地 computeDocHashFromMap（裸拼接串 ≠ db 的 SHA-1 → Step 4 永失败 → 误判并发写）。
+      docHash: note.docHash,
       blockHashes: blockHashesMap,
       openedAt: Date.now(),
       openedBySession: wsId,
@@ -574,16 +578,9 @@ async function initNoteBaseSnapshot(wsId: string, noteId: string): Promise<void>
   }
 }
 
-/** 按 blockId 字典序排序后拼接，再做 SHA-1 等价摘要（纯客户端实现，勿引 Node crypto） */
-function computeDocHashFromMap(blockHashes: Map<string, string>): string {
-  // renderer 进程无 Node crypto，用等价的 djb2-like 字符串拼接作为稳定键
-  // Phase 0 仅用于 snapshot，Phase 1 compare 走主进程的 docHash 字段
-  const sorted = Array.from(blockHashes.entries())
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${k}:${v}`)
-    .join(',');
-  return sorted; // Phase 0:直接用拼接串作指纹（长度可变，足够判断是否相等）
-}
+// computeDocHashFromMap 已删除(2026-07-25):它返回裸拼接串,与主进程 computeDocHash 的
+// SHA-1 hex 永不相等,导致 updateNoteWithMerge Step 4 快路径永远失败 → 每次写误判并发写。
+// baseSnapshot.docHash 现统一存主进程返回的权威 docHash(NoteInfo.docHash),不再本地重算。
 
 // ── 文件夹 ──
 

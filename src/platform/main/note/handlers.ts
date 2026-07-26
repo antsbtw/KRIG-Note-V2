@@ -98,6 +98,7 @@ export function registerNoteHandlers(): void {
       broadcastNoteBaseSnapshotUpdated({
         noteId: note.id,
         docVersion: note.docVersion,
+        docHash: note.docHash,
         blockHashes: note.blockHashes,
         fromSession: wsId ?? '',
       }, e.sender.id);

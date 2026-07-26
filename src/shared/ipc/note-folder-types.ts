@@ -33,6 +33,13 @@ export interface NoteInfo {
   docVersion: number;
   /** Phase 0 多窗口同步:blockId → blockHash(SHA-1 hex 40 字符)映射 */
   blockHashes: Record<string, string>;
+  /**
+   * Phase 1 乐观锁:container 的权威 docHash(SHA-1 hex,与 getNoteVersionInfo 同算法)。
+   * renderer 端 baseSnapshot 必须存这个权威值 —— 若 renderer 自己用别的算法(如裸拼接串)
+   * 重算,会与 getNoteVersionInfo 返回的 SHA-1 docHash 永不相等 → 每次写都误判「并发写」
+   * → sync/merge 日志刷屏 + 每次保存都跑无谓的 block 级冲突扫描(实测 bug)。
+   */
+  docHash: string;
 }
 
 /** 文件夹业务视图 (atom + 派生 parentId) */

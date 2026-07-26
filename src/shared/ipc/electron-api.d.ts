@@ -450,7 +450,7 @@ declare global {
        * 收到后更新本窗口的 baseSnapshot（不覆盖本地编辑，只更新基线）。
        */
       onNoteBaseSnapshotUpdated(
-        callback: (payload: { noteId: string; docVersion: number; blockHashes: Record<string, string>; fromSession: string }) => void,
+        callback: (payload: { noteId: string; docVersion: number; docHash: string; blockHashes: Record<string, string>; fromSession: string }) => void,
       ): () => void;
 
       // ── thought capability (横切思考层 — thought-view-port.md v0.5 §5.3) ──
