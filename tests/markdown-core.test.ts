@@ -22,6 +22,15 @@ import {
   buildCalloutNode,
   calloutEmojiFor,
   splitCellOnBr,
+  parseImageSrc,
+  buildImageNode,
+  buildVideoNode,
+  buildAudioNode,
+  buildHtmlBlockNode,
+  buildFileBlockNode,
+  buildExternalRefNode,
+  tryParseMediaTag,
+  tryParseObsidianVideoEmbed,
   type PMNode,
 } from '@shared/markdown-core';
 
@@ -351,5 +360,116 @@ describe('markdown-core / ② callout 集成（新增能力）', () => {
       return;
     }
     expect(nodes[0].type).toBe('blockquote');
+  });
+});
+
+// ── B3：媒体块 —— 核纯 sync 解析，src 原样 ────────────────────────────
+describe('markdown-core / image (B3)', () => {
+  it('标准 URL src 原样进原样出', () => {
+    expect(parseImageSrc('https://x.com/a.png')).toEqual({ src: 'https://x.com/a.png' });
+  });
+
+  it('base64 src 原样（核绝不本地化成 media://）', () => {
+    const b64 = 'data:image/png;base64,AAAA';
+    expect(parseImageSrc(b64)).toEqual({ src: b64 });
+    // buildImageNode 也原样（外壳才 resolve）
+    expect(buildImageNode(b64, 'alt').attrs?.src).toBe(b64);
+  });
+
+  it('image:pageN → src 归一 image + pageRef（bbox undefined）', () => {
+    expect(parseImageSrc('image:page19')).toEqual({ src: 'image', pageRef: 19 });
+    expect(parseImageSrc('image:page19-19')).toEqual({ src: 'image', pageRef: 19 });
+  });
+
+  it('image:pageN:x,y,w,h → pageRef + bbox 都解析出', () => {
+    expect(parseImageSrc('image:page3:x1,y2,w3,h4')).toEqual({
+      src: 'image',
+      pageRef: 3,
+      bbox: { x: 1, y: 2, w: 3, h: 4 },
+    });
+  });
+
+  it('bbox/pageRef 解析出但**不写进 image 节点 attrs**（指挥拍板保持丢弃 + TODO）', () => {
+    // buildImageNode 只吃 src/alt/title；bbox/pageRef 无 attr 承载（image schema 无此 attr）
+    const node = buildImageNode('image', 'alt');
+    expect(node.attrs).toEqual({ src: 'image', alt: 'alt' });
+    expect(node.attrs).not.toHaveProperty('bbox');
+    expect(node.attrs).not.toHaveProperty('pageRef');
+  });
+
+  it('buildImageNode：有 title 才带 title（空 caption 省 title，逐字段一致）', () => {
+    expect(buildImageNode('u', 'a').attrs).toEqual({ src: 'u', alt: 'a' });
+    expect(buildImageNode('u', 'a', '图1').attrs).toEqual({ src: 'u', alt: 'a', title: '图1' });
+    // content 恒带一个空 paragraph（caption 占位，防 setNodeAttribute RangeError）
+    expect(buildImageNode('u', 'a').content).toEqual([{ type: 'paragraph' }]);
+  });
+});
+
+describe('markdown-core / video·audio·html·file·externalRef (B3)', () => {
+  it('buildVideoNode src 原样 + 只带 schema 有的 attr', () => {
+    const node = buildVideoNode({ src: 'media://v1', title: 'T', duration: 60 });
+    expect(node.type).toBe('videoBlock');
+    expect(node.attrs).toEqual({ src: 'media://v1', title: 'T', duration: 60 });
+    expect(node.content).toEqual([{ type: 'paragraph' }]);
+  });
+
+  it('buildAudioNode src 原样', () => {
+    expect(buildAudioNode({ src: 'media://a1', title: 'A' }).type).toBe('audioBlock');
+    expect(buildAudioNode({ src: 'media://a1' }).attrs).toEqual({ src: 'media://a1' });
+  });
+
+  it('buildHtmlBlockNode src 原样（null 也可）', () => {
+    expect(buildHtmlBlockNode('media://h', 'T').attrs).toEqual({ src: 'media://h', title: 'T' });
+    expect(buildHtmlBlockNode(null, '').attrs).toEqual({ src: null, title: '' });
+  });
+
+  it('buildFileBlockNode src/mediaId 原样，size/source 留 null', () => {
+    const node = buildFileBlockNode({ src: 'media://f', mediaId: 'm1', filename: 'a.pdf', mimeType: 'application/pdf' });
+    expect(node.type).toBe('fileBlock');
+    expect(node.attrs).toEqual({
+      mediaId: 'm1', src: 'media://f', filename: 'a.pdf', mimeType: 'application/pdf', size: null, source: null,
+    });
+  });
+
+  it('buildExternalRefNode href 原样（核不碰路径协议）', () => {
+    const node = buildExternalRefNode({ kind: 'file', href: 'file:///a', title: 'T' });
+    expect(node.attrs).toEqual({ kind: 'file', href: 'file:///a', title: 'T', mimeType: '', size: null, modifiedAt: null });
+  });
+});
+
+describe('markdown-core / HTML 媒体标签解析 (B3)', () => {
+  it('<iframe src=https> → videoBlock，src 原样', () => {
+    const node = tryParseMediaTag('<iframe src="https://youtube.com/embed/x" title="片"></iframe>');
+    expect(node?.type).toBe('videoBlock');
+    expect(node?.attrs?.src).toBe('https://youtube.com/embed/x');
+    expect(node?.attrs?.title).toBe('片');
+  });
+
+  it('<iframe src=http（非 https）→ null（安全兜底）', () => {
+    expect(tryParseMediaTag('<iframe src="http://insecure/x"></iframe>')).toBeNull();
+  });
+
+  it('<video src> / <video attrs><source> → videoBlock，data-duration 取到', () => {
+    expect(tryParseMediaTag('<video src="media://v" data-duration="90"></video>')?.attrs).toEqual({
+      src: 'media://v', title: 'Video', duration: 90,
+    });
+    // 无 src 但带属性的 <video controls> + <source>（对齐 ① 原 regex 需 video 后有 \s）
+    expect(tryParseMediaTag('<video controls><source src="media://v2"></video>')?.attrs?.src).toBe('media://v2');
+  });
+
+  it('<audio src> → audioBlock', () => {
+    expect(tryParseMediaTag('<audio src="media://a" title="声"></audio>')?.type).toBe('audioBlock');
+  });
+
+  it('非媒体标签 → null', () => {
+    expect(tryParseMediaTag('<div>x</div>')).toBeNull();
+    expect(tryParseMediaTag('普通文本')).toBeNull();
+  });
+
+  it('Obsidian ![[id]] → YouTube videoBlock', () => {
+    const node = tryParseObsidianVideoEmbed('![[dQw4w9WgXcQ]]');
+    expect(node?.type).toBe('videoBlock');
+    expect(node?.attrs?.src).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    expect(tryParseObsidianVideoEmbed('![[短]]')).toBeNull(); // < 6 位不算
   });
 });

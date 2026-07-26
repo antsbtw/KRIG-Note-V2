@@ -42,6 +42,12 @@ import {
   buildTableNode,
   buildCalloutNode,
   calloutEmojiFor,
+  buildImageNode,
+  buildHtmlBlockNode,
+  buildFileBlockNode,
+  buildExternalRefNode,
+  tryParseMediaTag,
+  tryParseObsidianVideoEmbed,
 } from '@shared/markdown-core';
 
 function mediaPutBase64(
@@ -95,9 +101,14 @@ export const PM_NODE_REGISTRY = {
   tableRow: '✅',
   tableHeader: '✅',
   tableCell: '✅',
-  // block — 未实现(L5-B4.3 闭环测试会触发,反向驱动补齐)
-  fileBlock: '❌',
-  externalRef: '❌',
+  // B3:媒体类 block —— V2 schema 均已实现(spec 见 drivers/text-editing-driver/blocks/)。
+  //   htmlBlock/videoBlock/audioBlock 由 ② B3 补齐解析(从 ① 移植识别逻辑进核);
+  //   fileBlock/externalRef ② 本就产真节点(旧 registry 标 ❌ 是过时文案,B3 一并修正)。
+  fileBlock: '✅',
+  externalRef: '✅',
+  htmlBlock: '✅',
+  videoBlock: '✅',
+  audioBlock: '✅',
 } as const;
 
 /**
@@ -195,13 +206,11 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     if (linkedImg) {
       const alt = linkedImg[1] || '';
       const rawSrc = linkedImg[2];
+      // B3:async base64→media:// 本地化留外壳(resolvePMImageSrc);核 buildImageNode
+      // 只吃已解析好的 src(原样),不碰 IPC。
       const resolved = await resolvePMImageSrc(rawSrc);
       if (resolved.ok && resolved.url) {
-        content.push({
-          type: 'image',
-          attrs: { src: resolved.url, alt },
-          content: [{ type: 'paragraph' }],
-        });
+        content.push(buildImageNode(resolved.url, alt));
       } else {
         content.push(unknownNode('image', line, resolved.reason || 'mediaPutBase64 failed'));
       }
@@ -209,20 +218,14 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Block-level image — V2 未实现 image,输出 image 节点(schema 补齐时直接生效)
+    // Block-level image — B3:解析改调核 buildImageNode(src 原样);async 本地化留外壳
     const imgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (imgMatch) {
       const alt = imgMatch[1] || '';
       const rawSrc = imgMatch[2];
       const resolved = await resolvePMImageSrc(rawSrc);
       if (resolved.ok && resolved.url) {
-        // image schema content='block':必须含一个 caption(可空段落,paragraph)
-        // alt 默认不当 caption(用户可能想自己写),空 caption 让用户后续编辑
-        content.push({
-          type: 'image',
-          attrs: { src: resolved.url, alt },
-          content: [{ type: 'paragraph' }],
-        });
+        content.push(buildImageNode(resolved.url, alt));
       } else {
         content.push(
           unknownNode('image', line, resolved.reason || 'mediaPutBase64 failed'),
@@ -232,43 +235,63 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // !attach[name](src) — V2 未实现 fileBlock
+    // !attach[name](src) — B3:改调核 buildFileBlockNode;async 本地化留外壳 resolvePMAttachmentSrc
     const attachMatch = line.trim().match(/^!attach\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (attachMatch) {
       const filename = attachMatch[1] || 'attachment';
       const rawSrc = attachMatch[2];
       const resolved = await resolvePMAttachmentSrc(rawSrc, filename);
-      content.push({
-        type: 'fileBlock',
-        attrs: {
-          mediaId: resolved.mediaId,
+      content.push(
+        buildFileBlockNode({
           src: resolved.src,
+          mediaId: resolved.mediaId,
           filename: resolved.filename,
           mimeType: resolved.mimeType,
-          size: null,
-          source: null,
-        },
-      });
+        }),
+      );
       i++;
       continue;
     }
 
-    // !file[title](path) — V2 未实现 externalRef
+    // !file[title](path) — B3:改调核 buildExternalRefNode;href normalize 是 sync 外壳
+    // 语义(路径协议),先归一再传核(核不碰路径协议)。
     const fileMatch = line.trim().match(/^!file\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (fileMatch) {
       const title = fileMatch[1] || '';
       const rawPath = fileMatch[2];
-      content.push({
-        type: 'externalRef',
-        attrs: {
+      content.push(
+        buildExternalRefNode({
           kind: 'file',
           href: normalizePMFileHref(rawPath),
           title,
-          mimeType: '',
-          size: null,
-          modifiedAt: null,
-        },
-      });
+        }),
+      );
+      i++;
+      continue;
+    }
+
+    // !html[title](url) — B3:htmlBlock 改调核 buildHtmlBlockNode(src 原样,不本地化)。
+    // ② 以前无 htmlBlock 解析,从 ① 移植进核后 ② 补齐(新增能力)。
+    const htmlMatch = line.trim().match(/^!html\[([^\]]*)\]\(([^)]+)\)\s*$/);
+    if (htmlMatch) {
+      content.push(buildHtmlBlockNode(htmlMatch[2], htmlMatch[1]));
+      i++;
+      continue;
+    }
+
+    // Obsidian embed ![[videoId]] → YouTube videoBlock — B3:改调核(② 新增能力)。
+    const obsidianVideo = tryParseObsidianVideoEmbed(line);
+    if (obsidianVideo) {
+      content.push(obsidianVideo);
+      i++;
+      continue;
+    }
+
+    // HTML 媒体标签 <iframe>/<video>/<audio> → video/audioBlock — B3:改调核 tryParseMediaTag
+    // (src 原样,② 新增能力)。iframe 非 https / 无 src 返 null → 落默认 paragraph。
+    const mediaNode = tryParseMediaTag(line.trim());
+    if (mediaNode) {
+      content.push(mediaNode);
       i++;
       continue;
     }

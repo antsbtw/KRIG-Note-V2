@@ -48,6 +48,8 @@ import {
   buildMathBlockNode,
   buildTableNode,
   buildCalloutNode,
+  buildImageNode,
+  buildHtmlBlockNode,
 } from '@shared/markdown-core';
 
 // ProseMirror JSON 节点形式(纯数据,不依赖 prosemirror-model)
@@ -149,39 +151,25 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
     }
 
     case 'image':
-      // V2 image PM spec content='block' 必须有一个 child block(caption),
-      // 不加 content 时 PM.nodeFromJSON 会抛 RangeError(失败 fence 走默认 fallback)。
-      // 用空 paragraph 占位即可,用户可后续手填 caption。
-      return [
-        {
-          type: 'image',
-          attrs: {
-            src: block.src || '',
-            alt: block.alt || '',
-            title: block.caption || '',
-          },
-          content: [{ type: 'paragraph' }],
-        },
-      ];
+      // B3:image 改调核 buildImageNode(src 原样,core 不本地化)。① 无 async 本地化 ——
+      // src 进 result-parser 时已是 URL/`image:pageN` 占位,原样带出。caption→title(空则
+      // 省 title,与 schema default '' 等价)。
+      // 注:① 的 pageRef/bbox(image:pageN:x,y,w,h)迁移前就在此处被丢弃(未映射进 attrs);
+      // image schema 无 bbox/pageRef attr(方言规范:bbox 已是死数据),指挥拍板保持丢弃 +
+      // 留 TODO(见 markdown-core/media-blocks.ts parseImageSrc)。
+      return [buildImageNode(block.src || '', block.alt || '', block.caption)];
 
     case 'htmlBlock':
-      // V2 htmlBlock spec: content='block' 单 caption + attrs.src(media:// URL)
-      // AI 提取 HTML artifact 走这条路径(extract-turn.ts 输出 !html[title](media://...))
-      return [
-        {
-          type: 'htmlBlock',
-          attrs: {
-            src: block.src || null,
-            title: block.text || '',
-          },
-          content: [{ type: 'paragraph' }],
-        },
-      ];
+      // B3:htmlBlock 改调核 buildHtmlBlockNode(src 原样)。AI 提取 HTML artifact 走这条
+      // (extract-turn.ts 输出 !html[title](media://...))。text→title。
+      return [buildHtmlBlockNode(block.src || null, block.text || '')];
 
     case 'video':
     case 'audio':
     case 'file':
-      // V2 当前 ai-response thought 不接复杂媒体 block,降级 paragraph 占位
+      // V2 当前 ai-response thought 不接复杂媒体 block,降级 paragraph 占位。
+      // B3:① 此降级行为**保持不变**(验收准则#5:① video/audio 输出结构不变) ——
+      // 媒体节点识别/构造进核只供 ② 补齐用;① 若将来要产真节点另立项。
       return [
         {
           type: 'paragraph',

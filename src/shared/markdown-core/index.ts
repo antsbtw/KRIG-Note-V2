@@ -45,6 +45,19 @@ export {
   buildTableNode,
   splitCellOnBr,
 } from './table-callout';
+// 阶段 B3：媒体类 block canonical 构造器 + 纯解析（src 原样，async 本地化留外壳）。
+export {
+  parseImageSrc,
+  buildImageNode,
+  buildVideoNode,
+  buildAudioNode,
+  buildHtmlBlockNode,
+  buildFileBlockNode,
+  buildExternalRefNode,
+  tryParseMediaTag,
+  tryParseObsidianVideoEmbed,
+} from './media-blocks';
+export type { ParsedImageSrc } from './media-blocks';
 
 /**
  * markdown → canonical PMNode[]（B1 覆盖范围内规范解析，其余产 uncovered 哨兵）。
