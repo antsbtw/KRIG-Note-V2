@@ -32,15 +32,21 @@ export function registerAICommands(wsId: string): void {
   });
 
   /**
-   * SlotToggle dropdown — 在 right slot 打开指定 view(空白,无 payload)。
-   * commandArg = 目标 viewId(e.g. 'note-view' / 'thought-view')。
-   * 仿 note-view.open-right-slot 模式,本地版本服务 AI View 自身 toolbar SlotToggle。
+   * SlotPicker 视图切换 — 在 right slot 打开选中的 view。
+   * commandArg 与 note-view.open-right-slot 完全一致(同一 SlotPickerPopup 回调):
+   *   - string:目标 viewId(如 'note-view' / 'ebook-view' / 'web-view' / 'graph-view')
+   *   - { viewId, subId }:带子项的 view(AI / Social / X → 具体服务),subId 走 payload.subId
+   * openRight 幂等,已装同类直接覆盖重开。
    */
-  registerWsCommand('ai-view.open-right-slot', () => wsId, (ctx, viewId: unknown) => {
-    if (typeof viewId !== 'string' || !viewId) return;
+  registerWsCommand('ai-view.open-right-slot', () => wsId, (ctx, arg: unknown) => {
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
-    bus.slot.openRight(viewId);
+    if (typeof arg === 'string') {
+      bus.slot.openRight(arg);
+    } else if (arg && typeof arg === 'object' && 'viewId' in arg) {
+      const { viewId, subId } = arg as { viewId: string; subId: string };
+      bus.slot.openRight(viewId, { subId });
+    }
   });
 
   /**

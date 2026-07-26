@@ -14,6 +14,8 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { popupController } from '@slot/triggers/popup-controller';
+import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import type {
   AIConversationApi,
   AIHostHandle,
@@ -136,6 +138,17 @@ export function AIView({ workspaceId, payload }: AIViewProps) {
     bus?.slot.closeRight();
   }, [workspaceId]);
 
+  /**
+   * ⊞ 右栏视图切换 —— 复用全局 SlotPicker(与 Note toolbar 同一套机制,铁律:同功能同逻辑)。
+   * 点击先把本 view 的 open-right-slot 命令注入 slotPickerContext,再弹 SlotPicker popup;
+   * popup 从 viewTypeRegistry 动态列出所有 view(Note/eBook/Web/Graph/Claude/…),
+   * 选中项回调该命令 → bus.slot.openRight。不自造 toggle 逻辑。
+   */
+  const handleOpenSlotPicker = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    slotPickerContext.setCommandId('ai-view.open-right-slot');
+    popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
+  }, []);
+
   if (!wsState) {
     return <div className="krig-ai-view__empty">Workspace 未就绪</div>;
   }
@@ -166,6 +179,15 @@ export function AIView({ workspaceId, payload }: AIViewProps) {
             title="提取整页对话到 Note"
           >
             提取整页对话
+          </button>
+          <button
+            type="button"
+            className="krig-ai-view__tabbar-btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleOpenSlotPicker}
+            title="在右栏打开视图"
+          >
+            ⊞
           </button>
           {isInRightSlot && (
             <button
