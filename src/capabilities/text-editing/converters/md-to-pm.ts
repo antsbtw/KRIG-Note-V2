@@ -31,6 +31,15 @@
 // 同 view 端模式;运行时函数通过 string id 查 registry,charter § 1.2 注册原则路径)
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
+// 阶段 B1:heading/paragraph/hr/codeBlock(fence)/mathBlock/inline 改调唯一解析核
+// markdown-core。② 保留自己的行级 loop + 媒体本地化外壳,非 B1 block(image/list/
+// table/blockquote/attach…)仍走本文件旧逻辑,B2–B4 再逐类迁核。
+import {
+  parseInline as coreParseInline,
+  buildHeadingNode,
+  buildMathBlockNode,
+  tryParseCodeBlock,
+} from '@shared/markdown-core';
 
 function mediaPutBase64(
   ...args: Parameters<MediaStorageApi['mediaPutBase64']>
@@ -127,37 +136,17 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Code block (```) — 按 CommonMark 栏长配对(与 ai-markdown-parser ResultParser 同规则)。
-    // 开栏 N 个 backtick(N≥3);闭栏起始连续 backtick 数须 ≥N。关键:嵌套 fence
-    // (如 ````markdown 里再套 ```mermaid)必须按长度配对,否则内层 ```mermaid 会被误当闭栏
-    // → 产出空 codeBlock + 内容漏成正文(与 AI 提取同款 bug,影响 markdown 导入/网页剪藏)。
-    // 闭栏只看「起始 backtick 数 ≥ 开栏」,不要求整行纯 backtick —— 否则闭栏行带残留
-    // (``` 后跟空格/文字)会从首个 fence 吞到文末(AI 侧踩过的回归)。
-    const openFence = line.trimStart().match(/^(`{3,})/);
-    if (openFence) {
-      const openLen = openFence[1].length;
-      const lang = line.trimStart().slice(openLen).trim().split(/\s+/)[0] ?? '';
-      const isClosingFence = (raw: string): boolean => {
-        const m = raw.trimStart().match(/^(`{3,})/);
-        return m !== null && m[1].length >= openLen;
-      };
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !isClosingFence(lines[i])) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing fence
-      const textContent = codeLines.join('\n');
-      content.push({
-        type: 'codeBlock',
-        attrs: lang ? { language: lang } : undefined,
-        content: textContent ? [{ type: 'text', text: textContent }] : undefined,
-      });
+    // Code block (```) — B1:改调唯一解析核 markdown-core.tryParseCodeBlock。
+    // fence 长度配对规则(嵌套 fence + 闭栏带残留两个坑)固化在核 fence.ts 内。
+    const code = tryParseCodeBlock(lines, i);
+    if (code) {
+      content.push(code.node);
+      i = code.nextIndex;
       continue;
     }
 
-    // Math block ($$...$$) — V2 未实现 mathBlock,但输出目标节点名
+    // Math block ($$...$$) — B1:mathBlock 节点走核 buildMathBlockNode(canonical),
+    // 但 $$ 边界扫描保留 ② 本地逻辑(空内容降级 unknownNode 是 ② 外壳的兜底,非核职责)。
     if (line.trim().startsWith('$$')) {
       const startLine = i;
       const first = line.trim().slice(2);
@@ -166,10 +155,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       if (closeIdx >= 0) {
         const latex = first.slice(0, closeIdx).trim();
         if (latex) {
-          content.push({
-            type: 'mathBlock',
-            content: [{ type: 'text', text: latex }],
-          });
+          content.push(buildMathBlockNode(latex));
         }
         i++;
         continue;
@@ -190,10 +176,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       }
       const latex = buf.join('\n').trim();
       if (latex) {
-        content.push({
-          type: 'mathBlock',
-          content: [{ type: 'text', text: latex }],
-        });
+        content.push(buildMathBlockNode(latex));
       } else {
         // 罕见:`$$...$$` 但内容空
         content.push(unknownNode('mathBlock', lines.slice(startLine, i).join('\n')));
@@ -287,15 +270,10 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Heading (# ~ ######) — V2 用 heading 节点(D2 level 1-6,CommonMark)
+    // Heading (# ~ ######) — B1:改调核 buildHeadingNode(canonical inline)
     const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
     if (headingMatch) {
-      const level = headingMatch[1].length;
-      content.push({
-        type: 'heading',
-        attrs: { level },
-        content: parseInline(headingMatch[2]),
-      });
+      content.push(buildHeadingNode(headingMatch[1].length, headingMatch[2]));
       i++;
       continue;
     }
@@ -466,84 +444,14 @@ function splitCellOnBr(cell: string): string[] {
   return parts.length > 0 ? parts : [cell];
 }
 
-type Mark = NonNullable<PMNode['marks']>[number];
-
-/**
- * 给一组 inline node 叠加一个外层 mark(递归 mark 嵌套用)。
- *
- * - text 节点:把 mark 加进 marks(同 type 已存在则不重复;link 以外层为准不覆盖内层)。
- * - 非 text(如 mathInline):mark 不适用,原样返回。
- *
- * mark 顺序:外层 mark 追加在内层 marks 之后(PM 不依赖 marks 顺序,渲染等价)。
- */
-function applyMark(nodes: PMNode[], mark: Mark): PMNode[] {
-  return nodes.map((n) => {
-    if (n.type !== 'text') return n;
-    const existing = n.marks ?? [];
-    if (existing.some((m) => m.type === mark.type)) return n; // 同类型不重复叠
-    return { ...n, marks: [...existing, mark] };
-  });
-}
-
 /**
  * 解析 inline:bold / italic / strike / code / link / inline math
  *
- * **支持 mark 嵌套**(2026-06:网页剪藏暴露 Defuddle 输出 `[**X**](url)` /
- * `**[X](url)**` 这类 link↔bold 互套)。算法:匹配到一个 mark 分隔符后,**递归**
- * 解析其内部文本,再把当前 mark 叠加到每个子 node 上 → 任意层嵌套都正确展开。
- * code(代码内容字面)与 mathInline(节点,非 mark)为叶子,不再递归。
- *
- * V2 已实现 marks:bold / italic / code / link / underline / strike / highlight
- * V2 未实现 inline node:mathInline → 输出 `{ type: 'mathInline', ... }`(等待 schema 补齐)
+ * B1:实现已上收到唯一解析核 `@shared/markdown-core`(递归 mark 嵌套 + strike),
+ * 本文件保留同名薄封装,call site(paragraph/list/task/table cell)不变。
  */
 function parseInline(text: string): PMNode[] {
-  if (!text || !text.trim()) return [];
-
-  const nodes: PMNode[] = [];
-  const regex =
-    /(\*\*([\s\S]+?)\*\*|~~([\s\S]+?)~~|\*([^\*\n]+?)\*|`([^`\n]+?)`|\[([^\]]+)\]\(([^)]+)\)|\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$)/g;
-
-  let lastIndex = 0;
-  let match;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push({ type: 'text', text: text.slice(lastIndex, match.index) });
-    }
-
-    if (match[2] !== undefined) {
-      // **bold** — 递归解析内部(可含 link / italic / …),叠 bold
-      nodes.push(...applyMark(parseInline(match[2]), { type: 'bold' }));
-    } else if (match[3] !== undefined) {
-      // ~~strike~~
-      nodes.push(...applyMark(parseInline(match[3]), { type: 'strike' }));
-    } else if (match[4] !== undefined) {
-      // *italic*
-      nodes.push(...applyMark(parseInline(match[4]), { type: 'italic' }));
-    } else if (match[5] !== undefined) {
-      // `code` — 内容字面,叶子(不递归)
-      nodes.push({ type: 'text', text: match[5], marks: [{ type: 'code' }] });
-    } else if (match[6] && match[7]) {
-      // [text](url) — 递归解析链接文字(可含 **bold** / *italic*),叠 link
-      nodes.push(
-        ...applyMark(parseInline(match[6]), {
-          type: 'link',
-          attrs: { href: match[7] },
-        }),
-      );
-    } else if (match[8] !== undefined) {
-      // V2 schema 未实现 mathInline → 输出目标节点名,等 schema 补齐
-      nodes.push({ type: 'mathInline', attrs: { latex: match[8] } });
-    }
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push({ type: 'text', text: text.slice(lastIndex) });
-  }
-
-  return nodes.length > 0 ? nodes : [{ type: 'text', text }];
+  return coreParseInline(text) as PMNode[];
 }
 
 /** PM image src 解析:base64 → mediaPutBase64;其他原样 */

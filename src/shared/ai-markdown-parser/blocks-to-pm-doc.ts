@@ -38,6 +38,15 @@ import type {
   ExtractedInline,
   ExtractedListItem,
 } from './extraction-types';
+// 阶段 B1:heading/paragraph/hr/code/math 的 PMNode 构造改调唯一解析核 markdown-core
+// 的 canonical 构造器(B1 拍板:① 也吃规范形 —— inline 升级为递归嵌套 + strike,
+// codeBlock/mathBlock 形态与 ② 对齐)。非 B1 block(callout/list/table/image/…)不动。
+import {
+  buildHeadingNode,
+  buildParagraphNode,
+  buildCodeBlockNode,
+  buildMathBlockNode,
+} from '@shared/markdown-core';
 
 // ProseMirror JSON 节点形式(纯数据,不依赖 prosemirror-model)
 interface PMTextNode {
@@ -84,11 +93,12 @@ export function extractedBlocksToPmDoc(blocks: ExtractedBlock[]): PMDoc {
 function blockToNodes(block: ExtractedBlock): PMNode[] {
   switch (block.type) {
     case 'heading':
+      // B1:heading 走核 buildHeadingNode。level 仍经 clampLevel(核不 clamp,
+      // ① 侧 headingLevel 来源为 markdown `#` 数已 1-6,clamp 保持历史兜底)。
+      // content 用 canonical inline(核对 block.text 重解析,升级为递归嵌套 + strike)。
       return [
         {
-          type: 'heading',
-          attrs: { level: clampLevel(block.headingLevel) },
-          content: inlinesToContent(block.inlines, block.text),
+          ...buildHeadingNode(clampLevel(block.headingLevel), block.text || ''),
         },
       ];
 
@@ -99,12 +109,8 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
       if (block.tag === 'hr') {
         return [{ type: 'horizontalRule' }];
       }
-      return [
-        {
-          type: 'paragraph',
-          content: inlinesToContent(block.inlines, block.text),
-        },
-      ];
+      // B1:paragraph 走核 buildParagraphNode(canonical inline)。
+      return [{ ...buildParagraphNode(block.text || '') }];
 
     case 'blockquote':
       return [
@@ -135,30 +141,19 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
         },
       ];
 
-    case 'code': {
-      const text = block.text || '';
-      return [
-        {
-          type: 'codeBlock',
-          attrs: { language: block.language || '' },
-          // codeBlock content 是 text*,直接放 text node(empty 时不放 content,避免 PM 报错)
-          ...(text.length > 0
-            ? { content: [{ type: 'text', text } as PMTextNode] }
-            : {}),
-        },
-      ];
-    }
+    case 'code':
+      // B1:codeBlock 走核 buildCodeBlockNode(canonical:有 lang 才带 attrs,
+      // 空内容省 content)。注:① 侧 codeTitle 目前 blocks-to-pm-doc 本就丢弃,B1 不变。
+      return [{ ...buildCodeBlockNode(block.language || '', block.text || '') }];
 
     case 'math': {
+      // B1:mathBlock 走核 buildMathBlockNode(canonical:content=[text])。
+      // 保留 ① 历史行为:空 latex 时不产 content(核恒带,故空 latex 单独兜底)。
       const latex = block.text || '';
-      return [
-        {
-          type: 'mathBlock',
-          ...(latex.length > 0
-            ? { content: [{ type: 'text', text: latex } as PMTextNode] }
-            : {}),
-        },
-      ];
+      if (latex.length === 0) {
+        return [{ type: 'mathBlock' }];
+      }
+      return [{ ...buildMathBlockNode(latex) }];
     }
 
     case 'image':
