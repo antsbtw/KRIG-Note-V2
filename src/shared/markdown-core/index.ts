@@ -37,6 +37,14 @@ export {
   buildMathBlockNode,
   tryParseCodeBlock,
 } from './blocks';
+// 阶段 B2：table + callout canonical 构造器（①② 都调）。
+export {
+  CALLOUT_EMOJI_MAP,
+  calloutEmojiFor,
+  buildCalloutNode,
+  buildTableNode,
+  splitCellOnBr,
+} from './table-callout';
 
 /**
  * markdown → canonical PMNode[]（B1 覆盖范围内规范解析，其余产 uncovered 哨兵）。

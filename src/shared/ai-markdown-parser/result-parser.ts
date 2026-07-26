@@ -1,4 +1,6 @@
 import type { ExtractedBlock, ExtractedInline, ExtractedListItem } from './extraction-types';
+// 阶段 B2:callout emoji 映射上收到唯一解析核 markdown-core(①② 共用同一张表)。
+import { calloutEmojiFor } from '@shared/markdown-core';
 
 /**
  * ResultParser — parses AI response text into ExtractedBlock[].
@@ -172,7 +174,7 @@ export class ResultParser {
             headingLevel: 0,
             inlines: this.parseInlineMarkdown(bodyText),
             calloutType,
-            calloutEmoji: ResultParser.CALLOUT_EMOJI_MAP[calloutType] || '💡',
+            calloutEmoji: calloutEmojiFor(calloutType),
           });
           i++;
           continue;
@@ -926,16 +928,6 @@ export class ResultParser {
 
   // ── Media tag parsing (iframe/video/audio) ──
 
-  /** Callout type → emoji mapping */
-  private static CALLOUT_EMOJI_MAP: Record<string, string> = {
-    note: '📝', info: 'ℹ️', tip: '💡', hint: '💡',
-    warning: '⚠️', caution: '⚠️', danger: '🔴', error: '❌',
-    success: '✅', check: '✅', example: '📋', quote: '💬',
-    bug: '🐛', abstract: '📄', summary: '📄', tldr: '📄',
-    question: '❓', faq: '❓', failure: '❌', fail: '❌',
-    important: '🔥',
-  };
-
   /** iframe src 必须是 https:// 协议（安全性兜底，不再维护域名白名单） */
   private static isValidIframeSrc(url: string): boolean {
     return url.startsWith('https://');
@@ -1053,7 +1045,7 @@ export class ResultParser {
 
     const bodyText = contentLines.join('\n').trim();
     const type = calloutType.toLowerCase();
-    const emoji = ResultParser.CALLOUT_EMOJI_MAP[type] || '💡';
+    const emoji = calloutEmojiFor(type);
 
     return {
       block: {

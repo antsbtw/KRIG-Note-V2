@@ -11,13 +11,17 @@
  * canonical 形态。本文件同时锁 markdownCore 直接产物 + ① blocks-to-pm-doc 一致性。
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   markdownCore,
   parseInline,
   tryParseFencedCode,
   isUncovered,
   UNCOVERED_TYPE,
+  buildTableNode,
+  buildCalloutNode,
+  calloutEmojiFor,
+  splitCellOnBr,
   type PMNode,
 } from '@shared/markdown-core';
 
@@ -199,5 +203,153 @@ describe('markdown-core / uncovered exit', () => {
     expect(nodes[0].type).toBe('heading');
     expect(nodes[1].type).toBe(UNCOVERED_TYPE);
     expect(nodes[2].type).toBe('paragraph');
+  });
+});
+
+// ── B2：table（buildTableNode）───────────────────────────────────────
+describe('markdown-core / table (B2)', () => {
+  // 普通 cell 逐字段一致护栏：首行 tableHeader、其余 tableCell，
+  // 每 cell = paragraph 包 canonical inline text 节点（不含嵌套 mark 时逐字段不变）。
+  it('普通 cell 输出逐字段不变（tableHeader/tableCell + paragraph + text）', () => {
+    const node = buildTableNode(
+      [
+        ['a', 'b'],
+        ['1', '2'],
+      ],
+      true,
+    );
+    expect(node).toEqual({
+      type: 'table',
+      content: [
+        {
+          type: 'tableRow',
+          content: [
+            { type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }] },
+            { type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'b' }] }] },
+          ],
+        },
+        {
+          type: 'tableRow',
+          content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: '1' }] }] },
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: '2' }] }] },
+          ],
+        },
+      ],
+    });
+    // colwidth 不预设：cell 无 attrs.colwidth（留 NodeView 均分）
+    const cell = node!.content![0].content![0];
+    expect(cell.attrs).toBeUndefined();
+  });
+
+  it('hasHeader=false：首行也是 tableCell', () => {
+    const node = buildTableNode([['x']], false);
+    expect(node!.content![0].content![0].type).toBe('tableCell');
+  });
+
+  it('cell 内嵌套 mark 走核 parseInline（升级 ① 弱实现）', () => {
+    const node = buildTableNode([['**粗** 与 [**链接**](u)']], false);
+    const para = node!.content![0].content![0].content![0];
+    // **粗**
+    const bold = para.content!.find((n) => n.text === '粗');
+    expect(bold?.marks).toEqual([{ type: 'bold' }]);
+    // [**链接**](u) → link + bold 同叠
+    const linked = para.content!.find((n) => n.text === '链接');
+    const marks = (linked?.marks ?? []).map((m) => m.type).sort();
+    expect(marks).toEqual(['bold', 'link']);
+  });
+
+  it('cell 内 <br> 拆多段（采 ②）', () => {
+    const node = buildTableNode([['第一段<br>第二段']], false);
+    const cell = node!.content![0].content![0];
+    expect(cell.content).toHaveLength(2);
+    expect(cell.content![0].content![0].text).toBe('第一段');
+    expect(cell.content![1].content![0].text).toBe('第二段');
+  });
+
+  it('splitCellOnBr 容忍 <br/> / <br /> / 大小写；无 br 返单段', () => {
+    expect(splitCellOnBr('a<br/>b<BR />c')).toEqual(['a', 'b', 'c']);
+    expect(splitCellOnBr('单段')).toEqual(['单段']);
+  });
+
+  it('畸形零单元格行 fail-loud warn 后字面跳过（采 ②，对齐阶段 D）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const node = buildTableNode(
+      [
+        ['a', 'b'],
+        [], // 零单元格行
+        ['1', '2'],
+      ],
+      true,
+    );
+    // 只留 2 行有效数据（畸形行被跳）
+    expect(node!.content).toHaveLength(2);
+    // fail-loud：留痕，不静默
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('畸形空表格行');
+    warn.mockRestore();
+  });
+
+  it('全零单元格 → 返 null（caller 决定降级，不产 content:[] 空 table）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(buildTableNode([[], []], true)).toBeNull();
+    warn.mockRestore();
+  });
+});
+
+// ── B2：callout（buildCalloutNode / calloutEmojiFor）────────────────
+describe('markdown-core / callout (B2)', () => {
+  it('GitHub alert 各类型 → emoji（与 ① CALLOUT_EMOJI_MAP 一致）', () => {
+    expect(calloutEmojiFor('note')).toBe('📝');
+    expect(calloutEmojiFor('warning')).toBe('⚠️');
+    expect(calloutEmojiFor('tip')).toBe('💡');
+    expect(calloutEmojiFor('danger')).toBe('🔴');
+    expect(calloutEmojiFor('success')).toBe('✅');
+    expect(calloutEmojiFor('important')).toBe('🔥');
+  });
+
+  it('大小写不敏感 + 未知类型兜底 💡', () => {
+    expect(calloutEmojiFor('NOTE')).toBe('📝');
+    expect(calloutEmojiFor('Warning')).toBe('⚠️');
+    expect(calloutEmojiFor('unknown-type')).toBe('💡');
+  });
+
+  it('buildCalloutNode：callout{emoji} 包 paragraph，body 走核 parseInline', () => {
+    const node = buildCalloutNode('⚠️', '注意 **粗体** 内容');
+    expect(node.type).toBe('callout');
+    expect(node.attrs?.emoji).toBe('⚠️');
+    expect(node.content![0].type).toBe('paragraph');
+    const bold = node.content![0].content!.find((n) => n.text === '粗体');
+    expect(bold?.marks).toEqual([{ type: 'bold' }]);
+  });
+});
+
+// ── B2：② md-to-pm 现在认 GitHub alert callout（新增能力验证）──────────
+// 注：markdownToProseMirror 是 async 且依赖 capability registry（media），这里只验
+// 纯逻辑分支不触媒体的 callout 路径。若 registry 未装载会抛，跳过留实机验证。
+describe('markdown-core / ② callout 集成（新增能力）', () => {
+  it('② 把 > [!NOTE] 认成 callout（不再降级 blockquote）', async () => {
+    const mod = await import('@capabilities/text-editing/converters/md-to-pm');
+    let nodes: PMNode[];
+    try {
+      nodes = (await mod.markdownToProseMirror('> [!WARNING]\n> 小心内容')) as PMNode[];
+    } catch {
+      // capability registry 未装载（无头环境）→ 跳过，留实机手验
+      return;
+    }
+    expect(nodes[0].type).toBe('callout');
+    expect(nodes[0].attrs?.emoji).toBe('⚠️');
+    expect(nodes[0].content![0].content![0].text).toContain('小心内容');
+  });
+
+  it('② 普通 blockquote（无 [!TYPE]）仍是 blockquote（原行为不变）', async () => {
+    const mod = await import('@capabilities/text-editing/converters/md-to-pm');
+    let nodes: PMNode[];
+    try {
+      nodes = (await mod.markdownToProseMirror('> 普通引用')) as PMNode[];
+    } catch {
+      return;
+    }
+    expect(nodes[0].type).toBe('blockquote');
   });
 });

@@ -39,6 +39,9 @@ import {
   buildHeadingNode,
   buildMathBlockNode,
   tryParseCodeBlock,
+  buildTableNode,
+  buildCalloutNode,
+  calloutEmojiFor,
 } from '@shared/markdown-core';
 
 function mediaPutBase64(
@@ -285,7 +288,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Blockquote
+    // Blockquote（含 GitHub-style callout `> [!NOTE]` 识别）
     if (line.trimStart().startsWith('> ')) {
       const quoteLines: string[] = [];
       while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
@@ -295,6 +298,15 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
         // markdownToAtoms 吞成 warning 产空 note(2026-06-30 relay-design-v2.md 导入空白根因)。
         quoteLines.push(lines[i].replace(/^\s*>\s?/, ''));
         i++;
+      }
+      // B2:GitHub alert `> [!NOTE]`/`> [!WARNING]`… 首行单独一个 `[!TYPE]` → callout
+      //（改调核 buildCalloutNode + calloutEmojiFor）。② 以前当普通 blockquote,现在认 callout
+      // 是新增能力(非回归)。首行不是 alert 标记则仍走 blockquote(原行为不变)。
+      const ghCalloutMatch = quoteLines[0]?.match(/^\[!(\w+)\]\s*$/);
+      if (ghCalloutMatch) {
+        const bodyText = quoteLines.slice(1).join('\n').trim();
+        content.push(buildCalloutNode(calloutEmojiFor(ghCalloutMatch[1]), bodyText));
+        continue;
       }
       const innerContent = await markdownToProseMirror(quoteLines.join('\n'));
       content.push({
@@ -359,11 +371,13 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       continue;
     }
 
-    // Table (| ... |) — V2 schema 已实现(L5-B3.7),直接 emit 完整嵌套结构
+    // Table (| ... |) — B2:cell → PM 结构改调唯一解析核 buildTableNode(canonical:
+    // cell inline 走核 parseInline 递归嵌套 + strike、<br> 拆段、畸形零单元格行 fail-loud
+    // warn、colwidth 留 null 由 NodeView 均分)。② 只保留行级定位(收集 `|` 行 + 跳分隔行 +
+    // 切 cell),把 string[][] 交核构造;空 table 降级 unknown 仍是 ② 外壳兜底。
     if (line.trimStart().startsWith('|')) {
       const startLine = i;
-      const tableRows: PMNode[] = [];
-      let isFirst = true;
+      const rows: string[][] = [];
       while (i < lines.length && lines[i].trimStart().startsWith('|')) {
         const row = lines[i].trim();
         // Skip separator row (|---|---|)
@@ -371,51 +385,19 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
           i++;
           continue;
         }
-        const cells = row
-          .split('|')
-          .filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)
-          .map((c) => c.trim());
-        // 零单元格行(畸形 `||` / Word→md 退化行)字面跳过 — 否则产出
-        // content:[] 的 tableRow,违反 schema `(tableCell|tableHeader)+`,
-        // 落库后打开 note 时 setNodeMarkup 重校验抛 "Invalid content for node type
-        // table/tableRow" 致编辑器崩溃(2026-05-29 长 docx 导入崩溃根因)。
-        if (cells.length === 0) {
-          // fail-loud 留痕:跳过本身是对的(防 schema 崩溃),但不能静默 —
-          // 长文档导入时表格行数对不上需能诊断「哪几行被丢了」。
-          console.warn(
-            `[md-to-pm] 跳过畸形空表格行 @行 ${i}(cells.length===0,防 schema 崩溃;数据行数会少一行)`
-          );
-          i++;
-          continue;
-        }
-        const cellType = isFirst ? 'tableHeader' : 'tableCell';
-        // colwidth 不预设(留 null)—— 与 PDF/JSON 导入统一为「纯导入态」,
-        // 由 table NodeView 挂载时 fillWidthIfImported 按编辑区宽度均分各列
-        // (2026-06-09:导入 table 默认占满 view 宽度的设计要求,覆盖所有导入源)。
-        //
-        // 历史(2026-05-28):曾写死 colwidth:[120] 防 table-layout:fixed 退化成单列
-        // (pandoc 10 列大表只渲染序号一列)—— 那是 colgroup 未同步的旧 bug,已由
-        // node-view syncColgroup 根治;现在无 colwidth 也会被 fillWidth 均分+同步,不退化。
-        tableRows.push({
-          type: 'tableRow',
-          content: cells.map((cell) => ({
-            type: cellType,
-            // cell 内允许 <br> 拆多段(2026-05-28 反馈:Word 导入硬件规格表
-            //  cell 多段被压一行;word-import converter 已用 <br> 替换段间)。
-            //  GFM 表格语法本身 cell 只能单行,<br> 是 V2 双方约定。
-            content: splitCellOnBr(cell).map((seg) => ({
-              type: 'paragraph',
-              content: parseInline(seg),
-            })),
-          })),
-        });
-        isFirst = false;
+        rows.push(
+          row
+            .split('|')
+            .filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)
+            .map((c) => c.trim()),
+        );
         i++;
       }
-      // 仅当至少有一行(且经上面过滤后必有 cell)才产 table;否则降级 unknown,
-      // 不产空 table(content:[] 违反 schema `tableRow+`)。
-      if (tableRows.length > 0) {
-        content.push({ type: 'table', content: tableRows });
+      // ② 历史语义:首个非分隔行恒为 header(hasHeader=true);buildTableNode 内做
+      // 零单元格行 fail-loud warn + 跳过,全跳空则返 null → 降级 unknown(不产空 table)。
+      const tableNode = buildTableNode(rows, true);
+      if (tableNode) {
+        content.push(tableNode);
       } else {
         content.push(unknownNode('table', lines.slice(startLine, i).join('\n')));
       }
@@ -431,17 +413,6 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
   }
 
   return content;
-}
-
-/**
- * 拆 table cell 文本中的 <br> 为多段(2026-05-28 反馈)
- *
- * 容忍:<br> / <br/> / <br /> / <BR> / 大小写混合,跨多 br 视为一次切断。
- * 不命中任何 br → 返单段(保持原行为)。
- */
-function splitCellOnBr(cell: string): string[] {
-  const parts = cell.split(/<br\s*\/?\s*>/i).map((s) => s.trim()).filter(Boolean);
-  return parts.length > 0 ? parts : [cell];
 }
 
 /**
