@@ -177,27 +177,52 @@ interface PmAtomDraft {
 
 ### 6.0 全局分层总图（所有路径的汇聚真相）
 
-```
-┌─ 源专属外壳（各不相同，不可抽象：爬虫/API/docx/Defuddle/文件树）─────────────────┐
-│  AI extractor（爬虫注入/API）  word convert（mammoth/pandoc→md）  Defuddle 剪藏  文件读取/folder树  │
-└───────────────────────────────┬──────────────────────────────────────────────┘
-                                 ▼  各自产出 markdown string（或 V1Atom[]）
-┌─ 解析层（碎片化震中：markdown→PMNode[] 有两套 ①②）───────────────────────────┐
-│  ① ResultParser+blocks-to-pm-doc（AI）    ② markdownToProseMirror（导入）    ④ atomsToProseMirror（PDF，输入是 V1Atom[]）  │
-└───────────────────────────────┬──────────────────────────────────────────────┘
-                                 ▼  PMNode[]   ← ★收敛点★
-┌─ 中间层（已统一，markdown+PDF 共用）──────────────────────────────────────────┐
-│  pmNodeToDrafts（PMNode[]→PmAtomDraft[]，含 tableAdapter）  ／  wrapAITurnsInToggle（AI 侧另一分叉，PMNode[]→append）  │
-└───────────────────────────────┬──────────────────────────────────────────────┘
-              ┌──────────────────┴───────────────────┐
-              ▼ PmAtomDraft[]                          ▼ PMNode[]
-┌─ 落库层（完全统一，硬不变量单点收口）──────┐   ┌─ 插入层（editor）──────────────┐
-│ createNotesBatch → createSingleNoteFromDrafts │   │ insertNodesAtCursorOrEnd/AtEnd │
-│  · enforceSingleTitleInDrafts（单标题）       │   │  · injectBlockIdsIntoJson（补id） │
-│  · tmpId→realId 映射 / parentTmpId 解析       │   │  · dispatch → onChange → updateNote │
-│  · attrs 注入 id/noteId/parentId/order（零边） │   │    · ensureBlockIds（兜底补id）   │
-│  · 单事务原子性 · broadcastNoteListChanged    │   │    · enforceSingleTitleInDoc     │
-└───────────────────────────────────────────┘   └───────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph shell["源专属外壳（各不相同 · 不可抽象：爬虫/API/docx/Defuddle/文件树）"]
+    direction LR
+    aiE["AI extractor<br/>(爬虫/API)"]
+    wordE["word convert<br/>(mammoth/pandoc→md)"]
+    defE["Defuddle 剪藏"]
+    fileE["文件读取 / folder 树"]
+  end
+
+  subgraph parse["解析层（碎片化震中 · markdown→PMNode[] 有两套 ①②）"]
+    direction LR
+    p1["① ResultParser<br/>+ blocks-to-pm-doc（AI）"]
+    p2["② markdownToProseMirror（导入）"]
+    p4["④ atomsToProseMirror<br/>（PDF，输入 V1Atom[]）"]
+  end
+
+  pmnodes(["PMNode[] ★收敛点★"])
+
+  subgraph mid["中间层（已统一 · markdown+PDF 共用）"]
+    direction LR
+    p2d["pmNodeToDrafts<br/>（+ tableAdapter）"]
+    wrap["wrapAITurnsInToggle<br/>（AI 分叉）"]
+  end
+
+  subgraph store["落库层（完全统一 · 硬不变量单点收口）"]
+    batch["createNotesBatch → createSingleNoteFromDrafts<br/>· enforceSingleTitleInDrafts（单标题）<br/>· tmpId→realId / parentTmpId 解析<br/>· attrs 注入 id/noteId/parentId/order（零边）<br/>· 单事务原子性 · broadcastNoteListChanged"]
+  end
+
+  subgraph insert["插入层（editor）"]
+    ins["insertNodesAtCursorOrEnd/AtEnd<br/>· injectBlockIdsIntoJson（补id）<br/>· dispatch → onChange → updateNote<br/>· ensureBlockIds（兜底）· enforceSingleTitleInDoc"]
+  end
+
+  shell -->|"markdown string（或 V1Atom[]）"| parse
+  parse --> pmnodes
+  pmnodes --> p2d
+  pmnodes --> wrap
+  p2d -->|"PmAtomDraft[]"| batch
+  wrap -->|"PMNode[]"| ins
+
+  classDef frag fill:#5a2a2a,stroke:#c0392b,color:#fff;
+  classDef pivot fill:#1f3a5f,stroke:#2980b9,color:#fff;
+  classDef ok fill:#234d20,stroke:#27ae60,color:#fff;
+  class p1,p2 frag;
+  class pmnodes pivot;
+  class p2d,wrap,batch,ins ok;
 ```
 
 **三条铁律级结论**：
@@ -282,17 +307,23 @@ interface PmAtomDraft {
 
 ## 收敛总目标与总数据流（目标态）
 
-```
-目标数据流（唯一解析核 markdownCore 产 PMNode[]，下游已统一）：
+目标数据流（唯一解析核 `markdownCore` 产 `PMNode[]`，下游已统一）：
 
-  AI markdown ──[AI前处理: LaTeX标准化/widget清理]──┐
-  文件/剪藏/Word markdown ──────────────────────────┼──> markdownCore(md): PMNode[]  ← 唯一真源，超集，契约测试护栏
-  PDF V1Atom[] ──atomsToProseMirror──> PMNode[] ────┘（PDF 仍走 atoms→PMNode，不经 markdownCore）
-                                                          │
-                        ┌─────────────────────────────────┼──────────────────────────────┐
-             ①外壳: wrapAITurnsInToggle              ②外壳: 媒体本地化(base64→media://,async) + pmNodeToDrafts
-                        │                                                                 │
-                append-pm-nodes（插活跃 note）                            createNotesBatch（新建 note，经统一编排入口 C）
+```mermaid
+flowchart TB
+  aiMd["AI markdown"] -->|"AI前处理: LaTeX标准化/widget清理"| core
+  fileMd["文件 / 剪藏 / Word markdown"] --> core
+  core(["markdownCore(md): PMNode[]<br/>★唯一真源 · 超集 · 契约测试护栏★"])
+  pdfAtom["PDF V1Atom[]"] -->|"atomsToProseMirror<br/>(不经 markdownCore)"| pmnodes["PMNode[]"]
+  core --> pmnodes
+
+  pmnodes -->|"①外壳: wrapAITurnsInToggle"| append["append-pm-nodes<br/>（插活跃 note）"]
+  pmnodes -->|"②外壳: 媒体本地化 base64→media:// (async)<br/>+ pmNodeToDrafts"| batch["createNotesBatch<br/>（新建 note，经统一编排入口 C）"]
+
+  classDef pivot fill:#1f3a5f,stroke:#2980b9,color:#fff;
+  classDef ok fill:#234d20,stroke:#27ae60,color:#fff;
+  class core pivot;
+  class append,batch ok;
 ```
 
 **分层原则**：
