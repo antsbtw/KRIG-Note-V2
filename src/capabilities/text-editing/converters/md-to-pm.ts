@@ -402,6 +402,11 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
         // 落库后打开 note 时 setNodeMarkup 重校验抛 "Invalid content for node type
         // table/tableRow" 致编辑器崩溃(2026-05-29 长 docx 导入崩溃根因)。
         if (cells.length === 0) {
+          // fail-loud 留痕:跳过本身是对的(防 schema 崩溃),但不能静默 —
+          // 长文档导入时表格行数对不上需能诊断「哪几行被丢了」。
+          console.warn(
+            `[md-to-pm] 跳过畸形空表格行 @行 ${i}(cells.length===0,防 schema 崩溃;数据行数会少一行)`
+          );
           i++;
           continue;
         }
