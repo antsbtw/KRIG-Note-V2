@@ -49,6 +49,20 @@ import {
   tryParseMediaTag,
   tryParseObsidianVideoEmbed,
 } from '@shared/markdown-core';
+// B3 修复:核 buildVideoNode 产 embedType=null(核在 shared,禁止反向 import drivers 的
+// detectEmbedType);而 video NodeView 的 play-tab 只读 attrs.embedType、不 mount 时重新
+// 推断 → 导入的 video 恒落 null → 「暂不支持的视频源(Phase D)」。② 外壳(在 drivers 可 import
+// 层)对核产的 videoBlock 补一次 detectEmbedType,填好 embedType 再落库。detectEmbedType
+// 是纯正则、零副作用,不重复正则、不破核纯度。
+import { detectEmbedType } from '@drivers/text-editing-driver/blocks/video-block/helpers/embed-detection';
+
+/** 给核产的 videoBlock 补 embedType(核留 null → NodeView 不推断 → 暂不支持) */
+function fillVideoEmbedType(node: PMNode): PMNode {
+  if (node.type !== 'videoBlock') return node;
+  const src = node.attrs?.src as string | undefined;
+  if (!src || node.attrs?.embedType) return node;
+  return { ...node, attrs: { ...node.attrs, embedType: detectEmbedType(src) } };
+}
 
 function mediaPutBase64(
   ...args: Parameters<MediaStorageApi['mediaPutBase64']>
@@ -282,7 +296,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     // Obsidian embed ![[videoId]] → YouTube videoBlock — B3:改调核(② 新增能力)。
     const obsidianVideo = tryParseObsidianVideoEmbed(line);
     if (obsidianVideo) {
-      content.push(obsidianVideo);
+      content.push(fillVideoEmbedType(obsidianVideo));
       i++;
       continue;
     }
@@ -291,7 +305,7 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     // (src 原样,② 新增能力)。iframe 非 https / 无 src 返 null → 落默认 paragraph。
     const mediaNode = tryParseMediaTag(line.trim());
     if (mediaNode) {
-      content.push(mediaNode);
+      content.push(fillVideoEmbedType(mediaNode));
       i++;
       continue;
     }

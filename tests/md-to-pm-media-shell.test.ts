@@ -72,23 +72,28 @@ describe('B3 外壳 / ② 新增媒体能力（video/audio/htmlBlock/obsidian）
     expect(nodes[0].attrs).toEqual({ src: 'media://h1', title: '图表' });
   });
 
-  it('<iframe https> → videoBlock', async () => {
-    const nodes = await markdownToProseMirror('<iframe src="https://youtube.com/embed/x" title="片"></iframe>');
+  it('<iframe https> → videoBlock（embedType 已填,非 null）', async () => {
+    const nodes = await markdownToProseMirror('<iframe src="https://www.youtube.com/watch?v=42pCODxsB5k" title="片"></iframe>');
     expect(nodes[0].type).toBe('videoBlock');
-    expect(nodes[0].attrs?.src).toBe('https://youtube.com/embed/x');
+    expect(nodes[0].attrs?.src).toBe('https://www.youtube.com/watch?v=42pCODxsB5k');
+    // 回归红线:② 外壳必须补 embedType,否则 play-tab 只读 attrs.embedType=null →
+    // 「暂不支持的视频源(Phase D)」。核留 null 靠 NodeView 推断的假设是错的(它不推断)。
+    expect(nodes[0].attrs?.embedType).toBe('youtube');
   });
 
-  it('<video>/<audio> → video/audioBlock', async () => {
+  it('<video>/<audio> → video/audioBlock（video embedType=direct）', async () => {
     const v = await markdownToProseMirror('<video src="media://v" data-duration="90"></video>');
     expect(v[0].type).toBe('videoBlock');
     expect(v[0].attrs?.duration).toBe(90);
+    expect(v[0].attrs?.embedType).toBe('direct'); // media:// → direct
     const a = await markdownToProseMirror('<audio src="media://a"></audio>');
     expect(a[0].type).toBe('audioBlock');
   });
 
-  it('Obsidian ![[id]] → YouTube videoBlock', async () => {
+  it('Obsidian ![[id]] → YouTube videoBlock（embedType=youtube 非 null）', async () => {
     const nodes = await markdownToProseMirror('![[dQw4w9WgXcQ]]');
     expect(nodes[0].type).toBe('videoBlock');
     expect(String(nodes[0].attrs?.src)).toContain('dQw4w9WgXcQ');
+    expect(nodes[0].attrs?.embedType).toBe('youtube'); // 回归红线,同上
   });
 });
