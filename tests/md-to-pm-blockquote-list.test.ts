@@ -52,6 +52,23 @@ describe('B4a ② blockquote（递归任意 block）', () => {
     const nodes = await markdownToProseMirror('> [!WARNING]\n> 小心');
     expect(nodes[0].type).toBe('callout');
   });
+
+  it('空 `>` 行分隔的多 block 引用不被截断（回归：CommonMark 引用内段落分隔）', async () => {
+    // 既有缺陷(B4a 一并修):收集条件曾要求 `> `(带空格),空引用行 `>` 被漏 → 截断
+    // blockquote → 内嵌块用空 `>` 行分隔却分隔不了。放宽到 `>` 开头后,整段收进一个
+    // blockquote,内层递归出「段落 + 图」两个子块,图仍本地化 media://。
+    const md = '> 引用里嵌一张图：\n>\n> ![点](data:image/png;base64,AAAA)';
+    const nodes = await markdownToProseMirror(md);
+    // 只产 1 个 blockquote(不被空 > 行截断成多块 / 孤立 `>` 段落)
+    expect(nodes.length).toBe(1);
+    expect(nodes[0].type).toBe('blockquote');
+    // 引用内既有段落又有图(空行正确变段落分隔)
+    const inner = nodes[0].content!;
+    expect(inner.some((n) => n.type === 'paragraph')).toBe(true);
+    const img = inner.find((n) => n.type === 'image');
+    expect(img).toBeTruthy();
+    expect(String(img?.attrs?.src)).toMatch(/^media:\/\//); // 嵌套图仍本地化
+  });
 });
 
 describe('B4a ② list（普通单行不变 + task 不变）', () => {

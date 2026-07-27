@@ -338,9 +338,14 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     // 节点走核 buildBlockquoteNode;**内容递归仍调 markdownToProseMirror（async）**留外壳,
     // 保住嵌套媒体本地化(blockquote 内 image → media://)。核不递归、不碰 async(见
     // blockquote-list.ts 分层注)。
-    if (line.trimStart().startsWith('> ')) {
+    // 收集条件放宽到「`>` 开头」(不再要求 `> ` 带空格) —— 空引用行 `>`(CommonMark
+    // 合法的引用内段落分隔)以前被 startsWith('> ') 漏掉 → 截断 blockquote,内嵌块要用
+    // 空 `>` 行分隔却分隔不了,B4a 的 blockquote 递归内嵌 code/math/image 形同虚设。
+    // (① result-parser 的 /^>\s*/ 本就宽松、无此 bug;此为 ② 既有缺陷,B4a 一并修。)
+    // stripBlockquotePrefix 的 /^\s*>\s?/ 对 `>` / `> ` / `>text` 都正确剥前缀。
+    if (line.trimStart().startsWith('>')) {
       const quoteLines: string[] = [];
-      while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
+      while (i < lines.length && lines[i].trimStart().startsWith('>')) {
         // 剥引用前缀走核容错逻辑(trimStart 容忍缩进 + `>\s?` —— 防 relay-design-v2 栈溢出)。
         quoteLines.push(stripBlockquotePrefix(lines[i]));
         i++;
