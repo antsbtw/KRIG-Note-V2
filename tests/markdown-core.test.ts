@@ -31,6 +31,14 @@ import {
   buildExternalRefNode,
   tryParseMediaTag,
   tryParseObsidianVideoEmbed,
+  stripBlockquotePrefix,
+  buildBlockquoteNode,
+  classifyListLine,
+  buildListItemNode,
+  buildBulletListNode,
+  buildOrderedListNode,
+  buildTaskItemNode,
+  buildTaskListNode,
   type PMNode,
 } from '@shared/markdown-core';
 
@@ -471,5 +479,73 @@ describe('markdown-core / HTML 媒体标签解析 (B3)', () => {
     expect(node?.type).toBe('videoBlock');
     expect(node?.attrs?.src).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     expect(tryParseObsidianVideoEmbed('![[短]]')).toBeNull(); // < 6 位不算
+  });
+});
+
+// ── B4a：blockquote / list —— 核纯 sync 构造器 + 标记分类 ───────────────
+describe('markdown-core / blockquote (B4a)', () => {
+  it('stripBlockquotePrefix 容错剥 `>`（缩进 + 0/1 空格）', () => {
+    expect(stripBlockquotePrefix('> hello')).toBe('hello');
+    expect(stripBlockquotePrefix('>no-space')).toBe('no-space');
+    expect(stripBlockquotePrefix('   > 缩进引用')).toBe('缩进引用');
+  });
+
+  it('buildBlockquoteNode 包已解析内层 block；空则兜空 paragraph', () => {
+    const inner = [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }];
+    expect(buildBlockquoteNode(inner)).toEqual({ type: 'blockquote', content: inner });
+    expect(buildBlockquoteNode([])).toEqual({
+      type: 'blockquote',
+      content: [{ type: 'paragraph' }],
+    });
+  });
+});
+
+describe('markdown-core / list 标记分类 (B4a)', () => {
+  it('bullet / ordered / task 分类 + 正文提取', () => {
+    expect(classifyListLine('- 项')).toEqual({ kind: 'bullet', text: '项' });
+    expect(classifyListLine('* 星')).toEqual({ kind: 'bullet', text: '星' });
+    expect(classifyListLine('+ 加')).toEqual({ kind: 'bullet', text: '加' }); // CommonMark `+`
+    expect(classifyListLine('3. 序')).toEqual({ kind: 'ordered', text: '序' });
+    expect(classifyListLine('  - 缩进')).toEqual({ kind: 'bullet', text: '缩进' });
+  });
+
+  it('task 必先于 bullet：`- [ ]` / `- [x]` → task + checked', () => {
+    expect(classifyListLine('- [ ] 待办')).toEqual({ kind: 'task', checked: false, text: '待办' });
+    expect(classifyListLine('- [x] 完成')).toEqual({ kind: 'task', checked: true, text: '完成' });
+    expect(classifyListLine('* [X] 大写X')).toEqual({ kind: 'task', checked: true, text: '大写X' });
+  });
+
+  it('非 list 行 → null', () => {
+    expect(classifyListLine('普通段落')).toBeNull();
+    expect(classifyListLine('# 标题')).toBeNull();
+  });
+});
+
+describe('markdown-core / list 构造器 (B4a)', () => {
+  it('buildListItemNode / bulletList / orderedList', () => {
+    const item = buildListItemNode([{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }]);
+    expect(item.type).toBe('listItem');
+    expect(buildBulletListNode([item]).type).toBe('bulletList');
+    expect(buildOrderedListNode([item]).type).toBe('orderedList');
+    // 空 item 兜空 paragraph
+    expect(buildListItemNode([]).content).toEqual([{ type: 'paragraph' }]);
+  });
+
+  it('buildTaskItemNode / taskList：checked + createdAt 落 attrs', () => {
+    const t = buildTaskItemNode(true, '2026-07-27T00:00:00.000Z', [
+      { type: 'paragraph', content: [{ type: 'text', text: '做' }] },
+    ]);
+    expect(t.type).toBe('taskItem');
+    expect(t.attrs).toEqual({ checked: true, createdAt: '2026-07-27T00:00:00.000Z' });
+    expect(buildTaskListNode([t]).type).toBe('taskList');
+  });
+
+  it('list item 内嵌 block（①强项）：itemBlocks 原样进 content', () => {
+    const item = buildListItemNode([
+      { type: 'paragraph', content: [{ type: 'text', text: '项' }] },
+      { type: 'codeBlock', content: [{ type: 'text', text: 'x=1' }] },
+    ]);
+    expect(item.content).toHaveLength(2);
+    expect(item.content![1].type).toBe('codeBlock');
   });
 });

@@ -58,6 +58,18 @@ export {
   tryParseObsidianVideoEmbed,
 } from './media-blocks';
 export type { ParsedImageSrc } from './media-blocks';
+// 阶段 B4a：blockquote/list canonical 构造器 + list 标记分类（递归内容留外壳，核纯 sync）。
+export {
+  stripBlockquotePrefix,
+  buildBlockquoteNode,
+  classifyListLine,
+  buildListItemNode,
+  buildBulletListNode,
+  buildOrderedListNode,
+  buildTaskItemNode,
+  buildTaskListNode,
+} from './blockquote-list';
+export type { ListMarkerKind, ListLineInfo } from './blockquote-list';
 
 /**
  * markdown → canonical PMNode[]（B1 覆盖范围内规范解析，其余产 uncovered 哨兵）。

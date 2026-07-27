@@ -50,6 +50,12 @@ import {
   buildCalloutNode,
   buildImageNode,
   buildHtmlBlockNode,
+  buildBlockquoteNode,
+  buildListItemNode,
+  buildBulletListNode,
+  buildOrderedListNode,
+  buildTaskItemNode,
+  buildTaskListNode,
 } from '@shared/markdown-core';
 
 // ProseMirror JSON 节点形式(纯数据,不依赖 prosemirror-model)
@@ -117,16 +123,16 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
       return [{ ...buildParagraphNode(block.text || '') }];
 
     case 'blockquote':
+      // B4a:blockquote 采「② 递归任意 block」改调核 buildBlockquoteNode。内层由 result-parser
+      // 递归 parseMarkdown 产 block.blocks（纯文本引用=单 paragraph，输出不变；`>` 内含
+      // code/math 时产真子块=能力增强）。旧数据/极端无 blocks 时兜底单 paragraph（text/inlines）。
+      if (block.blocks && block.blocks.length > 0) {
+        return [buildBlockquoteNode(block.blocks.flatMap(blockToNodes))];
+      }
       return [
-        {
-          type: 'blockquote',
-          content: [
-            {
-              type: 'paragraph',
-              content: inlinesToContent(block.inlines, block.text),
-            },
-          ],
-        },
+        buildBlockquoteNode([
+          { type: 'paragraph', content: inlinesToContent(block.inlines, block.text) },
+        ]),
       ];
 
     case 'callout':
@@ -183,20 +189,16 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
       ];
 
     case 'bulletList':
-      return [
-        {
-          type: 'bulletList',
-          content: listItemsToNodes(block.items),
-        },
-      ];
+      // B4a:改调核 buildBulletListNode + buildListItemNode（item 内嵌 block 保持 ① 强项）。
+      return [buildBulletListNode(listItemsToNodes(block.items))];
 
     case 'orderedList':
-      return [
-        {
-          type: 'orderedList',
-          content: listItemsToNodes(block.items),
-        },
-      ];
+      return [buildOrderedListNode(listItemsToNodes(block.items))];
+
+    case 'taskList':
+      // B4a 新增能力：① 现认 task list（`- [ ]`）→ taskList > taskItem。createdAt 用导入时刻
+      //（markdown 无创建时间；不给则 NodeView mount 自动补触发 OCC 风暴）。checked 由 item 带。
+      return [buildTaskListNode(taskItemsToNodes(block.items))];
 
     case 'table':
       return [tableToNode(block)];
@@ -214,26 +216,32 @@ function blockToNodes(block: ExtractedBlock): PMNode[] {
 
 // ─── List ──────────────────────────────────────────────────────────
 
-function listItemsToNodes(items: ExtractedListItem[] | undefined): PMNode[] {
-  if (!items || items.length === 0) {
-    return [{ type: 'listItem', content: [{ type: 'paragraph' }] }];
-  }
-  return items.map((item): PMNode => {
-    // 每个 listItem 内容 = 一个 paragraph(用 item.inlines / text)+ 子 blocks 嵌套
-    const itemContent: PMNode[] = [
-      {
-        type: 'paragraph',
-        content: inlinesToContent(item.inlines, item.text),
-      },
-    ];
-    if (item.blocks && item.blocks.length > 0) {
-      for (const sub of item.blocks) {
-        const subNodes = blockToNodes(sub);
-        for (const n of subNodes) itemContent.push(n);
-      }
+/** 一个 list item 的内层 block：首 paragraph（inlines/text）+ 子 blocks 嵌套（① 强项）。 */
+function listItemContent(item: ExtractedListItem): PMNode[] {
+  const itemContent: PMNode[] = [
+    { type: 'paragraph', content: inlinesToContent(item.inlines, item.text) },
+  ];
+  if (item.blocks && item.blocks.length > 0) {
+    for (const sub of item.blocks) {
+      for (const n of blockToNodes(sub)) itemContent.push(n);
     }
-    return { type: 'listItem', content: itemContent };
-  });
+  }
+  return itemContent;
+}
+
+function listItemsToNodes(items: ExtractedListItem[] | undefined): PMNode[] {
+  // B4a:改调核 buildListItemNode（空 item 兜底空 paragraph 收口在核）。
+  if (!items || items.length === 0) return [buildListItemNode([])];
+  return items.map((item) => buildListItemNode(listItemContent(item)));
+}
+
+/** B4a：task items → taskItem[]（checked 由 item 带；createdAt 用导入时刻）。 */
+function taskItemsToNodes(items: ExtractedListItem[] | undefined): PMNode[] {
+  const createdAt = new Date().toISOString();
+  if (!items || items.length === 0) return [buildTaskItemNode(false, createdAt, [])];
+  return items.map((item) =>
+    buildTaskItemNode(item.checked === true, createdAt, listItemContent(item)),
+  );
 }
 
 // ─── Table ─────────────────────────────────────────────────────────

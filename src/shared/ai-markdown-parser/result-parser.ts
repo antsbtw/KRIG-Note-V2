@@ -1,6 +1,7 @@
 import type { ExtractedBlock, ExtractedInline, ExtractedListItem } from './extraction-types';
 // 阶段 B2:callout emoji 映射上收到唯一解析核 markdown-core(①② 共用同一张表)。
-import { calloutEmojiFor } from '@shared/markdown-core';
+// B4a:list 标记分类上收到核(① 借此新增 task list 识别，与 ② 同一张分类逻辑)。
+import { calloutEmojiFor, classifyListLine } from '@shared/markdown-core';
 
 /**
  * ResultParser — parses AI response text into ExtractedBlock[].
@@ -180,14 +181,34 @@ export class ResultParser {
           continue;
         }
 
+        // B4a:blockquote 采「② 递归任意 block」—— 内层文本递归 parseMarkdown（sync，无 async）
+        // 产子 block（可含 code/math/heading）。纯文本引用 → 子 block 是单 paragraph，输出不变；
+        // 仅 `>` 内含 code/math 时从「压成一段文本」升级为真子块（能力增强，非丢内容）。
+        // 无限递归防护:剥前缀已把 `>` 去掉，递归输入不再以 `>` 起始，不会自吞。
+        const innerBlocks = this.parseMarkdown(quoteText);
         blocks.push({
           type: 'blockquote',
           tag: 'blockquote',
           text: quoteText,
           headingLevel: 0,
-          inlines: this.parseInlineMarkdown(quoteText),
+          blocks: innerBlocks,
         });
         i++;
+        continue;
+      }
+
+      // Task list: - [ ] / - [x]（B4a 新增能力 —— ① 以前把 `- [ ]` 当普通 bullet、
+      // `[ ]` 进正文文本；现识别为真 taskItem。必须先于 bullet，否则被 bullet 截获）。
+      if (classifyListLine(line)?.kind === 'task') {
+        const listResult = this.collectList(lines, i, 'task');
+        blocks.push({
+          type: 'taskList',
+          tag: 'ul',
+          text: listResult.items.map(it => it.text).join('\n'),
+          headingLevel: 0,
+          items: listResult.items,
+        });
+        i = listResult.nextIndex;
         continue;
       }
 
@@ -524,27 +545,40 @@ export class ResultParser {
   private collectList(
     lines: string[],
     startIndex: number,
-    listType: 'ordered' | 'bullet',
+    listType: 'ordered' | 'bullet' | 'task',
   ): { items: ExtractedListItem[]; nextIndex: number } {
+    // itemRe 用于 collectListItemContent 判「下一项/续行」边界。task 标记 `- [ ]` 本就匹配
+    // BULLET_RE（`^\s*[-*+]\s+`），故 task 复用 BULLET_RE 作边界。bullet/ordered 保持原 itemMatch
+    // 路径逐字段不变（回归红线）；task 走核 classifyListLine 取 checked + 剥 `[ ]` 后正文。
     const itemRe = listType === 'ordered' ? ResultParser.ORDERED_RE : ResultParser.BULLET_RE;
     const items: ExtractedListItem[] = [];
     let i = startIndex;
 
     while (i < lines.length) {
-      const itemMatch = lines[i].match(itemRe);
-      if (!itemMatch) break;
+      let itemText: string;
+      let checked: boolean | undefined;
+      if (listType === 'task') {
+        const info = classifyListLine(lines[i]);
+        if (!info || info.kind !== 'task') break; // task list 只收 task 行
+        itemText = info.text.trim();
+        checked = info.checked === true;
+      } else {
+        const itemMatch = lines[i].match(itemRe);
+        if (!itemMatch) break;
+        itemText = itemMatch[2].trim();
+      }
 
-      const itemText = itemMatch[2].trim();
       const itemBlocks: ExtractedBlock[] = [];
       i++;
 
-      // Collect subsequent content belonging to this list item
+      // Collect subsequent content belonging to this list item（item 内嵌 block，① 强项保留）
       i = this.collectListItemContent(lines, i, itemRe, itemBlocks);
 
       items.push({
         text: itemText,
         inlines: this.parseInlineMarkdown(itemText),
         blocks: itemBlocks.length > 0 ? itemBlocks : undefined,
+        ...(listType === 'task' ? { checked } : {}),
       });
     }
 

@@ -18,10 +18,12 @@ export interface ExtractedListItem {
   text: string;
   inlines?: ExtractedInline[];
   blocks?: ExtractedBlock[];
+  // B4a:task list（`- [ ]` / `- [x]`）item 的勾选态；非 task item 为 undefined。
+  checked?: boolean;
 }
 
 export interface ExtractedBlock {
-  type: 'paragraph' | 'heading' | 'blockquote' | 'callout' | 'code' | 'math' | 'image' | 'video' | 'audio' | 'bulletList' | 'orderedList' | 'table' | 'file' | 'htmlBlock';
+  type: 'paragraph' | 'heading' | 'blockquote' | 'callout' | 'code' | 'math' | 'image' | 'video' | 'audio' | 'bulletList' | 'orderedList' | 'taskList' | 'table' | 'file' | 'htmlBlock';
   tag: string;
   text: string;
   headingLevel: number;
@@ -34,6 +36,9 @@ export interface ExtractedBlock {
   height?: number;
   items?: ExtractedListItem[];
   inlines?: ExtractedInline[];
+  // B4a:blockquote 采「② 递归任意 block」后，其内层递归解析出的子 block（可含
+  // code/math/heading 等）。纯文本引用时为空/undefined → 仍走 text/inlines 单段（输出不变）。
+  blocks?: ExtractedBlock[];
   caption?: string;
   pageRef?: number;
   bbox?: { x: number; y: number; w: number; h: number };

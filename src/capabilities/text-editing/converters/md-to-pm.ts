@@ -48,6 +48,14 @@ import {
   buildExternalRefNode,
   tryParseMediaTag,
   tryParseObsidianVideoEmbed,
+  stripBlockquotePrefix,
+  buildBlockquoteNode,
+  classifyListLine,
+  buildListItemNode,
+  buildBulletListNode,
+  buildOrderedListNode,
+  buildTaskItemNode,
+  buildTaskListNode,
 } from '@shared/markdown-core';
 // B3 修复:核 buildVideoNode 产 embedType=null(核在 shared,禁止反向 import drivers 的
 // detectEmbedType);而 video NodeView 的 play-tab 只读 attrs.embedType、不 mount 时重新
@@ -326,19 +334,18 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
     }
 
     // Blockquote（含 GitHub-style callout `> [!NOTE]` 识别）
+    // B4a:blockquote 采「② 递归任意 block」进核 —— 剥前缀走核 stripBlockquotePrefix、
+    // 节点走核 buildBlockquoteNode;**内容递归仍调 markdownToProseMirror（async）**留外壳,
+    // 保住嵌套媒体本地化(blockquote 内 image → media://)。核不递归、不碰 async(见
+    // blockquote-list.ts 分层注)。
     if (line.trimStart().startsWith('> ')) {
       const quoteLines: string[] = [];
       while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
-        // 剥引用前缀:检测用 trimStart() 容忍行首缩进(如列表内 `   > 权衡…`),
-        // 剥离也必须同样容忍前导空白 —— 否则锚在 col0 的 /^>\s?/ 对缩进行剥不掉,
-        // 递归 markdownToProseMirror 会再判成 blockquote → 无限递归 → 栈溢出 →
-        // markdownToAtoms 吞成 warning 产空 note(2026-06-30 relay-design-v2.md 导入空白根因)。
-        quoteLines.push(lines[i].replace(/^\s*>\s?/, ''));
+        // 剥引用前缀走核容错逻辑(trimStart 容忍缩进 + `>\s?` —— 防 relay-design-v2 栈溢出)。
+        quoteLines.push(stripBlockquotePrefix(lines[i]));
         i++;
       }
-      // B2:GitHub alert `> [!NOTE]`/`> [!WARNING]`… 首行单独一个 `[!TYPE]` → callout
-      //（改调核 buildCalloutNode + calloutEmojiFor）。② 以前当普通 blockquote,现在认 callout
-      // 是新增能力(非回归)。首行不是 alert 标记则仍走 blockquote(原行为不变)。
+      // B2:GitHub alert `> [!NOTE]`/`> [!WARNING]`… 首行单独一个 `[!TYPE]` → callout。
       const ghCalloutMatch = quoteLines[0]?.match(/^\[!(\w+)\]\s*$/);
       if (ghCalloutMatch) {
         const bodyText = quoteLines.slice(1).join('\n').trim();
@@ -346,66 +353,38 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
         continue;
       }
       const innerContent = await markdownToProseMirror(quoteLines.join('\n'));
-      content.push({
-        type: 'blockquote',
-        content: innerContent.length > 0 ? innerContent : [{ type: 'paragraph' }],
-      });
+      content.push(buildBlockquoteNode(innerContent));
       continue;
     }
 
-    // Task list — V2 schema:taskList > taskItem > paragraph
-    // taskItem attrs.createdAt 字面持久化:不给的话 NodeView mount 时会自动补
-    // (queueMicrotask + dispatch),导入 N 个 taskItem 会触发 N 次 IPC 引发 OCC 风暴。
-    // 用导入时刻作为 createdAt(markdown 文件无创建时间字段;若未来上溯 ScannedFile.mtime
-    // 可更准确,本期沿用导入时刻足够)。
-    if (/^\s*[-*]\s+\[([ x])\]\s/.test(line)) {
-      const items: PMNode[] = [];
-      const createdAt = new Date().toISOString();
-      while (i < lines.length && /^\s*[-*]\s+\[([ x])\]\s/.test(lines[i])) {
-        const match = lines[i].match(/^\s*[-*]\s+\[([ x])\]\s(.*)/)!;
-        items.push({
-          type: 'taskItem',
-          attrs: { checked: match[1] === 'x', createdAt },
-          content: [{ type: 'paragraph', content: parseInline(match[2]) }],
-        });
-        i++;
+    // Lists（bullet / ordered / task）— B4a:标记分类走核 classifyListLine、节点走核构造器。
+    // 「① item 内嵌 block ∪ ② task list」并集:② 侧本轮仍是「单行 item = 单 paragraph」
+    // （逐字段不变,回归红线），item 内嵌 block 的递归下钻能力由 ① 侧承载(② 的文件/剪藏
+    // markdown list item 缩进子块留后续增强，本轮不引入以保 ② 单行输出不变）。
+    // taskItem.createdAt 用导入时刻(markdown 无创建时间;不给则 NodeView mount 自动补触发
+    // N 次 IPC OCC 风暴)。createdAt 是外壳语义(Date.now 非纯,核禁副作用)故留外壳。
+    {
+      const first = classifyListLine(line);
+      if (first) {
+        const createdAt = first.kind === 'task' ? new Date().toISOString() : '';
+        const items: PMNode[] = [];
+        while (i < lines.length) {
+          const info = classifyListLine(lines[i]);
+          // 同类连续项才归一个 list(kind 变则断开,交外层循环起新 list)
+          if (!info || info.kind !== first.kind) break;
+          const para: PMNode = { type: 'paragraph', content: parseInline(info.text) };
+          if (info.kind === 'task') {
+            items.push(buildTaskItemNode(info.checked === true, createdAt, [para]));
+          } else {
+            items.push(buildListItemNode([para]));
+          }
+          i++;
+        }
+        if (first.kind === 'task') content.push(buildTaskListNode(items));
+        else if (first.kind === 'ordered') content.push(buildOrderedListNode(items));
+        else content.push(buildBulletListNode(items));
+        continue;
       }
-      content.push({ type: 'taskList', content: items });
-      continue;
-    }
-
-    // Bullet list — V2 schema:bulletList > listItem > paragraph
-    if (/^\s*[-*]\s+/.test(line) && !/^\s*[-*]\s+\[/.test(line)) {
-      const items: PMNode[] = [];
-      while (
-        i < lines.length &&
-        /^\s*[-*]\s+/.test(lines[i]) &&
-        !/^\s*[-*]\s+\[/.test(lines[i])
-      ) {
-        const text = lines[i].replace(/^\s*[-*]\s+/, '');
-        items.push({
-          type: 'listItem',
-          content: [{ type: 'paragraph', content: parseInline(text) }],
-        });
-        i++;
-      }
-      content.push({ type: 'bulletList', content: items });
-      continue;
-    }
-
-    // Ordered list — V2 schema:orderedList > listItem > paragraph
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: PMNode[] = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        const text = lines[i].replace(/^\s*\d+\.\s+/, '');
-        items.push({
-          type: 'listItem',
-          content: [{ type: 'paragraph', content: parseInline(text) }],
-        });
-        i++;
-      }
-      content.push({ type: 'orderedList', content: items });
-      continue;
     }
 
     // Table (| ... |) — B2:cell → PM 结构改调唯一解析核 buildTableNode(canonical:
