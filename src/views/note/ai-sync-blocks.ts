@@ -3,19 +3,19 @@
  *
  * 把 main 端 broadcast 的 AISyncTurn 转成可直接 insert 到 PM doc 的节点数组:
  *   1. ❓ Callout 包用户提问(仅当 userMessage 非空)
- *   2. 🔀 Toggle 包 AI 回答(label='回答 (服务名)' + ResultParser 解析后的子节点)
+ *   2. 🔀 Toggle 包 AI 回答(label='回答 (服务名)' + aiMarkdownToPmNodes 解析后的子节点)
  *   3. horizontalRule 分隔线
  *
- * 解析 markdown 走 @shared/ai-markdown-parser 的 ResultParser + extractedBlocksToPmDoc
- * (与"提取整页对话"路径一致,保证不失真原则;feedback_inject_placeholder_replace_global
- * 已记录的 markdown 解析不允许 split('\n\n'))。
+ * 解析 markdown 走 @shared/ai-markdown-parser 的 aiMarkdownToPmNodes(B4b:AI 预处理 →
+ * 唯一解析核 markdownCore → PMNode[],废 ExtractedBlock 中间态;与"提取整页对话"路径一致,
+ * 保证不失真原则;markdown 解析不允许 split('\n\n'))。
  *
  * 输出 nodes 直接 nodeType.create(...) 之前以 JSON 形态保留,view 层 dispatch 时用
  * schema.nodeFromJSON 还原 — 这样保留对 schema 的"晚绑定"(不在本模块 import driver
  * 内部 schema-builder)。
  */
 
-import { ResultParser, extractedBlocksToPmDoc } from '@shared/ai-markdown-parser';
+import { aiMarkdownToPmNodes } from '@shared/ai-markdown-parser';
 import type { AISyncTurn, AIServiceId } from '@capabilities/ai-extraction/types';
 import { getAIServiceProfile } from '@shared/types/ai-service-types';
 
@@ -57,9 +57,8 @@ export function buildAITurnPmNodes(
   // 2. 🔀 Toggle AI 回答
   const aiText = turn.markdown.trim();
   if (aiText) {
-    const parser = new ResultParser();
-    const blocks = parser.parse(aiText);
-    const pmDoc = extractedBlocksToPmDoc(blocks);
+    // B4b:改调 aiMarkdownToPmNodes（AI 预处理 → markdownCore → PMNode[]），废 ExtractedBlock。
+    const aiNodes = aiMarkdownToPmNodes(aiText) as PmNodeJson[];
     const profile = getAIServiceProfile(serviceId);
     const labelText = `回答 (${profile.name})`;
 
@@ -70,11 +69,8 @@ export function buildAITurnPmNodes(
       content: [{ type: 'text', text: labelText }],
     };
 
-    // extractedBlocksToPmDoc 返 {type:'doc', content: PmNode[]};拿 content 当 toggle 内容
-    // 兜底:若 content 为空(只有兜底 paragraph),仍保留以满足 content:'block+'
-    const aiContent = (pmDoc.content as PmNodeJson[]) ?? [
-      { type: 'paragraph' },
-    ];
+    // 兜底:若解析产物为空,放一个空 paragraph 以满足 toggle content:'block+'
+    const aiContent = aiNodes.length > 0 ? aiNodes : [{ type: 'paragraph' }];
 
     nodes.push({
       type: 'toggleList',

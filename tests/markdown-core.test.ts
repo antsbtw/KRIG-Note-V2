@@ -195,31 +195,55 @@ describe('markdown-core / inline marks', () => {
   });
 });
 
-// ── 未覆盖出口（不静默吞）────────────────────────────────────────────
-describe('markdown-core / uncovered exit', () => {
-  it('list / table / blockquote 等非 B1 block → uncovered 哨兵带原始源行', () => {
-    const md = '- 列表项\n- 第二项';
-    const nodes = markdownCore(md);
-    expect(nodes.every((n) => n.type === UNCOVERED_TYPE)).toBe(true);
-    const raw = nodes.map((n) => (n.attrs as { rawLines: string }).rawLines).join('\n');
-    expect(raw).toContain('列表项');
-    expect(raw).toContain('第二项');
+// ── B4b：完整入口 —— 全 block 进核（原 uncovered 出口已被真解析取代）──────
+describe('markdown-core / full entry (B4b)', () => {
+  it('list 直接解析成 bulletList（不再产 uncovered 哨兵）', () => {
+    const nodes = markdownCore('- 列表项\n- 第二项');
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe('bulletList');
+    expect(nodes[0].content).toHaveLength(2);
+    expect(nodes.some((n) => n.type === UNCOVERED_TYPE)).toBe(false);
   });
 
-  it('uncovered 块内容一字不丢（table）', () => {
-    const md = '| a | b |\n|---|---|\n| 1 | 2 |';
-    const nodes = markdownCore(md);
-    const raw = nodes.map((n) => (n.attrs as { rawLines: string })?.rawLines ?? '').join('\n');
-    expect(raw).toContain('| a | b |');
-    expect(raw).toContain('| 1 | 2 |');
+  it('table 直接解析成 table（cell 走核 parseInline）', () => {
+    const nodes = markdownCore('| a | b |\n|---|---|\n| 1 | 2 |');
+    expect(nodes[0].type).toBe('table');
+    expect(nodes[0].content![0].content![0].type).toBe('tableHeader');
+    expect(nodes[0].content![1].content![0].type).toBe('tableCell');
   });
 
-  it('B1 块与 uncovered 块混排：B1 规范解析、uncovered 隔断', () => {
-    const md = '# 标题\n\n- 列表\n\n普通段落';
-    const nodes = markdownCore(md);
-    expect(nodes[0].type).toBe('heading');
-    expect(nodes[1].type).toBe(UNCOVERED_TYPE);
-    expect(nodes[2].type).toBe('paragraph');
+  it('blockquote 递归解析内层 block（含 code）', () => {
+    const nodes = markdownCore('> 前言\n> ```js\n> x=1\n> ```');
+    expect(nodes[0].type).toBe('blockquote');
+    expect(nodes[0].content!.map((n) => n.type)).toContain('codeBlock');
+  });
+
+  it('image / video / html / task 各产真节点，src 原样', () => {
+    expect(markdownCore('![图](data:image/png;base64,AAAA)')[0]).toMatchObject({
+      type: 'image',
+      attrs: { src: 'data:image/png;base64,AAAA' }, // src 原样，不本地化
+    });
+    expect(markdownCore('![[dQw4w9WgXcQ]]')[0].type).toBe('videoBlock');
+    expect(markdownCore('!html[图](media://h1)')[0]).toMatchObject({
+      type: 'htmlBlock',
+      attrs: { src: 'media://h1', title: '图' },
+    });
+    expect(markdownCore('- [x] 完成')[0].type).toBe('taskList');
+  });
+
+  it('①方言 image:pageN[:bbox] → src 归一 image、bbox 不进 attrs（B3 拍板）', () => {
+    const [img] = markdownCore('![图 1-1 | 描述](image:page19:x1,y2,w3,h4)');
+    expect(img.type).toBe('image');
+    expect(img.attrs).toEqual({ src: 'image', alt: '描述', title: '图 1-1' }); // 无 bbox/pageRef
+  });
+
+  it('B1 块与其他块混排：各自规范解析', () => {
+    const nodes = markdownCore('# 标题\n\n- 列表\n\n普通段落');
+    expect(nodes.map((n) => n.type)).toEqual(['heading', 'bulletList', 'paragraph']);
+  });
+
+  it('空 $$$$ 仍产 uncovered 哨兵（不静默吞，caller 决定降级）', () => {
+    expect(isUncovered(markdownCore('$$$$')[0])).toBe(true);
   });
 });
 

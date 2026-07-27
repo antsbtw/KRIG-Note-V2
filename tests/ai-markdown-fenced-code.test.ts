@@ -10,55 +10,64 @@
  *  1. 嵌套 fence 按长度配对(````markdown 只被 ```` 闭合,内层 ```mermaid 视为内容)。
  *  2. language=markdown/md 的包裹型代码块自动展开,让内层 ```mermaid 浮出为真 mermaid 块;
  *     但真 ```python / ```mermaid(无外层包裹)不受影响。
+ *
+ * B4b 收官:① 废 ExtractedBlock 中间态,断言从「ExtractedBlock.type==='code'」迁到
+ *  「PMNode.type==='codeBlock'」（aiMarkdownToPmNodes = AI 预处理 → markdownCore）。
+ *  fence 配对固化在核 fence.ts、markdown 包裹展开在 ① 预处理层 —— 两条契约不变。
  */
 
 import { describe, it, expect } from 'vitest';
-import { ResultParser } from '@shared/ai-markdown-parser';
+import { aiMarkdownToPmNodes } from '@shared/ai-markdown-parser';
 
-type B = { type?: string; language?: string; text?: string };
-
-function parse(md: string): B[] {
-  return new ResultParser().parse(md) as unknown as B[];
+interface PMNode {
+  type?: string;
+  attrs?: Record<string, unknown>;
+  content?: PMNode[];
+  text?: string;
 }
 
-describe('ai-markdown-parser fenced code', () => {
+const parse = (md: string): PMNode[] => aiMarkdownToPmNodes(md) as PMNode[];
+const lang = (n: PMNode): string | undefined => n.attrs?.language as string | undefined;
+const codeText = (n: PMNode): string => n.content?.[0]?.text ?? '';
+const paraText = (n: PMNode): string =>
+  (n.content ?? []).map((c) => (c.type === 'text' ? c.text ?? '' : '')).join('');
+
+describe('ai-markdown-parser fenced code (B4b PMNode)', () => {
   it('ChatGPT 外层 ````markdown 包 ```mermaid → 浮出为 mermaid 块,内容完整不漏', () => {
     const md =
       '前言。\n\n````markdown\n```mermaid\nmindmap\n  root((NJ))\n    Chapter 1\n      License Types\n```\n````\n\n结束。';
     const blocks = parse(md);
-    const code = blocks.filter((b) => b.type === 'code');
+    const code = blocks.filter((b) => b.type === 'codeBlock');
     expect(code).toHaveLength(1);
-    expect(code[0].language).toBe('mermaid');
-    expect(code[0].text).toContain('mindmap');
-    expect(code[0].text).toContain('License Types');
+    expect(lang(code[0])).toBe('mermaid');
+    expect(codeText(code[0])).toContain('mindmap');
+    expect(codeText(code[0])).toContain('License Types');
     // 绝不能出现空代码块 / mermaid 内容漏成 paragraph
-    expect(blocks.some((b) => b.type === 'code' && !b.text?.trim())).toBe(false);
-    expect(blocks.some((b) => b.type === 'paragraph' && b.text?.includes('mindmap'))).toBe(false);
+    expect(blocks.some((b) => b.type === 'codeBlock' && !codeText(b).trim())).toBe(false);
+    expect(blocks.some((b) => b.type === 'paragraph' && paraText(b).includes('mindmap'))).toBe(false);
   });
 
   it('纯 ```mermaid(无外层包裹)保持 mermaid 代码块', () => {
     const blocks = parse('前言。\n\n```mermaid\nmindmap\n  root((NJ))\n```\n\n尾。');
-    const code = blocks.filter((b) => b.type === 'code');
+    const code = blocks.filter((b) => b.type === 'codeBlock');
     expect(code).toHaveLength(1);
-    expect(code[0].language).toBe('mermaid');
-    expect(code[0].text).toContain('mindmap');
+    expect(lang(code[0])).toBe('mermaid');
+    expect(codeText(code[0])).toContain('mindmap');
   });
 
   it('真 ```python 代码块不被 markdown 展开逻辑误伤', () => {
     const blocks = parse('```python\nprint("hi")\n```');
-    const code = blocks.filter((b) => b.type === 'code');
+    const code = blocks.filter((b) => b.type === 'codeBlock');
     expect(code).toHaveLength(1);
-    expect(code[0].language).toBe('python');
-    expect(code[0].text).toBe('print("hi")');
+    expect(lang(code[0])).toBe('python');
+    expect(codeText(code[0])).toBe('print("hi")');
   });
 
   it('闭栏行带残留(``` 后跟文字/语言标记)不能把后续段落吞进代码块', () => {
-    // 回归:曾把闭栏判定收严成「整行纯 backtick」→ 闭栏行不干净时从首个 fence 吞到文末,
-    // 提取只出第一段。闭栏应只看「起始连续 backtick 数 ≥ 开栏」,不要求整行纯 backtick。
     const md = '第一段。\n\n```\ncode\n``` 后面还有字\n\n第三段。';
     const blocks = parse(md);
-    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'code', 'paragraph']);
-    expect(blocks[2].text).toContain('第三段');
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'codeBlock', 'paragraph']);
+    expect(paraText(blocks[2])).toContain('第三段');
   });
 
   it('整页多段落 + 代码块混排:所有段落都保留(不只第一段)', () => {
@@ -67,16 +76,16 @@ describe('ai-markdown-parser fenced code', () => {
     const blocks = parse(md);
     const paras = blocks.filter((b) => b.type === 'paragraph');
     expect(paras.length).toBe(3);
-    expect(blocks.filter((b) => b.type === 'code')).toHaveLength(1);
+    expect(blocks.filter((b) => b.type === 'codeBlock')).toHaveLength(1);
   });
 
   it('内层带空行的 mermaid(章节间空行)内容完整保留', () => {
     const md =
       '````markdown\n```mermaid\nmindmap\n  root((X))\n\n    Chapter 1\n\n    Chapter 2\n```\n````';
-    const code = parse(md).filter((b) => b.type === 'code');
+    const code = parse(md).filter((b) => b.type === 'codeBlock');
     expect(code).toHaveLength(1);
-    expect(code[0].language).toBe('mermaid');
-    expect(code[0].text).toContain('Chapter 1');
-    expect(code[0].text).toContain('Chapter 2');
+    expect(lang(code[0])).toBe('mermaid');
+    expect(codeText(code[0])).toContain('Chapter 1');
+    expect(codeText(code[0])).toContain('Chapter 2');
   });
 });
