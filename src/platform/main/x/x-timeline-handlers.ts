@@ -14,12 +14,12 @@
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
-import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict } from '../db/tweet-inbox-repo';
+import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
 import { googleTranslate } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
-import { runJudgeBatch } from './x-ai-judge';
+import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
-import { DEFAULT_FILTER_CONFIG, DEFAULT_JUDGE_CONFIG } from '@shared/types/x-timeline-types';
+import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
 export function registerXTimelineHandlers(): void {
@@ -48,7 +48,7 @@ export function registerXTimelineHandlers(): void {
       const result = await scanRecipe(recipe, p.wsId, targetWcId, DEFAULT_FILTER_CONFIG);
       if (result.saved > 0) {
         // 只判触发它的那个 ws（p.wsId 已在上方校验为 string），防跨 ws 混批
-        runJudgeBatch(DEFAULT_JUDGE_CONFIG, p.wsId).catch((err) => {
+        runJudgeBatch(getJudgeConfig(), p.wsId).catch((err) => {
           console.error(`[x-timeline-handlers] judge batch after manual run ws=${p.wsId} failed:`, err);
         });
       }
@@ -76,8 +76,12 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'wsId required' };
     }
     try {
-      await runJudgeBatch(DEFAULT_JUDGE_CONFIG, p.wsId);
-      return { success: true };
+      // 首批 await:让 UI 立刻拿到真实战果(判了几条/失败原因);
+      // 剩余积压交给后台 drain 逐批清,出错即停并留痕
+      const first = await runJudgeBatch(getJudgeConfig(), p.wsId);
+      const remaining = (await queryInbox({ status: 'pending', wsId: p.wsId, limit: 5000 })).length;
+      if (remaining > 0) startJudgeDrain(getJudgeConfig(), p.wsId);
+      return { success: true, judged: first.judged, worth: first.worth, remaining, draining: remaining > 0 };
     } catch (err) {
       return { success: false, error: String(err) };
     }
@@ -85,7 +89,7 @@ export function registerXTimelineHandlers(): void {
 
   // X_INBOX_QUERY — 查询 tweet_inbox（Review Queue 用）
   ipcMain.handle(IPC_CHANNELS.X_INBOX_QUERY, async (_e, payload: unknown) => {
-    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; limit?: unknown; offset?: unknown } | null;
+    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; humanReviewed?: unknown; orderBy?: unknown; limit?: unknown; offset?: unknown } | null;
     try {
       const records = await queryInbox({
         status: typeof p?.status === 'string' ? (p.status as TweetInboxStatus) : undefined,
@@ -94,10 +98,14 @@ export function registerXTimelineHandlers(): void {
         lang: typeof p?.lang === 'string' ? p.lang : undefined,
         searchRecipe: typeof p?.searchRecipe === 'string' ? p.searchRecipe : undefined,
         taskId: typeof p?.taskId === 'string' ? p.taskId : undefined,
+        humanReviewed: typeof p?.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
+        orderBy: p?.orderBy === 'confidence' ? 'confidence' : undefined,
         limit: typeof p?.limit === 'number' ? p.limit : 50,
         offset: typeof p?.offset === 'number' ? p.offset : 0,
       });
-      return { success: true, records };
+      // datetime/RecordId 等 SDK 类型过 structured clone 会丢原型(renderer 拿到空对象,
+      // new Date() 解析成 NaN → 卡片显示"NaNd前");JSON 边界统一压成 ISO 字符串
+      return { success: true, records: JSON.parse(JSON.stringify(records)) };
     } catch (err) {
       return { success: false, error: String(err), records: [] };
     }
@@ -162,6 +170,30 @@ export function registerXTimelineHandlers(): void {
       // 同步更新 tweet_inbox 状态：accept → worth，reject → skip（UI 不再展示 skip）
       const newStatus = p.verdict === 'accept' ? 'worth' : 'skip';
       await updateVerdict(p.tweet_id, { worth: newStatus === 'worth', confidence: 1, reason: `human:${p.verdict}`, tags: [], suggestReply: newStatus === 'worth' });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_FEEDBACK_STATS — 近7天 Gemma 建议采纳率 / 捞回漏判数（侧栏仪表）
+  ipcMain.handle(IPC_CHANNELS.X_FEEDBACK_STATS, async () => {
+    try {
+      const stats = await getFeedbackStats();
+      return { success: true, stats };
+    } catch (err) {
+      return { success: false, error: String(err), stats: null };
+    }
+  });
+
+  // X_MARK_REPLIED — 标记推文已回复（已确认视图清场）
+  ipcMain.handle(IPC_CHANNELS.X_MARK_REPLIED, async (_e, payload: unknown) => {
+    const p = payload as { tweetId?: unknown } | null;
+    if (typeof p?.tweetId !== 'string') {
+      return { success: false, error: 'invalid payload: tweetId required' };
+    }
+    try {
+      await markReplied(p.tweetId);
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };

@@ -11,6 +11,28 @@ interface XInboxViewProps {
 
 const api = () => window.electronAPI?.xTimeline;
 
+// ── 视图模型：三段数据流(爬回→Gemma判→人工确认)按复核状态切片 ──
+// suggested/audit 靠 ai_verdict.reason 是否 human:* 区分「Gemma 原判」和「人工已表态」
+type InboxViewKey = 'pending' | 'suggested' | 'audit' | 'confirmed' | 'all';
+
+const VIEW_QUERY: Record<InboxViewKey, {
+  status?: string; statuses?: string[]; humanReviewed?: boolean; orderBy?: string;
+}> = {
+  pending:   { status: 'pending' },                                            // 爬回来还没判的
+  suggested: { status: 'worth', humanReviewed: false },                        // Gemma 建议值得,等表态
+  audit:     { status: 'skip',  humanReviewed: false, orderBy: 'confidence' }, // Gemma 判不值,按置信度升序抽查漏判
+  confirmed: { status: 'worth', humanReviewed: true },                         // 人工已 ✓
+  all:       { statuses: ['pending', 'worth'] },
+};
+
+const VIEW_ITEMS: Array<{ view: InboxViewKey; label: string; icon: string }> = [
+  { view: 'pending',   label: '待判',      icon: '⏳' },
+  { view: 'suggested', label: 'Gemma建议', icon: '✦' },
+  { view: 'audit',     label: '漏判抽查',  icon: '🔍' },
+  { view: 'confirmed', label: '已确认',    icon: '✅' },
+  { view: 'all',       label: '全部',      icon: '📋' },
+];
+
 // ── 统计类型（内联，与 electron-api.d.ts 一致） ──────────────────────
 interface RecipeStats {
   recipeId: string;
@@ -458,7 +480,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
   const [filterTaskId, setFilterTaskId] = useState('');       // '' = 全部任务；阶段B唯一具体任务为 DEFAULT_TASK_ID
-  const [currentStatus, setCurrentStatus] = useState<TweetInboxStatus | 'all'>('pending');
+  const [currentView, setCurrentView] = useState<InboxViewKey>('suggested');
+  const [fbStats, setFbStats] = useState<{ suggestedTotal: number; suggestedAccepted: number; rescuedFn: number } | null>(null);
   const [currentLang, setCurrentLang] = useState<'zh' | 'en' | 'all'>('all');
   const [tweets, setTweets] = useState<TweetInboxRecord[]>([]);
   const [page, setPage] = useState(0);
@@ -493,9 +516,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const taskFilter = filterTaskId || undefined;
       const offset = targetPage * PAGE_SIZE;
       const r = await xApiT.queryInbox({
-        ...(currentStatus === 'all'
-          ? { statuses: ['pending', 'worth'] }
-          : { status: currentStatus }),
+        ...VIEW_QUERY[currentView],
         lang: langFilter,
         searchRecipe: recipeFilter,
         taskId: taskFilter,
@@ -509,27 +530,33 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         setExpandedIds(new Set());
         setFeedbackMap({});
       }
-      const visibleStatuses: TweetInboxStatus[] = ['pending', 'worth'];
+      const countViews: InboxViewKey[] = ['pending', 'suggested', 'audit', 'confirmed'];
       const newCounts: Record<string, number> = {};
-      await Promise.all(visibleStatuses.map(async (s) => {
-        const cr = await xApiT.queryInbox({ status: s, lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, limit: 5000, offset: 0 });
-        newCounts[s] = cr?.records?.length ?? 0;
+      await Promise.all(countViews.map(async (v) => {
+        const cr = await xApiT.queryInbox({ ...VIEW_QUERY[v], lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, limit: 5000, offset: 0 });
+        newCounts[v] = cr?.records?.length ?? 0;
       }));
       setCounts(newCounts);
       setTotalCount(
-        currentStatus === 'all'
-          ? (newCounts['pending'] ?? 0) + (newCounts['worth'] ?? 0)
-          : (newCounts[currentStatus] ?? 0),
+        currentView === 'all'
+          ? (newCounts['pending'] ?? 0) + (newCounts['suggested'] ?? 0) + (newCounts['confirmed'] ?? 0)
+          : (newCounts[currentView] ?? 0),
       );
     } finally {
       setLoading(false);
     }
-  }, [currentStatus, currentLang, filterRecipeId, filterTaskId]);
+  }, [currentView, currentLang, filterRecipeId, filterTaskId]);
+
+  const loadStats = useCallback(async () => {
+    const r = await api()?.feedbackStats();
+    if (r?.success && r.stats) setFbStats(r.stats);
+  }, []);
 
   useEffect(() => {
     loadPage(0);
+    loadStats();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStatus, currentLang, filterRecipeId, filterTaskId, workspaceId]);
+  }, [currentView, currentLang, filterRecipeId, filterTaskId, workspaceId]);
 
   useEffect(() => {
     const check = async () => {
@@ -571,9 +598,15 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const triggerJudge = async () => {
     const tApi = api();
     if (!tApi) return;
-    setScanStatus('AI 判断中...');
+    setScanStatus('AI 判断中（一批约3分钟,模型冷启动更久）...');
     const r = await tApi.judgeNow(workspaceId);
-    setScanStatus(r?.success ? 'AI 判断完成' : `判断失败：${r?.error}`);
+    if (!r?.success) {
+      setScanStatus(`判断失败：${r?.error}`);
+    } else if (r.draining) {
+      setScanStatus(`首批判 ${r.judged} 条(worth ${r.worth}),剩 ${r.remaining} 条后台继续,点「刷新」看进度`);
+    } else {
+      setScanStatus(r.judged ? `判断完成:${r.judged} 条(worth ${r.worth})` : '无待判推文');
+    }
     loadPage(0);
   };
 
@@ -600,7 +633,10 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const submitFeedback = async (tweet: TweetInboxRecord, verdict: FeedbackVerdict) => {
     setFeedbackMap((prev) => ({ ...prev, [tweet.tweet_id]: verdict }));
-    if (verdict === 'reject') {
+    // suggested/audit 视图:表态后推文即离开本视图(去了 confirmed 或确认 skip),两种表态都移卡;
+    // 其余视图保持旧行为:✗ 移卡,✓ 留卡变绿
+    const removeCard = verdict === 'reject' || currentView === 'suggested' || currentView === 'audit';
+    if (removeCard) {
       setTweets((prev) => prev.filter((t) => t.tweet_id !== tweet.tweet_id));
       setTotalCount((c) => Math.max(0, c - 1));
     }
@@ -618,11 +654,24 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         delete next[tweet.tweet_id];
         return next;
       });
-      if (verdict === 'reject') {
+      if (removeCard) {
         setTweets((prev) => [...prev, tweet]);
         setTotalCount((c) => c + 1);
       }
       setScanStatus(`反馈写入失败：${r?.error}`);
+      return;
+    }
+    loadStats();  // ✓✗ 会改变近7天采纳率/捞回数,刷新侧栏仪表
+  };
+
+  const handleMarkReplied = async (tweet: TweetInboxRecord) => {
+    setTweets((prev) => prev.filter((t) => t.tweet_id !== tweet.tweet_id));
+    setTotalCount((c) => Math.max(0, c - 1));
+    const r = await api()?.markReplied(tweet.tweet_id);
+    if (!r?.success) {
+      setTweets((prev) => [...prev, tweet]);
+      setTotalCount((c) => c + 1);
+      setScanStatus(`标记已回复失败：${r?.error}`);
     }
   };
 
@@ -645,12 +694,6 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     );
   }
 
-  const statusItems: Array<{ status: TweetInboxStatus | 'all'; label: string; icon: string }> = [
-    { status: 'pending', label: '待处理', icon: '⏳' },
-    { status: 'worth', label: '已采纳', icon: '⭐' },
-    { status: 'all', label: '全部', icon: '📋' },
-  ];
-
   const cardBorderColor = (status: string) => {
     if (status === 'worth') return '#22c55e';
     if (status === 'pending') return '#f59e0b';
@@ -658,8 +701,9 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     return 'var(--border)';
   };
 
+  // 漏判抽查视图里 skip 卡片是工作对象,不降透明度
   const cardOpacity = (status: string) =>
-    status === 'skip' || status === 'filtered_out' ? 0.5 : 1;
+    currentView !== 'audit' && (status === 'skip' || status === 'filtered_out') ? 0.5 : 1;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
@@ -701,24 +745,26 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             ))}
           </div>
 
-          {/* 状态过滤 */}
+          {/* 视图切分:待判 → Gemma建议 → 漏判抽查 → 已确认 */}
           <div>
-            <div style={sectionTitle}>状态过滤</div>
-            {statusItems.map(({ status, label, icon }) => (
+            <div style={sectionTitle}>视图</div>
+            {VIEW_ITEMS.map(({ view: v, label, icon }) => (
               <div
-                key={status}
-                onClick={() => setCurrentStatus(status)}
+                key={v}
+                onClick={() => setCurrentView(v)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '4px 7px',
                   borderRadius: 5, cursor: 'pointer', marginBottom: 2,
-                  background: currentStatus === status ? 'var(--accent)' : 'transparent',
-                  color: currentStatus === status ? '#fff' : 'var(--text-muted)',
+                  background: currentView === v ? 'var(--accent)' : 'transparent',
+                  color: currentView === v ? '#fff' : 'var(--text-muted)',
                 }}
               >
                 <span>{icon}</span>
                 <span style={{ fontSize: 11 }}>{label}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 10, background: currentStatus === status ? 'rgba(255,255,255,0.2)' : 'var(--border)', padding: '1px 5px', borderRadius: 8 }}>
-                  {status === 'all' ? Object.values(counts).reduce((a, b) => a + b, 0) : (counts[status] ?? '-')}
+                <span style={{ marginLeft: 'auto', fontSize: 10, background: currentView === v ? 'rgba(255,255,255,0.2)' : 'var(--border)', padding: '1px 5px', borderRadius: 8 }}>
+                  {v === 'all'
+                    ? (counts['pending'] ?? 0) + (counts['suggested'] ?? 0) + (counts['confirmed'] ?? 0)
+                    : (counts[v] ?? '-')}
                 </span>
               </div>
             ))}
@@ -772,8 +818,25 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             {scanStatus && <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{scanStatus}</div>}
           </div>
 
+          {/* Gemma 观察仪表(近7天,靠 ai_verdict 快照;1.8.7 之前的旧标注不计入) */}
+          <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+            <div style={sectionTitle}>近7天 Gemma 观察</div>
+            {fbStats && fbStats.suggestedTotal > 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                建议采纳率 <span style={{ color: '#22c55e', fontWeight: 600 }}>
+                  {fbStats.suggestedAccepted}/{fbStats.suggestedTotal}
+                  （{Math.round(fbStats.suggestedAccepted / fbStats.suggestedTotal * 100)}%）
+                </span>
+                <br />
+                捞回漏判 <span style={{ color: fbStats.rescuedFn > 0 ? '#f59e0b' : 'var(--text-disabled)', fontWeight: 600 }}>{fbStats.rescuedFn} 条</span>
+              </div>
+            ) : (
+              <div style={{ fontSize: 10, color: 'var(--text-disabled)', lineHeight: 1.5 }}>暂无数据（对新判断的推文 ✓✗ 后开始累计）</div>
+            )}
+          </div>
+
           {/* Ollama 状态 */}
-          <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-disabled)' }}>
+          <div style={{ paddingTop: 8, fontSize: 11, color: 'var(--text-disabled)' }}>
             Ollama: <span style={{ fontWeight: 500, color: ollamaOk === true ? '#22c55e' : ollamaOk === false ? '#ef4444' : 'var(--text-muted)' }}>
               {ollamaOk === true ? '✅ 就绪' : ollamaOk === false ? '❌ 不可用' : '检测中...'}
             </span>
@@ -799,6 +862,21 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                     <span style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: 12 }}>{t.author_name}</span>
                     <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{t.author_handle}</span>
+                    {(() => {
+                      // 状态徽章:一眼看出这条推文处在三段流的哪一段
+                      const isHuman = reason.startsWith('human:');
+                      const [label, color] =
+                        isHuman && reason === 'human:accept' ? ['✓ 已采纳', '#22c55e'] :
+                        isHuman                              ? ['✗ 已拒绝', '#ef4444'] :
+                        t.ai_verdict && t.ai_verdict.worth   ? ['✦ Gemma:建议采纳', '#a78bfa'] :
+                        t.ai_verdict                         ? ['✦ Gemma:建议跳过', '#f59e0b'] :
+                        ['⏳ 未判', 'var(--text-disabled)'];
+                      return (
+                        <span style={{ fontSize: 10, color, border: `1px solid ${color}`, padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap' }}>
+                          {label}
+                        </span>
+                      );
+                    })()}
                     <span style={{ marginLeft: 'auto', color: 'var(--text-disabled)', fontSize: 11 }}>
                       {t.fetched_at ? timeAgo(t.fetched_at) : ''} · ❤ {t.metrics?.likes ?? 0}
                     </span>
@@ -829,9 +907,18 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                       🌐 {t.translation}
                     </div>
                   )}
-                  {reason && (
-                    <div style={{ color: 'var(--text-disabled)', fontStyle: 'italic', fontSize: 11, marginTop: 3 }}>✦ {reason}</div>
-                  )}
+                  {reason && (reason.startsWith('human:') ? (
+                    <div style={{ color: 'var(--text-disabled)', fontSize: 11, marginTop: 3 }}>
+                      ✋ 已人工{reason === 'human:accept' ? '采纳' : '拒绝'}
+                    </div>
+                  ) : (
+                    <div style={{ color: '#a78bfa', fontStyle: 'italic', fontSize: 11, marginTop: 3 }}>
+                      ✦ Gemma：{reason}
+                      {typeof t.ai_verdict?.confidence === 'number' && (
+                        <span style={{ color: 'var(--text-disabled)', marginLeft: 5 }}>置信 {Math.round(t.ai_verdict.confidence * 100)}%</span>
+                      )}
+                    </div>
+                  ))}
                   <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap', alignItems: 'center' }}>
                     {t.tweet_url && (
                       <Btn sm onClick={() => viewTweet(t)}>
@@ -841,16 +928,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                     {t.tweet_url && <Btn sm primary onClick={() => sendToReply(t)}>送入回复</Btn>}
                     {(() => {
                       const fb = feedbackMap[t.tweet_id];
+                      const isAudit = currentView === 'audit';
                       return (
                         <>
                           <Btn sm primary={fb === 'accept'} onClick={() => submitFeedback(t, 'accept')}
                             style={fb === 'accept' ? { background: '#16a34a', borderColor: '#16a34a' } : {}}>
-                            {fb === 'accept' ? '✓ 已采纳' : '✓ 采纳'}
+                            {fb === 'accept' ? '✓ 已采纳' : isAudit ? '✓ 捞回' : '✓ 采纳'}
                           </Btn>
                           <Btn sm onClick={() => submitFeedback(t, 'reject')}
                             style={fb === 'reject' ? { background: '#7f1d1d', borderColor: '#7f1d1d', color: '#fca5a5' } : {}}>
-                            {fb === 'reject' ? '✗ 已拒绝' : '✗ 不采纳'}
+                            {fb === 'reject' ? '✗ 已拒绝' : isAudit ? '✗ 确实不值' : '✗ 不采纳'}
                           </Btn>
+                          {currentView === 'confirmed' && (
+                            <Btn sm onClick={() => handleMarkReplied(t)}>↩ 已回复</Btn>
+                          )}
                         </>
                       );
                     })()}

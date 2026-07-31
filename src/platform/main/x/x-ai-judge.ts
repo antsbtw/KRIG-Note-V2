@@ -6,7 +6,18 @@
 
 import { callOllama } from '../local-llm/ollama-client';
 import { queryPending, markAiJudging, updateVerdict } from '../db/tweet-inbox-repo';
+import { DEFAULT_JUDGE_CONFIG } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, AIVerdict, TweetInboxRecord } from '@shared/types/x-timeline-types';
+
+/**
+ * 运行时判断配置:模型名可用环境变量 KRIG_JUDGE_MODEL 覆盖。
+ * 场景:win-desktop 只有 6GB 显存,跑 26b MoE(评测一致率 97.6% 打平 31b);
+ * Mac 默认 31b 不受影响。改配置无需改代码重打包。
+ */
+export function getJudgeConfig(): JudgeConfig {
+  const model = process.env.KRIG_JUDGE_MODEL;
+  return model ? { ...DEFAULT_JUDGE_CONFIG, model } : DEFAULT_JUDGE_CONFIG;
+}
 
 /** OTun 产品背景 system prompt（注入业务语境，防 Gemma 4 因合规顾虑误判 VPN 求助） */
 const SYSTEM_PROMPT = `你是 OTun VPN 产品的推文筛选助手。OTun 是一款面向中国大陆用户的 VPN 工具，
@@ -82,16 +93,22 @@ function parseVerdicts(content: string): Map<string, AIVerdict> {
   return result;
 }
 
+export interface JudgeBatchResult {
+  judged: number;   // 本批实际写回 verdict 的条数
+  worth: number;    // 其中判 worth 的条数
+}
+
 /**
  * 对一批 pending 推文调用 Gemma 4 判断，写回 ai_verdict。
  *
- * Ollama 不可用 → console.error + 推文保持 pending（降级，非静默：有明确日志）。
+ * Ollama 失败 → 推文回退 pending 后 **throw**（fail loud，调用方必须感知；
+ * 曾经在这里静默吞掉导致 UI 显示"判断完成"实则全灭）。
  */
 export async function judgeWithOllama(
   batch: TweetInboxRecord[],
   config: JudgeConfig,
-): Promise<void> {
-  if (batch.length === 0) return;
+): Promise<JudgeBatchResult> {
+  if (batch.length === 0) return { judged: 0, worth: 0 };
 
   const tweetIds = batch.map((t) => t.tweet_id);
   await markAiJudging(tweetIds);
@@ -115,18 +132,19 @@ export async function judgeWithOllama(
     });
     verdictMap = parseVerdicts(response.content);
   } catch (err) {
-    // fail loud：打明确错误日志，推文回退 pending 等模型恢复
-    console.error('[x-ai-judge] Ollama unavailable:', (err as Error).message);
-    // 回退 pending
+    console.error('[x-ai-judge] Ollama call failed:', (err as Error).message);
+    // 回退 pending 后上抛，让调用方(UI/调度器)看到失败
     const db = (await import('@storage/surreal/client')).getDB();
     await db.query(
       `UPDATE tweet_inbox SET status = 'pending' WHERE tweet_id IN $ids`,
       { ids: tweetIds },
     );
-    return;
+    throw err;
   }
 
   // 写回判断结果
+  let judged = 0;
+  let worth = 0;
   for (const tweet of batch) {
     const verdict = verdictMap.get(tweet.tweet_id);
     if (!verdict) {
@@ -139,25 +157,72 @@ export async function judgeWithOllama(
       continue;
     }
     await updateVerdict(tweet.tweet_id, verdict);
+    judged += 1;
+    if (verdict.worth) worth += 1;
   }
 
-  console.log(
-    `[x-ai-judge] judged ${batch.length} tweets, worth=${[...verdictMap.values()].filter((v) => v.worth).length}`,
-  );
+  console.log(`[x-ai-judge] judged ${judged}/${batch.length} tweets, worth=${worth}`);
+  return { judged, worth };
 }
 
 /**
  * 从 tweet_inbox 拉取 pending 推文并批量判断。
  * 供调度器和 IPC handler（X_AI_JUDGE_BATCH）调用。
  *
+ * Ollama 失败会 throw（fail loud），fire-and-forget 的调用方自行 .catch。
+ *
  * @param wsId 传入时只判该 ws 的 pending（per-ws 隔离，防跨 ws 混批）；
  *             不传时判全部 ws 的 pending（向后兼容，但生产路径应始终传 wsId）。
  */
-export async function runJudgeBatch(config: JudgeConfig, wsId?: string): Promise<void> {
+export async function runJudgeBatch(config: JudgeConfig, wsId?: string): Promise<JudgeBatchResult> {
   const pending = await queryPending(config.batchSize, wsId);
   if (pending.length === 0) {
     console.log(`[x-ai-judge] no pending tweets${wsId ? ` for ws=${wsId}` : ''}, skip`);
+    return { judged: 0, worth: 0 };
+  }
+  return judgeWithOllama(pending, config);
+}
+
+// ── 后台连续判断（清积压用）────────────────────────────────────────────
+// 一批 10 条约 3 分钟,积压上千条时手动逐批点不现实;
+// startJudgeDrain 在主进程后台逐批跑完全部 pending,出错即停(fail loud 留痕)。
+const drainingWs = new Set<string>();
+
+export function isDraining(wsId: string): boolean {
+  return drainingWs.has(wsId);
+}
+
+export function startJudgeDrain(config: JudgeConfig, wsId: string): void {
+  if (drainingWs.has(wsId)) {
+    console.log(`[x-ai-judge] drain already running for ws=${wsId}, skip`);
     return;
   }
-  await judgeWithOllama(pending, config);
+  drainingWs.add(wsId);
+  void (async () => {
+    let total = 0;
+    let consecutiveFailures = 0;
+    try {
+      // 上限防失控:1000 批 = 万条,远超真实积压
+      for (let i = 0; i < 1000; i++) {
+        try {
+          const r = await runJudgeBatch(config, wsId);
+          if (r.judged === 0) break;   // pending 清空(或全批解析失败回退,break 防死循环)
+          total += r.judged;
+          consecutiveFailures = 0;
+          console.log(`[x-ai-judge] drain ws=${wsId} progress: ${total} judged so far`);
+        } catch (err) {
+          // 单批失败(26b MoE 偶发 JSON 输出坏掉,评测实测 ~18% 批次)容忍重试;
+          // 连续 3 次才停(Ollama 真挂了的信号),失败推文已回退 pending 不丢
+          consecutiveFailures += 1;
+          console.error(`[x-ai-judge] drain ws=${wsId} batch failed (${consecutiveFailures}/3):`, (err as Error).message);
+          if (consecutiveFailures >= 3) throw err;
+        }
+      }
+      console.log(`[x-ai-judge] drain ws=${wsId} finished, total judged=${total}`);
+    } catch (err) {
+      console.error(`[x-ai-judge] drain ws=${wsId} stopped on error after ${total} judged:`, (err as Error).message);
+    } finally {
+      drainingWs.delete(wsId);
+    }
+  })();
 }

@@ -102,7 +102,9 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   batchSize: 10,
   maxWaitMinutes: 15,
   concurrency: 1,
-  timeoutMs: 30_000,
+  // 实测 gemma4:31b 判 10 条约 3 分钟(2026-07-30 离线评测),再留冷启动加载模型的余量;
+  // 曾设 30s 导致每批必超时、判断静默全灭(pending 积压 2222 条的根因)
+  timeoutMs: 300_000,
 };
 
 export type FeedbackVerdict = 'accept' | 'reject';

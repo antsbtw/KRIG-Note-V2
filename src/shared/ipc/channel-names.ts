@@ -310,6 +310,8 @@ export const IPC_CHANNELS = {
   X_UPSERT_RECIPE:   'x:upsert-recipe',   // renderer → main invoke：新建或更新配方
   X_DELETE_RECIPE:   'x:delete-recipe',   // renderer → main invoke：删除配方
   X_GET_RECIPE_STATS:'x:get-recipe-stats',// renderer → main invoke：查配方采纳率统计
+  X_FEEDBACK_STATS:  'x:feedback-stats',  // renderer → main invoke：近7天 Gemma建议采纳率/捞回漏判数
+  X_MARK_REPLIED:    'x:mark-replied',    // renderer → main invoke：标记推文已回复（已确认视图清场）
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

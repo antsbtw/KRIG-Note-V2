@@ -9,9 +9,9 @@
 
 import { listEnabledRecipes, updateLastRunAt } from '../db/search-recipe-repo';
 import { scanRecipe } from './x-timeline-scan';
-import { runJudgeBatch } from './x-ai-judge';
+import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { cleanExpired } from '../db/tweet-inbox-repo';
-import { DEFAULT_FILTER_CONFIG, DEFAULT_JUDGE_CONFIG } from '@shared/types/x-timeline-types';
+import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TimelineFilterConfig } from '@shared/types/x-timeline-types';
 
 /** 当前活跃的 X webContents id（per-ws Map，由 registerXTimelineHandlers 更新） */
@@ -53,7 +53,7 @@ export function accumulatePending(
 }
 
 const filterConfig: TimelineFilterConfig = DEFAULT_FILTER_CONFIG;
-const judgeConfig: JudgeConfig = DEFAULT_JUDGE_CONFIG;
+const judgeConfig: JudgeConfig = getJudgeConfig();  // 模型可被 KRIG_JUDGE_MODEL 环境变量覆盖
 
 /** 执行一次配方扫描并按需触发 AI 判断 */
 async function runEnabledRecipes(): Promise<void> {

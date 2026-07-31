@@ -128,6 +128,9 @@ export async function queryInbox(opts: {
   lang?: string;
   searchRecipe?: string;           // 按配方切片
   taskId?: string;                 // 按处理任务维度切片（阶段B恒 'judge-value'）
+  humanReviewed?: boolean;         // true=只要人工确认过的(ai_verdict.reason 为 human:*)；
+                                   // false=只要 Gemma 原判未复核的；缺省=不过滤
+  orderBy?: 'fetched_at' | 'confidence';  // confidence=按 Gemma 置信度升序（漏判抽查视图用）
   limit?: number;
   offset?: number;
 }): Promise<TweetInboxRecord[]> {
@@ -142,13 +145,48 @@ export async function queryInbox(opts: {
   if (opts.lang)                   conditions.push('lang = $lang');
   if (opts.searchRecipe)           conditions.push('search_recipe = $searchRecipe');
   if (opts.taskId)                 conditions.push('task_id = $taskId');
+  if (opts.humanReviewed === true)
+    conditions.push(`ai_verdict != NONE AND string::starts_with(ai_verdict.reason, 'human:')`);
+  else if (opts.humanReviewed === false)
+    conditions.push(`ai_verdict != NONE AND !string::starts_with(ai_verdict.reason, 'human:')`);
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const order = opts.orderBy === 'confidence' ? 'ai_verdict.confidence ASC' : 'fetched_at DESC';
 
   const res = await db.query<[TweetInboxRecord[]]>(
-    `SELECT * FROM tweet_inbox ${where} ORDER BY fetched_at DESC LIMIT $limit START $offset`,
+    `SELECT * FROM tweet_inbox ${where} ORDER BY ${order} LIMIT $limit START $offset`,
     { status: opts.status, statuses: opts.statuses ?? null, wsId: opts.wsId ?? null, lang: opts.lang ?? null, searchRecipe: opts.searchRecipe ?? null, taskId: opts.taskId ?? null, limit, offset },
   );
   return res[0] ?? [];
+}
+
+/** 标记推文已回复（已确认视图清场用） */
+export async function markReplied(tweetId: string): Promise<void> {
+  const db = getDB();
+  await db.query(
+    `UPDATE tweet_inbox SET status = 'replied', replied_at = time::now() WHERE tweet_id = $tweet_id`,
+    { tweet_id: tweetId },
+  );
+}
+
+export interface FeedbackStats {
+  suggestedTotal: number;     // 近7天:带 Gemma worth 快照且被人工表态的条数
+  suggestedAccepted: number;  // 其中人工 ✓ 的条数(精确率分子)
+  rescuedFn: number;          // 近7天:Gemma 判 skip 但人工捞回 ✓ 的条数(漏判)
+}
+
+/** 近 7 天 Gemma 建议 vs 人工表态的统计（靠 tweet_feedback.ai_verdict 快照,migration 1.8.7 起有数据） */
+export async function getFeedbackStats(): Promise<FeedbackStats> {
+  const db = getDB();
+  const res = await db.query<[Array<{ c: number }>, Array<{ c: number }>, Array<{ c: number }>]>(
+    `SELECT count() AS c FROM tweet_feedback WHERE created_at > time::now() - 7d AND ai_verdict != NONE AND ai_verdict.worth = true GROUP ALL;
+     SELECT count() AS c FROM tweet_feedback WHERE created_at > time::now() - 7d AND ai_verdict != NONE AND ai_verdict.worth = true AND verdict = 'accept' GROUP ALL;
+     SELECT count() AS c FROM tweet_feedback WHERE created_at > time::now() - 7d AND ai_verdict != NONE AND ai_verdict.worth = false AND verdict = 'accept' GROUP ALL;`,
+  );
+  return {
+    suggestedTotal:    res[0]?.[0]?.c ?? 0,
+    suggestedAccepted: res[1]?.[0]?.c ?? 0,
+    rescuedFn:         res[2]?.[0]?.c ?? 0,
+  };
 }
 
 /** TTL 清理：删除 expires_at 已过期的推文 */

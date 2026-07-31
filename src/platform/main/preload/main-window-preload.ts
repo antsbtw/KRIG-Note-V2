@@ -1003,7 +1003,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── X 时间线智能筛选 Review Queue（Phase 2）──
   xTimeline: {
-    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; limit?: number; offset?: number }) {
+    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number }) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
     },
     runRecipe(recipeId: string, wsId: string, targetWcId: number) {
@@ -1034,5 +1034,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_DELETE_RECIPE, { recipeId }),
     getRecipeStats: (recipeId: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_GET_RECIPE_STATS, { recipeId }),
+    feedbackStats: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_FEEDBACK_STATS),
+    markReplied: (tweetId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_MARK_REPLIED, { tweetId }),
   },
 });
