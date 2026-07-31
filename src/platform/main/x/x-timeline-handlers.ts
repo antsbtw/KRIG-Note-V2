@@ -14,7 +14,7 @@
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
-import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation } from '../db/tweet-inbox-repo';
+import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict } from '../db/tweet-inbox-repo';
 import { googleTranslate } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch } from './x-ai-judge';
@@ -145,6 +145,9 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'invalid payload: tweet_id and verdict required' };
     }
     try {
+      // 先抄 Gemma 原始判断快照：下面 updateVerdict 会用 human:* 覆盖 inbox 的 ai_verdict，
+      // 且 inbox 有 7 天 TTL —— 此快照是准确率对账的唯一持久来源（migration 1.8.7）
+      const aiVerdictSnapshot = await getGenuineAiVerdict(p.tweet_id);
       await insertFeedback({
         tweet_id:      p.tweet_id,
         text:          p.text ?? '',
@@ -154,6 +157,7 @@ export function registerXTimelineHandlers(): void {
         reason_tag:    p.reason_tag,
         source_recipe: p.source_recipe,
         created_at:    new Date().toISOString(),
+        ai_verdict:    aiVerdictSnapshot,
       });
       // 同步更新 tweet_inbox 状态：accept → worth，reject → skip（UI 不再展示 skip）
       const newStatus = p.verdict === 'accept' ? 'worth' : 'skip';

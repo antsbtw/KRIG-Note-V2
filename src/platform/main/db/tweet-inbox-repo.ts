@@ -192,7 +192,8 @@ export async function insertFeedback(fb: TweetFeedback): Promise<void> {
       verdict:       $verdict,
       reason_tag:    $reason_tag,
       source_recipe: $source_recipe,
-      created_at:    $created_at
+      created_at:    $created_at,
+      ai_verdict:    $ai_verdict
     }`,
     {
       tweet_id:      fb.tweet_id,
@@ -203,8 +204,25 @@ export async function insertFeedback(fb: TweetFeedback): Promise<void> {
       reason_tag:    fb.reason_tag ?? undefined,
       source_recipe: fb.source_recipe ?? undefined,
       created_at:    new Date(fb.created_at),
+      ai_verdict:    fb.ai_verdict ?? undefined,
     },
   );
+}
+
+/**
+ * 取 Gemma 对某推文的原始判断（准确率对账用）。
+ * tweet_inbox.ai_verdict 会被人工标注覆盖成 reason='human:*'（见 X_SUBMIT_FEEDBACK），
+ * 覆盖态不是 Gemma 的判断 → 返回 undefined；重复投票时上一次的覆盖态也因此不会被误抄。
+ */
+export async function getGenuineAiVerdict(tweetId: string): Promise<AIVerdict | undefined> {
+  const db = getDB();
+  const res = await db.query<[Array<{ ai_verdict?: AIVerdict }>]>(
+    `SELECT ai_verdict FROM tweet_inbox WHERE tweet_id = $tweet_id LIMIT 1`,
+    { tweet_id: tweetId },
+  );
+  const verdict = res[0]?.[0]?.ai_verdict;
+  if (!verdict || typeof verdict.reason !== 'string' || verdict.reason.startsWith('human:')) return undefined;
+  return verdict;
 }
 
 /** 查询 feedback 样本（Phase 3b few-shot 用） */

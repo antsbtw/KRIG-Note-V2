@@ -116,4 +116,7 @@ export interface TweetFeedback {
   reason_tag?: string;            // 可选：用户点击时带的快速标签
   source_recipe?: string;         // 来自哪个 search_recipe id
   created_at: string;             // ISO datetime
+  ai_verdict?: AIVerdict;         // Gemma 原始判断快照（标注时从 tweet_inbox 抄录；
+                                  // tweet_inbox.ai_verdict 会被人工标注覆盖且 7 天 TTL 删除，
+                                  // 此快照是准确率对账的唯一持久来源）
 }

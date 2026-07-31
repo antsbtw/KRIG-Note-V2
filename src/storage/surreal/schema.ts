@@ -619,3 +619,26 @@ export async function migration_1_8_6(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.8.6'), now },
   );
 }
+
+/**
+ * 1.8.7 — tweet_feedback 加 ai_verdict 快照字段。
+ *
+ * 背景:Gemma 的判断只落在 tweet_inbox.ai_verdict,但 (a) X_SUBMIT_FEEDBACK 标注时会用
+ * 人工判定(reason='human:*')覆盖它,(b) tweet_inbox 有 7 天 TTL。两者叠加导致
+ * 「Gemma 当时怎么判的」在标注后即永久丢失,人工 vs AI 的准确率对账无从算起。
+ * 此字段在标注写入 tweet_feedback 时抄录 Gemma 原始判断(human:* 覆盖态不抄),永久保存。
+ * 存量 feedback 无法回填(原始判断已被覆盖销毁),只对新标注生效。
+ */
+const SCHEMA_VERSION_1_8_7 = `
+DEFINE FIELD IF NOT EXISTS ai_verdict ON tweet_feedback TYPE option<object> FLEXIBLE;
+`;
+
+export async function migration_1_8_7(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_7);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.7', appliedAt = $now,
+     description = 'Add ai_verdict snapshot to tweet_feedback (preserve Gemma original verdict for accuracy accounting)'`,
+    { rid: new RecordId('schema_version', '1.8.7'), now },
+  );
+}
