@@ -1,22 +1,23 @@
 /**
- * PdfScrollContent — PDF scroll 模式的内容渲染组件(L5)
+ * PdfScrollContent — PDF 内容渲染组件(L5,scroll + paged 两模式共用)
  *
- * Host 内 PDF scroll 分支挂此组件。职责:
- * 1. 从 ebook-library 拿 buffer + pdf-viewer.loadDocument 拿 handle
- * 2. 挂 PDFViewerCanvas(pdfjs PDFViewer 真渲染)
- * 3. KRIG 自定义层接入(由 PDFViewerCanvas 桥接驱动):
+ * Host 内 PDF 分支挂此组件。职责:
+ * 1. 挂 PDFViewerCanvas(pdfjs PDFViewer 真渲染;handle 由 Host loadDocument
+ *    单次加载后注入 — Phase D 后 Host/内容组件不再各自 parse 一遍文档)
+ * 2. KRIG 自定义层接入(由 PDFViewerCanvas 桥接驱动):
  *    - AnnotationLayer  React portal 到 pdfjs PDFPageView.div(C5 矩形标注)
  *    - vocab-highlight  通过 onTextLayerReady 回调每页扫词
  *    - text selection   通过 usePdfTextSelection hook 监听 window mouseup
  *
- * 对照旧 FixedPageContent(已删):基于 PDFRenderer 命令式 canvas 渲染 +
- * 虚拟滚动。本组件改走 pdfjs PDFViewer 高层组件,scroll 由 pdfjs 内部管理。
+ * Phase D(2026-08-02):全屏 paged 模式并入本组件 — pageMode='paged' 时
+ * PDFViewerCanvas 走 ScrollMode.PAGE(+双页 SpreadMode.ODD),链接/标注/选区/
+ * 生词高亮与 scroll 同一套管线。旧 FullscreenPageView(命令式 PDFRenderer
+ * spread 渲染)已删。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type {
   PdfViewerApi,
   DocumentHandle,
@@ -33,6 +34,12 @@ import {
 } from './hooks/use-pdf-text-selection';
 
 interface Props {
+  /** 文档句柄 — Host loadDocument 后注入;生命周期(destroyDocument)由 Host 管 */
+  handle: DocumentHandle;
+  /** 页面组织模式:'scroll' 连续滚动(默认)/ 'paged' 全屏翻页 */
+  pageMode?: 'scroll' | 'paged';
+  /** paged 模式分页样式:'single' 单页 / 'double' 双页并排 */
+  pagedSpread?: 'single' | 'double';
   /** 初始 scale 模式或数值(恢复上次阅读 scale 用)
    *  - 'page-width' / 'page-fit' / 'auto' / 'page-actual' fit 关键字
    *  - 数字字符串(如 '1.5')绝对 scale
@@ -70,6 +77,9 @@ interface Props {
 }
 
 export function PdfScrollContent({
+  handle,
+  pageMode = 'scroll',
+  pagedSpread = 'single',
   initialFitMode = 'page-width',
   initialPage = null,
   onPageChange,
@@ -84,8 +94,6 @@ export function PdfScrollContent({
 }: Props) {
   // PDFViewerCanvas ref — 给 Host 注册的命令式 API 用
   const canvasRef = useRef<PDFViewerCanvasHandle | null>(null);
-  const [handle, setHandle] = useState<DocumentHandle | null>(null);
-  const [error, setError] = useState<string | null>(null);
   // 每页 wrapper div 引用(pdfjs PDFPageView.div),AnnotationLayer 自管 root 挂在内
   const [mountedPages, setMountedPages] = useState<Map<number, HTMLElement>>(
     () => new Map(),
@@ -110,43 +118,6 @@ export function PdfScrollContent({
 
   // 监听 mouseup 选区 — 用 cssScaleFactor(DOM px ↔ PDF point 转换),不是 pdfjs scale
   usePdfTextSelection(textLayerRefsRef, cssScaleFactor, onTextSelected);
-
-  // 加载 PDF
-  useEffect(() => {
-    let cancelled = false;
-    let localHandle: DocumentHandle | null = null;
-    const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-    const pdfViewer = requireCapabilityApi<PdfViewerApi>('pdf-viewer');
-
-    void (async () => {
-      try {
-        const result = await library.getData();
-        if (!result || cancelled) return;
-        const bytes =
-          result.data instanceof Uint8Array
-            ? result.data
-            : new Uint8Array(result.data as ArrayBuffer);
-        const h = await pdfViewer.loadDocument(bytes);
-        if (cancelled) {
-          void pdfViewer.destroyDocument(h);
-          return;
-        }
-        localHandle = h;
-        setHandle(h);
-      } catch (err) {
-        console.error('[PdfScrollContent] load failed:', err);
-        if (!cancelled) setError(String(err));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (localHandle) {
-        const pdfViewer = requireCapabilityApi<PdfViewerApi>('pdf-viewer');
-        void pdfViewer.destroyDocument(localHandle);
-      }
-    };
-  }, []);
 
   // PDFViewerCanvas 回调:页 DOM mount 完成 → 记录 div + 反推 scale=1 尺寸
   const handlePageMounted = useCallback(
@@ -285,18 +256,6 @@ export function PdfScrollContent({
     };
   }, []);
 
-  if (error) {
-    return (
-      <div className="krig-ebook-empty">
-        <div>PDF 加载失败</div>
-        <pre style={{ fontSize: 11 }}>{error}</pre>
-      </div>
-    );
-  }
-  if (!handle) {
-    return <div className="krig-ebook-loading">Loading PDF...</div>;
-  }
-
   const pdfViewer = requireCapabilityApi<PdfViewerApi>('pdf-viewer');
   const PDFViewerCanvas = pdfViewer.PDFViewerCanvas;
 
@@ -305,6 +264,8 @@ export function PdfScrollContent({
       <PDFViewerCanvas
         ref={canvasRef}
         handle={handle}
+        pageMode={pageMode}
+        pagedSpread={pagedSpread}
         initialFitMode={initialFitMode}
         initialPage={initialPage}
         onPageChange={onPageChange}

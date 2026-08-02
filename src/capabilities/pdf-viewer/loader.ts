@@ -138,13 +138,13 @@ export async function getOutline(handle: DocumentHandle): Promise<TOCItem[]> {
   const rec = getRecord(handle);
   const outline = (await rec.proxy.getOutline()) as RawOutlineItem[] | null;
   if (!outline || outline.length === 0) return [];
-  return outline.map((item) => convertOutlineItem(item, rec));
+  return Promise.all(outline.map((item) => convertOutlineItem(item, rec)));
 }
 
-function convertOutlineItem(
+async function convertOutlineItem(
   item: RawOutlineItem,
   rec: DocumentRecord,
-): TOCItem {
+): Promise<TOCItem> {
   // destRef 由原始 dest 序列化(JSON 化数组 / 直接用字符串名)
   // 反查时 LinkService.goToDestination 接 raw dest,故同时存 raw → ref 双向。
   let destRef = '';
@@ -156,10 +156,34 @@ function convertOutlineItem(
   return {
     label: item.title ?? '',
     destRef,
+    pageNum: await resolveDestPage(rec, item.dest),
     children: item.items && item.items.length > 0
-      ? item.items.map((child) => convertOutlineItem(child, rec))
+      ? await Promise.all(item.items.map((child) => convertOutlineItem(child, rec)))
       : undefined,
   };
+}
+
+/**
+ * dest → 目标页号(1-based)。named dest 先 getDestination 展开成 explicit 数组,
+ * 数组首元素是页 ref,getPageIndex 反查。解析失败(坏 dest / 无 dest)→ null。
+ * (原 ebook-rendering PDFRenderer.resolveDestPage 迁入,Phase D 收口)
+ */
+async function resolveDestPage(
+  rec: DocumentRecord,
+  dest: string | unknown[] | undefined,
+): Promise<number | null> {
+  if (dest === undefined || dest === null) return null;
+  try {
+    const explicitDest =
+      typeof dest === 'string' ? await rec.proxy.getDestination(dest) : dest;
+    if (!Array.isArray(explicitDest) || explicitDest.length === 0) return null;
+    const pageIndex = await rec.proxy.getPageIndex(
+      explicitDest[0] as Parameters<PDFDocumentProxy['getPageIndex']>[0],
+    );
+    return pageIndex + 1;
+  } catch {
+    return null;
+  }
 }
 
 // ── 页面 labels ──

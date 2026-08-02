@@ -276,7 +276,7 @@ function findTextNode(el: Element): Text | null {
  * 重扫所有已渲染 page —— vocab 列表变化后调。
  *
  * 查询所有 .textLayer 元素(主区 .krig-ebook-content__page-wrapper 和
- * 全屏 .krig-ebook-paged__page-wrapper 内均有);wrapper = textLayer.parentElement。
+ * 全屏 paged 模式同为 pdfjs .page 内均有);wrapper = textLayer.parentElement。
  *
  * 注:仅扫当下已 mount 的 textLayer;未来 scroll 进可见区 / 翻到的新页由
  * onTextLayerRendered 回调单独触发,不在此函数范围。

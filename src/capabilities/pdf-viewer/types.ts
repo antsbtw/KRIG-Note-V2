@@ -40,6 +40,11 @@ export interface DocumentHandle {
 export interface TOCItem {
   label: string;
   destRef: string;
+  /**
+   * dest 解析出的目标页(1-based);dest 缺失 / 解析失败时 null。
+   * ebook-rendering Host 的 getTOC(OutlinePanel 按页跳转)消费。
+   */
+  pageNum: number | null;
   children?: TOCItem[];
 }
 
@@ -93,6 +98,19 @@ export interface PDFViewerCanvasProps {
 
   /** 初始 fit 模式;默认 'page-width' */
   initialFitMode?: FitMode;
+
+  /**
+   * 页面组织模式(Phase D 全屏翻页重写,2026-08-02):
+   * - 'scroll'(默认):ScrollMode.VERTICAL 连续滚动
+   * - 'paged':ScrollMode.PAGE 翻页式(全屏阅读)— wheel 手势 / ←→ 键翻页,
+   *   链接 / 标注 / textLayer 与 scroll 同一套 pdfjs 管线
+   * 可动态切换,pdfjs 保持 currentPageNumber 不变;切换时 fit 意图重置为 page-fit
+   * (进/出全屏统一回整页适配,2026-07-06 拍板延续)。
+   */
+  pageMode?: 'scroll' | 'paged';
+
+  /** pageMode='paged' 时的分页样式:'single' 单页 / 'double' 双页并排(SpreadMode.ODD)*/
+  pagedSpread?: 'single' | 'double';
 
   /** 当前页号变化(scrollPageIntoView / 用户滚动触发)*/
   onPageChange?: (page: number) => void;

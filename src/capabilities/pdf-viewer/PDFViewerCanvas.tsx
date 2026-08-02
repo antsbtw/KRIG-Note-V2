@@ -32,7 +32,7 @@ import {
   AnnotationEditorType,
   AnnotationMode,
 } from 'pdfjs-dist';
-import { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
+import { PDFViewer, ScrollMode, SpreadMode } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import type {
   FitMode,
   PDFViewerCanvasHandle,
@@ -71,6 +71,15 @@ const WHEEL_DRAWING_DELAY = 400;  // 真渲染 postpone(<1000 才生效,期间�
 // `scrollPageIntoView + origin 偏移修正` 每 tick 锚点不同 → 视觉跳页感的真凶之一
 const GESTURE_TIMEOUT_MS = 100;
 
+/**
+ * paged 模式翻页手势参数(Phase D 全屏翻页重写,承旧 FullscreenPageView 手感):
+ * - 同一手势(连续 wheel 事件,gap < PAGED_GESTURE_GAP_MS)内只翻一屏
+ * - 累积 |delta| 过阈值才翻,过滤 trackpad 微动
+ * - GAP 只需覆盖 trackpad 惯性末尾(~150ms)
+ */
+const PAGED_SWIPE_THRESHOLD = 30;
+const PAGED_GESTURE_GAP_MS = 150;
+
 export const PDFViewerCanvas = forwardRef<
   PDFViewerCanvasHandle,
   PDFViewerCanvasProps
@@ -79,6 +88,8 @@ export const PDFViewerCanvas = forwardRef<
     handle,
     initialPage,
     initialFitMode = 'page-width',
+    pageMode = 'scroll',
+    pagedSpread = 'single',
     onPageChange,
     onScaleChange,
     onTextLayerReady,
@@ -99,6 +110,29 @@ export const PDFViewerCanvas = forwardRef<
     createFitController(() => viewerInstanceRef.current),
   );
   const fit = fitRef.current;
+
+  // ── 页面组织模式(scroll 连续滚动 / paged 全屏翻页)──
+  //
+  // ref 同步:wheel / keydown 监听器只挂一次(空 deps),经 ref 读最新模式,
+  // 避免重挂丢手势局部 state(memory: event-listener-must-use-ref-for-business-fn)。
+  const pageModeRef = useRef(pageMode);
+  const pagedSpreadRef = useRef(pagedSpread);
+  useEffect(() => {
+    pageModeRef.current = pageMode;
+    pagedSpreadRef.current = pagedSpread;
+  }, [pageMode, pagedSpread]);
+
+  /** 把当前模式 props 应用到 viewer(mount / handle 重建 / props 变化三处共用)*/
+  const applyPageMode = (viewer: PDFViewer): void => {
+    const targetScroll =
+      pageModeRef.current === 'paged' ? ScrollMode.PAGE : ScrollMode.VERTICAL;
+    const targetSpread =
+      pageModeRef.current === 'paged' && pagedSpreadRef.current === 'double'
+        ? SpreadMode.ODD
+        : SpreadMode.NONE;
+    if (viewer.scrollMode !== targetScroll) viewer.scrollMode = targetScroll;
+    if (viewer.spreadMode !== targetSpread) viewer.spreadMode = targetSpread;
+  };
 
   // 把最新 callbacks 存 ref,避免 useEffect 重跑(callbacks 变化只更 ref,不触发 cleanup)
   const callbacksRef = useRef({
@@ -153,6 +187,10 @@ export const PDFViewerCanvas = forwardRef<
     services.linkService.setViewer(viewer);
 
     viewerInstanceRef.current = viewer;
+
+    // 初始页面组织模式(scroll / paged)— setDocument 前设好,避免加载后再重排。
+    // handle 重建(换书)也走这里;props 动态切换走下方独立 effect。
+    applyPageMode(viewer);
 
     // ── 首屏渲染兜底守卫(2026-07-05)──
     //
@@ -275,6 +313,26 @@ export const PDFViewerCanvas = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle]);
 
+  // ── pageMode / pagedSpread 动态切换(进/出全屏)──
+  //
+  // pdfjs scrollMode/spreadMode setter 内部保持 currentPageNumber(页面连续性
+  // 由 pdfjs 自己保证,不再需要旧 lastPdfPageRef 式 remount 缝合)。
+  // 切换后 fit 意图统一重置 page-fit:进全屏 = 一屏一整页;退全屏 = 打开时的
+  // 默认整页适配(2026-07-06 拍板)。首次 mount 跳过 — 初始 fit 由 onPagesInit
+  // 设 initialFitMode,不能在这里覆盖。
+  const modeSwitchedOnceRef = useRef(false);
+  useEffect(() => {
+    const viewer = viewerInstanceRef.current;
+    if (!viewer) return;
+    if (!modeSwitchedOnceRef.current) {
+      modeSwitchedOnceRef.current = true;
+      return; // 初始模式已在主 effect applyPageMode 应用
+    }
+    applyPageMode(viewer);
+    fit.setFit('page-fit');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageMode, pagedSpread]);
+
   // ── Cmd/Ctrl+wheel 缩放(含 trackpad pinch)──
   //
   // **严格对齐 mozilla pdfjs viewer.js 真实源码 onWheel + _accumulateFactor**
@@ -300,6 +358,52 @@ export const PDFViewerCanvas = forwardRef<
     // 累积器(对应 mozilla _wheelUnusedFactor / _wheelUnusedTicks)
     let unusedFactor = 1;
     let unusedTicks = 0;
+
+    // paged 翻页手势状态(承旧 FullscreenPageView:同手势只翻一屏)
+    let pagedLastEventTime = 0;
+    let pagedFiredInGesture = false;
+    let pagedAccDelta = 0;
+
+    /**
+     * paged 模式的普通 wheel(双指滑动)→ 翻页。
+     *
+     * 页面放大溢出容器时优先让原生滚动平移,只在滚到边缘后继续滑才翻页
+     * (page-fit 常态下容器不可滚,直接走翻页)。
+     */
+    const handlePagedWheel = (e: WheelEvent, viewer: PDFViewer): void => {
+      const dx = e.deltaX;
+      const dy = e.deltaY;
+      const dominant = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+      if (Math.abs(dy) >= Math.abs(dx)) {
+        const maxScrollTop = container.scrollHeight - container.clientHeight;
+        if (maxScrollTop > 1) {
+          const atTop = container.scrollTop <= 0;
+          const atBottom = container.scrollTop >= maxScrollTop - 1;
+          if ((dy > 0 && !atBottom) || (dy < 0 && !atTop)) return; // 原生滚动
+        }
+      } else {
+        const maxScrollLeft = container.scrollWidth - container.clientWidth;
+        if (maxScrollLeft > 1) {
+          const atLeft = container.scrollLeft <= 0;
+          const atRight = container.scrollLeft >= maxScrollLeft - 1;
+          if ((dx > 0 && !atRight) || (dx < 0 && !atLeft)) return; // 原生滚动
+        }
+      }
+      e.preventDefault();
+      const now = Date.now();
+      if (now - pagedLastEventTime > PAGED_GESTURE_GAP_MS) {
+        pagedFiredInGesture = false;
+        pagedAccDelta = 0;
+      }
+      pagedLastEventTime = now;
+      if (pagedFiredInGesture) return;
+      pagedAccDelta += dominant;
+      if (Math.abs(pagedAccDelta) < PAGED_SWIPE_THRESHOLD) return;
+      if (pagedAccDelta > 0) viewer.nextPage();
+      else viewer.previousPage();
+      pagedFiredInGesture = true;
+      pagedAccDelta = 0;
+    };
 
     // mozilla _accumulateFactor 严格复刻
     const accumulateFactor = (previousScale: number, factor: number): number => {
@@ -357,8 +461,12 @@ export const PDFViewerCanvas = forwardRef<
         Math.abs(scaleFactor - 1) < 0.05 &&
         e.deltaZ === 0;
 
-      // 非 pinch 且非 Cmd/Ctrl + wheel:不处理(让浏览器/容器正常滚动)
-      if (!isPinchToZoom && !e.ctrlKey && !e.metaKey) return;
+      // 非 pinch 且非 Cmd/Ctrl + wheel:scroll 模式让容器正常滚动;
+      // paged 模式接管为翻页手势(Phase D 全屏翻页重写)
+      if (!isPinchToZoom && !e.ctrlKey && !e.metaKey) {
+        if (pageModeRef.current === 'paged') handlePagedWheel(e, viewer);
+        return;
+      }
 
       e.preventDefault();
       fit.clearFit(); // wheel/pinch 手动缩放 → 退出 fit 意图
@@ -410,6 +518,30 @@ export const PDFViewerCanvas = forwardRef<
       } else if (e.key === '0') {
         e.preventDefault();
         fit.setFit('page-width'); // Cmd+0 = fit-width,记住意图供几何变更重算
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // ── paged 模式键盘翻页(←/→ / PageUp/PageDown / Space)──
+  // 承旧 FullscreenPageView 键位;scroll 模式不接管(容器原生滚动)。
+  // EBookView 的 ←/→ 只在 EPUB(reflowable)分支消费,与此无冲突。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      if (pageModeRef.current !== 'paged') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+      const viewer = viewerInstanceRef.current;
+      if (!viewer) return;
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        viewer.previousPage();
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        viewer.nextPage();
       }
     };
     window.addEventListener('keydown', handler);

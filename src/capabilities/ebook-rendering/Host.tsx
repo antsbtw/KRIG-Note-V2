@@ -5,13 +5,15 @@
  * 内部封装 pdfjs-dist(C2)+ foliate-js(C3 起);view 不直 import 任何 npm。
  *
  * 数据通路(订阅模式):
- *   ebook-library.onBookOpened(推送)
- *     ↓ Host 内 useEffect 订阅
+ *   ebook-library.onBookOpened(推送)→ view ref 调 loadFromInfo
+ *     ↓
  *   library.getData() 拿 Uint8Array
  *     ↓
- *   PDFRenderer.load(buffer)
- *     ↓
- *   FixedPageContent 渲染(by IFixedPageRenderer)
+ *   PDF:pdf-viewer.loadDocument → DocumentHandle → PdfScrollContent
+ *        (scroll / paged 两模式同一条 pdfjs PDFViewer 管线;Phase D 2026-08-02
+ *        旧 PDFRenderer + FullscreenPageView 命令式渲染已删,元数据 API
+ *        getTOC / searchText / capturePageRect / hasTextContent 走 pdf-viewer)
+ *   EPUB:EPUBRenderer.load(buffer) → ReflowableContent
  *
  * view 端只感知 props/callbacks/ref,不感知 pdfjs-dist 的存在。
  *
@@ -29,25 +31,25 @@ import {
 } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi, EBookLoadedInfo } from '@capabilities/ebook-library/types';
+import type {
+  PdfViewerApi,
+  DocumentHandle,
+  TOCItem as PdfTOCItem,
+} from '@capabilities/pdf-viewer/types';
 import {
   type IBookRenderer,
-  type IFixedPageRenderer,
   type EBookFileType,
   type BookPosition,
   type TOCItem,
-  isFixedPage,
   isReflowable,
   detectFileType,
 } from './types';
-import { PDFRenderer } from './pdf';
 import { EPUBRenderer } from './epub';
 import { ReflowableContent } from './reflowable-content';
 import { PdfScrollContent } from './pdf-scroll-content';
-import {
-  FullscreenPageView,
-  type FullscreenPageViewHandle,
-  type FullscreenPagedLayout,
-} from './fullscreen/FullscreenPageView';
+
+/** paged 全屏的分页样式(原 FullscreenPageView 的 FullscreenPagedLayout,Phase D 迁入)*/
+export type FullscreenPagedLayout = 'single' | 'double';
 
 /** view 通过 ref 调用的命令式 API(EBookHostHandle)*/
 export interface EBookHostHandle {
@@ -220,7 +222,8 @@ export interface EBookHostProps {
   /**
    * PDF 渲染模式:
    * - 'scroll'(默认):FixedPageContent 连续滚动 + 虚拟化(view 主区,非全屏)
-   * - 'paged':FullscreenPageView 翻页式 + 不滚动(全屏 navSideCollapsed=true)
+   * - 'paged':翻页式(全屏 navSideCollapsed=true)— Phase D 后与 scroll 同走
+   *   PdfScrollContent/pdfjs 管线(ScrollMode.PAGE),仅组织模式不同
    *
    * EPUB 不受此 prop 影响 — foliate-js 自身分页,沿用 ReflowableContent。
    */
@@ -228,8 +231,6 @@ export interface EBookHostProps {
   /** paged 布局下的分页样式 — 'single' 单页 / 'double' 双页并排(view 按容器宽高比自适应)*/
   pagedLayout?: FullscreenPagedLayout;
 }
-
-const FIT_WIDTH_PADDING = 40;
 
 export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EBookHost(
   {
@@ -260,24 +261,27 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     () => requireCapabilityApi<EBookLibraryApi>('ebook-library'),
     [],
   );
+  const pdfViewer = useMemo(
+    () => requireCapabilityApi<PdfViewerApi>('pdf-viewer'),
+    [],
+  );
 
+  // EPUB renderer(PDF 不再走 renderer — Phase D 后走 pdf-viewer handle)
   const rendererRef = useRef<IBookRenderer | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const fitWidthRef = useRef(true);
-  const scaleRef = useRef(1.0);
 
   const [rendererReady, setRendererReady] = useState(false);
   const [renderer, setRenderer] = useState<IBookRenderer | null>(null);
+  // PDF 文档句柄 — Host 单点加载/销毁,PdfScrollContent 只消费
+  const pdfHandleRef = useRef<DocumentHandle | null>(null);
+  const [pdfHandle, setPdfHandle] = useState<DocumentHandle | null>(null);
   const [scale, setScale] = useState(1.0);
   const [fitWidth, setFitWidth] = useState(true);
   const [restorePage, setRestorePage] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // PdfScrollContent / FullscreenPageView 注册的 gotoPage 回调
+  // PdfScrollContent 注册的 gotoPage 回调(toolbar 跳页 / TOC / 跳源共用)
   const gotoPageRef = useRef<((page: number) => void) | null>(null);
-  const registerGotoPage = useCallback((fn: (page: number) => void) => {
-    gotoPageRef.current = fn;
-  }, []);
   // PdfScrollContent 注册的完整命令式 API(toolbar 缩放百分比 / fit-width 走此通道)
   const scrollApiRef = useRef<{
     setScale: (s: number) => void;
@@ -296,9 +300,9 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     [],
   );
 
-  // 当前 PDF 页号 — paged ↔ scroll 切换时,FixedPageContent / FullscreenPageView
-  // 重 mount,把这个值作为 initialPage 喂回去,保持页面连续(用户在 paged 翻到
-  // 100 页 → ESC 退全屏 → scroll 模式打开后停在 100 页附近)
+  // 当前 PDF 页号 — Phase D 后 scroll ↔ paged 切换不再重挂组件(pdfjs 自持
+  // currentPageNumber),此值只用于**同一本书重新打开 / handle 重建**时作
+  // initialPage 喂回,保持页面连续。
   const lastPdfPageRef = useRef<number | null>(null);
   const handlePdfPageChange = useCallback(
     (page: number) => {
@@ -308,14 +312,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     [onPageChange],
   );
 
-  // 同步 ref(供 useEffect 闭包内拿最新值)
-  useEffect(() => {
-    fitWidthRef.current = fitWidth;
-  }, [fitWidth]);
-  useEffect(() => {
-    scaleRef.current = scale;
-  }, [scale]);
-
   // ── 核心加载逻辑 ──
 
   const loadFromInfo = useCallback(
@@ -324,10 +320,15 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         setLoading(true);
         setRendererReady(false);
         setRenderer(null);
+        setPdfHandle(null);
 
-        // 销毁旧 renderer
+        // 销毁旧 renderer / 旧 PDF handle
         rendererRef.current?.destroy();
         rendererRef.current = null;
+        if (pdfHandleRef.current) {
+          void pdfViewer.destroyDocument(pdfHandleRef.current);
+          pdfHandleRef.current = null;
+        }
 
         // 拿 buffer
         const result = await library.getData();
@@ -337,6 +338,39 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         }
 
         const fileType = info.fileType ?? detectFileType(result.fileName);
+        const pos = info.lastPosition;
+
+        // 缩放模式:打开一律回默认整页适配(用户拍板 2026-07-06)——
+        // 不再恢复上次的绝对 scale(残留 150% 会截掉一大页)。PDF 走 page-fit
+        // 由 PdfScrollContent 消费;fitWidth=true 保持「适配模式(非绝对 scale)」语义,
+        // scale 状态保持 1.0(仅当用户手动缩放后经 onScaleChange 更新)。
+        setFitWidth(true);
+
+        // ── PDF:pdf-viewer 单点加载(Phase D:不再有 PDFRenderer 二次 parse)──
+        if (fileType === 'pdf') {
+          const bytes =
+            result.data instanceof Uint8Array
+              ? result.data
+              : new Uint8Array(result.data as ArrayBuffer);
+          const handle = await pdfViewer.loadDocument(bytes);
+          pdfHandleRef.current = handle;
+          setPdfHandle(handle);
+
+          // 不消费 pos.scale:初始渲染统一 page-fit,避免首屏被截。
+          onLoadComplete?.({
+            totalPages: handle.totalPages,
+            fileType,
+            renderMode: 'fixed-page',
+          });
+
+          setRestorePage(pos?.page && pos.page > 1 ? pos.page : null);
+          setRendererReady(true);
+          setLoading(false);
+          onReadyChange?.(true);
+          return;
+        }
+
+        // ── EPUB(reflowable)──
         const r = createRendererFor(fileType);
         if (!r) {
           console.warn(`[ebook-rendering] renderer for ${fileType} not yet implemented`);
@@ -344,8 +378,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           return;
         }
 
-        // result.data 在 IPC 序列化后是 Uint8Array;PDFRenderer.load 接 ArrayBuffer
-        // 直接传 Uint8Array,内部判类型转换
+        // result.data 在 IPC 序列化后是 Uint8Array;renderer.load 接 ArrayBuffer
         const data = result.data;
         const buffer =
           data instanceof Uint8Array
@@ -358,22 +391,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         await r.load(buffer);
         rendererRef.current = r;
 
-        const pos = info.lastPosition;
-
-        // 缩放模式:打开一律回默认整页适配(用户拍板 2026-07-06)——
-        // 不再恢复上次的绝对 scale(残留 150% 会截掉一大页)。PDF 走 page-fit
-        // 由 PdfScrollContent 消费;fitWidth=true 保持「适配模式(非绝对 scale)」语义,
-        // scale 状态保持 1.0(仅当用户手动缩放后经 onScaleChange 更新)。
-        setFitWidth(true);
-
-        if (isFixedPage(r)) {
-          // 不消费 pos.scale:初始渲染统一 page-fit,避免首屏被截。
-          onLoadComplete?.({
-            totalPages: r.getTotalPages(),
-            fileType,
-            renderMode: 'fixed-page',
-          });
-        } else if (isReflowable(r)) {
+        if (isReflowable(r)) {
           // EPUB 恢复 — 走 cfi(用户视觉位置精确锚点):
           //   全屏布局对齐设计(2026-05-23):panel spread 单 column 宽 = view 主区
           //   单 column 宽,paginator 切分文字位置一致 → cfi.goTo 在两 view 落到
@@ -402,40 +420,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         setRendererReady(true);
         setLoading(false);
         onReadyChange?.(true);
-
-        // 适应宽度:等 DOM 更新后计算(**仅 paged 全屏用旧 PDFRenderer 路径**)。
-        // scroll 主分支的初始适配走 pdfjs page-fit(见 render 处 initialFitMode),
-        // 不经这段自管 scale 计算 —— 否则会把 width-fit 百分比错报给 toolbar。
-        if (pdfLayoutRef.current === 'paged' && isFixedPage(r)) {
-          const fr = r;
-          requestAnimationFrame(() => {
-            const dims = fr.getPageDimensions();
-            if (dims.length > 0 && containerRef.current) {
-              const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
-              const pageW = dims[0].width;
-              const rawScale = cw / pageW;
-              // 防御:容器还没布局好(cw<=0)或算出异常 scale 时,fallback 1.0,
-              // 后续 ResizeObserver / window resize 会再算一次
-              const newScale =
-                cw > 0 && Number.isFinite(rawScale) && rawScale > 0.1
-                  ? rawScale
-                  : 1.0;
-              console.log(
-                '[ebook-rendering/Host] fit-width init: cw=',
-                cw,
-                'pageW=',
-                pageW,
-                'rawScale=',
-                rawScale,
-                'finalScale=',
-                newScale,
-              );
-              setScale(newScale);
-              fr.setScale(newScale);
-              onScaleChange?.(newScale);
-            }
-          });
-        }
       } catch (err) {
         console.error('[ebook-rendering/Host] Failed to load:', err);
         setLoading(false);
@@ -443,8 +427,8 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     },
     [
       library,
+      pdfViewer,
       onLoadComplete,
-      onScaleChange,
       onReadyChange,
       onEpubTextSelected,
       onEpubSelectionDismiss,
@@ -463,66 +447,29 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   // EBOOK_LOADED → view 收到 → ref 调 loadFromInfo。本 Host 不在 mount 时
   // 自动 open,完全由 view 协调。
 
-  // 销毁时清 renderer
+  // 销毁时清 renderer + PDF handle
   useEffect(() => {
     return () => {
       rendererRef.current?.destroy();
       rendererRef.current = null;
+      if (pdfHandleRef.current) {
+        void pdfViewer.destroyDocument(pdfHandleRef.current);
+        pdfHandleRef.current = null;
+      }
     };
+    // pdfViewer 是 memo 常量
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // fit-width 跟随容器宽度变化 —— **仅 paged 全屏用旧 PDFRenderer 路径**。
-  //
-  // ⚠️ scroll 主分支的适配走 pdfjs page-fit(PDFViewerCanvas 内的 fit-controller),
-  // 绝不能跑这段:它用旧 PDFRenderer 的 width-fit 公式 `cw / pageWidth` 算出**绝对
-  // scale**(如 135%)并经 onScaleChange 覆盖上去,把 page-fit 冲掉 → 真机现象:
-  // 打开是 135% 溢出而非整页(2026-07-06)。这是「旧 PDFRenderer width-fit」散点未清干净
-  // 的最后一处,与 loadFromInfo 里那段同源,一并 gate 到 paged。
-  useEffect(() => {
-    if (pdfLayout !== 'paged') return; // scroll 走 pdfjs page-fit,不跑旧 width-fit
-    if (!fitWidth || !rendererReady) return;
-    const handle = (): void => {
-      const r = rendererRef.current;
-      if (!r || !isFixedPage(r) || !containerRef.current) return;
-      const dims = r.getPageDimensions();
-      if (dims.length === 0) return;
-      const cw = containerRef.current.clientWidth - FIT_WIDTH_PADDING;
-      if (cw <= 0) return;
-      const newScale = cw / dims[0].width;
-      if (!Number.isFinite(newScale) || newScale <= 0.1) return;
-      setScale(newScale);
-      r.setScale(newScale);
-      onScaleChange?.(newScale);
-    };
-    window.addEventListener('resize', handle);
-
-    let observer: ResizeObserver | null = null;
-    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(handle);
-      observer.observe(containerRef.current);
-    }
-
-    return () => {
-      window.removeEventListener('resize', handle);
-      observer?.disconnect();
-    };
-  }, [pdfLayout, fitWidth, rendererReady, onScaleChange]);
 
   // ── view 命令式 API ──
 
-  const pdfLayoutRef = useRef(pdfLayout);
-  useEffect(() => {
-    pdfLayoutRef.current = pdfLayout;
-  }, [pdfLayout]);
-
   const handleScaleChange = useCallback(
     (newScale: number) => {
-      // paged 模式 scale 完全自动(viewport fit)— toolbar 调 scale 在全屏期 noop
-      if (pdfLayoutRef.current === 'paged') return;
       // 这是 **onScaleChange 回调**:pdfjs 已经把 scale 变了(用户手势 / fit 重算都会发),
       // 本函数只**同步 React state + toolbar 百分比**,绝不能再调 scrollApiRef.setScale
       // 把 scale **回推 pdfjs** —— 那既是冗余回声,又会经 canvas setScale 误清 fitModeRef,
       // 导致 fit 模式在首屏重算/换屏时被清成 null、后续 resize 全部失效(2026-07-06 诊断实锤)。
+      // Phase D 后 paged 也走同一条 pdfjs 管线,不再区分模式屏蔽。
       setScale(newScale);
       onScaleChange?.(newScale);
     },
@@ -531,12 +478,10 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
 
   const handleSetFitWidth = useCallback(
     (on: boolean) => {
-      // paged 模式不消费 fitWidth(scale 自动)
-      if (pdfLayoutRef.current === 'paged') return;
       setFitWidth(on);
       if (on) {
-        // scroll 模式:走 PdfScrollContent 注册的 setFitMode(pdfjs PDFViewer
-        // 内部 page-width 算法 + 真渲染),不再自管 dims × 公式。
+        // 走 PdfScrollContent 注册的 setFitMode(pdfjs PDFViewer 内部 page-width
+        // 算法 + 真渲染)。paged 模式同样有效:页占满宽、纵向边缘继续滑翻页。
         scrollApiRef.current?.setFitMode('page-width');
       }
     },
@@ -548,7 +493,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
     () => ({
       loadFromInfo,
       goToPage(page: number): void {
-        // PDF: 走 FixedPageContent / FullscreenPageView 注册的 gotoPage 回调
+        // PDF: 走 PdfScrollContent 注册的 gotoPage 回调(scroll / paged 同一通道)
         // EPUB: renderer.goToPage 按 fraction 近似定位
         if (gotoPageRef.current) {
           gotoPageRef.current(page);
@@ -568,12 +513,11 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       setScale: handleScaleChange,
       setFitWidth: handleSetFitWidth,
       getRenderMode(): 'fixed-page' | 'reflowable' | null {
+        if (pdfHandleRef.current) return 'fixed-page';
         return rendererRef.current?.renderMode ?? null;
       },
       getTotalPages(): number | null {
-        const r = rendererRef.current;
-        if (r && isFixedPage(r)) return r.getTotalPages();
-        return null;
+        return pdfHandleRef.current?.totalPages ?? null;
       },
       // ── EPUB 专用 ──
       prevChapter(): void {
@@ -607,23 +551,36 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       },
       // ── TOC + Search ──
       async getTOC(): Promise<TOCItem[]> {
+        const handle = pdfHandleRef.current;
+        if (handle) {
+          // pdf-viewer getOutline 已解析目标页号;映射为 ebook TOCItem(按页跳转)。
+          // pageNum 解析失败的节点降级 page 1(沿旧 PDFRenderer.getTOC 行为)。
+          const outline = await pdfViewer.getOutline(handle);
+          const mapItem = (item: PdfTOCItem): TOCItem => ({
+            label: item.label,
+            position: { type: 'page', page: item.pageNum ?? 1 },
+            children: item.children?.map(mapItem),
+          });
+          return outline.map(mapItem);
+        }
         const r = rendererRef.current;
         if (!r) return [];
         return r.getTOC();
       },
       async searchText(query: string): Promise<SearchResult[]> {
+        const handle = pdfHandleRef.current;
+        if (handle) return pdfViewer.searchText(handle, query);
         const r = rendererRef.current;
-        if (!r) return [];
-        if (isFixedPage(r)) return r.searchText(query);
-        if (isReflowable(r)) return r.searchText(query);
+        if (r && isReflowable(r)) return r.searchText(query);
         return [];
       },
       goToSearchResult(result: SearchResult): void {
-        const r = rendererRef.current;
-        if (!r) return;
-        if (isFixedPage(r)) {
+        if (pdfHandleRef.current) {
           gotoPageRef.current?.(result.pageNum);
-        } else if (isReflowable(r) && result.cfi) {
+          return;
+        }
+        const r = rendererRef.current;
+        if (r && isReflowable(r) && result.cfi) {
           r.goTo({ type: 'cfi', cfi: result.cfi });
         }
       },
@@ -653,19 +610,19 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         pageNum: number,
         rect: { x: number; y: number; w: number; h: number },
       ): Promise<string> {
-        const r = rendererRef.current;
-        if (!r || !isFixedPage(r)) {
-          throw new Error('capturePageRect requires a loaded fixed-page (PDF) renderer');
+        const handle = pdfHandleRef.current;
+        if (!handle) {
+          throw new Error('capturePageRect requires a loaded PDF document');
         }
-        return r.capturePageRect(pageNum, rect);
+        return pdfViewer.capturePageRect(handle, pageNum, rect);
       },
       async hasTextContent(pageNum: number): Promise<boolean> {
-        const r = rendererRef.current;
-        if (!r || !isFixedPage(r)) return false; // EPUB / 未加载 → false
-        return r.hasTextContent(pageNum);
+        const handle = pdfHandleRef.current;
+        if (!handle) return false; // EPUB / 未加载 → false
+        return pdfViewer.hasTextContent(handle, pageNum);
       },
     }),
-    [loadFromInfo, handleScaleChange, handleSetFitWidth],
+    [loadFromInfo, handleScaleChange, handleSetFitWidth, pdfViewer],
   );
 
   // ── 渲染 ──
@@ -679,12 +636,17 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       {loading && <div className="krig-ebook-loading">Loading...</div>}
 
       {/*
-       * PDF scroll 主分支 — pdfjs PDFViewer adapter(2026-05-25 全量重构)。
-       * 旧 FixedPageContent + 自管 canvas/textLayer 渲染已删,改走 pdf-viewer capability。
-       * 参数 scale / initialPage / scroll 由 pdfjs PDFViewer 内部管理,Host 不再透传。
+       * PDF 分支 — pdfjs PDFViewer adapter(2026-05-25 全量重构;Phase D 2026-08-02
+       * 全屏 paged 并入同一组件)。scroll / paged 由 pageMode 切换,组件不重挂:
+       * pdfjs 自己保持 currentPageNumber,进/出全屏页面天然连续。
+       * 链接跳转(TOC 内链)在两种模式下都由 PDFLinkService 原生处理。
        */}
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'scroll' && (
+      {!loading && rendererReady && pdfHandle && (
         <PdfScrollContent
+          key={pdfHandle.id}
+          handle={pdfHandle}
+          pageMode={pdfLayout}
+          pagedSpread={pagedLayout}
           // 打开一律用默认整页适配(用户拍板 2026-07-06):
           //   'page-fit' 让 pdfjs 按 container 宽高算,一整页刚好放进可视区、不截。
           //   **忽略上次残留的绝对 scale**(如 150% → 之前会截掉一大块);view 尺寸
@@ -704,21 +666,6 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         />
       )}
 
-      {!loading && rendererReady && renderer && isFixedPage(renderer) && pdfLayout === 'paged' && (
-        <PagedHostBranch
-          renderer={renderer}
-          layout={pagedLayout}
-          initialPage={lastPdfPageRef.current ?? restorePage}
-          onPageChange={handlePdfPageChange}
-          onRegisterGotoPage={registerGotoPage}
-          annotationMode={pdfAnnotationMode}
-          annotations={pdfAnnotations}
-          onAnnotationCreate={onPdfAnnotationCreate}
-          onTextSelected={onPdfTextSelected}
-          onTextLayerRendered={onPdfTextLayerRendered}
-        />
-      )}
-
       {!loading && rendererReady && renderer && isReflowable(renderer) && (
         <ReflowableContent
           renderer={renderer}
@@ -726,7 +673,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         />
       )}
 
-      {!loading && rendererReady && renderer && !isFixedPage(renderer) && !isReflowable(renderer) && (
+      {!loading && rendererReady && !pdfHandle && renderer && !isReflowable(renderer) && (
         <div className="krig-ebook-empty">
           <div className="krig-ebook-empty-icon">📕</div>
           <div className="krig-ebook-empty-text">
@@ -738,67 +685,14 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   );
 });
 
-/**
- * paged 路径分支 — FullscreenPageView 持 ref 的小组件,把 ref.goToPage 注册到
- * Host 的 gotoPageRef,让 host.goToPage()(toolbar 跳页 / TOC / thought source 跳转)
- * 在两种模式下都能 work。
- */
-function PagedHostBranch({
-  renderer,
-  layout,
-  initialPage,
-  onPageChange,
-  onRegisterGotoPage,
-  annotationMode,
-  annotations,
-  onAnnotationCreate,
-  onTextSelected,
-  onTextLayerRendered,
-}: {
-  renderer: IFixedPageRenderer;
-  layout: FullscreenPagedLayout;
-  initialPage: number | null;
-  onPageChange: (page: number) => void;
-  onRegisterGotoPage: (fn: (page: number) => void) => void;
-  annotationMode?: 'off' | 'rect';
-  annotations?: import('./annotation-layer').PageAnnotation[];
-  onAnnotationCreate?: (
-    pageNum: number,
-    annotation: import('./annotation-layer').AnnotationDraft,
-  ) => void;
-  onTextSelected?: (
-    ev: import('./hooks/use-pdf-text-selection').PdfTextSelectionEvent,
-  ) => void;
-  onTextLayerRendered?: (pageNum: number, textLayer: HTMLElement) => void;
-}) {
-  const viewRef = useRef<FullscreenPageViewHandle | null>(null);
-  useEffect(() => {
-    onRegisterGotoPage((page) => viewRef.current?.goToPage(page));
-  }, [onRegisterGotoPage]);
-  return (
-    <FullscreenPageView
-      ref={viewRef}
-      renderer={renderer}
-      layout={layout}
-      initialPage={initialPage}
-      onPageChange={onPageChange}
-      annotationMode={annotationMode}
-      annotations={annotations}
-      onAnnotationCreate={onAnnotationCreate}
-      onTextSelected={onTextSelected}
-      onTextLayerRendered={onTextLayerRendered}
-    />
-  );
-}
-
-// ── Renderer 工厂(C2 仅 PDF;C3 加 EPUBRenderer;DjVu/CBZ 留作未来)──
+// ── Renderer 工厂(EPUB;PDF Phase D 起走 pdf-viewer handle,不再有 renderer;
+//    DjVu/CBZ 留作未来)──
 
 function createRendererFor(fileType: EBookFileType): IBookRenderer | null {
   switch (fileType) {
-    case 'pdf':
-      return new PDFRenderer();
     case 'epub':
       return new EPUBRenderer();
+    case 'pdf': // 不可达 — loadFromInfo 在此之前已走 pdf-viewer 分支
     case 'djvu':
     case 'cbz':
       // 留作未来:console.warn 已在调用方

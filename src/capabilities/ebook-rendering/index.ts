@@ -20,8 +20,8 @@
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
-// 依赖:pdf-viewer capability 提供 PDFViewer adapter(scroll 模式 PdfScrollContent 用)
-// + 副作用初始化 pdfjs Worker(workerPort 风格)。本 import 保证它先于 PDFRenderer 实例化加载。
+// 依赖:pdf-viewer capability 提供 PDFViewer adapter(PDF scroll/paged 两模式
+// PdfScrollContent 共用;Phase D 后旧 PDFRenderer 已删)+ 副作用初始化 pdfjs Worker。
 import '@capabilities/pdf-viewer';
 import { EBookHost } from './Host';
 import { OutlinePanel } from './outline-panel';

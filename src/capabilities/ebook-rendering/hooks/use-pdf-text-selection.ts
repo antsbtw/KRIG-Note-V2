@@ -11,7 +11,7 @@
  * 架构定位(handoff §α-3 路径偏移说明):
  * - 选区监听是浏览器 DOM 事件(window mouseup + window.getSelection),
  *   不需要 PDFRenderer 的 PDF 知识 — 走 view 层 hook 而非 renderer 内部
- * - rendering capability 跨 FixedPageContent / FullscreenPageView 复用
+ * - rendering capability 内 PdfScrollContent(scroll / paged 两模式)复用
  *
  * 不监听 EPUB selectionchange / mousedown — 仅在 PDF textLayer 内的 mouseup 才有意义。
  */
