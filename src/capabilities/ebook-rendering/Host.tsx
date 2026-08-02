@@ -314,24 +314,27 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
 
   // ── 核心加载逻辑 ──
 
+  /**
+   * 加载序号 — 并发 loadFromInfo 守卫(2026-08-02 修首开白屏)。
+   *
+   * onBookOpened 可能短窗内推两次(首次进 ebook view:恢复上次的书 + 用户点书架
+   * 各 open 一次)。旧实现"调用开始就 destroy 旧 handle"在并发下会把**正被已挂载
+   * canvas 使用的文档**销毁 — pdfjs transport destroyed 后无报错白屏。
+   * 改为:destroy 挪到提交点;过期加载(seq 已被更新调用超越)只清理自己的产物。
+   */
+  const loadSeqRef = useRef(0);
+
   const loadFromInfo = useCallback(
     async (info: EBookLoadedInfo) => {
+      const seq = ++loadSeqRef.current;
+      const isStale = (): boolean => seq !== loadSeqRef.current;
       try {
         setLoading(true);
         setRendererReady(false);
-        setRenderer(null);
-        setPdfHandle(null);
-
-        // 销毁旧 renderer / 旧 PDF handle
-        rendererRef.current?.destroy();
-        rendererRef.current = null;
-        if (pdfHandleRef.current) {
-          void pdfViewer.destroyDocument(pdfHandleRef.current);
-          pdfHandleRef.current = null;
-        }
 
         // 拿 buffer
         const result = await library.getData();
+        if (isStale()) return; // 已有更新的加载在跑,本次让位(状态归它管)
         if (!result) {
           setLoading(false);
           return;
@@ -353,6 +356,19 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
               ? result.data
               : new Uint8Array(result.data as ArrayBuffer);
           const handle = await pdfViewer.loadDocument(bytes);
+          if (isStale()) {
+            // 过期加载:只销毁自己刚建的 handle,不碰展示中的
+            console.warn('[ebook-rendering/Host] stale pdf load discarded, seq=', seq);
+            void pdfViewer.destroyDocument(handle);
+            return;
+          }
+          // ── 提交点:先销毁旧资源,再换新 ──
+          rendererRef.current?.destroy();
+          rendererRef.current = null;
+          setRenderer(null);
+          if (pdfHandleRef.current) {
+            void pdfViewer.destroyDocument(pdfHandleRef.current);
+          }
           pdfHandleRef.current = handle;
           setPdfHandle(handle);
 
@@ -389,6 +405,19 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
             : (data as ArrayBuffer);
 
         await r.load(buffer);
+        if (isStale()) {
+          // 过期加载:只销毁自己刚建的 renderer,不碰展示中的
+          console.warn('[ebook-rendering/Host] stale epub load discarded, seq=', seq);
+          r.destroy();
+          return;
+        }
+        // ── 提交点:先销毁旧资源,再换新 ──
+        rendererRef.current?.destroy();
+        if (pdfHandleRef.current) {
+          void pdfViewer.destroyDocument(pdfHandleRef.current);
+          pdfHandleRef.current = null;
+          setPdfHandle(null);
+        }
         rendererRef.current = r;
 
         if (isReflowable(r)) {
@@ -422,7 +451,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
         onReadyChange?.(true);
       } catch (err) {
         console.error('[ebook-rendering/Host] Failed to load:', err);
-        setLoading(false);
+        if (!isStale()) setLoading(false);
       }
     },
     [
