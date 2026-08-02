@@ -19,6 +19,9 @@ import type { LearningApi } from '@capabilities/learning/types';
 
 const TOOLTIP_CLASS = 'krig-pdf-vocab-tooltip';
 
+/** tooltip 与 anchor 之间的定位间隙(px)— showTooltip 定位与 isPointOverTooltip 间隙带共用 */
+const ANCHOR_GAP = 6;
+
 let tooltipEl: HTMLDivElement | null = null;
 let hideTimer: number | null = null;
 let ttsAudio: HTMLAudioElement | null = null;
@@ -82,7 +85,7 @@ export function showTooltip(payload: VocabTooltipPayload, anchor: DOMRect): void
 
   el.style.display = 'block';
   el.style.left = `${anchor.left}px`;
-  el.style.top = `${anchor.bottom + 6}px`;
+  el.style.top = `${anchor.bottom + ANCHOR_GAP}px`;
 
   // 边界检测:右出 / 底出时翻转
   requestAnimationFrame(() => {
@@ -92,9 +95,28 @@ export function showTooltip(payload: VocabTooltipPayload, anchor: DOMRect): void
       tooltipEl.style.left = `${window.innerWidth - tr.width - 8}px`;
     }
     if (tr.bottom > window.innerHeight - 8) {
-      tooltipEl.style.top = `${anchor.top - tr.height - 6}px`;
+      tooltipEl.style.top = `${anchor.top - tr.height - ANCHOR_GAP}px`;
     }
   });
+}
+
+/**
+ * 判定 viewport 坐标是否落在**可见** tooltip 上(外扩 ANCHOR_GAP 间隙带)。
+ *
+ * 供 PDF 侧全局 mousemove 命中检测短路用:PDF 生词高亮 pointer-events:none,
+ * hover 走手工 BCR 矩形检测,感知不到浮在最上层的 tooltip — 鼠标移向 tooltip
+ * (点 🔊)时会穿透命中 tooltip 正下方相邻生词的 rect,把 tooltip 内容抢占掉。
+ * 间隙带外扩让 anchor→tooltip 之间 6px 走廊内也不换词。
+ */
+export function isPointOverTooltip(x: number, y: number): boolean {
+  if (!tooltipEl || tooltipEl.style.display === 'none') return false;
+  const r = tooltipEl.getBoundingClientRect();
+  return (
+    x >= r.left - ANCHOR_GAP &&
+    x <= r.right + ANCHOR_GAP &&
+    y >= r.top - ANCHOR_GAP &&
+    y <= r.bottom + ANCHOR_GAP
+  );
 }
 
 export function scheduleHide(): void {

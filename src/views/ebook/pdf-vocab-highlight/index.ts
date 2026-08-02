@@ -27,6 +27,7 @@ import {
   showTooltip,
   scheduleHide,
   hideTooltipNow,
+  isPointOverTooltip,
 } from '../vocab-tooltip';
 
 const HL_LAYER_CLASS = 'krig-pdf-vocab-hl-layer';
@@ -327,6 +328,10 @@ function attachGlobalListeners(): void {
     }
     const x = e.clientX;
     const y = e.clientY;
+    // tooltip 浮在最上层但 BCR 命中检测感知不到它:鼠标移上去点 🔊 时会穿透
+    // 命中 tooltip 正下方相邻生词的 rect 把内容抢掉。指针在 tooltip(含间隙带)
+    // 上时短路,保持当前 hover 词不变。
+    if (isPointOverTooltip(x, y)) return;
     let hit: HTMLElement | null = null;
     const all = document.querySelectorAll<HTMLElement>(`.${HL_CLASS}`);
     for (const el of all) {
