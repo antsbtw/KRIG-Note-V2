@@ -23,6 +23,8 @@ class ViewTypeRegistry {
   private cachedNavSideTabs: ViewDefinition[] | null = null;
   /** SlotArea 用的全集快照缓存(同上,L3.5 加)*/
   private cachedAll: ViewDefinition[] | null = null;
+  /** SlotPicker 用的有序快照缓存(navSideTab ∪ slotPickerEntry)*/
+  private cachedSlotPicker: ViewDefinition[] | null = null;
 
   /**
    * 注册 view + 自动拆分子字段到对应 Registry
@@ -95,6 +97,26 @@ class ViewTypeRegistry {
     return this.cachedNavSideTabs;
   }
 
+  /**
+   * SlotPicker 用 — navSideTab 或 slotPickerEntry 二者有其一的 view,按 order 升序
+   * (navSideTab.order 优先,slotPickerEntry-only 的 view 用自己的 order)。
+   *
+   * 与 getAllForNavSide 的差异:多出 slotPickerEntry-only 的 hidden view
+   * (如 thought-view — 不占 NavSide 切换条,但可被手动召回右槽)。
+   */
+  getAllForSlotPicker(): ViewDefinition[] {
+    if (this.cachedSlotPicker === null) {
+      this.cachedSlotPicker = Array.from(this.views.values())
+        .filter((v) => v.navSideTab !== undefined || v.slotPickerEntry !== undefined)
+        .sort(
+          (a, b) =>
+            (a.navSideTab?.order ?? a.slotPickerEntry!.order) -
+            (b.navSideTab?.order ?? b.slotPickerEntry!.order),
+        );
+    }
+    return this.cachedSlotPicker;
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -105,6 +127,7 @@ class ViewTypeRegistry {
   private notify(): void {
     this.cachedNavSideTabs = null;
     this.cachedAll = null;
+    this.cachedSlotPicker = null;
     this.listeners.forEach((l) => l());
   }
 

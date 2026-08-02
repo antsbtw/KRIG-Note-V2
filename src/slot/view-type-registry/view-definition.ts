@@ -61,6 +61,14 @@ export interface ViewDefinition {
   component?: ComponentType<ViewComponentProps>;
   /** ViewSwitcher 显示用(可选 — 不填的 view 不出现在切换条,如 L5 内部辅助 view)*/
   navSideTab?: NavSideTab;
+  /**
+   * SlotPicker 独立入口(可选)— **只**出现在 right slot 选择器,不上 NavSide 切换条。
+   *
+   * 给 thought-view 这类 hidden view 用:无 navSideTab(不占左侧导航),但用户需要
+   * 能手动把它召回右槽(如问 AI 后回看 pending thought)。有 navSideTab 的 view
+   * 不需要此字段 — SlotPicker 本就列出它们。
+   */
+  slotPickerEntry?: { label: string; icon: string; order: number };
   /** view 独有右键菜单项(可选;注册时自动拆到 contextMenuRegistry,view 字段补为 id)*/
   contextMenu?: Omit<ContextMenuItem, 'view'>[];
   /** view 独有 Toolbar 项 */

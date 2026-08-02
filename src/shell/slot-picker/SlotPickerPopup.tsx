@@ -1,7 +1,8 @@
 /**
  * SlotPickerPopup — 命令板风格的 right slot view 选择器
  *
- * 从 viewTypeRegistry 动态读取所有有 navSideTab 的 view。
+ * 从 viewTypeRegistry 动态读取所有可进 picker 的 view(navSideTab ∪ slotPickerEntry —
+ * 后者给 thought-view 这类不占 NavSide 切换条、但需要能手动召回右槽的 hidden view)。
  * 有 slotPickerChildren 的 view（如 AI、Social）展开为子项，直接选具体服务。
  * 支持名称/首字母过滤，方向键导航，Enter/点击确认。
  */
@@ -25,9 +26,8 @@ interface FlatItem {
 
 function buildFlatItems(): FlatItem[] {
   const items: FlatItem[] = [];
-  for (const v of viewTypeRegistry.getAllForNavSide()) {
-    const tab = v.navSideTab!;
-    const children = tab.slotPickerChildren;
+  for (const v of viewTypeRegistry.getAllForSlotPicker()) {
+    const children = v.navSideTab?.slotPickerChildren;
     if (children && children.length > 0) {
       for (const c of children) {
         items.push({
@@ -39,12 +39,14 @@ function buildFlatItems(): FlatItem[] {
         });
       }
     } else {
+      // navSideTab 或 slotPickerEntry 必有其一(getAllForSlotPicker 过滤保证)
+      const entry = (v.navSideTab ?? v.slotPickerEntry)!;
       items.push({
         viewId: v.id,
         subId: null,
-        label: tab.label,
-        icon: tab.icon,
-        searchText: tab.label.toLowerCase(),
+        label: entry.label,
+        icon: entry.icon,
+        searchText: entry.label.toLowerCase(),
       });
     }
   }

@@ -44,7 +44,10 @@ registerView({
     'thought',          // 横切层自身
   ],
   component: ThoughtView,
-  // 不设 navSideTab — V1 形态 thought 是 hidden view(只被动召唤右槽)
+  // 不设 navSideTab — V1 形态 thought 是 hidden view(不占 NavSide 切换条)。
+  // 但要能被 SlotPicker 手动召回右槽(问 AI 后回看 pending thought 等场景,
+  // 2026-08-02 用户指出 picker 缺 Thoughts 入口)— 走 slotPickerEntry 独立入口。
+  slotPickerEntry: { label: 'Thoughts', icon: '💭', order: 99 },
 });
 
 // registerThoughtCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
