@@ -24,6 +24,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -32,7 +33,12 @@ import {
   AnnotationEditorType,
   AnnotationMode,
 } from 'pdfjs-dist';
-import { PDFViewer, ScrollMode, SpreadMode } from 'pdfjs-dist/web/pdf_viewer.mjs';
+import {
+  PDFViewer,
+  ScrollMode,
+  SpreadMode,
+  type EventBus,
+} from 'pdfjs-dist/web/pdf_viewer.mjs';
 import type {
   FitMode,
   PDFViewerCanvasHandle,
@@ -79,6 +85,17 @@ const GESTURE_TIMEOUT_MS = 100;
  */
 const PAGED_SWIPE_THRESHOLD = 30;
 const PAGED_GESTURE_GAP_MS = 150;
+
+/**
+ * paged 翻页滑动动画(承旧 FullscreenPageView 的 Books 手感):
+ * - easeOutQuint 近似曲线:开头快速启动 + 末尾长尾衰减,"手推书页"物理直觉
+ * - 先渲染再动画:换页瞬间用快照保持旧视觉,新页 pagerendered 后才启动滑动
+ *   (完全消灭旧实现曾经的"白纸"问题,机制同 52ecc290)
+ * - PAGED_RENDER_WAIT_MS:新页渲染事件兜底 — 超时也启动动画,防快照卡死盖屏
+ */
+const PAGED_SLIDE_MS = 1000;
+const PAGED_SLIDE_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const PAGED_RENDER_WAIT_MS = 800;
 
 export const PDFViewerCanvas = forwardRef<
   PDFViewerCanvasHandle,
@@ -134,6 +151,135 @@ export const PDFViewerCanvas = forwardRef<
     if (viewer.spreadMode !== targetSpread) viewer.spreadMode = targetSpread;
   };
 
+  // ── paged 翻页滑动动画 ──
+  //
+  // 机制(承旧 FullscreenPageView"先渲染再动画",适配 pdfjs 管线):
+  // 翻页瞬间把当前视图快照(cloneNode + 逐 canvas drawImage 拷贝像素,textLayer/
+  // 标注/生词高亮 DOM 随克隆保留视觉)挂进 wrapper:
+  //   next:快照盖在真容器上(z 3)→ pdfjs 在其下换页渲染 → 就绪后快照滑出屏幕左侧
+  //   prev:快照垫底(z 1)+ 真容器瞬移屏外左侧(z 2)→ 换页渲染 → 就绪后滑回原位
+  // 新页就绪信号 = eventBus 'pagerendered';PAGED_RENDER_WAIT_MS 兜底防卡死。
+  // 动画期间再次翻页:立即结束当前动画、本次直接跳(旧实现同策略,防堆积)。
+  const eventBusRef = useRef<EventBus | null>(null);
+  const flipCleanupRef = useRef<(() => void) | null>(null);
+
+  const animatedPagedFlip = useCallback(
+    (direction: 'next' | 'prev', doFlip: () => void): void => {
+      const viewer = viewerInstanceRef.current;
+      const container = containerRef.current;
+      const viewerDiv = viewerRef.current;
+      const wrapper = container?.parentElement;
+      const eventBus = eventBusRef.current;
+      if (
+        !viewer ||
+        !container ||
+        !viewerDiv ||
+        !wrapper ||
+        !eventBus ||
+        pageModeRef.current !== 'paged'
+      ) {
+        doFlip();
+        return;
+      }
+      if (flipCleanupRef.current) {
+        // 已有动画在跑:结束它,本次直接跳
+        flipCleanupRef.current();
+        doFlip();
+        return;
+      }
+      const before = viewer.currentPageNumber;
+
+      // 快照当前视图 — cloneNode 不带 canvas 像素,逐个 drawImage 拷贝
+      const overlay = document.createElement('div');
+      overlay.className = 'pdfViewerContainer krig-pdf-flip-snapshot';
+      overlay.style.overflow = 'hidden';
+      overlay.style.pointerEvents = 'none';
+      const clone = viewerDiv.cloneNode(true) as HTMLElement;
+      const origCanvases = viewerDiv.querySelectorAll('canvas');
+      const cloneCanvases = clone.querySelectorAll('canvas');
+      cloneCanvases.forEach((c, i) => {
+        const o = origCanvases[i];
+        if (!o || o.width === 0 || o.height === 0) return;
+        c.width = o.width;
+        c.height = o.height;
+        c.getContext('2d')?.drawImage(o, 0, 0);
+      });
+      overlay.appendChild(clone);
+
+      const offset = container.clientWidth + 100;
+      let finished = false;
+      let started = false;
+      let fallbackTimer = 0;
+      function onRendered(): void {
+        startSlide();
+      }
+      function cleanup(): void {
+        if (finished) return;
+        finished = true;
+        flipCleanupRef.current = null;
+        eventBus!.off('pagerendered', onRendered);
+        window.clearTimeout(fallbackTimer);
+        overlay.remove();
+        container!.style.transition = '';
+        container!.style.transform = '';
+        container!.style.zIndex = '';
+        container!.style.willChange = '';
+      }
+      function startSlide(): void {
+        if (started || finished) return;
+        started = true;
+        eventBus!.off('pagerendered', onRendered);
+        window.clearTimeout(fallbackTimer);
+        // 下一帧才加 transition,避免初始 transform 也参与过渡
+        requestAnimationFrame(() => {
+          if (finished) return;
+          if (direction === 'next') {
+            overlay.style.willChange = 'transform';
+            overlay.style.transition = `transform ${PAGED_SLIDE_MS}ms ${PAGED_SLIDE_EASING}`;
+            overlay.style.transform = `translateX(${-offset}px)`;
+          } else {
+            container!.style.transition = `transform ${PAGED_SLIDE_MS}ms ${PAGED_SLIDE_EASING}`;
+            container!.style.transform = 'translateX(0px)';
+          }
+          window.setTimeout(cleanup, PAGED_SLIDE_MS + 30);
+        });
+      }
+      flipCleanupRef.current = cleanup;
+
+      if (direction === 'next') {
+        // 旧页快照盖最上,真容器在其下换页
+        overlay.style.zIndex = '3';
+        wrapper.appendChild(overlay);
+      } else {
+        // 快照垫底;真容器先瞬移屏外左侧,渲染就绪后载着新页滑回
+        overlay.style.zIndex = '1';
+        wrapper.appendChild(overlay);
+        container.style.zIndex = '2';
+        container.style.willChange = 'transform';
+        container.style.transform = `translateX(${-offset}px)`;
+      }
+      // 同步滚动位置,快照与原视图逐像素对齐(放大态翻页场景)
+      overlay.scrollTop = container.scrollTop;
+      overlay.scrollLeft = container.scrollLeft;
+
+      doFlip();
+      if (viewer.currentPageNumber === before) {
+        cleanup(); // 已在首/末页边界,未翻动 — 撤销快照
+        return;
+      }
+
+      eventBus.on('pagerendered', onRendered);
+      fallbackTimer = window.setTimeout(startSlide, PAGED_RENDER_WAIT_MS);
+      // 目标页已有现成像素(pdfjs buffer 缓存,来回翻页场景)时不会再发
+      // pagerendered — 立即启动,免吃 800ms 兜底延迟。renderingState 3 = FINISHED。
+      const targetView = viewer.getPageView(viewer.currentPageNumber - 1) as
+        | { renderingState?: number }
+        | undefined;
+      if (targetView?.renderingState === 3) startSlide();
+    },
+    [],
+  );
+
   // 把最新 callbacks 存 ref,避免 useEffect 重跑(callbacks 变化只更 ref,不触发 cleanup)
   const callbacksRef = useRef({
     onPageChange,
@@ -187,6 +333,7 @@ export const PDFViewerCanvas = forwardRef<
     services.linkService.setViewer(viewer);
 
     viewerInstanceRef.current = viewer;
+    eventBusRef.current = services.eventBus;
 
     // 初始页面组织模式(scroll / paged)— setDocument 前设好,避免加载后再重排。
     // handle 重建(换书)也走这里;props 动态切换走下方独立 effect。
@@ -306,8 +453,10 @@ export const PDFViewerCanvas = forwardRef<
       services.eventBus.off('pagerendered', onPageRendered);
       services.eventBus.off('textlayerrendered', onTextLayerRendered);
 
+      flipCleanupRef.current?.(); // 撤销进行中的翻页动画快照
       viewer.cleanup();
       viewerInstanceRef.current = null;
+      eventBusRef.current = null;
     };
     // initialPage / initialFitMode 只在 mount 期生效,不进 deps(变化不重建 viewer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,6 +477,7 @@ export const PDFViewerCanvas = forwardRef<
       modeSwitchedOnceRef.current = true;
       return; // 初始模式已在主 effect applyPageMode 应用
     }
+    flipCleanupRef.current?.(); // 模式切换前撤销进行中的翻页动画
     applyPageMode(viewer);
     fit.setFit('page-fit');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,6 +521,14 @@ export const PDFViewerCanvas = forwardRef<
      * (page-fit 常态下容器不可滚,直接走翻页)。
      */
     const handlePagedWheel = (e: WheelEvent, viewer: PDFViewer): void => {
+      // 动画期内 wheel 一律拒绝(锁手势),但不刷新 lastEventTime —
+      // 惯性末尾不算"还在手势中"(承旧 FullscreenPageView 决议)
+      if (flipCleanupRef.current) {
+        e.preventDefault();
+        pagedFiredInGesture = true;
+        pagedAccDelta = 0;
+        return;
+      }
       const dx = e.deltaX;
       const dy = e.deltaY;
       const dominant = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
@@ -399,8 +557,11 @@ export const PDFViewerCanvas = forwardRef<
       if (pagedFiredInGesture) return;
       pagedAccDelta += dominant;
       if (Math.abs(pagedAccDelta) < PAGED_SWIPE_THRESHOLD) return;
-      if (pagedAccDelta > 0) viewer.nextPage();
-      else viewer.previousPage();
+      if (pagedAccDelta > 0) {
+        animatedPagedFlip('next', () => viewer.nextPage());
+      } else {
+        animatedPagedFlip('prev', () => viewer.previousPage());
+      }
       pagedFiredInGesture = true;
       pagedAccDelta = 0;
     };
@@ -538,14 +699,16 @@ export const PDFViewerCanvas = forwardRef<
       if (!viewer) return;
       if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         e.preventDefault();
-        viewer.previousPage();
+        animatedPagedFlip('prev', () => viewer.previousPage());
       } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
         e.preventDefault();
-        viewer.nextPage();
+        animatedPagedFlip('next', () => viewer.nextPage());
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+    // animatedPagedFlip 是空 deps useCallback,恒定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── 容器宽度变化 → 重 fit-width(slot 切换等)──
@@ -635,6 +798,17 @@ export const PDFViewerCanvas = forwardRef<
       goToPage(pageNum: number): void {
         const viewer = viewerInstanceRef.current;
         if (!viewer) return;
+        // paged 模式跳页(toolbar / TOC / 跳源)同样走滑动动画,方向按页序推断
+        if (
+          pageModeRef.current === 'paged' &&
+          pageNum !== viewer.currentPageNumber
+        ) {
+          const direction = pageNum > viewer.currentPageNumber ? 'next' : 'prev';
+          animatedPagedFlip(direction, () => {
+            viewer.currentPageNumber = pageNum;
+          });
+          return;
+        }
         viewer.currentPageNumber = pageNum;
       },
       goToDestination(destRef: string): void {
@@ -670,7 +844,7 @@ export const PDFViewerCanvas = forwardRef<
         return viewerInstanceRef.current?.currentScale ?? 1.0;
       },
     }),
-    [handle],
+    [handle, animatedPagedFlip],
   );
 
   return (
