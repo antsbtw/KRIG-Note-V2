@@ -238,6 +238,19 @@ export function PdfScrollContent({
         continue;
       }
       const pageAnns = anns.filter((a) => a.pageNum === pageNum);
+      // 诊断(2026-08-03):wrapper 是否还挂在 DOM、是不是 pageDiv 末尾子节点、
+      // 挂它的 pageDiv 里 pdfjs 层顺序 — pdfjs 重渲会重排/清空 pageDiv 子节点
+      if (pageAnns.length > 0) {
+        const w = entry.wrapper;
+        const parent = w.parentElement;
+        console.log(
+          '[pdf-ann-dom] p', pageNum,
+          'wrapperConnected=', w.isConnected,
+          'isLastChild=', parent ? parent.lastElementChild === w : 'no-parent',
+          'siblings=', parent ? [...parent.children].map((c) => c.className || c.tagName).join('|') : '-',
+          'wrapperChildCount=', w.childElementCount,
+        );
+      }
       entry.root.render(
         <AnnotationLayer
           pageNum={pageNum}
