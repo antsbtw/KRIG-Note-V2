@@ -95,7 +95,16 @@ export function usePdfAnnotations(
     for (const a of legacyAnchors) {
       const item = toPageAnnotationFromLegacy(a);
       if (item) list.push(item);
+      // 诊断(2026-08-03 标注色丢失):数据在但形状不合(缺 rect/textRects)被丢弃时留痕
+      else console.warn('[pdf-ann] anchor dropped (shape):', a.createdAt, a.type, 'p', a.pageNum);
     }
+    // 诊断:数据层到底返回了什么 — 空 = 书侧 block 丢失(写库失败/被删),
+    // 非空但页面没高亮 = 渲染侧问题
+    console.log(
+      '[pdf-ann] refresh book=', bookId,
+      'anchors=', legacyAnchors.length, '→ rendered=', list.length,
+      legacyAnchors.map((a) => `${a.type}@p${a.pageNum}#${a.createdAt}`).join(' '),
+    );
     setAnnotations(list);
   }, []);
 
