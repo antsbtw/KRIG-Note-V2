@@ -430,10 +430,28 @@ export function registerContextMenu(): void {
   commandRegistry.register(
     'ebook-view.activate-thought-from-annotation',
     (arg: unknown) => {
-      if (typeof arg !== 'string') return;
-      const bookId = getActiveBookId();
+      // 双击标注**不走右键菜单** → contextMenuController.custom 为空,不能从中读
+      // bookId/wsId(2026-08-03 根因:getActiveBookId/getContextWsId 返 null → 静默退)。
+      // 由调用方(EBookView dblclick)显式传 { annotationId, bookId, wsId };
+      // 兼容旧形态(纯字符串 id)时回退 contextMenuController(仅右键触发场景才有值)。
+      let annotationId: string;
+      let bookId: string | null;
+      let wsId: string | null;
+      if (typeof arg === 'string') {
+        annotationId = arg;
+        bookId = getActiveBookId();
+        wsId = getContextWsId();
+      } else if (arg && typeof arg === 'object') {
+        const a = arg as { annotationId?: unknown; bookId?: unknown; wsId?: unknown };
+        if (typeof a.annotationId !== 'string') return;
+        annotationId = a.annotationId;
+        bookId = typeof a.bookId === 'string' ? a.bookId : getActiveBookId();
+        wsId = typeof a.wsId === 'string' ? a.wsId : getContextWsId();
+      } else {
+        return;
+      }
       if (!bookId) return;
-      const createdAt = Number(arg);
+      const createdAt = Number(annotationId);
       void (async () => {
         const thoughtApi = requireCapabilityApi<ThoughtCapabilityApi>('thought');
         const thoughts = await thoughtApi.listThoughtsBySource('book', bookId);
@@ -443,7 +461,6 @@ export function registerContextMenu(): void {
             (t.anchor.locator as BookLocator).createdAt === createdAt,
         );
         if (!matched || !matched.anchor) return; // 无关联 thought / 无 anchor,双击 no-op
-        const wsId = getContextWsId();
         const bus = wsId ? workspaceManager.getBus(wsId) : null;
         if (bus) {
           bus.slot.openRight('thought-view');

@@ -462,27 +462,22 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     if (!el) return;
     const onDblClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
-      let annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
-      // 诊断(2026-08-03 双击词汇不弹 Thoughts):target 落在哪层
-      const hitViaPoint = document
-        .elementsFromPoint(e.clientX, e.clientY)
-        .find((el) => (el as HTMLElement).hasAttribute?.('data-pdf-annotation-id'));
-      console.log(
-        '[dblclick-ann] target=', target?.className || target?.tagName,
-        'closestAnnEl=', annEl?.getAttribute('data-pdf-annotation-id') ?? null,
-        'annViaElementsFromPoint=', hitViaPoint ? (hitViaPoint as HTMLElement).getAttribute('data-pdf-annotation-id') : null,
-      );
-      // 回退:target 命中不到(textLayer span 盖在标注 div 上)→ 用坐标穿透命中
-      if (!annEl && hitViaPoint) annEl = hitViaPoint as HTMLElement;
+      const annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
       if (!annEl) return;
       const id = annEl.getAttribute('data-pdf-annotation-id');
       if (!id) return;
       e.preventDefault();
-      commandRegistry.execute('ebook-view.activate-thought-from-annotation', id);
+      // 显式传 bookId + wsId — 双击不走右键菜单,命令侧的 contextMenuController.custom
+      // 为空,不能从中读(2026-08-03 根因)。bookId 走 ref(effect 空 deps 闭包)。
+      commandRegistry.execute('ebook-view.activate-thought-from-annotation', {
+        annotationId: id,
+        bookId: activeBookIdRef.current,
+        wsId: workspaceId,
+      });
     };
     el.addEventListener('dblclick', onDblClick);
     return () => el.removeEventListener('dblclick', onDblClick);
-  }, []);
+  }, [activeBookIdRef, workspaceId]);
 
   // ── Toolbar callbacks ──
 
