@@ -442,6 +442,15 @@ export function registerContextMenu(): void {
             t.anchor?.source === 'book' &&
             (t.anchor.locator as BookLocator).createdAt === createdAt,
         );
+        // 诊断(2026-08-03):无关联 thought 是设计内静默分支,但要留痕可判
+        console.log(
+          '[dblclick-ann] command: createdAt=',
+          createdAt,
+          'thoughts=',
+          thoughts.length,
+          'matched=',
+          matched ? matched.id : null,
+        );
         if (!matched || !matched.anchor) return; // 无关联 thought / 无 anchor,双击 no-op
         const wsId = getContextWsId();
         const bus = wsId ? workspaceManager.getBus(wsId) : null;
