@@ -222,14 +222,6 @@ export function AnnotationLayer({
         if (useTextRects) {
           // highlight bg = 半透明色;strikethrough 走 CSS 渲染中线(背景透明)
           const bg = ann.markStyle === 'highlight' ? `${color}55` : 'transparent';
-          // 诊断(2026-08-03):打首个 textRect 乘 scale 后的实际像素 — 判是否画到屏外/零尺寸
-          const r0 = ann.textRects![0];
-          console.log(
-            '[ann-layer] p', pageNum, ann.markStyle, 'scale=', scale,
-            'tr0 raw=', `${Math.round(r0.x)},${Math.round(r0.y)},${Math.round(r0.w)}x${Math.round(r0.h)}`,
-            '→ px=', `${Math.round(r0.x * scale)},${Math.round(r0.y * scale)},${Math.round(r0.w * scale)}x${Math.round(r0.h * scale)}`,
-            'color=', color, 'bg=', bg,
-          );
           return ann.textRects!.map((r, idx) => (
             <div
               key={`${ann.id}.${idx}`}

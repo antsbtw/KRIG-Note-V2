@@ -463,14 +463,6 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     const onDblClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
       const annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
-      // 诊断(2026-08-03 双击标注不开 Thoughts):打 target 链路,定位是
-      // ① 没命中标注元素 ② 命中但命令侧查无关联 thought(命令内另有日志)
-      console.log(
-        '[dblclick-ann] target=',
-        target?.className || target?.tagName,
-        'annEl=',
-        annEl ? annEl.getAttribute('data-pdf-annotation-id') : null,
-      );
       if (!annEl) return;
       const id = annEl.getAttribute('data-pdf-annotation-id');
       if (!id) return;

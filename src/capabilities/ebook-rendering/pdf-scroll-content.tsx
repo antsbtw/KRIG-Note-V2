@@ -100,9 +100,11 @@ export function PdfScrollContent({
   );
   // 每页一个 React root + 挂载用的 wrapper div(我们创建,直接 append 到 pageDiv)
   // pdfjs 销毁 pageDiv 时 wrapper 跟着死,我们手动 root.unmount() 容错。
-  const rootsRef = useRef<Map<number, { root: Root; wrapper: HTMLDivElement }>>(
-    new Map(),
-  );
+  // pageDiv:该 root 当前所属的 pdfjs 页容器 — pdfjs 缩放重渲会清空 pageDiv 子节点
+  // 把 wrapper 摘掉(wrapper.isConnected=false),render 前据此重新 append。
+  const rootsRef = useRef<
+    Map<number, { root: Root; wrapper: HTMLDivElement; pageDiv: HTMLElement }>
+  >(new Map());
   // textLayer ref Map(用于 use-pdf-text-selection hook)
   const textLayerRefsRef = useRef<Map<number, HTMLElement>>(new Map());
   // pdfjs scale(0.x ~ 几)— scale 状态。CSS scale-factor 由其 × 1.333 反推
@@ -205,7 +207,7 @@ export function PdfScrollContent({
         roots.delete(pageNum);
       }
     }
-    // 创建新页 root
+    // 创建新页 root(mountedPages 里但 roots 里没有的页)
     for (const [pageNum, pageDiv] of mountedPages) {
       if (roots.has(pageNum)) continue;
       if (!pageDiv.isConnected) continue;
@@ -217,40 +219,25 @@ export function PdfScrollContent({
       wrapper.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
       pageDiv.appendChild(wrapper);
       const root = createRoot(wrapper);
-      roots.set(pageNum, { root, wrapper });
+      roots.set(pageNum, { root, wrapper, pageDiv });
     }
     // 2) 同步内容(render 现有 root)
     const { annotations: anns, annotationMode: mode, flashAnnotationId: flashId, cssScaleFactor: sf, onAnnotationCreate: onCreate } = annotationsForRender;
-    // 诊断(2026-08-03 标注色丢失):打全景 — 哪些页有 root、有 dim、annotations 落在哪页
-    if (anns.length > 0) {
-      console.log(
-        '[pdf-ann-render] scaleFactor=', sf,
-        'roots=', [...roots.keys()].join(','),
-        'dims=', [...pageDims.keys()].join(','),
-        'anns=', anns.map((a) => `${a.markStyle}@p${a.pageNum}[${Math.round(a.rect.x)},${Math.round(a.rect.y)},${Math.round(a.rect.w)}x${Math.round(a.rect.h)}]tr=${a.textRects?.length ?? 0}`).join(' '),
-      );
-    }
     for (const [pageNum, entry] of roots) {
       const dim = pageDims.get(pageNum);
-      if (!dim) {
-        if (anns.some((a) => a.pageNum === pageNum))
-          console.warn('[pdf-ann-render] page', pageNum, 'has anns but NO dim → skip render');
-        continue;
+      if (!dim) continue;
+      // pdfjs 缩放/重渲会清空 pageDiv 子节点 → wrapper 被摘出 DOM(isConnected=false),
+      // 之后 root.render 写进的是脱离 DOM 的孤儿 wrapper → 标注不可见(2026-08-03 根因)。
+      // render 前若 wrapper 已脱离,重新 append 回**当前** pageDiv(mountedPages 里的
+      // 最新引用;pdfjs 缩放通常复用同一 pageDiv,换书/虚拟滚动才换新)。
+      if (!entry.wrapper.isConnected) {
+        const currentPageDiv = mountedPages.get(pageNum) ?? entry.pageDiv;
+        if (currentPageDiv.isConnected) {
+          currentPageDiv.appendChild(entry.wrapper);
+          entry.pageDiv = currentPageDiv;
+        }
       }
       const pageAnns = anns.filter((a) => a.pageNum === pageNum);
-      // 诊断(2026-08-03):wrapper 是否还挂在 DOM、是不是 pageDiv 末尾子节点、
-      // 挂它的 pageDiv 里 pdfjs 层顺序 — pdfjs 重渲会重排/清空 pageDiv 子节点
-      if (pageAnns.length > 0) {
-        const w = entry.wrapper;
-        const parent = w.parentElement;
-        console.log(
-          '[pdf-ann-dom] p', pageNum,
-          'wrapperConnected=', w.isConnected,
-          'isLastChild=', parent ? parent.lastElementChild === w : 'no-parent',
-          'siblings=', parent ? [...parent.children].map((c) => c.className || c.tagName).join('|') : '-',
-          'wrapperChildCount=', w.childElementCount,
-        );
-      }
       entry.root.render(
         <AnnotationLayer
           pageNum={pageNum}
