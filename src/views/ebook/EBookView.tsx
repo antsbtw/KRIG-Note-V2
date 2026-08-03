@@ -462,7 +462,18 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     if (!el) return;
     const onDblClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement | null;
-      const annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
+      let annEl = target?.closest('[data-pdf-annotation-id]') as HTMLElement | null;
+      // 诊断(2026-08-03 双击词汇不弹 Thoughts):target 落在哪层
+      const hitViaPoint = document
+        .elementsFromPoint(e.clientX, e.clientY)
+        .find((el) => (el as HTMLElement).hasAttribute?.('data-pdf-annotation-id'));
+      console.log(
+        '[dblclick-ann] target=', target?.className || target?.tagName,
+        'closestAnnEl=', annEl?.getAttribute('data-pdf-annotation-id') ?? null,
+        'annViaElementsFromPoint=', hitViaPoint ? (hitViaPoint as HTMLElement).getAttribute('data-pdf-annotation-id') : null,
+      );
+      // 回退:target 命中不到(textLayer span 盖在标注 div 上)→ 用坐标穿透命中
+      if (!annEl && hitViaPoint) annEl = hitViaPoint as HTMLElement;
       if (!annEl) return;
       const id = annEl.getAttribute('data-pdf-annotation-id');
       if (!id) return;
