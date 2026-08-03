@@ -221,9 +221,22 @@ export function PdfScrollContent({
     }
     // 2) 同步内容(render 现有 root)
     const { annotations: anns, annotationMode: mode, flashAnnotationId: flashId, cssScaleFactor: sf, onAnnotationCreate: onCreate } = annotationsForRender;
+    // 诊断(2026-08-03 标注色丢失):打全景 — 哪些页有 root、有 dim、annotations 落在哪页
+    if (anns.length > 0) {
+      console.log(
+        '[pdf-ann-render] scaleFactor=', sf,
+        'roots=', [...roots.keys()].join(','),
+        'dims=', [...pageDims.keys()].join(','),
+        'anns=', anns.map((a) => `${a.markStyle}@p${a.pageNum}[${Math.round(a.rect.x)},${Math.round(a.rect.y)},${Math.round(a.rect.w)}x${Math.round(a.rect.h)}]tr=${a.textRects?.length ?? 0}`).join(' '),
+      );
+    }
     for (const [pageNum, entry] of roots) {
       const dim = pageDims.get(pageNum);
-      if (!dim) continue;
+      if (!dim) {
+        if (anns.some((a) => a.pageNum === pageNum))
+          console.warn('[pdf-ann-render] page', pageNum, 'has anns but NO dim → skip render');
+        continue;
+      }
       const pageAnns = anns.filter((a) => a.pageNum === pageNum);
       entry.root.render(
         <AnnotationLayer
