@@ -6,7 +6,8 @@
  * 用户数据(笔记/文件夹)走 noteCapability / folderCapability (L7-sub2:SurrealDB);
  * 本文件管理 **当前 Workspace 的工作位状态**(看哪条笔记 / 折哪些文件夹 / 选了什么 / 排序 / 剪贴板)。
  *
- * **持久化字段**(写 pluginStates):activeNoteId / expandedFolders / folderSortMap / clipboard
+ * **持久化字段**(写 pluginStates):activeNoteId(left 槽)/ rightActiveNoteId(right 槽)
+ *   / expandedFolders / folderSortMap / clipboard
  * **Transient 字段**(只内存,Q8=B):selectedIds — 关闭重启后清空,避免干扰新操作
  *
  * Set 字段持久化策略:Set ↔ string[] 编/解码在 hydrate/encode 内做,view 业务无感。
@@ -116,22 +117,30 @@ export interface NoteBaseSnapshot {
   openedBySession: string;
 }
 
-/** per-wsId 快照 Map（内存，不持久化） */
+/**
+ * per-scope 快照 Map（内存，不持久化）
+ *
+ * fix/slot-per-slot-active-note:key 从 wsId 改为 scopeKey(`${wsId}::${slot}`)。
+ * 左右双开各看一篇笔记时,两栏各自维护自己的 baseSnapshot —— 否则后开的那栏
+ * 会覆盖前一栏的快照,而 updateNoteWithMerge Step 1 的
+ * `baseSnapshot.noteId !== noteId` 守卫会持续不命中 → 每次写都走
+ * "跳过 merge 直接写 + warn" 的 fail-safe 路径(日志刷屏 + 丢并发保护)。
+ */
 const noteBaseSnapshots: Map<string, NoteBaseSnapshot> = new Map();
 
-/** 取当前 ws 的 baseSnapshot（Phase 1 merge 引擎用） */
-export function getNoteBaseSnapshot(wsId: string): NoteBaseSnapshot | undefined {
-  return noteBaseSnapshots.get(wsId);
+/** 取该 scope 的 baseSnapshot（Phase 1 merge 引擎用） */
+export function getNoteBaseSnapshot(scopeKey: string): NoteBaseSnapshot | undefined {
+  return noteBaseSnapshots.get(scopeKey);
 }
 
 /** 写入/更新 baseSnapshot（updateNote 成功后由调用方更新） */
-export function setNoteBaseSnapshot(wsId: string, snapshot: NoteBaseSnapshot): void {
-  noteBaseSnapshots.set(wsId, snapshot);
+export function setNoteBaseSnapshot(scopeKey: string, snapshot: NoteBaseSnapshot): void {
+  noteBaseSnapshots.set(scopeKey, snapshot);
 }
 
-/** 清除 ws 的 baseSnapshot（ws 关闭 / 切换 note 时） */
-export function clearNoteBaseSnapshot(wsId: string): void {
-  noteBaseSnapshots.delete(wsId);
+/** 清除该 scope 的 baseSnapshot（ws 关闭 / 切换 note 时） */
+export function clearNoteBaseSnapshot(scopeKey: string): void {
+  noteBaseSnapshots.delete(scopeKey);
 }
 
 function noteCap(): NoteCapabilityApi {
@@ -143,9 +152,25 @@ function folderCap(): FolderCapabilityApi {
 
 export type SortState = 'title-asc' | 'title-desc' | 'date-asc' | 'date-desc' | null;
 
+/**
+ * Note 槽标识(fix/slot-per-slot-active-note)
+ *
+ * 左右双开同一 view 时,"当前活跃笔记"必须按槽区分。此类型是所有 per-slot
+ * note 状态(activeNoteId / baseSnapshot)的作用域维度。
+ */
+export type NoteSlot = 'left' | 'right';
+
+/** 构造 per-slot 作用域 key(baseSnapshot 等内存 Map 用)*/
+export function noteScopeKey(wsId: string, slot: NoteSlot): string {
+  return `${wsId}::${slot}`;
+}
+
 /** per-workspace 工作位状态(persistent + transient 合并视图)*/
 export interface NoteWorkspaceState {
+  /** left 槽活跃笔记(旧字段,语义不变)*/
   activeNoteId: string | null;
+  /** right 槽活跃笔记 */
+  rightActiveNoteId: string | null;
   expandedFolders: Set<string>;
   folderSortMap: Record<string, SortState>;
   clipboard: { type: 'note' | 'folder'; id: string } | null;
@@ -157,7 +182,21 @@ const STORE_KEY = 'note';
 
 /** 持久化的形态(pluginStates['note'] 真实存的格式)— Set 序列化为 string[] */
 interface PersistedNoteWsState {
+  /**
+   * left 槽的活跃笔记。
+   *
+   * 字段名保持 activeNoteId 不变(不做 migration):历史数据天然落到 left 槽,
+   * 语义正好对得上 —— 旧版单栏就是今天的 left。
+   */
   activeNoteId: string | null;
+  /**
+   * right 槽的活跃笔记(fix/slot-per-slot-active-note 新增)。
+   *
+   * V1 曾有同名的 rightActiveNoteId,V2 初期砍掉并在 link-click-integration.ts
+   * 里记为"等 ActiveResourceManager 到位再补"。左右双开落地后必须补回 ——
+   * 否则两栏订阅同一字段,永远显示同一篇笔记。
+   */
+  rightActiveNoteId?: string | null;
   expandedFolders: string[];
   folderSortMap: Record<string, SortState>;
   clipboard: { type: 'note' | 'folder'; id: string } | null;
@@ -166,6 +205,7 @@ interface PersistedNoteWsState {
 /** 冻结常量(避免 useSyncExternalStore 死循环)*/
 const DEFAULT_WS_STATE: NoteWorkspaceState = {
   activeNoteId: null,
+  rightActiveNoteId: null,
   expandedFolders: new Set<string>(),
   folderSortMap: {},
   clipboard: null,
@@ -197,6 +237,7 @@ function hydrate(ws: WorkspaceState): NoteWorkspaceState {
   const raw = ws.pluginStates[STORE_KEY] as PersistedNoteWsState | undefined;
   const result: NoteWorkspaceState = {
     activeNoteId: raw?.activeNoteId ?? null,
+    rightActiveNoteId: raw?.rightActiveNoteId ?? null,
     expandedFolders: new Set(raw?.expandedFolders ?? []),
     folderSortMap: raw?.folderSortMap ?? {},
     clipboard: raw?.clipboard ?? null,
@@ -264,12 +305,13 @@ export function initNoteBaseSnapshotSync(): void {
   if (!window.electronAPI?.onNoteBaseSnapshotUpdated) return;
   window.electronAPI.onNoteBaseSnapshotUpdated((payload) => {
     const { noteId, docVersion, docHash, blockHashes, fromSession } = payload;
-    // 遍历所有 ws 的 baseSnapshot，找 noteId 匹配且 fromSession 不同于自己的
-    for (const [wsId, snapshot] of noteBaseSnapshots) {
+    // 遍历所有 scope 的 baseSnapshot，找 noteId 匹配且 fromSession 不同于自己的
+    // (scope = `${wsId}::${slot}`;左右双开时两栏各有一条,若都开着同一篇则各自更新)
+    for (const [scopeKey, snapshot] of noteBaseSnapshots) {
       if (snapshot.noteId !== noteId) continue;
       if (snapshot.openedBySession === fromSession) continue; // 自己发的，跳过
       // 更新基线（不覆盖本地编辑；本地编辑内容由 PM editor 持有，不在 baseSnapshot 里）
-      setNoteBaseSnapshot(wsId, {
+      setNoteBaseSnapshot(scopeKey, {
         ...snapshot,
         docVersion,
         // 存主进程权威 docHash（SHA-1），本窗口下次写时 Step 4 快路径才能正确命中；
@@ -278,7 +320,7 @@ export function initNoteBaseSnapshotSync(): void {
         blockHashes: new Map(Object.entries(blockHashes)),
       });
       console.info(
-        `[sync/base] wsId=${wsId} noteId=${noteId} 基线更新至 v${docVersion}（由 ${fromSession} 触发）`,
+        `[sync/base] scope=${scopeKey} noteId=${noteId} 基线更新至 v${docVersion}（由 ${fromSession} 触发）`,
       );
     }
   });
@@ -327,11 +369,18 @@ export async function createNote(
 export async function updateNote(
   noteId: string,
   patch: { doc?: DriverSerialized; title?: string; folderId?: string | null },
-  wsId?: string,
+  /**
+   * merge 作用域 key(`${wsId}::${slot}`,由 noteScopeKey 构造)。
+   *
+   * fix/slot-per-slot-active-note:原先传裸 wsId。左右双开各编辑一篇时,
+   * 两栏共用一条 baseSnapshot 会互相覆盖 → Step 1 的 noteId 守卫持续不命中 →
+   * 每次写都走 fail-safe「跳过 merge 直接写 + warn」,既刷屏又丢并发保护。
+   */
+  scopeKey?: string,
 ): Promise<void> {
   if (patch.doc !== undefined) {
     const clientId = getClientId();
-    await updateNoteWithMerge(noteId, patch.doc, clientId, wsId);
+    await updateNoteWithMerge(noteId, patch.doc, clientId, scopeKey);
   }
   if (patch.folderId !== undefined) {
     await noteCap().moveNote(noteId, patch.folderId);
@@ -347,22 +396,22 @@ async function updateNoteWithMerge(
   noteId: string,
   doc: DriverSerialized,
   clientId: string,
-  wsId?: string,
+  scopeKey?: string,
   retryCount = 0,
 ): Promise<void> {
   const MAX_RETRIES = 3;
 
   // Step 1:取本窗口 baseSnapshot
-  const baseSnapshot = wsId ? getNoteBaseSnapshot(wsId) : undefined;
+  const baseSnapshot = scopeKey ? getNoteBaseSnapshot(scopeKey) : undefined;
   if (!baseSnapshot || baseSnapshot.noteId !== noteId) {
     // 无快照时 fail-safe：直接写，但留痕
-    if (wsId) {
+    if (scopeKey) {
       console.warn(
-        `[sync/merge] noteId=${noteId} wsId=${wsId} baseSnapshot 不存在或对应不同 note，跳过 merge 直接写`,
+        `[sync/merge] noteId=${noteId} scopeKey=${scopeKey} baseSnapshot 不存在或对应不同 note，跳过 merge 直接写`,
       );
     }
-    const result = await noteCap().updateNote(noteId, doc, clientId, wsId);
-    applySnapshotFromResult(noteId, wsId, result);
+    const result = await noteCap().updateNote(noteId, doc, clientId, scopeKey);
+    applySnapshotFromResult(noteId, scopeKey, result);
     return;
   }
 
@@ -390,20 +439,20 @@ async function updateNoteWithMerge(
   const dbInfo = await window.electronAPI.noteGetVersionInfo(noteId);
   if (!dbInfo) {
     console.warn(`[sync/merge] noteId=${noteId} getNoteVersionInfo 返回 null，直接写`);
-    const result = await noteCap().updateNote(noteId, doc, clientId, wsId);
-    applySnapshotFromResult(noteId, wsId, result);
+    const result = await noteCap().updateNote(noteId, doc, clientId, scopeKey);
+    applySnapshotFromResult(noteId, scopeKey, result);
     return;
   }
 
   // Step 4:若 db.docHash == baseSnapshot.docHash → 无并发写，直接写
   if (dbInfo.docHash === baseSnapshot.docHash) {
-    const result = await noteCap().updateNote(noteId, doc, clientId, wsId, baseSnapshot.docVersion);
+    const result = await noteCap().updateNote(noteId, doc, clientId, scopeKey, baseSnapshot.docVersion);
     if (result === null) {
       // 乐观锁冲突（Step 4 期间又有写入）→ 重试
-      await handleOptimisticLockConflict(noteId, doc, clientId, wsId, retryCount, MAX_RETRIES);
+      await handleOptimisticLockConflict(noteId, doc, clientId, scopeKey, retryCount, MAX_RETRIES);
       return;
     }
-    applySnapshotFromResult(noteId, wsId, result);
+    applySnapshotFromResult(noteId, scopeKey, result);
     return;
   }
 
@@ -424,13 +473,13 @@ async function updateNoteWithMerge(
   }
 
   // Step 6:带乐观锁写入（expectedVersion = 数据库当前版本）
-  const result = await noteCap().updateNote(noteId, doc, clientId, wsId, dbInfo.docVersion);
+  const result = await noteCap().updateNote(noteId, doc, clientId, scopeKey, dbInfo.docVersion);
   if (result === null) {
     // 乐观锁冲突（Step 5-6 期间又有写入）→ 重试
-    await handleOptimisticLockConflict(noteId, doc, clientId, wsId, retryCount, MAX_RETRIES);
+    await handleOptimisticLockConflict(noteId, doc, clientId, scopeKey, retryCount, MAX_RETRIES);
     return;
   }
-  applySnapshotFromResult(noteId, wsId, result);
+  applySnapshotFromResult(noteId, scopeKey, result);
 }
 
 /** 乐观锁冲突处理：重试或 fail loud */
@@ -438,7 +487,7 @@ async function handleOptimisticLockConflict(
   noteId: string,
   doc: DriverSerialized,
   clientId: string,
-  wsId: string | undefined,
+  scopeKey: string | undefined,
   retryCount: number,
   maxRetries: number,
 ): Promise<void> {
@@ -452,32 +501,32 @@ async function handleOptimisticLockConflict(
     `[sync/merge] noteId=${noteId} 乐观锁冲突，第 ${retryCount + 1} 次重试`,
   );
   // 刷新 baseSnapshot 到最新数据库状态，再重走 merge 流程
-  if (wsId) {
+  if (scopeKey) {
     const freshInfo = await window.electronAPI.noteGetVersionInfo(noteId);
     if (freshInfo) {
-      const prev = getNoteBaseSnapshot(wsId);
-      setNoteBaseSnapshot(wsId, {
+      const prev = getNoteBaseSnapshot(scopeKey);
+      setNoteBaseSnapshot(scopeKey, {
         noteId,
         docVersion: freshInfo.docVersion,
         docHash: freshInfo.docHash,
         blockHashes: new Map(Object.entries(freshInfo.blockHashes)),
         openedAt: prev?.openedAt ?? Date.now(),
-        openedBySession: wsId,
+        openedBySession: scopeKey,
       });
     }
   }
-  await updateNoteWithMerge(noteId, doc, clientId, wsId, retryCount + 1);
+  await updateNoteWithMerge(noteId, doc, clientId, scopeKey, retryCount + 1);
 }
 
 /** 写库成功后更新 baseSnapshot */
 function applySnapshotFromResult(
   noteId: string,
-  wsId: string | undefined,
+  scopeKey: string | undefined,
   result: import('@capabilities/note/types').NoteInfo | null,
 ): void {
-  if (result && wsId) {
+  if (result && scopeKey) {
     const blockHashesMap = new Map(Object.entries(result.blockHashes));
-    setNoteBaseSnapshot(wsId, {
+    setNoteBaseSnapshot(scopeKey, {
       noteId,
       docVersion: result.docVersion,
       // 直接存主进程返回的**权威** docHash(SHA-1,与 getNoteVersionInfo 同算法)。
@@ -485,8 +534,8 @@ function applySnapshotFromResult(
       // 会让 updateNoteWithMerge Step 4 快路径永远失败 → 每次写都误判并发写(日志刷屏 bug)。
       docHash: result.docHash,
       blockHashes: blockHashesMap,
-      openedAt: getNoteBaseSnapshot(wsId)?.openedAt ?? Date.now(),
-      openedBySession: wsId,
+      openedAt: getNoteBaseSnapshot(scopeKey)?.openedAt ?? Date.now(),
+      openedBySession: scopeKey,
     });
   }
 }
@@ -535,16 +584,31 @@ function pluckFirstTextMarks(node: Record<string, unknown>): unknown[] | null {
   return null;
 }
 
-export function setActiveNote(workspaceId: string, noteId: string | null): void {
+/**
+ * 切某个槽的活跃笔记。
+ *
+ * fix/slot-per-slot-active-note:显式带 slot(默认 'left' 保持既有调用点语义 ——
+ * 旧版单栏即今天的 left)。左右双开时两栏各写各的字段,互不覆盖。
+ */
+export function setActiveNote(
+  workspaceId: string,
+  noteId: string | null,
+  slot: NoteSlot = 'left',
+): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
   const state = hydrate(ws);
-  if (state.activeNoteId === noteId) return;
-  writePersistent(workspaceId, { activeNoteId: noteId });
-  // Phase 0:切换笔记时清旧快照，然后异步加载新快照
-  clearNoteBaseSnapshot(workspaceId);
+  const current = slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
+  if (current === noteId) return;
+  writePersistent(
+    workspaceId,
+    slot === 'right' ? { rightActiveNoteId: noteId } : { activeNoteId: noteId },
+  );
+  // Phase 0:切换笔记时清旧快照，然后异步加载新快照(按槽隔离)
+  const scope = noteScopeKey(workspaceId, slot);
+  clearNoteBaseSnapshot(scope);
   if (noteId) {
-    void initNoteBaseSnapshot(workspaceId, noteId);
+    void initNoteBaseSnapshot(workspaceId, noteId, slot);
   }
 }
 
@@ -553,17 +617,22 @@ export function setActiveNote(workspaceId: string, noteId: string | null): void 
  * setActiveNote 以 fire-and-forget 方式调用（保持 setActiveNote 同步签名不变）。
  * 快照在用户第一次触发保存前必须就绪（通常有充足时间）。
  */
-async function initNoteBaseSnapshot(wsId: string, noteId: string): Promise<void> {
+async function initNoteBaseSnapshot(
+  wsId: string,
+  noteId: string,
+  slot: NoteSlot = 'left',
+): Promise<void> {
   try {
     const note = await noteCap().getNote(noteId);
     if (!note) return;
-    // 若在 getNote 期间用户已切换到别的 note，跳过（防竞态覆盖）
+    // 若在 getNote 期间用户已切换到别的 note，跳过（防竞态覆盖）—— 只看本槽
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
-    const current = hydrate(ws).activeNoteId;
+    const hydrated = hydrate(ws);
+    const current = slot === 'right' ? hydrated.rightActiveNoteId : hydrated.activeNoteId;
     if (current !== noteId) return;
     const blockHashesMap = new Map(Object.entries(note.blockHashes));
-    setNoteBaseSnapshot(wsId, {
+    setNoteBaseSnapshot(noteScopeKey(wsId, slot), {
       noteId,
       docVersion: note.docVersion,
       // 存 getNote 返回的**权威** docHash（SHA-1，与 getNoteVersionInfo 同算法）。

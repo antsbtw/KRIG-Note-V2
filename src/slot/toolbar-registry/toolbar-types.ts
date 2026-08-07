@@ -5,6 +5,14 @@ import type { SelectionPayload } from '@capabilities/selection';
 
 /** ToolbarItem 渲染时上下文(订阅 selection capability 计算) */
 export interface ToolbarItemContext {
+  /**
+   * 本 toolbar 所属的槽(fix/slot-per-slot-active-note)。
+   *
+   * 同一 view 左右双开时,两条 toolbar 渲染的是同一批注册项,但显示内容
+   * (如 Note 的标题)必须各自反映本槽的状态。custom-render 组件据此取数。
+   * 省略 = 调用方未透传(非 SlotArea 场景),按 'left' 处理。
+   */
+  slot?: 'left' | 'right';
   selection: SelectionPayload | null;
 }
 

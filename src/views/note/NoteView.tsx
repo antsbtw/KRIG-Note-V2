@@ -4,7 +4,7 @@
  * 见 DESIGN.md v0.2.3 § 4。
  *
  * 订阅两层:
- * - workspaceManager:取当前 ws.activeNoteId(per-workspace)
+ * - workspaceManager:取**本槽**活跃笔记(left → activeNoteId / right → rightActiveNoteId)
  * - noteCapability:取笔记数据(全局共享,通过 useAllNotes hook + IPC 广播)
  */
 
@@ -14,7 +14,7 @@ import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editin
 import type { NoteCapabilityApi, NoteDocEnvelope } from '@capabilities/note/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useAllNotes } from './use-notes-folders';
-import { getNoteWsState, updateNote } from './data-model';
+import { getNoteWsState, updateNote, noteScopeKey } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
@@ -70,8 +70,9 @@ export function NoteView({ workspaceId, slot = 'left' }: NoteViewProps) {
   // 避免自家 onChange 经 LIST_CHANGED 回灌让 activeNote.doc 引用变 → Host useEffect[doc] 跳光标。
   const allNotes = useAllNotes();
 
-  // 取当前活跃笔记元数据
-  const activeNoteId = wsState?.activeNoteId ?? null;
+  // 取**本槽**活跃笔记元数据(fix/slot-per-slot-active-note:左右各读各的字段)
+  const activeNoteId =
+    (slot === 'right' ? wsState?.rightActiveNoteId : wsState?.activeNoteId) ?? null;
   const activeNoteMeta = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) ?? null : null;
 
   // doc 独立通道(dual-channel 方案 §5.1):
@@ -142,25 +143,32 @@ export function NoteView({ workspaceId, slot = 'left' }: NoteViewProps) {
 
   const handleDocChange = useCallback(
     (newDoc: DriverSerialized) => {
-      if (!wsState?.activeNoteId) return;
+      if (!activeNoteId) return;
       // L7-sub2:title 派生自 doc 首段文本 (capability 内自动算),view 不传 title
       // 注意:这里只发 IPC,**不动 incomingDoc** — Host 内部 PM state 已是最新,
       // 自家编辑不需要回灌;若回灌反而触发 useEffect[doc] 跳光标。
-      // Phase 0:透传 workspaceId 作为 wsId，供 baseSnapshot 更新定向。
-      void updateNote(wsState.activeNoteId, { doc: newDoc }, workspaceId);
+      // Phase 0:透传 **per-slot scope key**,供 baseSnapshot 更新定向。
+      // (原先传裸 workspaceId — 左右双开各编一篇时两栏会共用一条快照互相覆盖)
+      void updateNote(activeNoteId, { doc: newDoc }, noteScopeKey(workspaceId, slot));
     },
-    [wsState?.activeNoteId, workspaceId],
+    [activeNoteId, workspaceId, slot],
   );
 
   // L5-B3.4:同步当前 noteId 到导航历史栈(切笔记时)
+  //
+  // fix/slot-per-slot-active-note:历史栈是全局单栈(note-navigation-history.ts),
+  // 左右两个实例都写会互相覆盖 → 后退回到的是另一栏看过的笔记。
+  // 暂只让 left 栏写栈(与旧行为一致 —— 旧版只有一栏,就是今天的 left)。
+  // per-slot 历史栈是独立议题,待前进/后退按钮也按槽拆分后一并做。
   useEffect(() => {
+    if (slot !== 'left') return;
     setCurrentNoteId(activeNoteId);
-  }, [activeNoteId]);
+  }, [activeNoteId, slot]);
 
   // L5-B3.4:笔记加载后 flush pendingAnchor(link-click 跨文档跳转的滚动)
   useEffect(() => {
     if (!activeNoteId) return;
-    const anchor = takePendingAnchor();
+    const anchor = takePendingAnchor(slot);
     if (!anchor) return;
     // 等编辑器装配 + DOM 渲染完成
     const t = window.setTimeout(() => {

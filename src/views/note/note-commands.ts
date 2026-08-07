@@ -168,7 +168,10 @@ export function registerNoteCommands(wsId: string): void {
     const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
-    setActiveNote(wsId, noteId);
+    // fix/slot-per-slot-active-note:写 **right 槽**字段。
+    // 原先写的是 left 字段(那时没有 rightActiveNoteId),导致右栏装了 NoteView
+    // 却跟着左栏显示同一篇 —— 本命令的语义("不打断左栏")当时并未真正实现。
+    setActiveNote(wsId, noteId, 'right');
     if (ws.slotBinding.right !== 'note-view') {
       workspaceManager.update(wsId, {
         slotBinding: { ...ws.slotBinding, right: 'note-view' },

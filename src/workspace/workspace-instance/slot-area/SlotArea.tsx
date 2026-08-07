@@ -114,7 +114,7 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
             data-view-slot={slot}
             style={{ display: pos === 'hidden' ? 'none' : 'flex' }}
           >
-            <ToolbarFrame viewId={viewId} />
+            <ToolbarFrame viewId={viewId} slot={slot} />
             <div className="krig-slot-view-content">
               <Comp workspaceId={workspaceId} payload={payload} slot={slot} />
             </div>

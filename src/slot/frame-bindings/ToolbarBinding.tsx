@@ -22,9 +22,11 @@ import './toolbar-bindings.css';
 
 interface ToolbarBindingProps {
   viewId: string | null;
+  /** 本 toolbar 所属槽(SlotArea 透传)— 传给 item ctx,供 custom-render 按槽取数 */
+  slot?: 'left' | 'right';
 }
 
-export function ToolbarBinding({ viewId }: ToolbarBindingProps) {
+export function ToolbarBinding({ viewId, slot }: ToolbarBindingProps) {
   useToolbarVersion();
 
   // 订阅 selection capability(activeWhen / currentLabel 用)
@@ -46,7 +48,7 @@ export function ToolbarBinding({ viewId }: ToolbarBindingProps) {
     return null;
   }
 
-  const ctx: ToolbarItemContext = { selection: sel };
+  const ctx: ToolbarItemContext = { selection: sel, slot };
 
   return (
     <div className="krig-toolbar-binding">

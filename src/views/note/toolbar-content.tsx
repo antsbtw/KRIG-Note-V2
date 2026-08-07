@@ -22,6 +22,7 @@ import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { NoteOpenPopup } from './note-open-popup/NoteOpenPopup';
 import { useAllNotes } from './use-notes-folders';
 import { getNoteWsState } from './data-model';
+import type { ToolbarItemContext } from '@slot/toolbar-registry/toolbar-types';
 import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import { TocToolbarButton } from './toc/TocToolbarButton';
 
@@ -29,15 +30,22 @@ const VIEW = 'note-view';
 
 const OPEN_POPUP_ID = 'note-view.popup.open';
 
-/** Toolbar title 组件 — 显示当前 active note 的标题(V1 NoteView.tsx:772 同款)*/
-function NoteToolbarTitle() {
+/** Toolbar title 组件 — 显示**本槽** active note 的标题(V1 NoteView.tsx:772 同款)
+ *
+ * fix/slot-per-slot-active-note:左右双开时两条 toolbar 各显各的笔记标题,
+ * 故按 ctx.slot 读对应字段(省略 = left,兼容非 SlotArea 调用方)。
+ */
+function NoteToolbarTitle({ ctx }: { ctx?: ToolbarItemContext }) {
   const wsId = useWsId();
   const allNotes = useAllNotes();
+  const slot = ctx?.slot ?? 'left';
   const activeNoteId = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
     () => {
       const ws = workspaceManager.get(wsId);
-      return ws ? getNoteWsState(ws).activeNoteId : null;
+      if (!ws) return null;
+      const s = getNoteWsState(ws);
+      return slot === 'right' ? s.rightActiveNoteId : s.activeNoteId;
     },
   );
   const note = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) : null;

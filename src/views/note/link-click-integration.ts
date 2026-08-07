@@ -4,12 +4,14 @@
  * driver 的 link-click plugin 需要 view 注入 onOpenNote / getCurrentNoteId,
  * 因为"如何切笔记"是 view 业务,driver 不该知道。
  *
- * 路由策略(对齐 V2 当前能力,降级 V1):
- * - V1:点 krig://note → 当前 ws 右栏 NoteView + 切右栏 activeNoteId(不动左栏)
- * - V2 当前:**没有 rightActiveNoteId 字段**(V2 故意暂缺,等 ActiveResourceManager 层)
- *   → 降级:点 krig://note → 切当前 ws activeNoteId(覆盖左栏当前笔记)
+ * 路由策略(fix/slot-per-slot-active-note 起恢复 V1 语义):
+ * - 点 krig://note → 装右栏 NoteView + 切**右栏** activeNoteId,**不动左栏**
+ * - 依赖:rightActiveNoteId 字段已补回(data-model.ts),右栏能独立显示另一篇
  *
- * 跨 ws 跳转 / 真右栏 routing 留 ActiveResourceManager 抽象到位后补。
+ * 历史:V2 初期砍掉 rightActiveNoteId,此处曾降级为"覆盖左栏当前笔记"。
+ * 左右双开落地后该降级取消 —— 点内链不该把用户正在读的左栏顶掉。
+ *
+ * 跨 ws 跳转仍留 ActiveResourceManager 抽象到位后补。
  *
  * 同文档 anchor 滚动由 driver 内部处理(scrollToBlockAnchor),view 不参与。
  */
@@ -19,20 +21,30 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { setActiveNote, getNoteWsState } from './data-model';
+import { setActiveNote, getNoteWsState, type NoteSlot } from './data-model';
 import { startNoteCache, getNoteTitle } from './note-cache';
 import {
   setCurrentNoteId,
   navigateToNote,
 } from './note-navigation-history';
 
-let pendingAnchor: string | null = null;
+/**
+ * 待执行的滚动 anchor,**带目标槽**(fix/slot-per-slot-active-note)。
+ *
+ * 原先是裸 `string | null` 模块单例。左右双开后两个 NoteView 实例都会在
+ * activeNoteId 变化时调 takePendingAnchor() —— 谁先跑谁拿走,另一个拿到 null,
+ * 表现为"右栏跳到笔记但不滚到锚点,左栏反而莫名其妙滚动"。
+ * 加 slot 后按槽认领,不是自己的不取走。
+ */
+let pendingAnchor: { slot: NoteSlot; anchor: string | null } | null = null;
 
 /**
- * 取当前待执行的 anchor(笔记加载完成后由 NoteView 调 flushPendingAnchor 滚到位)
+ * 取**本槽**待执行的 anchor(笔记加载完成后由 NoteView 滚到位)。
+ * 不是本槽的留着不动,交给目标槽那个实例认领。
  */
-export function takePendingAnchor(): string | null {
-  const a = pendingAnchor;
+export function takePendingAnchor(slot: NoteSlot): string | null {
+  if (!pendingAnchor || pendingAnchor.slot !== slot) return null;
+  const a = pendingAnchor.anchor;
   pendingAnchor = null;
   return a;
 }
@@ -48,17 +60,32 @@ export function registerLinkClickIntegration(): void {
       if (!wsId) return;
       // 历史栈推进
       navigateToNote(noteId);
-      // 切当前 ws 的活跃笔记(V2 当前能力 — 覆盖左栏)
-      setActiveNote(wsId, noteId);
-      // 留待笔记加载完成后由 NoteView 滚动 anchor
-      pendingAnchor = blockAnchor ?? null;
+      // V1 语义:装右栏 + 切右栏活跃笔记,不动左栏
+      const bus = workspaceManager.getBus(wsId);
+      bus?.slot.openRight('note-view');
+      setActiveNote(wsId, noteId, 'right');
+      // 留待笔记加载完成后由右栏 NoteView 滚动 anchor
+      pendingAnchor = { slot: 'right', anchor: blockAnchor ?? null };
     },
+    /**
+     * "当前笔记"用于 driver 判断同文档跳转(同文档 → 当场滚动,不开右栏)。
+     *
+     * fix/slot-per-slot-active-note:左右双开后本函数有歧义 —— 点链接的可能是
+     * 左栏也可能是右栏。用**聚焦的 PM 实例**反推是哪个槽:instanceId 形如
+     * `${wsId}::slot:${slot}`,解析出 slot 再读对应字段。
+     * 解析不出(无聚焦实例/非 NoteView 实例)时返回 left 的值兜底 —— 判错的
+     * 后果仅是"本可当场滚动的却开了右栏",不损坏数据。
+     */
     getCurrentNoteId() {
       const wsId = getActiveWorkspaceIdSync();
       if (!wsId) return null;
       const ws = workspaceManager.get(wsId);
       if (!ws) return null;
-      return getNoteWsState(ws).activeNoteId;
+      const focused = requireCapabilityApi<TextEditingApi>('text-editing')
+        .instanceRegistry.getFocusedInstanceId();
+      const slot: NoteSlot = focused?.endsWith('::slot:right') ? 'right' : 'left';
+      const state = getNoteWsState(ws);
+      return slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
     },
     /**
      * L5-B3.12:noteLink NodeView 同步目标 title — driver 不直接 import noteCapability,

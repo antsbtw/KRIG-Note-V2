@@ -19,9 +19,11 @@ import './toolbar-frame.css';
 interface ToolbarFrameProps {
   /** 当前 view ID */
   viewId: string | null;
+  /** 本 frame 所属槽(SlotArea 透传)*/
+  slot?: 'left' | 'right';
 }
 
-export function ToolbarFrame({ viewId }: ToolbarFrameProps) {
+export function ToolbarFrame({ viewId, slot }: ToolbarFrameProps) {
   // 订阅 toolbarRegistry 变化(view 注册/卸载 items 时触发重渲)
   useToolbarVersion();
 
@@ -32,7 +34,7 @@ export function ToolbarFrame({ viewId }: ToolbarFrameProps) {
 
   return (
     <div className="krig-toolbar-frame">
-      <ToolbarBinding viewId={viewId} />
+      <ToolbarBinding viewId={viewId} slot={slot} />
     </div>
   );
 }
