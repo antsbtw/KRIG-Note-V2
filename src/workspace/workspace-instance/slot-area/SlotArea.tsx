@@ -79,6 +79,9 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
           pos === 'left' ? slotBinding.leftPayload :
           pos === 'right' ? slotBinding.rightPayload :
           undefined;
+        // slot 透传给 view(fix/slot-instance-id):view 据此派生 per-slot 的 PM
+        // instanceId。hidden 态按 'left' 传 —— 此时 view 不可见,取值只需稳定不碰撞。
+        const slot = pos === 'right' ? 'right' : 'left';
         return (
           <div
             key={view.id}
@@ -88,7 +91,7 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
           >
             <ToolbarFrame viewId={view.id} />
             <div className="krig-slot-view-content">
-              <Comp workspaceId={workspaceId} payload={payload} />
+              <Comp workspaceId={workspaceId} payload={payload} slot={slot} />
             </div>
           </div>
         );

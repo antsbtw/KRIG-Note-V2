@@ -27,9 +27,29 @@ import './note.css';
 interface NoteViewProps {
   workspaceId: string;
   payload?: unknown;
+  /**
+   * 本实例所在的槽(left / right)。SlotArea 渲染时注入。
+   *
+   * 左右双开同一 view 时,两个实例的 workspaceId 相同,只有 slot 不同 —— 故
+   * instanceId 必须带 slot 维度,否则 instanceRegistry 键碰撞(见下方 instanceId 注释)。
+   * 缺省 'left':兼容尚未透传 slot 的调用方(SlotArea 之外的嵌入场景)。
+   */
+  slot?: 'left' | 'right';
 }
 
-export function NoteView({ workspaceId }: NoteViewProps) {
+export function NoteView({ workspaceId, slot = 'left' }: NoteViewProps) {
+  /**
+   * PM 实例 id —— 必须 per-slot 唯一(fix/slot-instance-id)。
+   *
+   * 旧值是裸 workspaceId,基于"一个 ws 一个 NoteView"的假设。左右双开后该假设
+   * 不成立:两个实例注册进 instanceRegistry(Map<instanceId, entry>)时后者覆盖前者,
+   * 且 right 卸载时 delete 掉的是 left 还活着的那条 → 左栏工具栏/快捷键/handle
+   * 全部静默失效(api.ts 里 get() 拿不到就 early-return,不报错)。
+   *
+   * 复合 id 在本体系已有先例:canvas-text-node 用 `${workspaceId}::${nodeId}`,
+   * thought 用 `thought::${id}`。此处沿用同一形态。
+   */
+  const instanceId = `${workspaceId}::slot:${slot}`;
   // W5 C4:间接路由拿 text-editing capability(useMemo 缓存,React identity 稳定)
   const textEditing = useMemo(
     () => requireCapabilityApi<TextEditingApi>('text-editing'),
@@ -144,10 +164,10 @@ export function NoteView({ workspaceId }: NoteViewProps) {
     if (!anchor) return;
     // 等编辑器装配 + DOM 渲染完成
     const t = window.setTimeout(() => {
-      textEditing.api.scrollToAnchor(workspaceId, anchor);
+      textEditing.api.scrollToAnchor(instanceId, anchor);
     }, 100);
     return () => window.clearTimeout(t);
-  }, [activeNoteId, workspaceId]);
+  }, [activeNoteId, instanceId]);
 
   // W4.1:全局 keymap(Cmd+K / Cmd+[ / Cmd+])改为 ViewDefinition.keymap 声明式注册,
   // 见 views/note/index.ts + note-commands.ts(note-view.popup-link / go-back / go-forward)
@@ -192,7 +212,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
           <Host
             key={activeNoteId}
             config={{
-              instanceId: workspaceId,
+              instanceId,
               undoScope: 'text-editing.pm',
               viewId: 'note-view',
               // C8 D-D:NoteView 显式声明 titleGuard(noteTitle 强制守门)。
@@ -205,7 +225,7 @@ export function NoteView({ workspaceId }: NoteViewProps) {
           />
         </div>
       </div>
-      <TocIndicator instanceId={workspaceId} textEditing={textEditing} />
+      <TocIndicator instanceId={instanceId} textEditing={textEditing} />
     </div>
   );
 }

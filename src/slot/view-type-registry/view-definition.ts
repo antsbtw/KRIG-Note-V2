@@ -18,6 +18,15 @@ export interface ViewComponentProps {
   workspaceId: string;
   /** bus.slot.openRight 传入的 payload(可选)*/
   payload?: unknown;
+  /**
+   * 本实例所在的槽(SlotArea 注入)。
+   *
+   * 内嵌 PM 编辑器的 view **必须**用它派生 per-slot 的 instanceId
+   * (如 `${workspaceId}::slot:${slot}`),不能再用裸 workspaceId ——
+   * 否则左右双开同一 view 时 instanceRegistry 键碰撞,先 mount 的那个会被
+   * 后 mount 的覆盖,且任一侧卸载会连带把另一侧的注册删掉(静默失效)。
+   */
+  slot?: 'left' | 'right';
 }
 
 /** ViewSwitcher Tab 信息(NavSide 顶部 view 切换条用)*/

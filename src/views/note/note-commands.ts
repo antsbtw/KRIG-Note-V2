@@ -72,12 +72,22 @@ function ensureNoteViewActive(wsId: string): void {
   });
 }
 
-/** focus-first instanceId(同 capability/commands 风格,业务命令也用) */
-function resolveInstanceId(wsId?: string): string | null {
-  return (
-    requireCapabilityApi<TextEditingApi>('text-editing')
-      .instanceRegistry.getFocusedInstanceId() ?? wsId ?? null
-  );
+/**
+ * focus-first instanceId(同 capability/commands 风格,业务命令也用)
+ *
+ * fix/slot-instance-id:删掉 `?? wsId` 兜底 —— NoteView 的 instanceId 已是
+ * `${wsId}::slot:${slot}` 复合形态,裸 wsId 查不到任何实例,兜底只会让命令
+ * 静默失败。改为 fail loud。
+ */
+function resolveInstanceId(): string | null {
+  const id = requireCapabilityApi<TextEditingApi>('text-editing')
+    .instanceRegistry.getFocusedInstanceId();
+  if (!id) {
+    console.error(
+      '[note-view] 无法解析目标 PM 实例:当前没有聚焦的编辑器,命令已跳过。',
+    );
+  }
+  return id;
 }
 
 function withInstance(fn: (instanceId: string) => void): () => void {
@@ -88,13 +98,21 @@ function withInstance(fn: (instanceId: string) => void): () => void {
   };
 }
 
-/** handle pos 解析(handle-copy-block-link 用) */
+/** handle pos 解析(handle-copy-block-link 用)
+ *
+ * fix/slot-instance-id:改用 controller state 自带的 instanceId,不再走
+ * resolveInstanceId() 的 focused 路径 —— 与 register-pm-commands.ts 的
+ * getHandlePos 对齐(那边早已修过,本处是漏网)。
+ *
+ * 理由同那边:handle 菜单弹出后焦点可能已不在编辑器里,focused 解析会指向
+ * 无关实例,把这个实例的 pos 用到另一个文档上 → 删/改错 block。pos 和
+ * instanceId 必须同源,都取自 handle plugin show 时显式传入的 state。
+ */
 function getHandlePos(): { instanceId: string; pos: number } | null {
-  const id = resolveInstanceId();
-  if (!id) return null;
   const state = handleMenuController.getState();
+  if (!state.instanceId) return null;
   if (typeof state.pos !== 'number') return null;
-  return { instanceId: id, pos: state.pos };
+  return { instanceId: state.instanceId, pos: state.pos };
 }
 
 export function registerNoteCommands(wsId: string): void {

@@ -126,10 +126,7 @@ export function Host(props: TextEditingHostProps) {
     viewRef.current = view;
 
     // 注册到 instance-registry(让单例命令 handler 路由到本实例)
-    instanceRegistry.set(config.instanceId, {
-      view,
-      workspaceId: config.instanceId, // L5-A:instanceId == workspaceId
-    });
+    instanceRegistry.set(config.instanceId, { view });
 
     // IME 拼音结束后:
     //   1. flush pendingComposingDoc — 把拼音整段产生的最终 doc 一次性 emit 出去(IPC 只走 1 次)
@@ -168,7 +165,8 @@ export function Host(props: TextEditingHostProps) {
       unregisterDnd();
       unregisterInsertion();
       unregisterFt();
-      instanceRegistry.delete(config.instanceId);
+      // 传 view:让 registry 核对身份,碰撞时不误删还活着的另一实例
+      instanceRegistry.delete(config.instanceId, view);
       view.destroy();
       viewRef.current = null;
     };

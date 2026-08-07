@@ -10,13 +10,13 @@
  * - D-B 命令实现走 driver capability api(requireCapabilityApi.api)
  * - N-1 唯一注册源 — 同 command id 全工程仅一处 register;C7 同步删 NoteView 旧 register
  * - L5-G4.5 focus-first instanceId 路径(canvas-text-node 嵌入 popup 复合 id 场景):
- *   优先用 instanceRegistry.getFocusedInstanceId();fallback 走 getActiveWorkspaceIdSync()
+ *   用 instanceRegistry.getFocusedInstanceId()。fix/slot-instance-id 起删掉
+ *   getActiveWorkspaceIdSync() 兜底(裸 wsId 不再是合法实例 key,兜底只会静默失败)
  *
  * 入口:capability/text-editing/index.ts 加载时调 registerTextEditingCommands()
  */
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
 import { popupController } from '@slot/triggers/popup-controller';
@@ -35,11 +35,24 @@ type TurnTarget =
  * focus-first instanceId resolver(L5-G4.5)
  *
  * 优先用真正持有焦点的 PM 实例 id — 让 NoteView / ThoughtView / canvas-text-node
- * 嵌入的 popup 编辑器(instanceId 是 `${workspaceId}::${nodeId}` 复合)能正确路由。
- * Fallback:无 PM 实例聚焦时走 workspace activeId(等价 NoteView 单 PM 实例场景)。
+ * 嵌入的 popup 编辑器(instanceId 是复合 id)能正确路由。
+ *
+ * fix/slot-instance-id:**删掉 `?? getActiveWorkspaceIdSync()` 兜底**。
+ * 所有内嵌 PM 的 view 现在都用复合 instanceId(NoteView = `${wsId}::slot:${slot}`,
+ * canvas-text-node = `${wsId}::${nodeId}`,thought = `thought::${id}`),裸 wsId
+ * 不再是任何实例的 key —— 该兜底只会返回一个查不到的 id,让命令走 early-return
+ * 静默失败。宁可在这里响一声,也不要"点了没反应"。
  */
 function resolveInstanceId(): string | null {
-  return instanceRegistry.getFocusedInstanceId() ?? getActiveWorkspaceIdSync();
+  const id = instanceRegistry.getFocusedInstanceId();
+  if (!id) {
+    console.error(
+      '[text-editing] 无法解析目标 PM 实例:当前没有聚焦的编辑器。' +
+      ' 命令已跳过。若操作前焦点落在工具栏/菜单等非编辑器元素上,' +
+      ' 调用方应显式携带 instanceId(参考 handle-menu-controller 的做法)。',
+    );
+  }
+  return id;
 }
 
 function withInstance(fn: (instanceId: string) => void): () => void {

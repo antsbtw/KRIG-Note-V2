@@ -14,7 +14,6 @@ import type { EditorView } from 'prosemirror-view';
 
 interface InstanceEntry {
   view: EditorView;
-  workspaceId: string;
   /**
    * 用户最后一次主动放置光标的位置(selection.from)。
    *
@@ -31,7 +30,23 @@ interface InstanceEntry {
 class InstanceRegistry {
   private instances = new Map<string, InstanceEntry>();
 
+  /**
+   * 注册实例。
+   *
+   * fail loud(fix/slot-instance-id):instanceId 必须全局唯一。撞 key 说明有两个
+   * Host 用了同一个 id(典型:view 内嵌 PM 但仍传裸 workspaceId,左右双开后碰撞)。
+   * 后果极隐蔽 —— 后者覆盖前者,且先卸载的那个会 delete 掉还活着的那条注册,
+   * 表现为"另一侧编辑器所有命令点了没反应"且不报错。故此处必须响。
+   */
   set(instanceId: string, entry: InstanceEntry): void {
+    const existing = this.instances.get(instanceId);
+    if (existing && existing.view !== entry.view) {
+      console.error(
+        `[text-editing-driver] instanceId 冲突: '${instanceId}' 已被另一个活跃 EditorView 占用。` +
+        ' 两个 Host 用了同一个 instanceId —— 内嵌 PM 的 view 必须派生 per-slot 唯一 id' +
+        ' (形如 "<workspaceId>::slot:<left|right>")。此实例注册将覆盖前者,前者的命令路由会失效。',
+      );
+    }
     this.instances.set(instanceId, entry);
   }
 
@@ -39,7 +54,23 @@ class InstanceRegistry {
     return this.instances.get(instanceId);
   }
 
-  delete(instanceId: string): void {
+  /**
+   * 注销实例。
+   *
+   * 只删"确实是自己那条" —— 传 view 时做身份核对,防止 key 碰撞场景下
+   * A 卸载把 B 还活着的注册删掉(体检里最难 debug 的那个症状)。
+   */
+  delete(instanceId: string, view?: EditorView): void {
+    if (view) {
+      const existing = this.instances.get(instanceId);
+      if (existing && existing.view !== view) {
+        console.error(
+          `[text-editing-driver] 拒绝注销 '${instanceId}': 注册表里是另一个 EditorView。` +
+          ' 说明存在 instanceId 碰撞,若强删会让还活着的那个实例命令全失效。',
+        );
+        return;
+      }
+    }
     this.instances.delete(instanceId);
   }
 
