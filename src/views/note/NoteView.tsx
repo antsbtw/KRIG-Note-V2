@@ -14,7 +14,7 @@ import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editin
 import type { NoteCapabilityApi, NoteDocEnvelope } from '@capabilities/note/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useAllNotes } from './use-notes-folders';
-import { getNoteWsState, updateNote, noteScopeKey } from './data-model';
+import { getNoteWsState, updateNote, noteScopeKey, noteInstanceId } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
@@ -49,7 +49,7 @@ export function NoteView({ workspaceId, slot = 'left' }: NoteViewProps) {
    * 复合 id 在本体系已有先例:canvas-text-node 用 `${workspaceId}::${nodeId}`,
    * thought 用 `thought::${id}`。此处沿用同一形态。
    */
-  const instanceId = `${workspaceId}::slot:${slot}`;
+  const instanceId = noteInstanceId(workspaceId, slot);
   // W5 C4:间接路由拿 text-editing capability(useMemo 缓存,React identity 稳定)
   const textEditing = useMemo(
     () => requireCapabilityApi<TextEditingApi>('text-editing'),

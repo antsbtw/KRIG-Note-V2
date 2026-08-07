@@ -24,6 +24,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
+import { getInvokingSlot } from '@slot/toolbar-registry/toolbar-invocation';
 import {
   createNote,
   setActiveNote,
@@ -32,6 +33,7 @@ import {
   cycleSortByTitle,
   cycleSortByDate,
   setSelectedIds,
+  noteInstanceId,
 } from './data-model';
 import {
   copyToClipboard,
@@ -121,15 +123,18 @@ export function registerNoteCommands(wsId: string): void {
   registerWsCommand('note-view.create-note', () => wsId, (ctx, folderId) => {
     const wsId = ctx.wsId;
     const fid = typeof folderId === 'string' ? folderId : null;
+    // 触发槽必须在**同步段**取出 —— 异步续段里 invokingSlot 已被清空
+    const slot = getInvokingSlot() ?? 'left';
     // L7-sub2:createNote 是 async,handler 是 sync,用 IIFE 包装拿 id 走后续选中
     void (async () => {
-      const noteId = await createNote(wsId, fid);
+      const noteId = await createNote(wsId, fid, slot);
       if (noteId) {
         // 选中新建笔记(单选)
         setSelectedIds(wsId, new Set([encodeNoteId(noteId)]));
       }
     })();
-    ensureNoteViewActive(wsId);
+    // 只有 left 栏触发才把 NoteView 强切到 left;右栏触发不动左栏
+    if (slot === 'left') ensureNoteViewActive(wsId);
   });
 
   registerWsCommand('note-view.delete-active', () => wsId, (ctx) => {
@@ -142,15 +147,19 @@ export function registerNoteCommands(wsId: string): void {
       void deleteSelected(wsId);
       return;
     }
-    // fallback:删活跃笔记(走统一进度入口,大 note 显块级进度)
-    if (state.activeNoteId) void deleteTreeIdsWithProgress([encodeNoteId(state.activeNoteId)]);
+    // fallback:删**本槽**活跃笔记(走统一进度入口,大 note 显块级进度)
+    const slot = getInvokingSlot() ?? 'left';
+    const target = slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
+    if (target) void deleteTreeIdsWithProgress([encodeNoteId(target)]);
   });
 
   registerWsCommand('note-view.set-active', () => wsId, (ctx, noteId) => {
     if (typeof noteId !== 'string') return;
     const wsId = ctx.wsId;
-    setActiveNote(wsId, noteId);
-    ensureNoteViewActive(wsId);
+    // 从右栏 toolbar(如 Open 弹窗)选笔记 → 换的是右栏,不该顶掉左栏
+    const slot = getInvokingSlot() ?? 'left';
+    setActiveNote(wsId, noteId, slot);
+    if (slot === 'left') ensureNoteViewActive(wsId);
   });
 
   /**
@@ -324,9 +333,22 @@ export function registerNoteCommands(wsId: string): void {
 
   // ── 目录面板开关(toolbar 📑 按钮)──
   // hover 触发易反复弹框,改显式 toggle;面板侧自带点外部关闭。
-  commandRegistry.register('note-view.toggle-toc', withInstance((instanceId) => {
-    tocToggleStore.toggle(instanceId);
-  }));
+  /**
+   * 目录开关 —— 作用于**点击那一栏**的编辑器。
+   *
+   * 不能只走 withInstance(focused):toolbar 按钮有 preventDefault 不抢焦点,
+   * 所以 focused 仍是"上次点过的那栏"。用户点右栏目录按钮时若焦点还在左栏,
+   * 会去开左栏的目录。有触发槽就直接按槽算 instanceId。
+   */
+  commandRegistry.register('note-view.toggle-toc', () => {
+    const slot = getInvokingSlot();
+    if (slot) {
+      tocToggleStore.toggle(noteInstanceId(wsId, slot));
+      return;
+    }
+    const id = resolveInstanceId();
+    if (id) tocToggleStore.toggle(id);
+  });
 
   // ── Toolbar 操作命令 ──
 
@@ -336,7 +358,17 @@ export function registerNoteCommands(wsId: string): void {
     const ws = workspaceManager.get(wsId);
     const bus = workspaceManager.getBus(wsId);
     if (!ws || !bus) return;
-    if (ws.slotBinding.right === 'note-view') {
+    // 关**点击那一栏**。
+    //
+    // 原实现按 `right === 'note-view'` 猜:左右都是 note-view 时恒为 true,
+    // 点左栏的 ✕ 会把右栏关掉。有触发槽就用触发槽,没有(快捷键/程序调用)
+    // 才退回按绑定猜。
+    const slot = getInvokingSlot();
+    if (slot === 'right') {
+      bus.slot.closeRight();
+    } else if (slot === 'left') {
+      bus.slot.closeLeft();
+    } else if (ws.slotBinding.right === 'note-view') {
       bus.slot.closeRight();
     } else {
       bus.slot.closeLeft();
@@ -359,6 +391,24 @@ export function registerNoteCommands(wsId: string): void {
    * 已装同类直接覆盖重开(openRight 是幂等的)。
    */
   registerWsCommand('note-view.open-right-slot', () => wsId, (ctx, arg) => {
+    const bus = workspaceManager.getBus(ctx.wsId);
+    if (!bus) return;
+    if (typeof arg === 'string') {
+      bus.slot.openRight(arg);
+    } else if (arg && typeof arg === 'object' && 'viewId' in arg) {
+      const { viewId, subId } = arg as { viewId: string; subId: string };
+      bus.slot.openRight(viewId, { subId });
+    }
+  });
+
+  /**
+   * 右栏 toolbar 的 ⊞ —— 用选中的 view **替换右栏自己**。
+   *
+   * 与 open-right-slot 的落点相同(都是 right 槽),但语义来源不同:
+   * 那个是"左栏想在右边开个副窗",这个是"右栏想换成别的 view"。
+   * 分成两个命令是为了让 SlotPicker 的调用方意图显式,不靠猜。
+   */
+  registerWsCommand('note-view.open-in-right-slot-self', () => wsId, (ctx, arg) => {
     const bus = workspaceManager.getBus(ctx.wsId);
     if (!bus) return;
     if (typeof arg === 'string') {

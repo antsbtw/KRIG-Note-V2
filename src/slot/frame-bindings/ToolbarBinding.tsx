@@ -12,6 +12,7 @@ import { useToolbarVersion } from './use-registry';
 import { toolbarRegistry } from '../toolbar-registry/toolbar-registry';
 import { commandRegistry } from '../command-registry/command-registry';
 import { popupController } from '../triggers/popup-controller';
+import { runWithInvokingSlot, setPopupOwnerSlot } from '../toolbar-registry/toolbar-invocation';
 import { selection, type SelectionPayload } from '@capabilities/selection';
 import type {
   ToolbarItem,
@@ -94,9 +95,15 @@ function renderItem(item: ToolbarItem, ctx: ToolbarItemContext) {
       onMouseDown={(e) => e.preventDefault()} // 不抢编辑器焦点
       onClick={(e) => {
         if (isPopupTrigger && item.popupId) {
+          // 浮层内容异步呈现,同步栈上下文届时已清 —— 单独记下归属槽
+          setPopupOwnerSlot(ctx.slot);
           popupController.toggle(item.popupId, e.currentTarget);
         } else if (item.command) {
-          commandRegistry.execute(item.command, item.commandArg);
+          // 带上本 toolbar 的槽 —— 否则命令只能按老习惯操作 left
+          // (点右栏「+新建」笔记却建到左栏的根因)
+          runWithInvokingSlot(ctx.slot, () =>
+            commandRegistry.execute(item.command!, item.commandArg),
+          );
         }
       }}
       title={item.label}
@@ -219,7 +226,9 @@ function renderDropdownOption(
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => {
         if (disabled) return;
-        commandRegistry.execute(opt.command, opt.commandArg);
+        runWithInvokingSlot(ctx.slot, () =>
+          commandRegistry.execute(opt.command, opt.commandArg),
+        );
         closeMenu();
       }}
     >

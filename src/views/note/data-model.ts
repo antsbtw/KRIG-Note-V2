@@ -165,6 +165,16 @@ export function noteScopeKey(wsId: string, slot: NoteSlot): string {
   return `${wsId}::${slot}`;
 }
 
+/**
+ * 构造 NoteView 的 PM instanceId(单一来源)。
+ *
+ * NoteView 挂 Host 时用它,命令按槽定位实例时也用它 —— 格式只此一处定义,
+ * 避免各处硬编码 `${wsId}::slot:${slot}` 字面量后漂移。
+ */
+export function noteInstanceId(wsId: string, slot: NoteSlot): string {
+  return `${wsId}::slot:${slot}`;
+}
+
 /** per-workspace 工作位状态(persistent + transient 合并视图)*/
 export interface NoteWorkspaceState {
   /** left 槽活跃笔记(旧字段,语义不变)*/
@@ -340,12 +350,16 @@ export function deriveTitle(doc: DriverSerialized): string {
 export async function createNote(
   workspaceId: string,
   folderId: string | null = null,
+  /** 新笔记在哪个槽打开(fix/slot-toolbar-command-targets-own-slot;默认 left = 旧行为)*/
+  slot: NoteSlot = 'left',
 ): Promise<string | null> {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return null;
   const textEditing = requireCapabilityApi<TextEditingApi>('text-editing');
   const note = await noteCap().createNote(textEditing.createEmptyDoc(), folderId);
-  writePersistent(workspaceId, { activeNoteId: note.id });
+  // 走 setActiveNote 而非直接 writePersistent —— 后者只会写 left 字段,
+  // 且会跳过 baseSnapshot 初始化(新笔记第一次保存就走 fail-safe 无 merge 路径)
+  setActiveNote(workspaceId, note.id, slot);
   // 创建到 folder 时自动展开它
   if (folderId) {
     const cur = hydrate(ws).expandedFolders;

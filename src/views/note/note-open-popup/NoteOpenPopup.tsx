@@ -18,6 +18,7 @@ import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { useAllNotes } from '../use-notes-folders';
 import { setActiveNote } from '../data-model';
 import { navigateToNote } from '../note-navigation-history';
+import { getPopupOwnerSlot } from '@slot/toolbar-registry/toolbar-invocation';
 import './note-open-popup.css';
 
 export function NoteOpenPopup({ onClose }: PopupCloseProps) {
@@ -57,7 +58,8 @@ export function NoteOpenPopup({ onClose }: PopupCloseProps) {
 
   function openNote(noteId: string): void {
     navigateToNote(noteId);
-    setActiveNote(wsId, noteId);
+    // 从右栏 toolbar 的 Open 打开 → 换右栏,不顶掉左栏
+    setActiveNote(wsId, noteId, getPopupOwnerSlot() ?? 'left');
     onClose();
   }
 

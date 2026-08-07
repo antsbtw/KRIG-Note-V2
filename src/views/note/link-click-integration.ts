@@ -21,7 +21,7 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { setActiveNote, getNoteWsState, type NoteSlot } from './data-model';
+import { setActiveNote, getNoteWsState, noteInstanceId, type NoteSlot } from './data-model';
 import { startNoteCache, getNoteTitle } from './note-cache';
 import {
   setCurrentNoteId,
@@ -83,7 +83,7 @@ export function registerLinkClickIntegration(): void {
       if (!ws) return null;
       const focused = requireCapabilityApi<TextEditingApi>('text-editing')
         .instanceRegistry.getFocusedInstanceId();
-      const slot: NoteSlot = focused?.endsWith('::slot:right') ? 'right' : 'left';
+      const slot: NoteSlot = focused === noteInstanceId(wsId, 'right') ? 'right' : 'left';
       const state = getNoteWsState(ws);
       return slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
     },

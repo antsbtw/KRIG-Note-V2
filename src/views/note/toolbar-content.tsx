@@ -53,16 +53,24 @@ function NoteToolbarTitle({ ctx }: { ctx?: ToolbarItemContext }) {
   return <span className="krig-toolbar-title">{title}</span>;
 }
 
-/** ⊞ 按钮 — 点击先注入 commandId 再弹 SlotPicker */
-function NoteSlotSwitchButton() {
+/** ⊞ 按钮 — 点击先注入 commandId 再弹 SlotPicker
+ *
+ * fix/slot-toolbar-command-targets-own-slot:右栏的 ⊞ 应替换**右栏自己**,
+ * 左栏的 ⊞ 才是"在右栏打开"。原先两栏都硬编码 open-right-slot,
+ * 导致右栏的 ⊞ 换的是自己以外的语义混乱。
+ */
+function NoteSlotSwitchButton({ ctx }: { ctx?: ToolbarItemContext }) {
+  const isRight = ctx?.slot === 'right';
   return (
     <button
       type="button"
       className="krig-toolbar-button krig-toolbar-button--default"
-      title="在右栏打开视图"
+      title={isRight ? '替换本栏视图' : '在右栏打开视图'}
       onMouseDown={(e) => e.preventDefault()}
       onClick={(e) => {
-        slotPickerContext.setCommandId('note-view.open-right-slot');
+        slotPickerContext.setCommandId(
+          isRight ? 'note-view.open-in-right-slot-self' : 'note-view.open-right-slot',
+        );
         popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
       }}
     >
