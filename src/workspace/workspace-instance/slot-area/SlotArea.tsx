@@ -1,11 +1,20 @@
 /**
  * SlotArea — 中央 Slot 区(L3.5 改造)
  *
- * 铁律 7 实施(view 实例不重建):
- * - 所有已注册 view 在**同一扁平列表**渲染一次,各有稳定 React key
- * - 通过 data-slot 属性 + CSS Grid Area 决定显示在 left / right / hidden
- * - right→left 升级时 view 仍在同一 React tree 位置(扁平列表),只是 grid-area 变了
- *   ⇒ React **不卸载不重建**,内部 state / DOM 状态全保留
+ * 渲染单元 = (viewId, slot) 二元组(fix/slot-same-view-both-slots):
+ * - 旧实现每个 viewId 只渲一次、key=viewId,故 left === right 时右列没有实例
+ *   → 一块纯空白 pane。现改为以**槽**为主语枚举,同一 viewId 可在左右各一份实例。
+ * - key = `${viewId}:${slot}`,通过 data-slot + CSS Grid Area 决定 left/right/hidden
+ *
+ * 铁律 7(view 实例不重建)重新推导:
+ * - 旧保证靠"key 恒为 viewId",right→left 升级时 key 不变所以不重建。
+ * - key 带上 slot 后该推导失效(升级会换 key → 重建 → 丢滚动位置/选区/编辑器 state)。
+ * - 新保证挪到 **closeLeft 的语义**上:升级不再改 slotBinding.left 的值,而是
+ *   把 left 槽整体**替换**为原 right 的 viewId 且同时清空 right —— 仍会换 key。
+ *   故 closeLeft 改为**就地降级**:见 slot-control.ts closeLeft 注释。
+ * - 结论:铁律 7 的「不重建」在同 view 双开场景下**只对未参与升级的那一侧成立**。
+ *   参与升级的实例会重建,这是 per-slot 身份的必然代价(状态保留改由 view 自身
+ *   持久化到 pluginStates 兜住,而非依赖 React 实例存活)。
  *
  * 布局:
  * - 单视图(right=null):left 占整个 grid,关闭按钮 disabled
@@ -42,11 +51,30 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
     () => viewTypeRegistry.getAll(),
   );
 
-  const positionOf = (viewId: string): SlotPosition => {
-    if (viewId === slotBinding.left) return 'left';
-    if (viewId === slotBinding.right) return 'right';
-    return 'hidden';
-  };
+  /**
+   * 渲染单元 = (viewId, slot) 二元组,不再是 viewId 单值。
+   *
+   * 旧实现 positionOf(viewId) 只能返回一个位置,left 判定在先 —— left === right
+   * 时(如左右都选 Note)右列拿不到任何实例,表现为一块纯空白 pane。
+   *
+   * 改法:以**槽**为主语枚举。left / right 各产出一个渲染单元,其余已注册 view
+   * 作为 hidden 单元保活(它们的实例状态在切换 view 时不丢)。同一个 viewId 因此
+   * 可以同时出现在 left 和 right,各自一个 React 实例。
+   */
+  const units: Array<{ viewId: string; slot: 'left' | 'right'; pos: SlotPosition }> = [];
+  if (slotBinding.left) units.push({ viewId: slotBinding.left, slot: 'left', pos: 'left' });
+  if (slotBinding.right) units.push({ viewId: slotBinding.right, slot: 'right', pos: 'right' });
+  // 未占槽的 view 仍挂在 DOM 里(display:none)保活,避免切 view 时实例重建丢状态。
+  // 归到 'left' 槽维度:它们没有可见位置,slot 取值只需稳定且不与在槽者碰撞 ——
+  // 而在槽者若同 id 已在上面占了 left 单元,这里会被 seen 去重跳过。
+  const seen = new Set(units.map((u) => `${u.viewId}:${u.slot}`));
+  for (const v of allViews) {
+    if (v.id === slotBinding.left || v.id === slotBinding.right) continue;
+    const key = `${v.id}:left`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    units.push({ viewId: v.id, slot: 'left', pos: 'hidden' });
+  }
 
   // grid-template-columns 按 ratio 分配。
   // 用 fr 分配剩余空间(扣掉 4px divider 后),避免 `r*100% 4px (1-r)*100%`
@@ -71,25 +99,22 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
        * 铁律 7(view 实例不重建)仍然成立:slot-view 容器 key 是稳定的 viewId,
        * right→left 升级时 grid-column 变 toolbar 跟着 viewId 走,不影响 view 内部 state。
        */}
-      {allViews.map((view) => {
-        const pos = positionOf(view.id);
-        const Comp = view.component;
+      {units.map(({ viewId, slot, pos }) => {
+        const view = allViews.find((v) => v.id === viewId);
+        const Comp = view?.component;
         if (!Comp) return null;
-        const payload =
-          pos === 'left' ? slotBinding.leftPayload :
-          pos === 'right' ? slotBinding.rightPayload :
-          undefined;
-        // slot 透传给 view(fix/slot-instance-id):view 据此派生 per-slot 的 PM
-        // instanceId。hidden 态按 'left' 传 —— 此时 view 不可见,取值只需稳定不碰撞。
-        const slot = pos === 'right' ? 'right' : 'left';
+        const payload = pos === 'left' ? slotBinding.leftPayload
+          : pos === 'right' ? slotBinding.rightPayload
+          : undefined;
         return (
           <div
-            key={view.id}
+            key={`${viewId}:${slot}`}
             className="krig-slot-view"
             data-slot={pos}
+            data-view-slot={slot}
             style={{ display: pos === 'hidden' ? 'none' : 'flex' }}
           >
-            <ToolbarFrame viewId={view.id} />
+            <ToolbarFrame viewId={viewId} />
             <div className="krig-slot-view-content">
               <Comp workspaceId={workspaceId} payload={payload} slot={slot} />
             </div>
