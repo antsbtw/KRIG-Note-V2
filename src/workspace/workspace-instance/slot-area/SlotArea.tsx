@@ -23,12 +23,27 @@
  * 关闭按钮(铁律 8):
  * - left 关闭:bus.slot.closeLeft();right=null 时按钮 disabled + 灰显
  * - right 关闭:bus.slot.closeRight()
+ *
+ * 活跃槽捕获(feat/slot-navside-follow-active):
+ * 每个可见 slot 容器挂 **capture 阶段** pointerdown → 写 activeSlot(单一来源)。
+ * 为什么是容器捕获而不是编辑器焦点:toolbar 按钮普遍带
+ * `onMouseDown={e => e.preventDefault()}`(刻意不抢编辑器焦点),用焦点判断会漏掉
+ * 「点了那一栏的工具栏」这种最典型的激活动作 —— 这个坑在 c7720f37 修 toggle-toc
+ * 时踩过。capture 阶段则在 preventDefault 之前就跑到了,不受其影响。
+ *
+ * ⚠️ 已知局限:装 <webview> 的 view(web / AI / X)点**页面正文**不会激活本栏 ——
+ * webview 是 Electron 的 OS 级 surface,guest 页内的鼠标事件不冒泡到宿主 DOM,
+ * 宿主这层根本收不到。这类栏目前只能靠点它自己的 toolbar(宿主 DOM,正常捕获)
+ * 来激活。要彻底解决需在 guest 侧注入脚本回报点击(同 X 拖拽发推的既有做法,
+ * 见 memory `X 拖拽发推方法`),那是独立工作量,本次不做。
+ * Note / eBook 等纯 DOM view 无此问题。
  */
 
 import { useRef, useSyncExternalStore } from 'react';
 import { ResizableDivider } from './ResizableDivider';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import { ToolbarFrame } from '../toolbar-frame/ToolbarFrame';
+import { setActiveSlot, useActiveSlot } from '../../workspace-state/active-slot';
 import type { SlotBinding } from '../../workspace-state/workspace-state';
 import './slot-area.css';
 
@@ -44,6 +59,9 @@ type SlotPosition = 'left' | 'right' | 'hidden';
 export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChange }: SlotAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hasRight = slotBinding.right !== null;
+
+  // 活跃槽:订阅用于给工具栏条打 data-slot-active(视觉提示,见 toolbar-frame.css)
+  const activeSlot = useActiveSlot(workspaceId);
 
   // 订阅 view 注册变化(L5 view 注册时自动触发重渲)
   const allViews = useSyncExternalStore(
@@ -112,9 +130,21 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
             className="krig-slot-view"
             data-slot={pos}
             data-view-slot={slot}
+            // 活跃槽捕获:capture 阶段抢在 toolbar 按钮的 preventDefault 之前,
+            // 且点在本容器**任何位置**都算(正文 / 工具栏 / 「未选择笔记」空白区)。
+            // hidden 单元不可见,不参与激活。
+            onPointerDownCapture={
+              pos === 'hidden' ? undefined : () => setActiveSlot(workspaceId, slot)
+            }
             style={{ display: pos === 'hidden' ? 'none' : 'flex' }}
           >
-            <ToolbarFrame viewId={viewId} slot={slot} />
+            <ToolbarFrame
+              viewId={viewId}
+              slot={slot}
+              // 视觉提示只加在 36px 工具栏条(硬约束 5:不碰正文区)。
+              // 单栏(right=null)时不做压暗 —— 只有一栏可用,"非活跃"无从谈起。
+              active={!hasRight || slot === activeSlot}
+            />
             <div className="krig-slot-view-content">
               <Comp workspaceId={workspaceId} payload={payload} slot={slot} />
             </div>

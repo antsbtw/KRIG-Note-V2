@@ -16,3 +16,31 @@
   font-style: italic;
   color: var(--text-subtle);
 }
+
+/* ── 非活跃槽的工具栏压暗(feat/slot-navside-follow-active)────────────────
+ *
+ * 为什么需要:navSide 的内容会随「点了哪一栏」整个换掉。没有视觉锚点,用户
+ * 无法预判点击结果 —— 那比不做跟随更难用。
+ *
+ * 为什么只动这 36px 条:分屏的主要用途是**对照阅读**,压暗正文与该目的直接
+ * 冲突(硬约束 5)。工具栏是"这一栏的身份牌",压它既够醒目又不妨碍读正文。
+ *
+ * 程度定「中」:底色降一档(elevated → shell,即与外壳同色 = 视觉上"退回背景"),
+ * 标题明显变灰,按钮图标一起降透明度。
+ *
+ * 按钮为什么也灰:点非活跃栏的按钮会先激活那一栏,再执行命令 —— 它确实处在
+ * 「半禁用」语义里,灰显是诚实表达。**不加 pointer-events:none**,仍可直接点。
+ */
+.krig-toolbar-frame--inactive {
+  background-color: var(--bg-shell);
+}
+
+.krig-toolbar-frame--inactive .krig-toolbar-title {
+  color: var(--text-disabled);
+}
+
+/* 按钮 / 图标整体降透明度 —— 逐个改 color 会碰到各 view 自定义按钮样式,
+   opacity 一刀切覆盖所有已注册和将来注册的 toolbar item。 */
+.krig-toolbar-frame--inactive .krig-toolbar-binding {
+  opacity: 0.55;
+}

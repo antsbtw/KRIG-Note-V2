@@ -15,6 +15,7 @@
 import type { WorkspaceState, WorkspaceManagerState } from './workspace-state';
 import { createDefaultWorkspaceState, DIVIDER_RATIO_MIN, DIVIDER_RATIO_MAX } from './default-state';
 import { getActiveWorkspaceIdSync } from '../workspace-instance/use-workspace';
+import { clearActiveSlot } from './active-slot';
 import type { PersistenceAPI } from '../persistence/persistence-api';
 import type { SlotUpdateSource } from '@slot/workspace-bus/bus-types';
 import { WorkspaceBus } from '@slot/workspace-bus/workspace-bus';
@@ -227,6 +228,9 @@ export class WorkspaceManager {
     }
 
     this.workspaces.delete(id);
+    // 活跃槽是纯内存 per-ws 状态,ws 没了就该清(否则 Map 随开关 ws 无限增长,
+    // 且同 id 被复用时会继承上一个 ws 的焦点)
+    clearActiveSlot(id);
 
     // 删的是活跃 → 切到另一个打开的
     if (this.activeId === id) this.activateAnotherOpen();
