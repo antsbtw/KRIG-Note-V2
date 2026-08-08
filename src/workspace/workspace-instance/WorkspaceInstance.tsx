@@ -16,7 +16,12 @@ import { SlotArea } from './slot-area/SlotArea';
 import { OverlayFrames } from './overlay-frames';
 import { SettingsModal } from './settings/SettingsModal';
 import { workspaceManager } from '../workspace-state/workspace-manager';
-import { getActiveSlot, reconcileActiveSlot, useActiveSlot } from '../workspace-state/active-slot';
+import {
+  getActiveSlot,
+  reconcileActiveSlot,
+  resolveActiveViewId,
+  useActiveSlot,
+} from '../workspace-state/active-slot';
 import { useContextMenuTrigger } from '@slot/triggers/use-context-menu-trigger';
 import { useSlashTrigger } from '@slot/triggers/use-slash-trigger';
 import { useHandleTrigger } from '@slot/triggers/use-handle-trigger';
@@ -81,19 +86,12 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
   // 仍显左栏的导航,右栏成了没有导航的孤岛(左 Note / 右 eBook 时尤其明显:
   // 点右栏看不到书架)。activeSlot 是唯一来源,这里只做**读取**不做推导。
   //
-  // 回落链保持原样:活跃槽为空 → 另一槽 → 第一个有 navSideTab 的 view
-  // (新 Workspace slotBinding.left=null 时让 NavSide / SlotArea 至少有内容可显)。
-  //
-  // 渲染期先取「有效活跃槽」:store 里可能仍是 'right' 而右栏已被关掉 —— 那一帧
-  // reconcileActiveSlot(useEffect,渲染后才跑)还没来得及把它拨回来。这里当场
-  // 按 slotBinding 校正,避免中间帧闪一下错栏的导航。
-  // 这**不是**第二处判断:唯一来源仍是 activeSlot,这里只是把它与"槽是否存在"
-  // 这个客观事实对齐,并由 reconcileActiveSlot 在渲染后落回 store 保持一致。
-  const storedSlot = useActiveSlot(state.id);
-  const activeSlot = storedSlot === 'right' && !state.slotBinding.right ? 'left' : storedSlot;
-  const primary = activeSlot === 'right' ? state.slotBinding.right : state.slotBinding.left;
-  const secondary = activeSlot === 'right' ? state.slotBinding.left : state.slotBinding.right;
-  let activeViewId: string | null = primary ?? secondary ?? null;
+  // 回落链(活跃槽为空 → 另一槽)收在 resolveActiveViewId 里,与 keymap-listener
+  // 共用同一份 —— 两处曾逐字重复,将来改回落规则必漏一处。
+  // 再回落到第一个有 navSideTab 的 view:新 Workspace slotBinding.left=null 时
+  // 让 NavSide / SlotArea 至少有内容可显。
+  const activeSlot = useActiveSlot(state.id);
+  let activeViewId: string | null = resolveActiveViewId(state.slotBinding, activeSlot);
   if (!activeViewId) {
     activeViewId = viewTypeRegistry.getAllForNavSide()[0]?.id ?? null;
   }

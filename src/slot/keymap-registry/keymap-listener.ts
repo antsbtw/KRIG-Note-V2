@@ -13,7 +13,7 @@
 
 import { commandRegistry } from '../command-registry/command-registry';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
-import { getActiveSlot } from '@workspace/workspace-state/active-slot';
+import { getActiveSlot, resolveActiveViewId } from '@workspace/workspace-state/active-slot';
 import { keymapRegistry, normalizeKey } from './keymap-registry';
 import type { KeymapBinding, KeymapCondition } from './keymap-types';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
@@ -57,10 +57,7 @@ function fallbackActiveViewId(): string | null {
   if (!wsId) return null;
   const ws = _getWs(wsId);
   if (!ws) return null;
-  const slot = getActiveSlot(wsId);
-  const primary = slot === 'right' ? ws.slotBinding.right : ws.slotBinding.left;
-  const secondary = slot === 'right' ? ws.slotBinding.left : ws.slotBinding.right;
-  return primary ?? secondary ?? null;
+  return resolveActiveViewId(ws.slotBinding, getActiveSlot(wsId));
 }
 
 /** enabledWhen 单项校验 */

@@ -113,6 +113,34 @@ export function useActiveSlot(wsId: string): ActiveSlot {
   );
 }
 
+/**
+ * 「活跃槽装的是哪个 view」——**槽 → viewId 的唯一解析**。
+ *
+ * 抽出理由:回落链(本槽 → 另一槽)原先在 WorkspaceInstance 与 keymap-listener
+ * 两处逐字重复。留着的话将来改回落规则必漏一处 —— 而回落规则正是那种「改一处
+ * 忘一处就产生诡异不一致」的东西(例:某天决定"本槽为空就不回落、直接不匹配",
+ * 只改了 navSide 那处,快捷键仍在回落,同一状态下两者认的 view 不同)。
+ *
+ * 顺带把「有效活跃槽」的校正也收进来:store 里可能仍是 'right' 而右栏已被关掉
+ * (reconcileActiveSlot 走 useEffect,渲染后才跑),这里当场按 slotBinding 对齐。
+ * 这**不是**第二处判断 —— 唯一来源仍是 activeSlot,此处只是把它与「槽是否存在」
+ * 这个客观事实对齐。
+ *
+ * @param slotBinding 当前 ws 的槽绑定
+ * @param slot        活跃槽(调用方从 getActiveSlot / useActiveSlot 取)
+ * @returns 活跃槽的 view;该槽为空则回落另一槽;都为空返回 null
+ */
+export function resolveActiveViewId(
+  slotBinding: { left: string | null; right: string | null },
+  slot: ActiveSlot,
+): string | null {
+  // 有效活跃槽:指向一个空槽时当场回落 left(避免中间帧闪一下错栏的导航)
+  const effective: ActiveSlot = slot === 'right' && !slotBinding.right ? 'left' : slot;
+  const primary = effective === 'right' ? slotBinding.right : slotBinding.left;
+  const secondary = effective === 'right' ? slotBinding.left : slotBinding.right;
+  return primary ?? secondary ?? null;
+}
+
 /** ws 被删除时清理(避免 Map 无限增长)*/
 export function clearActiveSlot(wsId: string): void {
   activeSlotByWs.delete(wsId);
