@@ -94,9 +94,9 @@ export function EBookView({ workspaceId, slot = 'left' }: EBookViewProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   /** 最近一次 onBookOpened 推流 — 全屏触发时复用,补最新位置喂给 panel */
   const lastBookInfoRef = useRef<EBookLoadedInfo | null>(null);
-  // 阅读进度按槽持久化:PDF 每翻页都写,不带槽的话左栏翻页会持续覆盖右栏位置
-  const { activeBookIdRef, persistPdfProgress, persistEpubProgress } =
-    useEBookProgress(workspaceId, slot);
+  // 阅读进度落 library.saveProgress(主进程 reading-state atom,书的全局最后位置)。
+  // 该位置本就按 bookId 存,左右各看一本书时天然互不干扰,故无需带槽。
+  const { activeBookIdRef, persistPdfProgress, persistEpubProgress } = useEBookProgress();
 
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),

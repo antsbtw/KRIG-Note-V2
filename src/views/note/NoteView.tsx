@@ -14,7 +14,7 @@ import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editin
 import type { NoteCapabilityApi, NoteDocEnvelope } from '@capabilities/note/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useAllNotes } from './use-notes-folders';
-import { getNoteWsState, updateNote, noteScopeKey, noteInstanceId } from './data-model';
+import { getNoteWsState, getActiveNoteId, updateNote, noteScopeKey, noteInstanceId } from './data-model';
 import { takePendingAnchor } from './link-click-integration';
 import { setCurrentNoteId } from './note-navigation-history';
 import { useExtractionImport } from './use-extraction-import';
@@ -70,9 +70,8 @@ export function NoteView({ workspaceId, slot = 'left' }: NoteViewProps) {
   // 避免自家 onChange 经 LIST_CHANGED 回灌让 activeNote.doc 引用变 → Host useEffect[doc] 跳光标。
   const allNotes = useAllNotes();
 
-  // 取**本槽**活跃笔记元数据(fix/slot-per-slot-active-note:左右各读各的字段)
-  const activeNoteId =
-    (slot === 'right' ? wsState?.rightActiveNoteId : wsState?.activeNoteId) ?? null;
+  // 取**本槽**活跃笔记元数据(槽分发走 data-model 的唯一入口,不在此自行按字段取)
+  const activeNoteId = wsState ? getActiveNoteId(wsState, slot) : null;
   const activeNoteMeta = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) ?? null : null;
 
   // doc 独立通道(dual-channel 方案 §5.1):

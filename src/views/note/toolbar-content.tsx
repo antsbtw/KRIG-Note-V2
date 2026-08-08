@@ -21,7 +21,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { NoteOpenPopup } from './note-open-popup/NoteOpenPopup';
 import { useAllNotes } from './use-notes-folders';
-import { getNoteWsState } from './data-model';
+import { getNoteWsState, getActiveNoteId } from './data-model';
 import type { ToolbarItemContext } from '@slot/toolbar-registry/toolbar-types';
 import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import { TocToolbarButton } from './toc/TocToolbarButton';
@@ -44,8 +44,7 @@ function NoteToolbarTitle({ ctx }: { ctx?: ToolbarItemContext }) {
     () => {
       const ws = workspaceManager.get(wsId);
       if (!ws) return null;
-      const s = getNoteWsState(ws);
-      return slot === 'right' ? s.rightActiveNoteId : s.activeNoteId;
+      return getActiveNoteId(getNoteWsState(ws), slot);
     },
   );
   const note = activeNoteId ? allNotes.find((n) => n.id === activeNoteId) : null;

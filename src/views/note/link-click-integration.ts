@@ -21,7 +21,7 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { setActiveNote, getNoteWsState, type NoteSlot } from './data-model';
+import { setActiveNote, getNoteWsState, getActiveNoteId, type NoteSlot } from './data-model';
 import { getActiveSlot } from '@workspace/workspace-state/active-slot';
 import { startNoteCache, getNoteTitle } from './note-cache';
 import {
@@ -84,8 +84,7 @@ export function registerLinkClickIntegration(): void {
       const ws = workspaceManager.get(wsId);
       if (!ws) return null;
       const slot: NoteSlot = getActiveSlot(wsId);
-      const state = getNoteWsState(ws);
-      return slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
+      return getActiveNoteId(getNoteWsState(ws), slot);
     },
     /**
      * L5-B3.12:noteLink NodeView 同步目标 title — driver 不直接 import noteCapability,

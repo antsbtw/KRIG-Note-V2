@@ -19,6 +19,7 @@
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
+import { declareSlotResource, type SlotId } from '@workspace/workspace-state/slot-resource';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { NoteCapabilityApi } from '@capabilities/note/types';
 import type { FolderCapabilityApi, FolderDeleteResult } from '@capabilities/folder/types';
@@ -153,12 +154,12 @@ function folderCap(): FolderCapabilityApi {
 export type SortState = 'title-asc' | 'title-desc' | 'date-asc' | 'date-desc' | null;
 
 /**
- * Note 槽标识(fix/slot-per-slot-active-note)
+ * Note 槽标识 —— 现为 slot-resource 层 `SlotId` 的别名(保留名字避免全仓改签名)。
  *
- * 左右双开同一 view 时,"当前活跃笔记"必须按槽区分。此类型是所有 per-slot
- * note 状态(activeNoteId / baseSnapshot)的作用域维度。
+ * 抽层前这里是独立定义,与 eBook 的 `EBookSlot` 同义却各定义一份。槽是**布局概念
+ * 不是 view 概念**(SlotArea 传给两者的是同一个值),故统一到 SlotId。
  */
-export type NoteSlot = 'left' | 'right';
+export type NoteSlot = SlotId;
 
 /** 构造 per-slot 作用域 key(baseSnapshot 等内存 Map 用)*/
 export function noteScopeKey(wsId: string, slot: NoteSlot): string {
@@ -210,6 +211,33 @@ interface PersistedNoteWsState {
   expandedFolders: string[];
   folderSortMap: Record<string, SortState>;
   clipboard: { type: 'note' | 'folder'; id: string } | null;
+}
+
+/**
+ * per-slot「当前笔记」的**唯一**槽分发声明(见 workspace-state/slot-resource.ts)。
+ *
+ * 抽层前 `slot === 'right' ? s.rightActiveNoteId : s.activeNoteId` 散在 6 处
+ * (NoteView / nav-side / toolbar / link-click / note-commands / 本文件两处),
+ * 与 eBook 侧另一份逐行同构。现在字段名只此一处知道。
+ */
+const activeNoteResource = declareSlotResource<string | null>({
+  name: 'note.activeNoteId',
+  storeKey: STORE_KEY,
+  leftField: 'activeNoteId',
+  rightField: 'rightActiveNoteId',
+  fallback: null,
+});
+
+/**
+ * 读**指定槽**的活跃笔记 —— per-slot 字段的唯一读取入口。
+ *
+ * 各处不要自己写 `slot === 'right' ? s.rightActiveNoteId : s.activeNoteId`:
+ * 字段名散出去后加第三个槽 / 改名就要全仓翻(eBook 侧已因此重踩三个坑)。
+ */
+export function getActiveNoteId(state: NoteWorkspaceState, slot: NoteSlot): string | null {
+  // 从 hydrate 后的视图对象读(而非 pluginStates 原始对象)—— 调用方手上普遍
+  // 只有 getNoteWsState() 的结果。字段名仍由 slot-resource 单一持有。
+  return activeNoteResource.read(state as unknown as Record<string, unknown>, slot);
 }
 
 /** 冻结常量(避免 useSyncExternalStore 死循环)*/
@@ -611,13 +639,9 @@ export function setActiveNote(
 ): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
-  const state = hydrate(ws);
-  const current = slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
+  const current = getActiveNoteId(hydrate(ws), slot);
   if (current === noteId) return;
-  writePersistent(
-    workspaceId,
-    slot === 'right' ? { rightActiveNoteId: noteId } : { activeNoteId: noteId },
-  );
+  writePersistent(workspaceId, activeNoteResource.patch(slot, noteId));
   // Phase 0:切换笔记时清旧快照，然后异步加载新快照(按槽隔离)
   const scope = noteScopeKey(workspaceId, slot);
   clearNoteBaseSnapshot(scope);
@@ -642,8 +666,7 @@ async function initNoteBaseSnapshot(
     // 若在 getNote 期间用户已切换到别的 note，跳过（防竞态覆盖）—— 只看本槽
     const ws = workspaceManager.get(wsId);
     if (!ws) return;
-    const hydrated = hydrate(ws);
-    const current = slot === 'right' ? hydrated.rightActiveNoteId : hydrated.activeNoteId;
+    const current = getActiveNoteId(hydrate(ws), slot);
     if (current !== noteId) return;
     const blockHashesMap = new Map(Object.entries(note.blockHashes));
     setNoteBaseSnapshot(noteScopeKey(wsId, slot), {

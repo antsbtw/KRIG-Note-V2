@@ -13,6 +13,7 @@ import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import { getInvokingSlot } from '@slot/toolbar-registry/toolbar-invocation';
 import { getActiveSlot } from '@workspace/workspace-state/active-slot';
+import { otherSlot, ALL_SLOTS } from '@workspace/workspace-state/slot-resource';
 import {
   getEBookWsState,
   getActiveBookId,
@@ -114,7 +115,7 @@ export function registerEBookCommands(wsId: string): void {
    */
   registerWsCommand('ebook-view.open-book-in-other-slot', () => wsId, (ctx, bookId: unknown) => {
     if (typeof bookId !== 'string' || !bookId) return;
-    const other: EBookSlot = getActiveSlot(ctx.wsId) === 'right' ? 'left' : 'right';
+    const other: EBookSlot = otherSlot(getActiveSlot(ctx.wsId));
     setActiveBookId(ctx.wsId, bookId, other);
     ensureEBookViewInSlot(ctx.wsId, other);
   });
@@ -137,7 +138,7 @@ export function registerEBookCommands(wsId: string): void {
       const ws = workspaceManager.get(ctx.wsId);
       if (ws) {
         const state = getEBookWsState(ws);
-        for (const s of ['left', 'right'] as const) {
+        for (const s of ALL_SLOTS) {
           if (getActiveBookId(state, s) === id) setActiveBookId(ctx.wsId, null, s);
         }
       }

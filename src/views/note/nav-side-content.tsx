@@ -15,6 +15,7 @@ import type { NoteInfo as Note } from '@capabilities/note/types';
 import { useAllNotes, useAllFolders } from './use-notes-folders';
 import {
   getNoteWsState,
+  getActiveNoteId,
   setSelectedIds,
   setFolderExpanded,
   subscribeTransient,
@@ -73,8 +74,7 @@ function FolderTreePanel() {
 
   // 高亮 =「活跃槽那一栏正在看的笔记」—— 实时派生,不新增持久化字段
   // (两栏的 activeNoteId 本来就各存各的,这里只是按活跃槽选读哪一个)。
-  const activeNoteId =
-    activeSlot === 'right' ? wsState.rightActiveNoteId : wsState.activeNoteId;
+  const activeNoteId = getActiveNoteId(wsState, activeSlot);
 
   const nodes = buildTreeNodes({
     notes: allNotes,

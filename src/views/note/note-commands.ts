@@ -26,10 +26,12 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { getInvokingSlot } from '@slot/toolbar-registry/toolbar-invocation';
 import { getActiveSlot } from '@workspace/workspace-state/active-slot';
+import { otherSlot } from '@workspace/workspace-state/slot-resource';
 import {
   createNote,
   setActiveNote,
   getNoteWsState,
+  getActiveNoteId,
   createFolder,
   cycleSortByTitle,
   cycleSortByDate,
@@ -208,7 +210,7 @@ export function registerNoteCommands(wsId: string): void {
     }
     // fallback:删**本槽**活跃笔记(走统一进度入口,大 note 显块级进度)
     const slot = targetSlot(wsId);
-    const target = slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
+    const target = getActiveNoteId(state, slot);
     if (target) void deleteTreeIdsWithProgress([encodeNoteId(target)]);
   });
 
@@ -252,7 +254,7 @@ export function registerNoteCommands(wsId: string): void {
    */
   registerWsCommand('note-view.open-in-other-slot', () => wsId, (ctx, noteId) => {
     if (typeof noteId !== 'string') return;
-    const other: NoteSlot = getActiveSlot(ctx.wsId) === 'right' ? 'left' : 'right';
+    const other: NoteSlot = otherSlot(getActiveSlot(ctx.wsId));
     setActiveNoteInSlot(ctx.wsId, noteId, other);
   });
 
