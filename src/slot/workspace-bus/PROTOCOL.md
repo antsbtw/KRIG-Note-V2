@@ -25,7 +25,7 @@ V2 把 view 间通信拆成三类**形态不同**的管道,**不混用**。
 |---|---|---|---|
 | **Channel** | view 状态广播(订阅式) | `emit / subscribe`,有 lastValue | NoteView 选区变 → GraphView 高亮节点 |
 | **Capability Request** | 调用别 view 的能力(请求式) | `request → Promise<Result<T>>`,1 handler | NoteView → AIView "总结这段" |
-| **Slot Control** | 改容器(框架内置) | `bus.openRight / closeRight / closeLeft` | NoteView 把 AI 结果推到 right slot |
+| **Slot Control** | 改容器(框架内置) | `bus.openLeft / openRight / closeRight / closeLeft` | NoteView 把 AI 结果推到 right slot |
 
 ### 为什么是三类不是两类
 
@@ -39,9 +39,73 @@ V1 的教训:把"改容器布局"当成普通 event 发,导致谁都能远程切
 
 ---
 
+## 1.5 Slot 对称性原则(2026-08-07 修订)
+
+> **本节统领铁律 5 / 7 / 9 的修订**。原协议假定「left 是主 view、right 是附属」,
+> 铁律 5(禁 openLeft)/ 铁律 9(切主 view 自动关 right)都由此派生。
+> 实践中该模型站不住:right 一旦能独立持有内容,用户就会把它当正式工作区用,
+> 而不是随时可弃的临时位。故改为**对称模型**,四条原则如下。
+
+### 原则 1:left / right 对称且独立
+
+两槽平等,各自持有:活跃资源(如 note 的 `activeNoteId` / `rightActiveNoteId`)、
+view 实例与 PM `instanceId`(`${wsId}::slot:${slot}`)、滚动位 / 目录 / 选区等
+UI 状态、以及自己的 merge baseSnapshot(key = `${wsId}::${slot}`)。
+
+**推论**:任何「当前 X」的解析都必须带槽维度。凡是靠 `getActiveWorkspaceIdSync()`
+或 focused 兜底来猜目标的,在双开下都会串台 —— 命令必须由**调用方显式携带**
+槽 / instanceId(见 `toolbar-invocation.ts`、`handle-menu-controller`)。
+
+### 原则 2:NavSide 单份、工作区级,不随槽分裂
+
+导航是「选内容」,天然属于工作区,不属于某一槽 —— 参考 VSCode:分屏分的是
+编辑区,侧边栏始终只有一个。
+
+**「内容放哪栏」由入口区分,不由导航区分裂来表达**:
+树左键 = 左栏(主 view 内容源),右键「在右栏打开」= 右栏。
+
+反面代价(不采纳每槽一个 navSide 的理由):两棵树吃掉横向空间;且一批
+模块级单例(`renameTrigger` 等,note / ebook / web / canvas 各一处)的
+现有正确性正建立在「NavSide 只有一个」之上,分裂会让它们立刻互相覆盖。
+
+### 原则 3:派生 ≠ 共生
+
+这是铁律 9 犯错的地方 —— 它把「派生」误当成了「共生」。
+
+| | 含义 | 例子 | 生命周期 |
+|---|---|---|---|
+| **派生** | left 的操作**触发**了 right 打开 | 点内链 / 问 AI / ebook 划词 | 打开后**即独立**,不随 left 变化而消亡 |
+| **共生** | right 离开 left 就**没有意义** | ai-sync 的 `[ai-view, note-view]` 组合 | 需跟随 left 生命周期 |
+
+「谁触发了打开」与「跟着谁死」是两件事。右栏那篇对照笔记来源是派生的,
+价值却是独立的 —— 切左栏就清掉它,是替用户做了他没同意的丢弃。
+
+### 原则 4:共生必须显式声明,框架不做默认联动
+
+框架默认**一律按独立处理**。真有共生关系的功能,由**该功能自己**声明依赖并
+管理生命周期,不得让框架对所有 right 一刀切。
+
+这样默认行为是对称的,特殊关系由需要它的功能自己负责 —— 加新功能时不会被
+一条隐形规则绊倒(铁律 9 就是这种隐形规则)。
+
+**当前状态**:真共生案例只有 ai-sync 一处,且 `AI_SYNC_ENABLED = false`
+(`views/note/ai-sync-integration.ts`)总开关关闭,**无活跃案例**。故**暂不建**
+共生声明机制 —— 等 ai-sync 真要恢复时由它提出需求,机制形状由真实需求逼出来,
+不为假想需求造抽象。
+
+> **关于 `rightActiveNoteId`**:本文档 §0 曾把 V1 的 `activeNoteId /
+> rightActiveNoteId` 散落列为原罪。V2 补回该字段**不是回退** —— 原罪是
+> "状态散落各处、各 view 互相推来推去",而非"存在按槽区分的字段"。
+> 现在它收敛在 `pluginStates['note']` 单一来源,由 `data-model.ts` 独家读写,
+> 与 V1 的散落形态无关。
+
+---
+
 ## 2. 九条铁律
 
 > 实施代码必须严格遵守,任何违反需先改协议再改代码。
+>
+> **注**:铁律 5 / 7 / 9 已按 §1.5 对称性原则修订,各条目下有说明。
 
 ### 铁律 1:三类管道,各司其职
 - 状态广播用 Channel,**不准**用 Capability Request 来"获取状态"(用 lastValue 即可)
@@ -64,32 +128,50 @@ V1 的教训:把"改容器布局"当成普通 event 发,导致谁都能远程切
 - bus 启动时扫描收集 manifest(或 view 注册时主动 declare)
 - **不集中**写在 `src/slot/workspace-bus/all-channels.ts` — 避免"加一个 view 改总表"的耦合
 
-### 铁律 5:主 view 锁
-- bus **不提供**改 left slot 的 API(`openLeft` 不存在)
-- view 注册 `slot.left.*` handler 时 bus 拒绝并 dev warn
-- 唯一改 left 的入口:**NavSide ViewSwitcher 点击**(用户显式) + **right→left 升级**(框架内置)
+### ~~铁律 5:主 view 锁~~(已按 §1.5 对称性原则解禁)
+
+> **原文**:bus 不提供 `openLeft`;唯一改 left 的入口是 NavSide 点击 + right→left 升级。
+>
+> **解禁理由**:该锁的前提是「left 是唯一主 view,不容程序改动」。对称化后
+> 左右平等,`openLeft` 与 `openRight` 成对存在才自洽(见 `slot-control.ts`)。
+>
+> **保留的部分**:容器控制仍是**框架级保留指令** —— view 不得注册 `slot.*`
+> 同名 handler 来改写容器行为(这条是铁律 6,未变)。解禁的只是"框架自己
+> 不提供 openLeft"这一条,不是"谁都能随便改容器"。
 
 ### 铁律 6:Slot Control 是框架级保留指令
-bus 内置三个 API,实现写死在 bus 里:
+bus 内置四个 API(§1.5 对称化后 openLeft 与 openRight 成对),实现写死在 bus 里:
 ```ts
+bus.openLeft(viewId: string, payload?: unknown): Result<void>   // 对称化新增
 bus.openRight(viewId: string, payload?: unknown): Result<void>
 bus.closeRight(): Result<void>
 bus.closeLeft(): Result<void>  // 触发 right→left 升级
 ```
-view 注册同名 handler 时 bus 拒绝。
+view 注册同名 handler 时 bus 拒绝 —— **本条未变**:容器控制归框架,
+解禁的只是"框架自己提不提供 openLeft",不是"view 能否改写容器行为"。
 
-### 铁律 7:left 关闭时 right→left 升级
+### 铁律 7:left 关闭时 right→left 升级(「实例不重建」部分已修订)
 `bus.closeLeft()` 行为:
 ```
 if (right !== null) {
-  // right 升级到 left,view 实例**不重建**(visibility 同款机制)
   slotBinding = { left: right, right: null };
 } else {
   // 没 right 兜底 → 这是最后一个 view,拒绝
   return { ok: false, reason: 'last-view-cannot-close' };
 }
 ```
-**view 实例不销毁**:SlotArea 渲染策略按 viewId 缓存,只切 left/right 字段值,view 实例继续存在,状态保留。
+
+**升级动作本身不变**。但原文附带的保证「view 实例不重建(SlotArea 按 viewId
+缓存)」**已不成立**:
+
+为支持同一 view 左右双开,SlotArea 的 React key 从 `viewId` 改为
+`${viewId}:${slot}`(否则 `left === right` 时右列拿不到实例 = 空白 pane)。
+key 带槽维度后,升级会换 key ⇒ 该实例**会重建**。
+
+这是 per-slot 身份的必然代价 —— 实例要么按 viewId 唯一(左右无法双开),
+要么按槽唯一(升级需重建),**二者不可兼得**。选后者;需要跨升级保留的状态
+由 view 自行持久化(如 note 的 activeNoteId 走 pluginStates),而不是依赖
+React 实例存活。详见 `SlotArea.tsx` / `slot-control.ts` 注释。
 
 ### 铁律 8:最后一个 view 不可关
 - Workspace **必有** left view(ensureMinimum 在 slot 层的对称)
@@ -146,7 +228,7 @@ graph.focus        — GraphView 聚焦到节点
 
 ### Slot Control(保留前缀)
 **`slot.*` 是 bus 保留命名空间**,view/capability 不能用作自己的 channel / request 名。
-内置 API 只有三个:`openRight` / `closeRight` / `closeLeft`(不通过命名空间暴露,直接 bus 方法)。
+内置 API 四个:`openLeft` / `openRight` / `closeRight` / `closeLeft`(不通过命名空间暴露,直接 bus 方法)。
 
 ---
 

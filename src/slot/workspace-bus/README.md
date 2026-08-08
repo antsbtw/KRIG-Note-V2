@@ -21,6 +21,7 @@ const result = await bus.requests.request('ai.summarize', { text: '...' });
 if (result.ok) console.log(result.value);
 
 // 3. Slot Control(框架级保留指令)
+bus.slot.openLeft('note-view');                   // 打开左 slot(对称化新增)
 bus.slot.openRight('graph', { nodeId: 'n1' });   // 打开右 slot
 bus.slot.closeRight();                            // 关闭右 slot
 bus.slot.closeLeft();                             // 关闭左 slot(右升级或拒绝)
