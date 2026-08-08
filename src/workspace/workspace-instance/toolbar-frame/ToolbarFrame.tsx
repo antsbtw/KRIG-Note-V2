@@ -21,21 +21,17 @@ interface ToolbarFrameProps {
   viewId: string | null;
   /** 本 frame 所属槽(SlotArea 透传)*/
   slot?: 'left' | 'right';
-  /**
-   * 本槽是否是活跃槽(feat/slot-navside-follow-active)。
-   *
-   * false 时整条工具栏压暗(标题变灰 + 底色降一档 + 按钮图标一起变灰)——
-   * navSide 会随点击整个换掉,没有视觉锚点用户无法预判点击结果。
-   *
-   * 按钮跟着变灰是**诚实表达**而非 bug:点非活跃栏的按钮会先激活那一栏,
-   * 语义上确实是"半禁用"。仍然可点(pointer-events 不动)。
-   *
-   * 省略(非 SlotArea 调用方)= 视为活跃,不压暗。
-   */
-  active?: boolean;
 }
 
-export function ToolbarFrame({ viewId, slot, active = true }: ToolbarFrameProps) {
+/**
+ * 活跃槽压暗**不在这里** —— 标在 SlotArea 的 slot 容器上(data-slot-active),
+ * 由 slot-area.css 用后代选择器统一处理。
+ *
+ * 原因:本组件只覆盖走共享 toolbarRegistry 的 view(目前只有 note);
+ * eBook / web / AI 都自绘 toolbar,且本组件在没有注册 items 时**整个不渲染**,
+ * 压暗放这里的话对它们完全不生效(eBook 双开两栏都高亮就是这么来的)。
+ */
+export function ToolbarFrame({ viewId, slot }: ToolbarFrameProps) {
   // 订阅 toolbarRegistry 变化(view 注册/卸载 items 时触发重渲)
   useToolbarVersion();
 
@@ -45,7 +41,7 @@ export function ToolbarFrame({ viewId, slot, active = true }: ToolbarFrameProps)
   if (items.length === 0) return null;
 
   return (
-    <div className={`krig-toolbar-frame${active ? '' : ' krig-toolbar-frame--inactive'}`}>
+    <div className="krig-toolbar-frame">
       <ToolbarBinding viewId={viewId} slot={slot} />
     </div>
   );

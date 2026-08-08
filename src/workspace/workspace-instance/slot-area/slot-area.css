@@ -49,6 +49,50 @@
   flex: 0 0 auto;
 }
 
+/* ── 非活跃槽的工具栏压暗(feat/slot-navside-follow-active)──────────────
+ *
+ * 为什么标在 slot 容器上而不是各自的 toolbar 组件里:
+ * 全仓有**两类** toolbar —— note 走共享 toolbarRegistry(渲染成
+ * .krig-toolbar-frame),而 eBook / web / AI 各自**自绘**(ToolbarFrame 在
+ * 没有注册 items 时整个不渲染)。最初只给 ToolbarFrame 加 --inactive class,
+ * 结果压暗只对 note 生效,eBook 左右双开时两栏工具栏都保持高亮。
+ * 挂在容器上、用后代选择器一次覆盖所有形态。
+ *
+ * ⚠️ 下面这份名单需要维护:自绘 toolbar 没有统一 class,只能逐个列。
+ * 判据 = 「view 顶部那条 height:36px + --bg-elevated + --border-muted 的横条」,
+ * 加新 view 时若自绘了这样一条,记得往这两组选择器里补一行
+ * (核对方式:`grep -rn "height: 36px" src/views/*/*.css`)。
+ * 走共享 toolbarRegistry 的 view 由第一条 .krig-toolbar-frame 自动覆盖,无需登记。
+ *
+ * 为什么只动这 36px 条:分屏主要用途是**对照阅读**,压暗正文与该目的直接冲突。
+ * 单栏时不压暗(data-slot-active 恒 true)—— 只有一栏可用,"非活跃"无从谈起。
+ *
+ * 按钮跟着变灰是诚实表达(点非活跃栏的按钮会先激活那一栏,确实处在"半禁用"
+ * 语义里),**不加 pointer-events:none**,仍可直接点。
+ */
+.krig-slot-view[data-slot-active='false'] > .krig-toolbar-frame,
+.krig-slot-view[data-slot-active='false'] .krig-ebook-toolbar,
+.krig-slot-view[data-slot-active='false'] .krig-web-toolbar,
+.krig-slot-view[data-slot-active='false'] .krig-ai-view__tabbar,
+.krig-slot-view[data-slot-active='false'] .krig-social-view__tabbar,
+.krig-slot-view[data-slot-active='false'] .krig-graph-canvas-toolbar {
+  background-color: var(--bg-shell);
+}
+
+/* 内容整体降透明度 —— 逐个改 color 会碰到各 view 自定义按钮样式,
+   opacity 一刀切覆盖所有已注册和将来注册的 toolbar item。
+   注意:选的是 toolbar 的**子元素**,不是 toolbar 自身 —— 对自绘 toolbar
+   而言 background 也在同一元素上,整体 opacity 会把底色一起冲淡,
+   导致压暗后的底色比预期浅。 */
+.krig-slot-view[data-slot-active='false'] > .krig-toolbar-frame > *,
+.krig-slot-view[data-slot-active='false'] .krig-ebook-toolbar > *,
+.krig-slot-view[data-slot-active='false'] .krig-web-toolbar > *,
+.krig-slot-view[data-slot-active='false'] .krig-ai-view__tabbar > *,
+.krig-slot-view[data-slot-active='false'] .krig-social-view__tabbar > *,
+.krig-slot-view[data-slot-active='false'] .krig-graph-canvas-toolbar > * {
+  opacity: 0.55;
+}
+
 /* slot 内 view 主体:占满 toolbar 之下的所有空间。
  *
  * 不能用 display:flex,因为 view 自身(.krig-note-view / .krig-ebook-view)

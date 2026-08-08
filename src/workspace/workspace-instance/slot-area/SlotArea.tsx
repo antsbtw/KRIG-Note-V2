@@ -60,7 +60,7 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
   const containerRef = useRef<HTMLDivElement>(null);
   const hasRight = slotBinding.right !== null;
 
-  // 活跃槽:订阅用于给工具栏条打 data-slot-active(视觉提示,见 toolbar-frame.css)
+  // 活跃槽:订阅用于给 slot 容器打 data-slot-active(压暗非活跃栏工具栏,见 slot-area.css)
   const activeSlot = useActiveSlot(workspaceId);
 
   // 订阅 view 注册变化(L5 view 注册时自动触发重渲)
@@ -130,6 +130,14 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
             className="krig-slot-view"
             data-slot={pos}
             data-view-slot={slot}
+            // 活跃态标在**容器**上,而不是只传给 ToolbarFrame。
+            //
+            // 起因:只有 note 走共享 toolbarRegistry;eBook / web / AI 都自绘
+            // toolbar(ToolbarFrame 在没注册 items 时整个不渲染),于是压暗只对
+            // note 生效,eBook 双开时两栏工具栏都是高亮的。
+            // 标在容器上后,一条 CSS 规则覆盖所有 view 的 toolbar —— 包括将来
+            // 新增的自绘 toolbar,不用每个 view 各写一遍(必漏、必漂移)。
+            data-slot-active={!hasRight || slot === activeSlot ? 'true' : 'false'}
             // 活跃槽捕获:capture 阶段抢在 toolbar 按钮的 preventDefault 之前,
             // 且点在本容器**任何位置**都算(正文 / 工具栏 / 「未选择笔记」空白区)。
             // hidden 单元不可见,不参与激活。
@@ -138,13 +146,7 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
             }
             style={{ display: pos === 'hidden' ? 'none' : 'flex' }}
           >
-            <ToolbarFrame
-              viewId={viewId}
-              slot={slot}
-              // 视觉提示只加在 36px 工具栏条(硬约束 5:不碰正文区)。
-              // 单栏(right=null)时不做压暗 —— 只有一栏可用,"非活跃"无从谈起。
-              active={!hasRight || slot === activeSlot}
-            />
+            <ToolbarFrame viewId={viewId} slot={slot} />
             <div className="krig-slot-view-content">
               <Comp workspaceId={workspaceId} payload={payload} slot={slot} />
             </div>
