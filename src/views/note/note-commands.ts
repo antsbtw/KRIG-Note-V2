@@ -25,6 +25,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { getInvokingSlot } from '@slot/toolbar-registry/toolbar-invocation';
+import { getActiveSlot } from '@workspace/workspace-state/active-slot';
 import {
   createNote,
   setActiveNote,
@@ -34,6 +35,7 @@ import {
   cycleSortByDate,
   setSelectedIds,
   noteInstanceId,
+  type NoteSlot,
 } from './data-model';
 import {
   copyToClipboard,
@@ -72,6 +74,40 @@ function ensureNoteViewActive(wsId: string): void {
   workspaceManager.update(wsId, {
     slotBinding: { ...ws.slotBinding, left: 'note-view' },
   });
+}
+
+/**
+ * 确保**指定槽**装的是 'note-view'(feat/slot-navside-follow-active)。
+ *
+ * 与 ensureNoteViewActive 的分工:那个回答「整个 ws 有地方显 note 吗」,
+ * 本函数回答「我要送去的**那一栏**能显 note 吗」。树左键跟随活跃槽后必须用后者 ——
+ * 焦点在右栏而右栏装着 eBook 时,ensureNoteViewActive 会因为"左栏已是 note-view"
+ * 直接返回,于是 rightActiveNoteId 写了但没人渲染 = 笔记开进虚空。
+ *
+ * 已经是 note-view 则不动(避免无谓 update 触发重渲/实例重建)。
+ */
+function ensureNoteViewInSlot(wsId: string, slot: NoteSlot): void {
+  const ws = workspaceManager.get(wsId);
+  if (!ws) return;
+  if (ws.slotBinding[slot] === 'note-view') return;
+  workspaceManager.update(wsId, {
+    slotBinding:
+      slot === 'right'
+        ? { ...ws.slotBinding, right: 'note-view', rightPayload: undefined }
+        : { ...ws.slotBinding, left: 'note-view', leftPayload: undefined },
+  });
+}
+
+/**
+ * 把某篇笔记送到**指定槽**并让那一栏显示出来(设活跃 + 保证装的是 note-view)。
+ *
+ * set-active-in-right / open-in-other-slot 共用 —— 两者只是「哪个槽」的算法不同,
+ * 落地动作完全一致,不该各写一遍(写两遍必然漂移:历史上 set-active-in-right
+ * 就曾漏写 rightActiveNoteId 导致右栏跟着左栏显同一篇)。
+ */
+function setActiveNoteInSlot(wsId: string, noteId: string, slot: NoteSlot): void {
+  setActiveNote(wsId, noteId, slot);
+  ensureNoteViewInSlot(wsId, slot);
 }
 
 /**
@@ -117,6 +153,27 @@ function getHandlePos(): { instanceId: string; pos: number } | null {
   return { instanceId: state.instanceId, pos: state.pos };
 }
 
+/**
+ * 命令的目标槽 —— 两个来源按优先级合成,**只此一处**合成。
+ *
+ * feat/slot-navside-follow-active:原先各站点写 `getInvokingSlot() ?? 'left'`,
+ * 恒定回落 left 是「树左键永远开到左栏」的根因 —— 焦点在右栏时点树上另一篇,
+ * 它跑去顶掉左栏。
+ *
+ * 优先级(不可颠倒):
+ * 1. `getInvokingSlot()` — 调用方**显式携带**的槽(toolbar 按钮点击栈)。
+ *    最强证据:用户点的就是那一栏的按钮,与焦点在哪无关(PROTOCOL.md §1.5
+ *    原则 1 推论:命令由调用方显式携带槽)。
+ * 2. `getActiveSlot(wsId)` — 用户焦点所在栏(单一来源)。用于**没有**调用栈上下文的
+ *    路径:navSide 树点击 / 快捷键 / 程序调用。
+ *
+ * 注意这**不是**第二处「判断当前是哪个槽」——「当前槽」的答案始终只有 activeSlot 一个;
+ * invokingSlot 回答的是另一个问题(这条命令由谁触发),两者语义正交,故可合成。
+ */
+function targetSlot(wsId: string): NoteSlot {
+  return getInvokingSlot() ?? getActiveSlot(wsId);
+}
+
 export function registerNoteCommands(wsId: string): void {
   // ── 笔记 CRUD(4) ──
 
@@ -124,7 +181,7 @@ export function registerNoteCommands(wsId: string): void {
     const wsId = ctx.wsId;
     const fid = typeof folderId === 'string' ? folderId : null;
     // 触发槽必须在**同步段**取出 —— 异步续段里 invokingSlot 已被清空
-    const slot = getInvokingSlot() ?? 'left';
+    const slot = targetSlot(wsId);
     // L7-sub2:createNote 是 async,handler 是 sync,用 IIFE 包装拿 id 走后续选中
     void (async () => {
       const noteId = await createNote(wsId, fid, slot);
@@ -133,8 +190,10 @@ export function registerNoteCommands(wsId: string): void {
         setSelectedIds(wsId, new Set([encodeNoteId(noteId)]));
       }
     })();
-    // 只有 left 栏触发才把 NoteView 强切到 left;右栏触发不动左栏
-    if (slot === 'left') ensureNoteViewActive(wsId);
+    // 新笔记要落到目标槽,那一栏就得装 note-view(否则写了 activeNoteId 没人渲染)。
+    // 原实现 `if (slot === 'left')` 是因为当时"右栏触发"必然来自右栏 toolbar,
+    // 右栏已经是 note-view 无需保证;现在 navSide 的 + 按钮也会落到右栏,需显式保证。
+    ensureNoteViewInSlot(wsId, slot);
   });
 
   registerWsCommand('note-view.delete-active', () => wsId, (ctx) => {
@@ -148,7 +207,7 @@ export function registerNoteCommands(wsId: string): void {
       return;
     }
     // fallback:删**本槽**活跃笔记(走统一进度入口,大 note 显块级进度)
-    const slot = getInvokingSlot() ?? 'left';
+    const slot = targetSlot(wsId);
     const target = slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
     if (target) void deleteTreeIdsWithProgress([encodeNoteId(target)]);
   });
@@ -156,36 +215,45 @@ export function registerNoteCommands(wsId: string): void {
   registerWsCommand('note-view.set-active', () => wsId, (ctx, noteId) => {
     if (typeof noteId !== 'string') return;
     const wsId = ctx.wsId;
-    // 从右栏 toolbar(如 Open 弹窗)选笔记 → 换的是右栏,不该顶掉左栏
-    const slot = getInvokingSlot() ?? 'left';
+    // 目标槽 = 触发栏(右栏 toolbar 的 Open 弹窗)优先,否则用户焦点所在栏。
+    //
+    // feat/slot-navside-follow-active:后半段原是硬编码 'left',所以 navSide 树
+    // 左键恒开左栏。改成跟随活跃槽后「点哪一栏,树上的操作就落到哪一栏」成立
+    // (设计文档 §0 用户原话)。这是有意的行为变更,不是回归。
+    const slot = targetSlot(wsId);
     setActiveNote(wsId, noteId, slot);
-    if (slot === 'left') ensureNoteViewActive(wsId);
+    ensureNoteViewInSlot(wsId, slot);
   });
 
   /**
-   * L5-C6:把 NoteView 装到右栏并把指定 note 设为 active。
+   * L5-C6:把 NoteView 装到**右栏**并把指定 note 设为 active。
    *
-   * 跟 set-active 区别:set-active 把 NoteView 强切到 **left slot**(掩盖 left
-   * 当前装的内容);本命令保留 left slot 不动,只**操作 right slot**(替换右栏
-   * 当前装的 view 为 NoteView)。
+   * 跟 set-active 区别:set-active 送到「触发栏 / 活跃栏」(跟随焦点);本命令
+   * 语义是**固定右栏**,与焦点无关 —— 调用方要的就是「钉在右边」这个具体布局。
    *
-   * 适用场景:left slot 当前是用户主导的 view(如 EBookView 看 PDF),需要在右栏
-   * 跳到刚导入的 note 而不打断左栏 — 走"left 不被系统自动关"约定。
+   * 适用场景(现有两处调用都属此类):web 剪藏把网页钉 left、剪藏稿开 right 做对照;
+   * ebook 导入时用户在 left 看 PDF,新章节送 right 不打断左栏。
+   * 这类调用方**不能**换成「另一栏」—— 焦点恰在右栏时"另一栏"会把内容送去左栏,
+   * 正好毁掉它要的对照布局。故本命令保留,不与 open-in-other-slot 合并。
    */
   registerWsCommand('note-view.set-active-in-right', () => wsId, (ctx, noteId) => {
     if (typeof noteId !== 'string') return;
-    const wsId = ctx.wsId;
-    const ws = workspaceManager.get(wsId);
-    if (!ws) return;
-    // fix/slot-per-slot-active-note:写 **right 槽**字段。
-    // 原先写的是 left 字段(那时没有 rightActiveNoteId),导致右栏装了 NoteView
-    // 却跟着左栏显示同一篇 —— 本命令的语义("不打断左栏")当时并未真正实现。
-    setActiveNote(wsId, noteId, 'right');
-    if (ws.slotBinding.right !== 'note-view') {
-      workspaceManager.update(wsId, {
-        slotBinding: { ...ws.slotBinding, right: 'note-view' },
-      });
-    }
+    setActiveNoteInSlot(ctx.wsId, noteId, 'right');
+  });
+
+  /**
+   * 在**另一栏**打开(feat/slot-navside-follow-active,树右键项)。
+   *
+   * 「另一栏」= 活跃槽的对侧:焦点在左 → 送右,焦点在右 → 送左。
+   *
+   * 为什么不是固定「在右栏打开」:树左键已跟随活跃槽,焦点在右栏时"在右栏打开"
+   * 就成了左键的同义项(多余);改成"另一栏"则在任何焦点下都有独立价值 ——
+   * 它永远表达「送到我现在没在看的那一栏」,也就是"开个对照"这个真实意图。
+   */
+  registerWsCommand('note-view.open-in-other-slot', () => wsId, (ctx, noteId) => {
+    if (typeof noteId !== 'string') return;
+    const other: NoteSlot = getActiveSlot(ctx.wsId) === 'right' ? 'left' : 'right';
+    setActiveNoteInSlot(ctx.wsId, noteId, other);
   });
 
   // ── 文件夹 CRUD(4) ──

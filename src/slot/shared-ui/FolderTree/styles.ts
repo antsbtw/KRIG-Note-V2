@@ -45,6 +45,16 @@ export const styles = {
     color: '#fff',
   } as CSSProperties,
 
+  /* 活跃条目(编辑区正在显示的那一条)——feat/slot-navside-follow-active
+   *
+   * 与 rowSelected 刻意用**不同的视觉语言**:选中是整行蓝底(批量操作对象),
+   * 活跃是左侧竖条 + 文字提亮(位置指针)。两者可同时成立(点一下笔记就
+   * 既选中又活跃),叠加时蓝底 + 竖条并存,不冲突也不互相遮盖。 */
+  rowActive: {
+    boxShadow: 'inset 2px 0 0 #4a90e2',
+    color: '#fff',
+  } as CSSProperties,
+
   rowDropTarget: {
     background: 'rgba(74, 144, 226, 0.18)',
     outline: '1px dashed rgba(74, 144, 226, 0.6)',

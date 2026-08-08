@@ -162,22 +162,22 @@ export function registerContextMenuItems(): void {
   // ── item(笔记)专属 ──
 
   /**
-   * 在右栏打开(fix/slot-symmetry-drop-rule9)
+   * 在另一栏打开(feat/slot-navside-follow-active;前身是 674b4b9a 的「在右栏打开」)
    *
-   * 树的左键点击恒切 left(主 view 的内容源)。左右对称化后 right 是用户主动
-   * 摆放的持久 pane,需要一个显式入口把某篇笔记送过去 —— 否则右栏只能被动
-   * 接收(内链跳转 / AI 提取结果),用户无法自己决定对照哪两篇。
+   * 改「右栏」为「另一栏」的理由:同期左键点击已改为跟随活跃槽,焦点在右栏时
+   * 「在右栏打开」与左键完全同义,成了一个多余项。「另一栏」= 活跃槽对侧,
+   * 在任何焦点下都表达同一个真实意图:**送到我没在看的那一栏,开个对照**。
    *
    * 只对 'item'(笔记)注册:文件夹没有"在某栏打开"的语义。
    */
   folderTreeContextMenuRegistry.register({
-    id: 'note-view.fl-note.open-in-right',
+    id: 'note-view.fl-note.open-in-other',
     scope: SCOPE,
     appliesTo: ['item'],
-    label: '在右栏打开',
+    label: '在另一栏打开',
     icon: '⫿',
     disabled: (ctx) => ctx.isMulti,
-    command: 'note-view.set-active-in-right',
+    command: 'note-view.open-in-other-slot',
     commandArgFn: (ctx) => (ctx.targetId ? decodeTreeId(ctx.targetId).id : null),
     order: 90,
   });

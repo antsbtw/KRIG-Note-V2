@@ -22,7 +22,8 @@ import {
   renameFolder,
   renameNote,
 } from './data-model';
-import { buildTreeNodes, decodeTreeId } from './tree-builder';
+import { buildTreeNodes, decodeTreeId, encodeNoteId } from './tree-builder';
+import { useActiveSlot } from '@workspace/workspace-state/active-slot';
 import { relativeTime } from '@shared/date-utils';
 import { handleDrop } from './tree-operations';
 import { setRenameTrigger } from './context-menu-registrations';
@@ -40,6 +41,10 @@ function FolderTreePanel() {
     (cb) => subscribeTransient(cb),
     () => getTransientVersion(),
   );
+
+  // 活跃槽(单一来源)——「树上高亮哪一条」由它决定。
+  // 必须在下面 early return 之前无条件调用(hook 规则)。
+  const activeSlot = useActiveSlot(wsId);
 
   // 重命名局部 state
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -65,6 +70,11 @@ function FolderTreePanel() {
 
   if (!wsId || !ws) return null;
   const wsState = getNoteWsState(ws);
+
+  // 高亮 =「活跃槽那一栏正在看的笔记」—— 实时派生,不新增持久化字段
+  // (两栏的 activeNoteId 本来就各存各的,这里只是按活跃槽选读哪一个)。
+  const activeNoteId =
+    activeSlot === 'right' ? wsState.rightActiveNoteId : wsState.activeNoteId;
 
   const nodes = buildTreeNodes({
     notes: allNotes,
@@ -116,6 +126,7 @@ function FolderTreePanel() {
     <FolderTree
       nodes={nodes}
       selectedIds={wsState.selectedIds}
+      activeId={activeNoteId ? encodeNoteId(activeNoteId) : null}
       onSelectChange={(ids) => setSelectedIds(wsId, ids)}
       onFolderToggle={(treeFolderId, expanded) => {
         const { id } = decodeTreeId(treeFolderId);

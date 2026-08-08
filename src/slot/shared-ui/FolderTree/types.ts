@@ -60,6 +60,17 @@ export type KeyAction = 'delete' | 'rename' | 'enter';
 export interface FolderTreeProps {
   nodes: TreeNode[];
   selectedIds: Set<string>;
+  /**
+   * 「当前正被打开着的那一条」的 treeId(feat/slot-navside-follow-active)。
+   *
+   * 与 selectedIds 是**两个概念**,不可合并:
+   * - selectedIds = 用户在树上圈选了哪些(可多选,是批量操作的对象)
+   * - activeId    = 编辑区此刻正显示哪一条(至多一条,是"你在看什么"的指针)
+   *
+   * note 树用它显示「活跃槽那一栏正在看的笔记」—— 点右栏时高亮随之跳到右栏那篇。
+   * 省略 = 不画活跃态(书签树等无此概念的调用方保持原样)。
+   */
+  activeId?: string | null;
   onSelectChange: (ids: Set<string>) => void;
   onFolderToggle: (folderId: string, expanded: boolean) => void;
   itemMeta: (item: ItemNode) => ItemMeta;

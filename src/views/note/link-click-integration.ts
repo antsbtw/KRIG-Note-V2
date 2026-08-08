@@ -21,7 +21,8 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { commandRegistry } from '@slot/command-registry/command-registry';
-import { setActiveNote, getNoteWsState, noteInstanceId, type NoteSlot } from './data-model';
+import { setActiveNote, getNoteWsState, type NoteSlot } from './data-model';
+import { getActiveSlot } from '@workspace/workspace-state/active-slot';
 import { startNoteCache, getNoteTitle } from './note-cache';
 import {
   setCurrentNoteId,
@@ -70,20 +71,19 @@ export function registerLinkClickIntegration(): void {
     /**
      * "当前笔记"用于 driver 判断同文档跳转(同文档 → 当场滚动,不开右栏)。
      *
-     * fix/slot-per-slot-active-note:左右双开后本函数有歧义 —— 点链接的可能是
-     * 左栏也可能是右栏。用**聚焦的 PM 实例**反推是哪个槽:instanceId 形如
-     * `${wsId}::slot:${slot}`,解析出 slot 再读对应字段。
-     * 解析不出(无聚焦实例/非 NoteView 实例)时返回 left 的值兜底 —— 判错的
-     * 后果仅是"本可当场滚动的却开了右栏",不损坏数据。
+     * feat/slot-navside-follow-active:槽的判定改走 activeSlot 单一来源。
+     *
+     * 原实现用**聚焦的 PM 实例**反推槽(`instanceId === ${wsId}::slot:right`)。
+     * 那是第三种"当前是哪个槽"的算法,且恰恰在最需要它准的场合不准 ——
+     * PM 焦点会被工具栏 preventDefault、浮层、非编辑区点击等打断,而 activeSlot
+     * 由容器捕获维护,不受这些影响。
      */
     getCurrentNoteId() {
       const wsId = getActiveWorkspaceIdSync();
       if (!wsId) return null;
       const ws = workspaceManager.get(wsId);
       if (!ws) return null;
-      const focused = requireCapabilityApi<TextEditingApi>('text-editing')
-        .instanceRegistry.getFocusedInstanceId();
-      const slot: NoteSlot = focused === noteInstanceId(wsId, 'right') ? 'right' : 'left';
+      const slot: NoteSlot = getActiveSlot(wsId);
       const state = getNoteWsState(ws);
       return slot === 'right' ? state.rightActiveNoteId : state.activeNoteId;
     },

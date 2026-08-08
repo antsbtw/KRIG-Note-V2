@@ -19,6 +19,7 @@ import { useAllNotes } from '../use-notes-folders';
 import { setActiveNote } from '../data-model';
 import { navigateToNote } from '../note-navigation-history';
 import { getPopupOwnerSlot } from '@slot/toolbar-registry/toolbar-invocation';
+import { getActiveSlot } from '@workspace/workspace-state/active-slot';
 import './note-open-popup.css';
 
 export function NoteOpenPopup({ onClose }: PopupCloseProps) {
@@ -58,8 +59,10 @@ export function NoteOpenPopup({ onClose }: PopupCloseProps) {
 
   function openNote(noteId: string): void {
     navigateToNote(noteId);
-    // 从右栏 toolbar 的 Open 打开 → 换右栏,不顶掉左栏
-    setActiveNote(wsId, noteId, getPopupOwnerSlot() ?? 'left');
+    // 目标槽:浮层归属栏(从哪条 toolbar 的 Open 弹出来的)优先,否则用户焦点所在栏。
+    // feat/slot-navside-follow-active:后半段原是硬编码 'left' —— 那是第二处
+    // 自行判断"当前是哪个槽",与 activeSlot 冲突(焦点在右栏时会顶掉左栏)。
+    setActiveNote(wsId, noteId, getPopupOwnerSlot() ?? getActiveSlot(wsId));
     onClose();
   }
 

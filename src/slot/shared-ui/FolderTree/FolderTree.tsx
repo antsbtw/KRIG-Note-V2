@@ -29,6 +29,7 @@ import { folderTreeContextMenuRegistry } from '@slot/nav-side-registry/folder-tr
 export function FolderTree({
   nodes,
   selectedIds,
+  activeId = null,
   onSelectChange,
   onFolderToggle,
   itemMeta,
@@ -255,11 +256,15 @@ export function FolderTree({
         const isHovered = hoveredId === node.id;
         const isDropTarget = node.kind === 'folder' && dragHoverFolderId === node.id;
 
+        const isActive = activeId !== null && node.id === activeId;
+
         const rowStyle: CSSProperties = {
           ...styles.row,
           paddingLeft: 8 + depth * TREE_INDENT_PX,
           ...(isHovered && !isSelected ? styles.rowHover : {}),
           ...(isSelected ? styles.rowSelected : {}),
+          // 活跃态放在选中之后合并:它只加左竖条 + 提亮文字,不覆盖选中的蓝底
+          ...(isActive ? styles.rowActive : {}),
           ...(isDropTarget ? styles.rowDropTarget : {}),
         };
 
