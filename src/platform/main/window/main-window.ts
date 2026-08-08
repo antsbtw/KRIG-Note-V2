@@ -176,6 +176,20 @@ export function getFocusedWindowWsId(): string | null {
   return windowRegistry.get(focused.id)?.wsId ?? null;
 }
 
+/**
+ * 此刻仍存活的窗口所绑定的 wsId(去重,未绑定 ws 的窗口不计)。
+ *
+ * 退出前对账用 —— 见 workspace-manager-main.reconcileHasWindow。本函数只回答
+ * "哪些 ws 还有窗口"这个窗口层天然知道的事实,不碰 workspace 状态(决策留在 workspace 层)。
+ */
+export function getLiveWsIds(): string[] {
+  const ids = new Set<string>();
+  for (const { win, wsId } of windowRegistry.values()) {
+    if (wsId && !win.isDestroyed()) ids.add(wsId);
+  }
+  return Array.from(ids);
+}
+
 export function getWindowByWsId(wsId: string): BrowserWindow | null {
   for (const { win, wsId: wid } of windowRegistry.values()) {
     if (wid === wsId) return win;

@@ -40,19 +40,28 @@ async function loadStateFromDB(): Promise<WorkspaceManagerState | null> {
   }
 }
 
+/** 写库本体 —— 失败照常抛,由调用方决定吞还是报 */
+async function persistStateOrThrow(state: WorkspaceManagerState): Promise<void> {
+  const db = getDB();
+  await db.query(
+    `UPSERT $rid SET workspaces = $workspaces, activeId = $activeId, counter = $counter`,
+    {
+      rid: WS_RECORD_ID,
+      workspaces: state.workspaces,
+      // SurrealDB option<string> 需要 undefined（NONE），不接受 null
+      activeId: state.activeId ?? undefined,
+      counter: state.counter,
+    },
+  );
+}
+
+/**
+ * 常规持久化 —— 调用方多为 `void persistState(...)` 的即发即忘路径,失败只记录不抛
+ * (抛出会变成未处理 rejection)。需要知道写成没成的路径请直接用 persistStateOrThrow。
+ */
 async function persistState(state: WorkspaceManagerState): Promise<void> {
   try {
-    const db = getDB();
-    await db.query(
-      `UPSERT $rid SET workspaces = $workspaces, activeId = $activeId, counter = $counter`,
-      {
-        rid: WS_RECORD_ID,
-        workspaces: state.workspaces,
-        // SurrealDB option<string> 需要 undefined（NONE），不接受 null
-        activeId: state.activeId ?? undefined,
-        counter: state.counter,
-      },
-    );
+    await persistStateOrThrow(state);
   } catch (err) {
     console.error('[workspace-manager-main] persistState failed:', err);
   }
@@ -206,6 +215,31 @@ export function wsSetConfig(
   }
   workspaces.set(wsId, next);
   void broadcast();
+}
+
+/**
+ * 退出前对账 hasWindow —— 「上次退出瞬间的窗口布局」的唯一真源。
+ *
+ * 背景(启动重复开窗 bug):hasWindow 原先只在 createWindow 置 true、在窗口 closed 时
+ * 置 false,而 closed 那条路被 `!appIsQuitting` 守卫挡住(守卫本意是别在 Cmd+Q 时把
+ * 多窗口布局擦掉)。结果:用 New Window 开过第二个 ws 的窗口后**直接退出**(而非先手动
+ * 关掉它),该 ws 的 hasWindow 永久停在 true → 下次启动 index.ts 按 hasWindow 过滤时
+ * 又开一个窗口 → 又置 true → 自我永续,再无自然路径清除。
+ *
+ * 修法:退出时以「此刻真实存活的窗口集合」为准整体覆写,存活的 true、其余一律 false。
+ * 语义由「曾经开过窗」纠正为「退出瞬间开着窗」,且首次运行即自愈历史脏值。
+ *
+ * 只写一次库(全量改完再 persist),因为调用点紧接 shutdownStorageSync —— 逐个
+ * wsSetHasWindow 会产生 N 次异步写、关库前未必落完(与本 bug 同源的竞态)。
+ */
+export async function reconcileHasWindow(liveWsIds: string[]): Promise<void> {
+  const live = new Set(liveWsIds);
+  for (const [id, ws] of workspaces) {
+    workspaces.set(id, { ...ws, hasWindow: live.has(id) });
+  }
+  // 用 OrThrow 版:这是退出前最后一次写,吞掉异常会让「以为对好了」而实际仍是旧快照
+  // (正是本 bug 的失效模式)。调用方 catch 后记录并照常退出。
+  await persistStateOrThrow(getFullState());
 }
 
 /** renderer 回写布局字段 + pluginStates，只持久化不广播（避免循环）*/

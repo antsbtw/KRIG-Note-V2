@@ -35,9 +35,9 @@ const ignoreEpipe = (err: NodeJS.ErrnoException): void => {
 };
 process.stdout.on('error', ignoreEpipe);
 process.stderr.on('error', ignoreEpipe);
-import { createWindow, markAppQuitting, setPerWindowWebviewHooks } from './window/main-window';
+import { createWindow, markAppQuitting, setPerWindowWebviewHooks, getLiveWsIds } from './window/main-window';
 import { initIpcBus } from './ipc/ipc-bus';
-import { initWorkspaceManager, getFullState } from './workspace/workspace-manager-main';
+import { initWorkspaceManager, getFullState, reconcileHasWindow } from './workspace/workspace-manager-main';
 import { reportL0Alive } from './diagnostics/L0-alive';
 import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
@@ -280,8 +280,27 @@ app.on('window-all-closed', () => {
   }
 });
 
-// 退出前：标记 app 正在退出（窗口 closed 回调跳过清 hasWindow）+ 关 SurrealDB
-app.on('before-quit', () => {
+// 退出前：标记 app 正在退出（窗口 closed 回调跳过清 hasWindow）→ 按此刻真实存活的窗口
+// 对账 hasWindow（决定下次启动开几个窗口）→ 关 SurrealDB。
+//
+// 对账必须在关库**之前**落盘,而 persistState 是异步(WebSocket)。before-quit 是同步回调,
+// 直接 void 掉会让 shutdownStorageSync 在写入途中把库关掉 → 修复静默失效。故首次进入时
+// preventDefault 拦住退出,等写完再 app.quit() 二次进入（此时 reconciled=true 直接放行）。
+let reconciled = false;
+app.on('before-quit', (event) => {
   markAppQuitting();
-  shutdownStorageSync();
+  if (reconciled) {
+    shutdownStorageSync();
+    return;
+  }
+  event.preventDefault();
+  void reconcileHasWindow(getLiveWsIds())
+    .catch((err) => {
+      // 对账失败不能卡住退出:记录后照常退（代价是下次启动窗口数可能仍是旧快照）
+      console.error('[main] before-quit reconcileHasWindow 失败,按原状态退出:', err);
+    })
+    .finally(() => {
+      reconciled = true;
+      app.quit();
+    });
 });
