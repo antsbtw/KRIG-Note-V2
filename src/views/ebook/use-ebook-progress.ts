@@ -5,16 +5,19 @@
  * v0.3 § 3.1 LOC 红线表 + C2 completion § 4.4)。
  *
  * 职责:
- * - debounce 500ms 双写:
- *   1) library.saveProgress(JSON 文件,全局最后位置)
- *   2) setReadingState(pluginStates['ebook-view'],per-ws 上次位置)
+ * - debounce 写 library.saveProgress(JSON 文件 + 主进程 reading-state atom,
+ *   即**真正**恢复阅读位置的那一份)
  * - 管理活跃 bookId(由订阅 onBookOpened 推流写入)
  * - PDF 路径:page + scale + fitWidth
  * - EPUB 路径:cfi(C3 加)
  *
+ * 2026-08-08:原先还并写一份 setReadingState 到 pluginStates(per-ws 副本)。
+ * 那份**只写不读**(全仓无读取点),每翻页白付一次 pluginStates 写 + 持久化 IPC,
+ * 已随字段一并删除;wsId / slot 参数因此不再需要。
+ *
  * 用法(view 端):
  *   const { activeBookIdRef, persistPdfProgress, persistEpubProgress } =
- *     useEBookProgress(workspaceId);
+ *     useEBookProgress();
  *   // onBookOpened: activeBookIdRef.current = info.bookId
  *   // pdf 切页 / 缩放: persistPdfProgress(page, scale, fitWidth)
  *   // epub relocate: persistEpubProgress(cfi)
@@ -23,7 +26,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
-import { setReadingState, type EBookSlot } from './data-model';
 
 // 500ms 太长 — 用户改 scale 后立即 Cmd+Q 关 app,timer 不触发数据丢。
 // 100ms 平衡:连续操作仍合并写,常规改完手离开就足够触发。
@@ -34,7 +36,7 @@ type PendingPayload =
   | { kind: 'pdf'; bookId: string; page: number; scale: number; fitWidth: boolean }
   | { kind: 'epub'; bookId: string; cfi: string };
 
-export function useEBookProgress(workspaceId: string, slot: EBookSlot = 'left') {
+export function useEBookProgress() {
   const activeBookIdRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const libraryRef = useRef<EBookLibraryApi | null>(null);
@@ -53,15 +55,10 @@ export function useEBookProgress(workspaceId: string, slot: EBookSlot = 'left') 
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         void libraryRef.current?.saveProgress(bookId, { page, scale, fitWidth });
-        setReadingState(
-          workspaceId,
-          { position: { page }, scale, fitWidth },
-          slot,
-        );
         pendingRef.current = null;
       }, SAVE_PROGRESS_DEBOUNCE_MS);
     },
-    [workspaceId, slot],
+    [],
   );
 
   const persistEpubProgress = useCallback(
@@ -72,11 +69,10 @@ export function useEBookProgress(workspaceId: string, slot: EBookSlot = 'left') 
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         void libraryRef.current?.saveProgress(bookId, { cfi });
-        setReadingState(workspaceId, { position: { cfi } }, slot);
         pendingRef.current = null;
       }, SAVE_PROGRESS_DEBOUNCE_MS);
     },
-    [workspaceId, slot],
+    [],
   );
 
   // beforeunload flush:Cmd+Q 关 app 时 debounce timer 没触发 → 强制同步写
