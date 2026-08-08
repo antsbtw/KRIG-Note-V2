@@ -84,7 +84,10 @@ async function scrollToBookSource(
     | { activeBookId?: string | null }
     | undefined;
   if (ebookState?.activeBookId !== bookId) {
-    await ebookApi.open(bookId);
+    // requester 必填(feat/ebook-per-slot):EBOOK_LOADED 广播按它定向,
+    // 不带的话没有任何 EBookView 认领 = 书打不开。
+    // 这里固定 'left':本函数上方刚把 ebook-view 强装进 left 槽,目标就是那一栏。
+    await ebookApi.open(bookId, { wsId, slot: 'left' });
   }
   // EBookView 订阅 channel 后多次重试 goToPage(幂等),
   // 直至 containerRef ready 后某一次成功

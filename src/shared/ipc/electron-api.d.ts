@@ -252,9 +252,11 @@ declare global {
         filePath: string,
         fileType: string,
         storage: 'managed' | 'link',
+        /** { wsId, slot } — 导入即打开时,EBOOK_LOADED 按它定向到发起的那一栏 */
+        requester?: unknown,
       ): Promise<unknown>;
-      /** 打开书 — 加载到 main 内存 + 通知 EBOOK_LOADED */
-      ebookBookshelfOpen(id: string): Promise<unknown>;
+      /** 打开书 — 加载到 main 内存 + 通知 EBOOK_LOADED(按 requester 定向)*/
+      ebookBookshelfOpen(id: string, requester?: unknown): Promise<unknown>;
       ebookBookshelfRemove(id: string): Promise<void>;
       ebookBookshelfRename(id: string, displayName: string): Promise<void>;
       ebookBookshelfMove(id: string, folderId: string | null): Promise<void>;

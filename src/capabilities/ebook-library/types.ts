@@ -25,6 +25,7 @@ export type {
   PickFileResult,
   EBookDataPayload,
   EBookLoadedInfo,
+  EBookOpenRequester,
 } from '@shared/ipc/ebook-types';
 
 import type {
@@ -35,6 +36,7 @@ import type {
   PickFileResult,
   EBookDataPayload,
   EBookLoadedInfo,
+  EBookOpenRequester,
 } from '@shared/ipc/ebook-types';
 import type { NoteInfo } from '@shared/ipc/note-folder-types';
 import type { BookAnchor } from '@drivers/text-editing-driver/blocks/_shared/book-anchor';
@@ -76,9 +78,18 @@ export interface EBookLibraryApi {
     filePath: string,
     fileType: EBookFileType,
     storage: EBookStorageMode,
+    requester?: EBookOpenRequester,
   ): Promise<EBookInfo | null>;
-  /** 打开书 — 加载到 main 内存 + 推 EBOOK_LOADED; 失败返错误对象 */
-  open(id: string): Promise<{ success: boolean; error?: string }>;
+  /**
+   * 打开书 — 加载到 main 内存 + 推 EBOOK_LOADED; 失败返错误对象.
+   *
+   * requester: 调用方显式携带的 (wsId, slot). EBOOK_LOADED 是发给所有窗口的广播,
+   * 接收方按它认领 —— 省略则无人认领 (刻意: 宁可不加载, 也不退回"所有 pane 一起换书").
+   */
+  open(
+    id: string,
+    requester?: EBookOpenRequester,
+  ): Promise<{ success: boolean; error?: string }>;
   remove(id: string): Promise<void>;
   rename(id: string, displayName: string): Promise<void>;
   moveToFolder(id: string, folderId: string | null): Promise<void>;

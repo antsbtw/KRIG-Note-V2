@@ -44,7 +44,12 @@ import {
   updateReadingThoughtBlockColor,
 } from './capability-impl';
 import type { ThoughtBlockSpec } from './capability-impl';
-import type { EBookFileType, EBookInfo, ReadingPosition } from '@shared/ipc/ebook-types';
+import type {
+  EBookFileType,
+  EBookInfo,
+  EBookOpenRequester,
+  ReadingPosition,
+} from '@shared/ipc/ebook-types';
 
 const VALID_FILE_TYPES: EBookFileType[] = ['pdf', 'epub', 'djvu', 'cbz'];
 
@@ -66,18 +71,41 @@ async function broadcastBookshelfChanged(): Promise<void> {
   }
 }
 
-/** 通知 renderer 书已加载 (view 收到后调 ebookGetData 拿 ArrayBuffer) */
+/**
+ * 通知 renderer 书已加载 (view 收到后调 ebookGetData 拿 ArrayBuffer)
+ *
+ * feat/ebook-per-slot:payload 带上 requester(谁请求打开的)。
+ *
+ * 仍然发给所有窗口 —— 主进程不维护「哪个 wsId 在哪个窗口」的映射,让它去查反而
+ * 是把 renderer 的布局知识泄进主进程。改为**接收方按 requester 认领**:
+ * 只有发起那一个 (wsId, slot) 的 EBookView 会加载,其余原样丢弃。
+ *
+ * ⚠️ 注意与 broadcastBookshelfChanged 的区别,别混:
+ * - 本函数 = 「**谁**请求打开了书」,是**定向**的,必须带身份
+ * - broadcastBookshelfChanged = 「书架列表变了」,是**真广播**,所有窗口都该收到,
+ *   不需要身份(书架内容与谁请求无关)
+ */
 function broadcastEBookLoaded(info: {
   bookId: string;
   fileName: string;
   fileType: EBookFileType;
   lastPosition?: ReadingPosition;
+  requester?: EBookOpenRequester;
 }): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send(IPC_CHANNELS.EBOOK_LOADED, info);
     }
   }
+}
+
+/** 校验 renderer 传来的 requester(跨 IPC 边界,不可信)*/
+function parseRequester(raw: unknown): EBookOpenRequester | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.wsId !== 'string' || !r.wsId) return undefined;
+  if (r.slot !== 'left' && r.slot !== 'right') return undefined;
+  return { wsId: r.wsId, slot: r.slot };
 }
 
 export function registerEBookHandlers(): void {
@@ -109,7 +137,7 @@ export function registerEBookHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.EBOOK_BOOKSHELF_ADD,
-    async (_e, filePath: unknown, fileType: unknown, storageMode: unknown) => {
+    async (_e, filePath: unknown, fileType: unknown, storageMode: unknown, requester: unknown) => {
       if (typeof filePath !== 'string' || !filePath) return null;
       if (!isFileType(fileType)) return null;
       if (!isStorageMode(storageMode)) return null;
@@ -123,10 +151,12 @@ export function registerEBookHandlers(): void {
       // 加载到内存 + 通知 renderer (导入即打开)
       try {
         await loadEBook(entry.filePath);
+        // 导入即打开:同样按请求方定向,否则「在右栏导入一本书」会把左栏也顶掉
         broadcastEBookLoaded({
           bookId: entry.id,
           fileName: entry.displayName,
           fileType: entry.fileType,
+          requester: parseRequester(requester),
         });
       } catch (err) {
         console.warn('[ebook] add → load failed:', err);
@@ -136,7 +166,7 @@ export function registerEBookHandlers(): void {
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.EBOOK_BOOKSHELF_OPEN, async (_e, id: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.EBOOK_BOOKSHELF_OPEN, async (_e, id: unknown, requester: unknown) => {
     if (typeof id !== 'string' || !id) return { success: false, error: 'invalid id' };
     const entry = await getBook(id);
     if (!entry) return { success: false, error: 'Entry not found' };
@@ -156,6 +186,7 @@ export function registerEBookHandlers(): void {
       fileName: entry.displayName,
       fileType: entry.fileType,
       lastPosition: entry.lastPosition,
+      requester: parseRequester(requester),
     });
     await broadcastBookshelfChanged();
     return { success: true };

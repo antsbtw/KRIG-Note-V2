@@ -268,11 +268,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     filePath: string,
     fileType: string,
     storage: 'managed' | 'link',
+    requester?: unknown,
   ): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_ADD, filePath, fileType, storage);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.EBOOK_BOOKSHELF_ADD,
+      filePath,
+      fileType,
+      storage,
+      requester,
+    );
   },
-  ebookBookshelfOpen(id: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_OPEN, id);
+  // requester = { wsId, slot }:EBOOK_LOADED 广播按它定向,只有发起的那一栏加载
+  ebookBookshelfOpen(id: string, requester?: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_OPEN, id, requester);
   },
   ebookBookshelfRemove(id: string): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.EBOOK_BOOKSHELF_REMOVE, id);

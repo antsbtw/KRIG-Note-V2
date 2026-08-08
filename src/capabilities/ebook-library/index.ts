@@ -31,6 +31,7 @@ import type {
   EBookStorageMode,
   EBookDataPayload,
   EBookLoadedInfo,
+  EBookOpenRequester,
   PickFileResult,
   ReadingPosition,
   ThoughtBlockSpec,
@@ -78,15 +79,27 @@ export async function add(
   filePath: string,
   fileType: EBookFileType,
   storage: EBookStorageMode,
+  requester?: EBookOpenRequester,
 ): Promise<EBookInfo | null> {
   if (!window.electronAPI?.ebookBookshelfAdd) return null;
-  const r = await window.electronAPI.ebookBookshelfAdd(filePath, fileType, storage);
+  const r = await window.electronAPI.ebookBookshelfAdd(filePath, fileType, storage, requester);
   return (r as EBookInfo | null) ?? null;
 }
 
-export async function open(id: string): Promise<{ success: boolean; error?: string }> {
+/**
+ * 打开书。
+ *
+ * requester(feat/ebook-per-slot):**调用方必须显式携带自己是哪个 (wsId, slot)**。
+ * 主进程原样回传进 EBOOK_LOADED,只有该 (wsId, slot) 的 EBookView 会认领加载。
+ * 省略 = 非 view 发起,届时没有任何 view 认领(接收方 fail loud),
+ * 这是刻意的 —— 宁可不加载也不要退回"所有 pane 一起换书"的老行为。
+ */
+export async function open(
+  id: string,
+  requester?: EBookOpenRequester,
+): Promise<{ success: boolean; error?: string }> {
   if (!window.electronAPI?.ebookBookshelfOpen) return { success: false, error: 'no api' };
-  const r = await window.electronAPI.ebookBookshelfOpen(id);
+  const r = await window.electronAPI.ebookBookshelfOpen(id, requester);
   return (r as { success: boolean; error?: string }) ?? { success: false };
 }
 

@@ -90,9 +90,33 @@ export interface EBookDataPayload {
 }
 
 /** EBOOK_LOADED 推送 (main → renderer) */
+/**
+ * 「谁请求打开的这本书」(feat/ebook-per-slot)
+ *
+ * EBOOK_LOADED 是发给 `BrowserWindow.getAllWindows()` 的广播,原先 payload 不带
+ * 任何来源标识 —— 每个 EBookView 收到就无条件 loadFromInfo,于是**一次点击、
+ * 所有 pane 一起换书**(扇出 = 2槽 × N workspace × N 窗口)。
+ *
+ * 修法是让请求方显式携带身份、主进程原样回传、接收方只认自己那份。
+ * 这与 PROTOCOL.md §1.5 原则 1 的推论一致(命令由调用方显式携带槽,而不是让
+ * 接收方去猜),仓库里也已有先例:X 链路的 targetWcId 透传同款。
+ *
+ * 为什么不能让接收方用 activeBookId 自行判断:左右开**同一本书**时两栏
+ * activeBookId 相同,都会认领 —— 而对照阅读同一本书的不同页是真实用法。
+ */
+export interface EBookOpenRequester {
+  wsId: string;
+  slot: 'left' | 'right';
+}
+
 export interface EBookLoadedInfo {
   bookId: string;
   fileName: string;
   fileType: EBookFileType;
   lastPosition?: ReadingPosition;
+  /**
+   * 请求方身份。缺省 = 非 view 发起(主进程内部路径 / 老调用点)——
+   * 接收方此时**不认领**(fail loud 记一条),避免退回"谁都加载"的老行为。
+   */
+  requester?: EBookOpenRequester;
 }
