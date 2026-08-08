@@ -53,9 +53,18 @@ import './web.css';
 
 interface WebViewProps {
   workspaceId: string;
+  /**
+   * 本实例所在的槽(SlotArea 注入)。
+   *
+   * 只用于 handleClose —— ✕ 必须关**自己那一栏**。其余 per-slot 化(tabs 按槽拆等)
+   * 未做:web 的价值场景是单栏内多 tab,不是左右开两个网页;为不存在的需求
+   * 扩展公共资源层属过度设计。剩余 3 条「反推自身槽位」保留在
+   * tests/views/slot-resource-guard.test.ts 的 KNOWN_DEBT 里,不会恶化。
+   */
+  slot?: 'left' | 'right';
 }
 
-export function WebView({ workspaceId }: WebViewProps) {
+export function WebView({ workspaceId, slot = 'left' }: WebViewProps) {
   // W5:间接路由拿 Host 组件(useMemo 缓存避免每次渲染重 require + 保持 React identity)
   const Host = useMemo(
     () => requireCapabilityApi<WebRenderingApi>('web-rendering').Host,
@@ -419,19 +428,18 @@ export function WebView({ workspaceId }: WebViewProps) {
     ],
   );
 
-  // × 关闭当前 web view:根据所在槽位调 closeLeft / closeRight
-  // (照 ebook 模式判 slot,不硬编码 closeLeft —— web 可进 right slot,硬编码会误关 left)
-  // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
+  // ✕ 关**自己那一栏**(最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)。
+  //
+  // 原实现按 `slotBinding.right === 'web-view'` 猜:左右双开同一 view 时该判断对
+  // 两个实例都成立 → 点左栏的 ✕ 关掉右栏。这是「靠 slotBinding 反推自身槽位」这个
+  // 反模式的**第三次**出现(note c7720f37 / eBook 3aabe642 已各修一次),
+  // 修法同前:槽由上层显式传入,不自行推导。
   const handleClose = useCallback(() => {
-    const ws = workspaceManager.get(workspaceId);
     const bus = workspaceManager.getBus(workspaceId);
-    if (!ws || !bus) return;
-    if (ws.slotBinding.right === 'web-view') {
-      bus.slot.closeRight();
-    } else {
-      bus.slot.closeLeft();
-    }
-  }, [workspaceId]);
+    if (!bus) return;
+    if (slot === 'right') bus.slot.closeRight();
+    else bus.slot.closeLeft();
+  }, [workspaceId, slot]);
 
   // toggle 双栏翻译模式
   const handleToggleTranslate = useCallback(() => {

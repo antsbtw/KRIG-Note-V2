@@ -273,9 +273,11 @@ describe('slot-resource 守卫 — 禁止靠 slotBinding 反推「我在哪一�
    */
   const KNOWN_DEBT: readonly string[] = [
     'src/views/social/SocialView.tsx:54', // isInRightSlot:双开时两个实例都会认领
-    'src/views/web/WebView.tsx:85', // isTranslateMode
-    'src/views/web/WebView.tsx:429', // handleClose:✕ 关错栏(与 note c7720f37 同形)
-    'src/views/web/WebView.tsx:441', // handleToggleTranslate
+    'src/views/web/WebView.tsx:94', // isTranslateMode
+    // 'src/views/web/WebView.tsx:429' handleClose —— 已修(2026-08-08):
+    // WebView 接了 slot prop,✕ 按槽关。这是本清单第一条被销掉的债,
+    // 销债后行号下移(85→94 / 441→449),一并校准。
+    'src/views/web/WebView.tsx:449', // handleToggleTranslate
     'src/views/x-inbox/XInboxView.tsx:469', // isInRightSlot
   ];
 
