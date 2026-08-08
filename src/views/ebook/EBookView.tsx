@@ -35,7 +35,7 @@ import type {
 } from '@capabilities/ebook-rendering/types';
 import type { LearningApi } from '@capabilities/learning/types';
 import type { ThoughtType } from '@shared/ipc/thought-types';
-import { getEBookWsState } from './data-model';
+import { getEBookWsState, getActiveBookId, type EBookSlot } from './data-model';
 import { useEBookProgress } from './use-ebook-progress';
 import { usePdfAnnotations } from './use-pdf-annotations';
 import { EBookToolbar, type EBookToolbarRenderMode } from './EBookToolbar';
@@ -59,9 +59,19 @@ import './ebook.css';
 interface EBookViewProps {
   workspaceId: string;
   payload?: unknown;
+  /**
+   * 本实例所在的槽(SlotArea 透传)。
+   *
+   * feat/ebook-per-slot:此前这个 prop **SlotArea 传了而本 view 丢掉了**
+   * (SlotArea.tsx 的 `<Comp workspaceId payload slot />`),于是 eBook 侧没有
+   * 任何东西知道自己在哪一栏 —— per-slot 的一切都无从谈起。这是前置修复。
+   *
+   * 默认 'left':兼容非 SlotArea 的调用方(与 NoteView 同款约定)。
+   */
+  slot?: EBookSlot;
 }
 
-export function EBookView({ workspaceId }: EBookViewProps) {
+export function EBookView({ workspaceId, slot = 'left' }: EBookViewProps) {
   const library = useMemo(
     () => requireCapabilityApi<EBookLibraryApi>('ebook-library'),
     [],
@@ -84,8 +94,9 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   /** 最近一次 onBookOpened 推流 — 全屏触发时复用,补最新位置喂给 panel */
   const lastBookInfoRef = useRef<EBookLoadedInfo | null>(null);
+  // 阅读进度按槽持久化:PDF 每翻页都写,不带槽的话左栏翻页会持续覆盖右栏位置
   const { activeBookIdRef, persistPdfProgress, persistEpubProgress } =
-    useEBookProgress(workspaceId);
+    useEBookProgress(workspaceId, slot);
 
   const wsState = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
@@ -94,7 +105,9 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       return ws ? getEBookWsState(ws) : null;
     },
   );
-  const activeBookId = wsState?.activeBookId ?? null;
+  // 本槽的当前书(feat/ebook-per-slot)—— 原先两栏都读同一个 activeBookId,
+  // 是「两栏恒显同一本」的字段层病根。
+  const activeBookId = wsState ? getActiveBookId(wsState, slot) : null;
 
   /**
    * 全屏(PDF 沉浸阅读)— view 内部独立 state(2026-05-24 用户拍板:与 navSideCollapsed 解耦)。
@@ -170,8 +183,27 @@ export function EBookView({ workspaceId }: EBookViewProps) {
   }, [extractUploading]);
 
   // 订阅 onBookOpened → 命令式驱动 Host + 加载书签 / 标注
+  //
+  // feat/ebook-per-slot:**按 requester 认领**。EBOOK_LOADED 是发给
+  // BrowserWindow.getAllWindows() 的广播,原先本回调无条件加载 —— 一次点击,
+  // 2槽 × N workspace × N 窗口 的所有 EBookView 一起换书(截图现象的直接原因)。
+  //
+  // 为什么不用「info.bookId === 我的 activeBookId」来判断:左右开**同一本书**时
+  // 两栏 activeBookId 相同,会双双认领 —— 而对照阅读同一本书的不同页是真实用法。
+  // 身份必须由请求方携带,不能由接收方猜(PROTOCOL.md §1.5 原则 1 推论)。
   useEffect(() => {
     return library.onBookOpened((info) => {
+      const req = info.requester;
+      if (!req) {
+        // 没带身份 = 非 view 发起的加载。不认领(否则退回"谁都加载"的老行为),
+        // 但要留痕:说明有调用点漏传 requester。
+        console.error(
+          `[ebook-view] EBOOK_LOADED 缺 requester,已忽略(book=${info.bookId})——` +
+            ' 请检查该 open/add 调用点是否漏传 { wsId, slot }。',
+        );
+        return;
+      }
+      if (req.wsId !== workspaceId || req.slot !== slot) return;   // 不是给我的
       setFileName(info.fileName);
       activeBookIdRef.current = info.bookId;
       lastBookInfoRef.current = info;
@@ -182,7 +214,7 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       // C5:PDF 空间标注加载(EPUB 路径会过滤掉,无副作用)
       void pdfAnn.loadOnBookOpen(info.bookId);
     });
-  }, [library, activeBookIdRef, bookmarks, ann, pdfAnn]);
+  }, [library, activeBookIdRef, bookmarks, ann, pdfAnn, workspaceId, slot]);
 
   // EPUB / PDF 全屏 单/双页布局自适应:容器宽高比 ≥ 1(宽 ≥ 高)→ 双页 spread;< 1 → 单页。
   // - EPUB(reflowable):始终自适应 — NavSide 收起后容器横向变宽,自动进双页 spread
@@ -218,13 +250,13 @@ export function EBookView({ workspaceId }: EBookViewProps) {
     });
   }, [rendering]);
 
-  // 启动 + 切书:有 activeBookId → 主动 open
+  // 启动 + 切书:本槽有 activeBookId → 主动 open(带上自己的身份,回来的广播才认得出)
   useEffect(() => {
     if (!activeBookId || activeBookIdRef.current === activeBookId) return;
-    void library.open(activeBookId).catch((err) => {
+    void library.open(activeBookId, { wsId: workspaceId, slot }).catch((err) => {
       console.warn('[ebook-view] open failed:', err);
     });
-  }, [library, activeBookId, activeBookIdRef]);
+  }, [library, activeBookId, activeBookIdRef, workspaceId, slot]);
 
   // Host onLoadComplete:同步 totalPages + renderMode + 字号(EPUB)
   const handleLoadComplete = useCallback(
@@ -529,7 +561,15 @@ export function EBookView({ workspaceId }: EBookViewProps) {
         rightSlot: ws.slotBinding.right,
       };
       workspaceManager.setNavSideCollapsed(workspaceId, true);
-      if (ws.slotBinding.right) bus.slot.closeRight();
+      // 腾空另一栏。
+      //
+      // ⚠️ 只处理「自己在 left」的情形。右栏自己进全屏时**不腾左栏** ——
+      // 腾它只能调 closeLeft(),而 closeLeft 会触发 right→left 升级(铁律 7):
+      // 本实例的 React key 从 `ebook-view:right` 变成 `ebook-view:left` → 实例
+      // 重建 → 刚设的 isFullscreen 随之丢失,进全屏当场失效。
+      // 正确修法需要一个「不升级的腾空」原语(或全屏改成覆盖层而非借 slot),
+      // 属独立工作量,本次不做。现状:右栏进全屏 = 只占右半边 + 收 NavSide。
+      if (slot === 'left' && ws.slotBinding.right) bus.slot.closeRight();
       setIsFullscreen(true);
     } else {
       // 退出全屏 — 恢复快照(开右槽前 setIsFullscreen 让 view paged→scroll 先生效)
@@ -537,27 +577,28 @@ export function EBookView({ workspaceId }: EBookViewProps) {
       setIsFullscreen(false);
       if (snap) {
         workspaceManager.setNavSideCollapsed(workspaceId, snap.navSideCollapsed);
-        if (snap.rightSlot) bus.slot.openRight(snap.rightSlot);
+        // 只有当初真关了右栏(即自己在 left)才恢复它;右栏进全屏时没关过任何东西,
+        // 这里若照旧 openRight 会把自己重装一遍。
+        if (slot === 'left' && snap.rightSlot) bus.slot.openRight(snap.rightSlot);
       }
       fullscreenSnapshotRef.current = null;
     }
     // 释放按钮焦点 — 避免 toolbar 全屏按钮点击后保持 :focus 视觉残留 +
     // ESC 退出后 hover 露出的 toolbar 上仍有焦点环
     (document.activeElement as HTMLElement | null)?.blur();
-  }, [workspaceId, isFullscreen]);
+  }, [workspaceId, isFullscreen, slot]);
 
   // × 关闭当前 ebook view:根据所在槽位调 closeLeft / closeRight
   // (最后一个 view 时 closeLeft 自身拒绝,见 slot-control.ts 铁律 8)
   const onClose = useCallback(() => {
-    const ws = workspaceManager.get(workspaceId);
     const bus = workspaceManager.getBus(workspaceId);
-    if (!ws || !bus) return;
-    if (ws.slotBinding.right === 'ebook-view') {
-      bus.slot.closeRight();
-    } else {
-      bus.slot.closeLeft();
-    }
-  }, [workspaceId]);
+    if (!bus) return;
+    // 关**自己这一栏**。原实现按 `right === 'ebook-view'` 猜:左右双开 eBook 时
+    // 该条件对两个实例都成立,点左栏的 ✕ 会把右栏关掉(note 侧 c7720f37 修过同款)。
+    // 现在 view 知道自己的槽,直接用。
+    if (slot === 'right') bus.slot.closeRight();
+    else bus.slot.closeLeft();
+  }, [workspaceId, slot]);
 
   const onBookmarkToggle = useCallback(
     () => void bookmarks.toggle(currentPage),

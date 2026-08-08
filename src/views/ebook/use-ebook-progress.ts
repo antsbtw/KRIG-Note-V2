@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
-import { setReadingState } from './data-model';
+import { setReadingState, type EBookSlot } from './data-model';
 
 // 500ms 太长 — 用户改 scale 后立即 Cmd+Q 关 app,timer 不触发数据丢。
 // 100ms 平衡:连续操作仍合并写,常规改完手离开就足够触发。
@@ -34,7 +34,7 @@ type PendingPayload =
   | { kind: 'pdf'; bookId: string; page: number; scale: number; fitWidth: boolean }
   | { kind: 'epub'; bookId: string; cfi: string };
 
-export function useEBookProgress(workspaceId: string) {
+export function useEBookProgress(workspaceId: string, slot: EBookSlot = 'left') {
   const activeBookIdRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const libraryRef = useRef<EBookLibraryApi | null>(null);
@@ -53,15 +53,15 @@ export function useEBookProgress(workspaceId: string) {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         void libraryRef.current?.saveProgress(bookId, { page, scale, fitWidth });
-        setReadingState(workspaceId, {
-          position: { page },
-          scale,
-          fitWidth,
-        });
+        setReadingState(
+          workspaceId,
+          { position: { page }, scale, fitWidth },
+          slot,
+        );
         pendingRef.current = null;
       }, SAVE_PROGRESS_DEBOUNCE_MS);
     },
-    [workspaceId],
+    [workspaceId, slot],
   );
 
   const persistEpubProgress = useCallback(
@@ -72,13 +72,11 @@ export function useEBookProgress(workspaceId: string) {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         void libraryRef.current?.saveProgress(bookId, { cfi });
-        setReadingState(workspaceId, {
-          position: { cfi },
-        });
+        setReadingState(workspaceId, { position: { cfi } }, slot);
         pendingRef.current = null;
       }, SAVE_PROGRESS_DEBOUNCE_MS);
     },
-    [workspaceId],
+    [workspaceId, slot],
   );
 
   // beforeunload flush:Cmd+Q 关 app 时 debounce timer 没触发 → 强制同步写

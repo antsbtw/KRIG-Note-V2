@@ -11,7 +11,49 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
-import { getEBookWsState, setActiveBookId, setFolderExpanded } from './data-model';
+import { getInvokingSlot } from '@slot/toolbar-registry/toolbar-invocation';
+import { getActiveSlot } from '@workspace/workspace-state/active-slot';
+import {
+  getEBookWsState,
+  getActiveBookId,
+  setActiveBookId,
+  setFolderExpanded,
+  type EBookSlot,
+} from './data-model';
+
+/**
+ * 命令的目标槽 —— 两个来源按优先级合成,**只此一处**合成(与 note-commands 同形)。
+ *
+ * 1. getInvokingSlot() — 调用方显式携带的槽(toolbar 按钮点击栈),最强证据
+ * 2. getActiveSlot(wsId) — 用户焦点所在栏(单一来源),用于没有调用栈上下文的
+ *    路径:书架树点击 / 快捷键 / 程序调用
+ *
+ * 这不是第二处「当前是哪个槽」——「当前槽」的答案始终只有 activeSlot 一个;
+ * invokingSlot 回答的是「这条命令由谁触发」,两者语义正交,故可合成。
+ */
+function targetSlot(wsId: string): EBookSlot {
+  return getInvokingSlot() ?? getActiveSlot(wsId);
+}
+
+/**
+ * 确保**指定槽**装的是 'ebook-view'。
+ *
+ * 原实现是「左右任一已是 ebook-view 就不动,否则切 left」—— 那只回答「整个 ws
+ * 有地方显书吗」。书架点击跟随活跃槽后必须按槽问:焦点在右栏而右栏装着 note 时,
+ * 老逻辑会因「左栏已是 ebook-view」直接返回,于是 rightActiveBookId 写了但没人
+ * 渲染 = 书开进虚空(与 note 侧 ensureNoteViewInSlot 同一个坑)。
+ */
+function ensureEBookViewInSlot(wsId: string, slot: EBookSlot): void {
+  const ws = workspaceManager.get(wsId);
+  if (!ws) return;
+  if (ws.slotBinding[slot] === 'ebook-view') return;
+  workspaceManager.update(wsId, {
+    slotBinding:
+      slot === 'right'
+        ? { ...ws.slotBinding, right: 'ebook-view', rightPayload: undefined }
+        : { ...ws.slotBinding, left: 'ebook-view', leftPayload: undefined },
+  });
+}
 
 /** import 流程:pickFile + 弹 ImportModal(由 nav-side-content 接管 modal UI) */
 let pendingImportTrigger: (() => void) | null = null;
@@ -51,17 +93,30 @@ export function registerEBookCommands(wsId: string): void {
 
   // 打开书(单击书项)
   // 只写 activeBookId + 确保 slot，不在命令层调 library.open。
-  // EBookView 的 useEffect 监测 activeBookId 变化后自己 open，那时 Host 已挂载。
+  // EBookView 的 useEffect 监测 activeBookId 变化后自己 open，那时 Host 已挂载
+  // ——顺带保证了 requester 一定是**本槽自己**填的,命令层不用操心身份透传。
   registerWsCommand('ebook-view.open-book', () => wsId, (ctx, bookId: unknown) => {
     if (typeof bookId !== 'string' || !bookId) return;
-    setActiveBookId(ctx.wsId, bookId);
-    // 确保 ebook-view 挂载到 slot（slotBinding 为空时切到 left）
-    const ws = workspaceManager.get(ctx.wsId);
-    if (ws && ws.slotBinding.left !== 'ebook-view' && ws.slotBinding.right !== 'ebook-view') {
-      workspaceManager.update(ctx.wsId, {
-        slotBinding: { ...ws.slotBinding, left: 'ebook-view' },
-      });
-    }
+    // 目标槽 = 触发栏(toolbar/浮层)优先,否则用户焦点所在栏。
+    // 与 note-commands 的 targetSlot() 同形:activeSlot 是唯一来源,
+    // invokingSlot 回答的是另一个问题(这条命令由谁触发),二者正交故可合成。
+    const slot = targetSlot(ctx.wsId);
+    setActiveBookId(ctx.wsId, bookId, slot);
+    ensureEBookViewInSlot(ctx.wsId, slot);
+  });
+
+  /**
+   * 在**另一栏**打开(书架右键项)——「另一栏」= 活跃槽的对侧。
+   *
+   * 与 note 的 note-view.open-in-other-slot 同形:左键已跟随活跃槽,故固定
+   * 「在右栏打开」在焦点已是右栏时就成了左键的同义项;「另一栏」永远表达
+   * 「送到我没在看的那一栏,开个对照」。对照阅读正是 eBook 分屏的核心用法。
+   */
+  registerWsCommand('ebook-view.open-book-in-other-slot', () => wsId, (ctx, bookId: unknown) => {
+    if (typeof bookId !== 'string' || !bookId) return;
+    const other: EBookSlot = getActiveSlot(ctx.wsId) === 'right' ? 'left' : 'right';
+    setActiveBookId(ctx.wsId, bookId, other);
+    ensureEBookViewInSlot(ctx.wsId, other);
   });
 
   // 重命名 — 真实改名由 nav-side-content 的 inline rename 提交时调 library.rename()
@@ -77,9 +132,14 @@ export function registerEBookCommands(wsId: string): void {
     const library = requireCapabilityApi<EBookLibraryApi>('ebook-library');
     if (type === 'book') {
       await library.remove(id);
+      // 删书要清**两个槽**:原实现只看 activeBookId(left),右栏若正开着这本
+      // 会留下一个指向已删书的 rightActiveBookId(重启后加载失败)。
       const ws = workspaceManager.get(ctx.wsId);
-      if (ws && getEBookWsState(ws).activeBookId === id) {
-        setActiveBookId(ctx.wsId, null);
+      if (ws) {
+        const state = getEBookWsState(ws);
+        for (const s of ['left', 'right'] as const) {
+          if (getActiveBookId(state, s) === id) setActiveBookId(ctx.wsId, null, s);
+        }
       }
     } else {
       // sub-phase 022: folder 删除走 folder capability (FolderViewType='ebook' 已自带 cascade)

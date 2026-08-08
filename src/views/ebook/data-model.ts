@@ -7,8 +7,18 @@
  * 决策 D-2=A:全部业务字段走 pluginStates['ebook-view'](charter 强制 + V2 既有
  * note-view / web-view 同模式)。WorkspaceState 框架字段不增加 ebook 专属字段。
  *
- * **持久化字段**:activeBookId / expandedFolders / readingState
+ * **持久化字段**:activeBookId(left)/ rightActiveBookId / expandedFolders /
+ *                 readingState(left)/ rightReadingState
  * **Transient 字段**:selectedIds(对齐 note-view Q8=B,关闭重启不残留)
+ *
+ * ## per-slot 化(feat/ebook-per-slot)
+ *
+ * 左右可各看一本书,故「当前书」与「阅读位置」都必须带槽维度 —— 与 note 的
+ * activeNoteId / rightActiveNoteId 同构(4fda395b)。
+ *
+ * readingState 按槽拆**比 note 更要紧**:note 的 activeNoteId 只在切笔记时写,
+ * 而 PDF 每翻一页都写 readingState,写频率差一个数量级。不拆的话左栏翻页会持续
+ * 覆盖右栏的位置,重启后两栏一起跳到最后一次翻页的地方。
  */
 
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
@@ -26,28 +36,60 @@ export interface EBookReadingState {
   fitWidth?: boolean;
 }
 
+/**
+ * EBook 槽标识(feat/ebook-per-slot)
+ *
+ * 与 note 的 NoteSlot 同义但**各自定义**:两个 view 的 per-slot 状态互不相干,
+ * 共用一个类型只会制造无谓的跨 view 依赖。等抽通用 ActiveResourceManager 时
+ * 再统一(本次不抽,见 docs/RefactorV2/stages/ebook-per-slot-design.md §4.3)。
+ */
+export type EBookSlot = 'left' | 'right';
+
 /** per-workspace 工作位状态(persistent + transient 合并视图)*/
 export interface EBookWorkspaceState {
+  /** left 槽当前书(旧字段,语义不变)*/
   activeBookId: string | null;
-  /** 书架文件夹展开状态 */
+  /** right 槽当前书 */
+  rightActiveBookId: string | null;
+  /** 书架文件夹展开状态(**槽间共享** — 导航是"选内容",属工作区级)*/
   expandedFolders: Set<string>;
-  /** 阅读状态(C2~C5 真消费,C1 占位)*/
+  /**
+   * left 槽阅读状态。
+   *
+   * ⚠️ 现状:**只写不读** —— 恢复阅读位置实际走 `entry.lastPosition`(书的全局
+   * 最后位置,存主进程)。本字段的原设计意图是"本 ws 上次读到哪"(与全局位置
+   * 互补),但至今没有消费点。
+   * 仍按槽拆:它每翻页都写,不拆的话左栏会持续覆盖右栏 —— 等将来真要"每栏各自
+   * 记位置"时,数据是干净的;否则那天再拆得先清一遍脏数据。
+   */
   readingState: EBookReadingState | null;
+  /** right 槽阅读状态(同上,只写不读)*/
+  rightReadingState: EBookReadingState | null;
   /** Transient — selectedIds 不持久化(对齐 note-view Q8=B)*/
   selectedIds: Set<string>;
 }
 
 /** 持久化形态(pluginStates['ebook-view'] 真实存的格式)— Set 序列化为 string[] */
 interface PersistedEBookWsState {
+  /**
+   * left 槽的书。字段名保持 activeBookId 不变(不做 migration):
+   * 历史数据天然落到 left 槽,语义正好对得上 —— 旧版单栏就是今天的 left。
+   */
   activeBookId: string | null;
+  /** right 槽的书(feat/ebook-per-slot 新增,老数据缺此字段 → null)*/
+  rightActiveBookId?: string | null;
   expandedFolders: string[];
   readingState: EBookReadingState | null;
+  /** right 槽阅读位置(同上,老数据缺 → null)*/
+  rightReadingState?: EBookReadingState | null;
 }
 
 const DEFAULT_WS_STATE: EBookWorkspaceState = {
   activeBookId: null,
+  rightActiveBookId: null,
   expandedFolders: new Set<string>(),
   readingState: null,
+  rightReadingState: null,
   selectedIds: new Set<string>(),
 };
 Object.freeze(DEFAULT_WS_STATE);
@@ -74,8 +116,10 @@ function hydrate(ws: WorkspaceState): EBookWorkspaceState {
   const raw = ws.pluginStates[STORE_KEY] as PersistedEBookWsState | undefined;
   const result: EBookWorkspaceState = {
     activeBookId: raw?.activeBookId ?? null,
+    rightActiveBookId: raw?.rightActiveBookId ?? null,
     expandedFolders: new Set(raw?.expandedFolders ?? []),
     readingState: raw?.readingState ?? null,
+    rightReadingState: raw?.rightReadingState ?? null,
     // selectedIds 兜底用 DEFAULT_WS_STATE.selectedIds(冻结引用),与 cached
     // 分支兜底一致 — useSyncExternalStore getSnapshot 多次调用返回稳定引用,
     // 避免 React 19 dev mode "getSnapshot should be cached" 警告(V2 既有 bug,
@@ -125,11 +169,34 @@ export function getTransientVersion(): number {
 
 // ── 业务 setters ──
 
-export function setActiveBookId(workspaceId: string, bookId: string | null): void {
+/**
+ * 读**指定槽**的当前书 —— per-slot 字段的唯一读取入口。
+ *
+ * 各处不要自己写 `slot === 'right' ? s.rightActiveBookId : s.activeBookId`,
+ * 字段名散落出去后加第三个槽 / 改名就要全仓翻(note 侧的教训)。
+ */
+export function getActiveBookId(state: EBookWorkspaceState, slot: EBookSlot): string | null {
+  return slot === 'right' ? state.rightActiveBookId : state.activeBookId;
+}
+
+/**
+ * 切**某个槽**的当前书。
+ *
+ * feat/ebook-per-slot:显式带 slot(默认 'left' 保持既有调用点语义 ——
+ * 旧版单栏即今天的 left)。左右双开时两栏各写各的字段,互不覆盖。
+ */
+export function setActiveBookId(
+  workspaceId: string,
+  bookId: string | null,
+  slot: EBookSlot = 'left',
+): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
-  if (hydrate(ws).activeBookId === bookId) return;
-  writePersistent(workspaceId, { activeBookId: bookId });
+  if (getActiveBookId(hydrate(ws), slot) === bookId) return;
+  writePersistent(
+    workspaceId,
+    slot === 'right' ? { rightActiveBookId: bookId } : { activeBookId: bookId },
+  );
 }
 
 export function setFolderExpanded(
@@ -150,8 +217,21 @@ export function setExpandedFolders(workspaceId: string, ids: Set<string>): void 
   writePersistent(workspaceId, { expandedFolders: Array.from(ids) });
 }
 
-export function setReadingState(workspaceId: string, state: EBookReadingState | null): void {
-  writePersistent(workspaceId, { readingState: state });
+/**
+ * 写**某个槽**的阅读位置。
+ *
+ * 这是本次 per-slot 化里写得最频繁的一条(PDF 每翻页都经 debounce 落这里),
+ * 不按槽拆的话左栏翻页会持续覆盖右栏位置 —— 重启后两栏一起跳到最后一次翻页处。
+ */
+export function setReadingState(
+  workspaceId: string,
+  state: EBookReadingState | null,
+  slot: EBookSlot = 'left',
+): void {
+  writePersistent(
+    workspaceId,
+    slot === 'right' ? { rightReadingState: state } : { readingState: state },
+  );
 }
 
 // ── transient selectedIds ──

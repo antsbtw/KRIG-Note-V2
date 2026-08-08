@@ -34,9 +34,11 @@ import type {
 import type { FolderCapabilityApi, FolderInfo } from '@capabilities/folder/types';
 import {
   getEBookWsState,
+  getActiveBookId,
   setSelectedIds,
   setFolderExpanded,
 } from './data-model';
+import { useActiveSlot } from '@workspace/workspace-state/active-slot';
 import { relativeTime } from '@shared/date-utils';
 import {
   encodeTreeId,
@@ -63,6 +65,9 @@ function fileIcon(fileType: string): string {
 function BookshelfPanel() {
   const wsId = useWsId();
   const ws = useWorkspace(wsId);
+  // 活跃槽:书架高亮「活跃栏正在看的那本」;点击落哪一栏由命令层的 targetSlot 决定
+  // (统一走 activeSlot 单一来源,书架这里不自行推导)。
+  const activeSlot = useActiveSlot(wsId);
 
   const library = useMemo(
     () => requireCapabilityApi<EBookLibraryApi>('ebook-library'),
@@ -164,6 +169,8 @@ function BookshelfPanel() {
 
   if (!wsId || !ws) return null;
   const wsState = getEBookWsState(ws);
+  // 高亮 =「活跃槽那一栏正在看的书」—— 实时派生,不新增持久化字段
+  const activeBookId = getActiveBookId(wsState, activeSlot);
 
   // ── TreeNode[] ──
 
@@ -273,6 +280,7 @@ function BookshelfPanel() {
       <FolderTree
         nodes={nodes}
         selectedIds={wsState.selectedIds}
+        activeId={activeBookId ? encodeTreeId('book', activeBookId) : null}
         onSelectChange={(ids) => setSelectedIds(wsId, ids)}
         onFolderToggle={(treeFolderId, expanded) => {
           const { id } = decodeTreeId(treeFolderId);
@@ -302,7 +310,7 @@ function BookshelfPanel() {
         onRenameCancel={() => setRenamingId(null)}
         contextMenuScope="ebook-view"
         contextMenuCtxExtra={() => ({
-          activeBookId: wsState.activeBookId,
+          activeBookId,
         })}
         emptyText="点击上方 + 导入 添加电子书"
       />
@@ -313,7 +321,12 @@ function BookshelfPanel() {
           storage={importStorage}
           onStorageChange={setImportStorage}
           onConfirm={async () => {
-            await library.add(importing.filePath, importing.fileType, importStorage);
+            // 导入即打开:带上「导入到哪一栏」的身份,否则 EBOOK_LOADED 广播
+            // 无人认领(接收方按 requester 过滤),导入完不会自动显示出来。
+            await library.add(importing.filePath, importing.fileType, importStorage, {
+              wsId,
+              slot: activeSlot,
+            });
             setImporting(null);
           }}
           onCancel={() => setImporting(null)}
@@ -476,6 +489,23 @@ export function registerFolderTreeContextMenu(): void {
     command: 'ebook-view.rename',
     commandArgFn: (ctx) => ctx.targetId,
     order: 30,
+  });
+
+  // 在另一栏打开(feat/ebook-per-slot)——「另一栏」= 活跃槽的对侧
+  //
+  // 与 note 树的 note-view.open-in-other-slot 同形。对照阅读(左右各一本 /
+  // 同一本的不同页)正是 eBook 分屏的核心用法,需要一个显式入口把书送到对侧。
+  // 只对 'item'(书)注册:文件夹没有"在某栏打开"的语义。
+  folderTreeContextMenuRegistry.register({
+    id: 'ebook-open-in-other-slot',
+    scope: 'ebook-view',
+    appliesTo: ['item'],
+    label: '在另一栏打开',
+    icon: '⫿',
+    enabledWhen: (ctx) => !ctx.isMulti,
+    command: 'ebook-view.open-book-in-other-slot',
+    commandArgFn: (ctx) => (ctx.targetId ? decodeTreeId(ctx.targetId).id : null),
+    order: 35,
   });
 
   // 移出文件夹 — 仅书 + 当前在某文件夹内

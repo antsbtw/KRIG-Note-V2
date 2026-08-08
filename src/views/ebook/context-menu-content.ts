@@ -39,7 +39,8 @@ import {
   THOUGHT_TYPE_META,
 } from '@shared/ipc/thought-types';
 import { DEFAULT_AI_SERVICE, type AIServiceId } from '@shared/types/ai-service-types';
-import { getEBookWsState } from './data-model';
+import { getEBookWsState, getActiveBookId as readActiveBookIdForSlot } from './data-model';
+import { getActiveSlot } from '@workspace/workspace-state/active-slot';
 import { AnnotationTypeSubmenu } from './AnnotationTypeSubmenu';
 import { getLastPdfSelection, setLastPdfSelection } from './pdf-selection-ref';
 
@@ -134,9 +135,15 @@ export function registerContextMenu(): void {
       }
 
       // 注入 wsId + activeBookId,让命令内不再直接调 workspaceManager.getActiveId()
+      //
+      // feat/ebook-per-slot:按**活跃槽**取书,原先恒取 left 字段 —— 在右栏 PDF 上
+      // 右键会拿到左栏那本的 bookId,标注/查词全落到错的书上。
+      // 右键会先经 SlotArea 的 pointerdown 捕获把该栏设为活跃,故 activeSlot
+      // 此刻就是光标所在栏。
       const wsId = getActiveWorkspaceIdSync();
       const ws = wsId ? workspaceManager.get(wsId) : null;
-      const activeBookId = ws ? (getEBookWsState(ws).activeBookId ?? null) : null;
+      const activeBookId =
+        ws && wsId ? readActiveBookIdForSlot(getEBookWsState(ws), getActiveSlot(wsId)) : null;
 
       return { pdfAnnotationId, pdfSelectionText, wsId, activeBookId };
     },
