@@ -13,6 +13,7 @@
 
 import { commandRegistry } from '../command-registry/command-registry';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
+import { getActiveSlot } from '@workspace/workspace-state/active-slot';
 import { keymapRegistry, normalizeKey } from './keymap-registry';
 import type { KeymapBinding, KeymapCondition } from './keymap-types';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
@@ -43,12 +44,23 @@ function findTargetViewId(target: EventTarget | null): string | null {
 type GetWs = (id: string) => WorkspaceState | null | undefined;
 let _getWs: GetWs = () => null;
 
-/** 退化路径:活跃 ws 的 slotBinding.left(charter:主 view 在 left)*/
+/**
+ * 退化路径:事件 target 上找不到 [data-view-id] 时,按**活跃槽**装的 view 算。
+ *
+ * feat/slot-navside-follow-active:原实现恒取 slotBinding.left(旧 charter
+ * "主 view 在 left")。左右对称化后 left 不再天然是主 view —— 焦点在右栏时
+ * 快捷键会跑去操作左栏的 view。改读 activeSlot 单一来源。
+ * 活跃槽为空(如 right 尚未装 view)时回落另一槽,保持有 view 可匹配。
+ */
 function fallbackActiveViewId(): string | null {
   const wsId = getActiveWorkspaceIdSync();
   if (!wsId) return null;
   const ws = _getWs(wsId);
-  return ws?.slotBinding.left ?? null;
+  if (!ws) return null;
+  const slot = getActiveSlot(wsId);
+  const primary = slot === 'right' ? ws.slotBinding.right : ws.slotBinding.left;
+  const secondary = slot === 'right' ? ws.slotBinding.left : ws.slotBinding.right;
+  return primary ?? secondary ?? null;
 }
 
 /** enabledWhen 单项校验 */
