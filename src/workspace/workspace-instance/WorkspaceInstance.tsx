@@ -42,14 +42,21 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
     const navSideOnSwitch = viewDef?.navSideTab?.navSideOnSwitch ?? 'expand';
     const nextCollapsed = navSideOnSwitch === 'collapse';
     console.log(`[handleSwitch] view=${viewId} navSideOnSwitch=${navSideOnSwitch} → navSideCollapsed=${nextCollapsed} (当前=${state.navSideCollapsed})`);
+    // 废除铁律 9(fix/slot-symmetry-drop-rule9):NavSide 切主 view **不再自动关 right**。
+    //
+    // 原契约「右 slot 是与主 view 共生的辅助位,主 view 换了辅位不再有意义」建立在
+    // "right 是附属"的主从模型上。左右对称化落地后该前提不成立 —— right 已能独立
+    // 持有自己的笔记/滚动位/目录状态,是用户主动摆放的持久 pane。切左栏就清掉它
+    // 等于替用户丢弃他刚布置好的对照视图。
+    //
+    // 关右栏的入口是各 view toolbar 自己的 ✕(已按槽精确关闭),不需要框架代劳。
     workspaceManager.update(
       state.id,
       {
         slotBinding: {
+          ...state.slotBinding,
           left: viewId,
           leftPayload: undefined,
-          right: null,
-          rightPayload: undefined,
         },
         navSideCollapsed: nextCollapsed,
       },

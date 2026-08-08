@@ -159,6 +159,29 @@ export function registerContextMenuItems(): void {
     order: 30,
   });
 
+  // ── item(笔记)专属 ──
+
+  /**
+   * 在右栏打开(fix/slot-symmetry-drop-rule9)
+   *
+   * 树的左键点击恒切 left(主 view 的内容源)。左右对称化后 right 是用户主动
+   * 摆放的持久 pane,需要一个显式入口把某篇笔记送过去 —— 否则右栏只能被动
+   * 接收(内链跳转 / AI 提取结果),用户无法自己决定对照哪两篇。
+   *
+   * 只对 'item'(笔记)注册:文件夹没有"在某栏打开"的语义。
+   */
+  folderTreeContextMenuRegistry.register({
+    id: 'note-view.fl-note.open-in-right',
+    scope: SCOPE,
+    appliesTo: ['item'],
+    label: '在右栏打开',
+    icon: '⫿',
+    disabled: (ctx) => ctx.isMulti,
+    command: 'note-view.set-active-in-right',
+    commandArgFn: (ctx) => (ctx.targetId ? decodeTreeId(ctx.targetId).id : null),
+    order: 90,
+  });
+
   // ── item / folder 通用项 ──
 
   folderTreeContextMenuRegistry.register({

@@ -97,10 +97,20 @@ if (right !== null) {
 - `bus.closeLeft()` 在 last-view 状态下返回 `{ ok: false, reason: 'last-view-cannot-close' }`
 - 用户想换主 view 走 NavSide ViewSwitcher(直接替换 left,不需要先关再开)
 
-### 铁律 9:NavSide 切主 view 自动关 right
-- 沿用 V1 已有契约(memory `navside_switch_closes_right_slot`)
-- ViewSwitcher 点击切 left 时,bus 内部触发 `closeRight()`,right 自动清空
-- **理由**:右 slot 是与主 view 共生的辅助/对照位,主 view 换了辅 view 不再有意义
+### ~~铁律 9:NavSide 切主 view 自动关 right~~(已废除)
+
+> **已废除**(左右对称化)。原文:NavSide 切 left 时 bus 自动 `closeRight()`,
+> 理由是「右 slot 是与主 view 共生的辅助/对照位,主 view 换了辅 view 不再有意义」。
+>
+> **废除理由**:该契约建立在「right 是 left 的附属」这一主从模型上。左右对称化后
+> right 已能独立持有自己的活跃资源 / 编辑器实例 / 滚动位 / 目录状态,是用户**主动
+> 摆放**的持久 pane —— 切左栏就清空它,等于替用户丢弃他刚布置好的对照视图。
+>
+> **替代**:关右栏由用户显式操作(各 view toolbar 的 ✕,已能按槽精确关闭),
+> 框架不代劳。
+>
+> 连带:铁律 5(禁 `openLeft`)同期解禁,见 slot-control.ts。铁律 7 的
+> 「实例不重建」改为按槽推导,见 SlotArea.tsx。
 
 ---
 

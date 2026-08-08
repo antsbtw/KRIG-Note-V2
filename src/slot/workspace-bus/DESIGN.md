@@ -185,20 +185,22 @@ step 6:SlotArea 看新 slotBinding,**view 实例 key 不变**(按 viewId 缓存)
 step 7:bus.slot 内部触发清场:right view 已经升级走了,nothing to clean
 ```
 
-### 4.2 NavSide 切主 view(铁律 9)
+### 4.2 NavSide 切主 view(原铁律 9 — **已废除自动关 right**)
 
 ```
 触发:用户点 ViewSwitcher 的 BookView tab(当前 left=Note, right=Graph)
 
 step 1:ViewSwitcherFrame 调 workspaceManager.update(wsId, {
-         slotBinding: { ...prev, left: 'book' }
-       })
-step 2:WorkspaceManager 通知 bus.slot 自动关 right(契约 9)
-       — 实施:bus.slot 监听 workspaceManager 的 slotBinding 变化,
-         发现 left 由用户 NavSide 切换 → 自动调 closeRight()
-step 3:slotBinding = { left: 'book', right: null }
+         slotBinding: { ...prev, left: 'book' }   ← right 原样保留
+       }, { source: 'navside' })
+step 2:slotBinding = { left: 'book', right: 'graph' }  ← right 不动
 ```
-**实施细节**:为区分"NavSide 切左" vs "bus.openRight 切右",`workspaceManager.update` 加可选参数 `{ source: 'navside' | 'bus' | 'frame' }`,bus.slot 订阅时按 source 决定是否触发自动 closeRight。
+
+**变更**:左右对称化后废除"自动关 right"。原契约把 right 当作 left 的附属,
+而 right 现在能独立持有活跃资源/编辑器实例/滚动位,是用户主动摆放的持久 pane,
+不该被切左栏顺手清掉。关右栏由用户显式操作(view toolbar 的 ✕,按槽精确关闭)。
+
+`source` 标记保留但**不再驱动任何行为**,纯诊断/审计用。
 
 ### 4.3 Channel emit 链(铁律 — 禁区 3)
 
@@ -324,16 +326,16 @@ export function WorkspaceInstance({ state, isActive }: Props) {
 - 渲染时按当前 slotBinding 决定哪个实例可见
 - right→left 升级时,viewId 没变,实例继承,状态保留
 
-### 6.4 ViewSwitcherFrame(配合铁律 9)
-当前点击 tab 调 `workspaceManager.update`。改成:
+### 6.4 ViewSwitcherFrame
+点击 tab 调 `workspaceManager.update`,**只改 left,保留 right**:
 ```tsx
 const handleSwitch = (viewId: string) => {
   workspaceManager.update(workspaceId, {
-    slotBinding: { ...ws.slotBinding, left: viewId },
-  }, { source: 'navside' });  // ← 标记来源
+    slotBinding: { ...ws.slotBinding, left: viewId, leftPayload: undefined },
+  }, { source: 'navside' });  // source 仅作诊断标记,不触发联动
 };
 ```
-bus.slot 监听 update 事件,source==='navside' 时自动 closeRight(铁律 9)。
+原设计在此处让 bus 监听 source==='navside' 自动 closeRight(铁律 9),已废除。
 
 ### 6.5 left slot 关闭按钮(铁律 8 UI)
 SlotArea 顶部 left 容器加 [×] 按钮:

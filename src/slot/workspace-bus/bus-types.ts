@@ -17,10 +17,13 @@ export type RequestHandler<I = unknown, O = unknown> = (
 ) => O | Promise<O>;
 
 /**
- * slotBinding 更新来源标记(铁律 9 用)
+ * slotBinding 更新来源标记
  *
- * - 'navside':NavSide ViewSwitcher 点击触发 → bus 自动 closeRight
- * - 'bus':bus.slot.* API 调用触发 → 不联动
- * - 'frame':其他 frame(如关闭按钮)触发 → 不联动
+ * - 'navside':NavSide ViewSwitcher 点击触发
+ * - 'bus':bus.slot.* API 调用触发
+ * - 'frame':其他 frame(如关闭按钮)触发
+ *
+ * 注:铁律 9(navside 切 left 自动关 right)已废除,本标记现在**纯诊断/审计**用,
+ * 无任何行为分支。见 PROTOCOL.md 铁律 9 条目。
  */
 export type SlotUpdateSource = 'navside' | 'bus' | 'frame';
