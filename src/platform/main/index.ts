@@ -65,7 +65,7 @@ import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cach
 import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
-import { startXSearchScheduler } from './x';
+import { startXSearchScheduler, stopXSearchScheduler } from './x';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -289,6 +289,9 @@ app.on('window-all-closed', () => {
 let reconciled = false;
 app.on('before-quit', (event) => {
   markAppQuitting();
+  // 停掉 X 调度器的 60s 轮询 —— 活着的 setInterval 会吊住事件循环让进程不肯退,
+  // 且退出途中继续跑配方毫无意义(日志刷 `no active X webContents, skip`)。
+  stopXSearchScheduler();
   if (reconciled) {
     shutdownStorageSync();
     return;
@@ -304,3 +307,32 @@ app.on('before-quit', (event) => {
       app.quit();
     });
 });
+
+// ── 信号退出(Ctrl+C / kill)──
+//
+// Electron 默认**不**把 SIGINT/SIGTERM 转成 app.quit(),所以按 Ctrl+C 时上面整套
+// before-quit 逻辑（hasWindow 对账 + 关库 + 停调度器）会被完全跳过。后果:
+//   1. SurrealDB 子进程自己收到 SIGINT 退出了,但 WS 客户端不知道 → 指数退避重连
+//      (2s→4s→8s→16s…)一直连一个已经死掉的服务端;
+//   2. X 调度器 60s setInterval 还活着,吊住事件循环;
+//   3. hasWindow 没对账 → 下次启动窗口数是旧快照。
+// 表现就是「Ctrl+C 后 shell 提示符回来了、但 app 迟迟不退还在刷日志」。
+//
+// 这里把信号接回正规退出路径。app.quit() 会触发 before-quit,preventDefault 那条
+// 异步分支照常走完(对账落盘 → 二次进入 → 关库),不会丢数据。
+//
+// 二次信号强杀:用户连按 Ctrl+C 表示不想再等(对齐 SurrealDB 自己的
+// "A second signal will force an immediate shutdown" 约定)。此时对账可能没写完,
+// 属用户显式选择,故只警告不静默。
+let quitSignalReceived = false;
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    if (quitSignalReceived) {
+      console.warn(`[main] 再次收到 ${sig},强制立即退出(对账可能未完成)。`);
+      process.exit(1);
+    }
+    quitSignalReceived = true;
+    console.log(`[main] 收到 ${sig},开始优雅退出…`);
+    app.quit();
+  });
+}

@@ -281,10 +281,13 @@ async function connectDB(): Promise<void> {
     const stamp = (): string => new Date().toISOString();
     for (const evt of ['connecting', 'connected', 'reconnecting', 'disconnected'] as const) {
       db.subscribe(evt, () => {
+        // 退出途中的断连/重连是预期内噪音,不刷屏(真因排查埋点只关心运行期)
+        if (shuttingDown) return;
         console.log(`[surreal-ws] ${stamp()} event=${evt} status=${db?.status}`);
       });
     }
     db.subscribe('error', (err: unknown) => {
+      if (shuttingDown) return;
       console.log(`[surreal-ws] ${stamp()} event=error status=${db?.status} err=${String(err)}`);
     });
   }
@@ -293,6 +296,22 @@ async function connectDB(): Promise<void> {
     namespace: NAMESPACE,
     database: DATABASE,
     authentication: { username, password },
+    // 显式配置重连:服务端是本机 sidecar 子进程,不是网络对端。它没了通常意味着
+    // 「进程组一起在退出」或「sidecar 崩了」,不值得按公网对端的耐心去等。
+    // SDK 默认 attempts:5 次数本身不多,但 retryDelay 1s ×2 递增、封顶
+    // retryDelayMax **60s** —— 尾几次每次要等到近一分钟,进程就吊在那儿出不去,
+    // 观感就是「Ctrl+C 后 app 迟迟不退还在刷 event=reconnecting」。
+    // 这里把封顶压到 4s:短暂抖动仍能自愈,真没了也能很快认输放事件循环走人。
+    // 注:ReconnectOptions.catch 的返回值会被 SDK 丢弃(propagate 只调不取值),
+    // 拦不住重连,故不用它做退出短路 —— 真正起作用的只有 enabled / attempts / 延迟。
+    reconnect: {
+      enabled: true,
+      attempts: 5,
+      retryDelay: 500,
+      retryDelayMax: 4_000,
+      retryDelayMultiplier: 2,
+      retryDelayJitter: 0.1,
+    },
   });
   console.log(`[storage/surreal] Connected via WebSocket (${NAMESPACE}/${DATABASE})`);
 }
@@ -310,8 +329,23 @@ export async function initSurrealDB(): Promise<void> {
   console.log('[storage/surreal] Sidecar mode started');
 }
 
+/**
+ * 标记「本进程正在主动退出」。
+ *
+ * 置位后 WS 断连一律视为预期内(见 connectDB 的 reconnecting 监听):不再重连、
+ * 不再刷日志。Ctrl+C 场景尤其重要 —— SurrealDB 子进程与本进程同属一个进程组、
+ * 会**同时**收到 SIGINT,子进程往往先死,此时若客户端还认为是意外掉线,
+ * SDK 就会对着一个已经没了的服务端指数退避重连(2s→4s→8s→16s…)不肯收手。
+ */
+let shuttingDown = false;
+
+export function markStorageShuttingDown(): void {
+  shuttingDown = true;
+}
+
 /** 同步关闭(用于 before-quit;不等子进程退出) */
 export function shutdownSurrealDB(): void {
+  shuttingDown = true;
   if (db) {
     try { db.close(); } catch { /* ignore */ }
     db = null;
