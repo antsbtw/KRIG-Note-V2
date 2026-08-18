@@ -13,10 +13,10 @@
  * instanceId。
  */
 
+import { useRef } from 'react';
 import type { HandleSubmenuContext } from '@slot/interaction-registries/handle-registry/handle-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
-import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { ColorSwatchGrid, TEXT_COLORS, BG_COLORS } from './ColorSwatchGrid';
 
 interface HandleColorSubmenuProps {
@@ -24,7 +24,15 @@ interface HandleColorSubmenuProps {
 }
 
 export function HandleColorSubmenu({ ctx }: HandleColorSubmenuProps) {
-  const instanceId = useWsId();
+  // instanceId 必须是 driver 的 per-slot 复合 id(`${wsId}::slot:<left|right>`),
+  // 不能用裸 wsId —— instanceRegistry 取不到实例,block API 会静默 no-op(同 LinkPanel 回归)。
+  // 快照:handle 菜单点开后 PM 已失焦,getFocusedInstanceId() 现读会返 null。
+  const instanceIdRef = useRef<string | null>(null);
+  if (instanceIdRef.current === null) {
+    instanceIdRef.current = requireCapabilityApi<TextEditingApi>('text-editing')
+      .instanceRegistry.getFocusedInstanceId();
+  }
+  const instanceId = instanceIdRef.current;
   const api = requireCapabilityApi<TextEditingApi>('text-editing').api;
   const currentText = instanceId ? api.getBlockTextColor(instanceId, ctx.blockPos) : null;
   const currentBg = instanceId ? api.getBlockBgColor(instanceId, ctx.blockPos) : null;

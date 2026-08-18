@@ -79,9 +79,13 @@ function getHandlePos(): { instanceId: string; pos: number } | null {
 
 /** context menu block pos 解析(从鼠标位置 resolveBlockAt) */
 function getCmBlockPos(): { instanceId: string; pos: number } | null {
-  const id = resolveInstanceId();
-  if (!id) return null;
   const state = contextMenuController.getState();
+  // 同 cm-remove-link:右键菜单弹出后 PM 已失焦,必须用触发瞬间抓拍的 pmInstanceId,
+  // 现读 getFocusedInstanceId() 会返 null → 静默跳过。
+  const ctxPmId = state.context.custom.pmInstanceId;
+  const id =
+    (typeof ctxPmId === 'string' ? ctxPmId : null) ?? resolveInstanceId();
+  if (!id) return null;
   const result = tea.resolveBlockAt(id, { x: state.x, y: state.y });
   if (!result) return null;
   return { instanceId: id, pos: result.pos };
@@ -338,9 +342,14 @@ export function registerTextEditingCommands(): void {
    * 再扩展到完整 link 范围 + removeMark。
    */
   commandRegistry.register('text-editing.cm-remove-link', () => {
-    const id = resolveInstanceId();
-    if (!id) return;
     const cm = contextMenuController.getState();
+    // 必须优先用右键触发瞬间抓拍的 pmInstanceId:菜单弹出后焦点已从 PM 转向菜单,
+    // resolveInstanceId()(现读 getFocusedInstanceId)此时返 null → 命令静默跳过,
+    // 表现为"点了移除链接没反应"。对齐 send-to-x / ask-ai / add-from-note 的取法。
+    const ctxPmId = cm.context.custom.pmInstanceId;
+    const id =
+      (typeof ctxPmId === 'string' ? ctxPmId : null) ?? resolveInstanceId();
+    if (!id) return;
     tea.removeLinkAtClientPoint(id, cm.x, cm.y);
     contextMenuController.hide();
   });

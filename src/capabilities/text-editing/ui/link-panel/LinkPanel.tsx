@@ -16,7 +16,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
-import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { NoteInfo as Note } from '@capabilities/note/types';
@@ -77,7 +76,18 @@ function extractHeadings(docJson: unknown): HeadingItem[] {
 }
 
 export function LinkPanel({ onClose }: PopupCloseProps) {
-  const wsId = useWsId();
+  // instanceId 来源 — instanceRegistry.getFocusedInstanceId()(对齐 ColorPickerPanel)。
+  // **不能用 useWsId()**:registry 的 key 是 per-slot 复合 id(`${wsId}::slot:<left|right>`,
+  // 见 note/data-model.ts noteInstanceId),裸 wsId 永远 get 不到实例 → setLink 静默 no-op。
+  //
+  // 必须在 mount 时快照:本面板的 input 带 autoFocus,会把焦点从 PM EditorView 抢走,
+  // 之后再调 getFocusedInstanceId() 会返 null。ColorPickerPanel 无输入框故可现读。
+  const instanceIdRef = useRef<string | null>(null);
+  if (instanceIdRef.current === null) {
+    instanceIdRef.current = requireCapabilityApi<TextEditingApi>('text-editing')
+      .instanceRegistry.getFocusedInstanceId();
+  }
+  const wsId = instanceIdRef.current;
   const currentHref = useMemo(
     () => (wsId ? requireCapabilityApi<TextEditingApi>('text-editing').api.getActiveLinkHref(wsId) : null),
     [wsId],
