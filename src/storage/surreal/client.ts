@@ -227,8 +227,21 @@ async function startServer(): Promise<void> {
       '--log', 'warn',
       `rocksdb://${dbPath}`,
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // 独立进程组(detached):否则 sidecar 与 app 同组,Ctrl+C 的 SIGINT 会被
+      // **同时**投递给它,它 ~0.3s 就自己退了 —— 而此时 before-quit 的
+      // reconcileHasWindow 还要用这条连接写 hasWindow,于是写在一条已死的连接上,
+      // 重连 15s 后抛 CallTerminatedError,hasWindow 落不了盘
+      // (退化成 24a137a1 修掉的「每次启动开两个窗口」)。
+      // detached 后 sidecar 收不到终端信号,只由我们在 shutdownSurrealDB 里显式
+      // kill —— 关闭时序从此完全由 app 掌握:先写完对账,再关库。
+      detached: true,
+    },
   );
+  // detached 的子进程默认会让父进程的事件循环一直等它 → 退出被吊住。
+  // unref 解除这层引用;进程本身仍在跑,仍由 shutdownSurrealDB 显式 kill。
+  serverProcess.unref();
 
   serverProcess.stdout?.on('data', (data: Buffer) => {
     console.log(`[storage/surreal server] ${data.toString().trim()}`);
@@ -351,13 +364,13 @@ export function shutdownSurrealDB(): void {
     db = null;
   }
   if (serverProcess) {
+    // detached 后 sidecar 不再随终端信号一起死,必须由我们显式送信号。
+    // 这里是**同步**退出路径(before-quit 二次进入后紧接着就 exit),原先那个
+    // 300ms 后补 SIGKILL 的 setTimeout 根本等不到执行 —— 进程先没了。
+    // 故直接 SIGTERM;surreal 收到后会自己 graceful 退出(日志 `Goodbye!`)。
+    // 万一它没退成孤儿,下次启动 initSurrealDB → killOrphanSurrealProcesses 会兜掉。
     try { serverProcess.kill('SIGTERM'); } catch { /* ignore */ }
-    setTimeout(() => {
-      if (serverProcess) {
-        try { serverProcess.kill('SIGKILL'); } catch { /* ignore */ }
-        serverProcess = null;
-      }
-    }, 300);
+    serverProcess = null;
   }
   isReady = false;
 }

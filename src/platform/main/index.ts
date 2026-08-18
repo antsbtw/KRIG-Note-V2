@@ -297,7 +297,17 @@ app.on('before-quit', (event) => {
     return;
   }
   event.preventDefault();
-  void reconcileHasWindow(getLiveWsIds())
+  // 对账必须有硬上限:它走 WebSocket 写库,若连接已经不健康(如 sidecar 先死),
+  // SDK 会退避重连十几秒才抛错,退出就被吊在这儿。给 3s 天花板 —— 正常本机写库
+  // 是毫秒级,超时即认定库已不可用,不再干等。
+  const RECONCILE_TIMEOUT_MS = 3_000;
+  const withTimeout = Promise.race([
+    reconcileHasWindow(getLiveWsIds()),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`对账超时 ${RECONCILE_TIMEOUT_MS}ms`)), RECONCILE_TIMEOUT_MS),
+    ),
+  ]);
+  void withTimeout
     .catch((err) => {
       // 对账失败不能卡住退出:记录后照常退（代价是下次启动窗口数可能仍是旧快照）
       console.error('[main] before-quit reconcileHasWindow 失败,按原状态退出:', err);

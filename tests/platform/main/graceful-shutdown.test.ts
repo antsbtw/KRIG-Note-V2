@@ -71,3 +71,31 @@ describe('SurrealDB 重连不得拖住退出', () => {
     expect(body.indexOf('db.close()')).toBeLessThan(body.indexOf("kill('SIGTERM')"));
   });
 });
+
+describe('sidecar 不得先于对账死掉(第二轮实测发现)', () => {
+  // 实测日志:SIGINT 后 before-quit 确实跑了,但 reconcileHasWindow 抛
+  // CallTerminatedError —— 因为 sidecar 与 app 同进程组、同时收到 SIGINT,
+  // 它 ~0.3s 就退了,而对账还要用这条连接写 hasWindow。
+  // 后果不只是慢(15s),更严重的是 hasWindow **落不了盘** →
+  // 退化成 24a137a1 修掉的「每次启动开两个窗口」。
+  const client = read('src/storage/surreal/client.ts');
+
+  it('sidecar 用 detached 独立进程组,不随终端信号一起死', () => {
+    expect(client).toMatch(/detached:\s*true/);
+    // detached 后必须 unref,否则父进程事件循环等它 → 反而退不出去
+    expect(client).toMatch(/serverProcess\.unref\(\)/);
+  });
+
+  it('对账有硬超时,不会被不健康的连接吊住', () => {
+    const main = read('src/platform/main/index.ts');
+    expect(main).toMatch(/RECONCILE_TIMEOUT_MS/);
+    expect(main).toMatch(/Promise\.race/);
+    const m = main.match(/RECONCILE_TIMEOUT_MS\s*=\s*([\d_]+)/);
+    expect(m).not.toBeNull();
+    expect(Number(m![1].replace(/_/g, ''))).toBeLessThanOrEqual(5_000);
+  });
+
+  it('启动时清理孤儿 sidecar(detached 的兜底)', () => {
+    expect(client).toMatch(/killOrphanSurrealProcesses\('pre-start'\)/);
+  });
+});
