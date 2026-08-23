@@ -67,18 +67,21 @@ async function pickDocxFiles(titleSuffix: string): Promise<string[] | null> {
 
 // ── 共享:hasDirectory 探测 + broadcast + 大批确认 ─────────────
 /**
- * 广播转换结果给 renderer。返回是否真的发出了 MARKDOWN_IMPORT_RUN:
- *  - 'sent'      已广播 → renderer overlay 会接手(main 端**不要** fire done)
+ * 把转换结果投递给**发起导入的那个窗口**。返回是否真的发出了 MARKDOWN_IMPORT_RUN:
+ *  - 'sent'      已投递 → renderer overlay 会接手(main 端**不要** fire done)
  *  - 'empty'     无可导入文件 → 调用方 fire done 收掉 main overlay
  *  - 'cancelled' 大批确认被用户取消 → 同上
  */
-async function broadcastResults(
+async function deliverResults(
   unified: UnifiedResult[],
   failed: Array<{ path: string; reason: string }>,
   paths: string[],
   converterTag: string,
+  invokerWin: BrowserWindow | null,
 ): Promise<'sent' | 'empty' | 'cancelled'> {
-  const focusedWin = BrowserWindow.getFocusedWindow();
+  // 发起方窗口在菜单触发时抓拍。docx 转换很慢且 dialog 会夺焦,
+  // 到这里再 getFocusedWindow() 拿到的可能是别的窗口甚至 null。
+  const focusedWin = invokerWin && !invokerWin.isDestroyed() ? invokerWin : null;
 
   let hasDirectory = false;
   try {
@@ -150,15 +153,16 @@ async function broadcastResults(
     hasDirectory,
   };
 
-  const windows = BrowserWindow.getAllWindows();
-  let sent = 0;
-  for (const win of windows) {
-    if (win.webContents.isDestroyed()) continue;
-    win.webContents.send(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, payload);
-    sent++;
+  // 只投递给发起导入的那个窗口 —— 见 markdown-import/index.ts 同处注释:
+  // renderer 的 activeWs 守卫拦不住跨窗口重复认领,广播会让同一批 docx 导入 N 份。
+  const target = focusedWin ?? BrowserWindow.getAllWindows().find((w) => !w.webContents.isDestroyed()) ?? null;
+  if (!target || target.webContents.isDestroyed()) {
+    console.warn(`[word-import:${converterTag}] no live window to receive MARKDOWN_IMPORT_RUN — aborted`);
+    return 'empty';
   }
+  target.webContents.send(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, payload);
   console.log(
-    `[word-import:${converterTag}] broadcast MARKDOWN_IMPORT_RUN → ${sent} window(s),files=${unified.length},warnings=${totalWarnings}`,
+    `[word-import:${converterTag}] sent MARKDOWN_IMPORT_RUN → window ${target.id},files=${unified.length},warnings=${totalWarnings}`,
   );
   return 'sent';
 }
@@ -169,7 +173,7 @@ function genWordTaskId(): string {
 }
 
 // ── handler 1:mammoth(基础)────────────────────────────────────
-async function runImportMammoth(): Promise<void> {
+async function runImportMammoth(invokerWin: BrowserWindow | null): Promise<void> {
   const paths = await pickDocxFiles('');
   if (!paths) return;
 
@@ -229,7 +233,7 @@ async function runImportMammoth(): Promise<void> {
     });
   }
 
-  const outcome = await broadcastResults(unified, failed, paths, 'mammoth');
+  const outcome = await deliverResults(unified, failed, paths, 'mammoth', invokerWin);
   // 没广播给 renderer(空 / 取消)→ main 端自己收掉 overlay,否则会一直转圈。
   if (outcome !== 'sent') {
     progressDone({
@@ -251,7 +255,7 @@ async function runImportMammoth(): Promise<void> {
 }
 
 // ── handler 2:pandoc(高保真)──────────────────────────────────
-async function runImportPandoc(): Promise<void> {
+async function runImportPandoc(invokerWin: BrowserWindow | null): Promise<void> {
   const focusedWin = BrowserWindow.getFocusedWindow();
 
   // 探测 pandoc — 每次菜单点击重新探测(用户可能中途装上)
@@ -339,7 +343,7 @@ async function runImportPandoc(): Promise<void> {
     });
   }
 
-  const outcome = await broadcastResults(unified, failed, paths, 'pandoc');
+  const outcome = await deliverResults(unified, failed, paths, 'pandoc', invokerWin);
   if (outcome !== 'sent') {
     progressDone({
       taskId,
@@ -362,12 +366,14 @@ async function runImportPandoc(): Promise<void> {
 /** 注册命令 + File 菜单项(被 framework-menus 调用)*/
 export function registerWordImport(): void {
   menuRegistry.registerCommand('file.import-word', () => {
-    void runImportMammoth().catch((err) => {
+    const invokerWin = BrowserWindow.getFocusedWindow();
+    void runImportMammoth(invokerWin).catch((err) => {
       console.error('[word-import:mammoth] runImport failed:', err);
     });
   });
   menuRegistry.registerCommand('file.import-word-pandoc', () => {
-    void runImportPandoc().catch((err) => {
+    const invokerWin = BrowserWindow.getFocusedWindow();
+    void runImportPandoc(invokerWin).catch((err) => {
       console.error('[word-import:pandoc] runImport failed:', err);
     });
   });

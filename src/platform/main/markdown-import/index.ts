@@ -30,8 +30,10 @@ export interface MarkdownImportRunPayload {
   hasDirectory: boolean;
 }
 
-async function runImport(): Promise<void> {
-  const focusedWin = BrowserWindow.getFocusedWindow();
+async function runImport(invokerWin: BrowserWindow | null): Promise<void> {
+  // 定向投递的目标窗口 = 用户点菜单那一刻的聚焦窗口(在任何 dialog 之前抓拍)。
+  // dialog 会夺焦,导入结束后 getFocusedWindow() 已不可信。
+  const focusedWin = invokerWin && !invokerWin.isDestroyed() ? invokerWin : null;
 
   const dialogResult = await dialog.showOpenDialog({
     title: 'Import Markdown',
@@ -100,28 +102,36 @@ async function runImport(): Promise<void> {
     if (choice.response !== 1) return;
   }
 
-  // 广播给所有 renderer 窗口(handler 自身幂等去重,跟 extraction-import 同模式)
   const payload: MarkdownImportRunPayload = {
     files: report.files,
     hasDirectory,
   };
 
-  const windows = BrowserWindow.getAllWindows();
-  let sent = 0;
-  for (const win of windows) {
-    if (win.webContents.isDestroyed()) continue;
-    win.webContents.send(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, payload);
-    sent++;
+  // 只投递给发起导入的那个窗口。
+  //
+  // 2026-08-23 修:原先 getAllWindows() 广播给所有窗口。renderer 侧 useMarkdownImport
+  // 的守卫是 `getActiveWorkspaceIdSync() !== workspaceId`,该守卫只能在**单窗口内**的
+  // 多个并存 NoteView 之间选出活跃 ws;多窗口时每个窗口各有自己的活跃 ws,于是
+  // 每个窗口都认领 → 同一批文件被导入 N 次(note/folder 是跨 ws 共享资源,只有 web
+  // 是 per-ws 的,所以重复导入会真的产生 N 份笔记)。
+  // 导入是"对着当前窗口发起"的动作,定向投递才是正确语义。
+  const target = focusedWin ?? BrowserWindow.getAllWindows().find((w) => !w.webContents.isDestroyed()) ?? null;
+  if (!target || target.webContents.isDestroyed()) {
+    console.warn('[markdown-import] no live window to receive MARKDOWN_IMPORT_RUN — aborted');
+    return;
   }
+  target.webContents.send(IPC_CHANNELS.MARKDOWN_IMPORT_RUN, payload);
   console.log(
-    `[markdown-import] broadcast MARKDOWN_IMPORT_RUN → ${sent} window(s),files=${report.files.length}`,
+    `[markdown-import] sent MARKDOWN_IMPORT_RUN → window ${target.id},files=${report.files.length}`,
   );
 }
 
 /** 注册命令 + File 菜单项 */
 export function registerMarkdownImport(): void {
   menuRegistry.registerCommand('file.import-markdown', () => {
-    void runImport().catch((err) => {
+    // 抓拍:菜单触发时的聚焦窗口就是发起方,后续 dialog 会夺焦
+    const invokerWin = BrowserWindow.getFocusedWindow();
+    void runImport(invokerWin).catch((err) => {
       console.error('[markdown-import] runImport failed:', err);
     });
   });
