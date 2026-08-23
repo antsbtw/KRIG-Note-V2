@@ -398,8 +398,22 @@ export class EPUBRenderer implements IReflowableRenderer {
     // 1) 注入到 iframe 文档内 — 文字 / 背景 / 链接 + 双页中缝细线
     // 注:column-rule 设在 html 元素(foliate-paginator 把 column-* 都挂这里),
     // 实际只在 column-count > 1 时显示;rule 颜色低透明度跟主题文字色融合
+    //
+    // --theme-bg-color 是**主题生效的关键**,不是可选装饰(2026-08-23 修):
+    // foliate paginator 在 iframe load 那一刻抓拍书本自带背景
+    // (`docBackground = getBackground(doc)`,paginator.js:253),随即把
+    // `doc.body.style.background = 'none'`,然后把抓拍值画到 shadow DOM 里的
+    // `#background` 层 —— 那层 `grid-column/row: 1/-1` **铺满整个阅读区**,
+    // 且是 iframe 的**兄弟层**,我们注入到 iframe 文档内的 background 盖不住它。
+    // 于是白底书在暗色主题下 = 白色 #background 铺满 + 深色文字被稀释 = 「隔着一层雾」。
+    //
+    // #replaceBackground(paginator.js:671-693)留了唯一逃生口:文档 html 上若有
+    // --theme-bg-color,就用它替换抓拍值。所以主题背景色必须**同时**走这个变量,
+    // 否则 6 个主题全部卡在书本原始底色上,只有文字色有差别。
+    // 铁律:改主题配色时 --theme-bg-color 必须跟 background 同步,别只改一处。
     const css = `
       html {
+        --theme-bg-color: ${c.bg};
         font-size: ${this.fontSize}% !important;
         background: ${c.bg} !important;
         color: ${c.fg} !important;
@@ -417,8 +431,12 @@ export class EPUBRenderer implements IReflowableRenderer {
     `;
     this.view.renderer.setStyles(css);
     // 2) foliate-view 自身容器背景(spread 边缘的 padding 区也要染色,否则违和)
+    //    同时把主题底色写成 --krig-epub-bg,供 styles.css 里
+    //    `foliate-view::part(filter)` 兜底染色 shadow DOM 的 #background 层
+    //    (--theme-bg-color 够不到的两种情况:抓拍值为空、书本背景是渐变/图片)。
     if (this.view) {
       this.view.style.background = c.bg;
+      this.view.style.setProperty('--krig-epub-bg', c.bg);
     }
   }
 

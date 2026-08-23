@@ -560,3 +560,22 @@
   border-color: #fff;
   transform: scale(1.15);
 }
+
+/* ── EPUB 主题背景兜底(2026-08-23)────────────────────────────────
+ * foliate paginator 在 iframe load 时抓拍书本自带背景,画到 shadow DOM 的
+ * `#background` 层(paginator.js:253 + #replaceBackground);该层铺满整个阅读区
+ * 且是 iframe 的兄弟层,注入到 iframe 文档内的 background 盖不住 —— 白底书在暗色
+ * 主题下就会「隔着一层雾」。
+ *
+ * 主路径是注入 --theme-bg-color 让 #replaceBackground 用主题色替换抓拍值
+ * (见 epub/index.ts applyContentStyles)。但它有两个够不到的角落:
+ *   1. 抓拍值为空/falsy 时 `if (background && themeBgColor)` 整段跳过;
+ *   2. 书本背景是渐变/图片时,只有第一个颜色 token 被替换,其余照旧盖住页面。
+ * 这里用 foliate 导出的 part=filter(view.js:248 exportparts)从外部兜住整层。
+ *
+ * 用 --krig-epub-bg 变量承接主题色,由 EPUBRenderer 每次 applyContentStyles 时写在
+ * foliate-view 行内(与 view.style.background 同源),故此处不硬编码任何颜色。
+ * 仅在变量已写入时生效,避免主题未就绪时抢在书本背景之前上色。 */
+.krig-ebook-content--reflowable foliate-view::part(filter) {
+  background: var(--krig-epub-bg, transparent) !important;
+}
