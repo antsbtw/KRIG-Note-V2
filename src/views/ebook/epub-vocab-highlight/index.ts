@@ -32,6 +32,7 @@ import {
   showTooltip,
   scheduleHide,
   hideTooltipNow,
+  isPointOverTooltip,
 } from '../vocab-tooltip';
 
 const HL_CLASS = 'krig-epub-vocab-hl';
@@ -236,6 +237,19 @@ interface DocListenersMarked extends Document {
   [LISTENERS_FIELD]?: boolean;
 }
 
+/** iframe 内的 doc → 其在 parent viewport 中的左上偏移(doc 不在 iframe 时为 0/0)*/
+function iframeOffset(doc: Document): { left: number; top: number } {
+  const iframeEl = doc.defaultView?.frameElement as HTMLElement | null;
+  const r = iframeEl?.getBoundingClientRect();
+  return { left: r?.left ?? 0, top: r?.top ?? 0 };
+}
+
+/** iframe 局部坐标 → parent viewport 坐标(fixed 定位的 tooltip 用同一坐标系)*/
+function toViewportPoint(doc: Document, x: number, y: number): [number, number] {
+  const { left, top } = iframeOffset(doc);
+  return [x + left, y + top];
+}
+
 function attachHoverListeners(doc: Document): void {
   const d = doc as DocListenersMarked;
   if (d[LISTENERS_FIELD]) return;
@@ -246,6 +260,11 @@ function attachHoverListeners(doc: Document): void {
   doc.addEventListener('mouseover', (e) => {
     const target = e.target as HTMLElement | null;
     const hl = target?.closest?.(`.${HL_CLASS}`) as HTMLElement | null;
+    // tooltip 挂在 parent document,鼠标要移出去点 🔊 必然先横穿 iframe 内容;
+    // 两个生词靠得近时,tooltip 正下方压着的那个生词会抢先 mouseover 把词条换掉,
+    // 🔊 永远点不到。指针落在 tooltip(含 6px 间隙带)上时短路,保持当前词不变。
+    // 注:iframe 内事件坐标是 iframe 局部坐标,需加 iframeRect 偏移转 viewport。
+    if (isPointOverTooltip(...toViewportPoint(doc, e.clientX, e.clientY))) return;
     if (hl === hovered) return;
     if (hovered) {
       hovered.classList.remove('is-hover');
@@ -262,11 +281,10 @@ function attachHoverListeners(doc: Document): void {
     if (!def) return;
     // iframe 内 BCR → viewport 坐标(parent fixed 单例 tooltip 用)
     const rect = hl.getBoundingClientRect();
-    const iframeEl = doc.defaultView?.frameElement as HTMLElement | null;
-    const iframeRect = iframeEl?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    const { left: offLeft, top: offTop } = iframeOffset(doc);
     const viewportRect = new DOMRect(
-      rect.left + iframeRect.left,
-      rect.top + iframeRect.top,
+      rect.left + offLeft,
+      rect.top + offTop,
       rect.width,
       rect.height,
     );

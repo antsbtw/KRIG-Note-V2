@@ -15,10 +15,12 @@
  * 2. enabledWhen predicates:
  *    - 'has-epub-text-selection' — 选区文本非空 + cfi 存在(未标注的选区)
  *    - 'has-epub-annotation' — 右键 target 命中已有标注(epubAnnotationCfi 非空)
+ *    - 'has-epub-annotation-selection' — 已标注 + 又划了词(查词/翻译用)
  *
  * 3. ContextMenu items(对齐用户截图设计):
- *    选区上:🖍 高亮 ▸ / 💭 加思考 ▸ / 🤖 问 AI / 📋 复制
+ *    选区上:🖍 高亮 ▸ / 💭 加思考 ▸ / 🤖 问 AI / 📖 查词 / 🌐 翻译 / 📋 复制
  *    已标注上:💭 加思考 / 🤖 问 AI / 🎨 改颜色 ▸ / 📋 复制 / 🗑 删除标注
+ *              (标注上再划词时另出 📖 查词 / 🌐 翻译)
  *
  * 4. 命令(走 lib.addReadingThoughtBlock 直接落,无中间 hook 依赖):
  *    - ebook-view.epub-highlight                 创建高亮(只 legacy block)
@@ -132,6 +134,16 @@ export function registerEpubContextMenu(): void {
     (c) =>
       typeof c.custom.epubAnnotationCfi === 'string' &&
       c.custom.epubAnnotationCfi.length > 0,
+  );
+  // 标注上「又划了词」——查词/翻译需要真实选区文本,标注整段 textContent 不适用
+  // (查一整段没有意义);没划词时这两项不出现,不静默 no-op。
+  enabledWhenRegistry.register(
+    'has-epub-annotation-selection',
+    (c) =>
+      typeof c.custom.epubAnnotationCfi === 'string' &&
+      c.custom.epubAnnotationCfi.length > 0 &&
+      typeof c.custom.epubSelectionText === 'string' &&
+      c.custom.epubSelectionText.length > 0,
   );
 
   // ── 3. 命令注册 ──
@@ -584,6 +596,26 @@ export function registerEpubContextMenu(): void {
       enabledWhen: 'has-epub-text-selection',
       group: 'learning',
       order: 46,
+    },
+    // 同上两条的标注孪生项(同 📋 复制:enabledWhen 不支持 union,分两条)。
+    // 标注上划词后仍可查词/翻译 —— 命令读 ctx().text,选区文本此时依然有值。
+    {
+      id: 'ebook-view.epub.cm.dictionary-lookup-annotation',
+      label: '📖 查词',
+      command: 'ebook-view.epub-dictionary-lookup',
+      view: VIEW,
+      enabledWhen: 'has-epub-annotation-selection',
+      group: 'learning',
+      order: 47,
+    },
+    {
+      id: 'ebook-view.epub.cm.translate-text-annotation',
+      label: '🌐 翻译',
+      command: 'ebook-view.epub-translate-text',
+      view: VIEW,
+      enabledWhen: 'has-epub-annotation-selection',
+      group: 'learning',
+      order: 48,
     },
     // 改颜色(仅已标注):走 EpubColorSubmenu(同高亮 submenu 但 actionCommand 不同)
     {

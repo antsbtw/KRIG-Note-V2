@@ -5,7 +5,8 @@
  * V2 React 组件,L4.1 后从 popup-registry 迁到 help-panel-registry(右栏长侧栏)。
  *
  * 双模式 + 双 Tab:
- * - mode = 'lookup' / 'translate'(由 setPanelInitial 设置,help-panel 渲染时读)
+ * - mode = 'lookup' / 'translate'(由 setPanelInitial 设置,组件订阅读取 —
+ *   面板开着时再查新词会原地刷新,见下方 PanelRequest 注释)
  * - tab = 'lookup' / 'vocab'(用户切换)
  *
  * lookup 模式:并行查词 + 翻译,UI 显释义 + 中文 + TTS + 加生词本
@@ -22,7 +23,7 @@
  * Header / × 关闭按钮:由 help-panel shell 提供,本组件只填 body。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { HelpPanelCloseProps } from '@slot/interaction-registries/help-panel-registry/help-panel-types';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
@@ -32,19 +33,43 @@ import type {
 } from '@capabilities/learning/types';
 import './dictionary-panel.css';
 
-// 模块级"待显示"状态(setPanelInitial 写入,help-panel 组件 mount 时读取)
-let pendingMode: 'lookup' | 'translate' = 'lookup';
-let pendingText = '';
-let pendingContext: string | undefined;
+/**
+ * 模块级"当前请求"状态(setPanelInitial 写入,组件订阅读取)
+ *
+ * ⚠️ 曾是 mount 时快照(useState(pendingText)):面板已开着时再查第二个词,
+ * helpPanelController.show 的 state 不变 → 组件不 remount → 快照永远停在第一个词,
+ * 必须先关面板才能查下一个。改成可订阅 store,写入即通知,面板原地刷新。
+ */
+interface PanelRequest {
+  mode: 'lookup' | 'translate';
+  text: string;
+  context?: string;
+  /** 单调递增 — 同词重查(如生词本点回同一个词)也要能触发一次刷新 */
+  seq: number;
+}
+
+let currentRequest: PanelRequest = { mode: 'lookup', text: '', seq: 0 };
+const requestListeners = new Set<() => void>();
 
 export function setPanelInitial(
   mode: 'lookup' | 'translate',
   text: string,
   context?: string,
 ): void {
-  pendingMode = mode;
-  pendingText = text;
-  pendingContext = context;
+  currentRequest = { mode, text, context, seq: currentRequest.seq + 1 };
+  requestListeners.forEach((l) => l());
+}
+
+function subscribeRequest(listener: () => void): () => void {
+  requestListeners.add(listener);
+  return () => {
+    requestListeners.delete(listener);
+  };
+}
+
+/** getSnapshot 必须返回稳定引用 — currentRequest 只在 setPanelInitial 整体换新 */
+function getRequestSnapshot(): PanelRequest {
+  return currentRequest;
 }
 
 interface AudioRef {
@@ -55,10 +80,9 @@ interface AudioRef {
 export function DictionaryPanel(_props: HelpPanelCloseProps) {
   const learning = useMemo(() => requireCapabilityApi<LearningApi>('learning'), []);
 
-  // 初始模式 + 文本(组件级常量,popup 内部不切换 — 切换走"重新打开 popup")
-  const [mode] = useState(pendingMode);
-  const [text] = useState(pendingText);
-  const [context] = useState(pendingContext);
+  // 当前请求(订阅式 — 面板开着时再查新词会原地刷新,不需先关面板)
+  const request = useSyncExternalStore(subscribeRequest, getRequestSnapshot);
+  const { mode, text, context, seq } = request;
 
   // Tab 状态
   const [tab, setTab] = useState<'lookup' | 'vocab'>('lookup');
@@ -71,7 +95,6 @@ export function DictionaryPanel(_props: HelpPanelCloseProps) {
   // vocab 数据
   const [vocab, setVocab] = useState<VocabEntry[]>([]);
   const [filter, setFilter] = useState('');
-  const [vocabLoaded, setVocabLoaded] = useState(false);
 
   // 添加生词本状态(防重复加 + 显 ✓ 已添加)
   const [addedToVocab, setAddedToVocab] = useState(false);
@@ -79,10 +102,13 @@ export function DictionaryPanel(_props: HelpPanelCloseProps) {
   // TTS audio 引用(组件级 cleanup)
   const audioRef = useRef<AudioRef>({ audio: null, url: null });
 
-  // 初次加载查词 / 翻译
+  // 加载查词 / 翻译(seq 变 = 有新请求,面板开着也重查)
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // 清掉上一个词的结果,避免新词 loading 期间还显示旧释义
+    setLookup(null);
+    setTranslation(null);
 
     if (mode === 'lookup') {
       Promise.all([learning.dictionaryLookup(text), learning.translate(text)]).then(
@@ -104,25 +130,35 @@ export function DictionaryPanel(_props: HelpPanelCloseProps) {
     return () => {
       cancelled = true;
     };
-  }, [mode, text, learning]);
+    // seq:同一个词再查一次也要重新拉(生词本点回同词)
+  }, [mode, text, seq, learning]);
 
-  // 切到 vocab Tab 时取列表(同时检测当前 text 是否已在 vocab)
+  // 新请求到达:回 lookup Tab(用户可能停在生词本页)
   useEffect(() => {
-    if (tab !== 'vocab' && !vocabLoaded) {
-      // lookup Tab 也需要 vocab 列表来判断 addedToVocab 状态
-      learning.vocabList().then((entries) => {
-        setVocab(entries);
-        setVocabLoaded(true);
-        const normalized = text.toLowerCase().trim();
-        setAddedToVocab(entries.some((e) => e.word === normalized));
-      });
-    } else if (tab === 'vocab') {
-      learning.vocabList().then((entries) => {
-        setVocab(entries);
-        setVocabLoaded(true);
-      });
-    }
-  }, [tab, learning, text, vocabLoaded]);
+    if (seq > 0) setTab('lookup');
+  }, [seq]);
+
+  // 当前 text 是否已在生词本 — 每次换词都要重算,否则新词沿用上一个词的 ✓ 状态
+  useEffect(() => {
+    let cancelled = false;
+    learning.vocabList().then((entries) => {
+      if (cancelled) return;
+      setVocab(entries);
+      const normalized = text.toLowerCase().trim();
+      setAddedToVocab(entries.some((e) => e.word === normalized));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [text, seq, learning]);
+
+  // 切到 vocab Tab 时刷新列表
+  useEffect(() => {
+    if (tab !== 'vocab') return;
+    learning.vocabList().then((entries) => {
+      setVocab(entries);
+    });
+  }, [tab, learning]);
 
   // 组件 unmount 清理 TTS audio
   useEffect(() => {
@@ -162,7 +198,7 @@ export function DictionaryPanel(_props: HelpPanelCloseProps) {
     const entry = await learning.vocabAdd(text, definition, context, phonetic);
     if (entry) {
       setAddedToVocab(true);
-      // 重新拉 vocab list(addedToVocab 变化由用户重开面板时下次 useEffect 触发同步)
+      // 重新拉 vocab list 保持生词本 Tab 同步
       const list = await learning.vocabList();
       setVocab(list);
     }
