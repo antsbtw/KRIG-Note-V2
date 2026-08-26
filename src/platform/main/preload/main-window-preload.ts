@@ -874,6 +874,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.MAIL_EXTRACT_REQUEST, handler);
   },
 
+  // ── 邮箱 阶段 1(IMAP 只读同步:账号配置 + 拉信落库) ──
+  /** 列出本 ws 的邮箱账号(不含密码) */
+  mailAccountList(wsId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_LIST, wsId);
+  },
+  /** 新建账号。password 明文入参,main 侧转 safeStorage 加密,**不入 DB** */
+  mailAccountCreate(payload: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_CREATE, payload);
+  },
+  /** 删账号(连带清密码/邮件/游标) */
+  mailAccountDelete(accountId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_DELETE, accountId);
+  },
+  /** 测试连接 + 列 mailbox */
+  mailAccountTest(accountId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_TEST, accountId);
+  },
+  /** 增量同步一个 mailbox */
+  mailSync(accountId: string, mailbox?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_SYNC, { accountId, mailbox });
+  },
+  /** 列邮件(日期倒序,分页) */
+  mailList(accountId: string, mailbox?: string, limit?: number, offset?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_LIST, { accountId, mailbox, limit, offset });
+  },
+  /** 取单封全文 */
+  mailGet(mailId: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_GET, mailId);
+  },
+
   // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
   /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)。
    *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。

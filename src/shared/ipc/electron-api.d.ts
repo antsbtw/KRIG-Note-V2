@@ -36,6 +36,7 @@ import type {
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
 import type { MailServiceId } from '../types/mail-service-types';
+import type { MailAccount, MailRecord, MailSyncResult, MailTestResult } from '../types/mail-types';
 import type { ArticlePlan, ArticleInsertStep } from './article-plan-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
@@ -640,6 +641,32 @@ declare global {
       onMailExtractRequest(
         callback: (payload: { serviceId: MailServiceId; x: number; y: number }) => void,
       ): () => void;
+
+      // ── 邮箱 阶段 1(IMAP 只读同步) ──
+      /** 列出本 ws 的邮箱账号(不含密码) */
+      mailAccountList(wsId: string): Promise<MailAccount[]>;
+      /** 新建账号。password 明文入参,main 侧 safeStorage 加密,不入 DB */
+      mailAccountCreate(payload: {
+        wsId: string;
+        serviceId: MailServiceId;
+        email: string;
+        imapHost: string;
+        imapPort: number;
+        imapSecure: boolean;
+        password: string;
+        smtpHost?: string;
+        smtpPort?: number;
+      }): Promise<{ success: boolean; account?: MailAccount; error?: string }>;
+      /** 删账号(连带清密码/邮件/游标) */
+      mailAccountDelete(accountId: string): Promise<{ success: boolean; error?: string }>;
+      /** 测试连接 + 列 mailbox */
+      mailAccountTest(accountId: string): Promise<MailTestResult>;
+      /** 增量同步一个 mailbox */
+      mailSync(accountId: string, mailbox?: string): Promise<MailSyncResult>;
+      /** 列邮件(日期倒序,分页) */
+      mailList(accountId: string, mailbox?: string, limit?: number, offset?: number): Promise<MailRecord[]>;
+      /** 取单封全文 */
+      mailGet(mailId: string): Promise<MailRecord | null>;
 
       // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
       /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布)。

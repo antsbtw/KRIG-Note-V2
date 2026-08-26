@@ -9,8 +9,16 @@
 
 import type { ComponentType, CSSProperties, Ref } from 'react';
 import type { MailServiceId } from '@shared/types/mail-service-types';
+import type {
+  MailAccount,
+  MailRecord,
+  MailSyncResult,
+  MailTestResult,
+  CreateMailAccountInput,
+} from '@shared/types/mail-types';
 
 export type { MailServiceId };
+export type { MailAccount, MailRecord, MailSyncResult, MailTestResult };
 
 /** 抓到的邮件字段(阶段 0 纯文本;附件/线程/flags 要等阶段 1 的 IMAP) */
 export interface MailExtractData {
@@ -90,4 +98,31 @@ export interface MailServiceApi {
   getMailHostWcId(wsId: string): number | null;
   /** Mail Host — forwardRef MailHostHandle,封装 webview 生命周期 + per-ws partition */
   Host: ComponentType<MailHostProps & { ref?: Ref<MailHostHandle> }>;
+
+  // ── 阶段 1:IMAP 只读同步 ──
+  /** 列出本 ws 的账号(不含密码) */
+  listAccounts(wsId: string): Promise<MailAccount[]>;
+  /**
+   * 新建账号。
+   * ⚠️ password 明文入参,经 IPC 交给 main 侧 safeStorage 加密落盘,**不进 SurrealDB**。
+   * renderer 侧用完即弃,不要存进任何 state / 日志。
+   */
+  createAccount(
+    input: CreateMailAccountInput,
+  ): Promise<{ success: boolean; account?: MailAccount; error?: string }>;
+  /** 删账号(连带清密码/邮件/游标) */
+  deleteAccount(accountId: string): Promise<{ success: boolean; error?: string }>;
+  /** 测试连接 + 列 mailbox(配置向导用) */
+  testAccount(accountId: string): Promise<MailTestResult>;
+  /** 增量同步一个 mailbox(缺省 INBOX) */
+  sync(accountId: string, mailbox?: string): Promise<MailSyncResult>;
+  /** 列邮件(日期倒序,分页) */
+  listMails(
+    accountId: string,
+    mailbox?: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<MailRecord[]>;
+  /** 取单封全文 */
+  getMail(mailId: string): Promise<MailRecord | null>;
 }

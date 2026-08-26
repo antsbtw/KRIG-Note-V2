@@ -12,6 +12,9 @@
 
 import { registerView } from '@slot/view-type-registry/register-view';
 import { MailView } from './MailView';
+import { registerNavSide } from './nav-side-content';
+
+registerNavSide();
 
 registerView({
   id: 'mail-view',
@@ -21,8 +24,9 @@ registerView({
     label: 'Mail',
     icon: '📧',
     order: 7,
-    navSideOnSwitch: 'collapse',
-    navSideDisabled: true,
+    // 阶段 0 时是 collapse + navSideDisabled(webview 类 view 无面板内容)。
+    // 阶段 1 有了账号面板 → 解禁,切过来时展开(账号配置是使用邮箱同步的入口)。
+    navSideOnSwitch: 'expand',
     slotPickerChildren: [
       { subId: 'gmail', label: 'Gmail', icon: '📧' },
       { subId: 'outlook', label: 'Outlook', icon: '📨' },

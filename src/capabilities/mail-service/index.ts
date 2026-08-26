@@ -22,6 +22,20 @@ import type {
   MailExtractRequest,
   MailExtractResult,
 } from './types';
+import type {
+  MailAccount,
+  MailRecord,
+  MailSyncResult,
+  MailTestResult,
+  CreateMailAccountInput,
+} from '@shared/types/mail-types';
+
+export type {
+  MailAccount,
+  MailRecord,
+  MailSyncResult,
+  MailTestResult,
+} from '@shared/types/mail-types';
 
 export type {
   MailServiceApi,
@@ -51,6 +65,43 @@ function onExtractRequest(callback: (payload: MailExtractRequest) => void): () =
   return window.electronAPI.onMailExtractRequest(callback);
 }
 
+// ── 阶段 1:IMAP 只读同步(薄 alias,主进程做实事) ──
+
+async function listAccounts(wsId: string): Promise<MailAccount[]> {
+  return window.electronAPI.mailAccountList(wsId);
+}
+
+async function createAccount(
+  input: CreateMailAccountInput,
+): Promise<{ success: boolean; account?: MailAccount; error?: string }> {
+  return window.electronAPI.mailAccountCreate(input);
+}
+
+async function deleteAccount(accountId: string): Promise<{ success: boolean; error?: string }> {
+  return window.electronAPI.mailAccountDelete(accountId);
+}
+
+async function testAccount(accountId: string): Promise<MailTestResult> {
+  return window.electronAPI.mailAccountTest(accountId);
+}
+
+async function sync(accountId: string, mailbox?: string): Promise<MailSyncResult> {
+  return window.electronAPI.mailSync(accountId, mailbox);
+}
+
+async function listMails(
+  accountId: string,
+  mailbox?: string,
+  limit?: number,
+  offset?: number,
+): Promise<MailRecord[]> {
+  return window.electronAPI.mailList(accountId, mailbox, limit, offset);
+}
+
+async function getMail(mailId: string): Promise<MailRecord | null> {
+  return window.electronAPI.mailGet(mailId);
+}
+
 export const mailServiceCapability: MailServiceApi = {
   extractMail,
   onExtractRequest,
@@ -58,6 +109,13 @@ export const mailServiceCapability: MailServiceApi = {
   clearMailHostWcId,
   getMailHostWcId,
   Host,
+  listAccounts,
+  createAccount,
+  deleteAccount,
+  testAccount,
+  sync,
+  listMails,
+  getMail,
 };
 
 capabilityRegistry.register({
