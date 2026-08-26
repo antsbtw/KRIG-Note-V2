@@ -268,6 +268,12 @@ export const IPC_CHANNELS = {
   X_DRAG_RESOLVE: 'x.drag-resolve',                  // 松手:读回最后坐标 + 解析落点(compose/tweet/...)
   X_DRAG_REPLY_HERE: 'x.drag-reply-here',            // 落推文:就地点该推回复按钮弹 reply 框(不跳详情页)
 
+  // 邮箱模块(阶段 0:webview 薄壳)— 内嵌网页版邮箱 + 右键提取单封邮件到 note。
+  // 数据层(IMAP/SMTP → SurrealDB)是阶段 1,不走这些通道。
+  // 见 docs/tasks/2026-08-26-mail-module-design.md
+  MAIL_EXTRACT: 'mail.extract',                     // renderer → main:按坐标定位 + 抽该封邮件(返主题/正文/发件人)
+  MAIL_EXTRACT_REQUEST: 'mail.extract-request',     // main → renderer 推送:邮箱 webview 原生右键点击,带 guest 坐标 {x,y}
+
   // Progress 反馈通道(backup-restore + 未来其他长耗时任务共用)
   PROGRESS_START: 'progress.start',                 // main → renderer:任务开始
   PROGRESS_UPDATE: 'progress.update',               // main → renderer:阶段/百分比更新

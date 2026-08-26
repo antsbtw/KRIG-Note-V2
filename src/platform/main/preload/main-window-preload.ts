@@ -859,6 +859,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.X_OPEN_TWEET_REQUEST, handler);
   },
 
+  // ── 邮箱模块(阶段 0:右键邮箱 webview 提取单封邮件 → note) ──
+  /** 按坐标定位 + 抽该封邮件(返 { success, data?, error? });targetWcId 按活跃 ws 定向 */
+  mailExtract(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_EXTRACT, { serviceId, x, y, targetWcId });
+  },
+  /** 订阅邮箱 webview 原生右键「提取此邮件」点击(main 推 guest 坐标);返 unsubscribe */
+  onMailExtractRequest(
+    callback: (payload: { serviceId: string; x: number; y: number }) => void,
+  ): () => void {
+    const handler = (_event: unknown, payload: unknown): void =>
+      callback(payload as { serviceId: string; x: number; y: number });
+    ipcRenderer.on(IPC_CHANNELS.MAIL_EXTRACT_REQUEST, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.MAIL_EXTRACT_REQUEST, handler);
+  },
+
   // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
   /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)。
    *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。

@@ -35,6 +35,7 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
+import type { MailServiceId } from '../types/mail-service-types';
 import type { ArticlePlan, ArticleInsertStep } from './article-plan-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
@@ -616,6 +617,28 @@ declare global {
       ): () => void;
       /** main → renderer 推送:宿主 iframe(tweet 卡片)弹 x.com 链接 → 改在 X webview 打开;返 unsubscribe */
       onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
+
+      // ── 邮箱模块(阶段 0:右键邮箱 webview 提取单封邮件 → note) ──
+      /** 按 guest viewport 坐标定位 + 抽该封邮件(主题/正文/发件人,纯文本) */
+      mailExtract(
+        serviceId: MailServiceId,
+        x: number,
+        y: number,
+        targetWcId?: number,
+      ): Promise<{
+        success: boolean;
+        data?: {
+          subject?: string;
+          bodyText?: string;
+          from?: string;
+          sourceUrl?: string;
+        };
+        error?: string;
+      }>;
+      /** main → renderer 推送:邮箱 webview 原生右键「提取此邮件」点击,带 guest 坐标;返 unsubscribe */
+      onMailExtractRequest(
+        callback: (payload: { serviceId: MailServiceId; x: number; y: number }) => void,
+      ): () => void;
 
       // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
       /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布)。

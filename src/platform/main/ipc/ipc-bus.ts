@@ -27,6 +27,7 @@ import { registerPmContentHandlers } from '../pm-content';
 import { registerThoughtHandlers } from '../thought';
 import { registerAIHandlers } from '../ai';
 import { registerXHandlers, registerXTestHandlers, registerXTimelineHandlers } from '../x';
+import { registerMailHandlers } from '../mail';
 import { registerAuthHandlers } from './auth-handler';
 import { registerWorkspaceHandlers } from './workspace-handler';
 
@@ -54,6 +55,7 @@ export function initIpcBus(): void {
   registerThoughtHandlers();        // 横切思考层(thought-view-port.md v0.5)
   registerAIHandlers();             // ai-extraction capability(V1 web-bridge AI 自动化 → V2 抽 capability)
   registerXHandlers();              // X 集成 阶段 1:右键 X webview 提取推文 → tweetBlock
+  registerMailHandlers();           // 邮箱 阶段 0:右键邮箱 webview 提取单封邮件 → note
   registerXTestHandlers();          // X Article 逐块底层测试(独立驱动+验证完整落定);只注册 listener,renderer 主动调才跑
   registerXTimelineHandlers();      // X 时间线智能筛选 Phase 1:搜索配方采集 + AI 判断 + inbox 查询
   registerAuthHandlers();           // 账号登录 + 归因(authorization-management-design.md;本期不做授权)
