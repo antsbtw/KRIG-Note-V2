@@ -61,6 +61,8 @@ interface Props {
     setScale: (scale: number) => void;
     setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
     getScale: () => number;
+    /** 按容器真实尺寸重新布局(保活隐藏 → 重新显示时用)*/
+    relayout: () => void;
   }) => void;
   /** 标注模式(C5):'off' / 'rect' */
   annotationMode?: 'off' | 'rect';
@@ -180,6 +182,7 @@ export function PdfScrollContent({
       setScale: (s) => canvasRef.current?.setScale(s),
       setFitMode: (mode) => canvasRef.current?.setFitMode(mode),
       getScale: () => canvasRef.current?.getScale() ?? 1.0,
+      relayout: () => canvasRef.current?.relayout(),
     });
   }, [onRegisterApi]);
 

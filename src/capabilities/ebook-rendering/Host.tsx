@@ -83,6 +83,18 @@ export interface EBookHostHandle {
   /** EPUB 明暗模式(light/dark/auto) — 与 theme 正交 */
   setEpubAppearance(appearance: import('./types').EpubAppearance): void;
 
+  /**
+   * 按容器**当前真实尺寸**重新布局(EPUB / PDF 通吃,幂等)。
+   *
+   * 给「容器尺寸曾是 0、现在不是了」的场景用 —— 典型是 SlotArea 把 view
+   * `display:none` 保活后重新显示。两种引擎都不会自愈,原因见各自实现:
+   *   - EPUB:foliate paginator 的 RO 在隐藏期算出空布局后不再重算
+   *   - PDF :pdfjs update() 在可见页为 0 时直接 return,且不自己重试
+   *
+   * 调用方须保证调用时容器已有非零尺寸(如放在 rAF 之后)。
+   */
+  relayout(): void;
+
   // ── TOC + Search(C3 给 outline / search bar 用)──
   /** 取 renderer 提供的 TOC 树(异步:EPUB 等 readyPromise) */
   getTOC(): Promise<TOCItem[]>;
@@ -286,6 +298,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
   const scrollApiRef = useRef<{
     setScale: (s: number) => void;
     setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
+    relayout: () => void;
   } | null>(null);
   const registerScrollApi = useCallback(
     (api: {
@@ -293,9 +306,14 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       setScale: (s: number) => void;
       setFitMode: (mode: 'page-width' | 'page-fit' | 'page-actual' | 'auto') => void;
       getScale: () => number;
+      relayout: () => void;
     }) => {
       gotoPageRef.current = api.goToPage;
-      scrollApiRef.current = { setScale: api.setScale, setFitMode: api.setFitMode };
+      scrollApiRef.current = {
+        setScale: api.setScale,
+        setFitMode: api.setFitMode,
+        relayout: api.relayout,
+      };
     },
     [],
   );
@@ -541,6 +559,13 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
       },
       setScale: handleScaleChange,
       setFitWidth: handleSetFitWidth,
+      relayout(): void {
+        // PDF:走 PdfScrollContent 注册的通道
+        scrollApiRef.current?.relayout();
+        // EPUB:renderer.onResize 内部调 foliate paginator.render()
+        const r = rendererRef.current;
+        if (r && isReflowable(r)) r.onResize();
+      },
       getRenderMode(): 'fixed-page' | 'reflowable' | null {
         if (pdfHandleRef.current) return 'fixed-page';
         return rendererRef.current?.renderMode ?? null;

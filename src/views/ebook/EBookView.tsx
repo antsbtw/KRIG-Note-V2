@@ -23,6 +23,7 @@ import {
   useCallback,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useOnSlotVisible } from '@workspace/workspace-state/slot-visibility';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { contextMenuController } from '@slot/triggers/context-menu-controller';
@@ -249,6 +250,25 @@ export function EBookView({ workspaceId, slot = 'left' }: EBookViewProps) {
       hostRef.current?.setEpubAppearance(s.appearance);
     });
   }, [rendering]);
+
+  /**
+   * 重新上台 → 强制重新布局(2026-08-25 修「切走再切回正文空白」)。
+   *
+   * SlotArea 用 `display:none` 保活未占槽的 view,隐藏期间容器 clientWidth/Height
+   * 恒为 0。EPUB(foliate)和 PDF(pdfjs)都是命令式渲染引擎,按 0 尺寸算出的布局
+   * 不会自愈:切回来 toolbar / 页码正常(React 画的),正文区却空白 —— 翻一页才出来,
+   * 因为翻页强制走了一遍布局。
+   *
+   * 注意:这里**不能**靠 activeBookId 变化触发(它没变,书还是那本),也不该重新
+   * open 整本书 —— 那会丢阅读位置且白白重载。relayout 是幂等的纯重排,
+   * foliate 的 render() 结尾会 scrollToAnchor 保住当前页。
+   *
+   * 可见性由框架播报(slot-visibility),不是本 view 自己猜的 —— 隐藏单元的 slot
+   * prop 恒为 'left',view 从 props 判断不出自己在不在台上。
+   */
+  useOnSlotVisible(workspaceId, 'ebook-view', () => {
+    hostRef.current?.relayout();
+  });
 
   // 启动 + 切书:本槽有 activeBookId → 主动 open(带上自己的身份,回来的广播才认得出)
   useEffect(() => {

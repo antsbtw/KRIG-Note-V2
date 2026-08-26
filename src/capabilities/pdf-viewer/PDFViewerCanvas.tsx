@@ -795,6 +795,23 @@ export const PDFViewerCanvas = forwardRef<
   useImperativeHandle(
     ref,
     () => ({
+      /**
+       * 按容器当前真实尺寸重新布局 + 补渲染。
+       *
+       * 与 onPagesInit 内的首屏守卫(ensureFirstPaint/reapplyFitAndPaint)同逻辑,
+       * 但那个是**一次性**的:disposeFirstPaintGuard 用完即拆,只保第一次上屏。
+       * 保活隐藏 → 重新显示是**反复发生**的,每次都需要同样的处理,故在此暴露成
+       * 可反复调用的入口(fit.reflow 与 viewer.update 本身都幂等)。
+       */
+      relayout(): void {
+        const viewer = viewerInstanceRef.current;
+        if (!viewer) return;
+        if (fit.current()) {
+          fit.reflow(); // fit 模式:按真实宽高重算 scale(避免按 0 高算出的偏小值)
+        } else {
+          viewer.update(); // 用户手选的数值 scale:尊重之,只补渲染
+        }
+      },
       goToPage(pageNum: number): void {
         const viewer = viewerInstanceRef.current;
         if (!viewer) return;

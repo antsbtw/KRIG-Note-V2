@@ -359,10 +359,16 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       nodeRendererRef.current?.setTextLayerVisible(id, visible);
     }, []);
 
+    /** 按容器真实尺寸重新布局 —— 保活隐藏 → 重新显示时补一刀(见 SceneManager.relayout)*/
+    const relayout = useCallback((): void => {
+      sceneRef.current?.relayout();
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
         loadDocument,
+        relayout,
         serialize,
         setViewport,
         fitToContent,
@@ -382,6 +388,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       }),
       [
         loadDocument,
+        relayout,
         serialize,
         setViewport,
         fitToContent,

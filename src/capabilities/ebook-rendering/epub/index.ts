@@ -494,8 +494,25 @@ export class EPUBRenderer implements IReflowableRenderer {
     r.setAttribute?.('max-inline-size', count === 2 ? '1000px' : '720px');
   }
 
+  /**
+   * 强制重新布局。
+   *
+   * ⚠️ 曾经是空函数,注释写着「foliate-js 的 View 通过 ResizeObserver 自动处理」——
+   * 这个假设在**保活隐藏**场景下不成立,正是「切走再切回正文空白」的根因:
+   *
+   * foliate 的 paginator 用 ResizeObserver 观察自己的 #container
+   * (node_modules/foliate-js/paginator.js:422 + :550)。SlotArea 把未占槽的 view
+   * `display:none` 保活时,容器尺寸变 0;等重新可见,foliate 内部那套按 0 尺寸算出的
+   * 分栏布局已经定型,而它的 RO 回调在隐藏期间算出的就是空布局 —— 没人再推它一把,
+   * 就一直空着。翻一页能好,正是因为翻页强制走了一遍 render()。
+   *
+   * paginator.render()(paginator.js:772)是官方的重新布局入口:自带 `#view` 空守卫,
+   * 且结尾会 `#scrollToAnchor(#anchor)` —— **保住当前阅读位置**,不会跳回第一页。
+   */
   onResize(): void {
-    // foliate-js 的 View 通过 ResizeObserver 自动处理
+    const r = this.view?.renderer as { render?: () => void } | undefined;
+    if (!r?.render) return; // view 未 ready / 非 paginator 渲染器(fixed-layout)
+    r.render();
   }
 
   // ── 进度保存 / 恢复 ──

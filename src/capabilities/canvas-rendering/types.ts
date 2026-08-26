@@ -223,6 +223,12 @@ export interface CanvasHostHandle {
   fitToContent(padding?: number): boolean;
   /** zoom 百分比(100 = zoom=1) */
   zoomTo(percent: number): void;
+  /**
+   * 按容器**当前真实尺寸**重新布局(幂等)。
+   * 用于 SlotArea `display:none` 保活后重新显示 —— 隐藏期间容器尺寸为 0,
+   * WebGL renderer 尺寸与相机 frustum 都按 0 算,需要显式补一次。
+   */
+  relayout(): void;
   /** 删除当前选中 */
   deleteSelected(): void;
   /** 清空选中 */

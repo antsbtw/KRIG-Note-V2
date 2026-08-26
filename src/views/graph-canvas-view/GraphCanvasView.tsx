@@ -27,6 +27,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useOnSlotVisible } from '@workspace/workspace-state/slot-visibility';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   CanvasRenderingApi,
@@ -74,6 +75,20 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   const TextEditOverlay = textNode.EditOverlay;
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
+
+  /**
+   * 重新上台 → 按真实尺寸重新布局(2026-08-25,与 eBook 同族修复)。
+   *
+   * SlotArea 用 `display:none` 保活未占槽的 view,隐藏期间容器 clientWidth/Height
+   * 恒为 0 —— SceneManager.handleResize 在零尺寸守卫处早退,WebGL renderer 尺寸和
+   * 相机 frustum 都停在按 0 算的状态。相机多数情况能靠容器 RO 自愈,但隐藏期被调用的
+   * fitToContent 会静默返回 false、节点浮条的 worldToScreen 会拿到 (0,0) 飘到角落。
+   *
+   * 可见性由框架播报(slot-visibility),view 不自己猜 —— 隐藏单元的 slot prop 恒为 'left'。
+   */
+  useOnSlotVisible(workspaceId, 'graph-canvas-view', () => {
+    hostRef.current?.relayout();
+  });
 
   // ── G4.4d UI 浮层状态(view 端拥有 open/anchor;capability 提供组件)──
   const [selectedIds, setSelectedIds] = useState<string[]>([]);

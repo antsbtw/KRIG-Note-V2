@@ -159,6 +159,18 @@ export interface PDFViewerCanvasHandle {
 
   /** 当前 scale(数值)— view 持久化 PdfProgress 用 */
   getScale(): number;
+
+  /**
+   * 按容器**当前真实尺寸**重新布局 + 补渲染(幂等,可反复调)。
+   *
+   * 用于「容器尺寸曾经是 0、现在不是了」的场景 —— 典型是 SlotArea 把 view
+   * `display:none` 保活后重新显示。pdfjs 的 `update()` 在 `numVisiblePages === 0`
+   * 时直接 return(可见页由 container.clientHeight/Width 算),隐藏期间尺寸恒为 0,
+   * 于是不排队渲染也不自己重试 → 切回来一片空白,直到用户滚一下。
+   *
+   * 调用方需自行保证调用时容器已有非零尺寸(如在 rAF 之后)。
+   */
+  relayout(): void;
 }
 
 // ── capability 对外 API ──

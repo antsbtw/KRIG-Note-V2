@@ -39,11 +39,12 @@
  * Note / eBook 等纯 DOM view 无此问题。
  */
 
-import { useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { ResizableDivider } from './ResizableDivider';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import { ToolbarFrame } from '../toolbar-frame/ToolbarFrame';
 import { setActiveSlot, useActiveSlot } from '../../workspace-state/active-slot';
+import { setSlotVisible } from '../../workspace-state/slot-visibility';
 import type { SlotBinding } from '../../workspace-state/workspace-state';
 import './slot-area.css';
 
@@ -93,6 +94,34 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
     seen.add(key);
     units.push({ viewId: v.id, slot: 'left', pos: 'hidden' });
   }
+
+  /**
+   * 播报每个 view 实例「在不在台上」到 slot-visibility(单一来源)。
+   *
+   * 为什么框架必须播报,而不是让 view 自己看:隐藏单元的 `slot` prop 恒为 'left'
+   * (见上方 units 构造),`pos` 只有这里知道 —— view 从 props 根本判断不出自己
+   * 是否可见。让它自己去 offsetParent/checkVisibility 猜,就是 memory
+   * 「别猜自己在哪一栏」那条铁律的同族违规。
+   *
+   * 消费方(eBook/PDF/Graph 等自己算布局的 view)订阅 false→true 边沿,重新上台时
+   * 各自调一次幂等的重新布局 —— display:none 期间 clientWidth 恒为 0,它们的
+   * 零尺寸守卫会吞掉隐藏期的所有通知,而 iframe/canvas 不像普通 DOM 会自愈。
+   *
+   * 放 effect 而非渲染期:渲染期写外部 store 属于渲染副作用(StrictMode 双调、
+   * 并发渲染下会播报出未提交的中间态)。setSlotVisible 自身幂等,每次渲染重播无害。
+   */
+  // units 每次渲染都是新数组(引用恒变),不能直接进 deps —— 否则 effect 每帧重跑。
+  // 压成一个稳定的字符串签名:内容没变 = 签名没变 = effect 不重跑。
+  const visibilitySignature = units
+    .map(({ viewId, pos }) => `${viewId}:${pos !== 'hidden' ? 1 : 0}`)
+    .join('|');
+  useEffect(() => {
+    for (const entry of visibilitySignature.split('|')) {
+      if (!entry) continue;
+      const idx = entry.lastIndexOf(':');
+      setSlotVisible(workspaceId, entry.slice(0, idx), entry.slice(idx + 1) === '1');
+    }
+  }, [workspaceId, visibilitySignature]);
 
   // grid-template-columns 按 ratio 分配。
   // 用 fr 分配剩余空间(扣掉 4px divider 后),避免 `r*100% 4px (1-r)*100%`

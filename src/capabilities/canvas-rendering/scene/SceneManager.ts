@@ -89,6 +89,21 @@ export class SceneManager {
   // resize / camera
   // ─────────────────────────────────────────────────────────
 
+  /**
+   * 按容器当前真实尺寸重新布局(幂等,可反复调)。
+   *
+   * 给「容器尺寸曾是 0、现在不是了」的场景用 —— SlotArea 把 view `display:none`
+   * 保活时 clientWidth/Height 恒为 0,handleResize 会在零尺寸守卫处早退,
+   * renderer.setSize 与 applyCamera 都拿不到正确尺寸。重新显示时需要补一次。
+   *
+   * 注:相机/renderer 尺寸多数情况下能靠容器 RO 自愈,但 fitToContent 这类
+   * 在隐藏期被调用的操作会静默失败(返回 false),浮条定位也会拿到 0 —— 显式
+   * 补一刀比依赖 RO 时序更可靠。
+   */
+  relayout(): void {
+    this.handleResize();
+  }
+
   private handleResize(): void {
     if (this.disposed) return;
     const { clientWidth, clientHeight } = this.container;
