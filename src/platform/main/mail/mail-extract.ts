@@ -39,6 +39,8 @@ export interface MailExtractData {
   bodyText?: string;
   /** 发件人显示名 / 地址(尽力抓,网页版结构差异大) */
   from?: string;
+  /** 收件日期(原样保留网页上的显示文本,不做解析 —— 各家格式不一,阶段 1 的 IMAP 才有真 datetime) */
+  date?: string;
   /** 提取时该邮箱页的 URL(诊断 + 归档时留痕) */
   sourceUrl?: string;
 }
@@ -121,10 +123,20 @@ function buildExtractScript(
       if (from && from.indexOf('mailto:') === 0) from = from.slice(7);
     }
 
+    // ⑤ 日期:网页版通常放在 title 属性里(hover 显示完整时间),文本是缩写
+    var date = '';
+    var dateNode = box.querySelector('span[title*=":"], span[data-tooltip*=":"], time');
+    if (dateNode) {
+      date = dateNode.getAttribute('title')
+        || dateNode.getAttribute('data-tooltip')
+        || textOf(dateNode);
+    }
+
     return {
       subject: subject || '',
       bodyText: bodyText || '',
       from: (from || '').trim(),
+      date: (date || '').trim(),
       sourceUrl: location.href,
     };
   } catch (e) {
@@ -187,6 +199,7 @@ export async function extractMail(
     subject?: string;
     bodyText?: string;
     from?: string;
+    date?: string;
     sourceUrl?: string;
   };
 
@@ -220,6 +233,7 @@ export async function extractMail(
       subject,
       bodyText,
       from: (r.from ?? '').trim() || undefined,
+      date: (r.date ?? '').trim() || undefined,
       sourceUrl: r.sourceUrl,
     },
   };

@@ -17,6 +17,8 @@ export interface MailExtractData {
   subject?: string;
   bodyText?: string;
   from?: string;
+  /** 收件日期(网页显示文本原样,未解析) */
+  date?: string;
   sourceUrl?: string;
 }
 

@@ -631,6 +631,7 @@ declare global {
           subject?: string;
           bodyText?: string;
           from?: string;
+          date?: string;
           sourceUrl?: string;
         };
         error?: string;

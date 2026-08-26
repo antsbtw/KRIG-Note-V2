@@ -39,8 +39,21 @@ let extractUnsub: (() => void) | null = null;
 /**
  * 邮件字段 → markdown。
  *
- * 阶段 0 正文是纯文本(innerText),故这里只做:主题作 H1、发件人/来源作元信息行、
- * 正文原样。**不做**富文本解析 —— 那是阶段 3 的活,且要走 Defuddle 而非手写。
+ * 阶段 0 正文是纯文本(innerText),故这里只做:主题作 H1、元信息作引用块、正文清洗。
+ * **不做**富文本解析 —— 那是阶段 3 的活,且要走 Defuddle 而非手写。
+ *
+ * ## 排版取舍(2026-08-26 实测后调整)
+ *
+ * 首版把「发件人 · 来源」挤成一行粗体塞在正文顶部,实测很难读:长 URL 折行断在中间,
+ * 和正文首段黏在一起分不清哪是元信息。改为:
+ * - 元信息走 **markdown 引用块**(`> `),视觉上与正文分离,且天然可折叠/可跳过
+ * - 每项**独占一行**,不再用 ` · ` 挤在一起
+ * - **不放 sourceUrl** —— Gmail 的 hash 路由 URL 又长又脆(换设备/换账号未必回得去),
+ *   占掉两行版面却几乎没用。留在 MailExtractData 里供诊断,只是不进正文。
+ *
+ * ⚠️ 更彻底的解法是给邮件专有块格式(mailBlock),但那要等阶段 1 IMAP 落地、
+ * 字段形态稳定后再立项 —— 现在为 DOM 抓来的半成品设计块结构大概率要重做。
+ * 见 memory「邮件在 note 里的专有格式」。
  */
 function mailToMarkdown(data: MailExtractData): string {
   const lines: string[] = [];
@@ -48,16 +61,37 @@ function mailToMarkdown(data: MailExtractData): string {
   lines.push(`# ${subject}`);
   lines.push('');
 
+  // 元信息:引用块,每项独占一行。sourceUrl 刻意不放(见文件头注释)。
   const meta: string[] = [];
-  if (data.from) meta.push(`**发件人**:${data.from}`);
-  if (data.sourceUrl) meta.push(`**来源**:${data.sourceUrl}`);
+  if (data.from) meta.push(`> **发件人**:${data.from}`);
+  if (data.date) meta.push(`> **日期**:${data.date}`);
   if (meta.length > 0) {
-    lines.push(meta.join(' · '));
+    lines.push(...meta);
     lines.push('');
   }
 
-  lines.push((data.bodyText ?? '').trim());
+  lines.push(normalizeBody(data.bodyText ?? ''));
   return lines.join('\n');
+}
+
+/**
+ * 正文清洗(阶段 0 最小处理)。
+ *
+ * innerText 抓下来的正文常带模板排版噪音:HTML 邮件(尤其 Google/新闻简报这类)靠
+ * 表格布局,innerText 会在每个单元格间插空行,导致一句话被拆成好几段。
+ * 这里只做**最保守**的压缩:连续 3 行以上空行压成 1 行、去掉行尾空白。
+ *
+ * ⚠️ 刻意**不做**更激进的合并(如把相邻短行接成一段)—— 那会把本就该分行的
+ * 列表/署名/地址也合并掉,弊大于利。真正的结构化要等 IMAP 拿到 HTML 正文后
+ * 走 Defuddle 清洗(阶段 3 归档链路),不是在这里手写规则。
+ */
+function normalizeBody(raw: string): string {
+  return raw
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export function registerMailCommands(wsId: string): void {
