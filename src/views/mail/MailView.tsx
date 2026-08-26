@@ -21,7 +21,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
-import { declareSlotResource } from '@workspace/workspace-state/slot-resource';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { popupController } from '@slot/triggers/popup-controller';
 import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
@@ -43,45 +42,34 @@ interface MailViewProps {
 const VALID_IDS = new Set<string>(MAIL_SERVICE_PROFILES.map((p) => p.id));
 
 /**
- * per-slot「当前邮箱服务商」的**唯一**槽分发声明。
+ * 「当前邮箱服务商」per-ws(**刻意不 per-slot**)。
  *
- * 为什么必须 per-slot:首版存成 per-ws 的 `pluginStates.mail.activeService`,
- * 左右双开 Mail 时两个实例读同一个字段 → 被迫显示同一个邮箱,
- * 「左 Gmail 右 Outlook 对照看」根本做不到,双开等于半残。
- * 与 note 的 activeNoteId / eBook 的 activeBookId 同款处理(slot-resource 抽象层)。
+ * 曾短暂改成 per-slot(declareSlotResource,与 note 的 activeNoteId / eBook 的
+ * activeBookId 同款),动机是支撑「左 Gmail 右 Outlook 对照看」。
+ * 用户 2026-08-26 明确「这个功能没有必要」→ 回退。
+ *
+ * 后果(已知且接受):左右双开 Mail 时两栏读同一字段,切服务商会同步切换。
+ * 若将来真需要双栏各看一个邮箱,改回 per-slot 即可 —— slot-resource 抽象层现成,
+ * 改动只在本文件这几个函数(参照 note/data-model.ts 的 activeNoteResource)。
  */
 const MAIL_STORE_KEY = 'mail';
 
-const activeServiceResource = declareSlotResource<MailServiceId>({
-  name: 'mail.activeService',
-  storeKey: MAIL_STORE_KEY,
-  leftField: 'activeService',
-  rightField: 'rightActiveService',
-  fallback: DEFAULT_MAIL_SERVICE,
-});
-
-function getActiveService(workspaceId: string, slot: 'left' | 'right'): MailServiceId {
+function getActiveService(workspaceId: string): MailServiceId {
   const ws = workspaceManager.get(workspaceId);
-  if (!ws) return DEFAULT_MAIL_SERVICE;
-  const v = activeServiceResource.get(ws, slot);
+  const persisted = ws?.pluginStates?.[MAIL_STORE_KEY] as { activeService?: string } | undefined;
+  const v = persisted?.activeService;
   // 守卫:持久化里可能是旧版遗留 / 手改坏的值,不认就回默认
-  return v && VALID_IDS.has(v) ? v : DEFAULT_MAIL_SERVICE;
+  return v && VALID_IDS.has(v) ? (v as MailServiceId) : DEFAULT_MAIL_SERVICE;
 }
 
-function setActiveService(
-  workspaceId: string,
-  slot: 'left' | 'right',
-  serviceId: MailServiceId,
-): void {
+function setActiveService(workspaceId: string, serviceId: MailServiceId): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
-  // patch 产的是 **store 内部**字段(activeService / rightActiveService),
-  // 要合并进 pluginStates['mail'] 里,不是摊到 pluginStates 顶层(照 note 的 writePersistent)。
   const current = (ws.pluginStates?.[MAIL_STORE_KEY] as Record<string, unknown> | undefined) ?? {};
   workspaceManager.update(workspaceId, {
     pluginStates: {
       ...(ws.pluginStates ?? {}),
-      [MAIL_STORE_KEY]: { ...current, ...activeServiceResource.patch(slot, serviceId) },
+      [MAIL_STORE_KEY]: { ...current, activeService: serviceId },
     },
   });
 }
@@ -96,7 +84,7 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
 
   const activeService = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
-    () => getActiveService(workspaceId, slot),
+    () => getActiveService(workspaceId),
   );
 
   // ✕ 关**自己那一栏**。用框架传的 slot,不用 slotBinding 反推(见文件头铁律)。
@@ -133,9 +121,9 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
     if (!payload || typeof payload !== 'object') return;
     const { subId } = payload as { subId?: string };
     if (subId && VALID_IDS.has(subId)) {
-      setActiveService(workspaceId, slot, subId as MailServiceId);
+      setActiveService(workspaceId, subId as MailServiceId);
     }
-  }, [payload, workspaceId, slot]);
+  }, [payload, workspaceId]);
 
   return (
     <div className="krig-mail-view">
@@ -146,7 +134,7 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
               key={p.id}
               type="button"
               className={`krig-mail-view__tab${p.id === activeService ? ' krig-mail-view__tab--active' : ''}`}
-              onClick={() => setActiveService(workspaceId, slot, p.id)}
+              onClick={() => setActiveService(workspaceId, p.id)}
               title={p.name}
             >
               <span>{p.icon}</span>
