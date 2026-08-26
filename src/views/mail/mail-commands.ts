@@ -23,21 +23,15 @@
 
 import { commandRegistry } from '@slot/command-registry/command-registry';
 import { registerWsCommand } from '@slot/command-registry/register-ws-command';
+import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getCapabilityApi, requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { MailServiceApi, MailExtractData } from '@capabilities/mail-service';
-
-/** content-ingest 的最小接口(走 requireCapabilityApi 间接路由,不直接 import 运行时值) */
-interface ContentIngestApiLite {
-  markdownToAtoms(md: string, opts?: unknown): unknown[];
-}
-
-/** import-orchestrator 的最小接口 */
-interface ImportOrchestratorApiLite {
-  importDraftsToNotes(
-    items: Array<{ atoms: unknown[]; folderId: string | null; titleHint?: string }>,
-    opts?: { logTag?: string },
-  ): Promise<{ noteIds: string[]; failures: unknown[]; warnings?: string[] }>;
-}
+// ⚠️ 用**真实**类型,不手写「最小接口」—— 曾因手写 Lite 接口(把 async 的
+// markdownToAtoms 写成同步、把 { atoms, warnings } 写成裸数组)绕开类型检查,
+// 结果把一个 Promise 塞进 IPC → 运行时 "An object could not be cloned"。
+// 类型只有对齐真源才拦得住这类错。
+import type { ContentIngestApi } from '@capabilities/content-ingest/types';
+import type { ImportOrchestratorApi } from '@capabilities/import-orchestrator/types';
 
 /** 模块级单订阅句柄(防重复注册) */
 let extractUnsub: (() => void) | null = null;
@@ -94,26 +88,65 @@ export function registerMailCommands(wsId: string): void {
       return;
     }
 
-    const ingest = requireCapabilityApi<ContentIngestApiLite>('content-ingest');
-    const orchestrator = requireCapabilityApi<ImportOrchestratorApiLite>('import-orchestrator');
+    const ingest = requireCapabilityApi<ContentIngestApi>('content-ingest');
+    const orchestrator = requireCapabilityApi<ImportOrchestratorApi>('import-orchestrator');
 
     const md = mailToMarkdown(result.data);
-    const atoms = ingest.markdownToAtoms(md);
-    if (!atoms || atoms.length === 0) {
+    const titleHint = (result.data.subject ?? '').trim() || '(无主题邮件)';
+
+    // ⚠️ markdownToAtoms 是 async 且返 { atoms, warnings } —— 必须 await + 解构。
+    // 直接把返回值当数组传下去 = 把 Promise 塞进 IPC,结构化克隆会抛
+    // "An object could not be cloned"(已踩)。
+    //
+    // **不传 titleHint** —— mailToMarkdown 已经把主题写成首行 `# 主题`,
+    // 再传会让 markdownToAtoms 在同一个首块上重复施加 isTitle 语义。
+    // titleHint 只给下面的 batch item(那是 note 的显示名,另一回事)。
+    const { atoms, warnings } = await ingest.markdownToAtoms(md);
+    if (warnings.length > 0) {
+      console.warn('[mail-extract] markdownToAtoms warnings:', warnings);
+    }
+    if (atoms.length === 0) {
       window.alert('邮件提取成功但转换后为空,已中止(未创建笔记)');
       return;
     }
 
-    const titleHint = (result.data.subject ?? '').trim() || '(无主题邮件)';
     const importResult = await orchestrator.importDraftsToNotes(
       [{ atoms, folderId: null, titleHint }],
       { logTag: 'mail-extract' },
     );
 
-    if (!importResult.noteIds || importResult.noteIds.length === 0) {
-      window.alert('邮件已提取,但落库失败 —— 请查看日志');
+    if (importResult.failures.length > 0) {
+      console.error('[mail-extract] 落库失败:', importResult.failures);
+    }
+    if (importResult.noteIds.length === 0) {
+      window.alert('邮件已提取,但落库失败 —— 请查看控制台日志');
       return;
     }
+
+    // 打开新 note —— 对照布局:mail 钉 left,note 开 right(左看原邮件、右看提取稿)。
+    // 与网页剪藏(content-extraction import-pipeline)同款收尾。
+    //
+    // ⚠️ 为什么必须打开:邮件落成的是**新 note**(设计 D4 邮件是独立实体),不像 X 那样
+    // 插进当前 note 立刻可见。不打开 = 用户点了菜单什么都没发生,和失败长得一模一样
+    // —— 成功也必须看得见(reliability-charter「故障必须响」的一体两面)。
+    const noteId = importResult.noteIds[0];
+    console.log('[mail-extract] mail → note', noteId, `(${atoms.length} atoms)`);
+    commandRegistry.execute('mail-view.pin-left');
+    commandRegistry.execute('note-view.set-active-in-right', noteId);
+  });
+
+  /**
+   * 把 Mail 钉到左栏(提取后腾出右栏给 note 的对照布局用)。
+   * 照搬 web-view.pin-left:若 mail 当前在 right 则腾出 right,否则只设 left。
+   */
+  registerWsCommand('mail-view.pin-left', () => wsId, (ctx) => {
+    const ws = workspaceManager.get(ctx.wsId);
+    if (!ws) return;
+    if (ws.slotBinding.left === 'mail-view') return; // 已在 left
+    const right = ws.slotBinding.right === 'mail-view' ? null : ws.slotBinding.right;
+    workspaceManager.update(ctx.wsId, {
+      slotBinding: { ...ws.slotBinding, left: 'mail-view', right },
+    });
   });
 
   // ── 右键「提取此邮件到笔记」(MAIL_EXTRACT_REQUEST 广播)模块级单订阅 ──

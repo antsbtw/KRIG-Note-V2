@@ -245,6 +245,10 @@ describe('slot-resource 守卫 — 禁止靠 slotBinding 反推「我在哪一�
       'web view 已在任一槽就复用那一栏(否则会挤成分栏);pin-left 搬栏。问的是在场性与目标布局。',
     'src/views/x/x-commands.ts':
       'noteIsOpen:查「有没有 Note 在场」作为提取落点的前置条件。问的是在场性。',
+    'src/views/mail/mail-commands.ts':
+      'mail-view.pin-left:提取后把 mail 搬到 left 腾出 right 给 note(对照布局),' +
+      '与 web-commands 的 pin-left 同款。问的是「mail-view 这个 view 现在占哪个槽」' +
+      '(为了搬它),不是「我这个实例在哪一栏」—— 命令没有自身实例可言。',
     'src/views/ai/ai-commands.ts':
       '查 left=ai + right=note 这一**特定左右组合**(ai-sync 专用布局),非自身槽位。',
     'src/views/note/ai-sync-integration.ts':
