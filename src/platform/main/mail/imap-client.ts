@@ -1,0 +1,283 @@
+/**
+ * IMAP 客户端(邮箱模块 阶段 1)—— 连接、认证、拉取
+ *
+ * 底层用 imapflow(现代 Promise API,Nodemailer 团队维护),MIME 解析用 mailparser。
+ *
+ * ## 认证:应用专用密码,零 OAuth 依赖
+ *
+ * 设计 D3:第一版走 PLAIN/LOGIN + 应用专用密码。Gmail(开两步验证后)、QQ、163、
+ * iCloud、Fastmail、企业自建都支持,用户自己去邮箱设置里生成,不需要我们申请任何
+ * 东西、不被任何审核卡住。将来接 OAuth 时把 `pass` 换成 XOAUTH2 token 即可,
+ * imapflow 两种都支持,切换成本接近零。
+ *
+ * ## 连接策略:每次同步开一条,用完即关
+ *
+ * **不做连接池 / 不做常驻 IDLE**。理由:
+ * - 阶段 1 是「只读同步」,触发是用户点按钮或定时,不需要实时推送
+ * - 常驻连接是个必须在 before-quit 里显式关闭的资源(graceful-shutdown 铁律),
+ *   而且服务端会因超时静默断开,得处理重连 —— 这些复杂度在阶段 1 没有收益
+ * - IMAP 服务端普遍限制并发连接数(Gmail 15 条),池化反而容易撞上限
+ *
+ * 将来做实时收信(IDLE)时再引入常驻连接,那时必须配套 before-quit 关闭调用。
+ *
+ * ## fail loud
+ *
+ * 连不上要**响**:认证失败/网络不通/超时都返回明确 error 文案,不静默重试到天荒地老。
+ * imapflow 自身不重试,我们也不加 —— 用户点了同步没反应比报错更糟。
+ */
+
+import { ImapFlow, type ListResponse } from 'imapflow';
+import { simpleParser, type ParsedMail } from 'mailparser';
+import type { MailAccount, MailRecord, MailAttachmentMeta } from '@shared/types/mail-types';
+import { getMailPassword } from './credential-store';
+
+/** 连接超时(毫秒)。邮箱服务端偶尔慢,但超过这个数基本是连不上了。 */
+const CONNECT_TIMEOUT_MS = 30_000;
+
+/** 单次同步最多拉多少封 —— 防止首次同步把几万封邮件一次性灌进来 */
+const MAX_FETCH_PER_SYNC = 200;
+
+/** 列表页预览截断长度 */
+const SNIPPET_LEN = 200;
+
+/**
+ * 建立一条 IMAP 连接。调用方**必须**在 finally 里 logout()。
+ *
+ * @throws 认证失败 / 网络不通 / 超时(消息已转成中文可读文案)
+ */
+export async function connect(account: MailAccount): Promise<ImapFlow> {
+  const password = getMailPassword(account.id);
+  if (!password) {
+    throw new Error(
+      `账号 ${account.email} 没有可用密码 —— 可能是首次配置未完成,` +
+        `或换了机器导致系统钥匙串里的凭据无法解密。请重新填写应用专用密码。`,
+    );
+  }
+
+  const client = new ImapFlow({
+    host: account.imapHost,
+    port: account.imapPort,
+    secure: account.imapSecure,
+    auth: { user: account.email, pass: password },
+    // imapflow 默认往 stdout 打全量协议日志,噪音极大且含邮件内容 —— 关掉
+    logger: false,
+    // 服务端能力探测失败时不要卡死
+    greetingTimeout: CONNECT_TIMEOUT_MS,
+    socketTimeout: CONNECT_TIMEOUT_MS,
+    connectionTimeout: CONNECT_TIMEOUT_MS,
+  });
+
+  try {
+    await client.connect();
+  } catch (e) {
+    throw new Error(toReadableError(e, account));
+  }
+  return client;
+}
+
+/**
+ * 把 imapflow / 网络层的原始错误转成用户能看懂的话。
+ *
+ * fail loud 不等于把栈扔给用户 —— 「AUTHENTICATIONFAILED」对用户毫无意义,
+ * 「密码不对,注意 Gmail 需要应用专用密码而非账号密码」才是可操作的。
+ */
+function toReadableError(e: unknown, account: MailAccount): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const lower = raw.toLowerCase();
+
+  if (lower.includes('auth') || lower.includes('login') || lower.includes('credentials')) {
+    return (
+      `认证失败(${account.email}):密码不被接受。\n` +
+      `注意:Gmail / QQ / 163 等都**不能用账号密码**,必须在邮箱设置里生成「应用专用密码」` +
+      `(QQ/163 叫「授权码」)。原始信息:${raw}`
+    );
+  }
+  if (lower.includes('timeout') || lower.includes('etimedout')) {
+    return `连接超时(${account.imapHost}:${account.imapPort}):检查网络或代理设置。原始信息:${raw}`;
+  }
+  if (lower.includes('enotfound') || lower.includes('dns')) {
+    return `找不到服务器 ${account.imapHost}:检查 IMAP 服务器地址是否填对。原始信息:${raw}`;
+  }
+  if (lower.includes('econnrefused')) {
+    return `服务器拒绝连接(${account.imapHost}:${account.imapPort}):检查端口与 SSL 设置。原始信息:${raw}`;
+  }
+  if (lower.includes('certificate') || lower.includes('self signed')) {
+    return `TLS 证书校验失败(${account.imapHost}):企业自建服务器可能用了自签证书。原始信息:${raw}`;
+  }
+  return `连接 ${account.imapHost} 失败:${raw}`;
+}
+
+/** 测试连接并列出 mailbox(配置向导用) */
+export async function testConnection(
+  account: MailAccount,
+): Promise<{ success: boolean; error?: string; mailboxes?: string[] }> {
+  let client: ImapFlow | null = null;
+  try {
+    client = await connect(account);
+    const list = (await client.list()) as ListResponse[];
+    // 排除不可选的容器节点(如 Gmail 的 '[Gmail]' 本身)
+    const mailboxes = list.filter((m) => !m.flags?.has('\\Noselect')).map((m) => m.path);
+    return { success: true, mailboxes };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    if (client) await safeLogout(client);
+  }
+}
+
+/** logout 失败不该盖过业务错误 —— 连接反正要丢弃了 */
+async function safeLogout(client: ImapFlow): Promise<void> {
+  try {
+    await client.logout();
+  } catch {
+    /* 连接已断/超时,忽略 */
+  }
+}
+
+/** 打开 mailbox 拿到 UIDVALIDITY 与最大 UID(增量同步的前置探测) */
+export interface MailboxStatus {
+  uidValidity: number;
+  uidNext: number;
+  exists: number;
+}
+
+export async function openMailbox(client: ImapFlow, mailbox: string): Promise<MailboxStatus> {
+  const lock = await client.getMailboxLock(mailbox);
+  try {
+    const mb = client.mailbox;
+    if (!mb || typeof mb === 'boolean') {
+      throw new Error(`打开 mailbox 失败:${mailbox}`);
+    }
+    return {
+      // uidValidity 在 imapflow 里是 BigInt,转 number(实际值远小于 2^53)
+      uidValidity: Number(mb.uidValidity),
+      uidNext: Number(mb.uidNext),
+      exists: mb.exists,
+    };
+  } finally {
+    lock.release();
+  }
+}
+
+/**
+ * 拉取 UID 大于 sinceUid 的邮件。
+ *
+ * @param sinceUid 上次同步到的最大 UID;0 表示全量(首次同步 / UIDVALIDITY 重来)
+ * @returns 解析好的邮件(不含 id/accountId/syncedAt,那些由 repo 生成)
+ */
+export async function fetchSince(
+  client: ImapFlow,
+  mailbox: string,
+  sinceUid: number,
+): Promise<Array<Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'>>> {
+  const lock = await client.getMailboxLock(mailbox);
+  const out: Array<Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'>> = [];
+
+  try {
+    // `${sinceUid + 1}:*` 是 IMAP 的 UID 区间语法。sinceUid=0 → '1:*' = 全部。
+    const range = `${sinceUid + 1}:*`;
+
+    // 先只取 uid 列表,好在超量时截取**最新的** MAX_FETCH_PER_SYNC 封 ——
+    // 首次同步几万封邮件时,用户要看的是最近的,不是 2015 年的。
+    const uids: number[] = [];
+    for await (const msg of client.fetch(range, { uid: true }, { uid: true })) {
+      uids.push(msg.uid);
+    }
+    if (uids.length === 0) return out;
+
+    uids.sort((a, b) => a - b);
+    const picked = uids.length > MAX_FETCH_PER_SYNC ? uids.slice(-MAX_FETCH_PER_SYNC) : uids;
+
+    for await (const msg of client.fetch(
+      picked.join(','),
+      { uid: true, flags: true, source: true },
+      { uid: true },
+    )) {
+      if (!msg.source) continue;
+      try {
+        const parsed = await simpleParser(msg.source);
+        out.push(toMailRecord(parsed, mailbox, msg.uid, msg.flags));
+      } catch (e) {
+        // 单封解析失败不该让整次同步失败 —— 但要留痕,不静默吞掉
+        console.error(`[imap-client] 解析邮件失败 uid=${msg.uid} mailbox=${mailbox}:`, e);
+      }
+    }
+  } finally {
+    lock.release();
+  }
+
+  return out;
+}
+
+/** ParsedMail → MailRecord(字段映射 + 线程键推导) */
+function toMailRecord(
+  parsed: ParsedMail,
+  mailbox: string,
+  uid: number,
+  flags?: Set<string>,
+): Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'> {
+  const from = parsed.from?.value?.[0];
+  const bodyText = parsed.text ?? '';
+  const bodyHtml = typeof parsed.html === 'string' ? parsed.html : undefined;
+
+  const attachments: MailAttachmentMeta[] = (parsed.attachments ?? []).map((a) => ({
+    filename: a.filename ?? '(未命名附件)',
+    contentType: a.contentType ?? 'application/octet-stream',
+    size: a.size ?? 0,
+    /** cid 用于内联图(HTML 正文里 <img src="cid:xxx">),阶段 3 归档时会用到 */
+    cid: a.cid ?? undefined,
+  }));
+
+  return {
+    mailbox,
+    uid,
+    messageId: parsed.messageId ?? undefined,
+    threadKey: deriveThreadKey(parsed),
+    subject: (parsed.subject ?? '').trim() || '(无主题)',
+    fromAddr: from?.address ?? '',
+    fromName: from?.name || undefined,
+    toAddrs: addrList(parsed.to),
+    ccAddrs: addrList(parsed.cc).length > 0 ? addrList(parsed.cc) : undefined,
+    date: (parsed.date ?? new Date()).getTime(),
+    bodyText: bodyText || undefined,
+    bodyHtml,
+    snippet: makeSnippet(bodyText || stripTags(bodyHtml ?? '')),
+    flags: flags ? [...flags] : [],
+    hasAttach: attachments.length > 0,
+    attachments: attachments.length > 0 ? attachments : undefined,
+  };
+}
+
+/**
+ * 线程键:References 链首 → In-Reply-To → 自身 Message-ID。
+ *
+ * RFC 5322 的 References 头按时间顺序记录整条线索,**首个**就是线程根。
+ * 一封新邮件没有 References/In-Reply-To,它自己就是根。
+ */
+function deriveThreadKey(parsed: ParsedMail): string | undefined {
+  const refs = parsed.references;
+  if (Array.isArray(refs) && refs.length > 0) return refs[0];
+  if (typeof refs === 'string' && refs.trim()) return refs.trim().split(/\s+/)[0];
+  if (parsed.inReplyTo) return parsed.inReplyTo;
+  return parsed.messageId ?? undefined;
+}
+
+function addrList(field: ParsedMail['to']): string[] {
+  if (!field) return [];
+  const arr = Array.isArray(field) ? field : [field];
+  return arr.flatMap((a) => (a.value ?? []).map((v) => v.address ?? '')).filter(Boolean);
+}
+
+function makeSnippet(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > SNIPPET_LEN ? `${flat.slice(0, SNIPPET_LEN)}…` : flat;
+}
+
+/** 极简去标签 —— 只为算 snippet,不是正文渲染(那是阶段 3 走 Defuddle 的事) */
+function stripTags(html: string): string {
+  return html.replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ');
+}
+
+export { MAX_FETCH_PER_SYNC };

@@ -642,3 +642,84 @@ export async function migration_1_8_7(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.8.7'), now },
   );
 }
+
+/**
+ * 1.8.8 — 邮箱模块 阶段 1:IMAP 只读同步的三张表。
+ *
+ * 设计见 docs/tasks/2026-08-26-mail-module-design.md。要点:
+ *
+ * - **mail_account** per-ws(带 ws_id),与 webview partition `persist:webview-${ws}` 对齐
+ *   —— 工作 ws 登公司邮箱、个人 ws 登私人邮箱,两边身份必须一致。
+ *   ⚠️ **密码不在这张表**:走 safeStorage 加密落盘(复用 auth-store 的现成方案),
+ *   DB 里只存连接参数。任何时候都不该在 SurrealDB 里看到明文/密文凭据。
+ *
+ * - **mail** 全局表 + account_id 外键(而非 per-ws 分表):默认按当前 ws 的账号过滤,
+ *   但保留「跨 ws 全局搜邮件」的可能。UNIQUE(account_id, mailbox, uid) 是去重主键 ——
+ *   IMAP UID 在单个 mailbox 内唯一且递增,这是增量同步的基石。
+ *
+ * - **mail_sync_state** 每 (account, mailbox) 一行游标。
+ *   ⚠️ uid_validity 是**正确性关键**:IMAP 服务端重建 mailbox 时会换发 UIDVALIDITY,
+ *   此时旧 UID 全部失效且可能重号。不校验就会张冠李戴(把新邮件当成已同步过的跳过,
+ *   或把不同邮件写进同一条记录)。变化时必须丢弃游标全量重来。
+ *
+ * 铁律:绝不 DEFINE FIELD id(见本文件 §1.0.0 注释,SurrealDB 3.x readonly 冲突)。
+ */
+const SCHEMA_VERSION_1_8_8 = `
+DEFINE TABLE IF NOT EXISTS mail_account SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id       ON mail_account TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS service_id  ON mail_account TYPE string;
+DEFINE FIELD IF NOT EXISTS email       ON mail_account TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS imap_host   ON mail_account TYPE string;
+DEFINE FIELD IF NOT EXISTS imap_port   ON mail_account TYPE int;
+DEFINE FIELD IF NOT EXISTS imap_secure ON mail_account TYPE bool;
+DEFINE FIELD IF NOT EXISTS smtp_host   ON mail_account TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS smtp_port   ON mail_account TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS enabled     ON mail_account TYPE bool;
+DEFINE FIELD IF NOT EXISTS created_at  ON mail_account TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ma_ws    ON mail_account FIELDS ws_id;
+DEFINE INDEX IF NOT EXISTS idx_ma_email ON mail_account FIELDS ws_id, email UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS mail SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account_id  ON mail TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS mailbox     ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS uid         ON mail TYPE int;
+DEFINE FIELD IF NOT EXISTS message_id  ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS thread_key  ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS subject     ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS from_addr   ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS from_name   ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS to_addrs    ON mail TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS cc_addrs    ON mail TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS date        ON mail TYPE datetime;
+DEFINE FIELD IF NOT EXISTS body_text   ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS body_html   ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS snippet     ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS flags       ON mail TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS has_attach  ON mail TYPE bool;
+DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS archived_note_id ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS synced_at   ON mail TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_mail_acct_uid ON mail FIELDS account_id, mailbox, uid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_mail_msgid    ON mail FIELDS message_id;
+DEFINE INDEX IF NOT EXISTS idx_mail_date     ON mail FIELDS date;
+DEFINE INDEX IF NOT EXISTS idx_mail_thread   ON mail FIELDS thread_key;
+DEFINE INDEX IF NOT EXISTS idx_mail_account  ON mail FIELDS account_id;
+
+DEFINE TABLE IF NOT EXISTS mail_sync_state SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account_id    ON mail_sync_state TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS mailbox       ON mail_sync_state TYPE string;
+DEFINE FIELD IF NOT EXISTS uid_validity  ON mail_sync_state TYPE int;
+DEFINE FIELD IF NOT EXISTS last_seen_uid ON mail_sync_state TYPE int;
+DEFINE FIELD IF NOT EXISTS last_sync_at  ON mail_sync_state TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_mss ON mail_sync_state FIELDS account_id, mailbox UNIQUE;
+`;
+
+export async function migration_1_8_8(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_8);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.8', appliedAt = $now,
+     description = 'Mail module phase 1: mail_account / mail / mail_sync_state (IMAP read-only sync)'`,
+    { rid: new RecordId('schema_version', '1.8.8'), now },
+  );
+}
