@@ -170,6 +170,28 @@ export function registerMailCommands(wsId: string): void {
   });
 
   /**
+   * SlotPicker 视图切换 — 在 right slot 打开选中的 view。
+   *
+   * 与 note-view / ai-view / social-view 的同名命令**完全一致**(同一 SlotPickerPopup
+   * 回调契约)。铁律:同功能同逻辑 —— 不自造 toggle,右栏能开什么由 viewTypeRegistry
+   * 动态决定,新增 view 自动出现在列表里,不用回来改这里。
+   *
+   * commandArg:
+   *   - string:目标 viewId('note-view' / 'ebook-view' / 'web-view' / …)
+   *   - { viewId, subId }:带子项的 view(AI / Social / Mail → 具体服务)
+   */
+  registerWsCommand('mail-view.open-right-slot', () => wsId, (ctx, arg: unknown) => {
+    const bus = workspaceManager.getBus(ctx.wsId);
+    if (!bus) return;
+    if (typeof arg === 'string') {
+      bus.slot.openRight(arg);
+    } else if (arg && typeof arg === 'object' && 'viewId' in arg) {
+      const { viewId, subId } = arg as { viewId: string; subId: string };
+      bus.slot.openRight(viewId, { subId });
+    }
+  });
+
+  /**
    * 把 Mail 钉到左栏(提取后腾出右栏给 note 的对照布局用)。
    * 照搬 web-view.pin-left:若 mail 当前在 right 则腾出 right,否则只设 left。
    */

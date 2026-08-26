@@ -21,7 +21,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { declareSlotResource } from '@workspace/workspace-state/slot-resource';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { popupController } from '@slot/triggers/popup-controller';
+import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import type { MailServiceApi, MailHostHandle } from '@capabilities/mail-service';
 import {
   MAIL_SERVICE_PROFILES,
@@ -39,21 +42,46 @@ interface MailViewProps {
 
 const VALID_IDS = new Set<string>(MAIL_SERVICE_PROFILES.map((p) => p.id));
 
-function getActiveService(workspaceId: string): MailServiceId {
+/**
+ * per-slot「当前邮箱服务商」的**唯一**槽分发声明。
+ *
+ * 为什么必须 per-slot:首版存成 per-ws 的 `pluginStates.mail.activeService`,
+ * 左右双开 Mail 时两个实例读同一个字段 → 被迫显示同一个邮箱,
+ * 「左 Gmail 右 Outlook 对照看」根本做不到,双开等于半残。
+ * 与 note 的 activeNoteId / eBook 的 activeBookId 同款处理(slot-resource 抽象层)。
+ */
+const MAIL_STORE_KEY = 'mail';
+
+const activeServiceResource = declareSlotResource<MailServiceId>({
+  name: 'mail.activeService',
+  storeKey: MAIL_STORE_KEY,
+  leftField: 'activeService',
+  rightField: 'rightActiveService',
+  fallback: DEFAULT_MAIL_SERVICE,
+});
+
+function getActiveService(workspaceId: string, slot: 'left' | 'right'): MailServiceId {
   const ws = workspaceManager.get(workspaceId);
-  const persisted = ws?.pluginStates?.['mail'] as { activeService?: string } | undefined;
-  const v = persisted?.activeService;
+  if (!ws) return DEFAULT_MAIL_SERVICE;
+  const v = activeServiceResource.get(ws, slot);
   // 守卫:持久化里可能是旧版遗留 / 手改坏的值,不认就回默认
-  return v && VALID_IDS.has(v) ? (v as MailServiceId) : DEFAULT_MAIL_SERVICE;
+  return v && VALID_IDS.has(v) ? v : DEFAULT_MAIL_SERVICE;
 }
 
-function setActiveService(workspaceId: string, serviceId: MailServiceId): void {
+function setActiveService(
+  workspaceId: string,
+  slot: 'left' | 'right',
+  serviceId: MailServiceId,
+): void {
   const ws = workspaceManager.get(workspaceId);
   if (!ws) return;
+  // patch 产的是 **store 内部**字段(activeService / rightActiveService),
+  // 要合并进 pluginStates['mail'] 里,不是摊到 pluginStates 顶层(照 note 的 writePersistent)。
+  const current = (ws.pluginStates?.[MAIL_STORE_KEY] as Record<string, unknown> | undefined) ?? {};
   workspaceManager.update(workspaceId, {
     pluginStates: {
       ...(ws.pluginStates ?? {}),
-      mail: { activeService: serviceId },
+      [MAIL_STORE_KEY]: { ...current, ...activeServiceResource.patch(slot, serviceId) },
     },
   });
 }
@@ -68,7 +96,7 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
 
   const activeService = useSyncExternalStore(
     (cb) => workspaceManager.subscribe(cb),
-    () => getActiveService(workspaceId),
+    () => getActiveService(workspaceId, slot),
   );
 
   // ✕ 关**自己那一栏**。用框架传的 slot,不用 slotBinding 反推(见文件头铁律)。
@@ -78,6 +106,17 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
     if (slot === 'right') bus.slot.closeRight();
     else bus.slot.closeLeft();
   }, [workspaceId, slot]);
+
+  /**
+   * ⊞ 右栏视图切换 —— 复用全局 SlotPicker(与 Note / AI / Social toolbar 同一套机制)。
+   *
+   * 铁律:同功能同逻辑。右栏能开什么由 viewTypeRegistry 动态决定 —— 新增 view
+   * 自动出现在列表里,不用回来改这里,也不必每个 view 各造一个「开右栏」按钮。
+   */
+  const handleOpenSlotPicker = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    slotPickerContext.setCommandId('mail-view.open-right-slot');
+    popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
+  }, []);
 
   // Host guest wcId 登记(提取时按 ws 定向,治多实例串扰)
   const registerWc = useCallback(() => {
@@ -94,9 +133,9 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
     if (!payload || typeof payload !== 'object') return;
     const { subId } = payload as { subId?: string };
     if (subId && VALID_IDS.has(subId)) {
-      setActiveService(workspaceId, subId as MailServiceId);
+      setActiveService(workspaceId, slot, subId as MailServiceId);
     }
-  }, [payload, workspaceId]);
+  }, [payload, workspaceId, slot]);
 
   return (
     <div className="krig-mail-view">
@@ -107,7 +146,7 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
               key={p.id}
               type="button"
               className={`krig-mail-view__tab${p.id === activeService ? ' krig-mail-view__tab--active' : ''}`}
-              onClick={() => setActiveService(workspaceId, p.id)}
+              onClick={() => setActiveService(workspaceId, slot, p.id)}
               title={p.name}
             >
               <span>{p.icon}</span>
@@ -148,6 +187,15 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
             title="刷新"
           >
             ⟳
+          </button>
+          <button
+            type="button"
+            className="krig-mail-view__action-btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleOpenSlotPicker}
+            title="在右栏打开视图"
+          >
+            ⊞
           </button>
           <button
             type="button"
