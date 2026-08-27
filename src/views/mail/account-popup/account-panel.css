@@ -60,9 +60,31 @@
   line-height: 1.6;
 }
 
+.krig-mail-panel__empty-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+
 .krig-mail-panel__empty-sub {
   margin-top: 6px;
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+.krig-mail-panel__empty-sub strong {
+  color: var(--text);
+  opacity: 1;
+}
+
+.krig-mail-panel__empty-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  opacity: 0.85;
+}
+
+.krig-mail-panel__empty-list li {
+  margin: 3px 0;
 }
 
 /* ── 单个账号卡片 ── */

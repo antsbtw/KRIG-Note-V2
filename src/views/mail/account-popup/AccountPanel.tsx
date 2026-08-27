@@ -133,10 +133,26 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
 
       {!loading && accounts.length === 0 && !showForm && (
         <div className="krig-mail-panel__empty">
-          <p>还没有配置邮箱账号。</p>
+          {/*
+            这段文案回答的是「我网页版都登录了,为什么还要配一次」——
+            实测用户第一反应就是这个疑问,不答掉就像是要求重复登录。
+            答案:webview 登的是 Google 网页 session(cookie),IMAP 是独立协议
+            (993 端口直连),两者互不通用。任何邮件客户端都是这样。
+          */}
+          <p className="krig-mail-panel__empty-title">这里配置的不是网页登录</p>
           <p className="krig-mail-panel__empty-sub">
-            配置后可把邮件同步到本地,供搜索、归档到笔记、以及将来交给 AI 处理。
+            左边的网页版邮箱已经登录了,看信、发信、右键提取到笔记都能用,
+            <strong>不配这里也不影响</strong>。
           </p>
+          <p className="krig-mail-panel__empty-sub">
+            IMAP 是独立的邮件协议,和浏览器登录互不通用(就像 Apple Mail
+            也要单独配一次)。配好后邮件会同步到本地,才能做:
+          </p>
+          <ul className="krig-mail-panel__empty-list">
+            <li>本地全文搜索、离线阅读</li>
+            <li>批量归档到笔记</li>
+            <li>交给 AI 自动分类、提取待办、起草回复</li>
+          </ul>
         </div>
       )}
 
