@@ -1,5 +1,5 @@
 /**
- * 邮箱账号面板(navSide 内容,阶段 1)
+ * 邮箱账号面板(toolbar ⚙ 弹窗内容,阶段 1)
  *
  * 职责:列出本 ws 的 IMAP 账号 + 新建/删除/测试连接/同步。
  * 阶段 1 刻意**不做完整收件箱** —— 只做「同步状态 + 已同步 N 封」,
@@ -11,16 +11,22 @@
  * **不进任何 state 持久化、不打日志**。renderer 永远拿不回明文(main 侧只提供
  * 加解密,不暴露读接口)。
  *
- * ## 为什么账号在 navSide 而不是弹窗
+ * ## 为什么是弹窗(初版放 navSide,已改)
  *
- * 与 ebook 的书架、note 的目录树同构 —— 都是「本 view 的资源清单」。
- * 放弹窗会让「看着账号列表点同步」这个高频动作每次都要开关一次弹窗。
+ * 见 ./index.ts 的说明:200px 窄栏装不下表单,且账号配置是低频操作,
+ * 不值得常驻占一栏 —— webview 类 view 的全宽更重要。
+ *
+ * ## 同步中不要关窗
+ *
+ * 同步是异步的,弹窗关掉后 setState 会打到已卸载组件上(React 会警告,
+ * 且用户看不到结果)。故同步/测试进行中时禁用关闭按钮,并在标题提示。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { MailServiceApi, MailAccount, MailSyncResult } from '@capabilities/mail-service';
+import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import {
   MAIL_SERVICE_PROFILES,
   DEFAULT_MAIL_SERVICE,
@@ -38,9 +44,8 @@ interface AccountRuntime {
   mailboxes?: string[];
 }
 
-export function AccountPanel() {
-  // wsId 走 context 订阅(照 ebook 的 BookshelfPanel)—— 切 ws 时面板跟着换,
-  // 不能由 contentRenderer 现读传入(那是快照,切 ws 后不更新)。
+export function AccountPanel({ onClose }: PopupCloseProps) {
+  // wsId 走 context 订阅 —— 弹窗渲染在全局 PopupFrame,但 context 仍然贯通。
   const workspaceId = useWsId();
   const mail = requireCapabilityApi<MailServiceApi>('mail-service');
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
@@ -106,8 +111,24 @@ export function AccountPanel() {
     [mail, reload],
   );
 
+  // 有任何账号正在同步/测试 → 禁止关窗(异步结果会打到已卸载组件上)
+  const busy = Object.values(runtime).some((r) => r.syncing || r.testing);
+
   return (
     <div className="krig-mail-panel">
+      <div className="krig-mail-panel__titlebar">
+        <span className="krig-mail-panel__title">邮箱账号</span>
+        <button
+          type="button"
+          className="krig-mail-panel__close"
+          onClick={onClose}
+          disabled={busy}
+          title={busy ? '同步进行中,请等待完成' : '关闭'}
+        >
+          ✕
+        </button>
+      </div>
+
       {loading && <div className="krig-mail-panel__hint">加载中…</div>}
 
       {!loading && accounts.length === 0 && !showForm && (

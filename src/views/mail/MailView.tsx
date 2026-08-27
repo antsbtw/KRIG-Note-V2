@@ -24,6 +24,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { popupController } from '@slot/triggers/popup-controller';
 import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
+import { MAIL_ACCOUNT_POPUP_ID } from './account-popup';
 import type { MailServiceApi, MailHostHandle } from '@capabilities/mail-service';
 import {
   MAIL_SERVICE_PROFILES,
@@ -106,6 +107,11 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
     popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
   }, []);
 
+  /** ⚙ 邮箱账号(IMAP 同步配置)—— 低频操作,弹窗而非常驻面板 */
+  const handleOpenAccounts = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    popupController.toggle(MAIL_ACCOUNT_POPUP_ID, e.currentTarget);
+  }, []);
+
   // Host guest wcId 登记(提取时按 ws 定向,治多实例串扰)
   const registerWc = useCallback(() => {
     const wcId = hostRef.current?.getWebContentsId() ?? null;
@@ -175,6 +181,15 @@ export function MailView({ workspaceId, payload, slot = 'left' }: MailViewProps)
             title="刷新"
           >
             ⟳
+          </button>
+          <button
+            type="button"
+            className="krig-mail-view__action-btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleOpenAccounts}
+            title="邮箱账号(IMAP 同步)"
+          >
+            ⚙
           </button>
           <button
             type="button"

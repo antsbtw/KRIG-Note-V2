@@ -1,12 +1,56 @@
 /* 邮箱账号面板(navSide 内容) */
 
+/*
+ * 弹窗容器 —— 宽度是关键:初版放 navSide(200px)时表单折行很难看,
+ * 这里给足 360px 并限制最大高度,内容超了自己滚。
+ */
 .krig-mail-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px;
+  padding: 12px;
+  width: 360px;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
   font-size: 13px;
   color: var(--text);
+  background: var(--bg-shell);
+  border-radius: 8px;
+}
+
+/* ── 标题栏 ── */
+
+.krig-mail-panel__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.krig-mail-panel__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.krig-mail-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--text-icon);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.krig-mail-panel__close:hover:not(:disabled) {
+  background: var(--hover-overlay);
+  color: var(--text);
+}
+
+.krig-mail-panel__close:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .krig-mail-panel__hint,
