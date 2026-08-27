@@ -887,6 +887,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mailAccountDelete(accountId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_DELETE, accountId);
   },
+  /** 改密码(safeStorage 覆写,不动 DB;内部去空白) */
+  mailAccountSetPassword(accountId: string, password: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_SET_PASSWORD, { accountId, password });
+  },
   /** 测试连接 + 列 mailbox */
   mailAccountTest(accountId: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.MAIL_ACCOUNT_TEST, accountId);

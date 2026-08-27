@@ -112,6 +112,14 @@ export interface MailServiceApi {
   ): Promise<{ success: boolean; account?: MailAccount; error?: string }>;
   /** 删账号(连带清密码/邮件/游标) */
   deleteAccount(accountId: string): Promise<{ success: boolean; error?: string }>;
+  /**
+   * 改密码。只覆写 safeStorage,不动账号记录与已同步邮件。
+   * 用途:应用专用密码被吊销/重新生成,或首次填错(如复制时带了空格)。
+   */
+  setAccountPassword(
+    accountId: string,
+    password: string,
+  ): Promise<{ success: boolean; error?: string }>;
   /** 测试连接 + 列 mailbox(配置向导用) */
   testAccount(accountId: string): Promise<MailTestResult>;
   /** 增量同步一个 mailbox(缺省 INBOX) */

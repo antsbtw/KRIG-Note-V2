@@ -42,6 +42,9 @@ interface AccountRuntime {
   testing?: boolean;
   testError?: string;
   mailboxes?: string[];
+  /** 正在改密码(展开输入框) */
+  editingPassword?: boolean;
+  passwordSaved?: boolean;
 }
 
 export function AccountPanel({ onClose }: PopupCloseProps) {
@@ -87,6 +90,30 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
         testing: false,
         testError: result.success ? undefined : result.error,
         mailboxes: result.mailboxes,
+      });
+    },
+    [mail, patchRuntime],
+  );
+
+  const handleSetPassword = useCallback(
+    async (account: MailAccount, newPassword: string) => {
+      const result = await mail.setAccountPassword(account.id, newPassword);
+      if (!result.success) {
+        patchRuntime(account.id, { testError: result.error ?? '改密码失败' });
+        return;
+      }
+      // 改完顺手测一次 —— 用户改密码就是因为连不上,不测等于让他再点一次
+      patchRuntime(account.id, {
+        editingPassword: false,
+        passwordSaved: true,
+        testError: undefined,
+        testing: true,
+      });
+      const test = await mail.testAccount(account.id);
+      patchRuntime(account.id, {
+        testing: false,
+        testError: test.success ? undefined : test.error,
+        mailboxes: test.mailboxes,
       });
     },
     [mail, patchRuntime],
@@ -191,6 +218,18 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
               </button>
               <button
                 type="button"
+                onClick={() =>
+                  patchRuntime(acct.id, {
+                    editingPassword: !rt.editingPassword,
+                    passwordSaved: false,
+                  })
+                }
+                title="重新填写应用专用密码(不影响已同步的邮件)"
+              >
+                改密码
+              </button>
+              <button
+                type="button"
                 className="krig-mail-panel__danger"
                 onClick={() => void handleDelete(acct)}
                 title="删除账号及其本地邮件"
@@ -198,6 +237,16 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
                 删除
               </button>
             </div>
+
+            {rt.editingPassword && (
+              <PasswordEditor
+                onSave={(pw) => void handleSetPassword(acct, pw)}
+                onCancel={() => patchRuntime(acct.id, { editingPassword: false })}
+              />
+            )}
+            {rt.passwordSaved && !rt.testError && !rt.testing && (
+              <div className="krig-mail-panel__result">密码已更新</div>
+            )}
 
             {/* 同步结果 —— 成功/失败都要显式呈现(fail loud) */}
             {rt.lastResult && (
@@ -263,6 +312,48 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  改密码(内联小表单)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * 只改密码,不动账号记录与已同步邮件。
+ *
+ * 为什么需要:应用专用密码可能被吊销/重新生成,或首次就填错了
+ * (最常见的是**复制时带了 Google 显示的空格**)。没有这个入口的话
+ * 用户只能删账号重建 —— 那会连带删掉已同步的全部邮件,代价过大。
+ */
+function PasswordEditor({
+  onSave,
+  onCancel,
+}: {
+  onSave: (password: string) => void;
+  onCancel: () => void;
+}) {
+  const [pw, setPw] = useState('');
+  return (
+    <div className="krig-mail-panel__pw-editor">
+      <input
+        type="password"
+        value={pw}
+        onChange={(e) => setPw(e.target.value)}
+        placeholder="新的应用专用密码"
+        autoComplete="new-password"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && pw) onSave(pw);
+          if (e.key === 'Escape') onCancel();
+        }}
+      />
+      <button type="button" onClick={() => pw && onSave(pw)} disabled={!pw}>
+        保存并测试
+      </button>
+      <button type="button" onClick={onCancel}>
+        取消
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
 //  新建账号表单
 // ═══════════════════════════════════════════════════════
 
@@ -321,7 +412,11 @@ function AccountForm({ workspaceId, onDone, onCancel }: AccountFormProps) {
         imapSecure: port === 993,
         smtpHost: defaults?.smtpHost,
         smtpPort: defaults?.smtpPort,
-        password,
+        // ⚠️ 去掉所有空白:Google 把应用专用密码显示成 `abcd efgh ijkl mnop`
+        // (四组四位带空格),用户复制时几乎必然连空格一起带上,而 IMAP 认证
+        // 要的是 16 位连续字符 —— 带空格必然 AUTHENTICATIONFAILED(实测踩到)。
+        // QQ/163 的授权码同理。所有正经邮件客户端都做这一步。
+        password: password.replace(/\s+/g, ''),
       });
       if (!result.success) {
         setError(result.error ?? '创建失败');
@@ -369,7 +464,7 @@ function AccountForm({ workspaceId, onDone, onCancel }: AccountFormProps) {
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="不是账号密码"
+          placeholder="16 位,空格可直接粘贴"
           autoComplete="new-password"
         />
       </label>

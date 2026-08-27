@@ -81,6 +81,13 @@ async function deleteAccount(accountId: string): Promise<{ success: boolean; err
   return window.electronAPI.mailAccountDelete(accountId);
 }
 
+async function setAccountPassword(
+  accountId: string,
+  password: string,
+): Promise<{ success: boolean; error?: string }> {
+  return window.electronAPI.mailAccountSetPassword(accountId, password);
+}
+
 async function testAccount(accountId: string): Promise<MailTestResult> {
   return window.electronAPI.mailAccountTest(accountId);
 }
@@ -112,6 +119,7 @@ export const mailServiceCapability: MailServiceApi = {
   listAccounts,
   createAccount,
   deleteAccount,
+  setAccountPassword,
   testAccount,
   sync,
   listMails,

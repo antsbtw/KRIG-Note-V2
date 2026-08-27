@@ -85,9 +85,17 @@ export function saveMailPassword(accountId: string, password: string): void {
   if (!accountId || !password) {
     throw new Error('[mail-credential-store] accountId / password 不能为空');
   }
+  // ⚠️ 去空白(第二道 —— 表单层已去过一次)。
+  // Google 把应用专用密码显示成 `abcd efgh ijkl mnop`,QQ/163 的授权码也常被
+  // 连着空格复制;IMAP 认证要的是连续字符,带空格 = AUTHENTICATIONFAILED。
+  // 收在写库必经处,将来新增任何配置入口都不会漏掉这一步。
+  const normalized = password.replace(/\s+/g, '');
+  if (!normalized) {
+    throw new Error('[mail-credential-store] 密码去掉空白后为空');
+  }
   assertEncryptionAvailable();
   const data = readAll();
-  data.entries[accountId] = safeStorage.encryptString(password).toString('base64');
+  data.entries[accountId] = safeStorage.encryptString(normalized).toString('base64');
   writeAll(data);
 }
 

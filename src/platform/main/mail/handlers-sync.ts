@@ -24,6 +24,7 @@ import {
   getAccount,
   listMails,
   getMail,
+  updateAccountPassword,
 } from '../db/mail-repo';
 import { testConnection } from './imap-client';
 import { syncMailbox, DEFAULT_MAILBOX } from './mail-sync';
@@ -77,6 +78,25 @@ export function registerMailSyncHandlers(): void {
       }
       try {
         await deleteAccount(accountId);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_ACCOUNT_SET_PASSWORD,
+    async (_e, payload: unknown): Promise<{ success: boolean; error?: string }> => {
+      const p = payload as { accountId?: unknown; password?: unknown } | null;
+      if (!p || typeof p.accountId !== 'string' || !p.accountId) {
+        return { success: false, error: '缺少 accountId' };
+      }
+      if (typeof p.password !== 'string' || !p.password) {
+        return { success: false, error: '密码不能为空' };
+      }
+      try {
+        await updateAccountPassword(p.accountId, p.password);
         return { success: true };
       } catch (e) {
         return { success: false, error: e instanceof Error ? e.message : String(e) };

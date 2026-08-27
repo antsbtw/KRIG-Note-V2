@@ -659,6 +659,11 @@ declare global {
       }): Promise<{ success: boolean; account?: MailAccount; error?: string }>;
       /** 删账号(连带清密码/邮件/游标) */
       mailAccountDelete(accountId: string): Promise<{ success: boolean; error?: string }>;
+      /** 改密码(safeStorage 覆写,不动 DB;内部去空白) */
+      mailAccountSetPassword(
+        accountId: string,
+        password: string,
+      ): Promise<{ success: boolean; error?: string }>;
       /** 测试连接 + 列 mailbox */
       mailAccountTest(accountId: string): Promise<MailTestResult>;
       /** 增量同步一个 mailbox */

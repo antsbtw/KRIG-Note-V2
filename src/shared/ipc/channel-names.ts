@@ -278,6 +278,7 @@ export const IPC_CHANNELS = {
   MAIL_ACCOUNT_CREATE: 'mail.account-create',       // renderer → main:新建账号(密码走 safeStorage,不入 DB)
   MAIL_ACCOUNT_DELETE: 'mail.account-delete',       // renderer → main:删账号(连带清密码/邮件/游标)
   MAIL_ACCOUNT_TEST: 'mail.account-test',           // renderer → main:测试连接 + 列 mailbox
+  MAIL_ACCOUNT_SET_PASSWORD: 'mail.account-set-password', // renderer → main:改密码(safeStorage 覆写,不动 DB)
   MAIL_SYNC: 'mail.sync',                           // renderer → main:同步一个 mailbox(增量)
   MAIL_LIST: 'mail.list',                           // renderer → main:列邮件(按日期倒序,分页)
   MAIL_GET: 'mail.get',                             // renderer → main:取单封全文

@@ -145,6 +145,21 @@ export async function deleteAccount(accountId: string): Promise<void> {
   deleteMailPassword(accountId);
 }
 
+/**
+ * 改密码 —— 只覆写 safeStorage,不动 mail_account(密码本来就不在 DB 里)。
+ *
+ * 用途:应用专用密码被吊销/重新生成,或首次填错(如带了空格)。
+ * 没有这个入口的话用户只能删账号重建 —— 那会连带删掉已同步的邮件,代价过大。
+ */
+export async function updateAccountPassword(
+  accountId: string,
+  password: string,
+): Promise<void> {
+  const account = await getAccount(accountId);
+  if (!account) throw new Error('账号不存在');
+  saveMailPassword(accountId, password); // 内部去空白 + fail loud
+}
+
 export async function setAccountEnabled(accountId: string, enabled: boolean): Promise<void> {
   const db = getDB();
   await db.query(`UPDATE mail_account SET enabled = $enabled WHERE account_id = $id`, {
