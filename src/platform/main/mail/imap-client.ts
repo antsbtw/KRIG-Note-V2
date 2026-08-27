@@ -31,8 +31,17 @@ import { simpleParser, type ParsedMail } from 'mailparser';
 import type { MailAccount, MailRecord, MailAttachmentMeta } from '@shared/types/mail-types';
 import { getMailPassword } from './credential-store';
 
-/** 连接超时(毫秒)。邮箱服务端偶尔慢,但超过这个数基本是连不上了。 */
+/**
+ * 三种超时的语义完全不同,初版全设成 30s 是错的:
+ *
+ * - connectionTimeout:TCP+TLS 握手上限。连不上就是连不上,30s 足够。
+ * - greetingTimeout:等服务器打招呼。同上量级。
+ * - socketTimeout:**socket 空闲**看门狗,不是「命令超时」。imapflow 默认 5 分钟。
+ *   设成 30s 会让正常的大批量 FETCH(解析几百封邮件时 socket 会短暂安静)
+ *   被误判成死连接 —— 实测就是这么崩的。
+ */
 const CONNECT_TIMEOUT_MS = 30_000;
+const SOCKET_IDLE_TIMEOUT_MS = 300_000;
 
 /** 单次同步最多拉多少封 —— 防止首次同步把几万封邮件一次性灌进来 */
 const MAX_FETCH_PER_SYNC = 200;
@@ -61,10 +70,23 @@ export async function connect(account: MailAccount): Promise<ImapFlow> {
     auth: { user: account.email, pass: password },
     // imapflow 默认往 stdout 打全量协议日志,噪音极大且含邮件内容 —— 关掉
     logger: false,
-    // 服务端能力探测失败时不要卡死
     greetingTimeout: CONNECT_TIMEOUT_MS,
-    socketTimeout: CONNECT_TIMEOUT_MS,
     connectionTimeout: CONNECT_TIMEOUT_MS,
+    socketTimeout: SOCKET_IDLE_TIMEOUT_MS,
+  });
+
+  /**
+   * ⚠️ 必须挂 error 监听器 —— ImapFlow 是 EventEmitter,socket 层的异步错误
+   * (如 'Socket timeout')经 emit('error') 抛出,**不在任何 try/catch 的调用栈里**。
+   * EventEmitter 的 'error' 事件没有监听器时会升级为未捕获异常,
+   * 在 Electron 主进程里直接弹「A JavaScript error occurred in the main process」
+   * 并崩掉整个 app(实测踩到)。
+   *
+   * 这里只记录不重抛:连接已经坏了,正在 await 的那个命令会自己失败并走正常
+   * 错误路径;监听器的唯一职责是阻止进程级崩溃。
+   */
+  client.on('error', (err) => {
+    console.error(`[imap-client] 连接错误 (${account.email}):`, err?.message ?? err);
   });
 
   try {
@@ -82,8 +104,36 @@ export async function connect(account: MailAccount): Promise<ImapFlow> {
  * 「密码不对,注意 Gmail 需要应用专用密码而非账号密码」才是可操作的。
  */
 function toReadableError(e: unknown, account: MailAccount): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  const lower = raw.toLowerCase();
+  // imapflow 把服务器的真实回复放在 responseText / serverResponseCode,
+  // message 常常只是 'Command failed' 这类无信息量的壳(实测踩到:
+  // 认证失败显示成「连接失败:Command failed」,用户完全不知道发生了什么)。
+  // 故三个字段一起看。
+  const err = e as {
+    message?: string;
+    responseText?: string;
+    serverResponseCode?: string;
+    authenticationFailed?: boolean;
+    code?: string;
+  } | null;
+  const message = err?.message ?? String(e);
+  const responseText = err?.responseText ?? '';
+  const serverCode = err?.serverResponseCode ?? '';
+  // 给用户看的原文:优先服务器回复(有实质内容),没有才退回 message
+  const raw = [responseText, serverCode && `[${serverCode}]`, responseText ? '' : message]
+    .filter(Boolean)
+    .join(' ')
+    .trim() || message;
+  const lower = `${message} ${responseText} ${serverCode} ${err?.code ?? ''}`.toLowerCase();
+
+  // imapflow 的 AuthenticationFailure 带这个标记 —— 比字符串匹配可靠
+  if (err?.authenticationFailed) {
+    return (
+      `认证失败(${account.email}):${raw}\n\n` +
+      `Gmail / QQ / 163 等**不接受账号密码**,必须在邮箱设置里生成「应用专用密码」` +
+      `(QQ/163 叫「授权码」)。\n` +
+      `另:Gmail 需要先开启两步验证,否则应用专用密码页面不会出现。`
+    );
+  }
 
   if (lower.includes('auth') || lower.includes('login') || lower.includes('credentials')) {
     return (
@@ -104,7 +154,12 @@ function toReadableError(e: unknown, account: MailAccount): string {
   if (lower.includes('certificate') || lower.includes('self signed')) {
     return `TLS 证书校验失败(${account.imapHost}):企业自建服务器可能用了自签证书。原始信息:${raw}`;
   }
-  return `连接 ${account.imapHost} 失败:${raw}`;
+  // 兜底也要给可操作的方向 —— 'Command failed' 这种壳信息对用户毫无用处
+  return (
+    `连接 ${account.imapHost}:${account.imapPort} 失败:${raw}\n\n` +
+    `常见原因:① 用了账号密码而非应用专用密码;② 邮箱未开启 IMAP 访问` +
+    `(Gmail 在「设置 → 转发和 POP/IMAP」里);③ 网络/代理拦截了 993 端口。`
+  );
 }
 
 /** 测试连接并列出 mailbox(配置向导用) */

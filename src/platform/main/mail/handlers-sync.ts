@@ -90,9 +90,15 @@ export function registerMailSyncHandlers(): void {
       if (typeof accountId !== 'string' || !accountId) {
         return { success: false, error: '缺少 accountId' };
       }
-      const account = await getAccount(accountId);
-      if (!account) return { success: false, error: '账号不存在' };
-      return testConnection(account);
+      try {
+        const account = await getAccount(accountId);
+        if (!account) return { success: false, error: '账号不存在' };
+        return await testConnection(account);
+      } catch (e) {
+        // 兜底(见本文件末尾注释):IMAP 层的异步错误绝不能逃逸成未捕获异常
+        console.error('[mail-handlers] 测试连接抛出:', e);
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
     },
   );
 
@@ -103,12 +109,22 @@ export function registerMailSyncHandlers(): void {
       if (!p || typeof p.accountId !== 'string' || !p.accountId) {
         return { success: false, fetched: 0, total: 0, error: '缺少 accountId' };
       }
-      const account = await getAccount(p.accountId);
-      if (!account) {
-        return { success: false, fetched: 0, total: 0, error: '账号不存在' };
+      try {
+        const account = await getAccount(p.accountId);
+        if (!account) {
+          return { success: false, fetched: 0, total: 0, error: '账号不存在' };
+        }
+        const mailbox = typeof p.mailbox === 'string' && p.mailbox ? p.mailbox : DEFAULT_MAILBOX;
+        return await syncMailbox(account, mailbox);
+      } catch (e) {
+        console.error('[mail-handlers] 同步抛出:', e);
+        return {
+          success: false,
+          fetched: 0,
+          total: 0,
+          error: e instanceof Error ? e.message : String(e),
+        };
       }
-      const mailbox = typeof p.mailbox === 'string' && p.mailbox ? p.mailbox : DEFAULT_MAILBOX;
-      return syncMailbox(account, mailbox);
     },
   );
 
@@ -132,3 +148,17 @@ export function registerMailSyncHandlers(): void {
     },
   );
 }
+
+/*
+ * ⚠️ 为什么这两个 handler 要 try/catch 兜底
+ *
+ * IMAP 客户端是 EventEmitter,socket 层错误(Socket timeout / ECONNRESET)
+ * 经 emit('error') 异步抛出,**不在 await 的调用栈里**。没有监听器时
+ * EventEmitter 会把它升级成未捕获异常 —— Electron 主进程里就是
+ * 「A JavaScript error occurred in the main process」弹窗 + 整个 app 崩掉
+ * (实测踩过)。
+ *
+ * imap-client.connect() 里已经给 client 挂了 error 监听器,这里是第二道:
+ * 挂监听器之前的窗口、以及任何我没预料到的同步 throw,都不该让主进程死掉。
+ * 用户点一次「同步」把 app 点崩,是比任何错误提示都糟糕的体验。
+ */
