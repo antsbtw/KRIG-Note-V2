@@ -15,7 +15,7 @@ import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
 import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
-import { googleTranslate } from './google-translate';
+import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
@@ -266,23 +266,45 @@ export function registerXTimelineHandlers(): void {
   }, 8_000);
 }
 
-/** 批量补填缺翻译的非中文推文，逐条调 Google 翻译，失败条目静默跳过 */
+/**
+ * 批量补填缺翻译的非中文推文，逐条调 Google 翻译。
+ *
+ * 限速 / 退避 / 熔断都在 googleTranslate 内部，这里不重复实现。
+ * 被限流(熔断)时**提前收工**而不是空转到底 —— 没翻成的条目 DB 里仍缺
+ * translation，下次启动会被重新查出来，不会丢。
+ */
 async function backfillTranslations(): Promise<void> {
   const rows = await queryMissingTranslation(1000);
   console.log(`[backfillTranslations] found ${rows.length} tweets needing translation`);
   if (rows.length === 0) return;
 
-  let total = 0;
+  let done = 0;
+  let failed = 0;
+  let aborted = false;
+
   for (const row of rows) {
+    if (translateCircuitOpen()) {
+      aborted = true;
+      break;
+    }
     const translation = await googleTranslate(row.text);
     if (translation) {
       await setTranslation(row.tweet_id, translation);
-      total++;
-      if (total % 10 === 0) {
-        console.log(`[backfillTranslations] ${total}/${rows.length} done`);
+      done++;
+      if (done % 20 === 0) {
+        console.log(`[backfillTranslations] ${done}/${rows.length} done`);
       }
+    } else {
+      failed++;
     }
   }
 
-  console.log(`[backfillTranslations] completed, total=${total}/${rows.length}`);
+  // 如实汇报:成功多少、失败多少、是否被限流打断(反静默坍缩)
+  const remaining = rows.length - done - failed;
+  console.log(
+    `[backfillTranslations] ${aborted ? '被限流中断' : 'completed'} — ` +
+      `成功 ${done} / 失败 ${failed}` +
+      (remaining > 0 ? ` / 未尝试 ${remaining}` : '') +
+      ` (共 ${rows.length},未成功的下次启动会重试)`,
+  );
 }
