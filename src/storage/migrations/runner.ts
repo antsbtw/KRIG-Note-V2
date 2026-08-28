@@ -5,7 +5,7 @@
  * 幂等: DEFINE TABLE/FIELD/INDEX 在 SurrealDB 是 idempotent (重复定义不报错)。
  */
 import type { Surreal } from 'surrealdb';
-import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1, migration_1_8_0, migration_1_8_1, migration_1_8_2, migration_1_8_3, migration_1_8_4, migration_1_8_5, migration_1_8_6, migration_1_8_7 } from '../surreal/schema';
+import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1, migration_1_8_0, migration_1_8_1, migration_1_8_2, migration_1_8_3, migration_1_8_4, migration_1_8_5, migration_1_8_6, migration_1_8_7, migration_1_8_8, migration_1_8_9, migration_1_9_0 } from '../surreal/schema';
 
 interface Migration {
   version: string;
@@ -99,6 +99,21 @@ const MIGRATIONS: Migration[] = [
     description: 'Add ai_verdict snapshot to tweet_feedback (preserve Gemma original verdict for accuracy accounting)',
     up: migration_1_8_7,
   },
+  {
+    version: '1.8.8',
+    description: 'Mail module phase 1: mail_account / mail / mail_sync_state (IMAP read-only sync)',
+    up: migration_1_8_8,
+  },
+  {
+    version: '1.8.9',
+    description: 'Fix mail.attachments element constraint (auto-derived attachments.* does not inherit FLEXIBLE)',
+    up: migration_1_8_9,
+  },
+  {
+    version: '1.9.0',
+    description: 'Add backfill_uid to mail_sync_state (downward backfill; older mail was unreachable)',
+    up: migration_1_9_0,
+  },
 ];
 
 export async function runMigrations(db: Surreal): Promise<void> {
@@ -123,7 +138,25 @@ export async function runMigrations(db: Surreal): Promise<void> {
   for (const mig of MIGRATIONS) {
     if (compareVersions(currentVersion, mig.version) < 0) {
       console.log(`[storage/migrations] applying ${mig.version}: ${mig.description}`);
-      await mig.up(db);
+      try {
+        await mig.up(db);
+      } catch (err) {
+        // fail loud + 停在第一个坏 migration:后续 migration 往往依赖前一个建出的表,
+        // 硬着头皮往下跑只会把「一个 DDL 写错」放大成一串看不懂的次生错误。
+        //
+        // ⚠️ 这条 rethrow 是有来历的(2026-08-27,mail 1.8.8):
+        // `option<array> FLEXIBLE` 是 parse error → **整段 DDL 被服务端拒收**
+        // (不是只跳过那一条)→ 三张表一张没建 → schema_version 也没写。
+        // 而 main/index.ts 对 initStorage 的 catch 只 console.error,app 照常起来了,
+        // 于是现场表现成「migration 根本没跑」,查了整整一轮才找到真因。
+        // 排查捷径记在这:表建了一半 ≠ migration 没跑,先把这行报错找出来。
+        console.error(
+          `[storage/migrations] ✗ migration ${mig.version} FAILED — schema 停在 ${currentVersion},` +
+            ` 后续 migration 已跳过。数据库处于半应用状态,先修这条再启动:`,
+          err,
+        );
+        throw err;
+      }
     }
   }
 }

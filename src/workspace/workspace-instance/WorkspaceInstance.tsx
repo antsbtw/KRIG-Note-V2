@@ -95,6 +95,11 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
   if (!activeViewId) {
     activeViewId = viewTypeRegistry.getAllForNavSide()[0]?.id ?? null;
   }
+  // 该 view 有没有 NavSide 内容 —— 决定 NavSideFrame 渲不渲染(详见下方渲染处注释)
+  const navSideDisabled =
+    activeViewId != null &&
+    viewTypeRegistry.get(activeViewId)?.navSideTab?.navSideDisabled === true;
+
   // 计算"展示用 slotBinding"(left null 时 fallback 到 activeViewId,不改实际 state)
   const effectiveSlotBinding = state.slotBinding.left
     ? state.slotBinding
@@ -141,7 +146,19 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
             onSwitch={handleSwitch}
             onToggleCollapse={handleToggleCollapse}
           />
-          {!state.navSideCollapsed && (
+          {/*
+            navSideDisabled 的 view(mail / ai / social 等 webview 类)**永远不渲染**
+            NavSide,而不只是「切过来时收起」。
+
+            ⚠️ 只靠 navSideOnSwitch:'collapse' 不够:那条只在 handleSwitch 里生效,
+            也就是**用户点 tab 切过来**的那一次。view 通过其它路径成为活跃
+            (恢复上次会话状态、slot 重建、右栏关闭后左栏顶上来……)时它根本不跑,
+            于是 mail 顶着一栏空白 NavSide,里面只有「待 view 注册内容」占位
+            (2026-08-28 用户实拍)。
+
+            式样问题要由「有没有内容」决定,不能依赖某个一次性事件有没有被触发。
+          */}
+          {!state.navSideCollapsed && !navSideDisabled && (
             <NavSideFrame workspaceId={state.id} navSideWidths={state.navSideWidths ?? {}} viewId={activeViewId} />
           )}
           <div className="krig-workspace-main">

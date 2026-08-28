@@ -42,6 +42,7 @@ import { registerEBookCommands } from '@views/ebook/bookshelf-commands';
 import { registerAICommands } from '@views/ai/ai-commands';
 import { registerXCommands } from '@views/x/x-commands';
 import { registerXTestCommands } from '@views/x/x-test-commands';
+import { registerMailCommands } from '@views/mail/mail-commands';
 import { registerGraphCanvasCommands } from '@views/graph-canvas-view/canvas-commands';
 import { registerThoughtCommands } from '@views/thought/thought-commands';
 // W5:capability 显式 side-effect import — 触发各 capability 的
@@ -73,6 +74,7 @@ import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IP
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)
 import '@capabilities/ai-extraction';       // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability(原 ai-conversation,2026-05-19 改名)
 import '@capabilities/x-extraction';        // X 集成 阶段 0/1:嵌 x.com webview + 右键提取推文 → tweetBlock(铁律 3 独立 capability)
+import '@capabilities/mail-service';        // 邮箱 阶段 0:嵌网页版邮箱 webview + 右键提取单封邮件(独立 capability)
 import '@capabilities/import-orchestrator'; // 阶段 C:统一批量落库编排(markdown/PDF/剪藏三处 view 走 importDraftsToNotes)
 import '@capabilities/content-extraction';  // 网页剪藏(Defuddle → Note);模块 load 即订阅 WEB_CLIP_RESULT 跑 import-pipeline
 import '@capabilities/auth';                 // 授权:注册 auth capability(暴露 StatusBadge),模块 load 即挂 onAuthChanged 单订阅
@@ -86,6 +88,7 @@ import '@views/ebook';  // L5-C1:EBookView self-register
 import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4)
 import '@views/x';      // X 集成:注册 X 提取命令
 import '@views/social'; // Social View self-register(NavSide tab 💬 order=6;含 X 平台)
+import '@views/mail';   // Mail View self-register(NavSide tab 📧 order=7;网页版邮箱)
 import '@views/x-inbox'; // X Inbox View self-register(right slot，从 SocialView tabbar 触发)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
@@ -108,6 +111,7 @@ onMyWsIdReady((rendererWsId) => {
   registerAICommands(rendererWsId);
   registerXCommands(rendererWsId);
   registerXTestCommands(rendererWsId);
+  registerMailCommands(rendererWsId);
   registerGraphCanvasCommands(rendererWsId);
   registerThoughtCommands(rendererWsId);
   // L3.5 bus 初始化(首次 wsId 就绪时补一次,确保 alive 计数 >= 1)

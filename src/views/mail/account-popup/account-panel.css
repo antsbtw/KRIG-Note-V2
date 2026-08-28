@@ -1,0 +1,340 @@
+/* 邮箱账号面板(navSide 内容) */
+
+/*
+ * 弹窗容器 —— 宽度是关键:初版放 navSide(200px)时表单折行很难看,
+ * 这里给足 360px 并限制最大高度,内容超了自己滚。
+ */
+.krig-mail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  width: 360px;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-shell);
+  border-radius: 8px;
+}
+
+/* ── 标题栏 ── */
+
+.krig-mail-panel__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.krig-mail-panel__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.krig-mail-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--text-icon);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.krig-mail-panel__close:hover:not(:disabled) {
+  background: var(--hover-overlay);
+  color: var(--text);
+}
+
+.krig-mail-panel__close:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.krig-mail-panel__hint,
+.krig-mail-panel__empty {
+  color: var(--text-icon);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.krig-mail-panel__empty-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+
+.krig-mail-panel__empty-sub {
+  margin-top: 6px;
+  opacity: 0.85;
+}
+
+.krig-mail-panel__empty-sub strong {
+  color: var(--text);
+  opacity: 1;
+}
+
+.krig-mail-panel__empty-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  opacity: 0.85;
+}
+
+.krig-mail-panel__empty-list li {
+  margin: 3px 0;
+}
+
+/* ── 单个账号卡片 ── */
+
+.krig-mail-panel__account {
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-elevated);
+}
+
+.krig-mail-panel__account-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.krig-mail-panel__account-icon {
+  flex-shrink: 0;
+}
+
+.krig-mail-panel__account-email {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.krig-mail-panel__account-meta {
+  font-size: 11px;
+  color: var(--text-icon);
+}
+
+.krig-mail-panel__account-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.krig-mail-panel__account-actions button {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.krig-mail-panel__account-actions button:hover:not(:disabled) {
+  background: var(--hover-overlay);
+}
+
+.krig-mail-panel__account-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.krig-mail-panel__danger:hover:not(:disabled) {
+  background: var(--danger-bg) !important;
+  color: var(--danger-text);
+}
+
+/* ── 同步/测试结果(成功失败都显式呈现)── */
+
+.krig-mail-panel__result {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--hover-overlay);
+  color: var(--text-icon);
+  word-break: break-word;
+}
+
+.krig-mail-panel__result--error {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  white-space: pre-wrap;
+}
+
+.krig-mail-panel__warn {
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+
+.krig-mail-panel__add {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px dashed var(--border-muted);
+  border-radius: 4px;
+  color: var(--text-icon);
+  cursor: pointer;
+}
+
+.krig-mail-panel__add:hover {
+  background: var(--hover-overlay);
+  color: var(--text);
+}
+
+/* ── 新建表单 ── */
+
+.krig-mail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--bg-elevated);
+}
+
+.krig-mail-form__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.krig-mail-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-icon);
+}
+
+.krig-mail-form__field input,
+.krig-mail-form__field select {
+  padding: 5px 7px;
+  font-size: 12px;
+  background: var(--bg-shell);
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.krig-mail-form__field input:focus,
+.krig-mail-form__field select:focus {
+  outline: none;
+  border-color: var(--accent-text);
+}
+
+.krig-mail-form__hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-icon);
+  padding: 6px 8px;
+  background: var(--hover-overlay);
+  border-radius: 4px;
+}
+
+.krig-mail-form__hint a {
+  color: var(--accent-text);
+}
+
+.krig-mail-form__advanced {
+  font-size: 11px;
+  color: var(--text-icon);
+}
+
+.krig-mail-form__advanced summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.krig-mail-form__advanced .krig-mail-form__field {
+  margin-top: 6px;
+}
+
+.krig-mail-form__error {
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  white-space: pre-wrap;
+}
+
+.krig-mail-form__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.krig-mail-form__actions button {
+  padding: 5px 12px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.krig-mail-form__actions button:first-child {
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  border-color: transparent;
+}
+
+.krig-mail-form__actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── 改密码内联表单 ── */
+
+.krig-mail-panel__pw-editor {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.krig-mail-panel__pw-editor input {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 5px 7px;
+  font-size: 12px;
+  background: var(--bg-shell);
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.krig-mail-panel__pw-editor input:focus {
+  outline: none;
+  border-color: var(--accent-text);
+}
+
+.krig-mail-panel__pw-editor button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.krig-mail-panel__pw-editor button:hover:not(:disabled) {
+  background: var(--hover-overlay);
+}
+
+.krig-mail-panel__pw-editor button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

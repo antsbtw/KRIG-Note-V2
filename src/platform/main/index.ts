@@ -50,6 +50,7 @@ import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
 import { registerXWebviewHook } from './x';
+import { registerMailWebviewHook } from './mail';
 import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
 import { registerWebDownloadHook } from './web-download/handler';
@@ -226,6 +227,8 @@ app.whenReady().then(async () => {
     registerAIWebviewHook(win);
     // X 集成 阶段 0/1:X Host webview 注册 + 原生右键「提取此推文到笔记」(同 AI 底座)。
     registerXWebviewHook(win);
+    // 邮箱 阶段 0:Mail Host webview 注册 + 原生右键「提取此邮件到笔记」(同 AI/X 底座)。
+    registerMailWebviewHook(win);
     // web view 原生右键菜单(Phase 2 根治 HTML 菜单被 webview OS 层遮挡)— 只接管普通浏览 webview
     registerWebContextMenuHook(win);
     // web view 快捷键整层 + 弹窗导流(Phase 4 Commit 2)— 只接管普通浏览 webview(排除 AI/翻译)。

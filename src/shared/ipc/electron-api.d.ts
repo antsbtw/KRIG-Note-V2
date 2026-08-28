@@ -35,6 +35,8 @@ import type {
 } from './ai-types';
 import type { AIServiceId } from '../types/ai-service-types';
 import type { XServiceId } from '../types/x-service-types';
+import type { MailServiceId } from '../types/mail-service-types';
+import type { MailAccount, MailRecord, MailSyncResult, MailTestResult } from '../types/mail-types';
 import type { ArticlePlan, ArticleInsertStep } from './article-plan-types';
 import type { ProxyNode, ProxyNodeType } from '../types/proxy-types';
 import type { WebGlobalSettings } from '../types/web-settings-types';
@@ -616,6 +618,60 @@ declare global {
       ): () => void;
       /** main → renderer 推送:宿主 iframe(tweet 卡片)弹 x.com 链接 → 改在 X webview 打开;返 unsubscribe */
       onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
+
+      // ── 邮箱模块(阶段 0:右键邮箱 webview 提取单封邮件 → note) ──
+      /** 按 guest viewport 坐标定位 + 抽该封邮件(主题/正文/发件人,纯文本) */
+      mailExtract(
+        serviceId: MailServiceId,
+        x: number,
+        y: number,
+        targetWcId?: number,
+      ): Promise<{
+        success: boolean;
+        data?: {
+          subject?: string;
+          bodyText?: string;
+          from?: string;
+          date?: string;
+          sourceUrl?: string;
+        };
+        error?: string;
+      }>;
+      /** main → renderer 推送:邮箱 webview 原生右键「提取此邮件」点击,带 guest 坐标;返 unsubscribe */
+      onMailExtractRequest(
+        callback: (payload: { serviceId: MailServiceId; x: number; y: number }) => void,
+      ): () => void;
+
+      // ── 邮箱 阶段 1(IMAP 只读同步) ──
+      /** 列出本 ws 的邮箱账号(不含密码) */
+      mailAccountList(wsId: string): Promise<MailAccount[]>;
+      /** 新建账号。password 明文入参,main 侧 safeStorage 加密,不入 DB */
+      mailAccountCreate(payload: {
+        wsId: string;
+        serviceId: MailServiceId;
+        email: string;
+        imapHost: string;
+        imapPort: number;
+        imapSecure: boolean;
+        password: string;
+        smtpHost?: string;
+        smtpPort?: number;
+      }): Promise<{ success: boolean; account?: MailAccount; error?: string }>;
+      /** 删账号(连带清密码/邮件/游标) */
+      mailAccountDelete(accountId: string): Promise<{ success: boolean; error?: string }>;
+      /** 改密码(safeStorage 覆写,不动 DB;内部去空白) */
+      mailAccountSetPassword(
+        accountId: string,
+        password: string,
+      ): Promise<{ success: boolean; error?: string }>;
+      /** 测试连接 + 列 mailbox */
+      mailAccountTest(accountId: string): Promise<MailTestResult>;
+      /** 增量同步一个 mailbox */
+      mailSync(accountId: string, mailbox?: string): Promise<MailSyncResult>;
+      /** 列邮件(日期倒序,分页) */
+      mailList(accountId: string, mailbox?: string, limit?: number, offset?: number): Promise<MailRecord[]>;
+      /** 取单封全文 */
+      mailGet(mailId: string): Promise<MailRecord | null>;
 
       // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
       /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布)。

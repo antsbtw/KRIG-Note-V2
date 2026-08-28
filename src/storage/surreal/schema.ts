@@ -642,3 +642,170 @@ export async function migration_1_8_7(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.8.7'), now },
   );
 }
+
+/**
+ * 1.8.8 — 邮箱模块 阶段 1:IMAP 只读同步的三张表。
+ *
+ * 设计见 docs/tasks/2026-08-26-mail-module-design.md。要点:
+ *
+ * - **mail_account** per-ws(带 ws_id),与 webview partition `persist:webview-${ws}` 对齐
+ *   —— 工作 ws 登公司邮箱、个人 ws 登私人邮箱,两边身份必须一致。
+ *   ⚠️ **密码不在这张表**:走 safeStorage 加密落盘(复用 auth-store 的现成方案),
+ *   DB 里只存连接参数。任何时候都不该在 SurrealDB 里看到明文/密文凭据。
+ *
+ * - **mail** 全局表 + account_id 外键(而非 per-ws 分表):默认按当前 ws 的账号过滤,
+ *   但保留「跨 ws 全局搜邮件」的可能。UNIQUE(account_id, mailbox, uid) 是去重主键 ——
+ *   IMAP UID 在单个 mailbox 内唯一且递增,这是增量同步的基石。
+ *
+ * - **mail_sync_state** 每 (account, mailbox) 一行游标。
+ *   ⚠️ uid_validity 是**正确性关键**:IMAP 服务端重建 mailbox 时会换发 UIDVALIDITY,
+ *   此时旧 UID 全部失效且可能重号。不校验就会张冠李戴(把新邮件当成已同步过的跳过,
+ *   或把不同邮件写进同一条记录)。变化时必须丢弃游标全量重来。
+ *
+ * 铁律:绝不 DEFINE FIELD id(见本文件 §1.0.0 注释,SurrealDB 3.x readonly 冲突)。
+ */
+const SCHEMA_VERSION_1_8_8 = `
+DEFINE TABLE IF NOT EXISTS mail_account SCHEMAFULL;
+-- 业务 id(ULID),不用内建 record id —— 见 1.8.6 的 readonly 教训。
+-- SCHEMAFULL 表里凡是代码会写/会查的字段都必须显式 DEFINE,漏了就是隐性依赖。
+DEFINE FIELD IF NOT EXISTS account_id ON mail_account TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS ws_id       ON mail_account TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS service_id  ON mail_account TYPE string;
+DEFINE FIELD IF NOT EXISTS email       ON mail_account TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS imap_host   ON mail_account TYPE string;
+DEFINE FIELD IF NOT EXISTS imap_port   ON mail_account TYPE int;
+DEFINE FIELD IF NOT EXISTS imap_secure ON mail_account TYPE bool;
+DEFINE FIELD IF NOT EXISTS smtp_host   ON mail_account TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS smtp_port   ON mail_account TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS enabled     ON mail_account TYPE bool;
+DEFINE FIELD IF NOT EXISTS created_at  ON mail_account TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ma_id    ON mail_account FIELDS account_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_ma_ws    ON mail_account FIELDS ws_id;
+DEFINE INDEX IF NOT EXISTS idx_ma_email ON mail_account FIELDS ws_id, email UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS mail SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS mail_id     ON mail TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS account_id  ON mail TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS mailbox     ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS uid         ON mail TYPE int;
+DEFINE FIELD IF NOT EXISTS message_id  ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS thread_key  ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS subject     ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS from_addr   ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS from_name   ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS to_addrs    ON mail TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS cc_addrs    ON mail TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS date        ON mail TYPE datetime;
+DEFINE FIELD IF NOT EXISTS body_text   ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS body_html   ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS snippet     ON mail TYPE string;
+DEFINE FIELD IF NOT EXISTS flags       ON mail TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS has_attach  ON mail TYPE bool;
+-- ⚠️ 必须写 array<object> 而非裸 array:SurrealDB 3.x 的 FLEXIBLE 只接受
+-- 「类型里含 object」的字段,option<array> FLEXIBLE 是 **parse error**。
+-- parse error 会让整段 DDL 被拒(不是只跳过这一条)→ mail / mail_sync_state
+-- 两张表一张都建不出来,而 migration 又被 index.ts 的 catch 降级成 console.error,
+-- 表现就是「migration 看着没跑」。2026-08-27 排查烧了整轮,别再改回裸 array。
+DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array<object>> FLEXIBLE;
+-- ⚠️ 数组**元素**要单独放行:DEFINE FIELD attachments 会自动派生一条
+-- attachments.* TYPE object,它**不继承父字段的 FLEXIBLE**,于是元素变成严格
+-- object,附件带 cid 就报 Found field 'attachments[0].cid', but no such field exists。
+-- 又因为自动派生的那条已占位,DEFINE FIELD IF NOT EXISTS attachments.* 会被静默
+-- 跳过(IF NOT EXISTS 认为它存在)—— 必须先 REMOVE 再 DEFINE,顺序不能反。
+REMOVE FIELD IF EXISTS attachments.* ON mail;
+DEFINE FIELD attachments.* ON mail TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS archived_note_id ON mail TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS synced_at   ON mail TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_mail_id       ON mail FIELDS mail_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_mail_acct_uid ON mail FIELDS account_id, mailbox, uid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_mail_msgid    ON mail FIELDS message_id;
+DEFINE INDEX IF NOT EXISTS idx_mail_date     ON mail FIELDS date;
+DEFINE INDEX IF NOT EXISTS idx_mail_thread   ON mail FIELDS thread_key;
+DEFINE INDEX IF NOT EXISTS idx_mail_account  ON mail FIELDS account_id;
+
+DEFINE TABLE IF NOT EXISTS mail_sync_state SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account_id    ON mail_sync_state TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS mailbox       ON mail_sync_state TYPE string;
+DEFINE FIELD IF NOT EXISTS uid_validity  ON mail_sync_state TYPE int;
+DEFINE FIELD IF NOT EXISTS last_seen_uid ON mail_sync_state TYPE int;
+DEFINE FIELD IF NOT EXISTS last_sync_at  ON mail_sync_state TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_mss ON mail_sync_state FIELDS account_id, mailbox UNIQUE;
+`;
+
+export async function migration_1_8_8(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_8);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.8', appliedAt = $now,
+     description = 'Mail module phase 1: mail_account / mail / mail_sync_state (IMAP read-only sync)'`,
+    { rid: new RecordId('schema_version', '1.8.8'), now },
+  );
+}
+
+/**
+ * 1.8.9 — 修 mail.attachments 的数组元素约束(承接 1.8.8)。
+ *
+ * 1.8.8 里 `attachments` 声明成 `option<array<object>> FLEXIBLE`,看似够了,
+ * 实则 SurrealDB 会为它自动派生一条 `attachments.* TYPE object`,
+ * 而**这条派生字段不继承 FLEXIBLE** —— 数组元素于是是严格 object,
+ * 任何未声明的子字段都写不进去:
+ *
+ *   Found field 'attachments[0].cid', but no such field exists for table 'mail'
+ *
+ * (`cid` 是内联图片的 Content-ID,Gmail 的图文邮件几乎必带,所以是必现而非边缘。)
+ *
+ * 坑中坑:自动派生的那条已经占位,`DEFINE FIELD IF NOT EXISTS attachments.*`
+ * 会被**静默跳过**(IF NOT EXISTS 认为字段已存在),看着跑了其实没生效。
+ * 必须 `REMOVE FIELD` 再 `DEFINE`。
+ *
+ * 已实测五种形态全通过:带 cid / 不带 cid / 多个附件 / 空数组 / NONE。
+ */
+const SCHEMA_VERSION_1_8_9 = `
+REMOVE FIELD IF EXISTS attachments.* ON mail;
+DEFINE FIELD attachments.* ON mail TYPE object FLEXIBLE;
+`;
+
+export async function migration_1_8_9(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_9);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.9', appliedAt = $now,
+     description = 'Fix mail.attachments element constraint (attachments.* must be FLEXIBLE; auto-derived one is not)'`,
+    { rid: new RecordId('schema_version', '1.8.9'), now },
+  );
+}
+
+/**
+ * 1.9.0 — mail_sync_state 加 backfill_uid(向下回填游标)。
+ *
+ * 起因(2026-08-28 真机):收件箱 1341 封,同步只拿到 201 封就再也不动了。
+ *
+ * 根因是两个各自合理的决策叠加成了死角:
+ *   1. fetchSince 超过单次上限时取**最新的** N 封(首次同步用户要看最近的,合理)
+ *   2. syncMailbox 把游标推进到**实际拉到的**最大 UID(防的是按 uidNext 推进
+ *      导致丢数据,也合理)
+ * 于是首次同步拿了 UID 2921-3120,游标推到 3120 —— 而 2810 以前的 1140 封
+ * 被跳过了,之后每次只查 `3121:*`,**那批邮件永远不会再被拉到**(静默丢数据)。
+ *
+ * 修法:游标从「一个水位」变成「一个区间」——
+ *   - last_seen_uid:已同步到的**最大** UID,向上追新邮件
+ *   - backfill_uid: 已回填到的**最小** UID,向下补历史;降到 1 表示触底
+ * 同步时先追新、再回填,两头收敛,最终覆盖整个 mailbox。
+ *
+ * 默认值取 0 表示「尚未开始回填」,首次同步时由 mail-sync 初始化成本批最小 UID。
+ */
+const SCHEMA_VERSION_1_9_0 = `
+DEFINE FIELD IF NOT EXISTS backfill_uid ON mail_sync_state TYPE int DEFAULT 0;
+`;
+
+export async function migration_1_9_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_9_0);
+  // 已有行补上默认值(DEFAULT 只作用于新写入,存量行需显式回填)
+  await db.query(`UPDATE mail_sync_state SET backfill_uid = 0 WHERE backfill_uid = NONE`);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.9.0', appliedAt = $now,
+     description = 'Add backfill_uid to mail_sync_state (downward backfill cursor; fixes older mail unreachable)'`,
+    { rid: new RecordId('schema_version', '1.9.0'), now },
+  );
+}

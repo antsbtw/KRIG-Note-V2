@@ -18,17 +18,23 @@
  *     capabilities/x-extraction/Host.tsx),partition 无法区分;改用 URL:
  *     `detectXServiceByUrl` 命中 x.com / twitter.com 则跳过(对齐 AI 的 URL 判定)。
  *     X 自带原生右键菜单(x/webview-hook.ts),不能让普通浏览的右键/快捷键/弹窗导流接管。
+ *  4. 排除邮箱 webview —— 邮箱与 AI / X / 普通浏览**同 ws 共用** `persist:webview-${ws}`
+ *     (见 capabilities/mail-service/Host.tsx),partition 无法区分;改用 URL:
+ *     `detectMailServiceByUrl` 命中 mail.google.com / outlook / mail.qq.com / mail.163.com
+ *     则跳过(对齐 AI / X 的 URL 判定)。邮箱自带原生右键菜单(mail/webview-hook.ts),
+ *     漏掉这条会**双菜单**(普通浏览的原生菜单与邮箱菜单同时弹)。
  */
 
 import { session, type WebContents } from 'electron';
 import { WEBVIEW_TRANSLATE_PARTITION } from '@shared/constants/webview';
 import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
 import { detectXServiceByUrl } from '@shared/types/x-service-types';
+import { detectMailServiceByUrl } from '@shared/types/mail-service-types';
 
 /**
  * 判断该 guest 是否为「普通浏览 webview」(需接管交互)。
  *
- * @returns true = 普通浏览,接管;false = 翻译 / AI / X,放过(保持现状)。
+ * @returns true = 普通浏览,接管;false = 翻译 / AI / X / 邮箱,放过(保持现状)。
  */
 export function shouldHandle(guest: WebContents): boolean {
   // 1) 翻译 webview:独立 partition,实例身份比较排除。
@@ -41,6 +47,9 @@ export function shouldHandle(guest: WebContents): boolean {
 
   // 3) X webview:URL 命中 x.com / twitter.com 排除。
   if (url && detectXServiceByUrl(url)) return false;
+
+  // 4) 邮箱 webview:URL 命中网页版邮箱排除(否则双右键菜单)。
+  if (url && detectMailServiceByUrl(url)) return false;
 
   return true;
 }

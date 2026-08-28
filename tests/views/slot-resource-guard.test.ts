@@ -24,121 +24,21 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import {
+  collectSources,
+  scanSources,
+  formatHits,
+  stripComments,
+  type Hit,
+} from '../helpers/source-scan';
 
 const SRC = path.resolve(__dirname, '../../src');
+const REPO_ROOT = path.resolve(__dirname, '../..');
 
-/** 递归收集 .ts / .tsx(跳过 .d.ts)*/
-function collectSources(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      out.push(...collectSources(full));
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-/**
- * 剥掉块注释 / 行注释,但**保留行号**(把注释内容换成等量空白)。
- *
- * 保留行号是为了让失败信息能直接指到文件:行号 —— 「found 3 matches」式的报错
- * 没法指导修复,而这条测试失败时开发者需要的正是"去哪一行改"。
- */
-function stripComments(code: string): string {
-  let out = '';
-  let i = 0;
-  let state: 'code' | 'line' | 'block' | 'string' = 'code';
-  let quote = '';
-  while (i < code.length) {
-    const c = code[i];
-    const next = code[i + 1];
-    if (state === 'code') {
-      if (c === '/' && next === '/') {
-        state = 'line';
-        out += '  ';
-        i += 2;
-        continue;
-      }
-      if (c === '/' && next === '*') {
-        state = 'block';
-        out += '  ';
-        i += 2;
-        continue;
-      }
-      if (c === '"' || c === "'" || c === '`') {
-        state = 'string';
-        quote = c;
-      }
-      out += c;
-      i++;
-      continue;
-    }
-    if (state === 'string') {
-      if (c === '\\') {
-        out += c + (next ?? '');
-        i += 2;
-        continue;
-      }
-      if (c === quote) state = 'code';
-      out += c;
-      i++;
-      continue;
-    }
-    // 注释中:只保留换行,其余替空格(行号不变)
-    if (state === 'line') {
-      if (c === '\n') {
-        state = 'code';
-        out += '\n';
-      } else {
-        out += ' ';
-      }
-      i++;
-      continue;
-    }
-    // block
-    if (c === '*' && next === '/') {
-      state = 'code';
-      out += '  ';
-      i += 2;
-      continue;
-    }
-    out += c === '\n' ? '\n' : ' ';
-    i++;
-  }
-  return out;
-}
-
-interface Hit {
-  file: string;
-  line: number;
-  text: string;
-}
-
-/** 在剥注释后的源码里逐行找 pattern,返回 repo 相对路径 + 行号 */
-function scan(files: string[], pattern: RegExp): Hit[] {
-  const hits: Hit[] = [];
-  for (const file of files) {
-    const code = stripComments(fs.readFileSync(file, 'utf-8'));
-    code.split('\n').forEach((line, idx) => {
-      if (pattern.test(line)) {
-        hits.push({
-          file: path.relative(path.resolve(__dirname, '../..'), file),
-          line: idx + 1,
-          text: line.trim(),
-        });
-      }
-      pattern.lastIndex = 0;
-    });
-  }
-  return hits;
-}
-
-function format(hits: Hit[]): string {
-  return hits.map((h) => `  ${h.file}:${h.line}\n      ${h.text}`).join('\n');
-}
+/** 本文件内的薄封装 —— 省得每个调用点都传 REPO_ROOT */
+const scan = (files: string[], pattern: RegExp): Hit[] =>
+  scanSources(files, pattern, REPO_ROOT);
+const format = formatHits;
 
 const ALL_SOURCES = collectSources(SRC);
 const VIEW_SOURCES = ALL_SOURCES.filter((f) => f.includes(`${path.sep}views${path.sep}`));
@@ -245,6 +145,10 @@ describe('slot-resource 守卫 — 禁止靠 slotBinding 反推「我在哪一�
       'web view 已在任一槽就复用那一栏(否则会挤成分栏);pin-left 搬栏。问的是在场性与目标布局。',
     'src/views/x/x-commands.ts':
       'noteIsOpen:查「有没有 Note 在场」作为提取落点的前置条件。问的是在场性。',
+    'src/views/mail/mail-commands.ts':
+      'mail-view.pin-left:提取后把 mail 搬到 left 腾出 right 给 note(对照布局),' +
+      '与 web-commands 的 pin-left 同款。问的是「mail-view 这个 view 现在占哪个槽」' +
+      '(为了搬它),不是「我这个实例在哪一栏」—— 命令没有自身实例可言。',
     'src/views/ai/ai-commands.ts':
       '查 left=ai + right=note 这一**特定左右组合**(ai-sync 专用布局),非自身槽位。',
     'src/views/note/ai-sync-integration.ts':
