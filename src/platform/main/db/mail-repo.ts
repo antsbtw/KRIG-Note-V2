@@ -89,8 +89,8 @@ export async function createAccount(input: CreateMailAccountInput): Promise<Mail
       imap_host: input.imapHost,
       imap_port: input.imapPort,
       imap_secure: input.imapSecure,
-      smtp_host: input.smtpHost ?? null,
-      smtp_port: input.smtpPort ?? null,
+      smtp_host: input.smtpHost,
+      smtp_port: input.smtpPort,
       created_at: now,
     },
   );
@@ -259,6 +259,18 @@ export async function insertMails(
   let inserted = 0;
 
   for (const m of mails) {
+    /**
+     * ⚠️ option<T> 字段一律传 **undefined**,绝不传 null —— 别「顺手」补 `?? null`。
+     *
+     * SurrealDB 的 NONE 和 NULL 是两个不同的值:`option<T>` 只接受 NONE,
+     * 遇到 NULL 会 fail:
+     *   Couldn't coerce value for field `attachments`:
+     *   Expected `none | array<object>` but found `NULL`
+     * 而 surrealdb SDK 的参数绑定里 undefined → NONE、null → NULL(实测确认)。
+     *
+     * 2026-08-28 真机同步就是死在这:attachments 传了 null,整批 INSERT 全挂,
+     * 一封邮件都落不了库。语句里写死的 `archived_note_id: NONE` 才是正确范式。
+     */
     await db.query(
       `INSERT IGNORE INTO mail {
         mail_id: $mail_id, account_id: $account_id, mailbox: $mailbox, uid: $uid,
@@ -273,20 +285,20 @@ export async function insertMails(
         account_id: accountId,
         mailbox: m.mailbox,
         uid: m.uid,
-        message_id: m.messageId ?? null,
-        thread_key: m.threadKey ?? null,
+        message_id: m.messageId,
+        thread_key: m.threadKey,
         subject: m.subject,
         from_addr: m.fromAddr,
-        from_name: m.fromName ?? null,
+        from_name: m.fromName,
         to_addrs: m.toAddrs,
-        cc_addrs: m.ccAddrs ?? null,
+        cc_addrs: m.ccAddrs,
         date: new Date(m.date),
-        body_text: m.bodyText ?? null,
-        body_html: m.bodyHtml ?? null,
+        body_text: m.bodyText,
+        body_html: m.bodyHtml,
         snippet: m.snippet,
         flags: m.flags,
         has_attach: m.hasAttach,
-        attachments: m.attachments ?? null,
+        attachments: m.attachments,
         synced_at: now,
       },
     );
