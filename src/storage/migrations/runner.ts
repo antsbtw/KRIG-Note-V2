@@ -128,7 +128,25 @@ export async function runMigrations(db: Surreal): Promise<void> {
   for (const mig of MIGRATIONS) {
     if (compareVersions(currentVersion, mig.version) < 0) {
       console.log(`[storage/migrations] applying ${mig.version}: ${mig.description}`);
-      await mig.up(db);
+      try {
+        await mig.up(db);
+      } catch (err) {
+        // fail loud + 停在第一个坏 migration:后续 migration 往往依赖前一个建出的表,
+        // 硬着头皮往下跑只会把「一个 DDL 写错」放大成一串看不懂的次生错误。
+        //
+        // ⚠️ 这条 rethrow 是有来历的(2026-08-27,mail 1.8.8):
+        // `option<array> FLEXIBLE` 是 parse error → **整段 DDL 被服务端拒收**
+        // (不是只跳过那一条)→ 三张表一张没建 → schema_version 也没写。
+        // 而 main/index.ts 对 initStorage 的 catch 只 console.error,app 照常起来了,
+        // 于是现场表现成「migration 根本没跑」,查了整整一轮才找到真因。
+        // 排查捷径记在这:表建了一半 ≠ migration 没跑,先把这行报错找出来。
+        console.error(
+          `[storage/migrations] ✗ migration ${mig.version} FAILED — schema 停在 ${currentVersion},` +
+            ` 后续 migration 已跳过。数据库处于半应用状态,先修这条再启动:`,
+          err,
+        );
+        throw err;
+      }
     }
   }
 }

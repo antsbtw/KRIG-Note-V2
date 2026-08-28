@@ -666,6 +666,9 @@ export async function migration_1_8_7(db: Surreal): Promise<void> {
  */
 const SCHEMA_VERSION_1_8_8 = `
 DEFINE TABLE IF NOT EXISTS mail_account SCHEMAFULL;
+-- 业务 id(ULID),不用内建 record id —— 见 1.8.6 的 readonly 教训。
+-- SCHEMAFULL 表里凡是代码会写/会查的字段都必须显式 DEFINE,漏了就是隐性依赖。
+DEFINE FIELD IF NOT EXISTS account_id ON mail_account TYPE string ASSERT $value != NONE;
 DEFINE FIELD IF NOT EXISTS ws_id       ON mail_account TYPE string ASSERT $value != NONE;
 DEFINE FIELD IF NOT EXISTS service_id  ON mail_account TYPE string;
 DEFINE FIELD IF NOT EXISTS email       ON mail_account TYPE string ASSERT $value != NONE;
@@ -676,10 +679,12 @@ DEFINE FIELD IF NOT EXISTS smtp_host   ON mail_account TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS smtp_port   ON mail_account TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS enabled     ON mail_account TYPE bool;
 DEFINE FIELD IF NOT EXISTS created_at  ON mail_account TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ma_id    ON mail_account FIELDS account_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_ma_ws    ON mail_account FIELDS ws_id;
 DEFINE INDEX IF NOT EXISTS idx_ma_email ON mail_account FIELDS ws_id, email UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS mail SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS mail_id     ON mail TYPE string ASSERT $value != NONE;
 DEFINE FIELD IF NOT EXISTS account_id  ON mail TYPE string ASSERT $value != NONE;
 DEFINE FIELD IF NOT EXISTS mailbox     ON mail TYPE string;
 DEFINE FIELD IF NOT EXISTS uid         ON mail TYPE int;
@@ -696,9 +701,15 @@ DEFINE FIELD IF NOT EXISTS body_html   ON mail TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS snippet     ON mail TYPE string;
 DEFINE FIELD IF NOT EXISTS flags       ON mail TYPE array<string>;
 DEFINE FIELD IF NOT EXISTS has_attach  ON mail TYPE bool;
-DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array> FLEXIBLE;
+-- ⚠️ 必须写 array<object> 而非裸 array:SurrealDB 3.x 的 FLEXIBLE 只接受
+-- 「类型里含 object」的字段,option<array> FLEXIBLE 是 **parse error**。
+-- parse error 会让整段 DDL 被拒(不是只跳过这一条)→ mail / mail_sync_state
+-- 两张表一张都建不出来,而 migration 又被 index.ts 的 catch 降级成 console.error,
+-- 表现就是「migration 看着没跑」。2026-08-27 排查烧了整轮,别再改回裸 array。
+DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array<object>> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS archived_note_id ON mail TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS synced_at   ON mail TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_mail_id       ON mail FIELDS mail_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_mail_acct_uid ON mail FIELDS account_id, mailbox, uid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_mail_msgid    ON mail FIELDS message_id;
 DEFINE INDEX IF NOT EXISTS idx_mail_date     ON mail FIELDS date;

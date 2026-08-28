@@ -1,64 +1,76 @@
-# 邮箱模块 阶段 1 交接 — IMAP 同步卡在 migration
+# 邮箱模块 阶段 1 交接 — IMAP 同步(migration 卡点已解,待真机验收)
 
-> 2026-08-27 · 分支 `feature/mail-module`(11 commits,未合 main)
+> 2026-08-27 立 · 2026-08-28 更新(migration 卡点已解)
+> 分支 `feature/mail-module`(未合 main)
 > 设计总纲见 [2026-08-26-mail-module-design.md](./2026-08-26-mail-module-design.md)
 
 ## 一句话
 
-**阶段 0(webview)已全部验收通过;阶段 1(IMAP)代码写完但跑不通 —— 卡在
-migration 1.8.8 没生效,三张表没建出来。** 下一步是定位 migration 为什么没跑。
+**阶段 0(webview)已全部验收通过;阶段 1(IMAP)的 migration 卡点已于 2026-08-28
+定位并修复 —— 三张表已建出。** 下一步是真机跑 §6 验收清单(测试连接 → 同步)。
 
 ---
 
-## 1. 当前卡点(接手第一件事)
+## 1. ~~当前卡点~~ 已解决(2026-08-28)
 
-### 症状
-
-删除邮箱账号时弹窗报:
+### 真因:DDL parse error 让**整段** migration 被服务端拒收
 
 ```
-删除失败:The table 'mail' does not exist
+DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array> FLEXIBLE;
+                                                                 ^^^^^^^^
+Parse error: FLEXIBLE can only be used with types containing object
 ```
 
-### 已知
+SurrealDB 3.x 的 `FLEXIBLE` 只接受「类型里含 object」的字段。
+修法:`option<array<object>> FLEXIBLE`(attachments 本来就是对象数组)。
 
-- `migration_1_8_8` **代码是对的**:`schema.ts:717` 定义了 up 函数,
-  `SCHEMA_VERSION_1_8_8`(schema.ts:667)确实 DEFINE 了三张表,
-  末尾也 UPSERT 了 schema_version(这两条是历史上最常漏的,已排除)
-- `runner.ts:8` import 了、`runner.ts:103-106` 注册进 MIGRATIONS 数组了
-- 但运行时表不存在 → **migration 没被执行**
+### 为什么查了一整轮(两条放大器 + 一个假象)
 
-### 三个待验假设(按可能性排序)
+1. **parse error 会让整段 DDL 被拒,不是只跳过出错那一条**。
+   45 条 DDL 错 1 条 → 三张表一张都建不出来。
+2. `main/index.ts:127` 对 `initStorage()` 的 catch 只 `console.error` 就放行,
+   app 照常起来,报错淹没在启动日志里 → 现场表现成「migration 根本没跑」。
+   **已修**:`runner.ts` 改成单条 migration 失败 fail loud + rethrow,
+   并停在第一个坏 migration(后续 migration 常依赖前一个建的表)。
+3. ⚠️ **假象**:`mail_account` 表当时**存在**,于是「表建了一半」看着像
+   migration 跑到一半崩了。真相是它由业务代码 `INSERT INTO mail_account`
+   触发 SurrealDB 自动建的 **schemaless** 表,跟 migration 无关。
+   判据:`INFO FOR TABLE x` 显示 **0 字段 0 索引 = 自动建的,不是 migration 建的**。
 
-**假设 A:库版本已 ≥ 1.8.8,migration 被跳过**
-`runner.ts` 的逻辑是 `compareVersions(currentVersion, mig.version) < 0` 才跑。
-若 schema_version 表里已有一条 1.8.8(比如某次跑到一半、表没建成但版本先写了),
-之后永远不会重跑。
+### 三个假设的结局
 
-验证方法(app 运行时,DevTools console 或加临时 IPC):
-```sql
-SELECT version, appliedAt FROM schema_version ORDER BY appliedAt DESC LIMIT 5
+| 假设 | 结论 |
+|---|---|
+| A 库版本已 ≥1.8.8 被跳过 | ❌ 否。实测最高版本 1.8.7,`schema_version` 里没有 1.8.8 |
+| B migration 抛错被吞 | ✅ **就是它** |
+| C app 跑的是旧代码 | ❌ 否 |
+
+### 排查捷径(以后同类问题直接用)
+
+app 在跑时**直接打 HTTP 问库**,别靠读代码脑补:
+
+```bash
+PW=$(python3 -c "import json;print(json.load(open('$HOME/Library/Application Support/KRIG Note V2/.db-credentials'))['password'])")
+curl -s -X POST http://127.0.0.1:8533/sql -u "root:$PW" \
+  -H 'Accept: application/json' -H 'surreal-ns: krig' -H 'surreal-db: krig_note_v2' \
+  -d 'INFO FOR DB;'
 ```
-若已有 1.8.8 → 删掉那条记录重启,或临时把版本号改 1.8.9 重跑。
 
-**假设 B:migration 执行时抛错被吞**
-`runMigrations` 外层有 catch。若 `SCHEMA_VERSION_1_8_8` 里某条 DDL 语法错
-(SurrealDB 3.x 对 `DEFINE FIELD ... TYPE option<array>` 之类挑剔),
-会 throw → 表建了一半 → 但错误可能只 warn 没 fail loud。
+- `INFO FOR DB` — 表在不在
+- `INFO FOR TABLE mail` — 字段/索引数(0 字段 = 自动建的 schemaless 表)
+- `SELECT version, appliedAt FROM schema_version ORDER BY appliedAt DESC LIMIT 5` — 版本
+- 整段 DDL 用 `--data-binary @file` 打过去,服务端会报出第几行第几列错
 
-验证方法:启动时看主进程日志有没有
-`[storage/migrations] applying 1.8.8:` 这一行,以及紧随其后的报错。
+### 本轮改动
 
-**假设 C:app 跑的是旧代码**
-⚠️ 这个已经骗过一次(见 §3 坑 3)。Vite HMR 只热更 renderer,
-主进程改动必须 **Cmd+Q 完全退出重启**。若上次没真正重启,
-migration 代码根本没进主进程。
+| 文件 | 改动 |
+|---|---|
+| `storage/surreal/schema.ts` | `attachments` 改 `option<array<object>> FLEXIBLE`(+ 防回退注释) |
+| `storage/surreal/schema.ts` | 补 DEFINE `mail_account.account_id` / `mail.mail_id` + UNIQUE 索引 —— 这两个业务 ULID 代码在写也在查,SCHEMAFULL 表里却没声明(本版本实测不丢数据,但属隐性依赖)。铁律:SCHEMAFULL 表里凡代码会写/会查的字段都要显式 DEFINE |
+| `storage/migrations/runner.ts` | 单条 migration 失败 fail loud + rethrow,不再让半应用状态静默放行 |
 
-### 建议排查顺序
-
-1. 完全退出 app(Cmd+Q),重新 `npm start`
-2. 看主进程日志有没有 `applying 1.8.8`
-3. 有 → 看紧随的报错(假设 B);没有 → 查 schema_version 表(假设 A)
+三张表已用修正后的 DDL 应用到本机库(49 条语句全绿,已有账号行完好)。
+`schema_version` 的 1.8.8 行留给下次正常启动写入(migration 幂等,会自然补上)。
 
 ---
 
@@ -75,7 +87,7 @@ migration 代码根本没进主进程。
 | ⊞ 开右栏(复用全局 SlotPicker) | ✅ |
 | ⚙ 账号弹窗(从 navSide 挪来) | ✅ |
 
-### 阶段 1(IMAP)—— 代码完成,链路未跑通 ⚠️
+### 阶段 1(IMAP)—— 代码完成 + 建表已通,IMAP 链路待真机验收 ⚠️
 
 已写完:
 - `migration 1.8.8`:mail_account / mail / mail_sync_state 三表
@@ -85,7 +97,8 @@ migration 代码根本没进主进程。
 - `mail-repo.ts`:三表 CRUD
 - 账号面板 UI(⚙ 弹窗):新建 / 测试连接 / 同步 / 改密码 / 删除
 
-**从没成功连上过 Gmail** —— 卡在上面的 migration 问题。
+**还没成功连上过 Gmail** —— 此前卡在 §1 的 migration 问题(已解)。
+三张表已建出,下一步就是按 §6 走一遍:测试连接 → 同步。
 
 ---
 
@@ -187,7 +200,10 @@ src/views/mail/                            MailView + 命令 + ⚙ 账号弹窗
 
 ## 6. 阶段 1 跑通后的验收清单
 
-migration 修好后按顺序验:
+⚠️ **先 Cmd+Q 完全退出 app 再 `npm start`**(坑 3:主进程改动不走 HMR)。
+启动日志应看到 `[storage/migrations] applying 1.8.8:` 且其后**无**报错。
+
+然后按顺序验:
 
 1. **添加账号** → 填 Gmail + 应用专用密码(空格随便粘,代码会去掉)
 2. **测试连接** → 期望「连接正常,共 N 个文件夹」
