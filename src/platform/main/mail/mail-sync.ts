@@ -41,7 +41,7 @@
  * 增量机制,不该自作聪明换掉。
  */
 
-import type { MailAccount, MailSyncResult } from '@shared/types/mail-types';
+import { MAIL_SYNC_BATCH_LIMIT, type MailAccount, type MailSyncResult } from '@shared/types/mail-types';
 import { connect, openMailbox, fetchSince, fetchBefore } from './imap-client';
 import {
   getSyncState,
@@ -136,6 +136,8 @@ export async function syncMailbox(
         backfilled = await insertMails(account.id, older);
         // 回填游标下移到这批的最小 UID
         backfillUid = older.reduce((m, x) => (x.uid < m ? x.uid : m), backfillUid);
+        // 没取满一批 = 区间已被掏空,直接判触底,不必等下一轮再空跑一次
+        if (older.length < MAIL_SYNC_BATCH_LIMIT) backfillUid = 1;
       } else {
         // 区间内一封都没有 = 已经触底
         backfillUid = 1;
@@ -152,6 +154,9 @@ export async function syncMailbox(
     });
 
     const total = await countMails(account.id, mailbox);
+    // ⚠️ 触底只认「回填那一轮没取满」,不能拿 backfillUid 跟 1 比大小来推断 ——
+    // 服务端最小 UID 未必是 1(删过的邮件会留下 UID 空洞,真机上最小就是 2),
+    // 按「降到 1 才算完」会永远判不成 done,用户被一直提示「还能继续同步」。
     const backfillDone = backfillUid <= 1;
 
     // 对账:服务端有多少 vs 本地有多少。不等就说明没同步完,如实告诉用户。
