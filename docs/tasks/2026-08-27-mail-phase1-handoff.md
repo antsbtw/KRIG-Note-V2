@@ -1,53 +1,33 @@
-# 邮箱模块 阶段 1 交接 — IMAP 同步(migration 卡点已解,待真机验收)
+# 邮箱模块 阶段 1 — ✅ 全部验收通过(2026-08-28)
 
-> 2026-08-27 立 · 2026-08-28 更新(migration 卡点已解)
+> 2026-08-27 立 · 2026-08-28 阶段 1 收工
 > 分支 `feature/mail-module`(未合 main)
 > 设计总纲见 [2026-08-26-mail-module-design.md](./2026-08-26-mail-module-design.md)
 
 ## 一句话
 
-**阶段 0(webview)已全部验收通过;阶段 1(IMAP)的 migration 卡点已于 2026-08-28
-定位并修复 —— 三张表已建出。** 下一步是真机跑 §6 验收清单(测试连接 → 同步)。
+**阶段 0(webview)与阶段 1(IMAP 只读同步)均已真机验收通过。**
+真机实测:2074 封邮件与服务端完全对平、删账号三处孤儿清净。可以开阶段 2。
 
 ---
 
-## 1. ~~当前卡点~~ 已解决(2026-08-28)
+## 1. 本轮修掉的五个 bug(2026-08-27 → 08-28)
 
-### 真因:DDL parse error 让**整段** migration 被服务端拒收
+排查从「migration 看着没跑」开始,一层层剥出五个独立缺陷。**共同教训:
+每一个都是"看起来成功了"而实际没有** —— 详见每条的判据。
 
-```
-DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array> FLEXIBLE;
-                                                                 ^^^^^^^^
-Parse error: FLEXIBLE can only be used with types containing object
-```
-
-SurrealDB 3.x 的 `FLEXIBLE` 只接受「类型里含 object」的字段。
-修法:`option<array<object>> FLEXIBLE`(attachments 本来就是对象数组)。
-
-### 为什么查了一整轮(两条放大器 + 一个假象)
-
-1. **parse error 会让整段 DDL 被拒,不是只跳过出错那一条**。
-   45 条 DDL 错 1 条 → 三张表一张都建不出来。
-2. `main/index.ts:127` 对 `initStorage()` 的 catch 只 `console.error` 就放行,
-   app 照常起来,报错淹没在启动日志里 → 现场表现成「migration 根本没跑」。
-   **已修**:`runner.ts` 改成单条 migration 失败 fail loud + rethrow,
-   并停在第一个坏 migration(后续 migration 常依赖前一个建的表)。
-3. ⚠️ **假象**:`mail_account` 表当时**存在**,于是「表建了一半」看着像
-   migration 跑到一半崩了。真相是它由业务代码 `INSERT INTO mail_account`
-   触发 SurrealDB 自动建的 **schemaless** 表,跟 migration 无关。
-   判据:`INFO FOR TABLE x` 显示 **0 字段 0 索引 = 自动建的,不是 migration 建的**。
-
-### 三个假设的结局
-
-| 假设 | 结论 |
-|---|---|
-| A 库版本已 ≥1.8.8 被跳过 | ❌ 否。实测最高版本 1.8.7,`schema_version` 里没有 1.8.8 |
-| B migration 抛错被吞 | ✅ **就是它** |
-| C app 跑的是旧代码 | ❌ 否 |
+| # | 症状 | 真因 | commit |
+|---|---|---|---|
+| 1 | 三张表一张没建,像 migration 没跑 | `option<array> FLEXIBLE` 是 **parse error** → **整段 DDL 被服务端拒收**(不是只跳过这一条)。放大器:`main/index.ts` 对 initStorage 的 catch 只 console.error 就放行 | `b7779894` |
+| 2 | 点「同步」屏幕毫无反应 | 同步/测试/改密码三个结果块并列渲染、互不排斥,各自只清自己那格 → 上次「连接正常」一直挂着 | `86e59a2f` |
+| 3 | 整批 INSERT 全挂,一封落不了库 | `option<T>` 只认 `NONE` 不认 `NULL`;SDK 绑定 `undefined→NONE`、`null→NULL`。9 处 `?? null` 全是 bug | `2bafd96b` |
+| 4 | 附件带 cid 写不进 | `DEFINE FIELD` 自动派生的 `attachments.*` **不继承 FLEXIBLE**;且它已占位,`IF NOT EXISTS` 会被**静默跳过** → 必须 REMOVE 再 DEFINE | `bb305a88` |
+| 5 | 2074 封只同步到 201 封就不动,UI 却报成功 | 取「最新 N 封」+ 游标只向上推进 = 更旧的邮件**永远够不着**(静默丢数据) | `7d02556a` |
+| 5b | 拉完了仍提示「可继续同步」 | 触底判据假设服务端最小 UID=1,但删信会留 UID 空洞(真机最小是 2) | `ec1cd4be` |
 
 ### 排查捷径(以后同类问题直接用)
 
-app 在跑时**直接打 HTTP 问库**,别靠读代码脑补:
+**app 在跑时直接打 HTTP 问库,别靠读代码脑补**:
 
 ```bash
 PW=$(python3 -c "import json;print(json.load(open('$HOME/Library/Application Support/KRIG Note V2/.db-credentials'))['password'])")
@@ -57,20 +37,11 @@ curl -s -X POST http://127.0.0.1:8533/sql -u "root:$PW" \
 ```
 
 - `INFO FOR DB` — 表在不在
-- `INFO FOR TABLE mail` — 字段/索引数(0 字段 = 自动建的 schemaless 表)
-- `SELECT version, appliedAt FROM schema_version ORDER BY appliedAt DESC LIMIT 5` — 版本
+- `INFO FOR TABLE mail` — 字段/索引(**0 字段 = 业务 INSERT 自动建的 schemaless 表,
+  不是 migration 建的**;本轮就因这个假象被带偏一轮)
 - 整段 DDL 用 `--data-binary @file` 打过去,服务端会报出第几行第几列错
-
-### 本轮改动
-
-| 文件 | 改动 |
-|---|---|
-| `storage/surreal/schema.ts` | `attachments` 改 `option<array<object>> FLEXIBLE`(+ 防回退注释) |
-| `storage/surreal/schema.ts` | 补 DEFINE `mail_account.account_id` / `mail.mail_id` + UNIQUE 索引 —— 这两个业务 ULID 代码在写也在查,SCHEMAFULL 表里却没声明(本版本实测不丢数据,但属隐性依赖)。铁律:SCHEMAFULL 表里凡代码会写/会查的字段都要显式 DEFINE |
-| `storage/migrations/runner.ts` | 单条 migration 失败 fail loud + rethrow,不再让半应用状态静默放行 |
-
-三张表已用修正后的 DDL 应用到本机库(49 条语句全绿,已有账号行完好)。
-`schema_version` 的 1.8.8 行留给下次正常启动写入(migration 幂等,会自然补上)。
+- JS 侧行为(如 `undefined` vs `null` 怎么绑定)写个 .mjs 连 ws:// 实测,
+  **脚本必须放仓库内**否则模块解析不到
 
 ---
 
@@ -87,20 +58,33 @@ curl -s -X POST http://127.0.0.1:8533/sql -u "root:$PW" \
 | ⊞ 开右栏(复用全局 SlotPicker) | ✅ |
 | ⚙ 账号弹窗(从 navSide 挪来) | ✅ |
 
-### 阶段 1(IMAP)—— 代码完成 + 建表已通,IMAP 链路待真机验收 ⚠️
+### 阶段 1(IMAP 只读同步)—— 真机全部验收通过 ✅
 
-已写完:
-- `migration 1.8.8`:mail_account / mail / mail_sync_state 三表
-- `imap-client.ts`:连接 + 六类错误分类文案
-- `mail-sync.ts`:增量同步(UIDVALIDITY 校验 + UID > last_seen_uid)
+| 验收项 | 结果 |
+|---|---|
+| 添加账号 | ✅ |
+| 测试连接 | ✅ 连接正常,共 9 个文件夹 |
+| **同步** | ✅ **本地 2074 / 服务端 2074 完全对平**,零重复(2074 行 = 2074 个唯一 UID) |
+| 删除账号 | ✅ 三处孤儿全清:mail 2074→0、游标 1→0、账号 1→0、safeStorage 凭据 1→空 |
+
+数据质量(2074 封全量抽查):标题 / 发件人 / 正文 / 日期 **零缺失**;
+33 封带附件、40 个附件明细,**其中 3 个带 cid**(即坑 4 那个修复的真机验证)。
+
+回填收敛轨迹:游标 1881→1575→1132→789→540→321→75→2,最后一轮 +74 收尾。
+
+⚠️ **2074 不是 1341**:Gmail 网页按**会话**折叠显示 1341,IMAP 按**单封**计。
+服务端 EXISTS 就是 2074,别再拿网页上的数字当对账基准。
+
+UID 有 624 段空洞、共 1046 个空缺 —— 那是**删信留下的**(UID 只增不复用),
+不是回填漏批。判据:漏批会是少数几个连续 200 长的大段,不是几百个小段。
+
+已写完的模块:
+- `migration 1.8.8/1.8.9/1.9.0`:三张表 + attachments 元素放行 + 回填游标
+- `imap-client.ts`:连接 + 错误分类 + fetchSince/fetchBefore(共用 fetchRange)
+- `mail-sync.ts`:双向游标同步(追新 + 回填)+ 与服务端 EXISTS 对账
 - `credential-store.ts`:safeStorage 加密,密码不入 DB
 - `mail-repo.ts`:三表 CRUD
 - 账号面板 UI(⚙ 弹窗):新建 / 测试连接 / 同步 / 改密码 / 删除
-
-**还没成功连上过 Gmail** —— 此前卡在 §1 的 migration 问题(已解)。
-三张表已建出,下一步就是按 §6 走一遍:测试连接 → 同步。
-
----
 
 ## 3. 已排除的可能(别重复排查)
 
@@ -198,23 +182,13 @@ src/views/mail/                            MailView + 命令 + ⚙ 账号弹窗
 
 ---
 
-## 6. 阶段 1 跑通后的验收清单
+## 6. 已知限制(设计如此,非 bug)
 
-⚠️ **先 Cmd+Q 完全退出 app 再 `npm start`**(坑 3:主进程改动不走 HMR)。
-启动日志应看到 `[storage/migrations] applying 1.8.8:` 且其后**无**报错。
-
-然后按顺序验:
-
-1. **添加账号** → 填 Gmail + 应用专用密码(空格随便粘,代码会去掉)
-2. **测试连接** → 期望「连接正常,共 N 个文件夹」
-3. **同步** → 期望「本次新增 N 封 · 本地共 M 封」
-4. **删除账号** → 期望能删掉(现在已容错,不会被表不存在阻断)
-
-已知限制(设计如此,非 bug):
-- 单次同步上限 **200 封**(防首次同步卡死),你的收件箱 1341 封需点多次
-- 只同步 **INBOX**,多文件夹选择留阶段 2
-
----
+- 单次同步上限 **200 封**(`MAIL_SYNC_BATCH_LIMIT`,唯一来源在 `shared/types/mail-types.ts`
+  —— renderer 也要显示这个数字,别在主进程侧另立常量)。2074 封约需 10 轮。
+- 只同步 **INBOX**,多文件夹选择留阶段 2。
+- 已归档到 note 的邮件:删账号只删 `mail` 表记录,**不删 note**(符合 D4,
+  note 一旦生成就是用户的笔记)。
 
 ## 7. 后续阶段(未开工)
 
