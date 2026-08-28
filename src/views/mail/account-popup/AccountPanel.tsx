@@ -73,9 +73,26 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
     setRuntime((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }, []);
 
+  /**
+   * ⚠️ 每个动作都要清掉**其它动作**的残留结果。
+   *
+   * 这几个结果块(同步结果 / 测试结果 / 密码已更新)是并列渲染的兄弟节点,
+   * 谁都不互斥。只清自己那一格的话,上一个动作的提示会一直挂在面板上 ——
+   * 用户点了「同步」,屏幕上却还是上一次测试连接留下的「连接正常,共 N 个文件夹」,
+   * 看起来就像「同步没反应」(2026-08-28 实际踩到)。
+   *
+   * 同族坑见 memory「EPUB菜单两分支互斥」:并列的分支必须显式互斥,
+   * 别指望渲染顺序替你兜底。
+   */
   const handleSync = useCallback(
     async (account: MailAccount) => {
-      patchRuntime(account.id, { syncing: true, lastResult: undefined });
+      patchRuntime(account.id, {
+        syncing: true,
+        lastResult: undefined,
+        testError: undefined,
+        mailboxes: undefined,
+        passwordSaved: false,
+      });
       const result = await mail.sync(account.id);
       patchRuntime(account.id, { syncing: false, lastResult: result });
     },
@@ -84,7 +101,13 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
 
   const handleTest = useCallback(
     async (account: MailAccount) => {
-      patchRuntime(account.id, { testing: true, testError: undefined, mailboxes: undefined });
+      patchRuntime(account.id, {
+        testing: true,
+        testError: undefined,
+        mailboxes: undefined,
+        lastResult: undefined,
+        passwordSaved: false,
+      });
       const result = await mail.testAccount(account.id);
       patchRuntime(account.id, {
         testing: false,
