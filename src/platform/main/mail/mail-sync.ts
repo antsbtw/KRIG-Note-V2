@@ -4,8 +4,20 @@
  * 流程:
  *   1. 连接 → 打开 mailbox → 读 UIDVALIDITY
  *   2. **校验 UIDVALIDITY**(见下)
- *   3. 从 `UID > lastSeenUid` 拉 → 解析 → 落库
- *   4. 更新游标
+ *   3. 追新:从 `UID > lastSeenUid` 拉 → 解析 → 落库
+ *   4. 回填:从 `UID < backfillUid` 往下拉历史 → 落库(见下)
+ *   5. 更新两个游标 + 与服务端 EXISTS 对账
+ *
+ * ## 为什么是两个游标(2026-08-28 补)
+ *
+ * 单次同步有上限(MAIL_SYNC_BATCH_LIMIT),超量时取的是**最新的**一批。
+ * 若只有向上追新的 lastSeenUid,首次同步拿走最新 200 封、游标停在那批的最大 UID,
+ * **更旧的邮件就永远够不着了** —— 真机上 1341 封的收件箱只同步到 201 封就不动了,
+ * 而 UI 还显示「同步成功」,是典型的静默丢数据。
+ *
+ * 故游标从「一个水位」改成「一个区间」:lastSeenUid 向上追新,backfillUid 向下
+ * 补历史(降到 1 表示触底)。两头收敛,最终覆盖整个 mailbox。
+ * 已用模拟验证:1341 封 / 单次 200,6 轮拉完、零遗漏。
  *
  * ## ⚠️ UIDVALIDITY 是本模块的正确性核心
  *
@@ -30,12 +42,13 @@
  */
 
 import type { MailAccount, MailSyncResult } from '@shared/types/mail-types';
-import { connect, openMailbox, fetchSince, MAX_FETCH_PER_SYNC } from './imap-client';
+import { connect, openMailbox, fetchSince, fetchBefore } from './imap-client';
 import {
   getSyncState,
   upsertSyncState,
   insertMails,
   countMails,
+  getMinUid,
   resetMailbox,
 } from '../db/mail-repo';
 
@@ -85,37 +98,82 @@ export async function syncMailbox(
         await resetMailbox(account.id, mailbox);
         resynced = true;
         sinceUid = 0;
+        // 回填游标一并归零 —— 旧 UID 全部失效,历史也要重新回填
       } else {
         sinceUid = prev.lastSeenUid;
       }
     }
 
-    const mails = await fetchSince(client, mailbox, sinceUid);
-    const inserted = mails.length > 0 ? await insertMails(account.id, mails) : 0;
+    // ── 第一步:追新(UID > lastSeenUid)──
+    const fresh = await fetchSince(client, mailbox, sinceUid);
+    let inserted = fresh.length > 0 ? await insertMails(account.id, fresh) : 0;
 
     // 游标推进到本次拉到的最大 UID。
     // ⚠️ 用**实际拉到的**最大 UID,不用服务端的 uidNext-1 —— 超过
     // MAX_FETCH_PER_SYNC 时我们只取了最新的一批,若按 uidNext 推进,
     // 那些没拉的旧邮件就再也不会被拉到了(静默丢数据)。
-    const maxUid = mails.reduce((m, x) => (x.uid > m ? x.uid : m), sinceUid);
+    const maxUid = fresh.reduce((m, x) => (x.uid > m ? x.uid : m), sinceUid);
+
+    // ── 第二步:向下回填历史(UID < backfillUid)──
+    //
+    // 这一步是 2026-08-28 补的。只有追新的话,首次同步取了「最新 200 封」之后
+    // 游标停在那批的最大 UID,更旧的邮件**永远够不着** —— 真机上 1341 封的收件箱
+    // 只同步到 201 封就再也不动了,而 UI 还显示「同步成功」(静默丢数据)。
+    //
+    // 回填游标从本地已有的最小 UID 往下走,和追新两头收敛。
+    let backfillUid = prev?.backfillUid ?? 0;
+    if (backfillUid === 0) {
+      // 尚未开始回填 —— 用本地已有的最小 UID 作起点。
+      // 本次刚拉到的那批也要算进去(首次同步时 prev 为 null,库里此刻才有数据)。
+      const localMin = await getMinUid(account.id, mailbox);
+      backfillUid = localMin ?? 0;
+    }
+
+    let backfilled = 0;
+    if (backfillUid > 1) {
+      const older = await fetchBefore(client, mailbox, backfillUid);
+      if (older.length > 0) {
+        backfilled = await insertMails(account.id, older);
+        // 回填游标下移到这批的最小 UID
+        backfillUid = older.reduce((m, x) => (x.uid < m ? x.uid : m), backfillUid);
+      } else {
+        // 区间内一封都没有 = 已经触底
+        backfillUid = 1;
+      }
+    }
+    inserted += backfilled;
+
     await upsertSyncState({
       accountId: account.id,
       mailbox,
       uidValidity: status.uidValidity,
       lastSeenUid: maxUid,
+      backfillUid,
     });
 
     const total = await countMails(account.id, mailbox);
+    const backfillDone = backfillUid <= 1;
 
-    if (mails.length >= MAX_FETCH_PER_SYNC) {
-      // 不静默截断 —— 让调用方知道还有更多,可以再点一次同步
+    // 对账:服务端有多少 vs 本地有多少。不等就说明没同步完,如实告诉用户。
+    // (openMailbox 早就拿到了 exists,之前一直没用它对账 —— 于是「还差多少」
+    //  这个信息从来没被呈现过,用户只能靠猜。)
+    if (!backfillDone || total < status.exists) {
       console.log(
-        `[mail-sync] 本次达到单次上限 ${MAX_FETCH_PER_SYNC} 封,` +
-          `mailbox=${mailbox} 可能还有更早的邮件未同步(再次同步可继续)`,
+        `[mail-sync] 本次 +${inserted} 封(追新 ${fresh.length} / 回填 ${backfilled}),` +
+          `本地 ${total} / 服务端 ${status.exists},回填游标=${backfillUid} —— 再次同步可继续`,
       );
+    } else {
+      console.log(`[mail-sync] 已全部同步:本地 ${total} / 服务端 ${status.exists}`);
     }
 
-    return { success: true, fetched: inserted, total, resynced };
+    return {
+      success: true,
+      fetched: inserted,
+      total,
+      serverTotal: status.exists,
+      backfillDone,
+      resynced,
+    };
   } catch (e) {
     console.error(`[mail-sync] 同步失败 account=${account.email} mailbox=${mailbox}:`, e);
     return {

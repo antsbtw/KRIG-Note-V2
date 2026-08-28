@@ -26,6 +26,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useWsId } from '@workspace/workspace-context/ws-id-context';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { MailServiceApi, MailAccount, MailSyncResult } from '@capabilities/mail-service';
+import { MAIL_SYNC_BATCH_LIMIT } from '@shared/types/mail-types';
 import type { PopupCloseProps } from '@slot/interaction-registries/popup-registry/popup-types';
 import {
   MAIL_SERVICE_PROFILES,
@@ -286,6 +287,22 @@ export function AccountPanel({ onClose }: PopupCloseProps) {
                       </div>
                     )}
                     本次新增 {rt.lastResult.fetched} 封 · 本地共 {rt.lastResult.total} 封
+                    {typeof rt.lastResult.serverTotal === 'number' && (
+                      <> / 服务端 {rt.lastResult.serverTotal} 封</>
+                    )}
+                    {/*
+                      对账没平就明说「还差多少、要继续点」——
+                      单次同步有上限,一次点不完是常态。不提示的话用户会以为
+                      「同步完了就这些」(真机上就是这么误判的)。
+                    */}
+                    {rt.lastResult.total > 0 &&
+                      typeof rt.lastResult.serverTotal === 'number' &&
+                      rt.lastResult.total < rt.lastResult.serverTotal && (
+                        <div className="krig-mail-panel__warn">
+                          还有 {rt.lastResult.serverTotal - rt.lastResult.total} 封未同步 ——
+                          单次上限 {MAIL_SYNC_BATCH_LIMIT} 封,再点几次「同步」继续。
+                        </div>
+                      )}
                     {rt.lastResult.fetched === 0 && rt.lastResult.total === 0 && (
                       <div className="krig-mail-panel__warn">
                         收件箱为空,或该文件夹没有邮件。

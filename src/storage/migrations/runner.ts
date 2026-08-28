@@ -5,7 +5,7 @@
  * 幂等: DEFINE TABLE/FIELD/INDEX 在 SurrealDB 是 idempotent (重复定义不报错)。
  */
 import type { Surreal } from 'surrealdb';
-import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1, migration_1_8_0, migration_1_8_1, migration_1_8_2, migration_1_8_3, migration_1_8_4, migration_1_8_5, migration_1_8_6, migration_1_8_7, migration_1_8_8, migration_1_8_9 } from '../surreal/schema';
+import { initSchema, migration_1_1_0, migration_1_2_0, migration_1_3_0, migration_1_4_0, migration_1_5_0, migration_1_6_0, migration_1_7_0, migration_1_7_1, migration_1_8_0, migration_1_8_1, migration_1_8_2, migration_1_8_3, migration_1_8_4, migration_1_8_5, migration_1_8_6, migration_1_8_7, migration_1_8_8, migration_1_8_9, migration_1_9_0 } from '../surreal/schema';
 
 interface Migration {
   version: string;
@@ -108,6 +108,11 @@ const MIGRATIONS: Migration[] = [
     version: '1.8.9',
     description: 'Fix mail.attachments element constraint (auto-derived attachments.* does not inherit FLEXIBLE)',
     up: migration_1_8_9,
+  },
+  {
+    version: '1.9.0',
+    description: 'Add backfill_uid to mail_sync_state (downward backfill; older mail was unreachable)',
+    up: migration_1_9_0,
   },
 ];
 

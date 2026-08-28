@@ -105,6 +105,15 @@ export interface MailRecord {
   syncedAt: number;
 }
 
+/**
+ * 单次同步最多拉多少封 —— 防止首次同步把几万封邮件一次性灌进来。
+ *
+ * 放在 shared 是因为 **renderer 也要用**:同步结果面板要告诉用户
+ * 「单次上限 N 封,再点几次继续」。放主进程侧的话 renderer 只能抄一份常量,
+ * 迟早两边对不上(用户看到的数字和实际行为不符)。
+ */
+export const MAIL_SYNC_BATCH_LIMIT = 200;
+
 // ═══════════════════════════════════════════════════════
 // §3  同步游标
 // ═══════════════════════════════════════════════════════
@@ -120,8 +129,19 @@ export interface MailSyncState {
   accountId: string;
   mailbox: string;
   uidValidity: number;
-  /** 已同步到的最大 UID;下次从 `UID > lastSeenUid` 拉 */
+  /** 已同步到的最大 UID;追新时从 `UID > lastSeenUid` 拉 */
   lastSeenUid: number;
+  /**
+   * 已回填到的最小 UID;回填时从 `UID < backfillUid` 往下拉。
+   *
+   * 0 = 尚未开始回填(首次同步后由 mail-sync 初始化成本批最小 UID);
+   * 1 = 已触底,该 mailbox 的历史邮件全部同步完毕。
+   *
+   * ⚠️ 没有这个游标就会丢数据:单次同步有上限,首次只取最新的一批,
+   * 若只靠 lastSeenUid 向上追,更旧的邮件永远够不着(2026-08-28 真机踩到,
+   * 1341 封只同步到 201 封就不动了)。
+   */
+  backfillUid: number;
   lastSyncAt: number;
 }
 
@@ -135,6 +155,13 @@ export interface MailSyncResult {
   fetched: number;
   /** 该 mailbox 累计已同步数 */
   total: number;
+  /**
+   * 服务端该 mailbox 的邮件总数(IMAP EXISTS)。
+   * 和 total 一起构成对账:两者不等就说明还没同步完,UI 据此提示用户继续。
+   */
+  serverTotal?: number;
+  /** 历史邮件是否已全部回填到位(backfillUid 触底) */
+  backfillDone?: boolean;
   /**
    * UIDVALIDITY 变化触发了全量重来(需要提示用户,因为耗时会明显变长)。
    */

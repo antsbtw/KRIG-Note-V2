@@ -28,7 +28,12 @@
 
 import { ImapFlow, type ListResponse } from 'imapflow';
 import { simpleParser, type ParsedMail } from 'mailparser';
-import type { MailAccount, MailRecord, MailAttachmentMeta } from '@shared/types/mail-types';
+import {
+  MAIL_SYNC_BATCH_LIMIT,
+  type MailAccount,
+  type MailRecord,
+  type MailAttachmentMeta,
+} from '@shared/types/mail-types';
 import { getMailPassword } from './credential-store';
 
 /**
@@ -43,8 +48,11 @@ import { getMailPassword } from './credential-store';
 const CONNECT_TIMEOUT_MS = 30_000;
 const SOCKET_IDLE_TIMEOUT_MS = 300_000;
 
-/** 单次同步最多拉多少封 —— 防止首次同步把几万封邮件一次性灌进来 */
-const MAX_FETCH_PER_SYNC = 200;
+/**
+ * 单次同步上限 —— 唯一来源在 shared(renderer 的同步结果面板也要显示这个数字)。
+ * 别在这里另立一个常量,两边对不上时用户看到的提示就是错的。
+ */
+const MAX_FETCH_PER_SYNC = MAIL_SYNC_BATCH_LIMIT;
 
 /** 列表页预览截断长度 */
 const SNIPPET_LEN = 200;
@@ -225,15 +233,48 @@ export async function fetchSince(
   mailbox: string,
   sinceUid: number,
 ): Promise<Array<Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'>>> {
+  // `${sinceUid + 1}:*` 是 IMAP 的 UID 区间语法。sinceUid=0 → '1:*' = 全部。
+  // 超量时取**最新的**一批(pick='newest'):首次同步用户要看的是最近的邮件。
+  return fetchRange(client, mailbox, `${sinceUid + 1}:*`, 'newest');
+}
+
+/**
+ * 向下回填:拉取 UID **小于** beforeUid 的历史邮件。
+ *
+ * 为什么需要它:单次同步有上限,fetchSince 超量时只取最新的一批,更旧的邮件
+ * 靠向上追新的游标永远够不着(2026-08-28 真机:1341 封只同步到 201 封就不动了)。
+ * 回填从已有的最小 UID 往下走,与追新两头收敛,最终覆盖整个 mailbox。
+ *
+ * @param beforeUid 已回填到的最小 UID;拉 `1:beforeUid-1`,取其中**最新的**一批
+ *   —— 由近及远逐批回填,用户先拿到时间上更近的历史邮件。
+ * @returns beforeUid <= 1 时返回空数组(已触底)
+ */
+export async function fetchBefore(
+  client: ImapFlow,
+  mailbox: string,
+  beforeUid: number,
+): Promise<Array<Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'>>> {
+  if (beforeUid <= 1) return [];
+  return fetchRange(client, mailbox, `1:${beforeUid - 1}`, 'newest');
+}
+
+/**
+ * 取一个 UID 区间的邮件,超过 MAX_FETCH_PER_SYNC 时按 pick 截取一批。
+ *
+ * 两步走(先列 UID 再取正文)是刻意的:先只 FETCH uid 很轻,拿到全集后才能
+ * 精确截取「最新的 N 封」;若直接按区间取正文,超量时截断的是**任意**一批,
+ * 而且白白传输了不要的邮件正文。
+ */
+async function fetchRange(
+  client: ImapFlow,
+  mailbox: string,
+  range: string,
+  pick: 'newest' | 'oldest',
+): Promise<Array<Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'>>> {
   const lock = await client.getMailboxLock(mailbox);
   const out: Array<Omit<MailRecord, 'id' | 'accountId' | 'syncedAt'>> = [];
 
   try {
-    // `${sinceUid + 1}:*` 是 IMAP 的 UID 区间语法。sinceUid=0 → '1:*' = 全部。
-    const range = `${sinceUid + 1}:*`;
-
-    // 先只取 uid 列表,好在超量时截取**最新的** MAX_FETCH_PER_SYNC 封 ——
-    // 首次同步几万封邮件时,用户要看的是最近的,不是 2015 年的。
     const uids: number[] = [];
     for await (const msg of client.fetch(range, { uid: true }, { uid: true })) {
       uids.push(msg.uid);
@@ -241,7 +282,12 @@ export async function fetchSince(
     if (uids.length === 0) return out;
 
     uids.sort((a, b) => a - b);
-    const picked = uids.length > MAX_FETCH_PER_SYNC ? uids.slice(-MAX_FETCH_PER_SYNC) : uids;
+    const picked =
+      uids.length > MAX_FETCH_PER_SYNC
+        ? pick === 'newest'
+          ? uids.slice(-MAX_FETCH_PER_SYNC)
+          : uids.slice(0, MAX_FETCH_PER_SYNC)
+        : uids;
 
     for await (const msg of client.fetch(
       picked.join(','),

@@ -351,6 +351,20 @@ export async function countMails(accountId: string, mailbox: string): Promise<nu
   return (res[0] ?? [])[0]?.c ?? 0;
 }
 
+/**
+ * 某账号某 mailbox 已同步邮件里的**最小** UID —— 向下回填的起点。
+ *
+ * 返回 null 表示一封都还没有(此时无从回填,等追新拉到第一批再说)。
+ */
+export async function getMinUid(accountId: string, mailbox: string): Promise<number | null> {
+  const db = getDB();
+  const res = await db.query<[Array<{ uid: number }>]>(
+    `SELECT uid FROM mail WHERE account_id = $acct AND mailbox = $mbox ORDER BY uid ASC LIMIT 1`,
+    { acct: accountId, mbox: mailbox },
+  );
+  return (res[0] ?? [])[0]?.uid ?? null;
+}
+
 /** 归档到 note 后回写引用(避免重复归档 + 双向跳转) */
 export async function setMailArchivedNote(mailId: string, noteId: string): Promise<void> {
   const db = getDB();
@@ -369,6 +383,7 @@ interface SyncStateRow {
   mailbox: string;
   uid_validity: number;
   last_seen_uid: number;
+  backfill_uid?: number;
   last_sync_at: string;
 }
 
@@ -388,6 +403,8 @@ export async function getSyncState(
     mailbox: row.mailbox,
     uidValidity: row.uid_validity,
     lastSeenUid: row.last_seen_uid,
+    // 1.9.0 之前的行没有这个字段 —— 读成 0(尚未开始回填),由 mail-sync 初始化
+    backfillUid: row.backfill_uid ?? 0,
     lastSyncAt: new Date(row.last_sync_at).getTime(),
   };
 }
@@ -399,13 +416,15 @@ export async function upsertSyncState(state: Omit<MailSyncState, 'lastSyncAt'>):
   const now = new Date();
   if (existing) {
     await db.query(
-      `UPDATE mail_sync_state SET uid_validity = $uv, last_seen_uid = $uid, last_sync_at = $now
+      `UPDATE mail_sync_state SET uid_validity = $uv, last_seen_uid = $uid,
+       backfill_uid = $bf, last_sync_at = $now
        WHERE account_id = $acct AND mailbox = $mbox`,
       {
         acct: state.accountId,
         mbox: state.mailbox,
         uv: state.uidValidity,
         uid: state.lastSeenUid,
+        bf: state.backfillUid,
         now,
       },
     );
@@ -413,13 +432,14 @@ export async function upsertSyncState(state: Omit<MailSyncState, 'lastSyncAt'>):
     await db.query(
       `INSERT INTO mail_sync_state {
         account_id: $acct, mailbox: $mbox, uid_validity: $uv,
-        last_seen_uid: $uid, last_sync_at: $now
+        last_seen_uid: $uid, backfill_uid: $bf, last_sync_at: $now
       }`,
       {
         acct: state.accountId,
         mbox: state.mailbox,
         uv: state.uidValidity,
         uid: state.lastSeenUid,
+        bf: state.backfillUid,
         now,
       },
     );

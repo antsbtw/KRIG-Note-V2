@@ -774,3 +774,38 @@ export async function migration_1_8_9(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.8.9'), now },
   );
 }
+
+/**
+ * 1.9.0 — mail_sync_state 加 backfill_uid(向下回填游标)。
+ *
+ * 起因(2026-08-28 真机):收件箱 1341 封,同步只拿到 201 封就再也不动了。
+ *
+ * 根因是两个各自合理的决策叠加成了死角:
+ *   1. fetchSince 超过单次上限时取**最新的** N 封(首次同步用户要看最近的,合理)
+ *   2. syncMailbox 把游标推进到**实际拉到的**最大 UID(防的是按 uidNext 推进
+ *      导致丢数据,也合理)
+ * 于是首次同步拿了 UID 2921-3120,游标推到 3120 —— 而 2810 以前的 1140 封
+ * 被跳过了,之后每次只查 `3121:*`,**那批邮件永远不会再被拉到**(静默丢数据)。
+ *
+ * 修法:游标从「一个水位」变成「一个区间」——
+ *   - last_seen_uid:已同步到的**最大** UID,向上追新邮件
+ *   - backfill_uid: 已回填到的**最小** UID,向下补历史;降到 1 表示触底
+ * 同步时先追新、再回填,两头收敛,最终覆盖整个 mailbox。
+ *
+ * 默认值取 0 表示「尚未开始回填」,首次同步时由 mail-sync 初始化成本批最小 UID。
+ */
+const SCHEMA_VERSION_1_9_0 = `
+DEFINE FIELD IF NOT EXISTS backfill_uid ON mail_sync_state TYPE int DEFAULT 0;
+`;
+
+export async function migration_1_9_0(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_9_0);
+  // 已有行补上默认值(DEFAULT 只作用于新写入,存量行需显式回填)
+  await db.query(`UPDATE mail_sync_state SET backfill_uid = 0 WHERE backfill_uid = NONE`);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.9.0', appliedAt = $now,
+     description = 'Add backfill_uid to mail_sync_state (downward backfill cursor; fixes older mail unreachable)'`,
+    { rid: new RecordId('schema_version', '1.9.0'), now },
+  );
+}
