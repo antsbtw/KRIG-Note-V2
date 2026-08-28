@@ -646,7 +646,7 @@ export async function migration_1_8_7(db: Surreal): Promise<void> {
 /**
  * 1.8.8 — 邮箱模块 阶段 1:IMAP 只读同步的三张表。
  *
- * 设计见 docs/tasks/2026-08-26-mail-module-design.md。要点:
+ * 设计见 docs/10-business-design/mail/module-design.md。要点:
  *
  * - **mail_account** per-ws(带 ws_id),与 webview partition `persist:webview-${ws}` 对齐
  *   —— 工作 ws 登公司邮箱、个人 ws 登私人邮箱,两边身份必须一致。

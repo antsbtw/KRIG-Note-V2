@@ -2,7 +2,7 @@
 
 > 2026-08-27 立 · 2026-08-28 阶段 1 收工
 > 分支 `feature/mail-module`(未合 main)
-> 设计总纲见 [2026-08-26-mail-module-design.md](./2026-08-26-mail-module-design.md)
+> 设计总纲见 [module-design.md](./module-design.md)
 
 ## 一句话
 

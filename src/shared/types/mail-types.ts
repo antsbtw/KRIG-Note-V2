@@ -4,7 +4,7 @@
  * 与 mail-service-types(webview profile / selector)分开:那是阶段 0 的
  * 「网页版邮箱怎么嵌」,这里是「邮件数据长什么样」。两者唯一的交集是 MailServiceId。
  *
- * 设计见 docs/tasks/2026-08-26-mail-module-design.md。
+ * 设计见 docs/10-business-design/mail/module-design.md。
  */
 
 import type { MailServiceId } from './mail-service-types';

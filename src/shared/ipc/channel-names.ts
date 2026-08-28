@@ -270,7 +270,7 @@ export const IPC_CHANNELS = {
 
   // 邮箱模块(阶段 0:webview 薄壳)— 内嵌网页版邮箱 + 右键提取单封邮件到 note。
   // 数据层(IMAP/SMTP → SurrealDB)是阶段 1,不走这些通道。
-  // 见 docs/tasks/2026-08-26-mail-module-design.md
+  // 见 docs/10-business-design/mail/module-design.md
   MAIL_EXTRACT: 'mail.extract',                     // renderer → main:按坐标定位 + 抽该封邮件(返主题/正文/发件人)
   MAIL_EXTRACT_REQUEST: 'mail.extract-request',     // main → renderer 推送:邮箱 webview 原生右键点击,带 guest 坐标 {x,y}
   // 邮箱 阶段 1(IMAP 只读同步)— 账号配置 + 拉信落库

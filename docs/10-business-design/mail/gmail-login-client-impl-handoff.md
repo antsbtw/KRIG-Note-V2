@@ -29,7 +29,7 @@
 
 ## 1. 必读背景
 
-- 方案选型已与后端敲定（见 [2026-06-17-gmail-login-backend-asks.md](./2026-06-17-gmail-login-backend-asks.md) + 后端回复）：**方案 B**。A（后端换 code）不可行——后端 `/auth/google` 只收 `id_token`、无 code 字段、生产 `GOOGLE_CLIENT_SECRET` 未配。
+- 方案选型已与后端敲定（见 [gmail-login-backend-asks.md](./gmail-login-backend-asks.md) + 后端回复）：**方案 B**。A（后端换 code）不可行——后端 `/auth/google` 只收 `id_token`、无 code 字段、生产 `GOOGLE_CLIENT_SECRET` 未配。
 - 现有邮箱登录架构（复用，别重写）：`src/platform/main/auth/`（auth-config/auth-client/auth-store/auth-service）、`src/capabilities/auth/`（authStore/AuthGate/LoginScreen）。Google 登录成功后的 `AuthResponse` 与邮箱**完全同款**，存盘/refresh/登出/广播全复用。
 - 设计总纲见 [authorization-management-design.md](../authorization-management-design.md)（本期只做登录+归因，无授权）。
 

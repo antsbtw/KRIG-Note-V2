@@ -3,7 +3,7 @@
  *
  * 职责:嵌网页版邮箱的 webview 宿主 + 右键提取单封邮件的 renderer 侧门面。
  * 数据层(IMAP/SMTP → SurrealDB)是阶段 1,不在本 capability
- * (见 docs/tasks/2026-08-26-mail-module-design.md)。
+ * (见 docs/10-business-design/mail/module-design.md)。
  *
  * view 通过 requireCapabilityApi<MailServiceApi>('mail-service') 取 api,
  * 不直接碰 window.electronAPI。
