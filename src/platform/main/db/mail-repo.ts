@@ -270,6 +270,14 @@ export async function insertMails(
      *
      * 2026-08-28 真机同步就是死在这:attachments 传了 null,整批 INSERT 全挂,
      * 一封邮件都落不了库。语句里写死的 `archived_note_id: NONE` 才是正确范式。
+     *
+     * ── 关于「中途失败」的半截状态 ──
+     * 本函数逐条 INSERT、**不包事务**,所以第 N 封炸掉时前 N-1 封已经落库。
+     * 这是可以接受的,因为两条设计兜住了:
+     *   1. syncMailbox 失败时**不写游标** → 下次从原点重拉
+     *   2. INSERT IGNORE + UNIQUE(account_id, mailbox, uid) → 已落库的被跳过
+     * 即「重跑安全」。改动这里时别打破这两条(尤其别为了『看起来干净』
+     * 在失败时回滚已落库的邮件 —— 那反而会把已经拿到的数据丢掉)。
      */
     await db.query(
       `INSERT IGNORE INTO mail {

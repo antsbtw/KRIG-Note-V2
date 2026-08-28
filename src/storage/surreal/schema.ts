@@ -707,6 +707,13 @@ DEFINE FIELD IF NOT EXISTS has_attach  ON mail TYPE bool;
 -- 两张表一张都建不出来,而 migration 又被 index.ts 的 catch 降级成 console.error,
 -- 表现就是「migration 看着没跑」。2026-08-27 排查烧了整轮,别再改回裸 array。
 DEFINE FIELD IF NOT EXISTS attachments ON mail TYPE option<array<object>> FLEXIBLE;
+-- ⚠️ 数组**元素**要单独放行:DEFINE FIELD attachments 会自动派生一条
+-- attachments.* TYPE object,它**不继承父字段的 FLEXIBLE**,于是元素变成严格
+-- object,附件带 cid 就报 Found field 'attachments[0].cid', but no such field exists。
+-- 又因为自动派生的那条已占位,DEFINE FIELD IF NOT EXISTS attachments.* 会被静默
+-- 跳过(IF NOT EXISTS 认为它存在)—— 必须先 REMOVE 再 DEFINE,顺序不能反。
+REMOVE FIELD IF EXISTS attachments.* ON mail;
+DEFINE FIELD attachments.* ON mail TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS archived_note_id ON mail TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS synced_at   ON mail TYPE datetime;
 DEFINE INDEX IF NOT EXISTS idx_mail_id       ON mail FIELDS mail_id UNIQUE;
@@ -732,5 +739,38 @@ export async function migration_1_8_8(db: Surreal): Promise<void> {
     `UPSERT $rid SET version = '1.8.8', appliedAt = $now,
      description = 'Mail module phase 1: mail_account / mail / mail_sync_state (IMAP read-only sync)'`,
     { rid: new RecordId('schema_version', '1.8.8'), now },
+  );
+}
+
+/**
+ * 1.8.9 — 修 mail.attachments 的数组元素约束(承接 1.8.8)。
+ *
+ * 1.8.8 里 `attachments` 声明成 `option<array<object>> FLEXIBLE`,看似够了,
+ * 实则 SurrealDB 会为它自动派生一条 `attachments.* TYPE object`,
+ * 而**这条派生字段不继承 FLEXIBLE** —— 数组元素于是是严格 object,
+ * 任何未声明的子字段都写不进去:
+ *
+ *   Found field 'attachments[0].cid', but no such field exists for table 'mail'
+ *
+ * (`cid` 是内联图片的 Content-ID,Gmail 的图文邮件几乎必带,所以是必现而非边缘。)
+ *
+ * 坑中坑:自动派生的那条已经占位,`DEFINE FIELD IF NOT EXISTS attachments.*`
+ * 会被**静默跳过**(IF NOT EXISTS 认为字段已存在),看着跑了其实没生效。
+ * 必须 `REMOVE FIELD` 再 `DEFINE`。
+ *
+ * 已实测五种形态全通过:带 cid / 不带 cid / 多个附件 / 空数组 / NONE。
+ */
+const SCHEMA_VERSION_1_8_9 = `
+REMOVE FIELD IF EXISTS attachments.* ON mail;
+DEFINE FIELD attachments.* ON mail TYPE object FLEXIBLE;
+`;
+
+export async function migration_1_8_9(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_8_9);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.8.9', appliedAt = $now,
+     description = 'Fix mail.attachments element constraint (attachments.* must be FLEXIBLE; auto-derived one is not)'`,
+    { rid: new RecordId('schema_version', '1.8.9'), now },
   );
 }
