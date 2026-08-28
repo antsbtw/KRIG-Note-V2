@@ -139,9 +139,31 @@ export async function getAccount(accountId: string): Promise<MailAccount | null>
  */
 export async function deleteAccount(accountId: string): Promise<void> {
   const db = getDB();
-  await db.query(`DELETE FROM mail WHERE account_id = $id`, { id: accountId });
-  await db.query(`DELETE FROM mail_sync_state WHERE account_id = $id`, { id: accountId });
-  await db.query(`DELETE FROM mail_account WHERE account_id = $id`, { id: accountId });
+
+  // 逐表删,单表失败不阻断后续。
+  //
+  // ⚠️ 起因(2026-08-27 实测):migration 1.8.8 未生效的库里 mail / mail_sync_state
+  // 表不存在,第一条 DELETE 抛 "The table 'mail' does not exist" → 整个删除中断
+  // → 账号删不掉、密码留在 safeStorage 里(用户想重配都做不到)。
+  //
+  // 删除是**清理动作**:目标是「清干净」而非「每一步都成功」。表不存在 = 本来就没有
+  // 要清的数据,等价于清完了。但仍 warn 留痕 —— 静默会掩盖真正的 schema 问题。
+  const sweeps: Array<[string, string]> = [
+    ['mail', `DELETE FROM mail WHERE account_id = $id`],
+    ['mail_sync_state', `DELETE FROM mail_sync_state WHERE account_id = $id`],
+    ['mail_account', `DELETE FROM mail_account WHERE account_id = $id`],
+  ];
+  for (const [table, sql] of sweeps) {
+    try {
+      await db.query(sql, { id: accountId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // 表不存在是可容忍的(见上);其他错误同样不阻断,但更值得注意。
+      console.warn(`[mail-repo] 删账号时清 ${table} 失败(继续):`, msg);
+    }
+  }
+
+  // 密码必须删掉 —— 这是安全相关,不能因为上面某张表出问题就跳过。
   deleteMailPassword(accountId);
 }
 
