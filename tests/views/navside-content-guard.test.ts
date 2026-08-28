@@ -31,6 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { readSourcesConcat } from '../helpers/source-scan';
 
 const SRC = path.resolve(__dirname, '../../src');
 const VIEWS = path.join(SRC, 'views');
@@ -44,43 +45,13 @@ interface ViewInfo {
   registersNavSideContent: boolean;
 }
 
-/**
- * 剥掉块注释 / 行注释(整行换成空白,不保留内容)。
- *
- * ⚠️ 这一步是**必须**的,不是洁癖:本守卫第一版没剥注释,结果
- * `src/views/mail/index.ts` 顶部的文档注释里写着
- * 「navSideDisabled: true —— 本 view 无 NavSide 内容」,正则把这行注释
- * 当成了真实声明 —— 我故意删掉真代码里那行做反向验证,守卫**依然全绿**。
- * 兄弟守卫 slot-resource-guard 的注释里早就写了这一课(它的文档里故意写着
- * 反模式的样子),我第一版没吸取。
- */
-function stripComments(code: string): string {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
-}
-
-/** 递归读一个 view 目录下的全部 .ts/.tsx 源码(已剥注释) */
-function readViewSources(dir: string): string {
-  let out = '';
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      out += readViewSources(full);
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
-      out += stripComments(fs.readFileSync(full, 'utf-8')) + '\n';
-    }
-  }
-  return out;
-}
-
 function collectViews(): ViewInfo[] {
   return fs
     .readdirSync(VIEWS, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => {
       const dir = path.join(VIEWS, e.name);
-      const code = readViewSources(dir);
+      const code = readSourcesConcat(dir);
       return {
         dir: e.name,
         code,
