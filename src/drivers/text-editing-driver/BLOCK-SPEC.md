@@ -4,7 +4,7 @@
 >
 > driver 协议 v0.2 铁律 4 规定 "driver 内部细节自由演化",block 是 driver 内部的自治模块。本子协议是 driver 内部的"block 注册规约",不对外暴露给 view。
 >
-> 设计输入:[V1-block-operations.md](../../../docs/RefactorV2/research/V1-block-operations.md)(V1 30+ block 抽象研究)。
+> 设计输入:[V1-block-operations.md](../../../docs/90-archive/refactor-v2/research/V1-block-operations.md)(V1 30+ block 抽象研究)。
 >
 > 文档版本:v0.1
 > 编写日期:2026-05-05

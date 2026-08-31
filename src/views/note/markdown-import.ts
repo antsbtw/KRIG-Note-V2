@@ -9,7 +9,7 @@
  *
  * relPath 形态:
  *   - 单文件:basename(eg "README.md")
- *   - 目录扫描:rootSegment + 子路径(eg "docs/refactor/00-总纲.md")
+ *   - 目录扫描:rootSegment + 子路径(eg "docs/90-archive/refactor-v1/00-总纲.md")
  *
  * 流程:
  * 1. 预扫描:统计每个 .md 的 heading 数,识别 oversized 文件(≥ H1_SPLIT_THRESHOLD)

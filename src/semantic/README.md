@@ -5,9 +5,9 @@
 > **当前状态**: ✅ Sub-phase 1 atom + edge 类型已落地
 
 完整规范见
-[`docs/RefactorV2/data-model/atom/spec.md`](../../docs/RefactorV2/data-model/atom/spec.md)
-+ [`docs/RefactorV2/data-model/relations/spec.md`](../../docs/RefactorV2/data-model/relations/spec.md)
-+ [`docs/RefactorV2/data-model/persistence/`](../../docs/RefactorV2/data-model/persistence/)。
+[`docs/90-archive/refactor-v2/data-model/atom/spec.md`](../../docs/90-archive/refactor-v2/data-model/atom/spec.md)
++ [`docs/90-archive/refactor-v2/data-model/relations/spec.md`](../../docs/90-archive/refactor-v2/data-model/relations/spec.md)
++ [`docs/90-archive/refactor-v2/data-model/persistence/`](../../docs/90-archive/refactor-v2/data-model/persistence/)。
 
 ---
 
@@ -38,7 +38,7 @@ src/semantic/
 
 ## 类型层契约
 
-按 decision 011 §3.2 + [`docs/RefactorV2/data-model/atom/spec.md`](../../docs/RefactorV2/data-model/atom/spec.md):
+按 decision 011 §3.2 + [`docs/90-archive/refactor-v2/data-model/atom/spec.md`](../../docs/90-archive/refactor-v2/data-model/atom/spec.md):
 
 - `Atom<D>` 主接口: `{ domain: D; payload: AtomPayloadOf<D> }`,domain 开放注册
 - `AtomEntity<D>` 持久化壳: 加 `id / createdAt / updatedAt / createdBy`,包 atom 在 `payload` 字段

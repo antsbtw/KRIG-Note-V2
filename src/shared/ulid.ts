@@ -1,6 +1,6 @@
 /**
  * V2 ULID id 生成(shared 层 — capability / storage 共享)
- * 按 docs/RefactorV2/data-model/persistence/decisions/006-id-generation.md
+ * 按 docs/90-archive/refactor-v2/data-model/persistence/decisions/006-id-generation.md
  *
  * - uppercase (ULID 官方规范)
  * - monotonic (同毫秒批量插入严格单调)

@@ -1,7 +1,7 @@
 /**
  * ContextMenu 类型
  *
- * EnabledWhen 重构(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * EnabledWhen 重构(handoff: docs/90-archive/tasks/context-menu-registry-handoff.md):
  * - 字面变 string,L4 不知道有哪些值
  * - 由 enabledWhenRegistry 提供 predicate 判定
  * - 找不到 predicate → fallback () => true(warn 去重)

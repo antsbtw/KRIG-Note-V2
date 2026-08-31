@@ -14,7 +14,7 @@ export interface CapabilityDefinition {
    * 实际类型由 capability 暴露给消费者:`api as XApi` 或通过 helpers 的泛型参数。
    *
    * 注:这是 V2 工程实施增量,charter v0.4 line 92-105 没列此字段。详见
-   * docs/RefactorV2/audit/wave5-design/Wave5-strict-compliance.md。
+   * docs/90-archive/refactor-v2/audit/wave5-design/Wave5-strict-compliance.md。
    */
   api?: unknown;
   /** 实例工厂(L5 view 调用获得可挂载的实例)*/

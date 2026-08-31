@@ -4,7 +4,7 @@
  * L5-B3.1:handle 触发(显示 ⋮⋮)由 driver block-handle plugin 实施;
  *         hook 只负责"点击外部关菜单"行为。
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 4.2。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 4.2。
  */
 
 import { useEffect, type RefObject } from 'react';

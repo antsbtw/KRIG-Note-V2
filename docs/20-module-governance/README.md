@@ -30,7 +30,7 @@
 - `README.md`（本文）— 工作法 + 索引
 - `problems.md` — 第 1 步产出：完整问题清单（U1~U5，按可独立优化单元）✅
 - `plan.md` — 第 2 步产出：总体优化规划（目标态/抽象点/规范化点/顺序/验收）✅
-- `units/` — 第 3 步产出：每个优化单元的细化文档 + 执行 prompt 🔶 进行中
+- 第 3 步产出（各单元细化文档 + 执行 prompt）已全部交付，归档至 [../90-archive/module-governance-units/](../90-archive/module-governance-units/)
   - `U1-a-ws-context-injection.md` + `.prompt.md` — ws 上下文注入链（地基）✅ **已交付验收**（commit 0741b78d）
   - `U1-b-component-inject.md` + `.prompt.md` — views nav-side 改注入（5 文件）✅ **已交付验收**（commit a96419c9）
   - `U1-c-command-ctx.md` — U1-c 地形排查 + c2 陷阱判定 + 关键收敛 ✅

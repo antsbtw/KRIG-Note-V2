@@ -2,7 +2,7 @@
  * X Articles 发布 — 驱动 X 原生 Insert 菜单(终态方案,2026-06-13)。
  *
  * 缘起(总指挥逐项实测 Insert 菜单后定终态,见
- *  docs/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §0):
+ *  docs/90-archive/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §0):
  * X Article **原生支持 LaTeX / Table / Code / Posts / Media**,交互模式高度统一
  * (点 Insert → 选项 → 弹模态 → 填文本框 → 点 Update)。所以发长文 = **驱动 X 自己的原生
  * Insert**,几乎不渲图(质量最高、保真、可搜索可复制)。

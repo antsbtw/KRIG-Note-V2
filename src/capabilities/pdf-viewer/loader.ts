@@ -12,7 +12,7 @@
  * - TOC destRef 由原始 dest 序列化 (JSON.stringify) 而成,goToDestination 反序列化后
  *   交给 LinkService.goToDestination 处理。
  *
- * 详见 docs/refactor/pdf-viewer-adapter-plan.md § 3 + Stage 1 配置清单。
+ * 详见 docs/90-archive/refactor-v1/pdf-viewer-adapter-plan.md § 3 + Stage 1 配置清单。
  */
 
 import * as pdfjsLib from 'pdfjs-dist';

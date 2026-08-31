@@ -3,7 +3,7 @@
  *
  * **铁律**：核纯 sync、无副作用、无媒体 I/O。
  *
- * 指挥拍板（见 docs/tasks/2026-07-27-stage-B4a-blockquote-list-proposal.md）：
+ * 指挥拍板（见 docs/90-archive/tasks/2026-07-27-stage-B4a-blockquote-list-proposal.md）：
  *  - blockquote：采 ② 递归任意 block（CommonMark 兼容；① 从 inline-only 升级为递归）。
  *  - list：取「① item 内嵌 block ∪ ② task list」并集（不丢任一侧能力）。
  *  - 子列表嵌套：本任务保持 flatten（两侧现状），真嵌套另立项。

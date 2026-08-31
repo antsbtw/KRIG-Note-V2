@@ -4,7 +4,7 @@
  * 单点屏障核心:**本 capability 是 V2 唯一允许 import elkjs 和
  * @mermaid-js/layout-elk 的位置**。
  *
- * 未来规划用 ELK 的业务(详见 docs/tasks/cm6-elk-capability-refactor.md §背景):
+ * 未来规划用 ELK 的业务(详见 docs/90-archive/tasks/cm6-elk-capability-refactor.md §背景):
  * - 画板 graph canvas — 自动布局起点(用户拖完后凝结)
  * - BPMN 2.0 — `layered` (sugiyama)
  * - Mind map — `mrtree` / `radial`

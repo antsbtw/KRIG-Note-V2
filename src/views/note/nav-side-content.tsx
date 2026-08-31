@@ -2,7 +2,7 @@
  * NavSide 内容注册 + FolderTreePanel 组件
  *
  * L5-A 单层 NoteList → L5-B1 FolderTree 完整树状面板。
- * 见 docs/RefactorV2/stages/L5B1-folder-tree-design.md § 4.7。
+ * 见 docs/90-archive/refactor-v2/stages/L5B1-folder-tree-design.md § 4.7。
  */
 
 import { useState, useEffect, useSyncExternalStore } from 'react';

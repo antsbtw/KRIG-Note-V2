@@ -1,7 +1,7 @@
 /**
  * EBookView self-register 入口(L5-C1)
  *
- * 见 docs/RefactorV2/v1-ebook-migration-plan.md v0.3。
+ * 见 docs/90-archive/refactor-v2/v1-ebook-migration-plan.md v0.3。
  *
  * import 时触发副作用:
  * - registerView(声明 ebook-view + install: ['ebook-library'])

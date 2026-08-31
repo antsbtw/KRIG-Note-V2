@@ -12,7 +12,7 @@
  * - .ttc 集合 → 子字体展开(苹方/黑体/Hiragino 全过)
  * - 个别异常 → 列为跳过,embed 时 fail loud
  *
- * 清单依据:docs/RefactorV2/stages/L5G7-G7.0-opentype-compat-report.md
+ * 清单依据:docs/90-archive/refactor-v2/stages/L5G7-G7.0-opentype-compat-report.md
  */
 
 import * as fs from 'fs';

@@ -64,7 +64,7 @@ main/ytdlp/downloader.ts     (download / getInfo / saveSubtitle — spawn yt-dlp
 - View 侧(强制):走 `requireCapabilityApi('ytdlp')` 间接路由
 - Driver/slot 侧(允许):可直 import `@capabilities/ytdlp`(模块级 export)
   作为临时允许项,跟现有 5 老 capability + media-storage / text-editing / web-rendering 一致
-- 详见 [audit 2026-05-08 § 5.2](../../../docs/RefactorV2/audit/2026-05-08-register-and-layer-audit.md)
+- 详见 [audit 2026-05-08 § 5.2](../../../docs/90-archive/refactor-v2/audit/2026-05-08-register-and-layer-audit.md)
 
 ## 平台限制
 

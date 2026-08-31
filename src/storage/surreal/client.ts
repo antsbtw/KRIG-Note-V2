@@ -289,7 +289,7 @@ async function connectDB(): Promise<void> {
   // (上一轮观察到的 NotAllowed / NavSide 归零背后的触发条件没找到)。
   // 保留这组 subscribe 作被动埋点:下次正常使用中若再撞断连/归零,终端会有
   // `[surreal-ws] event=disconnect/reconnect` 时间戳可直接对齐当时操作。成本极低(仅状态翻转时打一行)。
-  // 详见 docs/tasks/2026-05-31-ai-webview-churn-investigation.md。断连真因确认后可移除。
+  // 详见 docs/90-archive/tasks/2026-05-31-ai-webview-churn-investigation.md。断连真因确认后可移除。
   {
     const stamp = (): string => new Date().toISOString();
     for (const evt of ['connecting', 'connected', 'reconnecting', 'disconnected'] as const) {

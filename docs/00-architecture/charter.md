@@ -8,7 +8,7 @@
 
 ## 0. 为什么有这份新总纲
 
-KRIG-Note V1 二次重构期(2026-04 → 2026-05)产出 700+ 行的 [00-总纲.md](../99-archive-v1/refactor/00-总纲.md),包含六波分波、Step A+B 双 PR、三角架构等过程性规则。但实际重构推进**用户感知 0**——14 个阶段全部"字面合规但运行时违规未消除"。
+KRIG-Note V1 二次重构期(2026-04 → 2026-05)产出 700+ 行的 [00-总纲.md](../90-archive/v1/refactor/00-总纲.md),包含六波分波、Step A+B 双 PR、三角架构等过程性规则。但实际重构推进**用户感知 0**——14 个阶段全部"字面合规但运行时违规未消除"。
 
 V2 总纲只继承 V1 的**三大原则**(分层 / 注册 / 抽象),抛弃所有过程性规则。换之以**可见可验证 + 自上而下分层构建**。
 
@@ -444,7 +444,7 @@ overrides: [
 | `ai-conversation` | AI 对话(切模型 / 提取回复)| AI SDK |
 | `elk-layout` | 自动布局算法 | elkjs |
 
-详细参考 [99-archive-v1/refactor/00-总纲.md § 5.9](../99-archive-v1/refactor/00-总纲.md) 能力清单。
+详细参考 [90-archive/v1/refactor/00-总纲.md § 5.9](../90-archive/v1/refactor/00-总纲.md) 能力清单。
 
 ### 3.3 系统服务类能力(System Service Capabilities)
 
@@ -478,7 +478,7 @@ overrides: [
 { type: 'mathInline', attrs: { latex: 'x^2 + 1' } }
 ```
 
-详见 [V1 KRIG-Atom 体系设计文档](../99-archive-v1/refactor/00-总纲.md) 引用的 atom-types.ts。
+详见 [V1 KRIG-Atom 体系设计文档](../90-archive/v1/refactor/00-总纲.md) 引用的 atom-types.ts。
 
 ### 4.2 block — atom 的语义组合形态
 
@@ -609,7 +609,7 @@ V1 教训:**过度细拆 → 每阶段"小修小补" → 推进归零**。V2 反
 
 ### 6.4 阶段间拍板
 
-- 每层完成后,Claude 写一份 `docs/RefactorV2/stages/L<n>-<name>-completion.md` 描述"用户应该能看到什么"(详见 `docs/RefactorV2/README.md`)
+- 每层完成后,Claude 写一份 `docs/90-archive/refactor-v2/stages/L<n>-<name>-completion.md` 描述"用户应该能看到什么"(详见 `docs/90-archive/refactor-v2/README.md`)
 - 用户实际跑 `npm start` 验证 → 看到符合预期则确认通过 → 进下一层
 - 用户验证失败则当场调试,直到验证通过才进下一层
 

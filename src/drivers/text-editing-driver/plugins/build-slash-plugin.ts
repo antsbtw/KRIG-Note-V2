@@ -3,7 +3,7 @@
  *
  * Q6=A:行首/段首输入 `/` → slashMenuController.show
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 3.1。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 3.1。
  *
  * State:
  *  - active:slash menu 是否激活

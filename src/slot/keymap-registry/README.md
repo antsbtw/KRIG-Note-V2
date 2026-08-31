@@ -7,7 +7,7 @@ renderer 启动时调一次 `startKeymapListener()`(见 `platform/renderer/index
 全局 keydown → 路由到当前活跃 view 的 binding → 通过 `commandRegistry.execute`
 触发命令。
 
-详见 [docs/RefactorV2/audit/wave4-design/W4.1-keymap-registrar.md](../../../docs/RefactorV2/audit/wave4-design/W4.1-keymap-registrar.md)。
+详见 [docs/90-archive/refactor-v2/audit/wave4-design/W4.1-keymap-registrar.md](../../../docs/90-archive/refactor-v2/audit/wave4-design/W4.1-keymap-registrar.md)。
 
 ## 注册示例(view 端)
 

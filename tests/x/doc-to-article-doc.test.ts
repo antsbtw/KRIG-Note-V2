@@ -2,7 +2,7 @@
  * transformDocToArticleDoc — note doc → 「X Article 兼容 doc」结构转换
  *
  * 守的约束(X Articles 2026-06-12 总指挥拍板,见
- *  docs/tasks/2026-06-12-x-articles-prompt.md + 格式矩阵 A-3):
+ *  docs/90-archive/tasks/2026-06-12-x-articles-prompt.md + 格式矩阵 A-3):
  *  - ① 原生映射:paragraph/heading/list/blockquote/image + bold·italic·strike·link mark 原样
  *  - ② 文本降级:underline/highlight/字色/thought 丢格式留字;行内 code → 反引号;
  *       callout→引用+emoji;toggle 展开;task→☐☑;多列拍平;audio/file/noteLink→文字

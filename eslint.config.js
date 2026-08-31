@@ -216,7 +216,7 @@ export default [
   // P1-1 严格版屏障 — three 单点屏障(L5-G3 引入):
   // capability 层默认禁 three;canvas-rendering 是唯一允许 import three 的位置。
   //
-  // 详见 docs/RefactorV2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3。
+  // 详见 docs/90-archive/refactor-v2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3。
   // 这一块顺序在前面"capabilities/**" 块之后,通过 files 精确匹配排除
   // canvas-rendering 自身,达到"默认禁 + 例外允许"的效果。
   {
@@ -235,7 +235,7 @@ export default [
   // CodeMirror 6 单点屏障(Phase 1A code-editing capability 引入):
   // capability 层默认禁 @codemirror/* + @lezer/*;code-editing 是唯一允许 import 的位置。
   //
-  // 详见 docs/tasks/cm6-elk-capability-refactor.md §Task A 屏障约束。
+  // 详见 docs/90-archive/tasks/cm6-elk-capability-refactor.md §Task A 屏障约束。
   {
     files: ['src/capabilities/**/*.{ts,tsx}'],
     ignores: ['src/capabilities/code-editing/**/*.{ts,tsx}'],
@@ -254,7 +254,7 @@ export default [
   // ELK 单点屏障(Phase 1B graph-layout capability 引入):
   // capability 层默认禁 elkjs + @mermaid-js/layout-elk;graph-layout 是唯一允许 import 的位置。
   //
-  // 详见 docs/tasks/cm6-elk-capability-refactor.md §Task B 屏障约束。
+  // 详见 docs/90-archive/tasks/cm6-elk-capability-refactor.md §Task B 屏障约束。
   {
     files: ['src/capabilities/**/*.{ts,tsx}'],
     ignores: ['src/capabilities/graph-layout/**/*.{ts,tsx}'],
@@ -274,7 +274,7 @@ export default [
   // capability 层默认禁 mafs + mathjs + @cortex-js/compute-engine;
   // math-rendering 是唯一允许 import 的位置。
   //
-  // 详见 docs/tasks/math-visual-migration-prompt.md §D1。
+  // 详见 docs/90-archive/tasks/math-visual-migration-prompt.md §D1。
   {
     files: ['src/capabilities/**/*.{ts,tsx}'],
     ignores: ['src/capabilities/math-rendering/**/*.{ts,tsx}'],

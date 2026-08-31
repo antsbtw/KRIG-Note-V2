@@ -6,7 +6,7 @@
  * `requireCapabilityApi<CodeEditingApi>('code-editing')` 拿 Host + 语言注册 API。
  *
  * 设计对齐参考:capabilities/canvas-rendering/types.ts(命令式 Handle + Host props 模式)
- * 详见 docs/tasks/cm6-elk-capability-refactor.md §Task A。
+ * 详见 docs/90-archive/tasks/cm6-elk-capability-refactor.md §Task A。
  *
  * **本文件 0 import @codemirror/***(types.ts 只暴露与 SDK 无关的契约,
  * 实际 SDK 类型在 host/CodeHost.tsx 内消费;LanguageItem.loader 返回值

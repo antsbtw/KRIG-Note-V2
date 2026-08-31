@@ -13,7 +13,7 @@
  *
  * view 端只感知 props/callbacks/ref,不感知 three 的存在(P1-1 严格版屏障核心).
  *
- * 见 docs/RefactorV2/stages/L5G3-canvas-rendering-design.md v0.3 § 1.1.
+ * 见 docs/90-archive/refactor-v2/stages/L5G3-canvas-rendering-design.md v0.3 § 1.1.
  */
 
 import {

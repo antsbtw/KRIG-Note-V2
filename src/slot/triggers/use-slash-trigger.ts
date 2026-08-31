@@ -5,7 +5,7 @@
  *         hook 只负责 ↑↓ Enter Esc 键盘导航(由 SlashMenuBinding 自管 selectedIdx —
  *         hook 仅监听 Esc 关菜单 + 防止键盘 fallthrough 到编辑器)。
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 4.1。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 4.1。
  */
 
 import { useEffect, type RefObject } from 'react';

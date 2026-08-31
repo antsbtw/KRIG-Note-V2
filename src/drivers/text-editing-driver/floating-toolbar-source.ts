@@ -3,7 +3,7 @@
  *
  * Q1=A:driver 内部监听 selection capability,非空选区(text 类型)→ floatingToolbarController.show
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 3.3。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 3.3。
  */
 
 import type { EditorView } from 'prosemirror-view';

@@ -1,7 +1,7 @@
 /**
  * 「X Article 兼容 doc」→ X 支持的干净 HTML(X Articles 发布,2026-06-12 总指挥拍板)。
  *
- * 缘起 + 路径(实测见 docs/tasks/2026-06-12-x-articles-prompt.md §★★):X Article 编辑器
+ * 缘起 + 路径(实测见 docs/90-archive/tasks/2026-06-12-x-articles-prompt.md §★★):X Article 编辑器
  * **认网页富文本粘贴、不认 markdown**。发布 = 把 doc 序列化成 X 支持标签的 HTML → 写剪贴板
  * (text/html)→ 在 X Article 正文合成 paste,X 自己把 HTML 富文本转成它的内部格式。
  *

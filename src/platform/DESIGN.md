@@ -21,7 +21,7 @@
 
 ### 2.1 V1 入口现状
 
-V1 入口在 [`/Users/wenwu/Documents/VPN-Server/KRIG-Note/src/main/app.ts`](../../docs/99-archive-v1/refactor/00-总纲.md)(282 行)。
+V1 入口在 [`/Users/wenwu/Documents/VPN-Server/KRIG-Note/src/main/app.ts`](../../docs/90-archive/v1/refactor/00-总纲.md)(282 行)。
 
 #### V1 app.ts 干了什么(逐项盘点)
 

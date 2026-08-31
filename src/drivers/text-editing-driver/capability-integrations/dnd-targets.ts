@@ -12,7 +12,7 @@
  * 在更早阶段已把 dataTransfer.text/plain 当文字插入 → 表现为"拖动变复制"。
  * 改用 plugin.props.handleDrop 可在 PM 处理前截获。
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 3.4。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 3.4。
  */
 
 import { dnd } from '@capabilities/drag-and-drop';

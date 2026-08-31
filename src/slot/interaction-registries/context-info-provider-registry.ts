@@ -1,7 +1,7 @@
 /**
  * ContextInfoProviderRegistry — L4 右键上下文字段贡献者
  *
- * 设计(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * 设计(handoff: docs/90-archive/tasks/context-menu-registry-handoff.md):
  * - L4 不知道任何业务字段(thoughtId / pmInstanceId / hasLink 等),
  *   全部由 capability / view 通过 register 贡献到 ContextInfo.custom
  * - use-context-menu-trigger 右键时遍历 all(),合并各 provider 输出到 custom

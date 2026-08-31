@@ -7,7 +7,7 @@
  * - EPUB CFI 持久化补回(C3 已知短板修复)— host.getCurrentCFI() + onEpubProgressChange
  * - 主区点击外部关 picker(对齐 V1 全屏 mousedown 监听)
  *
- * 见 docs/RefactorV2/v1-ebook-migration-plan.md v0.3 § 5 C4。
+ * 见 docs/90-archive/refactor-v2/v1-ebook-migration-plan.md v0.3 § 5 C4。
  *
  * LOC 红线(v0.3 § 3.1):≤150~200 行。本组件 ~245 行(超 45 行,沿用 C3
  * 的"机会主义瘦身"取舍 — 持久化已拆 use-ebook-progress;keymap+toolbar

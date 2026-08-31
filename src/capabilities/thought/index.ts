@@ -110,7 +110,7 @@ capabilityRegistry.register({
 
 /**
  * L4 右键体系重构:贡献 thoughtId 业务字段 + has-thought enabledWhen 谓词
- * (handoff: docs/tasks/context-menu-registry-handoff.md §字段迁移清单)
+ * (handoff: docs/90-archive/tasks/context-menu-registry-handoff.md §字段迁移清单)
  *
  * thought anchor 三态 DOM 检测(同 V1 形态):
  *   - inline mark    → <span data-thought-id="...">

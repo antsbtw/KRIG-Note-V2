@@ -5,7 +5,7 @@
 view 层 install 时只声明 `'web-rendering'`(audit review P1-A:**不列 driver ID**),
 两个底层 driver 是 capability 内部实现细节,view 不可见。
 
-详见 [docs/RefactorV2/audit/wave4-design/W4.2-web-rendering-capability.md](../../../docs/RefactorV2/audit/wave4-design/W4.2-web-rendering-capability.md)。
+详见 [docs/90-archive/refactor-v2/audit/wave4-design/W4.2-web-rendering-capability.md](../../../docs/90-archive/refactor-v2/audit/wave4-design/W4.2-web-rendering-capability.md)。
 
 ## 对外面孔
 

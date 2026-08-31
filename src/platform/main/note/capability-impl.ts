@@ -1005,7 +1005,7 @@ export async function createNotesBatch(
 /**
  * 单 note 从 PmAtomDraft[] 字面写入 storage.
  *
- * 字面算法 (规范字面对齐 docs/RefactorV2/data-model/persistence/spec.md §6 PE4):
+ * 字面算法 (规范字面对齐 docs/90-archive/refactor-v2/data-model/persistence/spec.md §6 PE4):
  *  1. createContainer: tx.putAtom 字面创建 container atom (domain='pm', payload empty doc + title)
  *  2. 字面拼 hasNoteView + inFolder 边
  *  3. tmpId → realId 字面映射: 遍历 drafts, 每 draft 字面 tx.putAtom (storage 层分配 ULID),

@@ -13,7 +13,7 @@
  * - `./worker-setup` 模块顶层 ensurePdfWorker() — capability 首次 import 即激活
  *   Worker(避免懒加载竞态)。
  *
- * 详见 docs/refactor/pdf-viewer-adapter-plan.md。
+ * 详见 docs/90-archive/refactor-v1/pdf-viewer-adapter-plan.md。
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';

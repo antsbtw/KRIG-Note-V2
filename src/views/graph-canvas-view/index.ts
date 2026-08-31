@@ -1,8 +1,8 @@
 /**
  * GraphCanvasView self-register 入口
  *
- * 见 docs/RefactorV2/v1-graph-migration-plan.md v0.2 § 6.1 +
- * docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md v0.3。
+ * 见 docs/90-archive/refactor-v2/v1-graph-migration-plan.md v0.2 § 6.1 +
+ * docs/90-archive/refactor-v2/stages/L5G1-graph-platform-and-skeleton-design.md v0.3。
  *
  * import 时触发副作用:
  * - registerView(声明 graph-canvas-view + install 4 项 capability,P1-A 口径)
@@ -64,7 +64,7 @@ registerNavSide();
 registerFolderTreeContextMenu();
 
 // canvas-text-node popup 编辑器(viewId='graph-canvas-view')自注册 PM 通用菜单
-// 见 docs/refactor/stages/04-lift-pm-editing-to-capability/c8-d-c-design.md(方案 A)
+// 见 docs/90-archive/refactor-v1/stages/04-lift-pm-editing-to-capability/c8-d-c-design.md(方案 A)
 // 注:7 业务插入(image/table/...)留 NoteView,画板文字节点无此语义
 function registerTextEditingMenusForCanvas(): void {
   const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui;

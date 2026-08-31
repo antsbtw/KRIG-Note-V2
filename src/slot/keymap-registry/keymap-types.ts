@@ -2,7 +2,7 @@
  * Keymap binding 类型(W4.1)
  *
  * view 通过 ViewDefinition.keymap 字段声明全局快捷键。
- * 见 docs/RefactorV2/audit/wave4-design/W4.1-keymap-registrar.md。
+ * 见 docs/90-archive/refactor-v2/audit/wave4-design/W4.1-keymap-registrar.md。
  */
 
 /** enabledWhen 枚举值(数组语义 AND)*/

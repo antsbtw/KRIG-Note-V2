@@ -8,7 +8,7 @@
 
 1. **后台是 V3 SaaS 平台**(`portal.situstechnologies.com`,`app=krig-note`),
    用户数据在服务端,客户端走 REST API。见 [gmail-login-backend-asks.md](./gmail-login-backend-asks.md)
-   同期的 `docs/tasks/2026-06-16-auth-backend-asks.md`。
+   同期的 `docs/90-archive/tasks/2026-06-16-auth-backend-asks.md`。
 2. ⚠️ **后台目前没有「查询用户列表」接口** —— 只有登录/注册/授权查询,
    而且都是「查我自己」。通信录要拉注册用户,**后端必须新开接口**。
 3. 新接口涉及**权限设计**:谁有资格拉全量用户名单?这是安全边界问题,不是技术问题。
@@ -80,7 +80,7 @@ CSV/手工录入 ──> 本地 mail_contact(真源在本地)
 
 ## 若走 D,要向后端提的需求
 
-照 `docs/tasks/2026-06-16-auth-backend-asks.md` 的格式写:
+照 `docs/90-archive/tasks/2026-06-16-auth-backend-asks.md` 的格式写:
 
 - `GET /api/v1/users` — 分页拉取注册用户
   - 字段:email / 昵称 / 注册时间 / 订阅状态 / user_id

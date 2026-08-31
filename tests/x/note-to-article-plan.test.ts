@@ -1,7 +1,7 @@
 /**
  * buildArticlePlan — note doc → 「X Article 原生 Insert 驱动计划」纯逻辑层(终态发布,2026-06-13)。
  *
- * 守的约束(总指挥实测 Insert 菜单后定终态,见 docs/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §0):
+ * 守的约束(总指挥实测 Insert 菜单后定终态,见 docs/90-archive/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §0):
  *  - mathBlock → latex step(裸 latex)/ codeBlock → code step(语言+源码)/ table → table step(markdown)
  *  - tweetBlock → posts step(tweetUrl)/ horizontalRule → divider step
  *  - 连续可粘贴块(段落/标题/列表/图)→ 批量一个 html step(复用整篇 HTML 路降级)

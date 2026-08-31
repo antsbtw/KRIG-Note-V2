@@ -2,7 +2,7 @@
 
 > v0.4 · 2026-05-17 · 草稿,等用户审阅
 >
-> 配套:[charter.md v0.4 § 1.4 + § 2.2](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md](../../docs/RefactorV2/view-hierarchy-v2.md)
+> 配套:[charter.md v0.4 § 1.4 + § 2.2](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md](../../docs/90-archive/refactor-v2/view-hierarchy-v2.md)
 >
 > v0.1 → v0.2:经过深度讨论(2026-05-05),纠正 v0.1 把 NavSide / Toolbar / 浮层归 Shell 的错误。Shell 极轻,只做 WorkspaceBar + Workspace Container 容器。所有应用级 UI(NavSide / Toolbar / 浮层)归 L3 Workspace Container。
 >

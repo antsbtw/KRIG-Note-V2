@@ -1,7 +1,7 @@
 /**
  * NoteView per-workspace 工作位状态管理
  *
- * 见 docs/RefactorV2/stages/L5B1-folder-tree-design.md § 2.3。
+ * 见 docs/90-archive/refactor-v2/stages/L5B1-folder-tree-design.md § 2.3。
  *
  * 用户数据(笔记/文件夹)走 noteCapability / folderCapability (L7-sub2:SurrealDB);
  * 本文件管理 **当前 Workspace 的工作位状态**(看哪条笔记 / 折哪些文件夹 / 选了什么 / 排序 / 剪贴板)。
