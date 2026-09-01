@@ -2,15 +2,16 @@
  * tweet_inbox 表 CRUD（X 时间线智能筛选 Phase 1）
  *
  * 调用边界：仅 main 进程调用，直接 import @storage/surreal/client。
+ * ⚠️ 走 **X 库(krig_x)**,不是笔记库 —— 用 getXDB() 而非 getDB()。
  */
 
-import { getDB } from '@storage/surreal/client';
+import { getXDB } from '@storage/surreal/client';
 import type { TweetInboxRecord, AIVerdict, TweetInboxStatus, TweetFeedback, FeedbackVerdict } from '@shared/types/x-timeline-types';
 import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
 
 /** 写入或忽略（tweet_id 唯一索引冲突 = 重复，直接跳过） */
 export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `INSERT IGNORE INTO tweet_inbox {
       tweet_id: $tweet_id,
@@ -78,7 +79,7 @@ export async function insertFilteredOut(
  *  - windowHours 保留参数签名兼容，但只用于 filtered_out 过期清理，不影响核心去重
  */
 export async function getTweetIdSet(_windowHours: number): Promise<Set<string>> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[Array<{ tweet_id: string }>]>(
     `SELECT tweet_id FROM tweet_inbox`,
   );
@@ -91,7 +92,7 @@ export async function getTweetIdSet(_windowHours: number): Promise<Set<string>> 
  *  - 不传 wsId → 保持原全局行为（向后兼容）
  */
 export async function queryPending(limit = 50, wsId?: string): Promise<TweetInboxRecord[]> {
-  const db = getDB();
+  const db = getXDB();
   const wsFilter = wsId ? 'AND ws_id = $wsId' : '';
   const res = await db.query<[TweetInboxRecord[]]>(
     `SELECT * FROM tweet_inbox WHERE status = 'pending' ${wsFilter} ORDER BY fetched_at ASC LIMIT $limit`,
@@ -103,7 +104,7 @@ export async function queryPending(limit = 50, wsId?: string): Promise<TweetInbo
 /** 将一批推文状态更新为 ai_judging */
 export async function markAiJudging(tweetIds: string[]): Promise<void> {
   if (tweetIds.length === 0) return;
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `UPDATE tweet_inbox SET status = 'ai_judging' WHERE tweet_id IN $ids`,
     { ids: tweetIds },
@@ -112,7 +113,7 @@ export async function markAiJudging(tweetIds: string[]): Promise<void> {
 
 /** 写回 AI 判断结果（worth / skip）+ 可选翻译 */
 export async function updateVerdict(tweetId: string, verdict: AIVerdict): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   const status: TweetInboxStatus = verdict.worth ? 'worth' : 'skip';
   await db.query(
     `UPDATE tweet_inbox SET ai_verdict = $verdict, status = $status, translation = $translation WHERE tweet_id = $tweet_id`,
@@ -134,7 +135,7 @@ export async function queryInbox(opts: {
   limit?: number;
   offset?: number;
 }): Promise<TweetInboxRecord[]> {
-  const db = getDB();
+  const db = getXDB();
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
 
@@ -161,7 +162,7 @@ export async function queryInbox(opts: {
 
 /** 标记推文已回复（已确认视图清场用） */
 export async function markReplied(tweetId: string): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `UPDATE tweet_inbox SET status = 'replied', replied_at = time::now() WHERE tweet_id = $tweet_id`,
     { tweet_id: tweetId },
@@ -176,7 +177,7 @@ export interface FeedbackStats {
 
 /** 近 7 天 Gemma 建议 vs 人工表态的统计（靠 tweet_feedback.ai_verdict 快照,migration 1.8.7 起有数据） */
 export async function getFeedbackStats(): Promise<FeedbackStats> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[Array<{ c: number }>, Array<{ c: number }>, Array<{ c: number }>]>(
     `SELECT count() AS c FROM tweet_feedback WHERE created_at > time::now() - 7d AND ai_verdict != NONE AND ai_verdict.worth = true GROUP ALL;
      SELECT count() AS c FROM tweet_feedback WHERE created_at > time::now() - 7d AND ai_verdict != NONE AND ai_verdict.worth = true AND verdict = 'accept' GROUP ALL;
@@ -191,13 +192,13 @@ export async function getFeedbackStats(): Promise<FeedbackStats> {
 
 /** TTL 清理：删除 expires_at 已过期的推文 */
 export async function cleanExpired(): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(`DELETE tweet_inbox WHERE expires_at < time::now()`);
 }
 
 /** 查询缺翻译的非中文推文（补填用） */
 export async function queryMissingTranslation(limit = 100): Promise<Array<{ tweet_id: string; text: string; lang: string }>> {
-  const db = getDB();
+  const db = getXDB();
   // lang 不是 zh/zh-Hans/zh-Hant，且 translation 缺失
   const res = await db.query<[Array<{ tweet_id: string; text: string; lang: string }>]>(
     `SELECT tweet_id, text, lang FROM tweet_inbox
@@ -211,7 +212,7 @@ export async function queryMissingTranslation(limit = 100): Promise<Array<{ twee
 
 /** 写回单条翻译 */
 export async function setTranslation(tweetId: string, translation: string): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `UPDATE tweet_inbox SET translation = $translation WHERE tweet_id = $tweet_id`,
     { translation, tweet_id: tweetId },
@@ -220,7 +221,7 @@ export async function setTranslation(tweetId: string, translation: string): Prom
 
 /** 写入人工反馈（accept / reject），允许同一 tweet_id 多次投票 */
 export async function insertFeedback(fb: TweetFeedback): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `INSERT INTO tweet_feedback {
       tweet_id:      $tweet_id,
@@ -253,7 +254,7 @@ export async function insertFeedback(fb: TweetFeedback): Promise<void> {
  * 覆盖态不是 Gemma 的判断 → 返回 undefined；重复投票时上一次的覆盖态也因此不会被误抄。
  */
 export async function getGenuineAiVerdict(tweetId: string): Promise<AIVerdict | undefined> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[Array<{ ai_verdict?: AIVerdict }>]>(
     `SELECT ai_verdict FROM tweet_inbox WHERE tweet_id = $tweet_id LIMIT 1`,
     { tweet_id: tweetId },
@@ -269,7 +270,7 @@ export async function queryFeedbackSamples(opts: {
   lang?: string;
   limit?: number;
 }): Promise<TweetFeedback[]> {
-  const db = getDB();
+  const db = getXDB();
   const limit = opts.limit ?? 20;
   const conditions = ['verdict = $verdict'];
   if (opts.lang) conditions.push('lang = $lang');

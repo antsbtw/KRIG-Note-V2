@@ -161,7 +161,8 @@ export async function runMigrations(db: Surreal): Promise<void> {
   }
 }
 
-function compareVersions(a: string, b: string): number {
+/** 语义版本比较。导出供 x-runner 复用(两条序列共用同一套比较规则) */
+export function compareVersions(a: string, b: string): number {
   const aParts = a.split('.').map(Number);
   const bParts = b.split('.').map(Number);
   for (let i = 0; i < 3; i++) {

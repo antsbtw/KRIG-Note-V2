@@ -18,12 +18,22 @@ import { Surreal } from 'surrealdb';
 
 const DEFAULT_PORT = 8533;
 const NAMESPACE = 'krig';
-const DATABASE = 'krig_note_v2';
+/** 笔记库 —— getDB() 的目标,全 app 默认库 */
+const NOTE_DATABASE = 'krig_note_v2';
+/**
+ * X 库 —— getXDB() 的目标。与笔记库**物理隔离**的独立 database(同 ns)。
+ *
+ * 隔离是有意的(见 docs/00-architecture/storage-isolation-boundaries.md):
+ * X 是外部采集数据,不进笔记本体命名空间;独立 schema / migration / 清理粒度,
+ * SurrealDB 层面无法跨库 JOIN。跨库关联(若将来需要)只能落应用层。
+ */
+const X_DATABASE = 'krig_x';
 const READY_TIMEOUT = 15000;
 const READY_POLL_INTERVAL = 500;
 const DB_SUBDIR = 'krig-data/surreal';
 
 let db: Surreal | null = null;
+let xdb: Surreal | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverPort = DEFAULT_PORT;
 let isReady = false;
@@ -70,9 +80,21 @@ export function onDBReady(callback: ReadyCallback): void {
   }
 }
 
+/** 笔记库连接(krig_note_v2)。全 app 默认库,语义与多库改造前一致。 */
 export function getDB(): Surreal {
   if (!db) throw new Error('SurrealDB not initialized; call initSurrealDB() first');
   return db;
+}
+
+/**
+ * X 库连接(krig_x)。
+ *
+ * **绝不 fallback 到 getDB()** —— 一旦兜底,X 数据会静默写进笔记库,
+ * 而"两边数据不混"正是独立库要保证的东西。未初始化就是 bug,直接 throw。
+ */
+export function getXDB(): Surreal {
+  if (!xdb) throw new Error('X SurrealDB not initialized; call initSurrealDB() first');
+  return xdb;
 }
 
 export function isDBReady(): boolean {
@@ -86,8 +108,13 @@ export function getConnectionInfo() {
     username,
     password,
     namespace: NAMESPACE,
-    database: DATABASE,
+    database: NOTE_DATABASE,
   };
+}
+
+/** X 库的 ns/db(与 getConnectionInfo 同端点、同凭据,只是库名不同) */
+export function getXConnectionInfo() {
+  return { ...getConnectionInfo(), database: X_DATABASE };
 }
 
 export function getMode(): 'sidecar' {
@@ -276,9 +303,18 @@ async function waitForReady(): Promise<void> {
 
 // ── WebSocket 连接 ──
 
-async function connectDB(): Promise<void> {
+/**
+ * 建立一条到指定 database 的连接。
+ *
+ * **每个库一条独立连接,不用 `use()` 切库** —— SurrealDB WS 的鉴权态与 ns/db
+ * 绑在单条 socket 上,SDK 自动重连后建立的是全新匿名会话:一次性 signin()/use()
+ * 不会重放,重连后所有 RPC 报 NotAllowed。只有 connect() 的选项会随重连恢复
+ * (见下方 connect 调用处的详注)。所以「一条连接 + use() 来回切」在重连后必然
+ * 退化成:鉴权没了、库也切回默认 —— 两个坑一起踩。
+ */
+async function connectOne(database: string): Promise<Surreal> {
   const { username, password } = credentials();
-  db = new Surreal();
+  const conn = new Surreal();
   // 鉴权 + ns/db 走 connect() 选项而非一次性 signin()/use():
   // SurrealDB WS 的鉴权态绑定在单条 socket 上,SDK 自动重连后会建立全新匿名会话。
   // 一次性 signin() 不会在重连后重放 → 重连后所有 RPC 报 NotAllowed(Anonymous access not allowed)。
@@ -292,22 +328,23 @@ async function connectDB(): Promise<void> {
   // 详见 docs/90-archive/tasks/2026-05-31-ai-webview-churn-investigation.md。断连真因确认后可移除。
   {
     const stamp = (): string => new Date().toISOString();
+    // 日志带库名:两条连接的事件混在一起时,不带标签就分不清是谁断了。
     for (const evt of ['connecting', 'connected', 'reconnecting', 'disconnected'] as const) {
-      db.subscribe(evt, () => {
+      conn.subscribe(evt, () => {
         // 退出途中的断连/重连是预期内噪音,不刷屏(真因排查埋点只关心运行期)
         if (shuttingDown) return;
-        console.log(`[surreal-ws] ${stamp()} event=${evt} status=${db?.status}`);
+        console.log(`[surreal-ws][${database}] ${stamp()} event=${evt} status=${conn.status}`);
       });
     }
-    db.subscribe('error', (err: unknown) => {
+    conn.subscribe('error', (err: unknown) => {
       if (shuttingDown) return;
-      console.log(`[surreal-ws] ${stamp()} event=error status=${db?.status} err=${String(err)}`);
+      console.log(`[surreal-ws][${database}] ${stamp()} event=error status=${conn.status} err=${String(err)}`);
     });
   }
 
-  await db.connect(`ws://127.0.0.1:${serverPort}/rpc`, {
+  await conn.connect(`ws://127.0.0.1:${serverPort}/rpc`, {
     namespace: NAMESPACE,
-    database: DATABASE,
+    database,
     authentication: { username, password },
     // 显式配置重连:服务端是本机 sidecar 子进程,不是网络对端。它没了通常意味着
     // 「进程组一起在退出」或「sidecar 崩了」,不值得按公网对端的耐心去等。
@@ -326,14 +363,19 @@ async function connectDB(): Promise<void> {
       retryDelayJitter: 0.1,
     },
   });
-  console.log(`[storage/surreal] Connected via WebSocket (${NAMESPACE}/${DATABASE})`);
+  console.log(`[storage/surreal] Connected via WebSocket (${NAMESPACE}/${database})`);
+  return conn;
 }
 
 // ── 公开 API ──
 
 export async function initSurrealDB(): Promise<void> {
   await startServer();
-  await connectDB();
+  // 两条独立连接:笔记库 + X 库。顺序无所谓(同一个 sidecar),
+  // 但两条都连上才算 ready —— X 连接失败不能降级成"只有笔记库能用",
+  // 那会让 getXDB() 在运行期才 throw,故障点离真因十万八千里。
+  db = await connectOne(NOTE_DATABASE);
+  xdb = await connectOne(X_DATABASE);
   isReady = true;
   for (const cb of readyCallbacks) {
     try { cb(); } catch (err) { console.error('[storage/surreal] Ready callback error:', err); }
@@ -345,7 +387,7 @@ export async function initSurrealDB(): Promise<void> {
 /**
  * 标记「本进程正在主动退出」。
  *
- * 置位后 WS 断连一律视为预期内(见 connectDB 的 reconnecting 监听):不再重连、
+ * 置位后 WS 断连一律视为预期内(见 connectOne 的 reconnecting 监听):不再重连、
  * 不再刷日志。Ctrl+C 场景尤其重要 —— SurrealDB 子进程与本进程同属一个进程组、
  * 会**同时**收到 SIGINT,子进程往往先死,此时若客户端还认为是意外掉线,
  * SDK 就会对着一个已经没了的服务端指数退避重连(2s→4s→8s→16s…)不肯收手。
@@ -359,10 +401,13 @@ export function markStorageShuttingDown(): void {
 /** 同步关闭(用于 before-quit;不等子进程退出) */
 export function shutdownSurrealDB(): void {
   shuttingDown = true;
-  if (db) {
-    try { db.close(); } catch { /* ignore */ }
-    db = null;
+  // 所有常驻连接都要有停止调用(memory project-graceful-shutdown):
+  // 漏关一条,它的重连定时器会把事件循环吊住,表现成"Ctrl+C 后不退"。
+  for (const conn of [db, xdb]) {
+    if (conn) { try { conn.close(); } catch { /* ignore */ } }
   }
+  db = null;
+  xdb = null;
   if (serverProcess) {
     // detached 后 sidecar 不再随终端信号一起死,必须由我们显式送信号。
     // 这里是**同步**退出路径(before-quit 二次进入后紧接着就 exit),原先那个
@@ -377,10 +422,11 @@ export function shutdownSurrealDB(): void {
 
 /** 异步关闭(等子进程真退出 + 孤儿兜底,用于 reset/restore) */
 export async function shutdownSurrealDBAsync(): Promise<void> {
-  if (db) {
-    try { db.close(); } catch { /* ignore */ }
-    db = null;
+  for (const conn of [db, xdb]) {
+    if (conn) { try { conn.close(); } catch { /* ignore */ } }
   }
+  db = null;
+  xdb = null;
   if (serverProcess) {
     const proc = serverProcess;
     await new Promise<void>((resolve) => {

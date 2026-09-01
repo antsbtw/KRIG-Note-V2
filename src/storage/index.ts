@@ -6,8 +6,9 @@
  * - Capability / Platform 层可 import
  * - 业务层通过 capability API 间接访问
  */
-import { initSurrealDB, shutdownSurrealDB, shutdownSurrealDBAsync, getDB } from './surreal/client';
+import { initSurrealDB, shutdownSurrealDB, shutdownSurrealDBAsync, getDB, getXDB } from './surreal/client';
 import { runMigrations } from './migrations/runner';
+import { runXMigrations } from './migrations/x-runner';
 import { surrealStorage } from './surreal/storage';
 import { runCardinalityCheck } from './health/cardinality-check';
 import { sweepPendingIntents } from './intent-log';
@@ -30,6 +31,9 @@ export const storage = surrealStorage;
 export async function initStorage(): Promise<void> {
   await initSurrealDB();
   await runMigrations(getDB());
+  // X 库独立 migration 序列(自己的 schema_version,与上面的 1.9.x 无关)。
+  // 放在笔记库 migration 之后、业务 sweeper 之前:两者无依赖,顺序只求可预期。
+  await runXMigrations(getXDB());
   // SP-3 sweeper:扫未完成 intent 续完/回滚。在 migrations 后(intent 表已建)、
   // cardinality-check 前(半状态可能正是 cardinality 误判源,先清半状态)。
   // 各 op resolver 由 capability 在 initIpcBus 阶段(initStorage 之前)注册;未注册的
