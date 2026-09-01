@@ -38,6 +38,30 @@ interface WebviewElement extends HTMLElement {
   executeJavaScript(code: string): Promise<unknown>;
 }
 
+/**
+ * 派发 resize + 促重绘 + 回报导航状态。
+ *
+ * navW 是分辨状态的硬指标:X 左导航展开(带文字)约 275px,收起(仅图标)约 88px。
+ * 此前只看容器宽度,把"收起"和"展开"混作一谈,根本判断不出改动有没有生效。
+ */
+const RELAYOUT_PROBE_JS = `(function(){
+  window.dispatchEvent(new Event("resize"));
+  void document.documentElement.offsetHeight;
+  var b = document.body;
+  if (b) {
+    var prev = b.style.transform;
+    b.style.transform = 'translateZ(0)';
+    requestAnimationFrame(function(){ b.style.transform = prev; });
+  }
+  var hdr = document.querySelector('header[role="banner"]');
+  var side = document.querySelector('[data-testid="sidebarColumn"]');
+  return JSON.stringify({
+    w: window.innerWidth,
+    navW: hdr ? Math.round(hdr.getBoundingClientRect().width) : -1,
+    rightW: side ? Math.round(side.getBoundingClientRect().width) : -1,
+  });
+})()`;
+
 export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
   props,
   ref,
@@ -46,6 +70,43 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
 
   const webviewRef = useRef<WebviewElement | null>(null);
   const domReadyRef = useRef(false);
+  // setupWebview 的 deps 是 [],闭包里拿不到下面 useImperativeHandle 建的方法,
+  // 用 ref 中转(与本文件既有的 callbacksRef 同款做法)。
+
+  /**
+   * 让 guest 按当前尺寸重新布局(幂等),并回报它此刻的导航状态。
+   *
+   * 抽成普通函数而不是只挂在 imperative handle 上 —— setupWebview 的
+   * 事件回调(deps 为 [])也要调它,走 ref 中转反而绕。
+   */
+  const doRelayoutRef = useRef<(wsId: string) => void>(() => {});
+  const doRelayout = useCallback((wsId: string) => {
+    const wv = webviewRef.current;
+    if (!wv || !domReadyRef.current) return;
+    const kick = (attempt: number): void => {
+      try {
+        void wv.executeJavaScript(RELAYOUT_PROBE_JS).then((raw) => {
+          let m: { w?: number; navW?: number; rightW?: number } = {};
+          try { m = JSON.parse(String(raw)) as typeof m; } catch { /* ignore */ }
+          const nav = m.navW ?? -1;
+          const navState = nav < 0 ? '?' : nav > 200 ? '展开' : '收起';
+          const hostWidth = Math.round(wv.getBoundingClientRect().width);
+          console.log(
+            `[x-diag][${wsId}] host=${hostWidth} guest=${m.w}`
+            + ` 左导航=${navState}(${nav}px) 右栏=${m.rightW}`,
+          );
+          const guestWidth = m.w ?? 0;
+          if (guestWidth > 0 && hostWidth > 0
+              && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {
+            requestAnimationFrame(() => kick(attempt + 1));
+          }
+        }).catch(() => { /* guest 未 ready / 已销毁 */ });
+      } catch { /* 同上 */ }
+    };
+    kick(0);
+  }, []);
+  doRelayoutRef.current = doRelayout;
+
 
   // ref 缓存 callback,避免 setupWebview 因 callback 变化反复 unbind
   const callbacksRef = useRef({ onUrlChanged, onLoadingChanged });
@@ -108,6 +169,11 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
     // X 是 SPA,路由切换走 in-page navigation
     wv.addEventListener('did-navigate-in-page', handleDidNavigate);
     wv.addEventListener('dom-ready', handleDomReady);
+    // 打开 app 那一刻 X 是展开还是收起 —— 不主动量就只能靠看截图猜。
+    // X 是 SPA,dom-ready 时导航还没渲染完,等一拍再量。
+    wv.addEventListener('did-stop-loading', () => {
+      setTimeout(() => doRelayoutRef.current(workspaceId), 800);
+    });
   }, []);
 
   useImperativeHandle(
@@ -134,57 +200,11 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
           return null;
         }
       },
-      relayout: () => {
-        const wv = webviewRef.current;
-        if (!wv || !domReadyRef.current) return;
-        // guest 内部靠 window.resize 重算响应式布局。<webview> 是 OS 级 surface,
-        // 与 EPUB/PDF/WebGL 同属命令式渲染引擎:容器宽度变了不会自愈,
-        // 会一直停在上次布局算出的尺寸上,不派发就不重排。
-        //
-        // ⚠️ 时序:host 容器的 ResizeObserver 先于 webview 的 OS surface 完成同步,
-        // 立刻派发的话 guest 量到的是旧宽度。用 guest 自己的 innerWidth 当同步信号
-        // (而不是猜一个 setTimeout):对不上就下一帧重试,上限 10 帧 ≈160ms。
-        const kick = (attempt: number): void => {
-          try {
-            void wv.executeJavaScript(
-              // 合成 resize 事件 X 不一定认:React 的响应式多半接的是
-              // matchMedia / ResizeObserver,而**这两者只认真实的视口变化**,
-              // 手动 dispatch 的 Event('resize') 根本不会触发它们的回调。
-              // 所以除了派发,还要回报 sidebar 的实际宽度用于判断是否真的重排了。
-              // 除了派发 resize,还强制读一次布局并触碰一下合成层:
-              // guest 常常**算对了**新布局却不重绘(被 Chromium 判为不可见时节流),
-              // 屏幕上仍是旧样子 —— 一开 DevTools 就"自己好了",正是因为那强制了重绘。
-              // backgroundThrottling=false 是主治,这里再补一记推动,双保险。
-              `(function(){
-                 window.dispatchEvent(new Event("resize"));
-                 void document.documentElement.offsetHeight;   // 强制同步布局
-                 var b = document.body;
-                 if (b) {                                       // 触碰合成层促重绘
-                   var prev = b.style.transform;
-                   b.style.transform = 'translateZ(0)';
-                   requestAnimationFrame(function(){ b.style.transform = prev; });
-                 }
-                 return window.innerWidth;
-               })()`,
-            ).then((raw) => {
-              const m: { w?: number } = { w: typeof raw === 'number' ? raw : 0 };
-              // [x-diag] 每次宽度变化打一行,定位"侧栏不随宽度适配"。
-              // ws 标签是关键 —— 两个 ws 同屏时要能分清哪行是谁的。
-              console.log(`[x-diag][${workspaceId}] host=${Math.round(wv.getBoundingClientRect().width)} guest=${m.w}`);
-              const guestWidth = m.w ?? 0;
-              const hostWidth = Math.round(wv.getBoundingClientRect().width);
-              if (guestWidth > 0 && hostWidth > 0
-                  && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {
-                requestAnimationFrame(() => kick(attempt + 1));
-              }
-            }).catch(() => { /* guest 未 ready / 已销毁 */ });
-          } catch { /* 同上 */ }
-        };
-        kick(0);
-      },
+      relayout: () => doRelayout(workspaceId),
     }),
     [],
   );
+
 
   // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型。
   // partition per-ws 化(2026-06-11):`persist:webview-${workspaceId}`,与 AI webview /
