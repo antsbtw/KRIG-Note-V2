@@ -14,7 +14,7 @@
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
-import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
+import { queryInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
 import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
@@ -153,7 +153,7 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'invalid payload: tweet_id and verdict required' };
     }
     try {
-      // 先抄 Gemma 原始判断快照：下面 updateVerdict 会用 human:* 覆盖 inbox 的 ai_verdict，
+      // 先抄 Gemma 原始判断快照：下面 applyHumanVerdict 会用 human:* 覆盖 ai_verdict，
       // 且 inbox 有 7 天 TTL —— 此快照是准确率对账的唯一持久来源（migration 1.8.7）
       const aiVerdictSnapshot = await getGenuineAiVerdict(p.tweet_id);
       await insertFeedback({
@@ -167,9 +167,9 @@ export function registerXTimelineHandlers(): void {
         created_at:    new Date().toISOString(),
         ai_verdict:    aiVerdictSnapshot,
       });
-      // 同步更新 tweet_inbox 状态：accept → worth，reject → skip（UI 不再展示 skip）
-      const newStatus = p.verdict === 'accept' ? 'worth' : 'skip';
-      await updateVerdict(p.tweet_id, { worth: newStatus === 'worth', confidence: 1, reason: `human:${p.verdict}`, tags: [], suggestReply: newStatus === 'worth' });
+      // 同步更新 x_tweet:accept → worth + **永久保留**(expires_at=NONE),reject → skip
+      // (A 期止血:此前这里走 updateVerdict,不动 expires_at,采纳的推文照样 7 天后被 TTL 删掉)
+      await applyHumanVerdict(p.tweet_id, p.verdict as FeedbackVerdict);
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
