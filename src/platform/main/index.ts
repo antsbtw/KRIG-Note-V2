@@ -29,9 +29,16 @@ import { app, BrowserWindow, protocol } from 'electron';
 //
 // 在流上直接监听 'error' 并只忽略 EPIPE(此刻进程在退、日志本无意义),错误就被
 // 流自身消费、不再冒泡;其余真实异常不经此路径,fail-loud 行为不受影响。
+// ⚠️ EIO 与 EPIPE 同源,必须一起忽略(2026-09-01 实拍):
+//   Uncaught Exception: Error: write EIO
+//     at console.log ... at Pipe.onStreamRead
+// 管道断开在不同时序下 errno 不同 —— 对端已关是 EPIPE,底层 fd 已失效是 EIO。
+// 原来只挡 EPIPE,EIO 照样冒泡成 uncaughtException,而那个模态框会**阻塞事件循环**,
+// 连 before-quit 的优雅退出都跑不了(实测 SIGTERM 无效,只能 SIGKILL)。
+const IGNORED_STREAM_ERRNOS = new Set(['EPIPE', 'EIO']);
 const ignoreEpipe = (err: NodeJS.ErrnoException): void => {
-  if (err.code === 'EPIPE') return;
-  throw err; // 非 EPIPE 的流错误:照常抛出
+  if (err.code != null && IGNORED_STREAM_ERRNOS.has(err.code)) return;
+  throw err; // 其余流错误:照常抛出,fail-loud 不受影响
 };
 process.stdout.on('error', ignoreEpipe);
 process.stderr.on('error', ignoreEpipe);

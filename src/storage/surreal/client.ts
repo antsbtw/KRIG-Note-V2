@@ -270,12 +270,26 @@ async function startServer(): Promise<void> {
   // unref 解除这层引用;进程本身仍在跑,仍由 shutdownSurrealDB 显式 kill。
   serverProcess.unref();
 
-  serverProcess.stdout?.on('data', (data: Buffer) => {
-    console.log(`[storage/surreal server] ${data.toString().trim()}`);
-  });
-  serverProcess.stderr?.on('data', (data: Buffer) => {
-    console.log(`[storage/surreal server] ${data.toString().trim()}`);
-  });
+  // ⚠️ 转发 sidecar 输出必须包 try/catch:
+  // console.log 在 stdout 管道已断时会**抛** EPIPE/EIO(终端关了、
+  // electron-forge 父进程先退了、DevTools 断开都会造成这种局面)。
+  // 这里是 'data' 事件回调,抛出去没人接 → 主进程未捕获异常 → 弹
+  // "A JavaScript error occurred in the main process" 框,而且那个模态框
+  // 阻塞事件循环,连 before-quit 的优雅退出都跑不了,只能 SIGKILL
+  // (2026-09-01 实拍:Error: write EIO at console.log ... Pipe.onStreamRead)。
+  //
+  // sidecar 还在正常吐日志、app 也活得好好的,仅仅因为"日志没地方写"就崩掉
+  // 整个主进程,是典型的因果倒置。写不出去就丢弃 —— stdout 都没了,
+  // 这行日志本来也没人看。
+  const forwardServerLog = (data: Buffer): void => {
+    try {
+      console.log(`[storage/surreal server] ${data.toString().trim()}`);
+    } catch {
+      /* stdout 已断(EPIPE/EIO):丢弃,绝不让日志写入失败拖垮主进程 */
+    }
+  };
+  serverProcess.stdout?.on('data', forwardServerLog);
+  serverProcess.stderr?.on('data', forwardServerLog);
   serverProcess.on('close', (code) => {
     console.log(`[storage/surreal] Server exited with code ${code}`);
     serverProcess = null;
