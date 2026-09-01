@@ -44,6 +44,34 @@ interface WebviewElement extends HTMLElement {
  * navW 是分辨状态的硬指标:X 左导航展开(带文字)约 275px,收起(仅图标)约 88px。
  * 此前只看容器宽度,把"收起"和"展开"混作一谈,根本判断不出改动有没有生效。
  */
+/**
+ * 让 guest 经历一次**真实的 viewport 尺寸变化**。
+ *
+ * ⚠️ 这是本问题的正解,前面几版全打偏了。实测(x-sidebar-trace,2026-09-01):
+ *   17.5s  视口 1151→1679(变宽)  nav 容器 125→359,但**文字 span = 0**
+ *   ~110s  视口 1679 保持不变      文字 span 一直是 0(屏幕上就是"侧栏关着")
+ *  127.6s  视口 1679→1267(变窄)  文字 span = 18 —— 内容这才生成
+ * 而全程视口没变过的另一个实例,始终是 0。
+ *
+ * 结论:X 的左导航内容只在经历**真实 viewport 变化**时才重建。
+ * 所以:
+ *  - 合成 dispatchEvent(new Event('resize')) 无效(X 不听合成事件)
+ *  - invalidate() / setBackgroundThrottling 也无效(它们治"没画出来",
+ *    而这里是"内容压根没生成")
+ *  - Cmd+Opt+I 之所以"一按就好",是因为 DevTools 挤窄了 webview,
+ *    那次**真实**的尺寸变化触发了重建 —— 不是重绘,是尺寸变化本身
+ *
+ * 做法:把宿主元素宽度改 1px 再改回来,强制 Chromium 给 guest 下发真实 resize。
+ * 1px 肉眼不可见,两帧内复原。
+ */
+function nudgeViewport(el: HTMLElement): void {
+  const prev = el.style.width;
+  el.style.width = `calc(100% - 1px)`;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { el.style.width = prev; });
+  });
+}
+
 const RELAYOUT_PROBE_JS = `(function(){
   window.dispatchEvent(new Event("resize"));
   void document.documentElement.offsetHeight;
@@ -83,6 +111,9 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
   const doRelayout = useCallback((wsId: string) => {
     const wv = webviewRef.current;
     if (!wv || !domReadyRef.current) return;
+    // 关键一步:制造真实的 viewport 变化。X 的左导航内容只认这个,
+    // 不认合成 resize 事件(详见 nudgeViewport 上方注释的实测记录)。
+    nudgeViewport(wv as unknown as HTMLElement);
     const kick = (attempt: number): void => {
       try {
         void wv.executeJavaScript(RELAYOUT_PROBE_JS).then((raw) => {
@@ -176,10 +207,17 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
     // X 是 SPA,路由切换走 in-page navigation
     wv.addEventListener('did-navigate-in-page', handleDidNavigate);
     wv.addEventListener('dom-ready', handleDomReady);
-    // 打开 app 那一刻 X 是展开还是收起 —— 不主动量就只能靠看截图猜。
-    // X 是 SPA,dom-ready 时导航还没渲染完,等一拍再量。
+    // 首屏也要 nudge 一次 —— 这正是用户报告的场景:
+    // "打开 app,默认侧栏是关闭的,按 cmd+opt+i 才打开"。
+    // 冷启动时 X 从未经历过 viewport 变化,导航文字就一直不生成;
+    // 而 relayout 只在尺寸变化/切槽时触发,首屏根本不会被调到。
+    //
+    // 分几次是因为 X 是 SPA:骨架、导航、时间线分批渲染,
+    // 太早 nudge 时导航组件还没挂载,白推一次。
     wv.addEventListener('did-stop-loading', () => {
-      setTimeout(() => doRelayoutRef.current(workspaceId), 800);
+      for (const ms of [800, 2000, 4000]) {
+        setTimeout(() => doRelayoutRef.current(workspaceId), ms);
+      }
     });
   }, []);
 

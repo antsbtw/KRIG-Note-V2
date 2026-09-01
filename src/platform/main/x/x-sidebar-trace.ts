@@ -96,6 +96,14 @@ const PROBE_JS = `(function(){
  * 「算对了没画出来」就实锤了。
  */
 function scheduleStartupShots(wc: WebContents, wsId: string): void {
+  // 启动窗口过后改为长期低频轮询:排查时随时能看到"此刻"的状态,
+  // 不必再赶在启动 40s 内。开 DevTools 前后的对照就靠它。
+  const poll = setInterval(() => {
+    if (wc.isDestroyed()) { clearInterval(poll); return; }
+    void probeLayoutVars(wc, 'poll');
+  }, 5000);
+  wc.once('destroyed', () => clearInterval(poll));
+
   for (const sec of [1, 2, 4, 8, 15, 25, 40]) {
     setTimeout(() => {
       if (wc.isDestroyed()) return;
