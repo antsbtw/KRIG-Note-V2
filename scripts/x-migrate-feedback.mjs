@@ -54,6 +54,30 @@ async function sql(db, query) {
   return json[0].result;
 }
 
+/**
+ * datetime 字段名单 —— 这些字段必须序列化成 SurrealQL 的 d'...' 字面量。
+ *
+ * ⚠️ 踩过:HTTP /sql 端点把 datetime 读出来是**普通 JSON 字符串**,
+ * 直接 JSON.stringify 回去写进 TYPE datetime 字段会被拒:
+ *   Expected `datetime` but found `'2026-07-31T22:04:50.585Z'`
+ * (JSON 没有 datetime 类型,信息在读出那一刻就丢了,只能靠字段名补回来。)
+ */
+const DATETIME_FIELDS = new Set(['created_at']);
+
+/** 把一行对象序列化成 SurrealQL object 字面量,datetime 字段特殊处理 */
+function toSurql(obj, datetimeFields) {
+  const parts = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined) continue;               // undefined → 不写 → NONE(不是 NULL)
+    if (datetimeFields.has(k) && typeof v === 'string') {
+      parts.push(`${JSON.stringify(k)}: d${JSON.stringify(v)}`);
+    } else {
+      parts.push(`${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+    }
+  }
+  return `{ ${parts.join(', ')} }`;
+}
+
 async function count(db, table) {
   const r = await sql(db, `SELECT count() FROM ${table} GROUP ALL;`);
   return r[0]?.count ?? 0;
@@ -145,12 +169,9 @@ try {
       // 逐行 CREATE 到目标库,**保留原 record id**(同表名同 id,便于事后核对)。
       // 注:content 里不含 id 字段本身 —— id 走 CREATE 的目标位,
       // 绝不把 id 当普通字段写(会撞内建 record id 的 readonly 语义)。
-      const values = rows.map((r) => {
+      for (const r of rows) {
         const { id, ...rest } = r;
-        return { id, rest };
-      });
-      for (const v of values) {
-        await sql(X_DB, `CREATE ${v.id} CONTENT ${JSON.stringify(v.rest)};`);
+        await sql(X_DB, `CREATE ${id} CONTENT ${toSurql(rest, DATETIME_FIELDS)};`);
       }
       moved += rows.length;
       cursor = rows[rows.length - 1].id;
