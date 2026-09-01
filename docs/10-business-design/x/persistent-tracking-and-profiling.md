@@ -214,7 +214,140 @@ X 上一条热门推可能有上千条回复。若无条件把"回复过 n=1 账
 
 ## 4. 方案
 
-### 4.0 建模范式:账号是实体,推文是 item,采纳/回复是 item 的属性
+### 4.1 数据模型总纲:人 / 事 / 分析维度
+
+用户 2026-09-01 提出三分法:**① 人 ② 事(推文和回复)③ 分析维度(计算属性)**。
+
+**结论:这个分类是对的,而且它和本仓库既有的架构总纲高度吻合** ——
+不是新发明,是把已有原则用到 X 模块上。
+
+#### (1) 三分法本身:成立
+
+判据是**变更节奏不同**,这是分层的正当理由:
+
+| 层 | 内容 | 变更节奏 | 可否重算 |
+|---|---|---|---|
+| **人** | handle、展示名、我对他的态度(屏蔽/追踪/备注) | 慢,靠事件驱动 | ✗ 唯一真源 |
+| **事** | 推文、回复(id/正文/时间/作者引用/采纳状态) | 只增不改(采集所得) | ✗ 唯一真源 |
+| **分析维度** | 采纳率、互动次数、活跃时段、关系层数 | 随时可变 | **✓ 全部可从①②重算** |
+
+**第三层"可重算"是关键性质**。它决定了:分析维度**不是真源**,存它只为查询快。
+存错了、算法改了,清掉重算即可 —— 这正是用户说的"后期根据计算的需要不断整合"。
+
+#### (2) 与本仓库既有总纲的对应
+
+[relations/spec.md §11.2](../../../docs/90-archive/refactor-v2/data-model/relations/spec.md)
+早已确立三层数据模型:
+
+> 1. **文档本体**(零边):block atom + 结构属性。导入即完整,可靠 + 快
+> 2. **业务结构边**(A 类,`user:krig:*`):编辑思考产生的业务关系,持久,不可随意动
+> 3. **分析图谱边**(B 类,`sys/ai:<model>:*`):分析模型按需生成,**可随意增删清除**
+
+对应关系:
+
+| 用户三分法 | 仓库既有总纲 |
+|---|---|
+| 人 + 事 | 第 1 层(本体):**靠属性,不靠边** |
+| 人↔事、事↔事 的业务关系 | 第 2 层(A 类边):持久 |
+| 分析维度 | 第 3 层(B 类边 / 派生表):**随用随建随清** |
+
+**所以用户的直觉和仓库总纲是同一件事**,只是换了个说法。这让方案有了既有依据,
+不是另起炉灶。
+
+#### (3) 但有一个必须回答的问题:用 atom/edge 还是专用表?
+
+本仓库有通用实体-关系设施(`atom` + `edge`),X 的人和事**能不能直接用它**?
+
+实测现状:
+
+```
+atom domains:  pm 102422 / bookmark 256 / folder 59 / thought 8 / ebook 4 ...
+edge predicates: user:krig:inFolder 491 / hasNoteView 203 / folderForView 59 ...
+```
+
+`atom` 装的都是**笔记本体及其容器**(pm/folder/ebook/thought),
+`edge` 全是 `user:krig:*` 的**文档结构关系**。X 的推文**不属于这个体系** ——
+它不是用户创作的知识内容,是外部采集的原始数据。
+
+**先例**:mail 模块(最近的同类模块)选择了**专用 SCHEMAFULL 表**
+(`mail` / `mail_account` / `mail_sync_state`),用业务 id 不用内建 record id。
+X 现有的 `tweet_inbox` / `tweet_feedback` 也是这个路子。
+
+**取专用表**,理由:
+
+| | atom/edge | 专用表 |
+|---|---|---|
+| 查询 | 画像聚合要在 payload 里钻,写起来绕 | 直接 SQL 聚合,索引可控 |
+| 类型 | payload 是 `any`,类型安全靠约定 | SCHEMAFULL 强约束 |
+| 边界 | 会把外部采集数据混进笔记本体命名空间 | 与笔记体系物理隔离 |
+| 先例 | — | mail 模块已验证可行 |
+
+> **但第三层(分析维度)不同** —— 若将来要做"关系图谱可视化",
+> B 类边(`ai:<model>:*` 命名空间)是现成的正解:随用随建、整批清除、
+> 不污染业务数据。见 §4.1 (5)。
+
+#### (4) 落到具体表
+
+按三分法重整,**表结构如下**(取代原 §4.3 旧稿的写法):
+
+**① 人 —— `x_author`**(唯一真源,无 TTL,只显式删除)
+
+```
+handle          string UNIQUE      标识
+display_name    option<string>     当前展示名(会变)
+avatar          option<string>
+-- 我对他的态度(人工意志,不可重算)
+blocked         bool               需求 ④
+blocked_at / blocked_reason
+watched         bool               需求 ②⑤(与 blocked 互斥)
+watched_at / watch_source / watch_depth
+is_self         bool
+note            option<string>     人工备注
+```
+
+> **注意**:`first_seen` / `last_seen` / `seen_count` / `accepted_count` /
+> `replied_count` **不放这里** —— 它们是第三层的计算属性,可从"事"重算。
+> 原稿把它们混进 `x_author` 是**层次不清**,本次修正。
+
+**② 事 —— `x_tweet`**(唯一真源;是否永久取决于 `expires_at`)
+
+```
+tweet_id        string UNIQUE
+author_handle   string             → x_author 外键
+text            string
+created_at      option<datetime>   推文自身发布时间
+fetched_at      datetime           我们抓到的时刻
+in_reply_to     option<string>     非空 = 这是回复;含被回复者 handle
+metrics         object
+lang / tweet_url / author_name_at_post(见 Q6)
+-- item 的状态属性(用户明确:采纳与否只是属性)
+accepted        option<bool>       采纳/拒绝/未表态
+accepted_at     option<datetime>
+replied         bool               我是否回复过它
+reply_text      option<string>
+ai_verdict      option<object>
+source          string             'search' | 'watchlist'
+expires_at      option<datetime>   NONE = 永久保留(见 Q7)
+```
+
+**③ 分析维度 —— 不建"真源表",两条路按需选**
+
+- **轻量**:直接 SQL 聚合(`GROUP BY author_handle`)。当前量级(万级)完全够用,
+  **零维护成本、永不失真**
+- **重量**:若将来聚合变慢,再加**物化视图 / 派生表** `x_author_stats`,
+  标注"可重算、可清空",定期或按需刷新
+
+**建议先走轻量** —— 用户说"分析维度是方便查询而已",那就先别为了"方便"引入
+一致性负担(计数字段和真实数据不同步是最常见的 bug 源)。等真慢了再物化。
+
+#### (5) 关系图谱:留给 B 类边
+
+需求里的"n 层关系"(§3)本质是图查询。当前 n=1 直接从 `x_tweet.in_reply_to`
+聚合即可。若将来要做**可视化图谱**,按仓库总纲走 **B 类边**
+(`ai:x-graph:repliedTo` 之类的独立命名空间),随用随建、整批清除,
+不碰 `x_author` / `x_tweet` 这两张真源表。
+
+### 4.2 建模范式:账号是实体,推文是 item,采纳/回复是 item 的属性
 
 用户 2026-09-01 提出的建模直觉,**采纳** —— 它比原稿更正,原稿有两处没做干净:
 
@@ -275,7 +408,16 @@ X 上一条热门推可能有上千条回复。若无条件把"回复过 n=1 账
 
 > ⚠️ 但这是**需要用户拍板的架构选择**,见 §5 Q7。
 
-### 4.1 数据模型:两张新表
+### 4.3 数据模型(v0.2 旧稿 — 已被 §4.1 取代,保留供对照)
+
+> ⚠️ **以下为 v0.2 的写法,已被 §4.1 的三分法取代**。主要差异:
+> - 统计字段(`seen_count`/`accepted_count`/`replied_count`/`first_seen`/`last_seen`)
+>   原本混在 `x_author` 里,现划归第三层(计算属性),不入真源表
+> - `tweet_inbox` / `tweet_archive` 双表 → 倾向单表 `x_tweet` + `expires_at` option(Q7)
+>
+> 保留此节仅为对照演进过程,**实施以 §4.1 为准**。
+
+#### (旧稿)两张新表
 
 #### `tweet_archive` — 采纳/回复推文的永久档案
 
@@ -343,9 +485,9 @@ is_self      bool DEFAULT false   是否本人账号(自己的号也进 watchlis
 
 被追踪账号的推文/回复,**照常进 `tweet_inbox` → 采纳/回复时进 `tweet_archive`**。
 但 watchlist 抓来的推文有个特殊性:它们是**画像素材**,不是"待处理收件箱条目",
-不该混进 AI 判断队列刷屏 —— 见 §4.2 ⑤ 的 `source` 区分。
+不该混进 AI 判断队列刷屏 —— 见 §4.4 ⑤ 的 `source` 区分。
 
-### 4.2 五条需求的落地路径
+### 4.4 五条需求的落地路径
 
 #### ① 采纳持久化
 
@@ -528,7 +670,7 @@ in_reply_to   option<string>     回复上下文链接;非空 = 这是一条回�
 
 ### Q7. `tweet_inbox` / `tweet_archive` 单表还是双表?(架构选择)
 
-见 §4.0(c)。用户的建模意见("采纳只是 item 属性")指向**单表**:
+见 §4.2(c)。用户的建模意见("采纳只是 item 属性")指向**单表**:
 
 - **单表**:一张 `tweet` 表,`expires_at` option 化(NONE=永久)。建模干净、无 UNION;
   代价是改 `expires_at` 类型(REMOVE FIELD + DEFINE + 回填 4553 行),
