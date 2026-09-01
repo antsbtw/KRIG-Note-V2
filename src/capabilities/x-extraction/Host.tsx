@@ -86,16 +86,9 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
       }
     };
 
-    // [x-diag] 加载失败此前**完全静默** —— 没有任何 did-fail-load 监听,
-    // 于是加载失败的表现就是"一片黑,什么都没有",无从判断卡在哪一步。
-    // 这违背可靠性纲领的「故障必须响」。诊断期先把整条加载链路打点,
-    // 定位后可保留 did-fail-load(它本就该有),其余 log 再删。
-    const diag = (evt: string, extra?: unknown) => {
-      console.log(`[x-diag] ${new Date().toISOString()} ${evt}`,
-        extra ?? '', '| url=', (() => { try { return wv.getURL(); } catch { return '?'; } })());
-    };
-    // webview tag 的事件不在 HTMLElementEventMap 里,类型上只能当普通 Event 收,
-    // 运行期字段靠 cast 取(与本文件既有的 Tag cast 同款妥协)。
+    // 加载失败此前**完全静默** —— 没有任何 did-fail-load 监听,失败的表现就是
+    // "一片黑,什么都没有",无从判断卡在哪一步(2026-09-01 排查 X 白屏时,
+    // 正因为缺这条只能靠猜)。违背可靠性纲领「故障必须响」,故长期保留。
     wv.addEventListener('did-fail-load', ((e: Event) => {
       const d = e as unknown as {
         errorCode: number; errorDescription: string; validatedURL: string; isMainFrame: boolean;
@@ -109,10 +102,6 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
         (e as unknown as { reason?: string }).reason ?? e);
     }) as EventListener);
     wv.addEventListener('crashed', () => console.error('[x-diag] ✗✗ webview crashed'));
-    wv.addEventListener('did-start-loading', () => diag('did-start-loading'));
-    wv.addEventListener('did-stop-loading', () => diag('did-stop-loading'));
-    wv.addEventListener('dom-ready', () => diag('dom-ready'));
-
     wv.addEventListener('did-start-loading', handleStartLoading);
     wv.addEventListener('did-stop-loading', handleStopLoading);
     wv.addEventListener('did-navigate', handleDidNavigate);
@@ -148,45 +137,34 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
       relayout: () => {
         const wv = webviewRef.current;
         if (!wv || !domReadyRef.current) return;
-        // guest 内部靠 window.resize 重算响应式布局。<webview> 的 OS surface 尺寸
-        // 由 Electron 跟着 DOM 元素走,但**不保证**把 resize 事件送进 guest 文档 ——
-        // 尤其是从 display:none 回来、或父容器 grid track 宽度突变时。
+        // guest 内部靠 window.resize 重算响应式布局。<webview> 是 OS 级 surface,
+        // 与 EPUB/PDF/WebGL 同属命令式渲染引擎:容器宽度变了不会自愈,
+        // 会一直停在上次布局算出的尺寸上,不派发就不重排。
         //
-        // ⚠️ 时序是这里的要害(踩过):host 容器的 ResizeObserver 先于 webview 的
-        // OS surface 完成尺寸同步。此刻立刻派发 resize,guest 量到的是**旧宽度**
-        // → 全屏时也按窄宽度收起侧栏,而且之后不会再有事件把它纠回来。
-        // 解法:等 guest 自己量到的 innerWidth 稳定下来再派发,并且只在
-        // 「宽度确实变了」时派发 —— 让 guest 的量测结果本身当同步信号,
-        // 而不是猜一个 setTimeout 延迟。
+        // ⚠️ 时序:host 容器的 ResizeObserver 先于 webview 的 OS surface 完成同步,
+        // 立刻派发的话 guest 量到的是旧宽度。用 guest 自己的 innerWidth 当同步信号
+        // (而不是猜一个 setTimeout):对不上就下一帧重试,上限 10 帧 ≈160ms。
         const kick = (attempt: number): void => {
           try {
             void wv.executeJavaScript(
-              // 返回 guest 真实视口宽;顺带派发 resize 让 x.com 重算断点
-              // 多量几个口径:innerWidth / documentElement.clientWidth / dpr,
-              // 以及 X 侧栏元素当前是否存在、宽多少 —— 一次把证据取全,
-              // 免得再靠猜(已经猜错两次)。
+              // 合成 resize 事件 X 不一定认:React 的响应式多半接的是
+              // matchMedia / ResizeObserver,而**这两者只认真实的视口变化**,
+              // 手动 dispatch 的 Event('resize') 根本不会触发它们的回调。
+              // 所以除了派发,还要回报 sidebar 的实际宽度用于判断是否真的重排了。
               `(function(){
                  window.dispatchEvent(new Event("resize"));
-                 var sb = document.querySelector('[data-testid=\\'sidebarColumn\\']');
-                 var pc = document.querySelector('[data-testid=\\'primaryColumn\\']');
+                 var sb = document.querySelector('[data-testid="sidebarColumn"]');
                  return JSON.stringify({
-                   innerWidth: window.innerWidth,
-                   clientWidth: document.documentElement.clientWidth,
-                   dpr: window.devicePixelRatio,
-                   outerWidth: window.outerWidth,
+                   w: window.innerWidth,
                    sidebarW: sb ? Math.round(sb.getBoundingClientRect().width) : -1,
-                   primaryW: pc ? Math.round(pc.getBoundingClientRect().width) : -1,
                  });
                })()`,
             ).then((raw) => {
-              let m: Record<string, number> = {};
-              try { m = JSON.parse(String(raw)) as Record<string, number>; } catch { /* ignore */ }
-              const guestWidth = m.innerWidth ?? 0;
+              let m: { w?: number; sidebarW?: number } = {};
+              try { m = JSON.parse(String(raw)) as typeof m; } catch { /* ignore */ }
+              const guestWidth = m.w ?? 0;
               const hostWidth = Math.round(wv.getBoundingClientRect().width);
-              // [x-diag] 侧栏收起/展开定位:X 靠 guest 视口宽判断断点。
-              console.log(`[x-diag] relayout attempt=${attempt} host=${hostWidth}`, m);
-              // guest 还没跟上 host 宽度 → 再等一帧重来(最多 10 次 ≈ 160ms,
-              // 超时就放弃:X 自己也有 resize 监听,不至于永久卡住)
+              console.log(`[x-diag] relayout attempt=${attempt} host=${hostWidth} guest=${guestWidth} sidebarW=${m.sidebarW}`);
               if (guestWidth > 0 && hostWidth > 0
                   && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {
                 requestAnimationFrame(() => kick(attempt + 1));
