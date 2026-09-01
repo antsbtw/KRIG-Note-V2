@@ -75,16 +75,47 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
   useEffect(() => {
     const el = shellRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    // 宽度没变就不打扰 guest(ResizeObserver 高度变化也会触发)
+    // 宽度没变就不打扰 guest(ResizeObserver 高度变化也会触发)。
+    //
+    // ⚠️ 但**不能**只在"宽度变了"时触发一次就完事:全屏/拖分隔线都是连续变化,
+    // 那样只会在中途某个尺寸上排一次版,动画结束后的最终尺寸反而没人管
+    // (旧实现用 lastWidth 锁死,正是这个 bug)。
+    // 改成 debounce:连续变化只在**停下来之后**量一次,拿到的就是最终尺寸。
     let lastWidth = -1;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver((entries) => {
       const w = Math.round(entries[0]?.contentRect.width ?? 0);
       if (w <= 0 || w === lastWidth) return;   // 0 = 隐藏期,交给 ① 处理
       lastWidth = w;
-      xHostRef.current?.relayout();
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        xHostRef.current?.relayout();
+      }, 120);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      ro.disconnect();
+    };
+  }, []);
+
+  // ③ 窗口进/出全屏(点绿灯按钮)。
+  //
+  // ⚠️ 光靠 ② 的 ResizeObserver 不够:macOS 全屏是 ~0.5s 的动画,过程中容器宽度
+  // 连续变化,observer 在**中途某个尺寸**上触发一次(lastWidth 随即锁住),
+  // 而 guest 的 OS surface 落在动画结束后 —— 于是 X 按中途宽度排了版,
+  // 动画结束再没有事件把它纠回来。表现就是"点全屏侧栏不展开,
+  // 一按 Cmd+Opt+I 就弹出来"(用户 2026-09-01 实拍)。
+  //
+  // 主进程本来就在发 WINDOW_FULLSCREEN_CHANGED(main-window.ts:145),这里补上订阅:
+  // 动画结束后再量一次,拿到的才是最终尺寸。
+  useEffect(() => {
+    const off = window.electronAPI?.onFullscreenChanged?.(() => {
+      // 全屏动画结束后才是最终尺寸;等一拍再量,避免又量在动画中途
+      setTimeout(() => xHostRef.current?.relayout(), 350);
+    });
+    return () => off?.();
   }, []);
 
   const handleCloseRightSlot = useCallback(() => {
