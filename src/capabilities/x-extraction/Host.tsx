@@ -151,20 +151,25 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
               // matchMedia / ResizeObserver,而**这两者只认真实的视口变化**,
               // 手动 dispatch 的 Event('resize') 根本不会触发它们的回调。
               // 所以除了派发,还要回报 sidebar 的实际宽度用于判断是否真的重排了。
+              // 除了派发 resize,还强制读一次布局并触碰一下合成层:
+              // guest 常常**算对了**新布局却不重绘(被 Chromium 判为不可见时节流),
+              // 屏幕上仍是旧样子 —— 一开 DevTools 就"自己好了",正是因为那强制了重绘。
+              // backgroundThrottling=false 是主治,这里再补一记推动,双保险。
               `(function(){
                  window.dispatchEvent(new Event("resize"));
-                 var sb = document.querySelector('[data-testid="sidebarColumn"]');
-                 return JSON.stringify({
-                   w: window.innerWidth,
-                   sidebarW: sb ? Math.round(sb.getBoundingClientRect().width) : -1,
-                 });
+                 void document.documentElement.offsetHeight;   // 强制同步布局
+                 var b = document.body;
+                 if (b) {                                       // 触碰合成层促重绘
+                   var prev = b.style.transform;
+                   b.style.transform = 'translateZ(0)';
+                   requestAnimationFrame(function(){ b.style.transform = prev; });
+                 }
+                 return window.innerWidth;
                })()`,
             ).then((raw) => {
-              let m: { w?: number; sidebarW?: number } = {};
-              try { m = JSON.parse(String(raw)) as typeof m; } catch { /* ignore */ }
+              const m: { w?: number } = { w: typeof raw === 'number' ? raw : 0 };
               const guestWidth = m.w ?? 0;
               const hostWidth = Math.round(wv.getBoundingClientRect().width);
-              console.log(`[x-diag] relayout attempt=${attempt} host=${hostWidth} guest=${guestWidth} sidebarW=${m.sidebarW}`);
               if (guestWidth > 0 && hostWidth > 0
                   && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {
                 requestAnimationFrame(() => kick(attempt + 1));
@@ -187,6 +192,13 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
     src: homeUrl,
     partition: `persist:webview-${workspaceId}`,
     allowpopups: 'true',
+    // backgroundThrottling=false:Chromium 对"它认为不可见"的 surface 会节流
+    // 渲染与定时器。表现极具迷惑性 —— guest **算对了**新布局
+    // (relayout 探针回报的 sidebarW 完全正确),但**不重绘**,屏幕上还是旧样子;
+    // 一开 DevTools 就"自己好了",因为开 DevTools 强制了重绘
+    // (2026-09-01 用户实测:"每次切换都需要 cmd+opt+i 采集日志时才调整")。
+    // slot 切换/分栏改宽度时 webview 常处于这种被判定为不可见的中间态,故关掉节流。
+    webpreferences: 'backgroundThrottling=false',
     className,
     style,
   };
