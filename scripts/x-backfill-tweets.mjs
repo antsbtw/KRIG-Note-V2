@@ -124,7 +124,13 @@ try {
         replied: r.status === 'replied',
         backfilled: true,
         ...(isAccepted
-          ? { accepted: true, accepted_at: acceptedById.get(r.tweet_id).created_at, expires_at: undefined }
+          ? {
+              accepted: true,
+              accepted_at: acceptedById.get(r.tweet_id).created_at,
+              expires_at: undefined,
+              // 同上:采纳过的行 ai_verdict 必须是 human:*,否则会回到「Gemma建议」待表态列表
+              ai_verdict: { worth: true, confidence: 1, reason: 'human:accept', tags: [], suggestReply: true },
+            }
           : {}),
       };
       // 采纳行:显式不带 expires_at → NONE → 永久保留
@@ -148,7 +154,12 @@ try {
         search_recipe: fb.source_recipe,
         status: 'worth',
         filter_score: 1.0,
-        ai_verdict: fb.ai_verdict,
+        // ⚠️ 必须写成 human:accept,**不能**留 Gemma 原判快照。
+        // UI 的「Gemma建议」视图筛的是 status='worth' 且 ai_verdict.reason 不以 human: 开头
+        // (XInboxView.tsx:22)—— 留着 Gemma 原判,617 条早就采纳过的历史推文会全部
+        // 冒充成"待你表态的新建议"涌进收件箱。踩过一次,别再改回去。
+        // Gemma 原判快照的真源在 tweet_feedback.ai_verdict(migration 1.8.7),不在这里,覆盖无损失。
+        ai_verdict: { worth: true, confidence: 1, reason: 'human:accept', tags: [], suggestReply: true },
         accepted: true,
         accepted_at: fb.created_at,
         replied: false,
