@@ -121,6 +121,30 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
+  // X_INVALIDATE_WC — 强制指定 guest 全量重绘。
+  //
+  // ⚠️ 这条是「打开 DevTools 侧栏就正确了」的解药。
+  // 隐藏的 view 挂在 display:none 下保活(SlotArea.tsx:86),其 <webview> 的
+  // OS surface 随之脱离;重新上台时 surface 挂回来,带的却是**上次画的那一帧**。
+  // guest 内部布局其实早就算对了(实测 host=1679 时左导航已排成展开 389px),
+  // 只是没画出来 —— 所以派发多少次 resize 都没用,那是布局侧的药。
+  // 开 DevTools 之所以"一按就好",正是因为它顺带强制了一次真实重绘。
+  //
+  // webContents.invalidate() = "Schedules a full repaint",是 renderer 侧
+  // 拿不到的主进程 API(<webview> 标签只暴露 getWebContentsId)。
+  ipcMain.handle(IPC_CHANNELS.X_INVALIDATE_WC, (_e, payload: unknown) => {
+    const wcId = (payload as { wcId?: unknown } | null)?.wcId;
+    if (typeof wcId !== 'number') return { success: false, error: 'wcId required' };
+    const wc = webContents.fromId(wcId);
+    if (!wc || wc.isDestroyed()) return { success: false, error: 'webContents not found' };
+    try {
+      wc.invalidate();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
   // X_GET_ACTIVE_WC — 面板加载时拿到自己 ws 的 wcId
   ipcMain.handle(IPC_CHANNELS.X_GET_ACTIVE_WC, (_e, payload: unknown) => {
     const p = payload as { wsId?: string } | null;

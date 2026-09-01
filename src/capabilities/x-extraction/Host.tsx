@@ -95,6 +95,13 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
             `[x-diag][${wsId}] host=${hostWidth} guest=${m.w}`
             + ` 左导航=${navState}(${nav}px) 右栏=${m.rightW}`,
           );
+          // 布局算完了还得**真的画出来**:隐藏期 <webview> 的 OS surface 脱离,
+          // 复出时带的是上次那一帧。invalidate() 排一次全量重绘 ——
+          // 这正是"开 DevTools 就正确了"里 DevTools 顺手做掉的那件事。
+          try {
+            const wcId = wv.getWebContentsId();
+            if (typeof wcId === 'number') void window.electronAPI?.xTimeline?.invalidateWc?.(wcId);
+          } catch { /* guest 未 attach */ }
           const guestWidth = m.w ?? 0;
           if (guestWidth > 0 && hostWidth > 0
               && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {

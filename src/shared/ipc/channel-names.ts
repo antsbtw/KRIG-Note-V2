@@ -320,6 +320,7 @@ export const IPC_CHANNELS = {
   X_LIST_RECIPES:    'x:list-recipes',     // renderer → main invoke：取所有配方
   X_REPLY_TWEET:     'x:reply-tweet',      // renderer → main invoke：导航 X webview 到目标推文（wsId + tweetUrl）
   X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
+  X_INVALIDATE_WC:   'x:invalidate-wc',   // renderer → main：强制 guest 全量重绘(见 x-timeline-handlers)
   X_SUBMIT_FEEDBACK: 'x:submit-feedback', // renderer → main invoke：写入人工 verdict
   X_QUERY_FEEDBACK:  'x:query-feedback',  // renderer → main invoke：查询 feedback 样本（Phase 3b 用）
   X_UPSERT_RECIPE:   'x:upsert-recipe',   // renderer → main invoke：新建或更新配方
