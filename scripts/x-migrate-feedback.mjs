@@ -13,7 +13,7 @@
  * 本脚本自己拉起 surreal sidecar(app 退出后它也没了),跑完自己关掉。
  * 不删任何源数据 —— 删旧表是独立的一步,用户确认后单独做。
  */
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -101,6 +101,7 @@ async function startSidecar() {
 // ── 主流程 ─────────────────────────────────────────────────────
 
 let proc = null;
+let failed = false;
 try {
   console.log(`模式: ${DRY_RUN ? '预检(不写)' : '真迁移'}`);
   proc = await startSidecar();
@@ -210,7 +211,7 @@ try {
   }
 } catch (err) {
   console.error(`\n✗ ${err.message}`);
-  process.exitCode = 1;
+  failed = true;
 } finally {
   if (proc) {
     proc.kill('SIGTERM');
@@ -218,4 +219,8 @@ try {
     try { proc.kill('SIGKILL'); } catch { /* 已退出 */ }
     console.log('sidecar 已关闭');
   }
+  // 退出码放在最后设:finally 里任何 console/await 都可能被后续代码覆盖掉
+  // process.exitCode(实测踩过 —— 守卫报错了但退出码仍是 0,
+  // 对包装脚本而言就是"静默成功")。
+  if (failed) process.exit(1);
 }
