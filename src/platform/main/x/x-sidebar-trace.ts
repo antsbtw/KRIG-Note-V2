@@ -109,6 +109,7 @@ function scheduleStartupShots(wc: WebContents, wsId: string): void {
             + `navW:h?Math.round(h.getBoundingClientRect().width):-1});})()`,
           );
         } catch { /* ignore */ }
+        await probeLayoutVars(wc, `t${sec}s`);
         void trace('startup-shot', {
           wsId, wcId: wc.id, 秒: sec, dom,
           画面文字占比: painted?.paintedW ?? null,
@@ -264,6 +265,70 @@ export async function saveShot(wc: WebContents, label: string): Promise<string |
   } catch {
     return null;
   }
+}
+
+/**
+ * 深挖 X 布局到底由什么变量决定 —— 用户问:「更底层的 web 页布局时,
+ * 侧栏是没有变量的吗?」这正是该查的:与其外部量宽度猜断点,
+ * 不如直接问 X 自己用的是什么。
+ *
+ * 三个候选,一次全查:
+ *  ① CSS 媒体查询 —— matchMedia 的实际匹配结果(X 的断点是多少、当前命中哪条)
+ *  ② 导航元素的计算样式 —— 是靠 width 还是 display 切换的
+ *  ③ html/body 上的自定义属性 —— 有些 SPA 用 data-* 或 CSS 变量存布局态
+ */
+const LAYOUT_VARS_JS = `(function(){
+  var out = { mq: {}, nav: null, vars: {} };
+  // ① X 已知断点附近全试一遍,看当前命中哪些
+  [500,688,1005,1080,1265,1280].forEach(function(px){
+    try { out.mq['min-'+px] = window.matchMedia('(min-width:'+px+'px)').matches; } catch(e){}
+  });
+  // ② 导航元素的实际计算样式
+  var hdr = document.querySelector('header[role="banner"]');
+  if (hdr) {
+    var cs = getComputedStyle(hdr);
+    var r = hdr.getBoundingClientRect();
+    out.nav = {
+      rectW: Math.round(r.width),
+      styleWidth: cs.width, display: cs.display, visibility: cs.visibility,
+      opacity: cs.opacity, transform: cs.transform,
+      // 导航里第一个链接的宽度:展开时含文字会明显更宽
+      firstLinkW: (function(){
+        var a = hdr.querySelector('a[role="link"]');
+        return a ? Math.round(a.getBoundingClientRect().width) : -1;
+      })(),
+      // 文字节点是否真的存在(收起态 X 会把 span 移除或隐藏)
+      visibleText: (function(){
+        var sp = hdr.querySelectorAll('span');
+        var n = 0;
+        for (var i=0;i<sp.length;i++){
+          var t=(sp[i].textContent||'').trim();
+          if (t && sp[i].getBoundingClientRect().width>0) n++;
+        }
+        return n;
+      })(),
+    };
+  }
+  // ③ 根元素上的自定义属性/CSS 变量
+  try {
+    var de = document.documentElement;
+    for (var i=0;i<de.attributes.length;i++){
+      var a=de.attributes[i];
+      if (a.name.indexOf('data-')===0 || a.name==='style' || a.name==='class')
+        out.vars[a.name] = String(a.value).slice(0,120);
+    }
+  } catch(e){}
+  out.innerWidth = window.innerWidth;
+  out.dpr = window.devicePixelRatio;
+  return JSON.stringify(out);
+})()`;
+
+/** 查一次 X 的布局变量,写进 trace */
+export async function probeLayoutVars(wc: WebContents, label: string): Promise<void> {
+  try {
+    const raw = await wc.executeJavaScript(LAYOUT_VARS_JS);
+    void trace('layout-vars', { wcId: wc.id, label, data: JSON.parse(String(raw)) });
+  } catch { /* ignore */ }
 }
 
 /** 供排查时从主进程直接查当前所有 X guest 的状态 */
