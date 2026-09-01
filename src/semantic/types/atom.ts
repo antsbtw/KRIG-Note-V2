@@ -1,6 +1,6 @@
 /**
  * V2 语义层 Atom 通用接口
- * 详 docs/RefactorV2/data-model/atom/spec.md §1
+ * 详 docs/90-archive/refactor-v2/data-model/atom/spec.md §1
  */
 
 export type AtomDomain = string;

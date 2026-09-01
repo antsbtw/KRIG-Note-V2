@@ -1,7 +1,7 @@
 /**
  * PmAtomDraft — import-pipeline 内 pm atom 草稿形态 (5B Stage 7 拍板)
  *
- * 规范依据 (docs/RefactorV2/data-model/persistence/spec.md §6 PE4):
+ * 规范依据 (docs/90-archive/refactor-v2/data-model/persistence/spec.md §6 PE4):
  *   "atom.id 由 storage 层生成,业务层不允许指定"
  *
  * 因此 import 路径(markdownToAtoms / krigBatchToAtoms / 等)产出的 atom 集合

@@ -1078,6 +1078,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getActiveWcId(wsId: string) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_GET_ACTIVE_WC, { wsId });
     },
+
+    /** 强制指定 guest 全量重绘(解 display:none 复出后带旧帧的问题)*/
+    invalidateWc(wcId: number): Promise<{ success: boolean; error?: string }> {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_INVALIDATE_WC, { wcId });
+    },
     replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_TWEET, { tweetUrl, tweetId, wsId, wcId });
     },

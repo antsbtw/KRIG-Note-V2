@@ -13,7 +13,7 @@
  *
  * 双导出 + capabilityRegistry.register 范式对齐 graph-library-store / shape-library。
  *
- * 详见 docs/RefactorV2/stages/L5G5-node-floating-toolbar-design.md v0.3。
+ * 详见 docs/90-archive/refactor-v2/stages/L5G5-node-floating-toolbar-design.md v0.3。
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';

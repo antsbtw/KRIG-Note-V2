@@ -1,7 +1,7 @@
 /**
  * thought IPC 共享类型(横切思考层 — 跨 source 思考网)
  *
- * 见 docs/RefactorV2/thought-view-port.md v0.5 §4。
+ * 见 docs/90-archive/refactor-v2/thought-view-port.md v0.5 §4。
  *
  * 设计要点:
  * - Thought 是横切思考层,不依附任何单一 view;通过 anchor 挂到 note/book/graph/canvas/null

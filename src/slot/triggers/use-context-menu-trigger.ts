@@ -6,7 +6,7 @@
  * 使用:
  *   useContextMenuTrigger(slotElementRef, 'note');
  *
- * L4 重构(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * L4 重构(handoff: docs/90-archive/tasks/context-menu-registry-handoff.md):
  * - L4 字面 0 业务字段(无 thought / pmInstanceId / hasLink / hasMarks 等)
  * - 业务字段通过 contextInfoProviderRegistry.collect(target) 汇总到 ContextInfo.custom
  * - 各 capability / view 自行注册 provider(text-editing / thought / 未来 ebook)

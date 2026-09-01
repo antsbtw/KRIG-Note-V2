@@ -3,7 +3,7 @@
 Graph 节点浮条 —— 选中画板节点 → 选中框正下方居中浮出 Freeform 风格 pill 工具条 →
 按节点类型注册声明哪几个属性面板 → 改属性节点实时更新。
 
-**权威设计**:[../../../docs/RefactorV2/stages/L5G5-node-floating-toolbar-design.md](../../../docs/RefactorV2/stages/L5G5-node-floating-toolbar-design.md) v0.3
+**权威设计**:[../../../docs/90-archive/refactor-v2/stages/L5G5-node-floating-toolbar-design.md](../../../docs/90-archive/refactor-v2/stages/L5G5-node-floating-toolbar-design.md) v0.3
 
 ## 是什么
 

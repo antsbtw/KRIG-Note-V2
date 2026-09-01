@@ -9,7 +9,7 @@
  * 3. handle click → handleMenuController.show
  * 4. handle dragstart → dnd capability emit('dnd.started')
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 3.2 + § 3.4。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 3.2 + § 3.4。
  */
 
 import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';

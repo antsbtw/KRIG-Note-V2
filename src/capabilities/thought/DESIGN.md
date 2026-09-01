@@ -1,7 +1,7 @@
 # thought capability — v0.1 设计
 
 **状态**:Phase 1 落地中
-**主 SSOT**:`docs/RefactorV2/thought-view-port.md` v0.5+
+**主 SSOT**:`docs/90-archive/refactor-v2/thought-view-port.md` v0.5+
 
 ## 定位
 
@@ -15,7 +15,7 @@ Thought 是 KRIG 的**横切思考层**(thought-view-port.md §0/§2)。
 
 8 个 invoke API + 1 个订阅 = 9 表面(`types.ts` ThoughtCapabilityApi)。
 
-详见 [thought-view-port.md §5.3 接口表](../../../docs/RefactorV2/thought-view-port.md)。
+详见 [thought-view-port.md §5.3 接口表](../../../docs/90-archive/refactor-v2/thought-view-port.md)。
 
 ## 与 ebook reading-thought 的关系(双轨期)
 

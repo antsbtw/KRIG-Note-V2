@@ -8,7 +8,7 @@
  * 容器(NodeToolbar)**零硬编码 section 清单**:有哪几个 button 完全由 nodeBindingRegistry
  * 按节点类型声明 + sectionRegistry 解析。新增一种节点 / 一种 section,**只注册不改容器**。
  *
- * 详见 docs/RefactorV2/stages/L5G5-node-floating-toolbar-design.md §4.2。
+ * 详见 docs/90-archive/refactor-v2/stages/L5G5-node-floating-toolbar-design.md §4.2。
  */
 
 import type { NodeBinding, NodeSnapshot, SectionDef } from './types';

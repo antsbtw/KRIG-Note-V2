@@ -7,7 +7,7 @@
  *   (阶段 2 做原生收件箱时,账号树/文件夹会进 navSide,那时去掉这个标记)
  * - slotPickerChildren —— SlotPicker 里展开为各服务商子项,而非 view 本身
  *
- * 见 docs/tasks/2026-08-26-mail-module-design.md
+ * 见 docs/10-business-design/mail/module-design.md
  */
 
 import { registerView } from '@slot/view-type-registry/register-view';

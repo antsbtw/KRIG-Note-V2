@@ -1,7 +1,7 @@
 /**
  * note doc → 「X Article 原生 Insert 驱动计划」(终态方案,2026-06-13 总指挥拍板)。
  *
- * 缘起(实测见 docs/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §0):总指挥逐项
+ * 缘起(实测见 docs/90-archive/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §0):总指挥逐项
  * 实测 X Article 的 Insert 菜单,确认 **X 原生支持 LaTeX / Table / Code / Posts / Media**,
  * 且交互模式高度统一(点 Insert → 选项 → 弹模态 → 填文本框 → 点 Update)。所以终态发布
  * 路径 = **驱动 X 自己的原生 Insert**,几乎不渲图(质量最高、保真、可搜索可复制)。

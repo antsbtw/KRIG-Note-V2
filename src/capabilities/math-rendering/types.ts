@@ -6,7 +6,7 @@
  * `requireCapabilityApi<MathRenderingApi>('math-rendering')` 拿 MathHost + 计算 API。
  *
  * 设计对齐参考:capabilities/code-editing/types.ts(命令式 Handle + Host props 模式)
- * 详见 docs/tasks/math-visual-migration-prompt.md §D1。
+ * 详见 docs/90-archive/tasks/math-visual-migration-prompt.md §D1。
  *
  * **本文件 0 import mafs / mathjs / @cortex-js/compute-engine**(types.ts 只暴露
  * 与 SDK 无关的契约;实际 SDK 类型在 host/ + compute/ 内消费)。

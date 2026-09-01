@@ -20,7 +20,7 @@ export interface ScannedFile {
   absPath: string;
   /** 相对路径,segment 用 '/' 分隔。
    *  - 单文件场景:basename(eg "foo.md")
-   *  - 目录场景:目录名 + 子路径(eg "docs/refactor/00-总纲.md") */
+   *  - 目录场景:目录名 + 子路径(eg "docs/90-archive/refactor-v1/00-总纲.md") */
   relPath: string;
   /** 文件内容(UTF-8 文本) */
   content: string;

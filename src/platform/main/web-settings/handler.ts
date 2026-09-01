@@ -32,6 +32,10 @@ export function registerWebSettingsHandler(): void {
     async (_event, { workspaceId }: { workspaceId: string }): Promise<void> => {
       const partition = `persist:webview-${workspaceId}`;
       const sess = session.fromPartition(partition);
+      // ⚠️ 无参 clearStorageData = 清全部 storage,**含 cookies** → X/AI/Google 登录全掉。
+      // 这是用户手动点「清除浏览数据」的语义,可以接受。
+      // 但**绝不能**把这个调用接进任何自动/定时清理 —— 自动清理走
+      // web-settings/partition-cache-cleaner.ts(只清缓存,不碰登录态)。
       await sess.clearStorageData();
       console.log('[web-settings] cleared storage ws=', workspaceId);
     },

@@ -2,7 +2,7 @@
 
 > v0.1 · 2026-05-05 · 草稿,等用户审阅
 >
-> 配套:[charter.md v0.4 § 1.2 + § 1.4](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md v1.1](../../docs/RefactorV2/view-hierarchy-v2.md) + [src/workspace/DESIGN.md v0.1](../workspace/DESIGN.md)
+> 配套:[charter.md v0.4 § 1.2 + § 1.4](../../docs/00-architecture/charter.md) + [view-hierarchy-v2.md v1.1](../../docs/90-archive/refactor-v2/view-hierarchy-v2.md) + [src/workspace/DESIGN.md v0.1](../workspace/DESIGN.md)
 
 ---
 

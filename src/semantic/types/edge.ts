@@ -1,6 +1,6 @@
 /**
  * V2 语义层 Edge 通用接口
- * 详 docs/RefactorV2/data-model/relations/spec.md §2
+ * 详 docs/90-archive/refactor-v2/data-model/relations/spec.md §2
  */
 
 export type EdgePredicate = string;

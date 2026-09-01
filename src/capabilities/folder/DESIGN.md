@@ -3,8 +3,8 @@
 > v0.2 · 2026-05-12 · L7-sub2 + L7-sub3a-1 反向更新
 >
 > 配套:
-> - [decision 012](../../../docs/RefactorV2/data-model/persistence/decisions/012-sub-phase-2-note-folder-migration.md) — sub-phase 2 基础设计
-> - [decision 014](../../../docs/RefactorV2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) — sub-phase 3a-1 cascade scope 扩展
+> - [decision 012](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/012-sub-phase-2-note-folder-migration.md) — sub-phase 2 基础设计
+> - [decision 014](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) — sub-phase 3a-1 cascade scope 扩展
 
 ## 职责
 
@@ -75,7 +75,7 @@ type FolderViewType = 'note' | 'graph';   // future sub-phase 022 加 | 'ebook'
 `storage.transaction` 包"删旧 inFolder 边 + 加新 inFolder 边"原子操作,
 保证树形结构一致性。
 
-> 事务原子性已恢复 (sub-phase 3a-tx 完成,[decision 020](../../../docs/RefactorV2/data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md)):
+> 事务原子性已恢复 (sub-phase 3a-tx 完成,[decision 020](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/020-sub-phase-3a-tx-true-atomicity.md)):
 > SDK 2.x `beginTransaction()` 原生路径,任一步失败整段回滚。
 
 ## deleteFolder Path Y 语义 (decision 012 设计师批复)
@@ -166,7 +166,7 @@ previewDeleteFolder(id: string): Promise<{ folders: number; resources: number }>
 2. 同步加 `<新 domain>_LIST_CHANGED` 广播触发
 3. 在对应 sub-phase 决议文档登记扩展
 
-→ 详 [decision 013 §0.5 设计师纪律 4](../../../docs/RefactorV2/data-model/persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md)。
+→ 详 [decision 013 §0.5 设计师纪律 4](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md)。
 
 ## 订阅机制
 

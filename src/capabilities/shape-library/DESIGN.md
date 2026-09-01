@@ -3,8 +3,8 @@
 > v0.1 · 2026-05-10 · L5-G2
 >
 > 配套:
-> - [../../../docs/RefactorV2/v1-graph-migration-plan.md](../../../docs/RefactorV2/v1-graph-migration-plan.md) v0.2 § 3.2
-> - [../../../docs/RefactorV2/stages/L5G2-shape-library-design.md](../../../docs/RefactorV2/stages/L5G2-shape-library-design.md) v0.2
+> - [../../../docs/90-archive/refactor-v2/v1-graph-migration-plan.md](../../../docs/90-archive/refactor-v2/v1-graph-migration-plan.md) v0.2 § 3.2
+> - [../../../docs/90-archive/refactor-v2/stages/L5G2-shape-library-design.md](../../../docs/90-archive/refactor-v2/stages/L5G2-shape-library-design.md) v0.2
 > - 业务规格(权威):[../../../docs/10-business-design/graph/library/Library.md](../../../docs/10-business-design/graph/library/Library.md)
 
 ## P1-1 严格版屏障落地点

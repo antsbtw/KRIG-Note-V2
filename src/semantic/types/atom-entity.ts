@@ -2,7 +2,7 @@ import type { Atom, AtomDomain } from './atom';
 
 /**
  * V2 atom 实体壳
- * 详 docs/RefactorV2/data-model/persistence/atom-entity.md §1
+ * 详 docs/90-archive/refactor-v2/data-model/persistence/atom-entity.md §1
  *
  * hasBeenReferenced (decision 014 §3.7 引入,sub-phase 3a-1):
  * - 单向 flag,DEFAULT false,被第 2+ 条 hasContent 边引用时置 true (永不复位)

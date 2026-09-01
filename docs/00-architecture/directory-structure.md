@@ -216,8 +216,8 @@ overrides: [
 |---|---|---|
 | **跨层纲领**(charter / vision / directory-structure 等) | `docs/00-architecture/` | 不属于任何单一层 |
 | **业务领域设计**(note / block / graph 等业务概念) | `docs/10-business-design/` | 跨层,按业务组织 |
-| **V1 历史归档** | `docs/99-archive-v1/` | 不动 |
-| **阶段实施报告**(L0~L5 完成报告) | `docs/RefactorV2/stages/` | 按时间序,不按层 |
+| **V1 历史归档** | `docs/90-archive/v1/` | 不动 |
+| **阶段实施报告**(L0~L5 完成报告) | `docs/90-archive/refactor-v2/stages/` | 按时间序,不按层 |
 | **每层 README**(快速说明) | `src/<层>/README.md` | 与代码同位 |
 | **每层 DESIGN**(详细设计) | `src/<层>/DESIGN.md` | 与代码同位,改代码时强制同步 |
 | **每个模块 DESIGN**(NoteView / 某能力等) | `src/<层>/<模块>/DESIGN.md` | 同上 |
@@ -249,7 +249,7 @@ overrides: [
 
 ### 5.5 阶段实施报告
 
-每个 L 阶段(L0~L5)完成时,在 `docs/RefactorV2/stages/` 内写一份 `L<n>-<name>-completion.md`,内容详见 `docs/RefactorV2/README.md`。
+每个 L 阶段(L0~L5)完成时,在 `docs/90-archive/refactor-v2/stages/` 内写一份 `L<n>-<name>-completion.md`,内容详见 `docs/90-archive/refactor-v2/README.md`。
 
 不与 src/<层>/DESIGN.md 重复——前者是"实施过程记录"(用户可感知验证 / 完成判据 / 遗留问题),后者是"架构设计稳定文档"(那一层的设计契约)。
 
@@ -285,7 +285,7 @@ overrides: [
 |---|---|---|---|
 | 2026-05-03 | v0.1 | 初稿;详细描述 9 个第一层 + 各目录内部子结构(views / capabilities 3 类 / semantic / storage / platform / shell / workspace / slot / shared 各自 sub-tree)+ 与 V1 目录详细对应 — 备份为 `_archive_directory-structure-v0.1-detailed.md` 供未来真实现时参考 | wenwu + Claude |
 | 2026-05-03 | v0.2 | 重写,大幅简化;采用"分层写"原则——本文档仅定义第一层 9 目录 + 职责契约 + 屏障 + 命名 + path alias + ESLint;子目录细节移到独立 `directory-structure-<x>.md`(那一层真实现时再写);v0.1 详细子结构归档为 `_archive_` 文件 | wenwu + Claude |
-| 2026-05-03 | v0.3 | § 5 重构;采用"文档与代码同位 + 阶段记录单独存放"混合方案;层级 README/DESIGN 改放 `src/<层>/` 内(与代码同位),取代之前"放 docs/00-architecture/" 的安排;新建 `docs/RefactorV2/stages/` 存放阶段实施报告 | wenwu + Claude |
+| 2026-05-03 | v0.3 | § 5 重构;采用"文档与代码同位 + 阶段记录单独存放"混合方案;层级 README/DESIGN 改放 `src/<层>/` 内(与代码同位),取代之前"放 docs/00-architecture/" 的安排;新建 `docs/90-archive/refactor-v2/stages/` 存放阶段实施报告 | wenwu + Claude |
 
 ---
 

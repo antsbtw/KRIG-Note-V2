@@ -2,9 +2,10 @@
  * search_recipes 表 CRUD（X 时间线智能筛选 Phase 1）
  *
  * 调用边界：仅 main 进程调用，直接 import @storage/surreal/client。
+ * ⚠️ 走 **X 库(krig_x)**,不是笔记库 —— 用 getXDB() 而非 getDB()。
  */
 
-import { getDB } from '@storage/surreal/client';
+import { getXDB } from '@storage/surreal/client';
 import { generateUlid } from '@shared/ulid';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -80,7 +81,7 @@ const INITIAL_RECIPES: Omit<SearchRecipe, 'id'>[] = [
  * 在 initStorage + migration_1_8_0 之后调用。
  */
 export async function seedRecipes(): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   const existing = await db.query<[Array<{ recipe_id: string }>]>(
     `SELECT recipe_id FROM search_recipes LIMIT 1`,
   );
@@ -127,7 +128,7 @@ export async function seedRecipes(): Promise<void> {
 
 /** 取所有 enabled=true 的配方 */
 export async function listEnabledRecipes(): Promise<SearchRecipe[]> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[RecipeRow[]]>(
     `SELECT * FROM search_recipes WHERE enabled = true`,
   );
@@ -136,7 +137,7 @@ export async function listEnabledRecipes(): Promise<SearchRecipe[]> {
 
 /** 更新配方的 last_run_at */
 export async function updateLastRunAt(recipeId: string, at: string): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `UPDATE search_recipes SET last_run_at = $at WHERE recipe_id = $recipe_id`,
     { at: new Date(at), recipe_id: recipeId },
@@ -145,7 +146,7 @@ export async function updateLastRunAt(recipeId: string, at: string): Promise<voi
 
 /** 按 recipe_id 取单条配方 */
 export async function getRecipeById(recipeId: string): Promise<SearchRecipe | null> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[RecipeRow[]]>(
     `SELECT * FROM search_recipes WHERE recipe_id = $recipe_id LIMIT 1`,
     { recipe_id: recipeId },
@@ -156,7 +157,7 @@ export async function getRecipeById(recipeId: string): Promise<SearchRecipe | nu
 
 /** 取所有配方（不过滤 enabled，按名称排序） */
 export async function listAllRecipes(): Promise<SearchRecipe[]> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[RecipeRow[]]>(
     `SELECT * FROM search_recipes ORDER BY name ASC`,
   );
@@ -170,7 +171,7 @@ export async function listAllRecipes(): Promise<SearchRecipe[]> {
 export async function upsertRecipe(
   recipe: Omit<SearchRecipe, 'id'> & { id?: string },
 ): Promise<SearchRecipe> {
-  const db = getDB();
+  const db = getXDB();
   const params = {
     name: recipe.name,
     enabled: recipe.enabled,
@@ -218,7 +219,7 @@ export async function upsertRecipe(
 
 /** 删除配方（不删关联的 tweet_inbox 记录） */
 export async function deleteRecipe(recipeId: string): Promise<void> {
-  const db = getDB();
+  const db = getXDB();
   await db.query(
     `DELETE FROM search_recipes WHERE recipe_id = $recipe_id`,
     { recipe_id: recipeId },
@@ -236,7 +237,7 @@ export interface RecipeStats {
 
 /** 按 recipe id 统计 tweet_inbox 采纳率 */
 export async function getRecipeStats(recipeId: string): Promise<RecipeStats> {
-  const db = getDB();
+  const db = getXDB();
   const res = await db.query<[Array<{ status: string; cnt: number }>]>(
     `SELECT status, count() AS cnt
      FROM tweet_inbox

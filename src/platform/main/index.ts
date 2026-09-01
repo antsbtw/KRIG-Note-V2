@@ -29,9 +29,16 @@ import { app, BrowserWindow, protocol } from 'electron';
 //
 // 在流上直接监听 'error' 并只忽略 EPIPE(此刻进程在退、日志本无意义),错误就被
 // 流自身消费、不再冒泡;其余真实异常不经此路径,fail-loud 行为不受影响。
+// ⚠️ EIO 与 EPIPE 同源,必须一起忽略(2026-09-01 实拍):
+//   Uncaught Exception: Error: write EIO
+//     at console.log ... at Pipe.onStreamRead
+// 管道断开在不同时序下 errno 不同 —— 对端已关是 EPIPE,底层 fd 已失效是 EIO。
+// 原来只挡 EPIPE,EIO 照样冒泡成 uncaughtException,而那个模态框会**阻塞事件循环**,
+// 连 before-quit 的优雅退出都跑不了(实测 SIGTERM 无效,只能 SIGKILL)。
+const IGNORED_STREAM_ERRNOS = new Set(['EPIPE', 'EIO']);
 const ignoreEpipe = (err: NodeJS.ErrnoException): void => {
-  if (err.code === 'EPIPE') return;
-  throw err; // 非 EPIPE 的流错误:照常抛出
+  if (err.code != null && IGNORED_STREAM_ERRNOS.has(err.code)) return;
+  throw err; // 其余流错误:照常抛出,fail-loud 不受影响
 };
 process.stdout.on('error', ignoreEpipe);
 process.stderr.on('error', ignoreEpipe);
@@ -57,6 +64,7 @@ import { registerWebDownloadHook } from './web-download/handler';
 import { registerWebProxyHandler } from './web-proxy/handler';
 import { registerProfileHandlers } from './profile/profile-handlers';
 import { registerWebSettingsHandler } from './web-settings/handler';
+import { cleanOversizedPartitionCaches } from './web-settings/partition-cache-cleaner';
 import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
@@ -66,6 +74,7 @@ import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cach
 import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
+import { recoverStuckAiJudging } from './db/tweet-inbox-repo';
 import { startXSearchScheduler, stopXSearchScheduler } from './x';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
@@ -184,6 +193,16 @@ app.whenReady().then(async () => {
   await seedRecipes().catch((err) => {
     console.error('[x-timeline] seedRecipes failed:', err);
   });
+  // 启动自愈:上次运行被打断而卡在 ai_judging 的推文退回 pending,下轮重判。
+  // 必须在 startXSearchScheduler 之前 —— 否则调度器可能先跑一轮,
+  // 那些行还是 ai_judging,又被漏掉一次。
+  await recoverStuckAiJudging()
+    .then((n) => {
+      if (n > 0) console.log(`[x-timeline] 自愈:${n} 条卡在 ai_judging 的推文已退回 pending`);
+    })
+    .catch((err) => {
+      console.error('[x-timeline] ai_judging 自愈失败:', err);
+    });
   startXSearchScheduler();
 
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
@@ -258,6 +277,21 @@ app.whenReady().then(async () => {
   registerWebProxyHandler();
   // per-ws 代理阶段3:Web 全局设置(搜索/主页)+ 清浏览数据 IPC。
   registerWebSettingsHandler();
+
+  // webview partition 缓存清理(保守档):只清 HTTP 缓存 + JS 编译缓存,
+  // 不碰 cookies/localStorage —— 登录态零影响。超阈值才清,不 await 免拖慢启动。
+  void cleanOversizedPartitionCaches()
+    .then((r) => {
+      if (r.cleaned.length > 0) {
+        console.log(
+          `[partition-cache] 扫描 ${r.scanned} 个 partition,清理 ${r.cleaned.length} 个,` +
+            `回收 ${(r.freedBytes / 1024 / 1024).toFixed(0)} MB`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[partition-cache] 清理失败(不影响启动):', err);
+    });
 
   // 登录:从磁盘恢复 session(有 token → authenticated,无 → anonymous)。
   // **不 await**:窗口照常起,AuthState 初始 loading,restore 完成后经

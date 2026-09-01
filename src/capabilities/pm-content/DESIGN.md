@@ -2,7 +2,7 @@
 
 > v0.1 · 2026-05-12 · L7-sub3a-1
 >
-> 配套:[decision 014 sub-phase 3a-1](../../../docs/RefactorV2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) §3.4
+> 配套:[decision 014 sub-phase 3a-1](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) §3.4
 
 ## 定位
 

@@ -270,7 +270,7 @@ export const IPC_CHANNELS = {
 
   // 邮箱模块(阶段 0:webview 薄壳)— 内嵌网页版邮箱 + 右键提取单封邮件到 note。
   // 数据层(IMAP/SMTP → SurrealDB)是阶段 1,不走这些通道。
-  // 见 docs/tasks/2026-08-26-mail-module-design.md
+  // 见 docs/10-business-design/mail/module-design.md
   MAIL_EXTRACT: 'mail.extract',                     // renderer → main:按坐标定位 + 抽该封邮件(返主题/正文/发件人)
   MAIL_EXTRACT_REQUEST: 'mail.extract-request',     // main → renderer 推送:邮箱 webview 原生右键点击,带 guest 坐标 {x,y}
   // 邮箱 阶段 1(IMAP 只读同步)— 账号配置 + 拉信落库
@@ -320,6 +320,7 @@ export const IPC_CHANNELS = {
   X_LIST_RECIPES:    'x:list-recipes',     // renderer → main invoke：取所有配方
   X_REPLY_TWEET:     'x:reply-tweet',      // renderer → main invoke：导航 X webview 到目标推文（wsId + tweetUrl）
   X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
+  X_INVALIDATE_WC:   'x:invalidate-wc',   // renderer → main：强制 guest 全量重绘(见 x-timeline-handlers)
   X_SUBMIT_FEEDBACK: 'x:submit-feedback', // renderer → main invoke：写入人工 verdict
   X_QUERY_FEEDBACK:  'x:query-feedback',  // renderer → main invoke：查询 feedback 样本（Phase 3b 用）
   X_UPSERT_RECIPE:   'x:upsert-recipe',   // renderer → main invoke：新建或更新配方

@@ -70,8 +70,11 @@ export interface TweetInboxRecord {
   tweet_url?: string;
   lang?: string;
   metrics: { likes?: number; retweets?: number; replies?: number; views?: number };
-  fetched_at: string;            // ISO datetime
-  expires_at: string;            // fetched_at + 7 天
+  fetched_at: string;            // ISO datetime — 我们抓到的时刻
+  created_at?: string;           // 推文自身发布时间(A':extract 已提供)
+  in_reply_to?: string;          // 非空 = 这是一条回复,含被回复者 handle(A')
+  /** 到期时间。**undefined = 永久保留**(采纳/回复过的推文) —— TTL 清理会跳过。 */
+  expires_at?: string;
   source: 'timeline' | 'search';
   search_recipe?: string;        // recipe.id
   task_id?: string;              // 处理任务维度，阶段B恒 'judge-value'，阶段C 起为工单 task
@@ -81,8 +84,14 @@ export interface TweetInboxRecord {
   ai_verdict?: AIVerdict;
   translation?: string;          // 非中文推文的中文翻译（Gemma AI 判断时顺带输出）
   status: TweetInboxStatus;
+  /** 人工最终态度:true=采纳 / false=拒绝 / undefined=未表态。与 status(流转状态)语义不同 */
+  accepted?: boolean;
+  accepted_at?: string;
+  replied?: boolean;
   replied_at?: string;
   reply_draft?: string;
+  author_name_at_post?: string;  // 发推当时的展示名快照
+  backfilled?: boolean;          // true = 存量回填,非实时采集
 }
 
 /** 默认过滤配置（初期硬编码，后期可做 UI 配置） */

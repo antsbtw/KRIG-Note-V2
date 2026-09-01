@@ -3,8 +3,8 @@
 > v0.2 · 2026-05-13 · L7-sub3a-2.5(note 形态升级)
 >
 > 配套:
-> - [decision 012](../../../docs/RefactorV2/data-model/persistence/decisions/012-sub-phase-2-note-folder-migration.md) — sub-phase 2 note + folder 初版
-> - [decision 016](../../../docs/RefactorV2/data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) — sub-phase 3a-2.5 note 形态升级(本次)
+> - [decision 012](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/012-sub-phase-2-note-folder-migration.md) — sub-phase 2 note + folder 初版
+> - [decision 016](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md) — sub-phase 3a-2.5 note 形态升级(本次)
 
 ## 职责
 
@@ -36,7 +36,7 @@ view 通过 `requireCapabilityApi<NoteCapabilityApi>('note')` 拿 api,不直触 
 
 sub-phase 2 字面"pm atom 就是 note";sub-phase 3a-1 引入 graph text-node 也走 pm atom domain(decision 014 §3.4)+ `hasContent` 边,**pm domain 不再唯一对应 note**。
 
-sub-phase 3a-2.5 引入 [`user:krig:hasNoteView`](../../../docs/RefactorV2/data-model/relations/spec.md) 边(decision 016 §3.2):某 pm atom 当作 note 显示在 note 列表里 ⇔ 该 pm atom 有 1 条 `hasNoteView` 边作为 subject。
+sub-phase 3a-2.5 引入 [`user:krig:hasNoteView`](../../../docs/90-archive/refactor-v2/data-model/relations/spec.md) 边(decision 016 §3.2):某 pm atom 当作 note 显示在 note 列表里 ⇔ 该 pm atom 有 1 条 `hasNoteView` 边作为 subject。
 
 **形态对比**:
 
@@ -81,7 +81,7 @@ attrs:        { createdBy, createdAt }
 cardinality:  一对一(单引用约束,sub-phase 3a-2.5 强制)
 ```
 
-详 [decision 016 §3.2 / §3.3](../../../docs/RefactorV2/data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md)。
+详 [decision 016 §3.2 / §3.3](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md)。
 
 ### view ↔ capability 边界(NoteInfo,字面不变)
 
@@ -110,7 +110,7 @@ cardinality:  一对一(单引用约束,sub-phase 3a-2.5 强制)
 
 ## deleteNote 草稿/流通分支(sub-phase 3a-2.5)
 
-按 [decision 013 §3.5.2](../../../docs/RefactorV2/data-model/persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md) + [decision 016 §3.5](../../../docs/RefactorV2/data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md)`hasBeenReferenced` 删除契约:
+按 [decision 013 §3.5.2](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/013-sub-phase-3a-graph-canvas-migration.md) + [decision 016 §3.5](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/016-sub-phase-3a-2.5-note-form-upgrade.md)`hasBeenReferenced` 删除契约:
 
 | 状态 | 行为 | 实施 |
 |---|---|---|

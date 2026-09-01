@@ -3,9 +3,9 @@
 > v0.2 · 2026-05-12 · L5-G1 + L7-sub3a-1
 >
 > 配套:
-> - [../../../docs/RefactorV2/v1-graph-migration-plan.md](../../../docs/RefactorV2/v1-graph-migration-plan.md) v0.2 § 3.4
-> - [../../../docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md](../../../docs/RefactorV2/stages/L5G1-graph-platform-and-skeleton-design.md) v0.1
-> - [decision 014 sub-phase 3a-1](../../../docs/RefactorV2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) — SurrealDB 切换 + Instance + ref + pm 双层
+> - [../../../docs/90-archive/refactor-v2/v1-graph-migration-plan.md](../../../docs/90-archive/refactor-v2/v1-graph-migration-plan.md) v0.2 § 3.4
+> - [../../../docs/90-archive/refactor-v2/stages/L5G1-graph-platform-and-skeleton-design.md](../../../docs/90-archive/refactor-v2/stages/L5G1-graph-platform-and-skeleton-design.md) v0.1
+> - [decision 014 sub-phase 3a-1](../../../docs/90-archive/refactor-v2/data-model/persistence/decisions/014-sub-phase-3a-1-graph-canvas-instance-migration.md) — SurrealDB 切换 + Instance + ref + pm 双层
 >
 > **v0.2 变更**:JSON 磁盘后端 → SurrealDB Sidecar (sub-phase 3a-1 完成)
 

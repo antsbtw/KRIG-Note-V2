@@ -25,7 +25,8 @@ KRIG-Note-V2/
 ├─ README.md                          ← 本文件
 ├─ docs/                              ← 设计文档
 │  ├─ 00-architecture/                ← V2 架构纲领(6 个核心文档,继承自 V1)
-│  │  ├─ charter.md                  (V2 简化总纲,即将起草)
+│  │  ├─ charter.md                  (V2 简化总纲:分层/注册/抽象三大原则)
+│  │  ├─ data-model-charter.md       (数据模型总纲:实体优先/关系第二性/派生可重算)
 │  │  ├─ vision.md                   (项目愿景)
 │  │  ├─ three-layer.md              (三层架构顶层规范)
 │  │  ├─ view-hierarchy.md           (视图层级定义)
@@ -35,10 +36,17 @@ KRIG-Note-V2/
 │  ├─ 10-business-design/             ← 业务设计(各视图 + 块系统)
 │  │  ├─ note/        block/    ebook/   graph/    web/
 │  │  ├─ thought/     math/     code/    ai/       navside/
-│  │  └─ storage/     web-translate/  help/  agent/
-│  └─ 99-archive-v1/                  ← V1 历史归档
-│     ├─ refactor/                    (V1 refactor 全套:总纲 + 4 PROMPT + 14 stages + 15 archive)
-│     └─ evaluation/                  (V1 历史评估报告)
+│  │  ├─ storage/     web-translate/  help/  agent/  mail/
+│  │  └─ auth/        x-timeline-intelligence/
+│  ├─ 20-module-governance/           ← 模块边界治理(纲领 + 问题清单)
+│  ├─ reference/                      ← 速查表
+│  ├─ assets/                         ← 图片素材
+│  └─ 90-archive/                     ← 已完成任务归档(只读,不再维护)
+│     ├─ tasks/                       (一次性任务 prompt / handoff / delivery)
+│     ├─ refactor-v2/                 (V2 重构阶段单 + 数据模型决策)
+│     ├─ refactor-v1/                 (V2 早期 refactor 尝试)
+│     ├─ module-governance-units/     (模块治理工单)
+│     └─ v1/                          (V1 历史归档:refactor 全套 + evaluation)
 ├─ src/                               ← 代码实现(V2 从 0 开始,L0 起步)
 └─ package.json                       ← 项目依赖(从 0 添加)
 ```

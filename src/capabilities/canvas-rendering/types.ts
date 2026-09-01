@@ -13,7 +13,7 @@
  * **本文件 0 import three**(虽然 canvas-rendering 整体允许 import three,
  * 但 types.ts 不需要 — 暴露的是与 three 无关的画板数据类型 + 命令式 Host API).
  *
- * 详见 docs/RefactorV2/stages/L5G3-canvas-rendering-design.md v0.3 § 3.3.
+ * 详见 docs/90-archive/refactor-v2/stages/L5G3-canvas-rendering-design.md v0.3 § 3.3.
  */
 
 import type {
@@ -34,7 +34,7 @@ export type InstanceKind = 'shape' | 'substance';
  *
  * V2 sub-phase 3a-1 实际形态:DriverSerialized 信封
  *   { format:'pm-doc-json', version:'0.1', payload:{ type:'doc', content:[...] } }
- * 而非旧 V1 NoteView Atom[] 扁平形态.形态决议见 docs/RefactorV2/data-model/persistence/decisions/018.
+ * 而非旧 V1 NoteView Atom[] 扁平形态.形态决议见 docs/90-archive/refactor-v2/data-model/persistence/decisions/018.
  *
  * 此处用 unknown 是因为 canvas-rendering/types.ts 是基础类型层,不应直接依赖
  * text-editing capability;消费方(canvas-text-node 桥接 / 编辑层)做 import + 类型断言.

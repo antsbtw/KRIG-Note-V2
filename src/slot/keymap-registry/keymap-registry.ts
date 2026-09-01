@@ -4,7 +4,7 @@
  * view 注册时通过 ViewDefinition.keymap 字段声明绑定,view-type-registry
  * 在 distributeToRegistries 阶段把 keymap 拆到本 registry。
  *
- * 见 docs/RefactorV2/audit/wave4-design/W4.1-keymap-registrar.md § 4.2。
+ * 见 docs/90-archive/refactor-v2/audit/wave4-design/W4.1-keymap-registrar.md § 4.2。
  */
 
 import type { KeymapBinding } from './keymap-types';

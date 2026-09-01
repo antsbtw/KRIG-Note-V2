@@ -16,7 +16,7 @@
  *
  * ── 设计文档 ──
  *
- * docs/tasks/math-visual-migration-prompt.md §D1
+ * docs/90-archive/tasks/math-visual-migration-prompt.md §D1
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';

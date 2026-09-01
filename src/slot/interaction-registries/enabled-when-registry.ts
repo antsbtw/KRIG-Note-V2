@@ -1,7 +1,7 @@
 /**
  * EnabledWhenRegistry — L4 右键 enabledWhen 谓词贡献者
  *
- * 设计(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * 设计(handoff: docs/90-archive/tasks/context-menu-registry-handoff.md):
  * - L4 不知道有哪些 enabledWhen 值(EnabledWhen 字面变 string)
  * - capability / view 通过 register(name, predicate) 贡献
  * - context-menu-registry.getItemsForContext 过滤时调 eval(name, ctx)

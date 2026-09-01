@@ -9,12 +9,11 @@ build/surreal/
 *.log
 tmp/
 debug/
-docs/temp/
 .env
 .env.local
 
 # Test checklist prompt drafts (临时 prompt 模板,不入仓)
-docs/RefactorV2/test-checklists/*-prompt.md
+docs/90-archive/refactor-v2/test-checklists/*-prompt.md
 
 # 会话级 / 临时产物(不入仓)
 # .claude/settings.json = Claude Code 会话授权配置,逐会话累积,本机生效即可

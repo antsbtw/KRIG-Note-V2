@@ -14,7 +14,7 @@
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
-import { queryInbox, insertFeedback, queryFeedbackSamples, updateVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
+import { queryInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
 import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
@@ -121,6 +121,30 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
+  // X_INVALIDATE_WC — 强制指定 guest 全量重绘。
+  //
+  // ⚠️ 这条是「打开 DevTools 侧栏就正确了」的解药。
+  // 隐藏的 view 挂在 display:none 下保活(SlotArea.tsx:86),其 <webview> 的
+  // OS surface 随之脱离;重新上台时 surface 挂回来,带的却是**上次画的那一帧**。
+  // guest 内部布局其实早就算对了(实测 host=1679 时左导航已排成展开 389px),
+  // 只是没画出来 —— 所以派发多少次 resize 都没用,那是布局侧的药。
+  // 开 DevTools 之所以"一按就好",正是因为它顺带强制了一次真实重绘。
+  //
+  // webContents.invalidate() = "Schedules a full repaint",是 renderer 侧
+  // 拿不到的主进程 API(<webview> 标签只暴露 getWebContentsId)。
+  ipcMain.handle(IPC_CHANNELS.X_INVALIDATE_WC, (_e, payload: unknown) => {
+    const wcId = (payload as { wcId?: unknown } | null)?.wcId;
+    if (typeof wcId !== 'number') return { success: false, error: 'wcId required' };
+    const wc = webContents.fromId(wcId);
+    if (!wc || wc.isDestroyed()) return { success: false, error: 'webContents not found' };
+    try {
+      wc.invalidate();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
   // X_GET_ACTIVE_WC — 面板加载时拿到自己 ws 的 wcId
   ipcMain.handle(IPC_CHANNELS.X_GET_ACTIVE_WC, (_e, payload: unknown) => {
     const p = payload as { wsId?: string } | null;
@@ -153,7 +177,7 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'invalid payload: tweet_id and verdict required' };
     }
     try {
-      // 先抄 Gemma 原始判断快照：下面 updateVerdict 会用 human:* 覆盖 inbox 的 ai_verdict，
+      // 先抄 Gemma 原始判断快照：下面 applyHumanVerdict 会用 human:* 覆盖 ai_verdict，
       // 且 inbox 有 7 天 TTL —— 此快照是准确率对账的唯一持久来源（migration 1.8.7）
       const aiVerdictSnapshot = await getGenuineAiVerdict(p.tweet_id);
       await insertFeedback({
@@ -167,9 +191,9 @@ export function registerXTimelineHandlers(): void {
         created_at:    new Date().toISOString(),
         ai_verdict:    aiVerdictSnapshot,
       });
-      // 同步更新 tweet_inbox 状态：accept → worth，reject → skip（UI 不再展示 skip）
-      const newStatus = p.verdict === 'accept' ? 'worth' : 'skip';
-      await updateVerdict(p.tweet_id, { worth: newStatus === 'worth', confidence: 1, reason: `human:${p.verdict}`, tags: [], suggestReply: newStatus === 'worth' });
+      // 同步更新 x_tweet:accept → worth + **永久保留**(expires_at=NONE),reject → skip
+      // (A 期止血:此前这里走 updateVerdict,不动 expires_at,采纳的推文照样 7 天后被 TTL 删掉)
+      await applyHumanVerdict(p.tweet_id, p.verdict as FeedbackVerdict);
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };

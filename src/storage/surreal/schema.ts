@@ -3,7 +3,7 @@ import { surrealStorage } from './storage';
 
 /**
  * V2 SurrealDB schema 初始化
- * 详 docs/RefactorV2/data-model/persistence/surreal-schema.md §2-§3
+ * 详 docs/90-archive/refactor-v2/data-model/persistence/surreal-schema.md §2-§3
  *
  * 三张表:
  * - atom            语义层 atom (含 id / createdAt / updatedAt / createdBy / payload)
@@ -90,7 +90,7 @@ DEFINE INDEX IF NOT EXISTS schema_version_unique ON schema_version FIELDS versio
 /**
  * 1.3.0 schema — edge.attrs / atom.payload 改 FLEXIBLE,让 vocabulary 扩展字段合法。
  *
- * 设计文档(docs/RefactorV2/data-model/persistence/surreal-schema.md §3.1 line 203)
+ * 设计文档(docs/90-archive/refactor-v2/data-model/persistence/surreal-schema.md §3.1 line 203)
  * 字面写 "vocabulary-specific 扩展字段不约束([key]: any)",但 1.0.0 实施漏了
  * FLEXIBLE 关键字 → SurrealDB SCHEMAFULL 默认拒绝未声明字段 →
  * thought capability 写 attrs.source / attrs.locator(user:krig:thoughtOf 边的
@@ -646,7 +646,7 @@ export async function migration_1_8_7(db: Surreal): Promise<void> {
 /**
  * 1.8.8 — 邮箱模块 阶段 1:IMAP 只读同步的三张表。
  *
- * 设计见 docs/tasks/2026-08-26-mail-module-design.md。要点:
+ * 设计见 docs/10-business-design/mail/module-design.md。要点:
  *
  * - **mail_account** per-ws(带 ws_id),与 webview partition `persist:webview-${ws}` 对齐
  *   —— 工作 ws 登公司邮箱、个人 ws 登私人邮箱,两边身份必须一致。

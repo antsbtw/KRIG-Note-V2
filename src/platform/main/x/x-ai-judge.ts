@@ -134,7 +134,7 @@ export async function judgeWithOllama(
   } catch (err) {
     console.error('[x-ai-judge] Ollama call failed:', (err as Error).message);
     // 回退 pending 后上抛，让调用方(UI/调度器)看到失败
-    const db = (await import('@storage/surreal/client')).getDB();
+    const db = (await import('@storage/surreal/client')).getXDB();
     await db.query(
       `UPDATE tweet_inbox SET status = 'pending' WHERE tweet_id IN $ids`,
       { ids: tweetIds },
@@ -149,7 +149,7 @@ export async function judgeWithOllama(
     const verdict = verdictMap.get(tweet.tweet_id);
     if (!verdict) {
       // Ollama 没有返回这条推文的判断 → 回退 pending，下次重判
-      const db = (await import('@storage/surreal/client')).getDB();
+      const db = (await import('@storage/surreal/client')).getXDB();
       await db.query(
         `UPDATE tweet_inbox SET status = 'pending' WHERE tweet_id = $id`,
         { id: tweet.tweet_id },

@@ -3,8 +3,8 @@
 > v0.1 · 2026-05-10 · L5-G3
 >
 > 配套:
-> - [../../../docs/RefactorV2/v1-graph-migration-plan.md](../../../docs/RefactorV2/v1-graph-migration-plan.md) v0.2 § 3.3
-> - [../../../docs/RefactorV2/stages/L5G3-canvas-rendering-design.md](../../../docs/RefactorV2/stages/L5G3-canvas-rendering-design.md) v0.3
+> - [../../../docs/90-archive/refactor-v2/v1-graph-migration-plan.md](../../../docs/90-archive/refactor-v2/v1-graph-migration-plan.md) v0.2 § 3.3
+> - [../../../docs/90-archive/refactor-v2/stages/L5G3-canvas-rendering-design.md](../../../docs/90-archive/refactor-v2/stages/L5G3-canvas-rendering-design.md) v0.3
 > - 业务规格:[../../../docs/10-business-design/graph/canvas/Canvas.md](../../../docs/10-business-design/graph/canvas/Canvas.md)
 
 ## P1-1 严格版屏障核心(本 capability 设计中心)
@@ -21,7 +21,7 @@
   # 期望 0 命中
   ```
 
-详见 docs/RefactorV2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3.
+详见 docs/90-archive/refactor-v2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3.
 
 ## 职责
 

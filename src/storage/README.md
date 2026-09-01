@@ -4,9 +4,9 @@
 > **横向 L 层**: L7 (main 进程持久化基础设施)
 > **当前状态**: ✅ Sub-phase 1 基础设施完成 (业务 store 未接入)
 
-完整规范见 [`docs/RefactorV2/data-model/persistence/`](../../docs/RefactorV2/data-model/persistence/);
+完整规范见 [`docs/90-archive/refactor-v2/data-model/persistence/`](../../docs/90-archive/refactor-v2/data-model/persistence/);
 本 sub-phase 实施任务见
-[`decisions/011-sub-phase-1-surrealdb-infrastructure.md`](../../docs/RefactorV2/data-model/persistence/decisions/011-sub-phase-1-surrealdb-infrastructure.md)。
+[`decisions/011-sub-phase-1-surrealdb-infrastructure.md`](../../docs/90-archive/refactor-v2/data-model/persistence/decisions/011-sub-phase-1-surrealdb-infrastructure.md)。
 
 ---
 

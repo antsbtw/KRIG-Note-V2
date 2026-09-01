@@ -8,7 +8,7 @@
 >
 > **位置**:`src/capabilities/COMMON-PROTOCOL.md` — 与 `src/slot/workspace-bus/PROTOCOL.md` 平级。
 >
-> **相关研究**:[V1-function-mapping.md](../../docs/RefactorV2/research/V1-function-mapping.md)(双轴矩阵)+ [V1-block-operations.md](../../docs/RefactorV2/research/V1-block-operations.md)(BlockSpec 接口设计)。
+> **相关研究**:[V1-function-mapping.md](../../docs/90-archive/refactor-v2/research/V1-function-mapping.md)(双轴矩阵)+ [V1-block-operations.md](../../docs/90-archive/refactor-v2/research/V1-block-operations.md)(BlockSpec 接口设计)。
 >
 > 文档版本:v0.3
 > 编写日期:2026-05-05

@@ -2,7 +2,7 @@
  * intent-log 类型 — SP-3 数据层可靠性 intent-log 体系
  *
  * intent 记录一个"多步/分批写操作"的进度,让中断后 sweeper 能续完/回滚。
- * 详 docs/tasks/2026-05-30-data-layer-reliability-design.md §3。
+ * 详 docs/90-archive/tasks/2026-05-30-data-layer-reliability-design.md §3。
  */
 
 /** intent 操作类型(随 SP-2/4/5 逐步启用) */

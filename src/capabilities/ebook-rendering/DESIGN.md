@@ -2,7 +2,7 @@
 
 > v0.1 · 2026-05-09 · L5-C2
 >
-> 配套:[../../../docs/RefactorV2/v1-ebook-migration-plan.md](../../../docs/RefactorV2/v1-ebook-migration-plan.md) v0.3 § 3.2 + § 5 C2
+> 配套:[../../../docs/90-archive/refactor-v2/v1-ebook-migration-plan.md](../../../docs/90-archive/refactor-v2/v1-ebook-migration-plan.md) v0.3 § 3.2 + § 5 C2
 
 ## 职责
 

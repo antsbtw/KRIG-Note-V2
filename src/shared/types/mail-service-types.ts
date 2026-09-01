@@ -8,7 +8,7 @@
  *
  * 本阶段只做「内嵌网页版邮箱 + 右键提取单封邮件」。selectors 只需要
  * `mailElement`(单封邮件的容器,右键定位用)。**不做批量 DOM 抓取** ——
- * 那是阶段 1 的 IMAP 的活(见 docs/tasks/2026-08-26-mail-module-design.md §1)。
+ * 那是阶段 1 的 IMAP 的活(见 docs/10-business-design/mail/module-design.md §1)。
  *
  * ## imapDefaults 为什么现在就写
  *

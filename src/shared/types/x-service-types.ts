@@ -78,7 +78,7 @@ export interface XServiceSelectors {
 /**
  * X Article 原生 Insert 驱动所需的 selector 集合。
  *
- * 交互模式(总指挥实测,见 docs/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §6):
+ * 交互模式(总指挥实测,见 docs/90-archive/tasks/2026-06-13-x-articles-native-insert-impl-prompt.md §6):
  *   点 Insert 触发钮 → 弹菜单 → 点项(LaTeX/Table/Code/Posts/Media/Divider)→ 弹模态
  *   → 往文本框填内容 → 点 Update/确认 → 模态关闭 → 块插入完成。
  *

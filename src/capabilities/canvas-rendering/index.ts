@@ -5,7 +5,7 @@
  * 通过 ESLint config 例外允许 src/capabilities/canvas-rendering/** import three;
  * 其他位置(view / shape-library / 其他 capability / shell / workspace / slot)0 import.
  *
- * 详见 docs/RefactorV2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3.
+ * 详见 docs/90-archive/refactor-v2/v1-graph-migration-plan.md v0.2 § 0 第 3 条 + § 3.3.
  *
  * ── 下游消费者(规划)──
  *

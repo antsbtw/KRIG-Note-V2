@@ -8,7 +8,7 @@
  * PageViewport / RenderTask 等 pdfjs 内部类型。pdfjs 5.x 升级届时只改 adapter 内部,
  * 上游 0 改动。
  *
- * 详见 docs/refactor/pdf-viewer-adapter-plan.md § 3 + § 4。
+ * 详见 docs/90-archive/refactor-v1/pdf-viewer-adapter-plan.md § 3 + § 4。
  */
 
 import type { ComponentType, Ref } from 'react';

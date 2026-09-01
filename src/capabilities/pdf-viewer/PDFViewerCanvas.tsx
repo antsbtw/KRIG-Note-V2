@@ -19,7 +19,7 @@
  * - unmount 时 viewer.cleanup() + eventBus.off(all) + 不调 pdfDoc.destroy(handle
  *   生命周期由调用方通过 destroyDocument 管理)
  *
- * 详见 docs/refactor/pdf-viewer-adapter-plan.md § 5 Stage 2。
+ * 详见 docs/90-archive/refactor-v1/pdf-viewer-adapter-plan.md § 5 Stage 2。
  */
 
 import {

@@ -1,6 +1,6 @@
 /**
  * V2 StorageAPI 接口
- * 详 docs/RefactorV2/data-model/persistence/decisions/008-storage-layer-interface.md §2
+ * 详 docs/90-archive/refactor-v2/data-model/persistence/decisions/008-storage-layer-interface.md §2
  *
  * 调用边界 (§4.0):
  * - View 层禁止 import @storage

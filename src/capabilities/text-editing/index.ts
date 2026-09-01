@@ -96,5 +96,5 @@ registerCalloutIconRenderer();
 registerTextEditingCommands();
 
 // L4 右键体系重构:capability 注册 ContextInfo provider + enabledWhen 谓词
-// (handoff: docs/tasks/context-menu-registry-handoff.md)
+// (handoff: docs/90-archive/tasks/context-menu-registry-handoff.md)
 registerTextEditingContextInfo();

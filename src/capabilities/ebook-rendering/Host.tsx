@@ -443,7 +443,7 @@ export const EBookHost = forwardRef<EBookHostHandle, EBookHostProps>(function EB
           //   全屏布局对齐设计(2026-05-23):panel spread 单 column 宽 = view 主区
           //   单 column 宽,paginator 切分文字位置一致 → cfi.goTo 在两 view 落到
           //   相同的"视觉第一行" → 不再需要 anchor 落点校正 / range cfi 折叠
-          //   等任何变通逻辑。完整设计见 docs/tasks/epub-fullscreen-flip-handoff.md
+          //   等任何变通逻辑。完整设计见 docs/90-archive/tasks/epub-fullscreen-flip-handoff.md
           if (pos?.cfi) r.setRestoreLocation(pos.cfi);
 
           // C4:转推 EPUB 选区 / 选区取消 / 标注点击事件给 view

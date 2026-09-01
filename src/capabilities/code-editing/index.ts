@@ -18,7 +18,7 @@
  *
  * ── 设计文档 ──
  *
- * docs/tasks/cm6-elk-capability-refactor.md §Task A
+ * docs/90-archive/tasks/cm6-elk-capability-refactor.md §Task A
  */
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';

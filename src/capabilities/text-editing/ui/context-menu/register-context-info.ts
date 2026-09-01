@@ -1,6 +1,6 @@
 /**
  * text-editing capability 在 L4 contextInfoProviderRegistry / enabledWhenRegistry
- * 注册业务字段贡献 + 谓词(handoff: docs/tasks/context-menu-registry-handoff.md
+ * 注册业务字段贡献 + 谓词(handoff: docs/90-archive/tasks/context-menu-registry-handoff.md
  * §字段迁移清单)。
  *
  * 贡献字段(ContextInfo.custom):

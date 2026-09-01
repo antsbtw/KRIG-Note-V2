@@ -39,7 +39,7 @@
 
 ## 与 V1 的关系
 
-V1 入口在 [src/main/app.ts](../../docs/99-archive-v1/refactor/00-总纲.md)(282 行,做了太多事)——V2 platform 仅含**真正 L0+L1** 责任的代码。
+V1 入口在 [src/main/app.ts](../../docs/90-archive/v1/refactor/00-总纲.md)(282 行,做了太多事)——V2 platform 仅含**真正 L0+L1** 责任的代码。
 
 详细对比与改进见 [DESIGN.md § 4](./DESIGN.md)。
 

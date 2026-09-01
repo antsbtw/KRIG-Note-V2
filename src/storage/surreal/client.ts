@@ -18,12 +18,22 @@ import { Surreal } from 'surrealdb';
 
 const DEFAULT_PORT = 8533;
 const NAMESPACE = 'krig';
-const DATABASE = 'krig_note_v2';
+/** 笔记库 —— getDB() 的目标,全 app 默认库 */
+const NOTE_DATABASE = 'krig_note_v2';
+/**
+ * X 库 —— getXDB() 的目标。与笔记库**物理隔离**的独立 database(同 ns)。
+ *
+ * 隔离是有意的(见 docs/00-architecture/storage-isolation-boundaries.md):
+ * X 是外部采集数据,不进笔记本体命名空间;独立 schema / migration / 清理粒度,
+ * SurrealDB 层面无法跨库 JOIN。跨库关联(若将来需要)只能落应用层。
+ */
+const X_DATABASE = 'krig_x';
 const READY_TIMEOUT = 15000;
 const READY_POLL_INTERVAL = 500;
 const DB_SUBDIR = 'krig-data/surreal';
 
 let db: Surreal | null = null;
+let xdb: Surreal | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverPort = DEFAULT_PORT;
 let isReady = false;
@@ -70,9 +80,21 @@ export function onDBReady(callback: ReadyCallback): void {
   }
 }
 
+/** 笔记库连接(krig_note_v2)。全 app 默认库,语义与多库改造前一致。 */
 export function getDB(): Surreal {
   if (!db) throw new Error('SurrealDB not initialized; call initSurrealDB() first');
   return db;
+}
+
+/**
+ * X 库连接(krig_x)。
+ *
+ * **绝不 fallback 到 getDB()** —— 一旦兜底,X 数据会静默写进笔记库,
+ * 而"两边数据不混"正是独立库要保证的东西。未初始化就是 bug,直接 throw。
+ */
+export function getXDB(): Surreal {
+  if (!xdb) throw new Error('X SurrealDB not initialized; call initSurrealDB() first');
+  return xdb;
 }
 
 export function isDBReady(): boolean {
@@ -86,8 +108,13 @@ export function getConnectionInfo() {
     username,
     password,
     namespace: NAMESPACE,
-    database: DATABASE,
+    database: NOTE_DATABASE,
   };
+}
+
+/** X 库的 ns/db(与 getConnectionInfo 同端点、同凭据,只是库名不同) */
+export function getXConnectionInfo() {
+  return { ...getConnectionInfo(), database: X_DATABASE };
 }
 
 export function getMode(): 'sidecar' {
@@ -243,15 +270,37 @@ async function startServer(): Promise<void> {
   // unref 解除这层引用;进程本身仍在跑,仍由 shutdownSurrealDB 显式 kill。
   serverProcess.unref();
 
-  serverProcess.stdout?.on('data', (data: Buffer) => {
-    console.log(`[storage/surreal server] ${data.toString().trim()}`);
-  });
-  serverProcess.stderr?.on('data', (data: Buffer) => {
-    console.log(`[storage/surreal server] ${data.toString().trim()}`);
-  });
+  // ⚠️ 转发 sidecar 输出必须包 try/catch:
+  // console.log 在 stdout 管道已断时会**抛** EPIPE/EIO(终端关了、
+  // electron-forge 父进程先退了、DevTools 断开都会造成这种局面)。
+  // 这里是 'data' 事件回调,抛出去没人接 → 主进程未捕获异常 → 弹
+  // "A JavaScript error occurred in the main process" 框,而且那个模态框
+  // 阻塞事件循环,连 before-quit 的优雅退出都跑不了,只能 SIGKILL
+  // (2026-09-01 实拍:Error: write EIO at console.log ... Pipe.onStreamRead)。
+  //
+  // sidecar 还在正常吐日志、app 也活得好好的,仅仅因为"日志没地方写"就崩掉
+  // 整个主进程,是典型的因果倒置。写不出去就丢弃 —— stdout 都没了,
+  // 这行日志本来也没人看。
+  const forwardServerLog = (data: Buffer): void => {
+    try {
+      console.log(`[storage/surreal server] ${data.toString().trim()}`);
+    } catch {
+      /* stdout 已断(EPIPE/EIO):丢弃,绝不让日志写入失败拖垮主进程 */
+    }
+  };
+  serverProcess.stdout?.on('data', forwardServerLog);
+  serverProcess.stderr?.on('data', forwardServerLog);
   serverProcess.on('close', (code) => {
     console.log(`[storage/surreal] Server exited with code ${code}`);
     serverProcess = null;
+    // sidecar 意外死亡 → 拉起来并重连。
+    //
+    // ⚠️ 缺这一段的后果是**静默坍缩**(2026-09-01 实测):
+    // kill -9 掉 sidecar 后,SDK 尽职地重连 5 次(0.5→1→2→4→4s)然后放弃,
+    // 两条连接双双 disconnected。此后 app 看着还在跑,实际每次写库都抛
+    // ConnectionUnavailableError —— 用户直到保存笔记才发现数据写不进去。
+    // SDK 的重连本身没问题,缺的是「服务端没了得有人把它拉起来」。
+    void superviseRestart();
   });
 
   await waitForReady();
@@ -276,9 +325,18 @@ async function waitForReady(): Promise<void> {
 
 // ── WebSocket 连接 ──
 
-async function connectDB(): Promise<void> {
+/**
+ * 建立一条到指定 database 的连接。
+ *
+ * **每个库一条独立连接,不用 `use()` 切库** —— SurrealDB WS 的鉴权态与 ns/db
+ * 绑在单条 socket 上,SDK 自动重连后建立的是全新匿名会话:一次性 signin()/use()
+ * 不会重放,重连后所有 RPC 报 NotAllowed。只有 connect() 的选项会随重连恢复
+ * (见下方 connect 调用处的详注)。所以「一条连接 + use() 来回切」在重连后必然
+ * 退化成:鉴权没了、库也切回默认 —— 两个坑一起踩。
+ */
+async function connectOne(database: string): Promise<Surreal> {
   const { username, password } = credentials();
-  db = new Surreal();
+  const conn = new Surreal();
   // 鉴权 + ns/db 走 connect() 选项而非一次性 signin()/use():
   // SurrealDB WS 的鉴权态绑定在单条 socket 上,SDK 自动重连后会建立全新匿名会话。
   // 一次性 signin() 不会在重连后重放 → 重连后所有 RPC 报 NotAllowed(Anonymous access not allowed)。
@@ -289,25 +347,26 @@ async function connectDB(): Promise<void> {
   // (上一轮观察到的 NotAllowed / NavSide 归零背后的触发条件没找到)。
   // 保留这组 subscribe 作被动埋点:下次正常使用中若再撞断连/归零,终端会有
   // `[surreal-ws] event=disconnect/reconnect` 时间戳可直接对齐当时操作。成本极低(仅状态翻转时打一行)。
-  // 详见 docs/tasks/2026-05-31-ai-webview-churn-investigation.md。断连真因确认后可移除。
+  // 详见 docs/90-archive/tasks/2026-05-31-ai-webview-churn-investigation.md。断连真因确认后可移除。
   {
     const stamp = (): string => new Date().toISOString();
+    // 日志带库名:两条连接的事件混在一起时,不带标签就分不清是谁断了。
     for (const evt of ['connecting', 'connected', 'reconnecting', 'disconnected'] as const) {
-      db.subscribe(evt, () => {
+      conn.subscribe(evt, () => {
         // 退出途中的断连/重连是预期内噪音,不刷屏(真因排查埋点只关心运行期)
         if (shuttingDown) return;
-        console.log(`[surreal-ws] ${stamp()} event=${evt} status=${db?.status}`);
+        console.log(`[surreal-ws][${database}] ${stamp()} event=${evt} status=${conn.status}`);
       });
     }
-    db.subscribe('error', (err: unknown) => {
+    conn.subscribe('error', (err: unknown) => {
       if (shuttingDown) return;
-      console.log(`[surreal-ws] ${stamp()} event=error status=${db?.status} err=${String(err)}`);
+      console.log(`[surreal-ws][${database}] ${stamp()} event=error status=${conn.status} err=${String(err)}`);
     });
   }
 
-  await db.connect(`ws://127.0.0.1:${serverPort}/rpc`, {
+  await conn.connect(`ws://127.0.0.1:${serverPort}/rpc`, {
     namespace: NAMESPACE,
-    database: DATABASE,
+    database,
     authentication: { username, password },
     // 显式配置重连:服务端是本机 sidecar 子进程,不是网络对端。它没了通常意味着
     // 「进程组一起在退出」或「sidecar 崩了」,不值得按公网对端的耐心去等。
@@ -326,14 +385,19 @@ async function connectDB(): Promise<void> {
       retryDelayJitter: 0.1,
     },
   });
-  console.log(`[storage/surreal] Connected via WebSocket (${NAMESPACE}/${DATABASE})`);
+  console.log(`[storage/surreal] Connected via WebSocket (${NAMESPACE}/${database})`);
+  return conn;
 }
 
 // ── 公开 API ──
 
 export async function initSurrealDB(): Promise<void> {
   await startServer();
-  await connectDB();
+  // 两条独立连接:笔记库 + X 库。顺序无所谓(同一个 sidecar),
+  // 但两条都连上才算 ready —— X 连接失败不能降级成"只有笔记库能用",
+  // 那会让 getXDB() 在运行期才 throw,故障点离真因十万八千里。
+  db = await connectOne(NOTE_DATABASE);
+  xdb = await connectOne(X_DATABASE);
   isReady = true;
   for (const cb of readyCallbacks) {
     try { cb(); } catch (err) { console.error('[storage/surreal] Ready callback error:', err); }
@@ -343,9 +407,70 @@ export async function initSurrealDB(): Promise<void> {
 }
 
 /**
+ * sidecar 意外退出后的自愈:重启进程 + 重建两条连接。
+ *
+ * 边界:
+ *  - 主动退出途中(shuttingDown)绝不重启 —— 否则 Ctrl+C 会拉起一个新 sidecar,
+ *    把自己吊在事件循环里出不去(project-graceful-shutdown 的老坑)
+ *  - 限次 + 退避:二进制损坏/端口被占这类硬故障重启多少次都没用,
+ *    无限重启只会刷屏并拖垮机器。放弃时**大声报错**,不静默
+ *  - 重启成功后计数清零 —— 长期运行中偶发崩溃不该累积到耗尽配额
+ */
+const MAX_RESTART_ATTEMPTS = 3;
+let restartAttempts = 0;
+let restarting = false;
+
+async function superviseRestart(): Promise<void> {
+  if (shuttingDown) return;              // 主动退出,不管
+  if (restarting) return;                // 已在重启中,不叠加
+  restarting = true;
+  isReady = false;
+  try {
+    while (restartAttempts < MAX_RESTART_ATTEMPTS) {
+      restartAttempts += 1;
+      const delay = 500 * 2 ** (restartAttempts - 1);   // 0.5s / 1s / 2s
+      console.warn(
+        `[storage/surreal] sidecar 意外退出,${delay}ms 后重启`
+        + `(第 ${restartAttempts}/${MAX_RESTART_ATTEMPTS} 次)`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+      if (shuttingDown) return;
+      try {
+        // 旧连接已死透,先关掉再重建 —— 否则它们的重连定时器会和新连接抢
+        for (const conn of [db, xdb]) {
+          if (conn) { try { conn.close(); } catch { /* ignore */ } }
+        }
+        db = null;
+        xdb = null;
+        await startServer();
+        db = await connectOne(NOTE_DATABASE);
+        xdb = await connectOne(X_DATABASE);
+        isReady = true;
+        restartAttempts = 0;             // 成功即清零
+        console.log('[storage/surreal] ✓ sidecar 已重启,两条连接均已恢复');
+        return;
+      } catch (err) {
+        console.error(`[storage/surreal] 重启失败(第 ${restartAttempts} 次):`, err);
+      }
+    }
+    // 放弃:必须响。此时所有写库都会抛 ConnectionUnavailableError,
+    // 与其让用户在保存笔记时才撞见,不如现在就把话说清楚。
+    console.error(
+      '\n' + '='.repeat(72)
+      + `\n[storage/surreal] ✗✗✗ sidecar 连续 ${MAX_RESTART_ATTEMPTS} 次重启失败 —— 数据库不可用 ✗✗✗`
+      + '\n  此后所有读写都会失败(ConnectionUnavailableError)。请重启 app。'
+      + '\n  常见原因:surreal 二进制损坏 / 端口 8533 被占 / 数据目录权限异常。'
+      + '\n' + '='.repeat(72) + '\n',
+    );
+  } finally {
+    restarting = false;
+  }
+}
+
+/**
  * 标记「本进程正在主动退出」。
  *
- * 置位后 WS 断连一律视为预期内(见 connectDB 的 reconnecting 监听):不再重连、
+ * 置位后 WS 断连一律视为预期内(见 connectOne 的 reconnecting 监听):不再重连、
  * 不再刷日志。Ctrl+C 场景尤其重要 —— SurrealDB 子进程与本进程同属一个进程组、
  * 会**同时**收到 SIGINT,子进程往往先死,此时若客户端还认为是意外掉线,
  * SDK 就会对着一个已经没了的服务端指数退避重连(2s→4s→8s→16s…)不肯收手。
@@ -359,10 +484,13 @@ export function markStorageShuttingDown(): void {
 /** 同步关闭(用于 before-quit;不等子进程退出) */
 export function shutdownSurrealDB(): void {
   shuttingDown = true;
-  if (db) {
-    try { db.close(); } catch { /* ignore */ }
-    db = null;
+  // 所有常驻连接都要有停止调用(memory project-graceful-shutdown):
+  // 漏关一条,它的重连定时器会把事件循环吊住,表现成"Ctrl+C 后不退"。
+  for (const conn of [db, xdb]) {
+    if (conn) { try { conn.close(); } catch { /* ignore */ } }
   }
+  db = null;
+  xdb = null;
   if (serverProcess) {
     // detached 后 sidecar 不再随终端信号一起死,必须由我们显式送信号。
     // 这里是**同步**退出路径(before-quit 二次进入后紧接着就 exit),原先那个
@@ -377,10 +505,11 @@ export function shutdownSurrealDB(): void {
 
 /** 异步关闭(等子进程真退出 + 孤儿兜底,用于 reset/restore) */
 export async function shutdownSurrealDBAsync(): Promise<void> {
-  if (db) {
-    try { db.close(); } catch { /* ignore */ }
-    db = null;
+  for (const conn of [db, xdb]) {
+    if (conn) { try { conn.close(); } catch { /* ignore */ } }
   }
+  db = null;
+  xdb = null;
   if (serverProcess) {
     const proc = serverProcess;
     await new Promise<void>((resolve) => {

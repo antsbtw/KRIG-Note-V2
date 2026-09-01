@@ -11,7 +11,7 @@
  *   Hiragino Sans GB 全部 `getPath('测')` 出真实字形**
  *
  * → 首版即支持 .ttc(用户拍板 D1,2026-06-20),零额外依赖。
- *   清单见 docs/RefactorV2/stages/L5G7-G7.0-opentype-compat-report.md。
+ *   清单见 docs/90-archive/refactor-v2/stages/L5G7-G7.0-opentype-compat-report.md。
  *
  * ── 原理 ──
  *

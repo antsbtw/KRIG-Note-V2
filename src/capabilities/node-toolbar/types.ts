@@ -11,7 +11,7 @@
  * 改 instance 走 view 注入的 patchStyle/patchInstance(view 端落地到 canvas-rendering host);
  * 改文字 mark 走 runTextCommand(view 端落地到 text-editing.runNodeStyleCommand)。
  *
- * 详见 docs/RefactorV2/stages/L5G5-node-floating-toolbar-design.md v0.3。
+ * 详见 docs/90-archive/refactor-v2/stages/L5G5-node-floating-toolbar-design.md v0.3。
  */
 
 import type { FC, ReactNode } from 'react';

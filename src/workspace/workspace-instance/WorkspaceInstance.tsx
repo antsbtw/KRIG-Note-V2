@@ -95,10 +95,26 @@ export function WorkspaceInstance({ state }: WorkspaceInstanceProps) {
   if (!activeViewId) {
     activeViewId = viewTypeRegistry.getAllForNavSide()[0]?.id ?? null;
   }
+  // left 为空时展示上回落到 activeViewId(与下方 effectiveSlotBinding 同一规则)
+  const effectiveLeftViewId = state.slotBinding.left ?? activeViewId;
+
   // 该 view 有没有 NavSide 内容 —— 决定 NavSideFrame 渲不渲染(详见下方渲染处注释)
-  const navSideDisabled =
-    activeViewId != null &&
-    viewTypeRegistry.get(activeViewId)?.navSideTab?.navSideDisabled === true;
+  //
+  // ⚠️ 判据是**两个槽的并集**,不是只看活跃槽。
+  // 只看 activeViewId 时:左 X(navSideDisabled)+ 右 X-Inbox(未标)双开,
+  // 点一下右栏 → activeViewId 变成 x-inbox-view → NavSide 又渲染出来,
+  // 从左槽抢走 ~230 CSS px。X 的响应式断点是 1280px,被抢完只剩 1267px,
+  // 于是 x.com 全屏下也把左侧导航收成图标条(2026-09-01 用户实拍 + host=1267 实测)。
+  //
+  // 语义上也该如此:navSideDisabled 表达的是「这个 view 不需要 NavSide」,
+  // webview 类 view(mail / ai / social)要的是**宽度**。只要台上有一个这样的
+  // view,那栏空白 NavSide 就不该占着地方 —— 它对谁都没用。
+  const navSideDisabled = ([
+    effectiveLeftViewId,
+    state.slotBinding.right,
+  ].filter(Boolean) as string[]).some(
+    (vid) => viewTypeRegistry.get(vid)?.navSideTab?.navSideDisabled === true,
+  );
 
   // 计算"展示用 slotBinding"(left null 时 fallback 到 activeViewId,不改实际 state)
   const effectiveSlotBinding = state.slotBinding.left

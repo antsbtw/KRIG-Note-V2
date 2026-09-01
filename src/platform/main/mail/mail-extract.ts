@@ -6,7 +6,7 @@
  * 阶段 0 的 DOM 提取**只服务于「用户右键点了这一封」**。批量拉取是阶段 1 的 IMAP
  * 的活 —— 从 DOM 里滚动抓几百封是噩梦(懒加载、虚拟列表回收、无稳定 id),
  * 且 Gemma 需要的结构化字段(线程、UID、flags、附件)DOM 里根本拿不全。
- * 见 docs/tasks/2026-08-26-mail-module-design.md §1。
+ * 见 docs/10-business-design/mail/module-design.md §1。
  *
  * 故本文件**刻意不做**:列表遍历、翻页、增量、去重。只有「这一封」。
  *

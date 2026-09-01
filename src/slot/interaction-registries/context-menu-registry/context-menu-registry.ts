@@ -6,7 +6,7 @@
  * - 默认 view 为 undefined(全局,所有 view 都显示)
  * - capability 注册时不指定 view(Q6=A:全局过滤)
  *
- * enabledWhen 重构(handoff: docs/tasks/context-menu-registry-handoff.md):
+ * enabledWhen 重构(handoff: docs/90-archive/tasks/context-menu-registry-handoff.md):
  * - L4 不再硬编码 if 链,统一委托 enabledWhenRegistry.eval
  * - builtin('always' / 'has-selection' / 'is-editable')在 enabledWhenRegistry 构造时挂
  * - 业务谓词(has-link / has-marks / has-block-selection / has-thought / ...)由

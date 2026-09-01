@@ -786,6 +786,8 @@ declare global {
         judgeNow(wsId: string): Promise<{ success: boolean; judged?: number; worth?: number; remaining?: number; draining?: boolean; error?: string }>;
         listRecipes(): Promise<{ success: boolean; recipes: import('@shared/types/x-timeline-types').SearchRecipe[]; error?: string }>;
         getActiveWcId(wsId: string): Promise<{ wcId: number | null }>;
+        /** 强制 guest 全量重绘(display:none 复出后带旧帧) */
+        invalidateWc(wcId: number): Promise<{ success: boolean; error?: string }>;
         replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number): Promise<{ success: boolean; error?: string }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;

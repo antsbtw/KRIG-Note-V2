@@ -1,7 +1,7 @@
 /**
  * image — 图片 block(L5-B3.5)
  *
- * V1 → V2 直迁,见 docs/RefactorV2/stages/L5B3.5-image-block-design.md。
+ * V1 → V2 直迁,见 docs/90-archive/refactor-v2/stages/L5B3.5-image-block-design.md。
  *
  * 三态:
  * - placeholder(无 src):显示 🖼 + Upload 按钮 + Embed link 输入

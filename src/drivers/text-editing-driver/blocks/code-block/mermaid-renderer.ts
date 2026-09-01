@@ -14,7 +14,7 @@
  * **Phase 2 重构**(原 `await import('@mermaid-js/layout-elk')`):
  * 改走 `requireCapabilityApi<GraphLayoutApi>('graph-layout').getMermaidElkLoader()` —
  * @mermaid-js/layout-elk 的 import 收敛到 capabilities/graph-layout/ 内,driver 层
- * ESLint 屏障禁止重复 import(详见 docs/tasks/cm6-elk-capability-refactor.md §Task C)。
+ * ESLint 屏障禁止重复 import(详见 docs/90-archive/tasks/cm6-elk-capability-refactor.md §Task C)。
  */
 
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';

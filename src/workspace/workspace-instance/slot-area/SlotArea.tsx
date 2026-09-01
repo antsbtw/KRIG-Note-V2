@@ -64,6 +64,13 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
   // 活跃槽:订阅用于给 slot 容器打 data-slot-active(压暗非活跃栏工具栏,见 slot-area.css)
   const activeSlot = useActiveSlot(workspaceId);
 
+  // 曾经真的占过槽的 view —— 只有它们需要 display:none 保活(见下方 units 构造)。
+  // 用 ref 而非 state:它只在渲染期被读、在 effect 里增补,不该额外触发一轮渲染
+  // (增补必然伴随 slotBinding 变化,那本身就会重渲)。
+  const everMountedRef = useRef<Set<string>>(new Set());
+  if (slotBinding.left) everMountedRef.current.add(slotBinding.left);
+  if (slotBinding.right) everMountedRef.current.add(slotBinding.right);
+
   // 订阅 view 注册变化(L5 view 注册时自动触发重渲)
   const allViews = useSyncExternalStore(
     (cb) => viewTypeRegistry.subscribe(cb),
@@ -86,13 +93,24 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
   // 未占槽的 view 仍挂在 DOM 里(display:none)保活,避免切 view 时实例重建丢状态。
   // 归到 'left' 槽维度:它们没有可见位置,slot 取值只需稳定且不与在槽者碰撞 ——
   // 而在槽者若同 id 已在上面占了 left 单元,这里会被 seen 去重跳过。
+  //
+  // ⚠️ **只保活"曾经真的上过台"的 view**,不是全部已注册 view。
+  // 原实现枚举 allViews(21 个),于是每个 workspace 一启动就把 social / ai /
+  // mail / web 四个带 <webview> 的 view 全部实例化 —— 两个 ws 就是 8 个 webview,
+  // 实测追踪日志里同时存在 13 个 X guest,其中 11 个从未渲染过
+  // (2026-09-01)。后果不只是内存:诊断时根本分不清屏幕上是哪一个实例,
+  // 一切基于"某个 guest 的状态"的观测都失去意义。
+  //
+  // 保活的本意是"切走再切回来别丢状态",对**从没打开过**的 view 不成立 ——
+  // 它没有状态可丢。故改为惰性:上过台才进保活集合,此后一直留着。
   const seen = new Set(units.map((u) => `${u.viewId}:${u.slot}`));
-  for (const v of allViews) {
-    if (v.id === slotBinding.left || v.id === slotBinding.right) continue;
-    const key = `${v.id}:left`;
+  for (const viewId of everMountedRef.current) {
+    if (viewId === slotBinding.left || viewId === slotBinding.right) continue;
+    if (!allViews.some((v) => v.id === viewId)) continue;   // 已注销的 view 不再挂
+    const key = `${viewId}:left`;
     if (seen.has(key)) continue;
     seen.add(key);
-    units.push({ viewId: v.id, slot: 'left', pos: 'hidden' });
+    units.push({ viewId, slot: 'left', pos: 'hidden' });
   }
 
   /**

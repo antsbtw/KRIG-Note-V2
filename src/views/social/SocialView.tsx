@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 
 const VIEW_ID = 'social-view';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useOnSlotVisible } from '@workspace/workspace-state/slot-visibility';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XHostHandle } from '@capabilities/x-extraction';
 import { XPublishOverlay } from '@shell/global-progress-overlay/XPublishOverlay';
@@ -53,6 +54,69 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
     (cb) => workspaceManager.subscribe(cb),
     () => workspaceManager.get(workspaceId)?.slotBinding.right === VIEW_ID,
   );
+
+  // ── webview 重新布局的两个触发源 ────────────────────────────────────
+  //
+  // <webview> 是 OS 级 surface,和 EPUB/PDF/WebGL 一样是命令式渲染引擎:
+  // 容器尺寸变了不会自愈,会停在上次布局算出的尺寸上。dff9e5d0 为这类引擎
+  // 建了 slot-visibility,但当时只接了 ebook / graph-canvas,**X 漏接了** ——
+  // 于是右槽打开把 X 挤成半宽后,x.com 内部仍以为自己全宽,不触发响应式断点,
+  // 左侧导航该收起却一直摊开。
+  //
+  // 两个触发源都要接,少一个就有场景漏:
+  //  ① 隐藏→重新上台(切走再切回):slot-visibility 管这个
+  //  ② 一直可见但宽度变了(右槽开/关、拖分隔线):ResizeObserver 管这个
+  const shellRef = useRef<HTMLDivElement | null>(null);
+
+  useOnSlotVisible(workspaceId, VIEW_ID, () => {
+    xHostRef.current?.relayout();
+  });
+
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    // 宽度没变就不打扰 guest(ResizeObserver 高度变化也会触发)。
+    //
+    // ⚠️ 但**不能**只在"宽度变了"时触发一次就完事:全屏/拖分隔线都是连续变化,
+    // 那样只会在中途某个尺寸上排一次版,动画结束后的最终尺寸反而没人管
+    // (旧实现用 lastWidth 锁死,正是这个 bug)。
+    // 改成 debounce:连续变化只在**停下来之后**量一次,拿到的就是最终尺寸。
+    let lastWidth = -1;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (w <= 0 || w === lastWidth) return;   // 0 = 隐藏期,交给 ① 处理
+      lastWidth = w;
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        xHostRef.current?.relayout();
+      }, 120);
+    });
+    ro.observe(el);
+    return () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      ro.disconnect();
+    };
+  }, []);
+
+  // ③ 窗口进/出全屏(点绿灯按钮)。
+  //
+  // ⚠️ 光靠 ② 的 ResizeObserver 不够:macOS 全屏是 ~0.5s 的动画,过程中容器宽度
+  // 连续变化,observer 在**中途某个尺寸**上触发一次(lastWidth 随即锁住),
+  // 而 guest 的 OS surface 落在动画结束后 —— 于是 X 按中途宽度排了版,
+  // 动画结束再没有事件把它纠回来。表现就是"点全屏侧栏不展开,
+  // 一按 Cmd+Opt+I 就弹出来"(用户 2026-09-01 实拍)。
+  //
+  // 主进程本来就在发 WINDOW_FULLSCREEN_CHANGED(main-window.ts:145),这里补上订阅:
+  // 动画结束后再量一次,拿到的才是最终尺寸。
+  useEffect(() => {
+    const off = window.electronAPI?.onFullscreenChanged?.(() => {
+      // 全屏动画结束后才是最终尺寸;等一拍再量,避免又量在动画中途
+      setTimeout(() => xHostRef.current?.relayout(), 350);
+    });
+    return () => off?.();
+  }, []);
 
   const handleCloseRightSlot = useCallback(() => {
     const bus = workspaceManager.getBus(workspaceId);
@@ -123,7 +187,7 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
   }, [workspaceId]);
 
   return (
-    <div className="krig-social-view">
+    <div className="krig-social-view" ref={shellRef}>
       <div className="krig-social-view__tabbar">
         <div className="krig-social-view__tabs">
           {PLATFORMS.map((item) => (

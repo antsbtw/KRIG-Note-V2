@@ -4,7 +4,7 @@
  * L5-B3.1:floating-toolbar 显示由 driver 内部订阅 selection capability 触发;
  *         hook 只负责"Esc 关菜单"行为(visibility 跟选区联动 — 用户清空选区自然隐)。
  *
- * 见 docs/RefactorV2/stages/L5B3.1-interactions-design.md § 4.3。
+ * 见 docs/90-archive/refactor-v2/stages/L5B3.1-interactions-design.md § 4.3。
  */
 
 import { useEffect } from 'react';

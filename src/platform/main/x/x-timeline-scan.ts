@@ -169,7 +169,9 @@ export async function scanRecipe(
   await waitForTweetElements(wc);
 
   // 预加载去重窗口内已有的 tweet_id
-  const seenIds = await getTweetIdSet(filterConfig.dedupeWindowHours);
+  // 去重集合来自 x_tweet 全表(含 expires_at=NONE 的永久行) —— 采纳过的推文
+  // 不会因为过期而"消失"再被重新抓回来(A 期修掉的重复爬根因)。
+  const seenIds = await getTweetIdSet();
 
   let fetched = 0;
   let saved = 0;
@@ -204,6 +206,8 @@ export async function scanRecipe(
             lang: tweet.lang,
             metrics: tweet.metrics ?? {},
             fetched_at: nowIso,
+            created_at: tweet.createdAt || undefined,
+            in_reply_to: tweet.inReplyTo || undefined,
             expires_at: expiresAt,
             source: 'search',
             search_recipe: recipe.id,
@@ -228,6 +232,9 @@ export async function scanRecipe(
         lang: tweet.lang,
         metrics: tweet.metrics ?? {},
         fetched_at: nowIso,
+        // A':extract-script 早就提取了这两个字段(:75 / :147),此前组装记录时漏带 —— 只是接线
+        created_at: tweet.createdAt || undefined,
+        in_reply_to: tweet.inReplyTo || undefined,
         expires_at: expiresAt,
         source: 'search',
         search_recipe: recipe.id,
