@@ -168,6 +168,9 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
                })()`,
             ).then((raw) => {
               const m: { w?: number } = { w: typeof raw === 'number' ? raw : 0 };
+              // [x-diag] 每次宽度变化打一行,定位"侧栏不随宽度适配"。
+              // ws 标签是关键 —— 两个 ws 同屏时要能分清哪行是谁的。
+              console.log(`[x-diag][${workspaceId}] host=${Math.round(wv.getBoundingClientRect().width)} guest=${m.w}`);
               const guestWidth = m.w ?? 0;
               const hostWidth = Math.round(wv.getBoundingClientRect().width);
               if (guestWidth > 0 && hostWidth > 0
