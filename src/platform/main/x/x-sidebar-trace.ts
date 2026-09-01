@@ -86,7 +86,40 @@ const PROBE_JS = `(function(){
   return 'installed';
 })()`;
 
-/** 给一个 X guest 装追踪探针 + 接它的上报 */
+/**
+ * 启动后连拍:用户报告的故障是「打开 app 侧栏就是关的,按 Cmd+Opt+I 才打开」。
+ * 那是**启动期**的稳态故障,不是某次 resize 引起的 —— 之前的记录都在等
+ * "宽度变化"才采样,恰好把这段漏掉了(还把它当成"页面在加载"忽略掉)。
+ *
+ * 这里按 1/2/4/8/15/25/40s 连拍,把启动后侧栏"一直没展开"的过程完整拍下来,
+ * 并在每张图旁记下 DOM 此刻算的是多少 —— 若 DOM 一直是展开而画面一直是收起,
+ * 「算对了没画出来」就实锤了。
+ */
+function scheduleStartupShots(wc: WebContents, wsId: string): void {
+  for (const sec of [1, 2, 4, 8, 15, 25, 40]) {
+    setTimeout(() => {
+      if (wc.isDestroyed()) return;
+      void (async () => {
+        const painted = await capturePaintedNavWidth(wc);
+        let dom: unknown = null;
+        try {
+          dom = await wc.executeJavaScript(
+            `(function(){var h=document.querySelector('header[role="banner"]');`
+            + `return JSON.stringify({w:window.innerWidth,`
+            + `navW:h?Math.round(h.getBoundingClientRect().width):-1});})()`,
+          );
+        } catch { /* ignore */ }
+        void trace('startup-shot', {
+          wsId, wcId: wc.id, 秒: sec, dom,
+          画面文字占比: painted?.paintedW ?? null,
+        });
+        await saveShot(wc, `wc${wc.id}-t${sec}s`);
+      })();
+    }, sec * 1000);
+  }
+}
+
+/** 给一个 X guest 装探针 + 接它的上报 */
 export function installSidebarTrace(wc: WebContents, wsId: string): void {
   let lastShotExpanded: boolean | null = null;
   const install = (): void => {
@@ -140,6 +173,7 @@ export function installSidebarTrace(wc: WebContents, wsId: string): void {
     } catch { /* 解析不了就丢 */ }
   });
   if (!wc.isLoading()) install();
+  scheduleStartupShots(wc, wsId);
 }
 
 /** 记一次「我们主动做了什么」,便于把因果对上 */

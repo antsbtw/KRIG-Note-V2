@@ -46,6 +46,21 @@ export function registerXWebviewHook(mainWindow: BrowserWindow): void {
     installSidebarTrace(guestWebContents, 'x-guest');
     traceDevtools(guestWebContents, 'x-guest');
 
+    // 启动期强制重绘:用户报告「打开 app 侧栏是关的,按 Cmd+Opt+I 才打开」。
+    // Cmd+Opt+I 唯一的副作用就是强制一次真实重绘 —— 所以在页面稳定后主动补几次,
+    // 看能否顶掉这个手动动作。invalidate() = "Schedules a full repaint"。
+    //
+    // 为什么要多次:X 是 SPA,首屏骨架、导航、时间线是分批渲染的,
+    // 只补一次可能落在还没排好版的时刻。
+    guestWebContents.on('did-stop-loading', () => {
+      for (const ms of [300, 1200, 3000]) {
+        setTimeout(() => {
+          if (guestWebContents.isDestroyed()) return;
+          try { guestWebContents.invalidate(); } catch { /* 已销毁 */ }
+        }, ms);
+      }
+    });
+
     try {
       guestWebContents.setBackgroundThrottling(false);
     } catch {
