@@ -293,6 +293,14 @@ async function startServer(): Promise<void> {
   serverProcess.on('close', (code) => {
     console.log(`[storage/surreal] Server exited with code ${code}`);
     serverProcess = null;
+    // sidecar 意外死亡 → 拉起来并重连。
+    //
+    // ⚠️ 缺这一段的后果是**静默坍缩**(2026-09-01 实测):
+    // kill -9 掉 sidecar 后,SDK 尽职地重连 5 次(0.5→1→2→4→4s)然后放弃,
+    // 两条连接双双 disconnected。此后 app 看着还在跑,实际每次写库都抛
+    // ConnectionUnavailableError —— 用户直到保存笔记才发现数据写不进去。
+    // SDK 的重连本身没问题,缺的是「服务端没了得有人把它拉起来」。
+    void superviseRestart();
   });
 
   await waitForReady();
@@ -396,6 +404,67 @@ export async function initSurrealDB(): Promise<void> {
   }
   readyCallbacks.length = 0;
   console.log('[storage/surreal] Sidecar mode started');
+}
+
+/**
+ * sidecar 意外退出后的自愈:重启进程 + 重建两条连接。
+ *
+ * 边界:
+ *  - 主动退出途中(shuttingDown)绝不重启 —— 否则 Ctrl+C 会拉起一个新 sidecar,
+ *    把自己吊在事件循环里出不去(project-graceful-shutdown 的老坑)
+ *  - 限次 + 退避:二进制损坏/端口被占这类硬故障重启多少次都没用,
+ *    无限重启只会刷屏并拖垮机器。放弃时**大声报错**,不静默
+ *  - 重启成功后计数清零 —— 长期运行中偶发崩溃不该累积到耗尽配额
+ */
+const MAX_RESTART_ATTEMPTS = 3;
+let restartAttempts = 0;
+let restarting = false;
+
+async function superviseRestart(): Promise<void> {
+  if (shuttingDown) return;              // 主动退出,不管
+  if (restarting) return;                // 已在重启中,不叠加
+  restarting = true;
+  isReady = false;
+  try {
+    while (restartAttempts < MAX_RESTART_ATTEMPTS) {
+      restartAttempts += 1;
+      const delay = 500 * 2 ** (restartAttempts - 1);   // 0.5s / 1s / 2s
+      console.warn(
+        `[storage/surreal] sidecar 意外退出,${delay}ms 后重启`
+        + `(第 ${restartAttempts}/${MAX_RESTART_ATTEMPTS} 次)`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+      if (shuttingDown) return;
+      try {
+        // 旧连接已死透,先关掉再重建 —— 否则它们的重连定时器会和新连接抢
+        for (const conn of [db, xdb]) {
+          if (conn) { try { conn.close(); } catch { /* ignore */ } }
+        }
+        db = null;
+        xdb = null;
+        await startServer();
+        db = await connectOne(NOTE_DATABASE);
+        xdb = await connectOne(X_DATABASE);
+        isReady = true;
+        restartAttempts = 0;             // 成功即清零
+        console.log('[storage/surreal] ✓ sidecar 已重启,两条连接均已恢复');
+        return;
+      } catch (err) {
+        console.error(`[storage/surreal] 重启失败(第 ${restartAttempts} 次):`, err);
+      }
+    }
+    // 放弃:必须响。此时所有写库都会抛 ConnectionUnavailableError,
+    // 与其让用户在保存笔记时才撞见,不如现在就把话说清楚。
+    console.error(
+      '\n' + '='.repeat(72)
+      + `\n[storage/surreal] ✗✗✗ sidecar 连续 ${MAX_RESTART_ATTEMPTS} 次重启失败 —— 数据库不可用 ✗✗✗`
+      + '\n  此后所有读写都会失败(ConnectionUnavailableError)。请重启 app。'
+      + '\n  常见原因:surreal 二进制损坏 / 端口 8533 被占 / 数据目录权限异常。'
+      + '\n' + '='.repeat(72) + '\n',
+    );
+  } finally {
+    restarting = false;
+  }
 }
 
 /**
