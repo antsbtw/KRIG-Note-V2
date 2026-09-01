@@ -151,11 +151,32 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
         // guest 内部靠 window.resize 重算响应式布局。<webview> 的 OS surface 尺寸
         // 由 Electron 跟着 DOM 元素走,但**不保证**把 resize 事件送进 guest 文档 ——
         // 尤其是从 display:none 回来、或父容器 grid track 宽度突变时。
-        // 显式派发一次,x.com 才会重新判断断点(收起/展开左侧导航)。
-        try {
-          void wv.executeJavaScript('window.dispatchEvent(new Event("resize"))')
-            .catch(() => { /* guest 还没 ready / 已销毁,下次可见时还会再来一次 */ });
-        } catch { /* 同上 */ }
+        //
+        // ⚠️ 时序是这里的要害(踩过):host 容器的 ResizeObserver 先于 webview 的
+        // OS surface 完成尺寸同步。此刻立刻派发 resize,guest 量到的是**旧宽度**
+        // → 全屏时也按窄宽度收起侧栏,而且之后不会再有事件把它纠回来。
+        // 解法:等 guest 自己量到的 innerWidth 稳定下来再派发,并且只在
+        // 「宽度确实变了」时派发 —— 让 guest 的量测结果本身当同步信号,
+        // 而不是猜一个 setTimeout 延迟。
+        const kick = (attempt: number): void => {
+          try {
+            void wv.executeJavaScript(
+              // 返回 guest 真实视口宽;顺带派发 resize 让 x.com 重算断点
+              '(function(){var w=window.innerWidth;'
+              + 'window.dispatchEvent(new Event("resize"));return w;})()',
+            ).then((w) => {
+              const guestWidth = typeof w === 'number' ? w : 0;
+              const hostWidth = Math.round(wv.getBoundingClientRect().width);
+              // guest 还没跟上 host 宽度 → 再等一帧重来(最多 10 次 ≈ 160ms,
+              // 超时就放弃:X 自己也有 resize 监听,不至于永久卡住)
+              if (guestWidth > 0 && hostWidth > 0
+                  && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {
+                requestAnimationFrame(() => kick(attempt + 1));
+              }
+            }).catch(() => { /* guest 未 ready / 已销毁 */ });
+          } catch { /* 同上 */ }
+        };
+        kick(0);
       },
     }),
     [],
