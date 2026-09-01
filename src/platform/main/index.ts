@@ -74,6 +74,7 @@ import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cach
 import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
+import { recoverStuckAiJudging } from './db/tweet-inbox-repo';
 import { startXSearchScheduler, stopXSearchScheduler } from './x';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
@@ -192,6 +193,16 @@ app.whenReady().then(async () => {
   await seedRecipes().catch((err) => {
     console.error('[x-timeline] seedRecipes failed:', err);
   });
+  // 启动自愈:上次运行被打断而卡在 ai_judging 的推文退回 pending,下轮重判。
+  // 必须在 startXSearchScheduler 之前 —— 否则调度器可能先跑一轮,
+  // 那些行还是 ai_judging,又被漏掉一次。
+  await recoverStuckAiJudging()
+    .then((n) => {
+      if (n > 0) console.log(`[x-timeline] 自愈:${n} 条卡在 ai_judging 的推文已退回 pending`);
+    })
+    .catch((err) => {
+      console.error('[x-timeline] ai_judging 自愈失败:', err);
+    });
   startXSearchScheduler();
 
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）

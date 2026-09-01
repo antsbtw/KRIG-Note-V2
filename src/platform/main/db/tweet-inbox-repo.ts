@@ -140,6 +140,31 @@ export async function markAiJudging(tweetIds: string[]): Promise<void> {
   );
 }
 
+/**
+ * 启动自愈:把卡在 ai_judging 的推文退回 pending。
+ *
+ * `ai_judging` 是「AI 判断已领取、结果未写回」的中间态。正常路径下
+ * updateVerdict 会把它推向 worth/skip,Ollama 调用失败也会显式退回 pending
+ * (x-ai-judge.ts)。但**进程直接没了**就没人管了 —— app 退出、sidecar 崩溃、
+ * 被 kill,这些行会永远停在 ai_judging:不会被重判(queryPending 只捞 pending),
+ * 也不会出现在收件箱里(UI 视图筛的是 worth/skip),等于静默丢失。
+ * 2026-09-01 实测有 10 条这样卡住。
+ *
+ * 为什么无条件退回、不设时间阈值:**启动那一刻不可能有正在跑的批次**
+ * (判断任务不跨进程存活),所以不存在误伤正在处理的行。
+ * 加 ai_judging_at 时间戳 + 阈值反而要多一条 migration,还多一个要调的参数,
+ * 换不来额外的正确性。
+ *
+ * @returns 退回的行数(0 表示没有卡住的,属正常)
+ */
+export async function recoverStuckAiJudging(): Promise<number> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ tweet_id: string }>]>(
+    `UPDATE x_tweet SET status = 'pending' WHERE status = 'ai_judging' RETURN tweet_id`,
+  );
+  return (res[0] ?? []).length;
+}
+
 /** 写回 AI 判断结果（worth / skip）+ 可选翻译。
  *
  *  **仅供 Gemma 的机器判断使用** —— 它不改 expires_at,机器判 worth 的推文
