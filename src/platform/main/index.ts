@@ -75,6 +75,7 @@ import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
 import { startXSearchScheduler, stopXSearchScheduler } from './x';
+import { traceSessionStart } from './x/x-sidebar-trace';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -193,6 +194,7 @@ app.whenReady().then(async () => {
   }
 
   // X 时间线智能筛选 Phase 1 — 种子配方 + 调度器（必须在 migration_1_8_0 之后）
+  traceSessionStart();
   console.log('[boot-diag] ② 到达 seedRecipes');
   await seedRecipes().catch((err) => {
     console.error('[x-timeline] seedRecipes failed:', err);
