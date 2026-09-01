@@ -120,7 +120,41 @@ protocol.registerSchemesAsPrivileged([
 // 必须在 app ready 前设(Chromium 启动参数)。
 app.commandLine.appendSwitch('disable-features', 'FedCm');
 
+/**
+ * 单实例守卫 —— 必须在 whenReady 之前。
+ *
+ * 起因(2026-09-01 实拍):一个旧实例被 SIGKILL 后子进程成了孤儿(parent=1),
+ * 仍攥着 Partitions/webview-ws-1 的 43 个文件句柄。新实例启动时抢不到锁,
+ * 报了一串 LOCK / "Could not open the quota database" / SandboxOriginDatabase
+ * 失败 —— 表现是 X 打不开、webview 存储集体异常,极难联想到"有两个 app 在跑"。
+ *
+ * ⚠️ 与多窗口不冲突:本 app 的多窗口是**同一进程内**多个 BrowserWindow
+ * (createWindow 反复调用),锁挡的是"第二个 app 进程",不是窗口。
+ *
+ * 拿不到锁 = 已有实例在跑:退出自己,并让已有实例把窗口调到前台
+ * (符合 macOS 惯例:重复启动应激活已有窗口,而不是静默什么都不发生)。
+ */
+if (!app.requestSingleInstanceLock()) {
+  console.log('[main] 已有实例在运行,本进程退出(单实例守卫)');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // 有人试图再开一个 → 激活已有窗口
+    const wins = BrowserWindow.getAllWindows();
+    const win = wins.find((w) => !w.isDestroyed());
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
+  // 没拿到锁的进程走到这里时 app.quit() 已在路上,不该再初始化(会去抢
+  // 同一份 Partitions/ 与 DB 目录 —— 正是守卫要防的事)。
+  if (!app.hasSingleInstanceLock()) return;
+
   // L0 — 平台层就绪
   reportL0Alive();
 
