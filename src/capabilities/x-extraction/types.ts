@@ -91,6 +91,17 @@ export interface XHostHandle {
   getURL(): string;
   /** 取 guest webContents id(注入按 ws 定向用);未 dom-ready / 取不到返 null */
   getWebContentsId(): number | null;
+  /**
+   * 通知 guest 重新按当前尺寸布局(幂等)。
+   *
+   * <webview> 是 OS 级 surface,与 EPUB/PDF/WebGL 同属「命令式渲染引擎」:
+   * 容器宽度变了它不会自愈,会一直停在上次布局算出的那套尺寸上
+   * (dff9e5d0 的 slot-visibility 就是为这类引擎建的,但当时只接了
+   * ebook / graph-canvas 两个消费者,X 漏接了)。
+   * 表现:右槽打开把 X 挤成半宽后,x.com 内部仍以为自己是全宽 →
+   * 不触发它的响应式断点 → 左侧导航栏该收起却一直摊开。
+   */
+  relayout(): void;
 }
 
 export interface XHostProps {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 
 const VIEW_ID = 'social-view';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { useOnSlotVisible } from '@workspace/workspace-state/slot-visibility';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi, XHostHandle } from '@capabilities/x-extraction';
 import { XPublishOverlay } from '@shell/global-progress-overlay/XPublishOverlay';
@@ -53,6 +54,38 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
     (cb) => workspaceManager.subscribe(cb),
     () => workspaceManager.get(workspaceId)?.slotBinding.right === VIEW_ID,
   );
+
+  // ── webview 重新布局的两个触发源 ────────────────────────────────────
+  //
+  // <webview> 是 OS 级 surface,和 EPUB/PDF/WebGL 一样是命令式渲染引擎:
+  // 容器尺寸变了不会自愈,会停在上次布局算出的尺寸上。dff9e5d0 为这类引擎
+  // 建了 slot-visibility,但当时只接了 ebook / graph-canvas,**X 漏接了** ——
+  // 于是右槽打开把 X 挤成半宽后,x.com 内部仍以为自己全宽,不触发响应式断点,
+  // 左侧导航该收起却一直摊开。
+  //
+  // 两个触发源都要接,少一个就有场景漏:
+  //  ① 隐藏→重新上台(切走再切回):slot-visibility 管这个
+  //  ② 一直可见但宽度变了(右槽开/关、拖分隔线):ResizeObserver 管这个
+  const shellRef = useRef<HTMLDivElement | null>(null);
+
+  useOnSlotVisible(workspaceId, VIEW_ID, () => {
+    xHostRef.current?.relayout();
+  });
+
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    // 宽度没变就不打扰 guest(ResizeObserver 高度变化也会触发)
+    let lastWidth = -1;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (w <= 0 || w === lastWidth) return;   // 0 = 隐藏期,交给 ① 处理
+      lastWidth = w;
+      xHostRef.current?.relayout();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const handleCloseRightSlot = useCallback(() => {
     const bus = workspaceManager.getBus(workspaceId);
@@ -123,7 +156,7 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
   }, [workspaceId]);
 
   return (
-    <div className="krig-social-view">
+    <div className="krig-social-view" ref={shellRef}>
       <div className="krig-social-view__tabbar">
         <div className="krig-social-view__tabs">
           {PLATFORMS.map((item) => (

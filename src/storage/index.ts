@@ -51,7 +51,12 @@ export async function initStorage(): Promise<void> {
       '\n' + '='.repeat(72) + '\n',
       err,
     );
-    throw err;
+    // ⚠️ **不 rethrow**。曾经在这里 throw 过,是设计错误:
+    // 它会逃出 initStorage → 被 main/index.ts 的 catch 接住 → 启动继续,
+    // 但**后面的 sweepPendingIntents / runCardinalityCheck 被整段跳过** ——
+    // 把「X 库坏了」放大成「笔记库的完整性自检没跑」,正好违背上面那句
+    // "笔记库不受影响"。X 是独立 database,它的故障不该拖累笔记库的启动步骤。
+    // 响 = 上面这条横幅(够显眼);不 = 中断别人的初始化。
   }
   // SP-3 sweeper:扫未完成 intent 续完/回滚。在 migrations 后(intent 表已建)、
   // cardinality-check 前(半状态可能正是 cardinality 误判源,先清半状态)。
