@@ -162,11 +162,29 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
           try {
             void wv.executeJavaScript(
               // 返回 guest 真实视口宽;顺带派发 resize 让 x.com 重算断点
-              '(function(){var w=window.innerWidth;'
-              + 'window.dispatchEvent(new Event("resize"));return w;})()',
-            ).then((w) => {
-              const guestWidth = typeof w === 'number' ? w : 0;
+              // 多量几个口径:innerWidth / documentElement.clientWidth / dpr,
+              // 以及 X 侧栏元素当前是否存在、宽多少 —— 一次把证据取全,
+              // 免得再靠猜(已经猜错两次)。
+              `(function(){
+                 window.dispatchEvent(new Event("resize"));
+                 var sb = document.querySelector('[data-testid=\\'sidebarColumn\\']');
+                 var pc = document.querySelector('[data-testid=\\'primaryColumn\\']');
+                 return JSON.stringify({
+                   innerWidth: window.innerWidth,
+                   clientWidth: document.documentElement.clientWidth,
+                   dpr: window.devicePixelRatio,
+                   outerWidth: window.outerWidth,
+                   sidebarW: sb ? Math.round(sb.getBoundingClientRect().width) : -1,
+                   primaryW: pc ? Math.round(pc.getBoundingClientRect().width) : -1,
+                 });
+               })()`,
+            ).then((raw) => {
+              let m: Record<string, number> = {};
+              try { m = JSON.parse(String(raw)) as Record<string, number>; } catch { /* ignore */ }
+              const guestWidth = m.innerWidth ?? 0;
               const hostWidth = Math.round(wv.getBoundingClientRect().width);
+              // [x-diag] 侧栏收起/展开定位:X 靠 guest 视口宽判断断点。
+              console.log(`[x-diag] relayout attempt=${attempt} host=${hostWidth}`, m);
               // guest 还没跟上 host 宽度 → 再等一帧重来(最多 10 次 ≈ 160ms,
               // 超时就放弃:X 自己也有 resize 监听,不至于永久卡住)
               if (guestWidth > 0 && hostWidth > 0
