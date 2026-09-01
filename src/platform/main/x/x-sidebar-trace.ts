@@ -111,11 +111,20 @@ export function installSidebarTrace(wc: WebContents, wsId: string): void {
     try {
       const parsed = JSON.parse(json) as Record<string, unknown>;
       const navW = typeof parsed.navW === 'number' ? parsed.navW : -1;
-      void trace('guest', {
-        wsId, wcId: wc.id,
-        状态: navW < 0 ? '?' : navW > 200 ? '展开' : '收起',
-        ...parsed,
-      });
+      // 关键:同时记 DOM 算出来的宽度 **和** 真实画面里的宽度。
+      // 两者不一致 = "算对了但没画出来";一致 = 布局侧真有问题。
+      // 只有可见 guest 才截图(隐藏的截了也是空)。
+      const visible = typeof parsed.innerWidth === 'number' && parsed.innerWidth > 0;
+      void (async () => {
+        const painted = visible ? await capturePaintedNavWidth(wc) : null;
+        void trace('guest', {
+          wsId, wcId: wc.id,
+          DOM算的: navW,
+          画面上的: painted?.paintedW ?? null,
+          一致: painted ? (Math.abs(painted.paintedW - navW) < 40 ? '是' : '✗ 不一致') : '-',
+          ...parsed,
+        });
+      })();
     } catch { /* 解析不了就丢 */ }
   });
   if (!wc.isLoading()) install();
@@ -140,6 +149,64 @@ export function traceWindowEvent(event: string, detail: Record<string, unknown>)
 /** 会话开始分隔线 —— 每次启动在文件里留一道,便于分辨"这次"的记录 */
 export function traceSessionStart(): void {
   void trace('SESSION', '═'.repeat(60) + ' app 启动 ' + new Date().toLocaleString());
+}
+
+/**
+ * 抓真实渲染像素,判断左导航**画出来**没有。
+ *
+ * ⚠️ 为什么必须有这个:前面的 guest 探针读的是 DOM 计算值(getBoundingClientRect),
+ * 它只证明 X 的**布局引擎跑过了**,完全无法说明像素有没有画到屏幕上。
+ * 我曾据此断言"布局侧完全正确",被用户当场否掉 —— 眼睛看到的才是真相,
+ * DOM 数字不是。(2026-09-01)
+ *
+ * 做法:截取导航区那一竖条,统计非背景像素的横向分布 ——
+ * 展开态文字会一直延伸到 ~250px,收起态只有 ~88px 内有内容。
+ * 这个数字与 DOM 的 navW 一对比,就能分辨"算对了但没画"。
+ */
+export async function capturePaintedNavWidth(
+  wc: WebContents,
+): Promise<{ paintedW: number; sampled: number } | null> {
+  try {
+    const img = await wc.capturePage();
+    const size = img.getSize();
+    if (size.width === 0 || size.height === 0) return null;
+    const bmp = img.toBitmap();              // BGRA
+    const rowBytes = size.width * 4;
+    // capturePage 返回物理像素,Retina 下是 CSS 的 2 倍;换算回 CSS 才好与 navW 比
+    const scale = size.width >= 2000 ? 2 : 1;
+    const navZone = Math.min(size.width, 420 * scale);   // 导航区最多 420 CSS px
+    let maxX = 0;
+    let sampled = 0;
+    for (let y = Math.floor(size.height * 0.25); y < size.height * 0.75; y += 16) {
+      sampled++;
+      for (let x = navZone - 1; x >= 0; x--) {
+        const i = y * rowBytes + x * 4;
+        const b = bmp[i], g = bmp[i + 1], r = bmp[i + 2];
+        // X 深色主题背景近黑;文字/图标明显更亮
+        if (r + g + b > 120) { if (x > maxX) maxX = x; break; }
+      }
+    }
+    return { paintedW: Math.round(maxX / scale), sampled };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把 guest 当前画面存成 PNG。
+ * 像素启发式可能判错,但**图片不会骗人** —— 存下来直接看就知道屏幕上是什么。
+ */
+export async function saveShot(wc: WebContents, label: string): Promise<string | null> {
+  try {
+    await ensureDir();
+    const img = await wc.capturePage();
+    if (img.isEmpty()) return null;
+    const file = path.join(TRACE_DIR, `x-shot-${label}-${Date.now()}.png`);
+    await appendFile(file, img.toPNG());
+    return file;
+  } catch {
+    return null;
+  }
 }
 
 /** 供排查时从主进程直接查当前所有 X guest 的状态 */

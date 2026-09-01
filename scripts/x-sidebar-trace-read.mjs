@@ -33,7 +33,10 @@ for (const l of lines) {
   const state = (d.状态 ?? '').padEnd(4);
   const navW = String(d.navW ?? '').padStart(5);
   const w = String(d.innerWidth ?? d.w ?? '').padStart(6);
-  const note = d.reason ?? d.event ?? d.action ?? (d.opened != null ? (d.opened ? 'DevTools 打开' : 'DevTools 关闭') : '') ?? '';
+  const painted = d.画面上的 != null ? String(d.画面上的).padStart(5) : '    -';
+  const same = d.一致 ?? '';
+  const note = (d.reason ?? d.event ?? d.action ?? (d.opened != null ? (d.opened ? 'DevTools 打开' : 'DevTools 关闭') : '') ?? '')
+    + (same && same !== '-' ? `  DOM=${d.DOM算的} 画面=${painted.trim()} ${same}` : '');
   const flag = tag === 'devtools' ? '  ⚠️ ' : '';
   console.log(`  ${dt}  ${tag.padEnd(9)} ${state} ${navW} ${w}  ${flag}${note}`);
 }
