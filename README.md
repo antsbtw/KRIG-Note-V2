@@ -25,7 +25,8 @@ KRIG-Note-V2/
 ├─ README.md                          ← 本文件
 ├─ docs/                              ← 设计文档
 │  ├─ 00-architecture/                ← V2 架构纲领(6 个核心文档,继承自 V1)
-│  │  ├─ charter.md                  (V2 简化总纲,即将起草)
+│  │  ├─ charter.md                  (V2 简化总纲:分层/注册/抽象三大原则)
+│  │  ├─ data-model-charter.md       (数据模型总纲:实体优先/关系第二性/派生可重算)
 │  │  ├─ vision.md                   (项目愿景)
 │  │  ├─ three-layer.md              (三层架构顶层规范)
 │  │  ├─ view-hierarchy.md           (视图层级定义)
