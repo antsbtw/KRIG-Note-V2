@@ -19,7 +19,10 @@
 2. **已回复的用户持续追踪做画像**,直到手工删除为止
 3. **已采纳的推文标记出来,不重复爬取**
 4. **屏蔽名单**:某用户入名单后,其所有推文和回复都不再爬取
-5. **追踪本账号回复过的推文,以及这些推文的推主**(2026-08-31 追加)
+5. **账号关注名单(watchlist)**:用户按需添加任意账号(**包含自己的账号** ——
+   即自己的全部发推与回复),系统追踪该账号所发的**推文和回复**,为其积累画像素材。
+   *(2026-08-31 提出,2026-09-01 调整:从「只追踪本账号的回复」泛化为「用户可添加任意账号」)*
+   **具体画像怎么做,单独再议** —— 本方案只负责把素材抓全、存住。
 
 ---
 
@@ -51,24 +54,47 @@
 | ④ 屏蔽名单 | **机制已有但无来源**:`applyFilter` 里有 `accountBlacklist` 判断([x-timeline-scan.ts:69](../../../src/platform/main/x/x-timeline-scan.ts#L69)),但它来自 `DEFAULT_FILTER_CONFIG` 且**硬编码为 `[]`**、不落库、无 UI —— 调度器直接 `const filterConfig = DEFAULT_FILTER_CONFIG`([x-search-scheduler.ts:55](../../../src/platform/main/x/x-search-scheduler.ts#L55))。所以是"有开关没接线" | [x-timeline-scan.ts:69](../../../src/platform/main/x/x-timeline-scan.ts#L69) |
 | ⑤ 回复追踪 | **回复动作本身不落任何库**。见 §1.3 | [x-write.ts:208](../../../src/platform/main/x/x-write.ts#L208) |
 
-### 1.3 需求 ⑤ 的特殊难点:回复是「半自动」的
+### 1.3 需求 ⑤ 的现状:抓得到,但没存
 
-`pasteReply()`([x-write.ts:208](../../../src/platform/main/x/x-write.ts#L208))的语义是
-**把文字填进 reply 框,然后由用户手动点发布** —— 这是既定红线(绝不程序点发布)。
-函数返回 `publishReady`(发布按钮是否找到),**但无从得知用户最终有没有真的发出去**。
+需求从「追踪本账号的回复」泛化成「追踪任意关注账号的推文+回复」后,
+关键问题变成:**现有采集链路能不能抓到某账号的全部发言(含回复)?**
 
-而 `markReplied` 是**用户在收件箱里手动点"已回复"**才触发的
-([XInboxView.tsx:670](../../../src/views/x-inbox/XInboxView.tsx#L670)),
-且只写 `status='replied'` 到 inbox —— 7 天后连这个标记都没了(实测 `replied_at IS NOT NONE` = 0 条)。
+实测三个结论:
 
-**所以"我回复过谁"这件事,系统目前有两个信息源,都不可靠**:
+**(a) `from:` 搜索已支持** —— `buildSearchUrl` 已有 `fromAccounts` → `from:xxx`
+([x-timeline-scan.ts:37](../../../src/platform/main/x/x-timeline-scan.ts#L37)),
+`SearchRecipe.fromAccounts` 也已落库。所以"追某个账号"这件事,**配方层已经能表达**。
 
-| 来源 | 问题 |
-|---|---|
-| `pasteReply` 成功 | 只证明"文字填进去了",不证明发布了。用户可能改完不发、或直接关掉 |
-| 用户点"已回复" | 依赖手工操作,漏点就没记录;且记录 7 天后蒸发 |
+**(b) 但 `from:` 默认不含回复** —— X 搜索的既定行为:`from:xxx` 只返回原创推,
+回复要额外加 `include:replies`(或用 `to:` / `filter:replies` 组合)。
+当前 `buildSearchUrl` **没有这个开关** → 按现状建配方只能追到该账号的原创推,**回复抓不到**。
+这是需求 ⑤ 的主要缺口。
 
-设计必须直面这点,**不能假装能自动、准确地知道"已发布"**。方案见 §3.2 ⑤。
+**(c) 抓取脚本其实已经取了关键字段,只是被丢掉** —— 这是个好消息:
+`TWEET_SCRAPE_FN_BODY` 已经提取 `createdAt`(推文发布时间)和 `inReplyTo`(回复上下文链接)
+([extract-script.ts:75](../../../src/platform/main/tweet-fetcher/extract-script.ts#L75)、
+[:147](../../../src/platform/main/tweet-fetcher/extract-script.ts#L147)),
+但 `x-timeline-scan.ts` 组装 `TweetInboxRecord` 时**没把这两个字段带上**,
+`tweet_inbox` 表也没有对应列 → 信息在内存里存在过,落库时丢弃。
+
+> 所以需求 ⑤ 的成本比想象低:**不需要新的抓取能力,只需要**
+> ① 给 `buildSearchUrl` 加 `include:replies` 开关;② 让这两个字段落库。
+
+### 1.3.1 关于「本账号」的特殊性
+
+用户明确要求 watchlist **包含自己的账号**。这带来一个此前方案没有的能力:
+自己的发推和回复,可以和别人的一样,**统一走搜索采集**,不依赖
+「`pasteReply` 时顺手记一笔」这种脆弱路径。
+
+对比两条路:
+
+| 路径 | 覆盖面 | 可靠性 |
+|---|---|---|
+| `pasteReply` 埋点 | 只覆盖**通过本 app 发的**回复 | 且无从知道用户是否真的点了发布(红线:绝不程序点发布) |
+| **watchlist 搜 `from:自己 include:replies`** | 覆盖**所有**发言,含手机上、网页上发的 | 抓到即事实 —— 搜索结果里存在 = 确实发布了 |
+
+**后者完胜。** 它绕开了原方案 §3.2 ⑤ 里"无法确认是否真的发布"的死结:
+不用推断,直接观察结果。
 
 ### 1.4 画像的数据底子
 
@@ -90,7 +116,7 @@
 
 ## 3. 方案
 
-### 3.1 数据模型:三张新表
+### 3.1 数据模型:两张新表
 
 #### `tweet_archive` — 采纳/回复推文的永久档案
 
@@ -108,7 +134,7 @@ reply_text    option<string>  实际回复内容(现在没存,画像要用)
 - `tweet_id` UNIQUE 索引
 - 索引:`author_handle`(画像聚合)、`archived_at`(时序)
 
-#### `x_author` — 作者画像 + 屏蔽名单
+#### `x_author` — 作者画像 + 屏蔽名单 + 关注名单
 
 主键 `handle`。**画像和屏蔽合表**,因为都是"关于这个人的长期记忆":
 
@@ -122,33 +148,41 @@ seen_count       int                累计爬到过几条
 accepted_count   int                累计采纳几条
 replied_count    int                累计回复几次
 last_replied_at  option<datetime>
-blocked          bool DEFAULT false 需求 ④
+blocked          bool DEFAULT false 需求 ④:屏蔽,不再爬
 blocked_at       option<datetime>
 blocked_reason   option<string>
+watched          bool DEFAULT false 需求 ⑤:关注,主动追踪(与 blocked 互斥)
+watched_at       option<datetime>
+is_self          bool DEFAULT false 是否本人账号
 note             option<string>     人工备注(画像的手写部分)
 ```
 
 - **无 TTL**,只有显式删除
-- 索引:`handle` UNIQUE、`blocked`(过滤时快速取黑名单)
+- 索引:`handle` UNIQUE、`blocked`(过滤时取黑名单)、`watched`(调度时取关注名单)
 
-#### `reply_log` — 本账号回复行为流水(需求 ⑤)
+#### watchlist 不新建表 —— 复用 `x_author` + `search_recipes`
 
-与 `tweet_archive` 分开的理由:archive 是**推文的档案**(一条推一行),
-reply_log 是**行为流水**(同一条推可能填过多次回复、改了又改)。混在一起会让
-"这条推被回复过几次"和"这条推是什么"两个语义打架。
+需求 ⑤ 初看要一张"关注名单表",但拆开看,它需要的两样东西**已有归属**:
+
+| 要素 | 落在哪 | 理由 |
+|---|---|---|
+| "关注谁" | `x_author.watched: bool` | 和 `blocked` 完全对称 —— 都是"对这个 handle 的长期态度" |
+| "怎么抓" | `search_recipes` 里一条 `from:` 配方 | 采集调度已有的机制,不该另起炉灶 |
+
+所以 `x_author` 加两个字段:
 
 ```
-tweet_id        string             被回复的推文
-author_handle   string             被回复的推主 ← 需求 ⑤ 的「推主」
-tweet_url       option<string>
-reply_text      string             填进 reply 框的内容
-pasted_at       datetime
-confirmed       bool DEFAULT false 用户是否确认已发布(见 §3.2 ⑤)
-confirmed_at    option<datetime>
+watched      bool DEFAULT false   需求 ⑤:是否追踪此账号
+watched_at   option<datetime>
+is_self      bool DEFAULT false   是否本人账号(自己的号也进 watchlist)
 ```
 
-- **无 TTL**
-- 索引:`author_handle`、`pasted_at`、`confirmed`
+> **`watched` 与 `blocked` 互斥**:同一 handle 不该既追踪又屏蔽。
+> 写入时校验,不靠调用方自觉。
+
+被追踪账号的推文/回复,**照常进 `tweet_inbox` → 采纳/回复时进 `tweet_archive`**。
+但 watchlist 抓来的推文有个特殊性:它们是**画像素材**,不是"待处理收件箱条目",
+不该混进 AI 判断队列刷屏 —— 见 §3.2 ⑤ 的 `source` 区分。
 
 ### 3.2 五条需求的落地路径
 
@@ -197,35 +231,63 @@ UI 侧:inbox 列表对"曾采纳过"的推文显示标记(查 archive 命中即�
 - 需求原文说"所有推文**和回复**都不再爬取" —— 当前采集只走搜索页抓推文,
   没有单独的"抓回复"链路。若将来有,黑名单判断要同样覆盖
 
-#### ⑤ 追踪本账号回复过的推文 + 推主
+#### ⑤ 账号关注名单(watchlist)
 
-**难点见 §1.3:系统无法可靠知道"用户真的发布了"。** 设计上不回避,分两层:
+**核心思路:不新造采集链路,把 watchlist 变成一条自动维护的 `from:` 配方。**
 
-**(a) 记录"回复意图"** —— `pasteReply()` 成功填入时,写一条 `reply_log`:
+**(a) `buildSearchUrl` 加 `includeReplies` 开关**(§1.3 (b) 的缺口)
 
 ```
-tweet_id        被回复推文
-author_handle   被回复的推主  ← 需求 ⑤ 的「推主」
-reply_text      填进去的内容
-pasted_at       datetime
-confirmed       bool DEFAULT false   用户是否确认已发布
-confirmed_at    option<datetime>
+if (recipe.includeReplies) parts.push('include:replies');
 ```
 
-**(b) 用户确认** —— 现有的"已回复"按钮([XInboxView.tsx:670](../../../src/views/x-inbox/XInboxView.tsx#L670))
-把对应 `reply_log.confirmed` 置 true,并 upsert `x_author.replied_count`。
+`SearchRecipe` 加 `includeReplies?: boolean`。这是需求 ⑤ 唯一必须的采集侧改动。
 
-这样:
-- **`confirmed=false` 的是"填了但没确认"** —— 可能发了也可能没发,UI 上单独一栏提醒用户补确认
-- **`confirmed=true` 才计入画像的 `replied_count`** —— 保证画像数字有确定含义
-- 无论确认与否,`author_handle` 都已落库 → **"我尝试回复过谁"这件事不再丢失**
+> ⚠️ **待实机验证**:X 搜索语法对 `include:replies` 的支持时有变化,
+> 也有用 `filter:replies` / `to:` 的写法。**实施前必须实机 spike 确认哪个真的有效**,
+> 不能照文档假设(参照 X selector 屡次改版的教训)。
 
-> 这里刻意**不做**"自动检测是否已发布"(比如轮询该推文的回复列表找自己的账号)。
-> 那需要知道本账号 handle、且要额外爬取,复杂度和误判风险都高。
-> 若将来确有需要,再单独立项 —— 见 Q5。
+**(b) 让 `createdAt` / `inReplyTo` 落库**(§1.3 (c) 的缺口)
 
-**本账号 handle 的获取**:`reply_log` 里可以不存(单账号场景下所有回复都是"我"发的)。
-若将来一个 ws 绑多个 X 账号,再加 `from_account` 字段区分。当前**不预先设计**。
+`tweet_inbox` + `tweet_archive` 各加两列:
+
+```
+created_at    option<datetime>   推文自身的发布时间(区别于 fetched_at 抓取时间)
+in_reply_to   option<string>     回复上下文链接;非空 = 这是一条回复
+```
+
+- 抓取脚本已经提取,只是组装 record 时漏了 —— **改 3 行的事**
+- `created_at` 对画像是刚需:没有它只能按"我们抓到的时刻"排序,时序分析会失真
+- `in_reply_to` 让"推文 vs 回复"可区分 —— 需求 ⑤ 明确要"推文和回复"都追
+
+**(c) watchlist → 配方的映射**
+
+两种做法:
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| **A. 单条聚合配方**(推荐) | 所有 `watched` 账号合成一条配方:`(from:a OR from:b) include:replies` | X 搜索原生支持 OR;一次扫描覆盖全部关注对象,省配额。**但账号多了 URL 会超长** —— 需分批(建议每批 ≤ 10 个 handle) |
+| B. 每账号一条配方 | 加一个账号建一条 recipe | 调度粒度细、单账号可单独禁用;但配方数量随关注数线性增长,调度器压力大 |
+
+**取 A + 分批**。
+
+**(d) watchlist 推文不进 AI 判断队列**
+
+关注账号的推文是**画像素材**,不是"值不值得回复"的候选。若混进 `status='pending'`,
+会把 Gemma 判断队列刷爆,也污染收件箱。
+
+做法:watchlist 采集写库时 `source='watchlist'`(现有 `source` 字段,当前恒为 `'search'`),
+且 `status` 直接置为终态(不进 pending)。UI 上单独一个"关注动态"视图看,
+与"待处理收件箱"分开。
+
+**(e) 自己的账号**
+
+`is_self=true` 的 handle 同样走上面的链路 —— 自己发的推和回复被 `from:自己 include:replies`
+抓回来。这**比在 `pasteReply` 埋点更可靠**(见 §1.3.1):
+覆盖手机/网页发的,且"搜到了"本身就证明"确实发布了",绕开原方案的确认死结。
+
+> 因此**原设计里的 `reply_log` 表取消** —— 它要解决的"我回复过谁 + 是否真发布",
+> watchlist 用观察结果直接回答,不需要推断层。
 
 ---
 
@@ -248,30 +310,33 @@ confirmed_at    option<datetime>
 - **留着**(倾向):画像和统计需要历史;"不再爬取"约束的是未来,不是抹除过去
 - **一并删除**:彻底干净,但会让采纳率等统计数字回溯性变动
 
-### Q3. 画像要做到什么程度?
+### Q3. 画像的形态 —— 用户已明确「单独再议」
 
-当前设计只做**计数型画像**(seen/accepted/replied 次数 + 人工备注)。是否需要:
+用户 2026-09-01 明确:**画像具体怎么做单独考虑**,本方案只负责把素材抓全、存住。
 
-- 语言分布、话题标签聚合?
-- Gemma 对该作者的整体评价?
-- 互动时间线可视化?
+因此本方案对画像只做**最低承诺**:`x_author` 上的计数字段(seen/accepted/replied)
++ `note` 人工备注 + 明细可按 `author_handle` 回查 `tweet_archive`。
 
-*建议先只做计数 + 备注*,等真用起来再看缺什么 —— 避免设计过度。
+话题聚合、Gemma 整体评价、互动时间线等**不在本方案范围**,待单独立项。
+但设计上留好接口:`created_at` / `in_reply_to` / `lang` / `metrics` 都落库,
+将来做任何形态的画像都不必回头补数据。
 
 ### Q4. `tweet_archive` 会长多大?
 
 按当前节奏(日均采纳 ~16 条 + 回复):**一年约 6000 行,文本量 < 5 MB**。
 磁盘上完全不是问题(前置的磁盘排查已确认 X 数据一年仅 5 MB 量级)。
 
-### Q5. 回复「已发布」要不要做自动核实?
+### Q5. watchlist 的抓取频率与深度?
 
-§3.2 ⑤ 的方案依赖用户手动点"已回复"来确认。若嫌麻烦,理论上可以自动核实
-(导航到该推文的回复列表,找本账号的回复是否存在)。
+关注账号的推文/回复要多久抓一次、往回追多远?
 
-- **不做**(倾向):省一次爬取、无误判风险;代价是 `confirmed` 依赖手工
-- **做**:画像数字更准;但需要知道本账号 handle、多一轮爬取、X 改版易失效
+- **频率**:复用 `SearchRecipe.intervalMinutes`。但关注对象活跃度差异大,
+  统一间隔可能过密(浪费)或过疏(漏推)
+- **深度**:`sinceHours` 默认 24。新加入 watchlist 的账号,要不要一次性回溯抓取历史?
+  (X 搜索能翻多远受限,且翻页成本高)
 
-*建议先不做* —— 先用起来,如果"忘记点确认"真成为痛点再立项。
+*建议*:先用统一间隔 + 只抓增量(不回溯历史),跑一段时间看漏没漏,再调。
+避免一上来做复杂的自适应调度。
 
 ---
 
@@ -279,7 +344,7 @@ confirmed_at    option<datetime>
 
 | 项 | 说明 |
 |---|---|
-| Schema migration | 新增三表,走 `migration_1_9_x`。**教训**:`option<array>` 是 parse error、DDL 单条失败会拒收整段(见记忆 `project-surreal-flexible-parse-error`) |
+| Schema migration | 新增两表 + 给 tweet_inbox 加 created_at / in_reply_to 两列,走 `migration_1_9_x`。**教训**:`option<array>` 是 parse error、DDL 单条失败会拒收整段(见记忆 `project-surreal-flexible-parse-error`) |
 | option 字段写值 | 写 `option<T>` 必须传 `undefined` **不能传 `null`**(见记忆 `project-surreal-none-vs-null`) |
 | 去重范围扩大 | `inbox ∪ archive` 后集合持续增长。当前量级(万级)全量 SELECT 无压力;**十万级以上需改索引查询**,届时再优化,现在不预先设计 |
 | 归档写失败 | 必须 fail loud —— 采纳动作要么整体成功要么报错,不能出现"UI 显示已采纳但没归档" |
@@ -292,9 +357,10 @@ confirmed_at    option<datetime>
 | 期 | 内容 | 价值 |
 |---|---|---|
 | **A** | `tweet_archive` 表 + 采纳/回复时归档 + 去重并入 archive | **止血**:从今天起不再丢数据、不再重复爬(需求 ①③) |
-| **A'** | `reply_log` 表 + `pasteReply` 落库 + "已回复"按钮写 confirmed | **止血**:回复行为不再蒸发(需求 ⑤)。与 A 同期,同属"先把数据留住" |
+| **A'** | `tweet_inbox`/`archive` 加 `created_at` + `in_reply_to` 两列并落库 | 3 行改动,但决定了后续能不能区分"推文 vs 回复"、能不能按真实发布时间排序。**越早做,积累的数据越完整** |
 | **B** | `x_author` 表 + 屏蔽名单接上数据源 + 屏蔽 UI | 需求 ④,独立可验收 |
-| **C** | 画像聚合 + UI 呈现 + 存量回填 | 需求 ②,依赖 A/A'/B 的数据积累 |
+| **B'** | watchlist:`include:replies` 开关(先 spike)+ 聚合配方 + 关注 UI | 需求 ⑤。依赖 B 的 `x_author` 表 |
+| **C** | 画像聚合 + UI 呈现 + 存量回填 | 需求 ②。**画像具体形态用户说单独再议**,本期只保证素材齐备 |
 
 A / A' 期最紧急 —— **每多等一天就多丢一天的采纳正文和回复记录**。
 
