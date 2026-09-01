@@ -29,6 +29,21 @@ export function registerXWebviewHook(mainWindow: BrowserWindow): void {
   mainWindow.webContents.on('did-attach-webview', (_event, guestWebContents) => {
     trackWebContentsForXService(guestWebContents);
 
+    // 关掉后台节流。Chromium 会对"判定为不可见"的 surface 节流渲染,
+    // 导致 guest **算对了**新布局却**不重绘** —— 屏幕上还是旧样子,
+    // 一按 Cmd+Opt+I 打开 DevTools 就"自己好了"(那强制了重绘)。
+    // 实测数据佐证:host=1679 时 X 自己已把左导航排成展开(389px),
+    // host=1267 时排成收起(183px) —— 布局全对,只是没画出来。
+    //
+    // ⚠️ 必须在**主进程**对 guest 的 webContents 调,不能只在 <webview> 标签上写
+    // webpreferences='backgroundThrottling=false' —— 那条实测无效
+    // (2026-09-01 加了仍需 Cmd+Opt+I 才刷新)。
+    try {
+      guestWebContents.setBackgroundThrottling(false);
+    } catch {
+      /* 老版本 Electron 可能没有此方法;没有就退化成原行为,不影响其余功能 */
+    }
+
     attachWebviewContextMenu(
       mainWindow,
       guestWebContents,
