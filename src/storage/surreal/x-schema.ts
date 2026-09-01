@@ -32,6 +32,13 @@ import { RecordId, type Surreal } from 'surrealdb';
  */
 
 const X_SCHEMA_1_0_0 = `
+-- ⚠️ 必须先显式建库:connect({ database: 'krig_x' }) **不会**创建 database。
+-- 冷启动时第一条 DEFINE TABLE 会直接报 "The database 'krig_x' does not exist",
+-- 而单条 DDL 失败会让**整段**被服务端拒收 → 一张表都建不出来。
+-- (2026-09-01 实测踩到:app 照常启动、krig_x 却始终不存在,
+--  因为 main/index.ts 对 initStorage 的 catch 只 console.error。)
+DEFINE DATABASE IF NOT EXISTS krig_x;
+
 -- ═══════════════════════════════════════════════════════════════
 -- ① 人 —— x_author(唯一真源,无 TTL,只显式删除)
 -- ═══════════════════════════════════════════════════════════════
