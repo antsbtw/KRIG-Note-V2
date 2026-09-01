@@ -24,7 +24,6 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { detectXServiceByUrl } from '@shared/types/x-service-types';
 import { attachWebviewContextMenu } from '../web-service-base';
 import { trackWebContentsForXService } from './webview-registry';
-import { installSidebarTrace, traceDevtools } from './x-sidebar-trace';
 
 export function registerXWebviewHook(mainWindow: BrowserWindow): void {
   mainWindow.webContents.on('did-attach-webview', (_event, guestWebContents) => {
@@ -39,28 +38,6 @@ export function registerXWebviewHook(mainWindow: BrowserWindow): void {
     // ⚠️ 必须在**主进程**对 guest 的 webContents 调,不能只在 <webview> 标签上写
     // webpreferences='backgroundThrottling=false' —— 那条实测无效
     // (2026-09-01 加了仍需 Cmd+Opt+I 才刷新)。
-    // 侧栏状态追踪(临时诊断,定位后删):由 guest 自己观测并落文件,
-    // 不依赖 DevTools —— 因为开 DevTools 本身会改变行为(强制重绘),
-    // 「要开 DevTools 才看得到日志」和「一开 DevTools 就好了」纠缠在一起,
-    // 根本分不清看到的是故障态还是被修正后的状态。
-    installSidebarTrace(guestWebContents, 'x-guest');
-    traceDevtools(guestWebContents, 'x-guest');
-
-    // 启动期强制重绘:用户报告「打开 app 侧栏是关的,按 Cmd+Opt+I 才打开」。
-    // Cmd+Opt+I 唯一的副作用就是强制一次真实重绘 —— 所以在页面稳定后主动补几次,
-    // 看能否顶掉这个手动动作。invalidate() = "Schedules a full repaint"。
-    //
-    // 为什么要多次:X 是 SPA,首屏骨架、导航、时间线是分批渲染的,
-    // 只补一次可能落在还没排好版的时刻。
-    guestWebContents.on('did-stop-loading', () => {
-      for (const ms of [300, 1200, 3000]) {
-        setTimeout(() => {
-          if (guestWebContents.isDestroyed()) return;
-          try { guestWebContents.invalidate(); } catch { /* 已销毁 */ }
-        }, ms);
-      }
-    });
-
     try {
       guestWebContents.setBackgroundThrottling(false);
     } catch {

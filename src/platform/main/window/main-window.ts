@@ -14,7 +14,6 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { detectXServiceByUrl } from '@shared/types/x-service-types';
 import { applyWsConfigToSession, wsSetHasWindow } from '../workspace/workspace-manager-main';
 import { themeBgColor } from '../ipc/native-theme-handler';
-import { traceWindowEvent } from '../x/x-sidebar-trace';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -144,16 +143,10 @@ export async function createWindow(wsId?: string): Promise<BrowserWindow> {
 
   // 窗口全屏状态变化 → 通知 renderer(用于 UI 自适应,如 NavSide Toggle 位置)
   win.on('enter-full-screen', () => {
-    traceWindowEvent('enter-full-screen', { winId: win.id, bounds: win.getBounds() });
     win.webContents.send(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, true);
   });
   win.on('leave-full-screen', () => {
-    traceWindowEvent('leave-full-screen', { winId: win.id, bounds: win.getBounds() });
     win.webContents.send(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, false);
-  });
-  // 普通改窗口大小也记(拖边缘),便于把"宽度变了"与"侧栏变了"对齐时间轴
-  win.on('resize', () => {
-    traceWindowEvent('resize', { winId: win.id, w: win.getBounds().width });
   });
   reportL1Alive({
     windowId: win.id,

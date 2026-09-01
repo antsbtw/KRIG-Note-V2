@@ -75,7 +75,6 @@ import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
 import { startXSearchScheduler, stopXSearchScheduler } from './x';
-import { traceSessionStart } from './x/x-sidebar-trace';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -133,11 +132,7 @@ app.whenReady().then(async () => {
   try {
     await initStorage();
     console.log(`[storage] cold-start latency: ${Date.now() - storageStartedAt}ms`);
-    console.log('[boot-diag] ① initStorage 正常返回');
   } catch (err) {
-    // [boot-diag] 这里被吃掉过一次异常:X migration rethrow 逃到这,启动看着正常
-    // 但后续步骤全被跳过。诊断期把它打醒目。
-    console.error('[boot-diag] ✗✗✗ initStorage THREW —— 后续初始化步骤可能被跳过 ✗✗✗');
     console.error('[storage] init failed:', err);
   }
 
@@ -194,13 +189,10 @@ app.whenReady().then(async () => {
   }
 
   // X 时间线智能筛选 Phase 1 — 种子配方 + 调度器（必须在 migration_1_8_0 之后）
-  traceSessionStart();
-  console.log('[boot-diag] ② 到达 seedRecipes');
   await seedRecipes().catch((err) => {
     console.error('[x-timeline] seedRecipes failed:', err);
   });
   startXSearchScheduler();
-  console.log('[boot-diag] ③ X 调度器已启动');
 
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
   // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。
@@ -208,9 +200,7 @@ app.whenReady().then(async () => {
 
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
-  console.log('[boot-diag] ④ 到达 registerProtocol(media:// 注册)');
   mediaStore.registerProtocol();
-  console.log('[boot-diag] ⑤ media:// 已注册 —— webview 可正常加载资源');
 
   // L5-G7b — 字体改记名方案(sysname:<family>),不再嵌入 → 无 font:// 协议要注册。
   // 本机渲染 / 导出经 IPC FONT_READ_BY_NAME 按名读 buffer(registerFontHandlers 接)。

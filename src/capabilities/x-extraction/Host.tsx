@@ -39,55 +39,37 @@ interface WebviewElement extends HTMLElement {
 }
 
 /**
- * 派发 resize + 促重绘 + 回报导航状态。
- *
- * navW 是分辨状态的硬指标:X 左导航展开(带文字)约 275px,收起(仅图标)约 88px。
- * 此前只看容器宽度,把"收起"和"展开"混作一谈,根本判断不出改动有没有生效。
- */
-/**
  * 让 guest 经历一次**真实的 viewport 尺寸变化**。
  *
- * ⚠️ 这是本问题的正解,前面几版全打偏了。实测(x-sidebar-trace,2026-09-01):
- *   17.5s  视口 1151→1679(变宽)  nav 容器 125→359,但**文字 span = 0**
- *   ~110s  视口 1679 保持不变      文字 span 一直是 0(屏幕上就是"侧栏关着")
- *  127.6s  视口 1679→1267(变窄)  文字 span = 18 —— 内容这才生成
- * 而全程视口没变过的另一个实例,始终是 0。
+ * ⚠️ 这是本问题的正解。实测(2026-09-01,连续 150s 追踪):
+ *   视口 1151→1679(变宽):nav 容器 125→359,但导航文字 span **= 0**
+ *   视口 1679 保持不变     :文字 span 一直 0,持续 110s(屏幕上就是"侧栏关着")
+ *   视口 1679→1267(变窄):文字 span **= 18**,内容这才生成
+ *   全程视口未变的另一实例:始终 0
  *
- * 结论:X 的左导航内容只在经历**真实 viewport 变化**时才重建。
- * 所以:
- *  - 合成 dispatchEvent(new Event('resize')) 无效(X 不听合成事件)
- *  - invalidate() / setBackgroundThrottling 也无效(它们治"没画出来",
- *    而这里是"内容压根没生成")
- *  - Cmd+Opt+I 之所以"一按就好",是因为 DevTools 挤窄了 webview,
- *    那次**真实**的尺寸变化触发了重建 —— 不是重绘,是尺寸变化本身
+ * 即:X 的左导航内容只在经历**真实 viewport 变化**时才重建。因此
+ *  - 合成 dispatchEvent(new Event('resize')) 无效 —— X 不听合成事件
+ *  - invalidate() / setBackgroundThrottling 也无效 —— 它们治"没画出来",
+ *    而这里是"内容压根没生成"
+ *  - Cmd+Opt+I "一按就好",是因为 DevTools 挤窄了 webview,那次**真实**
+ *    尺寸变化触发了重建;不是重绘,是尺寸变化本身
  *
- * 做法:把宿主元素宽度改 1px 再改回来,强制 Chromium 给 guest 下发真实 resize。
- * 1px 肉眼不可见,两帧内复原。
+ * 做法:宿主元素宽度改 1px,两帧后复原 —— 强制 Chromium 给 guest 下发真实 resize。
+ * 1px 肉眼不可见。
  */
 function nudgeViewport(el: HTMLElement): void {
   const prev = el.style.width;
-  el.style.width = `calc(100% - 1px)`;
+  el.style.width = 'calc(100% - 1px)';
   requestAnimationFrame(() => {
     requestAnimationFrame(() => { el.style.width = prev; });
   });
 }
 
+/** nudge 之后补一次同步布局,并回报 guest 视口宽用于收敛判断。 */
 const RELAYOUT_PROBE_JS = `(function(){
   window.dispatchEvent(new Event("resize"));
   void document.documentElement.offsetHeight;
-  var b = document.body;
-  if (b) {
-    var prev = b.style.transform;
-    b.style.transform = 'translateZ(0)';
-    requestAnimationFrame(function(){ b.style.transform = prev; });
-  }
-  var hdr = document.querySelector('header[role="banner"]');
-  var side = document.querySelector('[data-testid="sidebarColumn"]');
-  return JSON.stringify({
-    w: window.innerWidth,
-    navW: hdr ? Math.round(hdr.getBoundingClientRect().width) : -1,
-    rightW: side ? Math.round(side.getBoundingClientRect().width) : -1,
-  });
+  return window.innerWidth;
 })()`;
 
 export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
@@ -117,23 +99,9 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
     const kick = (attempt: number): void => {
       try {
         void wv.executeJavaScript(RELAYOUT_PROBE_JS).then((raw) => {
-          let m: { w?: number; navW?: number; rightW?: number } = {};
-          try { m = JSON.parse(String(raw)) as typeof m; } catch { /* ignore */ }
-          const nav = m.navW ?? -1;
-          const navState = nav < 0 ? '?' : nav > 200 ? '展开' : '收起';
+          const guestWidth = typeof raw === 'number' ? raw : 0;
           const hostWidth = Math.round(wv.getBoundingClientRect().width);
-          console.log(
-            `[x-diag][${wsId}] host=${hostWidth} guest=${m.w}`
-            + ` 左导航=${navState}(${nav}px) 右栏=${m.rightW}`,
-          );
-          // 布局算完了还得**真的画出来**:隐藏期 <webview> 的 OS surface 脱离,
-          // 复出时带的是上次那一帧。invalidate() 排一次全量重绘 ——
-          // 这正是"开 DevTools 就正确了"里 DevTools 顺手做掉的那件事。
-          try {
-            const wcId = wv.getWebContentsId();
-            if (typeof wcId === 'number') void window.electronAPI?.xTimeline?.invalidateWc?.(wcId);
-          } catch { /* guest 未 attach */ }
-          const guestWidth = m.w ?? 0;
+          // guest 还没跟上 host 宽度 → 下一帧重来(上限 10 帧 ≈160ms)
           if (guestWidth > 0 && hostWidth > 0
               && Math.abs(guestWidth - hostWidth) > 2 && attempt < 10) {
             requestAnimationFrame(() => kick(attempt + 1));
@@ -193,14 +161,14 @@ export const Host = forwardRef<XHostHandle, XHostProps>(function XHost(
         errorCode: number; errorDescription: string; validatedURL: string; isMainFrame: boolean;
       };
       // errorCode -3 = ABORTED,常见于导航被新导航取代,不一定是故障
-      console.error('[x-diag] ✗ did-fail-load',
+      console.error('[x-webview] ✗ did-fail-load',
         `code=${d.errorCode} desc=${d.errorDescription} url=${d.validatedURL} isMainFrame=${d.isMainFrame}`);
     }) as EventListener);
     wv.addEventListener('render-process-gone', ((e: Event) => {
-      console.error('[x-diag] ✗✗ render-process-gone(webview 渲染进程没了)',
+      console.error('[x-webview] ✗✗ render-process-gone(webview 渲染进程没了)',
         (e as unknown as { reason?: string }).reason ?? e);
     }) as EventListener);
-    wv.addEventListener('crashed', () => console.error('[x-diag] ✗✗ webview crashed'));
+    wv.addEventListener('crashed', () => console.error('[x-webview] ✗✗ webview crashed'));
     wv.addEventListener('did-start-loading', handleStartLoading);
     wv.addEventListener('did-stop-loading', handleStopLoading);
     wv.addEventListener('did-navigate', handleDidNavigate);
