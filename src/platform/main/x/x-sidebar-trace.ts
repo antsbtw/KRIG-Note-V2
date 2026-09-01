@@ -17,7 +17,7 @@
  * ⚠️ 临时设施,定位后连同 x-diag 日志一起删。
  */
 import { app, webContents, type WebContents } from 'electron';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const TRACE_DIR = path.join(app.getPath('userData'), 'krig-data');
@@ -88,6 +88,7 @@ const PROBE_JS = `(function(){
 
 /** 给一个 X guest 装追踪探针 + 接它的上报 */
 export function installSidebarTrace(wc: WebContents, wsId: string): void {
+  let lastShotExpanded: boolean | null = null;
   const install = (): void => {
     wc.executeJavaScript(PROBE_JS)
       .then((r) => void trace('probe', { wsId, wcId: wc.id, result: r }))
@@ -117,11 +118,22 @@ export function installSidebarTrace(wc: WebContents, wsId: string): void {
       const visible = typeof parsed.innerWidth === 'number' && parsed.innerWidth > 0;
       void (async () => {
         const painted = visible ? await capturePaintedNavWidth(wc) : null;
+        // 状态真正翻转时存一张图:启发式可能判错,图片不会。
+        if (painted && visible) {
+          const nowExpanded = painted.paintedW > 40;
+          if (lastShotExpanded !== nowExpanded) {
+            lastShotExpanded = nowExpanded;
+            void saveShot(wc, `wc${wc.id}-${nowExpanded ? 'expanded' : 'collapsed'}`);
+          }
+        }
         void trace('guest', {
           wsId, wcId: wc.id,
           DOM算的: navW,
-          画面上的: painted?.paintedW ?? null,
-          一致: painted ? (Math.abs(painted.paintedW - navW) < 40 ? '是' : '✗ 不一致') : '-',
+          // 画面文字区占比:>40% 基本可断定"画出来是展开的",<10% 是收起
+          画面文字占比: painted?.paintedW ?? null,
+          画面状态: painted == null ? '-' : painted.paintedW > 40 ? '展开' : painted.paintedW < 10 ? '收起' : '中间',
+          一致: painted == null ? '-'
+            : ((navW > 200) === (painted.paintedW > 40) ? '是' : '✗ DOM与画面不符'),
           ...parsed,
         });
       })();
@@ -165,7 +177,7 @@ export function traceSessionStart(): void {
  */
 export async function capturePaintedNavWidth(
   wc: WebContents,
-): Promise<{ paintedW: number; sampled: number } | null> {
+): Promise<{ paintedW: number; sampled: number } | null> {  // paintedW 现在是「文字区亮行占比 %」
   try {
     const img = await wc.capturePage();
     const size = img.getSize();
@@ -174,19 +186,30 @@ export async function capturePaintedNavWidth(
     const rowBytes = size.width * 4;
     // capturePage 返回物理像素,Retina 下是 CSS 的 2 倍;换算回 CSS 才好与 navW 比
     const scale = size.width >= 2000 ? 2 : 1;
-    const navZone = Math.min(size.width, 420 * scale);   // 导航区最多 420 CSS px
-    let maxX = 0;
+    // ⚠️ 上一版在 0~420px 里找"最右侧亮像素",结果几乎恒等于 420 —— 因为**时间线内容
+    // 本身就在导航右边**,那片亮像素跟导航展开与否无关。读数饱和,毫无意义。
+    // (2026-09-01 差点据此下结论,幸好先查了分布。)
+    //
+    // 改成量导航**自身**:X 左导航左侧固定留白约 12~20px,图标列约到 88px,
+    // 展开时文字延伸到 ~250px。取 100~260px 这段"只有展开态才有内容"的区间,
+    // 统计亮像素占比 —— 收起态该区间近乎全黑,展开态有明显文字笔画。
+    let litRows = 0;
     let sampled = 0;
-    for (let y = Math.floor(size.height * 0.25); y < size.height * 0.75; y += 16) {
+    const zoneL = Math.round(100 * scale);
+    const zoneR = Math.round(260 * scale);
+    for (let y = Math.floor(size.height * 0.3); y < size.height * 0.8; y += 8) {
       sampled++;
-      for (let x = navZone - 1; x >= 0; x--) {
+      let lit = 0;
+      for (let x = zoneL; x < Math.min(zoneR, size.width); x++) {
         const i = y * rowBytes + x * 4;
         const b = bmp[i], g = bmp[i + 1], r = bmp[i + 2];
-        // X 深色主题背景近黑;文字/图标明显更亮
-        if (r + g + b > 120) { if (x > maxX) maxX = x; break; }
+        if (r + g + b > 150) lit++;
       }
+      if (lit > 3) litRows++;             // 该行在文字区有笔画
     }
-    return { paintedW: Math.round(maxX / scale), sampled };
+    // 展开态:多数采样行都有文字笔画;收起态:该区间是空的
+    const ratio = sampled ? litRows / sampled : 0;
+    return { paintedW: Math.round(ratio * 100), sampled };
   } catch {
     return null;
   }
@@ -202,7 +225,7 @@ export async function saveShot(wc: WebContents, label: string): Promise<string |
     const img = await wc.capturePage();
     if (img.isEmpty()) return null;
     const file = path.join(TRACE_DIR, `x-shot-${label}-${Date.now()}.png`);
-    await appendFile(file, img.toPNG());
+    await writeFile(file, img.toPNG());   // 必须 write 不能 append(append 会拼成坏文件)
     return file;
   } catch {
     return null;
