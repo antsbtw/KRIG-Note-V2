@@ -57,6 +57,7 @@ import { registerWebDownloadHook } from './web-download/handler';
 import { registerWebProxyHandler } from './web-proxy/handler';
 import { registerProfileHandlers } from './profile/profile-handlers';
 import { registerWebSettingsHandler } from './web-settings/handler';
+import { cleanOversizedPartitionCaches } from './web-settings/partition-cache-cleaner';
 import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { clearLegacyGraphStorage } from './graph/migration';
@@ -258,6 +259,21 @@ app.whenReady().then(async () => {
   registerWebProxyHandler();
   // per-ws 代理阶段3:Web 全局设置(搜索/主页)+ 清浏览数据 IPC。
   registerWebSettingsHandler();
+
+  // webview partition 缓存清理(保守档):只清 HTTP 缓存 + JS 编译缓存,
+  // 不碰 cookies/localStorage —— 登录态零影响。超阈值才清,不 await 免拖慢启动。
+  void cleanOversizedPartitionCaches()
+    .then((r) => {
+      if (r.cleaned.length > 0) {
+        console.log(
+          `[partition-cache] 扫描 ${r.scanned} 个 partition,清理 ${r.cleaned.length} 个,` +
+            `回收 ${(r.freedBytes / 1024 / 1024).toFixed(0)} MB`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[partition-cache] 清理失败(不影响启动):', err);
+    });
 
   // 登录:从磁盘恢复 session(有 token → authenticated,无 → anonymous)。
   // **不 await**:窗口照常起,AuthState 初始 loading,restore 完成后经
