@@ -610,20 +610,30 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     loadPage(0);
   };
 
+  /**
+   * 取推文 URL —— 缺 tweet_url 时从 tweet_id 现推。
+   *
+   * 0 期回填的 616 行只有正文没有 url(能力勘查 §2.3:url 填充率仅 28%),
+   * 而 X 的永久链接是 `https://x.com/<handle>/status/<id>` —— 完全可推导。
+   * 让功能因为一个可推导的字段缺失而消失,是不必要的。
+   */
+  const tweetUrlOf = (tweet: TweetInboxRecord): string =>
+    tweet.tweet_url
+    || `https://x.com/${normalizeHandle(tweet.author_handle ?? 'i') || 'i'}/status/${tweet.tweet_id}`;
+
   const sendToReply = async (tweet: TweetInboxRecord) => {
     // 同 894 行:库值自带 @,须归一化后再由模板补,否则弹窗显示 @@xxx
     const msg = `即将在 X 中打开 @${normalizeHandle(tweet.author_handle ?? '')} 的推文准备回复。\n\n${tweet.text?.slice(0, 120)}`;
     if (window.confirm(msg)) {
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-      const r = await api()?.replyToTweet(tweet.tweet_url ?? '', tweet.tweet_id, workspaceId, wcId);
+      const r = await api()?.replyToTweet(tweetUrlOf(tweet), tweet.tweet_id, workspaceId, wcId);
       if (!r?.success) alert(`导航失败：${r?.error}`);
     }
   };
 
   const viewTweet = async (tweet: TweetInboxRecord) => {
-    if (!tweet.tweet_url) return;
     const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-    const r = await api()?.replyToTweet(tweet.tweet_url, tweet.tweet_id, workspaceId, wcId);
+    const r = await api()?.replyToTweet(tweetUrlOf(tweet), tweet.tweet_id, workspaceId, wcId);
     if (r?.success) {
       setViewingId(tweet.tweet_id);
       setTimeout(() => setViewingId((prev) => prev === tweet.tweet_id ? null : prev), 2500);
@@ -960,12 +970,14 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                     </div>
                   ))}
                   <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {t.tweet_url && (
-                      <Btn sm onClick={() => viewTweet(t)}>
-                        {viewingId === t.tweet_id ? '↗ 已在 X 中打开' : '查看原推'}
-                      </Btn>
-                    )}
-                    {t.tweet_url && <Btn sm primary onClick={() => sendToReply(t)}>送入回复</Btn>}
+                    {/* ⚠️ 不能靠 tweet_url 判断能否打开原推:0 期回填的 616 行
+                        只有正文没有 url(能力勘查 §2.3 实测 url 填充率仅 28%),
+                        导致「已确认」翻到第二页后按钮整片消失。
+                        url 是可从 tweet_id 推导的 —— 缺就现推,不该因此禁用功能。 */}
+                    <Btn sm onClick={() => viewTweet(t)}>
+                      {viewingId === t.tweet_id ? '↗ 已在 X 中打开' : '查看原推'}
+                    </Btn>
+                    <Btn sm primary onClick={() => sendToReply(t)}>送入回复</Btn>
                     {(() => {
                       // 本次会话点过的优先(乐观更新不被覆盖),否则回落到库里的真实状态。
                       // feedbackMap 是会话内 state,翻页/重启即清空 —— 只靠它会让
