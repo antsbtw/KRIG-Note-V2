@@ -321,9 +321,22 @@ export async function getFeedbackStats(): Promise<FeedbackStats> {
  *  `expires_at` 为 NONE 的行(采纳/回复过的永久行)**不满足** `expires_at < time::now()`,
  *  因此天然被跳过 —— 这正是 A 期止血依赖的机制。改这条语句前先想清楚这点。
  */
+/**
+ * TTL 清理 —— **已停用**(用户 2026-09-02 拍板:X 推文永久保存)。
+ *
+ * 为什么保留这个函数而不是删掉:调用点在调度器里(每 24h + 启动时各一次),
+ * 保留成 no-op 比拆掉调用链更安全,也留下「这里曾经会删数据」的痕迹。
+ * 将来真要做容量治理(用户:「等容量到了一定的程度,再考虑迁移新的架构」),
+ * 应该是**迁移到冷存储**,而不是恢复这里的 DELETE。
+ *
+ * ⚠️ 绝不要简单地把 DELETE 加回来:
+ *   A 期就因 TTL 丢过 449 条已采纳推文的正文(不可再生);
+ *   而被 Gemma 判 skip / 被黑名单过滤的推,是竞品分析与语料素材,
+ *   同样不可再生。删除是不可逆操作,恢复它需要明确的产品决策。
+ */
 export async function cleanExpired(): Promise<void> {
-  const db = getXDB();
-  await db.query(`DELETE x_tweet WHERE expires_at != NONE AND expires_at < time::now()`);
+  // no-op:保留调用点,不再删除任何数据
+  return;
 }
 
 /** 查询缺翻译的非中文推文（补填用） */

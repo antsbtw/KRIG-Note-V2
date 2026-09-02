@@ -205,7 +205,16 @@ export async function scanRecipe(
   let saved = 0;
   let filteredOut = 0;
   const nowIso = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString();
+  // ⚠️ **不再设 TTL**(用户 2026-09-02 拍板:「永久保存吧,等容量到了一定的程度,
+  // 再考虑迁移新的架构」)。
+  //
+  // 原来设 7 天过期,前提是「没被采纳的推没价值」—— 这个前提已被推翻:
+  //   「有些不显示的帖子不见得没有用途,可以用于分析竞争对手。」
+  // 被 Gemma 判 skip / 被黑名单过滤掉的推,正是竞品分析与语料的素材,
+  // 删掉不可再生(A 期就因 TTL 丢过 449 条已采纳正文,教训在前)。
+  //
+  // undefined → NONE(SurrealDB 的 option 语义),cleanExpired 会跳过这些行。
+  const expiresAt = undefined;
 
   for (let round = 0; round < maxScrollRounds; round++) {
     if (scanAbortMap.get(wsId)) {

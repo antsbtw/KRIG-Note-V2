@@ -344,6 +344,38 @@ export async function x_migration_1_0_4(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * 1.0.5 —— 取消 TTL,X 推文永久保存(2026-09-02)
+ *
+ * 用户拍板:「永久保存吧。等容量到了一定的程度,再考虑迁移新的架构。」
+ *
+ * 背景:原 TTL 设计(A 期)的前提是「没被采纳的推没价值」,7 天后删除。
+ * 该前提已被推翻 ——「有些不显示的帖子不见得没有用途,可以用于分析竞争对手。」
+ * 被 Gemma 判 skip / 被黑名单过滤掉的推,是竞品分析与 AI 语料的素材,
+ * 删掉不可再生。实测当时有 368 行带 TTL,其中 295 行是 skip/filtered_out。
+ *
+ * ⚠️ A 期教训在前:旧 tweet_inbox 因 TTL 丢过 449 条已采纳推文的正文。
+ *    删除是不可逆的,这次把整个 TTL 机制关掉,而不是调长过期时间。
+ *
+ * 配套代码改动:x-timeline-scan 不再设 expires_at;cleanExpired 改为 no-op。
+ */
+const X_SCHEMA_1_0_5 = `
+UPDATE x_tweet SET expires_at = NONE WHERE expires_at != NONE;
+`;
+
+export async function x_migration_1_0_5(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_5);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.5',
+      appliedAt = $now,
+      description = 'Disable TTL: keep all X tweets permanently (competitor analysis + AI corpus)'`,
+    { rid: new RecordId('schema_version', '1.0.5'), now },
+  );
+}
+
 export async function x_migration_1_0_0(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_0_0);
 
