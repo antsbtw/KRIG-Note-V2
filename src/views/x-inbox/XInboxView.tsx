@@ -1223,10 +1223,14 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
         + (r.stats
             ? `\n【累计】已采纳 ${r.stats.totalAccepted} 条,其中回复过 ${r.stats.repliedAccepted} 条\n`
             : '')
-        + (r.coverage
-            ? `【库存回复】${r.coverage.count} 条,覆盖最近 ${r.coverage.spanDays ?? '?'} 天`
-              + `(${(r.coverage.oldest ?? '').slice(0, 10)} 起)\n`
-              + `  单次受 X 懒加载限制约 2.6 天,但**多次采集会累积** —— 定期跑即可往前推\n`
+        + (r.coverage && r.baseline?.tweetCount
+            ? `\n【采集完整度】库存 ${r.coverage.count} / 基线 ${r.baseline.tweetCount} 条`
+              + ` = ${Math.round(r.coverage.count * 1000 / r.baseline.tweetCount) / 10}%\n`
+              + `  基线 = X 官方发推总数(原创+回复);库存目前只有回复,口径待统一\n`
+              + `  覆盖最近 ${r.coverage.spanDays ?? '?'} 天(${(r.coverage.oldest ?? '').slice(0, 10)} 起)`
+              + ` —— 有游标续传,多跑几次会一次比一次深\n`
+            : r.coverage
+            ? `\n【库存回复】${r.coverage.count} 条,覆盖最近 ${r.coverage.spanDays ?? '?'} 天\n`
             : '')
         + (x.dumpPath ? `\n📦 明细:${x.dumpPath}` : '')
         + `\n\n(返回收件箱后刷新即可看到「已回复」状态)`,

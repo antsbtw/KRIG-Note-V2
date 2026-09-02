@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { app } from 'electron';
 import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
+import { saveAuthorCounts, getAuthorCounts } from '../db/x-author-repo';
 import { backfillRepliedFromRelations, saveReplyRelations, saveOwnReplies,
   getOwnReplyCoverage, getCollectCursor, saveCollectCursor,
   type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
@@ -44,6 +45,59 @@ function extractBottomCursor(node: unknown): string | undefined {
   if (isCursor && o.cursorType === 'Bottom' && typeof o.value === 'string') return o.value;
   for (const v of Object.values(o)) {
     const r = extractBottomCursor(v);
+    if (r) return r;
+  }
+  return undefined;
+}
+
+/**
+ * 从 UserByScreenName 响应里取账号基线计数。
+ *
+ * 用户 2026-09-02 点出:post 总数就是**基线** —— 采集完整度的分母。
+ * /with_replies 页面加载时 X 自己就会请求 UserByScreenName,顺手接住即可,
+ * 不需要额外发请求。
+ */
+function extractAuthorCounts(node: unknown, wantHandle: string): {
+  tweetCount?: number; mediaCount?: number; followersCount?: number;
+  followingCount?: number; favouritesCount?: number; accountCreatedAt?: string;
+} | undefined {
+  if (node === null || typeof node !== 'object') return undefined;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const r = extractAuthorCounts(item, wantHandle);
+      if (r) return r;
+    }
+    return undefined;
+  }
+  const o = node as Record<string, unknown>;
+  const tc = o.tweet_counts as Record<string, unknown> | undefined;
+  const rc = o.relationship_counts as Record<string, unknown> | undefined;
+  if (tc && typeof tc.tweets === 'number') {
+    const ac = o.action_counts as Record<string, unknown> | undefined;
+    const core = o.core as Record<string, unknown> | undefined;
+    // ⚠️ **必须核对 handle**:响应里到处都是 user 对象(通知里的操作者、
+    //    时间线里的其他作者),不核对就会把**别人的** 39850 条当成自己的基线。
+    //    2026-09-02 实测踩到:从 NotificationsTimeline 抓回了一个陌生账号的计数。
+    const sn = typeof core?.screen_name === 'string' ? core.screen_name : undefined;
+    if (!sn || normalizeHandle(sn) !== wantHandle) {
+      // 不是目标账号 → 继续往下找,别在这里返回
+      for (const v of Object.values(o)) {
+        const r = extractAuthorCounts(v, wantHandle);
+        if (r) return r;
+      }
+      return undefined;
+    }
+    return {
+      tweetCount: tc.tweets,
+      mediaCount: typeof tc.media_tweets === 'number' ? tc.media_tweets : undefined,
+      followersCount: typeof rc?.followers === 'number' ? rc.followers : undefined,
+      followingCount: typeof rc?.following === 'number' ? rc.following : undefined,
+      favouritesCount: typeof ac?.favorites_count === 'number' ? ac.favorites_count : undefined,
+      accountCreatedAt: typeof core?.created_at === 'string' ? core.created_at : undefined,
+    };
+  }
+  for (const v of Object.values(o)) {
+    const r = extractAuthorCounts(v, wantHandle);
     if (r) return r;
   }
   return undefined;
@@ -190,6 +244,7 @@ export async function collectReplyRelations(
   const pending = new Map<string, string>();
   let payloads = 0;
   let latestCursor: string | undefined;
+  let authorCounts: ReturnType<typeof extractAuthorCounts>;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
     if (method === 'Network.requestWillBeSent') {
@@ -215,6 +270,8 @@ export async function collectReplyRelations(
             // 每个响应都可能带新的 Bottom 游标 —— 留最后一个(最深的那页)
             const cur = extractBottomCursor(parsed);
             if (cur) latestCursor = cur;
+            // 基线:页面加载时 X 自己会请求 UserByScreenName,顺手接住
+            if (!authorCounts) authorCounts = extractAuthorCounts(parsed, h);
             // 记录时间戳以计算覆盖深度
             const collectTimes = (n: unknown): void => {
               if (n === null || typeof n !== 'object') return;
@@ -331,6 +388,12 @@ export async function collectReplyRelations(
   const ownSaved = await saveOwnReplies(ownReplies);
   const savedOnReplies = await saveReplyRelations(relations);
   const backfill = await backfillRepliedFromRelations(relations);
+
+  // 存基线 —— 采集完整度的分母(用户 2026-09-02 点出的关键)
+  if (authorCounts?.tweetCount) {
+    await saveAuthorCounts(h, authorCounts);
+    console.log(`[x-reply-collector] 基线更新: 发推总数 ${authorCounts.tweetCount}`);
+  }
 
   // 存游标:下次从这里接着挖。没拿到新游标 = X 不再给下一页 → 标记到底。
   // ⚠️ 只在**确实抓到了数据**时才判定到底 —— 一次都没抓到可能是网络/风控,

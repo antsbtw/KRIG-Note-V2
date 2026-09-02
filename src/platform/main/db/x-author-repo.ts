@@ -183,6 +183,73 @@ export async function getSelfHandle(): Promise<string | null> {
   return res[0]?.[0]?.handle ?? null;
 }
 
+/** 账号基线计数(采自 UserByScreenName) */
+export interface AuthorCounts {
+  tweetCount?: number;
+  mediaCount?: number;
+  followersCount?: number;
+  followingCount?: number;
+  favouritesCount?: number;
+  accountCreatedAt?: string;
+}
+
+/**
+ * 存账号基线计数 —— **采集完整度的分母**。
+ *
+ * 用户 2026-09-02:「你有发现用户有 post 的总数的吗?这就是基线。」
+ * tweet_count 让「抓够了没有」从猜变成算:已抓 N / 基线 M。
+ *
+ * ⚠️ 同时写 counts_at:没有观测时刻的计数判断不了新鲜度,
+ *    也做不了「基线涨了多少 vs 库里涨了多少」的对账。
+ */
+export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Promise<void> {
+  const h = normalizeHandle(handle);
+  if (!h) throw new Error('[x-author-repo] saveAuthorCounts: empty handle');
+
+  const db = getXDB();
+  const params = {
+    handle: h,
+    tc: counts.tweetCount ?? undefined,
+    mc: counts.mediaCount ?? undefined,
+    fc: counts.followersCount ?? undefined,
+    gc: counts.followingCount ?? undefined,
+    lc: counts.favouritesCount ?? undefined,
+    ca: counts.accountCreatedAt ? new Date(counts.accountCreatedAt) : undefined,
+  };
+  const existing = await db.query<[AuthorRow[]]>(
+    `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
+  );
+  const setClause = `tweet_count = $tc, media_count = $mc, followers_count = $fc,
+    following_count = $gc, favourites_count = $lc, account_created_at = $ca,
+    counts_at = time::now()`;
+  if ((existing[0] ?? []).length > 0) {
+    await db.query(`UPDATE x_author SET ${setClause} WHERE handle = $handle`, params);
+  } else {
+    await db.query(`CREATE x_author SET handle = $handle, ${setClause}`, params);
+  }
+}
+
+/** 读账号基线 —— UI 显示「已抓 N / 基线 M」用 */
+export async function getAuthorCounts(handle: string): Promise<AuthorCounts & { countsAt?: string }> {
+  const h = normalizeHandle(handle);
+  const db = getXDB();
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT tweet_count, media_count, followers_count, following_count,
+       favourites_count, counts_at FROM x_author WHERE handle = $handle LIMIT 1`,
+    { handle: h },
+  );
+  const r = res[0]?.[0];
+  if (!r) return {};
+  return {
+    tweetCount: typeof r.tweet_count === 'number' ? r.tweet_count : undefined,
+    mediaCount: typeof r.media_count === 'number' ? r.media_count : undefined,
+    followersCount: typeof r.followers_count === 'number' ? r.followers_count : undefined,
+    followingCount: typeof r.following_count === 'number' ? r.following_count : undefined,
+    favouritesCount: typeof r.favourites_count === 'number' ? r.favourites_count : undefined,
+    countsAt: r.counts_at ? String(r.counts_at) : undefined,
+  };
+}
+
 /**
  * 取屏蔽 handle 列表,喂给 TimelineFilterConfig.accountBlacklist。
  *

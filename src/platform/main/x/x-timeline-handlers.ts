@@ -25,6 +25,7 @@ import { probeAuthorTimeline } from './x-author-timeline-spike';
 import { surveyXPayloads } from './x-payload-inspector';
 import { collectReplyRelations } from './x-reply-collector';
 import { countRepliedAccepted, getOwnReplyCoverage } from '../db/x-reply-relation-repo';
+import { getAuthorCounts } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG, normalizeHandle } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -361,7 +362,9 @@ export function registerXTimelineHandlers(): void {
       const stats = await countRepliedAccepted();
       // 库里累计覆盖 ≠ 单次抓到的深度:单次受懒加载限制,但多次采集会累积
       const coverage = await getOwnReplyCoverage();
-      return { success: true, result: r, stats, coverage };
+      // 基线 = X 官方的发推总数,采集完整度的分母(用户 2026-09-02 点出)
+      const baseline = await getAuthorCounts(p.handle);
+      return { success: true, result: r, stats, coverage, baseline };
     } catch (err) {
       return { success: false, error: String(err) };
     }

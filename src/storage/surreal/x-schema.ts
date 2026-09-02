@@ -299,6 +299,51 @@ export async function x_migration_1_0_3(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * 1.0.4 —— 账号基线数字(2026-09-02)
+ *
+ * 用户点出的关键:「你有发现用户有 post 的总数的吗?**这就是基线**。」
+ *
+ * `UserByScreenName` 响应里带 `tweet_counts.tweets`(本账号实测 1192)——
+ * 我在能力勘查时就抓到并写进了文档,却只当成「画像基底」列了一行,
+ * **没意识到它是采集完整度的标尺**。
+ *
+ * 有了基线,「抓够了没有」从**猜**变成**算**:
+ *  - 进度可量化:已抓 N / 基线 M,而不是没有分母的「覆盖 X 天」
+ *  - 「到底了」有客观判据:此前靠「X 不再给游标」间接推断,
+ *    与「被限流」分不开;有基线就分得开
+ *  - 增量可自动对账:基线涨 5、库里也涨 5 = 正常;基线涨了库里没动 = 漏采
+ *
+ * 这些是**会变的观测值**(会随发推增长),不是派生值,故存在实体上,
+ * 并带 counts_at 记录观测时刻 —— 没有时刻的计数无法判断新鲜度。
+ */
+const X_SCHEMA_1_0_4 = `
+-- 发推总数(原创+回复),X 官方计数 —— 采集完整度的分母
+DEFINE FIELD IF NOT EXISTS tweet_count     ON x_author TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS media_count     ON x_author TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS followers_count ON x_author TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS following_count ON x_author TYPE option<int>;
+-- 该账号的点赞总数(活跃度指标)
+DEFINE FIELD IF NOT EXISTS favourites_count ON x_author TYPE option<int>;
+-- ⚠️ 计数的观测时刻:没有它就判断不了新鲜度,也做不了「基线涨了多少」的对账
+DEFINE FIELD IF NOT EXISTS counts_at       ON x_author TYPE option<datetime>;
+-- 账号注册时间(账号年龄 —— 画像基底)
+DEFINE FIELD IF NOT EXISTS account_created_at ON x_author TYPE option<datetime>;
+`;
+
+export async function x_migration_1_0_4(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_4);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.4',
+      appliedAt = $now,
+      description = 'Account baseline counts (tweet_count as collection-completeness denominator)'`,
+    { rid: new RecordId('schema_version', '1.0.4'), now },
+  );
+}
+
 export async function x_migration_1_0_0(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_0_0);
 
