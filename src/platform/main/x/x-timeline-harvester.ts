@@ -52,6 +52,11 @@ export interface HarvestedTweet {
   };
   /** 登录用户自己对这条推的状态 —— 登录态 webview 独有,零额外请求 */
   self: { favorited?: boolean; retweeted?: boolean; bookmarked?: boolean };
+  /**
+   * true = 从 DOM 兜底抓的(字段较少:没有会话根/自身互动状态/长推全文)。
+   * 用于监视页区分数据来源 —— 载荷是首选,DOM 只补 CDP 没覆盖到的部分。
+   */
+  fromDom?: boolean;
 }
 
 export interface RoundTrace {

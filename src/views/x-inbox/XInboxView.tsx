@@ -1415,13 +1415,21 @@ interface CaptureSnap {
   running: boolean; seenInDom: number; captured: number; captureRate: number;
   missing: string[]; payloads: number; elapsedSec: number;
   currentUrl?: string; scrollY?: number;
-  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number }>;
+  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
 }
 
 function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
   const [snap, setSnap] = useState<CaptureSnap | null>(null);
   const [running, setRunning] = useState(false);
   const [msg, setMsg] = useState('');
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
+
+  // 用户 2026-09-02:「屏幕满时自动往下同步滚动,方便作为人的观察和比对」
+  // 最新的在最上面,所以「跟随」= 滚到顶部
+  useEffect(() => {
+    if (autoFollow && listRef.current) listRef.current.scrollTop = 0;
+  }, [snap, autoFollow]);
 
   useEffect(() => {
     const off = api()?.onCaptureUpdate?.((s) => setSnap(s as CaptureSnap));
@@ -1496,9 +1504,19 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
         )}
 
         {/* 实时采到的内容 —— 与左边页面人眼对照 */}
-        <div style={{ fontSize: 11, color: 'var(--text-disabled)', marginTop: 4 }}>
-          最近采到(与左侧页面对照):
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
+            采到的推文(最新在上,共 {snap?.captured ?? 0} 条):
+          </span>
+          <label style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input type="checkbox" checked={autoFollow} onChange={(e) => setAutoFollow(e.target.checked)} />
+            自动跟随
+          </label>
         </div>
+      </div>
+
+      {/* 独立滚动区:内容多了自己滚,不挤压上面的统计 */}
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {(snap?.recent ?? []).map((t) => (
           <div key={t.tweetId} style={{
             background: 'var(--bg-card)', borderRadius: 8, padding: '8px 12px',
@@ -1508,6 +1526,10 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
               <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{normalizeHandle(t.authorHandle ?? '')}</span>
               <span style={{ fontSize: 10, color: t.isReply ? '#a78bfa' : '#22c55e' }}>
                 {t.isReply ? '回复' : '原创'}
+              </span>
+              <span style={{ fontSize: 9, color: t.fromDom ? '#f59e0b' : '#60a5fa',
+                border: `1px solid ${t.fromDom ? '#f59e0b' : '#60a5fa'}`, borderRadius: 6, padding: '0 4px' }}>
+                {t.fromDom ? 'DOM' : '载荷'}
               </span>
               <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)' }}>
                 ♥{t.likes ?? 0}　{t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : ''}

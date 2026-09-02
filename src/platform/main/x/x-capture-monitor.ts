@@ -40,19 +40,61 @@ interface MonitorState {
 
 let monitor: MonitorState | null = null;
 
-/** 扫当前 DOM 里可见的推文 id —— 这是「滚过多少」的来源 */
+/**
+ * 扫当前 DOM:既取「滚过多少」(分母),也**顺带把内容抓下来**。
+ *
+ * ⚠️ 为什么不能只靠 CDP 拦截 GraphQL(2026-09-02 实测暴露):
+ *   用户开始监视时页面**已经加载过**(scrollY=4884),那些推文是监视之前
+ *   到达的 —— 不会再有新的 GraphQL 响应带它们。结果就是
+ *   「滚过 14 / 采到 0 / 响应 0」,看着像彻底坏了,其实是时机问题。
+ *   → DOM 兜底:屏幕上有什么就能抓什么,与何时开始监视无关。
+ *   载荷仍是**首选**(字段全:conversation_id / favorited / 长推全文),
+ *   DOM 只补 CDP 没覆盖到的那部分。
+ */
 const SCAN_DOM_IDS = `(function () {
   var out = [];
   var arts = document.querySelectorAll('article[data-testid="tweet"]');
   for (var i = 0; i < arts.length; i++) {
-    var t = arts[i].querySelector('time');
+    var art = arts[i];
+    var t = art.querySelector('time');
     var a = t && t.closest('a[href*="/status/"]');
-    if (a) {
-      var m = (a.getAttribute('href') || '').match(/status\\/(\\d+)/);
-      if (m) out.push(m[1]);
-    }
+    if (!a) continue;
+    var m = (a.getAttribute('href') || '').match(/status\\/(\\d+)/);
+    if (!m) continue;
+
+    var handle = '';
+    try {
+      var un = art.querySelector('[data-testid="User-Name"]');
+      if (un) {
+        var sp = un.querySelectorAll('span');
+        for (var j = 0; j < sp.length; j++) {
+          var s = (sp[j].textContent || '').trim();
+          if (s.indexOf('@') === 0) { handle = s; break; }
+        }
+      }
+    } catch (e) {}
+
+    var text = '';
+    try {
+      var tt = art.querySelector('[data-testid="tweetText"]');
+      text = tt ? (tt.textContent || '') : '';
+    } catch (e) {}
+
+    var likes = 0;
+    try {
+      var lb = art.querySelector('[data-testid="like"], [data-testid="unlike"]');
+      if (lb) {
+        var ls = lb.querySelector('span');
+        var lt = ls ? (ls.textContent || '').replace(/,/g, '') : '';
+        if (lt.indexOf('K') > -1) likes = Math.round(parseFloat(lt) * 1000);
+        else likes = parseInt(lt) || 0;
+      }
+    } catch (e) {}
+
+    out.push({ id: m[1], handle: handle, text: text.slice(0, 200),
+      createdAt: t ? (t.getAttribute('datetime') || '') : '', likes: likes });
   }
-  return { ids: out, scrollY: window.scrollY,
+  return { items: out, scrollY: window.scrollY,
     docH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
     url: location.href };
 })()`;
@@ -75,6 +117,8 @@ export interface MonitorSnapshot {
   recent: Array<{
     tweetId: string; authorHandle?: string; text: string;
     createdAt?: string; isReply: boolean; likes?: number;
+    /** true = 从 DOM 兜底抓的(字段较少);false = 从 GraphQL 载荷抓的(字段全) */
+    fromDom: boolean;
   }>;
 }
 
@@ -86,13 +130,16 @@ function snapshot(extra?: { url?: string; scrollY?: number }): MonitorSnapshot {
   // ⚠️ 分母只算「DOM 见过的」:GraphQL 可能返回更多(如被折叠的回复),
   //    那不算漏 —— 漏的定义是**屏幕上出现过却没采到**。
   const missing = [...monitor.seenInDom].filter((id) => !monitor!.captured.has(id));
-  const recent = [...monitor.captured.values()].slice(-8).reverse().map((t) => ({
+  // ⚠️ 只回 8 条不够比对(用户 2026-09-02:「把采集到的推文显示在右侧,
+  //    这样我一眼就可以比对到是否采集了」)。给 60 条,按最新在前。
+  const recent = [...monitor.captured.values()].slice(-60).reverse().map((t) => ({
     tweetId: t.tweetId,
     authorHandle: t.authorHandle,
-    text: t.text.slice(0, 90),
+    text: t.text.slice(0, 140),
     createdAt: t.createdAt,
     isReply: !!t.inReplyToStatusId,
     likes: t.metrics.likes,
+    fromDom: (t as HarvestedTweet & { fromDom?: boolean }).fromDom === true,
   }));
   return {
     running: true,
@@ -158,17 +205,57 @@ export async function startCaptureMonitor(
     },
   };
 
-  try { wc.debugger.attach('1.3'); state.attached = true; }
-  catch { /* 已 attach,共用 */ }
+  // ⚠️ 这里曾经 `catch {}` 吞掉一切 —— 实测后果:采到 0 / 响应 0,
+  //    而界面上没有任何错误,典型的静默坍缩。必须把真实状态报出来。
+  let attachNote = '';
+  if (wc.debugger.isAttached()) {
+    // 已被别处 attach(如 AI SSE 拦截器):可以共用消息流,但不能重复 attach
+    state.attached = false;
+    attachNote = '(debugger 已被其他模块 attach,共用消息流)';
+  } else {
+    try {
+      wc.debugger.attach('1.3');
+      state.attached = true;
+    } catch (err) {
+      return { error: `CDP attach 失败,无法采集:${String(err)}` };
+    }
+  }
+
   wc.debugger.on('message', state.onMessage);
-  await wc.debugger.sendCommand('Network.enable').catch(() => {});
+  try {
+    await wc.debugger.sendCommand('Network.enable');
+  } catch (err) {
+    wc.debugger.off('message', state.onMessage);
+    if (state.attached) { try { wc.debugger.detach(); } catch { /* ignore */ } }
+    return { error: `Network.enable 失败,抓不到任何响应:${String(err)}` };
+  }
+  console.log(`[x-capture-monitor] CDP 就绪 ${attachNote}`);
 
   // 每 1.5s 扫一次 DOM,累计「滚过的」并推送快照
   state.domTimer = setInterval(() => {
     if (wc.isDestroyed()) { stopCaptureMonitor(); return; }
     wc.executeJavaScript(SCAN_DOM_IDS)
-      .then((r: { ids: string[]; scrollY: number; docH: number; url: string }) => {
-        for (const id of r.ids ?? []) seenInDom.add(id);
+      .then((r: {
+        items: Array<{ id: string; handle: string; text: string; createdAt: string; likes: number }>;
+        scrollY: number; docH: number; url: string;
+      }) => {
+        for (const it of r.items ?? []) {
+          seenInDom.add(it.id);
+          // DOM 兜底:载荷没覆盖到的,用屏幕上的内容补 —— 但**不覆盖**已有的,
+          // 因为载荷字段更全(会话根/自身互动状态/长推全文)
+          if (!captured.has(it.id)) {
+            captured.set(it.id, {
+              tweetId: it.id,
+              authorHandle: it.handle.replace(/^@/, '') || undefined,
+              text: it.text,
+              createdAt: it.createdAt || undefined,
+              isLongText: false,
+              metrics: { likes: it.likes },
+              self: {},
+              fromDom: true,
+            });
+          }
+        }
         broadcast(snapshot({ url: r.url, scrollY: r.scrollY }));
       })
       .catch(() => { /* 页面切换中,下轮再来 */ });

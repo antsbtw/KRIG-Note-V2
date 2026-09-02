@@ -67,7 +67,7 @@ interface XCaptureSnapshot {
   elapsedSec: number;
   currentUrl?: string;
   scrollY?: number;
-  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number }>;
+  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
 }
 
 declare global {
