@@ -127,6 +127,78 @@ export async function saveReplyRelations(relations: ReplyRelation[]): Promise<nu
   return updated;
 }
 
+/** 我自己发的一条回复(采自 X 载荷,字段比 DOM 抓取全) */
+export interface OwnReply {
+  tweetId: string;
+  text: string;
+  authorHandle: string;
+  createdAt?: string;
+  lang?: string;
+  inReplyToStatusId: string;
+  inReplyToScreenName?: string;
+  conversationId?: string;
+  /** 这条回复自己收到的互动 —— 促转发/评估话术效果要用 */
+  metrics?: { likes?: number; retweets?: number; replies?: number; quotes?: number; bookmarks?: number };
+}
+
+/**
+ * 把**我自己发的回复**入库。
+ *
+ * 为什么要存(用户 2026-09-02 同意):
+ *  1. `conversation_id` 的 n 层关系分析需要足够样本 —— 只存被回复方,
+ *     会话链是断的(实测:84 条关系里只有 6 条的「我的回复」在库中)
+ *  2. 「我回复了什么内容」可查 —— 话术效果复盘的前提
+ *  3. 促转发时要知道**哪条回复带来了互动** —— metrics 就在载荷里,顺手存
+ *
+ * ⚠️ `source = 'self_reply'`,与搜索采集的 'search' 区分:
+ *    收件箱查询按 is_self 排除自己的推(B 期已实现),不会污染待处理列表。
+ * ⚠️ `expires_at = NONE` 永久保留 —— 自己的发言是画像素材,丢了不可再生。
+ * ⚠️ status 置 'replied':它不是待判线索,不该进 AI 判断队列。
+ */
+export async function saveOwnReplies(replies: OwnReply[]): Promise<{ inserted: number; skipped: number }> {
+  const db = getXDB();
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const r of replies) {
+    if (!r.tweetId || !r.inReplyToStatusId) { skipped++; continue; }
+    // INSERT IGNORE:重复采集不报错也不覆盖(与 upsertTweet 同语义)
+    const res = await db.query<[unknown[]]>(
+      `INSERT IGNORE INTO x_tweet {
+        tweet_id: $tweet_id,
+        text: $text,
+        author_handle: $author_handle,
+        created_at: $created_at,
+        fetched_at: time::now(),
+        lang: $lang,
+        in_reply_to: $parent,
+        in_reply_to_user: $handle,
+        conversation_id: $conv,
+        metrics: $metrics,
+        source: 'self_reply',
+        status: 'replied',
+        replied: false,
+        expires_at: NONE,
+        filter_score: 0,
+        backfilled: false
+      }`,
+      {
+        tweet_id: r.tweetId,
+        text: r.text ?? '',
+        author_handle: r.authorHandle,
+        created_at: r.createdAt ? new Date(r.createdAt) : undefined,
+        lang: r.lang || undefined,
+        parent: r.inReplyToStatusId,
+        handle: r.inReplyToScreenName ? normalizeHandle(r.inReplyToScreenName) : undefined,
+        conv: r.conversationId || undefined,
+        metrics: r.metrics ?? {},
+      },
+    );
+    if ((res[0] ?? []).length > 0) inserted++; else skipped++;
+  }
+  return { inserted, skipped };
+}
+
 /**
  * 统计:我回复过的已采纳线索有多少条(业务主线的核心指标)。
  * 「找到需要买 VPN 的人 → 回复他们」—— 这个数就是主线的产出量。

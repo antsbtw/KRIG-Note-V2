@@ -18,36 +18,92 @@ import { join } from 'node:path';
 import { app } from 'electron';
 import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
-import { backfillRepliedFromRelations, saveReplyRelations, type ReplyRelation }
-  from '../db/x-reply-relation-repo';
+import { backfillRepliedFromRelations, saveReplyRelations, saveOwnReplies,
+  type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
 
-/** 递归找出响应里所有带回复字段的 legacy 对象 */
-function extractRelations(node: unknown, out: ReplyRelation[]): void {
+/** 取字符串字段(载荷里缺字段是常态,不能假设存在) */
+function str(o: Record<string, unknown>, k: string): string | undefined {
+  const v = o[k];
+  return typeof v === 'string' && v ? v : undefined;
+}
+function num(o: Record<string, unknown>, k: string): number | undefined {
+  const v = o[k];
+  return typeof v === 'number' ? v : undefined;
+}
+
+/**
+ * 递归找出响应里所有带回复字段的 legacy 对象。
+ *
+ * 同时产出两样东西 —— 它们服务不同目的,别合并:
+ *  - relations:轻量关系,用于**标记被回复的线索**为「我回复过了」
+ *  - ownReplies:我自己发的回复全量字段,用于**入库**(会话链/话术复盘/促转发)
+ *
+ * ⚠️ 长推 full_text 会被截断,真全文在 note_tweet(能力勘查 §4.6)。
+ */
+function extractRelations(
+  node: unknown,
+  out: ReplyRelation[],
+  own: OwnReply[],
+  selfHandle: string,
+): void {
   if (node === null || typeof node !== 'object') return;
 
   if (Array.isArray(node)) {
-    for (const item of node) extractRelations(item, out);
+    for (const item of node) extractRelations(item, out, own, selfHandle);
     return;
   }
 
   const obj = node as Record<string, unknown>;
   const legacy = obj.legacy as Record<string, unknown> | undefined;
   if (legacy && typeof legacy === 'object') {
-    const parent = legacy.in_reply_to_status_id_str;
-    const self = legacy.id_str;
-    if (typeof parent === 'string' && parent && typeof self === 'string' && self) {
+    const parent = str(legacy, 'in_reply_to_status_id_str');
+    const self = str(legacy, 'id_str');
+    if (parent && self) {
+      const replyTo = str(legacy, 'in_reply_to_screen_name');
+      const conv = str(legacy, 'conversation_id_str');
       out.push({
         tweetId: self,
         inReplyToStatusId: parent,
-        inReplyToScreenName: typeof legacy.in_reply_to_screen_name === 'string'
-          ? normalizeHandle(legacy.in_reply_to_screen_name) : undefined,
-        conversationId: typeof legacy.conversation_id_str === 'string'
-          ? legacy.conversation_id_str : undefined,
+        inReplyToScreenName: replyTo ? normalizeHandle(replyTo) : undefined,
+        conversationId: conv,
       });
+
+      // 作者是不是我 —— 载荷里作者在 core.user_results,回落到 screen_name 字段
+      const core = obj.core as Record<string, unknown> | undefined;
+      const ur = core?.user_results as Record<string, unknown> | undefined;
+      const urr = ur?.result as Record<string, unknown> | undefined;
+      const ucore = urr?.core as Record<string, unknown> | undefined;
+      const authorHandle = ucore ? str(ucore, 'screen_name') : undefined;
+
+      if (authorHandle && normalizeHandle(authorHandle) === selfHandle) {
+        // 长推优先取 note_tweet 全文(full_text 会被截断)
+        const note = obj.note_tweet as Record<string, unknown> | undefined;
+        const nres = (note?.note_tweet_results as Record<string, unknown> | undefined)
+          ?.result as Record<string, unknown> | undefined;
+        const fullText = (nres && str(nres, 'text')) ?? str(legacy, 'full_text') ?? '';
+
+        own.push({
+          tweetId: self,
+          text: fullText,
+          authorHandle: normalizeHandle(authorHandle),
+          createdAt: str(legacy, 'created_at'),
+          lang: str(legacy, 'lang'),
+          inReplyToStatusId: parent,
+          inReplyToScreenName: replyTo ? normalizeHandle(replyTo) : undefined,
+          conversationId: conv,
+          metrics: {
+            likes: num(legacy, 'favorite_count'),
+            retweets: num(legacy, 'retweet_count'),
+            replies: num(legacy, 'reply_count'),
+            quotes: num(legacy, 'quote_count'),
+            bookmarks: num(legacy, 'bookmark_count'),
+          },
+        });
+      }
     }
   }
 
-  for (const v of Object.values(obj)) extractRelations(v, out);
+  for (const v of Object.values(obj)) extractRelations(v, out, own, selfHandle);
 }
 
 export interface ReplyCollectResult {
@@ -57,6 +113,10 @@ export interface ReplyCollectResult {
   payloads: number;
   /** 解出的回复关系条数(去重后) */
   relations: number;
+  /** 其中我自己发的回复条数 */
+  ownReplies: number;
+  /** 自己的回复入库结果 */
+  ownSaved: { inserted: number; skipped: number };
   /** 写到「我的回复」那些推上的条数 */
   savedOnReplies: number;
   /** 回填战果 */
@@ -95,6 +155,7 @@ export async function collectReplyRelations(
   catch (err) { console.warn('[x-reply-collector] attach 失败(可能已 attach):', err); }
 
   const relMap = new Map<string, ReplyRelation>();
+  const ownMap = new Map<string, OwnReply>();
   const times: string[] = [];
   const pending = new Map<string, string>();
   let payloads = 0;
@@ -116,8 +177,10 @@ export async function collectReplyRelations(
           try {
             const parsed = JSON.parse(r.body);
             const found: ReplyRelation[] = [];
-            extractRelations(parsed, found);
+            const foundOwn: OwnReply[] = [];
+            extractRelations(parsed, found, foundOwn, h);
             for (const rel of found) relMap.set(rel.tweetId, rel);
+            for (const o of foundOwn) ownMap.set(o.tweetId, o);
             // 记录时间戳以计算覆盖深度
             const collectTimes = (n: unknown): void => {
               if (n === null || typeof n !== 'object') return;
@@ -157,8 +220,10 @@ export async function collectReplyRelations(
   if (attached) { try { wc.debugger.detach(); } catch { /* 已 detach */ } }
 
   const relations = [...relMap.values()];
+  const ownReplies = [...ownMap.values()];
   console.log(`[x-reply-collector] @${h}: ${rounds} 轮, ${payloads} 个响应, `
-    + `解出 ${relations.length} 条回复关系, 覆盖 ${oldestDays ?? '?'} 天`);
+    + `解出 ${relations.length} 条回复关系(其中我自己发的 ${ownReplies.length} 条), `
+    + `覆盖 ${oldestDays ?? '?'} 天`);
 
   // 诊断落盘:采集是有成本的,结果留痕便于复核(不必再跑一次)
   let dumpPath: string | undefined;
@@ -166,17 +231,22 @@ export async function collectReplyRelations(
     const dir = join(app.getPath('userData'), 'x-payload-survey');
     mkdirSync(dir, { recursive: true });
     dumpPath = join(dir, `replies-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-    writeFileSync(dumpPath, JSON.stringify({ handle: h, rounds, payloads, oldestDays, relations }, null, 2), 'utf-8');
+    writeFileSync(dumpPath, JSON.stringify(
+      { handle: h, rounds, payloads, oldestDays, relations, ownReplies }, null, 2), 'utf-8');
   } catch (err) {
     console.warn('[x-reply-collector] 诊断落盘失败(不影响主流程):', err);
   }
 
+  // 顺序要紧:先把自己的回复插进去,再补关系 —— 否则新插的行拿不到关系更新
+  const ownSaved = await saveOwnReplies(ownReplies);
   const savedOnReplies = await saveReplyRelations(relations);
   const backfill = await backfillRepliedFromRelations(relations);
 
-  console.log(`[x-reply-collector] 落库: 我的回复 ${savedOnReplies} 条补了关系; `
+  console.log(`[x-reply-collector] 落库: 自己的回复入库 ${ownSaved.inserted} 条`
+    + `(已存在 ${ownSaved.skipped} 条); 补关系 ${savedOnReplies} 条; `
     + `标记 replied ${backfill.markedReplied} 条(其中已采纳 ${backfill.amongAccepted});`
     + `父推不在库 ${backfill.parentNotInDb} 条`);
 
-  return { rounds, payloads, relations: relations.length, savedOnReplies, backfill, oldestDays, dumpPath };
+  return { rounds, payloads, relations: relations.length, ownReplies: ownReplies.length,
+    ownSaved, savedOnReplies, backfill, oldestDays, dumpPath };
 }
