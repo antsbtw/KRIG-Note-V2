@@ -1244,6 +1244,19 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
    * 拦截 GraphQL 取权威字段(in_reply_to_*),不从 DOM 猜。
    * 回填 replied 用的是客观事实,手机/网页上回的一律算数。
    */
+  // 全量回补可能跑 40 分钟 —— 订阅进度,否则界面上是个黑箱
+  useEffect(() => {
+    const off = api()?.onHarvestProgress?.((p) => {
+      const pct = Math.round(p.round * 100 / p.maxRounds);
+      setSpikeOut(`采集中… 轮 ${p.round}/${p.maxRounds}(${pct}%)\n`
+        + `  已抓 ${p.captured} 条 | 响应 ${p.payloads} | scrollY=${p.scrollY}`
+        + `${p.stuck > 0 ? ` | ⏳ 卡住 ${p.stuck} 轮(等懒加载)` : ''}\n`
+        + `  最旧:${p.oldest ?? '?'}\n`
+        + `  ${p.url}`);
+    });
+    return () => { if (off) off(); };
+  }, []);
+
   const handleCollectReplies = async () => {
     const handle = spikeHandle.trim() || selfHandle;
     if (!handle) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }

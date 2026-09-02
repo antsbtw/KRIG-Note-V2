@@ -825,6 +825,7 @@ declare global {
         captureStart(wcId?: number): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
         captureStop(): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
         onCaptureUpdate(cb: (snap: XCaptureSnapshot) => void): () => void;
+        onHarvestProgress(cb: (p: { url: string; round: number; maxRounds: number; captured: number; payloads: number; scrollY: number; stuck: number; oldest?: string }) => void): () => void;
         harvest(url: string, wcId?: number): Promise<{
           success: boolean; error?: string;
           report?: {

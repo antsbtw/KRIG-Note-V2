@@ -1121,6 +1121,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
       return () => ipcRenderer.off(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
     },
+    /** 订阅全量采集进度(长任务不能是黑箱) */
+    onHarvestProgress: (cb: (p: unknown) => void) => {
+      const h = (_e: unknown, p: unknown): void => cb(p);
+      ipcRenderer.on(IPC_CHANNELS.X_HARVEST_PROGRESS, h);
+      return () => ipcRenderer.off(IPC_CHANNELS.X_HARVEST_PROGRESS, h);
+    },
     /** 通用时间线采集(滚到底 + 自校验);只读不落库 */
     harvest: (url: string, wcId?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST, { url, wcId }),

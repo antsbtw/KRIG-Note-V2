@@ -341,6 +341,7 @@ export const IPC_CHANNELS = {
   X_CAPTURE_START:   'x:capture-start',  // renderer → main invoke：开始被动监视采集
   X_CAPTURE_STOP:    'x:capture-stop',   // renderer → main invoke：停止监视并取最终统计
   X_CAPTURE_UPDATE:  'x:capture-update', // main → renderer 广播：实时采集快照
+  X_HARVEST_PROGRESS:'x:harvest-progress',// main → renderer 广播：全量采集进度（长任务不能是黑箱）
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

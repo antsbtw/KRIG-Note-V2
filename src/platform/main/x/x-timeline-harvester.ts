@@ -32,6 +32,8 @@
  *  C. 时间连续性 —— 抓到的日期有没有大洞(洞 = 漏采信号)
  */
 
+import { webContents as allWebContents } from 'electron';
+import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
 
 /** 一条采集到的原始推文(字段照搬 X 载荷,不做业务解释) */
@@ -181,12 +183,16 @@ function analyseDates(tweets: HarvestedTweet[]): HarvestReport['dateSpan'] {
  *
  * @param url        目标页(个人主页 / with_replies / 搜索结果 / 通知…都行)
  * @param targetWcId X webContents
- * @param maxRounds  安全阀;正常情况靠「真的滚不动」自然结束
+ * @param maxRounds  安全阀;正常情况靠「真的滚不动」自然结束。
+ *   ⚠️ 全量回补一个上千条的账号需要**很多轮** —— 实测每轮平均只产出 1.5 条、
+ *   每 7.6 轮才触发一个 GraphQL 响应(X 越往深加载越慢)。
+ *   1200 轮 ≈ 40 分钟,对应约 1200~1800 条的覆盖能力。
+ *   设小了会**静默截断**(此前 300 轮就是这么把 2-7 月整段丢掉的)。
  */
 export async function harvestTimeline(
   url: string,
   targetWcId?: number,
-  maxRounds = 300,
+  maxRounds = 1200,
 ): Promise<HarvestReport | { error: string }> {
   const resolved = resolveXWebContents(targetWcId);
   if ('error' in resolved) return { error: resolved.error };
@@ -270,9 +276,36 @@ export async function harvestTimeline(
       cumulative: tweets.size, newThisRound: tweets.size - before, stuck,
     });
 
+    // 全量回补可能跑 40 分钟 —— 没有进度反馈的长任务等于黑箱,
+    // 用户无从判断「还在跑」与「卡死了」。每 5 轮播报一次。
+    if (i % 5 === 0 || stuck > 0) {
+      const times = [...tweets.values()].map((t) => t.createdAt).filter(Boolean) as string[];
+      const oldest = times.length
+        ? times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b)) : undefined;
+      const progress = {
+        url, round: i, maxRounds, captured: tweets.size,
+        payloads, scrollY: y, stuck,
+        oldest: oldest ? oldest.slice(0, 24) : undefined,
+      };
+      for (const w of allWebContents.getAllWebContents()) {
+        if (w.isDestroyed()) continue;
+        try { w.send(IPC_CHANNELS.X_HARVEST_PROGRESS, progress); } catch { /* 已销毁 */ }
+      }
+      if (i % 25 === 0) {
+        console.log(`[harvest] 轮${i}/${maxRounds} y=${y} 累计=${tweets.size} `
+          + `响应=${payloads} 最旧=${oldest ?? '?'}`);
+      }
+    }
+
     // **只有真的滚不动才算到底**(连续 3 轮位置没变)。
     // 「没有新数据」不作数 —— 时间线里夹着别人的推很正常。
-    if (stuck >= 3) { stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${y} 未变)`; break; }
+    // ⚠️ 深处加载明显变慢(X 的懒加载在几百轮后经常要等好几秒),
+    //    3 轮不变就判定到底会**提前截断**。放宽到 8 轮,并在中途多等一会儿,
+    //    给懒加载留出补货时间 —— 宁可多花几十秒,不可漏掉整段历史。
+    if (stuck > 0 && stuck % 3 === 0) {
+      await new Promise((r) => setTimeout(r, 3000));   // 卡住时额外等待,催一催懒加载
+    }
+    if (stuck >= 8) { stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${y} 未变)`; break; }
   }
 
   wc.debugger.off('message', onMessage);
