@@ -810,7 +810,7 @@ declare global {
             totalItems: number; selfItems: number; replyItems: number; threadLineItems: number; socialItems: number;
             rounds: Array<{ round: number; domCount: number; cumulative: number; newIds: number; oldest: string | null; spanDays: number | null }>;
             adjacency: { checked: number; precededByOther: number; precededBySelf: number; atTop: number };
-            samples: Array<{ idx: number; tweetId: string | null; handle: string; isSelf: boolean; createdAt: string | null; replyingTo: string | null; hasThreadLine: boolean; ariaReply: string | null; social: string | null; text: string }>;
+            samples: Array<{ idx: number; tweetId: string | null; handle: string; isSelf: boolean; createdAt: string | null; replyingTo: string | null; relSignals: { articleAttrs?: Record<string, string>; ancestorAttrs?: Array<Record<string, string>>; statusLinks?: string[]; err?: string }; ariaReply: string | null; social: string | null; text: string }>;
           };
         }>;
         listBlocked(): Promise<{

@@ -1158,10 +1158,17 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
               + `漏 ${x.selfItems - x.threadLineItems} 条。/with_replies 上本人每条都是回复,`
               + `连接线是有损代理,不能拿来筛候选`
             : '→ 连接线与本人条数一致'}\n`
-      + `\n④ 样本(看 tweetId 能否拿到)\n`
-      + x.samples.slice(0, 6).map((sp) =>
-          `  ${sp.isSelf ? '我' : '他'} ${sp.tweetId ?? 'no-id'} 线=${sp.hasThreadLine ? 'Y' : 'N'} ${sp.text.slice(0, 24)}`,
-        ).join('\n')
+      + `\n④ X 自己声明的关系载体(原样 dump,不做解读)\n`
+      + x.samples.filter((sp) => sp.isSelf).slice(0, 4).map((sp) => {
+          const rs = sp.relSignals ?? {};
+          const links = (rs.statusLinks ?? []).join(' , ') || '(无)';
+          const attrs = JSON.stringify(rs.articleAttrs ?? {});
+          const anc = JSON.stringify(rs.ancestorAttrs ?? []);
+          return `  ── ${sp.tweetId ?? 'no-id'} ${sp.text.slice(0, 20)}\n`
+            + `     status链接: ${links}\n`
+            + `     article属性: ${attrs.slice(0, 160)}\n`
+            + `     祖先属性: ${anc.slice(0, 200)}`;
+        }).join('\n')
       + `\n\n⑤ 回复关系(开详情页解 —— 这才是「回复了谁」的真源)\n`
       + (x.relationProbe.length === 0
           ? '  没有候选(需先有本人带连接线的推)'

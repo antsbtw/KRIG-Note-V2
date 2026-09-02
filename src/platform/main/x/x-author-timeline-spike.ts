@@ -78,20 +78,51 @@ const SCAN_JS = `(function (selfHandle) {
       if (m) replyingTo = m[1];
     } catch (e) {}
 
-    // 判据 B:连接线 —— X 在「上接一条推」时于头像列渲染竖线。
-    // 通过 article 内是否存在贯穿的细长竖条元素判断(不猜类名,量几何)。
-    var hasThreadLine = false;
+    // 判据 B:**读 X 自己声明的关系**,不再量像素几何。
+    // 用户 2026-09-02 定的原则:「不能离开 X 本身提供的关系来自行分析,
+    // 应该从 DOM 中找到 X 渲染时提供的关联方式」。
+    // 量连接线尺寸(宽≤4px)是在页面外面猜 —— 有损、会漂、错了不报错,
+    // 实测漏了 3 条(本人 109 / 判出 106)。
+    //
+    // X 渲染时必然带着这个关系(否则它自己也画不出线、跳不对链接),
+    // 这里把候选载体**原样 dump**,由实机结果指认哪个是真源:
+    //   · article 自身的 aria-* / data-* 属性
+    //   · 祖先容器(cellInnerDiv 层)的属性
+    //   · article 内所有 /status/ 链接 —— 父推链接通常就在其中
+    var relSignals = {};
     try {
-      var av = a.querySelector('[data-testid="Tweet-User-Avatar"]');
-      if (av) {
-        var col = av.parentElement;
-        var kids = col ? col.querySelectorAll('div') : [];
-        for (var k = 0; k < kids.length; k++) {
-          var r = kids[k].getBoundingClientRect();
-          if (r.width > 0 && r.width <= 4 && r.height >= 12) { hasThreadLine = true; break; }
+      var selfAttrs = {};
+      for (var ai = 0; ai < a.attributes.length; ai++) {
+        var at = a.attributes[ai];
+        if (at.name.indexOf('aria') === 0 || at.name.indexOf('data-') === 0) {
+          selfAttrs[at.name] = String(at.value).slice(0, 80);
         }
       }
-    } catch (e) {}
+      relSignals.articleAttrs = selfAttrs;
+
+      var anc = a.parentElement, hops = 0, ancAttrs = [];
+      while (anc && hops < 4) {
+        var one = {};
+        for (var bi = 0; bi < anc.attributes.length; bi++) {
+          var bt = anc.attributes[bi];
+          if (bt.name.indexOf('aria') === 0 || bt.name === 'data-testid') {
+            one[bt.name] = String(bt.value).slice(0, 60);
+          }
+        }
+        if (Object.keys(one).length) ancAttrs.push(one);
+        anc = anc.parentElement; hops++;
+      }
+      relSignals.ancestorAttrs = ancAttrs;
+
+      var links = a.querySelectorAll('a[href*="/status/"]');
+      var ids = [];
+      for (var li = 0; li < links.length; li++) {
+        var href = links[li].getAttribute('href') || '';
+        var lm = href.match(/\/([A-Za-z0-9_]+)\/status\/(\d+)/);
+        if (lm) ids.push(lm[1] + '/' + lm[2]);
+      }
+      relSignals.statusLinks = ids.slice(0, 6);
+    } catch (e) { relSignals.err = String(e); }
 
     // 判据 C:回复按钮的 aria-label 常含数量与语义,顺带取回以备判读
     var ariaReply = null;
@@ -126,7 +157,7 @@ const SCAN_JS = `(function (selfHandle) {
       createdAt: createdAt,
       url: url,
       replyingTo: replyingTo,
-      hasThreadLine: hasThreadLine,
+      relSignals: relSignals,
       ariaReply: ariaReply,
       social: social,
       text: body
@@ -144,8 +175,14 @@ export interface TimelineScanItem {
   url: string | null;
   /** 判据 A:「Replying to」文本(实测 /with_replies 不渲染,恒 null) */
   replyingTo: string | null;
-  /** 判据 B:头像列的连接线 —— X 用它表示「上接一条推」 */
-  hasThreadLine: boolean;
+  /** 判据 B:X 自己在 DOM 里声明的关系载体(原样 dump,由实机指认真源) */
+  relSignals: {
+    articleAttrs?: Record<string, string>;
+    ancestorAttrs?: Array<Record<string, string>>;
+    /** article 内所有 <handle>/status/<id> 链接 —— 父推通常在其中 */
+    statusLinks?: string[];
+    err?: string;
+  };
   /** 判据 C:回复按钮 aria-label */
   ariaReply: string | null;
   social: string | null;
@@ -365,7 +402,10 @@ export async function probeAuthorTimeline(
     totalItems: all.length,
     selfItems: all.filter((i) => i.isSelf).length,
     replyItems: all.filter((i) => i.replyingTo).length,
-    threadLineItems: all.filter((i) => i.hasThreadLine).length,
+    // 有多少条能从 X 自己的 status 链接里解出「除自己以外的另一条推」
+    threadLineItems: all.filter((i) =>
+      (i.relSignals?.statusLinks ?? []).some((l) => !l.endsWith(`/${i.tweetId}`)),
+    ).length,
     socialItems: all.filter((i) => i.social).length,
     adjacency,
     samples: all.slice(0, 12),
