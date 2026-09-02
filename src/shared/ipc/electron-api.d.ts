@@ -802,6 +802,17 @@ declare global {
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
         /** 采集回复关系并回填 replied(主线第一环) */
+        harvest(url: string, wcId?: number): Promise<{
+          success: boolean; error?: string;
+          report?: {
+            url: string; ok: boolean; problems: string[];
+            rounds: number; payloads: number; tweets: number;
+            dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
+            stopReason: string;
+            sample: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string }>;
+            trace: Array<{ round: number; scrollY: number; docHeight: number; domArticles: number; cumulative: number; newThisRound: number; stuck: number }>;
+          };
+        }>;
         collectReplies(handle: string, wcId?: number): Promise<{
           success: boolean; error?: string;
           result?: {

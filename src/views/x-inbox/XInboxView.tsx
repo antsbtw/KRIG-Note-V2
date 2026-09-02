@@ -1242,6 +1242,43 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
   };
 
   /**
+   * 滚动验证 —— 底座函数 harvestTimeline 的验收入口。
+   * 用户 2026-09-02:「先做好网页自动滚动…包含校验方法。这个函数过关再考虑其他的问题。」
+   * 只读不落库:先证明能把一页推文抓全,再谈接业务。
+   */
+  const handleHarvest = async () => {
+    const h = spikeHandle.trim() || selfHandle;
+    if (!h) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
+    const url = `https://x.com/${normalizeHandle(h)}/with_replies`;
+    setSpiking(true);
+    setSpikeOut(`滚动采集 ${url}\n(滚到底为止,可能数分钟,期间请勿操作 X)...`);
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.harvest(url, wcId);
+      if (!r?.success || !r.report) { setSpikeOut(`失败:${r?.error ?? '未知'}`); return; }
+      const x = r.report;
+      const tr = x.trace.map((t) =>
+        `  轮${String(t.round).padStart(3)} y=${String(t.scrollY).padStart(6)} `
+        + `article=${String(t.domArticles).padStart(3)} 累计=${String(t.cumulative).padStart(4)} `
+        + `新增=${t.newThisRound} 卡=${t.stuck}`).join('\n');
+      setSpikeOut(
+        `${x.ok ? '✅ 校验通过' : '❌ 校验未通过'} — ${x.url}\n`
+        + (x.problems.length ? `\n【问题】\n${x.problems.map((p) => `  ⚠ ${p}`).join('\n')}\n` : '')
+        + `\n抓到 ${x.tweets} 条 | ${x.rounds} 轮 | ${x.payloads} 个响应\n`
+        + `停因:${x.stopReason}\n`
+        + `\n【日期覆盖】${x.dateSpan.oldest ?? '?'} ~ ${x.dateSpan.newest ?? '?'}`
+        + ` 共 ${x.dateSpan.days} 天\n`
+        + (x.dateSpan.gaps.length
+            ? `  空洞:${x.dateSpan.gaps.join(' / ')}\n` : '  无空洞 ✓\n')
+        + `\n【滚动轨迹(首尾各5轮)】\n${tr}`,
+      );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
+  /**
    * 载荷勘查 —— 直接量 X GraphQL 原始响应,搞清底层到底供给哪些元数据。
    * 这是「能做到哪一步」的真实依据,不靠 DOM 推断、不靠我猜。
    */
@@ -1304,6 +1341,9 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
           </Btn>
           <Btn sm primary onClick={() => handleCollectReplies()} disabled={spiking}>
             {spiking ? '采集中...' : '采集回复'}
+          </Btn>
+          <Btn sm onClick={handleHarvest} disabled={spiking}>
+            {spiking ? '采集中...' : '滚动验证'}
           </Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>

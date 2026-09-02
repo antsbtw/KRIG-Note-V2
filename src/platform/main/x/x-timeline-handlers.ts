@@ -24,6 +24,7 @@ import { probeSelfHandle } from './x-self-account';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
 import { surveyXPayloads } from './x-payload-inspector';
 import { collectReplyRelations } from './x-reply-collector';
+import { harvestTimeline } from './x-timeline-harvester';
 import { countRepliedAccepted, getOwnReplyCoverage } from '../db/x-reply-relation-repo';
 import { getAuthorCounts } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG, normalizeHandle } from '@shared/types/x-timeline-types';
@@ -365,6 +366,29 @@ export function registerXTimelineHandlers(): void {
       // 基线 = X 官方的发推总数,采集完整度的分母(用户 2026-09-02 点出)
       const baseline = await getAuthorCounts(p.handle);
       return { success: true, result: r, stats, coverage, baseline };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_HARVEST — 通用时间线采集:把当前页 X 会显示的推文全部拿下 + 自校验
+  // ⚠️ 只读不落库:这是**底座函数**的验证入口,过关后才谈接业务
+  ipcMain.handle(IPC_CHANNELS.X_HARVEST, async (_e, payload: unknown) => {
+    const p = payload as { url?: unknown; wcId?: unknown } | null;
+    if (typeof p?.url !== 'string' || !p.url.trim()) {
+      return { success: false, error: 'invalid payload: url required' };
+    }
+    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const r = await harvestTimeline(p.url, wcId);
+      if ('error' in r) return { success: false, error: r.error };
+      // trace 可能上百条,只回传首尾便于判读;完整 trace 在主进程日志
+      return {
+        success: true,
+        report: { ...r, tweets: r.tweets.length,
+          sample: r.tweets.slice(0, 3),
+          trace: [...r.trace.slice(0, 5), ...r.trace.slice(-5)] },
+      };
     } catch (err) {
       return { success: false, error: String(err) };
     }
