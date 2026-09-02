@@ -212,6 +212,8 @@ export interface ReplyCollectResult {
   backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
   /** 覆盖到的最旧回复距今天数 —— 如实反映抓了多深,不谎称全量 */
   oldestDays: number | null;
+  /** **连续**覆盖天数 —— 真正的进度指标(oldestDays 会被置顶旧推带偏) */
+  contiguousDays: number;
   /** 为什么停 —— 区分「到底了」与「封顶了」,不含糊 */
   stopReason: string;
   /** 诊断落盘路径 */
@@ -330,6 +332,7 @@ export async function collectReplyRelations(
 
   let rounds = 0;
   let oldestDays: number | null = null;
+  let contiguousDays = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
   let noProgress = 0;
   let lastRelCount = 0;
@@ -340,18 +343,38 @@ export async function collectReplyRelations(
       const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
       oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
 
-      if (oldestDays >= targetDays) {
+      // ⚠️ **不能用「见过的最旧一条」当覆盖深度** —— 2026-09-02 实测踩到:
+      //   X 会把置顶/热门的旧推排在前面,一条 3 月的推就让 oldestDays=166,
+      //   瞬间"满足" 30 天目标 → 10 轮就停,而最近 6 天的密集回复根本没抓到
+      //   (库里 08-26~08-30 完全空白,用户按每天 20+ 条一算就发现了)。
+      //   这是又一次「拿有缺陷的测量当证据」:最旧一条 ≠ 连续覆盖。
+      //
+      // 正解:看**连续覆盖**的边界 —— 从今天往回数,哪一天开始出现空档,
+      //   那之前的都不算覆盖到。用抓到的日期集合算连续天数。
+      const daySet = new Set(times.map((t) => new Date(t).toISOString().slice(0, 10)));
+      let contiguous = 0;
+      for (let back = 0; back < 400; back++) {
+        const d = new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
+        if (daySet.has(d)) { contiguous = back + 1; continue; }
+        // 容忍单天空档(那天可能真的没发推),连续两天空才判定断档
+        const prev = new Date(Date.now() - (back + 1) * 86_400_000).toISOString().slice(0, 10);
+        if (!daySet.has(prev)) break;
+      }
+      contiguousDays = contiguous;
+
+      if (contiguous >= targetDays) {
         if (streamIdx < streams.length - 1) {
           streamIdx++;
-          console.log(`[x-reply-collector] ${targetDays} 天已覆盖,切到 ${streams[streamIdx].key} 流`);
+          console.log(`[x-reply-collector] 连续覆盖 ${contiguous} 天,切到 ${streams[streamIdx].key} 流`);
           wc.loadURL(streams[streamIdx].url);
           await new Promise((r) => setTimeout(r, 4000));
           times.length = 0;      // 新流重新计深度
+          contiguousDays = 0;
           noProgress = 0;
           lastRelCount = relMap.size;
           continue;
         }
-        stopReason = `已覆盖目标 ${targetDays} 天(两条流)`;
+        stopReason = `连续覆盖 ${contiguous} 天(两条流)`;
         break;
       }
     }
@@ -454,5 +477,5 @@ export async function collectReplyRelations(
     + `父推不在库 ${backfill.parentNotInDb} 条`);
 
   return { rounds, payloads, relations: relations.length, ownReplies: ownReplies.length,
-    ownSaved, savedOnReplies, backfill, oldestDays, stopReason, dumpPath };
+    ownSaved, savedOnReplies, backfill, oldestDays, contiguousDays, stopReason, dumpPath };
 }

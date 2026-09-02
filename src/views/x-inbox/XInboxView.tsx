@@ -1212,7 +1212,9 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       setSpikeOut(
         `回复关系采集完成 —— @${normalizeHandle(handle)}\n`
         + `\n滚了 ${x.rounds} 轮,捕获 ${x.payloads} 个响应\n`
-        + `本次覆盖最近 ${x.oldestDays ?? '?'} 天(停因:${x.stopReason})\n`
+        + `本次连续覆盖 ${x.contiguousDays} 天(最旧一条 ${x.oldestDays ?? '?'} 天前 —— `
+        + `X 会把置顶/热门旧推排前面,故最旧 ≠ 连续覆盖)\n`
+        + `停因:${x.stopReason}\n`
         + `解出回复关系 ${x.relations} 条,其中我自己发的 ${x.ownReplies} 条\n`
         + `\n【落库】\n`
         + `  自己的回复入库:${x.ownSaved.inserted} 条(已存在 ${x.ownSaved.skipped} 条)\n`
@@ -1227,8 +1229,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
             ? `\n【采集完整度】库存 ${r.coverage.count} / 基线 ${r.baseline.tweetCount} 条`
               + ` = ${Math.round(r.coverage.count * 1000 / r.baseline.tweetCount) / 10}%\n`
               + `  原创 ${r.coverage.posts} + 回复 ${r.coverage.replies}(AI 学说话方式两者都要)\n`
-              + `  覆盖最近 ${r.coverage.spanDays ?? '?'} 天(${(r.coverage.oldest ?? '').slice(0, 10)} 起)`
-              + ` —— 有游标续传,多跑几次会一次比一次深\n`
+              + `  最旧 ${(r.coverage.oldest ?? '').slice(0, 10)} —— 有游标续传,多跑几次会一次比一次深\n`
             : r.coverage
             ? `\n【库存回复】${r.coverage.count} 条,覆盖最近 ${r.coverage.spanDays ?? '?'} 天\n`
             : '')
