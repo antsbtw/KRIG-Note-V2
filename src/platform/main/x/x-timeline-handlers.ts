@@ -19,7 +19,8 @@ import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
-import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet } from '../db/x-author-repo';
+import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
+import { probeSelfHandle } from './x-self-account';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -96,7 +97,7 @@ export function registerXTimelineHandlers(): void {
 
   // X_INBOX_QUERY — 查询 tweet_inbox（Review Queue 用）
   ipcMain.handle(IPC_CHANNELS.X_INBOX_QUERY, async (_e, payload: unknown) => {
-    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; humanReviewed?: unknown; orderBy?: unknown; limit?: unknown; offset?: unknown } | null;
+    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; humanReviewed?: unknown; orderBy?: unknown; limit?: unknown; offset?: unknown; excludeHidden?: unknown } | null;
     try {
       const records = await queryInbox({
         status: typeof p?.status === 'string' ? (p.status as TweetInboxStatus) : undefined,
@@ -109,6 +110,8 @@ export function registerXTimelineHandlers(): void {
         orderBy: p?.orderBy === 'confidence' ? 'confidence' : undefined,
         limit: typeof p?.limit === 'number' ? p.limit : 50,
         offset: typeof p?.offset === 'number' ? p.offset : 0,
+        // 缺省即隐藏屏蔽者/自己的推文;调用方显式传 false 才看得到全量
+        excludeHidden: typeof p?.excludeHidden === 'boolean' ? p.excludeHidden : undefined,
       });
       // datetime/RecordId 等 SDK 类型过 structured clone 会丢原型(renderer 拿到空对象,
       // new Date() 解析成 NaN → 卡片显示"NaNd前");JSON 边界统一压成 ISO 字符串
@@ -270,6 +273,36 @@ export function registerXTimelineHandlers(): void {
       return { success: true, authors };
     } catch (err) {
       return { success: false, error: String(err), authors: [] };
+    }
+  });
+
+  // X_DETECT_SELF — 探测当前登录的 X 账号并标记 is_self
+  // ⚠️ 探测不到就返回失败,**绝不写一个猜的 handle** —— 写错会把别人的推当成
+  // 自己的永久隐藏,现象是"推文莫名消失",极难查。
+  ipcMain.handle(IPC_CHANNELS.X_DETECT_SELF, async (_e, payload: unknown) => {
+    const p = payload as { wcId?: unknown } | null;
+    const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const probe = await probeSelfHandle(wcId);
+      if (!probe.handle) {
+        // 留痕:tried 里有每条策略的命中情况,是 spike 时定位 X DOM 变化的唯一线索
+        console.error('[x-timeline-handlers] detect self failed, tried:', probe.tried);
+        return { success: false, error: `未能识别当前登录账号(${probe.tried.join(' | ')})` };
+      }
+      await setSelfAuthor(probe.handle);
+      console.log(`[x-timeline-handlers] self account = @${probe.handle} (via ${probe.via})`);
+      return { success: true, handle: probe.handle, via: probe.via, tried: probe.tried };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_GET_SELF — 取已标记的「我自己」
+  ipcMain.handle(IPC_CHANNELS.X_GET_SELF, async () => {
+    try {
+      return { success: true, handle: await getSelfHandle() };
+    } catch (err) {
+      return { success: false, error: String(err), handle: null };
     }
   });
 

@@ -332,6 +332,8 @@ export const IPC_CHANNELS = {
   X_BLOCK_AUTHOR:    'x:block-author',    // renderer → main invoke：屏蔽某作者（handle）
   X_UNBLOCK_AUTHOR:  'x:unblock-author',  // renderer → main invoke：解除屏蔽（handle）
   X_LIST_BLOCKED:    'x:list-blocked',    // renderer → main invoke：取屏蔽名单
+  X_DETECT_SELF:     'x:detect-self',     // renderer → main invoke：探测当前登录的 X 账号并标记 is_self
+  X_GET_SELF:        'x:get-self',        // renderer → main invoke：取已标记的「我自己」handle
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

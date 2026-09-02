@@ -780,7 +780,7 @@ declare global {
 
       // ── X 时间线智能筛选 Review Queue（Phase 2）──
       xTimeline: {
-        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
+        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
         runRecipe(recipeId: string, wsId: string, targetWcId: number): Promise<{ success: boolean; fetched?: number; saved?: number; filteredOut?: number; error?: string }>;
         pauseScan(wsId: string): Promise<void>;
         judgeNow(wsId: string): Promise<{ success: boolean; judged?: number; worth?: number; remaining?: number; draining?: boolean; error?: string }>;
@@ -799,6 +799,8 @@ declare global {
         /** 屏蔽某作者：只约束未来采集，已抓的历史推文保留 */
         blockAuthor(handle: string, reason?: string): Promise<{ success: boolean; error?: string }>;
         unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
+        detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
+        getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
         listBlocked(): Promise<{
           success: boolean;
           error?: string;

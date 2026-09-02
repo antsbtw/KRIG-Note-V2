@@ -709,7 +709,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   // ── 屏蔽名单视图 ──────────────────────────────────────────────────
   if (view === 'blocked') {
-    return <BlockedManagerView onBack={() => setView('inbox')} />;
+    return <BlockedManagerView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
 
   // ── 配方管理视图 ──────────────────────────────────────────────────
@@ -957,7 +957,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                     )}
                     {t.tweet_url && <Btn sm primary onClick={() => sendToReply(t)}>送入回复</Btn>}
                     {(() => {
-                      const fb = feedbackMap[t.tweet_id];
+                      // 本次会话点过的优先(乐观更新不被覆盖),否则回落到库里的真实状态。
+                      // feedbackMap 是会话内 state,翻页/重启即清空 —— 只靠它会让
+                      // 库里 accepted=true 的历史条目渲染成"没点过",看不出以前采纳过。
+                      const fb = feedbackMap[t.tweet_id]
+                        ?? (t.accepted === true ? 'accept' as const : undefined);
                       const isAudit = currentView === 'audit';
                       return (
                         <>
@@ -1043,10 +1047,12 @@ interface BlockedAuthorItem {
   blockedReason?: string;
 }
 
-function BlockedManagerView({ onBack }: { onBack: () => void }) {
+function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
   const [authors, setAuthors] = useState<BlockedAuthorItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [selfHandle, setSelfHandle] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1062,7 +1068,33 @@ function BlockedManagerView({ onBack }: { onBack: () => void }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadSelf = useCallback(async () => {
+    const r = await api()?.getSelf();
+    setSelfHandle(r?.handle ?? null);
+  }, []);
+
+  useEffect(() => { load(); loadSelf(); }, [load, loadSelf]);
+
+  /**
+   * 识别当前登录账号 —— 探测不到就如实报错,不写猜测值。
+   * X 的 DOM 会变,失败时把 tried 明细显示出来,便于定位是哪条策略失效。
+   */
+  const handleDetectSelf = async () => {
+    setDetecting(true);
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.detectSelf(wcId);
+      if (!r?.success) {
+        setStatusMsg(`识别失败:${r?.error ?? '未知'}(请确认 X 已登录并在前台)`);
+        return;
+      }
+      setStatusMsg(`已识别:@${r.handle}(via ${r.via})`);
+      await loadSelf();
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   const handleUnblock = async (handle: string) => {
     const r = await api()?.unblockAuthor(handle);
@@ -1081,12 +1113,24 @@ function BlockedManagerView({ onBack }: { onBack: () => void }) {
         <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>不再采集其新推,已抓历史保留</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           {statusMsg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{statusMsg}</span>}
+          <Btn sm onClick={handleDetectSelf} disabled={detecting}>
+            {detecting ? '识别中...' : '识别我的账号'}
+          </Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>
         </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{
+          background: 'var(--bg-card)', borderRadius: 8, padding: '8px 14px',
+          borderLeft: `3px solid ${selfHandle ? '#3b82f6' : 'var(--text-faint)'}`,
+          fontSize: 11, color: 'var(--text-muted)',
+        }}>
+          {selfHandle
+            ? <>我的账号:<strong style={{ color: '#60a5fa' }}>@{selfHandle}</strong> —— 自己发的推不显示在收件箱</>
+            : <>尚未识别本人账号。点右上「识别我的账号」后,自己发的推将不再出现在收件箱。</>}
+        </div>
         {!loading && authors.length === 0 && (
           <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>
             暂无屏蔽的账号。在收件箱推文卡片上点「🚫 屏蔽此人」即可加入。

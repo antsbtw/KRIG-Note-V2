@@ -235,6 +235,8 @@ export async function queryInbox(opts: {
   orderBy?: 'fetched_at' | 'confidence';  // confidence=按 Gemma 置信度升序（漏判抽查视图用）
   limit?: number;
   offset?: number;
+  /** true(默认)=剔除已屏蔽作者/自己的推文。仅影响**显示**,历史数据一行不删。 */
+  excludeHidden?: boolean;
 }): Promise<TweetInboxRecord[]> {
   const db = getXDB();
   const limit = opts.limit ?? 50;
@@ -251,6 +253,22 @@ export async function queryInbox(opts: {
     conditions.push(`ai_verdict != NONE AND string::starts_with(ai_verdict.reason, 'human:')`);
   else if (opts.humanReviewed === false)
     conditions.push(`ai_verdict != NONE AND !string::starts_with(ai_verdict.reason, 'human:')`);
+
+  // 屏蔽者 / 自己发的推:**只从面板隐藏,绝不删数据**。
+  // 「不再爬」约束未来(B 期 accountBlacklist),「不再显示」约束呈现 —— 两件事。
+  // 解除屏蔽后这些行会原样回到列表,是过滤不是删除。
+  //
+  // ⚠️ 跨表比对必须归一化:x_tweet.author_handle 存 '@angeelfv'(带 @、原始大小写),
+  // x_author.handle 存 'angeelfv'(归一化)。直接 IN 比对**恒不命中且不报错** ——
+  // 与 B 期 applyFilter 同源的坑,见 normalizeHandle 的注释。
+  // SQL 侧用 string::lowercase + 去 @,与 normalizeHandle() 同语义。
+  if (opts.excludeHidden !== false) {
+    conditions.push(
+      `string::replace(string::lowercase(author_handle), '@', '') NOT IN `
+      + `(SELECT VALUE handle FROM x_author WHERE blocked = true OR is_self = true)`,
+    );
+  }
+
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const order = opts.orderBy === 'confidence' ? 'ai_verdict.confidence ASC' : 'fetched_at DESC';
 

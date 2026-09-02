@@ -1060,7 +1060,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── X 时间线智能筛选 Review Queue（Phase 2）──
   xTimeline: {
-    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number }) {
+    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean }) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
     },
     runRecipe(recipeId: string, wsId: string, targetWcId: number) {
@@ -1107,5 +1107,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_UNBLOCK_AUTHOR, { handle }),
     listBlocked: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_LIST_BLOCKED),
+    /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
+    detectSelf: (wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId }),
+    getSelf: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
   },
 });

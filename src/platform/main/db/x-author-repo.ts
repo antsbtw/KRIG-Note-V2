@@ -147,6 +147,43 @@ export async function isBlocked(handle: string): Promise<boolean> {
 }
 
 /**
+ * 标记「这是我自己」—— 自己发的推不进收件箱面板。
+ *
+ * **单一自我**:置新的之前先把旧的 is_self 清掉,保证全表至多一行为 true。
+ * 换账号登录时旧标记必须让位,否则两个 handle 都被当成自己、别人的推被误藏。
+ *
+ * ⚠️ 只有实机探测到确切 handle 才允许调用(见 x-self-account.probeSelfHandle);
+ * 绝不拿猜测值写库 —— 写错会把无辜作者的推文永久藏起来,且现象是"推文莫名消失"。
+ */
+export async function setSelfAuthor(handle: string): Promise<void> {
+  const h = normalizeHandle(handle);
+  if (!h) throw new Error('[x-author-repo] setSelfAuthor: empty handle after normalize');
+
+  const db = getXDB();
+  // 先清旧的:至多一行 is_self = true
+  await db.query(`UPDATE x_author SET is_self = false WHERE is_self = true AND handle != $handle`,
+    { handle: h });
+
+  const existing = await db.query<[AuthorRow[]]>(
+    `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
+  );
+  if ((existing[0] ?? []).length > 0) {
+    await db.query(`UPDATE x_author SET is_self = true WHERE handle = $handle`, { handle: h });
+  } else {
+    await db.query(`CREATE x_author SET handle = $handle, is_self = true`, { handle: h });
+  }
+}
+
+/** 取当前标记为「我自己」的 handle(归一化形态);未标记则 null */
+export async function getSelfHandle(): Promise<string | null> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ handle: string }>]>(
+    `SELECT handle FROM x_author WHERE is_self = true LIMIT 1`,
+  );
+  return res[0]?.[0]?.handle ?? null;
+}
+
+/**
  * 取屏蔽 handle 列表,喂给 TimelineFilterConfig.accountBlacklist。
  *
  * 返回值是**已归一化**形态 —— 与 applyFilter 里的 normalizeHandle(tweet.authorHandle)
