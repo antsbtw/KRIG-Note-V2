@@ -331,6 +331,8 @@ export async function collectReplyRelations(
   let stopReason = `达到轮次上限 ${maxRounds}`;
   let noProgress = 0;
   let lastRelCount = 0;
+  let lastScrollY = -1;
+  let stuckRounds = 0;
 
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
@@ -356,16 +358,48 @@ export async function collectReplyRelations(
     //
     // 自然的含义:一屏以内的位移 + 随机化 + 随机停顿(人不会匀速滚)。
     // 慢不是代价 —— 增量锚点保证不重复,深度靠多次累积而非单次冲刺。
+    // ⚠️ 两个曾让采集静默失效的坑(2026-09-02 实测暴露:
+    //    用户按官网点击数据核对 —— 10 天 433 条回复,我们只有 81 条 = 19%):
+    //  ① `behavior:'smooth'` 是**异步**的:调用立刻返回,滚动还没发生,
+    //     所以我读到的 scrollY/docH 全是**滚动前**的状态 —— 等于没测。
+    //  ② 我从不检查 scrollY 到底动没动。X 的虚拟列表下 window 常常纹丝不动,
+    //     而循环只会傻等 8 轮然后宣布「到底了」。
+    // 修法:同步滚动 + 滚动后回读位置,**确认真的动了**;没动就换容器再推。
     const step = 0.55 + Math.random() * 0.3;          // 0.55~0.85 屏,不足一屏
-    const moved = await wc.executeJavaScript(`(function () {
-      var before = window.scrollY;
-      window.scrollBy({ top: window.innerHeight * ${step.toFixed(3)}, behavior: 'smooth' });
-      return { before: before, docH: Math.max(
-        document.body.scrollHeight, document.documentElement.scrollHeight) };
-    })()`).catch(() => null) as { before: number; docH: number } | null;
+    await wc.executeJavaScript(`(function () {
+      var y = window.scrollY;
+      window.scrollBy(0, window.innerHeight * ${step.toFixed(3)});   // 同步,不用 smooth
+      if (window.scrollY === y) {
+        // window 没动 → 找真正可滚的容器(X 有时把滚动放在内层)
+        var all = document.querySelectorAll('div');
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.scrollHeight > el.clientHeight + 400) {
+            el.scrollTop = el.scrollTop + el.clientHeight * ${step.toFixed(3)};
+            break;
+          }
+        }
+      }
+    })()`).catch(() => {});
 
     // 随机停顿 1.8~3.4s:匀速请求是风控最容易识别的特征之一
     await new Promise((r) => setTimeout(r, 1800 + Math.random() * 1600));
+
+    // 滚动**之后**回读,这才是真实位置
+    const moved = await wc.executeJavaScript(`(function () {
+      return { y: window.scrollY, docH: Math.max(
+        document.body.scrollHeight, document.documentElement.scrollHeight),
+        arts: document.querySelectorAll('article[data-testid="tweet"]').length };
+    })()`).catch(() => null) as { y: number; docH: number; arts: number } | null;
+
+    // 位置没变 = 滚不动了(与「滚动了但没新数据」是两回事,必须分开报,
+    // 否则又是拿一个含混的判据当证据)
+    if (moved && lastScrollY === moved.y) stuckRounds++; else stuckRounds = 0;
+    if (moved) lastScrollY = moved.y;
+    if (i % 10 === 0 || stuckRounds > 0) {
+      console.log(`[x-reply-collector] 轮${i} y=${moved?.y ?? '?'} docH=${moved?.docH ?? '?'} `
+        + `article=${moved?.arts ?? '?'} 累计关系=${relMap.size} 卡住=${stuckRounds}`);
+    }
 
     // 进度以**新解出的关系**为准,不以滚动位移为准:
     // 位移了但没新数据 = 到底了或懒加载封顶,两者都该停
@@ -373,10 +407,15 @@ export async function collectReplyRelations(
       noProgress++;
       // 容忍度留足:滚过已知区域时本来就没有新数据,
       // 太急会把"正在穿过已知区"误判成"到底了"(拿有缺陷的测量当证据)
-      // **滚不动 = 这条流抓完了**(用户定的判据,简单且不会被置顶旧推骗)
-      const limit = 8;
+      // 「滚不动」与「滚动了但没新数据」是两回事:
+      //   · 真滚不动(scrollY 不变)= 到底了 → 该切流
+      //   · 滚动了但没新数据 = 可能只是这一段没有我的推(时间线里夹着别人的),
+      //     应该**继续滚**,不能急着判定结束 —— 这正是漏掉 80% 数据的原因之一。
+      // 故:没卡住时把容忍度放得很宽,真卡住(连续 3 轮 scrollY 不变)才算到底。
+      const limit = stuckRounds >= 3 ? 1 : 40;
       if (noProgress >= limit) {
-        console.log(`[x-reply-collector] ${streams[streamIdx].key} 流滚不动了,`
+        console.log(`[x-reply-collector] ${streams[streamIdx].key} 流结束`
+          + `(卡住 ${stuckRounds} 轮 / 无新数据 ${noProgress} 轮),`
           + `累计 ${relMap.size} 条关系 / ${ownMap.size} 条本人推`);
         if (streamIdx < streams.length - 1) {
           streamIdx++;
@@ -384,10 +423,14 @@ export async function collectReplyRelations(
           wc.loadURL(streams[streamIdx].url);
           await new Promise((r) => setTimeout(r, 4000));
           noProgress = 0;
+          stuckRounds = 0;
+          lastScrollY = -1;
           lastRelCount = relMap.size;
           continue;
         }
-        stopReason = `两条流都滚不动了 —— 抓完(最旧 ${oldestDays ?? '?'} 天前)`;
+        stopReason = stuckRounds >= 3
+          ? `两条流都滚到底(最旧 ${oldestDays ?? '?'} 天前)`
+          : `连续 ${noProgress} 轮无新数据(最旧 ${oldestDays ?? '?'} 天前)`;
         break;
       }
     } else {
