@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -22,6 +22,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.0.0',
     description: 'X database initial schema (data isolation phase 0)',
     up: x_migration_1_0_0,
+  },
+  {
+    version: '1.0.1',
+    description: 'Reply relationship authoritative fields (in_reply_to_user / conversation_id)',
+    up: x_migration_1_0_1,
   },
 ];
 

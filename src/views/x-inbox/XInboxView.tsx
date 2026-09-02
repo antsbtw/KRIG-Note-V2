@@ -977,9 +977,16 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                             style={fb === 'reject' ? { background: '#7f1d1d', borderColor: '#7f1d1d', color: '#fca5a5' } : {}}>
                             {fb === 'reject' ? '✗ 已拒绝' : isAudit ? '✗ 确实不值' : '✗ 不采纳'}
                           </Btn>
-                          {currentView === 'confirmed' && (
+                          {/* 已回复:优先按库里的客观事实显示(采集自 X 的权威回复字段);
+                              t.replied 为真 = 确实回复过(手机/网页上回的都算),按钮变绿不可再点。
+                              否则保留手动标记入口。 */}
+                          {t.replied === true ? (
+                            <Btn sm style={{ background: '#16a34a', borderColor: '#16a34a', color: '#fff' }}>
+                              ↩ 已回复
+                            </Btn>
+                          ) : currentView === 'confirmed' ? (
                             <Btn sm onClick={() => handleMarkReplied(t)}>↩ 已回复</Btn>
-                          )}
+                          ) : null}
                           {t.author_handle && (
                             <Btn sm onClick={() => handleBlockAuthor(t)}
                               style={{ marginLeft: 'auto', color: '#fca5a5' }}>
@@ -1182,6 +1189,48 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
   };
 
   /**
+   * 采集回复关系 —— 主线第一环:「我回复了谁的哪条推」。
+   * 拦截 GraphQL 取权威字段(in_reply_to_*),不从 DOM 猜。
+   * 回填 replied 用的是客观事实,手机/网页上回的一律算数。
+   */
+  const handleCollectReplies = async () => {
+    const handle = spikeHandle.trim() || selfHandle;
+    if (!handle) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
+    setSpiking(true);
+    setSpikeOut(`采集 @${normalizeHandle(handle)} 的回复关系中(期间请勿操作 X)...`);
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.collectReplies(handle, wcId, 7);
+      if (!r?.success || !r.result) {
+        setSpikeOut(`采集失败:${r?.error ?? '未知'}`);
+        return;
+      }
+      const x = r.result;
+      const b = x.backfill;
+      setSpikeOut(
+        `回复关系采集完成 —— @${normalizeHandle(handle)}\n`
+        + `\n滚了 ${x.rounds} 轮,捕获 ${x.payloads} 个响应\n`
+        + `解出回复关系 ${x.relations} 条,覆盖最近 ${x.oldestDays ?? '?'} 天\n`
+        + `${x.oldestDays !== null && x.oldestDays < 7
+            ? '  ⚠ 未达 7 天目标 —— X 懒加载限制,这是实际抓到的深度,非全量\n' : ''}`
+        + `\n【落库】\n`
+        + `  我的回复补上关系:${x.savedOnReplies} 条\n`
+        + `  标记「已回复」:${b.markedReplied} 条\n`
+        + `  其中是已采纳线索:${b.amongAccepted} 条  ← 主线产出\n`
+        + `  父推不在库里:${b.parentNotInDb} 条(回复过但没采集过的)\n`
+        + (r.stats
+            ? `\n【累计】已采纳 ${r.stats.totalAccepted} 条,其中回复过 ${r.stats.repliedAccepted} 条\n`
+            : '')
+        + (x.dumpPath ? `\n📦 明细:${x.dumpPath}` : '')
+        + `\n\n(返回收件箱后刷新即可看到「已回复」状态)`,
+      );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
+  /**
    * 载荷勘查 —— 直接量 X GraphQL 原始响应,搞清底层到底供给哪些元数据。
    * 这是「能做到哪一步」的真实依据,不靠 DOM 推断、不靠我猜。
    */
@@ -1241,6 +1290,9 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
           </Btn>
           <Btn sm onClick={handleSurvey} disabled={spiking}>
             {spiking ? '勘查中...' : '载荷勘查'}
+          </Btn>
+          <Btn sm primary onClick={handleCollectReplies} disabled={spiking}>
+            {spiking ? '采集中...' : '采集回复关系'}
           </Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>

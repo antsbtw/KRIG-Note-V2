@@ -183,6 +183,42 @@ DEFINE INDEX IF NOT EXISTS idx_fb_verdict  ON tweet_feedback FIELDS verdict;
 DEFINE INDEX IF NOT EXISTS idx_fb_lang     ON tweet_feedback FIELDS lang;
 `;
 
+/**
+ * 1.0.1 —— 回复关系权威字段(2026-09-02)
+ *
+ * 依据:载荷勘查实测(docs/10-business-design/x/data-acquisition-capability-survey.md §2.4)
+ * X 的 GraphQL 响应里 legacy 对象自带完整回复关系:
+ *   in_reply_to_status_id_str / in_reply_to_screen_name /
+ *   in_reply_to_user_id_str / conversation_id_str
+ * 此前从 DOM 猜(连接线像素/idx相邻/正则)的三套判据全部作废。
+ *
+ * ⚠️ 既有 in_reply_to 字段语义修正:原意是"被回复者 handle 或 URL",
+ *    但取自 socialContext(那是「xx 转推了/已置顶」横幅),从未被正确填过
+ *    —— 全库 860 行为 0。现改为存**父推 id**,与 in_reply_to_user 分工。
+ *    不需要数据迁移:本来就没有一行有值。
+ */
+const X_SCHEMA_1_0_1 = `
+-- 被回复者 handle(归一化:无 @、全小写,与 x_author.handle 同形态)
+DEFINE FIELD IF NOT EXISTS in_reply_to_user ON x_tweet TYPE option<string>;
+-- 会话根 id —— n 层关系分析靠它 GROUP BY(方案 §4.1(5):先不建边表)
+DEFINE FIELD IF NOT EXISTS conversation_id  ON x_tweet TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_tweet_in_reply_to   ON x_tweet FIELDS in_reply_to;
+DEFINE INDEX IF NOT EXISTS idx_tweet_conversation  ON x_tweet FIELDS conversation_id;
+`;
+
+export async function x_migration_1_0_1(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_1);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.1',
+      appliedAt = $now,
+      description = 'Reply relationship authoritative fields: in_reply_to_user / conversation_id'`,
+    { rid: new RecordId('schema_version', '1.0.1'), now },
+  );
+}
+
 export async function x_migration_1_0_0(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_0_0);
 

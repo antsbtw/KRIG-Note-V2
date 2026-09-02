@@ -23,6 +23,8 @@ import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAu
 import { probeSelfHandle } from './x-self-account';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
 import { surveyXPayloads } from './x-payload-inspector';
+import { collectReplyRelations } from './x-reply-collector';
+import { countRepliedAccepted } from '../db/x-reply-relation-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -336,6 +338,26 @@ export function registerXTimelineHandlers(): void {
       const r = await surveyXPayloads(wcId, seconds);
       if ('error' in r) return { success: false, error: r.error };
       return { success: true, result: r };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_COLLECT_REPLIES — 采集回复关系(主线第一环:我回复了谁的哪条推)
+  // 拦截 GraphQL 取权威字段,不从 DOM 猜。回填 replied 用的是**客观事实**,
+  // 手机/网页上回的一律算数(此前 replied 只记录「我点没点过按钮」,故全库为 0)
+  ipcMain.handle(IPC_CHANNELS.X_COLLECT_REPLIES, async (_e, payload: unknown) => {
+    const p = payload as { handle?: unknown; wcId?: unknown; targetDays?: unknown } | null;
+    if (typeof p?.handle !== 'string' || !p.handle.trim()) {
+      return { success: false, error: 'invalid payload: handle required' };
+    }
+    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
+    const targetDays = typeof p.targetDays === 'number' ? p.targetDays : undefined;
+    try {
+      const r = await collectReplyRelations(p.handle, wcId, undefined, targetDays);
+      if ('error' in r) return { success: false, error: r.error };
+      const stats = await countRepliedAccepted();
+      return { success: true, result: r, stats };
     } catch (err) {
       return { success: false, error: String(err) };
     }

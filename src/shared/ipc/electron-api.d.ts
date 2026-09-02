@@ -801,6 +801,16 @@ declare global {
         unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
+        /** 采集回复关系并回填 replied(主线第一环) */
+        collectReplies(handle: string, wcId?: number, targetDays?: number): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            rounds: number; payloads: number; relations: number; savedOnReplies: number;
+            oldestDays: number | null; dumpPath?: string;
+            backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
+          };
+          stats?: { repliedAccepted: number; totalAccepted: number };
+        }>;
         /** 勘查 X GraphQL 原始载荷字段;只读不落库 */
         payloadSurvey(wcId?: number, seconds?: number): Promise<{
           success: boolean; error?: string;
