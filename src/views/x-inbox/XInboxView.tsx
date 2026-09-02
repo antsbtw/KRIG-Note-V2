@@ -3,7 +3,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { SearchRecipe, TweetInboxRecord, TweetInboxStatus, FeedbackVerdict } from '@shared/types/x-timeline-types';
-import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
+import { DEFAULT_TASK_ID, normalizeHandle } from '@shared/types/x-timeline-types';
 
 interface XInboxViewProps {
   workspaceId: string;
@@ -611,7 +611,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   };
 
   const sendToReply = async (tweet: TweetInboxRecord) => {
-    const msg = `即将在 X 中打开 @${tweet.author_handle} 的推文准备回复。\n\n${tweet.text?.slice(0, 120)}`;
+    // 同 894 行:库值自带 @,须归一化后再由模板补,否则弹窗显示 @@xxx
+    const msg = `即将在 X 中打开 @${normalizeHandle(tweet.author_handle ?? '')} 的推文准备回复。\n\n${tweet.text?.slice(0, 120)}`;
     if (window.confirm(msg)) {
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
       const r = await api()?.replyToTweet(tweet.tweet_url ?? '', tweet.tweet_id, workspaceId, wcId);
@@ -682,7 +683,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const handleBlockAuthor = async (tweet: TweetInboxRecord) => {
     const handle = tweet.author_handle ?? '';
     if (!handle) return;
-    const shown = handle.replace(/^@+/, '');
+    const shown = normalizeHandle(handle);  // 复用共享函数,不自己写一份去 @ 逻辑
     const ok = window.confirm(
       `屏蔽 @${shown}?\n\n`
       + `· 以后的采集不再收录他的推文\n`
@@ -891,7 +892,10 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                     <span style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: 12 }}>{t.author_name}</span>
-                    <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{t.author_handle}</span>
+                    {/* ⚠️ 库里 author_handle 自带 @('@angeelfv'),模板再加一个会渲染成 @@angeelfv。
+                        统一过 normalizeHandle 后由模板补 @ —— 与屏蔽名单页显示形态一致。
+                        只改显示:库值形态是历史既成事实,改它会牵动去重/统计,不在此处动。 */}
+                    <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{normalizeHandle(t.author_handle ?? '')}</span>
                     {(() => {
                       // 状态徽章:一眼看出这条推文处在三段流的哪一段
                       const isHuman = reason.startsWith('human:');
