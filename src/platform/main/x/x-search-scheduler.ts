@@ -11,6 +11,7 @@ import { listEnabledRecipes, updateLastRunAt } from '../db/search-recipe-repo';
 import { scanRecipe } from './x-timeline-scan';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { cleanExpired, recoverStuckAiJudging } from '../db/tweet-inbox-repo';
+import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
 import { getBlockedHandleSet } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TimelineFilterConfig } from '@shared/types/x-timeline-types';
@@ -168,6 +169,11 @@ export function startScheduler(): void {
       .then((n) => { if (n > 0) console.warn(`[x-search-scheduler] 自愈:${n} 条卡在 ai_judging 已退回 pending`); })
       .catch((err) => console.error('[x-search-scheduler] recoverStuckAiJudging error:', err));
   }, 10 * 60_000);
+
+  // 启动时先对一次账:上次运行期间采到的线索,可能有我早就回过的
+  reconcileRepliedFromOwnReplies().catch((err) => {
+    console.error('[x-search-scheduler] initial reconcile error:', err);
+  });
 
   // TTL 清理：每 24h 一次
   ttlTimer = setInterval(() => {

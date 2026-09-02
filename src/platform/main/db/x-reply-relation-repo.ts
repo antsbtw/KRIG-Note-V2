@@ -255,6 +255,46 @@ export async function getOwnReplyCoverage(): Promise<{
   };
 }
 
+/**
+ * 反向对账:新采到的线索,我是不是**早就回复过了**。
+ *
+ * 用户 2026-09-02 发现:「请检查一下第一条,是否已经回复过了,也爬取过了,
+ * 怎么还会显示呢?」
+ *
+ * 根因是回填只有**单向**:采到我的回复时,去标记它的父推。
+ * 但顺序反过来就漏了 ——
+ *   12:08 采到我的回复(那时父推还不在库里,无从标记)
+ *   23:38 搜索才采到那条父推 → 它带着 replied=false 进了「待判」
+ * 结果:我明明回过的人,又出现在待处理列表里,会被重复回复。
+ *
+ * 所以每次采集写库后都要跑一次本函数:拿新写入的 tweet_id 反查
+ * 「我的回复里有没有指向它的」,有就补标。
+ *
+ * @param tweetIds 本轮新写入的线索 id;不传则全量对账(启动时用)
+ */
+export async function reconcileRepliedFromOwnReplies(
+  tweetIds?: string[],
+): Promise<number> {
+  const db = getXDB();
+  // 只认 self_reply 的 in_reply_to —— 那是「我回复了谁」的权威记录
+  const scope = tweetIds?.length
+    ? `AND tweet_id IN $ids`
+    : '';
+  const res = await db.query<[Array<{ tweet_id: string }>]>(
+    `LET $mine = (SELECT VALUE in_reply_to FROM x_tweet
+       WHERE source = 'self_reply' AND in_reply_to != NONE);
+     UPDATE x_tweet SET replied = true, replied_at = time::now(), expires_at = NONE
+       WHERE tweet_id IN $mine AND replied != true ${scope}
+       RETURN tweet_id`,
+    tweetIds?.length ? { ids: tweetIds } : {},
+  );
+  const n = (res[res.length - 1] as Array<{ tweet_id: string }> | undefined)?.length ?? 0;
+  if (n > 0) {
+    console.log(`[x-reply-relation-repo] 反向对账:${n} 条新线索其实我早就回过了,已补标`);
+  }
+  return n;
+}
+
 /** 采集游标 —— 用 X 自己给的 Bottom cursor 续传 */
 export interface CollectCursor {
   bottomCursor?: string;

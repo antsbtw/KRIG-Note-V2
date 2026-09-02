@@ -10,6 +10,7 @@
 import { webContents } from 'electron';
 import { TWEET_SCRAPE_FN_BODY } from '../tweet-fetcher/extract-script';
 import { upsertTweet, insertFilteredOut, getTweetIdSet } from '../db/tweet-inbox-repo';
+import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
 import { googleTranslateBatch } from './google-translate';
 import type { XTweetData } from './x-extract-tweet';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
@@ -401,8 +402,21 @@ export async function scanRecipe(
     lastScrollY = y;
   }
 
+  // ⭐ 反向对账:本轮新采到的线索里,有些我**早就回复过**了。
+  // 回填此前只有单向(采到我的回复 → 标记它的父推),顺序反过来就漏:
+  // 我 12:08 回的推,那条线索 23:38 才被搜索采到 —— 它带着 replied=false
+  // 进「待判」,于是我明明回过的人又出现在待处理列表里(用户 2026-09-02 发现)。
+  let reconciled = 0;
+  try {
+    reconciled = await reconcileRepliedFromOwnReplies();
+  } catch (err) {
+    // 对账失败不该让整轮采集算失败,但必须留痕 —— 静默会让重复回复悄悄回来
+    console.error('[x-timeline-scan] 反向对账失败(采集本身已完成):', err);
+  }
+
   console.log(
-    `[x-timeline-scan] recipe="${recipe.name}" fetched=${fetched} saved=${saved} filteredOut=${filteredOut}`,
+    `[x-timeline-scan] recipe="${recipe.name}" fetched=${fetched} saved=${saved} `
+    + `filteredOut=${filteredOut} 补标已回复=${reconciled}`,
   );
   return { fetched, saved, filteredOut };
 }
