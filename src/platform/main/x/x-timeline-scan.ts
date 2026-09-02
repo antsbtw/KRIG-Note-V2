@@ -27,6 +27,31 @@ export function abortScan(wsId: string): void {
   scanAbortMap.set(wsId, true);
 }
 
+/**
+ * 从上次运行时间推算搜索起点 —— **叠加 48 小时**。
+ *
+ * 用户 2026-09-02:「搜索完毕,就往下滚动,采用叠加方式,比上一次的最后时间
+ * 多叠加 48 个小时。所有的缓存做比对,就能够获取需要的帖子了。」
+ *
+ * 为什么必须叠加(而不是从 lastRunAt 精确接上):
+ *  · X 的搜索索引有延迟 —— 一条推可能在发布几小时后才进入 since: 的结果
+ *  · 采集本身可能中断/失败,那段窗口就永久丢了
+ *  · since: 只精确到**天**(X 的语法限制),边界本就模糊
+ * 重叠抓回来的靠 tweet_id 去重(seenIds + INSERT IGNORE),成本只是多滚几屏,
+ * 换来的是**不漏**。宁可重复,不可遗漏。
+ *
+ * 没有 lastRunAt(首次运行)→ 回落到 recipe.sinceHours。
+ */
+export function computeSinceDate(recipe: SearchRecipe, overlapHours = 48): Date {
+  if (recipe.lastRunAt) {
+    const last = new Date(recipe.lastRunAt).getTime();
+    if (Number.isFinite(last)) {
+      return new Date(last - overlapHours * 3_600_000);
+    }
+  }
+  return new Date(Date.now() - (recipe.sinceHours ?? 24) * 3_600_000);
+}
+
 /** 按 SearchRecipe 拼装 X 搜索 URL */
 export function buildSearchUrl(recipe: SearchRecipe): string {
   const parts: string[] = [];
@@ -47,9 +72,9 @@ export function buildSearchUrl(recipe: SearchRecipe): string {
   if (recipe.minRetweets) parts.push(`min_retweets:${recipe.minRetweets}`);
   if (recipe.lang) parts.push(`lang:${recipe.lang}`);
 
-  const sinceHours = recipe.sinceHours ?? 24;
-  const sinceDate = new Date(Date.now() - sinceHours * 3_600_000);
-  const sinceStr = sinceDate.toISOString().split('T')[0];
+  // ⚠️ 起点从**上次运行时间往前推 48h**,不是从「现在往前 24h」——
+  // 后者与上次运行毫无关系:app 关两天,那两天的窗口就永久丢了。
+  const sinceStr = computeSinceDate(recipe).toISOString().split('T')[0];
   parts.push(`since:${sinceStr}`);
 
   const q = encodeURIComponent(parts.join(' '));
