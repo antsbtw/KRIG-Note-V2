@@ -1112,6 +1112,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId }),
     getSelf: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
+    /** 勘查 X GraphQL 原始载荷字段(能力边界的真实依据);只读不落库 */
+    payloadSurvey: (wcId?: number, seconds?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_PAYLOAD_SURVEY, { wcId, seconds }),
     /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
     watchlistSpike: (handle: string, wcId?: number, maxRounds?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST_SPIKE, { handle, wcId, maxRounds }),

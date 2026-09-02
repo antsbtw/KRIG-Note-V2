@@ -335,6 +335,7 @@ export const IPC_CHANNELS = {
   X_DETECT_SELF:     'x:detect-self',     // renderer → main invoke：探测当前登录的 X 账号并标记 is_self
   X_GET_SELF:        'x:get-self',        // renderer → main invoke：取已标记的「我自己」handle
   X_WATCHLIST_SPIKE: 'x:watchlist-spike', // renderer → main invoke：B' 期一次性诊断（搜索语法/回复判定实机对照）
+  X_PAYLOAD_SURVEY:  'x:payload-survey', // renderer → main invoke：勘查 X GraphQL 原始载荷字段（能力边界的真实依据）
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

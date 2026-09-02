@@ -22,6 +22,7 @@ import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
+import { surveyXPayloads } from './x-payload-inspector';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -318,6 +319,21 @@ export function registerXTimelineHandlers(): void {
     const maxRounds = typeof p.maxRounds === 'number' ? p.maxRounds : undefined;
     try {
       const r = await probeAuthorTimeline(p.handle, wcId, maxRounds);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, result: r };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_PAYLOAD_SURVEY — 勘查 X GraphQL 原始载荷:底层到底给了哪些字段
+  // ⚠️ 只读:不落库不改状态。这是「能做到哪一步」的真实依据,不靠 DOM 推断
+  ipcMain.handle(IPC_CHANNELS.X_PAYLOAD_SURVEY, async (_e, payload: unknown) => {
+    const p = payload as { wcId?: unknown; seconds?: unknown } | null;
+    const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    const seconds = typeof p?.seconds === 'number' ? p.seconds : undefined;
+    try {
+      const r = await surveyXPayloads(wcId, seconds);
       if ('error' in r) return { success: false, error: r.error };
       return { success: true, result: r };
     } catch (err) {

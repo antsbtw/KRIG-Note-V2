@@ -801,6 +801,16 @@ declare global {
         unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
+        /** 勘查 X GraphQL 原始载荷字段;只读不落库 */
+        payloadSurvey(wcId?: number, seconds?: number): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            totalPayloads: number; note: string;
+            operations: Array<{ name: string; count: number; bytes: number }>;
+            fields: Array<{ path: string; count: number; sample: string }>;
+            relationFields: Array<{ path: string; count: number; sample: string }>;
+          };
+        }>;
         /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
         watchlistSpike(handle: string, wcId?: number, maxRounds?: number): Promise<{
           success: boolean; error?: string;

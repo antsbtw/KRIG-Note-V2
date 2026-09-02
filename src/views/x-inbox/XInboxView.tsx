@@ -1181,6 +1181,39 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
     }
   };
 
+  /**
+   * 载荷勘查 —— 直接量 X GraphQL 原始响应,搞清底层到底供给哪些元数据。
+   * 这是「能做到哪一步」的真实依据,不靠 DOM 推断、不靠我猜。
+   */
+  const handleSurvey = async () => {
+    setSpiking(true);
+    setSpikeOut('勘查中(约 30 秒,会依次走通知页/主页,期间请勿操作 X)...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.payloadSurvey(wcId, 30);
+      if (!r?.success || !r.result) {
+        setSpikeOut(`勘查失败:${r?.error ?? '未知'}`);
+        return;
+      }
+      const x = r.result;
+      const ops = x.operations.slice(0, 12)
+        .map((o) => `  ${o.name} ×${o.count} (${Math.round(o.bytes / 1024)}KB)`).join('\n');
+      const rel = x.relationFields.slice(0, 40)
+        .map((f) => `  ${f.path}  ×${f.count}  = ${f.sample}`).join('\n');
+      setSpikeOut(
+        `X 原始载荷勘查 —— 捕获 ${x.totalPayloads} 个响应,${x.fields.length} 个字段\n`
+        + `${x.note}\n`
+        + `\n【捕获的接口(按来源页)】\n${ops || '  (无)'}\n`
+        + `\n【关系类字段 —— 能做什么的真实依据】\n${rel || '  (无)'}\n`
+        + `\n【全部字段共 ${x.fields.length} 个,前 60】\n`
+        + x.fields.slice(0, 60).map((f) => `  ${f.path} ×${f.count}`).join('\n'),
+      );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
@@ -1203,6 +1236,9 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
           />
           <Btn sm onClick={handleSpike} disabled={spiking}>
             {spiking ? '诊断中...' : 'B′ 诊断'}
+          </Btn>
+          <Btn sm onClick={handleSurvey} disabled={spiking}>
+            {spiking ? '勘查中...' : '载荷勘查'}
           </Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>
