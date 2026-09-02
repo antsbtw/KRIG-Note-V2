@@ -1060,7 +1060,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── X 时间线智能筛选 Review Queue（Phase 2）──
   xTimeline: {
-    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean }) {
+    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
     },
     runRecipe(recipeId: string, wsId: string, targetWcId: number) {

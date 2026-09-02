@@ -237,6 +237,8 @@ export async function queryInbox(opts: {
   offset?: number;
   /** true(默认)=剔除已屏蔽作者/自己的推文。仅影响**显示**,历史数据一行不删。 */
   excludeHidden?: boolean;
+  /** true=只看已回复过的;false=只看没回复的(排重复回复);缺省=不过滤 */
+  replied?: boolean;
 }): Promise<TweetInboxRecord[]> {
   const db = getXDB();
   const limit = opts.limit ?? 50;
@@ -268,6 +270,11 @@ export async function queryInbox(opts: {
       + `(SELECT VALUE handle FROM x_author WHERE blocked = true OR is_self = true)`,
     );
   }
+
+  // 已回复过滤:采纳与回复是两件事,一条推可能已采纳但没回、
+  // 也可能回过却还挂在待判里 —— 用户要能把回过的挑出去,避免重复回复
+  if (opts.replied === true) conditions.push('replied = true');
+  else if (opts.replied === false) conditions.push('replied != true');
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const order = opts.orderBy === 'confidence' ? 'ai_verdict.confidence ASC' : 'fetched_at DESC';

@@ -104,7 +104,7 @@ export function registerXTimelineHandlers(): void {
 
   // X_INBOX_QUERY — 查询 tweet_inbox（Review Queue 用）
   ipcMain.handle(IPC_CHANNELS.X_INBOX_QUERY, async (_e, payload: unknown) => {
-    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; humanReviewed?: unknown; orderBy?: unknown; limit?: unknown; offset?: unknown; excludeHidden?: unknown } | null;
+    const p = payload as { status?: unknown; statuses?: unknown; wsId?: unknown; lang?: unknown; searchRecipe?: unknown; taskId?: unknown; humanReviewed?: unknown; orderBy?: unknown; limit?: unknown; offset?: unknown; excludeHidden?: unknown; replied?: unknown } | null;
     try {
       const records = await queryInbox({
         status: typeof p?.status === 'string' ? (p.status as TweetInboxStatus) : undefined,
@@ -119,6 +119,7 @@ export function registerXTimelineHandlers(): void {
         offset: typeof p?.offset === 'number' ? p.offset : 0,
         // 缺省即隐藏屏蔽者/自己的推文;调用方显式传 false 才看得到全量
         excludeHidden: typeof p?.excludeHidden === 'boolean' ? p.excludeHidden : undefined,
+        replied: typeof p?.replied === 'boolean' ? p.replied : undefined,
       });
       // datetime/RecordId 等 SDK 类型过 structured clone 会丢原型(renderer 拿到空对象,
       // new Date() 解析成 NaN → 卡片显示"NaNd前");JSON 边界统一压成 ISO 字符串

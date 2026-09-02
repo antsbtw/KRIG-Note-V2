@@ -486,6 +486,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const [tweets, setTweets] = useState<TweetInboxRecord[]>([]);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  // 「隐藏已回复」:采纳与回复是两件事,回过的还挂在列表里会导致重复回复
+  const [hideReplied, setHideReplied] = useState(false);
   const offsetRef = useRef(0);
   const [scanStatus, setScanStatus] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -520,6 +522,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         lang: langFilter,
         searchRecipe: recipeFilter,
         taskId: taskFilter,
+        replied: hideReplied ? false : undefined,
         limit: PAGE_SIZE,
         offset,
       });
@@ -533,7 +536,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const countViews: InboxViewKey[] = ['pending', 'suggested', 'audit', 'confirmed'];
       const newCounts: Record<string, number> = {};
       await Promise.all(countViews.map(async (v) => {
-        const cr = await xApiT.queryInbox({ ...VIEW_QUERY[v], lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, limit: 5000, offset: 0 });
+        const cr = await xApiT.queryInbox({ ...VIEW_QUERY[v], lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, replied: hideReplied ? false : undefined, limit: 5000, offset: 0 });
         newCounts[v] = cr?.records?.length ?? 0;
       }));
       setCounts(newCounts);
@@ -545,7 +548,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [currentView, currentLang, filterRecipeId, filterTaskId]);
+  }, [currentView, currentLang, filterRecipeId, filterTaskId, hideReplied]);
 
   const loadStats = useCallback(async () => {
     const r = await api()?.feedbackStats();
@@ -556,7 +559,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     loadPage(0);
     loadStats();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView, currentLang, filterRecipeId, filterTaskId, workspaceId]);
+  }, [currentView, currentLang, filterRecipeId, filterTaskId, hideReplied, workspaceId]);
 
   useEffect(() => {
     const check = async () => {
@@ -817,6 +820,18 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             ))}
           </div>
 
+          {/* 已回复过滤:回过的还挂在列表里会导致重复回复同一个人 */}
+          <div>
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+              fontSize: 11, color: 'var(--text-muted)', padding: '2px 0',
+            }}>
+              <input type="checkbox" checked={hideReplied}
+                onChange={(e) => setHideReplied(e.target.checked)} />
+              隐藏已回复的
+            </label>
+          </div>
+
           {/* 配方切片 */}
           <div>
             <div style={sectionTitle}>配方</div>
@@ -922,9 +937,27 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                         t.ai_verdict                         ? ['✦ Gemma:建议跳过', '#f59e0b'] :
                         ['⏳ 未判', 'var(--text-disabled)'];
                       return (
-                        <span style={{ fontSize: 10, color, border: `1px solid ${color}`, padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap' }}>
-                          {label}
-                        </span>
+                        <>
+                          <span style={{ fontSize: 10, color, border: `1px solid ${color}`, padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap' }}>
+                            {label}
+                          </span>
+                          {/* ⭐「已回复」独立徽章:采纳与回复是两件事,一条推可能
+                              已采纳但没回、也可能回过却还挂在待判/建议里。
+                              实测 287 条 replied=true 落在 status='worth',
+                              在「已确认」「Gemma建议」视图里毫无提示 ——
+                              用户会重复回复同一个人(用户 2026-09-02 指出)。
+                              这条信息来自 X 的客观事实(采集自权威回复字段),
+                              手机/网页上回的都算,不只是点过按钮的。 */}
+                          {t.replied === true && (
+                            <span style={{
+                              fontSize: 10, color: '#22c55e', border: '1px solid #22c55e',
+                              background: 'rgba(34,197,94,0.12)',
+                              padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap',
+                            }}>
+                              ↩ 已回复
+                            </span>
+                          )}
+                        </>
                       );
                     })()}
                     <span style={{ marginLeft: 'auto', color: 'var(--text-disabled)', fontSize: 11 }}>

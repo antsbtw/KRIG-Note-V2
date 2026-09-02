@@ -800,7 +800,7 @@ declare global {
 
       // ── X 时间线智能筛选 Review Queue（Phase 2）──
       xTimeline: {
-        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
+        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
         runRecipe(recipeId: string, wsId: string, targetWcId: number): Promise<{ success: boolean; fetched?: number; saved?: number; filteredOut?: number; error?: string }>;
         pauseScan(wsId: string): Promise<void>;
         judgeNow(wsId: string): Promise<{ success: boolean; judged?: number; worth?: number; remaining?: number; draining?: boolean; error?: string }>;
