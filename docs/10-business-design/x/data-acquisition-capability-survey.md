@@ -100,29 +100,147 @@ in_reply_to   0/860    0%
 
 ## 3. 关系类型对照表(当前认知)
 
-| 关系 | 出向(我对别人) | 入向(别人对我) | 证据 |
-|---|---|---|---|
-| **回复** | `/with_replies` 页 | 通知页 | ✅ 页面确认 |
-| **点赞** | ❓ 我赞过谁(Likes 标签页?) | ✅ 通知页 `X liked your post` | ✅ 截图 |
-| **转发** | ❓ | ✅ 通知页 `X reposted` | ✅ 截图 |
-| **关注** | ❓ Following 列表 | ✅ 通知页 `X followed you` | ✅ 截图 |
-| **引用** | DOM 已抓 `quotedTweet` | ❓ | ✅ 代码 |
-| **收藏** | ❓ 本人书签页 | ❌ **不可能** —— X 不通知他人收藏 | 推理 |
+> ⚠️ 本表经 §4 调研**二次修正**。我先说「拿不到」(错),再说「通知页能拿到」
+> (只对了一半)—— 完整事实要区分**三种主体**,而不是出向/入向两种。
 
-> **入向关系(通知页)价值更高**:谁在持续关注我的内容,直接可见,
-> 且是「真实互动意图」的信号 —— 点赞很轻,回复很重,可加权。
+| 关系 | 我对别人 | 别人对我 | **第三方对第三方** |
+|---|---|---|---|
+| **点赞** | ✅ 每条推的 `legacy.favorited` | ✅ 通知页具名 | ❌ **不可能**(2024-06 移除) |
+| **转发** | ✅ `legacy.retweeted` | ✅ 通知页具名 | 📖 `Retweeters`(2026 未实测) |
+| **收藏** | ✅ `legacy.bookmarked` + 书签页 | ❌ X 不通知 | ❌ 不可能 |
+| **回复** | `/with_replies` + `in_reply_to_status_id_str` | ✅ 通知页 | ✅ `TweetDetail` |
+| **关注** | ✅ `following` 透视字段 | ✅ 通知页 + `followed_by` | 📖 `Followers`(限流紧:50/15min) |
+| **引用** | ✅ `quoted_status_id_str` | ❓ | ✅ 载荷自带 |
+
+**三点关键结论**:
+
+1. **「我对别人」几乎全部免费** —— `favorited`/`retweeted`/`bookmarked`/
+   `following` 都在**每条推的载荷里**,零额外请求。我此前说「出向待测」是低估了。
+2. **「别人对我」靠通知页** —— 具名、含被操作的推,是入向关系的唯一真源。
+3. **「第三方对第三方」的点赞永久不可得** —— X 2024 年删了这个能力。
+   任何依赖「枚举任意推的点赞者」的画像设计**从根上不成立**,
+   与我们的技术水平无关。
+
+> 互动权重提示:点赞很轻,回复/引用很重,可据此加权,而非等量齐观。
 
 ---
 
-## 4. ❓ 方法一:社区最佳爬虫能拿到什么
+## 4. 📖 方法一:社区最佳爬虫能拿到什么(2026-09-02 调研)
 
-**调研进行中**(twscrape / twikit / Nitter / snscrape 及 2025-2026 后继项目)。
+### 4.1 ⚠️ 最重要的一条:「谁点赞了」这个能力,X 已经删了
 
-本节待填:各项目字段清单、是否支持具名关系(Favoriters/Retweeters/
-Followers/Notifications)、调用的 GraphQL 操作名、鉴权要求与限流、项目健康度。
+**2024-06-12 起,只有推文作者本人能看到谁点赞了自己的推。**
+这是**服务端授权规则**,不是反爬 —— 任何爬虫都恢复不了。
+`Favoriters` 接口仍在、库里仍有这个方法,但对不是你写的推,返回空。
 
-**调研意义**:社区项目已经趟过 X 的接口,他们能拿到的字段
-就是**上界的参考**;我们走登录态 webview,理论上不比他们少。
+→ **这直接推翻了我在 §1.1 的"修正"的一半**:
+   我说「通知页能拿到谁点赞」是对的,但那**仅限别人点赞我的推**;
+   「谁点赞了任意一条推」**做不到**,且与爬虫水平无关。
+   设计画像时,「谁跟我互动过」必须围绕**通知页**建,不能围绕 Favoriters。
+
+来源:[WaPo](https://www.washingtonpost.com/technology/2024/06/12/twitter-likes-hidden-private-x/) ·
+[NPR](https://www.npr.org/2024/06/13/nx-s1-5004515/x-likes-hide-users-elon-musk)
+
+### 4.2 项目健康度(GitHub API 实查,2026-09-02)
+
+| 项目 | 最后提交 | 状态 |
+|---|---|---|
+| [twscrape](https://github.com/vladkens/twscrape) | 2026-08-28 | **最健康**,可作基准 |
+| [twifork](https://github.com/PawiX25/twifork)(twikit 分支) | 2026-08-31 | **最活跃** |
+| [d60/twikit](https://github.com/d60/twikit) 上游 | 代码停在 2025-04 | **实质停更** |
+| [the-convocation/twitter-scraper](https://github.com/the-convocation/twitter-scraper) | 2026-04-01 | 半活跃,**唯一 TS/Node** |
+| [twitter-openapi](https://github.com/fa0311/twitter-openapi) | 2026-05-20 | **schema 参考,当前有效** |
+| [Nitter](https://github.com/zedeus/nitter) | — | **已归档** —— X 于 2026-08 发 C&D |
+| [snscrape](https://github.com/JustAnotherArchivist/snscrape) | 2023-11 | **已死** |
+
+### 4.3 具名关系:谁能拿到
+
+| 关系 | 具名可得? | 途径 |
+|---|---|---|
+| 谁点赞了**任意**推 | ❌ **不可能**(2024-06 移除) | — |
+| 谁点赞了**我的**推 | ✅ | **仅通知页** |
+| 谁转发了 | ✅ | `Retweeters` |
+| 谁回复了 | ✅ | `TweetDetail`(回复带完整作者对象) |
+| 关注者 / 关注中 | ✅ | `Followers` / `Following` |
+| 通知 | ✅ | 见 4.4 |
+
+### 4.4 通知页的载荷结构(这是入向关系的真源)
+
+twikit 走的是 **v1.1 REST** 而非 GraphQL:
+`https://x.com/i/api/2/notifications/all.json`
+
+响应结构 `globalObjects.{users,tweets,notifications}`,每条通知带:
+```
+notification.template.aggregateUserActionsV1
+  ├── fromUsers      ← 具名点赞者数组
+  └── targetObjects  ← 被操作的推文
+```
+
+⚠️ **twikit 的解析是有损的**:只取 `fromUsers[0]` 和 `targetObjects[0]`。
+「12 人点赞了你的推」它丢掉 11 个。**我们自己实现要读整个数组。**
+
+另有较新的 GraphQL `NotificationsTimeline` 操作(twikit 未用)。
+**当前 x.com 网页版实际调哪个?未确认** —— 正是我们的载荷勘查要测的。
+
+### 4.5 GraphQL 操作名(名稳定,queryId 会轮换)
+
+```
+Favoriters / Retweeters / Followers / Following / TweetDetail
+UserTweets / UserTweetsAndReplies / SearchTimeline / Likes
+TweetResultByRestId / UserMedia / NotificationsTimeline
+HomeTimeline / Bookmarks / FollowersYouKnow
+```
+路径 `https://x.com/i/api/graphql/{queryId}/{OperationName}`。
+**queryId 每 2-4 周轮换,不能写死** —— 应从 X 的 JS bundle 运行时提取,
+或(我们的做法)直接拦截观察。
+
+### 4.6 ⭐ 登录态 webview 的独有优势(schema 实证)
+
+`legacy` 对象的**必填**字段里包含三个布尔位:
+**`favorited` / `retweeted` / `bookmarked`** —— 反映**当前登录用户自己**的互动状态。
+另有 `core.user_results.result` 的 `UserResultRelationshipPerspectives`:
+`following` / `followed_by` / `blocking` / `blocked_by`。
+
+→ **每条推文都免费附带「我是否赞过/转过/收藏过/关注了作者」,零额外请求。**
+   这是我们这套架构**强于所有社区库**的地方,也直接回答了
+   §3 表里「出向点赞/收藏」那几个 ❓:**能拿到,就在每条推的载荷里。**
+
+其他要点:
+- `views` = `{count: string, state}` —— `count` 是**字符串**,
+  且 state 为 `Enabled` 时**没有数字**,不能假设字段存在
+- `note_tweet`(长推):`legacy.full_text` 会被**截断**,
+  真正全文在 `note_tweet.note_tweet_results.result.text`
+- `legacy` 还有 `conversation_id_str` / `in_reply_to_status_id_str` /
+  `in_reply_to_user_id_str` —— **回复关系的权威字段就在这里**,
+  根本不需要从 DOM 猜连接线(见 §1.2 教训)
+
+### 4.7 限流(单账号,15 分钟窗口;来源单一未经实测,存疑)
+
+| 端点 | 限额 |
+|---|---|
+| `Favoriters` `Retweeters` `Following` `Bookmarks` | 500 |
+| **`Followers`** | **50** |
+| **`SearchTimeline`** | **50** |
+| `notifications/*.json` | 180 |
+
+⚠️ 来源为 twifork 的 ratelimits.md,**未注明测量方法与日期**;
+且博客流传的「search 500/15min」与之矛盾。**两者都别信,自己测。**
+
+### 4.8 鉴权
+
+所有可用工具都要求**登录态 cookies(`auth_token` + `ct0`)**,
+guest token 已基本无用;twifork 称密码登录端点已被 X 撤除。
+→ **这恰好契合我们的架构**:登录态 webview 本来就持有这些 cookie,
+  且拦截浏览器自身流量可**绕过 `x-client-transaction-id` 头的生成**
+  —— 那正是 2026 年两个 twikit 分支存在的原因(库最常见的崩溃点)。
+
+### 4.9 调研未能证实的(不许当结论用)
+
+- `Retweeters` 在 2026 是否仍返回完整数据 —— 无 2026 实测来源
+- `Favoriters` 对**自己的**推是否返回数据 —— 规则说作者可见,但
+  未见来源确认 GraphQL 端点(而非 UI)遵守此规则。**一次请求即可自测**
+- 当前 x.com 实际调 v1.1 还是 GraphQL 通知接口
+- 精确限流数字(见 4.7)
 
 ---
 
