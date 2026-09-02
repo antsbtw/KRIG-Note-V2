@@ -1153,9 +1153,11 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       + `\n③ 判据对照\n`
       + `  累计 ${x.totalItems} 条 | 本人 ${x.selfItems} | A「Replying to」${x.replyItems} | `
       + `B 连接线 ${x.threadLineItems} | socialContext ${x.socialItems}\n`
-      + `  ${x.threadLineItems > 0
-            ? '→ 判据 B(连接线)可用,A 在此页面不渲染'
-            : '→ 三个判据都为 0,需 dump DOM 另寻'}\n`
+      + `  ${x.selfItems > 0 && x.threadLineItems < x.selfItems
+            ? `⚠ 本人 ${x.selfItems} 条,连接线只判出 ${x.threadLineItems} 条 —— `
+              + `漏 ${x.selfItems - x.threadLineItems} 条。/with_replies 上本人每条都是回复,`
+              + `连接线是有损代理,不能拿来筛候选`
+            : '→ 连接线与本人条数一致'}\n`
       + `\n④ 样本(看 tweetId 能否拿到)\n`
       + x.samples.slice(0, 6).map((sp) =>
           `  ${sp.isSelf ? '我' : '他'} ${sp.tweetId ?? 'no-id'} 线=${sp.hasThreadLine ? 'Y' : 'N'} ${sp.text.slice(0, 24)}`,

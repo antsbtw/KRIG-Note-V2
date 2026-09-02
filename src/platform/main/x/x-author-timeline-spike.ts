@@ -289,10 +289,11 @@ export async function probeAuthorTimeline(
 
   const all = [...collected.values()];
 
-  // ① 配对结构:本人推文的前一条是谁的(用连接线判据筛「上接一条推」的)
+  // ① 配对结构:本人推文的前一条是谁的
+  // 遍历**全部本人推文**,不用连接线预筛(理由见下方 ⑤ 的说明)
   const adjacency = { checked: 0, precededByOther: 0, precededBySelf: 0, atTop: 0 };
   for (const it of all) {
-    if (!it.isSelf || !it.hasThreadLine) continue;
+    if (!it.isSelf) continue;
     adjacency.checked++;
     if (it.idx === 0) { adjacency.atTop++; continue; }
     const prev = all.find((x) => x.idx === it.idx - 1);
@@ -302,6 +303,17 @@ export async function probeAuthorTimeline(
   }
 
   // ── ⑤ 回复关系:详情页判据 ────────────────────────────────────────
+  //
+  // ⚠️ **不要用连接线来筛候选**(2026-09-02 用户指出):
+  //   /with_replies 这个页面上,本账号的每一条**都是回复**(原创推在 Posts 标签页)。
+  //   所以「本人 109 条 → 连接线判出 106 条」不是发现了 106 条回复,
+  //   而是**漏了 3 条** —— 连接线是量几何的启发式(宽≤4px 高≥12px),
+  //   线程末条、父推在视口外、元素尚未布局(rect 全 0)都会漏。
+  //   用一个有损代理去筛,漏掉的那部分**永远不会进入详情页探测**,
+  //   而且不报错 —— 又是一次「拿有缺陷的测量当证据」。
+  //
+  //   正解:候选 = **本人的全部推文**(在 /with_replies 上即全部回复),
+  //   由详情页给出权威答案。连接线只留作对照统计,不作筛选条件。
   // 用户 2026-09-02 指出:「用户回复了谁,这个关系要在爬取数据时有能力获取才对」。
   // 说得对 —— 时间线页把关系画成连接线(视觉),抓下来只知道「上接一条推」,
   // 不知道**接的是谁的哪一条**;而累计集合里 idx 会跨轮错乱,相邻推断更不可靠。
@@ -311,7 +323,7 @@ export async function probeAuthorTimeline(
   // 代价是每条回复多一次导航 —— 但这是**拿得到真关系**的唯一确定路径。
   // 本 spike 只验证可行性:取前 3 条本人带连接线的推,逐个开详情页看能否解出。
   const relationProbe: Array<{ tweetId: string; replyingTo: string | null; parentId: string | null }> = [];
-  const candidates = all.filter((i) => i.isSelf && i.hasThreadLine && i.tweetId).slice(0, 3);
+  const candidates = all.filter((i) => i.isSelf && i.tweetId).slice(0, 5);
   for (const c of candidates) {
     try {
       wc.loadURL(`https://x.com/${h}/status/${c.tweetId}`);
