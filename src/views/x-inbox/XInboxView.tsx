@@ -1058,6 +1058,8 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
   const [selfHandle, setSelfHandle] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [spikeOut, setSpikeOut] = useState<string>('');
+  const [spikeHandle, setSpikeHandle] = useState<string>('');
+  const [spiking, setSpiking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1117,15 +1119,14 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
    * 不试搜索语法。⚠️ 只读:不落库不改状态,占用前台 X webview 约 15 秒。
    */
   const handleSpike = async () => {
-    const target = window.prompt(
-      '对哪个 handle 做诊断?(留空用自己的账号)',
-      selfHandle ?? '',
-    );
-    if (target === null) return;
-    const handle = target.trim() || selfHandle;
-    if (!handle) { setSpikeOut('没有可诊断的 handle'); return; }
+    // ⚠️ 不能用 window.prompt —— Electron renderer 不支持(报
+    // "prompt() is not supported"),全仓也没有第二处在用。改用行内输入框。
+    const handle = spikeHandle.trim() || selfHandle;
+    if (!handle) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
 
-    setSpikeOut(`诊断 @${handle} 中(约 15 秒,期间请勿操作 X)...`);
+    setSpiking(true);
+    setSpikeOut(`诊断 @${normalizeHandle(handle)} 中(约 15 秒,期间请勿操作 X)...`);
+    try {
     const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
     const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
     const r = await api()?.watchlistSpike(handle, wcId);
@@ -1156,6 +1157,9 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
             ? '→ 两数不等:socialContext 与「是否回复」确实不是一回事'
             : '→ 两数相等,需更多样本才能区分'}`,
     );
+    } finally {
+      setSpiking(false);
+    }
   };
 
   return (
@@ -1168,7 +1172,19 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
           <Btn sm onClick={handleDetectSelf} disabled={detecting}>
             {detecting ? '识别中...' : '识别我的账号'}
           </Btn>
-          <Btn sm onClick={handleSpike}>B′ 诊断</Btn>
+          <input
+            value={spikeHandle}
+            onChange={(e) => setSpikeHandle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !spiking) handleSpike(); }}
+            placeholder={selfHandle ? `@${selfHandle}` : 'handle'}
+            style={{
+              width: 120, fontSize: 11, padding: '2px 6px', borderRadius: 5,
+              border: '1px solid var(--text-faint)', background: 'var(--bg)', color: 'var(--text)',
+            }}
+          />
+          <Btn sm onClick={handleSpike} disabled={spiking}>
+            {spiking ? '诊断中...' : 'B′ 诊断'}
+          </Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>
         </div>
