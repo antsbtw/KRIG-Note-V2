@@ -1202,7 +1202,8 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
       // 不传 mode:有游标就续传、没有就从头,由 main 侧决定 —— 用户不必知道
-      const r = await api()?.collectReplies(handle, wcId, 30);
+      // 不设目标天数:抓到滚不动为止(用户 2026-09-02 定的判据)
+      const r = await api()?.collectReplies(handle, wcId);
       if (!r?.success || !r.result) {
         setSpikeOut(`采集失败:${r?.error ?? '未知'}`);
         return;
@@ -1212,8 +1213,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       setSpikeOut(
         `回复关系采集完成 —— @${normalizeHandle(handle)}\n`
         + `\n滚了 ${x.rounds} 轮,捕获 ${x.payloads} 个响应\n`
-        + `本次连续覆盖 ${x.contiguousDays} 天(最旧一条 ${x.oldestDays ?? '?'} 天前 —— `
-        + `X 会把置顶/热门旧推排前面,故最旧 ≠ 连续覆盖)\n`
+        + `本次最旧抓到 ${x.oldestDays ?? '?'} 天前\n`
         + `停因:${x.stopReason}\n`
         + `解出回复关系 ${x.relations} 条,其中我自己发的 ${x.ownReplies} 条\n`
         + `\n【落库】\n`

@@ -212,8 +212,6 @@ export interface ReplyCollectResult {
   backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
   /** 覆盖到的最旧回复距今天数 —— 如实反映抓了多深,不谎称全量 */
   oldestDays: number | null;
-  /** **连续**覆盖天数 —— 真正的进度指标(oldestDays 会被置顶旧推带偏) */
-  contiguousDays: number;
   /** 为什么停 —— 区分「到底了」与「封顶了」,不含糊 */
   stopReason: string;
   /** 诊断落盘路径 */
@@ -224,8 +222,7 @@ export interface ReplyCollectResult {
  * 采集指定账号的回复关系。
  *
  * @param handle     目标账号(通常是自己)
- * @param maxRounds  滚动轮次上限
- * @param targetDays 回溯窗口(天)—— 达到即停。用户拍板:一般 7 天够判行为特征
+ * @param maxRounds  滚动轮次上限(安全阀,正常情况下靠「滚不动」自然结束)
  *
  * ⚠️ **边界如实汇报**:X 用虚拟列表 + 懒加载,B′ 诊断实测滚 60 轮只覆盖 3.2 天。
  *    本函数返回 oldestDays,调用方**不得声称"全量"** —— 抓到多少说多少。
@@ -233,8 +230,7 @@ export interface ReplyCollectResult {
 export async function collectReplyRelations(
   handle: string,
   targetWcId?: number,
-  maxRounds = 40,
-  targetDays = 7,
+  maxRounds = 400,
 ): Promise<ReplyCollectResult | { error: string }> {
   const h = normalizeHandle(handle);
   if (!h) return { error: 'empty handle' };
@@ -332,51 +328,23 @@ export async function collectReplyRelations(
 
   let rounds = 0;
   let oldestDays: number | null = null;
-  let contiguousDays = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
   let noProgress = 0;
   let lastRelCount = 0;
 
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
+
+    // 观察日期:抓到的最旧一条是什么时候 —— 用户 2026-09-02:
+    // 「滚动通知栏目的屏幕,所有的 item 都要抓取…当你滚不动的时候,就是获取完毕了。
+    //   很简单,滚动时观察日期就好了。」
+    //
+    // 日期是**进度显示**,不是停止条件。停止条件只有一个:滚不动了。
+    // 我此前把「达到 N 天」当停止条件,结果被置顶旧推带偏(一条 3 月的推
+    // 就让判据误以为已覆盖 166 天),10 轮就停,最近 6 天的密集回复全漏。
     if (times.length) {
       const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
       oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
-
-      // ⚠️ **不能用「见过的最旧一条」当覆盖深度** —— 2026-09-02 实测踩到:
-      //   X 会把置顶/热门的旧推排在前面,一条 3 月的推就让 oldestDays=166,
-      //   瞬间"满足" 30 天目标 → 10 轮就停,而最近 6 天的密集回复根本没抓到
-      //   (库里 08-26~08-30 完全空白,用户按每天 20+ 条一算就发现了)。
-      //   这是又一次「拿有缺陷的测量当证据」:最旧一条 ≠ 连续覆盖。
-      //
-      // 正解:看**连续覆盖**的边界 —— 从今天往回数,哪一天开始出现空档,
-      //   那之前的都不算覆盖到。用抓到的日期集合算连续天数。
-      const daySet = new Set(times.map((t) => new Date(t).toISOString().slice(0, 10)));
-      let contiguous = 0;
-      for (let back = 0; back < 400; back++) {
-        const d = new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
-        if (daySet.has(d)) { contiguous = back + 1; continue; }
-        // 容忍单天空档(那天可能真的没发推),连续两天空才判定断档
-        const prev = new Date(Date.now() - (back + 1) * 86_400_000).toISOString().slice(0, 10);
-        if (!daySet.has(prev)) break;
-      }
-      contiguousDays = contiguous;
-
-      if (contiguous >= targetDays) {
-        if (streamIdx < streams.length - 1) {
-          streamIdx++;
-          console.log(`[x-reply-collector] 连续覆盖 ${contiguous} 天,切到 ${streams[streamIdx].key} 流`);
-          wc.loadURL(streams[streamIdx].url);
-          await new Promise((r) => setTimeout(r, 4000));
-          times.length = 0;      // 新流重新计深度
-          contiguousDays = 0;
-          noProgress = 0;
-          lastRelCount = relMap.size;
-          continue;
-        }
-        stopReason = `连续覆盖 ${contiguous} 天(两条流)`;
-        break;
-      }
     }
 
     // ── 自然滚动(用户 2026-09-02 定的策略)────────────────────────
@@ -405,9 +373,11 @@ export async function collectReplyRelations(
       noProgress++;
       // 容忍度留足:滚过已知区域时本来就没有新数据,
       // 太急会把"正在穿过已知区"误判成"到底了"(拿有缺陷的测量当证据)
+      // **滚不动 = 这条流抓完了**(用户定的判据,简单且不会被置顶旧推骗)
       const limit = 8;
       if (noProgress >= limit) {
-        // 本条流跑完 → 切下一条;两条都跑完才真正结束
+        console.log(`[x-reply-collector] ${streams[streamIdx].key} 流滚不动了,`
+          + `累计 ${relMap.size} 条关系 / ${ownMap.size} 条本人推`);
         if (streamIdx < streams.length - 1) {
           streamIdx++;
           console.log(`[x-reply-collector] 切到 ${streams[streamIdx].key} 流`);
@@ -417,8 +387,7 @@ export async function collectReplyRelations(
           lastRelCount = relMap.size;
           continue;
         }
-        stopReason = `两条流都跑完(docH=${moved?.docH ?? '?'})`
-          + ` —— 到底了或 X 懒加载封顶`;
+        stopReason = `两条流都滚不动了 —— 抓完(最旧 ${oldestDays ?? '?'} 天前)`;
         break;
       }
     } else {
@@ -477,5 +446,5 @@ export async function collectReplyRelations(
     + `父推不在库 ${backfill.parentNotInDb} 条`);
 
   return { rounds, payloads, relations: relations.length, ownReplies: ownReplies.length,
-    ownSaved, savedOnReplies, backfill, oldestDays, contiguousDays, stopReason, dumpPath };
+    ownSaved, savedOnReplies, backfill, oldestDays, stopReason, dumpPath };
 }

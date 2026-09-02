@@ -1113,8 +1113,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSelf: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
     /** 采集回复关系并回填 replied(主线第一环) */
-    collectReplies: (handle: string, wcId?: number, targetDays?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_COLLECT_REPLIES, { handle, wcId, targetDays }),
+    collectReplies: (handle: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_COLLECT_REPLIES, { handle, wcId }),
     /** 勘查 X GraphQL 原始载荷字段(能力边界的真实依据);只读不落库 */
     payloadSurvey: (wcId?: number, seconds?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_PAYLOAD_SURVEY, { wcId, seconds }),
