@@ -10,7 +10,7 @@
 import { listEnabledRecipes, updateLastRunAt } from '../db/search-recipe-repo';
 import { scanRecipe } from './x-timeline-scan';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
-import { cleanExpired } from '../db/tweet-inbox-repo';
+import { cleanExpired, recoverStuckAiJudging } from '../db/tweet-inbox-repo';
 import { getBlockedHandleSet } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TimelineFilterConfig } from '@shared/types/x-timeline-types';
@@ -29,6 +29,7 @@ export function getActiveWcId(wsId: string): number | null {
 
 let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let ttlTimer: ReturnType<typeof setInterval> | null = null;
+let judgeRecoverTimer: ReturnType<typeof setInterval> | null = null;
 
 /** 累计待判断 pending 条数（per-ws：各 ws 各自累计、各自达阈值、各自清零，防跨 ws 混批） */
 const pendingAccumulated = new Map<string, number>();
@@ -155,6 +156,19 @@ export function startScheduler(): void {
     });
   }, 60_000);
 
+  // ⚠️ **卡住自愈:每 10 分钟一次**(2026-09-02 实测踩到)
+  // recoverStuckAiJudging 此前**只在启动时跑一次**(index.ts)。
+  // 后果:app 长时间运行时,判断中断的行永久停在 ai_judging ——
+  // 实测 460 条卡了十几个小时(最早一条 01:42),它们既不在「待判」
+  // (那查的是 status='pending')也不在其他视图,**从收件箱里彻底消失**,
+  // 而界面上毫无异常:用户只看到「采集 303 条」但待判是 0,以为全是重复。
+  // 判断任务不跨进程存活,所以退回 pending 不会误伤正在处理的行。
+  judgeRecoverTimer = setInterval(() => {
+    recoverStuckAiJudging()
+      .then((n) => { if (n > 0) console.warn(`[x-search-scheduler] 自愈:${n} 条卡在 ai_judging 已退回 pending`); })
+      .catch((err) => console.error('[x-search-scheduler] recoverStuckAiJudging error:', err));
+  }, 10 * 60_000);
+
   // TTL 清理：每 24h 一次
   ttlTimer = setInterval(() => {
     cleanExpired().catch((err) => {
@@ -167,7 +181,7 @@ export function startScheduler(): void {
     console.error('[x-search-scheduler] initial cleanExpired error:', err);
   });
 
-  console.log('[x-search-scheduler] started (poll interval: 60s, TTL cleanup: 24h)');
+  console.log('[x-search-scheduler] started (poll: 60s, stuck-judge recovery: 10min, TTL: 24h)');
 }
 
 export function stopScheduler(): void {
@@ -178,5 +192,10 @@ export function stopScheduler(): void {
   if (ttlTimer) {
     clearInterval(ttlTimer);
     ttlTimer = null;
+  }
+  // 铁律:常驻 timer 必须在这里有停止调用,否则 before-quit 走不完(Ctrl+C 不退)
+  if (judgeRecoverTimer) {
+    clearInterval(judgeRecoverTimer);
+    judgeRecoverTimer = null;
   }
 }
