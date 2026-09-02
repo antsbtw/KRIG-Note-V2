@@ -230,6 +230,61 @@ export async function getOwnReplyCoverage(): Promise<{
   };
 }
 
+/** 采集游标 —— 用 X 自己给的 Bottom cursor 续传 */
+export interface CollectCursor {
+  bottomCursor?: string;
+  oldestAt?: string;
+  exhausted: boolean;
+}
+
+/**
+ * 读采集游标。
+ *
+ * X 每个 timeline 响应都自带 `TimelineTimelineCursor`(cursorType: Top/Bottom),
+ * Bottom 就是「下一页从这里继续」的官方标记 —— 用它续传比拿时间戳猜边界精确得多,
+ * 而且**用户不必知道有这回事**(一个按钮即可,不必选「增量」还是「补历史」)。
+ */
+export async function getCollectCursor(scope: string): Promise<CollectCursor> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ bottom_cursor?: string; oldest_at?: string; exhausted?: boolean }>]>(
+    `SELECT bottom_cursor, oldest_at, exhausted FROM x_collect_cursor WHERE scope = $scope LIMIT 1`,
+    { scope },
+  );
+  const r = res[0]?.[0];
+  return {
+    bottomCursor: r?.bottom_cursor ?? undefined,
+    oldestAt: r?.oldest_at ? String(r.oldest_at) : undefined,
+    exhausted: r?.exhausted === true,
+  };
+}
+
+/** 存采集游标(幂等 upsert) */
+export async function saveCollectCursor(
+  scope: string,
+  cursor: { bottomCursor?: string; oldestAt?: string; exhausted?: boolean },
+): Promise<void> {
+  const db = getXDB();
+  const existing = await db.query<[Array<{ scope: string }>]>(
+    `SELECT scope FROM x_collect_cursor WHERE scope = $scope LIMIT 1`, { scope },
+  );
+  // ⚠️ option 字段传 undefined→NONE,不传 null(SurrealDB 的 NONE ≠ NULL)
+  const params = {
+    scope,
+    bottom: cursor.bottomCursor || undefined,
+    oldest: cursor.oldestAt ? new Date(cursor.oldestAt) : undefined,
+    exhausted: cursor.exhausted === true,
+  };
+  if ((existing[0] ?? []).length > 0) {
+    await db.query(
+      `UPDATE x_collect_cursor SET bottom_cursor = $bottom, oldest_at = $oldest,
+         exhausted = $exhausted, updated_at = time::now() WHERE scope = $scope`, params);
+  } else {
+    await db.query(
+      `CREATE x_collect_cursor SET scope = $scope, bottom_cursor = $bottom,
+         oldest_at = $oldest, exhausted = $exhausted, updated_at = time::now()`, params);
+  }
+}
+
 /**
  * 统计:我回复过的已采纳线索有多少条(业务主线的核心指标)。
  * 「找到需要买 VPN 的人 → 回复他们」—— 这个数就是主线的产出量。

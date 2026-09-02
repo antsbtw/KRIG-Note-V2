@@ -19,7 +19,35 @@ import { app } from 'electron';
 import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import { backfillRepliedFromRelations, saveReplyRelations, saveOwnReplies,
-  getOwnReplyCoverage, type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
+  getOwnReplyCoverage, getCollectCursor, saveCollectCursor,
+  type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
+
+/**
+ * 从响应里取出 X 自己给的分页游标。
+ *
+ * 用户 2026-09-02:「其实 X 上有很多标记,你要善于利用。」—— 这就是那个标记:
+ * content.__typename = 'TimelineTimelineCursor',cursorType = 'Top' | 'Bottom'。
+ * Bottom 即「下一页从这里继续」,是 X 自己的续传凭证,比拿时间戳猜边界精确。
+ */
+function extractBottomCursor(node: unknown): string | undefined {
+  if (node === null || typeof node !== 'object') return undefined;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const r = extractBottomCursor(item);
+      if (r) return r;
+    }
+    return undefined;
+  }
+  const o = node as Record<string, unknown>;
+  const isCursor = o.__typename === 'TimelineTimelineCursor'
+    || o.entryType === 'TimelineTimelineCursor';
+  if (isCursor && o.cursorType === 'Bottom' && typeof o.value === 'string') return o.value;
+  for (const v of Object.values(o)) {
+    const r = extractBottomCursor(v);
+    if (r) return r;
+  }
+  return undefined;
+}
 
 /** 取字符串字段(载荷里缺字段是常态,不能假设存在) */
 function str(o: Record<string, unknown>, k: string): string | undefined {
@@ -139,14 +167,11 @@ export interface ReplyCollectResult {
  * ⚠️ **边界如实汇报**:X 用虚拟列表 + 懒加载,B′ 诊断实测滚 60 轮只覆盖 3.2 天。
  *    本函数返回 oldestDays,调用方**不得声称"全量"** —— 抓到多少说多少。
  */
-export type CollectMode = 'incremental' | 'backfill';
-
 export async function collectReplyRelations(
   handle: string,
   targetWcId?: number,
   maxRounds = 40,
   targetDays = 7,
-  mode: CollectMode = 'incremental',
 ): Promise<ReplyCollectResult | { error: string }> {
   const h = normalizeHandle(handle);
   if (!h) return { error: 'empty handle' };
@@ -164,6 +189,7 @@ export async function collectReplyRelations(
   const times: string[] = [];
   const pending = new Map<string, string>();
   let payloads = 0;
+  let latestCursor: string | undefined;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
     if (method === 'Network.requestWillBeSent') {
@@ -186,6 +212,9 @@ export async function collectReplyRelations(
             extractRelations(parsed, found, foundOwn, h);
             for (const rel of found) relMap.set(rel.tweetId, rel);
             for (const o of foundOwn) ownMap.set(o.tweetId, o);
+            // 每个响应都可能带新的 Bottom 游标 —— 留最后一个(最深的那页)
+            const cur = extractBottomCursor(parsed);
+            if (cur) latestCursor = cur;
             // 记录时间戳以计算覆盖深度
             const collectTimes = (n: unknown): void => {
               if (n === null || typeof n !== 'object') return;
@@ -205,20 +234,21 @@ export async function collectReplyRelations(
   wc.debugger.on('message', onMessage);
   await wc.debugger.sendCommand('Network.enable').catch(() => {});
 
-  // ── 增量锚点(用户 2026-09-02:「做采集时间标记,这样就不会重复了」)──
+  // ── 续传:用 X 自己给的 Bottom 游标 ──────────────────────────────
   //
-  // ⚠️ **一个锚点服务不了两个方向**,必须分开:
-  //   incremental(日常):库里**最新**一条之后的才是新的 → 滚到遇见已知即停,
-  //     几轮就完事,最省、最不惊动风控。
-  //   backfill(补历史):库里**最旧**一条之前的才是新的 → 必须滚过已知区域,
-  //     遇见已知**不能停**,否则第一屏全是已知就立刻退出,永远挖不深。
+  // 用户 2026-09-02 两条指正,本段是它们的落地:
+  //  ①「不要增加用户负担,应该更加简洁」→ **一个按钮**,不让用户选方向
+  //  ②「X 上有很多标记,你要善于利用」→ 用 X 的 Bottom 游标,不拿时间戳猜边界
   //
-  // 这正是「时间标记」的陷阱:只记一个时间点,补历史时会被自己的锚点挡住。
+  // 我原来的两按钮方案(增量/补历史)是把实现细节暴露给用户:
+  // 时间戳做锚点必须区分「往新」「往旧」,所以才需要两个模式。
+  // 而游标天然是单向续传凭证 —— 有就接着上次挖,没有就从头,用户不必知道。
+  const scope = `${h}:replies`;
+  const saved = await getCollectCursor(scope);
   const coverage = await getOwnReplyCoverage();
-  const anchorNewest = coverage.newest ? new Date(coverage.newest).getTime() : null;
-  const anchorOldest = coverage.oldest ? new Date(coverage.oldest).getTime() : null;
-  console.log(`[x-reply-collector] 模式=${mode} 库存 ${coverage.count} 条 `
-    + `(${coverage.oldest ?? '?'} ~ ${coverage.newest ?? '?'})`);
+  console.log(`[x-reply-collector] 库存 ${coverage.count} 条 `
+    + `(最旧 ${coverage.oldest ?? '?'}), 游标=${saved.bottomCursor ? '有(续传)' : '无(从头)'}`
+    + `${saved.exhausted ? ' [已到底]' : ''}`);
 
   wc.loadURL(`https://x.com/${h}/with_replies`);
   await new Promise((r) => setTimeout(r, 4000));
@@ -233,21 +263,9 @@ export async function collectReplyRelations(
     rounds = i;
     if (times.length) {
       const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
-      const oldestMs = new Date(oldest).getTime();
-      oldestDays = Math.round((Date.now() - oldestMs) / 86_400_000 * 10) / 10;
+      oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
 
-      if (mode === 'incremental') {
-        // 日常:已经滚过库里最新一条 → 再往下全是已知,停。
-        // 这就是「时间标记不重复」的实现 —— 通常几轮就完事。
-        if (anchorNewest !== null && oldestMs < anchorNewest) {
-          stopReason = `已接上库存最新一条(${coverage.newest?.slice(0, 10)}),增量完成`;
-          break;
-        }
-      } else {
-        // 补历史:必须滚过整个已知区域才开始有收获,
-        // 所以**不能**因为遇见已知就停;只看是否达到目标深度。
-        if (oldestDays >= targetDays) { stopReason = `已覆盖目标 ${targetDays} 天`; break; }
-      }
+      if (oldestDays >= targetDays) { stopReason = `已覆盖目标 ${targetDays} 天`; break; }
     }
 
     // ── 自然滚动(用户 2026-09-02 定的策略)────────────────────────
@@ -274,9 +292,9 @@ export async function collectReplyRelations(
     // 位移了但没新数据 = 到底了或懒加载封顶,两者都该停
     if (relMap.size === lastRelCount) {
       noProgress++;
-      // 补历史时前若干轮在滚已知区域,本来就没有新数据 —— 容忍度放宽,
-      // 否则会把"正在穿过已知区"误判成"到底了"(又一次拿有缺陷的测量当证据)
-      const limit = mode === 'backfill' ? 12 : 6;
+      // 容忍度留足:滚过已知区域时本来就没有新数据,
+      // 太急会把"正在穿过已知区"误判成"到底了"(拿有缺陷的测量当证据)
+      const limit = 8;
       if (noProgress >= limit) {
         stopReason = `连续 ${limit} 轮无新数据(docH=${moved?.docH ?? '?'})`
           + ` —— 到底了或 X 懒加载封顶`;
@@ -313,6 +331,18 @@ export async function collectReplyRelations(
   const ownSaved = await saveOwnReplies(ownReplies);
   const savedOnReplies = await saveReplyRelations(relations);
   const backfill = await backfillRepliedFromRelations(relations);
+
+  // 存游标:下次从这里接着挖。没拿到新游标 = X 不再给下一页 → 标记到底。
+  // ⚠️ 只在**确实抓到了数据**时才判定到底 —— 一次都没抓到可能是网络/风控,
+  //    那种情况不该把 exhausted 钉死,否则以后再也不挖了(静默坍缩)。
+  const gotData = relations.length > 0;
+  await saveCollectCursor(scope, {
+    bottomCursor: latestCursor ?? saved.bottomCursor,
+    oldestAt: ownReplies.length
+      ? ownReplies.map((o) => o.createdAt).filter(Boolean).sort()[0]
+      : saved.oldestAt,
+    exhausted: gotData && !latestCursor,
+  });
 
   console.log(`[x-reply-collector] 落库: 自己的回复入库 ${ownSaved.inserted} 条`
     + `(已存在 ${ownSaved.skipped} 条); 补关系 ${savedOnReplies} 条; `

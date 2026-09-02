@@ -802,7 +802,7 @@ declare global {
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
         /** 采集回复关系并回填 replied(主线第一环) */
-        collectReplies(handle: string, wcId?: number, targetDays?: number, mode?: 'incremental' | 'backfill'): Promise<{
+        collectReplies(handle: string, wcId?: number, targetDays?: number): Promise<{
           success: boolean; error?: string;
           result?: {
             rounds: number; payloads: number; relations: number; savedOnReplies: number;

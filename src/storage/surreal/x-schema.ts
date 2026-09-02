@@ -255,6 +255,50 @@ export async function x_migration_1_0_2(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * 1.0.3 —— 采集游标(2026-09-02)
+ *
+ * 用户定的方向:「其实 X 上有很多标记,你要善于利用。」
+ * 实测确认:X 每个 timeline 响应都自带分页游标 ——
+ *   content.__typename = 'TimelineTimelineCursor',cursorType = 'Top' | 'Bottom'
+ * `Bottom` 就是「下一页从这里继续」的官方标记。
+ *
+ * 这比我原来的做法好在:
+ *  - 不用靠时间戳猜边界(时间戳做锚点必须区分「往新」「往旧」两个方向,
+ *    还得让用户选,是把实现细节暴露给用户)
+ *  - 游标是 X 自己的续传凭证,天然精确、天然不重复
+ *  - 一个按钮即可:有游标就续传,没有就从头 —— 用户不必知道有这回事
+ *
+ * 表设计遵循数据模型总纲:游标是**可重算的派生状态**(丢了大不了重爬),
+ * 与 x_tweet(真源)分开存,清空不影响任何业务数据。
+ */
+const X_SCHEMA_1_0_3 = `
+DEFINE TABLE IF NOT EXISTS x_collect_cursor SCHEMAFULL;
+-- 采集范围键:'<handle>:<kind>',如 'netlab2gfw:replies'
+DEFINE FIELD IF NOT EXISTS scope        ON x_collect_cursor TYPE string ASSERT $value != '';
+-- X 给的 Bottom 游标值 —— 下次从这里继续
+DEFINE FIELD IF NOT EXISTS bottom_cursor ON x_collect_cursor TYPE option<string>;
+-- 已抓到的最旧时间(展示用:让用户知道挖到哪了)
+DEFINE FIELD IF NOT EXISTS oldest_at    ON x_collect_cursor TYPE option<datetime>;
+-- 是否已到底(X 不再给新游标)—— 到底后无需再往前挖
+DEFINE FIELD IF NOT EXISTS exhausted    ON x_collect_cursor TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS updated_at   ON x_collect_cursor TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_cursor_scope ON x_collect_cursor FIELDS scope UNIQUE;
+`;
+
+export async function x_migration_1_0_3(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_3);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.3',
+      appliedAt = $now,
+      description = 'Collection cursor table (use X own Bottom cursor for resume)'`,
+    { rid: new RecordId('schema_version', '1.0.3'), now },
+  );
+}
+
 export async function x_migration_1_0_0(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_0_0);
 

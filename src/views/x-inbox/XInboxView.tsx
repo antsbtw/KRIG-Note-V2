@@ -1193,16 +1193,16 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
    * 拦截 GraphQL 取权威字段(in_reply_to_*),不从 DOM 猜。
    * 回填 replied 用的是客观事实,手机/网页上回的一律算数。
    */
-  const handleCollectReplies = async (mode: 'incremental' | 'backfill' = 'incremental') => {
+  const handleCollectReplies = async () => {
     const handle = spikeHandle.trim() || selfHandle;
     if (!handle) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
     setSpiking(true);
-    setSpikeOut(`${mode === 'backfill' ? '补历史' : '增量采集'} @${normalizeHandle(handle)} 中`
-      + `(自然滚动,期间请勿操作 X)...`);
+    setSpikeOut(`采集 @${normalizeHandle(handle)} 的回复中(自然滚动,期间请勿操作 X)...`);
     try {
       const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-      const r = await api()?.collectReplies(handle, wcId, mode === 'backfill' ? 30 : 7, mode);
+      // 不传 mode:有游标就续传、没有就从头,由 main 侧决定 —— 用户不必知道
+      const r = await api()?.collectReplies(handle, wcId, 30);
       if (!r?.success || !r.result) {
         setSpikeOut(`采集失败:${r?.error ?? '未知'}`);
         return;
@@ -1297,11 +1297,8 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
           <Btn sm onClick={handleSurvey} disabled={spiking}>
             {spiking ? '勘查中...' : '载荷勘查'}
           </Btn>
-          <Btn sm primary onClick={() => handleCollectReplies('incremental')} disabled={spiking}>
-            {spiking ? '采集中...' : '增量采集'}
-          </Btn>
-          <Btn sm onClick={() => handleCollectReplies('backfill')} disabled={spiking}>
-            补历史
+          <Btn sm primary onClick={() => handleCollectReplies()} disabled={spiking}>
+            {spiking ? '采集中...' : '采集回复'}
           </Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>

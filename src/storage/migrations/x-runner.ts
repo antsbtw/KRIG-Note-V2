@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -32,6 +32,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.0.2',
     description: 'Normalize author_handle (strip @, lowercase) across x_tweet / tweet_feedback',
     up: x_migration_1_0_2,
+  },
+  {
+    version: '1.0.3',
+    description: 'Collection cursor table (resume via X own Bottom cursor)',
+    up: x_migration_1_0_3,
   },
 ];
 
