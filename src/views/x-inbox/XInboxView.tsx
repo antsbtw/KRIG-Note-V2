@@ -1470,7 +1470,7 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ flexShrink: 0, padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {/* 统计:分子/分母/采集率 */}
         <div style={{ display: 'flex', gap: 10 }}>
           {[
@@ -1479,9 +1479,9 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
             { label: '已采到', value: snap?.captured ?? 0, color: '#60a5fa' },
             { label: '采集率', value: `${rate}%`, color: rateColor },
           ].map((k) => (
-            <div key={k.label} style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 8, padding: '10px 12px' }}>
+            <div key={k.label} style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 6, padding: '5px 10px' }}>
               <div style={{ fontSize: 10, color: 'var(--text-disabled)' }}>{k.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: k.color }}>{k.value}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: k.color, lineHeight: 1.2 }}>{k.value}</div>
             </div>
           ))}
         </div>
@@ -1519,10 +1519,13 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
       </div>
 
       {/* 独立滚动区:内容多了自己滚,不挤压上面的统计 */}
-      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* 推文列表:从统计区正下方开始铺,内容多了自己滚 ——
+          用户 2026-09-02:「右边把推文往上显示吧,只有满屏再往下滚,
+          都在下面看起来吃力」。此前统计区也是 flex:1,把列表挤到了底部。 */}
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {(snap?.recent ?? []).map((t) => (
           <div key={t.tweetId} style={{
-            background: 'var(--bg-card)', borderRadius: 8, padding: '8px 12px',
+            background: 'var(--bg-card)', borderRadius: 6, padding: '6px 10px',
             borderLeft: `3px solid ${t.isReply ? '#a78bfa' : '#22c55e'}`,
           }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3 }}>
@@ -1538,7 +1541,7 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
                 ♥{t.likes ?? 0}　{t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : ''}
               </span>
             </div>
-            <div style={{ fontSize: 12, lineHeight: 1.5 }}>{t.text}</div>
+            <div style={{ fontSize: 12, lineHeight: 1.45 }}>{t.text}</div>
           </div>
         ))}
         {!snap?.recent?.length && (
