@@ -56,6 +56,10 @@ import type {
 
 interface XCaptureSnapshot {
   running: boolean;
+  /** 此刻屏幕上的条数 */
+  onScreenCount: number;
+  /** 本轮跳过的广告等非推文元素 */
+  skippedAds: number;
   /** 屏幕上滚过的条数(分母) */
   seenInDom: number;
   /** 实际采到的条数(分子) */

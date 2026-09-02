@@ -30,6 +30,15 @@ interface MonitorState {
   captured: Map<string, HarvestedTweet>;
   /** DOM 里出现过的 tweetId —— **分母**:屏幕上滚过的 */
   seenInDom: Set<string>;
+  /**
+   * **当前屏幕上**的 id,按页面从上到下的顺序。
+   * ⚠️ 不能拿 captured(Map 按「首次发现」排序)当展示顺序 ——
+   * 那样右侧列的是「最近发现的」而不是「现在看到的」,与左侧完全对不上
+   * (2026-09-02 实测:左边第一条在右边排到了最后)。
+   */
+  onScreen: string[];
+  /** 最近一轮跳过的非推文元素数(广告) */
+  lastSkipped: number;
   payloads: number;
   startedAt: number;
   domTimer: ReturnType<typeof setInterval> | null;
@@ -53,14 +62,18 @@ let monitor: MonitorState | null = null;
  */
 const SCAN_DOM_IDS = `(function () {
   var out = [];
+  var skipped = 0;
   var arts = document.querySelectorAll('article[data-testid="tweet"]');
   for (var i = 0; i < arts.length; i++) {
     var art = arts[i];
     var t = art.querySelector('time');
     var a = t && t.closest('a[href*="/status/"]');
-    if (!a) continue;
+    // ⚠️ 广告(Ad)没有 <time>、没有 status 链接 —— 它们**不是推文**,
+    //    跳过是对的,但必须**计数报出来**,否则用户看到左边有、右边没有,
+    //    会以为漏采了(2026-09-02 实测:HubSpot 广告就是这种情况)。
+    if (!a) { skipped++; continue; }
     var m = (a.getAttribute('href') || '').match(/status\\/(\\d+)/);
-    if (!m) continue;
+    if (!m) { skipped++; continue; }
 
     var handle = '';
     try {
@@ -94,13 +107,17 @@ const SCAN_DOM_IDS = `(function () {
     out.push({ id: m[1], handle: handle, text: text.slice(0, 200),
       createdAt: t ? (t.getAttribute('datetime') || '') : '', likes: likes });
   }
-  return { items: out, scrollY: window.scrollY,
+  return { items: out, skipped: skipped, scrollY: window.scrollY,
     docH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
     url: location.href };
 })()`;
 
 export interface MonitorSnapshot {
   running: boolean;
+  /** 此刻屏幕上有多少条(用于「屏幕 N 条,采到 M 条」的即时比对) */
+  onScreenCount: number;
+  /** 本轮跳过的非推文元素(广告等,无 time/status 链接)—— 不算漏采 */
+  skippedAds: number;
   /** 屏幕上滚过的条数(去重)—— 分母 */
   seenInDom: number;
   /** 实际采到的条数 —— 分子 */
@@ -124,15 +141,21 @@ export interface MonitorSnapshot {
 
 function snapshot(extra?: { url?: string; scrollY?: number }): MonitorSnapshot {
   if (!monitor) {
-    return { running: false, seenInDom: 0, captured: 0, captureRate: 0,
+    return { running: false, onScreenCount: 0, skippedAds: 0, seenInDom: 0, captured: 0, captureRate: 0,
       missing: [], payloads: 0, elapsedSec: 0, recent: [] };
   }
   // ⚠️ 分母只算「DOM 见过的」:GraphQL 可能返回更多(如被折叠的回复),
   //    那不算漏 —— 漏的定义是**屏幕上出现过却没采到**。
   const missing = [...monitor.seenInDom].filter((id) => !monitor!.captured.has(id));
-  // ⚠️ 只回 8 条不够比对(用户 2026-09-02:「把采集到的推文显示在右侧,
-  //    这样我一眼就可以比对到是否采集了」)。给 60 条,按最新在前。
-  const recent = [...monitor.captured.values()].slice(-60).reverse().map((t) => ({
+  // ⭐ **按屏幕顺序列出**(用户 2026-09-02:「把采集到的推文显示在右侧,
+  //    这样我一眼就可以比对到是否采集了」)。
+  //    此前用 captured 的插入序 = 「最近发现的」,与左侧顺序完全不同,
+  //    左边第一条会排到右边最后 —— 看着像"对不上",其实是排序错了。
+  //    现在:先列当前屏幕上的(顺序一致),屏幕上没有的不列。
+  const onScreenTweets = monitor.onScreen
+    .map((id) => monitor!.captured.get(id))
+    .filter((t): t is HarvestedTweet => !!t);
+  const recent = onScreenTweets.map((t) => ({
     tweetId: t.tweetId,
     authorHandle: t.authorHandle,
     text: t.text.slice(0, 140),
@@ -143,6 +166,8 @@ function snapshot(extra?: { url?: string; scrollY?: number }): MonitorSnapshot {
   }));
   return {
     running: true,
+    onScreenCount: monitor.onScreen.length,
+    skippedAds: monitor.lastSkipped,
     seenInDom: monitor.seenInDom.size,
     captured: monitor.captured.size,
     captureRate: monitor.seenInDom.size
@@ -180,10 +205,11 @@ export async function startCaptureMonitor(
 
   const captured = new Map<string, HarvestedTweet>();
   const seenInDom = new Set<string>();
+  // onScreen 每轮重建 —— 它反映「此刻屏幕上有什么」,不是累计
   const pending = new Map<string, string>();
 
   const state: MonitorState = {
-    wcId: wc.id, captured, seenInDom, payloads: 0,
+    wcId: wc.id, captured, seenInDom, onScreen: [], lastSkipped: 0, payloads: 0,
     startedAt: Date.now(), domTimer: null, pending, attached: false,
     onMessage: (_e, method, params) => {
       if (method === 'Network.requestWillBeSent') {
@@ -237,8 +263,11 @@ export async function startCaptureMonitor(
     wc.executeJavaScript(SCAN_DOM_IDS)
       .then((r: {
         items: Array<{ id: string; handle: string; text: string; createdAt: string; likes: number }>;
-        scrollY: number; docH: number; url: string;
+        skipped: number; scrollY: number; docH: number; url: string;
       }) => {
+        state.lastSkipped = r.skipped ?? 0;
+        // 每轮重建:这是「此刻屏幕上的顺序」,与左侧页面一一对应
+        state.onScreen = (r.items ?? []).map((it) => it.id);
         for (const it of r.items ?? []) {
           seenInDom.add(it.id);
           // DOM 兜底:载荷没覆盖到的,用屏幕上的内容补 —— 但**不覆盖**已有的,

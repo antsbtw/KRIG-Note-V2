@@ -1412,7 +1412,8 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
 // ⭐ 核心是**分母**:滚过多少 vs 采到多少。没有分母时「抓到 81 条」
 //    说明不了任何问题 —— 正是用户拿官网 433 次点击当分母才发现漏了 80%。
 interface CaptureSnap {
-  running: boolean; seenInDom: number; captured: number; captureRate: number;
+  running: boolean; onScreenCount: number; skippedAds: number;
+  seenInDom: number; captured: number; captureRate: number;
   missing: string[]; payloads: number; elapsedSec: number;
   currentUrl?: string; scrollY?: number;
   recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
@@ -1426,7 +1427,7 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
   const [autoFollow, setAutoFollow] = useState(true);
 
   // 用户 2026-09-02:「屏幕满时自动往下同步滚动,方便作为人的观察和比对」
-  // 最新的在最上面,所以「跟随」= 滚到顶部
+  // 列表按**屏幕顺序**排(第一条 = 左边最上面那条),所以跟随 = 回到顶部对齐。
   useEffect(() => {
     if (autoFollow && listRef.current) listRef.current.scrollTop = 0;
   }, [snap, autoFollow]);
@@ -1473,10 +1474,10 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
         {/* 统计:分子/分母/采集率 */}
         <div style={{ display: 'flex', gap: 10 }}>
           {[
-            { label: '滚过(分母)', value: snap?.seenInDom ?? 0, color: 'var(--text-bright)' },
-            { label: '采到(分子)', value: snap?.captured ?? 0, color: '#60a5fa' },
+            { label: '此刻屏幕上', value: snap?.onScreenCount ?? 0, color: 'var(--text-bright)' },
+            { label: '累计滚过', value: snap?.seenInDom ?? 0, color: 'var(--text-muted)' },
+            { label: '已采到', value: snap?.captured ?? 0, color: '#60a5fa' },
             { label: '采集率', value: `${rate}%`, color: rateColor },
-            { label: '响应数', value: snap?.payloads ?? 0, color: 'var(--text-muted)' },
           ].map((k) => (
             <div key={k.label} style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 8, padding: '10px 12px' }}>
               <div style={{ fontSize: 10, color: 'var(--text-disabled)' }}>{k.label}</div>
@@ -1488,6 +1489,8 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
         {snap?.currentUrl && (
           <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
             当前页:{snap.currentUrl}　scrollY={snap.scrollY}　已运行 {snap.elapsedSec}s
+            {snap.skippedAds > 0 && `　(跳过 ${snap.skippedAds} 个广告/非推文元素)`}
+            　响应 {snap.payloads}
           </div>
         )}
 
@@ -1506,7 +1509,7 @@ function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBa
         {/* 实时采到的内容 —— 与左边页面人眼对照 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
-            采到的推文(最新在上,共 {snap?.captured ?? 0} 条):
+            此刻屏幕上的推文(顺序与左侧一致,共 {snap?.onScreenCount ?? 0} 条):
           </span>
           <label style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
             <input type="checkbox" checked={autoFollow} onChange={(e) => setAutoFollow(e.target.checked)} />
