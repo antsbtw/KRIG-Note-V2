@@ -52,6 +52,40 @@ export function computeSinceDate(recipe: SearchRecipe, overlapHours = 48): Date 
   return new Date(Date.now() - (recipe.sinceHours ?? 24) * 3_600_000);
 }
 
+/**
+ * 本轮**实际要滚多深** —— 与 since 窗口分开的两件事。
+ *
+ * 用户 2026-09-02:「我觉得每次扫描的执行太久了吧?」
+ * 实测症结:配方每 30 分钟跑一次,却每次都滚回 48 小时前 ——
+ * 48h 窗口内有 1062 条,而 30 分钟真正新增的只有 14 条,**76 倍无用功**。
+ *
+ * 但 48h 叠加窗口本身是对的(用户此前拍板:宁可重复不可遗漏,
+ * 防的是 app 关机/采集失败导致窗口永久丢失)。两者不矛盾:
+ *  · `since:` 保持宽 —— 它只是告诉 X「别给我更旧的」,不花我们时间
+ *  · **滚动深度**按「距上次成功运行多久」算,正常轮次只需覆盖那一小段
+ *
+ * 规则(用户 2026-09-02 拍板:「就执行 12 小时以内的就可以了」):
+ *  · 常规:上次运行至今 + 2 小时缓冲(X 搜索索引有延迟,新推可能晚几小时才出现)
+ *  · **上限 12 小时** —— 即使关机好几天,单轮也只滚 12 小时,
+ *    剩下的靠下一轮继续(每 30 分钟一轮,补齐很快),不让单次跑到失控
+ *  · 首次运行没有 lastRunAt → 直接用 12 小时上限
+ *
+ * ⚠️ 这不影响 `since:` 的 48h 叠加窗口 —— 那个照旧宽,防的是窗口永久丢失;
+ *    这里限的是**滚动深度**,即「本轮实际往回读多远」。两者是两件事。
+ */
+export const MAX_SCROLL_DEPTH_HOURS = 12;
+
+export function computeScrollDepthMs(recipe: SearchRecipe, bufferHours = 2): number {
+  const cap = MAX_SCROLL_DEPTH_HOURS * 3_600_000;
+  if (!recipe.lastRunAt) return cap;
+
+  const last = new Date(recipe.lastRunAt).getTime();
+  if (!Number.isFinite(last)) return cap;
+
+  const sinceLastRun = Date.now() - last + bufferHours * 3_600_000;
+  return Math.min(sinceLastRun, cap);
+}
+
 /** 按 SearchRecipe 拼装 X 搜索 URL */
 export function buildSearchUrl(recipe: SearchRecipe): string {
   const parts: string[] = [];
@@ -217,8 +251,14 @@ export async function scanRecipe(
   // undefined → NONE(SurrealDB 的 option 语义),cleanExpired 会跳过这些行。
   const expiresAt = undefined;
 
-  // since 窗口起点:滚过它就说明这一窗内的推文都看完了(不必读完整个时间线)
+  // ⚠️ 两个不同的量,别混:
+  //  · sinceMs   = 搜索 URL 里的 since: 起点(宽,48h 叠加,防遗漏)
+  //  · scrollToMs = 本轮**实际滚到哪**(窄,只覆盖距上次运行那一段)
+  // 30 分钟一轮却每次滚 48 小时 = 76 倍无用功(实测 1062 条里只有 14 条是新的)。
   const sinceMs = computeSinceDate(recipe).getTime();
+  const scrollToMs = Date.now() - computeScrollDepthMs(recipe);
+  console.log(`[x-timeline-scan] since=${new Date(sinceMs).toISOString().slice(0, 10)} `
+    + `滚动深度=${Math.round(computeScrollDepthMs(recipe) / 3_600_000)}h`);
   let lastScrollY = -1;
   let stuckRounds = 0;
 
@@ -327,8 +367,8 @@ export async function scanRecipe(
       .map((t) => t.createdAt).filter(Boolean)
       .map((d) => new Date(d as string).getTime())
       .filter((n) => Number.isFinite(n));
-    if (oldestThisRound.length && Math.min(...oldestThisRound) < sinceMs) {
-      console.log(`[x-timeline-scan] 已滚过 since 窗口(${new Date(sinceMs).toISOString().slice(0, 10)}),停止`);
+    if (oldestThisRound.length && Math.min(...oldestThisRound) < scrollToMs) {
+      console.log(`[x-timeline-scan] 已滚过本轮深度(${new Date(scrollToMs).toISOString()}),停止`);
       break;
     }
 

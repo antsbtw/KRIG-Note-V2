@@ -25,9 +25,11 @@ describe('搜索扫描的滚动覆盖', () => {
     ).toBeGreaterThanOrEqual(100);
   });
 
-  it('⭐ 必须按 since 窗口判断是否读完', () => {
+  it('⭐ 必须按时间判断是否读完(而非固定圈数)', () => {
+    // 停止判据从 sinceMs 改为 scrollToMs:since 窗口仍宽(防遗漏),
+    // 但单轮只滚「距上次运行那一段」,详见下方两条
     expect(SRC).toContain('sinceMs');
-    expect(SRC).toMatch(/Math\.min\(\.\.\.oldestThisRound\)\s*<\s*sinceMs/);
+    expect(SRC).toMatch(/Math\.min\(\.\.\.oldestThisRound\)\s*<\s*scrollToMs/);
   });
 
   it('⭐ 必须检测「真的滚不动」而非只看有无新数据', () => {
@@ -46,5 +48,17 @@ describe('搜索扫描的滚动覆盖', () => {
 
   it('48h 叠加窗口仍在(宁可重复不可遗漏)', () => {
     expect(SRC).toMatch(/overlapHours\s*=\s*48/);
+  });
+
+  it('⭐ 滚动深度与 since 窗口必须分开 —— 否则 30 分钟一轮却滚 48 小时', () => {
+    // 实测:48h 窗口内 1062 条,而 30 分钟真正新增只有 14 条 = 76 倍无用功
+    expect(SRC).toContain('computeScrollDepthMs');
+    expect(SRC).toContain('scrollToMs');
+    // 停止判据必须用 scrollToMs(本轮深度),不能用 sinceMs(宽窗口)
+    expect(SRC).toMatch(/Math\.min\(\.\.\.oldestThisRound\)\s*<\s*scrollToMs/);
+  });
+
+  it('滚动深度有 12 小时上限(关机数天也不会单轮跑失控)', () => {
+    expect(SRC).toMatch(/MAX_SCROLL_DEPTH_HOURS\s*=\s*12/);
   });
 });
