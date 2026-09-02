@@ -88,13 +88,84 @@ in_reply_to   0/860    0%
 真正抓全的仅近期采集的约 244 行。
 → 现有存量数据**不足以支撑画像**,这是独立于「能抓什么」的另一个问题。
 
-### 2.4 ❓ 待测:GraphQL 原始载荷的字段全集
+### 2.4 ✅ 实测:GraphQL 原始载荷字段全集(2026-09-02 勘查)
 
-已建工具 `x-payload-inspector.ts`(CDP 捕获 `/i/api/graphql/`,
-递归枚举全部字段路径 + 频次 + 样例),**尚未跑出结果**。
+**捕获 29 个响应,发现 1751 个字段路径。**
+报告:`userData/x-payload-survey/survey-2026-09-02T10-57-10-226Z.md`(448KB)
+原始:同目录 `raw-*.json`(3.2MB,每接口留最大一份,供日后重新分析)
 
-跑完后本节应填入:各接口(操作名)、字段全集、关系类字段。
-**在那之前,任何关于「能做到哪一步」的断言都无效。**
+#### 捕获到的核心接口
+
+| 接口 | 大小 | 供给 |
+|---|---|---|
+| `NotificationsTimeline` | 560KB | **入向关系(谁赞/回/关注我)** |
+| `HomeTimeline` | 257KB | 时间线推文全字段 |
+| `UserRepliesTimeline` | 242KB | 我的回复流(= `/with_replies`) |
+| `UserOriginalsTimeline` | 135KB | 我的原创推 |
+| `UserByScreenName` | 2KB | **账号实体(画像基底)** |
+
+> ✅ **回答 §4.9 存疑项**:当前 x.com 走的是 **GraphQL `NotificationsTimeline`**,
+> 不是 twikit 用的 v1.1 `all.json`。→ 实现应对齐 GraphQL 版。
+
+#### ✅ 证实:登录态自身互动状态免费自带
+
+```
+...tweet_results.result.legacy.favorited    ×33
+...tweet_results.result.legacy.retweeted    ×33
+...tweet_results.result.legacy.bookmarked   ×33
+```
+每条推都有,连 `quoted_status_result`(被引用的推)也各带一份。
+**社区调研 §4.6 的说法在我们自己的线上得到证实。**
+
+#### ✅ 证实:回复关系权威字段就在载荷里
+
+```
+legacy.conversation_id_str        ×33   会话根
+legacy.in_reply_to_status_id_str        父推 id
+legacy.in_reply_to_user_id_str          被回复者 id
+legacy.in_reply_to_screen_name          被回复者 handle
+```
+→ **彻底作废**此前从 DOM 猜连接线/idx 相邻/正则匹配的三套判据(§1.2 教训)。
+
+#### ⭐ 通知条目结构(入向关系的真源)
+
+`itemContent.__typename = "TimelineNotification"`:
+
+| 字段 | 内容 |
+|---|---|
+| `notification_icon` | **动作类型** —— `heart_icon`(点赞)/ `recommendation_icon` / `bell_icon` / `report_icon` |
+| `rich_message.text` | 人读文案,如「东大-MCGA 红色信仰🇨🇳 liked your reply」 |
+| `template.from_users[]` | **具名操作者数组**(含完整 user 对象) |
+| `template.target_objects[]` | 被操作的推文 |
+| `timestamp_ms` | 精确时间 |
+| `notification_url` | 指向具体推文 |
+
+✅ **证实 twikit 的截断确实有害**:实测 `from_users` 长度分布 `[0,1,3,5]`,
+**单条通知最多含 5 个具名操作者**。twikit 只取 `[0]` 会丢掉 4 个。
+→ 我们自己实现**必须读整个数组**。
+
+#### ⭐ 账号实体字段(画像基底,`UserByScreenName`)
+
+| 字段 | 实测值(本账号) |
+|---|---|
+| `core.created_at` | `Tue Jan 13 2026` —— **账号年龄** |
+| `relationship_counts` | `{followers: 174, following: 48}` |
+| `tweet_counts` | `{tweets: 1192, media_tweets: 79}` |
+| `action_counts.favorites_count` | `587` —— **该账号点赞总数** |
+| `profile_bio.description` | 简介全文 + entities |
+| `location` / `website` / `is_blue_verified` / `verification` | 身份属性 |
+| `pinned_items.tweet_ids_str` | 置顶推 |
+| **`relationship_perspectives`** | `{following, followed_by, blocking, blocked_by, muting, live_following}` |
+
+→ `relationship_perspectives` = **我与此人的关系,零额外请求**。
+   `action_counts.favorites_count` 甚至给出对方的点赞总量(活跃度指标)。
+
+#### 其他值得注意的字段簇(见报告全文)
+
+`views`(浏览量)、`edit_control`(编辑历史)、`note_tweet`(长推全文)、
+`article`(长文)、`card`(卡片/投票)、`community_results`、
+`birdwatch_pivot`(社区注记)、`grok_*`(AI 分析)、`content_disclosure`(AI 披露)、
+`source`(发推客户端)、`entities`(链接/话题/@提及)、`possibly_sensitive`。
 
 ---
 
@@ -239,19 +310,50 @@ guest token 已基本无用;twifork 称密码登录端点已被 X 撤除。
 - `Retweeters` 在 2026 是否仍返回完整数据 —— 无 2026 实测来源
 - `Favoriters` 对**自己的**推是否返回数据 —— 规则说作者可见,但
   未见来源确认 GraphQL 端点(而非 UI)遵守此规则。**一次请求即可自测**
-- 当前 x.com 实际调 v1.1 还是 GraphQL 通知接口
+- ~~当前 x.com 实际调 v1.1 还是 GraphQL 通知接口~~ → ✅ **已实测:GraphQL
+  `NotificationsTimeline`**(见 §2.4),实现应对齐 GraphQL 版
 - 精确限流数字(见 4.7)
 
 ---
 
-## 5. 下一步(本文档完成后才谈画像)
+## 5. 结论:能做到哪一步
 
-1. 跑 `载荷勘查`,填 §2.4 —— **这是硬前置**
-2. 汇入社区调研,填 §4
-3. 两相对照,定出**确定能拿到的字段全集**
-4. 再谈画像:用哪些字段、算什么指标、多久更新一次
+§2(本机实测)与 §4(社区调研)已交叉印证完毕。**能力边界现在是清楚的:**
 
-**不要跳过 1-3 直接设计画像。** 那正是此前反复出错的路径。
+### 5.1 能拿到(已证实)
+
+- **推文全字段**:正文(含长推 `note_tweet` 全文)、时间、语言、
+  媒体、`entities`、浏览量、编辑历史、发推客户端、卡片/投票
+- **我与每条推的关系**:`favorited` / `retweeted` / `bookmarked` —— 零额外请求
+- **我与每个人的关系**:`following` / `followed_by` / `blocking` / `muting`
+- **回复关系**:`conversation_id_str` + `in_reply_to_*` 权威字段
+- **入向互动**:通知页具名 —— 谁赞了我、谁回了我(单条最多 5 个具名操作者)
+- **账号实体**:注册时间、粉丝/关注数、发推数、点赞总数、简介、置顶推
+
+### 5.2 拿不到(硬边界,与技术水平无关)
+
+- **谁点赞了任意一条推**(非我本人的)—— X 于 2024-06 移除,服务端授权规则
+- **他人的收藏** —— 从不公开
+
+### 5.3 待实测(有疑问,别当结论)
+
+- `Retweeters` 在 2026 是否仍返回完整数据
+- 精确限流(§4.7 来源单一且与博客矛盾)
+- 时间线滚动的懒加载封顶(B′ 诊断跑到 60 轮只覆盖 3.2 天,未到底)
+
+### 5.4 一个独立问题:存量数据不足
+
+现有 860 行里 616 行是 0 期回填,**只有正文没有元数据**(§2.3)。
+画像要历史纵深,就得**重爬**这部分 —— 这是独立于「能抓什么」的工作量。
+
+---
+
+## 6. 下一步:谈画像
+
+前置条件已满足,可以开始设计。建议顺序:
+1. 定画像**要回答什么问题**(留客?找潜在客户?识别高价值互动者?)
+2. 由问题倒推需要哪些指标,再由指标倒推采哪些字段(**不要反过来**)
+3. 定采集节奏与存储形态(对照数据模型总纲:实体优先/关系第二性/派生可重算)
 
 ---
 
