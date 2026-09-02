@@ -338,6 +338,9 @@ export const IPC_CHANNELS = {
   X_PAYLOAD_SURVEY:  'x:payload-survey', // renderer → main invoke：勘查 X GraphQL 原始载荷字段（能力边界的真实依据）
   X_COLLECT_REPLIES: 'x:collect-replies', // renderer → main invoke：采集回复关系并回填 replied
   X_HARVEST:         'x:harvest',        // renderer → main invoke：通用时间线采集（滚到底 + 自校验）
+  X_CAPTURE_START:   'x:capture-start',  // renderer → main invoke：开始被动监视采集
+  X_CAPTURE_STOP:    'x:capture-stop',   // renderer → main invoke：停止监视并取最终统计
+  X_CAPTURE_UPDATE:  'x:capture-update', // main → renderer 广播：实时采集快照
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

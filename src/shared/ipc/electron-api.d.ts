@@ -54,6 +54,22 @@ import type {
   AuthActionResult,
 } from '../auth/auth-types';
 
+interface XCaptureSnapshot {
+  running: boolean;
+  /** 屏幕上滚过的条数(分母) */
+  seenInDom: number;
+  /** 实际采到的条数(分子) */
+  captured: number;
+  captureRate: number;
+  /** DOM 见过但没采到的 —— 漏网名单 */
+  missing: string[];
+  payloads: number;
+  elapsedSec: number;
+  currentUrl?: string;
+  scrollY?: number;
+  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number }>;
+}
+
 declare global {
   /** Web 下载历史条目(主进程 download-store 落盘的终态记录)*/
   interface WebDownloadHistoryEntry {
@@ -802,6 +818,9 @@ declare global {
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
         /** 采集回复关系并回填 replied(主线第一环) */
+        captureStart(wcId?: number): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
+        captureStop(): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
+        onCaptureUpdate(cb: (snap: XCaptureSnapshot) => void): () => void;
         harvest(url: string, wcId?: number): Promise<{
           success: boolean; error?: string;
           report?: {

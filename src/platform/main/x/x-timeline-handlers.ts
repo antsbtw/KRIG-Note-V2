@@ -25,6 +25,7 @@ import { probeAuthorTimeline } from './x-author-timeline-spike';
 import { surveyXPayloads } from './x-payload-inspector';
 import { collectReplyRelations } from './x-reply-collector';
 import { harvestTimeline } from './x-timeline-harvester';
+import { startCaptureMonitor, stopCaptureMonitor, getCaptureSnapshot } from './x-capture-monitor';
 import { countRepliedAccepted, getOwnReplyCoverage } from '../db/x-reply-relation-repo';
 import { getAuthorCounts } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG, normalizeHandle } from '@shared/types/x-timeline-types';
@@ -389,6 +390,29 @@ export function registerXTimelineHandlers(): void {
           sample: r.tweets.slice(0, 3),
           trace: [...r.trace.slice(0, 5), ...r.trace.slice(-5)] },
       };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_CAPTURE_START / STOP — 被动采集监视(左边浏览,右边实时显示抓到什么)
+  // 用户 2026-09-02 定的验证方式:人眼对照 + 采集率统计,
+  // 比「跑一遍自己报 ✅」可信 —— 后者校验与采集同源,一起错就一起瞎
+  ipcMain.handle(IPC_CHANNELS.X_CAPTURE_START, async (_e, payload: unknown) => {
+    const p = payload as { wcId?: unknown } | null;
+    const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const r = await startCaptureMonitor(wcId);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, snapshot: getCaptureSnapshot() };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_CAPTURE_STOP, async () => {
+    try {
+      return { success: true, snapshot: stopCaptureMonitor() };
     } catch (err) {
       return { success: false, error: String(err) };
     }

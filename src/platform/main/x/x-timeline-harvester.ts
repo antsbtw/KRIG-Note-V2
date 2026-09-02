@@ -78,11 +78,15 @@ export interface HarvestReport {
   trace: RoundTrace[];
 }
 
-/** 递归抽取所有推文对象 —— 只认 legacy 里的权威字段,不做 DOM 推断 */
-function extractTweets(node: unknown, out: Map<string, HarvestedTweet>): void {
+/**
+ * 递归抽取所有推文对象 —— 只认 legacy 里的权威字段,不做 DOM 推断。
+ * 导出给 x-capture-monitor 复用:**同一份抽取逻辑**,避免两处实现漂移
+ * (滚动逻辑散成三份、同一 bug 修三遍的教训就在眼前)。
+ */
+export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet>): void {
   if (node === null || typeof node !== 'object') return;
   if (Array.isArray(node)) {
-    for (const it of node) extractTweets(it, out);
+    for (const it of node) extractTweetsFrom(it, out);
     return;
   }
   const o = node as Record<string, unknown>;
@@ -140,7 +144,7 @@ function extractTweets(node: unknown, out: Map<string, HarvestedTweet>): void {
     }
   }
 
-  for (const v of Object.values(o)) extractTweets(v, out);
+  for (const v of Object.values(o)) extractTweetsFrom(v, out);
 }
 
 /** 算日期跨度与空洞 —— 空洞是漏采的直接信号 */
@@ -201,7 +205,7 @@ export async function harvestTimeline(
         .then((r: any) => {
           if (!r?.body) return;
           payloads++;
-          try { extractTweets(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
+          try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
         })
         .catch(() => { /* 响应体可能已丢弃 */ });
     }

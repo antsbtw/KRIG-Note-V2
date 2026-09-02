@@ -1113,6 +1113,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSelf: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
     /** 采集回复关系并回填 replied(主线第一环) */
+    /** 被动采集监视:开始/停止 + 实时快照订阅 */
+    captureStart: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_START, { wcId }),
+    captureStop: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_STOP),
+    onCaptureUpdate: (cb: (snap: unknown) => void) => {
+      const h = (_e: unknown, snap: unknown): void => cb(snap);
+      ipcRenderer.on(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
+      return () => ipcRenderer.off(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
+    },
     /** 通用时间线采集(滚到底 + 自校验);只读不落库 */
     harvest: (url: string, wcId?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST, { url, wcId }),

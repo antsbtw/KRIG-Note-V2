@@ -475,7 +475,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const PAGE_SIZE = 20;
 
-  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked'>('inbox');
+  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture'>('inbox');
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -708,6 +708,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     });
   };
 
+  // ── 采集验证视图 ──────────────────────────────────────────────────
+  if (view === 'capture') {
+    return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
   // ── 屏蔽名单视图 ──────────────────────────────────────────────────
   if (view === 'blocked') {
     return <BlockedManagerView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
@@ -747,6 +752,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
           <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
+          <Btn onClick={() => setView('capture')}>🔬 采集验证</Btn>
           {isInRightSlot && (
             <button onClick={handleClose} style={closeBtn}>✕</button>
           )}
@@ -1392,6 +1398,129 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
             <Btn sm onClick={() => handleUnblock(a.handle)}>解除</Btn>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 采集验证视图 ────────────────────────────────────────────────────
+// 用户 2026-09-02 定的验证方式:「左边是原推文页,右边是采集显示页,
+// 我在左边操作,你在右边显示抓取的 item 内容,如果我切换任何页面,
+// 都能保证抓取这些内容,这个函数就算大概过关。理论上应该加上统计,
+// 共滚动过多少个推文,成功采集了多少条才算。」
+//
+// ⭐ 核心是**分母**:滚过多少 vs 采到多少。没有分母时「抓到 81 条」
+//    说明不了任何问题 —— 正是用户拿官网 433 次点击当分母才发现漏了 80%。
+interface CaptureSnap {
+  running: boolean; seenInDom: number; captured: number; captureRate: number;
+  missing: string[]; payloads: number; elapsedSec: number;
+  currentUrl?: string; scrollY?: number;
+  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number }>;
+}
+
+function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
+  const [snap, setSnap] = useState<CaptureSnap | null>(null);
+  const [running, setRunning] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    const off = api()?.onCaptureUpdate?.((s) => setSnap(s as CaptureSnap));
+    return () => { if (off) off(); };
+  }, []);
+
+  const start = async () => {
+    const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    const r = await api()?.captureStart(wcId);
+    if (!r?.success) { setMsg(`启动失败:${r?.error ?? '未知'}`); return; }
+    setRunning(true);
+    setMsg('监视中 —— 请在左侧自由浏览、滚动、切换页面');
+  };
+
+  const stop = async () => {
+    const r = await api()?.captureStop();
+    setRunning(false);
+    if (r?.snapshot) setSnap(r.snapshot as CaptureSnap);
+    setMsg('已停止');
+  };
+
+  const rate = snap?.captureRate ?? 0;
+  const rateColor = rate >= 99 ? '#22c55e' : rate >= 90 ? '#f59e0b' : '#ef4444';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-bright)' }}>🔬 采集验证</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>左边浏览,右边实时对照</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {msg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{msg}</span>}
+          {running
+            ? <Btn sm onClick={stop} style={{ background: '#7f1d1d', borderColor: '#7f1d1d', color: '#fca5a5' }}>停止监视</Btn>
+            : <Btn sm primary onClick={start}>开始监视</Btn>}
+          <Btn sm onClick={onBack}>← 返回收件箱</Btn>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 统计:分子/分母/采集率 */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          {[
+            { label: '滚过(分母)', value: snap?.seenInDom ?? 0, color: 'var(--text-bright)' },
+            { label: '采到(分子)', value: snap?.captured ?? 0, color: '#60a5fa' },
+            { label: '采集率', value: `${rate}%`, color: rateColor },
+            { label: '响应数', value: snap?.payloads ?? 0, color: 'var(--text-muted)' },
+          ].map((k) => (
+            <div key={k.label} style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 8, padding: '10px 12px' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-disabled)' }}>{k.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: k.color }}>{k.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {snap?.currentUrl && (
+          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+            当前页:{snap.currentUrl}　scrollY={snap.scrollY}　已运行 {snap.elapsedSec}s
+          </div>
+        )}
+
+        {/* 漏网名单 —— 屏幕上见过却没采到的,这才是真正的问题 */}
+        {snap && snap.missing.length > 0 && (
+          <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px', borderLeft: '3px solid #ef4444' }}>
+            <div style={{ color: '#fca5a5', fontWeight: 600, marginBottom: 4 }}>
+              ⚠ 屏幕上见过但没采到:{snap.missing.length} 条
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'ui-monospace, monospace' }}>
+              {snap.missing.join(', ')}
+            </div>
+          </div>
+        )}
+
+        {/* 实时采到的内容 —— 与左边页面人眼对照 */}
+        <div style={{ fontSize: 11, color: 'var(--text-disabled)', marginTop: 4 }}>
+          最近采到(与左侧页面对照):
+        </div>
+        {(snap?.recent ?? []).map((t) => (
+          <div key={t.tweetId} style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '8px 12px',
+            borderLeft: `3px solid ${t.isReply ? '#a78bfa' : '#22c55e'}`,
+          }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3 }}>
+              <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{normalizeHandle(t.authorHandle ?? '')}</span>
+              <span style={{ fontSize: 10, color: t.isReply ? '#a78bfa' : '#22c55e' }}>
+                {t.isReply ? '回复' : '原创'}
+              </span>
+              <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)' }}>
+                ♥{t.likes ?? 0}　{t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : ''}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.5 }}>{t.text}</div>
+          </div>
+        ))}
+        {!snap?.recent?.length && (
+          <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 30 }}>
+            点「开始监视」后,在左侧 X 页面浏览/滚动/切换标签页,这里会实时显示抓到的内容。
+          </div>
+        )}
       </div>
     </div>
   );
