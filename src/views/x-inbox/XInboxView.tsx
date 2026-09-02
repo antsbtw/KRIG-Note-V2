@@ -1199,15 +1199,17 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       const x = r.result;
       const ops = x.operations.slice(0, 12)
         .map((o) => `  ${o.name} ×${o.count} (${Math.round(o.bytes / 1024)}KB)`).join('\n');
-      const rel = x.relationFields.slice(0, 40)
+      const rel = x.relationFields.slice(0, 60)
         .map((f) => `  ${f.path}  ×${f.count}  = ${f.sample}`).join('\n');
       setSpikeOut(
         `X 原始载荷勘查 —— 捕获 ${x.totalPayloads} 个响应,${x.fields.length} 个字段\n`
         + `${x.note}\n`
+        + `\n📄 完整报告(UI 只显示摘要,全量在文件里):\n  ${x.reportPath}\n`
+        + `📦 原始响应(供日后重新分析,不必再跑):\n  ${x.rawPath}\n`
         + `\n【捕获的接口(按来源页)】\n${ops || '  (无)'}\n`
         + `\n【关系类字段 —— 能做什么的真实依据】\n${rel || '  (无)'}\n`
-        + `\n【全部字段共 ${x.fields.length} 个,前 60】\n`
-        + x.fields.slice(0, 60).map((f) => `  ${f.path} ×${f.count}`).join('\n'),
+        + `\n【全部字段共 ${x.fields.length} 个,此处前 80,余见报告文件】\n`
+        + x.fields.slice(0, 80).map((f) => `  ${f.path} ×${f.count}`).join('\n'),
       );
     } finally {
       setSpiking(false);

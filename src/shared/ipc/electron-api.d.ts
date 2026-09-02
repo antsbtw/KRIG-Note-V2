@@ -805,6 +805,7 @@ declare global {
         payloadSurvey(wcId?: number, seconds?: number): Promise<{
           success: boolean; error?: string;
           result?: {
+            reportPath: string; rawPath: string;
             totalPayloads: number; note: string;
             operations: Array<{ name: string; count: number; bytes: number }>;
             fields: Array<{ path: string; count: number; sample: string }>;

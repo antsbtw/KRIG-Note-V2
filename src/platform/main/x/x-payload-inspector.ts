@@ -24,6 +24,9 @@
  *    **不做解读、不预设结论** —— 由真实字段说话。
  */
 
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { app } from 'electron';
 import { resolveXWebContents } from './x-webcontents';
 
 /** 一条被捕获的 GraphQL 响应 */
@@ -46,11 +49,14 @@ function collectFieldPaths(
   out: Map<string, { count: number; sample: string }>,
   depth = 0,
 ): void {
-  if (depth > 12 || node === null || node === undefined) return;
+  if (depth > 20 || node === null || node === undefined) return;
 
   if (Array.isArray(node)) {
-    // 数组:只看前两个元素,路径上标 [] 表示这是列表
-    for (const item of node.slice(0, 2)) collectFieldPaths(item, `${prefix}[]`, out, depth + 1);
+    // ⚠️ 必须**全量遍历**:X 一个响应含约 20 条推,只看前 2 个会漏掉
+    // 只在特定推文上才出现的字段(长推 note_tweet、投票 card、社区 community_results、
+    // 引用 quoted_status_result…)。用户 2026-09-02:「推文的元数据越多越好」——
+    // 字段发现阶段的漏采,后面补不回来。
+    for (const item of node) collectFieldPaths(item, `${prefix}[]`, out, depth + 1);
     return;
   }
 
@@ -61,7 +67,7 @@ function collectFieldPaths(
         collectFieldPaths(v, path, out, depth + 1);
       } else {
         const prev = out.get(path);
-        const sample = String(v).slice(0, 40);
+        const sample = String(v).slice(0, 120);
         out.set(path, { count: (prev?.count ?? 0) + 1, sample: prev?.sample ?? sample });
       }
     }
@@ -69,6 +75,10 @@ function collectFieldPaths(
 }
 
 export interface PayloadSurveyResult {
+  /** 完整报告落盘路径 —— UI 只显示摘要,全量在这里 */
+  reportPath: string;
+  /** 原始响应样本落盘路径(供日后重新分析,不必再跑一次) */
+  rawPath: string;
   /** 捕获到的 GraphQL 操作名与次数 */
   operations: Array<{ name: string; count: number; bytes: number }>;
   /** 全部标量字段路径(按出现次数降序),这是**能力边界的真实依据** */
@@ -90,7 +100,11 @@ export interface PayloadSurveyResult {
  */
 export const SURVEY_TARGETS = [
   { key: 'notifications', url: 'https://x.com/notifications', why: '入向关系:谁赞/转/回/关注了我' },
-  { key: 'home',          url: 'https://x.com/home',          why: '时间线推文与计数' },
+  { key: 'home',          url: 'https://x.com/home',          why: '时间线推文全字段' },
+  // 画像素材:个人主页含 UserByScreenName —— 简介/注册时间/粉丝数/地区/置顶推等
+  { key: 'profile',       url: 'https://x.com/NetLab2GFW',    why: '账号实体字段(画像基底)' },
+  // 自己的回复流:含 in_reply_to_* 权威字段,验证回复关系
+  { key: 'with_replies',  url: 'https://x.com/NetLab2GFW/with_replies', why: '回复关系权威字段' },
 ] as const;
 
 /** 关系类关键词 —— 只用于分组展示,不用于过滤 */
@@ -202,10 +216,57 @@ export async function surveyXPayloads(
     RELATION_HINTS.some((hint) => f.path.toLowerCase().includes(hint.toLowerCase())),
   );
 
+  const operations = [...opMap.entries()]
+    .map(([name, v]) => ({ name, count: v.count, bytes: v.bytes }))
+    .sort((a, b) => b.count - a.count);
+
+  // ── 落盘 ────────────────────────────────────────────────────────
+  // UI 文本框装不下几千个字段,且关掉就没了。字段发现是**一次性成本**,
+  // 结果必须留痕:报告用于判读,原始响应用于日后重新分析(不必再跑一次)。
+  const dir = join(app.getPath('userData'), 'x-payload-survey');
+  mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const reportPath = join(dir, `survey-${stamp}.md`);
+  const rawPath = join(dir, `raw-${stamp}.json`);
+
+  const lines: string[] = [
+    `# X GraphQL 载荷勘查 — ${new Date().toISOString()}`,
+    '',
+    `捕获 ${captured.length} 个响应,发现 ${allFields.length} 个字段路径。`,
+    '',
+    '## 捕获的接口(来源页/操作名)',
+    '',
+    ...operations.map((o) => `- \`${o.name}\` ×${o.count} (${Math.round(o.bytes / 1024)}KB)`),
+    '',
+    '## 关系类字段',
+    '',
+    ...relationFields.map((f) => `- \`${f.path}\` ×${f.count} = ${f.sample}`),
+    '',
+    `## 全部字段(${allFields.length} 个,按出现次数降序)`,
+    '',
+    ...allFields.map((f) => `- \`${f.path}\` ×${f.count} = ${f.sample}`),
+  ];
+  writeFileSync(reportPath, lines.join('\n'), 'utf-8');
+
+  // 原始响应:每个接口留最大的一份(样本最全),避免文件过大
+  const biggest = new Map<string, CapturedPayload>();
+  for (const c of captured) {
+    const k = `${c.source}/${c.operation}`;
+    if (!biggest.has(k) || biggest.get(k)!.bytes < c.bytes) biggest.set(k, c);
+  }
+  writeFileSync(rawPath, JSON.stringify(
+    [...biggest.entries()].map(([k, c]) => ({
+      key: k, url: c.url, bytes: c.bytes,
+      body: (() => { try { return JSON.parse(c.body); } catch { return c.body; } })(),
+    })), null, 2), 'utf-8');
+
+  console.log(`[x-payload-inspector] 报告: ${reportPath}`);
+  console.log(`[x-payload-inspector] 原始: ${rawPath}`);
+
   return {
-    operations: [...opMap.entries()]
-      .map(([name, v]) => ({ name, count: v.count, bytes: v.bytes }))
-      .sort((a, b) => b.count - a.count),
+    reportPath,
+    rawPath,
+    operations,
     fields: allFields,
     relationFields,
     totalPayloads: captured.length,
