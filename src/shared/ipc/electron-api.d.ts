@@ -801,6 +801,14 @@ declare global {
         unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
+        watchlistSpike(handle: string, wcId?: number): Promise<{
+          success: boolean; error?: string; handle?: string;
+          results?: Array<{
+            key: string; query: string; url: string; articles: number; replies: number;
+            samples: Array<{ handle: string; isReply: boolean; replyingTo: string | null; text: string }>;
+            error?: string;
+          }>;
+        }>;
         listBlocked(): Promise<{
           success: boolean;
           error?: string;

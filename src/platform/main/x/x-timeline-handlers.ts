@@ -21,6 +21,7 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
+import { runWatchlistSpike } from './x-watchlist-spike';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -303,6 +304,23 @@ export function registerXTimelineHandlers(): void {
       return { success: true, handle: await getSelfHandle() };
     } catch (err) {
       return { success: false, error: String(err), handle: null };
+    }
+  });
+
+  // X_WATCHLIST_SPIKE — B' 期实机诊断:哪种搜索写法能抓到「推文+回复」
+  // ⚠️ 只读不写:不落库、不改状态,结果由人判读后再定实现(交接文档 §4.1)
+  ipcMain.handle(IPC_CHANNELS.X_WATCHLIST_SPIKE, async (_e, payload: unknown) => {
+    const p = payload as { handle?: unknown; wcId?: unknown } | null;
+    if (typeof p?.handle !== 'string' || !p.handle.trim()) {
+      return { success: false, error: 'invalid payload: handle required' };
+    }
+    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const r = await runWatchlistSpike(p.handle, wcId);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, ...r };
+    } catch (err) {
+      return { success: false, error: String(err) };
     }
   });
 

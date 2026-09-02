@@ -1112,5 +1112,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId }),
     getSelf: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
+    /** B' 期一次性诊断:实机对照搜索语法与回复判定 */
+    watchlistSpike: (handle: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST_SPIKE, { handle, wcId }),
   },
 });

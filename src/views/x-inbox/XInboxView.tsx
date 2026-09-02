@@ -1057,6 +1057,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
   const [statusMsg, setStatusMsg] = useState('');
   const [selfHandle, setSelfHandle] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [spikeOut, setSpikeOut] = useState<string>('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1110,6 +1111,29 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
     await load();
   };
 
+  /**
+   * B' 期实机诊断 —— 对照哪种搜索写法能抓到「推文 + 回复」。
+   * ⚠️ 只读:不落库不改状态。会占用前台 X webview 逐条导航约 30 秒。
+   */
+  const handleSpike = async () => {
+    const target = selfHandle || window.prompt('对哪个 handle 做诊断?(建议先识别自己的账号)');
+    if (!target) return;
+    setSpikeOut('诊断中(约 30 秒,期间请勿操作 X)...');
+    const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    const r = await api()?.watchlistSpike(target, wcId);
+    if (!r?.success) {
+      setSpikeOut(`诊断失败:${r?.error ?? '未知'}`);
+      return;
+    }
+    const lines = (r.results ?? []).map((x) =>
+      x.error
+        ? `${x.key.padEnd(16)} ✗ ${x.error}`
+        : `${x.key.padEnd(16)} 抓到 ${x.articles} 条,其中回复 ${x.replies} 条   [${x.query}]`,
+    );
+    setSpikeOut(`@${r.handle}\n${lines.join('\n')}`);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
@@ -1120,6 +1144,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
           <Btn sm onClick={handleDetectSelf} disabled={detecting}>
             {detecting ? '识别中...' : '识别我的账号'}
           </Btn>
+          <Btn sm onClick={handleSpike}>B′ 诊断</Btn>
           <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn sm onClick={onBack}>← 返回收件箱</Btn>
         </div>
@@ -1135,6 +1160,13 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
             ? <>我的账号:<strong style={{ color: '#60a5fa' }}>@{selfHandle}</strong> —— 自己发的推不显示在收件箱</>
             : <>尚未识别本人账号。点右上「识别我的账号」后,自己发的推将不再出现在收件箱。</>}
         </div>
+        {spikeOut && (
+          <pre style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: '3px solid #a78bfa', fontSize: 11, color: 'var(--text)',
+            whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'ui-monospace, monospace',
+          }}>{spikeOut}</pre>
+        )}
         {!loading && authors.length === 0 && (
           <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>
             暂无屏蔽的账号。在收件箱推文卡片上点「🚫 屏蔽此人」即可加入。
