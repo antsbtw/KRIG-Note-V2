@@ -172,7 +172,8 @@ export interface ScanResult {
  * @param targetWcId      X Host guest webContents id（per-ws 定向，fail loud 不回退全局）
  * @param filterConfig    漏斗配置
  * @param onPendingReady  每批写库后通知，供调度器决定是否触发 AI 判断
- * @param maxScrollRounds 最大翻页轮次（默认 5，约 50 条）
+ * @param maxScrollRounds 轮次**安全阀**(默认 200)。正常情况靠「滚过 since 窗口」
+ *                        或「真的滚不动」结束 —— 不是靠这个数停。
  */
 export async function scanRecipe(
   recipe: SearchRecipe,
@@ -180,7 +181,7 @@ export async function scanRecipe(
   targetWcId: number,
   filterConfig: TimelineFilterConfig,
   onPendingReady?: (pendingCount: number) => void,
-  maxScrollRounds = 5,
+  maxScrollRounds = 200,
 ): Promise<ScanResult> {
   scanAbortMap.set(wsId, false);
 
@@ -215,6 +216,11 @@ export async function scanRecipe(
   //
   // undefined → NONE(SurrealDB 的 option 语义),cleanExpired 会跳过这些行。
   const expiresAt = undefined;
+
+  // since 窗口起点:滚过它就说明这一窗内的推文都看完了(不必读完整个时间线)
+  const sinceMs = computeSinceDate(recipe).getTime();
+  let lastScrollY = -1;
+  let stuckRounds = 0;
 
   for (let round = 0; round < maxScrollRounds; round++) {
     if (scanAbortMap.get(wsId)) {
@@ -306,12 +312,53 @@ export async function scanRecipe(
       onPendingReady?.(saved);
     }
 
-    // 滚动加载更多
-    if (round < maxScrollRounds - 1) {
-      await wc.executeJavaScript(`window.scrollBy(0, 1500)`);
-      // 短暂等待懒加载
-      await new Promise((r) => setTimeout(r, 1500));
+    // ── 滚动:与 x-timeline-harvester 同一套经过实机验证的做法 ──────
+    // 用户 2026-09-02:「应该让扫描 48 小时内的推文吧,哪怕重复,但是不会漏掉」。
+    // 光把 since 窗口放宽到 48h 没用 —— 此前 maxScrollRounds=5 意味着
+    // **只读前 5 屏(约 50 条)就收工**,窗口再宽也读不到。
+    //
+    // 停止条件(按优先级):
+    //  ① 已滚过 since 窗口:最旧一条早于窗口起点 → 该窗口内的都看完了
+    //  ② 真的滚不动(scrollY 连续 3 轮不变)→ 到底了
+    //  ③ maxScrollRounds 安全阀
+    // ⚠️ 「本轮没有新推文」**不作为**停止条件 —— 时间线里夹着已见过的很正常,
+    //    急着停正是漏数据的元凶(reply 采集上栽过,验证页量出漏 83%)。
+    const oldestThisRound = tweets
+      .map((t) => t.createdAt).filter(Boolean)
+      .map((d) => new Date(d as string).getTime())
+      .filter((n) => Number.isFinite(n));
+    if (oldestThisRound.length && Math.min(...oldestThisRound) < sinceMs) {
+      console.log(`[x-timeline-scan] 已滚过 since 窗口(${new Date(sinceMs).toISOString().slice(0, 10)}),停止`);
+      break;
     }
+
+    await wc.executeJavaScript(`(function () {
+      var y = window.scrollY;
+      window.scrollBy(0, window.innerHeight * 0.85);
+      if (window.scrollY === y) {
+        var all = document.querySelectorAll('div');
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.scrollHeight > el.clientHeight + 400) {
+            el.scrollTop = el.scrollTop + el.clientHeight * 0.85; break;
+          }
+        }
+      }
+    })()`).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1200));
+
+    // 滚动**之后**回读才是真实位置(behavior:'smooth' 是异步的,曾因此测了个寂寞)
+    const y = await wc.executeJavaScript(`window.scrollY`).catch(() => -1) as number;
+    if (y === lastScrollY) {
+      stuckRounds++;
+      if (stuckRounds >= 3) {
+        console.log(`[x-timeline-scan] 滚不动了(scrollY=${y} 连续 3 轮未变),停止`);
+        break;
+      }
+    } else {
+      stuckRounds = 0;
+    }
+    lastScrollY = y;
   }
 
   console.log(
