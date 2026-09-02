@@ -1226,7 +1226,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
         + (r.coverage && r.baseline?.tweetCount
             ? `\n【采集完整度】库存 ${r.coverage.count} / 基线 ${r.baseline.tweetCount} 条`
               + ` = ${Math.round(r.coverage.count * 1000 / r.baseline.tweetCount) / 10}%\n`
-              + `  基线 = X 官方发推总数(原创+回复);库存目前只有回复,口径待统一\n`
+              + `  原创 ${r.coverage.posts} + 回复 ${r.coverage.replies}(AI 学说话方式两者都要)\n`
               + `  覆盖最近 ${r.coverage.spanDays ?? '?'} 天(${(r.coverage.oldest ?? '').slice(0, 10)} 起)`
               + ` —— 有游标续传,多跑几次会一次比一次深\n`
             : r.coverage

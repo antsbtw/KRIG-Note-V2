@@ -117,7 +117,7 @@ export async function saveReplyRelations(relations: ReplyRelation[]): Promise<nu
        WHERE tweet_id = $tweet_id`,
       {
         tweet_id: r.tweetId,
-        parent: r.inReplyToStatusId,
+        parent: r.inReplyToStatusId || undefined,
         handle: handle || undefined,
         conv: r.conversationId || undefined,
       },
@@ -128,18 +128,32 @@ export async function saveReplyRelations(relations: ReplyRelation[]): Promise<nu
 }
 
 /** 我自己发的一条回复(采自 X 载荷,字段比 DOM 抓取全) */
-export interface OwnReply {
+/**
+ * 我自己发的一条推 —— **原创推与回复统一用这个结构**。
+ *
+ * 用户 2026-09-02 定的目的:「用户所有的发帖回复都要爬取,因为未来人工智能
+ * 要学习用户的方式,帮助发帖和回复。」
+ * → 这是**训练素材**,不是统计口径问题。所以:
+ *   · 原创推与回复都要,缺一半就学不全说话方式
+ *   · 正文必须保真:长推的 legacy.full_text **会被截断**,真全文在 note_tweet
+ *   · metrics 要带上:哪条说法有人搭理,是「学得好不好」的反馈信号
+ */
+export interface OwnPost {
   tweetId: string;
   text: string;
   authorHandle: string;
   createdAt?: string;
   lang?: string;
-  inReplyToStatusId: string;
+  /** 非空 = 这是回复;空 = 原创推 */
+  inReplyToStatusId?: string;
   inReplyToScreenName?: string;
   conversationId?: string;
-  /** 这条回复自己收到的互动 —— 促转发/评估话术效果要用 */
+  /** 这条推收到的互动 —— 促转发/评估话术效果/给 AI 当反馈信号 */
   metrics?: { likes?: number; retweets?: number; replies?: number; quotes?: number; bookmarks?: number };
 }
+
+/** @deprecated 用 OwnPost —— 保留别名避免一次性大改 */
+export type OwnReply = OwnPost;
 
 /**
  * 把**我自己发的回复**入库。
@@ -155,13 +169,15 @@ export interface OwnReply {
  * ⚠️ `expires_at = NONE` 永久保留 —— 自己的发言是画像素材,丢了不可再生。
  * ⚠️ status 置 'replied':它不是待判线索,不该进 AI 判断队列。
  */
-export async function saveOwnReplies(replies: OwnReply[]): Promise<{ inserted: number; skipped: number }> {
+export async function saveOwnReplies(replies: OwnPost[]): Promise<{ inserted: number; skipped: number }> {
   const db = getXDB();
   let inserted = 0;
   let skipped = 0;
 
   for (const r of replies) {
-    if (!r.tweetId || !r.inReplyToStatusId) { skipped++; continue; }
+    // 原创推没有父推 —— 只要有 id 就存(此前要求 inReplyToStatusId,
+    // 会把原创推全部丢掉,而 AI 学说话方式恰恰需要原创推)
+    if (!r.tweetId) { skipped++; continue; }
     // INSERT IGNORE:重复采集不报错也不覆盖(与 upsertTweet 同语义)
     const res = await db.query<[unknown[]]>(
       `INSERT IGNORE INTO x_tweet {
@@ -175,7 +191,7 @@ export async function saveOwnReplies(replies: OwnReply[]): Promise<{ inserted: n
         in_reply_to_user: $handle,
         conversation_id: $conv,
         metrics: $metrics,
-        source: 'self_reply',
+        source: $source,
         status: 'replied',
         replied: false,
         expires_at: NONE,
@@ -186,9 +202,11 @@ export async function saveOwnReplies(replies: OwnReply[]): Promise<{ inserted: n
         tweet_id: r.tweetId,
         text: r.text ?? '',
         author_handle: r.authorHandle,
+        // 区分原创与回复:两者都是训练素材,但语料性质不同(主动表达 vs 应答)
+        source: r.inReplyToStatusId ? 'self_reply' : 'self_post',
         created_at: r.createdAt ? new Date(r.createdAt) : undefined,
         lang: r.lang || undefined,
-        parent: r.inReplyToStatusId,
+        parent: r.inReplyToStatusId || undefined,
         handle: r.inReplyToScreenName ? normalizeHandle(r.inReplyToScreenName) : undefined,
         conv: r.conversationId || undefined,
         metrics: r.metrics ?? {},
@@ -207,21 +225,28 @@ export async function saveOwnReplies(replies: OwnReply[]): Promise<{ inserted: n
  * 本函数让 UI 能如实显示「库里累计覆盖了多久」,与「单次抓到多深」分开报。
  */
 export async function getOwnReplyCoverage(): Promise<{
-  count: number; oldest: string | null; newest: string | null; spanDays: number | null;
+  count: number; posts: number; replies: number;
+  oldest: string | null; newest: string | null; spanDays: number | null;
 }> {
   const db = getXDB();
   // ⚠️ 不用 math::min/max —— 实测对 datetime 返回 NULL(字段明明有值)。
   // 改用 ORDER BY + LIMIT 1,已实测可用。
-  const res = await db.query<[Array<{ c: number }>, string[], string[]]>(
-    `SELECT count() AS c FROM x_tweet WHERE source = 'self_reply' GROUP ALL;
-     SELECT VALUE created_at FROM x_tweet WHERE source = 'self_reply' ORDER BY created_at ASC LIMIT 1;
-     SELECT VALUE created_at FROM x_tweet WHERE source = 'self_reply' ORDER BY created_at DESC LIMIT 1;`,
+  // 原创(self_post)与回复(self_reply)都是我的发言 —— 训练素材两者都算
+  const res = await db.query<[Array<{ c: number }>, string[], string[],
+    Array<{ c: number }>, Array<{ c: number }>]>(
+    `SELECT count() AS c FROM x_tweet WHERE source IN ['self_reply','self_post'] GROUP ALL;
+     SELECT VALUE created_at FROM x_tweet WHERE source IN ['self_reply','self_post'] ORDER BY created_at ASC LIMIT 1;
+     SELECT VALUE created_at FROM x_tweet WHERE source IN ['self_reply','self_post'] ORDER BY created_at DESC LIMIT 1;
+     SELECT count() AS c FROM x_tweet WHERE source = 'self_post' GROUP ALL;
+     SELECT count() AS c FROM x_tweet WHERE source = 'self_reply' GROUP ALL;`,
   );
   const count = res[0]?.[0]?.c ?? 0;
-  if (!count) return { count: 0, oldest: null, newest: null, spanDays: null };
+  if (!count) return { count: 0, posts: 0, replies: 0, oldest: null, newest: null, spanDays: null };
   const oldest = res[1]?.[0] ? String(res[1][0]) : null;
   return {
     count,
+    posts: res[3]?.[0]?.c ?? 0,
+    replies: res[4]?.[0]?.c ?? 0,
     oldest,
     newest: res[2]?.[0] ? String(res[2][0]) : null,
     spanDays: oldest

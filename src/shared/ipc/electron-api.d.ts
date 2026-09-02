@@ -811,7 +811,7 @@ declare global {
             backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
           };
           stats?: { repliedAccepted: number; totalAccepted: number };
-          coverage?: { count: number; oldest: string | null; newest: string | null; spanDays: number | null };
+          coverage?: { count: number; posts: number; replies: number; oldest: string | null; newest: string | null; spanDays: number | null };
           baseline?: { tweetCount?: number; mediaCount?: number; followersCount?: number; followingCount?: number; favouritesCount?: number; countsAt?: string };
         }>;
         /** 勘查 X GraphQL 原始载荷字段;只读不落库 */

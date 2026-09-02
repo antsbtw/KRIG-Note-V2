@@ -140,17 +140,23 @@ function extractRelations(
   if (legacy && typeof legacy === 'object') {
     const parent = str(legacy, 'in_reply_to_status_id_str');
     const self = str(legacy, 'id_str');
+    const replyTo = str(legacy, 'in_reply_to_screen_name');
+    const conv = str(legacy, 'conversation_id_str');
+
+    // 关系:只有回复才有(原创推没有父推)
     if (parent && self) {
-      const replyTo = str(legacy, 'in_reply_to_screen_name');
-      const conv = str(legacy, 'conversation_id_str');
       out.push({
         tweetId: self,
         inReplyToStatusId: parent,
         inReplyToScreenName: replyTo ? normalizeHandle(replyTo) : undefined,
         conversationId: conv,
       });
+    }
 
-      // 作者是不是我 —— 载荷里作者在 core.user_results,回落到 screen_name 字段
+    // 我自己发的推:**原创与回复都要**(用户 2026-09-02:AI 要学说话方式,
+    // 只有回复学不全 —— 主动表达与应答是两种语料)。
+    // 此前这段嵌在 `if (parent && self)` 里,原创推被整个丢掉。
+    if (self) {
       const core = obj.core as Record<string, unknown> | undefined;
       const ur = core?.user_results as Record<string, unknown> | undefined;
       const urr = ur?.result as Record<string, unknown> | undefined;
@@ -158,7 +164,8 @@ function extractRelations(
       const authorHandle = ucore ? str(ucore, 'screen_name') : undefined;
 
       if (authorHandle && normalizeHandle(authorHandle) === selfHandle) {
-        // 长推优先取 note_tweet 全文(full_text 会被截断)
+        // ⚠️ 长推:legacy.full_text **会被截断**,真全文在 note_tweet。
+        // 训练素材必须保真,截断的语料会教出截断的说话方式。
         const note = obj.note_tweet as Record<string, unknown> | undefined;
         const nres = (note?.note_tweet_results as Record<string, unknown> | undefined)
           ?.result as Record<string, unknown> | undefined;
@@ -300,6 +307,8 @@ export async function collectReplyRelations(
   // 我原来的两按钮方案(增量/补历史)是把实现细节暴露给用户:
   // 时间戳做锚点必须区分「往新」「往旧」,所以才需要两个模式。
   // 而游标天然是单向续传凭证 —— 有就接着上次挖,没有就从头,用户不必知道。
+  // 两条流各有各的游标 —— X 的 with_replies 与 Posts 是不同 timeline,
+  // 共用一个游标会互相覆盖(一条流的续传点对另一条无意义)。
   const scope = `${h}:replies`;
   const saved = await getCollectCursor(scope);
   const coverage = await getOwnReplyCoverage();
@@ -307,7 +316,16 @@ export async function collectReplyRelations(
     + `(最旧 ${coverage.oldest ?? '?'}), 游标=${saved.bottomCursor ? '有(续传)' : '无(从头)'}`
     + `${saved.exhausted ? ' [已到底]' : ''}`);
 
-  wc.loadURL(`https://x.com/${h}/with_replies`);
+  // ── 两条流依次采(用户 2026-09-02:「所有的发帖回复都要爬取」)──
+  // /with_replies 只给回复流;原创推在 Posts 标签页(UserOriginalsTimeline)。
+  // 两条都要:AI 学说话方式,主动表达与应答是两种语料,缺一半学不全。
+  const streams = [
+    { key: 'replies', url: `https://x.com/${h}/with_replies` },
+    { key: 'posts',   url: `https://x.com/${h}` },
+  ];
+  let streamIdx = 0;
+
+  wc.loadURL(streams[0].url);
   await new Promise((r) => setTimeout(r, 4000));
 
   let rounds = 0;
@@ -322,7 +340,20 @@ export async function collectReplyRelations(
       const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
       oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
 
-      if (oldestDays >= targetDays) { stopReason = `已覆盖目标 ${targetDays} 天`; break; }
+      if (oldestDays >= targetDays) {
+        if (streamIdx < streams.length - 1) {
+          streamIdx++;
+          console.log(`[x-reply-collector] ${targetDays} 天已覆盖,切到 ${streams[streamIdx].key} 流`);
+          wc.loadURL(streams[streamIdx].url);
+          await new Promise((r) => setTimeout(r, 4000));
+          times.length = 0;      // 新流重新计深度
+          noProgress = 0;
+          lastRelCount = relMap.size;
+          continue;
+        }
+        stopReason = `已覆盖目标 ${targetDays} 天(两条流)`;
+        break;
+      }
     }
 
     // ── 自然滚动(用户 2026-09-02 定的策略)────────────────────────
@@ -353,7 +384,17 @@ export async function collectReplyRelations(
       // 太急会把"正在穿过已知区"误判成"到底了"(拿有缺陷的测量当证据)
       const limit = 8;
       if (noProgress >= limit) {
-        stopReason = `连续 ${limit} 轮无新数据(docH=${moved?.docH ?? '?'})`
+        // 本条流跑完 → 切下一条;两条都跑完才真正结束
+        if (streamIdx < streams.length - 1) {
+          streamIdx++;
+          console.log(`[x-reply-collector] 切到 ${streams[streamIdx].key} 流`);
+          wc.loadURL(streams[streamIdx].url);
+          await new Promise((r) => setTimeout(r, 4000));
+          noProgress = 0;
+          lastRelCount = relMap.size;
+          continue;
+        }
+        stopReason = `两条流都跑完(docH=${moved?.docH ?? '?'})`
           + ` —— 到底了或 X 懒加载封顶`;
         break;
       }
