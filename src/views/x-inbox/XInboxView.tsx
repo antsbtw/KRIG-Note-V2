@@ -475,7 +475,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const PAGE_SIZE = 20;
 
-  const [view, setView] = useState<'inbox' | 'recipes'>('inbox');
+  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked'>('inbox');
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -675,6 +675,30 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     }
   };
 
+  /**
+   * 屏蔽此人 —— 只约束未来采集,已抓的历史推文一律保留(方案 §3.3)。
+   * 确认文案必须把这层语义说清楚,否则用户会以为点了就清空他的所有推文。
+   */
+  const handleBlockAuthor = async (tweet: TweetInboxRecord) => {
+    const handle = tweet.author_handle ?? '';
+    if (!handle) return;
+    const shown = handle.replace(/^@+/, '');
+    const ok = window.confirm(
+      `屏蔽 @${shown}?\n\n`
+      + `· 以后的采集不再收录他的推文\n`
+      + `· 已经抓到的历史推文**保留不动**\n\n`
+      + `可在「🚫 屏蔽名单」里随时解除。`,
+    );
+    if (!ok) return;
+
+    const r = await api()?.blockAuthor(handle);
+    if (!r?.success) {
+      setScanStatus(`屏蔽失败:${r?.error}`);
+      return;
+    }
+    setScanStatus(`已屏蔽 @${shown}(历史推文保留)`);
+  };
+
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -682,6 +706,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       return next;
     });
   };
+
+  // ── 屏蔽名单视图 ──────────────────────────────────────────────────
+  if (view === 'blocked') {
+    return <BlockedManagerView onBack={() => setView('inbox')} />;
+  }
 
   // ── 配方管理视图 ──────────────────────────────────────────────────
   if (view === 'recipes') {
@@ -716,6 +745,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
+          <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
           {isInRightSlot && (
             <button onClick={handleClose} style={closeBtn}>✕</button>
           )}
@@ -942,6 +972,12 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                           {currentView === 'confirmed' && (
                             <Btn sm onClick={() => handleMarkReplied(t)}>↩ 已回复</Btn>
                           )}
+                          {t.author_handle && (
+                            <Btn sm onClick={() => handleBlockAuthor(t)}
+                              style={{ marginLeft: 'auto', color: '#fca5a5' }}>
+                              🚫 屏蔽此人
+                            </Btn>
+                          )}
                         </>
                       );
                     })()}
@@ -993,6 +1029,90 @@ function Field({ label, inline, children }: FieldProps) {
     <div style={{ display: inline ? 'flex' : 'block', alignItems: inline ? 'center' : undefined, gap: inline ? 6 : undefined }}>
       <div style={{ fontSize: 11, color: 'var(--text-disabled)', fontWeight: 600, marginBottom: inline ? 0 : 4, whiteSpace: 'nowrap' }}>{label}</div>
       {children}
+    </div>
+  );
+}
+
+// ── 屏蔽名单管理视图 ────────────────────────────────────────────────
+// 语义提醒:屏蔽只约束未来采集,不抹除历史数据(方案 §3.3 已拍板)。
+// 名单里的 handle 是**归一化形态**(无 @、全小写),展示时补回 @。
+interface BlockedAuthorItem {
+  handle: string;
+  displayName?: string;
+  blockedAt?: string;
+  blockedReason?: string;
+}
+
+function BlockedManagerView({ onBack }: { onBack: () => void }) {
+  const [authors, setAuthors] = useState<BlockedAuthorItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await api()?.listBlocked();
+    if (!r?.success) {
+      // fail loud:查不到 ≠ 名单为空,必须让用户看见
+      setStatusMsg(`加载失败:${r?.error ?? 'no api'}`);
+      setAuthors([]);
+    } else {
+      setStatusMsg('');
+      setAuthors(r.authors ?? []);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleUnblock = async (handle: string) => {
+    const r = await api()?.unblockAuthor(handle);
+    if (!r?.success) {
+      setStatusMsg(`解除失败:${r?.error}`);
+      return;
+    }
+    setStatusMsg(`已解除 @${handle}`);
+    await load();
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-bright)' }}>🚫 屏蔽名单</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>不再采集其新推,已抓历史保留</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {statusMsg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{statusMsg}</span>}
+          <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
+          <Btn sm onClick={onBack}>← 返回收件箱</Btn>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {!loading && authors.length === 0 && (
+          <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>
+            暂无屏蔽的账号。在收件箱推文卡片上点「🚫 屏蔽此人」即可加入。
+          </div>
+        )}
+        {authors.map((a) => (
+          <div key={a.handle} style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: '3px solid #7f1d1d', display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {a.displayName && (
+                  <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-bright)' }}>{a.displayName}</span>
+                )}
+                <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{a.handle}</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
+                {a.blockedAt ? `${timeAgo(String(a.blockedAt))}屏蔽` : '屏蔽时间未知'}
+                {a.blockedReason ? ` · ${a.blockedReason}` : ''}
+              </div>
+            </div>
+            <Btn sm onClick={() => handleUnblock(a.handle)}>解除</Btn>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

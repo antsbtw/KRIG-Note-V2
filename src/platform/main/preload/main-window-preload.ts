@@ -1100,5 +1100,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_FEEDBACK_STATS),
     markReplied: (tweetId: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_MARK_REPLIED, { tweetId }),
+    // 屏蔽名单（B 期）——「不再爬他的新推」，已抓历史保留
+    blockAuthor: (handle: string, reason?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_BLOCK_AUTHOR, { handle, reason }),
+    unblockAuthor: (handle: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_UNBLOCK_AUTHOR, { handle }),
+    listBlocked: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_BLOCKED),
   },
 });

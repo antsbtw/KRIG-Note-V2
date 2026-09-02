@@ -328,6 +328,10 @@ export const IPC_CHANNELS = {
   X_GET_RECIPE_STATS:'x:get-recipe-stats',// renderer → main invoke：查配方采纳率统计
   X_FEEDBACK_STATS:  'x:feedback-stats',  // renderer → main invoke：近7天 Gemma建议采纳率/捞回漏判数
   X_MARK_REPLIED:    'x:mark-replied',    // renderer → main invoke：标记推文已回复（已确认视图清场）
+  // 屏蔽名单（B 期）—— 屏蔽只约束未来采集，不抹除已抓的历史数据
+  X_BLOCK_AUTHOR:    'x:block-author',    // renderer → main invoke：屏蔽某作者（handle）
+  X_UNBLOCK_AUTHOR:  'x:unblock-author',  // renderer → main invoke：解除屏蔽（handle）
+  X_LIST_BLOCKED:    'x:list-blocked',    // renderer → main invoke：取屏蔽名单
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

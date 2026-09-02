@@ -12,6 +12,7 @@ import { TWEET_SCRAPE_FN_BODY } from '../tweet-fetcher/extract-script';
 import { upsertTweet, insertFilteredOut, getTweetIdSet } from '../db/tweet-inbox-repo';
 import { googleTranslateBatch } from './google-translate';
 import type { XTweetData } from './x-extract-tweet';
+import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type {
   SearchRecipe,
   TimelineFilterConfig,
@@ -66,7 +67,9 @@ export function applyFilter(
   if (config.keywordBlacklist.some((kw) => tweet.text?.includes(kw))) {
     return { pass: false, reason: 'keyword_blacklist' };
   }
-  if (config.accountBlacklist.includes(tweet.authorHandle ?? '')) {
+  // ⚠️ 必须归一化后再比:库里 authorHandle 是 '@Miekko22'(带 @、保留大小写),
+  // 而 accountBlacklist 按契约存的是归一化形态。少这一步 = 屏蔽恒不命中且不报错。
+  if (tweet.authorHandle && config.accountBlacklist.includes(normalizeHandle(tweet.authorHandle))) {
     return { pass: false, reason: 'account_blacklist' };
   }
 

@@ -26,8 +26,26 @@ export interface SearchRecipe {
   lastRunAt?: string;            // ISO datetime
 }
 
+/**
+ * handle 归一化:去 @ 前缀 + 转小写。
+ *
+ * ⚠️ 写 x_author 与 applyFilter 比对**必须共用本函数** ——
+ * 两端各写一份归一化逻辑迟早漂移,而漂移的表现是
+ * 「屏蔽点了没反应、且不报错」这种最难查的静默失效。
+ *
+ * 背景(实测 2026-09-01):x_tweet.author_handle 实际存的是
+ * '@Miekko22' —— 带 @ 前缀、保留原始大小写。而 x_author.handle
+ * 上有 idx_author_handle UNIQUE 索引,不归一化则 Foo/foo 会成两行,
+ * 同一个人被屏蔽两次只生效一次。
+ */
+export function normalizeHandle(h: string): string {
+  return h.trim().replace(/^@+/, '').toLowerCase();
+}
+
 export interface TimelineFilterConfig {
   keywordBlacklist: string[];
+  /** ⚠️ 契约:存**已归一化**的 handle(经 normalizeHandle),不带 @、全小写。
+   *  塞原始串进来会导致比对恒不命中且不报错。数据源见 x-author-repo.getBlockedHandleSet() */
   accountBlacklist: string[];
   minLikes: number;
   minRetweets: number;

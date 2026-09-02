@@ -19,6 +19,7 @@ import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
+import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
@@ -45,7 +46,13 @@ export function registerXTimelineHandlers(): void {
     setActiveXWcId(p.wsId, targetWcId);
 
     try {
-      const result = await scanRecipe(recipe, p.wsId, targetWcId, DEFAULT_FILTER_CONFIG);
+      // 屏蔽名单现取(与调度器同源):失败直接抛给下面的 catch → 返回 error,
+      // 绝不退化成空黑名单继续采集(feedback-fail-loud-no-fallback)
+      const accountBlacklist = await getBlockedHandleSet();
+      const result = await scanRecipe(recipe, p.wsId, targetWcId, {
+        ...DEFAULT_FILTER_CONFIG,
+        accountBlacklist,
+      });
       if (result.saved > 0) {
         // 只判触发它的那个 ws（p.wsId 已在上方校验为 string），防跨 ws 混批
         runJudgeBatch(getJudgeConfig(), p.wsId).catch((err) => {
@@ -221,6 +228,48 @@ export function registerXTimelineHandlers(): void {
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
+    }
+  });
+
+  // ── 屏蔽名单（B 期）─────────────────────────────────────────────
+  // 语义:屏蔽只约束**未来采集**,已抓的历史推文一律保留(方案 §3.3 已拍板)。
+
+  // X_BLOCK_AUTHOR — 屏蔽某作者
+  ipcMain.handle(IPC_CHANNELS.X_BLOCK_AUTHOR, async (_e, payload: unknown) => {
+    const p = payload as { handle?: unknown; reason?: unknown } | null;
+    if (typeof p?.handle !== 'string' || !p.handle.trim()) {
+      return { success: false, error: 'invalid payload: handle required' };
+    }
+    const reason = typeof p.reason === 'string' && p.reason.trim() ? p.reason.trim() : undefined;
+    try {
+      await blockAuthor(p.handle, reason);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_UNBLOCK_AUTHOR — 解除屏蔽
+  ipcMain.handle(IPC_CHANNELS.X_UNBLOCK_AUTHOR, async (_e, payload: unknown) => {
+    const p = payload as { handle?: unknown } | null;
+    if (typeof p?.handle !== 'string' || !p.handle.trim()) {
+      return { success: false, error: 'invalid payload: handle required' };
+    }
+    try {
+      await unblockAuthor(p.handle);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_LIST_BLOCKED — 取屏蔽名单
+  ipcMain.handle(IPC_CHANNELS.X_LIST_BLOCKED, async () => {
+    try {
+      const authors = await listBlocked();
+      return { success: true, authors };
+    } catch (err) {
+      return { success: false, error: String(err), authors: [] };
     }
   });
 

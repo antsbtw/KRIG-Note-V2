@@ -796,6 +796,14 @@ declare global {
         getRecipeStats(recipeId: string): Promise<{ success: boolean; stats: { recipeId: string; total: number; gemmaPass: number; adopted: number; rejected: number; adoptRate: number }; error?: string }>;
         feedbackStats(): Promise<{ success: boolean; stats: { suggestedTotal: number; suggestedAccepted: number; rescuedFn: number } | null; error?: string }>;
         markReplied(tweetId: string): Promise<{ success: boolean; error?: string }>;
+        /** 屏蔽某作者：只约束未来采集，已抓的历史推文保留 */
+        blockAuthor(handle: string, reason?: string): Promise<{ success: boolean; error?: string }>;
+        unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
+        listBlocked(): Promise<{
+          success: boolean;
+          error?: string;
+          authors: Array<{ handle: string; displayName?: string; blockedAt?: string; blockedReason?: string }>;
+        }>;
       };
     };
   }

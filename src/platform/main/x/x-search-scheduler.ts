@@ -11,6 +11,7 @@ import { listEnabledRecipes, updateLastRunAt } from '../db/search-recipe-repo';
 import { scanRecipe } from './x-timeline-scan';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { cleanExpired } from '../db/tweet-inbox-repo';
+import { getBlockedHandleSet } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TimelineFilterConfig } from '@shared/types/x-timeline-types';
 
@@ -52,8 +53,21 @@ export function accumulatePending(
   return { fire: false, accumulated: next };
 }
 
-const filterConfig: TimelineFilterConfig = DEFAULT_FILTER_CONFIG;
 const judgeConfig: JudgeConfig = getJudgeConfig();  // 模型可被 KRIG_JUDGE_MODEL 环境变量覆盖
+
+/**
+ * 组装本轮采集的漏斗配置 —— 屏蔽名单**每轮现取,不缓存**。
+ *
+ * 为什么不缓存:缓存会让「刚屏蔽的人还在被爬」持续一整个缓存周期,
+ * 且这个现象与「过滤逻辑压根没生效」在表现上无法区分,极难排查。
+ *
+ * ⚠️ 查库失败直接**抛**(不 catch 成空数组):空黑名单与「查不到」是两件事,
+ * 后者兜底 = 屏蔽悄悄失效。调用方负责跳过本轮并留痕。
+ */
+async function buildFilterConfig(): Promise<TimelineFilterConfig> {
+  const accountBlacklist = await getBlockedHandleSet();
+  return { ...DEFAULT_FILTER_CONFIG, accountBlacklist };
+}
 
 /** 执行一次配方扫描并按需触发 AI 判断 */
 async function runEnabledRecipes(): Promise<void> {
@@ -67,6 +81,17 @@ async function runEnabledRecipes(): Promise<void> {
     recipes = await listEnabledRecipes();
   } catch (err) {
     console.error('[x-search-scheduler] failed to list recipes:', err);
+    return;
+  }
+
+  // 屏蔽名单现取:失败则整轮跳过并大声留痕 —— 绝不以空黑名单继续采集,
+  // 否则被屏蔽的人会照爬不误,而日志上什么都看不出来。
+  let filterConfig: TimelineFilterConfig;
+  try {
+    filterConfig = await buildFilterConfig();
+  } catch (err) {
+    console.error('[x-search-scheduler] failed to load blocked authors, SKIPPING this round '
+      + '(refusing to scan with an empty blacklist):', err);
     return;
   }
 
