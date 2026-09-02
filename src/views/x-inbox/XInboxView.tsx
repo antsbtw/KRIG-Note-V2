@@ -1112,26 +1112,50 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
   };
 
   /**
-   * B' 期实机诊断 —— 对照哪种搜索写法能抓到「推文 + 回复」。
-   * ⚠️ 只读:不落库不改状态。会占用前台 X webview 逐条导航约 30 秒。
+   * 「取某账号全部发言」实机诊断 —— 画像基础方法的可行性验证。
+   * 走个人主页 /with_replies(回复与被回复的原推上下相邻,关系是页面结构自带的),
+   * 不试搜索语法。⚠️ 只读:不落库不改状态,占用前台 X webview 约 15 秒。
    */
   const handleSpike = async () => {
-    const target = selfHandle || window.prompt('对哪个 handle 做诊断?(建议先识别自己的账号)');
-    if (!target) return;
-    setSpikeOut('诊断中(约 30 秒,期间请勿操作 X)...');
+    const target = window.prompt(
+      '对哪个 handle 做诊断?(留空用自己的账号)',
+      selfHandle ?? '',
+    );
+    if (target === null) return;
+    const handle = target.trim() || selfHandle;
+    if (!handle) { setSpikeOut('没有可诊断的 handle'); return; }
+
+    setSpikeOut(`诊断 @${handle} 中(约 15 秒,期间请勿操作 X)...`);
     const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
     const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-    const r = await api()?.watchlistSpike(target, wcId);
-    if (!r?.success) {
+    const r = await api()?.watchlistSpike(handle, wcId);
+    if (!r?.success || !r.result) {
       setSpikeOut(`诊断失败:${r?.error ?? '未知'}`);
       return;
     }
-    const lines = (r.results ?? []).map((x) =>
-      x.error
-        ? `${x.key.padEnd(16)} ✗ ${x.error}`
-        : `${x.key.padEnd(16)} 抓到 ${x.articles} 条,其中回复 ${x.replies} 条   [${x.query}]`,
+    const x = r.result;
+    const rounds = x.rounds.map((rd) =>
+      `  轮${rd.round}: DOM ${rd.domCount} 条 (+${rd.added}), 最旧 ${rd.spanDays ?? '?'} 天前`,
+    ).join('\n');
+    const adj = x.adjacency;
+    setSpikeOut(
+      `@${x.handle}  ${x.url}\n`
+      + `\n① 配对结构(本人回复的前一条是谁的)\n`
+      + `  检出本人回复 ${adj.checked} 条 → 前一条是他人 ${adj.precededByOther} / `
+      + `是本人 ${adj.precededBySelf} / 在顶部 ${adj.atTop}\n`
+      + `  ${adj.checked > 0 && adj.precededByOther === adj.checked - adj.atTop
+            ? '✓ 相邻配对成立(可据此还原 in_reply_to)'
+            : adj.checked === 0 ? '· 没检出回复 —— 换个有回复的账号再试'
+            : '⚠ 配对不稳定,需另寻办法'}\n`
+      + `\n② 时间覆盖(决定「回溯窗口」变量的可行上限)\n${rounds}\n`
+      + `  停止原因:${x.stopReason}\n`
+      + `\n③ 判据对照\n`
+      + `  总 ${x.totalItems} 条 | 本人 ${x.selfItems} | 带「Replying to」${x.replyItems} | `
+      + `socialContext ${x.socialItems}\n`
+      + `  ${x.replyItems !== x.socialItems
+            ? '→ 两数不等:socialContext 与「是否回复」确实不是一回事'
+            : '→ 两数相等,需更多样本才能区分'}`,
     );
-    setSpikeOut(`@${r.handle}\n${lines.join('\n')}`);
   };
 
   return (

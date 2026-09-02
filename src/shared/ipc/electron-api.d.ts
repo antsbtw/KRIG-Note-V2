@@ -801,13 +801,16 @@ declare global {
         unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
         detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
-        watchlistSpike(handle: string, wcId?: number): Promise<{
-          success: boolean; error?: string; handle?: string;
-          results?: Array<{
-            key: string; query: string; url: string; articles: number; replies: number;
-            samples: Array<{ handle: string; isReply: boolean; replyingTo: string | null; text: string }>;
-            error?: string;
-          }>;
+        /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
+        watchlistSpike(handle: string, wcId?: number, maxRounds?: number): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            handle: string; url: string; stopReason: string;
+            totalItems: number; selfItems: number; replyItems: number; socialItems: number;
+            rounds: Array<{ round: number; domCount: number; added: number; oldest: string | null; spanDays: number | null }>;
+            adjacency: { checked: number; precededByOther: number; precededBySelf: number; atTop: number };
+            samples: Array<{ idx: number; handle: string; isSelf: boolean; createdAt: string | null; replyingTo: string | null; social: string | null; text: string }>;
+          };
         }>;
         listBlocked(): Promise<{
           success: boolean;
