@@ -17,8 +17,14 @@ type InboxViewKey = 'pending' | 'suggested' | 'audit' | 'confirmed' | 'all';
 
 const VIEW_QUERY: Record<InboxViewKey, {
   status?: string; statuses?: string[]; humanReviewed?: boolean; orderBy?: string;
+  replied?: boolean;
 }> = {
-  pending:   { status: 'pending' },                                            // 爬回来还没判的
+  // ⚠️「已回复」与「已研判」是两件事:回过的推 status 仍是 pending
+  //(没人判过它值不值),但对干活的人来说它已经处理完了 —— 不该再排队。
+  // 用户 2026-09-02 指出:「已经保存过的推文就不应该再显示在这个界面」。
+  // 唯一性(idx_tweet_id UNIQUE)保证的是**库里不会有两份 copy**,
+  // 与「该不该显示」无关 —— 后者由状态决定,故在这里显式排除已回复的。
+  pending:   { status: 'pending', replied: false },                            // 爬回来还没判、且我还没回过的
   suggested: { status: 'worth', humanReviewed: false },                        // Gemma 建议值得,等表态
   audit:     { status: 'skip',  humanReviewed: false, orderBy: 'confidence' }, // Gemma 判不值,按置信度升序抽查漏判
   confirmed: { status: 'worth', humanReviewed: true },                         // 人工已 ✓
