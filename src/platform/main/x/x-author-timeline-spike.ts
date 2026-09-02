@@ -69,11 +69,35 @@ const SCAN_JS = `(function (selfHandle) {
       }
     } catch (e) {}
 
-    // 「Replying to @xxx」提示行(中英两种界面)
+    // 判据 A:「Replying to @xxx」提示行。
+    // ⚠️ 实测 2026-09-02:/with_replies 页面**不渲染这行文本**,X 用左侧
+    // 视觉连接线表示回复关系 → 本判据在该页面恒为 null,保留仅作对照。
     var replyingTo = null;
     try {
       var m = (a.textContent || '').match(/(?:Replying to|回复)\\s*(@[A-Za-z0-9_]+)/);
       if (m) replyingTo = m[1];
+    } catch (e) {}
+
+    // 判据 B:连接线 —— X 在「上接一条推」时于头像列渲染竖线。
+    // 通过 article 内是否存在贯穿的细长竖条元素判断(不猜类名,量几何)。
+    var hasThreadLine = false;
+    try {
+      var av = a.querySelector('[data-testid="Tweet-User-Avatar"]');
+      if (av) {
+        var col = av.parentElement;
+        var kids = col ? col.querySelectorAll('div') : [];
+        for (var k = 0; k < kids.length; k++) {
+          var r = kids[k].getBoundingClientRect();
+          if (r.width > 0 && r.width <= 4 && r.height >= 12) { hasThreadLine = true; break; }
+        }
+      }
+    } catch (e) {}
+
+    // 判据 C:回复按钮的 aria-label 常含数量与语义,顺带取回以备判读
+    var ariaReply = null;
+    try {
+      var rb = a.querySelector('[data-testid="reply"]');
+      if (rb) ariaReply = (rb.getAttribute('aria-label') || '').slice(0, 40);
     } catch (e) {}
 
     // 现有代码在用的 socialContext(对照用:它其实是「xx 转推了/已置顶」横幅)
@@ -90,13 +114,20 @@ const SCAN_JS = `(function (selfHandle) {
     } catch (e) {}
 
     var norm = handle.replace(/^@+/, '').toLowerCase();
+    // tweet id:从 status 链接取,作为跨轮去重的稳定键(DOM 会被虚拟列表回收)
+    var tid = null;
+    try { if (url) { var mm = url.match(/status\\/(\\d+)/); if (mm) tid = mm[1]; } } catch (e) {}
+
     items.push({
       idx: i,
+      tweetId: tid,
       handle: handle,
       isSelf: norm === selfHandle,
       createdAt: createdAt,
       url: url,
       replyingTo: replyingTo,
+      hasThreadLine: hasThreadLine,
+      ariaReply: ariaReply,
       social: social,
       text: body
     });
@@ -106,28 +137,38 @@ const SCAN_JS = `(function (selfHandle) {
 
 export interface TimelineScanItem {
   idx: number;
+  tweetId: string | null;
   handle: string;
   isSelf: boolean;
   createdAt: string | null;
   url: string | null;
+  /** 判据 A:「Replying to」文本(实测 /with_replies 不渲染,恒 null) */
   replyingTo: string | null;
+  /** 判据 B:头像列的连接线 —— X 用它表示「上接一条推」 */
+  hasThreadLine: boolean;
+  /** 判据 C:回复按钮 aria-label */
+  ariaReply: string | null;
   social: string | null;
   text: string;
 }
 
 export interface RoundStat {
   round: number;
-  /** 本轮结束时页面上累计的 article 数 */
+  /** 本轮**当前 DOM 里**的 article 数(虚拟列表会回收,故非单调) */
   domCount: number;
-  /** 本轮新增(与上一轮相比) */
-  added: number;
-  /** 当前最旧一条的时间 */
+  /** 跨轮累计去重后的总数 —— 这才是真实进度指标 */
+  cumulative: number;
+  /** 本轮新收到的**新 id** 数(0 才意味着可能到底) */
+  newIds: number;
+  /** 累计集合里最旧一条的时间 */
   oldest: string | null;
   /** 最旧一条距今多少天 */
   spanDays: number | null;
 }
 
 export interface TimelineProbeResult {
+  /** ⑤ 详情页解出的真实回复关系(回复给谁 + 父推 id) */
+  relationProbe: Array<{ tweetId: string; replyingTo: string | null; parentId: string | null }>;
   handle: string;
   url: string;
   rounds: RoundStat[];
@@ -135,8 +176,10 @@ export interface TimelineProbeResult {
   stopReason: string;
   totalItems: number;
   selfItems: number;
-  /** 带「Replying to」提示的条数 */
+  /** 判据 A 命中数(「Replying to」文本;实测该页面恒 0) */
   replyItems: number;
+  /** 判据 B 命中数(头像列连接线 = 上接一条推) */
+  threadLineItems: number;
   /** socialContext 命中条数(对照:与 replyItems 不等即证明二者不是一回事) */
   socialItems: number;
   /** ① 相邻配对验证:本人回复的前一条是否为他人推文 */
@@ -166,7 +209,8 @@ async function scanDom(wc: Electron.WebContents, selfNorm: string): Promise<Time
 export async function probeAuthorTimeline(
   handle: string,
   targetWcId?: number,
-  maxRounds = 8,
+  maxRounds = 60,
+  targetDays = 7,
 ): Promise<TimelineProbeResult | { error: string }> {
   const h = normalizeHandle(handle);
   if (!h) return { error: 'empty handle' };
@@ -176,10 +220,9 @@ export async function probeAuthorTimeline(
   const wc = resolved.wc;
 
   const url = `https://x.com/${h}/with_replies`;
-  console.log(`[author-timeline-spike] → ${url}`);
+  console.log(`[author-timeline-spike] → ${url} (最多 ${maxRounds} 轮, 目标回溯 ${targetDays} 天)`);
   wc.loadURL(url);
 
-  // 等首批 article
   const deadline = Date.now() + 15_000;
   let ready = false;
   while (Date.now() < deadline) {
@@ -193,64 +236,127 @@ export async function probeAuthorTimeline(
     return { error: '15s 内没出现推文元素(未登录 / 账号不存在 / 被限流,三者需人工区分)' };
   }
 
+  // ⚠️ 跨轮累计:X 用虚拟列表,滚过去的 article 会被**从 DOM 删除**,
+  // 所以「当前 DOM 条数」不是进度 —— 实测出现过 +0 / -1(计数不涨反降),
+  // 旧版据此判定「到底了」,23 条就收工,而账号有 1183 条。
+  // 正解:按 tweet id 累计进 Map,DOM 回收不影响已收集的。
+  const collected = new Map<string, TimelineScanItem>();
   const rounds: RoundStat[] = [];
-  let prevCount = 0;
-  let stagnant = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
-  let items: TimelineScanItem[] = [];
+  let noNewStreak = 0;
 
   for (let round = 1; round <= maxRounds; round++) {
-    items = await scanDom(wc, h);
+    const items = await scanDom(wc, h);
 
-    const times = items.map((i) => i.createdAt).filter(Boolean) as string[];
+    let newIds = 0;
+    for (const it of items) {
+      const key = it.tweetId ?? `${it.handle}|${it.createdAt}|${it.text}`;
+      if (!collected.has(key)) { collected.set(key, it); newIds++; }
+    }
+
+    const times = [...collected.values()].map((i) => i.createdAt).filter(Boolean) as string[];
     const oldest = times.length ? times.reduce((a, b) => (a < b ? a : b)) : null;
     const spanDays = oldest
       ? Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10
       : null;
 
-    rounds.push({
-      round, domCount: items.length, added: items.length - prevCount, oldest, spanDays,
-    });
-    console.log(`[author-timeline-spike] 轮 ${round}: DOM ${items.length} 条 `
-      + `(+${items.length - prevCount}), 最旧 ${oldest ?? 'n/a'} (${spanDays ?? '?'} 天前)`);
+    rounds.push({ round, domCount: items.length, cumulative: collected.size, newIds, oldest, spanDays });
+    console.log(`[author-timeline-spike] 轮 ${round}: DOM ${items.length} | 累计 ${collected.size} `
+      + `(+${newIds} 新) | 最旧 ${spanDays ?? '?'} 天前`);
 
-    // ⚠️ X 用虚拟列表:滚下去时上面的 article 会被回收,DOM 数不会一直涨。
-    // 所以「不再增长」不等于「到底了」—— 这正是要 spike 出来的边界。
-    if (items.length === prevCount) {
-      stagnant++;
-      if (stagnant >= 2) { stopReason = '连续两轮 DOM 无增长(到底了,或虚拟列表回收/懒加载封顶 —— 需人工判读)'; break; }
-    } else {
-      stagnant = 0;
+    // 到达目标回溯窗口即停 —— 「取多久」是变量,不是写死的
+    if (spanDays !== null && spanDays >= targetDays) {
+      stopReason = `已覆盖目标窗口 ${targetDays} 天(最旧 ${spanDays} 天前)`;
+      break;
     }
-    prevCount = items.length;
 
-    await wc.executeJavaScript(`window.scrollBy(0, window.innerHeight * 3)`);
-    await new Promise((r) => setTimeout(r, 1500));
+    // 只有连续多轮**没有新 id** 才可能是真到底 —— 不再拿 DOM 条数当判据
+    if (newIds === 0) {
+      noNewStreak++;
+      if (noNewStreak >= 4) {
+        stopReason = `连续 4 轮无新推文(到底了,或懒加载封顶 —— 累计 ${collected.size} 条,`
+          + `覆盖 ${spanDays ?? '?'} 天)`;
+        break;
+      }
+    } else {
+      noNewStreak = 0;
+    }
+
+    // 慢一点没关系,不能漏 —— 每轮滚一屏,给懒加载留足时间
+    await wc.executeJavaScript(`window.scrollBy(0, window.innerHeight * 0.9)`);
+    await new Promise((r) => setTimeout(r, 2000));
   }
 
-  // ① 相邻配对验证:本人的回复,其前一条是不是别人的推
+  const all = [...collected.values()];
+
+  // ① 配对结构:本人推文的前一条是谁的(用连接线判据筛「上接一条推」的)
   const adjacency = { checked: 0, precededByOther: 0, precededBySelf: 0, atTop: 0 };
-  for (const it of items) {
-    if (!it.isSelf || !it.replyingTo) continue;
+  for (const it of all) {
+    if (!it.isSelf || !it.hasThreadLine) continue;
     adjacency.checked++;
     if (it.idx === 0) { adjacency.atTop++; continue; }
-    const prev = items.find((x) => x.idx === it.idx - 1);
+    const prev = all.find((x) => x.idx === it.idx - 1);
     if (!prev) { adjacency.atTop++; continue; }
     if (prev.isSelf) adjacency.precededBySelf++;
     else adjacency.precededByOther++;
   }
 
+  // ── ⑤ 回复关系:详情页判据 ────────────────────────────────────────
+  // 用户 2026-09-02 指出:「用户回复了谁,这个关系要在爬取数据时有能力获取才对」。
+  // 说得对 —— 时间线页把关系画成连接线(视觉),抓下来只知道「上接一条推」,
+  // 不知道**接的是谁的哪一条**;而累计集合里 idx 会跨轮错乱,相邻推断更不可靠。
+  //
+  // 可靠来源是**推文自己的详情页**:打开 /<handle>/status/<id>,X 会明确渲染
+  // 「Replying to @xxx」,且被回复的原推就在同一页上,能直接取到它的 status id。
+  // 代价是每条回复多一次导航 —— 但这是**拿得到真关系**的唯一确定路径。
+  // 本 spike 只验证可行性:取前 3 条本人带连接线的推,逐个开详情页看能否解出。
+  const relationProbe: Array<{ tweetId: string; replyingTo: string | null; parentId: string | null }> = [];
+  const candidates = all.filter((i) => i.isSelf && i.hasThreadLine && i.tweetId).slice(0, 3);
+  for (const c of candidates) {
+    try {
+      wc.loadURL(`https://x.com/${h}/status/${c.tweetId}`);
+      await new Promise((r) => setTimeout(r, 3500));
+      const detail = await wc.executeJavaScript(`(function () {
+        var out = { replyingTo: null, parentId: null };
+        try {
+          var m = (document.body.textContent || '').match(/(?:Replying to|回复)\\s*(@[A-Za-z0-9_]+)/);
+          if (m) out.replyingTo = m[1];
+        } catch (e) {}
+        try {
+          var arts = document.querySelectorAll('article[data-testid="tweet"]');
+          for (var i = 0; i < arts.length; i++) {
+            var t = arts[i].querySelector('time');
+            var a2 = t && t.closest('a[href*="/status/"]');
+            if (a2) {
+              var mm = a2.href.match(/status\\/(\\d+)/);
+              if (mm && mm[1] !== ${JSON.stringify(c.tweetId)}) { out.parentId = mm[1]; break; }
+            }
+          }
+        } catch (e) {}
+        return out;
+      })()`) as { replyingTo: string | null; parentId: string | null };
+      relationProbe.push({ tweetId: c.tweetId!, ...detail });
+      console.log(`[author-timeline-spike] 详情页 ${c.tweetId}: 回复给 ${detail.replyingTo ?? '?'} `
+        + `父推 ${detail.parentId ?? '?'}`);
+    } catch (err) {
+      relationProbe.push({ tweetId: c.tweetId!, replyingTo: null, parentId: null });
+      console.error(`[author-timeline-spike] 详情页 ${c.tweetId} 失败:`, err);
+    }
+  }
+
   const result: TimelineProbeResult = {
+    relationProbe,
     handle: h,
     url,
     rounds,
     stopReason,
-    totalItems: items.length,
-    selfItems: items.filter((i) => i.isSelf).length,
-    replyItems: items.filter((i) => i.replyingTo).length,
-    socialItems: items.filter((i) => i.social).length,
+    totalItems: all.length,
+    selfItems: all.filter((i) => i.isSelf).length,
+    replyItems: all.filter((i) => i.replyingTo).length,
+    threadLineItems: all.filter((i) => i.hasThreadLine).length,
+    socialItems: all.filter((i) => i.social).length,
     adjacency,
-    samples: items.slice(0, 10),
+    samples: all.slice(0, 12),
   };
 
   console.log('[author-timeline-spike] 结果:', JSON.stringify({

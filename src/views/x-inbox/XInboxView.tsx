@@ -1136,7 +1136,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
     }
     const x = r.result;
     const rounds = x.rounds.map((rd) =>
-      `  轮${rd.round}: DOM ${rd.domCount} 条 (+${rd.added}), 最旧 ${rd.spanDays ?? '?'} 天前`,
+      `  轮${rd.round}: DOM ${rd.domCount} | 累计 ${rd.cumulative} (+${rd.newIds}) | 最旧 ${rd.spanDays ?? '?'} 天前`,
     ).join('\n');
     const adj = x.adjacency;
     setSpikeOut(
@@ -1151,11 +1151,21 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       + `\n② 时间覆盖(决定「回溯窗口」变量的可行上限)\n${rounds}\n`
       + `  停止原因:${x.stopReason}\n`
       + `\n③ 判据对照\n`
-      + `  总 ${x.totalItems} 条 | 本人 ${x.selfItems} | 带「Replying to」${x.replyItems} | `
-      + `socialContext ${x.socialItems}\n`
-      + `  ${x.replyItems !== x.socialItems
-            ? '→ 两数不等:socialContext 与「是否回复」确实不是一回事'
-            : '→ 两数相等,需更多样本才能区分'}`,
+      + `  累计 ${x.totalItems} 条 | 本人 ${x.selfItems} | A「Replying to」${x.replyItems} | `
+      + `B 连接线 ${x.threadLineItems} | socialContext ${x.socialItems}\n`
+      + `  ${x.threadLineItems > 0
+            ? '→ 判据 B(连接线)可用,A 在此页面不渲染'
+            : '→ 三个判据都为 0,需 dump DOM 另寻'}\n`
+      + `\n④ 样本(看 tweetId 能否拿到)\n`
+      + x.samples.slice(0, 6).map((sp) =>
+          `  ${sp.isSelf ? '我' : '他'} ${sp.tweetId ?? 'no-id'} 线=${sp.hasThreadLine ? 'Y' : 'N'} ${sp.text.slice(0, 24)}`,
+        ).join('\n')
+      + `\n\n⑤ 回复关系(开详情页解 —— 这才是「回复了谁」的真源)\n`
+      + (x.relationProbe.length === 0
+          ? '  没有候选(需先有本人带连接线的推)'
+          : x.relationProbe.map((rp) =>
+              `  ${rp.tweetId} → 回复给 ${rp.replyingTo ?? '✗'} | 父推 ${rp.parentId ?? '✗'}`,
+            ).join('\n')),
     );
     } finally {
       setSpiking(false);
