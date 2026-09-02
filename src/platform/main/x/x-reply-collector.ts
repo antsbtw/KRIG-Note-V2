@@ -123,6 +123,8 @@ export interface ReplyCollectResult {
   backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
   /** 覆盖到的最旧回复距今天数 —— 如实反映抓了多深,不谎称全量 */
   oldestDays: number | null;
+  /** 为什么停 —— 区分「到底了」与「封顶了」,不含糊 */
+  stopReason: string;
   /** 诊断落盘路径 */
   dumpPath?: string;
 }
@@ -205,15 +207,53 @@ export async function collectReplyRelations(
 
   let rounds = 0;
   let oldestDays: number | null = null;
+  let stopReason = `达到轮次上限 ${maxRounds}`;
+  let noProgress = 0;
+  let lastRelCount = 0;
+
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
     if (times.length) {
       const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
       oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
-      if (oldestDays >= targetDays) break;
+      if (oldestDays >= targetDays) { stopReason = `已覆盖目标 ${targetDays} 天`; break; }
     }
-    await wc.executeJavaScript(`window.scrollBy(0, window.innerHeight * 0.9)`).catch(() => {});
-    await new Promise((r) => setTimeout(r, 1800));
+
+    // ⚠️ window.scrollBy 对 X 的虚拟列表**常常无效** —— 实测 40 轮只触发 12 个
+    // 请求,大部分滚动没让页面去取下一页(两次运行都恰好停在 2.6 天)。
+    // 原因:真正滚动的是内部容器,不是 window;且 X 只在「接近底部」时才拉下一页。
+    // 改为:直接把页面滚到文档底部,并回报**是否真的动了**(fail loud 的前提是能观测)。
+    const moved = await wc.executeJavaScript(`(function () {
+      var before = window.scrollY;
+      var docH = Math.max(
+        document.body.scrollHeight, document.documentElement.scrollHeight);
+      window.scrollTo(0, docH);
+      // 兜底:若 window 没动,找真正可滚的容器推一把
+      if (window.scrollY === before) {
+        var all = document.querySelectorAll('div');
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.scrollHeight > el.clientHeight + 200) { el.scrollTop = el.scrollHeight; break; }
+        }
+      }
+      return { before: before, after: window.scrollY, docH: docH };
+    })()`).catch(() => null) as { before: number; after: number; docH: number } | null;
+
+    await new Promise((r) => setTimeout(r, 2200));
+
+    // 进度以**新解出的关系**为准,不以滚动位移为准:
+    // 位移了但没新数据 = 到底了或懒加载封顶,两者都该停
+    if (relMap.size === lastRelCount) {
+      noProgress++;
+      if (noProgress >= 6) {
+        stopReason = `连续 6 轮无新数据(scrollY=${moved?.after ?? '?'}/${moved?.docH ?? '?'})`
+          + ` —— 到底了或 X 懒加载封顶`;
+        break;
+      }
+    } else {
+      noProgress = 0;
+      lastRelCount = relMap.size;
+    }
   }
 
   wc.debugger.off('message', onMessage);
@@ -232,7 +272,7 @@ export async function collectReplyRelations(
     mkdirSync(dir, { recursive: true });
     dumpPath = join(dir, `replies-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
     writeFileSync(dumpPath, JSON.stringify(
-      { handle: h, rounds, payloads, oldestDays, relations, ownReplies }, null, 2), 'utf-8');
+      { handle: h, rounds, payloads, oldestDays, stopReason, relations, ownReplies }, null, 2), 'utf-8');
   } catch (err) {
     console.warn('[x-reply-collector] 诊断落盘失败(不影响主流程):', err);
   }
@@ -248,5 +288,5 @@ export async function collectReplyRelations(
     + `父推不在库 ${backfill.parentNotInDb} 条`);
 
   return { rounds, payloads, relations: relations.length, ownReplies: ownReplies.length,
-    ownSaved, savedOnReplies, backfill, oldestDays, dumpPath };
+    ownSaved, savedOnReplies, backfill, oldestDays, stopReason, dumpPath };
 }

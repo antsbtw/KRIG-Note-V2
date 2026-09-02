@@ -24,8 +24,8 @@ import { probeSelfHandle } from './x-self-account';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
 import { surveyXPayloads } from './x-payload-inspector';
 import { collectReplyRelations } from './x-reply-collector';
-import { countRepliedAccepted } from '../db/x-reply-relation-repo';
-import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
+import { countRepliedAccepted, getOwnReplyCoverage } from '../db/x-reply-relation-repo';
+import { DEFAULT_FILTER_CONFIG, normalizeHandle } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
 export function registerXTimelineHandlers(): void {
@@ -198,7 +198,8 @@ export function registerXTimelineHandlers(): void {
         tweet_id:      p.tweet_id,
         text:          p.text ?? '',
         lang:          p.lang,
-        author_handle: p.author_handle ?? '',
+        // 存归一化形态(migration 1.0.2 统一),与 x_tweet / x_author 同形态
+        author_handle: normalizeHandle(p.author_handle ?? ''),
         verdict:       p.verdict as FeedbackVerdict,
         reason_tag:    p.reason_tag,
         source_recipe: p.source_recipe,
@@ -357,7 +358,9 @@ export function registerXTimelineHandlers(): void {
       const r = await collectReplyRelations(p.handle, wcId, undefined, targetDays);
       if ('error' in r) return { success: false, error: r.error };
       const stats = await countRepliedAccepted();
-      return { success: true, result: r, stats };
+      // 库里累计覆盖 ≠ 单次抓到的深度:单次受懒加载限制,但多次采集会累积
+      const coverage = await getOwnReplyCoverage();
+      return { success: true, result: r, stats, coverage };
     } catch (err) {
       return { success: false, error: String(err) };
     }

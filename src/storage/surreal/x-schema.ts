@@ -219,6 +219,42 @@ export async function x_migration_1_0_1(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * 1.0.2 —— handle 形态统一(2026-09-02)
+ *
+ * 问题:同一张表里两种形态并存 ——
+ *   `source='search'` 的 982 行存 '@ylyz61'(带 @、保留大小写,DOM 抓取的历史遗留)
+ *   `source='self_reply'` 的 78 行存 'netlab2gfw'(归一化,载荷采集时已过 normalizeHandle)
+ * 实测后果:657 个不同取值 → 归一化后只有 656 个人,**已经有一个人被算成两个**
+ * (正是本账号:'@NetLab2GFW' vs 'netlab2gfw')。
+ * 将来按作者聚合(画像!)会把同一人拆成两条,且**不报错**。
+ *
+ * 统一到**归一化形态**(无 @、全小写),与 x_author.handle / normalizeHandle() 一致 ——
+ * 跨表比对本来就按这个形态做(B 期屏蔽名单、收件箱隐藏过滤都是),
+ * 让存储与比对同形态,消除这一层转换。
+ *
+ * ⚠️ 只改 handle 类字段,不动 author_name_at_post(展示名快照,本就该保留原样)。
+ */
+const X_SCHEMA_1_0_2 = `
+UPDATE x_tweet SET author_handle = string::replace(string::lowercase(author_handle), '@', '')
+  WHERE string::starts_with(author_handle, '@') OR author_handle != string::lowercase(author_handle);
+UPDATE tweet_feedback SET author_handle = string::replace(string::lowercase(author_handle), '@', '')
+  WHERE string::starts_with(author_handle, '@') OR author_handle != string::lowercase(author_handle);
+`;
+
+export async function x_migration_1_0_2(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_2);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.2',
+      appliedAt = $now,
+      description = 'Normalize author_handle across x_tweet / tweet_feedback (strip @, lowercase)'`,
+    { rid: new RecordId('schema_version', '1.0.2'), now },
+  );
+}
+
 export async function x_migration_1_0_0(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_0_0);
 

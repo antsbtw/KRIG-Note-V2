@@ -1211,9 +1211,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
       setSpikeOut(
         `回复关系采集完成 —— @${normalizeHandle(handle)}\n`
         + `\n滚了 ${x.rounds} 轮,捕获 ${x.payloads} 个响应\n`
-        + `覆盖最近 ${x.oldestDays ?? '?'} 天\n`
-        + `${x.oldestDays !== null && x.oldestDays < 7
-            ? '  ⚠ 未达 7 天目标 —— X 懒加载限制,这是实际抓到的深度,非全量\n' : ''}`
+        + `本次覆盖最近 ${x.oldestDays ?? '?'} 天(停因:${x.stopReason})\n`
         + `解出回复关系 ${x.relations} 条,其中我自己发的 ${x.ownReplies} 条\n`
         + `\n【落库】\n`
         + `  自己的回复入库:${x.ownSaved.inserted} 条(已存在 ${x.ownSaved.skipped} 条)\n`
@@ -1223,6 +1221,11 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
         + `  父推不在库里:${b.parentNotInDb} 条(回复过但没采集过的)\n`
         + (r.stats
             ? `\n【累计】已采纳 ${r.stats.totalAccepted} 条,其中回复过 ${r.stats.repliedAccepted} 条\n`
+            : '')
+        + (r.coverage
+            ? `【库存回复】${r.coverage.count} 条,覆盖最近 ${r.coverage.spanDays ?? '?'} 天`
+              + `(${(r.coverage.oldest ?? '').slice(0, 10)} 起)\n`
+              + `  单次受 X 懒加载限制约 2.6 天,但**多次采集会累积** —— 定期跑即可往前推\n`
             : '')
         + (x.dumpPath ? `\n📦 明细:${x.dumpPath}` : '')
         + `\n\n(返回收件箱后刷新即可看到「已回复」状态)`,

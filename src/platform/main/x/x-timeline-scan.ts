@@ -203,7 +203,8 @@ export async function scanRecipe(
             tweet_id: tweet.tweetId,
             text: tweet.text ?? '',
             author_name: tweet.authorName ?? '',
-            author_handle: tweet.authorHandle ?? '',
+            // ⚠️ 存归一化形态(migration 1.0.2 统一):不归一化则同一人被算成两个
+            author_handle: normalizeHandle(tweet.authorHandle ?? ''),
             author_avatar: tweet.authorAvatar,
             tweet_url: tweet.tweetUrl,
             lang: tweet.lang,
@@ -229,7 +230,8 @@ export async function scanRecipe(
         tweet_id: tweet.tweetId!,
         text: tweet.text ?? '',
         author_name: tweet.authorName ?? '',
-        author_handle: tweet.authorHandle ?? '',
+        // ⚠️ 同上:存归一化形态,与 x_author.handle / normalizeHandle 一致
+        author_handle: normalizeHandle(tweet.authorHandle ?? ''),
         author_avatar: tweet.authorAvatar,
         tweet_url: tweet.tweetUrl,
         lang: tweet.lang,

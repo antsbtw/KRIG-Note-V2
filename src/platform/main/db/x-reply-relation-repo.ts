@@ -200,6 +200,37 @@ export async function saveOwnReplies(replies: OwnReply[]): Promise<{ inserted: n
 }
 
 /**
+ * 我已入库的回复里,最旧那条是什么时候 —— 增量采集的锚点。
+ *
+ * 用途:单次采集受 X 懒加载限制只能覆盖约 2.6 天(实测两次都停在这个数),
+ * 但**多次采集可以累积**:每次抓到的都并进库里,库里的覆盖深度会一次次往前推。
+ * 本函数让 UI 能如实显示「库里累计覆盖了多久」,与「单次抓到多深」分开报。
+ */
+export async function getOwnReplyCoverage(): Promise<{
+  count: number; oldest: string | null; newest: string | null; spanDays: number | null;
+}> {
+  const db = getXDB();
+  // ⚠️ 不用 math::min/max —— 实测对 datetime 返回 NULL(字段明明有值)。
+  // 改用 ORDER BY + LIMIT 1,已实测可用。
+  const res = await db.query<[Array<{ c: number }>, string[], string[]]>(
+    `SELECT count() AS c FROM x_tweet WHERE source = 'self_reply' GROUP ALL;
+     SELECT VALUE created_at FROM x_tweet WHERE source = 'self_reply' ORDER BY created_at ASC LIMIT 1;
+     SELECT VALUE created_at FROM x_tweet WHERE source = 'self_reply' ORDER BY created_at DESC LIMIT 1;`,
+  );
+  const count = res[0]?.[0]?.c ?? 0;
+  if (!count) return { count: 0, oldest: null, newest: null, spanDays: null };
+  const oldest = res[1]?.[0] ? String(res[1][0]) : null;
+  return {
+    count,
+    oldest,
+    newest: res[2]?.[0] ? String(res[2][0]) : null,
+    spanDays: oldest
+      ? Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10
+      : null,
+  };
+}
+
+/**
  * 统计:我回复过的已采纳线索有多少条(业务主线的核心指标)。
  * 「找到需要买 VPN 的人 → 回复他们」—— 这个数就是主线的产出量。
  */
