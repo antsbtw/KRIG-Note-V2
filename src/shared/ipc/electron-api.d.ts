@@ -841,7 +841,7 @@ declare global {
           result?: {
             rounds: number; payloads: number; relations: number; savedOnReplies: number;
             ownReplies: number; ownSaved: { inserted: number; skipped: number };
-            stopReason: string;
+            stopReason: string; problems: string[];
             oldestDays: number | null; dumpPath?: string;
             backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
           };

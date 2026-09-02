@@ -16,478 +16,151 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
-import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
-import { saveAuthorCounts, getAuthorCounts } from '../db/x-author-repo';
+import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
 import { backfillRepliedFromRelations, saveReplyRelations, saveOwnReplies,
-  getOwnReplyCoverage, getCollectCursor, saveCollectCursor,
-  type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
+  getOwnReplyCoverage, type ReplyRelation, type OwnPost } from '../db/x-reply-relation-repo';
 
-/**
- * 从响应里取出 X 自己给的分页游标。
- *
- * 用户 2026-09-02:「其实 X 上有很多标记,你要善于利用。」—— 这就是那个标记:
- * content.__typename = 'TimelineTimelineCursor',cursorType = 'Top' | 'Bottom'。
- * Bottom 即「下一页从这里继续」,是 X 自己的续传凭证,比拿时间戳猜边界精确。
+/*
+ * ── 已删除的本地实现(2026-09-02)────────────────────────────────
+ * 此处曾有:extractBottomCursor / extractAuthorCounts / extractRelations
+ * 以及一整套自己的滚动循环。它们与 x-timeline-harvester 重复,
+ * 而重复正是漏数据的根源 —— 同一个 bug 修三遍,每次都以为修好了,
+ * 实测代价:验证页看到 597 条,旧采集器只入库 101 条(漏 83%)。
+ * 现在滚动与字段抽取**只有 harvester 一处实现**,这里只管落库。
  */
-function extractBottomCursor(node: unknown): string | undefined {
-  if (node === null || typeof node !== 'object') return undefined;
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const r = extractBottomCursor(item);
-      if (r) return r;
-    }
-    return undefined;
-  }
-  const o = node as Record<string, unknown>;
-  const isCursor = o.__typename === 'TimelineTimelineCursor'
-    || o.entryType === 'TimelineTimelineCursor';
-  if (isCursor && o.cursorType === 'Bottom' && typeof o.value === 'string') return o.value;
-  for (const v of Object.values(o)) {
-    const r = extractBottomCursor(v);
-    if (r) return r;
-  }
-  return undefined;
-}
-
-/**
- * 从 UserByScreenName 响应里取账号基线计数。
- *
- * 用户 2026-09-02 点出:post 总数就是**基线** —— 采集完整度的分母。
- * /with_replies 页面加载时 X 自己就会请求 UserByScreenName,顺手接住即可,
- * 不需要额外发请求。
- */
-function extractAuthorCounts(node: unknown, wantHandle: string): {
-  tweetCount?: number; mediaCount?: number; followersCount?: number;
-  followingCount?: number; favouritesCount?: number; accountCreatedAt?: string;
-} | undefined {
-  if (node === null || typeof node !== 'object') return undefined;
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const r = extractAuthorCounts(item, wantHandle);
-      if (r) return r;
-    }
-    return undefined;
-  }
-  const o = node as Record<string, unknown>;
-  const tc = o.tweet_counts as Record<string, unknown> | undefined;
-  const rc = o.relationship_counts as Record<string, unknown> | undefined;
-  if (tc && typeof tc.tweets === 'number') {
-    const ac = o.action_counts as Record<string, unknown> | undefined;
-    const core = o.core as Record<string, unknown> | undefined;
-    // ⚠️ **必须核对 handle**:响应里到处都是 user 对象(通知里的操作者、
-    //    时间线里的其他作者),不核对就会把**别人的** 39850 条当成自己的基线。
-    //    2026-09-02 实测踩到:从 NotificationsTimeline 抓回了一个陌生账号的计数。
-    const sn = typeof core?.screen_name === 'string' ? core.screen_name : undefined;
-    if (!sn || normalizeHandle(sn) !== wantHandle) {
-      // 不是目标账号 → 继续往下找,别在这里返回
-      for (const v of Object.values(o)) {
-        const r = extractAuthorCounts(v, wantHandle);
-        if (r) return r;
-      }
-      return undefined;
-    }
-    return {
-      tweetCount: tc.tweets,
-      mediaCount: typeof tc.media_tweets === 'number' ? tc.media_tweets : undefined,
-      followersCount: typeof rc?.followers === 'number' ? rc.followers : undefined,
-      followingCount: typeof rc?.following === 'number' ? rc.following : undefined,
-      favouritesCount: typeof ac?.favorites_count === 'number' ? ac.favorites_count : undefined,
-      accountCreatedAt: typeof core?.created_at === 'string' ? core.created_at : undefined,
-    };
-  }
-  for (const v of Object.values(o)) {
-    const r = extractAuthorCounts(v, wantHandle);
-    if (r) return r;
-  }
-  return undefined;
-}
-
-/** 取字符串字段(载荷里缺字段是常态,不能假设存在) */
-function str(o: Record<string, unknown>, k: string): string | undefined {
-  const v = o[k];
-  return typeof v === 'string' && v ? v : undefined;
-}
-function num(o: Record<string, unknown>, k: string): number | undefined {
-  const v = o[k];
-  return typeof v === 'number' ? v : undefined;
-}
-
-/**
- * 递归找出响应里所有带回复字段的 legacy 对象。
- *
- * 同时产出两样东西 —— 它们服务不同目的,别合并:
- *  - relations:轻量关系,用于**标记被回复的线索**为「我回复过了」
- *  - ownReplies:我自己发的回复全量字段,用于**入库**(会话链/话术复盘/促转发)
- *
- * ⚠️ 长推 full_text 会被截断,真全文在 note_tweet(能力勘查 §4.6)。
- */
-function extractRelations(
-  node: unknown,
-  out: ReplyRelation[],
-  own: OwnReply[],
-  selfHandle: string,
-): void {
-  if (node === null || typeof node !== 'object') return;
-
-  if (Array.isArray(node)) {
-    for (const item of node) extractRelations(item, out, own, selfHandle);
-    return;
-  }
-
-  const obj = node as Record<string, unknown>;
-  const legacy = obj.legacy as Record<string, unknown> | undefined;
-  if (legacy && typeof legacy === 'object') {
-    const parent = str(legacy, 'in_reply_to_status_id_str');
-    const self = str(legacy, 'id_str');
-    const replyTo = str(legacy, 'in_reply_to_screen_name');
-    const conv = str(legacy, 'conversation_id_str');
-
-    // 关系:只有回复才有(原创推没有父推)
-    if (parent && self) {
-      out.push({
-        tweetId: self,
-        inReplyToStatusId: parent,
-        inReplyToScreenName: replyTo ? normalizeHandle(replyTo) : undefined,
-        conversationId: conv,
-      });
-    }
-
-    // 我自己发的推:**原创与回复都要**(用户 2026-09-02:AI 要学说话方式,
-    // 只有回复学不全 —— 主动表达与应答是两种语料)。
-    // 此前这段嵌在 `if (parent && self)` 里,原创推被整个丢掉。
-    if (self) {
-      const core = obj.core as Record<string, unknown> | undefined;
-      const ur = core?.user_results as Record<string, unknown> | undefined;
-      const urr = ur?.result as Record<string, unknown> | undefined;
-      const ucore = urr?.core as Record<string, unknown> | undefined;
-      const authorHandle = ucore ? str(ucore, 'screen_name') : undefined;
-
-      if (authorHandle && normalizeHandle(authorHandle) === selfHandle) {
-        // ⚠️ 长推:legacy.full_text **会被截断**,真全文在 note_tweet。
-        // 训练素材必须保真,截断的语料会教出截断的说话方式。
-        const note = obj.note_tweet as Record<string, unknown> | undefined;
-        const nres = (note?.note_tweet_results as Record<string, unknown> | undefined)
-          ?.result as Record<string, unknown> | undefined;
-        const fullText = (nres && str(nres, 'text')) ?? str(legacy, 'full_text') ?? '';
-
-        own.push({
-          tweetId: self,
-          text: fullText,
-          authorHandle: normalizeHandle(authorHandle),
-          createdAt: str(legacy, 'created_at'),
-          lang: str(legacy, 'lang'),
-          inReplyToStatusId: parent,
-          inReplyToScreenName: replyTo ? normalizeHandle(replyTo) : undefined,
-          conversationId: conv,
-          metrics: {
-            likes: num(legacy, 'favorite_count'),
-            retweets: num(legacy, 'retweet_count'),
-            replies: num(legacy, 'reply_count'),
-            quotes: num(legacy, 'quote_count'),
-            bookmarks: num(legacy, 'bookmark_count'),
-          },
-        });
-      }
-    }
-  }
-
-  for (const v of Object.values(obj)) extractRelations(v, out, own, selfHandle);
-}
 
 export interface ReplyCollectResult {
-  /** 滚了几轮 */
   rounds: number;
-  /** 捕获的 GraphQL 响应数 */
   payloads: number;
   /** 解出的回复关系条数(去重后) */
   relations: number;
-  /** 其中我自己发的回复条数 */
+  /** 其中我自己发的推(原创+回复) */
   ownReplies: number;
-  /** 自己的回复入库结果 */
+  /** 自己的推入库结果 */
   ownSaved: { inserted: number; skipped: number };
   /** 写到「我的回复」那些推上的条数 */
   savedOnReplies: number;
-  /** 回填战果 */
   backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
-  /** 覆盖到的最旧回复距今天数 —— 如实反映抓了多深,不谎称全量 */
+  /** 覆盖到的最旧一条距今天数 —— 如实反映抓了多深,不谎称全量 */
   oldestDays: number | null;
-  /** 为什么停 —— 区分「到底了」与「封顶了」,不含糊 */
+  /** 为什么停 */
   stopReason: string;
-  /** 诊断落盘路径 */
+  /** 采集底座的自校验结果:非空即有问题,不粉饰 */
+  problems: string[];
   dumpPath?: string;
 }
 
 /**
- * 采集指定账号的回复关系。
+ * 采集某账号的发言(原创 + 回复)并落库。
  *
- * @param handle     目标账号(通常是自己)
- * @param maxRounds  滚动轮次上限(安全阀,正常情况下靠「滚不动」自然结束)
+ * ⭐ **滚动交给 harvestTimeline** —— 用户 2026-09-02 在采集验证页人眼验过那套:
+ *    「我滚动到了 8月25日,获取到的回复大概 597 条,通过这个你就可以看出
+ *      前面漏了多少数据。」
+ *    实测对比:验证页看到 597 条,而旧采集器只入库 101 条 = **漏了 83%**。
+ *    根因是滚动逻辑此前散在三个文件里各修各的,同一个 bug 修三遍还都没修对。
+ *    现在只保留一处滚动实现(harvester),这里只负责**落库**。
  *
- * ⚠️ **边界如实汇报**:X 用虚拟列表 + 懒加载,B′ 诊断实测滚 60 轮只覆盖 3.2 天。
- *    本函数返回 oldestDays,调用方**不得声称"全量"** —— 抓到多少说多少。
+ * 两条流都采:/with_replies(回复)+ /<handle>(原创)——
+ * AI 要学说话方式,主动表达与应答是两种语料,缺一半学不全。
  */
 export async function collectReplyRelations(
   handle: string,
   targetWcId?: number,
-  maxRounds = 400,
 ): Promise<ReplyCollectResult | { error: string }> {
   const h = normalizeHandle(handle);
   if (!h) return { error: 'empty handle' };
 
-  const resolved = resolveXWebContents(targetWcId);
-  if ('error' in resolved) return { error: resolved.error };
-  const wc = resolved.wc;
-
-  let attached = false;
-  try { wc.debugger.attach('1.3'); attached = true; }
-  catch (err) { console.warn('[x-reply-collector] attach 失败(可能已 attach):', err); }
-
-  const relMap = new Map<string, ReplyRelation>();
-  const ownMap = new Map<string, OwnReply>();
-  const times: string[] = [];
-  const pending = new Map<string, string>();
-  let payloads = 0;
-  let latestCursor: string | undefined;
-  let authorCounts: ReturnType<typeof extractAuthorCounts>;
-
-  const onMessage = (_e: unknown, method: string, params: any): void => {
-    if (method === 'Network.requestWillBeSent') {
-      const url: string = params?.request?.url ?? '';
-      if (url.includes('/i/api/graphql/')) pending.set(params.requestId, url);
-      return;
-    }
-    if (method === 'Network.loadingFinished') {
-      const url = pending.get(params.requestId);
-      if (!url) return;
-      pending.delete(params.requestId);
-      wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
-        .then((r: any) => {
-          if (!r?.body) return;
-          payloads++;
-          try {
-            const parsed = JSON.parse(r.body);
-            const found: ReplyRelation[] = [];
-            const foundOwn: OwnReply[] = [];
-            extractRelations(parsed, found, foundOwn, h);
-            for (const rel of found) relMap.set(rel.tweetId, rel);
-            for (const o of foundOwn) ownMap.set(o.tweetId, o);
-            // 每个响应都可能带新的 Bottom 游标 —— 留最后一个(最深的那页)
-            const cur = extractBottomCursor(parsed);
-            if (cur) latestCursor = cur;
-            // 基线:页面加载时 X 自己会请求 UserByScreenName,顺手接住
-            if (!authorCounts) authorCounts = extractAuthorCounts(parsed, h);
-            // 记录时间戳以计算覆盖深度
-            const collectTimes = (n: unknown): void => {
-              if (n === null || typeof n !== 'object') return;
-              if (Array.isArray(n)) { n.forEach(collectTimes); return; }
-              const o = n as Record<string, unknown>;
-              const lg = o.legacy as Record<string, unknown> | undefined;
-              if (lg && typeof lg.created_at === 'string') times.push(lg.created_at);
-              Object.values(o).forEach(collectTimes);
-            };
-            collectTimes(parsed);
-          } catch { /* 非 JSON 跳过 */ }
-        })
-        .catch(() => { /* 响应体可能已丢弃 */ });
-    }
-  };
-
-  wc.debugger.on('message', onMessage);
-  await wc.debugger.sendCommand('Network.enable').catch(() => {});
-
-  // ── 续传:用 X 自己给的 Bottom 游标 ──────────────────────────────
-  //
-  // 用户 2026-09-02 两条指正,本段是它们的落地:
-  //  ①「不要增加用户负担,应该更加简洁」→ **一个按钮**,不让用户选方向
-  //  ②「X 上有很多标记,你要善于利用」→ 用 X 的 Bottom 游标,不拿时间戳猜边界
-  //
-  // 我原来的两按钮方案(增量/补历史)是把实现细节暴露给用户:
-  // 时间戳做锚点必须区分「往新」「往旧」,所以才需要两个模式。
-  // 而游标天然是单向续传凭证 —— 有就接着上次挖,没有就从头,用户不必知道。
-  // 两条流各有各的游标 —— X 的 with_replies 与 Posts 是不同 timeline,
-  // 共用一个游标会互相覆盖(一条流的续传点对另一条无意义)。
-  const scope = `${h}:replies`;
-  const saved = await getCollectCursor(scope);
-  const coverage = await getOwnReplyCoverage();
-  console.log(`[x-reply-collector] 库存 ${coverage.count} 条 `
-    + `(最旧 ${coverage.oldest ?? '?'}), 游标=${saved.bottomCursor ? '有(续传)' : '无(从头)'}`
-    + `${saved.exhausted ? ' [已到底]' : ''}`);
-
-  // ── 两条流依次采(用户 2026-09-02:「所有的发帖回复都要爬取」)──
-  // /with_replies 只给回复流;原创推在 Posts 标签页(UserOriginalsTimeline)。
-  // 两条都要:AI 学说话方式,主动表达与应答是两种语料,缺一半学不全。
   const streams = [
-    { key: 'replies', url: `https://x.com/${h}/with_replies` },
-    { key: 'posts',   url: `https://x.com/${h}` },
+    `https://x.com/${h}/with_replies`,
+    `https://x.com/${h}`,
   ];
-  let streamIdx = 0;
 
-  wc.loadURL(streams[0].url);
-  await new Promise((r) => setTimeout(r, 4000));
-
+  const all = new Map<string, HarvestedTweet>();
+  const problems: string[] = [];
   let rounds = 0;
-  let oldestDays: number | null = null;
-  let stopReason = `达到轮次上限 ${maxRounds}`;
-  let noProgress = 0;
-  let lastRelCount = 0;
-  let lastScrollY = -1;
-  let stuckRounds = 0;
+  let payloads = 0;
+  let stopReason = '';
 
-  for (let i = 1; i <= maxRounds; i++) {
-    rounds = i;
-
-    // 观察日期:抓到的最旧一条是什么时候 —— 用户 2026-09-02:
-    // 「滚动通知栏目的屏幕,所有的 item 都要抓取…当你滚不动的时候,就是获取完毕了。
-    //   很简单,滚动时观察日期就好了。」
-    //
-    // 日期是**进度显示**,不是停止条件。停止条件只有一个:滚不动了。
-    // 我此前把「达到 N 天」当停止条件,结果被置顶旧推带偏(一条 3 月的推
-    // 就让判据误以为已覆盖 166 天),10 轮就停,最近 6 天的密集回复全漏。
-    if (times.length) {
-      const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
-      oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
+  for (const url of streams) {
+    const r = await harvestTimeline(url, targetWcId);
+    if ('error' in r) {
+      problems.push(`${url}: ${r.error}`);
+      continue;
     }
-
-    // ── 自然滚动(用户 2026-09-02 定的策略)────────────────────────
-    // 「滚动采集要有策略,不要触发 X 的风控就好。建议滚动自然,一直放下翻页,
-    //   做采集时间标记,这样就不会重复了。」
-    //
-    // ⚠️ 我上一版改成 scrollTo(文档底部) 是**错的**:瞬间跳到底是明显的机器行为,
-    //    为了挖深反而做了更容易触发风控的动作。已改回自然滚动。
-    //
-    // 自然的含义:一屏以内的位移 + 随机化 + 随机停顿(人不会匀速滚)。
-    // 慢不是代价 —— 增量锚点保证不重复,深度靠多次累积而非单次冲刺。
-    // ⚠️ 两个曾让采集静默失效的坑(2026-09-02 实测暴露:
-    //    用户按官网点击数据核对 —— 10 天 433 条回复,我们只有 81 条 = 19%):
-    //  ① `behavior:'smooth'` 是**异步**的:调用立刻返回,滚动还没发生,
-    //     所以我读到的 scrollY/docH 全是**滚动前**的状态 —— 等于没测。
-    //  ② 我从不检查 scrollY 到底动没动。X 的虚拟列表下 window 常常纹丝不动,
-    //     而循环只会傻等 8 轮然后宣布「到底了」。
-    // 修法:同步滚动 + 滚动后回读位置,**确认真的动了**;没动就换容器再推。
-    const step = 0.55 + Math.random() * 0.3;          // 0.55~0.85 屏,不足一屏
-    await wc.executeJavaScript(`(function () {
-      var y = window.scrollY;
-      window.scrollBy(0, window.innerHeight * ${step.toFixed(3)});   // 同步,不用 smooth
-      if (window.scrollY === y) {
-        // window 没动 → 找真正可滚的容器(X 有时把滚动放在内层)
-        var all = document.querySelectorAll('div');
-        for (var i = 0; i < all.length; i++) {
-          var el = all[i];
-          if (el.scrollHeight > el.clientHeight + 400) {
-            el.scrollTop = el.scrollTop + el.clientHeight * ${step.toFixed(3)};
-            break;
-          }
-        }
-      }
-    })()`).catch(() => {});
-
-    // 随机停顿 1.8~3.4s:匀速请求是风控最容易识别的特征之一
-    await new Promise((r) => setTimeout(r, 1800 + Math.random() * 1600));
-
-    // 滚动**之后**回读,这才是真实位置
-    const moved = await wc.executeJavaScript(`(function () {
-      return { y: window.scrollY, docH: Math.max(
-        document.body.scrollHeight, document.documentElement.scrollHeight),
-        arts: document.querySelectorAll('article[data-testid="tweet"]').length };
-    })()`).catch(() => null) as { y: number; docH: number; arts: number } | null;
-
-    // 位置没变 = 滚不动了(与「滚动了但没新数据」是两回事,必须分开报,
-    // 否则又是拿一个含混的判据当证据)
-    if (moved && lastScrollY === moved.y) stuckRounds++; else stuckRounds = 0;
-    if (moved) lastScrollY = moved.y;
-    if (i % 10 === 0 || stuckRounds > 0) {
-      console.log(`[x-reply-collector] 轮${i} y=${moved?.y ?? '?'} docH=${moved?.docH ?? '?'} `
-        + `article=${moved?.arts ?? '?'} 累计关系=${relMap.size} 卡住=${stuckRounds}`);
-    }
-
-    // 进度以**新解出的关系**为准,不以滚动位移为准:
-    // 位移了但没新数据 = 到底了或懒加载封顶,两者都该停
-    if (relMap.size === lastRelCount) {
-      noProgress++;
-      // 容忍度留足:滚过已知区域时本来就没有新数据,
-      // 太急会把"正在穿过已知区"误判成"到底了"(拿有缺陷的测量当证据)
-      // 「滚不动」与「滚动了但没新数据」是两回事:
-      //   · 真滚不动(scrollY 不变)= 到底了 → 该切流
-      //   · 滚动了但没新数据 = 可能只是这一段没有我的推(时间线里夹着别人的),
-      //     应该**继续滚**,不能急着判定结束 —— 这正是漏掉 80% 数据的原因之一。
-      // 故:没卡住时把容忍度放得很宽,真卡住(连续 3 轮 scrollY 不变)才算到底。
-      const limit = stuckRounds >= 3 ? 1 : 40;
-      if (noProgress >= limit) {
-        console.log(`[x-reply-collector] ${streams[streamIdx].key} 流结束`
-          + `(卡住 ${stuckRounds} 轮 / 无新数据 ${noProgress} 轮),`
-          + `累计 ${relMap.size} 条关系 / ${ownMap.size} 条本人推`);
-        if (streamIdx < streams.length - 1) {
-          streamIdx++;
-          console.log(`[x-reply-collector] 切到 ${streams[streamIdx].key} 流`);
-          wc.loadURL(streams[streamIdx].url);
-          await new Promise((r) => setTimeout(r, 4000));
-          noProgress = 0;
-          stuckRounds = 0;
-          lastScrollY = -1;
-          lastRelCount = relMap.size;
-          continue;
-        }
-        stopReason = stuckRounds >= 3
-          ? `两条流都滚到底(最旧 ${oldestDays ?? '?'} 天前)`
-          : `连续 ${noProgress} 轮无新数据(最旧 ${oldestDays ?? '?'} 天前)`;
-        break;
-      }
-    } else {
-      noProgress = 0;
-      lastRelCount = relMap.size;
-    }
+    for (const t of r.tweets) if (!all.has(t.tweetId)) all.set(t.tweetId, t);
+    rounds += r.rounds;
+    payloads += r.payloads;
+    stopReason = stopReason ? `${stopReason};${r.stopReason}` : r.stopReason;
+    // 底座的自校验结果如实带出 —— 有问题就该看见,不埋掉
+    for (const p of r.problems) problems.push(`${url}: ${p}`);
   }
 
-  wc.debugger.off('message', onMessage);
-  if (attached) { try { wc.debugger.detach(); } catch { /* 已 detach */ } }
+  const list = [...all.values()];
 
-  const relations = [...relMap.values()];
-  const ownReplies = [...ownMap.values()];
-  console.log(`[x-reply-collector] @${h}: ${rounds} 轮, ${payloads} 个响应, `
-    + `解出 ${relations.length} 条回复关系(其中我自己发的 ${ownReplies.length} 条), `
-    + `覆盖 ${oldestDays ?? '?'} 天`);
+  // 关系:任何带父推的推(不限本人)—— 用于标记「被回复的线索」
+  const relations: ReplyRelation[] = list
+    .filter((t) => t.inReplyToStatusId)
+    .map((t) => ({
+      tweetId: t.tweetId,
+      inReplyToStatusId: t.inReplyToStatusId!,
+      inReplyToScreenName: t.inReplyToScreenName
+        ? normalizeHandle(t.inReplyToScreenName) : undefined,
+      conversationId: t.conversationId,
+    }));
 
-  // 诊断落盘:采集是有成本的,结果留痕便于复核(不必再跑一次)
+  // 我自己发的推(原创 + 回复)—— AI 语料
+  const ownPosts: OwnPost[] = list
+    .filter((t) => t.authorHandle && normalizeHandle(t.authorHandle) === h)
+    .map((t) => ({
+      tweetId: t.tweetId,
+      text: t.text,
+      authorHandle: h,
+      createdAt: t.createdAt,
+      lang: t.lang,
+      inReplyToStatusId: t.inReplyToStatusId,
+      inReplyToScreenName: t.inReplyToScreenName
+        ? normalizeHandle(t.inReplyToScreenName) : undefined,
+      conversationId: t.conversationId,
+      metrics: t.metrics,
+    }));
+
+  const times = list.map((t) => t.createdAt).filter(Boolean) as string[];
+  const oldestDays = times.length
+    ? Math.round((Date.now() - Math.min(...times.map((t) => new Date(t).getTime())))
+        / 86_400_000 * 10) / 10
+    : null;
+
+  // 诊断落盘:采集有成本,结果留痕便于复核
   let dumpPath: string | undefined;
   try {
     const dir = join(app.getPath('userData'), 'x-payload-survey');
     mkdirSync(dir, { recursive: true });
     dumpPath = join(dir, `replies-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
     writeFileSync(dumpPath, JSON.stringify(
-      { handle: h, rounds, payloads, oldestDays, stopReason, relations, ownReplies }, null, 2), 'utf-8');
+      { handle: h, rounds, payloads, oldestDays, stopReason, problems,
+        relations, ownReplies: ownPosts }, null, 2), 'utf-8');
   } catch (err) {
     console.warn('[x-reply-collector] 诊断落盘失败(不影响主流程):', err);
   }
 
-  // 顺序要紧:先把自己的回复插进去,再补关系 —— 否则新插的行拿不到关系更新
-  const ownSaved = await saveOwnReplies(ownReplies);
+  // 顺序要紧:先插自己的推,再补关系 —— 否则新插的行拿不到关系更新
+  const ownSaved = await saveOwnReplies(ownPosts);
   const savedOnReplies = await saveReplyRelations(relations);
   const backfill = await backfillRepliedFromRelations(relations);
 
-  // 存基线 —— 采集完整度的分母(用户 2026-09-02 点出的关键)
-  if (authorCounts?.tweetCount) {
-    await saveAuthorCounts(h, authorCounts);
-    console.log(`[x-reply-collector] 基线更新: 发推总数 ${authorCounts.tweetCount}`);
-  }
+  const cov = await getOwnReplyCoverage();
+  console.log(`[x-reply-collector] @${h}: ${rounds} 轮 / ${payloads} 响应 → `
+    + `抓到 ${list.length} 条(我的 ${ownPosts.length}),入库 ${ownSaved.inserted} 条新的;`
+    + `标记 replied ${backfill.markedReplied}(已采纳 ${backfill.amongAccepted});`
+    + `库存合计 ${cov.count} 条`);
+  if (problems.length) console.warn('[x-reply-collector] 校验问题:', problems);
 
-  // 存游标:下次从这里接着挖。没拿到新游标 = X 不再给下一页 → 标记到底。
-  // ⚠️ 只在**确实抓到了数据**时才判定到底 —— 一次都没抓到可能是网络/风控,
-  //    那种情况不该把 exhausted 钉死,否则以后再也不挖了(静默坍缩)。
-  const gotData = relations.length > 0;
-  await saveCollectCursor(scope, {
-    bottomCursor: latestCursor ?? saved.bottomCursor,
-    oldestAt: ownReplies.length
-      ? ownReplies.map((o) => o.createdAt).filter(Boolean).sort()[0]
-      : saved.oldestAt,
-    exhausted: gotData && !latestCursor,
-  });
-
-  console.log(`[x-reply-collector] 落库: 自己的回复入库 ${ownSaved.inserted} 条`
-    + `(已存在 ${ownSaved.skipped} 条); 补关系 ${savedOnReplies} 条; `
-    + `标记 replied ${backfill.markedReplied} 条(其中已采纳 ${backfill.amongAccepted});`
-    + `父推不在库 ${backfill.parentNotInDb} 条`);
-
-  return { rounds, payloads, relations: relations.length, ownReplies: ownReplies.length,
-    ownSaved, savedOnReplies, backfill, oldestDays, stopReason, dumpPath };
+  return {
+    rounds, payloads,
+    relations: relations.length,
+    ownReplies: ownPosts.length,
+    ownSaved, savedOnReplies, backfill,
+    oldestDays, stopReason, problems, dumpPath,
+  };
 }

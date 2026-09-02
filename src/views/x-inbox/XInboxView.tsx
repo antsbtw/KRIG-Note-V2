@@ -1221,6 +1221,10 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
         + `\n滚了 ${x.rounds} 轮,捕获 ${x.payloads} 个响应\n`
         + `本次最旧抓到 ${x.oldestDays ?? '?'} 天前\n`
         + `停因:${x.stopReason}\n`
+        + (x.problems?.length
+            ? `\n⚠ 采集校验问题(如实报出,不粉饰):\n`
+              + x.problems.map((p) => `  · ${p}`).join('\n') + '\n'
+            : '')
         + `解出回复关系 ${x.relations} 条,其中我自己发的 ${x.ownReplies} 条\n`
         + `\n【落库】\n`
         + `  自己的回复入库:${x.ownSaved.inserted} 条(已存在 ${x.ownSaved.skipped} 条)\n`
