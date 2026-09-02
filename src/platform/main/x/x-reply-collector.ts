@@ -19,7 +19,7 @@ import { app } from 'electron';
 import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import { backfillRepliedFromRelations, saveReplyRelations, saveOwnReplies,
-  type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
+  getOwnReplyCoverage, type ReplyRelation, type OwnReply } from '../db/x-reply-relation-repo';
 
 /** 取字符串字段(载荷里缺字段是常态,不能假设存在) */
 function str(o: Record<string, unknown>, k: string): string | undefined {
@@ -139,11 +139,14 @@ export interface ReplyCollectResult {
  * ⚠️ **边界如实汇报**:X 用虚拟列表 + 懒加载,B′ 诊断实测滚 60 轮只覆盖 3.2 天。
  *    本函数返回 oldestDays,调用方**不得声称"全量"** —— 抓到多少说多少。
  */
+export type CollectMode = 'incremental' | 'backfill';
+
 export async function collectReplyRelations(
   handle: string,
   targetWcId?: number,
   maxRounds = 40,
   targetDays = 7,
+  mode: CollectMode = 'incremental',
 ): Promise<ReplyCollectResult | { error: string }> {
   const h = normalizeHandle(handle);
   if (!h) return { error: 'empty handle' };
@@ -202,6 +205,21 @@ export async function collectReplyRelations(
   wc.debugger.on('message', onMessage);
   await wc.debugger.sendCommand('Network.enable').catch(() => {});
 
+  // ── 增量锚点(用户 2026-09-02:「做采集时间标记,这样就不会重复了」)──
+  //
+  // ⚠️ **一个锚点服务不了两个方向**,必须分开:
+  //   incremental(日常):库里**最新**一条之后的才是新的 → 滚到遇见已知即停,
+  //     几轮就完事,最省、最不惊动风控。
+  //   backfill(补历史):库里**最旧**一条之前的才是新的 → 必须滚过已知区域,
+  //     遇见已知**不能停**,否则第一屏全是已知就立刻退出,永远挖不深。
+  //
+  // 这正是「时间标记」的陷阱:只记一个时间点,补历史时会被自己的锚点挡住。
+  const coverage = await getOwnReplyCoverage();
+  const anchorNewest = coverage.newest ? new Date(coverage.newest).getTime() : null;
+  const anchorOldest = coverage.oldest ? new Date(coverage.oldest).getTime() : null;
+  console.log(`[x-reply-collector] 模式=${mode} 库存 ${coverage.count} 条 `
+    + `(${coverage.oldest ?? '?'} ~ ${coverage.newest ?? '?'})`);
+
   wc.loadURL(`https://x.com/${h}/with_replies`);
   await new Promise((r) => setTimeout(r, 4000));
 
@@ -215,38 +233,52 @@ export async function collectReplyRelations(
     rounds = i;
     if (times.length) {
       const oldest = times.reduce((a, b) => (new Date(a) < new Date(b) ? a : b));
-      oldestDays = Math.round((Date.now() - new Date(oldest).getTime()) / 86_400_000 * 10) / 10;
-      if (oldestDays >= targetDays) { stopReason = `已覆盖目标 ${targetDays} 天`; break; }
+      const oldestMs = new Date(oldest).getTime();
+      oldestDays = Math.round((Date.now() - oldestMs) / 86_400_000 * 10) / 10;
+
+      if (mode === 'incremental') {
+        // 日常:已经滚过库里最新一条 → 再往下全是已知,停。
+        // 这就是「时间标记不重复」的实现 —— 通常几轮就完事。
+        if (anchorNewest !== null && oldestMs < anchorNewest) {
+          stopReason = `已接上库存最新一条(${coverage.newest?.slice(0, 10)}),增量完成`;
+          break;
+        }
+      } else {
+        // 补历史:必须滚过整个已知区域才开始有收获,
+        // 所以**不能**因为遇见已知就停;只看是否达到目标深度。
+        if (oldestDays >= targetDays) { stopReason = `已覆盖目标 ${targetDays} 天`; break; }
+      }
     }
 
-    // ⚠️ window.scrollBy 对 X 的虚拟列表**常常无效** —— 实测 40 轮只触发 12 个
-    // 请求,大部分滚动没让页面去取下一页(两次运行都恰好停在 2.6 天)。
-    // 原因:真正滚动的是内部容器,不是 window;且 X 只在「接近底部」时才拉下一页。
-    // 改为:直接把页面滚到文档底部,并回报**是否真的动了**(fail loud 的前提是能观测)。
+    // ── 自然滚动(用户 2026-09-02 定的策略)────────────────────────
+    // 「滚动采集要有策略,不要触发 X 的风控就好。建议滚动自然,一直放下翻页,
+    //   做采集时间标记,这样就不会重复了。」
+    //
+    // ⚠️ 我上一版改成 scrollTo(文档底部) 是**错的**:瞬间跳到底是明显的机器行为,
+    //    为了挖深反而做了更容易触发风控的动作。已改回自然滚动。
+    //
+    // 自然的含义:一屏以内的位移 + 随机化 + 随机停顿(人不会匀速滚)。
+    // 慢不是代价 —— 增量锚点保证不重复,深度靠多次累积而非单次冲刺。
+    const step = 0.55 + Math.random() * 0.3;          // 0.55~0.85 屏,不足一屏
     const moved = await wc.executeJavaScript(`(function () {
       var before = window.scrollY;
-      var docH = Math.max(
-        document.body.scrollHeight, document.documentElement.scrollHeight);
-      window.scrollTo(0, docH);
-      // 兜底:若 window 没动,找真正可滚的容器推一把
-      if (window.scrollY === before) {
-        var all = document.querySelectorAll('div');
-        for (var i = 0; i < all.length; i++) {
-          var el = all[i];
-          if (el.scrollHeight > el.clientHeight + 200) { el.scrollTop = el.scrollHeight; break; }
-        }
-      }
-      return { before: before, after: window.scrollY, docH: docH };
-    })()`).catch(() => null) as { before: number; after: number; docH: number } | null;
+      window.scrollBy({ top: window.innerHeight * ${step.toFixed(3)}, behavior: 'smooth' });
+      return { before: before, docH: Math.max(
+        document.body.scrollHeight, document.documentElement.scrollHeight) };
+    })()`).catch(() => null) as { before: number; docH: number } | null;
 
-    await new Promise((r) => setTimeout(r, 2200));
+    // 随机停顿 1.8~3.4s:匀速请求是风控最容易识别的特征之一
+    await new Promise((r) => setTimeout(r, 1800 + Math.random() * 1600));
 
     // 进度以**新解出的关系**为准,不以滚动位移为准:
     // 位移了但没新数据 = 到底了或懒加载封顶,两者都该停
     if (relMap.size === lastRelCount) {
       noProgress++;
-      if (noProgress >= 6) {
-        stopReason = `连续 6 轮无新数据(scrollY=${moved?.after ?? '?'}/${moved?.docH ?? '?'})`
+      // 补历史时前若干轮在滚已知区域,本来就没有新数据 —— 容忍度放宽,
+      // 否则会把"正在穿过已知区"误判成"到底了"(又一次拿有缺陷的测量当证据)
+      const limit = mode === 'backfill' ? 12 : 6;
+      if (noProgress >= limit) {
+        stopReason = `连续 ${limit} 轮无新数据(docH=${moved?.docH ?? '?'})`
           + ` —— 到底了或 X 懒加载封顶`;
         break;
       }

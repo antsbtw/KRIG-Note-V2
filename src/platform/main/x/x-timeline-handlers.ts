@@ -348,14 +348,17 @@ export function registerXTimelineHandlers(): void {
   // 拦截 GraphQL 取权威字段,不从 DOM 猜。回填 replied 用的是**客观事实**,
   // 手机/网页上回的一律算数(此前 replied 只记录「我点没点过按钮」,故全库为 0)
   ipcMain.handle(IPC_CHANNELS.X_COLLECT_REPLIES, async (_e, payload: unknown) => {
-    const p = payload as { handle?: unknown; wcId?: unknown; targetDays?: unknown } | null;
+    const p = payload as { handle?: unknown; wcId?: unknown; targetDays?: unknown; mode?: unknown } | null;
     if (typeof p?.handle !== 'string' || !p.handle.trim()) {
       return { success: false, error: 'invalid payload: handle required' };
     }
     const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
     const targetDays = typeof p.targetDays === 'number' ? p.targetDays : undefined;
     try {
-      const r = await collectReplyRelations(p.handle, wcId, undefined, targetDays);
+      const mode = p.mode === 'backfill' ? 'backfill' as const : 'incremental' as const;
+      // 补历史要滚过整个已知区域才有收获,轮次上限相应放宽
+      const r = await collectReplyRelations(p.handle, wcId, mode === 'backfill' ? 80 : 40,
+        targetDays, mode);
       if ('error' in r) return { success: false, error: r.error };
       const stats = await countRepliedAccepted();
       // 库里累计覆盖 ≠ 单次抓到的深度:单次受懒加载限制,但多次采集会累积
