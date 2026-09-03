@@ -13,6 +13,7 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { cleanExpired, recoverStuckAiJudging, countPending } from '../db/tweet-inbox-repo';
 import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
 import { getBlockedHandleSet } from '../db/x-author-repo';
+import { getWsRole } from '../db/x-ws-role-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TimelineFilterConfig } from '@shared/types/x-timeline-types';
 
@@ -137,6 +138,15 @@ async function runEnabledRecipes(): Promise<void> {
 
     // 对每个活跃 ws 分别执行同一配方
     for (const [wsId, wcId] of activeXWcMap.entries()) {
+      // ⭐ **角色守卫**(用户 2026-09-03 拍板「一个 ws 只干一件事」):
+      // 只在 role='search' 的 ws 上跑定时采集。campaign ws 专供活动核验 ——
+      // 若在它上面导航到搜索页,正在抓的文章 conversation 就断了,
+      // 而现象是「活动偶尔抓不到」「采集时断时续」,极难定位。
+      const roleCfg = await getWsRole(wsId).catch(() => null);
+      if (!roleCfg || roleCfg.role !== 'search') {
+        console.log(`[x-search-scheduler] 跳过 ws=${wsId}(role=${roleCfg?.role ?? '?'},非 search)`);
+        continue;
+      }
       console.log(`[x-search-scheduler] running recipe "${recipe.name}" for ws=${wsId}`);
       try {
         await scanRecipe(

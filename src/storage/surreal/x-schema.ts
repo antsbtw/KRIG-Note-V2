@@ -388,3 +388,49 @@ export async function x_migration_1_0_0(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.0.0'), now },
   );
 }
+
+/**
+ * 1.0.6 —— X per-ws 角色表(2026-09-03)
+ *
+ * 用户拍板「一个 ws 只干一件事」:定时搜索采集与活动核验分到不同 ws,
+ * 各用自己的 X webview,互不打断(详见 shared/types/x-ws-role-types.ts)。
+ *
+ * 为什么单独建表而不塞进 workspace 实体:角色是 **X 模块的关注点**,
+ * workspace 是宿主概念 —— 往宿主实体里塞业务字段会让边界烂掉(总纲原则 1)。
+ */
+const X_SCHEMA_1_0_6 = `
+DEFINE TABLE IF NOT EXISTS x_ws_role SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id            ON x_ws_role TYPE string ASSERT $value != '';
+-- 'search' | 'campaign' | 'idle'
+DEFINE FIELD IF NOT EXISTS role             ON x_ws_role TYPE string ASSERT $value != '';
+-- campaign 专用:盯哪篇文章(留空=自动识别最新 Article,正式活动应显式钉死)
+DEFINE FIELD IF NOT EXISTS article_id       ON x_ws_role TYPE option<string>;
+-- campaign 专用:是否由本 ws 承接接口 B(外部触发口),配置决定不写死
+DEFINE FIELD IF NOT EXISTS serves_refresh   ON x_ws_role TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS interval_minutes ON x_ws_role TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS updated_at       ON x_ws_role TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ws_role_ws   ON x_ws_role FIELDS ws_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_ws_role_role ON x_ws_role FIELDS role;
+`;
+
+export async function x_migration_1_0_6(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_6);
+
+  // ⚠️ 存量回填:已在跑的 ws 必须默认 'search',否则升级后角色守卫会把
+  // 它们全判成 idle → **定时采集静默全停**,而日志只说「跳过」,像是正常行为。
+  // 判据:x_tweet 里出现过的 ws_id 就是在采集的(有实际采集记录才回填,不凭空造)。
+  await db.query(`
+    LET $seen = (SELECT VALUE ws_id FROM x_tweet WHERE ws_id != NONE GROUP BY ws_id);
+    FOR $ws IN $seen {
+      IF !(SELECT ws_id FROM x_ws_role WHERE ws_id = $ws)[0] {
+        CREATE x_ws_role SET ws_id = $ws, role = 'search',
+          serves_refresh = false, updated_at = time::now();
+      };
+    };
+  `);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.6', appliedAt = $now,
+      description = 'X per-ws role table (search / campaign / idle)'`,
+    { rid: new RecordId('schema_version', '1.0.6'), now: Date.now() },
+  );
+}
