@@ -15,7 +15,7 @@
  */
 
 import { harvestTimeline, extractTweetsFrom, type HarvestedTweet } from './x-timeline-harvester';
-import { resolveXWebContents } from './x-webcontents';
+import { resolveXWebContents, resolveAnyXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 
 /** 契约 §2.1 的一条 item(字段名保持契约原样,便于直接序列化) */
@@ -103,7 +103,9 @@ export async function fetchArticleReplies(
   if (!articleId) return { error: 'articleId required' };
   if (!h) return { error: 'authorHandle required' };
 
-  const resolved = resolveXWebContents(targetWcId);
+  // ⚠️ 用无人值守版本:campaign 的 /refresh 是外部随时敲进来的,
+  // 那台机器上不会有人一直守着 X 页面(wcId 随界面卸载被清掉,实测 503)。
+  const resolved = resolveAnyXWebContents(targetWcId);
   if ('error' in resolved) return { error: resolved.error };
   const wc = resolved.wc;
 

@@ -12,6 +12,7 @@
  * (右键就发生在 X webview 上),用不带 poll 的即可,但仍走同一 fail-loud 定位。
  */
 
+import { webContents } from 'electron';
 import { detectXServiceByUrl, type XServiceId } from '@shared/types/x-service-types';
 import {
   resolveWsWebContents,
@@ -53,4 +54,35 @@ export function resolveXWebContents(
     (url) => !!detectXServiceByUrl(url),
     X_LABELS,
   );
+}
+
+/**
+ * 无人值守场景下自行找一个可用的 X webContents。
+ *
+ * ⚠️ 2026-09-03 Windows 部署实测暴露的问题:
+ *   X 的 wcId 由 SocialView 在**挂载时登记、卸载时清除**
+ *   (SocialView.tsx:132)。而 campaign 的 /refresh 是**外部随时敲进来**的,
+ *   那台机器上不会有人一直守着 X 页面 —— 于是 getActiveWcId 返回 null,
+ *   整个请求 503「未登记 wc id」,而 X 其实还活着(只是界面切走了)。
+ *
+ * 故这里绕过「登记表」,直接在所有存活的 webContents 里找 x.com 的那个。
+ * 仅供**后台/无人值守**路径使用;交互路径仍应传显式 wcId(定向更准,
+ * 多 ws 时不会抓错窗口)。
+ *
+ * @param preferWcId 有显式 id 就优先用它,校验通过即返回
+ */
+export function resolveAnyXWebContents(
+  preferWcId?: number,
+): { wc: Electron.WebContents } | { error: string } {
+  if (preferWcId != null) {
+    const r = resolveXWebContents(preferWcId);
+    if (!('error' in r)) return r;
+  }
+  for (const wc of webContents.getAllWebContents()) {
+    if (wc.isDestroyed()) continue;
+    try {
+      if (detectXServiceByUrl(wc.getURL())) return { wc };
+    } catch { /* 取 URL 可能抛,跳过 */ }
+  }
+  return { error: '找不到已加载 x.com 的 webContents —— 请确认该 workspace 里 X 页面已打开过' };
 }
