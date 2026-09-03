@@ -279,6 +279,10 @@ export async function startCaptureMonitor(
               text: it.text,
               createdAt: it.createdAt || undefined,
               isLongText: false,
+              // ⚠️ DOM 兜底**不判 has_media**:页面上分不清「用户上传的图」与
+              // 「外链预览卡」,而契约明确预览卡不算。宽了会误发活动奖励,
+              // 故一律 false —— 活动核验只采信载荷路径(fromDom=false)。
+              hasMedia: false,
               metrics: { likes: it.likes },
               self: {},
               fromDom: true,

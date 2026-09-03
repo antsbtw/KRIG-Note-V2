@@ -40,6 +40,25 @@ import { resolveXWebContents } from './x-webcontents';
 export interface HarvestedTweet {
   tweetId: string;
   authorHandle?: string;
+  /**
+   * 作者的数字 id(core.user_results.result.rest_id)。
+   * 契约要求「有就务必给」—— OAuth 拿到的也是这个,按它匹配最稳
+   * (username 会改名,rest_id 不会)。实测 131/131 条都有。
+   */
+  authorRestId?: string;
+  /**
+   * 这条推**自己**带了图片或视频。
+   *
+   * ⚠️ 契约的定义很窄(§2.1),三个不算:
+   *  · 链接预览卡(card)不算 —— 那是 X 给外链生成的,不是用户上传的
+   *  · 引用的原文里的图不算 —— 那是别人的图
+   *  · 回复里 @ 到的推的图不算
+   * 故只认 legacy.extended_entities.media,不下钻 quoted_status_result、
+   * 不看 card。活动判定「有效留言」直接依赖这个字段,宽了会误发奖励。
+   */
+  hasMedia: boolean;
+  /** 媒体类型(photo/video/animated_gif),便于运营核对;判定只用 hasMedia */
+  mediaTypes?: string[];
   text: string;
   createdAt?: string;
   lang?: string;
@@ -122,12 +141,26 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
     const viewCount = views && typeof views.count === 'string'
       ? Number(views.count) : undefined;
 
+    // x_uid:rest_id 挂在 user_results.result 上(不是 core 里)
+    const authorRestId = urr && typeof urr.rest_id === 'string'
+      ? urr.rest_id : undefined;
+
+    // has_media:**只认自己的** extended_entities.media(见类型注释的三个「不算」)
+    const extEnt = lg.extended_entities as Record<string, unknown> | undefined;
+    const mediaArr = Array.isArray(extEnt?.media) ? extEnt!.media as Array<Record<string, unknown>> : [];
+    const mediaTypes = mediaArr
+      .map((m) => (typeof m.type === 'string' ? m.type : undefined))
+      .filter((t): t is string => !!t);
+
     const id = lg.id_str as string;
     if (!out.has(id)) {
       out.set(id, {
         tweetId: id,
         authorHandle: ucore && typeof ucore.screen_name === 'string'
           ? ucore.screen_name : undefined,
+        authorRestId,
+        hasMedia: mediaArr.length > 0,
+        mediaTypes: mediaTypes.length ? mediaTypes : undefined,
         text: noteText ?? s('full_text') ?? '',
         createdAt: s('created_at'),
         lang: s('lang'),
@@ -193,11 +226,25 @@ export async function harvestTimeline(
   url: string,
   targetWcId?: number,
   maxRounds = 1200,
+  opts: {
+    /**
+     * 时间预算(毫秒)。到点就返回已抓到的部分,stopReason 标 budget。
+     * 契约 §3.1:campaign-tasks 最多等 8s,超时按未命中处理 ——
+     * 所以宁可返回不完整,也不能干等。
+     */
+    budgetMs?: number;
+    /**
+     * 提前结束判据。契约 §3.1:「翻到这个人的留言就不用把整个评论区抓完」。
+     * 返回 true 即停,stopReason 标 hint。
+     */
+    stopWhen?: (t: HarvestedTweet) => boolean;
+  } = {},
 ): Promise<HarvestReport | { error: string }> {
   const resolved = resolveXWebContents(targetWcId);
   if ('error' in resolved) return { error: resolved.error };
   const wc = resolved.wc;
 
+  const startedAt = Date.now();
   const tweets = new Map<string, HarvestedTweet>();
   const trace: RoundTrace[] = [];
   const pending = new Map<string, string>();
@@ -306,6 +353,17 @@ export async function harvestTimeline(
       await new Promise((r) => setTimeout(r, 3000));   // 卡住时额外等待,催一催懒加载
     }
     if (stuck >= 8) { stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${y} 未变)`; break; }
+
+    // 时间预算到点:返回已抓到的部分(契约要求宁可 partial 也不干等)
+    if (opts.budgetMs && Date.now() - startedAt >= opts.budgetMs) {
+      stopReason = `budget 用尽(${opts.budgetMs}ms,已抓 ${tweets.size} 条)`;
+      break;
+    }
+    // hint 命中:不必把整个评论区抓完
+    if (opts.stopWhen) {
+      const hit = [...tweets.values()].find(opts.stopWhen);
+      if (hit) { stopReason = `hint 命中(${hit.tweetId}),提前结束`; break; }
+    }
   }
 
   wc.debugger.off('message', onMessage);
