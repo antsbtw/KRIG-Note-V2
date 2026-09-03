@@ -144,6 +144,28 @@ export async function queryPending(limit = 50, wsId?: string): Promise<TweetInbo
   return res[0] ?? [];
 }
 
+/**
+ * 数一下还有多少条待判 —— 与 queryPending **同一套排除条件**。
+ *
+ * 用途:调度器判断有无存量积压。两处判据必须一致,否则会出现
+ * 「数出来有积压、捞的时候是空」的空转(或反过来漏掉真积压)。
+ */
+export async function countPending(wsId?: string): Promise<number> {
+  const db = getXDB();
+  const wsFilter = wsId ? 'AND ws_id = $wsId' : '';
+  const res = await db.query<[Array<{ c: number }>]>(
+    `SELECT count() AS c FROM x_tweet
+     WHERE status = 'pending'
+       AND accepted = NONE
+       AND replied != true
+       AND (ai_verdict = NONE OR !string::starts_with(ai_verdict.reason, 'human:'))
+       ${wsFilter}
+     GROUP ALL`,
+    { wsId: wsId ?? null },
+  );
+  return res[0]?.[0]?.c ?? 0;
+}
+
 /** 将一批推文状态更新为 ai_judging */
 export async function markAiJudging(tweetIds: string[]): Promise<void> {
   if (tweetIds.length === 0) return;

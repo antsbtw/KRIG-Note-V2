@@ -9,8 +9,8 @@
 
 import { listEnabledRecipes, updateLastRunAt } from '../db/search-recipe-repo';
 import { scanRecipe } from './x-timeline-scan';
-import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
-import { cleanExpired, recoverStuckAiJudging } from '../db/tweet-inbox-repo';
+import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
+import { cleanExpired, recoverStuckAiJudging, countPending } from '../db/tweet-inbox-repo';
 import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
 import { getBlockedHandleSet } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG } from '@shared/types/x-timeline-types';
@@ -138,6 +138,23 @@ async function runEnabledRecipes(): Promise<void> {
       runJudgeBatch(judgeConfig, wsId).catch((err) => {
         console.error(`[x-search-scheduler] judge batch (timeout trigger) ws=${wsId} failed:`, err);
       });
+    }
+  }
+
+  // ⭐ **存量积压清理**(2026-09-03 实测发现的缺口):
+  // 上面两个触发点都挂在「本轮**新采到**多少条」上 —— 存量 pending 没有任何
+  // 东西会去动它。实测:重启后 945 条 pending 静躺 2 分钟,judging 恒为 0,
+  // 模型都没被加载。用户只能手点「AI 判断」才会开始清。
+  // 修法:每轮调度顺带看一眼积压,有就起 drain(内部有并发守卫,重复调用安全)。
+  for (const wsId of activeXWcMap.keys()) {
+    try {
+      const backlog = await countPending(wsId);
+      if (backlog > 0) {
+        console.log(`[x-search-scheduler] 存量积压 ${backlog} 条(ws=${wsId}),启动 drain`);
+        startJudgeDrain(judgeConfig, wsId);
+      }
+    } catch (err) {
+      console.error(`[x-search-scheduler] 查积压失败 ws=${wsId}:`, err);
     }
   }
 }
