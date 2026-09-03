@@ -74,6 +74,11 @@ interface XCaptureSnapshot {
   recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
 }
 
+interface VerifyRow {
+  uid: string; handle?: string; targetId: string;
+  hasMedia?: boolean; why: string; text?: string;
+}
+
 declare global {
   /** Web 下载历史条目(主进程 download-store 落盘的终态记录)*/
   interface WebDownloadHistoryEntry {
@@ -903,10 +908,7 @@ declare global {
           stats?: Record<string, number>;
           verify?: {
             articleId: string; excluded: number;
-            like: Array<{ uid: string; handle?: string; targetId: string }>;
-            retweet: Array<{ uid: string; handle?: string; targetId: string }>;
-            reply: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
-            quote: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
+            like: VerifyRow[]; retweet: VerifyRow[]; reply: VerifyRow[]; quote: VerifyRow[];
           };
           result?: { payloads: number; rounds: number; problems: string[];
             interactions: Array<{ kind: string; actorUid: string; actorHandle?: string;

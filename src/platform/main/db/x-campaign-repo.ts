@@ -326,15 +326,22 @@ export async function interactionStats(): Promise<Record<string, number>> {
  * ⚠️ 默认排除自己(excludeHandles):活动是给用户发奖励,
  *    自己给自己点赞不该算参与。
  */
+/** 核验名单里的一行 —— 带上「凭什么算这篇的」,便于人工核对 */
+export interface VerifyRow {
+  uid: string; handle?: string; targetId: string;
+  hasMedia?: boolean;
+  /** 归属原因:直接对文章 / 引用转发 / 会话内回复 */
+  why: string;
+  /** 被互动那条推的正文摘要 —— 一眼看出点赞的是哪条 */
+  text?: string;
+}
+
 export async function verifyListForArticle(
   articleId: string,
   opts: { excludeHandles?: string[] } = {},
 ): Promise<{
   articleId: string;
-  like: Array<{ uid: string; handle?: string; targetId: string }>;
-  retweet: Array<{ uid: string; handle?: string; targetId: string }>;
-  reply: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
-  quote: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
+  like: VerifyRow[]; retweet: VerifyRow[]; reply: VerifyRow[]; quote: VerifyRow[];
   excluded: number;
 }> {
   const db = getXDB();
@@ -348,19 +355,25 @@ export async function verifyListForArticle(
     { a: articleId },
   );
   const exclude = new Set((opts.excludeHandles ?? []).map((h) => normalizeHandle(h)));
+  /** 归属原因 —— 让「凭什么算这篇文章的」可核对,而不是黑箱 */
+  const why = (r: Record<string, unknown>): string => {
+    if (String(r.target_id) === articleId) return '直接对文章';
+    if (r.target_quoted_status_id && String(r.target_quoted_status_id) === articleId) return '引用转发';
+    if (r.target_conversation_id && String(r.target_conversation_id) === articleId) return '会话内回复';
+    return '?';
+  };
   const out = {
     articleId,
-    like: [] as Array<{ uid: string; handle?: string; targetId: string }>,
-    retweet: [] as Array<{ uid: string; handle?: string; targetId: string }>,
-    reply: [] as Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>,
-    quote: [] as Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>,
+    like: [] as VerifyRow[], retweet: [] as VerifyRow[],
+    reply: [] as VerifyRow[], quote: [] as VerifyRow[],
     excluded: 0,
   };
   for (const r of res[0] ?? []) {
     const handle = r.actor_handle ? String(r.actor_handle) : undefined;
     if (handle && exclude.has(handle)) { out.excluded++; continue; }
     const row = { uid: String(r.actor_uid), handle, targetId: String(r.target_id),
-      hasMedia: r.target_has_media === true };
+      hasMedia: r.target_has_media === true, why: why(r),
+      text: r.target_text ? String(r.target_text).slice(0, 50) : undefined };
     const k = String(r.kind);
     if (k === 'like') out.like.push(row);
     else if (k === 'retweet') out.retweet.push(row);

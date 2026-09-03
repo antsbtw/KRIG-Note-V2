@@ -72,3 +72,39 @@ describe('引用转发归属', () => {
     expect(repo).toContain('target_quoted_status_id = $quoted');
   });
 });
+
+describe('防错配', () => {
+  it('⭐ 归属必须逐条给出原因,不能只给人名', () => {
+    // 用户 2026-09-03:「关键要搞清楚点赞那个推文,不要再出现类似的错配」
+    // 没有原因就无法核对,错配会静默混进名单。
+    const fn = repo.slice(repo.indexOf('export async function verifyListForArticle'));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 1);
+    expect(body).toContain('why');
+    for (const reason of ['直接对文章', '引用转发', '会话内回复']) {
+      expect(body, `归属原因缺少「${reason}」`).toContain(reason);
+    }
+  });
+
+  it('⭐ 不属于本文章的互动一律不进名单(三条判据都不命中即排除)', () => {
+    const other = { x: {
+      __typename: 'TimelineNotification',
+      notification_icon: 'heart_icon',
+      rich_message: { text: 'someone liked your post' },
+      template: {
+        from_users: [{ user_results: { result: { rest_id: 'u2', core: { screen_name: 'bob' } } } }],
+        target_objects: [{ tweet_results: { result: {
+          rest_id: '9999999999999999999',
+          legacy: { full_text: '别的推', conversation_id_str: '8888888888888888888',
+            created_at: 'Wed Sep 02 10:00:00 +0000 2026' },
+        } } }],
+      },
+    } };
+    const out: Interaction[] = [];
+    extractInteractions(other, out);
+    expect(out).toHaveLength(1);
+    const i = out[0];
+    const belongs = i.targetId === ARTICLE || i.targetConversationId === ARTICLE
+      || i.targetQuotedStatusId === ARTICLE;
+    expect(belongs, '与本文章无关的互动不得算进来').toBe(false);
+  });
+});

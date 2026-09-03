@@ -1214,10 +1214,16 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
       // ⭐ 核验名单必须**锚定到那篇文章** —— 全局汇总没有主语,
       // 「点赞 5 条」可能散在 4 条不同的推上,与页面上数出来的对不上。
       const v = r.verify;
-      const nameList = (list: Array<{ handle?: string; uid: string; targetId: string; hasMedia?: boolean }>) =>
+      // 每行都写清「点赞/转发的是哪条推、凭什么算这篇文章的」——
+      // 用户 2026-09-03:「关键要搞清楚点赞那个推文,不要再出现类似的错配」。
+      // 光给个人名无法核对,必须把归属依据摆出来。
+      const nameList = (list: Array<{ handle?: string; uid: string; targetId: string;
+        hasMedia?: boolean; why?: string; text?: string }>) =>
         list.length === 0 ? '    (无)'
           : list.map((i) => `    @${i.handle ?? '?'} (uid ${i.uid})`
-              + `${i.hasMedia !== undefined ? (i.hasMedia ? ' 🖼带图' : ' 无图') : ''}`).join('\n');
+              + `${i.hasMedia ? ' 🖼带图' : ''}`
+              + `\n       ↳ 推 ${i.targetId} · ${i.why ?? '?'}`
+              + `${i.text ? `\n         「${i.text}」` : ''}`).join('\n');
 
       setTestOut(
         `通知采集完成 —— 接收方 @${r.owner ?? '(未识别)'}\n`
