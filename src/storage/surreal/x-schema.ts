@@ -519,3 +519,48 @@ export async function x_migration_1_0_8(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.0.8'), now: Date.now() },
   );
 }
+
+/**
+ * 1.0.9 —— 入向互动(通知页具名名单,2026-09-03)
+ *
+ * 用户:「应该获取它的元数据:点赞多少次(名单),转发多少次(名单),
+ *   回复多少次(名单)。只有能够区别出这些,才能够谈得上更新多少个呀?」
+ * 并指出:「这个需要在 notification 中拿到」——**对,已实测验证**。
+ *
+ * 实测结构(NotificationsTimeline,GraphQL 非 v1.1):
+ *   TimelineNotification.notification_icon        ← 行为类型(heart_icon=赞)
+ *   TimelineNotification.template.from_users[]    ← **具名操作者**(rest_id + handle)
+ *   TimelineNotification.template.target_objects[]← 被操作的推 id
+ * 一条「X and 2 others liked」的通知,from_users 确实是 3 个,不是 1 个。
+ *
+ * ⚠️ 归属到 ws:通知是「别人对**我**」,而「我」是**该 ws 登录的账号**。
+ *   多 ws 多账号并存,不记 ws 就分不清是谁收到的。
+ */
+const X_SCHEMA_1_0_9 = `
+DEFINE TABLE IF NOT EXISTS x_interaction SCHEMAFULL;
+-- 幂等键三元组:同一通知里同一人对同一条推的同一种行为,只算一条
+DEFINE FIELD IF NOT EXISTS kind        ON x_interaction TYPE string;   -- like/retweet/reply/follow/quote/other
+DEFINE FIELD IF NOT EXISTS actor_uid   ON x_interaction TYPE string;   -- 操作者 rest_id(稳定,不随改名变)
+DEFINE FIELD IF NOT EXISTS target_id   ON x_interaction TYPE string;   -- 被操作的推 id;follow 类为空串
+DEFINE FIELD IF NOT EXISTS actor_handle ON x_interaction TYPE option<string>;
+-- 接收方:该 ws 登录的账号(通知是「别人对我」,这个「我」是 per-ws 的)
+DEFINE FIELD IF NOT EXISTS ws_id       ON x_interaction TYPE string;
+DEFINE FIELD IF NOT EXISTS owner_handle ON x_interaction TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS notified_at ON x_interaction TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS first_seen_at ON x_interaction TYPE datetime;
+DEFINE FIELD IF NOT EXISTS message     ON x_interaction TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_interaction_key ON x_interaction
+  FIELDS kind, actor_uid, target_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_interaction_kind   ON x_interaction FIELDS kind;
+DEFINE INDEX IF NOT EXISTS idx_interaction_actor  ON x_interaction FIELDS actor_uid;
+DEFINE INDEX IF NOT EXISTS idx_interaction_target ON x_interaction FIELDS target_id;
+`;
+
+export async function x_migration_1_0_9(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_9);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.9', appliedAt = $now,
+      description = 'Inbound interactions from notifications (named actors)'`,
+    { rid: new RecordId('schema_version', '1.0.9'), now: Date.now() },
+  );
+}

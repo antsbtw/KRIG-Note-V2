@@ -24,7 +24,11 @@ import { probeSelfHandle } from './x-self-account';
 import { getWsRole, setWsRole, listWsRoles,
   setWsAccount, getWsAccount, requireWsAccount, listWsAccounts } from '../db/x-ws-role-repo';
 import { fetchArticleReplies, listOwnArticles, parseTweetUrl } from './x-article-replies';
-import { upsertCampaignReplies, markMissingAsDeleted, campaignStats } from '../db/x-campaign-repo';
+import { upsertCampaignReplies, markMissingAsDeleted, campaignStats,
+  upsertInteractions, interactionStats } from '../db/x-campaign-repo';
+import { harvestNotifications } from './x-notifications';
+import { campaignConfigStatus } from './x-campaign-config';
+import { campaignServerRunning } from './x-campaign-server';
 import { getSelfHandle as getSelfHandleDb } from '../db/x-author-repo';
 import type { XWsRole } from '@shared/types/x-ws-role-types';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
@@ -546,6 +550,37 @@ export function registerXTimelineHandlers(): void {
 
       const stats = await campaignStats(parsed.tweetId);
       return { success: true, result: r, saved, markedDeleted, stats };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_HARVEST_NOTIFICATIONS — 抓通知页,解出「谁赞/转/回了我」的具名名单
+  ipcMain.handle(IPC_CHANNELS.X_HARVEST_NOTIFICATIONS, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown; wcId?: unknown } | null;
+    if (typeof p?.wsId !== 'string' || !p.wsId) {
+      return { success: false, error: 'wsId required' };
+    }
+    try {
+      // 通知属于**该 ws 登录的账号** —— 跑到别的 ws 上抓会拿到别人的通知
+      const acc = await getWsAccount(p.wsId);
+      const r = await harvestNotifications(
+        typeof p.wcId === 'number' ? p.wcId : undefined);
+      if ('error' in r) return { success: false, error: r.error };
+
+      const saved = await upsertInteractions(p.wsId, acc?.handle, r.interactions);
+      const stats = await interactionStats();
+      return { success: true, result: r, saved, stats, owner: acc?.handle };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_CAMPAIGN_STATUS — 契约配置与服务状态(密钥只报有没有,绝不回传值)
+  ipcMain.handle(IPC_CHANNELS.X_CAMPAIGN_STATUS, async () => {
+    try {
+      return { success: true, config: campaignConfigStatus(),
+        serverRunning: campaignServerRunning() };
     } catch (err) {
       return { success: false, error: String(err) };
     }

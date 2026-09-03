@@ -897,6 +897,19 @@ declare global {
               has_media: boolean; created_at: string; in_reply_to_tweet_id?: string; text_excerpt?: string }>;
           };
         }>;
+        harvestNotifications(wsId: string, wcId?: number): Promise<{
+          success: boolean; error?: string; owner?: string;
+          saved?: { inserted: number; existing: number };
+          stats?: Record<string, number>;
+          result?: { payloads: number; rounds: number; problems: string[];
+            interactions: Array<{ kind: string; actorUid: string; actorHandle?: string;
+              targetId: string; notifiedAt?: string; message?: string }> };
+        }>;
+        campaignStatus(): Promise<{
+          success: boolean; error?: string; serverRunning?: boolean;
+          config?: { configured: boolean; importUrl?: string; hasSecret: boolean;
+            refreshBind: string; refreshPort: number; filePath: string };
+        }>;
         listBlocked(): Promise<{
           success: boolean;
           error?: string;

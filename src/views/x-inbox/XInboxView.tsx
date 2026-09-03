@@ -1195,6 +1195,40 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
     } finally { setBusy(false); }
   };
 
+  /** 抓通知页 —— 具名的入向互动名单(点赞/转发/回复) */
+  const harvestNotif = async () => {
+    setBusy(true);
+    setTestOut('抓通知中(约 20 秒)...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.harvestNotifications(workspaceId, wcId);
+      if (!r?.success || !r.result) { setTestOut(`失败:${r?.error ?? '未知'}`); return; }
+      const x = r.result;
+      const byKind: Record<string, typeof x.interactions> = {};
+      for (const it of x.interactions) (byKind[it.kind] ??= []).push(it);
+      const label: Record<string, string> = {
+        like: '点赞', retweet: '转发', reply: '回复', follow: '关注',
+        quote: '引用', mention: '提及', other: '其它',
+      };
+      setTestOut(
+        `通知采集完成 —— 接收方 @${r.owner ?? '(未识别)'}\n`
+        + `捕获 ${x.payloads} 个通知响应,滚 ${x.rounds} 轮\n`
+        + `入库:新增 ${r.saved?.inserted ?? 0} · 已存在 ${r.saved?.existing ?? 0}\n`
+        + (x.problems.length ? `⚠ ${x.problems.join(' | ')}\n` : '')
+        + `\n【本次名单】\n`
+        + Object.entries(byKind).map(([k, list]) =>
+            `${label[k] ?? k}(${list.length}):\n`
+            + list.slice(0, 12).map((i) =>
+                `  @${i.actorHandle ?? '?'} (uid ${i.actorUid})`
+                + `${i.targetId ? ` → 推 ${i.targetId}` : ''}`).join('\n'),
+          ).join('\n\n')
+        + `\n\n【库存累计】` + Object.entries(r.stats ?? {})
+            .map(([k, v]) => `${label[k] ?? k} ${v}`).join(' · '),
+      );
+    } finally { setBusy(false); }
+  };
+
   const inp: React.CSSProperties = {
     fontSize: 11, padding: '3px 7px', borderRadius: 5,
     border: '1px solid var(--text-faint)', background: 'var(--bg)', color: 'var(--text)',
@@ -1268,11 +1302,12 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
             </>
           )}
 
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <Btn primary onClick={save} disabled={busy}>保存</Btn>
             {role === 'campaign' && (
               <Btn onClick={testFetch} disabled={busy}>试抓(只抓不推送)</Btn>
             )}
+            <Btn onClick={harvestNotif} disabled={busy}>抓通知(谁赞/转/回了我)</Btn>
           </div>
         </div>
 

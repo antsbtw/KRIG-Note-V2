@@ -191,3 +191,81 @@ export async function campaignStats(articleId: string): Promise<{
     deleted: await q('AND deleted = true'),
   };
 }
+
+// ── 入向互动(通知页具名名单)──────────────────────────────────────
+import type { Interaction } from '../x/x-notifications';
+
+/**
+ * 批量入库入向互动(幂等)。
+ *
+ * 幂等键 (kind, actor_uid, target_id):同一人对同一条推的同一种行为只算一次。
+ * ⚠️ 归属到 ws —— 通知是「别人对**我**」,而「我」是该 ws 登录的账号;
+ *    多 ws 多账号并存时不记 ws 就分不清是谁收到的。
+ */
+export async function upsertInteractions(
+  wsId: string, ownerHandle: string | undefined, list: Interaction[],
+): Promise<{ inserted: number; existing: number }> {
+  const db = getXDB();
+  let inserted = 0;
+  let existing = 0;
+
+  for (const it of list) {
+    if (!it.actorUid || !it.kind) continue;
+    const target = it.targetId || '';
+    const found = await db.query<[Array<{ kind: string }>]>(
+      `SELECT kind FROM x_interaction
+       WHERE kind = $k AND actor_uid = $a AND target_id = $t LIMIT 1`,
+      { k: it.kind, a: it.actorUid, t: target },
+    );
+    if ((found[0] ?? []).length > 0) { existing++; continue; }
+
+    await db.query(
+      `CREATE x_interaction SET
+        kind = $k, actor_uid = $a, target_id = $t, actor_handle = $ah,
+        ws_id = $ws, owner_handle = $oh, notified_at = $at,
+        message = $msg, first_seen_at = time::now()`,
+      {
+        k: it.kind, a: it.actorUid, t: target,
+        ah: it.actorHandle || undefined,
+        ws: wsId, oh: ownerHandle || undefined,
+        at: it.notifiedAt ? new Date(it.notifiedAt) : undefined,
+        msg: it.message || undefined,
+      },
+    );
+    inserted++;
+  }
+  return { inserted, existing };
+}
+
+/** 某条推的互动名单 —— 「点赞多少次(名单)」的查询入口 */
+export async function interactionsForTarget(targetId: string): Promise<{
+  like: Array<{ uid: string; handle?: string }>;
+  retweet: Array<{ uid: string; handle?: string }>;
+  reply: Array<{ uid: string; handle?: string }>;
+}> {
+  const db = getXDB();
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT kind, actor_uid, actor_handle FROM x_interaction WHERE target_id = $t`,
+    { t: targetId },
+  );
+  const out = { like: [] as Array<{ uid: string; handle?: string }>,
+    retweet: [] as Array<{ uid: string; handle?: string }>,
+    reply: [] as Array<{ uid: string; handle?: string }> };
+  for (const r of res[0] ?? []) {
+    const k = String(r.kind);
+    if (k !== 'like' && k !== 'retweet' && k !== 'reply') continue;
+    out[k].push({ uid: String(r.actor_uid),
+      handle: r.actor_handle ? String(r.actor_handle) : undefined });
+  }
+  return out;
+}
+
+/** 互动统计 —— UI 显示用 */
+export async function interactionStats(): Promise<Record<string, number>> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ kind: string; count: number }>]>(
+    `SELECT kind, count() FROM x_interaction GROUP BY kind`);
+  const out: Record<string, number> = {};
+  for (const r of res[0] ?? []) out[String(r.kind)] = Number(r.count);
+  return out;
+}

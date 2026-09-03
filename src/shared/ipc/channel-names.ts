@@ -337,6 +337,8 @@ export const IPC_CHANNELS = {
   X_SET_WS_ROLE:     'x:set-ws-role',     // renderer → main invoke：设定某 ws 的角色/文章/触发口
   X_LIST_ARTICLES:   'x:list-articles',   // renderer → main invoke：探测本账号的 Article 供下拉选
   X_FETCH_ARTICLE_REPLIES: 'x:fetch-article-replies', // renderer → main invoke：试抓一篇文章的回复
+  X_HARVEST_NOTIFICATIONS: 'x:harvest-notifications', // renderer → main invoke：抓通知页(谁赞/转/回了我)
+  X_CAMPAIGN_STATUS:       'x:campaign-status',       // renderer → main invoke：契约配置与服务状态
   X_DETECT_SELF:     'x:detect-self',     // renderer → main invoke：探测当前登录的 X 账号并标记 is_self
   X_GET_SELF:        'x:get-self',        // renderer → main invoke：取已标记的「我自己」handle
   X_WATCHLIST_SPIKE: 'x:watchlist-spike', // renderer → main invoke：B' 期一次性诊断（搜索语法/回复判定实机对照）

@@ -1114,6 +1114,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_LIST_ARTICLES, { wcId, wsId }),
     fetchArticleReplies: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, payload),
+    harvestNotifications: (wsId: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST_NOTIFICATIONS, { wsId, wcId }),
+    campaignStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAMPAIGN_STATUS),
     /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
     detectSelf: (wcId?: number, wsId?: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId, wsId }),
