@@ -22,7 +22,15 @@
 import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 
-/** 一条入向互动 */
+/**
+ * 一条入向互动。
+ *
+ * ⭐ 2026-09-03 实测的关键发现(用户点出「应该是可以找到对应的元数据的」):
+ *   `target_objects[]` 带的是**完整推文对象**(22 个 legacy 字段),
+ *   不是一个光秃秃的 id。于是契约判定的三要素通知页一次全给:
+ *     谁(from_users)+ 哪篇文章(conversation_id_str)+ 带没带图(extended_entities)
+ *   → 文章详情页从「必需」降级为「兜底」,主循环改走通知页。
+ */
 export interface Interaction {
   kind: 'like' | 'retweet' | 'reply' | 'follow' | 'quote' | 'mention' | 'other';
   actorUid: string;
@@ -31,6 +39,14 @@ export interface Interaction {
   targetId: string;
   notifiedAt?: string;
   message?: string;
+  /** 被操作推的会话根 = **它属于哪篇文章**(契约的 article_id) */
+  targetConversationId?: string;
+  /** 被操作推**自己**带了图/视频(契约的 has_media,发奖励的硬条件) */
+  targetHasMedia?: boolean;
+  /** 被操作推的正文摘要,给运营看 */
+  targetText?: string;
+  /** 被操作推的发布时间 */
+  targetCreatedAt?: string;
 }
 
 /**
@@ -41,6 +57,21 @@ export interface Interaction {
  *   未实机验证 —— 见到真样本前不能声称「转发名单已可用」。
  *   未知 icon 一律归 other 并保留原文案,便于事后补映射(而不是丢掉)。
  */
+/**
+ * 是不是「别人对我做了什么」的真实互动。
+ *
+ * ⚠️ 实测:通知页里 16 条有 13 条是 `recommendation_icon` —— 那是
+ * **X 推给你的内容**(「Recent post from X」),不是用户对你的行为。
+ * 把它们当成互动会污染名单:活动核验会把 X 的推荐算成用户参与。
+ */
+export function isRealInteraction(icon: string | undefined, message?: string): boolean {
+  const i = (icon ?? '').toLowerCase();
+  // 推荐流/系统通知,一律不是互动
+  if (i.includes('recommendation') || i.includes('report') || i.includes('announcement')) return false;
+  const k = iconToKind(icon, message);
+  return k !== 'other';
+}
+
 export function iconToKind(icon: string | undefined, message?: string): Interaction['kind'] {
   const i = (icon ?? '').toLowerCase();
   if (i.includes('heart')) return 'like';
@@ -106,17 +137,42 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
     //   两种形态都兼容,解析失败一律留 undefined,不写坏值进库。
     const ts = parseNotifTime(o.timestamp_ms);
     const kind = iconToKind(icon, msg);
+    // 推荐流不是互动 —— 跳过,但**继续递归**(嵌套里可能还有真通知)
+    if (!isRealInteraction(icon, msg)) {
+      for (const v of Object.values(o)) extractInteractions(v, out);
+      return;
+    }
 
     const tpl = o.template as Record<string, unknown> | undefined;
     const fromUsers = Array.isArray(tpl?.from_users) ? tpl!.from_users as unknown[] : [];
     const targets = Array.isArray(tpl?.target_objects) ? tpl!.target_objects as unknown[] : [];
 
-    // 目标推(follow 类没有)
+    // 目标推(follow 类没有)。⭐ 不只取 id —— target 里带着完整推文对象,
+    // 契约要的 conversation_id / has_media 都在它的 legacy 里(实测)。
     let targetId = '';
+    let targetConversationId: string | undefined;
+    let targetHasMedia: boolean | undefined;
+    let targetText: string | undefined;
+    let targetCreatedAt: string | undefined;
     for (const t of targets) {
       const tr = ((t as Record<string, unknown>)?.tweet_results as Record<string, unknown>)
         ?.result as Record<string, unknown> | undefined;
-      if (tr && typeof tr.rest_id === 'string') { targetId = tr.rest_id; break; }
+      if (!tr || typeof tr.rest_id !== 'string') continue;
+      targetId = tr.rest_id;
+      const lg = tr.legacy as Record<string, unknown> | undefined;
+      if (lg) {
+        if (typeof lg.conversation_id_str === 'string') targetConversationId = lg.conversation_id_str;
+        // ⚠️ 与文章详情页同一判据:只认自己的 extended_entities.media,
+        //    预览卡不算、引用原文的图不算(契约 §2.1)
+        const ext = lg.extended_entities as Record<string, unknown> | undefined;
+        targetHasMedia = Array.isArray(ext?.media) && (ext!.media as unknown[]).length > 0;
+        if (typeof lg.full_text === 'string') targetText = lg.full_text.slice(0, 200);
+        if (typeof lg.created_at === 'string') {
+          const d = new Date(lg.created_at);
+          if (!Number.isNaN(d.getTime())) targetCreatedAt = d.toISOString();
+        }
+      }
+      break;
     }
 
     // ⚠️ 取**全部** from_users,不是 fromUsers[0](twikit 的坑)
@@ -128,7 +184,8 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
       const handle = core && typeof core.screen_name === 'string'
         ? normalizeHandle(core.screen_name) : undefined;
       out.push({ kind, actorUid: ur.rest_id, actorHandle: handle,
-        targetId, notifiedAt: ts, message: msg });
+        targetId, notifiedAt: ts, message: msg,
+        targetConversationId, targetHasMedia, targetText, targetCreatedAt });
     }
   }
 
