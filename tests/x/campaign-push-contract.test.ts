@@ -125,3 +125,12 @@ describe('接口 A 推送与错误处理', () => {
     expect(r.fatal).toMatch(/未配置/);
   });
 });
+
+describe('配置容错(部署时踩过的坑)', () => {
+  it('⭐ 占位符密钥不算「已配置」—— 否则带假密钥启动,对方一律 401', async () => {
+    process.env.CAMPAIGN_TASKS_IMPORT_URL = 'http://example.com/import';
+    process.env.X_SCRAPER_SECRET = 'REPLACE_ME_WITH_REAL_SECRET';
+    const r = await pushBatch('a1', [item()]);
+    expect(r.fatal, '占位符必须被识别为未配置').toMatch(/未配置/);
+  });
+});

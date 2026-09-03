@@ -44,7 +44,12 @@ function fromFile(): Partial<CampaignConfig> {
   const p = configFilePath();
   if (!p || !existsSync(p)) return {};
   try {
-    const raw = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>;
+    // ⚠️ 去 BOM:Windows 上用 PowerShell `Set-Content -Encoding UTF8` 写出的文件
+    //    带 UTF-8 BOM(EF BB BF),Node 的 JSON.parse 会直接抛。
+    //    2026-09-03 部署时踩到:配置看着完全正常,服务却静默不启动 ——
+    //    因为解析失败被 catch 成「没有配置」。宁可容错,不可静默失效。
+    const text = readFileSync(p, 'utf-8').replace(/^\uFEFF/, '');
+    const raw = JSON.parse(text) as Record<string, unknown>;
     return {
       importUrl: typeof raw.importUrl === 'string' ? raw.importUrl : undefined,
       secret: typeof raw.secret === 'string' ? raw.secret : undefined,
@@ -52,7 +57,12 @@ function fromFile(): Partial<CampaignConfig> {
       refreshPort: typeof raw.refreshPort === 'number' ? raw.refreshPort : undefined,
     };
   } catch (err) {
-    console.error('[campaign-config] 配置文件解析失败(将回落环境变量):', err);
+    // fail loud:解析失败若只是静默回落,现象会是「服务莫名不启动」——
+    // 部署时正是这样浪费了一轮排查。把文件路径与原因都打出来。
+    console.error(`[campaign-config] ⚠️ 配置文件解析失败,将当作「未配置」处理!`
+      + `\n  文件: ${p}\n  原因: ${err}`
+      + `\n  常见原因:UTF-8 BOM、尾随逗号、单引号。`
+      + `\n  服务不会启动,直到这个文件能被正确解析。`);
     return {};
   }
 }
@@ -69,7 +79,9 @@ export function getCampaignConfig(): CampaignConfig | null {
   const refreshBind = process.env.REFRESH_BIND || f.refreshBind || '0.0.0.0';
   const refreshPort = Number(process.env.REFRESH_PORT) || f.refreshPort || 8791;
 
-  if (!importUrl || !secret) return null;
+  // 占位符不算配置好 —— 否则服务会带着假密钥启动,对方一律 401,
+  // 而现象像「网络不通」,排查方向全错。
+  if (!importUrl || !secret || secret.startsWith('REPLACE_ME')) return null;
   return { importUrl, secret, refreshBind, refreshPort };
 }
 
@@ -82,7 +94,7 @@ export function campaignConfigStatus(): {
   const importUrl = process.env.CAMPAIGN_TASKS_IMPORT_URL || f.importUrl;
   const secret = process.env.X_SCRAPER_SECRET || f.secret;
   return {
-    configured: !!(importUrl && secret),
+    configured: !!(importUrl && secret && !secret.startsWith('REPLACE_ME')),
     importUrl,                               // 地址不是机密,可显示
     hasSecret: !!secret,                     // 密钥只报「有没有」
     refreshBind: process.env.REFRESH_BIND || f.refreshBind || '0.0.0.0',

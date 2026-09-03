@@ -36,6 +36,16 @@ KRIG_TARGET_PLATFORM=win32 npx electron-forge make --platform=win32 --arch=x64
 
 Windows 路径:`%APPDATA%\KRIG Note V2\campaign-config.json`
 
+> ⚠️ **别用 `Set-Content -Encoding UTF8` 写这个文件** —— PowerShell 会加
+> UTF-8 BOM(`EF BB BF`),Node 的 `JSON.parse` 直接抛,结果是
+> **配置看着完全正常、服务却静默不启动**(2026-09-03 部署时踩到,
+> 白查了一轮端口和防火墙)。代码已加去 BOM 容错,但写文件时仍建议:
+> ```powershell
+> [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
+> ```
+> 核对方法:`[System.IO.File]::ReadAllBytes($path)[0..2]` 应是 `7B ...`(`{`),
+> 不是 `EF BB BF`。
+
 ```json
 {
   "importUrl": "http://100.96.107.7:8790/x-replies/import",
