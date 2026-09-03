@@ -123,8 +123,22 @@ export async function getTweetIdSet(): Promise<Set<string>> {
 export async function queryPending(limit = 50, wsId?: string): Promise<TweetInboxRecord[]> {
   const db = getXDB();
   const wsFilter = wsId ? 'AND ws_id = $wsId' : '';
+  // ⭐ **人工处理过的一律不送 AI**(用户 2026-09-02:
+  // 「如果我都手工研判过了,Gemma4 就不应该再处理,而是认可人工的处理结果」)。
+  // 三种「已处理」都要排除:
+  //  · accepted 非空  = 已人工采纳/拒绝
+  //  · replied  = true = 我已经回复过(回过就是最强的表态)
+  //  · ai_verdict.reason 以 human: 开头 = 人工判定的快照
+  // 此前只筛 status='pending',这些行照样会被送去判 ——
+  // 既浪费算力(队列已积压 842 条、要跑 4 小时),又可能让机器判定覆盖人工结论。
   const res = await db.query<[TweetInboxRecord[]]>(
-    `SELECT * FROM x_tweet WHERE status = 'pending' ${wsFilter} ORDER BY fetched_at ASC LIMIT $limit`,
+    `SELECT * FROM x_tweet
+     WHERE status = 'pending'
+       AND accepted = NONE
+       AND replied != true
+       AND (ai_verdict = NONE OR !string::starts_with(ai_verdict.reason, 'human:'))
+       ${wsFilter}
+     ORDER BY fetched_at ASC LIMIT $limit`,
     { limit, wsId: wsId ?? null },
   );
   return res[0] ?? [];
