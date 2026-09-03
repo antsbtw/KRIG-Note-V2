@@ -50,6 +50,17 @@ export interface Interaction {
   targetText?: string;
   /** 被操作推的发布时间 */
   targetCreatedAt?: string;
+  /**
+   * 被操作推**引用**了哪条推。
+   *
+   * ⚠️ 2026-09-03 实测发现的归属漏判:「引用转发」某篇文章时,
+   * 那条推的 conversation_id 是**它自己所在的会话**,不是被引用的文章 ——
+   * 只按 target_id / conversation_id 归属会整条漏掉。
+   * 实例:推 2092213581563465730 正文只有一个 t.co 链接,
+   *   conversation_id = 2092069228715094394(自己的会话)
+   *   quoted_status_id = 2092213139139854555 ← 活动文章在这里
+   */
+  targetQuotedStatusId?: string;
 }
 
 /**
@@ -161,7 +172,7 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
     //   我避开了 actor 那个,却在 target 上照犯。
     interface TargetInfo {
       id: string; conversationId?: string; hasMedia?: boolean;
-      text?: string; createdAt?: string;
+      text?: string; createdAt?: string; quotedStatusId?: string;
     }
     const targetInfos: TargetInfo[] = [];
     for (const t of targets) {
@@ -177,6 +188,9 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
       }
       targetInfos.push({
         id: tr.rest_id,
+        // 引用转发的归属线索(见 targetQuotedStatusId 注释)
+        quotedStatusId: lg && typeof lg.quoted_status_id_str === 'string'
+          ? lg.quoted_status_id_str : undefined,
         conversationId: lg && typeof lg.conversation_id_str === 'string'
           ? lg.conversation_id_str : undefined,
         // ⚠️ 只认自己的 extended_entities.media(预览卡不算、引用原文的图不算)
@@ -205,6 +219,7 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
           targetHasMedia: ti.hasMedia,
           targetText: ti.text,
           targetCreatedAt: ti.createdAt,
+          targetQuotedStatusId: ti.quotedStatusId,
         });
       }
     }

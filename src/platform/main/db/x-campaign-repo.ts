@@ -229,7 +229,8 @@ export async function upsertInteractions(
           target_conversation_id = $conv OR target_conversation_id,
           target_has_media = IF $media != NONE THEN $media ELSE target_has_media END,
           target_text = $ttext OR target_text,
-          target_created_at = IF $tat != NONE THEN $tat ELSE target_created_at END
+          target_created_at = IF $tat != NONE THEN $tat ELSE target_created_at END,
+          target_quoted_status_id = $quoted OR target_quoted_status_id
          WHERE kind = $k AND actor_uid = $a AND target_id = $t`,
         {
           k: it.kind, a: it.actorUid, t: target,
@@ -237,6 +238,7 @@ export async function upsertInteractions(
           media: typeof it.targetHasMedia === 'boolean' ? it.targetHasMedia : undefined,
           ttext: it.targetText || undefined,
           tat: it.targetCreatedAt ? new Date(it.targetCreatedAt) : undefined,
+          quoted: it.targetQuotedStatusId || undefined,
         },
       ).catch((err) => console.warn('[x-campaign-repo] 补元数据失败:', err));
       existing++;
@@ -249,7 +251,8 @@ export async function upsertInteractions(
         ws_id = $ws, owner_handle = $oh, notified_at = $at,
         message = $msg, first_seen_at = time::now(),
         target_conversation_id = $conv, target_has_media = $media,
-        target_text = $ttext, target_created_at = $tat`,
+        target_text = $ttext, target_created_at = $tat,
+        target_quoted_status_id = $quoted`,
       {
         k: it.kind, a: it.actorUid, t: target,
         ah: it.actorHandle || undefined,
@@ -262,6 +265,7 @@ export async function upsertInteractions(
         media: typeof it.targetHasMedia === 'boolean' ? it.targetHasMedia : undefined,
         ttext: it.targetText || undefined,
         tat: it.targetCreatedAt ? new Date(it.targetCreatedAt) : undefined,
+        quoted: it.targetQuotedStatusId || undefined,
       },
     );
     inserted++;
@@ -310,9 +314,14 @@ export async function interactionStats(): Promise<Record<string, number>> {
  * → 「点赞 5 / 转发 2」这种全局汇总**没有主语**:那 5 个赞散在 4 条不同的推上。
  *   活动要问的是「**这条推文**谁点赞了、谁转发了」,才能与页面数字对账。
  *
- * 归属判据两条(任一命中):
+ * 归属判据**三条**(任一命中):
  *  · target_id == 文章本身 —— 直接对文章点赞/转发
  *  · conversation_id == 文章 —— 对该文章会话内某条回复的互动
+ *  · quoted_status_id == 文章 —— **引用转发**该文章的推(2026-09-03 补)
+ *    ⚠️ 这条最容易漏:引用转发的推 conversation_id 是它自己所在的会话,
+ *    不是被引用的文章。漏了它就会把「引用转发」整类参与全判成不属于本文章,
+ *    而这恰恰是活动最常见的参与形式(用户一句「转发后文章没有内容,
+ *    应该只有一个链接」点破的正是这个)。
  *
  * ⚠️ 默认排除自己(excludeHandles):活动是给用户发奖励,
  *    自己给自己点赞不该算参与。
@@ -330,9 +339,12 @@ export async function verifyListForArticle(
 }> {
   const db = getXDB();
   const res = await db.query<[Array<Record<string, unknown>>]>(
-    `SELECT kind, actor_uid, actor_handle, target_id, target_has_media
+    `SELECT kind, actor_uid, actor_handle, target_id, target_has_media,
+       target_quoted_status_id
      FROM x_interaction
-     WHERE target_id = $a OR target_conversation_id = $a`,
+     WHERE target_id = $a
+        OR target_conversation_id = $a
+        OR target_quoted_status_id = $a`,
     { a: articleId },
   );
   const exclude = new Set((opts.excludeHandles ?? []).map((h) => normalizeHandle(h)));

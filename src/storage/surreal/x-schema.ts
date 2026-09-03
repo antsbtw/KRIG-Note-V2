@@ -594,3 +594,25 @@ export async function x_migration_1_1_0(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.1 —— 互动带上「引用了哪条推」(2026-09-03)
+ *
+ * 用户观察到「转发后文章没有内容,应该只有一个链接」,一句话点破归属漏判:
+ * 引用转发某篇文章时,那条推的 conversation_id 是**它自己所在的会话**,
+ * 文章的关联藏在 quoted_status_id_str 里。只按 target_id / conversation_id
+ * 归属会把整类「引用转发」漏掉 —— 而它恰恰是活动最常见的参与形式。
+ */
+const X_SCHEMA_1_1_1 = `
+DEFINE FIELD IF NOT EXISTS target_quoted_status_id ON x_interaction TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_interaction_quoted ON x_interaction FIELDS target_quoted_status_id;
+`;
+
+export async function x_migration_1_1_1(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_1);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.1', appliedAt = $now,
+      description = 'Interaction quoted_status_id (quote-retweet attribution)'`,
+    { rid: new RecordId('schema_version', '1.1.1'), now: Date.now() },
+  );
+}
