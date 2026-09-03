@@ -149,33 +149,44 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
 
     // 目标推(follow 类没有)。⭐ 不只取 id —— target 里带着完整推文对象,
     // 契约要的 conversation_id / has_media 都在它的 legacy 里(实测)。
-    let targetId = '';
-    let targetConversationId: string | undefined;
-    let targetHasMedia: boolean | undefined;
-    let targetText: string | undefined;
-    let targetCreatedAt: string | undefined;
+    //
+    // ⚠️ **必须遍历全部 target**,不能只取第一个(2026-09-03 用户对账发现):
+    //   一条通知可以覆盖多条推 ——「reposted **2 of your posts**」
+    //   「liked **4 of your posts**」。只取 target[0] 会把 4 次点赞记成 1 次,
+    //   与用户在页面上数出来的数字对不上。
+    //   这与 from_users 那个坑是同一个形态:聚合通知里**两个维度都是数组**,
+    //   我避开了 actor 那个,却在 target 上照犯。
+    interface TargetInfo {
+      id: string; conversationId?: string; hasMedia?: boolean;
+      text?: string; createdAt?: string;
+    }
+    const targetInfos: TargetInfo[] = [];
     for (const t of targets) {
       const tr = ((t as Record<string, unknown>)?.tweet_results as Record<string, unknown>)
         ?.result as Record<string, unknown> | undefined;
       if (!tr || typeof tr.rest_id !== 'string') continue;
-      targetId = tr.rest_id;
       const lg = tr.legacy as Record<string, unknown> | undefined;
-      if (lg) {
-        if (typeof lg.conversation_id_str === 'string') targetConversationId = lg.conversation_id_str;
-        // ⚠️ 与文章详情页同一判据:只认自己的 extended_entities.media,
-        //    预览卡不算、引用原文的图不算(契约 §2.1)
-        const ext = lg.extended_entities as Record<string, unknown> | undefined;
-        targetHasMedia = Array.isArray(ext?.media) && (ext!.media as unknown[]).length > 0;
-        if (typeof lg.full_text === 'string') targetText = lg.full_text.slice(0, 200);
-        if (typeof lg.created_at === 'string') {
-          const d = new Date(lg.created_at);
-          if (!Number.isNaN(d.getTime())) targetCreatedAt = d.toISOString();
-        }
+      const ext = lg?.extended_entities as Record<string, unknown> | undefined;
+      let createdAt: string | undefined;
+      if (lg && typeof lg.created_at === 'string') {
+        const d = new Date(lg.created_at);
+        if (!Number.isNaN(d.getTime())) createdAt = d.toISOString();
       }
-      break;
+      targetInfos.push({
+        id: tr.rest_id,
+        conversationId: lg && typeof lg.conversation_id_str === 'string'
+          ? lg.conversation_id_str : undefined,
+        // ⚠️ 只认自己的 extended_entities.media(预览卡不算、引用原文的图不算)
+        hasMedia: lg ? Array.isArray(ext?.media) && (ext!.media as unknown[]).length > 0 : undefined,
+        text: lg && typeof lg.full_text === 'string' ? lg.full_text.slice(0, 200) : undefined,
+        createdAt,
+      });
     }
+    // follow 类没有目标推 —— 用一个空目标占位,保证仍产出一条记录
+    if (targetInfos.length === 0) targetInfos.push({ id: '' });
 
-    // ⚠️ 取**全部** from_users,不是 fromUsers[0](twikit 的坑)
+    // ⚠️ 取**全部** from_users(twikit 的坑),再与**全部** target 交叉 ——
+    // 「A and 2 others liked 4 of your posts」= 3 人 × 4 推 = 12 条互动事实。
     for (const u of fromUsers) {
       const ur = ((u as Record<string, unknown>)?.user_results as Record<string, unknown>)
         ?.result as Record<string, unknown> | undefined;
@@ -183,9 +194,16 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
       const core = ur.core as Record<string, unknown> | undefined;
       const handle = core && typeof core.screen_name === 'string'
         ? normalizeHandle(core.screen_name) : undefined;
-      out.push({ kind, actorUid: ur.rest_id, actorHandle: handle,
-        targetId, notifiedAt: ts, message: msg,
-        targetConversationId, targetHasMedia, targetText, targetCreatedAt });
+      for (const ti of targetInfos) {
+        out.push({
+          kind, actorUid: ur.rest_id, actorHandle: handle,
+          targetId: ti.id, notifiedAt: ts, message: msg,
+          targetConversationId: ti.conversationId,
+          targetHasMedia: ti.hasMedia,
+          targetText: ti.text,
+          targetCreatedAt: ti.createdAt,
+        });
+      }
     }
   }
 

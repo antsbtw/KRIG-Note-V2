@@ -92,3 +92,79 @@ describe('具名互动解析', () => {
     expect(keys.size).toBe(3);
   });
 });
+
+/**
+ * 聚合通知的**两个维度**都是数组:from_users × target_objects。
+ * 我避开了 actor 那个坑(twikit 只取 [0]),却在 target 上照犯 ——
+ * 2026-09-03 用户按页面数字对账时发现:「应该是 1 个点赞、3 个转发、1 个回复」,
+ * 而库里每条通知只记了 1 条 target,与「liked 4 of your posts」对不上。
+ */
+const multiTarget = { data: { x: {
+  __typename: 'TimelineNotification',
+  notification_icon: 'heart_icon',
+  rich_message: { text: 'A and 1 other liked 3 of your posts' },
+  timestamp_ms: '2026-09-03T10:00:00.000Z',
+  template: {
+    from_users: [
+      { user_results: { result: { rest_id: 'u1', core: { screen_name: 'alice' } } } },
+      { user_results: { result: { rest_id: 'u2', core: { screen_name: 'bob' } } } },
+    ],
+    target_objects: [
+      { tweet_results: { result: { rest_id: 'p1',
+        legacy: { conversation_id_str: 'c1', created_at: 'Wed Sep 02 10:00:00 +0000 2026' } } } },
+      { tweet_results: { result: { rest_id: 'p2',
+        legacy: { conversation_id_str: 'c2', created_at: 'Wed Sep 02 11:00:00 +0000 2026',
+          extended_entities: { media: [{ type: 'photo' }] } } } } },
+      { tweet_results: { result: { rest_id: 'p3',
+        legacy: { conversation_id_str: 'c3', created_at: 'Wed Sep 02 12:00:00 +0000 2026' } } } },
+    ],
+  },
+} } };
+
+describe('聚合通知:多人 × 多推', () => {
+  it('⭐ 2 人 × 3 推 = 6 条互动事实,不是 2 条也不是 1 条', () => {
+    const out: Interaction[] = [];
+    extractInteractions(multiTarget, out);
+    expect(out, '只取 target[0] 会把「liked 3 of your posts」记成 1 次').toHaveLength(6);
+  });
+
+  it('⭐ 每条推的 has_media 各自独立(不能用第一条的值套给全部)', () => {
+    const out: Interaction[] = [];
+    extractInteractions(multiTarget, out);
+    const p2 = out.filter((i) => i.targetId === 'p2');
+    const p1 = out.filter((i) => i.targetId === 'p1');
+    expect(p2.every((i) => i.targetHasMedia === true), 'p2 带图').toBe(true);
+    expect(p1.every((i) => i.targetHasMedia === false), 'p1 不带图').toBe(true);
+  });
+
+  it('⭐ conversation_id 逐条对应(决定属于哪篇文章)', () => {
+    const out: Interaction[] = [];
+    extractInteractions(multiTarget, out);
+    const map = new Map(out.map((i) => [i.targetId, i.targetConversationId]));
+    expect(map.get('p1')).toBe('c1');
+    expect(map.get('p2')).toBe('c2');
+    expect(map.get('p3')).toBe('c3');
+  });
+
+  it('幂等键能区分同一人对不同推的同类行为', () => {
+    const out: Interaction[] = [];
+    extractInteractions(multiTarget, out);
+    const keys = new Set(out.map((i) => `${i.kind}|${i.actorUid}|${i.targetId}`));
+    expect(keys.size).toBe(6);
+  });
+
+  it('follow 类无目标推时仍产出一条(空 targetId 占位)', () => {
+    const followNotif = { x: {
+      __typename: 'TimelineNotification',
+      notification_icon: 'person_icon',
+      rich_message: { text: 'A followed you' },
+      template: { from_users: [
+        { user_results: { result: { rest_id: 'u9', core: { screen_name: 'zoe' } } } }] },
+    } };
+    const out: Interaction[] = [];
+    extractInteractions(followNotif, out);
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('follow');
+    expect(out[0].targetId).toBe('');
+  });
+});
