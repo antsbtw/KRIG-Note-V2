@@ -27,6 +27,25 @@ describe('存量积压自动清理', () => {
     ).toBe(true);
   });
 
+  it('⭐ 积压清理必须独立调度,不能塞在 runEnabledRecipes 里', () => {
+    // 踩过:塞进去后被该函数开头的 `activeXWcMap.size === 0` 挡掉,
+    // 没开 X 视图时永远走不到 —— 重启两次都纹丝不动。
+    // 判断只需要 Ollama + 数据库,不需要 webContents。
+    expect(sched).toMatch(/backlogTimer\s*=\s*setInterval/);
+    const fn = sched.slice(sched.indexOf('async function runEnabledRecipes'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    expect(
+      body.includes('countPending'),
+      '积压清理又被塞回 runEnabledRecipes 了 —— 会被 activeXWcMap 守卫挡掉',
+    ).toBe(false);
+  });
+
+  it('backlogTimer 必须在 stopScheduler 里清理', () => {
+    const fn = sched.slice(sched.indexOf('export function stopScheduler'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    expect(body.includes('backlogTimer')).toBe(true);
+  });
+
   it('⭐ countPending 与 queryPending 的排除条件必须一致', () => {
     // 两处判据不一致会导致「数出来有积压、捞的时候是空」的空转
     for (const cond of ['accepted = NONE', "replied != true", 'human:']) {

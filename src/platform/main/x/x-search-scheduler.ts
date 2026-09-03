@@ -31,6 +31,7 @@ export function getActiveWcId(wsId: string): number | null {
 let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let ttlTimer: ReturnType<typeof setInterval> | null = null;
 let judgeRecoverTimer: ReturnType<typeof setInterval> | null = null;
+let backlogTimer: ReturnType<typeof setInterval> | null = null;
 
 /** 累计待判断 pending 条数（per-ws：各 ws 各自累计、各自达阈值、各自清零，防跨 ws 混批） */
 const pendingAccumulated = new Map<string, number>();
@@ -69,6 +70,35 @@ const judgeConfig: JudgeConfig = getJudgeConfig();  // 模型可被 KRIG_JUDGE_M
 async function buildFilterConfig(): Promise<TimelineFilterConfig> {
   const accountBlacklist = await getBlockedHandleSet();
   return { ...DEFAULT_FILTER_CONFIG, accountBlacklist };
+}
+
+/**
+ * 清理**存量积压** —— 与采集完全解耦。
+ *
+ * ⚠️ 2026-09-03 两次实机观察踩到的坑,记下来别再犯:
+ *  第一次:判断触发点只挂在「本轮新采到多少条」上,存量没人管 → 945 条静躺。
+ *  第二次:我把清理塞进 runEnabledRecipes 末尾,但那个函数**开头就有**
+ *          `if (activeXWcMap.size === 0) return` —— 没有活跃 X webview 时
+ *          直接返回,**根本走不到**清理那行。重启后依旧纹丝不动。
+ *
+ * 关键认知:**判断积压不需要 webContents** —— 它只跟 Ollama 和数据库打交道。
+ * 采集才需要浏览器。把两者绑在一起是我的错误,现已拆开独立调度。
+ */
+async function drainBacklog(): Promise<void> {
+  // 没有 ws 上下文时用 undefined 查全局积压(queryPending/countPending 的 wsId 可选)
+  const wsIds = activeXWcMap.size > 0 ? [...activeXWcMap.keys()] : [undefined];
+  for (const wsId of wsIds) {
+    try {
+      const backlog = await countPending(wsId);
+      if (backlog > 0) {
+        console.log(`[x-search-scheduler] 存量积压 ${backlog} 条`
+          + `${wsId ? `(ws=${wsId})` : '(全局)'},启动 drain`);
+        startJudgeDrain(judgeConfig, wsId ?? '');
+      }
+    } catch (err) {
+      console.error('[x-search-scheduler] 查积压失败:', err);
+    }
+  }
 }
 
 /** 执行一次配方扫描并按需触发 AI 判断 */
@@ -141,22 +171,7 @@ async function runEnabledRecipes(): Promise<void> {
     }
   }
 
-  // ⭐ **存量积压清理**(2026-09-03 实测发现的缺口):
-  // 上面两个触发点都挂在「本轮**新采到**多少条」上 —— 存量 pending 没有任何
-  // 东西会去动它。实测:重启后 945 条 pending 静躺 2 分钟,judging 恒为 0,
-  // 模型都没被加载。用户只能手点「AI 判断」才会开始清。
-  // 修法:每轮调度顺带看一眼积压,有就起 drain(内部有并发守卫,重复调用安全)。
-  for (const wsId of activeXWcMap.keys()) {
-    try {
-      const backlog = await countPending(wsId);
-      if (backlog > 0) {
-        console.log(`[x-search-scheduler] 存量积压 ${backlog} 条(ws=${wsId}),启动 drain`);
-        startJudgeDrain(judgeConfig, wsId);
-      }
-    } catch (err) {
-      console.error(`[x-search-scheduler] 查积压失败 ws=${wsId}:`, err);
-    }
-  }
+
 }
 
 /**
@@ -192,6 +207,21 @@ export function startScheduler(): void {
     console.error('[x-search-scheduler] initial reconcile error:', err);
   });
 
+  // 积压清理:**独立于采集调度** —— 判断只需要 Ollama + 数据库,不需要 X webview。
+  // 绑在 runEnabledRecipes 里会被它开头的 `activeXWcMap.size === 0` 挡掉(踩过)。
+  backlogTimer = setInterval(() => {
+    drainBacklog().catch((err) => {
+      console.error('[x-search-scheduler] drainBacklog error:', err);
+    });
+  }, 2 * 60_000);
+
+  // 启动后延迟 10s 先跑一次:给 storage/Ollama 留出就绪时间
+  setTimeout(() => {
+    drainBacklog().catch((err) => {
+      console.error('[x-search-scheduler] initial drainBacklog error:', err);
+    });
+  }, 10_000);
+
   // TTL 清理：每 24h 一次
   ttlTimer = setInterval(() => {
     cleanExpired().catch((err) => {
@@ -220,5 +250,9 @@ export function stopScheduler(): void {
   if (judgeRecoverTimer) {
     clearInterval(judgeRecoverTimer);
     judgeRecoverTimer = null;
+  }
+  if (backlogTimer) {
+    clearInterval(backlogTimer);
+    backlogTimer = null;
   }
 }
