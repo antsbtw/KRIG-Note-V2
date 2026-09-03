@@ -41,9 +41,13 @@ let pausedUntil = 0;
  * 表现为**一直转圈**,而且 /health 也卡住(主进程在等 webview)。
  * 这正是 ws 角色隔离要防的争抢,我却在单个 ws 内部又造了一次。
  */
-export function pauseCampaignLoop(minutes = 3): void {
-  pausedUntil = Date.now() + minutes * 60_000;
-  console.log(`[campaign-loop] 用户正在操作 X,暂停自动抓取 ${minutes} 分钟`);
+export function pauseCampaignLoop(seconds = 45): void {
+  // ⚠️ **暂停时长必须明显短于循环间隔**,否则会饿死循环:
+  //   2026-09-03 实测,暂停设成 3 分钟、间隔也是 3 分钟 ——
+  //   每次手动操作都把下一轮整轮推掉,6 分钟内一条新互动都没抓到。
+  //   目的只是「别在用户点页面的当口抢走它」,45 秒足够,不需要整轮。
+  pausedUntil = Date.now() + seconds * 1_000;
+  console.log(`[campaign-loop] 用户正在操作 X,暂停自动抓取 ${seconds}s`);
 }
 
 /**

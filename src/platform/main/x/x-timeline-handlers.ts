@@ -63,7 +63,7 @@ export function registerXTimelineHandlers(): void {
     }
 
     setActiveXWcId(p.wsId, targetWcId);
-    pauseCampaignLoop(3);   // 手动跑配方要占 webview,先让自动循环让路
+    pauseCampaignLoop();   // 手动跑配方要占 webview,先让自动循环让路(默认 45s)
 
     try {
       // 屏蔽名单现取(与调度器同源):失败直接抛给下面的 catch → 返回 error,
@@ -494,7 +494,7 @@ export function registerXTimelineHandlers(): void {
   // X_FETCH_ARTICLE_REPLIES — 试抓一篇文章的回复(测试用,只抓不推送)
   ipcMain.handle(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, async (_e, payload: unknown) => {
     // 手动操作要占用 webview —— 先让自动循环让路(否则两边抢,页面一直转圈)
-    pauseCampaignLoop(3);
+    pauseCampaignLoop();
     const p = payload as {
       wsId?: unknown; articleId?: unknown; wcId?: unknown; budgetMs?: unknown;
     } | null;
@@ -562,7 +562,7 @@ export function registerXTimelineHandlers(): void {
   // X_HARVEST_NOTIFICATIONS — 抓通知页,解出「谁赞/转/回了我」的具名名单
   ipcMain.handle(IPC_CHANNELS.X_HARVEST_NOTIFICATIONS, async (_e, payload: unknown) => {
     // 手动操作要占用 webview —— 先让自动循环让路(否则两边抢,页面一直转圈)
-    pauseCampaignLoop(3);
+    pauseCampaignLoop();
     const p = payload as { wsId?: unknown; wcId?: unknown } | null;
     if (typeof p?.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };

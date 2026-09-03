@@ -300,9 +300,20 @@ export async function harvestNotifications(
 
   let rounds = 0;
   try {
-    wc.loadURL('https://x.com/notifications');
-    // 等首个通知响应(首屏就带数据,不必固定长等)
-    const deadline = Date.now() + 10_000;
+    // ⭐ 用户 2026-09-03 观察:「当 notification 时,x 的页面是自动刷新的,
+    //   才 10s 左右就刷新了。」——**已经在通知页时不必再导航**,
+    //   X 自己会定时拉新数据,我们被动监听就行。
+    //   这同时消除了与用户的争抢:不 loadURL,就不会把用户正在看的页面抢走。
+    const curUrl = (() => { try { return wc.getURL(); } catch { return ''; } })();
+    const alreadyThere = /x\.com\/notifications/i.test(curUrl);
+    if (!alreadyThere) {
+      wc.loadURL('https://x.com/notifications');
+    } else {
+      console.log('[x-notifications] 已在通知页,被动监听 X 自身刷新(不导航)');
+    }
+    // 等首个通知响应(首屏就带数据,不必固定长等)。
+    // 已在页面上时给足一个 X 自刷新周期(~10s),等它自己送数据来。
+    const deadline = Date.now() + (alreadyThere ? 15_000 : 10_000);
     while (notifPayloads === 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
     }

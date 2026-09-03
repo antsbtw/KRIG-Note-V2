@@ -43,4 +43,20 @@ describe('webview 争抢防护', () => {
   it('循环自身有重入保护(上一轮没跑完不叠加)', () => {
     expect(loop).toMatch(/if\s*\(running\)/);
   });
+
+  it('⭐ 暂停时长必须用秒且明显短于循环间隔(否则饿死循环)', () => {
+    // 实测踩到:暂停 3 分钟 + 间隔 3 分钟 = 每次手动操作推掉整整一轮,
+    // 6 分钟内一条新互动都没抓到。
+    const m = loop.match(/pauseCampaignLoop\(seconds\s*=\s*(\d+)\)/);
+    expect(m, 'pauseCampaignLoop 应以秒为单位').toBeTruthy();
+    expect(Number(m![1]), '暂停不得达到分钟级').toBeLessThanOrEqual(60);
+    expect(loop).toContain('seconds * 1_000');
+  });
+
+  it('⭐ 已在通知页时不得再导航(X 自己 ~10s 刷新,导航会抢走用户页面)', () => {
+    const notif = read('src/platform/main/x/x-notifications.ts');
+    expect(notif).toContain('alreadyThere');
+    const i = notif.indexOf('if (!alreadyThere)');
+    expect(i, '缺少「已在通知页就不导航」的判断').toBeGreaterThan(0);
+  });
 });
