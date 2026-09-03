@@ -3,6 +3,30 @@
 > 立于 2026-09-03。代码在 macOS 完成并通过编译与测试,**待 Windows 联调**。
 > 接口定义见 [X爬虫同步契约.md](X爬虫同步契约.md),本文只讲部署。
 
+## 0. 交叉编译 Windows 包(在 macOS 上)
+
+```bash
+KRIG_TARGET_PLATFORM=win32 npx electron-forge make --platform=win32 --arch=x64
+```
+
+⚠️ **`KRIG_TARGET_PLATFORM=win32` 不能省**(2026-09-03 踩到)。
+`--platform=win32` **不会**传播到 forge.config.ts 里那个 env 判断,
+少了它 `surreal.exe` 不会被打进 `resources/` —— 而**打包过程一切正常、
+不报任何错**,直到装到 Windows 上启动才发现数据层起不来。
+
+产物:`out/make/zip/win32/x64/KRIG Note-win32-x64-<version>.zip`
+
+**装完必须逐个核对四个文件**(缺 surreal.exe 是最容易漏的):
+
+| 文件 | 参考大小 |
+|---|---|
+| `KRIG Note.exe` | ~204 MB |
+| `resources\app.asar` | ~62 MB |
+| `resources\surreal.exe` | ~90 MB ← **最容易缺** |
+| `resources\index.full.js` | ~0.5 MB |
+
+---
+
 ## 1. 部署前:两项必须线下配置
 
 契约 §1 明确密钥**不得出现在对话、issue、代码里**,故代码里零默认值,
