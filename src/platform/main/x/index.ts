@@ -15,4 +15,4 @@ export { startScheduler as startXSearchScheduler, stopScheduler as stopXSearchSc
 export { startCampaignServer, stopCampaignServer, campaignServerRunning } from './x-campaign-server';
 export { getCampaignConfig, campaignConfigStatus } from './x-campaign-config';
 export { pushPending } from './x-campaign-push';
-export { startCampaignLoop, stopCampaignLoop, campaignLoopRunning, runCampaignRound } from './x-campaign-loop';
+export { startCampaignLoop, stopCampaignLoop, campaignLoopRunning, runCampaignRound, pauseCampaignLoop } from './x-campaign-loop';

@@ -30,6 +30,21 @@ import type { Interaction } from './x-notifications';
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
+/** 用户正在操作 X 界面时暂停自动抓取,避免抢同一个 webview */
+let pausedUntil = 0;
+
+/**
+ * 用户碰了 X 界面 —— 暂停自动抓取一段时间。
+ *
+ * ⚠️ 2026-09-03 实测踩到:主循环每 3 分钟 loadURL 到通知页,
+ * 而用户正在同一个 webview 上点推文 —— 页面被硬生生导航走,
+ * 表现为**一直转圈**,而且 /health 也卡住(主进程在等 webview)。
+ * 这正是 ws 角色隔离要防的争抢,我却在单个 ws 内部又造了一次。
+ */
+export function pauseCampaignLoop(minutes = 3): void {
+  pausedUntil = Date.now() + minutes * 60_000;
+  console.log(`[campaign-loop] 用户正在操作 X,暂停自动抓取 ${minutes} 分钟`);
+}
 
 /**
  * 把通知里的互动转成契约 item。
@@ -124,6 +139,11 @@ export async function startCampaignLoop(): Promise<void> {
   timer = setInterval(() => {
     // 上一轮没跑完就跳过 —— 通知页抓取要占用 webview,重入会互相打断
     if (running) { console.log('[campaign-loop] 上一轮未结束,跳过'); return; }
+    // 用户正在用 X 界面 —— 让路,不跟他抢 webview
+    if (Date.now() < pausedUntil) {
+      console.log('[campaign-loop] 用户正在操作 X,本轮跳过');
+      return;
+    }
     running = true;
     runCampaignRound()
       .catch((err) => console.error('[campaign-loop] 本轮异常:', err))
