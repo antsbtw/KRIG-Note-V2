@@ -12,6 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import { getXDB } from '@storage/surreal/client';
+import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { ArticleReplyItem } from '../x/x-article-replies';
 
 /** 入库结果 —— 与契约响应的 accepted/updated 语义对齐,便于观测 */
@@ -223,13 +224,21 @@ export async function upsertInteractions(
       `CREATE x_interaction SET
         kind = $k, actor_uid = $a, target_id = $t, actor_handle = $ah,
         ws_id = $ws, owner_handle = $oh, notified_at = $at,
-        message = $msg, first_seen_at = time::now()`,
+        message = $msg, first_seen_at = time::now(),
+        target_conversation_id = $conv, target_has_media = $media,
+        target_text = $ttext, target_created_at = $tat`,
       {
         k: it.kind, a: it.actorUid, t: target,
         ah: it.actorHandle || undefined,
         ws: wsId, oh: ownerHandle || undefined,
         at: it.notifiedAt ? new Date(it.notifiedAt) : undefined,
         msg: it.message || undefined,
+        // ⭐ 这四个此前**解出来却没落库** —— 导致只能全局汇总,
+        //    答不了「这条推文谁点赞了」(用户 2026-09-03 指正的正是这点)
+        conv: it.targetConversationId || undefined,
+        media: typeof it.targetHasMedia === 'boolean' ? it.targetHasMedia : undefined,
+        ttext: it.targetText || undefined,
+        tat: it.targetCreatedAt ? new Date(it.targetCreatedAt) : undefined,
       },
     );
     inserted++;
@@ -267,5 +276,61 @@ export async function interactionStats(): Promise<Record<string, number>> {
     `SELECT kind, count() FROM x_interaction GROUP BY kind`);
   const out: Record<string, number> = {};
   for (const r of res[0] ?? []) out[String(r.kind)] = Number(r.count);
+  return out;
+}
+
+/**
+ * 某篇文章的**核验名单** —— 活动核验的正确口径。
+ *
+ * 用户 2026-09-03 指正:「这里首先明确是哪一条推文,然后才可以正确匹配
+ *   这个通知都有哪些属于这个推文的。你随便抓随便统计可不行。」
+ * → 「点赞 5 / 转发 2」这种全局汇总**没有主语**:那 5 个赞散在 4 条不同的推上。
+ *   活动要问的是「**这条推文**谁点赞了、谁转发了」,才能与页面数字对账。
+ *
+ * 归属判据两条(任一命中):
+ *  · target_id == 文章本身 —— 直接对文章点赞/转发
+ *  · conversation_id == 文章 —— 对该文章会话内某条回复的互动
+ *
+ * ⚠️ 默认排除自己(excludeHandles):活动是给用户发奖励,
+ *    自己给自己点赞不该算参与。
+ */
+export async function verifyListForArticle(
+  articleId: string,
+  opts: { excludeHandles?: string[] } = {},
+): Promise<{
+  articleId: string;
+  like: Array<{ uid: string; handle?: string; targetId: string }>;
+  retweet: Array<{ uid: string; handle?: string; targetId: string }>;
+  reply: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
+  quote: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
+  excluded: number;
+}> {
+  const db = getXDB();
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT kind, actor_uid, actor_handle, target_id, target_has_media
+     FROM x_interaction
+     WHERE target_id = $a OR target_conversation_id = $a`,
+    { a: articleId },
+  );
+  const exclude = new Set((opts.excludeHandles ?? []).map((h) => normalizeHandle(h)));
+  const out = {
+    articleId,
+    like: [] as Array<{ uid: string; handle?: string; targetId: string }>,
+    retweet: [] as Array<{ uid: string; handle?: string; targetId: string }>,
+    reply: [] as Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>,
+    quote: [] as Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>,
+    excluded: 0,
+  };
+  for (const r of res[0] ?? []) {
+    const handle = r.actor_handle ? String(r.actor_handle) : undefined;
+    if (handle && exclude.has(handle)) { out.excluded++; continue; }
+    const row = { uid: String(r.actor_uid), handle, targetId: String(r.target_id),
+      hasMedia: r.target_has_media === true };
+    const k = String(r.kind);
+    if (k === 'like') out.like.push(row);
+    else if (k === 'retweet') out.retweet.push(row);
+    else if (k === 'reply') out.reply.push(row);
+    else if (k === 'quote') out.quote.push(row);
+  }
   return out;
 }

@@ -564,3 +564,33 @@ export async function x_migration_1_0_9(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.0.9'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.0 —— 互动带上「属于哪篇文章」与「带没带图」(2026-09-03)
+ *
+ * 用户指正:「首先明确是哪一条推文,然后才可以正确匹配这个通知
+ *   都有哪些属于这个推文的。你随便抓随便统计可不行。」
+ *
+ * 此前 x_interaction 只存 target_id,于是只能做**全局汇总**
+ * (「点赞 5 条」——散在 4 条不同的推上,没有主语),
+ * 无法回答「**这条推文**谁点赞了」。而后者才是活动核验的口径。
+ *
+ * 解析层其实早已解出这两个字段(target.legacy 里带着),只是没落库 ——
+ * 属于「采到了却丢掉」,比没采到更隐蔽。
+ */
+const X_SCHEMA_1_1_0 = `
+DEFINE FIELD IF NOT EXISTS target_conversation_id ON x_interaction TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS target_has_media       ON x_interaction TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS target_text            ON x_interaction TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS target_created_at      ON x_interaction TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_interaction_conv ON x_interaction FIELDS target_conversation_id;
+`;
+
+export async function x_migration_1_1_0(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_0);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.0', appliedAt = $now,
+      description = 'Interaction target metadata (conversation_id + has_media) for per-article verification'`,
+    { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
+  );
+}

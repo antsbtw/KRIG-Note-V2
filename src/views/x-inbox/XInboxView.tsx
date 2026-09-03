@@ -1211,20 +1211,32 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
         like: '点赞', retweet: '转发', reply: '回复', follow: '关注',
         quote: '引用', mention: '提及', other: '其它',
       };
+      // ⭐ 核验名单必须**锚定到那篇文章** —— 全局汇总没有主语,
+      // 「点赞 5 条」可能散在 4 条不同的推上,与页面上数出来的对不上。
+      const v = r.verify;
+      const nameList = (list: Array<{ handle?: string; uid: string; targetId: string; hasMedia?: boolean }>) =>
+        list.length === 0 ? '    (无)'
+          : list.map((i) => `    @${i.handle ?? '?'} (uid ${i.uid})`
+              + `${i.hasMedia !== undefined ? (i.hasMedia ? ' 🖼带图' : ' 无图') : ''}`).join('\n');
+
       setTestOut(
         `通知采集完成 —— 接收方 @${r.owner ?? '(未识别)'}\n`
         + `捕获 ${x.payloads} 个通知响应,滚 ${x.rounds} 轮\n`
         + `入库:新增 ${r.saved?.inserted ?? 0} · 已存在 ${r.saved?.existing ?? 0}\n`
         + (x.problems.length ? `⚠ ${x.problems.join(' | ')}\n` : '')
-        + `\n【本次名单】\n`
+        + (v
+            ? `\n━━━ 【核验名单 · 文章 ${v.articleId}】━━━\n`
+              + `点赞(${v.like.length}):\n${nameList(v.like)}\n`
+              + `转发(${v.retweet.length}):\n${nameList(v.retweet)}\n`
+              + `回复(${v.reply.length}):\n${nameList(v.reply)}\n`
+              + `引用(${v.quote.length}):\n${nameList(v.quote)}\n`
+              + (v.excluded ? `(已排除自己的互动 ${v.excluded} 条)\n` : '')
+            : `\n⚠ 未配置帖子链接 —— 无法给出核验名单。请先在上方填链接并保存。\n`)
+        + `\n【本次抓到的全部通知(不限本文章,仅供参考)】\n`
         + Object.entries(byKind).map(([k, list]) =>
-            `${label[k] ?? k}(${list.length}):\n`
-            + list.slice(0, 12).map((i) =>
-                `  @${i.actorHandle ?? '?'} (uid ${i.actorUid})`
-                + `${i.targetId ? ` → 推 ${i.targetId}` : ''}`).join('\n'),
-          ).join('\n\n')
-        + `\n\n【库存累计】` + Object.entries(r.stats ?? {})
-            .map(([k, v]) => `${label[k] ?? k} ${v}`).join(' · '),
+            `  ${label[k] ?? k} ${list.length} 条`).join(' · ')
+        + `\n【库存累计】` + Object.entries(r.stats ?? {})
+            .map(([k, v2]) => `${label[k] ?? k} ${v2}`).join(' · '),
       );
     } finally { setBusy(false); }
   };

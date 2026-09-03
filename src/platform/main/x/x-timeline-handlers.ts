@@ -25,7 +25,7 @@ import { getWsRole, setWsRole, listWsRoles,
   setWsAccount, getWsAccount, requireWsAccount, listWsAccounts } from '../db/x-ws-role-repo';
 import { fetchArticleReplies, listOwnArticles, parseTweetUrl } from './x-article-replies';
 import { upsertCampaignReplies, markMissingAsDeleted, campaignStats,
-  upsertInteractions, interactionStats } from '../db/x-campaign-repo';
+  upsertInteractions, interactionStats, verifyListForArticle } from '../db/x-campaign-repo';
 import { harvestNotifications } from './x-notifications';
 import { campaignConfigStatus } from './x-campaign-config';
 import { campaignServerRunning } from './x-campaign-server';
@@ -570,7 +570,20 @@ export function registerXTimelineHandlers(): void {
 
       const saved = await upsertInteractions(p.wsId, acc?.handle, r.interactions);
       const stats = await interactionStats();
-      return { success: true, result: r, saved, stats, owner: acc?.handle };
+
+      // ⭐ 按**配置的那篇文章**给核验名单 —— 全局汇总没有主语,
+      // 「点赞 5 条」可能散在 4 条不同的推上,与页面数字对不上。
+      // 默认排除本 ws 自己的账号(自己给自己点赞不算参与)。
+      let verify: Awaited<ReturnType<typeof verifyListForArticle>> | undefined;
+      const roleCfg = await getWsRole(p.wsId).catch(() => null);
+      if (roleCfg?.articleId) {
+        const parsed = parseTweetUrl(roleCfg.articleId);
+        if (!('error' in parsed)) {
+          verify = await verifyListForArticle(parsed.tweetId,
+            { excludeHandles: acc?.handle ? [acc.handle] : [] });
+        }
+      }
+      return { success: true, result: r, saved, stats, owner: acc?.handle, verify };
     } catch (err) {
       return { success: false, error: String(err) };
     }

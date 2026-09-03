@@ -29,8 +29,12 @@ describe('per-ws 身份', () => {
   });
 
   it('⭐ 文章抓取不得回落全局 is_self', () => {
-    const i = handlers.lastIndexOf('const parsed = parseTweetUrl');
-    const block = handlers.slice(i, i + 1400);
+    // 锚到 X_FETCH_ARTICLE_REPLIES 这个 handler 本身,而不是「最后一个
+    // parseTweetUrl」—— 后者会随新增调用点漂移(2026-09-03 就漂到了
+    // 通知 handler 里,导致守卫误报)。
+    const i = handlers.indexOf('X_FETCH_ARTICLE_REPLIES, async');
+    expect(i, '找不到文章抓取 handler').toBeGreaterThan(0);
+    const block = handlers.slice(i, i + 2000);
     expect(
       block.includes('getSelfHandleDb'),
       '回落全局 is_self 会在多 ws 场景抓错账号 —— 必须用 getWsAccount(wsId)',

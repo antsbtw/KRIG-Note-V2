@@ -901,6 +901,13 @@ declare global {
           success: boolean; error?: string; owner?: string;
           saved?: { inserted: number; existing: number };
           stats?: Record<string, number>;
+          verify?: {
+            articleId: string; excluded: number;
+            like: Array<{ uid: string; handle?: string; targetId: string }>;
+            retweet: Array<{ uid: string; handle?: string; targetId: string }>;
+            reply: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
+            quote: Array<{ uid: string; handle?: string; targetId: string; hasMedia?: boolean }>;
+          };
           result?: { payloads: number; rounds: number; problems: string[];
             interactions: Array<{ kind: string; actorUid: string; actorHandle?: string;
               targetId: string; notifiedAt?: string; message?: string }> };
