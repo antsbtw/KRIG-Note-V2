@@ -126,14 +126,19 @@ async function handleRefresh(req: IncomingMessage, res: ServerResponse): Promise
   });
   if (pushed.accepted || pushed.updated) lastPushAt = new Date().toISOString();
 
+  // ⚠️ problems 必须带出来:没它就分不清「真的没人回复」和「采集失败」——
+  // 两者都表现为 items 为空,但一个是事实、一个是故障。
+  // 2026-09-03 实测 fetched:1/入库 0 时,正是靠不到这个信息才无法判断。
   send(res, 200, {
     success: true,
     data: {
       fetched: r.fetched,
+      items: r.items.length,          // 属于本文章的条数(fetched 含文章本体等)
       pushed: pushed.accepted + pushed.updated,
       hint_found: r.hintFound,
       elapsed_ms: Date.now() - started,
       partial: r.partial,
+      ...(r.problems.length ? { problems: r.problems } : {}),
     },
   });
 }
