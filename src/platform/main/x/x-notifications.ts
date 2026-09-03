@@ -19,6 +19,9 @@
  *   拿不到「第三方对第三方」的点赞(X 2024-06 移除,与爬虫水平无关)。
  */
 
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { app } from 'electron';
 import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 
@@ -253,6 +256,15 @@ export async function harvestNotifications(
           payloads++;
           if (!u.includes('Notifications')) return;      // 只吃通知接口
           notifPayloads++;
+          // 诊断落盘:通知载荷是「谁对我做了什么」的唯一真源,
+          // 出问题时(如核验名单恒为空)必须能回看原始结构,而不是靠猜。
+          try {
+            const dir = join(app.getPath('userData'), 'x-payload-survey');
+            mkdirSync(dir, { recursive: true });
+            writeFileSync(
+              join(dir, `notif-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
+              r.body, 'utf-8');
+          } catch { /* 诊断落盘失败不影响主流程 */ }
           try {
             const found: Interaction[] = [];
             extractInteractions(JSON.parse(r.body), found);

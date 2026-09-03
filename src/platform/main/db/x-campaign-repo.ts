@@ -218,7 +218,30 @@ export async function upsertInteractions(
        WHERE kind = $k AND actor_uid = $a AND target_id = $t LIMIT 1`,
       { k: it.kind, a: it.actorUid, t: target },
     );
-    if ((found[0] ?? []).length > 0) { existing++; continue; }
+    if ((found[0] ?? []).length > 0) {
+      // ⚠️ 不能「已存在就跳过」—— 2026-09-03 实测踩到:
+      //   migration 1.1.0 给 x_interaction 加了 target_conversation_id /
+      //   target_has_media,但旧行永远补不上(幂等键命中就 continue),
+      //   于是核验名单恒为空,而且**看不出原因**(表里有数据、统计也正常)。
+      //   正解:已存在则**补齐缺失的目标元数据**(只填空,不覆盖已有值)。
+      await db.query(
+        `UPDATE x_interaction SET
+          target_conversation_id = $conv OR target_conversation_id,
+          target_has_media = IF $media != NONE THEN $media ELSE target_has_media END,
+          target_text = $ttext OR target_text,
+          target_created_at = IF $tat != NONE THEN $tat ELSE target_created_at END
+         WHERE kind = $k AND actor_uid = $a AND target_id = $t`,
+        {
+          k: it.kind, a: it.actorUid, t: target,
+          conv: it.targetConversationId || undefined,
+          media: typeof it.targetHasMedia === 'boolean' ? it.targetHasMedia : undefined,
+          ttext: it.targetText || undefined,
+          tat: it.targetCreatedAt ? new Date(it.targetCreatedAt) : undefined,
+        },
+      ).catch((err) => console.warn('[x-campaign-repo] 补元数据失败:', err));
+      existing++;
+      continue;
+    }
 
     await db.query(
       `CREATE x_interaction SET
