@@ -75,7 +75,8 @@ import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
 import { recoverStuckAiJudging } from './db/tweet-inbox-repo';
-import { startXSearchScheduler, stopXSearchScheduler } from './x';
+import { startXSearchScheduler, stopXSearchScheduler,
+  startCampaignServer, stopCampaignServer } from './x';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -239,6 +240,15 @@ app.whenReady().then(async () => {
     });
   startXSearchScheduler();
 
+  // 活动契约接口 B(POST /refresh + GET /health)。
+  // 未配置密钥/地址时**静默跳过**——这是可选能力,没配就是没启用,不是错误。
+  // ⚠️ 长期部署在 Windows:监听 tailnet IP 而非 127.0.0.1,并阻止休眠(见该模块)。
+  startCampaignServer()
+    .then((r) => {
+      if ('error' in r) console.log(`[campaign-server] 未启动:${r.error}`);
+    })
+    .catch((err) => console.error('[campaign-server] 启动异常:', err));
+
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
   // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。
   await initWorkspaceManager();
@@ -363,6 +373,7 @@ app.on('before-quit', (event) => {
   // 停掉 X 调度器的 60s 轮询 —— 活着的 setInterval 会吊住事件循环让进程不肯退,
   // 且退出途中继续跑配方毫无意义(日志刷 `no active X webContents, skip`)。
   stopXSearchScheduler();
+  stopCampaignServer().catch(() => { /* 退出中,忽略 */ });
   if (reconciled) {
     shutdownStorageSync();
     return;

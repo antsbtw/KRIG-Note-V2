@@ -12,3 +12,6 @@ export { registerXTestHandlers } from './test-drivers'; // 逐块底层测试(de
 // X 时间线智能筛选（Phase 1）
 export { registerXTimelineHandlers } from './x-timeline-handlers';
 export { startScheduler as startXSearchScheduler, stopScheduler as stopXSearchScheduler, setActiveXWcId, getActiveWcId } from './x-search-scheduler';
+export { startCampaignServer, stopCampaignServer, campaignServerRunning } from './x-campaign-server';
+export { getCampaignConfig, campaignConfigStatus } from './x-campaign-config';
+export { pushPending } from './x-campaign-push';
