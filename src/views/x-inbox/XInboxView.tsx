@@ -1121,7 +1121,6 @@ interface WsRoleRow {
 
 function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
   const [roles, setRoles] = useState<WsRoleRow[]>([]);
-  const [articles, setArticles] = useState<Array<{ tweetId: string; text: string; createdAt?: string }>>([]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [testOut, setTestOut] = useState('');
@@ -1160,23 +1159,9 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
     } finally { setBusy(false); }
   };
 
-  /** 探测本账号的 Article —— 只列候选,选哪篇由你定 */
-  const probeArticles = async () => {
-    setBusy(true);
-    setMsg('探测 Article 中(约 20 秒)...');
-    try {
-      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
-      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-      const r = await api()?.listArticles(wcId);
-      if (!r?.success) { setMsg(`探测失败:${r?.error}`); return; }
-      setArticles(r.articles ?? []);
-      setMsg(`探测到 ${r.articles?.length ?? 0} 篇 Article`);
-    } finally { setBusy(false); }
-  };
-
   /** 试抓(只抓不推送)—— 先确认数据对不对,再谈传得对不对 */
   const testFetch = async () => {
-    if (!articleId.trim()) { setTestOut('请先填/选文章 id'); return; }
+    if (!articleId.trim()) { setTestOut('请先粘贴帖子链接'); return; }
     setBusy(true);
     setTestOut('抓取中...');
     try {
@@ -1234,26 +1219,20 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
 
           {role === 'campaign' && (
             <>
+              {/* 用户 2026-09-03:自动探测置顶帖不靠谱,改成贴链接 ——
+                  链接是手里现成的确定性输入,不用程序猜哪一篇。
+                  ⚠️ handle 以链接为准:活动文章可能发自另一个账号
+                  (OTun_MyVPN ≠ netlab2gfw),用登录账号拼 URL 会拼错。 */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--text-muted)' }}>文章 id</span>
+                <span style={{ color: 'var(--text-muted)' }}>帖子链接</span>
                 <input value={articleId} onChange={(e) => setArticleId(e.target.value)}
-                  placeholder="留空=自动识别最新(活动建议钉死)" style={{ ...inp, width: 240 }} />
-                <Btn sm onClick={probeArticles} disabled={busy}>探测我的 Article</Btn>
+                  placeholder="https://x.com/OTun_MyVPN/status/2092213139139854555?s=20"
+                  style={{ ...inp, width: 420, fontFamily: 'ui-monospace, monospace' }} />
               </div>
-              {articles.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {articles.map((a) => (
-                    <div key={a.tweetId} onClick={() => setArticleId(a.tweetId)}
-                      style={{
-                        cursor: 'pointer', fontSize: 11, padding: '4px 8px', borderRadius: 5,
-                        background: articleId === a.tweetId ? 'var(--accent)' : 'var(--border)',
-                        color: articleId === a.tweetId ? '#fff' : 'var(--text)',
-                      }}>
-                      {a.tweetId} · {a.createdAt?.slice(0, 10)} · {a.text}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                在 X 上打开那条帖子 →「分享」→「复制链接」→ 粘到这里。
+                也可只填纯数字 id;账号名取自链接,可以是别的账号的帖子。
+              </div>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
                   <input type="checkbox" checked={servesRefresh}

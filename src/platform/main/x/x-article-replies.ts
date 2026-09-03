@@ -136,6 +136,49 @@ export async function fetchArticleReplies(
 }
 
 /**
+ * 解析推文链接 → { handle, tweetId }。
+ *
+ * 用户 2026-09-03:「置顶帖的自动监测有问题,不如让用户自动填写
+ *   https://x.com/OTun_MyVPN/status/2092213139139854555?s=20 这样的帖子链接?」
+ * → 对。自动探测是我在猜你要哪一篇;链接是你手里现成的东西,解析它是确定性的。
+ *
+ * ⚠️ 顺带解决一个我漏掉的问题:链接里的 handle 可能**不是当前登录账号**
+ *   (示例里是 OTun_MyVPN,而 is_self 是 netlab2gfw)。此前代码用 is_self
+ *   拼详情页 URL,抓别的账号的文章就会拼错。改为**以链接里的 handle 为准**。
+ *
+ * 兼容形态:x.com / twitter.com、带 ?s=20 等查询参数、末尾斜杠、/i/status/xxx。
+ */
+export function parseTweetUrl(input: string): { handle?: string; tweetId: string } | { error: string } {
+  const raw = (input || '').trim();
+  if (!raw) return { error: '链接为空' };
+
+  // 纯数字 id 也接受(用户可能只贴 id)
+  if (/^\d{5,25}$/.test(raw)) return { tweetId: raw };
+
+  let u: URL;
+  try {
+    u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+  } catch {
+    return { error: `无法解析为链接:${raw.slice(0, 60)}` };
+  }
+  if (!/(^|\.)(x\.com|twitter\.com)$/i.test(u.hostname)) {
+    return { error: `不是 X 链接(host=${u.hostname})` };
+  }
+
+  const segs = u.pathname.split('/').filter(Boolean);
+  const si = segs.findIndex((x) => x === 'status' || x === 'statuses');
+  if (si < 0 || !segs[si + 1]) return { error: '链接里找不到 /status/<id>' };
+
+  const tweetId = segs[si + 1].replace(/\D+$/, '');
+  if (!/^\d{5,25}$/.test(tweetId)) return { error: `id 形态不对:${segs[si + 1]}` };
+
+  // /i/status/xxx 这种没有 handle
+  const first = segs[0];
+  const handle = first && first !== 'i' && si > 0 ? normalizeHandle(first) : undefined;
+  return { handle, tweetId };
+}
+
+/**
  * 探测本账号发过的 Article,供 UI 下拉选择。
  *
  * 用户 2026-09-03:「建议你在 UI 上做一个配置项,我自己设定,而不是受制于你」

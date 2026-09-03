@@ -22,7 +22,7 @@ import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
 import { getWsRole, setWsRole, listWsRoles } from '../db/x-ws-role-repo';
-import { fetchArticleReplies, listOwnArticles } from './x-article-replies';
+import { fetchArticleReplies, listOwnArticles, parseTweetUrl } from './x-article-replies';
 import { getSelfHandle as getSelfHandleDb } from '../db/x-author-repo';
 import type { XWsRole } from '@shared/types/x-ws-role-types';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
@@ -494,10 +494,18 @@ export function registerXTimelineHandlers(): void {
             + `请先在设置里把该 ws 配成 campaign。` };
         }
       }
-      const self = await getSelfHandleDb();
-      if (!self) return { success: false, error: '尚未识别本人账号' };
+      // 接受完整链接或纯 id。⚠️ **以链接里的 handle 为准**,不用 is_self ——
+      // 活动文章可能发自另一个账号(实例:OTun_MyVPN ≠ netlab2gfw),
+      // 用 is_self 拼详情页 URL 会拼错。
+      const parsed = parseTweetUrl(p.articleId);
+      if ('error' in parsed) return { success: false, error: parsed.error };
+      const handle = parsed.handle ?? await getSelfHandleDb();
+      if (!handle) {
+        return { success: false, error:
+          '链接里没有账号名(如 /i/status/xxx),且尚未识别本人账号 —— 请贴完整链接' };
+      }
       const r = await fetchArticleReplies(
-        p.articleId, self,
+        parsed.tweetId, handle,
         typeof p.wcId === 'number' ? p.wcId : undefined,
         { budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined },
       );
