@@ -176,7 +176,7 @@ legacy.in_reply_to_screen_name          被回复者 handle
 
 | 关系 | 我对别人 | 别人对我 | **第三方对第三方** |
 |---|---|---|---|
-| **点赞** | ✅ 每条推的 `legacy.favorited` | ✅ 通知页具名 | ❌ **不可能**(2024-06 移除) |
+| **点赞** | ✅ 每条推的 `legacy.favorited` | ✅ **通知页具名(已实测)** | ❌ **不可能**(2024-06 移除) |
 | **转发** | ✅ `legacy.retweeted` | ✅ 通知页具名 | 📖 `Retweeters`(2026 未实测) |
 | **收藏** | ✅ `legacy.bookmarked` + 书签页 | ❌ X 不通知 | ❌ 不可能 |
 | **回复** | `/with_replies` + `in_reply_to_status_id_str` | ✅ 通知页 | ✅ `TweetDetail` |
@@ -193,6 +193,30 @@ legacy.in_reply_to_screen_name          被回复者 handle
    与我们的技术水平无关。
 
 > 互动权重提示:点赞很轻,回复/引用很重,可据此加权,而非等量齐观。
+
+### 3.1 ✅ 实测:通知页载荷的具名结构(2026-09-03)
+
+用户指出「点赞/转发名单需要在 notification 中拿到」——**对,且已验证**。
+`NotificationsTimeline`(GraphQL,非社区文档说的 v1.1 `all.json`)载荷里:
+
+```
+TimelineNotification
+  ├── notification_icon   ← **行为类型**:heart_icon(赞) / retweet / bell / ...
+  ├── rich_message.text   ← 「呀吰吖 and 2 others liked your reply」
+  ├── timestamp_ms
+  └── template.（TimelineNotificationAggregateUserActions）
+      ├── from_users[]    ← **具名操作者**:user_results.result.rest_id + core.screen_name
+      └── target_objects[]← **被操作的推**:tweet_results.result.rest_id
+```
+
+实测样本(一条「3 人点赞」的通知):`from_users` **确实是 3 个**,
+分别给出 rest_id 与 handle;`target_objects` 给出被赞的推文 id。
+
+⚠️ **注意与社区调研的差异**:§4 引的 twikit 用的是 v1.1 REST
+(`globalObjects.notifications`),而 x.com 网页端实际调的是 **GraphQL**,
+字段路径完全不同(实测 `globalObjects` 为空)。
+→ 按 twikit 的 recipe 写解析会全空,必须按上面这个 GraphQL 结构写。
+⚠️ twikit 那个「只取 fromUsers[0]」的坑同样要避开 —— 多人聚合时会丢掉其余的人。
 
 ---
 
