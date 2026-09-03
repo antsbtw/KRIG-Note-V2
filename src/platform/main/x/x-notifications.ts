@@ -76,7 +76,10 @@ export interface Interaction {
  *
  * ⚠️ 实测:通知页里 16 条有 13 条是 `recommendation_icon` —— 那是
  * **X 推给你的内容**(「Recent post from X」),不是用户对你的行为。
- * 把它们当成互动会污染名单:活动核验会把 X 的推荐算成用户参与。
+ *
+ * ⚠️ 但**不要拿它在采集层过滤**(用户 2026-09-03 指正):
+ *   采集层丢掉的数据永远查不回来。本函数供**查询/展示层**判断用,
+ *   采集一律全量入库。
  */
 export function isRealInteraction(icon: string | undefined, message?: string): boolean {
   const i = (icon ?? '').toLowerCase();
@@ -150,12 +153,14 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
     //   离线拿真实载荷验证时当场炸了,靠字段名想当然就会踩。
     //   两种形态都兼容,解析失败一律留 undefined,不写坏值进库。
     const ts = parseNotifTime(o.timestamp_ms);
+    // ⭐ 用户 2026-09-03:「不要过滤,入库后前端就可以请求了。
+    //   估计你把逻辑模式搞复杂了。」——对。
+    //   原先在**采集层**就把推荐流丢掉,结果是:丢掉的永远查不回来,
+    //   而且每加一道过滤就多一个丢数据、要排查的地方。
+    //   现在改为:**全部入库**,是不是互动交给查询层判断
+    //   (verifyListForArticle 只挑 like/retweet/reply/quote)。
+    //   采集层只负责如实记录,不替下游做取舍。
     const kind = iconToKind(icon, msg);
-    // 推荐流不是互动 —— 跳过,但**继续递归**(嵌套里可能还有真通知)
-    if (!isRealInteraction(icon, msg)) {
-      for (const v of Object.values(o)) extractInteractions(v, out);
-      return;
-    }
 
     const tpl = o.template as Record<string, unknown> | undefined;
     const fromUsers = Array.isArray(tpl?.from_users) ? tpl!.from_users as unknown[] : [];
