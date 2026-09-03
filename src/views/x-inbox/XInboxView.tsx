@@ -481,7 +481,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const PAGE_SIZE = 20;
 
-  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture'>('inbox');
+  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign'>('inbox');
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -732,6 +732,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
 
+  // ── 活动配置视图(per-ws 角色 + 文章 id)──────────────────────
+  if (view === 'campaign') {
+    return <CampaignConfigView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
   // ── 屏蔽名单视图 ──────────────────────────────────────────────────
   if (view === 'blocked') {
     return <BlockedManagerView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
@@ -771,6 +776,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
           <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
+          <Btn onClick={() => setView('campaign')}>⚙ 活动配置</Btn>
           <Btn onClick={() => setView('capture')}>🔬 采集验证</Btn>
           {isInRightSlot && (
             <button onClick={handleClose} style={closeBtn}>✕</button>
@@ -1101,6 +1107,197 @@ function Field({ label, inline, children }: FieldProps) {
     <div style={{ display: inline ? 'flex' : 'block', alignItems: inline ? 'center' : undefined, gap: inline ? 6 : undefined }}>
       <div style={{ fontSize: 11, color: 'var(--text-disabled)', fontWeight: 600, marginBottom: inline ? 0 : 4, whiteSpace: 'nowrap' }}>{label}</div>
       {children}
+    </div>
+  );
+}
+
+// ── 活动配置视图 ────────────────────────────────────────────────
+// 用户 2026-09-03:「建议你在 UI 上做一个配置项,我自己设定,而不是受制于你」
+// 所以:角色、文章 id、触发口、间隔 全部在这里由用户自己定,代码不写死默认值。
+interface WsRoleRow {
+  wsId: string; role: string; articleId?: string;
+  servesRefresh?: boolean; intervalMinutes?: number;
+}
+
+function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
+  const [roles, setRoles] = useState<WsRoleRow[]>([]);
+  const [articles, setArticles] = useState<Array<{ tweetId: string; text: string; createdAt?: string }>>([]);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [testOut, setTestOut] = useState('');
+
+  // 本 ws 的当前配置(未配置时按 idle —— 不参与定时任务的安全默认)
+  const mine = roles.find((r) => r.wsId === workspaceId);
+  const [role, setRole] = useState('idle');
+  const [articleId, setArticleId] = useState('');
+  const [servesRefresh, setServesRefresh] = useState(false);
+  const [interval, setIntervalMin] = useState('3');
+
+  const load = useCallback(async () => {
+    const r = await api()?.getWsRoles();
+    if (!r?.success) { setMsg(`读配置失败:${r?.error}`); return; }
+    setRoles(r.roles ?? []);
+    const m = (r.roles ?? []).find((x) => x.wsId === workspaceId);
+    if (m) {
+      setRole(m.role);
+      setArticleId(m.articleId ?? '');
+      setServesRefresh(m.servesRefresh ?? false);
+      setIntervalMin(String(m.intervalMinutes ?? 3));
+    }
+  }, [workspaceId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api()?.setWsRole({
+        wsId: workspaceId, role, articleId: articleId.trim() || undefined,
+        servesRefresh, intervalMinutes: Number(interval) || undefined,
+      });
+      setMsg(r?.success ? '已保存' : `保存失败:${r?.error}`);
+      if (r?.success) await load();
+    } finally { setBusy(false); }
+  };
+
+  /** 探测本账号的 Article —— 只列候选,选哪篇由你定 */
+  const probeArticles = async () => {
+    setBusy(true);
+    setMsg('探测 Article 中(约 20 秒)...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.listArticles(wcId);
+      if (!r?.success) { setMsg(`探测失败:${r?.error}`); return; }
+      setArticles(r.articles ?? []);
+      setMsg(`探测到 ${r.articles?.length ?? 0} 篇 Article`);
+    } finally { setBusy(false); }
+  };
+
+  /** 试抓(只抓不推送)—— 先确认数据对不对,再谈传得对不对 */
+  const testFetch = async () => {
+    if (!articleId.trim()) { setTestOut('请先填/选文章 id'); return; }
+    setBusy(true);
+    setTestOut('抓取中...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.fetchArticleReplies({
+        wsId: workspaceId, articleId: articleId.trim(), wcId, budgetMs: 60_000,
+      });
+      if (!r?.success || !r.result) { setTestOut(`失败:${r?.error}`); return; }
+      const x = r.result;
+      const withMedia = x.items.filter((i) => i.has_media).length;
+      setTestOut(
+        `文章 ${x.articleId}\n`
+        + `翻到 ${x.fetched} 条 → 属于本文章 ${x.items.length} 条`
+        + `(其中带图 ${withMedia} 条 = 活动有效)\n`
+        + `耗时 ${Math.round(x.elapsedMs / 1000)}s${x.partial ? ' · 未抓完(budget)' : ''}\n`
+        + (x.problems.length ? `⚠ ${x.problems.join(' | ')}\n` : '')
+        + `\n${x.items.slice(0, 15).map((i) =>
+            `${i.has_media ? '🖼' : '  '} @${i.username}`
+            + `${i.x_uid ? ` (uid ${i.x_uid})` : ' (无 uid)'} ${i.kind}`
+            + `  ${(i.text_excerpt ?? '').slice(0, 40)}`).join('\n')}`,
+      );
+    } finally { setBusy(false); }
+  };
+
+  const inp: React.CSSProperties = {
+    fontSize: 11, padding: '3px 7px', borderRadius: 5,
+    border: '1px solid var(--text-faint)', background: 'var(--bg)', color: 'var(--text)',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-bright)' }}>⚙ 活动配置</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>一个 ws 只干一件事</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {msg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{msg}</span>}
+          <Btn sm onClick={onBack}>← 返回收件箱</Btn>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 本 ws 的角色 */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>本工作区({workspaceId})</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--text-muted)' }}>角色</span>
+            <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
+              <option value="idle">idle —— 不参与定时任务</option>
+              <option value="search">search —— 定时搜索采集</option>
+              <option value="campaign">campaign —— 活动核验</option>
+            </select>
+            {mine && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>当前已存:{mine.role}</span>}
+          </div>
+
+          {role === 'campaign' && (
+            <>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--text-muted)' }}>文章 id</span>
+                <input value={articleId} onChange={(e) => setArticleId(e.target.value)}
+                  placeholder="留空=自动识别最新(活动建议钉死)" style={{ ...inp, width: 240 }} />
+                <Btn sm onClick={probeArticles} disabled={busy}>探测我的 Article</Btn>
+              </div>
+              {articles.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {articles.map((a) => (
+                    <div key={a.tweetId} onClick={() => setArticleId(a.tweetId)}
+                      style={{
+                        cursor: 'pointer', fontSize: 11, padding: '4px 8px', borderRadius: 5,
+                        background: articleId === a.tweetId ? 'var(--accent)' : 'var(--border)',
+                        color: articleId === a.tweetId ? '#fff' : 'var(--text)',
+                      }}>
+                      {a.tweetId} · {a.createdAt?.slice(0, 10)} · {a.text}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={servesRefresh}
+                    onChange={(e) => setServesRefresh(e.target.checked)} />
+                  <span>承接外部触发口(/refresh)</span>
+                </label>
+                <span style={{ color: 'var(--text-muted)' }}>抓取间隔</span>
+                <input value={interval} onChange={(e) => setIntervalMin(e.target.value)}
+                  style={{ ...inp, width: 50 }} />
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>分钟</span>
+              </div>
+            </>
+          )}
+
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn primary onClick={save} disabled={busy}>保存</Btn>
+            {role === 'campaign' && (
+              <Btn onClick={testFetch} disabled={busy}>试抓(只抓不推送)</Btn>
+            )}
+          </div>
+        </div>
+
+        {/* 全部 ws 角色一览 —— 看清谁在干什么 */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px' }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-bright)', marginBottom: 6 }}>全部工作区</div>
+          {roles.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>暂无配置</div>}
+          {roles.map((r) => (
+            <div key={r.wsId} style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 0' }}>
+              <strong style={{ color: 'var(--text)' }}>{r.wsId}</strong> → {r.role}
+              {r.articleId ? ` · 文章 ${r.articleId}` : ''}
+              {r.servesRefresh ? ' · 承接 /refresh' : ''}
+              {r.intervalMinutes ? ` · ${r.intervalMinutes}min` : ''}
+            </div>
+          ))}
+        </div>
+
+        {testOut && (
+          <pre style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: '3px solid #a78bfa', fontSize: 11, color: 'var(--text)',
+            whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'ui-monospace, monospace',
+          }}>{testOut}</pre>
+        )}
+      </div>
     </div>
   );
 }

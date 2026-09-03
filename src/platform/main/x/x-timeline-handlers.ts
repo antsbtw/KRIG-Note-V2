@@ -21,6 +21,10 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
+import { getWsRole, setWsRole, listWsRoles } from '../db/x-ws-role-repo';
+import { fetchArticleReplies, listOwnArticles } from './x-article-replies';
+import { getSelfHandle as getSelfHandleDb } from '../db/x-author-repo';
+import type { XWsRole } from '@shared/types/x-ws-role-types';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
 import { surveyXPayloads } from './x-payload-inspector';
 import { collectReplyRelations } from './x-reply-collector';
@@ -414,6 +418,91 @@ export function registerXTimelineHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.X_CAPTURE_STOP, async () => {
     try {
       return { success: true, snapshot: stopCaptureMonitor() };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // ── per-ws 角色配置（活动契约）—— 用户在 UI 里自己设定 ─────────────
+  ipcMain.handle(IPC_CHANNELS.X_GET_WS_ROLES, async () => {
+    try {
+      return { success: true, roles: await listWsRoles() };
+    } catch (err) {
+      return { success: false, error: String(err), roles: [] };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_SET_WS_ROLE, async (_e, payload: unknown) => {
+    const p = payload as {
+      wsId?: unknown; role?: unknown; articleId?: unknown;
+      servesRefresh?: unknown; intervalMinutes?: unknown;
+    } | null;
+    if (typeof p?.wsId !== 'string' || !p.wsId) {
+      return { success: false, error: 'wsId required' };
+    }
+    const VALID: XWsRole[] = ['search', 'campaign', 'idle'];
+    if (typeof p.role !== 'string' || !VALID.includes(p.role as XWsRole)) {
+      return { success: false, error: `role 必须是 ${VALID.join(' / ')}` };
+    }
+    try {
+      await setWsRole({
+        wsId: p.wsId,
+        role: p.role as XWsRole,
+        articleId: typeof p.articleId === 'string' && p.articleId ? p.articleId : undefined,
+        servesRefresh: p.servesRefresh === true,
+        intervalMinutes: typeof p.intervalMinutes === 'number' ? p.intervalMinutes : undefined,
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_LIST_ARTICLES — 探测本账号的 Article,供配置项下拉选(不写死默认值)
+  ipcMain.handle(IPC_CHANNELS.X_LIST_ARTICLES, async (_e, payload: unknown) => {
+    const p = payload as { wcId?: unknown } | null;
+    const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const self = await getSelfHandleDb();
+      if (!self) {
+        return { success: false, error: '尚未识别本人账号 —— 请先点「识别我的账号」' };
+      }
+      const r = await listOwnArticles(self, wcId);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, articles: r };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_FETCH_ARTICLE_REPLIES — 试抓一篇文章的回复(测试用,只抓不推送)
+  ipcMain.handle(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, async (_e, payload: unknown) => {
+    const p = payload as {
+      wsId?: unknown; articleId?: unknown; wcId?: unknown; budgetMs?: unknown;
+    } | null;
+    if (typeof p?.articleId !== 'string' || !p.articleId) {
+      return { success: false, error: 'articleId required' };
+    }
+    try {
+      // ⚠️ 角色守卫:活动采集只能用 campaign ws。用错 ws 会与定时搜索互相
+      // 导航打断,现象是「活动偶尔抓不到」,故 fail loud 而非静默继续。
+      if (typeof p.wsId === 'string' && p.wsId) {
+        const cfg = await getWsRole(p.wsId);
+        if (cfg.role !== 'campaign') {
+          return { success: false, error:
+            `ws=${p.wsId} 的角色是 '${cfg.role}',活动采集需要 'campaign'。`
+            + `请先在设置里把该 ws 配成 campaign。` };
+        }
+      }
+      const self = await getSelfHandleDb();
+      if (!self) return { success: false, error: '尚未识别本人账号' };
+      const r = await fetchArticleReplies(
+        p.articleId, self,
+        typeof p.wcId === 'number' ? p.wcId : undefined,
+        { budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined },
+      );
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, result: r };
     } catch (err) {
       return { success: false, error: String(err) };
     }

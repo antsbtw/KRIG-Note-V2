@@ -873,6 +873,26 @@ declare global {
             samples: Array<{ idx: number; tweetId: string | null; handle: string; isSelf: boolean; createdAt: string | null; replyingTo: string | null; relSignals: { articleAttrs?: Record<string, string>; ancestorAttrs?: Array<Record<string, string>>; statusLinks?: string[]; err?: string }; ariaReply: string | null; social: string | null; text: string }>;
           };
         }>;
+        getWsRoles(): Promise<{
+          success: boolean; error?: string;
+          roles: Array<{ wsId: string; role: string; articleId?: string;
+            servesRefresh?: boolean; intervalMinutes?: number }>;
+        }>;
+        setWsRole(payload: { wsId: string; role: string; articleId?: string;
+          servesRefresh?: boolean; intervalMinutes?: number }): Promise<{ success: boolean; error?: string }>;
+        listArticles(wcId?: number): Promise<{
+          success: boolean; error?: string;
+          articles?: Array<{ tweetId: string; text: string; createdAt?: string }>;
+        }>;
+        fetchArticleReplies(payload: { wsId?: string; articleId: string; wcId?: number; budgetMs?: number }): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            articleId: string; fetched: number; hintFound: boolean; partial: boolean;
+            elapsedMs: number; problems: string[];
+            items: Array<{ tweet_id: string; kind: string; x_uid?: string; username: string;
+              has_media: boolean; created_at: string; in_reply_to_tweet_id?: string; text_excerpt?: string }>;
+          };
+        }>;
         listBlocked(): Promise<{
           success: boolean;
           error?: string;

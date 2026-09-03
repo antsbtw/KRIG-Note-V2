@@ -332,6 +332,11 @@ export const IPC_CHANNELS = {
   X_BLOCK_AUTHOR:    'x:block-author',    // renderer → main invoke：屏蔽某作者（handle）
   X_UNBLOCK_AUTHOR:  'x:unblock-author',  // renderer → main invoke：解除屏蔽（handle）
   X_LIST_BLOCKED:    'x:list-blocked',    // renderer → main invoke：取屏蔽名单
+  // per-ws 角色配置（活动契约）—— 用户自己在 UI 里设定，不由代码写死
+  X_GET_WS_ROLES:    'x:get-ws-roles',    // renderer → main invoke：列出所有 ws 角色
+  X_SET_WS_ROLE:     'x:set-ws-role',     // renderer → main invoke：设定某 ws 的角色/文章/触发口
+  X_LIST_ARTICLES:   'x:list-articles',   // renderer → main invoke：探测本账号的 Article 供下拉选
+  X_FETCH_ARTICLE_REPLIES: 'x:fetch-article-replies', // renderer → main invoke：试抓一篇文章的回复
   X_DETECT_SELF:     'x:detect-self',     // renderer → main invoke：探测当前登录的 X 账号并标记 is_self
   X_GET_SELF:        'x:get-self',        // renderer → main invoke：取已标记的「我自己」handle
   X_WATCHLIST_SPIKE: 'x:watchlist-spike', // renderer → main invoke：B' 期一次性诊断（搜索语法/回复判定实机对照）

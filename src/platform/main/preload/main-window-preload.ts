@@ -1107,6 +1107,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_UNBLOCK_AUTHOR, { handle }),
     listBlocked: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_LIST_BLOCKED),
+    // per-ws 角色配置(活动契约)—— 用户在 UI 里自己设定
+    getWsRoles: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_WS_ROLES),
+    setWsRole: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.X_SET_WS_ROLE, payload),
+    listArticles: (wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_ARTICLES, { wcId }),
+    fetchArticleReplies: (payload: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, payload),
     /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
     detectSelf: (wcId?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId }),

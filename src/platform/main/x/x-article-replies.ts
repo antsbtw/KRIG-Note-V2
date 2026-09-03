@@ -134,3 +134,32 @@ export async function fetchArticleReplies(
     problems: r.problems,
   };
 }
+
+/**
+ * 探测本账号发过的 Article,供 UI 下拉选择。
+ *
+ * 用户 2026-09-03:「建议你在 UI 上做一个配置项,我自己设定,而不是受制于你」
+ * → 所以这里只**列出候选**,选哪一篇由用户在界面上定,代码不猜、不写死默认值。
+ *
+ * 依据:载荷里带 `article` 字段的推就是 Article(实测抓到 2 篇)。
+ */
+export async function listOwnArticles(
+  authorHandle: string,
+  targetWcId?: number,
+): Promise<Array<{ tweetId: string; text: string; createdAt?: string }> | { error: string }> {
+  const h = normalizeHandle(authorHandle);
+  if (!h) return { error: 'authorHandle required' };
+
+  // Articles 有独立标签页,直接取,比翻整个时间线快
+  const r = await harvestTimeline(`https://x.com/${h}/articles`, targetWcId, 30);
+  if ('error' in r) return { error: r.error };
+
+  return r.tweets
+    .filter((t) => t.authorHandle && normalizeHandle(t.authorHandle) === h)
+    .map((t) => ({
+      tweetId: t.tweetId,
+      text: (t.text || '').slice(0, 80),
+      createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : undefined,
+    }))
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+}
