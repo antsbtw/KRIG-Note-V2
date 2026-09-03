@@ -1173,11 +1173,17 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
       if (!r?.success || !r.result) { setTestOut(`失败:${r?.error}`); return; }
       const x = r.result;
       const withMedia = x.items.filter((i) => i.has_media).length;
+      const sv = r.saved;
+      const st = r.stats;
       setTestOut(
         `文章 ${x.articleId}\n`
         + `翻到 ${x.fetched} 条 → 属于本文章 ${x.items.length} 条`
         + `(其中带图 ${withMedia} 条 = 活动有效)\n`
         + `耗时 ${Math.round(x.elapsedMs / 1000)}s${x.partial ? ' · 未抓完(budget)' : ''}\n`
+        + (sv ? `\n【③ 入库】新增 ${sv.inserted} · 变更 ${sv.changed} · 未变 ${sv.unchanged}`
+              + `${r.markedDeleted ? ` · 标记删除 ${r.markedDeleted}` : ''}\n` : '')
+        + (st ? `【库存】本文章共 ${st.total} 条 · 带图有效 ${st.withMedia}`
+              + ` · 待推送 ${st.unpushed} · 已删 ${st.deleted}\n` : '')
         + (x.problems.length ? `⚠ ${x.problems.join(' | ')}\n` : '')
         + `\n${x.items.slice(0, 15).map((i) =>
             `${i.has_media ? '🖼' : '  '} @${i.username}`

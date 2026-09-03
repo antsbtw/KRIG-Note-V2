@@ -23,6 +23,7 @@ import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAu
 import { probeSelfHandle } from './x-self-account';
 import { getWsRole, setWsRole, listWsRoles } from '../db/x-ws-role-repo';
 import { fetchArticleReplies, listOwnArticles, parseTweetUrl } from './x-article-replies';
+import { upsertCampaignReplies, markMissingAsDeleted, campaignStats } from '../db/x-campaign-repo';
 import { getSelfHandle as getSelfHandleDb } from '../db/x-author-repo';
 import type { XWsRole } from '@shared/types/x-ws-role-types';
 import { probeAuthorTimeline } from './x-author-timeline-spike';
@@ -510,7 +511,20 @@ export function registerXTimelineHandlers(): void {
         { budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined },
       );
       if ('error' in r) return { success: false, error: r.error };
-      return { success: true, result: r };
+
+      // ③ 入库(用户定的流程第三步)。幂等键 (article_id, tweet_id)。
+      const saved = await upsertCampaignReplies(parsed.tweetId, r.items);
+
+      // ⚠️ 只有**抓完整**时才判「消失=已删除」—— partial 时没抓完,
+      // 没出现不等于被删,那样会误标一片(契约 §2.1 的 deleted 影响签发)。
+      let markedDeleted = 0;
+      if (!r.partial && r.problems.length === 0) {
+        markedDeleted = await markMissingAsDeleted(
+          parsed.tweetId, r.items.map((i) => i.tweet_id));
+      }
+
+      const stats = await campaignStats(parsed.tweetId);
+      return { success: true, result: r, saved, markedDeleted, stats };
     } catch (err) {
       return { success: false, error: String(err) };
     }

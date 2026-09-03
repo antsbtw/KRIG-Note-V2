@@ -886,6 +886,9 @@ declare global {
         }>;
         fetchArticleReplies(payload: { wsId?: string; articleId: string; wcId?: number; budgetMs?: number }): Promise<{
           success: boolean; error?: string;
+          saved?: { inserted: number; changed: number; unchanged: number };
+          markedDeleted?: number;
+          stats?: { total: number; withMedia: number; unpushed: number; deleted: number };
           result?: {
             articleId: string; fetched: number; hintFound: boolean; partial: boolean;
             elapsedMs: number; problems: string[];

@@ -434,3 +434,53 @@ export async function x_migration_1_0_6(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.0.6'), now: Date.now() },
   );
 }
+
+/**
+ * 1.0.7 —— 活动留言表(2026-09-03)
+ *
+ * 用户定的流程:「① 点击这个推文 ② 往下滚动,获取推文的最新元数据
+ *   ③ **元数据入库**,按照数据契约提供服务即可」
+ * → 此前只抓+显示,没有 ③。本表就是 ③ 的落点。
+ *
+ * 为什么不塞进 x_tweet:x_tweet 是「推文实体」,而这里要记的是
+ * **「某篇活动文章下的某条留言 + 它的推送状态」** —— 后者是活动流程的状态,
+ * 不是推文自身的属性。混进去会让 x_tweet 长出与活动耦合的字段(总纲原则 1)。
+ *
+ * 幂等键 = 契约 §2.1 的 (article_id, tweet_id):
+ * 「同一 (article_id, tweet_id) 重复推送只更新、不新增」。
+ */
+const X_SCHEMA_1_0_7 = `
+DEFINE TABLE IF NOT EXISTS x_campaign_reply SCHEMAFULL;
+-- 幂等键的两半
+DEFINE FIELD IF NOT EXISTS article_id  ON x_campaign_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_id    ON x_campaign_reply TYPE string ASSERT $value != '';
+-- 契约 §2.1 的 item 字段(原样存,推送时零转换)
+DEFINE FIELD IF NOT EXISTS kind        ON x_campaign_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS x_uid       ON x_campaign_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS username    ON x_campaign_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS has_media   ON x_campaign_reply TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS created_at  ON x_campaign_reply TYPE datetime;
+DEFINE FIELD IF NOT EXISTS in_reply_to_tweet_id ON x_campaign_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS text_excerpt ON x_campaign_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS deleted     ON x_campaign_reply TYPE bool DEFAULT false;
+-- 采集与推送状态(活动流程的状态,不是推文属性)
+DEFINE FIELD IF NOT EXISTS first_seen_at ON x_campaign_reply TYPE datetime;
+DEFINE FIELD IF NOT EXISTS last_seen_at  ON x_campaign_reply TYPE datetime;
+-- 契约 §2.3:未确认成功的批次重启后要重推 → 必须记「推没推成功」
+DEFINE FIELD IF NOT EXISTS pushed_at   ON x_campaign_reply TYPE option<datetime>;
+-- 字段变化(has_media 由 false 变 true、deleted)后需要重推,故记内容指纹
+DEFINE FIELD IF NOT EXISTS payload_hash ON x_campaign_reply TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_campaign_key ON x_campaign_reply
+  FIELDS article_id, tweet_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_campaign_article ON x_campaign_reply FIELDS article_id;
+DEFINE INDEX IF NOT EXISTS idx_campaign_pushed ON x_campaign_reply FIELDS pushed_at;
+`;
+
+export async function x_migration_1_0_7(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_7);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.7', appliedAt = $now,
+      description = 'Campaign reply table (contract idempotency key + push state)'`,
+    { rid: new RecordId('schema_version', '1.0.7'), now: Date.now() },
+  );
+}
