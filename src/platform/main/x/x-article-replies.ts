@@ -14,7 +14,8 @@
  *   跨角色复用会被定时搜索导航打断,现象是「活动偶尔抓不到」,极难定位。
  */
 
-import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
+import { harvestTimeline, extractTweetsFrom, type HarvestedTweet } from './x-timeline-harvester';
+import { resolveXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 
 /** 契约 §2.1 的一条 item(字段名保持契约原样,便于直接序列化) */
@@ -102,36 +103,135 @@ export async function fetchArticleReplies(
   if (!articleId) return { error: 'articleId required' };
   if (!h) return { error: 'authorHandle required' };
 
-  const url = `https://x.com/${h}/status/${articleId}`;
-  const budgetMs = opts.budgetMs;
+  const resolved = resolveXWebContents(targetWcId);
+  if ('error' in resolved) return { error: resolved.error };
+  const wc = resolved.wc;
 
-  // hint 命中即可停:contract §3.1「翻到这个人的留言就不用把整个评论区抓完」
+  const url = `https://x.com/${h}/status/${articleId}`;
+  const budgetMs = opts.budgetMs ?? 45_000;
   const hintUid = opts.hint?.x_uid;
   const hintName = opts.hint?.username ? normalizeHandle(opts.hint.username) : undefined;
-  const r = await harvestTimeline(url, targetWcId, undefined, {
-    budgetMs,
-    stopWhen: (hintUid || hintName)
-      ? (t: HarvestedTweet) => {
-          if (hintUid && t.authorRestId === hintUid) return true;
-          if (hintName && t.authorHandle && normalizeHandle(t.authorHandle) === hintName) return true;
-          return false;
-        }
-      : undefined,
-  });
-  if ('error' in r) return { error: r.error };
 
-  const items = toContractItems(r.tweets, articleId, h);
+  // ⚠️ **不复用 harvestTimeline**(2026-09-03 实测踩到:
+  //    「翻到 42 条 → 属于本文章 0 条」,而且日期空洞跨 48 天 ——
+  //    那是时间线滚动器的行为:它为「把某人的历史翻完」设计,
+  //    在详情页上会一路滚进推荐流/相关推文,抓回一堆无关内容。
+  //    用户点明正确做法:「点击这个推文,往下翻页,最新的回复就够了」。)
+  //
+  // 详情页的接口是 **TweetDetail**(时间线是 UserTweets/HomeTimeline),
+  // 载荷勘查记录里从未出现过 TweetDetail —— 印证此前根本没落到详情页数据上。
+  const tweets = new Map<string, HarvestedTweet>();
+  const pending = new Map<string, string>();
+  let payloads = 0;
+  let detailPayloads = 0;
+  const problems: string[] = [];
+
+  const onMessage = (_e: unknown, method: string, params: any): void => {
+    if (method === 'Network.requestWillBeSent') {
+      const u: string = params?.request?.url ?? '';
+      if (u.includes('/i/api/graphql/')) pending.set(params.requestId, u);
+      return;
+    }
+    if (method === 'Network.loadingFinished') {
+      const u = pending.get(params.requestId);
+      if (!u) return;
+      pending.delete(params.requestId);
+      wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
+        .then((r: any) => {
+          if (!r?.body) return;
+          payloads++;
+          // 只吃详情页的响应 —— 侧边推荐、谁可以关注等接口一律不要
+          if (u.includes('TweetDetail')) detailPayloads++;
+          try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
+        })
+        .catch(() => { /* 响应体可能已丢弃 */ });
+    }
+  };
+
+  let attached = false;
+  try { wc.debugger.attach('1.3'); attached = true; }
+  catch { /* 已被 attach,共用即可 */ }
+  wc.debugger.on('message', onMessage);
+  await wc.debugger.sendCommand('Network.enable').catch(() => {});
+
+  let partial = false;
+  try {
+    wc.loadURL(url);
+
+    // ⚡ 用户 2026-09-03:「1 秒可以完成入库」—— 对。
+    // **第一个 TweetDetail 响应就已经带着回复**,不必先等固定 4.5s 再滚。
+    // 改为轮询等首个 detail 响应(每 200ms 探一次,最多 8s),到了立刻可用。
+    const firstDetailDeadline = Date.now() + 8_000;
+    while (detailPayloads === 0 && Date.now() < firstDetailDeadline) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    // 往下翻页取回复。**只翻回复区**,靠三个判据停,不做时间线那种长途滚动:
+    //  ① 本文章的条目不再增长(回复翻完了)
+    //  ② hint 命中(契约 §3.1:翻到那个人就不用抓完)
+    //  ③ budget 到点(契约要求宁可 partial 也不干等)
+    let noGrowth = 0;
+    let lastOwn = 0;
+    // 详情页回复量有限。首个响应通常就够(1 秒内),多翻几轮只为拿更多历史回复;
+    // 「最新的够了」是用户定的判据,所以轮次上限保守设小。
+    const MAX_ROUNDS = 12;
+    for (let i = 1; i <= MAX_ROUNDS; i++) {
+      if (Date.now() - started >= budgetMs) { partial = true; break; }
+
+      const own = toContractItems([...tweets.values()], articleId, h);
+      if (hintUid || hintName) {
+        const hit = own.some((it) =>
+          (hintUid && it.x_uid === hintUid) || (hintName && it.username === hintName));
+        if (hit) break;
+      }
+
+      if (own.length === lastOwn) {
+        noGrowth++;
+        if (noGrowth >= 4) break;             // 连续 4 轮没有新的本文章回复 → 翻完了
+      } else {
+        noGrowth = 0;
+        lastOwn = own.length;
+      }
+
+      await wc.executeJavaScript(`(function () {
+        var y = window.scrollY;
+        window.scrollBy(0, window.innerHeight * 0.8);
+        if (window.scrollY === y) {
+          var all = document.querySelectorAll('div');
+          for (var k = 0; k < all.length; k++) {
+            var el = all[k];
+            if (el.scrollHeight > el.clientHeight + 400) {
+              el.scrollTop = el.scrollTop + el.clientHeight * 0.8; break;
+            }
+          }
+        }
+      })()`).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1600 + Math.random() * 900));
+    }
+  } finally {
+    wc.debugger.off('message', onMessage);
+    if (attached) { try { wc.debugger.detach(); } catch { /* 已 detach */ } }
+  }
+
+  // fail loud:一个 TweetDetail 都没捕到,说明没落到详情页数据上 ——
+  // 此时「属于本文章 0 条」是**采集失败**,不是「真的没人回复」,必须区分开。
+  if (detailPayloads === 0) {
+    problems.push(`未捕获到 TweetDetail 响应(共 ${payloads} 个 GraphQL 响应)`
+      + ` —— 可能是页面没加载出来/登录态失效/该帖不可见,而**不是**没人回复`);
+  }
+
+  const items = toContractItems([...tweets.values()], articleId, h);
   const hintFound = !!(hintUid || hintName) && items.some((i) =>
     (hintUid && i.x_uid === hintUid) || (hintName && i.username === hintName));
 
   return {
     articleId,
     items,
-    fetched: r.tweets.length,
+    fetched: tweets.size,
     hintFound,
-    partial: r.stopReason.includes('budget') || r.stopReason.includes('hint'),
+    partial,
     elapsedMs: Date.now() - started,
-    problems: r.problems,
+    problems,
   };
 }
 
