@@ -124,14 +124,25 @@ export const DEFAULT_FILTER_CONFIG: TimelineFilterConfig = {
 
 /** 默认 AI 判断配置 */
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
-  model: 'gemma4:31b-it-qat',
+  // ⭐ 2026-09-03 换成 26b MoE:同一批 10 条真实推文实测
+  //    gemma4:31b-it-qat     252.5s
+  //    gemma4:26b-a4b-it-qat 117.8s   ← **2.1x 快**
+  //    质量:此前离线评测一致率 97.6%,与 31b 打平(见 x-ai-judge 顶部注释)。
+  //    换模型是为了让判断跟上采集 —— 积压 842 条时 31b 要跑 4 小时以上,
+  //    而采集仍在继续,队列只会越堆越高。
+  //    ⚠️ 两个模型返回的 JSON 外层 key 不同(results vs tweets),
+  //       parseVerdicts 取「第一个 key 的值」,故都能解析 —— 已核对。
+  model: 'gemma4:26b-a4b-it-qat',
   ollamaEndpoint: 'http://localhost:11434',
-  batchSize: 10,
+  // 批量 10 → 25:单批固定开销(模型加载/prompt 处理)被更多条摊薄。
+  // 不设更大是因为 batch 越大,单条超时失败时一起重来的代价越高。
+  batchSize: 25,
   maxWaitMinutes: 15,
   concurrency: 1,
-  // 实测 gemma4:31b 判 10 条约 3 分钟(2026-07-30 离线评测),再留冷启动加载模型的余量;
-  // 曾设 30s 导致每批必超时、判断静默全灭(pending 积压 2222 条的根因)
-  timeoutMs: 300_000,
+  // 26b 判 10 条约 2 分钟,25 条按线性外推约 5 分钟,留一倍余量。
+  // ⚠️ 曾设 30s 导致每批必超时、判断静默全灭(pending 积压 2222 条的根因)——
+  //    宁可设宽,超时失败比慢更致命。
+  timeoutMs: 600_000,
 };
 
 export type FeedbackVerdict = 'accept' | 'reject';
