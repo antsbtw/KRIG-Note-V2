@@ -21,7 +21,8 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
-import { getWsRole, setWsRole, listWsRoles } from '../db/x-ws-role-repo';
+import { getWsRole, setWsRole, listWsRoles,
+  setWsAccount, getWsAccount, requireWsAccount, listWsAccounts } from '../db/x-ws-role-repo';
 import { fetchArticleReplies, listOwnArticles, parseTweetUrl } from './x-article-replies';
 import { upsertCampaignReplies, markMissingAsDeleted, campaignStats } from '../db/x-campaign-repo';
 import { getSelfHandle as getSelfHandleDb } from '../db/x-author-repo';
@@ -294,7 +295,7 @@ export function registerXTimelineHandlers(): void {
   // ⚠️ 探测不到就返回失败,**绝不写一个猜的 handle** —— 写错会把别人的推当成
   // 自己的永久隐藏,现象是"推文莫名消失",极难查。
   ipcMain.handle(IPC_CHANNELS.X_DETECT_SELF, async (_e, payload: unknown) => {
-    const p = payload as { wcId?: unknown } | null;
+    const p = payload as { wcId?: unknown; wsId?: unknown } | null;
     const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
     try {
       const probe = await probeSelfHandle(wcId);
@@ -304,6 +305,12 @@ export function registerXTimelineHandlers(): void {
         return { success: false, error: `未能识别当前登录账号(${probe.tried.join(' | ')})` };
       }
       await setSelfAuthor(probe.handle);
+      // ⭐ 身份归属到 ws(用户 2026-09-03:「当前 ws 登录什么账号,就核实这个 ws」)。
+      // x_author.is_self 是全局单例,两个 ws 登不同账号时会互相覆盖 ——
+      // 故权威来源是 x_ws_account,按 ws 记。
+      if (typeof p?.wsId === 'string' && p.wsId) {
+        await setWsAccount(p.wsId, probe.handle, probe.restId);
+      }
       console.log(`[x-timeline-handlers] self account = @${probe.handle} (via ${probe.via})`);
       return { success: true, handle: probe.handle, via: probe.via, tried: probe.tried };
     } catch (err) {
@@ -427,7 +434,8 @@ export function registerXTimelineHandlers(): void {
   // ── per-ws 角色配置（活动契约）—— 用户在 UI 里自己设定 ─────────────
   ipcMain.handle(IPC_CHANNELS.X_GET_WS_ROLES, async () => {
     try {
-      return { success: true, roles: await listWsRoles() };
+      // 一并给出各 ws 登录的账号 —— UI 上能一眼看出「这个 ws 是谁」
+      return { success: true, roles: await listWsRoles(), accounts: await listWsAccounts() };
     } catch (err) {
       return { success: false, error: String(err), roles: [] };
     }
@@ -461,14 +469,15 @@ export function registerXTimelineHandlers(): void {
 
   // X_LIST_ARTICLES — 探测本账号的 Article,供配置项下拉选(不写死默认值)
   ipcMain.handle(IPC_CHANNELS.X_LIST_ARTICLES, async (_e, payload: unknown) => {
-    const p = payload as { wcId?: unknown } | null;
+    const p = payload as { wcId?: unknown; wsId?: unknown } | null;
     const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
     try {
-      const self = await getSelfHandleDb();
-      if (!self) {
-        return { success: false, error: '尚未识别本人账号 —— 请先点「识别我的账号」' };
+      // 按**本 ws** 的登录账号列 Article,不用全局 is_self
+      if (typeof p?.wsId !== 'string' || !p.wsId) {
+        return { success: false, error: 'wsId required' };
       }
-      const r = await listOwnArticles(self, wcId);
+      const acc = await requireWsAccount(p.wsId);
+      const r = await listOwnArticles(acc.handle, wcId);
       if ('error' in r) return { success: false, error: r.error };
       return { success: true, articles: r };
     } catch (err) {
@@ -495,15 +504,27 @@ export function registerXTimelineHandlers(): void {
             + `请先在设置里把该 ws 配成 campaign。` };
         }
       }
-      // 接受完整链接或纯 id。⚠️ **以链接里的 handle 为准**,不用 is_self ——
-      // 活动文章可能发自另一个账号(实例:OTun_MyVPN ≠ netlab2gfw),
-      // 用 is_self 拼详情页 URL 会拼错。
+      // 链接给出文章作者(拼详情页 URL 用);**本 ws 的登录账号**决定「我是谁」。
+      // ⚠️ 用户 2026-09-03 指正:「当前 ws 是登录什么账号,就核实这个 ws 的状态,
+      //    而不是跑到一个对应不上的 ws 来核实」。
+      //    故不再回落全局 is_self —— 两个 ws 登不同账号时全局值只会是其中一个,
+      //    拿它去核实另一个 ws 会静默抓错人。
       const parsed = parseTweetUrl(p.articleId);
       if ('error' in parsed) return { success: false, error: parsed.error };
-      const handle = parsed.handle ?? await getSelfHandleDb();
+
+      let handle = parsed.handle;
       if (!handle) {
-        return { success: false, error:
-          '链接里没有账号名(如 /i/status/xxx),且尚未识别本人账号 —— 请贴完整链接' };
+        // 链接没带账号名(/i/status/xxx)→ 用**本 ws** 的登录账号
+        if (typeof p.wsId !== 'string' || !p.wsId) {
+          return { success: false, error: '链接里没有账号名,且未提供 wsId —— 请贴完整链接' };
+        }
+        const acc = await getWsAccount(p.wsId);
+        if (!acc) {
+          return { success: false, error:
+            `链接里没有账号名,且 ws=${p.wsId} 尚未识别登录账号 —— `
+            + `请在该 ws 里点「识别我的账号」,或贴完整链接` };
+        }
+        handle = acc.handle;
       }
       const r = await fetchArticleReplies(
         parsed.tweetId, handle,

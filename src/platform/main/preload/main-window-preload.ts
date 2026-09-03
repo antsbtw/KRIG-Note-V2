@@ -1110,13 +1110,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // per-ws 角色配置(活动契约)—— 用户在 UI 里自己设定
     getWsRoles: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_WS_ROLES),
     setWsRole: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.X_SET_WS_ROLE, payload),
-    listArticles: (wcId?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_ARTICLES, { wcId }),
+    listArticles: (wcId?: number, wsId?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_ARTICLES, { wcId, wsId }),
     fetchArticleReplies: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, payload),
     /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
-    detectSelf: (wcId?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId }),
+    detectSelf: (wcId?: number, wsId?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId, wsId }),
     getSelf: () =>
       ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
     /** 采集回复关系并回填 replied(主线第一环) */

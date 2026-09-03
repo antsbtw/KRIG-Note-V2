@@ -484,3 +484,38 @@ export async function x_migration_1_0_7(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.0.7'), now: Date.now() },
   );
 }
+
+/**
+ * 1.0.8 —— per-ws 登录账号(2026-09-03)
+ *
+ * 用户指正:「当前 ws 是登录什么账号,就核实这个 ws 的状态,
+ *   而不是跑到一个对应不上的 ws 来核实」。
+ *
+ * 此前的错误建模:`x_author.is_self` 是**全局唯一**的
+ * (setSelfAuthor 会把其它行的 is_self 清掉)。但 X webview 的登录态是
+ * **per-ws** 的(partition = persist:webview-${wsId}),两个 ws 可以登不同账号。
+ * 后果:第二个 ws 识别账号时会**静默覆盖**第一个,之后所有「我是谁」的查询
+ * 都会给出错的那个 —— 而现象只是「抓不到/抓错人」,不报错。
+ *
+ * 修法:身份归属到 ws。x_author.is_self 保留(兼容旧数据、表示"曾是本人"),
+ * 但**权威来源改为本表**:一个 ws 一行,记它登录的是谁。
+ */
+const X_SCHEMA_1_0_8 = `
+DEFINE TABLE IF NOT EXISTS x_ws_account SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id      ON x_ws_account TYPE string ASSERT $value != '';
+-- 该 ws 当前登录的账号(归一化 handle:无 @、小写)
+DEFINE FIELD IF NOT EXISTS handle     ON x_ws_account TYPE string ASSERT $value != '';
+-- 数字 id(rest_id)—— 契约的 x_uid 用它匹配最稳,handle 会改名
+DEFINE FIELD IF NOT EXISTS rest_id    ON x_ws_account TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS detected_at ON x_ws_account TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ws_account_ws ON x_ws_account FIELDS ws_id UNIQUE;
+`;
+
+export async function x_migration_1_0_8(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_8);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.8', appliedAt = $now,
+      description = 'Per-ws logged-in account (identity belongs to ws, not global)'`,
+    { rid: new RecordId('schema_version', '1.0.8'), now: Date.now() },
+  );
+}

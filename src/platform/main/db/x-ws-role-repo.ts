@@ -10,6 +10,7 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
+import { normalizeHandle } from '@shared/types/x-timeline-types';
 import { DEFAULT_X_WS_ROLE, DEFAULT_CAMPAIGN_INTERVAL_MINUTES,
   type XWsRole, type XWsRoleConfig } from '@shared/types/x-ws-role-types';
 
@@ -123,4 +124,81 @@ export async function getRefreshServingWs(): Promise<XWsRoleConfig | null> {
 /** campaign ws 的抓取间隔(分钟),带默认值 */
 export function campaignInterval(cfg: XWsRoleConfig): number {
   return cfg.intervalMinutes ?? DEFAULT_CAMPAIGN_INTERVAL_MINUTES;
+}
+
+// ── per-ws 登录账号 ──────────────────────────────────────────────
+// 用户 2026-09-03:「当前 ws 是登录什么账号,就核实这个 ws 的状态,
+//   而不是跑到一个对应不上的 ws 来核实」。
+// 身份是 ws 的属性(X webview 的登录态本就 per-ws / per-partition),
+// 不是全局单例 —— 全局单例会让两个 ws 互相覆盖且不报错。
+
+export interface WsAccount { wsId: string; handle: string; restId?: string; detectedAt?: string }
+
+/** 记录某 ws 当前登录的账号(幂等) */
+export async function setWsAccount(
+  wsId: string, handle: string, restId?: string,
+): Promise<void> {
+  const h = normalizeHandle(handle);
+  if (!wsId) throw new Error('[x-ws-role-repo] setWsAccount: wsId required');
+  if (!h) throw new Error('[x-ws-role-repo] setWsAccount: handle required');
+
+  const db = getXDB();
+  const existing = await db.query<[Array<{ ws_id: string }>]>(
+    `SELECT ws_id FROM x_ws_account WHERE ws_id = $wsId LIMIT 1`, { wsId });
+  const params = { wsId, h, rid: restId || undefined };
+  if ((existing[0] ?? []).length > 0) {
+    await db.query(
+      `UPDATE x_ws_account SET handle = $h, rest_id = $rid, detected_at = time::now()
+       WHERE ws_id = $wsId`, params);
+  } else {
+    await db.query(
+      `CREATE x_ws_account SET ws_id = $wsId, handle = $h, rest_id = $rid,
+       detected_at = time::now()`, params);
+  }
+  console.log(`[x-ws-account] ws=${wsId} 登录账号 = @${h}${restId ? ` (uid ${restId})` : ''}`);
+}
+
+/** 读某 ws 登录的账号;未识别返回 null */
+export async function getWsAccount(wsId: string): Promise<WsAccount | null> {
+  const db = getXDB();
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT * FROM x_ws_account WHERE ws_id = $wsId LIMIT 1`, { wsId });
+  const r = res[0]?.[0];
+  if (!r) return null;
+  return {
+    wsId: String(r.ws_id), handle: String(r.handle),
+    restId: r.rest_id ? String(r.rest_id) : undefined,
+    detectedAt: r.detected_at ? String(r.detected_at) : undefined,
+  };
+}
+
+/**
+ * 断言某 ws 已识别登录账号 —— 未识别就抛。
+ *
+ * ⚠️ 不回落到「全局 is_self」:那正是此前的错误 ——
+ * 两个 ws 登不同账号时,全局值只会是其中一个,用它去核实另一个 ws
+ * 会静默抓错人(现象是「抓不到/对不上」,不报错)。
+ */
+export async function requireWsAccount(wsId: string): Promise<WsAccount> {
+  const a = await getWsAccount(wsId);
+  if (!a) {
+    throw new Error(
+      `[x-ws-account] ws=${wsId} 尚未识别登录账号。`
+      + `请在该 ws 里点「识别我的账号」—— 每个 ws 各自登录、各自识别,`
+      + `不能用别的 ws 的账号代替(会核实到对不上的账号上)。`,
+    );
+  }
+  return a;
+}
+
+/** 列出所有 ws 的登录账号 —— UI 一览用 */
+export async function listWsAccounts(): Promise<WsAccount[]> {
+  const db = getXDB();
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT * FROM x_ws_account ORDER BY ws_id`);
+  return (res[0] ?? []).map((r) => ({
+    wsId: String(r.ws_id), handle: String(r.handle),
+    restId: r.rest_id ? String(r.rest_id) : undefined,
+    detectedAt: r.detected_at ? String(r.detected_at) : undefined,
+  }));
 }

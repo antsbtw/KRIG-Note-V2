@@ -56,6 +56,13 @@ const DETECT_SELF_HANDLE_JS = `(function () {
     } catch (e) { out.tried.push('ProfileLink:err:' + e); }
   }
 
+  // rest_id:从内嵌状态里取当前用户的数字 id(契约的 x_uid)
+  try {
+    var raw2 = document.documentElement.innerHTML;
+    var mid = raw2.match(/"id_str":"(\\d+)"[^}]{0,200}"screen_name":"([A-Za-z0-9_]{1,15})"/);
+    if (mid) { out.restId = mid[1]; out.restIdHandle = mid[2]; }
+  } catch (e) { out.tried.push('restId:err:' + e); }
+
   // ③ 兜底:页面里任何 /settings/ 之外的自链接结构都不可靠,改从内嵌状态取
   if (!out.handle) {
     try {
@@ -72,6 +79,8 @@ const DETECT_SELF_HANDLE_JS = `(function () {
 export interface SelfHandleProbe {
   /** 归一化后的 handle(无 @、全小写);未识别时为 null */
   handle: string | null;
+  /** 数字 id(rest_id)—— 契约的 x_uid;handle 会改名,它不会 */
+  restId?: string;
   /** 命中的取法,便于 spike 时判断哪条策略有效 */
   via: string | null;
   /** 各策略的尝试结果,失败时用于定位 */
@@ -92,11 +101,19 @@ export async function probeSelfHandle(targetWcId?: number): Promise<SelfHandlePr
 
   const raw = await resolved.wc.executeJavaScript(DETECT_SELF_HANDLE_JS) as {
     handle: string | null; via: string | null; tried: string[];
+    restId?: string; restIdHandle?: string;
   };
 
   const normalized = raw?.handle ? normalizeHandle(raw.handle) : '';
+  // ⚠️ 只在 rest_id 与识别出的 handle **同属一人**时才采信 ——
+  // 页面里可能混着别人的 id_str/screen_name(推荐关注等),配错会写错 x_uid。
+  const restId = raw?.restId && raw.restIdHandle
+    && normalizeHandle(raw.restIdHandle) === normalized
+    ? raw.restId : undefined;
+
   return {
     handle: normalized || null,
+    restId,
     via: raw?.via ?? null,
     tried: raw?.tried ?? [],
   };

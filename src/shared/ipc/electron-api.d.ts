@@ -819,7 +819,7 @@ declare global {
         /** 屏蔽某作者：只约束未来采集，已抓的历史推文保留 */
         blockAuthor(handle: string, reason?: string): Promise<{ success: boolean; error?: string }>;
         unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
-        detectSelf(wcId?: number): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
+        detectSelf(wcId?: number, wsId?: string): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
         getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
         /** 采集回复关系并回填 replied(主线第一环) */
         captureStart(wcId?: number): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
@@ -877,10 +877,11 @@ declare global {
           success: boolean; error?: string;
           roles: Array<{ wsId: string; role: string; articleId?: string;
             servesRefresh?: boolean; intervalMinutes?: number }>;
+          accounts?: Array<{ wsId: string; handle: string; restId?: string; detectedAt?: string }>;
         }>;
         setWsRole(payload: { wsId: string; role: string; articleId?: string;
           servesRefresh?: boolean; intervalMinutes?: number }): Promise<{ success: boolean; error?: string }>;
-        listArticles(wcId?: number): Promise<{
+        listArticles(wcId?: number, wsId?: string): Promise<{
           success: boolean; error?: string;
           articles?: Array<{ tweetId: string; text: string; createdAt?: string }>;
         }>;

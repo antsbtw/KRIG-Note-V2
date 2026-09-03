@@ -1121,6 +1121,7 @@ interface WsRoleRow {
 
 function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
   const [roles, setRoles] = useState<WsRoleRow[]>([]);
+  const [accounts, setAccounts] = useState<Array<{ wsId: string; handle: string; restId?: string }>>([]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [testOut, setTestOut] = useState('');
@@ -1136,6 +1137,7 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
     const r = await api()?.getWsRoles();
     if (!r?.success) { setMsg(`读配置失败:${r?.error}`); return; }
     setRoles(r.roles ?? []);
+    setAccounts(r.accounts ?? []);
     const m = (r.roles ?? []).find((x) => x.wsId === workspaceId);
     if (m) {
       setRole(m.role);
@@ -1212,7 +1214,20 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* 本 ws 的角色 */}
         <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>本工作区({workspaceId})</div>
+          <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>
+            本工作区({workspaceId})
+            {(() => {
+              // 身份是 ws 的属性 —— 每个 ws 登录哪个账号,就核实哪个账号的状态
+              const a = accounts.find((x) => x.wsId === workspaceId);
+              return a
+                ? <span style={{ marginLeft: 8, fontWeight: 400, color: '#60a5fa' }}>
+                    登录 @{a.handle}{a.restId ? ` (uid ${a.restId})` : ''}
+                  </span>
+                : <span style={{ marginLeft: 8, fontWeight: 400, color: '#f59e0b' }}>
+                    ⚠ 未识别登录账号 —— 请先点「识别我的账号」
+                  </span>;
+            })()}
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ color: 'var(--text-muted)' }}>角色</span>
             <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
@@ -1268,6 +1283,10 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
           {roles.map((r) => (
             <div key={r.wsId} style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 0' }}>
               <strong style={{ color: 'var(--text)' }}>{r.wsId}</strong> → {r.role}
+              {(() => {
+                const a = accounts.find((x) => x.wsId === r.wsId);
+                return a ? <span style={{ color: '#60a5fa' }}> · @{a.handle}</span> : null;
+              })()}
               {r.articleId ? ` · 文章 ${r.articleId}` : ''}
               {r.servesRefresh ? ' · 承接 /refresh' : ''}
               {r.intervalMinutes ? ` · ${r.intervalMinutes}min` : ''}
@@ -1337,7 +1356,7 @@ function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBa
     try {
       const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-      const r = await api()?.detectSelf(wcId);
+      const r = await api()?.detectSelf(wcId, workspaceId);
       if (!r?.success) {
         setStatusMsg(`识别失败:${r?.error ?? '未知'}(请确认 X 已登录并在前台)`);
         return;
