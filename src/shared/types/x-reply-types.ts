@@ -126,14 +126,17 @@ export const REPLY_TEMPLATES: readonly ReplyTemplate[] = [
     observedCount: 15,
     text: `试试这个吧，但没有微信/支付宝支付方式哦。\n${link('zh')}`,
   },
-  // ── 英文:无语料依据,待用户审核 ──────────────────────────
+  // ── 英文 ────────────────────────────────────────────────
+  // 用户 2026-09-04 定的意思:「用户翻墙有困难,请他点击链接注册试用」——
+  // 与中文同义,但更直接:点明处境(连不上/被墙)→ 给试用入口。
+  // ⚠️ 仍无语料依据(全库 0 条英文句子回复),needsHumanReview 保留。
   {
     id: 'otun_full_en',
     lang: 'en',
     label: 'Full recommendation',
     observedCount: 0,
     needsHumanReview: true,
-    text: `Try OTun-M — sign up via the link below and you'll get a 7-day 10GB trial. Works on iOS/Android/macOS/Windows/Google TV, one account across multiple devices.\n${link('en')}`,
+    text: `If you're having trouble getting a stable connection, try OTun-M. Sign up with the link below for a free 7-day 10GB trial — works on iOS/Android/macOS/Windows/Google TV, one account across all your devices.\n${link('en')}`,
   },
   {
     id: 'otun_short_en',
@@ -141,7 +144,7 @@ export const REPLY_TEMPLATES: readonly ReplyTemplate[] = [
     label: 'Short recommendation',
     observedCount: 0,
     needsHumanReview: true,
-    text: `You could try OTun-M — the link below gets you a 7-day 10GB trial, and one account works on multiple devices.\n${link('en')}`,
+    text: `Having trouble connecting? Try OTun-M — sign up with the link below for a free 7-day 10GB trial.\n${link('en')}`,
   },
   {
     id: 'nudge_en',
@@ -149,7 +152,7 @@ export const REPLY_TEMPLATES: readonly ReplyTemplate[] = [
     label: 'Minimal nudge',
     observedCount: 0,
     needsHumanReview: true,
-    text: `Maybe give this a try?\n${link('en')}`,
+    text: `This might help — free trial if you want to test it:\n${link('en')}`,
   },
 ] as const;
 

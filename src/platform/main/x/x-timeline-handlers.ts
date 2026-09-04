@@ -719,6 +719,77 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
+  // X_REPLAY_REPLIES — 拿历史人工标注样本回放规划器。
+  // 用途:活动专题还没抓到数据时(x_campaign_reply 为 0、worth 只剩个位数),
+  // 先用不可再生的 7000+ 条人工标注看整套流程的实际效果。
+  // ⚠️ **只算不发、不写库** —— 回放不产生任何副作用,更不碰 X 页面。
+  //    因为样本自带人工 verdict,可以直接给出「模型与人工的一致率」。
+  ipcMain.handle(IPC_CHANNELS.X_REPLAY_REPLIES, async (_e, payload: unknown) => {
+    const p = payload as { accept?: unknown; reject?: unknown; lang?: unknown } | null;
+    const nAccept = typeof p?.accept === 'number' ? p.accept : 10;
+    const nReject = typeof p?.reject === 'number' ? p.reject : 10;
+    const lang = typeof p?.lang === 'string' ? p.lang : undefined;
+    try {
+      const [acc, rej] = await Promise.all([
+        queryFeedbackSamples({ verdict: 'accept', lang, limit: nAccept }),
+        queryFeedbackSamples({ verdict: 'reject', lang, limit: nReject }),
+      ]);
+      const gold = new Map<string, FeedbackVerdict>();
+      for (const f of acc) gold.set(f.tweet_id, 'accept');
+      for (const f of rej) gold.set(f.tweet_id, 'reject');
+
+      // 拼成 TweetInboxRecord 形态喂给规划器(回放不落库,故字段只填规划器要用的)
+      const batch = [...acc, ...rej].map((f) => ({
+        tweet_id: f.tweet_id,
+        text: f.text,
+        author_name: '',
+        author_handle: f.author_handle ?? '',
+        lang: f.lang,
+        metrics: {},
+        fetched_at: f.created_at,
+        source: 'search' as const,
+        filter_score: 1,
+        status: 'worth' as const,
+      }));
+      if (batch.length === 0) {
+        return { success: true, drafts: [], skips: [], scored: [], scanned: 0 };
+      }
+
+      // ⚠️ 回放刻意**不传** alreadyRepliedTweetIds/recentlyRepliedAuthors ——
+      //    这些历史样本大多早就回过了,带上会被冷却规则整批挡掉,看不到模型表现。
+      //    但**保留刷屏过滤**:那正是要观察的一层。
+      const acct = await getWsAccount(typeof (p as { wsId?: string })?.wsId === 'string'
+        ? (p as { wsId: string }).wsId : '').catch(() => null);
+      const r = await planReplies(batch, getJudgeConfig(), {
+        selfHandle: acct?.handle,
+        ref: 'tw_replay',   // 回放用固定 ref,免得污染真实统计
+      });
+
+      // 对账:模型说该回的里,人工当时判 accept 的占多少
+      const drafted = new Set(r.drafts.map((d) => d.tweetId));
+      let tp = 0, fp = 0, tn = 0, fn = 0;
+      for (const [tid, g] of gold) {
+        const pred = drafted.has(tid);
+        if (g === 'accept' && pred) tp += 1;
+        else if (g === 'accept') fn += 1;
+        else if (pred) fp += 1;
+        else tn += 1;
+      }
+      return {
+        success: true,
+        drafts: r.drafts, skips: r.skips, scanned: batch.length,
+        score: {
+          tp, fp, tn, fn,
+          precision: tp + fp > 0 ? tp / (tp + fp) : null,
+          recall: tp + fn > 0 ? tp / (tp + fn) : null,
+        },
+      };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_REPLAY_REPLIES failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
+  });
+
   // X_UPSERT_RECIPE — 新建或更新配方
   ipcMain.handle(IPC_CHANNELS.X_UPSERT_RECIPE, async (_e, payload: unknown) => {
     const p = payload as Partial<SearchRecipe> | null;

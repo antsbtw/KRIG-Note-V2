@@ -834,6 +834,15 @@ declare global {
           scanned?: number;
           error?: string;
         }>;
+        /** 回放历史标注样本(只算不发、不写库);score = 与人工判断的对账 */
+        replayReplies(wsId: string, accept?: number, reject?: number, lang?: string): Promise<{
+          success: boolean;
+          drafts?: import('@shared/types/x-reply-types').ReplyDraft[];
+          skips?: import('@shared/types/x-reply-types').ReplySkip[];
+          scanned?: number;
+          score?: { tp: number; fp: number; tn: number; fn: number; precision: number | null; recall: number | null };
+          error?: string;
+        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;

@@ -50,6 +50,10 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
   const [planning, setPlanning] = useState(false);
   const [status, setStatus] = useState('');
   const [showSkips, setShowSkips] = useState(false);
+  const [score, setScore] = useState<{
+    tp: number; fp: number; tn: number; fn: number;
+    precision: number | null; recall: number | null;
+  } | null>(null);
 
   const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
 
@@ -67,6 +71,7 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
       setDrafts(r.drafts ?? []);
       setSkips(r.skips ?? []);
       setEdits({});
+      setScore(null);
       const n = r.drafts?.length ?? 0;
       setStatus(
         n === 0
@@ -75,6 +80,35 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
       );
     } catch (err) {
       setStatus(`规划失败:${String(err)}`);
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  /**
+   * 回放:拿历史人工标注样本跑一遍规划器。
+   *
+   * 用途:活动专题还没抓到数据时(worth 只剩个位数、x_campaign_reply 为 0),
+   * 先用那 7000+ 条不可再生的人工标注看整套流程的实际效果。
+   * ⚠️ 只算不发、不写库;样本自带人工 verdict,故能直接给出一致率。
+   */
+  const replay = async () => {
+    setPlanning(true);
+    setStatus('正在回放历史标注样本…(模型判断需要几十秒)');
+    try {
+      const r = await api()?.replayReplies(workspaceId, 10, 10);
+      if (!r?.success) {
+        setStatus(`回放失败:${r?.error ?? '未知错误'}`);
+        setDrafts([]); setSkips([]); setScore(null);
+        return;
+      }
+      setDrafts(r.drafts ?? []);
+      setSkips(r.skips ?? []);
+      setScore(r.score ?? null);
+      setEdits({});
+      setStatus(`回放 ${r.scanned ?? 0} 条历史样本 · 草稿 ${r.drafts?.length ?? 0} 条`);
+    } catch (err) {
+      setStatus(`回放失败:${String(err)}`);
     } finally {
       setPlanning(false);
     }
@@ -132,6 +166,7 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
         <Btn primary onClick={plan} disabled={planning}>
           {planning ? '规划中…' : '🤖 规划草稿'}
         </Btn>
+        <Btn onClick={replay} disabled={planning}>🔁 回放历史样本</Btn>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>{status}</span>
       </div>
 
@@ -143,6 +178,26 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
         ⚠️ 本页只把正文<b>填进</b> X 的回复框，<b>不会替你点发布</b>。
         发布那一下永远在 X 页面上由你自己点。
       </div>
+
+      {/* ── 回放对账:模型 vs 人工当时的判断 ── */}
+      {score && (
+        <div style={{
+          fontSize: 11, border: '1px solid var(--border)', borderRadius: 6,
+          padding: '7px 9px', marginBottom: 10, background: 'var(--bg-secondary)',
+        }}>
+          <b>回放对账</b>(拿历史人工标注当答案,只算不发)
+          <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>
+            精确率 {score.precision === null ? '—' : `${(score.precision * 100).toFixed(1)}%`}
+            <span style={{ color: 'var(--text-faint)' }}>(说该回的里真该回的)</span>
+            {'　'}
+            召回率 {score.recall === null ? '—' : `${(score.recall * 100).toFixed(1)}%`}
+            <span style={{ color: 'var(--text-faint)' }}>(真该回的抓住了多少)</span>
+          </div>
+          <div style={{ marginTop: 3, color: 'var(--text-faint)' }}>
+            真阳 {score.tp} · 假阳 {score.fp} · 真阴 {score.tn} · 假阴 {score.fn}
+          </div>
+        </div>
+      )}
 
       {/* ── 草稿列表 ── */}
       {drafts.length === 0 && !planning && (

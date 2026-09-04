@@ -1090,6 +1090,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     planReplies(wsId: string, tweetIds?: string[], limit?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_REPLIES, { wsId, tweetIds, limit });
     },
+    /** 回放:拿历史人工标注样本跑规划器(只算不发、不写库,附与人工的一致率) */
+    replayReplies(wsId: string, accept?: number, reject?: number, lang?: string) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLAY_REPLIES, { wsId, accept, reject, lang });
+    },
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
     queryFeedback: (payload: unknown) =>
