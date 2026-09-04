@@ -18,6 +18,7 @@ import { queryInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, qu
 import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
+import { planReplies, textFingerprint } from './x-reply-planner';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
@@ -111,6 +112,65 @@ export function registerXTimelineHandlers(): void {
       if (remaining > 0) startJudgeDrain(getJudgeConfig(), p.wsId);
       return { success: true, judged: first.judged, worth: first.worth, remaining, draining: remaining > 0 };
     } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_PLAN_REPLIES — 给一批推文规划回复草稿。
+  // ⚠️⚠️ 写方向红线:本 handler **只产草稿,不碰发布**。
+  //   草稿要真正填进 X 回复框,仍走既有的 X_PASTE_REPLY(它也只填不点)。
+  //   把「规划」与「填充」分开,是为了让用户在两步之间有机会逐条过目。
+  ipcMain.handle(IPC_CHANNELS.X_PLAN_REPLIES, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown; tweetIds?: unknown; limit?: unknown } | null;
+    if (!p || typeof p.wsId !== 'string' || !p.wsId) {
+      // 与 X_AI_JUDGE_BATCH 同样的守卫:缺 wsId 会跨 ws 混批
+      console.error('[x-timeline-handlers] X_PLAN_REPLIES missing wsId, refusing to run');
+      return { success: false, error: 'wsId required' };
+    }
+    try {
+      // 候选:本 ws 里 Gemma judge 认为值得(worth)、且**还没回复过**的
+      const wanted = Array.isArray(p.tweetIds)
+        ? new Set(p.tweetIds.filter((x): x is string => typeof x === 'string'))
+        : null;
+      const pool = await queryInbox({
+        status: 'worth', wsId: p.wsId, replied: false,
+        limit: typeof p.limit === 'number' ? p.limit : 30,
+      });
+      const batch = wanted ? pool.filter((t) => wanted.has(t.tweet_id)) : pool;
+      if (batch.length === 0) {
+        return { success: true, drafts: [], skips: [], scanned: 0 };
+      }
+
+      // 上下文:已回过的推 / 近期回过的作者 —— 供前置规则挡掉重复打扰。
+      // ⚠️ 不限 wsId:同一个人在别的 ws 被回过,也算回过。骚扰是按人算的,不按 ws 算。
+      const replied = await queryInbox({ replied: true, limit: 5000 });
+      const alreadyRepliedTweetIds = new Set(replied.map((t) => t.tweet_id));
+      const recentlyRepliedAuthors = new Map<string, string>();
+      for (const t of replied) {
+        const h = normalizeHandle(t.author_handle ?? '');
+        if (!h) continue;
+        const at = t.fetched_at;
+        const prev = recentlyRepliedAuthors.get(h);
+        if (!prev || (at && at > prev)) recentlyRepliedAuthors.set(h, at);
+      }
+
+      // 文本指纹计数:识别「同一句话反复出现」的模板刷屏。
+      // 单条文本判不出刷屏(模型一次只看一条),必须跨条统计 —— 2026-09-04
+      // 评测里唯一残留的假阳正是此类(同一句在库里一字不差出现 3 次)。
+      const corpus = await queryInbox({ wsId: p.wsId, limit: 5000 });
+      const fingerprintCounts = new Map<string, number>();
+      for (const t of corpus) {
+        const fp = textFingerprint(t.text);
+        if (fp) fingerprintCounts.set(fp, (fingerprintCounts.get(fp) ?? 0) + 1);
+      }
+
+      const r = await planReplies(batch, getJudgeConfig(), {
+        alreadyRepliedTweetIds, recentlyRepliedAuthors, fingerprintCounts,
+      });
+      return { success: true, drafts: r.drafts, skips: r.skips, scanned: batch.length };
+    } catch (err) {
+      // fail loud:解析失败/Ollama 挂了都会到这里,绝不返回空草稿装作「没什么可回的」
+      console.error('[x-timeline-handlers] X_PLAN_REPLIES failed:', (err as Error).message);
       return { success: false, error: String(err) };
     }
   });

@@ -1086,6 +1086,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_TWEET, { tweetUrl, tweetId, wsId, wcId });
     },
+    /** 规划回复草稿(只产草稿,不发布 —— 填进 X 仍走 pasteReply,发布永远由用户点) */
+    planReplies(wsId: string, tweetIds?: string[], limit?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_REPLIES, { wsId, tweetIds, limit });
+    },
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
     queryFeedback: (payload: unknown) =>

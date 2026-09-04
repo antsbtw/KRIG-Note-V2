@@ -826,6 +826,14 @@ declare global {
         /** 强制 guest 全量重绘(display:none 复出后带旧帧) */
         invalidateWc(wcId: number): Promise<{ success: boolean; error?: string }>;
         replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number): Promise<{ success: boolean; error?: string }>;
+        /** 规划回复草稿(只产草稿,不发布) */
+        planReplies(wsId: string, tweetIds?: string[], limit?: number): Promise<{
+          success: boolean;
+          drafts?: import('@shared/types/x-reply-types').ReplyDraft[];
+          skips?: import('@shared/types/x-reply-types').ReplySkip[];
+          scanned?: number;
+          error?: string;
+        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;
