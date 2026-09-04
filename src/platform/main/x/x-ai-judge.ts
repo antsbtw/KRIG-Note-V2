@@ -66,16 +66,54 @@ interface RawVerdictItem {
   translation?: string;
 }
 
+/**
+ * 从模型返回里取出判断数组。
+ *
+ * ⚠️ 曾经的写法是「取第一个 key 的值」——
+ *   `parsed[Object.keys(parsed)[0]] ?? []`。
+ * 它在两种真实情况下会**静默返回空数组**:
+ *   ① 外层 key 不是数组(如 `{"results":{...}}`、`{"error":"..."}`)
+ *   ② 数组不在第一个 key 上(如 `{"count":10,"results":[...]}` —— key 顺序不保证)
+ * 后果:整批推文被判成「模型没返回」→ 全部回退 pending → `judged=0`,
+ * 而 `startJudgeDrain` 把 `judged===0` 当成「pending 清空」**直接 break**,
+ * 于是积压明明还在,drain 却显示正常结束(又一次「看着成功实际没做」)。
+ * 2026-09-04 离线评测实测:80 条里整整一批 10 条就是这样丢的。
+ *
+ * 改为**扫所有 key 找数组**,一个都找不到就 throw —— 让调用方走既有的
+ * 「回退 pending + 上抛」路径,由 drain 的连续失败计数处理,绝不静默当空批。
+ */
+function extractItems(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const values = Object.values(parsed as Record<string, unknown>);
+    // 优先取「元素像判断结果」的数组,避免误取到无关数组(如 tags)
+    const looksLikeVerdicts = values.find(
+      (v): v is unknown[] => Array.isArray(v)
+        && v.some((it) => it && typeof it === 'object' && 'tweetId' in (it as object)),
+    );
+    if (looksLikeVerdicts) return looksLikeVerdicts;
+    const anyArray = values.find((v): v is unknown[] => Array.isArray(v));
+    if (anyArray) return anyArray;
+  }
+  throw new Error(
+    `[x-ai-judge] response JSON contains no verdict array (keys=${
+      parsed && typeof parsed === 'object' ? Object.keys(parsed as object).join(',') : typeof parsed
+    })`,
+  );
+}
+
 function parseVerdicts(content: string): Map<string, AIVerdict> {
   const result = new Map<string, AIVerdict>();
-  let items: unknown[];
+  let parsed: unknown;
   try {
-    // Gemma 有时在 json_object 模式下把数组包在对象里
-    const parsed = JSON.parse(content);
-    items = Array.isArray(parsed) ? parsed : (parsed as Record<string, unknown[]>)[Object.keys(parsed as object)[0]] ?? [];
+    parsed = JSON.parse(content);
   } catch {
     throw new Error(`[x-ai-judge] failed to parse Ollama response as JSON: ${content.slice(0, 200)}`);
   }
+  // ⚠️ 不能并进上面的 try:extractItems 的 throw 会被 catch 吞成
+  //    「JSON 解析失败」,把「结构不对」误报成「不是 JSON」,掩盖真因。
+  // Gemma 有时在 json_object 模式下把数组包在对象里,故不能只认顶层数组。
+  const items = extractItems(parsed);
 
   for (const item of items) {
     const v = item as RawVerdictItem;
@@ -96,6 +134,14 @@ function parseVerdicts(content: string): Map<string, AIVerdict> {
 export interface JudgeBatchResult {
   judged: number;   // 本批实际写回 verdict 的条数
   worth: number;    // 其中判 worth 的条数
+  /**
+   * 本批从 pending 取到的条数。
+   * ⚠️ 用来区分两种 `judged === 0`:
+   *   `fetched === 0` → 队列真的空了(可以停)
+   *   `fetched > 0`   → 取到了却一条没判成(模型返回没覆盖这些 id),**不是空队列**
+   * 此前 drain 只看 judged,后者会被当成「清空」直接 break,积压还在却显示正常结束。
+   */
+  fetched: number;
 }
 
 /**
@@ -108,7 +154,7 @@ export async function judgeWithOllama(
   batch: TweetInboxRecord[],
   config: JudgeConfig,
 ): Promise<JudgeBatchResult> {
-  if (batch.length === 0) return { judged: 0, worth: 0 };
+  if (batch.length === 0) return { judged: 0, worth: 0, fetched: 0 };
 
   const tweetIds = batch.map((t) => t.tweet_id);
   await markAiJudging(tweetIds);
@@ -162,7 +208,7 @@ export async function judgeWithOllama(
   }
 
   console.log(`[x-ai-judge] judged ${judged}/${batch.length} tweets, worth=${worth}`);
-  return { judged, worth };
+  return { judged, worth, fetched: batch.length };
 }
 
 /**
@@ -178,7 +224,7 @@ export async function runJudgeBatch(config: JudgeConfig, wsId?: string): Promise
   const pending = await queryPending(config.batchSize, wsId);
   if (pending.length === 0) {
     console.log(`[x-ai-judge] no pending tweets${wsId ? ` for ws=${wsId}` : ''}, skip`);
-    return { judged: 0, worth: 0 };
+    return { judged: 0, worth: 0, fetched: 0 };
   }
   return judgeWithOllama(pending, config);
 }
@@ -206,7 +252,21 @@ export function startJudgeDrain(config: JudgeConfig, wsId: string): void {
       for (let i = 0; i < 1000; i++) {
         try {
           const r = await runJudgeBatch(config, wsId);
-          if (r.judged === 0) break;   // pending 清空(或全批解析失败回退,break 防死循环)
+          if (r.fetched === 0) break;   // 队列真空了 —— 唯一可以正常收工的出口
+          if (r.judged === 0) {
+            // 取到了却一条没判成:模型返回没覆盖这些 id(推文已回退 pending)。
+            // ⚠️ 这**不是**空队列 —— 此前按 judged===0 break,积压还在却报「完成」。
+            // 计入连续失败,连续 3 次才停,避免同一批反复空转成死循环。
+            consecutiveFailures += 1;
+            console.error(
+              `[x-ai-judge] drain ws=${wsId} batch returned no verdicts for ${r.fetched} tweets `
+              + `(${consecutiveFailures}/3) —— 已回退 pending`,
+            );
+            if (consecutiveFailures >= 3) {
+              throw new Error(`连续 ${consecutiveFailures} 批未取到任何判断,停止 drain(积压未清完)`);
+            }
+            continue;
+          }
           total += r.judged;
           consecutiveFailures = 0;
           console.log(`[x-ai-judge] drain ws=${wsId} progress: ${total} judged so far`);
