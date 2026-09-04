@@ -15,8 +15,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { textFingerprint, pickTemplate, DUPLICATE_FINGERPRINT_THRESHOLD } from
   '../../src/platform/main/x/x-reply-planner';
-import { REPLY_TEMPLATES, getTemplate, needsLinkReview, REPLY_CONFIDENCE_FLOOR } from
-  '../../src/shared/types/x-reply-types';
+import {
+  REPLY_TEMPLATES, getTemplate, hasStaleShortLink, needsRef, REPLY_CONFIDENCE_FLOOR,
+  buildRef, renderTemplate, REF_PLACEHOLDER, LANDING_BASE,
+} from '../../src/shared/types/x-reply-types';
 
 const PLANNER = readFileSync(
   resolve(__dirname, '../../src/platform/main/x/x-reply-planner.ts'), 'utf-8');
@@ -65,9 +67,19 @@ describe('正文只来自模板库', () => {
     expect(prompt).not.toMatch(/"suggestReply"\s*:/);
   });
 
-  it('⭐ 草稿正文必须逐字取自模板,不做插值改写', () => {
-    // `text: template.text` —— 任何 `${...}` 拼接都是「模型/代码生成正文」的后门
-    expect(PLANNER).toMatch(/text:\s*template\.text/);
+  it('⭐ 草稿正文只经 renderTemplate(唯一允许的替换是 {ref})', () => {
+    // 任何按推文内容拼接正文的写法都是「模型生成正文」的后门
+    expect(PLANNER).toMatch(/text:\s*renderTemplate\(template,\s*ref\)/);
+  });
+
+  it('⭐ 正文不得混入推文内容/模型输出', () => {
+    const push = PLANNER.slice(PLANNER.indexOf('drafts.push('));
+    const body = push.slice(0, push.indexOf('});'));
+    const textLine = body.split('\n').find((l) => /^\s*text:/.test(l)) ?? '';
+    expect(
+      /t\.text|d\.reason|decision|\+/.test(textLine),
+      `正文行混入了模板以外的东西:${textLine.trim()}`,
+    ).toBe(false);
   });
 
   it('模板库非空,且每个模板都有正文', () => {
@@ -88,9 +100,51 @@ describe('正文只来自模板库', () => {
     expect(() => getTemplate('nope' as never)).toThrow();
   });
 
-  it('语料原始短链需人工确认 —— 标记必须存在', () => {
-    // 不自动改写链接(业务资产),但要能查出哪些还没确认
-    expect(REPLY_TEMPLATES.some((t) => needsLinkReview(t))).toBe(true);
+  it('⭐ 模板里不得残留 X 的 t.co 短链', () => {
+    // t.co 是 X 发布时生成的包装,硬编码它 = 丢掉 ref 统计参数,
+    // 且指向一条我们控制不了也更新不了的跳转
+    for (const t of REPLY_TEMPLATES) {
+      expect(hasStaleShortLink(t), `模板 ${t.id} 还带着 t.co 短链`).toBe(false);
+    }
+  });
+});
+
+describe('追踪标识 ref', () => {
+  it('⭐ 模板用原始落地页 + {ref} 占位', () => {
+    for (const t of REPLY_TEMPLATES) {
+      expect(t.text, `模板 ${t.id} 没用落地页`).toContain(LANDING_BASE);
+      expect(needsRef(t), `模板 ${t.id} 少了 {ref} 占位`).toBe(true);
+    }
+  });
+
+  it('⭐ renderTemplate 必须把占位全换掉', () => {
+    for (const t of REPLY_TEMPLATES) {
+      const out = renderTemplate(t, 'tw_x_20260904');
+      expect(out, `模板 ${t.id} 渲染后仍有占位`).not.toContain(REF_PLACEHOLDER);
+      expect(out).toContain('ref=tw_x_20260904');
+    }
+  });
+
+  it('⭐ 有占位却不给 ref 必须 throw(不能把 {ref} 字面量发出去)', () => {
+    // 静默留着占位 = 推给用户一条明显坏掉的链接
+    expect(() => renderTemplate(REPLY_TEMPLATES[0], '')).toThrow();
+    expect(() => renderTemplate(REPLY_TEMPLATES[0], '   ')).toThrow();
+  });
+
+  it('ref 形态:tw_<账号>_<日期>[_<配方>],只含 URL 安全字符', () => {
+    const at = new Date('2026-09-04T10:00:00Z');
+    expect(buildRef('netlab2gfw', at)).toBe('tw_netlab2gfw_20260904');
+    expect(buildRef('netlab2gfw', at, 'vpn-help')).toBe('tw_netlab2gfw_20260904_vpnhelp');
+    // 非法字符必须被剔除,不能带进 URL
+    expect(buildRef('a@b#c', at)).toMatch(/^tw_abc_\d{8}$/);
+  });
+
+  it('⭐ ref 按批次不按条 —— 同一批各条正文必须完全相同', () => {
+    // 每条唯一 = 正文条条不同 = 水军最直接的特征之一
+    const ref = buildRef('netlab2gfw', new Date());
+    const a = renderTemplate(REPLY_TEMPLATES[0], ref);
+    const b = renderTemplate(REPLY_TEMPLATES[0], ref);
+    expect(a).toBe(b);
   });
 });
 

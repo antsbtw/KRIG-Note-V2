@@ -164,8 +164,14 @@ export function registerXTimelineHandlers(): void {
         if (fp) fingerprintCounts.set(fp, (fingerprintCounts.get(fp) ?? 0) + 1);
       }
 
+      // 「我是谁」只认 x_ws_account —— 绝不回落全局 is_self(多 ws 下必然漂移,
+      // 2026-09-04 两账号混淆就是这么来的)。取不到就让 buildRef 用默认值,
+      // 不因此拦住整批(ref 错了是统计粒度问题,不是安全问题)。
+      const acc = await getWsAccount(p.wsId).catch(() => null);
       const r = await planReplies(batch, getJudgeConfig(), {
         alreadyRepliedTweetIds, recentlyRepliedAuthors, fingerprintCounts,
+        selfHandle: acc?.handle,
+        ref: typeof (p as { ref?: unknown }).ref === 'string' ? (p as { ref: string }).ref : undefined,
       });
       return { success: true, drafts: r.drafts, skips: r.skips, scanned: batch.length };
     } catch (err) {

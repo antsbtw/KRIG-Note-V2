@@ -39,38 +39,90 @@ export interface ReplyTemplate {
 }
 
 /**
- * 模板库 —— 取自 netlab2gfw 真实用过的文本(2026-09-04 从库里导出,原文照抄)。
+ * 落地页 —— 用户 2026-09-04 给定的形态:
+ *   https://situstechnologies.com/x?ref=tw_<标识>&lang=zh&v=6
  *
- * ⚠️ 这里的短链是**语料里的原样**。上线前必须由用户确认/替换成当前有效的
- * 推广链接 —— 代码不猜、不生成、也不校验链接是否还活着(那是业务决定)。
- * 见 needsLinkReview()。
+ * ⚠️ 语料里存的是 `https://t.co/xxxx` —— 那是 **X 自己的短链包装**,
+ * 不是我们的链接。实测解开后:
+ *   t.co/n283CfvXsB → situstechnologies.com/x?ref=tw_NetLab2GFW&lang=zh&v=6
+ *                   → 307 /trial?ref=...&s=x  (200)
+ * 所以模板里必须存**原始 URL**,不能存 t.co —— t.co 短码由 X 在发布时生成,
+ * 我们既不能预知也不该硬编码(那等于把统计参数丢了)。
+ *
+ * 实测确认 ref 是透传的:换成没见过的 `tw_krigtest0904` 同样 307 → 200,
+ * 参数原样带到 /trial。故任意标识都能用,不会被拒或回落。
+ */
+export const LANDING_BASE = 'https://situstechnologies.com/x';
+
+/** 正文里的占位符 —— 由 renderTemplate() 在产草稿时替换成当次 ref */
+export const REF_PLACEHOLDER = '{ref}';
+
+/**
+ * 模板库 —— 文案取自 netlab2gfw 真实语料(2026-09-04 导出,原文照抄),
+ * 链接换成带 {ref} 占位的原始 URL。
+ *
+ * ⚠️ 正文里**只有 {ref} 一个占位**,不允许再加别的插值 ——
+ * 每多一个变量,正文的变体就翻一倍,而 X 判垃圾看的正是重复度与差异度。
  */
 export const REPLY_TEMPLATES: readonly ReplyTemplate[] = [
   {
     id: 'otun_full',
     label: '完整推荐',
     observedCount: 103,
-    text: '推荐OTun-M，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\nhttps://t.co/n283CfvXsB',
+    text: `推荐OTun-M，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
   },
   {
     id: 'otun_short',
     label: '简短推荐',
     observedCount: 73,
-    text: '试试OTun-M呗，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\nhttps://t.co/n283CfvXsB',
+    text: `试试OTun-M呗，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
   },
   {
     id: 'nudge',
     label: '极简一句',
     observedCount: 17,
-    text: '试试这个？\nhttps://t.co/Eu5F4jYEpz',
+    text: `试试这个？\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
   },
   {
     id: 'nudge_nopay',
     label: '极简(注明支付方式)',
     observedCount: 15,
-    text: '试试这个吧，但没有微信/支付宝支付方式哦。\nhttps://t.co/Eu5F4jYEpz',
+    text: `试试这个吧，但没有微信/支付宝支付方式哦。\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
   },
 ] as const;
+
+/**
+ * 追踪标识 —— **按批次,不按条**。
+ *
+ * 为什么不每条一个唯一码:X 会把链接重写成 t.co 短码,
+ * 每条唯一 = 每条正文都不一样 —— 那正是水军最直接的特征之一。
+ * 而按批次已经能回答「哪天/哪个配方带来的注册」,统计价值几乎不损失。
+ *
+ * 形态:`tw_<账号>_<YYYYMMDD>[_<配方>]`,如 `tw_netlab2gfw_20260904_vpnhelp`。
+ * 只保留 URL 安全字符;配方名里的非法字符会被剔除而不是静默截断。
+ */
+export function buildRef(handle: string, at: Date, recipeId?: string): string {
+  const safe = (s: string) => s.replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+  const d = `${at.getFullYear()}${String(at.getMonth() + 1).padStart(2, '0')}${String(at.getDate()).padStart(2, '0')}`;
+  const parts = ['tw', safe(handle) || 'unknown', d];
+  const r = recipeId ? safe(recipeId) : '';
+  if (r) parts.push(r);
+  return parts.join('_');
+}
+
+/**
+ * 把模板正文里的 {ref} 换成实际标识。
+ *
+ * ⚠️ fail loud:模板里有占位却没给 ref → throw。
+ * 静默留着 `{ref}` 字面量发出去,是把一条明显坏掉的链接推给用户点击。
+ */
+export function renderTemplate(t: ReplyTemplate, ref: string): string {
+  if (!t.text.includes(REF_PLACEHOLDER)) return t.text;
+  if (!ref || !ref.trim()) {
+    throw new Error(`[x-reply] template ${t.id} needs a ref but none was provided`);
+  }
+  return t.text.split(REF_PLACEHOLDER).join(ref.trim());
+}
 
 export function getTemplate(id: ReplyTemplateId): ReplyTemplate {
   const t = REPLY_TEMPLATES.find((x) => x.id === id);
@@ -104,6 +156,8 @@ export interface ReplyDraft {
   /** 待发正文(来自模板库,逐字原文) */
   text: string;
   templateId: ReplyTemplateId;
+  /** 本条链接里用的追踪标识 —— 落库便于事后对账「哪批带来的注册」 */
+  ref: string;
   confidence: number;
   reason: string;
   createdAt: string;
@@ -131,9 +185,17 @@ export const REPLY_CONFIDENCE_FLOOR = 0.6;
 export const SAME_AUTHOR_COOLDOWN_HOURS = 72;
 
 /**
- * 判断模板是否仍带着语料里的原始短链 —— 上线前需人工确认。
- * 不自动改写:链接是业务资产,代码猜错的代价是把流量导去死链。
+ * 模板是否还带着 X 的 t.co 短链 —— **那是坏的**,必须换成原始 URL。
+ *
+ * t.co 是 X 发布时自己生成的包装,硬编码它等于:
+ *  ① 把 ref 统计参数丢了(短码背后是别人某次发布时的固定参数)
+ *  ② 指向一条我们无法控制、也无法更新的跳转
  */
-export function needsLinkReview(t: ReplyTemplate): boolean {
+export function hasStaleShortLink(t: ReplyTemplate): boolean {
   return /https:\/\/t\.co\//.test(t.text);
+}
+
+/** 模板正文是否带 {ref} 占位(带则必须经 renderTemplate 才能发) */
+export function needsRef(t: ReplyTemplate): boolean {
+  return t.text.includes(REF_PLACEHOLDER);
 }

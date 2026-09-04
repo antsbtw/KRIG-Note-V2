@@ -21,6 +21,7 @@ import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-types';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
+  buildRef, renderTemplate,
   type ReplyDecision, type ReplyDraft, type ReplyPlanResult,
   type ReplySkip, type ReplyTemplateId,
 } from '@shared/types/x-reply-types';
@@ -142,6 +143,15 @@ export interface PlanContext {
   /** 最近用过的模板(最新在前)—— 用于轮换,避免连发同一句 */
   recentTemplateIds?: ReplyTemplateId[];
   now?: Date;
+  /**
+   * 追踪标识(链接里的 ref)。不传则按 `tw_<本ws账号>_<日期>[_<配方>]` 现生成。
+   * **按批次不按条** —— 每条唯一会让正文条条不同,那正是水军特征。
+   */
+  ref?: string;
+  /** 生成 ref 用:本 ws 登录的账号 */
+  selfHandle?: string;
+  /** 生成 ref 用:来源配方,便于回答「哪个配方带来的注册」 */
+  recipeId?: string;
 }
 
 /**
@@ -238,7 +248,10 @@ export async function planReplies(
   // 解析失败会 throw —— 调用方必须感知,绝不静默产出空草稿列表
   const decisions = parseDecisions(response.content);
 
-  // ── ③ 组装草稿(正文来自模板库,逐字原文)──────────────────
+  // ── ③ 组装草稿(正文来自模板库)────────────────────────────
+  // ref 整批算一次 —— 按批次不按条,同一批里各条正文完全相同。
+  const ref = ctx.ref?.trim()
+    || buildRef(ctx.selfHandle ?? 'netlab2gfw', now, ctx.recipeId);
   const recentTemplates = [...(ctx.recentTemplateIds ?? [])];
   for (const t of candidates) {
     const handle = normalizeHandle(t.author_handle ?? '');
@@ -271,9 +284,12 @@ export async function planReplies(
       tweetId: t.tweet_id,
       tweetUrl: tweetUrlOf(t),
       authorHandle: handle,
-      // ⚠️ 逐字原文,不做任何改写/插值 —— 改写即是「模型生成正文」的后门
-      text: template.text,
+      // ⚠️ 只做 {ref} 一处替换,别的一字不改 ——
+      //    任何按推文内容改写正文的口子,都是「模型生成正文」的后门。
+      //    ref 按批次生成,故同一批里各条正文仍然完全相同。
+      text: renderTemplate(template, ref),
       templateId,
+      ref,
       confidence: d.confidence,
       reason: d.reason,
       createdAt: now.toISOString(),
