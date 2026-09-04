@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { extractInteractions, type Interaction } from '@platform/main/x/x-notifications';
+import { interactionsToContractItems } from '@platform/main/x/x-campaign-loop';
 
 const repo = readFileSync(
   resolve(__dirname, '../../src/platform/main/db/x-campaign-repo.ts'), 'utf-8');
@@ -106,5 +107,67 @@ describe('防错配', () => {
     const belongs = i.targetId === ARTICLE || i.targetConversationId === ARTICLE
       || i.targetQuotedStatusId === ARTICLE;
     expect(belongs, '与本文章无关的互动不得算进来').toBe(false);
+  });
+});
+
+/**
+ * ⚠️ 2026-09-04 真机漏判:上面的用例守住了「解析」和「查询」两层,
+ *   却没人守 **契约转换层**(interactionsToContractItems)——
+ *   那里只写了 `targetConversationId !== articleId` 一条判据,
+ *   于是引用转发整类进不了 x_campaign_reply。
+ *
+ *   现象极具迷惑性:面板显示「✓ 引用转发」(judgeBelongs 用三判据)、
+ *   x_interaction 里也有,唯独契约表收不到 —— **判定与落库两套标准**。
+ *   实例:推 2095912671543456158 引用文章 2095910972506427676,
+ *         conv = 自己,q = 文章。
+ */
+describe('契约转换层的归属(与 judgeBelongs 必须同一套判据)', () => {
+  const ART = '2095910972506427676';
+  const base = {
+    actorUid: 'u1', actorHandle: 'netlab2gfw',
+    targetCreatedAt: '2026-09-04T16:31:00.000Z', targetText: '正文',
+  };
+
+  it('⭐ 引用转发:conv 是自己、quoted 才是文章 → 必须进契约', () => {
+    const items = interactionsToContractItems([{
+      ...base, kind: 'quote',
+      targetId: '2095912671543456158',
+      targetConversationId: '2095912671543456158',   // 自己的会话
+      targetQuotedStatusId: ART,                      // 文章在这里
+    }], ART);
+    expect(items, '只认 conversation_id 会把引用转发整类丢掉').toHaveLength(1);
+    expect(items[0].kind).toBe('quote');
+    expect(items[0].tweet_id).toBe('2095912671543456158');
+  });
+
+  it('会话内回复照旧进契约', () => {
+    const items = interactionsToContractItems([{
+      ...base, kind: 'reply',
+      targetId: '2095692212638032207', targetConversationId: ART,
+    }], ART);
+    expect(items).toHaveLength(1);
+  });
+
+  it('直接对文章的回复也算', () => {
+    const items = interactionsToContractItems([{
+      ...base, kind: 'reply', targetId: ART, targetConversationId: 'other',
+    }], ART);
+    expect(items).toHaveLength(1);
+  });
+
+  it('⭐ 三条判据都不命中 → 一条都不能进', () => {
+    const items = interactionsToContractItems([{
+      ...base, kind: 'reply',
+      targetId: 'x', targetConversationId: 'y', targetQuotedStatusId: 'z',
+    }], ART);
+    expect(items).toHaveLength(0);
+  });
+
+  it('点赞/转发不是「留言」,再命中也不进契约(契约 §2.1 kind 只收 reply/quote)', () => {
+    const items = interactionsToContractItems([
+      { ...base, kind: 'like', targetId: ART, targetConversationId: ART },
+      { ...base, kind: 'retweet', targetId: ART, targetConversationId: ART },
+    ], ART);
+    expect(items).toHaveLength(0);
   });
 });

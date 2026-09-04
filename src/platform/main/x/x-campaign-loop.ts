@@ -64,8 +64,20 @@ export function interactionsToContractItems(
   for (const it of list) {
     // 只有回复/引用算「留言」;点赞关注不是
     if (it.kind !== 'reply' && it.kind !== 'quote') continue;
-    // 必须属于这篇文章
-    if (it.targetConversationId !== articleId) continue;
+    // 必须属于这篇文章 —— **三判据,与 judgeBelongs / 契约 §4 同一套**。
+    //
+    // ⚠️ 2026-09-04 真机踩到:这里原先只认 conversation_id 一条,
+    //   而**引用转发的 conversation_id 是它自己的会话**,不是被引用的文章 ——
+    //   于是 quote 整类永远进不了契约表。现象极具迷惑性:
+    //   面板显示「✓ 引用转发」(judgeBelongs 用的是三判据)、
+    //   x_interaction 也有这条,唯独 x_campaign_reply 收不到 ——
+    //   **判定与落库用了两套标准**,看着一切正常。
+    //   实例:推 2095912671543456158 引用文章 2095910972506427676,
+    //         conv = 2095912671543456158(自己),q = 文章。
+    const belongs = it.targetId === articleId
+      || it.targetQuotedStatusId === articleId
+      || it.targetConversationId === articleId;
+    if (!belongs) continue;
     if (!it.actorHandle || !it.targetCreatedAt) continue;
 
     out.push({
