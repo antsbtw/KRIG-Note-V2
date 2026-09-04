@@ -89,6 +89,34 @@ export function isRealInteraction(icon: string | undefined, message?: string): b
   return k !== 'other';
 }
 
+/**
+ * 聚合通知的**缺口**:文案声称 N 条,载荷只给了 M 条推。
+ *
+ * ⚠️ 2026-09-04 真机坐实:用户点了 2 个赞,X 只发**一条**通知,
+ *   文案从「liked 5 of your posts」变成「liked 7 of your posts」,
+ *   而 target_objects 始终只有 1 条。监听没漏 —— 是 X 只给了一条代表推,
+ *   另外 6 条被赞的推 id **载荷里根本没有**。
+ *
+ * 早先猜「靠会话根 + 本地推文表能补出来」,已被数据否掉:
+ * 每条聚合通知的代表推各不相同,不是同一会话簇。**目前无解法**。
+ *
+ * 故这里不试图补全,只把缺口**变成可读的数字** ——
+ * 让「丢了多少」从猜测变成能核对的量(用户:要过程,不要只给结论)。
+ *
+ * 返回 undefined = 不是聚合通知(文案里没有「N of your posts」)。
+ */
+export function aggregationGap(
+  message: string | undefined, targetCount: number,
+): { claimed: number; got: number; missing: number } | undefined {
+  if (!message) return undefined;
+  // 实测文案:「KRIG Note liked 4 of your posts」「reposted 2 of your posts」
+  const m = /\b(\d+)\s+of\s+your\s+posts\b/i.exec(message);
+  if (!m) return undefined;
+  const claimed = Number(m[1]);
+  if (!Number.isFinite(claimed)) return undefined;
+  return { claimed, got: targetCount, missing: Math.max(0, claimed - targetCount) };
+}
+
 export function iconToKind(icon: string | undefined, message?: string): Interaction['kind'] {
   const i = (icon ?? '').toLowerCase();
   if (i.includes('heart')) return 'like';

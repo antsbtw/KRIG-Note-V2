@@ -1120,6 +1120,7 @@ interface WatchEvent {
   actorHandle?: string; actorUid: string; targetId: string; targetText?: string;
   targetQuotedStatusId?: string; targetHasMedia?: boolean;
   isInteraction: boolean; belongsToArticle: boolean; belongsWhy: string;
+  aggMissing?: number;
 }
 interface NotifWatchSnapshot {
   running: boolean; articleId?: string; startedAt?: string;
@@ -1452,6 +1453,14 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
                     <span style={{ fontSize: 11, color: '#60a5fa' }}>{e.kind}</span>
                     <span style={{ fontSize: 11 }}>@{e.actorHandle ?? '?'}</span>
                     {e.targetHasMedia && <span style={{ fontSize: 10 }}>🖼</span>}
+                    {/* 聚合缺口:X 说 N 条却只给 1 条代表推 —— 差额摆出来,
+                        否则「少了几次」永远是静默的(真机实测:点 2 个赞只来 1 条通知) */}
+                    {e.aggMissing !== undefined && e.aggMissing > 0 && (
+                      <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}
+                        title="X 的聚合通知只给一条代表推,其余推的 id 载荷里没有 —— 目前无解">
+                        ⚠ X 还扣着 {e.aggMissing} 条没给
+                      </span>
+                    )}
                     <span style={{ marginLeft: 'auto', fontSize: 10,
                       color: e.belongsToArticle ? '#22c55e' : 'var(--text-faint)' }}>
                       {e.belongsToArticle ? `✓ ${e.belongsWhy}` : `— ${e.belongsWhy}`}

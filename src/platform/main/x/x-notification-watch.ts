@@ -18,10 +18,13 @@
  *   ③ 连同原始文案、目标推、归属判定一起推给界面
  */
 
-import { webContents as allWebContents } from 'electron';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { app, webContents as allWebContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveAnyXWebContents } from './x-webcontents';
-import { extractInteractions, isRealInteraction, type Interaction } from './x-notifications';
+import { extractInteractions, isRealInteraction, aggregationGap,
+  type Interaction } from './x-notifications';
 import { upsertInteractions, upsertCampaignReplies } from '../db/x-campaign-repo';
 import { getWsAccount } from '../db/x-ws-role-repo';
 import { interactionsToContractItems } from './x-campaign-loop';
@@ -49,6 +52,11 @@ export interface NotifEvent {
   /** 归属判定:属于配置的那篇文章吗?为什么? */
   belongsToArticle: boolean;
   belongsWhy: string;
+  /**
+   * 聚合缺口:X 文案说 N 条、载荷只给 1 条时的差额(N−1)。
+   * undefined = 非聚合通知。摆出来是为了让「X 扣着多少没给」可见而非静默。
+   */
+  aggMissing?: number;
 }
 
 export interface WatchSnapshot {
@@ -114,6 +122,31 @@ let watch: WatchState | null = null;
  */
 export function canReceiveNotifications(url: string): boolean {
   return /x\.com\/notifications/i.test(url);
+}
+
+/**
+ * 载荷留档 —— 只在**出现没见过的互动**时写盘。
+ *
+ * 判据用 `kind|actorUid|targetId`(与 seen 同一把钥匙):X 每 ~10s 重发全量首屏,
+ * 无条件写会几分钟塞满一个目录,而全是同一份内容。
+ *
+ * ⚠️ 聚合类通知(`liked 7 of your posts`)的 targetId 会随代表推变化,
+ *   计数从 5 涨到 7 时 key 也变 —— 正好会留档,这正是要抓的样本。
+ */
+function archiveIfNew(state: WatchState, found: Interaction[], body: string): void {
+  const hasNew = found.some(
+    (i) => !state.seen.has(`${i.kind}|${i.actorUid}|${i.targetId}`));
+  if (!hasNew) return;
+  try {
+    const dir = join(app.getPath('userData'), 'x-payload-survey');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, `watch-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
+      body, 'utf-8');
+  } catch (err) {
+    // 留档失败不影响监听主流程,但要说出来 —— 否则「样本怎么一直没攒下」查不到原因
+    console.warn('[notif-watch] 载荷留档失败:', err);
+  }
 }
 
 /**
@@ -283,6 +316,15 @@ export async function startNotifWatch(
             const found: Interaction[] = [];
             extractInteractions(parsed, found);
 
+            // 原始载荷留档 —— **只在出现没见过的互动时**落盘。
+            //
+            // ⚠️ 2026-09-04:reply / quote 的真实通知形态至今一个样本都没有,
+            //   而「聚合」这一族问题只能靠原始载荷判(文案说 N 条、
+            //   target_objects 给几条)。监听是最可能先撞见真实回复的地方,
+            //   但它原先不落盘,撞见了也留不下证据 —— 解析后的视图证明不了聚合。
+            //   条件落盘:X 每 ~10s 重发一次全量首屏,无条件写会刷屏。
+            archiveIfNew(state, found, r.body);
+
             // ⭐ 入库 —— 监听不再只是「给人看」。
             //   2026-09-03 实测:被动监听秒级就收到新通知,而主循环 3 分钟一轮、
             //   要抢 webview、用户在用就整轮跳过。及时的通道一直在跑,却只推给面板,
@@ -307,6 +349,13 @@ export async function startNotifWatch(
                 targetQuotedStatusId: i.targetQuotedStatusId,
                 targetHasMedia: i.targetHasMedia,
                 isInteraction: isRealInteraction(undefined, i.message),
+                // 聚合缺口:X 说「liked 7 of your posts」却只给 1 条代表推 →
+                // 这条事件其实代表 7 次互动,我们只知道 1 条推是哪个。
+                // 把差额摆在面板上,而不是让它静悄悄地少(用户要过程)。
+                //
+                // ⚠️ 这里的「1」是本条通知产出的 target 数:聚合通知实测恒为 1,
+                //   非聚合的 aggregationGap 直接返回 undefined,不受影响。
+                aggMissing: aggregationGap(i.message, 1)?.missing,
                 belongsToArticle: b.yes,
                 belongsWhy: b.why,
               };
