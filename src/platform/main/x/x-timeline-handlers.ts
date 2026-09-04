@@ -28,6 +28,7 @@ import { upsertCampaignReplies, markMissingAsDeleted, campaignStats,
   upsertInteractions, interactionStats, verifyListForArticle } from '../db/x-campaign-repo';
 import { harvestNotifications } from './x-notifications';
 import { pauseCampaignLoop } from './x-campaign-loop';
+import { startNotifWatch, stopNotifWatch, notifWatchSnapshot } from './x-notification-watch';
 import { campaignConfigStatus } from './x-campaign-config';
 import { campaignServerRunning } from './x-campaign-server';
 import { getSelfHandle as getSelfHandleDb } from '../db/x-author-repo';
@@ -603,6 +604,32 @@ export function registerXTimelineHandlers(): void {
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  });
+
+  // 通知实时监听 —— 给人核对「来了什么 / 解成了什么 / 算不算这篇的」
+  ipcMain.handle(IPC_CHANNELS.X_NOTIF_WATCH_START, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown; wcId?: unknown } | null;
+    try {
+      let articleId: string | undefined;
+      if (typeof p?.wsId === 'string' && p.wsId) {
+        const cfg = await getWsRole(p.wsId).catch(() => null);
+        if (cfg?.articleId) {
+          const parsed = parseTweetUrl(cfg.articleId);
+          if (!('error' in parsed)) articleId = parsed.tweetId;
+        }
+      }
+      const r = await startNotifWatch(articleId,
+        typeof p?.wcId === 'number' ? p.wcId : undefined);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, snapshot: notifWatchSnapshot() };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_NOTIF_WATCH_STOP, () => {
+    try { return { success: true, snapshot: stopNotifWatch() }; }
+    catch (err) { return { success: false, error: String(err) }; }
   });
 
   // X_QUERY_FEEDBACK — 查询 feedback 样本（Phase 3b 预留）

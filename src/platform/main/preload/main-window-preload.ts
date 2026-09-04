@@ -1117,6 +1117,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     harvestNotifications: (wsId: string, wcId?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST_NOTIFICATIONS, { wsId, wcId }),
     campaignStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAMPAIGN_STATUS),
+    startNotifWatch: (wsId: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_NOTIF_WATCH_START, { wsId, wcId }),
+    stopNotifWatch: () => ipcRenderer.invoke(IPC_CHANNELS.X_NOTIF_WATCH_STOP),
+    onNotifWatchUpdate: (cb: (snap: unknown) => void) => {
+      const h = (_e: unknown, snap: unknown) => cb(snap);
+      ipcRenderer.on(IPC_CHANNELS.X_NOTIF_WATCH_UPDATE, h);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.X_NOTIF_WATCH_UPDATE, h);
+    },
     /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
     detectSelf: (wcId?: number, wsId?: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId, wsId }),

@@ -74,6 +74,18 @@ interface XCaptureSnapshot {
   recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
 }
 
+interface NotifEvent {
+  seenAt: string; notifiedAt?: string; kind: string; message?: string;
+  actorHandle?: string; actorUid: string; targetId: string; targetText?: string;
+  targetConversationId?: string; targetQuotedStatusId?: string; targetHasMedia?: boolean;
+  isInteraction: boolean; belongsToArticle: boolean; belongsWhy: string;
+}
+interface NotifWatchSnapshot {
+  running: boolean; articleId?: string; startedAt?: string;
+  payloads: number; total: number; byKind: Record<string, number>;
+  belongs: number; recent: NotifEvent[]; secondsSinceLastPayload?: number;
+}
+
 interface VerifyRow {
   uid: string; handle?: string; targetId: string;
   hasMedia?: boolean; why: string; text?: string;
@@ -914,6 +926,10 @@ declare global {
             interactions: Array<{ kind: string; actorUid: string; actorHandle?: string;
               targetId: string; notifiedAt?: string; message?: string }> };
         }>;
+        startNotifWatch(wsId: string, wcId?: number): Promise<{
+          success: boolean; error?: string; snapshot?: NotifWatchSnapshot }>;
+        stopNotifWatch(): Promise<{ success: boolean; error?: string; snapshot?: NotifWatchSnapshot }>;
+        onNotifWatchUpdate(cb: (snap: NotifWatchSnapshot) => void): () => void;
         campaignStatus(): Promise<{
           success: boolean; error?: string; serverRunning?: boolean;
           config?: { configured: boolean; importUrl?: string; hasSecret: boolean;

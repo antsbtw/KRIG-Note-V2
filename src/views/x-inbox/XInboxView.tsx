@@ -1114,6 +1114,19 @@ function Field({ label, inline, children }: FieldProps) {
 // ── 活动配置视图 ────────────────────────────────────────────────
 // 用户 2026-09-03:「建议你在 UI 上做一个配置项,我自己设定,而不是受制于你」
 // 所以:角色、文章 id、触发口、间隔 全部在这里由用户自己定,代码不写死默认值。
+/** 与 electron-api.d.ts 的 NotifWatchSnapshot 一致(renderer 本地副本) */
+interface WatchEvent {
+  seenAt: string; notifiedAt?: string; kind: string; message?: string;
+  actorHandle?: string; actorUid: string; targetId: string; targetText?: string;
+  targetQuotedStatusId?: string; targetHasMedia?: boolean;
+  isInteraction: boolean; belongsToArticle: boolean; belongsWhy: string;
+}
+interface NotifWatchSnapshot {
+  running: boolean; articleId?: string; startedAt?: string;
+  payloads: number; total: number; byKind: Record<string, number>;
+  belongs: number; recent: WatchEvent[]; secondsSinceLastPayload?: number;
+}
+
 interface WsRoleRow {
   wsId: string; role: string; articleId?: string;
   servesRefresh?: boolean; intervalMinutes?: number;
@@ -1125,6 +1138,7 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [testOut, setTestOut] = useState('');
+  const [watchSnap, setWatchSnap] = useState<NotifWatchSnapshot | null>(null);
 
   // 本 ws 的当前配置(未配置时按 idle —— 不参与定时任务的安全默认)
   const mine = roles.find((r) => r.wsId === workspaceId);
@@ -1148,6 +1162,26 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
   }, [workspaceId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // 实时监听推送 —— 每来一条通知就刷新,供人眼核对「有没有漏」
+  useEffect(() => {
+    const off = api()?.onNotifWatchUpdate?.((snap) => setWatchSnap(snap));
+    return () => { off?.(); };
+  }, []);
+
+  const toggleWatch = async () => {
+    if (watchSnap?.running) {
+      const r = await api()?.stopNotifWatch();
+      setWatchSnap(r?.snapshot ?? null);
+      return;
+    }
+    const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    const r = await api()?.startNotifWatch(workspaceId, wcId);
+    if (!r?.success) { setMsg(`监听启动失败:${r?.error}`); return; }
+    setWatchSnap(r.snapshot ?? null);
+    setMsg('已开始监听 —— 请在左侧打开 X 通知页,新通知会实时显示在下方');
+  };
 
   const save = async () => {
     setBusy(true);
@@ -1326,6 +1360,9 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
               <Btn onClick={testFetch} disabled={busy}>试抓(只抓不推送)</Btn>
             )}
             <Btn onClick={harvestNotif} disabled={busy}>抓通知(谁赞/转/回了我)</Btn>
+            <Btn primary={watchSnap?.running} onClick={toggleWatch}>
+              {watchSnap?.running ? '⏹ 停止监听' : '👁 实时监听通知'}
+            </Btn>
           </div>
         </div>
 
@@ -1346,6 +1383,73 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
             </div>
           ))}
         </div>
+
+        {/* 实时监听面板 —— 用户 2026-09-03:「这样我才能够在测试中发现是否漏东西」。
+            给的是**过程**(何时来了什么、原始文案、解成什么、算不算这篇),
+            而不是我算好的结论 —— 结论对不对,只有看得见过程才判断得了。 */}
+        {watchSnap && (
+          <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: `3px solid ${watchSnap.running ? '#22c55e' : 'var(--text-faint)'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600, color: watchSnap.running ? '#22c55e' : 'var(--text-muted)' }}>
+                {watchSnap.running ? '● 监听中' : '○ 已停止'}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                收到载荷 {watchSnap.payloads} 个 · 事件 {watchSnap.total} 条 · 属于本文章 {watchSnap.belongs} 条
+              </span>
+              {watchSnap.secondsSinceLastPayload !== undefined && (
+                <span style={{ fontSize: 11,
+                  color: watchSnap.secondsSinceLastPayload > 60 ? '#f59e0b' : 'var(--text-faint)' }}>
+                  上次收到 {watchSnap.secondsSinceLastPayload}s 前
+                  {watchSnap.secondsSinceLastPayload > 60 ? '(超过 1 分钟没动静 —— X 可能没在刷新)' : ''}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
+              {watchSnap.articleId
+                ? `目标文章 ${watchSnap.articleId}`
+                : '⚠ 未配置帖子链接 —— 归属判定不可用'}
+              {'　'}类型分布:{Object.entries(watchSnap.byKind).map(([k, v]) => `${k} ${v}`).join(' · ') || '(暂无)'}
+            </div>
+
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5,
+              maxHeight: 360, overflowY: 'auto' }}>
+              {watchSnap.recent.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                  等待新通知…(X 约每 10 秒自己刷新一次通知页;请保持左侧停在通知页)
+                </div>
+              )}
+              {watchSnap.recent.map((e, idx) => (
+                <div key={`${e.kind}-${e.actorUid}-${e.targetId}-${idx}`} style={{
+                  background: 'var(--bg)', borderRadius: 5, padding: '5px 8px',
+                  borderLeft: `3px solid ${e.belongsToArticle ? '#22c55e' : 'var(--text-faint)'}`,
+                }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-disabled)' }}>
+                      {new Date(e.seenAt).toLocaleTimeString('zh-CN')}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#60a5fa' }}>{e.kind}</span>
+                    <span style={{ fontSize: 11 }}>@{e.actorHandle ?? '?'}</span>
+                    {e.targetHasMedia && <span style={{ fontSize: 10 }}>🖼</span>}
+                    <span style={{ marginLeft: 'auto', fontSize: 10,
+                      color: e.belongsToArticle ? '#22c55e' : 'var(--text-faint)' }}>
+                      {e.belongsToArticle ? `✓ ${e.belongsWhy}` : `— ${e.belongsWhy}`}
+                    </span>
+                  </div>
+                  {/* 原始文案:人核对的第一依据 */}
+                  {e.message && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>「{e.message}」</div>
+                  )}
+                  {e.targetText && (
+                    <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                      推 {e.targetId}:{e.targetText}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {testOut && (
           <pre style={{
