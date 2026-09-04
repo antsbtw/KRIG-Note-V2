@@ -1125,6 +1125,8 @@ interface NotifWatchSnapshot {
   running: boolean; articleId?: string; startedAt?: string;
   payloads: number; total: number; byKind: Record<string, number>;
   belongs: number; recent: WatchEvent[]; secondsSinceLastPayload?: number;
+  watchingUrl?: string; saved?: { inserted: number; existing: number };
+  stallWarning?: string;
 }
 
 interface WsRoleRow {
@@ -1397,6 +1399,12 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 收到载荷 {watchSnap.payloads} 个 · 事件 {watchSnap.total} 条 · 属于本文章 {watchSnap.belongs} 条
               </span>
+              {/* 「看得到」与「留得下」分开显示 —— 面板有、库里没有 是踩过的坑 */}
+              {watchSnap.saved && (
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  · 已入库 {watchSnap.saved.inserted} 新增 / {watchSnap.saved.existing} 已存在
+                </span>
+              )}
               {watchSnap.secondsSinceLastPayload !== undefined && (
                 <span style={{ fontSize: 11,
                   color: watchSnap.secondsSinceLastPayload > 60 ? '#f59e0b' : 'var(--text-faint)' }}>
@@ -1405,6 +1413,19 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
                 </span>
               )}
             </div>
+            {/* 绿灯不够 —— 必须能看出「在听哪一页」和「为什么没动静」。
+                停在首页时 attach 一样成功、绿灯一样亮,但 X 根本不发通知载荷。 */}
+            {watchSnap.stallWarning && (
+              <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4, fontWeight: 600 }}>
+                ⚠ {watchSnap.stallWarning}
+              </div>
+            )}
+            {watchSnap.watchingUrl && (
+              <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                正在监听:{watchSnap.watchingUrl}
+              </div>
+            )}
             <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
               {watchSnap.articleId
                 ? `目标文章 ${watchSnap.articleId}`

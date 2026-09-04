@@ -22,6 +22,11 @@ import { webContents as allWebContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveAnyXWebContents } from './x-webcontents';
 import { extractInteractions, isRealInteraction, type Interaction } from './x-notifications';
+import { upsertInteractions, upsertCampaignReplies } from '../db/x-campaign-repo';
+import { getWsAccount } from '../db/x-ws-role-repo';
+import { interactionsToContractItems } from './x-campaign-loop';
+import { pushPending } from './x-campaign-push';
+import { parseTweetUrl } from './x-article-replies';
 
 /** 一条被观察到的通知事件 —— 字段全部面向「人工核对」 */
 export interface NotifEvent {
@@ -62,6 +67,12 @@ export interface WatchSnapshot {
   recent: NotifEvent[];
   /** 上次收到载荷距今多少秒 —— 能看出「是不是还在收」 */
   secondsSinceLastPayload?: number;
+  /** 正在监听的**真实 URL** —— 「绿灯却收不到」时第一眼就能看出是不是页面不对 */
+  watchingUrl?: string;
+  /** 累计入库条数(新增 / 已存在)—— 让「看得到」与「留得下」分开可见 */
+  saved?: { inserted: number; existing: number };
+  /** 非空 = 监听有异常,面板应变黄。不猜原因,把可能性列清楚给人判断 */
+  stallWarning?: string;
 }
 
 interface WatchState {
@@ -75,9 +86,79 @@ interface WatchState {
   onMessage: (e: unknown, method: string, params: any) => void;
   pending: Map<string, string>;
   attached: boolean;
+  /** 监听所属 ws 与账号 —— 入库要用(通知是「别人对**这个**账号」) */
+  wsId?: string;
+  ownerHandle?: string;
+  /** 累计入库计数 */
+  saved: { inserted: number; existing: number };
+  /**
+   * 心跳 —— **卡住的守卫必须自己能响**。
+   *
+   * ⚠️ broadcast 原先只在「收到载荷」时发,而 stallWarning 恰恰描述的是
+   *   **收不到载荷**的状态 —— 靠载荷驱动的推送永远送不出这条警告,
+   *   面板会一直停在最后一次正常快照上,绿灯长亮。
+   *   (feedback-verify-guard-can-fail:守卫要能真的失败)
+   */
+  heartbeat: ReturnType<typeof setInterval>;
 }
 
 let watch: WatchState | null = null;
+
+/**
+ * 当前页面能不能收到通知载荷。
+ *
+ * ⚠️ 抽成纯函数是为了**能被测试反向注入** —— 这条守卫挡的是「假绿灯」:
+ *   停在首页时 CDP attach 一样成功、面板一样显示「● 监听中」,
+ *   但 X 只在通知页轮询 NotificationsTimeline,别处一个载荷都不发。
+ *   守卫若失效,现象是「等一晚上,零数据,零报错」。
+ */
+export function canReceiveNotifications(url: string): boolean {
+  return /x\.com\/notifications/i.test(url);
+}
+
+/**
+ * 把监听到的互动落库,命中活动文章的顺带走契约推送。
+ *
+ * ⚠️ **串行化**:CDP 的 loadingFinished 是并发回调,X 每次刷新会同时到几个载荷。
+ *   upsertInteractions 是「先 SELECT 再 CREATE」的读改写,并发跑同一条互动会
+ *   两边都查不到、然后各 CREATE 一条 —— 重复行。用一条 promise 链排队。
+ *
+ * ⚠️ 失败**不吞**:入库失败必须让人看见(feedback-fail-loud-no-fallback),
+ *   否则又是「面板有、库里没有」这种看着成功实际没有的坑。
+ */
+let persistChain: Promise<void> = Promise.resolve();
+
+async function persistWatched(state: WatchState, found: Interaction[]): Promise<void> {
+  if (found.length === 0) return;
+  if (!state.wsId) return;        // 没识别出 ws 就不写,避免写错归属
+  const wsId = state.wsId;
+
+  persistChain = persistChain.then(async () => {
+    try {
+      const r = await upsertInteractions(wsId, state.ownerHandle, found);
+      state.saved.inserted += r.inserted;
+      state.saved.existing += r.existing;
+      if (r.inserted > 0) {
+        console.log(`[notif-watch] 入库 +${r.inserted} 条(已存在 ${r.existing})`);
+      }
+
+      // 命中活动文章的回复/引用 → 走契约(与主循环同一套判定与推送)
+      if (!state.articleId) return;
+      const parsed = parseTweetUrl(state.articleId);
+      if ('error' in parsed) return;
+      const items = interactionsToContractItems(found, parsed.tweetId);
+      if (items.length === 0) return;
+      await upsertCampaignReplies(parsed.tweetId, items);
+      const p = await pushPending(parsed.tweetId);
+      console.log(`[notif-watch] 契约推送 accepted=${p.accepted} updated=${p.updated}`
+        + (p.fatal ? ` ⚠️ ${p.fatal}` : ''));
+    } catch (err) {
+      // 面板上看得到、库里却没有 —— 这种不一致必须响
+      console.error('[notif-watch] ⚠️ 入库/推送失败(面板显示的条目未必已落库):', err);
+    }
+  });
+  return persistChain;
+}
 
 function judgeBelongs(i: Interaction, articleId?: string): { yes: boolean; why: string } {
   if (!articleId) return { yes: false, why: '未配置文章' };
@@ -93,6 +174,26 @@ function snapshot(): WatchSnapshot {
   }
   const byKind: Record<string, number> = {};
   for (const e of watch.events) byKind[e.kind] = (byKind[e.kind] ?? 0) + 1;
+  // 真实 URL:页面可能在监听期间被导航走(用户点了别的),绿灯必须跟着塌
+  const wc = allWebContents.fromId(watch.wcId);
+  const url = wc && !wc.isDestroyed()
+    ? (() => { try { return wc.getURL(); } catch { return ''; } })() : '';
+
+  // ⚠️ 不干等:启动 20s 还是 0 载荷、或收着收着断了 60s,都要把话说出来。
+  //   只列可能原因,不替人下结论(X 约 10s 一次刷新,60s 没动就不正常了)。
+  const idleMs = Date.now() - (watch.lastPayloadAt ?? watch.startedAt);
+  let stallWarning: string | undefined;
+  if (!canReceiveNotifications(url)) {
+    stallWarning = `页面已离开通知页(当前:${url || '未知'})—— X 不再发通知载荷,`
+      + `请切回 🔔 通知页`;
+  } else if (watch.payloads === 0 && idleMs > 20_000) {
+    stallWarning = `已等 ${Math.round(idleMs / 1000)}s 仍未收到任何通知载荷 —— `
+      + `可能是登录态失效,或 CDP 被别处占用(试抓/抓通知正在跑)`;
+  } else if (watch.payloads > 0 && idleMs > 60_000) {
+    stallWarning = `距上次载荷已 ${Math.round(idleMs / 1000)}s(正常约 10s 一次)—— `
+      + `X 可能停止了自动刷新,试着在通知页手动滚一下`;
+  }
+
   return {
     running: true,
     articleId: watch.articleId,
@@ -104,6 +205,9 @@ function snapshot(): WatchSnapshot {
     recent: [...watch.events].reverse().slice(0, 40),
     secondsSinceLastPayload: watch.lastPayloadAt
       ? Math.round((Date.now() - watch.lastPayloadAt) / 1000) : undefined,
+    watchingUrl: url,
+    saved: watch.saved,
+    stallWarning,
   };
 }
 
@@ -120,7 +224,7 @@ function broadcast(): void {
  * 我们只是搭个耳朵在网络层听 X 自己的刷新。
  */
 export async function startNotifWatch(
-  articleId?: string, targetWcId?: number,
+  articleId?: string, targetWcId?: number, wsId?: string,
 ): Promise<{ ok: true } | { error: string }> {
   if (watch) return { ok: true };
 
@@ -128,8 +232,33 @@ export async function startNotifWatch(
   if ('error' in resolved) return { error: resolved.error };
   const wc = resolved.wc;
 
+  // ⚠️ 2026-09-03 实测踩到的「假绿灯」:resolver 只校验是不是 x.com,
+  //   **不校验在哪一页**。停在首页(For you)时 attach 一样成功、面板一样显示
+  //   「● 监听中」,但 X 在首页只轮询 HomeTimeline,NotificationsTimeline
+  //   一个都不发 —— 于是「收到载荷 0 个」永远不动,而人看着绿灯以为一切正常,
+  //   干等下去。这正是「看着成功实际没有」那一族 bug。
+  //   → 不在通知页就**拒绝启动并说清楚**,不假装在监听。
+  const url = (() => { try { return wc.getURL(); } catch { return ''; } })();
+  if (!canReceiveNotifications(url)) {
+    return { error: `X 当前停在「${url || '未知页面'}」,不是通知页 —— `
+      + `X 只在通知页才会轮询 NotificationsTimeline,在别的页面监听收不到任何载荷。`
+      + `请先在左侧点 🔔 切到通知页再开始监听。` };
+  }
+
+  // 入库归属:通知是「别人对**该 ws 登录的账号**」。识别不出账号仍可监听
+  // (面板照常给人看),但**不入库** —— 宁可不写,不可写错归属。
+  const acc = wsId ? await getWsAccount(wsId).catch(() => null) : null;
+  if (wsId && !acc) {
+    console.warn(`[notif-watch] ws=${wsId} 未识别登录账号 —— 只监听不入库`
+      + `(请先点「识别我的账号」)`);
+  }
+
   const state: WatchState = {
     wcId: wc.id, articleId,
+    wsId: acc ? wsId : undefined, ownerHandle: acc?.handle,
+    saved: { inserted: 0, existing: 0 },
+    // 占位,attach 成功后立刻换成真心跳(见下方 state.heartbeat = ...)
+    heartbeat: setInterval(() => {}, 1 << 30),
     seen: new Map(), events: [], payloads: 0,
     startedAt: Date.now(), pending: new Map(), attached: false,
     onMessage: (_e, method, params) => {
@@ -153,6 +282,14 @@ export async function startNotifWatch(
 
             const found: Interaction[] = [];
             extractInteractions(parsed, found);
+
+            // ⭐ 入库 —— 监听不再只是「给人看」。
+            //   2026-09-03 实测:被动监听秒级就收到新通知,而主循环 3 分钟一轮、
+            //   要抢 webview、用户在用就整轮跳过。及时的通道一直在跑,却只推给面板,
+            //   关掉面板数据就没了 —— 现成的实时性没接到存储上。
+            //   这里**全量入库**(不过滤),取舍仍交给查询层(见 c227c037)。
+            void persistWatched(state, found);
+
             for (const i of found) {
               const key = `${i.kind}|${i.actorUid}|${i.targetId}`;
               if (state.seen.has(key)) continue;      // 只报**新**的
@@ -190,8 +327,15 @@ export async function startNotifWatch(
   wc.debugger.on('message', state.onMessage);
   await wc.debugger.sendCommand('Network.enable').catch(() => {});
 
+  // 每 10s 推一次快照:没有载荷时 stallWarning 才送得出去,
+  // 「上次收到 N 秒前」也才会自己往上走(否则停在最后一次正常值上)
+  clearInterval(state.heartbeat);
+  state.heartbeat = setInterval(() => broadcast(), 10_000);
+
   watch = state;
-  console.log('[notif-watch] 开始监听通知(不导航、不滚动,收 X 自己的刷新)');
+  console.log('[notif-watch] 开始监听通知(不导航、不滚动,收 X 自己的刷新)'
+    + ` · 页面=${url}`
+    + (state.wsId ? ` · 入库 ws=${state.wsId} @${state.ownerHandle}` : ' · **不入库**'));
   broadcast();
   return { ok: true };
 }
@@ -199,6 +343,8 @@ export async function startNotifWatch(
 export function stopNotifWatch(): WatchSnapshot {
   if (!watch) return snapshot();
   const final = snapshot();
+  // 常驻 timer 必须有停止调用(project-graceful-shutdown 的铁律)
+  clearInterval(watch.heartbeat);
   const wc = allWebContents.fromId(watch.wcId);
   if (wc && !wc.isDestroyed()) {
     wc.debugger.off('message', watch.onMessage);

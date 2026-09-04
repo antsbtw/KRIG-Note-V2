@@ -619,7 +619,10 @@ export function registerXTimelineHandlers(): void {
         }
       }
       const r = await startNotifWatch(articleId,
-        typeof p?.wcId === 'number' ? p.wcId : undefined);
+        typeof p?.wcId === 'number' ? p.wcId : undefined,
+        // ⭐ wsId 透传:监听现在要入库,而通知是「别人对**该 ws 登录的账号**」——
+        //   没有 ws 归属就写不了(也不该写),见 x-notification-watch 的 persistWatched
+        typeof p?.wsId === 'string' ? p.wsId : undefined);
       if ('error' in r) return { success: false, error: r.error };
       return { success: true, snapshot: notifWatchSnapshot() };
     } catch (err) {
