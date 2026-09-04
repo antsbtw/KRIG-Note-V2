@@ -99,6 +99,8 @@ interface WatchState {
   ownerHandle?: string;
   /** 累计入库计数 */
   saved: { inserted: number; existing: number };
+  /** 已留档的「解析出 0 条」样本数 —— 限量,避免 X 每 10s 重发刷爆目录 */
+  zeroArchived: number;
   /**
    * 心跳 —— **卡住的守卫必须自己能响**。
    *
@@ -136,12 +138,27 @@ export function canReceiveNotifications(url: string): boolean {
 function archiveIfNew(state: WatchState, found: Interaction[], body: string): void {
   const hasNew = found.some(
     (i) => !state.seen.has(`${i.kind}|${i.actorUid}|${i.targetId}`));
-  if (!hasNew) return;
+
+  // ⚠️ 2026-09-04 真机踩到:「收到载荷 25 个 · 事件 0 条」——
+  //   X 一直在发,解析却一条都出不来(载荷结构变了 / 走了别的字段路径)。
+  //   而原先的条件是「有新互动才留档」,于是**最该留证据的情况恰好一个字节都不写**,
+  //   排查时手里空空。这正是「守卫在最该响的时候哑掉」那一族。
+  //   → 解析出 0 条也必须留档,而且要**优先**留(它才是异常样本)。
+  //   限量:同一次监听最多存 3 份 zero,避免 X 每 10s 重发把目录刷爆。
+  const parsedNothing = found.length === 0;
+  if (parsedNothing) {
+    if (state.zeroArchived >= 3) return;
+    state.zeroArchived++;
+  } else if (!hasNew) {
+    return;
+  }
+
+  const tag = parsedNothing ? 'zero' : 'new';
   try {
     const dir = join(app.getPath('userData'), 'x-payload-survey');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
-      join(dir, `watch-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
+      join(dir, `watch-${tag}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
       body, 'utf-8');
   } catch (err) {
     // 留档失败不影响监听主流程,但要说出来 —— 否则「样本怎么一直没攒下」查不到原因
@@ -290,6 +307,7 @@ export async function startNotifWatch(
     wcId: wc.id, articleId,
     wsId: acc ? wsId : undefined, ownerHandle: acc?.handle,
     saved: { inserted: 0, existing: 0 },
+    zeroArchived: 0,
     // 占位,attach 成功后立刻换成真心跳(见下方 state.heartbeat = ...)
     heartbeat: setInterval(() => {}, 1 << 30),
     seen: new Map(), events: [], payloads: 0,
@@ -314,7 +332,9 @@ export async function startNotifWatch(
             try { parsed = JSON.parse(r.body); } catch { return; }
 
             const found: Interaction[] = [];
-            extractInteractions(parsed, found);
+            // ownerHandle 必须传:reply 的判据是 in_reply_to_screen_name == 我,
+            // 不传就只能收 quote,回复整类照漏(见 x-notifications 的 TimelineTweet 分支)
+            extractInteractions(parsed, found, state.ownerHandle);
 
             // 原始载荷留档 —— **只在出现没见过的互动时**落盘。
             //

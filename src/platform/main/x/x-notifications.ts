@@ -163,13 +163,102 @@ export function parseNotifTime(v: unknown): string | undefined {
  *     ├── timestamp_ms
  *     └── template.{from_users[], target_objects[]}
  */
-export function extractInteractions(node: unknown, out: Interaction[]): void {
+export function extractInteractions(
+  node: unknown, out: Interaction[], ownerHandle?: string,
+): void {
   if (node === null || typeof node !== 'object') return;
   if (Array.isArray(node)) {
-    for (const it of node) extractInteractions(it, out);
+    for (const it of node) extractInteractions(it, out, ownerHandle);
     return;
   }
   const o = node as Record<string, unknown>;
+
+  /**
+   * ⭐ 回复 / 引用走的是 **TimelineTweet**,不是 TimelineNotification。
+   *
+   * ⚠️ 2026-09-04 真机坐实(用户:「有一个回复过来了」而面板「事件 0 条」):
+   *   X 只把**可聚合的反应**(赞/转/关注)做成 TimelineNotification;
+   *   有实体推文可展示的(回复、提及、引用)直接投**推文本身**。
+   *   首屏 22 条里 9 条是 TimelineTweet —— 我第一轮把它们当「不是通知」跳过了,
+   *   于是**契约最需要的 reply/quote 一条都没在解析**。
+   *   (这不是入库改动引入的回归:从第一版起就全漏。)
+   *
+   * ⚠️ **不能见 TimelineTweet 就收**:通知页也会推「我参与的会话」——
+   *   实测样本里 NetLab2GFW 回复 heibagou / dmfiv58749997 的推也在列,
+   *   那是「别人对别人」,收进来就是脏数据。判据必须是**指向我**:
+   *     in_reply_to_screen_name == 我   → reply
+   *     quoted_status_id 存在            → quote(引用了我的推;归属由上层三判据裁)
+   *   拿不到 ownerHandle 时**只收 quote**,不猜 reply —— 宁可少收,不可收错。
+   */
+  if (o.__typename === 'TimelineTweet') {
+    const tr = (o.tweet_results as Record<string, unknown> | undefined)
+      ?.result as Record<string, unknown> | undefined;
+    const lg = tr?.legacy as Record<string, unknown> | undefined;
+    if (tr && typeof tr.rest_id === 'string' && lg) {
+      const core = (tr.core as Record<string, unknown> | undefined)
+        ?.user_results as Record<string, unknown> | undefined;
+      const author = core?.result as Record<string, unknown> | undefined;
+      const aCore = author?.core as Record<string, unknown> | undefined;
+      const aLegacy = author?.legacy as Record<string, unknown> | undefined;
+      const screenName = typeof aCore?.screen_name === 'string' ? aCore.screen_name
+        : typeof aLegacy?.screen_name === 'string' ? aLegacy.screen_name : undefined;
+
+      const replyTo = typeof lg.in_reply_to_screen_name === 'string'
+        ? normalizeHandle(lg.in_reply_to_screen_name) : undefined;
+      const quoted = typeof lg.quoted_status_id_str === 'string'
+        ? lg.quoted_status_id_str : undefined;
+      const me = ownerHandle ? normalizeHandle(ownerHandle) : undefined;
+
+      // ⚠️ 「有 quoted_status_id 就算 quote」**太松**：那只说明这条推引用了某人，
+      //   没说明引用的是**我**。实测样本里 NetLab2GFW 一边回复第三方、
+      //   一边引用推广我们的帖子（8 条全是引用 @OTun_MyVPN，所以侥幸没出错），
+      //   但只要有人引用第三方的推，就会被误收成「别人对我」。
+      //   载荷里带 quoted_status_result（被引用推的完整对象）—— 用它核作者。
+      //   拿不到被引用推作者时**保守放行**：X 未展开引用对象的情况确实存在，
+      //   一律拒收会把真实的引用也丢掉（归属仍由上层三判据兜）。
+      const qRes = (tr.quoted_status_result as Record<string, unknown> | undefined)
+        ?.result as Record<string, unknown> | undefined;
+      const qAuthor = ((qRes?.core as Record<string, unknown> | undefined)
+        ?.user_results as Record<string, unknown> | undefined)
+        ?.result as Record<string, unknown> | undefined;
+      const qCore = qAuthor?.core as Record<string, unknown> | undefined;
+      const qHandle = typeof qCore?.screen_name === 'string'
+        ? normalizeHandle(qCore.screen_name) : undefined;
+      // 知道被引用推作者、且不是我 → 这是「引用别人」，与我无关
+      const quotesSomeoneElse = !!me && !!qHandle && qHandle !== me;
+
+      // 是不是冲着我来的
+      const isReplyToMe = !!me && !!replyTo && replyTo === me;
+      const kind: Interaction['kind'] | undefined = isReplyToMe ? 'reply'
+        : (quoted && !quotesSomeoneElse) ? 'quote' : undefined;
+
+      // 作者是自己 → 那是我自己发的推,不是「别人对我」
+      const authoredByMe = !!me && !!screenName && normalizeHandle(screenName) === me;
+
+      if (kind && author && typeof author.rest_id === 'string' && !authoredByMe) {
+        const ext = lg.extended_entities as Record<string, unknown> | undefined;
+        let createdAt: string | undefined;
+        if (typeof lg.created_at === 'string') {
+          const d = new Date(lg.created_at);
+          if (!Number.isNaN(d.getTime())) createdAt = d.toISOString();
+        }
+        out.push({
+          kind,
+          actorUid: author.rest_id,
+          actorHandle: screenName ? normalizeHandle(screenName) : undefined,
+          // 目标推 = **这条回复/引用自己**(契约的 items[].tweet_id)
+          targetId: tr.rest_id,
+          targetConversationId: typeof lg.conversation_id_str === 'string'
+            ? lg.conversation_id_str : undefined,
+          targetQuotedStatusId: quoted,
+          targetHasMedia: Array.isArray(ext?.media) && (ext.media as unknown[]).length > 0,
+          targetText: typeof lg.full_text === 'string' ? lg.full_text.slice(0, 200) : undefined,
+          targetCreatedAt: createdAt,
+          message: isReplyToMe ? `回复了你(@${replyTo})` : '引用了你的推',
+        });
+      }
+    }
+  }
 
   if (o.__typename === 'TimelineNotification') {
     const icon = typeof o.notification_icon === 'string' ? o.notification_icon : undefined;
@@ -258,7 +347,7 @@ export function extractInteractions(node: unknown, out: Interaction[]): void {
     }
   }
 
-  for (const v of Object.values(o)) extractInteractions(v, out);
+  for (const v of Object.values(o)) extractInteractions(v, out, ownerHandle);
 }
 
 export interface NotificationHarvest {
@@ -277,6 +366,8 @@ export interface NotificationHarvest {
 export async function harvestNotifications(
   targetWcId?: number,
   maxRounds = 20,
+  /** 本 ws 登录的账号 —— reply 判据要用(见 TimelineTweet 分支);缺则只收 quote */
+  ownerHandle?: string,
 ): Promise<NotificationHarvest | { error: string }> {
   const resolved = resolveXWebContents(targetWcId);
   if ('error' in resolved) return { error: resolved.error };
@@ -315,7 +406,7 @@ export async function harvestNotifications(
           } catch { /* 诊断落盘失败不影响主流程 */ }
           try {
             const found: Interaction[] = [];
-            extractInteractions(JSON.parse(r.body), found);
+            extractInteractions(JSON.parse(r.body), found, ownerHandle);
             for (const it of found) {
               seen.set(`${it.kind}|${it.actorUid}|${it.targetId}`, it);
             }

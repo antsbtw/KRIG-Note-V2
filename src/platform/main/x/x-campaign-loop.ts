@@ -96,7 +96,8 @@ export async function runCampaignRound(): Promise<void> {
     }
 
     const wcId = getActiveWcId(cfg.wsId) ?? undefined;
-    const r = await harvestNotifications(wcId);
+    // ownerHandle 必须传:回复走 TimelineTweet,判据是 in_reply_to_screen_name == 我
+    const r = await harvestNotifications(wcId, 20, acc.handle);
     if ('error' in r) {
       console.warn(`[campaign-loop] ws=${cfg.wsId} 抓通知失败:${r.error}`);
       continue;
