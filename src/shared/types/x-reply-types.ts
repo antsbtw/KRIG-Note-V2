@@ -21,21 +21,33 @@
  * 相似度 90% 的变体,比稳定用模板更像水军。
  */
 
+/** 回复语言 —— 决定用哪套文案和哪组链接参数 */
+export type ReplyLang = 'zh' | 'en';
+
 /** 模板 id —— 与库里的 key 对应,写进 x_reply_draft 便于事后对账 */
 export type ReplyTemplateId =
   | 'otun_full'      // 完整推荐(产品名 + 试用额度 + 全平台 + 链接)
   | 'otun_short'     // 简短推荐
   | 'nudge'          // 极简一句 + 链接
-  | 'nudge_nopay';   // 极简 + 支付方式提醒
+  | 'nudge_nopay'    // 极简 + 支付方式提醒
+  | 'otun_full_en'   // ↓ 英文:无语料依据,待人工审核
+  | 'otun_short_en'
+  | 'nudge_en';
 
 export interface ReplyTemplate {
   id: ReplyTemplateId;
+  lang: ReplyLang;
   /** 正文。⚠️ 不含 @提及 —— X 回复框会自动带上被回复者,手动再加会变成 @@xxx */
   text: string;
   /** 人可读的短名,UI 上给用户选/看 */
   label: string;
   /** 语料里实际用过多少次 —— 仅作参考,不参与选择逻辑 */
   observedCount: number;
+  /**
+   * true = 这条文案**没有语料依据**(我按原意直译的新文案,未经实战检验)。
+   * UI 必须显眼提示,由用户审过再发 —— 发出去的是产品承诺。
+   */
+  needsHumanReview?: boolean;
 }
 
 /**
@@ -58,8 +70,29 @@ export const LANDING_BASE = 'https://situstechnologies.com/x';
 export const REF_PLACEHOLDER = '{ref}';
 
 /**
- * 模板库 —— 文案取自 netlab2gfw 真实语料(2026-09-04 导出,原文照抄),
- * 链接换成带 {ref} 占位的原始 URL。
+ * 链接的语言/版本参数 —— 用户 2026-09-04 给定:
+ *   中文 `lang=zh&v=6`   英文 `lang=en&v=7`
+ * 两者均已实测:307 → /trial?ref=...&s=x → 200,ref 原样透传。
+ */
+export const LINK_PARAMS: Record<ReplyLang, string> = {
+  zh: 'lang=zh&v=6',
+  en: 'lang=en&v=7',
+};
+
+/** 拼出带 ref 占位的完整落地页链接 */
+function link(lang: ReplyLang): string {
+  return `${LANDING_BASE}?ref=${REF_PLACEHOLDER}&${LINK_PARAMS[lang]}`;
+}
+
+/**
+ * 模板库 —— 中文文案取自 netlab2gfw 真实语料(2026-09-04 导出,原文照抄)。
+ *
+ * ⚠️ **英文文案没有语料依据** —— 全库 1095 条自身回复里,
+ * 像英文句子的(≥3 个英文单词)是 **0 条**;那 115 条「无中文」的
+ * 全是数字与 emoji(「9+6」「👍」「125」)。
+ * 故英文是按中文原意直译的**新写文案,未经实战检验**,
+ * 用 `needsHumanReview` 标出 —— UI 必须显眼提示,由用户审过再发。
+ * 不自作主张认为它可用:发出去的是产品承诺,不是我能替用户拍板的东西。
  *
  * ⚠️ 正文里**只有 {ref} 一个占位**,不允许再加别的插值 ——
  * 每多一个变量,正文的变体就翻一倍,而 X 判垃圾看的正是重复度与差异度。
@@ -67,27 +100,56 @@ export const REF_PLACEHOLDER = '{ref}';
 export const REPLY_TEMPLATES: readonly ReplyTemplate[] = [
   {
     id: 'otun_full',
+    lang: 'zh',
     label: '完整推荐',
     observedCount: 103,
-    text: `推荐OTun-M，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
+    text: `推荐OTun-M，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\n${link('zh')}`,
   },
   {
     id: 'otun_short',
+    lang: 'zh',
     label: '简短推荐',
     observedCount: 73,
-    text: `试试OTun-M呗，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
+    text: `试试OTun-M呗，按照下面的链接注册即可获得7天10G的测试流量了，支持iOS/Android/macOS/Windows/Google TV，一个账号，多个客户端共享。\n${link('zh')}`,
   },
   {
     id: 'nudge',
+    lang: 'zh',
     label: '极简一句',
     observedCount: 17,
-    text: `试试这个？\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
+    text: `试试这个？\n${link('zh')}`,
   },
   {
     id: 'nudge_nopay',
+    lang: 'zh',
     label: '极简(注明支付方式)',
     observedCount: 15,
-    text: `试试这个吧，但没有微信/支付宝支付方式哦。\n${LANDING_BASE}?ref=${REF_PLACEHOLDER}&lang=zh&v=6`,
+    text: `试试这个吧，但没有微信/支付宝支付方式哦。\n${link('zh')}`,
+  },
+  // ── 英文:无语料依据,待用户审核 ──────────────────────────
+  {
+    id: 'otun_full_en',
+    lang: 'en',
+    label: 'Full recommendation',
+    observedCount: 0,
+    needsHumanReview: true,
+    text: `Try OTun-M — sign up via the link below and you'll get a 7-day 10GB trial. Works on iOS/Android/macOS/Windows/Google TV, one account across multiple devices.\n${link('en')}`,
+  },
+  {
+    id: 'otun_short_en',
+    lang: 'en',
+    label: 'Short recommendation',
+    observedCount: 0,
+    needsHumanReview: true,
+    text: `You could try OTun-M — the link below gets you a 7-day 10GB trial, and one account works on multiple devices.\n${link('en')}`,
+  },
+  {
+    id: 'nudge_en',
+    lang: 'en',
+    label: 'Minimal nudge',
+    observedCount: 0,
+    needsHumanReview: true,
+    text: `Maybe give this a try?\n${link('en')}`,
   },
 ] as const;
 
@@ -156,6 +218,10 @@ export interface ReplyDraft {
   /** 待发正文(来自模板库,逐字原文) */
   text: string;
   templateId: ReplyTemplateId;
+  /** 本条用的语言(由推文 lang 决定,一批里可中英混杂) */
+  lang: ReplyLang;
+  /** true = 该文案无语料依据(新写的),UI 必须提示用户审核 */
+  needsHumanReview: boolean;
   /** 本条链接里用的追踪标识 —— 落库便于事后对账「哪批带来的注册」 */
   ref: string;
   confidence: number;
@@ -198,4 +264,21 @@ export function hasStaleShortLink(t: ReplyTemplate): boolean {
 /** 模板正文是否带 {ref} 占位(带则必须经 renderTemplate 才能发) */
 export function needsRef(t: ReplyTemplate): boolean {
   return t.text.includes(REF_PLACEHOLDER);
+}
+
+/**
+ * 按推文语言选用哪套模板。
+ *
+ * ⚠️ 非中文一律走英文模板 —— 给一条英文推回中文文案,
+ * 对方多半看不懂,等于白发一条还留了垃圾记录。
+ * 库里 lang 只有 zh/en 两种(实测),其余按 en 处理更安全:
+ * 英文是国际通用回退,中文不是。
+ */
+export function langOf(tweetLang?: string): ReplyLang {
+  return (tweetLang ?? '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+/** 该语言下可用的模板 */
+export function templatesFor(lang: ReplyLang): ReplyTemplate[] {
+  return REPLY_TEMPLATES.filter((t) => t.lang === lang);
 }

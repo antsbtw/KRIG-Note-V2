@@ -21,9 +21,9 @@ import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-types';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
-  buildRef, renderTemplate,
+  buildRef, renderTemplate, langOf, templatesFor,
   type ReplyDecision, type ReplyDraft, type ReplyPlanResult,
-  type ReplySkip, type ReplyTemplateId,
+  type ReplySkip, type ReplyTemplateId, type ReplyLang,
 } from '@shared/types/x-reply-types';
 
 /**
@@ -163,11 +163,18 @@ export interface PlanContext {
  *
  * 为什么要轮换而不是固定一个:X 判垃圾看重复度。连发同一句最容易被判水军。
  */
-export function pickTemplate(recentTemplateIds: ReplyTemplateId[] = []): ReplyTemplateId {
-  const recent = recentTemplateIds.slice(0, REPLY_TEMPLATES.length - 1);
-  const unused = REPLY_TEMPLATES.find((t) => !recent.includes(t.id));
-  // 全用过 → 取最久没用的(recent 末尾之后的那个)
-  return (unused ?? REPLY_TEMPLATES[REPLY_TEMPLATES.length - 1]).id;
+export function pickTemplate(
+  recentTemplateIds: ReplyTemplateId[] = [],
+  lang: ReplyLang = 'zh',
+): ReplyTemplateId {
+  // ⚠️ 只在**该语言**的模板里轮换 —— 给英文推回中文文案对方看不懂,
+  //    等于白发一条还留了垃圾记录。
+  const pool = templatesFor(lang);
+  if (pool.length === 0) throw new Error(`[x-reply] no template for lang=${lang}`);
+  const recent = recentTemplateIds.slice(0, pool.length - 1);
+  const unused = pool.find((t) => !recent.includes(t.id));
+  // 全用过 → 取最久没用的
+  return (unused ?? pool[pool.length - 1]).id;
 }
 
 function tweetUrlOf(t: TweetInboxRecord): string {
@@ -276,7 +283,9 @@ export async function planReplies(
       continue;
     }
 
-    const templateId = pickTemplate(recentTemplates);
+    // 语言由**推文**决定,不是全局设置 —— 一批里中英混杂是常态
+    const lang = langOf(t.lang);
+    const templateId = pickTemplate(recentTemplates, lang);
     recentTemplates.unshift(templateId);
     const template = REPLY_TEMPLATES.find((x) => x.id === templateId)!;
 
@@ -289,6 +298,9 @@ export async function planReplies(
       //    ref 按批次生成,故同一批里各条正文仍然完全相同。
       text: renderTemplate(template, ref),
       templateId,
+      lang,
+      /** 文案没有语料依据时透传给 UI 提示 —— 别让用户不知情地发新文案 */
+      needsHumanReview: template.needsHumanReview === true,
       ref,
       confidence: d.confidence,
       reason: d.reason,

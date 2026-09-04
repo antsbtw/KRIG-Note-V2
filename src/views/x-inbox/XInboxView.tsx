@@ -4,6 +4,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { SearchRecipe, TweetInboxRecord, TweetInboxStatus, FeedbackVerdict } from '@shared/types/x-timeline-types';
 import { DEFAULT_TASK_ID, normalizeHandle } from '@shared/types/x-timeline-types';
+import { ReplyDraftsView } from './ReplyDraftsView';
 
 interface XInboxViewProps {
   workspaceId: string;
@@ -481,7 +482,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const PAGE_SIZE = 20;
 
-  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign'>('inbox');
+  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign' | 'drafts'>('inbox');
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -732,6 +733,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
 
+  // ── 拟回复视图(批量规划草稿 → 逐条填入 X;红线:只填不发)──────
+  if (view === 'drafts') {
+    return <ReplyDraftsView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
   // ── 活动配置视图(per-ws 角色 + 文章 id)──────────────────────
   if (view === 'campaign') {
     return <CampaignConfigView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
@@ -774,6 +780,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         <div style={{ display: 'flex', gap: 6 }}>
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
+          <Btn onClick={() => setView('drafts')}>✎ 拟回复</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
           <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
           <Btn onClick={() => setView('campaign')}>⚙ 活动配置</Btn>

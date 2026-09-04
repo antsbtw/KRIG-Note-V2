@@ -18,12 +18,24 @@ import { textFingerprint, pickTemplate, DUPLICATE_FINGERPRINT_THRESHOLD } from
 import {
   REPLY_TEMPLATES, getTemplate, hasStaleShortLink, needsRef, REPLY_CONFIDENCE_FLOOR,
   buildRef, renderTemplate, REF_PLACEHOLDER, LANDING_BASE,
+  langOf, templatesFor, LINK_PARAMS,
 } from '../../src/shared/types/x-reply-types';
 
 const PLANNER = readFileSync(
   resolve(__dirname, '../../src/platform/main/x/x-reply-planner.ts'), 'utf-8');
 const HANDLERS = readFileSync(
   resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+const UI_RAW = readFileSync(
+  resolve(__dirname, '../../src/views/x-inbox/ReplyDraftsView.tsx'), 'utf-8');
+/**
+ * 去掉注释后的代码 —— 「禁止出现 X」这类守卫必须只看**代码**。
+ * 否则「本视图不存在任何一键全发」这句**说明它没做**的注释,
+ * 反而会把守卫弄红(踩过:首次写完就是这样),
+ * 之后为了让测试变绿去删注释,等于把最该留的说明删掉。
+ */
+const UI = UI_RAW
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 describe('红线:只填不发', () => {
   it('⭐ planner 不得有任何点击发布/回复按钮的动作', () => {
@@ -50,6 +62,52 @@ describe('红线:只填不发', () => {
       /pasteReply|pasteTweet/.test(body),
       '规划顺手就填进去了 —— 用户失去逐条过目的机会',
     ).toBe(false);
+  });
+});
+
+describe('UI:只填不发', () => {
+  it('⭐ 不得有「全部填入/一键全发」这类批量动作', () => {
+    // 逐条过目是这个功能的核心 —— 有了批量按钮,红线形同虚设
+    expect(
+      /全部填入|一键|批量发|fillAll|sendAll|replyAll/i.test(UI),
+      'UI 出现了批量发送入口 —— 逐条过目被绕过',
+    ).toBe(false);
+  });
+
+  it('⭐ UI 必须明示「不会替你点发布」', () => {
+    expect(UI_RAW).toMatch(/不会替你点发布/);
+  });
+
+  it('⭐ 填入后不得自动写 markReplied(填入 ≠ 已发布)', () => {
+    // 填进去你没点发布的话,这条得还能再出现;自动标已回复会让它永远消失
+    expect(
+      /markReplied/.test(UI),
+      '填入即标已回复 —— 没点发布的会被永久漏掉',
+    ).toBe(false);
+  });
+
+  it('⭐ 手改正文不得回写模板库', () => {
+    // 手滑污染模板会影响之后所有回复
+    expect(
+      /REPLY_TEMPLATES\s*[.[]\s*\w*\s*=|\.text\s*=\s*/.test(UI),
+      'UI 在写模板库 —— 手改应只作用于当前这一条',
+    ).toBe(false);
+  });
+
+  it('⭐ 英文文案的待审核提示必须真的渲染出来', () => {
+    expect(UI).toMatch(/needsHumanReview/);
+    expect(UI_RAW).toMatch(/没有语料依据/);
+  });
+
+  it('⭐ 跳过的条目要能展开看原因(不静默丢)', () => {
+    expect(UI).toMatch(/SKIP_LABEL/);
+    for (const k of ['duplicate_text', 'author_recent', 'blocked_author', 'low_confidence']) {
+      expect(UI, `跳过原因 ${k} 没有对应人话`).toContain(k);
+    }
+  });
+
+  it('⭐ 规划失败必须报错,不能留空列表装作「没什么可回的」', () => {
+    expect(UI_RAW).toMatch(/规划失败/);
   });
 });
 
@@ -191,15 +249,18 @@ describe('前置过滤不问模型', () => {
 
 describe('模板轮换(不问模型)', () => {
   it('⭐ 连续选取不重复 —— 避免连发同一句被判水军', () => {
-    const picked: string[] = [];
-    let recent: ReturnType<typeof pickTemplate>[] = [];
-    for (let i = 0; i < REPLY_TEMPLATES.length; i++) {
-      const id = pickTemplate(recent);
-      picked.push(id);
-      recent = [id, ...recent];
+    for (const lang of ['zh', 'en'] as const) {
+      const pool = templatesFor(lang);
+      const picked: string[] = [];
+      let recent: ReturnType<typeof pickTemplate>[] = [];
+      for (let i = 0; i < pool.length; i++) {
+        const id = pickTemplate(recent, lang);
+        picked.push(id);
+        recent = [id, ...recent];
+      }
+      expect(new Set(picked).size, `${lang} 轮换失效,${pool.length} 次里出现重复`)
+        .toBe(pool.length);
     }
-    expect(new Set(picked).size, `轮换失效,${REPLY_TEMPLATES.length} 次里出现重复`)
-      .toBe(REPLY_TEMPLATES.length);
   });
 
   it('⭐ 模板选择不得依赖模型返回', () => {
@@ -210,6 +271,53 @@ describe('模板轮换(不问模型)', () => {
       /decision|verdict|ollama|d\.template/i.test(body),
       'pickTemplate 又去看模型输出了 —— 那是在学噪声',
     ).toBe(false);
+  });
+});
+
+describe('中英文分流', () => {
+  it('⭐ 中文推用中文模板,其余一律英文', () => {
+    // 给英文推回中文文案,对方看不懂 = 白发一条还留垃圾记录
+    expect(langOf('zh')).toBe('zh');
+    expect(langOf('zh-Hans')).toBe('zh');
+    expect(langOf('en')).toBe('en');
+    expect(langOf('ja')).toBe('en');       // 非中文回退英文(国际通用)
+    expect(langOf(undefined)).toBe('en');
+  });
+
+  it('⭐ 两种语言都必须有可用模板(否则 pickTemplate 会 throw)', () => {
+    expect(templatesFor('zh').length).toBeGreaterThan(0);
+    expect(templatesFor('en').length).toBeGreaterThan(0);
+  });
+
+  it('⭐ 选出的模板语言必须与请求一致', () => {
+    for (const lang of ['zh', 'en'] as const) {
+      const id = pickTemplate([], lang);
+      expect(getTemplate(id).lang, `lang=${lang} 选出了别的语言的模板`).toBe(lang);
+    }
+  });
+
+  it('⭐ 链接参数按语言:中文 lang=zh&v=6,英文 lang=en&v=7', () => {
+    // 用户 2026-09-04 给定,两者均已实测 307 → 200
+    expect(LINK_PARAMS.zh).toBe('lang=zh&v=6');
+    expect(LINK_PARAMS.en).toBe('lang=en&v=7');
+    for (const t of REPLY_TEMPLATES) {
+      expect(t.text, `模板 ${t.id} 链接参数与其语言不符`).toContain(LINK_PARAMS[t.lang]);
+    }
+  });
+
+  it('⭐ 英文文案必须标 needsHumanReview(全库 0 条英文语料,是新写的)', () => {
+    // 语料里像英文句子的回复是 0 条 —— 那 115 条「无中文」全是数字和 emoji。
+    // 发出去的是产品承诺,不能让用户不知情地发未经检验的文案。
+    for (const t of templatesFor('en')) {
+      expect(t.needsHumanReview, `英文模板 ${t.id} 没标待审核`).toBe(true);
+    }
+  });
+
+  it('中文文案有语料依据,不该标待审核', () => {
+    for (const t of templatesFor('zh')) {
+      expect(t.needsHumanReview ?? false, `中文模板 ${t.id} 被误标待审核`).toBe(false);
+      expect(t.observedCount).toBeGreaterThan(0);
+    }
   });
 });
 
