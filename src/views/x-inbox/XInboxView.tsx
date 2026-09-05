@@ -1134,7 +1134,7 @@ interface NotifWatchSnapshot {
   payloads: number; total: number; byKind: Record<string, number>;
   belongs: number; recent: WatchEvent[]; secondsSinceLastPayload?: number;
   watchingUrl?: string; saved?: { inserted: number; existing: number };
-  stallWarning?: string;
+  stallWarning?: string; returns?: number;
 }
 
 interface WsRoleRow {
@@ -1426,6 +1426,12 @@ function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBa
             {watchSnap.stallWarning && (
               <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4, fontWeight: 600 }}>
                 ⚠ {watchSnap.stallWarning}
+              </div>
+            )}
+            {/* 被抢走的次数:自愈也要留痕,否则「页面老被抢」永远查不出来 */}
+            {watchSnap.returns !== undefined && watchSnap.returns > 0 && (
+              <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2 }}>
+                已自动跳回通知页 {watchSnap.returns} 次(页面被别的流程导航走过)
               </div>
             )}
             {watchSnap.watchingUrl && (

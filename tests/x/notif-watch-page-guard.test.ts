@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { canReceiveNotifications } from '@platform/main/x/x-notification-watch';
+import { canReceiveNotifications, shouldReturnToNotifications } from '@platform/main/x/x-notification-watch';
 
 describe('通知监听页面守卫 —— 挡「假绿灯」', () => {
   it('通知页:能收到载荷', () => {
@@ -52,5 +52,52 @@ describe('通知监听页面守卫 —— 挡「假绿灯」', () => {
     // 将来谁把 canReceiveNotifications 改宽,这里立刻红
     expect(canReceiveNotifications('https://x.com/home'))
       .not.toBe(broken('https://x.com/home'));
+  });
+});
+
+/**
+ * 页面被导航走后的**自动跳回**。
+ *
+ * ⚠️ 2026-09-04 用户实测:「有时候它会自动跳转到其他页面而无法捕捉 notification」。
+ *   同一个 X webview 被很多路径共用并 loadURL 走,最可能的是 /refresh 外部触发
+ *   (x-article-replies.ts:161)—— campaign-tasks 从别的机器随时敲,本机没人在场。
+ *   原先守卫只在**启动时**校验页面,跑起来后被抢走就只剩一条黄字,
+ *   而无人值守时没人看得见 —— 通知静默地断了。
+ */
+describe('页面漂移后自动跳回', () => {
+  const T0 = 1_000_000;
+
+  it('还在通知页 → 不动', () => {
+    expect(shouldReturnToNotifications('https://x.com/notifications', T0)).toBe(false);
+  });
+
+  it('⭐ 被导航到推文详情页(/refresh 抓回复会这么干)→ 必须跳回', () => {
+    expect(shouldReturnToNotifications(
+      'https://x.com/OTun_MyVPN/status/2095910972506427676', T0)).toBe(true);
+  });
+
+  it('被导航到首页 / compose 也要跳回', () => {
+    expect(shouldReturnToNotifications('https://x.com/home', T0)).toBe(true);
+    expect(shouldReturnToNotifications('https://x.com/compose/post', T0)).toBe(true);
+  });
+
+  it('⭐ 冷却期内不重复跳 —— 别跟正在干正事的流程抢 webview', () => {
+    // 刚跳过 5 秒,别人可能正在发推/抓回复,这时再抢会把人家的页面弄没
+    expect(shouldReturnToNotifications('https://x.com/home', T0 + 5_000, T0)).toBe(false);
+  });
+
+  it('冷却过后可以再跳', () => {
+    expect(shouldReturnToNotifications('https://x.com/home', T0 + 31_000, T0)).toBe(true);
+  });
+
+  it('取不到 URL(空串)也算漂移 —— 宁可跳回,不可静默收零', () => {
+    expect(shouldReturnToNotifications('', T0)).toBe(true);
+  });
+
+  /** 反向注入:守卫恒 false(从不跳回)时,漂移用例必须变红 */
+  it('反向注入:从不跳回时,漂移样本会暴露差异', () => {
+    const broken = (): boolean => false;
+    expect(shouldReturnToNotifications('https://x.com/home', T0))
+      .not.toBe(broken());
   });
 });

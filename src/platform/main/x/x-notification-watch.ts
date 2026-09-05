@@ -81,6 +81,8 @@ export interface WatchSnapshot {
   saved?: { inserted: number; existing: number };
   /** 非空 = 监听有异常,面板应变黄。不猜原因,把可能性列清楚给人判断 */
   stallWarning?: string;
+  /** 自动跳回通知页的次数 —— 让「页面老被抢走」这件事可见而非无声自愈 */
+  returns?: number;
 }
 
 interface WatchState {
@@ -101,6 +103,9 @@ interface WatchState {
   saved: { inserted: number; existing: number };
   /** 已留档的「解析出 0 条」样本数 —— 限量,避免 X 每 10s 重发刷爆目录 */
   zeroArchived: number;
+  /** 自动回通知页:上次导航时刻(冷却用)与累计次数(给人看) */
+  lastReturnAt?: number;
+  returns: number;
   /**
    * 心跳 —— **卡住的守卫必须自己能响**。
    *
@@ -164,6 +169,46 @@ function archiveIfNew(state: WatchState, found: Interaction[], body: string): vo
     // 留档失败不影响监听主流程,但要说出来 —— 否则「样本怎么一直没攒下」查不到原因
     console.warn('[notif-watch] 载荷留档失败:', err);
   }
+}
+
+/**
+ * 页面被别处导航走时,**自动跳回通知页**。
+ *
+ * ⚠️ 2026-09-04 用户实测:「有时候它会自动跳转到其他页面而无法捕捉 notification」。
+ *   同一个 X webview 被很多路径共用,都会 loadURL 走:
+ *     - /refresh 外部触发 → fetchArticleReplies(x-article-replies.ts:161)
+ *       ← **最可能的元凶**:campaign-tasks 从别的机器随时敲,本机没人在场
+ *     - 试抓 / 抓通知 / 发推 / 配方扫描……
+ *   原先的守卫只在**启动时**校验页面,跑起来之后被导航走就只剩一条黄字警告,
+ *   而无人值守时没人看得见 —— 通知就这么静默地断了。
+ *
+ * 策略:发现不在通知页就导航回去,但**留够冷却**(30s),
+ *   避免与正在用该 webview 干正事的流程(发推、抓回复)互相打架、
+ *   把人家的页面反复抢走。次数计入快照,让「老被抢」可见而不是无声自愈。
+ */
+export function shouldReturnToNotifications(
+  url: string, now: number, lastReturnAt?: number, cooldownMs = 30_000,
+): boolean {
+  if (canReceiveNotifications(url)) return false;         // 还在通知页,不动
+  if (lastReturnAt && now - lastReturnAt < cooldownMs) return false;  // 冷却中
+  return true;
+}
+
+function returnToNotificationsIfDrifted(): void {
+  if (!watch) return;
+  const wc = allWebContents.fromId(watch.wcId);
+  if (!wc || wc.isDestroyed()) return;
+  const url = (() => { try { return wc.getURL(); } catch { return ''; } })();
+  const now = Date.now();
+  if (!shouldReturnToNotifications(url, now, watch.lastReturnAt)) return;
+  watch.lastReturnAt = now;
+  watch.returns++;
+  console.warn(`[notif-watch] 页面被导航到 ${url || '未知'} —— 自动跳回通知页`
+    + `(第 ${watch.returns} 次)`);
+  wc.loadURL('https://x.com/notifications').catch((err) => {
+    // 跳不回去要说出来,否则又是「看着在监听、其实收不到」
+    console.error('[notif-watch] ⚠️ 自动跳回通知页失败:', err);
+  });
 }
 
 /**
@@ -234,8 +279,9 @@ function snapshot(): WatchSnapshot {
   const idleMs = Date.now() - (watch.lastPayloadAt ?? watch.startedAt);
   let stallWarning: string | undefined;
   if (!canReceiveNotifications(url)) {
-    stallWarning = `页面已离开通知页(当前:${url || '未知'})—— X 不再发通知载荷,`
-      + `请切回 🔔 通知页`;
+    stallWarning = `页面被导航到「${url || '未知'}」—— X 不再发通知载荷,`
+      + `正在自动跳回通知页(已跳回 ${watch.returns} 次);若反复发生,`
+      + `多半是 /refresh 外部触发或试抓在抢同一个 webview`;
   } else if (watch.payloads === 0 && idleMs > 20_000) {
     stallWarning = `已等 ${Math.round(idleMs / 1000)}s 仍未收到任何通知载荷 —— `
       + `可能是登录态失效,或 CDP 被别处占用(试抓/抓通知正在跑)`;
@@ -258,6 +304,7 @@ function snapshot(): WatchSnapshot {
     watchingUrl: url,
     saved: watch.saved,
     stallWarning,
+    returns: watch.returns,
   };
 }
 
@@ -308,6 +355,7 @@ export async function startNotifWatch(
     wsId: acc ? wsId : undefined, ownerHandle: acc?.handle,
     saved: { inserted: 0, existing: 0 },
     zeroArchived: 0,
+    returns: 0,
     // 占位,attach 成功后立刻换成真心跳(见下方 state.heartbeat = ...)
     heartbeat: setInterval(() => {}, 1 << 30),
     seen: new Map(), events: [], payloads: 0,
@@ -399,7 +447,10 @@ export async function startNotifWatch(
   // 每 10s 推一次快照:没有载荷时 stallWarning 才送得出去,
   // 「上次收到 N 秒前」也才会自己往上走(否则停在最后一次正常值上)
   clearInterval(state.heartbeat);
-  state.heartbeat = setInterval(() => broadcast(), 10_000);
+  state.heartbeat = setInterval(() => {
+    returnToNotificationsIfDrifted();   // 被抢走就自己回来,不干等人来看黄字
+    broadcast();
+  }, 10_000);
 
   watch = state;
   console.log('[notif-watch] 开始监听通知(不导航、不滚动,收 X 自己的刷新)'
