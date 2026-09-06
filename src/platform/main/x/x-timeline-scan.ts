@@ -103,6 +103,12 @@ export function buildSearchUrl(recipe: SearchRecipe): string {
     parts.push(`(${recipe.helpSignals.map((s) => `"${s}"`).join(' OR ')})`);
   }
 
+  // ⚠️ include:replies **未经实机验证**(设计 §4.4⑤(a) 明令必须先 spike):
+  //    X 搜索对它的支持时有变化,还有 filter:replies / to: 两种写法。
+  //    照文档假设正是 selector 屡次翻车的老路 —— 故这里只在**显式开启**时才拼,
+  //    且开启后必须实机核对「搜出来的结果里真的有回复」才能信。
+  if (recipe.includeReplies) parts.push('include:replies');
+
   if (recipe.minLikes) parts.push(`min_faves:${recipe.minLikes}`);
   if (recipe.minRetweets) parts.push(`min_retweets:${recipe.minRetweets}`);
   if (recipe.lang) parts.push(`lang:${recipe.lang}`);

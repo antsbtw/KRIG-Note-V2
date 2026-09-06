@@ -23,7 +23,8 @@ import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
-import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
+import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
+  watchAuthor, unwatchAuthor, listWatched, getAuthorStats } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
 import { getWsRole, setWsRole, listWsRoles,
   setWsAccount, getWsAccount, requireWsAccount, listWsAccounts } from '../db/x-ws-role-repo';
@@ -893,6 +894,14 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'tweet_id / ai_text / final_text 必填' };
     }
     try {
+      // ⑤ n=1 自动入列:回复过的人进追踪名单(设计 §3.4「自动入列 + watch_depth=1」)。
+      // ⚠️ 只在 action='filled' 时入列 —— dismissed 表示「不该回」,不该因此追踪他。
+      // ⚠️ 失败不拦主流程:反馈记录比入列重要,后者可事后补。
+      if (p.action !== 'dismissed' && typeof p.author_handle === 'string' && p.author_handle) {
+        await watchAuthor(p.author_handle, { source: 'replied', depth: 1 })
+          .catch((e: unknown) => console.warn('[x-timeline-handlers] 自动入列失败:', e));
+      }
+
       await insertReplyFeedback({
         tweet_id:   p.tweet_id,
         tweet_text: typeof p.tweet_text === 'string' ? p.tweet_text : '',
@@ -928,6 +937,33 @@ export function registerXTimelineHandlers(): void {
       return { success: true, readiness: await getReadiness() };
     } catch (err) {
       return { success: false, error: String(err), readiness: [] };
+    }
+  });
+
+  // X_WATCHLIST — 追踪名单读写(需求 ②⑤)。
+  // ⚠️ 措辞:一律「追踪名单」,**不出现「关注」**(设计 §0)——
+  //    这是本 app 的采集清单,与 X 的 follow 无关。
+  ipcMain.handle(IPC_CHANNELS.X_WATCHLIST, async (_e, payload: unknown) => {
+    const p = payload as { op?: unknown; handle?: unknown; note?: unknown } | null;
+    try {
+      if (p?.op === 'add' && typeof p.handle === 'string') {
+        await watchAuthor(p.handle, {
+          source: 'manual', depth: 0,
+          note: typeof p.note === 'string' ? p.note : undefined,
+        });
+      } else if (p?.op === 'remove' && typeof p.handle === 'string') {
+        await unwatchAuthor(p.handle);
+      } else if (p?.op !== 'list') {
+        return { success: false, error: `未知操作:${String(p?.op)}`, watched: [] };
+      }
+      // 名单 + 每人的聚合统计(按需算,不存计数字段 —— 设计 §4.1(4))
+      const watched = await listWatched();
+      const withStats = await Promise.all(watched.map(async (w) => ({
+        ...w, stats: await getAuthorStats(w.handle).catch(() => null),
+      })));
+      return { success: true, watched: withStats };
+    } catch (err) {
+      return { success: false, error: String(err), watched: [] };
     }
   });
 

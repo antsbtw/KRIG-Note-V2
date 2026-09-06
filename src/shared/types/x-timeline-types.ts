@@ -22,6 +22,15 @@ export interface SearchRecipe {
   lang?: string;                 // 'en' | 'zh' 等
   sinceHours?: number;           // 默认 24
   resultType: 'latest' | 'top';
+  /**
+   * 是否连回复一起抓(追踪名单需要:设计 §4.4⑤ 要「推文和回复」都追)。
+   *
+   * ⚠️ **语法未经实机验证** —— 设计文档 §4.4⑤(a) 明确警告:
+   * X 搜索对 `include:replies` 的支持时有变化,也有 `filter:replies` / `to:` 的写法,
+   * 「实施前必须实机 spike 确认哪个真的有效,不能照文档假设」。
+   * 故 buildSearchUrl 里这一段**默认不启用**,等实机验证后再开。
+   */
+  includeReplies?: boolean;
   intervalMinutes: number;
   lastRunAt?: string;            // ISO datetime
 }

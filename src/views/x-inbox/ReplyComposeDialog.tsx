@@ -114,6 +114,8 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
       trigger:     draft.trace?.trigger,
       ai_reason:   draft.reason,
       in_thread:   draft.inThread,
+      // ⑤ n=1 自动入列要用(回复过的人进追踪名单)
+      author_handle: draft.authorHandle,
     }).catch((e: unknown) => {
       // 记不上不该挡住主流程,但要留痕 —— 否则判据会悄悄少样本
       console.error('[ReplyComposeDialog] 反馈记录失败:', e);

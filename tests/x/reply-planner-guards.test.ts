@@ -188,6 +188,64 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
   });
 });
 
+describe('追踪名单(watchlist)', () => {
+  const REPO = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+  const HAND = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+
+  it('⭐ 措辞:代码里不许把追踪叫「关注」(会和 X 的 follow 混淆)', () => {
+    // 设计文档 §0 明令。混用会让人以为改这里会动 X 上的关注关系。
+    const code = stripComments(REPO) + stripComments(HAND);
+    const bad = [...code.matchAll(/关注(名单|列表|某人|了他)/g)].map((m) => m[0]);
+    expect(bad, `出现了「关注」措辞:${bad.join(',')}`).toEqual([]);
+  });
+
+  it('⭐ 移出名单只清标记,绝不删行', () => {
+    // 同一行还挂着 blocked / 画像计数 / is_self,删行会连带丢掉别的意志
+    const fn = REPO.slice(REPO.indexOf('export async function unwatchAuthor'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    expect(body).toMatch(/UPDATE x_author SET watched = false/);
+    expect(/DELETE/.test(body), 'unwatch 在删行 —— 会丢掉同一行上的其它意志').toBe(false);
+  });
+
+  it('⭐ 追踪与屏蔽互斥 —— 加入追踪要清掉 blocked', () => {
+    // 两个都为 true 是矛盾状态,不能留给查询端各自解释
+    const fn = REPO.slice(REPO.indexOf('export async function watchAuthor'));
+    expect(fn.slice(0, fn.indexOf('\n}'))).toMatch(/blocked = false/);
+  });
+
+  it('⭐ 统计按需聚合,不在 x_author 存计数字段', () => {
+    // 设计 §4.1(4):那些是第三层计算属性,混进「人」表是层次不清,
+    // 且计数字段与真实数据不同步是最常见的 bug 源
+    expect(REPO).toMatch(/export async function getAuthorStats/);
+    const schema = readFileSync(
+      resolve(__dirname, '../../src/storage/surreal/x-schema.ts'), 'utf-8');
+    const seg = schema.slice(schema.indexOf('DEFINE TABLE IF NOT EXISTS x_author'),
+      schema.indexOf('DEFINE TABLE IF NOT EXISTS x_tweet'));
+    expect(/seen_count|replied_count|accepted_count/.test(seg),
+      '计数字段又混进 x_author 了 —— 那是可重算的第三层属性').toBe(false);
+  });
+
+  it('⭐ n=1 自动入列只在真回复时触发,dismissed 不入列', () => {
+    // dismissed 表示「这条不该回」,不该因此追踪这个人
+    const seg = HAND.slice(HAND.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/action !== 'dismissed'[\s\S]{0,200}watchAuthor/);
+  });
+
+  it('⭐ n≥2 不实现(设计 §3.4:先看清 n=1 的真实规模)', () => {
+    // 预先实现会爆炸,门槛得看真实数据说话
+    expect(REPO).toMatch(/n≥2\s*\*\*不实现\*\*|n≥2.{0,10}不实现/);
+  });
+
+  it('include:replies 必须标注未经实机验证', () => {
+    // 设计 §4.4⑤(a) 明令先 spike;照文档假设正是 selector 屡次翻车的老路
+    const scan = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
+    expect(scan).toMatch(/未经实机验证/);
+  });
+});
+
 describe('账号画像:去挖事实,不靠猜', () => {
   const PROFILE = readFileSync(
     resolve(__dirname, '../../src/platform/main/x/x-author-profile.ts'), 'utf-8');

@@ -269,3 +269,136 @@ export async function getBlockedHandleSet(): Promise<string[]> {
   );
   return (res[0] ?? []).map((r) => r.handle);
 }
+
+
+// ── 追踪名单(watchlist)—— 需求 ②⑤ ────────────────────────────────
+//
+// ⚠️ **措辞**:一律叫「追踪名单 / watchlist」,**不许出现「关注」二字**
+// (设计文档 §0 明令)。这是**本 app 内部的采集清单**,与 X 上的 follow
+// 毫无关系:可以追踪一个没关注的人,也可以不追踪已关注的好友。
+// 混用措辞会让人以为改这里会动 X 上的关注关系。
+
+export interface WatchedAuthor {
+  handle: string;
+  watchedAt?: string;
+  /** 怎么进来的:'manual'=手动加 / 'replied'=回复过他自动入列 */
+  watchSource?: string;
+  /** 关系层数。n=0 手动、n=1 自动入列;**n≥2 不实现**(设计 §3.4:
+   *  等 n=1 跑一段时间看清真实规模再定门槛,避免爆炸) */
+  watchDepth: number;
+  note?: string;
+}
+
+/**
+ * 加入追踪名单。
+ *
+ * ⚠️ 与 blocked **互斥**:屏蔽和追踪是相反的意志,同时为真是矛盾状态。
+ * 这里显式清掉 blocked,而不是放任两个都为 true 让查询端各自解释。
+ */
+export async function watchAuthor(
+  handle: string,
+  opts: { source?: string; depth?: number; note?: string } = {},
+): Promise<void> {
+  const h = normalizeHandle(handle);
+  if (!h) throw new Error('[x-author-repo] watchAuthor: empty handle after normalize');
+
+  const db = getXDB();
+  const params = {
+    handle: h,
+    src: opts.source ?? 'manual',
+    depth: opts.depth ?? 0,
+    note: opts.note ?? undefined,
+  };
+  const existing = await db.query<[AuthorRow[]]>(
+    `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
+  );
+  const setClause = `watched = true, watched_at = time::now(),
+    watch_source = $src, watch_depth = $depth, note = $note,
+    blocked = false, blocked_at = NONE, blocked_reason = NONE`;
+  if ((existing[0] ?? []).length > 0) {
+    await db.query(`UPDATE x_author SET ${setClause} WHERE handle = $handle`, params);
+  } else {
+    await db.query(`CREATE x_author SET handle = $handle, ${setClause}`, params);
+  }
+}
+
+/**
+ * 移出追踪名单。
+ *
+ * ⚠️ **只清 watched 标记,绝不删行** —— 同一行上还挂着 blocked、画像计数、
+ * is_self 等其它意志,删行会连带丢掉(与 unblockAuthor 同款约束,见该函数注释)。
+ */
+export async function unwatchAuthor(handle: string): Promise<void> {
+  const h = normalizeHandle(handle);
+  if (!h) throw new Error('[x-author-repo] unwatchAuthor: empty handle after normalize');
+  await getXDB().query(
+    `UPDATE x_author SET watched = false, watched_at = NONE,
+       watch_source = NONE WHERE handle = $handle`,
+    { handle: h },
+  );
+}
+
+export async function listWatched(): Promise<WatchedAuthor[]> {
+  const res = await getXDB().query<[Array<Record<string, unknown>>]>(
+    `SELECT handle, watched_at, watch_source, watch_depth, note
+       FROM x_author WHERE watched = true ORDER BY watched_at DESC`,
+  );
+  return (res[0] ?? []).map((r) => ({
+    handle: String(r.handle),
+    watchedAt: r.watched_at ? String(r.watched_at) : undefined,
+    watchSource: r.watch_source ? String(r.watch_source) : undefined,
+    watchDepth: typeof r.watch_depth === 'number' ? r.watch_depth : 1,
+    note: r.note ? String(r.note) : undefined,
+  }));
+}
+
+export async function isWatched(handle: string): Promise<boolean> {
+  const h = normalizeHandle(handle);
+  if (!h) return false;
+  const res = await getXDB().query<[AuthorRow[]]>(
+    `SELECT handle FROM x_author WHERE handle = $handle AND watched = true LIMIT 1`,
+    { handle: h },
+  );
+  return (res[0] ?? []).length > 0;
+}
+
+/**
+ * 账号统计 —— **按需聚合,不存计数字段**。
+ *
+ * 设计 §4.1(4) 明确:first_seen/seen_count/replied_count 这类是
+ * **第三层的计算属性,可从「事」重算**,不该混进 x_author(层次不清)。
+ * 万级数据量直接 GROUP BY 完全够用,零维护成本、永不失真。
+ * 等真慢了再物化成 x_author_stats。
+ */
+export interface AuthorStats {
+  handle: string;
+  seenTweets: number;
+  repliedCount: number;
+  acceptedCount: number;
+  firstSeen?: string;
+  lastSeen?: string;
+}
+
+export async function getAuthorStats(handle: string): Promise<AuthorStats> {
+  const h = normalizeHandle(handle);
+  const db = getXDB();
+  const res = await db.query<[
+    Array<{ c: number }>, Array<{ c: number }>, Array<{ c: number }>,
+    Array<{ t: string }>, Array<{ t: string }>,
+  ]>(
+    `SELECT count() AS c FROM x_tweet WHERE author_handle = $h GROUP ALL;
+     SELECT count() AS c FROM x_tweet WHERE author_handle = $h AND replied = true GROUP ALL;
+     SELECT count() AS c FROM x_tweet WHERE author_handle = $h AND accepted = true GROUP ALL;
+     SELECT VALUE fetched_at AS t FROM x_tweet WHERE author_handle = $h ORDER BY fetched_at ASC LIMIT 1;
+     SELECT VALUE fetched_at AS t FROM x_tweet WHERE author_handle = $h ORDER BY fetched_at DESC LIMIT 1;`,
+    { h },
+  );
+  return {
+    handle: h,
+    seenTweets: res?.[0]?.[0]?.c ?? 0,
+    repliedCount: res?.[1]?.[0]?.c ?? 0,
+    acceptedCount: res?.[2]?.[0]?.c ?? 0,
+    firstSeen: res?.[3]?.[0] ? String(res[3][0]) : undefined,
+    lastSeen: res?.[4]?.[0] ? String(res[4][0]) : undefined,
+  };
+}
