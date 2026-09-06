@@ -68,7 +68,10 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
     let cancelled = false;
     (async () => {
       try {
-        const r = await api()?.planOneReply(workspaceId, tweet.tweet_id);
+        // ⚠️ 必须传 wcId:画像采集/父推抓取都要驱动本 ws 的 X webview,
+        //    不传会回退到只在 X 视图挂载时才有值的登记表 → 静默失败
+        const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+        const r = await api()?.planOneReply(workspaceId, tweet.tweet_id, wcId);
         if (cancelled) return;
         if (!r?.success) {
           // fail loud:不给个空框让人以为「AI 没什么可说的」

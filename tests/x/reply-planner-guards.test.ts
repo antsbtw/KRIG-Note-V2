@@ -573,6 +573,34 @@ describe('ref 归因不许猜', () => {
   });
 });
 
+describe('驱动 webview 的路径都要显式传 wcId', () => {
+  // ⚠️ 这个坑 2026-09-06 一天踩了两次(spike、画像采集):
+  //    不传 wcId → resolveXWebContents 回退到「登记表」,
+  //    而登记表只在 X 视图**挂载时**才有值 —— 用户停在收件箱页面时它是空的,
+  //    于是静默失败(画像采不到、上文抓不到),而界面毫无异常。
+  //    实测后果:全库 3458 个作者只有 1 个采到画像。
+  const H = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+
+  it('⭐ 画像采集必须用调用方传的 wcId,不能传 undefined', () => {
+    expect(H).toMatch(/harvestAuthorProfile\(posterHandle, callerWcId/);
+    expect(
+      /harvestAuthorProfile\([^,]+,\s*undefined/.test(stripComments(H)),
+      '画像采集又传 undefined 了 —— 收件箱页面下会静默采不到',
+    ).toBe(false);
+  });
+
+  it('⭐ 抓父推同样要传 wcId', () => {
+    expect(H).toMatch(/callerWcId, 10_000/);
+  });
+
+  it('⭐ 弹窗必须把 wcId 传下去', () => {
+    const d = readFileSync(
+      resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+    expect(d).toMatch(/planOneReply\(workspaceId, tweet\.tweet_id, wcId\)/);
+  });
+});
+
 describe('② 关系视角(活跃度信号)', () => {
   const AR = readFileSync(
     resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');

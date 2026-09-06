@@ -1095,8 +1095,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return ipcRenderer.invoke(IPC_CHANNELS.X_REPLAY_REPLIES, { wsId, accept, reject, lang });
     },
     /** 为单条推文现写回复(卡片弹窗;只产草稿,发布永远由用户点) */
-    planOneReply(wsId: string, tweetId: string) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_ONE_REPLY, { wsId, tweetId });
+    planOneReply(wsId: string, tweetId: string, wcId?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_ONE_REPLY, { wsId, tweetId, wcId });
     },
     /** 记学习期反馈(AI 原文 vs 用户最终发的) */
     submitReplyFeedback(payload: unknown) {

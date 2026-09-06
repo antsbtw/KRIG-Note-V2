@@ -801,10 +801,15 @@ export function registerXTimelineHandlers(): void {
   // 与 X_PLAN_REPLIES 的区别:那个是批量预扫,这个是用户点开某条时按需生成。
   // ⚠️ 同样只产草稿,不碰发布。
   ipcMain.handle(IPC_CHANNELS.X_PLAN_ONE_REPLY, async (_e, payload: unknown) => {
-    const p = payload as { wsId?: unknown; tweetId?: unknown } | null;
+    const p = payload as { wsId?: unknown; tweetId?: unknown; wcId?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId || typeof p.tweetId !== 'string') {
       return { success: false, error: 'wsId 与 tweetId 必填' };
     }
+    // ⚠️ 必须由 renderer 显式传 wcId:不传的话 resolveXWebContents 回退到
+    //    「登记表」,而登记表只在 X 视图挂载时才有值 —— 用户在收件箱页面时
+    //    它是空的,画像采集与父推抓取都会静默失败(2026-09-06 实测:
+    //    全库只有 1 个画像,还是走别的路径采的)。与 spike 那次同款的坑。
+    const callerWcId = typeof p.wcId === 'number' ? p.wcId : undefined;
     try {
       // ⚠️ 三次 5000 行查询原本是**串行**的,加上模型两趟调用,单条要 ~27s。
       //    这里改并行取数 + 单次模型调用(planOneReply),两处都是用户
@@ -849,7 +854,7 @@ export function registerXTimelineHandlers(): void {
           && (Date.now() - new Date(cached.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
         let prof = fresh ? cached : null;
         if (!prof) {
-          const got = await harvestAuthorProfile(posterHandle, undefined, 12_000)
+          const got = await harvestAuthorProfile(posterHandle, callerWcId, 12_000)
             .catch((e) => ({ error: String(e) }));
           if (!('error' in got)) prof = got;
           else console.warn(`[x-timeline-handlers] 画像采集失败(不拦回复):${got.error}`);
@@ -886,7 +891,7 @@ export function registerXTimelineHandlers(): void {
       } else if (looksReply) {
         const got = await fetchParentTweet(
           found.tweet_url || `https://x.com/i/status/${found.tweet_id}`,
-          undefined, 10_000,
+          callerWcId, 10_000,
         ).catch(() => null);
         if (got) parentTweet = { text: got.text, authorHandle: got.authorHandle };
         else console.warn(`[x-timeline-handlers] 上文没取到(${found.tweet_id}),模型会被告知「没看到」`);

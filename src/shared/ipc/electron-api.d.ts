@@ -844,7 +844,7 @@ declare global {
           error?: string;
         }>;
         /** 为单条推文现写回复(只产草稿) */
-        planOneReply(wsId: string, tweetId: string): Promise<{
+        planOneReply(wsId: string, tweetId: string, wcId?: number): Promise<{
           success: boolean;
           draft?: import('@shared/types/x-reply-types').ReplyDraft | null;
           skip?: import('@shared/types/x-reply-types').ReplySkip | null;
