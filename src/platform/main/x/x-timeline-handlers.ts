@@ -21,6 +21,7 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
+import { probeSearchSyntax } from './x-search-syntax-spike';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
@@ -964,6 +965,23 @@ export function registerXTimelineHandlers(): void {
       return { success: true, watched: withStats };
     } catch (err) {
       return { success: false, error: String(err), watched: [] };
+    }
+  });
+
+  // X_SEARCH_SYNTAX_SPIKE — 实测哪种搜索写法能连回复一起搜到。
+  // 设计 §4.4⑤(a) 明令必须先 spike 再实施,不能照文档假设。
+  ipcMain.handle(IPC_CHANNELS.X_SEARCH_SYNTAX_SPIKE, async (_e, payload: unknown) => {
+    const p = payload as { handle?: unknown; wcId?: unknown } | null;
+    if (!p || typeof p.handle !== 'string' || !p.handle) {
+      return { success: false, error: '需要 handle(选一个你知道他最近回复过别人的账号)' };
+    }
+    try {
+      const r = await probeSearchSyntax(
+        p.handle, typeof p.wcId === 'number' ? p.wcId : undefined);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, ...r };
+    } catch (err) {
+      return { success: false, error: String(err) };
     }
   });
 

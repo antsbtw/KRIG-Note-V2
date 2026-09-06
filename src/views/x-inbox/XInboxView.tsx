@@ -6,6 +6,7 @@ import type { SearchRecipe, TweetInboxRecord, TweetInboxStatus, FeedbackVerdict 
 import { DEFAULT_TASK_ID, normalizeHandle } from '@shared/types/x-timeline-types';
 import { ReplyDraftsView } from './ReplyDraftsView';
 import { ReplyComposeDialog } from './ReplyComposeDialog';
+import { WatchlistView } from './WatchlistView';
 
 interface XInboxViewProps {
   workspaceId: string;
@@ -483,7 +484,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const PAGE_SIZE = 20;
 
-  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign' | 'drafts'>('inbox');
+  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign' | 'drafts' | 'watchlist'>('inbox');
   /** 正在为哪条推写回复(卡片「送入回复」弹窗) */
   const [composeFor, setComposeFor] = useState<TweetInboxRecord | null>(null);
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
@@ -734,6 +735,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
 
+  // ── 追踪名单(需求②⑤;≠ X 的关注)────────────────────────────
+  if (view === 'watchlist') {
+    return <WatchlistView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
   // ── 回放验证台(拿历史标注离线验生成质量;日常回复走卡片弹窗)──────
   if (view === 'drafts') {
     return <ReplyDraftsView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
@@ -783,6 +789,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
           <Btn onClick={() => setView('drafts')}>🔁 回放验证</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
+          <Btn onClick={() => setView('watchlist')}>👁 追踪名单</Btn>
           <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
           <Btn onClick={() => setView('campaign')}>⚙ 活动配置</Btn>
           <Btn onClick={() => setView('capture')}>🔬 采集验证</Btn>

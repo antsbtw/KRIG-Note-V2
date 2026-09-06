@@ -1106,6 +1106,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     replyReadiness() {
       return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_READINESS);
     },
+    /** 追踪名单增删查(≠ X 的关注) */
+    watchlist(op: 'list' | 'add' | 'remove', handle?: string, note?: string) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST, { op, handle, note });
+    },
+    /** 实测哪种搜索写法能带回复(设计要求先 spike) */
+    searchSyntaxSpike(handle: string, wcId?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_SEARCH_SYNTAX_SPIKE, { handle, wcId });
+    },
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
     queryFeedback: (payload: unknown) =>

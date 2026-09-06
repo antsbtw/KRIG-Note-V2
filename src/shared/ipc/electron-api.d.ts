@@ -858,6 +858,26 @@ declare global {
           readiness?: Array<{ lang: 'zh' | 'en'; filled: number; unedited: number; passRate: number; ready: boolean }>;
           error?: string;
         }>;
+        /** 追踪名单增删查(≠ X 的关注) */
+        watchlist(op: 'list' | 'add' | 'remove', handle?: string, note?: string): Promise<{
+          success: boolean;
+          watched?: Array<{
+            handle: string; watchedAt?: string; watchSource?: string;
+            watchDepth: number; note?: string;
+            stats?: { seenTweets: number; repliedCount: number; acceptedCount: number;
+                      firstSeen?: string; lastSeen?: string } | null;
+          }>;
+          error?: string;
+        }>;
+        /** 实测哪种搜索写法能带回复 */
+        searchSyntaxSpike(handle: string, wcId?: number): Promise<{
+          success: boolean;
+          handle?: string;
+          probes?: Array<{ key: string; query: string; total: number; replies: number;
+                           noResults: boolean; sample: string[] }>;
+          verdict?: string;
+          error?: string;
+        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;
