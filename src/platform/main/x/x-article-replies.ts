@@ -14,6 +14,9 @@
  *   跨角色复用会被定时搜索导航打断,现象是「活动偶尔抓不到」,极难定位。
  */
 
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { app } from 'electron';
 import { harvestTimeline, extractTweetsFrom, type HarvestedTweet } from './x-timeline-harvester';
 import { resolveXWebContents, resolveAnyXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
@@ -143,7 +146,21 @@ export async function fetchArticleReplies(
           if (!r?.body) return;
           payloads++;
           // 只吃详情页的响应 —— 侧边推荐、谁可以关注等接口一律不要
-          if (u.includes('TweetDetail')) detailPayloads++;
+          if (u.includes('TweetDetail')) {
+            detailPayloads++;
+            // 原始载荷留档 —— 「展开『显示更多回复』」和「什么才算翻完了」
+            // 这两件事都必须照真实 cursor 结构写,不能猜(照抄 twikit 的
+            // recipe 曾导致一条都解不出来)。而此前 TweetDetail 一份都没留过。
+            try {
+              const dir = join(app.getPath('userData'), 'x-payload-survey');
+              mkdirSync(dir, { recursive: true });
+              writeFileSync(
+                join(dir, `detail-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
+                r.body, 'utf-8');
+            } catch (err) {
+              console.warn('[x-article-replies] TweetDetail 留档失败:', err);
+            }
+          }
           try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
         })
         .catch(() => { /* 响应体可能已丢弃 */ });
@@ -189,7 +206,23 @@ export async function fetchArticleReplies(
 
       if (own.length === lastOwn) {
         noGrowth++;
-        if (noGrowth >= 4) break;             // 连续 4 轮没有新的本文章回复 → 翻完了
+        if (noGrowth >= 4) {
+          // ⚠️ 「连续 N 轮无新增」**不等于**「翻完了」——
+          //   X 详情页把一部分回复藏在「Show more replies」和
+          //   「可能是垃圾内容」折叠区里,**必须点击才展开**,而本函数只滚不点
+          //   (2026-09-06 查实:整个 x 模块没有任何展开逻辑)。
+          //   滚到底之后不点开就永远不会有新数据 → noGrowth 必然攒到 4 → break,
+          //   于是「没抓完」被当成「回复翻完了」。
+          //   这与时间线丢 83% 那次(commit a9d9bc75)是同一形态。
+          //
+          //   治本要展开折叠区 + 改用 cursor 耗尽做判据(待 TweetDetail 载荷到手)。
+          //   在此之前**至少不许谎报完整**:标 partial,让 campaign-tasks 知道
+          //   「本次没抓完」,而不是把它当成「这个人没留言」(契约 §3.3)。
+          partial = true;
+          problems.push(`滚动 ${i} 轮后连续 ${noGrowth} 轮无新增即停 —— `
+            + `**未展开「显示更多回复」/ 折叠区**,可能还有回复没抓到(非「已翻完」)`);
+          break;
+        }
       } else {
         noGrowth = 0;
         lastOwn = own.length;
