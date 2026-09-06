@@ -12,7 +12,7 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
-import type { ReplyLang, ReplySource } from '@shared/types/x-reply-types';
+import type { ReplyLang, ReplySource, PosterKind } from '@shared/types/x-reply-types';
 
 export interface ReplyFeedback {
   tweet_id: string;
@@ -29,6 +29,16 @@ export interface ReplyFeedback {
   confidence?: number;
   ref?: string;
   ws_id?: string;
+  /** ① 发推者判断 —— ⚠️模型据正文推断,非查证事实(库里无账号资料) */
+  poster_kind?: PosterKind;
+  /** ① 凭什么这么判 */
+  poster_read?: string;
+  /** ② 因由:对方为什么发这条推 */
+  trigger?: string;
+  /** ③ 之前的判断理由(worth 的 reason) */
+  ai_reason?: string;
+  /** 这条推是否在回复串里(AI 没看到上文) */
+  in_thread?: boolean;
   created_at: string;
 }
 
@@ -39,13 +49,20 @@ export async function insertReplyFeedback(fb: ReplyFeedback): Promise<void> {
       tweet_id: $tweet_id, tweet_text: $tweet_text, lang: $lang,
       ai_text: $ai_text, source: $source, final_text: $final_text,
       edited: $edited, action: $action, confidence: $confidence,
-      ref: $ref, ws_id: $ws_id, created_at: $created_at
+      ref: $ref, ws_id: $ws_id, created_at: $created_at,
+      poster_kind: $poster_kind, poster_read: $poster_read,
+      trigger: $trigger, ai_reason: $ai_reason, in_thread: $in_thread
     }`,
     {
       ...fb,
       confidence: fb.confidence ?? undefined,
       ref: fb.ref ?? undefined,
       ws_id: fb.ws_id ?? undefined,
+      poster_kind: fb.poster_kind ?? undefined,
+      poster_read: fb.poster_read ?? undefined,
+      trigger: fb.trigger ?? undefined,
+      ai_reason: fb.ai_reason ?? undefined,
+      in_thread: fb.in_thread ?? false,
       created_at: new Date(fb.created_at),
     },
   );

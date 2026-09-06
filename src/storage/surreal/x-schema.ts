@@ -669,3 +669,33 @@ export async function x_migration_1_1_2(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.2'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.3 —— 回复推断链留档(2026-09-06)
+ *
+ * 用户:「每回一条推文,都在逻辑链上做几步分析并记录下来列出来,
+ *   这样你才有回归检查的机会……才有回归分析 Gemma4 的执行是否正确的再分析能力。」
+ *
+ * 此前只记 ai_text/final_text —— 知道「写了什么」,不知道「为什么这么写」。
+ * 回错了无法定位:是把推广者看成真实用户?是因由读错?还是因由对但正文答偏?
+ *
+ * ⚠️ `poster_kind` 是**模型看正文的推断,不是查证过的事实** ——
+ * 库里没有账号资料(x_author 36 行、粉丝数字段全空)。查询时别当事实用。
+ */
+const X_SCHEMA_1_1_3 = `
+DEFINE FIELD IF NOT EXISTS poster_kind ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS poster_read ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS trigger     ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ai_reason   ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS in_thread   ON x_reply_feedback TYPE bool DEFAULT false;
+DEFINE INDEX IF NOT EXISTS idx_rfb_poster ON x_reply_feedback FIELDS poster_kind;
+`;
+
+export async function x_migration_1_1_3(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_3);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.3', appliedAt = $now,
+      description = 'Reply decision trace (poster read / trigger) for regression review'`,
+    { rid: new RecordId('schema_version', '1.1.3'), now: Date.now() },
+  );
+}

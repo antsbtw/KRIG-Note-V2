@@ -20,6 +20,7 @@ import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
+import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
@@ -871,6 +872,13 @@ export function registerXTimelineHandlers(): void {
         confidence: typeof p.confidence === 'number' ? p.confidence : undefined,
         ref:        typeof p.ref === 'string' ? p.ref : undefined,
         ws_id:      typeof p.wsId === 'string' ? p.wsId : undefined,
+        // 推断链:回归分析的依据,缺一步就定位不了是哪一步坏的
+        poster_kind: typeof p.poster_kind === 'string'
+          ? (p.poster_kind as ReplyFeedback['poster_kind']) : undefined,
+        poster_read: typeof p.poster_read === 'string' ? p.poster_read : undefined,
+        trigger:     typeof p.trigger === 'string' ? p.trigger : undefined,
+        ai_reason:   typeof p.ai_reason === 'string' ? p.ai_reason : undefined,
+        in_thread:   p.in_thread === true,
         created_at: new Date().toISOString(),
       });
       return { success: true };

@@ -188,6 +188,54 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
   });
 });
 
+describe('推断链留档(回归分析的依据)', () => {
+  it('⭐ 三步都要输出:作者判断 / 因由 / 正文', () => {
+    // 用户 2026-09-06:只记正文的话,回错了无法定位是哪一步坏的
+    const facts = readFileSync(
+      resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+    const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
+    for (const k of ['posterKind', 'posterRead', 'trigger']) {
+      expect(fn, `prompt 里少了 ${k}`).toContain(k);
+    }
+  });
+
+  it('⭐ prompt 必须允许并鼓励 unclear(不许猜)', () => {
+    // 库里没有账号资料,判不出来就该说判不出来
+    const facts = readFileSync(
+      resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+    const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
+    expect(fn).toMatch(/unclear/);
+    expect(fn).toMatch(/不要猜|do NOT guess/);
+  });
+
+  it('⭐ posterKind 越界值必须归 unclear,不能勉强塞进某一类', () => {
+    expect(PLANNER).toMatch(/KINDS\.includes/);
+    expect(PLANNER).toMatch(/: 'unclear'/);
+  });
+
+  it('⭐ 推断链必须落库(否则谈不上事后回归)', () => {
+    const repo = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-reply-feedback-repo.ts'), 'utf-8');
+    for (const k of ['poster_kind', 'poster_read', 'trigger', 'ai_reason', 'in_thread']) {
+      expect(repo, `落库字段少了 ${k}`).toContain(k);
+    }
+    // 弹窗要真的把它传上去,否则字段永远是空的
+    expect(DIALOG).toMatch(/poster_kind:\s*draft\.trace\?\.posterKind/);
+  });
+
+  it('⭐ 不回的理由也要带推断链(为什么没回同样要能复查)', () => {
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    const seg = fn.slice(fn.indexOf('if (!parsed?.worth)'));
+    expect(seg.slice(0, 600)).toMatch(/trace\.posterKind/);
+  });
+
+  it('⭐ UI 必须标明①是推断而非账号资料', () => {
+    // 别让人把模型的猜测当成查证过的事实
+    expect(DIALOG_RAW).toMatch(/不是账号资料/);
+    expect(DIALOG).toMatch(/POSTER_LABEL/);
+  });
+});
+
 describe('上下文缺失要让用户知道', () => {
   it('⭐ 生成只喂正文 —— 这是事实,别假装喂了上下文', () => {
     // 现状:{ role: 'user', content: tweet.text }。没有父推/会话串。

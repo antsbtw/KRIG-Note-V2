@@ -19,9 +19,23 @@ import { useEffect, useState } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { TweetInboxRecord } from '@shared/types/x-timeline-types';
-import type { ReplyDraft, ReplySkip, ReplySkipReason } from '@shared/types/x-reply-types';
+import type { ReplyDraft, ReplySkip, ReplySkipReason, PosterKind } from '@shared/types/x-reply-types';
 
 const api = () => window.electronAPI?.xTimeline;
+
+/** ① 的显示 —— 刻意区分「判断」与「事实」,unclear 不该被藏起来 */
+const POSTER_LABEL: Record<PosterKind, string> = {
+  genuine:  '像真实用户',
+  promoter: '像同行推广',
+  bot:      '像机器人/水军',
+  unclear:  '看不出来',
+};
+const POSTER_COLOR: Record<PosterKind, string> = {
+  genuine:  '#16a34a',
+  promoter: '#b45309',
+  bot:      '#7f1d1d',
+  unclear:  '#57534e',
+};
 
 const SKIP_LABEL: Record<ReplySkipReason, string> = {
   ai_declined:     'AI 判定这条不值得回',
@@ -94,6 +108,12 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
       confidence: draft.confidence,
       ref:        draft.ref,
       wsId:       workspaceId,
+      // 推断链一并存档 —— 只记正文的话,回错了无从复查是哪一步坏的
+      poster_kind: draft.trace?.posterKind,
+      poster_read: draft.trace?.posterRead,
+      trigger:     draft.trace?.trigger,
+      ai_reason:   draft.reason,
+      in_thread:   draft.inThread,
     }).catch((e: unknown) => {
       // 记不上不该挡住主流程,但要留痕 —— 否则判据会悄悄少样本
       console.error('[ReplyComposeDialog] 反馈记录失败:', e);
@@ -188,6 +208,35 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
 
         {draft && (
           <>
+            {/* 推断链 —— 让用户在发之前就能核对 AI 是怎么想的,
+                也是事后回归分析的同一份数据(落进 x_reply_feedback)。 */}
+            {draft.trace && (draft.trace.trigger || draft.trace.posterRead) && (
+              <div style={{
+                fontSize: 11, lineHeight: 1.7, marginBottom: 8, padding: '7px 9px',
+                borderRadius: 6, background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)', color: 'var(--text-muted)',
+              }}>
+                <div>
+                  <b style={{ color: 'var(--text)' }}>① 对方是</b>{' '}
+                  <span style={{
+                    padding: '1px 5px', borderRadius: 4, fontSize: 10,
+                    background: POSTER_COLOR[draft.trace.posterKind] ?? 'var(--border)',
+                    color: '#fff',
+                  }}>{POSTER_LABEL[draft.trace.posterKind]}</span>
+                  {draft.trace.posterRead && <span>　{draft.trace.posterRead}</span>}
+                </div>
+                {draft.trace.trigger && (
+                  <div><b style={{ color: 'var(--text)' }}>② 因由</b>　{draft.trace.trigger}</div>
+                )}
+                {draft.reason && (
+                  <div><b style={{ color: 'var(--text)' }}>③ 判断</b>　{draft.reason}</div>
+                )}
+                <div style={{ marginTop: 3, color: 'var(--text-faint)', fontSize: 10 }}>
+                  ⓘ ①是 AI 读正文得出的推断，<b>不是账号资料</b>（库里没存粉丝数/注册时间）。
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 {draft.source === 'generated' ? 'AI 写的回复' : '模板兜底'}

@@ -221,6 +221,35 @@ export type ReplySkipReason =
  */
 export type ReplySource = 'generated' | 'template';
 
+/**
+ * 对发推者的判断 —— ⚠️**这是模型看正文的推断,不是查证过的事实**。
+ *
+ * 实测 2026-09-06:`x_author` 全表只有 36 行、粉丝数字段**一行都没填**,
+ * 所以判断只能来自推文正文本身。模型对明显的同行广告(带 qq 群/报价)
+ * 判 promoter 很准,但对「有什么好用的机场推荐一下」这种六个字
+ * 也敢给 genuine + confidence 1.0 —— 那是过度自信,不是知识。
+ * 故保留 `unclear`,并在 UI 上标明是「AI 判断」而非账号资料。
+ */
+export type PosterKind = 'genuine' | 'promoter' | 'bot' | 'unclear';
+
+/**
+ * 回复的推断链 —— 用户 2026-09-06 提出:
+ *   「每回一条推文都在逻辑链上做几步分析并记录下来,
+ *     这样才有回归检查的机会」。
+ *
+ * 只记 final_text 的话,回错了无法定位是哪一步坏的:
+ * 是把推广者看成真实用户?是因由读错?还是因由对但正文答偏?
+ * 三步分开留档,才谈得上「再分析 Gemma4 执行是否正确」。
+ */
+export interface ReplyTrace {
+  /** ① 发推者是什么人(模型据正文推断) */
+  posterKind: PosterKind;
+  /** ① 的一句话说明 —— 便于人核对它凭什么这么判 */
+  posterRead: string;
+  /** ② 因由:对方为什么发这条推(他自己的话里的具体问题/需求) */
+  trigger: string;
+}
+
 export interface ReplyDraft {
   tweetId: string;
   tweetUrl: string;
@@ -248,6 +277,11 @@ export interface ReplyDraft {
    * 只有 48 条有 conversation_id),所以这里同时靠正文形态兜底判断。
    * 见 [[project-x-reply-no-context]]。
    */
+  /**
+   * 推断链 —— 为什么这么回。生成路径必有;回落模板时可能缺(模型没返回)。
+   * 学习期落库,供事后回归分析:回错了能定位是哪一步坏的。
+   */
+  trace?: ReplyTrace;
   inThread: boolean;
   /** 本条链接里用的追踪标识 —— 落库便于事后对账「哪批带来的注册」 */
   ref: string;

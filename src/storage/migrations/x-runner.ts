@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -82,6 +82,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.1.2',
     description: 'Reply feedback (learning period: AI text vs user edit)',
     up: x_migration_1_1_2,
+  },
+  {
+    version: '1.1.3',
+    description: 'Reply decision trace (poster read / trigger) for regression review',
+    up: x_migration_1_1_3,
   },
 ];
 

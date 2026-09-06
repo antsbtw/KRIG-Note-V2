@@ -25,6 +25,7 @@ import {
   buildRef, renderTemplate, langOf, templatesFor, isInThread, LANDING_BASE, LINK_PARAMS,
   type ReplyDecision, type ReplyDraft, type ReplyPlanResult,
   type ReplySkip, type ReplyTemplateId, type ReplyLang, type ReplySource,
+  type ReplyTrace, type PosterKind,
 } from '@shared/types/x-reply-types';
 
 /**
@@ -477,7 +478,10 @@ export async function planOneReply(
   const ref = ctx.ref?.trim() || buildRef(ctx.selfHandle ?? 'netlab2gfw', now, ctx.recipeId);
   const link = `${LANDING_BASE}?ref=${ref}&${LINK_PARAMS[lang]}`;
 
-  let parsed: { worth?: boolean; confidence?: number; reason?: string; reply?: string };
+  let parsed: {
+    worth?: boolean; confidence?: number; reason?: string; reply?: string;
+    posterKind?: string; posterRead?: string; trigger?: string;
+  };
   try {
     const res = await callOllama({
       model: config.model,
@@ -497,8 +501,29 @@ export async function planOneReply(
     throw new Error(`[x-reply-planner] 单条生成失败:${(err as Error).message}`);
   }
 
+  // 推断链 —— 三步都留档,回错了才能定位是哪一步坏的(用户 2026-09-06)。
+  // ⚠️ posterKind 是模型看正文的**推断**,不是查证过的事实:
+  //    库里没有粉丝数/注册时间(x_author 36 行、fc 全空)。
+  //    取值不在枚举内一律归 'unclear',绝不勉强塞进某一类。
+  const KINDS: PosterKind[] = ['genuine', 'promoter', 'bot', 'unclear'];
+  const trace: ReplyTrace = {
+    posterKind: KINDS.includes(parsed?.posterKind as PosterKind)
+      ? (parsed!.posterKind as PosterKind) : 'unclear',
+    posterRead: typeof parsed?.posterRead === 'string' ? parsed.posterRead.trim() : '',
+    trigger: typeof parsed?.trigger === 'string' ? parsed.trigger.trim() : '',
+  };
+
   if (!parsed?.worth) {
-    return skip('ai_declined', typeof parsed?.reason === 'string' ? parsed.reason : undefined);
+    return {
+      skip: {
+        tweetId: tweet.tweet_id, authorHandle: handle, skipReason: 'ai_declined',
+        // 不回的理由也带上推断链 —— 「为什么没回这条」同样需要能复查
+        detail: [
+          typeof parsed?.reason === 'string' ? parsed.reason : '',
+          trace.posterKind !== 'unclear' ? `(判为${trace.posterKind})` : '',
+        ].filter(Boolean).join(' ') || undefined,
+      },
+    };
   }
   const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
   if (confidence < REPLY_CONFIDENCE_FLOOR) {
@@ -531,6 +556,7 @@ export async function planOneReply(
       tweetUrl: tweetUrlOf(tweet),
       authorHandle: handle,
       text, source, templateId, fallbackReason, lang,
+      trace,
       inThread: isInThread(tweet),
       needsHumanReview: source === 'generated'
         || (templateId ? REPLY_TEMPLATES.find((x) => x.id === templateId)?.needsHumanReview === true : false),

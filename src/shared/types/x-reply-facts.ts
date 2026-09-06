@@ -211,16 +211,29 @@ export function buildSingleReplyPrompt(
 
 ${facts}
 
-先判断这条推**值不值得回**：用户在找翻墙工具、抱怨现用工具不好使、
-问怎么访问被封锁的服务 —— 这些值得回。
-广告引流、纯政治、教程分享、对厂商维权、跟风梗回复、与翻墙无关 —— 不值得回。
+回复前先做三步分析，每步都要输出（这是为了事后能回归检查，别省）：
+
+① posterKind —— 发推的是什么人，**只凭这条推文的正文判断**：
+   genuine=像真实用户在求助 / promoter=同行推广或卖节点（带群号、报价、自荐机场）
+   / bot=机器人或水军刷屏 / unclear=正文看不出来
+   ⚠️ 看不出来就填 unclear，**不要猜**。你没有这个账号的粉丝数、注册时间等资料。
+   posterRead：一句话说明你凭什么这么判（引用正文里的依据）。
+
+② trigger —— 因由：对方为什么发这条推，他遇到的具体问题或需求是什么。
+   用他自己话里的信息，别脑补。
+
+③ 再决定值不值得回：用户在找翻墙工具、抱怨现用工具不好使、
+   问怎么访问被封锁的服务 —— 这些值得回。
+   广告引流、纯政治、教程分享、对厂商维权、跟风梗回复、与翻墙无关 —— 不值得回。
 
 不值得回：worth=false，reply 留空字符串。
 值得回：写回复 —— 直接回应他说的具体问题，口语、1-2 句、
 必须包含注册链接（原样照抄一个字符都不改）、不要 @提及、不要营销腔。
 对方问了清单里没有的（价格、速度、节点数），如实说去官网/App 看，别编。${shots}
 
-输出 JSON 对象：{"worth":true,"confidence":0.9,"reason":"一句话","reply":"回复正文"}
+输出 JSON 对象：
+{"posterKind":"genuine","posterRead":"凭什么这么判","trigger":"因由",
+ "worth":true,"confidence":0.9,"reason":"一句话","reply":"回复正文"}
 不要输出 JSON 之外的任何文字。`;
   }
 
@@ -228,10 +241,24 @@ ${facts}
 
 ${facts}
 
-First decide whether this tweet is worth replying to: someone looking for a VPN,
-complaining their current tool fails, or asking how to reach blocked services — worth it.
-Ads and self-promo, pure politics, tutorials, users fighting with their vendor,
-copycat meme replies, anything unrelated — not worth it.
+Do three steps of analysis before replying, and output each one
+(this exists so the decision can be reviewed later — do not skip it):
+
+1. posterKind — what kind of account this is, judging **only from the tweet text**:
+   genuine = a real user asking for help / promoter = a competitor or reseller
+   (group IDs, price lists, pushing their own service) / bot = spam or astroturf
+   / unclear = the text doesn't tell you.
+   ⚠️ If you cannot tell, say unclear — do NOT guess. You do not have this
+   account's follower count, join date, or any other profile data.
+   posterRead: one line on what in the text made you decide that.
+
+2. trigger — why they posted: the concrete problem or need they describe.
+   Use what is actually in their words; do not invent context.
+
+3. Then decide whether it is worth replying: someone looking for a VPN,
+   complaining their current tool fails, or asking how to reach blocked services — worth it.
+   Ads and self-promo, pure politics, tutorials, users fighting with their vendor,
+   copycat meme replies, anything unrelated — not worth it.
 
 Not worth it: worth=false and leave reply as an empty string.
 Worth it: write the reply — address the specific thing they said, casual, 1-2 sentences,
@@ -239,6 +266,8 @@ include the signup link **copied verbatim**, no @mentions, no marketing voice.
 If they ask something not in the facts (price, speed, server count), say to check
 the site/app — do not make it up. Write in English.${shots}
 
-Output a JSON object: {"worth":true,"confidence":0.9,"reason":"one line","reply":"the reply text"}
+Output a JSON object:
+{"posterKind":"genuine","posterRead":"why you judged that","trigger":"what prompted them",
+ "worth":true,"confidence":0.9,"reason":"one line","reply":"the reply text"}
 Output nothing except the JSON object.`;
 }
