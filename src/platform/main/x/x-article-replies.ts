@@ -21,6 +21,54 @@ import { harvestTimeline, extractTweetsFrom, type HarvestedTweet } from './x-tim
 import { resolveXWebContents, resolveAnyXWebContents } from './x-webcontents';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 
+/**
+ * 从 TweetDetail 载荷里找「还有更多回复」的游标。
+ *
+ * ⭐ 2026-09-06 真机载荷坐实(此前一份 TweetDetail 都没留过,全靠猜):
+ * ```
+ * entryId    : "cursor-showmorethreads-2096729716814774201"
+ * cursorType : "ShowMoreThreads"
+ * displayTreatment.actionText : "Show probable spam"   ← 就是页面上那个蓝字按钮
+ * value      : "DAAKCgAB…"                            ← 分页游标
+ * ```
+ * X **明确告诉了你「还有,拿这个 cursor 来取」**,而原先的代码在数
+ * 「连续 4 轮没新增」—— 真源就摆在载荷里,我们没读(与时间线丢 83%
+ * 那次 commit a9d9bc75 同一形态)。
+ *
+ * ⚠️ 折进去的正是活动参与者那一类(新账号 + 带链接 + 带图),
+ *   X 判它们「probable spam」;而契约恰恰只认 has_media 的留言。
+ *
+ * @returns 该游标的 actionText(用于在页面上точ定位按钮)与 value;无则 undefined
+ */
+export function findShowMoreCursor(
+  node: unknown,
+): { actionText?: string; value: string; entryId?: string } | undefined {
+  let found: { actionText?: string; value: string; entryId?: string } | undefined;
+  const walk = (o: unknown, entryId?: string): void => {
+    if (found || o === null || typeof o !== 'object') return;
+    if (Array.isArray(o)) { for (const v of o) walk(v, entryId); return; }
+    const r = o as Record<string, unknown>;
+    const eid = typeof r.entryId === 'string' ? r.entryId : entryId;
+    if (r.__typename === 'TimelineTimelineCursor'
+      && typeof r.value === 'string'
+      // ShowMoreThreads = 折叠区(probable spam);ShowMore = 会话中段断层。
+      // Bottom/Top 是普通上下翻页,不在此列。
+      && typeof r.cursorType === 'string'
+      && /ShowMore/i.test(r.cursorType)) {
+      const dt = r.displayTreatment as Record<string, unknown> | undefined;
+      found = {
+        value: r.value,
+        actionText: typeof dt?.actionText === 'string' ? dt.actionText : undefined,
+        entryId: eid,
+      };
+      return;
+    }
+    for (const v of Object.values(r)) walk(v, eid);
+  };
+  walk(node);
+  return found;
+}
+
 /** 契约 §2.1 的一条 item(字段名保持契约原样,便于直接序列化) */
 export interface ArticleReplyItem {
   tweet_id: string;
@@ -130,6 +178,9 @@ export async function fetchArticleReplies(
   let payloads = 0;
   let detailPayloads = 0;
   const problems: string[] = [];
+  /** X 说「还有更多回复」时给的游标(折叠区 / 会话断层);undefined = 真的翻完了 */
+  let showMore: { actionText?: string; value: string; entryId?: string } | undefined;
+  let expanded = 0;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
     if (method === 'Network.requestWillBeSent') {
@@ -160,6 +211,12 @@ export async function fetchArticleReplies(
             } catch (err) {
               console.warn('[x-article-replies] TweetDetail 留档失败:', err);
             }
+            // 记下「还有更多」的游标 —— 这是 X 自己给的权威判据,
+            // 比「连续 N 轮没新增」可靠得多
+            try {
+              const c = findShowMoreCursor(JSON.parse(r.body));
+              showMore = c;
+            } catch { /* 非 JSON */ }
           }
           try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
         })
@@ -206,6 +263,36 @@ export async function fetchArticleReplies(
 
       if (own.length === lastOwn) {
         noGrowth++;
+        // ⭐ 停之前先看 X 有没有说「还有」——
+        //   有折叠区就点开它,而不是把「滚不动了」当成「翻完了」。
+        //   点击而非直接带 cursor 重发请求:重发要复刻 X 的 GraphQL
+        //   query id / features 参数(会随版本变),点按钮让 X 自己去取更稳。
+        if (showMore && expanded < 3) {
+          const label = showMore.actionText ?? 'Show more';
+          const clicked = await wc.executeJavaScript(`(function () {
+            var want = ${JSON.stringify(label)};
+            var els = document.querySelectorAll('[role="button"], button, a, span');
+            for (var k = 0; k < els.length; k++) {
+              var t = (els[k].textContent || '').trim();
+              if (t === want || t.indexOf(want) === 0) {
+                els[k].scrollIntoView({ block: 'center' });
+                els[k].click();
+                return true;
+              }
+            }
+            return false;
+          })()`).catch(() => false);
+          expanded++;
+          if (clicked) {
+            console.log(`[x-article-replies] 展开折叠区「${label}」(第 ${expanded} 次)`);
+            showMore = undefined;          // 等下一个载荷再判断还有没有
+            noGrowth = 0;                  // 展开后重新给它机会长
+            await new Promise((r) => setTimeout(r, 2200));
+            continue;
+          }
+          problems.push(`载荷里有「${label}」折叠区游标,但页面上没找到该按钮 —— `
+            + `可能 X 改了文案/结构,折叠的回复没抓到`);
+        }
         if (noGrowth >= 4) {
           // ⚠️ 「连续 N 轮无新增」**不等于**「翻完了」——
           //   X 详情页把一部分回复藏在「Show more replies」和
@@ -218,9 +305,11 @@ export async function fetchArticleReplies(
           //   治本要展开折叠区 + 改用 cursor 耗尽做判据(待 TweetDetail 载荷到手)。
           //   在此之前**至少不许谎报完整**:标 partial,让 campaign-tasks 知道
           //   「本次没抓完」,而不是把它当成「这个人没留言」(契约 §3.3)。
-          partial = true;
-          problems.push(`滚动 ${i} 轮后连续 ${noGrowth} 轮无新增即停 —— `
-            + `**未展开「显示更多回复」/ 折叠区**,可能还有回复没抓到(非「已翻完」)`);
+          if (showMore) {
+            partial = true;
+            problems.push(`滚动 ${i} 轮后停止,但 X 仍给着「`
+              + `${showMore.actionText ?? 'Show more'}」游标 —— **还有回复没抓到**`);
+          }
           break;
         }
       } else {
