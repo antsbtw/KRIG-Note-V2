@@ -22,7 +22,7 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
-import { probeSearchSyntax, probeReplyContextDom } from './x-search-syntax-spike';
+import { probeSearchSyntax } from './x-search-syntax-spike';
 import { fetchParentTweet } from './x-parent-tweet';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
@@ -853,17 +853,17 @@ export function registerXTimelineHandlers(): void {
         const cached = await getAuthorCounts(posterHandle).catch(() => null);
         const fresh = cached?.countsAt
           && (Date.now() - new Date(cached.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
-        let prof = fresh ? cached : null;
+        // ⭐ **只读库,不现采**(用户 2026-09-06 定的分工):
+        //   「点『预取资料』时先读取当前页面的用户资料和上下文,
+        //     然后在用户点『送入回复』时开始研判并生成回复片段。」
+        //   采集与研判分开:点开弹窗不该再等 12s 导航 —— 那时页面焦点在弹窗上,
+        //   现采还会把 X 页面导走,把用户正在看的东西弄没。
+        //   没有资料就照实说「没采到」并给重试入口,由用户决定要不要补。
+        const prof = fresh ? cached : null;
         if (!prof) {
-          const got = await harvestAuthorProfile(posterHandle, callerWcId, 12_000)
-            .catch((e) => ({ error: String(e) }));
-          if (!('error' in got)) prof = got;
-          else {
-            // ⚠️ 不拦住回复,但**把原因带给用户**:私密号/已注销是不可恢复的,
-            //    网络慢/页面没加载完则重试就好 —— 让用户自己判断,别替他决定「不许回」
-            profileError = got.error;
-            console.warn(`[x-timeline-handlers] 画像采集失败(不拦回复):${got.error}`);
-          }
+          profileError = cached?.countsAt
+            ? '画像已过期（超过 7 天），点「🧵 预取资料」可刷新'
+            : '这个账号还没采过画像 —— 点「🧵 预取资料」先把本页备齐';
         }
         if (prof) {
           const seen = corpus.filter(
@@ -889,19 +889,11 @@ export function registerXTimelineHandlers(): void {
       //    为它们白跑一次导航是纯浪费(收件箱里绝大多数是独立求助推)。
       // ⚠️ 抓不到就是抓不到 —— 传 undefined 让 prompt 说「没取到」,
       //    模型会因此更保守;绝不编一个空上文冒充「上文是空的」。
+      // ⭐ 同画像:**只读库,不现采**。上文由「🧵 预取资料」提前备好。
       const looksReply = !!(found.in_reply_to_user || /^\s*@\w+/.test(found.text ?? ''));
-      let parentTweet;
-      // 预抓过就直接用 —— 省掉每条现等 10s 的导航(用户 2026-09-06 的要求就是这个)
-      if (found.parent_text) {
-        parentTweet = { text: found.parent_text, authorHandle: found.parent_handle };
-      } else if (looksReply) {
-        const got = await fetchParentTweet(
-          found.tweet_url || `https://x.com/i/status/${found.tweet_id}`,
-          callerWcId, 10_000,
-        ).catch(() => null);
-        if (got) parentTweet = { text: got.text, authorHandle: got.authorHandle };
-        else console.warn(`[x-timeline-handlers] 上文没取到(${found.tweet_id}),模型会被告知「没看到」`);
-      }
+      const parentTweet = found.parent_text
+        ? { text: found.parent_text, authorHandle: found.parent_handle }
+        : undefined;
 
       const r = await planOneReply(found, getJudgeConfig(), {
         selfHandle: acct?.handle,
@@ -1162,21 +1154,6 @@ export function registerXTimelineHandlers(): void {
     try {
       const r = await probeSearchSyntax(
         p.handle, typeof p.wcId === 'number' ? p.wcId : undefined);
-      if ('error' in r) return { success: false, error: r.error };
-      return { success: true, ...r };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  });
-
-  // X_PROBE_REPLY_DOM — 实测「Replying to」那一行的 DOM 结构。
-  // 起因:改了提取器却发现 search 采的 3782 条只有 48 条有 in_reply_to_user
-  // (那 48 条还是更早走载荷层拿的)—— 选择器没命中,又是"照猜写没实测"。
-  ipcMain.handle(IPC_CHANNELS.X_PROBE_REPLY_DOM, async (_e, payload: unknown) => {
-    const p = payload as { wcId?: unknown } | null;
-    try {
-      const r = await probeReplyContextDom(
-        typeof p?.wcId === 'number' ? p.wcId : undefined);
       if ('error' in r) return { success: false, error: r.error };
       return { success: true, ...r };
     } catch (err) {

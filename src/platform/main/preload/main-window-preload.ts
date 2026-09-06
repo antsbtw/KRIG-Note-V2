@@ -1118,10 +1118,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES, { wsId, wcId, limit, offset });
     },
-    /** 实测「Replying to」那行的 DOM 结构(选择器没命中时用) */
-    probeReplyDom(wcId?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PROBE_REPLY_DOM, { wcId });
-    },
     /** 实测哪种搜索写法能带回复(设计要求先 spike) */
     searchSyntaxSpike(handle: string, wcId?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_SEARCH_SYNTAX_SPIKE, { handle, wcId });

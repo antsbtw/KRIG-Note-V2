@@ -35,8 +35,6 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
   // 搜索语法 spike:设计要求实施前必须实机验证,这里给个按钮
   const [cands, setCands] = useState<Array<{ handle: string; repliedCount: number; seenTweets: number }>>([]);
   const [showCands, setShowCands] = useState(false);
-  const [domProbe, setDomProbe] = useState<Array<{ how: string; hit: number; samples: string[] }> | null>(null);
-  const [domTotal, setDomTotal] = useState(0);
   const [spike, setSpike] = useState<{
     verdict?: string;
     probes?: Array<{ key: string; query: string; total: number; replies: number; noResults: boolean; sample: string[] }>;
@@ -125,20 +123,6 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
     setBusy(false);
     if (!r?.success) { setStatus(`实测失败:${r?.error}`); return; }
     setSpike({ verdict: r.verdict, probes: r.probes });
-    setStatus('');
-  };
-
-  /** 实测「Replying to」那行的 DOM 结构 —— 选择器没命中时靠它定位 */
-  const runDomProbe = async () => {
-    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-    if (wcId === undefined) { setStatus('先切到 X 服务加载一次页面'); return; }
-    setBusy(true);
-    setStatus('正在读当前 X 页面的 DOM…');
-    const r = await api()?.probeReplyDom(wcId);
-    setBusy(false);
-    if (!r?.success) { setStatus(`探测失败:${r?.error}`); return; }
-    setDomProbe(r.probes ?? []);
-    setDomTotal(r.total ?? 0);
     setStatus('');
   };
 
@@ -247,41 +231,6 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
             background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)',
           }}>{spike.verdict}</div>
         )}
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-            <b style={{ fontSize: 12 }}>回复关系 DOM 探测</b>
-            <Btn sm onClick={runDomProbe} disabled={busy}>▶ 读当前页面</Btn>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>
-            实测发现:搜索采的 3782 条里只有 48 条抓到了「回复谁」，而那 48 条是走别的路径拿的
-            —— 说明 DOM 选择器<b>没命中</b>。
-            <b>先在 X 上打开一个带回复的页面</b>（比如某条推的详情页），再点这里，
-            看哪种取法真的能命中。
-          </div>
-          {domProbe && (
-            <div style={{ fontSize: 11 }}>
-              <div style={{ color: 'var(--text-muted)', marginBottom: 3 }}>
-                当前页面共 {domTotal} 条推文
-              </div>
-              {domProbe.map((d) => (
-                <div key={d.how} style={{
-                  padding: '4px 8px', marginBottom: 3, borderRadius: 5,
-                  background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-                }}>
-                  <div>
-                    <code>{d.how}</code>{'　'}命中 <b style={{
-                      color: d.hit > 0 ? '#22c55e' : 'var(--text-faint)',
-                    }}>{d.hit}</b>
-                  </div>
-                  {d.samples.map((x, i) => (
-                    <div key={i} style={{ color: 'var(--text-faint)' }}>{x}</div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {spike?.probes?.map((p) => (
           <div key={p.key} style={{
             fontSize: 11, padding: '5px 8px', marginBottom: 4, borderRadius: 5,

@@ -886,13 +886,6 @@ declare global {
           mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
           error?: string;
         }>;
-        /** 实测「Replying to」那行的 DOM 结构 */
-        probeReplyDom(wcId?: number): Promise<{
-          success: boolean;
-          total?: number;
-          probes?: Array<{ how: string; hit: number; samples: string[] }>;
-          error?: string;
-        }>;
         /** 实测哪种搜索写法能带回复 */
         searchSyntaxSpike(handle: string, wcId?: number): Promise<{
           success: boolean;

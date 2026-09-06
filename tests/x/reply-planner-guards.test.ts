@@ -316,10 +316,10 @@ describe('追踪名单 UI 与搜索语法 spike', () => {
     expect(/UPDATE tweet_inbox/.test(code), '又写进 tweet_inbox 死表了').toBe(false);
   });
 
-  it('⭐ 预抓过的上文要被复用,不能每次重抓', () => {
+  it('⭐ 弹窗只用备好的上文,不自己去抓', () => {
     const h = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
-    expect(h).toMatch(/if \(found\.parent_text\)/);
+    expect(h).toMatch(/found\.parent_text\s*\n?\s*\?/);
   });
 
   it('移出名单的提示要说明历史数据保留', () => {
@@ -588,16 +588,24 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
   const D2 = readFileSync(
     resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
 
-  it('⭐ 采不到画像不能拦住回复', () => {
-    // 私密号/已注销是不可恢复的,硬等只会让人卡住;
-    // 该回不该回交给用户,系统只负责如实标注
-    expect(H2).toMatch(/不拦回复/);
-    const seg = H2.slice(H2.indexOf('画像采集失败(不拦回复)'));
-    expect(/return\s*\{\s*success:\s*false/.test(seg.slice(0, 200)), '采不到就不给回复了').toBe(false);
+  it('⭐ 采集与研判分开:点开弹窗只读库,不现采', () => {
+    // 用户 2026-09-06:「点『预取资料』时先读取当前页面的用户资料和上下文,
+    //   然后在用户点『送入回复』时开始研判并生成回复片段」
+    // 现采还会把 X 页面导走,把用户正在看的东西弄没
+    const seg = H2.slice(H2.indexOf('X_PLAN_ONE_REPLY'), H2.indexOf('X_REPLY_FEEDBACK'));
+    const code = stripComments(seg);
+    expect(
+      /harvestAuthorProfile\(/.test(code),
+      '弹窗路径又现采画像了 —— 该在「预取资料」时备好',
+    ).toBe(false);
+    expect(
+      /fetchParentTweet\(/.test(code),
+      '弹窗路径又现抓上文了 —— 该在「预取资料」时备好',
+    ).toBe(false);
   });
 
-  it('⭐ 采不到要带原因,并给重试入口', () => {
-    expect(H2).toMatch(/profileError = got\.error/);
+  it('⭐ 没备料时要说清楚怎么补,并给重试入口', () => {
+    expect(H2).toMatch(/点「🧵 预取资料」/);
     expect(D2).toMatch(/profileError/);
     expect(D2).toMatch(/重新采集并生成/);
   });
@@ -663,16 +671,18 @@ describe('驱动 webview 的路径都要显式传 wcId', () => {
   const H = readFileSync(
     resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
 
-  it('⭐ 画像采集必须用调用方传的 wcId,不能传 undefined', () => {
-    expect(H).toMatch(/harvestAuthorProfile\(posterHandle, callerWcId/);
+  it('⭐ 预取路径必须用调用方传的 wcId,不能传 undefined', () => {
+    // 不传 → 回退到只在 X 视图挂载时才有值的登记表 → 静默失败
+    expect(H).toMatch(/harvestAuthorProfile\(h, wcId/);
     expect(
-      /harvestAuthorProfile\([^,]+,\s*undefined/.test(stripComments(H)),
-      '画像采集又传 undefined 了 —— 收件箱页面下会静默采不到',
+      /harvestAuthorProfile\([^,)]+,\s*undefined/.test(stripComments(H)),
+      '画像采集又传 undefined 了 —— 会静默采不到',
     ).toBe(false);
   });
 
-  it('⭐ 抓父推同样要传 wcId', () => {
-    expect(H).toMatch(/callerWcId, 10_000/);
+  it('⭐ 预取抓父推同样要传 wcId', () => {
+    const seg = H.slice(H.indexOf('X_PREFETCH_CONTEXT'), H.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/wcId, 10_000/);
   });
 
   it('⭐ 弹窗必须把 wcId 传下去', () => {
@@ -746,12 +756,11 @@ describe('① 上文闸门(链条第一步)', () => {
     expect(FACTS2).toMatch(/could not be fetched|上文没取到/);
   });
 
-  it('⭐ 只对真的是回复的推抓上文(独立推别白跑导航)', () => {
+  it('⭐ 预取只对真的是回复的推抓上文(独立推别白跑导航)', () => {
     const h = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
-    const seg = h.slice(h.indexOf('X_PLAN_ONE_REPLY'), h.indexOf('X_REPLY_FEEDBACK'));
-    expect(seg).toMatch(/looksReply/);
-    expect(seg).toMatch(/if \(looksReply\)/);
+    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/in_reply_to_user \|\|/);
   });
 
   it('⭐ 抓父推只读,不点任何东西', () => {
