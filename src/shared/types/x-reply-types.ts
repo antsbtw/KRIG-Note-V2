@@ -236,6 +236,19 @@ export interface ReplyDraft {
   lang: ReplyLang;
   /** true = 该文案无语料依据(新写的),UI 必须提示用户审核 */
   needsHumanReview: boolean;
+  /**
+   * 这条推是不是**回复串里的一条**(而非独立求助推)。
+   *
+   * ⚠️ 为什么要标出来:生成时只喂了 `tweet.text`,**没有任何上下文** ——
+   * 没有父推、没有会话串。对独立求助推(「大家有没有好用的VPN推荐」)
+   * 这没问题,那本来就没有上文;但对串里的一条,AI 是在**不知道上文的情况下
+   * 猜着回**,很可能答非所问。
+   *
+   * 库里的关系字段目前几乎全空(2026-09-06 实测:search 采集的 3782 条里
+   * 只有 48 条有 conversation_id),所以这里同时靠正文形态兜底判断。
+   * 见 [[project-x-reply-no-context]]。
+   */
+  inThread: boolean;
   /** 本条链接里用的追踪标识 —— 落库便于事后对账「哪批带来的注册」 */
   ref: string;
   confidence: number;
@@ -295,4 +308,17 @@ export function langOf(tweetLang?: string): ReplyLang {
 /** 该语言下可用的模板 */
 export function templatesFor(lang: ReplyLang): ReplyTemplate[] {
   return REPLY_TEMPLATES.filter((t) => t.lang === lang);
+}
+
+/**
+ * 判断一条推是不是「回复串里的一条」。
+ *
+ * ⚠️ 不能只看 `in_reply_to` 字段:实测搜索采集根本没写这两个关系字段
+ * (x_tweet 6762 行里 search 来源只有 48 条有 conversation_id),
+ * 只信字段等于**永远判 false**,提示形同虚设。
+ * 故字段缺失时退回看正文形态 —— X 的串内回复正文天然以 @handle 开头。
+ */
+export function isInThread(t: { in_reply_to?: string; text?: string }): boolean {
+  if (t.in_reply_to && t.in_reply_to.trim()) return true;
+  return /^\s*@\w+/.test(t.text ?? '');
 }

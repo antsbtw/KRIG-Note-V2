@@ -18,7 +18,7 @@ import { textFingerprint, pickTemplate, DUPLICATE_FINGERPRINT_THRESHOLD } from
 import {
   REPLY_TEMPLATES, getTemplate, hasStaleShortLink, needsRef, REPLY_CONFIDENCE_FLOOR,
   buildRef, renderTemplate, REF_PLACEHOLDER, LANDING_BASE,
-  langOf, templatesFor, LINK_PARAMS,
+  langOf, templatesFor, LINK_PARAMS, isInThread,
 } from '../../src/shared/types/x-reply-types';
 import { verifyGeneratedReply, buildGenerationPrompt, PRODUCT_FACTS } from
   '../../src/shared/types/x-reply-facts';
@@ -185,6 +185,38 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
 
   it('⭐ 回落模板时要显示回落原因', () => {
     expect(DIALOG).toMatch(/fallbackReason/);
+  });
+});
+
+describe('上下文缺失要让用户知道', () => {
+  it('⭐ 生成只喂正文 —— 这是事实,别假装喂了上下文', () => {
+    // 现状:{ role: 'user', content: tweet.text }。没有父推/会话串。
+    // 这条守卫不是禁止改进,是钉住「现状必须与 UI 提示一致」——
+    // 哪天真喂了上下文,这里会红,提示语也该跟着改。
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    expect(fn).toMatch(/content:\s*tweet\.text/);
+  });
+
+  it('⭐ 串内回复必须能认出来 —— 不能只信 in_reply_to 字段', () => {
+    // 实测:search 采集的 3782 条里只有 48 条有关系字段。
+    // 只信字段 = 永远判 false = 提示形同虚设。必须有正文形态兜底。
+    expect(isInThread({ in_reply_to: '123', text: '随便' })).toBe(true);
+    expect(isInThread({ text: '@someone 你说的那个梯子叫啥' })).toBe(true);
+    expect(isInThread({ text: '  @a @b 我也想知道' })).toBe(true);
+    // 独立求助推不该被误标(否则每条都弹警告 = 提示失效)
+    expect(isInThread({ text: '大家有没有好用的VPN推荐' })).toBe(false);
+    expect(isInThread({ text: 'anyone know a good VPN? mine keeps dropping' })).toBe(false);
+  });
+
+  it('⭐ 弹窗必须显示这个警告', () => {
+    expect(DIALOG).toMatch(/draft\.inThread/);
+    expect(DIALOG_RAW).toMatch(/没有上文/);
+  });
+
+  it('⭐ inThread 必须真的算出来,不能恒 false', () => {
+    // 写死 false 会让守卫全绿而提示永不出现
+    expect(PLANNER).toMatch(/inThread:\s*isInThread\(/);
+    expect(/inThread:\s*false/.test(PLANNER), 'inThread 被写死了').toBe(false);
   });
 });
 

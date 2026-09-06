@@ -223,6 +223,20 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
               改动只作用于这一条，不会影响其他回复。ref={draft.ref}
             </div>
 
+            {/* ⚠️ 串里的一条 —— AI 没看到上文,是猜着回的。必须让用户知道。
+                生成时只喂了 tweet.text(见 planOneReply):
+                对独立求助推没问题(本来就没上文),对串内回复可能答非所问。 */}
+            {draft.inThread && (
+              <div style={{
+                fontSize: 11, color: '#fbbf24', marginTop: 8,
+                background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)',
+                borderRadius: 5, padding: '6px 9px',
+              }}>
+                ⚠️ 这条推是<b>回复串里的一条</b>，而 AI <b>只看到了它本身、没有上文</b>。
+                请点「查看原推」确认对方在说什么，再决定这样回合不合适。
+              </div>
+            )}
+
             <div style={{
               fontSize: 11, color: 'var(--text-muted)', marginTop: 8,
               background: 'var(--bg-secondary)', border: '1px solid var(--border)',

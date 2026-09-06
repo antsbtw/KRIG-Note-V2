@@ -22,7 +22,7 @@ import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-typ
 import { buildGenerationPrompt, buildSingleReplyPrompt, verifyGeneratedReply } from '@shared/types/x-reply-facts';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
-  buildRef, renderTemplate, langOf, templatesFor, LANDING_BASE, LINK_PARAMS,
+  buildRef, renderTemplate, langOf, templatesFor, isInThread, LANDING_BASE, LINK_PARAMS,
   type ReplyDecision, type ReplyDraft, type ReplyPlanResult,
   type ReplySkip, type ReplyTemplateId, type ReplyLang, type ReplySource,
 } from '@shared/types/x-reply-types';
@@ -416,6 +416,7 @@ export async function planReplies(
       templateId,
       fallbackReason,
       lang,
+      inThread: isInThread(t),
       /** 生成的正文人必须看过 —— 模板文案则已有语料依据 */
       needsHumanReview: source === 'generated'
         || (templateId ? REPLY_TEMPLATES.find((x) => x.id === templateId)?.needsHumanReview === true : false),
@@ -530,6 +531,7 @@ export async function planOneReply(
       tweetUrl: tweetUrlOf(tweet),
       authorHandle: handle,
       text, source, templateId, fallbackReason, lang,
+      inThread: isInThread(tweet),
       needsHumanReview: source === 'generated'
         || (templateId ? REPLY_TEMPLATES.find((x) => x.id === templateId)?.needsHumanReview === true : false),
       ref,
