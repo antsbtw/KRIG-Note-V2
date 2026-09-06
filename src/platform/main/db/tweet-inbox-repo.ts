@@ -15,12 +15,20 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
+import { registerSeenAuthor } from './x-author-repo';
 import type { TweetInboxRecord, AIVerdict, TweetInboxStatus, TweetFeedback, FeedbackVerdict } from '@shared/types/x-timeline-types';
 import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
 
 /** 写入或忽略（tweet_id 唯一索引冲突 = 重复，直接跳过） */
 export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
   const db = getXDB();
+  // 「人」也要留档:此前采集只写推文,x_author 见过 3458 个作者却只有 36 行
+  // (用户 2026-09-06 发现)。⚠️ 只登记标识,计数走 getAuthorStats 现算;
+  //   失败不拦入库 —— 推文是主数据,人表是派生登记。
+  await registerSeenAuthor(record.author_handle, {
+    displayName: record.author_name,
+    avatar: record.author_avatar,
+  }).catch((e) => console.warn('[tweet-inbox-repo] 作者登记失败(不拦入库):', e));
   await db.query(
     `INSERT IGNORE INTO x_tweet {
       tweet_id: $tweet_id,

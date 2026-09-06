@@ -188,6 +188,56 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
   });
 });
 
+describe('人表:见过的人都要留档', () => {
+  const AREPO = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+  const TREPO = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/tweet-inbox-repo.ts'), 'utf-8');
+
+  it('⭐ 采集写推文时必须顺带登记作者', () => {
+    // 用户 2026-09-06 发现:见过 3458 个作者,x_author 只有 36 行 ——
+    // 采集链路从不写人表,只有「对某人动作」才建行
+    expect(TREPO).toMatch(/registerSeenAuthor/);
+    const fn = TREPO.slice(TREPO.indexOf('export async function upsertTweet'));
+    expect(fn.slice(0, 900)).toMatch(/registerSeenAuthor/);
+  });
+
+  it('⭐ 登记不得覆盖已有行的意志字段', () => {
+    // 这个人可能已被 blocked/watched,采到他新推不该把那些清掉
+    const fn = AREPO.slice(AREPO.indexOf('export async function registerSeenAuthor'));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    const updateSeg = body.slice(body.indexOf('UPDATE x_author'));
+    expect(/blocked\s*=|watched\s*=|is_self\s*=/.test(updateSeg.slice(0, 300)),
+      '登记时动了意志字段 —— 会把屏蔽/追踪状态冲掉').toBe(false);
+  });
+
+  it('⭐ 登记只写标识,不写计数字段', () => {
+    // 设计 §4.1(4):seen_count/replied_count 是可重算的第三层属性
+    const fn = AREPO.slice(AREPO.indexOf('export async function registerSeenAuthor'));
+    expect(/seen_count|replied_count|accepted_count/.test(fn.slice(0, 1500)),
+      '计数字段混进登记了 —— 会有与真实数据不同步的老问题').toBe(false);
+  });
+
+  it('⭐ 登记失败不能拦住推文入库', () => {
+    // 推文是主数据,人表是派生登记
+    const fn = TREPO.slice(TREPO.indexOf('export async function upsertTweet'));
+    expect(fn.slice(0, 900)).toMatch(/catch/);
+  });
+
+  it('⭐ 回填迁移不能用那条静默失败的纯 SQL', () => {
+    // 实测:FOR ... IN array::distinct(...) 对 6762 行返回空响应、
+    // 一行没建、且不报错。改成 GROUP BY + 分批。
+    const schema = readFileSync(
+      resolve(__dirname, '../../src/storage/surreal/x-schema.ts'), 'utf-8');
+    const fn = schema.slice(schema.indexOf('export async function x_migration_1_1_4'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    expect(body).toMatch(/GROUP BY author_handle/);
+    // 只看代码:注释里正解释着为什么不用它,别自己撞上
+    expect(/array::distinct/.test(stripComments(body)),
+      '又用回那条静默失败的写法了').toBe(false);
+  });
+});
+
 describe('追踪名单(watchlist)', () => {
   const REPO = readFileSync(
     resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');

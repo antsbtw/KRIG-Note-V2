@@ -699,3 +699,61 @@ export async function x_migration_1_1_3(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.3'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.4 —— 回填「见过的人」(2026-09-06)
+ *
+ * 用户问「凡是爬下来的用户,都保存下来没有删除吧?」—— 一查发现没有:
+ *   x_tweet 里有 **3458 个不同作者**,x_author 只有 **36 行**
+ *   (34 blocked + 1 is_self + 1 测试残留)。
+ * 采集链路从不写人表,只有「对某人采取动作」才建行 ——
+ * 设计 §4.1(4) 说 x_author 是「人」的唯一真源,实际它成了动作记录表。
+ *
+ * 代码侧已修(upsertTweet → registerSeenAuthor),但那只管**将来**;
+ * 存量 3400+ 个作者需要这次回填补上,否则历史数据里的人永远没有落点。
+ *
+ * ⚠️ 只建标识行,**不写任何计数**:seen_count/replied_count 是
+ * 第三层可重算属性(设计 §4.1(4) 明确「不放这里」)。
+ * ⚠️ 用 INSERT IGNORE 语义:已存在的行(带 blocked/watched 意志)绝不能被覆盖。
+ */
+export async function x_migration_1_1_4(db: Surreal): Promise<void> {
+  // ⚠️ 刻意**不用**纯 SQL 的 `FOR ... IN array::distinct(...)`:
+  //    实测(2026-09-06)那条语句对 6762 行的 x_tweet 返回**空响应、
+  //    一行也没建、且不报错** —— 典型的静默失败。
+  //    改成 GROUP BY 取去重作者(实测 22ms)+ 分批 CREATE,每批留痕。
+  const seenRes = await db.query<[Array<{ author_handle: string }>]>(
+    `SELECT author_handle FROM x_tweet GROUP BY author_handle`,
+  );
+  const knownRes = await db.query<[Array<{ handle: string }>]>(
+    `SELECT handle FROM x_author`,
+  );
+  const known = new Set((knownRes?.[0] ?? []).map((r) => r.handle));
+  const missing = (seenRes?.[0] ?? [])
+    .map((r) => r.author_handle)
+    .filter((h) => h && !known.has(h));
+
+  console.log(`[x-migration 1.1.4] 见过 ${seenRes?.[0]?.length ?? 0} 个作者,`
+    + `已登记 ${known.size},待回填 ${missing.length}`);
+
+  // 分批:一次性几千条 CREATE 容易撞事务/超时,批量出错也难定位
+  const BATCH = 200;
+  let done = 0;
+  for (let i = 0; i < missing.length; i += BATCH) {
+    const batch = missing.slice(i, i + BATCH);
+    // ⚠️ 只建标识行,不写任何计数(设计 §4.1(4):那是可重算的第三层属性)
+    const stmts = batch.map((_, k) =>
+      `CREATE x_author SET handle = $h${k}, blocked = false, watched = false, is_self = false;`
+    ).join('\n');
+    const params: Record<string, string> = {};
+    batch.forEach((h, k) => { params[`h${k}`] = h; });
+    await db.query(stmts, params);
+    done += batch.length;
+  }
+  console.log(`[x-migration 1.1.4] 回填完成:新建 ${done} 行`);
+
+  await db.query(
+    `UPSERT $rid SET version = '1.1.4', appliedAt = $now,
+      description = 'Backfill x_author from x_tweet (people seen but never registered)'`,
+    { rid: new RecordId('schema_version', '1.1.4'), now: Date.now() },
+  );
+}

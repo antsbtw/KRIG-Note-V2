@@ -402,3 +402,52 @@ export async function getAuthorStats(handle: string): Promise<AuthorStats> {
     lastSeen: res?.[4]?.[0] ? String(res[4][0]) : undefined,
   };
 }
+
+
+/**
+ * 登记见过的人 —— 每采到一条推就确保作者在 `x_author` 里有一行。
+ *
+ * ⭐ 起因(用户 2026-09-06 问「凡是爬下来的用户,都保存下来没有删除吧?」):
+ * 实测 `x_tweet` 见过 **3458 个不同作者**,而 `x_author` 只有 **36 行**
+ * (34 blocked + 1 is_self + 1 测试残留)—— 采集链路**从不写人表**,
+ * 只有「对某人采取动作」(屏蔽/追踪/识别本人)才建行。
+ * 设计 §4.1(4) 说它是「人」的唯一真源,实际它成了一张动作记录表。
+ *
+ * ⚠️ **只登记标识,不写计数**:seen_count / replied_count 这类是
+ * 第三层可重算属性(设计 §4.1(4) 明确「不放这里」),
+ * 塞进来就会有「计数与真实数据不同步」这个最常见的 bug 源。
+ * 要统计走 getAuthorStats() 现算。
+ *
+ * ⚠️ **绝不覆盖已有行的意志字段**:这个人可能已被 blocked 或 watched,
+ * 采集到他的新推不该把那些清掉。故已存在时只补展示名/头像这类快照。
+ */
+export async function registerSeenAuthor(
+  handle: string,
+  seen: { displayName?: string; avatar?: string } = {},
+): Promise<void> {
+  const h = normalizeHandle(handle);
+  if (!h) return;   // 空 handle 静默跳过:采集侧偶有脏数据,不值得为它中断入库
+
+  const db = getXDB();
+  const existing = await db.query<[AuthorRow[]]>(
+    `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
+  );
+  if ((existing[0] ?? []).length > 0) {
+    // 已有行:只刷新会变的展示信息,**不碰 blocked/watched/is_self**
+    if (seen.displayName || seen.avatar) {
+      await db.query(
+        `UPDATE x_author SET
+           display_name = $dn ?? display_name,
+           avatar = $av ?? avatar
+         WHERE handle = $handle`,
+        { handle: h, dn: seen.displayName ?? undefined, av: seen.avatar ?? undefined },
+      );
+    }
+    return;
+  }
+  await db.query(
+    `CREATE x_author SET handle = $handle, display_name = $dn, avatar = $av,
+       blocked = false, watched = false, is_self = false`,
+    { handle: h, dn: seen.displayName ?? undefined, av: seen.avatar ?? undefined },
+  );
+}
