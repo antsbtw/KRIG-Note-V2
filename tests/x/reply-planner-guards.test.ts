@@ -440,6 +440,66 @@ describe('推断链留档(回归分析的依据)', () => {
   });
 });
 
+describe('① 上文闸门(链条第一步)', () => {
+  const FACTS2 = readFileSync(
+    resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+
+  it('⭐ 上文必须进 prompt', () => {
+    // 用户 2026-09-06:「先追踪这个帖子的上一层的内容(确保它和 VPN 相关)」
+    expect(FACTS2).toMatch(/function contextBlock/);
+    const fn = FACTS2.slice(FACTS2.indexOf('export function buildSingleReplyPrompt'));
+    expect(fn.slice(0, 600)).toMatch(/contextBlock\(lang, parent, isReply\)/);
+  });
+
+  it('⭐ threadRelevant=false 必须由**代码**强制拦下,不能只在 prompt 里说', () => {
+    // 实测(2026-09-06):只在 prompt 写「无关就判 worth=false」,
+    // 模型照回不误(游戏楼里那条 worth 仍是 true)。
+    // 拆成显式字段 + 代码强制才真的拦得住。
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    expect(fn).toMatch(/threadRelevant === false/);
+    // 而且必须排在 worth 判断**之前**,否则先被 worth 放行就晚了
+    const gate = fn.indexOf('threadRelevant === false');
+    const worth = fn.indexOf('if (!parsed?.worth)');
+    expect(gate > -1 && gate < worth, '闸门排在 worth 之后 —— 拦不住').toBe(true);
+  });
+
+  it('⭐ 上文取不到时要让模型知道「没看到」而非「没有」', () => {
+    // 编一个空上文冒充「上文是空的」会让模型放心大胆地回
+    expect(FACTS2).toMatch(/could not be fetched|上文没取到/);
+  });
+
+  it('⭐ 只对真的是回复的推抓上文(独立推别白跑导航)', () => {
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PLAN_ONE_REPLY'), h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/looksReply/);
+    expect(seg).toMatch(/if \(looksReply\)/);
+  });
+
+  it('⭐ 抓父推只读,不点任何东西', () => {
+    const pt = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-parent-tweet.ts'), 'utf-8');
+    expect(/\.click\(\)/.test(stripComments(pt))).toBe(false);
+  });
+
+  it('⭐ 抓不到父推返回 null,不返回空壳', () => {
+    const pt = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-parent-tweet.ts'), 'utf-8');
+    expect(pt).toMatch(/if \(!text\) return null/);
+  });
+
+  it('⭐ DOM 提取器不许再用 socialContext 当回复关系', () => {
+    // 那是「xx 转推了/已置顶」横幅,取它导致 in_reply_to 长期恒空,
+    // 而现象与「这些推本来就没父推」一模一样,极易被当成事实
+    const ex = readFileSync(
+      resolve(__dirname, '../../src/platform/main/tweet-fetcher/extract-script.ts'), 'utf-8');
+    const code = stripComments(ex);
+    const seg = code.slice(code.indexOf('inReplyToUser') - 800, code.indexOf('inReplyToUser') + 200);
+    expect(/socialContext/.test(seg), 'socialContext 又被当成回复关系了').toBe(false);
+    expect(ex).toMatch(/Replying to/);
+  });
+});
+
 describe('上下文缺失要让用户知道', () => {
   it('⭐ 生成只喂正文 —— 这是事实,别假装喂了上下文', () => {
     // 现状:{ role: 'user', content: tweet.text }。没有父推/会话串。

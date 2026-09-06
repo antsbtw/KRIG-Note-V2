@@ -99,7 +99,9 @@ export interface TweetInboxRecord {
   metrics: { likes?: number; retweets?: number; replies?: number; views?: number };
   fetched_at: string;            // ISO datetime — 我们抓到的时刻
   created_at?: string;           // 推文自身发布时间(A':extract 已提供)
-  in_reply_to?: string;          // 非空 = 这是一条回复,含被回复者 handle(A')
+  in_reply_to?: string;          // 父推 id(载荷层填);⚠️历史上取自 socialContext 故长期为空
+  /** 被回复者 handle —— DOM 上「Replying to @xxx」那一行。非空 = 这是一条回复 */
+  in_reply_to_user?: string;
   /** 到期时间。**undefined = 永久保留**(采纳/回复过的推文) —— TTL 清理会跳过。 */
   expires_at?: string;
   source: 'timeline' | 'search';

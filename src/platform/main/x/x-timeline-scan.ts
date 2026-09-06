@@ -299,6 +299,8 @@ export async function scanRecipe(
             fetched_at: nowIso,
             created_at: tweet.createdAt || undefined,
             in_reply_to: tweet.inReplyTo || undefined,
+            // 被回复者 handle —— ① 判断「这楼和 VPN 有没有关系」的入口
+            in_reply_to_user: tweet.inReplyToUser || undefined,
             expires_at: expiresAt,
             source: 'search',
             search_recipe: recipe.id,
@@ -327,6 +329,7 @@ export async function scanRecipe(
         // A':extract-script 早就提取了这两个字段(:75 / :147),此前组装记录时漏带 —— 只是接线
         created_at: tweet.createdAt || undefined,
         in_reply_to: tweet.inReplyTo || undefined,
+        in_reply_to_user: tweet.inReplyToUser || undefined,
         expires_at: expiresAt,
         source: 'search',
         search_recipe: recipe.id,

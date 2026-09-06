@@ -245,13 +245,44 @@ bio pushing VPN/proxy services or links, or a high count in our DB → promoter;
 normal ratio + established account + unrelated bio → more likely a real user.`;
 }
 
+/**
+ * 上文块 —— 用户 2026-09-06 定的链条第 ①(正确性闸门)。
+ *
+ * 「先追踪这个帖子的上一层的内容,**确保它和 VPN 相关**」——
+ * 一条「我也想要」放在卖手办的楼里和放在求 VPN 的楼里意思完全不同,
+ * 只看这一条判不出来。
+ */
+function contextBlock(
+  lang: ReplyLang,
+  parent?: { text: string; authorHandle?: string },
+  isReply?: boolean,
+): string {
+  if (parent?.text) {
+    const quoted = parent.text.slice(0, 400);
+    return lang === 'zh'
+      ? `\n【上文 —— 这条推是在回复 @${parent.authorHandle ?? '?'}】\n「${quoted}」\n\n⚠️ **第一步先判这楼在聊什么**(threadRelevant):这楼是不是在说\n「上不去某个网站 / 需要翻墙工具」?是 true,不是 false。\n**threadRelevant=false 就必须 worth=false 并停下**——\n在一个聊游戏/追星/卖东西的楼里说「我 VPN 太卡关掉了」的人**不是在找 VPN**,\n他关掉了反而更舒服,对他推销只会招人烦。`
+      : `\nCONTEXT — this tweet is a reply to @${parent.authorHandle ?? '?'}:\n"${quoted}"\n\n⚠️ **STEP 1, decide threadRelevant first**: is this thread about not being able to\nreach something / needing a way past network blocks? true or false.\n**If threadRelevant is false you MUST set worth=false and stop.**\nSomeone saying "my VPN lagged so I turned it off" inside a gaming thread is NOT\nlooking for a VPN — they are happier without one. Do not pitch to them.`;
+  }
+  if (isReply) {
+    return lang === 'zh'
+      ? '\n【上文】这条推是**回复串里的一条**,但**上文没取到** —— 你看不到这楼在聊什么。\nthreadRelevant 填 false 除非这条推自己就把需求说清楚了;拿不准宁可 worth=false。'
+      : '\nCONTEXT: this tweet is part of a reply thread, but **the parent could not be fetched** —\nyou cannot see what the thread is about. Set threadRelevant=false unless this tweet alone\nstates the need clearly; when unsure prefer worth=false.';
+  }
+  return lang === 'zh'
+    ? '\n【上文】这是一条独立推文(不在回复串里),没有上文要考虑 —— threadRelevant 按这条推本身判。'
+    : '\nCONTEXT: standalone tweet (not a reply), no thread to consider — judge threadRelevant from the tweet itself.';
+}
+
 export function buildSingleReplyPrompt(
   lang: ReplyLang,
   link: string,
   examples: Array<{ tweet: string; reply: string }> = [],
   posterFacts?: PosterFacts,
+  parent?: { text: string; authorHandle?: string },
+  isReply?: boolean,
 ): string {
-  const facts = factsBlock(lang, link) + posterBlock(lang, posterFacts);
+  const facts = factsBlock(lang, link) + posterBlock(lang, posterFacts)
+    + contextBlock(lang, parent, isReply);
   const shots = examples.length > 0
     ? (lang === 'zh'
         ? `\n\n【你以往认可的回复风格 —— 照这个口气写】\n${
@@ -287,7 +318,8 @@ ${facts}
 对方问了清单里没有的（价格、速度、节点数），如实说去官网/App 看，别编。${shots}
 
 输出 JSON 对象：
-{"posterKind":"genuine","posterRead":"凭什么这么判","trigger":"因由",
+{"threadTopic":"这楼在聊什么","threadRelevant":true,
+ "posterKind":"genuine","posterRead":"凭什么这么判","trigger":"因由",
  "worth":true,"confidence":0.9,"reason":"一句话","reply":"回复正文"}
 不要输出 JSON 之外的任何文字。`;
   }
@@ -322,7 +354,8 @@ If they ask something not in the facts (price, speed, server count), say to chec
 the site/app — do not make it up. Write in English.${shots}
 
 Output a JSON object:
-{"posterKind":"genuine","posterRead":"why you judged that","trigger":"what prompted them",
+{"threadTopic":"what the thread is about","threadRelevant":true,
+ "posterKind":"genuine","posterRead":"why you judged that","trigger":"what prompted them",
  "worth":true,"confidence":0.9,"reason":"one line","reply":"the reply text"}
 Output nothing except the JSON object.`;
 }

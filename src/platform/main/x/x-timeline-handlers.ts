@@ -22,6 +22,7 @@ import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import { probeSearchSyntax } from './x-search-syntax-spike';
+import { fetchParentTweet } from './x-parent-tweet';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
@@ -868,9 +869,26 @@ export function registerXTimelineHandlers(): void {
         }
       }
 
+      // ① 上一层内容 —— 链条第一步,正确性闸门(用户 2026-09-06)。
+      // ⚠️ **只对真的是回复的推抓**:独立求助推本来就没有上文,
+      //    为它们白跑一次导航是纯浪费(收件箱里绝大多数是独立求助推)。
+      // ⚠️ 抓不到就是抓不到 —— 传 undefined 让 prompt 说「没取到」,
+      //    模型会因此更保守;绝不编一个空上文冒充「上文是空的」。
+      const looksReply = !!(found.in_reply_to_user || /^\s*@\w+/.test(found.text ?? ''));
+      let parentTweet;
+      if (looksReply) {
+        const got = await fetchParentTweet(
+          found.tweet_url || `https://x.com/i/status/${found.tweet_id}`,
+          undefined, 10_000,
+        ).catch(() => null);
+        if (got) parentTweet = { text: got.text, authorHandle: got.authorHandle };
+        else console.warn(`[x-timeline-handlers] 上文没取到(${found.tweet_id}),模型会被告知「没看到」`);
+      }
+
       const r = await planOneReply(found, getJudgeConfig(), {
         selfHandle: acct?.handle,
         posterFacts,
+        parentTweet,
         approvedExamples: examples,
         fingerprintCounts,
         recentlyRepliedAuthors,

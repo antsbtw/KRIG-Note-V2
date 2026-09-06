@@ -757,3 +757,33 @@ export async function x_migration_1_1_4(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.4'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.5 —— 被回复者 handle 落库(2026-09-06)
+ *
+ * 用户定的回复链条:「先追踪这个帖子的上一层的内容(确保它和 VPN 相关),
+ *   再确认这个用户的活跃度,最后才能拟定出比较好的回复内容」。
+ * ① 是**正确性闸门**,但此前完全没做 —— 而且卡在采集层:
+ *
+ * `x-timeline-scan` 一直在写 `in_reply_to: tweet.inReplyTo`,
+ * 但 DOM 提取器取的是 `[data-testid="socialContext"]` ——
+ * **那是「xx 转推了/已置顶」横幅,不是回复关系**,所以该字段从未被正确填过。
+ * 实测:回复过的 20 条推,父推 id 全空 —— 现象与「它们本来就没有父推」
+ * 一模一样,极易被当成事实(我差点就是)。
+ *
+ * 修法:DOM 层改抓「Replying to @xxx」那一行的 handle(存这个字段),
+ * 父推 id 走载荷层(harvester 已有 in_reply_to_status_id_str)。
+ */
+const X_SCHEMA_1_1_5 = `
+DEFINE FIELD IF NOT EXISTS in_reply_to_user ON tweet_inbox TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_inbox_reply_user ON tweet_inbox FIELDS in_reply_to_user;
+`;
+
+export async function x_migration_1_1_5(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_5);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.5', appliedAt = $now,
+      description = 'tweet_inbox.in_reply_to_user (reply context for step 1 gate)'`,
+    { rid: new RecordId('schema_version', '1.1.5'), now: Date.now() },
+  );
+}

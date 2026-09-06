@@ -165,6 +165,8 @@ export interface PlanContext {
    * 传了 posterKind 就有事实依据;不传则模型只能看正文并倾向 unclear。
    */
   posterFacts?: PosterFacts;
+  /** 上一层内容(链条第①)。取不到时配合 isReplyThread 让模型知道「没看到」而非「没有」 */
+  parentTweet?: { text: string; authorHandle?: string };
   /**
    * 用户此前认可/修改过的例子 —— 放进生成 prompt 当少样本。
    * ⚠️ 这不是训练模型,是 in-context learning:立刻见效、随时可撤。
@@ -487,12 +489,19 @@ export async function planOneReply(
   let parsed: {
     worth?: boolean; confidence?: number; reason?: string; reply?: string;
     posterKind?: string; posterRead?: string; trigger?: string;
+    threadTopic?: string; threadRelevant?: boolean;
   };
   try {
     const res = await callOllama({
       model: config.model,
       messages: [
-        { role: 'system', content: buildSingleReplyPrompt(lang, link, ctx.approvedExamples ?? [], ctx.posterFacts) },
+        {
+          role: 'system',
+          content: buildSingleReplyPrompt(
+            lang, link, ctx.approvedExamples ?? [], ctx.posterFacts,
+            ctx.parentTweet, isInThread(tweet),
+          ),
+        },
         { role: 'user', content: tweet.text },
       ],
       endpoint: config.ollamaEndpoint,
@@ -518,6 +527,14 @@ export async function planOneReply(
     posterRead: typeof parsed?.posterRead === 'string' ? parsed.posterRead.trim() : '',
     trigger: typeof parsed?.trigger === 'string' ? parsed.trigger.trim() : '',
   };
+
+  // ① 闸门:上文与翻墙无关 → 直接不回,**不管它 worth 说什么**。
+  // 实测(2026-09-06):只在 prompt 里说「无关就判 false」模型会照回不误;
+  // 拆成显式的 threadRelevant 字段 + 代码强制,才真的拦得住。
+  if (parsed?.threadRelevant === false) {
+    return skip('ai_declined',
+      `上文与翻墙无关${parsed.threadTopic ? `(这楼在聊:${parsed.threadTopic})` : ''}`);
+  }
 
   if (!parsed?.worth) {
     return {

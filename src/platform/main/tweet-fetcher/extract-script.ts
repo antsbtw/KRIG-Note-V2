@@ -139,12 +139,32 @@ export const TWEET_SCRAPE_FN_BODY = `
       }
     } catch (e) {}
 
-    // 回复上下文
+    // 回复上下文 —— 「这条是回复谁的」
+    //
+    // ⚠️ 曾经取的是 [data-testid="socialContext"],**那是错的**:
+    //    socialContext 是「xx 转推了 / 已置顶」这条横幅,不是回复关系。
+    //    实测后果:全库 in_reply_to 恒空(20/20 回复过的推父推 id 全无),
+    //    而现象与「这些推本来就没有父推」一模一样 —— 极易被当成事实。
+    //
+    // X 的回复卡片在正文上方有一行「Replying to @xxx」/「回复 @xxx」,
+    // 它是个链接指向被回复者主页(不是 /status/),所以这里
+    // **抓 handle 而不是 status 链接**;父推 id 走载荷层补(见 x-timeline-harvester)。
     try {
-      var social = article.querySelector('[data-testid="socialContext"]');
-      if (social) {
-        var slink = social.querySelector('a[href*="/status/"]');
-        if (slink) result.inReplyTo = slink.href;
+      var blocks = article.querySelectorAll('div[dir]');
+      for (var bi = 0; bi < blocks.length; bi++) {
+        var bt = blocks[bi].textContent || '';
+        if (bt.indexOf('Replying to') === 0 || bt.indexOf('回复 @') === 0
+            || bt.indexOf('回复\u0020@') === 0) {
+          var rlink = blocks[bi].querySelector('a[href^="/"]');
+          if (rlink) {
+            var rh = rlink.getAttribute('href') || '';
+            // href = /someone → 取 handle
+            var rm = rh.match(/^\/([A-Za-z0-9_]{1,15})$/);
+            if (rm) result.inReplyToUser = rm[1];
+          }
+          result.isReply = true;
+          break;
+        }
       }
     } catch (e) {}
 

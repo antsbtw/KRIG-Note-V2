@@ -42,6 +42,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       fetched_at: $fetched_at,
       created_at: $created_at,
       in_reply_to: $in_reply_to,
+      in_reply_to_user: $in_reply_to_user,
       expires_at: $expires_at,
       source: $source,
       search_recipe: $search_recipe,
@@ -73,6 +74,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       // A':extract 早就提取了这两个字段,只是组装记录时没带上
       created_at: record.created_at ? new Date(record.created_at) : undefined,
       in_reply_to: record.in_reply_to ?? undefined,
+      in_reply_to_user: record.in_reply_to_user ?? undefined,
       // ⚠️ undefined → NONE(永久保留);绝不写 null —— option<T> 只认 NONE,NULL 会被拒
       expires_at: record.expires_at ? new Date(record.expires_at) : undefined,
       source: record.source,
