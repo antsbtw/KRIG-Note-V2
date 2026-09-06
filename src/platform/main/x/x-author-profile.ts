@@ -165,7 +165,11 @@ export async function harvestAuthorProfile(
   if (!profile) {
     return { error: `未截获 @${h} 的账号载荷(${budgetMs}ms 内)—— 可能未登录、页面没加载完、或该账号不存在` };
   }
-  await saveAuthorCounts(h, profile);
+  // 关系视角一并落库 —— 载荷自带、零额外请求,但此前只在内存里没存
+  await saveAuthorCounts(h, {
+    ...(profile as AuthorProfile),
+    xBlocking: (profile as AuthorProfile).blocking,
+  });
   return profile;
 }
 

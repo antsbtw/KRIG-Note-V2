@@ -787,3 +787,38 @@ export async function x_migration_1_1_5(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.5'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.6 —— 关系视角与简介落库(2026-09-06)
+ *
+ * 用户 2026-09-06 一句话点破:「账户关联关系不是在爬下来的数据都有吗?
+ *   只是如何触发,什么时候触发而已。」——对。
+ * `UserByScreenName` 载荷自带 `relationship_perspectives`
+ * (following / followed_by / blocking / blocked_by / muting),**零额外请求**
+ * (能力勘查 §2.4 实测)。x-author-profile 早就解析出来了,
+ * 但**只在内存里、没落库、也没进判断** —— 又一次「采到了没用上」。
+ *
+ * ⭐ 为什么值得存:「他关注了我」是判断链条第 ② 步(活跃度/真实性)的**强信号** ——
+ * 水军和营销号不会去关注一个小账号,而真实用户看过你的内容才会关注。
+ * 这比粉丝数更难伪造。
+ *
+ * ⚠️ 与 `blocked` 区分:`blocked` 是**我们 app 内部的屏蔽意志**,
+ *    `x_blocking` 是**X 上的真实拉黑状态**(我在 X 上拉黑了他)。两码事,别混。
+ */
+const X_SCHEMA_1_1_6 = `
+DEFINE FIELD IF NOT EXISTS follows_me   ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS i_follow     ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS x_blocking   ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS bio          ON x_author TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS is_blue_verified ON x_author TYPE option<bool>;
+DEFINE INDEX IF NOT EXISTS idx_author_follows_me ON x_author FIELDS follows_me;
+`;
+
+export async function x_migration_1_1_6(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_6);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.6', appliedAt = $now,
+      description = 'Author relationship perspectives + bio (step 2 activity signals)'`,
+    { rid: new RecordId('schema_version', '1.1.6'), now: Date.now() },
+  );
+}

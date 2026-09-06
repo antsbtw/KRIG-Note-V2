@@ -440,6 +440,42 @@ describe('推断链留档(回归分析的依据)', () => {
   });
 });
 
+describe('② 关系视角(活跃度信号)', () => {
+  const AR = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+  const PROF = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-author-profile.ts'), 'utf-8');
+  const FCT = readFileSync(
+    resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+
+  it('⭐ 载荷里的关系视角必须落库(此前采到了没用上)', () => {
+    // 用户 2026-09-06:「账户关联关系不是在爬下来的数据都有吗?只是如何触发」
+    expect(PROF).toMatch(/relationship_perspectives/);
+    expect(AR).toMatch(/follows_me = \$fm/);
+  });
+
+  it('⭐ 写进去的字段必须能读回来(否则缓存路径静默丢信号)', () => {
+    // 漏读会让「现采的有、读缓存的没有」,两次判断不一致且查不出原因
+    const g = AR.slice(AR.indexOf('export async function getAuthorCounts'));
+    for (const k of ['follows_me', 'i_follow', 'bio', 'is_blue_verified']) {
+      expect(g.slice(0, 1400), `getAuthorCounts 漏读 ${k}`).toContain(k);
+    }
+  });
+
+  it('⭐ X 上的拉黑与本 app 的屏蔽必须分开', () => {
+    // blocked = 我们的屏蔽意志;x_blocking = X 上的真实拉黑状态。两码事
+    expect(AR).toMatch(/x_blocking/);
+    const schema = readFileSync(
+      resolve(__dirname, '../../src/storage/surreal/x-schema.ts'), 'utf-8');
+    expect(schema).toMatch(/DEFINE FIELD IF NOT EXISTS x_blocking/);
+  });
+
+  it('⭐ 关系信号要进 prompt', () => {
+    expect(FCT).toMatch(/followsMe/);
+    expect(FCT).toMatch(/they follow us|他关注了我们/);
+  });
+});
+
 describe('① 上文闸门(链条第一步)', () => {
   const FACTS2 = readFileSync(
     resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');

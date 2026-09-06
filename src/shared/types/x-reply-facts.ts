@@ -206,6 +206,14 @@ export interface PosterFacts {
   isBlueVerified?: boolean;
   /** 这人在库里被我们采到过几条推 —— 高频出现是推广者的强信号 */
   seenTweets?: number;
+  /**
+   * 他关注了我们 —— ② 活跃度/真实性的**强信号**。
+   * 水军和营销号不会去关注一个小账号;真实用户看过内容才会关注。
+   * 比粉丝数难伪造得多。载荷自带,零额外请求。
+   */
+  followsMe?: boolean;
+  /** 我们关注了他 */
+  iFollow?: boolean;
 }
 
 /** 账号事实渲染成 prompt 片段。没有资料就明说没有,让模型填 unclear。 */
@@ -221,12 +229,16 @@ function posterBlock(lang: ReplyLang, facts?: PosterFacts): string {
   const ratio = facts.followersCount != null && facts.followingCount
     ? (facts.followersCount / Math.max(1, facts.followingCount)).toFixed(2)
     : '未知';
+  const rel = facts.followsMe
+    ? '**他关注了我们**（真实用户的强信号：水军/营销号不会去关注小账号）'
+    : '他没关注我们';
   if (lang === 'zh') {
     return `\n【账号资料 —— 已查证，可以据此判断】
 - @${facts.handle}
 - 粉丝 ${facts.followersCount ?? '未知'} / 关注 ${facts.followingCount ?? '未知'}（粉丝关注比 ${ratio}）
 - 账号年龄 ${age}，累计发推 ${facts.tweetCount ?? '未知'}
 - 我们库里采到过他 ${facts.seenTweets ?? 0} 条推
+- 关系：${rel}
 - 认证：${facts.isBlueVerified ? '蓝V' : '无'}
 - 简介：${facts.bio ? facts.bio.slice(0, 120) : '(空)'}
 参考判据：粉丝极少+关注极多+账号很新 → 多半是营销号；
@@ -238,6 +250,9 @@ function posterBlock(lang: ReplyLang, facts?: PosterFacts): string {
 - ${facts.followersCount ?? '?'} followers / ${facts.followingCount ?? '?'} following (ratio ${ratio})
 - account age ${age}, ${facts.tweetCount ?? '?'} tweets total
 - we have collected ${facts.seenTweets ?? 0} of their tweets
+- relationship: ${facts.followsMe
+    ? '**they follow us** (strong signal of a real user: spam/marketing accounts do not follow small accounts)'
+    : 'they do not follow us'}
 - verified: ${facts.isBlueVerified ? 'blue check' : 'no'}
 - bio: ${facts.bio ? facts.bio.slice(0, 120) : '(empty)'}
 Heuristics: very few followers + following many + very new account → likely a marketing account;

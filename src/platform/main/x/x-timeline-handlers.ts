@@ -865,6 +865,9 @@ export function registerXTimelineHandlers(): void {
             bio: (prof as { bio?: string }).bio,
             isBlueVerified: (prof as { isBlueVerified?: boolean }).isBlueVerified,
             seenTweets: seen,
+            // ② 活跃度/真实性的强信号 —— 载荷自带,零额外请求
+            followsMe: (prof as { followsMe?: boolean }).followsMe,
+            iFollow: (prof as { iFollow?: boolean }).iFollow,
           };
         }
       }

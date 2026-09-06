@@ -191,6 +191,15 @@ export interface AuthorCounts {
   followingCount?: number;
   favouritesCount?: number;
   accountCreatedAt?: string;
+  /**
+   * 关系视角 —— 载荷自带,零额外请求(能力勘查 §2.4)。
+   * ⚠️ `xBlocking` 是**X 上的真实拉黑**,与 `blocked`(本 app 的屏蔽意志)是两码事。
+   */
+  followsMe?: boolean;
+  iFollow?: boolean;
+  xBlocking?: boolean;
+  bio?: string;
+  isBlueVerified?: boolean;
 }
 
 /**
@@ -215,12 +224,19 @@ export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Pr
     gc: counts.followingCount ?? undefined,
     lc: counts.favouritesCount ?? undefined,
     ca: counts.accountCreatedAt ? new Date(counts.accountCreatedAt) : undefined,
+    fm: counts.followsMe ?? undefined,
+    ifl: counts.iFollow ?? undefined,
+    xb: counts.xBlocking ?? undefined,
+    bio: counts.bio ?? undefined,
+    bv: counts.isBlueVerified ?? undefined,
   };
   const existing = await db.query<[AuthorRow[]]>(
     `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
   );
   const setClause = `tweet_count = $tc, media_count = $mc, followers_count = $fc,
     following_count = $gc, favourites_count = $lc, account_created_at = $ca,
+    follows_me = $fm, i_follow = $ifl, x_blocking = $xb,
+    bio = $bio, is_blue_verified = $bv,
     counts_at = time::now()`;
   if ((existing[0] ?? []).length > 0) {
     await db.query(`UPDATE x_author SET ${setClause} WHERE handle = $handle`, params);
@@ -235,7 +251,8 @@ export async function getAuthorCounts(handle: string): Promise<AuthorCounts & { 
   const db = getXDB();
   const res = await db.query<[Array<Record<string, unknown>>]>(
     `SELECT tweet_count, media_count, followers_count, following_count,
-       favourites_count, counts_at FROM x_author WHERE handle = $handle LIMIT 1`,
+       favourites_count, account_created_at, follows_me, i_follow, x_blocking,
+       bio, is_blue_verified, counts_at FROM x_author WHERE handle = $handle LIMIT 1`,
     { handle: h },
   );
   const r = res[0]?.[0];
@@ -246,6 +263,14 @@ export async function getAuthorCounts(handle: string): Promise<AuthorCounts & { 
     followersCount: typeof r.followers_count === 'number' ? r.followers_count : undefined,
     followingCount: typeof r.following_count === 'number' ? r.following_count : undefined,
     favouritesCount: typeof r.favourites_count === 'number' ? r.favourites_count : undefined,
+    accountCreatedAt: r.account_created_at ? String(r.account_created_at) : undefined,
+    // ⚠️ 这几个必须一起读回来 —— 漏了会让「库里有新鲜画像」这条路径
+    //    静默丢掉关系信号(现采的有、读缓存的没有),两次判断结果不一致且查不出原因
+    followsMe: typeof r.follows_me === 'boolean' ? r.follows_me : undefined,
+    iFollow: typeof r.i_follow === 'boolean' ? r.i_follow : undefined,
+    xBlocking: typeof r.x_blocking === 'boolean' ? r.x_blocking : undefined,
+    bio: typeof r.bio === 'string' ? r.bio : undefined,
+    isBlueVerified: typeof r.is_blue_verified === 'boolean' ? r.is_blue_verified : undefined,
     countsAt: r.counts_at ? String(r.counts_at) : undefined,
   };
 }
