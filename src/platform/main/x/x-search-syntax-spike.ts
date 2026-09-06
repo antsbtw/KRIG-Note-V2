@@ -115,3 +115,80 @@ export async function probeSearchSyntax(
 
   return { handle: h, probes, verdict };
 }
+
+
+/**
+ * 实测「Replying to」那一行到底长什么样。
+ *
+ * ⭐ 起因(2026-09-06):我改了 DOM 提取器抓被回复者 handle,
+ * 但实测 **search 采的 3782 条里只有 48 条有值**,而那 48 条是更早走载荷层拿到的
+ * —— 说明我的 DOM 选择器**根本没命中**,又是"照猜写、没实测"。
+ * (与 socialContext 那次同源:那次也是想当然地取了个错元素。)
+ *
+ * 这个探针把候选选择器逐个试一遍,报告各自命中多少、抓到什么,
+ * 由实测决定用哪个 —— 而不是我再猜一版。
+ */
+export async function probeReplyContextDom(
+  targetWcId?: number,
+): Promise<{ total: number; probes: Array<{ how: string; hit: number; samples: string[] }> } | { error: string }> {
+  const resolved = resolveXWebContents(targetWcId);
+  if ('error' in resolved) return { error: resolved.error };
+  const wc = resolved.wc;
+
+  const got = await wc.executeJavaScript(`(function () {
+    var arts = Array.prototype.slice.call(
+      document.querySelectorAll('article[data-testid="tweet"]'));
+    var out = { total: arts.length, probes: [] };
+    function push(how, fn) {
+      var hit = 0, samples = [];
+      for (var i = 0; i < arts.length; i++) {
+        try {
+          var v = fn(arts[i]);
+          if (v) { hit++; if (samples.length < 3) samples.push(String(v).slice(0, 60)); }
+        } catch (e) {}
+      }
+      out.probes.push({ how: how, hit: hit, samples: samples });
+    }
+    // ① 我现在用的:div[dir] 且 textContent 以 Replying to 开头
+    push('div[dir] startsWith(Replying to)', function (a) {
+      var bs = a.querySelectorAll('div[dir]');
+      for (var i = 0; i < bs.length; i++) {
+        var t = bs[i].textContent || '';
+        if (t.indexOf('Replying to') === 0) return t;
+      }
+      return null;
+    });
+    // ② 放宽:任何元素**包含**(不必开头)Replying to / 回复
+    push('any el contains(Replying to|回复)', function (a) {
+      var all = a.querySelectorAll('*');
+      for (var i = 0; i < all.length; i++) {
+        var t = all[i].textContent || '';
+        if ((t.indexOf('Replying to') >= 0 || t.indexOf('回复 @') >= 0) && t.length < 200) return t;
+      }
+      return null;
+    });
+    // ③ 整个 article 文本里有没有这串(判断"页面上到底有没有")
+    push('article.innerText contains', function (a) {
+      var t = a.innerText || '';
+      return (t.indexOf('Replying to') >= 0 || t.indexOf('回复 @') >= 0) ? t.slice(0, 60) : null;
+    });
+    // ④ 结构法:正文之前是否有指向某人主页的链接
+    push('a[href^=/] before tweetText', function (a) {
+      var body = a.querySelector('[data-testid="tweetText"]');
+      if (!body) return null;
+      var links = a.querySelectorAll('a[href^="/"]');
+      for (var i = 0; i < links.length; i++) {
+        var h = links[i].getAttribute('href') || '';
+        if (/^\\/[A-Za-z0-9_]{1,15}$/.test(h)
+            && (links[i].compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+          return h;
+        }
+      }
+      return null;
+    });
+    return out;
+  })()`).catch(() => null) as { total: number; probes: Array<{ how: string; hit: number; samples: string[] }> } | null;
+
+  if (!got) return { error: '页面上取不到推文(先切到 X 并加载一个含回复的页面)' };
+  return got;
+}

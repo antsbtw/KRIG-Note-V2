@@ -22,7 +22,7 @@ import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
-import { probeSearchSyntax } from './x-search-syntax-spike';
+import { probeSearchSyntax, probeReplyContextDom } from './x-search-syntax-spike';
 import { fetchParentTweet } from './x-parent-tweet';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
@@ -1162,6 +1162,21 @@ export function registerXTimelineHandlers(): void {
     try {
       const r = await probeSearchSyntax(
         p.handle, typeof p.wcId === 'number' ? p.wcId : undefined);
+      if ('error' in r) return { success: false, error: r.error };
+      return { success: true, ...r };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_PROBE_REPLY_DOM — 实测「Replying to」那一行的 DOM 结构。
+  // 起因:改了提取器却发现 search 采的 3782 条只有 48 条有 in_reply_to_user
+  // (那 48 条还是更早走载荷层拿的)—— 选择器没命中,又是"照猜写没实测"。
+  ipcMain.handle(IPC_CHANNELS.X_PROBE_REPLY_DOM, async (_e, payload: unknown) => {
+    const p = payload as { wcId?: unknown } | null;
+    try {
+      const r = await probeReplyContextDom(
+        typeof p?.wcId === 'number' ? p.wcId : undefined);
       if ('error' in r) return { success: false, error: r.error };
       return { success: true, ...r };
     } catch (err) {
