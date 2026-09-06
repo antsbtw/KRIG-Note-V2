@@ -90,6 +90,13 @@ export interface ArticleRepliesResult {
   hintFound: boolean;
   /** 因 budget 提前返回 */
   partial: boolean;
+  /**
+   * 本次采集里见过折叠区(「Show probable spam」等)。
+   *
+   * ⚠️ 为 true 时**绝不可**判「消失=已删除」:折叠区里藏着没翻到的回复,
+   *   「本次没看见」不等于「被删了」。2026-09-06 实测误标 3 条。
+   */
+  sawFolded: boolean;
   elapsedMs: number;
   problems: string[];
 }
@@ -181,6 +188,15 @@ export async function fetchArticleReplies(
   /** X 说「还有更多回复」时给的游标(折叠区 / 会话断层);undefined = 真的翻完了 */
   let showMore: { actionText?: string; value: string; entryId?: string } | undefined;
   let expanded = 0;
+  /**
+   * 本次是否见过折叠区(不论最后展没展开)。
+   *
+   * ⚠️ 2026-09-06 误删事故的教训:只要这篇文章有折叠区,
+   *   「本次没看见某条」就**不能**推断成「它被删了」——
+   *   折叠区里本来就藏着我们没翻到的回复。
+   *   这个标记要一路传到调用方,作为「不许判删除」的硬闸。
+   */
+  let sawFolded = false;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
     if (method === 'Network.requestWillBeSent') {
@@ -216,6 +232,7 @@ export async function fetchArticleReplies(
             try {
               const c = findShowMoreCursor(JSON.parse(r.body));
               showMore = c;
+              if (c) sawFolded = true;
             } catch { /* 非 JSON */ }
           }
           try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
@@ -394,6 +411,7 @@ export async function fetchArticleReplies(
     fetched: tweets.size,
     hintFound,
     partial,
+    sawFolded,
     elapsedMs: Date.now() - started,
     problems,
   };

@@ -618,10 +618,15 @@ export function registerXTimelineHandlers(): void {
       // ③ 入库(用户定的流程第三步)。幂等键 (article_id, tweet_id)。
       const saved = await upsertCampaignReplies(parsed.tweetId, r.items);
 
-      // ⚠️ 只有**抓完整**时才判「消失=已删除」—— partial 时没抓完,
-      // 没出现不等于被删,那样会误标一片(契约 §2.1 的 deleted 影响签发)。
+      // ⚠️ 只有**抓完整**时才判「消失=已删除」—— 没抓完时「没出现」
+      // 不等于「被删」,误标会让 campaign-tasks 把有效留言判成无效(契约 §2.1)。
+      //
+      // ⚠️ 2026-09-06 实测误标 3 条:此前的闸只看 partial + problems,
+      //   而展开折叠区成功后游标被消费掉、partial 归 false、problems 也空,
+      //   闸就开了 —— 但折叠区里仍有没翻到的回复。
+      //   → 加第三道:**本次见过折叠区就一律不判删除**(sawFolded)。
       let markedDeleted = 0;
-      if (!r.partial && r.problems.length === 0) {
+      if (!r.partial && r.problems.length === 0 && !r.sawFolded) {
         markedDeleted = await markMissingAsDeleted(
           parsed.tweetId, r.items.map((i) => i.tweet_id));
       }

@@ -80,3 +80,48 @@ describe('折叠区游标', () => {
     expect(findShowMoreCursor(realShape)).not.toBe(broken());
   });
 });
+
+/**
+ * 误标删除的闸门。
+ *
+ * ⚠️ 2026-09-06 真机事故:试抓报「标记删除 3」,而那 3 条并没被删 ——
+ *   它们在「Show probable spam」折叠区里,本次没翻到而已。
+ *   契约 §2.1 的 deleted:true 会让 campaign-tasks 把留言判成无效。
+ *
+ * 事故成因值得记:原先的闸是 `!partial && problems.length===0`,
+ * 而我在上一次修「不许谎报完整」时,把 partial 改成「只有还剩游标才置位」——
+ * 展开成功后游标被消费掉,partial 归 false、problems 也空,**闸就开了**。
+ * 修一个诚实性问题,顺手拆掉了另一处的安全网。
+ */
+describe('误标删除的闸门', () => {
+  /** 复刻 x-timeline-handlers 里的判据,守住三者的组合关系 */
+  const mayMarkDeleted = (r: {
+    partial: boolean; problems: string[]; sawFolded: boolean;
+  }): boolean => !r.partial && r.problems.length === 0 && !r.sawFolded;
+
+  it('⭐ 见过折叠区 → 一律不判删除(哪怕 partial=false、problems 为空)', () => {
+    // 这正是 2026-09-06 误标 3 条时的实际状态
+    expect(mayMarkDeleted({ partial: false, problems: [], sawFolded: true })).toBe(false);
+  });
+
+  it('没抓完(partial)不判删除', () => {
+    expect(mayMarkDeleted({ partial: true, problems: [], sawFolded: false })).toBe(false);
+  });
+
+  it('有 problems 不判删除', () => {
+    expect(mayMarkDeleted({ partial: false, problems: ['x'], sawFolded: false })).toBe(false);
+  });
+
+  it('三者都干净才允许判删除', () => {
+    expect(mayMarkDeleted({ partial: false, problems: [], sawFolded: false })).toBe(true);
+  });
+
+  /** 反向注入:漏掉 sawFolded 这一道时,事故场景会重现 */
+  it('反向注入:少了 sawFolded 闸,事故场景会放行', () => {
+    const broken = (r: { partial: boolean; problems: string[] }): boolean =>
+      !r.partial && r.problems.length === 0;
+    const accident = { partial: false, problems: [], sawFolded: true };
+    expect(broken(accident)).toBe(true);              // 旧闸放行 = 误删
+    expect(mayMarkDeleted(accident)).not.toBe(broken(accident));
+  });
+});
