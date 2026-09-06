@@ -116,8 +116,44 @@ describe('UI:只填不发', () => {
     }
   });
 
-  it('⭐ 规划失败必须报错,不能留空列表装作「没什么可回的」', () => {
-    expect(UI_RAW).toMatch(/规划失败/);
+  it('⭐ 回放失败必须报错,不能留空列表装作「没什么可回的」', () => {
+    // 批量「规划草稿」已删(全局入口),同一条不变量现在落在回放路径上
+    expect(UI_RAW).toMatch(/回放失败/);
+  });
+});
+
+describe('回复是逐条的事,不能有全局入口', () => {
+  const INBOX = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+
+  it('⭐ 「送入回复」必须在卡片里、且带上这一条推文', () => {
+    // 用户 2026-09-06:「回复应该是针对每一条推文,而不是总体只有一个 button」
+    expect(INBOX).toMatch(/sendToReply\(t\)/);
+  });
+
+  it('⭐ 顶栏不得再出现批量拟回复入口', () => {
+    // 顶栏那个「✎ 拟回复」正是「总体一个 button」,已删。
+    // ⚠️ 别用「两个标识之间切片」定位顶栏:startScan 在文件里其实**排在
+    //    triggerJudge 前面**,那样切出来是空串,守卫会永远通过(踩过)。
+    //    直接找 setView('drafts') 那颗按钮,检查它的文字。
+    const i = INBOX.indexOf("setView('drafts')");
+    expect(i, "找不到回放入口按钮").toBeGreaterThan(-1);
+    const btn = INBOX.slice(i, INBOX.indexOf('</Btn>', i));
+    expect(
+      /拟回复|规划草稿/.test(btn),
+      `顶栏又出现了批量拟回复 —— 回复应该逐条进行:${btn.trim()}`,
+    ).toBe(false);
+  });
+
+  it('⭐ 回放页不得再有批量规划按钮', () => {
+    expect(
+      /规划草稿|planReplies\(/.test(stripComments(UI_RAW)),
+      '回放页又能批量产草稿了 —— 那就是变相的全局回复入口',
+    ).toBe(false);
+  });
+
+  it('回放页要指明日常回复的正确入口', () => {
+    expect(UI_RAW).toMatch(/送入回复/);
   });
 });
 

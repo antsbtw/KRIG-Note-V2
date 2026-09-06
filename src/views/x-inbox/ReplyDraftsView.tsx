@@ -1,9 +1,18 @@
 /**
- * 拟回复视图 —— 批量规划草稿,逐条过目后填进 X。
+ * 回放验证台 —— 拿历史人工标注样本跑规划器,看 AI 现在写得怎么样。
+ *
+ * ⚠️ 这里**不做日常回复**。用户 2026-09-06 指出:
+ *   「回复应该是针对每一条推文,而不是总体只有一个 button」——对。
+ *   日常回复的入口是**每条卡片上的「送入回复」**(ReplyComposeDialog),
+ *   那里能看到原推全文、置信度、作者,是判断「该不该这么回」的地方。
+ *   本页原有的「🤖 规划草稿」批量按钮已删 —— 它正是那个「总体一个 button」。
  *
  * ⚠️⚠️ 写方向最高红线:**只填不发**。
  *   「填入 X」走 pasteReply(它自己也只填不点),发布那一下永远由用户在 X 页面上点。
  *   本视图不存在任何「一键全发」——刻意不做,不是没来得及做。
+ *
+ * 保留它的唯一理由:回放能拿 7000+ 条不可再生的人工标注**离线验证**生成质量,
+ * 不需要等新数据、不产生任何副作用。
  *
  * 三处刻意的设计(都有实测依据,别顺手改):
  *  ① **正文可改,但改动不回写模板库** —— 手滑污染模板会影响之后所有回复。
@@ -56,34 +65,6 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
   } | null>(null);
 
   const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
-
-  const plan = async () => {
-    setPlanning(true);
-    setStatus('正在规划…(模型判断需要几十秒)');
-    try {
-      const r = await api()?.planReplies(workspaceId);
-      if (!r?.success) {
-        // fail loud:失败就说失败,不要留个空列表让人以为「没什么可回的」
-        setStatus(`规划失败:${r?.error ?? '未知错误'}`);
-        setDrafts([]); setSkips([]);
-        return;
-      }
-      setDrafts(r.drafts ?? []);
-      setSkips(r.skips ?? []);
-      setEdits({});
-      setScore(null);
-      const n = r.drafts?.length ?? 0;
-      setStatus(
-        n === 0
-          ? `扫了 ${r.scanned ?? 0} 条,没有可回的(跳过 ${r.skips?.length ?? 0} 条,展开可看原因)`
-          : `草稿 ${n} 条 · 跳过 ${r.skips?.length ?? 0} 条`,
-      );
-    } catch (err) {
-      setStatus(`规划失败:${String(err)}`);
-    } finally {
-      setPlanning(false);
-    }
-  };
 
   /**
    * 回放:拿历史人工标注样本跑一遍规划器。
@@ -163,10 +144,9 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
       {/* ── 顶栏 ── */}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
         <Btn onClick={onBack}>← 返回收件箱</Btn>
-        <Btn primary onClick={plan} disabled={planning}>
-          {planning ? '规划中…' : '🤖 规划草稿'}
+        <Btn primary onClick={replay} disabled={planning}>
+          {planning ? '回放中…' : '🔁 回放历史样本'}
         </Btn>
-        <Btn onClick={replay} disabled={planning}>🔁 回放历史样本</Btn>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>{status}</span>
       </div>
 
@@ -202,7 +182,11 @@ export function ReplyDraftsView({ workspaceId, onBack }: Props) {
       {/* ── 草稿列表 ── */}
       {drafts.length === 0 && !planning && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '18px 4px' }}>
-          还没有草稿。点「🤖 规划草稿」让模型过一遍待回复的推文。
+          点「🔁 回放历史样本」拿历史人工标注跑一遍，看看 AI 现在写得怎么样。
+          <div style={{ marginTop: 6, color: 'var(--text-faint)' }}>
+            日常回复请回收件箱，在每条推文卡片上点「送入回复」——
+            回复是逐条的事，这里只做验证。
+          </div>
         </div>
       )}
 

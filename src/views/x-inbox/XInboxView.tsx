@@ -734,7 +734,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
 
-  // ── 拟回复视图(批量规划草稿 → 逐条填入 X;红线:只填不发)──────
+  // ── 回放验证台(拿历史标注离线验生成质量;日常回复走卡片弹窗)──────
   if (view === 'drafts') {
     return <ReplyDraftsView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
@@ -781,7 +781,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         <div style={{ display: 'flex', gap: 6 }}>
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
-          <Btn onClick={() => setView('drafts')}>✎ 拟回复</Btn>
+          <Btn onClick={() => setView('drafts')}>🔁 回放验证</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
           <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
           <Btn onClick={() => setView('campaign')}>⚙ 活动配置</Btn>
