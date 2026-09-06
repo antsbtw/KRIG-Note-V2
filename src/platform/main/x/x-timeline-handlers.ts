@@ -1034,12 +1034,12 @@ export function registerXTimelineHandlers(): void {
       //    全都 reason='human:accept'(用户已表态),原本写 humanReviewed:false
       //    → 匹配 0 条 → 预抓静默什么都不做。
       //    而且方向本就反了:用户已确认要回的那些**更需要**上文,不是更不需要。
-      const pool = await queryInbox({
-        status: 'worth', wsId: p.wsId,
-        limit: typeof p.limit === 'number' ? p.limit : 20,
-      });
-      const targets = pool.filter(
-        (t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''));
+      // 同画像:不按页取。上文是按**推**存的,存过的跳过 → 断点续抓。
+      const pool = await queryInbox({ status: 'worth', wsId: p.wsId, limit: 5000 });
+      const targets = pool
+        .filter((t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''))
+        .filter((t) => !t.parent_text)   // 已抓过的不重抓
+        .slice(0, typeof p.limit === 'number' ? p.limit : 25);
       const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
 
       let ok = 0;
@@ -1055,9 +1055,17 @@ export function registerXTimelineHandlers(): void {
           missed.push(t.tweet_id);
         }
       }
+      const allReplies = pool.filter(
+        (t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''));
       return {
         success: true,
-        scanned: pool.length, isReply: targets.length, fetched: ok, missed: missed.length,
+        scanned: pool.length,
+        isReply: allReplies.length,
+        // 本次真正处理的(已抓过的不算)
+        attempted: targets.length,
+        fetched: ok,
+        missed: missed.length,
+        remaining: allReplies.filter((t) => !t.parent_text).length - targets.length,
       };
     } catch (err) {
       console.error('[x-timeline-handlers] X_PREFETCH_CONTEXT failed:', (err as Error).message);
@@ -1081,19 +1089,24 @@ export function registerXTimelineHandlers(): void {
     }
     const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
     try {
-      const pool = await queryInbox({
-        status: 'worth', wsId: p.wsId,
-        limit: typeof p.limit === 'number' ? p.limit : 20,
-      });
-      // 去重作者;已有新鲜画像的跳过(别为已有数据白跑导航)
+      // ⚠️ **不按页取**:用户问「是不是每一页都要点一次」——不该是。
+      //    画像是按**人**采的,与你翻到第几页无关;而且限 20 条会让人
+      //    不知道哪些采过、哪些没采(实测 565 个作者,要点 28 次还数不清)。
+      //    故一次扫全部 worth,已有新鲜画像的跳过,只采缺的。
+      const pool = await queryInbox({ status: 'worth', wsId: p.wsId, limit: 5000 });
       const handles = [...new Set(pool
         .map((t) => normalizeHandle(t.author_handle ?? ''))
         .filter(Boolean))];
+      // 单次最多采多少个 —— 每个要 12s,不能让用户干等太久。
+      // 剩下的下次再点(已采的会跳过,所以是**断点续采**,不会重复劳动)。
+      const budget = typeof p.limit === 'number' ? p.limit : 25;
 
       let fetched = 0; let cached = 0; let failed = 0;
       let consecutiveFail = 0; let maxConsecutive = 0;
       const errors: string[] = [];
       for (const h of handles) {
+        // 采够本次预算就收工 —— 剩下的下次继续(断点续采)
+        if (fetched + failed >= budget) break;
         const have = await getAuthorCounts(h).catch(() => null);
         const fresh = have?.countsAt
           && (Date.now() - new Date(have.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
@@ -1113,9 +1126,11 @@ export function registerXTimelineHandlers(): void {
       }
       // 连续 5 个失败 = 机制层面的怀疑,不是个别账号的问题
       const mechanismSuspect = maxConsecutive >= 5;
+      // 还差多少没采 —— 让用户知道要不要再点一次,而不是猜
+      const remaining = handles.length - cached - fetched - failed;
       return {
         success: true,
-        authors: handles.length, fetched, cached, failed,
+        authors: handles.length, fetched, cached, failed, remaining,
         mechanismSuspect, maxConsecutive, errors,
       };
     } catch (err) {

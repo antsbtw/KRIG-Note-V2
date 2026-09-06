@@ -513,8 +513,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       }
       const r = await api()?.prefetchContext(workspaceId, wcId, 20);
       if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
+      // 明说还剩多少 —— 用户问「是不是每页都要点一次」正是因为看不出进度
       const profPart = pr?.success
-        ? `画像 ${pr.fetched} 新采/${pr.cached} 已有${pr.failed ? `/${pr.failed} 失败` : ''}　`
+        ? `画像 ${(pr.cached ?? 0) + (pr.fetched ?? 0)}/${pr.authors ?? 0}`
+          + `${pr.failed ? `(${pr.failed} 失败)` : ''}`
+          + `${pr.remaining ? `，还剩 ${pr.remaining} 个未采` : '，已采全'}　`
         : '';
       // ⚠️ 扫到 0 条要明说「没有目标」,别让人以为抓完了 ——
       //    实测踩过:过滤条件写错导致匹配 0 条,界面却像正常跑完一样
@@ -522,8 +525,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         r.scanned === 0
           ? '没有可预抓的推文（本 ws 没有 Gemma 判为值得回复的）'
           : profPart + (r.isReply === 0
-            ? `建议 ${r.scanned} 条，都是独立求助推（无上文可抓）`
-            : `上文 ${r.fetched}/${r.isReply} 条`),
+            ? `${r.scanned} 条都是独立求助推（无上文可抓）`
+            : `上文 +${r.fetched}${r.remaining ? `，还剩 ${r.remaining} 条` : '，已抓全'}`),
       );
     } catch (err) {
       setScanStatus(`预抓失败：${String(err)}`);

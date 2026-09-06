@@ -615,6 +615,27 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
     expect(V2).toMatch(/画像采集可能已失效/);
   });
 
+  it('⭐ 预取不按页取 —— 画像是按人采的,与翻到第几页无关', () => {
+    // 用户 2026-09-06 问「是不是每一页都点一次」——不该是。
+    // 原本 limit:20 且无 offset,翻页再点会重做第一页;
+    // 实测 565 个作者要点 28 次还数不清哪些采过。
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE'));
+    expect(seg).toMatch(/limit: 5000/);
+    // 断点续采:已采的跳过,本次只采缺的
+    expect(seg).toMatch(/if \(fetched \+ failed >= budget\) break/);
+  });
+
+  it('⭐ 上文预抓同样断点续抓,不重抓已有的', () => {
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_CONTEXT'), H2.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/!t\.parent_text/);
+  });
+
+  it('⭐ 必须报「还剩多少」,否则用户不知道要不要再点', () => {
+    expect(H2).toMatch(/remaining/);
+    expect(V2).toMatch(/还剩/);
+    expect(V2).toMatch(/已采全|已抓全/);
+  });
+
   it('⭐ 已有新鲜画像的不重复采(别白跑导航)', () => {
     const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'));
     expect(seg.slice(0, 2000)).toMatch(/if \(fresh\) \{ cached \+= 1/);
