@@ -440,6 +440,30 @@ describe('推断链留档(回归分析的依据)', () => {
   });
 });
 
+describe('ref 归因不许猜', () => {
+  it('⭐ 取不到本 ws 账号必须 throw,不能兜底成默认账号', () => {
+    // 2026-09-06 实测:20 条回复里 7 条来自未登记账号的 ws-1,
+    // 旧代码默默用 'netlab2gfw' —— 这次侥幸对了(ws-1 登的正好是它),
+    // 但若登的是 otun_myvpn,那 7 条就归错账且**数据上看不出来**。
+    expect(PLANNER).toMatch(/function requireSelfHandle/);
+    expect(
+      /selfHandle \?\? '[a-z0-9_]+'/.test(stripComments(PLANNER)),
+      '又出现了默认账号兜底 —— ref 会静默归错账',
+    ).toBe(false);
+  });
+
+  it('⭐ 错误信息要直接给出修法,别让人猜', () => {
+    const fn = PLANNER.slice(PLANNER.indexOf('function requireSelfHandle'));
+    expect(fn.slice(0, 900)).toMatch(/识别我的账号/);
+  });
+
+  it('显式传 ref 时不需要 selfHandle(回放路径)', () => {
+    // 回放用固定 ref=tw_replay,不该被这条守卫拦住
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    expect(fn).toMatch(/ctx\.ref\?\.trim\(\) \|\| buildRef/);
+  });
+});
+
 describe('② 关系视角(活跃度信号)', () => {
   const AR = readFileSync(
     resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');

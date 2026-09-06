@@ -270,6 +270,30 @@ async function generateReplies(
   return { texts, rejects };
 }
 
+/**
+ * 取本 ws 登录的账号 —— **拿不到就 throw,不再兜底成 'netlab2gfw'**。
+ *
+ * ⭐ 为什么改(2026-09-06 实测发现):
+ * 那 20 条回复里有 7 条来自 ws-1,而 `x_ws_account` 只登记了 ws-2。
+ * 取不到账号时旧代码默默用默认值 'netlab2gfw' —— **这次侥幸对了**
+ * (ws-1 登的正好也是这个账号),但那是运气不是机制:
+ * 若 ws-1 登的是 otun_myvpn,那 7 条就会被打上 netlab2gfw 的 ref,
+ * **后台看到的归因是错的,而且从数据上完全看不出来**。
+ *
+ * ref 是统计资产,宁可拦住也不能默默归错账
+ * (与「不要兜底 fallback」同源:静默兜底掩盖真 bug)。
+ * 错误信息直接给出修法,别让用户对着 "wsId required" 猜。
+ */
+function requireSelfHandle(ctx: PlanContext): string {
+  const h = ctx.selfHandle?.trim();
+  if (h) return h;
+  throw new Error(
+    '无法确定本 workspace 登录的 X 账号,已停止 —— 否则这批回复的 ref 会归错账号,'
+    + '而且事后从数据上看不出来。\n'
+    + '修法:在这个 workspace 的 X 页面点一次「识别我的账号」(X Inbox → ⚙ 活动配置)。',
+  );
+}
+
 function tweetUrlOf(t: TweetInboxRecord): string {
   return t.tweet_url
     || `https://x.com/${normalizeHandle(t.author_handle ?? 'i') || 'i'}/status/${t.tweet_id}`;
@@ -351,7 +375,7 @@ export async function planReplies(
   // ── ③ 先定「该回哪些」,再让模型为这些现写正文 ──────────────
   // ref 整批算一次 —— 按批次不按条,免得正文条条不同反成水军特征。
   const ref = ctx.ref?.trim()
-    || buildRef(ctx.selfHandle ?? 'netlab2gfw', now, ctx.recipeId);
+    || buildRef(requireSelfHandle(ctx), now, ctx.recipeId);
   const linkFor = (lang: ReplyLang) =>
     `${LANDING_BASE}?ref=${ref}&${LINK_PARAMS[lang]}`;
 
@@ -483,7 +507,7 @@ export async function planOneReply(
 
   // ── 一次问完:该不该回 + 回什么 ──────────────────────────
   const lang = langOf(tweet.lang);
-  const ref = ctx.ref?.trim() || buildRef(ctx.selfHandle ?? 'netlab2gfw', now, ctx.recipeId);
+  const ref = ctx.ref?.trim() || buildRef(requireSelfHandle(ctx), now, ctx.recipeId);
   const link = `${LANDING_BASE}?ref=${ref}&${LINK_PARAMS[lang]}`;
 
   let parsed: {

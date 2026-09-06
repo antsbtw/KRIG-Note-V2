@@ -205,7 +205,12 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
         )}
 
         {!loading && !skip && !draft && status && (
-          <div style={{ fontSize: 12, color: '#fca5a5', padding: '10px 2px' }}>{status}</div>
+          // whiteSpace:pre-line —— 错误信息里带换行的修法提示要能显示出来
+          // (如「账号未识别」那条会告诉用户具体去哪点哪个按钮)
+          <div style={{
+            fontSize: 12, color: '#fca5a5', padding: '10px 2px',
+            whiteSpace: 'pre-line', lineHeight: 1.6,
+          }}>{status}</div>
         )}
 
         {draft && (
