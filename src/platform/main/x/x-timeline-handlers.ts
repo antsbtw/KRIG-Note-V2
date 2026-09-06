@@ -19,6 +19,7 @@ import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, textFingerprint } from './x-reply-planner';
+import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
@@ -787,6 +788,99 @@ export function registerXTimelineHandlers(): void {
     } catch (err) {
       console.error('[x-timeline-handlers] X_REPLAY_REPLIES failed:', (err as Error).message);
       return { success: false, error: String(err) };
+    }
+  });
+
+  // X_PLAN_ONE_REPLY — 为**单条**推文现写回复(卡片「送入回复」弹窗用)。
+  // 与 X_PLAN_REPLIES 的区别:那个是批量预扫,这个是用户点开某条时按需生成。
+  // ⚠️ 同样只产草稿,不碰发布。
+  ipcMain.handle(IPC_CHANNELS.X_PLAN_ONE_REPLY, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown; tweetId?: unknown } | null;
+    if (!p || typeof p.wsId !== 'string' || !p.wsId || typeof p.tweetId !== 'string') {
+      return { success: false, error: 'wsId 与 tweetId 必填' };
+    }
+    try {
+      const found = (await queryInbox({ limit: 5000 }))
+        .find((t) => t.tweet_id === p.tweetId);
+      if (!found) return { success: false, error: `库里找不到推文 ${p.tweetId}` };
+
+      const acct = await getWsAccount(p.wsId).catch(() => null);
+      // 学习期回流:把用户原样认可过的例子当少样本喂回生成 prompt。
+      // 不训练模型 —— in-context learning,立刻见效、随时可撤。
+      const lang = (found.lang ?? '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+      const examples = await getApprovedExamples(lang, 5).catch(() => []);
+
+      // ⚠️ 单条也要走完整前置过滤(刷屏/冷却/已回过)——
+      //    用户点开某条不代表这条就该回,守卫不能因为「是手点的」就放行。
+      const replied = await queryInbox({ replied: true, limit: 5000 });
+      const corpus = await queryInbox({ wsId: p.wsId, limit: 5000 });
+      const fingerprintCounts = new Map<string, number>();
+      for (const t of corpus) {
+        const fp = textFingerprint(t.text);
+        if (fp) fingerprintCounts.set(fp, (fingerprintCounts.get(fp) ?? 0) + 1);
+      }
+      const recentlyRepliedAuthors = new Map<string, string>();
+      for (const t of replied) {
+        const h = normalizeHandle(t.author_handle ?? '');
+        if (!h) continue;
+        const prev = recentlyRepliedAuthors.get(h);
+        if (!prev || (t.fetched_at && t.fetched_at > prev)) recentlyRepliedAuthors.set(h, t.fetched_at);
+      }
+
+      const r = await planReplies([found], getJudgeConfig(), {
+        selfHandle: acct?.handle,
+        approvedExamples: examples,
+        fingerprintCounts,
+        recentlyRepliedAuthors,
+        alreadyRepliedTweetIds: new Set(replied.map((t) => t.tweet_id)),
+      });
+      return {
+        success: true,
+        draft: r.drafts[0] ?? null,
+        skip: r.skips[0] ?? null,
+      };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_PLAN_ONE_REPLY failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_REPLY_FEEDBACK — 记学习期反馈(AI 原文 vs 用户最终发的)
+  ipcMain.handle(IPC_CHANNELS.X_REPLY_FEEDBACK, async (_e, payload: unknown) => {
+    const p = payload as Record<string, unknown> | null;
+    if (!p || typeof p.tweet_id !== 'string' || typeof p.ai_text !== 'string'
+        || typeof p.final_text !== 'string') {
+      return { success: false, error: 'tweet_id / ai_text / final_text 必填' };
+    }
+    try {
+      await insertReplyFeedback({
+        tweet_id:   p.tweet_id,
+        tweet_text: typeof p.tweet_text === 'string' ? p.tweet_text : '',
+        lang:       p.lang === 'zh' ? 'zh' : 'en',
+        ai_text:    p.ai_text,
+        source:     p.source === 'template' ? 'template' : 'generated',
+        final_text: p.final_text,
+        // 由主进程判定,不信 renderer 传的 —— 这是判据的分子,不能被写错
+        edited:     p.final_text.trim() !== p.ai_text.trim(),
+        action:     p.action === 'dismissed' ? 'dismissed' : 'filled',
+        confidence: typeof p.confidence === 'number' ? p.confidence : undefined,
+        ref:        typeof p.ref === 'string' ? p.ref : undefined,
+        ws_id:      typeof p.wsId === 'string' ? p.wsId : undefined,
+        created_at: new Date().toISOString(),
+      });
+      return { success: true };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_REPLY_FEEDBACK failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_REPLY_READINESS — 分语言原样通过率(放手自动的判据)
+  ipcMain.handle(IPC_CHANNELS.X_REPLY_READINESS, async () => {
+    try {
+      return { success: true, readiness: await getReadiness() };
+    } catch (err) {
+      return { success: false, error: String(err), readiness: [] };
     }
   });
 

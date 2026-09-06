@@ -5,6 +5,7 @@ import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { SearchRecipe, TweetInboxRecord, TweetInboxStatus, FeedbackVerdict } from '@shared/types/x-timeline-types';
 import { DEFAULT_TASK_ID, normalizeHandle } from '@shared/types/x-timeline-types';
 import { ReplyDraftsView } from './ReplyDraftsView';
+import { ReplyComposeDialog } from './ReplyComposeDialog';
 
 interface XInboxViewProps {
   workspaceId: string;
@@ -483,6 +484,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign' | 'drafts'>('inbox');
+  /** 正在为哪条推写回复(卡片「送入回复」弹窗) */
+  const [composeFor, setComposeFor] = useState<TweetInboxRecord | null>(null);
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -631,15 +634,13 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     tweet.tweet_url
     || `https://x.com/${normalizeHandle(tweet.author_handle ?? 'i') || 'i'}/status/${tweet.tweet_id}`;
 
-  const sendToReply = async (tweet: TweetInboxRecord) => {
-    // 同 894 行:库值自带 @,须归一化后再由模板补,否则弹窗显示 @@xxx
-    const msg = `即将在 X 中打开 @${normalizeHandle(tweet.author_handle ?? '')} 的推文准备回复。\n\n${tweet.text?.slice(0, 120)}`;
-    if (window.confirm(msg)) {
-      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-      const r = await api()?.replyToTweet(tweetUrlOf(tweet), tweet.tweet_id, workspaceId, wcId);
-      if (!r?.success) alert(`导航失败：${r?.error}`);
-    }
-  };
+  /**
+   * 「送入回复」—— 打开确认弹窗,里面是 AI 为这条现写的回复。
+   *
+   * 此前是个 window.confirm,只说「即将打开推文」——**弹了窗却什么也没给**。
+   * 现在弹窗里直接是待发正文,可改可换,确认后才填进 X(仍不替用户点发布)。
+   */
+  const sendToReply = (tweet: TweetInboxRecord) => setComposeFor(tweet);
 
   const viewTweet = async (tweet: TweetInboxRecord) => {
     const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
@@ -1083,6 +1084,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           )}
         </div>
       </div>
+
+      {/* 回复确认弹窗 —— 卡片「送入回复」点开;只填不发 */}
+      {composeFor && (
+        <ReplyComposeDialog
+          tweet={composeFor}
+          workspaceId={workspaceId}
+          onClose={() => setComposeFor(null)}
+          onFilled={() => {
+            // 填入 ≠ 已发布:不写 markReplied,等 X 采集回来的 replied 字段认。
+            // 这里只刷新列表,让本条的最新状态回显。
+            void loadPage(page);
+          }}
+        />
+      )}
     </div>
   );
 }

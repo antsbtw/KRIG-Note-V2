@@ -843,6 +843,21 @@ declare global {
           score?: { tp: number; fp: number; tn: number; fn: number; precision: number | null; recall: number | null };
           error?: string;
         }>;
+        /** 为单条推文现写回复(只产草稿) */
+        planOneReply(wsId: string, tweetId: string): Promise<{
+          success: boolean;
+          draft?: import('@shared/types/x-reply-types').ReplyDraft | null;
+          skip?: import('@shared/types/x-reply-types').ReplySkip | null;
+          error?: string;
+        }>;
+        /** 记学习期反馈 */
+        submitReplyFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
+        /** 分语言原样通过率 */
+        replyReadiness(): Promise<{
+          success: boolean;
+          readiness?: Array<{ lang: 'zh' | 'en'; filled: number; unedited: number; passRate: number; ready: boolean }>;
+          error?: string;
+        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;

@@ -29,6 +29,14 @@ const HANDLERS = readFileSync(
   resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
 const UI_RAW = readFileSync(
   resolve(__dirname, '../../src/views/x-inbox/ReplyDraftsView.tsx'), 'utf-8');
+const DIALOG_RAW = readFileSync(
+  resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+const stripComments = (t: string) => t
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
+const DIALOG = stripComments(DIALOG_RAW);
+const REPO_RAW = readFileSync(
+  resolve(__dirname, '../../src/platform/main/db/x-reply-feedback-repo.ts'), 'utf-8');
 /**
  * 去掉注释后的代码 —— 「禁止出现 X」这类守卫必须只看**代码**。
  * 否则「本视图不存在任何一键全发」这句**说明它没做**的注释,
@@ -110,6 +118,80 @@ describe('UI:只填不发', () => {
 
   it('⭐ 规划失败必须报错,不能留空列表装作「没什么可回的」', () => {
     expect(UI_RAW).toMatch(/规划失败/);
+  });
+});
+
+describe('卡片弹窗:确认后才填,填入不等于发布', () => {
+  it('⭐ 弹窗不得替用户点发布', () => {
+    expect(/\.click\(\)|clickPublish|clickSendButton/.test(DIALOG)).toBe(false);
+    expect(DIALOG_RAW).toMatch(/不会替你发布/);
+  });
+
+  it('⭐ 填入后不得写 markReplied(填入 ≠ 已发布)', () => {
+    // 没点发布的话这条得还能再出现;自动标已回复会让它永久消失
+    expect(/markReplied/.test(DIALOG)).toBe(false);
+  });
+
+  it('⭐ 原推正文必须显示在弹窗里', () => {
+    // 判断「该不该这么回」的依据。看不到原推就是在信息更少的地方做同一个决定
+    expect(DIALOG).toMatch(/tweet\.text/);
+  });
+
+  it('⭐ 填入与跳过都要记学习期反馈', () => {
+    expect(DIALOG).toMatch(/recordFeedback\('filled'/);
+    expect(DIALOG).toMatch(/recordFeedback\('dismissed'/);
+  });
+
+  it('⭐ 被挡掉时要说明原因,不给空框', () => {
+    expect(DIALOG).toMatch(/SKIP_LABEL/);
+    expect(DIALOG_RAW).toMatch(/没有生成回复/);
+  });
+
+  it('⭐ 回落模板时要显示回落原因', () => {
+    expect(DIALOG).toMatch(/fallbackReason/);
+  });
+});
+
+describe('学习期判据', () => {
+  it('⭐ edited 必须由主进程判定,不信 renderer', () => {
+    // 这是判据的分子 —— renderer 传错(或被改)会让「原样通过率」失真
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/edited:\s*p\.final_text\.trim\(\) !== p\.ai_text\.trim\(\)/);
+  });
+
+  it('⭐ 通过率必须分语言算', () => {
+    // 合起来算会让样本多的一边淹掉另一边,得出「整体达标」的假结论
+    expect(REPO_RAW).toMatch(/for \(const lang of \['zh', 'en'\]/);
+  });
+
+  it('⭐ 只统计 filled,dismissed 不算进通过率', () => {
+    // dismissed = 这条根本不该回,是判断层的问题,不是「写得好不好」
+    expect(REPO_RAW).toMatch(/action = 'filled'/);
+  });
+
+  it('⭐ 少样本只取原样通过的例子', () => {
+    // 用户改过的说明 AI 那版不够好,拿它当范例是在教模型重复被否决的写法
+    const seg = REPO_RAW.slice(REPO_RAW.indexOf('getApprovedExamples'));
+    expect(seg).toMatch(/edited = false/);
+  });
+
+  it('⭐ 通过率的分子必须是 edited=false(分母是全部 filled)', () => {
+    // 差点踩到:注入实验误把分子的 edited=false 去掉,
+    // 两条 count 变成一样 → 通过率恒 100% → **门槛永远"达标"**,
+    // 而且看不出异常。这条守卫就是钉这个。
+    const seg = REPO_RAW.slice(REPO_RAW.indexOf('export async function getReadiness'));
+    const sql = seg.slice(seg.indexOf('`'), seg.indexOf('`', seg.indexOf('`') + 1));
+    const lines = sql.split(';').filter((x) => x.includes('count()'));
+    expect(lines.length, '应有两条 count:分母(全部 filled)与分子(未改动)').toBe(2);
+    expect(lines[0].includes('edited'), '分母不该带 edited 条件').toBe(false);
+    expect(lines[1].includes('edited = false'), '分子必须只数未改动的').toBe(true);
+  });
+
+  it('放手门槛是可调常量,不是埋在逻辑里的魔数', () => {
+    expect(REPO_RAW).toMatch(/AUTO_REPLY_MIN_SAMPLES\s*=\s*\d+/);
+    expect(REPO_RAW).toMatch(/AUTO_REPLY_MIN_PASS_RATE\s*=\s*[\d.]+/);
   });
 });
 

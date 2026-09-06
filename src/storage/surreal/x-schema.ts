@@ -616,3 +616,56 @@ export async function x_migration_1_1_1(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.1'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.2 —— 回复反馈(学习期,2026-09-05)
+ *
+ * 用户定的节奏:「先定一个学习期间,它所有的回复都经过我点击后方能发出,
+ *   等到一定数量积累后,就可以让它自动回复了。对于无法决定,
+ *   或者和前期区别太大的,可以留待判决即可。」
+ *
+ * 为什么**不**塞进 tweet_feedback:
+ *   那张表回答的是「这条推**值不值得回**」(accept/reject);
+ *   这张表回答的是「这条**回得对不对**」—— 两个问题。
+ *   而且 tweet_feedback 那 6900+ 行是**不可再生资产**(40 天连续人工判断),
+ *   不给它加字段冒险。
+ *
+ * ⭐ 记「AI 原文 vs 用户改成什么」是关键 ——
+ *   现在的 accept/reject **记不了「该回,但不该这么回」**。
+ *   用户把正文改了一句,这个信息此前直接丢掉。存下来它能回答:
+ *   哪类推文总要手动补话、生成质量在涨还是在跌、什么时候能放手自动。
+ *
+ * 同时它是 in-context learning 的**回流源**:approved 的例子直接当少样本
+ * 喂回生成 prompt,模型会越来越像用户的口气 —— 不训练模型、随时可撤。
+ */
+const X_SCHEMA_1_1_2 = `
+DEFINE TABLE IF NOT EXISTS x_reply_feedback SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_reply_feedback TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS lang          ON x_reply_feedback TYPE string;   -- zh | en
+-- AI 写的原文;回落模板时是模板正文
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS source        ON x_reply_feedback TYPE string;   -- generated | template
+-- 用户最终填进 X 的正文。与 ai_text 相同 = 原样通过(放手自动的判据)
+DEFINE FIELD IF NOT EXISTS final_text    ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS edited        ON x_reply_feedback TYPE bool DEFAULT false;
+-- 用户的处置:filled=填入X(默认认可) / dismissed=跳过不回
+DEFINE FIELD IF NOT EXISTS action        ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS confidence    ON x_reply_feedback TYPE option<float>;
+DEFINE FIELD IF NOT EXISTS ref           ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at    ON x_reply_feedback TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_rfb_tweet   ON x_reply_feedback FIELDS tweet_id;
+DEFINE INDEX IF NOT EXISTS idx_rfb_lang    ON x_reply_feedback FIELDS lang;
+DEFINE INDEX IF NOT EXISTS idx_rfb_edited  ON x_reply_feedback FIELDS edited;
+DEFINE INDEX IF NOT EXISTS idx_rfb_created ON x_reply_feedback FIELDS created_at;
+`;
+
+export async function x_migration_1_1_2(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_2);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.2', appliedAt = $now,
+      description = 'Reply feedback (learning period: AI text vs user edit)'`,
+    { rid: new RecordId('schema_version', '1.1.2'), now: Date.now() },
+  );
+}
