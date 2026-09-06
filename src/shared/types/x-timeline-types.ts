@@ -25,10 +25,9 @@ export interface SearchRecipe {
   /**
    * 是否连回复一起抓(追踪名单需要:设计 §4.4⑤ 要「推文和回复」都追)。
    *
-   * ⚠️ **语法未经实机验证** —— 设计文档 §4.4⑤(a) 明确警告:
-   * X 搜索对 `include:replies` 的支持时有变化,也有 `filter:replies` / `to:` 的写法,
-   * 「实施前必须实机 spike 确认哪个真的有效,不能照文档假设」。
-   * 故 buildSearchUrl 里这一段**默认不启用**,等实机验证后再开。
+   * ✅ 语法已实机验证(2026-09-06):用 `filter:replies`。
+   * `include:replies` **X 已不支持**,加上去结果会变 0 条(静默,不报错)。
+   * 实测:from: 裸查 12 条/回复 11,+filter:replies 22 条/回复 22。
    */
   includeReplies?: boolean;
   intervalMinutes: number;

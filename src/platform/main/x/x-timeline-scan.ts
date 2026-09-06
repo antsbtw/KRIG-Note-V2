@@ -103,11 +103,18 @@ export function buildSearchUrl(recipe: SearchRecipe): string {
     parts.push(`(${recipe.helpSignals.map((s) => `"${s}"`).join(' OR ')})`);
   }
 
-  // ⚠️ include:replies **未经实机验证**(设计 §4.4⑤(a) 明令必须先 spike):
-  //    X 搜索对它的支持时有变化,还有 filter:replies / to: 两种写法。
-  //    照文档假设正是 selector 屡次翻车的老路 —— 故这里只在**显式开启**时才拼,
-  //    且开启后必须实机核对「搜出来的结果里真的有回复」才能信。
-  if (recipe.includeReplies) parts.push('include:replies');
+  // ⭐ 2026-09-06 实机 spike 结论(设计 §4.4⑤(a) 要求的验证已完成):
+  //      from:netlab2gfw                    共 12 条,其中回复 11
+  //      from:netlab2gfw include:replies    共  0 条,其中回复  0   ← **无效**
+  //      from:netlab2gfw filter:replies     共 22 条,其中回复 22   ← 有效且最全
+  //
+  //    `include:replies` **X 已不支持**,写上去会把结果打成 0 条 ——
+  //    不报错、静默返回空,正是文档警告的那种失败形态。照文档假设就中招了。
+  //    故这里用 `filter:replies`。
+  //
+  //    ⚠️ 另一个实测发现:裸 `from:` 本身就已经带回复(12 条里 11 条是回复),
+  //    所以「只要原创推」反而需要额外过滤 —— 与直觉相反,别想当然。
+  if (recipe.includeReplies) parts.push('filter:replies');
 
   if (recipe.minLikes) parts.push(`min_faves:${recipe.minLikes}`);
   if (recipe.minRetweets) parts.push(`min_retweets:${recipe.minRetweets}`);

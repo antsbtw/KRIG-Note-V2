@@ -365,11 +365,19 @@ describe('追踪名单(watchlist)', () => {
     expect(REPO).toMatch(/n≥2\s*\*\*不实现\*\*|n≥2.{0,10}不实现/);
   });
 
-  it('include:replies 必须标注未经实机验证', () => {
-    // 设计 §4.4⑤(a) 明令先 spike;照文档假设正是 selector 屡次翻车的老路
+  it('⭐ 必须用 filter:replies —— include:replies 实测无效(返回 0 条)', () => {
+    // 2026-09-06 实机 spike:
+    //   from:x                    12 条/回复 11
+    //   from:x include:replies     0 条/回复  0  ← X 已不支持,静默返回空
+    //   from:x filter:replies     22 条/回复 22  ← 有效
     const scan = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
-    expect(scan).toMatch(/未经实机验证/);
+    const code = stripComments(scan);
+    expect(code).toMatch(/parts\.push\('filter:replies'\)/);
+    expect(
+      /parts\.push\('include:replies'\)/.test(code),
+      'include:replies 实测会把结果打成 0 条(不报错) —— 别改回去',
+    ).toBe(false);
   });
 });
 
