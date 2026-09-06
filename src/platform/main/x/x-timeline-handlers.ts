@@ -26,7 +26,7 @@ import { fetchParentTweet } from './x-parent-tweet';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
-  watchAuthor, unwatchAuthor, listWatched, getAuthorStats } from '../db/x-author-repo';
+  watchAuthor, unwatchAuthor, listWatched, getAuthorStats, listWatchCandidates } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
 import { getWsRole, setWsRole, listWsRoles,
   setWsAccount, getWsAccount, requireWsAccount, listWsAccounts } from '../db/x-ws-role-repo';
@@ -975,6 +975,9 @@ export function registerXTimelineHandlers(): void {
         });
       } else if (p?.op === 'remove' && typeof p.handle === 'string') {
         await unwatchAuthor(p.handle);
+      } else if (p?.op === 'candidates') {
+        // 从已有数据里挑候选 —— 免得用户凭记忆一个个手打
+        return { success: true, watched: [], candidates: await listWatchCandidates(20) };
       } else if (p?.op !== 'list') {
         return { success: false, error: `未知操作:${String(p?.op)}`, watched: [] };
       }

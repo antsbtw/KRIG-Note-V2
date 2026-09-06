@@ -476,3 +476,50 @@ export async function registerSeenAuthor(
     { handle: h, dn: seen.displayName ?? undefined, av: seen.avatar ?? undefined },
   );
 }
+
+
+/**
+ * 候选追踪对象 —— 从**已有数据**里挑,免得用户一个个手打。
+ *
+ * ⭐ 用户 2026-09-06:「如果每一个都需要手工输入,不是很麻烦?」——是。
+ * 库里已经有 3458 个见过的人、还有「我回过谁」的记录,
+ * 值得追踪的对象本来就在数据里,不该让人凭记忆敲 handle。
+ *
+ * 排序依据:**我们回过他几次** > 采到过他几条推。
+ * 回过多次说明这人反复出现在求助场景里,正是画像价值最高的那一小撮
+ * (设计 §1.4:互动是长尾的,价值在少数高频互动者身上)。
+ *
+ * ⚠️ 排除已在名单里的、已屏蔽的、以及本人。
+ */
+export interface WatchCandidate {
+  handle: string;
+  repliedCount: number;
+  seenTweets: number;
+}
+
+export async function listWatchCandidates(limit = 20): Promise<WatchCandidate[]> {
+  const db = getXDB();
+  const res = await db.query<[
+    Array<{ author_handle: string; c: number }>,
+    Array<{ author_handle: string; c: number }>,
+    Array<{ handle: string }>,
+  ]>(
+    `SELECT author_handle, count() AS c FROM x_tweet
+       WHERE replied = true AND author_handle != NONE
+       GROUP BY author_handle;
+     SELECT author_handle, count() AS c FROM x_tweet
+       WHERE author_handle != NONE GROUP BY author_handle;
+     SELECT handle FROM x_author WHERE watched = true OR blocked = true OR is_self = true;`,
+  );
+  const replied = new Map((res?.[0] ?? []).map((r) => [r.author_handle, r.c]));
+  const seen = new Map((res?.[1] ?? []).map((r) => [r.author_handle, r.c]));
+  const exclude = new Set((res?.[2] ?? []).map((r) => r.handle));
+
+  const all = new Set([...replied.keys(), ...seen.keys()]);
+  return [...all]
+    .filter((h) => h && !exclude.has(h))
+    .map((h) => ({ handle: h, repliedCount: replied.get(h) ?? 0, seenTweets: seen.get(h) ?? 0 }))
+    // 回过的排前面;都没回过的按采到条数排
+    .sort((a, b) => (b.repliedCount - a.repliedCount) || (b.seenTweets - a.seenTweets))
+    .slice(0, limit);
+}

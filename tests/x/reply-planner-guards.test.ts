@@ -221,6 +221,40 @@ describe('追踪名单 UI 与搜索语法 spike', () => {
     expect(/\.click\(\)/.test(stripComments(SPIKE)), 'spike 里出现了点击').toBe(false);
   });
 
+  it('⭐ spike 必须传 wcId(否则找不到本 ws 的 X 页面)', () => {
+    // 实测踩过:不传 → main 侧回退全局 active → 报「未登记 wc id」
+    expect(WL).toMatch(/getXHostWcId\(workspaceId\)/);
+    expect(WL).toMatch(/searchSyntaxSpike\(h, wcId\)/);
+  });
+
+  it('⭐ 不该逼用户手打 handle —— 要能从已有数据挑', () => {
+    // 用户 2026-09-06:「如果每一个都需要手工输入,不是很麻烦?」
+    // 库里已有 3458 个见过的人 + 「回过谁」的记录,候选本来就在数据里
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    expect(ar).toMatch(/export async function listWatchCandidates/);
+    expect(WL).toMatch(/loadCandidates/);
+  });
+
+  it('⭐ 候选按「回过几次」排,不是按见过条数', () => {
+    // 设计 §1.4:互动是长尾的,价值在少数高频互动者身上
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    const fn = ar.slice(ar.indexOf('export async function listWatchCandidates'));
+    expect(fn).toMatch(/b\.repliedCount - a\.repliedCount/);
+  });
+
+  it('⭐ 候选要排除已在名单/已屏蔽/本人', () => {
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    const fn = ar.slice(ar.indexOf('export async function listWatchCandidates'));
+    expect(fn).toMatch(/watched = true OR blocked = true OR is_self = true/);
+  });
+
+  it('spike 输入框空着时自动挑一个,不报错让人手打', () => {
+    expect(WL).toMatch(/const auto = \[\.\.\.rows\]/);
+  });
+
   it('移出名单的提示要说明历史数据保留', () => {
     expect(WL_RAW).toMatch(/历史数据保留/);
   });

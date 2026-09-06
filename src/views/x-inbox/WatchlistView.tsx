@@ -10,6 +10,8 @@
  * 设计 §4.1(4):计数是可重算的第三层属性,存进「人」表会有不同步问题。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { XExtractionApi } from '@capabilities/x-extraction';
 
 const api = () => window.electronAPI?.xTimeline;
 
@@ -23,11 +25,16 @@ interface Props {
 }
 
 export function WatchlistView({ workspaceId, onBack }: Props) {
+  // ⚠️ spike 要驱动本 ws 的 X webview,必须显式传 wcId ——
+  //    不传的话 main 侧只能回退全局 active,多 ws 下会找错窗口甚至找不到。
+  const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
   const [rows, setRows] = useState<Row[]>([]);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   // 搜索语法 spike:设计要求实施前必须实机验证,这里给个按钮
+  const [cands, setCands] = useState<Array<{ handle: string; repliedCount: number; seenTweets: number }>>([]);
+  const [showCands, setShowCands] = useState(false);
   const [spike, setSpike] = useState<{
     verdict?: string;
     probes?: Array<{ key: string; query: string; total: number; replies: number; noResults: boolean; sample: string[] }>;
@@ -53,6 +60,28 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
     setRows(r.watched ?? []);
   };
 
+  /** 从已有数据里挑候选 —— 不用凭记忆手打 handle */
+  const loadCandidates = async () => {
+    setBusy(true);
+    const r = await api()?.watchlist('candidates');
+    setBusy(false);
+    if (!r?.success) { setStatus(`取候选失败:${r?.error}`); return; }
+    const list = r.candidates ?? [];
+    setCands(list);
+    setShowCands(true);
+    setStatus(list.length ? `找到 ${list.length} 个候选(按回过次数排)` : '没有候选 —— 还没回过任何人');
+  };
+
+  const addHandle = async (h: string) => {
+    setBusy(true);
+    const r = await api()?.watchlist('add', h);
+    setBusy(false);
+    if (!r?.success) { setStatus(`加入失败:${r?.error}`); return; }
+    setRows(r.watched ?? []);
+    setCands((prev) => prev.filter((c) => c.handle !== h));
+    setStatus(`已把 @${h} 加入追踪名单`);
+  };
+
   const remove = async (handle: string) => {
     setBusy(true);
     const r = await api()?.watchlist('remove', handle);
@@ -63,11 +92,22 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
   };
 
   const runSpike = async () => {
-    const h = (input.trim() || rows[0]?.handle || '').replace(/^@/, '');
-    if (!h) { setStatus('先在输入框填一个 handle(挑一个你知道他最近回复过别人的)'); return; }
+    // ⚠️ 别逼用户手打:输入框空着就自动挑名单里**见过条数最多**的那个 ——
+    //    采到越多越可能回复过别人,正是 spike 需要的样本。
+    //    (用户 2026-09-06:「如果每一个都需要手工输入,不是很麻烦?」)
+    const auto = [...rows].sort(
+      (a, b) => (b.stats?.seenTweets ?? 0) - (a.stats?.seenTweets ?? 0))[0];
+    const h = (input.trim() || auto?.handle || '').replace(/^@/, '');
+    if (!h) { setStatus('名单是空的 —— 先加一个人,或在输入框填个 handle'); return; }
     setBusy(true);
-    setStatus(`正在实测三种搜索写法(会占用 X 页面导航三次)…`);
-    const r = await api()?.searchSyntaxSpike(h);
+    setStatus(`正在用 @${h} 实测三种搜索写法(会占用 X 页面导航三次)…`);
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    if (wcId === undefined) {
+      setBusy(false);
+      setStatus('本 workspace 还没打开过 X 页面 —— 先切到 X 服务加载一次 x.com 再来跑');
+      return;
+    }
+    const r = await api()?.searchSyntaxSpike(h, wcId);
     setBusy(false);
     if (!r?.success) { setStatus(`实测失败:${r?.error}`); return; }
     setSpike({ verdict: r.verdict, probes: r.probes });
@@ -90,6 +130,7 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
           }}
         />
         <Btn primary onClick={add} disabled={busy || !input.trim()}>+ 加入追踪</Btn>
+        <Btn onClick={loadCandidates} disabled={busy}>📋 从已回过的人里挑</Btn>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{status}</span>
       </div>
 
@@ -102,6 +143,32 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
         加入这里不会去关注对方，移出也不会取消关注。
         回复过的人会<b>自动入列</b>（层数 1），手动加入的是层数 0。
       </div>
+
+      {/* 候选:从库里已有数据挑,免得手打 —— 按「我们回过他几次」排,
+          那正是画像价值最高的一小撮(设计 §1.4:互动是长尾的) */}
+      {showCands && cands.length > 0 && (
+        <div style={{
+          border: '1px solid var(--border)', borderRadius: 7, padding: 8,
+          marginBottom: 10, background: 'var(--bg-secondary)',
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+            候选（按<b>我们回过他几次</b>排，回得多说明他反复出现在求助场景里）
+            <Btn sm onClick={() => setShowCands(false)} style={{ marginLeft: 8 }}>收起</Btn>
+          </div>
+          {cands.map((c) => (
+            <div key={c.handle} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '3px 2px',
+              fontSize: 11, borderBottom: '1px solid var(--border)',
+            }}>
+              <b>@{c.handle}</b>
+              <span style={{ color: 'var(--text-muted)' }}>
+                回过 {c.repliedCount} 次 · 见过 {c.seenTweets} 条
+              </span>
+              <Btn sm onClick={() => addHandle(c.handle)} style={{ marginLeft: 'auto' }}>+ 追踪</Btn>
+            </div>
+          ))}
+        </div>
+      )}
 
       {rows.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '14px 4px' }}>
@@ -140,8 +207,8 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
           追踪名单要连<b>回复</b>一起采，但 X 对 <code>include:replies</code> 的支持时有变化。
-          设计文档要求<b>实施前必须实机确认</b>哪种写法真的有效 —— 拿上面输入框里的 handle
-          （挑一个你知道他最近回复过别人的）跑三种写法看结果。
+          设计文档要求<b>实施前必须实机确认</b>哪种写法真的有效。
+          默认拿名单里<b>见过条数最多</b>的那个人跑（最可能回复过别人）；也可在上面输入框指定。
           <br />⚠️ 判据不是「有没有报错」，而是<b>结果里有没有真的回复</b> ——
           错的写法不会报错，只会静默地只给你原创推。
         </div>
