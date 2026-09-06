@@ -18,7 +18,7 @@ import { queryInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, qu
 import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
-import { planReplies, textFingerprint } from './x-reply-planner';
+import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
@@ -800,20 +800,23 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'wsId 与 tweetId 必填' };
     }
     try {
-      const found = (await queryInbox({ limit: 5000 }))
-        .find((t) => t.tweet_id === p.tweetId);
+      // ⚠️ 三次 5000 行查询原本是**串行**的,加上模型两趟调用,单条要 ~27s。
+      //    这里改并行取数 + 单次模型调用(planOneReply),两处都是用户
+      //    2026-09-06 反馈「生成很慢」实测出来的耗时点。
+      const [pool, replied, corpus, acct] = await Promise.all([
+        queryInbox({ limit: 5000 }),
+        queryInbox({ replied: true, limit: 5000 }),
+        queryInbox({ wsId: p.wsId, limit: 5000 }),
+        getWsAccount(p.wsId).catch(() => null),
+      ]);
+      const found = pool.find((t) => t.tweet_id === p.tweetId);
       if (!found) return { success: false, error: `库里找不到推文 ${p.tweetId}` };
 
-      const acct = await getWsAccount(p.wsId).catch(() => null);
-      // 学习期回流:把用户原样认可过的例子当少样本喂回生成 prompt。
+      // 学习期回流:把用户原样认可过的例子当少样本喂回 prompt。
       // 不训练模型 —— in-context learning,立刻见效、随时可撤。
       const lang = (found.lang ?? '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
       const examples = await getApprovedExamples(lang, 5).catch(() => []);
 
-      // ⚠️ 单条也要走完整前置过滤(刷屏/冷却/已回过)——
-      //    用户点开某条不代表这条就该回,守卫不能因为「是手点的」就放行。
-      const replied = await queryInbox({ replied: true, limit: 5000 });
-      const corpus = await queryInbox({ wsId: p.wsId, limit: 5000 });
       const fingerprintCounts = new Map<string, number>();
       for (const t of corpus) {
         const fp = textFingerprint(t.text);
@@ -827,7 +830,9 @@ export function registerXTimelineHandlers(): void {
         if (!prev || (t.fetched_at && t.fetched_at > prev)) recentlyRepliedAuthors.set(h, t.fetched_at);
       }
 
-      const r = await planReplies([found], getJudgeConfig(), {
+      // ⚠️ 单条也要走完整前置过滤 —— 用户点开某条不代表这条就该回,
+      //    守卫不能因为「是手点的」就放行。planOneReply 内部先跑规则再问模型。
+      const r = await planOneReply(found, getJudgeConfig(), {
         selfHandle: acct?.handle,
         approvedExamples: examples,
         fingerprintCounts,
@@ -836,8 +841,8 @@ export function registerXTimelineHandlers(): void {
       });
       return {
         success: true,
-        draft: r.drafts[0] ?? null,
-        skip: r.skips[0] ?? null,
+        draft: r.draft ?? null,
+        skip: r.skip ?? null,
       };
     } catch (err) {
       console.error('[x-timeline-handlers] X_PLAN_ONE_REPLY failed:', (err as Error).message);

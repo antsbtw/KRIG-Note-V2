@@ -188,6 +188,50 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
   });
 });
 
+describe('单条路径的延迟约束', () => {
+  it('⭐ 单条必须一次问完(判断+生成合并),不能两趟串行', () => {
+    // 用户 2026-09-06「生成很慢」:两趟串行是主因(~27s 热启动)
+    expect(PLANNER).toMatch(/buildSingleReplyPrompt/);
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    const calls = [...fn.matchAll(/await callOllama/g)];
+    expect(calls.length, `planOneReply 里有 ${calls.length} 次模型调用,应该只有 1 次`).toBe(1);
+  });
+
+  it('⭐ 单条契约必须是对象,不能用数组', () => {
+    // 实测:数组 grammar 让模型难判何时收尾 —— 11-36s 且方差极大;
+    // 对象稳定 6-7s。这不是风格问题,是实测出来的性能差异。
+    const facts = readFileSync(
+      resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+    const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
+    expect(fn).toMatch(/JSON 对象|JSON object/);
+    expect(/输出 JSON 数组|Output a JSON array/.test(fn.slice(0, fn.indexOf('\n}'))), 
+      '单条 prompt 又要求数组了 —— 会慢 2-5 倍').toBe(false);
+  });
+
+  it('⭐ 不得用 num_predict 提速(会变成静默截断)', () => {
+    // 实测:200/300/400 三档模型把预算烧光返回**空串**,512 时灵时不灵。
+    // 那是把「慢」换成「悄悄发不出去」,比慢严重得多。
+    const all = PLANNER + readFileSync(
+      resolve(__dirname, '../../src/platform/main/local-llm/ollama-client.ts'), 'utf-8');
+    expect(/num_predict/.test(all), 'num_predict 是陷阱,见 x-reply-facts 顶部说明').toBe(false);
+  });
+
+  it('⭐ 前置规则必须在模型调用之前(挡掉的连推理时间都不花)', () => {
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    const dup = fn.indexOf("skip('duplicate_text'");
+    const model = fn.indexOf('await callOllama');
+    expect(dup).toBeGreaterThan(-1);
+    expect(dup < model, '前置规则跑到模型后面了 —— 白白花掉推理时间').toBe(true);
+  });
+
+  it('⭐ handler 的取数必须并行(三次 5000 行串行是实测耗时点)', () => {
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PLAN_ONE_REPLY'), h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/await Promise\.all\(\[/);
+  });
+});
+
 describe('学习期判据', () => {
   it('⭐ edited 必须由主进程判定,不信 renderer', () => {
     // 这是判据的分子 —— renderer 传错(或被改)会让「原样通过率」失真

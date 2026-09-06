@@ -19,7 +19,7 @@ import { callOllama } from '../local-llm/ollama-client';
 import { getBlockedHandleSet } from '../db/x-author-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-types';
-import { buildGenerationPrompt, verifyGeneratedReply } from '@shared/types/x-reply-facts';
+import { buildGenerationPrompt, buildSingleReplyPrompt, verifyGeneratedReply } from '@shared/types/x-reply-facts';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
   buildRef, renderTemplate, langOf, templatesFor, LANDING_BASE, LINK_PARAMS,
@@ -430,4 +430,112 @@ export async function planReplies(
     `[x-reply-planner] ${batch.length} 条 → 草稿 ${drafts.length} / 跳过 ${skips.length}`,
   );
   return { drafts, skips };
+}
+
+/**
+ * 为**单条**推文一次问完「该不该回 + 回什么」(卡片弹窗路径)。
+ *
+ * ⭐ 与 planReplies 的区别是**调用次数**:那边批量场景判断与生成分两趟
+ * (批量判断能一次筛掉大半,分开更省);单条场景分两趟纯属浪费 ——
+ * 用户 2026-09-06 反馈「生成很慢」,实测就是这两趟串行导致的 ~27s(热)。
+ * 合并后:不该回的 5-7s 就返回(不用写正文),该回的一趟出结果。
+ *
+ * 前置规则(刷屏/冷却/已回过/屏蔽)仍**先于模型**执行 —— 那些是跨条现象,
+ * 模型看不出来,而且能在花任何推理时间之前就挡掉。
+ */
+export async function planOneReply(
+  tweet: TweetInboxRecord,
+  config: JudgeConfig,
+  ctx: PlanContext = {},
+): Promise<{ draft?: ReplyDraft; skip?: ReplySkip }> {
+  const now = ctx.now ?? new Date();
+  const handle = normalizeHandle(tweet.author_handle ?? '');
+  const skip = (skipReason: ReplySkip['skipReason'], detail?: string) =>
+    ({ skip: { tweetId: tweet.tweet_id, authorHandle: handle, skipReason, detail } });
+
+  // ── 前置规则(不问模型,先挡)──────────────────────────────
+  if (ctx.alreadyRepliedTweetIds?.has(tweet.tweet_id)) return skip('already_replied');
+  const blocked = new Set((await getBlockedHandleSet()).map(normalizeHandle));
+  if (handle && blocked.has(handle)) return skip('blocked_author');
+
+  const fp = textFingerprint(tweet.text);
+  const dupes = fp ? (ctx.fingerprintCounts?.get(fp) ?? 0) : 0;
+  if (dupes >= DUPLICATE_FINGERPRINT_THRESHOLD) {
+    return skip('duplicate_text', `相同文本出现 ${dupes} 次(模板刷屏)`);
+  }
+  const last = handle ? ctx.recentlyRepliedAuthors?.get(handle) : undefined;
+  if (last) {
+    const hours = (now.getTime() - new Date(last).getTime()) / 3_600_000;
+    if (hours < SAME_AUTHOR_COOLDOWN_HOURS) {
+      return skip('author_recent', `${hours.toFixed(0)}h 前刚回过(冷却 ${SAME_AUTHOR_COOLDOWN_HOURS}h)`);
+    }
+  }
+
+  // ── 一次问完:该不该回 + 回什么 ──────────────────────────
+  const lang = langOf(tweet.lang);
+  const ref = ctx.ref?.trim() || buildRef(ctx.selfHandle ?? 'netlab2gfw', now, ctx.recipeId);
+  const link = `${LANDING_BASE}?ref=${ref}&${LINK_PARAMS[lang]}`;
+
+  let parsed: { worth?: boolean; confidence?: number; reason?: string; reply?: string };
+  try {
+    const res = await callOllama({
+      model: config.model,
+      messages: [
+        { role: 'system', content: buildSingleReplyPrompt(lang, link, ctx.approvedExamples ?? []) },
+        { role: 'user', content: tweet.text },
+      ],
+      endpoint: config.ollamaEndpoint,
+      timeoutMs: config.timeoutMs,
+      temperature: 0.6,
+      responseFormat: 'json_object',
+    });
+    // ⚠️ 契约是**对象**不是数组(实测数组 grammar 慢 2-5× 且方差极大)
+    parsed = JSON.parse(res.content) as typeof parsed;
+  } catch (err) {
+    // fail loud:调用方要看到失败,不返回一个空草稿装作「没什么可说的」
+    throw new Error(`[x-reply-planner] 单条生成失败:${(err as Error).message}`);
+  }
+
+  if (!parsed?.worth) {
+    return skip('ai_declined', typeof parsed?.reason === 'string' ? parsed.reason : undefined);
+  }
+  const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+  if (confidence < REPLY_CONFIDENCE_FLOOR) {
+    return skip('low_confidence', `confidence ${confidence.toFixed(2)} < ${REPLY_CONFIDENCE_FLOOR}`);
+  }
+
+  const generated = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
+  const bad = generated ? verifyGeneratedReply(generated, link) : 'empty';
+
+  let text: string;
+  let source: ReplySource;
+  let templateId: ReplyTemplateId | undefined;
+  let fallbackReason: string | undefined;
+  if (!bad) {
+    text = generated;
+    source = 'generated';
+  } else {
+    // 校验没过 → 回落模板,**绝不硬发**;留原因,否则发现不了「校验一直在拦」
+    templateId = pickTemplate(ctx.recentTemplateIds ?? [], lang);
+    const tpl = REPLY_TEMPLATES.find((x) => x.id === templateId)!;
+    text = renderTemplate(tpl, ref);
+    source = 'template';
+    fallbackReason = `校验未通过:${bad}`;
+    console.warn(`[x-reply-planner] ${tweet.tweet_id} 回落模板:${fallbackReason}`);
+  }
+
+  return {
+    draft: {
+      tweetId: tweet.tweet_id,
+      tweetUrl: tweetUrlOf(tweet),
+      authorHandle: handle,
+      text, source, templateId, fallbackReason, lang,
+      needsHumanReview: source === 'generated'
+        || (templateId ? REPLY_TEMPLATES.find((x) => x.id === templateId)?.needsHumanReview === true : false),
+      ref,
+      confidence,
+      reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+      createdAt: now.toISOString(),
+    },
+  };
 }

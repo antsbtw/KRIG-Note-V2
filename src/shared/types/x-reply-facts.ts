@@ -176,3 +176,69 @@ export function verifyGeneratedReply(text: string, link: string): ReplyRejectRea
   }
   return null;
 }
+
+/**
+ * 单条「判断 + 生成」合并 prompt(卡片弹窗用)。
+ *
+ * ⭐ 为什么合并:用户 2026-09-06 反馈「生成很慢」。实测拆解 ——
+ * 批量路径是**判断一次 + 生成一次两趟串行**,单条也走这套就是 ~27s(热)/~61s(冷)。
+ * 单条场景下判断与生成本可一次问完:模型看同一条推,先决定回不回,
+ * 该回就顺手写出来。实测合并后:该回的 ~27s → 一趟;
+ * **不该回的只要 5-7s**(不用写正文,提前收工)。
+ *
+ * ⚠️ 契约刻意用**对象**而非数组。实测(2026-09-06):
+ * 同一条推用 `[{...}]` 数组契约要 11-36s 且方差极大,
+ * 换成 `{...}` 对象稳定 6-7s —— 数组 grammar 让模型难以判定何时收尾。
+ * (曾试过 num_predict 限长提速,**是陷阱**:200/300/400 三档模型
+ *  把预算烧光返回空串,512 时灵时不灵 —— 把「慢」换成了「静默截断」,已否决。)
+ */
+export function buildSingleReplyPrompt(
+  lang: ReplyLang,
+  link: string,
+  examples: Array<{ tweet: string; reply: string }> = [],
+): string {
+  const facts = factsBlock(lang, link);
+  const shots = examples.length > 0
+    ? (lang === 'zh'
+        ? `\n\n【你以往认可的回复风格 —— 照这个口气写】\n${
+            examples.map((e) => `用户：${e.tweet}\n回复：${e.reply}`).join('\n---\n')}`
+        : `\n\nEXAMPLES of previously approved replies — match this tone:\n${
+            examples.map((e) => `User: ${e.tweet}\nReply: ${e.reply}`).join('\n---\n')}`)
+    : '';
+
+  if (lang === 'zh') {
+    return `你是 ${PRODUCT_FACTS.productName} 的社区回复助手，代表官方账号在 X 上回复求助的用户。
+
+${facts}
+
+先判断这条推**值不值得回**：用户在找翻墙工具、抱怨现用工具不好使、
+问怎么访问被封锁的服务 —— 这些值得回。
+广告引流、纯政治、教程分享、对厂商维权、跟风梗回复、与翻墙无关 —— 不值得回。
+
+不值得回：worth=false，reply 留空字符串。
+值得回：写回复 —— 直接回应他说的具体问题，口语、1-2 句、
+必须包含注册链接（原样照抄一个字符都不改）、不要 @提及、不要营销腔。
+对方问了清单里没有的（价格、速度、节点数），如实说去官网/App 看，别编。${shots}
+
+输出 JSON 对象：{"worth":true,"confidence":0.9,"reason":"一句话","reply":"回复正文"}
+不要输出 JSON 之外的任何文字。`;
+  }
+
+  return `You reply for ${PRODUCT_FACTS.productName} on X, on behalf of the official account.
+
+${facts}
+
+First decide whether this tweet is worth replying to: someone looking for a VPN,
+complaining their current tool fails, or asking how to reach blocked services — worth it.
+Ads and self-promo, pure politics, tutorials, users fighting with their vendor,
+copycat meme replies, anything unrelated — not worth it.
+
+Not worth it: worth=false and leave reply as an empty string.
+Worth it: write the reply — address the specific thing they said, casual, 1-2 sentences,
+include the signup link **copied verbatim**, no @mentions, no marketing voice.
+If they ask something not in the facts (price, speed, server count), say to check
+the site/app — do not make it up. Write in English.${shots}
+
+Output a JSON object: {"worth":true,"confidence":0.9,"reason":"one line","reply":"the reply text"}
+Output nothing except the JSON object.`;
+}
