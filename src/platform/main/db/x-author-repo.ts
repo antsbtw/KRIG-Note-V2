@@ -523,3 +523,48 @@ export async function listWatchCandidates(limit = 20): Promise<WatchCandidate[]>
     .sort((a, b) => (b.repliedCount - a.repliedCount) || (b.seenTweets - a.seenTweets))
     .slice(0, limit);
 }
+
+
+/**
+ * 把「已确认(采纳过)推文的作者」批量建立追踪关系。
+ *
+ * ⭐ 用户 2026-09-06:「确保已确认的推文中所有的用户都建立追踪关系。」
+ * 实测:采纳过的推涉及 **498 个不同作者**,而追踪名单当时只有 1 个 ——
+ * 你亲手采纳过的人才是最该长期跟的那批,却一个都没进名单。
+ *
+ * ⚠️ **不动已有行的意志字段**:已屏蔽的不追(屏蔽是相反的意志),
+ *    已在名单里的跳过(免得把手动加的 depth=0 覆盖成 1)。
+ * ⚠️ depth=1:与「回复过自动入列」同级 —— 都是「我对他有过动作」。
+ */
+export async function watchAllAccepted(): Promise<{ added: number; skipped: number }> {
+  const db = getXDB();
+  const res = await db.query<[
+    Array<{ author_handle: string }>, Array<{ handle: string }>,
+  ]>(
+    `SELECT author_handle FROM x_tweet
+       WHERE accepted = true AND author_handle != NONE AND author_handle != ''
+       GROUP BY author_handle;
+     SELECT handle FROM x_author
+       WHERE watched = true OR blocked = true OR is_self = true;`,
+  );
+  const authors = (res?.[0] ?? []).map((r) => r.author_handle).filter(Boolean);
+  const exclude = new Set((res?.[1] ?? []).map((r) => r.handle));
+  const todo = authors.filter((h) => !exclude.has(h));
+
+  // 分批:几百条 UPDATE 一次性发容易撞事务,出错也难定位
+  const BATCH = 100;
+  let added = 0;
+  for (let i = 0; i < todo.length; i += BATCH) {
+    const batch = todo.slice(i, i + BATCH);
+    const stmts = batch.map((_, k) =>
+      `UPDATE x_author SET watched = true, watched_at = time::now(),
+         watch_source = 'accepted', watch_depth = 1 WHERE handle = $h${k};`
+    ).join('\n');
+    const params: Record<string, string> = {};
+    batch.forEach((h, k) => { params[`h${k}`] = h; });
+    await db.query(stmts, params);
+    added += batch.length;
+  }
+  console.log(`[x-author-repo] 已确认作者建立追踪:新增 ${added},跳过 ${authors.length - todo.length}`);
+  return { added, skipped: authors.length - todo.length };
+}

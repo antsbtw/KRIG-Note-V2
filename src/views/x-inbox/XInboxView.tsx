@@ -487,6 +487,29 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign' | 'drafts' | 'watchlist'>('inbox');
   /** 正在为哪条推写回复(卡片「送入回复」弹窗) */
   const [composeFor, setComposeFor] = useState<TweetInboxRecord | null>(null);
+  const [prefetching, setPrefetching] = useState(false);
+
+  /**
+   * 给「Gemma 建议采纳」的推批量预抓上文。
+   * 用户 2026-09-06:「每一个它建议的,都应该获取上下文。」——
+   * 上文是①闸门的输入,提前抓好,点开弹窗就不用现等 10s。
+   */
+  const prefetchContext = async () => {
+    setPrefetching(true);
+    setScanStatus('正在给建议名单预抓上文…');
+    try {
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.prefetchContext(workspaceId, wcId, 20);
+      if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
+      setScanStatus(
+        `建议 ${r.scanned} 条，其中回复 ${r.isReply} 条 → 抓到上文 ${r.fetched}，没抓到 ${r.missed}`,
+      );
+    } catch (err) {
+      setScanStatus(`预抓失败：${String(err)}`);
+    } finally {
+      setPrefetching(false);
+    }
+  };
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -787,6 +810,9 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         <div style={{ display: 'flex', gap: 6 }}>
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
+          <Btn onClick={prefetchContext} disabled={prefetching}>
+            {prefetching ? '抓上文中…' : '🧵 预抓上文'}
+          </Btn>
           <Btn onClick={() => setView('drafts')}>🔁 回放验证</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
           <Btn onClick={() => setView('watchlist')}>👁 追踪名单</Btn>

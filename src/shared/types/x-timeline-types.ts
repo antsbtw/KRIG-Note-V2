@@ -101,6 +101,10 @@ export interface TweetInboxRecord {
   in_reply_to?: string;          // 父推 id(载荷层填);⚠️历史上取自 socialContext 故长期为空
   /** 被回复者 handle —— DOM 上「Replying to @xxx」那一行。非空 = 这是一条回复 */
   in_reply_to_user?: string;
+  /** 上文快照:父推正文。预抓时落库,回复时直接用,免得每条现等 10s */
+  parent_text?: string;
+  parent_handle?: string;
+  parent_fetched_at?: string;
   /** 到期时间。**undefined = 永久保留**(采纳/回复过的推文) —— TTL 清理会跳过。 */
   expires_at?: string;
   source: 'timeline' | 'search';

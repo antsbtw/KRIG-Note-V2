@@ -255,6 +255,40 @@ describe('追踪名单 UI 与搜索语法 spike', () => {
     expect(WL).toMatch(/const auto = \[\.\.\.rows\]/);
   });
 
+  it('⭐ 已确认推文的作者要能一次性全部建立追踪', () => {
+    // 用户 2026-09-06:「确保已确认的推文中所有的用户都建立追踪关系」
+    // 实测:采纳过的推涉及 498 个作者,而名单当时只有 1 个
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    expect(ar).toMatch(/export async function watchAllAccepted/);
+    expect(WL).toMatch(/watchAccepted/);
+  });
+
+  it('⭐ 批量追踪不得覆盖已屏蔽/已在名单的', () => {
+    // 屏蔽是相反的意志;已手动加的 depth=0 不该被冲成 1
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    const fn = ar.slice(ar.indexOf('export async function watchAllAccepted'));
+    expect(fn).toMatch(/watched = true OR blocked = true OR is_self = true/);
+  });
+
+  it('⭐ 建议名单要能批量预抓上文', () => {
+    // 用户:「每一个它建议的,都应该获取上下文」——
+    // 上文是①闸门的输入,等点开弹窗才抓意味着每条现等 10s
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    expect(h).toMatch(/X_PREFETCH_CONTEXT/);
+    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'));
+    // 只抓真是回复的,独立推别白跑
+    expect(seg.slice(0, 1600)).toMatch(/in_reply_to_user \|\|/);
+  });
+
+  it('⭐ 预抓过的上文要被复用,不能每次重抓', () => {
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    expect(h).toMatch(/if \(found\.parent_text\)/);
+  });
+
   it('移出名单的提示要说明历史数据保留', () => {
     expect(WL_RAW).toMatch(/历史数据保留/);
   });

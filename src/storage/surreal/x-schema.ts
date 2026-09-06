@@ -822,3 +822,31 @@ export async function x_migration_1_1_6(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.6'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.7 —— 上文快照(2026-09-06)
+ *
+ * 用户:「从 Gemma4 的建议名单中获取,因为每一个它建议的,都应该获取上下文。」
+ * 上文是①闸门(判「这楼真和 VPN 相关吗」)的输入。
+ * 此前只在点开弹窗时现抓,每条现等 10s;存下来后点开即有。
+ *
+ * ⚠️ 存**快照**而非只存父推 id:父推可能被删或被改,
+ *    快照保留我们当时判断的依据(与 author_name_at_post 同思路)。
+ */
+const X_SCHEMA_1_1_7 = `
+DEFINE FIELD IF NOT EXISTS parent_text       ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_handle     ON tweet_inbox TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_fetched_at ON tweet_inbox TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS parent_text       ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_handle     ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_fetched_at ON x_tweet TYPE option<datetime>;
+`;
+
+export async function x_migration_1_1_7(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_7);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.7', appliedAt = $now,
+      description = 'Parent tweet snapshot (context for step 1 gate)'`,
+    { rid: new RecordId('schema_version', '1.1.7'), now: Date.now() },
+  );
+}

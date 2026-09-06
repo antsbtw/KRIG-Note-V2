@@ -14,6 +14,7 @@
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
+import { setParentContext } from '../db/tweet-inbox-repo';
 import { queryInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
 import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
@@ -26,7 +27,7 @@ import { fetchParentTweet } from './x-parent-tweet';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
-  watchAuthor, unwatchAuthor, listWatched, getAuthorStats, listWatchCandidates } from '../db/x-author-repo';
+  watchAuthor, unwatchAuthor, listWatched, getAuthorStats, listWatchCandidates, watchAllAccepted } from '../db/x-author-repo';
 import { probeSelfHandle } from './x-self-account';
 import { getWsRole, setWsRole, listWsRoles,
   setWsAccount, getWsAccount, requireWsAccount, listWsAccounts } from '../db/x-ws-role-repo';
@@ -879,7 +880,10 @@ export function registerXTimelineHandlers(): void {
       //    模型会因此更保守;绝不编一个空上文冒充「上文是空的」。
       const looksReply = !!(found.in_reply_to_user || /^\s*@\w+/.test(found.text ?? ''));
       let parentTweet;
-      if (looksReply) {
+      // 预抓过就直接用 —— 省掉每条现等 10s 的导航(用户 2026-09-06 的要求就是这个)
+      if (found.parent_text) {
+        parentTweet = { text: found.parent_text, authorHandle: found.parent_handle };
+      } else if (looksReply) {
         const got = await fetchParentTweet(
           found.tweet_url || `https://x.com/i/status/${found.tweet_id}`,
           undefined, 10_000,
@@ -975,6 +979,14 @@ export function registerXTimelineHandlers(): void {
         });
       } else if (p?.op === 'remove' && typeof p.handle === 'string') {
         await unwatchAuthor(p.handle);
+      } else if (p?.op === 'watch-accepted') {
+        // 把所有「采纳过的推」的作者一次性建立追踪关系(用户 2026-09-06)
+        const r = await watchAllAccepted();
+        const watched = await listWatched();
+        const withStats = await Promise.all(watched.map(async (w) => ({
+          ...w, stats: await getAuthorStats(w.handle).catch(() => null),
+        })));
+        return { success: true, watched: withStats, bulk: r };
       } else if (p?.op === 'candidates') {
         // 从已有数据里挑候选 —— 免得用户凭记忆一个个手打
         return { success: true, watched: [], candidates: await listWatchCandidates(20) };
@@ -989,6 +1001,51 @@ export function registerXTimelineHandlers(): void {
       return { success: true, watched: withStats };
     } catch (err) {
       return { success: false, error: String(err), watched: [] };
+    }
+  });
+
+  // X_PREFETCH_CONTEXT — 给「Gemma 建议采纳」的推批量预抓上文。
+  //
+  // ⭐ 用户 2026-09-06:「从 Gemma4 的建议名单中获取,因为每一个它建议的,
+  //   都应该获取上下文。」——对。上文是①闸门的输入,等点开弹窗才抓
+  //   意味着每条都要现等 10s;而建议名单是可预知的,可以提前批量抓好。
+  //
+  // ⚠️ 只抓**真是回复**的:独立求助推没有上文,白跑导航纯浪费。
+  // ⚠️ 抓不到不算失败 —— 记下来让调用方知道哪些没拿到,不静默。
+  ipcMain.handle(IPC_CHANNELS.X_PREFETCH_CONTEXT, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown; wcId?: unknown; limit?: unknown } | null;
+    if (!p || typeof p.wsId !== 'string' || !p.wsId) {
+      return { success: false, error: 'wsId required' };
+    }
+    try {
+      const pool = await queryInbox({
+        status: 'worth', wsId: p.wsId, humanReviewed: false,
+        limit: typeof p.limit === 'number' ? p.limit : 20,
+      });
+      const targets = pool.filter(
+        (t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''));
+      const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
+
+      let ok = 0;
+      const missed: string[] = [];
+      for (const t of targets) {
+        const got = await fetchParentTweet(
+          t.tweet_url || `https://x.com/i/status/${t.tweet_id}`, wcId, 10_000,
+        ).catch(() => null);
+        if (got) {
+          await setParentContext(t.tweet_id, got.text, got.authorHandle);
+          ok += 1;
+        } else {
+          missed.push(t.tweet_id);
+        }
+      }
+      return {
+        success: true,
+        scanned: pool.length, isReply: targets.length, fetched: ok, missed: missed.length,
+      };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_PREFETCH_CONTEXT failed:', (err as Error).message);
+      return { success: false, error: String(err) };
     }
   });
 

@@ -477,3 +477,27 @@ export async function queryFeedbackSamples(opts: {
   );
   return res[0] ?? [];
 }
+
+
+/**
+ * 存下这条推的**上文**(父推正文)。
+ *
+ * ⭐ 用户 2026-09-06:「每一个它建议的,都应该获取上下文。」
+ * 上文是①闸门的输入。此前只在点开弹窗时现抓 —— 每条现等 10s;
+ * 建议名单是可预知的,提前批量抓好、存起来,点开就有。
+ *
+ * ⚠️ 存的是**抓到那一刻的快照**:父推可能被删或改,快照保留我们当时判断的依据
+ *    (与 author_name_at_post 同一思路)。
+ */
+export async function setParentContext(
+  tweetId: string, parentText: string, parentHandle?: string,
+): Promise<void> {
+  if (!tweetId || !parentText?.trim()) return;   // 空上文没有存的价值
+  await getXDB().query(
+    `UPDATE tweet_inbox SET parent_text = $t, parent_handle = $h,
+       parent_fetched_at = time::now() WHERE tweet_id = $id;
+     UPDATE x_tweet SET parent_text = $t, parent_handle = $h,
+       parent_fetched_at = time::now() WHERE tweet_id = $id;`,
+    { id: tweetId, t: parentText.trim().slice(0, 1000), h: parentHandle ?? undefined },
+  );
+}

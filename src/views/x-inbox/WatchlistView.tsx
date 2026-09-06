@@ -82,6 +82,18 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
     setStatus(`已把 @${h} 加入追踪名单`);
   };
 
+  /** 把所有「采纳过的推」的作者一次性建立追踪关系 */
+  const watchAccepted = async () => {
+    setBusy(true);
+    setStatus('正在给已确认推文的作者建立追踪关系…');
+    const r = await api()?.watchlist('watch-accepted');
+    setBusy(false);
+    if (!r?.success) { setStatus(`失败:${r?.error}`); return; }
+    setRows(r.watched ?? []);
+    const b = r.bulk;
+    setStatus(b ? `已建立 ${b.added} 个追踪关系(跳过 ${b.skipped} 个:已在名单/已屏蔽/本人)` : '完成');
+  };
+
   const remove = async (handle: string) => {
     setBusy(true);
     const r = await api()?.watchlist('remove', handle);
@@ -131,6 +143,7 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
         />
         <Btn primary onClick={add} disabled={busy || !input.trim()}>+ 加入追踪</Btn>
         <Btn onClick={loadCandidates} disabled={busy}>📋 从已回过的人里挑</Btn>
+        <Btn onClick={watchAccepted} disabled={busy}>✓ 已确认的全部追踪</Btn>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{status}</span>
       </div>
 

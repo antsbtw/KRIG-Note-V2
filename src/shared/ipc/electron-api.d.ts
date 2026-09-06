@@ -859,7 +859,7 @@ declare global {
           error?: string;
         }>;
         /** 追踪名单增删查(≠ X 的关注) */
-        watchlist(op: 'list' | 'add' | 'remove' | 'candidates', handle?: string, note?: string): Promise<{
+        watchlist(op: 'list' | 'add' | 'remove' | 'candidates' | 'watch-accepted', handle?: string, note?: string): Promise<{
           success: boolean;
           watched?: Array<{
             handle: string; watchedAt?: string; watchSource?: string;
@@ -869,6 +869,14 @@ declare global {
           }>;
           /** op='candidates' 时返回:从已有数据里挑的候选(按回过次数排) */
           candidates?: Array<{ handle: string; repliedCount: number; seenTweets: number }>;
+          /** op='watch-accepted' 时返回 */
+          bulk?: { added: number; skipped: number };
+          error?: string;
+        }>;
+        /** 给建议名单批量预抓上文 */
+        prefetchContext(wsId: string, wcId?: number, limit?: number): Promise<{
+          success: boolean;
+          scanned?: number; isReply?: number; fetched?: number; missed?: number;
           error?: string;
         }>;
         /** 实测哪种搜索写法能带回复 */
