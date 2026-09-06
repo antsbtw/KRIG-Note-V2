@@ -242,7 +242,14 @@ export type PosterKind = 'genuine' | 'promoter' | 'bot' | 'unclear';
  * 三步分开留档,才谈得上「再分析 Gemma4 执行是否正确」。
  */
 export interface ReplyTrace {
-  /** ① 发推者是什么人(模型据正文推断) */
+  /**
+   * ① 判断依据里**有没有账号资料**。
+   * false = 只读了正文(该账号没采到画像),此时 posterKind 只是印象;
+   * true  = 有粉丝数/注册时间/简介撑着,是有据可依的判断。
+   * ⚠️ UI 必须据此显示不同的免责说明 —— 否则「有依据」和「纯猜」长得一样。
+   */
+  hasAccountFacts?: boolean;
+  /** ① 发推者是什么人 */
   posterKind: PosterKind;
   /** ① 的一句话说明 —— 便于人核对它凭什么这么判 */
   posterRead: string;

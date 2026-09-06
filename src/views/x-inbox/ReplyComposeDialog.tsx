@@ -242,7 +242,9 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
                   <div><b style={{ color: 'var(--text)' }}>③ 判断</b>　{draft.reason}</div>
                 )}
                 <div style={{ marginTop: 3, color: 'var(--text-faint)', fontSize: 10 }}>
-                  ⓘ ①是 AI 读正文得出的推断，<b>不是账号资料</b>（库里没存粉丝数/注册时间）。
+                  {draft.trace.hasAccountFacts
+                    ? <>ⓘ ①<b>有账号资料撑着</b>（粉丝数/注册时间/简介已采集），不是只读正文猜的。</>
+                    : <>ⓘ ①是 AI <b>只读正文</b>得出的印象 —— 这个账号<b>没采到资料</b>，判断可信度有限。</>}
                 </div>
               </div>
             )}

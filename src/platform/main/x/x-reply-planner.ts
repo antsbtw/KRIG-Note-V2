@@ -546,6 +546,8 @@ export async function planOneReply(
   //    取值不在枚举内一律归 'unclear',绝不勉强塞进某一类。
   const KINDS: PosterKind[] = ['genuine', 'promoter', 'bot', 'unclear'];
   const trace: ReplyTrace = {
+    // 有没有账号资料撑着 —— UI 据此区分「有据可依」与「纯读正文的印象」
+    hasAccountFacts: !!ctx.posterFacts,
     posterKind: KINDS.includes(parsed?.posterKind as PosterKind)
       ? (parsed!.posterKind as PosterKind) : 'unclear',
     posterRead: typeof parsed?.posterRead === 'string' ? parsed.posterRead.trim() : '',

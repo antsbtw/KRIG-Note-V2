@@ -542,10 +542,17 @@ describe('推断链留档(回归分析的依据)', () => {
     expect(seg.slice(0, 600)).toMatch(/trace\.posterKind/);
   });
 
-  it('⭐ UI 必须标明①是推断而非账号资料', () => {
-    // 别让人把模型的猜测当成查证过的事实
-    expect(DIALOG_RAW).toMatch(/不是账号资料/);
+  it('⭐ UI 必须区分「有账号资料」和「只读正文猜的」', () => {
+    // 2026-09-06:画像采集修好后,那句「库里没存粉丝数」的免责声明就过时了 ——
+    // 有依据的判断和纯猜长得一样,反而误导人。改为按 hasAccountFacts 分支。
+    expect(DIALOG).toMatch(/hasAccountFacts/);
+    expect(DIALOG_RAW).toMatch(/有账号资料撑着/);
+    expect(DIALOG_RAW).toMatch(/只读正文/);
     expect(DIALOG).toMatch(/POSTER_LABEL/);
+  });
+
+  it('⭐ hasAccountFacts 必须真的反映有没有资料,不能写死', () => {
+    expect(PLANNER).toMatch(/hasAccountFacts:\s*!!ctx\.posterFacts/);
   });
 });
 
