@@ -879,6 +879,13 @@ declare global {
           scanned?: number; isReply?: number; fetched?: number; missed?: number;
           error?: string;
         }>;
+        /** 给建议名单批量预采画像 */
+        prefetchProfiles(wsId: string, wcId?: number, limit?: number): Promise<{
+          success: boolean;
+          authors?: number; fetched?: number; cached?: number; failed?: number;
+          mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
+          error?: string;
+        }>;
         /** 实测哪种搜索写法能带回复 */
         searchSyntaxSpike(handle: string, wcId?: number): Promise<{
           success: boolean;

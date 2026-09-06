@@ -848,6 +848,7 @@ export function registerXTimelineHandlers(): void {
       //    那是诚实的降级;但拿不到资料就不给回复,才是因小失大。
       const posterHandle = normalizeHandle(found.author_handle ?? '');
       let posterFacts;
+      let profileError: string | undefined;
       if (posterHandle) {
         const cached = await getAuthorCounts(posterHandle).catch(() => null);
         const fresh = cached?.countsAt
@@ -857,7 +858,12 @@ export function registerXTimelineHandlers(): void {
           const got = await harvestAuthorProfile(posterHandle, callerWcId, 12_000)
             .catch((e) => ({ error: String(e) }));
           if (!('error' in got)) prof = got;
-          else console.warn(`[x-timeline-handlers] 画像采集失败(不拦回复):${got.error}`);
+          else {
+            // ⚠️ 不拦住回复,但**把原因带给用户**:私密号/已注销是不可恢复的,
+            //    网络慢/页面没加载完则重试就好 —— 让用户自己判断,别替他决定「不许回」
+            profileError = got.error;
+            console.warn(`[x-timeline-handlers] 画像采集失败(不拦回复):${got.error}`);
+          }
         }
         if (prof) {
           const seen = corpus.filter(
@@ -900,6 +906,7 @@ export function registerXTimelineHandlers(): void {
       const r = await planOneReply(found, getJudgeConfig(), {
         selfHandle: acct?.handle,
         posterFacts,
+        profileError,
         parentTweet,
         approvedExamples: examples,
         fingerprintCounts,
@@ -1054,6 +1061,65 @@ export function registerXTimelineHandlers(): void {
       };
     } catch (err) {
       console.error('[x-timeline-handlers] X_PREFETCH_CONTEXT failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // X_PREFETCH_PROFILES — 给建议名单里的作者批量预采画像。
+  //
+  // ⭐ 用户 2026-09-06:「如果数据不齐备,应该主动去切换 X 的页面来获取
+  //   足够的数据才回复」——方向对。现在是点开某条时**现采**(每条等 12s);
+  //   批量预采后点开即有,不用每条现等。
+  //
+  // ⚠️ 连续失败要告警:采不到单个账号是常事(私密号/已注销),
+  //    但**连着一串都采不到**多半是采集机制坏了(如 X 改版让载荷截不到)。
+  //    那时继续默默出草稿,用户会在毫不知情下连发一堆「只读正文」的判断。
+  ipcMain.handle(IPC_CHANNELS.X_PREFETCH_PROFILES, async (_e, payload: unknown) => {
+    const p = payload as { wsId?: unknown; wcId?: unknown; limit?: unknown } | null;
+    if (!p || typeof p.wsId !== 'string' || !p.wsId) {
+      return { success: false, error: 'wsId required' };
+    }
+    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const pool = await queryInbox({
+        status: 'worth', wsId: p.wsId,
+        limit: typeof p.limit === 'number' ? p.limit : 20,
+      });
+      // 去重作者;已有新鲜画像的跳过(别为已有数据白跑导航)
+      const handles = [...new Set(pool
+        .map((t) => normalizeHandle(t.author_handle ?? ''))
+        .filter(Boolean))];
+
+      let fetched = 0; let cached = 0; let failed = 0;
+      let consecutiveFail = 0; let maxConsecutive = 0;
+      const errors: string[] = [];
+      for (const h of handles) {
+        const have = await getAuthorCounts(h).catch(() => null);
+        const fresh = have?.countsAt
+          && (Date.now() - new Date(have.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
+        if (fresh) { cached += 1; consecutiveFail = 0; continue; }
+
+        const got = await harvestAuthorProfile(h, wcId, 12_000)
+          .catch((e) => ({ error: String(e) }));
+        if ('error' in got) {
+          failed += 1;
+          consecutiveFail += 1;
+          maxConsecutive = Math.max(maxConsecutive, consecutiveFail);
+          if (errors.length < 3) errors.push(`@${h}: ${got.error}`);
+        } else {
+          fetched += 1;
+          consecutiveFail = 0;
+        }
+      }
+      // 连续 5 个失败 = 机制层面的怀疑,不是个别账号的问题
+      const mechanismSuspect = maxConsecutive >= 5;
+      return {
+        success: true,
+        authors: handles.length, fetched, cached, failed,
+        mechanismSuspect, maxConsecutive, errors,
+      };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_PREFETCH_PROFILES failed:', (err as Error).message);
       return { success: false, error: String(err) };
     }
   });

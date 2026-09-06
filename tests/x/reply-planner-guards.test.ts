@@ -580,6 +580,47 @@ describe('ref 归因不许猜', () => {
   });
 });
 
+describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
+  const H2 = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+  const V2 = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+  const D2 = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+
+  it('⭐ 采不到画像不能拦住回复', () => {
+    // 私密号/已注销是不可恢复的,硬等只会让人卡住;
+    // 该回不该回交给用户,系统只负责如实标注
+    expect(H2).toMatch(/不拦回复/);
+    const seg = H2.slice(H2.indexOf('画像采集失败(不拦回复)'));
+    expect(/return\s*\{\s*success:\s*false/.test(seg.slice(0, 200)), '采不到就不给回复了').toBe(false);
+  });
+
+  it('⭐ 采不到要带原因,并给重试入口', () => {
+    expect(H2).toMatch(/profileError = got\.error/);
+    expect(D2).toMatch(/profileError/);
+    expect(D2).toMatch(/重新采集并生成/);
+  });
+
+  it('⭐ 重试要说明什么情况下重试有用', () => {
+    // 别让人对着按钮乱点:网络慢重试有用,私密号重试没用
+    expect(D2).toMatch(/网络慢.*重试有用|重试有用/);
+  });
+
+  it('⭐ 连续采不到要告警(机制坏了 vs 个别账号)', () => {
+    // 连着一串失败多半是 X 改版让载荷截不到,
+    // 这时继续默默出草稿,用户会毫不知情地连发一堆弱判断
+    expect(H2).toMatch(/mechanismSuspect/);
+    expect(H2).toMatch(/maxConsecutive >= 5/);
+    expect(V2).toMatch(/画像采集可能已失效/);
+  });
+
+  it('⭐ 已有新鲜画像的不重复采(别白跑导航)', () => {
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg.slice(0, 2000)).toMatch(/if \(fresh\) \{ cached \+= 1/);
+  });
+});
+
 describe('驱动 webview 的路径都要显式传 wcId', () => {
   // ⚠️ 这个坑 2026-09-06 一天踩了两次(spike、画像采集):
   //    不传 wcId → resolveXWebContents 回退到「登记表」,

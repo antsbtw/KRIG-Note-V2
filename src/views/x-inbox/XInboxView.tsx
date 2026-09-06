@@ -499,16 +499,31 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     setScanStatus('正在给建议名单预抓上文…');
     try {
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      // ② 的事实来源:画像。先采画像再抓上文 —— 画像影响「该不该回」,
+      //    上文只影响「这楼相关吗」,前者更基础。
+      const pr = await api()?.prefetchProfiles(workspaceId, wcId, 20);
+      if (pr?.success && pr.mechanismSuspect) {
+        // ⚠️ 连着一串采不到 = 机制可能坏了,不是个别账号的问题。
+        //    这时继续默默出草稿,用户会毫不知情地连发一堆「只读正文」的判断。
+        setScanStatus(
+          `⚠️ 画像采集可能已失效:连续 ${pr.maxConsecutive} 个账号采不到`
+          + `（${pr.errors?.[0] ?? ''}）—— 建议检查 X 是否已改版`,
+        );
+        return;
+      }
       const r = await api()?.prefetchContext(workspaceId, wcId, 20);
       if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
+      const profPart = pr?.success
+        ? `画像 ${pr.fetched} 新采/${pr.cached} 已有${pr.failed ? `/${pr.failed} 失败` : ''}　`
+        : '';
       // ⚠️ 扫到 0 条要明说「没有目标」,别让人以为抓完了 ——
       //    实测踩过:过滤条件写错导致匹配 0 条,界面却像正常跑完一样
       setScanStatus(
         r.scanned === 0
           ? '没有可预抓的推文（本 ws 没有 Gemma 判为值得回复的）'
-          : r.isReply === 0
-            ? `建议 ${r.scanned} 条，但都是独立求助推（没有上文可抓）`
-            : `建议 ${r.scanned} 条，其中回复 ${r.isReply} 条 → 抓到上文 ${r.fetched}，没抓到 ${r.missed}`,
+          : profPart + (r.isReply === 0
+            ? `建议 ${r.scanned} 条，都是独立求助推（无上文可抓）`
+            : `上文 ${r.fetched}/${r.isReply} 条`),
       );
     } catch (err) {
       setScanStatus(`预抓失败：${String(err)}`);
@@ -817,7 +832,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
           <Btn onClick={prefetchContext} disabled={prefetching}>
-            {prefetching ? '抓上文中…' : '🧵 预抓上文'}
+            {prefetching ? '预取中…' : '🧵 预取资料'}
           </Btn>
           <Btn onClick={() => setView('drafts')}>🔁 回放验证</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>

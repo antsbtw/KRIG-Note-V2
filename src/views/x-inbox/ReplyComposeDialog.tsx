@@ -64,6 +64,29 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
 
   const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
 
+  const [retrying, setRetrying] = useState(false);
+
+  /**
+   * 重新生成 —— 主要用途是**画像没采到时再试一次**。
+   * 采不到的原因分两类:网络慢/页面没加载完(重试有用)、
+   * 私密号/已注销(重试无用)。决定权交给用户,别替他判定「这条不许回」。
+   */
+  const regenerate = async () => {
+    setRetrying(true);
+    setStatus('正在重新采集账号资料并生成…');
+    try {
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.planOneReply(workspaceId, tweet.tweet_id, wcId);
+      if (!r?.success) { setStatus(`重试失败:${r?.error ?? '未知错误'}`); return; }
+      if (r.draft) { setDraft(r.draft); setText(r.draft.text); setSkip(null); setStatus(''); }
+      else if (r.skip) { setSkip(r.skip); setDraft(null); setStatus(''); }
+    } catch (err) {
+      setStatus(`重试失败:${String(err)}`);
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -242,9 +265,27 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
                   <div><b style={{ color: 'var(--text)' }}>③ 判断</b>　{draft.reason}</div>
                 )}
                 <div style={{ marginTop: 3, color: 'var(--text-faint)', fontSize: 10 }}>
-                  {draft.trace.hasAccountFacts
-                    ? <>ⓘ ①<b>有账号资料撑着</b>（粉丝数/注册时间/简介已采集），不是只读正文猜的。</>
-                    : <>ⓘ ①是 AI <b>只读正文</b>得出的印象 —— 这个账号<b>没采到资料</b>，判断可信度有限。</>}
+                  {draft.trace.hasAccountFacts ? (
+                    <>ⓘ ①<b>有账号资料撑着</b>（粉丝数/注册时间/简介已采集），不是只读正文猜的。</>
+                  ) : (
+                    <>
+                      ⓘ ①是 AI <b>只读正文</b>得出的印象 —— 这个账号<b>没采到资料</b>，判断可信度有限。
+                      {draft.trace.profileError && (
+                        <div style={{ marginTop: 2, color: '#fbbf24' }}>
+                          原因：{draft.trace.profileError}
+                        </div>
+                      )}
+                      <div style={{ marginTop: 3 }}>
+                        <Btn onClick={regenerate} disabled={retrying}
+                          style={{ fontSize: 10, padding: '1px 7px' }}>
+                          {retrying ? '重试中…' : '🔄 重新采集并生成'}
+                        </Btn>
+                        <span style={{ marginLeft: 6, color: 'var(--text-faint)' }}>
+                          网络慢/页面没加载完时重试有用；私密号或已注销则重试也没用。
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}

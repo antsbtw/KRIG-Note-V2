@@ -249,6 +249,13 @@ export interface ReplyTrace {
    * ⚠️ UI 必须据此显示不同的免责说明 —— 否则「有依据」和「纯猜」长得一样。
    */
   hasAccountFacts?: boolean;
+  /**
+   * 画像采集失败的原因(hasAccountFacts=false 时才有)。
+   * ⚠️ 区分「没采到」与「没尝试」很重要:
+   *   前者可能重试就好(网络慢/页面没加载完),后者是逻辑问题。
+   * UI 据此给出重试入口,而不是让用户对着一个「看不出来」干瞪眼。
+   */
+  profileError?: string;
   /** ① 发推者是什么人 */
   posterKind: PosterKind;
   /** ① 的一句话说明 —— 便于人核对它凭什么这么判 */

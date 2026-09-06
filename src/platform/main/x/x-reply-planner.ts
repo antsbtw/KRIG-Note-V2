@@ -160,6 +160,8 @@ export interface PlanContext {
   selfHandle?: string;
   /** 生成 ref 用:来源配方,便于回答「哪个配方带来的注册」 */
   recipeId?: string;
+  /** 画像采集失败原因 —— 透传给 UI,让「没采到」可解释、可重试 */
+  profileError?: string;
   /**
    * 发推者的**已查证**账号资料(采自 UserByScreenName)。
    * 传了 posterKind 就有事实依据;不传则模型只能看正文并倾向 unclear。
@@ -548,6 +550,7 @@ export async function planOneReply(
   const trace: ReplyTrace = {
     // 有没有账号资料撑着 —— UI 据此区分「有据可依」与「纯读正文的印象」
     hasAccountFacts: !!ctx.posterFacts,
+    profileError: ctx.posterFacts ? undefined : ctx.profileError,
     posterKind: KINDS.includes(parsed?.posterKind as PosterKind)
       ? (parsed!.posterKind as PosterKind) : 'unclear',
     posterRead: typeof parsed?.posterRead === 'string' ? parsed.posterRead.trim() : '',

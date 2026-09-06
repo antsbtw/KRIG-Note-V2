@@ -1114,6 +1114,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     prefetchContext(wsId: string, wcId?: number, limit?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT, { wsId, wcId, limit });
     },
+    /** 给建议名单批量预采账号画像(②活跃度的事实来源) */
+    prefetchProfiles(wsId: string, wcId?: number, limit?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES, { wsId, wcId, limit });
+    },
     /** 实测哪种搜索写法能带回复(设计要求先 spike) */
     searchSyntaxSpike(handle: string, wcId?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_SEARCH_SYNTAX_SPIKE, { handle, wcId });
