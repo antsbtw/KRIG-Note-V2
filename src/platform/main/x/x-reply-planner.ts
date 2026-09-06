@@ -19,11 +19,12 @@ import { callOllama } from '../local-llm/ollama-client';
 import { getBlockedHandleSet } from '../db/x-author-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-types';
+import { buildGenerationPrompt, verifyGeneratedReply } from '@shared/types/x-reply-facts';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
-  buildRef, renderTemplate, langOf, templatesFor,
+  buildRef, renderTemplate, langOf, templatesFor, LANDING_BASE, LINK_PARAMS,
   type ReplyDecision, type ReplyDraft, type ReplyPlanResult,
-  type ReplySkip, type ReplyTemplateId, type ReplyLang,
+  type ReplySkip, type ReplyTemplateId, type ReplyLang, type ReplySource,
 } from '@shared/types/x-reply-types';
 
 /**
@@ -71,6 +72,11 @@ confidence 是 0~1 的小数。不要输出 JSON 之外的任何文字。`;
 function extractDecisions(parsed: unknown): unknown[] {
   if (Array.isArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') {
+    // 实测(2026-09-05,英文生成):批里只有 1-2 条时,模型会直接返回**裸对象**
+    //   {"tweetId":"d","reply":"..."}  而不是数组。
+    // 此前当成「没有数组」throw → 整批回落模板,而中文批因为条数多没踩到,
+    // 现象就是「英文永远是模板腔」—— 极易被当成模型不会写英文。
+    if ('tweetId' in (parsed as object)) return [parsed];
     const values = Object.values(parsed as Record<string, unknown>);
     const looksRight = values.find(
       (v): v is unknown[] => Array.isArray(v)
@@ -152,6 +158,12 @@ export interface PlanContext {
   selfHandle?: string;
   /** 生成 ref 用:来源配方,便于回答「哪个配方带来的注册」 */
   recipeId?: string;
+  /**
+   * 用户此前认可/修改过的例子 —— 放进生成 prompt 当少样本。
+   * ⚠️ 这不是训练模型,是 in-context learning:立刻见效、随时可撤。
+   * 学习期积累的修改就从这里回流。
+   */
+  approvedExamples?: Array<{ tweet: string; reply: string }>;
 }
 
 /**
@@ -175,6 +187,78 @@ export function pickTemplate(
   const unused = pool.find((t) => !recent.includes(t.id));
   // 全用过 → 取最久没用的
   return (unused ?? pool[pool.length - 1]).id;
+}
+
+/**
+ * 让 Gemma 为一批推文**现写**回复正文。
+ *
+ * ⭐ 这是引入模型的**唯一理由** —— 直接回应对方说的具体问题,模板做不到。
+ * 实测:「Google TV 上老连不上」→ 精准挑平台事实先答;
+ *       「想找能微信支付的」→ 主动先说不支持微信支付再给试用。
+ *
+ * 每条产出都过 verifyGeneratedReply:链接被改/缺失、自带 @、超长、
+ * 冒出最高级承诺 —— 一律判不通过,由调用方回落模板(不硬发)。
+ *
+ * @returns tweetId → 通过校验的正文;没通过或没返回的**不在 map 里**
+ */
+async function generateReplies(
+  items: Array<{ tweetId: string; text: string; lang: ReplyLang }>,
+  link: (lang: ReplyLang) => string,
+  config: JudgeConfig,
+  examples: Array<{ tweet: string; reply: string }>,
+): Promise<{ texts: Map<string, string>; rejects: Map<string, string> }> {
+  const texts = new Map<string, string>();
+  const rejects = new Map<string, string>();
+  // 按语言分组:事实清单与语气要求都是分语言的,混在一次请求里会串味
+  for (const lang of ['zh', 'en'] as const) {
+    const group = items.filter((it) => it.lang === lang);
+    if (group.length === 0) continue;
+    const theLink = link(lang);
+    let content: string;
+    try {
+      const res = await callOllama({
+        model: config.model,
+        messages: [
+          { role: 'system', content: buildGenerationPrompt(lang, theLink, examples) },
+          { role: 'user', content: JSON.stringify(group.map((g) => ({ tweetId: g.tweetId, text: g.text }))) },
+        ],
+        endpoint: config.ollamaEndpoint,
+        timeoutMs: config.timeoutMs,
+        // 生成要一点多样性(全批同一句话就又变回模板了),但不能放飞
+        temperature: 0.7,
+        responseFormat: 'json_object',
+      });
+      content = res.content;
+    } catch (err) {
+      // 生成失败不致命 —— 调用方会回落模板。但必须留痕,不静默。
+      console.error(`[x-reply-planner] 生成失败(lang=${lang}),将回落模板:`, (err as Error).message);
+      for (const g of group) rejects.set(g.tweetId, `生成失败:${(err as Error).message}`);
+      continue;
+    }
+
+    let items2: unknown[];
+    try {
+      items2 = extractDecisions(JSON.parse(content));
+    } catch (err) {
+      console.error(`[x-reply-planner] 生成结果解析失败(lang=${lang}),将回落模板:`, (err as Error).message);
+      for (const g of group) rejects.set(g.tweetId, '生成结果解析失败');
+      continue;
+    }
+
+    for (const raw of items2) {
+      const r = raw as { tweetId?: string; reply?: string };
+      if (!r.tweetId || typeof r.reply !== 'string') continue;
+      const bad = verifyGeneratedReply(r.reply, theLink);
+      if (bad) {
+        // ⚠️ 校验不通过**绝不硬发** —— link_altered 尤其隐蔽:
+        //    发出去看不出异常,但那次点击永远归不了因。
+        rejects.set(r.tweetId, `校验未通过:${bad}`);
+        continue;
+      }
+      texts.set(r.tweetId, r.reply.trim());
+    }
+  }
+  return { texts, rejects };
 }
 
 function tweetUrlOf(t: TweetInboxRecord): string {
@@ -255,11 +339,14 @@ export async function planReplies(
   // 解析失败会 throw —— 调用方必须感知,绝不静默产出空草稿列表
   const decisions = parseDecisions(response.content);
 
-  // ── ③ 组装草稿(正文来自模板库)────────────────────────────
-  // ref 整批算一次 —— 按批次不按条,同一批里各条正文完全相同。
+  // ── ③ 先定「该回哪些」,再让模型为这些现写正文 ──────────────
+  // ref 整批算一次 —— 按批次不按条,免得正文条条不同反成水军特征。
   const ref = ctx.ref?.trim()
     || buildRef(ctx.selfHandle ?? 'netlab2gfw', now, ctx.recipeId);
-  const recentTemplates = [...(ctx.recentTemplateIds ?? [])];
+  const linkFor = (lang: ReplyLang) =>
+    `${LANDING_BASE}?ref=${ref}&${LINK_PARAMS[lang]}`;
+
+  const accepted: Array<{ t: TweetInboxRecord; handle: string; d: ReplyDecision; lang: ReplyLang }> = [];
   for (const t of candidates) {
     const handle = normalizeHandle(t.author_handle ?? '');
     const d = decisions.get(t.tweet_id);
@@ -282,25 +369,56 @@ export async function planReplies(
       });
       continue;
     }
+    // 语言由**推文**决定;非中文一律英文 —— 实测落地页只有中/英两版,
+    // 用俄语/波斯语回复会把人导向读不懂的英文注册页,比直接用英文更差。
+    accepted.push({ t, handle, d, lang: langOf(t.lang) });
+  }
 
-    // 语言由**推文**决定,不是全局设置 —— 一批里中英混杂是常态
-    const lang = langOf(t.lang);
-    const templateId = pickTemplate(recentTemplates, lang);
-    recentTemplates.unshift(templateId);
-    const template = REPLY_TEMPLATES.find((x) => x.id === templateId)!;
+  if (accepted.length === 0) return { drafts, skips };
+
+  // Gemma 现写正文(引入模型的唯一理由)。失败/校验不过 → 回落模板,不硬发。
+  const { texts, rejects } = await generateReplies(
+    accepted.map((a) => ({ tweetId: a.t.tweet_id, text: a.t.text, lang: a.lang })),
+    linkFor, config, ctx.approvedExamples ?? [],
+  );
+
+  const recentTemplates = [...(ctx.recentTemplateIds ?? [])];
+  for (const { t, handle, d, lang } of accepted) {
+    const generated = texts.get(t.tweet_id);
+    let text: string;
+    let source: ReplySource;
+    let templateId: ReplyTemplateId | undefined;
+    let fallbackReason: string | undefined;
+
+    if (generated) {
+      text = generated;
+      source = 'generated';
+    } else {
+      // 回落模板:模型挂了、解析失败、或校验没过。
+      // ⚠️ 回落**必须留原因** —— 否则「为什么这条是模板腔」查不出来,
+      //    也就永远发现不了「校验一直在拦」这种系统性问题。
+      const tid = pickTemplate(recentTemplates, lang);
+      recentTemplates.unshift(tid);
+      const tpl = REPLY_TEMPLATES.find((x) => x.id === tid)!;
+      text = renderTemplate(tpl, ref);
+      source = 'template';
+      templateId = tid;
+      fallbackReason = rejects.get(t.tweet_id) ?? '模型未返回该条正文';
+      console.warn(`[x-reply-planner] ${t.tweet_id} 回落模板:${fallbackReason}`);
+    }
 
     drafts.push({
       tweetId: t.tweet_id,
       tweetUrl: tweetUrlOf(t),
       authorHandle: handle,
-      // ⚠️ 只做 {ref} 一处替换,别的一字不改 ——
-      //    任何按推文内容改写正文的口子,都是「模型生成正文」的后门。
-      //    ref 按批次生成,故同一批里各条正文仍然完全相同。
-      text: renderTemplate(template, ref),
+      text,
+      source,
       templateId,
+      fallbackReason,
       lang,
-      /** 文案没有语料依据时透传给 UI 提示 —— 别让用户不知情地发新文案 */
-      needsHumanReview: template.needsHumanReview === true,
+      /** 生成的正文人必须看过 —— 模板文案则已有语料依据 */
+      needsHumanReview: source === 'generated'
+        || (templateId ? REPLY_TEMPLATES.find((x) => x.id === templateId)?.needsHumanReview === true : false),
       ref,
       confidence: d.confidence,
       reason: d.reason,

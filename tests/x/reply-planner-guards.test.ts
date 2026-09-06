@@ -20,6 +20,8 @@ import {
   buildRef, renderTemplate, REF_PLACEHOLDER, LANDING_BASE,
   langOf, templatesFor, LINK_PARAMS,
 } from '../../src/shared/types/x-reply-types';
+import { verifyGeneratedReply, buildGenerationPrompt, PRODUCT_FACTS } from
+  '../../src/shared/types/x-reply-facts';
 
 const PLANNER = readFileSync(
   resolve(__dirname, '../../src/platform/main/x/x-reply-planner.ts'), 'utf-8');
@@ -112,32 +114,40 @@ describe('UI:只填不发', () => {
 });
 
 describe('正文只来自模板库', () => {
-  it('⭐ prompt 必须明确要求模型不生成正文', () => {
-    expect(PLANNER).toMatch(/不生成任何回复正文/);
-  });
-
-  it('⭐ prompt 不得要求模型输出正文或模板选择字段', () => {
+  it('⭐ 判断 prompt 只判该不该回,不掺正文/模板字段', () => {
+    // 判断与生成是两次调用、两份 prompt。判断这次只要 reply/confidence/reason
     const promptStart = PLANNER.indexOf('REPLY_SYSTEM_PROMPT');
     const prompt = PLANNER.slice(promptStart, PLANNER.indexOf('`;', promptStart));
-    // 输出契约里只该有 tweetId/reply/confidence/reason
-    expect(prompt).not.toMatch(/"text"\s*:/);
+    expect(prompt).toMatch(/你不生成任何回复正文/);
     expect(prompt).not.toMatch(/"template"\s*:/);
-    expect(prompt).not.toMatch(/"suggestReply"\s*:/);
   });
 
-  it('⭐ 草稿正文只经 renderTemplate(唯一允许的替换是 {ref})', () => {
-    // 任何按推文内容拼接正文的写法都是「模型生成正文」的后门
-    expect(PLANNER).toMatch(/text:\s*renderTemplate\(template,\s*ref\)/);
+  it('⭐ 模板选择仍不问模型(一致率 37%,语料本身无信号)', () => {
+    const pick = PLANNER.slice(PLANNER.indexOf('export function pickTemplate'));
+    const body = pick.slice(0, pick.indexOf('\n}'));
+    expect(/decision|verdict|ollama/i.test(body)).toBe(false);
   });
 
-  it('⭐ 正文不得混入推文内容/模型输出', () => {
-    const push = PLANNER.slice(PLANNER.indexOf('drafts.push('));
-    const body = push.slice(0, push.indexOf('});'));
-    const textLine = body.split('\n').find((l) => /^\s*text:/.test(l)) ?? '';
+  it('⭐ 生成的正文必须过校验才用(校验不过一律回落,不硬发)', () => {
+    // link_altered 尤其隐蔽:发出去看不出异常,但那次点击永远归不了因
+    expect(PLANNER).toMatch(/verifyGeneratedReply/);
+    const gen = PLANNER.slice(PLANNER.indexOf('for (const raw of items2)'));
+    const body = gen.slice(0, gen.indexOf('\n    }\n  }'));
     expect(
-      /t\.text|d\.reason|decision|\+/.test(textLine),
-      `正文行混入了模板以外的东西:${textLine.trim()}`,
-    ).toBe(false);
+      /if \(bad\)[\s\S]{0,200}continue/.test(body),
+      '校验结果没有拦住写入 —— 不合格正文会被当成合格发出去',
+    ).toBe(true);
+  });
+
+  it('⭐ 回落模板必须留原因(否则发现不了「校验一直在拦」)', () => {
+    expect(PLANNER).toMatch(/fallbackReason/);
+    expect(PLANNER).toMatch(/回落模板/);
+  });
+
+  it('⭐ 模板仍是兜底路径,不能被删掉', () => {
+    // 模型挂了/Ollama 不在时还得能发,回落是保底不是摆设
+    expect(PLANNER).toMatch(/renderTemplate\(tpl, ref\)/);
+    expect(PLANNER).toMatch(/source = 'template'/);
   });
 
   it('模板库非空,且每个模板都有正文', () => {
@@ -164,6 +174,58 @@ describe('正文只来自模板库', () => {
     for (const t of REPLY_TEMPLATES) {
       expect(hasStaleShortLink(t), `模板 ${t.id} 还带着 t.co 短链`).toBe(false);
     }
+  });
+});
+
+describe('事实清单与生成校验', () => {
+  const LINK = 'https://situstechnologies.com/x?ref=tw_t&lang=zh&v=6';
+
+  it('⭐ 链接必须逐字存在 —— 缺了/改了都要拦', () => {
+    // 链接是统计资产:模型改一个字符不报错、发出去看不出来,
+    // 但那次点击永远归不了因。这条不能靠模型自觉。
+    expect(verifyGeneratedReply(`试试这个 ${LINK}`, LINK)).toBeNull();
+    expect(verifyGeneratedReply('试试这个吧', LINK)).toBe('link_missing');
+    expect(verifyGeneratedReply(
+      '试试 https://situstechnologies.com/x?ref=CHANGED&lang=zh&v=6', LINK)).toBe('link_altered');
+  });
+
+  it('⭐ 最高级/稳定性承诺必须拦(外语实测踩过)', () => {
+    // 俄语加过「稳定运行」、波斯语加过「最佳选择」
+    expect(verifyGeneratedReply(`本产品稳定运行 ${LINK}`, LINK)).toBe('superlative');
+    expect(verifyGeneratedReply(`这是最佳选择 ${LINK}`, LINK)).toBe('superlative');
+    expect(verifyGeneratedReply(`the best option ${LINK}`, LINK)).toBe('superlative');
+  });
+
+  it('⭐ 自带 @提及要拦(X 会再带一次 → @@xxx)', () => {
+    expect(verifyGeneratedReply(`@someone 试试 ${LINK}`, LINK)).toBe('has_mention');
+  });
+
+  it('空正文与超长要拦', () => {
+    expect(verifyGeneratedReply('', LINK)).toBe('empty');
+    expect(verifyGeneratedReply('啊'.repeat(300) + LINK, LINK)).toBe('too_long');
+  });
+
+  it('⭐ 事实清单里禁止项必须显式列出(比"别瞎说"有效)', () => {
+    for (const k of ['价格', '速度数字', '节点数量', '优惠活动', '退款政策']) {
+      expect(PRODUCT_FACTS.forbidden, `禁止项少了 ${k}`).toContain(k);
+    }
+  });
+
+  it('⭐ 生成 prompt 必须带事实清单和「原样照抄链接」', () => {
+    const zh = buildGenerationPrompt('zh', LINK);
+    expect(zh).toContain(LINK);
+    expect(zh).toMatch(/原样照抄/);
+    expect(zh).toMatch(/严禁/);
+    const en = buildGenerationPrompt('en', LINK);
+    expect(en).toContain(LINK);
+    expect(en).toMatch(/verbatim/);
+    expect(en).toMatch(/NEVER/);
+  });
+
+  it('⭐ 少样本示例会进 prompt(学习期修改的回流路径)', () => {
+    const withEx = buildGenerationPrompt('zh', LINK, [{ tweet: '求推荐', reply: '试试这个' }]);
+    expect(withEx).toContain('求推荐');
+    expect(withEx).toContain('试试这个');
   });
 });
 
@@ -226,8 +288,10 @@ describe('前置过滤不问模型', () => {
 
   it('⭐ 前置过滤必须在调用模型之前(省算力,更要省误回)', () => {
     const filterAt = PLANNER.indexOf("push('duplicate_text'");
-    const modelAt = PLANNER.indexOf('await callOllama');
+    // 判断调用在 planReplies 内(生成调用在 generateReplies 里,更靠前定义)
+    const modelAt = PLANNER.indexOf('const response = await callOllama');
     expect(filterAt, '找不到刷屏过滤').toBeGreaterThan(-1);
+    expect(modelAt, '找不到判断调用').toBeGreaterThan(-1);
     expect(
       filterAt < modelAt,
       '过滤跑在模型之后 —— 刷屏推文会先被模型判成「该回」',

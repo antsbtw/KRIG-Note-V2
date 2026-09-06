@@ -214,13 +214,24 @@ export type ReplySkipReason =
   | 'already_replied'    // 这条推已经回过
   | 'blocked_author';    // 屏蔽名单
 
+/**
+ * 正文从哪来。
+ * `generated` = Gemma 针对这条推现写的(常态,引入模型的理由);
+ * `template`  = 回落 —— 模型挂了/解析失败/校验没过。回落必带 fallbackReason。
+ */
+export type ReplySource = 'generated' | 'template';
+
 export interface ReplyDraft {
   tweetId: string;
   tweetUrl: string;
   authorHandle: string;
-  /** 待发正文(来自模板库,逐字原文) */
+  /** 待发正文 */
   text: string;
-  templateId: ReplyTemplateId;
+  source: ReplySource;
+  /** 仅回落模板时有值 */
+  templateId?: ReplyTemplateId;
+  /** 仅回落时有值 —— 说明为什么没用生成的(便于发现「校验一直在拦」) */
+  fallbackReason?: string;
   /** 本条用的语言(由推文 lang 决定,一批里可中英混杂) */
   lang: ReplyLang;
   /** true = 该文案无语料依据(新写的),UI 必须提示用户审核 */

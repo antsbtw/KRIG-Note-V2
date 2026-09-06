@@ -85,6 +85,10 @@ interface RawVerdictItem {
 function extractItems(parsed: unknown): unknown[] {
   if (Array.isArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') {
+    // 批里只剩 1 条时模型会返回**裸对象** {"tweetId":...,"worth":...} 而非数组。
+    // 2026-09-05 在生成侧实测到,此处同源:不认它 → 那条被判「模型没返回」
+    // → 回退 pending → 下轮又只有它一条 → **永远判不完**(且不报错)。
+    if ('tweetId' in (parsed as object)) return [parsed];
     const values = Object.values(parsed as Record<string, unknown>);
     // 优先取「元素像判断结果」的数组,避免误取到无关数组(如 tags)
     const looksLikeVerdicts = values.find(
