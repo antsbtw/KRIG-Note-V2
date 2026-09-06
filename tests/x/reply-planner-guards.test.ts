@@ -188,6 +188,59 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
   });
 });
 
+describe('账号画像:去挖事实,不靠猜', () => {
+  const PROFILE = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-author-profile.ts'), 'utf-8');
+  const FACTS = readFileSync(
+    resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+
+  it('⭐ 必须真的采账号载荷,不能只读库', () => {
+    // 用户 2026-09-06:「你的逻辑限制在现有数据,而不是去挖掘事实」
+    // 能力勘查 §2.4 早已实测 UserByScreenName 带全部画像字段
+    expect(PROFILE).toMatch(/UserByScreenName/);
+    expect(PROFILE).toMatch(/saveAuthorCounts/);
+  });
+
+  it('⭐ 解析不得写死响应路径(改版会静默取不到)', () => {
+    expect(PROFILE).toMatch(/findUserResult/);
+    // 只看代码:注释里正解释着「不要写死 data.user.result」,别自己撞上
+    expect(
+      /data\.user\.result/.test(stripComments(PROFILE)),
+      '写死路径了 —— X 改版后会静默返回 undefined',
+    ).toBe(false);
+  });
+
+  it('⭐ 采不到必须报错,不能返回空画像', () => {
+    // 空画像会被下游当成「这人没粉丝、刚注册」,比没有更糟
+    expect(PROFILE).toMatch(/未截获/);
+    const fn = PROFILE.slice(PROFILE.indexOf('export async function harvestAuthorProfile'));
+    expect(fn).toMatch(/if \(!profile\)[\s\S]{0,120}error/);
+  });
+
+  it('⭐ 只 detach 自己 attach 的(否则会掐掉别人的监听)', () => {
+    // harvester / notification-watch 也在用同一个 debugger
+    expect(PROFILE).toMatch(/if \(attached\)/);
+  });
+
+  it('⭐ 有资料就用资料判断,没资料才退回看正文', () => {
+    expect(FACTS).toMatch(/posterBlock/);
+    expect(FACTS).toMatch(/已查证|verified, you may rely/);
+    expect(FACTS).toMatch(/未采集到|not collected/);
+  });
+
+  it('⭐ 画像采集失败不能拦住回复', () => {
+    // 拿不到资料就不给回复,是因小失大;没资料时模型会倾向 unclear,那是诚实降级
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PLAN_ONE_REPLY'), h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/不拦回复|不拦住回复/);
+  });
+
+  it('画像有新鲜度概念(粉丝数会变)', () => {
+    expect(PROFILE).toMatch(/PROFILE_STALE_HOURS/);
+  });
+});
+
 describe('推断链留档(回归分析的依据)', () => {
   it('⭐ 三步都要输出:作者判断 / 因由 / 正文', () => {
     // 用户 2026-09-06:只记正文的话,回错了无法定位是哪一步坏的
@@ -205,7 +258,7 @@ describe('推断链留档(回归分析的依据)', () => {
       resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
     const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
     expect(fn).toMatch(/unclear/);
-    expect(fn).toMatch(/不要猜|do NOT guess/);
+    expect(fn).toMatch(/不要猜|rather than guessing/);
   });
 
   it('⭐ posterKind 越界值必须归 unclear,不能勉强塞进某一类', () => {

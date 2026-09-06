@@ -192,12 +192,66 @@ export function verifyGeneratedReply(text: string, link: string): ReplyRejectRea
  * (曾试过 num_predict 限长提速,**是陷阱**:200/300/400 三档模型
  *  把预算烧光返回空串,512 时灵时不灵 —— 把「慢」换成了「静默截断」,已否决。)
  */
+/**
+ * 账号事实 —— 采自 `UserByScreenName` 载荷(能力勘查 §2.4)。
+ * 有它时 posterKind 就不是猜的了。
+ */
+export interface PosterFacts {
+  handle: string;
+  followersCount?: number;
+  followingCount?: number;
+  tweetCount?: number;
+  accountCreatedAt?: string;
+  bio?: string;
+  isBlueVerified?: boolean;
+  /** 这人在库里被我们采到过几条推 —— 高频出现是推广者的强信号 */
+  seenTweets?: number;
+}
+
+/** 账号事实渲染成 prompt 片段。没有资料就明说没有,让模型填 unclear。 */
+function posterBlock(lang: ReplyLang, facts?: PosterFacts): string {
+  if (!facts) {
+    return lang === 'zh'
+      ? '\n【账号资料】未采集到 —— 你只能凭正文判断，判不出就填 unclear。'
+      : '\nACCOUNT DATA: not collected — judge from the text alone, and say unclear if you cannot tell.';
+  }
+  const age = facts.accountCreatedAt
+    ? `${Math.floor((Date.now() - new Date(facts.accountCreatedAt).getTime()) / 86_400_000)} 天`
+    : '未知';
+  const ratio = facts.followersCount != null && facts.followingCount
+    ? (facts.followersCount / Math.max(1, facts.followingCount)).toFixed(2)
+    : '未知';
+  if (lang === 'zh') {
+    return `\n【账号资料 —— 已查证，可以据此判断】
+- @${facts.handle}
+- 粉丝 ${facts.followersCount ?? '未知'} / 关注 ${facts.followingCount ?? '未知'}（粉丝关注比 ${ratio}）
+- 账号年龄 ${age}，累计发推 ${facts.tweetCount ?? '未知'}
+- 我们库里采到过他 ${facts.seenTweets ?? 0} 条推
+- 认证：${facts.isBlueVerified ? '蓝V' : '无'}
+- 简介：${facts.bio ? facts.bio.slice(0, 120) : '(空)'}
+参考判据：粉丝极少+关注极多+账号很新 → 多半是营销号；
+简介里带机场/节点/推广链接、库里出现次数很高 → promoter；
+正常粉丝关注比 + 有年头 + 简介与翻墙无关 → 更像真实用户。`;
+  }
+  return `\nACCOUNT DATA — verified, you may rely on this:
+- @${facts.handle}
+- ${facts.followersCount ?? '?'} followers / ${facts.followingCount ?? '?'} following (ratio ${ratio})
+- account age ${age}, ${facts.tweetCount ?? '?'} tweets total
+- we have collected ${facts.seenTweets ?? 0} of their tweets
+- verified: ${facts.isBlueVerified ? 'blue check' : 'no'}
+- bio: ${facts.bio ? facts.bio.slice(0, 120) : '(empty)'}
+Heuristics: very few followers + following many + very new account → likely a marketing account;
+bio pushing VPN/proxy services or links, or a high count in our DB → promoter;
+normal ratio + established account + unrelated bio → more likely a real user.`;
+}
+
 export function buildSingleReplyPrompt(
   lang: ReplyLang,
   link: string,
   examples: Array<{ tweet: string; reply: string }> = [],
+  posterFacts?: PosterFacts,
 ): string {
-  const facts = factsBlock(lang, link);
+  const facts = factsBlock(lang, link) + posterBlock(lang, posterFacts);
   const shots = examples.length > 0
     ? (lang === 'zh'
         ? `\n\n【你以往认可的回复风格 —— 照这个口气写】\n${
@@ -213,11 +267,12 @@ ${facts}
 
 回复前先做三步分析，每步都要输出（这是为了事后能回归检查，别省）：
 
-① posterKind —— 发推的是什么人，**只凭这条推文的正文判断**：
+① posterKind —— 发推的是什么人：
    genuine=像真实用户在求助 / promoter=同行推广或卖节点（带群号、报价、自荐机场）
-   / bot=机器人或水军刷屏 / unclear=正文看不出来
-   ⚠️ 看不出来就填 unclear，**不要猜**。你没有这个账号的粉丝数、注册时间等资料。
-   posterRead：一句话说明你凭什么这么判（引用正文里的依据）。
+   / bot=机器人或水军刷屏 / unclear=判不出来
+   依据 = 上面的【账号资料】+ 这条推文正文。⚠️ 资料显示「未采集到」时只能看正文，
+   那种情况下拿不准就填 unclear，**不要猜**。
+   posterRead：一句话说明你凭什么这么判（引用具体数字或正文里的依据）。
 
 ② trigger —— 因由：对方为什么发这条推，他遇到的具体问题或需求是什么。
    用他自己话里的信息，别脑补。
@@ -244,13 +299,13 @@ ${facts}
 Do three steps of analysis before replying, and output each one
 (this exists so the decision can be reviewed later — do not skip it):
 
-1. posterKind — what kind of account this is, judging **only from the tweet text**:
+1. posterKind — what kind of account this is:
    genuine = a real user asking for help / promoter = a competitor or reseller
    (group IDs, price lists, pushing their own service) / bot = spam or astroturf
-   / unclear = the text doesn't tell you.
-   ⚠️ If you cannot tell, say unclear — do NOT guess. You do not have this
-   account's follower count, join date, or any other profile data.
-   posterRead: one line on what in the text made you decide that.
+   / unclear = you cannot tell.
+   Base it on the ACCOUNT DATA above plus the tweet text. ⚠️ If the account data says
+   "not collected", you only have the text — say unclear rather than guessing.
+   posterRead: one line citing the specific numbers or wording you relied on.
 
 2. trigger — why they posted: the concrete problem or need they describe.
    Use what is actually in their words; do not invent context.

@@ -20,6 +20,7 @@ import { getBlockedHandleSet } from '../db/x-author-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-types';
 import { buildGenerationPrompt, buildSingleReplyPrompt, verifyGeneratedReply } from '@shared/types/x-reply-facts';
+import type { PosterFacts } from '@shared/types/x-reply-facts';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
   buildRef, renderTemplate, langOf, templatesFor, isInThread, LANDING_BASE, LINK_PARAMS,
@@ -159,6 +160,11 @@ export interface PlanContext {
   selfHandle?: string;
   /** 生成 ref 用:来源配方,便于回答「哪个配方带来的注册」 */
   recipeId?: string;
+  /**
+   * 发推者的**已查证**账号资料(采自 UserByScreenName)。
+   * 传了 posterKind 就有事实依据;不传则模型只能看正文并倾向 unclear。
+   */
+  posterFacts?: PosterFacts;
   /**
    * 用户此前认可/修改过的例子 —— 放进生成 prompt 当少样本。
    * ⚠️ 这不是训练模型,是 in-context learning:立刻见效、随时可撤。
@@ -486,7 +492,7 @@ export async function planOneReply(
     const res = await callOllama({
       model: config.model,
       messages: [
-        { role: 'system', content: buildSingleReplyPrompt(lang, link, ctx.approvedExamples ?? []) },
+        { role: 'system', content: buildSingleReplyPrompt(lang, link, ctx.approvedExamples ?? [], ctx.posterFacts) },
         { role: 'user', content: tweet.text },
       ],
       endpoint: config.ollamaEndpoint,

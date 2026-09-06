@@ -20,6 +20,7 @@ import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
+import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle } from '../db/x-author-repo';
@@ -833,8 +834,41 @@ export function registerXTimelineHandlers(): void {
 
       // ⚠️ 单条也要走完整前置过滤 —— 用户点开某条不代表这条就该回,
       //    守卫不能因为「是手点的」就放行。planOneReply 内部先跑规则再问模型。
+      // ① 的事实来源:先看库里有没有新鲜画像,没有就现去主页采一次。
+      // ⚠️ 采集失败**不拦住回复** —— 没资料时模型会倾向 unclear,
+      //    那是诚实的降级;但拿不到资料就不给回复,才是因小失大。
+      const posterHandle = normalizeHandle(found.author_handle ?? '');
+      let posterFacts;
+      if (posterHandle) {
+        const cached = await getAuthorCounts(posterHandle).catch(() => null);
+        const fresh = cached?.countsAt
+          && (Date.now() - new Date(cached.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
+        let prof = fresh ? cached : null;
+        if (!prof) {
+          const got = await harvestAuthorProfile(posterHandle, undefined, 12_000)
+            .catch((e) => ({ error: String(e) }));
+          if (!('error' in got)) prof = got;
+          else console.warn(`[x-timeline-handlers] 画像采集失败(不拦回复):${got.error}`);
+        }
+        if (prof) {
+          const seen = corpus.filter(
+            (t) => normalizeHandle(t.author_handle ?? '') === posterHandle).length;
+          posterFacts = {
+            handle: posterHandle,
+            followersCount: prof.followersCount,
+            followingCount: prof.followingCount,
+            tweetCount: prof.tweetCount,
+            accountCreatedAt: prof.accountCreatedAt,
+            bio: (prof as { bio?: string }).bio,
+            isBlueVerified: (prof as { isBlueVerified?: boolean }).isBlueVerified,
+            seenTweets: seen,
+          };
+        }
+      }
+
       const r = await planOneReply(found, getJudgeConfig(), {
         selfHandle: acct?.handle,
+        posterFacts,
         approvedExamples: examples,
         fingerprintCounts,
         recentlyRepliedAuthors,
