@@ -283,6 +283,18 @@ describe('追踪名单 UI 与搜索语法 spike', () => {
     expect(seg.slice(0, 1600)).toMatch(/in_reply_to_user \|\|/);
   });
 
+  it('⭐ 上文必须写 x_tweet,不能写 tweet_inbox(那是死表)', () => {
+    // 2026-09-06 踩过:写进 tweet_inbox **不报错也永远读不到**,
+    // 现象是「预抓点了没反应」,查了半天才发现写错表。
+    // 全仓读写都走 x_tweet(upsertTweet/queryInbox 皆是)。
+    const tr = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/tweet-inbox-repo.ts'), 'utf-8');
+    const fn = tr.slice(tr.indexOf('export async function setParentContext'));
+    const code = stripComments(fn);
+    expect(code).toMatch(/UPDATE x_tweet SET parent_text/);
+    expect(/UPDATE tweet_inbox/.test(code), '又写进 tweet_inbox 死表了').toBe(false);
+  });
+
   it('⭐ 预抓过的上文要被复用,不能每次重抓', () => {
     const h = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');

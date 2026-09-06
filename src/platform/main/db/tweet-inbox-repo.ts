@@ -493,11 +493,14 @@ export async function setParentContext(
   tweetId: string, parentText: string, parentHandle?: string,
 ): Promise<void> {
   if (!tweetId || !parentText?.trim()) return;   // 空上文没有存的价值
+  // ⚠️ 只写 x_tweet。`tweet_inbox` 是**遗留表**:全仓所有读写(upsertTweet /
+  //    queryInbox / countPending …)走的都是 x_tweet,那张表早已没人维护
+  //    (2026-09-06 实测:x_tweet 有 ws-1 今天采的 112 条,tweet_inbox 里 0 条、
+  //     最新数据停在 5 天前)。我第一版写了 tweet_inbox,等于写进一张死表 ——
+  //    不报错、也永远读不到,正是最难查的那种。
   await getXDB().query(
-    `UPDATE tweet_inbox SET parent_text = $t, parent_handle = $h,
-       parent_fetched_at = time::now() WHERE tweet_id = $id;
-     UPDATE x_tweet SET parent_text = $t, parent_handle = $h,
-       parent_fetched_at = time::now() WHERE tweet_id = $id;`,
+    `UPDATE x_tweet SET parent_text = $t, parent_handle = $h,
+       parent_fetched_at = time::now() WHERE tweet_id = $id`,
     { id: tweetId, t: parentText.trim().slice(0, 1000), h: parentHandle ?? undefined },
   );
 }

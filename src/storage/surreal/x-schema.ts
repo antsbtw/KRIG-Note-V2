@@ -775,8 +775,10 @@ export async function x_migration_1_1_4(db: Surreal): Promise<void> {
  * 父推 id 走载荷层(harvester 已有 in_reply_to_status_id_str)。
  */
 const X_SCHEMA_1_1_5 = `
-DEFINE FIELD IF NOT EXISTS in_reply_to_user ON tweet_inbox TYPE option<string>;
-DEFINE INDEX IF NOT EXISTS idx_inbox_reply_user ON tweet_inbox FIELDS in_reply_to_user;
+-- ⚠️ 写 x_tweet 不是 tweet_inbox:后者是遗留表,全仓读写都走 x_tweet
+--    (2026-09-06 实测:x_tweet 有当天采的 112 条,tweet_inbox 停在 5 天前)
+DEFINE FIELD IF NOT EXISTS in_reply_to_user ON x_tweet TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_tweet_reply_user ON x_tweet FIELDS in_reply_to_user;
 `;
 
 export async function x_migration_1_1_5(db: Surreal): Promise<void> {
@@ -834,9 +836,7 @@ export async function x_migration_1_1_6(db: Surreal): Promise<void> {
  *    快照保留我们当时判断的依据(与 author_name_at_post 同思路)。
  */
 const X_SCHEMA_1_1_7 = `
-DEFINE FIELD IF NOT EXISTS parent_text       ON tweet_inbox TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS parent_handle     ON tweet_inbox TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS parent_fetched_at ON tweet_inbox TYPE option<datetime>;
+-- ⚠️ 同上:只定义在 x_tweet,别往遗留表上加字段
 DEFINE FIELD IF NOT EXISTS parent_text       ON x_tweet TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS parent_handle     ON x_tweet TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS parent_fetched_at ON x_tweet TYPE option<datetime>;
