@@ -296,40 +296,33 @@ export async function fetchArticleReplies(
             var want = ${JSON.stringify(label)};
             function norm(s) { return (s || '').replace(/\\s+/g, ' ').trim(); }
             // ① 先滚到底,逼虚拟列表把尾部渲染出来
-            for (var n = 0; n < 6; n++) {
+            for (var n = 0; n < 8; n++) {
               window.scrollTo(0, document.body.scrollHeight);
-              await new Promise(function (r) { setTimeout(r, 400); });
+              await new Promise(function (r) { setTimeout(r, 450); });
             }
-            // ② 找文案节点(不限定标签,X 会改)
-            var all = document.querySelectorAll('span, div, button, a');
+            // ② 直接找 **button / role=button**,不要先匹配任意节点再往上爬。
+            //    2026-09-06 DevTools 探针实测:同一句文案会命中 7 个节点,
+            //    最外层是 DIV[data-testid="cellInnerDiv"](整行容器),
+            //    真正可点的是其中的 <button role="button">。
+            //    先匹配任意节点再向上找祖先 → 命中容器 → 越爬越远 → 点了没反应。
+            var btns = document.querySelectorAll('button, [role="button"]');
             var hit = null;
-            for (var k = 0; k < all.length; k++) {
-              var t = norm(all[k].textContent);
-              if (t === want) { hit = all[k]; break; }
+            for (var k = 0; k < btns.length; k++) {
+              var t = norm(btns[k].textContent);
+              if (t === want) { hit = btns[k]; break; }
             }
             if (!hit) {
-              // 报回页面上到底有哪些像按钮的文案,便于对照 X 是不是改了措辞
               var cands = [];
-              var btns = document.querySelectorAll('[role="button"], button');
               for (var j = 0; j < btns.length && cands.length < 25; j++) {
                 var bt = norm(btns[j].textContent);
                 if (bt && bt.length < 60) cands.push(bt);
               }
               return { ok: false, candidates: cands };
             }
-            // ③ 向上找真正可点的祖先(span 上的 click 未必生效)
-            var el = hit;
-            for (var d = 0; d < 6 && el; d++) {
-              if (el.getAttribute && (el.getAttribute('role') === 'button'
-                  || el.tagName === 'BUTTON' || el.tagName === 'A')) break;
-              el = el.parentElement;
-            }
-            var target = el || hit;
-            target.scrollIntoView({ block: 'center' });
-            await new Promise(function (r) { setTimeout(r, 200); });
-            target.click();
-            return { ok: true, tag: target.tagName, role: target.getAttribute
-              ? target.getAttribute('role') : null };
+            hit.scrollIntoView({ block: 'center' });
+            await new Promise(function (r) { setTimeout(r, 250); });
+            hit.click();
+            return { ok: true, tag: hit.tagName };
           })()`).catch((err) => ({ ok: false, error: String(err) }));
           const clicked = !!(res && res.ok);
           if (!clicked && res && Array.isArray(res.candidates)) {

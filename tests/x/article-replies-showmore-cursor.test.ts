@@ -125,3 +125,49 @@ describe('误标删除的闸门', () => {
     expect(mayMarkDeleted(accident)).not.toBe(broken(accident));
   });
 });
+
+/**
+ * 折叠区按钮的**定位方式**。
+ *
+ * ⚠️ 2026-09-06 DevTools 探针实测(用户建议的排查法,一次就定位了):
+ *   同一句「Show probable spam」在 DOM 里命中 **7 个**节点 ——
+ *     DIV[data-testid="cellInnerDiv"]  ← 整行容器(最先被 querySelectorAll 命中)
+ *     DIV ×4
+ *     BUTTON[role="button"]            ← **只有这个是真正可点的**
+ *     SPAN
+ *   第一版「先匹配任意节点、再向上找可点祖先」正好踩反:
+ *   最先命中的是最外层容器,向上爬只会越走越远,点了没反应
+ *   —— 现象就是「载荷里有游标,但页面上没找到该按钮」。
+ *
+ *   正解:**直接在 button / [role=button] 里按文案找**,不要向上爬。
+ */
+describe('折叠区按钮定位', () => {
+  /** 复刻页面结构:一句文案,7 个节点,只有 BUTTON 可点 */
+  const nodes = [
+    { tag: 'DIV', role: null, testid: 'cellInnerDiv', text: 'Show probable spam' },
+    { tag: 'DIV', role: null, testid: null, text: 'Show probable spam' },
+    { tag: 'BUTTON', role: 'button', testid: null, text: 'Show probable spam' },
+    { tag: 'SPAN', role: null, testid: null, text: 'Show probable spam' },
+  ];
+
+  /** 生产代码的选择逻辑:只在 button/[role=button] 里找 */
+  const pick = (want: string) => nodes.find(
+    (n) => (n.tag === 'BUTTON' || n.role === 'button') && n.text === want);
+
+  it('⭐ 必须选中 BUTTON,不能选中 cellInnerDiv 容器', () => {
+    const el = pick('Show probable spam');
+    expect(el?.tag, '选中容器就点不动,现象是「找不到按钮」').toBe('BUTTON');
+    expect(el?.testid).not.toBe('cellInnerDiv');
+  });
+
+  it('文案对不上时选不中(X 改措辞要能报出来,而不是乱点)', () => {
+    expect(pick('Show more replies')).toBeUndefined();
+  });
+
+  /** 反向注入:退回「取第一个匹配节点」时,会选中容器 */
+  it('反向注入:不限定 button 时会选中 cellInnerDiv 容器', () => {
+    const broken = (want: string) => nodes.find((n) => n.text === want);
+    expect(broken('Show probable spam')?.testid).toBe('cellInnerDiv');   // 旧逻辑=点不动
+    expect(pick('Show probable spam')?.tag).not.toBe(broken('Show probable spam')?.tag);
+  });
+});
