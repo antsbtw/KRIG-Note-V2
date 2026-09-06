@@ -269,19 +269,57 @@ export async function fetchArticleReplies(
         //   query id / features 参数(会随版本变),点按钮让 X 自己去取更稳。
         if (showMore && expanded < 3) {
           const label = showMore.actionText ?? 'Show more';
-          const clicked = await wc.executeJavaScript(`(function () {
+          // ⚠️ 2026-09-06 实测:第一版只按文案精确匹配、且匹配到才 scrollIntoView ——
+          //   而这个按钮在**回复区最底部**,虚拟列表里可能还没渲染进 DOM,
+          //   于是 textContent 永远匹配不上,报「页面上没找到该按钮」。
+          //   正解:先滚到底把它渲染出来,再按 X 的实际 DOM 找。
+          //   X 的按钮结构是 <button role="button"><span>Show probable spam</span></button>,
+          //   点 span 未必冒泡到处理器,要**向上找可点祖先**再点。
+          const res = await wc.executeJavaScript(`(async function () {
             var want = ${JSON.stringify(label)};
-            var els = document.querySelectorAll('[role="button"], button, a, span');
-            for (var k = 0; k < els.length; k++) {
-              var t = (els[k].textContent || '').trim();
-              if (t === want || t.indexOf(want) === 0) {
-                els[k].scrollIntoView({ block: 'center' });
-                els[k].click();
-                return true;
-              }
+            function norm(s) { return (s || '').replace(/\\s+/g, ' ').trim(); }
+            // ① 先滚到底,逼虚拟列表把尾部渲染出来
+            for (var n = 0; n < 6; n++) {
+              window.scrollTo(0, document.body.scrollHeight);
+              await new Promise(function (r) { setTimeout(r, 400); });
             }
-            return false;
-          })()`).catch(() => false);
+            // ② 找文案节点(不限定标签,X 会改)
+            var all = document.querySelectorAll('span, div, button, a');
+            var hit = null;
+            for (var k = 0; k < all.length; k++) {
+              var t = norm(all[k].textContent);
+              if (t === want) { hit = all[k]; break; }
+            }
+            if (!hit) {
+              // 报回页面上到底有哪些像按钮的文案,便于对照 X 是不是改了措辞
+              var cands = [];
+              var btns = document.querySelectorAll('[role="button"], button');
+              for (var j = 0; j < btns.length && cands.length < 25; j++) {
+                var bt = norm(btns[j].textContent);
+                if (bt && bt.length < 60) cands.push(bt);
+              }
+              return { ok: false, candidates: cands };
+            }
+            // ③ 向上找真正可点的祖先(span 上的 click 未必生效)
+            var el = hit;
+            for (var d = 0; d < 6 && el; d++) {
+              if (el.getAttribute && (el.getAttribute('role') === 'button'
+                  || el.tagName === 'BUTTON' || el.tagName === 'A')) break;
+              el = el.parentElement;
+            }
+            var target = el || hit;
+            target.scrollIntoView({ block: 'center' });
+            await new Promise(function (r) { setTimeout(r, 200); });
+            target.click();
+            return { ok: true, tag: target.tagName, role: target.getAttribute
+              ? target.getAttribute('role') : null };
+          })()`).catch((err) => ({ ok: false, error: String(err) }));
+          const clicked = !!(res && res.ok);
+          if (!clicked && res && Array.isArray(res.candidates)) {
+            // 把页面实际文案报出来 —— 「找不到」必须能查,不能只说找不到
+            problems.push(`页面上没有「${label}」按钮;当前可点文案:`
+              + `[${res.candidates.slice(0, 12).join(' | ')}]`);
+          }
           expanded++;
           if (clicked) {
             console.log(`[x-article-replies] 展开折叠区「${label}」(第 ${expanded} 次)`);
@@ -290,8 +328,10 @@ export async function fetchArticleReplies(
             await new Promise((r) => setTimeout(r, 2200));
             continue;
           }
-          problems.push(`载荷里有「${label}」折叠区游标,但页面上没找到该按钮 —— `
-            + `可能 X 改了文案/结构,折叠的回复没抓到`);
+          // 同一条不重复堆(实测一轮里报了 3 遍,看着像 3 个不同问题)
+          const msg = `载荷里有「${label}」折叠区游标,但页面上没找到该按钮 —— `
+            + `可能 X 改了文案/结构,折叠的回复没抓到`;
+          if (!problems.includes(msg)) problems.push(msg);
         }
         if (noGrowth >= 4) {
           // ⚠️ 「连续 N 轮无新增」**不等于**「翻完了」——
