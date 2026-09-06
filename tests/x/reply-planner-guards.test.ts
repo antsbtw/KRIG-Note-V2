@@ -283,6 +283,27 @@ describe('追踪名单 UI 与搜索语法 spike', () => {
     expect(seg.slice(0, 1600)).toMatch(/in_reply_to_user \|\|/);
   });
 
+  it('⭐ 预抓不许按 humanReviewed 过滤(已确认的更需要上文)', () => {
+    // 2026-09-06 实测:18 条 worth 全是 human:accept,
+    // 原本 humanReviewed:false → 匹配 0 条 → 静默什么都不做。
+    // 方向本就反了:用户已确认要回的那些更需要上文。
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_SEARCH_SYNTAX_SPIKE'));
+    expect(
+      /humanReviewed/.test(stripComments(seg)),
+      '预抓又加了 humanReviewed 过滤 —— 已确认的会被漏掉',
+    ).toBe(false);
+  });
+
+  it('⭐ 扫到 0 条要明说,不能像正常跑完一样', () => {
+    // 过滤条件写错时界面必须看得出来,否则"成功但没效果"最难查
+    const v = readFileSync(
+      resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+    expect(v).toMatch(/没有可预抓的推文/);
+    expect(v).toMatch(/都是独立求助推/);
+  });
+
   it('⭐ 上文必须写 x_tweet,不能写 tweet_inbox(那是死表)', () => {
     // 2026-09-06 踩过:写进 tweet_inbox **不报错也永远读不到**,
     // 现象是「预抓点了没反应」,查了半天才发现写错表。

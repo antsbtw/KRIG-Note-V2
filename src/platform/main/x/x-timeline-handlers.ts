@@ -1018,8 +1018,12 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'wsId required' };
     }
     try {
+      // ⚠️ **不加 humanReviewed 过滤**:2026-09-06 实测,ws-1 的 18 条 worth
+      //    全都 reason='human:accept'(用户已表态),原本写 humanReviewed:false
+      //    → 匹配 0 条 → 预抓静默什么都不做。
+      //    而且方向本就反了:用户已确认要回的那些**更需要**上文,不是更不需要。
       const pool = await queryInbox({
-        status: 'worth', wsId: p.wsId, humanReviewed: false,
+        status: 'worth', wsId: p.wsId,
         limit: typeof p.limit === 'number' ? p.limit : 20,
       });
       const targets = pool.filter(

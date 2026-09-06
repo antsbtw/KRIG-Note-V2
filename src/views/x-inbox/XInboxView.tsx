@@ -501,8 +501,14 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
       const r = await api()?.prefetchContext(workspaceId, wcId, 20);
       if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
+      // ⚠️ 扫到 0 条要明说「没有目标」,别让人以为抓完了 ——
+      //    实测踩过:过滤条件写错导致匹配 0 条,界面却像正常跑完一样
       setScanStatus(
-        `建议 ${r.scanned} 条，其中回复 ${r.isReply} 条 → 抓到上文 ${r.fetched}，没抓到 ${r.missed}`,
+        r.scanned === 0
+          ? '没有可预抓的推文（本 ws 没有 Gemma 判为值得回复的）'
+          : r.isReply === 0
+            ? `建议 ${r.scanned} 条，但都是独立求助推（没有上文可抓）`
+            : `建议 ${r.scanned} 条，其中回复 ${r.isReply} 条 → 抓到上文 ${r.fetched}，没抓到 ${r.missed}`,
       );
     } catch (err) {
       setScanStatus(`预抓失败：${String(err)}`);
