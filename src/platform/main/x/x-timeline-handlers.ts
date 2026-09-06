@@ -1025,7 +1025,8 @@ export function registerXTimelineHandlers(): void {
   // ⚠️ 只抓**真是回复**的:独立求助推没有上文,白跑导航纯浪费。
   // ⚠️ 抓不到不算失败 —— 记下来让调用方知道哪些没拿到,不静默。
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_CONTEXT, async (_e, payload: unknown) => {
-    const p = payload as { wsId?: unknown; wcId?: unknown; limit?: unknown } | null;
+    const p = payload as
+      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };
     }
@@ -1034,12 +1035,16 @@ export function registerXTimelineHandlers(): void {
       //    全都 reason='human:accept'(用户已表态),原本写 humanReviewed:false
       //    → 匹配 0 条 → 预抓静默什么都不做。
       //    而且方向本就反了:用户已确认要回的那些**更需要**上文,不是更不需要。
-      // 同画像:不按页取。上文是按**推**存的,存过的跳过 → 断点续抓。
-      const pool = await queryInbox({ status: 'worth', wsId: p.wsId, limit: 5000 });
+      // 同画像:**按当前页取**(操作纪律:处理一页时先把这页的资料备齐)。
+      // 已抓过的跳过,不重抓。
+      const pool = await queryInbox({
+        status: 'worth', wsId: p.wsId,
+        limit: typeof p.limit === 'number' ? p.limit : 20,
+        offset: typeof p.offset === 'number' ? p.offset : 0,
+      });
       const targets = pool
         .filter((t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''))
-        .filter((t) => !t.parent_text)   // 已抓过的不重抓
-        .slice(0, typeof p.limit === 'number' ? p.limit : 25);
+        .filter((t) => !t.parent_text);
       const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
 
       let ok = 0;
@@ -1061,11 +1066,11 @@ export function registerXTimelineHandlers(): void {
         success: true,
         scanned: pool.length,
         isReply: allReplies.length,
-        // 本次真正处理的(已抓过的不算)
         attempted: targets.length,
         fetched: ok,
         missed: missed.length,
-        remaining: allReplies.filter((t) => !t.parent_text).length - targets.length,
+        // 本页还差多少 —— 「这页备齐了没有」的判据
+        remaining: missed.length,
       };
     } catch (err) {
       console.error('[x-timeline-handlers] X_PREFETCH_CONTEXT failed:', (err as Error).message);
@@ -1083,23 +1088,31 @@ export function registerXTimelineHandlers(): void {
   //    但**连着一串都采不到**多半是采集机制坏了(如 X 改版让载荷截不到)。
   //    那时继续默默出草稿,用户会在毫不知情下连发一堆「只读正文」的判断。
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_PROFILES, async (_e, payload: unknown) => {
-    const p = payload as { wsId?: unknown; wcId?: unknown; limit?: unknown } | null;
+    const p = payload as
+      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };
     }
     const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
     try {
-      // ⚠️ **不按页取**:用户问「是不是每一页都要点一次」——不该是。
-      //    画像是按**人**采的,与你翻到第几页无关;而且限 20 条会让人
-      //    不知道哪些采过、哪些没采(实测 565 个作者,要点 28 次还数不清)。
-      //    故一次扫全部 worth,已有新鲜画像的跳过,只采缺的。
-      const pool = await queryInbox({ status: 'worth', wsId: p.wsId, limit: 5000 });
+      // ⭐ **按当前页取**(用户 2026-09-06 定的操作纪律):
+      //   「在处理一页时先采集,完毕再回复,这样可靠性更高。」
+      //   —— 这不是"少点几次"的问题,是**批次完整性**:
+      //   你正在看的这一页,资料要么齐、要么明确知道缺哪几个,
+      //   而不是边回边采、每条碰运气。将来交给 AI 自动跑也该守这个纪律。
+      //
+      //   我曾改成「一次扫全部、不按页」——那是把用户的问题理解成
+      //   "怎么少点几次"了,方向反了。
+      const offset = typeof p.offset === 'number' ? p.offset : 0;
+      const pageSize = typeof p.limit === 'number' ? p.limit : 20;
+      const pool = await queryInbox({
+        status: 'worth', wsId: p.wsId, limit: pageSize, offset,
+      });
       const handles = [...new Set(pool
         .map((t) => normalizeHandle(t.author_handle ?? ''))
         .filter(Boolean))];
-      // 单次最多采多少个 —— 每个要 12s,不能让用户干等太久。
-      // 剩下的下次再点(已采的会跳过,所以是**断点续采**,不会重复劳动)。
-      const budget = typeof p.limit === 'number' ? p.limit : 25;
+      // 本页的人全部采完 —— 不设预算上限,否则「先采完再回复」就不成立
+      const budget = handles.length;
 
       let fetched = 0; let cached = 0; let failed = 0;
       let consecutiveFail = 0; let maxConsecutive = 0;

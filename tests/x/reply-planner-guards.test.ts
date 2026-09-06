@@ -615,25 +615,37 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
     expect(V2).toMatch(/画像采集可能已失效/);
   });
 
-  it('⭐ 预取不按页取 —— 画像是按人采的,与翻到第几页无关', () => {
-    // 用户 2026-09-06 问「是不是每一页都点一次」——不该是。
-    // 原本 limit:20 且无 offset,翻页再点会重做第一页;
-    // 实测 565 个作者要点 28 次还数不清哪些采过。
-    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE'));
-    expect(seg).toMatch(/limit: 5000/);
-    // 断点续采:已采的跳过,本次只采缺的
-    expect(seg).toMatch(/if \(fetched \+ failed >= budget\) break/);
+  it('⭐ 预取必须按当前页取(操作纪律:先把这页备齐再回复)', () => {
+    // 用户 2026-09-06:「在处理一页时先采集,完毕再回复,这样可靠性更高」
+    // 我曾改成「一次扫全部不按页」——把他的问题误解成"怎么少点几次",方向反了
+    // ⚠️ 只看代码:注释里正解释着 offset,别自己撞上(踩过一次:
+    //    注入「不按页」后守卫居然全绿,就是因为匹配到了注释)
+    const seg = stripComments(
+      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE')));
+    expect(seg, '画像预取没按页取').toMatch(/limit: pageSize, offset/);
+    expect(
+      /limit: 5000/.test(seg),
+      '又改成一次扫全部了 —— 那样「先把这页备齐」就不成立',
+    ).toBe(false);
+    expect(V2).toMatch(/page \* PAGE_SIZE/);
   });
 
-  it('⭐ 上文预抓同样断点续抓,不重抓已有的', () => {
+  it('⭐ 本页的人要全部采完,不能设预算上限', () => {
+    // 设了上限「先采完再回复」就不成立了
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE'));
+    expect(seg).toMatch(/const budget = handles\.length/);
+  });
+
+  it('⭐ 上文预抓同样按页,且不重抓已有的', () => {
     const seg = H2.slice(H2.indexOf('X_PREFETCH_CONTEXT'), H2.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/offset:/);
     expect(seg).toMatch(/!t\.parent_text/);
   });
 
-  it('⭐ 必须报「还剩多少」,否则用户不知道要不要再点', () => {
-    expect(H2).toMatch(/remaining/);
-    expect(V2).toMatch(/还剩/);
-    expect(V2).toMatch(/已采全|已抓全/);
+  it('⭐ 完成后要明确报「本页备齐了没有」', () => {
+    // 缺口必须在动手**之前**暴露,而不是回到一半才发现
+    expect(V2).toMatch(/本页资料已备齐/);
+    expect(V2).toMatch(/有缺口/);
   });
 
   it('⭐ 已有新鲜画像的不重复采(别白跑导航)', () => {

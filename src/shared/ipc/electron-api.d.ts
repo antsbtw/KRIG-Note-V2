@@ -874,13 +874,13 @@ declare global {
           error?: string;
         }>;
         /** 给建议名单批量预抓上文 */
-        prefetchContext(wsId: string, wcId?: number, limit?: number): Promise<{
+        prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number): Promise<{
           success: boolean;
           scanned?: number; isReply?: number; attempted?: number; fetched?: number; missed?: number; remaining?: number;
           error?: string;
         }>;
         /** 给建议名单批量预采画像 */
-        prefetchProfiles(wsId: string, wcId?: number, limit?: number): Promise<{
+        prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number): Promise<{
           success: boolean;
           authors?: number; fetched?: number; cached?: number; failed?: number; remaining?: number;
           mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];

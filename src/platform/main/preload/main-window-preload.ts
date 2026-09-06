@@ -1111,12 +1111,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST, { op, handle, note });
     },
     /** 给「Gemma 建议采纳」的推批量预抓上文(①闸门的输入) */
-    prefetchContext(wsId: string, wcId?: number, limit?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT, { wsId, wcId, limit });
+    prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT, { wsId, wcId, limit, offset });
     },
     /** 给建议名单批量预采账号画像(②活跃度的事实来源) */
-    prefetchProfiles(wsId: string, wcId?: number, limit?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES, { wsId, wcId, limit });
+    prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES, { wsId, wcId, limit, offset });
     },
     /** 实测哪种搜索写法能带回复(设计要求先 spike) */
     searchSyntaxSpike(handle: string, wcId?: number) {

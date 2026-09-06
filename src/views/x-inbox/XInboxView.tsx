@@ -501,7 +501,10 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
       // ② 的事实来源:画像。先采画像再抓上文 —— 画像影响「该不该回」,
       //    上文只影响「这楼相关吗」,前者更基础。
-      const pr = await api()?.prefetchProfiles(workspaceId, wcId, 20);
+      // ⭐ 按**当前页**取(用户 2026-09-06 的操作纪律:
+      //   「在处理一页时先采集,完毕再回复,这样可靠性更高」)
+      const pageOffset = page * PAGE_SIZE;
+      const pr = await api()?.prefetchProfiles(workspaceId, wcId, PAGE_SIZE, pageOffset);
       if (pr?.success && pr.mechanismSuspect) {
         // ⚠️ 连着一串采不到 = 机制可能坏了,不是个别账号的问题。
         //    这时继续默默出草稿,用户会毫不知情地连发一堆「只读正文」的判断。
@@ -511,22 +514,24 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         );
         return;
       }
-      const r = await api()?.prefetchContext(workspaceId, wcId, 20);
+      const r = await api()?.prefetchContext(workspaceId, wcId, PAGE_SIZE, pageOffset);
       if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
-      // 明说还剩多少 —— 用户问「是不是每页都要点一次」正是因为看不出进度
+      // 判据是「**本页**备齐了没有」——这正是「先采完再回复」要的保证
+      const ready = (pr?.cached ?? 0) + (pr?.fetched ?? 0);
       const profPart = pr?.success
-        ? `画像 ${(pr.cached ?? 0) + (pr.fetched ?? 0)}/${pr.authors ?? 0}`
-          + `${pr.failed ? `(${pr.failed} 失败)` : ''}`
-          + `${pr.remaining ? `，还剩 ${pr.remaining} 个未采` : '，已采全'}　`
+        ? `画像 ${ready}/${pr.authors ?? 0}${pr.failed ? `（${pr.failed} 个采不到）` : ''}　`
         : '';
       // ⚠️ 扫到 0 条要明说「没有目标」,别让人以为抓完了 ——
       //    实测踩过:过滤条件写错导致匹配 0 条,界面却像正常跑完一样
       setScanStatus(
         r.scanned === 0
           ? '没有可预抓的推文（本 ws 没有 Gemma 判为值得回复的）'
-          : profPart + (r.isReply === 0
-            ? `${r.scanned} 条都是独立求助推（无上文可抓）`
-            : `上文 +${r.fetched}${r.remaining ? `，还剩 ${r.remaining} 条` : '，已抓全'}`),
+          : `第 ${page + 1} 页 ` + profPart + (r.isReply === 0
+            ? '无回复串（都是独立求助推）'
+            : `上文 ${r.fetched}/${r.isReply}`)
+            + ((pr?.failed || r.missed)
+              ? ' ⚠️ 有缺口，这几条的判断会弱一些'
+              : ' ✓ 本页资料已备齐'),
       );
     } catch (err) {
       setScanStatus(`预抓失败：${String(err)}`);
