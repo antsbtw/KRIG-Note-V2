@@ -188,43 +188,14 @@ describe('卡片弹窗:确认后才填,填入不等于发布', () => {
   });
 });
 
-describe('追踪名单 UI 与搜索语法 spike', () => {
+describe('追踪名单 UI', () => {
   const WL_RAW = readFileSync(
     resolve(__dirname, '../../src/views/x-inbox/WatchlistView.tsx'), 'utf-8');
   const WL = stripComments(WL_RAW);
-  const SPIKE = readFileSync(
-    resolve(__dirname, '../../src/platform/main/x/x-search-syntax-spike.ts'), 'utf-8');
 
   it('⭐ UI 必须说清「这不是 X 的关注」', () => {
     // 设计 §0:混用措辞会让人以为在这里操作会改动 X 上的关注关系
     expect(WL_RAW).toMatch(/和你在 X 上「关注」谁.{0,10}没有任何关系|不会去关注对方/);
-  });
-
-  it('⭐ spike 判据是「有没有真的回复」,不是「有没有报错」', () => {
-    // 错的写法不会报错,只会静默地只返回原创推 —— 这是最容易误判成「能用」的形态
-    expect(SPIKE).toMatch(/replies/);
-    expect(SPIKE).toMatch(/Replying to/);
-    // verdict 必须看 replies 而不是只看 total
-    const v = SPIKE.slice(SPIKE.indexOf('const winners'));
-    expect(v.slice(0, 200)).toMatch(/p\.replies > 0/);
-  });
-
-  it('⭐ 三种候选写法都要测,不能预设哪个对', () => {
-    for (const k of ['include:replies', 'filter:replies']) {
-      expect(SPIKE, `候选写法少了 ${k}`).toContain(k);
-    }
-    // 还要有个不加任何修饰的对照组,否则不知道基线是多少
-    expect(SPIKE).toMatch(/from:\$\{h\}`/);
-  });
-
-  it('⭐ spike 只读:不许点任何按钮', () => {
-    expect(/\.click\(\)/.test(stripComments(SPIKE)), 'spike 里出现了点击').toBe(false);
-  });
-
-  it('⭐ spike 必须传 wcId(否则找不到本 ws 的 X 页面)', () => {
-    // 实测踩过:不传 → main 侧回退全局 active → 报「未登记 wc id」
-    expect(WL).toMatch(/getXHostWcId\(workspaceId\)/);
-    expect(WL).toMatch(/searchSyntaxSpike\(h, wcId\)/);
   });
 
   it('⭐ 不该逼用户手打 handle —— 要能从已有数据挑', () => {
@@ -249,10 +220,6 @@ describe('追踪名单 UI 与搜索语法 spike', () => {
       resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
     const fn = ar.slice(ar.indexOf('export async function listWatchCandidates'));
     expect(fn).toMatch(/watched = true OR blocked = true OR is_self = true/);
-  });
-
-  it('spike 输入框空着时自动挑一个,不报错让人手打', () => {
-    expect(WL).toMatch(/const auto = \[\.\.\.rows\]/);
   });
 
   it('⭐ 已确认推文的作者要能一次性全部建立追踪', () => {

@@ -886,15 +886,6 @@ declare global {
           mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
           error?: string;
         }>;
-        /** 实测哪种搜索写法能带回复 */
-        searchSyntaxSpike(handle: string, wcId?: number): Promise<{
-          success: boolean;
-          handle?: string;
-          probes?: Array<{ key: string; query: string; total: number; replies: number;
-                           noResults: boolean; sample: string[] }>;
-          verdict?: string;
-          error?: string;
-        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;

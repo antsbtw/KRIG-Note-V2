@@ -175,7 +175,16 @@ async function waitForTweetElements(wc: Electron.WebContents, timeoutMs = 10_000
   const script = `document.querySelectorAll('article[data-testid="tweet"]').length`;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const count = await wc.executeJavaScript(script);
+    // ⚠️ 这里的 catch **不是**兜底掩盖错误(feedback-fail-loud-no-fallback),
+    //   而是这个轮询本来就可能落在**导航途中**:即使上面 await 了 loadURL,
+    //   X 是 SPA,进站后还会自己再跳一次/换路由 —— 旧文档正在拆、新文档还没
+    //   commit,这个窗口里注入必被 Electron 拒:
+    //   「Script failed to execute, this normally means an error was thrown」。
+    //   实测形态:X 停在上一个详情页转圈时点扫描 → 第一次注入就撞上 → 整轮采集
+    //   报这句话失败(而它其实只是「页面还没好」)。
+    //   真正的失败判据是**超时**,由下面的 throw 负责 —— 那条路仍然 fail loud。
+    //   同一形态在 x-parent-tweet.ts:61 就是这么处理的,此处对齐。
+    const count = await wc.executeJavaScript(script).catch(() => null);
     if (typeof count === 'number' && count > 0) return;
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -199,7 +208,13 @@ async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetDat
       }
     })()
   `;
-  const raw = await wc.executeJavaScript(script);
+  // 同上:滚动过程中 X 会自己跳转/重载(登录态刷新、路由切换),
+  // 注入撞上导航窗口就被拒。**单轮**抽取失败不该让整轮采集崩掉 ——
+  // 返回空数组让外层继续滚,真的一直抽不到,靠「滚不动 3 轮」正常收尾。
+  const raw = await wc.executeJavaScript(script).catch((err: unknown) => {
+    console.warn('[x-timeline-scan] extractVisibleTweets 注入失败(多半撞上导航),本轮跳过:', err);
+    return [];
+  });
   if (!Array.isArray(raw)) {
     throw new Error('[x-timeline-scan] extractVisibleTweets returned non-array');
   }
@@ -241,8 +256,16 @@ export async function scanRecipe(
   const searchUrl = buildSearchUrl(recipe);
   console.log(`[x-timeline-scan] navigating to: ${searchUrl}`);
 
-  // 导航到搜索页
-  wc.loadURL(searchUrl);
+  // 导航到搜索页。
+  // ⚠️ loadURL 要 await:不等它,下面的轮询会在**旧文档正在拆卸**时就注入,
+  //   撞进导航窗口被 Electron 拒(「Script failed to execute」)。
+  //   实测触发条件 = X 停在上一个详情页(还在转圈)时点「开始扫描」。
+  //   ⚠️ 但 await 本身也可能 reject —— X 常见 ERR_ABORTED(它自己的路由/重定向
+  //   把这次导航接管了),那不是失败:页面照样会到位,交给下面的轮询判定。
+  //   真失败由 waitForTweetElements 超时 throw,fail loud 这条路没变。
+  await wc.loadURL(searchUrl).catch((err: unknown) => {
+    console.warn('[x-timeline-scan] loadURL 未正常 resolve(X 常自行接管导航),继续等元素:', err);
+  });
   await waitForTweetElements(wc);
 
   // 预加载去重窗口内已有的 tweet_id

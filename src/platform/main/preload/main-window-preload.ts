@@ -1118,10 +1118,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES, { wsId, wcId, limit, offset });
     },
-    /** 实测哪种搜索写法能带回复(设计要求先 spike) */
-    searchSyntaxSpike(handle: string, wcId?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_SEARCH_SYNTAX_SPIKE, { handle, wcId });
-    },
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
     queryFeedback: (payload: unknown) =>

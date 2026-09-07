@@ -10,8 +10,6 @@
  * 设计 §4.1(4):计数是可重算的第三层属性,存进「人」表会有不同步问题。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type { XExtractionApi } from '@capabilities/x-extraction';
 
 const api = () => window.electronAPI?.xTimeline;
 
@@ -25,20 +23,12 @@ interface Props {
 }
 
 export function WatchlistView({ workspaceId, onBack }: Props) {
-  // ⚠️ spike 要驱动本 ws 的 X webview,必须显式传 wcId ——
-  //    不传的话 main 侧只能回退全局 active,多 ws 下会找错窗口甚至找不到。
-  const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
   const [rows, setRows] = useState<Row[]>([]);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
-  // 搜索语法 spike:设计要求实施前必须实机验证,这里给个按钮
   const [cands, setCands] = useState<Array<{ handle: string; repliedCount: number; seenTweets: number }>>([]);
   const [showCands, setShowCands] = useState(false);
-  const [spike, setSpike] = useState<{
-    verdict?: string;
-    probes?: Array<{ key: string; query: string; total: number; replies: number; noResults: boolean; sample: string[] }>;
-  } | null>(null);
 
   const load = useCallback(async () => {
     const r = await api()?.watchlist('list');
@@ -101,29 +91,6 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
     if (!r?.success) { setStatus(`移出失败:${r?.error}`); return; }
     setStatus(`已把 @${handle} 移出名单(历史数据保留)`);
     setRows(r.watched ?? []);
-  };
-
-  const runSpike = async () => {
-    // ⚠️ 别逼用户手打:输入框空着就自动挑名单里**见过条数最多**的那个 ——
-    //    采到越多越可能回复过别人,正是 spike 需要的样本。
-    //    (用户 2026-09-06:「如果每一个都需要手工输入,不是很麻烦?」)
-    const auto = [...rows].sort(
-      (a, b) => (b.stats?.seenTweets ?? 0) - (a.stats?.seenTweets ?? 0))[0];
-    const h = (input.trim() || auto?.handle || '').replace(/^@/, '');
-    if (!h) { setStatus('名单是空的 —— 先加一个人,或在输入框填个 handle'); return; }
-    setBusy(true);
-    setStatus(`正在用 @${h} 实测三种搜索写法(会占用 X 页面导航三次)…`);
-    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-    if (wcId === undefined) {
-      setBusy(false);
-      setStatus('本 workspace 还没打开过 X 页面 —— 先切到 X 服务加载一次 x.com 再来跑');
-      return;
-    }
-    const r = await api()?.searchSyntaxSpike(h, wcId);
-    setBusy(false);
-    if (!r?.success) { setStatus(`实测失败:${r?.error}`); return; }
-    setSpike({ verdict: r.verdict, probes: r.probes });
-    setStatus('');
   };
 
   return (
@@ -212,43 +179,6 @@ export function WatchlistView({ workspaceId, onBack }: Props) {
         </div>
       ))}
 
-      {/* ── 搜索语法实测 ──────────────────────────────── */}
-      <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-          <b style={{ fontSize: 12 }}>搜索语法实测</b>
-          <Btn sm onClick={runSpike} disabled={busy}>▶ 跑一次</Btn>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
-          追踪名单要连<b>回复</b>一起采，但 X 对 <code>include:replies</code> 的支持时有变化。
-          设计文档要求<b>实施前必须实机确认</b>哪种写法真的有效。
-          默认拿名单里<b>见过条数最多</b>的那个人跑（最可能回复过别人）；也可在上面输入框指定。
-          <br />⚠️ 判据不是「有没有报错」，而是<b>结果里有没有真的回复</b> ——
-          错的写法不会报错，只会静默地只给你原创推。
-        </div>
-        {spike?.verdict && (
-          <div style={{
-            fontSize: 11, padding: '6px 9px', borderRadius: 5, marginBottom: 6,
-            background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)',
-          }}>{spike.verdict}</div>
-        )}
-        {spike?.probes?.map((p) => (
-          <div key={p.key} style={{
-            fontSize: 11, padding: '5px 8px', marginBottom: 4, borderRadius: 5,
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-          }}>
-            <div>
-              <code style={{ color: 'var(--text)' }}>{p.query}</code>
-              {'　'}共 {p.total} 条，其中回复 <b style={{
-                color: p.replies > 0 ? '#22c55e' : 'var(--text-faint)',
-              }}>{p.replies}</b>
-              {p.noResults && <span style={{ color: '#fca5a5' }}>　(页面显示无结果)</span>}
-            </div>
-            {p.sample.map((s, i) => (
-              <div key={i} style={{ color: 'var(--text-faint)', marginTop: 2 }}>{s}</div>
-            ))}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

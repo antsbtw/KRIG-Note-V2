@@ -782,7 +782,10 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     });
   };
 
-  // ── 采集验证视图 ──────────────────────────────────────────────────
+  // ── 采集验证视图(排查工具,顶栏入口已撤)────────────────────────
+  // ⚠️ 组件与 IPC 都保留:它是「采到的 vs 屏幕上滚过的」对账工具,
+  //    真出「怎么少了一半」这类问题时还要靠它。只是日常不占顶栏位置,
+  //    需要时把 setView('capture') 接回来即可。
   if (view === 'capture') {
     return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
   }
@@ -847,7 +850,6 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           <Btn onClick={() => setView('watchlist')}>👁 追踪名单</Btn>
           <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
           <Btn onClick={() => setView('campaign')}>⚙ 活动配置</Btn>
-          <Btn onClick={() => setView('capture')}>🔬 采集验证</Btn>
           {isInRightSlot && (
             <button onClick={handleClose} style={closeBtn}>✕</button>
           )}
