@@ -591,6 +591,19 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
     expect(V2).toMatch(/画像采集可能已失效/);
   });
 
+  it('⭐ 预取口径必须与列表一致 —— 不按 wsId 过滤', () => {
+    // 用户 2026-09-07 撞上:屏幕上「Gemma建议 67」,点预取却说「没有可预抓的推文」。
+    // 真因:收件箱列表**不按 ws 过滤**(loadPage 与侧栏计数都没传 wsId),
+    // 而预取按 ws 过滤 —— ws-1 的 worth 是 0,ws-2 才有 69。
+    // 口径必须与用户看到的一致:他在这一页看到谁,就给谁备料。
+    const seg = stripComments(
+      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE')));
+    expect(
+      /wsId: p\.wsId/.test(seg),
+      '预取又按 wsId 过滤了 —— 会出现「屏幕上有、预取说没有」',
+    ).toBe(false);
+  });
+
   it('⭐ 预取必须跟随当前视图,不能写死 status=worth', () => {
     // 用户 2026-09-06 发现的矛盾:侧栏说「本页资料已备齐」(那是 Gemma建议 页),
     // 而他在「漏判抽查」(status='skip')里打开一条,弹窗说「还没采过画像」。

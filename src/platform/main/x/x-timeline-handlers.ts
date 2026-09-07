@@ -1040,7 +1040,7 @@ export function registerXTimelineHandlers(): void {
           ? { statuses: p.statuses as TweetInboxStatus[] }
           : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
         humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
-        wsId: p.wsId,
+        // 同上:与列表口径一致,不按 wsId 过滤
         limit: typeof p.limit === 'number' ? p.limit : 20,
         offset: typeof p.offset === 'number' ? p.offset : 0,
       });
@@ -1119,7 +1119,12 @@ export function registerXTimelineHandlers(): void {
           ? { statuses: p.statuses as TweetInboxStatus[] }
           : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
         humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
-        wsId: p.wsId, limit: pageSize, offset,
+        // ⚠️ **不按 wsId 过滤** —— 收件箱列表本身就不按 ws 过滤
+        //    (loadPage 的 queryInbox 没传 wsId,侧栏计数也没传)。
+        //    预取若按 ws 过滤,就会「屏幕上明明有 67 条,预取却说没有可预抓的」
+        //    —— 用户 2026-09-07 就是这么撞上的。
+        //    口径必须与用户看到的一致:他在这一页看到谁,就给谁备料。
+        limit: pageSize, offset,
       });
       const handles = [...new Set(pool
         .map((t) => normalizeHandle(t.author_handle ?? ''))
