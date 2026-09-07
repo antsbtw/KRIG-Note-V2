@@ -938,9 +938,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             </label>
           </div>
 
-          {/* 配方切片 */}
+          {/* 配方切片 —— ⚠️ 与下面「触发采集」是两回事,标题必须写清楚:
+              用户 2026-09-07 把这个当成了采集用的下拉,调了它却发现
+              「搜索栏没变化」,而且各视图全变 0(因为新配方还没采过数据)。 */}
           <div>
-            <div style={sectionTitle}>配方</div>
+            <div style={sectionTitle}>只看某配方的结果</div>
             <select
               value={filterRecipeId}
               onChange={(e) => setFilterRecipeId(e.target.value)}
@@ -966,7 +968,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
           {/* 触发采集 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={sectionTitle}>触发采集</div>
+            <div style={sectionTitle}>去 X 抓新数据(选配方后点扫描)</div>
             <select
               value={selectedRecipeId}
               onChange={(e) => setSelectedRecipeId(e.target.value)}
@@ -1015,7 +1017,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg)' }}>
             {tweets.length === 0 && (
-              <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>暂无推文</div>
+              filterRecipeId ? (
+                // ⚠️ 空结果要说清是**筛选**导致的,别只显示「暂无推文」——
+                //    用户 2026-09-07 选了新配方筛选,各视图全变 0,以为数据没了
+                <div style={{ color: '#fbbf24', textAlign: 'center', marginTop: 40, fontSize: 12, lineHeight: 1.8 }}>
+                  当前按「{recipes.find((r) => String(r.id) === filterRecipeId)?.name}」筛选，
+                  该配方还没采到过数据
+                  <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>
+                    想看全部 → 左侧「只看某配方的结果」选「🌐 全部」<br />
+                    想让它采数据 → 左侧「去 X 抓新数据」选中它，再点「开始扫描」
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>暂无推文</div>
+              )
             )}
             {tweets.map((t) => {
               const expanded = expandedIds.has(t.tweet_id);
