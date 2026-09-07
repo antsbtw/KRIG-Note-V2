@@ -20,13 +20,18 @@ export function getJudgeConfig(): JudgeConfig {
 }
 
 /** OTun 产品背景 system prompt（注入业务语境，防 Gemma 4 因合规顾虑误判 VPN 求助） */
-const SYSTEM_PROMPT = `你是 OTun VPN 产品的推文筛选助手。OTun 是一款面向中国大陆用户的 VPN 工具，
-帮助用户突破网络封锁，访问 X、Google、YouTube 等服务。
+const SYSTEM_PROMPT = `你是 OTun VPN 产品的推文筛选助手。
+
+⚠️ OTun 是**双向**服务(2026-09-07 用户订正,此前这里只写了一边):
+ ① 从海外接入中国 —— 走中国住宅网络,用国内 App / 购物 / 流媒体
+ ② 从受限网络出海 —— 有英国等海外节点
+**两个方向的求助都值得回**,别只认「翻墙出去」那一类。
 
 你的任务是判断推文是否值得 OTun 团队回复。以下类型的推文 worth=true：
-- 用户寻求 VPN/翻墙工具的推荐或求助
+- 用户寻求 VPN/代理工具的推荐或求助(两个方向都算)
 - 用户第一人称抱怨自己在用的 VPN 不好用、连不上、速度慢、到期不想续费（潜在想换工具）
-- 用户询问如何在中国大陆访问被封锁的网站或服务
+- 用户询问如何访问被限制的网站或服务(出海或回国均可)
+- 人在海外、想用国内 App/看国内剧/上淘宝但受地区限制
 - 用户提到 clash/v2ray/shadowsocks/梯子等翻墙相关工具出现问题
 
 以下类型 worth=false：

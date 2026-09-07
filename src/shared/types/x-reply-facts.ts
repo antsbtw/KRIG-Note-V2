@@ -37,6 +37,14 @@ import type { ReplyLang } from './x-reply-types';
  */
 export interface ProductFacts {
   productName: string;
+  /**
+   * 服务方向 —— ⚠️ **双向**,别只写一边(2026-09-07 用户订正)。
+   * 我此前只按「翻墙出去」写,而落地页展示的是「Access China from anywhere」
+   * (回国线路),两边都不完整:实际两个方向都有。
+   * 写错的后果是实的:希腊看英超那条,AI 因为不知道有英国节点,
+   * 只能泛泛推销,答不到点上。
+   */
+  direction: string;
   trial: string;
   platforms: string;
   accountSharing: string;
@@ -47,6 +55,8 @@ export interface ProductFacts {
 
 export const PRODUCT_FACTS: ProductFacts = {
   productName: 'OTun-M',
+  direction: '双向:既能从海外接入中国（用国内 App/购物/流媒体，走中国住宅网络），'
+    + '也能从受限网络出海（有英国等海外节点）',
   trial: '注册即得 7 天 10GB 测试流量',
   platforms: 'iOS / Android / macOS / Windows / Google TV',
   accountSharing: '一个账号可多客户端共享',
@@ -60,6 +70,7 @@ function factsBlock(lang: ReplyLang, link: string): string {
   if (lang === 'zh') {
     return `【可用事实 —— 只能用这里的内容，不得添加任何其他承诺】
 - 产品名：${f.productName}
+- 服务方向：${f.direction}
 - 试用：${f.trial}
 - 平台：${f.platforms}
 - ${f.accountSharing}
@@ -70,6 +81,8 @@ function factsBlock(lang: ReplyLang, link: string): string {
   }
   return `FACTS — use ONLY what is listed here, never add any other promise:
 - Product: ${f.productName}
+- Works BOTH ways: into China (use Chinese apps/shopping/streaming via a China residential
+  network) and out of restricted networks (UK and other overseas nodes available)
 - Trial: free 7-day 10GB trial on signup
 - Platforms: ${f.platforms}
 - One account works across multiple devices
@@ -115,7 +128,9 @@ ${facts}
 - 必须包含注册链接，**原样照抄，一个字符都不能改**
 - 不要加 @提及（X 会自动带）
 - 不要用营销腔（"立即""超值""强烈推荐"），不要堆 emoji
-- 对方问了清单里没有的（价格、速度、节点数），就如实说去官网/App 看，别编${shots}
+- 对方问了清单里没有的（价格、速度、节点数），就如实说去官网/App 看，别编
+- ⚠️ **先分清他要哪个方向**：想看国内的（爱奇艺/腾讯/B站/淘宝/微信）→ 说"接入中国"那边；
+  想看海外的（YouTube/Netflix/英超直播/美区商店）→ 说"出海节点"那边。**别把方向说反**${shots}
 
 输出 JSON 数组，每条：{"tweetId":"...","reply":"回复正文"}
 不要输出 JSON 之外的任何文字。`;
@@ -135,6 +150,12 @@ How to write the reply:
 - No marketing voice ("act now", "amazing deal"), no emoji pile-up.
 - If they ask something not in the facts (price, speed, server count), say to check
   the site/app — do not make it up.
+- ⚠️ **Match the direction to what they actually need**:
+  wants Chinese content (iQIYI/Tencent/Bilibili/Taobao/WeChat) → speak to the
+  "into China" side; wants overseas content (YouTube/Netflix/Premier League
+  streams/US app store) → speak to the overseas-nodes side.
+  **Do not get the direction backwards** — telling someone in Greece trying to watch
+  the Premier League about "a China residential network" misses the point entirely.
 - Write in English.${shots}
 
 Output a JSON array, each item: {"tweetId":"...","reply":"the reply text"}

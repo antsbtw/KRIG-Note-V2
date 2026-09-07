@@ -995,6 +995,30 @@ describe('事实清单与生成校验', () => {
     expect(verifyGeneratedReply('啊'.repeat(300) + LINK, LINK)).toBe('too_long');
   });
 
+  it('⭐ 事实清单必须写明服务是**双向**的', () => {
+    // 2026-09-07 用户订正:「你定位错误了,我是双向的,有英国节点」。
+    // 我此前只按「翻墙出去」写 prompt,而落地页展示的是「Access China from anywhere」
+    // —— 两边都不完整。后果是实的:希腊看英超那条,AI 不知道有英国节点,
+    // 只能泛泛推销,答不到点上。
+    expect(PRODUCT_FACTS.direction).toMatch(/双向/);
+    expect(PRODUCT_FACTS.direction).toMatch(/英国|海外节点/);
+    expect(PRODUCT_FACTS.direction).toMatch(/接入中国|国内/);
+  });
+
+  it('⭐ prompt 要求按对方需求选方向,别说反', () => {
+    const zh = buildGenerationPrompt('zh', 'https://x/y');
+    expect(zh).toMatch(/先分清他要哪个方向|别把方向说反/);
+    const en = buildGenerationPrompt('en', 'https://x/y');
+    expect(en).toMatch(/Match the direction|direction backwards/);
+  });
+
+  it('⭐ 判断层也要认「回国」那一类,不能只认翻墙出去', () => {
+    const judge = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-ai-judge.ts'), 'utf-8');
+    expect(judge).toMatch(/双向/);
+    expect(judge).toMatch(/想用国内 App|回国/);
+  });
+
   it('⭐ 事实清单里禁止项必须显式列出(比"别瞎说"有效)', () => {
     for (const k of ['价格', '速度数字', '节点数量', '优惠活动', '退款政策']) {
       expect(PRODUCT_FACTS.forbidden, `禁止项少了 ${k}`).toContain(k);
