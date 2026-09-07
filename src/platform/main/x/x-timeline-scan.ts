@@ -222,9 +222,23 @@ async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetDat
 }
 
 export interface ScanResult {
+  /** 屏幕上滚过、被提取到的推文总数 */
   fetched: number;
+  /** 真正新入库的 */
   saved: number;
+  /** 被规则过滤掉的(关键词黑名单/语言/点赞数不够等) */
   filteredOut: number;
+  /**
+   * 早就采过、这次跳过的。
+   * ⭐ 必须与 saved 分开报(用户 2026-09-07):只说「采集 0 条」会让人
+   * 以为不工作,而实际常常是**扫到的都是旧的** —— 那是正常且预期的。
+   */
+  duplicates: number;
+  /** 反向对账补标「已回复」的条数 */
+  reconciled: number;
+  elapsedMs: number;
+  /** 搜索窗口起点(since:YYYY-MM-DD) */
+  sinceDate: string;
 }
 
 /**
@@ -276,6 +290,11 @@ export async function scanRecipe(
   let fetched = 0;
   let saved = 0;
   let filteredOut = 0;
+  // ⭐ 单独数「早就采过的」——用户 2026-09-07 指出:只报 saved=0 会让人
+  //    以为「不工作」,而实际常常是**扫到的都是旧的**。两者必须分开报,
+  //    否则「正常但没新货」和「真的没扫到」长得一模一样。
+  let duplicates = 0;
+  const startedAt = Date.now();
   const nowIso = new Date().toISOString();
   // ⚠️ **不再设 TTL**(用户 2026-09-02 拍板:「永久保存吧,等容量到了一定的程度,
   // 再考虑迁移新的架构」)。
@@ -314,6 +333,7 @@ export async function scanRecipe(
       const { pass, reason } = applyFilter(tweet, filterConfig, seenIds);
 
       if (!pass) {
+        if (reason === 'duplicate') duplicates += 1;
         // filtered_out 也写库（供 V4 统计分布），但 tweetId 缺失的静默跳过（无法去重）
         if (tweet.tweetId && reason !== 'duplicate') {
           await insertFilteredOut({
@@ -453,9 +473,14 @@ export async function scanRecipe(
     console.error('[x-timeline-scan] 反向对账失败(采集本身已完成):', err);
   }
 
+  const elapsedMs = Date.now() - startedAt;
   console.log(
     `[x-timeline-scan] recipe="${recipe.name}" fetched=${fetched} saved=${saved} `
-    + `filteredOut=${filteredOut} 补标已回复=${reconciled}`,
+    + `dup=${duplicates} filteredOut=${filteredOut} 补标已回复=${reconciled} ${(elapsedMs / 1000).toFixed(0)}s`,
   );
-  return { fetched, saved, filteredOut };
+  return {
+    fetched, saved, filteredOut, duplicates, reconciled, elapsedMs,
+    // 搜索窗口起点(since:YYYY-MM-DD)—— 让用户知道扫的是哪段时间
+    sinceDate: computeSinceDate(recipe).toISOString().split('T')[0],
+  };
 }

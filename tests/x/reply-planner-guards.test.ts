@@ -152,9 +152,26 @@ describe('配方选择:跑的是哪条要看得见', () => {
     expect(INBOX2).toMatch(/想看全部/);
   });
 
+  it('⭐ 扫描要报概况,不能只给一个数字', () => {
+    // 用户 2026-09-07:「都是旧的不用入库,又不现实,都以为是不工作哦」
+    // 「扫到的都是旧的」和「压根没扫到」长得一模一样,必须分开报
+    const scan = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
+    expect(scan).toMatch(/duplicates: number/);
+    expect(scan).toMatch(/sinceDate/);
+    expect(INBOX2).toMatch(/早采过/);
+    expect(INBOX2).toMatch(/窗口：/);
+  });
+
+  it('⭐ 要给人话结论,别让用户自己推断数字', () => {
+    // fetched=0 与 saved=0 含义完全不同,得说清楚
+    expect(INBOX2).toMatch(/一条都没扫到/);
+    expect(INBOX2).toMatch(/扫到的都已在库里/);
+  });
+
   it('⭐ 状态里要写明跑的是哪条配方', () => {
     // 否则「采集 0 条」看不出是配方选错了还是真没量
-    expect(INBOX2).toMatch(/「\$\{usedName\}」完成/);
+    expect(INBOX2).toMatch(/`「\$\{usedName\}」/);
   });
 });
 

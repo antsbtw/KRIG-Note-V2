@@ -669,10 +669,28 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     const usedName = (fresh ?? recipes).find(
       (x) => String(x.id) === selectedRecipeId)?.name ?? selectedRecipeId;
     const r = await tApi.runRecipe(selectedRecipeId, workspaceId, wcId);
-    // 明写跑的是哪条配方 —— 否则「采集 0 条」看不出是配方选错了还是真没量
-    setScanStatus(r?.success
-      ? `「${usedName}」完成：采集 ${r.saved ?? 0} 条`
-      : `「${usedName}」失败：${r?.error}`);
+    // ⭐ 汇报扫描概况而非只报一个数字(用户 2026-09-07):
+    //   「都是旧的所以没入库」和「压根没扫到」长得一模一样,
+    //   只说「采集 0 条」会让人以为不工作。必须把两者分开摆出来。
+    if (!r?.success) {
+      setScanStatus(`「${usedName}」失败：${r?.error}`);
+    } else {
+      const rr = r as { saved?: number; fetched?: number; duplicates?: number;
+        filteredOut?: number; reconciled?: number; elapsedMs?: number; sinceDate?: string };
+      const fetched = rr.fetched ?? 0;
+      const lines = [
+        `「${usedName}」${((rr.elapsedMs ?? 0) / 1000).toFixed(0)}s`,
+        `窗口：${rr.sinceDate ?? '?'} 至今`,
+        `扫到 ${fetched} 条 → 新入库 ${rr.saved ?? 0}`
+          + `，早采过 ${rr.duplicates ?? 0}`
+          + `，被过滤 ${rr.filteredOut ?? 0}`,
+      ];
+      if (rr.reconciled) lines.push(`补标已回复 ${rr.reconciled}`);
+      // 一句人话结论 —— 别让用户自己去推断这些数字意味着什么
+      if (fetched === 0) lines.push('⚠️ 一条都没扫到：这批关键词在该时间窗口内可能没有推文');
+      else if ((rr.saved ?? 0) === 0) lines.push('✓ 正常：扫到的都已在库里（不是没工作）');
+      setScanStatus(lines.join('\n'));
+    }
     setScanning(false);
     loadPage(0);
   };
@@ -990,7 +1008,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
               </Btn>
               <Btn onClick={stopScan}>停</Btn>
             </div>
-            {scanStatus && <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{scanStatus}</div>}
+            {/* pre-line:扫描概况是多行的(窗口/扫到多少/新入库多少/结论) */}
+            {scanStatus && <div style={{
+              fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7,
+              whiteSpace: 'pre-line',
+            }}>{scanStatus}</div>}
           </div>
 
           {/* Gemma 观察仪表(近7天,靠 ai_verdict 快照;1.8.7 之前的旧标注不计入) */}
