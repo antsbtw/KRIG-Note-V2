@@ -250,16 +250,17 @@ describe('追踪名单 UI', () => {
     expect(seg.slice(0, 1600)).toMatch(/in_reply_to_user \|\|/);
   });
 
-  it('⭐ 预抓不许按 humanReviewed 过滤(已确认的更需要上文)', () => {
-    // 2026-09-06 实测:18 条 worth 全是 human:accept,
-    // 原本 humanReviewed:false → 匹配 0 条 → 静默什么都不做。
-    // 方向本就反了:用户已确认要回的那些更需要上文。
+  it('⭐ humanReviewed 只能来自视图,不许写死', () => {
+    // 曾写死 humanReviewed:false → 18 条 worth 全是 human:accept → 匹配 0 条、静默空转。
+    // 现在跟随视图(「已确认」页本就该是 true),但**不许再出现写死的字面量**。
     const h = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
-    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_SEARCH_SYNTAX_SPIKE'));
+    const seg = stripComments(
+      h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_UPSERT_RECIPE')));
+    expect(seg).toMatch(/typeof p\.humanReviewed === 'boolean'/);
     expect(
-      /humanReviewed/.test(stripComments(seg)),
-      '预抓又加了 humanReviewed 过滤 —— 已确认的会被漏掉',
+      /humanReviewed:\s*(true|false)\b/.test(seg),
+      'humanReviewed 又被写死了 —— 会让某些视图整页备不上料',
     ).toBe(false);
   });
 
@@ -590,6 +591,22 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
     expect(V2).toMatch(/画像采集可能已失效/);
   });
 
+  it('⭐ 预取必须跟随当前视图,不能写死 status=worth', () => {
+    // 用户 2026-09-06 发现的矛盾:侧栏说「本页资料已备齐」(那是 Gemma建议 页),
+    // 而他在「漏判抽查」(status='skip')里打开一条,弹窗说「还没采过画像」。
+    // 两句都没说谎 —— 预取根本没覆盖他正在看的那一页。
+    const seg = stripComments(
+      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE')));
+    expect(seg, '预取没接受调用方的 status').toMatch(/typeof p\.status === 'string'/);
+    // 「全部」视图用 statuses(复数),只认 status 会静默退回 worth
+    expect(seg, '没处理 statuses 复数 —— 「全部」视图会备不上料').toMatch(/Array\.isArray\(p\.statuses\)/);
+    expect(V2, '前端没把当前视图的查询条件传下去').toMatch(/VIEW_QUERY\[currentView\]/);
+  });
+
+  it('⭐ 状态提示要说清是哪个视图,否则又会串台', () => {
+    expect(V2).toMatch(/VIEW_ITEMS\.find/);
+  });
+
   it('⭐ 预取必须按当前页取(操作纪律:先把这页备齐再回复)', () => {
     // 用户 2026-09-06:「在处理一页时先采集,完毕再回复,这样可靠性更高」
     // 我曾改成「一次扫全部不按页」——把他的问题误解成"怎么少点几次",方向反了
@@ -624,8 +641,8 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
   });
 
   it('⭐ 已有新鲜画像的不重复采(别白跑导航)', () => {
-    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'));
-    expect(seg.slice(0, 2000)).toMatch(/if \(fresh\) \{ cached \+= 1/);
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE'));
+    expect(seg).toMatch(/if \(fresh\) \{ cached \+= 1/);
   });
 });
 

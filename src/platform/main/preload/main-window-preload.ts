@@ -1111,12 +1111,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST, { op, handle, note });
     },
     /** 给「Gemma 建议采纳」的推批量预抓上文(①闸门的输入) */
-    prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT, { wsId, wcId, limit, offset });
+    prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number,
+                    status?: string, humanReviewed?: boolean, statuses?: string[]) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT,
+        { wsId, wcId, limit, offset, status, humanReviewed, statuses });
     },
     /** 给建议名单批量预采账号画像(②活跃度的事实来源) */
-    prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES, { wsId, wcId, limit, offset });
+    prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number,
+                     status?: string, humanReviewed?: boolean, statuses?: string[]) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES,
+        { wsId, wcId, limit, offset, status, humanReviewed, statuses });
     },
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),

@@ -1022,7 +1022,8 @@ export function registerXTimelineHandlers(): void {
   // ⚠️ 抓不到不算失败 —— 记下来让调用方知道哪些没拿到,不静默。
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_CONTEXT, async (_e, payload: unknown) => {
     const p = payload as
-      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown } | null;
+      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown;
+        status?: unknown; statuses?: unknown; humanReviewed?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };
     }
@@ -1033,8 +1034,13 @@ export function registerXTimelineHandlers(): void {
       //    而且方向本就反了:用户已确认要回的那些**更需要**上文,不是更不需要。
       // 同画像:**按当前页取**(操作纪律:处理一页时先把这页的资料备齐)。
       // 已抓过的跳过,不重抓。
+      // 同画像:跟随调用方的视图,不写死 'worth'
       const pool = await queryInbox({
-        status: 'worth', wsId: p.wsId,
+        ...(Array.isArray(p.statuses) && p.statuses.length
+          ? { statuses: p.statuses as TweetInboxStatus[] }
+          : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
+        humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
+        wsId: p.wsId,
         limit: typeof p.limit === 'number' ? p.limit : 20,
         offset: typeof p.offset === 'number' ? p.offset : 0,
       });
@@ -1085,7 +1091,8 @@ export function registerXTimelineHandlers(): void {
   //    那时继续默默出草稿,用户会在毫不知情下连发一堆「只读正文」的判断。
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_PROFILES, async (_e, payload: unknown) => {
     const p = payload as
-      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown } | null;
+      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown;
+        status?: unknown; statuses?: unknown; humanReviewed?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };
     }
@@ -1101,8 +1108,18 @@ export function registerXTimelineHandlers(): void {
       //   "怎么少点几次"了,方向反了。
       const offset = typeof p.offset === 'number' ? p.offset : 0;
       const pageSize = typeof p.limit === 'number' ? p.limit : 20;
+      // ⚠️ **跟随调用方的视图**,不写死 'worth':
+      //    用户 2026-09-06 发现矛盾 —— 侧栏说「本页资料已备齐」(那是 Gemma建议 页),
+      //    而他在「漏判抽查」(status='skip',3292 条)里打开一条,弹窗说「还没采过画像」。
+      //    两句都没说谎,但预取根本没覆盖他正在看的那一页。
       const pool = await queryInbox({
-        status: 'worth', wsId: p.wsId, limit: pageSize, offset,
+        // 「全部」视图用的是 statuses(复数);只认 status 会静默退回 'worth',
+        // 于是那个视图永远备不上料 —— 与写死 'worth' 同款的坑
+        ...(Array.isArray(p.statuses) && p.statuses.length
+          ? { statuses: p.statuses as TweetInboxStatus[] }
+          : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
+        humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
+        wsId: p.wsId, limit: pageSize, offset,
       });
       const handles = [...new Set(pool
         .map((t) => normalizeHandle(t.author_handle ?? ''))

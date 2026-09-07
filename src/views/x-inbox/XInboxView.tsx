@@ -504,7 +504,14 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       // ⭐ 按**当前页**取(用户 2026-09-06 的操作纪律:
       //   「在处理一页时先采集,完毕再回复,这样可靠性更高」)
       const pageOffset = page * PAGE_SIZE;
-      const pr = await api()?.prefetchProfiles(workspaceId, wcId, PAGE_SIZE, pageOffset);
+      // ⚠️ 跟随**当前视图**:写死 'worth' 会让「漏判抽查」等视图永远备不上料,
+      //    而侧栏还显示「本页资料已备齐」—— 用户 2026-09-06 就是这么发现矛盾的
+      const vq = VIEW_QUERY[currentView];
+      const prefStatus = vq.status;
+      const prefReviewed = vq.humanReviewed;
+      const prefStatuses = vq.statuses;   // 「全部」视图用复数
+      const pr = await api()?.prefetchProfiles(
+        workspaceId, wcId, PAGE_SIZE, pageOffset, prefStatus, prefReviewed, prefStatuses);
       if (pr?.success && pr.mechanismSuspect) {
         // ⚠️ 连着一串采不到 = 机制可能坏了,不是个别账号的问题。
         //    这时继续默默出草稿,用户会毫不知情地连发一堆「只读正文」的判断。
@@ -514,7 +521,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         );
         return;
       }
-      const r = await api()?.prefetchContext(workspaceId, wcId, PAGE_SIZE, pageOffset);
+      const r = await api()?.prefetchContext(
+        workspaceId, wcId, PAGE_SIZE, pageOffset, prefStatus, prefReviewed, prefStatuses);
       if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
       // 判据是「**本页**备齐了没有」——这正是「先采完再回复」要的保证
       const ready = (pr?.cached ?? 0) + (pr?.fetched ?? 0);
@@ -526,7 +534,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       setScanStatus(
         r.scanned === 0
           ? '没有可预抓的推文（本 ws 没有 Gemma 判为值得回复的）'
-          : `第 ${page + 1} 页 ` + profPart + (r.isReply === 0
+          : `${VIEW_ITEMS.find((v) => v.view === currentView)?.label ?? ''} 第 ${page + 1} 页 `
+            + profPart + (r.isReply === 0
             ? '无回复串（都是独立求助推）'
             : `上文 ${r.fetched}/${r.isReply}`)
             + ((pr?.failed || r.missed)
