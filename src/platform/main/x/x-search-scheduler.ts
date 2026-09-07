@@ -153,7 +153,9 @@ async function runEnabledRecipes(): Promise<void> {
           recipe,
           wsId,
           wcId,
-          filterConfig,
+          // ⚠️ 关键词兜底必须**按配方**给 —— filterConfig 是全局共用的,
+          //    把 requireKeywords 塞进去会让所有配方共用同一批词。
+          { ...filterConfig, requireKeywords: recipe.keywords ?? [] },
           (saved) => {
             // per-ws 累计：只判触发它的那个 ws，绝不跨 ws 混批
             const { fire } = accumulatePending(pendingAccumulated, wsId, saved, judgeConfig.batchSize);

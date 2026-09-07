@@ -164,6 +164,18 @@ export function applyFilter(
     return { pass: false, reason: 'duplicate' };
   }
 
+  // L5 关键词兜底 —— **不能全信 X 的搜索**(2026-09-07 用户发现)。
+  //    实测:最新 30 条里只有 3 条含关键词,其余既无关键词也无求助信号。
+  //    此前这里完全不校验正文,等于"X 给什么就存什么" ——
+  //    一旦落错页面(首页时间线)或 X 搜索放宽,整批噪音直接进库,
+  //    还要占用 Gemma 的判断额度。
+  //    ⚠️ 只在配方**声明了关键词**时才校验:没声明说明本来就想全量收。
+  if (config.requireKeywords?.length) {
+    const t = (tweet.text ?? '').toLowerCase();
+    const hit = config.requireKeywords.some((k) => t.includes(k.toLowerCase()));
+    if (!hit) return { pass: false, reason: 'no_keyword' };
+  }
+
   return { pass: true };
 }
 
@@ -302,6 +314,19 @@ export async function scanRecipe(
     console.warn('[x-timeline-scan] loadURL 未正常 resolve(X 常自行接管导航),继续等元素:', err);
   });
   await waitForTweetElements(wc);
+
+  // ⚠️ **确认真的落在搜索结果页**(2026-09-07 用户发现:采回来的推
+  //    大多既不含关键词、也不含求助信号 —— 那不是 X 搜索"宽松",
+  //    而是我们压根在读别的页面,把首页时间线当成了搜索结果)。
+  //    X 是 SPA:登录态刷新、路由接管、被弹回首页都会让 URL 变,
+  //    而 waitForTweetElements 只管"有没有推文",不管"是不是搜索页"。
+  const landedUrl = wc.getURL();
+  if (!landedUrl.includes('/search')) {
+    throw new Error(
+      `[x-timeline-scan] 没落在搜索页,实际在 ${landedUrl.slice(0, 80)} —— `
+      + '本轮中止(继续抓只会把首页时间线当成搜索结果入库)',
+    );
+  }
 
   // 预加载去重窗口内已有的 tweet_id
   // 去重集合来自 x_tweet 全表(含 expires_at=NONE 的永久行) —— 采纳过的推文

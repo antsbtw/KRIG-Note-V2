@@ -122,6 +122,40 @@ describe('UI:只填不发', () => {
   });
 });
 
+describe('采集必须校验:落对页面 + 正文真含关键词', () => {
+  const SCAN = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
+
+  it('⭐ 必须确认落在搜索页,否则会把首页时间线当搜索结果入库', () => {
+    // 2026-09-07 用户发现:采回来的推大多既不含关键词也不含求助信号
+    expect(SCAN).toMatch(/landedUrl/);
+    expect(SCAN).toMatch(/includes\('\/search'\)/);
+  });
+
+  it('⭐ 正文要过关键词兜底 —— 不能全信 X 搜索', () => {
+    // 此前 applyFilter 完全不校验正文,X 给什么就存什么
+    expect(SCAN).toMatch(/requireKeywords/);
+    expect(SCAN).toMatch(/reason: 'no_keyword'/);
+  });
+
+  it('⭐ 关键词必须按配方给,不能塞进全局 filterConfig', () => {
+    // filterConfig 是所有配方共用的,塞进去会让配方之间互相污染
+    const sched = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-search-scheduler.ts'), 'utf-8');
+    expect(sched).toMatch(/requireKeywords: recipe\.keywords/);
+    const build = sched.slice(sched.indexOf('async function buildFilterConfig'));
+    expect(
+      /requireKeywords/.test(build.slice(0, 300)),
+      'requireKeywords 被塞进全局 buildFilterConfig 了 —— 配方会互相污染',
+    ).toBe(false);
+  });
+
+  it('没声明关键词的配方不该被拦(全量收集场景)', () => {
+    const seg = SCAN.slice(SCAN.indexOf('L5 关键词兜底'));
+    expect(seg.slice(0, 700)).toMatch(/config\.requireKeywords\?\.length/);
+  });
+});
+
 describe('配方选择:跑的是哪条要看得见', () => {
   const INBOX2 = readFileSync(
     resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');

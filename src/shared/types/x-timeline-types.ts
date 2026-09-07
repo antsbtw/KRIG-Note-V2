@@ -51,6 +51,15 @@ export function normalizeHandle(h: string): string {
 }
 
 export interface TimelineFilterConfig {
+  /**
+   * 正文必须命中其中之一才入库 —— **对 X 搜索结果的兜底校验**。
+   *
+   * ⚠️ 2026-09-07 实测:X 搜索返回的推里大量既不含关键词、也不含求助信号
+   * (最新 30 条只有 3 条命中)。此前采集完全信任 X,「给什么存什么」——
+   * 一旦落错页面或 X 放宽匹配,整批噪音进库并占用 Gemma 判断额度。
+   * 留空 = 不校验(全量收集场景)。
+   */
+  requireKeywords?: string[];
   keywordBlacklist: string[];
   /** ⚠️ 契约:存**已归一化**的 handle(经 normalizeHandle),不带 @、全小写。
    *  塞原始串进来会导致比对恒不命中且不报错。数据源见 x-author-repo.getBlockedHandleSet() */

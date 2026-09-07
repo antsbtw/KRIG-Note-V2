@@ -80,6 +80,8 @@ export function registerXTimelineHandlers(): void {
       const result = await scanRecipe(recipe, p.wsId, targetWcId, {
         ...DEFAULT_FILTER_CONFIG,
         accountBlacklist,
+        // 兜底校验:正文得真的含配方关键词才入库,别全信 X 搜索
+        requireKeywords: recipe.keywords ?? [],
       });
       if (result.saved > 0) {
         // 只判触发它的那个 ws（p.wsId 已在上方校验为 string），防跨 ws 混批
