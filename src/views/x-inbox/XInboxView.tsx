@@ -945,6 +945,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             <div style={sectionTitle}>只看某配方的结果</div>
             <select
               value={filterRecipeId}
+              onMouseDown={() => { void loadRecipes(); }}
               onChange={(e) => setFilterRecipeId(e.target.value)}
               style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
             >
@@ -968,9 +969,13 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
           {/* 触发采集 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={sectionTitle}>去 X 抓新数据(选配方后点扫描)</div>
+            <div style={sectionTitle}>去 X 抓新数据(选配方后点扫描) · 共 {recipes.length} 条</div>
             <select
               value={selectedRecipeId}
+              // ⚠️ 点开下拉就重拉:配方可能在别处新建(甚至直接写库),
+              //    而列表只在挂载时读过一次 —— 用户 2026-09-07 因此
+              //    始终看不到新建的「回国需求」,反复以为是自己选错了。
+              onMouseDown={() => { void loadRecipes(); }}
               onChange={(e) => setSelectedRecipeId(e.target.value)}
               style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
             >
