@@ -122,6 +122,29 @@ describe('UI:只填不发', () => {
   });
 });
 
+describe('配方选择:跑的是哪条要看得见', () => {
+  const INBOX2 = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+
+  it('⭐ 扫描前必须重拉配方(列表只在挂载时读过一次)', () => {
+    // 用户 2026-09-07:新建了「回国需求」却仍跑成老配方,
+    // X 搜索栏里还是「翻墙」那些词 —— 因为下拉列表里根本没有新配方
+    const fn = INBOX2.slice(INBOX2.indexOf('const startScan = async'));
+    expect(fn.slice(0, 900)).toMatch(/await loadRecipes\(\)/);
+  });
+
+  it('⭐ loadRecipes 要返回最新列表,不能让调用方读旧闭包', () => {
+    // setRecipes 是异步的,同一次调用里读 `recipes` 拿到的还是旧值
+    const fn = INBOX2.slice(INBOX2.indexOf('const loadRecipes = useCallback'));
+    expect(fn.slice(0, 900)).toMatch(/return r\.recipes/);
+  });
+
+  it('⭐ 状态里要写明跑的是哪条配方', () => {
+    // 否则「采集 0 条」看不出是配方选错了还是真没量
+    expect(INBOX2).toMatch(/「\$\{usedName\}」完成/);
+  });
+});
+
 describe('回复是逐条的事,不能有全局入口', () => {
   const INBOX = readFileSync(
     resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');

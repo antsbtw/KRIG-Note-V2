@@ -352,7 +352,11 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
         }),
       );
       setStatsMap(Object.fromEntries(entries));
+      // ⚠️ 返回最新列表:setRecipes 是异步的,同一次调用里读 `recipes`
+      //    拿到的还是旧闭包 —— 调用方要用最新值必须接这个返回
+      return r.recipes;
     }
+    return null;
   }, []);
 
   useEffect(() => { loadRecipes(); }, [loadRecipes]);
@@ -374,7 +378,7 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
     const r = await api()?.upsertRecipe(draft);
     if (!r?.success) throw new Error(r?.error ?? 'upsert failed');
     setEditTarget(null);
-    await loadRecipes();
+    const fresh = await loadRecipes();
     onRefreshRecipes();
   };
 
@@ -382,7 +386,7 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
     const r = await api()?.deleteRecipe(recipeId);
     if (!r?.success) throw new Error(r?.error ?? 'delete failed');
     setEditTarget(null);
-    await loadRecipes();
+    const fresh = await loadRecipes();
     onRefreshRecipes();
   };
 
@@ -651,15 +655,24 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     if (!selectedRecipeId) return;
     const tApi = api();
     if (!tApi) return;
+    // ⚠️ 扫描前重新拉一次配方:列表只在挂载时读过一次,
+    //    期间新建/改过的配方不会出现在下拉里 —— 用户 2026-09-07 撞上:
+    //    新建了「回国需求」却仍跑成老配方,搜索栏里还是「翻墙」那些词。
+    const fresh = await loadRecipes();
     const wcId = xApi.getXHostWcId(workspaceId);
     if (!wcId) {
       setScanStatus('请先在 X 视图登录（无活跃 X webview）');
       return;
     }
     setScanning(true);
-    setScanStatus('扫描中...');
+    setScanStatus(`扫描中…（${recipes.find((x) => String(x.id) === selectedRecipeId)?.name ?? ''}）`);
+    const usedName = (fresh ?? recipes).find(
+      (x) => String(x.id) === selectedRecipeId)?.name ?? selectedRecipeId;
     const r = await tApi.runRecipe(selectedRecipeId, workspaceId, wcId);
-    setScanStatus(r?.success ? `完成：采集 ${r.saved ?? 0} 条` : `失败：${r?.error}`);
+    // 明写跑的是哪条配方 —— 否则「采集 0 条」看不出是配方选错了还是真没量
+    setScanStatus(r?.success
+      ? `「${usedName}」完成：采集 ${r.saved ?? 0} 条`
+      : `「${usedName}」失败：${r?.error}`);
     setScanning(false);
     loadPage(0);
   };
