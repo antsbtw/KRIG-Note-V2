@@ -192,6 +192,13 @@ async function waitForTweetElements(wc: Electron.WebContents, timeoutMs = 10_000
 }
 
 /** 在 webContents 内批量提取当前可见推文（复用 TWEET_SCRAPE_FN_BODY） */
+/**
+ * 连续注入失败计数 —— **必须放模块级**:放函数里每次调用都归零,
+ * 永远到不了阈值,那条「不是导航撞车」的提示就永远不会出现。
+ * 成功一次即清零(见下方)。
+ */
+let injectFails = 0;
+
 async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetData[]> {
   const script = `
     (function() {
@@ -211,13 +218,27 @@ async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetDat
   // 同上:滚动过程中 X 会自己跳转/重载(登录态刷新、路由切换),
   // 注入撞上导航窗口就被拒。**单轮**抽取失败不该让整轮采集崩掉 ——
   // 返回空数组让外层继续滚,真的一直抽不到,靠「滚不动 3 轮」正常收尾。
+  // ⚠️ 这里的 catch 曾把一个真 bug 盖了一整天(2026-09-07):
+  //    提取脚本里一个转义写错导致**每次**注入都抛,
+  //    而日志只说「多半撞上导航」—— 一句猜测被当成了结论,
+  //    于是采集连续一天报「0 条」却没人知道真因。
+  //    现在**记连续失败次数**:偶发确实多半是导航;
+  //    但连着失败就不是导航了,必须换一句话说。
   const raw = await wc.executeJavaScript(script).catch((err: unknown) => {
-    console.warn('[x-timeline-scan] extractVisibleTweets 注入失败(多半撞上导航),本轮跳过:', err);
+    injectFails += 1;
+    console.warn(
+      injectFails >= 3
+        ? '[x-timeline-scan] ❗ extractVisibleTweets 连续注入失败 —— '
+          + '这**不是导航撞车**,多半是提取脚本本身报错'
+          + '(先在 X 页面控制台试一下那段脚本):'
+        : '[x-timeline-scan] extractVisibleTweets 注入失败(可能撞上导航),本轮跳过:',
+      err);
     return [];
   });
   if (!Array.isArray(raw)) {
     throw new Error('[x-timeline-scan] extractVisibleTweets returned non-array');
   }
+  injectFails = 0;   // 成功即清零 —— 偶发导航撞车不该累积成误报
   return raw as XTweetData[];
 }
 

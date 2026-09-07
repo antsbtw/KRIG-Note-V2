@@ -164,7 +164,13 @@ export const TWEET_SCRAPE_FN_BODY = `
           if (rlink) {
             var rh = rlink.getAttribute('href') || '';
             // href = /someone → 取 handle
-            var rm = rh.match(/^\/([A-Za-z0-9_]{1,15})$/);
+            // ⚠️ 反斜杠必须写 \\/ —— 这整段在**模板字面量**里,
+            //    写 \/ 会被求值吃掉,浏览器收到 /^/(...)$/ —— 非法正则,
+            //    整个脚本解析失败 → executeJavaScript 每次都抛 → fetched 恒为 0。
+            //    实测后果:采集整整一天报「0 条」,日志里只看到
+            //    「注入失败(多半撞上导航)」—— 那句话把真因盖掉了。
+            //    参照同文件 line 79 的 \\/status\\/ 才是对的写法。
+            var rm = rh.match(/^\\/([A-Za-z0-9_]{1,15})$/);
             if (rm) result.inReplyToUser = rm[1];
           }
           result.isReply = true;
