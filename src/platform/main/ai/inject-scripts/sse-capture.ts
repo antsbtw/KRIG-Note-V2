@@ -422,3 +422,37 @@ export function getSSECaptureScript(
   return 'hooked';
 })()`;
 }
+
+/**
+ * 读回页面里缓存的最新一条已完成回复(ChatGPT / Claude 的 page-cache 路径)。
+ * ⭐ 步 4:从 interceptor 的内联模板搬来,纳入预注册脚本表统一受求值守卫。
+ */
+export function getSSEReadLatestScript(): string {
+  return `(function() {
+  var responses = window.__krig_sse_responses || [];
+  for (var i = responses.length - 1; i >= 0; i--) {
+    if (!responses[i].streaming && responses[i].markdown.length > 0) {
+      return responses[i].markdown;
+    }
+  }
+  return null;
+})()`;
+}
+
+/** 读回捕获状态(条数 / 是否还在流式 / hook 装没装上)*/
+export function getSSEStatusScript(): string {
+  return `(function() {
+  var responses = window.__krig_sse_responses || [];
+  var latest = responses.length > 0 ? responses[responses.length - 1] : null;
+  return {
+    count: responses.length,
+    latestStreaming: latest ? latest.streaming : false,
+    hooked: !!window.__krig_sse_hooked,
+  };
+})()`;
+}
+
+/** 清空页面里缓存的回复 */
+export function getSSEClearScript(): string {
+  return `(function() { window.__krig_sse_responses = []; return true; })()`;
+}
