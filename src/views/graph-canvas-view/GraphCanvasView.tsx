@@ -169,12 +169,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
       return;
     }
     let cancelled = false;
+    // ⭐ B1:导图在 mind_doc 表,画板在 graph_canvas 表 —— 先问导图表,
+    //    命中则是导图;否则按画板处理(记录不存在也走这条,不会卡住)。
     void library
-      .load(activeGraphId)
-      .then((record: GraphCanvasRecord | null) => {
+      .mindLoad(activeGraphId)
+      .then((mind) => {
         if (cancelled) return;
-        // 记录不存在:按 canvas 处理(走既有空画板路径),不是卡住
-        setActiveVariant(record ? record.variant : 'canvas');
+        setActiveVariant(mind ? 'mindmap' : 'canvas');
       })
       .catch(() => {
         if (!cancelled) setActiveVariant('canvas');
@@ -212,12 +213,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         // 竞态保护:快速切换时丢弃过期结果
         if (seq !== loadSeqRef.current) return;
         if (!record) return;
-        // ⚠️⚠️ variant 闸门(diglot mind v0):本 view 只会渲染 canvas 文档。
-        // 若把 mindmap 记录喂进来,sanitizeDocument 会把它「洗」成空画板
-        // (instances: []),接着防抖 save 用画布 JSON **覆盖掉 mind 文件** ——
-        // 静默毁数据。故这里 fail loud 并**不标记 loaded**,
-        // loadedIdRef 保持旧值 → flushSave 的就绪判据不成立 → 绝不写盘。
-        // ⭐ 渲染器接上之前,mind 记录先只创建不打开。
+        // ⚠️⚠️ variant 闸门:本 view 只渲染 canvas 文档。
+        // sanitizeDocument 对任何不认识的 doc_content **一律洗成空画板**
+        // (instances: []),接着防抖 save 用画布 JSON 覆盖回去 —— 静默毁数据。
+        // 故非 canvas 一律 fail loud 且**不标记 loaded**
+        // (loadedIdRef 保持旧值 → flushSave 就绪判据不成立 → 绝不写盘)。
+        // ⭐ B1 之后导图已不在本表,此闸门现护的是 family-tree / knowledge
+        //    这两个**已登记但渲染器未接**的 variant。
         setActiveVariant(record.variant); // 幂等:探测 effect 通常已设过
         if (record.variant !== 'canvas') {
           console.warn(

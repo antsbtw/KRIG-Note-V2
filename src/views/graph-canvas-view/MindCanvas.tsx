@@ -87,7 +87,8 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
     const snap = snapRef.current;
     // ⚠️ 未 load 完不写盘(防止空模型擦掉真数据 —— 对齐 GraphCanvasView 的既有防御)
     if (!snap || loadedIdRef.current !== graphId) return;
-    void library.save(graphId, diglot.snapshotToFile(snap), titleRef.current);
+    const file = diglot.snapshotToFile(snap) as { semantic: string; graphic: string };
+    void library.mindSave(graphId, file.semantic, file.graphic, titleRef.current);
   }, [library, graphId, diglot]);
 
   const scheduleSave = useCallback((): void => {
@@ -125,15 +126,15 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
     let cancelled = false;
 
     void library
-      .load(graphId)
+      .mindLoad(graphId)
       .then((record) => {
         if (cancelled || !record) return;
-        // ⚠️ variant 闸门:非 mindmap 不碰(对称于 GraphCanvasView 拒 mindmap)
-        if (record.variant !== 'mindmap') {
-          setError(`记录 variant=${record.variant},不是导图`);
-          return;
-        }
-        const parsed = diglot.fileToSnapshot(record.doc_content);
+        // ⭐ B1:两段纯文本直接从 mind_doc 读出来,不经 doc_content 那层拆解
+        const parsed = diglot.fileToSnapshot({
+          format: 'diglot-mind/v0',
+          semantic: record.semantic,
+          graphic: record.graphic,
+        });
         if (!parsed.ok) {
           // ⭐ 坏档 fail loud:显示错误,**不加载也不保存**,保住磁盘上的原文
           setError(
