@@ -97,6 +97,18 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
    * 那样每个节点都会被当成"动过",每次回调全量误判。
    */
   const lastPosRef = useRef<Map<string, { x: number; y: number; w: number; h: number }>>(new Map());
+  /**
+   * ⭐ 当前视口 —— 重排时**原样保留**,不要重置。
+   *
+   * ⚠️ 真机实测:拖动后整个画布跳动。三个原因叠加:
+   *   ① `loadDocument` 会 setView,我每次传死值 (0,0,zoom=1) → 镜头瞬移
+   *   ② 紧接着 `fitToContent` 又按新 bbox 重算缩放 → 再跳一次
+   *   ③ 树一变(尺寸/层数变),bbox 就变,fit 出来的 zoom 每次都不同 → 持续跳
+   * ⭐ 修法:**只有首次加载才 fit**;之后的重排保留用户当前的视口。
+   */
+  const viewportRef = useRef<CanvasDocument['view']>({ centerX: 0, centerY: 0, zoom: 1 });
+  /** 是否已经 fit 过(每张图只在首次加载时自动取景一次)。 */
+  const fittedRef = useRef(false);
 
   // ── 保存(防抖)──
   const flushSave = useCallback((): void => {
@@ -121,7 +133,7 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
 
   /** {S,G} → 布局 → instances → 推给画布。 */
   const render = useCallback(
-    async (snap: DiglotSnapshot): Promise<void> => {
+    async (snap: DiglotSnapshot, opts?: { fit?: boolean }): Promise<void> => {
       const host = hostRef.current;
       if (!host) return;
       const req = diglot.buildLayoutRequest(snap.s, snap.g);
@@ -142,10 +154,15 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
       }
       lastPosRef.current = posMap;
       const instances = projected as unknown as Instance[];
-      host.loadDocument(toCanvasDocument(instances, { centerX: 0, centerY: 0, zoom: 1 }));
-      // ⚠️ padding 是**比例不是像素**(fitToBox: padW = w * (1 + padding))。
+      // ⭐ 保留当前视口 —— 重排不该让镜头动(拖一下整个画布跳是最劝退的体验)
+      host.loadDocument(toCanvasDocument(instances, viewportRef.current));
+      // ⭐ 只在首次加载自动取景;之后重排一律保持用户视角。
+      // ⚠️ padding 是**比例不是像素**(fitToBox: padW = w * (1 + padding));
       //    传 40 = 4000% 留白 → 整张图缩成一个点(真机实测撞到)。
-      host.fitToContent(0.15);
+      if (opts?.fit && !fittedRef.current) {
+        host.fitToContent(0.15);
+        fittedRef.current = true;
+      }
     },
     [layoutApi, diglot],
   );
@@ -154,6 +171,8 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
   useEffect(() => {
     loadedIdRef.current = null;
     snapRef.current = null;
+    fittedRef.current = false;
+    viewportRef.current = { centerX: 0, centerY: 0, zoom: 1 };
     setError(null);
     let cancelled = false;
 
@@ -178,7 +197,7 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
         titleRef.current = record.title;
         snapRef.current = parsed.value;
         loadedIdRef.current = graphId;
-        void render(parsed.value);
+        void render(parsed.value, { fit: true });
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(`加载失败:${String(err)}`);
@@ -310,6 +329,10 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
         ref={hostRef}
         workspaceId={workspaceId}
         onInstancesChange={handleInstancesChange}
+        onViewportChange={(vp) => {
+          // ⚠️ 只记不写盘:视口是**会话态**,不持久(01 §7.5「缩放/平移不持久」)
+          viewportRef.current = vp;
+        }}
       />
     </div>
   );
