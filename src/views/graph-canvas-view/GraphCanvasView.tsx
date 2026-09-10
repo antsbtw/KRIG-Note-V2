@@ -365,6 +365,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
       <GraphCanvasToolbar
         activeGraphId={activeGraphId}
         hostRef={hostRef}
+        isMind={activeVariant === 'mindmap'}
         selectedCount={selectedIds.length}
         onAddClick={handlePickerOpen}
         onCombineClick={() => setCombineDialogOpen(true)}

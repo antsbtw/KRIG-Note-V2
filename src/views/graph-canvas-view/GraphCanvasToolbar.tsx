@@ -19,7 +19,6 @@ import {
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   GraphLibraryStoreApi,
-  GraphCanvasListItem,
 } from '@capabilities/graph-library-store/types';
 import type { CanvasHostHandle } from '@capabilities/canvas-rendering/types';
 
@@ -27,6 +26,12 @@ interface GraphCanvasToolbarProps {
   activeGraphId: string | null;
   /** Host ref(G3 加 — Fit-to-content 等命令调用入口) */
   hostRef: MutableRefObject<CanvasHostHandle | null>;
+  /**
+   * ⭐ 当前是否为导图(B1)。
+   * ⚠️ 导图由 MindCanvas 自己的 Host 渲染,本组件的 hostRef **恒为 null** ——
+   * 画板专属按钮(添加/Fit/Combine)打过去是**静默无效**,故隐藏而非留着骗人。
+   */
+  isMind?: boolean;
   /** 选区数(G4.4d):0 隐 Combine,1+ 显;Combine 仅 ≥2 才可点 */
   selectedCount: number;
   /** "+添加"按钮点击 — view 端打开 LibraryPicker(传 anchorRect) */
@@ -38,6 +43,7 @@ interface GraphCanvasToolbarProps {
 export function GraphCanvasToolbar({
   activeGraphId,
   hostRef,
+  isMind = false,
   selectedCount,
   onAddClick,
   onCombineClick,
@@ -57,21 +63,27 @@ export function GraphCanvasToolbar({
       return;
     }
     let cancelled = false;
+    // ⭐ B1:标题可能来自两张表 —— 画板在 graph_canvas,导图在 mind_doc。
+    //    只查画板表的话,打开导图时标题会退成空(真机实测:显示 'Untitled Canvas')。
     const refresh = (): void => {
-      void library
-        .list()
-        .then((list: GraphCanvasListItem[]) => {
+      void Promise.all([library.list(), library.mindList()])
+        .then(([canvasList, mindList]) => {
           if (cancelled) return;
-          const entry = list.find((e) => e.id === activeGraphId);
-          setTitle(entry?.title ?? '');
+          const hit =
+            canvasList.find((e) => e.id === activeGraphId) ??
+            mindList.find((e) => e.id === activeGraphId);
+          setTitle(hit?.title ?? '');
         })
         .catch(() => {});
     };
     refresh();
-    const off = library.onGraphListChanged(() => refresh());
+    // ⚠️ 两个推流都要订阅,否则改了名标题不刷新
+    const offGraph = library.onGraphListChanged(() => refresh());
+    const offMind = library.onMindListChanged(() => refresh());
     return () => {
       cancelled = true;
-      off();
+      offGraph();
+      offMind();
     };
   }, [activeGraphId, library]);
 
@@ -87,10 +99,10 @@ export function GraphCanvasToolbar({
   return (
     <div className="krig-graph-canvas-toolbar">
       <div className="krig-graph-canvas-toolbar__title">
-        {activeGraphId == null ? '画板' : title || 'Untitled Canvas'}
+        {activeGraphId == null ? '画板' : title || (isMind ? '未命名导图' : 'Untitled Canvas')}
       </div>
       <div className="krig-graph-canvas-toolbar__actions">
-        {activeGraphId != null && (
+        {activeGraphId != null && !isMind && (
           <>
             <button
               ref={addBtnRef}

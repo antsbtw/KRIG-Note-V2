@@ -113,7 +113,9 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
       });
       const instances = diglot.projectToInstances(snap.s, snap.g, result) as unknown as Instance[];
       host.loadDocument(toCanvasDocument(instances, { centerX: 0, centerY: 0, zoom: 1 }));
-      host.fitToContent(40);
+      // ⚠️ padding 是**比例不是像素**(fitToBox: padW = w * (1 + padding))。
+      //    传 40 = 4000% 留白 → 整张图缩成一个点(真机实测撞到)。
+      host.fitToContent(0.15);
     },
     [layoutApi, diglot],
   );
