@@ -169,6 +169,17 @@ export function isHeadingCollapsed(state: EditorState, pos: number): boolean {
 }
 
 /** 切换某 heading 的折叠状态 */
+/**
+ * ⭐ 强制重算折叠区间(外部来源模式用)。
+ *
+ * ⚠️ 为什么需要它:画布侧折叠**不改 doc**,PM 因此没有新 transaction,
+ * plugin 的 `apply` 不跑 → 内容不藏。必须由外部显式推一下。
+ * 发一个空 tr(不改内容)让 apply 重新问 source。
+ */
+export function refreshHeadingCollapse(view: EditorView): void {
+  view.dispatch(view.state.tr.setMeta('addToHistory', false));
+}
+
 export function toggleHeadingCollapse(view: EditorView, pos: number): void {
   const node = view.state.doc.nodeAt(pos);
   if (!node || node.type.name !== 'heading') return;
@@ -323,17 +334,46 @@ function emitForView(view: EditorView): void {
 
 // ─── Plugin ──────────────────────────────────────────────
 
-export function buildHeadingCollapsePlugin(): Plugin<HeadingCollapseState> {
+/**
+ * ⭐ 折叠集的外部来源(可选)——「哪些 heading 是折叠的」由外部说了算。
+ *
+ * ⚠️⚠️ 加这个的原因(真机实测):把**三角**的读写换成 G 层之后,
+ * 三角显示对了,但**内容没藏** —— 因为藏内容靠的是本 plugin 自己的
+ * `collapsed` Set,它根本不知道 G 层发生了什么。两个 plugin **各读各的**。
+ * ⭐ 折叠必须**单一真源**:三角读哪儿,藏内容就得读哪儿。
+ *
+ * 不传 = 用自己的 Set(note 本体行为不变)。
+ */
+export interface CollapsedSetSource {
+  /** 给定 doc,返回当前应折叠的顶层 heading pos 集合 */
+  collapsedPositions(doc: import('prosemirror-model').Node): Set<number>;
+}
+
+export function buildHeadingCollapsePlugin(
+  source?: CollapsedSetSource,
+): Plugin<HeadingCollapseState> {
   return new Plugin<HeadingCollapseState>({
     key: headingCollapseKey,
 
     state: {
       init(_, state) {
-        const empty = new Set<number>();
-        const r = computeRanges(state.doc, empty);
-        return { collapsed: empty, hiddenRanges: r.hiddenRanges, ellipsisPositions: r.ellipsisPositions };
+        // ⭐ 有外部来源就问它,否则从空集起步
+        const initial = source ? source.collapsedPositions(state.doc) : new Set<number>();
+        const r = computeRanges(state.doc, initial);
+        return { collapsed: initial, hiddenRanges: r.hiddenRanges, ellipsisPositions: r.ellipsisPositions };
       },
       apply(tr, value, _oldState, newState) {
+        // ⭐ 外部来源模式:**每次都重新问**(G 层随时可能被画布侧改动)。
+        //   ⚠️ 不能只在 docChanged 时问 —— 画布折叠时 doc 没变,但折叠集变了。
+        if (source) {
+          const collapsed = source.collapsedPositions(newState.doc);
+          const same =
+            collapsed.size === value.collapsed.size &&
+            [...collapsed].every((p) => value.collapsed.has(p));
+          if (same && !tr.docChanged) return value;
+          const r = computeRanges(newState.doc, collapsed);
+          return { collapsed, hiddenRanges: r.hiddenRanges, ellipsisPositions: r.ellipsisPositions };
+        }
         // meta 直接覆写 collapsed(toggle/expand/ensure 用)
         const meta = tr.getMeta(headingCollapseKey) as { collapsed: Set<number> } | undefined;
         let collapsed = value.collapsed;

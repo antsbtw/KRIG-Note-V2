@@ -180,7 +180,25 @@ export function buildEditorView(
     // 折叠逻辑 + 行内三角入口:同一开关(没有折叠能力时三角也没意义)
     ...(enableHeadingCollapse
       ? [
-          buildHeadingCollapsePlugin(),
+          // ⭐ 藏内容与画三角**必须同源**:三角读 G 层,藏内容也得读 G 层。
+          //   ⚠️ 不同源的后果(真机踩过):三角切了但内容没藏。
+          buildHeadingCollapsePlugin(
+            headingCollapseSource
+              ? {
+                  collapsedPositions: (doc) => {
+                    const out = new Set<number>();
+                    doc.forEach((node, pos) => {
+                      if (node.type.name !== 'heading') return;
+                      const id = node.attrs?.id;
+                      if (typeof id === 'string' && id && headingCollapseSource.isCollapsed(id)) {
+                        out.add(pos);
+                      }
+                    });
+                    return out;
+                  },
+                }
+              : undefined,
+          ),
           // ⭐ 有外部来源(如 diglot 的 G 层)就用它,否则用内建 plugin state。
           //   ⚠️ note 本体不传 → 行为完全不变(「不污染 schema」的决议照旧)。
           buildHeadingTogglePlugin(

@@ -156,6 +156,18 @@ export function MindSemanticPane({
    */
   const snapshotRef = useRef<DiglotSnapshot | null>(null);
   snapshotRef.current = snapshot;
+  /**
+   * ⭐ 画布侧折叠后,推一下 note 侧重算。
+   *
+   * ⚠️ 画布折叠**不改 doc** → PM 没有新 transaction → 藏内容的 plugin 不重算
+   *    → 三角切了但内容没藏(真机踩过)。这里显式推。
+   */
+  useEffect(() => {
+    if (!snapshot) return;
+    textEditing.api.refreshHeadingCollapseFor(`diglot-mind::${graphId}`);
+    // 折叠集变了就要重算 —— 依赖整个 g(折叠状态在里面)
+  }, [snapshot, textEditing, graphId]);
+
   const collapseSource = useMemo(
     () => ({
       isCollapsed: (blockId: string): boolean => {

@@ -49,6 +49,7 @@ import {
   subscribeHeadingChange,
   toggleHeadingCollapse as toggleHeadingCollapseImpl,
   isHeadingCollapsed as isHeadingCollapsedImpl,
+  refreshHeadingCollapse as refreshHeadingCollapseImpl,
   type TocHeadingEntry,
 } from './plugins/build-heading-collapse-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
@@ -2267,6 +2268,18 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst || inst.view.isDestroyed) return;
     scrollToHeadingPos(inst.view, pos);
+  },
+
+  /**
+   * ⭐ 强制重算折叠区间(外部折叠来源模式用)。
+   *
+   * ⚠️ 画布侧折叠**不改 doc** → PM 无新 transaction → plugin 不重算 → 内容不藏。
+   * 外部改了折叠状态后调本函数推一下。
+   */
+  refreshHeadingCollapseFor(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return;
+    refreshHeadingCollapseImpl(inst.view);
   },
 
   /**
