@@ -231,8 +231,17 @@ export function MindSemanticPane({
                 instanceId: `diglot-mind::${graphId}`,
                 undoScope: 'text-editing.pm',
                 viewId: 'graph-canvas-view',
-                // 导图语义面只要「层级 + 文字」,关掉与树无关的重型 plugin
-                plugins: { blockHandle: false, pasteMedia: false, noteLinkCommand: false },
+                // ⭐ **默认全开** —— note tab 就该是完整的 note 编辑器:
+                //   有 block、有 ⋮⋮ handle、能拖块、slash 菜单可用。
+                //
+                // ⚠️ 我最初关掉了 blockHandle/pasteMedia/noteLinkCommand,理由是
+                //   「导图只要层级+文字」—— 那是**错的**:关掉 blockHandle 等于
+                //   把 note 编辑器降级成普通文本框,block 的存在感就没了(用户指出)。
+                //   ⭐ 这条 tab 的全部价值正是「**用 note 的方式写导图**」,
+                //   砍掉 note 的能力就失去了它与 mermaid tab 的区别。
+                //
+                // ⚠️ 唯一不开的是 titleGuard(opt-in,NoteView 专属的"强制首块 isTitle"):
+                //   导图的 root 由 role 决定,不靠 isTitle;开了会与树推导打架。
               }}
               doc={noteDocOf(snapshot)}
               onChange={handleNoteChange}

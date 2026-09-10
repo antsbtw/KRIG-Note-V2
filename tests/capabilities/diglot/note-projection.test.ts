@@ -118,6 +118,25 @@ describe('note block 序列 → 树', () => {
     expect(t.nodes.find((n) => n.id === 'b')!.parent, '归到就近父级 a').toBe('a');
   });
 
+  it('⭐⭐ 拖块改顺序 → 树跟着变(note tab 的 ⋮⋮ handle 走这条路)', () => {
+    const s = snap();
+    const doc = treeToNoteDoc(s.s);
+    const blocks = [...doc.payload.content] as Record<string, unknown>[];
+    // 把最后一块(叶子3,h3)拖到第 2 位 —— 它的 h 级别没变,但前面的块变了
+    const moved = blocks.splice(5, 1)[0];
+    blocks.splice(1, 0, moved);
+
+    const t = noteDocToTree({ format: 'pm-doc-json', payload: { type: 'doc', content: blocks } });
+    const leaf3 = t.nodes.find((n) => contentToText(n.content) === '叶子3')!;
+    const root = t.nodes.find((n) => n.role === 'root')!;
+    // ⭐ 叶子3 现在紧跟 root(h1)之后,按 §4 规则 1 归到 root 之下
+    expect(leaf3.parent, '拖块改变了父子关系').toBe(root.id);
+    // 其余节点结构不受影响
+    expect(t.nodes.find((n) => contentToText(n.content) === '叶子1')!.parent).toBe(
+      t.nodes.find((n) => contentToText(n.content) === '分支A')!.id,
+    );
+  });
+
   it('⭐ 富内容原样保住(marks 不丢)', () => {
     const doc = {
       format: 'pm-doc-json' as const,
