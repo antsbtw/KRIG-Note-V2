@@ -254,7 +254,7 @@ id 形态 `rel_<source净化>_<target净化>_<fnv1a(source␀target)>`,性质:
 | **债 1** | `markers` 在画布怎么呈现(优先级徽标) | 不挡 v0 骨架 | 用到再定 |
 | **债 2** | `Span` 的 Instance 投影(框线图元) | boundary v0 仅画布入口 | 做 Span 时定 |
 | ~~债 3~~ | ~~Edge 确定性 id~~ | ~~重复边~~ | ✅ **已做**(用户拍板 v0 做掉),见 §3.6 |
-| **债 4** | `GraphVariant` 已有 `'mindmap'` 值但全仓零消费(占位) | 可能有既有通路 | 接线时决定走不走 |
+| ~~债 4~~ | ~~`GraphVariant` 的 `'mindmap'` 占位~~ | ~~可能有既有通路~~ | ✅ **已启用**(2026-09-10,方案 A),见 §7 |
 | **债 5** | 撤销栈跨三面统一(`00 §7`) | 手感完整性前提 | v0 之后 |
 
 ⚠️ **债 4 实测**:`src/capabilities/graph-library-store/types.ts:15`
@@ -271,3 +271,67 @@ id 形态 `rel_<source净化>_<target净化>_<fnv1a(source␀target)>`,性质:
 **不许假设「每个节点只有一个父」** —— 否则 bpmn 开工要拆。
 
 > `00 §5`:共用的是 **G 层与同步机制**,**不是 S 层模型**。
+
+
+---
+
+## 7. ⭐ mind 的落地形态(2026-09-10,用户拍板方案 A)
+
+### 7.1 选了什么
+
+> **在创建画布的地方增加一个创建 mind,独立文件格式。**
+
+`variant='mindmap'`,复用 `graph_canvas` 表与 `library.create/save/load`,
+与画板并列在同一棵树里。入口:navSide `+ 导图` / 空白处右键「新建思维导图」。
+
+⚠️⚠️ **这是脚手架,不是最终归属(明确记账)**:
+
+`01-mind-spec.md` §3.4 的规格方向是**方案 B —— mind 就是一篇 note**,
+`type=mind` 只是解释器选择,同一 blocks 数据可按大纲或导图解释、切换零转换。
+B 才能让富文本/公式/图片整类白送,树骨架直接复用 note 的
+`parentId`/`order`/`noteId`(§3.2)。
+
+⭐ **为什么现在仍走 A**:双向同步引擎在内存里全绿了,但**没被任何真实交互验证过**。
+先接到真东西上看一眼,比先解决归属问题要紧。
+⭐ **迁移不会白写**:本格式的两段纯文本可直接喂给 note 导入。
+
+### 7.2 文件格式 `diglot-mind/v0`
+
+```jsonc
+{
+  "format": "diglot-mind/v0",
+  "semantic": "mindmap\n  root((主题))\n    分支A",  // S 层:mermaid 语法
+  "graphic":  "^m002 pos=420,180\n"                    // G 层:规范形,稀疏
+}
+```
+
+**为什么两段都存纯文本**:
+
+| 理由 | 说明 |
+|---|---|
+| ⭐ C1 幂等验的是**字节** | 存结构体只能验对象相等,弱得多 |
+| **肉眼能看** | 出问题能直接读,这是「别猜、看真实数据」的前提 |
+| **导出 `.md` 零转换** | S 层本就是 mermaid 代码块;G 层包进 HTML 注释,渲染为干净大纲且不丢 |
+
+新建时 `graphic` 为**空串** —— 新图一个 G 条目都没有,全靠自动布局(C5 的起点);
+`semantic` 用仓库既有 Mindmap 模板,**新建即有东西可拖**。
+
+### 7.3 ⚠️⚠️ variant 闸门(一条静默毁数据的路径)
+
+`GraphCanvasView.sanitizeDocument` 对任何不认识的 `doc_content`
+**一律洗成空画板**(`instances: []`),接着 1s 防抖 `save` 把画布 JSON
+写回同一条记录 —— **mind 文件当场没了,而且不报错**。
+
+已在 load 回调加闸门:`variant !== 'canvas'` → 拒绝 + **不标记 loaded**
+(`loadedIdRef` 保持旧值 → `flushSave` 就绪判据不成立 → 绝不写盘)。
+
+⚠️ **故渲染器接上之前,mind 记录「只创建、不打开」** —— 点开会看到 warn 而非空图。
+
+### 7.4 ⏳ 下一步(未做)
+
+| 事 | 说明 |
+|---|---|
+| ⭐ **mind 渲染器** | S+G → ELK 自动布局 → `Instance[]` → 复用 canvas-rendering |
+| 左侧语义面 | 挂 `text-editing.Host`(与 note 同一个,§4 实测) |
+| 真机回归 | 新建导图 → 点开 → 关掉 → 重开,确认内容还在 |
+| 落库幂等 | `putEdgeViaTx` 带 id 走 `UPDATE`,写联系线必须改 UPSERT(§3.6) |

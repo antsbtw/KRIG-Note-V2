@@ -274,6 +274,12 @@ export function registerNavSide(): void {
         command: 'graph-canvas-view.create-canvas',
       },
       {
+        // ⭐ diglot mind v0(方案 A:独立 variant,共用本树)
+        id: 'create-mind',
+        label: '+ 导图',
+        command: 'graph-canvas-view.create-mind',
+      },
+      {
         id: 'create-folder',
         label: '+ 文件夹',
         command: 'graph-canvas-view.create-folder',
@@ -315,6 +321,16 @@ export function registerFolderTreeContextMenu(): void {
     icon: '🎨',
     command: 'graph-canvas-view.create-canvas',
     order: 30,
+  });
+
+  folderTreeContextMenuRegistry.register({
+    id: 'graph-create-mind-blank',
+    scope: 'graph-canvas-view',
+    appliesTo: ['blank'],
+    label: '新建思维导图',
+    icon: '🧠',
+    command: 'graph-canvas-view.create-mind',
+    order: 31,
   });
 
   // ── 文件夹右键 — 在此新建子文件夹 ──

@@ -19,6 +19,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { GraphLibraryStoreApi } from '@capabilities/graph-library-store/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
+import { emptyMindFile } from '@capabilities/diglot-model/mind-file';
 import {
   getGraphCanvasWsState,
   setActiveGraphId,
@@ -32,6 +33,23 @@ export function registerGraphCanvasCommands(wsId: string): void {
     const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
     const record = await library.create('Untitled Canvas', 'canvas', null);
     if (!record) return;
+    setActiveGraphId(ctx.wsId, record.id);
+    pendingCanvasCreatedTrigger?.(record.id);
+  });
+
+  // ── 创建思维导图(diglot mind v0)──
+  // ⭐ 方案 A(用户拍板 2026-09-10):独立 variant 'mindmap',共用 graph 库与本树。
+  // ⚠️ 脚手架,非最终归属 —— 规格方向是「mind 就是一篇 note,type=mind 只是
+  //    解释器选择」(01-mind-spec §3.4)。迁移时 doc_content 的两段纯文本
+  //    可直接喂给 note 导入,不会白写。见 docs/10-business-design/diglot/03 §6。
+  registerWsCommand('graph-canvas-view.create-mind', () => wsId, async (ctx) => {
+    const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
+    const record = await library.create('未命名导图', 'mindmap', null);
+    if (!record) return;
+    // ⭐ 新建即带模板内容(不是空白图)—— 新建就能拖,立刻能验双向同步。
+    // ⚠️ 分两步是刻意的:`create` 的签名不收初始内容,而它是 canvas 共用 API ——
+    //    为 mind 改它会波及既有画板路径,得不偿失(改动量 vs 架构纯度,选后者)。
+    await library.save(record.id, emptyMindFile(), record.title);
     setActiveGraphId(ctx.wsId, record.id);
     pendingCanvasCreatedTrigger?.(record.id);
   });

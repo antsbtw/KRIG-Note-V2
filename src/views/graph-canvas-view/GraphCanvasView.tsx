@@ -175,6 +175,20 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         // 竞态保护:快速切换时丢弃过期结果
         if (seq !== loadSeqRef.current) return;
         if (!record) return;
+        // ⚠️⚠️ variant 闸门(diglot mind v0):本 view 只会渲染 canvas 文档。
+        // 若把 mindmap 记录喂进来,sanitizeDocument 会把它「洗」成空画板
+        // (instances: []),接着防抖 save 用画布 JSON **覆盖掉 mind 文件** ——
+        // 静默毁数据。故这里 fail loud 并**不标记 loaded**,
+        // loadedIdRef 保持旧值 → flushSave 的就绪判据不成立 → 绝不写盘。
+        // ⭐ 渲染器接上之前,mind 记录先只创建不打开。
+        if (record.variant !== 'canvas') {
+          console.warn(
+            `[graph-canvas-view] 拒绝以画板方式打开 variant=${record.variant} 的记录 ` +
+              `(id=${record.id});mind 渲染器尚未接线,不加载也不保存,以免覆盖内容。`,
+          );
+          loadedIdRef.current = null;
+          return;
+        }
         titleRef.current = record.title;
         const doc = sanitizeDocument(record.doc_content);
         host.loadDocument(doc);
