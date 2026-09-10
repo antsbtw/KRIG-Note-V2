@@ -12,8 +12,10 @@ import {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  fontSizeForDepth,
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
+import { BLOCK_VISUAL_SPEC } from '../../../src/lib/visual-spec/block-visual-spec';
 import { fileToSnapshot, emptyMindFile } from '@capabilities/diglot-model/mind-file';
 import { notImplementedEngine as engine } from '@capabilities/diglot-model/engine-contract';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
@@ -218,6 +220,45 @@ describe('投影:稀疏覆盖全量', () => {
     for (const l of inst.filter((i) => isTreeLineId(i.id))) {
       expect(tops.includes(l.endpoints![1].instance), '顶层节点不该是连线终点').toBe(false);
     }
+  });
+
+  it('⭐⭐ 字号按树深度取 h1~hn,与 note 标题层级同一套', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const byId = new Map(inst.map((i) => [i.id, i]));
+
+    const root = s.s.nodes.find((n) => n.role === 'root')!;
+    const branch = s.s.nodes.find((n) => n.parent === root.id)!;
+    const leaf = s.s.nodes.find((n) => n.parent === branch.id)!;
+
+    // ⭐ 数值必须来自 BLOCK_VISUAL_SPEC,不另立一套 —— 否则导图和 note 会视觉分叉
+    expect(byId.get(root.id)!.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
+    expect(byId.get(branch.id)!.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h2.fontSize);
+    expect(byId.get(leaf.id)!.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h3.fontSize);
+  });
+
+  it('⚠️ 超过 h3 的深度用正文号,不继续缩(无限缩小会不可读)', () => {
+    expect(fontSizeForDepth(3)).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+    expect(fontSizeForDepth(10)).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+  });
+
+  it('⭐ 层级越深字号越小(不许倒挂)', () => {
+    expect(fontSizeForDepth(0)).toBeGreaterThan(fontSizeForDepth(1));
+    expect(fontSizeForDepth(1)).toBeGreaterThan(fontSizeForDepth(2));
+    expect(fontSizeForDepth(2)).toBeGreaterThan(fontSizeForDepth(3));
+  });
+
+  it('⭐ 节点尺寸随字号缩放(大字号配大盒子)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const byId = new Map(inst.map((i) => [i.id, i]));
+    const root = s.s.nodes.find((n) => n.role === 'root')!;
+    const leaf = s.s.nodes.find((n) => {
+      const p = s.s.nodes.find((x) => x.id === n.parent);
+      return p && p.parent !== null;
+    })!;
+    // 「主题」两字 vs 「叶子1」三字:字号差 38 vs 22,盒子高度必须体现出来
+    expect(byId.get(root.id)!.size!.h).toBeGreaterThan(byId.get(leaf.id)!.size!.h);
   });
 
   it('⚠️ 布局结果缺节点 → fail loud,不静默给 (0,0)', () => {
