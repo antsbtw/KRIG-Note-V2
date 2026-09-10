@@ -18,7 +18,12 @@ import { capabilityRegistry } from '@slot/capability-registry/capability-registr
 import type { DiglotModelApi } from './types';
 import { applyAction } from './apply-action';
 import { emptyMindFile, fileToSnapshot, snapshotToFile } from './mind-file';
-import { buildLayoutRequest, projectToInstances, isTreeLineId } from './project-to-canvas';
+import {
+  buildLayoutRequest,
+  projectToInstances,
+  isTreeLineId,
+  resolveDropTarget,
+} from './project-to-canvas';
 
 export type { DiglotModelApi } from './types';
 
@@ -30,6 +35,7 @@ const api: DiglotModelApi = {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  resolveDropTarget,
 };
 
 console.info('[diglot-model] alive | S⇄G 双向同步内核(mind v0)');

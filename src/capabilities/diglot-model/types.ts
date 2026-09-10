@@ -344,6 +344,17 @@ export interface DiglotModelApi {
   ) => import('./project-to-canvas').LayoutRequest;
   /** 判断某 instance id 是否为树连线(派生物,不对应 S 层节点) */
   readonly isTreeLineId: (id: string) => boolean;
+  /**
+   * ⭐ 落点 → 结构归位(01 §7.2 v0.2:裸拖=改父/改序)。
+   * 返回 null = 不该改(拖回原位 / 无合法父),调用侧据此不发 action。
+   */
+  readonly resolveDropTarget: (
+    s: SLayer,
+    g: GLayer,
+    draggedId: NodeId,
+    drop: { x: number; y: number },
+    positions: ReadonlyMap<NodeId, { x: number; y: number; w: number; h: number }>,
+  ) => { newParent: NodeId; beforeSibling?: NodeId } | null;
   /** ⭐⭐ S + G + 布局 → Instance[](稀疏覆盖全量) */
   readonly projectToInstances: (
     s: SLayer,

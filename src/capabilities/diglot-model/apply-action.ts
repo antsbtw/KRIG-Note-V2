@@ -100,6 +100,51 @@ function orderAfterLast(s: SLayer, parent: NodeId | null): string {
   return out;
 }
 
+/**
+ * ⭐ 取「插到某个兄弟之前」的 order —— v0.2 裸拖改序要用。
+ *
+ * ⚠️ 之前只实现了 `orderAfterLast`(追加末位),`beforeSibling` 是契约里有、
+ * 实现没做的债。裸拖改成「改父/改序」后它上了主路径,必须补。
+ *
+ * 取法:目标兄弟的 order 与其**前一个**兄弟的 order 之间取中点。
+ * ⚠️ 定宽 base-62 串在中点取不出新值时(相邻已无空隙),**退化为在末尾追加一位**
+ * —— 与 lexrank 同样的思路,字符串变长但永不撞、永不退化。
+ */
+function orderBefore(s: SLayer, parent: NodeId | null, beforeId: NodeId): string {
+  const sibs = s.nodes
+    .filter((n) => n.parent === parent)
+    .sort((a, b) => a.order.localeCompare(b.order));
+  const idx = sibs.findIndex((n) => n.id === beforeId);
+  if (idx < 0) return orderAfterLast(s, parent);
+  const hi = sibs[idx].order;
+  const lo = idx > 0 ? sibs[idx - 1].order : null;
+  return orderBetween(lo, hi);
+}
+
+/** 两个 order 之间取一个新 order(定宽 base-62 中点法,退化时追加一位)。 */
+function orderBetween(lo: string | null, hi: string): string {
+  const val = (str: string): number => {
+    let v = 0;
+    for (const ch of str) v = v * 62 + Math.max(0, DIGITS.indexOf(ch));
+    return v;
+  };
+  const enc = (v: number): string => {
+    let out = '';
+    let x = v;
+    for (let d = 0; d < 4; d++) {
+      out = DIGITS[x % 62] + out;
+      x = Math.floor(x / 62);
+    }
+    return out;
+  };
+  const hiV = val(hi.slice(0, 4));
+  const loV = lo ? val(lo.slice(0, 4)) : 0;
+  if (hiV - loV >= 2) return enc(Math.floor((loV + hiV) / 2));
+  // ⚠️ 无空隙:在下界串后追加一位中点数字(字符串加长,但永不撞)
+  const base = lo ?? enc(0);
+  return base + DIGITS[Math.floor(62 / 2)];
+}
+
 /** 新节点 id:确定性递增,不撞既有 id。 */
 function freshNodeId(s: SLayer): NodeId {
   let i = s.nodes.length + 1;
@@ -141,7 +186,9 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
     case 'semantic.moveIndent': {
       // ⭐ 改层级 = 改一条 parent 引用;后代无需重编号(01 §4)
       // ⭐ G 层零变更 —— 布局属性存活(M3)
-      const order = orderAfterLast(s, action.newParent);
+      const order = action.beforeSibling
+        ? orderBefore(s, action.newParent, action.beforeSibling)
+        : orderAfterLast(s, action.newParent);
       return {
         s: withNode(s, action.id, { parent: action.newParent, order }),
         g,
@@ -162,9 +209,11 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
     }
 
     case 'canvas.dragReparent': {
-      // 落点②另一节点上/兄弟缝隙 = 改父改序
+      // ⭐ v0.2:裸拖走这里(改父/改序),不再钉坐标
       // ⚠️⚠️ **绝不顺手写 pos** —— 串了就是 M2 失败,且会把用户的自动布局意图钉死
-      const order = orderAfterLast(s, action.newParent);
+      const order = action.beforeSibling
+        ? orderBefore(s, action.newParent, action.beforeSibling)
+        : orderAfterLast(s, action.newParent);
       return { s: withNode(s, action.id, { parent: action.newParent, order }), g };
     }
 

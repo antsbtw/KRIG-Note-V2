@@ -82,6 +82,21 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
   const loadedIdRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * ⭐ Alt 是否按下 —— 区分「裸拖=改结构」与「Alt+拖=自由摆位」(01 §7.2 v0.2)。
+   *
+   * ⚠️ 为什么在 view 层用键盘事件跟踪,而不是从拖动回调里读:
+   * `onInstancesChange` 的签名只给 `instances`,**不带修饰键**。
+   * 为 mind 改这个共享 API 会波及既有画板路径 —— 选架构纯度不选改动量
+   * (与 `library.create` 不收初始内容时同样的取舍)。
+   */
+  const altRef = useRef(false);
+  /**
+   * ⭐ 上一次投影出来的节点位置 —— 用于判断「这个节点被拖动过吗」。
+   * ⚠️ 不能拿 G 层的 pos 比:裸拖路径下 G 层根本没有条目,
+   * 那样每个节点都会被当成"动过",每次回调全量误判。
+   */
+  const lastPosRef = useRef<Map<string, { x: number; y: number; w: number; h: number }>>(new Map());
 
   // ── 保存(防抖)──
   const flushSave = useCallback((): void => {
@@ -117,7 +132,16 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
         // ⚠️ 间距要与节点尺寸同量级,否则 fit 之后视觉上挤成一团
         spacing: { node: 36, layer: 90 },
       });
-      const instances = diglot.projectToInstances(snap.s, snap.g, result) as unknown as Instance[];
+      const projected = diglot.projectToInstances(snap.s, snap.g, result);
+      // ⭐ 记下本次投影的位置,供下次拖动回调比对
+      const posMap = new Map<string, { x: number; y: number; w: number; h: number }>();
+      for (const p of projected) {
+        if (p.position && p.size) {
+          posMap.set(p.id, { x: p.position.x, y: p.position.y, w: p.size.w, h: p.size.h });
+        }
+      }
+      lastPosRef.current = posMap;
+      const instances = projected as unknown as Instance[];
       host.loadDocument(toCanvasDocument(instances, { centerX: 0, centerY: 0, zoom: 1 }));
       // ⚠️ padding 是**比例不是像素**(fitToBox: padW = w * (1 + padding))。
       //    传 40 = 4000% 留白 → 整张图缩成一个点(真机实测撞到)。
@@ -173,30 +197,79 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
       const snap = snapRef.current;
       if (!snap || loadedIdRef.current !== graphId) return;
 
-      // ⭐ 找出位置与当前投影不一致的节点 → 每个发一条 dragNode action。
-      //   ⚠️ 这里**只发 action**,模型由 applyAction 改 —— 与断言同一条路径。
+      // ⭐⭐ v0.2 拖动分流(01 §7.2 修订):
+      //   裸拖 → 改父/改序(S 层),图随后自动重排
+      //   Alt+拖 → 钉住坐标(G 层),自由摆位
+      // ⚠️ 这里**只发 action**,模型由 applyAction 改 —— 与断言同一条路径。
+      //
+      // 落点从画布回传的 instance.position 取;当前投影位置从 lastPosRef 取
+      // (上一次渲染时算出来的),两者不同才算"被拖过"。
       let next = snap;
       let changed = false;
+      let needsRelayout = false;
+
       for (const inst of instances) {
         // ⚠️ 跳过树连线:它们是**派生物**,没有对应的 S 层节点,也不该有 G 条目。
-        //    不跳的话 `nodes.find` 找不到就静默 continue —— 能跑但语义含糊,
-        //    显式跳更清楚(且将来连线若带了 position 也不会被误当拖动)。
         if (diglot.isTreeLineId(inst.id)) continue;
         const node = snap.s.nodes.find((n) => n.id === inst.id);
         if (!node || !inst.position) continue;
-        const cur = snap.g.get(inst.id)?.pos;
+
+        const prev = lastPosRef.current.get(inst.id);
         const x = Math.round(inst.position.x);
         const y = Math.round(inst.position.y);
-        if (cur && cur.x === x && cur.y === y) continue;
-        next = diglot.applyAction(next, { kind: 'canvas.dragNode', id: inst.id, x, y });
-        changed = true;
+        // 没动过就跳过(画布每次都回传全量 instances)
+        if (prev && prev.x === x && prev.y === y) continue;
+
+        if (altRef.current) {
+          // ── Alt+拖:自由摆位,钉住坐标 ──
+          next = diglot.applyAction(next, { kind: 'canvas.dragNode', id: inst.id, x, y });
+          changed = true;
+        } else {
+          // ── ⭐ 裸拖:改结构 —— 位置由布局重算,不钉坐标 ──
+          const target = diglot.resolveDropTarget(next.s, next.g, inst.id, { x, y }, lastPosRef.current);
+          if (!target) {
+            // 拖回原位 / 没有合法父 → 不产生变更,但要重排把它弹回去
+            needsRelayout = true;
+            continue;
+          }
+          next = diglot.applyAction(next, {
+            kind: 'canvas.dragReparent',
+            id: inst.id,
+            newParent: target.newParent,
+            ...(target.beforeSibling ? { beforeSibling: target.beforeSibling } : {}),
+          });
+          changed = true;
+          needsRelayout = true;
+        }
       }
-      if (!changed) return;
+
+      if (!changed && !needsRelayout) return;
       snapRef.current = next;
-      scheduleSave();
+      // ⭐ 结构变了(或拖了但没变)→ 重跑布局,让图回到整齐状态
+      if (needsRelayout) void render(next);
+      if (changed) scheduleSave();
     },
-    [graphId, scheduleSave, diglot],
+    [graphId, scheduleSave, diglot, render],
   );
+
+  // ── Alt 键跟踪(区分裸拖 / 自由摆位)──
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      altRef.current = e.altKey;
+    };
+    // ⚠️ blur 时必须清掉:切走再回来若 Alt 卡在 true,裸拖会被误判成自由摆位
+    const onBlur = (): void => {
+      altRef.current = false;
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   // ── ⭐ 注入 atom-bridge,节点文字才真渲染 ──
   //
