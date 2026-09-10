@@ -241,6 +241,75 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
       return { s: { ...s, nodes: [...s.nodes, node] }, g };
     }
 
+    case 'canvas.insertSibling': {
+      // ⭐ Enter:同父,排在 afterId 之后
+      const anchor = s.nodes.find((n) => n.id === action.afterId);
+      if (!anchor) throw new Error(`[diglot] insertSibling:锚点不存在 ${action.afterId}`);
+      // ⚠️ root 没有兄弟位(它是文档标题)——退化为给它加子节点,而不是静默失败
+      const parent = anchor.role === 'root' ? anchor.id : anchor.parent;
+      const sibs = s.nodes
+        .filter((n) => n.parent === parent)
+        .sort((a, b) => a.order.localeCompare(b.order));
+      const idx = sibs.findIndex((n) => n.id === action.afterId);
+      const next = idx >= 0 ? sibs[idx + 1] : undefined;
+      const id = freshNodeId(s);
+      const node: SNode = {
+        id,
+        content: textToContent(action.text),
+        parent,
+        order: next ? orderBefore(s, parent, next.id) : orderAfterLast(s, parent),
+        role: 'branch',
+      };
+      // ⭐ C5:新节点 G 层零条目(位置由自动布局算)
+      return { s: { ...s, nodes: [...s.nodes, node] }, g };
+    }
+
+    case 'canvas.insertChild': {
+      // ⭐ Tab:成为选中节点的最后一个孩子
+      const id = freshNodeId(s);
+      const node: SNode = {
+        id,
+        content: textToContent(action.text),
+        parent: action.parentId,
+        order: orderAfterLast(s, action.parentId),
+        role: 'branch',
+      };
+      return { s: { ...s, nodes: [...s.nodes, node] }, g };
+    }
+
+    case 'canvas.deleteSubtree': {
+      // 收集自己 + 全部后代
+      const doomed = new Set<NodeId>([action.id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const n of s.nodes) {
+          if (n.parent && doomed.has(n.parent) && !doomed.has(n.id)) {
+            doomed.add(n.id);
+            grew = true;
+          }
+        }
+      }
+      // ⚠️ root 不可删(它是文档标题)—— fail loud,别让用户以为删了
+      const target = s.nodes.find((n) => n.id === action.id);
+      if (target?.role === 'root') {
+        throw new Error('[diglot] 不能删除 root(它是文档标题;改标题请编辑它的文字)');
+      }
+      // ⭐ 连带清理:G 条目 + 悬空 Edge/Span(01 §7.1 明写)
+      const nextG = new Map(g);
+      for (const id of doomed) nextG.delete(id);
+      return {
+        s: {
+          nodes: s.nodes.filter((n) => !doomed.has(n.id)),
+          edges: s.edges.filter((e) => !doomed.has(e.source) && !doomed.has(e.target)),
+          spans: s.spans.filter(
+            (p) => !doomed.has(p.from) && !doomed.has(p.to) && !(p.topic && doomed.has(p.topic)),
+          ),
+        },
+        g: nextG,
+      };
+    }
+
     case 'canvas.connect': {
       // ⭐ 联系线是**树之外的附加关系**(01 §3.2),也是唯一真用边的地方。
       // ⚠️ id 走确定性导出 —— 重复连同一对端点 = 覆盖而非新增(债 3)

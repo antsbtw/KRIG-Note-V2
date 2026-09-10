@@ -99,6 +99,8 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
   const [snapView, setSnapView] = useState<DiglotSnapshot | null>(null);
   /** 语义面宽度(px)。⚠️ 会话态,不持久 —— 与视口同理(01 §7.5)。 */
   const [paneW, setPaneW] = useState(340);
+  /** 画布当前选中的节点 id(键盘操作的作用对象)。 */
+  const selectedRef = useRef<string[]>([]);
   /**
    * ⭐ Alt 是否按下 —— 区分「裸拖=改结构」与「Alt+拖=自由摆位」(01 §7.2 v0.2)。
    *
@@ -309,6 +311,57 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     };
   }, []);
 
+  // ── ⭐ 键盘操作(01 §7.1,照搬 XMind 肌肉记忆)──
+  //
+  // ⚠️⚠️ 用 **capture 阶段**并 stopPropagation:画布的 InteractionController
+  // 也挂在 window 上监听 Delete/Backspace,它会**直接删 instance** ——
+  // 而 instance 是派生物,删了模型还在,下次重排又冒出来(且 G 层留孤儿)。
+  // 必须由本层先接管,转成模型 action。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      // 在输入框 / 语义面里打字时不拦截
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey) return; // 让 Cmd+Z / Cmd+C 等走画布既有逻辑
+
+      const snap = snapRef.current;
+      if (!snap || loadedIdRef.current !== graphId) return;
+      const sel = selectedRef.current.filter((id) => !diglot.isTreeLineId(id));
+      if (sel.length === 0) return;
+      const id = sel[0];
+      const node = snap.s.nodes.find((n) => n.id === id);
+      if (!node) return;
+
+      let next: DiglotSnapshot | null = null;
+      if (e.key === 'Enter' && !e.shiftKey) {
+        next = diglot.applyAction(snap, { kind: 'canvas.insertSibling', afterId: id, text: '新节点' });
+      } else if (e.key === 'Tab') {
+        next = diglot.applyAction(snap, { kind: 'canvas.insertChild', parentId: id, text: '新节点' });
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (node.role === 'root') {
+          // ⚠️ root 是文档标题,删不得 —— 明确告知而非静默无视
+          setError('root 是文档标题,不能删除(改标题请编辑它的文字)');
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        next = diglot.applyAction(snap, { kind: 'canvas.deleteSubtree', id });
+      } else {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation(); // ⭐ 挡住画布的同名处理
+      snapRef.current = next;
+      setError(null);
+      void render(next);
+      scheduleSave();
+    };
+    // ⭐ capture:必须先于画布的 window 监听拿到事件
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [graphId, diglot, render, scheduleSave]);
+
   // ── ⭐ 注入 atom-bridge,节点文字才真渲染 ──
   //
   // ⚠️ 不注入的话,带 doc 的节点会退化成**空白灰矩形**(真机实测:六个空框)。
@@ -415,6 +468,9 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
           ref={hostRef}
           workspaceId={workspaceId}
           onInstancesChange={handleInstancesChange}
+          onSelectionChange={(ids) => {
+            selectedRef.current = ids;
+          }}
           onViewportChange={(vp) => {
             // ⚠️ 只记不写盘:视口是**会话态**,不持久(01 §7.5「缩放/平移不持久」)
             viewportRef.current = vp;

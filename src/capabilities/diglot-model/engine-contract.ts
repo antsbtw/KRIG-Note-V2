@@ -64,6 +64,15 @@ export type DiglotAction =
   /** ⭐ Shift+拖到空白 = 转自由主题(S:role→float;G:pos)—— M2 三义之三 */
   | { readonly kind: 'canvas.dragToFloat'; readonly id: NodeId; readonly x: number; readonly y: number }
   | { readonly kind: 'canvas.createNode'; readonly parent: NodeId | null; readonly text: string }
+  /** ⭐ `Enter`:在选中节点**之后**插入兄弟(01 §7.1) */
+  | { readonly kind: 'canvas.insertSibling'; readonly afterId: NodeId; readonly text: string }
+  /** ⭐ `Tab`:插入子节点(01 §7.1) */
+  | { readonly kind: 'canvas.insertChild'; readonly parentId: NodeId; readonly text: string }
+  /**
+   * ⭐ `Delete`:删节点**及其整棵子树**(01 §7.1)。
+   * ⚠️ 连带清理其 G 条目与悬空 Edge —— 否则会留下指向不存在节点的孤儿。
+   */
+  | { readonly kind: 'canvas.deleteSubtree'; readonly id: NodeId }
   | { readonly kind: 'canvas.connect'; readonly source: NodeId; readonly target: NodeId; readonly label?: string }
   // ── 图形面(落 G) ──
   | { readonly kind: 'graphic.editColor'; readonly id: NodeId; readonly color: string }
