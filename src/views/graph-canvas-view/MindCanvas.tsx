@@ -42,6 +42,7 @@ import type { GraphLayoutApi } from '@capabilities/graph-layout/types';
 import type { CanvasTextNodeApi } from '@capabilities/canvas-text-node';
 import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
+import { MindSemanticPane } from './MindSemanticPane';
 
 const SAVE_DEBOUNCE_MS = 1000;
 
@@ -90,6 +91,14 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
   const [error, setError] = useState<string | null>(null);
   /** 被钉住的节点数 —— 决定「恢复自动布局」按钮是否可用(0 时置灰,别让用户点空)。 */
   const [pinned, setPinned] = useState(0);
+  /**
+   * ⭐ 快照的 React 镜像 —— 只为驱动语义面重渲染。
+   * ⚠️ 真源仍是 `snapRef`(拖动回调在 ref 上连续改,不能等 React 批处理);
+   *    这里是**投影**,每次 render() 时同步一次。两者不同步会出「文本落后一步」。
+   */
+  const [snapView, setSnapView] = useState<DiglotSnapshot | null>(null);
+  /** 语义面宽度(px)。⚠️ 会话态,不持久 —— 与视口同理(01 §7.5)。 */
+  const [paneW, setPaneW] = useState(340);
   /**
    * ⭐ Alt 是否按下 —— 区分「裸拖=改结构」与「Alt+拖=自由摆位」(01 §7.2 v0.2)。
    *
@@ -162,6 +171,7 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
       }
       lastPosRef.current = posMap;
       setPinned(diglot.pinnedCount(snap));
+      setSnapView(snap);
       const instances = projected as unknown as Instance[];
       // ⭐ 保留当前视口 —— 重排不该让镜头动(拖一下整个画布跳是最劝退的体验)
       host.loadDocument(toCanvasDocument(instances, viewportRef.current));
@@ -334,6 +344,28 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     onPinnedChange?.(pinned, handleReleaseAll);
   }, [pinned, handleReleaseAll, onPinnedChange]);
 
+  /**
+   * ⭐ 语义面改动落地:文本 → 新的 S 层。
+   *
+   * ⚠️ **G 层原样保留** —— 改标签不该动布局(C3:全部 pos 存活)。
+   * id 由解析器按顺序确定性分配,故只要树形没变,G 条目仍配得上。
+   * ⚠️ 已知局限:若用户在文本里增删了节点,后续 id 会整体位移,
+   *    G 条目会配错 —— 记账,见提交说明。
+   */
+  const handleSemanticCommit = useCallback(
+    (semantic: string): void => {
+      const snap = snapRef.current;
+      if (!snap || loadedIdRef.current !== graphId) return;
+      const graphic = (diglot.snapshotToFile(snap) as { graphic: string }).graphic;
+      const parsed = diglot.fileToSnapshot({ format: 'diglot-mind/v0', semantic, graphic });
+      if (!parsed.ok) return; // 语义面自己已显示错误,这里静默返回不重复报
+      snapRef.current = parsed.value;
+      void render(parsed.value);
+      scheduleSave();
+    },
+    [graphId, diglot, render, scheduleSave],
+  );
+
   // ── 常驻 timer 必须有停止调用(铁律)──
   useEffect(
     () => () => {
@@ -354,16 +386,41 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
   }
 
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
-      <Host
-        ref={hostRef}
-        workspaceId={workspaceId}
-        onInstancesChange={handleInstancesChange}
-        onViewportChange={(vp) => {
-          // ⚠️ 只记不写盘:视口是**会话态**,不持久(01 §7.5「缩放/平移不持久」)
-          viewportRef.current = vp;
+    <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
+      {/* ⭐ 左:语义描述面(00 §6 的 left slot 文本侧) */}
+      <div style={{ width: paneW, flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+        <MindSemanticPane snapshot={snapView} onSemanticCommit={handleSemanticCommit} />
+      </div>
+      {/* 分隔条:拖动改宽度 */}
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const startX = e.clientX;
+          const startW = paneW;
+          const onMove = (ev: MouseEvent): void => {
+            setPaneW(Math.max(200, Math.min(720, startW + ev.clientX - startX)));
+          };
+          const onUp = (): void => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
         }}
+        style={{ width: 4, cursor: 'col-resize', flexShrink: 0, background: 'transparent' }}
       />
+      {/* ⭐ 右:画布(right slot) */}
+      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+        <Host
+          ref={hostRef}
+          workspaceId={workspaceId}
+          onInstancesChange={handleInstancesChange}
+          onViewportChange={(vp) => {
+            // ⚠️ 只记不写盘:视口是**会话态**,不持久(01 §7.5「缩放/平移不持久」)
+            viewportRef.current = vp;
+          }}
+        />
+      </div>
     </div>
   );
 }
