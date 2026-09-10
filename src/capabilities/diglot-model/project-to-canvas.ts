@@ -165,14 +165,35 @@ function nodeSize(text: string, fontSize: number, extraBlocks = 0): { w: number;
   const m = measureText(text, fontSize);
   const pad = paddingFor(fontSize);
   const minW = Math.round(fontSize * 3);
+
+  // ⭐ 上限不是「排版宽度」,而是**防失控的兜底** —— 有人粘一整段进来时,
+  //   不至于把图横向撑到几千像素;到那个长度才折行是合理的。
+  //
+  // ⚠️⚠️ 真机那次「标题被强行折行」**不是这里夹的**(实测:「主题278910101次」
+  //   在 h1 只需 363px,而 16 字上限是 608px,任何层级都没碰到过)。
+  //   真凶是 text_size 与块 level **叠乘**把字撑到 90px(见 text_size 处注释)。
+  //   ⭐ 记这一笔是因为我当时改宽了上限、症状却还在 —— **改错地方而症状仍在**,
+  //   说明「看起来相关」不等于「就是它」。上限保持 16 字宽不动。
   const maxW = Math.round(fontSize * 16);
   const w = Math.max(minW, Math.min(maxW, m.w + pad.x));
 
-  // ⭐ 宽度被 maxW 夹住 → 文字会折行 → 高度要按折行数估。
+  // ⭐ 只有真的被 maxW 夹住才会折行 → 那时才按折行数估高度。
   // ⚠️ 旧版高度**恒为一行**,于是长文本换了行、盒子却没长高 → 第二行溢出框外。
   const contentW = Math.max(1, w - pad.x);
-  const lines = Math.max(1, Math.ceil(m.w / contentW)) + extraBlocks;
-  return { w, h: m.h * lines + pad.y };
+  const headLines = Math.max(1, Math.ceil(m.w / contentW));
+
+  // ⭐⭐ **与渲染层同一条公式**(textBlock.ts:`fontSize × 1.7`),
+  //   标题行按本级字号、正文行按正文号 —— 因为首块保留了 level 之后,
+  //   渲染层就是这么分别算的。
+  // ⚠️ 估算与渲染不同源正是本轮一连串毛病的根源;这里对齐,ELK 才能
+  //   预留出接近真实的高度,撑高时不至于长出一大截压到兄弟节点(重叠)。
+  const LINE_RATIO = BLOCK_VISUAL_SPEC.body.lineHeight;
+  const bodyFs = BLOCK_VISUAL_SPEC.body.fontSize;
+  const h =
+    Math.round(fontSize * LINE_RATIO) * headLines +
+    Math.round(bodyFs * LINE_RATIO) * extraBlocks +
+    pad.y;
+  return { w, h };
 }
 
 /**
@@ -346,8 +367,18 @@ export function projectToInstances(
       //   否则 ELK 按「只有标题」排版,撑高后容易和兄弟节点压到一起。
       //   ⚠️ 仍只是**初值**:真实高度由渲染层撑(见 nodeSize 注释)。
       size: nodeSize(label, fontSizeForDepth(depths.get(n.id) ?? 0), extraBlocksOf(n.content)),
-      // ⭐ 字号透传给渲染层(NodeRenderer 读 inst.text_size 覆盖 baseFontSize)
-      text_size: fontSizeForDepth(depths.get(n.id) ?? 0),
+      // ⭐⭐ 字号透传给渲染层。
+      //
+      // ⚠️⚠️ **这里必须传正文号(16),不能传该深度的标题号**:
+      //   渲染层的公式是 `fontSize = headingFontSize(level) × (text_size / 16)`
+      //   —— 它**自己会按块的 level 放大**。若这里再传 38(h1),
+      //   首块会被渲成 `38 × (38/16) = 90px`(实测),是估算宽度的 2.4 倍
+      //   → 文字装不下 → **被强行折行**(真机现象,一度以为是 maxW 夹的)。
+      //
+      // ⭐ 深度→字号的映射现在由 **note-projection 写在块的 level 上**
+      //   (首块保留 heading/level),渲染层照 level 取字号,标题大、正文小,
+      //   与 note 完全一致 —— 这正是「用回公共层那套」的意思。
+      text_size: BLOCK_VISUAL_SPEC.body.fontSize,
       // ⭐ 原样透传富文本 —— 折叠与否都不动内容(公式/格式/图片保住)
       doc: n.content,
       ...(entry?.color ? { style_overrides: { fill: { color: entry.color } } } : {}),

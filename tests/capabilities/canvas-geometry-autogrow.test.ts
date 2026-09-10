@@ -62,6 +62,16 @@ describe('几何 shape 撑高', () => {
     expect(code).toMatch(/if \(newH <= rendered\.size\.h \+ 1\) return;/);
   });
 
+
+  it('⭐⭐ 几何撑高要**居中生长**,否则往下长会压到兄弟节点(真机:两个框重叠)', () => {
+    const code = readCode('src/capabilities/canvas-rendering/scene/NodeRenderer.ts');
+    // 纯文字框分支靠 outer.position.y += (newH-oldH)/2 保持中心;
+    // 几何分支走 update() 重建、读 inst.position(左上角),必须自己上提半个增量
+    expect(code, '几何撑高没有上提 position → 框从左上角往下长,压住下方节点').toMatch(
+      /inst\.position\.y -= grow \/ 2;/,
+    );
+  });
+
   it('⚠️ size_lock.h 的保护还在(手动定高的节点不该被撑)', () => {
     const code = readCode('src/capabilities/canvas-rendering/scene/NodeRenderer.ts');
     expect(code).toMatch(/if \(inst\?\.size_lock\?\.h\) return;/);

@@ -89,3 +89,34 @@ describe('节点 = 标题 + 它的正文', () => {
     }
   });
 });
+
+/**
+ * ⭐⭐ 首块保留 heading/level(用户 2026-09-10:
+ * 「paragraph 应该是正文文字大小,而不应该和 hn 的文字一样大小」)
+ *
+ * ⚠️ 渲染层(textBlock.ts)**本来就按块给字号**:
+ *   `fontSize = headingFontSize(atom.attrs.level) × (base/16)`。
+ *   所以只要把 level 带上,标题大、正文小就自动成立 —— 不需要另算一套字号。
+ *   之前把首块拍成裸 paragraph,level 丢了 → 整框被拉成一样大。
+ */
+describe('首块保留 heading/level', () => {
+  it('⭐⭐ heading 进树后仍是 heading,且带 level', () => {
+    const s = noteDocToTree(doc([h(2, 'h2', '主题2'), math('p1', 'x^2+1')]));
+    const blocks = blocksOf(s.nodes[0]) as { type: string; attrs?: { level?: number } }[];
+    expect(blocks[0].type, '首块丢了 heading → 渲染层无从区分标题与正文').toBe('heading');
+    expect(blocks[0].attrs?.level).toBe(2);
+  });
+
+  it('⭐⭐ 并进来的正文**不带 level**(带了会被渲成标题大小)', () => {
+    const s = noteDocToTree(doc([h(2, 'h2', '主题2'), math('p1', 'x^2+1')]));
+    const blocks = blocksOf(s.nodes[0]) as { type: string; attrs?: { level?: number } }[];
+    expect(blocks[1].type).toBe('paragraph');
+    expect(blocks[1].attrs?.level).toBeUndefined();
+  });
+
+  it('⚠️ 无 heading 的节点(mermaid 来的)首块仍是 paragraph,不硬塞 level', () => {
+    const s = noteDocToTree(doc([p('p1', '开头就是正文')]));
+    const blocks = blocksOf(s.nodes[0]) as { type: string; attrs?: { level?: number } }[];
+    expect(blocks[0].attrs?.level).toBeUndefined();
+  });
+});

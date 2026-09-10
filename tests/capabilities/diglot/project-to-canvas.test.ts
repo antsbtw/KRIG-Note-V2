@@ -18,7 +18,7 @@ import {
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
 import { textToContent } from '@capabilities/diglot-model/mermaid-mindmap';
-import { BLOCK_VISUAL_SPEC } from '../../../src/lib/visual-spec/block-visual-spec';
+import { BLOCK_VISUAL_SPEC, headingFontSize } from '../../../src/lib/visual-spec/block-visual-spec';
 import { isCjk } from '../../../src/lib/atom-serializers/svg/font-loader';
 import { fileToSnapshot, emptyMindFile } from '@capabilities/diglot-model/mind-file';
 import { notImplementedEngine as engine } from '@capabilities/diglot-model/engine-contract';
@@ -235,10 +235,20 @@ describe('投影:稀疏覆盖全量', () => {
     const branch = s.s.nodes.find((n) => n.parent === root.id)!;
     const leaf = s.s.nodes.find((n) => n.parent === branch.id)!;
 
-    // ⭐ 数值必须来自 BLOCK_VISUAL_SPEC,不另立一套 —— 否则导图和 note 会视觉分叉
-    expect(byId.get(root.id)!.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
-    expect(byId.get(branch.id)!.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h2.fontSize);
-    expect(byId.get(leaf.id)!.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h3.fontSize);
+    // ⚠️⚠️ **字号不再由 text_size 携带**(2026-09-10 改):
+    //   渲染层公式是 `headingFontSize(block.level) × (text_size / 16)`,
+    //   它**自己按块的 level 放大**。若 text_size 再传 h1(38),
+    //   首块会被渲成 38 × (38/16) = 90px —— 估算宽度的 2.4 倍 → 强行折行(真机踩过)。
+    // ⭐ 所以 text_size 恒为正文号,深度→字号改由 note-projection 写在**块的 level** 上。
+    //   这里断言的是**最终渲染字号**(同一条公式),意图不变:深度 → h1~hn,与 note 同源。
+    const effective = (id: string, level: number): number =>
+      headingFontSize(level) * (byId.get(id)!.text_size! / BLOCK_VISUAL_SPEC.body.fontSize);
+
+    expect(effective(root.id, 1)).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
+    expect(effective(branch.id, 2)).toBe(BLOCK_VISUAL_SPEC.headings.h2.fontSize);
+    expect(effective(leaf.id, 3)).toBe(BLOCK_VISUAL_SPEC.headings.h3.fontSize);
+    // ⭐ 正文块(无 level)= 正文号,与标题拉开 —— 这正是用户要的「paragraph 是正文大小」
+    expect(effective(root.id, 0)).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
   });
 
   it('⚠️ 超过 h3 的深度用正文号,不继续缩(无限缩小会不可读)', () => {
@@ -279,8 +289,12 @@ describe('投影:稀疏覆盖全量', () => {
     const expectX = Math.round(rootInst.position!.x + rootInst.size!.w / 2);
     const expectY = Math.round(rootInst.position!.y + rootInst.size!.h / 2);
     expect(Number.isFinite(expectX) && Number.isFinite(expectY)).toBe(true);
-    // ⭐ root 字号必须是 h1 —— 这条与 zoom=1 合起来才等于"和 note 一样大"
-    expect(rootInst.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
+    // ⭐ root **渲染出来**必须是 h1 —— 这条与 zoom=1 合起来才等于「和 note 一样大」。
+    // ⚠️ 字号不再由 text_size 直接携带(见上一条注释:会与渲染层的 level 放大叠乘),
+    //    这里按渲染层同一条公式算最终字号。
+    expect(
+      headingFontSize(1) * (rootInst.text_size! / BLOCK_VISUAL_SPEC.body.fontSize),
+    ).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
   });
 
   it('⭐⭐ 折叠的节点带可辨认标记 —— 数字在圆圈里(magnetActions.count)', () => {
@@ -541,7 +555,7 @@ describe('节点尺寸估算(给 ELK 的初值)', () => {
       ...s.s,
       nodes: s.s.nodes.map((n) =>
         n.id === short.id
-          ? { ...n, content: textToContent('这是一段很长很长的标题会被折成好几行来显示') }
+          ? { ...n, content: textToContent('很长'.repeat(40)) }
           : n,
       ),
     };
@@ -565,6 +579,93 @@ describe('节点尺寸估算(给 ELK 的初值)', () => {
     const inst = nodesOnly(
       projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
     )[0];
+    // ⭐ 上限 = 防失控兜底(不是排版宽度)
     expect(inst.size!.w).toBeLessThanOrEqual(Math.round(H1 * 16) + Math.round(H1 * 1.6));
+  });
+});
+
+/**
+ * ⭐⭐ 不强行折行(用户 2026-09-10:
+ * 「主题框如果没有换行,就应该满足文字的长度,而不是强行换行」)
+ */
+describe('不强行折行', () => {
+  /** 用户真机里那个被硬折的标题 */
+  const LABEL = '主题278910101次';
+
+  it('⭐⭐ 正常长度的标题**一行装下**,不被硬折', () => {
+    const s = snap();
+    const target = s.s.nodes[0];
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n) =>
+        n.id === target.id ? { ...n, content: textToContent(LABEL) } : n,
+      ),
+    };
+    const inst = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    ).find((i) => i.id === target.id)!;
+
+    const fs = BLOCK_VISUAL_SPEC.headings.h1.fontSize;
+    // ⚠️⚠️ **不能只比高度**:高度等于一行,在 maxW 被改小的情况下**照样成立**
+    //   (注入验红时抓到 —— 旧写法三条注入全绿 = 假保证)。
+    //   真正要钉的是「**宽度足以装下这串字**」。
+    const pad = Math.round(fs * 1.6);
+    // ⚠️ 宽度**按字符实算**,不手写常数 —— 我手算过一次就数错了字符数
+    //   (12 字算成 13),断言反而挂在自己算错的期望值上。
+    let textW = 0;
+    for (const ch of LABEL) textW += /[一-鿿]/.test(ch) ? fs : fs * 0.55;
+    textW = Math.round(textW);
+    expect(
+      inst.size!.w,
+      `宽度 ${inst.size!.w} 装不下文字(需 ${textW + pad})→ 会被强行折行`,
+    ).toBeGreaterThanOrEqual(textW + pad);
+  });
+});
+
+/**
+ * ⭐⭐ text_size 与块 level **不能叠乘**(2026-09-10 真机踩过)
+ *
+ * 渲染层公式:`fontSize = headingFontSize(block.level) × (inst.text_size / 16)`
+ * —— 它**自己按块 level 放大**。若投影再把 h1(38)塞进 text_size,
+ * 首块就被渲成 `38 × (38/16) = 90px`,是估算宽度的 2.4 倍 → **强行折行**。
+ *
+ * ⚠️ 我一度以为折行是 maxW(16 字)夹的,把上限放宽到 40 字 —— 实测那串字
+ * 在任何层级都**没碰到过 maxW**(h1 上限 608px,它只要 363px)。
+ * **改错了地方而症状还在**,正是这条断言要防的。
+ */
+describe('字号不叠乘', () => {
+  it('⭐⭐ text_size 恒为正文号(深度→字号由块的 level 表达)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    for (const i of inst) {
+      expect(
+        i.text_size,
+        'text_size 传了标题号 → 与渲染层的 level 放大叠乘 → 字被撑大到折行',
+      ).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+    }
+  });
+
+  it('⭐⭐ 估算宽度 ≥ 该字号下文字实宽(否则渲染层必然折行)', () => {
+    const s = snap();
+    const LABEL = '主题278910101次';
+    const target = s.s.nodes.find((n) => n.role === 'root')!;
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n) => (n.id === target.id ? { ...n, content: textToContent(LABEL) } : n)),
+    };
+    const inst = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    ).find((i) => i.id === target.id)!;
+
+    // 最终渲染字号(与渲染层同一条公式)
+    const fs = headingFontSize(1) * (inst.text_size! / BLOCK_VISUAL_SPEC.body.fontSize);
+    let textW = 0;
+    for (const ch of LABEL) textW += /[一-鿿]/.test(ch) ? fs : fs * 0.55;
+
+    // roundRect 的 textBox 左右各内缩 rad = 0.15 × min(w,h)
+    const rad = 0.15 * Math.min(inst.size!.w, inst.size!.h);
+    const usable = inst.size!.w - 2 * rad;
+    expect(usable, `可用宽 ${Math.round(usable)} < 文字宽 ${Math.round(textW)} → 会折行`)
+      .toBeGreaterThanOrEqual(Math.round(textW));
   });
 });

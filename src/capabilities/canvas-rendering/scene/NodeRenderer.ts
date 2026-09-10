@@ -669,6 +669,13 @@ export class NodeRenderer {
     //    几何 shape 走的是 evaluate → pathToThree,没有这个标记。
     const isPureTextBox = rendered.group.userData?.isTextNode === true;
     if (inst && !isPureTextBox) {
+      // ⚠️⚠️ 只改 size.h 的话,框从**左上角往下长** —— 直接压到下方兄弟节点身上
+      //   (真机踩过:「两个主题框重叠了」)。
+      // ⭐ 纯文字框那条分支是靠 `outer.position.y += (newH-oldH)/2` **保持中心不动**;
+      //   几何分支走 update() 重建,读的是 inst.position(左上角),
+      //   所以要**自己把 position 往上提半个增量**,等效于中心不动、上下对称地长。
+      const grow = newH - rendered.size.h;
+      if (inst.position) inst.position.y -= grow / 2;
       if (inst.size) inst.size.h = newH;
       rendered.size.h = newH;
       this.update(inst);

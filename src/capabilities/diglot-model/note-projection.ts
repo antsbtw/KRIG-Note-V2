@@ -281,10 +281,19 @@ export function noteDocToTree(doc: unknown): SLayer {
       ...(x.content?.length ? { content: x.content } : {}),
       ...(x.attrs?.id ? { attrs: { id: x.attrs.id } } : {}),
     })) as PmNode[];
-    const headBlock: PmNode =
-      (b.content?.length ?? 0) > 0
-        ? { type: 'paragraph', content: b.content }
-        : { type: 'paragraph', content: [{ type: 'text', text: textOf(b) }] };
+    // ⭐⭐ 首块**保留 heading/level**(用户:「paragraph 应该是正文文字大小」)。
+    //
+    // ⚠️ 渲染层(textBlock.ts)**本来就按块给字号**:
+    //   `fontSize = headingFontSize(atom.attrs.level) × (base/16)`,
+    //   paragraph 没有 level → 正文号。所以只要把 level 带上,标题大、正文小
+    //   就自动成立 —— **不需要我另算一套字号**。
+    // ⚠️ 之前把首块拍成裸 paragraph,level 丢了 → 渲染层无从区分,
+    //   整框被节点级 text_size 拉成一样大(真机现象:正文和标题一样大)。
+    const headBlock: PmNode = {
+      type: b.type === 'heading' ? 'heading' : 'paragraph',
+      ...(b.attrs?.level !== undefined ? { attrs: { level: b.attrs.level } } : {}),
+      content: (b.content?.length ?? 0) > 0 ? b.content : [{ type: 'text', text: textOf(b) }],
+    };
     const content: RichContent = {
       format: 'pm-doc-json',
       version: '0.1',
