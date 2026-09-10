@@ -39,6 +39,7 @@ import type {
 } from '@capabilities/canvas-rendering/types';
 import type { GraphLibraryStoreApi } from '@capabilities/graph-library-store/types';
 import type { GraphLayoutApi } from '@capabilities/graph-layout/types';
+import type { CanvasTextNodeApi } from '@capabilities/canvas-text-node';
 import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
 
@@ -69,6 +70,10 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
    * 走 requireCapabilityApi 间接路由;类型走 import type from .../types。
    */
   const diglot = useMemo(() => requireCapabilityApi<DiglotModelApi>('diglot-model'), []);
+  const textNode = useMemo(
+    () => requireCapabilityApi<CanvasTextNodeApi>('canvas-text-node'),
+    [],
+  );
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
   /** ⭐ 真源:{S, G}。instances 是派生物,**绝不反过来当真源**。 */
@@ -109,7 +114,8 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
       const result = await layoutApi.computeLayout(req, {
         algorithm: 'mrtree',
         direction: 'RIGHT',
-        spacing: { node: 24, layer: 60 },
+        // ⚠️ 间距要与节点尺寸同量级,否则 fit 之后视觉上挤成一团
+        spacing: { node: 36, layer: 90 },
       });
       const instances = diglot.projectToInstances(snap.s, snap.g, result) as unknown as Instance[];
       host.loadDocument(toCanvasDocument(instances, { centerX: 0, centerY: 0, zoom: 1 }));
@@ -187,6 +193,20 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
     },
     [graphId, scheduleSave, diglot],
   );
+
+  // ── ⭐ 注入 atom-bridge,节点文字才真渲染 ──
+  //
+  // ⚠️ 不注入的话,带 doc 的节点会退化成**空白灰矩形**(真机实测:六个空框)。
+  // 文字层走 canvas-text-node 的 atomsToSvgInput 把 PM doc 转成可渲染原子 ——
+  // 与 note 编辑器同一条链路(03 §4:content 这一格白送)。
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.setAtomBridge(
+      textNode.atomBridge.atomsToSvgInput as Parameters<CanvasHostHandle['setAtomBridge']>[0],
+    );
+    return () => host.setAtomBridge(null);
+  }, [textNode, graphId]);
 
   // ── 常驻 timer 必须有停止调用(铁律)──
   useEffect(
