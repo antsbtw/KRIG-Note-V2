@@ -156,10 +156,37 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     }, SAVE_DEBOUNCE_MS);
   }, [flushSave]);
 
+  // ── ⭐ variant 探测(独立 effect,**不依赖 Host**)──
+  //
+  // ⚠️ 必须与下面的「加载画板」分开,否则死锁:
+  //   渲染分支在 variant===null 时不挂 <Host> → hostRef 恒 null
+  //   → 加载 effect 的 `if (!host) return` 早退 → 永远拿不到 variant
+  //   → 界面卡在「加载中…」。(2026-09-10 真机实测撞到)
+  // ⭐ 教训:**别把「决定渲染谁」的前置查询,放进「渲染完才跑」的 effect 里。**
+  useEffect(() => {
+    if (!activeGraphId) {
+      setActiveVariant(null);
+      return;
+    }
+    let cancelled = false;
+    void library
+      .load(activeGraphId)
+      .then((record: GraphCanvasRecord | null) => {
+        if (cancelled) return;
+        // 记录不存在:按 canvas 处理(走既有空画板路径),不是卡住
+        setActiveVariant(record ? record.variant : 'canvas');
+      })
+      .catch(() => {
+        if (!cancelled) setActiveVariant('canvas');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGraphId, library]);
+
   // ── 切画板 / 启动恢复 ──
   useEffect(() => {
     activeIdRef.current = activeGraphId;
-    setActiveVariant(null);
     const host = hostRef.current;
     if (!host) return;
 
@@ -191,7 +218,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         // 静默毁数据。故这里 fail loud 并**不标记 loaded**,
         // loadedIdRef 保持旧值 → flushSave 的就绪判据不成立 → 绝不写盘。
         // ⭐ 渲染器接上之前,mind 记录先只创建不打开。
-        setActiveVariant(record.variant);
+        setActiveVariant(record.variant); // 幂等:探测 effect 通常已设过
         if (record.variant !== 'canvas') {
           console.warn(
             `[graph-canvas-view] 拒绝以画板方式打开 variant=${record.variant} 的记录 ` +
