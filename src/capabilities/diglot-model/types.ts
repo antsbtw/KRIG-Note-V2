@@ -310,3 +310,42 @@ export type MindOnly<T> = T;
 
 /** 文档类型 = ⭐ 解释器选择(01 §3.4)。同一 blocks 数据可按大纲或导图解释。 */
 export type DiglotDocType = 'mind' | 'bpmn';
+
+
+// ─────────────────────────────────────────────────────────
+// 6. Capability API(view 通过 requireCapabilityApi 取,不直接 import 运行时值)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * ⭐ diglot-model 对外 API。
+ *
+ * ⚠️ view 层**不得直接 import 本 capability 的运行时值**(eslint 守着):
+ * 走 `requireCapabilityApi<DiglotModelApi>('diglot-model')` 间接路由;
+ * 类型走 `import type ... from '@capabilities/diglot-model/types'`(W5 设计 §5)。
+ */
+export interface DiglotModelApi {
+  /** mind 文件 → {S,G} 快照;坏档 fail loud,不返回半个模型 */
+  readonly fileToSnapshot: (raw: unknown) => import('./engine-contract').ParseResult<
+    import('./engine-contract').DiglotSnapshot
+  >;
+  /** {S,G} 快照 → mind 文件(两段纯文本) */
+  readonly snapshotToFile: (snap: import('./engine-contract').DiglotSnapshot) => unknown;
+  /** 新建 mind 的初始内容(带模板,G 层为空) */
+  readonly emptyMindFile: () => unknown;
+  /** ⭐ 唯一的状态迁移入口 —— 三面改动一律经此 */
+  readonly applyAction: (
+    snap: import('./engine-contract').DiglotSnapshot,
+    action: import('./engine-contract').DiglotAction,
+  ) => import('./engine-contract').DiglotSnapshot;
+  /** S 层 → ELK 布局输入(树的父子在此才变成 edges,仅算法输入) */
+  readonly buildLayoutRequest: (
+    s: SLayer,
+    g: GLayer,
+  ) => import('./project-to-canvas').LayoutRequest;
+  /** ⭐⭐ S + G + 布局 → Instance[](稀疏覆盖全量) */
+  readonly projectToInstances: (
+    s: SLayer,
+    g: GLayer,
+    layout: import('./project-to-canvas').LayoutAnswer,
+  ) => import('./project-to-canvas').ProjectedInstance[];
+}

@@ -42,7 +42,9 @@ import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasRecord,
+  GraphVariant,
 } from '@capabilities/graph-library-store/types';
+import { MindCanvas } from './MindCanvas';
 import { getGraphCanvasWsState } from './data-model';
 import { GraphCanvasToolbar } from './GraphCanvasToolbar';
 import { GraphCanvasNodeToolbar } from './GraphCanvasNodeToolbar';
@@ -92,6 +94,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 
   // ── G4.4d UI 浮层状态(view 端拥有 open/anchor;capability 提供组件)──
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /**
+   * ⭐ 当前记录的 variant —— 决定用哪个渲染器(diglot mind v0)。
+   * 'canvas' 走本 view 的 Host;'mindmap' 走 MindCanvas(真源是 {S,G} 不是 instances)。
+   * null = 还没查出来(加载中),此时**两个渲染器都不挂** ——
+   * 免得用错的那个去读写记录(sanitizeDocument 会把 mind 洗成空画板)。
+   */
+  const [activeVariant, setActiveVariant] = useState<GraphVariant | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
@@ -150,6 +159,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
   // ── 切画板 / 启动恢复 ──
   useEffect(() => {
     activeIdRef.current = activeGraphId;
+    setActiveVariant(null);
     const host = hostRef.current;
     if (!host) return;
 
@@ -181,6 +191,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         // 静默毁数据。故这里 fail loud 并**不标记 loaded**,
         // loadedIdRef 保持旧值 → flushSave 的就绪判据不成立 → 绝不写盘。
         // ⭐ 渲染器接上之前,mind 记录先只创建不打开。
+        setActiveVariant(record.variant);
         if (record.variant !== 'canvas') {
           console.warn(
             `[graph-canvas-view] 拒绝以画板方式打开 variant=${record.variant} 的记录 ` +
@@ -339,6 +350,15 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
               在左侧选择已有画板,或点 NavSide 「+ 画板」新建
             </div>
           </div>
+        ) : activeVariant === 'mindmap' ? (
+          /* ⭐ diglot mind v0:真源是 {S,G},instances 是派生物 —— 独立渲染器 */
+          <MindCanvas workspaceId={workspaceId} graphId={activeGraphId} />
+        ) : activeVariant === null ? (
+          /* ⚠️ variant 未知(加载中)→ 两个渲染器都不挂,
+             免得用错的那个去读写记录(sanitizeDocument 会把 mind 洗成空画板) */
+          <div className="krig-graph-canvas-view__empty">
+            <div className="krig-graph-canvas-view__empty-hint">加载中…</div>
+          </div>
         ) : (
           <Host
             ref={hostRef}
@@ -350,7 +370,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
           />
         )}
         {/* G5 节点浮条(单选时贴选中框下方;view-agnostic node-toolbar capability) */}
-        {activeGraphId != null && (
+        {activeGraphId != null && activeVariant === 'canvas' && (
           <GraphCanvasNodeToolbar
             hostRef={hostRef}
             selectedIds={selectedIds}

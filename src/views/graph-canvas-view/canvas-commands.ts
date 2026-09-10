@@ -18,8 +18,8 @@ import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { GraphLibraryStoreApi } from '@capabilities/graph-library-store/types';
+import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
-import { emptyMindFile } from '@capabilities/diglot-model/mind-file';
 import {
   getGraphCanvasWsState,
   setActiveGraphId,
@@ -44,12 +44,14 @@ export function registerGraphCanvasCommands(wsId: string): void {
   //    可直接喂给 note 导入,不会白写。见 docs/10-business-design/diglot/03 §6。
   registerWsCommand('graph-canvas-view.create-mind', () => wsId, async (ctx) => {
     const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
+    // ⚠️ 走间接路由取 capability(view 不直接 import 运行时值,W5 §5)
+    const diglot = requireCapabilityApi<DiglotModelApi>('diglot-model');
     const record = await library.create('未命名导图', 'mindmap', null);
     if (!record) return;
     // ⭐ 新建即带模板内容(不是空白图)—— 新建就能拖,立刻能验双向同步。
     // ⚠️ 分两步是刻意的:`create` 的签名不收初始内容,而它是 canvas 共用 API ——
     //    为 mind 改它会波及既有画板路径,得不偿失(改动量 vs 架构纯度,选后者)。
-    await library.save(record.id, emptyMindFile(), record.title);
+    await library.save(record.id, diglot.emptyMindFile(), record.title);
     setActiveGraphId(ctx.wsId, record.id);
     pendingCanvasCreatedTrigger?.(record.id);
   });
