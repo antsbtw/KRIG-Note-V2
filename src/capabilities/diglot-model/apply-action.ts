@@ -264,10 +264,37 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
       return { s, g: setG(g, action.id, { color: action.color }) };
     }
 
+    case 'graphic.releaseAllPos': {
+      // ⭐ 整图回自动布局。⚠️ **只删 pos**,不碰 color/shape/collapsed ——
+      //    那些是用户另外表达的意图,不该被「恢复布局」顺手抹掉。
+      const next = new Map<string, GEntry>();
+      for (const [id, e] of g) {
+        const rest: Record<string, unknown> = { ...e };
+        delete rest.pos;
+        delete rest.float; // float 的位置意义随 pos 一起释放
+        // 稀疏纪律:删空的条目整条移除,不留空壳
+        if (Object.keys(rest).length > 0) next.set(id, rest as GEntry);
+      }
+      return { s, g: next };
+    }
+
     case 'graphic.deletePos': {
       // ⭐⭐ C7 释放语义:删条目 → 该元素**回自动布局**,其余一切不变
       //    删空后整条移除(不留空壳),这就是「删除条目即释放回自动」
       return { s, g: unsetG(g, action.id, 'pos') };
     }
   }
+}
+
+
+/**
+ * ⭐ 数一数有多少节点被钉住(G 层有 pos)。
+ *
+ * UI 用它决定「恢复自动布局」按钮是否可用 —— 一个都没钉住时按钮该是灰的,
+ * 否则用户点了没反应会以为坏了(⚠️ 有开关没接线是最劝退的形态)。
+ */
+export function pinnedCount(snapshot: DiglotSnapshot): number {
+  let n = 0;
+  for (const e of snapshot.g.values()) if (e.pos) n += 1;
+  return n;
 }

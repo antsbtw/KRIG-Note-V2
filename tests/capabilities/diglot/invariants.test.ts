@@ -375,6 +375,54 @@ describe('C7 释放语义 —— 删一条 G 条目,该元素回自动,其余一
   });
 });
 
+describe('⭐ 恢复自动布局(整图释放 pos)—— C7 的整图版', () => {
+  it('清空全部 pos → 所有节点回自动布局', () => {
+    const base = freshSnapshot();
+    const ids = base.s.nodes.filter((n) => n.parent !== null).map((n) => n.id);
+    let snap = base;
+    ids.forEach((id, i) => {
+      snap = engine.applyAction(snap, { kind: 'canvas.dragNode', id, x: i * 10, y: i * 20 });
+    });
+    expect(snap.g.size).toBe(ids.length);
+
+    const after = engine.applyAction(snap, { kind: 'graphic.releaseAllPos' });
+    for (const e of after.g.values()) {
+      expect(e.pos, '释放后不该还有 pos').toBeUndefined();
+    }
+    // ⭐ S 层零变更 —— 恢复布局是纯 G 层操作
+    expect(sFingerprint(after.s)).toBe(sFingerprint(snap.s));
+  });
+
+  it('⚠️ 只删 pos,不碰 color/shape/collapsed(那是用户另外表达的意图)', () => {
+    const base = freshSnapshot();
+    const id = someBranchId(base.s);
+    let snap = engine.applyAction(base, { kind: 'canvas.dragNode', id, x: 5, y: 6 });
+    snap = engine.applyAction(snap, { kind: 'graphic.editColor', id, color: 'red' });
+    snap = engine.applyAction(snap, { kind: 'semantic.slashShape', id, shape: 'ellipse' });
+
+    const after = engine.applyAction(snap, { kind: 'graphic.releaseAllPos' });
+    expect(after.g.get(id)?.pos, 'pos 该没了').toBeUndefined();
+    expect(after.g.get(id)?.color, 'color 必须留着').toBe('red');
+    expect(after.g.get(id)?.shape, 'shape 必须留着').toBe('ellipse');
+  });
+
+  it('⭐ 只有 pos 的条目整条移除(稀疏纪律,不留空壳)', () => {
+    const base = freshSnapshot();
+    const id = someBranchId(base.s);
+    const snap = engine.applyAction(base, { kind: 'canvas.dragNode', id, x: 1, y: 2 });
+    const after = engine.applyAction(snap, { kind: 'graphic.releaseAllPos' });
+    expect(after.g.has(id), '零属性条目必须整条移除').toBe(false);
+    expect(after.g.size).toBe(0);
+  });
+
+  it('没有被钉住的节点时,释放是无操作(不报错)', () => {
+    const base = freshSnapshot();
+    const after = engine.applyAction(base, { kind: 'graphic.releaseAllPos' });
+    expect(after.g.size).toBe(0);
+    expect(sFingerprint(after.s)).toBe(sFingerprint(base.s));
+  });
+});
+
 describe('C8 手势消解 —— 语义面斜杠属性词:S 零残留,G 恰好一条', () => {
   it('键入 /三角形 → S 层不留任何属性 token,G 层多一条 shape', () => {
     const base = freshSnapshot();

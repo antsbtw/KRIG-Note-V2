@@ -332,6 +332,8 @@ export interface DiglotModelApi {
   readonly snapshotToFile: (snap: import('./engine-contract').DiglotSnapshot) => unknown;
   /** 新建 mind 的初始内容(带模板,G 层为空) */
   readonly emptyMindFile: () => unknown;
+  /** 该快照里有多少个被钉住(有 pos)的节点 —— UI 用来决定按钮是否可用 */
+  readonly pinnedCount: (snap: import('./engine-contract').DiglotSnapshot) => number;
   /** ⭐ 唯一的状态迁移入口 —— 三面改动一律经此 */
   readonly applyAction: (
     snap: import('./engine-contract').DiglotSnapshot,

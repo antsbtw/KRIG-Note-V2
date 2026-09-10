@@ -48,6 +48,12 @@ const SAVE_DEBOUNCE_MS = 1000;
 export interface MindCanvasProps {
   readonly workspaceId: string;
   readonly graphId: string;
+  /**
+   * 向上报告「有几个节点被钉住」+ 恢复回调。
+   * ⚠️ toolbar 在 GraphCanvasView 里、状态在本组件里 —— 用回调上报而非
+   * 把 toolbar 塞进来,避免两处各存一份 pinned 数量而漂移。
+   */
+  readonly onPinnedChange?: (count: number, releaseAll: () => void) => void;
 }
 
 /** 派生物 → CanvasDocument(画布吃的形态)。 */
@@ -55,7 +61,7 @@ function toCanvasDocument(instances: Instance[], view: CanvasDocument['view']): 
   return { schema_version: 3, view, instances };
 }
 
-export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElement {
+export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasProps): ReactElement {
   const { Host } = useMemo(
     () => requireCapabilityApi<CanvasRenderingApi>('canvas-rendering'),
     [],
@@ -82,6 +88,8 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
   const loadedIdRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 被钉住的节点数 —— 决定「恢复自动布局」按钮是否可用(0 时置灰,别让用户点空)。 */
+  const [pinned, setPinned] = useState(0);
   /**
    * ⭐ Alt 是否按下 —— 区分「裸拖=改结构」与「Alt+拖=自由摆位」(01 §7.2 v0.2)。
    *
@@ -153,6 +161,7 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
         }
       }
       lastPosRef.current = posMap;
+      setPinned(diglot.pinnedCount(snap));
       const instances = projected as unknown as Instance[];
       // ⭐ 保留当前视口 —— 重排不该让镜头动(拖一下整个画布跳是最劝退的体验)
       host.loadDocument(toCanvasDocument(instances, viewportRef.current));
@@ -303,6 +312,27 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
     );
     return () => host.setAtomBridge(null);
   }, [textNode, graphId]);
+
+  /**
+   * ⭐ 恢复自动布局:清空全部 pos,整图回到算出来的位置。
+   *
+   * ⚠️ 这是 `Alt`+拖(自由摆位)的**必要配套** —— 没有释放途径的话,
+   * 钉住是单向的,用户摆乱了就再也回不去(01 §7.5「释放钉住」)。
+   * ⭐ 也是 C7「删除条目即释放回自动」在 UI 上的直接体现。
+   */
+  const handleReleaseAll = useCallback((): void => {
+    const snap = snapRef.current;
+    if (!snap || loadedIdRef.current !== graphId) return;
+    const next = diglot.applyAction(snap, { kind: 'graphic.releaseAllPos' });
+    snapRef.current = next;
+    void render(next);
+    scheduleSave();
+  }, [graphId, diglot, render, scheduleSave]);
+
+  // 把入口交给上层 toolbar(view 持有状态,toolbar 只负责显示)
+  useEffect(() => {
+    onPinnedChange?.(pinned, handleReleaseAll);
+  }, [pinned, handleReleaseAll, onPinnedChange]);
 
   // ── 常驻 timer 必须有停止调用(铁律)──
   useEffect(

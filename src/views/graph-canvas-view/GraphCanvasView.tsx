@@ -101,6 +101,11 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
    * 免得用错的那个去读写记录(sanitizeDocument 会把 mind 洗成空画板)。
    */
   const [activeVariant, setActiveVariant] = useState<GraphVariant | null>(null);
+  /** 导图:被钉住的节点数 + 恢复回调(由 MindCanvas 上报,toolbar 消费)。 */
+  const [mindPinned, setMindPinned] = useState<{ count: number; releaseAll: () => void }>({
+    count: 0,
+    releaseAll: () => {},
+  });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
@@ -366,6 +371,8 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         activeGraphId={activeGraphId}
         hostRef={hostRef}
         isMind={activeVariant === 'mindmap'}
+        mindPinnedCount={mindPinned.count}
+        onMindReleaseAll={mindPinned.releaseAll}
         selectedCount={selectedIds.length}
         onAddClick={handlePickerOpen}
         onCombineClick={() => setCombineDialogOpen(true)}
@@ -382,7 +389,11 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
           </div>
         ) : activeVariant === 'mindmap' ? (
           /* ⭐ diglot mind v0:真源是 {S,G},instances 是派生物 —— 独立渲染器 */
-          <MindCanvas workspaceId={workspaceId} graphId={activeGraphId} />
+          <MindCanvas
+            workspaceId={workspaceId}
+            graphId={activeGraphId}
+            onPinnedChange={(count, releaseAll) => setMindPinned({ count, releaseAll })}
+          />
         ) : activeVariant === null ? (
           /* ⚠️ variant 未知(加载中)→ 两个渲染器都不挂,
              免得用错的那个去读写记录(sanitizeDocument 会把 mind 洗成空画板) */

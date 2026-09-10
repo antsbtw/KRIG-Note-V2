@@ -68,7 +68,15 @@ export type DiglotAction =
   // ── 图形面(落 G) ──
   | { readonly kind: 'graphic.editColor'; readonly id: NodeId; readonly color: string }
   /** ⭐ 删 pos 条目 → 回自动布局(C7 的画布入口) */
-  | { readonly kind: 'graphic.deletePos'; readonly id: NodeId };
+  | { readonly kind: 'graphic.deletePos'; readonly id: NodeId }
+  /**
+   * ⭐ 全图恢复自动布局:清空**所有** pos 条目(01 §7.5「释放钉住」的整图版)。
+   *
+   * ⚠️ 为什么单独一个 action 而不是循环发 deletePos:
+   * 循环发会产生 N 个可撤销事务,用户按一次 Cmd+Z 只弹回一个节点 ——
+   * 而他心里那一步操作是「整图恢复自动」。**一次操作 = 一条事务**(00 §7)。
+   */
+  | { readonly kind: 'graphic.releaseAllPos' };
 
 // ─────────────────────────────────────────────────────────
 // 3. 引擎接口

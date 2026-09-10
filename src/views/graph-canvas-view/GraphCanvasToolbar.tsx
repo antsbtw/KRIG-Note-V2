@@ -32,6 +32,10 @@ interface GraphCanvasToolbarProps {
    * 画板专属按钮(添加/Fit/Combine)打过去是**静默无效**,故隐藏而非留着骗人。
    */
   isMind?: boolean;
+  /** 导图:被钉住的节点数(0 时按钮置灰 —— 别让用户点空)。 */
+  mindPinnedCount?: number;
+  /** 导图:恢复自动布局(清空全部 pos)。 */
+  onMindReleaseAll?: () => void;
   /** 选区数(G4.4d):0 隐 Combine,1+ 显;Combine 仅 ≥2 才可点 */
   selectedCount: number;
   /** "+添加"按钮点击 — view 端打开 LibraryPicker(传 anchorRect) */
@@ -44,6 +48,8 @@ export function GraphCanvasToolbar({
   activeGraphId,
   hostRef,
   isMind = false,
+  mindPinnedCount = 0,
+  onMindReleaseAll,
   selectedCount,
   onAddClick,
   onCombineClick,
@@ -102,6 +108,22 @@ export function GraphCanvasToolbar({
         {activeGraphId == null ? '画板' : title || (isMind ? '未命名导图' : 'Untitled Canvas')}
       </div>
       <div className="krig-graph-canvas-toolbar__actions">
+        {/* ⭐ 导图专属:恢复自动布局(Alt+拖自由摆位的必要配套,01 §7.5) */}
+        {activeGraphId != null && isMind && (
+          <button
+            type="button"
+            className="krig-graph-canvas-toolbar__btn"
+            onClick={onMindReleaseAll}
+            disabled={mindPinnedCount === 0}
+            title={
+              mindPinnedCount === 0
+                ? '没有被钉住的节点(全部已是自动布局)'
+                : `恢复自动布局:释放 ${mindPinnedCount} 个被钉住的节点`
+            }
+          >
+            ⟲ 恢复自动布局{mindPinnedCount > 0 ? ` (${mindPinnedCount})` : ''}
+          </button>
+        )}
         {activeGraphId != null && !isMind && (
           <>
             <button
