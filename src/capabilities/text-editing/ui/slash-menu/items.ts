@@ -23,7 +23,7 @@
 
 import type { SlashItem } from '@slot/interaction-registries/slash-registry/slash-types';
 
-/** 11 项 turn-into:Paragraph / H1-H3 / Bullet / Ordered / Task / Quote / Code / Divider / Callout / Toggle */
+/** 14 项 turn-into:Paragraph / H1-H6 / Bullet / Ordered / Task / Quote / Code / Divider / Callout / Toggle */
 export function createTurnIntoItems(viewId: string): SlashItem[] {
   return [
     {
@@ -68,6 +68,39 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       icon: 'heading-3',
       hint: '###',
       order: 40,
+    },
+    {
+      id: `${viewId}.slash.h4`,
+      label: 'Heading 4',
+      command: 'text-editing.slash-turn-h4',
+      keywords: ['h4', 'heading', 'header'],
+      view: viewId,
+      group: 'basic',
+      icon: 'heading-4',
+      hint: '####',
+      order: 41,
+    },
+    {
+      id: `${viewId}.slash.h5`,
+      label: 'Heading 5',
+      command: 'text-editing.slash-turn-h5',
+      keywords: ['h5', 'heading', 'header'],
+      view: viewId,
+      group: 'basic',
+      icon: 'heading-5',
+      hint: '#####',
+      order: 42,
+    },
+    {
+      id: `${viewId}.slash.h6`,
+      label: 'Heading 6',
+      command: 'text-editing.slash-turn-h6',
+      keywords: ['h6', 'heading', 'header'],
+      view: viewId,
+      group: 'basic',
+      icon: 'heading-6',
+      hint: '######',
+      order: 43,
     },
     {
       id: `${viewId}.slash.bullet`,

@@ -18,6 +18,7 @@ import { dropPoint } from 'prosemirror-transform';
 import { handleMenuController } from '@slot/triggers/handle-menu-controller';
 import { dnd } from '@capabilities/drag-and-drop';
 import { MultipleNodeSelection } from './_shared/multiple-node-selection';
+import { hasCollapsibleContent } from './build-heading-collapse-plugin';
 
 const handleKey = new PluginKey('text-editing-driver:block-handle');
 
@@ -54,6 +55,11 @@ const CONFIG = {
   // hide 延迟
   HIDE_DELAY_FROM_HANDLE: 300, // ms 鼠标离开 handle 后多久隐
   HIDE_DELAY_FROM_VIEW: 100,   // ms 鼠标离开 view.dom 后多久隐
+
+  // heading 折叠三角(heading-toggle plugin)占位 —— 对齐 Notion:
+  // 三角紧贴标题文字左缘,handle 整体再往左让位,两者不重叠。
+  // 必须 = pm-host.css .krig-heading-toggle 的 |left| + 宽度余量。
+  HEADING_TOGGLE_RESERVE: 28,
 
   // ⋮⋮ menu 弹出 offset
   MENU_OFFSET_RIGHT: 4,        // menu 距 ⋮⋮ 右缘多少 px
@@ -466,7 +472,14 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
         // 对齐 Notion:handle 跟随当前 block 文字左缘(blockRect.left 含 list 嵌套缩进)
         // 垂直对齐第一行基线中心
         const topAbs = blockRect.top + paddingTop + lineHeight / 2 - HANDLE_HEIGHT / 2;
-        const leftAbs = blockRect.left - HANDLE_WIDTH - CONFIG.HANDLE_TEXT_GAP;
+        // 该 block 是"带折叠三角的 heading"时,三角占了文字左缘外第一格 —— handle 再往左让位。
+        // 判据与三角渲染同源(hasCollapsibleContent),避免两边各自判断而漂移。
+        const reserve =
+          blockNode.type.name === 'heading' &&
+          hasCollapsibleContent(view.state.doc, blockStart)
+            ? CONFIG.HEADING_TOGGLE_RESERVE
+            : 0;
+        const leftAbs = blockRect.left - HANDLE_WIDTH - CONFIG.HANDLE_TEXT_GAP - reserve;
         // 相对 hostContainer 的偏移
         const top = topAbs - hostRect.top;
         const left = leftAbs - hostRect.left;

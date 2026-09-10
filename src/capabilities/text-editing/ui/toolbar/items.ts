@@ -66,6 +66,27 @@ export function createHeadingDropdown(viewId: string): ToolbarItem {
         commandArg: 3,
         activeWhen: (ctx) => ctx.selection?.activeLevel === 3,
       },
+      {
+        id: 'h4',
+        label: 'H4',
+        command: 'text-editing.set-heading-level',
+        commandArg: 4,
+        activeWhen: (ctx) => ctx.selection?.activeLevel === 4,
+      },
+      {
+        id: 'h5',
+        label: 'H5',
+        command: 'text-editing.set-heading-level',
+        commandArg: 5,
+        activeWhen: (ctx) => ctx.selection?.activeLevel === 5,
+      },
+      {
+        id: 'h6',
+        label: 'H6',
+        command: 'text-editing.set-heading-level',
+        commandArg: 6,
+        activeWhen: (ctx) => ctx.selection?.activeLevel === 6,
+      },
     ],
   };
 }

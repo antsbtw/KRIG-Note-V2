@@ -37,6 +37,7 @@ import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 import { buildKeyboardKeymap } from './keyboard/build-keyboard-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
+import { buildHeadingTogglePlugin } from './plugins/build-heading-toggle-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
 import { buildBottomPadPlugin } from './plugins/build-bottom-pad-plugin';
 
@@ -171,7 +172,8 @@ export function buildEditorView(
     ...(enablePasteMedia ? [buildPasteMediaPlugin()] : []),
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     ...(enableCodeSyntaxHighlight ? [buildCodeSyntaxHighlightPlugin()] : []),
-    ...(enableHeadingCollapse ? [buildHeadingCollapsePlugin()] : []),
+    // 折叠逻辑 + 行内三角入口:同一开关(没有折叠能力时三角也没意义)
+    ...(enableHeadingCollapse ? [buildHeadingCollapsePlugin(), buildHeadingTogglePlugin()] : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
     // (Phase 3:split-indent keymap 的 Enter 继承缩进已并入集中 keyboard 模块的

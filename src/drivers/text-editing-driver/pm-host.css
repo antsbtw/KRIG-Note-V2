@@ -4409,3 +4409,97 @@
 .krig-block-frame:hover {
   background: color-mix(in srgb, var(--krig-frame-color, #337EA9) 6%, transparent);
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   heading-toggle — h1~h6 行内折叠三角(▸/▾)
+   由 build-heading-toggle-plugin 的 widget decoration 注入。
+
+   定位:absolute 挂在 heading 盒子内、悬在文字左缘外 —— 绝不占文档流,
+   否则标题文字会横移、整篇重排(三角是入口不是内容)。
+   对齐 Notion:紧贴文字左缘,⋮⋮ 手柄再往左让位(见 block-handle 的
+   HEADING_TOGGLE_RESERVE)。
+
+   显形规则:
+     - 展开态:hover 该标题才显(常驻符号干扰阅读)
+     - 折叠态:⭐ 常驻可见 —— 否则「哪些标题折叠了」一眼看不出
+   ───────────────────────────────────────────────────────────────── */
+
+/* 有三角的 heading 作为定位锚点(不改 padding/margin,不影响排版) */
+.krig-pm-host .ProseMirror h1.has-heading-toggle,
+.krig-pm-host .ProseMirror h2.has-heading-toggle,
+.krig-pm-host .ProseMirror h3.has-heading-toggle,
+.krig-pm-host .ProseMirror h4.has-heading-toggle,
+.krig-pm-host .ProseMirror h5.has-heading-toggle,
+.krig-pm-host .ProseMirror h6.has-heading-toggle {
+  position: relative;
+}
+
+.krig-pm-host .ProseMirror .krig-heading-toggle {
+  position: absolute;
+  /* 悬在文字左缘外:三角靶区 22 + 间距 6 */
+  left: -28px;
+
+  /* ── 垂直居中对齐标题**第一行**(实测定的,改前先读完)──
+     难点:三角要按**标题**的行高居中(h1 行框 38×1.7=64.6px),但字形本身
+     必须固定 16px(不能跟着 h1 涨成 38px 的巨大三角)。两个尺寸来源不同。
+
+     ⚠️ 试过两条死路(都在 Electron 40 实测过):
+       ① `height: 1.7em` —— em 解析**本元素自己的** font-size,不是标题的;
+          三角固定 16px 时得到 27.2px 矮盒子 → flex 居中落在标题上部。
+       ② `height: 1lh` —— lh 继承的是 line-height **倍率**不是父级算好的行框;
+          同样按本元素 16px 算 → 还是 27.2px。实测中心 y=11 vs 应为 35.3。
+       这就是用户看到"三角没垂直居中"的真因。
+
+     ✅ 解法:让**外壳**继承标题字号(不设 font-size),只用它做 em 度量 ——
+        top = padding-top + 0.85em(0.85 = 1.7/2,半个行高,em 此时是标题字号),
+        再 translateY(-50%) 回拉半个自身高度 → 精确落在首行中线。
+        字形大小交给 ::before 的固定 16px,与外壳度量解耦。
+     实测 h1/h2/h6 偏差均为 0px。 */
+  top: calc(3px + 0.85em);
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a8f98;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+
+/* ▼ 展开 / ▶ 折叠
+   ⭐ 字形大小在这里定(不在外壳上)—— 外壳字号要继承标题做 em 度量,见上。
+   与 toggleList 的 ▶ 完全同款:font-size:16px + **实心** ▶/▼。
+   (空心 ▸/▾ 是另一套字形,同字号下视觉明显更小 —— 这才是第一版"看起来小"
+    的真因,不单是字号。) */
+.krig-pm-host .ProseMirror .krig-heading-toggle::before {
+  content: '▼';
+  font-size: 16px;
+  line-height: 1;
+}
+.krig-pm-host .ProseMirror .krig-heading-toggle--collapsed::before {
+  content: '▶';
+}
+
+/* 展开态:hover 标题所在行才显形 */
+.krig-pm-host .ProseMirror h1.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h2.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h3.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h4.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h5.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h6.has-heading-toggle:hover .krig-heading-toggle {
+  opacity: 1;
+}
+
+/* ⭐ 折叠态常驻可见(不 hover 也看得见,这是"哪些被折叠了"的唯一显式线索) */
+.krig-pm-host .ProseMirror .krig-heading-toggle--collapsed {
+  opacity: 1;
+}
+
+.krig-pm-host .ProseMirror .krig-heading-toggle:hover {
+  color: #e8eaed;
+  background: rgba(255, 255, 255, 0.1);
+}

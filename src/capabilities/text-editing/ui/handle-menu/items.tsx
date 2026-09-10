@@ -78,7 +78,7 @@ export function createFormatContainer(viewId: string): HandleItem {
   };
 }
 
-/** 11 项 turn-into submenu 子项(submenuOf='turn-into') */
+/** 14 项 turn-into submenu 子项(submenuOf='turn-into')—— h4~h6 order 用小数位插队,避免改动后续 8 项 */
 export function createTurnIntoSubmenu(viewId: string): HandleItem[] {
   return [
     {
@@ -96,6 +96,18 @@ export function createTurnIntoSubmenu(viewId: string): HandleItem[] {
     {
       id: `${viewId}.h.sub.turn-h3`, icon: 'H3', label: 'Heading 3',
       command: 'text-editing.handle-turn-h3', submenuOf: 'turn-into', view: viewId, order: 13,
+    },
+    {
+      id: `${viewId}.h.sub.turn-h4`, icon: 'H4', label: 'Heading 4',
+      command: 'text-editing.handle-turn-h4', submenuOf: 'turn-into', view: viewId, order: 13.1,
+    },
+    {
+      id: `${viewId}.h.sub.turn-h5`, icon: 'H5', label: 'Heading 5',
+      command: 'text-editing.handle-turn-h5', submenuOf: 'turn-into', view: viewId, order: 13.2,
+    },
+    {
+      id: `${viewId}.h.sub.turn-h6`, icon: 'H6', label: 'Heading 6',
+      command: 'text-editing.handle-turn-h6', submenuOf: 'turn-into', view: viewId, order: 13.3,
     },
     {
       id: `${viewId}.h.sub.turn-bullet`, icon: '•', label: 'Bullet List',

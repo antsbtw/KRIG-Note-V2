@@ -23,13 +23,16 @@ import type { SlashItem } from '@slot/interaction-registries/slash-registry/slas
  *
  * 命令→TurnTarget 权威源:register-pm-commands.ts registerSlashTurn(...);
  * TurnTarget(kebab)→ atom.type(camel)在此显式登记,避免散落字符串。
- * paragraph/h1-h3 都落 paragraph|heading(渲染态 renderTextBlock),恒可渲。
+ * paragraph/h1-h6 都落 paragraph|heading(渲染态 renderTextBlock),恒可渲。
  */
 const SLASH_TURN_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
   'text-editing.slash-turn-paragraph': 'paragraph',
   'text-editing.slash-turn-h1': 'heading',
   'text-editing.slash-turn-h2': 'heading',
   'text-editing.slash-turn-h3': 'heading',
+  'text-editing.slash-turn-h4': 'heading',
+  'text-editing.slash-turn-h5': 'heading',
+  'text-editing.slash-turn-h6': 'heading',
   'text-editing.slash-turn-bullet': 'bulletList',
   'text-editing.slash-turn-ordered': 'orderedList',
   'text-editing.slash-turn-task': 'taskList',

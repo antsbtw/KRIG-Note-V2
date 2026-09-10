@@ -27,7 +27,7 @@ import type { DriverSerialized } from '@drivers/text-editing-driver';
 
 /** TurnInto 目标 block 类型(slash / handle 命令用)*/
 export type TurnTarget =
-  | 'paragraph' | 'h1' | 'h2' | 'h3'
+  | 'paragraph' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
   | 'bullet-list' | 'ordered-list' | 'task-list'
   | 'blockquote' | 'code-block' | 'horizontal-rule'
   | 'callout' | 'toggle-list';

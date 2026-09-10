@@ -26,7 +26,7 @@ import { instanceRegistry } from '@drivers/text-editing-driver/instance-registry
 const tea = textEditingDriverApi;
 
 type TurnTarget =
-  | 'paragraph' | 'h1' | 'h2' | 'h3'
+  | 'paragraph' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
   | 'bullet-list' | 'ordered-list' | 'task-list'
   | 'blockquote' | 'code-block' | 'horizontal-rule'
   | 'callout' | 'toggle-list';
@@ -171,6 +171,9 @@ export function registerTextEditingCommands(): void {
   registerSlashTurn('text-editing.slash-turn-h1', 'h1');
   registerSlashTurn('text-editing.slash-turn-h2', 'h2');
   registerSlashTurn('text-editing.slash-turn-h3', 'h3');
+  registerSlashTurn('text-editing.slash-turn-h4', 'h4');
+  registerSlashTurn('text-editing.slash-turn-h5', 'h5');
+  registerSlashTurn('text-editing.slash-turn-h6', 'h6');
   registerSlashTurn('text-editing.slash-turn-bullet', 'bullet-list');
   registerSlashTurn('text-editing.slash-turn-ordered', 'ordered-list');
   registerSlashTurn('text-editing.slash-turn-task', 'task-list');
@@ -236,6 +239,9 @@ export function registerTextEditingCommands(): void {
   registerHandleTurn('text-editing.handle-turn-h1', 'h1');
   registerHandleTurn('text-editing.handle-turn-h2', 'h2');
   registerHandleTurn('text-editing.handle-turn-h3', 'h3');
+  registerHandleTurn('text-editing.handle-turn-h4', 'h4');
+  registerHandleTurn('text-editing.handle-turn-h5', 'h5');
+  registerHandleTurn('text-editing.handle-turn-h6', 'h6');
   registerHandleTurn('text-editing.handle-turn-bullet', 'bullet-list');
   registerHandleTurn('text-editing.handle-turn-ordered', 'ordered-list');
   registerHandleTurn('text-editing.handle-turn-task', 'task-list');

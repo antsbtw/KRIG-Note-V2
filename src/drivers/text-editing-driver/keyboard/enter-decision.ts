@@ -12,9 +12,14 @@ import { liftEmptyBlock } from 'prosemirror-commands';
 import { splitListItem, liftListItem } from 'prosemirror-schema-list';
 import type { KeyboardMetaLookup } from './resolve-context';
 import {
+  isHeadingCollapsed,
+  headingCollapseRange,
+} from '../plugins/build-heading-collapse-plugin';
+import {
   splitBlockInheritFormat,
   exitToParagraphAfter,
   insertSiblingToggleAfter,
+  insertSiblingHeadingAfter,
   insertNewline,
   codeBlockExitOnDoubleEnter,
 } from './semantic-actions';
@@ -70,6 +75,24 @@ export function buildEnterCommand(metaLookup: KeyboardMetaLookup): Command {
         return insertSiblingToggleAfter(toggleDepth)(state, dispatch);
       }
       // open=true → 落到下方通用 split(容器内小 note 正常拆段)
+    }
+
+    // —— 3.5 收起的 heading 行:在折叠范围之后插一个**同级新 heading** ——
+    // 与上面 toggle 同源语义:折叠态下这一行代表整个章节,回车产出下一个对等章节,
+    // 而不是钻进看不见的折叠内容里加正文(光标会凭空消失)。
+    // 展开态**不接管** —— 落到 step 6 通用 split,回车照旧产出正文段。
+    //
+    // 折叠状态只活在 plugin state(不写 attrs),故这里读 plugin 而非 node.attrs。
+    // 顶层 heading 才有折叠语义($from.depth === 1);容器内 heading 不参与。
+    if (blockType === 'heading' && $from.depth === 1) {
+      const headingPos = $from.before($from.depth);
+      if (isHeadingCollapsed(state, headingPos)) {
+        const range = headingCollapseRange(state.doc, headingPos);
+        // 折叠态必有范围(没内容不会显示三角也折不起来);防御性兜底放行
+        if (range) {
+          return insertSiblingHeadingAfter(headingPos, range.to)(state, dispatch);
+        }
+      }
     }
 
     // —— 4. 列表项:非空拆项(splitListItem);空项跳出列表 ——

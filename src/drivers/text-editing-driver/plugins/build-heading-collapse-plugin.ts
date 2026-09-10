@@ -119,6 +119,49 @@ function rebaseCollapsed(tr: Transaction, oldCollapsed: Set<number>): Set<number
 
 // ─── 公共 API(供 driver / TOC 用)────────────────────────
 
+/**
+ * 求某 heading 的折叠范围 —— 纯函数,不依赖 plugin state。
+ *
+ * 语义与 computeRanges 内部一致:从 heading 末尾起,到第一个 level <= 自身
+ * 的后续 heading 为止;没有则到文末。
+ *
+ * 返回 null = 该 heading 下**没有任何内容**(下一个 block 就是同级/更高级
+ * heading,或它本身就是最后一个 block)。⭐ 三角是否显示的唯一判据。
+ */
+export function headingCollapseRange(
+  doc: import('prosemirror-model').Node,
+  pos: number,
+): { from: number; to: number } | null {
+  const node = doc.nodeAt(pos);
+  if (!node || node.type.name !== 'heading') return null;
+  const level = node.attrs.level as number;
+  const rangeStart = pos + node.nodeSize;
+  let rangeEnd = doc.content.size;
+  let found = false;
+  doc.forEach((other, offset) => {
+    if (found) return;
+    if (offset <= pos) return;
+    if (other.type.name !== 'heading') return;
+    if ((other.attrs.level as number) <= level) {
+      rangeEnd = offset;
+      found = true;
+    }
+  });
+  if (rangeStart >= rangeEnd) return null;
+  return { from: rangeStart, to: rangeEnd };
+}
+
+/**
+ * 该 heading 下面是否有可折叠内容(= 是否该显示三角)。
+ * 没内容还显三角是骗人 —— 见 §3.1 第 3 条。
+ */
+export function hasCollapsibleContent(
+  doc: import('prosemirror-model').Node,
+  pos: number,
+): boolean {
+  return headingCollapseRange(doc, pos) !== null;
+}
+
 /** 查某 heading 当前是否折叠(handle dynamicLabel 用)*/
 export function isHeadingCollapsed(state: EditorState, pos: number): boolean {
   const cur = headingCollapseKey.getState(state);

@@ -1081,7 +1081,7 @@ export const textEditingDriverApi = {
    * 把当前光标所在 block(或指定 pos block)Turn Into 指定类型
    *
    * 支持:
-   * - 'paragraph' / 'h1' / 'h2' / 'h3' — 切换到 paragraph / heading{level} 节点类型
+   * - 'paragraph' / 'h1'..'h6' — 切换到 paragraph / heading{level} 节点类型
    * - 'bullet-list' / 'ordered-list' / 'task-list' — 包成 list > list-item > paragraph(或 heading)
    * - 'blockquote' — 包成 blockquote > 当前 block
    * - 'code-block' — 替换为 code-block(纯文本)
@@ -1095,6 +1095,9 @@ export const textEditingDriverApi = {
       | 'h1'
       | 'h2'
       | 'h3'
+      | 'h4'
+      | 'h5'
+      | 'h6'
       | 'bullet-list'
       | 'ordered-list'
       | 'task-list'
@@ -1190,7 +1193,10 @@ export const textEditingDriverApi = {
     }
 
     // heading 切换 — 切到 heading 节点类型 + level
-    if (target === 'h1' || target === 'h2' || target === 'h3') {
+    if (
+      target === 'h1' || target === 'h2' || target === 'h3' ||
+      target === 'h4' || target === 'h5' || target === 'h6'
+    ) {
       const headingType = schema.nodes.heading;
       if (!headingType) return;
       const level = parseInt(target.slice(1), 10);
@@ -1326,6 +1332,9 @@ export const textEditingDriverApi = {
       | 'h1'
       | 'h2'
       | 'h3'
+      | 'h4'
+      | 'h5'
+      | 'h6'
       | 'bullet-list'
       | 'ordered-list'
       | 'task-list'

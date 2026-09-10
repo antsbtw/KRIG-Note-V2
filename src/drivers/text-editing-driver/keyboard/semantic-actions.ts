@@ -132,6 +132,40 @@ export function insertSiblingToggleAfter(
   };
 }
 
+/**
+ * 在**已折叠的** heading 之后插入一个同级新 heading(折叠标题上按 Enter)。
+ *
+ * 语义与 insertSiblingToggleAfter 同源:折叠态下这一行代表的是"整个章节"这个
+ * 整体,而不是一行文字 —— 回车理应产出下一个对等的章节标题,而不是钻进被折叠
+ * 的内容里加正文(那段内容还看不见,光标跳进去等于凭空消失)。
+ *
+ * 落点在**折叠范围之后**(不是 heading 之后)—— 否则新标题会插进折叠区里被藏掉。
+ *
+ * 新 heading 继承原 level 与 indent;不继承 isTitle 等其它 attr。
+ */
+export function insertSiblingHeadingAfter(
+  headingPos: number,
+  /** 折叠范围终点(= 新标题的落点);由调用方从折叠 plugin 求得 */
+  insertPos: number,
+): ActionFn {
+  return (state, dispatch) => {
+    const heading = state.doc.nodeAt(headingPos);
+    const headingType = state.schema.nodes.heading;
+    if (!heading || heading.type.name !== 'heading' || !headingType) return false;
+    if (dispatch) {
+      const level = heading.attrs.level as number;
+      const indent = (heading.attrs.indent as number | undefined) ?? 0;
+      const newHeading = headingType.create({ level, indent });
+      const tr = state.tr.insert(insertPos, newHeading);
+      // +1 进入新 heading 的 inline 内容
+      tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
+      tr.scrollIntoView();
+      dispatch(tr);
+    }
+    return true;
+  };
+}
+
 /** 块内插换行 `\n`(代码块 Enter)。 */
 export function insertNewline(): ActionFn {
   return (state, dispatch) => {
