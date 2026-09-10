@@ -495,8 +495,19 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
       if (!node) return;
       const inst = hostRef.current?.getInstance(info.instanceId);
       if (!inst) return;
-      if (inst.type === 'shape' && shapeApi.shapes.get(inst.ref)?.category === 'line') return;
-
+      // ⭐ 与画板**同一套判定**(GraphCanvasView.handleNodeDoubleClick):
+      //   line 类不可编辑(端点驱动、无文字层);
+      //   几何 shape(parametric/svg)= 文字层叠在几何上 → popup 透明,几何透出不被遮挡;
+      //   文字框(kind:'text')有自身底色 → 不透明。
+      // ⚠️ 我原先硬编码 transparent: true —— 导图节点是 roundRect(parametric),
+      //   碰巧也是 true,但那是**巧合不是道理**;换个形状就错了(用户指出要与画板一致)。
+      let transparent = false;
+      if (inst.type === 'shape') {
+        const shape = shapeApi.shapes.get(inst.ref);
+        if (shape?.category === 'line') return;
+        transparent = shape?.geometry.kind !== 'text';
+      }
+      // 进编辑:隐藏渲染态文字层,避免与透明编辑浮层的文字重影(退出恢复)
       hostRef.current?.setNodeTextLayerVisible(info.instanceId, false);
       textNode.enterEdit({
         instanceId: info.instanceId,
@@ -506,8 +517,13 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
         width: info.screenW,
         height: info.screenH,
         backgroundColor: inst.style_overrides?.fill?.color,
-        transparent: true,
+        transparent,
+        // ⭐ 与画板一致:size_lock 决定编辑框高度是否固定
+        heightFixed: !!inst.size_lock?.h,
         workspaceId,
+        // ⚠️ 节点编辑用画板的 viewId(与画布文字节点同一套菜单 + 渲染态闸),
+        //    **不是**语义面的 mind-semantic —— 节点内容要经 atomsToSvg 渲成 mesh,
+        //    那道「能插 ⊆ 能渲」的闸对它是必要的。
         viewId: 'graph-canvas-view',
         onExit: (id, newDoc) => {
           if (newDoc === null) {
