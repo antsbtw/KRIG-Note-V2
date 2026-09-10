@@ -125,6 +125,20 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
       },
       ...(inline.length > 0 ? { content: inline } : {}),
     });
+
+    // ⭐⭐ 首块之后的块 = 并进来的正文,**原样 emit 成无 indent 的 paragraph**。
+    //
+    // ⚠️⚠️ 这里是本节最容易写错的地方:正文若也按深度加 indent,
+    // 正向读回来就会被当成**层级** → 节点一轮轮增殖,往返不收敛。
+    // (note-block-grouping.test.ts 的「往返收敛」断言钉的就是这条。)
+    for (const extra of bodyBlocksOf(n.content)) {
+      out.push({
+        type: 'paragraph',
+        ...(extra.attrs?.id ? { attrs: { id: extra.attrs.id } } : {}),
+        ...(extra.content?.length ? { content: extra.content } : {}),
+      });
+    }
+
     for (const c of byParent.get(n.id) ?? []) emit(c, depth + 1);
   };
   for (const top of byParent.get('\0root') ?? []) emit(top, 0);
@@ -148,6 +162,15 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
  */
 function levelOf(node: PmNode): number {
   return depthForNoteForm(node);
+}
+
+/**
+ * ⭐ content 信封里**首块之后**的块 = 并进该节点的正文(规格 03 §5.5)。
+ * ⚠️ 首块是标签本体(inlineOf 取的就是它),不在此列。
+ */
+function bodyBlocksOf(content: RichContent): PmNode[] {
+  const payload = content.payload as { content?: PmNode[] } | undefined;
+  return (payload?.content ?? []).slice(1) as PmNode[];
 }
 
 /** 该块的纯文本(用于回落到 content 信封)。 */
@@ -180,9 +203,33 @@ function rankAt(i: number): string {
  */
 export function noteDocToTree(doc: unknown): SLayer {
   const d = doc as { payload?: { content?: PmNode[] } } | undefined;
-  const blocks = (d?.payload?.content ?? []).filter(
+  const raw = (d?.payload?.content ?? []).filter(
     (b) => b.type === 'heading' || b.type === 'paragraph',
   );
+
+  // ⭐⭐ 节点 = 标题 + 它的正文(规格 03 §5.5,用户拍板:「要默认它作为一个整体」)。
+  //
+  // ⚠️ 旧版把 heading / paragraph **一视同仁**当树节点 → 标题下写一行正文就
+  // 凭空多一个节点(真机现象:公式看着像从主题框溢出,其实它自己就是个框)。
+  //
+  // 归属规则:
+  //   heading                  → 开新节点(首行)
+  //   paragraph 带 indent >= 1 → 开新节点(h6 之后的层级)
+  //   paragraph 无 indent      → ⭐ 并入上一个节点,当正文
+  //
+  // ⭐ 两条不冲突:noteFormForDepth 产出的层级段落**永远带 indent >= 1**
+  //   (depth 6 → indent 1 …),从不产出无 indent 段落 —— 那个形态是空出来的。
+  const groups: { head: PmNode; body: PmNode[] }[] = [];
+  for (const b of raw) {
+    const ind = b.attrs?.indent;
+    const startsNode =
+      b.type === 'heading' || (typeof ind === 'number' && ind >= 1);
+    // ⚠️ 文档以无 indent 段落开头 → 没有「上一个节点」可并,自成节点,
+    //    否则这段内容会凭空消失。
+    if (startsNode || groups.length === 0) groups.push({ head: b, body: [] });
+    else groups[groups.length - 1].body.push(b);
+  }
+  const blocks = groups.map((g) => g.head);
 
   const stack: { level: number; id: NodeId }[] = [];
   const parents: (NodeId | null)[] = [];
@@ -227,14 +274,22 @@ export function noteDocToTree(doc: unknown): SLayer {
       }
     }
     // ⭐ 富内容原样保住:有 inline 就包回信封,不经纯文本拍平
-    const content: RichContent =
+    // ⭐⭐ content 现在可装**多块**:首块 = 标题本身,其后 = 并进来的正文。
+    //    ⚠️ inlineOf / contentToText 只取首块 —— 那仍然正确(标签 = 首行)。
+    const bodyBlocks = groups[i].body.map((x) => ({
+      type: 'paragraph',
+      ...(x.content?.length ? { content: x.content } : {}),
+      ...(x.attrs?.id ? { attrs: { id: x.attrs.id } } : {}),
+    })) as PmNode[];
+    const headBlock: PmNode =
       (b.content?.length ?? 0) > 0
-        ? {
-            format: 'pm-doc-json',
-            version: '0.1',
-            payload: { type: 'doc', content: [{ type: 'paragraph', content: b.content }] },
-          }
-        : textToContent(textOf(b));
+        ? { type: 'paragraph', content: b.content }
+        : { type: 'paragraph', content: [{ type: 'text', text: textOf(b) }] };
+    const content: RichContent = {
+      format: 'pm-doc-json',
+      version: '0.1',
+      payload: { type: 'doc', content: [headBlock, ...bodyBlocks] },
+    };
     return { id: ids[i], content, parent: parents[i], order: orders[i], role };
   });
 

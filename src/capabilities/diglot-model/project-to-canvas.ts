@@ -155,7 +155,13 @@ function measureText(text: string, fontSize: number): { w: number; h: number } {
  * ⚠️ 但**宽度**不会被回写(撑高只管高),所以宽度估算仍要合理 ——
  * 超过 maxW 的长文本走换行,高度随之增长,由渲染层撑开。
  */
-function nodeSize(text: string, fontSize: number): { w: number; h: number } {
+/** content 信封里首块之后的块数(= 并进来的正文行数);规格 03 §5.5。 */
+function extraBlocksOf(content: { payload?: unknown } | undefined): number {
+  const payload = content?.payload as { content?: unknown[] } | undefined;
+  return Math.max(0, (payload?.content?.length ?? 1) - 1);
+}
+
+function nodeSize(text: string, fontSize: number, extraBlocks = 0): { w: number; h: number } {
   const m = measureText(text, fontSize);
   const pad = paddingFor(fontSize);
   const minW = Math.round(fontSize * 3);
@@ -165,7 +171,7 @@ function nodeSize(text: string, fontSize: number): { w: number; h: number } {
   // ⭐ 宽度被 maxW 夹住 → 文字会折行 → 高度要按折行数估。
   // ⚠️ 旧版高度**恒为一行**,于是长文本换了行、盒子却没长高 → 第二行溢出框外。
   const contentW = Math.max(1, w - pad.x);
-  const lines = Math.max(1, Math.ceil(m.w / contentW));
+  const lines = Math.max(1, Math.ceil(m.w / contentW)) + extraBlocks;
   return { w, h: m.h * lines + pad.y };
 }
 
@@ -336,7 +342,10 @@ export function projectToInstances(
       ref: refForShape(entry?.shape),
       // ⚠️ 坐标量化为整数(00 §4);G 层来的本已是整数,自动布局的可能带小数
       position: { x: Math.round(p.x), y: Math.round(p.y) },
-      size: nodeSize(label, fontSizeForDepth(depths.get(n.id) ?? 0)),
+      // ⭐ 估算要算上并进该节点的正文块数(规格 03 §5.5:节点 = 标题 + 正文),
+      //   否则 ELK 按「只有标题」排版,撑高后容易和兄弟节点压到一起。
+      //   ⚠️ 仍只是**初值**:真实高度由渲染层撑(见 nodeSize 注释)。
+      size: nodeSize(label, fontSizeForDepth(depths.get(n.id) ?? 0), extraBlocksOf(n.content)),
       // ⭐ 字号透传给渲染层(NodeRenderer 读 inst.text_size 覆盖 baseFontSize)
       text_size: fontSizeForDepth(depths.get(n.id) ?? 0),
       // ⭐ 原样透传富文本 —— 折叠与否都不动内容(公式/格式/图片保住)
