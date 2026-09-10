@@ -128,3 +128,53 @@ describe('Delete — 删子树', () => {
     );
   });
 });
+
+describe('双击编辑 — 富文本落回 S 层', () => {
+  it('⭐ 编辑结果写回 content,重排后仍在(不是写 instance)', () => {
+    const base = snap();
+    const id = idOf(base.s, '叶子1');
+    const richDoc = {
+      format: 'pm-doc-json',
+      payload: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: '改过的' }] }],
+      },
+    };
+    const after = engine.applyAction(base, { kind: 'semantic.editLabelDoc', id, doc: richDoc });
+    expect(contentToText(after.s.nodes.find((n) => n.id === id)!.content)).toBe('改过的');
+  });
+
+  it('⭐⭐ 富文本原样保留(不拍平)—— 公式/格式/图片的前提', () => {
+    const base = snap();
+    const id = idOf(base.s, '叶子1');
+    // 带行内格式的 doc:一个加粗 mark
+    const richDoc = {
+      format: 'pm-doc-json',
+      payload: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '粗体', marks: [{ type: 'strong' }] }],
+          },
+        ],
+      },
+    };
+    const after = engine.applyAction(base, { kind: 'semantic.editLabelDoc', id, doc: richDoc });
+    const stored = after.s.nodes.find((n) => n.id === id)!.content;
+    // ⚠️ 若实现拿 textToContent 拍平,marks 会消失
+    expect(JSON.stringify(stored)).toContain('strong');
+  });
+
+  it('⭐ 编辑标签 G 层零变更(C3:布局属性存活)', () => {
+    const base = snap();
+    const id = idOf(base.s, '叶子1');
+    const pinned = engine.applyAction(base, { kind: 'canvas.dragNode', id, x: 7, y: 8 });
+    const doc = {
+      format: 'pm-doc-json',
+      payload: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] },
+    };
+    const after = engine.applyAction(pinned, { kind: 'semantic.editLabelDoc', id, doc });
+    expect(after.g.get(id)?.pos, '改标签不该动坐标').toEqual({ x: 7, y: 8 });
+  });
+});

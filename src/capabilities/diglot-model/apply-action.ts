@@ -183,6 +183,15 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
       return { s: withNode(s, action.id, { content: textToContent(action.text) }), g };
     }
 
+    case 'semantic.editLabelDoc': {
+      // ⭐ 富文本原样写回 —— 不经 textToContent 拍平,保住公式/格式/图片
+      // ⚠️ 只换 content,不碰 parent/order/role,更不碰 G(C3)
+      return {
+        s: withNode(s, action.id, { content: action.doc as SNode['content'] }),
+        g,
+      };
+    }
+
     case 'semantic.moveIndent': {
       // ⭐ 改层级 = 改一条 parent 引用;后代无需重编号(01 §4)
       // ⭐ G 层零变更 —— 布局属性存活(M3)

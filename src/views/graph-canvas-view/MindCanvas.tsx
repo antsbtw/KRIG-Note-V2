@@ -40,6 +40,7 @@ import type {
 import type { GraphLibraryStoreApi } from '@capabilities/graph-library-store/types';
 import type { GraphLayoutApi } from '@capabilities/graph-layout/types';
 import type { CanvasTextNodeApi } from '@capabilities/canvas-text-node';
+import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
 import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
 import { MindSemanticPane } from './MindSemanticPane';
@@ -81,6 +82,8 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     () => requireCapabilityApi<CanvasTextNodeApi>('canvas-text-node'),
     [],
   );
+  const shapeApi = useMemo(() => requireCapabilityApi<ShapeLibraryApi>('shape-library'), []);
+  const TextEditOverlay = textNode.EditOverlay;
 
   const hostRef = useRef<CanvasHostHandle | null>(null);
   /** ⭐ 真源:{S, G}。instances 是派生物,**绝不反过来当真源**。 */
@@ -419,6 +422,69 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     [graphId, diglot, render, scheduleSave],
   );
 
+  /**
+   * ⭐ 双击节点 → 就地编辑标签(01 §7.3)。
+   *
+   * ⭐ 复用画板既有的 canvas-text-node 编辑浮层 —— 那是 **note 的同一个
+   * text-editing.Host**(03 §4 实测),所以富文本/公式/图片天然可用。
+   *
+   * ⚠️⚠️ **与画板的关键差别**:画板编辑完走 `updateInstance`(instance 是本体);
+   * mind 的 instance 是**派生物**,必须把结果写回 **S 层 content** ——
+   * 写 instance 的话下次重排就被覆盖掉了。
+   */
+  const handleNodeDoubleClick = useCallback(
+    (info: {
+      instanceId: string;
+      screenX: number;
+      screenY: number;
+      screenW: number;
+      screenH: number;
+    }): void => {
+      // ⚠️ 树连线不可编辑(无文字层)
+      if (diglot.isTreeLineId(info.instanceId)) return;
+      const snap = snapRef.current;
+      if (!snap || loadedIdRef.current !== graphId) return;
+      const node = snap.s.nodes.find((n) => n.id === info.instanceId);
+      if (!node) return;
+      const inst = hostRef.current?.getInstance(info.instanceId);
+      if (!inst) return;
+      if (inst.type === 'shape' && shapeApi.shapes.get(inst.ref)?.category === 'line') return;
+
+      hostRef.current?.setNodeTextLayerVisible(info.instanceId, false);
+      textNode.enterEdit({
+        instanceId: info.instanceId,
+        initialDoc: node.content,
+        screenX: info.screenX,
+        screenY: info.screenY,
+        width: info.screenW,
+        height: info.screenH,
+        backgroundColor: inst.style_overrides?.fill?.color,
+        transparent: true,
+        workspaceId,
+        viewId: 'graph-canvas-view',
+        onExit: (id, newDoc) => {
+          if (newDoc === null) {
+            // 取消编辑 → 恢复文字层可见
+            hostRef.current?.setNodeTextLayerVisible(id, true);
+            return;
+          }
+          const cur = snapRef.current;
+          if (!cur) return;
+          // ⭐ 写回 S 层 content(不是 updateInstance)—— 重排后仍然在
+          const next = diglot.applyAction(cur, {
+            kind: 'semantic.editLabelDoc',
+            id,
+            doc: newDoc,
+          });
+          snapRef.current = next;
+          void render(next);
+          scheduleSave();
+        },
+      });
+    },
+    [graphId, diglot, textNode, shapeApi, workspaceId, render, scheduleSave],
+  );
+
   // ── 常驻 timer 必须有停止调用(铁律)──
   useEffect(
     () => () => {
@@ -471,12 +537,15 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
           onSelectionChange={(ids) => {
             selectedRef.current = ids;
           }}
+          onNodeDoubleClick={handleNodeDoubleClick}
           onViewportChange={(vp) => {
             // ⚠️ 只记不写盘:视口是**会话态**,不持久(01 §7.5「缩放/平移不持久」)
             viewportRef.current = vp;
           }}
         />
       </div>
+      {/* 文字编辑浮层(session-store 驱动) */}
+      <TextEditOverlay />
     </div>
   );
 }

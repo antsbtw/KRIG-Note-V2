@@ -53,6 +53,14 @@ export interface DiglotSnapshot {
 export type DiglotAction =
   // ── 语义面(落 S) ──
   | { readonly kind: 'semantic.editLabel'; readonly id: NodeId; readonly text: string }
+  /**
+   * ⭐ 就地编辑落定:直接给**富文本 doc**,不是纯文本。
+   *
+   * ⚠️ 与 `editLabel` 分设而非复用:编辑器回传的是 `DriverSerialized` 信封,
+   * 把它拍平成字符串会**丢掉公式/行内格式/图片** —— 而那正是
+   * 「行内编辑器即 note block 编辑器」的全部价值(01 §7.3,对 XMind 的超越)。
+   */
+  | { readonly kind: 'semantic.editLabelDoc'; readonly id: NodeId; readonly doc: unknown }
   | { readonly kind: 'semantic.moveIndent'; readonly id: NodeId; readonly newParent: NodeId | null; readonly beforeSibling?: NodeId }
   /** ⭐ 斜杠手势:S 层零残留(C8),G 层恰好一条 */
   | { readonly kind: 'semantic.slashShape'; readonly id: NodeId; readonly shape: string }
