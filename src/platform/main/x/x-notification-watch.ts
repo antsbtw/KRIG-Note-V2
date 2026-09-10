@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { app, webContents as allWebContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveAnyXWebContents } from './x-webcontents';
+import { captureXPayloads } from './x-net-capture';
 import { extractInteractions, isRealInteraction, aggregationGap,
   type Interaction } from './x-notifications';
 import { upsertInteractions, upsertCampaignReplies } from '../db/x-campaign-repo';
@@ -93,9 +94,14 @@ interface WatchState {
   payloads: number;
   startedAt: number;
   lastPayloadAt?: number;
-  onMessage: (e: unknown, method: string, params: any) => void;
+  /** ⭐ 步 6a:web.net 送来的已解好载荷(迁移前是 CDP 三段式的 onMessage)*/
+  onPayload: (body: string) => void;
+  /** web.net 的退订函数 —— ⚠️ 不是 detach,掐不断别人 */
+  unsubscribe?: () => void;
   pending: Map<string, string>;
   attached: boolean;
+  /** 通道故障原因;非空 = 监听已聋 */
+  channelFault?: string;
   /** 监听所属 ws 与账号 —— 入库要用(通知是「别人对**这个**账号」) */
   wsId?: string;
   ownerHandle?: string;
@@ -360,24 +366,14 @@ export async function startNotifWatch(
     heartbeat: setInterval(() => {}, 1 << 30),
     seen: new Map(), events: [], payloads: 0,
     startedAt: Date.now(), pending: new Map(), attached: false,
-    onMessage: (_e, method, params) => {
-      if (method === 'Network.requestWillBeSent') {
-        const u: string = params?.request?.url ?? '';
-        if (u.includes('/i/api/graphql/')) state.pending.set(params.requestId, u);
-        return;
-      }
-      if (method === 'Network.loadingFinished') {
-        const u = state.pending.get(params.requestId);
-        if (!u) return;
-        state.pending.delete(params.requestId);
-        if (!u.includes('Notifications')) return;
-        wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
-          .then((r: any) => {
-            if (!r?.body) return;
+    // ⭐ 步 6a:改成 web.net 送来的「已解好的载荷」——
+    // 迁移前是 requestWillBeSent 记 pending → loadingFinished → getResponseBody 三段式。
+    onPayload: (body: string) => {
+          {
             state.payloads++;
             state.lastPayloadAt = Date.now();
             let parsed: unknown;
-            try { parsed = JSON.parse(r.body); } catch { return; }
+            try { parsed = JSON.parse(body); } catch { return; }
 
             const found: Interaction[] = [];
             // ownerHandle 必须传:reply 的判据是 in_reply_to_screen_name == 我,
@@ -391,7 +387,7 @@ export async function startNotifWatch(
             //   target_objects 给几条)。监听是最可能先撞见真实回复的地方,
             //   但它原先不落盘,撞见了也留不下证据 —— 解析后的视图证明不了聚合。
             //   条件落盘:X 每 ~10s 重发一次全量首屏,无条件写会刷屏。
-            archiveIfNew(state, found, r.body);
+            archiveIfNew(state, found, body);
 
             // ⭐ 入库 —— 监听不再只是「给人看」。
             //   2026-09-03 实测:被动监听秒级就收到新通知,而主循环 3 分钟一轮、
@@ -433,16 +429,24 @@ export async function startNotifWatch(
                 + `→ 推 ${ev.targetId} · ${ev.belongsWhy} | ${ev.message ?? ''}`);
             }
             broadcast();
-          })
-          .catch(() => { /* 响应体可能已丢弃 */ });
-      }
+          }
     },
   };
 
-  try { wc.debugger.attach('1.3'); state.attached = true; }
-  catch { /* 已被 attach,共用 */ }
-  wc.debugger.on('message', state.onMessage);
-  await wc.debugger.sendCommand('Network.enable').catch(() => {});
+  // ⭐ 步 6a:只订阅,不 attach/detach。
+  // 迁移前这里是 `try { attach } catch { /* 已被 attach,共用 */ }` ——
+  // 那个「共用」在别人先 attach 且先结束时会被连带掐掉(顺序依赖,见 x-net-capture.ts)。
+  state.unsubscribe = captureXPayloads(wc, {
+    urlIncludes: ['/i/api/graphql/', 'Notifications'],
+    onPayload: ({ body }) => state.onPayload(body),
+    onChannelFault: (reason, kind) => {
+      // ⭐ 常驻监听最怕静默失聪 —— 通道没了必须看得见,而不是"再也没有新通知"
+      state.channelFault = `${kind}: ${reason}`;
+      console.warn(`[notif-watch] ⚠️ CDP 通道故障(${kind}):${reason} —— 监听已聋,需重启监听`);
+      broadcast();
+    },
+  });
+  state.attached = true;
 
   // 每 10s 推一次快照:没有载荷时 stallWarning 才送得出去,
   // 「上次收到 N 秒前」也才会自己往上走(否则停在最后一次正常值上)
@@ -467,8 +471,8 @@ export function stopNotifWatch(): WatchSnapshot {
   clearInterval(watch.heartbeat);
   const wc = allWebContents.fromId(watch.wcId);
   if (wc && !wc.isDestroyed()) {
-    wc.debugger.off('message', watch.onMessage);
-    if (watch.attached) { try { wc.debugger.detach(); } catch { /* 已 detach */ } }
+    // ⭐ 只退订 —— 通道由底座独占,不会掐断别的模块(旧写法的 detach 会)
+    watch.unsubscribe?.();
   }
   console.log(`[notif-watch] 停止 —— 共 ${final.total} 条事件 / ${final.payloads} 个载荷`);
   watch = null;

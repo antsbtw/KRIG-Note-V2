@@ -532,9 +532,19 @@ describe('账号画像:去挖事实,不靠猜', () => {
     expect(fn).toMatch(/if \(!profile\)[\s\S]{0,120}error/);
   });
 
-  it('⭐ 只 detach 自己 attach 的(否则会掐掉别人的监听)', () => {
-    // harvester / notification-watch 也在用同一个 debugger
-    expect(PROFILE).toMatch(/if \(attached\)/);
+  it('⭐ 不许 detach —— 通道由底座独占,业务方掐不断别人的监听', () => {
+    // 迁移前(步 6a 之前)这里守的是 `if (attached)`,即「只 detach 自己 attach 的」。
+    // ⚠️ 但那**只防住一半**:它防的是「本函数掐掉先来的人」,
+    // 没防「本函数先 attach、别人后共用,本函数结束时把别人一起掐掉」——
+    // 而后者才是 x/refactor-02 §3.3 记的那个 bug,且**顺序一换就中招**
+    // (可执行复现见 tests/web-capability/x-cdp-order-dependence.test.ts)。
+    //
+    // 迁移后载荷捕获走 web.net 的单一持有者模型:业务方**没有 detach 这个动作**,
+    // 于是「谁先谁后」不再是变量 —— 这个 bug 在结构上消失,而不是被小心避开。
+    // 故守卫从「小心地 detach」升级为「根本没有 detach」。
+    expect(PROFILE).not.toMatch(/debugger\s*\.\s*detach/);
+    expect(PROFILE).not.toMatch(/debugger\s*\.\s*attach/);
+    expect(PROFILE).toMatch(/captureXPayloads/);
   });
 
   it('⭐ 有资料就用资料判断,没资料才退回看正文', () => {

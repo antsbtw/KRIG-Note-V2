@@ -19,6 +19,7 @@
  */
 
 import { resolveXWebContents } from './x-webcontents';
+import { captureXPayloads } from './x-net-capture';
 import { saveAuthorCounts, type AuthorCounts } from '../db/x-author-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 
@@ -118,36 +119,24 @@ export async function harvestAuthorProfile(
   const wc = resolved.wc;
 
   let profile: AuthorProfile | null = null;
-  const pending = new Set<string>();
 
-  const onMessage = (_e: unknown, method: string, params: any): void => {
-    if (method === 'Network.requestWillBeSent') {
-      const u: string = params?.request?.url ?? '';
-      // 只关心账号实体接口 —— 主页还会打一堆时间线请求,不必解析
-      if (u.includes('/i/api/graphql/') && u.includes('UserByScreenName')) {
-        pending.add(params.requestId);
-      }
-      return;
-    }
-    if (method === 'Network.loadingFinished' && pending.has(params.requestId)) {
-      pending.delete(params.requestId);
-      wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
-        .then((r: any) => {
-          if (!r?.body || profile) return;
-          try {
-            const found = findUserResult(JSON.parse(r.body));
-            if (found) profile = parseUserResult(found);
-          } catch { /* 非 JSON,忽略 */ }
-        })
-        .catch(() => { /* 响应体可能已被丢弃 */ });
-    }
-  };
-
-  let attached = false;
-  try { wc.debugger.attach('1.3'); attached = true; }
-  catch { /* 已被别处 attach,共用即可 */ }
-  wc.debugger.on('message', onMessage);
-  await wc.debugger.sendCommand('Network.enable').catch(() => {});
+  // ⭐ 步 6a:载荷捕获改走 web.net。
+  // 迁移前这里是自己 attach + on('message') + getResponseBody,finally 里 detach ——
+  // 而那个 detach 会在「本函数先 attach、别人后共用」时把别人一起掐掉
+  // (见 x-net-capture.ts 的顺序依赖说明)。现在业务方**没有 detach 这个动作**。
+  let channelFault: string | null = null;
+  const unsubscribe = captureXPayloads(wc, {
+    urlIncludes: ['/i/api/graphql/', 'UserByScreenName'],
+    onPayload: ({ body }) => {
+      if (profile) return;
+      try {
+        const found = findUserResult(JSON.parse(body));
+        if (found) profile = parseUserResult(found);
+      } catch { /* 非 JSON,忽略 */ }
+    },
+    // 旧实现在通道故障时是**静默**的 —— 现在记下来,超时后能说清是"没截到"还是"通道坏了"
+    onChannelFault: (reason) => { channelFault ??= reason; },
+  });
 
   try {
     wc.loadURL(`https://x.com/${h}`);
@@ -156,14 +145,17 @@ export async function harvestAuthorProfile(
       await new Promise((r) => setTimeout(r, 250));
     }
   } finally {
-    wc.debugger.off('message', onMessage);
-    // ⚠️ 只在**本函数 attach 的**时候才 detach:别人先 attach 的话
-    //    detach 会把人家的监听一起掐掉(harvester/notification-watch 都在用)
-    if (attached) { try { wc.debugger.detach(); } catch { /* 已断开 */ } }
+    // ⭐ 只退订,不 detach —— 通道由底座独占,别的模块不受影响
+    unsubscribe();
   }
 
   if (!profile) {
-    return { error: `未截获 @${h} 的账号载荷(${budgetMs}ms 内)—— 可能未登录、页面没加载完、或该账号不存在` };
+    return {
+      error: channelFault
+        // ⚠️ 通道坏了和"没截到"是两回事,旧实现分不出来 —— 现在分得出
+        ? `未截获 @${h} 的账号载荷:CDP 通道故障 —— ${channelFault}`
+        : `未截获 @${h} 的账号载荷(${budgetMs}ms 内)—— 可能未登录、页面没加载完、或该账号不存在`,
+    };
   }
   // 关系视角一并落库 —— 载荷自带、零额外请求,但此前只在内存里没存
   await saveAuthorCounts(h, {
