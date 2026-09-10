@@ -441,6 +441,22 @@ declare global {
       driveProgress(payload: ProgressDrivePayload): void;
 
       // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
+      // ── diglot mind v0(方案 B1:独立表,共用 graph 文件夹)──
+      mindList(): Promise<unknown>;
+      mindLoad(id: string): Promise<unknown>;
+      mindCreate(
+        title: string,
+        semantic: string,
+        graphic: string,
+        folderId: string | null,
+      ): Promise<unknown>;
+      mindSave(id: string, semantic: string, graphic: string, title: string): Promise<void>;
+      mindDelete(id: string): Promise<void>;
+      mindRename(id: string, title: string): Promise<void>;
+      mindMoveToFolder(id: string, folderId: string | null): Promise<void>;
+      mindDuplicate(id: string): Promise<unknown>;
+      onMindListChanged(callback: (list: unknown) => void): () => void;
+
       graphList(): Promise<unknown>;
       graphLoad(id: string): Promise<unknown>;
       graphCreate(

@@ -621,6 +621,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.GRAPH_LIST_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.GRAPH_LIST_CHANGED, handler);
   },
+  // ── diglot mind v0(方案 B1:独立表 mind_doc,共用 graph 文件夹)──
+  mindList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_LIST);
+  },
+  mindLoad(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_LOAD, id);
+  },
+  mindCreate(
+    title: string,
+    semantic: string,
+    graphic: string,
+    folderId: string | null,
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_CREATE, title, semantic, graphic, folderId);
+  },
+  mindSave(id: string, semantic: string, graphic: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_SAVE, id, semantic, graphic, title);
+  },
+  mindDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_DELETE, id);
+  },
+  mindRename(id: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_RENAME, id, title);
+  },
+  mindMoveToFolder(id: string, folderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_MOVE_TO_FOLDER, id, folderId);
+  },
+  mindDuplicate(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_DUPLICATE, id);
+  },
+  /** main → renderer 推送:导图列表变更 */
+  onMindListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.MIND_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.MIND_LIST_CHANGED, handler);
+  },
+
   // 文件夹
   graphFolderList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_LIST);

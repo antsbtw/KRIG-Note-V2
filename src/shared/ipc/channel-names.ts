@@ -219,6 +219,17 @@ export const IPC_CHANNELS = {
   GRAPH_DUPLICATE: 'graph.duplicate',
   GRAPH_LIST_CHANGED: 'graph.list-changed',         // main → renderer 推送
   // 文件夹
+  // ── diglot mind(方案 B1:独立表/独立 store,共用 graph 文件夹)──
+  MIND_LIST: 'mind.list',
+  MIND_LOAD: 'mind.load',
+  MIND_CREATE: 'mind.create',
+  MIND_SAVE: 'mind.save',
+  MIND_DELETE: 'mind.delete',
+  MIND_RENAME: 'mind.rename',
+  MIND_MOVE_TO_FOLDER: 'mind.move-to-folder',
+  MIND_DUPLICATE: 'mind.duplicate',
+  MIND_LIST_CHANGED: 'mind.list-changed',           // main → renderer 推送
+
   GRAPH_FOLDER_LIST: 'graph.folder-list',
   GRAPH_FOLDER_CREATE: 'graph.folder-create',
   GRAPH_FOLDER_RENAME: 'graph.folder-rename',

@@ -31,6 +31,8 @@ import type {
   GraphFolderRecord,
   GraphVariant,
   CanvasDocumentJson,
+  MindDocRecord,
+  MindDocListItem,
 } from './types';
 
 export type {
@@ -40,6 +42,8 @@ export type {
   GraphFolderRecord,
   GraphVariant,
   CanvasDocumentJson,
+  MindDocRecord,
+  MindDocListItem,
 } from './types';
 
 // ── 画板 CRUD ──
@@ -148,6 +152,73 @@ export function onGraphListChanged(
   });
 }
 
+
+// ── diglot mind CRUD(方案 B1:独立表 mind_doc,共用本 capability 与文件夹)──
+//
+// ⚠️ 与画板 CRUD 并列而非另起 capability:二者**共用同一棵左侧树与同一套文件夹**,
+// 拆开会让 view 为了渲染一棵树装两个能力。见 types.ts MindLibraryApi 注释。
+
+export async function mindList(): Promise<MindDocListItem[]> {
+  if (!window.electronAPI?.mindList) return [];
+  const r = await window.electronAPI.mindList();
+  return Array.isArray(r) ? (r as MindDocListItem[]) : [];
+}
+
+export async function mindLoad(id: string): Promise<MindDocRecord | null> {
+  if (!window.electronAPI?.mindLoad) return null;
+  const r = await window.electronAPI.mindLoad(id);
+  return (r as MindDocRecord | null) ?? null;
+}
+
+export async function mindCreate(
+  title: string,
+  semantic: string,
+  graphic: string,
+  folderId?: string | null,
+): Promise<MindDocRecord | null> {
+  if (!window.electronAPI?.mindCreate) return null;
+  const r = await window.electronAPI.mindCreate(title, semantic, graphic, folderId ?? null);
+  return (r as MindDocRecord | null) ?? null;
+}
+
+export async function mindSave(
+  id: string,
+  semantic: string,
+  graphic: string,
+  title: string,
+): Promise<void> {
+  if (!window.electronAPI?.mindSave) return;
+  await window.electronAPI.mindSave(id, semantic, graphic, title);
+}
+
+export async function mindDelete(id: string): Promise<void> {
+  if (!window.electronAPI?.mindDelete) return;
+  await window.electronAPI.mindDelete(id);
+}
+
+export async function mindRename(id: string, title: string): Promise<void> {
+  if (!window.electronAPI?.mindRename) return;
+  await window.electronAPI.mindRename(id, title);
+}
+
+export async function mindMoveToFolder(id: string, folderId: string | null): Promise<void> {
+  if (!window.electronAPI?.mindMoveToFolder) return;
+  await window.electronAPI.mindMoveToFolder(id, folderId);
+}
+
+export async function mindDuplicate(id: string): Promise<MindDocRecord | null> {
+  if (!window.electronAPI?.mindDuplicate) return null;
+  const r = await window.electronAPI.mindDuplicate(id);
+  return (r as MindDocRecord | null) ?? null;
+}
+
+export function onMindListChanged(cb: (list: MindDocListItem[]) => void): () => void {
+  if (!window.electronAPI?.onMindListChanged) return () => {};
+  return window.electronAPI.onMindListChanged((list) => {
+    cb(Array.isArray(list) ? (list as MindDocListItem[]) : []);
+  });
+}
+
 // W5 严格态:Registry 注册 + api 字段(view 通过 requireCapabilityApi 间接路由)
 // W5 边界 A 临时允许项:同时保留模块级 export(driver/slot 内部消费可直 import)
 capabilityRegistry.register({
@@ -167,5 +238,15 @@ capabilityRegistry.register({
     folderDelete,
     folderMove,
     onGraphListChanged,
+    // diglot mind(B1)
+    mindList,
+    mindLoad,
+    mindCreate,
+    mindSave,
+    mindDelete,
+    mindRename,
+    mindMoveToFolder,
+    mindDuplicate,
+    onMindListChanged,
   } satisfies GraphLibraryStoreApi,
 });
