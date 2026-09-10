@@ -18,6 +18,10 @@ import {
   parseMermaidMindmap as parseMermaidMindmapImpl,
   toMermaidMindmap as toMermaidMindmapImpl,
 } from './mermaid-mindmap';
+import {
+  parseGLayer as parseGLayerImpl,
+  serializeGLayer as serializeGLayerImpl,
+} from './g-layer';
 
 // ─────────────────────────────────────────────────────────
 // 1. 三面快照
@@ -133,12 +137,9 @@ export const notImplementedEngine: DiglotEngine = {
   // ⭐ 步骤③已落地 —— 这两条接真实现,对应断言(M1/C6-mermaid/C9 前半)自动转绿。
   parseMermaidMindmap: parseMermaidMindmapImpl,
   toMermaidMindmap: toMermaidMindmapImpl,
-  parseGLayer() {
-    throw new NotImplementedError('parseGLayer');
-  },
-  serializeGLayer() {
-    throw new NotImplementedError('serializeGLayer');
-  },
+  // ⭐ 步骤④已落地 —— C1 / C6-G层 / C9 后半 自动转绿。
+  parseGLayer: parseGLayerImpl,
+  serializeGLayer: serializeGLayerImpl,
   applyAction() {
     throw new NotImplementedError('applyAction');
   },

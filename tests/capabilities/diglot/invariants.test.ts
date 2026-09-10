@@ -25,6 +25,7 @@ import {
   type DiglotSnapshot,
   type DiglotAction,
 } from '@capabilities/diglot-model/engine-contract';
+import { wrapGLayer } from '@capabilities/diglot-model/g-layer';
 import {
   LANDING_MATRIX,
   type GEntry,
@@ -163,6 +164,74 @@ describe('C1 规范化幂等 —— G 层规范形二次序列化字节级不变
     // 空 G 层不得产出任何条目行(可以有包裹/空串,但不得凭空写 auto 值)
     expect(empty.includes('auto')).toBe(false);
     expect(empty.trim().split('\n').filter((l) => l.trim().startsWith('^')).length).toBe(0);
+  });
+
+  it('⭐⭐ 有条目时也不得补写未触碰的属性', () => {
+    // ⚠️ 上一条只喂**空 map**,根本走不到「逐条属性」那段代码 ——
+    //   注入「color 缺省写成 auto」后它照样绿(实测),因为空 map 没有条目。
+    //   形态 = HANDOFF §5「样本里根本没有该现象」。
+    //   故必须喂**只碰了一个属性**的条目,验其余属性一个都不冒出来。
+    const g = new Map<string, GEntry>([['solo', { pos: { x: 1, y: 2 } }]]);
+    const out = engine.serializeGLayer(g);
+    expect(out).toContain('pos=1,2');
+    // 只碰了 pos,其余键一个都不许出现
+    for (const absent of ['color', 'shape', 'structure', 'collapsed', 'float']) {
+      expect(out, `未触碰的 ${absent} 不得被写出(稀疏纪律)`).not.toContain(absent);
+    }
+    // ⚠️ 且不许出现 auto 这类缺省占位
+    expect(out).not.toContain('auto');
+  });
+
+  it('⭐ 条目内属性键按固定序输出(00 §4:canonical 键名固定序)', () => {
+    // ⚠️ 规范形要求「条目内属性键按固定序」,但前几条断言**都没验键序** ——
+    //   把键序改成跟着对象自身键序走(不稳定),它们照样全绿(实测)。
+    //   两个属性集相同、插入顺序不同的条目,必须序列化成**同一字节**。
+    const a = new Map<string, GEntry>([
+      ['x', { collapsed: true, color: 'red', pos: { x: 1, y: 2 } }],
+    ]);
+    const b = new Map<string, GEntry>([
+      ['x', { pos: { x: 1, y: 2 }, color: 'red', collapsed: true }],
+    ]);
+    expect(engine.serializeGLayer(b), '键的书写顺序不得影响规范形').toBe(
+      engine.serializeGLayer(a),
+    );
+    // 且顺序必须是规格定的那个(pos 在 color 前,collapsed 在最后)
+    const out = engine.serializeGLayer(a);
+    expect(out.indexOf('pos=')).toBeLessThan(out.indexOf('color='));
+    expect(out.indexOf('color=')).toBeLessThan(out.indexOf('collapsed'));
+  });
+
+  it('⭐ 零属性的条目整条不输出', () => {
+    // 一个 id 若没有任何被触碰的属性,它根本不该存在于 G 层(C5 的地基)
+    const g = new Map<string, GEntry>([['ghost', {}]]);
+    expect(engine.serializeGLayer(g).trim()).toBe('');
+  });
+
+  it('⭐ HTML 注释包裹:Markdown 环境渲染为干净大纲(00 §4)', () => {
+    const g = new Map<string, GEntry>([['arch', { pos: { x: 420, y: 180 } }]]);
+    const wrapped = wrapGLayer(engine.serializeGLayer(g));
+    expect(wrapped.startsWith('<!-- diglot')).toBe(true);
+    expect(wrapped.trimEnd().endsWith('-->')).toBe(true);
+    // ⭐ 包裹后仍能解回来,且幂等
+    const back = engine.parseGLayer(wrapped);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(engine.serializeGLayer(back.value)).toBe(engine.serializeGLayer(g));
+  });
+
+  it('⭐ 空 G 层不写空壳注释(稀疏纪律)', () => {
+    // 没条目就是没内容 —— 不许留一个空的 <!-- diglot --> 壳子
+    expect(wrapGLayer(engine.serializeGLayer(new Map()))).toBe('');
+  });
+
+  it('⭐ 中英别名在输入层互通,序列化一律写 canonical(00 §4)', () => {
+    const r = engine.parseGLayer('^a structure=逻辑图\n^b structure=LOGIC\n');
+    expect(r.ok, '别名不是坏行').toBe(true);
+    if (!r.ok) return;
+    const out = engine.serializeGLayer(r.value);
+    // ⚠️ 若序列化把别名原样吐回,C1 幂等就不成立(同一语义两种字节)
+    expect(out).toBe('^a structure=logic\n^b structure=logic\n');
+    expect(out).not.toContain('逻辑图');
   });
 });
 
@@ -531,46 +600,60 @@ describe('⭐⭐ M5 边坏树不坏 —— 用户 2026-09-09 拍板的硬约束'
  *
  * | 步骤 | 实现什么 | 状态 |
  * |---|---|---|
- * | ③ mermaid 解析 | `parseMermaidMindmap` / `toMermaidMindmap` | ✅ 已落地 → M1×2 / C6-mermaid×2 / C9 前半 转绿 |
- * | ④ G 层 | `parseGLayer` / `serializeGLayer` | ⏳ 未做 → C1×3 / C6-G层 / C9 后半 仍红 |
+ * | ③ mermaid 解析 | `parseMermaidMindmap` / `toMermaidMindmap` | ✅ 已落地 |
+ * | ④ G 层 | `parseGLayer` / `serializeGLayer` | ✅ 已落地 |
  * | ⑤ 双向同步 | `applyAction` | ⏳ 未做 → C2/C3/C4/C5/C7/C8、M2/M3/M4/M5 仍红 |
  *
- * ⚠️ **步骤③落地时没有改动任何断言的判据** —— 只是把加固后的判据补强。
+ * ⚠️ 每步落地都**没有改动既有断言的判据**，只在发现守卫失效时**加固**。
  * 改测试让它绿 = 违规（HANDOFF §4）。
  *
  * ────────────────────────────────────────────────
- * ⭐⭐ §注入台账（步骤③）—— 抓到本轮第 3、4 个真缺口
+ * ⭐⭐ §注入台账 —— 全部真跑，累计抓到 6 个真缺口
  *
- * | # | 注入 | 期望 | 实测 |
- * |---|---|---|---|
- * | E | 不按 indent 弹栈（每节点挂前一个） | M1/C9/M5 红 | ⚠️ **初次 5 条全绿 → 见下** |
- * | F | 弹栈 `>=` 改 `>`（兄弟被当成子） | 同上 | ✅ 4 红（加固后） |
- * | G2 | 坏头照收（真静默兜底） | C6 红 | ✅ 2 红（加固后） |
+ * **步骤③（mermaid 解析）**
+ * | # | 注入 | 实测 |
+ * |---|---|---|
+ * | E | 不按 indent 弹栈（每节点挂前一个） | ⚠️ 初次 5 条全绿 → 缺口 3、4 |
+ * | F | 弹栈 `>=` 改 `>`（兄弟被当成子） | ✅ 4 红（加固后） |
+ * | G2 | 坏头照收（真静默兜底） | ✅ 2 红（加固后） |
  *
- * ⚠️⚠️ **缺口 3：断言比的东西不含树结构**
- * 注入 E 把树推导彻底改坏，**5 条断言全绿**。逐条查明：
- * - M1 第一条比 `nodes.map(n=>n.order).sort()` —— order 的**多重集合**，
- *   与 parent 指向谁完全无关
- * - C9 比 `{parentIsNull, role}` —— 布尔+角色，树形状信息几乎全丢
- * - M5 第二条只验 parent「非 null 且存在」—— 挂错父仍满足
- * 已加 `treeOutline()`：把父子嵌套与标签编码成缩进大纲串再比。
+ * **步骤④（G 层）**
+ * | # | 注入 | 实测 |
+ * |---|---|---|
+ * | H | 序列化把 color 缺省写成 auto | ⚠️ 初次全绿 → 缺口 5 |
+ * | I | id 不排序 | ✅ C1「乱序输入」红 |
+ * | J | 未知记号丢弃 | ✅ C9 红 |
+ * | K | 坏行静默跳过 | ✅ C6 红 |
+ * | L | 键序跟着对象自身键序 | ⚠️ 初次全绿 → 缺口 6 |
+ * | M | 空 G 层也写空壳注释 | ✅ 红 |
+ * | N | 别名原样吐回不转 canonical | ✅ 红 |
  *
- * ⚠️⚠️ **缺口 4：自比只证确定性，证不了正确性**
- * 加固后注入 E **仍有 3 条绿**。根因更隐蔽：
- * - M1「解析两次结果一致」——**坏解析器两次也一致**
- * - C9「round-trip 一致」——坏解析器导出坏文本、再用**同一个**坏解析器
- *   读回来，**当然一致**（实测：注入后 round-trip 仍 true）
- * ⭐ 即 round-trip 一致是**必要不充分**条件。
- * 已改为**同时钉住 MERMAID_SAMPLE 的预期具体树**，才抓得到「一致地错」。
+ * ⚠️ **缺口 3：断言比的东西不含树结构**
+ * M1 比 `order` 的多重集合、C9 比 `{parentIsNull, role}`、M5 只验 parent
+ * 「非 null 且存在」—— 都与 parent **指向谁**无关。已加 `treeOutline()`。
  *
- * ⚠️ 另记：注入 G（`start = i - 1`）曾以为是 C6 的缺口，查明是
- * **注入本身太弱** —— 它让 start=-1，撞上另一条「空输入」守卫，
- * 仍返回 ok:false（对的结果、错的原因）。改用 G2（start=i，真照收）后
- * C6 两条正常变红。⭐ **注入没造出目标场景 ≠ 守卫失效**，
- * 形态同 HANDOFF §5「假环境不像真环境」。
+ * ⚠️ **缺口 4：自比只证确定性，证不了正确性**
+ * 坏解析器解析两次也一致；round-trip 更是**自洽** —— 坏解析器导出坏文本、
+ * 再用同一个坏解析器读回来当然一致（实测 true）。
+ * ⭐ round-trip 一致是**必要不充分**条件。已改为同时钉住预期的具体树。
+ *
+ * ⚠️ **缺口 5：样本喂的是空 map，走不到被测代码**
+ * 「不写缺省值」只喂 `new Map()`，根本没有条目 → 注入 H（color 缺省写 auto）
+ * 照样绿；且写 `color=auto` **仍然幂等**，C1 前两条也抓不到。
+ * 已补「有条目时也不得补写未触碰的属性」+「零属性条目整条不输出」。
+ *
+ * ⚠️ **缺口 6：规范形要求「键按固定序」但无人验**
+ * 注入 L 把键序改成跟对象自身键序走，C1 全部照样绿 ——
+ * 因为每条都是拿输出跟**同样方式产生的输出**比。
+ * 已补「两个属性集相同、插入顺序不同的条目必须序列化成同一字节」。
+ *
+ * ⚠️ 另记：注入 G（`start = i - 1`）曾以为是缺口，查明是**注入本身太弱** ——
+ * 它撞上另一条「空输入」守卫，仍返回 ok:false（对的结果、错的原因）。
+ * ⭐ **注入没造出目标场景 ≠ 守卫失效**。
  *
  * ⚠️ 未覆盖（诚实记账）：
- * - C1/C9 后半（G 层部分）注入未做 —— 步骤④落地后必须补。
- * - `contentToText` 的 fail loud 分支未测。
- * - mermaid 的 icon/class 装饰语法 v0 当纯文本收，未验 round-trip 是否丢。
+ * - `contentToText` 的 fail loud 分支未测
+ * - mermaid 的 icon/class 装饰 v0 当纯文本收，round-trip 是否丢未验
+ * - 同一 id 在 G 层重复出现时的合并语义，实现里有但未进断言
+ * - G 层坏行的**多行**报错（只验了首个 error 的行号）
  */
