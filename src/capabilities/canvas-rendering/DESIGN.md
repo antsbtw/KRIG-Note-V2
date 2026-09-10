@@ -121,6 +121,36 @@ three 存在,canvas-rendering 端是唯一拥有 three 的"渲染圈".
 - canvas-rendering 不依赖 canvas-text-node(G4 反向消费:canvas-text-node 通过
   Host 命令式接口挂文字编辑浮层)
 
+## 连接点操作点(magnet actions)
+
+**每个图元的连接点(magnet)可以声明成可交互的操作点**:点它 → `onMagnetClick`;
+拖它 → 拉出一条连接 → `onMagnetDragOut`(落在别的连接点给 target,落空白给 world 坐标)。
+
+```ts
+// 声明(instance 上;⭐ 复用既有 magnet id,不新造坐标语言)
+instance.magnetActions = [{ magnet: 'E', icon: 'minus' }];
+
+<Host
+  onMagnetClick={(instanceId, magnet) => { /* 调用方决定语义 */ }}
+  onMagnetDragOut={(instanceId, magnet, target) => { /* target: {kind:'magnet'|'world'} */ }}
+/>
+```
+
+| 层 | 路径 | 职责 |
+|---|---|---|
+| 纯逻辑 | `interaction/magnet-actions.ts` | 声明解析 / 命中判定 / 落点分流 —— **0 import three,可单测** |
+| 画 | `scene/MagnetActionsOverlay.ts` | 只画 mesh(像素恒定 + 记号画几何);判定不在这里 |
+| 手势 | `InteractionController` 1.7 段 | 插在 rewire(1.5)之后、节点拖动(2)之前 |
+
+⚠️ **本 capability 不认识业务语义** —— 它只知道「这个连接点上有个可点的圆」。
+「点了要折叠子树」这类语义由调用方接回调实现(diglot mind 接 `graphic.toggleCollapsed`)。
+
+⚠️ 手势链位置是**静默**不变量:插得太早会抢 resize/rotate/rewire,插得太晚点连接点
+会变成拖节点 —— 两种都不报错,已由 `tests/capabilities/canvas-magnet-actions-gesture-chain.test.ts` 钉住。
+
+⭐ 记号(`+`/`-`/`·`)**画几何不走文字渲染**:打包字体按 CJK/ASCII 分流,
+两者之外的符号(如 `⊕` U+2295)会渲染成空白宽度(真机踩过)。
+
 ## 不做的事(G3 范围外)
 
 | 不做 | 说明 |

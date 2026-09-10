@@ -174,3 +174,116 @@ env -u ELECTRON_RUN_AS_NODE npx electron-forge start
 >  ⚠️ canvas-rendering 不会认识『折叠』—— 那是调用方的语义。
 >  我打算**先写断言**(声明才画 / 回调带对 magnet id / 拖出吸附 / Esc 取消 /
 >  既有手势未被破坏),再做画 → 点击 → 拖出。这个顺序你认吗?」
+
+---
+
+## 8. 实施结果(2026-09-10)
+
+**机制 + diglot mind 调用方均已落地。真机验证未做 —— 见下方「待验」。**
+
+### 8.1 落在哪
+
+| 层 | 文件 | 说明 |
+|---|---|---|
+| 纯逻辑 | `src/capabilities/canvas-rendering/interaction/magnet-actions.ts`(新) | 声明解析 / 命中判定 / 落点分流 —— **0 import three** |
+| 画 | `src/capabilities/canvas-rendering/scene/MagnetActionsOverlay.ts`(新) | 像素恒定圆 + `+`/`-`/`·` 记号(**画几何,不走文字渲染**) |
+| 手势 | `InteractionController` 新增 **1.7 段** | 插在 rewire(1.5)之后、节点拖动(2)之前 |
+| 契约 | `types.ts` | `Instance.magnetActions` + `onMagnetClick` / `onMagnetDragOut` |
+| 装配 | `Host.tsx` | 建 overlay + provider(扫 instances 的声明,经既有 `listMagnets` 解世界坐标) |
+| 调用方 | `project-to-canvas.ts` + `MindCanvas.tsx` | 有子节点的节点在 `E` 挂圆;点它 → `graphic.toggleCollapsed` |
+
+⭐ **一半工作确实是白送的**:magnets / 吸附(`findClosestMagnet`)/ 预览线
+(`renderLine` + `updateLineGeometry`)全部复用,没有重写任何几何。
+
+### 8.2 ⚠️ 一个必须交代的偏差:断言落在哪
+
+交接 §4 要求「断言先行」,已做,但**落点与预期不同**,原因是实测出来的约束:
+
+> **本仓库没有任何测试 import 过 three** —— vitest 跑 node 环境,无 DOM / WebGL。
+
+所以断言分成两半(此决定已与用户确认):
+
+1. **真行为断言**(`tests/capabilities/canvas-magnet-actions.test.ts`,13 条)——
+   判定逻辑抽进纯模块后直测:声明才画 / 拼错 id 丢弃+warn / **命中按屏幕像素恒定**
+   (同一屏幕距离在 zoom 0.25~8 下结果一致)/ 重叠取最近 / 落空白给 world 坐标。
+2. **结构断言**(`tests/capabilities/canvas-magnet-actions-gesture-chain.test.ts`,8 条)——
+   守「顺序」与「必有停止调用」这类**会被改动悄悄破坏、且不会报错**的不变量:
+   操作点在 rewire 之后 / 节点命中之前、Esc 与 dispose 都有取消、
+   预览线真被 `dispose` 而非只置 null、overlay 常驻 RAF 有 `cancelAnimationFrame`、
+   底座不出现 `toggleCollapsed` 这类调用方语义。
+3. **投影断言**(`tests/capabilities/diglot/project-to-canvas.test.ts`,+4 条)——
+   有子节点才挂 / 叶子不挂 / 图标反映「点了会发生什么」/ 树连线不挂。
+
+⚠️ **结构断言不是行为断言**,守不住「点下去真的会折叠」——那一半只能真机验。
+
+### 8.3 验红台账
+
+**25 条新断言,逐条注入违规实跑验红**(明细见各测试文件末尾的台账表):
+纯逻辑 9 项注入、手势链 8 项注入、投影 4 项注入,**全部由对应断言捕获**。
+实验用 `cp` 备份还原,未用 `git checkout`。
+
+### 8.4 测试状态
+
+- `tests/x/` **512 全绿**(铁律)
+- diglot 147 全绿(142 + 新 4 + 1)
+- 全仓 1868 passed / 2 failed(7 文件)—— **已 stash 改动实跑对照,与基线逐条一致**:
+  2 个失败用例都在 `tests/views/slot-resource-guard.test.ts`(slotBinding 已知债),
+  另 6 个文件是 `electron` 在 node 环境 import 失败的收集错误(scenarios / bookmark /
+  create-notes-batch);**没有一个碰到 canvas-rendering 或 diglot**
+- `tsc` 仅剩 `XInboxView.tsx:881` 的存量错误(改动前后一致,非本轮引入)
+- `eslint` 改动文件零错误
+
+### 8.5 ⚠️ 待验 / 未做
+
+1. **真机验证一条没做** —— 交接 §4 ⑤ 要求「画板既有手势逐个过一遍
+   (resize / rotate / rewire / 画线 / 框选)」,以及 mind 上点圆真能折叠。
+   结构断言只能证明**代码顺序**没错,证明不了**点下去的效果**。
+2. `onMagnetDragOut` **机制已通但无人消费** —— diglot mind 只接了 click。
+   「拖出一个新子节点」按 §3.3 是将来的事。
+3. 拖出预览线固定用 `krig.line.straight`;真机看观感若不合适可换 `curved`。
+
+---
+
+## 9. ⚠️ 真机第一轮反馈 & 修复(2026-09-10)
+
+用户真机截图指出两点:「收起来时应该是 `-` 吧?怎么收起来和展开都一样?」
+「连接点应该在最上层吧,而不是被线条挡住?」
+
+### 9.1 ⭐ 两个问题是**同一个根因**
+
+图标逻辑没错(截图里折叠的「分支A(5)」画的正是 `+`)。
+「看起来一样」的真因 = **记号被树连线糊掉**:父节点的 `E` 点正是所有子树连线的
+汇聚点,四条线压在圆上,`-` 就看不见了。所以第一个问题是第二个问题的表征。
+
+### 9.2 ⚠️⚠️ 只调 Z 没用 —— 两件事缺一不可
+
+| 坑 | 事实 |
+|---|---|
+| 线**不看 Z** | `LineRenderer` 的材质是 `depthTest:false`,纯按 `renderOrder` 排(它是 1)。把操作点 Z 抬到 0.06 对它毫无作用 |
+| `renderOrder` **不继承** | three 的排序看每个可渲染对象**自己**的 renderOrder。设在 root Group 上等于没设,子 mesh 仍是 0 —— 输给线的 1 |
+
+修法:**逐 mesh** 设 `renderOrder`(20+,高于线的 1)+ 材质 `depthTest:false`
+(与线同一套规则)。圆内部三层(边框/底/记号)也靠 renderOrder 分先后,
+因为关掉 depthTest 后 Z 不再参与排序。
+
+⚠️ **同族隐患**:`HandlesOverlay` 也是把 renderOrder 设在 Group 上(第 114 行)。
+它没暴露只是因为 handle 长在 bbox 边缘、离连线远。**别照抄那处写法。**
+
+### 9.3 ⚠️⚠️ 一条守卫「用注释骗过了自己」—— 必须记下来
+
+新加的 3 条层级守卫注入验红时,**`depthTest:false` 那条第一次是绿的**:
+守卫拿源码全文做文本匹配,而文件注释里到处写着「depthTest:false」的解释文字,
+于是**删掉真代码它照样匹配得上**。这正是 §6 列的「用注释里的说明骗过守卫」。
+
+修法 = 加 `stripComments()` 先剥注释再匹配,重新注入确认变红。
+⭐ **教训**:文本型守卫必须先问一句「**被守的字符串会不会也出现在注释里**」。
+本轮另外几条(`cancelMagnetAction` / `cancelAnimationFrame` /
+`disposeLineGroup` / `tryStartMagnetAction`)已逐个核过 —— 注释里 0 次出现,
+之前的红是真的。
+
+### 9.4 状态
+
+- 新增 3 条层级守卫(共 28 条断言),**逐条注入验红**(含上面那条修好后重验)
+- `tests/x/` 512 全绿;capabilities+views 882 passed / 2 failed(存量 slotBinding 债)
+- tsc / eslint 状态同 §8.4
+- ⚠️ **仍未真机复验** —— 这次改的是渲染层排序,必须真机看一眼记号是否露出来

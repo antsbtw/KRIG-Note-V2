@@ -22,6 +22,9 @@ import type {
   RefAttributes,
 } from 'react';
 import type { FillStyle, LineStyle, ArrowStyle, SubstanceDef } from '@capabilities/shape-library/types';
+import type { MagnetAction, MagnetDragOutTarget } from './interaction/magnet-actions';
+
+export type { MagnetAction, MagnetActionIcon, MagnetDragOutTarget } from './interaction/magnet-actions';
 
 // ─────────────────────────────────────────────────────────
 // Instance 系(V1 plugins/graph/library/types.ts 直迁)
@@ -134,6 +137,21 @@ export interface Instance {
    *   对方没装 / 缺字回退打包字体,不乱码;唯导出 PNG/SVG 时本机 outline 进产物)
    */
   text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `sysname:${string}`;
+
+  /**
+   * 连接点操作点(magnet actions):把该 instance 的某几个既有连接点变成**可交互的操作点**
+   * —— 点它触发 `onMagnetClick`,拖它拉出连接触发 `onMagnetDragOut`.
+   *
+   * ⭐ 复用既有 magnet id(N/E/S/W/START/END/...),**不新造坐标语言**;
+   * 声明了图元没有的 id 会被丢弃并 warn(fail loud,不静默兜底到别的连接点).
+   *
+   * ⚠️ canvas-rendering **不认识业务语义** —— 它只知道「这个连接点上有个可点的圆」.
+   * 「点了要折叠子树」这类语义由调用方接回调实现(如 diglot mind 的
+   * `graphic.toggleCollapsed`).
+   *
+   * 详见 src/capabilities/canvas-rendering/interaction/magnet-actions.ts.
+   */
+  magnetActions?: MagnetAction[];
 }
 
 // ─────────────────────────────────────────────────────────
@@ -202,6 +220,21 @@ export interface CanvasHostProps {
     screenW: number;
     screenH: number;
   }) => void;
+  /**
+   * 点击某个连接点操作点(见 `Instance.magnetActions`).
+   * ⚠️ 只在**声明了 action 的连接点**上触发;canvas-rendering 不解释语义.
+   */
+  onMagnetClick?: (instanceId: string, magnet: string) => void;
+  /**
+   * 从某个连接点操作点**拖出**并松手.
+   * target 落在别的节点的连接点上时给 `{kind:'magnet'}`,落空白给 `{kind:'world'}`
+   * —— ⚠️ 落空白不吞掉这次拖动(调用方可据此新建节点).
+   */
+  onMagnetDragOut?: (
+    instanceId: string,
+    magnet: string,
+    target: MagnetDragOutTarget,
+  ) => void;
 }
 
 /**

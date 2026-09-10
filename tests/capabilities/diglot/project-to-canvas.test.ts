@@ -337,6 +337,50 @@ describe('投影:稀疏覆盖全量', () => {
     expect(JSON.stringify(inst.find((i) => i.id === leaf.id)!.doc)).not.toContain('（');
   });
 
+  // ── 连接点操作点(点右侧圆折叠/展开;规格 §7.5「徽标点击」那一半)──
+
+  it('⭐⭐ 有子节点的节点在 E 连接点挂操作点(树连线也从 E 出发,同一个点)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const hit = inst.find((i) => i.id === branch.id)!;
+    expect(hit.magnetActions).toEqual([{ magnet: 'E', icon: 'minus' }]);
+  });
+
+  it('⚠️ 叶子不挂操作点 —— 没得折,挂了会骗人', () => {
+    const s = snap();
+    const leaf = s.s.nodes.find((n) => !s.s.nodes.some((k) => k.parent === n.id))!;
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    expect(inst.find((i) => i.id === leaf.id)!.magnetActions).toBeUndefined();
+  });
+
+  it('⭐⭐ 图标反映「点了会发生什么」:展开态 minus、折叠态 plus', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+
+    const openInst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    expect(
+      openInst.find((i) => i.id === branch.id)!.magnetActions?.[0].icon,
+      '展开态点它会折叠 → 画 minus',
+    ).toBe('minus');
+
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const closedInst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    expect(
+      closedInst.find((i) => i.id === branch.id)!.magnetActions?.[0].icon,
+      '折叠态点它会展开 → 画 plus;⚠️ 折叠后子节点被裁掉,操作点必须还在,否则再也展不开',
+    ).toBe('plus');
+  });
+
+  it('⚠️ 树连线 instance 不挂操作点(操作点只属于节点)', () => {
+    const s = snap();
+    const all = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const lines = all.filter((i) => isTreeLineId(i.id));
+    expect(lines.length, '前提:样本里确实有树连线').toBeGreaterThan(0);
+    for (const l of lines) expect(l.magnetActions).toBeUndefined();
+  });
+
   it('⭐ 展开态原样透传富文本(不经文本拍平)', () => {
     const s = snap();
     const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));

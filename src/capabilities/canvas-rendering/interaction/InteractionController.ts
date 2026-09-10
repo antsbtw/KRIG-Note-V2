@@ -32,6 +32,12 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
 import { renderLine, updateLineGeometry } from '../scene/LineRenderer';
 import { findClosestMagnet, listMagnets, MAGNET_SNAP_RADIUS_PX } from './magnet-snap';
+import type { MagnetActionsOverlay } from '../scene/MagnetActionsOverlay';
+import {
+  hitTestMagnetAction,
+  resolveMagnetDragOut,
+  type MagnetDragOutTarget,
+} from './magnet-actions';
 
 /**
  * Picker / Toolbar 触发"添加模式"的入参:
@@ -48,6 +54,19 @@ export interface AddModeSpec {
   presetInstance?: Partial<Instance>;
 }
 
+/**
+ * 操作点「按下」转「拖出」的阈值(屏幕像素).
+ * ⚠️ 按屏幕像素而非世界距离:低 zoom 下世界距离会被放大,手抖就被当成拖出.
+ */
+const MAGNET_ACTION_DRAG_THRESHOLD_PX = 4;
+
+/**
+ * 拖出预览线用的 line shape ref —— 复用既有基础直线,不新造资源.
+ * ⚠️ 只用于**预览**;落地成什么由调用方接 onMagnetDragOut 决定
+ * (canvas-rendering 不替调用方建 instance).
+ */
+const MAGNET_ACTION_PREVIEW_LINE_REF = 'krig.line.straight';
+
 /** V1 wheel zoom 灵敏度 / 上下限(InteractionController.ts:155-160 直迁) */
 const WHEEL_ZOOM_SENSITIVITY = 0.005;
 const MIN_ZOOM = 0.1;
@@ -59,6 +78,8 @@ export interface InteractionControllerOpts {
   nodeRenderer: NodeRenderer;
   /** Handles overlay(8 resize + 1 rotation)— G4.2 必传 */
   handlesOverlay: HandlesOverlay;
+  /** 连接点操作点 overlay(magnet actions);不传 = 该机制整体不启用 */
+  magnetActionsOverlay?: MagnetActionsOverlay;
   /** 反查 instance(给 resize/rotate 修原始 Instance 用) */
   getInstance: (id: string) => Instance | undefined;
   /** 选中变化回调(view 端 toolbar 用) */
@@ -74,6 +95,17 @@ export interface InteractionControllerOpts {
    * 打开 EditOverlay popup.参数 = 命中的 instance + 屏幕坐标 + 节点屏幕尺寸.
    */
   onNodeDoubleClick?: (info: NodeDoubleClickInfo) => void;
+  /**
+   * 点击连接点操作点(见 Instance.magnetActions).
+   * ⚠️ 本控制器**不解释语义** —— 只报「哪个 instance 的哪个 magnet 被点了」.
+   */
+  onMagnetClick?: (instanceId: string, magnet: string) => void;
+  /** 从连接点操作点拖出并松手(落 magnet 给 target,落空白给 world 坐标) */
+  onMagnetDragOut?: (
+    instanceId: string,
+    magnet: string,
+    target: MagnetDragOutTarget,
+  ) => void;
 }
 
 export interface NodeDoubleClickInfo {
@@ -97,6 +129,13 @@ export class InteractionController {
   private onViewportChange?: () => void;
   private onAddModeChange?: (spec: AddModeSpec | null) => void;
   private onNodeDoubleClick?: (info: NodeDoubleClickInfo) => void;
+  private magnetActionsOverlay?: MagnetActionsOverlay;
+  private onMagnetClick?: (instanceId: string, magnet: string) => void;
+  private onMagnetDragOut?: (
+    instanceId: string,
+    magnet: string,
+    target: MagnetDragOutTarget,
+  ) => void;
 
   /** 当前选中(G3 单选,G4.2 起支持多选 toggle) */
   private selected = new Set<string>();
@@ -139,6 +178,23 @@ export class InteractionController {
     startRotation: number;
     startSize: { w: number; h: number };
     startParams: Record<string, number>;
+  } | null = null;
+
+  /**
+   * 连接点操作点的按下 / 拖出状态(magnet actions).
+   *
+   * ⭐ 按下先只记状态**不立刻回调** —— 因为「点」和「拖出」共用同一次 mousedown:
+   * 走到 mouseup 还没拖动过(dragged=false)才算「点」,拖动过就算「拖出」.
+   * (与画板既有 dragMoved 判定同款思路.)
+   */
+  private magnetActionPress: {
+    instanceId: string;
+    magnetId: string;
+    startWorld: { x: number; y: number };
+    /** 是否已越过阈值真的拖起来了 */
+    dragged: boolean;
+    /** 拖出中的预览线(dragged 后才建;⚠️ 取消/结束必须移除并 dispose) */
+    previewGroup: THREE.Group | null;
   } | null = null;
 
   /** Clipboard:Cmd+C 时存当前选中 instances 全量快照(view-scoped,不跨画板) */
@@ -216,6 +272,9 @@ export class InteractionController {
     this.onViewportChange = opts.onViewportChange;
     this.onAddModeChange = opts.onAddModeChange;
     this.onNodeDoubleClick = opts.onNodeDoubleClick;
+    this.magnetActionsOverlay = opts.magnetActionsOverlay;
+    this.onMagnetClick = opts.onMagnetClick;
+    this.onMagnetDragOut = opts.onMagnetDragOut;
     this.attachListeners();
   }
 
@@ -310,6 +369,7 @@ export class InteractionController {
     }
     this.magnetHints.clear();
     this.clearLineEndpointHandles();
+    this.cancelMagnetAction();
     this.rewiring = null;
     this.addMode = null;
     this.undoStack = [];
@@ -426,6 +486,11 @@ export class InteractionController {
       return;
     }
 
+    // ── 1.7 连接点操作点(magnet actions)──
+    // ⭐ 必须**先于**节点拖动判(否则点连接点会变成拖节点);
+    // ⚠️ 又不该抢 resize / rotate / rewire 的既有手势,所以插在 1.5 之后.
+    if (this.tryStartMagnetAction(world)) return;
+
     // ── 2. 命中节点 → 选中 + 启动拖动 ──
     const hit = this.hitTest(screen.x, screen.y);
     const additive = e.shiftKey || e.metaKey;
@@ -488,6 +553,10 @@ export class InteractionController {
       this.applyParamDrag(world);
       return;
     }
+    if (this.magnetActionPress) {
+      this.updateMagnetActionDrag(world);
+      return;
+    }
     if (this.rewiring) {
       this.updateRewire(world);
       return;
@@ -544,6 +613,12 @@ export class InteractionController {
       this.paramDragging = null;
       this.refreshHandles();
       this.onInstancesChange?.();
+      return;
+    }
+    if (this.magnetActionPress) {
+      const screen = this.toContainerCoords(e);
+      const world = this.sceneManager.screenToWorld(screen.x, screen.y);
+      this.finishMagnetAction(world);
       return;
     }
     if (this.rewiring) {
@@ -673,6 +748,8 @@ export class InteractionController {
         this.refreshHandles();
       } else if (this.marquee) {
         this.cancelMarquee();
+      } else if (this.magnetActionPress) {
+        this.cancelMagnetAction();
       } else if (this.rewiring) {
         this.cancelRewire();
       } else if (this.drawingLine) {
@@ -781,6 +858,121 @@ export class InteractionController {
     this.notifySelection();
     this.exitAddMode();
     this.onInstancesChange?.();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // 连接点操作点(magnet actions):点 → 回调;拖出 → 拉连接
+  //
+  // ⚠️ 本段**不认识业务语义**(不知道什么叫「折叠」)—— 只报「哪个连接点被点/被拖到哪」.
+  // 判定几何在 interaction/magnet-actions.ts(纯函数,node 环境可单测).
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * mousedown 命中操作点 → 记状态(先不回调,mouseup 才分「点」还是「拖出」).
+   * @returns true = 本次 mousedown 已被操作点接管,后续手势不再判
+   */
+  private tryStartMagnetAction(world: { x: number; y: number }): boolean {
+    const overlay = this.magnetActionsOverlay;
+    if (!overlay) return false;
+    const zoom = this.sceneManager.getView().zoom;
+    const hit = hitTestMagnetAction(world, overlay.getResolved(), zoom);
+    if (!hit) return false;
+    this.magnetActionPress = {
+      instanceId: hit.instanceId,
+      magnetId: hit.magnetId,
+      startWorld: { x: world.x, y: world.y },
+      dragged: false,
+      previewGroup: null,
+    };
+    return true;
+  }
+
+  /**
+   * mousemove:越过阈值就转成「拖出」—— 建预览线 + 吸附到最近 magnet.
+   *
+   * ⭐ 吸附复用 findClosestMagnet(与画线 / rewire 同一套),不重写几何.
+   * 阈值按**屏幕像素**折世界距离:低 zoom 下手抖不该被当成拖出.
+   */
+  private updateMagnetActionDrag(world: { x: number; y: number }): void {
+    const press = this.magnetActionPress;
+    if (!press) return;
+    if (!press.dragged) {
+      const zoom = this.sceneManager.getView().zoom;
+      const moved = Math.hypot(
+        world.x - press.startWorld.x,
+        world.y - press.startWorld.y,
+      ) * Math.max(zoom, 0.01);
+      if (moved < MAGNET_ACTION_DRAG_THRESHOLD_PX) return;
+      press.dragged = true;
+      press.previewGroup = renderLine(MAGNET_ACTION_PREVIEW_LINE_REF, {
+        start: press.startWorld,
+        end: world,
+      });
+      this.sceneManager.scene.add(press.previewGroup);
+      // 拖出时显示候选连接点(与画线同款提示;排除自身)
+      this.showMagnetHintsFor((id) => id !== press.instanceId);
+    }
+    const exclude = new Set([press.instanceId]);
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+      exclude,
+    );
+    const end = closest ? { x: closest.magnet.x, y: closest.magnet.y } : world;
+    if (press.previewGroup) {
+      updateLineGeometry(
+        press.previewGroup,
+        MAGNET_ACTION_PREVIEW_LINE_REF,
+        press.startWorld,
+        end,
+      );
+    }
+  }
+
+  /**
+   * mouseup:没拖动过 = 「点」→ onMagnetClick;拖动过 = 「拖出」→ onMagnetDragOut.
+   *
+   * ⚠️ 拖出落空白也回调(给 world 坐标)—— **不吞掉这次拖动**:
+   * 调用方可能据此新建一个节点.
+   */
+  private finishMagnetAction(world: { x: number; y: number }): void {
+    const press = this.magnetActionPress;
+    if (!press) return;
+    this.clearMagnetActionPreview(press);
+    this.magnetActionPress = null;
+
+    if (!press.dragged) {
+      this.onMagnetClick?.(press.instanceId, press.magnetId);
+      return;
+    }
+    const exclude = new Set([press.instanceId]);
+    const closest = findClosestMagnet(
+      world.x, world.y,
+      this.allMagnetCandidates(),
+      this.snapRadiusWorld(),
+      exclude,
+    );
+    const target = resolveMagnetDragOut(closest, world);
+    this.onMagnetDragOut?.(press.instanceId, press.magnetId, target);
+  }
+
+  /** ESC / dispose:取消操作点手势(⚠️ 不留预览线残留,也不发任何回调) */
+  private cancelMagnetAction(): void {
+    const press = this.magnetActionPress;
+    if (!press) return;
+    this.clearMagnetActionPreview(press);
+    this.magnetActionPress = null;
+  }
+
+  /** 清预览线 + magnet 提示(成功 / 取消都要走) */
+  private clearMagnetActionPreview(press: NonNullable<InteractionController['magnetActionPress']>): void {
+    if (press.previewGroup) {
+      this.sceneManager.scene.remove(press.previewGroup);
+      disposeLineGroup(press.previewGroup);
+      press.previewGroup = null;
+    }
+    if (press.dragged) this.clearMagnetHints();
   }
 
   // ─────────────────────────────────────────────────────────

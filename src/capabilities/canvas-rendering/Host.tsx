@@ -34,6 +34,9 @@ import type {
 import { SceneManager } from './scene/SceneManager';
 import { NodeRenderer } from './scene/NodeRenderer';
 import { HandlesOverlay } from './scene/HandlesOverlay';
+import { MagnetActionsOverlay } from './scene/MagnetActionsOverlay';
+import { listMagnets } from './interaction/magnet-snap';
+import { resolveMagnetActions, type ResolvedMagnetAction } from './interaction/magnet-actions';
 import { InteractionController } from './interaction/InteractionController';
 import { combineSelectedToSubstance } from './combine';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
@@ -42,7 +45,10 @@ import './styles.css';
 
 export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
   function CanvasHost(props, ref) {
-    const { onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange, onNodeDoubleClick } = props;
+    const {
+      onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange,
+      onNodeDoubleClick, onMagnetClick, onMagnetDragOut,
+    } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneManager | null>(null);
     const nodeRendererRef = useRef<NodeRenderer | null>(null);
@@ -79,11 +85,33 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
           params: inst.params,
         }).map((h) => ({ index: h.index, localX: h.x, localY: h.y }));
       });
+      /**
+       * 连接点操作点 overlay(magnet actions).
+       *
+       * ⭐ provider 每帧给「当前该画哪些操作点」:扫 instances 上声明的 magnetActions,
+       * 用既有 listMagnets 解出世界坐标(rotation 已在里面处理).
+       * ⚠️ 没有任何 instance 声明 → 一个都不画,零开销、零行为变化
+       * (画板 / family-tree 不声明,机制对它们完全隐形).
+       */
+      const magnetActions = new MagnetActionsOverlay(scene);
+      magnetActions.setProvider((): ResolvedMagnetAction[] => {
+        const out: ResolvedMagnetAction[] = [];
+        for (const id of nodeRenderer.ids()) {
+          const inst = nodeRenderer.getInstance(id);
+          if (!inst?.magnetActions?.length) continue;
+          const node = nodeRenderer.get(id);
+          if (!node) continue;
+          out.push(...resolveMagnetActions(id, inst.magnetActions, listMagnets(node, inst)));
+        }
+        return out;
+      });
+
       const interaction = new InteractionController({
         container,
         sceneManager: scene,
         nodeRenderer,
         handlesOverlay: handles,
+        magnetActionsOverlay: magnetActions,
         getInstance: (id) => nodeRenderer.getInstance(id),
         onSelectionChange: (ids) => onSelectionChange?.(ids),
         onInstancesChange: () => onInstancesChange?.(nodeRenderer.listInstances()),
@@ -92,6 +120,9 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         },
         onAddModeChange: (spec) => onAddModeChange?.(spec),
         onNodeDoubleClick: (info) => onNodeDoubleClick?.(info),
+        onMagnetClick: (instanceId, magnet) => onMagnetClick?.(instanceId, magnet),
+        onMagnetDragOut: (instanceId, magnet, target) =>
+          onMagnetDragOut?.(instanceId, magnet, target),
       });
       sceneRef.current = scene;
       nodeRendererRef.current = nodeRenderer;
@@ -119,6 +150,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);
         interaction.dispose();
+        magnetActions.dispose();
         handles.dispose();
         nodeRenderer.clear();
         scene.dispose();

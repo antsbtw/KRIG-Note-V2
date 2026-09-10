@@ -670,6 +670,17 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
             selectedRef.current = ids;
           }}
           onNodeDoubleClick={handleNodeDoubleClick}
+          /**
+           * ⭐ 点节点右侧的连接点圆 → 折叠/展开(规格 §7.5「徽标点击」)。
+           *
+           * ⚠️ 这里用 toggle 而 `-`/`+` 两键各司其职 —— 不矛盾:
+           * 圆上画的就是「点了会发生什么」(展开态画 `-`、折叠态画 `+`),
+           * 所见即所得,不存在「按 `-` 却展开了」那种意外。
+           *
+           * ⚠️ 树连线 instance 不挂操作点(投影时只给有子节点的**节点**挂),
+           * 所以这里拿到的 id 必然是节点 id。
+           */
+          onMagnetClick={(instanceId) => handleToggleCollapsed(instanceId)}
           onViewportChange={(vp) => {
             // ⚠️ 只记不写盘:视口是**会话态**,不持久(01 §7.5「缩放/平移不持久」)
             viewportRef.current = vp;
