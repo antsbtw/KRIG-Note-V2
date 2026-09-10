@@ -39,21 +39,6 @@ const ACTION_BORDER = 0x4A90E2;       // 边框蓝(与选中色同族)
 const ACTION_GLYPH = 0x2E5C8A;        // 记号深蓝
 const ACTION_BORDER_PX = 1.2;         // 边框宽度(像素)
 
-/**
- * ⭐ 呼吸区外环:圆最外面再套一圈**与画布同色**的环,视觉上是「留白」。
- *
- * ⚠️ 解决的问题:画布背景网格点(DotGrid,世界坐标、到处都是)会**恰好落在圆旁边**,
- *   看着像圆上黏了个脏点(真机踩过)。
- * ⭐ 为什么不靠「把圆画成不透明」—— 圆本来就是不透明的;
- *   那个网格点在**圆外面**,不在覆盖范围内,再不透明也盖不住。
- * ⭐ 为什么不针对那一个点修 —— 它随平移/缩放就挪走了,是巧合不是稳定现象。
- *   外环是**通用解**:操作点在任何背景上都有干净边界。
- *
- * ⚠️ 必须与 SceneManager 的 `scene.background` 同色,否则外环会显形。
- *   两处都写死 '#1e1e1e';改背景色时**必须同步改这里**(已由守卫钉住)。
- */
-const ACTION_HALO = 0x1e1e1e;         // = SceneManager scene.background
-const ACTION_HALO_PX = 3.5;           // 外环宽度(像素)
 const GLYPH_HALF_PX = 3;              // 记号半长(像素)
 const GLYPH_THICK_PX = 1.4;           // 记号线宽(像素)
 const DOT_RADIUS_PX = 2;              // 'dot' 图标的实心点半径(像素)
@@ -203,23 +188,13 @@ function rebuildActionMesh(
     disposeObject(child);
   }
 
-  // ⚠️ 各层要分先后(外环 < 边框 < 底 < 记号),否则圆内部会自己盖自己。
+  // ⚠️ 三层自身也要分先后(边框 < 底 < 记号),否则圆内部会自己盖自己。
   //    同样只能靠 renderOrder —— depthTest 关了之后 Z 不再参与排序。
-
-  // ⭐ 呼吸区外环(画布同色)—— 画在最底,把圆周围的背景网格点盖掉
-  const halo = addLayer(
-    group,
-    new THREE.CircleGeometry(radius + ACTION_BORDER_PX + ACTION_HALO_PX, 24),
-    ACTION_HALO,
-    0,
-  );
-  halo.position.z = -0.003;
-
   const border = addLayer(
     group,
     new THREE.CircleGeometry(radius + ACTION_BORDER_PX, 24),
     ACTION_BORDER,
-    1,
+    0,
   );
   border.position.z = -0.002;
 
@@ -227,7 +202,7 @@ function rebuildActionMesh(
     group,
     new THREE.CircleGeometry(radius, 24),
     ACTION_FILL,
-    2,
+    1,
   );
   fill.position.z = -0.001;
 
@@ -240,7 +215,7 @@ function rebuildActionMesh(
 
   // ⭐ 记号画几何(横/竖线段),不用文字 —— 见文件头注释
   if (icon === 'dot') {
-    addLayer(group, new THREE.CircleGeometry(DOT_RADIUS_PX, 16), ACTION_GLYPH, 3);
+    addLayer(group, new THREE.CircleGeometry(DOT_RADIUS_PX, 16), ACTION_GLYPH, 2);
     return;
   }
   // 横线(minus / plus 共用)
@@ -248,14 +223,14 @@ function rebuildActionMesh(
     group,
     new THREE.PlaneGeometry(GLYPH_HALF_PX * 2, GLYPH_THICK_PX),
     ACTION_GLYPH,
-    3,
+    2,
   );
   if (icon === 'plus') {
     addLayer(
       group,
       new THREE.PlaneGeometry(GLYPH_THICK_PX, GLYPH_HALF_PX * 2),
       ACTION_GLYPH,
-      3,
+      2,
     );
   }
 }
@@ -320,7 +295,7 @@ function addCountLabel(group: THREE.Group, label: string, radius: number): void 
       side: THREE.DoubleSide,
     }),
   );
-  mesh.renderOrder = ACTION_RENDER_ORDER + 3; // 与记号同层(记号和数字互斥)
+  mesh.renderOrder = ACTION_RENDER_ORDER + 2; // 与记号同层(记号和数字互斥)
 
   // ⚠️⚠️ **抵消相机的 Y 翻转,否则数字上下颠倒**(真机踩过:`2` 看着像镜像字符)。
   //

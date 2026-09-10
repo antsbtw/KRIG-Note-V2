@@ -274,54 +274,6 @@ describe('圆内数字:必须装得进圆里', () => {
   });
 });
 
-describe('呼吸区外环:圆周围要有干净留白', () => {
-  const code = stripComments(overlay);
-
-  /**
-   * ⚠️ 真机踩过:画布背景网格点(DotGrid,世界坐标、到处都是)恰好落在圆旁边,
-   * 看着像圆上黏了个脏点。外环用**画布同色**把圆周围一圈盖掉。
-   *
-   * ⚠️⚠️ 外环颜色必须与 SceneManager 的 scene.background **完全一致** ——
-   * 不一致的话外环会显形,变成一个更难看的灰圈(比原来的脏点还糟)。
-   * 这是**跨文件的隐式耦合**,改背景色时极易漏改,所以钉在这里。
-   */
-  it('⭐⭐ 外环颜色必须 = 画布背景色(不一致会显形)', () => {
-    const haloHex = /const ACTION_HALO = 0x([0-9a-fA-F]{6})/.exec(code)?.[1];
-    expect(haloHex, '外环必须有明确的颜色常量').toBeTruthy();
-
-    const sceneManager = stripComments(
-      readFileSync(resolve(SRC_ROOT, 'scene/SceneManager.ts'), 'utf8'),
-    );
-    const bgHex = /scene\.background = new THREE\.Color\('#([0-9a-fA-F]{6})'\)/
-      .exec(sceneManager)?.[1];
-    expect(bgHex, '读不到画布背景色 —— 改写法了,这条守卫要同步更新').toBeTruthy();
-
-    expect(
-      haloHex?.toLowerCase(),
-      `外环 0x${haloHex} 与画布背景 #${bgHex} 不一致 —— 外环会显形`,
-    ).toBe(bgHex?.toLowerCase());
-  });
-
-  it('⭐ 外环画在最底层(不能盖住边框/底/记号)', () => {
-    // 外环 layer 0 < 边框 1 < 底 2 < 记号 3
-    expect(code).toMatch(/ACTION_HALO,\s*\n\s*0,/);
-    expect(code, '边框必须在外环之上').toMatch(/ACTION_BORDER,\s*\n\s*1,/);
-    expect(code, '内圆底必须在边框之上').toMatch(/ACTION_FILL,\s*\n\s*2,/);
-  });
-
-  it('⚠️ 外环只是留白,不得改变命中范围(点的还是那个圆)', () => {
-    // 命中半径来自 magnet-actions.ts,与外环无关 —— 外环变宽不该让命中区变大
-    const pure = stripComments(
-      readFileSync(resolve(SRC_ROOT, 'interaction/magnet-actions.ts'), 'utf8'),
-    );
-    // ⚠️ 命中半径 = 圆的实际半径 + slop(圆带数字时更大);**与外环无关**
-    expect(pure, '命中半径由圆半径 + slop 决定').toMatch(
-      /\(r \+ MAGNET_ACTION_HIT_SLOP_PX\)/,
-    );
-    expect(pure, '命中计算不该认识外环').not.toMatch(/ACTION_HALO/);
-  });
-});
-
 describe('业务语义不下沉到共享底座', () => {
   it('⭐⭐ canvas-rendering 全层不出现「折叠」这类调用方语义', () => {
     // 底座只知道「连接点上有个可点的圆」;知道「折叠」= 语义漏下来了
