@@ -261,6 +261,24 @@ describe('投影:稀疏覆盖全量', () => {
     expect(byId.get(root.id)!.size!.h).toBeGreaterThan(byId.get(leaf.id)!.size!.h);
   });
 
+  it('⭐⭐ 首屏视口:root 居中 + zoom=1(字号与 note 一样大)', () => {
+    // ⚠️ 之前用 fitToContent 取景 —— 它按 bbox 缩放填满容器,
+    //   字号随图大小忽大忽小,与「h1~h6 对齐 note 字号」矛盾(用户实测指出)。
+    // ⭐ zoom=1 的不变量:1 世界单位 = 1 CSS 像素(SceneManager 注释),
+    //   所以 zoom=1 时节点就按声明的 38/28/22 渲染 —— 与 note 一样大。
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const root = s.s.nodes.find((n) => n.role === 'root')!;
+    const rootInst = inst.find((i) => i.id === root.id)!;
+
+    // 视口中心应落在 root 的几何中心
+    const expectX = Math.round(rootInst.position!.x + rootInst.size!.w / 2);
+    const expectY = Math.round(rootInst.position!.y + rootInst.size!.h / 2);
+    expect(Number.isFinite(expectX) && Number.isFinite(expectY)).toBe(true);
+    // ⭐ root 字号必须是 h1 —— 这条与 zoom=1 合起来才等于"和 note 一样大"
+    expect(rootInst.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
+  });
+
   it('⚠️ 布局结果缺节点 → fail loud,不静默给 (0,0)', () => {
     const s = snap();
     // 故意给一个空布局

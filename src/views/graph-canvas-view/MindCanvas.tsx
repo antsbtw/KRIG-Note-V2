@@ -58,6 +58,44 @@ export interface MindCanvasProps {
   readonly onPinnedChange?: (count: number, releaseAll: () => void) => void;
 }
 
+/**
+ * ⭐ 首屏视口:**root 居中,zoom=1**。
+ *
+ * ⚠️ 不用 `fitToContent` —— 它按 bbox 缩放填满容器,字号会随图的大小变,
+ * 与「h1~h6 对齐 note 字号」的设计相矛盾(用户实测指出)。
+ *
+ * root 找不到时回落到整图中心(空图/异常数据也要有个合理落点,不 fail)。
+ */
+function centeredOnRoot(
+  snap: DiglotSnapshot,
+  projected: readonly { id: string; position?: { x: number; y: number }; size?: { w: number; h: number } }[],
+): CanvasDocument['view'] {
+  const rootId = snap.s.nodes.find((n) => n.role === 'root')?.id;
+  const hit = rootId ? projected.find((p) => p.id === rootId) : undefined;
+  if (hit?.position && hit.size) {
+    return {
+      centerX: Math.round(hit.position.x + hit.size.w / 2),
+      centerY: Math.round(hit.position.y + hit.size.h / 2),
+      zoom: 1,
+    };
+  }
+  // 回落:整图 bbox 中心
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of projected) {
+    if (!p.position || !p.size) continue;
+    minX = Math.min(minX, p.position.x);
+    minY = Math.min(minY, p.position.y);
+    maxX = Math.max(maxX, p.position.x + p.size.w);
+    maxY = Math.max(maxY, p.position.y + p.size.h);
+  }
+  if (!Number.isFinite(minX)) return { centerX: 0, centerY: 0, zoom: 1 };
+  return {
+    centerX: Math.round((minX + maxX) / 2),
+    centerY: Math.round((minY + maxY) / 2),
+    zoom: 1,
+  };
+}
+
 /** 派生物 → CanvasDocument(画布吃的形态)。 */
 function toCanvasDocument(instances: Instance[], view: CanvasDocument['view']): CanvasDocument {
   return { schema_version: 3, view, instances };
@@ -182,15 +220,20 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
       setPinned(diglot.pinnedCount(snap));
       setSnapView(snap);
       const instances = projected as unknown as Instance[];
-      // ⭐ 保留当前视口 —— 重排不该让镜头动(拖一下整个画布跳是最劝退的体验)
-      host.loadDocument(toCanvasDocument(instances, viewportRef.current));
-      // ⭐ 只在首次加载自动取景;之后重排一律保持用户视角。
-      // ⚠️ padding 是**比例不是像素**(fitToBox: padW = w * (1 + padding));
-      //    传 40 = 4000% 留白 → 整张图缩成一个点(真机实测撞到)。
+      // ⭐ 首次打开:**root 居中 + zoom=1**(用户拍板 2026-09-10)
+      //
+      // ⚠️ 之前用 `fitToContent` 取景 —— 它按内容 bbox **缩放到填满容器**,
+      //    于是字号随图的大小忽大忽小:节点少时被放大、节点多时被缩小,
+      //    和 note 正文对不上。而 h1~h6 的意义正是「与 note 同一套字号」。
+      // ⭐ zoom=1 的不变量:**1 个世界单位 = 1 个 CSS 像素**(SceneManager 注释),
+      //    所以 zoom=1 时节点字号就是它声明的 38/28/22 —— 与 note 渲染**一样大**。
+      const initialView =
+        opts?.fit && !fittedRef.current ? centeredOnRoot(snap, projected) : viewportRef.current;
       if (opts?.fit && !fittedRef.current) {
-        host.fitToContent(0.15);
+        viewportRef.current = initialView;
         fittedRef.current = true;
       }
+      host.loadDocument(toCanvasDocument(instances, initialView));
     },
     [layoutApi, diglot],
   );
