@@ -45,6 +45,23 @@ describe('几何 shape 撑高', () => {
     expect(code).toContain('adaptTextNodeSizeToContent(inst.id, current, contentH + insetY)');
   });
 
+
+  it('⭐⭐ 几何 shape 撑高必须**整体重渲**,不能只补 hit-area/背景 mesh', () => {
+    const code = readCode('src/capabilities/canvas-rendering/scene/NodeRenderer.ts');
+    // ⚠️ 真机踩过:只改 size 不重渲 → 蓝色框纹丝不动(路径 mesh 顶点在 evaluate 时
+    //    按 size.h 烘死了),公式照旧溢出,看着像「改了没生效」。
+    expect(code).toContain("rendered.group.userData?.isTextNode === true");
+    expect(code, '几何分支必须调 this.update(inst) 让 evaluate 按新高度重求值').toMatch(
+      /if \(inst && !isPureTextBox\) \{[\s\S]{0,200}this\.update\(inst\);/,
+    );
+  });
+
+  it('⚠️ 重渲不会无限递归 —— 收敛靠「装得下就 return」这道闸', () => {
+    const code = readCode('src/capabilities/canvas-rendering/scene/NodeRenderer.ts');
+    // 这句没了 → update() 会再触发撑高 → 再 update() → 死循环卡死画板
+    expect(code).toMatch(/if \(newH <= rendered\.size\.h \+ 1\) return;/);
+  });
+
   it('⚠️ size_lock.h 的保护还在(手动定高的节点不该被撑)', () => {
     const code = readCode('src/capabilities/canvas-rendering/scene/NodeRenderer.ts');
     expect(code).toMatch(/if \(inst\?\.size_lock\?\.h\) return;/);

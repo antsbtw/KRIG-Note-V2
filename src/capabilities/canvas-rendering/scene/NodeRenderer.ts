@@ -654,6 +654,27 @@ export class NodeRenderer {
     const newH = Math.ceil(contentH + padding);
     if (newH <= rendered.size.h + 1) return;
 
+    // ⭐⭐ 几何 shape(圆角矩形等):**必须整体重渲**,不能只改下面那几个 mesh。
+    //
+    // ⚠️ 真机踩过:放开撑高后公式**照旧溢出框外**,看着像「改了没生效」。
+    // 真因 = 下面那段只重建 **hit-area** 和 **背景** 两个 PlaneGeometry,
+    // 而几何 shape 的蓝色框是 `pathToThree(evaluate(...))` 产出的**路径 mesh**,
+    // 顶点在 evaluate 时就按 `size.h` **烘死**了 —— size 改了它纹丝不动。
+    // 文字框没有这层几何,所以老代码一直够用;几何 shape 一放开就露馅。
+    //
+    // ⭐ 正解:写回 size 后走 `update()`(remove + add 整体重建),
+    // 让 evaluate 按新高度重新求值,框才会真的变高。
+    // ⚠️ 不会无限递归:重渲后内容装得下,上面那句 `newH <= size.h + 1` 直接 return。
+    // ⭐ 判据:`isTextNode` 只在**纯文字框**那条路径上打(renderTextLayerNode),
+    //    几何 shape 走的是 evaluate → pathToThree,没有这个标记。
+    const isPureTextBox = rendered.group.userData?.isTextNode === true;
+    if (inst && !isPureTextBox) {
+      if (inst.size) inst.size.h = newH;
+      rendered.size.h = newH;
+      this.update(inst);
+      return;
+    }
+
     // outer/inner 嵌套(wrapForRotation):
     // outer.position = (px + w/2, py + h/2);inner.position = (-w/2, -h/2)
     // 改 size.h 时两处同步(否则 bbox 中心算错,节点上下偏移)
