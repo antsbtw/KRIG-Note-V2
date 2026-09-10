@@ -78,6 +78,17 @@ export function emptyMindFile(): MindFile {
  * ⭐ 幂等:同一快照序列化两次字节相同(C1 由 G 层保证,S 层由 toMermaid 保证)。
  */
 export function snapshotToFile(snap: DiglotSnapshot): MindFile {
+  // ⚠️⚠️ **不要在这里给节点写显式 id**(2026-09-10 试过,被 C4 断言挡回)。
+  //
+  // 动机曾是:用户在文本里增删行后,解析器按行序重分配 id,G 条目会配错。
+  // 但把 id 写进语义文本,会让「拖动节点」产生的 G 条目**反过来改动语义文本**
+  // (多出 `m002[分支A]`)—— 直接违反 C4「画布拖动 → S 层零变更」。
+  //
+  // ⭐ 两者不可兼得:**id 不能既是语义面的内容,又对语义面透明**。
+  // 正解方向(未做):把稳定 id 变成**书写表面之外**的东西 ——
+  // KRIG 投影里它天然存在(block id,见 01 §5),平文本投影才需要 `^id`,
+  // 而 `^id` 应由**用户主动写**(规格 §3.2「想连线,先命名」),不是机器补。
+  // 记账见 03-projection-map §6。
   return {
     format: MIND_FILE_FORMAT,
     semantic: toMermaidMindmap(snap.s),

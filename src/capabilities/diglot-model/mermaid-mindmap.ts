@@ -309,7 +309,7 @@ function wrap(label: string, shape: MermaidShape): string {
  * C9 验的是「**再解析回来图一致**」,不是字符串相等。
  * ⭐ 真正要保用户书写原貌的是 KRIG 投影(note block),不是这条导出路径。
  */
-export function toMermaidMindmap(s: SLayer): string {
+export function toMermaidMindmap(s: SLayer, opts?: { explicitIds?: ReadonlySet<string> }): string {
   const byParent = new Map<string, SNode[]>();
   for (const n of s.nodes) {
     const key = n.parent ?? ' root';
@@ -322,8 +322,21 @@ export function toMermaidMindmap(s: SLayer): string {
   const out: string[] = ['mindmap'];
   const emit = (n: SNode, depth: number): void => {
     const label = contentToText(n.content);
-    // root 用 mermaid 惯例的 `root((...))`;其余节点 v0 不带形状(形状归 G 层)
-    const body = n.role === 'root' ? `root${wrap(label, 'circle')}` : label;
+    // ⭐ 显式 id:被 G 层触碰过的节点要把 id 写进文本,否则用户在文本里
+    //   增删行之后,解析器按行序重新分配 id,G 条目会**配到别的节点上**。
+    //   语法沿用 mermaid 文法规则 27 的 `id[descr]` 形态 —— 解析器本就认。
+    //   ⚠️ 只给需要的节点写(稀疏):没有 G 条目的节点不写,保持文本干净。
+    const needsId = opts?.explicitIds?.has(n.id) === true;
+    let body: string;
+    if (n.role === 'root') {
+      // root 用 mermaid 惯例的 `root((...))`
+      body = `root${wrap(label, 'circle')}`;
+    } else if (needsId) {
+      body = `${n.id}[${label}]`;
+    } else {
+      // 其余节点 v0 不带形状(形状归 G 层)
+      body = label;
+    }
     out.push('  '.repeat(depth + 1) + body);
     for (const c of byParent.get(n.id) ?? []) emit(c, depth + 1);
   };
