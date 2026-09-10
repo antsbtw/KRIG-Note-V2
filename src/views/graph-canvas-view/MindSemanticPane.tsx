@@ -30,24 +30,43 @@ import type {
 } from '@capabilities/code-editing/types';
 import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
+import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
 
 /** 用户停止输入后多久才尝试解析。⚠️ 太短会在输入中途反复报错刷屏。 */
 const PARSE_DEBOUNCE_MS = 400;
 
+/**
+ * ⭐ 语义面的两种写法(用户拍板 2026-09-10):
+ * - `note`:⭐ **我们自己的格式** —— 层级用 h1~hn,block 自带稳定 id(规格 §5 右列)
+ * - `mermaid`:继承 mermaid 语法,导入现成图例的通道(规格 §2 起步策略)
+ *
+ * ⚠️ 两者是**同一棵树的两种写法**,不是两份数据。切换随时,内容跟着走。
+ */
+export type SemanticTab = 'note' | 'mermaid';
+
 export interface MindSemanticPaneProps {
   /** 当前快照(画布侧改动后会变) */
   readonly snapshot: DiglotSnapshot | null;
-  /** 用户改文本且解析成功 → 上报新的 S 层 */
+  /** mermaid tab:用户改文本且解析成功 → 上报新的 S 层文本 */
   readonly onSemanticCommit: (semantic: string) => void;
+  /** ⭐ note tab:用户改 block → 上报新的 S 层(直接给树,不经文本) */
+  readonly onTreeCommit: (doc: unknown) => void;
+  /** 当前导图 id —— 用于构造互不相同的 PM instanceId */
+  readonly graphId: string;
 }
 
 export function MindSemanticPane({
   snapshot,
   onSemanticCommit,
+  onTreeCommit,
+  graphId,
 }: MindSemanticPaneProps): ReactElement {
+  const [tab, setTab] = useState<SemanticTab>('note');
   const codeApi = useMemo(() => requireCapabilityApi<CodeEditingApi>('code-editing'), []);
   const diglot = useMemo(() => requireCapabilityApi<DiglotModelApi>('diglot-model'), []);
   const CodeHost = codeApi.Host;
+  const textEditing = useMemo(() => requireCapabilityApi<TextEditingApi>('text-editing'), []);
+  const NoteHost = textEditing.Host;
 
   const handleRef = useRef<CodeEditingHandle | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,12 +131,50 @@ export function MindSemanticPane({
     [diglot, snapshot, onSemanticCommit],
   );
 
+  // ── ⭐ note tab:block 改动 → 树跟着变 ──
+  //
+  // ⚠️ 同样要抑制回环,但闸门形态不同:note 侧比的是**结构指纹**而非字符串
+  //    (PM 每次编辑都会产出新对象,引用比较必然不等)。
+  const noteEchoRef = useRef<string | null>(null);
+  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** 当前快照对应的 note doc。 */
+  const noteDocOf = useCallback(
+    (snap: DiglotSnapshot): DriverSerialized =>
+      diglot.treeToNoteDoc(snap.s) as unknown as DriverSerialized,
+    [diglot],
+  );
+
+  const handleNoteChange = useCallback(
+    (newDoc: DriverSerialized): void => {
+      const fp = JSON.stringify(newDoc);
+      // ⭐ 自己回灌进去的,丢弃
+      if (noteEchoRef.current === fp) {
+        noteEchoRef.current = null;
+        return;
+      }
+      editingRef.current = true;
+      if (noteTimerRef.current !== null) clearTimeout(noteTimerRef.current);
+      noteTimerRef.current = setTimeout(() => {
+        noteTimerRef.current = null;
+        editingRef.current = false;
+        setError(null);
+        onTreeCommit(newDoc);
+      }, PARSE_DEBOUNCE_MS);
+    },
+    [onTreeCommit],
+  );
+
   // ⚠️ 常驻 timer 必须有停止调用(铁律)
   useEffect(
     () => () => {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
+      }
+      if (noteTimerRef.current !== null) {
+        clearTimeout(noteTimerRef.current);
+        noteTimerRef.current = null;
       }
     },
     [],
@@ -127,27 +184,71 @@ export function MindSemanticPane({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+      {/* ⭐ 两个 tab:note(我们自己的格式)/ mermaid(继承的语法) */}
       <div
         style={{
-          padding: '6px 10px',
-          fontSize: 12,
-          opacity: 0.6,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '4px 8px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           flexShrink: 0,
         }}
       >
-        语义描述面
+        <span style={{ fontSize: 12, opacity: 0.5, marginRight: 6 }}>语义描述面</span>
+        {(['note', 'mermaid'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            title={
+              t === 'note'
+                ? '我们自己的格式:层级用 h1~hn,块自带稳定 id'
+                : '继承 mermaid 语法:可直接粘贴社区图例'
+            }
+            style={{
+              fontSize: 12,
+              padding: '2px 10px',
+              borderRadius: 4,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: tab === t ? 'rgba(120,160,220,0.22)' : 'transparent',
+              color: tab === t ? '#cfe0ff' : 'rgba(255,255,255,0.6)',
+              cursor: 'pointer',
+            }}
+          >
+            {t === 'note' ? 'note' : 'mermaid'}
+          </button>
+        ))}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <CodeHost
-          initialValue={initial}
-          theme="dark"
-          onChange={handleChange}
-          onMount={(h) => {
-            handleRef.current = h;
-          }}
-          features={{ lineNumbers: true, lineWrap: true, tabIndent: true, defaultKeymap: true }}
-        />
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {tab === 'note' ? (
+          snapshot ? (
+            <NoteHost
+              config={{
+                // ⚠️ instanceId 必须与 NoteView / 画板文字编辑**互不相同** ——
+                //    registry 按它区分多个 PM 实例,撞了会静默 no-op
+                //    (memory: pm-panel-instance-id 记过这个坑)。
+                instanceId: `diglot-mind::${graphId}`,
+                undoScope: 'text-editing.pm',
+                viewId: 'graph-canvas-view',
+                // 导图语义面只要「层级 + 文字」,关掉与树无关的重型 plugin
+                plugins: { blockHandle: false, pasteMedia: false, noteLinkCommand: false },
+              }}
+              doc={noteDocOf(snapshot)}
+              onChange={handleNoteChange}
+            />
+          ) : null
+        ) : (
+          <CodeHost
+            initialValue={initial}
+            theme="dark"
+            onChange={handleChange}
+            onMount={(h) => {
+              handleRef.current = h;
+            }}
+            features={{ lineNumbers: true, lineWrap: true, tabIndent: true, defaultKeymap: true }}
+          />
+        )}
       </div>
       {error !== null && (
         <div

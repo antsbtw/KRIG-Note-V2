@@ -485,6 +485,28 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     [graphId, diglot, textNode, shapeApi, workspaceId, render, scheduleSave],
   );
 
+  /**
+   * ⭐ note tab 改动落地:block 序列 → 新的 S 层。
+   *
+   * ⚠️ **G 层原样保留** —— 与 mermaid 侧同理(改标签不该动布局,C3)。
+   * ⭐ 且这条路**没有债 6**:block 自带稳定 id,用户增删块时其它块 id 不变,
+   *    G 条目照样配得上(见 03 §8 的正解方向)。
+   */
+  const handleTreeCommit = useCallback(
+    (doc: unknown): void => {
+      const snap = snapRef.current;
+      if (!snap || loadedIdRef.current !== graphId) return;
+      const nextS = diglot.noteDocToTree(doc);
+      // ⚠️ 空树不写入 —— 编辑器初始化中途可能给空 doc,写进去等于清空用户内容
+      if (nextS.nodes.length === 0) return;
+      const next = { s: nextS, g: snap.g };
+      snapRef.current = next;
+      void render(next);
+      scheduleSave();
+    },
+    [graphId, diglot, render, scheduleSave],
+  );
+
   // ── 常驻 timer 必须有停止调用(铁律)──
   useEffect(
     () => () => {
@@ -508,7 +530,12 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
       {/* ⭐ 左:语义描述面(00 §6 的 left slot 文本侧) */}
       <div style={{ width: paneW, flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.1)' }}>
-        <MindSemanticPane snapshot={snapView} onSemanticCommit={handleSemanticCommit} />
+        <MindSemanticPane
+          snapshot={snapView}
+          graphId={graphId}
+          onSemanticCommit={handleSemanticCommit}
+          onTreeCommit={handleTreeCommit}
+        />
       </div>
       {/* 分隔条:拖动改宽度 */}
       <div

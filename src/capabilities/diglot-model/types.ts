@@ -344,6 +344,10 @@ export interface DiglotModelApi {
     s: SLayer,
     g: GLayer,
   ) => import('./project-to-canvas').LayoutRequest;
+  /** ⭐ S 层树 → note block 序列(层级用 h1~hn 表达,block 带稳定 id) */
+  readonly treeToNoteDoc: (s: SLayer) => import('./note-projection').NoteDoc;
+  /** ⭐ note block 序列 → S 层树(id 优先取 block 自带的) */
+  readonly noteDocToTree: (doc: unknown) => SLayer;
   /** 判断某 instance id 是否为树连线(派生物,不对应 S 层节点) */
   readonly isTreeLineId: (id: string) => boolean;
   /**
