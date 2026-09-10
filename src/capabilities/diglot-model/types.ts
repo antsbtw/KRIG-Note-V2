@@ -56,6 +56,13 @@ export type MarkerKind =
  */
 export type RichContent = {
   readonly format: 'pm-doc-json';
+  /**
+   * ⚠️⚠️ **必填** —— driver 的 `deserializeDoc` 对 `version !== '0.1'` **返回 null**,
+   * 编辑器于是渲染成空白且**不报错**(真机实测:note tab 一片空白)。
+   * 缺这个字段在画布路径上不暴露(那条走 atomsToSvgInput 不经 deserialize),
+   * 只有喂给 note 编辑器时才炸 —— 典型的「一条路没走过就没发现」。
+   */
+  readonly version: '0.1';
   readonly payload: unknown;
 };
 

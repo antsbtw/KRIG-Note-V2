@@ -103,6 +103,8 @@ function parseNodeBody(body: string): { id: string | null; label: string; shape:
 export function textToContent(text: string): RichContent {
   return {
     format: 'pm-doc-json',
+    // ⚠️ version 必填:driver 的 deserializeDoc 对 !== '0.1' 直接返 null(静默空白)
+    version: '0.1',
     payload: {
       type: 'doc',
       content: [

@@ -52,6 +52,27 @@ function outline(s: SLayer): string {
   return out.join('\n');
 }
 
+describe('⚠️ doc 信封必须带 version(真机踩过)', () => {
+  it('⭐⭐ treeToNoteDoc 产出必须带 version:0.1', () => {
+    // ⚠️ 真机实测:note tab **一片空白且不报错**。
+    //   根因是 driver 的 deserializeDoc 对 `version !== '0.1'` **直接返 null**,
+    //   编辑器拿到 null 就什么都不渲染 —— 典型的静默失败。
+    //   ⭐ 这个字段在画布路径上不暴露(那条走 atomsToSvgInput 不经 deserialize),
+    //   只有喂给 note 编辑器时才炸 ——「一条路没走过就没发现」。
+    const s = snap();
+    const doc = treeToNoteDoc(s.s);
+    expect(doc.version, 'deserializeDoc 对 version !== 0.1 返 null(静默空白)').toBe('0.1');
+    expect(doc.format).toBe('pm-doc-json');
+  });
+
+  it('⭐ 节点 content 信封也必须带 version(双击编辑要用)', () => {
+    const s = snap();
+    for (const n of s.s.nodes) {
+      expect(n.content.version, `节点 ${n.id} 的 content 缺 version`).toBe('0.1');
+    }
+  });
+});
+
 describe('树 → note block 序列', () => {
   it('⭐ 层级用 h1~hn 表达(不是缩进)', () => {
     const s = snap();
