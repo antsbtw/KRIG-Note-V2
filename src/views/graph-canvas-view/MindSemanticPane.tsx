@@ -1,46 +1,31 @@
 /**
  * MindSemanticPane — 语义描述面(00-diglot-core §6 的 left slot 文本侧)
  *
- * ⭐⭐ **这里才第一次让「双向」两个方向同时可见**:
- * ```
- * 改文本 → 图跟着变        (mermaid 也能做的那半)
- * 拖节点 → 文本跟着变      ⭐ 我们的差异点
- * ```
+ * ⭐⭐ 两个 tab(用户拍板 2026-09-10):
+ * - `note`:⭐ **主路径** —— 用 note 的方式写导图。层级 h1~h6 + indent,
+ *   block 自带稳定 id,⋮⋮ handle / slash / 富文本全套可用。
+ * - `mermaid`:兼容通道 —— 导入现成图例、对照检验。
  *
- * ⚠️⚠️ **抑制回环是本组件的核心难点**(00 §6:「同步管道带方向标记抑制回环」):
- * ```
- * 用户输入 → onChange → 解析 → 改模型 → 重渲染 → 文本被 setValue 覆盖
- *                                                    ↑ 光标跳走、输入被打断
- * ```
- * 解法:`echoGuardRef` 标记「这次 setValue 是我自己发的」,
- * 收到对应的 onChange 时直接丢弃。⭐ 方向标记,不是防抖 ——
- * 防抖只是让它晚一点发生,回环还在。
- *
- * ⚠️ **坏语法不污染模型**(C6):解析失败时**只显示错误,不改模型**,
- * 画布保持上一有效状态。用户输入到一半必然经过非法状态,
- * 那是正常过程,不是错误。
+ * ⚠️⚠️ **抑制回环是本组件的核心难点**(00 §6:「同步管道带方向标记抑制回环」)。
+ * 两个 tab 各有一套闸门,形态不同:
+ * - mermaid:比**字符串**(CM6 吃字符串)
+ * - note:走 **dual-channel**(照抄 NoteView)—— 自家编辑**绝不回灌**
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
-import type {
-  CodeEditingApi,
-  CodeEditingHandle,
-} from '@capabilities/code-editing/types';
+import type { CodeEditingApi, CodeEditingHandle } from '@capabilities/code-editing/types';
 import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
 import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
 
-/** 用户停止输入后多久才尝试解析。⚠️ 太短会在输入中途反复报错刷屏。 */
+/** 用户停止输入后多久才落笔。⚠️ 太短会在输入中途反复报错刷屏。 */
 const PARSE_DEBOUNCE_MS = 400;
 
 /**
- * ⭐ 语义面的两种写法(用户拍板 2026-09-10):
- * - `note`:⭐ **我们自己的格式** —— 层级用 h1~hn,block 自带稳定 id(规格 §5 右列)
- * - `mermaid`:继承 mermaid 语法,导入现成图例的通道(规格 §2 起步策略)
- *
- * ⚠️ 两者是**同一棵树的两种写法**,不是两份数据。切换随时,内容跟着走。
+ * ⭐ 语义面的两种写法。
+ * ⚠️ 两者是**同一棵树的两种写法**,不是两份数据。
  */
 export type SemanticTab = 'note' | 'mermaid';
 
@@ -64,46 +49,98 @@ export function MindSemanticPane({
   const [tab, setTab] = useState<SemanticTab>('note');
   const codeApi = useMemo(() => requireCapabilityApi<CodeEditingApi>('code-editing'), []);
   const diglot = useMemo(() => requireCapabilityApi<DiglotModelApi>('diglot-model'), []);
-  const CodeHost = codeApi.Host;
   const textEditing = useMemo(() => requireCapabilityApi<TextEditingApi>('text-editing'), []);
+  const CodeHost = codeApi.Host;
+  /** ⭐ 与 NoteView 用的是**同一个** `textEditing.Host` —— 没有另造编辑器。 */
   const NoteHost = textEditing.Host;
 
   const handleRef = useRef<CodeEditingHandle | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /**
-   * ⭐ 回环闸门:记住「我刚刚 setValue 写进去的那个串」。
-   * 收到内容相同的 onChange 说明是自己写的回声,直接丢弃。
-   */
+  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** mermaid 侧回环闸门:记住「我刚 setValue 写进去的串」。 */
   const echoGuardRef = useRef<string | null>(null);
-  /** 用户是否正在编辑 —— 编辑期间**不接受**画布侧回灌,免得光标被抢。 */
+  /** 用户是否正在本面板编辑 —— 编辑期间**不接受**画布侧回灌。 */
   const editingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** 当前快照对应的语义文本。 */
-  const semanticOf = useCallback(
-    (snap: DiglotSnapshot): string => {
-      const f = diglot.snapshotToFile(snap) as { semantic: string };
-      return f.semantic;
+  // ─────────────────────────────────────────────────────
+  // note tab:dual-channel(照抄 NoteView)
+  // ─────────────────────────────────────────────────────
+
+  /**
+   * ⭐⭐ **dual-channel** —— 光标不跳的正解。
+   *
+   * ⚠️⚠️ 我起初把每次快照都喂给 `doc` prop,于是:
+   * ```
+   * 打字 → onChange → 改树 → 重渲染 → 新 doc → Host useEffect[doc] 重建 → 光标跳
+   * ```
+   * 还会把正在编辑的块劈成两半(真机截图里出现两个「主题」)。
+   *
+   * ⭐ NoteView 的注释早写明:「doc 走独立 incomingDoc 通道,
+   *   **自家编辑不动 incomingDoc**」—— 避免 onChange 回灌让引用变。
+   *   ⚠️ 我用的是**同一个 Host**,错在**喂法**,不是错在组件。
+   *
+   * 本组件照抄:`incomingDoc` 只在**换图**或**画布侧改动**时更新。
+   */
+  const [incomingDoc, setIncomingDoc] = useState<DriverSerialized | null>(null);
+  /** 上次推给编辑器的内容指纹 —— 判断画布侧是否真的改了。 */
+  const pushedFpRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!snapshot) {
+      setIncomingDoc(null);
+      pushedFpRef.current = null;
+      return;
+    }
+    // ⚠️ 用户正在本面板打字 → 一律不推,编辑器此刻是真源
+    if (editingRef.current) return;
+    const built = diglot.treeToNoteDoc(snapshot.s) as unknown as DriverSerialized;
+    const fp = JSON.stringify(built);
+    // ⭐ 内容没变就不推 —— 推了就是无谓重建
+    if (pushedFpRef.current === fp) return;
+    pushedFpRef.current = fp;
+    setIncomingDoc(built);
+  }, [snapshot, diglot]);
+
+  const handleNoteChange = useCallback(
+    (newDoc: DriverSerialized): void => {
+      editingRef.current = true;
+      if (noteTimerRef.current !== null) clearTimeout(noteTimerRef.current);
+      noteTimerRef.current = setTimeout(() => {
+        noteTimerRef.current = null;
+        setError(null);
+        onTreeCommit(newDoc);
+        // ⚠️ 等这一轮 commit 走完再解除编辑态,否则 effect 会立刻推一份新 doc 回来
+        setTimeout(() => {
+          editingRef.current = false;
+        }, 0);
+      }, PARSE_DEBOUNCE_MS);
     },
+    [onTreeCommit],
+  );
+
+  // ─────────────────────────────────────────────────────
+  // mermaid tab:字符串闸门
+  // ─────────────────────────────────────────────────────
+
+  const semanticOf = useCallback(
+    (snap: DiglotSnapshot): string => (diglot.snapshotToFile(snap) as { semantic: string }).semantic,
     [diglot],
   );
 
-  // ── 画布侧改动 → 文本跟着变 ──
   useEffect(() => {
+    if (tab !== 'mermaid') return;
     const handle = handleRef.current;
     if (!handle || !snapshot) return;
-    // ⚠️ 用户正在敲字时不回灌 —— 否则光标跳走、输入被打断
     if (editingRef.current) return;
     const next = semanticOf(snapshot);
     if (handle.getValue() === next) return;
-    echoGuardRef.current = next; // 标记方向:这次是我写的
+    echoGuardRef.current = next; // 方向标记:这次是我写的
     handle.setValue(next);
-  }, [snapshot, semanticOf]);
+  }, [snapshot, semanticOf, tab]);
 
-  // ── 文本改动 → 图跟着变 ──
   const handleChange = useCallback(
     (value: string): void => {
-      // ⭐ 自己写进去的回声,丢弃(抑制回环)
       if (echoGuardRef.current === value) {
         echoGuardRef.current = null;
         return;
@@ -113,8 +150,7 @@ export function MindSemanticPane({
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
         editingRef.current = false;
-        // ⚠️ 解析失败**只显示错误,不改模型**(C6:坏语法不污染模型,
-        //    画布保持上一有效状态)。输入到一半必然经过非法状态,那是正常过程。
+        // ⚠️ 解析失败**只显示错误,不改模型**(C6);输入到一半必然经过非法状态
         const parsed = diglot.fileToSnapshot({
           format: 'diglot-mind/v0',
           semantic: value,
@@ -129,40 +165,6 @@ export function MindSemanticPane({
       }, PARSE_DEBOUNCE_MS);
     },
     [diglot, snapshot, onSemanticCommit],
-  );
-
-  // ── ⭐ note tab:block 改动 → 树跟着变 ──
-  //
-  // ⚠️ 同样要抑制回环,但闸门形态不同:note 侧比的是**结构指纹**而非字符串
-  //    (PM 每次编辑都会产出新对象,引用比较必然不等)。
-  const noteEchoRef = useRef<string | null>(null);
-  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /** 当前快照对应的 note doc。 */
-  const noteDocOf = useCallback(
-    (snap: DiglotSnapshot): DriverSerialized =>
-      diglot.treeToNoteDoc(snap.s) as unknown as DriverSerialized,
-    [diglot],
-  );
-
-  const handleNoteChange = useCallback(
-    (newDoc: DriverSerialized): void => {
-      const fp = JSON.stringify(newDoc);
-      // ⭐ 自己回灌进去的,丢弃
-      if (noteEchoRef.current === fp) {
-        noteEchoRef.current = null;
-        return;
-      }
-      editingRef.current = true;
-      if (noteTimerRef.current !== null) clearTimeout(noteTimerRef.current);
-      noteTimerRef.current = setTimeout(() => {
-        noteTimerRef.current = null;
-        editingRef.current = false;
-        setError(null);
-        onTreeCommit(newDoc);
-      }, PARSE_DEBOUNCE_MS);
-    },
-    [onTreeCommit],
   );
 
   // ⚠️ 常驻 timer 必须有停止调用(铁律)
@@ -184,7 +186,6 @@ export function MindSemanticPane({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
-      {/* ⭐ 两个 tab:note(我们自己的格式)/ mermaid(继承的语法) */}
       <div
         style={{
           display: 'flex',
@@ -203,8 +204,8 @@ export function MindSemanticPane({
             onClick={() => setTab(t)}
             title={
               t === 'note'
-                ? '我们自己的格式:层级用 h1~hn,块自带稳定 id'
-                : '继承 mermaid 语法:可直接粘贴社区图例'
+                ? '用 note 的方式写导图:层级 h1~h6,块自带稳定 id'
+                : '兼容 mermaid 语法:可直接粘贴社区图例'
             }
             style={{
               fontSize: 12,
@@ -216,34 +217,26 @@ export function MindSemanticPane({
               cursor: 'pointer',
             }}
           >
-            {t === 'note' ? 'note' : 'mermaid'}
+            {t}
           </button>
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {tab === 'note' ? (
-          snapshot ? (
+          incomingDoc ? (
             <NoteHost
               config={{
                 // ⚠️ instanceId 必须与 NoteView / 画板文字编辑**互不相同** ——
-                //    registry 按它区分多个 PM 实例,撞了会静默 no-op
-                //    (memory: pm-panel-instance-id 记过这个坑)。
+                //    registry 按它区分多个 PM 实例,撞了会静默 no-op。
                 instanceId: `diglot-mind::${graphId}`,
                 undoScope: 'text-editing.pm',
                 viewId: 'graph-canvas-view',
-                // ⭐ **默认全开** —— note tab 就该是完整的 note 编辑器:
-                //   有 block、有 ⋮⋮ handle、能拖块、slash 菜单可用。
-                //
-                // ⚠️ 我最初关掉了 blockHandle/pasteMedia/noteLinkCommand,理由是
-                //   「导图只要层级+文字」—— 那是**错的**:关掉 blockHandle 等于
-                //   把 note 编辑器降级成普通文本框,block 的存在感就没了(用户指出)。
-                //   ⭐ 这条 tab 的全部价值正是「**用 note 的方式写导图**」,
-                //   砍掉 note 的能力就失去了它与 mermaid tab 的区别。
-                //
-                // ⚠️ 唯一不开的是 titleGuard(opt-in,NoteView 专属的"强制首块 isTitle"):
-                //   导图的 root 由 role 决定,不靠 isTitle;开了会与树推导打架。
+                // ⭐ plugin **默认全开** —— note tab 就该是完整的 note 编辑器
+                //   (有 block、有 ⋮⋮ handle、slash 可用)。
+                // ⚠️ 唯一不开 titleGuard(opt-in,NoteView 专属的强制首块 isTitle):
+                //   导图 root 由 role 决定,开了会与树推导打架。
               }}
-              doc={noteDocOf(snapshot)}
+              doc={incomingDoc}
               onChange={handleNoteChange}
             />
           ) : null
