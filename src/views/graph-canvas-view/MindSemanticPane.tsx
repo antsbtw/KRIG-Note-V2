@@ -19,6 +19,10 @@ import type { CodeEditingApi, CodeEditingHandle } from '@capabilities/code-editi
 import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
 import type { DriverSerialized, TextEditingApi } from '@capabilities/text-editing/types';
+import {
+  MIND_SEMANTIC_VIEW_ID,
+  registerMindSemanticMenus,
+} from './mind-semantic-menus';
 
 /** 用户停止输入后多久才落笔。⚠️ 太短会在输入中途反复报错刷屏。 */
 const PARSE_DEBOUNCE_MS = 400;
@@ -47,6 +51,11 @@ export function MindSemanticPane({
   graphId,
 }: MindSemanticPaneProps): ReactElement {
   const [tab, setTab] = useState<SemanticTab>('note');
+  // ⭐ 语义面用**独立 viewId** 注册完整菜单(见 mind-semantic-menus.ts 的论证):
+  //   `graph-canvas-view` 那套是画布节点用的,只有 6 项且被渲染态闸筛过。
+  useEffect(() => {
+    registerMindSemanticMenus();
+  }, []);
   const codeApi = useMemo(() => requireCapabilityApi<CodeEditingApi>('code-editing'), []);
   const diglot = useMemo(() => requireCapabilityApi<DiglotModelApi>('diglot-model'), []);
   const textEditing = useMemo(() => requireCapabilityApi<TextEditingApi>('text-editing'), []);
@@ -83,6 +92,22 @@ export function MindSemanticPane({
    * 本组件照抄:`incomingDoc` 只在**换图**或**画布侧改动**时更新。
    */
   const [incomingDoc, setIncomingDoc] = useState<DriverSerialized | null>(null);
+  /**
+   * ⭐⭐ **自己提交出去的树的指纹** —— 回环闸门的真正锚点。
+   *
+   * ⚠️⚠️ 只靠 `editingRef` 的时间窗**挡不住**(真机实测:回车后光标跳回主题)。
+   * 时序是这样的:
+   * ```
+   * 回车 → onChange → editingRef=true,起 400ms
+   * 400ms → onTreeCommit → 改树 → render → setSnapView
+   * setTimeout(0) → editingRef=false          ← 比下一步**更早**执行
+   * snapshot 变 → effect 跑 → editingRef 已 false → 推新 doc → 重建 → 光标跳
+   * ```
+   * ⭐ 时间窗永远追不上 React 的批处理顺序。正解是**按内容认**:
+   * 记住「我提交出去的那棵树长什么样」,effect 看到同一棵树就**不推**——
+   * 与时序无关,怎么排都对。
+   */
+  const committedFpRef = useRef<string | null>(null);
   /** 上次推给编辑器的内容指纹 —— 判断画布侧是否真的改了。 */
   const pushedFpRef = useRef<string | null>(null);
 
@@ -90,14 +115,24 @@ export function MindSemanticPane({
     if (!snapshot) {
       setIncomingDoc(null);
       pushedFpRef.current = null;
+      committedFpRef.current = null;
       return;
     }
     // ⚠️ 用户正在本面板打字 → 一律不推,编辑器此刻是真源
     if (editingRef.current) return;
+
     const built = diglot.treeToNoteDoc(snapshot.s) as unknown as DriverSerialized;
     const fp = JSON.stringify(built);
+
+    // ⭐⭐ 这棵树正是我刚提交出去的 → 是自己的回声,**不推**
+    //    (与 editingRef 的时间窗无关,按内容认,时序怎么排都对)
+    if (committedFpRef.current === fp) {
+      pushedFpRef.current = fp; // 对齐基线,免得下次误判成"变了"
+      return;
+    }
     // ⭐ 内容没变就不推 —— 推了就是无谓重建
     if (pushedFpRef.current === fp) return;
+
     pushedFpRef.current = fp;
     setIncomingDoc(built);
   }, [snapshot, diglot]);
@@ -109,14 +144,20 @@ export function MindSemanticPane({
       noteTimerRef.current = setTimeout(() => {
         noteTimerRef.current = null;
         setError(null);
+        // ⭐ 先算出「这份 doc 变成树、再序列化回来」长什么样 —— 那才是 effect 会看到的东西。
+        //   ⚠️ 不能直接用 newDoc 的指纹:用户敲的块可能缺 id、属性顺序不同,
+        //      与树往返后的结果**字节不同**,拿它当锚点会漏判。
+        try {
+          const tree = diglot.noteDocToTree(newDoc);
+          committedFpRef.current = JSON.stringify(diglot.treeToNoteDoc(tree));
+        } catch {
+          committedFpRef.current = null;
+        }
         onTreeCommit(newDoc);
-        // ⚠️ 等这一轮 commit 走完再解除编辑态,否则 effect 会立刻推一份新 doc 回来
-        setTimeout(() => {
-          editingRef.current = false;
-        }, 0);
+        editingRef.current = false;
       }, PARSE_DEBOUNCE_MS);
     },
-    [onTreeCommit],
+    [onTreeCommit, diglot],
   );
 
   // ─────────────────────────────────────────────────────
@@ -230,7 +271,9 @@ export function MindSemanticPane({
                 //    registry 按它区分多个 PM 实例,撞了会静默 no-op。
                 instanceId: `diglot-mind::${graphId}`,
                 undoScope: 'text-editing.pm',
-                viewId: 'graph-canvas-view',
+                // ⭐ 独立 viewId —— 与画布节点的 'graph-canvas-view' 区分,
+                //   这样两边的 slash/handle 菜单互不影响(画布那套要守渲染态闸)。
+                viewId: MIND_SEMANTIC_VIEW_ID,
                 // ⭐ plugin **默认全开** —— note tab 就该是完整的 note 编辑器
                 //   (有 block、有 ⋮⋮ handle、slash 可用)。
                 // ⚠️ 唯一不开 titleGuard(opt-in,NoteView 专属的强制首块 isTitle):
