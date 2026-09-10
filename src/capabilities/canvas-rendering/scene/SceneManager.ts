@@ -140,11 +140,26 @@ export class SceneManager {
     // 视口宽高(世界坐标)= 容器像素 / zoom
     const halfW = clientWidth / this.zoom / 2;
     const halfH = clientHeight / this.zoom / 2;
-    this.camera.left = this.viewCenter.x - halfW;
-    this.camera.right = this.viewCenter.x + halfW;
+    // ⚠️⚠️ frustum 以**原点**为中心,平移**只**靠 camera.position ——
+    //   别把 viewCenter 加进 frustum 边界(历史 bug,2026-09-10 修)。
+    //
+    // 曾经的写法是 `left = viewCenter.x - halfW`(frustum 也围着 viewCenter),
+    // 而下面又把 `camera.position` 挪到 viewCenter → **viewCenter 被计入两次**,
+    // 相机实际投影成了 `screen = size/2 + (world - 2*viewCenter) * zoom`。
+    //
+    // ⚠️ 为什么一直没被发现:screenToWorld / worldToScreen 都走同一个相机,
+    //   **错得一致**,所以往返自洽、hit-test 也准 —— 画面看着"基本正常"。
+    //   露馅的是 **zoom-to-cursor**:它的公式在世界坐标里推,假设的是
+    //   `screen = size/2 + (world - viewCenter) * zoom`(只减一次),
+    //   与相机的实际行为对不上 → 每次缩放鼠标下的图元都往同方向挪一点,
+    //   连续缩放就越漂越远(真机实测每次偏 1~7px,累积可观)。
+    // ⭐ 定位靠实测:日志记下相机自报的 frustum + position,离线重算能**精确复现**
+    //   drift(误差 <0.01px),才确认是双重计入 —— 不是靠读代码猜出来的。
+    this.camera.left = -halfW;
+    this.camera.right = halfW;
     // Y 向下:top 数值 < bottom 数值。用默认 camera.up=(0,1,0)(不另设)
-    this.camera.top = this.viewCenter.y - halfH;
-    this.camera.bottom = this.viewCenter.y + halfH;
+    this.camera.top = -halfH;
+    this.camera.bottom = halfH;
     this.camera.position.x = this.viewCenter.x;
     this.camera.position.y = this.viewCenter.y;
     this.camera.position.z = 10;

@@ -247,8 +247,19 @@ describe('圆内数字朝向(Y 翻转抵消)', () => {
   it('⭐ 相机仍是「top < bottom」的颠倒 frustum(抵消的前提)', () => {
     const sm = read('src/capabilities/canvas-rendering/scene/SceneManager.ts');
     // 前提没了(比如哪天改成正常 frustum),下面那条抵消就会**反过来**把数字弄颠倒
-    expect(sm).toContain('this.camera.top = this.viewCenter.y - halfH;');
-    expect(sm).toContain('this.camera.bottom = this.viewCenter.y + halfH;');
+    //
+    // ⚠️ 守的是「top 取负、bottom 取正」这个**性质**,不是某一行的字面写法 ——
+    //   第一版写死了 `this.camera.top = this.viewCenter.y - halfH`,
+    //   结果 2026-09-10 修 zoom-to-cursor 双重计入(frustum 改为以原点为中心)时,
+    //   性质明明没变、守卫却红了。**把实现细节当约束**是守卫的典型写坏形态。
+    const top = /this\.camera\.top\s*=\s*([^;]+);/.exec(sm)?.[1]?.trim();
+    const bottom = /this\.camera\.bottom\s*=\s*([^;]+);/.exec(sm)?.[1]?.trim();
+    expect(top, '读不到 camera.top 赋值').toBeTruthy();
+    expect(bottom, '读不到 camera.bottom 赋值').toBeTruthy();
+    // top 必须是负向的 halfH、bottom 必须是正向的 halfH → top < bottom
+    expect(top, `top 必须取负(当前:${top})`).toMatch(/^-/);
+    expect(bottom, `bottom 必须取正(当前:${bottom})`).not.toMatch(/^-/);
+    expect(top?.replace(/^-/, '')).toBe(bottom);
   });
 
   it('⭐⭐ 数字贴图 mesh 必须抵消 Y 翻转(scale.y = -1)', () => {
