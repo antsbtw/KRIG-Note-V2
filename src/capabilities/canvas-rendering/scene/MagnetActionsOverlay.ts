@@ -278,6 +278,18 @@ function addCountLabel(group: THREE.Group, label: string, radius: number): void 
     }),
   );
   mesh.renderOrder = ACTION_RENDER_ORDER + 2; // 与记号同层(记号和数字互斥)
+
+  // ⚠️⚠️ **抵消相机的 Y 翻转,否则数字上下颠倒**(真机踩过:`2` 看着像镜像字符)。
+  //
+  // SceneManager 用 **top < bottom 的颠倒 frustum** 实现「world Y 向下」
+  // (见 applyCamera 注释),投影矩阵因此自带一次 Y 翻转。
+  // ⭐ 实测确认过是 **Y 翻、X 不翻**:world(0,0.5) → NDC(0,-0.5),world(0.5,0) → NDC(0.5,0)。
+  //
+  // ⚠️ 为什么以前没暴露:圆、`+`、`-` 都**上下对称**,翻了看不出来;
+  //    数字不对称,一上来就露馅。**别据此以为「以前是对的、现在坏了」。**
+  // ⭐ 同款做法:TextRenderer 给 callout 图标也是 `mesh.scale.y = -1`。
+  mesh.scale.y = -1;
+
   group.add(mesh);
 }
 

@@ -14,6 +14,8 @@
  * overlay 那层只剩画 mesh,不含可测判定。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   resolveMagnetActions,
   hitTestMagnetAction,
@@ -224,5 +226,46 @@ describe('操作点圆内数字', () => {
     );
     expect(resolved).toHaveLength(1);
     expect(resolved[0].count).toBe(7);
+  });
+});
+
+/**
+ * ⭐⭐ 圆内数字的**朝向**守卫
+ *
+ * ⚠️ 真机踩过:数字 `2` 渲染成上下颠倒,看着像个陌生符号。
+ * 真因 = SceneManager 用 **top < bottom 的颠倒 frustum** 实现「world Y 向下」,
+ * 投影自带一次 Y 翻转;圆/`+`/`-` **上下对称**所以一直没暴露,数字不对称就露馅。
+ *
+ * ⚠️ 这条**测不到 three 渲染结果**(node 环境无 WebGL),
+ * 所以退一步守**两个前提**:frustum 约定没变、抵消代码还在。
+ * 任一被改动 → 数字会再次颠倒,而单测原本一无所知。
+ */
+describe('圆内数字朝向(Y 翻转抵消)', () => {
+  const read = (p: string): string =>
+    readFileSync(resolve(__dirname, '../..', p), 'utf-8');
+
+  it('⭐ 相机仍是「top < bottom」的颠倒 frustum(抵消的前提)', () => {
+    const sm = read('src/capabilities/canvas-rendering/scene/SceneManager.ts');
+    // 前提没了(比如哪天改成正常 frustum),下面那条抵消就会**反过来**把数字弄颠倒
+    expect(sm).toContain('this.camera.top = this.viewCenter.y - halfH;');
+    expect(sm).toContain('this.camera.bottom = this.viewCenter.y + halfH;');
+  });
+
+  it('⭐⭐ 数字贴图 mesh 必须抵消 Y 翻转(scale.y = -1)', () => {
+    const overlay = read('src/capabilities/canvas-rendering/scene/MagnetActionsOverlay.ts');
+    const fn = overlay.slice(overlay.indexOf('function addCountLabel'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+
+    // ⚠️⚠️ 必须**剥掉注释再比** —— 第一版直接 toContain('mesh.scale.y = -1'),
+    //   而同一句话也写在上面的说明注释里,于是**删掉真代码测试照样绿**(注入验红时抓到)。
+    //   这正是「用注释骗过守卫」的形态:守卫看的必须是**会执行的东西**。
+    const code = body
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+      .join('\n');
+
+    expect(code, 'addCountLabel 缺 mesh.scale.y = -1 → 数字上下颠倒').toMatch(
+      /^\s*mesh\.scale\.y\s*=\s*-1\s*;/m,
+    );
   });
 });
