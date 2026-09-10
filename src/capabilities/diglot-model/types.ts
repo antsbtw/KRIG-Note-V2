@@ -342,6 +342,8 @@ export interface DiglotModelApi {
     s: SLayer,
     g: GLayer,
   ) => import('./project-to-canvas').LayoutRequest;
+  /** 判断某 instance id 是否为树连线(派生物,不对应 S 层节点) */
+  readonly isTreeLineId: (id: string) => boolean;
   /** ⭐⭐ S + G + 布局 → Instance[](稀疏覆盖全量) */
   readonly projectToInstances: (
     s: SLayer,

@@ -178,6 +178,10 @@ export function MindCanvas({ workspaceId, graphId }: MindCanvasProps): ReactElem
       let next = snap;
       let changed = false;
       for (const inst of instances) {
+        // ⚠️ 跳过树连线:它们是**派生物**,没有对应的 S 层节点,也不该有 G 条目。
+        //    不跳的话 `nodes.find` 找不到就静默 continue —— 能跑但语义含糊,
+        //    显式跳更清楚(且将来连线若带了 position 也不会被误当拖动)。
+        if (diglot.isTreeLineId(inst.id)) continue;
         const node = snap.s.nodes.find((n) => n.id === inst.id);
         if (!node || !inst.position) continue;
         const cur = snap.g.get(inst.id)?.pos;

@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildLayoutRequest,
   projectToInstances,
+  isTreeLineId,
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
 import { fileToSnapshot, emptyMindFile } from '@capabilities/diglot-model/mind-file';
@@ -23,6 +24,16 @@ function snap(): DiglotSnapshot {
   return r.value;
 }
 
+/**
+ * 只取节点实例,滤掉树连线。
+ * ⚠️ 加了树连线之后,`projectToInstances` 返回的是**节点 + 连线**两类;
+ * 断言「每个实例都有坐标」这类话时必须先滤,否则会把连线也算进去
+ * (连线走 magnet,本就没有 position —— 这是对的,不是缺陷)。
+ */
+function nodesOnly(inst: ReturnType<typeof projectToInstances>) {
+  return inst.filter((i) => !isTreeLineId(i.id));
+}
+
 /** 假布局:给每个请求节点一个可辨认的坐标(x=序号*1000),便于区分「自动」与「G 层」。 */
 function fakeLayout(req: ReturnType<typeof buildLayoutRequest>): LayoutAnswer {
   return { nodes: req.nodes.map((n, i) => ({ id: n.id, x: i * 1000, y: i * 100 })) };
@@ -33,7 +44,7 @@ describe('投影:稀疏覆盖全量', () => {
     const s = snap();
     expect(s.g.size, '前提:新建的图 G 层为空').toBe(0);
     const req = buildLayoutRequest(s.s, s.g);
-    const inst = projectToInstances(s.s, s.g, fakeLayout(req));
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(req)));
 
     expect(inst.length).toBe(s.s.nodes.length);
     // 每个节点都拿到了坐标,且正是假布局给的那个
@@ -81,11 +92,11 @@ describe('投影:稀疏覆盖全量', () => {
       const kids = s.s.nodes.filter((k) => k.parent === n.id);
       return kids.length >= 2;
     })!;
-    const before = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const before = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
 
     const g = new Map(s.g);
     g.set(branch.id, { collapsed: true });
-    const after = projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
+    const after = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
 
     expect(after.length).toBeLessThan(before.length);
     // 折叠的节点**自身仍可见**
@@ -146,6 +157,69 @@ describe('投影:稀疏覆盖全量', () => {
     expect(cjk.width).toBeGreaterThan(ascii.width);
   });
 
+  it('⭐⭐ 树连线:每个非顶层节点恰好一条,父 E → 子 W', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const lines = inst.filter((i) => isTreeLineId(i.id));
+    const nonTop = s.s.nodes.filter((n) => n.parent !== null);
+
+    expect(lines.length, '每个有父的节点恰好一条连线').toBe(nonTop.length);
+    for (const n of nonTop) {
+      const line = lines.find((l) => l.endpoints?.[1].instance === n.id);
+      expect(line, `节点 ${n.id} 缺连线`).toBeDefined();
+      // ⭐ 左→右布局:父接右侧(E),子接左侧(W)
+      expect(line!.endpoints![0]).toEqual({ instance: n.parent, magnet: 'E' });
+      expect(line!.endpoints![1]).toEqual({ instance: n.id, magnet: 'W' });
+    }
+  });
+
+  it('⭐ 连线走 magnet 而非固定坐标(拖动时才会自动跟随)', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    for (const l of inst.filter((i) => isTreeLineId(i.id))) {
+      expect(l.endpoints, '连线必须有 endpoints').toBeDefined();
+      // ⚠️ 有 position 的话画布会用固定坐标,拖动节点线就不跟了
+      expect(l.position, '连线不得带 position').toBeUndefined();
+      expect(l.doc, '连线没有文字').toBeUndefined();
+    }
+  });
+
+  it('⭐⭐ 连线是纯派生物 —— 不进 S 层 edges,也不进 G 层', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    expect(inst.some((i) => isTreeLineId(i.id))).toBe(true);
+    // ⚠️ S 层的 edges 是**联系线**(树之外的附加关系),与树连线是两回事
+    expect(s.s.edges.length, '树连线不得污染 S 层 edges').toBe(0);
+    // ⚠️ G 层不为连线存条目(它们没有"被用户触碰过"这回事)
+    expect(s.g.size, '树连线不得在 G 层留条目').toBe(0);
+  });
+
+  it('⭐ 折叠时,被裁掉的子树连线一并消失(不留悬空线)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find(
+      (n) => s.s.nodes.filter((k) => k.parent === n.id).length >= 2,
+    )!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const inst = projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
+    const visibleIds = new Set(inst.filter((i) => !isTreeLineId(i.id)).map((i) => i.id));
+
+    for (const l of inst.filter((i) => isTreeLineId(i.id))) {
+      // ⚠️ 两端都必须是**可见**节点,否则就是指向不存在 instance 的悬空线
+      expect(visibleIds.has(l.endpoints![0].instance), '连线起点必须可见').toBe(true);
+      expect(visibleIds.has(l.endpoints![1].instance), '连线终点必须可见').toBe(true);
+    }
+  });
+
+  it('顶层节点(root / 自由主题)不画线', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const tops = s.s.nodes.filter((n) => n.parent === null).map((n) => n.id);
+    for (const l of inst.filter((i) => isTreeLineId(i.id))) {
+      expect(tops.includes(l.endpoints![1].instance), '顶层节点不该是连线终点').toBe(false);
+    }
+  });
+
   it('⚠️ 布局结果缺节点 → fail loud,不静默给 (0,0)', () => {
     const s = snap();
     // 故意给一个空布局
@@ -156,10 +230,11 @@ describe('投影:稀疏覆盖全量', () => {
     const s = snap();
     const req = buildLayoutRequest(s.s, s.g);
     const noisy: LayoutAnswer = { nodes: req.nodes.map((n) => ({ id: n.id, x: 1.7, y: -2.3 })) };
-    const inst = projectToInstances(s.s, s.g, noisy);
+    const inst = nodesOnly(projectToInstances(s.s, s.g, noisy));
+    expect(inst.length).toBeGreaterThan(0);
     for (const it of inst) {
-      expect(Number.isInteger(it.position.x)).toBe(true);
-      expect(Number.isInteger(it.position.y)).toBe(true);
+      expect(Number.isInteger(it.position!.x)).toBe(true);
+      expect(Number.isInteger(it.position!.y)).toBe(true);
     }
   });
 
@@ -167,7 +242,7 @@ describe('投影:稀疏覆盖全量', () => {
     const s0 = snap();
     const id = s0.s.nodes.find((n) => n.parent !== null)!.id;
     const s = engine.applyAction(s0, { kind: 'graphic.editColor', id, color: 'red' });
-    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
 
     expect(inst.find((i) => i.id === id)!.style_overrides?.fill?.color).toBe('red');
     // ⭐ 没碰过的节点不许凭空多出样式字段
@@ -177,7 +252,7 @@ describe('投影:稀疏覆盖全量', () => {
 
   it('节点 doc 就是 S 层 content(与 note block 同一形态)', () => {
     const s = snap();
-    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
     const first = inst[0];
     const node = s.s.nodes.find((n) => n.id === first.id)!;
     // ⭐ 直接透传,不做转换 —— 富文本/公式/图片将来天然可承载
