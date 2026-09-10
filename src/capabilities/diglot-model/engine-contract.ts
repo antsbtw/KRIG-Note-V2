@@ -22,6 +22,7 @@ import {
   parseGLayer as parseGLayerImpl,
   serializeGLayer as serializeGLayerImpl,
 } from './g-layer';
+import { applyAction as applyActionImpl } from './apply-action';
 
 // ─────────────────────────────────────────────────────────
 // 1. 三面快照
@@ -140,7 +141,6 @@ export const notImplementedEngine: DiglotEngine = {
   // ⭐ 步骤④已落地 —— C1 / C6-G层 / C9 后半 自动转绿。
   parseGLayer: parseGLayerImpl,
   serializeGLayer: serializeGLayerImpl,
-  applyAction() {
-    throw new NotImplementedError('applyAction');
-  },
+  // ⭐ 步骤⑤已落地 —— 双向同步全部断言自动转绿。
+  applyAction: applyActionImpl,
 };

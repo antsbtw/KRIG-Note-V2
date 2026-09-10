@@ -268,6 +268,17 @@ describe('C3 语义编辑最小性 —— 改一个标签仅一处 update,且全
     const before = gFingerprint(pinned.g);
     const after = engine.applyAction(pinned, { kind: 'semantic.editLabel', id, text: '改名了' });
     expect(gFingerprint(after.g), 'pos 必须原样存活').toBe(before);
+
+    // ⚠️⚠️ 只验 G 层不变**不够** —— 「删旧建新」换的是 **S 层的 id**,
+    //   G 层原样躺着反而更像没事,实则那条 pos 成了**指向不存在节点的孤儿**。
+    //   注入「改名时换 id」后本条曾照样绿(实测)。
+    //   ⭐ id 是四面唯一 join 键,C3 要求的是**id 配对**,故必须验:
+    //   (1) 该 id 仍在 S 层;(2) G 层每个 key 都能在 S 层找到对应节点。
+    expect(after.s.nodes.some((n) => n.id === id), '改名不得换 id(绝不删旧建新)').toBe(true);
+    const liveIds = new Set(after.s.nodes.map((n) => n.id));
+    for (const key of after.g.keys()) {
+      expect(liveIds.has(key), `G 条目 ${key} 成了孤儿 —— 没有对应的 S 层节点`).toBe(true);
+    }
   });
 });
 
@@ -351,8 +362,13 @@ describe('C7 释放语义 —— 删一条 G 条目,该元素回自动,其余一
     const otherBefore = JSON.stringify(snap.g.get(b) ?? null);
 
     const after = engine.applyAction(snap, { kind: 'graphic.deletePos', id: a });
-    // a 回自动:要么整条没了,要么至少 pos 字段没了
+    // ⚠️ 初版写「要么整条没了,要么至少 pos 字段没了」—— **放行了空壳**,
+    //   注入「deletePos 留下 {} 空条目」后照样绿(实测)。
+    //   但空壳会架空稀疏纪律:G 层里躺着一个没有任何属性的条目,
+    //   序列化虽不输出,`g.size` 却变了 —— C5「新建节点 G 层零条目」
+    //   这类按 size 计数的断言就被污染。故要求**整条移除**。
     expect(after.g.get(a)?.pos).toBeUndefined();
+    expect(after.g.has(a), 'pos 删空后该条目必须整条移除,不留空壳(稀疏纪律)').toBe(false);
     // ⭐ 「其余一切不变」
     expect(JSON.stringify(after.g.get(b) ?? null)).toBe(otherBefore);
     expect(sFingerprint(after.s)).toBe(sFingerprint(snap.s));
@@ -530,6 +546,21 @@ describe('M4 Span 锚点稳固 —— 节点移动/更名后 from/to 仍指向�
 });
 
 describe('⭐⭐ M5 边坏树不坏 —— 用户 2026-09-09 拍板的硬约束', () => {
+  it('⭐ 重复连同一对端点 → 覆盖而非新增(债 3:确定性 id)', () => {
+    // ⚠️ Decision 028 §1.2:putEdge 无 id 时每次 CREATE 新行 → 重复边累积。
+    //   联系线走确定性 id 才能「拖一下不多一条边」。
+    //   注入「connect 用随机 id」后,之前没有任何断言会红(实测)。
+    const base = freshSnapshot();
+    const ns = base.s.nodes.filter((n) => n.parent !== null);
+    const a1 = engine.applyAction(base, { kind: 'canvas.connect', source: ns[0].id, target: ns[1].id });
+    const a2 = engine.applyAction(a1, { kind: 'canvas.connect', source: ns[0].id, target: ns[1].id });
+    expect(a1.s.edges.length).toBe(1);
+    expect(a2.s.edges.length, '同一对端点连两次不得变成两条边').toBe(1);
+    // ⭐ 方向敏感:反向是**另一条**边,不是覆盖
+    const a3 = engine.applyAction(a2, { kind: 'canvas.connect', source: ns[1].id, target: ns[0].id });
+    expect(a3.s.edges.length, 'A→B 与 B→A 是两条不同的边').toBe(2);
+  });
+
   it('全部 Edge 整批删除 → 树结构 / content / G 条目逐项一致', () => {
     // 用户原话:「边的错误不会影响文档的完整性、正确性。」
     const base = freshSnapshot();
@@ -559,7 +590,15 @@ describe('⭐⭐ M5 边坏树不坏 —— 用户 2026-09-09 拍板的硬约束'
           .map((n) => ({ id: n.id, parent: n.parent, order: n.order, content: n.content }))
           .sort((a, b) => a.id.localeCompare(b.id)),
       );
+    // ⚠️⚠️ 与 `snap` 比是**不够**的:`edgeless` 正是从 `snap.s.nodes` 造的,
+    //   若 connect 本身就把树压平了(parent 全置 null、结构塞进 edges),
+    //   两边**一样地坏**,照样相等(实测:注入后本条曾全绿)。
+    //   ⭐ 必须与**连线之前的 base** 比,并钉住预期具体树。
     expect(treeOf(edgeless.s)).toBe(treeOf(snap.s));
+    expect(treeOf(edgeless.s), '连线不得改动树本身').toBe(treeOf(base.s));
+    expect(treeOutline(edgeless.s, labelText)).toBe(
+      ['主题', '  分支A', '    叶子1', '    叶子2', '  分支B', '    叶子3'].join('\n'),
+    );
     expect(gFingerprint(edgeless.g)).toBe(gFingerprint(snap.g));
 
     // ⭐ 这条能真失败:谁把树也存成边(如用 edges 表达 parent),
@@ -598,62 +637,86 @@ describe('⭐⭐ M5 边坏树不坏 —— 用户 2026-09-09 拍板的硬约束'
 /**
  * §闸门说明 + 注入验证台账
  *
- * | 步骤 | 实现什么 | 状态 |
+ * | 步骤 | 实现 | 状态 |
  * |---|---|---|
- * | ③ mermaid 解析 | `parseMermaidMindmap` / `toMermaidMindmap` | ✅ 已落地 |
- * | ④ G 层 | `parseGLayer` / `serializeGLayer` | ✅ 已落地 |
- * | ⑤ 双向同步 | `applyAction` | ⏳ 未做 → C2/C3/C4/C5/C7/C8、M2/M3/M4/M5 仍红 |
+ * | ③ | `parseMermaidMindmap` / `toMermaidMindmap` | ✅ |
+ * | ④ | `parseGLayer` / `serializeGLayer` | ✅ |
+ * | ⑤ | `applyAction`（双向同步） | ✅ |
  *
- * ⚠️ 每步落地都**没有改动既有断言的判据**，只在发现守卫失效时**加固**。
+ * ⭐ 三步落地**没有改动任何断言的判据**，只在注入暴露守卫失效时**加固**。
  * 改测试让它绿 = 违规（HANDOFF §4）。
  *
  * ────────────────────────────────────────────────
- * ⭐⭐ §注入台账 —— 全部真跑，累计抓到 6 个真缺口
+ * ⭐⭐ §注入台账 —— 全部真跑，累计 22 次注入，抓到 10 个真缺口
  *
- * **步骤③（mermaid 解析）**
+ * **步骤③ mermaid 解析**
  * | # | 注入 | 实测 |
  * |---|---|---|
- * | E | 不按 indent 弹栈（每节点挂前一个） | ⚠️ 初次 5 条全绿 → 缺口 3、4 |
- * | F | 弹栈 `>=` 改 `>`（兄弟被当成子） | ✅ 4 红（加固后） |
- * | G2 | 坏头照收（真静默兜底） | ✅ 2 红（加固后） |
+ * | E | 不按 indent 弹栈 | ⚠️ 5 条全绿 → 缺口 3、4 |
+ * | F | 弹栈 `>=` 改 `>` | ✅ 4 红 |
+ * | G2 | 坏头照收 | ✅ 2 红 |
  *
- * **步骤④（G 层）**
+ * **步骤④ G 层**
  * | # | 注入 | 实测 |
  * |---|---|---|
- * | H | 序列化把 color 缺省写成 auto | ⚠️ 初次全绿 → 缺口 5 |
- * | I | id 不排序 | ✅ C1「乱序输入」红 |
- * | J | 未知记号丢弃 | ✅ C9 红 |
- * | K | 坏行静默跳过 | ✅ C6 红 |
- * | L | 键序跟着对象自身键序 | ⚠️ 初次全绿 → 缺口 6 |
- * | M | 空 G 层也写空壳注释 | ✅ 红 |
- * | N | 别名原样吐回不转 canonical | ✅ 红 |
+ * | H | color 缺省写成 auto | ⚠️ 全绿 → 缺口 5 |
+ * | I | id 不排序 | ✅ 红 |
+ * | J | 未知记号丢弃 | ✅ 红 |
+ * | K | 坏行静默跳过 | ✅ 红 |
+ * | L | 键序跟对象自身键序 | ⚠️ 全绿 → 缺口 6 |
+ * | M | 空 G 层写空壳注释 | ✅ 红 |
+ * | N | 别名不转 canonical | ✅ 红 |
  *
- * ⚠️ **缺口 3：断言比的东西不含树结构**
- * M1 比 `order` 的多重集合、C9 比 `{parentIsNull, role}`、M5 只验 parent
- * 「非 null 且存在」—— 都与 parent **指向谁**无关。已加 `treeOutline()`。
+ * **步骤⑤ 双向同步**
+ * | # | 注入 | 实测 |
+ * |---|---|---|
+ * | O | 拖动时 `role:'branch'`（原值） | ⚪ **注入无效**（改了等于没改）→ 见下 |
+ * | O2 | 拖动时真改 order | ✅ C4 + M2 红 |
+ * | P | 新建节点顺手写 pos | ✅ C5 红 |
+ * | Q | 改父顺手钉坐标 | ✅ M2 两条红 |
+ * | R | deletePos 留 `{}` 空壳 | ⚠️ 全绿 → 缺口 7 |
+ * | S | 斜杠手势在 S 层留残留 | ✅ C8 红 |
+ * | T | 坐标不量化 | ✅ 红 |
+ * | U | 改名时删旧建新（换 id） | ⚠️ 全绿 → 缺口 8 |
+ * | V | 移动子树时清 G 条目 | ✅ M3 红 |
+ * | W | connect 把树塞进 edges | ⚠️ 全绿 → 缺口 9 |
+ * | X | connect 用随机 id | ⚠️ 全绿 → 缺口 10 |
  *
- * ⚠️ **缺口 4：自比只证确定性，证不了正确性**
- * 坏解析器解析两次也一致；round-trip 更是**自洽** —— 坏解析器导出坏文本、
- * 再用同一个坏解析器读回来当然一致（实测 true）。
- * ⭐ round-trip 一致是**必要不充分**条件。已改为同时钉住预期的具体树。
+ * ⚠️ **缺口 7：C7 明文放行空壳**
+ * 原注释写「要么整条没了，**要么至少 pos 字段没了**」——
+ * 注入「deletePos 留 `{}`」照样绿。空壳会架空稀疏纪律：
+ * G 层躺着零属性条目，序列化虽不输出但 `g.size` 变了，
+ * C5 这类按 size 计数的断言就被污染。已要求**整条移除**。
  *
- * ⚠️ **缺口 5：样本喂的是空 map，走不到被测代码**
- * 「不写缺省值」只喂 `new Map()`，根本没有条目 → 注入 H（color 缺省写 auto）
- * 照样绿；且写 `color=auto` **仍然幂等**，C1 前两条也抓不到。
- * 已补「有条目时也不得补写未触碰的属性」+「零属性条目整条不输出」。
+ * ⚠️ **缺口 8：只验 G 层不变，看不见 S 层换了 id**
+ * 「删旧建新」换的是 **S 层的 id**，G 层原样躺着反而更像没事，
+ * 实则那条 pos 成了**指向不存在节点的孤儿**。
+ * ⭐ id 是四面唯一 join 键，C3 要的是**id 配对**。
+ * 已补：该 id 仍在 S 层 + G 层每个 key 都能在 S 层找到对应节点。
  *
- * ⚠️ **缺口 6：规范形要求「键按固定序」但无人验**
- * 注入 L 把键序改成跟对象自身键序走，C1 全部照样绿 ——
- * 因为每条都是拿输出跟**同样方式产生的输出**比。
- * 已补「两个属性集相同、插入顺序不同的条目必须序列化成同一字节」。
+ * ⚠️ **缺口 9：拿被污染的快照跟它自己比**
+ * M5 的 `edgeless` 正是从 `snap.s.nodes` 造的 —— 若 connect 本身就把树
+ * 压平了，两边**一样地坏**，照样相等。已改为与**连线之前的 base** 比，
+ * 并钉住预期具体树。
+ * ⭐ 同族教训：缺口 4「自比只证确定性」，这里是「自比连确定性都不证」。
  *
- * ⚠️ 另记：注入 G（`start = i - 1`）曾以为是缺口，查明是**注入本身太弱** ——
- * 它撞上另一条「空输入」守卫，仍返回 ok:false（对的结果、错的原因）。
- * ⭐ **注入没造出目标场景 ≠ 守卫失效**。
+ * ⚠️ **缺口 10：债 3 有单元测试，却没有集成断言**
+ * `edge-id.test.ts` 验了 `deterministicEdgeId` 本身，但**没人验
+ * `applyAction` 真的用了它** —— 注入「connect 用随机 id」全绿。
+ * 形态 = HANDOFF §5「只验了标记串，没验引擎在不在听」。
+ * 已补「同一对端点连两次仍是一条边 + 反向是另一条边」。
  *
- * ⚠️ 未覆盖（诚实记账）：
- * - `contentToText` 的 fail loud 分支未测
- * - mermaid 的 icon/class 装饰 v0 当纯文本收，round-trip 是否丢未验
- * - 同一 id 在 G 层重复出现时的合并语义，实现里有但未进断言
- * - G 层坏行的**多行**报错（只验了首个 error 的行号）
+ * ⚪ **注入 O 的教训（不是缺口）**：给已是 `branch` 的节点再设
+ * `role:'branch'` —— 改了等于没改，快照当然相等。
+ * ⭐ **注入没造出目标场景 ≠ 守卫失效**（同 G→G2）。
+ * 注入本身必须先自证「确实改变了行为」。
+ *
+ * ⚠️ 未覆盖（诚实记账，留给接线阶段）：
+ * - **落库幂等**：`putEdgeViaTx` 带 id 走 `UPDATE`，边不存在时抛
+ *   `Edge <id> not found` → 写联系线**必须走 UPSERT**，否则第一次连线就失败。
+ *   本文件全在内存态，碰不到这条。
+ * - `semantic.moveIndent` / `dragReparent` 的 `beforeSibling`（插到指定兄弟前）
+ *   契约里有、实现只做了「追加到末位」，未验。
+ * - Span 的实际生成（`Cmd+J`/`Cmd+B`）未实现，M4 只验了「更名不动 span」。
+ * - `contentToText` fail loud 分支、mermaid icon/class 装饰 round-trip。
  */
