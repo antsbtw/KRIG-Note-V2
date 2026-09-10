@@ -14,6 +14,10 @@
  */
 
 import type { GLayer, GLayerText, NodeId, SLayer } from './types';
+import {
+  parseMermaidMindmap as parseMermaidMindmapImpl,
+  toMermaidMindmap as toMermaidMindmapImpl,
+} from './mermaid-mindmap';
 
 // ─────────────────────────────────────────────────────────
 // 1. 三面快照
@@ -126,12 +130,9 @@ export class NotImplementedError extends Error {
  * 而不是 `it.skip`(skip 会被忘掉,红不会)。
  */
 export const notImplementedEngine: DiglotEngine = {
-  parseMermaidMindmap() {
-    throw new NotImplementedError('parseMermaidMindmap');
-  },
-  toMermaidMindmap() {
-    throw new NotImplementedError('toMermaidMindmap');
-  },
+  // ⭐ 步骤③已落地 —— 这两条接真实现,对应断言(M1/C6-mermaid/C9 前半)自动转绿。
+  parseMermaidMindmap: parseMermaidMindmapImpl,
+  toMermaidMindmap: toMermaidMindmapImpl,
   parseGLayer() {
     throw new NotImplementedError('parseGLayer');
   },

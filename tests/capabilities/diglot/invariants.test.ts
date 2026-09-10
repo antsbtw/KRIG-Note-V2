@@ -76,6 +76,38 @@ function sFingerprint(s: SLayer): string {
   });
 }
 
+/**
+ * ⭐⭐ 树形状指纹 —— **把父子嵌套与标签一起编码成缩进大纲串**。
+ *
+ * ⚠️ 为什么必须这样比:初版几条断言比的是
+ * `nodes.map(n => n.order).sort()`(order 的多重集合)、
+ * `{parentIsNull, role}`(布尔+角色)—— **都与 parent 指向谁无关**,
+ * 把树推导彻底改坏(每个节点都挂到前一个)后**照样全绿**(实测)。
+ * 形态 = HANDOFF §5「断言成立的原因不是被测逻辑对」。
+ */
+function treeOutline(s: SLayer, labelOf: (n: SLayer['nodes'][number]) => string): string {
+  const byParent = new Map<string, SLayer['nodes'][number][]>();
+  for (const n of s.nodes) {
+    const k = n.parent ?? '\u0000root';
+    const arr = byParent.get(k);
+    if (arr) arr.push(n); else byParent.set(k, [n]);
+  }
+  for (const arr of byParent.values()) arr.sort((a, b) => a.order.localeCompare(b.order));
+  const out: string[] = [];
+  const walk = (n: SLayer['nodes'][number], depth: number): void => {
+    out.push(`${'  '.repeat(depth)}${labelOf(n)}`);
+    for (const c of byParent.get(n.id) ?? []) walk(c, depth + 1);
+  };
+  for (const top of byParent.get('\u0000root') ?? []) walk(top, 0);
+  return out.join('\n');
+}
+
+/** 从内容信封取首段文本(与解析器同一形态,测试侧只读不写)。 */
+function labelText(n: SLayer['nodes'][number]): string {
+  const payload = n.content.payload as { content?: { content?: { text?: string }[] }[] } | undefined;
+  return (payload?.content?.[0]?.content ?? []).map((r) => r.text ?? '').join('');
+}
+
 /** G 层指纹。 */
 function gFingerprint(g: ReadonlyMap<string, GEntry>): string {
   return JSON.stringify([...g.entries()].sort((a, b) => a[0].localeCompare(b[0])));
@@ -220,6 +252,22 @@ describe('C6 错误隔离 —— 坏语法/坏行不污染模型,错误定位到
   it('mermaid 坏语法 → ok:false,不产出半棵树', () => {
     const r = engine.parseMermaidMindmap('这根本不是 mindmap\n  ???');
     expect(r.ok).toBe(false);
+    if (r.ok) return;
+    // ⚠️ 只验 ok:false **不够** —— 注入「坏语法照收」后,
+    //   仍可能因为另一条守卫(空输入)而返回 false,**对的结果、错的原因**(实测)。
+    //   故必须验错误**定位到出问题的那一行**且说明是「不是 mindmap」。
+    expect(r.errors.length).toBeGreaterThan(0);
+    expect(r.errors[0].line, '应定位到第 1 行(第一个非空行就不对)').toBe(1);
+    expect(r.errors[0].message).toContain('mindmap');
+    // ⚠️ fail loud:不许返回「解析了一半」的模型
+    expect('value' in r).toBe(false);
+  });
+
+  it('⭐ 坏语法不得被静默兜底成一棵树', () => {
+    // 守「把不是 mindmap 的东西也照收」这条分支:
+    // 若实现遇到坏头不报错而是硬解析,这里会拿到 ok:true。
+    const r = engine.parseMermaidMindmap('flowchart TD\n  A --> B');
+    expect(r.ok, 'flowchart 不是 mindmap,不许照收').toBe(false);
   });
 });
 
@@ -268,13 +316,15 @@ describe('C9 round-trip 不破坏 —— 导入→编辑→导出→再导入,�
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     // 比结构而非比 id(id 可能是新分配的);比「树形状 + 标签序列」
-    const shape = (s: SLayer) =>
-      JSON.stringify(
-        [...s.nodes]
-          .sort((a, b) => a.order.localeCompare(b.order))
-          .map((n) => ({ parentIsNull: n.parent === null, role: n.role })),
-      );
-    expect(shape(second.value)).toBe(shape(first.value));
+    // ⚠️ 初版比的是 {parentIsNull, role} —— 布尔+角色,树形状信息几乎全丢。
+    expect(treeOutline(second.value, labelText)).toBe(treeOutline(first.value, labelText));
+
+    // ⚠️⚠️ round-trip **自洽**:坏解析器导出坏文本、再用同一坏解析器读回来
+    //   仍然一致(实测)。所以 round-trip 一致是**必要不充分**条件,
+    //   必须同时钉住预期的具体树,否则「一致地错」照样绿。
+    expect(treeOutline(first.value, labelText)).toBe(
+      ['主题', '  分支A', '    叶子1', '    叶子2', '  分支B', '    叶子3'].join('\n'),
+    );
   });
 
   it('⭐ 未知记号原样透传,round-trip 不丢失(00 §2.3)', () => {
@@ -299,9 +349,17 @@ describe('M1 推导确定性 —— 同一书写序列必得同一棵树', () =>
     const b = engine.parseMermaidMindmap(MERMAID_SAMPLE);
     expect(a.ok && b.ok).toBe(true);
     if (!a.ok || !b.ok) return;
-    const shape = (s: SLayer) =>
-      JSON.stringify([...s.nodes].map((n) => n.order).sort());
-    expect(shape(b.value)).toBe(shape(a.value));
+    // ⚠️ 初版比的是 `nodes.map(n=>n.order).sort()` —— order 的多重集合,
+    //   与 parent 指向谁**完全无关**,树推导改坏后照样绿(实测)。
+    expect(treeOutline(b.value, labelText)).toBe(treeOutline(a.value, labelText));
+
+    // ⚠️⚠️ 但「两次解析互相一致」**也抓不到「一致地错」** ——
+    //   把树推导改坏成「每个节点都挂到前一个」,两次解析仍然一致(实测)。
+    //   自比只能证明**确定性**,证明不了**正确性**。
+    //   故必须钉住 MERMAID_SAMPLE 的**预期具体树**(缩进即父子):
+    expect(treeOutline(a.value, labelText)).toBe(
+      ['主题', '  分支A', '    叶子1', '    叶子2', '  分支B', '    叶子3'].join('\n'),
+    );
   });
 
   it('⭐ 级别跳跃宽容解释:h1 下直接出现 h3,按就近父级归属,不报错', () => {
@@ -311,9 +369,15 @@ describe('M1 推导确定性 —— 同一书写序列必得同一棵树', () =>
     expect(r.ok, '级别跳跃不是错误').toBe(true);
     if (!r.ok) return;
     // 「深缩进直接来」的父应是 root(序列中之前、级别小于它的最近节点)
-    const deep = r.value.nodes.find((n) => JSON.stringify(n.content).includes('深缩进直接来'));
+    const deep = r.value.nodes.find((n) => labelText(n) === '深缩进直接来');
     expect(deep, '节点应被解析出来').toBeDefined();
-    expect(deep!.parent, '应归到就近父级 root,而非报错或挂到 Document').not.toBeNull();
+    // ⚠️ 不能只验 not null —— 要验**归到了哪个**父(就近父级 = root)
+    const root = r.value.nodes.find((n) => n.role === 'root');
+    expect(root).toBeDefined();
+    expect(deep!.parent, '应归到就近父级 root').toBe(root!.id);
+    // 第二个顶层(缩进回到与 root 同级)应是自由主题,而非 root 的孩子
+    const second = r.value.nodes.find((n) => labelText(n) === '第二个顶层');
+    expect(second!.parent, '同级顶层不该挂到 root 下').toBeNull();
   });
 });
 
@@ -451,56 +515,62 @@ describe('⭐⭐ M5 边坏树不坏 —— 用户 2026-09-09 拍板的硬约束'
       expect(n.parent, `节点 ${n.id} 的 parent 不得为 null —— 树不许靠 edges 表达`).not.toBeNull();
       expect(ids.has(n.parent!), `节点 ${n.id} 的 parent=${n.parent} 不存在`).toBe(true);
     }
+    // ⚠️ 「每个 parent 都非 null 且存在」还不够 —— 把树推导改坏成
+    //   「每个节点都挂到前一个」时,这些条件**仍然全部满足**(实测)。
+    //   故再验:清空 edges 后树形状与原图**逐字一致**,且确有多层嵌套。
+    expect(treeOutline(edgeless, labelText)).toBe(treeOutline(base.s, labelText));
+    // ⚠️ 同上:与自身比抓不到「一致地错」,钉住预期具体树
+    expect(treeOutline(edgeless, labelText)).toBe(
+      ['主题', '  分支A', '    叶子1', '    叶子2', '  分支B', '    叶子3'].join('\n'),
+    );
   });
 });
 
 /**
  * §闸门说明 + 注入验证台账
  *
- * 本文件现在**大面积红**，因为 `notImplementedEngine` 每个方法都 fail loud。
- * 这是**预置的验收闸门**，不是坏了：
- *
- * | 步骤 | 实现什么 | 哪些断言随之转绿 |
+ * | 步骤 | 实现什么 | 状态 |
  * |---|---|---|
- * | ③ mermaid 解析 | `parseMermaidMindmap` | M1、C6（mermaid 分支）、C9 前半 |
- * | ④ G 层 | `parseGLayer` / `serializeGLayer` | C1、C6（G 层分支）、C9 后半 |
- * | ⑤ 双向同步 | `applyAction` | C2/C3/C4/C5/C7/C8、M2/M3/M4/M5 |
+ * | ③ mermaid 解析 | `parseMermaidMindmap` / `toMermaidMindmap` | ✅ 已落地 → M1×2 / C6-mermaid×2 / C9 前半 转绿 |
+ * | ④ G 层 | `parseGLayer` / `serializeGLayer` | ⏳ 未做 → C1×3 / C6-G层 / C9 后半 仍红 |
+ * | ⑤ 双向同步 | `applyAction` | ⏳ 未做 → C2/C3/C4/C5/C7/C8、M2/M3/M4/M5 仍红 |
  *
- * ⚠️ **实现落地后不需要改本文件一个字**。改测试让它绿 = 违规（HANDOFF §4）。
+ * ⚠️ **步骤③落地时没有改动任何断言的判据** —— 只是把加固后的判据补强。
+ * 改测试让它绿 = 违规（HANDOFF §4）。
  *
  * ────────────────────────────────────────────────
- * ⭐⭐ §注入验证台账 —— **已真跑，不是"应该会红"**
- *
- * 方法：在 scratchpad 写了一个 130 行的**诚实引擎**（朴素但正确的实现），
- * 把本文件的 engine 临时指向它，验证两件事：
- *   (1) 断言在正确实现下**真的会绿** → 25/25 通过。
- *       ⭐ 这一步不做的话，闸门可能是「死红」（断言压根不可满足），
- *       那它就永远不会转绿，等于没有守卫。
- *   (2) 往诚实引擎里**注入违规**，看对应断言是否变红。
+ * ⭐⭐ §注入台账（步骤③）—— 抓到本轮第 3、4 个真缺口
  *
  * | # | 注入 | 期望 | 实测 |
  * |---|---|---|---|
- * | A | 拖动时顺手改 S 层 | C4 红 | ✅ 2 红（C4 + M2 落点①） |
- * | B | 新建节点顺手写 pos | C5 红 | ✅ 1 红（精确命中） |
- * | C | 改父时顺手钉坐标 | M2 三义互斥红 | ✅ 3 红（M2×2 + M3） |
- * | D | 把树塞进 edges 表达 | M5 红 | ⚠️ **初次半哑 → 见下** |
+ * | E | 不按 indent 弹栈（每节点挂前一个） | M1/C9/M5 红 | ⚠️ **初次 5 条全绿 → 见下** |
+ * | F | 弹栈 `>=` 改 `>`（兄弟被当成子） | 同上 | ✅ 4 红（加固后） |
+ * | G2 | 坏头照收（真静默兜底） | C6 红 | ✅ 2 红（加固后） |
  *
- * ⚠️⚠️ **注入 D 抓到一个真缺口（本轮第 2 个）**：
- * M5 第二条初版写的是 `expect(n.parent !== undefined).toBe(true)` ——
- * **`null` 也满足 `!== undefined`**，而「树靠边表达」的实现恰恰把每个
- * parent 都置成 `null`，于是这条**照样绿**（实测），对它声称守护的缺陷零区分力。
- * 且第一条是在夹具阶段撞 `TypeError: Cannot read properties of undefined`
- * 才红的 —— **崩溃式的红看不出是哪条不变量破了**。
+ * ⚠️⚠️ **缺口 3：断言比的东西不含树结构**
+ * 注入 E 把树推导彻底改坏，**5 条断言全绿**。逐条查明：
+ * - M1 第一条比 `nodes.map(n=>n.order).sort()` —— order 的**多重集合**，
+ *   与 parent 指向谁完全无关
+ * - C9 比 `{parentIsNull, role}` —— 布尔+角色，树形状信息几乎全丢
+ * - M5 第二条只验 parent「非 null 且存在」—— 挂错父仍满足
+ * 已加 `treeOutline()`：把父子嵌套与标签编码成缩进大纲串再比。
  *
- * 已修：
- * - 第二条改为「非根非自由节点必须有**非 null** 且**真实存在**的 parent」
- * - 第一条先自证夹具健全，让断言自己说话而不是崩在下标越界
- * 改后重跑注入 D：两条各自以**真实断言消息**变红
- * （"夹具里应有带 parent 的节点…" / "节点 n008 的 parent 不得为 null…"）。
+ * ⚠️⚠️ **缺口 4：自比只证确定性，证不了正确性**
+ * 加固后注入 E **仍有 3 条绿**。根因更隐蔽：
+ * - M1「解析两次结果一致」——**坏解析器两次也一致**
+ * - C9「round-trip 一致」——坏解析器导出坏文本、再用**同一个**坏解析器
+ *   读回来，**当然一致**（实测：注入后 round-trip 仍 true）
+ * ⭐ 即 round-trip 一致是**必要不充分**条件。
+ * 已改为**同时钉住 MERMAID_SAMPLE 的预期具体树**，才抓得到「一致地错」。
+ *
+ * ⚠️ 另记：注入 G（`start = i - 1`）曾以为是 C6 的缺口，查明是
+ * **注入本身太弱** —— 它让 start=-1，撞上另一条「空输入」守卫，
+ * 仍返回 ok:false（对的结果、错的原因）。改用 G2（start=i，真照收）后
+ * C6 两条正常变红。⭐ **注入没造出目标场景 ≠ 守卫失效**，
+ * 形态同 HANDOFF §5「假环境不像真环境」。
  *
  * ⚠️ 未覆盖（诚实记账）：
- * - C1/C6/C9 的注入未做 —— 诚实引擎的 G 层解析/序列化只是朴素实现，
- *   真实现落地后**必须补注入**（如：让 serializeGLayer 写出 auto 缺省值 → C1 第三条应红；
- *   让 parseGLayer 遇坏行返回半个模型 → C6 应红；让未知记号被丢弃 → C9 应红）。
- * - 落库层（真 DB、UPSERT 幂等）不在本文件范围，见 edge-id.test.ts 台账。
+ * - C1/C9 后半（G 层部分）注入未做 —— 步骤④落地后必须补。
+ * - `contentToText` 的 fail loud 分支未测。
+ * - mermaid 的 icon/class 装饰语法 v0 当纯文本收，未验 round-trip 是否丢。
  */
