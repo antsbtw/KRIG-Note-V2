@@ -38,6 +38,22 @@ const ACTION_FILL = 0xffffff;         // 内圆白
 const ACTION_BORDER = 0x4A90E2;       // 边框蓝(与选中色同族)
 const ACTION_GLYPH = 0x2E5C8A;        // 记号深蓝
 const ACTION_BORDER_PX = 1.2;         // 边框宽度(像素)
+
+/**
+ * ⭐ 呼吸区外环:圆最外面再套一圈**与画布同色**的环,视觉上是「留白」。
+ *
+ * ⚠️ 解决的问题:画布背景网格点(DotGrid,世界坐标、到处都是)会**恰好落在圆旁边**,
+ *   看着像圆上黏了个脏点(真机踩过)。
+ * ⭐ 为什么不靠「把圆画成不透明」—— 圆本来就是不透明的;
+ *   那个网格点在**圆外面**,不在覆盖范围内,再不透明也盖不住。
+ * ⭐ 为什么不针对那一个点修 —— 它随平移/缩放就挪走了,是巧合不是稳定现象。
+ *   外环是**通用解**:操作点在任何背景上都有干净边界。
+ *
+ * ⚠️ 必须与 SceneManager 的 `scene.background` 同色,否则外环会显形。
+ *   两处都写死 '#1e1e1e';改背景色时**必须同步改这里**(已由守卫钉住)。
+ */
+const ACTION_HALO = 0x1e1e1e;         // = SceneManager scene.background
+const ACTION_HALO_PX = 3.5;           // 外环宽度(像素)
 const GLYPH_HALF_PX = 3;              // 记号半长(像素)
 const GLYPH_THICK_PX = 1.4;           // 记号线宽(像素)
 const DOT_RADIUS_PX = 2;              // 'dot' 图标的实心点半径(像素)
@@ -187,13 +203,23 @@ function rebuildActionMesh(
     disposeObject(child);
   }
 
-  // ⚠️ 三层自身也要分先后(边框 < 底 < 记号),否则圆内部会自己盖自己。
+  // ⚠️ 各层要分先后(外环 < 边框 < 底 < 记号),否则圆内部会自己盖自己。
   //    同样只能靠 renderOrder —— depthTest 关了之后 Z 不再参与排序。
+
+  // ⭐ 呼吸区外环(画布同色)—— 画在最底,把圆周围的背景网格点盖掉
+  const halo = addLayer(
+    group,
+    new THREE.CircleGeometry(radius + ACTION_BORDER_PX + ACTION_HALO_PX, 24),
+    ACTION_HALO,
+    0,
+  );
+  halo.position.z = -0.003;
+
   const border = addLayer(
     group,
     new THREE.CircleGeometry(radius + ACTION_BORDER_PX, 24),
     ACTION_BORDER,
-    0,
+    1,
   );
   border.position.z = -0.002;
 
@@ -201,7 +227,7 @@ function rebuildActionMesh(
     group,
     new THREE.CircleGeometry(radius, 24),
     ACTION_FILL,
-    1,
+    2,
   );
   fill.position.z = -0.001;
 
@@ -214,7 +240,7 @@ function rebuildActionMesh(
 
   // ⭐ 记号画几何(横/竖线段),不用文字 —— 见文件头注释
   if (icon === 'dot') {
-    addLayer(group, new THREE.CircleGeometry(DOT_RADIUS_PX, 16), ACTION_GLYPH, 2);
+    addLayer(group, new THREE.CircleGeometry(DOT_RADIUS_PX, 16), ACTION_GLYPH, 3);
     return;
   }
   // 横线(minus / plus 共用)
@@ -222,14 +248,14 @@ function rebuildActionMesh(
     group,
     new THREE.PlaneGeometry(GLYPH_HALF_PX * 2, GLYPH_THICK_PX),
     ACTION_GLYPH,
-    2,
+    3,
   );
   if (icon === 'plus') {
     addLayer(
       group,
       new THREE.PlaneGeometry(GLYPH_THICK_PX, GLYPH_HALF_PX * 2),
       ACTION_GLYPH,
-      2,
+      3,
     );
   }
 }
@@ -244,8 +270,11 @@ function rebuildActionMesh(
  * 纯函数判定层(magnet-actions.ts)刻意不含这段,才能在 node 环境单测。
  */
 function addCountLabel(group: THREE.Group, label: string, radius: number): void {
-  // 纹理边长 = 圆直径(方片内切于圆),再按超采样倍数放大
-  const sidePx = Math.ceil(radius * 2);
+  // ⚠️⚠️ 方片必须**内接于圆**(边长 = 直径/√2),不是「边长 = 直径」——
+  //   后者四角伸出圆外 2.5px,数字画到圆边缘甚至外面,看着像一坨黑斑。
+  //   (真机踩过:折叠圆里是个糊成一团的黑点,展开态的 +/- 反而干净,
+  //    因为只有数字这条路径走方片贴图。)
+  const sidePx = Math.ceil((radius * 2) / Math.SQRT2);
   const canvas = document.createElement('canvas');
   canvas.width = sidePx * COUNT_TEXTURE_SCALE;
   canvas.height = sidePx * COUNT_TEXTURE_SCALE;
@@ -256,8 +285,15 @@ function addCountLabel(group: THREE.Group, label: string, radius: number): void 
     return;
   }
 
-  // ⚠️ 字号按**位数**收:'99+' 三字符要比单字符小,否则撑出圆外
-  const fontPx = sidePx * COUNT_TEXTURE_SCALE * (label.length >= 3 ? 0.42 : 0.62);
+  // ⚠️⚠️ 字号是「方片边长的百分比」,**再乘超采样倍数**才是 canvas 内的像素值。
+  //   曾经写成 `sidePx * COUNT_TEXTURE_SCALE * 0.62` —— 那是**整张 canvas 的 62%**,
+  //   等于把字号连超采样倍数一起放大了 4 倍,墨迹高度 5.4px 塞进半径 6px 的圆,
+  //   数字顶满圆边 → 真机看着就是个黑斑,根本读不出是几。
+  // ⚠️ 按**位数**收:'99+' 三字符要比单字符小,否则撑出方片。
+  // ⚠️ 用户实测反馈 0.62 太小看不清。方片已内接于圆,还有余量 ——
+  //   单字符提到 0.82(墨迹约占圆直径 44%),三字符 '99+' 仍收窄避免撑出方片。
+  const fontRatio = label.length >= 3 ? 0.52 : 0.82;
+  const fontPx = sidePx * fontRatio * COUNT_TEXTURE_SCALE;
   ctx.font = `600 ${fontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
   ctx.fillStyle = '#2E5C8A'; // = ACTION_GLYPH,与记号同色
   ctx.textAlign = 'center';
@@ -265,6 +301,12 @@ function addCountLabel(group: THREE.Group, label: string, radius: number): void 
   ctx.fillText(label, canvas.width / 2, canvas.height / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
+  // ⚠️⚠️ **必须声明 sRGB,否则数字边缘发黑糊成一坨**(真机踩过两轮,且**与字号无关** ——
+  //   这是当初误判成「数字画太大」的原因:改小了字,黑边跟着缩,看着还是黑)。
+  //   canvas 2d 画出来的是 sRGB;不声明的话 three 当线性空间处理,
+  //   抗锯齿边缘那圈半透明像素被压暗成黑边,小圆里就是一个黑斑。
+  // ⭐ 同款做法:TextRenderer 的 callout 图标纹理(scene/TextRenderer.ts:144)。
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter; // ⚠️ 非 2 次幂尺寸,mipmap 会报警且没必要
   texture.magFilter = THREE.LinearFilter;
 
@@ -274,10 +316,11 @@ function addCountLabel(group: THREE.Group, label: string, radius: number): void 
       map: texture,
       transparent: true, // ⚠️ 少了它数字周围是一圈黑底方块
       depthTest: false,
+      depthWrite: false, // 半透明贴图不写深度(对齐 TextRenderer 的图标纹理)
       side: THREE.DoubleSide,
     }),
   );
-  mesh.renderOrder = ACTION_RENDER_ORDER + 2; // 与记号同层(记号和数字互斥)
+  mesh.renderOrder = ACTION_RENDER_ORDER + 3; // 与记号同层(记号和数字互斥)
 
   // ⚠️⚠️ **抵消相机的 Y 翻转,否则数字上下颠倒**(真机踩过:`2` 看着像镜像字符)。
   //

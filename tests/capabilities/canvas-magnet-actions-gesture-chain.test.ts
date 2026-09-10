@@ -152,8 +152,173 @@ describe('层级:操作点必须画在连线之上', () => {
     ).toMatch(/depthTest:\s*false/);
   });
 
+  /**
+   * ⚠️ 真机踩过:magnet 提示点(hover 时画的蓝色小圆)与操作点画在**同一个坐标**
+   * (都在该 magnet 处),提示点盖住了圆里的折叠计数数字。
+   * 两者必须有明确先后 —— 操作点带语义且圆里有数字,叠最上面。
+   */
+  it('⭐⭐ magnet 提示点必须排在操作点之下(否则盖住圆里的数字)', () => {
+    const code = stripComments(controller);
+    const hintOrder = Number(
+      /const MAGNET_HINT_RENDER_ORDER = (\d+)/.exec(code)?.[1],
+    );
+    expect(Number.isFinite(hintOrder), '提示点必须有显式 renderOrder 常量').toBe(true);
+
+    const actionOrder = Number(
+      /const ACTION_RENDER_ORDER = (\d+)/.exec(stripComments(overlay))?.[1],
+    );
+    expect(hintOrder, '提示点必须低于操作点,才会叠在它下面').toBeLessThan(actionOrder);
+
+    // ⚠️ 逐 mesh 设置(renderOrder 不从 Group 继承)
+    expect(code, '提示点的 renderOrder 必须真的落到 mesh 上').toMatch(
+      /mesh\.renderOrder = MAGNET_HINT_RENDER_ORDER/,
+    );
+  });
+
+  it('⭐ 提示点也必须 depthTest:false —— 与操作点进同一套排序规则', () => {
+    // ⚠️ 混着排(一边 depthTest 开、一边关)先后不确定,真机就是数字被盖
+    const hintMat = /color: MAGNET_HINT_COLOR,[\s\S]{0,200}?\}\);/.exec(
+      stripComments(controller),
+    )?.[0];
+    expect(hintMat, '找不到提示点材质 —— 改名了这条守卫要同步更新').toBeTruthy();
+    expect(hintMat).toMatch(/depthTest:\s*false/);
+  });
+
   it('⚠️ 不把 renderOrder 设在 root Group 上(设了等于没设,不继承给子 mesh)', () => {
     expect(overlay).not.toMatch(/this\.root\.renderOrder\s*=/);
+  });
+});
+
+describe('圆内数字:必须装得进圆里', () => {
+  /**
+   * ⚠️⚠️ 真机踩过两轮:折叠圆里是个糊成一团的黑斑,读不出数字。
+   * 展开态的 +/- 反而干净 —— 因为**只有数字**走「方片贴图」这条路径。
+   *
+   * 两个叠加的错:
+   *  ① 方片边长写成「= 直径」而非「内接于圆(直径/√2)」→ 四角伸出圆外
+   *  ② 字号写成 `sidePx * COUNT_TEXTURE_SCALE * 比例` —— 那是整张 canvas 的比例,
+   *     等于把字号连超采样倍数一起放大 4 倍 → 墨迹顶满圆边
+   *
+   * ⭐ 这里直接**照抄源码里的公式算一遍**,验证几何上装得下 ——
+   * 光匹配字符串守不住「数字比圆大」这种数值错误。
+   */
+  const code = stripComments(overlay);
+  // ⚠️ MAGNET_ACTION_RADIUS_PX 定义在 magnet-actions.ts(overlay 只是 import 它),
+  //   只搜 overlay 会拿到 NaN —— 两个文件都要搜。
+  const pure = stripComments(
+    readFileSync(resolve(SRC_ROOT, 'interaction/magnet-actions.ts'), 'utf8'),
+  );
+
+  function constOf(name: string): number {
+    const re = new RegExp(`${name} = ([\\d.]+)`);
+    const v = Number((re.exec(code) ?? re.exec(pure))?.[1]);
+    expect(Number.isFinite(v), `读不到常量 ${name} —— 改名了守卫要同步更新`).toBe(true);
+    return v;
+  }
+
+  it('⭐⭐ 方片内接于圆 —— 四角不得伸出圆外', () => {
+    expect(code, '方片边长必须按内接正方形算(除以 √2)').toMatch(
+      /const sidePx = Math\.ceil\(\(radius \* 2\) \/ Math\.SQRT2\)/,
+    );
+    const radius = constOf('MAGNET_ACTION_RADIUS_PX');
+    const sidePx = Math.ceil((radius * 2) / Math.SQRT2);
+    const halfDiagonal = (sidePx * Math.SQRT2) / 2;
+    expect(halfDiagonal, `方片半对角 ${halfDiagonal} 不得超过圆半径 ${radius}`)
+      .toBeLessThanOrEqual(radius + 0.5); // +0.5 容 Math.ceil 的取整
+  });
+
+  /**
+   * ⚠️⚠️ 这条是**真凶**,前两轮都误判了 ——
+   * canvas 2d 画出来的是 sRGB;不声明 colorSpace,three 按线性空间处理,
+   * 抗锯齿边缘那圈半透明像素被压暗成黑边 → 小圆里就是一坨黑斑。
+   *
+   * ⭐ 它**与字号无关**:字号改小,黑边跟着缩,看着还是黑。
+   * 这正是「改小了还是一样」的原因,别再往字号上找。
+   */
+  it('⭐⭐ 数字纹理必须声明 sRGB —— 否则边缘发黑(与字号无关)', () => {
+    expect(code, '数字纹理必须 colorSpace = SRGBColorSpace').toMatch(
+      /texture\.colorSpace = THREE\.SRGBColorSpace/,
+    );
+    // 同款做法的参照物:TextRenderer 的 callout 图标纹理
+    const textRenderer = stripComments(
+      readFileSync(resolve(SRC_ROOT, 'scene/TextRenderer.ts'), 'utf8'),
+    );
+    expect(
+      textRenderer,
+      '前提:TextRenderer 的 CanvasTexture 也是这么做的(参照物没了这条要重审)',
+    ).toMatch(/colorSpace = THREE\.SRGBColorSpace/);
+  });
+
+  it('⭐⭐ 数字墨迹必须明显小于圆内径(不能顶满边缘)', () => {
+    // 字号比例必须是「方片的比例」,不能再乘一次超采样倍数
+    expect(code, '字号 = 方片边长 × 比例 × 超采样,顺序不能错').toMatch(
+      /const fontPx = sidePx \* fontRatio \* COUNT_TEXTURE_SCALE/,
+    );
+
+    const radius = constOf('MAGNET_ACTION_RADIUS_PX');
+    const scale = constOf('COUNT_TEXTURE_SCALE');
+    const sidePx = Math.ceil((radius * 2) / Math.SQRT2);
+    const fontPx = sidePx * 0.82 * scale;  // 单字符比例(与源码同步)
+    // 数字墨迹高 ≈ 字号 × 0.72(cap height 经验值),换算回屏幕像素
+    const inkOnScreen = (fontPx * 0.72) / scale;
+    // ⚠️ 阈值守的是「装得进圆、不顶边」,**不是「越小越好」** ——
+    //   用户实测反馈过「太小看不清」,所以这里只卡上界,别把它当成越严越对。
+    //   上界 = 圆内径(超过就画到圆边框上甚至圆外)。
+    expect(
+      inkOnScreen,
+      `数字墨迹 ${inkOnScreen.toFixed(1)}px 不得超过圆内径 ${radius}px,` +
+        `否则画到圆边缘外面`,
+    ).toBeLessThanOrEqual(radius);
+    // 方片也要装得下(方片内接于圆,比圆内径更紧)
+    expect(inkOnScreen, '数字墨迹不得超出方片边长').toBeLessThanOrEqual(sidePx);
+  });
+});
+
+describe('呼吸区外环:圆周围要有干净留白', () => {
+  const code = stripComments(overlay);
+
+  /**
+   * ⚠️ 真机踩过:画布背景网格点(DotGrid,世界坐标、到处都是)恰好落在圆旁边,
+   * 看着像圆上黏了个脏点。外环用**画布同色**把圆周围一圈盖掉。
+   *
+   * ⚠️⚠️ 外环颜色必须与 SceneManager 的 scene.background **完全一致** ——
+   * 不一致的话外环会显形,变成一个更难看的灰圈(比原来的脏点还糟)。
+   * 这是**跨文件的隐式耦合**,改背景色时极易漏改,所以钉在这里。
+   */
+  it('⭐⭐ 外环颜色必须 = 画布背景色(不一致会显形)', () => {
+    const haloHex = /const ACTION_HALO = 0x([0-9a-fA-F]{6})/.exec(code)?.[1];
+    expect(haloHex, '外环必须有明确的颜色常量').toBeTruthy();
+
+    const sceneManager = stripComments(
+      readFileSync(resolve(SRC_ROOT, 'scene/SceneManager.ts'), 'utf8'),
+    );
+    const bgHex = /scene\.background = new THREE\.Color\('#([0-9a-fA-F]{6})'\)/
+      .exec(sceneManager)?.[1];
+    expect(bgHex, '读不到画布背景色 —— 改写法了,这条守卫要同步更新').toBeTruthy();
+
+    expect(
+      haloHex?.toLowerCase(),
+      `外环 0x${haloHex} 与画布背景 #${bgHex} 不一致 —— 外环会显形`,
+    ).toBe(bgHex?.toLowerCase());
+  });
+
+  it('⭐ 外环画在最底层(不能盖住边框/底/记号)', () => {
+    // 外环 layer 0 < 边框 1 < 底 2 < 记号 3
+    expect(code).toMatch(/ACTION_HALO,\s*\n\s*0,/);
+    expect(code, '边框必须在外环之上').toMatch(/ACTION_BORDER,\s*\n\s*1,/);
+    expect(code, '内圆底必须在边框之上').toMatch(/ACTION_FILL,\s*\n\s*2,/);
+  });
+
+  it('⚠️ 外环只是留白,不得改变命中范围(点的还是那个圆)', () => {
+    // 命中半径来自 magnet-actions.ts,与外环无关 —— 外环变宽不该让命中区变大
+    const pure = stripComments(
+      readFileSync(resolve(SRC_ROOT, 'interaction/magnet-actions.ts'), 'utf8'),
+    );
+    // ⚠️ 命中半径 = 圆的实际半径 + slop(圆带数字时更大);**与外环无关**
+    expect(pure, '命中半径由圆半径 + slop 决定').toMatch(
+      /\(r \+ MAGNET_ACTION_HIT_SLOP_PX\)/,
+    );
+    expect(pure, '命中计算不该认识外环').not.toMatch(/ACTION_HALO/);
   });
 });
 

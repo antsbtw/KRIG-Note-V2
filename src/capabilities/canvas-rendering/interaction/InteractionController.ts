@@ -2033,6 +2033,23 @@ function rebuildMarqueeOverlay(
 const MAGNET_HINT_COLOR = 0x4A90E2;
 const MAGNET_HINT_Z = 0.04;            // 略低于 handles(0.05),不抢交互
 
+/**
+ * 提示点的绘制层(⚠️ 真机踩过:折叠节点圆里的数字被这个点盖住)。
+ *
+ * ⭐ 提示点与**连接点操作点**画在**同一个坐标**上(都在该 magnet 处),
+ * 所以两者必须有明确先后 —— 操作点带语义(点它折叠/展开)且圆里有数字,
+ * **必须叠在最上面**;提示点是通用的「这里能连线」,退到下面。
+ *
+ * ⚠️ 光靠 Z 定不了先后:操作点是 `depthTest:false`(与线同一套规则,纯按
+ * renderOrder 排),而提示点原本 renderOrder 未设(=0)、depthTest 开着 ——
+ * 两者混在一起排序结果不确定,真机表现就是数字被盖。
+ * 修法 = 提示点也走 `depthTest:false` + 显式 renderOrder,进同一套规则。
+ *
+ * 当前层级预算:线 1 < marquee 边框 2 < 选中框 10 < **提示点 12** <
+ * 操作点 20+(见 MagnetActionsOverlay.ACTION_RENDER_ORDER)。
+ */
+const MAGNET_HINT_RENDER_ORDER = 12;
+
 function makeMagnetHintGroup(node: RenderedNode, inst: Instance): THREE.Group {
   const group = new THREE.Group();
   rebuildMagnetHintDots(group, node, inst);
@@ -2060,9 +2077,13 @@ function rebuildMagnetHintDots(group: THREE.Group, node: RenderedNode, inst: Ins
       transparent: true,
       opacity: 0.7,
       side: THREE.DoubleSide,
+      // ⚠️ 与操作点同一套排序规则(纯 renderOrder),否则先后不确定 —— 见常量注释
+      depthTest: false,
     });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(m.x, m.y, MAGNET_HINT_Z);
+    // ⚠️ 必须逐 mesh 设(renderOrder 不从 Group 继承);低于操作点 = 叠在它下面
+    mesh.renderOrder = MAGNET_HINT_RENDER_ORDER;
     group.add(mesh);
   }
 }
