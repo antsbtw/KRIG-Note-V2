@@ -396,6 +396,29 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
           return;
         }
         next = diglot.applyAction(snap, { kind: 'canvas.deleteSubtree', id });
+      } else if (e.key === '-' || e.key === '+' || e.key === '=') {
+        // ⭐ 折叠/展开(01 §7.5「徽标点击 / `-` `+`」的键盘那一半)。
+        //   `=` 一并收:美式键盘上 `+` 要按 Shift,不按也该能展开。
+        //
+        // ⚠️ 没有子节点就没得折 —— 静默无视会让人以为按键坏了,明确告知。
+        const hasChildren = snap.s.nodes.some((n) => n.parent === id);
+        if (!hasChildren) {
+          setError('该节点没有子节点,无法折叠');
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        const collapsed = diglot.isCollapsed(snap, id);
+        // `-` 只折、`+`/`=` 只展开 —— ⚠️ 不做成 toggle:
+        //   规格给的是两个键,各司其职;按 `-` 却展开了会很意外。
+        const wantCollapsed = e.key === '-';
+        if (wantCollapsed === collapsed) {
+          // 已经是目标状态,不产生无意义变更(也不报错 —— 这不是错误)
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        next = diglot.applyAction(snap, { kind: 'graphic.toggleCollapsed', id });
       } else {
         return;
       }

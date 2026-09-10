@@ -279,6 +279,50 @@ describe('投影:稀疏覆盖全量', () => {
     expect(rootInst.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
   });
 
+  it('⭐⭐ 折叠的节点带可辨认标记(否则与叶子长得一样)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find(
+      (n) => s.s.nodes.filter((k) => k.parent === n.id).length >= 2,
+    )!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+
+    const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    const hit = inst.find((i) => i.id === branch.id)!;
+    const text = JSON.stringify(hit.doc);
+    // ⭐ 带 ⊕ 与子节点数 —— 用户才知道「下面还有东西」
+    expect(text).toContain('⊕');
+    expect(text).toContain('2');
+  });
+
+  it('⚠️ 标记只影响显示,不进 S 层 content', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
+    // 模型里的文字没被改写
+    expect(JSON.stringify(s.s.nodes.find((n) => n.id === branch.id)!.content)).not.toContain('⊕');
+  });
+
+  it('⚠️ 没有子节点的节点即使标了 collapsed 也不加标记(不骗人)', () => {
+    const s = snap();
+    const leaf = s.s.nodes.find((n) => !s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+    g.set(leaf.id, { collapsed: true });
+    const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    expect(JSON.stringify(inst.find((i) => i.id === leaf.id)!.doc)).not.toContain('⊕');
+  });
+
+  it('⭐ 展开态原样透传富文本(不经文本拍平)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const first = inst[0];
+    const node = s.s.nodes.find((n) => n.id === first.id)!;
+    // ⚠️ 非折叠态必须是**同一个对象**,否则公式/marks 会在某处被拍平
+    expect(first.doc).toBe(node.content);
+  });
+
   it('⚠️ 布局结果缺节点 → fail loud,不静默给 (0,0)', () => {
     const s = snap();
     // 故意给一个空布局
