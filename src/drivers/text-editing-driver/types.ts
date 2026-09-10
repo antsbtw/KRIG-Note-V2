@@ -134,6 +134,27 @@ export interface TextEditingConfig {
   viewId: string;
   /** L5-G4.5 plugin 启停开关;不传 = 全开(NoteView 零回归) */
   plugins?: TextEditingPluginToggles;
+  /**
+   * ⭐ 折叠状态的外部来源(可选)。
+   *
+   * 不传 = 用 driver 内建的 plugin state(**不持久**,重启即重置 ——
+   * NoteView 的既有决议「不污染 schema」)。
+   *
+   * ⚠️ 传了 = 折叠的读/写全部走它。diglot mind 用这条把折叠落到 G 层,
+   * 从而**持久**且与画布同步(规格 `01-mind-spec` §3.1 要求 collapsed 持久)。
+   * ⭐ 两种策略并存,互不影响:note 本体的行为**不因此改变**。
+   */
+  headingCollapseSource?: HeadingCollapseSource;
+}
+
+/**
+ * 折叠状态的读/写接口(与 build-heading-toggle-plugin 的 CollapseSource 同形)。
+ * ⚠️ 用 `blockId` 而非 PM `pos` 作键 —— 外部存储(如 G 层)认的是稳定 id,
+ * pos 会随编辑漂移。driver 内部负责 pos ↔ blockId 的转换。
+ */
+export interface HeadingCollapseSource {
+  isCollapsed(blockId: string): boolean;
+  toggle(blockId: string): void;
 }
 
 // ── Driver 主接口(DESIGN.md v0.2.1 § 1.1)──

@@ -353,6 +353,11 @@ export interface DiglotModelApi {
   ) => import('./project-to-canvas').LayoutRequest;
   /** ⭐ S 层树 → note block 序列(层级用 h1~hn 表达,block 带稳定 id) */
   readonly treeToNoteDoc: (s: SLayer) => import('./note-projection').NoteDoc;
+  /** 某节点是否折叠(读 G 层 collapsed) */
+  readonly isCollapsed: (
+    snap: import('./engine-contract').DiglotSnapshot,
+    id: NodeId,
+  ) => boolean;
   /** ⭐ root 节点的文字 = 文档标题(01 §3.4「标题即 root」);无 root 或空则 null */
   readonly rootTitleOf: (s: SLayer) => string | null;
   /** ⭐ note block 序列 → S 层树(id 优先取 block 自带的) */

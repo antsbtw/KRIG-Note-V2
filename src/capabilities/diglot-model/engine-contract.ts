@@ -87,6 +87,15 @@ export type DiglotAction =
   /** ⭐ 删 pos 条目 → 回自动布局(C7 的画布入口) */
   | { readonly kind: 'graphic.deletePos'; readonly id: NodeId }
   /**
+   * ⭐ 折叠/展开某节点的子树(01 §7.5)。
+   *
+   * ⚠️ 落 **G 层 V 类**且**持久**(规格 §3.1 明写)——
+   * 与 note 侧「仅存 plugin state、重启即重置」的策略**刻意不同**:
+   * 导图的折叠是**图的一部分**(我设计这张图时就想让它默认收着),
+   * 不是「我这会儿不想看」的临时视图状态。
+   */
+  | { readonly kind: 'graphic.toggleCollapsed'; readonly id: NodeId }
+  /**
    * ⭐ 全图恢复自动布局:清空**所有** pos 条目(01 §7.5「释放钉住」的整图版)。
    *
    * ⚠️ 为什么单独一个 action 而不是循环发 deletePos:

@@ -42,6 +42,8 @@ export interface MindSemanticPaneProps {
   readonly onTreeCommit: (doc: unknown) => void;
   /** 当前导图 id —— 用于构造互不相同的 PM instanceId */
   readonly graphId: string;
+  /** ⭐ 折叠某节点(落 G 层,持久)—— 与画布折叠同一真源 */
+  readonly onToggleCollapsed: (nodeId: string) => void;
 }
 
 export function MindSemanticPane({
@@ -49,6 +51,7 @@ export function MindSemanticPane({
   onSemanticCommit,
   onTreeCommit,
   graphId,
+  onToggleCollapsed,
 }: MindSemanticPaneProps): ReactElement {
   const [tab, setTab] = useState<SemanticTab>('note');
   // ⭐ 语义面用**独立 viewId** 注册完整菜单(见 mind-semantic-menus.ts 的论证):
@@ -136,6 +139,33 @@ export function MindSemanticPane({
     pushedFpRef.current = fp;
     setIncomingDoc(built);
   }, [snapshot, diglot]);
+
+  /**
+   * ⭐⭐ 折叠状态来源:**读写 G 层**,不用 driver 内建的 plugin state。
+   *
+   * ⚠️ 两边策略刻意不同:
+   * - note 本体:仅存 plugin state,重启即重置(用户决议「不污染 schema」)
+   * - ⭐ mind:G 层 `collapsed`,**持久**(规格 01 §3.1 明写)——
+   *   导图的折叠是**图的一部分**,不是「我这会儿不想看」的临时视图状态。
+   *
+   * ⭐ 接这个 source 之后,note tab 的三角与画布的折叠**是同一件事**:
+   * 在哪边折,另一边跟着收。
+   *
+   * ⚠️ 用 ref 读快照:source 的身份必须稳定(变了会重建 PM plugin),
+   * 但它要读到**最新**的折叠状态 —— ref 正好两全。
+   */
+  const snapshotRef = useRef<DiglotSnapshot | null>(null);
+  snapshotRef.current = snapshot;
+  const collapseSource = useMemo(
+    () => ({
+      isCollapsed: (blockId: string): boolean => {
+        const snap = snapshotRef.current;
+        return snap ? diglot.isCollapsed(snap, blockId) : false;
+      },
+      toggle: (blockId: string): void => onToggleCollapsed(blockId),
+    }),
+    [diglot, onToggleCollapsed],
+  );
 
   const handleNoteChange = useCallback(
     (newDoc: DriverSerialized): void => {
@@ -274,6 +304,8 @@ export function MindSemanticPane({
                 // ⭐ 独立 viewId —— 与画布节点的 'graph-canvas-view' 区分,
                 //   这样两边的 slash/handle 菜单互不影响(画布那套要守渲染态闸)。
                 viewId: MIND_SEMANTIC_VIEW_ID,
+                // ⭐ 折叠走 G 层(持久 + 与画布同步),不用内建 plugin state
+                headingCollapseSource: collapseSource,
                 // ⭐ plugin **默认全开** —— note tab 就该是完整的 note 编辑器
                 //   (有 block、有 ⋮⋮ handle、slash 可用)。
                 // ⚠️ 唯一不开 titleGuard(opt-in,NoteView 专属的强制首块 isTitle):

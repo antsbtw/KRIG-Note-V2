@@ -423,6 +423,43 @@ describe('⭐ 恢复自动布局(整图释放 pos)—— C7 的整图版', () =>
   });
 });
 
+describe('⭐ 折叠(G 层持久,与 note 三角同源)', () => {
+  it('toggle → G 层写 collapsed;再 toggle → 整条移除(稀疏)', () => {
+    const base = freshSnapshot();
+    const id = someBranchId(base.s);
+
+    const on = engine.applyAction(base, { kind: 'graphic.toggleCollapsed', id });
+    expect(on.g.get(id)?.collapsed).toBe(true);
+
+    const off = engine.applyAction(on, { kind: 'graphic.toggleCollapsed', id });
+    // ⭐ 展开 = 删字段;条目空了整条移除(false 是缺省,不写缺省值)
+    expect(off.g.get(id)?.collapsed).toBeUndefined();
+    expect(off.g.has(id), '零属性条目必须整条移除').toBe(false);
+  });
+
+  it('⭐ 折叠是纯 G 层操作 —— S 层零变更', () => {
+    const base = freshSnapshot();
+    const id = someBranchId(base.s);
+    const after = engine.applyAction(base, { kind: 'graphic.toggleCollapsed', id });
+    expect(sFingerprint(after.s)).toBe(sFingerprint(base.s));
+  });
+
+  it('⚠️ 折叠不碰同节点的其它 G 属性(pos/color 要留着)', () => {
+    const base = freshSnapshot();
+    const id = someBranchId(base.s);
+    let snap = engine.applyAction(base, { kind: 'canvas.dragNode', id, x: 5, y: 6 });
+    snap = engine.applyAction(snap, { kind: 'graphic.editColor', id, color: 'red' });
+
+    const on = engine.applyAction(snap, { kind: 'graphic.toggleCollapsed', id });
+    expect(on.g.get(id)?.pos).toEqual({ x: 5, y: 6 });
+    expect(on.g.get(id)?.color).toBe('red');
+    // 展开后其它属性仍在(条目不该被整条删)
+    const off = engine.applyAction(on, { kind: 'graphic.toggleCollapsed', id });
+    expect(off.g.get(id)?.pos).toEqual({ x: 5, y: 6 });
+    expect(off.g.get(id)?.color).toBe('red');
+  });
+});
+
 describe('C8 手势消解 —— 语义面斜杠属性词:S 零残留,G 恰好一条', () => {
   it('键入 /三角形 → S 层不留任何属性 token,G 层多一条 shape', () => {
     const base = freshSnapshot();

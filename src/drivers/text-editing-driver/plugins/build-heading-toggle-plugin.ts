@@ -46,6 +46,41 @@ const pluginStateCollapseSource: CollapseSource = {
   toggle: toggleHeadingCollapse,
 };
 
+/**
+ * ⭐ 把「按 blockId 读写」的外部来源,适配成本 plugin 用的「按 pos 读写」。
+ *
+ * ⚠️ 为什么外部用 blockId 而不是 pos:pos 会随编辑漂移(插一行后面全变),
+ * 外部存储(如 diglot 的 G 层)认的是**稳定 id**。转换放在 driver 内 ——
+ * 只有这里同时看得到 doc 和 pos。
+ *
+ * ⚠️ 块没有 id 时**回落到内建 plugin state**:
+ * 新敲的块还没分配 id,总不能因此不能折叠。fail soft 是对的,
+ * 因为这不是错误,是正常过渡态。
+ */
+function blockIdSourceAdapter(external: {
+  isCollapsed(blockId: string): boolean;
+  toggle(blockId: string): void;
+}): CollapseSource {
+  const idAt = (state: EditorState, pos: number): string | null => {
+    const node = state.doc.nodeAt(pos);
+    const id = node?.attrs?.id;
+    return typeof id === 'string' && id.length > 0 ? id : null;
+  };
+  return {
+    isCollapsed(state, pos) {
+      const id = idAt(state, pos);
+      return id ? external.isCollapsed(id) : isHeadingCollapsed(state, pos);
+    },
+    toggle(view, pos) {
+      const id = idAt(view.state, pos);
+      if (id) external.toggle(id);
+      else toggleHeadingCollapse(view, pos);
+    },
+  };
+}
+
+export { blockIdSourceAdapter };
+
 /** widget DOM:一个 contentEditable=false 的三角按钮 */
 function renderToggle(collapsed: boolean, onClick: () => void): HTMLElement {
   const el = document.createElement('span');

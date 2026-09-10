@@ -16,7 +16,7 @@
 
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import type { DiglotModelApi } from './types';
-import { applyAction, pinnedCount } from './apply-action';
+import { applyAction, pinnedCount, isCollapsed } from './apply-action';
 import { treeToNoteDoc, noteDocToTree, rootTitleOf } from './note-projection';
 import { emptyMindFile, fileToSnapshot, snapshotToFile } from './mind-file';
 import {
@@ -34,6 +34,7 @@ const api: DiglotModelApi = {
   emptyMindFile,
   applyAction,
   pinnedCount,
+  isCollapsed,
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,

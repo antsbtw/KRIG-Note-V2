@@ -342,6 +342,13 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
       return { s, g: setG(g, action.id, { color: action.color }) };
     }
 
+    case 'graphic.toggleCollapsed': {
+      const cur = g.get(action.id)?.collapsed === true;
+      // ⭐ 展开 = 删掉该字段(稀疏纪律:false 是缺省,不写缺省值)
+      //   条目删空则整条移除,与 deletePos 同款处理。
+      return { s, g: cur ? unsetG(g, action.id, 'collapsed') : setG(g, action.id, { collapsed: true }) };
+    }
+
     case 'graphic.releaseAllPos': {
       // ⭐ 整图回自动布局。⚠️ **只删 pos**,不碰 color/shape/collapsed ——
       //    那些是用户另外表达的意图,不该被「恢复布局」顺手抹掉。
@@ -375,4 +382,10 @@ export function pinnedCount(snapshot: DiglotSnapshot): number {
   let n = 0;
   for (const e of snapshot.g.values()) if (e.pos) n += 1;
   return n;
+}
+
+
+/** 某节点是否折叠(读 G 层 `collapsed`)。⭐ 与画布裁剪、note 三角共用同一真源。 */
+export function isCollapsed(snapshot: DiglotSnapshot, id: NodeId): boolean {
+  return snapshot.g.get(id)?.collapsed === true;
 }

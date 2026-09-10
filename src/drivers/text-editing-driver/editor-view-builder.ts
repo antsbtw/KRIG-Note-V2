@@ -37,7 +37,10 @@ import { buildBlockIndentPlugin } from './plugins/build-block-indent-plugin';
 import { buildBlockIndentKeymap } from './plugins/build-block-indent-keymap';
 import { buildKeyboardKeymap } from './keyboard/build-keyboard-keymap';
 import { buildHeadingCollapsePlugin } from './plugins/build-heading-collapse-plugin';
-import { buildHeadingTogglePlugin } from './plugins/build-heading-toggle-plugin';
+import {
+  buildHeadingTogglePlugin,
+  blockIdSourceAdapter,
+} from './plugins/build-heading-toggle-plugin';
 import { buildAutoBlockIdPlugin } from './plugins/build-auto-block-id-plugin';
 import { buildBottomPadPlugin } from './plugins/build-bottom-pad-plugin';
 
@@ -89,6 +92,8 @@ export function buildEditorView(
   viewId: string,
   instanceId: string,
   pluginToggles?: import('./types').TextEditingPluginToggles,
+  /** ⭐ 折叠状态的外部来源(diglot mind 用它把折叠落到 G 层);不传 = 内建 plugin state */
+  headingCollapseSource?: import('./types').HeadingCollapseSource,
 ): EditorView {
   // 收集 nodeViews
   const nodeViews: Record<string, NodeViewConstructor> = {};
@@ -173,7 +178,16 @@ export function buildEditorView(
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     ...(enableCodeSyntaxHighlight ? [buildCodeSyntaxHighlightPlugin()] : []),
     // 折叠逻辑 + 行内三角入口:同一开关(没有折叠能力时三角也没意义)
-    ...(enableHeadingCollapse ? [buildHeadingCollapsePlugin(), buildHeadingTogglePlugin()] : []),
+    ...(enableHeadingCollapse
+      ? [
+          buildHeadingCollapsePlugin(),
+          // ⭐ 有外部来源(如 diglot 的 G 层)就用它,否则用内建 plugin state。
+          //   ⚠️ note 本体不传 → 行为完全不变(「不污染 schema」的决议照旧)。
+          buildHeadingTogglePlugin(
+            headingCollapseSource ? blockIdSourceAdapter(headingCollapseSource) : undefined,
+          ),
+        ]
+      : []),
     buildMarkKeymap(schema),
     buildHeadingKeymap(schema),
     // (Phase 3:split-indent keymap 的 Enter 继承缩进已并入集中 keyboard 模块的

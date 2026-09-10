@@ -121,6 +121,8 @@ export function Host(props: TextEditingHostProps) {
       config.viewId,
       config.instanceId,
       config.plugins,
+      // ⭐ 折叠状态外部来源(diglot mind 传;note 不传 → 行为不变)
+      config.headingCollapseSource,
     );
 
     viewRef.current = view;

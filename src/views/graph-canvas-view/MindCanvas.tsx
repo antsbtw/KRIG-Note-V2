@@ -570,6 +570,24 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     [graphId, diglot, render, scheduleSave],
   );
 
+  /**
+   * ⭐ 折叠/展开某节点 —— 落 G 层(持久),画布与 note tab **同一真源**。
+   *
+   * ⚠️ 折叠后画布会把该子树整个裁掉(projectToInstances 的 visibleNodes),
+   * note tab 那边由 heading-collapse plugin 藏内容 —— 两边表现不同但**状态同源**。
+   */
+  const handleToggleCollapsed = useCallback(
+    (nodeId: string): void => {
+      const snap = snapRef.current;
+      if (!snap || loadedIdRef.current !== graphId) return;
+      const next = diglot.applyAction(snap, { kind: 'graphic.toggleCollapsed', id: nodeId });
+      snapRef.current = next;
+      void render(next);
+      scheduleSave();
+    },
+    [graphId, diglot, render, scheduleSave],
+  );
+
   // ── 常驻 timer 必须有停止调用(铁律)──
   useEffect(
     () => () => {
@@ -598,6 +616,7 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
           graphId={graphId}
           onSemanticCommit={handleSemanticCommit}
           onTreeCommit={handleTreeCommit}
+          onToggleCollapsed={handleToggleCollapsed}
         />
       </div>
       {/* 分隔条:拖动改宽度 */}
