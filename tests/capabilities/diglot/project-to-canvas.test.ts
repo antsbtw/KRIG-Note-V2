@@ -16,6 +16,7 @@ import {
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
 import { BLOCK_VISUAL_SPEC } from '../../../src/lib/visual-spec/block-visual-spec';
+import { isCjk } from '../../../src/lib/atom-serializers/svg/font-loader';
 import { fileToSnapshot, emptyMindFile } from '@capabilities/diglot-model/mind-file';
 import { notImplementedEngine as engine } from '@capabilities/diglot-model/engine-contract';
 import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
@@ -290,9 +291,31 @@ describe('投影:稀疏覆盖全量', () => {
     const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
     const hit = inst.find((i) => i.id === branch.id)!;
     const text = JSON.stringify(hit.doc);
-    // ⭐ 带 ⊕ 与子节点数 —— 用户才知道「下面还有东西」
-    expect(text).toContain('⊕');
-    expect(text).toContain('2');
+    // ⭐ 带子节点数 —— 用户才知道「下面还有东西」
+    expect(text).toContain('（2）');
+  });
+
+  it('⭐⭐ 标记字符必须在打包字体覆盖范围内(真机踩过:⊕ 渲染成空白)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    const label = String(
+      (inst.find((i) => i.id === branch.id)!.doc as {
+        payload: { content: { content: { text: string }[] }[] };
+      }).payload.content[0].content[0].text,
+    );
+
+    // ⚠️ 每个字符要么是 CJK(走中文字体)、要么是 ASCII(走西文字体) ——
+    //   两者之外的符号(如 ⊕ U+2295)会落到西文字体但**没有字形** → 空白。
+    for (const ch of label) {
+      const code = ch.codePointAt(0) ?? 0;
+      const ok = isCjk(ch) || code < 0x7f;
+      expect(ok, `字符 ${JSON.stringify(ch)}(U+${code.toString(16).toUpperCase()}) 可能无字形`).toBe(
+        true,
+      );
+    }
   });
 
   it('⚠️ 标记只影响显示,不进 S 层 content', () => {
@@ -302,7 +325,7 @@ describe('投影:稀疏覆盖全量', () => {
     g.set(branch.id, { collapsed: true });
     projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
     // 模型里的文字没被改写
-    expect(JSON.stringify(s.s.nodes.find((n) => n.id === branch.id)!.content)).not.toContain('⊕');
+    expect(JSON.stringify(s.s.nodes.find((n) => n.id === branch.id)!.content)).not.toContain('（');
   });
 
   it('⚠️ 没有子节点的节点即使标了 collapsed 也不加标记(不骗人)', () => {
@@ -311,7 +334,7 @@ describe('投影:稀疏覆盖全量', () => {
     const g = new Map(s.g);
     g.set(leaf.id, { collapsed: true });
     const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
-    expect(JSON.stringify(inst.find((i) => i.id === leaf.id)!.doc)).not.toContain('⊕');
+    expect(JSON.stringify(inst.find((i) => i.id === leaf.id)!.doc)).not.toContain('（');
   });
 
   it('⭐ 展开态原样透传富文本(不经文本拍平)', () => {
