@@ -105,6 +105,47 @@ describe('投影:稀疏覆盖全量', () => {
     expect(s.s.edges.length, '布局用的 edge 不得污染数据模型').toBe(0);
   });
 
+  it('⭐⭐ 节点尺寸跟着文字走,不是一刀切', () => {
+    // ⚠️ 真机实测(用户指出):六个短标签节点全部同宽同高 ——
+    //   因为 estimateWidth 的下限(120)把它们**全部吞掉**了。
+    //   一刀切既难看,也让树的层次感消失:长标题和短叶子该一眼看出差别。
+    const src = [
+      'mindmap',
+      '  root((知识管理))',
+      '    很长的一个分支标题',
+      '      短',
+      '    B',
+    ].join('\n');
+    const parsed = engine.parseMermaidMindmap(src);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const req = buildLayoutRequest(parsed.value, new Map());
+    const byId = new Map(req.nodes.map((n) => [n.id, n]));
+    const widthOf = (label: string): number => {
+      const node = parsed.value.nodes.find(
+        (n) => JSON.stringify(n.content).includes(label),
+      );
+      return byId.get(node!.id)!.width;
+    };
+
+    // ⭐ 长标签必须比短标签宽 —— 这是「跟着内容走」的最小判据
+    expect(widthOf('很长的一个分支标题')).toBeGreaterThan(widthOf('知识管理'));
+    expect(widthOf('知识管理')).toBeGreaterThan(widthOf('短'));
+    // ⚠️ 且不许所有节点同宽(一刀切的机器化描述)
+    const widths = new Set(req.nodes.map((n) => n.width));
+    expect(widths.size, '不同长度的标签不该产出同一个宽度').toBeGreaterThan(1);
+  });
+
+  it('CJK 比同数量 ASCII 宽(全宽 vs 窄字)', () => {
+    const src = ['mindmap', '  root((中中中中))', '    aaaa'].join('\n');
+    const parsed = engine.parseMermaidMindmap(src);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const req = buildLayoutRequest(parsed.value, new Map());
+    const [cjk, ascii] = req.nodes;
+    expect(cjk.width).toBeGreaterThan(ascii.width);
+  });
+
   it('⚠️ 布局结果缺节点 → fail loud,不静默给 (0,0)', () => {
     const s = snap();
     // 故意给一个空布局
