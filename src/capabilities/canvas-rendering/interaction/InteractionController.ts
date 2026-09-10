@@ -1657,6 +1657,25 @@ export class InteractionController {
     inst.size.h = newH;
     inst.position.x = newCx - newW / 2;
     inst.position.y = newCy - newH / 2;
+
+    // ⭐⭐ 手动调过高度 → 锁住,此后不再被文字内容自动撑高。
+    //
+    // ⚠️ 这半边**一直没接上**:`size_lock` 全仓只有「读」(编辑器 heightFixed)
+    // 和「持久化」(canvas-store),**没有任何地方写它** —— 而
+    // `adaptTextNodeSizeToContent` 唯一的保护就是 `if (inst.size_lock?.h) return`,
+    // 保护条件恒为假 = 形同虚设。几何 shape 放开撑高后,没有这段就会变成
+    // 「用户拖高 → 下次渲染又被内容改回去」,看起来像拖动没生效。
+    //
+    // ⭐ 不是新语义:`adaptTextNodeSizeToContent` 的注释本来就写着
+    // 「size_lock.h=true 时跳过(用户已固定高度,如 Sticky 或**拖过 N/S handle**)」,
+    // 这里只是把设计里说好、却没实现的那半边补上。
+    //
+    // ⚠️ 只有**真的改到高**才锁(角 handle 等比缩放同时改宽高,也算):
+    //    纯 E/W 拖动只改宽,不该顺手把高锁死。
+    if (dir.y !== 0 || isCorner) {
+      inst.size_lock = { ...inst.size_lock, h: true };
+    }
+
     this.nodeRenderer.update(inst);
     this.handlesOverlay.setTarget(this.nodeRenderer.get(r.instanceId) ?? null);
     this.refreshOverlays();

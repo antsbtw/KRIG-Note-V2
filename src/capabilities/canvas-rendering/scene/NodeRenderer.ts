@@ -356,16 +356,27 @@ export class NodeRenderer {
     });
 
     // 文字层统一:带 doc 的几何 shape → 在其 textBox(缺省整框)叠一条文字层.
-    // 几何层先渲(out.group),文字层叠在其上(z 更高).几何 shape textGrows
-    // 缺省 false → 文字溢出可见,不撑高几何.
+    // 几何层先渲(out.group),文字层叠在其上(z 更高).
+    //
+    // ⭐⭐ **几何 shape 也撑高**(用户拍板:「shape 是服务于文字的,不是一个固定的长宽比」)。
+    // 旧版这里硬编码 `false` —— 而 contentH 在 fillTextLayer 里**本来就无条件算好了**,
+    // 只是算完不用。四个 basic shape 全是 `aspect: variable`,没有固定比例会被破坏。
+    //
+    // ⚠️ 用户手动拖过高度的节点不会被撑(size_lock.h),见 applyResize 的「拖过就锁」。
+    //
+    // ⚠️ 撑高只管**高**不管宽:宽度仍由用户拖 / 调用方给。文字过宽走换行
+    //    (fillTextLayer 传了 width,渲染层按 textBox 宽度 wrap)。
     if (this.atomBridge && hasTextLayer(inst, shape)) {
       const tb = evalPath.textBox ?? { l: 0, t: 0, r: size.w, b: size.h };
+      // ⚠️ textBox 是**内缩**的(圆角矩形按 rad 内缩),撑高时要把上下内缩量加回去,
+      //    否则按 contentH 定高会让文字正好顶到圆角边缘、下缘被裁。
+      const insetY = Math.max(0, tb.t) + Math.max(0, size.h - tb.b);
       this.fillTextLayer(inst, out.group, {
         x: tb.l,
         y: tb.t,
         w: Math.max(1, tb.r - tb.l),
         h: Math.max(1, tb.b - tb.t),
-      }, false);
+      }, shape.textGrows ?? true, insetY);
     }
 
     // outer/inner 嵌套实现 bbox 中心旋转
@@ -526,13 +537,16 @@ export class NodeRenderer {
    *
    * @param region 文字层在 innerGroup 局部坐标的子区域 { x, y, w, h }
    *               (几何 shape = evalPath.textBox;文字框 = 整框 {0,0,w,h})
-   * @param autogrow 内容溢出是否撑高节点(shape.textGrows;文字框 true / 几何 shape false)
+   * @param autogrow 内容溢出是否撑高节点(shape.textGrows,缺省 true)
+   * @param insetY 文字区相对整框的**上下内缩总量**(几何 shape 的 textBox 内缩;
+   *               文字框为 0)。撑高时要加回去,否则文字会顶到边缘被裁。
    */
   private fillTextLayer(
     inst: Instance,
     innerGroup: THREE.Group,
     region: { x: number; y: number; w: number; h: number },
     autogrow: boolean,
+    insetY = 0,
   ): void {
     if (!this.atomBridge) return;
     const safeRegion = {
@@ -611,7 +625,7 @@ export class NodeRenderer {
 
         // 3. 内容溢出 → 自适应高度(仅 autogrow=true,即文字框;几何 shape 文字溢出可见).
         if (autogrow && contentH > 0) {
-          this.adaptTextNodeSizeToContent(inst.id, current, contentH);
+          this.adaptTextNodeSizeToContent(inst.id, current, contentH + insetY);
         }
       } catch (e) {
         console.warn(`[NodeRenderer] text render failed for ${inst.id}`, e);

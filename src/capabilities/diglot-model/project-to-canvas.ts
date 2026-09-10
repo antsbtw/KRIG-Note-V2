@@ -140,18 +140,33 @@ function measureText(text: string, fontSize: number): { w: number; h: number } {
 }
 
 /**
- * 节点尺寸:**内容宽 + 内边距**,随字号缩放,只在极端处夹一下。
- * ⭐ 下限防"空标签变成一条缝";上限防"一行长文把整图撑爆"(超出走换行,后续做)。
+ * 节点尺寸:**给 ELK 的初始估算**,不是最终尺寸。
+ *
+ * ⭐⭐ **真实高度由渲染层撑**(NodeRenderer.adaptTextNodeSizeToContent):
+ * 那里量的是**真正渲染出来的内容**(atomsToSvg 的 bbox),行内公式、折行、
+ * 将来任何新 inline 类型都天然算得进去。
+ *
+ * ⚠️ 所以本函数**故意不追求精确** —— 它只需要给 ELK 一个同量级的同步初值
+ * (布局是同步的,拿不到异步渲染结果)。想在这里把公式宽度也算对,
+ * 等于在 diglot 里维护第二套文字测量 —— 那正是「主题2 + 公式」溢出的根因:
+ * 测量端看不见公式(contentToText 对 mathInline 返回 ''),渲染端照画。
+ *
+ * ⭐ 估算宽了/窄了不会错位:撑高会回写真实高度。
+ * ⚠️ 但**宽度**不会被回写(撑高只管高),所以宽度估算仍要合理 ——
+ * 超过 maxW 的长文本走换行,高度随之增长,由渲染层撑开。
  */
 function nodeSize(text: string, fontSize: number): { w: number; h: number } {
   const m = measureText(text, fontSize);
   const pad = paddingFor(fontSize);
   const minW = Math.round(fontSize * 3);
   const maxW = Math.round(fontSize * 16);
-  return {
-    w: Math.max(minW, Math.min(maxW, m.w + pad.x)),
-    h: m.h + pad.y,
-  };
+  const w = Math.max(minW, Math.min(maxW, m.w + pad.x));
+
+  // ⭐ 宽度被 maxW 夹住 → 文字会折行 → 高度要按折行数估。
+  // ⚠️ 旧版高度**恒为一行**,于是长文本换了行、盒子却没长高 → 第二行溢出框外。
+  const contentW = Math.max(1, w - pad.x);
+  const lines = Math.max(1, Math.ceil(m.w / contentW));
+  return { w, h: m.h * lines + pad.y };
 }
 
 /**
@@ -230,19 +245,42 @@ export function buildLayoutRequest(s: SLayer, g: GLayer): LayoutRequest {
 // 4. ⭐⭐ 稀疏覆盖全量
 // ─────────────────────────────────────────────────────────
 
-/** 形状词表 → shape-library ref(未登记的一律回落矩形,**不报错**:形状只是外观)。 */
-function refForShape(shape: string | undefined): string {
-  switch (shape) {
-    case 'text':
-      return 'krig.basic.text';
-    case 'ellipse':
-    case 'circle':
-      return 'krig.basic.ellipse';
-    case 'rect':
-      return 'krig.basic.rect';
-    default:
-      return 'krig.basic.roundRect';
-  }
+/**
+ * ⭐⭐ 形状 → shape-library ref:**直通**,不是白名单。
+ *
+ * 用户拍板:「mind 应该可以调用画板的任何 shape」—— mind 只是画板的一个应用,
+ * 不该自带一份形状清单。所以:
+ *
+ * - 已经是完整 ref(含 `.`,如 `krig.basic.ellipse` / 将来的 `krig.flow.decision`)
+ *   → **原样透传**,shape 库新增任何形状 mind 立即可用,本文件零改动
+ * - 短名(`rect` / `circle` …)→ 查别名表,纯为 mermaid 语法和手写方便
+ * - 没给 → 默认圆角矩形
+ *
+ * ⚠️ **本函数不校验 ref 是否真的存在** —— 校验要查 ShapeRegistry,
+ * 而它的 bootstrap 用 `import.meta.glob`(Vite 专属)且是顶层副作用,
+ * 一 import 就把 diglot-model 从「node 纯环境可离线测」拖进 Vite 依赖
+ * (vitest.config 是 `environment: 'node'`,当场就跑不起来)。
+ * ⭐ 校验放在 **view 侧**(投影结果喂给画布前),那里本来就有 registry。
+ *
+ * ⚠️ 旧版是四条目 switch + `default` 静默回落成矩形 —— 用户写了库里没有的形状,
+ * 图上默默给个圆角矩形**不吭声**。那是静默兜底(违反可靠性纲领),已废。
+ */
+const SHAPE_ALIASES: Readonly<Record<string, string>> = {
+  text: 'krig.basic.text',
+  ellipse: 'krig.basic.ellipse',
+  circle: 'krig.basic.ellipse',
+  rect: 'krig.basic.rect',
+  roundRect: 'krig.basic.roundRect',
+};
+
+/** 没给形状时的默认 —— 导图节点是圆角矩形。 */
+export const DEFAULT_MIND_SHAPE_REF = 'krig.basic.roundRect';
+
+export function refForShape(shape: string | undefined): string {
+  if (!shape) return DEFAULT_MIND_SHAPE_REF;
+  // ⭐ 完整 ref 直通:库里有什么就能用什么
+  if (shape.includes('.')) return shape;
+  return SHAPE_ALIASES[shape] ?? shape;
 }
 
 /**

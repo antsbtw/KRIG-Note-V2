@@ -13,8 +13,11 @@ import {
   projectToInstances,
   isTreeLineId,
   fontSizeForDepth,
+  refForShape,
+  DEFAULT_MIND_SHAPE_REF,
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
+import { textToContent } from '@capabilities/diglot-model/mermaid-mindmap';
 import { BLOCK_VISUAL_SPEC } from '../../../src/lib/visual-spec/block-visual-spec';
 import { isCjk } from '../../../src/lib/atom-serializers/svg/font-loader';
 import { fileToSnapshot, emptyMindFile } from '@capabilities/diglot-model/mind-file';
@@ -485,3 +488,83 @@ describe('投影:稀疏覆盖全量', () => {
  * - `Instance` 的字段是结构性对齐（刻意不 import canvas-rendering 的类型，
  *   那会把 three 拖进 diglot-model），若渲染层改字段名这里不会自动红。
  */
+
+/**
+ * ⭐⭐ shape 直通 —— 「mind 应该可以调用画板的任何 shape」(用户拍板)
+ *
+ * ⚠️ 旧版是四条目 switch + default 静默回落成圆角矩形:
+ *   shape 库新增形状 mind 用不到(除非回来手改 switch),
+ *   且用户写了库里没有的形状会**默默变个样子不吭声**。
+ */
+describe('shape 直通(mind 不自带形状白名单)', () => {
+  it('⭐⭐ 完整 ref 原样透传 —— 库里新增什么就能用什么,本文件零改动', () => {
+    // 这些 ref 现在库里还没有,正是「将来新增」的模拟
+    expect(refForShape('krig.flow.decision')).toBe('krig.flow.decision');
+    expect(refForShape('krig.uml.actor')).toBe('krig.uml.actor');
+  });
+
+  it('⭐ 短名走别名表(mermaid 语法 / 手写方便)', () => {
+    expect(refForShape('circle')).toBe('krig.basic.ellipse');
+    expect(refForShape('rect')).toBe('krig.basic.rect');
+    expect(refForShape('text')).toBe('krig.basic.text');
+  });
+
+  it('⚠️ 不认识的短名**不再静默回落成圆角矩形**(那是静默兜底)', () => {
+    // 原样透出去,由 view 侧对着 registry fail loud —— 而不是在这里假装没事
+    expect(refForShape('菱形')).toBe('菱形');
+    expect(refForShape('菱形')).not.toBe(DEFAULT_MIND_SHAPE_REF);
+  });
+
+  it('⭐ 没给形状才用默认圆角矩形', () => {
+    expect(refForShape(undefined)).toBe(DEFAULT_MIND_SHAPE_REF);
+  });
+});
+
+/**
+ * ⭐⭐ 折行高度 —— 长文本换行后盒子要跟着长高
+ *
+ * ⚠️ 旧版 measureText 高度**恒为一行**,而宽度被 maxW 夹住 →
+ *   渲染层老老实实换行,盒子却还是一行高 → 第二行溢出到框外。
+ */
+describe('节点尺寸估算(给 ELK 的初值)', () => {
+  const H1 = BLOCK_VISUAL_SPEC.headings.h1.fontSize;
+
+  it('⭐⭐ 长文本折行 → 高度必须**大于**单行', () => {
+    const s = snap();
+    const short = s.s.nodes[0];
+    const inst1 = nodesOnly(
+      projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))),
+    ).find((i) => i.id === short.id)!;
+
+    // 造一个远超 maxW(16 字宽)的标签
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n) =>
+        n.id === short.id
+          ? { ...n, content: textToContent('这是一段很长很长的标题会被折成好几行来显示') }
+          : n,
+      ),
+    };
+    const inst2 = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    ).find((i) => i.id === short.id)!;
+
+    expect(inst2.size!.h, '长文本折行了,盒子高度却没变 → 文字会溢出框外').toBeGreaterThan(
+      inst1.size!.h,
+    );
+  });
+
+  it('⚠️ 宽度仍被 maxW 夹住(靠折行消化,不是把图横向撑爆)', () => {
+    const s = snap();
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n, i) =>
+        i === 0 ? { ...n, content: textToContent('极长'.repeat(60)) } : n,
+      ),
+    };
+    const inst = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    )[0];
+    expect(inst.size!.w).toBeLessThanOrEqual(Math.round(H1 * 16) + Math.round(H1 * 1.6));
+  });
+});

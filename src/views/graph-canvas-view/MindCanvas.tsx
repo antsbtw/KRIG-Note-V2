@@ -209,6 +209,18 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
         spacing: { node: 36, layer: 90 },
       });
       const projected = diglot.projectToInstances(snap.s, snap.g, result);
+      // ⭐ shape ref 校验放在这里(不在 diglot-model):registry 的 bootstrap 用
+      //   import.meta.glob(Vite 专属),diglot-model 要保持 node 纯环境可离线测。
+      // ⚠️ fail loud —— 旧版在投影里 default 静默回落成圆角矩形,用户写了库里没有的
+      //   形状,图上默默变个样子还不吭声(可靠性纲领:不静默兜底)。
+      for (const inst of projected) {
+        if (inst.type !== 'shape' || !inst.ref) continue;
+        if (shapeApi.shapes.get(inst.ref)) continue;
+        throw new Error(
+          `[mind] 形状 '${inst.ref}' 不在 shape 库里(节点 ${inst.id})。` +
+            `可用:${shapeApi.shapes.list().map((x) => x.id).join(', ') || '(库是空的)'}`,
+        );
+      }
       // ⭐ 记下本次投影的位置,供下次拖动回调比对
       const posMap = new Map<string, { x: number; y: number; w: number; h: number }>();
       for (const p of projected) {
