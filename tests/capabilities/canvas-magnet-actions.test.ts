@@ -18,6 +18,8 @@ import {
   resolveMagnetActions,
   hitTestMagnetAction,
   magnetActionHitRadiusWorld,
+  radiusFor,
+  labelFor,
   resolveMagnetDragOut,
   MAGNET_ACTION_RADIUS_PX,
   MAGNET_ACTION_HIT_SLOP_PX,
@@ -177,3 +179,50 @@ describe('③ 拖出落点分流', () => {
  * | 重叠取最近 | 改成取第一个命中的 | 红 |
  * | 落空白给 world | 改成 closest 为 null 时返回 null | 红 |
  */
+
+/**
+ * 圆内数字(count)—— 几何与命中口径
+ *
+ * ⚠️ 这里**测不到 three**(vitest 是 node 环境,MagnetActionsOverlay 画笔部分不可测),
+ * 所以只测纯函数层:半径推导 / 文字裁剪 / 命中半径跟随。
+ * 画笔那半靠真机看。
+ */
+describe('操作点圆内数字', () => {
+  it('⭐ 没 count 时半径不变(不影响既有操作点)', () => {
+    expect(radiusFor({})).toBe(MAGNET_ACTION_RADIUS_PX);
+    expect(labelFor({})).toBe('');
+  });
+
+  it('⭐⭐ 有 count 时圆必须变大 —— 否则数字溢出到圆外', () => {
+    expect(radiusFor({ count: 3 })).toBeGreaterThan(MAGNET_ACTION_RADIUS_PX);
+    // 位数越多圆越大
+    expect(radiusFor({ count: 12 })).toBeGreaterThan(radiusFor({ count: 3 }));
+    expect(radiusFor({ count: 123 })).toBeGreaterThan(radiusFor({ count: 12 }));
+  });
+
+  it('⚠️ 超过 99 收成 `99+`,圆不会被撑到无限大', () => {
+    expect(labelFor({ count: 99 })).toBe('99');
+    expect(labelFor({ count: 100 })).toBe('99+');
+    expect(labelFor({ count: 9999 })).toBe('99+');
+    // 三位以上都用同一个半径,不随数值继续涨
+    expect(radiusFor({ count: 100 })).toBe(radiusFor({ count: 9999 }));
+  });
+
+  it('⭐⭐ 命中半径**跟随放大后的圆** —— 否则「画得大、点边缘点不中」', () => {
+    const withCount = magnetActionHitRadiusWorld(1, { count: 12 });
+    const plain = magnetActionHitRadiusWorld(1);
+    expect(withCount).toBeGreaterThan(plain);
+    // 与画出来的半径同口径(圆半径 + slop)
+    expect(withCount).toBe(radiusFor({ count: 12 }) + MAGNET_ACTION_HIT_SLOP_PX);
+  });
+
+  it('⭐ count 经 resolve 透传给 overlay(漏传 = 圆里永远没数字)', () => {
+    const resolved = resolveMagnetActions(
+      'n1',
+      [{ magnet: 'E', icon: 'plus', count: 7 }],
+      [{ magnetId: 'E', x: 10, y: 20 }],
+    );
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].count).toBe(7);
+  });
+});

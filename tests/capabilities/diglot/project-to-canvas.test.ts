@@ -280,7 +280,7 @@ describe('投影:稀疏覆盖全量', () => {
     expect(rootInst.text_size).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
   });
 
-  it('⭐⭐ 折叠的节点带可辨认标记(否则与叶子长得一样)', () => {
+  it('⭐⭐ 折叠的节点带可辨认标记 —— 数字在圆圈里(magnetActions.count)', () => {
     const s = snap();
     const branch = s.s.nodes.find(
       (n) => s.s.nodes.filter((k) => k.parent === n.id).length >= 2,
@@ -290,41 +290,79 @@ describe('投影:稀疏覆盖全量', () => {
 
     const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
     const hit = inst.find((i) => i.id === branch.id)!;
-    const text = JSON.stringify(hit.doc);
-    // ⭐ 带子节点数 —— 用户才知道「下面还有东西」
-    expect(text).toContain('（2）');
+
+    // ⭐ 折叠 → 圆圈是 plus(点了展开)且**带子节点数**
+    const action = hit.magnetActions?.[0];
+    expect(action?.icon).toBe('plus');
+    expect(action?.count).toBe(2);
   });
 
-  it('⭐⭐ 标记字符必须在打包字体覆盖范围内(真机踩过:⊕ 渲染成空白)', () => {
+  it('⭐⭐ 展开态**不给** count —— 子节点就在画布上,再标数字是噪音', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const action = inst.find((i) => i.id === branch.id)!.magnetActions?.[0];
+    expect(action?.icon).toBe('minus');
+    expect(action?.count).toBeUndefined();
+  });
+
+  it('⭐⭐ 折叠**不再改写节点文本**(旧 `（N）` 后缀会把富文本拍平成纯文本)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+
+    const expanded = nodesOnly(
+      projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))),
+    ).find((i) => i.id === branch.id)!;
+
+    g.set(branch.id, { collapsed: true });
+    const collapsed = nodesOnly(
+      projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))),
+    ).find((i) => i.id === branch.id)!;
+
+    // ⭐ 折叠前后 doc **完全一致** —— 这正是把数字挪进圆圈换来的:
+    //   旧做法要 textToContent(`${label}（N）`) 重造纯文本 doc,公式/格式/图片全丢。
+    expect(JSON.stringify(collapsed.doc)).toBe(JSON.stringify(expanded.doc));
+    // ⚠️ 且不含任何后缀标记(防有人「顺手」把 `（N）` 加回来)
+    expect(JSON.stringify(collapsed.doc)).not.toContain('（');
+  });
+
+  it('⭐⭐ 圆圈数字**不走打包字体**,所以不受字形覆盖限制(当年 ⊕ 渲染成空白那个坑)', () => {
+    // ⚠️ 这条守的是「为什么现在敢用数字」:
+    //   打包字体(atomsToSvg / font-loader)只覆盖 CJK 与 ASCII —— `⊕`(U+2295)
+    //   两头不沾 → 渲染成空白。当年因此被迫改用全角 `（N）`。
+    // ⭐ 数字挪进圆圈后走的是 MagnetActionsOverlay 的 canvas fillText → CanvasTexture,
+    //   用**系统字体**,与打包字体无关。这里钉住两件事:
+    //   ① count 是数字(不是符号),② 节点标签本身仍在打包字体覆盖范围内。
     const s = snap();
     const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
     const g = new Map(s.g);
     g.set(branch.id, { collapsed: true });
     const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
-    const label = String(
-      (inst.find((i) => i.id === branch.id)!.doc as {
-        payload: { content: { content: { text: string }[] }[] };
-      }).payload.content[0].content[0].text,
-    );
+    const hit = inst.find((i) => i.id === branch.id)!;
 
-    // ⚠️ 每个字符要么是 CJK(走中文字体)、要么是 ASCII(走西文字体) ——
-    //   两者之外的符号(如 ⊕ U+2295)会落到西文字体但**没有字形** → 空白。
+    expect(typeof hit.magnetActions?.[0]?.count).toBe('number');
+
+    // ⚠️ 标签(走打包字体那条路)每个字符仍要么 CJK 要么 ASCII
+    const label = String(
+      (hit.doc as { payload: { content: { content: { text: string }[] }[] } })
+        .payload.content[0].content[0].text,
+    );
     for (const ch of label) {
       const code = ch.codePointAt(0) ?? 0;
-      const ok = isCjk(ch) || code < 0x7f;
-      expect(ok, `字符 ${JSON.stringify(ch)}(U+${code.toString(16).toUpperCase()}) 可能无字形`).toBe(
-        true,
-      );
+      expect(
+        isCjk(ch) || code < 0x7f,
+        `字符 ${JSON.stringify(ch)}(U+${code.toString(16).toUpperCase()}) 可能无字形`,
+      ).toBe(true);
     }
   });
 
-  it('⚠️ 标记只影响显示,不进 S 层 content', () => {
+  it('⚠️ 折叠标记不进 S 层 content(模型文字永远不被显示逻辑改写)', () => {
     const s = snap();
     const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
     const g = new Map(s.g);
     g.set(branch.id, { collapsed: true });
     projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
-    // 模型里的文字没被改写
     expect(JSON.stringify(s.s.nodes.find((n) => n.id === branch.id)!.content)).not.toContain('（');
   });
 

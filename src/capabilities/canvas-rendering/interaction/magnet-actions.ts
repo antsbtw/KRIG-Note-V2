@@ -33,10 +33,44 @@ export interface MagnetAction {
   /** 既有 magnet id(N/E/S/W/START/END/...) */
   magnet: string;
   icon: MagnetActionIcon;
+  /**
+   * ⭐ 圆内显示的数字(可选)—— 如「折叠了几个分支」。
+   *
+   * ⚠️ 走 **canvas fillText → CanvasTexture**(系统字体),
+   * **不走打包字体的矢量文字层** —— 后者不覆盖 `⊕` 这类符号会渲染成空白(踩过),
+   * 而 `fillText` 用系统字体,阿拉伯数字必然有字形。
+   * (同款做法:callout 图标的 icon-raster。)
+   *
+   * ⚠️ 有 count 时圆会**自动放大**到能容纳数字(见 radiusFor),
+   * 否则两位数会溢出圆外。
+   */
+  count?: number;
 }
 
 /** 操作点半径(屏幕像素;与 HandlesOverlay 的 HANDLE_RADIUS 同量级但略大 —— 它要被点)*/
 export const MAGNET_ACTION_RADIUS_PX = 6;
+
+/**
+ * ⭐ 带数字时的圆半径 —— 按位数放大,保证数字装得下。
+ *
+ * ⚠️ 不放大的话:半径 6px 的圆里塞「12」必然溢出到圆外,看起来像脏点。
+ * 一位数 9px、两位 11px、三位及以上 13px(再多就该显示 99+ 了,见 labelFor)。
+ */
+export function radiusFor(action: { count?: number }): number {
+  if (action.count === undefined) return MAGNET_ACTION_RADIUS_PX;
+  const digits = labelFor(action).length;
+  return digits <= 1 ? 9 : digits === 2 ? 11 : 13;
+}
+
+/**
+ * 圆内文字。⚠️ 超过 99 显示 `99+` —— 三位以上会把圆撑得比节点还显眼。
+ * 返回空串 = 不画文字(没有 count)。
+ */
+export function labelFor(action: { count?: number }): string {
+  if (action.count === undefined) return '';
+  if (action.count > 99) return '99+';
+  return String(action.count);
+}
 
 /**
  * 命中容忍(屏幕像素)。
@@ -49,6 +83,8 @@ export interface ResolvedMagnetAction {
   instanceId: string;
   magnetId: string;
   icon: MagnetActionIcon;
+  /** 圆内数字(见 MagnetAction.count);undefined = 不画数字 */
+  count?: number;
   /** 世界坐标(已含节点 rotation)*/
   x: number;
   y: number;
@@ -89,7 +125,7 @@ export function resolveMagnetActions(
       );
       continue;
     }
-    out.push({ instanceId, magnetId: a.magnet, icon: a.icon, x: m.x, y: m.y });
+    out.push({ instanceId, magnetId: a.magnet, icon: a.icon, count: a.count, x: m.x, y: m.y });
   }
   return out;
 }
@@ -115,9 +151,10 @@ export function hitTestMagnetAction(
   zoom: number,
 ): ResolvedMagnetAction | null {
   if (resolved.length === 0) return null;
-  const radiusWorld = magnetActionHitRadiusWorld(zoom);
   let best: { a: ResolvedMagnetAction; d: number } | null = null;
   for (const a of resolved) {
+    // ⚠️ 半径**逐个算** —— 带数字的圆更大,统一用基准半径会「画得大、点不中边缘」
+    const radiusWorld = magnetActionHitRadiusWorld(zoom, a);
     const d = Math.hypot(world.x - a.x, world.y - a.y);
     if (d > radiusWorld) continue;
     if (!best || d < best.d) best = { a, d };
@@ -125,9 +162,13 @@ export function hitTestMagnetAction(
   return best?.a ?? null;
 }
 
-/** 命中半径换算到世界距离(zoom 兜到 0.01 防除零 —— 与 snapRadiusWorld 同款)*/
-export function magnetActionHitRadiusWorld(zoom: number): number {
-  return (MAGNET_ACTION_RADIUS_PX + MAGNET_ACTION_HIT_SLOP_PX) / Math.max(zoom, 0.01);
+/**
+ * 命中半径换算到世界距离(zoom 兜到 0.01 防除零 —— 与 snapRadiusWorld 同款)。
+ * @param action 传了就按它的实际半径算(带数字的圆更大);不传按基准半径。
+ */
+export function magnetActionHitRadiusWorld(zoom: number, action?: { count?: number }): number {
+  const r = action ? radiusFor(action) : MAGNET_ACTION_RADIUS_PX;
+  return (r + MAGNET_ACTION_HIT_SLOP_PX) / Math.max(zoom, 0.01);
 }
 
 // ─────────────────────────────────────────────────────────

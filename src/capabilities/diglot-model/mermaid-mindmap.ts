@@ -242,7 +242,7 @@ export function parseMermaidMindmap(text: string): ParseResult<SLayer> {
   // ── order:同父兄弟按出现顺序分配 lexrank ──
   const siblings = new Map<string, number[]>();
   parents.forEach((p, i) => {
-    const key = p ?? ' root';
+    const key = p ?? '\0root';
     const arr = siblings.get(key);
     if (arr) arr.push(i);
     else siblings.set(key, [i]);
@@ -314,7 +314,7 @@ function wrap(label: string, shape: MermaidShape): string {
 export function toMermaidMindmap(s: SLayer, opts?: { explicitIds?: ReadonlySet<string> }): string {
   const byParent = new Map<string, SNode[]>();
   for (const n of s.nodes) {
-    const key = n.parent ?? ' root';
+    const key = n.parent ?? '\0root';
     const arr = byParent.get(key);
     if (arr) arr.push(n);
     else byParent.set(key, [n]);
@@ -342,6 +342,6 @@ export function toMermaidMindmap(s: SLayer, opts?: { explicitIds?: ReadonlySet<s
     out.push('  '.repeat(depth + 1) + body);
     for (const c of byParent.get(n.id) ?? []) emit(c, depth + 1);
   };
-  for (const top of byParent.get(' root') ?? []) emit(top, 0);
+  for (const top of byParent.get('\0root') ?? []) emit(top, 0);
   return out.join('\n');
 }

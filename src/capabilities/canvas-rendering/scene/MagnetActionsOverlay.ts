@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { SceneManager } from './SceneManager';
 import {
-  MAGNET_ACTION_RADIUS_PX,
+  labelFor,
+  radiusFor,
   type MagnetActionIcon,
   type ResolvedMagnetAction,
 } from '../interaction/magnet-actions';
@@ -24,6 +25,10 @@ import {
  *   → mesh 顶点 1 单位 == 屏幕 1 像素(与 HandlesOverlay 同一套推导)
  * - ⭐ 记号**画几何**(线段),不走文字渲染 ——
  *   打包字体按 CJK/ASCII 分流,`⊕` 这类符号会渲染成空白宽度(刚踩过)
+ * - ⭐ **数字是唯一例外**(圆内计数):走 `canvas fillText → CanvasTexture`,
+ *   ⚠️ 用的是**系统字体**,不是那套打包字体,所以不受上面那条字形缺失影响
+ *   (同款做法:callout 的 icon-raster、TextRenderer 的 CanvasTexture)。
+ *   ⚠️ 别把它改成矢量文字层 —— 那就踩回 `⊕` 那个坑了。
  *
  * ⚠️ 节点 rotation 不参与:操作点是圆 + 轴对齐的 +/- 记号,跟着转没有意义,
  * 位置本身已由 listMagnets 处理过 rotation。
@@ -36,6 +41,12 @@ const ACTION_BORDER_PX = 1.2;         // 边框宽度(像素)
 const GLYPH_HALF_PX = 3;              // 记号半长(像素)
 const GLYPH_THICK_PX = 1.4;           // 记号线宽(像素)
 const DOT_RADIUS_PX = 2;              // 'dot' 图标的实心点半径(像素)
+
+/**
+ * ⭐ 数字纹理的**超采样倍数** —— 圆只有十几像素,1:1 画出来的数字发糊,
+ * 且用户可以放大画布看(那时纹理会被拉伸)。4× 是清晰度/显存的折中。
+ */
+const COUNT_TEXTURE_SCALE = 4;
 
 /** 比 handles(0.05)更上层 —— 操作点要能被点到,不该被别的 overlay 盖住 */
 const Z_ACTION = 0.06;
@@ -67,8 +78,12 @@ export class MagnetActionsOverlay {
   private provider: MagnetActionProvider | null = null;
   /** 当前帧解析结果(hitTest 由 InteractionController 走纯函数消费,这里只做缓存出口)*/
   private current: ResolvedMagnetAction[] = [];
-  /** mesh 池:数量随操作点数变,按 icon 重建记号 */
-  private pool: Array<{ group: THREE.Group; icon: MagnetActionIcon | null }> = [];
+  /**
+   * mesh 池:数量随操作点数变,按 **icon + 圆内数字** 重建记号。
+   * ⚠️ key 必须含数字 —— 只比 icon 的话,分支数从 3 变 5 会**留着旧纹理**
+   * (icon 没变 → 不重建),用户看到的是过期计数。
+   */
+  private pool: Array<{ group: THREE.Group; icon: MagnetActionIcon | null; label: string }> = [];
   private rafTick: number | null = null;
   private disposed = false;
 
@@ -100,13 +115,7 @@ export class MagnetActionsOverlay {
     if (this.rafTick !== null) cancelAnimationFrame(this.rafTick);
     this.rafTick = null;
     this.sceneManager.scene.remove(this.root);
-    this.root.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
-      const m = mesh.material;
-      if (Array.isArray(m)) for (const x of m) x.dispose();
-      else if (m) (m as THREE.Material).dispose();
-    });
+    this.root.traverse((obj) => disposeObject(obj));
     this.pool = [];
     this.current = [];
     this.provider = null;
@@ -135,7 +144,7 @@ export class MagnetActionsOverlay {
     while (this.pool.length < this.current.length) {
       const group = new THREE.Group();
       this.root.add(group);
-      this.pool.push({ group, icon: null });
+      this.pool.push({ group, icon: null, label: '' });
     }
 
     for (let i = 0; i < this.pool.length; i++) {
@@ -145,10 +154,12 @@ export class MagnetActionsOverlay {
         slot.group.visible = false;
         continue;
       }
-      // icon 变了才重建记号(避免每帧丢弃几何)
-      if (slot.icon !== action.icon) {
-        rebuildActionMesh(slot.group, action.icon);
+      // icon 或数字变了才重建(避免每帧丢弃几何 / 重造纹理)
+      const label = labelFor(action);
+      if (slot.icon !== action.icon || slot.label !== label) {
+        rebuildActionMesh(slot.group, action.icon, label, radiusFor(action));
         slot.icon = action.icon;
+        slot.label = label;
       }
       slot.group.position.set(action.x, action.y, Z_ACTION);
       // ⭐ 像素恒定:顶点按屏幕像素构造,scale=1/zoom 抵消 zoom
@@ -158,8 +169,18 @@ export class MagnetActionsOverlay {
   }
 }
 
-/** 重建一个操作点的 mesh:外圆边框 + 内圆底 + 记号(顶点单位 = 屏幕像素) */
-function rebuildActionMesh(group: THREE.Group, icon: MagnetActionIcon): void {
+/**
+ * 重建一个操作点的 mesh:外圆边框 + 内圆底 + 记号(顶点单位 = 屏幕像素)。
+ *
+ * @param label 圆内数字;空串 = 画 icon 记号(+/-/·),非空 = **数字取代记号**
+ * @param radius 内圆半径(带数字时会比基准半径大,见 radiusFor)
+ */
+function rebuildActionMesh(
+  group: THREE.Group,
+  icon: MagnetActionIcon,
+  label: string,
+  radius: number,
+): void {
   while (group.children.length > 0) {
     const child = group.children[0];
     group.remove(child);
@@ -170,7 +191,7 @@ function rebuildActionMesh(group: THREE.Group, icon: MagnetActionIcon): void {
   //    同样只能靠 renderOrder —— depthTest 关了之后 Z 不再参与排序。
   const border = addLayer(
     group,
-    new THREE.CircleGeometry(MAGNET_ACTION_RADIUS_PX + ACTION_BORDER_PX, 24),
+    new THREE.CircleGeometry(radius + ACTION_BORDER_PX, 24),
     ACTION_BORDER,
     0,
   );
@@ -178,11 +199,18 @@ function rebuildActionMesh(group: THREE.Group, icon: MagnetActionIcon): void {
 
   const fill = addLayer(
     group,
-    new THREE.CircleGeometry(MAGNET_ACTION_RADIUS_PX, 24),
+    new THREE.CircleGeometry(radius, 24),
     ACTION_FILL,
     1,
   );
   fill.position.z = -0.001;
+
+  // ⭐ 有数字就画数字,**取代** +/- 记号 —— 两者叠在同一个小圆里会糊成一团。
+  //    (语义不丢:折叠态才有数字,数字本身就表达「点开有 N 个」。)
+  if (label) {
+    addCountLabel(group, label, radius);
+    return;
+  }
 
   // ⭐ 记号画几何(横/竖线段),不用文字 —— 见文件头注释
   if (icon === 'dot') {
@@ -204,6 +232,53 @@ function rebuildActionMesh(group: THREE.Group, icon: MagnetActionIcon): void {
       2,
     );
   }
+}
+
+/**
+ * ⭐ 圆内数字:canvas fillText → CanvasTexture → 贴在一个方片上。
+ *
+ * ⚠️ 走**系统字体**(`fillText` 用的是浏览器/OS 字体栈),阿拉伯数字必然有字形 ——
+ * 这正是它能绕开打包字体字形缺失(`⊕` 空白)的原因。别改成矢量文字层。
+ *
+ * ⚠️ `document` 在这里是安全的:overlay 只在 renderer 进程构造(three 已经要 WebGL),
+ * 纯函数判定层(magnet-actions.ts)刻意不含这段,才能在 node 环境单测。
+ */
+function addCountLabel(group: THREE.Group, label: string, radius: number): void {
+  // 纹理边长 = 圆直径(方片内切于圆),再按超采样倍数放大
+  const sidePx = Math.ceil(radius * 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = sidePx * COUNT_TEXTURE_SCALE;
+  canvas.height = sidePx * COUNT_TEXTURE_SCALE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    // ⚠️ 不静默:拿不到 2d context 说明环境异常,画个记号也不对,直接说出来
+    console.warn('[MagnetActionsOverlay] 取不到 2d context,圆内数字画不出');
+    return;
+  }
+
+  // ⚠️ 字号按**位数**收:'99+' 三字符要比单字符小,否则撑出圆外
+  const fontPx = sidePx * COUNT_TEXTURE_SCALE * (label.length >= 3 ? 0.42 : 0.62);
+  ctx.font = `600 ${fontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  ctx.fillStyle = '#2E5C8A'; // = ACTION_GLYPH,与记号同色
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter; // ⚠️ 非 2 次幂尺寸,mipmap 会报警且没必要
+  texture.magFilter = THREE.LinearFilter;
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(sidePx, sidePx),
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true, // ⚠️ 少了它数字周围是一圈黑底方块
+      depthTest: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  mesh.renderOrder = ACTION_RENDER_ORDER + 2; // 与记号同层(记号和数字互斥)
+  group.add(mesh);
 }
 
 /**
@@ -231,6 +306,16 @@ function disposeObject(obj: THREE.Object3D): void {
   const mesh = obj as THREE.Mesh;
   if (mesh.geometry) mesh.geometry.dispose();
   const m = mesh.material;
-  if (Array.isArray(m)) for (const x of m) x.dispose();
-  else if (m) (m as THREE.Material).dispose();
+  if (Array.isArray(m)) for (const x of m) disposeMaterial(x);
+  else if (m) disposeMaterial(m as THREE.Material);
+}
+
+/**
+ * ⚠️ `material.dispose()` **不释放它的贴图** —— 数字用的 CanvasTexture 每次
+ * 计数变化都会重造一张,不单独 dispose 就是逐次泄漏显存。
+ */
+function disposeMaterial(m: THREE.Material): void {
+  const map = (m as THREE.MeshBasicMaterial).map;
+  if (map) map.dispose();
+  m.dispose();
 }

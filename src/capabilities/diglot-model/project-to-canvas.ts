@@ -18,7 +18,7 @@
  */
 
 import type { GLayer, NodeId, SLayer, SNode } from './types';
-import { contentToText, textToContent } from './mermaid-mindmap';
+import { contentToText } from './mermaid-mindmap';
 import { BLOCK_VISUAL_SPEC } from '../../lib/visual-spec/block-visual-spec';
 
 // ─────────────────────────────────────────────────────────
@@ -50,8 +50,16 @@ export interface ProjectedInstance {
    *
    * ⚠️ 图标反映**当前状态下点它会发生什么**:已折叠挂 `plus`(点了展开),
    * 展开挂 `minus`(点了折叠)。与 `-`/`+` 两键各司其职的语义一致。
+   *
+   * ⭐ `count` = 圆圈里显示的数字(折叠了几个直接子节点),**只在折叠态给**。
+   * ⚠️ 这个字段必须在这里声明 —— 本类型是与 canvas-rendering 的**结构性镜像**,
+   * 漏声明的字段会在 view 侧适配时被**静默丢掉**(TS 结构类型不会报错)。
    */
-  readonly magnetActions?: ReadonlyArray<{ magnet: string; icon: 'plus' | 'minus' | 'dot' }>;
+  readonly magnetActions?: ReadonlyArray<{
+    magnet: string;
+    icon: 'plus' | 'minus' | 'dot';
+    count?: number;
+  }>;
   /**
    * ⭐ 树连线的两端(父 → 子)。
    * 走 magnet 而非固定坐标 —— 这样**拖动节点时线自动跟随**,
@@ -176,7 +184,7 @@ function depthMap(s: SLayer): Map<NodeId, number> {
 function visibleNodes(s: SLayer, g: GLayer): SNode[] {
   const byParent = new Map<string, SNode[]>();
   for (const n of s.nodes) {
-    const k = n.parent ?? ' root';
+    const k = n.parent ?? '\0root';
     const arr = byParent.get(k);
     if (arr) arr.push(n);
     else byParent.set(k, [n]);
@@ -188,7 +196,7 @@ function visibleNodes(s: SLayer, g: GLayer): SNode[] {
     if (g.get(n.id)?.collapsed === true) return;
     for (const c of byParent.get(n.id) ?? []) walk(c);
   };
-  for (const top of byParent.get(' root') ?? []) walk(top);
+  for (const top of byParent.get('\0root') ?? []) walk(top);
   return out;
 }
 
@@ -270,34 +278,44 @@ export function projectToInstances(
       );
     }
     const label = contentToText(n.content);
-    // ⭐ 折叠标记:折叠的节点在画布上**与叶子长得一样** —— 看不出「下面还有东西」。
-    //   标签后缀子节点数,让它可辨认。
+    // ⭐ 折叠的节点在画布上**与叶子长得一样** —— 看不出「下面还有东西」。
+    //   解法:折叠时把**子节点数显示在连接点圆圈里**(magnetActions.count),
+    //   用户一眼看到「点开有几个分支」。
     //
-    // ⚠️⚠️ **标记字符必须在打包字体的覆盖范围内**(真机踩过):
-    //   起初用 `⊕`(U+2295)—— 它既不在 CJK 区(font-loader.isCjk 只认
-    //   U+4E00-9FFF / U+3400-4DBF / U+3000-303F / U+FF00-FFEF)也不是西文,
-    //   于是走西文字体、而那套字体**没有这个字形** → 渲染成一段空白,
-    //   看起来像「文字和标记之间有个大空隙」。
-    // ⭐ 改用**全角括号 + 数字**:全角括号在 U+FF00-FFEF(isCjk 认),
-    //   数字是西文基本字符,两者都必然有字形。
+    // ⚠️⚠️ 曾经的做法是**在标签后缀 `（N）`**,已废弃,别改回去 —— 两个理由:
+    //   ① 数字进圆圈后,后缀是**重复信息**,还把节点撑宽、改变布局;
+    //   ② 后缀必须走 `textToContent(shown)` 重造文本 doc,
+    //      **折叠期间富文本(公式/格式/图片)会被拍平成纯文本**。
+    //   现在 doc 原样透传,折叠不再损失任何内容。
+    //
+    // ⚠️ 圆圈里的数字**不受打包字体字形缺失影响**(当年 `⊕` 渲染成空白那个坑):
+    //   它走 canvas fillText → CanvasTexture,用的是**系统字体**,不是那套打包字体。
     const kidCount = s.nodes.filter((x) => x.parent === n.id).length;
     const isCollapsed = entry?.collapsed === true && kidCount > 0;
-    const shown = isCollapsed ? `${label}（${kidCount}）` : label;
     return {
       id: n.id,
       type: 'shape' as const,
       ref: refForShape(entry?.shape),
       // ⚠️ 坐标量化为整数(00 §4);G 层来的本已是整数,自动布局的可能带小数
       position: { x: Math.round(p.x), y: Math.round(p.y) },
-      size: nodeSize(shown, fontSizeForDepth(depths.get(n.id) ?? 0)),
+      size: nodeSize(label, fontSizeForDepth(depths.get(n.id) ?? 0)),
       // ⭐ 字号透传给渲染层(NodeRenderer 读 inst.text_size 覆盖 baseFontSize)
       text_size: fontSizeForDepth(depths.get(n.id) ?? 0),
-      // ⚠️ 折叠时用带标记的文本;否则原样透传富文本(公式/格式/图片要保住)
-      doc: isCollapsed ? textToContent(shown) : n.content,
+      // ⭐ 原样透传富文本 —— 折叠与否都不动内容(公式/格式/图片保住)
+      doc: n.content,
       ...(entry?.color ? { style_overrides: { fill: { color: entry.color } } } : {}),
-      // ⭐ 有子节点才挂操作点 —— 叶子没得折,挂了会骗人(与折叠标记同一条规矩)
+      // ⭐ 有子节点才挂操作点 —— 叶子没得折,挂了会骗人
+      // ⚠️ `count` **只在折叠态给**:展开时子节点自己就在画布上,再标数字是噪音
       ...(kidCount > 0
-        ? { magnetActions: [{ magnet: 'E', icon: isCollapsed ? 'plus' as const : 'minus' as const }] }
+        ? {
+            magnetActions: [
+              {
+                magnet: 'E',
+                icon: isCollapsed ? ('plus' as const) : ('minus' as const),
+                ...(isCollapsed ? { count: kidCount } : {}),
+              },
+            ],
+          }
         : {}),
     };
   });
