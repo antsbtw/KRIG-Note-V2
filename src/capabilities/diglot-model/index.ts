@@ -17,7 +17,7 @@
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import type { DiglotModelApi } from './types';
 import { applyAction, pinnedCount } from './apply-action';
-import { treeToNoteDoc, noteDocToTree } from './note-projection';
+import { treeToNoteDoc, noteDocToTree, rootTitleOf } from './note-projection';
 import { emptyMindFile, fileToSnapshot, snapshotToFile } from './mind-file';
 import {
   buildLayoutRequest,
@@ -40,6 +40,7 @@ const api: DiglotModelApi = {
   resolveDropTarget,
   treeToNoteDoc,
   noteDocToTree,
+  rootTitleOf,
 };
 
 console.info('[diglot-model] alive | S⇄G 双向同步内核(mind v0)');

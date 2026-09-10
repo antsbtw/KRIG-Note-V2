@@ -6,10 +6,26 @@
  * 本文件验这条同构真的成立。
  */
 import { describe, it, expect } from 'vitest';
-import { treeToNoteDoc, noteDocToTree } from '@capabilities/diglot-model/note-projection';
+import {
+  treeToNoteDoc,
+  noteDocToTree,
+  noteFormForDepth,
+  depthForNoteForm,
+  rootTitleOf,
+} from '@capabilities/diglot-model/note-projection';
 import { emptyMindFile, fileToSnapshot } from '@capabilities/diglot-model/mind-file';
 import { contentToText } from '@capabilities/diglot-model/mermaid-mindmap';
 import type { SLayer, SNode } from '@capabilities/diglot-model/types';
+
+function asNode(form: { type: 'heading' | 'paragraph'; level?: number; indent?: number }) {
+  return {
+    type: form.type,
+    attrs: {
+      ...(form.level !== undefined ? { level: form.level } : {}),
+      ...(form.indent !== undefined ? { indent: form.indent } : {}),
+    },
+  };
+}
 
 function snap() {
   const r = fileToSnapshot(emptyMindFile());
@@ -55,6 +71,62 @@ describe('树 → note block 序列', () => {
     expect(ids.every((i) => typeof i === 'string' && i.length > 0)).toBe(true);
     expect(new Set(ids).size, 'id 不重复').toBe(ids.length);
     for (const n of s.s.nodes) expect(ids).toContain(n.id);
+  });
+});
+
+describe('⭐⭐ 层级对应表(单一真源)', () => {
+  it('深度 0~5 → h1~h6', () => {
+    for (let d = 0; d < 6; d++) {
+      expect(noteFormForDepth(d)).toEqual({ type: 'heading', level: d + 1 });
+    }
+  });
+
+  it('⭐ h6 之后用 indent 递进(接上 note 既有缩进机制,不发明新东西)', () => {
+    expect(noteFormForDepth(6)).toEqual({ type: 'paragraph', indent: 1 });
+    expect(noteFormForDepth(7)).toEqual({ type: 'paragraph', indent: 2 });
+    expect(noteFormForDepth(9)).toEqual({ type: 'paragraph', indent: 4 });
+  });
+
+  it('⭐⭐ 正逆向严格互逆 —— 「定义好对应关系,怎么变都对得上」', () => {
+    for (let d = 0; d < 12; d++) {
+      const form = noteFormForDepth(d);
+      const back = depthForNoteForm({
+        type: form.type,
+        attrs: {
+          ...(form.level !== undefined ? { level: form.level } : {}),
+          ...(form.indent !== undefined ? { indent: form.indent } : {}),
+        },
+      });
+      expect(back, `深度 ${d} 往返后应回到自己`).toBe(d);
+    }
+  });
+
+  it('⭐ 层级越深级别数越大(不许倒挂)', () => {
+    for (let d = 0; d < 11; d++) {
+      expect(depthForNoteForm(asNode(noteFormForDepth(d)))).toBeLessThan(
+        depthForNoteForm(asNode(noteFormForDepth(d + 1))),
+      );
+    }
+  });
+});
+
+describe('⭐ 标题即 root(01 §3.4)', () => {
+  it('root 的文字就是文档标题', () => {
+    const s = snap();
+    expect(rootTitleOf(s.s)).toBe('主题');
+  });
+
+  it('改 root 的文字 = 改标题(不是两份数据)', () => {
+    const s = snap();
+    const doc = treeToNoteDoc(s.s);
+    const blocks = [...doc.payload.content] as Record<string, unknown>[];
+    (blocks[0] as { content: unknown[] }).content = [{ type: 'text', text: '新标题' }];
+    const t = noteDocToTree({ format: 'pm-doc-json', payload: { type: 'doc', content: blocks } });
+    expect(rootTitleOf(t)).toBe('新标题');
+  });
+
+  it('⚠️ 没有 root / 标题为空 → null(调用侧据此保留原标题,不写空)', () => {
+    expect(rootTitleOf({ nodes: [], edges: [], spans: [] })).toBeNull();
   });
 });
 

@@ -72,6 +72,43 @@
   color: #e8eaed;
 }
 
+/*
+ * h4-h6(2026-09-10 补齐)
+ *
+ * ⭐ schema 早就支持 level 1-6(CommonMark,decision 005 D2 明写
+ * 「UI 渲染层即便暂时只样式化 1-3,schema 支持 1-6 留出扩展余地」),
+ * 但样式只到 h3 —— h4 以下渲染成与正文无异,层级看不出来。
+ *
+ * 补齐的直接动因是 diglot mind:导图层级用 h1~hn 表达,深过 h3 就断层。
+ * ⚠️ 但这不是 mind 专属改动 —— note 自己写深层大纲同样受益。
+ *
+ * 字号沿 h1..h3 的递减节奏(38/28/22)继续:18/16/15,
+ * h5/h6 与正文同号靠字重与颜色区分(CommonMark 排版惯例)。
+ */
+.krig-pm-host .ProseMirror h4 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror h5 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #d6d9dd;
+}
+
+.krig-pm-host .ProseMirror h6 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #b8bdc4;
+}
+
 /* Inline code(对齐 V1)*/
 .krig-pm-host .ProseMirror code {
   background: #2a2a2a;

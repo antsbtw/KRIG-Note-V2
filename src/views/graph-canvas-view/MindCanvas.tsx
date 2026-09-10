@@ -142,6 +142,10 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
     // ⚠️ 未 load 完不写盘(防止空模型擦掉真数据 —— 对齐 GraphCanvasView 的既有防御)
     if (!snap || loadedIdRef.current !== graphId) return;
     const file = diglot.snapshotToFile(snap) as { semantic: string; graphic: string };
+    // ⭐ 「标题即 root」(01 §3.4):标题不再单独维护,改 root 的文字就是改标题。
+    // ⚠️ 之前 title 与 root 是两份数据,改一个另一个不动 —— 这里收口。
+    const rootTitle = diglot.rootTitleOf(snap.s);
+    if (rootTitle !== null) titleRef.current = rootTitle;
     void library.mindSave(graphId, file.semantic, file.graphic, titleRef.current);
   }, [library, graphId, diglot]);
 
