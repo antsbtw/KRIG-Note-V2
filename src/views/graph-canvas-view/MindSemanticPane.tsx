@@ -206,8 +206,18 @@ export function MindSemanticPane({
   // mermaid tab:字符串闸门
   // ─────────────────────────────────────────────────────
 
+  /**
+   * mermaid tab 显示什么。
+   *
+   * ⚠️⚠️ **不能用 `snapshotToFile().semantic`** —— v1 之后那是
+   * **note doc 的 JSON 串**,直接塞进编辑器就是满屏 `{"format":"pm-doc-json"...}`
+   * (真机踩过:用户说「这是乱码呀」)。改格式时只改了存法、没改显示,是我漏的。
+   *
+   * ⭐ mermaid tab 要的是**mermaid 投影**(有损:只有层级 + 标题纯文本),
+   *   这正是 mermaid 降级为「导入/导出通道」之后它该扮演的角色。
+   */
   const semanticOf = useCallback(
-    (snap: DiglotSnapshot): string => (diglot.snapshotToFile(snap) as { semantic: string }).semantic,
+    (snap: DiglotSnapshot): string => diglot.toMermaidMindmap(snap.s),
     [diglot],
   );
 

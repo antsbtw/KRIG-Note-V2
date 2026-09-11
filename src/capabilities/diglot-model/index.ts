@@ -18,6 +18,7 @@ import { capabilityRegistry } from '@slot/capability-registry/capability-registr
 import type { DiglotModelApi } from './types';
 import { applyAction, pinnedCount, isCollapsed, mergeKeepingBodies } from './apply-action';
 import { detectMindFormat } from './mind-file';
+import { toMermaidMindmap } from './mermaid-mindmap';
 import { treeToNoteDoc, noteDocToTree, rootTitleOf } from './note-projection';
 import { emptyMindFile, fileToSnapshot, snapshotToFile } from './mind-file';
 import {
@@ -38,6 +39,7 @@ const api: DiglotModelApi = {
   isCollapsed,
   mergeKeepingBodies,
   detectMindFormat,
+  toMermaidMindmap,
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,

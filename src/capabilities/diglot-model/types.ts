@@ -364,6 +364,11 @@ export interface DiglotModelApi {
    * ⚠️ mermaid 一个节点只有一行标签,解析结果没有正文 ——
    * 整份替换会把全图正文删光(规格 03 §5.6 硬约束)。
    */
+  /**
+   * ⭐ S 层 → mermaid 文本(**有损投影**:只保住层级 + 标题纯文本)。
+   * mermaid tab 显示用 —— v1 的 semantic 是 note doc JSON,不能直接给人看。
+   */
+  readonly toMermaidMindmap: (s: import('./types').SLayer) => string;
   /** ⭐ 从 semantic 内容判断格式版本(mind_doc 不存 format) */
   readonly detectMindFormat: (semantic: string) => string;
   readonly mergeKeepingBodies: (
