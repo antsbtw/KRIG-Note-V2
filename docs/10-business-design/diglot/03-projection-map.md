@@ -372,8 +372,16 @@ atom-bridge 全透传 ✅ atomsToSvg 遍历全部 ✅ —— 问题在**存储�
 | ~~债 4~~ | ~~`GraphVariant` 的 `'mindmap'` 占位~~ | ~~可能有既有通路~~ | ✅ **已启用**(2026-09-10,方案 A),见 §7 |
 | **债 5** | 撤销栈跨三面统一(`00 §7`) | 手感完整性前提 | v0 之后 |
 | ⭐ **债 6** | **文本增删行后 G 条目错位** | 拖过的节点坐标配到别的节点上 | 见 §8 |
-| ⭐ **债 7** | **视口(center/zoom)没落库** | 每次重开都回到默认取景;画板存了(`GraphCanvasPayload.view`)mind 没存 | 见 04 §0.5.4 |
+| ⭐ **债 7** | **视口(center/zoom)没落库** | 每次重开都回到默认取景;画板存了(`GraphCanvasPayload.view`)mind 没存 | ⏳ 等画板缩放控件(见下)完成后继承 |
 | **债 8** | 语义面宽度 / 当前 tab 没落库 | 同属「上次编辑后的状态」,次要 | 同上 |
+
+⏳ **债 7 的前置**:用户 2026-09-11 拍板「先在画板上把缩放控件做成共用,
+再由导图继承」。交接 prompt 已写:`docs/10-business-design/graph/canvas/HANDOFF-zoom-control.prompt.md`。
+⚠️ 那一轮**不碰 mind**;本轮之后 mind 再接「记住上次比例 / 新建默认 100%」。
+
+⚠️⚠️ 注意这与规格 `01 §7.5` 表格里的「**视口不持久**(会话态)」**冲突** ——
+以用户 2026-09-11 的新决议为准:「完整表达各个 view 状态的,都要落库,
+否则加载上一次编辑后的数据时就会丢失」。01 §7.5 那一行需同步改。
 
 ⚠️ **债 4 实测**:`src/capabilities/graph-library-store/types.ts:15`
 `GraphVariant = 'canvas'|'family-tree'|'knowledge'|'mindmap'` —— **`'mindmap'` 已存在但无人消费。**
