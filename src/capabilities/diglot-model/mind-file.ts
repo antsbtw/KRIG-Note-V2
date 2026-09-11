@@ -23,11 +23,22 @@
 
 import { parseGLayer, serializeGLayer, wrapGLayer } from './g-layer';
 import { parseMermaidMindmap, toMermaidMindmap } from './mermaid-mindmap';
+import { noteDocToTree, treeToNoteDoc } from './note-projection';
+import type { SLayer } from './types';
 import type { ParseResult } from './engine-contract';
 import type { DiglotSnapshot } from './engine-contract';
 
 /** 格式标识 —— ⚠️ 带版本,将来改格式时能认出旧档而不是静默错读。 */
-export const MIND_FILE_FORMAT = 'diglot-mind/v0' as const;
+export const MIND_FILE_FORMAT = 'diglot-mind/v1' as const;
+
+/**
+ * ⭐ 旧格式:S 层存 mermaid 文本。**仍然可读**(用户已有文件),只是不再写出。
+ *
+ * ⚠️ v0 为什么废弃(实测,规格 03 §5.6):mermaid 的 mindmap 语法
+ * **一个节点只有一行纯文本标签**,装不下「节点 = 标题 + 正文」——
+ * 内存里 2 块,存一次变 1 块,行内公式直接变空串。
+ */
+export const MIND_FILE_FORMAT_V0 = 'diglot-mind/v0' as const;
 
 /**
  * mind 文件内容(存进 `graph_canvas.doc_content`)。
@@ -42,7 +53,17 @@ export const MIND_FILE_FORMAT = 'diglot-mind/v0' as const;
  */
 export interface MindFile {
   readonly format: typeof MIND_FILE_FORMAT;
-  /** ⭐ S 层 —— 用户书写,**机器不改写**。前期兼容 mermaid `mindmap` 语法。 */
+  /**
+   * ⭐⭐ S 层 —— **note doc(PM JSON)序列化串**,用户书写、机器不改写。
+   *
+   * ⚠️ v0 曾是 mermaid 文本,已废(见 MIND_FILE_FORMAT_V0):
+   * mermaid 装不下节点正文 / 行内公式 / marks。
+   * ⭐ 改存 note doc 之后,「格式装不下富内容」这类问题不会再出现 ——
+   * note doc 本来就是富文本的完整载体。
+   *
+   * mermaid 降为**导入/导出**通道(用户口径:导入居多),是**有损投影**:
+   * 只保住层级 + 标题纯文本。
+   */
   readonly semantic: string;
   /** ⭐ G 层 —— 规范形,稀疏。空图时为空串(**不写空壳**)。 */
   readonly graphic: string;
@@ -58,9 +79,11 @@ export interface MindFile {
  * 全靠自动布局(C5 缺省即自动)。这正是稀疏纪律的起点。
  */
 export function emptyMindFile(): MindFile {
-  return {
-    format: MIND_FILE_FORMAT,
-    semantic: [
+  // ⭐ 模板仍用 mermaid **书写**(可读性好),但立刻转成 v1 的 note doc 存法 ——
+  //   ⚠️ 不能直接把 mermaid 串塞进 v1 的 semantic:格式说它是 note doc JSON,
+  //     塞 mermaid 进去就是**声明与内容不符**(改版本号时踩过:夹具全红)。
+  const seed = parseMermaidMindmap(
+    [
       'mindmap',
       '  root((主题))',
       '    分支A',
@@ -69,6 +92,14 @@ export function emptyMindFile(): MindFile {
       '    分支B',
       '      叶子3',
     ].join('\n'),
+  );
+  if (!seed.ok) {
+    // ⚠️ 模板是代码里写死的,解析不了说明代码本身坏了 —— fail loud,不给半张空图
+    throw new Error('[diglot] 内置 mind 模板解析失败(代码 bug,不是用户数据问题)');
+  }
+  return {
+    format: MIND_FILE_FORMAT,
+    semantic: JSON.stringify(treeToNoteDoc(seed.value)),
     graphic: '',
   };
 }
@@ -91,7 +122,10 @@ export function snapshotToFile(snap: DiglotSnapshot): MindFile {
   // 记账见 03-projection-map §6。
   return {
     format: MIND_FILE_FORMAT,
-    semantic: toMermaidMindmap(snap.s),
+    // ⭐⭐ 存 note doc,不再存 mermaid —— 富内容(正文块/公式/marks)完整保住。
+    //   ⚠️ treeToNoteDoc 与 noteDocToTree 严格互逆(§5.5 有往返断言钉着),
+    //     所以这是无损的;而 toMermaidMindmap 是有损投影,只配做导出。
+    semantic: JSON.stringify(treeToNoteDoc(snap.s)),
     graphic: serializeGLayer(snap.g),
   };
 }
@@ -107,8 +141,14 @@ export function fileToSnapshot(raw: unknown): ParseResult<DiglotSnapshot> {
   if (typeof raw !== 'object' || raw === null) {
     return { ok: false, errors: [{ line: 1, message: 'mind 文件内容不是对象' }] };
   }
-  const f = raw as Partial<MindFile>;
-  if (f.format !== MIND_FILE_FORMAT) {
+  // ⚠️ 读入端的 format 可能是 v0(旧档)或任意脏值 —— 类型放宽到 string,
+  //   不能用 Partial<MindFile>(它把 format 窄化成 v1,v0 分支会被判成"不可能")。
+  const f = raw as { format?: string; semantic?: unknown; graphic?: unknown };
+  // ⭐ v0(mermaid)仍然可读 —— 用户已有文件不能打不开。
+  //   ⚠️ 只读不写:存盘一律写 v1,等于**打开即迁移**,无损
+  //   (v0 每个节点本来就只有一行标签)。
+  const isV0 = f.format === MIND_FILE_FORMAT_V0;
+  if (f.format !== MIND_FILE_FORMAT && !isV0) {
     return {
       ok: false,
       errors: [{ line: 1, message: `未知 mind 文件格式:${String(f.format)}(期望 ${MIND_FILE_FORMAT})` }],
@@ -123,13 +163,57 @@ export function fileToSnapshot(raw: unknown): ParseResult<DiglotSnapshot> {
     return { ok: false, errors: [{ line: 1, message: 'mind 文件的 graphic(G 层)不是字符串' }] };
   }
 
-  const s = parseMermaidMindmap(f.semantic);
+  // ⭐ v0 = mermaid 文本;v1 = note doc 的 JSON 串
+  const s = isV0 ? parseMermaidMindmap(f.semantic) : parseNoteDocSemantic(f.semantic);
   if (!s.ok) return { ok: false, errors: s.errors };
 
   const g = parseGLayer(f.graphic ?? '');
   if (!g.ok) return { ok: false, errors: g.errors };
 
   return { ok: true, value: { s: s.value, g: g.value } };
+}
+
+/**
+ * ⭐⭐ 从 **semantic 内容本身**判断格式版本。
+ *
+ * ⚠️ 为什么需要它:`mind_doc` 表**不存 format**(mind-store §8 实测:
+ * 存了读回来是 undefined,所以那一层只留 semantic/graphic 两段文本)。
+ * 加载时若写死一个版本,另一个版本的文件就打不开 ——
+ * v1 上线后写死 v0,会让**所有新存的图都加载失败**。
+ *
+ * ⭐ 判据可靠:v1 是 JSON 对象串(`{"format":"pm-doc-json",...}`),
+ * v0 是 mermaid 文本(必须以 `mindmap` 开头,见 parseMermaidMindmap)。
+ * 两者在语法上不可能混淆。
+ */
+export function detectMindFormat(semantic: string): typeof MIND_FILE_FORMAT | typeof MIND_FILE_FORMAT_V0 {
+  return semantic.trimStart().startsWith('{') ? MIND_FILE_FORMAT : MIND_FILE_FORMAT_V0;
+}
+
+/**
+ * v1 的 S 层:note doc JSON 串 → SLayer。
+ *
+ * ⚠️ 解析失败**不兜底**(C6 / 可靠性纲领):返回 ok:false,
+ * 调用侧保持上一有效状态并显示错误,而不是给一张空图假装打开成功。
+ */
+function parseNoteDocSemantic(text: string): ParseResult<SLayer> {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch (e) {
+    return {
+      ok: false,
+      errors: [{ line: 1, message: `S 层不是合法 JSON:${e instanceof Error ? e.message : String(e)}` }],
+    };
+  }
+  try {
+    const tree = noteDocToTree(doc);
+    return { ok: true, value: tree };
+  } catch (e) {
+    return {
+      ok: false,
+      errors: [{ line: 1, message: `S 层不是合法 note doc:${e instanceof Error ? e.message : String(e)}` }],
+    };
+  }
 }
 
 /**
@@ -140,6 +224,12 @@ export function fileToSnapshot(raw: unknown): ParseResult<DiglotSnapshot> {
  * G 层不可见但**不丢失**(round-trip 的依据,00 §4)。
  */
 export function mindFileToMarkdown(f: MindFile): string {
-  const fence = ['```mermaid', f.semantic, '```', ''].join('\n');
+  // ⚠️⚠️ v1 的 `semantic` 是 **note doc JSON**,不能直接塞进 ```mermaid 围栏
+  //   (那样 markdown 里会渲出一坨 JSON)。这里现投影成 mermaid ——
+  //   ⭐ 这正是 mermaid 的新定位:**导出通道**,而且是**有损**的
+  //   (只保住层级 + 标题纯文本;正文块 / 行内公式 / marks 都表达不了,见 03 §5.6)。
+  const tree = fileToSnapshot(f);
+  const mermaid = tree.ok ? toMermaidMindmap(tree.value.s) : '';
+  const fence = ['```mermaid', mermaid, '```', ''].join('\n');
   return fence + wrapGLayer(f.graphic);
 }

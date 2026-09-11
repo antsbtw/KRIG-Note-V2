@@ -264,8 +264,10 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
       .then((record) => {
         if (cancelled || !record) return;
         // ⭐ B1:两段纯文本直接从 mind_doc 读出来,不经 doc_content 那层拆解
+        // ⚠️ mind_doc 表**不存 format**(只有 semantic/graphic 两段文本),
+        //   所以从内容本身判版本 —— 写死任一版本都会让另一版本的图打不开。
         const parsed = diglot.fileToSnapshot({
-          format: 'diglot-mind/v0',
+          format: diglot.detectMindFormat(record.semantic),
           semantic: record.semantic,
           graphic: record.graphic,
         });
@@ -495,10 +497,21 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
       const snap = snapRef.current;
       if (!snap || loadedIdRef.current !== graphId) return;
       const graphic = (diglot.snapshotToFile(snap) as { graphic: string }).graphic;
+      // ⚠️ mermaid tab 的内容是 **mermaid 文本**,所以这里显式按 v0 解析
+      //   (v1 的 semantic 是 note doc JSON,两者不是一回事)。
       const parsed = diglot.fileToSnapshot({ format: 'diglot-mind/v0', semantic, graphic });
       if (!parsed.ok) return; // 语义面自己已显示错误,这里静默返回不重复报
-      snapRef.current = parsed.value;
-      void render(parsed.value);
+
+      // ⭐⭐ **保住正文**(规格 03 §5.6 硬约束):
+      //   mermaid 一个节点只有一行标签,解析结果里**没有正文块**。
+      //   直接整份替换 = 用户点进 mermaid tab 改一个字,**全图正文被删光**
+      //   —— 静默毁数据,与 §7.3 variant 闸门同族。
+      // ⭐ 做法:按节点 id 把旧快照里「首块之后的块」接回去。
+      //   mermaid 表达不了的东西,就不该由 mermaid 的解析结果来决定其存亡。
+      const merged = diglot.mergeKeepingBodies(snap, parsed.value);
+
+      snapRef.current = merged;
+      void render(merged);
       scheduleSave();
     },
     [graphId, diglot, render, scheduleSave],

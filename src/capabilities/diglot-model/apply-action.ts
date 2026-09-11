@@ -21,7 +21,7 @@
 import type { DiglotAction, DiglotSnapshot } from './engine-contract';
 import { deterministicEdgeId } from './edge-id';
 import { textToContent } from './mermaid-mindmap';
-import type { GEntry, GLayer, NodeId, SEdge, SLayer, SNode } from './types';
+import type { GEntry, GLayer, NodeId, RichContent, SEdge, SLayer, SNode } from './types';
 
 // ─────────────────────────────────────────────────────────
 // 1. 不可变小工具 —— ⚠️ 一律返回新对象,绝不就地改
@@ -388,4 +388,65 @@ export function pinnedCount(snapshot: DiglotSnapshot): number {
 /** 某节点是否折叠(读 G 层 `collapsed`)。⭐ 与画布裁剪、note 三角共用同一真源。 */
 export function isCollapsed(snapshot: DiglotSnapshot, id: NodeId): boolean {
   return snapshot.g.get(id)?.collapsed === true;
+}
+
+/**
+ * ⭐⭐ mermaid 导入合并:结构/标签用新的,**正文块从旧快照接回来**。
+ *
+ * 规格 03 §5.6 硬约束。
+ *
+ * ⚠️ 为什么需要它:mermaid 的 mindmap 语法**一个节点只有一行纯文本标签**,
+ * 解析结果里天然**没有正文块**。若直接整份替换 S 层,用户「点进 mermaid tab
+ * 改一个字」就会把全图的正文/公式删光 —— 静默毁数据(与 §7.3 variant 闸门同族)。
+ *
+ * ⭐ 判断依据:**mermaid 表达不了的东西,不该由 mermaid 的解析结果决定其存亡。**
+ * 它能表达的(层级、次序、标签)以导入为准;它表达不了的(正文块)保留旧值。
+ *
+ * ⚠️ 不是「只增不减」:新快照里没有的节点**确实会被删掉** ——
+ * 删节点是 mermaid 能表达的语义(那一行没了),必须尊重。
+ *
+ * @param prev 旧快照(正文的来源)
+ * @param incoming mermaid 解析出的新快照(结构/标签的来源)
+ */
+export function mergeKeepingBodies(
+  prev: DiglotSnapshot,
+  incoming: DiglotSnapshot,
+): DiglotSnapshot {
+  const prevById = new Map(prev.s.nodes.map((n) => [n.id, n]));
+
+  const nodes = incoming.s.nodes.map((n) => {
+    const old = prevById.get(n.id);
+    if (!old) return n; // 新增节点:没有旧正文可接,就是没有
+
+    const oldBlocks = bodyBlocks(old.content);
+    if (oldBlocks.length === 0) return n; // 旧的也没正文 → 原样
+
+    const head = firstBlock(n.content);
+    if (!head) return n;
+
+    return {
+      ...n,
+      content: {
+        format: 'pm-doc-json' as const,
+        version: '0.1' as const,
+        // ⭐ 首块(标签)用新的,正文用旧的
+        payload: { type: 'doc' as const, content: [head, ...oldBlocks] },
+      },
+    };
+  });
+
+  // ⚠️ G 层原样带过去 —— 导入语义不该动布局(C3)
+  return { s: { ...incoming.s, nodes }, g: incoming.g === prev.g ? prev.g : prev.g };
+}
+
+/** content 信封的首块(= 标签本体) */
+function firstBlock(content: RichContent): unknown | null {
+  const payload = content.payload as { content?: unknown[] } | undefined;
+  return payload?.content?.[0] ?? null;
+}
+
+/** content 信封里首块之后的块(= 正文;规格 03 §5.5) */
+function bodyBlocks(content: RichContent): unknown[] {
+  const payload = content.payload as { content?: unknown[] } | undefined;
+  return (payload?.content ?? []).slice(1);
 }

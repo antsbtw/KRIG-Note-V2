@@ -358,6 +358,18 @@ export interface DiglotModelApi {
     snap: import('./engine-contract').DiglotSnapshot,
     id: NodeId,
   ) => boolean;
+  /**
+   * ⭐⭐ mermaid 导入合并:结构/标签用新的,**正文块从旧快照接回来**。
+   *
+   * ⚠️ mermaid 一个节点只有一行标签,解析结果没有正文 ——
+   * 整份替换会把全图正文删光(规格 03 §5.6 硬约束)。
+   */
+  /** ⭐ 从 semantic 内容判断格式版本(mind_doc 不存 format) */
+  readonly detectMindFormat: (semantic: string) => string;
+  readonly mergeKeepingBodies: (
+    prev: import('./engine-contract').DiglotSnapshot,
+    incoming: import('./engine-contract').DiglotSnapshot,
+  ) => import('./engine-contract').DiglotSnapshot;
   /** ⭐ root 节点的文字 = 文档标题(01 §3.4「标题即 root」);无 root 或空则 null */
   readonly rootTitleOf: (s: SLayer) => string | null;
   /** ⭐ note block 序列 → S 层树(id 优先取 block 自带的) */

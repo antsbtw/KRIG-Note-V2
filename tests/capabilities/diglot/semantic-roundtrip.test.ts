@@ -15,7 +15,7 @@ import {
   fileToSnapshot,
   snapshotToFile,
 } from '@capabilities/diglot-model/mind-file';
-import { contentToText } from '@capabilities/diglot-model/mermaid-mindmap';
+import { contentToText, toMermaidMindmap } from '@capabilities/diglot-model/mermaid-mindmap';
 
 function snap() {
   const r = fileToSnapshot(emptyMindFile());
@@ -63,8 +63,10 @@ describe('语义面 → 画布', () => {
     expect(graphic).toContain('pos=42,43');
 
     // 只改了某个标签的文本
+    // ⚠️ v1 的 semantic 是 note doc JSON —— 字符串替换仍然有效(标签就在里面),
+    //   但 format 必须声明 v1,否则会走 mermaid 解析分支。
     const edited = snapshotToFile(pinned).semantic.replace('叶子1', '叶子壹');
-    const r = fileToSnapshot({ format: 'diglot-mind/v0', semantic: edited, graphic });
+    const r = fileToSnapshot({ format: 'diglot-mind/v1', semantic: edited, graphic });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     // ⭐ G 条目必须还在
@@ -99,8 +101,9 @@ describe('画布 → 语义面', () => {
     const after = snapshotToFile(moved).semantic;
     // ⭐ 这就是「拖了节点,文本跟着变」—— mermaid 做不到的那半
     expect(after).not.toBe(before);
-    // 叶子1 现在应缩进在分支B 之下
-    const lines = after.split('\n');
+    // ⚠️ v1 的 semantic 是 note doc JSON,没有"缩进行"可言 ——
+    //   结构次序改看 **mermaid 投影**(它正是用缩进表达层级的那个形态)。
+    const lines = toMermaidMindmap(moved.s).split('\n');
     const bIdx = lines.findIndex((l) => l.includes('分支B'));
     const leafIdx = lines.findIndex((l) => l.includes('叶子1'));
     expect(leafIdx, '叶子1 应排在分支B 之后').toBeGreaterThan(bIdx);
@@ -109,7 +112,7 @@ describe('画布 → 语义面', () => {
   it('⭐ round-trip:文本 → 图 → 文本,字节一致', () => {
     const base = snap();
     const text1 = snapshotToFile(base).semantic;
-    const r = fileToSnapshot({ format: 'diglot-mind/v0', semantic: text1, graphic: '' });
+    const r = fileToSnapshot({ format: 'diglot-mind/v1', semantic: text1, graphic: '' });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(snapshotToFile(r.value).semantic).toBe(text1);
