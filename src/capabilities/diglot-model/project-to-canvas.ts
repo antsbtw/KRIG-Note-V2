@@ -18,7 +18,6 @@
  */
 
 import type { GLayer, NodeId, SLayer, SNode } from './types';
-import { contentToText } from './mermaid-mindmap';
 import { BLOCK_VISUAL_SPEC } from '../../lib/visual-spec/block-visual-spec';
 
 // ─────────────────────────────────────────────────────────
@@ -155,16 +154,54 @@ function measureText(text: string, fontSize: number): { w: number; h: number } {
  * ⚠️ 但**宽度**不会被回写(撑高只管高),所以宽度估算仍要合理 ——
  * 超过 maxW 的长文本走换行,高度随之增长,由渲染层撑开。
  */
-/** content 信封里首块之后的块数(= 并进来的正文行数);规格 03 §5.5。 */
-function extraBlocksOf(content: { payload?: unknown } | undefined): number {
+
+/**
+ * ⭐⭐ content 信封里**每一块的纯文本**(首块=标题,其余=正文)。
+ * ⚠️ 宽度要按**最宽那一行**算 —— 只量首块会让正文被硬折或溢出(真机踩过)。
+ */
+function blockTextsOf(content: { payload?: unknown } | undefined): string[] {
   const payload = content?.payload as { content?: unknown[] } | undefined;
-  return Math.max(0, (payload?.content?.length ?? 1) - 1);
+  const blocks = (payload?.content ?? []) as { content?: { text?: string }[] }[];
+  return blocks.map((b) => (b.content ?? []).map((r) => r.text ?? '').join(''));
 }
 
-function nodeSize(text: string, fontSize: number, extraBlocks = 0): { w: number; h: number } {
+/**
+ * ⭐⭐ 节点尺寸的**唯一入口** —— 布局与渲染都必须走它。
+ *
+ * ⚠️⚠️ 曾经有两个调用点参数不同:
+ *   buildLayoutRequest → nodeSize(label, fs)              ← 漏了正文
+ *   projectToInstances → nodeSize(label, fs, extraBlocks)
+ * → ELK 按「只有标题」排版,实际框却带正文长得更大 →
+ *   **压住兄弟节点、挡住连线**(真机截图)。
+ * ⭐ 现在统一走 `nodeSizeOf(node)`,两处同源,不可能再漂移。
+ */
+function nodeSizeOf(
+  content: { payload?: unknown } | undefined,
+  fontSize: number,
+): { w: number; h: number } {
+  const texts = blockTextsOf(content);
+  const head = texts[0] ?? '';
+  const bodies = texts.slice(1);
+  return nodeSize(head, fontSize, bodies.length, bodies);
+}
+
+function nodeSize(
+  text: string,
+  fontSize: number,
+  extraBlocks = 0,
+  bodyTexts: readonly string[] = [],
+): { w: number; h: number } {
   const m = measureText(text, fontSize);
   const pad = paddingFor(fontSize);
   const minW = Math.round(fontSize * 3);
+
+  // ⭐⭐ 宽度按**最宽那一行**算(标题按本级字号,正文按正文号)——
+  //   只按标题算会让更长的正文被硬折甚至溢出框外(真机:「分支Achang123」)。
+  const bodyFsForW = BLOCK_VISUAL_SPEC.body.fontSize;
+  const widest = bodyTexts.reduce(
+    (acc, t) => Math.max(acc, measureText(t, bodyFsForW).w),
+    m.w,
+  );
 
   // ⭐ 上限不是「排版宽度」,而是**防失控的兜底** —— 有人粘一整段进来时,
   //   不至于把图横向撑到几千像素;到那个长度才折行是合理的。
@@ -175,7 +212,7 @@ function nodeSize(text: string, fontSize: number, extraBlocks = 0): { w: number;
   //   ⭐ 记这一笔是因为我当时改宽了上限、症状却还在 —— **改错地方而症状仍在**,
   //   说明「看起来相关」不等于「就是它」。上限保持 16 字宽不动。
   const maxW = Math.round(fontSize * 16);
-  const w = Math.max(minW, Math.min(maxW, m.w + pad.x));
+  const w = Math.max(minW, Math.min(maxW, widest + pad.x));
 
   // ⭐ 只有真的被 maxW 夹住才会折行 → 那时才按折行数估高度。
   // ⚠️ 旧版高度**恒为一行**,于是长文本换了行、盒子却没长高 → 第二行溢出框外。
@@ -259,7 +296,8 @@ export function buildLayoutRequest(s: SLayer, g: GLayer): LayoutRequest {
   const depths = depthMap(s);
   return {
     nodes: vis.map((n) => {
-      const sz = nodeSize(contentToText(n.content), fontSizeForDepth(depths.get(n.id) ?? 0));
+      // ⭐ 与 projectToInstances **同一个函数**,不可能再漂移
+      const sz = nodeSizeOf(n.content, fontSizeForDepth(depths.get(n.id) ?? 0));
       return { id: n.id, width: sz.w, height: sz.h };
     }),
     edges: vis
@@ -331,18 +369,40 @@ export function projectToInstances(
   const pos = new Map(layout.nodes.map((n) => [n.id, n]));
   const depths = depthMap(s);
 
+  // ⭐⭐ **同层级左对齐**(用户 2026-09-11:「同一个级别的 shape,应该左边对齐」)。
+  //
+  // ⚠️ 起因:自适应宽度上线后,同层一宽一窄 → 左边缘参差不齐,
+  //   宽框向左"探出"压住父节点和连线(真机截图:分支B 盖在连线上)。
+  // ⚠️ ELK 侧无解 —— 实测 `elk.alignment` 对 mrtree **完全没有效果**
+  //   (同层 x=176 vs x=306,加不加一模一样),所以在这里做一次后处理。
+  // ⭐ 取该层**最小 x**:向左对齐,不会把任何节点往右推出原本的走廊。
+  // ⚠️ 被钉住的节点(G 层有 pos)**不参与** —— 用户摆的位置优先(C7)。
+  const alignX = new Map<number, number>();
+  for (const n of vis) {
+    if (g.get(n.id)?.pos) continue; // 钉住的不参与统计
+    const p = pos.get(n.id);
+    if (!p) continue;
+    const d = depths.get(n.id) ?? 0;
+    const cur = alignX.get(d);
+    if (cur === undefined || p.x < cur) alignX.set(d, p.x);
+  }
+
   const nodes: ProjectedInstance[] = vis.map((n) => {
     const entry = g.get(n.id);
     const auto = pos.get(n.id);
     // ⭐ 稀疏覆盖:G 层有 pos 就用它,否则用自动布局
-    const p = entry?.pos ?? auto;
+    // ⭐ 自动布局的坐标先做同层对齐;G 层有 pos 的直接用 pos(不对齐)
+    const aligned =
+      auto === undefined
+        ? undefined
+        : { x: alignX.get(depths.get(n.id) ?? 0) ?? auto.x, y: auto.y };
+    const p = entry?.pos ?? aligned;
     if (!p) {
       throw new Error(
         `[diglot] 节点 ${n.id} 既无 G 层 pos 也不在布局结果里 —— ` +
           `布局输入与可见节点集不一致(不静默兜底,见可靠性纲领)`,
       );
     }
-    const label = contentToText(n.content);
     // ⭐ 折叠的节点在画布上**与叶子长得一样** —— 看不出「下面还有东西」。
     //   解法:折叠时把**子节点数显示在连接点圆圈里**(magnetActions.count),
     //   用户一眼看到「点开有几个分支」。
@@ -366,7 +426,7 @@ export function projectToInstances(
       // ⭐ 估算要算上并进该节点的正文块数(规格 03 §5.5:节点 = 标题 + 正文),
       //   否则 ELK 按「只有标题」排版,撑高后容易和兄弟节点压到一起。
       //   ⚠️ 仍只是**初值**:真实高度由渲染层撑(见 nodeSize 注释)。
-      size: nodeSize(label, fontSizeForDepth(depths.get(n.id) ?? 0), extraBlocksOf(n.content)),
+      size: nodeSizeOf(n.content, fontSizeForDepth(depths.get(n.id) ?? 0)),
       // ⭐⭐ 字号透传给渲染层。
       //
       // ⚠️⚠️ **这里必须传正文号(16),不能传该深度的标题号**:

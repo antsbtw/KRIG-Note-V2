@@ -53,9 +53,14 @@ describe('投影:稀疏覆盖全量', () => {
     const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(req)));
 
     expect(inst.length).toBe(s.s.nodes.length);
-    // 每个节点都拿到了坐标,且正是假布局给的那个
+    // 每个节点都拿到了坐标(来自自动布局,不是 G 层)
+    // ⚠️ y 原样;x 经过**同层左对齐**后处理(2026-09-11 用户拍板),
+    //    所以不再逐个等于假布局的 x —— 但仍必须是**布局给过的某个 x**,
+    //    绝不能凭空冒出来或落到 (0,0)。
+    const layoutXs = new Set(fakeLayout(req).nodes.map((n) => n.x));
     inst.forEach((it, i) => {
-      expect(it.position).toEqual({ x: i * 1000, y: i * 100 });
+      expect(it.position!.y).toBe(i * 100);
+      expect(layoutXs.has(it.position!.x), `x=${it.position!.x} 不是布局给过的值`).toBe(true);
     });
   });
 
