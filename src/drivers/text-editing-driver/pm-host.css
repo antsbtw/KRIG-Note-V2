@@ -4503,3 +4503,21 @@
   color: #e8eaed;
   background: rgba(255, 255, 255, 0.1);
 }
+
+/* ─────────────────────────────────────────────────────────
+   标题折叠:隐藏被折叠范围内的块
+   ⭐⭐ 规则住在 **driver 层** —— 折叠能力本来就在 driver
+   (build-heading-collapse-plugin),样式却一直只在 `views/note/toc/toc.css`
+   里,是 note 的**私有样式**。别的 view 用同一个 plugin,却要靠
+   「NoteView 恰好也被挂过、CSS 已进全局 bundle」才生效 —— 隐式依赖。
+
+   ⚠️⚠️ 且必须 `!important`:被隐藏的块里若有**行内公式**,
+   `.krig-pm-host .ProseMirror .krig-math-inline{display:inline-block}`
+   特异度 0,3,0 **高过** 隐藏规则的 0,2,0 → 公式把自己显示回来
+   (真机现象:标题收起了,公式还留在原地)。
+   同理适用于任何给 display 赋值的行内块(将来新增的 NodeView)。
+   ───────────────────────────────────────────────────────── */
+.krig-pm-host .ProseMirror .heading-collapsed-hidden,
+.krig-pm-host .ProseMirror .heading-collapsed-hidden * {
+  display: none !important;
+}
