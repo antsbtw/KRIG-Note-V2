@@ -372,6 +372,8 @@ atom-bridge 全透传 ✅ atomsToSvg 遍历全部 ✅ —— 问题在**存储�
 | ~~债 4~~ | ~~`GraphVariant` 的 `'mindmap'` 占位~~ | ~~可能有既有通路~~ | ✅ **已启用**(2026-09-10,方案 A),见 §7 |
 | **债 5** | 撤销栈跨三面统一(`00 §7`) | 手感完整性前提 | v0 之后 |
 | ⭐ **债 6** | **文本增删行后 G 条目错位** | 拖过的节点坐标配到别的节点上 | 见 §8 |
+| ⭐ **债 7** | **视口(center/zoom)没落库** | 每次重开都回到默认取景;画板存了(`GraphCanvasPayload.view`)mind 没存 | 见 04 §0.5.4 |
+| **债 8** | 语义面宽度 / 当前 tab 没落库 | 同属「上次编辑后的状态」,次要 | 同上 |
 
 ⚠️ **债 4 实测**:`src/capabilities/graph-library-store/types.ts:15`
 `GraphVariant = 'canvas'|'family-tree'|'knowledge'|'mindmap'` —— **`'mindmap'` 已存在但无人消费。**

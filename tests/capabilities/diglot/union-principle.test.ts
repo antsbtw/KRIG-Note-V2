@@ -126,19 +126,18 @@ describe('⭐⭐ 推论③:view 写回只能改自己那部分', () => {
   });
 });
 
-describe('⚠️ 反面:派生物不进数据', () => {
-  it('⭐ 层级数字不落库(由 parent 深度推出)', () => {
-    const s = noteDocToTree(unionDoc);
-    const file = snapshotToFile({ s, g: new Map() } as never);
-    // S 层节点本身不带 level 字段(level 只出现在投影出的 block attrs 里)
-    for (const n of s.nodes) {
-      expect(Object.keys(n)).not.toContain('level');
-      expect(Object.keys(n)).not.toContain('depth');
-    }
-    expect(file.semantic.length).toBeGreaterThan(0);
-  });
+describe('⭐⭐ 落库判据:能不能重算(用户 2026-09-10 纠正)', () => {
+  /**
+   * ⚠️ 我先前写成「派生物不进数据」,**错了**。
+   * 用户纠正:「完整表达各个 view 状态的,都要落库。否则其中一个 view
+   * 加载上一次编辑后的数据时就会丢失了。」
+   *
+   * ⭐ 正确判据分两种:
+   *   - **纯函数派生**(由现有字段唯一确定,重算必得同一结果)→ 可不存
+   *   - ⭐⭐ **用户意图**(重算不回来)→ **必须落库**
+   */
 
-  it('⭐⭐ G 层是**稀疏**的:没碰过的节点没有条目(不是全量存档)', () => {
+  it('⭐⭐ 用户意图必须落库:拖过的 pos 重开还在', () => {
     const snap = withG(noteDocToTree(unionDoc));
     const file = snapshotToFile(snap as never);
     const back = fileToSnapshot({
@@ -148,7 +147,69 @@ describe('⚠️ 反面:派生物不进数据', () => {
     });
     expect(back.ok).toBe(true);
     if (!back.ok) return;
-    // 3 个节点,只有 1 个有 G 条目 —— 其余走自动布局
+    expect(back.value.g.get('m002')?.pos, '用户拖过的位置丢了 = 重开回到自动布局').toEqual({
+      x: 42,
+      y: 43,
+    });
+  });
+
+  it('⭐⭐ 用户意图必须落库:选的 shape/color 与折叠态重开还在', () => {
+    const snap = withG(noteDocToTree(unionDoc));
+    const file = snapshotToFile(snap as never);
+    const back = fileToSnapshot({
+      format: detectMindFormat(file.semantic),
+      semantic: file.semantic,
+      graphic: file.graphic,
+    });
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    const e = back.value.g.get('m002');
+    expect(e?.color).toBe('#fff');
+    expect(e?.collapsed).toBe(true);
+  });
+
+  it('⭐ 将来新增的图元特征也不许丢(unknown 原样透传,C9)', () => {
+    // ⚠️ 用户:「未来 mind 中的各个图元 shape 特征……都需要落库」
+    //    老版本读到不认识的记号,**不能丢** —— 否则新版存的东西被老版抹掉。
+    const snap = {
+      s: noteDocToTree(unionDoc),
+      g: new Map([['m002', { unknown: { borderStyle: 'dashed', opacity: '0.8' } }]]),
+    };
+    const file = snapshotToFile(snap as never);
+    const back = fileToSnapshot({
+      format: detectMindFormat(file.semantic),
+      semantic: file.semantic,
+      graphic: file.graphic,
+    });
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    const u = back.value.g.get('m002')?.unknown;
+    expect(u?.borderStyle, '不认识的图元特征被丢掉 = 新版存的被老版抹掉').toBe('dashed');
+    expect(u?.opacity).toBe('0.8');
+  });
+
+  it('⚠️ 纯函数派生可以不存:层级数字由 parent 深度推出', () => {
+    // ⚠️ 存了反而有害:出现**两个真源**,不一致时以谁为准?
+    //    (hn 一致性那轮踩过:写的 level 与算的 depth 打架)
+    const s = noteDocToTree(unionDoc);
+    for (const n of s.nodes) {
+      expect(Object.keys(n)).not.toContain('level');
+      expect(Object.keys(n)).not.toContain('depth');
+    }
+  });
+
+  it('⭐⭐ G 层是**稀疏**的:没碰过的节点没有条目', () => {
+    // ⭐ 稀疏的意义正是「存的是**用户碰过哪些**」——
+    //    自动布局算得出来的那部分不必存,用户拖过的那部分必须存。
+    const snap = withG(noteDocToTree(unionDoc));
+    const file = snapshotToFile(snap as never);
+    const back = fileToSnapshot({
+      format: detectMindFormat(file.semantic),
+      semantic: file.semantic,
+      graphic: file.graphic,
+    });
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
     expect(back.value.s.nodes.length).toBe(2);
     expect(back.value.g.size, 'G 层变成全量存档 = C5/C7 全废').toBe(1);
   });
