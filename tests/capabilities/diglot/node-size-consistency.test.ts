@@ -145,3 +145,74 @@ describe('同层级左对齐', () => {
     expect(b.position, '用户钉的坐标被对齐覆盖了').toEqual({ x: 9999, y: 8888 });
   });
 });
+
+/**
+ * ⭐⭐ 同层级**同宽**(用户 2026-09-11:
+ * 「同一种类型的图元,使用不同的处理方法,是有问题的哦」)
+ *
+ * ⚠️ 只做左对齐不够:同层一个 240px、一个 116px,
+ * **右边缘参差不齐**,连接点(E 磁吸在右边缘)也就一个在前一个在后,
+ * 连线出发点忽左忽右 —— 看起来像"同一种图元被两套规则处理"。
+ *
+ * ⭐ 同层 = 同一种图元 = 同样的处理方法:**取该层最宽**,全层统一。
+ * ⚠️ 高度不统一 —— 内容多的本来就该更高(那是内容差异,不是处理方法差异)。
+ */
+describe('同层级同宽', () => {
+  const tree = () =>
+    noteDocToTree({
+      format: 'pm-doc-json', version: '0.1',
+      payload: { type: 'doc', content: [
+        { type: 'heading', attrs: { level: 1, id: 'root' }, content: [{ type: 'text', text: '主题' }] },
+        { type: 'heading', attrs: { level: 2, id: 'a' }, content: [{ type: 'text', text: '分支Achang123' }] },
+        { type: 'paragraph', attrs: { id: 'b1' }, content: [{ type: 'text', text: '123' }] },
+        { type: 'heading', attrs: { level: 2, id: 'b' }, content: [{ type: 'text', text: '分支B' }] },
+        { type: 'heading', attrs: { level: 3, id: 'c' }, content: [{ type: 'text', text: '叶子1' }] },
+        { type: 'heading', attrs: { level: 3, id: 'd' }, content: [{ type: 'text', text: '叶子222222' }] },
+      ] },
+    });
+
+  const project = () => {
+    const s = tree();
+    const g = new Map();
+    const req = buildLayoutRequest(s, g);
+    const layout: LayoutAnswer = { nodes: req.nodes.map((n, i) => ({ id: n.id, x: i * 137, y: i * 80 })) };
+    return { s, inst: projectToInstances(s, g, layout).filter((i) => !isTreeLineId(i.id)) };
+  };
+
+  it('⭐⭐ 同一深度的节点宽度必须相同(右边缘齐平 → 连接点对齐)', () => {
+    const { s, inst } = project();
+    const byId = new Map(s.nodes.map((n) => [n.id, n]));
+    const depthOf = (id: string): number => {
+      let d = 0; let c = byId.get(id)!;
+      while (c.parent) { d++; c = byId.get(c.parent)!; }
+      return d;
+    };
+    const byDepth = new Map<number, number[]>();
+    for (const i of inst) {
+      const d = depthOf(i.id);
+      byDepth.set(d, [...(byDepth.get(d) ?? []), i.size!.w]);
+    }
+    for (const [d, ws] of byDepth) {
+      expect([...new Set(ws)].length, `深度 ${d} 宽度不一致:${ws.join(',')}`).toBe(1);
+    }
+  });
+
+  it('⭐ 取该层**最宽**(不能把内容挤窄)', () => {
+    const { inst } = project();
+    const a = inst.find((i) => i.id === 'a')!;
+    const b = inst.find((i) => i.id === 'b')!;
+    expect(a.size!.w).toBe(b.size!.w);
+    // 宽的那个不该被压缩:仍然装得下「分支Achang123」
+    const fs = 28;
+    let need = 0;
+    for (const ch of '分支Achang123') need += /[一-鿿]/.test(ch) ? fs : fs * 0.55;
+    expect(a.size!.w).toBeGreaterThanOrEqual(Math.round(need));
+  });
+
+  it('⚠️ 高度**不统一** —— 内容多的本来就该更高(内容差异,不是处理方法差异)', () => {
+    const { inst } = project();
+    const a = inst.find((i) => i.id === 'a')!; // 带正文
+    const b = inst.find((i) => i.id === 'b')!; // 只有标题
+    expect(a.size!.h).toBeGreaterThan(b.size!.h);
+  });
+});

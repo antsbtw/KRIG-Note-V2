@@ -185,6 +185,41 @@ function nodeSizeOf(
   return nodeSize(head, fontSize, bodies.length, bodies);
 }
 
+/**
+ * ⭐⭐ 整张图的节点尺寸表 —— **布局与渲染的唯一来源**。
+ *
+ * 用户 2026-09-11:「**同一种类型的图元,使用不同的处理方法,是有问题的哦**」。
+ *
+ * ⭐ 同一层级 = 同一种图元 → **同宽**,取该层最宽者。
+ * ⚠️ 只做左对齐不够:同层一个 240px、一个 116px,右边缘参差不齐,
+ *   而连接点(E 磁吸)长在右边缘 → 连线出发点忽左忽右,
+ *   看起来就像"同一种图元被两套规则处理"(真机截图)。
+ *
+ * ⚠️ **高度不统一** —— 内容多的本来就该更高。那是**内容差异**,
+ *   不是处理方法差异;强行等高会留下大片空白或裁掉内容。
+ */
+function sizeTable(
+  vis: readonly SNode[],
+  depths: ReadonlyMap<NodeId, number>,
+): Map<NodeId, { w: number; h: number }> {
+  const raw = new Map<NodeId, { w: number; h: number }>();
+  const widest = new Map<number, number>();
+  for (const n of vis) {
+    const d = depths.get(n.id) ?? 0;
+    const sz = nodeSizeOf(n.content, fontSizeForDepth(d));
+    raw.set(n.id, sz);
+    widest.set(d, Math.max(widest.get(d) ?? 0, sz.w));
+  }
+  const out = new Map<NodeId, { w: number; h: number }>();
+  for (const n of vis) {
+    const d = depths.get(n.id) ?? 0;
+    const sz = raw.get(n.id)!;
+    // ⭐ 宽度取该层最宽;高度保留各自的(内容差异)
+    out.set(n.id, { w: widest.get(d) ?? sz.w, h: sz.h });
+  }
+  return out;
+}
+
 function nodeSize(
   text: string,
   fontSize: number,
@@ -294,10 +329,11 @@ export function buildLayoutRequest(s: SLayer, g: GLayer): LayoutRequest {
   const vis = visibleNodes(s, g);
   const visIds = new Set(vis.map((n) => n.id));
   const depths = depthMap(s);
+  // ⭐ 与 projectToInstances **同一张表**,不可能再漂移
+  const sizes = sizeTable(vis, depths);
   return {
     nodes: vis.map((n) => {
-      // ⭐ 与 projectToInstances **同一个函数**,不可能再漂移
-      const sz = nodeSizeOf(n.content, fontSizeForDepth(depths.get(n.id) ?? 0));
+      const sz = sizes.get(n.id)!;
       return { id: n.id, width: sz.w, height: sz.h };
     }),
     edges: vis
@@ -377,6 +413,8 @@ export function projectToInstances(
   //   (同层 x=176 vs x=306,加不加一模一样),所以在这里做一次后处理。
   // ⭐ 取该层**最小 x**:向左对齐,不会把任何节点往右推出原本的走廊。
   // ⚠️ 被钉住的节点(G 层有 pos)**不参与** —— 用户摆的位置优先(C7)。
+  const sizes = sizeTable(vis, depths);
+
   const alignX = new Map<number, number>();
   for (const n of vis) {
     if (g.get(n.id)?.pos) continue; // 钉住的不参与统计
@@ -426,7 +464,7 @@ export function projectToInstances(
       // ⭐ 估算要算上并进该节点的正文块数(规格 03 §5.5:节点 = 标题 + 正文),
       //   否则 ELK 按「只有标题」排版,撑高后容易和兄弟节点压到一起。
       //   ⚠️ 仍只是**初值**:真实高度由渲染层撑(见 nodeSize 注释)。
-      size: nodeSizeOf(n.content, fontSizeForDepth(depths.get(n.id) ?? 0)),
+      size: sizes.get(n.id)!,
       // ⭐⭐ 字号透传给渲染层。
       //
       // ⚠️⚠️ **这里必须传正文号(16),不能传该深度的标题号**:
