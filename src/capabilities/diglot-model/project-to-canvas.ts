@@ -199,34 +199,28 @@ function nodeSizeOf(
 /**
  * ⭐⭐ 整张图的节点尺寸表 —— **布局与渲染的唯一来源**。
  *
- * 用户 2026-09-11:「**同一种类型的图元,使用不同的处理方法,是有问题的哦**」。
+ * ⭐ 宽度**各自按自己的 hn 文字长度**算(用户 2026-09-11:
+ * 「不用强调所有同级的主题框都一样长吧?各自根据 hn 的文字长度就好了」)。
  *
- * ⭐ 同一层级 = 同一种图元 → **同宽**,取该层最宽者。
- * ⚠️ 只做左对齐不够:同层一个 240px、一个 116px,右边缘参差不齐,
- *   而连接点(E 磁吸)长在右边缘 → 连线出发点忽左忽右,
- *   看起来就像"同一种图元被两套规则处理"(真机截图)。
+ * ⚠️ 我一度做成「同层取最宽者」,是**把用户的话理解窄了** ——
+ * 「同一种图元用同一种处理方法」指的是**规则一致**(宽度都由 hn 决定),
+ * 不是**结果一致**(都一样宽)。把短标题硬撑到最宽者那么长,
+ * 反而是拿另一套规则去改它(真机:分支B 被无谓拉长)。
  *
- * ⚠️ **高度不统一** —— 内容多的本来就该更高。那是**内容差异**,
- *   不是处理方法差异;强行等高会留下大片空白或裁掉内容。
+ * ⚠️ 高度同理:内容多的本来就该更高,那是**内容差异**。
+ *
+ * ⭐ 本函数存在的真正价值是**单一来源**:布局端(buildLayoutRequest)与
+ * 渲染端(projectToInstances)读同一张表,杜绝「两处各算一次、算法还不一样」
+ * 那类漂移(踩过:ELK 按只有标题排版、实际框带正文更大 → 重叠挡线)。
  */
 function sizeTable(
   vis: readonly SNode[],
   depths: ReadonlyMap<NodeId, number>,
 ): Map<NodeId, { w: number; h: number }> {
-  const raw = new Map<NodeId, { w: number; h: number }>();
-  const widest = new Map<number, number>();
-  for (const n of vis) {
-    const d = depths.get(n.id) ?? 0;
-    const sz = nodeSizeOf(n.content, fontSizeForDepth(d));
-    raw.set(n.id, sz);
-    widest.set(d, Math.max(widest.get(d) ?? 0, sz.w));
-  }
   const out = new Map<NodeId, { w: number; h: number }>();
   for (const n of vis) {
     const d = depths.get(n.id) ?? 0;
-    const sz = raw.get(n.id)!;
-    // ⭐ 宽度取该层最宽;高度保留各自的(内容差异)
-    out.set(n.id, { w: widest.get(d) ?? sz.w, h: sz.h });
+    out.set(n.id, nodeSizeOf(n.content, fontSizeForDepth(d)));
   }
   return out;
 }

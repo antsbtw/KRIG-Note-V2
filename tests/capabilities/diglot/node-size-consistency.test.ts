@@ -16,6 +16,7 @@ import {
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
 import { noteDocToTree } from '@capabilities/diglot-model/note-projection';
+import { headingFontSize } from '../../../src/lib/visual-spec/block-visual-spec';
 
 /** 一个带正文(多块)的节点 —— 真机那个「分支Achang123 + 123 + 公式」 */
 const richTree = () =>
@@ -164,7 +165,13 @@ describe('同层级左对齐', () => {
  * ⭐ 同层 = 同一种图元 = 同样的处理方法:**取该层最宽**,全层统一。
  * ⚠️ 高度不统一 —— 内容多的本来就该更高(那是内容差异,不是处理方法差异)。
  */
-describe('同层级同宽', () => {
+describe('同层级:规则一致,不是结果一致', () => {
+  /**
+   * ⚠️ 本组原本断言「同层必须同宽」—— **已被用户推翻**(2026-09-11):
+   * 「不用强调所有同级的主题框都一样长吧?各自根据 hn 的文字长度就好了。」
+   * ⭐ 「同一种图元用同一种处理方法」指的是**规则一致**(宽度都由 hn 决定),
+   *    不是**结果一致**。把短标题硬撑长,反而是拿另一套规则去改它。
+   */
   const tree = () =>
     noteDocToTree({
       format: 'pm-doc-json', version: '0.1',
@@ -173,8 +180,6 @@ describe('同层级同宽', () => {
         { type: 'heading', attrs: { level: 2, id: 'a' }, content: [{ type: 'text', text: '分支Achang123' }] },
         { type: 'paragraph', attrs: { id: 'b1' }, content: [{ type: 'text', text: '123' }] },
         { type: 'heading', attrs: { level: 2, id: 'b' }, content: [{ type: 'text', text: '分支B' }] },
-        { type: 'heading', attrs: { level: 3, id: 'c' }, content: [{ type: 'text', text: '叶子1' }] },
-        { type: 'heading', attrs: { level: 3, id: 'd' }, content: [{ type: 'text', text: '叶子222222' }] },
       ] },
     });
 
@@ -183,43 +188,38 @@ describe('同层级同宽', () => {
     const g = new Map();
     const req = buildLayoutRequest(s, g);
     const layout: LayoutAnswer = { nodes: req.nodes.map((n, i) => ({ id: n.id, x: i * 137, y: i * 80 })) };
-    return { s, inst: projectToInstances(s, g, layout).filter((i) => !isTreeLineId(i.id)) };
+    return projectToInstances(s, g, layout).filter((i) => !isTreeLineId(i.id));
   };
 
-  it('⭐⭐ 同一深度的节点宽度必须相同(右边缘齐平 → 连接点对齐)', () => {
-    const { s, inst } = project();
-    const byId = new Map(s.nodes.map((n) => [n.id, n]));
-    const depthOf = (id: string): number => {
-      let d = 0; let c = byId.get(id)!;
-      while (c.parent) { d++; c = byId.get(c.parent)!; }
-      return d;
+  it('⭐⭐ 标题短的节点**就该窄**(不被同层最宽者撑长)', () => {
+    const inst = project();
+    const a = inst.find((i) => i.id === 'a')!; // 长标题
+    const b = inst.find((i) => i.id === 'b')!; // 短标题
+    expect(b.size!.w, '短标题被硬撑到与长标题同宽').toBeLessThan(a.size!.w);
+  });
+
+  it('⭐ 但规则一致:两者的宽度都由**各自的 hn** 推出', () => {
+    const inst = project();
+    const fs = headingFontSize(2);
+    const need = (t: string): number => {
+      let w = 0;
+      for (const ch of t) {
+        const c = ch.codePointAt(0) ?? 0;
+        w += c >= 0x4e00 && c <= 0x9fff ? fs : fs * 0.6;
+      }
+      return w;
     };
-    const byDepth = new Map<number, number[]>();
-    for (const i of inst) {
-      const d = depthOf(i.id);
-      byDepth.set(d, [...(byDepth.get(d) ?? []), i.size!.w]);
-    }
-    for (const [d, ws] of byDepth) {
-      expect([...new Set(ws)].length, `深度 ${d} 宽度不一致:${ws.join(',')}`).toBe(1);
+    for (const [id, title] of [['a', '分支Achang123'], ['b', '分支B']] as const) {
+      const n = inst.find((i) => i.id === id)!;
+      const rad = 0.15 * Math.min(n.size!.w, n.size!.h);
+      expect(n.size!.w - 2 * rad, `${id} 的可用宽装不下自己的标题`).toBeGreaterThanOrEqual(need(title));
     }
   });
 
-  it('⭐ 取该层**最宽**(不能把内容挤窄)', () => {
-    const { inst } = project();
+  it('⚠️ 高度也各自按内容算(内容多的更高)', () => {
+    const inst = project();
     const a = inst.find((i) => i.id === 'a')!;
     const b = inst.find((i) => i.id === 'b')!;
-    expect(a.size!.w).toBe(b.size!.w);
-    // 宽的那个不该被压缩:仍然装得下「分支Achang123」
-    const fs = 28;
-    let need = 0;
-    for (const ch of '分支Achang123') need += /[一-鿿]/.test(ch) ? fs : fs * 0.55;
-    expect(a.size!.w).toBeGreaterThanOrEqual(Math.round(need));
-  });
-
-  it('⚠️ 高度**不统一** —— 内容多的本来就该更高(内容差异,不是处理方法差异)', () => {
-    const { inst } = project();
-    const a = inst.find((i) => i.id === 'a')!; // 带正文
-    const b = inst.find((i) => i.id === 'b')!; // 只有标题
     expect(a.size!.h).toBeGreaterThan(b.size!.h);
   });
 });

@@ -71,11 +71,11 @@ describe('宽度由标题决定', () => {
     expect(a.size!.w, '正文把框撑宽了 —— 应由标题定宽,正文折行').toBeLessThan(longBody + pad);
   });
 
-  it('⭐ 同层仍然同宽(取该层**标题**最宽者)', () => {
+  it('⭐ 同层**各自按自己的 hn** 定宽(用户 2026-09-11 推翻了"同层同宽")', () => {
     const inst = project();
-    const a = inst.find((i) => i.id === 'a')!;
-    const b = inst.find((i) => i.id === 'b')!;
-    expect(a.size!.w).toBe(b.size!.w);
+    const a = inst.find((i) => i.id === 'a')!; // 长标题
+    const b = inst.find((i) => i.id === 'b')!; // 短标题
+    expect(b.size!.w, '短标题被撑到与长标题同宽 —— 用户已明确不要这样').toBeLessThan(a.size!.w);
   });
 });
 
