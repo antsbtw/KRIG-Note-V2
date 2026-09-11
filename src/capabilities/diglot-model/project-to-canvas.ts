@@ -255,32 +255,42 @@ function nodeSize(
   const maxW = Math.round(fontSize * 16);
   // ⭐⭐ 标题**不许折行**(用户 2026-09-11)。要装下它,框宽必须同时覆盖:
   //   ① 文字本身(按渲染层口径算)
-  //   ② roundRect 的 textBox **左右内缩** rad = 0.15 × min(w,h) —— 渲染层按内缩后的宽折行
+  //   ② roundRect 的 textBox **左右内缩** —— 渲染层按内缩后的宽折行
   //   ③ 渲染层自述的 **±10% 估算误差**余量
-  // ⚠️ 少算任何一项都会「测试绿、真机折行」——②③ 正是我先前漏掉的两项。
-  const TEXTBOX_INSET_RATIO = 0.15; // 与 roundRect.json 的 params.r 缺省一致
-  const ESTIMATE_MARGIN = 1.1;
-  const needed = widest * ESTIMATE_MARGIN;
-  // 内缩按两侧算:usable = w − 2·0.15·min(w,h);保守地按 min=w 反解 → w ≥ need/0.7
-  const forNoWrap = Math.ceil(needed / (1 - 2 * TEXTBOX_INSET_RATIO));
-  const w = Math.max(minW, Math.min(maxW, Math.max(widest + pad.x, forNoWrap)));
-
-  // ⭐ 只有真的被 maxW 夹住才会折行 → 那时才按折行数估高度。
-  // ⚠️ 旧版高度**恒为一行**,于是长文本换了行、盒子却没长高 → 第二行溢出框外。
-  const contentW = Math.max(1, w - pad.x);
-  const headLines = Math.max(1, Math.ceil(m.w / contentW));
-
+  //
+  // ⚠️⚠️ 内缩公式是 `rad = 0.15 × **min(w, h)**`(见 roundRect.json 的 guides),
+  //   基准是**宽高里较小的那个**。我先前按 `need/(1−2×0.15)` 反解,
+  //   等于假设内缩 = 0.3×**w** —— 而节点通常 h < w,真实内缩只有 0.3×h。
+  //   后果:白白多留一大截空白(实测框宽 326、文字仅 207、右侧富余 88px),
+  //   ⭐ 而且框被撑得过宽会**盖住父节点连过来的曲线**(用户:「分支A 怎么看不到连线了」)。
+  //
   // ⭐⭐ **与渲染层同一条公式**(textBlock.ts:`fontSize × 1.7`),
   //   标题行按本级字号、正文行按正文号 —— 因为首块保留了 level 之后,
   //   渲染层就是这么分别算的。
   // ⚠️ 估算与渲染不同源正是本轮一连串毛病的根源;这里对齐,ELK 才能
   //   预留出接近真实的高度,撑高时不至于长出一大截压到兄弟节点(重叠)。
+  // ⭐ 先算高度。标题**通常**一行(本函数就是为此定宽),
+  //   ⚠️ 但标题长到超过 maxW 时仍会被夹住 → 那时真的会折行,高度必须跟上,
+  //     否则第二行溢出框外(踩过)。所以行数按「被 maxW 夹住后的可用宽」算。
+  const cappedW = Math.max(minW, Math.min(maxW, widest + pad.x));
+  const headLines = Math.max(1, Math.ceil(m.w / Math.max(1, cappedW - pad.x)));
+
   const LINE_RATIO = BLOCK_VISUAL_SPEC.body.lineHeight;
   const bodyFs = BLOCK_VISUAL_SPEC.body.fontSize;
   const h =
     Math.round(fontSize * LINE_RATIO) * headLines +
     Math.round(bodyFs * LINE_RATIO) * extraBlocks +
     pad.y;
+
+  // ⭐ 内缩以 **min(w, h)** 为基准,而节点通常 h < w → 用 h 算即可;
+  //   ⚠️ 若 w 反而更小(极短标题),真实内缩只会更小 → 更宽松,不会折行。
+  const TEXTBOX_INSET_RATIO = 0.15; // 与 roundRect.json 的 params.r 缺省一致
+  const ESTIMATE_MARGIN = 1.1;
+  const needed = widest * ESTIMATE_MARGIN;
+  const inset = 2 * TEXTBOX_INSET_RATIO * h;
+  const forNoWrap = Math.ceil(needed + inset);
+  const w = Math.max(minW, Math.min(maxW, Math.max(widest + pad.x, forNoWrap)));
+
   return { w, h };
 }
 
