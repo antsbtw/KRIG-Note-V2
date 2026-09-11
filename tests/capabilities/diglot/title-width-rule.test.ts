@@ -15,6 +15,7 @@ import {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  TEXT_INSET_PX,
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
 import { noteDocToTree } from '@capabilities/diglot-model/note-projection';
@@ -103,7 +104,8 @@ describe('估算高度不低于渲染高度', () => {
     //   所以永远抓不到「高度没覆盖上下内缩」这个 bug(真机日志才抓到)。
     // ⭐ 教训:守卫若照抄实现的公式,就只能验证"实现和自己一致",验不出漏项。
     //   必须按**渲染层真正要的东西**列全:内容 + 内缩 + 撑高阈值。
-    const insetY = 2 * 0.15 * Math.min(a.size!.w, a.size!.h);
+    // ⭐ 内缩已固定 10px(TEXT_INSET_PX),不再按比例
+    const insetY = 2 * TEXT_INSET_PX;
     const need = Math.ceil(renderH + insetY) + ADAPT_PADDING;
 
     expect(

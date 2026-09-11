@@ -41,6 +41,11 @@ export interface ProjectedInstance {
   readonly doc?: unknown;
   /** ⭐ 字号(pt)—— 按树深度取 h1~hn,与 note 标题层级同一套 */
   readonly text_size?: number;
+  /**
+   * ⭐ shape 参数覆盖(覆盖 ShapeDef.params 的 default)。
+   * 导图用它把文字内缩钉成固定 10px,见 TEXT_INSET_PX。
+   */
+  readonly params?: Readonly<Record<string, number>>;
   readonly style_overrides?: { fill?: { color?: string }; line?: { color?: string; width?: number } };
   /**
    * ⭐ 连接点操作点(canvas-rendering 的 `Instance.magnetActions`):
@@ -272,7 +277,6 @@ function nodeSize(
   // ⭐ 先算高度。标题**通常**一行(本函数就是为此定宽),
   //   ⚠️ 但标题长到超过 maxW 时仍会被夹住 → 那时真的会折行,高度必须跟上,
   //     否则第二行溢出框外(踩过)。所以行数按「被 maxW 夹住后的可用宽」算。
-  const TEXTBOX_INSET_RATIO = 0.15; // 与 roundRect.json 的 params.r 缺省一致
   const cappedW = Math.max(minW, Math.min(maxW, widest + pad.x));
   const headLines = Math.max(1, Math.ceil(m.w / Math.max(1, cappedW - pad.x)));
 
@@ -295,18 +299,18 @@ function nodeSize(
   //
   // ⚠️ 我先前只给了 `pad.y = fontSize × 1.0`(≈28),而实测 insetY ≈ 42 —— 不够。
   //   **宽度那边算了左右内缩,高度这边却忘了上下内缩**,是同一个疏忽的两半。
+  // ⭐⭐ 内缩现在是**常量 10px**(TEXT_INSET_PX),不再依赖 h ——
+  //   先前 `insetY = 0.3×min(w,h)` 依赖 h 自己,导致**自激**
+  //   (真机日志:撑了 3 轮才收敛),需要解析解 `(contentH+8)/0.7`。
+  // ⭐ 固定之后退化成简单加法,一次到位。
   const ADAPT_PADDING = 8; // 与 NodeRenderer.adaptTextNodeSizeToContent 一致
-  const hForInset = Math.ceil(
-    (contentH + ADAPT_PADDING) / (1 - 2 * TEXTBOX_INSET_RATIO),
-  );
-  const h = Math.max(contentH + pad.y, hForInset);
+  const h = contentH + 2 * TEXT_INSET_PX + ADAPT_PADDING;
 
   // ⭐ 内缩以 **min(w, h)** 为基准,而节点通常 h < w → 用 h 算即可;
   //   ⚠️ 若 w 反而更小(极短标题),真实内缩只会更小 → 更宽松,不会折行。
   const ESTIMATE_MARGIN = 1.1;
   const needed = widest * ESTIMATE_MARGIN;
-  const inset = 2 * TEXTBOX_INSET_RATIO * h;
-  const forNoWrap = Math.ceil(needed + inset);
+  const forNoWrap = Math.ceil(needed + 2 * TEXT_INSET_PX);
   const w = Math.max(minW, Math.min(maxW, Math.max(widest + pad.x, forNoWrap)));
 
   return { w, h };
@@ -418,6 +422,28 @@ const SHAPE_ALIASES: Readonly<Record<string, string>> = {
   roundRect: 'krig.basic.roundRect',
 };
 
+/**
+ * ⭐⭐ 导图节点的**固定文字内缩**(用户 2026-09-11:「固定边距离吧,先按照 10px」)。
+ *
+ * ⚠️ 原先内缩 = 圆角半径 `rad = 0.15 × min(w,h)` —— 一个参数管两件事,
+ * 且**随框变大而变大**(实测 15.4 → 23.7px):框越高文字离边越远,
+ * 正文可用空间被越挤越小。
+ *
+ * ⭐ 改法**不动共用 shape 的缺省行为**:roundRect 新增 px 参数 `textPad`,
+ * `tpad = max(textPad, rad)`,缺省 textPad=0 → 仍等于 rad(画板既有图元零变化)。
+ * mind 传 `textPad=10` 且把 `r` 调小(使 rad ≤ 10)→ 内缩恒为 10px。
+ */
+export const TEXT_INSET_PX = 10;
+
+/**
+ * ⭐ 导图节点的圆角比例。
+ *
+ * ⚠️ 早期版本必须把它压到 0.05 才能让固定内缩成立(那时 `tpad = max(textPad, rad)`,
+ * 节点一大 rad 就反超 10)。现在 shape 的 guides 已让 **textPad 无条件胜出**,
+ * 圆角与文字内缩**彻底解耦** —— 所以这里可以用正常弧度,不必为内缩牺牲外观。
+ */
+const MIND_CORNER_RATIO = 0.12;
+
 /** 没给形状时的默认 —— 导图节点是圆角矩形。 */
 export const DEFAULT_MIND_SHAPE_REF = 'krig.basic.roundRect';
 
@@ -509,6 +535,8 @@ export function projectToInstances(
       //   否则 ELK 按「只有标题」排版,撑高后容易和兄弟节点压到一起。
       //   ⚠️ 仍只是**初值**:真实高度由渲染层撑(见 nodeSize 注释)。
       size: sizes.get(n.id)!,
+      // ⭐ 固定 10px 文字内缩(见 TEXT_INSET_PX):textPad 生效的前提是 rad ≤ 它
+      params: { textPad: TEXT_INSET_PX, r: MIND_CORNER_RATIO },
       // ⭐⭐ 字号透传给渲染层。
       //
       // ⚠️⚠️ **这里必须传正文号(16),不能传该深度的标题号**:

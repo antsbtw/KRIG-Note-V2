@@ -17,6 +17,7 @@ import {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  TEXT_INSET_PX,
   type LayoutAnswer,
 } from '@capabilities/diglot-model/project-to-canvas';
 import { noteDocToTree } from '@capabilities/diglot-model/note-projection';
@@ -55,9 +56,8 @@ describe('标题不折行', () => {
       const inst = projectWith(title, 2);
       // 渲染字号 = headingFontSize(level) × (text_size / 16)
       const fs = headingFontSize(2) * (inst.text_size! / BLOCK_VISUAL_SPEC.body.fontSize);
-      // roundRect 的 textBox 左右各内缩 rad = 0.15 × min(w,h)
-      const rad = 0.15 * Math.min(inst.size!.w, inst.size!.h);
-      const usable = inst.size!.w - 2 * rad;
+      // ⭐ 内缩已固定 10px(TEXT_INSET_PX,用户 2026-09-11),不再按 min(w,h) 比例
+      const usable = inst.size!.w - 2 * TEXT_INSET_PX;
       const need = renderWidth(title, fs);
       expect(
         usable,
@@ -69,8 +69,7 @@ describe('标题不折行', () => {
   it('⚠️ 还要留 ±10% 的估算误差余量(渲染层自述的误差)', () => {
     const inst = projectWith('分支Achang123', 2);
     const fs = headingFontSize(2) * (inst.text_size! / BLOCK_VISUAL_SPEC.body.fontSize);
-    const rad = 0.15 * Math.min(inst.size!.w, inst.size!.h);
-    const usable = inst.size!.w - 2 * rad;
+    const usable = inst.size!.w - 2 * TEXT_INSET_PX;
     expect(usable, '余量不足 10% → 字体一变就折行').toBeGreaterThanOrEqual(
       renderWidth('分支Achang123', fs) * 1.1,
     );
