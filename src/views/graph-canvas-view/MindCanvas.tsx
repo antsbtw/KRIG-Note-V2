@@ -480,7 +480,17 @@ export function MindCanvas({ workspaceId, graphId, onPinnedChange }: MindCanvasP
   }, [graphId, diglot, render, scheduleSave]);
 
   // 把入口交给上层 toolbar(view 持有状态,toolbar 只负责显示)
+  //
+  // ⚠️⚠️ 这个 effect 曾是**数据被冲掉**的元凶(真机:Maximum update depth exceeded)。
+  //   上层传的是内联箭头 → 每次 render 都是新引用 → 本 effect 每次都重跑
+  //   → setState → 父 re-render → 新箭头 → **无限循环**;
+  //   循环期间本组件被反复重挂,**加载中的空模型盖掉了用户刚编辑的内容**。
+  // ⭐ 上层已改成 useCallback 稳定引用;这里再加一道**值比对**闸,
+  //   即便将来又有人传了不稳定的回调,也不会因为"值没变"而空转。
+  const lastPinnedRef = useRef<number | null>(null);
   useEffect(() => {
+    if (lastPinnedRef.current === pinned) return;
+    lastPinnedRef.current = pinned;
     onPinnedChange?.(pinned, handleReleaseAll);
   }, [pinned, handleReleaseAll, onPinnedChange]);
 

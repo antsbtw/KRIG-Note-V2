@@ -132,9 +132,12 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
     // 正向读回来就会被当成**层级** → 节点一轮轮增殖,往返不收敛。
     // (note-block-grouping.test.ts 的「往返收敛」断言钉的就是这条。)
     for (const extra of bodyBlocksOf(n.content)) {
+      // ⭐⭐ 原样吐回**块类型 + attrs**:mathBlock 还是 mathBlock。
+      // ⚠️ 但**不许带 indent** —— 带了会被正向读成层级 → 节点增殖、往返不收敛。
+      const { indent: _drop, ...attrs } = (extra.attrs ?? {}) as Record<string, unknown>;
       out.push({
-        type: 'paragraph',
-        ...(extra.attrs?.id ? { attrs: { id: extra.attrs.id } } : {}),
+        type: extra.type,
+        ...(Object.keys(attrs).length > 0 ? { attrs } : {}),
         ...(extra.content?.length ? { content: extra.content } : {}),
       });
     }
@@ -203,9 +206,15 @@ function rankAt(i: number): string {
  */
 export function noteDocToTree(doc: unknown): SLayer {
   const d = doc as { payload?: { content?: PmNode[] } } | undefined;
-  const raw = (d?.payload?.content ?? []).filter(
-    (b) => b.type === 'heading' || b.type === 'paragraph',
-  );
+  // ⚠️⚠️ **不过滤块类型** —— 曾经这里是
+  //   `.filter(b => b.type === 'heading' || b.type === 'paragraph')`,
+  //   于是 mathBlock / codeBlock / 列表 / 引用 / callout **全被静默丢弃**。
+  // ⭐ 真机日志铁证:用户把正文变成块级公式的那一刻 ——
+  //   treeCommit 收到 `heading,heading,mathBlock,...` → 存盘 len 退回模板 628,
+  //   **用户内容当场消失**。
+  // ⭐ 渲染层 RENDERABLE_ATOM_TYPES 有 13 种块,投影只认 2 种 = 其余全丢;
+  //   这正违反分区原则推论③「不认识的一律原样保留」(04 §0.6.3)。
+  const raw = d?.payload?.content ?? [];
 
   // ⭐⭐ 节点 = 标题 + 它的正文(规格 03 §5.5,用户拍板:「要默认它作为一个整体」)。
   //
@@ -222,8 +231,10 @@ export function noteDocToTree(doc: unknown): SLayer {
   const groups: { head: PmNode; body: PmNode[] }[] = [];
   for (const b of raw) {
     const ind = b.attrs?.indent;
+    // ⭐ 只有 heading、以及带 indent 的 paragraph(h6 之后的层级)开新节点;
+    //   **其余一切块类型**(mathBlock/codeBlock/列表/…)都并入上一个节点当正文。
     const startsNode =
-      b.type === 'heading' || (typeof ind === 'number' && ind >= 1);
+      b.type === 'heading' || (b.type === 'paragraph' && typeof ind === 'number' && ind >= 1);
     // ⚠️ 文档以无 indent 段落开头 → 没有「上一个节点」可并,自成节点,
     //    否则这段内容会凭空消失。
     if (startsNode || groups.length === 0) groups.push({ head: b, body: [] });
@@ -276,10 +287,12 @@ export function noteDocToTree(doc: unknown): SLayer {
     // ⭐ 富内容原样保住:有 inline 就包回信封,不经纯文本拍平
     // ⭐⭐ content 现在可装**多块**:首块 = 标题本身,其后 = 并进来的正文。
     //    ⚠️ inlineOf / contentToText 只取首块 —— 那仍然正确(标签 = 首行)。
+    // ⭐⭐ **保留原块类型**(不再一律拍成 paragraph):
+    //   mathBlock 拍成 paragraph = 公式降级成纯文本,用户的东西照样毁。
     const bodyBlocks = groups[i].body.map((x) => ({
-      type: 'paragraph',
+      type: x.type,
       ...(x.content?.length ? { content: x.content } : {}),
-      ...(x.attrs?.id ? { attrs: { id: x.attrs.id } } : {}),
+      ...(x.attrs ? { attrs: { ...x.attrs } } : {}),
     })) as PmNode[];
     // ⭐⭐ 首块**保留 heading/level**(用户:「paragraph 应该是正文文字大小」)。
     //
@@ -290,7 +303,8 @@ export function noteDocToTree(doc: unknown): SLayer {
     // ⚠️ 之前把首块拍成裸 paragraph,level 丢了 → 渲染层无从区分,
     //   整框被节点级 text_size 拉成一样大(真机现象:正文和标题一样大)。
     const headBlock: PmNode = {
-      type: b.type === 'heading' ? 'heading' : 'paragraph',
+      // ⭐ 首块保留自己的类型(heading 保 heading;文档以 mathBlock 开头就保 mathBlock)
+      type: b.type,
       ...(b.attrs?.level !== undefined ? { attrs: { level: b.attrs.level } } : {}),
       content: (b.content?.length ?? 0) > 0 ? b.content : [{ type: 'text', text: textOf(b) }],
     };

@@ -106,6 +106,27 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     count: 0,
     releaseAll: () => {},
   });
+
+  /**
+   * ⚠️⚠️ **必须是稳定引用**(真机踩过:Maximum update depth exceeded,并**冲掉用户数据**)。
+   *
+   * 原来这里写的是**内联箭头函数**:
+   *   `onPinnedChange={(count, releaseAll) => setMindPinned({ count, releaseAll })}`
+   * 每次 render 都是新函数 → MindCanvas 里 `useEffect[..., onPinnedChange]` 每次都重跑
+   * → `setMindPinned` → 父组件 re-render → 又是新箭头 → **无限循环**。
+   *
+   * ⭐ 后果远不止刷屏:循环期间 MindCanvas 被反复重挂,
+   * **加载中的空模型会盖掉用户刚编辑的内容**(实测 semantic 退回模板的 628 字节)。
+   *
+   * ⚠️ 两道闸缺一不可:
+   *  ① 回调本身 useCallback 稳定(否则 effect 恒重跑)
+   *  ② setState 前**比对值**(否则值没变也 re-render,循环照旧)
+   */
+  const handleMindPinnedChange = useCallback((count: number, releaseAll: () => void): void => {
+    setMindPinned((prev) =>
+      prev.count === count && prev.releaseAll === releaseAll ? prev : { count, releaseAll },
+    );
+  }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
@@ -392,7 +413,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
           <MindCanvas
             workspaceId={workspaceId}
             graphId={activeGraphId}
-            onPinnedChange={(count, releaseAll) => setMindPinned({ count, releaseAll })}
+            onPinnedChange={handleMindPinnedChange}
           />
         ) : activeVariant === null ? (
           /* ⚠️ variant 未知(加载中)→ 两个渲染器都不挂,
