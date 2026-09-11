@@ -272,19 +272,37 @@ function nodeSize(
   // ⭐ 先算高度。标题**通常**一行(本函数就是为此定宽),
   //   ⚠️ 但标题长到超过 maxW 时仍会被夹住 → 那时真的会折行,高度必须跟上,
   //     否则第二行溢出框外(踩过)。所以行数按「被 maxW 夹住后的可用宽」算。
+  const TEXTBOX_INSET_RATIO = 0.15; // 与 roundRect.json 的 params.r 缺省一致
   const cappedW = Math.max(minW, Math.min(maxW, widest + pad.x));
   const headLines = Math.max(1, Math.ceil(m.w / Math.max(1, cappedW - pad.x)));
 
   const LINE_RATIO = BLOCK_VISUAL_SPEC.body.lineHeight;
   const bodyFs = BLOCK_VISUAL_SPEC.body.fontSize;
-  const h =
+
+  // ⭐ 渲染层真正产出的内容高(textBlock.ts:每块 fontSize × 1.7 累加)
+  const contentH =
     Math.round(fontSize * LINE_RATIO) * headLines +
-    Math.round(bodyFs * LINE_RATIO) * extraBlocks +
-    pad.y;
+    Math.round(bodyFs * LINE_RATIO) * extraBlocks;
+
+  // ⭐⭐ 高度必须**连 textBox 的上下内缩一起覆盖**(真机日志定位)。
+  //
+  // ⚠️⚠️ 内缩 `insetY = 2 × 0.15 × min(w, h)` —— 注意它**依赖 h 自己**:
+  //   h 涨一点 → insetY 跟着涨 → 需要的 h 又涨 → **自激**。
+  //   真机日志实测撑了 3 轮才收敛(130→138→140),每轮都是一次全节点重渲。
+  // ⭐ 解析解(h < w 时 min 取 h):
+  //     h ≥ contentH + 0.3·h + ADAPT_PADDING  ⟹  h ≥ (contentH + PADDING) / 0.7
+  //   一次到位,撑高**根本不触发**,自激自然不存在。
+  //
+  // ⚠️ 我先前只给了 `pad.y = fontSize × 1.0`(≈28),而实测 insetY ≈ 42 —— 不够。
+  //   **宽度那边算了左右内缩,高度这边却忘了上下内缩**,是同一个疏忽的两半。
+  const ADAPT_PADDING = 8; // 与 NodeRenderer.adaptTextNodeSizeToContent 一致
+  const hForInset = Math.ceil(
+    (contentH + ADAPT_PADDING) / (1 - 2 * TEXTBOX_INSET_RATIO),
+  );
+  const h = Math.max(contentH + pad.y, hForInset);
 
   // ⭐ 内缩以 **min(w, h)** 为基准,而节点通常 h < w → 用 h 算即可;
   //   ⚠️ 若 w 反而更小(极短标题),真实内缩只会更小 → 更宽松,不会折行。
-  const TEXTBOX_INSET_RATIO = 0.15; // 与 roundRect.json 的 params.r 缺省一致
   const ESTIMATE_MARGIN = 1.1;
   const needed = widest * ESTIMATE_MARGIN;
   const inset = 2 * TEXTBOX_INSET_RATIO * h;

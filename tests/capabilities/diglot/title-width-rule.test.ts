@@ -99,11 +99,17 @@ describe('估算高度不低于渲染高度', () => {
     const fs = headingFontSize(2);
     const renderH = Math.round(fs * LINE) + Math.round(BODY * LINE) * 2;
     const ADAPT_PADDING = 8; // NodeRenderer.adaptTextNodeSizeToContent
+    // ⚠️⚠️ 本断言原来**漏了 insetY** —— 它与被测代码犯了同一个疏忽,
+    //   所以永远抓不到「高度没覆盖上下内缩」这个 bug(真机日志才抓到)。
+    // ⭐ 教训:守卫若照抄实现的公式,就只能验证"实现和自己一致",验不出漏项。
+    //   必须按**渲染层真正要的东西**列全:内容 + 内缩 + 撑高阈值。
+    const insetY = 2 * 0.15 * Math.min(a.size!.w, a.size!.h);
+    const need = Math.ceil(renderH + insetY) + ADAPT_PADDING;
 
     expect(
       a.size!.h,
-      `估算 ${a.size!.h} < 渲染 ${renderH + ADAPT_PADDING} → 会触发撑高 → 吃掉兄弟间距`,
-    ).toBeGreaterThanOrEqual(renderH + ADAPT_PADDING);
+      `估算 ${a.size!.h} < 渲染 ${need} → 会触发撑高 → 吃掉兄弟间距`,
+    ).toBeGreaterThanOrEqual(need);
   });
 
   it('⭐ 纯标题节点同理(不能因为没正文就估算不足)', () => {
