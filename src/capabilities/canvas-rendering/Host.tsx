@@ -38,6 +38,7 @@ import { MagnetActionsOverlay } from './scene/MagnetActionsOverlay';
 import { listMagnets } from './interaction/magnet-snap';
 import { resolveMagnetActions, type ResolvedMagnetAction } from './interaction/magnet-actions';
 import { InteractionController } from './interaction/InteractionController';
+import { clampZoomPercent } from './interaction/zoom-levels';
 import { combineSelectedToSubstance } from './combine';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { ShapeLibraryApi, SubstanceDef } from '@capabilities/shape-library/types';
@@ -237,6 +238,19 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       };
     }, []);
 
+    /**
+     * 读当前视口(toolbar 显示缩放百分比用).
+     * ⭐ 为什么需要它:`onViewportChange` 只在 pan/zoom **变化时**推,
+     * 而 `loadDocument` 恢复视口后不推 —— 只靠回调的话,打开一个存在 250% 的画板,
+     * toolbar 会一直显示 100% 直到用户随手拖一下。
+     */
+    const getViewport = useCallback((): Viewport | null => {
+      const scene = sceneRef.current;
+      if (!scene) return null;
+      const v = scene.getView();
+      return { centerX: v.centerX, centerY: v.centerY, zoom: v.zoom };
+    }, []);
+
     const setViewport = useCallback((vp: Viewport): void => {
       sceneRef.current?.setView(vp.centerX, vp.centerY, vp.zoom);
       viewportDirtyRef.current = true;
@@ -254,7 +268,8 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       const scene = sceneRef.current;
       if (!scene) return;
       const v = scene.getView();
-      const z = Math.max(10, Math.min(2000, percent)) / 100;
+      // ⚠️ 上下限走共用 zoom-levels —— 与滚轮/快捷键同一区间(别在这里再夹一遍)
+      const z = clampZoomPercent(percent) / 100;
       scene.setView(v.centerX, v.centerY, z);
       viewportDirtyRef.current = true;
     }, []);
@@ -402,6 +417,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         loadDocument,
         relayout,
         serialize,
+        getViewport,
         setViewport,
         fitToContent,
         zoomTo,
@@ -422,6 +438,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         loadDocument,
         relayout,
         serialize,
+        getViewport,
         setViewport,
         fitToContent,
         zoomTo,

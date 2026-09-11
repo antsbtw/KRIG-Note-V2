@@ -312,9 +312,22 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     },
     [scheduleSave],
   );
+  /**
+   * 视口订阅者(toolbar 缩放百分比用).
+   * ⚠️ 用 ref 存集合而非 state —— 订阅/退订不该引起 re-render;
+   * 退订函数必须真的把自己摘掉(常驻订阅没有停止调用就是泄漏)。
+   */
+  const viewportSubsRef = useRef<Set<() => void>>(new Set());
+  const subscribeViewport = useCallback((onChange: () => void): (() => void) => {
+    viewportSubsRef.current.add(onChange);
+    return () => {
+      viewportSubsRef.current.delete(onChange);
+    };
+  }, []);
   const handleViewportChange = useCallback(
     (_vp: Viewport): void => {
       scheduleSave();
+      for (const fn of viewportSubsRef.current) fn();
     },
     [scheduleSave],
   );
@@ -397,6 +410,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         selectedCount={selectedIds.length}
         onAddClick={handlePickerOpen}
         onCombineClick={() => setCombineDialogOpen(true)}
+        subscribeViewport={subscribeViewport}
       />
       <div className="krig-graph-canvas-view__body">
         {activeGraphId == null ? (

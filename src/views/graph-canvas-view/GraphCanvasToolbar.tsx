@@ -11,6 +11,7 @@
 
 import {
   type MutableRefObject,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,6 +22,7 @@ import type {
   GraphLibraryStoreApi,
 } from '@capabilities/graph-library-store/types';
 import type { CanvasHostHandle } from '@capabilities/canvas-rendering/types';
+import { GraphCanvasZoomControl } from './GraphCanvasZoomControl';
 
 interface GraphCanvasToolbarProps {
   activeGraphId: string | null;
@@ -42,6 +44,11 @@ interface GraphCanvasToolbarProps {
   onAddClick: (rect: DOMRect) => void;
   /** Combine 按钮点击 — view 端打开 CreateSubstanceDialog */
   onCombineClick: () => void;
+  /**
+   * 订阅视口变化(滚轮 / pinch / 快捷键缩放时通知 toolbar 刷新百分比).
+   * ⚠️ 必须返回退订函数.
+   */
+  subscribeViewport: (onChange: () => void) => () => void;
 }
 
 export function GraphCanvasToolbar({
@@ -53,6 +60,7 @@ export function GraphCanvasToolbar({
   selectedCount,
   onAddClick,
   onCombineClick,
+  subscribeViewport,
 }: GraphCanvasToolbarProps) {
   const addBtnRef = useRef<HTMLButtonElement>(null);
   const library = useMemo(
@@ -96,6 +104,20 @@ export function GraphCanvasToolbar({
   const handleFit = (): void => {
     hostRef.current?.fitToContent();
   };
+
+  // ── 缩放控件的宿主适配(⭐ 控件本身不认识 hostRef,只认这三个函数)──
+  const getZoom = useCallback(
+    (): number | null => hostRef.current?.getViewport()?.zoom ?? null,
+    [hostRef],
+  );
+  const zoomTo = useCallback(
+    (percent: number): void => hostRef.current?.zoomTo(percent),
+    [hostRef],
+  );
+  const zoomFit = useCallback(
+    (): boolean => hostRef.current?.fitToContent() ?? false,
+    [hostRef],
+  );
 
   const handleAdd = (): void => {
     const rect = addBtnRef.current?.getBoundingClientRect();
@@ -153,6 +175,19 @@ export function GraphCanvasToolbar({
                 ⊟ Combine
               </button>
             )}
+            {/*
+              ⭐ 缩放控件。⚠️ 只在画板显示 —— 导图走 MindCanvas 自己的 Host,
+              本组件的 hostRef 在导图下**恒为 null**(见上方 isMind 注释),
+              挂上去会是「显示不动、点了没反应」的死控件。
+              导图侧的接线是下一轮的事(控件本身已按可继承的形态写:
+              只依赖 getZoom / zoomTo / fitToContent / subscribe)。
+            */}
+            <GraphCanvasZoomControl
+              getZoom={getZoom}
+              zoomTo={zoomTo}
+              fitToContent={zoomFit}
+              subscribe={subscribeViewport}
+            />
           </>
         )}
       </div>

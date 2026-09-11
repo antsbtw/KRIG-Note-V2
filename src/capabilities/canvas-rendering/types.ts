@@ -250,6 +250,12 @@ export interface CanvasHostHandle {
   loadDocument(doc: CanvasDocument): void;
   /** 序列化当前状态 — view 防抖保存用 */
   serialize(): CanvasDocument;
+  /**
+   * 读当前视口 — toolbar 显示缩放百分比用.
+   * ⚠️ Host 未挂载(容器还没 mount)时给 null,调用方**不要**兜底成 zoom=1
+   * 去显示 —— 那会在恢复了 250% 的画板上骗人显示 100%.
+   */
+  getViewport(): Viewport | null;
   /** 直接设视口 — view 端 toolbar zoom 滑块用 */
   setViewport(vp: Viewport): void;
   /** Fit-to-content;true 表示成功 fit,false 表示空画板/退化几何跳过 */
@@ -321,9 +327,41 @@ export interface CanvasRenderingApi {
   LibraryPicker: ComponentType<LibraryPickerComponentProps>;
   /** Create Substance Dialog(模态;G4.4c) */
   CreateSubstanceDialog: ComponentType<CreateSubstanceDialogComponentProps>;
+  /**
+   * 缩放档位 / 上下限 / 快捷键映射(纯逻辑,零依赖).
+   *
+   * ⭐ 为什么走 api 而不让 view 直 import:上下限与档位是**渲染侧的事实**
+   * (滚轮、快捷键、按钮必须是同一套),view 只是消费者;W5 边界也不允许
+   * view 直 import capability 运行时值.
+   */
+  zoom: CanvasZoomApi;
   // FloatingInspector(G4.4b 右上角 Format Shape 浮窗)L5-G5 删除 — 被 node-toolbar
   // 选中框跟随浮条取代。
 }
+
+/**
+ * 缩放档位逻辑(实现在 interaction/zoom-levels.ts).
+ * ⚠️ 全部是**纯函数 + 常量**,不碰相机 —— 改视口仍走 Host 的 zoomTo / fitToContent.
+ */
+export interface CanvasZoomApi {
+  /** 缩放下限(百分比) */
+  readonly MIN_PERCENT: number;
+  /** 缩放上限(百分比) */
+  readonly MAX_PERCENT: number;
+  /** 档位表(升序,首尾 = 上下限) */
+  readonly STEPS: readonly number[];
+  /** 夹到合法区间(百分比) */
+  clamp(percent: number): number;
+  /** zoom 倍率 → 显示用取整百分比(1 → 100) */
+  format(zoom: number): number;
+  /** 下一档(放大);已到顶返回上限 */
+  next(percent: number): number;
+  /** 上一档(缩小);已到底返回下限 */
+  prev(percent: number): number;
+}
+
+/** 缩放快捷键意图 */
+export type CanvasZoomShortcut = 'zoom-in' | 'zoom-out' | 'zoom-reset';
 
 // UI 组件 props 形态(给 CanvasRenderingApi 用,实际类型在各组件文件)
 

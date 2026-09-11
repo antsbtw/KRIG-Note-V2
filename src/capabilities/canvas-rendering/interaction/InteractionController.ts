@@ -38,6 +38,15 @@ import {
   resolveMagnetDragOut,
   type MagnetDragOutTarget,
 } from './magnet-actions';
+import {
+  MIN_ZOOM,
+  MAX_ZOOM,
+  clampZoomPercent,
+  nextZoomStep,
+  prevZoomStep,
+  matchZoomShortcut,
+  type ZoomShortcut,
+} from './zoom-levels';
 
 /**
  * Picker / Toolbar 触发"添加模式"的入参:
@@ -67,10 +76,12 @@ const MAGNET_ACTION_DRAG_THRESHOLD_PX = 4;
  */
 const MAGNET_ACTION_PREVIEW_LINE_REF = 'krig.line.straight';
 
-/** V1 wheel zoom 灵敏度 / 上下限(InteractionController.ts:155-160 直迁) */
+/**
+ * V1 wheel zoom 灵敏度(InteractionController.ts:155-160 直迁)。
+ * ⚠️ 上下限**不在这里定义** —— 见 ./zoom-levels(toolbar 按钮 / 快捷键 / 滚轮
+ * 共用同一区间;此前这里和 Host.zoomTo 各写一遍,改一处漏一处就会错位)。
+ */
 const WHEEL_ZOOM_SENSITIVITY = 0.005;
-const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 20;
 
 export interface InteractionControllerOpts {
   container: HTMLElement;
@@ -713,6 +724,15 @@ export class InteractionController {
 
     const meta = e.metaKey || e.ctrlKey;
 
+    // Cmd/Ctrl + `+` / `-` / `0`(放大 / 缩小 / 回 100%)
+    // ⭐ 按**档位**跳,不是线性加减;档位表与 toolbar 共用 zoom-levels
+    const zoomIntent = matchZoomShortcut(e);
+    if (zoomIntent) {
+      e.preventDefault();
+      this.applyZoomShortcut(zoomIntent);
+      return;
+    }
+
     // Cmd/Ctrl + Z / Shift+Z(undo / redo)
     if (meta && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
@@ -760,6 +780,27 @@ export class InteractionController {
         this.clearSelection();
       }
     }
+  }
+
+  /**
+   * 快捷键缩放 —— 以**视口中心**为锚点(不涉及鼠标位置).
+   *
+   * ⚠️ 与滚轮的 zoom-to-cursor 不同:键盘没有"鼠标底下那个图元"这个概念,
+   * 按中心缩放才是用户预期(与 toolbar 按钮同一行为).
+   * ⭐ 档位跳转与上下限全部走共用 zoom-levels,不在这里再算一遍.
+   */
+  private applyZoomShortcut(intent: ZoomShortcut): void {
+    const view = this.sceneManager.getView();
+    const curPercent = view.zoom * 100;
+    let target: number;
+    if (intent === 'zoom-in') target = nextZoomStep(curPercent);
+    else if (intent === 'zoom-out') target = prevZoomStep(curPercent);
+    else target = 100;
+
+    const nextZoom = clampZoomPercent(target) / 100;
+    if (nextZoom === view.zoom) return;
+    this.sceneManager.setView(view.centerX, view.centerY, nextZoom);
+    this.onViewportChange?.();
   }
 
   // ─────────────────────────────────────────────────────────
