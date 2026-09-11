@@ -182,7 +182,7 @@ function nodeSizeOf(
   const texts = blockTextsOf(content);
   const head = texts[0] ?? '';
   const bodies = texts.slice(1);
-  return nodeSize(head, fontSize, bodies.length, bodies);
+  return nodeSize(head, fontSize, bodies.length);
 }
 
 /**
@@ -224,19 +224,20 @@ function nodeSize(
   text: string,
   fontSize: number,
   extraBlocks = 0,
-  bodyTexts: readonly string[] = [],
 ): { w: number; h: number } {
   const m = measureText(text, fontSize);
   const pad = paddingFor(fontSize);
   const minW = Math.round(fontSize * 3);
 
-  // ⭐⭐ 宽度按**最宽那一行**算(标题按本级字号,正文按正文号)——
-  //   只按标题算会让更长的正文被硬折甚至溢出框外(真机:「分支Achang123」)。
-  const bodyFsForW = BLOCK_VISUAL_SPEC.body.fontSize;
-  const widest = bodyTexts.reduce(
-    (acc, t) => Math.max(acc, measureText(t, bodyFsForW).w),
-    m.w,
-  );
+  // ⭐⭐ 宽度**只由标题(hn)那一行决定**(用户 2026-09-11 拍板):
+  //   「应该按照 hn 的长度来确定主题框的长度,除非用户手动缩短。」
+  //
+  // ⚠️ 先前写成「取最宽那一行(含正文)」—— 方向就不对:
+  //   一行长正文就能把框撑得很宽,而正文本来就该**在框内折行**。
+  // ⭐ 反过来,标题**必须一行装下**:装不下就会折行 → 框比 ELK 的估算更高
+  //   → 渲染层撑高 → **把兄弟间距吃掉**(真机实测:同层间距 85px 只剩 11px)。
+  //   所以这条规则不只是好看,它是**布局稳定的前提**。
+  const widest = m.w;
 
   // ⭐ 上限不是「排版宽度」,而是**防失控的兜底** —— 有人粘一整段进来时,
   //   不至于把图横向撑到几千像素;到那个长度才折行是合理的。

@@ -60,7 +60,11 @@ describe('布局尺寸 == 渲染尺寸', () => {
 });
 
 describe('宽度自适应', () => {
-  it('⭐⭐ 正文比标题长时,宽度要按**最宽那一行**算', () => {
+  it('⭐⭐ 宽度由**标题**决定,正文再长也在框内折行(用户 2026-09-11 拍板)', () => {
+    // ⚠️ 本条原来断言的是「按最宽那一行(含正文)算」—— **已被用户推翻**:
+    //   「应该按照 hn 的长度来确定主题框的长度,除非用户手动缩短。」
+    // ⭐ 而且那条旧规则有害:一行长正文能把框撑得很宽,
+    //   反过来标题装不下就折行 → 撑高 → 吃掉兄弟间距(真机 85px→11px)。
     const s = noteDocToTree({
       format: 'pm-doc-json', version: '0.1',
       payload: { type: 'doc', content: [
@@ -72,9 +76,12 @@ describe('宽度自适应', () => {
     const inst = projectToInstances(s, new Map(), fakeLayout(req)).filter((i) => !isTreeLineId(i.id));
     const node = inst.find((i) => i.id === 'root')!;
 
-    // 只按「短」算宽 → 会很窄;按最宽行算 → 明显更宽
-    const narrowIfTitleOnly = 40 * 3;
-    expect(node.size!.w, '宽度只按标题算 → 正文被硬折/溢出').toBeGreaterThan(narrowIfTitleOnly);
+    // 标题是「短」一个字 → 框应贴着标题走,不被长正文撑开。
+    // ⚠️ 此时生效的是**下限** minW = fontSize×3(防「空标签变成一条缝」),
+    //    不是正文宽度 —— 断言按下限写,别按我手算的期望值写(手算过一次就错了)。
+    const fs = 38; // h1
+    const minW = Math.round(fs * 3);
+    expect(node.size!.w, '正文把框撑宽了 —— 应由标题定宽').toBe(minW);
   });
 });
 
