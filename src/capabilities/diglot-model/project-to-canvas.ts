@@ -127,13 +127,24 @@ function paddingFor(fontSize: number): { x: number; y: number } {
   return { x: Math.round(fontSize * 1.6), y: Math.round(fontSize * 1.0) };
 }
 
+/**
+ * ⭐⭐ 西文字符的宽度系数 —— **必须与渲染层 `estimateAdvance` 一致**。
+ *
+ * ⚠️ 真机踩过:这里曾是 `0.55`,而 textBlock.ts 的 `estimateAdvance` 是 **0.6**。
+ * 「分支Achang123」差 13px —— 我算 195、渲染 207,而 textBox 可用宽只有 209,
+ * 只剩 2px 余量 → **测试绿、真机照折行**。
+ * ⭐ 度量不同源,就等于没度量。
+ */
+const LATIN_ADVANCE_RATIO = 0.6;
+
 function measureText(text: string, fontSize: number): { w: number; h: number } {
   const lineH = Math.round(fontSize * 1.4);
   if (text.length === 0) return { w: Math.round(fontSize * 2.5), h: lineH };
   let w = 0;
   for (const ch of text) {
-    // CJK / 全角标点按全宽,其余按窄字
-    w += /[一-鿿぀-ゟ゠-ヿ　-〿＀-￯]/.test(ch) ? fontSize : fontSize * 0.55;
+    // ⚠️ 判据也要与渲染层同口径:它只认 U+4E00–9FFF 为全宽
+    const code = ch.codePointAt(0) ?? 0;
+    w += code >= 0x4e00 && code <= 0x9fff ? fontSize : fontSize * LATIN_ADVANCE_RATIO;
   }
   return { w: Math.round(w), h: lineH };
 }
@@ -248,7 +259,17 @@ function nodeSize(
   //   ⭐ 记这一笔是因为我当时改宽了上限、症状却还在 —— **改错地方而症状仍在**,
   //   说明「看起来相关」不等于「就是它」。上限保持 16 字宽不动。
   const maxW = Math.round(fontSize * 16);
-  const w = Math.max(minW, Math.min(maxW, widest + pad.x));
+  // ⭐⭐ 标题**不许折行**(用户 2026-09-11)。要装下它,框宽必须同时覆盖:
+  //   ① 文字本身(按渲染层口径算)
+  //   ② roundRect 的 textBox **左右内缩** rad = 0.15 × min(w,h) —— 渲染层按内缩后的宽折行
+  //   ③ 渲染层自述的 **±10% 估算误差**余量
+  // ⚠️ 少算任何一项都会「测试绿、真机折行」——②③ 正是我先前漏掉的两项。
+  const TEXTBOX_INSET_RATIO = 0.15; // 与 roundRect.json 的 params.r 缺省一致
+  const ESTIMATE_MARGIN = 1.1;
+  const needed = widest * ESTIMATE_MARGIN;
+  // 内缩按两侧算:usable = w − 2·0.15·min(w,h);保守地按 min=w 反解 → w ≥ need/0.7
+  const forNoWrap = Math.ceil(needed / (1 - 2 * TEXTBOX_INSET_RATIO));
+  const w = Math.max(minW, Math.min(maxW, Math.max(widest + pad.x, forNoWrap)));
 
   // ⭐ 只有真的被 maxW 夹住才会折行 → 那时才按折行数估高度。
   // ⚠️ 旧版高度**恒为一行**,于是长文本换了行、盒子却没长高 → 第二行溢出框外。
