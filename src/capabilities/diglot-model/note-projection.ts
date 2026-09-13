@@ -20,7 +20,17 @@
  * 而 note block **自带稳定 id**,增删行不影响其它块 —— 债 6 在这条路上不存在。
  */
 
-import type { NodeId, RichContent, SLayer, SNode } from './types';
+import type { EdgeId, NodeId, RichContent, SLayer, SNode } from './types';
+import {
+  defRelations,
+  defValue,
+  isDefBlock,
+  parseDefBlock,
+  serializeDefBlock,
+  classifyDefLine,
+  type DefBlock,
+} from './def-block';
+import { deterministicEdgeId } from './edge-id';
 import { contentToText, textToContent } from './mermaid-mindmap';
 
 /**
@@ -126,6 +136,12 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
       ...(inline.length > 0 ? { content: inline } : {}),
     });
 
+    // ⭐⭐ def 块紧跟 hn 之后 emit(§7.7.3 反向第 1 条)。
+    // ⚠️ 一行都没有 → **不 emit 空块**,否则往返会多出一段。
+    if (n.defLines && n.defLines.length > 0) {
+      out.push(serializeDefBlock({ lines: n.defLines.map(classifyDefLine) }) as PmNode);
+    }
+
     // ⭐⭐ 首块之后的块 = 并进来的正文,**原样 emit 成无 indent 的 paragraph**。
     //
     // ⚠️⚠️ 这里是本节最容易写错的地方:正文若也按深度加 indent,
@@ -228,8 +244,19 @@ export function noteDocToTree(doc: unknown): SLayer {
   //
   // ⭐ 两条不冲突:noteFormForDepth 产出的层级段落**永远带 indent >= 1**
   //   (depth 6 → indent 1 …),从不产出无 indent 段落 —— 那个形态是空出来的。
-  const groups: { head: PmNode; body: PmNode[] }[] = [];
+  // ⭐⭐ def 块单独收着,**不进 body** —— 否则按 §5.5「无 indent 段落并入上一节点」
+  //   它会被当成正文,画布主题框里就会显示 `id: B` 这种东西(`01 §7.7.3` 正向第 2 条)。
+  const groups: { head: PmNode; body: PmNode[]; def?: DefBlock }[] = [];
   for (const b of raw) {
+    // ⚠️ 必须在 startsNode 判定**之前**拦下:def 块是 paragraph,
+    //   若它带了 indent 会被误判成"开新节点"。
+    if (groups.length > 0 && isDefBlock(b)) {
+      const g = groups[groups.length - 1];
+      // ⭐ 一个节点只认第一个 def 块;多余的按正文原样保留(不静默吞)
+      if (g.def === undefined) g.def = parseDefBlock(b);
+      else g.body.push(b);
+      continue;
+    }
     const ind = b.attrs?.indent;
     // ⭐ 只有 heading、以及带 indent 的 paragraph(h6 之后的层级)开新节点;
     //   **其余一切块类型**(mathBlock/codeBlock/列表/…)都并入上一个节点当正文。
@@ -272,6 +299,19 @@ export function noteDocToTree(doc: unknown): SLayer {
     });
   }
 
+  // ⭐⭐ 别名表:`id: A` → NodeId(§7.7.7 / §2.5.3)。
+  //   ⚠️ 别名只是**人写的书写便利**,真身份仍是 block id(ULID)。
+  //   ⭐ 撞车自动加序号(方案丙:用户说了算 + 系统兜底,`00 §2.5.4`)。
+  const aliasToId = new Map<string, NodeId>();
+  groups.forEach((g, i) => {
+    if (!g.def) return;
+    const alias = defValue(g.def, 'id');
+    if (alias === undefined || alias === '') return;
+    let name = alias;
+    for (let n = 2; aliasToId.has(name); n += 1) name = `${alias}${n}`;
+    aliasToId.set(name, ids[i]);
+  });
+
   let rootSeen = false;
   const nodes: SNode[] = blocks.map((b, i) => {
     const isTop = parents[i] === null;
@@ -283,6 +323,14 @@ export function noteDocToTree(doc: unknown): SLayer {
       } else {
         role = 'floating';
       }
+    }
+    // ⭐⭐ def 块的 `role:` **显式优先**(§7.7.7);没写才回落上面的隐式规则。
+    //   ⚠️ 隐式规则(首个顶层=root)靠**位置**定身份 —— 顺序一变身份就变(与债 6 同源),
+    //     所以显式声明必须能盖过它。
+    const declaredRole = groups[i].def ? defValue(groups[i].def, 'role') : undefined;
+    if (declaredRole === 'floating' || declaredRole === 'root' || declaredRole === 'branch') {
+      if (declaredRole === 'root') rootSeen = true;
+      role = declaredRole;
     }
     // ⭐ 富内容原样保住:有 inline 就包回信封,不经纯文本拍平
     // ⭐⭐ content 现在可装**多块**:首块 = 标题本身,其后 = 并进来的正文。
@@ -313,10 +361,40 @@ export function noteDocToTree(doc: unknown): SLayer {
       version: '0.1',
       payload: { type: 'doc', content: [headBlock, ...bodyBlocks] },
     };
-    return { id: ids[i], content, parent: parents[i], order: orders[i], role };
+    // ⭐ def 块原样带上(逐字节往返的载体);没有就不带这个字段
+    const defLines = groups[i].def?.lines.map((l) => l.raw);
+    return {
+      id: ids[i],
+      content,
+      parent: parents[i],
+      order: orders[i],
+      role,
+      ...(defLines ? { defLines } : {}),
+    };
   });
 
-  return { nodes, edges: [], spans: [] };
+  // ⭐⭐ 关系行 → Edge。⚠️ 这就是「联系线存盘即丢」的修复点:
+  //   以前这里硬写 `edges: []`,连的线一存盘就没了(离线探针实证)。
+  //
+  // ⭐ 别名解析到 NodeId;⚠️ **悬空引用丢弃但不报错**(方案丙 §7.7.4):
+  //   原文仍在 def 块里(defLines 原样保留 → 写回时吐回去),UI 侧标红提示。
+  const edges: { id: EdgeId; source: NodeId; target: NodeId; label?: string }[] = [];
+  const seen = new Set<string>();
+  for (const g of groups) {
+    if (!g.def) continue;
+    for (const rel of defRelations(g.def)) {
+      const source = aliasToId.get(rel.source);
+      const target = aliasToId.get(rel.target);
+      if (!source || !target) continue; // 悬空:不造边,原文照留
+      // ⭐ 确定性 id —— 重复连同一对端点 = 覆盖而非新增(债 3,`03 §3.6`)
+      const id = deterministicEdgeId(source, target);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      edges.push({ id, source, target, ...(rel.label ? { label: rel.label } : {}) });
+    }
+  }
+
+  return { nodes, edges, spans: [] };
 }
 
 

@@ -93,6 +93,17 @@ export interface SNode {
   readonly labels?: readonly string[];
   /** ⭐ 受控标记,与 labels 分设。缺省空。 */
   readonly markers?: readonly MarkerKind[];
+  /**
+   * ⭐⭐ def 块的**原始行**(`00 §2.5` / `01 §7.7`)—— 逐字节往返的载体。
+   *
+   * ⚠️ 存 `raw` 而非解析结果,是为了 §7.7.3 的收敛判据:
+   * 注释行(`#`)与**不认识的行**必须**原样吐回**(`04 §0.6.3` 分区原则③),
+   * 否则往返不收敛 —— 那正是「正文存盘即丢」「节点增殖」两个坑的共同根因。
+   *
+   * ⚠️ 这是 note 投影的专用载体:mermaid 投影没有它(mermaid 装不下),
+   * 缺省 `undefined` = 该节点没有 def 块,写回时**不 emit 空块**。
+   */
+  readonly defLines?: readonly string[];
 }
 
 /**
