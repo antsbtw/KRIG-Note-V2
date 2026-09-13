@@ -134,3 +134,39 @@ export function defValue(block: DefBlock, key: string): string | undefined {
 export function defRelations(block: DefBlock): readonly { source: string; target: string; label?: string }[] {
   return block.lines.filter((l): l is Extract<DefLine, { kind: 'rel' }> => l.kind === 'rel');
 }
+
+// ─────────────────────────────────────────────────────────
+// `/def` 入口用:骨架生成与别名分配(`00 §2.5.7`)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * 下一个可用别名 —— A, B, C … Z, A2, B2 …
+ *
+ * ⭐ 取**第一个没被占的**,不是按个数递增:
+ * 用户删掉中间某个节点后,那个字母该能被重新用上。
+ * ⚠️ 26 个用完后**不许塌缩成重复** —— 撞车的别名会让关系行指向错误的节点。
+ */
+export function nextDefAlias(used: readonly string[]): string {
+  const taken = new Set(used);
+  for (let round = 1; round < 1000; round += 1) {
+    for (let i = 0; i < 26; i += 1) {
+      const name = String.fromCharCode(65 + i) + (round === 1 ? '' : String(round));
+      if (!taken.has(name)) return name;
+    }
+  }
+  // ⚠️ fail loud:真走到这里说明别名用尽(2.6 万个),不静默返回空串
+  throw new Error('def 别名耗尽');
+}
+
+/**
+ * `/def` 插入的骨架 —— 只有一行 `id:`。
+ *
+ * ⭐ 其余字段**用户按需补**(`00 §2.5.2`:行数可变、只写关键行、逐步补充),
+ * 不预填一堆注释行去教学 —— 那会让每个节点下面都杵着一坨。
+ */
+export function buildDefSkeleton(alias: string): {
+  type: 'paragraph';
+  content: { type: string; text?: string }[];
+} {
+  return serializeDefBlock({ lines: [classifyDefLine(`id: ${alias}`)] });
+}

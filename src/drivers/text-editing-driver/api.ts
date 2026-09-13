@@ -1742,6 +1742,55 @@ export const textEditingDriverApi = {
    * - caption(figcaption)用空 paragraph 填(满足 content:'block')
    * - 光标进 caption 内(insertPos + 2 = 进入 figcaption 内的 paragraph)
    */
+  /**
+   * ⭐ 通用:在光标当前 block 位置插入**任意 JSON 形态的块**。
+   *
+   * 行为与 insertMermaid/HtmlBlockAtSelection 一致(空段落→替换,非空→之后插入),
+   * 只是节点由调用方给 —— 避免为每种新块都往 driver 加一个近乎重复的方法。
+   *
+   * ⚠️ 首个使用者是 diglot mind 的 `/def`(def 块 = 普通 paragraph + `+++` 记号,
+   * `00 §2.5`)。⭐ 本方法**不认识 def 语义**,它只管"把这个块放进去"——
+   * 图种语义留在调用方,不渗进共用 driver。
+   *
+   * ⚠️ schema 不认识该节点形态时 **fail loud**(console.error + 不改文档),
+   * 不静默吞掉:静默的话用户点了没反应,连排查线索都没有。
+   */
+  insertJsonNodeAtSelection(instanceId: string, json: unknown): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    let node;
+    try {
+      node = state.schema.nodeFromJSON(json as Parameters<typeof state.schema.nodeFromJSON>[0]);
+    } catch (e) {
+      console.error('[text-editing] insertJsonNodeAtSelection: schema 不认识该节点形态', e, json);
+      return;
+    }
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      dispatch(state.tr.insert(state.selection.from, node));
+      inst.view.focus();
+      return;
+    }
+    const depth = $from.depth;
+    const blockNode = $from.node(depth);
+    const blockStart = $from.before(depth);
+    const blockEnd = $from.after(depth);
+    const isEmptyParagraph =
+      blockNode.type.name === 'paragraph' &&
+      blockNode.content.size === 0 &&
+      !blockNode.attrs.isTitle;
+    let tr = state.tr;
+    const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+    if (isEmptyParagraph) tr = tr.replaceWith(blockStart, blockEnd, node);
+    else tr = tr.insert(blockEnd, node);
+    // ⭐ 光标落在新块**首行末尾**(def 块即 `+++` 后的 id 行),接着就能往下写
+    const target = Math.min(insertPos + 1 + node.content.size, tr.doc.content.size);
+    tr = tr.setSelection(TextSelection.create(tr.doc, target)).scrollIntoView();
+    dispatch(tr);
+    inst.view.focus();
+  },
+
   insertHtmlBlockAtSelection(instanceId: string): void {
     const inst = instanceRegistry.get(instanceId);
     if (!inst) return;

@@ -27,16 +27,35 @@
  */
 
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import { commandRegistry } from '@slot/command-registry/command-registry';
 import { slashRegistry } from '@slot/interaction-registries/slash-registry/slash-registry';
 import { handleRegistry } from '@slot/interaction-registries/handle-registry/handle-registry';
 import { floatingToolbarRegistry } from '@slot/interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
+import { buildDefSkeleton, nextDefAlias } from '@capabilities/diglot-model/def-block';
 
 /**
  * ⭐ 语义面专属 viewId —— 与 `graph-canvas-view`(画布节点)刻意区分。
  * 导出给 MindSemanticPane 的 `config.viewId` 用,两处必须一致。
  */
 export const MIND_SEMANTIC_VIEW_ID = 'mind-semantic';
+
+/** `/def` 的命令 id —— ⚠️ mind 专属,不进 text-editing 共用命令表。 */
+export const MIND_DEF_COMMAND = 'diglot-mind.insert-def-block';
+
+/**
+ * 扫出该文档已用的别名(`id: X` 行)。
+ *
+ * ⚠️ 用**宽松正则**扫全文,不重建一遍解析器 —— 这里只为「别撞车」:
+ * 多扫到几个(正文里恰好写了 `id: A`)只会让新别名更靠后,**不会出错**;
+ * ⭐ 漏扫才危险(会发出撞车的别名),故宁可宽。
+ */
+function collectUsedAliases(text: string): string[] {
+  const out: string[] = [];
+  const re = /^\s*id\s*:\s*(\S+)\s*$/gm;
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) out.push(m[1]);
+  return out;
+}
 
 let registered = false;
 
@@ -50,6 +69,49 @@ export function registerMindSemanticMenus(): void {
 
   const ui = requireCapabilityApi<TextEditingApi>('text-editing').ui;
   const V = MIND_SEMANTIC_VIEW_ID;
+
+  // ── ⭐⭐ `/def` 图定义块(`00 §2.5.7`)──
+  //
+  // ⚠️ 光有 `+++` 记号不够:**用户不知道要写什么**(`id:` 还是 `ID:`?
+  //   `-.->` 还是 `-->`?)。slash 一敲给骨架,并**自动分配别名** ——
+  //   方案丙「系统兜底」的自然落点。
+  //
+  // ⭐⭐ **名字只有一个,入口可以很多**(用户 2026-09-13):
+  //   文档与代码只认 `def`,但 `/meta`、`/图元`、`/graphmeta` 都搜得到同一项。
+  //
+  // ⚠️ 注册在**本模块**(mind 专属 viewId),不进 text-editing 的共用命令表 ——
+  //   def 块是图种语义,不该渗进 note 本体。
+  commandRegistry.register(MIND_DEF_COMMAND, () => {
+    const te = requireCapabilityApi<TextEditingApi>('text-editing');
+    const instanceId = te.instanceRegistry.getFocusedInstanceId();
+    if (!instanceId) {
+      // ⚠️ fail loud:静默 return 的话用户「点了没反应」且无从排查
+      console.error('[mind] /def:没有聚焦的编辑器,已跳过');
+      return;
+    }
+    te.api.clearSlashTrigger(instanceId);
+    // ⭐ 别名躲开该文档已用的(nextDefAlias 取第一个没被占的)
+    const md = te.api.getDocMarkdown(instanceId);
+    te.api.insertJsonNodeAtSelection(
+      instanceId,
+      buildDefSkeleton(nextDefAlias(collectUsedAliases(md.markdown))),
+    );
+  });
+
+  slashRegistry.register([
+    {
+      id: `${V}.slash.def`,
+      label: 'Graph Definition',
+      command: MIND_DEF_COMMAND,
+      // ⭐ 多入口:用户按自己的说法搜,都命中同一项
+      keywords: ['def', 'graphdef', 'meta', 'graphmeta', 'diagram', '定义', '图元', 'gd'],
+      view: V,
+      group: 'advanced',
+      icon: 'share-2',
+      hint: '+++',
+      order: 150,
+    },
+  ]);
 
   // ── slash:块类型转换 + 数学 / mermaid / html 块 ──
   // ⭐ 不经渲染态闸:note tab 渲的是 DOM,不是 atomsToSvg
