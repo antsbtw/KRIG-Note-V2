@@ -183,7 +183,7 @@ macOS 记号,Windows 以 Ctrl 对应 Cmd。
 | 插入父节点 | `Cmd+Enter` | S:新节点接管选中节点的父位 |
 | 新建自由主题 | 双击空白画布 | S:顶层插入 + float;G:pos |
 | 删除 | `Delete` | S:节点及子树移除;**连带清理其 G 条目、悬空 Edge/Span** |
-| 升降级 | 拖动 / 大纲侧 Tab | S:parent/order 变更(⭐ **G 层 pos 存活**) |
+| 升降级 | 拖动 / ⭐ 大纲侧 **slash(h1~h6)/ ⋮⋮ handle turn-into** | S:parent/order 变更(⭐ **G 层 pos 存活**) |
 
 ### 7.2 ⭐⭐ 拖动三义分流(本图种核心约定)
 
@@ -200,6 +200,24 @@ macOS 记号,Windows 以 Ctrl 对应 Cmd。
 ⚠️ **拖动预览必须在松手前区分三义**:
 缝隙插入高亮(结构)vs 钉住虚影(布局)vs 自由主题标识。
 对应 XMind 的 drag-reparent / Alt-drag 自由摆位 / Shift-drag 转 floating。
+
+> ⚠️⚠️ **2026-09-13 修订(用户拍板方案 a):大纲侧升降级的入口不是 `Tab`。**
+>
+> 原文写「大纲侧 Tab」是照搬 XMind。但 mind 的大纲侧**不是 XMind 的大纲**,
+> 它是一个**真正的 note 编辑器**,而 note 里 `Tab` 早已有三种既定行为
+> (块缩进 / 插两个全角空格 / `Cmd+Shift+I` 首行缩进)。
+>
+> ⭐ 实测:大纲侧改层级**本来就做得到** —— 把块从 h2 改成 h3,
+> `parent` 自动跟着变(层级由 heading level 推导,不是 `parent` 字段)。
+> 入口是 **slash 的 h1~h6** 与 **⋮⋮ handle 的 turn-into**,两个都是 note 原生的。
+>
+> ⚠️ 给 `Tab` 另派「升降级」语义,等于在一个 note 编辑器里让 `Tab` 不按 note 的
+> 规矩来 —— **两套习惯打架**。用户口径:
+> 「hn 已经有很好的编辑方法了,就是 slash……**没有必要调整原来 note 的编辑习惯**。」
+>
+> ⭐ 落地为「mind 语义面**关掉** Tab/Shift-Tab」(而非改写它):
+> 原先按 Tab 会往标题插两个全角空格 → 节点名字变成「　　子」,是**静默污染数据**。
+> 详见 `03-projection-map.md` §5.9.2.1。
 
 #### 7.2.1 ⭐ 修订理由:导图的位置是**算出来的**,不是摆出来的
 

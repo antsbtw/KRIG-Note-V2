@@ -372,18 +372,47 @@ atom-bridge 全透传 ✅ atomsToSvg 遍历全部 ✅ —— 问题在**存储�
 `engine-contract.ts` 声明的 `DiglotAction` 与 `apply-action.ts` 的 `case` **逐一对齐**,
 无声明未实现、也无实现未声明。C1–C9 + M1–M5 **14 条不变量全部有断言**。
 
-### 5.9.2 ⚠️ 真正的缺口在 **view 接线**:6 个动作没有触发入口
+### 5.9.2 ⚠️ 真正的缺口在 **view 接线**:5 个动作没有触发入口
 
 模型能做,但 UI 上**点不到**(grep 全 view 零调用):
 
 | 动作 | 规格出处 | 缺什么 |
 |---|---|---|
-| `semantic.moveIndent` | 01 §7.1「升降级」 | ⭐ **大纲侧 Tab/Shift+Tab 升降级** —— note tab 里改层级只能靠改 hn |
 | `canvas.dragToFloat` | 01 §7.2「Shift+拖动」 | **转自由主题**手势未接 |
 | `canvas.createNode` | 01 §7.1「双击空白」 | **新建自由主题**未接 |
 | `canvas.connect` | 01 §7.4「Cmd+L」 | ⭐ **联系线**(树之外的关系)整条未接 |
 | `graphic.editColor` | 01 §7.3 配色 | 节点上色入口未接(节点浮条也未做) |
 | `graphic.deletePos` | 01 §7.5 | **单节点**解除钉住(只做了 releaseAllPos 全量) |
+
+#### 5.9.2.1 ⚠️⚠️ 更正:`semantic.moveIndent` **不是**大纲侧的缺口(2026-09-13 实测)
+
+上一版本表里有第 6 行「`semantic.moveIndent` → 大纲侧 Tab/Shift+Tab 升降级」,
+**那一条是错的**,已删。三点实测:
+
+1. ⭐⭐ **大纲侧的层级不是 `parent` 字段,是从块形态推出来的。**
+   `noteDocToTree` 用 `depthForNoteForm` 从 heading level / indent 推 parent。
+   离线探针:把某块从 h2 改成 h3,它的 `parent` **自动**从 `n1` 变成 `n2` ——
+   **层级本来就改得动**,一行模型调用都不需要。
+2. ⚠️ **`moveIndent` 在这条路上用不上。** 它直接写 `parent`/`order`,
+   但 note tab 提交走 `onTreeCommit(doc)` → **整份 doc 重新推导树** →
+   写进去的 parent **会被下一次推导覆盖**。它是**画布侧**的动作(拖拽改父),
+   与大纲侧是两件事,上一版把两者当成了一件。
+3. ⚠️⚠️ **真正的问题不是「点不到」,是「按了会坏」。**
+   `build-block-indent-keymap.ts` 的 tabCmd「行为 3」:纯文本光标 →
+   `insertText('　　')`(两个**全角**空格)。在 mind 语义面里标题文字
+   = **节点的名字**,于是按 Tab → 画布主题框变成「　　子」,**静默污染数据**。
+
+⭐ **用户决议(2026-09-13):方案 a —— Tab 在 mind 语义面什么都不做。**
+> 「hn 已经有很好的编辑方法了,就是 slash,如果有其他,通过 handle 改变就行了。
+> **没有必要调整原来 note 的编辑习惯。**」
+
+落地:`TextEditingPluginToggles.blockIndentKeymap`(opt-out,默认 true),
+mind 语义面传 `false` → Tab/Shift-Tab 不注册(`Shift-Mod-i` 首行缩进保留)。
+⭐ **note 本体不传 = 行为零回归**,与 `headingCollapseSource` 同一套 per-instance 手法。
+守卫:`tests/capabilities/diglot/mind-tab-no-title-pollution.test.ts`(6 条,三向注入验红)。
+
+⚠️ **规格 `01 §7.1` 的「升降级:拖动 / 大纲侧 Tab」需同步修订** ——
+大纲侧改层级的入口是 **slash(h1~h6)/ ⋮⋮ handle turn-into**,不是 Tab。
 
 ### 5.9.3 ⚠️ 键盘:规格列了 12 项,实接 5 项
 

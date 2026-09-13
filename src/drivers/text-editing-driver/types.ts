@@ -116,6 +116,16 @@ export interface TextEditingPluginToggles {
   codeSyntaxHighlight?: boolean;
   /** Heading 折叠(配合 TOC 面板);NoteView 默认开,canvas-text-node / thought 等单段 view 可关 */
   headingCollapse?: boolean;
+  /**
+   * ⭐ 块缩进 keymap 的 **Tab / Shift-Tab** 分支(`Shift-Mod-i` 首行缩进不受影响)。
+   *
+   * ⚠️ diglot mind 语义面关掉它(用户拍板 2026-09-13 方案 a):那里标题文字
+   * = **节点的名字**,Tab 的「纯文本光标插两个全角空格」会让画布上的主题框
+   * 变成「　　子」—— 在 note 本体是正确行为,在导图里是**静默污染数据**。
+   * ⭐ 关掉后不另派语义:改层级走 slash(h1~h6)/ handle turn-into,
+   *   都是 note 原生入口,不动用户既有编辑习惯。
+   */
+  blockIndentKeymap?: boolean;
   // opt-in(默认 false,view 显式 true 开启)
   titleGuard?: boolean;
   /**

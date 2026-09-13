@@ -332,6 +332,16 @@ export function MindSemanticPane({
                 //   (有 block、有 ⋮⋮ handle、slash 可用)。
                 // ⚠️ 唯一不开 titleGuard(opt-in,NoteView 专属的强制首块 isTitle):
                 //   导图 root 由 role 决定,开了会与树推导打架。
+                plugins: {
+                  // ⭐⭐ 关掉 Tab/Shift-Tab(用户拍板 2026-09-13 方案 a)。
+                  // ⚠️ 这里的标题文字 = **节点的名字**,而 Tab 在纯文本光标下
+                  //   会插两个全角空格 → 画布主题框变成「　　子」,静默污染数据。
+                  //   (`Shift-Mod-i` 首行缩进不受影响,仍可用。)
+                  // ⭐ 不给 Tab 另派「升降级」语义:改层级已有 slash(h1~h6)与
+                  //   ⋮⋮ handle 的 turn-into 两个 note 原生入口 ——
+                  //   用户口径「没有必要调整原来 note 的编辑习惯」。
+                  blockIndentKeymap: false,
+                },
               }}
               doc={incomingDoc}
               onChange={handleNoteChange}

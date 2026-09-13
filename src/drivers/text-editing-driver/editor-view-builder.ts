@@ -138,6 +138,8 @@ export function buildEditorView(
   const enableBlockSelection = optIn(pluginToggles?.blockSelection);
   const enableCodeSyntaxHighlight = optIn(pluginToggles?.codeSyntaxHighlight);
   const enableHeadingCollapse = optIn(pluginToggles?.headingCollapse);
+  // ⭐ opt-out:mind 语义面关掉 Tab/Shift-Tab(见 build-block-indent-keymap 说明)
+  const enableBlockIndentKeymap = optIn(pluginToggles?.blockIndentKeymap);
 
   const plugins: Plugin[] = [
     // L7 block atomization Stage 1.5:auto-block-id-plugin 必须早于 history
@@ -168,7 +170,7 @@ export function buildEditorView(
     // block-indent keymap:列表/codeblock/table 优先抢断 Tab(它们在 blockPlugins / code-block
     // keymap 内处理 Tab),落到这里都是普通顶层 block 的视觉缩进。
     // (Phase 3:list-keymap 的 Enter 已被集中 keyboard 模块接管,文件已删。)
-    buildBlockIndentKeymap(),
+    buildBlockIndentKeymap({ enabled: enableBlockIndentKeymap }),
     buildCodeBlockKeymap(schema),
     buildHardBreakKeymap(schema),
     buildLinkClickPlugin(),

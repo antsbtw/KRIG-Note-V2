@@ -20,6 +20,8 @@
  * - 在 tableCell / tableHeader 内 → 不接管(返回 false 让 table-keymap 走)
  * - 在 codeBlock 内 → 不接管
  * - parent.indent === undefined → 不接管(理论上不会,schema 已注入)
+ * - ⭐ `enabled: false`(diglot mind 语义面)→ Tab/Shift-Tab 整个不注册,
+ *   见下方 buildBlockIndentKeymap 的说明。note 本体不传 = 行为不变。
  */
 
 import { keymap } from 'prosemirror-keymap';
@@ -176,7 +178,29 @@ const toggleTextIndentCmd: Command = (state, dispatch) => {
   return true;
 };
 
-export function buildBlockIndentKeymap() {
+/**
+ * @param opts.enabled opt-out 开关(默认 true = note 本体零回归)。
+ *
+ * ⭐⭐ 传 `false` 时:**Tab / Shift-Tab 完全不接管**(连键都不吃,交给下游),
+ * 但 `Shift-Mod-i`(块内首行缩进)**照常保留** —— 它是块级排版,不碰文字内容。
+ *
+ * ⚠️ 为什么需要这个开关(diglot mind 语义面,用户拍板 2026-09-13 方案 a):
+ * 那里的标题文字 = **节点的名字**,而 Tab 的「行为 3」会往光标处插两个
+ * 全角空格 → 画布上主题框的名字变成「　　子」,**静默污染数据**。
+ * ⭐ 同一行为在 note 本体里是**正确**的(中文段内缩进,既有约定),
+ * 所以这里只做 per-instance opt-out,**绝不改共用层的既有行为**。
+ *
+ * ⚠️ mind 侧不给 Tab 另派「升降级」语义 —— 改层级已有两个 note 原生入口
+ * (slash 的 h1~h6、⋮⋮ handle 的 turn-into)。用户原话:
+ * 「没有必要调整原来 note 的编辑习惯」。
+ */
+export function buildBlockIndentKeymap(opts?: { enabled?: boolean }) {
+  // opt-out 语义:未传 / 传 true = 开(与 TextEditingPluginToggles 同一契约)
+  const enabled = opts?.enabled !== false;
+  if (!enabled) {
+    // ⚠️ 只留首行缩进;Tab/Shift-Tab 一概不注册 —— 不接管即不污染
+    return keymap({ 'Shift-Mod-i': toggleTextIndentCmd });
+  }
   return keymap({
     Tab: tabCmd,
     'Shift-Tab': shiftTabCmd,
