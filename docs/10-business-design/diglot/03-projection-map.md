@@ -387,32 +387,57 @@ atom-bridge 全透传 ✅ atomsToSvg 遍历全部 ✅ —— 问题在**存储�
 #### 5.9.2.1 ⚠️⚠️ 更正:`semantic.moveIndent` **不是**大纲侧的缺口(2026-09-13 实测)
 
 上一版本表里有第 6 行「`semantic.moveIndent` → 大纲侧 Tab/Shift+Tab 升降级」,
-**那一条是错的**,已删。三点实测:
+**那一条是错的**,已删。两点实测:
 
 1. ⭐⭐ **大纲侧的层级不是 `parent` 字段,是从块形态推出来的。**
    `noteDocToTree` 用 `depthForNoteForm` 从 heading level / indent 推 parent。
    离线探针:把某块从 h2 改成 h3,它的 `parent` **自动**从 `n1` 变成 `n2` ——
    **层级本来就改得动**,一行模型调用都不需要。
+   入口是 **slash 的 h1~h6** 与 **⋮⋮ handle 的 turn-into**(均已在
+   `mind-semantic-menus.ts` 注册),都是 note 原生入口。
 2. ⚠️ **`moveIndent` 在这条路上用不上。** 它直接写 `parent`/`order`,
    但 note tab 提交走 `onTreeCommit(doc)` → **整份 doc 重新推导树** →
    写进去的 parent **会被下一次推导覆盖**。它是**画布侧**的动作(拖拽改父),
    与大纲侧是两件事,上一版把两者当成了一件。
-3. ⚠️⚠️ **真正的问题不是「点不到」,是「按了会坏」。**
-   `build-block-indent-keymap.ts` 的 tabCmd「行为 3」:纯文本光标 →
-   `insertText('　　')`(两个**全角**空格)。在 mind 语义面里标题文字
-   = **节点的名字**,于是按 Tab → 画布主题框变成「　　子」,**静默污染数据**。
 
-⭐ **用户决议(2026-09-13):方案 a —— Tab 在 mind 语义面什么都不做。**
-> 「hn 已经有很好的编辑方法了,就是 slash,如果有其他,通过 handle 改变就行了。
-> **没有必要调整原来 note 的编辑习惯。**」
+⭐ 教训:「模型有 action + view 零调用」**不等于**「缺接线」——
+先查那条路上的层级/状态**是怎么来的**,再判断缺不缺。
 
-落地:`TextEditingPluginToggles.blockIndentKeymap`(opt-out,默认 true),
-mind 语义面传 `false` → Tab/Shift-Tab 不注册(`Shift-Mod-i` 首行缩进保留)。
-⭐ **note 本体不传 = 行为零回归**,与 `headingCollapseSource` 同一套 per-instance 手法。
-守卫:`tests/capabilities/diglot/mind-tab-no-title-pollution.test.ts`(6 条,三向注入验红)。
+---
 
-⚠️ **规格 `01 §7.1` 的「升降级:拖动 / 大纲侧 Tab」需同步修订** ——
-大纲侧改层级的入口是 **slash(h1~h6)/ ⋮⋮ handle turn-into**,不是 Tab。
+#### 5.9.2.2 ⭐⭐ 大纲侧的总原则:**mind 适应 note,除非 note 本身改变**(2026-09-13 用户拍板)
+
+> 用户原话:「**我们要让 mind 来适应 note 的编辑方式,除非 note 本身改变了。**」
+
+**这条是大纲侧一切交互的裁决准绳,优先于规格里照搬 XMind 的条目。**
+
+##### 判例:`Tab` 在 mind 语义面**不做任何特殊处理**
+
+事实(离线探针实测):`build-block-indent-keymap.ts` 的 `tabCmd`「行为 3」
+在纯文本光标下 `insertText('　　')`(两个**全角**空格)。
+在 mind 语义面里,标题块的文字**同时是节点在画布上的名字**,
+于是按 Tab 后画布主题框显示「　　子」,且**跟着存盘**、进 mermaid 导出。
+
+⚠️ 我据此判定为「污染」并加了一个 per-instance 开关
+(`TextEditingPluginToggles.blockIndentKeymap`,mind 传 `false` 关掉 Tab)。
+⭐⭐ **用户否决了这个做法,已整体回退**(代码回到 `f06fe555` 逐字节一致)。
+
+**否决理由(比「要不要那两个空格」更根本)**:
+
+| | 说明 |
+|---|---|
+| ⭐ **一致性本身就是价值** | 大纲侧**就是 note 编辑器**。note 里 Tab 什么行为,这儿就什么行为 |
+| ⚠️ **开关就是那个口子** | 一旦允许「mind 这里特殊一点」,以后每加一个 view 都要问「这个键要不要特殊」,规则从一套裂成 N 套 |
+| ⚠️ **「污染」是我下的判断,不是事实** | 插全角空格在 note 里是**正确行为**(中文段内缩进,用户既有决议)。同一动作换个地方被判成污染,前提是「标题文字 = 节点名字」—— 那个前提该用户定 |
+
+⭐ **推论(以后遇到同类问题直接照用)**:
+
+1. 大纲侧的键盘 / 编辑行为,**一律跟随 note**,不为 mind 另开分支
+2. 真觉得某个行为在导图语境下不合适 → ⭐ **去改 note 本体**(那是全局决议),
+   **不是**给 mind 开小灶
+3. ⚠️ 同理**不给 `Tab` 另派「升降级」语义**(规格 `01 §7.1` 原文照搬 XMind):
+   那是在一个 note 编辑器里让 Tab 不按 note 规矩来,**两套习惯打架**;
+   何况层级本来就改得动(见 §5.9.2.1)
 
 ### 5.9.3 ⚠️ 键盘:规格列了 12 项,实接 5 项
 
