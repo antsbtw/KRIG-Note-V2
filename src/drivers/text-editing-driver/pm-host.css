@@ -330,7 +330,13 @@
  *   只响应「点一下展开」。
  * ⚠️ 正文 contentDOM 必须常驻(PM 位置映射要求),折叠靠 display:none 隐藏。 */
 .krig-pm-host .ProseMirror div.krig-def-block {
-  margin: 1.5em 0;
+  /* ⚠️ 不用 hr 的 1.5em:hr 是独立分隔线,def 块是**依附在 hn 之下的定义**
+   * (00 §2.5.2「hn 之后的第一段」)—— 离得远就不像属于这个标题。
+   * 用户 2026-09-13 真机反馈:「距离 hn 太远了,不美观」。
+   * 跟正文块同一节奏(.ProseMirror > * 的 margin:1px),让它紧贴上一个块。 */
+  margin: 1px 0;
+  /* 通用 .ProseMirror > * 给了 padding:3px 2px —— 线条块不需要,清掉免得又撑开 */
+  padding: 0;
 }
 
 /* 展开态:上下各一条单线(通栏) */

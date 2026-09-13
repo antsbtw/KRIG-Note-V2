@@ -464,6 +464,20 @@ describe('defBlock · 折叠态:一条双线,不可交互', () => {
     expect(block![1]).toMatch(/border-top:\s*1px solid/);
   });
 
+  it('⚠️ 紧贴上一个块 —— 不许用 hr 的 1.5em 把它推远(真机反馈:离 hn 太远)', () => {
+    // def 块是「依附在 hn 之下的定义」,不是独立分隔线;离得远就不像属于这个标题。
+    // 只看外层块自己那条规则的花括号内部(别被内部 rule/body 的值满足掉)。
+    const css = stripComments(readSrc('src/drivers/text-editing-driver/pm-host.css'));
+    const m = /div\.krig-def-block\s*\{([^}]*)\}/.exec(css);
+    expect(m).toBeTruthy();
+    const body = m![1];
+    // margin 必须是正文块节奏(1px),不是 hr 的 1.5em
+    expect(body).toMatch(/margin:\s*1px\s+0/);
+    expect(body).not.toMatch(/margin:[^;]*em/);
+    // 通用 .ProseMirror > * 的 padding:3px 会再撑开,必须显式清掉
+    expect(body).toMatch(/padding:\s*0/);
+  });
+
   it('⭐ 折叠态上边框是**双线**(border-style: double)', () => {
     const css = stripComments(readSrc('src/drivers/text-editing-driver/pm-host.css'));
     const closed = css.slice(css.indexOf('.krig-def-block.closed'));
