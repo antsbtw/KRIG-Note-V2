@@ -218,6 +218,13 @@ export function registerTextEditingCommands(): void {
     tea.insertHtmlBlockAtSelection(instanceId);
   }));
 
+  // ── Def block(定义块,00 §2.5;⭐ note 的能力,graph 只是调用者) ──
+
+  commandRegistry.register('text-editing.slash-insert-def-block', withInstance((instanceId) => {
+    tea.clearSlashTrigger(instanceId);
+    tea.insertDefBlockAtSelection(instanceId);
+  }));
+
   // ── Math Visual block(V1 → V2 迁移 Phase 1B,走 math-rendering capability) ──
 
   commandRegistry.register('text-editing.slash-insert-math-visual', withInstance((instanceId) => {

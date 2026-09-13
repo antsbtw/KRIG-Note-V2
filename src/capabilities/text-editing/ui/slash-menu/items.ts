@@ -269,3 +269,26 @@ export function createMathVisualBlockItem(viewId: string): SlashItem {
     order: 146,
   };
 }
+
+/**
+ * Def Block(定义块,`00 §2.5`)
+ *
+ * ⭐⭐ **note 的一等能力**(`00 §2.5.9`:def 是 note 的能力,graph 只是调用者)——
+ * 故与 math / mermaid / html 同列,是 PM 通用项,不是图种专属。
+ *
+ * ⭐ **名字只有一个,入口可以很多**:打 `/meta`、`/图元`、`/graphmeta` 都搜得到
+ * 同一项,文档与代码只认 `def`(用户 2026-09-13)——把「叫什么」的分歧降到最小。
+ */
+export function createDefBlockItem(viewId: string): SlashItem {
+  return {
+    id: `${viewId}.slash.def-block`,
+    label: 'Definition',
+    command: 'text-editing.slash-insert-def-block',
+    keywords: ['def', 'graphdef', 'meta', 'graphmeta', 'diagram', '定义', '图元', 'gd'],
+    view: viewId,
+    group: 'advanced',
+    icon: 'braces',
+    hint: '+++',
+    order: 148,
+  };
+}

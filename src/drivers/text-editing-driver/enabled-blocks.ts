@@ -32,6 +32,7 @@ import { videoBlockSpec } from './blocks/video-block/spec';
 import { tweetBlockSpec } from './blocks/tweet-block/spec';
 import { htmlBlockSpec } from './blocks/html-block/spec';
 import { mathVisualSpec } from './blocks/math-visual/spec';
+import { defBlockSpec } from './blocks/def-block/spec';
 import {
   tableSpec,
   tableRowSpec,
@@ -74,4 +75,5 @@ export const ENABLED_BLOCKS: BlockSpec[] = [
   tweetBlockSpec,
   htmlBlockSpec,
   mathVisualSpec,
+  defBlockSpec,
 ];

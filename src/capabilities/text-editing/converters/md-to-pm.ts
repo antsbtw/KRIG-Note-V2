@@ -131,6 +131,8 @@ export const PM_NODE_REGISTRY = {
   htmlBlock: '✅',
   videoBlock: '✅',
   audioBlock: '✅',
+  // def 块(00 §2.5):note 的定义块,`+++ ... +++`
+  defBlock: '✅',
 } as const;
 
 /**
@@ -179,6 +181,24 @@ export async function markdownToProseMirror(md: string): Promise<PMNode[]> {
       content.push(code.node);
       i = code.nextIndex;
       continue;
+    }
+
+    // def 块(`+++ ... +++`,00 §2.5)—— note 的定义块。
+    // ⚠️ 必须在 paragraph 兜底之前判,否则 `+++` 会变成正文文字。
+    // ⚠️ 没闭合 `+++` → **不认**(fail safe:少写一行不该把后文全吞进定义块),
+    //   落到下面的普通段落逻辑。
+    if (line.trim() === '+++') {
+      const closeAt = lines.findIndex((l, k) => k > i && l.trim() === '+++');
+      if (closeAt > i) {
+        const body = lines.slice(i + 1, closeAt).join('\n');
+        content.push({
+          type: 'defBlock',
+          attrs: { id: null, for: null, open: false },
+          ...(body === '' ? {} : { content: [{ type: 'text', text: body }] }),
+        });
+        i = closeAt + 1;
+        continue;
+      }
     }
 
     // Math block ($$...$$) — B1:mathBlock 节点走核 buildMathBlockNode(canonical),

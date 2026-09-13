@@ -39,6 +39,8 @@ export const DEFAULT_KEYBOARD_META: Readonly<Record<string, KeyboardMeta>> = {
   // 代码区:Enter=softBreak,双回车跳出
   codeBlock: { isCodeArea: true },
   mathBlock: { isCodeArea: true },
+  // def 块是逐行词法(00 §2.5):Enter 换行不拆块,双回车跳出 —— 与代码区同语义
+  defBlock: { isCodeArea: true },
 
   // 原子卡片:仅选中/handle 删块
   horizontalRule: { isAtomCard: true },

@@ -296,6 +296,9 @@ function unknownAtomLabel(atomType: string): string {
     case 'fileBlock':     return '[File]';
     case 'htmlBlock':     return '[HTML]';
     case 'mathVisual':    return '[Function Graph]';
+    // defBlock 不进 RENDERABLE_ATOM_TYPES(00 §2.5:def 是 note 的书写面,
+    // 画布渲染的是它**定义出来的**节点/连线,不是定义文本本身)
+    case 'defBlock':      return '[Def]';
     case 'horizontalRule': return '---';
     case 'pageAnchor':    return '[Anchor]';
     case 'taskList':      return '[Tasks]';

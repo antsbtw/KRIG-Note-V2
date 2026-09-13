@@ -164,6 +164,9 @@ function serializeBlock(node: PMNode, indent: number, images: string[]): string 
     case 'mathBlock':
       return serializeMathBlock(node, prefix);
 
+    case 'defBlock':
+      return serializeDefBlock(node, prefix);
+
     case 'image':
       return serializeImage(node, prefix, images);
 
@@ -306,6 +309,21 @@ function serializeCodeBlock(node: PMNode, prefix: string): string {
   const lang = (node.attrs.language as string) || '';
   const code = node.textContent;
   return `${prefix}\`\`\`${lang}\n${code}\n${prefix}\`\`\``;
+}
+
+// ─── Def Block(定义块,00 §2.5)──────────────────────────────────
+
+/**
+ * defBlock → `+++ ... +++`
+ *
+ * ⭐ `+++` 是块的边框(NodeView 画的),**不在 textContent 里** —— 序列化时补回。
+ * ⚠️ 正文逐字节原样吐:def 块的往返收敛靠「不重新格式化」(01 §7.7.3)。
+ * ⚠️ 空块也 emit 首尾 `+++`(块真实存在,吞掉它 = 往返丢块)。
+ */
+function serializeDefBlock(node: PMNode, prefix: string): string {
+  const body = node.textContent;
+  const lines = body === '' ? [] : body.split('\n').map((l) => `${prefix}${l}`);
+  return [`${prefix}+++`, ...lines, `${prefix}+++`].join('\n');
 }
 
 // ─── Math Block ────────────────────────────────────────────────────

@@ -59,6 +59,8 @@ export function registerMindSemanticMenus(): void {
     ui.slashMenu.createMermaidBlockItem(V),
     ui.slashMenu.createHtmlBlockItem(V),
     ui.slashMenu.createMathVisualBlockItem(V),
+    // ⭐ def 块:导图语义面正是它的第一个调用者(00 §2.5.9)
+    ui.slashMenu.createDefBlockItem(V),
   ]);
 
   // ── ⋮⋮ handle 菜单:转换 / 颜色 / 格式 / 折叠 / 块操作 ──

@@ -322,6 +322,63 @@
   font-size: inherit;
 }
 
+/* defBlock — 定义块(00 §2.5):`+++` 边框由 NodeView 画,不在文本里
+ * ⭐ 默认折叠(用户拍板):closed 时只显摘要,正文 display:none
+ *   —— 正文 DOM 必须常驻(PM 位置映射要求),不能真的不渲染 */
+.krig-pm-host .ProseMirror div.krig-def-block {
+  margin: 8px 0;
+  border-left: 3px solid #5a7fa8;
+  border-radius: 4px;
+  background: rgba(90, 127, 168, 0.08);
+  padding: 6px 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.krig-pm-host .ProseMirror .krig-def-block__fence {
+  color: #7f96ad;
+  user-select: none;
+  cursor: pointer;
+  letter-spacing: 2px;
+}
+
+.krig-pm-host .ProseMirror .krig-def-block__fence:hover {
+  color: #a8c0d8;
+}
+
+.krig-pm-host .ProseMirror pre.krig-def-block__body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: #d8dee6;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 摘要:仅折叠态可见 */
+.krig-pm-host .ProseMirror .krig-def-block__summary {
+  display: none;
+  color: #9fb3c8;
+  user-select: none;
+  cursor: pointer;
+}
+
+.krig-pm-host .ProseMirror div.krig-def-block.closed {
+  padding: 2px 12px;
+}
+
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__summary {
+  display: block;
+}
+
+/* 折叠态:正文与尾 `+++` 收起,头 `+++` 留作可点的把手 */
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__body,
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__fence:last-child {
+  display: none;
+}
+
 /* toggleList — 对齐 V1(箭头 + 内容,closed 时仅显第一行)
  * flex 让 ▶ 与内容行首中线对齐(单行场景最准;closed 多行时箭头仍贴第一行) */
 .krig-pm-host .ProseMirror div.krig-toggle-list {
