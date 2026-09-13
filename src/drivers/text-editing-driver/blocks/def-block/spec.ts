@@ -21,6 +21,8 @@
  *            **默认 null = 定义紧挨它前面那个块**(位置约定,手写零负担);
  *            程序化场景可显式写目标 blockId,挪动不失联。
  * - `open`   折叠态(用户拍板**默认折叠**);⚠️ 新插入时由插入方置 true 便于当场写。
+ *            ⭐ 折叠态塌成一条双线:不显内容、无 handle、完全不可交互(只能点开)。
+ *            ⚠️ 故它的删除入口在 backspace-decision 第 7.5 步(下一段行首 Backspace)。
  */
 
 import type { NodeSpec } from 'prosemirror-model';

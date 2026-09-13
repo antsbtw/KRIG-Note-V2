@@ -1,62 +1,47 @@
 /**
- * defBlock NodeView — `+++` 边框 + 折叠 + 摘要
+ * defBlock NodeView — 分隔线边框 + 折叠成双线
  *
- * ⭐ `+++` 是**块的边框**,由 NodeView 画(contentEditable=false),**不在文本里** ——
- * 用户编辑的只有中间那几行词法。前一版把 `+++` 塞进 paragraph 文本,导致
- * 每次序列化都要重新猜边界;真块之后边界是结构性的。
+ * ⭐ `+++` **画成一条通栏的线**(不是字面的三个加号),视觉与 `---` 产生的
+ * horizontalRule 同族 —— 用户 2026-09-13:「`+++` 是否使用一条线覆盖整个页面宽度?
+ * 类似 `---` 产生的效果」。线是 NodeView 画的边框,**不在文本里**。
  *
- * ⭐ 折叠(用户拍板**默认折叠**):
- * - open=false → 只显示一行摘要(`id: B · 2 项`),正文 DOM 仍在(PM 要求
- *   contentDOM 常驻),由 CSS `display:none` 隐藏。⚠️ 不能真的不渲染 contentDOM,
- *   否则 PM 位置映射错乱。
- * - 点 `+++` 头或摘要 → 切换。
+ * ⭐ 两态(用户拍板):
+ * - **展开**:上下各一条线,中间是可编辑的逐行词法。
+ * - **折叠**:塌成**一条双线**,⚠️ **不显示 def 里的任何内容**、不显示 handle、
+ *   **完全不可交互** —— 只响应「点一下展开」这一个动作。
  *
- * ⚠️ 摘要只做**字面统计**,不解释任何 key(词法归 lexicon,含义归调用方)。
+ * ⚠️ 折叠态既然选不中,它的**删除入口**在别处:光标落到**它下面那段的行首**
+ * 按 Backspace 优先删掉整个 def 块(backspace-decision 第 7.5 步)。
+ *
+ * ⚠️ 正文 contentDOM 必须常驻(PM 位置映射要求),折叠靠 CSS 隐藏,
+ * 不能真的不渲染。
  */
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { DEF_FENCE, parseDefText, defValue } from './lexicon';
-
-/** 折叠态摘要:有 `id:` 就显示它,再缀上行数。⚠️ 纯字面,不解释含义。 */
-function summarize(node: PMNode): string {
-  const block = parseDefText(node.textContent);
-  const alias = defValue(block, 'id');
-  const n = block.lines.length;
-  const head = alias ? `id: ${alias}` : 'def';
-  return n > 0 ? `${head} · ${n} 项` : head;
-}
 
 export const defBlockNodeView: NodeViewConstructor = (initialNode, view, getPos) => {
   let node = initialNode;
 
   const dom = document.createElement('div');
 
-  // ── 头:`+++` 记号(点击折叠/展开)──
-  const fenceTop = document.createElement('div');
-  fenceTop.className = 'krig-def-block__fence';
-  fenceTop.contentEditable = 'false';
-  fenceTop.textContent = DEF_FENCE;
-
-  // ── 折叠态摘要 ──
-  const summary = document.createElement('div');
-  summary.className = 'krig-def-block__summary';
-  summary.contentEditable = 'false';
+  // ── 上边框(展开态一条线;折叠态由 CSS 变成双线)──
+  const ruleTop = document.createElement('div');
+  ruleTop.className = 'krig-def-block__rule';
+  ruleTop.contentEditable = 'false';
 
   // ── 正文(contentDOM,PM 接管)──
   const body = document.createElement('pre');
   body.className = 'krig-def-block__body';
 
-  // ── 尾:`+++` ──
-  const fenceBottom = document.createElement('div');
-  fenceBottom.className = 'krig-def-block__fence';
-  fenceBottom.contentEditable = 'false';
-  fenceBottom.textContent = DEF_FENCE;
+  // ── 下边框 ──
+  const ruleBottom = document.createElement('div');
+  ruleBottom.className = 'krig-def-block__rule';
+  ruleBottom.contentEditable = 'false';
 
-  dom.appendChild(fenceTop);
-  dom.appendChild(summary);
+  dom.appendChild(ruleTop);
   dom.appendChild(body);
-  dom.appendChild(fenceBottom);
+  dom.appendChild(ruleBottom);
 
   function toggleOpen(): void {
     const pos = typeof getPos === 'function' ? getPos() : null;
@@ -68,7 +53,8 @@ export const defBlockNodeView: NodeViewConstructor = (initialNode, view, getPos)
     );
   }
 
-  for (const el of [fenceTop, summary]) {
+  // 两条线都可点:展开态点任一条收起,折叠态点双线展开。
+  for (const el of [ruleTop, ruleBottom]) {
     el.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -82,7 +68,6 @@ export const defBlockNodeView: NodeViewConstructor = (initialNode, view, getPos)
     dom.setAttribute('data-open', String(open));
     if (n.attrs.for) dom.setAttribute('data-for', n.attrs.for as string);
     else dom.removeAttribute('data-for');
-    summary.textContent = summarize(n);
   }
 
   paint(node);
@@ -97,7 +82,7 @@ export const defBlockNodeView: NodeViewConstructor = (initialNode, view, getPos)
       return true;
     },
     ignoreMutation(mutation) {
-      // 正文由 PM 管;`+++` / 摘要是我们自己画的,PM 不该为它们的变动重解析。
+      // 正文由 PM 管;两条线是我们自己画的,PM 不该为它们的变动重解析。
       return mutation.target !== body && !body.contains(mutation.target as Node);
     },
   };

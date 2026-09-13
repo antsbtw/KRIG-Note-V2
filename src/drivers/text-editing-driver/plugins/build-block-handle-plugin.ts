@@ -417,6 +417,17 @@ export function buildBlockHandlePlugin(viewId: string, instanceId: string): Plug
           return;
         }
 
+        // ⭐ 折叠态 def 块上不显示 handle(用户 2026-09-13 拍板):
+        // 折叠后它塌成一条双线,刻意**完全不可交互** —— 只响应「点一下展开」。
+        // ⚠️ 展开态仍有 handle(那时它是一个正常可拖可转的块)。
+        // ⚠️ 它折叠态既然没 handle 也选不中,删除入口在 backspace-decision 第 7.5 步:
+        //    光标落到它下面那段行首按 Backspace,优先删掉整个 def 块。
+        if (blockNode.type.name === 'defBlock' && blockNode.attrs.open !== true) {
+          dom.style.opacity = '0';
+          currentPos = -1;
+          return;
+        }
+
         // callout / toggleList 第一个子 block:handle 与 emoji 💡 或 ▼ 三角视觉撞挤,
         // 隐藏 handle。后续子 block (第 2 行及以后) 仍有 handle 可拖。
         // 用户可通过容器顶 padding 区(emoji / 三角旁)拿到容器自身的 handle 拖动整个 callout/toggle。

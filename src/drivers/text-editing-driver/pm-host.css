@@ -322,60 +322,50 @@
   font-size: inherit;
 }
 
-/* defBlock — 定义块(00 §2.5):`+++` 边框由 NodeView 画,不在文本里
- * ⭐ 默认折叠(用户拍板):closed 时只显摘要,正文 display:none
- *   —— 正文 DOM 必须常驻(PM 位置映射要求),不能真的不渲染 */
+/* defBlock — 定义块(00 §2.5)
+ * ⭐ `+++` 画成**通栏的线**(用户 2026-09-13:「类似 --- 产生的效果」),
+ *   与 hr.krig-horizontal-rule 同族配色(#444),线是 NodeView 的边框不是文字。
+ * ⭐ 折叠态塌成**一条双线**:不显示 def 里的任何内容、不显示 handle
+ *   (handle 由 build-block-handle-plugin 主动隐藏)、完全不可交互 ——
+ *   只响应「点一下展开」。
+ * ⚠️ 正文 contentDOM 必须常驻(PM 位置映射要求),折叠靠 display:none 隐藏。 */
 .krig-pm-host .ProseMirror div.krig-def-block {
-  margin: 8px 0;
-  border-left: 3px solid #5a7fa8;
-  border-radius: 4px;
-  background: rgba(90, 127, 168, 0.08);
-  padding: 6px 12px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 13px;
-  line-height: 1.6;
+  margin: 1.5em 0;
 }
 
-.krig-pm-host .ProseMirror .krig-def-block__fence {
-  color: #7f96ad;
-  user-select: none;
+/* 展开态:上下各一条单线(通栏) */
+.krig-pm-host .ProseMirror .krig-def-block__rule {
+  border-top: 1px solid #444;
+  height: 0;
   cursor: pointer;
-  letter-spacing: 2px;
+  user-select: none;
 }
 
-.krig-pm-host .ProseMirror .krig-def-block__fence:hover {
-  color: #a8c0d8;
+.krig-pm-host .ProseMirror .krig-def-block__rule:hover {
+  border-top-color: #6b7f95;
 }
 
 .krig-pm-host .ProseMirror pre.krig-def-block__body {
   margin: 0;
-  padding: 0;
+  padding: 6px 0;
   background: transparent;
   color: #d8dee6;
-  font: inherit;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* 摘要:仅折叠态可见 */
-.krig-pm-host .ProseMirror .krig-def-block__summary {
-  display: none;
-  color: #9fb3c8;
-  user-select: none;
-  cursor: pointer;
+/* ── 折叠态:塌成一条双线 ── */
+/* 上边框变双线(border-style:double 需 ≥3px 才画得出两道) */
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__rule:first-child {
+  border-top: 3px double #444;
 }
 
-.krig-pm-host .ProseMirror div.krig-def-block.closed {
-  padding: 2px 12px;
-}
-
-.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__summary {
-  display: block;
-}
-
-/* 折叠态:正文与尾 `+++` 收起,头 `+++` 留作可点的把手 */
+/* ⚠️ 正文与下边框都收起 —— 折叠后不显示 def 中的任何内容 */
 .krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__body,
-.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__fence:last-child {
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__rule:last-child {
   display: none;
 }
 

@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { EditorState, type Transaction } from 'prosemirror-state';
+import { EditorState, TextSelection, type Transaction } from 'prosemirror-state';
 import type { Schema } from 'prosemirror-model';
 
 // 全 ENABLED_BLOCKS import 链顺带拉起 learning vocab 集成,它 lazy 调
@@ -57,6 +57,8 @@ let docNodeToMarkdown: typeof import('@drivers/text-editing-driver/serializers/p
 let dissectPmDoc: typeof import('@platform/main/note/dissect-pm-doc').dissectPmDoc;
 let createDefBlockItem: typeof import('@capabilities/text-editing/ui/slash-menu/items').createDefBlockItem;
 let markdownToProseMirror: typeof import('@capabilities/text-editing/converters/md-to-pm').markdownToProseMirror;
+let buildBackspaceCommand: typeof import('@drivers/text-editing-driver/keyboard/backspace-decision').buildBackspaceCommand;
+let buildKeyboardMetaLookup: typeof import('@drivers/text-editing-driver/keyboard/build-keyboard-keymap').buildKeyboardMetaLookup;
 let lex: Lex;
 let gate: Gate;
 let RENDERABLE_ATOM_TYPES: ReadonlySet<string>;
@@ -72,6 +74,12 @@ beforeAll(async () => {
   ({ dissectPmDoc } = await import('@platform/main/note/dissect-pm-doc'));
   ({ createDefBlockItem } = await import('@capabilities/text-editing/ui/slash-menu/items'));
   ({ markdownToProseMirror } = await import('@capabilities/text-editing/converters/md-to-pm'));
+  ({ buildBackspaceCommand } = await import(
+    '@drivers/text-editing-driver/keyboard/backspace-decision'
+  ));
+  ({ buildKeyboardMetaLookup } = await import(
+    '@drivers/text-editing-driver/keyboard/build-keyboard-keymap'
+  ));
   lex = await import('@drivers/text-editing-driver/blocks/def-block/lexicon');
   gate = await import('@views/graph-canvas-view/slash-render-gate');
   ({ RENDERABLE_ATOM_TYPES } = await import('../../src/lib/atom-serializers/svg'));
@@ -437,6 +445,127 @@ describe('defBlock · markdown 往返', () => {
     const nodes = await markdownToProseMirror(['+++', 'id: A', '', '正文'].join('\n'));
     expect(nodes.some((n) => n.type === 'defBlock')).toBe(false);
     expect(nodes.every((n) => n.type === 'paragraph')).toBe(true);
+  });
+});
+
+
+// ────────────────────────────────────────────────────────────
+// 五、折叠态形态与删除入口(用户 2026-09-13 拍板)
+// ────────────────────────────────────────────────────────────
+
+describe('defBlock · 折叠态:一条双线,不可交互', () => {
+  it('⭐ `+++` 是通栏的线,不是字面三个加号(CSS 用 border-top,与 hr 同族)', () => {
+    // 用户:「+++ 是否使用一条线覆盖整个页面宽度?类似 --- 产生的效果」
+    // ⚠️ 必须**只看展开态那条规则的花括号内部** —— 早先写成「从选择器往后 slice
+    //   全文再 match」,折叠态的 `3px double` 会把它满足掉(注入验红时抓到的假绿)。
+    const css = stripComments(readSrc('src/drivers/text-editing-driver/pm-host.css'));
+    const block = /\.krig-def-block__rule\s*\{([^}]*)\}/.exec(css);
+    expect(block).toBeTruthy();
+    expect(block![1]).toMatch(/border-top:\s*1px solid/);
+  });
+
+  it('⭐ 折叠态上边框是**双线**(border-style: double)', () => {
+    const css = stripComments(readSrc('src/drivers/text-editing-driver/pm-host.css'));
+    const closed = css.slice(css.indexOf('.krig-def-block.closed'));
+    expect(closed).toMatch(/border-top:\s*3px double/);
+  });
+
+  it('⚠️ 折叠态**不显示 def 里的任何内容**(正文与下边框都 display:none)', () => {
+    const css = stripComments(readSrc('src/drivers/text-editing-driver/pm-host.css'));
+    // 收起规则必须同时点名正文和末条线,且值是 display:none
+    const m = css.match(
+      /\.krig-def-block\.closed \.krig-def-block__body[^{]*\{[^}]*display:\s*none/,
+    );
+    expect(m).toBeTruthy();
+  });
+
+  it('⚠️ NodeView 不再渲染摘要 —— 折叠态一个字都不露', () => {
+    // 早先版本折叠时显示 `id: A · 2 项` 摘要;用户要求改成什么都不显示。
+    const nv = stripComments(readSrc('src/drivers/text-editing-driver/blocks/def-block/node-view.ts'));
+    expect(nv).not.toContain('summary');
+  });
+
+  it('⭐ 折叠态不显示 handle(⋮⋮);⚠️ 展开态仍要有', () => {
+    const plugin = stripComments(
+      readSrc('src/drivers/text-editing-driver/plugins/build-block-handle-plugin.ts'),
+    );
+    // 必须是「defBlock 且未展开」才隐藏 —— 无条件隐藏会把展开态的 handle 也砍掉
+    expect(plugin).toMatch(/defBlock[\s\S]{0,80}attrs\.open\s*!==\s*true/);
+  });
+});
+
+describe('defBlock · 删除入口:下一段行首 Backspace(用户拍板)', () => {
+  function pressBackspaceAtStartOfLastPara(blocks: import('prosemirror-model').Node[]) {
+    const doc = schema.node('doc', null, blocks);
+    let state = EditorState.create({ schema, doc });
+    const last = doc.child(doc.childCount - 1);
+    const pos = doc.content.size - last.nodeSize + 1;
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+    const cmd = buildBackspaceCommand(buildKeyboardMetaLookup(ENABLED_BLOCKS));
+    const handled = cmd(state, (tr) => {
+      state = state.apply(tr);
+    }, undefined as never);
+    return { handled, state };
+  }
+
+  it('⭐ 光标在 def 块下一段行首按 Backspace → 整个 def 块被删掉', () => {
+    const { handled, state } = pressBackspaceAtStartOfLastPara([
+      schema.nodes.paragraph.create(null, schema.text('上文')),
+      schema.nodes.defBlock.create({ open: false }, schema.text('id: A')),
+      schema.nodes.paragraph.create(null, schema.text('下文')),
+    ]);
+    expect(handled).toBe(true);
+    const types = state.doc.content.content.map((n) => n.type.name);
+    expect(types).toEqual(['paragraph', 'paragraph']);
+    // ⚠️ 下文一个字都不能丢(删的是 def 块,不是这段)
+    expect(state.doc.child(1).textContent).toBe('下文');
+    expect(state.doc.child(0).textContent).toBe('上文');
+  });
+
+  it('⚠️⚠️ 修掉一个真 bug:不接管时正文会被并进 def 块污染词法', () => {
+    // 探针实测(非脑补):joinTextblockBackward 会产出
+    //   [para "上文"] [defBlock "id: A下文"]   ⭐ 正文混进逐行词法,定义就不合法了
+    const { state } = pressBackspaceAtStartOfLastPara([
+      schema.nodes.paragraph.create(null, schema.text('上文')),
+      schema.nodes.defBlock.create({ open: false }, schema.text('id: A')),
+      schema.nodes.paragraph.create(null, schema.text('下文')),
+    ]);
+    for (const n of state.doc.content.content) {
+      if (n.type.name === 'defBlock') expect(n.textContent).not.toContain('下文');
+    }
+  });
+
+  it('展开态同样能这样删(删除入口与折叠与否无关)', () => {
+    const { handled, state } = pressBackspaceAtStartOfLastPara([
+      schema.nodes.defBlock.create({ open: true }, schema.text('id: A')),
+      schema.nodes.paragraph.create(null, schema.text('下文')),
+    ]);
+    expect(handled).toBe(true);
+    expect(state.doc.content.content.map((n) => n.type.name)).toEqual(['paragraph']);
+  });
+
+  it('⚠️ 不许误伤:上一块**不是** def 块时,仍走原来的合并语义', () => {
+    const { state } = pressBackspaceAtStartOfLastPara([
+      schema.nodes.paragraph.create(null, schema.text('上文')),
+      schema.nodes.paragraph.create(null, schema.text('下文')),
+    ]);
+    // 原行为:两段合并成一段
+    expect(state.doc.childCount).toBe(1);
+    expect(state.doc.child(0).textContent).toBe('上文下文');
+  });
+
+  it('⚠️ 不许误伤:光标不在行首时不接管(该删字符就删字符)', () => {
+    const doc = schema.node('doc', null, [
+      schema.nodes.defBlock.create({ open: false }, schema.text('id: A')),
+      schema.nodes.paragraph.create(null, schema.text('下文')),
+    ]);
+    let state = EditorState.create({ schema, doc });
+    const last = doc.child(1);
+    const startPos = doc.content.size - last.nodeSize + 1;
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, startPos + 1)));
+    const cmd = buildBackspaceCommand(buildKeyboardMetaLookup(ENABLED_BLOCKS));
+    const handled = cmd(state, () => {}, undefined as never);
+    expect(handled).toBe(false); // 放行 → baseKeymap 删字符,def 块不受影响
   });
 });
 
