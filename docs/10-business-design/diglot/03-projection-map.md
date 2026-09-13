@@ -79,6 +79,7 @@ G 层(稀疏 pos) ──┘   ⭐ 有条目的覆盖自动值;没条目的用算
 | **Document.title** | ⭐ 标题即 root | — | note 标题 | — | |
 | **theme** | — | 全局 G 条目 | 同上 | — | |
 | **viewport** | — | ⚠️ **不持久**(会话) | — | `CanvasDocument.view` | `01 §7.5` 明定 |
+| ⭐ **`+++` 元数据区** | ⭐ 别名/`marker`/`label` + **Edge** | ⭐ `shape`/`color`/`structure` | note 内 paragraph | 联系线图元(未做) | ⭐⭐ **同一块写、落两层**;记法 `00 §2.5`、mind 词表 `01 §7.7` |
 
 ---
 
