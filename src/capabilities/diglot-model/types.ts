@@ -93,6 +93,20 @@ export interface SNode {
   readonly labels?: readonly string[];
   /** ⭐ 受控标记,与 labels 分设。缺省空。 */
   readonly markers?: readonly MarkerKind[];
+  /**
+   * ⭐⭐ 定义该节点的 def 块**原始块**(00 §2.5,note 的定义块)。
+   *
+   * ⚠️ **为什么不放进 `content`**:`content` 是「主题框里显示什么」——
+   * def 塞进去,画布主题框会当场显示 `id: A`(探针实测过的真现象)。
+   * 但它又**必须存住**,否则往返时整块蒸发(= 用户写的定义存盘即丢)。
+   * ⭐ 故单开一格:**摘出正文、原样保管、写回时原样吐回**。
+   *
+   * ⚠️ 存的是**原始块**不是解析结果 —— 逐字节往返的载体:
+   * 注释行、不认识的行、非规范空格都得原样吐回(01 §7.7.3 / 04 §0.6.3)。
+   * ⭐ 解析出来的东西(别名 / role / 关系行)已经落到 role/edges 上了,
+   * 这里留的是**书写原文**,两者各司其职。
+   */
+  readonly defs?: readonly unknown[];
 }
 
 /**

@@ -20,8 +20,19 @@
  * 而 note block **自带稳定 id**,增删行不影响其它块 —— 债 6 在这条路上不存在。
  */
 
-import type { NodeId, RichContent, SLayer, SNode } from './types';
+import type { NodeId, RichContent, SEdge, SLayer, SNode } from './types';
 import { contentToText, textToContent } from './mermaid-mindmap';
+import { deterministicEdgeId } from './edge-id';
+// ⭐ 词法归 note(00 §2.5.9:def 是 note 的能力),本模块只做**词表与含义**。
+// ⚠️ 分层依据 module-boundary-governance §1.3:`capabilities/L4 → drivers` 是
+//   既有合法边(四处违规 V1–V4 不含它);违规的是**反方向** shared→drivers(V3)。
+//   故此处直接 import driver 的词法模块,不把纯函数包成 capability 运行时依赖
+//   —— diglot 至今零 capability 依赖,加一个是朝「震中」方向走。
+import {
+  parseDefText,
+  defValue,
+  defRelations,
+} from '@drivers/text-editing-driver/blocks/def-block/lexicon';
 
 /**
  * ⭐⭐ **层级对应关系(单一真源)** —— 用户拍板 2026-09-10。
@@ -126,6 +137,18 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
       ...(inline.length > 0 ? { content: inline } : {}),
     });
 
+    // ⭐ def 块原样吐回,**紧跟在标题之后**(00 §2.5:hn 之后)——
+    //   ⚠️ 位置必须与正向摘出时一致,否则往返不收敛(甲靠位置约定认归属)。
+    //   ⚠️ 逐字节原样:注释行、不认识的行、非规范空格都不许「顺手规范化」。
+    //   ⚠️ 无 def **不 emit 空块**(否则往返多出一段,01 §7.7.3 反向第 3 条)。
+    for (const d of (n.defs ?? []) as PmNode[]) {
+      out.push({
+        type: d.type,
+        ...(d.attrs ? { attrs: { ...d.attrs } } : {}),
+        ...(d.content?.length ? { content: d.content } : {}),
+      });
+    }
+
     // ⭐⭐ 首块之后的块 = 并进来的正文,**原样 emit 成无 indent 的 paragraph**。
     //
     // ⚠️⚠️ 这里是本节最容易写错的地方:正文若也按深度加 indent,
@@ -228,8 +251,28 @@ export function noteDocToTree(doc: unknown): SLayer {
   //
   // ⭐ 两条不冲突:noteFormForDepth 产出的层级段落**永远带 indent >= 1**
   //   (depth 6 → indent 1 …),从不产出无 indent 段落 —— 那个形态是空出来的。
-  const groups: { head: PmNode; body: PmNode[] }[] = [];
+  const groups: { head: PmNode; body: PmNode[]; defs: PmNode[] }[] = [];
+  // ⭐ def 块与它「定义谁」的配对(甲=紧挨前面那个块;乙=attrs.for 定向)。
+  //   ⚠️ 乙的目标可能**还没出现**(def 写在前、块在后),故先记录待解,全扫完再配。
+  const pendingDefs: { def: PmNode; forId: string | null; groupIndex: number }[] = [];
+  // ⚠️ 绑不上任何块的 def(for 指向不存在 / 文档以 def 开头)——
+  //   ⭐ **不许丢**(方案丙:不删不改)。挂到第一个节点尾部原样吐回;
+  //   ⚠️ 它的别名不入表,故引用它的关系行成为悬空 —— 那是**正确**的结果:
+  //     绑不上块的定义,本来就没有「定义了谁」可言。
+  const orphanDefs: PmNode[] = [];
   for (const b of raw) {
+    // ⭐⭐ def 块**摘出正文**(00 §2.5 / 01 §7.7.3 正向第 2 条)——
+    //   ⚠️ 不摘就会按 §5.5「无 indent 的块并入上一节点当正文」被并进去,
+    //     画布主题框当场显示 `id: A` 这种鬼东西(探针实测过)。
+    if (b.type === 'defBlock') {
+      const forAttr = b.attrs?.for;
+      pendingDefs.push({
+        def: b,
+        forId: typeof forAttr === 'string' && forAttr.length > 0 ? forAttr : null,
+        groupIndex: groups.length - 1, // 甲:紧挨它前面那个块所在的组
+      });
+      continue;
+    }
     const ind = b.attrs?.indent;
     // ⭐ 只有 heading、以及带 indent 的 paragraph(h6 之后的层级)开新节点;
     //   **其余一切块类型**(mathBlock/codeBlock/列表/…)都并入上一个节点当正文。
@@ -237,7 +280,7 @@ export function noteDocToTree(doc: unknown): SLayer {
       b.type === 'heading' || (b.type === 'paragraph' && typeof ind === 'number' && ind >= 1);
     // ⚠️ 文档以无 indent 段落开头 → 没有「上一个节点」可并,自成节点,
     //    否则这段内容会凭空消失。
-    if (startsNode || groups.length === 0) groups.push({ head: b, body: [] });
+    if (startsNode || groups.length === 0) groups.push({ head: b, body: [], defs: [] });
     else groups[groups.length - 1].body.push(b);
   }
   const blocks = groups.map((g) => g.head);
@@ -272,6 +315,71 @@ export function noteDocToTree(doc: unknown): SLayer {
     });
   }
 
+  // ─────────────────────────────────────────────────────
+  // ⭐ def 块归属 → 别名表 → 关系行(词表与含义归 mind,词法调 lexicon)
+  // ─────────────────────────────────────────────────────
+
+  // ⭐ 甲为主 + 乙可选(用户 2026-09-13 拍板):
+  //   for=null    → 定义**紧挨它前面那个块**(位置约定)
+  //   for=<blockId> → 定向绑定,不受位置影响(挪动不失联)
+  // ⚠️ 绑不上的(for 指向不存在的块 / 文档以 def 开头没有上一个块)→ **不绑**,
+  //   它声明的别名就不入表 → 引用它的关系行成为悬空(方案丙:不造边、原文照留)。
+  const indexOfBlockId = new Map<string, number>();
+  ids.forEach((id, i) => indexOfBlockId.set(id, i));
+  for (const pd of pendingDefs) {
+    let owner = -1;
+    if (pd.forId !== null) {
+      // 乙:定向绑定 —— ⚠️ 目标不存在就是不存在,不回落到「上一个块」
+      //   (静默回落 = 把「写错了」变成「悄悄绑到别处」,比不绑更难查)
+      owner = indexOfBlockId.get(pd.forId) ?? -1;
+    } else {
+      owner = pd.groupIndex; // 甲:紧挨它前面那个块
+    }
+    if (owner >= 0 && owner < groups.length) groups[owner].defs.push(pd.def);
+    else orphanDefs.push(pd.def);
+  }
+
+  // ⭐ 别名表:`id: X` → NodeId。⚠️ 撞车**自动加序号**不报错拒绝(00 §2.5.4 方案丙)
+  //   —— 一次手滑不该让整张图的连线全废。
+  const aliasToNode = new Map<string, NodeId>();
+  groups.forEach((g, i) => {
+    for (const d of g.defs) {
+      const alias = defValue(parseDefText(textOf(d)), 'id');
+      if (!alias) continue;
+      if (!aliasToNode.has(alias)) {
+        aliasToNode.set(alias, ids[i]);
+        continue;
+      }
+      // 撞车:A → A2 → A3 …(⚠️ 不塌成重复,否则关系行会指向错节点)
+      for (let n = 2; n < 1000; n += 1) {
+        const candidate = `${alias}${n}`;
+        if (!aliasToNode.has(candidate)) {
+          aliasToNode.set(candidate, ids[i]);
+          break;
+        }
+      }
+    }
+  });
+
+  // ⭐ 关系行 → SEdge。⚠️ **含义归 mind**:`-.->` 在 mind 是**联系线**(树之外的
+  //   附加关系,不改父子);bpmn 里同样的记号是骨架本身 —— 词法共用,含义不共用
+  //   (00 §2.5.5)。
+  // ⭐ 确定性 id:重复连同一对 = **覆盖非新增**(债 3;用 Map 去重)。
+  // ⚠️ 悬空引用(别名不在表里)→ **丢弃这条边,但原文照留在 def 块里**(方案丙)。
+  const edgeMap = new Map<string, SEdge>();
+  for (const g of groups) {
+    for (const d of g.defs) {
+      for (const rel of defRelations(parseDefText(textOf(d)))) {
+        const source = aliasToNode.get(rel.source);
+        const target = aliasToNode.get(rel.target);
+        if (!source || !target) continue; // 悬空:不造边(原文在 def 块里原样保留)
+        const id = deterministicEdgeId(source, target);
+        edgeMap.set(id, { id, source, target, ...(rel.label ? { label: rel.label } : {}) });
+      }
+    }
+  }
+  const edges: SEdge[] = [...edgeMap.values()];
+
   let rootSeen = false;
   const nodes: SNode[] = blocks.map((b, i) => {
     const isTop = parents[i] === null;
@@ -282,6 +390,17 @@ export function noteDocToTree(doc: unknown): SLayer {
         rootSeen = true;
       } else {
         role = 'floating';
+      }
+    }
+    // ⭐ `role:` **显式优先**,不写才落隐式规则(01 §7.7.7;向后兼容老文档)。
+    // ⚠️ 这是**含义层**判断,归 mind:`role` 是什么词、认哪几个值,note 不管。
+    // ⚠️ rootSeen 已在上面按隐式规则推进过 —— 显式声明只改**本节点**的 role,
+    //   不回溯改别人(否则「第二个顶层显式写 root」会把第一个挤成 floating,
+    //   用户没让它动的东西不该动)。
+    for (const d of groups[i].defs) {
+      const explicit = defValue(parseDefText(textOf(d)), 'role');
+      if (explicit === 'root' || explicit === 'branch' || explicit === 'floating') {
+        role = explicit;
       }
     }
     // ⭐ 富内容原样保住:有 inline 就包回信封,不经纯文本拍平
@@ -313,10 +432,28 @@ export function noteDocToTree(doc: unknown): SLayer {
       version: '0.1',
       payload: { type: 'doc', content: [headBlock, ...bodyBlocks] },
     };
-    return { id: ids[i], content, parent: parents[i], order: orders[i], role };
+    // ⭐ def 块**原样保管**在 defs 格,不进 content(否则画布主题框显示 `id: A`)。
+    // ⚠️ 孤儿 def(绑不上任何块)挂到第一个节点尾部 —— 只为**不丢**,
+    //   它的别名不入表,不参与任何语义。
+    const defBlocks: PmNode[] = [
+      ...groups[i].defs,
+      ...(i === 0 ? orphanDefs : []),
+    ].map((x) => ({
+      type: x.type,
+      ...(x.attrs ? { attrs: { ...x.attrs } } : {}),
+      ...(x.content?.length ? { content: x.content } : {}),
+    }));
+    return {
+      id: ids[i],
+      content,
+      parent: parents[i],
+      order: orders[i],
+      role,
+      ...(defBlocks.length > 0 ? { defs: defBlocks } : {}),
+    };
   });
 
-  return { nodes, edges: [], spans: [] };
+  return { nodes, edges, spans: [] };
 }
 
 
