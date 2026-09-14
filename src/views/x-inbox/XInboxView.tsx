@@ -595,6 +595,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const offset = targetPage * PAGE_SIZE;
       const r = await xApiT.queryInbox({
         ...VIEW_QUERY[currentView],
+        wsId: workspaceId,
         lang: langFilter,
         searchRecipe: recipeFilter,
         taskId: taskFilter,
@@ -609,18 +610,26 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         setExpandedIds(new Set());
         setFeedbackMap({});
       }
-      const countViews: InboxViewKey[] = ['pending', 'suggested', 'audit', 'confirmed'];
-      const newCounts: Record<string, number> = {};
-      await Promise.all(countViews.map(async (v) => {
-        const cr = await xApiT.queryInbox({ ...VIEW_QUERY[v], lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, replied: hideReplied ? false : undefined, limit: 5000, offset: 0 });
-        newCounts[v] = cr?.records?.length ?? 0;
-      }));
+      // 徽章:一次 IPC 问完五个切片,每个只回一个整数。
+      // ⚠️ 别改回「queryInbox({limit:5000}).records.length」——
+      //    那会为显示一个数字把上千行全文过一遍 IPC,且超过 5000 静默截断。
+      // 「全部」独立数一次,不再拿三个视图相加:pending/worth 之外的状态
+      //    (如 skip)本就不该计入,相加也会把边界条件算错。
+      const countViews: InboxViewKey[] = ['pending', 'suggested', 'audit', 'confirmed', 'all'];
+      const cr = await xApiT.countInbox(countViews.map((v) => ({
+        key: v,
+        filter: {
+          ...VIEW_QUERY[v],
+          wsId: workspaceId,
+          lang: langFilter,
+          searchRecipe: recipeFilter,
+          taskId: taskFilter,
+          replied: hideReplied ? false : undefined,
+        },
+      })));
+      const newCounts = cr?.counts ?? {};
       setCounts(newCounts);
-      setTotalCount(
-        currentView === 'all'
-          ? (newCounts['pending'] ?? 0) + (newCounts['suggested'] ?? 0) + (newCounts['confirmed'] ?? 0)
-          : (newCounts[currentView] ?? 0),
-      );
+      setTotalCount(newCounts[currentView] ?? 0);
     } finally {
       setLoading(false);
     }
@@ -936,9 +945,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                 <span>{icon}</span>
                 <span style={{ fontSize: 11 }}>{label}</span>
                 <span style={{ marginLeft: 'auto', fontSize: 10, background: currentView === v ? 'rgba(255,255,255,0.2)' : 'var(--border)', padding: '1px 5px', borderRadius: 8 }}>
-                  {v === 'all'
-                    ? (counts['pending'] ?? 0) + (counts['suggested'] ?? 0) + (counts['confirmed'] ?? 0)
-                    : (counts[v] ?? '-')}
+                  {counts[v] ?? '-'}
                 </span>
               </div>
             ))}

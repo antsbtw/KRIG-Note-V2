@@ -11,10 +11,15 @@
  *   不能做成派生视图。
  *
  * ⚠️ 三条本表专属铁律:
- * 1. **handle 一律过 normalizeHandle()** —— 库里 x_tweet.author_handle 是
- *    '@Miekko22'(带 @、保留大小写),而 idx_author_handle 是 UNIQUE。
+ * 1. **handle 一律过 normalizeHandle()** —— idx_author_handle 是 UNIQUE,
  *    不归一化则 Foo/foo 成两行,同一人屏蔽两次只生效一次;且与
  *    applyFilter 的比对对不上 → 屏蔽点了没反应**且不报错**。
+ *    ⚠️ 2026-09-14 实测更正:此处原写「x_tweet.author_handle 存 '@Miekko22'
+ *    (带 @、保留大小写)」——**与实际数据不符**。活库 11739 行 x_tweet 里
+ *    带 @ 的 0 条、含大写的 0 条,最早 2026-07-23 的行也是归一化的;
+ *    x_author 同样。即两侧本来就同形,跨表可直接比对,
+ *    **不需要**在 SQL 里包 string::lowercase/string::replace。
+ *    本条铁律本身仍然成立(它保的是 UNIQUE 索引和写入端一致性)。
  * 2. **清空 option 字段用语句内写死的 NONE**,不走参数绑定 ——
  *    SurrealDB 的 NONE ≠ NULL,option<T> 只认 NONE;绑定 null 会被拒。
  * 3. **绝不 DEFINE/写 id 字段** —— id 是内建 record 标识,声明成 string 会

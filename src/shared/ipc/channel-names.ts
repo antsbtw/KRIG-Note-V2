@@ -328,6 +328,7 @@ export const IPC_CHANNELS = {
   X_SCAN_PAUSE:      'x:scan-pause',       // renderer → main invoke：暂停指定 ws 扫描（Phase 2: 改为 invoke + wsId）
   X_AI_JUDGE_BATCH:  'x:ai-judge-batch',  // renderer → main invoke / main 内部触发批判断
   X_INBOX_QUERY:     'x:inbox-query',      // renderer → main invoke：查询 tweet_inbox（支持 wsId 过滤）
+  X_INBOX_COUNTS:    'x:inbox-counts',     // renderer → main invoke：批量数各视图条数（侧栏徽章，只回整数不回行）
   X_LIST_RECIPES:    'x:list-recipes',     // renderer → main invoke：取所有配方
   X_REPLY_TWEET:     'x:reply-tweet',      // renderer → main invoke：导航 X webview 到目标推文（wsId + tweetUrl）
   X_PLAN_REPLIES:    'x:plan-replies',     // renderer → main invoke：给一批推文规划回复草稿（只产草稿，不发布）

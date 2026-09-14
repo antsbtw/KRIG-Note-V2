@@ -268,8 +268,8 @@ export async function applyHumanVerdict(
   }
 }
 
-/** 查询 tweet_inbox（Review Queue 用，支持按 status / lang 过滤） */
-export async function queryInbox(opts: {
+/** queryInbox / countInbox 的公共切片条件 */
+export interface InboxFilter {
   status?: TweetInboxStatus;
   statuses?: TweetInboxStatus[];   // 多状态 IN 过滤（与 status 互斥，优先级更高）
   wsId?: string;
@@ -278,18 +278,26 @@ export async function queryInbox(opts: {
   taskId?: string;                 // 按处理任务维度切片（阶段B恒 'judge-value'）
   humanReviewed?: boolean;         // true=只要人工确认过的(ai_verdict.reason 为 human:*)；
                                    // false=只要 Gemma 原判未复核的；缺省=不过滤
-  orderBy?: 'fetched_at' | 'confidence';  // confidence=按 Gemma 置信度升序（漏判抽查视图用）
-  limit?: number;
-  offset?: number;
   /** true(默认)=剔除已屏蔽作者/自己的推文。仅影响**显示**,历史数据一行不删。 */
   excludeHidden?: boolean;
   /** true=只看已回复过的;false=只看没回复的(排重复回复);缺省=不过滤 */
   replied?: boolean;
-}): Promise<TweetInboxRecord[]> {
-  const db = getXDB();
-  const limit = opts.limit ?? 50;
-  const offset = opts.offset ?? 0;
+}
 
+/**
+ * 构造 WHERE 子句 + 绑定参数 —— **列表与计数唯一的条件来源**。
+ *
+ * ⚠️ 为什么必须共用而不是各写一份:徽章数字与列表内容一旦用两套条件,
+ * 就会出现「徽章说有 12 条、点进去只有 8 条」这种对不上的账,
+ * 而且不报错。countPending/queryPending 早就踩过同一个坑(见上方注释:
+ * 「数出来有积压、捞的时候是空」),那里是靠注释约定,这里直接共用代码。
+ */
+function buildInboxWhere(opts: InboxFilter): {
+  where: string;
+  /** true = WHERE 里含 $hidden,调用方**必须**加 HIDDEN_PRELUDE 并把结果下标后移一位 */
+  needsHidden: boolean;
+  vars: Record<string, unknown>;
+} {
   const conditions: string[] = [];
   if (opts.statuses?.length)       conditions.push('status IN $statuses');
   else if (opts.status)            conditions.push('status = $status');
@@ -306,15 +314,20 @@ export async function queryInbox(opts: {
   // 「不再爬」约束未来(B 期 accountBlacklist),「不再显示」约束呈现 —— 两件事。
   // 解除屏蔽后这些行会原样回到列表,是过滤不是删除。
   //
-  // ⚠️ 跨表比对必须归一化:x_tweet.author_handle 存 '@angeelfv'(带 @、原始大小写),
-  // x_author.handle 存 'angeelfv'(归一化)。直接 IN 比对**恒不命中且不报错** ——
-  // 与 B 期 applyFilter 同源的坑,见 normalizeHandle 的注释。
-  // SQL 侧用 string::lowercase + 去 @,与 normalizeHandle() 同语义。
+  // ⭐⭐ 这一条**必须配合 HIDDEN_PRELUDE 使用**,右侧只能是 $hidden 变量,
+  // 绝不能把 (SELECT … FROM x_author …) 内联写在这里。
+  //
+  // 2026-09-14 实测(11684 行 x_tweet / 35 个屏蔽者):
+  //   内联子查询  → 22.07s     ← 每行都把右侧子查询重算一遍
+  //   LET 绑定后  → 0.027s     ← 只算一次,之后是常量比对
+  // 差约 800 倍。这**不是**索引问题,也不是 NOT IN 本身慢:
+  // 把右侧换成硬编码字面量数组同样是 26ms。真因就是「内联子查询按行重算」。
+  //
+  // ⚠️ 别再把 handle 包成 string::replace(string::lowercase(…)):
+  // 实测两侧本来就都是归一化的(x_tweet 11739 行 0 条带 @、0 条含大写,
+  // x_author 同样),包一层既无必要又让字段吃不到 idx_tweet_author。
   if (opts.excludeHidden !== false) {
-    conditions.push(
-      `string::replace(string::lowercase(author_handle), '@', '') NOT IN `
-      + `(SELECT VALUE handle FROM x_author WHERE blocked = true OR is_self = true)`,
-    );
+    conditions.push('author_handle NOT IN $hidden');
   }
 
   // 已回复过滤:采纳与回复是两件事,一条推可能已采纳但没回、
@@ -323,13 +336,103 @@ export async function queryInbox(opts: {
   else if (opts.replied === false) conditions.push('replied != true');
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return {
+    where,
+    needsHidden: opts.excludeHidden !== false,
+    vars: {
+      status: opts.status,
+      statuses: opts.statuses ?? null,
+      wsId: opts.wsId ?? null,
+      lang: opts.lang ?? null,
+      searchRecipe: opts.searchRecipe ?? null,
+      taskId: opts.taskId ?? null,
+    },
+  };
+}
+
+/**
+ * 隐藏名单的 LET 前缀 —— 把「屏蔽者/自己」这个集合**只算一次**。
+ *
+ * 必须与 `author_handle NOT IN $hidden` 成对出现:少了它,$hidden 未定义,
+ * 条件会静默变成「NOT IN 空」从而**放行所有行**(屏蔽失效且不报错);
+ * 把它换回内联子查询则退回 22s。两种坏法都不报错,所以由
+ * tests/x/inbox-exclude-hidden.test.ts 钉死。
+ */
+const HIDDEN_PRELUDE =
+  'LET $hidden = (SELECT VALUE handle FROM x_author WHERE blocked = true OR is_self = true);\n';
+
+/** 查询 tweet_inbox（Review Queue 用，支持按 status / lang 过滤） */
+export async function queryInbox(opts: InboxFilter & {
+  orderBy?: 'fetched_at' | 'confidence';  // confidence=按 Gemma 置信度升序（漏判抽查视图用）
+  limit?: number;
+  offset?: number;
+}): Promise<TweetInboxRecord[]> {
+  const db = getXDB();
+  const limit = opts.limit ?? 50;
+  const offset = opts.offset ?? 0;
+
+  const { where, vars, needsHidden } = buildInboxWhere(opts);
   const order = opts.orderBy === 'confidence' ? 'ai_verdict.confidence ASC' : 'fetched_at DESC';
 
-  const res = await db.query<[TweetInboxRecord[]]>(
-    `SELECT * FROM x_tweet ${where} ORDER BY ${order} LIMIT $limit START $offset`,
-    { status: opts.status, statuses: opts.statuses ?? null, wsId: opts.wsId ?? null, lang: opts.lang ?? null, searchRecipe: opts.searchRecipe ?? null, taskId: opts.taskId ?? null, limit, offset },
+  // LET 前缀必须和 $hidden 同时出现 —— 见 HIDDEN_PRELUDE 注释(22s → 0.03s)
+  const prelude = needsHidden ? HIDDEN_PRELUDE : '';
+  const res = await db.query<[TweetInboxRecord[]] | [unknown, TweetInboxRecord[]]>(
+    `${prelude}SELECT * FROM x_tweet ${where} ORDER BY ${order} LIMIT $limit START $offset`,
+    { ...vars, limit, offset },
   );
-  return res[0] ?? [];
+  // 有 LET 时结果数组第 0 位是 LET 自身的结果,真正的行在第 1 位
+  const rows = (needsHidden ? res[1] : res[0]) as TweetInboxRecord[] | undefined;
+  return rows ?? [];
+}
+
+/**
+ * 数一批切片各有多少条 —— 侧栏徽章专用,**一次问完,不拉行**。
+ *
+ * ⚠️ 这是在修一个具体的性能坑:此前徽章数字是靠
+ * `queryInbox({ limit: 5000 }).records.length` 算的 —— 为了显示一个整数,
+ * 把最多 5000 行**完整推文**(含 text/ai_verdict/translation 全文)
+ * 拉过 IPC、过一遍 JSON.parse(JSON.stringify()),到了 renderer 只读 .length
+ * 然后整个数组立刻丢弃。四个视图并发跑,每次点侧栏都重来一遍。
+ *
+ * 附带修掉的第二个缺陷:`limit: 5000` 是个**静默的天花板** ——
+ * 超过 5000 的切片会把数字截在 5000 且不报错(实测「漏判抽查」已到 4769,
+ * 正在逼近)。count() 没有上限,这个假象不会再出现。
+ *
+ * 用 GROUP ALL 多语句一次往返;条件与 queryInbox 共用 buildInboxWhere,
+ * 保证徽章数字与点进去看到的列表是同一套判据。
+ *
+ * ⭐ 五条语句共用**一个** LET $hidden:实测整批 33s → 0.07s。
+ */
+export async function countInbox(
+  slices: Array<{ key: string; filter: InboxFilter }>,
+): Promise<Record<string, number>> {
+  if (slices.length === 0) return {};
+  const db = getXDB();
+
+  // 每个切片一条 count 语句;各自的绑定变量加 key 前缀,避免互相覆盖
+  const stmts: string[] = [];
+  const vars: Record<string, unknown> = {};
+  let anyHidden = false;
+  slices.forEach(({ filter }, i) => {
+    const { where, vars: v, needsHidden } = buildInboxWhere(filter);
+    if (needsHidden) anyHidden = true;
+    // $status → $status_0,与该切片的语句一一对应。
+    // ⚠️ $hidden 是 LET 定义的共享变量,**不能**加下标 —— 排除掉。
+    const scoped = where.replace(/\$(\w+)/g, (_m, name) => (
+      name === 'hidden' ? '$hidden' : `$${name}_${i}`
+    ));
+    for (const [k, val] of Object.entries(v)) vars[`${k}_${i}`] = val;
+    stmts.push(`SELECT count() AS c FROM x_tweet ${scoped} GROUP ALL;`);
+  });
+
+  // LET 只发一次,五条 count 复用它
+  const prelude = anyHidden ? HIDDEN_PRELUDE : '';
+  const res = await db.query<Array<Array<{ c: number }>>>(prelude + stmts.join('\n'), vars);
+  // 有 LET 时结果整体后移一位
+  const base = anyHidden ? 1 : 0;
+  const out: Record<string, number> = {};
+  slices.forEach(({ key }, i) => { out[key] = res[base + i]?.[0]?.c ?? 0; });
+  return out;
 }
 
 /** 标记推文已回复（已确认视图清场用）

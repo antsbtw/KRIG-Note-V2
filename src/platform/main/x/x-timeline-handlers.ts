@@ -15,7 +15,8 @@ import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
 import { setParentContext } from '../db/tweet-inbox-repo';
-import { queryInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
+import { queryInbox, countInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
+import type { InboxFilter } from '../db/tweet-inbox-repo';
 import { googleTranslate, translateCircuitOpen } from './google-translate';
 import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
@@ -213,6 +214,40 @@ export function registerXTimelineHandlers(): void {
       return { success: true, records: JSON.parse(JSON.stringify(records)) };
     } catch (err) {
       return { success: false, error: String(err), records: [] };
+    }
+  });
+
+  // X_INBOX_COUNTS — 侧栏徽章:一次问完各视图条数（只回整数，不拉行）
+  //
+  // ⚠️ 别退回「拉 5000 行数 length」那种算法:那是这个通道存在的理由 ——
+  //    为显示一个整数而把上千行全文过 IPC,且超过 limit 会静默截断。
+  ipcMain.handle(IPC_CHANNELS.X_INBOX_COUNTS, async (_e, payload: unknown) => {
+    const p = payload as { slices?: unknown } | null;
+    try {
+      const raw = Array.isArray(p?.slices) ? p.slices : [];
+      const slices = raw.map((s) => {
+        const it = s as { key?: unknown; filter?: Record<string, unknown> } | null;
+        const f = (it?.filter ?? {}) as Record<string, unknown>;
+        const filter: InboxFilter = {
+          status: typeof f.status === 'string' ? (f.status as TweetInboxStatus) : undefined,
+          statuses: Array.isArray(f.statuses) ? (f.statuses as TweetInboxStatus[]) : undefined,
+          wsId: typeof f.wsId === 'string' ? f.wsId : undefined,
+          lang: typeof f.lang === 'string' ? f.lang : undefined,
+          searchRecipe: typeof f.searchRecipe === 'string' ? f.searchRecipe : undefined,
+          taskId: typeof f.taskId === 'string' ? f.taskId : undefined,
+          humanReviewed: typeof f.humanReviewed === 'boolean' ? f.humanReviewed : undefined,
+          excludeHidden: typeof f.excludeHidden === 'boolean' ? f.excludeHidden : undefined,
+          replied: typeof f.replied === 'boolean' ? f.replied : undefined,
+        };
+        return { key: String(it?.key ?? ''), filter };
+      });
+      const counts = await countInbox(slices);
+      return { success: true, counts };
+    } catch (err) {
+      // fail loud:数不出来就说数不出来,绝不回 {} 让徽章显示 0
+      //（0 和「查询挂了」长得一模一样,会让人以为队列空了）
+      console.error('[x-timeline-handlers] X_INBOX_COUNTS failed:', (err as Error).message);
+      return { success: false, error: String(err), counts: {} };
     }
   });
 

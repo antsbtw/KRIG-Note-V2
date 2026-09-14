@@ -1,17 +1,23 @@
 /**
- * queryInbox 隐藏过滤(屏蔽者 / 自己)—— 守跨表 handle 归一化。
+ * queryInbox / countInbox 隐藏过滤(屏蔽者 / 自己)。
  *
- * 守的缺陷:x_tweet.author_handle 存 '@angeelfv'(带 @、原始大小写),
- * x_author.handle 存 'angeelfv'(归一化)。跨表直接比对**恒不命中且不报错**
- * —— 与 B 期 applyFilter 同源的坑,表现是「屏蔽了还显示在面板上」。
+ * ⚠️ 2026-09-14 重写。本测试原来钉的是「SQL 里必须有 string::lowercase
+ * + string::replace 去 @」,理由是「x_tweet 存 '@angeelfv'、x_author 存
+ * 'angeelfv',不归一化就恒不命中」。**实测证否**:活库 11739 行 x_tweet
+ * 带 @ 的 0 条、含大写 0 条,x_author 亦然 —— 两侧本来就同形。那层字符串
+ * 包裹既无必要,又让字段吃不到 idx_tweet_author。原判据已删。
  *
- * 本测试钉死:排除条件里必须同时有「转小写」和「去 @」两步。
- * 任一步被删,用例必须变红。
+ * 现在钉的是真正会坏事的两件:
  *
- * ⚠️ 真实 SQL 行为已在活库实测(2026-09-02):
- *    全表 782 → 排除后 769,差 13 = 三个被屏蔽者的历史推文
- *    (@angeelfv 6 / @kidzpod 5 / @ashertogcpd 2),数字对得上。
- *    本测试补的是「表达式不被后人改坏」这一层。
+ * 1. **$hidden 必须由 LET 前缀定义**。少了前缀,$hidden 未定义 →
+ *    条件退化成「NOT IN 空」→ **放行所有行**(屏蔽失效)且不报错。
+ *
+ * 2. **右侧绝不能内联 (SELECT … FROM x_author …)**。内联子查询会被
+ *    按行重算:实测 11684 行 × 35 个屏蔽者 = 22.07s;换成 LET 绑定
+ *    后 0.027s,约 800 倍。这不是索引问题 —— 右侧换成硬编码字面量
+ *    数组同样是 26ms,真因就是「内联子查询按行重算」。
+ *
+ * 两种坏法都不报错(一个静默放行、一个只是慢),所以必须由测试钉住。
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -22,39 +28,52 @@ const SRC = readFileSync(
   'utf-8',
 );
 
-/** 抽出排除条件那段 SQL */
-function excludeClause(): string {
-  const m = SRC.match(/NOT IN[\s\S]{0,200}?is_self = true\)/);
-  return m ? m[0] : '';
-}
-
-describe('queryInbox 隐藏过滤', () => {
+describe('隐藏过滤(屏蔽者 / 自己)', () => {
   it('排除条件存在', () => {
-    expect(excludeClause()).not.toBe('');
+    expect(SRC).toContain('author_handle NOT IN $hidden');
   });
 
-  it('⭐必须转小写 —— 少了则 @Miekko22 类大写 handle 漏网', () => {
-    expect(SRC).toContain('string::lowercase(author_handle)');
-  });
-
-  it('⭐必须去 @ 前缀 —— 少了则 x_tweet 的 @xxx 永远匹配不上 x_author 的 xxx', () => {
-    expect(SRC).toMatch(/string::replace\(\s*string::lowercase\(author_handle\)\s*,\s*'@'/);
+  it('⭐必须有 LET 前缀定义 $hidden —— 少了它会静默放行所有行', () => {
+    expect(SRC).toMatch(/LET \$hidden\s*=\s*\(SELECT VALUE handle FROM x_author/);
   });
 
   it('屏蔽与自己两类都要排除', () => {
-    const clause = excludeClause();
-    expect(clause).toContain('blocked = true');
-    expect(clause).toContain('is_self = true');
+    const m = SRC.match(/LET \$hidden[\s\S]{0,200}?\);/);
+    expect(m).not.toBeNull();
+    expect(m![0]).toContain('blocked = true');
+    expect(m![0]).toContain('is_self = true');
+  });
+
+  it('⭐条件里绝不能内联子查询 —— 按行重算 = 22s(见文件头)', () => {
+    // WHERE 片段里只允许出现 $hidden 变量,不允许出现 SELECT
+    const cond = SRC.match(/conditions\.push\('author_handle NOT IN[^)]*\)/);
+    expect(cond).not.toBeNull();
+    expect(cond![0]).not.toContain('SELECT');
+  });
+
+  it('⭐不得再把 handle 包进 lowercase/replace —— 两侧本来同形,包了反而吃不到索引', () => {
+    expect(SRC).not.toContain('string::lowercase(author_handle)');
+    expect(SRC).not.toMatch(/string::replace\(\s*string::lowercase\(author_handle\)/);
   });
 
   it('excludeHidden 默认开启(只有显式传 false 才看全量)', () => {
-    // 写成 !== false 而非 === true,保证调用方不传时也过滤
     expect(SRC).toContain('opts.excludeHidden !== false');
   });
 
+  it('queryInbox / countInbox 两条路径都要发 LET 前缀', () => {
+    // 两处都必须根据 needsHidden 拼 prelude,否则 $hidden 未定义
+    expect(SRC).toMatch(/needsHidden \? HIDDEN_PRELUDE/);
+    expect(SRC).toMatch(/anyHidden \? HIDDEN_PRELUDE/);
+  });
+
+  it('有 LET 时结果要偏移一位 —— 否则读到的是 LET 自己的结果', () => {
+    expect(SRC).toMatch(/needsHidden \? res\[1\] : res\[0\]/);
+    expect(SRC).toMatch(/anyHidden \? 1 : 0/);
+  });
+
   it('只过滤不删除 —— 本函数不得出现 DELETE', () => {
-    const fn = SRC.slice(SRC.indexOf('export async function queryInbox'));
-    const body = fn.slice(0, fn.indexOf('\n}'));
+    const start = SRC.indexOf('function buildInboxWhere');
+    const body = SRC.slice(start, SRC.indexOf('\n}', start));
     expect(body).not.toMatch(/\bDELETE\b/);
   });
 });

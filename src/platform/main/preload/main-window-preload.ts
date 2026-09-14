@@ -1100,6 +1100,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
     },
+    /** 侧栏徽章:一次问完各视图条数（只回整数，不拉行） */
+    countInbox(slices: Array<{ key: string; filter: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; excludeHidden?: boolean; replied?: boolean } }>) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_COUNTS, { slices });
+    },
     runRecipe(recipeId: string, wsId: string, targetWcId: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_RUN_RECIPE, { recipeId, wsId, targetWcId });
     },
