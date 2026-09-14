@@ -308,3 +308,53 @@ describe('M6 · attrs.for(甲为主 + 乙可选)', () => {
     expect(JSON.stringify(treeToNoteDoc(s).payload)).toContain('X -.-> X'); // 原文还在
   });
 });
+
+// ────────────────────────────────────────────────────────────
+// 5. ⭐ 别名可以用什么字符(用户 2026-09-13 问「任意字符和文字,对吗?」)
+// ────────────────────────────────────────────────────────────
+
+describe('M8 · 别名字符范围', () => {
+  it('⭐ 中文别名可用 —— 关系行真造得出边', () => {
+    const src = doc([
+      h(1, 'n1', '需求'), def('d1', 'id: 需求分析'),
+      h(1, 'n2', '排期'), def('d2', 'id: 排期\n需求分析 -.支撑.-> 排期'),
+    ]);
+    const s = noteDocToTree(src);
+    expect(s.edges).toHaveLength(1);
+    expect(s.edges[0]).toMatchObject({ source: 'n1', target: 'n2', label: '支撑' });
+    // ⚠️ 中文别名也要逐字节往返(别被"顺手规范化")
+    expect(treeToNoteDoc(s).payload).toEqual((src as { payload: unknown }).payload);
+  });
+
+  it('⭐ emoji / 连字符 / 点 / 冒号都能当别名', () => {
+    for (const alias of ['🔥', 'node-1', 'a.b', 'x:y']) {
+      const s = noteDocToTree(
+        doc([
+          h(1, 'n1', '甲'), def('d1', `id: ${alias}`),
+          h(1, 'n2', '乙'), def('d2', `id: B\n${alias} -.-> B`),
+        ]),
+      );
+      expect(s.edges, `别名 ${alias} 应能造边`).toHaveLength(1);
+    }
+  });
+
+  it('⚠️⚠️ 别名带空格 → 关系行**静默不生效**(硬边界,记账用)', () => {
+    // ⚠️ 这条**钉的是现状不是理想**:REL_RE 用 (\S+) 取端点,空格处断开。
+    //   方案丙不报错 → 用户只看到「线没出来」。将来加引号语法时,这条要一并改。
+    const src = doc([
+      h(1, 'n1', '甲'), def('d1', 'id: 我的 节点'),
+      h(1, 'n2', '乙'), def('d2', 'id: B\n我的 节点 -.-> B'),
+    ]);
+    const s = noteDocToTree(src);
+    expect(s.edges).toEqual([]); // 不造边
+    // ⭐ 但原文必须原样保留(方案丙:不删不改)
+    expect(treeToNoteDoc(s).payload).toEqual((src as { payload: unknown }).payload);
+  });
+
+  it('⚠️ 带空格的别名在 `id:` 行**仍然认**(只是关系行用不了)', () => {
+    const s = noteDocToTree(doc([h(1, 'n1', '甲'), def('d1', 'id: 我的 节点')]));
+    // 节点还在、def 还在 —— 不是"整块作废"
+    expect(s.nodes).toHaveLength(1);
+    expect(s.nodes[0].defs).toBeDefined();
+  });
+});
