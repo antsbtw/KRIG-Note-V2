@@ -23,7 +23,7 @@
 
 import type { SlashItem } from '@slot/interaction-registries/slash-registry/slash-types';
 
-/** 11 项 turn-into:Paragraph / H1-H3 / Bullet / Ordered / Task / Quote / Code / Divider / Callout / Toggle */
+/** 14 项 turn-into:Paragraph / H1-H6 / Bullet / Ordered / Task / Quote / Code / Divider / Callout / Toggle */
 export function createTurnIntoItems(viewId: string): SlashItem[] {
   return [
     {
@@ -68,6 +68,39 @@ export function createTurnIntoItems(viewId: string): SlashItem[] {
       icon: 'heading-3',
       hint: '###',
       order: 40,
+    },
+    {
+      id: `${viewId}.slash.h4`,
+      label: 'Heading 4',
+      command: 'text-editing.slash-turn-h4',
+      keywords: ['h4', 'heading', 'header'],
+      view: viewId,
+      group: 'basic',
+      icon: 'heading-4',
+      hint: '####',
+      order: 41,
+    },
+    {
+      id: `${viewId}.slash.h5`,
+      label: 'Heading 5',
+      command: 'text-editing.slash-turn-h5',
+      keywords: ['h5', 'heading', 'header'],
+      view: viewId,
+      group: 'basic',
+      icon: 'heading-5',
+      hint: '#####',
+      order: 42,
+    },
+    {
+      id: `${viewId}.slash.h6`,
+      label: 'Heading 6',
+      command: 'text-editing.slash-turn-h6',
+      keywords: ['h6', 'heading', 'header'],
+      view: viewId,
+      group: 'basic',
+      icon: 'heading-6',
+      hint: '######',
+      order: 43,
     },
     {
       id: `${viewId}.slash.bullet`,
@@ -234,5 +267,28 @@ export function createMathVisualBlockItem(viewId: string): SlashItem {
     group: 'advanced',
     icon: 'line-chart',
     order: 146,
+  };
+}
+
+/**
+ * Def Block(定义块,`00 §2.5`)
+ *
+ * ⭐⭐ **note 的一等能力**(`00 §2.5.9`:def 是 note 的能力,graph 只是调用者)——
+ * 故与 math / mermaid / html 同列,是 PM 通用项,不是图种专属。
+ *
+ * ⭐ **名字只有一个,入口可以很多**:打 `/meta`、`/图元`、`/graphmeta` 都搜得到
+ * 同一项,文档与代码只认 `def`(用户 2026-09-13)——把「叫什么」的分歧降到最小。
+ */
+export function createDefBlockItem(viewId: string): SlashItem {
+  return {
+    id: `${viewId}.slash.def-block`,
+    label: 'Definition',
+    command: 'text-editing.slash-insert-def-block',
+    keywords: ['def', 'graphdef', 'meta', 'graphmeta', 'diagram', '定义', '图元', 'gd'],
+    view: viewId,
+    group: 'advanced',
+    icon: 'braces',
+    hint: '+++',
+    order: 148,
   };
 }

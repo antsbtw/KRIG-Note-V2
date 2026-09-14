@@ -46,6 +46,9 @@ export interface BlockVisualSpec {
     readonly h1: { readonly fontSize: number; readonly fontWeight: number };
     readonly h2: { readonly fontSize: number; readonly fontWeight: number };
     readonly h3: { readonly fontSize: number; readonly fontWeight: number };
+    readonly h4: { readonly fontSize: number; readonly fontWeight: number };
+    readonly h5: { readonly fontSize: number; readonly fontWeight: number };
+    readonly h6: { readonly fontSize: number; readonly fontWeight: number };
   };
   /** 列表(pm-host.css `.ProseMirror li` / bullet ::before) */
   readonly list: {
@@ -165,6 +168,11 @@ export const BLOCK_VISUAL_SPEC: BlockVisualSpec = {
     h1: { fontSize: 38, fontWeight: 700 }, // .ProseMirror h1 38px/700
     h2: { fontSize: 28, fontWeight: 600 }, // .ProseMirror h2 28px/600
     h3: { fontSize: 22, fontWeight: 600 }, // .ProseMirror h3 22px/600
+    // ⭐ h4-h6(2026-09-10 补齐):schema 本就支持 level 1-6,样式此前只到 h3。
+    // 直接动因是 diglot mind 的层级用 h1~hn 表达,深过 h3 会断层;note 深层大纲同样受益。
+    h4: { fontSize: 18, fontWeight: 600 }, // .ProseMirror h4 18px/600
+    h5: { fontSize: 16, fontWeight: 600 }, // .ProseMirror h5 16px/600
+    h6: { fontSize: 15, fontWeight: 600 }, // .ProseMirror h6 15px/600
   },
   list: {
     indentPerLevel: 24,  // .ProseMirror li padding-left:24px

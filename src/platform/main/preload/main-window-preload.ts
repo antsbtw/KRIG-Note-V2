@@ -621,6 +621,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.GRAPH_LIST_CHANGED, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.GRAPH_LIST_CHANGED, handler);
   },
+  // ── diglot mind v0(方案 B1:独立表 mind_doc,共用 graph 文件夹)──
+  mindList(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_LIST);
+  },
+  mindLoad(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_LOAD, id);
+  },
+  mindCreate(
+    title: string,
+    semantic: string,
+    graphic: string,
+    folderId: string | null,
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_CREATE, title, semantic, graphic, folderId);
+  },
+  mindSave(id: string, semantic: string, graphic: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_SAVE, id, semantic, graphic, title);
+  },
+  mindDelete(id: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_DELETE, id);
+  },
+  mindRename(id: string, title: string): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_RENAME, id, title);
+  },
+  mindMoveToFolder(id: string, folderId: string | null): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_MOVE_TO_FOLDER, id, folderId);
+  },
+  mindDuplicate(id: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.MIND_DUPLICATE, id);
+  },
+  /** main → renderer 推送:导图列表变更 */
+  onMindListChanged(callback: (list: unknown) => void): () => void {
+    const handler = (_event: unknown, list: unknown): void => callback(list);
+    ipcRenderer.on(IPC_CHANNELS.MIND_LIST_CHANGED, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.MIND_LIST_CHANGED, handler);
+  },
+
   // 文件夹
   graphFolderList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.GRAPH_FOLDER_LIST);
@@ -1060,7 +1097,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── X 时间线智能筛选 Review Queue（Phase 2）──
   xTimeline: {
-    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number }) {
+    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
     },
     runRecipe(recipeId: string, wsId: string, targetWcId: number) {
@@ -1086,6 +1123,42 @@ contextBridge.exposeInMainWorld('electronAPI', {
     replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number) {
       return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_TWEET, { tweetUrl, tweetId, wsId, wcId });
     },
+    /** 规划回复草稿(只产草稿,不发布 —— 填进 X 仍走 pasteReply,发布永远由用户点) */
+    planReplies(wsId: string, tweetIds?: string[], limit?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_REPLIES, { wsId, tweetIds, limit });
+    },
+    /** 回放:拿历史人工标注样本跑规划器(只算不发、不写库,附与人工的一致率) */
+    replayReplies(wsId: string, accept?: number, reject?: number, lang?: string) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLAY_REPLIES, { wsId, accept, reject, lang });
+    },
+    /** 为单条推文现写回复(卡片弹窗;只产草稿,发布永远由用户点) */
+    planOneReply(wsId: string, tweetId: string, wcId?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_ONE_REPLY, { wsId, tweetId, wcId });
+    },
+    /** 记学习期反馈(AI 原文 vs 用户最终发的) */
+    submitReplyFeedback(payload: unknown) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_FEEDBACK, payload);
+    },
+    /** 分语言原样通过率(放手自动的判据) */
+    replyReadiness() {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_READINESS);
+    },
+    /** 追踪名单增删查(≠ X 的关注) */
+    watchlist(op: 'list' | 'add' | 'remove', handle?: string, note?: string) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST, { op, handle, note });
+    },
+    /** 给「Gemma 建议采纳」的推批量预抓上文(①闸门的输入) */
+    prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number,
+                    status?: string, humanReviewed?: boolean, statuses?: string[]) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT,
+        { wsId, wcId, limit, offset, status, humanReviewed, statuses });
+    },
+    /** 给建议名单批量预采账号画像(②活跃度的事实来源) */
+    prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number,
+                     status?: string, humanReviewed?: boolean, statuses?: string[]) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES,
+        { wsId, wcId, limit, offset, status, humanReviewed, statuses });
+    },
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
     queryFeedback: (payload: unknown) =>
@@ -1100,5 +1173,61 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke(IPC_CHANNELS.X_FEEDBACK_STATS),
     markReplied: (tweetId: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_MARK_REPLIED, { tweetId }),
+    // 屏蔽名单（B 期）——「不再爬他的新推」，已抓历史保留
+    blockAuthor: (handle: string, reason?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_BLOCK_AUTHOR, { handle, reason }),
+    unblockAuthor: (handle: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_UNBLOCK_AUTHOR, { handle }),
+    listBlocked: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_BLOCKED),
+    // per-ws 角色配置(活动契约)—— 用户在 UI 里自己设定
+    getWsRoles: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_WS_ROLES),
+    setWsRole: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.X_SET_WS_ROLE, payload),
+    listArticles: (wcId?: number, wsId?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_ARTICLES, { wcId, wsId }),
+    fetchArticleReplies: (payload: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, payload),
+    harvestNotifications: (wsId: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST_NOTIFICATIONS, { wsId, wcId }),
+    campaignStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAMPAIGN_STATUS),
+    startNotifWatch: (wsId: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_NOTIF_WATCH_START, { wsId, wcId }),
+    stopNotifWatch: () => ipcRenderer.invoke(IPC_CHANNELS.X_NOTIF_WATCH_STOP),
+    onNotifWatchUpdate: (cb: (snap: unknown) => void) => {
+      const h = (_e: unknown, snap: unknown) => cb(snap);
+      ipcRenderer.on(IPC_CHANNELS.X_NOTIF_WATCH_UPDATE, h);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.X_NOTIF_WATCH_UPDATE, h);
+    },
+    /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
+    detectSelf: (wcId?: number, wsId?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId, wsId }),
+    getSelf: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
+    /** 采集回复关系并回填 replied(主线第一环) */
+    /** 被动采集监视:开始/停止 + 实时快照订阅 */
+    captureStart: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_START, { wcId }),
+    captureStop: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_STOP),
+    onCaptureUpdate: (cb: (snap: unknown) => void) => {
+      const h = (_e: unknown, snap: unknown): void => cb(snap);
+      ipcRenderer.on(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
+      return () => ipcRenderer.off(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
+    },
+    /** 订阅全量采集进度(长任务不能是黑箱) */
+    onHarvestProgress: (cb: (p: unknown) => void) => {
+      const h = (_e: unknown, p: unknown): void => cb(p);
+      ipcRenderer.on(IPC_CHANNELS.X_HARVEST_PROGRESS, h);
+      return () => ipcRenderer.off(IPC_CHANNELS.X_HARVEST_PROGRESS, h);
+    },
+    /** 通用时间线采集(滚到底 + 自校验);只读不落库 */
+    harvest: (url: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST, { url, wcId }),
+    collectReplies: (handle: string, wcId?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_COLLECT_REPLIES, { handle, wcId }),
+    /** 勘查 X GraphQL 原始载荷字段(能力边界的真实依据);只读不落库 */
+    payloadSurvey: (wcId?: number, seconds?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_PAYLOAD_SURVEY, { wcId, seconds }),
+    /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
+    watchlistSpike: (handle: string, wcId?: number, maxRounds?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST_SPIKE, { handle, wcId, maxRounds }),
   },
 });

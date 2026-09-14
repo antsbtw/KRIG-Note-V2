@@ -47,7 +47,7 @@ export interface GraphFolderRecord {
 
 // ── view 业务路径 API ──
 
-export interface GraphLibraryStoreApi {
+export interface GraphLibraryStoreApi extends MindLibraryApi {
   // ── 画板 CRUD ──
 
   /** 列出全部画板(按 updated_at 倒序);不返 doc_content */
@@ -82,4 +82,60 @@ export interface GraphLibraryStoreApi {
 
   /** 订阅画板列表变化(create / save / rename / delete / move / duplicate / folder ops 全广播)*/
   onGraphListChanged(callback: (list: GraphCanvasListItem[]) => void): () => void;
+}
+
+
+// ─────────────────────────────────────────────────────────
+// diglot mind(方案 B1:独立表 mind_doc,共用 graph 文件夹)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * ⭐ mind 文档记录 —— **两段纯文本**就是全部内容。
+ *
+ * ⚠️ 与 `GraphCanvasRecord` 刻意不同:那边是 `doc_content`(被拆成 instance 原子),
+ * 这边是 `semantic`/`graphic` 两个字符串**原样存**。
+ * 理由见 03-projection-map §7:mind 的真源是文本,画板的真源是节点。
+ */
+export interface MindDocRecord {
+  id: string;
+  title: string;
+  /** S 层:mermaid mindmap 语法(用户书写,机器不改写) */
+  semantic: string;
+  /** G 层:规范形,稀疏(空串 = 全自动布局) */
+  graphic: string;
+  folder_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface MindDocListItem {
+  id: string;
+  title: string;
+  folder_id: string | null;
+  updated_at: number;
+}
+
+/**
+ * mind 存储 API。
+ *
+ * ⚠️ 挂在 graph-library-store 上而非独立 capability:
+ * 二者**共用同一棵左侧树与同一套文件夹**(B1 的定义),
+ * 拆成两个 capability 会让 view 端为了渲染一棵树去装两个能力,得不偿失。
+ */
+export interface MindLibraryApi {
+  mindList(): Promise<MindDocListItem[]>;
+  mindLoad(id: string): Promise<MindDocRecord | null>;
+  mindCreate(
+    title: string,
+    semantic: string,
+    graphic: string,
+    folderId?: string | null,
+  ): Promise<MindDocRecord | null>;
+  mindSave(id: string, semantic: string, graphic: string, title: string): Promise<void>;
+  mindDelete(id: string): Promise<void>;
+  mindRename(id: string, title: string): Promise<void>;
+  mindMoveToFolder(id: string, folderId: string | null): Promise<void>;
+  mindDuplicate(id: string): Promise<MindDocRecord | null>;
+  /** main → renderer 推送:导图列表变更 */
+  onMindListChanged(cb: (list: MindDocListItem[]) => void): () => void;
 }

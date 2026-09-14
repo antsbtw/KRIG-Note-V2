@@ -29,6 +29,7 @@ import type {
   SubstanceComponent,
   FillStyle,
   LineStyle,
+  ArrowStyle,
   EvaluatedPath,
 } from '@capabilities/shape-library/types';
 import type { Instance } from '../types';
@@ -356,16 +357,27 @@ export class NodeRenderer {
     });
 
     // 文字层统一:带 doc 的几何 shape → 在其 textBox(缺省整框)叠一条文字层.
-    // 几何层先渲(out.group),文字层叠在其上(z 更高).几何 shape textGrows
-    // 缺省 false → 文字溢出可见,不撑高几何.
+    // 几何层先渲(out.group),文字层叠在其上(z 更高).
+    //
+    // ⭐⭐ **几何 shape 也撑高**(用户拍板:「shape 是服务于文字的,不是一个固定的长宽比」)。
+    // 旧版这里硬编码 `false` —— 而 contentH 在 fillTextLayer 里**本来就无条件算好了**,
+    // 只是算完不用。四个 basic shape 全是 `aspect: variable`,没有固定比例会被破坏。
+    //
+    // ⚠️ 用户手动拖过高度的节点不会被撑(size_lock.h),见 applyResize 的「拖过就锁」。
+    //
+    // ⚠️ 撑高只管**高**不管宽:宽度仍由用户拖 / 调用方给。文字过宽走换行
+    //    (fillTextLayer 传了 width,渲染层按 textBox 宽度 wrap)。
     if (this.atomBridge && hasTextLayer(inst, shape)) {
       const tb = evalPath.textBox ?? { l: 0, t: 0, r: size.w, b: size.h };
+      // ⚠️ textBox 是**内缩**的(圆角矩形按 rad 内缩),撑高时要把上下内缩量加回去,
+      //    否则按 contentH 定高会让文字正好顶到圆角边缘、下缘被裁。
+      const insetY = Math.max(0, tb.t) + Math.max(0, size.h - tb.b);
       this.fillTextLayer(inst, out.group, {
         x: tb.l,
         y: tb.t,
         w: Math.max(1, tb.r - tb.l),
         h: Math.max(1, tb.b - tb.t),
-      }, false);
+      }, shape.textGrows ?? true, insetY);
     }
 
     // outer/inner 嵌套实现 bbox 中心旋转
@@ -402,6 +414,8 @@ export class NodeRenderer {
       start: ep.start,
       end: ep.end,
       style: mergeLine(shape.default_style?.line, inst.style_overrides?.line),
+      // ⭐ 补「ArrowStyle 是死字段」缺口(00 §9.1):此前 JSON 写了 arrow 渲染层也收不到
+      arrow: mergeArrow(shape.default_style?.arrow, inst.style_overrides?.arrow),
     });
     group.userData.instanceId = inst.id;
     return {
@@ -526,13 +540,16 @@ export class NodeRenderer {
    *
    * @param region 文字层在 innerGroup 局部坐标的子区域 { x, y, w, h }
    *               (几何 shape = evalPath.textBox;文字框 = 整框 {0,0,w,h})
-   * @param autogrow 内容溢出是否撑高节点(shape.textGrows;文字框 true / 几何 shape false)
+   * @param autogrow 内容溢出是否撑高节点(shape.textGrows,缺省 true)
+   * @param insetY 文字区相对整框的**上下内缩总量**(几何 shape 的 textBox 内缩;
+   *               文字框为 0)。撑高时要加回去,否则文字会顶到边缘被裁。
    */
   private fillTextLayer(
     inst: Instance,
     innerGroup: THREE.Group,
     region: { x: number; y: number; w: number; h: number },
     autogrow: boolean,
+    insetY = 0,
   ): void {
     if (!this.atomBridge) return;
     const safeRegion = {
@@ -611,7 +628,7 @@ export class NodeRenderer {
 
         // 3. 内容溢出 → 自适应高度(仅 autogrow=true,即文字框;几何 shape 文字溢出可见).
         if (autogrow && contentH > 0) {
-          this.adaptTextNodeSizeToContent(inst.id, current, contentH);
+          this.adaptTextNodeSizeToContent(inst.id, current, contentH + insetY);
         }
       } catch (e) {
         console.warn(`[NodeRenderer] text render failed for ${inst.id}`, e);
@@ -639,6 +656,34 @@ export class NodeRenderer {
     const padding = 8;
     const newH = Math.ceil(contentH + padding);
     if (newH <= rendered.size.h + 1) return;
+
+    // ⭐⭐ 几何 shape(圆角矩形等):**必须整体重渲**,不能只改下面那几个 mesh。
+    //
+    // ⚠️ 真机踩过:放开撑高后公式**照旧溢出框外**,看着像「改了没生效」。
+    // 真因 = 下面那段只重建 **hit-area** 和 **背景** 两个 PlaneGeometry,
+    // 而几何 shape 的蓝色框是 `pathToThree(evaluate(...))` 产出的**路径 mesh**,
+    // 顶点在 evaluate 时就按 `size.h` **烘死**了 —— size 改了它纹丝不动。
+    // 文字框没有这层几何,所以老代码一直够用;几何 shape 一放开就露馅。
+    //
+    // ⭐ 正解:写回 size 后走 `update()`(remove + add 整体重建),
+    // 让 evaluate 按新高度重新求值,框才会真的变高。
+    // ⚠️ 不会无限递归:重渲后内容装得下,上面那句 `newH <= size.h + 1` 直接 return。
+    // ⭐ 判据:`isTextNode` 只在**纯文字框**那条路径上打(renderTextLayerNode),
+    //    几何 shape 走的是 evaluate → pathToThree,没有这个标记。
+    const isPureTextBox = rendered.group.userData?.isTextNode === true;
+    if (inst && !isPureTextBox) {
+      // ⚠️⚠️ 只改 size.h 的话,框从**左上角往下长** —— 直接压到下方兄弟节点身上
+      //   (真机踩过:「两个主题框重叠了」)。
+      // ⭐ 纯文字框那条分支是靠 `outer.position.y += (newH-oldH)/2` **保持中心不动**;
+      //   几何分支走 update() 重建,读的是 inst.position(左上角),
+      //   所以要**自己把 position 往上提半个增量**,等效于中心不动、上下对称地长。
+      const grow = newH - rendered.size.h;
+      if (inst.position) inst.position.y -= grow / 2;
+      if (inst.size) inst.size.h = newH;
+      rendered.size.h = newH;
+      this.update(inst);
+      return;
+    }
 
     // outer/inner 嵌套(wrapForRotation):
     // outer.position = (px + w/2, py + h/2);inner.position = (-w/2, -h/2)
@@ -767,6 +812,17 @@ function mergeFill(
 ): FillStyle | undefined {
   if (!base && !override) return undefined;
   if (!base) return override as FillStyle;
+  if (!override) return base;
+  return { ...base, ...override };
+}
+
+/** 合并两端箭头 —— ⚠️ 约定与 mergeLine 一致(override 覆盖 base 的同名字段)。 */
+function mergeArrow(
+  base?: ArrowStyle,
+  override?: Partial<ArrowStyle>,
+): ArrowStyle | undefined {
+  if (!base && !override) return undefined;
+  if (!base) return override as ArrowStyle;
   if (!override) return base;
   return { ...base, ...override };
 }

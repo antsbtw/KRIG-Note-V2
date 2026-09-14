@@ -57,6 +57,7 @@ export function buildInputRules(schema: Schema): Plugin {
   const blockquote = schema.nodes.blockquote;
   const horizontalRule = schema.nodes.horizontalRule;
   const codeBlock = schema.nodes.codeBlock;
+  const defBlock = schema.nodes.defBlock;
   const listItem = schema.nodes.listItem;
 
   if (bulletList && listItem) {
@@ -86,6 +87,9 @@ export function buildInputRules(schema: Schema): Plugin {
   }
   if (codeBlock) {
     rules.push(codeBlockRule(codeBlock));
+  }
+  if (defBlock) {
+    rules.push(defBlockRule(defBlock));
   }
 
   return inputRules({ rules });
@@ -183,6 +187,30 @@ function codeBlockRule(codeBlockType: NodeType): InputRule {
     const blockStart = $start.before($start.depth);
     const blockEnd = $start.after($start.depth);
     const tr = state.tr.replaceWith(blockStart, blockEnd, codeBlockType.create());
+    tr.setSelection(TextSelection.near(tr.doc.resolve(blockStart + 1)));
+    return tr;
+  });
+}
+
+/**
+ * `+++` 行首 → defBlock(定义块,`00 §2.5`),光标进块内
+ *
+ * ⭐ 与 ``` → codeBlock 同一手势范式:手写体验不变,但**存储是真块**,
+ * 不再靠记号硬凑(用户 2026-09-13 拍板保留此输入规则)。
+ * ⚠️ 刻意**不用** `---`:行首 `---` 已被上面的 horizontalRuleRule 占用,
+ * 而 buildInputRules 是「始终开」的共用层,动它 = 改 note 既有行为。
+ * ⭐ 新插入的块 open=true —— 用户刚敲出来就要往里写,折叠着没法写;
+ * 默认折叠是**已有内容重开时**的形态(spec.attrs.open 默认 false)。
+ */
+function defBlockRule(defBlockType: NodeType): InputRule {
+  return new InputRule(/^\+\+\+$/, (state, _match, start) => {
+    const $start = state.doc.resolve(start);
+    const blockStart = $start.before($start.depth);
+    const blockEnd = $start.after($start.depth);
+    const node = state.doc.nodeAt(blockStart);
+    // title paragraph 不许变定义块(单标题不变量)
+    if (!node || node.type.name !== 'paragraph' || node.attrs.isTitle) return null;
+    const tr = state.tr.replaceWith(blockStart, blockEnd, defBlockType.create({ open: true }));
     tr.setSelection(TextSelection.near(tr.doc.resolve(blockStart + 1)));
     return tr;
   });

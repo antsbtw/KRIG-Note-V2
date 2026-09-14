@@ -75,7 +75,11 @@ import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 import { seedRecipes } from './db/search-recipe-repo';
 import { recoverStuckAiJudging } from './db/tweet-inbox-repo';
-import { startXSearchScheduler, stopXSearchScheduler } from './x';
+// ⭐ 步 3:web.net 健康巡检 —— 探针是拉取式的,必须有人定期查,否则通道哑了没人知道
+import { startHealthWatch, stopHealthWatch } from './web-capability/wiring/health-watch';
+import { startXSearchScheduler, stopXSearchScheduler,
+  startCampaignServer, stopCampaignServer,
+  startCampaignLoop, stopCampaignLoop } from './x';
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -238,6 +242,25 @@ app.whenReady().then(async () => {
       console.error('[x-timeline] ai_judging 自愈失败:', err);
     });
   startXSearchScheduler();
+  // ⭐ 步 3:启动 web.net 健康巡检(60s 一轮,只在健康状态翻转时发声,不刷屏)。
+  // 停止调用在下面的 before-quit —— 常驻 timer 必须有停止调用(记忆 project-graceful-shutdown)。
+  startHealthWatch();
+
+  // 活动契约接口 B(POST /refresh + GET /health)。
+  // 未配置密钥/地址时**静默跳过**——这是可选能力,没配就是没启用,不是错误。
+  // ⚠️ 长期部署在 Windows:监听 tailnet IP 而非 127.0.0.1,并阻止休眠(见该模块)。
+  startCampaignServer()
+    .then((r) => {
+      if ('error' in r) console.log(`[campaign-server] 未启动:${r.error}`);
+    })
+    .catch((err) => console.error('[campaign-server] 启动异常:', err));
+
+  // 活动主循环:**通知页驱动**(用户拍板)——「谁点赞、谁转发」一页覆盖,
+  // 且 target 带完整推文对象(conversation_id + has_media),契约要素一次全给。
+  // 延迟 20s 启动:给 storage / webview 留出就绪时间。
+  setTimeout(() => {
+    startCampaignLoop().catch((err) => console.error('[campaign-loop] 启动异常:', err));
+  }, 20_000);
 
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
   // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。
@@ -363,6 +386,10 @@ app.on('before-quit', (event) => {
   // 停掉 X 调度器的 60s 轮询 —— 活着的 setInterval 会吊住事件循环让进程不肯退,
   // 且退出途中继续跑配方毫无意义(日志刷 `no active X webContents, skip`)。
   stopXSearchScheduler();
+  // ⭐ 步 3:停 web.net 健康巡检(与上面同理:活着的 setInterval 会吊住事件循环)
+  stopHealthWatch();
+  stopCampaignServer().catch(() => { /* 退出中,忽略 */ });
+  stopCampaignLoop().catch(() => { /* 退出中,忽略 */ });
   if (reconciled) {
     shutdownStorageSync();
     return;

@@ -18,6 +18,7 @@ import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { GraphLibraryStoreApi } from '@capabilities/graph-library-store/types';
+import type { DiglotModelApi } from '@capabilities/diglot-model/types';
 import type { FolderCapabilityApi } from '@capabilities/folder/types';
 import {
   getGraphCanvasWsState,
@@ -34,6 +35,34 @@ export function registerGraphCanvasCommands(wsId: string): void {
     if (!record) return;
     setActiveGraphId(ctx.wsId, record.id);
     pendingCanvasCreatedTrigger?.(record.id);
+  });
+
+  // ── 创建思维导图(diglot mind v0)──
+  // ⭐ 方案 B1(用户拍板 2026-09-10):导图存**独立表 mind_doc**,
+  //    共用 graph 的文件夹与左侧树(🎨 与 🧠 混排)。
+  // ⚠️ 曾走过方案 A(塞 graph_canvas 的 doc_content),真机实测**内容被静默丢弃** ——
+  //    canvas-store 把 doc_content 拆成 instance 原子,两段纯文本没有容身处。
+  // ⚠️ 仍非最终归属:规格方向是「mind 就是一篇 note」(01-mind-spec §3.4);
+  //    迁移时两段纯文本可直接喂 note 导入,不会白写。见 03-projection-map §7。
+  registerWsCommand('graph-canvas-view.create-mind', () => wsId, async (ctx) => {
+    const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
+    // ⚠️ 走间接路由取 capability(view 不直接 import 运行时值,W5 §5)
+    const diglot = requireCapabilityApi<DiglotModelApi>('diglot-model');
+    // ⭐ B1:走 mind 自己的表,一步到位带上初始内容
+    //    (不再借 graph_canvas —— 那张表会把两段文本静默丢弃,真机实测过)
+    const tpl = diglot.emptyMindFile() as { semantic: string; graphic: string };
+    const record = await library.mindCreate('未命名导图', tpl.semantic, tpl.graphic, null);
+    if (!record) return;
+    setActiveGraphId(ctx.wsId, record.id);
+    pendingCanvasCreatedTrigger?.(encodeTreeId('mind', record.id));
+  });
+
+  // ── ⭐「+ 新建」类型选择菜单(用户拍板 2026-09-10)──
+  // 弹一个菜单选文件类型,而不是摆一排 button。
+  // ⚠️ 菜单位置由命令发起处给:navSide 按钮没有 DOM 引用可拿,
+  //    故用 window 尺寸估一个左上角锚点(NavSide 宽度固定)。
+  commandRegistry.register('graph-canvas-view.show-create-menu', () => {
+    pendingCreateMenuTrigger?.({ x: 96, y: 84 });
   });
 
   // ── 文件夹 CRUD ──
@@ -92,6 +121,13 @@ export function registerGraphCanvasCommands(wsId: string): void {
         if (ws && getGraphCanvasWsState(ws).activeGraphId === id) {
           setActiveGraphId(ctx.wsId, null);
         }
+      } else if (type === 'mind') {
+        // ⭐ B1 分发:导图在另一张表
+        await library.mindDelete(id);
+        const ws = workspaceManager.get(ctx.wsId);
+        if (ws && getGraphCanvasWsState(ws).activeGraphId === id) {
+          setActiveGraphId(ctx.wsId, null);
+        }
       } else {
         // decision 021 §5.5 Q7 弱保护 (R3 字面各自实施):含资源 folder 删除前 confirm
         // canvas-commands 是 view 层,跨 capability 调用允许(graph-library-store 不动 + folder capability 单独调)
@@ -115,24 +151,43 @@ export function registerGraphCanvasCommands(wsId: string): void {
 
   commandRegistry.register(
     'graph-canvas-view.move-out',
-    async (graphId: unknown) => {
-      if (typeof graphId !== 'string' || !graphId) return;
+    async (treeIdOrId: unknown) => {
+      if (typeof treeIdOrId !== 'string' || !treeIdOrId) return;
       const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
-      await library.moveToFolder(graphId, null);
+      // ⭐ B1 分发:兼容裸 id(旧调用)与 treeId(带类型前缀)
+      const { type, id } = treeIdOrId.includes(':')
+        ? decodeTreeId(treeIdOrId)
+        : { type: 'canvas' as const, id: treeIdOrId };
+      if (type === 'mind') await library.mindMoveToFolder(id, null);
+      else await library.moveToFolder(id, null);
     },
   );
 
   commandRegistry.register(
     'graph-canvas-view.duplicate',
-    async (graphId: unknown) => {
-      if (typeof graphId !== 'string' || !graphId) return;
+    async (treeIdOrId: unknown) => {
+      if (typeof treeIdOrId !== 'string' || !treeIdOrId) return;
       const library = requireCapabilityApi<GraphLibraryStoreApi>('graph-library-store');
-      await library.duplicate(graphId);
+      const { type, id } = treeIdOrId.includes(':')
+        ? decodeTreeId(treeIdOrId)
+        : { type: 'canvas' as const, id: treeIdOrId };
+      if (type === 'mind') {
+        await library.mindDuplicate(id);
+        return;
+      }
+      await library.duplicate(id);
     },
   );
 }
 
 // ── 桥接器(nav-side-content mount 时挂上,unmount 清掉)──
+
+let pendingCreateMenuTrigger: ((pos: { x: number; y: number }) => void) | null = null;
+export function setCreateMenuTrigger(
+  fn: ((pos: { x: number; y: number }) => void) | null,
+): void {
+  pendingCreateMenuTrigger = fn;
+}
 
 let pendingRenameTrigger: ((treeId: string) => void) | null = null;
 let pendingFolderCreatedTrigger: ((folderId: string) => void) | null = null;
@@ -156,15 +211,25 @@ export function setCanvasCreatedTrigger(
 
 // ── tree id 编码(canvas / folder)──
 
-export function encodeTreeId(type: 'canvas' | 'folder', id: string): string {
-  return `${type === 'folder' ? 'f' : 'c'}:${id}`;
+/**
+ * 树项 id 编码。
+ *
+ * ⭐ `mind` 是第三类(diglot mind v0,方案 B1):它存在**另一张表**,
+ * 所有列表操作(重命名/删除/移动/打开)都要按此类型**分发到不同 store**。
+ * ⚠️ 分发逻辑统一收在本文件的命令里,**不许散落到 UI** —— 漏一处就是静默出错。
+ */
+export type TreeItemType = 'canvas' | 'mind' | 'folder';
+
+export function encodeTreeId(type: TreeItemType, id: string): string {
+  const prefix = type === 'folder' ? 'f' : type === 'mind' ? 'm' : 'c';
+  return `${prefix}:${id}`;
 }
 
-export function decodeTreeId(
-  treeId: string,
-): { type: 'canvas' | 'folder'; id: string } {
-  return {
-    type: treeId.startsWith('f:') ? 'folder' : 'canvas',
-    id: treeId.slice(2),
-  };
+export function decodeTreeId(treeId: string): { type: TreeItemType; id: string } {
+  const type: TreeItemType = treeId.startsWith('f:')
+    ? 'folder'
+    : treeId.startsWith('m:')
+      ? 'mind'
+      : 'canvas';
+  return { type, id: treeId.slice(2) };
 }

@@ -23,13 +23,16 @@ import type { SlashItem } from '@slot/interaction-registries/slash-registry/slas
  *
  * 命令→TurnTarget 权威源:register-pm-commands.ts registerSlashTurn(...);
  * TurnTarget(kebab)→ atom.type(camel)在此显式登记,避免散落字符串。
- * paragraph/h1-h3 都落 paragraph|heading(渲染态 renderTextBlock),恒可渲。
+ * paragraph/h1-h6 都落 paragraph|heading(渲染态 renderTextBlock),恒可渲。
  */
 const SLASH_TURN_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
   'text-editing.slash-turn-paragraph': 'paragraph',
   'text-editing.slash-turn-h1': 'heading',
   'text-editing.slash-turn-h2': 'heading',
   'text-editing.slash-turn-h3': 'heading',
+  'text-editing.slash-turn-h4': 'heading',
+  'text-editing.slash-turn-h5': 'heading',
+  'text-editing.slash-turn-h6': 'heading',
   'text-editing.slash-turn-bullet': 'bulletList',
   'text-editing.slash-turn-ordered': 'orderedList',
   'text-editing.slash-turn-task': 'taskList',
@@ -38,6 +41,22 @@ const SLASH_TURN_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
   'text-editing.slash-turn-divider': 'horizontalRule',
   'text-editing.slash-turn-callout': 'callout',
   'text-editing.slash-turn-toggle': 'toggleList',
+};
+
+/**
+ * slash-**insert** 命令 → 落地的块 atom.type(非 turn-into 的插入项)。
+ *
+ * ⚠️ 上面 isSlashItemRenderable 原本对「命令不在 turn-into 表内」一律放行,
+ * 并留了 fail loud 提示:「未来若注册了渲染态不支持的非 turn-into 块,需在此
+ * 显式登记其 atom.type 再判」。**defBlock 就是第一个**(00 §2.5,note 的定义块)——
+ * atomsToSvg 不渲它,画布节点里插了会变灰字占位 → 功能黑洞。
+ *
+ * ⭐ 且从语义上画布文字节点本就不该插 def:def 定义的是**导图/画板节点本身**,
+ * 写在节点**内部**是套娃。它的落点是语义面(note tab,MIND_SEMANTIC_VIEW_ID),
+ * 那条链路不经本闸。
+ */
+const SLASH_INSERT_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
+  'text-editing.slash-insert-def-block': 'defBlock',
 };
 
 /**
@@ -67,9 +86,10 @@ const GRAPH_SLASH_DENY_ATOM_TYPES: ReadonlySet<string> = new Set([
  *   宁可未来加一行,不静默放行黑洞)。
  */
 export function isSlashItemRenderable(item: SlashItem): boolean {
-  const atomType = SLASH_TURN_COMMAND_TO_ATOM_TYPE[item.command];
+  const atomType =
+    SLASH_TURN_COMMAND_TO_ATOM_TYPE[item.command] ?? SLASH_INSERT_COMMAND_TO_ATOM_TYPE[item.command];
   if (atomType === undefined) {
-    // 非 turn-into item(math-block 等);当前注册的此类项目标块均可渲,放行。
+    // 非 turn-into / 非登记的 insert item(math-block 等);当前注册的此类项目标块均可渲,放行。
     return true;
   }
   return RENDERABLE_ATOM_TYPES.has(atomType) && !GRAPH_SLASH_DENY_ATOM_TYPES.has(atomType);
@@ -81,4 +101,8 @@ export function filterSlashItemsToRenderable(items: SlashItem[]): SlashItem[] {
 }
 
 /** 单测用:导出映射表 + 画板主动屏蔽集(断言闸行为时对照)。 */
-export { SLASH_TURN_COMMAND_TO_ATOM_TYPE, GRAPH_SLASH_DENY_ATOM_TYPES };
+export {
+  SLASH_TURN_COMMAND_TO_ATOM_TYPE,
+  SLASH_INSERT_COMMAND_TO_ATOM_TYPE,
+  GRAPH_SLASH_DENY_ATOM_TYPES,
+};

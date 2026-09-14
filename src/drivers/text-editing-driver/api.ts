@@ -49,10 +49,12 @@ import {
   subscribeHeadingChange,
   toggleHeadingCollapse as toggleHeadingCollapseImpl,
   isHeadingCollapsed as isHeadingCollapsedImpl,
+  refreshHeadingCollapse as refreshHeadingCollapseImpl,
   type TocHeadingEntry,
 } from './plugins/build-heading-collapse-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
 import { insertColumnList as insertColumnListCommand } from './blocks/column-list';
+import { buildDefSkeleton, nextDefAlias, parseDefText, defValue } from './blocks/def-block/lexicon';
 import { generateUlid } from '@shared/ulid';
 import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
@@ -1081,7 +1083,7 @@ export const textEditingDriverApi = {
    * 把当前光标所在 block(或指定 pos block)Turn Into 指定类型
    *
    * 支持:
-   * - 'paragraph' / 'h1' / 'h2' / 'h3' — 切换到 paragraph / heading{level} 节点类型
+   * - 'paragraph' / 'h1'..'h6' — 切换到 paragraph / heading{level} 节点类型
    * - 'bullet-list' / 'ordered-list' / 'task-list' — 包成 list > list-item > paragraph(或 heading)
    * - 'blockquote' — 包成 blockquote > 当前 block
    * - 'code-block' — 替换为 code-block(纯文本)
@@ -1095,6 +1097,9 @@ export const textEditingDriverApi = {
       | 'h1'
       | 'h2'
       | 'h3'
+      | 'h4'
+      | 'h5'
+      | 'h6'
       | 'bullet-list'
       | 'ordered-list'
       | 'task-list'
@@ -1190,7 +1195,10 @@ export const textEditingDriverApi = {
     }
 
     // heading 切换 — 切到 heading 节点类型 + level
-    if (target === 'h1' || target === 'h2' || target === 'h3') {
+    if (
+      target === 'h1' || target === 'h2' || target === 'h3' ||
+      target === 'h4' || target === 'h5' || target === 'h6'
+    ) {
       const headingType = schema.nodes.heading;
       if (!headingType) return;
       const level = parseInt(target.slice(1), 10);
@@ -1326,6 +1334,9 @@ export const textEditingDriverApi = {
       | 'h1'
       | 'h2'
       | 'h3'
+      | 'h4'
+      | 'h5'
+      | 'h6'
       | 'bullet-list'
       | 'ordered-list'
       | 'task-list'
@@ -1766,6 +1777,64 @@ export const textEditingDriverApi = {
       }
       // 光标进 caption 内(insertPos + 2 = htmlBlock 内 paragraph 起点)
       const sel = TextSelection.create(tr.doc, insertPos + 2);
+      tr = tr.setSelection(sel).scrollIntoView();
+      dispatch(tr);
+    }
+    inst.view.focus();
+  },
+
+  /**
+   * 在光标当前 block 位置插入 defBlock 骨架(定义块,`00 §2.5`)
+   *
+   * 行为参照 insertMermaidBlockAtSelection:
+   * - 空段落 → 替换;非空段落 → 之后插入
+   * - ⭐ **别名自动分配**:扫全 doc 已用的 `id:` 值,取第一个没被占的
+   *   (`nextDefAlias`;⚠️ 不是按个数递增 —— 删掉中间节点后那个字母该能重用)
+   * - ⭐ 新插入的块 `open: true`(刚敲出来就要写,折叠着没法写);
+   *   spec 默认 false 管的是**已有内容重开**时的形态
+   * - 光标落在 `id:` 行末,用户接着往下写(`00 §2.5.7`)
+   */
+  insertDefBlockAtSelection(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return;
+    const { state, dispatch } = inst.view;
+    const schema = state.schema;
+    const defType = schema.nodes.defBlock;
+    if (!defType) return;
+
+    // 扫全 doc 已用别名 —— 只看 defBlock 的 `id:` 行(词法归 lexicon,这里不解释含义)
+    const used: string[] = [];
+    state.doc.descendants((n) => {
+      if (n.type.name !== 'defBlock') return true;
+      const alias = defValue(parseDefText(n.textContent), 'id');
+      if (alias) used.push(alias);
+      return false;
+    });
+    const skeleton = buildDefSkeleton(nextDefAlias(used));
+    const defNode = defType.create({ open: true }, schema.text(skeleton));
+    if (!defNode) return;
+
+    const $from = state.selection.$from;
+    if ($from.depth === 0) {
+      dispatch(state.tr.insert(state.selection.from, defNode));
+    } else {
+      const depth = $from.depth;
+      const blockNode = $from.node(depth);
+      const blockStart = $from.before(depth);
+      const blockEnd = $from.after(depth);
+      const isEmptyParagraph =
+        blockNode.type.name === 'paragraph' &&
+        blockNode.content.size === 0 &&
+        !blockNode.attrs.isTitle;
+      let tr = state.tr;
+      const insertPos = isEmptyParagraph ? blockStart : blockEnd;
+      if (isEmptyParagraph) {
+        tr = tr.replaceWith(blockStart, blockEnd, defNode);
+      } else {
+        tr = tr.insert(blockEnd, defNode);
+      }
+      // 光标落 `id:` 行末(insertPos + 1 = 块内文本起点,+ skeleton.length = 行末)
+      const sel = TextSelection.create(tr.doc, insertPos + 1 + skeleton.length);
       tr = tr.setSelection(sel).scrollIntoView();
       dispatch(tr);
     }
@@ -2258,6 +2327,18 @@ export const textEditingDriverApi = {
     const inst = instanceRegistry.get(instanceId);
     if (!inst || inst.view.isDestroyed) return;
     scrollToHeadingPos(inst.view, pos);
+  },
+
+  /**
+   * ⭐ 强制重算折叠区间(外部折叠来源模式用)。
+   *
+   * ⚠️ 画布侧折叠**不改 doc** → PM 无新 transaction → plugin 不重算 → 内容不藏。
+   * 外部改了折叠状态后调本函数推一下。
+   */
+  refreshHeadingCollapseFor(instanceId: string): void {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return;
+    refreshHeadingCollapseImpl(inst.view);
   },
 
   /**

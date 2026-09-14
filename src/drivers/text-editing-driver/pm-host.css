@@ -72,6 +72,43 @@
   color: #e8eaed;
 }
 
+/*
+ * h4-h6(2026-09-10 补齐)
+ *
+ * ⭐ schema 早就支持 level 1-6(CommonMark,decision 005 D2 明写
+ * 「UI 渲染层即便暂时只样式化 1-3,schema 支持 1-6 留出扩展余地」),
+ * 但样式只到 h3 —— h4 以下渲染成与正文无异,层级看不出来。
+ *
+ * 补齐的直接动因是 diglot mind:导图层级用 h1~hn 表达,深过 h3 就断层。
+ * ⚠️ 但这不是 mind 专属改动 —— note 自己写深层大纲同样受益。
+ *
+ * 字号沿 h1..h3 的递减节奏(38/28/22)继续:18/16/15,
+ * h5/h6 与正文同号靠字重与颜色区分(CommonMark 排版惯例)。
+ */
+.krig-pm-host .ProseMirror h4 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #e8eaed;
+}
+
+.krig-pm-host .ProseMirror h5 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #d6d9dd;
+}
+
+.krig-pm-host .ProseMirror h6 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 1px 0;
+  padding: 3px 2px;
+  color: #b8bdc4;
+}
+
 /* Inline code(对齐 V1)*/
 .krig-pm-host .ProseMirror code {
   background: #2a2a2a;
@@ -283,6 +320,59 @@
   padding: 0;
   color: inherit;
   font-size: inherit;
+}
+
+/* defBlock — 定义块(00 §2.5)
+ * ⭐ `+++` 画成**通栏的线**(用户 2026-09-13:「类似 --- 产生的效果」),
+ *   与 hr.krig-horizontal-rule 同族配色(#444),线是 NodeView 的边框不是文字。
+ * ⭐ 折叠态塌成**一条双线**:不显示 def 里的任何内容、不显示 handle
+ *   (handle 由 build-block-handle-plugin 主动隐藏)、完全不可交互 ——
+ *   只响应「点一下展开」。
+ * ⚠️ 正文 contentDOM 必须常驻(PM 位置映射要求),折叠靠 display:none 隐藏。 */
+.krig-pm-host .ProseMirror div.krig-def-block {
+  /* ⚠️ 不用 hr 的 1.5em:hr 是独立分隔线,def 块是**依附在 hn 之下的定义**
+   * (00 §2.5.2「hn 之后的第一段」)—— 离得远就不像属于这个标题。
+   * 用户 2026-09-13 真机反馈:「距离 hn 太远了,不美观」。
+   * 跟正文块同一节奏(.ProseMirror > * 的 margin:1px),让它紧贴上一个块。 */
+  margin: 1px 0;
+  /* 通用 .ProseMirror > * 给了 padding:3px 2px —— 线条块不需要,清掉免得又撑开 */
+  padding: 0;
+}
+
+/* 展开态:上下各一条单线(通栏) */
+.krig-pm-host .ProseMirror .krig-def-block__rule {
+  border-top: 1px solid #444;
+  height: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.krig-pm-host .ProseMirror .krig-def-block__rule:hover {
+  border-top-color: #6b7f95;
+}
+
+.krig-pm-host .ProseMirror pre.krig-def-block__body {
+  margin: 0;
+  padding: 6px 0;
+  background: transparent;
+  color: #d8dee6;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 折叠态:塌成一条双线 ── */
+/* 上边框变双线(border-style:double 需 ≥3px 才画得出两道) */
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__rule:first-child {
+  border-top: 3px double #444;
+}
+
+/* ⚠️ 正文与下边框都收起 —— 折叠后不显示 def 中的任何内容 */
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__body,
+.krig-pm-host .ProseMirror div.krig-def-block.closed .krig-def-block__rule:last-child {
+  display: none;
 }
 
 /* toggleList — 对齐 V1(箭头 + 内容,closed 时仅显第一行)
@@ -4371,4 +4461,116 @@
 
 .krig-block-frame:hover {
   background: color-mix(in srgb, var(--krig-frame-color, #337EA9) 6%, transparent);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   heading-toggle — h1~h6 行内折叠三角(▸/▾)
+   由 build-heading-toggle-plugin 的 widget decoration 注入。
+
+   定位:absolute 挂在 heading 盒子内、悬在文字左缘外 —— 绝不占文档流,
+   否则标题文字会横移、整篇重排(三角是入口不是内容)。
+   对齐 Notion:紧贴文字左缘,⋮⋮ 手柄再往左让位(见 block-handle 的
+   HEADING_TOGGLE_RESERVE)。
+
+   显形规则:
+     - 展开态:hover 该标题才显(常驻符号干扰阅读)
+     - 折叠态:⭐ 常驻可见 —— 否则「哪些标题折叠了」一眼看不出
+   ───────────────────────────────────────────────────────────────── */
+
+/* 有三角的 heading 作为定位锚点(不改 padding/margin,不影响排版) */
+.krig-pm-host .ProseMirror h1.has-heading-toggle,
+.krig-pm-host .ProseMirror h2.has-heading-toggle,
+.krig-pm-host .ProseMirror h3.has-heading-toggle,
+.krig-pm-host .ProseMirror h4.has-heading-toggle,
+.krig-pm-host .ProseMirror h5.has-heading-toggle,
+.krig-pm-host .ProseMirror h6.has-heading-toggle {
+  position: relative;
+}
+
+.krig-pm-host .ProseMirror .krig-heading-toggle {
+  position: absolute;
+  /* 悬在文字左缘外:三角靶区 22 + 间距 6 */
+  left: -28px;
+
+  /* ── 垂直居中对齐标题**第一行**(实测定的,改前先读完)──
+     难点:三角要按**标题**的行高居中(h1 行框 38×1.7=64.6px),但字形本身
+     必须固定 16px(不能跟着 h1 涨成 38px 的巨大三角)。两个尺寸来源不同。
+
+     ⚠️ 试过两条死路(都在 Electron 40 实测过):
+       ① `height: 1.7em` —— em 解析**本元素自己的** font-size,不是标题的;
+          三角固定 16px 时得到 27.2px 矮盒子 → flex 居中落在标题上部。
+       ② `height: 1lh` —— lh 继承的是 line-height **倍率**不是父级算好的行框;
+          同样按本元素 16px 算 → 还是 27.2px。实测中心 y=11 vs 应为 35.3。
+       这就是用户看到"三角没垂直居中"的真因。
+
+     ✅ 解法:让**外壳**继承标题字号(不设 font-size),只用它做 em 度量 ——
+        top = padding-top + 0.85em(0.85 = 1.7/2,半个行高,em 此时是标题字号),
+        再 translateY(-50%) 回拉半个自身高度 → 精确落在首行中线。
+        字形大小交给 ::before 的固定 16px,与外壳度量解耦。
+     实测 h1/h2/h6 偏差均为 0px。 */
+  top: calc(3px + 0.85em);
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a8f98;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+
+/* ▼ 展开 / ▶ 折叠
+   ⭐ 字形大小在这里定(不在外壳上)—— 外壳字号要继承标题做 em 度量,见上。
+   与 toggleList 的 ▶ 完全同款:font-size:16px + **实心** ▶/▼。
+   (空心 ▸/▾ 是另一套字形,同字号下视觉明显更小 —— 这才是第一版"看起来小"
+    的真因,不单是字号。) */
+.krig-pm-host .ProseMirror .krig-heading-toggle::before {
+  content: '▼';
+  font-size: 16px;
+  line-height: 1;
+}
+.krig-pm-host .ProseMirror .krig-heading-toggle--collapsed::before {
+  content: '▶';
+}
+
+/* 展开态:hover 标题所在行才显形 */
+.krig-pm-host .ProseMirror h1.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h2.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h3.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h4.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h5.has-heading-toggle:hover .krig-heading-toggle,
+.krig-pm-host .ProseMirror h6.has-heading-toggle:hover .krig-heading-toggle {
+  opacity: 1;
+}
+
+/* ⭐ 折叠态常驻可见(不 hover 也看得见,这是"哪些被折叠了"的唯一显式线索) */
+.krig-pm-host .ProseMirror .krig-heading-toggle--collapsed {
+  opacity: 1;
+}
+
+.krig-pm-host .ProseMirror .krig-heading-toggle:hover {
+  color: #e8eaed;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ─────────────────────────────────────────────────────────
+   标题折叠:隐藏被折叠范围内的块
+   ⭐⭐ 规则住在 **driver 层** —— 折叠能力本来就在 driver
+   (build-heading-collapse-plugin),样式却一直只在 `views/note/toc/toc.css`
+   里,是 note 的**私有样式**。别的 view 用同一个 plugin,却要靠
+   「NoteView 恰好也被挂过、CSS 已进全局 bundle」才生效 —— 隐式依赖。
+
+   ⚠️⚠️ 且必须 `!important`:被隐藏的块里若有**行内公式**,
+   `.krig-pm-host .ProseMirror .krig-math-inline{display:inline-block}`
+   特异度 0,3,0 **高过** 隐藏规则的 0,2,0 → 公式把自己显示回来
+   (真机现象:标题收起了,公式还留在原地)。
+   同理适用于任何给 display 赋值的行内块(将来新增的 NodeView)。
+   ───────────────────────────────────────────────────────── */
+.krig-pm-host .ProseMirror .heading-collapsed-hidden,
+.krig-pm-host .ProseMirror .heading-collapsed-hidden * {
+  display: none !important;
 }

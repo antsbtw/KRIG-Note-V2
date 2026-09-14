@@ -54,6 +54,43 @@ import type {
   AuthActionResult,
 } from '../auth/auth-types';
 
+interface XCaptureSnapshot {
+  running: boolean;
+  /** 此刻屏幕上的条数 */
+  onScreenCount: number;
+  /** 本轮跳过的广告等非推文元素 */
+  skippedAds: number;
+  /** 屏幕上滚过的条数(分母) */
+  seenInDom: number;
+  /** 实际采到的条数(分子) */
+  captured: number;
+  captureRate: number;
+  /** DOM 见过但没采到的 —— 漏网名单 */
+  missing: string[];
+  payloads: number;
+  elapsedSec: number;
+  currentUrl?: string;
+  scrollY?: number;
+  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
+}
+
+interface NotifEvent {
+  seenAt: string; notifiedAt?: string; kind: string; message?: string;
+  actorHandle?: string; actorUid: string; targetId: string; targetText?: string;
+  targetConversationId?: string; targetQuotedStatusId?: string; targetHasMedia?: boolean;
+  isInteraction: boolean; belongsToArticle: boolean; belongsWhy: string;
+}
+interface NotifWatchSnapshot {
+  running: boolean; articleId?: string; startedAt?: string;
+  payloads: number; total: number; byKind: Record<string, number>;
+  belongs: number; recent: NotifEvent[]; secondsSinceLastPayload?: number;
+}
+
+interface VerifyRow {
+  uid: string; handle?: string; targetId: string;
+  hasMedia?: boolean; why: string; text?: string;
+}
+
 declare global {
   /** Web 下载历史条目(主进程 download-store 落盘的终态记录)*/
   interface WebDownloadHistoryEntry {
@@ -404,6 +441,22 @@ declare global {
       driveProgress(payload: ProgressDrivePayload): void;
 
       // ── L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步)──
+      // ── diglot mind v0(方案 B1:独立表,共用 graph 文件夹)──
+      mindList(): Promise<unknown>;
+      mindLoad(id: string): Promise<unknown>;
+      mindCreate(
+        title: string,
+        semantic: string,
+        graphic: string,
+        folderId: string | null,
+      ): Promise<unknown>;
+      mindSave(id: string, semantic: string, graphic: string, title: string): Promise<void>;
+      mindDelete(id: string): Promise<void>;
+      mindRename(id: string, title: string): Promise<void>;
+      mindMoveToFolder(id: string, folderId: string | null): Promise<void>;
+      mindDuplicate(id: string): Promise<unknown>;
+      onMindListChanged(callback: (list: unknown) => void): () => void;
+
       graphList(): Promise<unknown>;
       graphLoad(id: string): Promise<unknown>;
       graphCreate(
@@ -780,7 +833,7 @@ declare global {
 
       // ── X 时间线智能筛选 Review Queue（Phase 2）──
       xTimeline: {
-        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
+        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
         runRecipe(recipeId: string, wsId: string, targetWcId: number): Promise<{ success: boolean; fetched?: number; saved?: number; filteredOut?: number; error?: string }>;
         pauseScan(wsId: string): Promise<void>;
         judgeNow(wsId: string): Promise<{ success: boolean; judged?: number; worth?: number; remaining?: number; draining?: boolean; error?: string }>;
@@ -789,6 +842,68 @@ declare global {
         /** 强制 guest 全量重绘(display:none 复出后带旧帧) */
         invalidateWc(wcId: number): Promise<{ success: boolean; error?: string }>;
         replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number): Promise<{ success: boolean; error?: string }>;
+        /** 规划回复草稿(只产草稿,不发布) */
+        planReplies(wsId: string, tweetIds?: string[], limit?: number): Promise<{
+          success: boolean;
+          drafts?: import('@shared/types/x-reply-types').ReplyDraft[];
+          skips?: import('@shared/types/x-reply-types').ReplySkip[];
+          scanned?: number;
+          error?: string;
+        }>;
+        /** 回放历史标注样本(只算不发、不写库);score = 与人工判断的对账 */
+        replayReplies(wsId: string, accept?: number, reject?: number, lang?: string): Promise<{
+          success: boolean;
+          drafts?: import('@shared/types/x-reply-types').ReplyDraft[];
+          skips?: import('@shared/types/x-reply-types').ReplySkip[];
+          scanned?: number;
+          score?: { tp: number; fp: number; tn: number; fn: number; precision: number | null; recall: number | null };
+          error?: string;
+        }>;
+        /** 为单条推文现写回复(只产草稿) */
+        planOneReply(wsId: string, tweetId: string, wcId?: number): Promise<{
+          success: boolean;
+          draft?: import('@shared/types/x-reply-types').ReplyDraft | null;
+          skip?: import('@shared/types/x-reply-types').ReplySkip | null;
+          error?: string;
+        }>;
+        /** 记学习期反馈 */
+        submitReplyFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
+        /** 分语言原样通过率 */
+        replyReadiness(): Promise<{
+          success: boolean;
+          readiness?: Array<{ lang: 'zh' | 'en'; filled: number; unedited: number; passRate: number; ready: boolean }>;
+          error?: string;
+        }>;
+        /** 追踪名单增删查(≠ X 的关注) */
+        watchlist(op: 'list' | 'add' | 'remove' | 'candidates' | 'watch-accepted', handle?: string, note?: string): Promise<{
+          success: boolean;
+          watched?: Array<{
+            handle: string; watchedAt?: string; watchSource?: string;
+            watchDepth: number; note?: string;
+            stats?: { seenTweets: number; repliedCount: number; acceptedCount: number;
+                      firstSeen?: string; lastSeen?: string } | null;
+          }>;
+          /** op='candidates' 时返回:从已有数据里挑的候选(按回过次数排) */
+          candidates?: Array<{ handle: string; repliedCount: number; seenTweets: number }>;
+          /** op='watch-accepted' 时返回 */
+          bulk?: { added: number; skipped: number };
+          error?: string;
+        }>;
+        /** 给建议名单批量预抓上文 */
+        prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number,
+                        status?: string, humanReviewed?: boolean, statuses?: string[]): Promise<{
+          success: boolean;
+          scanned?: number; isReply?: number; attempted?: number; fetched?: number; missed?: number; remaining?: number;
+          error?: string;
+        }>;
+        /** 给建议名单批量预采画像 */
+        prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number,
+                         status?: string, humanReviewed?: boolean, statuses?: string[]): Promise<{
+          success: boolean;
+          authors?: number; fetched?: number; cached?: number; failed?: number; remaining?: number;
+          mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
+          error?: string;
+        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;
@@ -796,6 +911,113 @@ declare global {
         getRecipeStats(recipeId: string): Promise<{ success: boolean; stats: { recipeId: string; total: number; gemmaPass: number; adopted: number; rejected: number; adoptRate: number }; error?: string }>;
         feedbackStats(): Promise<{ success: boolean; stats: { suggestedTotal: number; suggestedAccepted: number; rescuedFn: number } | null; error?: string }>;
         markReplied(tweetId: string): Promise<{ success: boolean; error?: string }>;
+        /** 屏蔽某作者：只约束未来采集，已抓的历史推文保留 */
+        blockAuthor(handle: string, reason?: string): Promise<{ success: boolean; error?: string }>;
+        unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
+        detectSelf(wcId?: number, wsId?: string): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
+        getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
+        /** 采集回复关系并回填 replied(主线第一环) */
+        captureStart(wcId?: number): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
+        captureStop(): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
+        onCaptureUpdate(cb: (snap: XCaptureSnapshot) => void): () => void;
+        onHarvestProgress(cb: (p: { url: string; round: number; maxRounds: number; captured: number; payloads: number; scrollY: number; stuck: number; oldest?: string }) => void): () => void;
+        harvest(url: string, wcId?: number): Promise<{
+          success: boolean; error?: string;
+          report?: {
+            url: string; ok: boolean; problems: string[];
+            rounds: number; payloads: number; tweets: number;
+            dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
+            stopReason: string;
+            sample: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string }>;
+            trace: Array<{ round: number; scrollY: number; docHeight: number; domArticles: number; cumulative: number; newThisRound: number; stuck: number }>;
+          };
+        }>;
+        collectReplies(handle: string, wcId?: number): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            rounds: number; payloads: number; relations: number; savedOnReplies: number;
+            ownReplies: number; ownSaved: { inserted: number; skipped: number };
+            stopReason: string; problems: string[];
+            oldestDays: number | null; dumpPath?: string;
+            backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
+          };
+          stats?: { repliedAccepted: number; totalAccepted: number };
+          coverage?: { count: number; posts: number; replies: number; oldest: string | null; newest: string | null; spanDays: number | null };
+          baseline?: { tweetCount?: number; mediaCount?: number; followersCount?: number; followingCount?: number; favouritesCount?: number; countsAt?: string };
+        }>;
+        /** 勘查 X GraphQL 原始载荷字段;只读不落库 */
+        payloadSurvey(wcId?: number, seconds?: number): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            reportPath: string; rawPath: string;
+            totalPayloads: number; note: string;
+            operations: Array<{ name: string; count: number; bytes: number }>;
+            fields: Array<{ path: string; count: number; sample: string }>;
+            relationFields: Array<{ path: string; count: number; sample: string }>;
+          };
+        }>;
+        /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
+        watchlistSpike(handle: string, wcId?: number, maxRounds?: number): Promise<{
+          success: boolean; error?: string;
+          result?: {
+            relationProbe: Array<{ tweetId: string; replyingTo: string | null; parentId: string | null }>;
+            handle: string; url: string; stopReason: string;
+            totalItems: number; selfItems: number; replyItems: number; threadLineItems: number; socialItems: number;
+            rounds: Array<{ round: number; domCount: number; cumulative: number; newIds: number; oldest: string | null; spanDays: number | null }>;
+            adjacency: { checked: number; precededByOther: number; precededBySelf: number; atTop: number };
+            samples: Array<{ idx: number; tweetId: string | null; handle: string; isSelf: boolean; createdAt: string | null; replyingTo: string | null; relSignals: { articleAttrs?: Record<string, string>; ancestorAttrs?: Array<Record<string, string>>; statusLinks?: string[]; err?: string }; ariaReply: string | null; social: string | null; text: string }>;
+          };
+        }>;
+        getWsRoles(): Promise<{
+          success: boolean; error?: string;
+          roles: Array<{ wsId: string; role: string; articleId?: string;
+            servesRefresh?: boolean; intervalMinutes?: number }>;
+          accounts?: Array<{ wsId: string; handle: string; restId?: string; detectedAt?: string }>;
+        }>;
+        setWsRole(payload: { wsId: string; role: string; articleId?: string;
+          servesRefresh?: boolean; intervalMinutes?: number }): Promise<{ success: boolean; error?: string }>;
+        listArticles(wcId?: number, wsId?: string): Promise<{
+          success: boolean; error?: string;
+          articles?: Array<{ tweetId: string; text: string; createdAt?: string }>;
+        }>;
+        fetchArticleReplies(payload: { wsId?: string; articleId: string; wcId?: number; budgetMs?: number }): Promise<{
+          success: boolean; error?: string;
+          saved?: { inserted: number; changed: number; unchanged: number };
+          markedDeleted?: number;
+          stats?: { total: number; withMedia: number; unpushed: number; deleted: number };
+          result?: {
+            articleId: string; fetched: number; hintFound: boolean; partial: boolean;
+            elapsedMs: number; problems: string[];
+            items: Array<{ tweet_id: string; kind: string; x_uid?: string; username: string;
+              has_media: boolean; created_at: string; in_reply_to_tweet_id?: string; text_excerpt?: string }>;
+          };
+        }>;
+        harvestNotifications(wsId: string, wcId?: number): Promise<{
+          success: boolean; error?: string; owner?: string;
+          saved?: { inserted: number; existing: number };
+          stats?: Record<string, number>;
+          verify?: {
+            articleId: string; excluded: number;
+            like: VerifyRow[]; retweet: VerifyRow[]; reply: VerifyRow[]; quote: VerifyRow[];
+          };
+          result?: { payloads: number; rounds: number; problems: string[];
+            interactions: Array<{ kind: string; actorUid: string; actorHandle?: string;
+              targetId: string; notifiedAt?: string; message?: string }> };
+        }>;
+        startNotifWatch(wsId: string, wcId?: number): Promise<{
+          success: boolean; error?: string; snapshot?: NotifWatchSnapshot }>;
+        stopNotifWatch(): Promise<{ success: boolean; error?: string; snapshot?: NotifWatchSnapshot }>;
+        onNotifWatchUpdate(cb: (snap: NotifWatchSnapshot) => void): () => void;
+        campaignStatus(): Promise<{
+          success: boolean; error?: string; serverRunning?: boolean;
+          config?: { configured: boolean; importUrl?: string; hasSecret: boolean;
+            refreshBind: string; refreshPort: number; filePath: string };
+        }>;
+        listBlocked(): Promise<{
+          success: boolean;
+          error?: string;
+          authors: Array<{ handle: string; displayName?: string; blockedAt?: string; blockedReason?: string }>;
+        }>;
       };
     };
   }

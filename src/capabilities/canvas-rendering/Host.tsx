@@ -34,7 +34,11 @@ import type {
 import { SceneManager } from './scene/SceneManager';
 import { NodeRenderer } from './scene/NodeRenderer';
 import { HandlesOverlay } from './scene/HandlesOverlay';
+import { MagnetActionsOverlay } from './scene/MagnetActionsOverlay';
+import { listMagnets } from './interaction/magnet-snap';
+import { resolveMagnetActions, type ResolvedMagnetAction } from './interaction/magnet-actions';
 import { InteractionController } from './interaction/InteractionController';
+import { clampZoomPercent } from './interaction/zoom-levels';
 import { combineSelectedToSubstance } from './combine';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { ShapeLibraryApi, SubstanceDef } from '@capabilities/shape-library/types';
@@ -42,7 +46,10 @@ import './styles.css';
 
 export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
   function CanvasHost(props, ref) {
-    const { onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange, onNodeDoubleClick } = props;
+    const {
+      onViewportChange, onSelectionChange, onInstancesChange, onAddModeChange,
+      onNodeDoubleClick, onMagnetClick, onMagnetDragOut,
+    } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const sceneRef = useRef<SceneManager | null>(null);
     const nodeRendererRef = useRef<NodeRenderer | null>(null);
@@ -79,11 +86,33 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
           params: inst.params,
         }).map((h) => ({ index: h.index, localX: h.x, localY: h.y }));
       });
+      /**
+       * 连接点操作点 overlay(magnet actions).
+       *
+       * ⭐ provider 每帧给「当前该画哪些操作点」:扫 instances 上声明的 magnetActions,
+       * 用既有 listMagnets 解出世界坐标(rotation 已在里面处理).
+       * ⚠️ 没有任何 instance 声明 → 一个都不画,零开销、零行为变化
+       * (画板 / family-tree 不声明,机制对它们完全隐形).
+       */
+      const magnetActions = new MagnetActionsOverlay(scene);
+      magnetActions.setProvider((): ResolvedMagnetAction[] => {
+        const out: ResolvedMagnetAction[] = [];
+        for (const id of nodeRenderer.ids()) {
+          const inst = nodeRenderer.getInstance(id);
+          if (!inst?.magnetActions?.length) continue;
+          const node = nodeRenderer.get(id);
+          if (!node) continue;
+          out.push(...resolveMagnetActions(id, inst.magnetActions, listMagnets(node, inst)));
+        }
+        return out;
+      });
+
       const interaction = new InteractionController({
         container,
         sceneManager: scene,
         nodeRenderer,
         handlesOverlay: handles,
+        magnetActionsOverlay: magnetActions,
         getInstance: (id) => nodeRenderer.getInstance(id),
         onSelectionChange: (ids) => onSelectionChange?.(ids),
         onInstancesChange: () => onInstancesChange?.(nodeRenderer.listInstances()),
@@ -92,6 +121,9 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         },
         onAddModeChange: (spec) => onAddModeChange?.(spec),
         onNodeDoubleClick: (info) => onNodeDoubleClick?.(info),
+        onMagnetClick: (instanceId, magnet) => onMagnetClick?.(instanceId, magnet),
+        onMagnetDragOut: (instanceId, magnet, target) =>
+          onMagnetDragOut?.(instanceId, magnet, target),
       });
       sceneRef.current = scene;
       nodeRendererRef.current = nodeRenderer;
@@ -119,6 +151,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);
         interaction.dispose();
+        magnetActions.dispose();
         handles.dispose();
         nodeRenderer.clear();
         scene.dispose();
@@ -205,6 +238,19 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       };
     }, []);
 
+    /**
+     * 读当前视口(toolbar 显示缩放百分比用).
+     * ⭐ 为什么需要它:`onViewportChange` 只在 pan/zoom **变化时**推,
+     * 而 `loadDocument` 恢复视口后不推 —— 只靠回调的话,打开一个存在 250% 的画板,
+     * toolbar 会一直显示 100% 直到用户随手拖一下。
+     */
+    const getViewport = useCallback((): Viewport | null => {
+      const scene = sceneRef.current;
+      if (!scene) return null;
+      const v = scene.getView();
+      return { centerX: v.centerX, centerY: v.centerY, zoom: v.zoom };
+    }, []);
+
     const setViewport = useCallback((vp: Viewport): void => {
       sceneRef.current?.setView(vp.centerX, vp.centerY, vp.zoom);
       viewportDirtyRef.current = true;
@@ -222,7 +268,8 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
       const scene = sceneRef.current;
       if (!scene) return;
       const v = scene.getView();
-      const z = Math.max(10, Math.min(2000, percent)) / 100;
+      // ⚠️ 上下限走共用 zoom-levels —— 与滚轮/快捷键同一区间(别在这里再夹一遍)
+      const z = clampZoomPercent(percent) / 100;
       scene.setView(v.centerX, v.centerY, z);
       viewportDirtyRef.current = true;
     }, []);
@@ -370,6 +417,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         loadDocument,
         relayout,
         serialize,
+        getViewport,
         setViewport,
         fitToContent,
         zoomTo,
@@ -390,6 +438,7 @@ export const CanvasHost = forwardRef<CanvasHostHandle, CanvasHostProps>(
         loadDocument,
         relayout,
         serialize,
+        getViewport,
         setViewport,
         fitToContent,
         zoomTo,

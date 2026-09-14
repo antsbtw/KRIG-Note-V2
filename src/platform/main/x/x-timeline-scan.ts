@@ -10,8 +10,10 @@
 import { webContents } from 'electron';
 import { TWEET_SCRAPE_FN_BODY } from '../tweet-fetcher/extract-script';
 import { upsertTweet, insertFilteredOut, getTweetIdSet } from '../db/tweet-inbox-repo';
+import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
 import { googleTranslateBatch } from './google-translate';
 import type { XTweetData } from './x-extract-tweet';
+import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type {
   SearchRecipe,
   TimelineFilterConfig,
@@ -24,6 +26,65 @@ const scanAbortMap = new Map<string, boolean>();
 
 export function abortScan(wsId: string): void {
   scanAbortMap.set(wsId, true);
+}
+
+/**
+ * 从上次运行时间推算搜索起点 —— **叠加 48 小时**。
+ *
+ * 用户 2026-09-02:「搜索完毕,就往下滚动,采用叠加方式,比上一次的最后时间
+ * 多叠加 48 个小时。所有的缓存做比对,就能够获取需要的帖子了。」
+ *
+ * 为什么必须叠加(而不是从 lastRunAt 精确接上):
+ *  · X 的搜索索引有延迟 —— 一条推可能在发布几小时后才进入 since: 的结果
+ *  · 采集本身可能中断/失败,那段窗口就永久丢了
+ *  · since: 只精确到**天**(X 的语法限制),边界本就模糊
+ * 重叠抓回来的靠 tweet_id 去重(seenIds + INSERT IGNORE),成本只是多滚几屏,
+ * 换来的是**不漏**。宁可重复,不可遗漏。
+ *
+ * 没有 lastRunAt(首次运行)→ 回落到 recipe.sinceHours。
+ */
+export function computeSinceDate(recipe: SearchRecipe, overlapHours = 48): Date {
+  if (recipe.lastRunAt) {
+    const last = new Date(recipe.lastRunAt).getTime();
+    if (Number.isFinite(last)) {
+      return new Date(last - overlapHours * 3_600_000);
+    }
+  }
+  return new Date(Date.now() - (recipe.sinceHours ?? 24) * 3_600_000);
+}
+
+/**
+ * 本轮**实际要滚多深** —— 与 since 窗口分开的两件事。
+ *
+ * 用户 2026-09-02:「我觉得每次扫描的执行太久了吧?」
+ * 实测症结:配方每 30 分钟跑一次,却每次都滚回 48 小时前 ——
+ * 48h 窗口内有 1062 条,而 30 分钟真正新增的只有 14 条,**76 倍无用功**。
+ *
+ * 但 48h 叠加窗口本身是对的(用户此前拍板:宁可重复不可遗漏,
+ * 防的是 app 关机/采集失败导致窗口永久丢失)。两者不矛盾:
+ *  · `since:` 保持宽 —— 它只是告诉 X「别给我更旧的」,不花我们时间
+ *  · **滚动深度**按「距上次成功运行多久」算,正常轮次只需覆盖那一小段
+ *
+ * 规则(用户 2026-09-02 拍板:「就执行 12 小时以内的就可以了」):
+ *  · 常规:上次运行至今 + 2 小时缓冲(X 搜索索引有延迟,新推可能晚几小时才出现)
+ *  · **上限 12 小时** —— 即使关机好几天,单轮也只滚 12 小时,
+ *    剩下的靠下一轮继续(每 30 分钟一轮,补齐很快),不让单次跑到失控
+ *  · 首次运行没有 lastRunAt → 直接用 12 小时上限
+ *
+ * ⚠️ 这不影响 `since:` 的 48h 叠加窗口 —— 那个照旧宽,防的是窗口永久丢失;
+ *    这里限的是**滚动深度**,即「本轮实际往回读多远」。两者是两件事。
+ */
+export const MAX_SCROLL_DEPTH_HOURS = 12;
+
+export function computeScrollDepthMs(recipe: SearchRecipe, bufferHours = 2): number {
+  const cap = MAX_SCROLL_DEPTH_HOURS * 3_600_000;
+  if (!recipe.lastRunAt) return cap;
+
+  const last = new Date(recipe.lastRunAt).getTime();
+  if (!Number.isFinite(last)) return cap;
+
+  const sinceLastRun = Date.now() - last + bufferHours * 3_600_000;
+  return Math.min(sinceLastRun, cap);
 }
 
 /** 按 SearchRecipe 拼装 X 搜索 URL */
@@ -42,13 +103,26 @@ export function buildSearchUrl(recipe: SearchRecipe): string {
     parts.push(`(${recipe.helpSignals.map((s) => `"${s}"`).join(' OR ')})`);
   }
 
+  // ⭐ 2026-09-06 实机 spike 结论(设计 §4.4⑤(a) 要求的验证已完成):
+  //      from:netlab2gfw                    共 12 条,其中回复 11
+  //      from:netlab2gfw include:replies    共  0 条,其中回复  0   ← **无效**
+  //      from:netlab2gfw filter:replies     共 22 条,其中回复 22   ← 有效且最全
+  //
+  //    `include:replies` **X 已不支持**,写上去会把结果打成 0 条 ——
+  //    不报错、静默返回空,正是文档警告的那种失败形态。照文档假设就中招了。
+  //    故这里用 `filter:replies`。
+  //
+  //    ⚠️ 另一个实测发现:裸 `from:` 本身就已经带回复(12 条里 11 条是回复),
+  //    所以「只要原创推」反而需要额外过滤 —— 与直觉相反,别想当然。
+  if (recipe.includeReplies) parts.push('filter:replies');
+
   if (recipe.minLikes) parts.push(`min_faves:${recipe.minLikes}`);
   if (recipe.minRetweets) parts.push(`min_retweets:${recipe.minRetweets}`);
   if (recipe.lang) parts.push(`lang:${recipe.lang}`);
 
-  const sinceHours = recipe.sinceHours ?? 24;
-  const sinceDate = new Date(Date.now() - sinceHours * 3_600_000);
-  const sinceStr = sinceDate.toISOString().split('T')[0];
+  // ⚠️ 起点从**上次运行时间往前推 48h**,不是从「现在往前 24h」——
+  // 后者与上次运行毫无关系:app 关两天,那两天的窗口就永久丢了。
+  const sinceStr = computeSinceDate(recipe).toISOString().split('T')[0];
   parts.push(`since:${sinceStr}`);
 
   const q = encodeURIComponent(parts.join(' '));
@@ -66,7 +140,9 @@ export function applyFilter(
   if (config.keywordBlacklist.some((kw) => tweet.text?.includes(kw))) {
     return { pass: false, reason: 'keyword_blacklist' };
   }
-  if (config.accountBlacklist.includes(tweet.authorHandle ?? '')) {
+  // ⚠️ 必须归一化后再比:库里 authorHandle 是 '@Miekko22'(带 @、保留大小写),
+  // 而 accountBlacklist 按契约存的是归一化形态。少这一步 = 屏蔽恒不命中且不报错。
+  if (tweet.authorHandle && config.accountBlacklist.includes(normalizeHandle(tweet.authorHandle))) {
     return { pass: false, reason: 'account_blacklist' };
   }
 
@@ -88,6 +164,18 @@ export function applyFilter(
     return { pass: false, reason: 'duplicate' };
   }
 
+  // L5 关键词兜底 —— **不能全信 X 的搜索**(2026-09-07 用户发现)。
+  //    实测:最新 30 条里只有 3 条含关键词,其余既无关键词也无求助信号。
+  //    此前这里完全不校验正文,等于"X 给什么就存什么" ——
+  //    一旦落错页面(首页时间线)或 X 搜索放宽,整批噪音直接进库,
+  //    还要占用 Gemma 的判断额度。
+  //    ⚠️ 只在配方**声明了关键词**时才校验:没声明说明本来就想全量收。
+  if (config.requireKeywords?.length) {
+    const t = (tweet.text ?? '').toLowerCase();
+    const hit = config.requireKeywords.some((k) => t.includes(k.toLowerCase()));
+    if (!hit) return { pass: false, reason: 'no_keyword' };
+  }
+
   return { pass: true };
 }
 
@@ -99,7 +187,16 @@ async function waitForTweetElements(wc: Electron.WebContents, timeoutMs = 10_000
   const script = `document.querySelectorAll('article[data-testid="tweet"]').length`;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const count = await wc.executeJavaScript(script);
+    // ⚠️ 这里的 catch **不是**兜底掩盖错误(feedback-fail-loud-no-fallback),
+    //   而是这个轮询本来就可能落在**导航途中**:即使上面 await 了 loadURL,
+    //   X 是 SPA,进站后还会自己再跳一次/换路由 —— 旧文档正在拆、新文档还没
+    //   commit,这个窗口里注入必被 Electron 拒:
+    //   「Script failed to execute, this normally means an error was thrown」。
+    //   实测形态:X 停在上一个详情页转圈时点扫描 → 第一次注入就撞上 → 整轮采集
+    //   报这句话失败(而它其实只是「页面还没好」)。
+    //   真正的失败判据是**超时**,由下面的 throw 负责 —— 那条路仍然 fail loud。
+    //   同一形态在 x-parent-tweet.ts:61 就是这么处理的,此处对齐。
+    const count = await wc.executeJavaScript(script).catch(() => null);
     if (typeof count === 'number' && count > 0) return;
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -107,6 +204,13 @@ async function waitForTweetElements(wc: Electron.WebContents, timeoutMs = 10_000
 }
 
 /** 在 webContents 内批量提取当前可见推文（复用 TWEET_SCRAPE_FN_BODY） */
+/**
+ * 连续注入失败计数 —— **必须放模块级**:放函数里每次调用都归零,
+ * 永远到不了阈值,那条「不是导航撞车」的提示就永远不会出现。
+ * 成功一次即清零(见下方)。
+ */
+let injectFails = 0;
+
 async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetData[]> {
   const script = `
     (function() {
@@ -123,17 +227,51 @@ async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetDat
       }
     })()
   `;
-  const raw = await wc.executeJavaScript(script);
+  // 同上:滚动过程中 X 会自己跳转/重载(登录态刷新、路由切换),
+  // 注入撞上导航窗口就被拒。**单轮**抽取失败不该让整轮采集崩掉 ——
+  // 返回空数组让外层继续滚,真的一直抽不到,靠「滚不动 3 轮」正常收尾。
+  // ⚠️ 这里的 catch 曾把一个真 bug 盖了一整天(2026-09-07):
+  //    提取脚本里一个转义写错导致**每次**注入都抛,
+  //    而日志只说「多半撞上导航」—— 一句猜测被当成了结论,
+  //    于是采集连续一天报「0 条」却没人知道真因。
+  //    现在**记连续失败次数**:偶发确实多半是导航;
+  //    但连着失败就不是导航了,必须换一句话说。
+  const raw = await wc.executeJavaScript(script).catch((err: unknown) => {
+    injectFails += 1;
+    console.warn(
+      injectFails >= 3
+        ? '[x-timeline-scan] ❗ extractVisibleTweets 连续注入失败 —— '
+          + '这**不是导航撞车**,多半是提取脚本本身报错'
+          + '(先在 X 页面控制台试一下那段脚本):'
+        : '[x-timeline-scan] extractVisibleTweets 注入失败(可能撞上导航),本轮跳过:',
+      err);
+    return [];
+  });
   if (!Array.isArray(raw)) {
     throw new Error('[x-timeline-scan] extractVisibleTweets returned non-array');
   }
+  injectFails = 0;   // 成功即清零 —— 偶发导航撞车不该累积成误报
   return raw as XTweetData[];
 }
 
 export interface ScanResult {
+  /** 屏幕上滚过、被提取到的推文总数 */
   fetched: number;
+  /** 真正新入库的 */
   saved: number;
+  /** 被规则过滤掉的(关键词黑名单/语言/点赞数不够等) */
   filteredOut: number;
+  /**
+   * 早就采过、这次跳过的。
+   * ⭐ 必须与 saved 分开报(用户 2026-09-07):只说「采集 0 条」会让人
+   * 以为不工作,而实际常常是**扫到的都是旧的** —— 那是正常且预期的。
+   */
+  duplicates: number;
+  /** 反向对账补标「已回复」的条数 */
+  reconciled: number;
+  elapsedMs: number;
+  /** 搜索窗口起点(since:YYYY-MM-DD) */
+  sinceDate: string;
 }
 
 /**
@@ -144,7 +282,8 @@ export interface ScanResult {
  * @param targetWcId      X Host guest webContents id（per-ws 定向，fail loud 不回退全局）
  * @param filterConfig    漏斗配置
  * @param onPendingReady  每批写库后通知，供调度器决定是否触发 AI 判断
- * @param maxScrollRounds 最大翻页轮次（默认 5，约 50 条）
+ * @param maxScrollRounds 轮次**安全阀**(默认 200)。正常情况靠「滚过 since 窗口」
+ *                        或「真的滚不动」结束 —— 不是靠这个数停。
  */
 export async function scanRecipe(
   recipe: SearchRecipe,
@@ -152,7 +291,7 @@ export async function scanRecipe(
   targetWcId: number,
   filterConfig: TimelineFilterConfig,
   onPendingReady?: (pendingCount: number) => void,
-  maxScrollRounds = 5,
+  maxScrollRounds = 200,
 ): Promise<ScanResult> {
   scanAbortMap.set(wsId, false);
 
@@ -164,9 +303,30 @@ export async function scanRecipe(
   const searchUrl = buildSearchUrl(recipe);
   console.log(`[x-timeline-scan] navigating to: ${searchUrl}`);
 
-  // 导航到搜索页
-  wc.loadURL(searchUrl);
+  // 导航到搜索页。
+  // ⚠️ loadURL 要 await:不等它,下面的轮询会在**旧文档正在拆卸**时就注入,
+  //   撞进导航窗口被 Electron 拒(「Script failed to execute」)。
+  //   实测触发条件 = X 停在上一个详情页(还在转圈)时点「开始扫描」。
+  //   ⚠️ 但 await 本身也可能 reject —— X 常见 ERR_ABORTED(它自己的路由/重定向
+  //   把这次导航接管了),那不是失败:页面照样会到位,交给下面的轮询判定。
+  //   真失败由 waitForTweetElements 超时 throw,fail loud 这条路没变。
+  await wc.loadURL(searchUrl).catch((err: unknown) => {
+    console.warn('[x-timeline-scan] loadURL 未正常 resolve(X 常自行接管导航),继续等元素:', err);
+  });
   await waitForTweetElements(wc);
+
+  // ⚠️ **确认真的落在搜索结果页**(2026-09-07 用户发现:采回来的推
+  //    大多既不含关键词、也不含求助信号 —— 那不是 X 搜索"宽松",
+  //    而是我们压根在读别的页面,把首页时间线当成了搜索结果)。
+  //    X 是 SPA:登录态刷新、路由接管、被弹回首页都会让 URL 变,
+  //    而 waitForTweetElements 只管"有没有推文",不管"是不是搜索页"。
+  const landedUrl = wc.getURL();
+  if (!landedUrl.includes('/search')) {
+    throw new Error(
+      `[x-timeline-scan] 没落在搜索页,实际在 ${landedUrl.slice(0, 80)} —— `
+      + '本轮中止(继续抓只会把首页时间线当成搜索结果入库)',
+    );
+  }
 
   // 预加载去重窗口内已有的 tweet_id
   // 去重集合来自 x_tweet 全表(含 expires_at=NONE 的永久行) —— 采纳过的推文
@@ -176,8 +336,33 @@ export async function scanRecipe(
   let fetched = 0;
   let saved = 0;
   let filteredOut = 0;
+  // ⭐ 单独数「早就采过的」——用户 2026-09-07 指出:只报 saved=0 会让人
+  //    以为「不工作」,而实际常常是**扫到的都是旧的**。两者必须分开报,
+  //    否则「正常但没新货」和「真的没扫到」长得一模一样。
+  let duplicates = 0;
+  const startedAt = Date.now();
   const nowIso = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString();
+  // ⚠️ **不再设 TTL**(用户 2026-09-02 拍板:「永久保存吧,等容量到了一定的程度,
+  // 再考虑迁移新的架构」)。
+  //
+  // 原来设 7 天过期,前提是「没被采纳的推没价值」—— 这个前提已被推翻:
+  //   「有些不显示的帖子不见得没有用途,可以用于分析竞争对手。」
+  // 被 Gemma 判 skip / 被黑名单过滤掉的推,正是竞品分析与语料的素材,
+  // 删掉不可再生(A 期就因 TTL 丢过 449 条已采纳正文,教训在前)。
+  //
+  // undefined → NONE(SurrealDB 的 option 语义),cleanExpired 会跳过这些行。
+  const expiresAt = undefined;
+
+  // ⚠️ 两个不同的量,别混:
+  //  · sinceMs   = 搜索 URL 里的 since: 起点(宽,48h 叠加,防遗漏)
+  //  · scrollToMs = 本轮**实际滚到哪**(窄,只覆盖距上次运行那一段)
+  // 30 分钟一轮却每次滚 48 小时 = 76 倍无用功(实测 1062 条里只有 14 条是新的)。
+  const sinceMs = computeSinceDate(recipe).getTime();
+  const scrollToMs = Date.now() - computeScrollDepthMs(recipe);
+  console.log(`[x-timeline-scan] since=${new Date(sinceMs).toISOString().slice(0, 10)} `
+    + `滚动深度=${Math.round(computeScrollDepthMs(recipe) / 3_600_000)}h`);
+  let lastScrollY = -1;
+  let stuckRounds = 0;
 
   for (let round = 0; round < maxScrollRounds; round++) {
     if (scanAbortMap.get(wsId)) {
@@ -194,13 +379,15 @@ export async function scanRecipe(
       const { pass, reason } = applyFilter(tweet, filterConfig, seenIds);
 
       if (!pass) {
+        if (reason === 'duplicate') duplicates += 1;
         // filtered_out 也写库（供 V4 统计分布），但 tweetId 缺失的静默跳过（无法去重）
         if (tweet.tweetId && reason !== 'duplicate') {
           await insertFilteredOut({
             tweet_id: tweet.tweetId,
             text: tweet.text ?? '',
             author_name: tweet.authorName ?? '',
-            author_handle: tweet.authorHandle ?? '',
+            // ⚠️ 存归一化形态(migration 1.0.2 统一):不归一化则同一人被算成两个
+            author_handle: normalizeHandle(tweet.authorHandle ?? ''),
             author_avatar: tweet.authorAvatar,
             tweet_url: tweet.tweetUrl,
             lang: tweet.lang,
@@ -208,6 +395,8 @@ export async function scanRecipe(
             fetched_at: nowIso,
             created_at: tweet.createdAt || undefined,
             in_reply_to: tweet.inReplyTo || undefined,
+            // 被回复者 handle —— ① 判断「这楼和 VPN 有没有关系」的入口
+            in_reply_to_user: tweet.inReplyToUser || undefined,
             expires_at: expiresAt,
             source: 'search',
             search_recipe: recipe.id,
@@ -226,7 +415,8 @@ export async function scanRecipe(
         tweet_id: tweet.tweetId!,
         text: tweet.text ?? '',
         author_name: tweet.authorName ?? '',
-        author_handle: tweet.authorHandle ?? '',
+        // ⚠️ 同上:存归一化形态,与 x_author.handle / normalizeHandle 一致
+        author_handle: normalizeHandle(tweet.authorHandle ?? ''),
         author_avatar: tweet.authorAvatar,
         tweet_url: tweet.tweetUrl,
         lang: tweet.lang,
@@ -235,6 +425,7 @@ export async function scanRecipe(
         // A':extract-script 早就提取了这两个字段(:75 / :147),此前组装记录时漏带 —— 只是接线
         created_at: tweet.createdAt || undefined,
         in_reply_to: tweet.inReplyTo || undefined,
+        in_reply_to_user: tweet.inReplyToUser || undefined,
         expires_at: expiresAt,
         source: 'search',
         search_recipe: recipe.id,
@@ -267,16 +458,75 @@ export async function scanRecipe(
       onPendingReady?.(saved);
     }
 
-    // 滚动加载更多
-    if (round < maxScrollRounds - 1) {
-      await wc.executeJavaScript(`window.scrollBy(0, 1500)`);
-      // 短暂等待懒加载
-      await new Promise((r) => setTimeout(r, 1500));
+    // ── 滚动:与 x-timeline-harvester 同一套经过实机验证的做法 ──────
+    // 用户 2026-09-02:「应该让扫描 48 小时内的推文吧,哪怕重复,但是不会漏掉」。
+    // 光把 since 窗口放宽到 48h 没用 —— 此前 maxScrollRounds=5 意味着
+    // **只读前 5 屏(约 50 条)就收工**,窗口再宽也读不到。
+    //
+    // 停止条件(按优先级):
+    //  ① 已滚过 since 窗口:最旧一条早于窗口起点 → 该窗口内的都看完了
+    //  ② 真的滚不动(scrollY 连续 3 轮不变)→ 到底了
+    //  ③ maxScrollRounds 安全阀
+    // ⚠️ 「本轮没有新推文」**不作为**停止条件 —— 时间线里夹着已见过的很正常,
+    //    急着停正是漏数据的元凶(reply 采集上栽过,验证页量出漏 83%)。
+    const oldestThisRound = tweets
+      .map((t) => t.createdAt).filter(Boolean)
+      .map((d) => new Date(d as string).getTime())
+      .filter((n) => Number.isFinite(n));
+    if (oldestThisRound.length && Math.min(...oldestThisRound) < scrollToMs) {
+      console.log(`[x-timeline-scan] 已滚过本轮深度(${new Date(scrollToMs).toISOString()}),停止`);
+      break;
     }
+
+    await wc.executeJavaScript(`(function () {
+      var y = window.scrollY;
+      window.scrollBy(0, window.innerHeight * 0.85);
+      if (window.scrollY === y) {
+        var all = document.querySelectorAll('div');
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.scrollHeight > el.clientHeight + 400) {
+            el.scrollTop = el.scrollTop + el.clientHeight * 0.85; break;
+          }
+        }
+      }
+    })()`).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1200));
+
+    // 滚动**之后**回读才是真实位置(behavior:'smooth' 是异步的,曾因此测了个寂寞)
+    const y = await wc.executeJavaScript(`window.scrollY`).catch(() => -1) as number;
+    if (y === lastScrollY) {
+      stuckRounds++;
+      if (stuckRounds >= 3) {
+        console.log(`[x-timeline-scan] 滚不动了(scrollY=${y} 连续 3 轮未变),停止`);
+        break;
+      }
+    } else {
+      stuckRounds = 0;
+    }
+    lastScrollY = y;
   }
 
+  // ⭐ 反向对账:本轮新采到的线索里,有些我**早就回复过**了。
+  // 回填此前只有单向(采到我的回复 → 标记它的父推),顺序反过来就漏:
+  // 我 12:08 回的推,那条线索 23:38 才被搜索采到 —— 它带着 replied=false
+  // 进「待判」,于是我明明回过的人又出现在待处理列表里(用户 2026-09-02 发现)。
+  let reconciled = 0;
+  try {
+    reconciled = await reconcileRepliedFromOwnReplies();
+  } catch (err) {
+    // 对账失败不该让整轮采集算失败,但必须留痕 —— 静默会让重复回复悄悄回来
+    console.error('[x-timeline-scan] 反向对账失败(采集本身已完成):', err);
+  }
+
+  const elapsedMs = Date.now() - startedAt;
   console.log(
-    `[x-timeline-scan] recipe="${recipe.name}" fetched=${fetched} saved=${saved} filteredOut=${filteredOut}`,
+    `[x-timeline-scan] recipe="${recipe.name}" fetched=${fetched} saved=${saved} `
+    + `dup=${duplicates} filteredOut=${filteredOut} 补标已回复=${reconciled} ${(elapsedMs / 1000).toFixed(0)}s`,
   );
-  return { fetched, saved, filteredOut };
+  return {
+    fetched, saved, filteredOut, duplicates, reconciled, elapsedMs,
+    // 搜索窗口起点(since:YYYY-MM-DD)—— 让用户知道扫的是哪段时间
+    sinceDate: computeSinceDate(recipe).toISOString().split('T')[0],
+  };
 }

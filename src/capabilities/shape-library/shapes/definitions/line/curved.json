@@ -1,0 +1,35 @@
+{
+  "id": "krig.line.curved",
+  "category": "line",
+  "name": "Curved Connector",
+  "geometry": { "kind": "parametric" },
+  "viewBox": { "w": 100, "h": 100 },
+  "aspect": "variable",
+  "params": {
+    "slack": {
+      "type": "number",
+      "default": 0.33,
+      "min": 0.1,
+      "max": 0.5,
+      "label": "Curve slack",
+      "unit": "ratio"
+    }
+  },
+  "guides": [
+    { "name": "cx", "op": "*/", "args": ["w", "slack", 1] }
+  ],
+  "path": [
+    { "cmd": "M", "x": 0, "y": 0 },
+    { "cmd": "C", "x1": "cx", "y1": 0, "x2": "w - cx", "y2": "h", "x": "w", "y": "h" }
+  ],
+  "magnets": [
+    { "id": "START", "x": 0, "y": 0 },
+    { "id": "END",   "x": 1, "y": 1 }
+  ],
+  "default_style": {
+    "fill":  { "type": "none" },
+    "line":  { "type": "solid", "color": "#5B8FC7", "width": 1.5, "dashType": "solid" },
+    "arrow": { "begin": "none", "end": "none" }
+  },
+  "source": "builtin"
+}

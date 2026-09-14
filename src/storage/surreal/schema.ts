@@ -809,3 +809,50 @@ export async function migration_1_9_0(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.9.0'), now },
   );
 }
+
+/**
+ * 1.9.1 migration — diglot mind 独立表(用户拍板方案 B1,2026-09-10)
+ *
+ * ⭐ **为什么 mind 不塞进 graph_canvas**:
+ * `canvas-store` 是「画板形状」的 —— 它把 doc_content **拆成 instance 原子 + inCanvas 边**,
+ * 读回来再从 `{schema_version, view, instances}` 重新拼。
+ * mind 的内容是**两段纯文本**(S 层 mermaid + G 层规范形),塞进去会被静默丢弃
+ * (真机实测:存了 `{format, semantic, graphic}`,读回来 format=undefined)。
+ *
+ * ⭐ 对齐数据模型总纲原则 1(实体优先):
+ * 「把这个实体单独取出来,它的描述是否还完整?」——
+ * mind 文档 = 标题 + 两段文本,单独存在就是完整的,**不该为了复用别人的表而被拆散**。
+ *
+ * ⚠️ **共用 `graph_folder`**(B1):文件夹是「组织方式」不是「画板的私有物」,
+ * 故 `folder_id` 指向既有文件夹表,左侧仍是一棵树(🎨 与 🧠 混排)。
+ *
+ * ⚠️ 字段用 `option<string>` 表示可空:SurrealDB 的 NONE ≠ NULL,
+ * option<T> 只认 NONE —— 写入端必须传 `undefined`(SDK 绑定 undefined→NONE)。
+ */
+const SCHEMA_VERSION_1_9_1 = `
+DEFINE TABLE IF NOT EXISTS mind_doc SCHEMAFULL;
+-- 业务 id(ULID),不用内建 record id —— 见 1.8.6 的 readonly 教训
+-- (把内建 id 声明成 TYPE string 会让 CREATE 后同事务 UPSERT 触发 readonly,
+--  表现是新建/保存**静默失败**)。铁律:绝不 DEFINE FIELD id。
+-- SCHEMAFULL 表里凡是代码会写/会查的字段都必须显式 DEFINE,漏了就是隐性依赖。
+DEFINE FIELD IF NOT EXISTS mind_id    ON mind_doc TYPE string ASSERT $value != NONE;
+DEFINE FIELD IF NOT EXISTS title      ON mind_doc TYPE string;
+DEFINE FIELD IF NOT EXISTS semantic   ON mind_doc TYPE string;
+DEFINE FIELD IF NOT EXISTS graphic    ON mind_doc TYPE string;
+DEFINE FIELD IF NOT EXISTS folder_id  ON mind_doc TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON mind_doc TYPE int;
+DEFINE FIELD IF NOT EXISTS updated_at ON mind_doc TYPE int;
+DEFINE INDEX IF NOT EXISTS idx_mind_id ON mind_doc FIELDS mind_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_mind_folder ON mind_doc FIELDS folder_id;
+DEFINE INDEX IF NOT EXISTS idx_mind_updated ON mind_doc FIELDS updated_at;
+`;
+
+export async function migration_1_9_1(db: Surreal): Promise<void> {
+  await db.query(SCHEMA_VERSION_1_9_1);
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET version = '1.9.1', appliedAt = $now,
+     description = 'Add mind_doc table (diglot mind v0; own store, shares graph_folder)'`,
+    { rid: new RecordId('schema_version', '1.9.1'), now },
+  );
+}

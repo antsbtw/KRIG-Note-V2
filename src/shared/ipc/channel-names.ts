@@ -219,6 +219,17 @@ export const IPC_CHANNELS = {
   GRAPH_DUPLICATE: 'graph.duplicate',
   GRAPH_LIST_CHANGED: 'graph.list-changed',         // main → renderer 推送
   // 文件夹
+  // ── diglot mind(方案 B1:独立表/独立 store,共用 graph 文件夹)──
+  MIND_LIST: 'mind.list',
+  MIND_LOAD: 'mind.load',
+  MIND_CREATE: 'mind.create',
+  MIND_SAVE: 'mind.save',
+  MIND_DELETE: 'mind.delete',
+  MIND_RENAME: 'mind.rename',
+  MIND_MOVE_TO_FOLDER: 'mind.move-to-folder',
+  MIND_DUPLICATE: 'mind.duplicate',
+  MIND_LIST_CHANGED: 'mind.list-changed',           // main → renderer 推送
+
   GRAPH_FOLDER_LIST: 'graph.folder-list',
   GRAPH_FOLDER_CREATE: 'graph.folder-create',
   GRAPH_FOLDER_RENAME: 'graph.folder-rename',
@@ -319,6 +330,14 @@ export const IPC_CHANNELS = {
   X_INBOX_QUERY:     'x:inbox-query',      // renderer → main invoke：查询 tweet_inbox（支持 wsId 过滤）
   X_LIST_RECIPES:    'x:list-recipes',     // renderer → main invoke：取所有配方
   X_REPLY_TWEET:     'x:reply-tweet',      // renderer → main invoke：导航 X webview 到目标推文（wsId + tweetUrl）
+  X_PLAN_REPLIES:    'x:plan-replies',     // renderer → main invoke：给一批推文规划回复草稿（只产草稿，不发布）
+  X_REPLAY_REPLIES:  'x:replay-replies',   // renderer → main invoke：拿历史标注样本回放规划器（只算不发，不写库）
+  X_REPLY_FEEDBACK:  'x:reply-feedback',   // renderer → main invoke：记学习期反馈（AI 原文 vs 用户改成什么）
+  X_REPLY_READINESS: 'x:reply-readiness',  // renderer → main invoke：分语言原样通过率（放手自动的判据）
+  X_WATCHLIST:       'x:watchlist',        // renderer → main invoke：追踪名单增删查（≠ X 的关注）
+  X_PREFETCH_CONTEXT: 'x:prefetch-context',   // renderer → main invoke：给建议名单批量预抓上文
+  X_PREFETCH_PROFILES: 'x:prefetch-profiles', // renderer → main invoke：给建议名单批量预采画像
+  X_PLAN_ONE_REPLY:  'x:plan-one-reply',   // renderer → main invoke：为单条推文现写回复（卡片弹窗用）
   X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
   X_INVALIDATE_WC:   'x:invalidate-wc',   // renderer → main：强制 guest 全量重绘(见 x-timeline-handlers)
   X_SUBMIT_FEEDBACK: 'x:submit-feedback', // renderer → main invoke：写入人工 verdict
@@ -328,6 +347,31 @@ export const IPC_CHANNELS = {
   X_GET_RECIPE_STATS:'x:get-recipe-stats',// renderer → main invoke：查配方采纳率统计
   X_FEEDBACK_STATS:  'x:feedback-stats',  // renderer → main invoke：近7天 Gemma建议采纳率/捞回漏判数
   X_MARK_REPLIED:    'x:mark-replied',    // renderer → main invoke：标记推文已回复（已确认视图清场）
+  // 屏蔽名单（B 期）—— 屏蔽只约束未来采集，不抹除已抓的历史数据
+  X_BLOCK_AUTHOR:    'x:block-author',    // renderer → main invoke：屏蔽某作者（handle）
+  X_UNBLOCK_AUTHOR:  'x:unblock-author',  // renderer → main invoke：解除屏蔽（handle）
+  X_LIST_BLOCKED:    'x:list-blocked',    // renderer → main invoke：取屏蔽名单
+  // per-ws 角色配置（活动契约）—— 用户自己在 UI 里设定，不由代码写死
+  X_GET_WS_ROLES:    'x:get-ws-roles',    // renderer → main invoke：列出所有 ws 角色
+  X_SET_WS_ROLE:     'x:set-ws-role',     // renderer → main invoke：设定某 ws 的角色/文章/触发口
+  X_LIST_ARTICLES:   'x:list-articles',   // renderer → main invoke：探测本账号的 Article 供下拉选
+  X_FETCH_ARTICLE_REPLIES: 'x:fetch-article-replies', // renderer → main invoke：试抓一篇文章的回复
+  X_HARVEST_NOTIFICATIONS: 'x:harvest-notifications', // renderer → main invoke：抓通知页(谁赞/转/回了我)
+  X_CAMPAIGN_STATUS:       'x:campaign-status',       // renderer → main invoke：契约配置与服务状态
+  X_DETECT_SELF:     'x:detect-self',     // renderer → main invoke：探测当前登录的 X 账号并标记 is_self
+  X_GET_SELF:        'x:get-self',        // renderer → main invoke：取已标记的「我自己」handle
+  X_WATCHLIST_SPIKE: 'x:watchlist-spike', // renderer → main invoke：B' 期一次性诊断（搜索语法/回复判定实机对照）
+  X_PAYLOAD_SURVEY:  'x:payload-survey', // renderer → main invoke：勘查 X GraphQL 原始载荷字段（能力边界的真实依据）
+  X_COLLECT_REPLIES: 'x:collect-replies', // renderer → main invoke：采集回复关系并回填 replied
+  X_HARVEST:         'x:harvest',        // renderer → main invoke：通用时间线采集（滚到底 + 自校验）
+  X_CAPTURE_START:   'x:capture-start',  // renderer → main invoke：开始被动监视采集
+  X_CAPTURE_STOP:    'x:capture-stop',   // renderer → main invoke：停止监视并取最终统计
+  X_CAPTURE_UPDATE:  'x:capture-update', // main → renderer 广播：实时采集快照
+  // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
+  X_NOTIF_WATCH_START:  'x:notif-watch-start',
+  X_NOTIF_WATCH_STOP:   'x:notif-watch-stop',
+  X_NOTIF_WATCH_UPDATE: 'x:notif-watch-update', // main → renderer 广播
+  X_HARVEST_PROGRESS:'x:harvest-progress',// main → renderer 广播：全量采集进度（长任务不能是黑箱）
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }

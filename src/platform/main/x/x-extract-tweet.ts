@@ -27,7 +27,15 @@ export interface XTweetData {
   media?: Array<{ type: 'image' | 'video'; url: string; thumbUrl?: string }>;
   metrics?: { replies?: number; retweets?: number; likes?: number; views?: number };
   quotedTweet?: string;
+  /**
+   * ⚠️ 历史字段:曾取自 socialContext(那是「xx 转推了」横幅),**从未被正确填过**。
+   * 现由载荷层(harvester)提供父推 id;DOM 层只给下面两个。
+   */
   inReplyTo?: string;
+  /** 被回复者 handle —— DOM 上「Replying to @xxx」那一行 */
+  inReplyToUser?: string;
+  /** 这条是不是回复(DOM 上有 Replying to 那一行) */
+  isReply?: boolean;
   tweetUrl?: string;
   tweetId?: string;
 }

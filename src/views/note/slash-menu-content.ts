@@ -115,6 +115,7 @@ export function registerSlashMenu(): void {
     ui.createMermaidBlockItem(VIEW),
     ui.createHtmlBlockItem(VIEW),
     ui.createMathVisualBlockItem(VIEW),
+    ui.createDefBlockItem(VIEW),
     ...createNoteBusinessInsertItems(),
   ]);
 }

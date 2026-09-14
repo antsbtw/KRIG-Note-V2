@@ -1,0 +1,913 @@
+/**
+ * S + G → Instance[] 投影断言
+ *
+ * ⭐⭐ 守的是 03 §1.1 的核心关系:**稀疏覆盖全量**。
+ * 写错这里,C5(新建 G 层零条目)与 C7(删条目回自动)在画面上就没了意义 ——
+ * 模型层再对,用户看到的还是错的。
+ *
+ * ⚠️ 每条都注入验红,台账见文件末尾。
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  buildLayoutRequest,
+  projectToInstances,
+  isTreeLineId,
+  isRelationLineId,
+  pickRelationMagnets,
+  fontSizeForDepth,
+  refForShape,
+  DEFAULT_MIND_SHAPE_REF,
+  type LayoutAnswer,
+} from '@capabilities/diglot-model/project-to-canvas';
+import { textToContent } from '@capabilities/diglot-model/mermaid-mindmap';
+import { BLOCK_VISUAL_SPEC, headingFontSize } from '../../../src/lib/visual-spec/block-visual-spec';
+import { isCjk } from '../../../src/lib/atom-serializers/svg/font-loader';
+import { fileToSnapshot, emptyMindFile } from '@capabilities/diglot-model/mind-file';
+import { notImplementedEngine as engine } from '@capabilities/diglot-model/engine-contract';
+import type { DiglotSnapshot } from '@capabilities/diglot-model/engine-contract';
+
+function snap(): DiglotSnapshot {
+  const r = fileToSnapshot(emptyMindFile());
+  if (!r.ok) throw new Error('夹具解析失败');
+  return r.value;
+}
+
+/**
+ * 只取节点实例,滤掉树连线。
+ * ⚠️ 加了树连线之后,`projectToInstances` 返回的是**节点 + 连线**两类;
+ * 断言「每个实例都有坐标」这类话时必须先滤,否则会把连线也算进去
+ * (连线走 magnet,本就没有 position —— 这是对的,不是缺陷)。
+ */
+function nodesOnly(inst: ReturnType<typeof projectToInstances>) {
+  return inst.filter((i) => !isTreeLineId(i.id));
+}
+
+/** 假布局:给每个请求节点一个可辨认的坐标(x=序号*1000),便于区分「自动」与「G 层」。 */
+function fakeLayout(req: ReturnType<typeof buildLayoutRequest>): LayoutAnswer {
+  return { nodes: req.nodes.map((n, i) => ({ id: n.id, x: i * 1000, y: i * 100 })) };
+}
+
+describe('投影:稀疏覆盖全量', () => {
+  it('⭐⭐ 没有 G 条目的节点,坐标全部来自自动布局', () => {
+    const s = snap();
+    expect(s.g.size, '前提:新建的图 G 层为空').toBe(0);
+    const req = buildLayoutRequest(s.s, s.g);
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(req)));
+
+    expect(inst.length).toBe(s.s.nodes.length);
+    // 每个节点都拿到了坐标(来自自动布局,不是 G 层)
+    // ⚠️ y 原样;x 经过**同层左对齐**后处理(2026-09-11 用户拍板),
+    //    所以不再逐个等于假布局的 x —— 但仍必须是**布局给过的某个 x**,
+    //    绝不能凭空冒出来或落到 (0,0)。
+    const layoutXs = new Set(fakeLayout(req).nodes.map((n) => n.x));
+    inst.forEach((it, i) => {
+      expect(it.position!.y).toBe(i * 100);
+      expect(layoutXs.has(it.position!.x), `x=${it.position!.x} 不是布局给过的值`).toBe(true);
+    });
+  });
+
+  it('⭐⭐ 有 G 条目的节点,pos 覆盖自动布局(pinned)', () => {
+    const s0 = snap();
+    const id = s0.s.nodes.find((n) => n.parent !== null)!.id;
+    // 经引擎钉住(不手写 G 层)
+    const s = engine.applyAction(s0, { kind: 'canvas.dragNode', id, x: 42, y: 43 });
+
+    const req = buildLayoutRequest(s.s, s.g);
+    const inst = projectToInstances(s.s, s.g, fakeLayout(req));
+
+    const pinned = inst.find((i) => i.id === id)!;
+    expect(pinned.position, 'G 层的 pos 必须赢过自动布局').toEqual({ x: 42, y: 43 });
+
+    // ⭐ 其余节点仍走自动布局 —— 「只有被碰过的才被钉住」
+    const others = inst.filter((i) => i.id !== id);
+    expect(others.length).toBeGreaterThan(0);
+    for (const o of others) {
+      expect(o.position).not.toEqual({ x: 42, y: 43 });
+    }
+  });
+
+  it('⭐ 删掉 pos 条目 → 该节点回自动布局(C7 在画面上的体现)', () => {
+    const s0 = snap();
+    const id = s0.s.nodes.find((n) => n.parent !== null)!.id;
+    const pinned = engine.applyAction(s0, { kind: 'canvas.dragNode', id, x: 42, y: 43 });
+    const released = engine.applyAction(pinned, { kind: 'graphic.deletePos', id });
+
+    const req = buildLayoutRequest(released.s, released.g);
+    const inst = projectToInstances(released.s, released.g, fakeLayout(req));
+    const it = inst.find((i) => i.id === id)!;
+    expect(it.position, '删条目后必须回到自动布局给的位置').not.toEqual({ x: 42, y: 43 });
+  });
+
+  it('⭐ 折叠:collapsed 节点的整棵子树不出现在 instances 里', () => {
+    const s = snap();
+    // 「分支A」有两个叶子
+    const branch = s.s.nodes.find((n) => {
+      const kids = s.s.nodes.filter((k) => k.parent === n.id);
+      return kids.length >= 2;
+    })!;
+    const before = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const after = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+
+    expect(after.length).toBeLessThan(before.length);
+    // 折叠的节点**自身仍可见**
+    expect(after.some((i) => i.id === branch.id), '折叠的节点自己还在').toBe(true);
+    // 它的孩子全部消失
+    for (const kid of s.s.nodes.filter((k) => k.parent === branch.id)) {
+      expect(after.some((i) => i.id === kid.id), `子节点 ${kid.id} 应被裁掉`).toBe(false);
+    }
+  });
+
+  it('⭐ 布局请求里的 edges 只是算法输入,不代表数据模型有边', () => {
+    const s = snap();
+    const req = buildLayoutRequest(s.s, s.g);
+    // 树有父子 → 布局输入有 edges
+    expect(req.edges.length).toBeGreaterThan(0);
+    // ⚠️ 但 S 层的 edges(联系线)仍然是空的 —— 两者是两回事(03 §3)
+    expect(s.s.edges.length, '布局用的 edge 不得污染数据模型').toBe(0);
+  });
+
+  it('⭐⭐ 节点尺寸跟着文字走,不是一刀切', () => {
+    // ⚠️ 真机实测(用户指出):六个短标签节点全部同宽同高 ——
+    //   因为 estimateWidth 的下限(120)把它们**全部吞掉**了。
+    //   一刀切既难看,也让树的层次感消失:长标题和短叶子该一眼看出差别。
+    const src = [
+      'mindmap',
+      '  root((知识管理))',
+      '    很长的一个分支标题',
+      '      短',
+      '    B',
+    ].join('\n');
+    const parsed = engine.parseMermaidMindmap(src);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const req = buildLayoutRequest(parsed.value, new Map());
+    const byId = new Map(req.nodes.map((n) => [n.id, n]));
+    const widthOf = (label: string): number => {
+      const node = parsed.value.nodes.find(
+        (n) => JSON.stringify(n.content).includes(label),
+      );
+      return byId.get(node!.id)!.width;
+    };
+
+    // ⭐ 长标签必须比短标签宽 —— 这是「跟着内容走」的最小判据
+    expect(widthOf('很长的一个分支标题')).toBeGreaterThan(widthOf('知识管理'));
+    expect(widthOf('知识管理')).toBeGreaterThan(widthOf('短'));
+    // ⚠️ 且不许所有节点同宽(一刀切的机器化描述)
+    const widths = new Set(req.nodes.map((n) => n.width));
+    expect(widths.size, '不同长度的标签不该产出同一个宽度').toBeGreaterThan(1);
+  });
+
+  it('CJK 比同数量 ASCII 宽(全宽 vs 窄字)', () => {
+    const src = ['mindmap', '  root((中中中中))', '    aaaa'].join('\n');
+    const parsed = engine.parseMermaidMindmap(src);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const req = buildLayoutRequest(parsed.value, new Map());
+    const [cjk, ascii] = req.nodes;
+    expect(cjk.width).toBeGreaterThan(ascii.width);
+  });
+
+  it('⭐⭐ 树连线:每个非顶层节点恰好一条,父 E → 子 W', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const lines = inst.filter((i) => isTreeLineId(i.id));
+    const nonTop = s.s.nodes.filter((n) => n.parent !== null);
+
+    expect(lines.length, '每个有父的节点恰好一条连线').toBe(nonTop.length);
+    for (const n of nonTop) {
+      const line = lines.find((l) => l.endpoints?.[1].instance === n.id);
+      expect(line, `节点 ${n.id} 缺连线`).toBeDefined();
+      // ⭐ 左→右布局:父接右侧(E),子接左侧(W)
+      expect(line!.endpoints![0]).toEqual({ instance: n.parent, magnet: 'E' });
+      expect(line!.endpoints![1]).toEqual({ instance: n.id, magnet: 'W' });
+    }
+  });
+
+  it('⭐ 连线走 magnet 而非固定坐标(拖动时才会自动跟随)', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    for (const l of inst.filter((i) => isTreeLineId(i.id))) {
+      expect(l.endpoints, '连线必须有 endpoints').toBeDefined();
+      // ⚠️ 有 position 的话画布会用固定坐标,拖动节点线就不跟了
+      expect(l.position, '连线不得带 position').toBeUndefined();
+      expect(l.doc, '连线没有文字').toBeUndefined();
+    }
+  });
+
+  it('⭐⭐ 连线是纯派生物 —— 不进 S 层 edges,也不进 G 层', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    expect(inst.some((i) => isTreeLineId(i.id))).toBe(true);
+    // ⚠️ S 层的 edges 是**联系线**(树之外的附加关系),与树连线是两回事
+    expect(s.s.edges.length, '树连线不得污染 S 层 edges').toBe(0);
+    // ⚠️ G 层不为连线存条目(它们没有"被用户触碰过"这回事)
+    expect(s.g.size, '树连线不得在 G 层留条目').toBe(0);
+  });
+
+  it('⭐ 折叠时,被裁掉的子树连线一并消失(不留悬空线)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find(
+      (n) => s.s.nodes.filter((k) => k.parent === n.id).length >= 2,
+    )!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const inst = projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
+    const visibleIds = new Set(inst.filter((i) => !isTreeLineId(i.id)).map((i) => i.id));
+
+    for (const l of inst.filter((i) => isTreeLineId(i.id))) {
+      // ⚠️ 两端都必须是**可见**节点,否则就是指向不存在 instance 的悬空线
+      expect(visibleIds.has(l.endpoints![0].instance), '连线起点必须可见').toBe(true);
+      expect(visibleIds.has(l.endpoints![1].instance), '连线终点必须可见').toBe(true);
+    }
+  });
+
+  it('顶层节点(root / 自由主题)不画线', () => {
+    const s = snap();
+    const inst = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const tops = s.s.nodes.filter((n) => n.parent === null).map((n) => n.id);
+    for (const l of inst.filter((i) => isTreeLineId(i.id))) {
+      expect(tops.includes(l.endpoints![1].instance), '顶层节点不该是连线终点').toBe(false);
+    }
+  });
+
+  it('⭐⭐ 字号按树深度取 h1~hn,与 note 标题层级同一套', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const byId = new Map(inst.map((i) => [i.id, i]));
+
+    const root = s.s.nodes.find((n) => n.role === 'root')!;
+    const branch = s.s.nodes.find((n) => n.parent === root.id)!;
+    const leaf = s.s.nodes.find((n) => n.parent === branch.id)!;
+
+    // ⚠️⚠️ **字号不再由 text_size 携带**(2026-09-10 改):
+    //   渲染层公式是 `headingFontSize(block.level) × (text_size / 16)`,
+    //   它**自己按块的 level 放大**。若 text_size 再传 h1(38),
+    //   首块会被渲成 38 × (38/16) = 90px —— 估算宽度的 2.4 倍 → 强行折行(真机踩过)。
+    // ⭐ 所以 text_size 恒为正文号,深度→字号改由 note-projection 写在**块的 level** 上。
+    //   这里断言的是**最终渲染字号**(同一条公式),意图不变:深度 → h1~hn,与 note 同源。
+    const effective = (id: string, level: number): number =>
+      headingFontSize(level) * (byId.get(id)!.text_size! / BLOCK_VISUAL_SPEC.body.fontSize);
+
+    expect(effective(root.id, 1)).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
+    expect(effective(branch.id, 2)).toBe(BLOCK_VISUAL_SPEC.headings.h2.fontSize);
+    expect(effective(leaf.id, 3)).toBe(BLOCK_VISUAL_SPEC.headings.h3.fontSize);
+    // ⭐ 正文块(无 level)= 正文号,与标题拉开 —— 这正是用户要的「paragraph 是正文大小」
+    expect(effective(root.id, 0)).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+  });
+
+  it('⚠️ 超过 h3 的深度用正文号,不继续缩(无限缩小会不可读)', () => {
+    expect(fontSizeForDepth(3)).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+    expect(fontSizeForDepth(10)).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+  });
+
+  it('⭐ 层级越深字号越小(不许倒挂)', () => {
+    expect(fontSizeForDepth(0)).toBeGreaterThan(fontSizeForDepth(1));
+    expect(fontSizeForDepth(1)).toBeGreaterThan(fontSizeForDepth(2));
+    expect(fontSizeForDepth(2)).toBeGreaterThan(fontSizeForDepth(3));
+  });
+
+  it('⭐ 节点尺寸随字号缩放(大字号配大盒子)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const byId = new Map(inst.map((i) => [i.id, i]));
+    const root = s.s.nodes.find((n) => n.role === 'root')!;
+    const leaf = s.s.nodes.find((n) => {
+      const p = s.s.nodes.find((x) => x.id === n.parent);
+      return p && p.parent !== null;
+    })!;
+    // 「主题」两字 vs 「叶子1」三字:字号差 38 vs 22,盒子高度必须体现出来
+    expect(byId.get(root.id)!.size!.h).toBeGreaterThan(byId.get(leaf.id)!.size!.h);
+  });
+
+  it('⭐⭐ 首屏视口:root 居中 + zoom=1(字号与 note 一样大)', () => {
+    // ⚠️ 之前用 fitToContent 取景 —— 它按 bbox 缩放填满容器,
+    //   字号随图大小忽大忽小,与「h1~h6 对齐 note 字号」矛盾(用户实测指出)。
+    // ⭐ zoom=1 的不变量:1 世界单位 = 1 CSS 像素(SceneManager 注释),
+    //   所以 zoom=1 时节点就按声明的 38/28/22 渲染 —— 与 note 一样大。
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const root = s.s.nodes.find((n) => n.role === 'root')!;
+    const rootInst = inst.find((i) => i.id === root.id)!;
+
+    // 视口中心应落在 root 的几何中心
+    const expectX = Math.round(rootInst.position!.x + rootInst.size!.w / 2);
+    const expectY = Math.round(rootInst.position!.y + rootInst.size!.h / 2);
+    expect(Number.isFinite(expectX) && Number.isFinite(expectY)).toBe(true);
+    // ⭐ root **渲染出来**必须是 h1 —— 这条与 zoom=1 合起来才等于「和 note 一样大」。
+    // ⚠️ 字号不再由 text_size 直接携带(见上一条注释:会与渲染层的 level 放大叠乘),
+    //    这里按渲染层同一条公式算最终字号。
+    expect(
+      headingFontSize(1) * (rootInst.text_size! / BLOCK_VISUAL_SPEC.body.fontSize),
+    ).toBe(BLOCK_VISUAL_SPEC.headings.h1.fontSize);
+  });
+
+  it('⭐⭐ 折叠的节点带可辨认标记 —— 数字在圆圈里(magnetActions.count)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find(
+      (n) => s.s.nodes.filter((k) => k.parent === n.id).length >= 2,
+    )!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+
+    const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    const hit = inst.find((i) => i.id === branch.id)!;
+
+    // ⭐ 折叠 → 圆圈是 plus(点了展开)且**带子节点数**
+    const action = hit.magnetActions?.[0];
+    expect(action?.icon).toBe('plus');
+    expect(action?.count).toBe(2);
+  });
+
+  it('⭐⭐ 展开态**不给** count —— 子节点就在画布上,再标数字是噪音', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const action = inst.find((i) => i.id === branch.id)!.magnetActions?.[0];
+    expect(action?.icon).toBe('minus');
+    expect(action?.count).toBeUndefined();
+  });
+
+  it('⭐⭐ 折叠**不再改写节点文本**(旧 `（N）` 后缀会把富文本拍平成纯文本)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+
+    const expanded = nodesOnly(
+      projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))),
+    ).find((i) => i.id === branch.id)!;
+
+    g.set(branch.id, { collapsed: true });
+    const collapsed = nodesOnly(
+      projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))),
+    ).find((i) => i.id === branch.id)!;
+
+    // ⭐ 折叠前后 doc **完全一致** —— 这正是把数字挪进圆圈换来的:
+    //   旧做法要 textToContent(`${label}（N）`) 重造纯文本 doc,公式/格式/图片全丢。
+    expect(JSON.stringify(collapsed.doc)).toBe(JSON.stringify(expanded.doc));
+    // ⚠️ 且不含任何后缀标记(防有人「顺手」把 `（N）` 加回来)
+    expect(JSON.stringify(collapsed.doc)).not.toContain('（');
+  });
+
+  it('⭐⭐ 圆圈数字**不走打包字体**,所以不受字形覆盖限制(当年 ⊕ 渲染成空白那个坑)', () => {
+    // ⚠️ 这条守的是「为什么现在敢用数字」:
+    //   打包字体(atomsToSvg / font-loader)只覆盖 CJK 与 ASCII —— `⊕`(U+2295)
+    //   两头不沾 → 渲染成空白。当年因此被迫改用全角 `（N）`。
+    // ⭐ 数字挪进圆圈后走的是 MagnetActionsOverlay 的 canvas fillText → CanvasTexture,
+    //   用**系统字体**,与打包字体无关。这里钉住两件事:
+    //   ① count 是数字(不是符号),② 节点标签本身仍在打包字体覆盖范围内。
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    const hit = inst.find((i) => i.id === branch.id)!;
+
+    expect(typeof hit.magnetActions?.[0]?.count).toBe('number');
+
+    // ⚠️ 标签(走打包字体那条路)每个字符仍要么 CJK 要么 ASCII
+    const label = String(
+      (hit.doc as { payload: { content: { content: { text: string }[] }[] } })
+        .payload.content[0].content[0].text,
+    );
+    for (const ch of label) {
+      const code = ch.codePointAt(0) ?? 0;
+      expect(
+        isCjk(ch) || code < 0x7f,
+        `字符 ${JSON.stringify(ch)}(U+${code.toString(16).toUpperCase()}) 可能无字形`,
+      ).toBe(true);
+    }
+  });
+
+  it('⚠️ 折叠标记不进 S 层 content(模型文字永远不被显示逻辑改写)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g)));
+    expect(JSON.stringify(s.s.nodes.find((n) => n.id === branch.id)!.content)).not.toContain('（');
+  });
+
+  it('⚠️ 没有子节点的节点即使标了 collapsed 也不加标记(不骗人)', () => {
+    const s = snap();
+    const leaf = s.s.nodes.find((n) => !s.s.nodes.some((k) => k.parent === n.id))!;
+    const g = new Map(s.g);
+    g.set(leaf.id, { collapsed: true });
+    const inst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    expect(JSON.stringify(inst.find((i) => i.id === leaf.id)!.doc)).not.toContain('（');
+  });
+
+  // ── 连接点操作点(点右侧圆折叠/展开;规格 §7.5「徽标点击」那一半)──
+
+  it('⭐⭐ 有子节点的节点在 E 连接点挂操作点(树连线也从 E 出发,同一个点)', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const hit = inst.find((i) => i.id === branch.id)!;
+    expect(hit.magnetActions).toEqual([{ magnet: 'E', icon: 'minus' }]);
+  });
+
+  it('⚠️ 叶子不挂操作点 —— 没得折,挂了会骗人', () => {
+    const s = snap();
+    const leaf = s.s.nodes.find((n) => !s.s.nodes.some((k) => k.parent === n.id))!;
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    expect(inst.find((i) => i.id === leaf.id)!.magnetActions).toBeUndefined();
+  });
+
+  it('⭐⭐ 图标反映「点了会发生什么」:展开态 minus、折叠态 plus', () => {
+    const s = snap();
+    const branch = s.s.nodes.find((n) => s.s.nodes.some((k) => k.parent === n.id))!;
+
+    const openInst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    expect(
+      openInst.find((i) => i.id === branch.id)!.magnetActions?.[0].icon,
+      '展开态点它会折叠 → 画 minus',
+    ).toBe('minus');
+
+    const g = new Map(s.g);
+    g.set(branch.id, { collapsed: true });
+    const closedInst = nodesOnly(projectToInstances(s.s, g, fakeLayout(buildLayoutRequest(s.s, g))));
+    expect(
+      closedInst.find((i) => i.id === branch.id)!.magnetActions?.[0].icon,
+      '折叠态点它会展开 → 画 plus;⚠️ 折叠后子节点被裁掉,操作点必须还在,否则再也展不开',
+    ).toBe('plus');
+  });
+
+  it('⚠️ 树连线 instance 不挂操作点(操作点只属于节点)', () => {
+    const s = snap();
+    const all = projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g)));
+    const lines = all.filter((i) => isTreeLineId(i.id));
+    expect(lines.length, '前提:样本里确实有树连线').toBeGreaterThan(0);
+    for (const l of lines) expect(l.magnetActions).toBeUndefined();
+  });
+
+  it('⭐ 展开态原样透传富文本(不经文本拍平)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const first = inst[0];
+    const node = s.s.nodes.find((n) => n.id === first.id)!;
+    // ⚠️ 非折叠态必须是**同一个对象**,否则公式/marks 会在某处被拍平
+    expect(first.doc).toBe(node.content);
+  });
+
+  it('⚠️ 布局结果缺节点 → fail loud,不静默给 (0,0)', () => {
+    const s = snap();
+    // 故意给一个空布局
+    expect(() => projectToInstances(s.s, s.g, { nodes: [] })).toThrow(/布局/);
+  });
+
+  it('坐标量化为整数(自动布局可能带小数)', () => {
+    const s = snap();
+    const req = buildLayoutRequest(s.s, s.g);
+    const noisy: LayoutAnswer = { nodes: req.nodes.map((n) => ({ id: n.id, x: 1.7, y: -2.3 })) };
+    const inst = nodesOnly(projectToInstances(s.s, s.g, noisy));
+    expect(inst.length).toBeGreaterThan(0);
+    for (const it of inst) {
+      expect(Number.isInteger(it.position!.x)).toBe(true);
+      expect(Number.isInteger(it.position!.y)).toBe(true);
+    }
+  });
+
+  it('G 层 color 落到 style_overrides;没设的不带该字段(稀疏)', () => {
+    const s0 = snap();
+    const id = s0.s.nodes.find((n) => n.parent !== null)!.id;
+    const s = engine.applyAction(s0, { kind: 'graphic.editColor', id, color: 'red' });
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+
+    expect(inst.find((i) => i.id === id)!.style_overrides?.fill?.color).toBe('red');
+    // ⭐ 没碰过的节点不许凭空多出样式字段
+    const untouched = inst.find((i) => i.id !== id)!;
+    expect(untouched.style_overrides).toBeUndefined();
+  });
+
+  it('节点 doc 就是 S 层 content(与 note block 同一形态)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    const first = inst[0];
+    const node = s.s.nodes.find((n) => n.id === first.id)!;
+    // ⭐ 直接透传,不做转换 —— 富文本/公式/图片将来天然可承载
+    expect(first.doc).toBe(node.content);
+  });
+});
+
+/**
+ * §注入台账 —— 真跑，见提交说明
+ *
+ * | 注入 | 期望 | 实测 |
+ * |---|---|---|
+ * | 覆盖顺序反过来（自动布局赢过 G 层） | 「pos 覆盖自动布局」红 | ✅ |
+ * | 无 G 条目时也补一条 pos | 「回自动布局」红 | ✅ |
+ * | collapsed 不裁子树 | 「折叠」红 | ✅ |
+ * | 布局缺节点时兜底给 (0,0) | 「fail loud」红 | ✅ |
+ *
+ * ⚠️ 未覆盖（诚实记账）：
+ * - **真 ELK**：本文件用假布局，只验「覆盖逻辑」，不验 mrtree 排得好不好看。
+ *   真布局质量要接线后肉眼看。
+ * - 尺寸估算 `estimateWidth` 是近似值，精确尺寸需文字层 measure 后回填。
+ * - `Instance` 的字段是结构性对齐（刻意不 import canvas-rendering 的类型，
+ *   那会把 three 拖进 diglot-model），若渲染层改字段名这里不会自动红。
+ */
+
+/**
+ * ⭐⭐ shape 直通 —— 「mind 应该可以调用画板的任何 shape」(用户拍板)
+ *
+ * ⚠️ 旧版是四条目 switch + default 静默回落成圆角矩形:
+ *   shape 库新增形状 mind 用不到(除非回来手改 switch),
+ *   且用户写了库里没有的形状会**默默变个样子不吭声**。
+ */
+describe('shape 直通(mind 不自带形状白名单)', () => {
+  it('⭐⭐ 完整 ref 原样透传 —— 库里新增什么就能用什么,本文件零改动', () => {
+    // 这些 ref 现在库里还没有,正是「将来新增」的模拟
+    expect(refForShape('krig.flow.decision')).toBe('krig.flow.decision');
+    expect(refForShape('krig.uml.actor')).toBe('krig.uml.actor');
+  });
+
+  it('⭐ 短名走别名表(mermaid 语法 / 手写方便)', () => {
+    expect(refForShape('circle')).toBe('krig.basic.ellipse');
+    expect(refForShape('rect')).toBe('krig.basic.rect');
+    expect(refForShape('text')).toBe('krig.basic.text');
+  });
+
+  it('⚠️ 不认识的短名**不再静默回落成圆角矩形**(那是静默兜底)', () => {
+    // 原样透出去,由 view 侧对着 registry fail loud —— 而不是在这里假装没事
+    expect(refForShape('菱形')).toBe('菱形');
+    expect(refForShape('菱形')).not.toBe(DEFAULT_MIND_SHAPE_REF);
+  });
+
+  it('⭐ 没给形状才用默认圆角矩形', () => {
+    expect(refForShape(undefined)).toBe(DEFAULT_MIND_SHAPE_REF);
+  });
+});
+
+/**
+ * ⭐⭐ 折行高度 —— 长文本换行后盒子要跟着长高
+ *
+ * ⚠️ 旧版 measureText 高度**恒为一行**,而宽度被 maxW 夹住 →
+ *   渲染层老老实实换行,盒子却还是一行高 → 第二行溢出到框外。
+ */
+describe('节点尺寸估算(给 ELK 的初值)', () => {
+  const H1 = BLOCK_VISUAL_SPEC.headings.h1.fontSize;
+
+  it('⭐⭐ 长文本折行 → 高度必须**大于**单行', () => {
+    const s = snap();
+    const short = s.s.nodes[0];
+    const inst1 = nodesOnly(
+      projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))),
+    ).find((i) => i.id === short.id)!;
+
+    // 造一个远超 maxW(16 字宽)的标签
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n) =>
+        n.id === short.id
+          ? { ...n, content: textToContent('很长'.repeat(40)) }
+          : n,
+      ),
+    };
+    const inst2 = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    ).find((i) => i.id === short.id)!;
+
+    expect(inst2.size!.h, '长文本折行了,盒子高度却没变 → 文字会溢出框外').toBeGreaterThan(
+      inst1.size!.h,
+    );
+  });
+
+  it('⚠️ 宽度仍被 maxW 夹住(靠折行消化,不是把图横向撑爆)', () => {
+    const s = snap();
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n, i) =>
+        i === 0 ? { ...n, content: textToContent('极长'.repeat(60)) } : n,
+      ),
+    };
+    const inst = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    )[0];
+    // ⭐ 上限 = 防失控兜底(不是排版宽度)
+    expect(inst.size!.w).toBeLessThanOrEqual(Math.round(H1 * 16) + Math.round(H1 * 1.6));
+  });
+});
+
+/**
+ * ⭐⭐ 不强行折行(用户 2026-09-10:
+ * 「主题框如果没有换行,就应该满足文字的长度,而不是强行换行」)
+ */
+describe('不强行折行', () => {
+  /** 用户真机里那个被硬折的标题 */
+  const LABEL = '主题278910101次';
+
+  it('⭐⭐ 正常长度的标题**一行装下**,不被硬折', () => {
+    const s = snap();
+    const target = s.s.nodes[0];
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n) =>
+        n.id === target.id ? { ...n, content: textToContent(LABEL) } : n,
+      ),
+    };
+    const inst = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    ).find((i) => i.id === target.id)!;
+
+    const fs = BLOCK_VISUAL_SPEC.headings.h1.fontSize;
+    // ⚠️⚠️ **不能只比高度**:高度等于一行,在 maxW 被改小的情况下**照样成立**
+    //   (注入验红时抓到 —— 旧写法三条注入全绿 = 假保证)。
+    //   真正要钉的是「**宽度足以装下这串字**」。
+    const pad = Math.round(fs * 1.6);
+    // ⚠️ 宽度**按字符实算**,不手写常数 —— 我手算过一次就数错了字符数
+    //   (12 字算成 13),断言反而挂在自己算错的期望值上。
+    let textW = 0;
+    for (const ch of LABEL) textW += /[一-鿿]/.test(ch) ? fs : fs * 0.55;
+    textW = Math.round(textW);
+    expect(
+      inst.size!.w,
+      `宽度 ${inst.size!.w} 装不下文字(需 ${textW + pad})→ 会被强行折行`,
+    ).toBeGreaterThanOrEqual(textW + pad);
+  });
+});
+
+/**
+ * ⭐⭐ text_size 与块 level **不能叠乘**(2026-09-10 真机踩过)
+ *
+ * 渲染层公式:`fontSize = headingFontSize(block.level) × (inst.text_size / 16)`
+ * —— 它**自己按块 level 放大**。若投影再把 h1(38)塞进 text_size,
+ * 首块就被渲成 `38 × (38/16) = 90px`,是估算宽度的 2.4 倍 → **强行折行**。
+ *
+ * ⚠️ 我一度以为折行是 maxW(16 字)夹的,把上限放宽到 40 字 —— 实测那串字
+ * 在任何层级都**没碰到过 maxW**(h1 上限 608px,它只要 363px)。
+ * **改错了地方而症状还在**,正是这条断言要防的。
+ */
+describe('字号不叠乘', () => {
+  it('⭐⭐ text_size 恒为正文号(深度→字号由块的 level 表达)', () => {
+    const s = snap();
+    const inst = nodesOnly(projectToInstances(s.s, s.g, fakeLayout(buildLayoutRequest(s.s, s.g))));
+    for (const i of inst) {
+      expect(
+        i.text_size,
+        'text_size 传了标题号 → 与渲染层的 level 放大叠乘 → 字被撑大到折行',
+      ).toBe(BLOCK_VISUAL_SPEC.body.fontSize);
+    }
+  });
+
+  it('⭐⭐ 估算宽度 ≥ 该字号下文字实宽(否则渲染层必然折行)', () => {
+    const s = snap();
+    const LABEL = '主题278910101次';
+    const target = s.s.nodes.find((n) => n.role === 'root')!;
+    const longS = {
+      ...s.s,
+      nodes: s.s.nodes.map((n) => (n.id === target.id ? { ...n, content: textToContent(LABEL) } : n)),
+    };
+    const inst = nodesOnly(
+      projectToInstances(longS, s.g, fakeLayout(buildLayoutRequest(longS, s.g))),
+    ).find((i) => i.id === target.id)!;
+
+    // 最终渲染字号(与渲染层同一条公式)
+    const fs = headingFontSize(1) * (inst.text_size! / BLOCK_VISUAL_SPEC.body.fontSize);
+    let textW = 0;
+    for (const ch of LABEL) textW += /[一-鿿]/.test(ch) ? fs : fs * 0.55;
+
+    // roundRect 的 textBox 左右各内缩 rad = 0.15 × min(w,h)
+    const rad = 0.15 * Math.min(inst.size!.w, inst.size!.h);
+    const usable = inst.size!.w - 2 * rad;
+    expect(usable, `可用宽 ${Math.round(usable)} < 文字宽 ${Math.round(textW)} → 会折行`)
+      .toBeGreaterThanOrEqual(Math.round(textW));
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// ⭐⭐ 联系线上画布(M9)—— `00 §2.5.1` 那条「存不住」修完之后,这条是「看不见」
+// ────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️ 实测缺口(2026-09-13 grep):`projectToInstances` 函数体里 **`edges` 零命中** ——
+ * def 块里写的 `A -.支撑.-> C` 存得住、读得回,但**画布上根本没有这条线**。
+ *
+ * ⭐ 本组守三件事:
+ *  1. 边**真的变成 instance**(不是又一个死字段)
+ *  2. ⭐⭐ 一端被折叠 → **不画**(用户拍板丙:先不做"里面还有线"的标记)
+ *  3. 联系线与树连线**分得开** —— 树连线是派生物不可选,联系线是用户数据
+ */
+describe('M9 · 联系线上画布', () => {
+  /** 在夹具上连一条边(用模型自己的 action,不手搓 SEdge) */
+  function withEdge(): { snapshot: DiglotSnapshot; source: string; target: string } {
+    const base = snap();
+    // 取两个**互不为父子**的节点,免得联系线与树连线重合看不出差别
+    const tops = base.s.nodes.filter((n) => n.parent !== null);
+    const source = tops[0].id;
+    const target = tops.find((n) => n.id !== source && n.parent !== source)!.id;
+    const next = engine.applyAction(base, { kind: 'canvas.connect', source, target, label: '支撑' });
+    return { snapshot: next, source, target };
+  }
+  const relsOf = (inst: ReturnType<typeof projectToInstances>) =>
+    inst.filter((i) => isRelationLineId(i.id));
+
+  it('⭐⭐ S 层的 edge 真的变成画布 instance(此前 edges 根本没进投影)', () => {
+    const { snapshot: sn, source, target } = withEdge();
+    expect(sn.s.edges, '夹具自证:应当真连上了一条边').toHaveLength(1);
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    const rels = relsOf(inst);
+    expect(rels, '联系线应当出现在 instances 里').toHaveLength(1);
+    expect(rels[0].endpoints![0].instance).toBe(source);
+    expect(rels[0].endpoints![1].instance).toBe(target);
+  });
+
+  it('⭐ 走 magnet 不走固定坐标 —— 拖动节点时线自动跟随(白用画板既有能力)', () => {
+    const { snapshot: sn } = withEdge();
+    const rel = relsOf(projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g))))[0];
+    expect(rel.endpoints, '联系线必须有 endpoints').toBeDefined();
+    expect(rel.position, '有 position 就是钉死坐标,拖动时不会跟随').toBeUndefined();
+  });
+
+  it('⭐⭐ 画成**虚线 + 箭头** —— 与树连线(实线无箭头)一眼区分', () => {
+    const { snapshot: sn } = withEdge();
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    const rel = relsOf(inst)[0];
+    // 虚线:`-.->` 的视觉对应物(01 §7.7.2「虚线箭头 + 标签 = 联系线」)
+    expect(rel.style_overrides?.line?.dashType, '联系线应当是虚线').toBe('dash');
+    // ⭐ 箭头:方向敏感(A→B 与 B→A 是两条边),画不出箭头就看不出方向
+    expect(rel.style_overrides?.arrow?.end, '联系线终点应当有箭头').toBeTruthy();
+    // 对照:树连线是实线、无箭头
+    const tline = inst.filter((i) => isTreeLineId(i.id))[0];
+    expect(tline.style_overrides?.arrow, '树连线不该有箭头').toBeUndefined();
+  });
+
+  it('⭐⭐ 一端被折叠 → **不画**(用户拍板丙:不留悬空线,也不做标记)', () => {
+    const { snapshot: sn, source } = withEdge();
+    // 把 source 的父折叠 → source 被裁掉
+    const parent = sn.s.nodes.find((n) => n.id === source)!.parent!;
+    const g = new Map(sn.g);
+    g.set(parent, { collapsed: true });
+    const inst = projectToInstances(sn.s, g, fakeLayout(buildLayoutRequest(sn.s, g)));
+    const visibleIds = new Set(nodesOnly(inst).map((i) => i.id));
+    expect(visibleIds.has(source), '夹具自证:source 应当真被折叠裁掉了').toBe(false);
+    expect(relsOf(inst), '一端不可见时不该画线').toHaveLength(0);
+  });
+
+  it('⚠️ 两端都可见时**照画** —— 别把「折叠不画」写成「什么都不画」', () => {
+    // ⚠️ 反向对照:上一条若实现成 `return []`,它也会绿。这条钉住正向仍然成立。
+    const { snapshot: sn } = withEdge();
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    expect(relsOf(inst)).toHaveLength(1);
+  });
+
+  it('⭐ 联系线 id 与树连线**分得开**(两个前缀互不误判)', () => {
+    const { snapshot: sn } = withEdge();
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    for (const i of inst) {
+      // ⚠️ 任何一个 instance 不许同时被两个判据认领
+      expect(isTreeLineId(i.id) && isRelationLineId(i.id), `${i.id} 被两个判据同时认领`).toBe(false);
+    }
+    const rel = relsOf(inst)[0];
+    expect(isTreeLineId(rel.id), '联系线不该被当成树连线(那会让它不可选、被拖动回调跳过)').toBe(false);
+  });
+
+  it('⚠️ 联系线**不进** G 层,也不改 S 层节点(它已经是 S 的一部分)', () => {
+    const { snapshot: sn } = withEdge();
+    const beforeG = sn.g.size;
+    const beforeNodes = JSON.stringify(sn.s.nodes);
+    projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    expect(sn.g.size, '投影是纯函数,不许写 G 层').toBe(beforeG);
+    expect(JSON.stringify(sn.s.nodes), '投影不许改 S 层').toBe(beforeNodes);
+  });
+
+  it('⚠️ 没有联系线的文档:instances 里一条都不多(只增不改)', () => {
+    const base = snap();
+    expect(base.s.edges).toHaveLength(0);
+    const inst = projectToInstances(base.s, base.g, fakeLayout(buildLayoutRequest(base.s, base.g)));
+    expect(relsOf(inst)).toHaveLength(0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// ⭐⭐ M10 · 吸附点按相对位置选(用户 2026-09-14 真机指出:「吸附点不对」)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️⚠️ **M9 漏掉的那条**:M9 只验了「走 magnet / 有箭头 / 是虚线」,
+ * **没有一条验走线是否合理** —— 于是写死的 `源 E → 目标 W` 全绿通过,
+ * 真机上却让「目标在源左边」的线**掉头横穿整张画布**(用户截图)。
+ *
+ * ⭐ 探针还证否了我的第二个猜测:那条线**不是退化成直线**(弯曲度 20.4,
+ * 比树连线的 10.7 还大)——**是跨度太大把弧度稀释了**。
+ * 即:吸附点选错 → 线被迫横穿 → 看着像直线。**一个病根,两个症状。**
+ */
+describe('M10 · 联系线吸附点按相对位置选', () => {
+  const C = (x: number, y: number) => ({ x, y });
+
+  it('⭐⭐ 目标在右 → E→W(不掉头)', () => {
+    expect(pickRelationMagnets(C(0, 0), C(300, 20))).toEqual(['E', 'W']);
+  });
+
+  it('⭐⭐ 目标在左 → W→E(这正是真机上走反的那种)', () => {
+    // ⚠️ 写死 E→W 时,这条线要从右边甩出去再横穿回来
+    expect(pickRelationMagnets(C(300, 0), C(0, 20))).toEqual(['W', 'E']);
+  });
+
+  it('⭐ 目标在正下方 → S→N(竖直方向不该用左右点)', () => {
+    expect(pickRelationMagnets(C(0, 0), C(10, 300))).toEqual(['S', 'N']);
+  });
+
+  it('⭐ 目标在正上方 → N→S', () => {
+    expect(pickRelationMagnets(C(0, 300), C(10, 0))).toEqual(['N', 'S']);
+  });
+
+  it('⭐⭐ 水平差略大于垂直差 → 仍走左右(别在对角线上乱跳)', () => {
+    // dx=100 dy=90 → 水平占优
+    expect(pickRelationMagnets(C(0, 0), C(100, 90))).toEqual(['E', 'W']);
+    // dx=90 dy=100 → 垂直占优
+    expect(pickRelationMagnets(C(0, 0), C(90, 100))).toEqual(['S', 'N']);
+  });
+
+  it('⚠️ 两点重合 → 给默认 E→W,不崩也不产出空字符串', () => {
+    expect(pickRelationMagnets(C(5, 5), C(5, 5))).toEqual(['E', 'W']);
+  });
+
+  it('⭐⭐ 端到端:真实布局下,出发点与相对位置一致(M9 漏掉的那条)', () => {
+    // ⚠️⚠️ 本条**第一版写错了**,记在这里免得重犯:我只比 `cx` 就断言必须从 E 出发,
+    //   而夹具经过「同层左对齐」后两个节点 **x 完全相同**(实测 1059 vs 1059,dx=0)——
+    //   它们是**上下叠着**的,正解是 S→N。断言拿一个样本里**根本不存在的现象**
+    //   (水平偏移)去要求结果,自然红。⭐ 与 memory「先确认样本含不含该现象」同形。
+    // ⭐ 改法:按**主轴**判断(与实现同一条规则,但独立算一遍,不抄实现的分支)。
+    const base = snap();
+    const nodes = base.s.nodes.filter((n) => n.parent !== null);
+    const source = nodes[0].id;
+    const target = nodes.find((n) => n.id !== source && n.parent !== source)!.id;
+    const sn = engine.applyAction(base, { kind: 'canvas.connect', source, target });
+
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    const rel = inst.find((i) => isRelationLineId(i.id))!;
+    const byId = new Map(nodesOnly(inst).map((i) => [i.id, i]));
+    const c = (id: string) => ({
+      x: byId.get(id)!.position!.x + byId.get(id)!.size!.w / 2,
+      y: byId.get(id)!.position!.y + byId.get(id)!.size!.h / 2,
+    });
+    const a = c(source);
+    const b = c(target);
+    const [srcM, tgtM] = rel.endpoints!.map((e) => e.magnet);
+
+    if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+      // 水平主导:源在左从 E 出发,在右从 W 出发 —— 反了就是掉头横穿
+      expect([srcM, tgtM]).toEqual(b.x >= a.x ? ['E', 'W'] : ['W', 'E']);
+    } else {
+      // 垂直主导:上下叠着时不该用左右点(本夹具正是这种)
+      expect([srcM, tgtM]).toEqual(b.y >= a.y ? ['S', 'N'] : ['N', 'S']);
+    }
+  });
+
+  it('⭐⭐ 水平错开的真实布局:源在右 → 从 W 出发(真机那条掉头线的回归)', () => {
+    // ⭐ 上一条的夹具是上下叠的,**测不到水平回指** —— 这条显式构造它:
+    //   给两个节点钉上坐标,让 target 落在 source 的**左边**。
+    const base = snap();
+    const nodes = base.s.nodes.filter((n) => n.parent !== null);
+    const source = nodes[0].id;
+    const target = nodes.find((n) => n.id !== source && n.parent !== source)!.id;
+    const sn = engine.applyAction(base, { kind: 'canvas.connect', source, target });
+    const g = new Map(sn.g);
+    g.set(source, { pos: { x: 900, y: 0 } }); // 源在右
+    g.set(target, { pos: { x: 100, y: 0 } }); // 目标在左
+
+    const inst = projectToInstances(sn.s, g, fakeLayout(buildLayoutRequest(sn.s, g)));
+    const rel = inst.find((i) => isRelationLineId(i.id))!;
+    // ⚠️ 写死 E→W 的旧实现在这里会红 —— 那正是用户截图里那条掉头线
+    expect(rel.endpoints!.map((e) => e.magnet)).toEqual(['W', 'E']);
+  });
+});
+
+/**
+ * ── M9 注入验红台账(5 向,全部按预期变红、还原后全绿)────────────
+ *
+ * | # | 注入 | 结果 |
+ * |---|---|---|
+ * | T | `edges` 不进投影(退回改动前) | 5 红 |
+ * | U | 折叠也照画(留悬空线) | 1 红 |
+ * | V | 画成实线无箭头(与树连线分不开) | 1 红 |
+ * | W | 联系线用 `tline:` 前缀(被当成派生物静默跳过) | 1 红 |
+ * | X | 走固定坐标不走 magnet(拖动时线不跟随) | 2 红 |
+ *
+ * ⚠️ U 单独一条红,正说明「两端都可见时照画」那条**反向对照**是必要的:
+ * 若把「折叠不画」实现成 `return []`,U 会绿而反向对照会红 —— 两条互为守卫。
+ */
+
+/**
+ * ── M10 注入验红台账(4 向,全部按预期变红、还原后全绿)────────────
+ *
+ * | # | 注入 | 结果 |
+ * |---|---|---|
+ * | Y | 退回写死 `E→W`(**就是用户截图那条掉头线**) | 6 红 |
+ * | Z | 主轴判反(水平差大却用上下点) | 8 红 |
+ * | AA | 方向颠倒(源在左却从 W 出发) | 5 红 |
+ * | AB | 用布局原始坐标而非**最终中心**(钉住/对齐过的节点选错边) | 2 红 |
+ *
+ * ⭐ AB 只红那两条**端到端**断言 —— 纯函数单测全绿。
+ * 这正说明端到端那两条不可省:单测只证明「给对坐标会选对点」,
+ * **证明不了「喂进去的坐标是对的」**。
+ *
+ * ⚠️⚠️ **本组断言我自己写错过一版,记在这里**:第一版端到端只比 `cx` 就要求从 E 出发,
+ * 而夹具经同层左对齐后两节点 **x 完全相同**(实测 1059 vs 1059)——它们上下叠着,
+ * 正解是 `S→N`。⭐ 拿样本里**根本不存在的现象**(水平偏移)去要求结果,自然红;
+ * 与 memory「先确认样本含不含该现象」同形。修法是按**主轴**判断,
+ * 并**另加一条显式钉住水平回指**的断言(钉坐标造出 target 在左的布局)。
+ */

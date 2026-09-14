@@ -22,6 +22,9 @@ import type {
   RefAttributes,
 } from 'react';
 import type { FillStyle, LineStyle, ArrowStyle, SubstanceDef } from '@capabilities/shape-library/types';
+import type { MagnetAction, MagnetDragOutTarget } from './interaction/magnet-actions';
+
+export type { MagnetAction, MagnetActionIcon, MagnetDragOutTarget } from './interaction/magnet-actions';
 
 // ─────────────────────────────────────────────────────────
 // Instance 系(V1 plugins/graph/library/types.ts 直迁)
@@ -134,6 +137,21 @@ export interface Instance {
    *   对方没装 / 缺字回退打包字体,不乱码;唯导出 PNG/SVG 时本机 outline 进产物)
    */
   text_font?: 'auto' | 'sans' | 'serif' | 'mono' | 'handwriting' | `sysname:${string}`;
+
+  /**
+   * 连接点操作点(magnet actions):把该 instance 的某几个既有连接点变成**可交互的操作点**
+   * —— 点它触发 `onMagnetClick`,拖它拉出连接触发 `onMagnetDragOut`.
+   *
+   * ⭐ 复用既有 magnet id(N/E/S/W/START/END/...),**不新造坐标语言**;
+   * 声明了图元没有的 id 会被丢弃并 warn(fail loud,不静默兜底到别的连接点).
+   *
+   * ⚠️ canvas-rendering **不认识业务语义** —— 它只知道「这个连接点上有个可点的圆」.
+   * 「点了要折叠子树」这类语义由调用方接回调实现(如 diglot mind 的
+   * `graphic.toggleCollapsed`).
+   *
+   * 详见 src/capabilities/canvas-rendering/interaction/magnet-actions.ts.
+   */
+  magnetActions?: MagnetAction[];
 }
 
 // ─────────────────────────────────────────────────────────
@@ -202,6 +220,21 @@ export interface CanvasHostProps {
     screenW: number;
     screenH: number;
   }) => void;
+  /**
+   * 点击某个连接点操作点(见 `Instance.magnetActions`).
+   * ⚠️ 只在**声明了 action 的连接点**上触发;canvas-rendering 不解释语义.
+   */
+  onMagnetClick?: (instanceId: string, magnet: string) => void;
+  /**
+   * 从某个连接点操作点**拖出**并松手.
+   * target 落在别的节点的连接点上时给 `{kind:'magnet'}`,落空白给 `{kind:'world'}`
+   * —— ⚠️ 落空白不吞掉这次拖动(调用方可据此新建节点).
+   */
+  onMagnetDragOut?: (
+    instanceId: string,
+    magnet: string,
+    target: MagnetDragOutTarget,
+  ) => void;
 }
 
 /**
@@ -217,6 +250,12 @@ export interface CanvasHostHandle {
   loadDocument(doc: CanvasDocument): void;
   /** 序列化当前状态 — view 防抖保存用 */
   serialize(): CanvasDocument;
+  /**
+   * 读当前视口 — toolbar 显示缩放百分比用.
+   * ⚠️ Host 未挂载(容器还没 mount)时给 null,调用方**不要**兜底成 zoom=1
+   * 去显示 —— 那会在恢复了 250% 的画板上骗人显示 100%.
+   */
+  getViewport(): Viewport | null;
   /** 直接设视口 — view 端 toolbar zoom 滑块用 */
   setViewport(vp: Viewport): void;
   /** Fit-to-content;true 表示成功 fit,false 表示空画板/退化几何跳过 */
@@ -288,9 +327,41 @@ export interface CanvasRenderingApi {
   LibraryPicker: ComponentType<LibraryPickerComponentProps>;
   /** Create Substance Dialog(模态;G4.4c) */
   CreateSubstanceDialog: ComponentType<CreateSubstanceDialogComponentProps>;
+  /**
+   * 缩放档位 / 上下限 / 快捷键映射(纯逻辑,零依赖).
+   *
+   * ⭐ 为什么走 api 而不让 view 直 import:上下限与档位是**渲染侧的事实**
+   * (滚轮、快捷键、按钮必须是同一套),view 只是消费者;W5 边界也不允许
+   * view 直 import capability 运行时值.
+   */
+  zoom: CanvasZoomApi;
   // FloatingInspector(G4.4b 右上角 Format Shape 浮窗)L5-G5 删除 — 被 node-toolbar
   // 选中框跟随浮条取代。
 }
+
+/**
+ * 缩放档位逻辑(实现在 interaction/zoom-levels.ts).
+ * ⚠️ 全部是**纯函数 + 常量**,不碰相机 —— 改视口仍走 Host 的 zoomTo / fitToContent.
+ */
+export interface CanvasZoomApi {
+  /** 缩放下限(百分比) */
+  readonly MIN_PERCENT: number;
+  /** 缩放上限(百分比) */
+  readonly MAX_PERCENT: number;
+  /** 档位表(升序,首尾 = 上下限) */
+  readonly STEPS: readonly number[];
+  /** 夹到合法区间(百分比) */
+  clamp(percent: number): number;
+  /** zoom 倍率 → 显示用取整百分比(1 → 100) */
+  format(zoom: number): number;
+  /** 下一档(放大);已到顶返回上限 */
+  next(percent: number): number;
+  /** 上一档(缩小);已到底返回下限 */
+  prev(percent: number): number;
+}
+
+/** 缩放快捷键意图 */
+export type CanvasZoomShortcut = 'zoom-in' | 'zoom-out' | 'zoom-reset';
 
 // UI 组件 props 形态(给 CanvasRenderingApi 用,实际类型在各组件文件)
 

@@ -1,0 +1,1318 @@
+/**
+ * 守卫:自动回复的三条硬约束。
+ *
+ * ① **红线**:全链路只填不发,代码里不得出现「点发布/点回复按钮」的动作。
+ * ② **正文只来自模板库**:模型不生成一个字(它不知道「7天10G」是否仍有效,
+ *    且 X 判垃圾看重复度,模型改写只会制造一堆 90% 相似的变体)。
+ * ③ **前置过滤不问模型**:刷屏/冷却/已回过是跨条现象,模型一次只看一条判不出。
+ *    2026-09-04 评测里唯一残留的假阳正是此类 ——
+ *    「我有小火箭加速器,求推荐一个好用的VPN」在库里一字不差出现 3 次。
+ *
+ * ⚠️ 纯逻辑部分(指纹/轮换)测真实行为;涉及 Electron/DB 的部分测源码约束。
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { textFingerprint, pickTemplate, DUPLICATE_FINGERPRINT_THRESHOLD } from
+  '../../src/platform/main/x/x-reply-planner';
+import {
+  REPLY_TEMPLATES, getTemplate, hasStaleShortLink, needsRef, REPLY_CONFIDENCE_FLOOR,
+  buildRef, renderTemplate, REF_PLACEHOLDER, LANDING_BASE,
+  langOf, templatesFor, LINK_PARAMS, isInThread,
+} from '../../src/shared/types/x-reply-types';
+import { verifyGeneratedReply, buildGenerationPrompt, PRODUCT_FACTS } from
+  '../../src/shared/types/x-reply-facts';
+
+const PLANNER = readFileSync(
+  resolve(__dirname, '../../src/platform/main/x/x-reply-planner.ts'), 'utf-8');
+const HANDLERS = readFileSync(
+  resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+const UI_RAW = readFileSync(
+  resolve(__dirname, '../../src/views/x-inbox/ReplyDraftsView.tsx'), 'utf-8');
+const DIALOG_RAW = readFileSync(
+  resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+const stripComments = (t: string) => t
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
+const DIALOG = stripComments(DIALOG_RAW);
+const REPO_RAW = readFileSync(
+  resolve(__dirname, '../../src/platform/main/db/x-reply-feedback-repo.ts'), 'utf-8');
+/**
+ * 去掉注释后的代码 —— 「禁止出现 X」这类守卫必须只看**代码**。
+ * 否则「本视图不存在任何一键全发」这句**说明它没做**的注释,
+ * 反而会把守卫弄红(踩过:首次写完就是这样),
+ * 之后为了让测试变绿去删注释,等于把最该留的说明删掉。
+ */
+const UI = UI_RAW
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+describe('红线:只填不发', () => {
+  it('⭐ planner 不得有任何点击发布/回复按钮的动作', () => {
+    // 写方向最高红线(x-write.ts §9):发布那一下永远留给用户
+    const clicks = [...PLANNER.matchAll(/\.click\(\)|clickSendButton|clickPublish|pressEnter/g)];
+    expect(
+      clicks.map((m) => m[0]),
+      'planner 里出现了点击动作 —— 违反「绝不程序自动点发布」红线',
+    ).toEqual([]);
+  });
+
+  it('⭐ planner 不得直接驱动 webview(它只产数据)', () => {
+    // 填充走既有的 pasteReply(它自己也只填不点),planner 不该碰 webContents
+    expect(
+      /executeJavaScript|webContents|sendInputEvent/.test(PLANNER),
+      'planner 碰了 webview —— 规划与填充必须分开,否则「产草稿」会顺手把内容送出去',
+    ).toBe(false);
+  });
+
+  it('⭐ X_PLAN_REPLIES handler 不得调用 pasteReply(规划 ≠ 填充)', () => {
+    const start = HANDLERS.indexOf('X_PLAN_REPLIES');
+    const body = HANDLERS.slice(start, HANDLERS.indexOf('X_INBOX_QUERY', start));
+    expect(
+      /pasteReply|pasteTweet/.test(body),
+      '规划顺手就填进去了 —— 用户失去逐条过目的机会',
+    ).toBe(false);
+  });
+});
+
+describe('UI:只填不发', () => {
+  it('⭐ 不得有「全部填入/一键全发」这类批量动作', () => {
+    // 逐条过目是这个功能的核心 —— 有了批量按钮,红线形同虚设
+    expect(
+      /全部填入|一键|批量发|fillAll|sendAll|replyAll/i.test(UI),
+      'UI 出现了批量发送入口 —— 逐条过目被绕过',
+    ).toBe(false);
+  });
+
+  it('⭐ UI 必须明示「不会替你点发布」', () => {
+    expect(UI_RAW).toMatch(/不会替你点发布/);
+  });
+
+  it('⭐ 填入后不得自动写 markReplied(填入 ≠ 已发布)', () => {
+    // 填进去你没点发布的话,这条得还能再出现;自动标已回复会让它永远消失
+    expect(
+      /markReplied/.test(UI),
+      '填入即标已回复 —— 没点发布的会被永久漏掉',
+    ).toBe(false);
+  });
+
+  it('⭐ 手改正文不得回写模板库', () => {
+    // 手滑污染模板会影响之后所有回复
+    expect(
+      /REPLY_TEMPLATES\s*[.[]\s*\w*\s*=|\.text\s*=\s*/.test(UI),
+      'UI 在写模板库 —— 手改应只作用于当前这一条',
+    ).toBe(false);
+  });
+
+  it('⭐ 英文文案的待审核提示必须真的渲染出来', () => {
+    expect(UI).toMatch(/needsHumanReview/);
+    expect(UI_RAW).toMatch(/没有语料依据/);
+  });
+
+  it('⭐ 跳过的条目要能展开看原因(不静默丢)', () => {
+    expect(UI).toMatch(/SKIP_LABEL/);
+    for (const k of ['duplicate_text', 'author_recent', 'blocked_author', 'low_confidence']) {
+      expect(UI, `跳过原因 ${k} 没有对应人话`).toContain(k);
+    }
+  });
+
+  it('⭐ 回放失败必须报错,不能留空列表装作「没什么可回的」', () => {
+    // 批量「规划草稿」已删(全局入口),同一条不变量现在落在回放路径上
+    expect(UI_RAW).toMatch(/回放失败/);
+  });
+});
+
+describe('采集必须校验:落对页面 + 正文真含关键词', () => {
+  const SCAN = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
+
+  it('⭐ 必须确认落在搜索页,否则会把首页时间线当搜索结果入库', () => {
+    // 2026-09-07 用户发现:采回来的推大多既不含关键词也不含求助信号
+    expect(SCAN).toMatch(/landedUrl/);
+    expect(SCAN).toMatch(/includes\('\/search'\)/);
+  });
+
+  it('⭐ 正文要过关键词兜底 —— 不能全信 X 搜索', () => {
+    // 此前 applyFilter 完全不校验正文,X 给什么就存什么
+    expect(SCAN).toMatch(/requireKeywords/);
+    expect(SCAN).toMatch(/reason: 'no_keyword'/);
+  });
+
+  it('⭐ 关键词必须按配方给,不能塞进全局 filterConfig', () => {
+    // filterConfig 是所有配方共用的,塞进去会让配方之间互相污染
+    const sched = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-search-scheduler.ts'), 'utf-8');
+    expect(sched).toMatch(/requireKeywords: recipe\.keywords/);
+    const build = sched.slice(sched.indexOf('async function buildFilterConfig'));
+    expect(
+      /requireKeywords/.test(build.slice(0, 300)),
+      'requireKeywords 被塞进全局 buildFilterConfig 了 —— 配方会互相污染',
+    ).toBe(false);
+  });
+
+  it('没声明关键词的配方不该被拦(全量收集场景)', () => {
+    const seg = SCAN.slice(SCAN.indexOf('L5 关键词兜底'));
+    expect(seg.slice(0, 700)).toMatch(/config\.requireKeywords\?\.length/);
+  });
+});
+
+describe('配方选择:跑的是哪条要看得见', () => {
+  const INBOX2 = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+
+  it('⭐ 扫描前必须重拉配方(列表只在挂载时读过一次)', () => {
+    // 用户 2026-09-07:新建了「回国需求」却仍跑成老配方,
+    // X 搜索栏里还是「翻墙」那些词 —— 因为下拉列表里根本没有新配方
+    const fn = INBOX2.slice(INBOX2.indexOf('const startScan = async'));
+    expect(fn.slice(0, 900)).toMatch(/await loadRecipes\(\)/);
+  });
+
+  it('⭐ loadRecipes 要返回最新列表,不能让调用方读旧闭包', () => {
+    // setRecipes 是异步的,同一次调用里读 `recipes` 拿到的还是旧值
+    const fn = INBOX2.slice(INBOX2.indexOf('const loadRecipes = useCallback'));
+    expect(fn.slice(0, 900)).toMatch(/return r\.recipes/);
+  });
+
+  it('⭐ 两个配方下拉必须能区分(筛选 vs 采集)', () => {
+    // 用户 2026-09-07 把「配方」当成了采集用的下拉,调了它却发现
+    // 「搜索栏没变化」,而且各视图全变 0 —— 两个框长得太像、标题太含糊
+    expect(INBOX2).toMatch(/只看某配方的结果/);
+    expect(INBOX2).toMatch(/去 X 抓新数据/);
+  });
+
+  it('⭐ 因筛选导致的空结果要说明原因,不能只显示「暂无推文」', () => {
+    // 否则用户会以为数据丢了(实际库里 6762 条都在)
+    expect(INBOX2).toMatch(/该配方还没采到过数据/);
+    expect(INBOX2).toMatch(/想看全部/);
+  });
+
+  it('⭐ 扫描要报概况,不能只给一个数字', () => {
+    // 用户 2026-09-07:「都是旧的不用入库,又不现实,都以为是不工作哦」
+    // 「扫到的都是旧的」和「压根没扫到」长得一模一样,必须分开报
+    const scan = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
+    expect(scan).toMatch(/duplicates: number/);
+    expect(scan).toMatch(/sinceDate/);
+    expect(INBOX2).toMatch(/早采过/);
+    expect(INBOX2).toMatch(/窗口：/);
+  });
+
+  it('⭐ 要给人话结论,别让用户自己推断数字', () => {
+    // fetched=0 与 saved=0 含义完全不同,得说清楚
+    expect(INBOX2).toMatch(/一条都没扫到/);
+    expect(INBOX2).toMatch(/扫到的都已在库里/);
+  });
+
+  it('⭐ 状态里要写明跑的是哪条配方', () => {
+    // 否则「采集 0 条」看不出是配方选错了还是真没量
+    expect(INBOX2).toMatch(/`「\$\{usedName\}」/);
+  });
+});
+
+describe('回复是逐条的事,不能有全局入口', () => {
+  const INBOX = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+
+  it('⭐ 「送入回复」必须在卡片里、且带上这一条推文', () => {
+    // 用户 2026-09-06:「回复应该是针对每一条推文,而不是总体只有一个 button」
+    expect(INBOX).toMatch(/sendToReply\(t\)/);
+  });
+
+  it('⭐ 顶栏不得再出现批量拟回复入口', () => {
+    // 顶栏那个「✎ 拟回复」正是「总体一个 button」,已删。
+    // ⚠️ 别用「两个标识之间切片」定位顶栏:startScan 在文件里其实**排在
+    //    triggerJudge 前面**,那样切出来是空串,守卫会永远通过(踩过)。
+    //    直接找 setView('drafts') 那颗按钮,检查它的文字。
+    const i = INBOX.indexOf("setView('drafts')");
+    expect(i, "找不到回放入口按钮").toBeGreaterThan(-1);
+    const btn = INBOX.slice(i, INBOX.indexOf('</Btn>', i));
+    expect(
+      /拟回复|规划草稿/.test(btn),
+      `顶栏又出现了批量拟回复 —— 回复应该逐条进行:${btn.trim()}`,
+    ).toBe(false);
+  });
+
+  it('⭐ 回放页不得再有批量规划按钮', () => {
+    expect(
+      /规划草稿|planReplies\(/.test(stripComments(UI_RAW)),
+      '回放页又能批量产草稿了 —— 那就是变相的全局回复入口',
+    ).toBe(false);
+  });
+
+  it('回放页要指明日常回复的正确入口', () => {
+    expect(UI_RAW).toMatch(/送入回复/);
+  });
+});
+
+describe('卡片弹窗:确认后才填,填入不等于发布', () => {
+  it('⭐ 弹窗不得替用户点发布', () => {
+    expect(/\.click\(\)|clickPublish|clickSendButton/.test(DIALOG)).toBe(false);
+    expect(DIALOG_RAW).toMatch(/不会替你发布/);
+  });
+
+  it('⭐ 填入后不得写 markReplied(填入 ≠ 已发布)', () => {
+    // 没点发布的话这条得还能再出现;自动标已回复会让它永久消失
+    expect(/markReplied/.test(DIALOG)).toBe(false);
+  });
+
+  it('⭐ 原推正文必须显示在弹窗里', () => {
+    // 判断「该不该这么回」的依据。看不到原推就是在信息更少的地方做同一个决定
+    expect(DIALOG).toMatch(/tweet\.text/);
+  });
+
+  it('⭐ 填入与跳过都要记学习期反馈', () => {
+    expect(DIALOG).toMatch(/recordFeedback\('filled'/);
+    expect(DIALOG).toMatch(/recordFeedback\('dismissed'/);
+  });
+
+  it('⭐ 被挡掉时要说明原因,不给空框', () => {
+    expect(DIALOG).toMatch(/SKIP_LABEL/);
+    expect(DIALOG_RAW).toMatch(/没有生成回复/);
+  });
+
+  it('⭐ 回落模板时要显示回落原因', () => {
+    expect(DIALOG).toMatch(/fallbackReason/);
+  });
+});
+
+describe('追踪名单 UI', () => {
+  const WL_RAW = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/WatchlistView.tsx'), 'utf-8');
+  const WL = stripComments(WL_RAW);
+
+  it('⭐ UI 必须说清「这不是 X 的关注」', () => {
+    // 设计 §0:混用措辞会让人以为在这里操作会改动 X 上的关注关系
+    expect(WL_RAW).toMatch(/和你在 X 上「关注」谁.{0,10}没有任何关系|不会去关注对方/);
+  });
+
+  it('⭐ 不该逼用户手打 handle —— 要能从已有数据挑', () => {
+    // 用户 2026-09-06:「如果每一个都需要手工输入,不是很麻烦?」
+    // 库里已有 3458 个见过的人 + 「回过谁」的记录,候选本来就在数据里
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    expect(ar).toMatch(/export async function listWatchCandidates/);
+    expect(WL).toMatch(/loadCandidates/);
+  });
+
+  it('⭐ 候选按「回过几次」排,不是按见过条数', () => {
+    // 设计 §1.4:互动是长尾的,价值在少数高频互动者身上
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    const fn = ar.slice(ar.indexOf('export async function listWatchCandidates'));
+    expect(fn).toMatch(/b\.repliedCount - a\.repliedCount/);
+  });
+
+  it('⭐ 候选要排除已在名单/已屏蔽/本人', () => {
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    const fn = ar.slice(ar.indexOf('export async function listWatchCandidates'));
+    expect(fn).toMatch(/watched = true OR blocked = true OR is_self = true/);
+  });
+
+  it('⭐ 已确认推文的作者要能一次性全部建立追踪', () => {
+    // 用户 2026-09-06:「确保已确认的推文中所有的用户都建立追踪关系」
+    // 实测:采纳过的推涉及 498 个作者,而名单当时只有 1 个
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    expect(ar).toMatch(/export async function watchAllAccepted/);
+    expect(WL).toMatch(/watchAccepted/);
+  });
+
+  it('⭐ 批量追踪不得覆盖已屏蔽/已在名单的', () => {
+    // 屏蔽是相反的意志;已手动加的 depth=0 不该被冲成 1
+    const ar = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+    const fn = ar.slice(ar.indexOf('export async function watchAllAccepted'));
+    expect(fn).toMatch(/watched = true OR blocked = true OR is_self = true/);
+  });
+
+  it('⭐ 建议名单要能批量预抓上文', () => {
+    // 用户:「每一个它建议的,都应该获取上下文」——
+    // 上文是①闸门的输入,等点开弹窗才抓意味着每条现等 10s
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    expect(h).toMatch(/X_PREFETCH_CONTEXT/);
+    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'));
+    // 只抓真是回复的,独立推别白跑
+    expect(seg.slice(0, 1600)).toMatch(/in_reply_to_user \|\|/);
+  });
+
+  it('⭐ humanReviewed 只能来自视图,不许写死', () => {
+    // 曾写死 humanReviewed:false → 18 条 worth 全是 human:accept → 匹配 0 条、静默空转。
+    // 现在跟随视图(「已确认」页本就该是 true),但**不许再出现写死的字面量**。
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = stripComments(
+      h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_UPSERT_RECIPE')));
+    expect(seg).toMatch(/typeof p\.humanReviewed === 'boolean'/);
+    expect(
+      /humanReviewed:\s*(true|false)\b/.test(seg),
+      'humanReviewed 又被写死了 —— 会让某些视图整页备不上料',
+    ).toBe(false);
+  });
+
+  it('⭐ 扫到 0 条要明说,不能像正常跑完一样', () => {
+    // 过滤条件写错时界面必须看得出来,否则"成功但没效果"最难查
+    const v = readFileSync(
+      resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+    expect(v).toMatch(/没有可预抓的推文/);
+    expect(v).toMatch(/都是独立求助推/);
+  });
+
+  it('⭐ 上文必须写 x_tweet,不能写 tweet_inbox(那是死表)', () => {
+    // 2026-09-06 踩过:写进 tweet_inbox **不报错也永远读不到**,
+    // 现象是「预抓点了没反应」,查了半天才发现写错表。
+    // 全仓读写都走 x_tweet(upsertTweet/queryInbox 皆是)。
+    const tr = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/tweet-inbox-repo.ts'), 'utf-8');
+    const fn = tr.slice(tr.indexOf('export async function setParentContext'));
+    const code = stripComments(fn);
+    expect(code).toMatch(/UPDATE x_tweet SET parent_text/);
+    expect(/UPDATE tweet_inbox/.test(code), '又写进 tweet_inbox 死表了').toBe(false);
+  });
+
+  it('⭐ 弹窗只用备好的上文,不自己去抓', () => {
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    expect(h).toMatch(/found\.parent_text\s*\n?\s*\?/);
+  });
+
+  it('移出名单的提示要说明历史数据保留', () => {
+    expect(WL_RAW).toMatch(/历史数据保留/);
+  });
+
+  it('统计现算而非读存储字段', () => {
+    // UI 直接用 handler 返回的 stats(那边走 getAuthorStats 现算)
+    expect(WL).toMatch(/w\.stats/);
+  });
+});
+
+describe('人表:见过的人都要留档', () => {
+  const AREPO = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+  const TREPO = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/tweet-inbox-repo.ts'), 'utf-8');
+
+  it('⭐ 采集写推文时必须顺带登记作者', () => {
+    // 用户 2026-09-06 发现:见过 3458 个作者,x_author 只有 36 行 ——
+    // 采集链路从不写人表,只有「对某人动作」才建行
+    expect(TREPO).toMatch(/registerSeenAuthor/);
+    const fn = TREPO.slice(TREPO.indexOf('export async function upsertTweet'));
+    expect(fn.slice(0, 900)).toMatch(/registerSeenAuthor/);
+  });
+
+  it('⭐ 登记不得覆盖已有行的意志字段', () => {
+    // 这个人可能已被 blocked/watched,采到他新推不该把那些清掉
+    const fn = AREPO.slice(AREPO.indexOf('export async function registerSeenAuthor'));
+    const body = fn.slice(0, fn.indexOf('\n}\n') + 2);
+    const updateSeg = body.slice(body.indexOf('UPDATE x_author'));
+    expect(/blocked\s*=|watched\s*=|is_self\s*=/.test(updateSeg.slice(0, 300)),
+      '登记时动了意志字段 —— 会把屏蔽/追踪状态冲掉').toBe(false);
+  });
+
+  it('⭐ 登记只写标识,不写计数字段', () => {
+    // 设计 §4.1(4):seen_count/replied_count 是可重算的第三层属性
+    const fn = AREPO.slice(AREPO.indexOf('export async function registerSeenAuthor'));
+    expect(/seen_count|replied_count|accepted_count/.test(fn.slice(0, 1500)),
+      '计数字段混进登记了 —— 会有与真实数据不同步的老问题').toBe(false);
+  });
+
+  it('⭐ 登记失败不能拦住推文入库', () => {
+    // 推文是主数据,人表是派生登记
+    const fn = TREPO.slice(TREPO.indexOf('export async function upsertTweet'));
+    expect(fn.slice(0, 900)).toMatch(/catch/);
+  });
+
+  it('⭐ 回填迁移不能用那条静默失败的纯 SQL', () => {
+    // 实测:FOR ... IN array::distinct(...) 对 6762 行返回空响应、
+    // 一行没建、且不报错。改成 GROUP BY + 分批。
+    const schema = readFileSync(
+      resolve(__dirname, '../../src/storage/surreal/x-schema.ts'), 'utf-8');
+    const fn = schema.slice(schema.indexOf('export async function x_migration_1_1_4'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    expect(body).toMatch(/GROUP BY author_handle/);
+    // 只看代码:注释里正解释着为什么不用它,别自己撞上
+    expect(/array::distinct/.test(stripComments(body)),
+      '又用回那条静默失败的写法了').toBe(false);
+  });
+});
+
+describe('追踪名单(watchlist)', () => {
+  const REPO = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+  const HAND = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+
+  it('⭐ 措辞:代码里不许把追踪叫「关注」(会和 X 的 follow 混淆)', () => {
+    // 设计文档 §0 明令。混用会让人以为改这里会动 X 上的关注关系。
+    const code = stripComments(REPO) + stripComments(HAND);
+    const bad = [...code.matchAll(/关注(名单|列表|某人|了他)/g)].map((m) => m[0]);
+    expect(bad, `出现了「关注」措辞:${bad.join(',')}`).toEqual([]);
+  });
+
+  it('⭐ 移出名单只清标记,绝不删行', () => {
+    // 同一行还挂着 blocked / 画像计数 / is_self,删行会连带丢掉别的意志
+    const fn = REPO.slice(REPO.indexOf('export async function unwatchAuthor'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    expect(body).toMatch(/UPDATE x_author SET watched = false/);
+    expect(/DELETE/.test(body), 'unwatch 在删行 —— 会丢掉同一行上的其它意志').toBe(false);
+  });
+
+  it('⭐ 追踪与屏蔽互斥 —— 加入追踪要清掉 blocked', () => {
+    // 两个都为 true 是矛盾状态,不能留给查询端各自解释
+    const fn = REPO.slice(REPO.indexOf('export async function watchAuthor'));
+    expect(fn.slice(0, fn.indexOf('\n}'))).toMatch(/blocked = false/);
+  });
+
+  it('⭐ 统计按需聚合,不在 x_author 存计数字段', () => {
+    // 设计 §4.1(4):那些是第三层计算属性,混进「人」表是层次不清,
+    // 且计数字段与真实数据不同步是最常见的 bug 源
+    expect(REPO).toMatch(/export async function getAuthorStats/);
+    const schema = readFileSync(
+      resolve(__dirname, '../../src/storage/surreal/x-schema.ts'), 'utf-8');
+    const seg = schema.slice(schema.indexOf('DEFINE TABLE IF NOT EXISTS x_author'),
+      schema.indexOf('DEFINE TABLE IF NOT EXISTS x_tweet'));
+    expect(/seen_count|replied_count|accepted_count/.test(seg),
+      '计数字段又混进 x_author 了 —— 那是可重算的第三层属性').toBe(false);
+  });
+
+  it('⭐ n=1 自动入列只在真回复时触发,dismissed 不入列', () => {
+    // dismissed 表示「这条不该回」,不该因此追踪这个人
+    const seg = HAND.slice(HAND.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/action !== 'dismissed'[\s\S]{0,200}watchAuthor/);
+  });
+
+  it('⭐ n≥2 不实现(设计 §3.4:先看清 n=1 的真实规模)', () => {
+    // 预先实现会爆炸,门槛得看真实数据说话
+    expect(REPO).toMatch(/n≥2\s*\*\*不实现\*\*|n≥2.{0,10}不实现/);
+  });
+
+  it('⭐ 必须用 filter:replies —— include:replies 实测无效(返回 0 条)', () => {
+    // 2026-09-06 实机 spike:
+    //   from:x                    12 条/回复 11
+    //   from:x include:replies     0 条/回复  0  ← X 已不支持,静默返回空
+    //   from:x filter:replies     22 条/回复 22  ← 有效
+    const scan = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-scan.ts'), 'utf-8');
+    const code = stripComments(scan);
+    expect(code).toMatch(/parts\.push\('filter:replies'\)/);
+    expect(
+      /parts\.push\('include:replies'\)/.test(code),
+      'include:replies 实测会把结果打成 0 条(不报错) —— 别改回去',
+    ).toBe(false);
+  });
+});
+
+describe('账号画像:去挖事实,不靠猜', () => {
+  const PROFILE = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-author-profile.ts'), 'utf-8');
+  const FACTS = readFileSync(
+    resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+
+  it('⭐ 必须真的采账号载荷,不能只读库', () => {
+    // 用户 2026-09-06:「你的逻辑限制在现有数据,而不是去挖掘事实」
+    // 能力勘查 §2.4 早已实测 UserByScreenName 带全部画像字段
+    expect(PROFILE).toMatch(/UserByScreenName/);
+    expect(PROFILE).toMatch(/saveAuthorCounts/);
+  });
+
+  it('⭐ 解析不得写死响应路径(改版会静默取不到)', () => {
+    expect(PROFILE).toMatch(/findUserResult/);
+    // 只看代码:注释里正解释着「不要写死 data.user.result」,别自己撞上
+    expect(
+      /data\.user\.result/.test(stripComments(PROFILE)),
+      '写死路径了 —— X 改版后会静默返回 undefined',
+    ).toBe(false);
+  });
+
+  it('⭐ 采不到必须报错,不能返回空画像', () => {
+    // 空画像会被下游当成「这人没粉丝、刚注册」,比没有更糟
+    expect(PROFILE).toMatch(/未截获/);
+    const fn = PROFILE.slice(PROFILE.indexOf('export async function harvestAuthorProfile'));
+    expect(fn).toMatch(/if \(!profile\)[\s\S]{0,120}error/);
+  });
+
+  it('⭐ 不许 detach —— 通道由底座独占,业务方掐不断别人的监听', () => {
+    // 迁移前(步 6a 之前)这里守的是 `if (attached)`,即「只 detach 自己 attach 的」。
+    // ⚠️ 但那**只防住一半**:它防的是「本函数掐掉先来的人」,
+    // 没防「本函数先 attach、别人后共用,本函数结束时把别人一起掐掉」——
+    // 而后者才是 x/refactor-02 §3.3 记的那个 bug,且**顺序一换就中招**
+    // (可执行复现见 tests/web-capability/x-cdp-order-dependence.test.ts)。
+    //
+    // 迁移后载荷捕获走 web.net 的单一持有者模型:业务方**没有 detach 这个动作**,
+    // 于是「谁先谁后」不再是变量 —— 这个 bug 在结构上消失,而不是被小心避开。
+    // 故守卫从「小心地 detach」升级为「根本没有 detach」。
+    expect(PROFILE).not.toMatch(/debugger\s*\.\s*detach/);
+    expect(PROFILE).not.toMatch(/debugger\s*\.\s*attach/);
+    expect(PROFILE).toMatch(/captureXPayloads/);
+  });
+
+  it('⭐ 有资料就用资料判断,没资料才退回看正文', () => {
+    expect(FACTS).toMatch(/posterBlock/);
+    expect(FACTS).toMatch(/已查证|verified, you may rely/);
+    expect(FACTS).toMatch(/未采集到|not collected/);
+  });
+
+  it('⭐ 画像采集失败不能拦住回复', () => {
+    // 拿不到资料就不给回复,是因小失大;没资料时模型会倾向 unclear,那是诚实降级
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PLAN_ONE_REPLY'), h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/不拦回复|不拦住回复/);
+  });
+
+  it('画像有新鲜度概念(粉丝数会变)', () => {
+    expect(PROFILE).toMatch(/PROFILE_STALE_HOURS/);
+  });
+});
+
+describe('推断链留档(回归分析的依据)', () => {
+  it('⭐ 三步都要输出:作者判断 / 因由 / 正文', () => {
+    // 用户 2026-09-06:只记正文的话,回错了无法定位是哪一步坏的
+    const facts = readFileSync(
+      resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+    const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
+    for (const k of ['posterKind', 'posterRead', 'trigger']) {
+      expect(fn, `prompt 里少了 ${k}`).toContain(k);
+    }
+  });
+
+  it('⭐ prompt 必须允许并鼓励 unclear(不许猜)', () => {
+    // 库里没有账号资料,判不出来就该说判不出来
+    const facts = readFileSync(
+      resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+    const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
+    expect(fn).toMatch(/unclear/);
+    expect(fn).toMatch(/不要猜|rather than guessing/);
+  });
+
+  it('⭐ posterKind 越界值必须归 unclear,不能勉强塞进某一类', () => {
+    expect(PLANNER).toMatch(/KINDS\.includes/);
+    expect(PLANNER).toMatch(/: 'unclear'/);
+  });
+
+  it('⭐ 推断链必须落库(否则谈不上事后回归)', () => {
+    const repo = readFileSync(
+      resolve(__dirname, '../../src/platform/main/db/x-reply-feedback-repo.ts'), 'utf-8');
+    for (const k of ['poster_kind', 'poster_read', 'trigger', 'ai_reason', 'in_thread']) {
+      expect(repo, `落库字段少了 ${k}`).toContain(k);
+    }
+    // 弹窗要真的把它传上去,否则字段永远是空的
+    expect(DIALOG).toMatch(/poster_kind:\s*draft\.trace\?\.posterKind/);
+  });
+
+  it('⭐ 不回的理由也要带推断链(为什么没回同样要能复查)', () => {
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    const seg = fn.slice(fn.indexOf('if (!parsed?.worth)'));
+    expect(seg.slice(0, 600)).toMatch(/trace\.posterKind/);
+  });
+
+  it('⭐ UI 必须区分「有账号资料」和「只读正文猜的」', () => {
+    // 2026-09-06:画像采集修好后,那句「库里没存粉丝数」的免责声明就过时了 ——
+    // 有依据的判断和纯猜长得一样,反而误导人。改为按 hasAccountFacts 分支。
+    expect(DIALOG).toMatch(/hasAccountFacts/);
+    expect(DIALOG_RAW).toMatch(/有账号资料撑着/);
+    expect(DIALOG_RAW).toMatch(/只读正文/);
+    expect(DIALOG).toMatch(/POSTER_LABEL/);
+  });
+
+  it('⭐ hasAccountFacts 必须真的反映有没有资料,不能写死', () => {
+    expect(PLANNER).toMatch(/hasAccountFacts:\s*!!ctx\.posterFacts/);
+  });
+});
+
+describe('ref 归因不许猜', () => {
+  it('⭐ 取不到本 ws 账号必须 throw,不能兜底成默认账号', () => {
+    // 2026-09-06 实测:20 条回复里 7 条来自未登记账号的 ws-1,
+    // 旧代码默默用 'netlab2gfw' —— 这次侥幸对了(ws-1 登的正好是它),
+    // 但若登的是 otun_myvpn,那 7 条就归错账且**数据上看不出来**。
+    expect(PLANNER).toMatch(/function requireSelfHandle/);
+    expect(
+      /selfHandle \?\? '[a-z0-9_]+'/.test(stripComments(PLANNER)),
+      '又出现了默认账号兜底 —— ref 会静默归错账',
+    ).toBe(false);
+  });
+
+  it('⭐ 错误信息要直接给出修法,别让人猜', () => {
+    const fn = PLANNER.slice(PLANNER.indexOf('function requireSelfHandle'));
+    expect(fn.slice(0, 900)).toMatch(/识别我的账号/);
+  });
+
+  it('显式传 ref 时不需要 selfHandle(回放路径)', () => {
+    // 回放用固定 ref=tw_replay,不该被这条守卫拦住
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    expect(fn).toMatch(/ctx\.ref\?\.trim\(\) \|\| buildRef/);
+  });
+});
+
+describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
+  const H2 = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+  const V2 = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/XInboxView.tsx'), 'utf-8');
+  const D2 = readFileSync(
+    resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+
+  it('⭐ 采集与研判分开:点开弹窗只读库,不现采', () => {
+    // 用户 2026-09-06:「点『预取资料』时先读取当前页面的用户资料和上下文,
+    //   然后在用户点『送入回复』时开始研判并生成回复片段」
+    // 现采还会把 X 页面导走,把用户正在看的东西弄没
+    const seg = H2.slice(H2.indexOf('X_PLAN_ONE_REPLY'), H2.indexOf('X_REPLY_FEEDBACK'));
+    const code = stripComments(seg);
+    expect(
+      /harvestAuthorProfile\(/.test(code),
+      '弹窗路径又现采画像了 —— 该在「预取资料」时备好',
+    ).toBe(false);
+    expect(
+      /fetchParentTweet\(/.test(code),
+      '弹窗路径又现抓上文了 —— 该在「预取资料」时备好',
+    ).toBe(false);
+  });
+
+  it('⭐ 没备料时要说清楚怎么补,并给重试入口', () => {
+    expect(H2).toMatch(/点「🧵 预取资料」/);
+    expect(D2).toMatch(/profileError/);
+    expect(D2).toMatch(/重新采集并生成/);
+  });
+
+  it('⭐ 重试要说明什么情况下重试有用', () => {
+    // 别让人对着按钮乱点:网络慢重试有用,私密号重试没用
+    expect(D2).toMatch(/网络慢.*重试有用|重试有用/);
+  });
+
+  it('⭐ 连续采不到要告警(机制坏了 vs 个别账号)', () => {
+    // 连着一串失败多半是 X 改版让载荷截不到,
+    // 这时继续默默出草稿,用户会毫不知情地连发一堆弱判断
+    expect(H2).toMatch(/mechanismSuspect/);
+    expect(H2).toMatch(/maxConsecutive >= 5/);
+    expect(V2).toMatch(/画像采集可能已失效/);
+  });
+
+  it('⭐ 预取口径必须与列表一致 —— 不按 wsId 过滤', () => {
+    // 用户 2026-09-07 撞上:屏幕上「Gemma建议 67」,点预取却说「没有可预抓的推文」。
+    // 真因:收件箱列表**不按 ws 过滤**(loadPage 与侧栏计数都没传 wsId),
+    // 而预取按 ws 过滤 —— ws-1 的 worth 是 0,ws-2 才有 69。
+    // 口径必须与用户看到的一致:他在这一页看到谁,就给谁备料。
+    const seg = stripComments(
+      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE')));
+    expect(
+      /wsId: p\.wsId/.test(seg),
+      '预取又按 wsId 过滤了 —— 会出现「屏幕上有、预取说没有」',
+    ).toBe(false);
+  });
+
+  it('⭐ 预取必须跟随当前视图,不能写死 status=worth', () => {
+    // 用户 2026-09-06 发现的矛盾:侧栏说「本页资料已备齐」(那是 Gemma建议 页),
+    // 而他在「漏判抽查」(status='skip')里打开一条,弹窗说「还没采过画像」。
+    // 两句都没说谎 —— 预取根本没覆盖他正在看的那一页。
+    const seg = stripComments(
+      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE')));
+    expect(seg, '预取没接受调用方的 status').toMatch(/typeof p\.status === 'string'/);
+    // 「全部」视图用 statuses(复数),只认 status 会静默退回 worth
+    expect(seg, '没处理 statuses 复数 —— 「全部」视图会备不上料').toMatch(/Array\.isArray\(p\.statuses\)/);
+    expect(V2, '前端没把当前视图的查询条件传下去').toMatch(/VIEW_QUERY\[currentView\]/);
+  });
+
+  it('⭐ 状态提示要说清是哪个视图,否则又会串台', () => {
+    expect(V2).toMatch(/VIEW_ITEMS\.find/);
+  });
+
+  it('⭐ 预取必须按当前页取(操作纪律:先把这页备齐再回复)', () => {
+    // 用户 2026-09-06:「在处理一页时先采集,完毕再回复,这样可靠性更高」
+    // 我曾改成「一次扫全部不按页」——把他的问题误解成"怎么少点几次",方向反了
+    // ⚠️ 只看代码:注释里正解释着 offset,别自己撞上(踩过一次:
+    //    注入「不按页」后守卫居然全绿,就是因为匹配到了注释)
+    const seg = stripComments(
+      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE')));
+    expect(seg, '画像预取没按页取').toMatch(/limit: pageSize, offset/);
+    expect(
+      /limit: 5000/.test(seg),
+      '又改成一次扫全部了 —— 那样「先把这页备齐」就不成立',
+    ).toBe(false);
+    expect(V2).toMatch(/page \* PAGE_SIZE/);
+  });
+
+  it('⭐ 本页的人要全部采完,不能设预算上限', () => {
+    // 设了上限「先采完再回复」就不成立了
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE'));
+    expect(seg).toMatch(/const budget = handles\.length/);
+  });
+
+  it('⭐ 上文预抓同样按页,且不重抓已有的', () => {
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_CONTEXT'), H2.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/offset:/);
+    expect(seg).toMatch(/!t\.parent_text/);
+  });
+
+  it('⭐ 完成后要明确报「本页备齐了没有」', () => {
+    // 缺口必须在动手**之前**暴露,而不是回到一半才发现
+    expect(V2).toMatch(/本页资料已备齐/);
+    expect(V2).toMatch(/有缺口/);
+  });
+
+  it('⭐ 已有新鲜画像的不重复采(别白跑导航)', () => {
+    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE'));
+    expect(seg).toMatch(/if \(fresh\) \{ cached \+= 1/);
+  });
+});
+
+describe('驱动 webview 的路径都要显式传 wcId', () => {
+  // ⚠️ 这个坑 2026-09-06 一天踩了两次(spike、画像采集):
+  //    不传 wcId → resolveXWebContents 回退到「登记表」,
+  //    而登记表只在 X 视图**挂载时**才有值 —— 用户停在收件箱页面时它是空的,
+  //    于是静默失败(画像采不到、上文抓不到),而界面毫无异常。
+  //    实测后果:全库 3458 个作者只有 1 个采到画像。
+  const H = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+
+  it('⭐ 预取路径必须用调用方传的 wcId,不能传 undefined', () => {
+    // 不传 → 回退到只在 X 视图挂载时才有值的登记表 → 静默失败
+    expect(H).toMatch(/harvestAuthorProfile\(h, wcId/);
+    expect(
+      /harvestAuthorProfile\([^,)]+,\s*undefined/.test(stripComments(H)),
+      '画像采集又传 undefined 了 —— 会静默采不到',
+    ).toBe(false);
+  });
+
+  it('⭐ 预取抓父推同样要传 wcId', () => {
+    const seg = H.slice(H.indexOf('X_PREFETCH_CONTEXT'), H.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/wcId, 10_000/);
+  });
+
+  it('⭐ 弹窗必须把 wcId 传下去', () => {
+    const d = readFileSync(
+      resolve(__dirname, '../../src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+    expect(d).toMatch(/planOneReply\(workspaceId, tweet\.tweet_id, wcId\)/);
+  });
+});
+
+describe('② 关系视角(活跃度信号)', () => {
+  const AR = readFileSync(
+    resolve(__dirname, '../../src/platform/main/db/x-author-repo.ts'), 'utf-8');
+  const PROF = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-author-profile.ts'), 'utf-8');
+  const FCT = readFileSync(
+    resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+
+  it('⭐ 载荷里的关系视角必须落库(此前采到了没用上)', () => {
+    // 用户 2026-09-06:「账户关联关系不是在爬下来的数据都有吗?只是如何触发」
+    expect(PROF).toMatch(/relationship_perspectives/);
+    expect(AR).toMatch(/follows_me = \$fm/);
+  });
+
+  it('⭐ 写进去的字段必须能读回来(否则缓存路径静默丢信号)', () => {
+    // 漏读会让「现采的有、读缓存的没有」,两次判断不一致且查不出原因
+    const g = AR.slice(AR.indexOf('export async function getAuthorCounts'));
+    for (const k of ['follows_me', 'i_follow', 'bio', 'is_blue_verified']) {
+      expect(g.slice(0, 1400), `getAuthorCounts 漏读 ${k}`).toContain(k);
+    }
+  });
+
+  it('⭐ X 上的拉黑与本 app 的屏蔽必须分开', () => {
+    // blocked = 我们的屏蔽意志;x_blocking = X 上的真实拉黑状态。两码事
+    expect(AR).toMatch(/x_blocking/);
+    const schema = readFileSync(
+      resolve(__dirname, '../../src/storage/surreal/x-schema.ts'), 'utf-8');
+    expect(schema).toMatch(/DEFINE FIELD IF NOT EXISTS x_blocking/);
+  });
+
+  it('⭐ 关系信号要进 prompt', () => {
+    expect(FCT).toMatch(/followsMe/);
+    expect(FCT).toMatch(/they follow us|他关注了我们/);
+  });
+});
+
+describe('① 上文闸门(链条第一步)', () => {
+  const FACTS2 = readFileSync(
+    resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+
+  it('⭐ 上文必须进 prompt', () => {
+    // 用户 2026-09-06:「先追踪这个帖子的上一层的内容(确保它和 VPN 相关)」
+    expect(FACTS2).toMatch(/function contextBlock/);
+    const fn = FACTS2.slice(FACTS2.indexOf('export function buildSingleReplyPrompt'));
+    expect(fn.slice(0, 600)).toMatch(/contextBlock\(lang, parent, isReply\)/);
+  });
+
+  it('⭐ threadRelevant=false 必须由**代码**强制拦下,不能只在 prompt 里说', () => {
+    // 实测(2026-09-06):只在 prompt 写「无关就判 worth=false」,
+    // 模型照回不误(游戏楼里那条 worth 仍是 true)。
+    // 拆成显式字段 + 代码强制才真的拦得住。
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    expect(fn).toMatch(/threadRelevant === false/);
+    // 而且必须排在 worth 判断**之前**,否则先被 worth 放行就晚了
+    const gate = fn.indexOf('threadRelevant === false');
+    const worth = fn.indexOf('if (!parsed?.worth)');
+    expect(gate > -1 && gate < worth, '闸门排在 worth 之后 —— 拦不住').toBe(true);
+  });
+
+  it('⭐ 上文取不到时要让模型知道「没看到」而非「没有」', () => {
+    // 编一个空上文冒充「上文是空的」会让模型放心大胆地回
+    expect(FACTS2).toMatch(/could not be fetched|上文没取到/);
+  });
+
+  it('⭐ 预取只对真的是回复的推抓上文(独立推别白跑导航)', () => {
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_PREFETCH_PROFILES'));
+    expect(seg).toMatch(/in_reply_to_user \|\|/);
+  });
+
+  it('⭐ 抓父推只读,不点任何东西', () => {
+    const pt = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-parent-tweet.ts'), 'utf-8');
+    expect(/\.click\(\)/.test(stripComments(pt))).toBe(false);
+  });
+
+  it('⭐ 抓不到父推返回 null,不返回空壳', () => {
+    const pt = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-parent-tweet.ts'), 'utf-8');
+    expect(pt).toMatch(/if \(!text\) return null/);
+  });
+
+  it('⭐ DOM 提取器不许再用 socialContext 当回复关系', () => {
+    // 那是「xx 转推了/已置顶」横幅,取它导致 in_reply_to 长期恒空,
+    // 而现象与「这些推本来就没父推」一模一样,极易被当成事实
+    const ex = readFileSync(
+      resolve(__dirname, '../../src/platform/main/tweet-fetcher/extract-script.ts'), 'utf-8');
+    const code = stripComments(ex);
+    const seg = code.slice(code.indexOf('inReplyToUser') - 800, code.indexOf('inReplyToUser') + 200);
+    expect(/socialContext/.test(seg), 'socialContext 又被当成回复关系了').toBe(false);
+    expect(ex).toMatch(/Replying to/);
+  });
+});
+
+describe('上下文缺失要让用户知道', () => {
+  it('⭐ 生成只喂正文 —— 这是事实,别假装喂了上下文', () => {
+    // 现状:{ role: 'user', content: tweet.text }。没有父推/会话串。
+    // 这条守卫不是禁止改进,是钉住「现状必须与 UI 提示一致」——
+    // 哪天真喂了上下文,这里会红,提示语也该跟着改。
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    expect(fn).toMatch(/content:\s*tweet\.text/);
+  });
+
+  it('⭐ 串内回复必须能认出来 —— 不能只信 in_reply_to 字段', () => {
+    // 实测:search 采集的 3782 条里只有 48 条有关系字段。
+    // 只信字段 = 永远判 false = 提示形同虚设。必须有正文形态兜底。
+    expect(isInThread({ in_reply_to: '123', text: '随便' })).toBe(true);
+    expect(isInThread({ text: '@someone 你说的那个梯子叫啥' })).toBe(true);
+    expect(isInThread({ text: '  @a @b 我也想知道' })).toBe(true);
+    // 独立求助推不该被误标(否则每条都弹警告 = 提示失效)
+    expect(isInThread({ text: '大家有没有好用的VPN推荐' })).toBe(false);
+    expect(isInThread({ text: 'anyone know a good VPN? mine keeps dropping' })).toBe(false);
+  });
+
+  it('⭐ 弹窗必须显示这个警告', () => {
+    expect(DIALOG).toMatch(/draft\.inThread/);
+    expect(DIALOG_RAW).toMatch(/没有上文/);
+  });
+
+  it('⭐ inThread 必须真的算出来,不能恒 false', () => {
+    // 写死 false 会让守卫全绿而提示永不出现
+    expect(PLANNER).toMatch(/inThread:\s*isInThread\(/);
+    expect(/inThread:\s*false/.test(PLANNER), 'inThread 被写死了').toBe(false);
+  });
+});
+
+describe('单条路径的延迟约束', () => {
+  it('⭐ 单条必须一次问完(判断+生成合并),不能两趟串行', () => {
+    // 用户 2026-09-06「生成很慢」:两趟串行是主因(~27s 热启动)
+    expect(PLANNER).toMatch(/buildSingleReplyPrompt/);
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    const calls = [...fn.matchAll(/await callOllama/g)];
+    expect(calls.length, `planOneReply 里有 ${calls.length} 次模型调用,应该只有 1 次`).toBe(1);
+  });
+
+  it('⭐ 单条契约必须是对象,不能用数组', () => {
+    // 实测:数组 grammar 让模型难判何时收尾 —— 11-36s 且方差极大;
+    // 对象稳定 6-7s。这不是风格问题,是实测出来的性能差异。
+    const facts = readFileSync(
+      resolve(__dirname, '../../src/shared/types/x-reply-facts.ts'), 'utf-8');
+    const fn = facts.slice(facts.indexOf('export function buildSingleReplyPrompt'));
+    expect(fn).toMatch(/JSON 对象|JSON object/);
+    expect(/输出 JSON 数组|Output a JSON array/.test(fn.slice(0, fn.indexOf('\n}'))), 
+      '单条 prompt 又要求数组了 —— 会慢 2-5 倍').toBe(false);
+  });
+
+  it('⭐ 不得用 num_predict 提速(会变成静默截断)', () => {
+    // 实测:200/300/400 三档模型把预算烧光返回**空串**,512 时灵时不灵。
+    // 那是把「慢」换成「悄悄发不出去」,比慢严重得多。
+    const all = PLANNER + readFileSync(
+      resolve(__dirname, '../../src/platform/main/local-llm/ollama-client.ts'), 'utf-8');
+    expect(/num_predict/.test(all), 'num_predict 是陷阱,见 x-reply-facts 顶部说明').toBe(false);
+  });
+
+  it('⭐ 前置规则必须在模型调用之前(挡掉的连推理时间都不花)', () => {
+    const fn = PLANNER.slice(PLANNER.indexOf('export async function planOneReply'));
+    const dup = fn.indexOf("skip('duplicate_text'");
+    const model = fn.indexOf('await callOllama');
+    expect(dup).toBeGreaterThan(-1);
+    expect(dup < model, '前置规则跑到模型后面了 —— 白白花掉推理时间').toBe(true);
+  });
+
+  it('⭐ handler 的取数必须并行(三次 5000 行串行是实测耗时点)', () => {
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_PLAN_ONE_REPLY'), h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/await Promise\.all\(\[/);
+  });
+});
+
+describe('学习期判据', () => {
+  it('⭐ edited 必须由主进程判定,不信 renderer', () => {
+    // 这是判据的分子 —— renderer 传错(或被改)会让「原样通过率」失真
+    const h = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
+    const seg = h.slice(h.indexOf('X_REPLY_FEEDBACK'));
+    expect(seg).toMatch(/edited:\s*p\.final_text\.trim\(\) !== p\.ai_text\.trim\(\)/);
+  });
+
+  it('⭐ 通过率必须分语言算', () => {
+    // 合起来算会让样本多的一边淹掉另一边,得出「整体达标」的假结论
+    expect(REPO_RAW).toMatch(/for \(const lang of \['zh', 'en'\]/);
+  });
+
+  it('⭐ 只统计 filled,dismissed 不算进通过率', () => {
+    // dismissed = 这条根本不该回,是判断层的问题,不是「写得好不好」
+    expect(REPO_RAW).toMatch(/action = 'filled'/);
+  });
+
+  it('⭐ 少样本只取原样通过的例子', () => {
+    // 用户改过的说明 AI 那版不够好,拿它当范例是在教模型重复被否决的写法
+    const seg = REPO_RAW.slice(REPO_RAW.indexOf('getApprovedExamples'));
+    expect(seg).toMatch(/edited = false/);
+  });
+
+  it('⭐ 通过率的分子必须是 edited=false(分母是全部 filled)', () => {
+    // 差点踩到:注入实验误把分子的 edited=false 去掉,
+    // 两条 count 变成一样 → 通过率恒 100% → **门槛永远"达标"**,
+    // 而且看不出异常。这条守卫就是钉这个。
+    const seg = REPO_RAW.slice(REPO_RAW.indexOf('export async function getReadiness'));
+    const sql = seg.slice(seg.indexOf('`'), seg.indexOf('`', seg.indexOf('`') + 1));
+    const lines = sql.split(';').filter((x) => x.includes('count()'));
+    expect(lines.length, '应有两条 count:分母(全部 filled)与分子(未改动)').toBe(2);
+    expect(lines[0].includes('edited'), '分母不该带 edited 条件').toBe(false);
+    expect(lines[1].includes('edited = false'), '分子必须只数未改动的').toBe(true);
+  });
+
+  it('放手门槛是可调常量,不是埋在逻辑里的魔数', () => {
+    expect(REPO_RAW).toMatch(/AUTO_REPLY_MIN_SAMPLES\s*=\s*\d+/);
+    expect(REPO_RAW).toMatch(/AUTO_REPLY_MIN_PASS_RATE\s*=\s*[\d.]+/);
+  });
+});
+
+describe('正文只来自模板库', () => {
+  it('⭐ 判断 prompt 只判该不该回,不掺正文/模板字段', () => {
+    // 判断与生成是两次调用、两份 prompt。判断这次只要 reply/confidence/reason
+    const promptStart = PLANNER.indexOf('REPLY_SYSTEM_PROMPT');
+    const prompt = PLANNER.slice(promptStart, PLANNER.indexOf('`;', promptStart));
+    expect(prompt).toMatch(/你不生成任何回复正文/);
+    expect(prompt).not.toMatch(/"template"\s*:/);
+  });
+
+  it('⭐ 模板选择仍不问模型(一致率 37%,语料本身无信号)', () => {
+    const pick = PLANNER.slice(PLANNER.indexOf('export function pickTemplate'));
+    const body = pick.slice(0, pick.indexOf('\n}'));
+    expect(/decision|verdict|ollama/i.test(body)).toBe(false);
+  });
+
+  it('⭐ 生成的正文必须过校验才用(校验不过一律回落,不硬发)', () => {
+    // link_altered 尤其隐蔽:发出去看不出异常,但那次点击永远归不了因
+    expect(PLANNER).toMatch(/verifyGeneratedReply/);
+    const gen = PLANNER.slice(PLANNER.indexOf('for (const raw of items2)'));
+    const body = gen.slice(0, gen.indexOf('\n    }\n  }'));
+    expect(
+      /if \(bad\)[\s\S]{0,200}continue/.test(body),
+      '校验结果没有拦住写入 —— 不合格正文会被当成合格发出去',
+    ).toBe(true);
+  });
+
+  it('⭐ 回落模板必须留原因(否则发现不了「校验一直在拦」)', () => {
+    expect(PLANNER).toMatch(/fallbackReason/);
+    expect(PLANNER).toMatch(/回落模板/);
+  });
+
+  it('⭐ 模板仍是兜底路径,不能被删掉', () => {
+    // 模型挂了/Ollama 不在时还得能发,回落是保底不是摆设
+    expect(PLANNER).toMatch(/renderTemplate\(tpl, ref\)/);
+    expect(PLANNER).toMatch(/source = 'template'/);
+  });
+
+  it('模板库非空,且每个模板都有正文', () => {
+    expect(REPLY_TEMPLATES.length).toBeGreaterThan(0);
+    for (const t of REPLY_TEMPLATES) {
+      expect(t.text.trim().length, `模板 ${t.id} 正文为空`).toBeGreaterThan(0);
+    }
+  });
+
+  it('⭐ 模板正文不得自带 @提及(X 回复框会自动带,重复会变 @@xxx)', () => {
+    for (const t of REPLY_TEMPLATES) {
+      expect(/^@\w+/.test(t.text.trim()), `模板 ${t.id} 自带了 @提及`).toBe(false);
+    }
+  });
+
+  it('getTemplate 对未知 id 必须 throw(不静默回退第一个模板)', () => {
+    // 静默回退 = 发错内容出去才发现
+    expect(() => getTemplate('nope' as never)).toThrow();
+  });
+
+  it('⭐ 模板里不得残留 X 的 t.co 短链', () => {
+    // t.co 是 X 发布时生成的包装,硬编码它 = 丢掉 ref 统计参数,
+    // 且指向一条我们控制不了也更新不了的跳转
+    for (const t of REPLY_TEMPLATES) {
+      expect(hasStaleShortLink(t), `模板 ${t.id} 还带着 t.co 短链`).toBe(false);
+    }
+  });
+});
+
+describe('事实清单与生成校验', () => {
+  const LINK = 'https://situstechnologies.com/x?ref=tw_t&lang=zh&v=6';
+
+  it('⭐ 链接必须逐字存在 —— 缺了/改了都要拦', () => {
+    // 链接是统计资产:模型改一个字符不报错、发出去看不出来,
+    // 但那次点击永远归不了因。这条不能靠模型自觉。
+    expect(verifyGeneratedReply(`试试这个 ${LINK}`, LINK)).toBeNull();
+    expect(verifyGeneratedReply('试试这个吧', LINK)).toBe('link_missing');
+    expect(verifyGeneratedReply(
+      '试试 https://situstechnologies.com/x?ref=CHANGED&lang=zh&v=6', LINK)).toBe('link_altered');
+  });
+
+  it('⭐ 最高级/稳定性承诺必须拦(外语实测踩过)', () => {
+    // 俄语加过「稳定运行」、波斯语加过「最佳选择」
+    expect(verifyGeneratedReply(`本产品稳定运行 ${LINK}`, LINK)).toBe('superlative');
+    expect(verifyGeneratedReply(`这是最佳选择 ${LINK}`, LINK)).toBe('superlative');
+    expect(verifyGeneratedReply(`the best option ${LINK}`, LINK)).toBe('superlative');
+  });
+
+  it('⭐ 自带 @提及要拦(X 会再带一次 → @@xxx)', () => {
+    expect(verifyGeneratedReply(`@someone 试试 ${LINK}`, LINK)).toBe('has_mention');
+  });
+
+  it('空正文与超长要拦', () => {
+    expect(verifyGeneratedReply('', LINK)).toBe('empty');
+    expect(verifyGeneratedReply('啊'.repeat(300) + LINK, LINK)).toBe('too_long');
+  });
+
+  it('⭐ 事实清单必须写明服务是**双向**的', () => {
+    // 2026-09-07 用户订正:「你定位错误了,我是双向的,有英国节点」。
+    // 我此前只按「翻墙出去」写 prompt,而落地页展示的是「Access China from anywhere」
+    // —— 两边都不完整。后果是实的:希腊看英超那条,AI 不知道有英国节点,
+    // 只能泛泛推销,答不到点上。
+    expect(PRODUCT_FACTS.direction).toMatch(/双向/);
+    expect(PRODUCT_FACTS.direction).toMatch(/英国|海外节点/);
+    expect(PRODUCT_FACTS.direction).toMatch(/接入中国|国内/);
+  });
+
+  it('⭐ prompt 要求按对方需求选方向,别说反', () => {
+    const zh = buildGenerationPrompt('zh', 'https://x/y');
+    expect(zh).toMatch(/先分清他要哪个方向|别把方向说反/);
+    const en = buildGenerationPrompt('en', 'https://x/y');
+    expect(en).toMatch(/Match the direction|direction backwards/);
+  });
+
+  it('⭐ 判断层也要认「回国」那一类,不能只认翻墙出去', () => {
+    const judge = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-ai-judge.ts'), 'utf-8');
+    expect(judge).toMatch(/双向/);
+    expect(judge).toMatch(/想用国内 App|回国/);
+  });
+
+  it('⭐ 事实清单里禁止项必须显式列出(比"别瞎说"有效)', () => {
+    for (const k of ['价格', '速度数字', '节点数量', '优惠活动', '退款政策']) {
+      expect(PRODUCT_FACTS.forbidden, `禁止项少了 ${k}`).toContain(k);
+    }
+  });
+
+  it('⭐ 生成 prompt 必须带事实清单和「原样照抄链接」', () => {
+    const zh = buildGenerationPrompt('zh', LINK);
+    expect(zh).toContain(LINK);
+    expect(zh).toMatch(/原样照抄/);
+    expect(zh).toMatch(/严禁/);
+    const en = buildGenerationPrompt('en', LINK);
+    expect(en).toContain(LINK);
+    expect(en).toMatch(/verbatim/);
+    expect(en).toMatch(/NEVER/);
+  });
+
+  it('⭐ 少样本示例会进 prompt(学习期修改的回流路径)', () => {
+    const withEx = buildGenerationPrompt('zh', LINK, [{ tweet: '求推荐', reply: '试试这个' }]);
+    expect(withEx).toContain('求推荐');
+    expect(withEx).toContain('试试这个');
+  });
+});
+
+describe('追踪标识 ref', () => {
+  it('⭐ 模板用原始落地页 + {ref} 占位', () => {
+    for (const t of REPLY_TEMPLATES) {
+      expect(t.text, `模板 ${t.id} 没用落地页`).toContain(LANDING_BASE);
+      expect(needsRef(t), `模板 ${t.id} 少了 {ref} 占位`).toBe(true);
+    }
+  });
+
+  it('⭐ renderTemplate 必须把占位全换掉', () => {
+    for (const t of REPLY_TEMPLATES) {
+      const out = renderTemplate(t, 'tw_x_20260904');
+      expect(out, `模板 ${t.id} 渲染后仍有占位`).not.toContain(REF_PLACEHOLDER);
+      expect(out).toContain('ref=tw_x_20260904');
+    }
+  });
+
+  it('⭐ 有占位却不给 ref 必须 throw(不能把 {ref} 字面量发出去)', () => {
+    // 静默留着占位 = 推给用户一条明显坏掉的链接
+    expect(() => renderTemplate(REPLY_TEMPLATES[0], '')).toThrow();
+    expect(() => renderTemplate(REPLY_TEMPLATES[0], '   ')).toThrow();
+  });
+
+  it('ref 形态:tw_<账号>_<日期>[_<配方>],只含 URL 安全字符', () => {
+    const at = new Date('2026-09-04T10:00:00Z');
+    expect(buildRef('netlab2gfw', at)).toBe('tw_netlab2gfw_20260904');
+    expect(buildRef('netlab2gfw', at, 'vpn-help')).toBe('tw_netlab2gfw_20260904_vpnhelp');
+    // 非法字符必须被剔除,不能带进 URL
+    expect(buildRef('a@b#c', at)).toMatch(/^tw_abc_\d{8}$/);
+  });
+
+  it('⭐ ref 按批次不按条 —— 同一批各条正文必须完全相同', () => {
+    // 每条唯一 = 正文条条不同 = 水军最直接的特征之一
+    const ref = buildRef('netlab2gfw', new Date());
+    const a = renderTemplate(REPLY_TEMPLATES[0], ref);
+    const b = renderTemplate(REPLY_TEMPLATES[0], ref);
+    expect(a).toBe(b);
+  });
+});
+
+describe('前置过滤不问模型', () => {
+  it('⭐ 文本指纹能识别「同一句话」的刷屏', () => {
+    // 这两条在库里一字不差出现过 3 次,是评测里唯一残留假阳的来源
+    const a = textFingerprint('我有小火箭加速器，求推荐一个好用的VPN');
+    const b = textFingerprint('@someone 我有小火箭加速器，求推荐一个好用的VPN https://t.co/abc');
+    expect(a, '@提及与链接不同就认不出是同一句 —— 刷屏必然漏网').toBe(b);
+  });
+
+  it('⭐ 不同内容必须有不同指纹(否则会误杀真求助)', () => {
+    const a = textFingerprint('大家有什么好用的机场推荐吗');
+    const b = textFingerprint('我有小火箭加速器，求推荐一个好用的VPN');
+    expect(a).not.toBe(b);
+  });
+
+  it('阈值为 2 —— 真人不会一字不差发两遍', () => {
+    expect(DUPLICATE_FINGERPRINT_THRESHOLD).toBe(2);
+  });
+
+  it('⭐ 前置过滤必须在调用模型之前(省算力,更要省误回)', () => {
+    const filterAt = PLANNER.indexOf("push('duplicate_text'");
+    // 判断调用在 planReplies 内(生成调用在 generateReplies 里,更靠前定义)
+    const modelAt = PLANNER.indexOf('const response = await callOllama');
+    expect(filterAt, '找不到刷屏过滤').toBeGreaterThan(-1);
+    expect(modelAt, '找不到判断调用').toBeGreaterThan(-1);
+    expect(
+      filterAt < modelAt,
+      '过滤跑在模型之后 —— 刷屏推文会先被模型判成「该回」',
+    ).toBe(true);
+  });
+
+  it('⭐ 冷却/已回过/屏蔽三道闸都要在', () => {
+    for (const k of ['already_replied', 'blocked_author', 'author_recent', 'duplicate_text']) {
+      expect(PLANNER, `少了 ${k} 这道闸`).toContain(k);
+    }
+  });
+
+  it('⭐ 被挡掉的必须留原因,不静默丢', () => {
+    // 否则「为什么没回这条」无从查起
+    expect(PLANNER).toMatch(/skips\.push/);
+    expect(PLANNER).toMatch(/skipReason/);
+  });
+});
+
+describe('模板轮换(不问模型)', () => {
+  it('⭐ 连续选取不重复 —— 避免连发同一句被判水军', () => {
+    for (const lang of ['zh', 'en'] as const) {
+      const pool = templatesFor(lang);
+      const picked: string[] = [];
+      let recent: ReturnType<typeof pickTemplate>[] = [];
+      for (let i = 0; i < pool.length; i++) {
+        const id = pickTemplate(recent, lang);
+        picked.push(id);
+        recent = [id, ...recent];
+      }
+      expect(new Set(picked).size, `${lang} 轮换失效,${pool.length} 次里出现重复`)
+        .toBe(pool.length);
+    }
+  });
+
+  it('⭐ 模板选择不得依赖模型返回', () => {
+    // 离线一致率仅 37%,且语料本身无信号(同质父推人工也用了不同模板)
+    const pick = PLANNER.slice(PLANNER.indexOf('export function pickTemplate'));
+    const body = pick.slice(0, pick.indexOf('\n}'));
+    expect(
+      /decision|verdict|ollama|d\.template/i.test(body),
+      'pickTemplate 又去看模型输出了 —— 那是在学噪声',
+    ).toBe(false);
+  });
+});
+
+describe('中英文分流', () => {
+  it('⭐ 中文推用中文模板,其余一律英文', () => {
+    // 给英文推回中文文案,对方看不懂 = 白发一条还留垃圾记录
+    expect(langOf('zh')).toBe('zh');
+    expect(langOf('zh-Hans')).toBe('zh');
+    expect(langOf('en')).toBe('en');
+    expect(langOf('ja')).toBe('en');       // 非中文回退英文(国际通用)
+    expect(langOf(undefined)).toBe('en');
+  });
+
+  it('⭐ 两种语言都必须有可用模板(否则 pickTemplate 会 throw)', () => {
+    expect(templatesFor('zh').length).toBeGreaterThan(0);
+    expect(templatesFor('en').length).toBeGreaterThan(0);
+  });
+
+  it('⭐ 选出的模板语言必须与请求一致', () => {
+    for (const lang of ['zh', 'en'] as const) {
+      const id = pickTemplate([], lang);
+      expect(getTemplate(id).lang, `lang=${lang} 选出了别的语言的模板`).toBe(lang);
+    }
+  });
+
+  it('⭐ 链接参数按语言:中文 lang=zh&v=6,英文 lang=en&v=7', () => {
+    // 用户 2026-09-04 给定,两者均已实测 307 → 200
+    expect(LINK_PARAMS.zh).toBe('lang=zh&v=6');
+    expect(LINK_PARAMS.en).toBe('lang=en&v=7');
+    for (const t of REPLY_TEMPLATES) {
+      expect(t.text, `模板 ${t.id} 链接参数与其语言不符`).toContain(LINK_PARAMS[t.lang]);
+    }
+  });
+
+  it('⭐ 英文文案必须标 needsHumanReview(全库 0 条英文语料,是新写的)', () => {
+    // 语料里像英文句子的回复是 0 条 —— 那 115 条「无中文」全是数字和 emoji。
+    // 发出去的是产品承诺,不能让用户不知情地发未经检验的文案。
+    for (const t of templatesFor('en')) {
+      expect(t.needsHumanReview, `英文模板 ${t.id} 没标待审核`).toBe(true);
+    }
+  });
+
+  it('中文文案有语料依据,不该标待审核', () => {
+    for (const t of templatesFor('zh')) {
+      expect(t.needsHumanReview ?? false, `中文模板 ${t.id} 被误标待审核`).toBe(false);
+      expect(t.observedCount).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('失败要响,不静默产出空草稿', () => {
+  it('⭐ 模型返回结构异常必须 throw(同 x-ai-judge 的教训)', () => {
+    // 回复层丢一批 = 该回的没回,而面板显示一切正常,比判断层后果更重
+    expect(PLANNER).toContain('contains no decision array');
+    const ex = PLANNER.slice(PLANNER.indexOf('function extractDecisions'));
+    expect(
+      /\?\?\s*\[\]/.test(ex.slice(0, ex.indexOf('\n}'))),
+      '又出现了 `?? []` 兜底 —— 整批会被静默当成空批',
+    ).toBe(false);
+  });
+
+  it('⭐ 置信度下限存在且不为 0(宁可漏不可扰)', () => {
+    expect(REPLY_CONFIDENCE_FLOOR).toBeGreaterThan(0);
+    expect(PLANNER).toContain('low_confidence');
+  });
+
+  it('模型漏判某条时不得当成「不该回」而无痕跳过', () => {
+    expect(PLANNER).toMatch(/模型未返回该条判断/);
+  });
+});

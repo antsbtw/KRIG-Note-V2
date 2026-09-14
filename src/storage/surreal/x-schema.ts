@@ -183,6 +183,199 @@ DEFINE INDEX IF NOT EXISTS idx_fb_verdict  ON tweet_feedback FIELDS verdict;
 DEFINE INDEX IF NOT EXISTS idx_fb_lang     ON tweet_feedback FIELDS lang;
 `;
 
+/**
+ * 1.0.1 —— 回复关系权威字段(2026-09-02)
+ *
+ * 依据:载荷勘查实测(docs/10-business-design/x/data-acquisition-capability-survey.md §2.4)
+ * X 的 GraphQL 响应里 legacy 对象自带完整回复关系:
+ *   in_reply_to_status_id_str / in_reply_to_screen_name /
+ *   in_reply_to_user_id_str / conversation_id_str
+ * 此前从 DOM 猜(连接线像素/idx相邻/正则)的三套判据全部作废。
+ *
+ * ⚠️ 既有 in_reply_to 字段语义修正:原意是"被回复者 handle 或 URL",
+ *    但取自 socialContext(那是「xx 转推了/已置顶」横幅),从未被正确填过
+ *    —— 全库 860 行为 0。现改为存**父推 id**,与 in_reply_to_user 分工。
+ *    不需要数据迁移:本来就没有一行有值。
+ */
+const X_SCHEMA_1_0_1 = `
+-- 被回复者 handle(归一化:无 @、全小写,与 x_author.handle 同形态)
+DEFINE FIELD IF NOT EXISTS in_reply_to_user ON x_tweet TYPE option<string>;
+-- 会话根 id —— n 层关系分析靠它 GROUP BY(方案 §4.1(5):先不建边表)
+DEFINE FIELD IF NOT EXISTS conversation_id  ON x_tweet TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_tweet_in_reply_to   ON x_tweet FIELDS in_reply_to;
+DEFINE INDEX IF NOT EXISTS idx_tweet_conversation  ON x_tweet FIELDS conversation_id;
+`;
+
+export async function x_migration_1_0_1(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_1);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.1',
+      appliedAt = $now,
+      description = 'Reply relationship authoritative fields: in_reply_to_user / conversation_id'`,
+    { rid: new RecordId('schema_version', '1.0.1'), now },
+  );
+}
+
+/**
+ * 1.0.2 —— handle 形态统一(2026-09-02)
+ *
+ * 问题:同一张表里两种形态并存 ——
+ *   `source='search'` 的 982 行存 '@ylyz61'(带 @、保留大小写,DOM 抓取的历史遗留)
+ *   `source='self_reply'` 的 78 行存 'netlab2gfw'(归一化,载荷采集时已过 normalizeHandle)
+ * 实测后果:657 个不同取值 → 归一化后只有 656 个人,**已经有一个人被算成两个**
+ * (正是本账号:'@NetLab2GFW' vs 'netlab2gfw')。
+ * 将来按作者聚合(画像!)会把同一人拆成两条,且**不报错**。
+ *
+ * 统一到**归一化形态**(无 @、全小写),与 x_author.handle / normalizeHandle() 一致 ——
+ * 跨表比对本来就按这个形态做(B 期屏蔽名单、收件箱隐藏过滤都是),
+ * 让存储与比对同形态,消除这一层转换。
+ *
+ * ⚠️ 只改 handle 类字段,不动 author_name_at_post(展示名快照,本就该保留原样)。
+ */
+const X_SCHEMA_1_0_2 = `
+UPDATE x_tweet SET author_handle = string::replace(string::lowercase(author_handle), '@', '')
+  WHERE string::starts_with(author_handle, '@') OR author_handle != string::lowercase(author_handle);
+UPDATE tweet_feedback SET author_handle = string::replace(string::lowercase(author_handle), '@', '')
+  WHERE string::starts_with(author_handle, '@') OR author_handle != string::lowercase(author_handle);
+`;
+
+export async function x_migration_1_0_2(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_2);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.2',
+      appliedAt = $now,
+      description = 'Normalize author_handle across x_tweet / tweet_feedback (strip @, lowercase)'`,
+    { rid: new RecordId('schema_version', '1.0.2'), now },
+  );
+}
+
+/**
+ * 1.0.3 —— 采集游标(2026-09-02)
+ *
+ * 用户定的方向:「其实 X 上有很多标记,你要善于利用。」
+ * 实测确认:X 每个 timeline 响应都自带分页游标 ——
+ *   content.__typename = 'TimelineTimelineCursor',cursorType = 'Top' | 'Bottom'
+ * `Bottom` 就是「下一页从这里继续」的官方标记。
+ *
+ * 这比我原来的做法好在:
+ *  - 不用靠时间戳猜边界(时间戳做锚点必须区分「往新」「往旧」两个方向,
+ *    还得让用户选,是把实现细节暴露给用户)
+ *  - 游标是 X 自己的续传凭证,天然精确、天然不重复
+ *  - 一个按钮即可:有游标就续传,没有就从头 —— 用户不必知道有这回事
+ *
+ * 表设计遵循数据模型总纲:游标是**可重算的派生状态**(丢了大不了重爬),
+ * 与 x_tweet(真源)分开存,清空不影响任何业务数据。
+ */
+const X_SCHEMA_1_0_3 = `
+DEFINE TABLE IF NOT EXISTS x_collect_cursor SCHEMAFULL;
+-- 采集范围键:'<handle>:<kind>',如 'netlab2gfw:replies'
+DEFINE FIELD IF NOT EXISTS scope        ON x_collect_cursor TYPE string ASSERT $value != '';
+-- X 给的 Bottom 游标值 —— 下次从这里继续
+DEFINE FIELD IF NOT EXISTS bottom_cursor ON x_collect_cursor TYPE option<string>;
+-- 已抓到的最旧时间(展示用:让用户知道挖到哪了)
+DEFINE FIELD IF NOT EXISTS oldest_at    ON x_collect_cursor TYPE option<datetime>;
+-- 是否已到底(X 不再给新游标)—— 到底后无需再往前挖
+DEFINE FIELD IF NOT EXISTS exhausted    ON x_collect_cursor TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS updated_at   ON x_collect_cursor TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_cursor_scope ON x_collect_cursor FIELDS scope UNIQUE;
+`;
+
+export async function x_migration_1_0_3(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_3);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.3',
+      appliedAt = $now,
+      description = 'Collection cursor table (use X own Bottom cursor for resume)'`,
+    { rid: new RecordId('schema_version', '1.0.3'), now },
+  );
+}
+
+/**
+ * 1.0.4 —— 账号基线数字(2026-09-02)
+ *
+ * 用户点出的关键:「你有发现用户有 post 的总数的吗?**这就是基线**。」
+ *
+ * `UserByScreenName` 响应里带 `tweet_counts.tweets`(本账号实测 1192)——
+ * 我在能力勘查时就抓到并写进了文档,却只当成「画像基底」列了一行,
+ * **没意识到它是采集完整度的标尺**。
+ *
+ * 有了基线,「抓够了没有」从**猜**变成**算**:
+ *  - 进度可量化:已抓 N / 基线 M,而不是没有分母的「覆盖 X 天」
+ *  - 「到底了」有客观判据:此前靠「X 不再给游标」间接推断,
+ *    与「被限流」分不开;有基线就分得开
+ *  - 增量可自动对账:基线涨 5、库里也涨 5 = 正常;基线涨了库里没动 = 漏采
+ *
+ * 这些是**会变的观测值**(会随发推增长),不是派生值,故存在实体上,
+ * 并带 counts_at 记录观测时刻 —— 没有时刻的计数无法判断新鲜度。
+ */
+const X_SCHEMA_1_0_4 = `
+-- 发推总数(原创+回复),X 官方计数 —— 采集完整度的分母
+DEFINE FIELD IF NOT EXISTS tweet_count     ON x_author TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS media_count     ON x_author TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS followers_count ON x_author TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS following_count ON x_author TYPE option<int>;
+-- 该账号的点赞总数(活跃度指标)
+DEFINE FIELD IF NOT EXISTS favourites_count ON x_author TYPE option<int>;
+-- ⚠️ 计数的观测时刻:没有它就判断不了新鲜度,也做不了「基线涨了多少」的对账
+DEFINE FIELD IF NOT EXISTS counts_at       ON x_author TYPE option<datetime>;
+-- 账号注册时间(账号年龄 —— 画像基底)
+DEFINE FIELD IF NOT EXISTS account_created_at ON x_author TYPE option<datetime>;
+`;
+
+export async function x_migration_1_0_4(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_4);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.4',
+      appliedAt = $now,
+      description = 'Account baseline counts (tweet_count as collection-completeness denominator)'`,
+    { rid: new RecordId('schema_version', '1.0.4'), now },
+  );
+}
+
+/**
+ * 1.0.5 —— 取消 TTL,X 推文永久保存(2026-09-02)
+ *
+ * 用户拍板:「永久保存吧。等容量到了一定的程度,再考虑迁移新的架构。」
+ *
+ * 背景:原 TTL 设计(A 期)的前提是「没被采纳的推没价值」,7 天后删除。
+ * 该前提已被推翻 ——「有些不显示的帖子不见得没有用途,可以用于分析竞争对手。」
+ * 被 Gemma 判 skip / 被黑名单过滤掉的推,是竞品分析与 AI 语料的素材,
+ * 删掉不可再生。实测当时有 368 行带 TTL,其中 295 行是 skip/filtered_out。
+ *
+ * ⚠️ A 期教训在前:旧 tweet_inbox 因 TTL 丢过 449 条已采纳推文的正文。
+ *    删除是不可逆的,这次把整个 TTL 机制关掉,而不是调长过期时间。
+ *
+ * 配套代码改动:x-timeline-scan 不再设 expires_at;cleanExpired 改为 no-op。
+ */
+const X_SCHEMA_1_0_5 = `
+UPDATE x_tweet SET expires_at = NONE WHERE expires_at != NONE;
+`;
+
+export async function x_migration_1_0_5(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_5);
+
+  const now = Date.now();
+  await db.query(
+    `UPSERT $rid SET
+      version = '1.0.5',
+      appliedAt = $now,
+      description = 'Disable TTL: keep all X tweets permanently (competitor analysis + AI corpus)'`,
+    { rid: new RecordId('schema_version', '1.0.5'), now },
+  );
+}
+
 export async function x_migration_1_0_0(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_0_0);
 
@@ -193,5 +386,467 @@ export async function x_migration_1_0_0(db: Surreal): Promise<void> {
       appliedAt = $now,
       description = 'X database initial schema: x_author / x_tweet + runtime tables (tweet_inbox / search_recipes / tweet_feedback)'`,
     { rid: new RecordId('schema_version', '1.0.0'), now },
+  );
+}
+
+/**
+ * 1.0.6 —— X per-ws 角色表(2026-09-03)
+ *
+ * 用户拍板「一个 ws 只干一件事」:定时搜索采集与活动核验分到不同 ws,
+ * 各用自己的 X webview,互不打断(详见 shared/types/x-ws-role-types.ts)。
+ *
+ * 为什么单独建表而不塞进 workspace 实体:角色是 **X 模块的关注点**,
+ * workspace 是宿主概念 —— 往宿主实体里塞业务字段会让边界烂掉(总纲原则 1)。
+ */
+const X_SCHEMA_1_0_6 = `
+DEFINE TABLE IF NOT EXISTS x_ws_role SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id            ON x_ws_role TYPE string ASSERT $value != '';
+-- 'search' | 'campaign' | 'idle'
+DEFINE FIELD IF NOT EXISTS role             ON x_ws_role TYPE string ASSERT $value != '';
+-- campaign 专用:盯哪篇文章(留空=自动识别最新 Article,正式活动应显式钉死)
+DEFINE FIELD IF NOT EXISTS article_id       ON x_ws_role TYPE option<string>;
+-- campaign 专用:是否由本 ws 承接接口 B(外部触发口),配置决定不写死
+DEFINE FIELD IF NOT EXISTS serves_refresh   ON x_ws_role TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS interval_minutes ON x_ws_role TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS updated_at       ON x_ws_role TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ws_role_ws   ON x_ws_role FIELDS ws_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_ws_role_role ON x_ws_role FIELDS role;
+`;
+
+export async function x_migration_1_0_6(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_6);
+
+  // ⚠️ 存量回填:已在跑的 ws 必须默认 'search',否则升级后角色守卫会把
+  // 它们全判成 idle → **定时采集静默全停**,而日志只说「跳过」,像是正常行为。
+  // 判据:x_tweet 里出现过的 ws_id 就是在采集的(有实际采集记录才回填,不凭空造)。
+  await db.query(`
+    LET $seen = (SELECT VALUE ws_id FROM x_tweet WHERE ws_id != NONE GROUP BY ws_id);
+    FOR $ws IN $seen {
+      IF !(SELECT ws_id FROM x_ws_role WHERE ws_id = $ws)[0] {
+        CREATE x_ws_role SET ws_id = $ws, role = 'search',
+          serves_refresh = false, updated_at = time::now();
+      };
+    };
+  `);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.6', appliedAt = $now,
+      description = 'X per-ws role table (search / campaign / idle)'`,
+    { rid: new RecordId('schema_version', '1.0.6'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.0.7 —— 活动留言表(2026-09-03)
+ *
+ * 用户定的流程:「① 点击这个推文 ② 往下滚动,获取推文的最新元数据
+ *   ③ **元数据入库**,按照数据契约提供服务即可」
+ * → 此前只抓+显示,没有 ③。本表就是 ③ 的落点。
+ *
+ * 为什么不塞进 x_tweet:x_tweet 是「推文实体」,而这里要记的是
+ * **「某篇活动文章下的某条留言 + 它的推送状态」** —— 后者是活动流程的状态,
+ * 不是推文自身的属性。混进去会让 x_tweet 长出与活动耦合的字段(总纲原则 1)。
+ *
+ * 幂等键 = 契约 §2.1 的 (article_id, tweet_id):
+ * 「同一 (article_id, tweet_id) 重复推送只更新、不新增」。
+ */
+const X_SCHEMA_1_0_7 = `
+DEFINE TABLE IF NOT EXISTS x_campaign_reply SCHEMAFULL;
+-- 幂等键的两半
+DEFINE FIELD IF NOT EXISTS article_id  ON x_campaign_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_id    ON x_campaign_reply TYPE string ASSERT $value != '';
+-- 契约 §2.1 的 item 字段(原样存,推送时零转换)
+DEFINE FIELD IF NOT EXISTS kind        ON x_campaign_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS x_uid       ON x_campaign_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS username    ON x_campaign_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS has_media   ON x_campaign_reply TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS created_at  ON x_campaign_reply TYPE datetime;
+DEFINE FIELD IF NOT EXISTS in_reply_to_tweet_id ON x_campaign_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS text_excerpt ON x_campaign_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS deleted     ON x_campaign_reply TYPE bool DEFAULT false;
+-- 采集与推送状态(活动流程的状态,不是推文属性)
+DEFINE FIELD IF NOT EXISTS first_seen_at ON x_campaign_reply TYPE datetime;
+DEFINE FIELD IF NOT EXISTS last_seen_at  ON x_campaign_reply TYPE datetime;
+-- 契约 §2.3:未确认成功的批次重启后要重推 → 必须记「推没推成功」
+DEFINE FIELD IF NOT EXISTS pushed_at   ON x_campaign_reply TYPE option<datetime>;
+-- 字段变化(has_media 由 false 变 true、deleted)后需要重推,故记内容指纹
+DEFINE FIELD IF NOT EXISTS payload_hash ON x_campaign_reply TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_campaign_key ON x_campaign_reply
+  FIELDS article_id, tweet_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_campaign_article ON x_campaign_reply FIELDS article_id;
+DEFINE INDEX IF NOT EXISTS idx_campaign_pushed ON x_campaign_reply FIELDS pushed_at;
+`;
+
+export async function x_migration_1_0_7(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_7);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.7', appliedAt = $now,
+      description = 'Campaign reply table (contract idempotency key + push state)'`,
+    { rid: new RecordId('schema_version', '1.0.7'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.0.8 —— per-ws 登录账号(2026-09-03)
+ *
+ * 用户指正:「当前 ws 是登录什么账号,就核实这个 ws 的状态,
+ *   而不是跑到一个对应不上的 ws 来核实」。
+ *
+ * 此前的错误建模:`x_author.is_self` 是**全局唯一**的
+ * (setSelfAuthor 会把其它行的 is_self 清掉)。但 X webview 的登录态是
+ * **per-ws** 的(partition = persist:webview-${wsId}),两个 ws 可以登不同账号。
+ * 后果:第二个 ws 识别账号时会**静默覆盖**第一个,之后所有「我是谁」的查询
+ * 都会给出错的那个 —— 而现象只是「抓不到/抓错人」,不报错。
+ *
+ * 修法:身份归属到 ws。x_author.is_self 保留(兼容旧数据、表示"曾是本人"),
+ * 但**权威来源改为本表**:一个 ws 一行,记它登录的是谁。
+ */
+const X_SCHEMA_1_0_8 = `
+DEFINE TABLE IF NOT EXISTS x_ws_account SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id      ON x_ws_account TYPE string ASSERT $value != '';
+-- 该 ws 当前登录的账号(归一化 handle:无 @、小写)
+DEFINE FIELD IF NOT EXISTS handle     ON x_ws_account TYPE string ASSERT $value != '';
+-- 数字 id(rest_id)—— 契约的 x_uid 用它匹配最稳,handle 会改名
+DEFINE FIELD IF NOT EXISTS rest_id    ON x_ws_account TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS detected_at ON x_ws_account TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ws_account_ws ON x_ws_account FIELDS ws_id UNIQUE;
+`;
+
+export async function x_migration_1_0_8(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_8);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.8', appliedAt = $now,
+      description = 'Per-ws logged-in account (identity belongs to ws, not global)'`,
+    { rid: new RecordId('schema_version', '1.0.8'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.0.9 —— 入向互动(通知页具名名单,2026-09-03)
+ *
+ * 用户:「应该获取它的元数据:点赞多少次(名单),转发多少次(名单),
+ *   回复多少次(名单)。只有能够区别出这些,才能够谈得上更新多少个呀?」
+ * 并指出:「这个需要在 notification 中拿到」——**对,已实测验证**。
+ *
+ * 实测结构(NotificationsTimeline,GraphQL 非 v1.1):
+ *   TimelineNotification.notification_icon        ← 行为类型(heart_icon=赞)
+ *   TimelineNotification.template.from_users[]    ← **具名操作者**(rest_id + handle)
+ *   TimelineNotification.template.target_objects[]← 被操作的推 id
+ * 一条「X and 2 others liked」的通知,from_users 确实是 3 个,不是 1 个。
+ *
+ * ⚠️ 归属到 ws:通知是「别人对**我**」,而「我」是**该 ws 登录的账号**。
+ *   多 ws 多账号并存,不记 ws 就分不清是谁收到的。
+ */
+const X_SCHEMA_1_0_9 = `
+DEFINE TABLE IF NOT EXISTS x_interaction SCHEMAFULL;
+-- 幂等键三元组:同一通知里同一人对同一条推的同一种行为,只算一条
+DEFINE FIELD IF NOT EXISTS kind        ON x_interaction TYPE string;   -- like/retweet/reply/follow/quote/other
+DEFINE FIELD IF NOT EXISTS actor_uid   ON x_interaction TYPE string;   -- 操作者 rest_id(稳定,不随改名变)
+DEFINE FIELD IF NOT EXISTS target_id   ON x_interaction TYPE string;   -- 被操作的推 id;follow 类为空串
+DEFINE FIELD IF NOT EXISTS actor_handle ON x_interaction TYPE option<string>;
+-- 接收方:该 ws 登录的账号(通知是「别人对我」,这个「我」是 per-ws 的)
+DEFINE FIELD IF NOT EXISTS ws_id       ON x_interaction TYPE string;
+DEFINE FIELD IF NOT EXISTS owner_handle ON x_interaction TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS notified_at ON x_interaction TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS first_seen_at ON x_interaction TYPE datetime;
+DEFINE FIELD IF NOT EXISTS message     ON x_interaction TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_interaction_key ON x_interaction
+  FIELDS kind, actor_uid, target_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_interaction_kind   ON x_interaction FIELDS kind;
+DEFINE INDEX IF NOT EXISTS idx_interaction_actor  ON x_interaction FIELDS actor_uid;
+DEFINE INDEX IF NOT EXISTS idx_interaction_target ON x_interaction FIELDS target_id;
+`;
+
+export async function x_migration_1_0_9(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_0_9);
+  await db.query(
+    `UPSERT $rid SET version = '1.0.9', appliedAt = $now,
+      description = 'Inbound interactions from notifications (named actors)'`,
+    { rid: new RecordId('schema_version', '1.0.9'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.0 —— 互动带上「属于哪篇文章」与「带没带图」(2026-09-03)
+ *
+ * 用户指正:「首先明确是哪一条推文,然后才可以正确匹配这个通知
+ *   都有哪些属于这个推文的。你随便抓随便统计可不行。」
+ *
+ * 此前 x_interaction 只存 target_id,于是只能做**全局汇总**
+ * (「点赞 5 条」——散在 4 条不同的推上,没有主语),
+ * 无法回答「**这条推文**谁点赞了」。而后者才是活动核验的口径。
+ *
+ * 解析层其实早已解出这两个字段(target.legacy 里带着),只是没落库 ——
+ * 属于「采到了却丢掉」,比没采到更隐蔽。
+ */
+const X_SCHEMA_1_1_0 = `
+DEFINE FIELD IF NOT EXISTS target_conversation_id ON x_interaction TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS target_has_media       ON x_interaction TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS target_text            ON x_interaction TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS target_created_at      ON x_interaction TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_interaction_conv ON x_interaction FIELDS target_conversation_id;
+`;
+
+export async function x_migration_1_1_0(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_0);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.0', appliedAt = $now,
+      description = 'Interaction target metadata (conversation_id + has_media) for per-article verification'`,
+    { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.1 —— 互动带上「引用了哪条推」(2026-09-03)
+ *
+ * 用户观察到「转发后文章没有内容,应该只有一个链接」,一句话点破归属漏判:
+ * 引用转发某篇文章时,那条推的 conversation_id 是**它自己所在的会话**,
+ * 文章的关联藏在 quoted_status_id_str 里。只按 target_id / conversation_id
+ * 归属会把整类「引用转发」漏掉 —— 而它恰恰是活动最常见的参与形式。
+ */
+const X_SCHEMA_1_1_1 = `
+DEFINE FIELD IF NOT EXISTS target_quoted_status_id ON x_interaction TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_interaction_quoted ON x_interaction FIELDS target_quoted_status_id;
+`;
+
+export async function x_migration_1_1_1(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_1);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.1', appliedAt = $now,
+      description = 'Interaction quoted_status_id (quote-retweet attribution)'`,
+    { rid: new RecordId('schema_version', '1.1.1'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.2 —— 回复反馈(学习期,2026-09-05)
+ *
+ * 用户定的节奏:「先定一个学习期间,它所有的回复都经过我点击后方能发出,
+ *   等到一定数量积累后,就可以让它自动回复了。对于无法决定,
+ *   或者和前期区别太大的,可以留待判决即可。」
+ *
+ * 为什么**不**塞进 tweet_feedback:
+ *   那张表回答的是「这条推**值不值得回**」(accept/reject);
+ *   这张表回答的是「这条**回得对不对**」—— 两个问题。
+ *   而且 tweet_feedback 那 6900+ 行是**不可再生资产**(40 天连续人工判断),
+ *   不给它加字段冒险。
+ *
+ * ⭐ 记「AI 原文 vs 用户改成什么」是关键 ——
+ *   现在的 accept/reject **记不了「该回,但不该这么回」**。
+ *   用户把正文改了一句,这个信息此前直接丢掉。存下来它能回答:
+ *   哪类推文总要手动补话、生成质量在涨还是在跌、什么时候能放手自动。
+ *
+ * 同时它是 in-context learning 的**回流源**:approved 的例子直接当少样本
+ * 喂回生成 prompt,模型会越来越像用户的口气 —— 不训练模型、随时可撤。
+ */
+const X_SCHEMA_1_1_2 = `
+DEFINE TABLE IF NOT EXISTS x_reply_feedback SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_reply_feedback TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS lang          ON x_reply_feedback TYPE string;   -- zh | en
+-- AI 写的原文;回落模板时是模板正文
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS source        ON x_reply_feedback TYPE string;   -- generated | template
+-- 用户最终填进 X 的正文。与 ai_text 相同 = 原样通过(放手自动的判据)
+DEFINE FIELD IF NOT EXISTS final_text    ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS edited        ON x_reply_feedback TYPE bool DEFAULT false;
+-- 用户的处置:filled=填入X(默认认可) / dismissed=跳过不回
+DEFINE FIELD IF NOT EXISTS action        ON x_reply_feedback TYPE string;
+DEFINE FIELD IF NOT EXISTS confidence    ON x_reply_feedback TYPE option<float>;
+DEFINE FIELD IF NOT EXISTS ref           ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at    ON x_reply_feedback TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_rfb_tweet   ON x_reply_feedback FIELDS tweet_id;
+DEFINE INDEX IF NOT EXISTS idx_rfb_lang    ON x_reply_feedback FIELDS lang;
+DEFINE INDEX IF NOT EXISTS idx_rfb_edited  ON x_reply_feedback FIELDS edited;
+DEFINE INDEX IF NOT EXISTS idx_rfb_created ON x_reply_feedback FIELDS created_at;
+`;
+
+export async function x_migration_1_1_2(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_2);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.2', appliedAt = $now,
+      description = 'Reply feedback (learning period: AI text vs user edit)'`,
+    { rid: new RecordId('schema_version', '1.1.2'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.3 —— 回复推断链留档(2026-09-06)
+ *
+ * 用户:「每回一条推文,都在逻辑链上做几步分析并记录下来列出来,
+ *   这样你才有回归检查的机会……才有回归分析 Gemma4 的执行是否正确的再分析能力。」
+ *
+ * 此前只记 ai_text/final_text —— 知道「写了什么」,不知道「为什么这么写」。
+ * 回错了无法定位:是把推广者看成真实用户?是因由读错?还是因由对但正文答偏?
+ *
+ * ⚠️ `poster_kind` 是**模型看正文的推断,不是查证过的事实** ——
+ * 库里没有账号资料(x_author 36 行、粉丝数字段全空)。查询时别当事实用。
+ */
+const X_SCHEMA_1_1_3 = `
+DEFINE FIELD IF NOT EXISTS poster_kind ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS poster_read ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS trigger     ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ai_reason   ON x_reply_feedback TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS in_thread   ON x_reply_feedback TYPE bool DEFAULT false;
+DEFINE INDEX IF NOT EXISTS idx_rfb_poster ON x_reply_feedback FIELDS poster_kind;
+`;
+
+export async function x_migration_1_1_3(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_3);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.3', appliedAt = $now,
+      description = 'Reply decision trace (poster read / trigger) for regression review'`,
+    { rid: new RecordId('schema_version', '1.1.3'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.4 —— 回填「见过的人」(2026-09-06)
+ *
+ * 用户问「凡是爬下来的用户,都保存下来没有删除吧?」—— 一查发现没有:
+ *   x_tweet 里有 **3458 个不同作者**,x_author 只有 **36 行**
+ *   (34 blocked + 1 is_self + 1 测试残留)。
+ * 采集链路从不写人表,只有「对某人采取动作」才建行 ——
+ * 设计 §4.1(4) 说 x_author 是「人」的唯一真源,实际它成了动作记录表。
+ *
+ * 代码侧已修(upsertTweet → registerSeenAuthor),但那只管**将来**;
+ * 存量 3400+ 个作者需要这次回填补上,否则历史数据里的人永远没有落点。
+ *
+ * ⚠️ 只建标识行,**不写任何计数**:seen_count/replied_count 是
+ * 第三层可重算属性(设计 §4.1(4) 明确「不放这里」)。
+ * ⚠️ 用 INSERT IGNORE 语义:已存在的行(带 blocked/watched 意志)绝不能被覆盖。
+ */
+export async function x_migration_1_1_4(db: Surreal): Promise<void> {
+  // ⚠️ 刻意**不用**纯 SQL 的 `FOR ... IN array::distinct(...)`:
+  //    实测(2026-09-06)那条语句对 6762 行的 x_tweet 返回**空响应、
+  //    一行也没建、且不报错** —— 典型的静默失败。
+  //    改成 GROUP BY 取去重作者(实测 22ms)+ 分批 CREATE,每批留痕。
+  const seenRes = await db.query<[Array<{ author_handle: string }>]>(
+    `SELECT author_handle FROM x_tweet GROUP BY author_handle`,
+  );
+  const knownRes = await db.query<[Array<{ handle: string }>]>(
+    `SELECT handle FROM x_author`,
+  );
+  const known = new Set((knownRes?.[0] ?? []).map((r) => r.handle));
+  const missing = (seenRes?.[0] ?? [])
+    .map((r) => r.author_handle)
+    .filter((h) => h && !known.has(h));
+
+  console.log(`[x-migration 1.1.4] 见过 ${seenRes?.[0]?.length ?? 0} 个作者,`
+    + `已登记 ${known.size},待回填 ${missing.length}`);
+
+  // 分批:一次性几千条 CREATE 容易撞事务/超时,批量出错也难定位
+  const BATCH = 200;
+  let done = 0;
+  for (let i = 0; i < missing.length; i += BATCH) {
+    const batch = missing.slice(i, i + BATCH);
+    // ⚠️ 只建标识行,不写任何计数(设计 §4.1(4):那是可重算的第三层属性)
+    const stmts = batch.map((_, k) =>
+      `CREATE x_author SET handle = $h${k}, blocked = false, watched = false, is_self = false;`
+    ).join('\n');
+    const params: Record<string, string> = {};
+    batch.forEach((h, k) => { params[`h${k}`] = h; });
+    await db.query(stmts, params);
+    done += batch.length;
+  }
+  console.log(`[x-migration 1.1.4] 回填完成:新建 ${done} 行`);
+
+  await db.query(
+    `UPSERT $rid SET version = '1.1.4', appliedAt = $now,
+      description = 'Backfill x_author from x_tweet (people seen but never registered)'`,
+    { rid: new RecordId('schema_version', '1.1.4'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.5 —— 被回复者 handle 落库(2026-09-06)
+ *
+ * 用户定的回复链条:「先追踪这个帖子的上一层的内容(确保它和 VPN 相关),
+ *   再确认这个用户的活跃度,最后才能拟定出比较好的回复内容」。
+ * ① 是**正确性闸门**,但此前完全没做 —— 而且卡在采集层:
+ *
+ * `x-timeline-scan` 一直在写 `in_reply_to: tweet.inReplyTo`,
+ * 但 DOM 提取器取的是 `[data-testid="socialContext"]` ——
+ * **那是「xx 转推了/已置顶」横幅,不是回复关系**,所以该字段从未被正确填过。
+ * 实测:回复过的 20 条推,父推 id 全空 —— 现象与「它们本来就没有父推」
+ * 一模一样,极易被当成事实(我差点就是)。
+ *
+ * 修法:DOM 层改抓「Replying to @xxx」那一行的 handle(存这个字段),
+ * 父推 id 走载荷层(harvester 已有 in_reply_to_status_id_str)。
+ */
+const X_SCHEMA_1_1_5 = `
+-- ⚠️ 写 x_tweet 不是 tweet_inbox:后者是遗留表,全仓读写都走 x_tweet
+--    (2026-09-06 实测:x_tweet 有当天采的 112 条,tweet_inbox 停在 5 天前)
+DEFINE FIELD IF NOT EXISTS in_reply_to_user ON x_tweet TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_tweet_reply_user ON x_tweet FIELDS in_reply_to_user;
+`;
+
+export async function x_migration_1_1_5(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_5);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.5', appliedAt = $now,
+      description = 'tweet_inbox.in_reply_to_user (reply context for step 1 gate)'`,
+    { rid: new RecordId('schema_version', '1.1.5'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.6 —— 关系视角与简介落库(2026-09-06)
+ *
+ * 用户 2026-09-06 一句话点破:「账户关联关系不是在爬下来的数据都有吗?
+ *   只是如何触发,什么时候触发而已。」——对。
+ * `UserByScreenName` 载荷自带 `relationship_perspectives`
+ * (following / followed_by / blocking / blocked_by / muting),**零额外请求**
+ * (能力勘查 §2.4 实测)。x-author-profile 早就解析出来了,
+ * 但**只在内存里、没落库、也没进判断** —— 又一次「采到了没用上」。
+ *
+ * ⭐ 为什么值得存:「他关注了我」是判断链条第 ② 步(活跃度/真实性)的**强信号** ——
+ * 水军和营销号不会去关注一个小账号,而真实用户看过你的内容才会关注。
+ * 这比粉丝数更难伪造。
+ *
+ * ⚠️ 与 `blocked` 区分:`blocked` 是**我们 app 内部的屏蔽意志**,
+ *    `x_blocking` 是**X 上的真实拉黑状态**(我在 X 上拉黑了他)。两码事,别混。
+ */
+const X_SCHEMA_1_1_6 = `
+DEFINE FIELD IF NOT EXISTS follows_me   ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS i_follow     ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS x_blocking   ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS bio          ON x_author TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS is_blue_verified ON x_author TYPE option<bool>;
+DEFINE INDEX IF NOT EXISTS idx_author_follows_me ON x_author FIELDS follows_me;
+`;
+
+export async function x_migration_1_1_6(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_6);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.6', appliedAt = $now,
+      description = 'Author relationship perspectives + bio (step 2 activity signals)'`,
+    { rid: new RecordId('schema_version', '1.1.6'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.7 —— 上文快照(2026-09-06)
+ *
+ * 用户:「从 Gemma4 的建议名单中获取,因为每一个它建议的,都应该获取上下文。」
+ * 上文是①闸门(判「这楼真和 VPN 相关吗」)的输入。
+ * 此前只在点开弹窗时现抓,每条现等 10s;存下来后点开即有。
+ *
+ * ⚠️ 存**快照**而非只存父推 id:父推可能被删或被改,
+ *    快照保留我们当时判断的依据(与 author_name_at_post 同思路)。
+ */
+const X_SCHEMA_1_1_7 = `
+-- ⚠️ 同上:只定义在 x_tweet,别往遗留表上加字段
+DEFINE FIELD IF NOT EXISTS parent_text       ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_handle     ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_fetched_at ON x_tweet TYPE option<datetime>;
+`;
+
+export async function x_migration_1_1_7(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_7);
+  await db.query(
+    `UPSERT $rid SET version = '1.1.7', appliedAt = $now,
+      description = 'Parent tweet snapshot (context for step 1 gate)'`,
+    { rid: new RecordId('schema_version', '1.1.7'), now: Date.now() },
   );
 }

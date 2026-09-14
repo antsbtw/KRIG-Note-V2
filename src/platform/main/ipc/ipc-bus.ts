@@ -21,6 +21,7 @@ import { registerEBookHandlers } from '../ebook/library-handlers';
 import { registerBookmarkHandlers } from '../bookmark/handlers';
 import { registerExtractionHandlers } from '../extraction/handlers';
 import { registerGraphHandlers } from '../graph';
+import { registerMindHandlers } from '../mind';
 import { registerFolderHandlers } from '../folder';
 import { registerNoteHandlers } from '../note';
 import { registerPmContentHandlers } from '../pm-content';
@@ -49,6 +50,7 @@ export function initIpcBus(): void {
   registerBookmarkHandlers();       // web view 书签树(书签步骤1 数据层:bookmark atom + folder viewType='web')
   registerExtractionHandlers();     // L5-C6:PDF 提取 → Note(KRIG Knowledge Platform)
   registerGraphHandlers();          // L5-G1:graph 画板 + 文件夹(D-3=B JSON 起步,模板对齐 ebook)
+  registerMindHandlers();           // diglot mind v0:独立表 mind_doc(方案 B1,共用 graph 文件夹)
   registerFolderHandlers();         // L7-sub2:folder capability (decision 012,SurrealDB)
   registerNoteHandlers();           // L7-sub2:note capability (decision 012,SurrealDB)
   registerPmContentHandlers();      // L7-sub3a-1:pm-content capability (decision 014,view-agnostic pm atom)

@@ -3,7 +3,10 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { SearchRecipe, TweetInboxRecord, TweetInboxStatus, FeedbackVerdict } from '@shared/types/x-timeline-types';
-import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
+import { DEFAULT_TASK_ID, normalizeHandle } from '@shared/types/x-timeline-types';
+import { ReplyDraftsView } from './ReplyDraftsView';
+import { ReplyComposeDialog } from './ReplyComposeDialog';
+import { WatchlistView } from './WatchlistView';
 
 interface XInboxViewProps {
   workspaceId: string;
@@ -17,8 +20,14 @@ type InboxViewKey = 'pending' | 'suggested' | 'audit' | 'confirmed' | 'all';
 
 const VIEW_QUERY: Record<InboxViewKey, {
   status?: string; statuses?: string[]; humanReviewed?: boolean; orderBy?: string;
+  replied?: boolean;
 }> = {
-  pending:   { status: 'pending' },                                            // 爬回来还没判的
+  // ⚠️「已回复」与「已研判」是两件事:回过的推 status 仍是 pending
+  //(没人判过它值不值),但对干活的人来说它已经处理完了 —— 不该再排队。
+  // 用户 2026-09-02 指出:「已经保存过的推文就不应该再显示在这个界面」。
+  // 唯一性(idx_tweet_id UNIQUE)保证的是**库里不会有两份 copy**,
+  // 与「该不该显示」无关 —— 后者由状态决定,故在这里显式排除已回复的。
+  pending:   { status: 'pending', replied: false },                            // 爬回来还没判、且我还没回过的
   suggested: { status: 'worth', humanReviewed: false },                        // Gemma 建议值得,等表态
   audit:     { status: 'skip',  humanReviewed: false, orderBy: 'confidence' }, // Gemma 判不值,按置信度升序抽查漏判
   confirmed: { status: 'worth', humanReviewed: true },                         // 人工已 ✓
@@ -343,7 +352,11 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
         }),
       );
       setStatsMap(Object.fromEntries(entries));
+      // ⚠️ 返回最新列表:setRecipes 是异步的,同一次调用里读 `recipes`
+      //    拿到的还是旧闭包 —— 调用方要用最新值必须接这个返回
+      return r.recipes;
     }
+    return null;
   }, []);
 
   useEffect(() => { loadRecipes(); }, [loadRecipes]);
@@ -365,7 +378,7 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
     const r = await api()?.upsertRecipe(draft);
     if (!r?.success) throw new Error(r?.error ?? 'upsert failed');
     setEditTarget(null);
-    await loadRecipes();
+    const fresh = await loadRecipes();
     onRefreshRecipes();
   };
 
@@ -373,7 +386,7 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
     const r = await api()?.deleteRecipe(recipeId);
     if (!r?.success) throw new Error(r?.error ?? 'delete failed');
     setEditTarget(null);
-    await loadRecipes();
+    const fresh = await loadRecipes();
     onRefreshRecipes();
   };
 
@@ -475,7 +488,70 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
   const PAGE_SIZE = 20;
 
-  const [view, setView] = useState<'inbox' | 'recipes'>('inbox');
+  const [view, setView] = useState<'inbox' | 'recipes' | 'blocked' | 'capture' | 'campaign' | 'drafts' | 'watchlist'>('inbox');
+  /** 正在为哪条推写回复(卡片「送入回复」弹窗) */
+  const [composeFor, setComposeFor] = useState<TweetInboxRecord | null>(null);
+  const [prefetching, setPrefetching] = useState(false);
+
+  /**
+   * 给「Gemma 建议采纳」的推批量预抓上文。
+   * 用户 2026-09-06:「每一个它建议的,都应该获取上下文。」——
+   * 上文是①闸门的输入,提前抓好,点开弹窗就不用现等 10s。
+   */
+  const prefetchContext = async () => {
+    setPrefetching(true);
+    setScanStatus('正在给建议名单预抓上文…');
+    try {
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      // ② 的事实来源:画像。先采画像再抓上文 —— 画像影响「该不该回」,
+      //    上文只影响「这楼相关吗」,前者更基础。
+      // ⭐ 按**当前页**取(用户 2026-09-06 的操作纪律:
+      //   「在处理一页时先采集,完毕再回复,这样可靠性更高」)
+      const pageOffset = page * PAGE_SIZE;
+      // ⚠️ 跟随**当前视图**:写死 'worth' 会让「漏判抽查」等视图永远备不上料,
+      //    而侧栏还显示「本页资料已备齐」—— 用户 2026-09-06 就是这么发现矛盾的
+      const vq = VIEW_QUERY[currentView];
+      const prefStatus = vq.status;
+      const prefReviewed = vq.humanReviewed;
+      const prefStatuses = vq.statuses;   // 「全部」视图用复数
+      const pr = await api()?.prefetchProfiles(
+        workspaceId, wcId, PAGE_SIZE, pageOffset, prefStatus, prefReviewed, prefStatuses);
+      if (pr?.success && pr.mechanismSuspect) {
+        // ⚠️ 连着一串采不到 = 机制可能坏了,不是个别账号的问题。
+        //    这时继续默默出草稿,用户会毫不知情地连发一堆「只读正文」的判断。
+        setScanStatus(
+          `⚠️ 画像采集可能已失效:连续 ${pr.maxConsecutive} 个账号采不到`
+          + `（${pr.errors?.[0] ?? ''}）—— 建议检查 X 是否已改版`,
+        );
+        return;
+      }
+      const r = await api()?.prefetchContext(
+        workspaceId, wcId, PAGE_SIZE, pageOffset, prefStatus, prefReviewed, prefStatuses);
+      if (!r?.success) { setScanStatus(`预抓失败：${r?.error}`); return; }
+      // 判据是「**本页**备齐了没有」——这正是「先采完再回复」要的保证
+      const ready = (pr?.cached ?? 0) + (pr?.fetched ?? 0);
+      const profPart = pr?.success
+        ? `画像 ${ready}/${pr.authors ?? 0}${pr.failed ? `（${pr.failed} 个采不到）` : ''}　`
+        : '';
+      // ⚠️ 扫到 0 条要明说「没有目标」,别让人以为抓完了 ——
+      //    实测踩过:过滤条件写错导致匹配 0 条,界面却像正常跑完一样
+      setScanStatus(
+        r.scanned === 0
+          ? '没有可预抓的推文（本 ws 没有 Gemma 判为值得回复的）'
+          : `${VIEW_ITEMS.find((v) => v.view === currentView)?.label ?? ''} 第 ${page + 1} 页 `
+            + profPart + (r.isReply === 0
+            ? '无回复串（都是独立求助推）'
+            : `上文 ${r.fetched}/${r.isReply}`)
+            + ((pr?.failed || r.missed)
+              ? ' ⚠️ 有缺口，这几条的判断会弱一些'
+              : ' ✓ 本页资料已备齐'),
+      );
+    } catch (err) {
+      setScanStatus(`预抓失败：${String(err)}`);
+    } finally {
+      setPrefetching(false);
+    }
+  };
   const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');   // '' = 全部配方（切片用，独立于触发采集的 selectedRecipeId）
@@ -486,6 +562,8 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
   const [tweets, setTweets] = useState<TweetInboxRecord[]>([]);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  // 「隐藏已回复」:采纳与回复是两件事,回过的还挂在列表里会导致重复回复
+  const [hideReplied, setHideReplied] = useState(false);
   const offsetRef = useRef(0);
   const [scanStatus, setScanStatus] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -520,6 +598,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         lang: langFilter,
         searchRecipe: recipeFilter,
         taskId: taskFilter,
+        replied: hideReplied ? false : undefined,
         limit: PAGE_SIZE,
         offset,
       });
@@ -533,7 +612,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       const countViews: InboxViewKey[] = ['pending', 'suggested', 'audit', 'confirmed'];
       const newCounts: Record<string, number> = {};
       await Promise.all(countViews.map(async (v) => {
-        const cr = await xApiT.queryInbox({ ...VIEW_QUERY[v], lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, limit: 5000, offset: 0 });
+        const cr = await xApiT.queryInbox({ ...VIEW_QUERY[v], lang: langFilter, searchRecipe: recipeFilter, taskId: taskFilter, replied: hideReplied ? false : undefined, limit: 5000, offset: 0 });
         newCounts[v] = cr?.records?.length ?? 0;
       }));
       setCounts(newCounts);
@@ -545,7 +624,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [currentView, currentLang, filterRecipeId, filterTaskId]);
+  }, [currentView, currentLang, filterRecipeId, filterTaskId, hideReplied]);
 
   const loadStats = useCallback(async () => {
     const r = await api()?.feedbackStats();
@@ -556,7 +635,7 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     loadPage(0);
     loadStats();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView, currentLang, filterRecipeId, filterTaskId, workspaceId]);
+  }, [currentView, currentLang, filterRecipeId, filterTaskId, hideReplied, workspaceId]);
 
   useEffect(() => {
     const check = async () => {
@@ -576,15 +655,42 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     if (!selectedRecipeId) return;
     const tApi = api();
     if (!tApi) return;
+    // ⚠️ 扫描前重新拉一次配方:列表只在挂载时读过一次,
+    //    期间新建/改过的配方不会出现在下拉里 —— 用户 2026-09-07 撞上:
+    //    新建了「回国需求」却仍跑成老配方,搜索栏里还是「翻墙」那些词。
+    const fresh = await loadRecipes();
     const wcId = xApi.getXHostWcId(workspaceId);
     if (!wcId) {
       setScanStatus('请先在 X 视图登录（无活跃 X webview）');
       return;
     }
     setScanning(true);
-    setScanStatus('扫描中...');
+    setScanStatus(`扫描中…（${recipes.find((x) => String(x.id) === selectedRecipeId)?.name ?? ''}）`);
+    const usedName = (fresh ?? recipes).find(
+      (x) => String(x.id) === selectedRecipeId)?.name ?? selectedRecipeId;
     const r = await tApi.runRecipe(selectedRecipeId, workspaceId, wcId);
-    setScanStatus(r?.success ? `完成：采集 ${r.saved ?? 0} 条` : `失败：${r?.error}`);
+    // ⭐ 汇报扫描概况而非只报一个数字(用户 2026-09-07):
+    //   「都是旧的所以没入库」和「压根没扫到」长得一模一样,
+    //   只说「采集 0 条」会让人以为不工作。必须把两者分开摆出来。
+    if (!r?.success) {
+      setScanStatus(`「${usedName}」失败：${r?.error}`);
+    } else {
+      const rr = r as { saved?: number; fetched?: number; duplicates?: number;
+        filteredOut?: number; reconciled?: number; elapsedMs?: number; sinceDate?: string };
+      const fetched = rr.fetched ?? 0;
+      const lines = [
+        `「${usedName}」${((rr.elapsedMs ?? 0) / 1000).toFixed(0)}s`,
+        `窗口：${rr.sinceDate ?? '?'} 至今`,
+        `扫到 ${fetched} 条 → 新入库 ${rr.saved ?? 0}`
+          + `，早采过 ${rr.duplicates ?? 0}`
+          + `，被过滤 ${rr.filteredOut ?? 0}`,
+      ];
+      if (rr.reconciled) lines.push(`补标已回复 ${rr.reconciled}`);
+      // 一句人话结论 —— 别让用户自己去推断这些数字意味着什么
+      if (fetched === 0) lines.push('⚠️ 一条都没扫到：这批关键词在该时间窗口内可能没有推文');
+      else if ((rr.saved ?? 0) === 0) lines.push('✓ 正常：扫到的都已在库里（不是没工作）');
+      setScanStatus(lines.join('\n'));
+    }
     setScanning(false);
     loadPage(0);
   };
@@ -610,19 +716,28 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     loadPage(0);
   };
 
-  const sendToReply = async (tweet: TweetInboxRecord) => {
-    const msg = `即将在 X 中打开 @${tweet.author_handle} 的推文准备回复。\n\n${tweet.text?.slice(0, 120)}`;
-    if (window.confirm(msg)) {
-      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-      const r = await api()?.replyToTweet(tweet.tweet_url ?? '', tweet.tweet_id, workspaceId, wcId);
-      if (!r?.success) alert(`导航失败：${r?.error}`);
-    }
-  };
+  /**
+   * 取推文 URL —— 缺 tweet_url 时从 tweet_id 现推。
+   *
+   * 0 期回填的 616 行只有正文没有 url(能力勘查 §2.3:url 填充率仅 28%),
+   * 而 X 的永久链接是 `https://x.com/<handle>/status/<id>` —— 完全可推导。
+   * 让功能因为一个可推导的字段缺失而消失,是不必要的。
+   */
+  const tweetUrlOf = (tweet: TweetInboxRecord): string =>
+    tweet.tweet_url
+    || `https://x.com/${normalizeHandle(tweet.author_handle ?? 'i') || 'i'}/status/${tweet.tweet_id}`;
+
+  /**
+   * 「送入回复」—— 打开确认弹窗,里面是 AI 为这条现写的回复。
+   *
+   * 此前是个 window.confirm,只说「即将打开推文」——**弹了窗却什么也没给**。
+   * 现在弹窗里直接是待发正文,可改可换,确认后才填进 X(仍不替用户点发布)。
+   */
+  const sendToReply = (tweet: TweetInboxRecord) => setComposeFor(tweet);
 
   const viewTweet = async (tweet: TweetInboxRecord) => {
-    if (!tweet.tweet_url) return;
     const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
-    const r = await api()?.replyToTweet(tweet.tweet_url, tweet.tweet_id, workspaceId, wcId);
+    const r = await api()?.replyToTweet(tweetUrlOf(tweet), tweet.tweet_id, workspaceId, wcId);
     if (r?.success) {
       setViewingId(tweet.tweet_id);
       setTimeout(() => setViewingId((prev) => prev === tweet.tweet_id ? null : prev), 2500);
@@ -675,6 +790,30 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
     }
   };
 
+  /**
+   * 屏蔽此人 —— 只约束未来采集,已抓的历史推文一律保留(方案 §3.3)。
+   * 确认文案必须把这层语义说清楚,否则用户会以为点了就清空他的所有推文。
+   */
+  const handleBlockAuthor = async (tweet: TweetInboxRecord) => {
+    const handle = tweet.author_handle ?? '';
+    if (!handle) return;
+    const shown = normalizeHandle(handle);  // 复用共享函数,不自己写一份去 @ 逻辑
+    const ok = window.confirm(
+      `屏蔽 @${shown}?\n\n`
+      + `· 以后的采集不再收录他的推文\n`
+      + `· 已经抓到的历史推文**保留不动**\n\n`
+      + `可在「🚫 屏蔽名单」里随时解除。`,
+    );
+    if (!ok) return;
+
+    const r = await api()?.blockAuthor(handle);
+    if (!r?.success) {
+      setScanStatus(`屏蔽失败:${r?.error}`);
+      return;
+    }
+    setScanStatus(`已屏蔽 @${shown}(历史推文保留)`);
+  };
+
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -682,6 +821,34 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
       return next;
     });
   };
+
+  // ── 采集验证视图(排查工具,顶栏入口已撤)────────────────────────
+  // ⚠️ 组件与 IPC 都保留:它是「采到的 vs 屏幕上滚过的」对账工具,
+  //    真出「怎么少了一半」这类问题时还要靠它。只是日常不占顶栏位置,
+  //    需要时把 setView('capture') 接回来即可。
+  if (view === 'capture') {
+    return <CaptureMonitorView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
+  // ── 追踪名单(需求②⑤;≠ X 的关注)────────────────────────────
+  if (view === 'watchlist') {
+    return <WatchlistView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
+  // ── 回放验证台(拿历史标注离线验生成质量;日常回复走卡片弹窗)──────
+  if (view === 'drafts') {
+    return <ReplyDraftsView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
+  // ── 活动配置视图(per-ws 角色 + 文章 id)──────────────────────
+  if (view === 'campaign') {
+    return <CampaignConfigView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
+
+  // ── 屏蔽名单视图 ──────────────────────────────────────────────────
+  if (view === 'blocked') {
+    return <BlockedManagerView workspaceId={workspaceId} onBack={() => setView('inbox')} />;
+  }
 
   // ── 配方管理视图 ──────────────────────────────────────────────────
   if (view === 'recipes') {
@@ -715,7 +882,14 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         <div style={{ display: 'flex', gap: 6 }}>
           <Btn onClick={() => loadPage(page)} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
           <Btn primary onClick={triggerJudge}>AI 判断</Btn>
+          <Btn onClick={prefetchContext} disabled={prefetching}>
+            {prefetching ? '预取中…' : '🧵 预取资料'}
+          </Btn>
+          <Btn onClick={() => setView('drafts')}>🔁 回放验证</Btn>
           <Btn onClick={() => setView('recipes')}>⚙ 配方</Btn>
+          <Btn onClick={() => setView('watchlist')}>👁 追踪名单</Btn>
+          <Btn onClick={() => setView('blocked')}>🚫 屏蔽名单</Btn>
+          <Btn onClick={() => setView('campaign')}>⚙ 活动配置</Btn>
           {isInRightSlot && (
             <button onClick={handleClose} style={closeBtn}>✕</button>
           )}
@@ -770,11 +944,26 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
             ))}
           </div>
 
-          {/* 配方切片 */}
+          {/* 已回复过滤:回过的还挂在列表里会导致重复回复同一个人 */}
           <div>
-            <div style={sectionTitle}>配方</div>
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+              fontSize: 11, color: 'var(--text-muted)', padding: '2px 0',
+            }}>
+              <input type="checkbox" checked={hideReplied}
+                onChange={(e) => setHideReplied(e.target.checked)} />
+              隐藏已回复的
+            </label>
+          </div>
+
+          {/* 配方切片 —— ⚠️ 与下面「触发采集」是两回事,标题必须写清楚:
+              用户 2026-09-07 把这个当成了采集用的下拉,调了它却发现
+              「搜索栏没变化」,而且各视图全变 0(因为新配方还没采过数据)。 */}
+          <div>
+            <div style={sectionTitle}>只看某配方的结果</div>
             <select
               value={filterRecipeId}
+              onMouseDown={() => { void loadRecipes(); }}
               onChange={(e) => setFilterRecipeId(e.target.value)}
               style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
             >
@@ -798,9 +987,13 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
 
           {/* 触发采集 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={sectionTitle}>触发采集</div>
+            <div style={sectionTitle}>去 X 抓新数据(选配方后点扫描) · 共 {recipes.length} 条</div>
             <select
               value={selectedRecipeId}
+              // ⚠️ 点开下拉就重拉:配方可能在别处新建(甚至直接写库),
+              //    而列表只在挂载时读过一次 —— 用户 2026-09-07 因此
+              //    始终看不到新建的「回国需求」,反复以为是自己选错了。
+              onMouseDown={() => { void loadRecipes(); }}
               onChange={(e) => setSelectedRecipeId(e.target.value)}
               style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: 5, fontSize: 11 }}
             >
@@ -815,7 +1008,11 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
               </Btn>
               <Btn onClick={stopScan}>停</Btn>
             </div>
-            {scanStatus && <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{scanStatus}</div>}
+            {/* pre-line:扫描概况是多行的(窗口/扫到多少/新入库多少/结论) */}
+            {scanStatus && <div style={{
+              fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7,
+              whiteSpace: 'pre-line',
+            }}>{scanStatus}</div>}
           </div>
 
           {/* Gemma 观察仪表(近7天,靠 ai_verdict 快照;1.8.7 之前的旧标注不计入) */}
@@ -847,7 +1044,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg)' }}>
             {tweets.length === 0 && (
-              <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>暂无推文</div>
+              filterRecipeId ? (
+                // ⚠️ 空结果要说清是**筛选**导致的,别只显示「暂无推文」——
+                //    用户 2026-09-07 选了新配方筛选,各视图全变 0,以为数据没了
+                <div style={{ color: '#fbbf24', textAlign: 'center', marginTop: 40, fontSize: 12, lineHeight: 1.8 }}>
+                  当前按「{recipes.find((r) => String(r.id) === filterRecipeId)?.name}」筛选，
+                  该配方还没采到过数据
+                  <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>
+                    想看全部 → 左侧「只看某配方的结果」选「🌐 全部」<br />
+                    想让它采数据 → 左侧「去 X 抓新数据」选中它，再点「开始扫描」
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>暂无推文</div>
+              )
             )}
             {tweets.map((t) => {
               const expanded = expandedIds.has(t.tweet_id);
@@ -861,7 +1071,10 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                     <span style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: 12 }}>{t.author_name}</span>
-                    <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{t.author_handle}</span>
+                    {/* ⚠️ 库里 author_handle 自带 @('@angeelfv'),模板再加一个会渲染成 @@angeelfv。
+                        统一过 normalizeHandle 后由模板补 @ —— 与屏蔽名单页显示形态一致。
+                        只改显示:库值形态是历史既成事实,改它会牵动去重/统计,不在此处动。 */}
+                    <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{normalizeHandle(t.author_handle ?? '')}</span>
                     {(() => {
                       // 状态徽章:一眼看出这条推文处在三段流的哪一段
                       const isHuman = reason.startsWith('human:');
@@ -872,9 +1085,27 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                         t.ai_verdict                         ? ['✦ Gemma:建议跳过', '#f59e0b'] :
                         ['⏳ 未判', 'var(--text-disabled)'];
                       return (
-                        <span style={{ fontSize: 10, color, border: `1px solid ${color}`, padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap' }}>
-                          {label}
-                        </span>
+                        <>
+                          <span style={{ fontSize: 10, color, border: `1px solid ${color}`, padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap' }}>
+                            {label}
+                          </span>
+                          {/* ⭐「已回复」独立徽章:采纳与回复是两件事,一条推可能
+                              已采纳但没回、也可能回过却还挂在待判/建议里。
+                              实测 287 条 replied=true 落在 status='worth',
+                              在「已确认」「Gemma建议」视图里毫无提示 ——
+                              用户会重复回复同一个人(用户 2026-09-02 指出)。
+                              这条信息来自 X 的客观事实(采集自权威回复字段),
+                              手机/网页上回的都算,不只是点过按钮的。 */}
+                          {t.replied === true && (
+                            <span style={{
+                              fontSize: 10, color: '#22c55e', border: '1px solid #22c55e',
+                              background: 'rgba(34,197,94,0.12)',
+                              padding: '0px 5px', borderRadius: 8, whiteSpace: 'nowrap',
+                            }}>
+                              ↩ 已回复
+                            </span>
+                          )}
+                        </>
                       );
                     })()}
                     <span style={{ marginLeft: 'auto', color: 'var(--text-disabled)', fontSize: 11 }}>
@@ -920,14 +1151,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                     </div>
                   ))}
                   <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {t.tweet_url && (
-                      <Btn sm onClick={() => viewTweet(t)}>
-                        {viewingId === t.tweet_id ? '↗ 已在 X 中打开' : '查看原推'}
-                      </Btn>
-                    )}
-                    {t.tweet_url && <Btn sm primary onClick={() => sendToReply(t)}>送入回复</Btn>}
+                    {/* ⚠️ 不能靠 tweet_url 判断能否打开原推:0 期回填的 616 行
+                        只有正文没有 url(能力勘查 §2.3 实测 url 填充率仅 28%),
+                        导致「已确认」翻到第二页后按钮整片消失。
+                        url 是可从 tweet_id 推导的 —— 缺就现推,不该因此禁用功能。 */}
+                    <Btn sm onClick={() => viewTweet(t)}>
+                      {viewingId === t.tweet_id ? '↗ 已在 X 中打开' : '查看原推'}
+                    </Btn>
+                    <Btn sm primary onClick={() => sendToReply(t)}>送入回复</Btn>
                     {(() => {
-                      const fb = feedbackMap[t.tweet_id];
+                      // 本次会话点过的优先(乐观更新不被覆盖),否则回落到库里的真实状态。
+                      // feedbackMap 是会话内 state,翻页/重启即清空 —— 只靠它会让
+                      // 库里 accepted=true 的历史条目渲染成"没点过",看不出以前采纳过。
+                      const fb = feedbackMap[t.tweet_id]
+                        ?? (t.accepted === true ? 'accept' as const : undefined);
                       const isAudit = currentView === 'audit';
                       return (
                         <>
@@ -939,8 +1176,21 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
                             style={fb === 'reject' ? { background: '#7f1d1d', borderColor: '#7f1d1d', color: '#fca5a5' } : {}}>
                             {fb === 'reject' ? '✗ 已拒绝' : isAudit ? '✗ 确实不值' : '✗ 不采纳'}
                           </Btn>
-                          {currentView === 'confirmed' && (
+                          {/* 已回复:优先按库里的客观事实显示(采集自 X 的权威回复字段);
+                              t.replied 为真 = 确实回复过(手机/网页上回的都算),按钮变绿不可再点。
+                              否则保留手动标记入口。 */}
+                          {t.replied === true ? (
+                            <Btn sm style={{ background: '#16a34a', borderColor: '#16a34a', color: '#fff' }}>
+                              ↩ 已回复
+                            </Btn>
+                          ) : currentView === 'confirmed' ? (
                             <Btn sm onClick={() => handleMarkReplied(t)}>↩ 已回复</Btn>
+                          ) : null}
+                          {t.author_handle && (
+                            <Btn sm onClick={() => handleBlockAuthor(t)}
+                              style={{ marginLeft: 'auto', color: '#fca5a5' }}>
+                              🚫 屏蔽此人
+                            </Btn>
                           )}
                         </>
                       );
@@ -962,6 +1212,20 @@ export function XInboxView({ workspaceId }: XInboxViewProps) {
           )}
         </div>
       </div>
+
+      {/* 回复确认弹窗 —— 卡片「送入回复」点开;只填不发 */}
+      {composeFor && (
+        <ReplyComposeDialog
+          tweet={composeFor}
+          workspaceId={workspaceId}
+          onClose={() => setComposeFor(null)}
+          onFilled={() => {
+            // 填入 ≠ 已发布:不写 markReplied,等 X 采集回来的 replied 字段认。
+            // 这里只刷新列表,让本条的最新状态回显。
+            void loadPage(page);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -993,6 +1257,911 @@ function Field({ label, inline, children }: FieldProps) {
     <div style={{ display: inline ? 'flex' : 'block', alignItems: inline ? 'center' : undefined, gap: inline ? 6 : undefined }}>
       <div style={{ fontSize: 11, color: 'var(--text-disabled)', fontWeight: 600, marginBottom: inline ? 0 : 4, whiteSpace: 'nowrap' }}>{label}</div>
       {children}
+    </div>
+  );
+}
+
+// ── 活动配置视图 ────────────────────────────────────────────────
+// 用户 2026-09-03:「建议你在 UI 上做一个配置项,我自己设定,而不是受制于你」
+// 所以:角色、文章 id、触发口、间隔 全部在这里由用户自己定,代码不写死默认值。
+/** 与 electron-api.d.ts 的 NotifWatchSnapshot 一致(renderer 本地副本) */
+interface WatchEvent {
+  seenAt: string; notifiedAt?: string; kind: string; message?: string;
+  actorHandle?: string; actorUid: string; targetId: string; targetText?: string;
+  targetQuotedStatusId?: string; targetHasMedia?: boolean;
+  isInteraction: boolean; belongsToArticle: boolean; belongsWhy: string;
+  aggMissing?: number;
+}
+interface NotifWatchSnapshot {
+  running: boolean; articleId?: string; startedAt?: string;
+  payloads: number; total: number; byKind: Record<string, number>;
+  belongs: number; recent: WatchEvent[]; secondsSinceLastPayload?: number;
+  watchingUrl?: string; saved?: { inserted: number; existing: number };
+  stallWarning?: string; returns?: number;
+}
+
+interface WsRoleRow {
+  wsId: string; role: string; articleId?: string;
+  servesRefresh?: boolean; intervalMinutes?: number;
+}
+
+function CampaignConfigView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
+  const [roles, setRoles] = useState<WsRoleRow[]>([]);
+  const [accounts, setAccounts] = useState<Array<{ wsId: string; handle: string; restId?: string }>>([]);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [testOut, setTestOut] = useState('');
+  const [watchSnap, setWatchSnap] = useState<NotifWatchSnapshot | null>(null);
+
+  // 本 ws 的当前配置(未配置时按 idle —— 不参与定时任务的安全默认)
+  const mine = roles.find((r) => r.wsId === workspaceId);
+  const [role, setRole] = useState('idle');
+  const [articleId, setArticleId] = useState('');
+  const [servesRefresh, setServesRefresh] = useState(false);
+  const [interval, setIntervalMin] = useState('3');
+
+  const load = useCallback(async () => {
+    const r = await api()?.getWsRoles();
+    if (!r?.success) { setMsg(`读配置失败:${r?.error}`); return; }
+    setRoles(r.roles ?? []);
+    setAccounts(r.accounts ?? []);
+    const m = (r.roles ?? []).find((x) => x.wsId === workspaceId);
+    if (m) {
+      setRole(m.role);
+      setArticleId(m.articleId ?? '');
+      setServesRefresh(m.servesRefresh ?? false);
+      setIntervalMin(String(m.intervalMinutes ?? 3));
+    }
+  }, [workspaceId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // 实时监听推送 —— 每来一条通知就刷新,供人眼核对「有没有漏」
+  useEffect(() => {
+    const off = api()?.onNotifWatchUpdate?.((snap) => setWatchSnap(snap));
+    return () => { off?.(); };
+  }, []);
+
+  const toggleWatch = async () => {
+    if (watchSnap?.running) {
+      const r = await api()?.stopNotifWatch();
+      setWatchSnap(r?.snapshot ?? null);
+      return;
+    }
+    const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    const r = await api()?.startNotifWatch(workspaceId, wcId);
+    if (!r?.success) { setMsg(`监听启动失败:${r?.error}`); return; }
+    setWatchSnap(r.snapshot ?? null);
+    setMsg('已开始监听 —— 请在左侧打开 X 通知页,新通知会实时显示在下方');
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api()?.setWsRole({
+        wsId: workspaceId, role, articleId: articleId.trim() || undefined,
+        servesRefresh, intervalMinutes: Number(interval) || undefined,
+      });
+      setMsg(r?.success ? '已保存' : `保存失败:${r?.error}`);
+      if (r?.success) await load();
+    } finally { setBusy(false); }
+  };
+
+  /** 试抓(只抓不推送)—— 先确认数据对不对,再谈传得对不对 */
+  const testFetch = async () => {
+    if (!articleId.trim()) { setTestOut('请先粘贴帖子链接'); return; }
+    setBusy(true);
+    setTestOut('抓取中...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.fetchArticleReplies({
+        wsId: workspaceId, articleId: articleId.trim(), wcId, budgetMs: 60_000,
+      });
+      if (!r?.success || !r.result) { setTestOut(`失败:${r?.error}`); return; }
+      const x = r.result;
+      const withMedia = x.items.filter((i) => i.has_media).length;
+      const sv = r.saved;
+      const st = r.stats;
+      setTestOut(
+        `文章 ${x.articleId}\n`
+        + `翻到 ${x.fetched} 条 → 属于本文章 ${x.items.length} 条`
+        + `(其中带图 ${withMedia} 条 = 活动有效)\n`
+        + `耗时 ${Math.round(x.elapsedMs / 1000)}s${x.partial ? ' · 未抓完(budget)' : ''}\n`
+        + (sv ? `\n【③ 入库】新增 ${sv.inserted} · 变更 ${sv.changed} · 未变 ${sv.unchanged}`
+              + `${r.markedDeleted ? ` · 标记删除 ${r.markedDeleted}` : ''}\n` : '')
+        + (st ? `【库存】本文章共 ${st.total} 条 · 带图有效 ${st.withMedia}`
+              + ` · 待推送 ${st.unpushed} · 已删 ${st.deleted}\n` : '')
+        + (x.problems.length ? `⚠ ${x.problems.join(' | ')}\n` : '')
+        + `\n${x.items.slice(0, 15).map((i) =>
+            `${i.has_media ? '🖼' : '  '} @${i.username}`
+            + `${i.x_uid ? ` (uid ${i.x_uid})` : ' (无 uid)'} ${i.kind}`
+            + `  ${(i.text_excerpt ?? '').slice(0, 40)}`).join('\n')}`,
+      );
+    } finally { setBusy(false); }
+  };
+
+  /** 抓通知页 —— 具名的入向互动名单(点赞/转发/回复) */
+  const harvestNotif = async () => {
+    setBusy(true);
+    setTestOut('抓通知中(约 20 秒)...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.harvestNotifications(workspaceId, wcId);
+      if (!r?.success || !r.result) { setTestOut(`失败:${r?.error ?? '未知'}`); return; }
+      const x = r.result;
+      const byKind: Record<string, typeof x.interactions> = {};
+      for (const it of x.interactions) (byKind[it.kind] ??= []).push(it);
+      const label: Record<string, string> = {
+        like: '点赞', retweet: '转发', reply: '回复', follow: '关注',
+        quote: '引用', mention: '提及', other: '其它',
+      };
+      // ⭐ 核验名单必须**锚定到那篇文章** —— 全局汇总没有主语,
+      // 「点赞 5 条」可能散在 4 条不同的推上,与页面上数出来的对不上。
+      const v = r.verify;
+      // 每行都写清「点赞/转发的是哪条推、凭什么算这篇文章的」——
+      // 用户 2026-09-03:「关键要搞清楚点赞那个推文,不要再出现类似的错配」。
+      // 光给个人名无法核对,必须把归属依据摆出来。
+      const nameList = (list: Array<{ handle?: string; uid: string; targetId: string;
+        hasMedia?: boolean; why?: string; text?: string }>) =>
+        list.length === 0 ? '    (无)'
+          : list.map((i) => `    @${i.handle ?? '?'} (uid ${i.uid})`
+              + `${i.hasMedia ? ' 🖼带图' : ''}`
+              + `\n       ↳ 推 ${i.targetId} · ${i.why ?? '?'}`
+              + `${i.text ? `\n         「${i.text}」` : ''}`).join('\n');
+
+      setTestOut(
+        `通知采集完成 —— 接收方 @${r.owner ?? '(未识别)'}\n`
+        + `捕获 ${x.payloads} 个通知响应,滚 ${x.rounds} 轮\n`
+        + `入库:新增 ${r.saved?.inserted ?? 0} · 已存在 ${r.saved?.existing ?? 0}\n`
+        + (x.problems.length ? `⚠ ${x.problems.join(' | ')}\n` : '')
+        + (v
+            ? `\n━━━ 【核验名单 · 文章 ${v.articleId}】━━━\n`
+              + `点赞(${v.like.length}):\n${nameList(v.like)}\n`
+              + `转发(${v.retweet.length}):\n${nameList(v.retweet)}\n`
+              + `回复(${v.reply.length}):\n${nameList(v.reply)}\n`
+              + `引用(${v.quote.length}):\n${nameList(v.quote)}\n`
+              + (v.excluded ? `(已排除自己的互动 ${v.excluded} 条)\n` : '')
+            : `\n⚠ 未配置帖子链接 —— 无法给出核验名单。请先在上方填链接并保存。\n`)
+        + `\n【本次抓到的全部通知(不限本文章,仅供参考)】\n`
+        + Object.entries(byKind).map(([k, list]) =>
+            `  ${label[k] ?? k} ${list.length} 条`).join(' · ')
+        + `\n【库存累计】` + Object.entries(r.stats ?? {})
+            .map(([k, v2]) => `${label[k] ?? k} ${v2}`).join(' · '),
+      );
+    } finally { setBusy(false); }
+  };
+
+  const inp: React.CSSProperties = {
+    fontSize: 11, padding: '3px 7px', borderRadius: 5,
+    border: '1px solid var(--text-faint)', background: 'var(--bg)', color: 'var(--text)',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-bright)' }}>⚙ 活动配置</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>一个 ws 只干一件事</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {msg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{msg}</span>}
+          <Btn sm onClick={onBack}>← 返回收件箱</Btn>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 本 ws 的角色 */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>
+            本工作区({workspaceId})
+            {(() => {
+              // 身份是 ws 的属性 —— 每个 ws 登录哪个账号,就核实哪个账号的状态
+              const a = accounts.find((x) => x.wsId === workspaceId);
+              return a
+                ? <span style={{ marginLeft: 8, fontWeight: 400, color: '#60a5fa' }}>
+                    登录 @{a.handle}{a.restId ? ` (uid ${a.restId})` : ''}
+                  </span>
+                : <span style={{ marginLeft: 8, fontWeight: 400, color: '#f59e0b' }}>
+                    ⚠ 未识别登录账号 —— 请先点「识别我的账号」
+                  </span>;
+            })()}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--text-muted)' }}>角色</span>
+            <select value={role} onChange={(e) => setRole(e.target.value)} style={inp}>
+              <option value="idle">idle —— 不参与定时任务</option>
+              <option value="search">search —— 定时搜索采集</option>
+              <option value="campaign">campaign —— 活动核验</option>
+            </select>
+            {mine && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>当前已存:{mine.role}</span>}
+          </div>
+
+          {role === 'campaign' && (
+            <>
+              {/* 用户 2026-09-03:自动探测置顶帖不靠谱,改成贴链接 ——
+                  链接是手里现成的确定性输入,不用程序猜哪一篇。
+                  ⚠️ handle 以链接为准:活动文章可能发自另一个账号
+                  (OTun_MyVPN ≠ netlab2gfw),用登录账号拼 URL 会拼错。 */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--text-muted)' }}>帖子链接</span>
+                <input value={articleId} onChange={(e) => setArticleId(e.target.value)}
+                  placeholder="https://x.com/OTun_MyVPN/status/2092213139139854555?s=20"
+                  style={{ ...inp, width: 420, fontFamily: 'ui-monospace, monospace' }} />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                在 X 上打开那条帖子 →「分享」→「复制链接」→ 粘到这里。
+                也可只填纯数字 id;账号名取自链接,可以是别的账号的帖子。
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={servesRefresh}
+                    onChange={(e) => setServesRefresh(e.target.checked)} />
+                  <span>承接外部触发口(/refresh)</span>
+                </label>
+                <span style={{ color: 'var(--text-muted)' }}>抓取间隔</span>
+                <input value={interval} onChange={(e) => setIntervalMin(e.target.value)}
+                  style={{ ...inp, width: 50 }} />
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>分钟</span>
+              </div>
+            </>
+          )}
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Btn primary onClick={save} disabled={busy}>保存</Btn>
+            {role === 'campaign' && (
+              <Btn onClick={testFetch} disabled={busy}>试抓(只抓不推送)</Btn>
+            )}
+            <Btn onClick={harvestNotif} disabled={busy}>抓通知(谁赞/转/回了我)</Btn>
+            <Btn primary={watchSnap?.running} onClick={toggleWatch}>
+              {watchSnap?.running ? '⏹ 停止监听' : '👁 实时监听通知'}
+            </Btn>
+          </div>
+        </div>
+
+        {/* 全部 ws 角色一览 —— 看清谁在干什么 */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px' }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-bright)', marginBottom: 6 }}>全部工作区</div>
+          {roles.length === 0 && <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>暂无配置</div>}
+          {roles.map((r) => (
+            <div key={r.wsId} style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 0' }}>
+              <strong style={{ color: 'var(--text)' }}>{r.wsId}</strong> → {r.role}
+              {(() => {
+                const a = accounts.find((x) => x.wsId === r.wsId);
+                return a ? <span style={{ color: '#60a5fa' }}> · @{a.handle}</span> : null;
+              })()}
+              {r.articleId ? ` · 文章 ${r.articleId}` : ''}
+              {r.servesRefresh ? ' · 承接 /refresh' : ''}
+              {r.intervalMinutes ? ` · ${r.intervalMinutes}min` : ''}
+            </div>
+          ))}
+        </div>
+
+        {/* 实时监听面板 —— 用户 2026-09-03:「这样我才能够在测试中发现是否漏东西」。
+            给的是**过程**(何时来了什么、原始文案、解成什么、算不算这篇),
+            而不是我算好的结论 —— 结论对不对,只有看得见过程才判断得了。 */}
+        {watchSnap && (
+          <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: `3px solid ${watchSnap.running ? '#22c55e' : 'var(--text-faint)'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600, color: watchSnap.running ? '#22c55e' : 'var(--text-muted)' }}>
+                {watchSnap.running ? '● 监听中' : '○ 已停止'}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                收到载荷 {watchSnap.payloads} 个 · 事件 {watchSnap.total} 条 · 属于本文章 {watchSnap.belongs} 条
+              </span>
+              {/* 「看得到」与「留得下」分开显示 —— 面板有、库里没有 是踩过的坑 */}
+              {watchSnap.saved && (
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  · 已入库 {watchSnap.saved.inserted} 新增 / {watchSnap.saved.existing} 已存在
+                </span>
+              )}
+              {watchSnap.secondsSinceLastPayload !== undefined && (
+                <span style={{ fontSize: 11,
+                  color: watchSnap.secondsSinceLastPayload > 60 ? '#f59e0b' : 'var(--text-faint)' }}>
+                  上次收到 {watchSnap.secondsSinceLastPayload}s 前
+                  {watchSnap.secondsSinceLastPayload > 60 ? '(超过 1 分钟没动静 —— X 可能没在刷新)' : ''}
+                </span>
+              )}
+            </div>
+            {/* 绿灯不够 —— 必须能看出「在听哪一页」和「为什么没动静」。
+                停在首页时 attach 一样成功、绿灯一样亮,但 X 根本不发通知载荷。 */}
+            {watchSnap.stallWarning && (
+              <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4, fontWeight: 600 }}>
+                ⚠ {watchSnap.stallWarning}
+              </div>
+            )}
+            {/* 被抢走的次数:自愈也要留痕,否则「页面老被抢」永远查不出来 */}
+            {watchSnap.returns !== undefined && watchSnap.returns > 0 && (
+              <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2 }}>
+                已自动跳回通知页 {watchSnap.returns} 次(页面被别的流程导航走过)
+              </div>
+            )}
+            {watchSnap.watchingUrl && (
+              <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                正在监听:{watchSnap.watchingUrl}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
+              {watchSnap.articleId
+                ? `目标文章 ${watchSnap.articleId}`
+                : '⚠ 未配置帖子链接 —— 归属判定不可用'}
+              {'　'}类型分布:{Object.entries(watchSnap.byKind).map(([k, v]) => `${k} ${v}`).join(' · ') || '(暂无)'}
+            </div>
+
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5,
+              maxHeight: 360, overflowY: 'auto' }}>
+              {watchSnap.recent.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                  等待新通知…(X 约每 10 秒自己刷新一次通知页;请保持左侧停在通知页)
+                </div>
+              )}
+              {watchSnap.recent.map((e, idx) => (
+                <div key={`${e.kind}-${e.actorUid}-${e.targetId}-${idx}`} style={{
+                  background: 'var(--bg)', borderRadius: 5, padding: '5px 8px',
+                  borderLeft: `3px solid ${e.belongsToArticle ? '#22c55e' : 'var(--text-faint)'}`,
+                }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-disabled)' }}>
+                      {new Date(e.seenAt).toLocaleTimeString('zh-CN')}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#60a5fa' }}>{e.kind}</span>
+                    <span style={{ fontSize: 11 }}>@{e.actorHandle ?? '?'}</span>
+                    {e.targetHasMedia && <span style={{ fontSize: 10 }}>🖼</span>}
+                    {/* 聚合缺口:X 说 N 条却只给 1 条代表推 —— 差额摆出来,
+                        否则「少了几次」永远是静默的(真机实测:点 2 个赞只来 1 条通知) */}
+                    {e.aggMissing !== undefined && e.aggMissing > 0 && (
+                      <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}
+                        title="X 的聚合通知只给一条代表推,其余推的 id 载荷里没有 —— 目前无解">
+                        ⚠ X 还扣着 {e.aggMissing} 条没给
+                      </span>
+                    )}
+                    <span style={{ marginLeft: 'auto', fontSize: 10,
+                      color: e.belongsToArticle ? '#22c55e' : 'var(--text-faint)' }}>
+                      {e.belongsToArticle ? `✓ ${e.belongsWhy}` : `— ${e.belongsWhy}`}
+                    </span>
+                  </div>
+                  {/* 原始文案:人核对的第一依据 */}
+                  {e.message && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>「{e.message}」</div>
+                  )}
+                  {e.targetText && (
+                    <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                      推 {e.targetId}:{e.targetText}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {testOut && (
+          <pre style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: '3px solid #a78bfa', fontSize: 11, color: 'var(--text)',
+            whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'ui-monospace, monospace',
+          }}>{testOut}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 屏蔽名单管理视图 ────────────────────────────────────────────────
+// 语义提醒:屏蔽只约束未来采集,不抹除历史数据(方案 §3.3 已拍板)。
+// 名单里的 handle 是**归一化形态**(无 @、全小写),展示时补回 @。
+interface BlockedAuthorItem {
+  handle: string;
+  displayName?: string;
+  blockedAt?: string;
+  blockedReason?: string;
+}
+
+function BlockedManagerView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
+  const [authors, setAuthors] = useState<BlockedAuthorItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [selfHandle, setSelfHandle] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [spikeOut, setSpikeOut] = useState<string>('');
+  const [spikeHandle, setSpikeHandle] = useState<string>('');
+  const [spiking, setSpiking] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await api()?.listBlocked();
+    if (!r?.success) {
+      // fail loud:查不到 ≠ 名单为空,必须让用户看见
+      setStatusMsg(`加载失败:${r?.error ?? 'no api'}`);
+      setAuthors([]);
+    } else {
+      setStatusMsg('');
+      setAuthors(r.authors ?? []);
+    }
+    setLoading(false);
+  }, []);
+
+  const loadSelf = useCallback(async () => {
+    const r = await api()?.getSelf();
+    setSelfHandle(r?.handle ?? null);
+  }, []);
+
+  useEffect(() => { load(); loadSelf(); }, [load, loadSelf]);
+
+  /**
+   * 识别当前登录账号 —— 探测不到就如实报错,不写猜测值。
+   * X 的 DOM 会变,失败时把 tried 明细显示出来,便于定位是哪条策略失效。
+   */
+  const handleDetectSelf = async () => {
+    setDetecting(true);
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.detectSelf(wcId, workspaceId);
+      if (!r?.success) {
+        setStatusMsg(`识别失败:${r?.error ?? '未知'}(请确认 X 已登录并在前台)`);
+        return;
+      }
+      setStatusMsg(`已识别:@${r.handle}(via ${r.via})`);
+      await loadSelf();
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const handleUnblock = async (handle: string) => {
+    const r = await api()?.unblockAuthor(handle);
+    if (!r?.success) {
+      setStatusMsg(`解除失败:${r?.error}`);
+      return;
+    }
+    setStatusMsg(`已解除 @${handle}`);
+    await load();
+  };
+
+  /**
+   * 「取某账号全部发言」实机诊断 —— 画像基础方法的可行性验证。
+   * 走个人主页 /with_replies(回复与被回复的原推上下相邻,关系是页面结构自带的),
+   * 不试搜索语法。⚠️ 只读:不落库不改状态,占用前台 X webview 约 15 秒。
+   */
+  const handleSpike = async () => {
+    // ⚠️ 不能用 window.prompt —— Electron renderer 不支持(报
+    // "prompt() is not supported"),全仓也没有第二处在用。改用行内输入框。
+    const handle = spikeHandle.trim() || selfHandle;
+    if (!handle) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
+
+    setSpiking(true);
+    setSpikeOut(`诊断 @${normalizeHandle(handle)} 中(约 15 秒,期间请勿操作 X)...`);
+    try {
+    const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    const r = await api()?.watchlistSpike(handle, wcId);
+    if (!r?.success || !r.result) {
+      setSpikeOut(`诊断失败:${r?.error ?? '未知'}`);
+      return;
+    }
+    const x = r.result;
+    const rounds = x.rounds.map((rd) =>
+      `  轮${rd.round}: DOM ${rd.domCount} | 累计 ${rd.cumulative} (+${rd.newIds}) | 最旧 ${rd.spanDays ?? '?'} 天前`,
+    ).join('\n');
+    const adj = x.adjacency;
+    setSpikeOut(
+      `@${x.handle}  ${x.url}\n`
+      + `\n① 配对结构(本人回复的前一条是谁的)\n`
+      + `  检出本人回复 ${adj.checked} 条 → 前一条是他人 ${adj.precededByOther} / `
+      + `是本人 ${adj.precededBySelf} / 在顶部 ${adj.atTop}\n`
+      + `  ${adj.checked > 0 && adj.precededByOther === adj.checked - adj.atTop
+            ? '✓ 相邻配对成立(可据此还原 in_reply_to)'
+            : adj.checked === 0 ? '· 没检出回复 —— 换个有回复的账号再试'
+            : '⚠ 配对不稳定,需另寻办法'}\n`
+      + `\n② 时间覆盖(决定「回溯窗口」变量的可行上限)\n${rounds}\n`
+      + `  停止原因:${x.stopReason}\n`
+      + `\n③ 判据对照\n`
+      + `  累计 ${x.totalItems} 条 | 本人 ${x.selfItems} | A「Replying to」${x.replyItems} | `
+      + `B 连接线 ${x.threadLineItems} | socialContext ${x.socialItems}\n`
+      + `  ${x.selfItems > 0 && x.threadLineItems < x.selfItems
+            ? `⚠ 本人 ${x.selfItems} 条,连接线只判出 ${x.threadLineItems} 条 —— `
+              + `漏 ${x.selfItems - x.threadLineItems} 条。/with_replies 上本人每条都是回复,`
+              + `连接线是有损代理,不能拿来筛候选`
+            : '→ 连接线与本人条数一致'}\n`
+      + `\n④ X 自己声明的关系载体(原样 dump,不做解读)\n`
+      + x.samples.filter((sp) => sp.isSelf).slice(0, 4).map((sp) => {
+          const rs = sp.relSignals ?? {};
+          const links = (rs.statusLinks ?? []).join(' , ') || '(无)';
+          const attrs = JSON.stringify(rs.articleAttrs ?? {});
+          const anc = JSON.stringify(rs.ancestorAttrs ?? []);
+          return `  ── ${sp.tweetId ?? 'no-id'} ${sp.text.slice(0, 20)}\n`
+            + `     status链接: ${links}\n`
+            + `     article属性: ${attrs.slice(0, 160)}\n`
+            + `     祖先属性: ${anc.slice(0, 200)}`;
+        }).join('\n')
+      + `\n\n⑤ 回复关系(开详情页解 —— 这才是「回复了谁」的真源)\n`
+      + (x.relationProbe.length === 0
+          ? '  没有候选(需先有本人带连接线的推)'
+          : x.relationProbe.map((rp) =>
+              `  ${rp.tweetId} → 回复给 ${rp.replyingTo ?? '✗'} | 父推 ${rp.parentId ?? '✗'}`,
+            ).join('\n')),
+    );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
+  /**
+   * 采集回复关系 —— 主线第一环:「我回复了谁的哪条推」。
+   * 拦截 GraphQL 取权威字段(in_reply_to_*),不从 DOM 猜。
+   * 回填 replied 用的是客观事实,手机/网页上回的一律算数。
+   */
+  // 全量回补可能跑 40 分钟 —— 订阅进度,否则界面上是个黑箱
+  useEffect(() => {
+    const off = api()?.onHarvestProgress?.((p) => {
+      const pct = Math.round(p.round * 100 / p.maxRounds);
+      setSpikeOut(`采集中… 轮 ${p.round}/${p.maxRounds}(${pct}%)\n`
+        + `  已抓 ${p.captured} 条 | 响应 ${p.payloads} | scrollY=${p.scrollY}`
+        + `${p.stuck > 0 ? ` | ⏳ 卡住 ${p.stuck} 轮(等懒加载)` : ''}\n`
+        + `  最旧:${p.oldest ?? '?'}\n`
+        + `  ${p.url}`);
+    });
+    return () => { if (off) off(); };
+  }, []);
+
+  const handleCollectReplies = async () => {
+    const handle = spikeHandle.trim() || selfHandle;
+    if (!handle) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
+    setSpiking(true);
+    setSpikeOut(`采集 @${normalizeHandle(handle)} 的回复中(自然滚动,期间请勿操作 X)...`);
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      // 不传 mode:有游标就续传、没有就从头,由 main 侧决定 —— 用户不必知道
+      // 不设目标天数:抓到滚不动为止(用户 2026-09-02 定的判据)
+      const r = await api()?.collectReplies(handle, wcId);
+      if (!r?.success || !r.result) {
+        setSpikeOut(`采集失败:${r?.error ?? '未知'}`);
+        return;
+      }
+      const x = r.result;
+      const b = x.backfill;
+      setSpikeOut(
+        `回复关系采集完成 —— @${normalizeHandle(handle)}\n`
+        + `\n滚了 ${x.rounds} 轮,捕获 ${x.payloads} 个响应\n`
+        + `本次最旧抓到 ${x.oldestDays ?? '?'} 天前\n`
+        + `停因:${x.stopReason}\n`
+        + (x.problems?.length
+            ? `\n⚠ 采集校验问题(如实报出,不粉饰):\n`
+              + x.problems.map((p) => `  · ${p}`).join('\n') + '\n'
+            : '')
+        + `解出回复关系 ${x.relations} 条,其中我自己发的 ${x.ownReplies} 条\n`
+        + `\n【落库】\n`
+        + `  自己的回复入库:${x.ownSaved.inserted} 条(已存在 ${x.ownSaved.skipped} 条)\n`
+        + `  补上关系:${x.savedOnReplies} 条\n`
+        + `  标记「已回复」:${b.markedReplied} 条\n`
+        + `  其中是已采纳线索:${b.amongAccepted} 条  ← 主线产出\n`
+        + `  父推不在库里:${b.parentNotInDb} 条(回复过但没采集过的)\n`
+        + (r.stats
+            ? `\n【累计】已采纳 ${r.stats.totalAccepted} 条,其中回复过 ${r.stats.repliedAccepted} 条\n`
+            : '')
+        + (r.coverage && r.baseline?.tweetCount
+            ? `\n【采集完整度】库存 ${r.coverage.count} / 基线 ${r.baseline.tweetCount} 条`
+              + ` = ${Math.round(r.coverage.count * 1000 / r.baseline.tweetCount) / 10}%\n`
+              + `  原创 ${r.coverage.posts} + 回复 ${r.coverage.replies}(AI 学说话方式两者都要)\n`
+              + `  最旧 ${(r.coverage.oldest ?? '').slice(0, 10)} —— 有游标续传,多跑几次会一次比一次深\n`
+            : r.coverage
+            ? `\n【库存回复】${r.coverage.count} 条,覆盖最近 ${r.coverage.spanDays ?? '?'} 天\n`
+            : '')
+        + (x.dumpPath ? `\n📦 明细:${x.dumpPath}` : '')
+        + `\n\n(返回收件箱后刷新即可看到「已回复」状态)`,
+      );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
+  /**
+   * 滚动验证 —— 底座函数 harvestTimeline 的验收入口。
+   * 用户 2026-09-02:「先做好网页自动滚动…包含校验方法。这个函数过关再考虑其他的问题。」
+   * 只读不落库:先证明能把一页推文抓全,再谈接业务。
+   */
+  const handleHarvest = async () => {
+    const h = spikeHandle.trim() || selfHandle;
+    if (!h) { setSpikeOut('请先填 handle,或先「识别我的账号」'); return; }
+    const url = `https://x.com/${normalizeHandle(h)}/with_replies`;
+    setSpiking(true);
+    setSpikeOut(`滚动采集 ${url}\n(滚到底为止,可能数分钟,期间请勿操作 X)...`);
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.harvest(url, wcId);
+      if (!r?.success || !r.report) { setSpikeOut(`失败:${r?.error ?? '未知'}`); return; }
+      const x = r.report;
+      const tr = x.trace.map((t) =>
+        `  轮${String(t.round).padStart(3)} y=${String(t.scrollY).padStart(6)} `
+        + `article=${String(t.domArticles).padStart(3)} 累计=${String(t.cumulative).padStart(4)} `
+        + `新增=${t.newThisRound} 卡=${t.stuck}`).join('\n');
+      setSpikeOut(
+        `${x.ok ? '✅ 校验通过' : '❌ 校验未通过'} — ${x.url}\n`
+        + (x.problems.length ? `\n【问题】\n${x.problems.map((p) => `  ⚠ ${p}`).join('\n')}\n` : '')
+        + `\n抓到 ${x.tweets} 条 | ${x.rounds} 轮 | ${x.payloads} 个响应\n`
+        + `停因:${x.stopReason}\n`
+        + `\n【日期覆盖】${x.dateSpan.oldest ?? '?'} ~ ${x.dateSpan.newest ?? '?'}`
+        + ` 共 ${x.dateSpan.days} 天\n`
+        + (x.dateSpan.gaps.length
+            ? `  空洞:${x.dateSpan.gaps.join(' / ')}\n` : '  无空洞 ✓\n')
+        + `\n【滚动轨迹(首尾各5轮)】\n${tr}`,
+      );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
+  /**
+   * 载荷勘查 —— 直接量 X GraphQL 原始响应,搞清底层到底供给哪些元数据。
+   * 这是「能做到哪一步」的真实依据,不靠 DOM 推断、不靠我猜。
+   */
+  const handleSurvey = async () => {
+    setSpiking(true);
+    setSpikeOut('勘查中(约 30 秒,会依次走通知页/主页,期间请勿操作 X)...');
+    try {
+      const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+      const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+      const r = await api()?.payloadSurvey(wcId, 30);
+      if (!r?.success || !r.result) {
+        setSpikeOut(`勘查失败:${r?.error ?? '未知'}`);
+        return;
+      }
+      const x = r.result;
+      const ops = x.operations.slice(0, 12)
+        .map((o) => `  ${o.name} ×${o.count} (${Math.round(o.bytes / 1024)}KB)`).join('\n');
+      const rel = x.relationFields.slice(0, 60)
+        .map((f) => `  ${f.path}  ×${f.count}  = ${f.sample}`).join('\n');
+      setSpikeOut(
+        `X 原始载荷勘查 —— 捕获 ${x.totalPayloads} 个响应,${x.fields.length} 个字段\n`
+        + `${x.note}\n`
+        + `\n📄 完整报告(UI 只显示摘要,全量在文件里):\n  ${x.reportPath}\n`
+        + `📦 原始响应(供日后重新分析,不必再跑):\n  ${x.rawPath}\n`
+        + `\n【捕获的接口(按来源页)】\n${ops || '  (无)'}\n`
+        + `\n【关系类字段 —— 能做什么的真实依据】\n${rel || '  (无)'}\n`
+        + `\n【全部字段共 ${x.fields.length} 个,此处前 80,余见报告文件】\n`
+        + x.fields.slice(0, 80).map((f) => `  ${f.path} ×${f.count}`).join('\n'),
+      );
+    } finally {
+      setSpiking(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-bright)' }}>🚫 屏蔽名单</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>不再采集其新推,已抓历史保留</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {statusMsg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{statusMsg}</span>}
+          <Btn sm onClick={handleDetectSelf} disabled={detecting}>
+            {detecting ? '识别中...' : '识别我的账号'}
+          </Btn>
+          <input
+            value={spikeHandle}
+            onChange={(e) => setSpikeHandle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !spiking) handleSpike(); }}
+            placeholder={selfHandle ? `@${selfHandle}` : 'handle'}
+            style={{
+              width: 120, fontSize: 11, padding: '2px 6px', borderRadius: 5,
+              border: '1px solid var(--text-faint)', background: 'var(--bg)', color: 'var(--text)',
+            }}
+          />
+          <Btn sm onClick={handleSpike} disabled={spiking}>
+            {spiking ? '诊断中...' : 'B′ 诊断'}
+          </Btn>
+          <Btn sm onClick={handleSurvey} disabled={spiking}>
+            {spiking ? '勘查中...' : '载荷勘查'}
+          </Btn>
+          <Btn sm primary onClick={() => handleCollectReplies()} disabled={spiking}>
+            {spiking ? '采集中...' : '采集回复'}
+          </Btn>
+          <Btn sm onClick={handleHarvest} disabled={spiking}>
+            {spiking ? '采集中...' : '滚动验证'}
+          </Btn>
+          <Btn sm onClick={load} disabled={loading}>{loading ? '加载中...' : '刷新'}</Btn>
+          <Btn sm onClick={onBack}>← 返回收件箱</Btn>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{
+          background: 'var(--bg-card)', borderRadius: 8, padding: '8px 14px',
+          borderLeft: `3px solid ${selfHandle ? '#3b82f6' : 'var(--text-faint)'}`,
+          fontSize: 11, color: 'var(--text-muted)',
+        }}>
+          {selfHandle
+            ? <>我的账号:<strong style={{ color: '#60a5fa' }}>@{selfHandle}</strong> —— 自己发的推不显示在收件箱</>
+            : <>尚未识别本人账号。点右上「识别我的账号」后,自己发的推将不再出现在收件箱。</>}
+        </div>
+        {spikeOut && (
+          <pre style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: '3px solid #a78bfa', fontSize: 11, color: 'var(--text)',
+            whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'ui-monospace, monospace',
+          }}>{spikeOut}</pre>
+        )}
+        {!loading && authors.length === 0 && (
+          <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 40 }}>
+            暂无屏蔽的账号。在收件箱推文卡片上点「🚫 屏蔽此人」即可加入。
+          </div>
+        )}
+        {authors.map((a) => (
+          <div key={a.handle} style={{
+            background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px',
+            borderLeft: '3px solid #7f1d1d', display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {a.displayName && (
+                  <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-bright)' }}>{a.displayName}</span>
+                )}
+                <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{a.handle}</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
+                {a.blockedAt ? `${timeAgo(String(a.blockedAt))}屏蔽` : '屏蔽时间未知'}
+                {a.blockedReason ? ` · ${a.blockedReason}` : ''}
+              </div>
+            </div>
+            <Btn sm onClick={() => handleUnblock(a.handle)}>解除</Btn>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 采集验证视图 ────────────────────────────────────────────────────
+// 用户 2026-09-02 定的验证方式:「左边是原推文页,右边是采集显示页,
+// 我在左边操作,你在右边显示抓取的 item 内容,如果我切换任何页面,
+// 都能保证抓取这些内容,这个函数就算大概过关。理论上应该加上统计,
+// 共滚动过多少个推文,成功采集了多少条才算。」
+//
+// ⭐ 核心是**分母**:滚过多少 vs 采到多少。没有分母时「抓到 81 条」
+//    说明不了任何问题 —— 正是用户拿官网 433 次点击当分母才发现漏了 80%。
+interface CaptureSnap {
+  running: boolean; onScreenCount: number; skippedAds: number;
+  seenInDom: number; captured: number; captureRate: number;
+  missing: string[]; payloads: number; elapsedSec: number;
+  currentUrl?: string; scrollY?: number;
+  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
+}
+
+function CaptureMonitorView({ workspaceId, onBack }: { workspaceId: string; onBack: () => void }) {
+  const [snap, setSnap] = useState<CaptureSnap | null>(null);
+  const [running, setRunning] = useState(false);
+  const [msg, setMsg] = useState('');
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
+
+  // 用户 2026-09-02:「屏幕满时自动往下同步滚动,方便作为人的观察和比对」
+  // 列表按**屏幕顺序**排(第一条 = 左边最上面那条),所以跟随 = 回到顶部对齐。
+  useEffect(() => {
+    if (autoFollow && listRef.current) listRef.current.scrollTop = 0;
+  }, [snap, autoFollow]);
+
+  useEffect(() => {
+    const off = api()?.onCaptureUpdate?.((s) => setSnap(s as CaptureSnap));
+    return () => { if (off) off(); };
+  }, []);
+
+  const start = async () => {
+    const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
+    const wcId = xApi.getXHostWcId(workspaceId) ?? undefined;
+    const r = await api()?.captureStart(wcId);
+    if (!r?.success) { setMsg(`启动失败:${r?.error ?? '未知'}`); return; }
+    setRunning(true);
+    setMsg('监视中 —— 请在左侧自由浏览、滚动、切换页面');
+  };
+
+  const stop = async () => {
+    const r = await api()?.captureStop();
+    setRunning(false);
+    if (r?.snapshot) setSnap(r.snapshot as CaptureSnap);
+    setMsg('已停止');
+  };
+
+  const rate = snap?.captureRate ?? 0;
+  const rateColor = rate >= 99 ? '#22c55e' : rate >= 90 ? '#f59e0b' : '#ef4444';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 36, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', flexShrink: 0, gap: 8 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-bright)' }}>🔬 采集验证</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>左边浏览,右边实时对照</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {msg && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{msg}</span>}
+          {running
+            ? <Btn sm onClick={stop} style={{ background: '#7f1d1d', borderColor: '#7f1d1d', color: '#fca5a5' }}>停止监视</Btn>
+            : <Btn sm primary onClick={start}>开始监视</Btn>}
+          <Btn sm onClick={onBack}>← 返回收件箱</Btn>
+        </div>
+      </div>
+
+      <div style={{ flexShrink: 0, padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* 统计:分子/分母/采集率 */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          {[
+            { label: '此刻屏幕上', value: snap?.onScreenCount ?? 0, color: 'var(--text-bright)' },
+            { label: '累计滚过', value: snap?.seenInDom ?? 0, color: 'var(--text-muted)' },
+            { label: '已采到', value: snap?.captured ?? 0, color: '#60a5fa' },
+            { label: '采集率', value: `${rate}%`, color: rateColor },
+          ].map((k) => (
+            <div key={k.label} style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 6, padding: '5px 10px' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-disabled)' }}>{k.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: k.color, lineHeight: 1.2 }}>{k.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {snap?.currentUrl && (
+          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+            当前页:{snap.currentUrl}　scrollY={snap.scrollY}　已运行 {snap.elapsedSec}s
+            {snap.skippedAds > 0 && `　(跳过 ${snap.skippedAds} 个广告/非推文元素)`}
+            　响应 {snap.payloads}
+          </div>
+        )}
+
+        {/* 漏网名单 —— 屏幕上见过却没采到的,这才是真正的问题 */}
+        {snap && snap.missing.length > 0 && (
+          <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: '10px 14px', borderLeft: '3px solid #ef4444' }}>
+            <div style={{ color: '#fca5a5', fontWeight: 600, marginBottom: 4 }}>
+              ⚠ 屏幕上见过但没采到:{snap.missing.length} 条
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'ui-monospace, monospace' }}>
+              {snap.missing.join(', ')}
+            </div>
+          </div>
+        )}
+
+        {/* 实时采到的内容 —— 与左边页面人眼对照 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
+            此刻屏幕上的推文(顺序与左侧一致,共 {snap?.onScreenCount ?? 0} 条):
+          </span>
+          <label style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input type="checkbox" checked={autoFollow} onChange={(e) => setAutoFollow(e.target.checked)} />
+            自动跟随
+          </label>
+        </div>
+      </div>
+
+      {/* 独立滚动区:内容多了自己滚,不挤压上面的统计 */}
+      {/* 推文列表:从统计区正下方开始铺,内容多了自己滚 ——
+          用户 2026-09-02:「右边把推文往上显示吧,只有满屏再往下滚,
+          都在下面看起来吃力」。此前统计区也是 flex:1,把列表挤到了底部。 */}
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {(snap?.recent ?? []).map((t) => (
+          <div key={t.tweetId} style={{
+            background: 'var(--bg-card)', borderRadius: 6, padding: '6px 10px',
+            borderLeft: `3px solid ${t.isReply ? '#a78bfa' : '#22c55e'}`,
+          }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3 }}>
+              <span style={{ color: 'var(--text-disabled)', fontSize: 11 }}>@{normalizeHandle(t.authorHandle ?? '')}</span>
+              <span style={{ fontSize: 10, color: t.isReply ? '#a78bfa' : '#22c55e' }}>
+                {t.isReply ? '回复' : '原创'}
+              </span>
+              <span style={{ fontSize: 9, color: t.fromDom ? '#f59e0b' : '#60a5fa',
+                border: `1px solid ${t.fromDom ? '#f59e0b' : '#60a5fa'}`, borderRadius: 6, padding: '0 4px' }}>
+                {t.fromDom ? 'DOM' : '载荷'}
+              </span>
+              <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)' }}>
+                ♥{t.likes ?? 0}　{t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : ''}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.45 }}>{t.text}</div>
+          </div>
+        ))}
+        {!snap?.recent?.length && (
+          <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 30 }}>
+            点「开始监视」后,在左侧 X 页面浏览/滚动/切换标签页,这里会实时显示抓到的内容。
+          </div>
+        )}
+      </div>
     </div>
   );
 }

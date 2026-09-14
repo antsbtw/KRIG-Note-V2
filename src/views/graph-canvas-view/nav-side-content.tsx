@@ -33,6 +33,7 @@ import { useWorkspace } from '@workspace/workspace-instance/use-workspace';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasListItem,
+  MindDocListItem,
   GraphFolderRecord,
 } from '@capabilities/graph-library-store/types';
 import {
@@ -46,8 +47,15 @@ import {
   setRenameTrigger,
   setFolderCreatedTrigger,
   setCanvasCreatedTrigger,
+  setCreateMenuTrigger,
 } from './canvas-commands';
 import { relativeTime } from '@shared/date-utils';
+import { ContextMenuPopover } from '@slot/shared-ui/ContextMenuPopover';
+
+/** 树项载荷:画板与导图混排,用 kind 区分(B1)。 */
+type TreeItemPayload =
+  | { kind: 'canvas'; item: GraphCanvasListItem }
+  | { kind: 'mind'; item: MindDocListItem };
 
 function CanvasListPanel() {
   const wsId = useWsId();
@@ -60,17 +68,30 @@ function CanvasListPanel() {
 
   // 订阅全局画板列表 + 文件夹(走 capability,IPC + onGraphListChanged 推流)
   const [canvases, setCanvases] = useState<GraphCanvasListItem[]>([]);
+  /** ⭐ B1:导图在另一张表,单独一份 state,渲染时与画板合并成一棵树 */
+  const [minds, setMinds] = useState<MindDocListItem[]>([]);
   const [folders, setFolders] = useState<GraphFolderRecord[]>([]);
 
   const refresh = useCallback(() => {
     void library.list().then(setCanvases).catch(() => {});
+    void library.mindList().then(setMinds).catch(() => {});
     void library.folderList().then(setFolders).catch(() => {});
   }, [library]);
 
   useEffect(() => {
     refresh();
-    return library.onGraphListChanged(() => refresh());
+    // ⚠️ 两个推流都要订阅 —— 只订一个的话,另一类的增删改在树上不刷新
+    //    (现象是"新建了但列表里没有",极易误判成没保存)
+    const offGraph = library.onGraphListChanged(() => refresh());
+    const offMind = library.onMindListChanged(() => refresh());
+    return () => {
+      offGraph();
+      offMind();
+    };
   }, [library, refresh]);
+
+  /** ⭐「+ 新建」类型选择菜单(用户拍板:不摆一排 button) */
+  const [createMenuAt, setCreateMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   // 重命名局部 state
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -83,7 +104,9 @@ function CanvasListPanel() {
       const cur =
         type === 'canvas'
           ? canvases.find((c) => c.id === id)?.title
-          : folders.find((f) => f.id === id)?.title;
+          : type === 'mind'
+            ? minds.find((m) => m.id === id)?.title
+            : folders.find((f) => f.id === id)?.title;
       if (cur === undefined) return;
       setRenamingId(treeId);
       setRenameValue(cur);
@@ -93,17 +116,27 @@ function CanvasListPanel() {
       setRenamingId(encodeTreeId('folder', folderId));
       setRenameValue(cur?.title ?? '新建文件夹');
     });
-    setCanvasCreatedTrigger((graphId) => {
-      const cur = canvases.find((c) => c.id === graphId);
-      setRenamingId(encodeTreeId('canvas', graphId));
-      setRenameValue(cur?.title ?? 'Untitled Canvas');
+    setCreateMenuTrigger((pos) => setCreateMenuAt(pos));
+    setCanvasCreatedTrigger((treeIdOrId) => {
+      // ⭐ create-mind 传的是 treeId(带 m: 前缀),create-canvas 传裸 id
+      const isTree = treeIdOrId.includes(':');
+      const { type, id } = isTree
+        ? decodeTreeId(treeIdOrId)
+        : { type: 'canvas' as const, id: treeIdOrId };
+      const cur =
+        type === 'mind'
+          ? minds.find((m) => m.id === id)?.title
+          : canvases.find((c) => c.id === id)?.title;
+      setRenamingId(encodeTreeId(type, id));
+      setRenameValue(cur ?? (type === 'mind' ? '未命名导图' : 'Untitled Canvas'));
     });
     return () => {
       setRenameTrigger(null);
       setFolderCreatedTrigger(null);
       setCanvasCreatedTrigger(null);
+      setCreateMenuTrigger(null);
     };
-  }, [canvases, folders]);
+  }, [canvases, minds, folders]);
 
   if (!wsId || !ws) return null;
   const wsState = getGraphCanvasWsState(ws);
@@ -126,15 +159,30 @@ function CanvasListPanel() {
       };
       out.push(node);
     }
-    const subCanvases = canvases
-      .filter((c) => (c.folder_id ?? null) === parentId)
-      .sort((a, b) => b.updated_at - a.updated_at);
-    for (const c of subCanvases) {
+    // ⭐ B1 混排:画板与导图来自两张表,按 updated_at 统一排序后混在同一层
+    const items: { treeId: string; updated_at: number; payload: TreeItemPayload }[] = [
+      ...canvases
+        .filter((c) => (c.folder_id ?? null) === parentId)
+        .map((c) => ({
+          treeId: encodeTreeId('canvas', c.id),
+          updated_at: c.updated_at,
+          payload: { kind: 'canvas' as const, item: c },
+        })),
+      ...minds
+        .filter((m) => (m.folder_id ?? null) === parentId)
+        .map((m) => ({
+          treeId: encodeTreeId('mind', m.id),
+          updated_at: m.updated_at,
+          payload: { kind: 'mind' as const, item: m },
+        })),
+    ].sort((a, b) => b.updated_at - a.updated_at);
+
+    for (const it of items) {
       const node: ItemNode = {
         kind: 'item',
-        id: encodeTreeId('canvas', c.id),
+        id: it.treeId,
         parentId: parentId ? encodeTreeId('folder', parentId) : null,
-        payload: c,
+        payload: it.payload,
       };
       out.push(node);
     }
@@ -148,7 +196,9 @@ function CanvasListPanel() {
     const { type, id } = decodeTreeId(treeId);
     const trimmed = renameValue.trim();
     if (trimmed) {
+      // ⭐ B1 分发:三类各归各的 store
       if (type === 'canvas') void library.rename(id, trimmed);
+      else if (type === 'mind') void library.mindRename(id, trimmed);
       else void library.folderRename(id, trimmed);
     }
     setRenamingId(null);
@@ -218,6 +268,36 @@ function CanvasListPanel() {
   };
 
   return (
+    <>
+    {createMenuAt && (
+      <ContextMenuPopover
+        x={createMenuAt.x}
+        y={createMenuAt.y}
+        items={[
+          {
+            id: 'new-canvas',
+            label: '画板',
+            icon: '🎨',
+            command: 'graph-canvas-view.create-canvas',
+          },
+          {
+            id: 'new-mind',
+            label: '思维导图',
+            icon: '🧠',
+            command: 'graph-canvas-view.create-mind',
+          },
+          // ⚠️ 文件夹是**容器**不是文件类型,用分隔线隔开
+          { id: 'sep', label: '', separator: true },
+          {
+            id: 'new-folder',
+            label: '文件夹',
+            icon: '📁',
+            command: 'graph-canvas-view.create-folder',
+          },
+        ]}
+        onClose={() => setCreateMenuAt(null)}
+      />
+    )}
     <FolderTree
       nodes={nodes}
       selectedIds={wsState.selectedIds}
@@ -227,11 +307,12 @@ function CanvasListPanel() {
         setFolderExpanded(wsId, id, expanded);
       }}
       itemMeta={(item: ItemNode) => {
-        const c = item.payload as GraphCanvasListItem;
+        const p = item.payload as TreeItemPayload;
+        // ⭐ 图标区分类型:画板 🎨 / 导图 🧠(用户定义:mind 是画板中的一种)
         return {
-          icon: '🎨',
-          title: c.title || 'Untitled Canvas',
-          rightHint: relativeTime(c.updated_at),
+          icon: p.kind === 'mind' ? '🧠' : '🎨',
+          title: p.item.title || (p.kind === 'mind' ? '未命名导图' : 'Untitled Canvas'),
+          rightHint: relativeTime(p.item.updated_at),
         };
       }}
       onItemClick={(item) => {
@@ -255,8 +336,9 @@ function CanvasListPanel() {
       contextMenuCtxExtra={() => ({
         activeGraphId: wsState.activeGraphId,
       })}
-      emptyText="点击上方 + 画板 创建新画板"
+      emptyText="点击上方 + 新建 创建画板或思维导图"
     />
+    </>
   );
 }
 
@@ -269,14 +351,12 @@ export function registerNavSide(): void {
     title: '画板',
     actions: [
       {
-        id: 'create-canvas',
-        label: '+ 画板',
-        command: 'graph-canvas-view.create-canvas',
-      },
-      {
-        id: 'create-folder',
-        label: '+ 文件夹',
-        command: 'graph-canvas-view.create-folder',
+        // ⭐ 用户拍板(2026-09-10):点 + 弹「文件类型选择」,不摆一排 button。
+        //    定义:mind 是画板中的一种 —— 故同一个入口下选类型,
+        //    将来加 bpmn / 知识图谱只是往菜单里加一行,不再长按钮。
+        id: 'create-new',
+        label: '+ 新建',
+        command: 'graph-canvas-view.show-create-menu',
       },
     ],
     searchPlaceholder: '搜索画板...',
@@ -315,6 +395,16 @@ export function registerFolderTreeContextMenu(): void {
     icon: '🎨',
     command: 'graph-canvas-view.create-canvas',
     order: 30,
+  });
+
+  folderTreeContextMenuRegistry.register({
+    id: 'graph-create-mind-blank',
+    scope: 'graph-canvas-view',
+    appliesTo: ['blank'],
+    label: '新建思维导图',
+    icon: '🧠',
+    command: 'graph-canvas-view.create-mind',
+    order: 31,
   });
 
   // ── 文件夹右键 — 在此新建子文件夹 ──

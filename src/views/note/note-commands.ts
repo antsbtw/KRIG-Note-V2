@@ -176,6 +176,38 @@ function targetSlot(wsId: string): NoteSlot {
   return getInvokingSlot() ?? getActiveSlot(wsId);
 }
 
+/**
+ * 跨 view 插入命令(append-ai-turn / append-pm-nodes)的目标 PM instanceId。
+ *
+ * fix:这两个命令过去直接把**裸 wsId** 当 instanceId 传给 driver,而 NoteView 注册用的
+ * 是 `noteInstanceId(wsId, slot)` = `${wsId}::slot:${slot}` —— registry.get() 永远拿不到,
+ * insertNodes* 第一行 early-return false,表现为「提取成功但插不进 Note」且控制台零报错。
+ *
+ * 为什么不用 getFocusedInstanceId():本命令的触发路径是「用户在 AI / X webview 里点提取」,
+ * 那一刻焦点在 webview,PM 必然失焦 → 恒返 null。driver 的 insertNodesAtCursorOrEnd 正是
+ * 为这个场景准备了 `hasFocus()=false → lastUserSelectionFrom` 分支;按焦点解析实例会让
+ * 那条分支永远走不到。
+ *
+ * 为什么不能只用 getActiveSlot():activeSlot 是「用户最后点过哪一栏」,而 SlotArea 在
+ * **容器任意位置** pointerdown 都会 setActiveSlot —— 用户点的正是 AI 那一栏的提取按钮,
+ * activeSlot 因此指向 AI 槽(没有 PM 实例)。故先按 slotBinding 找 note-view 真正所在的槽,
+ * 只有两栏都是 Note 时才用 activeSlot 决胜。
+ *
+ * 返 null = 本 ws 没有 note-view 在场,调用方据此返 false(fail loud,由上层提示用户)。
+ */
+function resolveNoteInstanceId(wsId: string): string | null {
+  const ws = workspaceManager.get(wsId);
+  if (!ws) return null;
+  const { left, right } = ws.slotBinding;
+  const leftIsNote = left === 'note-view';
+  const rightIsNote = right === 'note-view';
+  if (!leftIsNote && !rightIsNote) return null;
+  // 两栏都是 Note 时才轮到 activeSlot 决胜(单一来源,不自行推导)
+  const slot: NoteSlot =
+    leftIsNote && rightIsNote ? getActiveSlot(wsId) : leftIsNote ? 'left' : 'right';
+  return noteInstanceId(wsId, slot);
+}
+
 export function registerNoteCommands(wsId: string): void {
   // ── 笔记 CRUD(4) ──
 
@@ -517,12 +549,19 @@ export function registerNoteCommands(wsId: string): void {
     const nodes = buildAITurnPmNodes(p.serviceId, p.turn);
     if (nodes.length === 0) return false;
 
-    const api = tea();
-    // NoteView 用 instanceId = workspaceId(参考 NoteView.tsx Host config)
-    if (p.mode === 'cursor-or-end') {
-      return api.insertNodesAtCursorOrEnd(wsId, nodes);
+    const instanceId = resolveNoteInstanceId(wsId);
+    if (!instanceId) {
+      console.error(
+        `[note-view.append-ai-turn] ws=${wsId} 没有 note-view 在场,无法插入。`,
+      );
+      return false;
     }
-    return api.insertNodesAtEnd(wsId, nodes);
+
+    const api = tea();
+    if (p.mode === 'cursor-or-end') {
+      return api.insertNodesAtCursorOrEnd(instanceId, nodes);
+    }
+    return api.insertNodesAtEnd(instanceId, nodes);
   });
 
   /**
@@ -541,10 +580,18 @@ export function registerNoteCommands(wsId: string): void {
     const p = (arg ?? {}) as { nodes?: unknown; mode?: 'end' | 'cursor-or-end' };
     if (!Array.isArray(p.nodes) || p.nodes.length === 0) return false;
     const wsId = ctx.wsId;
+    const instanceId = resolveNoteInstanceId(wsId);
+    if (!instanceId) {
+      console.error(
+        `[note-view.append-pm-nodes] ws=${wsId} 没有 note-view 在场,无法插入。`,
+      );
+      return false;
+    }
+
     const api = tea();
     if (p.mode === 'cursor-or-end') {
-      return api.insertNodesAtCursorOrEnd(wsId, p.nodes);
+      return api.insertNodesAtCursorOrEnd(instanceId, p.nodes);
     }
-    return api.insertNodesAtEnd(wsId, p.nodes);
+    return api.insertNodesAtEnd(instanceId, p.nodes);
   });
 }

@@ -119,6 +119,49 @@ function rebaseCollapsed(tr: Transaction, oldCollapsed: Set<number>): Set<number
 
 // ─── 公共 API(供 driver / TOC 用)────────────────────────
 
+/**
+ * 求某 heading 的折叠范围 —— 纯函数,不依赖 plugin state。
+ *
+ * 语义与 computeRanges 内部一致:从 heading 末尾起,到第一个 level <= 自身
+ * 的后续 heading 为止;没有则到文末。
+ *
+ * 返回 null = 该 heading 下**没有任何内容**(下一个 block 就是同级/更高级
+ * heading,或它本身就是最后一个 block)。⭐ 三角是否显示的唯一判据。
+ */
+export function headingCollapseRange(
+  doc: import('prosemirror-model').Node,
+  pos: number,
+): { from: number; to: number } | null {
+  const node = doc.nodeAt(pos);
+  if (!node || node.type.name !== 'heading') return null;
+  const level = node.attrs.level as number;
+  const rangeStart = pos + node.nodeSize;
+  let rangeEnd = doc.content.size;
+  let found = false;
+  doc.forEach((other, offset) => {
+    if (found) return;
+    if (offset <= pos) return;
+    if (other.type.name !== 'heading') return;
+    if ((other.attrs.level as number) <= level) {
+      rangeEnd = offset;
+      found = true;
+    }
+  });
+  if (rangeStart >= rangeEnd) return null;
+  return { from: rangeStart, to: rangeEnd };
+}
+
+/**
+ * 该 heading 下面是否有可折叠内容(= 是否该显示三角)。
+ * 没内容还显三角是骗人 —— 见 §3.1 第 3 条。
+ */
+export function hasCollapsibleContent(
+  doc: import('prosemirror-model').Node,
+  pos: number,
+): boolean {
+  return headingCollapseRange(doc, pos) !== null;
+}
+
 /** 查某 heading 当前是否折叠(handle dynamicLabel 用)*/
 export function isHeadingCollapsed(state: EditorState, pos: number): boolean {
   const cur = headingCollapseKey.getState(state);
@@ -126,6 +169,17 @@ export function isHeadingCollapsed(state: EditorState, pos: number): boolean {
 }
 
 /** 切换某 heading 的折叠状态 */
+/**
+ * ⭐ 强制重算折叠区间(外部来源模式用)。
+ *
+ * ⚠️ 为什么需要它:画布侧折叠**不改 doc**,PM 因此没有新 transaction,
+ * plugin 的 `apply` 不跑 → 内容不藏。必须由外部显式推一下。
+ * 发一个空 tr(不改内容)让 apply 重新问 source。
+ */
+export function refreshHeadingCollapse(view: EditorView): void {
+  view.dispatch(view.state.tr.setMeta('addToHistory', false));
+}
+
 export function toggleHeadingCollapse(view: EditorView, pos: number): void {
   const node = view.state.doc.nodeAt(pos);
   if (!node || node.type.name !== 'heading') return;
@@ -280,17 +334,46 @@ function emitForView(view: EditorView): void {
 
 // ─── Plugin ──────────────────────────────────────────────
 
-export function buildHeadingCollapsePlugin(): Plugin<HeadingCollapseState> {
+/**
+ * ⭐ 折叠集的外部来源(可选)——「哪些 heading 是折叠的」由外部说了算。
+ *
+ * ⚠️⚠️ 加这个的原因(真机实测):把**三角**的读写换成 G 层之后,
+ * 三角显示对了,但**内容没藏** —— 因为藏内容靠的是本 plugin 自己的
+ * `collapsed` Set,它根本不知道 G 层发生了什么。两个 plugin **各读各的**。
+ * ⭐ 折叠必须**单一真源**:三角读哪儿,藏内容就得读哪儿。
+ *
+ * 不传 = 用自己的 Set(note 本体行为不变)。
+ */
+export interface CollapsedSetSource {
+  /** 给定 doc,返回当前应折叠的顶层 heading pos 集合 */
+  collapsedPositions(doc: import('prosemirror-model').Node): Set<number>;
+}
+
+export function buildHeadingCollapsePlugin(
+  source?: CollapsedSetSource,
+): Plugin<HeadingCollapseState> {
   return new Plugin<HeadingCollapseState>({
     key: headingCollapseKey,
 
     state: {
       init(_, state) {
-        const empty = new Set<number>();
-        const r = computeRanges(state.doc, empty);
-        return { collapsed: empty, hiddenRanges: r.hiddenRanges, ellipsisPositions: r.ellipsisPositions };
+        // ⭐ 有外部来源就问它,否则从空集起步
+        const initial = source ? source.collapsedPositions(state.doc) : new Set<number>();
+        const r = computeRanges(state.doc, initial);
+        return { collapsed: initial, hiddenRanges: r.hiddenRanges, ellipsisPositions: r.ellipsisPositions };
       },
       apply(tr, value, _oldState, newState) {
+        // ⭐ 外部来源模式:**每次都重新问**(G 层随时可能被画布侧改动)。
+        //   ⚠️ 不能只在 docChanged 时问 —— 画布折叠时 doc 没变,但折叠集变了。
+        if (source) {
+          const collapsed = source.collapsedPositions(newState.doc);
+          const same =
+            collapsed.size === value.collapsed.size &&
+            [...collapsed].every((p) => value.collapsed.has(p));
+          if (same && !tr.docChanged) return value;
+          const r = computeRanges(newState.doc, collapsed);
+          return { collapsed, hiddenRanges: r.hiddenRanges, ellipsisPositions: r.ellipsisPositions };
+        }
         // meta 直接覆写 collapsed(toggle/expand/ensure 用)
         const meta = tr.getMeta(headingCollapseKey) as { collapsed: Set<number> } | undefined;
         let collapsed = value.collapsed;

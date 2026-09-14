@@ -139,12 +139,43 @@ export const TWEET_SCRAPE_FN_BODY = `
       }
     } catch (e) {}
 
-    // 回复上下文
+    // 回复上下文 —— 「这条是回复谁的」
+    //
+    // ⚠️ 曾经取的是 [data-testid="socialContext"],**那是错的**:
+    //    socialContext 是「xx 转推了 / 已置顶」这条横幅,不是回复关系。
+    //
+    // ⚠️⚠️ 2026-09-06 二次订正:我一度以为下面这段也「没命中」——
+    //    依据是「search 采的 3782 条只有 48 条有值」。**那个推断是错的**:
+    //    用户打开其中一条的详情页,X 上根本没有 "Replying to" 那一行 ——
+    //    **它本来就是独立推**,字段为空是正确数据,不是选择器坏了。
+    //    教训:低填充率 ≠ 提取器坏了,先确认样本里到底有没有那个现象
+    //    (同 feedback-check-sample-contains-phenomenon)。
+    //
+    // X 的回复卡片在正文上方有一行「Replying to @xxx」/「回复 @xxx」,
+    // 它是个链接指向被回复者主页(不是 /status/),所以这里
+    // **抓 handle 而不是 status 链接**;父推 id 走载荷层补(见 x-timeline-harvester)。
     try {
-      var social = article.querySelector('[data-testid="socialContext"]');
-      if (social) {
-        var slink = social.querySelector('a[href*="/status/"]');
-        if (slink) result.inReplyTo = slink.href;
+      var blocks = article.querySelectorAll('div[dir]');
+      for (var bi = 0; bi < blocks.length; bi++) {
+        var bt = blocks[bi].textContent || '';
+        if (bt.indexOf('Replying to') === 0 || bt.indexOf('回复 @') === 0
+            || bt.indexOf('回复\u0020@') === 0) {
+          var rlink = blocks[bi].querySelector('a[href^="/"]');
+          if (rlink) {
+            var rh = rlink.getAttribute('href') || '';
+            // href = /someone → 取 handle
+            // ⚠️ 反斜杠必须写 \\/ —— 这整段在**模板字面量**里,
+            //    写 \/ 会被求值吃掉,浏览器收到 /^/(...)$/ —— 非法正则,
+            //    整个脚本解析失败 → executeJavaScript 每次都抛 → fetched 恒为 0。
+            //    实测后果:采集整整一天报「0 条」,日志里只看到
+            //    「注入失败(多半撞上导航)」—— 那句话把真因盖掉了。
+            //    参照同文件 line 79 的 \\/status\\/ 才是对的写法。
+            var rm = rh.match(/^\\/([A-Za-z0-9_]{1,15})$/);
+            if (rm) result.inReplyToUser = rm[1];
+          }
+          result.isReply = true;
+          break;
+        }
       }
     } catch (e) {}
 

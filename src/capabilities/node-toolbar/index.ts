@@ -26,6 +26,7 @@ import {
 } from './registry';
 import { fillSection } from './sections/fill';
 import { lineSection } from './sections/line';
+import { arrowSection } from './sections/arrow';
 import { textSection } from './sections/text';
 import type { NodeToolbarApi } from './types';
 
@@ -50,6 +51,7 @@ export { registerSection, registerNodeBinding, resolveSections } from './registr
 // Text section(G6 合并)已含 文字色 + 对齐 + 字体 + 字号;原独立 Type section 已并入。
 registerSection(fillSection);
 registerSection(lineSection);
+registerSection(arrowSection);
 registerSection(textSection);
 
 // ── 内置 canvas 节点类型 → section 绑定(其它 view 可继续 registerNodeBinding 扩展)──
@@ -61,9 +63,10 @@ registerNodeBinding({
   sections: ['fill', 'line', 'text'],
 });
 registerNodeBinding({
-  // 线条:Line + Arrow(无 Fill);arrow section 待后续,先只 line
+  // ⭐ 线条:Line + Arrow(无 Fill)—— arrow section 已补(2026-09-13,用户拍板
+  //   「基础图形的建设,应该现在画板构建」)。六种端形各画各的,不是统一三角。
   match: (node) => node.kind === 'line',
-  sections: ['line'],
+  sections: ['line', 'arrow'],
 });
 registerNodeBinding({
   // 文字节点:Fill(底色)+ Text(文字色 + 对齐 + 字体 + 字号,G6 合并 Type)

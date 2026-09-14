@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -22,6 +22,91 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.0.0',
     description: 'X database initial schema (data isolation phase 0)',
     up: x_migration_1_0_0,
+  },
+  {
+    version: '1.0.1',
+    description: 'Reply relationship authoritative fields (in_reply_to_user / conversation_id)',
+    up: x_migration_1_0_1,
+  },
+  {
+    version: '1.0.2',
+    description: 'Normalize author_handle (strip @, lowercase) across x_tweet / tweet_feedback',
+    up: x_migration_1_0_2,
+  },
+  {
+    version: '1.0.3',
+    description: 'Collection cursor table (resume via X own Bottom cursor)',
+    up: x_migration_1_0_3,
+  },
+  {
+    version: '1.0.4',
+    description: 'Account baseline counts (tweet_count = collection completeness denominator)',
+    up: x_migration_1_0_4,
+  },
+  {
+    version: '1.0.5',
+    description: 'Disable TTL: keep all X tweets permanently',
+    up: x_migration_1_0_5,
+  },
+  {
+    version: '1.0.6',
+    description: 'X per-ws role table (search / campaign / idle)',
+    up: x_migration_1_0_6,
+  },
+  {
+    version: '1.0.7',
+    description: 'Campaign reply table (contract idempotency key + push state)',
+    up: x_migration_1_0_7,
+  },
+  {
+    version: '1.0.8',
+    description: 'Per-ws logged-in account (identity belongs to ws, not global)',
+    up: x_migration_1_0_8,
+  },
+  {
+    version: '1.0.9',
+    description: 'Inbound interactions from notifications (named actors)',
+    up: x_migration_1_0_9,
+  },
+  {
+    version: '1.1.0',
+    description: 'Interaction target metadata for per-article verification',
+    up: x_migration_1_1_0,
+  },
+  {
+    version: '1.1.1',
+    description: 'Interaction quoted_status_id (quote-retweet attribution)',
+    up: x_migration_1_1_1,
+  },
+  {
+    version: '1.1.2',
+    description: 'Reply feedback (learning period: AI text vs user edit)',
+    up: x_migration_1_1_2,
+  },
+  {
+    version: '1.1.3',
+    description: 'Reply decision trace (poster read / trigger) for regression review',
+    up: x_migration_1_1_3,
+  },
+  {
+    version: '1.1.4',
+    description: 'Backfill x_author from x_tweet (people seen but never registered)',
+    up: x_migration_1_1_4,
+  },
+  {
+    version: '1.1.5',
+    description: 'tweet_inbox.in_reply_to_user (reply context for step 1 gate)',
+    up: x_migration_1_1_5,
+  },
+  {
+    version: '1.1.6',
+    description: 'Author relationship perspectives + bio (step 2 activity signals)',
+    up: x_migration_1_1_6,
+  },
+  {
+    version: '1.1.7',
+    description: 'Parent tweet snapshot (context for step 1 gate)',
+    up: x_migration_1_1_7,
   },
 ];
 

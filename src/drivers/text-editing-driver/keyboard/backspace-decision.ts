@@ -11,6 +11,7 @@
  *   5. 当前块是标题 → 降级为正文段(保留文字)
  *   6. 当前块是列表项 → 退出列表(liftListItem)
  *   7. 在容器内、已到该层顶级首块 → 退出容器(lift);tableCell → noop(硬墙)
+ *   7.5 上一块是 def 块 → 删掉整个 def 块(它折叠态不可交互,这是它的删除入口)
  *   8. 否则放行 → baseKeymap joinBackward(与上一块合并)
  *
  * 「上提对齐」由 PM lift 的逐层语义自然体现:每按一次 lift 一层,到顶级再退才 joinBackward。
@@ -129,6 +130,31 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
         break; // 命中最近容器层即停(不再向外找)
       }
       // 非容器、非 cell 的中间层(理论少见)→ 继续向外
+    }
+
+    // —— 7.5 上一块是 def 块 → **删掉整个 def 块**(用户 2026-09-13 拍板)——
+    //
+    // ⭐ def 块折叠态刻意**不可交互**(只响应点击展开、无 handle、选不中),
+    //   所以它的删除入口就是这条:光标在**它下面那段的行首**按 Backspace,
+    //   **优先删掉 def 块**,而不是与之合并。再按一次才轮到上一个段落。
+    //
+    // ⚠️ 这条同时修掉一个真 bug(探针实测,非脑补):不接管时
+    //   `joinTextblockBackward` 会把下文**并进 def 块里** ——
+    //     [para "上文"] [defBlock "id: A"] [para "下文"]
+    //     → [para "上文"] [defBlock "id: A下文"]        ⭐ 正文污染词法
+    //   def 块是逐行词法,混进正文就不再是合法定义了。
+    if ($from.depth === 1) {
+      const indexInDoc = $from.index(0);
+      if (indexInDoc > 0) {
+        const prev = state.doc.child(indexInDoc - 1);
+        if (prev.type.name === 'defBlock') {
+          if (dispatch) {
+            const prevStart = $from.before(1) - prev.nodeSize;
+            dispatch(state.tr.delete(prevStart, prevStart + prev.nodeSize).scrollIntoView());
+          }
+          return true;
+        }
+      }
     }
 
     // —— 8. 与上一块合并 ——

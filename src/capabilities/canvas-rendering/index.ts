@@ -31,6 +31,7 @@ import type { CanvasRenderingApi } from './types';
 import { CanvasHost } from './Host';
 import { LibraryPicker } from './ui/library-picker';
 import { CreateSubstanceDialog } from './ui/create-substance-dialog';
+import { zoomApi } from './interaction/zoom-levels';
 
 // 类型 re-export(view 端走 `import type from '@capabilities/canvas-rendering/types'`
 // 也可走 `from '@capabilities/canvas-rendering'`,两路径都可)
@@ -45,6 +46,8 @@ export type {
   InstanceEndpoint,
   TextNodeAtoms,
   AddModeSpec,
+  CanvasZoomApi,
+  CanvasZoomShortcut,
 } from './types';
 
 // 模块级 export(W5 边界 A 临时允许项 — driver/slot 内部可直 import;view 侧仍走 requireCapabilityApi)
@@ -75,5 +78,7 @@ capabilityRegistry.register({
     Host: CanvasHost,
     LibraryPicker,
     CreateSubstanceDialog,
+    // 缩放档位 / 上下限(纯逻辑;view 端 toolbar 缩放控件消费)
+    zoom: zoomApi,
   } satisfies CanvasRenderingApi,
 });

@@ -15,12 +15,20 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
+import { registerSeenAuthor } from './x-author-repo';
 import type { TweetInboxRecord, AIVerdict, TweetInboxStatus, TweetFeedback, FeedbackVerdict } from '@shared/types/x-timeline-types';
 import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
 
 /** 写入或忽略（tweet_id 唯一索引冲突 = 重复，直接跳过） */
 export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
   const db = getXDB();
+  // 「人」也要留档:此前采集只写推文,x_author 见过 3458 个作者却只有 36 行
+  // (用户 2026-09-06 发现)。⚠️ 只登记标识,计数走 getAuthorStats 现算;
+  //   失败不拦入库 —— 推文是主数据,人表是派生登记。
+  await registerSeenAuthor(record.author_handle, {
+    displayName: record.author_name,
+    avatar: record.author_avatar,
+  }).catch((e) => console.warn('[tweet-inbox-repo] 作者登记失败(不拦入库):', e));
   await db.query(
     `INSERT IGNORE INTO x_tweet {
       tweet_id: $tweet_id,
@@ -34,6 +42,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       fetched_at: $fetched_at,
       created_at: $created_at,
       in_reply_to: $in_reply_to,
+      in_reply_to_user: $in_reply_to_user,
       expires_at: $expires_at,
       source: $source,
       search_recipe: $search_recipe,
@@ -65,6 +74,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       // A':extract 早就提取了这两个字段,只是组装记录时没带上
       created_at: record.created_at ? new Date(record.created_at) : undefined,
       in_reply_to: record.in_reply_to ?? undefined,
+      in_reply_to_user: record.in_reply_to_user ?? undefined,
       // ⚠️ undefined → NONE(永久保留);绝不写 null —— option<T> 只认 NONE,NULL 会被拒
       expires_at: record.expires_at ? new Date(record.expires_at) : undefined,
       source: record.source,
@@ -123,11 +133,47 @@ export async function getTweetIdSet(): Promise<Set<string>> {
 export async function queryPending(limit = 50, wsId?: string): Promise<TweetInboxRecord[]> {
   const db = getXDB();
   const wsFilter = wsId ? 'AND ws_id = $wsId' : '';
+  // ⭐ **人工处理过的一律不送 AI**(用户 2026-09-02:
+  // 「如果我都手工研判过了,Gemma4 就不应该再处理,而是认可人工的处理结果」)。
+  // 三种「已处理」都要排除:
+  //  · accepted 非空  = 已人工采纳/拒绝
+  //  · replied  = true = 我已经回复过(回过就是最强的表态)
+  //  · ai_verdict.reason 以 human: 开头 = 人工判定的快照
+  // 此前只筛 status='pending',这些行照样会被送去判 ——
+  // 既浪费算力(队列已积压 842 条、要跑 4 小时),又可能让机器判定覆盖人工结论。
   const res = await db.query<[TweetInboxRecord[]]>(
-    `SELECT * FROM x_tweet WHERE status = 'pending' ${wsFilter} ORDER BY fetched_at ASC LIMIT $limit`,
+    `SELECT * FROM x_tweet
+     WHERE status = 'pending'
+       AND accepted = NONE
+       AND replied != true
+       AND (ai_verdict = NONE OR !string::starts_with(ai_verdict.reason, 'human:'))
+       ${wsFilter}
+     ORDER BY fetched_at ASC LIMIT $limit`,
     { limit, wsId: wsId ?? null },
   );
   return res[0] ?? [];
+}
+
+/**
+ * 数一下还有多少条待判 —— 与 queryPending **同一套排除条件**。
+ *
+ * 用途:调度器判断有无存量积压。两处判据必须一致,否则会出现
+ * 「数出来有积压、捞的时候是空」的空转(或反过来漏掉真积压)。
+ */
+export async function countPending(wsId?: string): Promise<number> {
+  const db = getXDB();
+  const wsFilter = wsId ? 'AND ws_id = $wsId' : '';
+  const res = await db.query<[Array<{ c: number }>]>(
+    `SELECT count() AS c FROM x_tweet
+     WHERE status = 'pending'
+       AND accepted = NONE
+       AND replied != true
+       AND (ai_verdict = NONE OR !string::starts_with(ai_verdict.reason, 'human:'))
+       ${wsFilter}
+     GROUP ALL`,
+    { wsId: wsId ?? null },
+  );
+  return res[0]?.[0]?.c ?? 0;
 }
 
 /** 将一批推文状态更新为 ai_judging */
@@ -235,6 +281,10 @@ export async function queryInbox(opts: {
   orderBy?: 'fetched_at' | 'confidence';  // confidence=按 Gemma 置信度升序（漏判抽查视图用）
   limit?: number;
   offset?: number;
+  /** true(默认)=剔除已屏蔽作者/自己的推文。仅影响**显示**,历史数据一行不删。 */
+  excludeHidden?: boolean;
+  /** true=只看已回复过的;false=只看没回复的(排重复回复);缺省=不过滤 */
+  replied?: boolean;
 }): Promise<TweetInboxRecord[]> {
   const db = getXDB();
   const limit = opts.limit ?? 50;
@@ -251,6 +301,27 @@ export async function queryInbox(opts: {
     conditions.push(`ai_verdict != NONE AND string::starts_with(ai_verdict.reason, 'human:')`);
   else if (opts.humanReviewed === false)
     conditions.push(`ai_verdict != NONE AND !string::starts_with(ai_verdict.reason, 'human:')`);
+
+  // 屏蔽者 / 自己发的推:**只从面板隐藏,绝不删数据**。
+  // 「不再爬」约束未来(B 期 accountBlacklist),「不再显示」约束呈现 —— 两件事。
+  // 解除屏蔽后这些行会原样回到列表,是过滤不是删除。
+  //
+  // ⚠️ 跨表比对必须归一化:x_tweet.author_handle 存 '@angeelfv'(带 @、原始大小写),
+  // x_author.handle 存 'angeelfv'(归一化)。直接 IN 比对**恒不命中且不报错** ——
+  // 与 B 期 applyFilter 同源的坑,见 normalizeHandle 的注释。
+  // SQL 侧用 string::lowercase + 去 @,与 normalizeHandle() 同语义。
+  if (opts.excludeHidden !== false) {
+    conditions.push(
+      `string::replace(string::lowercase(author_handle), '@', '') NOT IN `
+      + `(SELECT VALUE handle FROM x_author WHERE blocked = true OR is_self = true)`,
+    );
+  }
+
+  // 已回复过滤:采纳与回复是两件事,一条推可能已采纳但没回、
+  // 也可能回过却还挂在待判里 —— 用户要能把回过的挑出去,避免重复回复
+  if (opts.replied === true) conditions.push('replied = true');
+  else if (opts.replied === false) conditions.push('replied != true');
+
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const order = opts.orderBy === 'confidence' ? 'ai_verdict.confidence ASC' : 'fetched_at DESC';
 
@@ -303,9 +374,22 @@ export async function getFeedbackStats(): Promise<FeedbackStats> {
  *  `expires_at` 为 NONE 的行(采纳/回复过的永久行)**不满足** `expires_at < time::now()`,
  *  因此天然被跳过 —— 这正是 A 期止血依赖的机制。改这条语句前先想清楚这点。
  */
+/**
+ * TTL 清理 —— **已停用**(用户 2026-09-02 拍板:X 推文永久保存)。
+ *
+ * 为什么保留这个函数而不是删掉:调用点在调度器里(每 24h + 启动时各一次),
+ * 保留成 no-op 比拆掉调用链更安全,也留下「这里曾经会删数据」的痕迹。
+ * 将来真要做容量治理(用户:「等容量到了一定的程度,再考虑迁移新的架构」),
+ * 应该是**迁移到冷存储**,而不是恢复这里的 DELETE。
+ *
+ * ⚠️ 绝不要简单地把 DELETE 加回来:
+ *   A 期就因 TTL 丢过 449 条已采纳推文的正文(不可再生);
+ *   而被 Gemma 判 skip / 被黑名单过滤的推,是竞品分析与语料素材,
+ *   同样不可再生。删除是不可逆操作,恢复它需要明确的产品决策。
+ */
 export async function cleanExpired(): Promise<void> {
-  const db = getXDB();
-  await db.query(`DELETE x_tweet WHERE expires_at != NONE AND expires_at < time::now()`);
+  // no-op:保留调用点,不再删除任何数据
+  return;
 }
 
 /** 查询缺翻译的非中文推文（补填用） */
@@ -392,4 +476,31 @@ export async function queryFeedbackSamples(opts: {
     { verdict: opts.verdict, lang: opts.lang ?? null, limit },
   );
   return res[0] ?? [];
+}
+
+
+/**
+ * 存下这条推的**上文**(父推正文)。
+ *
+ * ⭐ 用户 2026-09-06:「每一个它建议的,都应该获取上下文。」
+ * 上文是①闸门的输入。此前只在点开弹窗时现抓 —— 每条现等 10s;
+ * 建议名单是可预知的,提前批量抓好、存起来,点开就有。
+ *
+ * ⚠️ 存的是**抓到那一刻的快照**:父推可能被删或改,快照保留我们当时判断的依据
+ *    (与 author_name_at_post 同一思路)。
+ */
+export async function setParentContext(
+  tweetId: string, parentText: string, parentHandle?: string,
+): Promise<void> {
+  if (!tweetId || !parentText?.trim()) return;   // 空上文没有存的价值
+  // ⚠️ 只写 x_tweet。`tweet_inbox` 是**遗留表**:全仓所有读写(upsertTweet /
+  //    queryInbox / countPending …)走的都是 x_tweet,那张表早已没人维护
+  //    (2026-09-06 实测:x_tweet 有 ws-1 今天采的 112 条,tweet_inbox 里 0 条、
+  //     最新数据停在 5 天前)。我第一版写了 tweet_inbox,等于写进一张死表 ——
+  //    不报错、也永远读不到,正是最难查的那种。
+  await getXDB().query(
+    `UPDATE x_tweet SET parent_text = $t, parent_handle = $h,
+       parent_fetched_at = time::now() WHERE tweet_id = $id`,
+    { id: tweetId, t: parentText.trim().slice(0, 1000), h: parentHandle ?? undefined },
+  );
 }

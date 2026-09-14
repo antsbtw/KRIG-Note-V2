@@ -42,7 +42,9 @@ import type { ShapeLibraryApi } from '@capabilities/shape-library/types';
 import type {
   GraphLibraryStoreApi,
   GraphCanvasRecord,
+  GraphVariant,
 } from '@capabilities/graph-library-store/types';
+import { MindCanvas } from './MindCanvas';
 import { getGraphCanvasWsState } from './data-model';
 import { GraphCanvasToolbar } from './GraphCanvasToolbar';
 import { GraphCanvasNodeToolbar } from './GraphCanvasNodeToolbar';
@@ -92,6 +94,39 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
 
   // ── G4.4d UI 浮层状态(view 端拥有 open/anchor;capability 提供组件)──
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /**
+   * ⭐ 当前记录的 variant —— 决定用哪个渲染器(diglot mind v0)。
+   * 'canvas' 走本 view 的 Host;'mindmap' 走 MindCanvas(真源是 {S,G} 不是 instances)。
+   * null = 还没查出来(加载中),此时**两个渲染器都不挂** ——
+   * 免得用错的那个去读写记录(sanitizeDocument 会把 mind 洗成空画板)。
+   */
+  const [activeVariant, setActiveVariant] = useState<GraphVariant | null>(null);
+  /** 导图:被钉住的节点数 + 恢复回调(由 MindCanvas 上报,toolbar 消费)。 */
+  const [mindPinned, setMindPinned] = useState<{ count: number; releaseAll: () => void }>({
+    count: 0,
+    releaseAll: () => {},
+  });
+
+  /**
+   * ⚠️⚠️ **必须是稳定引用**(真机踩过:Maximum update depth exceeded,并**冲掉用户数据**)。
+   *
+   * 原来这里写的是**内联箭头函数**:
+   *   `onPinnedChange={(count, releaseAll) => setMindPinned({ count, releaseAll })}`
+   * 每次 render 都是新函数 → MindCanvas 里 `useEffect[..., onPinnedChange]` 每次都重跑
+   * → `setMindPinned` → 父组件 re-render → 又是新箭头 → **无限循环**。
+   *
+   * ⭐ 后果远不止刷屏:循环期间 MindCanvas 被反复重挂,
+   * **加载中的空模型会盖掉用户刚编辑的内容**(实测 semantic 退回模板的 628 字节)。
+   *
+   * ⚠️ 两道闸缺一不可:
+   *  ① 回调本身 useCallback 稳定(否则 effect 恒重跑)
+   *  ② setState 前**比对值**(否则值没变也 re-render,循环照旧)
+   */
+  const handleMindPinnedChange = useCallback((count: number, releaseAll: () => void): void => {
+    setMindPinned((prev) =>
+      prev.count === count && prev.releaseAll === releaseAll ? prev : { count, releaseAll },
+    );
+  }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
@@ -147,6 +182,35 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     }, SAVE_DEBOUNCE_MS);
   }, [flushSave]);
 
+  // ── ⭐ variant 探测(独立 effect,**不依赖 Host**)──
+  //
+  // ⚠️ 必须与下面的「加载画板」分开,否则死锁:
+  //   渲染分支在 variant===null 时不挂 <Host> → hostRef 恒 null
+  //   → 加载 effect 的 `if (!host) return` 早退 → 永远拿不到 variant
+  //   → 界面卡在「加载中…」。(2026-09-10 真机实测撞到)
+  // ⭐ 教训:**别把「决定渲染谁」的前置查询,放进「渲染完才跑」的 effect 里。**
+  useEffect(() => {
+    if (!activeGraphId) {
+      setActiveVariant(null);
+      return;
+    }
+    let cancelled = false;
+    // ⭐ B1:导图在 mind_doc 表,画板在 graph_canvas 表 —— 先问导图表,
+    //    命中则是导图;否则按画板处理(记录不存在也走这条,不会卡住)。
+    void library
+      .mindLoad(activeGraphId)
+      .then((mind) => {
+        if (cancelled) return;
+        setActiveVariant(mind ? 'mindmap' : 'canvas');
+      })
+      .catch(() => {
+        if (!cancelled) setActiveVariant('canvas');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGraphId, library]);
+
   // ── 切画板 / 启动恢复 ──
   useEffect(() => {
     activeIdRef.current = activeGraphId;
@@ -175,6 +239,22 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
         // 竞态保护:快速切换时丢弃过期结果
         if (seq !== loadSeqRef.current) return;
         if (!record) return;
+        // ⚠️⚠️ variant 闸门:本 view 只渲染 canvas 文档。
+        // sanitizeDocument 对任何不认识的 doc_content **一律洗成空画板**
+        // (instances: []),接着防抖 save 用画布 JSON 覆盖回去 —— 静默毁数据。
+        // 故非 canvas 一律 fail loud 且**不标记 loaded**
+        // (loadedIdRef 保持旧值 → flushSave 就绪判据不成立 → 绝不写盘)。
+        // ⭐ B1 之后导图已不在本表,此闸门现护的是 family-tree / knowledge
+        //    这两个**已登记但渲染器未接**的 variant。
+        setActiveVariant(record.variant); // 幂等:探测 effect 通常已设过
+        if (record.variant !== 'canvas') {
+          console.warn(
+            `[graph-canvas-view] 拒绝以画板方式打开 variant=${record.variant} 的记录 ` +
+              `(id=${record.id});mind 渲染器尚未接线,不加载也不保存,以免覆盖内容。`,
+          );
+          loadedIdRef.current = null;
+          return;
+        }
         titleRef.current = record.title;
         const doc = sanitizeDocument(record.doc_content);
         host.loadDocument(doc);
@@ -232,9 +312,22 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
     },
     [scheduleSave],
   );
+  /**
+   * 视口订阅者(toolbar 缩放百分比用).
+   * ⚠️ 用 ref 存集合而非 state —— 订阅/退订不该引起 re-render;
+   * 退订函数必须真的把自己摘掉(常驻订阅没有停止调用就是泄漏)。
+   */
+  const viewportSubsRef = useRef<Set<() => void>>(new Set());
+  const subscribeViewport = useCallback((onChange: () => void): (() => void) => {
+    viewportSubsRef.current.add(onChange);
+    return () => {
+      viewportSubsRef.current.delete(onChange);
+    };
+  }, []);
   const handleViewportChange = useCallback(
     (_vp: Viewport): void => {
       scheduleSave();
+      for (const fn of viewportSubsRef.current) fn();
     },
     [scheduleSave],
   );
@@ -311,9 +404,13 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
       <GraphCanvasToolbar
         activeGraphId={activeGraphId}
         hostRef={hostRef}
+        isMind={activeVariant === 'mindmap'}
+        mindPinnedCount={mindPinned.count}
+        onMindReleaseAll={mindPinned.releaseAll}
         selectedCount={selectedIds.length}
         onAddClick={handlePickerOpen}
         onCombineClick={() => setCombineDialogOpen(true)}
+        subscribeViewport={subscribeViewport}
       />
       <div className="krig-graph-canvas-view__body">
         {activeGraphId == null ? (
@@ -324,6 +421,19 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
             <div className="krig-graph-canvas-view__empty-hint">
               在左侧选择已有画板,或点 NavSide 「+ 画板」新建
             </div>
+          </div>
+        ) : activeVariant === 'mindmap' ? (
+          /* ⭐ diglot mind v0:真源是 {S,G},instances 是派生物 —— 独立渲染器 */
+          <MindCanvas
+            workspaceId={workspaceId}
+            graphId={activeGraphId}
+            onPinnedChange={handleMindPinnedChange}
+          />
+        ) : activeVariant === null ? (
+          /* ⚠️ variant 未知(加载中)→ 两个渲染器都不挂,
+             免得用错的那个去读写记录(sanitizeDocument 会把 mind 洗成空画板) */
+          <div className="krig-graph-canvas-view__empty">
+            <div className="krig-graph-canvas-view__empty-hint">加载中…</div>
           </div>
         ) : (
           <Host
@@ -336,7 +446,7 @@ export function GraphCanvasView({ workspaceId }: GraphCanvasViewProps) {
           />
         )}
         {/* G5 节点浮条(单选时贴选中框下方;view-agnostic node-toolbar capability) */}
-        {activeGraphId != null && (
+        {activeGraphId != null && activeVariant === 'canvas' && (
           <GraphCanvasNodeToolbar
             hostRef={hostRef}
             selectedIds={selectedIds}
