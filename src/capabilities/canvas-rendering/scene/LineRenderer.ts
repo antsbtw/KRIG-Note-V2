@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import type { ArrowStyle, LineStyle } from '@capabilities/shape-library/types';
+import type { ArrowEndKind, ArrowStyle, LineStyle } from '@capabilities/shape-library/types';
 import { dashParamsFor } from './path-to-three';
 import {
   ARROW_SIZE_PX,
@@ -110,26 +110,37 @@ function updateArrowHead(group: THREE.Group, points: readonly THREE.Vector3[]): 
 
   // end 端:切线取末两点;begin 端:把点列反过来,同一套逻辑
   if (shouldDrawArrow(raw.end) && plain.length >= 2) {
-    addHead(group, plain[plain.length - 1], arrowTangentOf(plain), color);
+    addHead(group, plain[plain.length - 1], arrowTangentOf(plain), color, raw.end!);
   }
   if (shouldDrawArrow(raw.begin) && plain.length >= 2) {
     const reversed = [...plain].reverse();
-    addHead(group, reversed[reversed.length - 1], arrowTangentOf(reversed), color);
+    addHead(group, reversed[reversed.length - 1], arrowTangentOf(reversed), color, raw.begin!);
   }
 }
 
-/** 把一个三角形 mesh 加进 group(几何来自纯逻辑层,这里只管画)。 */
-function addHead(group: THREE.Group, tip: Pt, tangent: Pt | null, color: string): void {
-  const head = arrowHeadPoints(tip, tangent, ARROW_SIZE_PX);
+/**
+ * 把一个端形 mesh 加进 group(几何来自纯逻辑层,这里只管画)。
+ *
+ * ⭐ 吃的是**通用多边形**(`points` + `triangles` 索引)—— 六种端形共用这一套:
+ * triangle 1 个三角、diamond/stealth 2 个、arrow 4 个、oval 扇形 16 个。
+ * ⚠️ 若这里按形状分支,就等于把几何知识又抄一份到 mesh 层(两处迟早漂移)。
+ */
+function addHead(
+  group: THREE.Group,
+  tip: Pt,
+  tangent: Pt | null,
+  color: string,
+  kind: ArrowEndKind,
+): void {
+  const head = arrowHeadPoints(tip, tangent, ARROW_SIZE_PX, kind);
   if (!head) return; // ⚠️ 退化线(末两点重合)→ 不画,不产出 NaN mesh
+  const flat: number[] = [];
+  for (const i of head.triangles) {
+    const p = head.points[i];
+    flat.push(p.x, p.y, 0);
+  }
   const geom = new THREE.BufferGeometry();
-  geom.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute(
-      [head.tip.x, head.tip.y, 0, head.left.x, head.left.y, 0, head.right.x, head.right.y, 0],
-      3,
-    ),
-  );
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
   const mat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(color).getHex(),
     side: THREE.DoubleSide,

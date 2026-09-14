@@ -60,40 +60,92 @@ describe('箭头几何 · 切线方向', () => {
   });
 });
 
-describe('箭头几何 · 三角形顶点', () => {
+describe('箭头几何 · 端形顶点', () => {
+  const T = { x: 1, y: 0 };
+
   it('⭐ 尖端落在**线的终点**上,不是终点之外', () => {
-    const pts = arrowHeadPoints({ x: 100, y: 50 }, { x: 1, y: 0 }, 10);
-    expect(pts).not.toBeNull();
-    expect(pts!.tip).toEqual({ x: 100, y: 50 });
+    for (const kind of ['arrow', 'triangle', 'stealth', 'diamond', 'oval'] as const) {
+      const h = arrowHeadPoints({ x: 100, y: 50 }, T, 10, kind);
+      expect(h, `${kind} 应产出几何`).not.toBeNull();
+      expect(h!.tip, `${kind} 尖端必须落在线端`).toEqual({ x: 100, y: 50 });
+    }
   });
 
-  it('⭐⭐ 两翼关于轴线**对称**,且在尖端后方', () => {
-    const pts = arrowHeadPoints({ x: 100, y: 0 }, { x: 1, y: 0 }, 10)!;
-    // 轴向朝 +x → 两翼 x 相同且小于 tip.x(在后方)
-    expect(pts.left.x).toBeCloseTo(pts.right.x, 10);
-    expect(pts.left.x).toBeLessThan(pts.tip.x);
-    // 对称:y 等大反向
-    expect(pts.left.y).toBeCloseTo(-pts.right.y, 10);
-    expect(Math.abs(pts.left.y)).toBeGreaterThan(0);
+  it('⭐⭐ 六种端形**各不相同** —— 否则浮条上选了没区别(假选项)', () => {
+    // ⚠️ 这条是本次的核心:上一版打算「统一画实心三角」,那样 6 个选项全一个样,
+    //   是「配置写了没反应」的静默失败。用顶点签名两两比对,任意两种相同即红。
+    const sig = (k: 'arrow' | 'triangle' | 'stealth' | 'diamond' | 'oval'): string => {
+      const h = arrowHeadPoints({ x: 0, y: 0 }, T, 10, k)!;
+      return JSON.stringify({
+        p: h.points.map((q) => [Math.round(q.x * 100) / 100, Math.round(q.y * 100) / 100]),
+        t: h.triangles,
+      });
+    };
+    const kinds = ['arrow', 'triangle', 'stealth', 'diamond', 'oval'] as const;
+    const seen = new Map<string, string>();
+    for (const k of kinds) {
+      const g = sig(k);
+      const dup = seen.get(g);
+      expect(dup, `${k} 与 ${dup} 的几何完全相同 → 浮条上是假选项`).toBeUndefined();
+      seen.set(g, k);
+    }
   });
 
-  it('⭐ 尺寸参数真的改变箭头大小(不是写死)', () => {
-    const small = arrowHeadPoints({ x: 0, y: 0 }, { x: 1, y: 0 }, 6)!;
-    const big = arrowHeadPoints({ x: 0, y: 0 }, { x: 1, y: 0 }, 18)!;
-    const spanOf = (p: typeof small): number => Math.hypot(p.left.x - p.right.x, p.left.y - p.right.y);
-    expect(spanOf(big)).toBeGreaterThan(spanOf(small) * 2);
+  it('⭐ 顶点索引合法:triangles 每 3 个一组且都指得到 points', () => {
+    for (const kind of ['arrow', 'triangle', 'stealth', 'diamond', 'oval'] as const) {
+      const h = arrowHeadPoints({ x: 0, y: 0 }, T, 10, kind)!;
+      expect(h.triangles.length % 3, `${kind} 索引数必须是 3 的倍数`).toBe(0);
+      expect(h.triangles.length, `${kind} 至少一个三角`).toBeGreaterThanOrEqual(3);
+      for (const i of h.triangles) {
+        expect(i, `${kind} 索引 ${i} 越界(points=${h.points.length})`).toBeLessThan(h.points.length);
+        expect(i).toBeGreaterThanOrEqual(0);
+      }
+    }
   });
 
-  it('⚠️ 切线为 null → 三角形也给 null(不画半个箭头)', () => {
-    expect(arrowHeadPoints({ x: 0, y: 0 }, null, 10)).toBeNull();
+  it('⚠️ 任何端形都不产出 NaN 顶点(NaN 会让 three 整个 mesh 消失)', () => {
+    for (const kind of ['arrow', 'triangle', 'stealth', 'diamond', 'oval'] as const) {
+      const h = arrowHeadPoints({ x: 3, y: -7 }, { x: 0.6, y: 0.8 }, 10, kind)!;
+      for (const p of h.points) {
+        expect(Number.isFinite(p.x) && Number.isFinite(p.y), `${kind} 有 NaN 顶点`).toBe(true);
+      }
+    }
   });
 
-  it('⭐ 斜向也对:旋转 90° 后两翼跟着转', () => {
-    const pts = arrowHeadPoints({ x: 0, y: 100 }, { x: 0, y: 1 }, 10)!;
-    // 轴向朝 +y → 两翼 y 相同且小于 tip.y
-    expect(pts.left.y).toBeCloseTo(pts.right.y, 10);
-    expect(pts.left.y).toBeLessThan(pts.tip.y);
-    expect(pts.left.x).toBeCloseTo(-pts.right.x, 10);
+  it('⭐⭐ 实心类端形关于轴线**对称**(arrow/triangle/stealth/diamond)', () => {
+    // 轴向 +x 时,顶点应成对出现在 y 的正负两侧
+    for (const kind of ['arrow', 'triangle', 'stealth', 'diamond'] as const) {
+      const h = arrowHeadPoints({ x: 0, y: 0 }, T, 10, kind)!;
+      const ys = h.points.map((p) => Math.round(p.y * 1000) / 1000);
+      const sum = ys.reduce((a, b) => a + b, 0);
+      expect(sum, `${kind} 两侧不对称(y 之和应为 0,实为 ${sum})`).toBeCloseTo(0, 6);
+    }
+  });
+
+  it('⭐ 尺寸参数真的改变端形大小(不是写死)', () => {
+    const spanOf = (size: number): number => {
+      const h = arrowHeadPoints({ x: 0, y: 0 }, T, size, 'triangle')!;
+      const ys = h.points.map((p) => p.y);
+      return Math.max(...ys) - Math.min(...ys);
+    };
+    expect(spanOf(18)).toBeGreaterThan(spanOf(6) * 2);
+  });
+
+  it('⚠️ 切线为 null → 给 null(不画半个箭头)', () => {
+    expect(arrowHeadPoints({ x: 0, y: 0 }, null, 10, 'triangle')).toBeNull();
+  });
+
+  it("⚠️ kind='none' → 给 null(别指望调用方记得先判)", () => {
+    expect(arrowHeadPoints({ x: 0, y: 0 }, T, 10, 'none')).toBeNull();
+  });
+
+  it('⭐ 斜向也对:旋转 90° 后端形跟着转', () => {
+    const h = arrowHeadPoints({ x: 0, y: 100 }, { x: 0, y: 1 }, 10, 'triangle')!;
+    // 轴向 +y → 两翼 y 相同且小于 tip.y
+    const wings = h.points.slice(1);
+    expect(wings[0].y).toBeCloseTo(wings[1].y, 10);
+    expect(wings[0].y).toBeLessThan(h.tip.y);
+    expect(wings[0].x).toBeCloseTo(-wings[1].x, 10);
   });
 });
 
@@ -156,7 +208,15 @@ describe('⚠️ 契约:arrow 必须真被 NodeRenderer 传下去', () => {
  * | M | 切线不归一化(箭头大小随线长变) | 2 红 |
  * | N | 退化线返回零向量而非 null(产出 NaN mesh) | 1 红 |
  * | O | `shouldDrawArrow` 只认 'arrow'(triangle 静默不画) | 1 红 |
+ * | P | 六种统一画三角(甲方案)→ **浮条上全一个样** | 1 红 |
+ * | Q | `kind='none'` 不返回 null(调用方忘判就画出鬼东西) | 1 红 |
+ * | R | 三角形索引越界(mesh 渲染垃圾) | 1 红 |
+ * | S | 端形不对称(两翼偏一边) | 2 红 |
  *
  * ⚠️ J / K 都让「共用 helper」那条红 —— 它守的是**两处不许各写一份**,
  * 比「有没有调用」宽一格,这是有意的:同一件事两处实现迟早漂移。
+ *
+ * ⭐⭐ **P 是本轮最要紧的一条**:它就是「甲方案(统一画三角)」的注入 ——
+ * 六种端形若几何相同,浮条上 6 个选项**选了没区别**,属「配置写了没反应」的
+ * 静默失败。用户拍板「基础图形的建设,应该现在画板构建」,正是不接受那个形态。
  */

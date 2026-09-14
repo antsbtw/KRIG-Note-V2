@@ -12,6 +12,10 @@
  * (同款先例:`interaction/magnet-actions.ts`、shape-library 求值器、node-toolbar registry。)
  *
  * ⚠️ 坐标语境:世界坐标,**Y 向下**(与 magnet-snap / HandlesOverlay 同源)。
+ *
+ * ⭐⭐ **六种端形各画各的**(用户 2026-09-13 拍板:「基础图形的建设,应该现在画板构建」)。
+ * ⚠️ 上一版打算「统一画实心三角、形状差异留后续」—— 那会让浮条上 6 个选项
+ * **选了没区别**,是「配置写了没反应」的静默失败。故一次做齐。
  */
 
 import type { ArrowEndKind } from '@capabilities/shape-library/types';
@@ -27,11 +31,21 @@ export interface Pt {
   readonly y: number;
 }
 
+/**
+ * ⭐ 端形的几何产物 —— **顶点列 + 三角形索引**(而非固定三个点)。
+ *
+ * ⚠️ 为什么不是「三个点」:diamond 要 4 顶点 2 三角、oval 要扇形多三角。
+ * 统一成 `{points, triangles}` 后,`LineRenderer` 只需**一套** mesh 代码吃所有形状。
+ */
 export interface ArrowHead {
-  /** 尖端 —— ⭐ 就落在线的终点上 */
+  /** 尖端 —— ⭐ 就落在线的终点上(所有端形都以它为锚) */
   readonly tip: Pt;
-  readonly left: Pt;
-  readonly right: Pt;
+  /** 多边形顶点(世界坐标) */
+  readonly points: readonly Pt[];
+  /** 三角形索引(每 3 个一组,指向 points 下标) */
+  readonly triangles: readonly number[];
+  /** ⭐ 线应当**缩短到**这一点,免得线尾从端形里穿出来(见 arrowInsetOf) */
+  readonly inset: number;
 }
 
 /**
@@ -55,31 +69,99 @@ export function arrowTangentOf(points: readonly Pt[]): Pt | null {
   return { x: dx / len, y: dy / len };
 }
 
+/** oval 的扇形采样数(足够圆,又不至于顶点爆炸)。 */
+const OVAL_SEGMENTS = 16;
+
 /**
- * ⭐ 三角形三个顶点:尖端在 `tip`,两翼在**尖端后方**、关于轴线对称。
+ * ⭐⭐ 按端形算几何 —— **六种各画各的**。
+ *
+ * 形状语义(本仓库首次定义;`ArrowEndKind` 此前只有类型没有几何):
+ *
+ * | kind | 形状 | 说明 |
+ * |---|---|---|
+ * | `none` | — | 不画(由 `shouldDrawArrow` 挡在前面) |
+ * | `arrow` | 开口 V | ⭐ 两条短边,**不封口** —— 最轻,适合联系线 |
+ * | `triangle` | 实心三角 | 经典流程图箭头 |
+ * | `stealth` | 燕尾三角 | 尾部内凹,视觉更"锐" |
+ * | `diamond` | 菱形 | UML 聚合;⚠️ 尖端在线端,**整体在线内侧** |
+ * | `oval` | 圆点 | UML 常用端点标记 |
  *
  * ⚠️ `tangent` 为 null(退化线)→ 返回 null,**不画半个箭头**。
  */
-export function arrowHeadPoints(tip: Pt, tangent: Pt | null, size: number): ArrowHead | null {
+export function arrowHeadPoints(
+  tip: Pt,
+  tangent: Pt | null,
+  size: number,
+  kind: ArrowEndKind = 'triangle',
+): ArrowHead | null {
   if (!tangent) return null;
-  // 沿轴线往回退 size,得到两翼所在的横截面中心
-  const backX = tip.x - tangent.x * size;
-  const backY = tip.y - tangent.y * size;
-  // 法向量(轴向逆时针 90°)
+  if (!shouldDrawArrow(kind)) return null;
+
+  // 轴向单位向量(指向尖端)与法向量(逆时针 90°)
+  const ax = tangent.x;
+  const ay = tangent.y;
   const nx = -tangent.y;
   const ny = tangent.x;
   const half = size * HALF_WIDTH_RATIO;
-  return {
-    tip: { x: tip.x, y: tip.y },
-    left: { x: backX + nx * half, y: backY + ny * half },
-    right: { x: backX - nx * half, y: backY - ny * half },
-  };
+  /** 沿轴向后退 d、沿法向偏移 o 的点 */
+  const at = (d: number, o: number): Pt => ({
+    x: tip.x - ax * d + nx * o,
+    y: tip.y - ay * d + ny * o,
+  });
+
+  switch (kind) {
+    case 'oval': {
+      // 圆心落在线端**内侧**半径处,使圆与线端相切
+      const r = half;
+      const c = at(r, 0);
+      const pts: Pt[] = [c];
+      for (let i = 0; i <= OVAL_SEGMENTS; i += 1) {
+        const t = (i / OVAL_SEGMENTS) * Math.PI * 2;
+        pts.push({ x: c.x + Math.cos(t) * r, y: c.y + Math.sin(t) * r });
+      }
+      const tris: number[] = [];
+      for (let i = 1; i <= OVAL_SEGMENTS; i += 1) tris.push(0, i, i + 1);
+      return { tip, points: pts, triangles: tris, inset: r * 2 };
+    }
+    case 'diamond': {
+      // 尖端 → 两侧 → 尾尖;⭐ 长度取 size(与三角同轴长,视觉才协调)
+      const pts: Pt[] = [tip, at(size / 2, half), at(size, 0), at(size / 2, -half)];
+      return { tip, points: pts, triangles: [0, 1, 2, 0, 2, 3], inset: size };
+    }
+    case 'stealth': {
+      // 燕尾:尾部中点向尖端内凹 0.35·size
+      const pts: Pt[] = [tip, at(size, half), at(size * 0.65, 0), at(size, -half)];
+      return { tip, points: pts, triangles: [0, 1, 2, 0, 2, 3], inset: size * 0.65 };
+    }
+    case 'arrow': {
+      // ⭐ 开口 V:两条有厚度的短边,不封口。用 4 顶点 2 三角画出 "V" 的两臂
+      const t = Math.max(1, size * 0.16); // 臂厚
+      const l1 = at(size, half);
+      const r1 = at(size, -half);
+      const l2 = at(size - t * 1.6, half);
+      const r2 = at(size - t * 1.6, -half);
+      const tipIn = at(t * 1.6, 0);
+      const pts: Pt[] = [tip, l1, l2, tipIn, r1, r2];
+      return {
+        tip,
+        points: pts,
+        // 左臂(tip,l1,l2 / tip,l2,tipIn)+ 右臂(tip,r2,r1 / tip,tipIn,r2)
+        triangles: [0, 1, 2, 0, 2, 3, 0, 3, 5, 0, 5, 4],
+        inset: 0, // 开口箭头不遮线尾,不缩线
+      };
+    }
+    case 'triangle':
+    default: {
+      const pts: Pt[] = [tip, at(size, half), at(size, -half)];
+      return { tip, points: pts, triangles: [0, 1, 2], inset: size };
+    }
+  }
 }
 
 /**
  * ⭐ 这个端点画不画箭头。
  *
- * ⚠️ v0 六种词表**统一画实心三角**(形状差异留后续)—— 但**都得画**:
+ * ⚠️ 六种词表**各画各的形状**(见 `arrowHeadPoints`)——
  * 只认 `'arrow'` 会让 JSON 里写 `triangle` 的**静默不出箭头**,
  * 那是「配置写了没反应」的典型静默失败。
  */

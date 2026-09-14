@@ -598,7 +598,7 @@ G 面改颜色 → 画布即变、语义面零变更。**同步管道带方向�
 
 | 缺 | 难度 | 说明 |
 |---|---|---|
-| ~~箭头不渲染~~ | ✅ | **已补**(2026-09-13):`scene/arrow-geometry.ts` 纯几何 + `LineRenderer` 画 mesh;`ArrowStyle` 从死字段变活,line JSON 写 `"arrow":{"end":"arrow"}` 即出箭头。⚠️ v0 六种词表**统一画实心三角**(形状差异留后续),但**都画** —— 只认 `arrow` 会让写 `triangle` 的静默没反应 |
+| ~~箭头不渲染~~ | ✅ | **已补齐**(2026-09-13):`scene/arrow-geometry.ts` 纯几何 + `LineRenderer` 画 mesh;`ArrowStyle` 从死字段变活。⭐ **六种端形各画各的**(开口箭头 / 实心三角 / 燕尾 / 菱形 / 圆点),并补上 `node-toolbar` 的 **arrow section**(两端各选一种,只对 line 显)——⚠️ 前一版打算「统一画三角、形状留后续」,那会让浮条 6 个选项**选了没区别**,用户否决 |
 | 边的方向语义 | 小 | `endpoints:[A,B]` 视觉对称,谁是源只靠数组下标 |
 | 边标签 | 中 | line 分支不走文字层,要新开「线中点挂文字」路径 |
 
@@ -610,9 +610,18 @@ G 面改颜色 → 画布即变、语义面零变更。**同步管道带方向�
 **拖动时线走了、箭头钉在原地**。⭐ 故箭头更新收口成**唯一入口** `updateArrowHead`,
 `renderLine` 与 `updateLineGeometry` 共用 —— 两处各写一份迟早漂移。
 
-⏳ **UI 入口未做**(用户拍板选 A:先只补渲染):`node-toolbar` 的
-「arrow section 待后续」仍在。画板用户现在不能在浮条上加箭头,
-但 JSON / 投影层写 arrow 就能画出来 —— 导图联系线正是这么用的。
+✅ **UI 入口已补**(用户 2026-09-13 改判:「基础图形的建设,应该现在画板构建」):
+`node-toolbar/sections/arrow/` 两端各六选一,`visibleWhen` 只对 line 类显。
+
+⚠️⚠️ **我这里犯过一个该记的错**:上一版说「画板没有建线入口(grep 不到)」
+并据此主张先只补渲染 —— ⭐ **那个 grep 是错的**,我只搜了 `views/graph-canvas-view/`,
+而建线在 `canvas-rendering/InteractionController` 的 `addMode` / `drawingLine` 里。
+用户直接甩截图证否(画板上线、端点手柄、线条浮条都在)。
+⭐ 教训与 memory 那条「grep 零命中 ≠ 代码不存在」同形,只是这次不是 NUL,是**搜错目录**。
+
+⭐ 另外发现:前人把这条路**全铺好了** —— `NodeStyleOverrides.arrow`、
+`patchStyle` 注释「改 fill/line/arrow」、`SectionDef.id` 列着 `'arrow'`、
+`visibleWhen` 注释「如 arrow 选中才显」**都已存在**,就差 section 本体没写。
 
 ⚠️ **另一个方向性提醒**:画板的边**不是数据库 edge** ——
 连线存为 `graph-instance` atom 的 `endpoints` 属性。
