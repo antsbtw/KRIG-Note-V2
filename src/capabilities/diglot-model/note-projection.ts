@@ -32,6 +32,9 @@ import {
   parseDefText,
   defValue,
   defRelations,
+  isLevelAlias,
+  levelAlias,
+  renumberAliasesInText,
 } from '@drivers/text-editing-driver/blocks/def-block/lexicon';
 
 /**
@@ -123,6 +126,47 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
   }
   for (const arr of byParent.values()) arr.sort((a, b) => a.order.localeCompare(b.order));
 
+  // ─────────────────────────────────────────────────────
+  // ⭐⭐ 层级别名重编号(用户 2026-09-13 拍板:`L<层号>-<同层序号>`)
+  // ─────────────────────────────────────────────────────
+  //
+  // > 用户原话:「根据层级来做标识……这样用户不要翻究竟是哪个层级的节点,
+  // > **很容易判断和再标注**。」
+  //
+  // ⚠️⚠️ **这是全仓唯一「机器改写用户文本」的地方**,故把边界钉死:
+  //  1. ⭐ **只动 L 编号**:`id: A`、`id: 我的节点` 这类手写别名一个字都不碰
+  //     (`isLevelAlias` 判定)。想让机器管就用 L 号,想自己管就写别的名字。
+  //  2. ⭐ **`id:` 行与关系行同步改**:否则改完编号,`L3-1 -.-> L2-1` 就指向空气。
+  //  3. ⭐⭐ **必须幂等**:本函数在 MindSemanticPane 每次 render 都跑
+  //     (`MindSemanticPane.tsx:127`),不幂等 = 光打开文档就把文本改了,
+  //     且双通道指纹比对(同文件 :194)会误判成「画布侧变了」→ 推新 doc → **光标跳**。
+  //     幂等来自:编号是**位置的纯函数**,同一棵树算两遍必然同一个答案。
+  //
+  // ⚠️ 与 C4 的关系(`03 §8.2` 记过一次「写 id 进语义文本被 C4 挡回」):
+  // ⭐ 那次挡的是**画布拖动**(`canvas.dragNode`)改写语义文本;
+  // 本次重编号只由**层级变化**触发(`canvas.dragReparent` / 改 hn 级别),
+  // 那本来就是 S 层编辑 —— Alt+拖(纯钉坐标)走 `dragNode`,S 零变更,**C4 不受影响**。
+  const levelCounter = new Map<number, number>();
+  const newAliasOf = new Map<NodeId, string>();
+  const assign = (n: SNode, depth: number): void => {
+    const idx = levelCounter.get(depth) ?? 0;
+    levelCounter.set(depth, idx + 1);
+    newAliasOf.set(n.id, levelAlias(depth, idx));
+    for (const c of byParent.get(n.id) ?? []) assign(c, depth + 1);
+  };
+  for (const top of byParent.get('\0root') ?? []) assign(top, 0);
+
+  // 旧 L 编号 → 新 L 编号。⚠️ 只收**当前就是 L 编号**的;手写别名不进这张表。
+  const rename = new Map<string, string>();
+  for (const n of s.nodes) {
+    const next = newAliasOf.get(n.id);
+    if (next === undefined) continue;
+    for (const d of (n.defs ?? []) as PmNode[]) {
+      const cur = defValue(parseDefText(defTextOf(d)), 'id');
+      if (cur !== undefined && isLevelAlias(cur) && cur !== next) rename.set(cur, next);
+    }
+  }
+
   const out: PmNode[] = [];
   const emit = (n: SNode, depth: number): void => {
     const inline = inlineOf(n.content);
@@ -142,10 +186,15 @@ export function treeToNoteDoc(s: SLayer): NoteDoc {
     //   ⚠️ 逐字节原样:注释行、不认识的行、非规范空格都不许「顺手规范化」。
     //   ⚠️ 无 def **不 emit 空块**(否则往返多出一段,01 §7.7.3 反向第 3 条)。
     for (const d of (n.defs ?? []) as PmNode[]) {
+      // ⭐ 重编号只改**别名 token**,行里其它字节(标签/空格/注释)原样 ——
+      //   rename 为空(没有 L 编号需要动)时 `renumberAliasesInText` 直接返回原串,
+      //   ⚠️ 这保证「没用 L 编号的老文档」逐字节完全不变(只增不改)。
+      const before = defTextOf(d);
+      const after = renumberAliasesInText(before, rename);
       out.push({
         type: d.type,
         ...(d.attrs ? { attrs: { ...d.attrs } } : {}),
-        ...(d.content?.length ? { content: d.content } : {}),
+        ...(after === '' ? {} : { content: [{ type: 'text', text: after }] }),
       });
     }
 
@@ -197,6 +246,11 @@ function levelOf(node: PmNode): number {
 function bodyBlocksOf(content: RichContent): PmNode[] {
   const payload = content.payload as { content?: PmNode[] } | undefined;
   return (payload?.content ?? []).slice(1) as PmNode[];
+}
+
+/** def 块(PmNode)的块内文本 —— def 的正文就是 `content: 'text*'` 的纯文本。 */
+function defTextOf(node: PmNode): string {
+  return (node.content ?? []).map((c) => c.text ?? '').join('');
 }
 
 /** 该块的纯文本(用于回落到 content 信封)。 */

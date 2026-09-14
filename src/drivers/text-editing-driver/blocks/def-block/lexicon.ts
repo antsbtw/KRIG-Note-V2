@@ -126,6 +126,102 @@ export function nextDefAlias(used: readonly string[]): string {
 }
 
 /**
+ * ⭐⭐ 层级别名:`L<层号>-<同层序号>`(用户 2026-09-13 拍板,推翻纯 A/B/C)。
+ *
+ * > 用户原话:「根据层级来做标识……这样用户不要翻究竟是哪个层级的节点,
+ * > **很容易判断和再标注**。」
+ *
+ * ```
+ * # 主题        L1-1
+ * ## 分支A      L2-1
+ * ### 叶子1     L3-1
+ * ### 叶子3     L3-2
+ * ## 分支B      L2-2
+ * ### 叶子2     L3-3     ← ⭐ 同层连续编号(不按父分组)
+ * ```
+ *
+ * ⚠️⚠️ **别名仍然不是身份**(`00 §2.5.3` 那条没变)——
+ * 真身份永远是 block id(ULID)。L 编号只是**人写的书写便利**,
+ * 且因为它**编码了位置**,层级一变就得重编号(见 `renumberAliases`)。
+ *
+ * ⚠️ 层号从 **1** 起(顶层 = L1),与用户口径一致;
+ * 内部树深度从 0 起,故 `层号 = depth + 1`。
+ */
+export function levelAlias(depth: number, indexInLevel: number): string {
+  return `L${depth + 1}-${indexInLevel + 1}`;
+}
+
+/** ⭐ 认出 L 编号形态(用于判断某别名是不是机器管的)。⚠️ 手写的 A/B/C 不匹配。 */
+const LEVEL_ALIAS_RE = /^L(\d+)-(\d+)$/;
+
+export function isLevelAlias(alias: string): boolean {
+  return LEVEL_ALIAS_RE.test(alias);
+}
+
+/**
+ * ⭐⭐ 按新层级重写 def 文本里的别名 —— **`id:` 行与关系行同步改**。
+ *
+ * ⚠️⚠️ **这是本特性唯一危险的地方**:机器改用户写的文本。
+ * 两条纪律钉死风险:
+ * 1. ⭐ **只动 L 编号**(`isLevelAlias`)—— 用户手写的 `id: A`、`id: 我的节点`
+ *    **一个字都不碰**。想要机器管就用 L 编号,想自己管就写别的名字。
+ * 2. ⭐ **只动别名 token**,行里其它字节(标签、空格、注释)原样 ——
+ *    `B -.支撑.-> C` 只换 B/C 两个 token,`-.支撑.->` 与空格排布不动。
+ *
+ * @param text     def 块原文
+ * @param rename   旧别名 → 新别名(只含 L 编号)
+ */
+export function renumberAliasesInText(
+  text: string,
+  rename: ReadonlyMap<string, string>,
+): string {
+  if (rename.size === 0) return text;
+  const block = parseDefText(text);
+  const lines = block.lines.map((l) => {
+    if (l.kind === 'kv') {
+      // ⚠️ 只改 `id:` 行的**值**;shape/color/role 等其它 kv 的值不是别名,不许碰
+      if (l.key !== 'id') return l;
+      const next = rename.get(l.value);
+      if (next === undefined) return l;
+      // ⭐ 保住原行的书写形态(`id:B` 无空格就还他无空格)——只换值那一段
+      const raw = l.raw.replace(
+        new RegExp(`(:\\s*)${escapeForRegExp(l.value)}(\\s*)$`),
+        `$1${next}$2`,
+      );
+      return { ...l, value: next, raw };
+    }
+    if (l.kind === 'rel') {
+      const src = rename.get(l.source) ?? l.source;
+      const tgt = rename.get(l.target) ?? l.target;
+      if (src === l.source && tgt === l.target) return l;
+      // ⭐ 逐 token 替换,不重建整行 —— 标签与空格排布原样
+      let raw = l.raw;
+      if (src !== l.source) raw = replaceFirstToken(raw, l.source, src);
+      if (tgt !== l.target) raw = replaceLastToken(raw, l.target, tgt);
+      return { ...l, source: src, target: tgt, raw };
+    }
+    return l; // other:注释 / 不认识的行 —— ⚠️ 一个字节都不碰
+  });
+  return serializeDefText({ lines });
+}
+
+function escapeForRegExp(v: string): string {
+  return v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 换掉行里**第一个**该 token(关系行的源端)。 */
+function replaceFirstToken(raw: string, from: string, to: string): string {
+  const re = new RegExp(`(^\\s*)${escapeForRegExp(from)}(?=\\s|-)`);
+  return raw.replace(re, `$1${to}`);
+}
+
+/** 换掉行里**最后一个**该 token(关系行的目标端)。 */
+function replaceLastToken(raw: string, from: string, to: string): string {
+  const re = new RegExp(`(>\\s*)${escapeForRegExp(from)}(\\s*)$`);
+  return raw.replace(re, `$1${to}$2`);
+}
+
+/**
  * `/def` 插入的骨架文本 —— 只有一行 `id:`。
  *
  * ⭐ 其余字段**用户按需补**(`00 §2.5.2`:行数可变、只写关键行、逐步补充),

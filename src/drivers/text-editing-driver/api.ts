@@ -54,7 +54,14 @@ import {
 } from './plugins/build-heading-collapse-plugin';
 import { insertTable as insertTableCommand } from './blocks/table';
 import { insertColumnList as insertColumnListCommand } from './blocks/column-list';
-import { buildDefSkeleton, nextDefAlias, parseDefText, defValue } from './blocks/def-block/lexicon';
+import { buildDefSkeleton, nextDefAlias, parseDefText, defValue, levelAlias, isLevelAlias } from './blocks/def-block/lexicon';
+
+/**
+ * `/def` 在**非 heading**(正文段)里插入时的层号兜底 —— 归末层。
+ * ⚠️ 与 note-projection 的 `MAX_HEADING_LEVEL` 同值(h1–h6,CommonMark);
+ * ⭐ 两处规则必须同源:note 的 hn 层级 ↔ 树深度。
+ */
+const MAX_ALIAS_LEVEL = 6;
 import { generateUlid } from '@shared/ulid';
 import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 
@@ -1788,8 +1795,16 @@ export const textEditingDriverApi = {
    *
    * 行为参照 insertMermaidBlockAtSelection:
    * - 空段落 → 替换;非空段落 → 之后插入
-   * - ⭐ **别名自动分配**:扫全 doc 已用的 `id:` 值,取第一个没被占的
-   *   (`nextDefAlias`;⚠️ 不是按个数递增 —— 删掉中间节点后那个字母该能重用)
+   * - ⭐⭐ **别名自动分配 = 层级编号 `L<层号>-<同层序号>`**(用户 2026-09-13 拍板)
+   *   > 用户原话:「根据层级来做标识……这样用户**不要翻究竟是哪个层级的节点**」
+   *   ⚠️ 层号从**当前块的 heading level** 来(h1→L1、h2→L2;非 heading 归末层);
+   *   同层序号 = 本 doc 里**同一层已用掉的 L 号个数 + 1**。
+   *   ⚠️ 这里**只能自己按 heading level 算** —— driver 看不见 diglot 的树推导
+   *   (反向依赖是违规),故不复用 `depthForNoteForm`。两处规则必须同源:
+   *   note 的 hn 层级 ↔ 树深度,见 `note-projection.ts` 的对应表。
+   * - ⚠️ **老文档的手写别名(A/B/C)一个字不碰**(用户拍板:只对新插入的用 L 号)——
+   *   `nextDefAlias` 因此**保留**,给「已经在用字母别名」的 doc 兜底:
+   *   ⭐ 判据是**这份 doc 里有没有 L 号**,没有就说明它是字母体系,continue 用字母。
    * - ⭐ 新插入的块 `open: true`(刚敲出来就要写,折叠着没法写);
    *   spec 默认 false 管的是**已有内容重开**时的形态
    * - 光标落在 `id:` 行末,用户接着往下写(`00 §2.5.7`)
@@ -1810,7 +1825,34 @@ export const textEditingDriverApi = {
       if (alias) used.push(alias);
       return false;
     });
-    const skeleton = buildDefSkeleton(nextDefAlias(used));
+
+    // ⭐ 当前块的层号:heading level 就是层号(h1→1);非 heading(正文段)归末层。
+    const $sel = state.selection.$from;
+    let curLevel = MAX_ALIAS_LEVEL;
+    for (let d = $sel.depth; d >= 1; d -= 1) {
+      const node = $sel.node(d);
+      if (node.type.name === 'heading') {
+        const lv = node.attrs.level;
+        curLevel = typeof lv === 'number' ? lv : 1;
+        break;
+      }
+    }
+
+    // ⚠️ 老文档兼容:这份 doc 一个 L 号都没有 = 它是字母体系(A/B/C),
+    //   ⭐ 继续给字母,**不把两套别名混进同一份文档**(用户拍板:老的不动)。
+    const docUsesLevelAlias = used.some((a) => isLevelAlias(a));
+    const isFreshDoc = used.length === 0;
+    let alias: string;
+    if (docUsesLevelAlias || isFreshDoc) {
+      // 同层序号 = 该层已用掉的 L 号个数 +1;⚠️ 撞了就顺延,绝不产出重复别名
+      const takenAtLevel = used.filter((a) => a.startsWith(`L${curLevel}-`)).length;
+      let idx = takenAtLevel;
+      while (used.includes(levelAlias(curLevel - 1, idx))) idx += 1;
+      alias = levelAlias(curLevel - 1, idx);
+    } else {
+      alias = nextDefAlias(used);
+    }
+    const skeleton = buildDefSkeleton(alias);
     const defNode = defType.create({ open: true }, schema.text(skeleton));
     if (!defNode) return;
 

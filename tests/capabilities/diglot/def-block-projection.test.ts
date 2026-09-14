@@ -308,3 +308,104 @@ describe('M6 · attrs.for(甲为主 + 乙可选)', () => {
     expect(JSON.stringify(treeToNoteDoc(s).payload)).toContain('X -.-> X'); // 原文还在
   });
 });
+
+// ────────────────────────────────────────────────────────────
+// 5. ⭐⭐ 层级别名 L<层号>-<同层序号>(用户 2026-09-13 拍板,推翻纯 A/B/C)
+// ────────────────────────────────────────────────────────────
+
+describe('M7 · 层级别名重编号', () => {
+  const L = (id: string, alias: string, extra = ''): unknown =>
+    def(id, extra ? `id: ${alias}\n${extra}` : `id: ${alias}`);
+  /** 取回写后所有 def 块的全文 */
+  const defTexts = (d: { payload: { content: { type: string; content?: { text?: string }[] }[] } }): string[] =>
+    d.payload.content
+      .filter((b) => b.type === 'defBlock')
+      .map((b) => (b.content ?? []).map((c) => c.text ?? '').join(''));
+
+  it('⭐ 编号反映真实层级:L<层号>-<同层序号>,同层连续', () => {
+    const src = doc([
+      h(1, 'n1', '主题'),
+      h(2, 'n2', '分支A'), L('d1', 'L2-1'),
+      h(3, 'n3', '叶子1'), L('d2', 'L3-1'),
+      h(2, 'n4', '分支B'), L('d3', 'L2-2'),
+      h(3, 'n5', '叶子2'), L('d4', 'L3-2'),
+    ]);
+    // 层级没变 → 编号原样(幂等)
+    expect(defTexts(treeToNoteDoc(noteDocToTree(src)) as never)).toEqual([
+      'id: L2-1', 'id: L3-1', 'id: L2-2', 'id: L3-2',
+    ]);
+  });
+
+  it('⭐⭐ 层级一变,编号跟着变(这就是本特性的全部意义)', () => {
+    // 叶子1 从 h3 提成 h2 → 它不再是第三层,编号必须改
+    const moved = doc([
+      h(1, 'n1', '主题'),
+      h(2, 'n2', '分支A'), L('d1', 'L2-1'),
+      h(2, 'n3', '叶子1'), L('d2', 'L3-1'),
+      h(2, 'n4', '分支B'), L('d3', 'L2-2'),
+    ]);
+    const back = defTexts(treeToNoteDoc(noteDocToTree(moved)) as never);
+    // 三个都在第二层 → L2-1 / L2-2 / L2-3
+    expect(back).toEqual(['id: L2-1', 'id: L2-2', 'id: L2-3']);
+  });
+
+  it('⭐⭐ `id:` 行与关系行**同步**改 —— 否则关系指向空气', () => {
+    const moved = doc([
+      h(1, 'n1', '主题'),
+      h(2, 'n2', '分支A'), L('d1', 'L2-1'),
+      h(2, 'n3', '叶子1'), L('d2', 'L3-1'),
+      h(2, 'n4', '分支B'), L('d3', 'L2-2', 'L3-1 -.支撑.-> L2-2'),
+    ]);
+    const back = defTexts(treeToNoteDoc(noteDocToTree(moved)) as never);
+    // L3-1 → L2-2、L2-2 → L2-3,关系行两端都得跟着改
+    expect(back[2]).toBe('id: L2-3\nL2-2 -.支撑.-> L2-3');
+    // ⭐ 且改完之后边还解析得出来(没指向空气)
+    expect(noteDocToTree(treeToNoteDoc(noteDocToTree(moved))).edges).toHaveLength(1);
+  });
+
+  it('⚠️ 标签与空格排布原样 —— 只换别名 token,不重排整行', () => {
+    const moved = doc([
+      h(1, 'n1', '主题'),
+      h(2, 'n2', 'A'), L('d1', 'L2-1'),
+      h(2, 'n3', 'B'), L('d2', 'L3-1', 'L3-1   -.很长的标签.->   L2-1'),
+    ]);
+    const back = defTexts(treeToNoteDoc(noteDocToTree(moved)) as never);
+    // 三个空格、标签文字都必须原样
+    expect(back[1]).toContain('   -.很长的标签.->   ');
+  });
+
+  it('⭐⭐ 手写别名(A/B/C、中文)**一个字都不碰**(用户:老的不动)', () => {
+    const src = doc([
+      h(1, 'n1', '甲'), def('d1', 'id: A'),
+      h(1, 'n2', '乙'), def('d2', 'id: 我的节点\nA -.-> 我的节点'),
+    ]);
+    // ⚠️ 逐字节不变 —— 机器绝不改用户手写的名字
+    expect(treeToNoteDoc(noteDocToTree(src)).payload).toEqual((src as { payload: unknown }).payload);
+  });
+
+  it('⚠️ 注释行里的 L 号不算引用,不许被改写', () => {
+    const moved = doc([
+      h(1, 'n1', '主题'),
+      h(2, 'n2', 'A'), L('d1', 'L2-1'),
+      h(2, 'n3', 'B'), def('d2', 'id: L3-1\n# 这里提到 L3-1 只是注释'),
+    ]);
+    const back = defTexts(treeToNoteDoc(noteDocToTree(moved)) as never);
+    expect(back[1]).toBe('id: L2-2\n# 这里提到 L3-1 只是注释');
+  });
+
+  it('⭐⭐ 幂等:连跑两遍字节一致(它在每次 render 都跑,不幂等就会抢光标)', () => {
+    const src = doc([
+      h(1, 'n1', '主题'),
+      h(2, 'n2', '分支A'), L('d1', 'L2-1'),
+      h(3, 'n3', '叶子1'), L('d2', 'L3-1', 'L3-1 -.-> L2-1'),
+    ]);
+    const once = treeToNoteDoc(noteDocToTree(src));
+    const twice = treeToNoteDoc(noteDocToTree(once));
+    expect(twice.payload).toEqual(once.payload);
+  });
+
+  it('⚠️ 没有 def 块的老文档:逐字节完全不变(只增不改)', () => {
+    const plain = doc([h(1, 'n1', '主题'), p('p1', '正文'), h(2, 'n2', '子题')]);
+    expect(treeToNoteDoc(noteDocToTree(plain)).payload).toEqual((plain as { payload: unknown }).payload);
+  });
+});
