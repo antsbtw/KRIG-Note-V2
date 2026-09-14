@@ -368,22 +368,48 @@ atom-bridge 全透传 ✅ atomsToSvg 遍历全部 ✅ —— 问题在**存储�
 > 用户问「原来设计的 mind 构建要求还有哪些没有完成的?」——
 > 下表是**跑代码查出来的**,不是凭记忆列的。
 
-### 5.9.1 ⭐ 模型层:16/16 动作**全部实现**
+### 5.9.1 ⭐ 模型层:17/17 动作**全部实现**
 
 `engine-contract.ts` 声明的 `DiglotAction` 与 `apply-action.ts` 的 `case` **逐一对齐**,
 无声明未实现、也无实现未声明。C1–C9 + M1–M5 **14 条不变量全部有断言**。
 
-### 5.9.2 ⚠️ 真正的缺口在 **view 接线**:5 个动作没有触发入口
+⚠️ **2026-09-14 更新**:16 → 17(新增 `canvas.disconnect`,`af81c2ae`)。
+⭐ 同时给 `applyAction` 补了 **`default:` fail-loud 兜底** —— 此前未处理的 kind
+会让 switch 落空、函数**返回 `undefined`**,调用侧才炸(真实报错是
+`Cannot read properties of undefined (reading 's')`,离真因十万八千里);
+⚠️ 且 **tsc 拦不住**(实测加 union 成员前 tsc 报 0 错)。
 
-模型能做,但 UI 上**点不到**(grep 全 view 零调用):
+⭐ **数字别照抄,直接问代码**(本节两个数都是这么来的):
+```bash
+grep -oa "kind: '[a-z]*\.[a-zA-Z]*'" src/capabilities/diglot-model/engine-contract.ts \
+  | sed "s/.*kind: '//;s/'//" | sort -u > /tmp/decl.txt
+grep -oa "case '[a-z]*\.[a-zA-Z]*'" src/capabilities/diglot-model/apply-action.ts \
+  | sed "s/.*case '//;s/'//" | sort -u > /tmp/impl.txt
+diff /tmp/decl.txt /tmp/impl.txt && echo "对齐"
+```
+
+### 5.9.2 ⚠️ 真正的缺口在 **view 接线**:6 个动作没有触发入口
+
+模型能做,但 UI 上**点不到**(2026-09-14 复核:grep 全 view 零调用):
 
 | 动作 | 规格出处 | 缺什么 |
 |---|---|---|
-| `canvas.dragToFloat` | 01 §7.2「Shift+拖动」 | **转自由主题**手势未接 |
+| `canvas.dragToFloat` | 01 §7.2 → **改判右键菜单**(01 §7.0) | **转自由主题**未接 |
 | `canvas.createNode` | 01 §7.1「双击空白」 | **新建自由主题**未接 |
-| `canvas.connect` | 01 §7.4「Cmd+L」 | ⚠️ **渲染已接**(2026-09-14:S 层 edges → 画布虚线+箭头);⏳ 仍缺**创建手势**(`Cmd+L` / 磁吸点拉线)与右键菜单 |
+| `canvas.connect` | 01 §7.4「Cmd+L」 | ⚠️ **渲染已接**(2026-09-14:S 层 edges → 画布虚线+箭头);⏳ 仍缺**创建手势**(磁吸点拉线 / `Cmd+L`)与右键菜单 |
+| ⭐ `canvas.disconnect` | 01 §7.0「选中联系线 → 删除」 | **2026-09-14 新补的模型**(`af81c2ae`),⏳ 删除入口(选中线 Delete / 右键)未接 |
 | `graphic.editColor` | 01 §7.3 配色 | 节点上色入口未接(节点浮条也未做) |
 | `graphic.deletePos` | 01 §7.5 | **单节点**解除钉住(只做了 releaseAllPos 全量) |
+
+⚠️ **数字会过时**:本节标题的「6 个」是 2026-09-14 实测值。
+⭐ 复核办法(别数表格,直接问代码):
+```bash
+for a in canvas.connect canvas.disconnect canvas.createNode \
+         canvas.dragToFloat graphic.deletePos graphic.editColor; do
+  n=$(grep -ran "'$a'" src/views/ src/capabilities/ | grep -v "diglot-model/" | wc -l)
+  printf "%-22s view调用点=%s\n" "$a" "$n"
+done
+```
 
 #### 5.9.2.1 ⚠️⚠️ 更正:`semantic.moveIndent` **不是**大纲侧的缺口(2026-09-13 实测)
 
@@ -516,6 +542,43 @@ v1 存储格式(note doc)、分区模型(交集+三专用)、尺寸自适应(标
 故现在弧度写死 `dx/3`,调不了。⚠️ 记账,**不在本轮修**(那是画板共用层改动,影响所有线)。
 ⏳ **仍缺交互**:创建手势(磁吸点拉线 / `Cmd+L`)、选中与删除、右键菜单
 (`00 §3.5` 通则:手势与菜单必须配对做,单独一轮)。
+
+---
+
+## 5.99 ⏸️⏸️ **mind 暂停记账(2026-09-14 用户决定)**
+
+> 用户原话:「经过这几天的调试,我发现 **mind 的开发耽搁太多时间了,
+> 而且这还不是我目前的主任务**。可能得把剩余部分留给后面再次完善,先记账了。」
+
+⭐ **停在一个干净的位置**:主线能力全部真机验收并**已合 main**(`cea86089`),
+`af81c2ae` 补完模型层最后一块(删边)。⚠️ **没有半截状态**。
+
+### 已完成(合进 main,可用)
+
+| | |
+|---|---|
+| def 块 | note 的一等公民:真块 + `+++` 输入规则 + `/def` + markdown 双向 + 落库 |
+| 联系线三段 | **存得住**(`edges:[]` 硬写已修)→ **看得见**(虚线+箭头上画布)→ **走得对**(吸附点按相对位置) |
+| 画板箭头 | `ArrowStyle` 从死字段变活,六种端形 + 浮条 section |
+| `canvas.disconnect` | 2026-09-14 补,与 connect 对称;顺带给 `applyAction` 补 fail-loud `default` |
+
+### ⏸️ 剩下的(**全是 view 接线,模型层都现成**)
+
+| # | 事 | 现成条件 |
+|---|---|---|
+| 1 | 右键菜单(转自由主题 / 恢复自动位置 / 上色 / 删除 / 删联系线) | ⭐ 静态已查清:`canvas-rendering` **零** `contextmenu` 处理、自治区标记只在 FolderTree、`registerView` **没有 `contextMenu` 字段** → **右键「没反应」的真因就是零注册项**。⚠️ 但这是**静态推断,未真机验证** |
+| 2 | 磁吸点拉线(连联系线 / 自由主题回树) | ⭐ `onMagnetDragOut` 是**现成回调**,导图只接了 `onMagnetClick`;`MagnetDragOutTarget` 是 `magnet`/`world` 二元 union |
+| 3 | 节点浮条(上色/字体) | ⚠️ 被 `activeVariant === 'canvas'` 挡掉;**不能简单去条件** —— 浮条依赖 `hostRef`,导图走 MindCanvas 自己的 Host(与缩放控件同坑) |
+| 4 | 改序 bug | `project-to-canvas.ts:885` `if (dragged.parent === newParent && !before) return null` —— 末位时 `before` 为 undefined 直接短路,**同父拖不到末尾**,且会被弹回原位 |
+| 5 | 拖端点静默失败 | 树连线是**派生物**(`tline:`),`handleInstancesChange` 显式跳过 → 用户「连成功了」但数据零变更,一折叠就弹回 |
+| 6 | 债 7 视口 / `slack` 死参数 | 见 §6 与下文 |
+
+### ⚠️ 恢复时先做的两件事
+
+1. ⭐ **真机确认右键事件到不到** —— 上面第 1 条是静态推断,别在没验证的前提上盖一整套菜单
+   (「看着成立实际没有」是本仓库反复出现的形态)
+2. ⚠️ **补两次欠下的真机验证**:画板缩放控件、magnet-actions 手势回归
+   (resize / rotate / rewire / 画线 / 框选)—— 后者与第 2 条共用底层,一起过
 
 ---
 
