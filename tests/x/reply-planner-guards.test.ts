@@ -128,8 +128,22 @@ describe('采集必须校验:落对页面 + 正文真含关键词', () => {
 
   it('⭐ 必须确认落在搜索页,否则会把首页时间线当搜索结果入库', () => {
     // 2026-09-07 用户发现:采回来的推大多既不含关键词也不含求助信号
-    expect(SCAN).toMatch(/landedUrl/);
-    expect(SCAN).toMatch(/includes\('\/search'\)/);
+    //
+    // ⚠️ 2026-09-14:校验本身搬进了执行器(assertLanded),**断言没删,搬到两处**:
+    //   ① 策略必须声明 /search 这个判据(没声明 = 执行器无从校验)
+    //   ② 执行器必须真的比对并 throw(声明了没人查 = 白声明)
+    const STRATEGY = readFileSync(
+      resolve(__dirname, '../../src/capabilities/x-collect/strategies/keyword.ts'), 'utf-8');
+    const RUNNER = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-collect-runner.ts'), 'utf-8');
+
+    // ① 策略声明判据
+    expect(STRATEGY).toMatch(/urlIncludes:\s*'\/search'/);
+    // ② 执行器拿它跟真实落地 URL 比,不符就抛
+    expect(RUNNER).toMatch(/getURL\(\)/);
+    expect(RUNNER).toMatch(/landed\.includes\(arrival\.urlIncludes\)/);
+    expect(RUNNER, '比不上只是 log 而不抛 = 继续把别的页面当结果入库')
+      .toMatch(/if\s*\(!landed\.includes\(arrival\.urlIncludes\)\)\s*\{\s*throw/);
   });
 
   it('⭐ 正文要过关键词兜底 —— 不能全信 X 搜索', () => {

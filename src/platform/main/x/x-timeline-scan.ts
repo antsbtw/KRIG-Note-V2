@@ -14,6 +14,8 @@ import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
 import { googleTranslateBatch } from './google-translate';
 import type { XTweetData } from './x-extract-tweet';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
+import { runCollectStrategy } from './x-collect-runner';
+import { keywordStrategy } from '@capabilities/x-collect';
 import type {
   SearchRecipe,
   TimelineFilterConfig,
@@ -87,7 +89,17 @@ export function computeScrollDepthMs(recipe: SearchRecipe, bufferHours = 2): num
   return Math.min(sinceLastRun, cap);
 }
 
-/** 按 SearchRecipe 拼装 X 搜索 URL */
+/**
+ * 按 SearchRecipe 拼装 X 搜索 URL。
+ *
+ * ⚠️ **2026-09-14 起生产路径不再走这里** —— `scanRecipe` 已改用
+ * `keywordStrategy.target()`(见 `capabilities/x-collect/strategies/keyword.ts`)。
+ *
+ * ⭐ **但本函数必须留着**:它是那个策略的**对照基准** ——
+ * 「策略拼出来的 URL 与这里逐字一致」由 `tests/x/collect-strategy-registry.test.ts`
+ * 钉住。删了它,那几条实测血泪(filter:replies / since: 从 lastRunAt 推)
+ * 就只剩一份实现,再没有第二份可以对照。
+ */
 export function buildSearchUrl(recipe: SearchRecipe): string {
   const parts: string[] = [];
 
@@ -179,29 +191,7 @@ export function applyFilter(
   return { pass: true };
 }
 
-/**
- * 等待 X 页面推文元素出现（poll，最多 10s）。
- * 失败 → throw（fail loud）。
- */
-async function waitForTweetElements(wc: Electron.WebContents, timeoutMs = 10_000): Promise<void> {
-  const script = `document.querySelectorAll('article[data-testid="tweet"]').length`;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    // ⚠️ 这里的 catch **不是**兜底掩盖错误(feedback-fail-loud-no-fallback),
-    //   而是这个轮询本来就可能落在**导航途中**:即使上面 await 了 loadURL,
-    //   X 是 SPA,进站后还会自己再跳一次/换路由 —— 旧文档正在拆、新文档还没
-    //   commit,这个窗口里注入必被 Electron 拒:
-    //   「Script failed to execute, this normally means an error was thrown」。
-    //   实测形态:X 停在上一个详情页转圈时点扫描 → 第一次注入就撞上 → 整轮采集
-    //   报这句话失败(而它其实只是「页面还没好」)。
-    //   真正的失败判据是**超时**,由下面的 throw 负责 —— 那条路仍然 fail loud。
-    //   同一形态在 x-parent-tweet.ts:61 就是这么处理的,此处对齐。
-    const count = await wc.executeJavaScript(script).catch(() => null);
-    if (typeof count === 'number' && count > 0) return;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error('[x-timeline-scan] timeout waiting for tweet elements after 10s');
-}
+
 
 /** 在 webContents 内批量提取当前可见推文（复用 TWEET_SCRAPE_FN_BODY） */
 /**
@@ -300,33 +290,15 @@ export async function scanRecipe(
     throw new Error(`[x-timeline-scan] webContents ${targetWcId} not found or destroyed`);
   }
 
-  const searchUrl = buildSearchUrl(recipe);
-  console.log(`[x-timeline-scan] navigating to: ${searchUrl}`);
-
-  // 导航到搜索页。
-  // ⚠️ loadURL 要 await:不等它,下面的轮询会在**旧文档正在拆卸**时就注入,
-  //   撞进导航窗口被 Electron 拒(「Script failed to execute」)。
-  //   实测触发条件 = X 停在上一个详情页(还在转圈)时点「开始扫描」。
-  //   ⚠️ 但 await 本身也可能 reject —— X 常见 ERR_ABORTED(它自己的路由/重定向
-  //   把这次导航接管了),那不是失败:页面照样会到位,交给下面的轮询判定。
-  //   真失败由 waitForTweetElements 超时 throw,fail loud 这条路没变。
-  await wc.loadURL(searchUrl).catch((err: unknown) => {
-    console.warn('[x-timeline-scan] loadURL 未正常 resolve(X 常自行接管导航),继续等元素:', err);
-  });
-  await waitForTweetElements(wc);
-
-  // ⚠️ **确认真的落在搜索结果页**(2026-09-07 用户发现:采回来的推
-  //    大多既不含关键词、也不含求助信号 —— 那不是 X 搜索"宽松",
-  //    而是我们压根在读别的页面,把首页时间线当成了搜索结果)。
-  //    X 是 SPA:登录态刷新、路由接管、被弹回首页都会让 URL 变,
-  //    而 waitForTweetElements 只管"有没有推文",不管"是不是搜索页"。
-  const landedUrl = wc.getURL();
-  if (!landedUrl.includes('/search')) {
-    throw new Error(
-      `[x-timeline-scan] 没落在搜索页,实际在 ${landedUrl.slice(0, 80)} —— `
-      + '本轮中止(继续抓只会把首页时间线当成搜索结果入库)',
-    );
-  }
+  // ⭐⭐ 导航 / 等到位 / 落地校验 / 滚动判停 **全部交给执行器**
+  //     (`x-collect-runner.ts` + `keywordStrategy` 的三个答案)。
+  //     本函数从此只管「抓到的推怎么过滤、怎么入库」—— 见下面的 onRound。
+  //
+  //  ⚠️ 那三段被搬走的逻辑一条没少,都在执行器里(含各自的血泪注释):
+  //   · loadURL 要 await,但 reject 不算失败(X 常自行接管导航)
+  //   · waitArrived 超时才是真失败 → throw,fail loud
+  //   · 落地校验(URL 必须含 /search)—— 2026-09-07 「把首页时间线当搜索结果」那次
+  //   · 滚动:同步 scrollBy + 滚动后回读;scrollY 连续 3 轮不变才算到底
 
   // 预加载去重窗口内已有的 tweet_id
   // 去重集合来自 x_tweet 全表(含 expires_at=NONE 的永久行) —— 采纳过的推文
@@ -361,151 +333,168 @@ export async function scanRecipe(
   const scrollToMs = Date.now() - computeScrollDepthMs(recipe);
   console.log(`[x-timeline-scan] since=${new Date(sinceMs).toISOString().slice(0, 10)} `
     + `滚动深度=${Math.round(computeScrollDepthMs(recipe) / 3_600_000)}h`);
-  let lastScrollY = -1;
-  let stuckRounds = 0;
+  /**
+   * ⭐⭐ recipe → 策略参数。
+   *
+   * ⚠️ **签名不变,调用方零改动** —— 两个调用方(调度器 / X_RUN_RECIPE handler)
+   * 传的仍是 `SearchRecipe`,映射在这里做。这样本步的风险面只有一个文件,
+   * `tests/x` 的既有守卫可以直接当回归网用。
+   *
+   * ⚠️ `scrollDepthHours` 不从这里传 —— 本函数已有算好的 `scrollToMs`
+   * (`computeScrollDepthMs`,含 lastRunAt/bufferHours/12h 封顶的全部口径),
+   * 直接喂给 `olderThan`,免得同一个量算两遍、两处漂移。
+   */
+  const strategyParams = {
+    keywords: recipe.keywords,
+    fromAccounts: recipe.fromAccounts,
+    helpSignals: recipe.template === 'help-wanted' ? recipe.helpSignals : undefined,
+    lang: recipe.lang,
+    minLikes: recipe.minLikes,
+    minRetweets: recipe.minRetweets,
+    includeReplies: recipe.includeReplies,
+    resultType: recipe.resultType,
+    lastRunAt: recipe.lastRunAt,
+    sinceHours: recipe.sinceHours,
+  };
 
-  for (let round = 0; round < maxScrollRounds; round++) {
-    if (scanAbortMap.get(wsId)) {
-      console.log(`[x-timeline-scan] aborted by user (ws=${wsId})`);
-      break;
-    }
+  await runCollectStrategy(
+    keywordStrategy,
+    strategyParams,
+    wc,
+    {
+      // ── 抓(甲案:边滚边抓,虚拟列表滚过就删 DOM,滚完再抓必然丢)──
+      capture: () => extractVisibleTweets(wc),
 
-    const tweets = await extractVisibleTweets(wc);
-    fetched += tweets.length;
+      /**
+       * ⭐ 判停用的时间 —— `olderThan` 要拿它跟 `beforeTs` 比。
+       *
+       * ⚠️ 取不到返回 null(执行器会忽略这条),**不返回 0** ——
+       * 0 会被当成 1970 年,立刻判「已滚过深度」,整轮采集一屏就收工。
+       */
+      timeOf: (item) => {
+        const t = (item as XTweetData).createdAt;
+        if (!t) return null;
+        const ms = new Date(t).getTime();
+        return Number.isFinite(ms) ? ms : null;
+      },
 
-    const pendingBatch: TweetInboxRecord[] = [];
+      isAborted: () => scanAbortMap.get(wsId) === true,
+      maxRounds: maxScrollRounds,
 
-    for (const tweet of tweets) {
-      const { pass, reason } = applyFilter(tweet, filterConfig, seenIds);
+      // ── 每轮:过滤 → 翻译 → 入库(原样,一行没动)──
+      onRound: async ({ items }) => {
+        // ⚠️ 契约的必然代价:执行器不认识推文,回来的是 unknown[]。
+        //    这里转回去 —— 形状不对就 throw,绝不默默当空数组
+        //    (那会让「提取脚本坏了」表现为「今天没采到」)。
+        const tweets = items as XTweetData[];
+        fetched += tweets.length;
 
-      if (!pass) {
-        if (reason === 'duplicate') duplicates += 1;
-        // filtered_out 也写库（供 V4 统计分布），但 tweetId 缺失的静默跳过（无法去重）
-        if (tweet.tweetId && reason !== 'duplicate') {
-          await insertFilteredOut({
-            tweet_id: tweet.tweetId,
+        const pendingBatch: TweetInboxRecord[] = [];
+
+        for (const tweet of tweets) {
+          const { pass, reason } = applyFilter(tweet, filterConfig, seenIds);
+
+          if (!pass) {
+            if (reason === 'duplicate') duplicates += 1;
+            // filtered_out 也写库（供 V4 统计分布），但 tweetId 缺失的静默跳过（无法去重）
+            if (tweet.tweetId && reason !== 'duplicate') {
+              await insertFilteredOut({
+                tweet_id: tweet.tweetId,
+                text: tweet.text ?? '',
+                author_name: tweet.authorName ?? '',
+                // ⚠️ 存归一化形态(migration 1.0.2 统一):不归一化则同一人被算成两个
+                author_handle: normalizeHandle(tweet.authorHandle ?? ''),
+                author_avatar: tweet.authorAvatar,
+                tweet_url: tweet.tweetUrl,
+                lang: tweet.lang,
+                metrics: tweet.metrics ?? {},
+                fetched_at: nowIso,
+                created_at: tweet.createdAt || undefined,
+                in_reply_to: tweet.inReplyTo || undefined,
+                // 被回复者 handle —— ① 判断「这楼和 VPN 有没有关系」的入口
+                in_reply_to_user: tweet.inReplyToUser || undefined,
+                expires_at: expiresAt,
+                source: 'search',
+                search_recipe: recipe.id,
+                filter_reason: reason ?? 'unknown',
+                replied_at: undefined,
+                reply_draft: undefined,
+              });
+              seenIds.add(tweet.tweetId);
+              filteredOut++;
+            }
+            continue;
+          }
+
+          seenIds.add(tweet.tweetId!);
+          const record: TweetInboxRecord = {
+            tweet_id: tweet.tweetId!,
             text: tweet.text ?? '',
             author_name: tweet.authorName ?? '',
-            // ⚠️ 存归一化形态(migration 1.0.2 统一):不归一化则同一人被算成两个
+            // ⚠️ 同上:存归一化形态,与 x_author.handle / normalizeHandle 一致
             author_handle: normalizeHandle(tweet.authorHandle ?? ''),
             author_avatar: tweet.authorAvatar,
             tweet_url: tweet.tweetUrl,
             lang: tweet.lang,
             metrics: tweet.metrics ?? {},
             fetched_at: nowIso,
+            // A':extract-script 早就提取了这两个字段(:75 / :147),此前组装记录时漏带 —— 只是接线
             created_at: tweet.createdAt || undefined,
             in_reply_to: tweet.inReplyTo || undefined,
-            // 被回复者 handle —— ① 判断「这楼和 VPN 有没有关系」的入口
             in_reply_to_user: tweet.inReplyToUser || undefined,
             expires_at: expiresAt,
             source: 'search',
             search_recipe: recipe.id,
-            filter_reason: reason ?? 'unknown',
-            replied_at: undefined,
-            reply_draft: undefined,
-          });
-          seenIds.add(tweet.tweetId);
-          filteredOut++;
+            ws_id: wsId,
+            filter_score: 1.0,
+            status: 'pending',
+          };
+          pendingBatch.push(record);
         }
-        continue;
-      }
 
-      seenIds.add(tweet.tweetId!);
-      const record: TweetInboxRecord = {
-        tweet_id: tweet.tweetId!,
-        text: tweet.text ?? '',
-        author_name: tweet.authorName ?? '',
-        // ⚠️ 同上:存归一化形态,与 x_author.handle / normalizeHandle 一致
-        author_handle: normalizeHandle(tweet.authorHandle ?? ''),
-        author_avatar: tweet.authorAvatar,
-        tweet_url: tweet.tweetUrl,
-        lang: tweet.lang,
-        metrics: tweet.metrics ?? {},
-        fetched_at: nowIso,
-        // A':extract-script 早就提取了这两个字段(:75 / :147),此前组装记录时漏带 —— 只是接线
-        created_at: tweet.createdAt || undefined,
-        in_reply_to: tweet.inReplyTo || undefined,
-        in_reply_to_user: tweet.inReplyToUser || undefined,
-        expires_at: expiresAt,
-        source: 'search',
-        search_recipe: recipe.id,
-        ws_id: wsId,
-        filter_score: 1.0,
-        status: 'pending',
-      };
-      pendingBatch.push(record);
-    }
+            // 对非中文推文批量翻译（Google 翻译，失败条目静默跳过，不阻断采集）
+            const toTranslate = pendingBatch
+              .filter((r) => r.lang && r.lang !== 'zh')
+              .map((r) => ({ tweetId: r.tweet_id, text: r.text }));
+            if (toTranslate.length > 0) {
+              const translations = await googleTranslateBatch(toTranslate);
+              for (const r of pendingBatch) {
+                const t = translations.get(r.tweet_id);
+                if (t) r.translation = t;
+              }
+            }
 
-    // 对非中文推文批量翻译（Google 翻译，失败条目静默跳过，不阻断采集）
-    const toTranslate = pendingBatch
-      .filter((r) => r.lang && r.lang !== 'zh')
-      .map((r) => ({ tweetId: r.tweet_id, text: r.text }));
-    if (toTranslate.length > 0) {
-      const translations = await googleTranslateBatch(toTranslate);
-      for (const r of pendingBatch) {
-        const t = translations.get(r.tweet_id);
-        if (t) r.translation = t;
-      }
-    }
+            // 批量写库
+            for (const r of pendingBatch) {
+              await upsertTweet(r);
+              saved++;
+            }
 
-    // 批量写库
-    for (const r of pendingBatch) {
-      await upsertTweet(r);
-      saved++;
-    }
+            if (pendingBatch.length > 0) {
+              onPendingReady?.(saved);
+            }
+      },
 
-    if (pendingBatch.length > 0) {
-      onPendingReady?.(saved);
-    }
-
-    // ── 滚动:与 x-timeline-harvester 同一套经过实机验证的做法 ──────
-    // 用户 2026-09-02:「应该让扫描 48 小时内的推文吧,哪怕重复,但是不会漏掉」。
-    // 光把 since 窗口放宽到 48h 没用 —— 此前 maxScrollRounds=5 意味着
-    // **只读前 5 屏(约 50 条)就收工**,窗口再宽也读不到。
-    //
-    // 停止条件(按优先级):
-    //  ① 已滚过 since 窗口:最旧一条早于窗口起点 → 该窗口内的都看完了
-    //  ② 真的滚不动(scrollY 连续 3 轮不变)→ 到底了
-    //  ③ maxScrollRounds 安全阀
-    // ⚠️ 「本轮没有新推文」**不作为**停止条件 —— 时间线里夹着已见过的很正常,
-    //    急着停正是漏数据的元凶(reply 采集上栽过,验证页量出漏 83%)。
-    const oldestThisRound = tweets
-      .map((t) => t.createdAt).filter(Boolean)
-      .map((d) => new Date(d as string).getTime())
-      .filter((n) => Number.isFinite(n));
-    if (oldestThisRound.length && Math.min(...oldestThisRound) < scrollToMs) {
-      console.log(`[x-timeline-scan] 已滚过本轮深度(${new Date(scrollToMs).toISOString()}),停止`);
-      break;
-    }
-
-    await wc.executeJavaScript(`(function () {
-      var y = window.scrollY;
-      window.scrollBy(0, window.innerHeight * 0.85);
-      if (window.scrollY === y) {
-        var all = document.querySelectorAll('div');
-        for (var i = 0; i < all.length; i++) {
-          var el = all[i];
-          if (el.scrollHeight > el.clientHeight + 400) {
-            el.scrollTop = el.scrollTop + el.clientHeight * 0.85; break;
-          }
-        }
-      }
-    })()`).catch(() => {});
-    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1200));
-
-    // 滚动**之后**回读才是真实位置(behavior:'smooth' 是异步的,曾因此测了个寂寞)
-    const y = await wc.executeJavaScript(`window.scrollY`).catch(() => -1) as number;
-    if (y === lastScrollY) {
-      stuckRounds++;
-      if (stuckRounds >= 3) {
-        console.log(`[x-timeline-scan] 滚不动了(scrollY=${y} 连续 3 轮未变),停止`);
-        break;
-      }
-    } else {
-      stuckRounds = 0;
-    }
-    lastScrollY = y;
-  }
+      /**
+       * ⭐⭐ 什么时候停 —— **覆盖策略的默认答案**。
+       *
+       * `keywordStrategy.stop()` 会自己按 lastRunAt/12h 封顶算一个 `beforeTs`,
+       * 但本函数已经有算好的 `scrollToMs`(`computeScrollDepthMs`,同一套口径)。
+       * 用现成的,免得同一个量算两遍、日后两处漂移。
+       *
+       * ⚠️ 这不是「策略白写了」:策略给的是**默认值**,调用方有更准的上下文时
+       * 可以覆盖 —— 与 `web.page` 的「停止条件由调用方传」同源。
+       *
+       * ⚠️⚠️ 三条停法在这里汇合,一条都不许丢:
+       *  ① 已滚过本轮深度 → `olderThan`(这里)
+       *  ② 真的滚不动(scrollY 连续 3 轮不变)→ 执行器内建
+       *  ③ `maxRounds` 安全阀 → 上面传的 maxScrollRounds
+       * ⚠️ 「本轮没有新推文」**不作为**停止条件 —— 时间线里夹着已见过的很正常,
+       *    急着停正是漏数据的元凶(reply 采集上栽过,验证页量出漏 83%)。
+       */
+      stopOverride: { kind: 'olderThan', beforeTs: scrollToMs },
+    },
+  );
 
   // ⭐ 反向对账:本轮新采到的线索里,有些我**早就回复过**了。
   // 回填此前只有单向(采到我的回复 → 标记它的父推),顺序反过来就漏:
