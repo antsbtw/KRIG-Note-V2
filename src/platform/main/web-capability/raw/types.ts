@@ -197,3 +197,31 @@ export type RawQuota = {
   /** 占用超过这个比例就告警(0~1)。默认 0.9 */
   readonly warnRatio?: number;
 };
+
+/**
+ * ⭐ 重启后重建内存索引的入参(§15.1 第 2 条)。
+ *
+ * ⚠️ **收整个 `loadIndex()` 的返回值,不只收 entries** ——
+ * 这样调用方**没有机会把 `badLines` 丢掉**。只收 entries 的话,
+ * 「有几行坏了」就要靠调用方自觉去查、去报,那是静默吞掉的标准配方。
+ */
+export type RawHydrateInput = {
+  readonly entries: readonly RawIndexEntry[];
+  /** 读盘时解析失败的行数(`FsRawSink.loadIndex()` 已经数好了) */
+  readonly badLines: number;
+};
+
+/**
+ * 重建报告。
+ *
+ * ⚠️ `bytes` 是**落盘字节数**(截断条目用 `storedBytes`),
+ * 与 `usage().bytes` 同口径 —— 两者对不上就说明重建算错了。
+ */
+export type RawHydrateReport = {
+  /** 真正装进索引的条数 */
+  readonly restored: number;
+  /** 重建出来的占用字节数 */
+  readonly bytes: number;
+  /** 读盘时就坏掉的行数(原样透传,便于调用方决定要不要告警) */
+  readonly badLines: number;
+};

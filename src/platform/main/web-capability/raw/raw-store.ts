@@ -24,9 +24,11 @@
  * 有一条守卫扫死这件事。
  */
 
-import { type Failed, type Ok, type Result, failed, ok } from '../result';
+import { type Failed, type Ok, type Result, degraded, failed, ok } from '../result';
 import type {
   CaptureMechanism,
+  RawHydrateInput,
+  RawHydrateReport,
   RawIndexEntry,
   RawPurgeFilter,
   RawPurgeReport,
@@ -170,6 +172,83 @@ export class RawStore {
     this.enforceMaxBytes();
 
     return ok(entry);
+  }
+
+  /**
+   * ⭐⭐ 重启后把盘上的索引装回内存(§15.1 第 2 条)。
+   *
+   * ── 为什么非有不可 ──
+   *
+   * `FsRawSink.loadIndex()` 早就有,也有测试;缺的是**把 entries 交还给仓库的入口** ——
+   * 本类的三个私有状态(`index`/`bodies`/`totalBytes`)此前**只能由 `put` 填充**。
+   * 于是重启后 `query()` 恒空:**东西在盘上,但查不回来**,
+   * 而这一层的全部价值就是「一个月后还找得回来」。
+   *
+   * ⚠️ 现有那条「关掉进程再起来仍查得回」的端到端测试**绕过了本类**
+   * (它直接 `new FsRawSink().loadIndex()` 再 `sink.readBody()` 自己断言),
+   * 所以它验证的是 sink 层、不是仓库层 —— 真实启动路径(业务调 `query()`)
+   * 在重启后返回空,那条测试永远不会红。守卫必须走**公开面**,见 `raw-hydrate.test.ts`。
+   *
+   * ── 五条裁定(都要能被守卫打红)──
+   *
+   * ① **`badLines > 0` → `Degraded`,不吞也不炸**:为一行坏数据丢掉整月索引不划算
+   *    (`loadIndex` 自己的注释),但丢了多少必须说得出来。这正是三态里
+   *    `Degraded` 的定义场景 ——「当 Ok 是撒谎,当 Failed 是冤枉」。
+   * ② ⚠️ **字节数按落盘口径算**:`entry.bytes` 是**原始**大小,截断时盘上只有
+   *    `storedBytes`。而 `usage().bytes` 的语义是「实际落盘字节数(截断后的)」。
+   *    直接累加 `bytes` 会让占用**虚高** → 触发不该触发的配额淘汰 →
+   *    **把没过期的数据删掉**。这个 bug 只在「有截断条目 + 接近配额」时现形,极难复现。
+   * ③ **只恢复索引,不预加载 body**:body 可能有几个 GB,全读进内存等于把磁盘搬进 RAM。
+   *    `body(ref)` 本就有回落路径(内存未命中 → `sink.readBody`),代价只是首次取要走一次磁盘。
+   * ④ **只许在空库时调**:重复 hydrate 会让 `totalBytes` 翻倍。「启动时调一次」是唯一
+   *    合法用法,所以把非法用法变成**明确失败**,而不是靠注释约定。
+   * ⑤ **ref 撞了 fail loud**:`mintRef()` 的进程内计数器重启后归零,理论上可能与盘上
+   *    已有 ref 相撞。撞了就停,**绝不覆盖** —— 覆盖会让两条不同的记录共用一个句柄。
+   *
+   * ⚠️ `evicted` **有意不跨重启累计**:它的语义是「本次运行淘汰了多少」,
+   * 跨重启累计既无意义也无处存。保持归零 —— 这是裁定,不是漏做。
+   */
+  hydrate(input: RawHydrateInput): Result<RawHydrateReport> {
+    // ④ 非空库拒绝 —— 重复调会让 totalBytes 翻倍
+    if (this.index.size > 0) {
+      return failed(
+        `L-raw 已有 ${this.index.size} 条索引,拒绝重复 hydrate` +
+          `(重复装载会让占用统计翻倍 → 触发误淘汰)。hydrate 只该在启动时调一次。`,
+        false,
+      );
+    }
+
+    let bytes = 0;
+    for (const entry of input.entries) {
+      // ⑤ 撞 ref 就停,不覆盖
+      if (this.index.has(entry.ref)) {
+        return failed(
+          `L-raw 索引里 ref 重复: ${entry.ref} —— 盘上的索引可能被污染,` +
+            `绝不覆盖(两条记录共用一个句柄会让 body 取回错的那条)。`,
+          false,
+        );
+      }
+      this.index.set(entry.ref, entry);
+      // ② 落盘口径:截断的按 storedBytes 算,不是原始 bytes
+      bytes += entry.truncated ? (entry.storedBytes ?? 0) : entry.bytes;
+    }
+    this.totalBytes = bytes;
+
+    const report: RawHydrateReport = {
+      restored: this.index.size,
+      bytes,
+      badLines: input.badLines,
+    };
+
+    // ① 坏行要如实说 —— 不吞(说成 Ok 是撒谎),也不整体失败(说成 Failed 是冤枉)
+    if (input.badLines > 0) {
+      return degraded(report, [
+        `索引分片有 ${input.badLines} 行损坏,已跳过` +
+          `(多半是上次非正常退出时追加写被截断;这些记录的 body 仍在盘上但已查不到)`,
+      ]);
+    }
+
+    return ok(report);
   }
 
   /**

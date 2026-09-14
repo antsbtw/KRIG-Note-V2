@@ -606,7 +606,9 @@ adapter 航海图(哪片海域有什么)
 
 1. 接管 `net/bus.ts:483 storeBody` —— 让载荷真的流进来
 2. ⭐ **启动时 `loadIndex()` 重建内存索引** —— 否则落盘的数据**查不回来**
-3. `ready`/`scrollUntil` **尚未挂进 `WebPage` 接口** —— 能力建好了但调不到
+3. ~~`ready`/`scrollUntil` **尚未挂进 `WebPage` 接口** —— 能力建好了但调不到~~
+   ✅ **已还清(2026-09-14)** —— 上了公开面,X 现在调得到。⚠️ 但**只还了「调得到」这一半**,
+   签名分歧仍在,见下方更正。
 4. 磁盘剩余空间告警(需 `statfs`)
 
 > ⚠️ **第 2 条比「补个调用」严重**(2026-09-09 核实):
@@ -616,10 +618,55 @@ adapter 航海图(哪片海域有什么)
 > 构造函数只吃 `quota`/`sink`/`now`。
 > **需要新开一个 hydrate 入口**,并定「分片损坏(`badLines` 非零)时怎么办」——
 > 按铁律不许静默吞。**这是设计,不是接线。**
+>
+> ✅ **2026-09-14:设计已定并落地** —— `RawStore.hydrate(input): Result<RawHydrateReport>`。
+> 收**整个** `loadIndex()` 的返回值(`{entries, badLines}`)而不只收 entries,
+> 这样调用方**没有机会把 `badLines` 丢掉**。五条裁定:
+>
+> | # | 裁定 | 理由 |
+> |---|---|---|
+> | ① | `badLines > 0` → **`Degraded`**,`missing` 说明坏了几行 | 为一行坏数据丢掉整月索引不划算,但丢了多少必须说得出来 —— 正是三态里 `Degraded` 的定义场景 |
+> | ② | ⚠️ 字节数按**落盘口径**:截断条目用 `storedBytes` 而非 `bytes` | `bytes` 是**原始**大小。累加它会让占用**虚高** → 触发误淘汰 → **把没过期的删掉**。只在「有截断 + 接近配额」时现形,极难复现 |
+> | ③ | **只恢复索引,不预加载 body** | body 可能几个 GB;`body(ref)` 本就有 sink 回落路径 |
+> | ④ | **只许空库时调**,否则 `Failed` | 重复装载让 `totalBytes` 翻倍;把非法用法变成明确失败,不靠注释约定 |
+> | ⑤ | ref 撞了 **fail loud**,绝不覆盖 | `mintRef()` 的进程内计数器重启后归零;覆盖会让两条记录共用一个句柄 |
+>
+> ⚠️ `evicted` **有意不跨重启累计**(语义是「本次运行淘汰了多少」)—— 是裁定,不是漏做。
+>
+> 🛡 守卫:`tests/web-capability/raw-hydrate.test.ts`(13 条),**全部经公开面断言**。
+> ⚠️ 现有 `raw-fs-sink.test.ts` 那条「关掉进程再起来仍查得回」是绿的,但它
+> **绕过了 `RawStore`**(直接 `sink.loadIndex()` + `sink.readBody()` 自证),
+> 验证的是 sink 层不是仓库层 —— 真实启动路径重启后 `query()` 返回空,那条测试永远不会红。
+>
+> ⭐⭐ **注入验证时抓到自己写的假守卫**(值得记):守卫四初稿用「同一批 entries 装两次」
+> + 只断言 `isFailed`,删掉空库检查后**照样绿** —— 探针查出真因是走了裁定⑤的
+> ref 重复分支,**裁定⑤替裁定④兜了底**。已改成第二批用**全新 ref**,
+> 让 ref 检查帮不上忙;重新注入 → 如期变红。四条注入现已逐条验证过。
+>
+> ⏳ **接线仍未做**:`hydrate` 要在启动时被调到,得等**第 1 条**(`storeBody` 接管)一起 ——
+> 否则没人往 L-raw 里写,hydrate 出来永远是空的。按 §15.3,那一步要与观察窗同期。
 
-> ⚠️ **第 3 条同样比记的重**:`page/index.ts` **压根没导出 `control.ts`**,
+> ⚠️ **第 3 条同样比记的重**(2026-09-09 核实):`page/index.ts` **压根没导出 `control.ts`**,
 > 所以 `ready`/`scrollUntil` 不只是「没挂进 `WebPage`」,而是**不在包的公开面上**。
 > 且 `WebPage.ready()` 的签名与 `ControlEngine.ready()` **不一致**,合并时要选一个形状。
+>
+> ✅ **2026-09-14 已做的那一半**:`page/index.ts` 导出 `ControlEngine` + 五个默认值常量
+> + `ScrollStop`/`ScrollOptions`/`ScrollReport`/`RoundTrace` 与三个接缝类型。
+> 根 `index.ts` 早已 `export * as page`,故 `web.page.ControlEngine` 这条路同时通了。
+>
+> ⚠️ **`ReadyCriterion` 故意没转出** —— 它是**两份不等价的同名类型**:
+> `web-page.ts` 那份是不透明 brand 串,`control-types.ts` 那份是四分支判别联合(含 `anchorGone`)。
+> `export *` 会让「导出了哪一份」靠运气,故改用具名导出清单;要判别联合那份请显式深引用。
+>
+> ⚠️⚠️ **签名分歧本步没解决,是有意的**:`WebPage` 至今**零实现者、零引用**,
+> 是一份未兑现的声明;而 `ControlEngine` 是已实现已测的真东西。合并要么让接口降级成串、
+> **丢掉 `anchorGone`**(那是 `x-article-driver` 连环失败换来的分支),要么改写一份没人用的接口 ——
+> 按本节第 2 条同款裁定:**这是设计,不是接线**,留给接线时连同 `goto`/`prepare` 一起定。
+>
+> 🛡 守卫:`tests/web-capability/page-public-surface.test.ts`(6 条)。
+> 它从**公开面**取用而非深路径 —— 两个既有测试走的是 `.../page/control` 深路径,
+> 所以导出没了它们照样全绿,这正是这笔债能躺 5 天没人发现的原因。
+> 已按 `feedback-verify-guard-can-fail` 注入验证:删掉 index 的 control 导出 → **5/6 立刻红**。
 
 ### 15.2 ⭐⭐ 第一个真实消费者已确定:X 的「盯页作业」
 
