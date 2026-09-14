@@ -82,6 +82,17 @@ export type DiglotAction =
    */
   | { readonly kind: 'canvas.deleteSubtree'; readonly id: NodeId }
   | { readonly kind: 'canvas.connect'; readonly source: NodeId; readonly target: NodeId; readonly label?: string }
+  /**
+   * ⭐ 断开一条联系线 —— 与 `canvas.connect` **对称**(用户 2026-09-14 拍板「甲」)。
+   *
+   * ⚠️ 刻意用 `{source,target}` 而非 `{id}`:两者都要推出边 id,
+   * 用两端让 id 推导**只有 `deterministicEdgeId` 一处**;
+   * 给 id 则 view 侧要从 `rel:<edgeId>` instance id 剥前缀再传,
+   * **id 在两侧各拼一次 = 迟早漂移**(本仓库已有同形教训)。
+   *
+   * ⚠️ 边不存在 = **无变更**(幂等),不报错 —— 重复删/删空图都不该炸。
+   */
+  | { readonly kind: 'canvas.disconnect'; readonly source: NodeId; readonly target: NodeId }
   // ── 图形面(落 G) ──
   | { readonly kind: 'graphic.editColor'; readonly id: NodeId; readonly color: string }
   /** ⭐ 删 pos 条目 → 回自动布局(C7 的画布入口) */

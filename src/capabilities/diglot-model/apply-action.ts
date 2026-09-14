@@ -368,6 +368,26 @@ export function applyAction(snapshot: DiglotSnapshot, action: DiglotAction): Dig
       //    删空后整条移除(不留空壳),这就是「删除条目即释放回自动」
       return { s, g: unsetG(g, action.id, 'pos') };
     }
+
+    case 'canvas.disconnect': {
+      // ⭐ 与 connect 对称:同一个 deterministicEdgeId 推 id,**推导只此一处**
+      const id = deterministicEdgeId(action.source, action.target);
+      const edges = s.edges.filter((e) => e.id !== id);
+      // ⚠️ 边不存在 → 原样返回(幂等,不报错)。⭐ 引用不变,避免无谓重渲。
+      if (edges.length === s.edges.length) return snapshot;
+      // ⚠️ 只动 edges —— 节点与 G 层一律不碰(C3)
+      return { s: { ...s, edges }, g };
+    }
+
+    default: {
+      // ⚠️⚠️ **fail loud**:没有这条时,未处理的 kind 会让 switch 落空、
+      //   函数返回 `undefined`,调用侧拿到 undefined 才炸 ——
+      //   报错点离真因十万八千里(实测:断言报的是
+      //   `Cannot read properties of undefined (reading 's')`)。
+      // ⭐ 且 tsc **拦不住**(实测新增 kind 前 tsc 报 0 错),故必须运行时兜住。
+      const never: never = action;
+      throw new Error(`[diglot] 未处理的 action kind: ${JSON.stringify(never)}`);
+    }
   }
 }
 
