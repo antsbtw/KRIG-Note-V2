@@ -12,6 +12,7 @@ import {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  isRelationLineId,
   fontSizeForDepth,
   refForShape,
   DEFAULT_MIND_SHAPE_REF,
@@ -674,3 +675,122 @@ describe('字号不叠乘', () => {
       .toBeGreaterThanOrEqual(Math.round(textW));
   });
 });
+
+// ────────────────────────────────────────────────────────────
+// ⭐⭐ 联系线上画布(M9)—— `00 §2.5.1` 那条「存不住」修完之后,这条是「看不见」
+// ────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️ 实测缺口(2026-09-13 grep):`projectToInstances` 函数体里 **`edges` 零命中** ——
+ * def 块里写的 `A -.支撑.-> C` 存得住、读得回,但**画布上根本没有这条线**。
+ *
+ * ⭐ 本组守三件事:
+ *  1. 边**真的变成 instance**(不是又一个死字段)
+ *  2. ⭐⭐ 一端被折叠 → **不画**(用户拍板丙:先不做"里面还有线"的标记)
+ *  3. 联系线与树连线**分得开** —— 树连线是派生物不可选,联系线是用户数据
+ */
+describe('M9 · 联系线上画布', () => {
+  /** 在夹具上连一条边(用模型自己的 action,不手搓 SEdge) */
+  function withEdge(): { snapshot: DiglotSnapshot; source: string; target: string } {
+    const base = snap();
+    // 取两个**互不为父子**的节点,免得联系线与树连线重合看不出差别
+    const tops = base.s.nodes.filter((n) => n.parent !== null);
+    const source = tops[0].id;
+    const target = tops.find((n) => n.id !== source && n.parent !== source)!.id;
+    const next = engine.applyAction(base, { kind: 'canvas.connect', source, target, label: '支撑' });
+    return { snapshot: next, source, target };
+  }
+  const relsOf = (inst: ReturnType<typeof projectToInstances>) =>
+    inst.filter((i) => isRelationLineId(i.id));
+
+  it('⭐⭐ S 层的 edge 真的变成画布 instance(此前 edges 根本没进投影)', () => {
+    const { snapshot: sn, source, target } = withEdge();
+    expect(sn.s.edges, '夹具自证:应当真连上了一条边').toHaveLength(1);
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    const rels = relsOf(inst);
+    expect(rels, '联系线应当出现在 instances 里').toHaveLength(1);
+    expect(rels[0].endpoints![0].instance).toBe(source);
+    expect(rels[0].endpoints![1].instance).toBe(target);
+  });
+
+  it('⭐ 走 magnet 不走固定坐标 —— 拖动节点时线自动跟随(白用画板既有能力)', () => {
+    const { snapshot: sn } = withEdge();
+    const rel = relsOf(projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g))))[0];
+    expect(rel.endpoints, '联系线必须有 endpoints').toBeDefined();
+    expect(rel.position, '有 position 就是钉死坐标,拖动时不会跟随').toBeUndefined();
+  });
+
+  it('⭐⭐ 画成**虚线 + 箭头** —— 与树连线(实线无箭头)一眼区分', () => {
+    const { snapshot: sn } = withEdge();
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    const rel = relsOf(inst)[0];
+    // 虚线:`-.->` 的视觉对应物(01 §7.7.2「虚线箭头 + 标签 = 联系线」)
+    expect(rel.style_overrides?.line?.dashType, '联系线应当是虚线').toBe('dash');
+    // ⭐ 箭头:方向敏感(A→B 与 B→A 是两条边),画不出箭头就看不出方向
+    expect(rel.style_overrides?.arrow?.end, '联系线终点应当有箭头').toBeTruthy();
+    // 对照:树连线是实线、无箭头
+    const tline = inst.filter((i) => isTreeLineId(i.id))[0];
+    expect(tline.style_overrides?.arrow, '树连线不该有箭头').toBeUndefined();
+  });
+
+  it('⭐⭐ 一端被折叠 → **不画**(用户拍板丙:不留悬空线,也不做标记)', () => {
+    const { snapshot: sn, source } = withEdge();
+    // 把 source 的父折叠 → source 被裁掉
+    const parent = sn.s.nodes.find((n) => n.id === source)!.parent!;
+    const g = new Map(sn.g);
+    g.set(parent, { collapsed: true });
+    const inst = projectToInstances(sn.s, g, fakeLayout(buildLayoutRequest(sn.s, g)));
+    const visibleIds = new Set(nodesOnly(inst).map((i) => i.id));
+    expect(visibleIds.has(source), '夹具自证:source 应当真被折叠裁掉了').toBe(false);
+    expect(relsOf(inst), '一端不可见时不该画线').toHaveLength(0);
+  });
+
+  it('⚠️ 两端都可见时**照画** —— 别把「折叠不画」写成「什么都不画」', () => {
+    // ⚠️ 反向对照:上一条若实现成 `return []`,它也会绿。这条钉住正向仍然成立。
+    const { snapshot: sn } = withEdge();
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    expect(relsOf(inst)).toHaveLength(1);
+  });
+
+  it('⭐ 联系线 id 与树连线**分得开**(两个前缀互不误判)', () => {
+    const { snapshot: sn } = withEdge();
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    for (const i of inst) {
+      // ⚠️ 任何一个 instance 不许同时被两个判据认领
+      expect(isTreeLineId(i.id) && isRelationLineId(i.id), `${i.id} 被两个判据同时认领`).toBe(false);
+    }
+    const rel = relsOf(inst)[0];
+    expect(isTreeLineId(rel.id), '联系线不该被当成树连线(那会让它不可选、被拖动回调跳过)').toBe(false);
+  });
+
+  it('⚠️ 联系线**不进** G 层,也不改 S 层节点(它已经是 S 的一部分)', () => {
+    const { snapshot: sn } = withEdge();
+    const beforeG = sn.g.size;
+    const beforeNodes = JSON.stringify(sn.s.nodes);
+    projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    expect(sn.g.size, '投影是纯函数,不许写 G 层').toBe(beforeG);
+    expect(JSON.stringify(sn.s.nodes), '投影不许改 S 层').toBe(beforeNodes);
+  });
+
+  it('⚠️ 没有联系线的文档:instances 里一条都不多(只增不改)', () => {
+    const base = snap();
+    expect(base.s.edges).toHaveLength(0);
+    const inst = projectToInstances(base.s, base.g, fakeLayout(buildLayoutRequest(base.s, base.g)));
+    expect(relsOf(inst)).toHaveLength(0);
+  });
+});
+
+/**
+ * ── M9 注入验红台账(5 向,全部按预期变红、还原后全绿)────────────
+ *
+ * | # | 注入 | 结果 |
+ * |---|---|---|
+ * | T | `edges` 不进投影(退回改动前) | 5 红 |
+ * | U | 折叠也照画(留悬空线) | 1 红 |
+ * | V | 画成实线无箭头(与树连线分不开) | 1 红 |
+ * | W | 联系线用 `tline:` 前缀(被当成派生物静默跳过) | 1 红 |
+ * | X | 走固定坐标不走 magnet(拖动时线不跟随) | 2 红 |
+ *
+ * ⚠️ U 单独一条红,正说明「两端都可见时照画」那条**反向对照**是必要的:
+ * 若把「折叠不画」实现成 `return []`,U 会绿而反向对照会红 —— 两条互为守卫。
+ */

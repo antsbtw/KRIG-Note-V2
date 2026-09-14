@@ -46,7 +46,19 @@ export interface ProjectedInstance {
    * 导图用它把文字内缩钉成固定 10px,见 TEXT_INSET_PX。
    */
   readonly params?: Readonly<Record<string, number>>;
-  readonly style_overrides?: { fill?: { color?: string }; line?: { color?: string; width?: number } };
+  /**
+   * ⭐ 样式覆盖(canvas-rendering `Instance.style_overrides` 的结构性镜像)。
+   *
+   * ⚠️⚠️ **漏声明的字段会被静默丢掉**(TS 结构类型不报错)—— 与下面 magnetActions
+   * 同一个坑:`dashType` / `arrow` 起初没声明,联系线的虚线与箭头**写了也传不过去**。
+   * ⭐ 加字段时对照 `canvas-rendering/types.ts` 的 `Instance.style_overrides`。
+   */
+  readonly style_overrides?: {
+    fill?: { color?: string };
+    line?: { color?: string; width?: number; dashType?: string };
+    /** 两端端形(`none`/`arrow`/`triangle`/`stealth`/`diamond`/`oval`)。 */
+    arrow?: { begin?: string; end?: string };
+  };
   /**
    * ⭐ 连接点操作点(canvas-rendering 的 `Instance.magnetActions`):
    * 有子节点的节点在 `E`(右侧连接点,也正是树连线出发的那个点)挂一个圆,
@@ -568,7 +580,58 @@ export function projectToInstances(
     };
   });
 
-  return [...nodes, ...projectTreeLines(vis, lineStyle)];
+  return [
+    ...nodes,
+    ...projectTreeLines(vis, lineStyle),
+    ...projectRelationLines(s, vis),
+  ];
+}
+
+/**
+ * ⭐⭐ S 层 `edges`(联系线)→ 画布 instance。
+ *
+ * ⚠️ 此前 `projectToInstances` **完全不碰 `s.edges`**(grep 零命中)——
+ * 于是 def 块里写的 `A -.支撑.-> C` 存得住、读得回,**画布上却什么都没有**。
+ * 那正是 `00 §2.5.1` 修完「存不住」之后剩下的另一半:**看不见**。
+ *
+ * ⭐ **一端不可见就不画**(用户 2026-09-14 拍板丙):
+ * 折叠会把整棵子树裁掉(`visibleNodes`),此时端点 instance 根本不存在 ——
+ * 照画就是**指向不存在 instance 的悬空线**(树连线那条早有同款断言钉着)。
+ * ⏳ 「折叠里面还有线」的提示标记**本轮不做**:用户要先在真机上看见联系线,
+ * 才好判断那个提示值不值得加(且 E 磁吸点已被折叠数字占满,见 magnet-actions)。
+ *
+ * ⚠️ **走 magnet 不走固定坐标** —— 与树连线同一个理由:拖动节点时画布会
+ * 自动重算端点(rewire 是画板既有能力,白用)。写死坐标就得自己维护。
+ */
+function projectRelationLines(s: SLayer, vis: readonly SNode[]): ProjectedInstance[] {
+  if (s.edges.length === 0) return [];
+  const visIds = new Set(vis.map((n) => n.id));
+  const out: ProjectedInstance[] = [];
+  for (const e of s.edges) {
+    // ⭐ 一端被折叠裁掉 → 不画(不留悬空线)
+    if (!visIds.has(e.source) || !visIds.has(e.target)) continue;
+    out.push({
+      id: `${RELATION_LINE_PREFIX}${e.id}`,
+      type: 'shape',
+      ref: DEFAULT_RELATION_LINE.ref,
+      // ⚠️ 两端都取 E/W 会让"回指"的线绕一大圈;联系线是任意两点,
+      //   统一用 源 E → 目标 W,与树连线同向,视觉最不意外。
+      endpoints: [
+        { instance: e.source, magnet: 'E' },
+        { instance: e.target, magnet: 'W' },
+      ],
+      style_overrides: {
+        line: {
+          color: DEFAULT_RELATION_LINE.color,
+          width: DEFAULT_RELATION_LINE.width,
+          dashType: DEFAULT_RELATION_LINE.dashType,
+        },
+        // ⭐ 终点箭头 = 方向的唯一视觉表达(模型统一存有向,`01 §3.2`)
+        arrow: { end: 'triangle' },
+      },
+    });
+  }
+  return out;
 }
 
 /** 树连线 instance 的 id 前缀 —— ⭐ 与节点 id 命名空间隔离,避免撞。 */
@@ -612,6 +675,41 @@ export const DEFAULT_TREE_LINE: Required<Omit<TreeLineStyle, 'dashType'>> & {
 export function isTreeLineId(id: string): boolean {
   return id.startsWith(TREE_LINE_PREFIX);
 }
+
+/**
+ * ⭐ 联系线 instance 的 id 前缀 —— ⚠️ **与树连线刻意分开**。
+ *
+ * 两者性质完全不同,判据混用会出两种反向的错:
+ * - 树连线是**派生物**(每次由树重算),view 的拖动/删除回调一律跳过它;
+ * - ⭐ 联系线是**用户数据**(S 层 `edges`),将来要能选中、能删 ——
+ *   若被 `isTreeLineId` 认领就会被静默跳过(`03 §5.9.2` 记的「拖端点静默失败」同形)。
+ */
+const RELATION_LINE_PREFIX = 'rel:';
+
+/** 某个 instance id 是不是联系线(树之外的附加关系,`01 §3.2`)。 */
+export function isRelationLineId(id: string): boolean {
+  return id.startsWith(RELATION_LINE_PREFIX);
+}
+
+/**
+ * ⭐ 联系线的默认观感 —— ⚠️ **与树连线一眼区分**(规格 `01 §7.7.2`:
+ * 「`B -.支撑.-> C` 虚线箭头 + 标签 = 联系线」)。
+ *
+ * | | 树连线 | ⭐ 联系线 |
+ * |---|---|---|
+ * | 线型 | 实线 | **虚线** |
+ * | 箭头 | 无 | ⭐ **终点实心三角**(方向敏感:A→B 与 B→A 是两条边) |
+ * | 颜色 | `#5B8FC7`(蓝) | 偏紫,避免与树连线混 |
+ *
+ * ⚠️ 箭头能画出来是因为刚补了画板的箭头渲染(`00 §9.1`);
+ * 在那之前这里写 arrow 也是死字段。
+ */
+const DEFAULT_RELATION_LINE = {
+  ref: 'krig.line.curved',
+  color: '#9B7FD4',
+  width: 1.5,
+  dashType: 'dash',
+} as const;
 
 /**
  * ⭐ 由树的父子关系生成连线 instance。

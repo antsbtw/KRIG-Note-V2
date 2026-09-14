@@ -25,6 +25,7 @@ import {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  isRelationLineId,
   resolveDropTarget,
 } from './project-to-canvas';
 
@@ -43,6 +44,7 @@ const api: DiglotModelApi = {
   buildLayoutRequest,
   projectToInstances,
   isTreeLineId,
+  isRelationLineId,
   resolveDropTarget,
   treeToNoteDoc,
   noteDocToTree,

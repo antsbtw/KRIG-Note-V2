@@ -396,6 +396,12 @@ export interface DiglotModelApi {
   /** 判断某 instance id 是否为树连线(派生物,不对应 S 层节点) */
   readonly isTreeLineId: (id: string) => boolean;
   /**
+   * ⭐ 判断某 instance id 是否为**联系线**(S 层 edges,用户数据)。
+   * ⚠️ 与 `isTreeLineId` **必须分开判**:树连线是派生物该被拖动/删除回调跳过,
+   * 联系线是用户数据、将来要能选中能删 —— 混用会让它被静默跳过。
+   */
+  readonly isRelationLineId: (id: string) => boolean;
+  /**
    * ⭐ 落点 → 结构归位(01 §7.2 v0.2:裸拖=改父/改序)。
    * 返回 null = 不该改(拖回原位 / 无合法父),调用侧据此不发 action。
    */
