@@ -13,6 +13,7 @@ import {
   projectToInstances,
   isTreeLineId,
   isRelationLineId,
+  pickRelationMagnets,
   fontSizeForDepth,
   refForShape,
   DEFAULT_MIND_SHAPE_REF,
@@ -780,6 +781,101 @@ describe('M9 · 联系线上画布', () => {
   });
 });
 
+// ────────────────────────────────────────────────────────────
+// ⭐⭐ M10 · 吸附点按相对位置选(用户 2026-09-14 真机指出:「吸附点不对」)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️⚠️ **M9 漏掉的那条**:M9 只验了「走 magnet / 有箭头 / 是虚线」,
+ * **没有一条验走线是否合理** —— 于是写死的 `源 E → 目标 W` 全绿通过,
+ * 真机上却让「目标在源左边」的线**掉头横穿整张画布**(用户截图)。
+ *
+ * ⭐ 探针还证否了我的第二个猜测:那条线**不是退化成直线**(弯曲度 20.4,
+ * 比树连线的 10.7 还大)——**是跨度太大把弧度稀释了**。
+ * 即:吸附点选错 → 线被迫横穿 → 看着像直线。**一个病根,两个症状。**
+ */
+describe('M10 · 联系线吸附点按相对位置选', () => {
+  const C = (x: number, y: number) => ({ x, y });
+
+  it('⭐⭐ 目标在右 → E→W(不掉头)', () => {
+    expect(pickRelationMagnets(C(0, 0), C(300, 20))).toEqual(['E', 'W']);
+  });
+
+  it('⭐⭐ 目标在左 → W→E(这正是真机上走反的那种)', () => {
+    // ⚠️ 写死 E→W 时,这条线要从右边甩出去再横穿回来
+    expect(pickRelationMagnets(C(300, 0), C(0, 20))).toEqual(['W', 'E']);
+  });
+
+  it('⭐ 目标在正下方 → S→N(竖直方向不该用左右点)', () => {
+    expect(pickRelationMagnets(C(0, 0), C(10, 300))).toEqual(['S', 'N']);
+  });
+
+  it('⭐ 目标在正上方 → N→S', () => {
+    expect(pickRelationMagnets(C(0, 300), C(10, 0))).toEqual(['N', 'S']);
+  });
+
+  it('⭐⭐ 水平差略大于垂直差 → 仍走左右(别在对角线上乱跳)', () => {
+    // dx=100 dy=90 → 水平占优
+    expect(pickRelationMagnets(C(0, 0), C(100, 90))).toEqual(['E', 'W']);
+    // dx=90 dy=100 → 垂直占优
+    expect(pickRelationMagnets(C(0, 0), C(90, 100))).toEqual(['S', 'N']);
+  });
+
+  it('⚠️ 两点重合 → 给默认 E→W,不崩也不产出空字符串', () => {
+    expect(pickRelationMagnets(C(5, 5), C(5, 5))).toEqual(['E', 'W']);
+  });
+
+  it('⭐⭐ 端到端:真实布局下,出发点与相对位置一致(M9 漏掉的那条)', () => {
+    // ⚠️⚠️ 本条**第一版写错了**,记在这里免得重犯:我只比 `cx` 就断言必须从 E 出发,
+    //   而夹具经过「同层左对齐」后两个节点 **x 完全相同**(实测 1059 vs 1059,dx=0)——
+    //   它们是**上下叠着**的,正解是 S→N。断言拿一个样本里**根本不存在的现象**
+    //   (水平偏移)去要求结果,自然红。⭐ 与 memory「先确认样本含不含该现象」同形。
+    // ⭐ 改法:按**主轴**判断(与实现同一条规则,但独立算一遍,不抄实现的分支)。
+    const base = snap();
+    const nodes = base.s.nodes.filter((n) => n.parent !== null);
+    const source = nodes[0].id;
+    const target = nodes.find((n) => n.id !== source && n.parent !== source)!.id;
+    const sn = engine.applyAction(base, { kind: 'canvas.connect', source, target });
+
+    const inst = projectToInstances(sn.s, sn.g, fakeLayout(buildLayoutRequest(sn.s, sn.g)));
+    const rel = inst.find((i) => isRelationLineId(i.id))!;
+    const byId = new Map(nodesOnly(inst).map((i) => [i.id, i]));
+    const c = (id: string) => ({
+      x: byId.get(id)!.position!.x + byId.get(id)!.size!.w / 2,
+      y: byId.get(id)!.position!.y + byId.get(id)!.size!.h / 2,
+    });
+    const a = c(source);
+    const b = c(target);
+    const [srcM, tgtM] = rel.endpoints!.map((e) => e.magnet);
+
+    if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+      // 水平主导:源在左从 E 出发,在右从 W 出发 —— 反了就是掉头横穿
+      expect([srcM, tgtM]).toEqual(b.x >= a.x ? ['E', 'W'] : ['W', 'E']);
+    } else {
+      // 垂直主导:上下叠着时不该用左右点(本夹具正是这种)
+      expect([srcM, tgtM]).toEqual(b.y >= a.y ? ['S', 'N'] : ['N', 'S']);
+    }
+  });
+
+  it('⭐⭐ 水平错开的真实布局:源在右 → 从 W 出发(真机那条掉头线的回归)', () => {
+    // ⭐ 上一条的夹具是上下叠的,**测不到水平回指** —— 这条显式构造它:
+    //   给两个节点钉上坐标,让 target 落在 source 的**左边**。
+    const base = snap();
+    const nodes = base.s.nodes.filter((n) => n.parent !== null);
+    const source = nodes[0].id;
+    const target = nodes.find((n) => n.id !== source && n.parent !== source)!.id;
+    const sn = engine.applyAction(base, { kind: 'canvas.connect', source, target });
+    const g = new Map(sn.g);
+    g.set(source, { pos: { x: 900, y: 0 } }); // 源在右
+    g.set(target, { pos: { x: 100, y: 0 } }); // 目标在左
+
+    const inst = projectToInstances(sn.s, g, fakeLayout(buildLayoutRequest(sn.s, g)));
+    const rel = inst.find((i) => isRelationLineId(i.id))!;
+    // ⚠️ 写死 E→W 的旧实现在这里会红 —— 那正是用户截图里那条掉头线
+    expect(rel.endpoints!.map((e) => e.magnet)).toEqual(['W', 'E']);
+  });
+});
+
 /**
  * ── M9 注入验红台账(5 向,全部按预期变红、还原后全绿)────────────
  *
@@ -793,4 +889,25 @@ describe('M9 · 联系线上画布', () => {
  *
  * ⚠️ U 单独一条红,正说明「两端都可见时照画」那条**反向对照**是必要的:
  * 若把「折叠不画」实现成 `return []`,U 会绿而反向对照会红 —— 两条互为守卫。
+ */
+
+/**
+ * ── M10 注入验红台账(4 向,全部按预期变红、还原后全绿)────────────
+ *
+ * | # | 注入 | 结果 |
+ * |---|---|---|
+ * | Y | 退回写死 `E→W`(**就是用户截图那条掉头线**) | 6 红 |
+ * | Z | 主轴判反(水平差大却用上下点) | 8 红 |
+ * | AA | 方向颠倒(源在左却从 W 出发) | 5 红 |
+ * | AB | 用布局原始坐标而非**最终中心**(钉住/对齐过的节点选错边) | 2 红 |
+ *
+ * ⭐ AB 只红那两条**端到端**断言 —— 纯函数单测全绿。
+ * 这正说明端到端那两条不可省:单测只证明「给对坐标会选对点」,
+ * **证明不了「喂进去的坐标是对的」**。
+ *
+ * ⚠️⚠️ **本组断言我自己写错过一版,记在这里**:第一版端到端只比 `cx` 就要求从 E 出发,
+ * 而夹具经同层左对齐后两节点 **x 完全相同**(实测 1059 vs 1059)——它们上下叠着,
+ * 正解是 `S→N`。⭐ 拿样本里**根本不存在的现象**(水平偏移)去要求结果,自然红;
+ * 与 memory「先确认样本含不含该现象」同形。修法是按**主轴**判断,
+ * 并**另加一条显式钉住水平回指**的断言(钉坐标造出 target 在左的布局)。
  */

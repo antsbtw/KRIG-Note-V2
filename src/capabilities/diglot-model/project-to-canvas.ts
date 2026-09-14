@@ -583,7 +583,18 @@ export function projectToInstances(
   return [
     ...nodes,
     ...projectTreeLines(vis, lineStyle),
-    ...projectRelationLines(s, vis),
+    // ⭐ 传**最终**中心点(已含 G 层 pos 覆盖与同层对齐)—— 选磁吸点要按真实位置,
+    //   不能用布局原始坐标,否则钉住/对齐过的节点会选错边。
+    ...projectRelationLines(
+      s,
+      vis,
+      new Map(
+        nodes.map((n) => [
+          n.id,
+          { x: n.position!.x + n.size!.w / 2, y: n.position!.y + n.size!.h / 2 },
+        ]),
+      ),
+    ),
   ];
 }
 
@@ -603,22 +614,35 @@ export function projectToInstances(
  * ⚠️ **走 magnet 不走固定坐标** —— 与树连线同一个理由:拖动节点时画布会
  * 自动重算端点(rewire 是画板既有能力,白用)。写死坐标就得自己维护。
  */
-function projectRelationLines(s: SLayer, vis: readonly SNode[]): ProjectedInstance[] {
+function projectRelationLines(
+  s: SLayer,
+  vis: readonly SNode[],
+  centers: ReadonlyMap<NodeId, { x: number; y: number }>,
+): ProjectedInstance[] {
   if (s.edges.length === 0) return [];
   const visIds = new Set(vis.map((n) => n.id));
   const out: ProjectedInstance[] = [];
   for (const e of s.edges) {
     // ⭐ 一端被折叠裁掉 → 不画(不留悬空线)
     if (!visIds.has(e.source) || !visIds.has(e.target)) continue;
+    const a = centers.get(e.source);
+    const b = centers.get(e.target);
+    // ⚠️ 可见却没有中心点 = 上游算漏了,fail loud 不静默兜底(可靠性纲领)
+    if (!a || !b) {
+      throw new Error(
+        `[diglot] 联系线 ${e.id} 的端点可见却拿不到中心点(source=${e.source} target=${e.target})`,
+      );
+    }
+    const magnets = pickRelationMagnets(a, b);
     out.push({
       id: `${RELATION_LINE_PREFIX}${e.id}`,
       type: 'shape',
       ref: DEFAULT_RELATION_LINE.ref,
-      // ⚠️ 两端都取 E/W 会让"回指"的线绕一大圈;联系线是任意两点,
-      //   统一用 源 E → 目标 W,与树连线同向,视觉最不意外。
+      // ⭐ 按相对位置选点(见 pickRelationMagnets):联系线连**任意两点**,
+      //   写死 E→W 会让「目标在左」的线掉头横穿画布(真机实测过)。
       endpoints: [
-        { instance: e.source, magnet: 'E' },
-        { instance: e.target, magnet: 'W' },
+        { instance: e.source, magnet: magnets[0] },
+        { instance: e.target, magnet: magnets[1] },
       ],
       style_overrides: {
         line: {
@@ -689,6 +713,34 @@ const RELATION_LINE_PREFIX = 'rel:';
 /** 某个 instance id 是不是联系线(树之外的附加关系,`01 §3.2`)。 */
 export function isRelationLineId(id: string): boolean {
   return id.startsWith(RELATION_LINE_PREFIX);
+}
+
+/**
+ * ⭐⭐ 按两端**相对位置**选磁吸点 —— 纯函数,可单测。
+ *
+ * ⚠️⚠️ **起因是真机 bug**(用户 2026-09-14 截图):此前写死 `源 E → 目标 W`,
+ * 当目标在源**左边**时,线从右侧甩出去、掉头**横穿整张画布**再从左侧扎进来。
+ * ⭐ 我当时的注释还写着「统一 E→W 视觉最不意外」—— **那句判断是错的**,
+ * 它防的是另一种情形,而「目标在左」恰恰是它造成绕远的那种。
+ *
+ * ⭐ 探针还证否了第二个猜测:那条线**不是退化成直线**
+ * (反向弯曲度 20.4 > 树连线 10.7)——**是跨度太大把弧度稀释了**。
+ * 即:吸附点选错 → 线被迫横穿 → 看着像直线。**一个病根,两个症状。**
+ *
+ * 规则(简单可解释,优于聪明难预期):**谁的差值大就走哪个轴**
+ * - |dx| ≥ |dy| → 水平:目标在右 `E→W`,在左 `W→E`
+ * - |dx| < |dy| → 垂直:目标在下 `S→N`,在上 `N→S`
+ *
+ * ⚠️ 两点重合(dx=dy=0)→ 落 `E→W` 默认,**不产出空值**。
+ */
+export function pickRelationMagnets(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): [string, string] {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? ['E', 'W'] : ['W', 'E'];
+  return dy >= 0 ? ['S', 'N'] : ['N', 'S'];
 }
 
 /**
