@@ -29,6 +29,7 @@ import type {
   SubstanceComponent,
   FillStyle,
   LineStyle,
+  ArrowStyle,
   EvaluatedPath,
 } from '@capabilities/shape-library/types';
 import type { Instance } from '../types';
@@ -413,6 +414,8 @@ export class NodeRenderer {
       start: ep.start,
       end: ep.end,
       style: mergeLine(shape.default_style?.line, inst.style_overrides?.line),
+      // ⭐ 补「ArrowStyle 是死字段」缺口(00 §9.1):此前 JSON 写了 arrow 渲染层也收不到
+      arrow: mergeArrow(shape.default_style?.arrow, inst.style_overrides?.arrow),
     });
     group.userData.instanceId = inst.id;
     return {
@@ -809,6 +812,17 @@ function mergeFill(
 ): FillStyle | undefined {
   if (!base && !override) return undefined;
   if (!base) return override as FillStyle;
+  if (!override) return base;
+  return { ...base, ...override };
+}
+
+/** 合并两端箭头 —— ⚠️ 约定与 mergeLine 一致(override 覆盖 base 的同名字段)。 */
+function mergeArrow(
+  base?: ArrowStyle,
+  override?: Partial<ArrowStyle>,
+): ArrowStyle | undefined {
+  if (!base && !override) return undefined;
+  if (!base) return override as ArrowStyle;
   if (!override) return base;
   return { ...base, ...override };
 }
