@@ -62,7 +62,19 @@ export function wsIdOf(wc: Electron.WebContents): string | null {
 /** 在 `web.page` 登记这个 X 页面并返回身份;已登记则直接返回 */
 export function xPageId(wc: Electron.WebContents): PageId {
   const existing = pageIdByWc.get(wc.id);
-  if (existing) return existing;
+  if (existing) {
+    // ⚠️ **早返回这条路也要绑**(2026-09-15 补)。
+    //
+    // `bindPageHost` 原本只在下面「新登记」那一支里调 —— 而 `xPageId` 有三个调用方
+    // (控制台 / captureXPayloads / 调度器),**只要有一处先跑过**,后面全走早返回,
+    // 于是 `pageIdByWc` 答得出 pageId、`hosts` 里却没有 wc。
+    // 今天没暴露是因为两张表同为模块级、一起随进程消失;
+    // 一旦有人 `unbindPageHost`(已导出)或多一个登记方,就会出现
+    // 「查得到身份、拿不到渲染目标」→ 报成「页面已关闭」,指向完全错误的方向。
+    // `Map.set` 幂等,重复绑无副作用。
+    bindPageHost(existing, wc);
+    return existing;
+  }
   const partition = readPartition(wc);
   const facts = pageRegistry.register({
     window: 'main',

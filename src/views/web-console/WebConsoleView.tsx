@@ -80,7 +80,15 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [pressKey, setPressKey] = useState('Escape');
 
   // ── 输入:参数 ──
-  const [typeAnchor, setTypeAnchor] = useState('compose.sendButton');
+  /**
+   * ⚠️ 默认必须是**输入框**,不是发送按钮。
+   *
+   * 初版默认 `compose.sendButton` —— 它是个合法锚点,下拉照样选中它,
+   * 于是用户不手动改就一直在**往按钮里填字**,底座如实报
+   * 「既非 input/textarea 也非 contenteditable」。连撞三次都是这个原因。
+   * ⭐ 默认值要选「这个功能最常见的正确用法」,而不是随手挑一个能解析的名字。
+   */
+  const [typeAnchor, setTypeAnchor] = useState('compose.box');
   const [typeText, setTypeText] = useState('测试文本(不会发布)');
   const [typeCheck, setTypeCheck] = useState('contains');
 

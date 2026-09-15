@@ -48,6 +48,7 @@ import {
   controlEngine, inputEngine, listAnchorOwners, listAnchorNames, traceRecorder, traceSink,
 } from '../web-capability/wiring/runtime';
 import { listBoundPages } from '../web-capability/wiring/page-hosts';
+import { traceRecorder as traceRec } from '../web-capability/wiring/runtime';
 import { planTrace, describeWhy, type CapabilityOutcome } from './web-console-classify';
 import { xPageId } from '../x/x-net-capture';
 import { resolveXWebContents } from '../x/x-webcontents';
@@ -324,12 +325,28 @@ export function registerWebConsoleHandlers(): void {
        * ⚠️ 用户 2026-09-15 跑过一次,而当时本通道零落痕,我读不到,
        * 只能回头问他要 —— 那正是「靠人口头描述」的复发。
        */
+      /**
+       * ⚠️⚠️ **testid 清单必须进留痕本身,不能只进 console.log**(2026-09-15 第二次栽)。
+       *
+       * 初版只记 `{found, withTestid}` 两个**计数**,真正的名字进了 console ——
+       * 而 console 我读不到。于是用户跑完 `readTabBar`,留痕里写着「8 个带 testid」,
+       * **8 个叫什么仍然只有他知道**。落痕的意义正是「不用回头问人」,这等于没落。
+       *
+       * ⚠️ 也不能塞进 `params`:`inputRef` 有 200 字上限,
+       * 实测 8 个 testid 的 JSON 是 **217 字** —— 会被截断,又是一次静默丢失。
+       * 故单开一条 lifecycle 记录放全量清单(lifecycle 的 `detail` 不截断)。
+       */
+      traceRec.lifecycle({
+        layer: 'web.dom',
+        event: 'x.tabbar-read',
+        pageId: String(xPageId(r.wc)),
+        detail: { found: list.length, withTestid: withId, tabs: list },
+      });
       recordRun('readTabBar', { found: list.length, withTestid: withId },
         withId > 0
           ? { status: 'ok' }
           : { status: 'failed', reason: `读到 ${list.length} 个节点但零个带 testid(X 换了 DOM?)` },
         Date.now() - t0);
-      // 留痕里带上真实 testid 清单 —— 下次我自己读文件就能补锚点表
       console.log(`[web-console] readTabBar → ${withId}/${list.length} 带 testid: `
         + JSON.stringify(list.slice(0, 20)));
       return { channelOk: true, tabs };

@@ -59,6 +59,33 @@ describe('⭐⭐ 每个登记点都要绑宿主 —— 漏一家,那家静默失
     ).toEqual([]);
   });
 
+  it('⭐⭐ **早返回那条路**也要绑 —— 按次数数看不出这个洞', () => {
+    /**
+     * ⚠️⚠️ 2026-09-15 实测:把 `xPageId` 早返回分支里的 `bindPageHost` 删掉,
+     * 本文件 7 条 + 控制台 48 条**全绿** —— 因为上面那条按「文件内出现次数」数,
+     * 新登记分支里还留着一次,计数照样满足。
+     *
+     * `xPageId` 有三个调用方(控制台 / captureXPayloads / 调度器),
+     * **只要有一处先跑过**,后面全走早返回;若早返回不绑,
+     * `pageIdByWc` 答得出身份、`hosts` 里却没有 wc →
+     * `lookupWebContents` 返回 null → 报成「页面已关闭」,指向完全错误的方向。
+     *
+     * ⭐ 教训同 [[feedback-guard-scope-to-the-branch]]:**缩到分支**,
+     * 钉「这条路径上有没有」,而不是「整个文件里有几次」。
+     */
+    const src = FILES.find((f) => f.path.endsWith('x/x-net-capture.ts'));
+    expect(src, 'x-net-capture.ts 不见了').toBeDefined();
+
+    const fn = src!.code.slice(src!.code.indexOf('export function xPageId('));
+    const earlyReturn = fn.slice(0, fn.indexOf('return existing;'));
+    expect(earlyReturn.length, '锚点过时:找不到 xPageId 的早返回分支')
+      .toBeGreaterThan(30);
+    expect(
+      earlyReturn,
+      '早返回没绑宿主 —— 第二个调用方起就「查得到身份、拿不到渲染目标」',
+    ).toMatch(/bindPageHost\(/);
+  });
+
   it('⭐ 登记点数量与绑定次数对得上(少绑一处也算漏)', () => {
     for (const f of FILES) {
       const regs = (f.code.match(/pageRegistry\.register\s*\(/g) ?? []).length;

@@ -472,6 +472,36 @@ describe('⭐⭐ 每个能力通道都要落痕 —— 漏一个我就读不到'
   });
 });
 
+describe('⭐⭐ 留痕要带得出**事实本身**,不只是计数', () => {
+  it('⭐⭐ readTabBar 的 testid 清单进留痕,不是只进 console.log', () => {
+    /**
+     * ⚠️ 初版只记 `{found, withTestid}` 两个计数,名字进了 console —— 我读不到。
+     * 用户跑完,留痕写着「8 个带 testid」,**8 个叫什么仍然只有他知道**。
+     * 落痕的意义正是「不用回头问人」,那样等于没落。
+     */
+    expect(HANDLER_CODE, 'tabs 清单没进留痕').toMatch(/event: 'x\.tabbar-read'/);
+    expect(HANDLER_CODE, 'detail 里没带 tabs 全量').toMatch(/detail: \{[^}]*tabs: list/);
+  });
+
+  it('⭐ 用 lifecycle 而不是塞进 inputRef(后者有 200 字上限会截断)', () => {
+    // 实测 8 个 testid 的 JSON 是 217 字 —— 塞 params 会被截,又是一次静默丢失
+    expect(HANDLER_CODE).toMatch(/lifecycle\(\{[\s\S]{0,200}x\.tabbar-read/);
+  });
+});
+
+describe('⭐⭐ 默认值要是「最常见的正确用法」', () => {
+  it('⭐⭐ type 的默认锚点是**输入框**,不是发送按钮', () => {
+    /**
+     * 用户连撞三次「既非 input/textarea 也非 contenteditable」——
+     * 因为默认 `compose.sendButton` 是个**合法**锚点,下拉照样选中它,
+     * 不手动改就一直在往按钮里填字。
+     */
+    expect(VIEW_CODE, 'type 默认还是发送按钮 —— 往按钮里填字永远不会成功')
+      .not.toMatch(/useState\('compose\.sendButton'\)/);
+    expect(VIEW_CODE).toMatch(/useState\('compose\.box'\)/);
+  });
+});
+
 describe('⭐ pageId 不透明 —— 面板只传 wcId', () => {
   it('⭐⭐ 面板不构造、不解析 pageId', () => {
     expect(
