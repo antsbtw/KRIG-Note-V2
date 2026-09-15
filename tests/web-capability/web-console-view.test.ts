@@ -409,6 +409,69 @@ describe('⭐⭐ lifecycle 流不许是空的(「当时在哪个页面」)', () 
   });
 });
 
+describe('⭐⭐ 锚点表由 profile 派生 —— 不许并存两张 selector 表', () => {
+  /**
+   * ⚠️ 初版我在 `x-anchors.ts` 手写了一张 11 条的表,结果:
+   *  ① **漏掉输入框**(`composeBox`)→ 我据此断言「输入这项做不了」,
+   *    而用户当场指出 note 点发推填输入框**早就实现过**(`focusInputBox` + profile);
+   *  ② `compose.sendButton` 写成单候选 `tweetButton`,而 profile 是
+   *    `tweetButtonInline, tweetButton` 双候选 —— 抄出来的比原件**弱**。
+   *
+   * 同一份 selector 两处并存 = 改一处漏一处,而现象与「元素不在页面上」一模一样。
+   */
+  const ANCHORS = strip(read('src/platform/main/x/x-anchors.ts'));
+
+  it('⭐⭐ 写方向 selector 从 X_PROFILE.selectors 取,不写死字面量', () => {
+    expect(ANCHORS, '没从 profile 派生 —— 又抄了一份').toMatch(/X_PROFILE\.selectors\.composeBox/);
+    expect(ANCHORS).toMatch(/X_PROFILE\.selectors\.publishButton/);
+    // ⭐ 反向锁:本文件不许出现写方向的 selector 字面量(那就是第二张表)
+    expect(ANCHORS, 'x-anchors 里出现了 tweetTextarea 字面量 —— 与 profile 并存会漂移')
+      .not.toMatch(/tweetTextarea_/);
+    expect(ANCHORS, 'x-anchors 里出现了 tweetButton 字面量 —— 同上')
+      .not.toMatch(/tweetButton/);
+  });
+
+  it('⭐⭐ 输入框锚点必须在(它缺席直接导致「输入」页无锚点可选)', () => {
+    expect(ANCHORS).toMatch(/'compose\.box'/);
+    expect(ANCHORS).toMatch(/'compose\.replyBox'/);
+  });
+
+  it('⭐ 空值条目要当成没登记(空 selector 会让 querySelector 抛)', () => {
+    // resolve 返回 null 而不是空串 —— 「没配」与「注入失败」必须分得开
+    expect(ANCHORS).toMatch(/return sel \? sel : null/);
+    expect(ANCHORS, 'names() 把空条目也列出来 —— 下拉里会出现选了必失败的名字')
+      .toMatch(/filter\(\(k\) => this\.table\[k\]\)/);
+  });
+});
+
+describe('⭐⭐ 每个能力通道都要落痕 —— 漏一个我就读不到', () => {
+  it('⭐⭐ 九个能力通道零遗漏(WEBC_TRACE 除外:它是读回,不是能力)', () => {
+    /**
+     * ⚠️ 用户 2026-09-15 跑了 readTabBar,而当时该通道**零落痕** ——
+     * 我读不到,只能回头问他要返回值。那正是「靠人口头描述」的复发,
+     * 也正是他要求「你先有能力做回归测试并记录」要治的事。
+     */
+    const bodies = HANDLER_CODE.split('ipcMain.handle(IPC_CHANNELS.');
+    const missing: string[] = [];
+    for (const seg of bodies.slice(1)) {
+      const name = seg.slice(0, seg.indexOf(','));
+      if (name === 'WEBC_TRACE') continue;   // 读回自己,不产生能力调用
+      if (!/recordRun\(/.test(seg)) missing.push(name);
+    }
+    expect(
+      missing,
+      '这些通道没落痕 —— 跑过之后我读不到,只能回头问人:\n  ' + missing.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⭐⭐ readTabBar 的产出要进留痕(它正是喂回锚点表的事实)', () => {
+    expect(HANDLER_CODE).toMatch(/recordRun\('readTabBar'/);
+    // 读到节点但零个带 testid = X 换了 DOM,必须是明确失败而不是「读到了」
+    expect(HANDLER_CODE, '零 testid 被当成成功 —— 锚点表会被喂空')
+      .toMatch(/withId > 0[\s\S]{0,160}status: 'failed'/);
+  });
+});
+
 describe('⭐ pageId 不透明 —— 面板只传 wcId', () => {
   it('⭐⭐ 面板不构造、不解析 pageId', () => {
     expect(

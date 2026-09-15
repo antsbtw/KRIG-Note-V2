@@ -40,6 +40,10 @@ export const LAYER_OF: Readonly<Record<string, CapabilityLayer>> = {
   press: 'web.input',
   hover: 'web.input',
   type: 'web.input',
+  // ── 输出类:读的是「我们这一层看到了什么」,归 web.trace ──
+  pages: 'web.trace',
+  anchors: 'web.trace',
+  readTabBar: 'web.dom',
 };
 
 /** 判断结果:记成一条 recovery,还是一条 degradation */

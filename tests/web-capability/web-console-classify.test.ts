@@ -112,6 +112,14 @@ describe('⭐⭐ 层归属按能力真正所属,不一律 web.page', () => {
     expect(ready.layer).toBe('web.page');
   });
 
+  it('⭐ 输出类能力也要归对层(pages/anchors 归 trace,readTabBar 归 dom)', () => {
+    // 它们读的是「我们这一层看到了什么」,不是页面控制动作
+    expect(LAYER_OF.pages).toBe('web.trace');
+    expect(LAYER_OF.anchors).toBe('web.trace');
+    // readTabBar 真的在页面上跑脚本读 DOM
+    expect(LAYER_OF.readTabBar).toBe('web.dom');
+  });
+
   it('⭐ 没登记的能力名有确定回落(不抛、不 undefined)', () => {
     const plan = planTrace('somethingNew', {}, { status: 'ok' }, 1);
     expect(plan.layer).toBe('web.page');

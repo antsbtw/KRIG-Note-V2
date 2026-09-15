@@ -228,7 +228,10 @@ export function registerWebConsoleHandlers(): void {
     const p = (payload ?? {}) as { wcId?: unknown; anchor?: unknown };
     const page = resolvePage(p.wcId);
     if ('error' in page) return { channelOk: false, error: page.error };
+    const t0 = Date.now();
     const result = await inputEngine.hover(page.pageId, { anchor: asAnchor(p.anchor) });
+    console.log(`[web-console] hover ${String(p.anchor)} → ${result.status}${describeWhy(result)}`);
+    recordRun('hover', { anchor: p.anchor }, result, Date.now() - t0);
     return { channelOk: true, pageId: String(page.pageId), result };
   });
 
@@ -276,12 +279,26 @@ export function registerWebConsoleHandlers(): void {
    * 少一行=有页面没登记(会漏操作)。这是 AI 验不出来的。
    */
   ipcMain.handle(IPC_CHANNELS.WEBC_PAGES, async () => {
-    return { channelOk: true, pages: listBoundPages().map((b) => ({ ...b, pageId: String(b.pageId) })) };
+    // ⚠️ 同步读表,真实耗时就是 0~1ms —— 但仍要**量**而不是写死:
+    //    写死是断言「它一定很快」,量出来才是事实(守卫禁 `recordRun(..., 0)` 正为此)
+    const t0 = Date.now();
+    const pages = listBoundPages().map((b) => ({ ...b, pageId: String(b.pageId) }));
+    // ⭐ 页面清单也落痕:「当时有几个页面」是排查采集问题的第一个问题
+    recordRun('pages', { count: pages.length }, { status: 'ok' }, Date.now() - t0);
+    return { channelOk: true, pages };
   });
 
   /** 已注册的锚点表 —— 免得靠记忆猜锚点名 */
   ipcMain.handle(IPC_CHANNELS.WEBC_ANCHORS, async () => {
-    return { channelOk: true, owners: listAnchorOwners(), tables: listAnchorNames() };
+    const t0 = Date.now();
+    const owners = listAnchorOwners();
+    const tables = listAnchorNames();
+    const total = tables.reduce((n, t) => n + t.names.length, 0);
+    // ⚠️ 锚点表为空是「业务没推表进来」的征兆,必须留痕 —— 否则只表现为下拉是空的
+    recordRun('anchors', { owners, total },
+      total > 0 ? { status: 'ok' } : { status: 'failed', reason: '锚点表为空(业务没注册?)' },
+      Date.now() - t0);
+    return { channelOk: true, owners, tables };
   });
 
   /**
@@ -296,12 +313,31 @@ export function registerWebConsoleHandlers(): void {
     const id = typeof p.wcId === 'number' ? p.wcId : undefined;
     const r = resolveXWebContents(id);
     if ('error' in r) return { channelOk: false, error: r.error };
+    const t0 = Date.now();
     try {
       const tabs = await r.wc.executeJavaScript(READ_APP_TAB_BAR);
+      const list = Array.isArray(tabs) ? tabs as Array<{ testid?: string | null }> : [];
+      const withId = list.filter((t) => t?.testid).length;
+      /**
+       * ⭐⭐ 这条**必须**落痕 —— 它的产出正是要喂回锚点表的事实。
+       *
+       * ⚠️ 用户 2026-09-15 跑过一次,而当时本通道零落痕,我读不到,
+       * 只能回头问他要 —— 那正是「靠人口头描述」的复发。
+       */
+      recordRun('readTabBar', { found: list.length, withTestid: withId },
+        withId > 0
+          ? { status: 'ok' }
+          : { status: 'failed', reason: `读到 ${list.length} 个节点但零个带 testid(X 换了 DOM?)` },
+        Date.now() - t0);
+      // 留痕里带上真实 testid 清单 —— 下次我自己读文件就能补锚点表
+      console.log(`[web-console] readTabBar → ${withId}/${list.length} 带 testid: `
+        + JSON.stringify(list.slice(0, 20)));
       return { channelOk: true, tabs };
     } catch (err) {
+      const reason = `读取失败: ${err instanceof Error ? err.message : String(err)}`;
+      recordRun('readTabBar', {}, { status: 'failed', reason }, Date.now() - t0);
       // 只写事实,不写「多半是…」——那次事故的日志就是这么误导人的
-      return { channelOk: false, error: `读取失败: ${err instanceof Error ? err.message : String(err)}` };
+      return { channelOk: false, error: reason };
     }
   });
 
