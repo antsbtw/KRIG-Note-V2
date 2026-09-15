@@ -15,6 +15,9 @@
 import { type Failed, type Ok, type Result, failed, ok } from '../result';
 import type { PageId } from './types';
 import type {
+  PageTarget,
+  PageResolver,
+  GotoReport,
   ReadyCriterion,
   RoundTrace,
   ScrollOptions,
@@ -49,6 +52,14 @@ export const STEP_RATIO_MAX = 0.85;
 export interface ControlHost {
   /** 在页面上下文求值。失败**必须抛**,不许返 undefined 假装成功 */
   evaluate(pageId: PageId, script: string): Promise<unknown>;
+  /**
+   * 导航到某 URL,并返回**实际落地 URL**。
+   *
+   * ⚠️ 实现方要 `await` 导航,但 **reject 不算失败**(站点自行接管导航时必 reject),
+   * 把 reject 的原因**如实返回**给引擎,由引擎决定怎么解释 ——
+   * 在接线层吞掉它,`goto` 就分不出「站点接管了」与「真没导航成」。
+   */
+  navigate?(pageId: PageId, url: string): Promise<{ landedUrl: string; rejected?: string }>;
   /** 可注入的时钟(测试用可控版,免得真等) */
   sleep?(ms: number): Promise<void>;
   /** 可注入的随机源(测试要可复现;生产用 Math.random) */
@@ -80,6 +91,8 @@ export class ControlEngine {
     private readonly host: ControlHost,
     private readonly anchors: AnchorResolver,
     private readonly scripts?: CustomScriptSource,
+    /** ⭐ 语义页面表(adapter 的活)。不给 → `goto` 只能收 `kind:'url'` */
+    private readonly pages?: PageResolver,
   ) {}
 
   private sleep(ms: number): Promise<void> {
@@ -89,6 +102,123 @@ export class ControlEngine {
 
   private random(): number {
     return this.host.random ? this.host.random() : Math.random();
+  }
+
+  /**
+   * ⭐⭐ 去某个**语义**页面(§9.3)。
+   *
+   * ── 三条必须内建的事(`x-collect-runner` 的血泪,别再各写一遍)──
+   *
+   * ① `loadURL` 要 await:不等它,后面的注入会在旧文档拆卸时被拒。
+   * ② 但 await **reject 不算失败** —— 站点自行接管导航时必 reject
+   *    (X 常见 ERR_ABORTED),页面照样会到位。真失败由「等到位」判定。
+   * ③ ⭐ **落地校验是必须的**:到位 ≠ 到对地方。
+   *    2026-09-07 实测:被弹回首页时「页面上有推文」照样成立,
+   *    于是把首页时间线当成搜索结果**整批入库**。
+   *
+   * ⚠️ 本方法**不抛**,一律回三态 —— 与 `ready`/`scrollUntil` 一致。
+   */
+  async goto(
+    pageId: PageId,
+    target: PageTarget,
+    options: { readyTimeoutMs?: number } = {},
+  ): Promise<Result<GotoReport>> {
+    if (!this.host.navigate) {
+      return failed('宿主没有 navigate 能力 —— 接线层没接上导航接缝', false);
+    }
+
+    // ── 语义名 → URL + 到位判据 ──
+    let url: string;
+    let arrival: ReadyCriterion;
+    let describe: string;
+
+    if (target.kind === 'url') {
+      // ⚠️ 仅 adapter 内部可用。没有语义名就没有到位判据,
+      //    只能退化成「URL 里含它自己」—— 弱,但至少不是没有。
+      url = target.url;
+      arrival = { kind: 'urlIncludes', fragment: stripOrigin(target.url) };
+      describe = `裸 URL ${target.url}`;
+    } else {
+      if (!this.pages) {
+        return failed(
+          `没有语义页面表,无法解释 ${target.name}(adapter 没把表推进来?)`,
+          false,
+        );
+      }
+      const hit = this.pages.resolve(target.name, target.params);
+      if (!hit) {
+        // ⚠️ fail loud:不兜底、不猜 —— 兜底会导航到别的页面,
+        //    而那正是「把首页当搜索结果」的成因
+        const known = this.pages.names?.().join(', ') ?? '(表未提供 names())';
+        return failed(`未登记的语义页面: ${target.name}(可用: ${known})`, false);
+      }
+      url = hit.url;
+      arrival = hit.arrival;
+      describe = hit.describe;
+    }
+
+    const startedAt = Date.now();
+
+    // 血泪①②:要 await,但 reject 不算失败
+    let nav: { landedUrl: string; rejected?: string };
+    try {
+      nav = await this.host.navigate(pageId, url);
+    } catch (err) {
+      // 宿主自己抛(如页面已关闭)才是真失败
+      return failed(
+        `导航 ${describe} 失败: ${err instanceof Error ? err.message : String(err)}`,
+        true,
+      );
+    }
+
+    // 等到位 —— 复用 ready 的全部血泪(多候选 / 注入异常重试 / 超时如实报)
+    const arrived = await this.ready(pageId, arrival, options.readyTimeoutMs);
+    if (arrived.status !== 'ok') {
+      return failed(
+        `${describe}:导航后未到位 —— ${arrived.status === 'failed' ? arrived.reason : '判据未满足'}`
+        + (nav.rejected ? `;loadURL 曾 reject: ${nav.rejected}` : ''),
+        true,
+      );
+    }
+
+    /**
+     * ⚠️ 这里**不再单独做一次落地校验** —— 探针实证它是死码(2026-09-15)。
+     *
+     * 初版我照搬 `x-collect-runner` 的 `assertLanded`,写成
+     * 「`ready` 之后再比一次 URL 片段」。实测 reason 恒为
+     * 「导航后未到位 —— 等待判据 urlIncludes:/xxx 超时」:
+     * **`ready` 先失败,那段永远走不到**。
+     *
+     * 而且它对**四种判据全是死的**:只有 `urlIncludes` 带 fragment,
+     * 另外三种(anchorAppears / anchorGone / custom)根本没有 URL 可比。
+     *
+     * ⭐ 真相是:**落地校验本来就由 `ready` 的 `urlIncludes` 判据承担** ——
+     * 语义页面表给的 arrival 就是那道闸(见 `x-pages.ts`:
+     * `x.withReplies` 的判据是 `/{handle}/with_replies`,带 handle,
+     * 跳到别人的页面照样不算到位)。再写一遍只是重复,而重复的那份还够不着。
+     *
+     * ⚠️ 我的测试当时写 `/没落在目标页|未到位/` —— 两种结果都放过,
+     * 于是这段死码一直没被发现。**用 `|` 放过多种结果 = 假绿的又一种形态。**
+     */
+    const landedUrl = await this.currentUrl(pageId, nav.landedUrl);
+
+    return ok({
+      requestedUrl: url,
+      landedUrl,
+      elapsedMs: Date.now() - startedAt,
+      describe,
+      loadRejected: nav.rejected,
+    });
+  }
+
+  /** 读当前 URL;读不到就退回导航时拿到的那个(**不假装成功**,只是少一次确认) */
+  private async currentUrl(pageId: PageId, fallback: string): Promise<string> {
+    try {
+      const raw = await this.host.evaluate(pageId, 'window.location.href');
+      return typeof raw === 'string' && raw ? raw : fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   /**
@@ -392,5 +522,17 @@ function describeStop(s: ScrollStop): string {
     case 'rounds': return `rounds:${s.n}`;
     case 'anchorAppears': return `anchorAppears:${s.anchor}`;
     case 'custom': return `custom:${s.script}`;
+  }
+}
+
+/**
+ * 从完整 URL 里取出 path 部分,给 `kind:'url'` 当退化判据。
+ * ⚠️ 解析失败就原样返回 —— 宁可判据宽一点,也不要在这里抛。
+ */
+function stripOrigin(url: string): string {
+  try {
+    return new URL(url).pathname || url;
+  } catch {
+    return url;
   }
 }

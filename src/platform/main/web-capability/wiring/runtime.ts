@@ -14,6 +14,7 @@ import { FsTraceSink } from './fs-trace-sink';
 import { ControlEngine } from '../page';
 import { InputEngine } from '../input';
 import type { AnchorResolver } from '../input';
+import type { PageResolver } from '../page/control-types';
 import { ElectronControlHost } from './electron-control';
 import { ElectronInputHost } from './electron-input';
 import { lookupWebContents } from './page-hosts';
@@ -156,9 +157,46 @@ const mergedAnchors: AnchorResolver = {
  * 于是「控制/输入」整条能力线建好了却调不动,
  * 与 `recordRequestStart` 零调用、`ready`/`scrollUntil` 掉出公开面**是同一种病**。
  */
+/**
+ * ⭐ 语义页面表注册表 —— 与锚点表同款依赖倒置:业务推进来,底座**不 import 业务**。
+ *
+ * ⚠️ 合并解释器按注册顺序问,第一个命中即返回。目前只有 X 一家不会撞;
+ * 真出现两家都认同一个页面名时,要改成按页面 owner 分派,
+ * 而不是让顺序决定 —— 那是「悄悄替你挑」,与 `find` 的铁律同源。
+ */
+const pageTables = new Map<string, PageResolver>();
+
+/** 业务侧注册自己的语义页面表(如 X 在启动时调一次)。同名覆盖 */
+export function registerPageTable(owner: string, resolver: PageResolver): void {
+  pageTables.set(owner, resolver);
+}
+
+/** 已注册的语义页面名(按 owner 分组)—— 验收台列给人看,免得靠记忆猜 */
+export function listPageNames(): Array<{ owner: string; names: string[] }> {
+  return Array.from(pageTables.entries()).map(([owner, t]) => ({
+    owner,
+    names: typeof t.names === 'function' ? t.names() : [],
+  }));
+}
+
+const mergedPages: PageResolver = {
+  resolve(name, params) {
+    for (const t of pageTables.values()) {
+      const hit = t.resolve(name, params);
+      if (hit) return hit;
+    }
+    return null;
+  },
+  names() {
+    return Array.from(pageTables.values()).flatMap((t) => t.names?.() ?? []);
+  },
+};
+
 export const controlEngine = new ControlEngine(
   new ElectronControlHost(lookupWebContents),
   mergedAnchors,
+  undefined,        // CustomScriptSource —— 暂无 custom 判据的消费者
+  mergedPages,      // ⭐ 语义页面表(`goto` 靠它把语义名翻成 URL)
 );
 export const inputEngine = new InputEngine(
   new ElectronInputHost(lookupWebContents),

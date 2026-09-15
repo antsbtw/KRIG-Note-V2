@@ -13,8 +13,9 @@
 
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
-import { registerAnchorTable } from '../web-capability/wiring/runtime';
+import { registerAnchorTable, registerPageTable } from '../web-capability/wiring/runtime';
 import { XAnchorResolver } from './x-anchors';
+import { XPageResolver } from './x-pages';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
 import { setParentContext } from '../db/tweet-inbox-repo';
 import { queryInbox, countInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
@@ -63,6 +64,8 @@ export function registerXTimelineHandlers(): void {
    * 与「元素真不在页面上」长得一模一样。
    */
   registerAnchorTable('x', new XAnchorResolver());
+  // ⭐ 语义页面表 —— `goto` 靠它把「去某人的推文与回复页」翻成 URL
+  registerPageTable('x', new XPageResolver());
 
   // X_RUN_RECIPE — 手动触发指定配方
   ipcMain.handle(IPC_CHANNELS.X_RUN_RECIPE, async (_e, payload: unknown) => {

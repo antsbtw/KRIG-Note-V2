@@ -24,6 +24,29 @@ import { isFailed, isOk } from '@platform/main/web-capability';
 import { FakeScrollPage, MapAnchors, MapScripts, PAGE } from './helpers/fake-scroll-page';
 
 describe('⭐ web.page 公开面 —— ready / scrollUntil 必须调得到', () => {
+  it('⭐⭐ goto 也在公开面上(2026-09-15 落地,同款债不踩第二次)', () => {
+    /**
+     * ⚠️ `ready`/`scrollUntil` 当初正是写完了**没从 index 导出**,
+     * 「能力建好了却调不到」躺了 5 天(§15.1 第 3 条)。
+     * `goto` 落地时一并钉住 —— 掉出公开面就红。
+     */
+    const engine = new page.ControlEngine(
+      new FakeScrollPage({ docHeight: 2000, viewport: 500 }),
+      new MapAnchors({}),
+      new MapScripts({}),
+    );
+    expect(typeof engine.goto, 'ControlEngine 上没有 goto').toBe('function');
+  });
+
+  it('⭐⭐ goto 的三个类型从公开面转得出(调用方要 import 得到)', () => {
+    // 类型在运行期不可见,故扫 index 源码 —— 这是类型导出唯一可查的方式
+    const fs = require('node:fs') as typeof import('node:fs');
+    const idx = fs.readFileSync('src/platform/main/web-capability/page/index.ts', 'utf-8');
+    for (const t of ['PageTarget', 'PageResolver', 'GotoReport']) {
+      expect(idx, `${t} 没上公开面 —— 调用方 import 不到`).toMatch(new RegExp(`\\b${t}\\b`));
+    }
+  });
+
   it('包的公开面上有 ControlEngine(§15.1 第 3 条)', () => {
     expect(
       typeof page.ControlEngine,

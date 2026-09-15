@@ -272,12 +272,34 @@ describe('⭐ 能力层边界', () => {
     expect(code).toMatch(/executeJavaScript/);
   });
 
-  it('⭐ 接线层不 catch 注入异常(吞掉会让 ready 的重试与 scrollUntil 的分辨都失效)', () => {
+  it('⭐ 接线层不 catch **注入**异常(吞掉会让 ready 的重试与 scrollUntil 的分辨都失效)', () => {
+    /**
+     * ⚠️ **收窄到 `evaluate` 的函数体**(2026-09-15,`goto` 落地时改)。
+     *
+     * 初版扫整个文件禁 `catch` —— 而 `navigate` **必须** catch:
+     * `loadURL` 常常不 resolve(站点自行接管导航,X 的 ERR_ABORTED 是常态),
+     * 契约 §9.3 明写「底座必须内建:处理站点自行接管导航」。
+     * 不 catch 就等于把正常导航一律当失败。
+     *
+     * ⭐ 这条守卫真正保护的是**注入异常要往上抛** ——
+     * `ready` 靠它决定「继续等」,`scrollUntil` 靠它区分「滚不动」与「做不了」。
+     * 那是 `evaluate` 的事,与 `navigate` 无关。故按函数体守,不按文件守。
+     */
     const fs = require('node:fs') as typeof import('node:fs');
     const code = fs
       .readFileSync('src/platform/main/web-capability/wiring/electron-control.ts', 'utf-8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/.*$/gm, '');
-    expect(code, '接线层不许吞异常').not.toMatch(/catch\s*[({]/);
+
+    const start = code.indexOf('async evaluate(');
+    expect(start, '锚点过时:找不到 evaluate').toBeGreaterThan(0);
+    // evaluate 是文件里最后一个方法;取到类结尾即可
+    const body = code.slice(start);
+    expect(body, 'evaluate 里吞了注入异常 —— ready 的重试与 scrollUntil 的分辨都会失效')
+      .not.toMatch(/catch\s*[({]/);
+
+    // ⭐ 反向锁:navigate 那条 catch 必须**还在**(删了就等于把正常导航当失败)
+    expect(code, 'navigate 不 catch loadURL reject —— 站点接管导航会被误判成失败')
+      .toMatch(/loadURL\([^)]*\)\.catch\(/);
   });
 });

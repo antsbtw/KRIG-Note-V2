@@ -46,4 +46,17 @@ export type {
   ScrollOptions,
   ScrollReport,
   RoundTrace,
+  /**
+   * ⭐ `goto` 的三件套(2026-09-15 落地)。
+   *
+   * ⚠️ 必须上公开面 —— `ready`/`scrollUntil` 当初正是写完了没导出,
+   * 「能力建好了却调不到」躺了 5 天(§15.1 第 3 条)。同一个坑不踩第二次。
+   *
+   * ⚠️ `PageTarget` 用的是**契约 §9.3 那份判别联合**,
+   * 与 `web-page.ts` 里那份 branded 串**不等价**(用户 2026-09-15 拍板用前者)。
+   * 故此处从 `control-types` 转出;`web-page.ts` 那份已无引用。
+   */
+  PageTarget,
+  PageResolver,
+  GotoReport,
 } from './control-types';

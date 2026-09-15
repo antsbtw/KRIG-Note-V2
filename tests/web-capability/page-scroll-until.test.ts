@@ -450,17 +450,65 @@ describe('⭐ 三态契约与 fail loud', () => {
 });
 
 describe('⭐ 只管滚,不管抓(与捕获解耦)', () => {
-  it('引擎接口里零处「捕获 / 导航」的痕迹', () => {
-    // 现有 harvestTimeline 把 loadURL + 滚动 + 捕获 + 判停缝死在一个函数,
-    // 结果「只滚不抓」「抓但不导航」「换判停规则」全做不到。
+  it('⭐ scrollUntil **本身**零处「捕获 / 导航」的痕迹', () => {
+    /**
+     * 现有 `harvestTimeline` 把 `loadURL + 滚动 + 捕获 + 判停` 缝死在一个函数,
+     * 结果「只滚不抓」「抓但不导航」「换判停规则」全做不到。
+     *
+     * ⚠️ **收窄到 `scrollUntil` 的函数体**(2026-09-15,`goto` 落地时改)。
+     * 初版扫整个 `control.ts` —— 而 `goto` 按契约 §9.3 就该在这一层
+     * (用户 2026-09-15 拍板放进 `ControlEngine`),它的**错误信息里**
+     * 出现 `loadURL` 这个词就会把守卫打红。
+     *
+     * ⭐ 守卫真正保护的是「**滚动**这一步不缝死导航/捕获」,
+     * 不是「这个文件里不许出现这几个词」。契约要的是
+     * `goto → scrollUntil → capture` **各自独立**,而它们同在一个类里
+     * 且互不调用,正是「独立」。故按函数体守。
+     */
     const fs = require('node:fs') as typeof import('node:fs');
     const code = fs
       .readFileSync('src/platform/main/web-capability/page/control.ts', 'utf-8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/.*$/gm, '');
-    for (const banned of [/loadURL/, /debugger/, /Network\.enable/, /tweet/i, /payload/i]) {
-      expect(code, `滚动层混进了捕获/导航(${banned})`).not.toMatch(banned);
+
+    const start = code.indexOf('async scrollUntil(');
+    expect(start, '锚点过时:找不到 scrollUntil').toBeGreaterThan(0);
+    // 取到下一个方法定义之前(scrollUntil 之后是 private 助手)
+    const after = code.slice(start + 10);
+    const end = after.search(/\n  (?:private|async|public)\s/);
+    const body = end > 0 ? after.slice(0, end) : after;
+    expect(body.length, 'scrollUntil 函数体切空了').toBeGreaterThan(300);
+
+    /**
+     * ⚠️ `navigate` 的禁词写成 `/navigate\(/` **拦不住 `navigate?.(`** ——
+     * 可选链的 `?.` 卡在名字与括号之间。注入验证当场抓到(2026-09-15):
+     * 往 `scrollUntil` 里塞 `this.host.navigate?.(...)`,33 条守卫**全绿**。
+     * ⭐ 第五次同款:**禁词要匹配违规真实的书写形态**,不是我以为的那种。
+     */
+    for (const banned of [
+      /loadURL/, /navigate\s*\??\.?\s*\(/, /debugger/, /Network\.enable/, /tweet/i, /payload/i,
+    ]) {
+      expect(body, `滚动那一步混进了捕获/导航(${banned})`).not.toMatch(banned);
     }
+  });
+
+  it('⭐⭐ goto 与 scrollUntil **互不调用**(同一个类,但各自独立)', () => {
+    // 契约 §9.5:「拆开后 goto → scrollUntil → capture 各自独立,业务自由编排」
+    const fs = require('node:fs') as typeof import('node:fs');
+    const code = fs
+      .readFileSync('src/platform/main/web-capability/page/control.ts', 'utf-8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+
+    const gotoStart = code.indexOf('async goto(');
+    const gotoEnd = code.indexOf('private async currentUrl(');
+    expect(gotoStart, '锚点过时:找不到 goto').toBeGreaterThan(0);
+    expect(gotoEnd).toBeGreaterThan(gotoStart);
+    const gotoBody = code.slice(gotoStart, gotoEnd);
+
+    expect(gotoBody, 'goto 里调了 scrollUntil —— 又缝死了').not.toMatch(/scrollUntil\(/);
+    // ⭐ goto 只允许调 ready(导航后等到位),那是编排里明确的一步
+    expect(gotoBody, 'goto 没调 ready —— 导航后不等到位就往下走').toMatch(/this\.ready\(/);
   });
 
   it('ScrollReport 里没有任何「抓到什么」的字段', () => {

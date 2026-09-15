@@ -92,3 +92,62 @@ export type ScrollReport = {
   readonly stopReason: string;
   readonly trace: readonly RoundTrace[];
 };
+
+// ═══════════════════════════════════════════════════════
+//  `goto` —— 语义导航(§9.3)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * ⭐ `goto` 的目标是**语义**,不是 URL。
+ *
+ * ⚠️ 形状用**契约文档 §9.3 那份**(判别联合),不是 `web-page.ts` 里那份 branded 串
+ * ——用户 2026-09-15 拍板。理由:`params` 能带类型(handle / tweetId 不会互串),
+ * 且 `kind:'url'` 把「仅 adapter 内部可用」**显式表达出来**,
+ * 而不是靠注释约束。
+ *
+ * ⚠️⚠️ `kind:'url'` **只许 adapter 自己用**:业务方传语义名,
+ * adapter 把它翻成 URL。站点改版时变的是 URL,不变的是「我要去发推页」——
+ * 这是「改版只改一层」的直接兑现。
+ */
+export type PageTarget =
+  | { readonly kind: 'semantic'; readonly name: string; readonly params?: Readonly<Record<string, string>> }
+  /** ⚠️ 仅 adapter 内部可用 —— 业务方不该构造它 */
+  | { readonly kind: 'url'; readonly url: string };
+
+/**
+ * 语义页面表 —— **adapter 的活**(与 `AnchorResolver` 同源)。
+ *
+ * ⚠️ 解释不出来返回 null(调用方据此 Failed),**不返回兜底 URL**:
+ * 兜底会让「页面名打错了」表现为「导航到了别的页面」,
+ * 而那正是 2026-09-07「把首页时间线当搜索结果」整批入库的形态。
+ */
+export interface PageResolver {
+  /** 语义名 + 参数 → 可导航 URL 与到位判据。解释不出来返回 null */
+  resolve(
+    name: string,
+    params?: Readonly<Record<string, string>>,
+  ): { url: string; arrival: ReadyCriterion; describe: string } | null;
+  /** 已登记的页面名 —— 验收台列给人看,免得靠记忆猜 */
+  names?(): string[];
+}
+
+/**
+ * 导航报告(§9.3)。
+ *
+ * ⭐ 返回**事实**:请求的是什么、实际落在哪、等了多久、`loadURL` 有没有 reject。
+ * ⚠️ 不返回一个光秃秃的 ok —— 「到位」与「到对地方」是两件事,
+ * 人和调用方都要能分开看。
+ */
+export type GotoReport = {
+  readonly requestedUrl: string;
+  /** 实际落地 URL(`loadURL` 之后真实的那个,不是请求的那个) */
+  readonly landedUrl: string;
+  readonly elapsedMs: number;
+  readonly describe: string;
+  /**
+   * `loadURL` 是否 reject 过。
+   * ⚠️ **reject 不算失败** —— 站点自行接管导航时必 reject(X 的 ERR_ABORTED),
+   * 页面照样会到位。但要留痕,否则「为什么慢」无从查起。
+   */
+  readonly loadRejected?: string;
+};

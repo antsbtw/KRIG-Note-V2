@@ -24,6 +24,27 @@ export type WebContentsLookup = (pageId: PageId) => WebContents | null;
 export class ElectronControlHost implements ControlHost {
   constructor(private readonly lookup: WebContentsLookup) {}
 
+  /**
+   * 导航 —— **唯一** `loadURL` 的地方(与 evaluate 同款收口)。
+   *
+   * ⚠️ `loadURL` 常常**不 resolve**:站点自行接管导航时会 reject
+   * (X 的 ERR_ABORTED 是常态,不是故障)。所以这里**捕获 reject 但不当失败**,
+   * 把原因如实回给引擎 —— 由引擎用「等到位」判定真假。
+   * 在这里吞掉原因,`goto` 就分不出「站点接管了」与「真没导航成」。
+   */
+  async navigate(pageId: PageId, url: string): Promise<{ landedUrl: string; rejected?: string }> {
+    const wc = this.lookup(pageId);
+    if (!wc) {
+      // fail loud —— 与 evaluate 同款:找不到页面就抛
+      throw new Error(`[web.page] 页面 ${pageId} 没有对应的渲染目标(已关闭?)`);
+    }
+    let rejected: string | undefined;
+    await wc.loadURL(url).catch((err: unknown) => {
+      rejected = err instanceof Error ? err.message : String(err);
+    });
+    return { landedUrl: wc.getURL(), rejected };
+  }
+
   async evaluate(pageId: PageId, script: string): Promise<unknown> {
     const wc = this.lookup(pageId);
     if (!wc) {
