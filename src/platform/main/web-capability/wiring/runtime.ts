@@ -10,11 +10,39 @@ import { NetworkEventBus, CdpBodyProvider } from '../net';
 import { TraceRecorder, HealthProbe, NetMonitor } from '../trace';
 import { ScriptRegistry, registerAIScripts } from '../dom';
 import { ElectronDomRunner } from './electron-dom';
+import { FsTraceSink } from './fs-trace-sink';
+import { ControlEngine } from '../page';
+import { InputEngine } from '../input';
+import type { AnchorResolver } from '../input';
+import { ElectronControlHost } from './electron-control';
+import { ElectronInputHost } from './electron-input';
+import { lookupWebContents } from './page-hosts';
 
 export const pageRegistry = new PageRegistry();
 export const netBus = new NetworkEventBus();
 export const bodyProvider = new CdpBodyProvider(netBus);
-export const traceRecorder = new TraceRecorder();
+/**
+ * ⭐ 诊断留痕的落盘根目录。
+ *
+ * ⚠️ `app` 只在主进程可用,而本文件会被单测 import ——
+ * 故用 require 懒取并兜底:拿不到就退回临时目录,**不让测试因为没有 Electron 而挂**。
+ * ⚠️ 兜底只在「没有 app」时发生,不是掩盖错误(fail-loud 适用于业务失败,
+ * 这里是运行环境差异)。
+ */
+function traceRoot(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { app } = require('electron') as typeof import('electron');
+    const base = app?.getPath?.('userData');
+    if (base) return `${base}/krig-data/web-trace`;
+  } catch { /* 非 Electron 环境(单测) */ }
+  return `${process.env.TMPDIR ?? '/tmp'}/krig-web-trace`;
+}
+
+/** ⭐ 落盘出口 —— 没有它,诊断记录进程一关全没了(见 fs-trace-sink.ts 文件头) */
+export const traceSink = new FsTraceSink(traceRoot());
+
+export const traceRecorder = new TraceRecorder({ sink: traceSink });
 export const healthProbe = new HealthProbe();
 
 /** ⭐ 预注册脚本表 —— 业务方只能按 id 取用,拼不出坏脚本 */
@@ -44,3 +72,95 @@ export function dropNetMonitor(pageId: string): void {
 export function listMonitoredPages(): string[] {
   return Array.from(monitors.keys());
 }
+
+/**
+ * ⭐⭐ 控制 / 输入 两个引擎的运行期实例(`01-contract.md` 的「控制 · 输入 · 输出」)。
+ *
+ * ── 为什么到今天才有 ──
+ *
+ * `ControlEngine` / `InputEngine` / `ElectronControlHost` / `ElectronInputHost`
+ * 四个类**早就写完并测过**,但全仓 **零处 `new`** —— 两个 Host 都要一个
+ * `WebContentsLookup`,而**没有人提供它**(`pageIdByWc` 只有正向)。
+ * 于是「控制/输入」整条能力线建好了却调不动,
+ * 与 `recordRequestStart` 零调用、`ready`/`scrollUntil` 掉出公开面**是同一种病**。
+ *
+ * ⚠️ 锚点表暂时只有 X 一家(`XAnchorResolver`)。将来 AI 也要锚点时,
+ * 这里要换成**按 owner 分派**的解释器 —— 而不是把 AI 的 selector 混进 X 那张表。
+ * 现在只有 X 用,先不做那层间接;真要加时这一行就是唯一的改动点。
+ */
+/**
+ * ⭐ 锚点解释器**注册表** —— 依赖方向:业务 → 底座,**绝不反过来**。
+ *
+ * ⚠️ 初版我在这里直接 `import { XAnchorResolver } from '../../x/x-anchors'`,
+ * 那是**分层倒置**:能力层反过来依赖 X 业务层,底座从此离开 X 就不能构建。
+ * `wiring/` 里其它文件全都只 import `electron` / `node:*` / 本层 —— 没有先例,
+ * 而且**没有任何守卫会拦它**(守卫盯的是 Electron 与脚本文本,不是依赖方向),
+ * 所以它只会悄悄烂掉。改成注册表后,X 在启动时把自己的表**推**进来。
+ *
+ * 查不到锚点返回 null —— 调用方据此 Failed。**绝不原样回显锚点名**:
+ * 那会让「没注册表」表现成「元素不在页面上」,两者排查方向完全相反。
+ */
+const anchorTables = new Map<string, AnchorResolver>();
+
+/** 业务侧注册自己的锚点表(如 X 在启动时调一次)。同名覆盖 */
+export function registerAnchorTable(owner: string, resolver: AnchorResolver): void {
+  anchorTables.set(owner, resolver);
+}
+
+/** 已注册的 owner —— 验收台列给人看 */
+export function listAnchorOwners(): string[] {
+  return Array.from(anchorTables.keys());
+}
+
+/**
+ * ⭐ 已注册的**锚点名**(按 owner 分组)。
+ *
+ * 给控制台的下拉用 —— ⚠️ 必须从**真表**读,不许面板自己抄一份:
+ * 抄一份就会漂,而漂的表现是「面板上有这个名字、点下去说没登记」。
+ * ⚠️ 解释器不一定实现 `names()`(接口只要求 `resolve`),没有就跳过。
+ */
+export function listAnchorNames(): Array<{ owner: string; names: string[] }> {
+  const out: Array<{ owner: string; names: string[] }> = [];
+  for (const [owner, table] of anchorTables.entries()) {
+    const withNames = table as { names?: () => string[] };
+    out.push({ owner, names: typeof withNames.names === 'function' ? withNames.names() : [] });
+  }
+  return out;
+}
+
+/**
+ * 合并解释器:按注册顺序问每一张表,第一个命中即返回。
+ *
+ * ⚠️ 目前只有 X 一家,所以「谁的表」不会撞。真出现两家都认同一个锚点名时,
+ * 这里要改成**按页面 owner 分派**(pageFacts.owner),而不是让顺序决定 ——
+ * 那是「悄悄替你挑」,与 `find` 的铁律同源。到那天再改,不预先造间接层。
+ */
+const mergedAnchors: AnchorResolver = {
+  resolve(anchor: string): string | null {
+    for (const table of anchorTables.values()) {
+      const hit = table.resolve(anchor);
+      if (hit) return hit;
+    }
+    return null;
+  },
+};
+
+/**
+ * ⭐⭐ 控制 / 输入 两个引擎的运行期实例(契约的「控制 · 输入 · 输出」)。
+ *
+ * ── 为什么到今天才有 ──
+ *
+ * `ControlEngine` / `InputEngine` / `ElectronControlHost` / `ElectronInputHost`
+ * 四个类**早就写完并测过**,但全仓 **零处 `new`** —— 两个 Host 都要一个
+ * `WebContentsLookup`,而**没有人提供它**(`pageIdByWc` 只有正向)。
+ * 于是「控制/输入」整条能力线建好了却调不动,
+ * 与 `recordRequestStart` 零调用、`ready`/`scrollUntil` 掉出公开面**是同一种病**。
+ */
+export const controlEngine = new ControlEngine(
+  new ElectronControlHost(lookupWebContents),
+  mergedAnchors,
+);
+export const inputEngine = new InputEngine(
+  new ElectronInputHost(lookupWebContents),
+  mergedAnchors,
+);

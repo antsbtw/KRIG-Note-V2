@@ -33,6 +33,29 @@ import type {
 import type { Profile, ProfileColor } from '@shared/types/profile-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  /**
+   * ⭐ Web 能力层控制台(dev-only)—— 逐个原子能力单独跑。
+   * ⚠️ 生产构建下主侧根本不注册这些通道,invoke 会 reject —— 面板那侧也被 dead-code 掉。
+   */
+  webConsole: {
+    ready: (wcId: number | undefined, criterion: unknown, timeoutMs?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_READY, { wcId, criterion, timeoutMs }),
+    scrollUntil: (wcId: number | undefined, stop: unknown, options?: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_SCROLL_UNTIL, { wcId, stop, options }),
+    tap: (wcId: number | undefined, anchor: string, settle?: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_TAP, { wcId, anchor, settle }),
+    press: (wcId: number | undefined, key: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_PRESS, { wcId, key }),
+    hover: (wcId: number | undefined, anchor: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_HOVER, { wcId, anchor }),
+    type: (wcId: number | undefined, anchor: string, text: string, check?: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_TYPE, { wcId, anchor, text, check }),
+    pages: () => ipcRenderer.invoke(IPC_CHANNELS.WEBC_PAGES),
+    anchors: () => ipcRenderer.invoke(IPC_CHANNELS.WEBC_ANCHORS),
+    readTabBar: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_READ_TABBAR, { wcId }),
+    trace: (sinceMs?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_TRACE, { sinceMs }),
+  },
+
   /** 诊断上报(renderer → main) */
   reportAlive(payload: DiagnosticsReportPayload): void {
     ipcRenderer.send(IPC_CHANNELS.DIAGNOSTICS_REPORT_ALIVE, payload);

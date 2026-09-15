@@ -31,6 +31,7 @@ import { registerXHandlers, registerXTestHandlers, registerXTimelineHandlers } f
 import { registerMailHandlers, registerMailSyncHandlers } from '../mail';
 import { registerAuthHandlers } from './auth-handler';
 import { registerWorkspaceHandlers } from './workspace-handler';
+import { registerWebConsoleHandlers } from './web-console-handler';
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -63,4 +64,5 @@ export function initIpcBus(): void {
   registerXTimelineHandlers();      // X 时间线智能筛选 Phase 1:搜索配方采集 + AI 判断 + inbox 查询
   registerAuthHandlers();           // 账号登录 + 归因(authorization-management-design.md;本期不做授权)
   registerWorkspaceHandlers();      // S3-a:Workspace 楼长 IPC(create/close/remove/open/rename/setActive/getState)
+  registerWebConsoleHandlers();     // ⭐ Web 能力层控制台(dev-only;app.isPackaged 时内部直接 return 不注册)
 }

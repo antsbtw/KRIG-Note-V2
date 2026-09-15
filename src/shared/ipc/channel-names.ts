@@ -369,6 +369,20 @@ export const IPC_CHANNELS = {
   X_CAPTURE_STOP:    'x:capture-stop',   // renderer → main invoke：停止监视并取最终统计
   X_CAPTURE_UPDATE:  'x:capture-update', // main → renderer 广播：实时采集快照
   X_FETCH_PROFILE:   'x:fetch-profile',  // renderer → main invoke：抓单个账号画像（盯人面板的 bio 卡片）
+
+  // ── Web 能力层控制台(dev-only)—— 逐个原子能力单独跑、看原样返回值 ──
+  // ⚠️ 刻意**一能力一通道**,不做「求值任意脚本」的万能通道:
+  //    那等于把 web.dom 费力关掉的注入口重新打开。
+  WEBC_READY:        'webc:ready',         // 控制:等页面到位
+  WEBC_SCROLL_UNTIL: 'webc:scroll-until',  // 控制:滚动直到判据
+  WEBC_TAP:          'webc:tap',           // 控制:点一个锚点
+  WEBC_PRESS:        'webc:press',         // 控制:按一个键
+  WEBC_HOVER:        'webc:hover',         // 控制:悬停
+  WEBC_TYPE:         'webc:type',          // 输入:往锚点填文本(含落地确认)
+  WEBC_PAGES:        'webc:pages',         // 输出:页面清单(对照屏幕数行数)
+  WEBC_ANCHORS:      'webc:anchors',       // 输出:已注册锚点表
+  WEBC_READ_TABBAR:  'webc:read-tabbar',   // 输出:真页面上读 X 左栏 tab 的 testid
+  WEBC_TRACE:        'webc:trace',         // 输出:读回诊断留痕(内存 + 磁盘两份,对不上说明落盘坏了)
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
   X_NOTIF_WATCH_START:  'x:notif-watch-start',
   X_NOTIF_WATCH_STOP:   'x:notif-watch-stop',

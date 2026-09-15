@@ -1,0 +1,235 @@
+/**
+ * 能力控制台样式 —— 与 X 工作台同一套色板(纯黑底 / #2f3336 线 / X 蓝)
+ *
+ * ⚠️ 作用域全部收在 `.krig-webc` 前缀下,**不碰 :root / theme.css**,
+ * 否则会波及所有 view(与 x-workbench 同款做法)。
+ *
+ * ⚠️ 刻意**不做绿灯/红灯样式**:结果区渲染的是原样返回值,
+ * 判断留给看的人。满屏绿灯而真实链路零数据 = 观察窗变演示台。
+ */
+.krig-webc {
+  --webc-bg: #000000;
+  --webc-card: #16181c;
+  --webc-line: #2f3336;
+  --webc-text: #e7e9ea;
+  --webc-dim: #71767b;
+  --webc-blue: #1d9bf0;
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--webc-bg);
+  color: var(--webc-text);
+  font-size: 13px;
+}
+
+.krig-webc__topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--webc-line);
+  flex-shrink: 0;
+}
+
+.krig-webc__title { font-weight: 700; font-size: 14px; }
+
+.krig-webc__badge {
+  font-size: 10px;
+  color: var(--webc-blue);
+  border: 1px solid var(--webc-blue);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 15px;
+}
+
+.krig-webc__ws {
+  font-size: 11px;
+  color: var(--webc-dim);
+  border: 1px solid var(--webc-line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.krig-webc__spacer { flex: 1; }
+
+.krig-webc__hint { font-size: 10px; color: var(--webc-dim); }
+
+.krig-webc__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--webc-line);
+  flex-shrink: 0;
+}
+
+.krig-webc__tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--webc-dim);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px 8px;
+  cursor: pointer;
+}
+
+.krig-webc__tab:hover { color: var(--webc-text); }
+
+.krig-webc__tab--active {
+  color: var(--webc-text);
+  border-bottom-color: var(--webc-blue);
+}
+
+.krig-webc__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.krig-webc__fn {
+  background: var(--webc-card);
+  border: 1px solid var(--webc-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.krig-webc__fn-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.krig-webc__fn-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  color: var(--webc-blue);
+}
+
+.krig-webc__fn-sig { font-size: 11px; color: var(--webc-dim); }
+
+.krig-webc__row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.krig-webc__in {
+  background: var(--webc-bg);
+  border: 1px solid var(--webc-line);
+  border-radius: 6px;
+  color: var(--webc-text);
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.krig-webc__in:focus { border-color: var(--webc-blue); }
+
+.krig-webc__go {
+  background: var(--webc-blue);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.krig-webc__go:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.krig-webc__note {
+  font-size: 10px;
+  color: var(--webc-dim);
+  line-height: 1.6;
+  margin-top: 6px;
+}
+
+.krig-webc__note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--webc-text);
+}
+
+.krig-webc__runs { margin-top: 4px; }
+
+.krig-webc__runs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--webc-dim);
+  padding: 6px 2px;
+  border-top: 1px solid var(--webc-line);
+}
+
+.krig-webc__clear {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--webc-line);
+  border-radius: 999px;
+  color: var(--webc-dim);
+  font-size: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.krig-webc__run {
+  background: var(--webc-card);
+  border: 1px solid var(--webc-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.krig-webc__run-head {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--webc-dim);
+  margin-bottom: 4px;
+}
+
+.krig-webc__run-fn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--webc-blue);
+  font-weight: 700;
+}
+
+.krig-webc__run-label {
+  font-size: 10px;
+  color: var(--webc-dim);
+  margin: 5px 0 2px;
+}
+
+/* 原样返回值 —— 横向可滚,不换行截断(截断会让人以为字段不存在) */
+.krig-webc__pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--webc-bg);
+  border: 1px solid var(--webc-line);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--webc-text);
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.krig-webc__empty {
+  color: var(--webc-dim);
+  font-size: 11px;
+  padding: 16px 4px;
+  text-align: center;
+}

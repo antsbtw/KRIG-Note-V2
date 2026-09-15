@@ -17,6 +17,7 @@ import { detectAIServiceByUrl } from '@shared/types/ai-service-types';
 import { netBus, bodyProvider, pageRegistry, getNetMonitor, domRunner } from '../web-capability/wiring/runtime';
 import { AI_SCRIPTS, type ScriptId } from '../web-capability/dom';
 import { toPageHost } from '../web-capability/wiring/electron-page-host';
+import { bindPageHost } from '../web-capability/wiring/page-hosts';
 import type { PageId } from '../web-capability/page';
 
 export interface SSEResponseRecord {
@@ -230,6 +231,7 @@ export class SSECaptureManager {
         state: 'complete',
       });
       this.pageId = facts.pageId;
+      bindPageHost(facts.pageId, this.webContents);  // ⭐ 反向绑定,同 X 侧
     }
     return this.pageId;
   }
@@ -280,6 +282,7 @@ export class SSECaptureManager {
         state: 'complete',
       });
       this.pageId = facts.pageId;
+      bindPageHost(facts.pageId, this.webContents);  // ⭐ 反向绑定,同 X 侧
     }
     const pageId = this.pageId;
     const endpointPattern = profile.intercept?.endpointPattern ?? 'StreamGenerate';

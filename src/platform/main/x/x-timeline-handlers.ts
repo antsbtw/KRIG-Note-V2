@@ -13,6 +13,8 @@
 
 import { ipcMain, webContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
+import { registerAnchorTable } from '../web-capability/wiring/runtime';
+import { XAnchorResolver } from './x-anchors';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
 import { setParentContext } from '../db/tweet-inbox-repo';
 import { queryInbox, countInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
@@ -52,6 +54,16 @@ import { DEFAULT_FILTER_CONFIG, normalizeHandle } from '@shared/types/x-timeline
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
 export function registerXTimelineHandlers(): void {
+  /**
+   * ⭐ 把 X 的锚点表推给底座(依赖方向:业务 → 底座)。
+   *
+   * ⚠️ 底座**不 import X** —— 它只提供 `registerAnchorTable` 这个入口。
+   * 没有这一行,`web.input` 的 tap/type、`web.page` 的 anchor 类判据
+   * 全都解释不出 selector,表现为「未找到可点的 X」——
+   * 与「元素真不在页面上」长得一模一样。
+   */
+  registerAnchorTable('x', new XAnchorResolver());
+
   // X_RUN_RECIPE — 手动触发指定配方
   ipcMain.handle(IPC_CHANNELS.X_RUN_RECIPE, async (_e, payload: unknown) => {
     const p = payload as { recipeId?: unknown; wsId?: unknown; targetWcId?: unknown } | null;
@@ -530,11 +542,19 @@ export function registerXTimelineHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.X_CAPTURE_START, async (_e, payload: unknown) => {
     const p = payload as { wcId?: unknown } | null;
     const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    // ⭐ 用户 2026-09-15:「在后台能够 log 这些操作,而不是靠我口头描述,这是不健康的」。
+    //    每个面板动作在 main 侧都要留痕 —— 否则日志里分不出「没点」和「点了没起来」。
+    console.log(`[x-workbench] ▶ 开始对照 wcId=${wcId ?? '(未指定,走兜底解析)'}`);
     try {
       const r = await startCaptureMonitor(wcId);
-      if ('error' in r) return { success: false, error: r.error };
+      if ('error' in r) {
+        console.warn(`[x-workbench] ✗ 开始对照失败:${r.error}`);
+        return { success: false, error: r.error };
+      }
+      console.log('[x-workbench] ✓ 对照已启动(被动监视 —— 需要人在左侧浏览/滚动才有数据)');
       return { success: true, snapshot: getCaptureSnapshot() };
     } catch (err) {
+      console.error('[x-workbench] ✗ 开始对照异常:', String(err));
       return { success: false, error: String(err) };
     }
   });
@@ -553,9 +573,14 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'handle 必填' };
     }
     const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    console.log(`[x-workbench] ▶ 抓画像 @${handle} wcId=${wcId ?? '(未指定)'}`);
     try {
       const got = await harvestAuthorProfile(handle, wcId, 12_000);
-      if ('error' in got) return { success: false, error: got.error };
+      if ('error' in got) {
+        console.warn(`[x-workbench] ✗ 抓画像失败 @${handle}:${got.error}`);
+        return { success: false, error: got.error };
+      }
+      console.log(`[x-workbench] ✓ 抓到画像 @${handle}`);
       return { success: true, profile: got };
     } catch (err) {
       console.error('[x-timeline-handlers] X_FETCH_PROFILE failed:', (err as Error).message);
@@ -563,10 +588,15 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
+
   ipcMain.handle(IPC_CHANNELS.X_CAPTURE_STOP, async () => {
     try {
-      return { success: true, snapshot: stopCaptureMonitor() };
+      const snap = stopCaptureMonitor();
+      console.log(`[x-workbench] ■ 停止对照 —— 屏幕见过 ${snap.seenInDom} 条,`
+        + `采到 ${snap.captured} 条,载荷 ${snap.payloads} 个`);
+      return { success: true, snapshot: snap };
     } catch (err) {
+      console.error('[x-workbench] ✗ 停止对照异常:', String(err));
       return { success: false, error: String(err) };
     }
   });

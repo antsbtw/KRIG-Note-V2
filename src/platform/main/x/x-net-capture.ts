@@ -27,6 +27,7 @@
 import type { PageId } from '../web-capability/page';
 import { pageRegistry, netBus, bodyProvider, getNetMonitor } from '../web-capability/wiring/runtime';
 import { toPageHost } from '../web-capability/wiring/electron-page-host';
+import { bindPageHost } from '../web-capability/wiring/page-hosts';
 import type { NetworkEvent } from '../web-capability/net';
 
 /** 一个 X webContents 对应的 pageId(同一个 wc 复用同一个身份)*/
@@ -74,6 +75,9 @@ export function xPageId(wc: Electron.WebContents): PageId {
     state: 'complete',
   });
   pageIdByWc.set(wc.id, facts.pageId);
+  // ⭐ 反向绑定 —— 没有这一行,`web.page` / `web.input` 拿不到渲染目标,
+  //    表现为「登记了页面但控制/输入调不动」,且**不报错**。
+  bindPageHost(facts.pageId, wc);
   return facts.pageId;
 }
 

@@ -132,6 +132,64 @@ declare global {
 
   interface Window {
     electronAPI: {
+      /**
+       * ⭐ Web 能力层控制台(dev-only)—— 逐个原子能力单独跑,看**原样返回值**。
+       *
+       * ⚠️ 全部返回 `{ channelOk, result }`(channelOk=通道通不通,result.status=能力成不成),其中 `result` 是底座的**三态 Result**
+       * (`ok` / `failed` / `degraded`)——**不要在 UI 里把它压成成功/失败两态**:
+       * `degraded`(做了但不完整)当成功是「滚了个寂寞却报成功」,
+       * 当失败会丢掉已滚出的进度。
+       *
+       * ⚠️ 生产构建下主侧不注册这些通道(`app.isPackaged` 时直接 return)。
+       */
+      webConsole?: {
+        // ── 控制 ──
+        ready(wcId: number | undefined, criterion: unknown, timeoutMs?: number): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
+        scrollUntil(wcId: number | undefined, stop: unknown, options?: unknown): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
+        tap(wcId: number | undefined, anchor: string, settle?: unknown): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
+        press(wcId: number | undefined, key: string): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
+        hover(wcId: number | undefined, anchor: string): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
+        // ── 输入 ──
+        type(wcId: number | undefined, anchor: string, text: string, check?: unknown): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
+        // ── 输出 ──
+        pages(): Promise<{ channelOk: boolean; pages?: Array<{ pageId: string; alive: boolean }> }>;
+        anchors(): Promise<{
+          channelOk: boolean; owners?: string[];
+          tables?: Array<{ owner: string; names: string[] }>;
+        }>;
+        readTabBar(wcId?: number): Promise<{
+          channelOk: boolean; error?: string;
+          tabs?: Array<{ testid: string | null; href: string | null; label: string }>;
+        }>;
+        /**
+         * ⭐ 读回诊断留痕。`sinceMs` = 往前多少毫秒(不传则全部)。
+         * ⚠️ 同时给内存与磁盘两份计数 —— 对不上就说明落盘坏了。
+         */
+        trace(sinceMs?: number): Promise<{
+          channelOk: boolean;
+          memory?: {
+            degradations: unknown[]; recoveries: unknown[];
+            dropped: Record<string, number>;
+            formatDriftByCapability: Record<string, number>;
+          };
+          disk?: {
+            degradationCount: number; badLines: number;
+            shards: Record<string, number>;
+          };
+        }>;
+      };
       reportAlive(payload: DiagnosticsReportPayload): void;
       health(layer: 'L0' | 'L1' | 'L2' | 'L3' | 'L3.5' | 'L4' | 'L5' | 'platform'): Promise<HealthCheckResponse>;
       /** 系统主题变化订阅，返回取消订阅函数 */

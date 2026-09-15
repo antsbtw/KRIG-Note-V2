@@ -76,7 +76,8 @@ import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-
 import { seedRecipes } from './db/search-recipe-repo';
 import { recoverStuckAiJudging } from './db/tweet-inbox-repo';
 // ⭐ 步 3:web.net 健康巡检 —— 探针是拉取式的,必须有人定期查,否则通道哑了没人知道
-import { startHealthWatch, stopHealthWatch } from './web-capability/wiring/health-watch';
+import { startHealthWatch, stopHealthWatch, startTraceSweep, stopTraceSweep } from './web-capability/wiring/health-watch';
+import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
 import { startXSearchScheduler, stopXSearchScheduler,
   startCampaignServer, stopCampaignServer,
   startCampaignLoop, stopCampaignLoop } from './x';
@@ -245,6 +246,10 @@ app.whenReady().then(async () => {
   // ⭐ 步 3:启动 web.net 健康巡检(60s 一轮,只在健康状态翻转时发声,不刷屏)。
   // 停止调用在下面的 before-quit —— 常驻 timer 必须有停止调用(记忆 project-graceful-shutdown)。
   startHealthWatch();
+  // ⭐ 诊断留痕的老化 —— 停止调用在下面的 before-quit(常驻 timer 铁律)
+  startTraceSweep();
+  // ⭐ 「当时在哪个页面」—— pageRegistry 一直在发事件,此前零订阅者
+  startTraceLifecycle();
 
   // 活动契约接口 B(POST /refresh + GET /health)。
   // 未配置密钥/地址时**静默跳过**——这是可选能力,没配就是没启用,不是错误。
@@ -388,6 +393,8 @@ app.on('before-quit', (event) => {
   stopXSearchScheduler();
   // ⭐ 步 3:停 web.net 健康巡检(与上面同理:活着的 setInterval 会吊住事件循环)
   stopHealthWatch();
+  stopTraceSweep();
+  stopTraceLifecycle();
   stopCampaignServer().catch(() => { /* 退出中,忽略 */ });
   stopCampaignLoop().catch(() => { /* 退出中,忽略 */ });
   if (reconciled) {

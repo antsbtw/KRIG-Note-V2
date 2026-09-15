@@ -228,6 +228,22 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
             <span>📥</span>
             <span>Inbox</span>
           </button>
+          {/* ⭐ 能力控制台(dev-only,2026-09-15):逐个原子能力单独跑、看原样返回值。
+              ⚠️ Vite 在 prod build 会把整段 dead-code 掉 —— 用户看不到这个按钮。 */}
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              className="krig-social-view__tab krig-social-view__tab--inbox"
+              onClick={() => {
+                const bus = workspaceManager.getBus(workspaceId);
+                bus?.slot.openRight('web-console-view');
+              }}
+              title="能力控制台 — 控制 / 输入 / 输出,逐个函数验证(dev-only)"
+            >
+              <span>🧰</span>
+              <span>控制台</span>
+            </button>
+          )}
         </div>
         <div className="krig-social-view__drag-spacer" />
         {isInRightSlot && (

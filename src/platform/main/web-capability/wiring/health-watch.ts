@@ -25,7 +25,7 @@
  *   不健康 → 健康:`console.log` 报恢复 + 记 recovery(⭐ 自愈必须留痕)
  */
 
-import { healthProbe, netBus, traceRecorder, getNetMonitor, listMonitoredPages } from './runtime';
+import { healthProbe, netBus, traceRecorder, traceSink, getNetMonitor, listMonitoredPages } from './runtime';
 import type { HealthReport } from '../trace';
 
 /** 默认巡检间隔。比探针窗口(5 分钟)短,保证一个窗口内至少查到几次 */
@@ -108,4 +108,53 @@ export function stopHealthWatch(): void {
 export function _resetHealthWatch(): void {
   stopHealthWatch();
   lastAlive.clear();
+}
+
+// ── ⭐ 诊断留痕的老化(配额)──────────────────────────────────────
+//
+// ⚠️ `dropShardsBefore` 写完后**零调用** —— 老化建好了没人跑,磁盘照样无限涨。
+// 这是本会话第七次撞到同一形态(建好了、测过了、没接线),
+// 而我的守卫当时只验了「方法存在」,所以全绿。守卫已改成验**有人调**。
+//
+// ⭐ 放在接线层而非能力层:常驻 timer 会吊住事件循环让进程不肯退
+// (记忆 `project-graceful-shutdown`)。同 `startHealthWatch`:`unref()` + 有停止调用。
+
+/** 各条流的保留期(§3.2:流水短、故障记录长) */
+const RETAIN_DAYS = { lifecycle: 7, network: 3, degradation: 90, recovery: 30 } as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** 一天扫一次就够 —— 分片本来就是按天切的 */
+const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 扫一次。导出供手动排查与测试调用 */
+export function sweepTraceOnce(): number {
+  const now = Date.now();
+  const dropped = traceSink.dropShardsBefore({
+    lifecycle: now - RETAIN_DAYS.lifecycle * DAY_MS,
+    network: now - RETAIN_DAYS.network * DAY_MS,
+    degradation: now - RETAIN_DAYS.degradation * DAY_MS,
+    recovery: now - RETAIN_DAYS.recovery * DAY_MS,
+  });
+  // ⚠️ 只在真删了东西时出声 —— 每天打一行「删了 0 个」是噪音
+  if (dropped > 0) console.log(`[web.trace] 老化:删除 ${dropped} 个过期分片`);
+  return dropped;
+}
+
+/**
+ * 启动老化巡检。
+ * ⚠️ 调用方**必须**在 `before-quit` 调 `stopTraceSweep()`(常驻 timer 铁律)。
+ */
+export function startTraceSweep(intervalMs = SWEEP_INTERVAL_MS): void {
+  if (sweepTimer) return;
+  sweepTraceOnce();   // ⭐ 启动先扫一次:上次退出后攒下的过期分片要立刻清掉
+  sweepTimer = setInterval(() => { sweepTraceOnce(); }, intervalMs);
+  sweepTimer.unref?.();
+}
+
+export function stopTraceSweep(): void {
+  if (sweepTimer) {
+    clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
 }
