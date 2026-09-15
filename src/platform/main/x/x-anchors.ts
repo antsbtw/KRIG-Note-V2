@@ -57,8 +57,28 @@ export const X_ANCHORS: Readonly<Record<string, string>> = {
   'tweet.userName': '[data-testid="User-Name"]',
 
   // ── 左栏导航 ──
-  // ⚠️ 只有这两个有生产代码佐证(`x-self-account.ts`)
+  //
+  // ⭐ 2026-09-15 **真页面读出来的**(控制台 readTabBar,留痕 `x.tabbar-read`):
+  //   11 个节点,8 个带 testid。以下全部有实测依据,不是猜的。
+  'nav.home': '[data-testid="AppTabBar_Home_Link"]',
+  'nav.explore': '[data-testid="AppTabBar_Explore_Link"]',
+  'nav.notifications': '[data-testid="AppTabBar_Notifications_Link"]',
+  'nav.follow': '[data-testid="AppTabBar_Follow_Link"]',
+  'nav.messages': '[data-testid="AppTabBar_DirectMessage_Link"]',
   'nav.profile': '[data-testid="AppTabBar_Profile_Link"]',
+  'nav.more': '[data-testid="AppTabBar_More_Menu"]',
+  // ⚠️ 命名体系与其它不同(不是 AppTabBar_*),照实抄,不强行统一
+  'nav.premium': '[data-testid="premium-signup-tab"]',
+  //
+  // ⚠️⚠️ 下面三个**真页面上就没有 testid**(readTabBar 实测 testid=null),
+  //   只有 href。**不给它们编一个 testid** —— 编出来的 selector 找不到元素时,
+  //   与「这个 tab 不存在」长得一模一样(本文件开头那条教训)。
+  //   href 是 X 自己的路由,比 testid 更稳;`a[href="..."]` 是合法 CSS。
+  'nav.grok': 'a[href="/i/grok"]',
+  'nav.history': 'a[href="/i/history"]',
+  'nav.creatorStudio': 'a[href="/i/jf/creators/studio"]',
+  //
+  // 账号切换器:来自 `x-self-account.ts`,不在 tabbar 里
   'nav.accountSwitcher': '[data-testid="SideNav_AccountSwitcher_Button"]',
 };
 

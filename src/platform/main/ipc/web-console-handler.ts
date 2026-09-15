@@ -208,8 +208,13 @@ export function registerWebConsoleHandlers(): void {
           }
         : undefined,
     });
-    console.log(`[web-console] tap ${String(p.anchor)} → ${result.status}${describeWhy(result)}`);
-    recordRun('tap', { anchor: p.anchor }, result, Date.now() - t0);
+    // ⚠️ 同 type:`settled`/`waited` 在 result.value 里,不带上就答不了「等到了没」
+    const tapReport = result.status === 'ok' || result.status === 'degraded'
+      ? (result.value as { settled: boolean; waited: boolean })
+      : undefined;
+    console.log(`[web-console] tap ${String(p.anchor)} → ${result.status}${describeWhy(result)}`
+      + (tapReport ? ` settled=${tapReport.settled} waited=${tapReport.waited}` : ''));
+    recordRun('tap', { anchor: p.anchor, ...(tapReport ?? {}) }, result, Date.now() - t0);
     return { channelOk: true, pageId: String(page.pageId), result };
   });
 
@@ -267,8 +272,24 @@ export function registerWebConsoleHandlers(): void {
       text: String(p.text ?? ''),
       check,
     });
-    console.log(`[web-console] type → ${result.status}${describeWhy(result)}`);
-    recordRun('type', { anchor: p.anchor }, result, Date.now() - t0);
+    /**
+     * ⚠️⚠️ **`LandingReport` 必须进留痕**(2026-09-15,同一通道第三次丢事实)。
+     *
+     * `recordRun` 只收 `{status, reason, missing}` —— 而 `landed` / `via` / `attempts`
+     * 在 `result.value` 里。于是留痕只写得出 `recovered`,
+     * **答不了「文字到底进框了没有」** —— 而那正是本通道存在的唯一理由
+     * (历史 bug:日志说注入成功、右栏框是空的)。
+     *
+     * ⭐ `attempts > 1` 更是契约里写明的「站点改版早期信号」:
+     * 主路径(合成 paste)失效、靠 OS 粘贴兜底成功 —— 结果仍是 ok,
+     * 不记下来就**看不见劣化**,直到某天两条路一起失效才发现。
+     */
+    const landing = result.status === 'ok' || result.status === 'degraded'
+      ? (result.value as { checked: boolean; landed: boolean; via: string; attempts: number })
+      : undefined;
+    console.log(`[web-console] type → ${result.status}${describeWhy(result)}`
+      + (landing ? ` landed=${landing.landed} via=${landing.via} attempts=${landing.attempts}` : ''));
+    recordRun('type', { anchor: p.anchor, ...(landing ?? {}) }, result, Date.now() - t0);
     return { channelOk: true, pageId: String(page.pageId), result };
   });
 

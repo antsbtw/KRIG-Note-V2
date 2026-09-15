@@ -502,6 +502,57 @@ describe('⭐⭐ 默认值要是「最常见的正确用法」', () => {
   });
 });
 
+describe('⭐⭐ 成功也要答得出「到底成到什么程度」', () => {
+  /**
+   * ⚠️ 2026-09-15 实测:`type` 第一次 `recovered`,而留痕只写得出 `recovered` ——
+   * **答不了「文字进框了没有」**,而那正是本通道存在的唯一理由
+   * (历史 bug:日志说注入成功、右栏框是空的)。
+   * 同一通道第三次丢事实(前两次:readTabBar 的 testid、耗时写死 0)。
+   */
+  it('⭐⭐ type 的 landed / via / attempts 进留痕', () => {
+    const body = HANDLER_CODE.slice(
+      HANDLER_CODE.indexOf('IPC_CHANNELS.WEBC_TYPE'),
+      HANDLER_CODE.indexOf('IPC_CHANNELS.WEBC_PAGES'),
+    );
+    expect(body.length, '锚点过时:找不到 type 通道').toBeGreaterThan(200);
+    expect(body, 'LandingReport 被丢了 —— 只剩 recovered,答不出进没进框')
+      .toMatch(/result\.value as \{[^}]*landed/);
+    expect(body, 'recordRun 没带上 landing').toMatch(/recordRun\('type',[^)]*landing/);
+  });
+
+  it('⭐⭐ attempts 是站点改版的早期信号,不许丢', () => {
+    // 主路径失效、靠 OS 粘贴兜底成功 —— 结果仍是 ok,不记就看不见劣化
+    expect(HANDLER_CODE).toMatch(/attempts/);
+  });
+
+  it('⭐ tap 的 settled / waited 同理', () => {
+    const body = HANDLER_CODE.slice(
+      HANDLER_CODE.indexOf('IPC_CHANNELS.WEBC_TAP'),
+      HANDLER_CODE.indexOf('IPC_CHANNELS.WEBC_PRESS'),
+    );
+    expect(body.length).toBeGreaterThan(200);
+    expect(body, '「没等」与「等到了」分不开').toMatch(/settled/);
+  });
+});
+
+describe('⭐⭐ 锚点只写实测到的,不编 testid', () => {
+  const ANCHORS2 = strip(read('src/platform/main/x/x-anchors.ts'));
+
+  it('⭐⭐ 左栏 tab 用真页面读到的 testid(readTabBar 实测)', () => {
+    for (const t of ['AppTabBar_Home_Link', 'AppTabBar_Explore_Link',
+      'AppTabBar_Notifications_Link', 'AppTabBar_DirectMessage_Link']) {
+      expect(ANCHORS2, `缺实测锚点 ${t}`).toContain(t);
+    }
+  });
+
+  it('⭐⭐ 页面上没有 testid 的,用 href,**不编一个 testid**', () => {
+    // /i/grok、/i/history、/i/jf/creators/studio 实测 testid=null
+    expect(ANCHORS2).toMatch(/a\[href="\/i\/grok"\]/);
+    expect(ANCHORS2, '给无 testid 的 tab 编了 AppTabBar_Grok 之类')
+      .not.toMatch(/AppTabBar_Grok|AppTabBar_History|AppTabBar_Creator/);
+  });
+});
+
 describe('⭐ pageId 不透明 —— 面板只传 wcId', () => {
   it('⭐⭐ 面板不构造、不解析 pageId', () => {
     expect(
