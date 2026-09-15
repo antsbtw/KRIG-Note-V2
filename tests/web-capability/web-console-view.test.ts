@@ -39,6 +39,15 @@ const RENDERER = read('src/platform/renderer/index.tsx');
 const SOCIAL = strip(read('src/views/social/SocialView.tsx'));
 const HANDLER = read('src/platform/main/ipc/web-console-handler.ts');
 const HANDLER_CODE = strip(HANDLER);
+/**
+ * ⭐ 归类逻辑已抽成**纯模块**(`web-console-classify.ts`)。
+ *
+ * 抽出去的理由:这段逻辑本会话出过三次 bug(耗时写死 0 / 层归错 / 「等不到」
+ * 被当成站点改版),而它当时埋在 handler 里且没导出 —— 守卫只能 grep 源码文本,
+ * **两次假绿**。现在**行为断言在 `web-console-classify.test.ts` 里真调函数**,
+ * 本文件只留「结构还在不在」这类源码级检查。
+ */
+const CLASSIFY = strip(read('src/platform/main/ipc/web-console-classify.ts'));
 const BUS = strip(read('src/platform/main/ipc/ipc-bus.ts'));
 const PRELOAD = read('src/platform/main/preload/main-window-preload.ts');
 const DTS = read('src/shared/ipc/electron-api.d.ts');
@@ -231,13 +240,13 @@ describe('⭐⭐ 日志要能替代口头描述', () => {
   it('⭐⭐ 失败要打**原因**,不只打 status', () => {
     // failed 有两种成因,现象一样但排查方向相反:
     //   锚点没登记(改锚点表) vs 等不到(改等待时机)
-    expect(HANDLER_CODE).toMatch(/function describeWhy/);
-    expect(HANDLER_CODE, 'failed 不带 reason,日志里两种成因分不开')
+    expect(CLASSIFY).toMatch(/function describeWhy/);
+    expect(CLASSIFY, 'failed 不带 reason,日志里两种成因分不开')
       .toMatch(/r\.status === 'failed'[\s\S]{0,80}r\.reason/);
   });
 
   it('⭐⭐ degraded 的 missing 也要打 —— 不打等于没报', () => {
-    expect(HANDLER_CODE).toMatch(/r\.status === 'degraded'[\s\S]{0,80}missing/);
+    expect(CLASSIFY).toMatch(/r\.status === 'degraded'[\s\S]{0,80}missing/);
   });
 });
 
@@ -260,8 +269,11 @@ describe('⭐⭐ 留痕要活过重启(遥测的前提)', () => {
 
   it('⭐⭐ 每次调用都落痕 —— 成功也记(否则算不出成功率)', () => {
     expect(HANDLER_CODE).toMatch(/function recordRun/);
-    expect(HANDLER_CODE, 'ok 不记 recovery —— 只有失败记录就算不出成功率')
-      .toMatch(/status === 'ok'[\s\S]{0,200}traceRecorder\.recovery/);
+    // ⭐ 行为断言在 web-console-classify.test.ts(真调 planTrace);这里只钉结构还在
+    expect(CLASSIFY, 'ok 不记 recovery —— 只有失败记录就算不出成功率')
+      .toMatch(/status === 'ok'[\s\S]{0,200}outcome: 'recovered'/);
+    expect(HANDLER_CODE, 'handler 没把判断派发给 planTrace —— 又埋回去了')
+      .toMatch(/planTrace\(/);
     // 五个能力都要落
     for (const fn of ['ready', 'scrollUntil', 'tap', 'press', 'type']) {
       expect(HANDLER_CODE, `${fn} 没落痕`).toMatch(new RegExp(`recordRun\\('${fn}'`));
@@ -276,9 +288,9 @@ describe('⭐⭐ 留痕要活过重启(遥测的前提)', () => {
 
   it('⭐⭐ 按能力真正所属的层归类,不是一律 web.page', () => {
     // 归错层会让按层的查询直接说谎
-    expect(HANDLER_CODE).toMatch(/LAYER_OF/);
-    expect(HANDLER_CODE).toMatch(/tap:\s*'web\.input'/);
-    expect(HANDLER_CODE).toMatch(/ready:\s*'web\.page'/);
+    expect(CLASSIFY).toMatch(/LAYER_OF/);
+    expect(CLASSIFY).toMatch(/tap:\s*'web\.input'/);
+    expect(CLASSIFY).toMatch(/ready:\s*'web\.page'/);
   });
 
   it('⭐ 落盘按天分片 + 坏行跳过计数(照 FsRawSink 已验证的做法)', () => {
@@ -350,9 +362,9 @@ describe('⭐⭐ 归类要能支撑遥测,不能自我污染', () => {
      * **整文件 `toMatch` 在 token 出现多次时永远不够** ——
      * 必须缩到被守的那一段,并钉住**分支**而不是**字面量**。
      */
-    const body = HANDLER_CODE.slice(
-      HANDLER_CODE.indexOf('function recordRun('),
-      HANDLER_CODE.indexOf('export function registerWebConsoleHandlers'),
+    const body = CLASSIFY.slice(
+      CLASSIFY.indexOf('export function planTrace('),
+      CLASSIFY.indexOf('export function describeWhy('),
     );
     expect(body.length, '锚点过时:找不到 recordRun 函数体').toBeGreaterThan(200);
 
@@ -363,15 +375,21 @@ describe('⭐⭐ 归类要能支撑遥测,不能自我污染', () => {
     );
     expect(branch.length, '「等不到」那条分支不见了 —— 它又掉回 degradation 了')
       .toBeGreaterThan(50);
-    expect(branch, '等不到没走 recovery —— 会污染改版探测器')
-      .toMatch(/traceRecorder\.recovery\(/);
+    /**
+     * ⚠️ 抽成纯函数后契约变了:`planTrace` **返回** `{kind:'recovery'}`,
+     * 它自己**绝不调** `traceRecorder` —— 判断与副作用分开正是抽取的目的。
+     * 初版这条仍断言 `traceRecorder.recovery(`,于是**为了过时的理由恒红** ——
+     * 而恒红的守卫和假绿一样瞎:注入验证(删掉整条分支)它一样不会变化。
+     */
+    expect(branch, '等不到没归成 recovery —— 会污染改版探测器')
+      .toMatch(/kind: 'recovery'/);
     expect(branch, "等不到被记成 recovered —— 那是把否定结果说成成功")
       .toMatch(/outcome: 'failed'/);
   });
 
   it('⭐⭐ 三种失败分三类,不一律 unexpected-format', () => {
-    expect(HANDLER_CODE).toMatch(/isAnchorMiss[\s\S]{0,120}'contract-violation'/);
-    expect(HANDLER_CODE).toMatch(/hadInjectionError[\s\S]{0,120}'resource-failure'/);
+    expect(CLASSIFY).toMatch(/isAnchorMiss[\s\S]{0,120}'contract-violation'/);
+    expect(CLASSIFY).toMatch(/hadInjectionError[\s\S]{0,120}'resource-failure'/);
   });
 });
 

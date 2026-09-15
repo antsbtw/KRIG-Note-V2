@@ -48,6 +48,7 @@ import {
   controlEngine, inputEngine, listAnchorOwners, listAnchorNames, traceRecorder, traceSink,
 } from '../web-capability/wiring/runtime';
 import { listBoundPages } from '../web-capability/wiring/page-hosts';
+import { planTrace, describeWhy, type CapabilityOutcome } from './web-console-classify';
 import { xPageId } from '../x/x-net-capture';
 import { resolveXWebContents } from '../x/x-webcontents';
 import { READ_APP_TAB_BAR } from '../x/x-anchors';
@@ -82,103 +83,36 @@ const asAnchor = (v: unknown): AnchorName => String(v ?? '') as AnchorName;
  * 只打 `status` 的话这两种在日志里无法区分。
  * `degraded` 的 `missing` 同理 —— 不打出来就等于没报。
  */
-function describeWhy(r: { status: string; reason?: string; missing?: readonly string[] }): string {
-  if (r.status === 'failed') return ` —— ${r.reason ?? '(无原因,这本身是 bug)'}`;
-  if (r.status === 'degraded') return ` —— 缺: ${(r.missing ?? []).join(', ')}`;
-  return '';
-}
-
 /**
- * ⭐⭐ 每次调用都**落一条可读回的痕**。
+ * ⭐ 判断与副作用分开:**判断**在 `web-console-classify.ts`(纯函数、可单独测),
+ * 这里只负责把判断结果**写进** `web.trace`。
  *
- * 用户 2026-09-15:「这些数据应该记录到 log,这样你直接读取,
- * 未来可能需要遥测的这些能力来发现并迭代 app。」
- *
- * ⚠️ console.log 进程一关就没了,替代不了「我直接读取」——
- * 所以走 `web.trace`(已落盘,见 `fs-trace-sink.ts`),而不是另造一套日志。
- *
- * 映射:
- *  · `ok`       → recovery(outcome: 'recovered')  —— 成功也要记,否则算不出成功率
- *  · `degraded` → degradation(category: 'unexpected-format')
- *  · `failed`   → degradation,按原因分类:
- *      锚点解释不出来 = **契约违反**(改锚点表)
- *      其余           = **格式外**(站点改版的主要形态,可统计)
- *
- * ⚠️ 只记**能力名 / 参数摘要 / 原因 / 耗时**,不记页面正文 ——
- * 底座不内置过滤规则(§4.4),所以「记多少」是这里(调用方)的选择。
+ * ⚠️ 抽出去的理由不是好看 —— 是这段逻辑本会话出过三次 bug
+ * (耗时写死 0 / 层归错 / 「等不到」被当成站点改版),
+ * 而它当时埋在本文件里且没导出,守卫只能 grep 源码文本,**两次假绿**。
+ * 现在测试直接调 `planTrace` 断言返回值。
  */
-/**
- * ⚠️ 按**能力真正所属的层**归类,不是「都算 web.page」。
- * 归错层会让 `countByCapability` 与将来任何按层的查询直接说谎 ——
- * 遥测里一条归错的记录比没有更坏。
- */
-const LAYER_OF: Record<string, 'web.page' | 'web.input'> = {
-  ready: 'web.page',
-  scrollUntil: 'web.page',
-  tap: 'web.input',
-  press: 'web.input',
-  hover: 'web.input',
-  type: 'web.input',
-};
-
 function recordRun(
   fn: string,
   params: unknown,
-  result: { status: string; reason?: string; missing?: readonly string[] },
+  result: CapabilityOutcome,
   elapsedMs: number,
 ): void {
-  const layer = LAYER_OF[fn] ?? 'web.page';
-  const inputRef = `${fn}:${JSON.stringify(params).slice(0, 200)}`;
-  const reason = result.reason ?? '';
-
-  if (result.status === 'ok') {
+  const plan = planTrace(fn, params, result, elapsedMs);
+  if (plan.kind === 'recovery') {
     traceRecorder.recovery({
-      layer, what: `console:${fn}`, outcome: 'recovered',
-      detail: `${elapsedMs}ms ${inputRef}`,
+      layer: plan.layer, what: plan.what, outcome: plan.outcome, detail: plan.detail,
     });
     return;
   }
-
-  /**
-   * ⚠️⚠️ **「等不到」不是降级** —— 2026-09-15 读真实留痕时发现的归类错误。
-   *
-   * 初版把所有 failed 都记成 degradation,且非锚点错一律 `unexpected-format`。
-   * 于是「anchorGone 等推文消失、推文一直在」这种**完全正常的否定结果**
-   * 被记成了「格式外」。而 `countByCapability('unexpected-format')` 正是
-   * **站点改版探测器**(§3.3:某 adapter 格式外计数突然上升 = 那个站改版了)——
-   * 拿正常超时去喂它,等 X 真改版时指标早被顶高,涨上去也看不出来。
-   *
-   * ⭐ 判据不是「失败了吗」,而是「**这次失败说明系统坏了吗**」:
-   *  · 锚点解释不出来 → 契约违反(锚点表该改)      → degradation
-   *  · 注入一直抛到超时 → 资源失败(页面/通道有问题)  → degradation
-   *  · 纯粹没等到      → **正常的否定结果**          → recovery(failed),不污染指标
-   */
-  const isAnchorMiss = reason.includes('无法解释成 selector');
-  const hadInjectionError = reason.includes('最后一次注入异常');
-
-  if (!isAnchorMiss && !hadInjectionError && result.status === 'failed') {
-    // 「问了,答案是否定的」—— 记事实,但不记成降级
-    traceRecorder.recovery({
-      layer, what: `console:${fn}`, outcome: 'failed',
-      detail: `${elapsedMs}ms ${inputRef} —— ${reason}`,
-    });
-    return;
-  }
-
   traceRecorder.degradation({
-    layer,
-    capability: 'x',
-    operation: `console:${fn}`,
-    category: isAnchorMiss
-      ? 'contract-violation'
-      : hadInjectionError
-        ? 'resource-failure'
-        : 'unexpected-format',
-    reason: result.status === 'degraded'
-      ? `缺: ${(result.missing ?? []).join(', ')}`
-      : (reason || '(无原因)'),
-    inputRef,
-    rawSnippet: `${elapsedMs}ms`,
+    layer: plan.layer,
+    capability: plan.capability,
+    operation: plan.operation,
+    category: plan.category,
+    reason: plan.reason,
+    inputRef: plan.inputRef,
+    rawSnippet: plan.rawSnippet,
   });
 }
 
