@@ -91,6 +91,7 @@ import '@views/x';      // X 集成:注册 X 提取命令
 import '@views/social'; // Social View self-register(NavSide tab 💬 order=6;含 X 平台)
 import '@views/mail';   // Mail View self-register(NavSide tab 📧 order=7;网页版邮箱)
 import '@views/x-inbox'; // X Inbox View self-register(right slot，从 SocialView tabbar 触发)
+import '@views/x-workbench'; // X 工作台 self-register(重构中的新面板;旧面板并存直到迁移完毕)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
 import './app.css';

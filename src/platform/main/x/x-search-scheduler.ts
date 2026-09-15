@@ -1,11 +1,33 @@
 /**
- * X 搜索配方调度器（Phase 1）
+ * X 任务调度器
  *
  * 职责：
- * 1. 按配方 intervalMinutes 轮询 enabled 配方，触发 scanRecipe
+ * 1. 按任务 intervalMinutes 轮询 enabled 任务，取 webview 租约后执行采集
  * 2. 积累 pending >= batchSize 时触发 AI 判断
  * 3. 每 24h 执行一次 TTL 清理
+ *
+ * ⚠️⚠️ **重构期间自动采集一律关闭** —— 见下方 `AUTO_COLLECT_ENABLED`。
  */
+
+/**
+ * ⭐⭐ 自动采集总开关(2026-09-15,用户拍板「甲+丙一起做」)。
+ *
+ * ── 为什么要这道代码层的保险 ──
+ *
+ * 光把库里的 `x_task.enabled` 置 false 不够(那是甲):它是**运行期状态**,
+ * 谁在界面上一改配置、或哪次 migration 顺手改回来,采集就又跑起来了。
+ * 用户 2026-09-15 撞到过一次:四条任务在重构期间一直 30 分钟一轮地跑,
+ * 一晚自动采了 204 条 —— 而那时我们正在换任务模型、换面板。
+ *
+ * ⚠️ **恢复条件**(三条都满足才改回 true):
+ *  1. 任务面板接上 `X_LIST_TASKS` / `X_UPSERT_TASK`,能在界面上开关任务
+ *  2. 盯人采集真机验过一轮(至今**一次都没跑过**)
+ *  3. 用户明确说「可以自动跑了」
+ *
+ * ⚠️ 关掉的只是**定时轮询**。手动触发(界面点执行)不受影响 ——
+ * 重构期间正需要「想跑就跑一次」来验证。
+ */
+const AUTO_COLLECT_ENABLED = false;
 
 import {
   listEnabledTasks, updateTaskLastRunAt, setTaskRunState, recoverStuckTasks,
@@ -444,11 +466,20 @@ export function startScheduler(): void {
    * 每 60s 检查一次;各任务按自己的 `intervalMinutes` 决定是否真正执行。
    * ⚠️ 执行前取 webview 租约 —— 撞车时跳过本轮而不是硬上(见 runEnabledTasks)。
    */
-  schedulerTimer = setInterval(() => {
-    runEnabledTasks().catch((err) => {
-      console.error('[x-search-scheduler] runEnabledTasks error:', err);
-    });
-  }, 60_000);
+  if (AUTO_COLLECT_ENABLED) {
+    schedulerTimer = setInterval(() => {
+      runEnabledTasks().catch((err) => {
+        console.error('[x-search-scheduler] runEnabledTasks error:', err);
+      });
+    }, 60_000);
+  } else {
+    // ⚠️ **必须说出来** —— 静默不启动会变成「以为在采、其实没采」,
+    //    那和当初「以为没采、其实在采」是同一种病的两面。
+    console.warn(
+      '[x-search-scheduler] ⏸ 自动采集已关闭(重构期间)—— 定时轮询不启动。'
+      + ' 手动执行不受影响;恢复条件见 AUTO_COLLECT_ENABLED 注释。',
+    );
+  }
 
   /**
    * ⚠️ 启动时复位卡住的任务:执行**不跨进程存活**,上次退出时正在跑的
@@ -501,11 +532,14 @@ export function startScheduler(): void {
    *
    * ⚠️ 停止调用在 `stopScheduler`(常驻 timer 铁律)。
    */
-  watchlistTimer = setInterval(() => {
-    runWatchlist().catch((err) => {
-      console.error('[x-search-scheduler] runWatchlist error:', err);
-    });
-  }, 30 * 60_000);
+  // ⚠️ 盯人轮询受同一个开关控制 —— 只关一个等于没关(它照样占 webview、照样采)
+  if (AUTO_COLLECT_ENABLED) {
+    watchlistTimer = setInterval(() => {
+      runWatchlist().catch((err) => {
+        console.error('[x-search-scheduler] runWatchlist error:', err);
+      });
+    }, 30 * 60_000);
+  }
 
   // TTL 清理：每 24h 一次
   ttlTimer = setInterval(() => {

@@ -1211,6 +1211,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     /** 被动采集监视:开始/停止 + 实时快照订阅 */
     captureStart: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_START, { wcId }),
     captureStop: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_STOP),
+    /** 抓单个账号画像(盯人面板的 bio 卡片)。⚠️ 会导航,故由人手动触发 */
+    fetchAuthorProfile(handle: string, wcId?: number) {
+      return ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_PROFILE, { handle, wcId });
+    },
     onCaptureUpdate: (cb: (snap: unknown) => void) => {
       const h = (_e: unknown, snap: unknown): void => cb(snap);
       ipcRenderer.on(IPC_CHANNELS.X_CAPTURE_UPDATE, h);

@@ -368,6 +368,7 @@ export const IPC_CHANNELS = {
   X_CAPTURE_START:   'x:capture-start',  // renderer → main invoke：开始被动监视采集
   X_CAPTURE_STOP:    'x:capture-stop',   // renderer → main invoke：停止监视并取最终统计
   X_CAPTURE_UPDATE:  'x:capture-update', // main → renderer 广播：实时采集快照
+  X_FETCH_PROFILE:   'x:fetch-profile',  // renderer → main invoke：抓单个账号画像（盯人面板的 bio 卡片）
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
   X_NOTIF_WATCH_START:  'x:notif-watch-start',
   X_NOTIF_WATCH_STOP:   'x:notif-watch-stop',

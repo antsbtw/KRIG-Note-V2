@@ -130,10 +130,43 @@ export interface MonitorSnapshot {
   elapsedSec: number;
   currentUrl?: string;
   scrollY?: number;
-  /** 最近采到的几条,供人眼与左边页面对照 */
+  /**
+   * 最近采到的几条,供人眼与左边页面对照。
+   *
+   * ⚠️⚠️ **2026-09-15 补全字段**(用户:「建议补全,进一步做画像会需要的」)。
+   * 此前只传 7 个字段,而载荷层 `HarvestedTweet` 有 20 多个 ——
+   * `inReplyToStatusId`(回复了**哪一条**)、完整 metrics、`self`(我赞过没)
+   * 全被裁掉了。**采到了但传不出来**,是「静默丢信息」的一种:
+   * main 侧日志看着正常,右边面板永远显示不了这些。
+   */
   recent: Array<{
-    tweetId: string; authorHandle?: string; text: string;
-    createdAt?: string; isReply: boolean; likes?: number;
+    tweetId: string;
+    authorHandle?: string;
+    /** 作者数字 id —— username 会改名,rest_id 不会,做画像时按它匹配最稳 */
+    authorRestId?: string;
+    text: string;
+    createdAt?: string;
+    lang?: string;
+    isReply: boolean;
+    /** ⭐ 回复的是**哪一条**(权威字段,来自载荷 in_reply_to_status_id_str) */
+    inReplyToStatusId?: string;
+    /** 回复给谁 */
+    inReplyToScreenName?: string;
+    /** 会话根 —— 判「这条属于哪个楼」 */
+    conversationId?: string;
+    /** 引用了哪条 */
+    quotedStatusId?: string;
+    /** 这条推**自己**带图/视频(不含链接预览卡、不含引用原文里的图) */
+    hasMedia: boolean;
+    mediaTypes?: string[];
+    isLongText: boolean;
+    /** ⭐ 完整互动数 —— 此前只传了 likes */
+    metrics: {
+      likes?: number; retweets?: number; replies?: number;
+      quotes?: number; bookmarks?: number; views?: number;
+    };
+    /** ⭐ 我自己对这条的状态(登录态 webview 独有,零额外请求) */
+    self: { favorited?: boolean; retweeted?: boolean; bookmarked?: boolean };
     /** true = 从 DOM 兜底抓的(字段较少);false = 从 GraphQL 载荷抓的(字段全) */
     fromDom: boolean;
   }>;
@@ -155,13 +188,27 @@ function snapshot(extra?: { url?: string; scrollY?: number }): MonitorSnapshot {
   const onScreenTweets = monitor.onScreen
     .map((id) => monitor!.captured.get(id))
     .filter((t): t is HarvestedTweet => !!t);
+  /**
+   * ⚠️ 正文放宽到 280 字:140 是推文的旧上限,长推(isLongText)会被腰斩,
+   * 而「重点内容」正需要看全。再长的由 UI 决定折不折叠,不在这里截。
+   */
   const recent = onScreenTweets.map((t) => ({
     tweetId: t.tweetId,
     authorHandle: t.authorHandle,
-    text: t.text.slice(0, 140),
+    authorRestId: t.authorRestId,
+    text: t.text.slice(0, 280),
     createdAt: t.createdAt,
+    lang: t.lang,
     isReply: !!t.inReplyToStatusId,
-    likes: t.metrics.likes,
+    inReplyToStatusId: t.inReplyToStatusId,
+    inReplyToScreenName: t.inReplyToScreenName,
+    conversationId: t.conversationId,
+    quotedStatusId: t.quotedStatusId,
+    hasMedia: t.hasMedia,
+    mediaTypes: t.mediaTypes,
+    isLongText: t.isLongText,
+    metrics: t.metrics,
+    self: t.self,
     fromDom: (t as HarvestedTweet & { fromDom?: boolean }).fromDom === true,
   }));
   return {

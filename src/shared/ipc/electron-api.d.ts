@@ -71,7 +71,34 @@ interface XCaptureSnapshot {
   elapsedSec: number;
   currentUrl?: string;
   scrollY?: number;
-  recent: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string; isReply: boolean; likes?: number; fromDom: boolean }>;
+  /**
+   * ⚠️ 2026-09-15 补全:此前只有 7 个字段,载荷里的
+   * `inReplyToStatusId` / 完整 metrics / `self` 全被裁掉 —— 采到了却传不出来。
+   * 契约两端必须同步改(main 的 MonitorSnapshot ↔ 这里 ↔ view 的 CaptureSnap)。
+   */
+  recent: Array<{
+    tweetId: string;
+    authorHandle?: string;
+    authorRestId?: string;
+    text: string;
+    createdAt?: string;
+    lang?: string;
+    isReply: boolean;
+    /** 回复的是哪一条(权威字段) */
+    inReplyToStatusId?: string;
+    inReplyToScreenName?: string;
+    conversationId?: string;
+    quotedStatusId?: string;
+    hasMedia: boolean;
+    mediaTypes?: string[];
+    isLongText: boolean;
+    metrics: {
+      likes?: number; retweets?: number; replies?: number;
+      quotes?: number; bookmarks?: number; views?: number;
+    };
+    self: { favorited?: boolean; retweeted?: boolean; bookmarked?: boolean };
+    fromDom: boolean;
+  }>;
 }
 
 interface NotifEvent {
@@ -922,6 +949,20 @@ declare global {
         captureStart(wcId?: number): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
         captureStop(): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
         onCaptureUpdate(cb: (snap: XCaptureSnapshot) => void): () => void;
+        /**
+         * 抓单个账号的画像（盯人面板顶部的 bio 卡片）。
+         * ⚠️ 会导航到 /{handle}，打断左侧当前浏览 —— 故由人手动触发，不自动跑。
+         */
+        fetchAuthorProfile(handle: string, wcId?: number): Promise<{
+          success: boolean;
+          error?: string;
+          profile?: {
+            handle: string; displayName?: string; bio?: string;
+            location?: string; website?: string; isBlueVerified?: boolean;
+            followersCount?: number; followingCount?: number; tweetCount?: number;
+            iFollow?: boolean; followsMe?: boolean; blocking?: boolean;
+          };
+        }>;
         onHarvestProgress(cb: (p: { url: string; round: number; maxRounds: number; captured: number; payloads: number; scrollY: number; stuck: number; oldest?: string }) => void): () => void;
         harvest(url: string, wcId?: number): Promise<{
           success: boolean; error?: string;

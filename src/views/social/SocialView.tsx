@@ -202,6 +202,20 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
               <span>{item.name}</span>
             </button>
           ))}
+          {/* ⭐ X 工作台(2026-09-15 重构中):采集/分析/回复的新面板。
+              ⚠️ 与 Inbox 并存 —— 收件箱/拟回复/标注还在旧面板,迁完才撤。 */}
+          <button
+            type="button"
+            className="krig-social-view__tab krig-social-view__tab--inbox"
+            onClick={() => {
+              const bus = workspaceManager.getBus(workspaceId);
+              bus?.slot.openRight('x-workbench-view');
+            }}
+            title="X 工作台 — 采集 / 分析 / 回复"
+          >
+            <span>🛠</span>
+            <span>工作台</span>
+          </button>
           <button
             type="button"
             className="krig-social-view__tab krig-social-view__tab--inbox"

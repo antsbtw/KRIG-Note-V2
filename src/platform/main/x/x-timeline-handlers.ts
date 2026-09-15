@@ -539,6 +539,30 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
+  /**
+   * X_FETCH_PROFILE — 抓单个账号画像(盯人面板顶部的 bio 卡片)。
+   *
+   * ⚠️ 它会**导航到 /{handle}**,打断左侧当前浏览 —— 所以由人手动点,
+   * 绝不在监视过程中自动触发(那会把用户正在看的页面顶掉)。
+   */
+  ipcMain.handle(IPC_CHANNELS.X_FETCH_PROFILE, async (_e, payload: unknown) => {
+    const p = payload as { handle?: unknown; wcId?: unknown } | null;
+    const handle = typeof p?.handle === 'string' ? normalizeHandle(p.handle) : '';
+    if (!handle) {
+      // fail loud:空 handle 会导航到 https://x.com/ 首页,然后把首页当成他的主页解析
+      return { success: false, error: 'handle 必填' };
+    }
+    const wcId = typeof p?.wcId === 'number' ? p.wcId : undefined;
+    try {
+      const got = await harvestAuthorProfile(handle, wcId, 12_000);
+      if ('error' in got) return { success: false, error: got.error };
+      return { success: true, profile: got };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_FETCH_PROFILE failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.X_CAPTURE_STOP, async () => {
     try {
       return { success: true, snapshot: stopCaptureMonitor() };
