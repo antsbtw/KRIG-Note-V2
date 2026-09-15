@@ -850,3 +850,168 @@ export async function x_migration_1_1_7(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.7'), now: Date.now() },
   );
 }
+
+/**
+ * 1.1.8 —— ⭐⭐ 任务表(2026-09-14,用户拍板「甲」)
+ *
+ * > 「我们先做一个 task 的配置面板,未来所有的执行从先在面板配置任务,然后才执行,
+ * >   对于两个任务撞车的,不能同时执行。」
+ * > 「甲 —— 我喜欢干净,对现有的代码已经难以忍受,搞不清楚哪个是哪个了。」
+ *
+ * ── 它替代 `search_recipes` ──
+ *
+ * ⚠️ 关键差别:配方表把 `keywords`/`min_likes`/`lang` **平铺成字段**,
+ * 于是加一种新采集方式就得改表结构。任务表把它们收进 `params`(FLEXIBLE),
+ * 由 `CollectStrategy.paramsSchema` 定义与校验 ——
+ * **加一种策略 = 注册一个,本表一个字段都不用动。**
+ *
+ * ⚠️⚠️ `params` 必须是 `TYPE object FLEXIBLE`:
+ *  · 少了 FLEXIBLE → SCHEMAFULL 下子字段**静默丢弃**(本库踩过,x-schema.ts:101)
+ *  · 语序不可颠倒(`FLEXIBLE object` 是 parse error,而**单条 DDL parse error
+ *    会让整段被服务端拒收**,现场表现是「表建了一半」)
+ *
+ * ── 迁移:4 条配方 → 4 个任务 ──
+ *
+ * ⭐ `task_id` **沿用原 `recipe_id`** —— `x_tweet.search_recipe` 那 11850 行
+ * 历史外键才对得上。改 id 就要重写 11850 行,收益只是好看。
+ *
+ * ⚠️ 老表**不删**(本步只加不改,删在 1c 步):
+ * 迁移失败时还能回去看原数据,而且 1b 之前调度器仍可能读它。
+ */
+const X_SCHEMA_1_1_8 = `
+DEFINE TABLE IF NOT EXISTS x_task SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS task_id      ON x_task TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS name         ON x_task TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS description  ON x_task TYPE option<string>;
+-- ⭐ 注册表里的策略 id。故意是 string 不是枚举 —— 写死联合类型 = 注册制退回枚举
+DEFINE FIELD IF NOT EXISTS strategy_id  ON x_task TYPE string ASSERT $value != '';
+-- ⭐⭐ 策略参数。形状由 paramsSchema 声明,本表不认识内容(加策略零改表的兑现点)
+DEFINE FIELD IF NOT EXISTS params       ON x_task TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS enabled      ON x_task TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS interval_minutes ON x_task TYPE int DEFAULT 30;
+DEFINE FIELD IF NOT EXISTS last_run_at  ON x_task TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS ws_id        ON x_task TYPE option<string>;
+-- 运行期状态:「跑了没成功」与「没跑」在界面上长得一样,必须分开记
+DEFINE FIELD IF NOT EXISTS run_state    ON x_task TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_error   ON x_task TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS last_result  ON x_task TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS created_at   ON x_task TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_task_id      ON x_task FIELDS task_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_task_enabled ON x_task FIELDS enabled;
+`;
+
+export async function x_migration_1_1_8(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_8);
+
+  /**
+   * ⭐ 把现有配方搬成任务。
+   *
+   * ⚠️ **幂等**:已存在同 task_id 的跳过 —— migration 可能因上一条失败而重跑,
+   * 重复 CREATE 会撞 UNIQUE 索引让整段 DDL 白跑。
+   *
+   * ⚠️ 参数装配要与 `keywordStrategy.paramsSchema` 的 key **逐字对应**:
+   * 拼错一个 key 不会报错,只会让那个参数**静默失效**(如 keywords 丢了就搜空串)。
+   * 守卫 `tests/x/task-migration.test.ts` 钉住这组对应关系。
+   */
+  const existing = await db.query<[Array<{ task_id: string }>]>(
+    `SELECT task_id FROM x_task`,
+  );
+  const have = new Set((existing[0] ?? []).map((r) => r.task_id));
+
+  const recipes = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT * FROM search_recipes`,
+  );
+  let migrated = 0;
+  for (const r of recipes[0] ?? []) {
+    const id = String(r.recipe_id ?? '');
+    if (!id || have.has(id)) continue;
+
+    // ⚠️ 只装非空值:传 undefined → NONE(option 语义),绝不传 null
+    const params: Record<string, unknown> = {};
+    if (Array.isArray(r.keywords) && r.keywords.length) params.keywords = r.keywords;
+    if (Array.isArray(r.from_accounts) && r.from_accounts.length) params.fromAccounts = r.from_accounts;
+    // help_signals 只对 help-wanted 模板有意义(与 keywordStrategy.target 同口径)
+    if (r.template === 'help-wanted' && Array.isArray(r.help_signals) && r.help_signals.length) {
+      params.helpSignals = r.help_signals;
+    }
+    if (r.lang) params.lang = String(r.lang);
+    if (typeof r.min_likes === 'number' && r.min_likes > 0) params.minLikes = r.min_likes;
+    if (typeof r.min_retweets === 'number' && r.min_retweets > 0) params.minRetweets = r.min_retweets;
+    if (typeof r.since_hours === 'number') params.sinceHours = r.since_hours;
+    if (r.result_type) params.resultType = String(r.result_type);
+    if (r.last_run_at) params.lastRunAt = new Date(String(r.last_run_at)).toISOString();
+
+    await db.query(
+      `CREATE x_task SET
+         task_id = $id, name = $name, description = $desc,
+         strategy_id = 'keyword', params = $params,
+         enabled = $enabled, interval_minutes = $interval,
+         last_run_at = $lastRun, ws_id = $wsId,
+         run_state = 'idle', created_at = time::now()`,
+      {
+        id,
+        name: String(r.name ?? id),
+        desc: `由配方迁移(template=${String(r.template ?? '?')})`,
+        params,
+        enabled: r.enabled === true,
+        interval: typeof r.interval_minutes === 'number' ? r.interval_minutes : 30,
+        lastRun: r.last_run_at ? new Date(String(r.last_run_at)) : undefined,
+        wsId: r.ws_id ? String(r.ws_id) : undefined,
+      },
+    );
+    migrated += 1;
+  }
+  console.log(`[x-schema 1.1.8] 配方 → 任务:迁入 ${migrated} 条`);
+
+  await db.query(
+    `UPSERT $rid SET version = '1.1.8', appliedAt = $now,
+      description = 'Task table (recipes become tasks; params driven by strategy schema)'`,
+    { rid: new RecordId('schema_version', '1.1.8'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.1.9 —— ⭐ 任务归属到 ws(2026-09-14,用户拍板)
+ *
+ * > 「应该是在哪个窗口配置,就是打开哪个窗口才执行吧?
+ * >   任何的配置只是对自己的窗口负责。」
+ * > 「先归 ws-2,后面要在 task 窗口配置才对。」
+ *
+ * ── 为什么必须补这一刀 ──
+ *
+ * 1.1.8 从配方迁来的四条任务 `ws_id` **全是空**(配方表本来就没填),
+ * 而空的语义是「在所有可用 ws 上跑」。实测三个洞:
+ *  · 同一批推抓两遍,翻译调两次(刚被 Google 429 限流过)
+ *  · `run_state`/`last_result` 被后完成的那个 ws **覆盖**,数字看着正常只是少一半
+ *  · ⚠️ webview 租约**挡不住** —— 两个 ws 是两个 pageId,各拿各的
+ *
+ * ⭐ 归属模型下这些结构上不可能发生。
+ *
+ * ⚠️ 只补**空值**的行:已经指定过 ws 的不动(幂等,且不覆盖人工设置)。
+ */
+const X_SCHEMA_1_1_9 = `
+UPDATE x_task SET ws_id = 'ws-2' WHERE ws_id = NONE OR ws_id = '';
+`;
+
+export async function x_migration_1_1_9(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_1_9);
+  const left = await db.query<[Array<{ c: number }>]>(
+    `SELECT count() AS c FROM x_task WHERE ws_id = NONE GROUP ALL`,
+  );
+  const remaining = left[0]?.[0]?.c ?? 0;
+  if (remaining > 0) {
+    // fail loud:没归属的任务在新模型下**永远不会被执行**(调度器按 ws 查),
+    // 而现象是「任务列表里有它,就是不跑」—— 必须现在就吼出来
+    throw new Error(
+      `[x-schema 1.1.9] 仍有 ${remaining} 个任务没有 ws 归属 —— `
+      + '新模型下它们永远不会被执行(调度器按 ws 查任务)。请检查 UPDATE 是否生效。',
+    );
+  }
+  console.log('[x-schema 1.1.9] 任务归属:未指定的已归入 ws-2');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.1.9', appliedAt = $now,
+      description = 'Tasks belong to a ws (unassigned default to ws-2)'`,
+    { rid: new RecordId('schema_version', '1.1.9'), now: Date.now() },
+  );
+}

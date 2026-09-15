@@ -293,13 +293,17 @@ export async function reconcileRepliedFromOwnReplies(
     console.log(`[x-reply-relation-repo] 反向对账:${n} 条新线索其实我早就回过了,已补标`);
   }
 
-  // ⚠️ 补标 replied 后必须**顺带把状态从 pending 挪走**,否则它们会永远滞留:
+  // ⚠️ 补标 replied 后必须**顺带把状态挪走**,否则它们会永远滞留:
   // queryPending 已排除已回复的(不再送 AI 判),而没有别的东西会改它们的状态
   // —— 结果是一批「不会被判、也不会消失」的僵尸行。
   // 置 'replied':回复过就是最终态,不需要 AI 再判值不值。
+  //
+  // ⚠️ 2026-09-14:`collected`(盯人采来的,本就不进判断队列)**也要挪** ——
+  // 它同样没有别的东西会改其状态,漏掉它就是造出第二批僵尸行,
+  // 而且这批更隐蔽:它们本来就不在「待判」里,没人会发现它们卡住了。
   await db.query(
     `UPDATE x_tweet SET status = 'replied'
-     WHERE status = 'pending' AND replied = true`,
+     WHERE status IN ['pending', 'collected'] AND replied = true`,
   );
 
   return n;

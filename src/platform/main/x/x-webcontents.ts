@@ -60,8 +60,13 @@ export function resolveXWebContents(
  * 无人值守场景下自行找一个可用的 X webContents。
  *
  * ⚠️ 2026-09-03 Windows 部署实测暴露的问题:
- *   X 的 wcId 由 SocialView 在**挂载时登记、卸载时清除**
- *   (SocialView.tsx:132)。而 campaign 的 /refresh 是**外部随时敲进来**的,
+ *   X 的 wcId 要**有人在界面上操作过**才会被登记。
+ *   ⚠️⚠️ **2026-09-14 更正**:此处原写「由 SocialView 在挂载时登记、卸载时清除
+ *   (SocialView.tsx:132)」——**与实际不符**。全仓 grep 证实 `setActiveXWcId`
+ *   的唯一调用方是 `x-timeline-handlers.ts:74`(X_RUN_RECIPE handler),
+ *   即**人点「开始扫描」**时;SocialView 从未调用过它。
+ *   原注释描述了一个不存在的机制,照它排查会找错方向。
+ *   而 campaign 的 /refresh 是**外部随时敲进来**的,
  *   那台机器上不会有人一直守着 X 页面 —— 于是 getActiveWcId 返回 null,
  *   整个请求 503「未登记 wc id」,而 X 其实还活着(只是界面切走了)。
  *

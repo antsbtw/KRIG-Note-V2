@@ -94,7 +94,26 @@ export type TweetInboxStatus =
   | 'ai_judging'
   | 'worth'
   | 'skip'
-  | 'replied';
+  | 'replied'
+  /**
+   * ⭐ 已入库,但**本来就不该进 AI 判断队列**(2026-09-14,用户拍板「乙」)。
+   *
+   * 目前唯一来源:`source='watchlist'` 的盯人采集。schema 那条规则
+   * (`x-schema.ts:97`)说的是「不置 pending,否则刷爆 Gemma 队列」——
+   * 但它只说了**不该是什么**,没说该是什么,于是这个状态此前**不存在**。
+   *
+   * ⚠️ 为什么不复用现有的:
+   *  · `filtered_out` **语义撒谎** —— 它不是被漏斗过滤掉的,是根本没送去判断;
+   *    且会混进「过滤掉多少」的统计里
+   *  · 沿用 `pending` 靠 source 排除 → 队列判据分散成两处,
+   *    正是本仓踩过的「数出来有积压、捞的时候是空」
+   *
+   * ⚠️ `status` 在 schema 里是 `TYPE string` 不是枚举,**新增值不需要 migration**。
+   *
+   * ⭐ 它不是终态:被人工采纳 / 回复后照常流转(见 applyHumanVerdict、
+   * reconcileRepliedFromOwnReplies)。
+   */
+  | 'collected';
 
 export interface TweetInboxRecord {
   tweet_id: string;
@@ -116,7 +135,32 @@ export interface TweetInboxRecord {
   parent_fetched_at?: string;
   /** 到期时间。**undefined = 永久保留**(采纳/回复过的推文) —— TTL 清理会跳过。 */
   expires_at?: string;
-  source: 'timeline' | 'search';
+  /**
+   * 这条推是怎么来的。
+   *
+   * ⚠️⚠️ **2026-09-14 实测更正:此前类型与现实三方不符** ——
+   *
+   * | 来源 | 当时写的 |
+   * |---|---|
+   * | 本类型 | `'timeline' \| 'search'` |
+   * | schema 注释(`x-schema.ts:97`) | `'search' \| 'watchlist'` |
+   * | **实际写进库的** | `search` / `self_post` / `self_reply` |
+   *
+   * · `'timeline'` **全仓零写入点**,只活在这行类型里(死值)
+   * · `self_post` / `self_reply` **真在写**却不在类型里 ——
+   *   `x-reply-relation-repo` 直接拼 SQL,绕过了这个类型,所以 tsc 一直没发现
+   *
+   * ⭐ 现在如实列出真实取值。⚠️ 加新值前先 grep 实际写入点,别再凭这行猜。
+   */
+  source:
+    /** 关键词配方采集 */
+    | 'search'
+    /** ⭐ 盯人采集(追踪名单)。⚠️ 不进 AI 判断队列 —— 见 status 的 'collected' */
+    | 'watchlist'
+    /** 我自己发的推(反向对账用) */
+    | 'self_post'
+    /** 我自己发的回复 —— 「我回复了谁」的权威记录 */
+    | 'self_reply';
   search_recipe?: string;        // recipe.id
   task_id?: string;              // 处理任务维度，阶段B恒 'judge-value'，阶段C 起为工单 task
   ws_id?: string;                // workspace id（Phase 2 多窗口隔离）

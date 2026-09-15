@@ -7,8 +7,18 @@
  * 3. 每 24h 执行一次 TTL 清理
  */
 
-import { listEnabledRecipes, updateLastRunAt } from '../db/search-recipe-repo';
+import {
+  listEnabledTasks, updateTaskLastRunAt, setTaskRunState, recoverStuckTasks,
+} from '../db/x-task-repo';
+import { collectStrategies, registerInitialStrategies } from '@capabilities/x-collect';
+import { pageRegistry } from '../web-capability/wiring/runtime';
+import { xPageId, wsIdOf } from './x-net-capture';
+import { resolveAnyXWebContents } from './x-webcontents';
 import { scanRecipe } from './x-timeline-scan';
+import { collectWatchlist } from './x-watchlist-collect';
+import { webContents } from 'electron';
+import type { XTask } from '@shared/types/x-task';
+import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { cleanExpired, recoverStuckAiJudging, countPending } from '../db/tweet-inbox-repo';
 import { reconcileRepliedFromOwnReplies } from '../db/x-reply-relation-repo';
@@ -33,6 +43,16 @@ let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let ttlTimer: ReturnType<typeof setInterval> | null = null;
 let judgeRecoverTimer: ReturnType<typeof setInterval> | null = null;
 let backlogTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * ⭐ 盯人采集轮询(2026-09-14 新增)。
+ *
+ * ⚠️ 此前追踪名单「四层齐了,唯独采集循环不存在」—— 加得进名单、看得到统计,
+ * 但**没有任何东西会因为『他在名单里』而去抓他的新推**。这个 timer 就是那一层。
+ *
+ * ⚠️ 铁律:常驻 timer **必须在 `stopScheduler` 里有停止调用**
+ * (记忆 `project-graceful-shutdown`:否则 before-quit 走不完,Ctrl+C 不退)。
+ */
+let watchlistTimer: ReturnType<typeof setInterval> | null = null;
 
 /** 累计待判断 pending 条数（per-ws：各 ws 各自累计、各自达阈值、各自清零，防跨 ws 混批） */
 const pendingAccumulated = new Map<string, number>();
@@ -102,18 +122,221 @@ async function drainBacklog(): Promise<void> {
   }
 }
 
-/** 执行一次配方扫描并按需触发 AI 判断 */
-async function runEnabledRecipes(): Promise<void> {
-  if (activeXWcMap.size === 0) {
-    console.log('[x-search-scheduler] no active X webContents, skip');
+/**
+ * ⭐⭐ 任务 → 配方的**反向组装**(1b 过渡期)。
+ *
+ * ⚠️ 为什么还要组装成 `SearchRecipe`:`scanRecipe` 内部同时做了「跑策略」和
+ * 「过滤 + 翻译 + 入库」两件事。1b 只该换**驱动方式**(配方表 → 任务表),
+ * 把入库那半也一起重写会让这一步的风险面从 1 个文件涨到 4 个。
+ *
+ * ⏳ `scanRecipe` 与本函数一起删在 **1c**,那时入库逻辑迁进任务执行链。
+ *
+ * ⚠️ `params` 的 key 必须与 `keywordStrategy.paramsSchema` 逐字对应 ——
+ * 拼错不报错,只会让那个参数**静默失效**(如 keywords 丢了就搜空串)。
+ */
+function taskToRecipe(task: XTask): SearchRecipe {
+  const p = task.params ?? {};
+  const arr = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.length ? v.filter((x): x is string => typeof x === 'string') : undefined;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+
+  return {
+    id: task.id,
+    name: task.name,
+    enabled: task.enabled,
+    // help_signals 只在 help-wanted 下生效,故有信号词就按 help-wanted 走
+    template: arr(p.helpSignals) ? 'help-wanted' : 'custom',
+    keywords: arr(p.keywords),
+    fromAccounts: arr(p.fromAccounts),
+    helpSignals: arr(p.helpSignals),
+    minLikes: num(p.minLikes),
+    minRetweets: num(p.minRetweets),
+    lang: typeof p.lang === 'string' ? p.lang : undefined,
+    sinceHours: num(p.sinceHours),
+    resultType: p.resultType === 'top' ? 'top' : 'latest',
+    includeReplies: p.includeReplies === true,
+    intervalMinutes: task.intervalMinutes,
+    lastRunAt: task.lastRunAt,
+  };
+}
+
+/**
+ * ⭐⭐ 执行到期的任务(1b:调度器从**任务表**驱动,不再读配方表)。
+ *
+ * ── 与配方时代的三处关键差别 ──
+ *
+ * ① 读 `x_task` 而非 `search_recipes`
+ * ② ⭐ **执行前取 webview 租约** —— 「两个任务撞车不能同时执行」的落地点。
+ *    此前只靠「周期错开」碰运气(配方 60s / 盯人 30min),真撞上只能指望
+ *    落地校验兜底。现在是显式互斥:占着就跳过,并留痕说明被谁占着。
+ * ③ 运行态入库(`run_state`/`last_error`)——「跑了没成功」与「没跑」
+ *    在界面上长得一样,不记原因就等于静默。
+ */
+/**
+ * ⭐⭐ 找出本轮可用的 (wsId, wcId) —— **不依赖手动登记**。
+ *
+ * ⚠️⚠️ 2026-09-14 实测的既有缺陷:`activeXWcMap` 的**唯一**填充点是
+ * `X_RUN_RECIPE` handler(`x-timeline-handlers.ts:74`),也就是**人点「开始扫描」**。
+ * 于是 app 重启后没点过扫描,定时采集每轮都在 `size === 0` 处静默早退 ——
+ * **配方时代就是这样**,只是手点扫描顺带登记了 wc,看起来才像在自动跑。
+ *
+ * ⚠️ 且 `x-webcontents.ts` 有段注释说「wcId 由 SocialView 挂载时登记」——
+ * **那是错的**,SocialView 零调用(2026-09-14 grep 证实),它描述了一个不存在的机制。
+ *
+ * ⭐ 解法用仓库里现成的 `resolveAnyXWebContents()`,它的注释正是为这个场景写的:
+ * 「绕过登记表,直接在所有存活的 webContents 里找 x.com 的那个……
+ *   仅供**后台/无人值守**路径使用」——定时采集正是无人值守路径。
+ *
+ * ⚠️ 登记表**优先**:它是显式定向的,多 ws 时比扫描准。回落只在表为空时用。
+ */
+function resolveSchedulerTargets(): Array<[string, number]> {
+  if (activeXWcMap.size > 0) return [...activeXWcMap.entries()];
+
+  const found = resolveAnyXWebContents();
+  if ('error' in found) return [];
+
+  const wsId = wsIdOf(found.wc);
+  if (!wsId) {
+    // ⚠️ 反推不出 ws 就不猜 —— 猜错会把任务跑到别的 ws 上,而且不报错
+    console.warn('[x-search-scheduler] 找到 X webview 但反推不出 wsId(partition 形状变了?),跳过');
+    return [];
+  }
+  console.log(`[x-search-scheduler] 登记表为空,回落到无人值守扫描:ws=${wsId} wc#${found.wc.id}`);
+  return [[wsId, found.wc.id]];
+}
+
+/**
+ * ⭐⭐ 跑某个 ws 自己的任务。
+ *
+ * ⚠️⚠️ **不再「对每个活跃 ws 跑一遍同一个任务」**(用户 2026-09-14 拍板):
+ *
+ * > 「在哪个窗口配置,就是打开哪个窗口才执行……任何的配置只是对自己的窗口负责。」
+ *
+ * 旧模型(`wsId` 留空 = 所有 ws 都跑)实测有三个洞:同一批推抓两遍、
+ * 翻译调两次(刚被 429 限流过)、`lastResult` 被后完成的那个 ws 覆盖。
+ * ⚠️ 而 webview 租约**挡不住** —— 两个 ws 是两个 pageId,各拿各的。
+ *
+ * ⭐ 归属模型下这些**结构上不可能发生**:任务只属于一个 ws,
+ * 本函数只查那个 ws 的任务,循环那层整个消失。
+ */
+async function runTasksForWs(
+  wsId: string,
+  wcId: number,
+  filterConfig: TimelineFilterConfig,
+): Promise<void> {
+  let tasks: XTask[];
+  try {
+    tasks = await listEnabledTasks(wsId);
+  } catch (err) {
+    console.error(`[x-search-scheduler] ws=${wsId} 取任务列表失败:`, err);
+    return;
+  }
+  if (tasks.length === 0) return;
+
+  // ⭐ 角色守卫(用户 2026-09-03「一个 ws 只干一件事」):
+  // 只在 role='search' 的 ws 上跑定时采集。campaign ws 专供活动核验 ——
+  // 在它上面导航到搜索页,正在抓的 conversation 就断了。
+  const roleCfg = await getWsRole(wsId).catch(() => null);
+  if (!roleCfg || roleCfg.role !== 'search') {
+    console.log(`[x-search-scheduler] 跳过 ws=${wsId}(role=${roleCfg?.role ?? '?'},非 search)`);
     return;
   }
 
-  let recipes;
-  try {
-    recipes = await listEnabledRecipes();
-  } catch (err) {
-    console.error('[x-search-scheduler] failed to list recipes:', err);
+  const wc = webContents.fromId(wcId);
+  if (!wc || wc.isDestroyed()) return;
+
+  const now = Date.now();
+  for (const task of tasks) {
+    // 到期判定
+    if (task.lastRunAt) {
+      const lastRun = new Date(task.lastRunAt).getTime();
+      if (Number.isFinite(lastRun) && now - lastRun < task.intervalMinutes * 60_000) continue;
+    }
+
+    // ⚠️ 策略取不到直接跳过并记错 —— fail loud。
+    //    `registry.get` 自己会抛(列出已注册的 id),错误信息比这里能写的更有用。
+    try {
+      collectStrategies.get(task.strategyId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[x-search-scheduler] 任务「${task.name}」策略不可用:`, msg);
+      await setTaskRunState(task.id, 'failed', { error: msg }).catch(() => {});
+      continue;
+    }
+
+    /**
+     * ⭐⭐ 取 webview 租约 —— 「同一 webview 上两个任务撞车」的防线。
+     *
+     * ⚠️ 它防不了「同一任务跨 ws 并行」(两个 ws 两个 pageId,各拿各的)——
+     * 那个由**归属模型**防:任务只属于一个 ws,根本不会在别处跑。
+     * 两道防线管两件事,别指望其中一道兼管另一件。
+     */
+    const pageId = xPageId(wc);
+    const leased = pageRegistry.lease(pageId, `task:${task.name}`, 20 * 60_000);
+    if (leased.status !== 'ok') {
+      console.log(
+        `[x-search-scheduler] 任务「${task.name}」跳过:webview 被占用`
+        + `(${leased.status === 'failed' ? leased.reason : ''})`,
+      );
+      continue;
+    }
+
+    console.log(`[x-search-scheduler] 执行任务「${task.name}」 ws=${wsId}`);
+    await setTaskRunState(task.id, 'running').catch(() => {});
+    try {
+      const recipe = taskToRecipe(task);
+      const r = await scanRecipe(
+        recipe,
+        wsId,
+        wcId,
+        // ⚠️ 关键词兜底必须**按任务**给 —— filterConfig 是全局共用的,
+        //    把 requireKeywords 塞进去会让所有任务共用同一批词。
+        { ...filterConfig, requireKeywords: recipe.keywords ?? [] },
+        (saved) => {
+          // per-ws 累计:只判触发它的那个 ws,绝不跨 ws 混批
+          const { fire } = accumulatePending(pendingAccumulated, wsId, saved, judgeConfig.batchSize);
+          if (fire) {
+            runJudgeBatch(judgeConfig, wsId).catch((err) => {
+              console.error(`[x-search-scheduler] judge batch ws=${wsId} failed:`, err);
+            });
+          }
+        },
+      );
+      await setTaskRunState(task.id, 'idle', {
+        result: {
+          fetched: r.fetched, saved: r.saved,
+          duplicates: r.duplicates, elapsedMs: r.elapsedMs,
+        },
+      }).catch(() => {});
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[x-search-scheduler] 任务「${task.name}」ws=${wsId} 失败:`, msg);
+      // ⚠️ 失败要留痕:「跑了没成功」与「没跑」在界面上长得一样
+      await setTaskRunState(task.id, 'failed', { error: msg }).catch(() => {});
+    } finally {
+      // ⚠️ 租约**必须**在 finally 释放 —— 一次异常就永久占着,
+      //    之后所有任务都会「被占用」而永远跑不了(同 timer 那条铁律)。
+      const released = pageRegistry.release(leased.value);
+      if (released.status !== 'ok') {
+        console.warn(`[x-search-scheduler] 释放租约失败(page=${pageId}):`,
+          released.status === 'failed' ? released.reason : '');
+      }
+    }
+    await updateTaskLastRunAt(task.id, new Date().toISOString());
+  }
+}
+
+/**
+ * ⭐ 一轮调度:找到可用的 ws,各跑各自的任务。
+ *
+ * ⚠️⚠️ **这里没有「对每个 ws 跑一遍同一个任务」那层循环了** ——
+ * 任务归属于 ws(用户 2026-09-14),所以是「每个 ws 问自己有哪些任务」,
+ * 而不是「每个任务问自己该在哪些 ws 跑」。方向反过来,洞就没了。
+ */
+async function runEnabledTasks(): Promise<void> {
+  const targets = resolveSchedulerTargets();
+  if (targets.length === 0) {
+    console.log('[x-search-scheduler] 找不到可用的 X webview,skip');
     return;
   }
 
@@ -128,49 +351,8 @@ async function runEnabledRecipes(): Promise<void> {
     return;
   }
 
-  const now = Date.now();
-  for (const recipe of recipes) {
-    // 检查是否到了执行时间
-    if (recipe.lastRunAt) {
-      const lastRun = new Date(recipe.lastRunAt).getTime();
-      if (now - lastRun < recipe.intervalMinutes * 60_000) continue;
-    }
-
-    // 对每个活跃 ws 分别执行同一配方
-    for (const [wsId, wcId] of activeXWcMap.entries()) {
-      // ⭐ **角色守卫**(用户 2026-09-03 拍板「一个 ws 只干一件事」):
-      // 只在 role='search' 的 ws 上跑定时采集。campaign ws 专供活动核验 ——
-      // 若在它上面导航到搜索页,正在抓的文章 conversation 就断了,
-      // 而现象是「活动偶尔抓不到」「采集时断时续」,极难定位。
-      const roleCfg = await getWsRole(wsId).catch(() => null);
-      if (!roleCfg || roleCfg.role !== 'search') {
-        console.log(`[x-search-scheduler] 跳过 ws=${wsId}(role=${roleCfg?.role ?? '?'},非 search)`);
-        continue;
-      }
-      console.log(`[x-search-scheduler] running recipe "${recipe.name}" for ws=${wsId}`);
-      try {
-        await scanRecipe(
-          recipe,
-          wsId,
-          wcId,
-          // ⚠️ 关键词兜底必须**按配方**给 —— filterConfig 是全局共用的,
-          //    把 requireKeywords 塞进去会让所有配方共用同一批词。
-          { ...filterConfig, requireKeywords: recipe.keywords ?? [] },
-          (saved) => {
-            // per-ws 累计：只判触发它的那个 ws，绝不跨 ws 混批
-            const { fire } = accumulatePending(pendingAccumulated, wsId, saved, judgeConfig.batchSize);
-            if (fire) {
-              runJudgeBatch(judgeConfig, wsId).catch((err) => {
-                console.error(`[x-search-scheduler] judge batch ws=${wsId} failed:`, err);
-              });
-            }
-          },
-        );
-      } catch (err) {
-        console.error(`[x-search-scheduler] recipe "${recipe.name}" ws=${wsId} failed:`, err);
-      }
-    }
-    await updateLastRunAt(recipe.id, new Date().toISOString());
+  for (const [wsId, wcId] of targets) {
+    await runTasksForWs(wsId, wcId, filterConfig);
   }
 
   // maxWaitMinutes 超时触发：逐 ws 处理未满 batchSize 的残留积累，各判各的
@@ -187,6 +369,51 @@ async function runEnabledRecipes(): Promise<void> {
 }
 
 /**
+ * ⭐ 跑一遍追踪名单(盯人采集)。
+ *
+ * ⚠️ 与配方采集**共用同一个 X webview**,所以必须串行让路 ——
+ * 两者同时导航会互相把对方正在滚的页面顶掉,现象是「采集时断时续」。
+ * 这里靠**错开周期**(配方 60s / 盯人 30min)+ 同一个角色守卫实现,
+ * 真撞上了由 `runCollectStrategy` 的落地校验挡住(不会把别人的页面当结果)。
+ */
+async function runWatchlist(): Promise<void> {
+  // ⚠️ 同 runEnabledTasks:**不依赖手动登记** —— 登记表只在人点过
+  //    「开始扫描」后才有值,盯人采集本就是无人值守路径(见 resolveSchedulerTargets)
+  const targets = resolveSchedulerTargets();
+  if (targets.length === 0) return;
+
+  let filterConfig: TimelineFilterConfig;
+  try {
+    filterConfig = await buildFilterConfig();
+  } catch (err) {
+    // 同配方采集:绝不以空黑名单继续 —— 被屏蔽的人会照爬不误而日志上看不出来
+    console.error('[x-search-scheduler] 盯人采集:屏蔽名单取不到,本轮跳过:', err);
+    return;
+  }
+
+  for (const [wsId, wcId] of targets) {
+    // ⭐ 同一条角色守卫(用户 2026-09-03「一个 ws 只干一件事」):
+    // 只在 role='search' 的 ws 上跑,不去打扰 campaign ws 正在抓的会话
+    const roleCfg = await getWsRole(wsId).catch(() => null);
+    if (!roleCfg || roleCfg.role !== 'search') continue;
+
+    try {
+      const r = await collectWatchlist(wsId, wcId, filterConfig);
+      // ⚠️ 单人失败已在内部记进 failures,这里把「有人失败」报出来 ——
+      // 静默会让「名单里的人悄悄不采了」无从发现
+      if (r.failures.length > 0) {
+        console.warn(
+          `[x-search-scheduler] 盯人采集 ws=${wsId}:${r.failures.length} 人失败,`
+          + `首个 @${r.failures[0].handle}: ${r.failures[0].error}`,
+        );
+      }
+    } catch (err) {
+      console.error(`[x-search-scheduler] 盯人采集 ws=${wsId} 整批失败:`, err);
+    }
+  }
+}
+
+/**
  * 启动调度器。在 initStorage + seedRecipes 之后调用。
  * 调度器每分钟检查一次各配方是否到期，到期则执行。
  * TTL 清理每 24h 一次。
@@ -194,12 +421,43 @@ async function runEnabledRecipes(): Promise<void> {
 export function startScheduler(): void {
   if (schedulerTimer) return; // 防重复启动
 
-  // 每 60s 检查一次（各配方内部按自己的 intervalMinutes 决定是否真正执行）
+  /**
+   * ⭐⭐ 注册采集策略 —— **必须在任何任务执行之前**。
+   *
+   * ⚠️ 2026-09-14 实测:`registerInitialStrategies` 此前**全仓零调用** ——
+   * 注册表建好了但是空的,于是 `collectStrategies.get('keyword')` 会直接抛,
+   * 所有任务都跑不起来。这是「建好了没人用」的又一例(与追踪名单同款)。
+   *
+   * ⚠️ 包 try:重复注册会撞 id 重复检查并抛(那是 register 有意的 fail loud),
+   * 而 `startScheduler` 本身有防重入,正常只会走一次。
+   */
+  try {
+    registerInitialStrategies();
+    console.log(`[x-search-scheduler] 已注册采集策略:${collectStrategies.list().map((s) => s.id).join(', ')}`);
+  } catch (err) {
+    console.warn('[x-search-scheduler] 策略注册跳过(多半已注册过):', err);
+  }
+
+  /**
+   * ⭐ 任务轮询(1b:从**任务表**驱动,不再读配方表)。
+   *
+   * 每 60s 检查一次;各任务按自己的 `intervalMinutes` 决定是否真正执行。
+   * ⚠️ 执行前取 webview 租约 —— 撞车时跳过本轮而不是硬上(见 runEnabledTasks)。
+   */
   schedulerTimer = setInterval(() => {
-    runEnabledRecipes().catch((err) => {
-      console.error('[x-search-scheduler] runEnabledRecipes error:', err);
+    runEnabledTasks().catch((err) => {
+      console.error('[x-search-scheduler] runEnabledTasks error:', err);
     });
   }, 60_000);
+
+  /**
+   * ⚠️ 启动时复位卡住的任务:执行**不跨进程存活**,上次退出时正在跑的
+   * 任务重启后 `run_state` 还是 'running',调度器会以为「还在跑」而永远跳过它。
+   * 同 `recoverStuckAiJudging` 的理由。
+   */
+  recoverStuckTasks()
+    .then((n) => { if (n > 0) console.warn(`[x-search-scheduler] 复位 ${n} 个卡在 running 的任务`); })
+    .catch((err) => console.error('[x-search-scheduler] recoverStuckTasks error:', err));
 
   // ⚠️ **卡住自愈:每 10 分钟一次**(2026-09-02 实测踩到)
   // recoverStuckAiJudging 此前**只在启动时跑一次**(index.ts)。
@@ -234,6 +492,21 @@ export function startScheduler(): void {
     });
   }, 10_000);
 
+  /**
+   * ⭐ 盯人采集:每 30 分钟一轮。
+   *
+   * ⚠️ 与配方采集(60s 轮询)**错开**:两者共用同一个 X webview,
+   * 频率相近会频繁互相顶掉正在滚的页面。
+   * 30 分钟对「追踪某人的新推」足够 —— 他不会每分钟发一条。
+   *
+   * ⚠️ 停止调用在 `stopScheduler`(常驻 timer 铁律)。
+   */
+  watchlistTimer = setInterval(() => {
+    runWatchlist().catch((err) => {
+      console.error('[x-search-scheduler] runWatchlist error:', err);
+    });
+  }, 30 * 60_000);
+
   // TTL 清理：每 24h 一次
   ttlTimer = setInterval(() => {
     cleanExpired().catch((err) => {
@@ -266,5 +539,10 @@ export function stopScheduler(): void {
   if (backlogTimer) {
     clearInterval(backlogTimer);
     backlogTimer = null;
+  }
+  // 同上铁律:新增的常驻 timer 必须在这里停
+  if (watchlistTimer) {
+    clearInterval(watchlistTimer);
+    watchlistTimer = null;
   }
 }

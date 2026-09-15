@@ -40,6 +40,24 @@ describe('AI 判断队列排除人工已处理', () => {
   });
 
   it('排除后必须把状态挪走,否则滞留成僵尸行', () => {
-    expect(rel).toMatch(/status\s*=\s*'replied'[\s\S]{0,120}status\s*=\s*'pending'\s*AND\s*replied\s*=\s*true/);
+    /**
+     * ⚠️ 2026-09-14 改写:原断言钉的是**那一句 SQL 的字面**
+     * (`status = 'pending' AND replied = true`)。加了 `collected` 状态后
+     * 实现改成 `status IN ['pending', 'collected']` —— 行为**变强**了
+     * (多救一类会滞留的行),字面却对不上,于是假红。
+     *
+     * ⭐ 现在钉**意图**:凡是「被排除出判断队列、但已回复」的状态,都要挪走。
+     * 判据 = 挪走语句的状态集合,必须覆盖所有这类状态。
+     */
+    const moveStmt = rel.match(/UPDATE x_tweet SET status = 'replied'[\s\S]{0,200}?;/);
+    expect(moveStmt, '找不到「挪走状态」的语句 —— 僵尸行防线没了').toBeTruthy();
+    const stmt = moveStmt![0];
+    expect(stmt).toMatch(/replied\s*=\s*true/);
+
+    // ⭐ 两类都必须在:pending(判过队列的)与 collected(本就不进队列的)。
+    // ⚠️ 漏掉 collected 更隐蔽 —— 那批行本来就不在「待判」里,没人会发现它们卡住。
+    for (const s of ['pending', 'collected']) {
+      expect(stmt, `挪走语句漏了 '${s}' —— 这类行会永远滞留`).toContain(`'${s}'`);
+    }
   });
 });

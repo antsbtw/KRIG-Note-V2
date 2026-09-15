@@ -201,7 +201,14 @@ export function applyFilter(
  */
 let injectFails = 0;
 
-async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetData[]> {
+/**
+ * ⚠️ 2026-09-14 改为导出:盯人采集(`x-watchlist-collect.ts`)复用同一份提取。
+ *
+ * ⭐ **绝不允许第二份实现** —— 这个函数里那条「连续注入失败才说不是导航撞车」
+ * 的判据是踩了一整天换来的(转义被模板字面量吃掉,采集恒 0 而日志说
+ * 「多半撞上导航」)。复制一份出去,那个教训就只在其中一份里。
+ */
+export async function extractVisibleTweets(wc: Electron.WebContents): Promise<XTweetData[]> {
   const script = `
     (function() {
       ${TWEET_SCRAPE_FN_BODY}

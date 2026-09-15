@@ -32,13 +32,30 @@ import type { NetworkEvent } from '../web-capability/net';
 /** 一个 X webContents 对应的 pageId(同一个 wc 复用同一个身份)*/
 const pageIdByWc = new Map<number, PageId>();
 
-function readPartition(wc: Electron.WebContents): string {
+/**
+ * 从 webContents 反推它的 partition(形如 `persist:webview-ws-2`)。
+ *
+ * ⚠️ 2026-09-14 改为导出:调度器无人值守回落时要从 wc 反推 wsId。
+ * ⭐ **绝不允许第二份实现** —— 反推规则写两遍,改一处漏一处,
+ * 而现象是「多 ws 时任务跑到别的 ws 上」,极难定位。
+ */
+export function readPartition(wc: Electron.WebContents): string {
   try {
     const p = wc.session.storagePath;
     return p ? `persist:${p.split('/').pop()}` : 'persist:webview';
   } catch {
     return 'persist:webview';
   }
+}
+
+/**
+ * 从 partition 反推 wsId。取不到返回 null。
+ *
+ * ⚠️ 与 `xPageId` 里的 `ws:` 同一条规则 —— 两处必须共用本函数,
+ * 别再各写一次正则。
+ */
+export function wsIdOf(wc: Electron.WebContents): string | null {
+  return readPartition(wc).match(/^persist:webview-(.+)$/)?.[1] ?? null;
 }
 
 /** 在 `web.page` 登记这个 X 页面并返回身份;已登记则直接返回 */
