@@ -45,7 +45,8 @@
 import { app, ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import {
-  controlEngine, inputEngine, listAnchorOwners, listAnchorNames, traceRecorder, traceSink,
+  controlEngine, inputEngine, listAnchorOwners, listAnchorNames, listPageNames,
+  traceRecorder, traceSink,
 } from '../web-capability/wiring/runtime';
 import { listBoundPages } from '../web-capability/wiring/page-hosts';
 import { traceRecorder as traceRec } from '../web-capability/wiring/runtime';
@@ -124,6 +125,40 @@ export function registerWebConsoleHandlers(): void {
   }
 
   // ── 控制(web.page / web.input 的动作)──────────────────────────
+
+  /**
+   * ⭐⭐ 语义导航(§9.3)。
+   *
+   * ⚠️ 面板传**语义名 + 参数**,不传 URL —— URL 是 adapter 的知识。
+   * 站点改版时变的是 `x-pages.ts`,面板一个字不用改。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_GOTO, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { wcId?: unknown; name?: unknown; params?: unknown; timeoutMs?: unknown };
+    const page = resolvePage(p.wcId);
+    if ('error' in page) return { channelOk: false, error: page.error };
+
+    const name = String(p.name ?? '');
+    if (!name) return { channelOk: false, error: '语义页面名必填' };
+    const params = (p.params ?? {}) as Record<string, string>;
+    const timeoutMs = typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined;
+
+    const t0 = Date.now();
+    const result = await controlEngine.goto(
+      page.pageId, { kind: 'semantic', name, params }, { readyTimeoutMs: timeoutMs },
+    );
+    /**
+     * ⚠️ 带上 `GotoReport` 的事实(落在哪 / 耗时 / loadURL 有没有 reject)——
+     * 只记 `recovered` 就答不了「到底去到哪一页」,
+     * 那是本会话犯过三次的同一个错(readTabBar 的 testid、耗时写死 0、type 的 landed)。
+     */
+    const report = result.status === 'ok'
+      ? (result.value as { landedUrl: string; elapsedMs: number; loadRejected?: string })
+      : undefined;
+    console.log(`[web-console] goto ${name} → ${result.status}${describeWhy(result)}`
+      + (report ? ` landed=${report.landedUrl}` : ''));
+    recordRun('goto', { name, params, ...(report ?? {}) }, result, Date.now() - t0);
+    return { channelOk: true, pageId: String(page.pageId), result };
+  });
 
   /** 等页面到位。⚠️ 超时是 Failed,不是 Ok —— 「等不到」就是没等到 */
   ipcMain.handle(IPC_CHANNELS.WEBC_READY, async (_e, payload: unknown) => {
@@ -321,6 +356,17 @@ export function registerWebConsoleHandlers(): void {
       total > 0 ? { status: 'ok' } : { status: 'failed', reason: '锚点表为空(业务没注册?)' },
       Date.now() - t0);
     return { channelOk: true, owners, tables };
+  });
+
+  /** 已注册的语义页面名 —— ⚠️ 面板下拉必须读**真表**,抄一份就会漂 */
+  ipcMain.handle(IPC_CHANNELS.WEBC_PAGE_NAMES, async () => {
+    const t0 = Date.now();
+    const tables = listPageNames();
+    const total = tables.reduce((n, t) => n + t.names.length, 0);
+    recordRun('pageNames', { total },
+      total > 0 ? { status: 'ok' } : { status: 'failed', reason: '语义页面表为空(业务没注册?)' },
+      Date.now() - t0);
+    return { channelOk: true, tables };
   });
 
   /**

@@ -40,9 +40,13 @@ export const LAYER_OF: Readonly<Record<string, CapabilityLayer>> = {
   press: 'web.input',
   hover: 'web.input',
   type: 'web.input',
+  // ⭐ goto 是控制动作(导航 + 等到位),与 ready/scrollUntil 同层
+  goto: 'web.page',
   // ── 输出类:读的是「我们这一层看到了什么」,归 web.trace ──
   pages: 'web.trace',
   anchors: 'web.trace',
+  /** ⚠️ 与 anchors 同类:读的是**注册表**,不是页面 —— 不是 web.page */
+  pageNames: 'web.trace',
   readTabBar: 'web.dom',
 };
 

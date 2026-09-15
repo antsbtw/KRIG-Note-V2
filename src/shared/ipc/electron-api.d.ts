@@ -163,8 +163,19 @@ declare global {
         type(wcId: number | undefined, anchor: string, text: string, check?: unknown): Promise<{
           channelOk: boolean; error?: string; pageId?: string; result?: unknown;
         }>;
+        /**
+         * ⭐ 语义导航:传**页面名 + 参数**,不传 URL(URL 是 adapter 的知识)。
+         * 站点改版时改 `x-pages.ts`,面板一个字不用动。
+         */
+        goto(wcId: number | undefined, name: string, params?: Record<string, string>, timeoutMs?: number): Promise<{
+          channelOk: boolean; error?: string; pageId?: string; result?: unknown;
+        }>;
         // ── 输出 ──
         pages(): Promise<{ channelOk: boolean; pages?: Array<{ pageId: string; alive: boolean }> }>;
+        /** 已注册的语义页面名 —— 下拉读真表,不抄一份 */
+        pageNames(): Promise<{
+          channelOk: boolean; tables?: Array<{ owner: string; names: string[] }>;
+        }>;
         anchors(): Promise<{
           channelOk: boolean; owners?: string[];
           tables?: Array<{ owner: string; names: string[] }>;

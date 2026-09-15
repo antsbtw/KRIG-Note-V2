@@ -112,6 +112,12 @@ describe('⭐⭐ 层归属按能力真正所属,不一律 web.page', () => {
     expect(ready.layer).toBe('web.page');
   });
 
+  it('⭐ goto 归 web.page(它是控制动作,与 ready/scrollUntil 同层)', () => {
+    expect(LAYER_OF.goto).toBe('web.page');
+    // ⚠️ pageNames 读的是注册表不是页面 —— 与 anchors 同类,别因为名字带 page 就归 web.page
+    expect(LAYER_OF.pageNames).toBe('web.trace');
+  });
+
   it('⭐ 输出类能力也要归对层(pages/anchors 归 trace,readTabBar 归 dom)', () => {
     // 它们读的是「我们这一层看到了什么」,不是页面控制动作
     expect(LAYER_OF.pages).toBe('web.trace');

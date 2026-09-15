@@ -383,6 +383,8 @@ export const IPC_CHANNELS = {
   WEBC_ANCHORS:      'webc:anchors',       // 输出:已注册锚点表
   WEBC_READ_TABBAR:  'webc:read-tabbar',   // 输出:真页面上读 X 左栏 tab 的 testid
   WEBC_TRACE:        'webc:trace',         // 输出:读回诊断留痕(内存 + 磁盘两份,对不上说明落盘坏了)
+  WEBC_GOTO:         'webc:goto',          // 控制:语义导航(名字 → URL → 导航 → 等到位)
+  WEBC_PAGE_NAMES:   'webc:page-names',    // 输出:已注册的语义页面名(下拉用真表,不抄一份)
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
   X_NOTIF_WATCH_START:  'x:notif-watch-start',
   X_NOTIF_WATCH_STOP:   'x:notif-watch-stop',

@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     anchors: () => ipcRenderer.invoke(IPC_CHANNELS.WEBC_ANCHORS),
     readTabBar: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_READ_TABBAR, { wcId }),
     trace: (sinceMs?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_TRACE, { sinceMs }),
+    goto: (wcId: number | undefined, name: string, params?: Record<string, string>, timeoutMs?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_GOTO, { wcId, name, params, timeoutMs }),
+    pageNames: () => ipcRenderer.invoke(IPC_CHANNELS.WEBC_PAGE_NAMES),
   },
 
   /** 诊断上报(renderer → main) */

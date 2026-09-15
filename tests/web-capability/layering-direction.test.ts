@@ -34,7 +34,13 @@ function listSources(dir: string): string[] {
 
 /** ⚠️ 先剥注释 —— 否则上面那段说明里的 `../../x/` 会让守卫永远红 */
 const strip = (s: string) =>
-  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  s
+    // ⚠️⚠️ 行注释的 `//` 必须**前面不是冒号** —— 否则 `https://x.com` 里的 `//`
+    // 会被当成注释开头,把整个 URL 连同后面的代码一起吃掉。
+    // 实测(2026-09-15):`'https://x.com/home'` → `'https:`,于是
+    // 「面板不许拼 URL」那条守卫**永远看不见 URL**,注入验证当场假绿(第六次)。
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const sources = listSources(LAYER_DIR).map((p) => ({
   path: p.replace(process.cwd() + '/', ''),

@@ -29,7 +29,13 @@ import { resolve } from 'node:path';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '../../', p), 'utf-8');
 const strip = (s: string) =>
-  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  s
+    // ⚠️⚠️ 行注释的 `//` 必须**前面不是冒号** —— 否则 `https://x.com` 里的 `//`
+    // 会被当成注释开头,把整个 URL 连同后面的代码一起吃掉。
+    // 实测(2026-09-15):`'https://x.com/home'` → `'https:`,于是
+    // 「面板不许拼 URL」那条守卫**永远看不见 URL**,注入验证当场假绿(第六次)。
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const INDEX = read('src/views/web-console/index.ts');
 const VIEW = read('src/views/web-console/WebConsoleView.tsx');
@@ -54,6 +60,25 @@ const DTS = read('src/shared/ipc/electron-api.d.ts');
 const CHANNELS = read('src/shared/ipc/channel-names.ts');
 
 const VIEW_ID = 'web-console-view';
+
+describe('⭐ 守卫自检:剥注释不能把 URL 吃掉', () => {
+  /**
+   * ⚠️⚠️ 2026-09-15 实测的**第六次假绿**,也是最隐蔽的一次:
+   *
+   * 旧 `strip` 用 `/\/\/.*$/gm` 剥行注释,而 `https://x.com/home` 里的 `//`
+   * 正好命中 —— 于是 `'https://x.com/home'` 被剥成 `'https:`。
+   * 「面板不许自己拼 URL」那条守卫因此**永远看不见 URL**:
+   * 往面板里塞一个写死的 x.com 地址,57 条守卫全绿。
+   *
+   * ⭐ 守卫自己的工具坏了,它守什么都没用。所以这条自检必须在。
+   */
+  it('⭐⭐ strip 保住 URL,同时仍剥掉行注释', () => {
+    expect(strip("const u = 'https://x.com/home';"), 'URL 被吃掉了')
+      .toContain('https://x.com/home');
+    expect(strip('const a = 1; // 注释'), '行注释没剥掉').not.toContain('注释');
+    expect(strip('/* 块注释 */ const b = 2;'), '块注释没剥掉').not.toContain('块注释');
+  });
+});
 
 describe('⭐⭐ 进得去:注册 → import → 入口', () => {
   it('⭐⭐ registerView 注册了这个 id,且挂了 component', () => {
@@ -116,7 +141,7 @@ describe('⭐⭐ 按契约三分法分类:控制 / 输入 / 输出', () => {
   });
 
   it('⭐ 控制页跑的是底座已有的原子能力(不自己再写一份)', () => {
-    for (const fn of ['ready', 'scrollUntil', 'tap', 'press']) {
+    for (const fn of ['goto', 'ready', 'scrollUntil', 'tap', 'press']) {
       expect(VIEW_CODE, `控制页没有 ${fn}`).toMatch(new RegExp(`api\\(\\)!\\.${fn}\\(`));
     }
   });
@@ -171,6 +196,8 @@ describe('⭐⭐ 四端名字一致(?. 会让不一致静默失败)', () => {
     const chans = [
       'WEBC_READY', 'WEBC_SCROLL_UNTIL', 'WEBC_TAP', 'WEBC_PRESS', 'WEBC_HOVER',
       'WEBC_TYPE', 'WEBC_PAGES', 'WEBC_ANCHORS', 'WEBC_READ_TABBAR',
+      // ⭐ goto 落地时补(2026-09-15)—— 清单漏一个,那个通道的四端不一致就没人发现
+      'WEBC_GOTO', 'WEBC_PAGE_NAMES',
     ];
     for (const c of chans) {
       expect(CHANNELS, `channel-names 缺 ${c}`).toMatch(new RegExp(`${c}:`));
@@ -181,7 +208,7 @@ describe('⭐⭐ 四端名字一致(?. 会让不一致静默失败)', () => {
 
   it('⭐⭐ preload 的方法名与 d.ts 对得上(面板调的是 d.ts 那份)', () => {
     for (const fn of ['ready', 'scrollUntil', 'tap', 'press', 'hover', 'type',
-      'pages', 'anchors', 'readTabBar']) {
+      'pages', 'anchors', 'readTabBar', 'goto', 'pageNames']) {
       expect(PRELOAD, `preload 缺 ${fn}`).toMatch(new RegExp(`\\b${fn}\\s*[:(]`));
       expect(DTS, `d.ts 缺 ${fn}`).toMatch(new RegExp(`\\b${fn}\\s*\\(`));
     }
@@ -550,6 +577,40 @@ describe('⭐⭐ 锚点只写实测到的,不编 testid', () => {
     expect(ANCHORS2).toMatch(/a\[href="\/i\/grok"\]/);
     expect(ANCHORS2, '给无 testid 的 tab 编了 AppTabBar_Grok 之类')
       .not.toMatch(/AppTabBar_Grok|AppTabBar_History|AppTabBar_Creator/);
+  });
+});
+
+describe('⭐⭐ 语义导航:面板不碰 URL', () => {
+  /**
+   * ⭐ `goto` 的全部意义就是「业务方说去哪,不说怎么去」。
+   * 面板一旦自己拼 URL,站点改版就要改面板 —— 「改版只改一层」当场作废。
+   */
+  it('⭐⭐ 面板传语义名 + 参数,零处构造 x.com URL', () => {
+    expect(VIEW_CODE, '面板里出现了 x.com 的 URL —— 那是 adapter 的知识')
+      .not.toMatch(/https:\/\/x\.com/);
+    expect(VIEW_CODE).toMatch(/api\(\)!\.goto\(/);
+  });
+
+  it('⭐⭐ 页面名下拉读**真表**,不是硬编码一份', () => {
+    // 与锚点下拉同一条纪律:抄一份就会漂,而漂的表现是「选了说没登记」
+    expect(VIEW_CODE).toMatch(/api\(\)\?\.pageNames\(\)/);
+    expect(VIEW_CODE, '面板硬编码了语义页面名单')
+      .not.toMatch(/\[\s*'x\.home'\s*,\s*'x\.profile'/);
+  });
+
+  it('⭐ 表没读到时明说,不渲染空下拉', () => {
+    expect(VIEW_CODE).toMatch(/pageNames\.length === 0/);
+    expect(VIEW).toMatch(/语义页面表还没读到/);
+  });
+
+  it('⭐⭐ goto 的落地事实进留痕(只记 recovered 答不出去到哪一页)', () => {
+    const body = HANDLER_CODE.slice(
+      HANDLER_CODE.indexOf('IPC_CHANNELS.WEBC_GOTO'),
+      HANDLER_CODE.indexOf('IPC_CHANNELS.WEBC_READY'),
+    );
+    expect(body.length, '锚点过时:找不到 goto 通道').toBeGreaterThan(200);
+    expect(body, 'GotoReport 被丢了').toMatch(/result\.value as \{[^}]*landedUrl/);
+    expect(body).toMatch(/recordRun\('goto',[^)]*report/);
   });
 });
 

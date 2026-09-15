@@ -68,6 +68,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState<string | null>(null);
 
   // ── 控制:参数 ──
+  /** ⭐ goto:语义页面名 + 参数。⚠️ 面板不碰 URL —— 那是 adapter 的知识 */
+  const [gotoName, setGotoName] = useState('x.home');
+  const [gotoHandle, setGotoHandle] = useState('fang_danie121');
+  const [gotoTweetId, setGotoTweetId] = useState('');
+  const [gotoQuery, setGotoQuery] = useState('');
+  const [pageNames, setPageNames] = useState<string[]>([]);
   const [readyKind, setReadyKind] = useState('urlIncludes');
   /** ⚠️ URL 片段与锚点名**分开存** —— 共用一个格子就是那个 bug 的根源 */
   const [readyValue, setReadyValue] = useState('/home');
@@ -143,6 +149,10 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       setPages(r ?? { channelOk: false, error: '通道未注册' });
       const a = await api()?.anchors();
       setAnchors(a ?? null);
+      // ⭐ 语义页面名同样读**真表**,面板不抄一份(抄一份就会漂)
+      const pn = await api()?.pageNames();
+      const tabs = (pn as { tables?: Array<{ names: string[] }> } | undefined)?.tables ?? [];
+      setPageNames(tabs.flatMap((t) => t.names));
     })();
   }, []);
 
@@ -193,6 +203,52 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       <div className="krig-webc__body">
         {tab === 'control' && (
           <>
+            {/* goto —— 编排第一步:先去对页面 */}
+            <div className="krig-webc__fn">
+              <div className="krig-webc__fn-head">
+                <span className="krig-webc__fn-name">goto</span>
+                <span className="krig-webc__fn-sig">语义导航 · 传页面名不传 URL</span>
+              </div>
+              <div className="krig-webc__row">
+                {pageNames.length === 0 ? (
+                  <span className="krig-webc__note" style={{ flex: 1, margin: 0 }}>
+                    语义页面表还没读到 —— 重启后应自动加载
+                  </span>
+                ) : (
+                  <select className="krig-webc__in" style={{ flex: 1 }}
+                    value={gotoName} onChange={(e) => setGotoName(e.target.value)}>
+                    {pageNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                )}
+                {/^x\.(profile|withReplies|articles)$/.test(gotoName) && (
+                  <input className="krig-webc__in" style={{ width: 170 }} value={gotoHandle}
+                    onChange={(e) => setGotoHandle(e.target.value)} placeholder="handle" />
+                )}
+                {gotoName === 'x.status' && (
+                  <input className="krig-webc__in" style={{ width: 170 }} value={gotoTweetId}
+                    onChange={(e) => setGotoTweetId(e.target.value)} placeholder="推文 id" />
+                )}
+                {gotoName === 'x.search' && (
+                  <input className="krig-webc__in" style={{ width: 170 }} value={gotoQuery}
+                    onChange={(e) => setGotoQuery(e.target.value)} placeholder="搜索词" />
+                )}
+                <button type="button" className="krig-webc__go" disabled={busy !== null}
+                  onClick={() => {
+                    const params: Record<string, string> = {};
+                    if (/^x\.(profile|withReplies|articles)$/.test(gotoName)) params.handle = gotoHandle;
+                    if (gotoName === 'x.status') params.tweetId = gotoTweetId;
+                    if (gotoName === 'x.search') params.q = gotoQuery;
+                    void run('goto', { name: gotoName, params },
+                      () => api()!.goto(wcId(), gotoName, params));
+                  }}>执行</button>
+              </div>
+              <div className="krig-webc__note">
+                ⭐ 跑的时候**看左边** —— 页面真的换了才算数。
+                <br />⚠️ 判据由语义页面表给(如 <code>x.withReplies</code> 的判据带 handle,
+                跳到别人页面不算到位)。
+              </div>
+            </div>
+
             {/* ready */}
             <div className="krig-webc__fn">
               <div className="krig-webc__fn-head">
