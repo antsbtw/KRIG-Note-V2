@@ -22,7 +22,24 @@ export type ReadyCriterion =
   | { readonly kind: 'anchorGone'; readonly anchor: AnchorName }
   | { readonly kind: 'urlIncludes'; readonly fragment: string }
   /** 预注册脚本(不收脚本字符串,同 `web.dom`)*/
-  | { readonly kind: 'custom'; readonly script: ScriptId };
+  | { readonly kind: 'custom'; readonly script: ScriptId }
+  /**
+   * ⭐⭐ **全部满足**才算到位(2026-09-15 实测补的)。
+   *
+   * ── 为什么非有不可 ──
+   *
+   * 用户填了个**不存在的账号** `fang_dani` 跑 `goto x.withReplies`,
+   * 结果 `recovered` —— 因为 X 对不存在的用户**保持 URL 不变**、
+   * 在页内渲染「账号不存在」,而判据只比 URL,于是
+   * 「到了他的页」与「到了错误页」**分不开**。
+   *
+   * 四个分支互斥,表达不了「URL 对 **且** 页面上真有推文」——
+   * 这个组合子就是为此。
+   *
+   * ⚠️ `of` 为空数组必须 fail loud:空的「全部满足」恒真,
+   * 那等于没有判据,比没有更坏(它看起来像有)。
+   */
+  | { readonly kind: 'all'; readonly of: readonly ReadyCriterion[] };
 
 /**
  * 停止判据(§9.5)。

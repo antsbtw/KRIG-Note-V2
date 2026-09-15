@@ -18,7 +18,7 @@
  * 与锚点表那条教训同源:判据要能区分「到了」与「到了对的地方」。
  */
 
-import type { PageResolver, ReadyCriterion } from '../web-capability/page/control-types';
+import type { PageResolver, ReadyCriterion, AnchorName } from '../web-capability/page/control-types';
 import { X_SERVICE_PROFILES } from '@shared/types/x-service-types';
 
 const X_PROFILE = X_SERVICE_PROFILES[0];
@@ -28,8 +28,33 @@ function cleanHandle(h: string): string {
   return h.trim().replace(/^@+/, '').toLowerCase();
 }
 
-/** URL 片段判据 —— X 的页面绝大多数靠 URL 认 */
+/** URL 片段判据 —— 首页/通知/搜索这类「没有具体对象」的页面够用 */
 const byUrl = (fragment: string): ReadyCriterion => ({ kind: 'urlIncludes', fragment });
+
+/**
+ * ⭐⭐ **某个人的页面**:URL 对 **且** 页面上真有推文。
+ *
+ * ── 为什么不能只比 URL(2026-09-15 实测)──
+ *
+ * 用户填了不存在的账号 `fang_dani` 跑 `goto x.withReplies`,结果 **recovered**:
+ * X 对不存在的用户**保持 URL 不变**、在页内渲染「账号不存在」,
+ * 于是「到了他的页」与「到了错误页」在 URL 判据下**完全一样**。
+ *
+ * 加上 `tweet.article` 在场这一条,账号不存在/被封/零推文时就会诚实超时。
+ *
+ * ⚠️ 代价说明白:**零推文的真实账号也会判失败**。这是有意的取舍 ——
+ * 宁可对「空号」误报,也不能把「不存在」当成「到了」:
+ * 前者人一看就知道,后者会让后续采集把错误页当成他的时间线。
+ */
+const byUrlAndTweets = (fragment: string): ReadyCriterion => ({
+  kind: 'all',
+  of: [
+    { kind: 'urlIncludes', fragment },
+    // ⚠️ 用 `as AnchorName` 铸造,**不用 `as never`** —— 后者是「让编译器闭嘴」,
+    //    而且会连真正的类型错误一起吞掉。与 `web-console-handler` 的 `asAnchor` 同一手法。
+    { kind: 'anchorAppears', anchor: 'tweet.article' as AnchorName },
+  ],
+});
 
 type Resolved = { url: string; arrival: ReadyCriterion; describe: string };
 
@@ -51,7 +76,7 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
   'x.profile': (p) => {
     const h = cleanHandle(p.handle ?? '');
     if (!h) return null;
-    return { url: `${X_PROFILE.baseUrl}/${h}`, arrival: byUrl(`/${h}`), describe: `@${h} 主页` };
+    return { url: `${X_PROFILE.baseUrl}/${h}`, arrival: byUrlAndTweets(`/${h}`), describe: `@${h} 主页` };
   },
 
   /** 某人的推文与回复 —— ⚠️ 判据带 handle,否则别人的 with_replies 也算到位 */
@@ -60,7 +85,7 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
     if (!h) return null;
     return {
       url: `${X_PROFILE.baseUrl}/${h}/with_replies`,
-      arrival: byUrl(`/${h}/with_replies`),
+      arrival: byUrlAndTweets(`/${h}/with_replies`),
       describe: `@${h} 的推文与回复`,
     };
   },
@@ -71,7 +96,7 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
     if (!h) return null;
     return {
       url: `${X_PROFILE.baseUrl}/${h}/articles`,
-      arrival: byUrl(`/${h}/articles`),
+      arrival: byUrlAndTweets(`/${h}/articles`),
       describe: `@${h} 的文章`,
     };
   },

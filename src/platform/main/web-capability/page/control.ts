@@ -469,6 +469,39 @@ export class ControlEngine {
         }
         return ok({ script, satisfied: (raw) => raw === true });
       }
+      case 'all': {
+        /**
+         * ⭐ 组合判据:**一次注入拿到全部子判据的结果**,再逐个判。
+         *
+         * ⚠️ 不做成「轮流注入」——那样一轮里各子判据看到的是**不同时刻**的页面,
+         * 「URL 已经对了、推文还没渲染」会被当成同时满足。一次注入才是同一瞬间。
+         *
+         * ⚠️ `of` 为空 → fail loud:空的「全部满足」恒真,
+         * 看起来像有判据,实际等于没有 —— 比没有更坏。
+         */
+        if (criterion.of.length === 0) {
+          return failed('组合判据 all 的 of 是空数组 —— 空的「全部满足」恒真,等于没有判据', false);
+        }
+        const subs: Array<{ script: string; satisfied: (raw: unknown) => boolean }> = [];
+        for (const sub of criterion.of) {
+          if (sub.kind === 'all') {
+            // ⚠️ 不支持嵌套:嵌套只会让「哪一条没满足」更难说清,而它没有真实需求
+            return failed('组合判据 all 不支持嵌套 —— 把子判据摊平写', false);
+          }
+          const built = this.buildProbe(sub);
+          if (built.status !== 'ok') return built;   // 子判据自身不合法 → 整体失败
+          subs.push(built.value);
+        }
+        // 把 N 段表达式包成一个数组表达式,一次求值
+        const script = `[${subs.map((x) => `(${x.script})`).join(', ')}]`;
+        return ok({
+          script,
+          satisfied: (raw) =>
+            Array.isArray(raw)
+            && raw.length === subs.length
+            && subs.every((x, i) => x.satisfied(raw[i])),
+        });
+      }
     }
   }
 
@@ -513,6 +546,8 @@ function describeCriterion(c: ReadyCriterion): string {
     case 'anchorGone': return `anchorGone:${c.anchor}`;
     case 'urlIncludes': return `urlIncludes:${c.fragment}`;
     case 'custom': return `custom:${c.script}`;
+    // ⚠️ 要说清「全部满足」里有哪几条 —— 只说 all 等于没说
+    case 'all': return `all(${c.of.map(describeCriterion).join(' && ')})`;
   }
 }
 
