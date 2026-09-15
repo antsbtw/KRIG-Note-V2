@@ -188,10 +188,22 @@ export async function judgeWithOllama(
     verdictMap = parseVerdicts(response.content);
   } catch (err) {
     console.error('[x-ai-judge] Ollama call failed:', (err as Error).message);
-    // 回退 pending 后上抛，让调用方(UI/调度器)看到失败
+    /**
+     * 回退 pending 后上抛，让调用方(UI/调度器)看到失败。
+     *
+     * ⚠️⚠️ **2026-09-14 修 Bug 1**:这里原来写的是 `UPDATE tweet_inbox` ——
+     * 而 `tweet_inbox` 是**死表**(活库 28 行,最新一条停在 2026-09-01;
+     * x_tweet 同期 11900+ 行)。于是「退回 pending 下次重判」这个动作
+     * **打在空表上**,推文实际停在 `ai_judging`,**再也不会被重判**。
+     *
+     * ⚠️ 为什么一直没被发现:启动时 `recoverStuckAiJudging()` 会把卡住的捞回来,
+     * 所以现象是「**要等下次重启才恢复**」而不是当场丢数据。
+     * ⭐ 今天启动日志里那句「自愈:41 条卡在 ai_judging 已退回 pending」
+     * 就是这个 bug 的活体现场。
+     */
     const db = (await import('@storage/surreal/client')).getXDB();
     await db.query(
-      `UPDATE tweet_inbox SET status = 'pending' WHERE tweet_id IN $ids`,
+      `UPDATE x_tweet SET status = 'pending' WHERE tweet_id IN $ids`,
       { ids: tweetIds },
     );
     throw err;
@@ -204,9 +216,10 @@ export async function judgeWithOllama(
     const verdict = verdictMap.get(tweet.tweet_id);
     if (!verdict) {
       // Ollama 没有返回这条推文的判断 → 回退 pending，下次重判
+      // ⚠️ 同上(Bug 1 的第二处):原来打在死表 tweet_inbox 上,这条推会卡死在 ai_judging
       const db = (await import('@storage/surreal/client')).getXDB();
       await db.query(
-        `UPDATE tweet_inbox SET status = 'pending' WHERE tweet_id = $id`,
+        `UPDATE x_tweet SET status = 'pending' WHERE tweet_id = $id`,
         { id: tweet.tweet_id },
       );
       continue;

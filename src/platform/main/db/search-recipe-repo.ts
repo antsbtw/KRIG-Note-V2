@@ -235,12 +235,23 @@ export interface RecipeStats {
   adoptRate: number;   // worth / (worth + skip) × 100，NaN 时为 0
 }
 
-/** 按 recipe id 统计 tweet_inbox 采纳率 */
+/**
+ * 按 recipe id 统计采纳率。
+ *
+ * ⚠️⚠️ **2026-09-14 修 Bug 2**:原来查的是 `FROM tweet_inbox` —— **死表**
+ * (活库 28 行,最新停在 2026-09-01)。于是配方采纳率**恒为空**,
+ * 界面上四条配方的统计数字全是 0,而没有任何报错。
+ *
+ * ⚠️ 这个缺陷此前标着「未实证」,2026-09-14 查库证实:
+ * `x_tweet` 里按 search_recipe 分组有 4818/4661/130/45 行,`tweet_inbox` 里 0 行。
+ *
+ * ⏳ 本函数随配方概念一起删在 1d(UI 重写时),现在先让它报真数。
+ */
 export async function getRecipeStats(recipeId: string): Promise<RecipeStats> {
   const db = getXDB();
   const res = await db.query<[Array<{ status: string; cnt: number }>]>(
     `SELECT status, count() AS cnt
-     FROM tweet_inbox
+     FROM x_tweet
      WHERE search_recipe = $recipe_id
      GROUP BY status`,
     { recipe_id: recipeId },

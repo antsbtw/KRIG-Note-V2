@@ -1015,3 +1015,41 @@ export async function x_migration_1_1_9(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.9'), now: Date.now() },
   );
 }
+
+/**
+ * 1.2.0 —— ⭐ 删掉死表 `tweet_inbox`(2026-09-14)
+ *
+ * ── 为什么现在能删 ──
+ *
+ * 实测(活库):`tweet_inbox` **28 行**,最新一条停在 **2026-09-01**(两周前);
+ * 同期 `x_tweet` 有 11900+ 行且持续在写。全仓所有读写(upsertTweet /
+ * queryInbox / queryPending / updateVerdict …)**早就走 x_tweet**,
+ * repo 文件名叫 `tweet-inbox-repo.ts` 只是历史包袱。
+ *
+ * ⚠️ 它造成过两个真 bug(都在本次一并修掉):
+ *  · **Bug 1**:判断失败回退 `UPDATE tweet_inbox SET status='pending'` 打在空表上
+ *    → 推文卡死在 `ai_judging`,**要等下次重启**靠 recoverStuckAiJudging 才捞回来
+ *    (今天启动日志「自愈:41 条」就是现场)
+ *  · **Bug 2**:配方采纳率 `FROM tweet_inbox` 查空表 → 统计**恒为 0 且不报错**
+ *
+ * ⭐ 记忆 `project-x-tweet-inbox-is-dead-table` 记的就是这张表:
+ * 「名字骗人,写进去不报错且永远读不到,现象是『功能点了没反应』」。
+ * **删掉它,这个家族的 bug 就不可能再出现。**
+ *
+ * ⚠️ 那 28 行不迁:全是 2026-09-01 的采集残留,`x_tweet` 里有同期同源数据
+ * (去重键 tweet_id 相同),且用户 2026-09-01 已定「X 历史数据都可以重新爬取」。
+ */
+const X_SCHEMA_1_2_0 = `
+REMOVE TABLE IF EXISTS tweet_inbox;
+`;
+
+export async function x_migration_1_2_0(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_0);
+  console.log('[x-schema 1.2.0] 已删除死表 tweet_inbox');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.0', appliedAt = $now,
+      description = 'Drop dead table tweet_inbox (all reads/writes long since on x_tweet)'`,
+    { rid: new RecordId('schema_version', '1.2.0'), now: Date.now() },
+  );
+}
