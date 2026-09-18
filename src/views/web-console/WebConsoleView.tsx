@@ -675,6 +675,23 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   {(pageNames.length > 0 ? pageNames : ['x.home']).map((n) =>
                     <option key={n} value={n}>{n}</option>)}
                 </select>
+                {/**
+                  * ⭐ 带参数的页面要能填参数 —— 否则选了 x.profile 点采集会直接失败。
+                  * ⚠️ 复用 goto 那块的 state(同一套语义页面表、同一套参数),
+                  * 不另起一份:两份会漂,而漂的表现是「这边填了那边没生效」。
+                  */}
+                {/^x\.(profile|withReplies|articles)$/.test(acPage) && (
+                  <input className="krig-webc__in" style={{ width: 150 }} value={gotoHandle}
+                    onChange={(e) => setGotoHandle(e.target.value)} placeholder="handle" />
+                )}
+                {acPage === 'x.status' && (
+                  <input className="krig-webc__in" style={{ width: 150 }} value={gotoTweetId}
+                    onChange={(e) => setGotoTweetId(e.target.value)} placeholder="推文 id" />
+                )}
+                {acPage === 'x.search' && (
+                  <input className="krig-webc__in" style={{ width: 150 }} value={gotoQuery}
+                    onChange={(e) => setGotoQuery(e.target.value)} placeholder="搜索词" />
+                )}
                 <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
                   onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数" title="滚动轮数上限" />
                 <input className="krig-webc__in" style={{ width: 72 }} value={acBudget}
@@ -682,8 +699,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 <button type="button" className="krig-webc__go" disabled={busy !== null}
                   onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget) },
                     async () => {
+                      const params: Record<string, string> = {};
+                      if (/^x\.(profile|withReplies|articles)$/.test(acPage)) params.handle = gotoHandle;
+                      if (acPage === 'x.status') params.tweetId = gotoTweetId;
+                      if (acPage === 'x.search') params.q = gotoQuery;
                       const r = await api()?.autoCollect({
-                        page: acPage, wcId: wcId(),
+                        page: acPage, params, wcId: wcId(),
                         maxRounds: Number(acRounds) || 30,
                         budgetMs: (Number(acBudget) || 120) * 1000,
                         wsId: workspaceId,
