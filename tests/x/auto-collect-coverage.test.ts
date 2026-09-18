@@ -186,3 +186,52 @@ describe('⭐⭐ 采集层只报事实,不下判断', () => {
     expect(code, 'rounds 没进报告').toMatch(/rounds: r\.rounds/);
   });
 });
+
+
+describe('⭐⭐ 落地校验:到错页面不许照采不误', () => {
+  /**
+   * ── 用户 2026-09-18 实测 ──
+   *
+   * 选了 x.profile,handle 用的是默认值 `fang_danie121`(一个**不存在的账号**,
+   * 当天早些时候测「账号不存在」留下的)。X 对不存在的用户**弹回首页**,
+   * 于是采集在首页上跑完、报告一切正常 ——
+   * 用户看到的现象是「点采集后弹回自己主页」。
+   *
+   * ⚠️ 这是 2026-09-07 教训的复发:
+   * 「被弹回首页时『页面上有推文』照样成立,于是把首页时间线当成搜索结果整批入库」。
+   * goto 为此加了带 handle 的 arrival 判据,而 harvestTimeline 这条路
+   * **一直没有任何落地校验** —— 它只管滚和抓。
+   */
+  const harvester = strip(
+    readFileSync(join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8'),
+  );
+
+  it('⭐⭐ 导航后必须校验真的到了目标页', () => {
+    expect(harvester, '导航完不校验落地 —— 会在错误页面上照采不误')
+      .toMatch(/const landed = wc\.getURL\(\)/);
+    expect(harvester, '没有「没落在目标页」的中止分支')
+      .toMatch(/没落在目标页/);
+  });
+
+  it('⭐⭐ 落地不符要**中止**,不是只警告', () => {
+    const i = harvester.indexOf('const landed = wc.getURL()');
+    expect(i, '找不到落地校验').toBeGreaterThan(0);
+    const body = harvester.slice(i, i + 900);
+    expect(body, '只警告不中止 —— 错误页面的数据照样会整批入库')
+      .toMatch(/return\s*\{\s*\n?\s*error:/);
+  });
+
+  it('⭐ 面板默认 handle 不许是写死的账号', () => {
+    /**
+     * 默认值一旦是某个具体账号,人不改就点 = 采错人;
+     * 而那个账号若已不存在,就是这次的坑。留空 → 语义页面表返回 null
+     * → 明确报「参数不全」,比默认跳到坏账号好。
+     */
+    const view = strip(
+      readFileSync(join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'),
+    );
+    const m = view.match(/const \[gotoHandle[^=]*=\s*useState\('([^']*)'\)/);
+    expect(m, '找不到 gotoHandle 的默认值').not.toBeNull();
+    expect(m![1], `默认 handle 写死成「${m![1]}」—— 人不改就点会采错人`).toBe('');
+  });
+});

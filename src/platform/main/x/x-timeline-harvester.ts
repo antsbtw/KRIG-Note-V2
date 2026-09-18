@@ -399,6 +399,38 @@ export async function harvestTimeline(
   } else {
     wc.loadURL(url);
     await new Promise((r) => setTimeout(r, 4500));
+
+    /**
+     * ⭐⭐ **落地校验** —— 导航完必须确认真的到了,否则在错的页面上照采不误。
+     *
+     * ── 用户 2026-09-18 实测踩到 ──
+     *
+     * 选了 x.profile 但 handle 用的是默认值 `fang_danie121`(一个**不存在的账号**,
+     * 那是当天早些时候测「账号不存在」留下的)。X 对不存在的用户**弹回首页**,
+     * 于是采集在首页上跑完、报告一切正常 —— 用户看到的是「点采集后弹回自己主页」。
+     *
+     * ⚠️ 这正是 2026-09-07 那个教训的复发:
+     * 「被弹回首页时『页面上有推文』照样成立,于是把首页时间线当成搜索结果整批入库」。
+     * `goto` 为此加了带 handle 的 arrival 判据,而 `harvestTimeline` 这条路
+     * **一直没有任何落地校验** —— 它只管滚和抓。
+     *
+     * ⭐ 这里只比 path:到没到**那一页**是事实,页面上有没有推是另一回事。
+     */
+    const landed = wc.getURL();
+    const same = (() => {
+      try {
+        const want = new URL(url).pathname.replace(/\/$/, '').toLowerCase();
+        const got = new URL(landed).pathname.replace(/\/$/, '').toLowerCase();
+        return got === want || got.startsWith(want + '/');
+      } catch { return false; }
+    })();
+    if (!same) {
+      return {
+        error: `导航后没落在目标页:想去 ${url},实际在 ${landed} —— `
+          + '常见成因:账号不存在/被封/改名(X 会弹回首页)。'
+          + '⚠️ 已中止采集,否则会把**错误页面**的内容当成目标数据整批入库。',
+      };
+    }
   }
 
   let lastY = -1;

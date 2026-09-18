@@ -72,7 +72,13 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   // ── 控制:参数 ──
   /** ⭐ goto:语义页面名 + 参数。⚠️ 面板不碰 URL —— 那是 adapter 的知识 */
   const [gotoName, setGotoName] = useState('x.home');
-  const [gotoHandle, setGotoHandle] = useState('fang_danie121');
+  /**
+   * ⚠️ 默认留空 —— 此前默认值是 `fang_danie121`,那是测「账号不存在」留下的残留。
+   * 用户选了 x.profile 没改这个框就点采集,X 把他弹回首页,
+   * 而采集**在首页上照跑不误**、报告一切正常。
+   * ⭐ 空值会让语义页面表返回 null → 明确报错「参数不全」,比默认跳到坏账号好。
+   */
+  const [gotoHandle, setGotoHandle] = useState('');
   const [gotoTweetId, setGotoTweetId] = useState('');
   const [gotoQuery, setGotoQuery] = useState('');
   const [pageNames, setPageNames] = useState<string[]>([]);
