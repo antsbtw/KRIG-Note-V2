@@ -219,6 +219,14 @@ declare global {
          * ⭐⭐ 无人工采集 —— 导航 + 滚动 + 解析载荷 + 入库,一次跑完。
          * 关系/蓝V 在载荷里就有,但**要有新请求**才截得到,所以必须主动导航。
          */
+        /**
+         * ⭐ 当前页面是哪个语义页面 + 参数 —— 让右边跟着左边走。
+         * 认不出来时 page 为 null(可能在设置页之类),不猜。
+         */
+        whereAmI(wcId?: number): Promise<{
+          channelOk: boolean; error?: string; url?: string;
+          page?: { name: string; params: Record<string, string> } | null;
+        }>;
         autoCollect(args: {
           /**
            * ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识。

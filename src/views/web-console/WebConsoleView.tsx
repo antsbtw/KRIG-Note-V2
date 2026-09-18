@@ -150,6 +150,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [acRounds, setAcRounds] = useState('30');
   const [acBudget, setAcBudget] = useState('120');
   const [acReport, setAcReport] = useState<unknown>(null);
+  /**
+   * ⭐⭐ 跟着左边走 —— 用户 2026-09-18:
+   * 「点击左边时,右边自动填充变量,点击采集,即可采集。」
+   *
+   * ⚠️ 下拉与参数框**照样在**(编排时要用),只是值可以从当前页面自动来;
+   * 填完看得见、能改 —— 不是黑盒。
+   * ⚠️ 自动填充可关 —— 你想采别的页面时不该被一直覆盖回去。
+   */
+  const [acFollow, setAcFollow] = useState(true);
+  const [acCurrent, setAcCurrent] = useState<{ url?: string; name?: string } | null>(null);
   const [atts, setAtts] = useState<Array<{ name: string; value: string }>>([
     { name: 'bio', value: '' },
     { name: '上下文', value: '' },
@@ -204,6 +214,28 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * ⚠️ 退订必须返回 —— 组件卸载后还收广播会往死组件里 setState
    * (多窗口下每个 view 实例各收一份,不退订会越积越多)。
    */
+
+  /**
+   * ⭐ 每 1.5s 问一次「左边在哪一页」,自动填充下拉与参数。
+   * ⚠️ 只在跟随开着、且**不在跑**的时候填 —— 采集途中页面会变(它自己导航),
+   * 那时覆盖输入框会让人以为自己选的被改掉了。
+   */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!acFollow || busy !== null) return;
+      void (async () => {
+        const r = await api()?.whereAmI(wcId());
+        const page = r?.page ?? null;
+        setAcCurrent({ url: r?.url, name: page?.name });
+        if (!page) return;
+        setAcPage(page.name);
+        if (page.params.handle) setGotoHandle(page.params.handle);
+        if (page.params.tweetId) setGotoTweetId(page.params.tweetId);
+        if (page.params.q) setGotoQuery(page.params.q);
+      })();
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [acFollow, busy]);
 
   // 打开就拉一次页面清单 —— 「屏幕上几个页面,这里就该几行」
   useEffect(() => {
@@ -674,6 +706,20 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
               <div className="krig-webc__fn-head">
                 <span className="krig-webc__fn-name">无人工采集</span>
                 <span className="krig-webc__fn-sig">导航 + 滚动 + 解析载荷 + 入库 —— 不用你点</span>
+              </div>
+              <div className="krig-webc__row">
+                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input type="checkbox" checked={acFollow}
+                    onChange={(e) => setAcFollow(e.target.checked)} />
+                  跟着左边走
+                </label>
+                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                  {acCurrent?.name
+                    ? <>左边现在在 <b>{acCurrent.name}</b> —— 下拉与参数已自动填好,点采集即可</>
+                    : acCurrent?.url
+                      ? <>⚠️ 认不出左边这个页面({String(acCurrent.url).slice(0, 60)})—— 请手动选</>
+                      : '(还没读到左边的页面)'}
+                </span>
               </div>
               <div className="krig-webc__row">
                 <select className="krig-webc__in" style={{ flex: 1 }} value={acPage}

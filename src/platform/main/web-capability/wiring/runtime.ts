@@ -193,6 +193,21 @@ export function resolveSemanticPage(
   return hit ? { url: hit.url, describe: hit.describe } : null;
 }
 
+/**
+ * ⭐ 反向:当前 URL → 语义名 + 参数(问每一张表,第一个认出来的赢)。
+ *
+ * 用户 2026-09-18:「点击左边时,右边自动填充变量,点击采集,即可采集。」
+ */
+export function identifySemanticPage(
+  url: string,
+): { name: string; params: Record<string, string> } | null {
+  for (const t of pageTables.values()) {
+    const hit = t.identify?.(url);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 const mergedPages: PageResolver = {
   resolve(name, params) {
     for (const t of pageTables.values()) {

@@ -170,4 +170,68 @@ export class XPageResolver implements PageResolver {
   names(): string[] {
     return Object.keys(PAGES);
   }
+
+  /**
+   * ⭐⭐ **反向**:当前 URL → 语义名 + 参数。
+   *
+   * 用户 2026-09-18:「点击左边时,右边自动填充变量,点击采集,即可采集。」
+   *
+   * ⚠️ 与正向**同一张表同一处维护** —— 另写一份会漂,
+   * 而漂的表现是「自动填的页面名和实际采的不是同一个」,最难查。
+   * 所以这里的顺序与 `PAGES` 的定义顺序对应,加页面时两边一起改。
+   *
+   * ⚠️ 认不出来返回 null,**绝不猜一个** ——
+   * 猜错会让人以为「自动填好了」,然后采了别的页面。
+   */
+  identify(url: string): { name: string; params: Record<string, string> } | null {
+    let path: string;
+    let search: URLSearchParams;
+    try {
+      const u = new URL(url);
+      // ⚠️ 只认 X 自己的域,别的站点一律不认
+      if (!/(^|\.)x\.com$|(^|\.)twitter\.com$/.test(u.hostname)) return null;
+      path = u.pathname.replace(/\/$/, '');
+      search = u.searchParams;
+    } catch { return null; }
+
+    if (path === '/home') return { name: 'x.home', params: {} };
+    if (path === '/notifications') return { name: 'x.notifications', params: {} };
+    if (path === '/compose/post') return { name: 'x.compose', params: {} };
+    if (path.startsWith('/compose/articles')) return { name: 'x.composeArticles', params: {} };
+    if (path === '/search') {
+      const q = search.get('q') ?? '';
+      return q ? { name: 'x.search', params: { q, f: search.get('f') ?? 'live' } } : null;
+    }
+
+    // /<handle>/status/<id>
+    const st = path.match(/^\/([^/]+)\/status\/(\d+)$/);
+    if (st) return { name: 'x.status', params: { handle: st[1], tweetId: st[2] } };
+
+    // /<handle>/with_replies | /articles
+    const sub = path.match(/^\/([^/]+)\/(with_replies|articles)$/);
+    if (sub) {
+      return {
+        name: sub[2] === 'with_replies' ? 'x.withReplies' : 'x.articles',
+        params: { handle: sub[1] },
+      };
+    }
+
+    /**
+     * /<handle> —— 某人主页。
+     * ⚠️ 必须排除 X 自己的路由(/explore /settings /i/... 等),
+     * 否则会把「设置页」认成「一个叫 settings 的人的主页」,
+     * 然后采集跑到那儿去 —— 而现象是「采到 0 条」,指向完全错误的方向。
+     */
+    const RESERVED = new Set([
+      'explore', 'settings', 'messages', 'bookmarks', 'lists', 'communities',
+      'jobs', 'premium', 'i', 'intent', 'search', 'home', 'notifications',
+      'compose', 'login', 'logout', 'signup', 'tos', 'privacy',
+    ]);
+    const one = path.match(/^\/([^/]+)$/);
+    if (one && !RESERVED.has(one[1].toLowerCase())) {
+      return { name: 'x.profile', params: { handle: one[1] } };
+    }
+
+    return null;   // ⚠️ 认不出来就是认不出来,不猜
+  }
 }

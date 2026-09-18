@@ -45,7 +45,7 @@
 import { app, ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import {
-  controlEngine, inputEngine, listAnchorOwners, listAnchorNames, listPageNames, resolveSemanticPage,
+  controlEngine, inputEngine, listAnchorOwners, listAnchorNames, listPageNames, resolveSemanticPage, identifySemanticPage,
   traceRecorder, traceSink,
 } from '../web-capability/wiring/runtime';
 import { listBoundPages } from '../web-capability/wiring/page-hosts';
@@ -111,7 +111,7 @@ const STEP_TYPE_OF: Readonly<Record<string, StepType>> = {
   tap: 'act', press: 'act', hover: 'act', type: 'act',
   pages: 'fetch', anchors: 'fetch', pageNames: 'fetch',
   readTabBar: 'fetch', inventory: 'fetch', readVerified: 'fetch', probeMemory: 'fetch',
-  autoCollect: 'fetch',
+  autoCollect: 'fetch', whereAmI: 'fetch',
   execute: 'judge',
 };
 
@@ -203,7 +203,7 @@ function failFast(fn: string, reason: string, t0: number): { channelOk: false; e
 }
 
 /** 注册的通道数 —— 与下面 ipcMain.handle 的条数一致 */
-const WEBC_COUNT = 17;
+const WEBC_COUNT = 18;
 
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
@@ -768,6 +768,27 @@ export function registerWebConsoleHandlers(): void {
         : { status: 'degraded', missing: r.problems },
       r.elapsedMs);
     return { channelOk: true, report: r };
+  });
+
+  /**
+   * ⭐ 当前页面是哪个语义页面 —— 让右边**跟着左边走**。
+   *
+   * 用户 2026-09-18:「点击左边时,右边自动填充变量,点击采集,即可采集。」
+   * 下拉与参数框照样在(编排时要用),只是**值可以从当前页面自动来**,
+   * 填完还看得见、能改 —— 不是黑盒。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_WHERE_AM_I, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { wcId?: unknown };
+    const t0 = Date.now();
+    const r = resolveXWebContents(typeof p.wcId === 'number' ? p.wcId : undefined);
+    if ('error' in r) return failFast('whereAmI', r.error, t0);
+    const url = r.wc.getURL();
+    const hit = identifySemanticPage(url);
+    // ⚠️ 认不出来不是错误(可能在设置页之类),但要如实说
+    recordRun('whereAmI', { url, name: hit?.name ?? null },
+      hit ? { status: 'ok' } : { status: 'degraded', missing: ['认不出这个页面'] },
+      Date.now() - t0);
+    return { channelOk: true, url, page: hit };
   });
 
   ipcMain.handle(IPC_CHANNELS.WEBC_TRACE, async (_e, payload: unknown) => {

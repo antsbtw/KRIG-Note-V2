@@ -146,6 +146,16 @@ export interface PageResolver {
   ): { url: string; arrival: ReadyCriterion; describe: string } | null;
   /** 已登记的页面名 —— 验收台列给人看,免得靠记忆猜 */
   names?(): string[];
+  /**
+   * ⭐ **反向**:当前 URL → 语义名 + 参数。认不出来返回 null。
+   *
+   * 用户 2026-09-18:「点击左边时,右边自动填充变量,点击采集,即可采集。」
+   * —— 人在左边点到某人主页,右边的下拉与参数框自动填好,点一下就采他。
+   *
+   * ⚠️ 可选:不是每个业务都需要反向。实现方**必须与正向同一张表**,
+   * 另写一份会漂 —— 而漂的表现是「自动填的和实际采的不是同一页」。
+   */
+  identify?(url: string): { name: string; params: Record<string, string> } | null;
 }
 
 /**
