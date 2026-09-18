@@ -178,7 +178,8 @@ function toRecord(t: HarvestedTweet, wsId?: string): TweetInboxRecord {
 /**
  * 跑一次无人工采集。
  *
- * @param url 目标页面(首页时间线 / 某人主页 / 搜索结果都行)
+ * @param url 目标页面。⭐ **已经在这一页就不会跳** —— 「确保在目标页」是
+ *   流程的一个步骤,不是两个流程(用户 2026-09-18 纠正)。传空串 = 采当前页。
  * @param targetWcId X webview 的 wcId
  * @param opts.maxRounds 滚动轮数上限 —— **是参数不是常量**(用户定过)
  */

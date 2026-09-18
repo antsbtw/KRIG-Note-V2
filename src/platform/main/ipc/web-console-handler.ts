@@ -687,7 +687,7 @@ export function registerWebConsoleHandlers(): void {
    */
   ipcMain.handle(IPC_CHANNELS.WEBC_AUTO_COLLECT, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as {
-      wcId?: unknown; page?: unknown; params?: unknown;
+      wcId?: unknown; page?: unknown; params?: unknown; current?: unknown;
       maxRounds?: unknown; budgetMs?: unknown; wsId?: unknown;
     };
     const t0 = Date.now();
@@ -695,16 +695,34 @@ export function registerWebConsoleHandlers(): void {
      * ⚠️ 收**语义页面名**,不收 URL —— URL 是 adapter 的知识。
      * 守卫「面板不许构造 x.com URL」正为此:站点改版只改 x-pages.ts 一处。
      */
+    /**
+     * ⭐ 两种模式:
+     *  · 给了 page → 导航到那个语义页面再采
+     *  · 没给 page → **采当前页**(用户 2026-09-18:
+     *    「我直接点击某个人,x 跳转到这个人的页面,点击采集,即可采集」)
+     *
+     * ⭐ 「要不要跳转」由**流程自己判断**(harvestTimeline 比对当前 URL):
+     * 已经在目标页就不跳,省掉重新加载、不冲掉滚动位置、不白等 4.5 秒。
+     * ⚠️ 不让人选「要不要导航」—— 那是把到达方式当成了不同流程。
+     */
+    const current = p.current === true;
     const pageName = String(p.page ?? '').trim();
-    if (!pageName) return failFast('autoCollect', 'page 必填(语义页面名,如 x.home)', t0);
-    const resolved = resolveSemanticPage(pageName,
-      typeof p.params === 'object' && p.params ? p.params as Record<string, string> : {});
-    if (!resolved) {
-      return failFast('autoCollect',
-        `未登记的页面名「${pageName}」—— 可用:${listPageNames().flatMap((t) => t.names).join(', ')}`, t0);
+    if (!current && !pageName) {
+      return failFast('autoCollect', 'page 必填(语义页面名),或传 current:true 采当前页', t0);
     }
 
-    const r = await autoCollect(resolved.url,
+    let url = '';
+    if (!current) {
+      const resolved = resolveSemanticPage(pageName,
+      typeof p.params === 'object' && p.params ? p.params as Record<string, string> : {});
+      if (!resolved) {
+        return failFast('autoCollect',
+          `未登记的页面名「${pageName}」—— 可用:${listPageNames().flatMap((t) => t.names).join(', ')}`, t0);
+      }
+      url = resolved.url;
+    }
+
+    const r = await autoCollect(url,
       typeof p.wcId === 'number' ? p.wcId : undefined,
       {
         maxRounds: typeof p.maxRounds === 'number' ? p.maxRounds : undefined,
@@ -733,7 +751,7 @@ export function registerWebConsoleHandlers(): void {
     const incomplete = r.sample.filter((x) => x.missing.length > 0).length;
 
     recordRun('autoCollect',
-      { page: pageName, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
+      { page: current ? '(当前页)' : pageName, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
         authorsWithRelation: r.authorsWithRelation, authorsWithBio: r.authorsWithBio,
         // ⭐ 长推统计排在前面 —— 留痕会截断,要紧的先写
         longText: r.longText,

@@ -220,8 +220,13 @@ declare global {
          * 关系/蓝V 在载荷里就有,但**要有新请求**才截得到,所以必须主动导航。
          */
         autoCollect(args: {
-          /** ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识 */
-          page: string;
+          /**
+           * ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识。
+           * ⭐ 采当前页时可省略(配 current:true)。
+           */
+          page?: string;
+          /** ⭐ 采**当前页面**,不导航 —— 人已经点到那个人页面上了 */
+          current?: boolean;
           params?: Record<string, string>;
           wcId?: number; maxRounds?: number;
           /** 时间预算(ms)。⚠️ 调轮数必须一起调它,否则预算先到点,轮数用不完 */

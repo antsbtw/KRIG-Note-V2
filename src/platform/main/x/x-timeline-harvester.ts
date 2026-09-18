@@ -364,8 +364,42 @@ export async function harvestTimeline(
   wc.debugger.on('message', onMessage);
   await wc.debugger.sendCommand('Network.enable').catch(() => {});
 
-  wc.loadURL(url);
-  await new Promise((r) => setTimeout(r, 4500));
+  /**
+   * ⭐⭐ 「确保在目标页」是**一个步骤**,不是两个流程。
+   *
+   * ── 用户 2026-09-18 纠正 ──
+   *
+   * > 「这是通用的子流程,如果输入一个用户名,点击采集,
+   * >   也是要先跳转到这个人的主页,对吗?」
+   *
+   * 对。「输入 handle 采集」与「采当前页」**只是到达方式不同**,
+   * 后面的滚动/抓载荷/入库完全一样。我起初做成两个按钮,
+   * 是把**到达方式**当成了**不同流程**。
+   *
+   * ⭐ 所以判断放在这里,不让人选:
+   *  · 已经在目标页 → 不跳(省掉重新加载、不冲掉滚动位置、不白等 4.5s)
+   *  · 不在 → 跳过去
+   *  · 没给 url → 就采当前页
+   */
+  const already = (() => {
+    if (!url) return true;                       // 没给目标 = 采当前页
+    try {
+      const nowUrl = wc.getURL();
+      // ⚠️ 只比 path,不比 query/hash —— X 会往 URL 上挂 ?src= 之类,
+      //    比全等会让「明明已经在这页」误判成「不在」,白跳一次
+      const a = new URL(url).pathname.replace(/\/$/, '');
+      const b = new URL(nowUrl).pathname.replace(/\/$/, '');
+      return a === b;
+    } catch { return false; }
+  })();
+
+  if (already) {
+    // 仍给一点时间让 CDP 监听就位 —— 刚 attach 就滚,头几个响应会漏在监听之前
+    await new Promise((r) => setTimeout(r, 300));
+  } else {
+    wc.loadURL(url);
+    await new Promise((r) => setTimeout(r, 4500));
+  }
 
   let lastY = -1;
   let stuck = 0;
