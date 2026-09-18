@@ -1204,3 +1204,56 @@ export async function x_migration_1_2_2(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.2.2'), now: Date.now() },
   );
 }
+
+/**
+ * 1.2.3 —— ⭐⭐ 采集顺序留痕(2026-09-18)
+ *
+ * ── 为什么需要(用户问全量/增量)──
+ *
+ * > 「第一次采集要全量,后面再次采集时补充没采的即可,对吗?
+ * >   我不知道 x 上的这个列表是按照实现的先后排序的吗?」
+ *
+ * 增量策略(「遇到采过的就停」)**只在列表按时间倒序时成立** ——
+ * 否则新关注的人可能出现在任何位置,不翻到底就不知道漏没漏。
+ *
+ * ⚠️ 而「X 按什么排序」**没人知道**,也不该猜。用户说得对:
+ * 「这个肉眼看不出来的,你要他们的元数据呀。」
+ *
+ * ⭐ 所以存**采集顺序**:同一次采集里,这个人是第几个出现的。
+ * 两次采集一对照就有答案 ——
+ *  · 新增的人都排在前面 → 按时间倒序,增量可以「遇到采过的就停」
+ *  · 新增的人散落各处   → 不是时间序,每次都得翻到底
+ *
+ * ⚠️ 载荷里**没有**「什么时候关注的」字段(那是关系元数据,不在 user 对象上),
+ * 所以只能靠顺序间接推断 —— 这一点要说清楚,别把推断当事实。
+ */
+const X_SCHEMA_1_2_3 = `
+-- 同一次采集里的序号(0 起)—— 列表顺序的唯一证据
+DEFINE FIELD IF NOT EXISTS list_seq      ON x_author TYPE option<int>;
+-- 这个序号是哪次采集、哪一页给的(不同页面的顺序不可比)
+DEFINE FIELD IF NOT EXISTS list_source   ON x_author TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS list_seen_at  ON x_author TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_author_list_seq ON x_author FIELDS list_source, list_seq;
+`;
+
+export async function x_migration_1_2_3(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_3);
+
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['list_seq', 'list_source', 'list_seen_at']) {
+    if (!(f in fields)) {
+      throw new Error(
+        `[x-schema 1.2.3] ${f} 没加上 —— 采集顺序存不下来,`
+        + '「列表按什么排序」这个问题就永远只能靠猜。',
+      );
+    }
+  }
+  console.log('[x-schema 1.2.3] 采集顺序字段已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.3', appliedAt = $now,
+      description = 'x_author list_seq/list_source (evidence for list ordering)'`,
+    { rid: new RecordId('schema_version', '1.2.3'), now: Date.now() },
+  );
+}

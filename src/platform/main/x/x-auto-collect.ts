@@ -227,9 +227,11 @@ function toRecord(t: HarvestedTweet, wsId?: string): TweetInboxRecord {
 export async function autoCollect(
   url: string,
   targetWcId?: number,
-  opts: { maxRounds?: number; budgetMs?: number; wsId?: string } = {},
+  opts: { maxRounds?: number; budgetMs?: number; wsId?: string; pageLabel?: string } = {},
 ): Promise<AutoCollectReport | { error: string }> {
   const t0 = Date.now();
+  /** 这批顺序属于哪个列表 —— followers 的第 3 名 ≠ following 的第 3 名 */
+  const pageLabel = opts.pageLabel ?? url;
 
   // ⭐ 导航 + 滚动 + 解析载荷,一条龙 —— 现成的,不重写
   const r = await harvestTimeline(url, targetWcId, opts.maxRounds ?? 8, {
@@ -292,6 +294,11 @@ export async function autoCollect(
    */
   let peopleWithBio = 0;
   let peopleWithRelation = 0;
+  /**
+   * ⭐ 采集顺序 —— 「X 的列表按什么排序」的唯一证据(migration 1.2.3)。
+   * ⚠️ `r.people` 来自 Map,**顺序即载荷里的出现顺序**,也就是列表顺序。
+   */
+  let listSeq = 0;
   for (const person of r.people) {
     const hasBio = !!person.bio;
     const hasRel = person.iFollow !== undefined || person.followsMe !== undefined;
@@ -310,6 +317,9 @@ export async function autoCollect(
         accountCreatedAt: person.accountCreatedAt,
         // ⭐ migration 1.2.2 补了这一列(此前采到了没地方存)
         location: person.location,
+        // ⭐ 顺序与来源一起写 —— 不同页面的序号不可比
+        listSeq: listSeq++,
+        listSource: pageLabel,
       });
       /**
        * ⚠️ 展示名/头像**不在 AuthorCounts 里** —— 那是 registerSeenAuthor 的字段。

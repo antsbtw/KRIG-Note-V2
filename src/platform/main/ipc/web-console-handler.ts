@@ -743,6 +743,9 @@ export function registerWebConsoleHandlers(): void {
          */
         budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined,
         wsId: typeof p.wsId === 'string' ? p.wsId : undefined,
+        // ⭐ 顺序的归属用**语义页面名 + handle**,比 URL 稳(URL 会带 query)
+        pageLabel: current ? '(当前页)'
+          : `${pageName}:${(p.params as Record<string, string> | undefined)?.handle ?? ''}`,
       });
 
     if ('error' in r) return failFast('autoCollect', r.error, t0);

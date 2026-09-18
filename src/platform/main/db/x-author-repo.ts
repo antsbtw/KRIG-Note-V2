@@ -216,6 +216,17 @@ export interface AuthorCounts {
    * 记忆 project-x-reply-decision-trace)。
    */
   location?: string;
+  /**
+   * ⭐ 采集顺序 —— 同一次采集里第几个出现(0 起)。
+   *
+   * 「X 的列表按什么排序」没人知道,而增量策略依赖这个事实。
+   * 存下来,两次采集一对照就有答案(migration 1.2.3)。
+   *
+   * ⚠️ 不同来源的序号**不可比**(followers 的第 3 名 ≠ following 的第 3 名),
+   * 所以必须与 `listSource` 一起写。
+   */
+  listSeq?: number;
+  listSource?: string;
 }
 
 /**
@@ -246,6 +257,8 @@ export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Pr
     bio: counts.bio ?? undefined,
     bv: counts.isBlueVerified ?? undefined,
     loc: counts.location ?? undefined,
+    lseq: counts.listSeq ?? undefined,
+    lsrc: counts.listSource ?? undefined,
   };
   const existing = await db.query<[AuthorRow[]]>(
     `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
@@ -254,6 +267,8 @@ export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Pr
     following_count = $gc, favourites_count = $lc, account_created_at = $ca,
     follows_me = $fm, i_follow = $ifl, x_blocking = $xb,
     bio = $bio, is_blue_verified = $bv, location = $loc,
+    list_seq = $lseq, list_source = $lsrc,
+    list_seen_at = IF $lsrc != NONE THEN time::now() ELSE list_seen_at END,
     counts_at = time::now()`;
   if ((existing[0] ?? []).length > 0) {
     await db.query(`UPDATE x_author SET ${setClause} WHERE handle = $handle`, params);
