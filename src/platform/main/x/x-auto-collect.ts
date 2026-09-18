@@ -48,6 +48,18 @@ export interface AutoCollectReport {
   authorsWithRelation: number;
   /** 采到 bio 的作者数 */
   authorsWithBio: number;
+  /**
+   * ⭐ 长推(Show more)统计 —— 用户 2026-09-18 问「show more 的内容
+   * 是否被取回来?或者漏失了?」
+   *
+   * 载荷路**是处理了的**:`note_tweet.note_tweet_results.result.text`
+   * 优先于会被截断的 `legacy.full_text`。入库也不截(schema 无长度限制)。
+   * 但「理论上没丢」不够 —— 这里给出**可验证的数字**:
+   * 有几条长推、最长多少字、平均多少字。
+   *
+   * ⚠️ 若 `longText > 0` 而 `maxChars` 只有 280 上下,那就是**真截断了**。
+   */
+  longText: { count: number; maxChars: number; avgChars: number };
   /** 载荷条数;0 说明导航没触发请求(页面可能用了缓存) */
   payloads: number;
   /**
@@ -285,6 +297,15 @@ export async function autoCollect(
     rounds: r.rounds,
     dateSpan: r.dateSpan,
     elapsedMs: Date.now() - t0,
+    longText: (() => {
+      const longs = r.tweets.filter((t) => t.isLongText);
+      const lens = r.tweets.map((t) => (t.text ?? '').length);
+      return {
+        count: longs.length,
+        maxChars: lens.length ? Math.max(...lens) : 0,
+        avgChars: lens.length ? Math.round(lens.reduce((a, b) => a + b, 0) / lens.length) : 0,
+      };
+    })(),
     coverage,
     sample,
   };

@@ -35,34 +35,8 @@ type Run = {
 };
 
 const api = () => window.electronAPI?.webConsole;
-/** ⚠️ 主侧已有这套(startCaptureMonitor + broadcast),**renderer 侧此前零接收** ——
- *  广播出去没人听,正是「建好了却点不到」那个形态(feedback-guard-must-pin-live-code)。*/
-const xapi = () => (window.electronAPI as { xTimeline?: {
-  captureStart(wcId?: number): Promise<unknown>;
-  captureStop(): Promise<unknown>;
-  onCaptureUpdate(cb: (s: unknown) => void): () => void;
-} } | undefined)?.xTimeline;
 
-type CapturedTweet = Record<string, unknown> & { tweetId?: string };
-type CaptureSnapshot = {
-  running?: boolean; onScreenCount?: number; captured?: number;
-  seenInDom?: number; skippedAds?: number; payloads?: number; captureRate?: number;
-  recent?: CapturedTweet[];
-  rawPayloads?: Array<{ op: string; url: string; body: string; at: number; bytes: number }>;
-  cdpNote?: string;
-  graphqlSeen?: number;
-  actions?: Array<{ t: number; kind: string; detail: string }>;
-  hoverProfiles?: Record<string, Record<string, unknown>>;
-};
 
-/** 全字段都要列 —— 包括空的。只显示有值的,就看不出少了什么 */
-const VERIFY_FIELDS = [
-  'tweetId', 'authorHandle', 'authorRestId', 'authorName', 'authorAvatar', 'isBlueVerified', 'verifiedEvidence', 'authorBio', 'iFollow', 'followEvidence', 'followsMe',
-  'text', 'createdAt', 'lang', 'tweetUrl',
-  'isReply', 'inReplyToStatusId', 'inReplyToScreenName', 'conversationId',
-  'quotedStatusId', 'hasMedia', 'mediaTypes', 'media', 'isLongText',
-  'metrics', 'self', 'fromDom',
-] as const;
 
 
 /**
@@ -161,11 +135,6 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * 互比出来是「一致」,其实共同盲区。而人眼看得见页面上真有什么 ——
    * 那才是真值。这正是 AI 验不了、只能靠人的那部分。
    */
-  const [capSnap, setCapSnap] = useState<CaptureSnapshot | null>(null);
-  const [capOn, setCapOn] = useState(false);
-  const [rawOpen, setRawOpen] = useState<number | null>(null);
-  const [vBadge, setVBadge] = useState<unknown>(null);
-  const [memProbe, setMemProbe] = useState<unknown>(null);
   /**
    * ⚠️ 传**语义页面名**,不是 URL —— 守卫「面板不许构造 x.com URL」刚抓住我。
    * 那条规矩是对的:URL 是 adapter 的知识,站点改版只改 x-pages.ts 一处。
@@ -229,10 +198,6 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * ⚠️ 退订必须返回 —— 组件卸载后还收广播会往死组件里 setState
    * (多窗口下每个 view 实例各收一份,不退订会越积越多)。
    */
-  useEffect(() => {
-    const off = xapi()?.onCaptureUpdate((snap) => setCapSnap(snap as CaptureSnapshot));
-    return () => { off?.(); };
-  }, []);
 
   // 打开就拉一次页面清单 —— 「屏幕上几个页面,这里就该几行」
   useEffect(() => {
@@ -280,7 +245,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
           { id: 'input' as const, label: '输入', desc: '往页面里填' },
           { id: 'output' as const, label: '输出', desc: '看得见的事实' },
           { id: 'exec' as const, label: '执行', desc: '第四类:对象=模型,不是页面' },
-          { id: 'verify' as const, label: '采集验证', desc: '左边操作 X,右边列出采到的一切 —— 你来核对漏没漏' },
+          { id: 'verify' as const, label: '采集', desc: '无人工采集:导航+滚动+解析载荷+入库,并报字段完整性' },
         ]).map((t) => (
           <button
             key={t.id}
@@ -731,6 +696,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
                   problems: string[]; stopReason: string; elapsedMs: number;
+                  longText?: { count: number; maxChars: number; avgChars: number };
                   coverage?: Array<{ field: string; have: number; total: number; rate: number }>;
                   sample?: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
                 }; error?: string } | null;
@@ -750,38 +716,49 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       {d.problems.length > 0 && <> · ⚠️ {d.problems.join('、')}</>}</div>
 
                     {/**
-                      * ⭐⭐ 字段级覆盖率 —— 用户 2026-09-18:
-                      * 「我关注的是采集数据的完整性,每一条数据都是完整的吗?」
-                      * ⚠️ 总数不等于完整:77 条里可能条条缺字段,而「采到 77 条」照样好看。
+                      * ⭐⭐ 浓缩成**结论**,不铺满屏 —— 用户 2026-09-18:
+                      * 「这些数据是验证用的,但是对我来讲,我是要看到事实。」
+                      *
+                      * ⚠️ 此前把 19 个字段逐行列出(大部分是 100%),
+                      * 真正有信息的那一两行被淹在里面。
+                      * 全绿的只报一句,**只展开没到 100% 的**。
                       */}
-                    {(d.coverage?.length ?? 0) > 0 && (
-                      <div style={{ marginTop: 8 }}>
-                        <div><b>字段完整性</b>(分母按字段种类算,不是一律用总条数)</div>
-                        {d.coverage!.map((c) => (
-                          <div className="krig-webc__row" key={c.field}>
-                            <span className="krig-webc__note" style={{ margin: 0, width: 170, flexShrink: 0 }}>
-                              {c.total === 0 ? '·' : c.rate === 1 ? '✓' : c.rate >= 0.9 ? '⚠️' : '✗'} {c.field}
-                            </span>
-                            <span className="krig-webc__note" style={{ margin: 0, width: 90, flexShrink: 0 }}>
-                              {c.have}{c.total > 0 ? `/${c.total}` : ''}
-                            </span>
-                            <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                              {c.total === 0
-                                ? '(条件字段,不算覆盖率 —— 不是回复本来就没有)'
-                                : `${(c.rate * 100).toFixed(0)}%`}
-                            </span>
+                    {(d.coverage?.length ?? 0) > 0 && (() => {
+                      const scored = d.coverage!.filter((c) => c.total > 0);
+                      const gaps = scored.filter((c) => c.rate < 1);
+                      const lt = d.longText;
+                      return (
+                        <div style={{ marginTop: 6 }}>
+                          <div>
+                            <b>字段完整性</b>:{scored.length - gaps.length}/{scored.length} 项 100%
+                            {gaps.length === 0 && ' —— 全齐'}
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          {gaps.map((c) => (
+                            <div key={c.field}>
+                              ⚠️ <b>{c.field}</b> {c.have}/{c.total}({(c.rate * 100).toFixed(0)}%)
+                            </div>
+                          ))}
+                          {lt && (
+                            <div>
+                              <b>长推(Show more)</b>:{lt.count} 条 ·
+                              最长 <b>{lt.maxChars}</b> 字 · 平均 {lt.avgChars} 字
+                              {lt.count > 0 && lt.maxChars <= 290
+                                ? ' ⚠️ 最长只有 ~280 字,疑似被截断'
+                                : lt.count > 0 ? ' ✓ 全文已取回' : ''}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* ⭐ 逐条明细 —— 人要能逐条检查,不是只看百分比 */}
                     {(d.sample?.length ?? 0) > 0 && (
                       <div style={{ marginTop: 8 }}>
                         <div><b>逐条检查</b>(前 {d.sample!.length} 条 ·
                           完整 {d.sample!.filter((x) => x.missing.length === 0).length} 条 ·
-                          有缺 {d.sample!.filter((x) => x.missing.length > 0).length} 条)</div>
-                        {d.sample!.map((x) => (
+                          有缺 {d.sample!.filter((x) => x.missing.length > 0).length} 条)
+                          {/* ⚠️ 只列**有缺的** —— 全列会把真问题淹掉 */}</div>
+                        {d.sample!.filter((x) => x.missing.length > 0).map((x) => (
                           <div className="krig-webc__row" key={x.tweetId}>
                             <span className="krig-webc__note" style={{ margin: 0, width: 24, flexShrink: 0 }}>
                               {x.missing.length === 0 ? '✓' : '⚠️'}
@@ -809,294 +786,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
               </div>
             </div>
 
-            <div className="krig-webc__fn">
-              <div className="krig-webc__fn-head">
-                <span className="krig-webc__fn-name">采集验证</span>
-                <span className="krig-webc__fn-sig">左边操作 X · 右边列出采到的一切</span>
-              </div>
-              <div className="krig-webc__row">
-                <button type="button" className="krig-webc__go" disabled={busy !== null}
-                  onClick={() => void run(capOn ? 'captureStop' : 'captureStart', {}, async () => {
-                    const r = capOn ? await xapi()?.captureStop() : await xapi()?.captureStart(wcId());
-                    setCapOn(!capOn);
-                    return r;
-                  })}>{capOn ? '停止监测' : '开始监测'}</button>
-                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                  {capSnap?.running
-                    ? `● 监测中 · 屏幕上 ${capSnap.onScreenCount ?? 0} 条 · 累计 ${capSnap.captured ?? 0} · 载荷 ${capSnap.payloads ?? 0}`
-                    : '未开始 —— 点「开始监测」后在左边正常浏览 X'}
-                </span>
-              </div>
-
-              {/**
-                * ⭐⭐ 操作流 × 载荷 —— **按时间交织**,因果一眼可见。
-                *
-                * ── 用户 2026-09-18 ──
-                * > 「我建议你在后台也能够观察到我在 x 上的操作以及操作结果才对呀。
-                * >   否则那叫什么数据采集?」
-                *
-                * ⚠️ 此前监视器完全不知道用户做了什么,于是每次都只能回头问
-                * 「你点了吗」「有没有反应」—— 那正是「靠口头描述」的复发。
-                *
-                * ⭐ 交织显示的价值:「悬停头像 → 后面没有任何请求」
-                * 才**证明得了**「数据本来就在本地」,而不是停留在推测。
-                */}
-              {capSnap?.running && ((capSnap.actions?.length ?? 0) > 0
-                || (capSnap.rawPayloads?.length ?? 0) > 0) && (
-                <div className="krig-webc__fn" style={{ marginTop: 6 }}>
-                  <div className="krig-webc__fn-head">
-                    <span className="krig-webc__fn-name">你的操作 × 网络请求</span>
-                    <span className="krig-webc__fn-sig">按时间交织 —— 哪个动作触发了请求,一眼看见</span>
-                  </div>
-                  {(() => {
-                    type Row = { t: number; kind: string; text: string };
-                    const rows: Row[] = [
-                      ...(capSnap.actions ?? []).map((a) => ({
-                        t: a.t, kind: a.kind, text: a.detail,
-                      })),
-                      ...(capSnap.rawPayloads ?? []).map((r) => ({
-                        t: r.at, kind: 'payload',
-                        text: `${r.op} · ${(r.bytes / 1024).toFixed(0)}KB`,
-                      })),
-                    ].sort((a, b) => b.t - a.t).slice(0, 30);
-
-                    if (rows.length === 0) {
-                      return <div className="krig-webc__note">
-                        还没有记录到操作 —— 在左边点一下、悬停一下试试
-                      </div>;
-                    }
-                    const icon: Record<string, string> = {
-                      click: '👆', hover: '🖱', scroll: '↕', payload: '📦',
-                    };
-                    return rows.map((r, i) => (
-                      <div className="krig-webc__row" key={`${r.t}-${i}`}>
-                        <span className="krig-webc__note" style={{ margin: 0, width: 62, flexShrink: 0 }}>
-                          {new Date(r.t).toLocaleTimeString('zh-CN')}
-                        </span>
-                        <span className="krig-webc__note" style={{ margin: 0, width: 26, flexShrink: 0 }}>
-                          {icon[r.kind] ?? '·'}
-                        </span>
-                        <span className="krig-webc__note" style={{
-                          margin: 0, flex: 1,
-                          color: r.kind === 'payload' ? 'var(--accent, #6af)' : undefined,
-                          fontWeight: r.kind === 'payload' ? 600 : undefined,
-                        }}>
-                          {r.kind === 'payload' ? `载荷 ${r.text}` : r.text}
-                        </span>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              )}
-
-              {/**
-                * ⭐⭐ 悬浮卡白拿的画像 —— 用户 2026-09-18 的洞察:
-                * 「关键这里还有 bio 数据呀?这样就不一定逐个翻页就可以获取 bio 数据了。」
-                */}
-              {Object.keys(capSnap?.hoverProfiles ?? {}).length > 0 && (
-                <div className="krig-webc__fn" style={{ marginTop: 6 }}>
-                  <div className="krig-webc__fn-head">
-                    <span className="krig-webc__fn-name">悬浮卡画像</span>
-                    <span className="krig-webc__fn-sig">
-                      白拿的 bio / 粉丝数 / 关注状态 —— 零网络请求,不用逐个翻主页
-                    </span>
-                  </div>
-                  {Object.entries(capSnap!.hoverProfiles!).map(([h, p]) => (
-                    <div key={h} style={{ marginBottom: 8 }}>
-                      <div className="krig-webc__row">
-                        <span className="krig-webc__note" style={{ margin: 0, width: 150, flexShrink: 0 }}>
-                          <b>@{h}</b>
-                        </span>
-                        <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                          {p.iFollow ? '✓ 我已关注' : '· 未关注'}
-                          {p.isBlueVerified ? ' · 蓝V' : ''}
-                          {p.restId ? ` · id=${String(p.restId)}` : ''}
-                          {p.followingText ? ` · 关注 ${String(p.followingText)}` : ''}
-                          {p.followersText ? ` · 粉丝 ${String(p.followersText)}` : ''}
-                        </span>
-                      </div>
-                      <div className="krig-webc__row">
-                        <span className="krig-webc__note" style={{ margin: 0, width: 150, flexShrink: 0 }}>
-                          {p.bio ? '✓ bio' : '⚠️ bio'}
-                        </span>
-                        <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                          {p.bio ? String(p.bio).slice(0, 200) : '— (没解出来,看下面 rawHtml)'}
-                        </span>
-                      </div>
-                      {!p.bio && typeof p.rawHtml === 'string' && (
-                        <pre className="krig-webc__pre" style={{ maxHeight: 150, overflow: 'auto' }}>
-                          {String(p.rawHtml)}
-                        </pre>
-                      )}
-                    </div>
-                  ))}
-                  <div className="krig-webc__note">
-                    ⭐ 一张卡 ≈ 一次「抓画像」,而后者要**导航到那人主页 + 等 12 秒**。
-                    盘点里 bio 只有 <b>155/8021(2%)</b>,正是因为那条路太贵。
-                    <br />⚠️ 卡片 DOM 结构仓里零记录,所以解不出来时**把 rawHtml 摆出来** ——
-                    量不准时能当场看清该怎么改,不用猜。
-                  </div>
-                </div>
-              )}
-
-              {/**
-                * ⭐⭐ 载荷为 0 时**说清是哪一环断的** —— 这是「载荷 0」唯一有用的诊断。
-                *
-                * ⚠️ 此前 CDP 状态只进 console.log,用户看不见、我也读不到,
-                * 只能靠猜。用户定过:「在后台能 log 这些操作,而不是靠我口头描述」。
-                */}
-              {capSnap?.running && (capSnap.payloads ?? 0) === 0 && (
-                <div className="krig-webc__note" style={{ lineHeight: 1.9 }}>
-                  <div>⚠️ <b>一条载荷都没截到</b> —— 分三种,现在能分清:</div>
-                  <div>· CDP 通道:<b>{capSnap.cdpNote ?? '(未知)'}</b></div>
-                  <div>· 见过的 graphql 请求:<b>{capSnap.graphqlSeen ?? 0}</b> 条</div>
-                  <div>
-                    {(capSnap.graphqlSeen ?? 0) === 0
-                      ? <>→ <b>页面压根没发新请求</b>。
-                          <br />⭐ 这本身就是一个发现:<b>悬停弹卡片没有伴随任何网络请求</b>,
-                          说明那些关注关系数据**本来就在前端内存里** —— 是更早的时间线载荷带来的。
-                          <br />⚠️ 而那次载荷发生在**监测开始之前**,所以我们没截到。
-                          <br /><b>要验证:点一下「Following」再点回「For you」</b> ——
-                          那会让 X 重新拉一次时间线,我们就能截到完整载荷,
-                          当场看清关系字段在不在里面。
-                          <br />(单纯往下滚可能只用缓存,不一定发新请求)</>
-                      : <>→ 请求发生了但 <b>body 取不到</b>(响应体可能已被丢弃)——
-                          这是 CDP 侧的问题,我去查。</>}
-                  </div>
-                </div>
-              )}
-
-              <div className="krig-webc__row" style={{ display: 'none' }}>
-              </div>
-              <div className="krig-webc__row">
-                <button type="button" className="krig-webc__go" disabled={busy !== null}
-                  onClick={() => void run('probeMemory', {}, async () => {
-                    const r = await api()?.probeMemory(wcId()); setMemProbe(r); return r;
-                  })}>探内存里的 user 数据</button>
-                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                  ⭐ 磁盘已排除(IndexedDB 只存 UI 偏好、Cache 里 API 响应 no-store)——
-                  数据在页面 JS 内存里
-                </span>
-              </div>
-              {memProbe != null && (
-                <pre className="krig-webc__pre" style={{ maxHeight: 300, overflow: 'auto' }}>
-                  {JSON.stringify(memProbe, null, 2)}
-                </pre>
-              )}
-
-              <div className="krig-webc__row">
-                <button type="button" className="krig-webc__clear" disabled={busy !== null}
-                  onClick={() => void run('readVerified', {}, async () => {
-                    const r = await api()?.readVerified(wcId()); setVBadge(r); return r;
-                  })}>量一下蓝V结构</button>
-                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                  ⚠️ 蓝V的 selector 全仓没有实测记录 —— <b>量出来再写</b>,不猜
-                </span>
-              </div>
-              {vBadge != null && (
-                <pre className="krig-webc__pre" style={{ maxHeight: 260, overflow: 'auto' }}>
-                  {JSON.stringify(vBadge, null, 2)}
-                </pre>
-              )}
-
-              <div className="krig-webc__note">
-                ⭐ <b>你核对的是「漏没漏」</b>:左边页面上看得见的东西,右边是不是都列出来了。
-                <br />⚠️ <b>空字段也列出来并标 ⚠️</b> —— 只显示有值的,就看不出少了什么。
-                <br />⭐ 说「这个数据明明有」时,展开<b>原始载荷</b>当场分清:
-                是 X 压根没返回,还是返回了但我们没解出来 —— 两者修法完全相反。
-              </div>
-            </div>
-
-            {(capSnap?.recent ?? []).map((t, i) => (
-              <div className="krig-webc__fn" key={String(t.tweetId ?? i)}>
-                <div className="krig-webc__fn-head">
-                  <span className="krig-webc__fn-name">{String(t.tweetId ?? '(无 id)')}</span>
-                  <span className="krig-webc__fn-sig">
-                    {String(t.authorHandle ?? '?')} · {t.fromDom ? 'DOM 兜底' : '载荷'}
-                  </span>
-                </div>
-                {VERIFY_FIELDS.map((f) => {
-                  const v = t[f];
-                  const empty = v === undefined || v === null || v === ''
-                    || (Array.isArray(v) && v.length === 0);
-                  return (
-                    <div className="krig-webc__row" key={f}>
-                      <span className="krig-webc__note" style={{ margin: 0, width: 150, flexShrink: 0 }}>
-                        {empty ? '⚠️' : '✓'} {f}
-                      </span>
-                      <span className="krig-webc__note" style={{ margin: 0, flex: 1, wordBreak: 'break-all' }}>
-                        {empty ? '—' : (typeof v === 'object' ? JSON.stringify(v) : String(v))}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-
-            {(capSnap?.rawPayloads?.length ?? 0) > 0 && (
-              <div className="krig-webc__fn">
-                <div className="krig-webc__fn-head">
-                  <span className="krig-webc__fn-name">原始载荷</span>
-                  <span className="krig-webc__fn-sig">X 到底给了什么(最近 {capSnap!.rawPayloads!.length} 条)</span>
-                </div>
-                {/**
-                  * ⭐⭐ 自动判读 —— **不用人输任何东西**。
-                  *
-                  * ⚠️ 初版做成「让你输字段名去搜」,那是把我该知道的事甩给用户:
-                  * 用户怎么会知道该输 `relationship_perspectives`?
-                  * 面板的职责是**直接给结论**,不是给个搜索框让人自己查。
-                  */}
-                <div className="krig-webc__note" style={{ lineHeight: 1.9 }}>
-                  <div><b>截到的请求</b>:{
-                    Array.from(new Set(capSnap!.rawPayloads!.map((r) => r.op))).join('、') || '(无)'
-                  }</div>
-                  {(() => {
-                    const all = capSnap!.rawPayloads!;
-                    const has = (k: string) => all.some((r) => r.body.includes(k));
-                    const ops = new Set(all.map((r) => r.op));
-                    const hoverOp = [...ops].some((o) => /UserByScreenName|UserByRestId/i.test(o));
-                    const inTimeline = all
-                      .filter((r) => /Timeline|UserTweets/i.test(r.op))
-                      .some((r) => r.body.includes('relationship_perspectives')
-                        || r.body.includes('"followed_by"'));
-
-                    if (inTimeline) {
-                      return <div>✓ <b>关注关系在时间线载荷里就有</b> —— 你的推断对,
-                        数据早就打包下来了。<b>是我们没解出来</b>,我去修解析器。</div>;
-                    }
-                    if (hoverOp) {
-                      return <div>✓ <b>悬停触发了独立请求</b>(UserByScreenName)——
-                        而我们**已经把它截下来了**,只是解析器只认推文对象、把它整个跳过。
-                        <b>数据在手里,只是没解。</b></div>;
-                    }
-                    if (has('relationship_perspectives') || has('"followed_by"')) {
-                      return <div>✓ 关系字段出现在载荷里(但不在时间线里)—— 我去看是哪条请求带的。</div>;
-                    }
-                    return <div>⚠️ 最近 {all.length} 条载荷里<b>没有任何关系字段</b> ——
-                      要么还没悬停过,要么 X 真没给。
-                      <b>请把鼠标靠近一个头像让卡片弹出来</b>,然后再看这里。</div>;
-                  })()}
-                </div>
-                {capSnap!.rawPayloads!.map((r, i) => (
-                  <div key={`${r.at}-${i}`}>
-                    <div className="krig-webc__row">
-                      <button type="button" className="krig-webc__clear"
-                        onClick={() => setRawOpen(rawOpen === i ? null : i)}>
-                        {rawOpen === i ? '▾' : '▸'} {r.op}
-                      </button>
-                      <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                        {(r.bytes / 1024).toFixed(0)} KB
-                      </span>
-                    </div>
-                    {rawOpen === i && (
-                      <pre className="krig-webc__pre" style={{ maxHeight: 320, overflow: 'auto' }}>
-                        {r.body}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            {/**
+              * ⚠️ 「采集验证」那一块已删(用户 2026-09-18:「先去掉这个框?没有意义了」)。
+              *
+              * 它的使命是**诊断采集通不通** —— 操作流、原始载荷、悬浮卡、内存探针,
+              * 都是为了回答「数据在哪、为什么没采到」。那些问题现在有答案了:
+              * 关系/蓝V/bio 都在时间线载荷里,autoCollect 一次全拿。
+              *
+              * ⭐ 诊断脚手架完成使命就该拆,留着只会占屏幕、让人以为还要用它。
+              * 被动监视本身(startCaptureMonitor)保留在主侧,将来要用再接回来。
+              */}
           </>
         )}
 

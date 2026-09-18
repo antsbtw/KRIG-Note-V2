@@ -190,7 +190,7 @@ describe('⭐⭐ 按契约分类:控制 / 输入 / 输出 / 执行', () => {
 
     for (const [id, why] of [
       ['control', '契约三分法'], ['input', '契约三分法'], ['output', '契约三分法'],
-      ['exec', '第四类执行者'], ['verify', '采集验证(人核对漏没漏)'],
+      ['exec', '第四类执行者'], ['verify', '无人工采集 + 字段完整性'],
     ] as const) {
       expect(tabsBlock, `tab「${id}」不见了 —— ${why}`).toMatch(new RegExp(`id:\\s*'${id}'`));
     }
