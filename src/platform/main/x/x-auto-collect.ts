@@ -68,6 +68,11 @@ export interface AutoCollectReport {
    * 「我们应该忠实于页面能够获取的信息,分析数据是另外一个主题。」
    */
   problems: string[];
+  /**
+   * ⭐ 事实性说明(不是故障)—— 如「这一页没有推文」。
+   * ⚠️ 与 problems 分开:那是**链路坏了**,这是**如实解释一个数字**。
+   */
+  notes: string[];
   stopReason: string;
   /** 实际滚了几轮 —— 事实,不判断「够不够」 */
   rounds: number;
@@ -245,6 +250,28 @@ export async function autoCollect(
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
   /**
+   * ⭐ 「截到载荷却一条推都没解出来」要**说清楚**,不能只报 0 条。
+   *
+   * ── 用户 2026-09-18 在 verified_followers 页上采集 ──
+   *
+   * 这几页(followers / following / verified_followers)的载荷是
+   * `Followers`/`Following` —— 内容是**人的列表**,而 `extractTweetsFrom`
+   * 只认带 `legacy.id_str` 的推文对象,会把这些载荷整个跳过。
+   *
+   * ⚠️ 那样报告会显示「采到 0 条」,看着像**采集坏了** ——
+   * 而事实是「这一页本来就没有推文,需要的是另一种解析器」。
+   * 两者的处置完全不同:前者要修采集,后者要加「采人」能力。
+   */
+  const notes: string[] = [];
+  if (r.tweets.length === 0 && r.payloads > 0) {
+    notes.push(
+      `截到 ${r.payloads} 个载荷但解出 0 条推 —— `
+      + '这一页多半没有推文(如关注者/关注中列表),'
+      + '需要的是「采人」而不是「采推」,不是采集坏了',
+    );
+  }
+
+  /**
    * ⭐⭐ 字段级覆盖率 —— 用户 2026-09-18:「每一条数据都是完整的吗?」
    *
    * ⚠️ 分母按字段种类算,**不是一律用总条数**:
@@ -294,6 +321,7 @@ export async function autoCollect(
     authorsWithBio,
     payloads: r.payloads,
     problems: r.problems,
+    notes,
     stopReason: r.stopReason,
     rounds: r.rounds,
     dateSpan: r.dateSpan,

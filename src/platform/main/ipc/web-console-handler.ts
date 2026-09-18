@@ -763,6 +763,7 @@ export function registerWebConsoleHandlers(): void {
         rounds: r.rounds,
         dateDays: r.dateSpan.days,
         dateGaps: r.dateSpan.gaps.length,
+        notes: r.notes,
       },
       r.problems.length === 0 ? { status: 'ok' }
         : { status: 'degraded', missing: r.problems },

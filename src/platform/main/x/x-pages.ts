@@ -129,6 +129,52 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
     };
   },
 
+  /**
+   * ⭐ 关注者 / 关注中 / 验证关注者 —— **人的列表页**(2026-09-18 补登记)。
+   *
+   * 用户在 `x.com/OTun_MyVPN/verified_followers` 上点采集,面板说
+   * 「认不出左边这个页面」—— 因为这三页**根本没登记**。
+   *
+   * ⚠️ **登记 ≠ 能采**:这几页的载荷是 `Followers`/`Following`,内容是
+   * **人的列表**,而 `extractTweetsFrom` 只认带 `legacy.id_str` 的推文对象,
+   * 会把这些载荷整个跳过 → 采集会诚实地报「载荷 N 个、解析 0 条」。
+   *
+   * ⭐ 「采人」是另一种采集类型(产出 x_author 行而非 x_tweet 行、
+   * 字段不同、报告口径不同),值得单独设计 —— 先把页面认出来,解析另说。
+   *
+   * ⚠️ 到位判据用 `urlIncludes` 不用 `byUrlAndTweets`:
+   * 这几页上**没有推文**,等 `tweet.article` 会必然超时。
+   */
+  'x.followers': (p) => {
+    const h = cleanHandle(p.handle ?? '');
+    if (!h) return null;
+    return {
+      url: `${X_PROFILE.baseUrl}/${h}/followers`,
+      arrival: byUrl(`/${h}/followers`),
+      describe: `@${h} 的关注者`,
+    };
+  },
+
+  'x.verifiedFollowers': (p) => {
+    const h = cleanHandle(p.handle ?? '');
+    if (!h) return null;
+    return {
+      url: `${X_PROFILE.baseUrl}/${h}/verified_followers`,
+      arrival: byUrl(`/${h}/verified_followers`),
+      describe: `@${h} 的验证关注者`,
+    };
+  },
+
+  'x.following': (p) => {
+    const h = cleanHandle(p.handle ?? '');
+    if (!h) return null;
+    return {
+      url: `${X_PROFILE.baseUrl}/${h}/following`,
+      arrival: byUrl(`/${h}/following`),
+      describe: `@${h} 关注的人`,
+    };
+  },
+
   /** 通知页 */
   'x.notifications': () => ({
     url: `${X_PROFILE.baseUrl}/notifications`,
@@ -207,13 +253,18 @@ export class XPageResolver implements PageResolver {
     const st = path.match(/^\/([^/]+)\/status\/(\d+)$/);
     if (st) return { name: 'x.status', params: { handle: st[1], tweetId: st[2] } };
 
-    // /<handle>/with_replies | /articles
-    const sub = path.match(/^\/([^/]+)\/(with_replies|articles)$/);
+    // /<handle>/with_replies | /articles | /followers | /verified_followers | /following
+    const sub = path.match(/^\/([^/]+)\/(with_replies|articles|followers|verified_followers|following)$/);
     if (sub) {
-      return {
-        name: sub[2] === 'with_replies' ? 'x.withReplies' : 'x.articles',
-        params: { handle: sub[1] },
+      // ⚠️ 与正向 PAGES 的键一一对应 —— 加页面时两边一起改,否则会漂
+      const NAME: Record<string, string> = {
+        with_replies: 'x.withReplies',
+        articles: 'x.articles',
+        followers: 'x.followers',
+        verified_followers: 'x.verifiedFollowers',
+        following: 'x.following',
       };
+      return { name: NAME[sub[2]], params: { handle: sub[1] } };
     }
 
     /**

@@ -31,6 +31,26 @@ describe('⭐⭐ 认得出常见页面', () => {
     });
   });
 
+  it('⭐⭐ 关注者 / 验证关注者 / 关注中 —— 人的列表页', () => {
+    /**
+     * 用户 2026-09-18 在 x.com/OTun_MyVPN/verified_followers 上点采集,
+     * 面板说「认不出左边这个页面」—— 因为这三页**根本没登记**。
+     *
+     * ⚠️ 登记 ≠ 能采:这几页的载荷是 Followers/Following(人的列表),
+     * 而 extractTweetsFrom 只认推文对象,会整个跳过。
+     * 「采人」是另一种采集类型,先让页面认得出。
+     */
+    expect(id('https://x.com/somebody/followers')).toEqual({
+      name: 'x.followers', params: { handle: 'somebody' },
+    });
+    expect(id('https://x.com/somebody/verified_followers')).toEqual({
+      name: 'x.verifiedFollowers', params: { handle: 'somebody' },
+    });
+    expect(id('https://x.com/somebody/following')).toEqual({
+      name: 'x.following', params: { handle: 'somebody' },
+    });
+  });
+
   it('⭐ 推文与回复 / 文章列表', () => {
     expect(id('https://x.com/somebody/with_replies')).toEqual({
       name: 'x.withReplies', params: { handle: 'somebody' },
@@ -114,6 +134,9 @@ describe('⭐⭐ 正反向必须对得上', () => {
       'https://x.com/somebody',
       'https://x.com/somebody/with_replies',
       'https://x.com/somebody/articles',
+      'https://x.com/somebody/followers',
+      'https://x.com/somebody/verified_followers',
+      'https://x.com/somebody/following',
       'https://x.com/notifications',
     ]) {
       const hit = id(url);

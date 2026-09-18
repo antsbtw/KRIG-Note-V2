@@ -768,7 +768,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 const r = acReport as { report?: {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
-                  problems: string[]; stopReason: string; elapsedMs: number;
+                  problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   longText?: { count: number; maxChars: number; avgChars: number };
                   coverage?: Array<{ field: string; have: number; total: number; rate: number }>;
                   sample?: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
@@ -785,6 +785,9 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       {d.authorsWithRelation > 0
                         ? ' —— 不用点击就拿到了'
                         : ' —— 一个都没有,载荷里可能没带关系字段'}</div>
+                    {(d.notes?.length ?? 0) > 0 && d.notes!.map((n, i) => (
+                      <div key={i}>ℹ️ {n}</div>
+                    ))}
                     <div>停止原因:{d.stopReason}
                       {d.problems.length > 0 && <> · ⚠️ {d.problems.join('、')}</>}</div>
 

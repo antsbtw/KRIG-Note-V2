@@ -246,6 +246,8 @@ declare global {
             url: string; tweets: number; fromPayload: number; saved: number;
             authorsWithRelation: number; authorsWithBio: number;
             payloads: number; problems: string[]; stopReason: string; elapsedMs: number;
+            /** ⭐ 事实性说明(如「这一页没有推文」)—— 与 problems(链路坏了)分开 */
+            notes: string[];
             /** 实际滚了几轮 —— 事实 */
             rounds: number;
             /** ⭐ 日期跨度与空洞 —— **事实**,采集层不解释成「漏采」(首页是算法混排) */
