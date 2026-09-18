@@ -14,7 +14,7 @@
  * 所以 X 自己的路由必须排除,认不出来就返回 null,**绝不猜**。
  */
 import { describe, it, expect } from 'vitest';
-import { XPageResolver } from '@platform/main/x/x-pages';
+import { XPageResolver, PAGE_PARAMS } from '@platform/main/x/x-pages';
 
 const r = new XPageResolver();
 const id = (url: string) => r.identify(url);
@@ -156,6 +156,57 @@ describe('⭐⭐ 正反向必须对得上', () => {
       const hit = id(url);
       if (!hit) continue;
       expect(known.has(hit.name), `identify 认出了未登记的名字 ${hit.name}`).toBe(true);
+    }
+  });
+});
+
+
+describe('⭐⭐ 参数需求表必须与页面表对齐', () => {
+  /**
+   * ── 用户 2026-09-18 实测踩到 ──
+   *
+   * 在 verified_followers 页点采集,报错说「未登记的页面名
+   * x.verifiedFollowers」,而**同一句话里的可用清单里就有它** —— 自相矛盾。
+   *
+   * 真因:面板有**四处写死的正则** `/^x\.(profile|withReplies|articles)$/`
+   * 决定「要不要显示 handle 输入框、要不要传 handle」。新加的三页不在里面
+   * → 框不显示 → 参数不传 → resolve 拿到空 handle 返回 null。
+   *
+   * ⚠️ 又是「写死清单不会自己长」(同族第五刀)。
+   * ⭐ 改成从 PAGE_PARAMS 真表推,而这条守卫钉住**真表本身**不漏项。
+   */
+  it('⭐⭐ 每个登记的页面都在 PAGE_PARAMS 里', () => {
+    const missing = r.names().filter((n) => !(n in PAGE_PARAMS));
+    expect(
+      missing,
+      `这些页面没登记参数需求 —— 面板不知道要不要显示输入框,\n`
+      + `结果是「选了它、参数没传、报未登记」:\n  ${missing.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('⭐⭐ PAGE_PARAMS 里不许有已不存在的页面', () => {
+    const known = new Set(r.names());
+    const stale = Object.keys(PAGE_PARAMS).filter((n) => !known.has(n));
+    expect(stale, `PAGE_PARAMS 里这些页面已经不存在了:${stale.join('、')}`).toEqual([]);
+  });
+
+  it('⭐⭐ 声明的参数必须真能让 resolve 成功', () => {
+    /**
+     * 光登记参数名不够 —— 得验证「按这个清单填参数,resolve 真的返回 URL」。
+     * 否则参数名写错(如 'userHandle' 而非 'handle')照样 null。
+     */
+    const sample: Record<string, string> = {
+      handle: 'somebody', tweetId: '123456', q: '测试', f: 'live',
+    };
+    for (const name of r.names()) {
+      const need = PAGE_PARAMS[name] ?? [];
+      const params: Record<string, string> = {};
+      for (const k of need) params[k] = sample[k] ?? 'x';
+      expect(
+        r.resolve(name, params),
+        `${name} 按声明的参数 [${need.join(',')}] 填了仍然 resolve 失败 —— `
+        + '参数名可能写错了',
+      ).not.toBeNull();
     }
   });
 });

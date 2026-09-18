@@ -82,6 +82,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [gotoTweetId, setGotoTweetId] = useState('');
   const [gotoQuery, setGotoQuery] = useState('');
   const [pageNames, setPageNames] = useState<string[]>([]);
+  /**
+   * ⭐ 每页要哪些参数 —— **从真表来**,不在面板里写死。
+   *
+   * ⚠️ 此前面板有四处写死的正则 /^x\.(profile|withReplies|articles)$/
+   * 决定「显示不显示 handle 框」。加了 followers/following 三页后就漏了:
+   * 框不显示 → 参数不传 → resolve 拿到空 handle 返回 null →
+   * 报「未登记的页面名」,而同一句的可用清单里就有它(用户 2026-09-18 实测)。
+   * 清单不会自己长 —— 所以改成问主侧要。
+   */
+  const [pageParams, setPageParams] = useState<Record<string, readonly string[]>>({});
   const [readyKind, setReadyKind] = useState('urlIncludes');
   /** ⚠️ URL 片段与锚点名**分开存** —— 共用一个格子就是那个 bug 的根源 */
   const [readyValue, setReadyValue] = useState('/home');
@@ -248,6 +258,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       const pn = await api()?.pageNames();
       const tabs = (pn as { tables?: Array<{ names: string[] }> } | undefined)?.tables ?? [];
       setPageNames(tabs.flatMap((t) => t.names));
+      const po = (pn as { paramsOf?: Record<string, readonly string[]> } | undefined)?.paramsOf;
+      if (po) setPageParams(po);
     })();
   }, []);
 
@@ -732,18 +744,21 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   * ⚠️ 复用 goto 那块的 state(同一套语义页面表、同一套参数),
                   * 不另起一份:两份会漂,而漂的表现是「这边填了那边没生效」。
                   */}
-                {/^x\.(profile|withReplies|articles)$/.test(acPage) && (
-                  <input className="krig-webc__in" style={{ width: 150 }} value={gotoHandle}
-                    onChange={(e) => setGotoHandle(e.target.value)} placeholder="handle" />
-                )}
-                {acPage === 'x.status' && (
-                  <input className="krig-webc__in" style={{ width: 150 }} value={gotoTweetId}
-                    onChange={(e) => setGotoTweetId(e.target.value)} placeholder="推文 id" />
-                )}
-                {acPage === 'x.search' && (
-                  <input className="krig-webc__in" style={{ width: 150 }} value={gotoQuery}
-                    onChange={(e) => setGotoQuery(e.target.value)} placeholder="搜索词" />
-                )}
+                {/* ⭐ 参数框按**真表**渲染 —— 加页面时不用改这里 */}
+                {(pageParams[acPage] ?? []).map((k) => {
+                  const val = k === 'handle' ? gotoHandle
+                    : k === 'tweetId' ? gotoTweetId
+                    : k === 'q' ? gotoQuery : '';
+                  const set = k === 'handle' ? setGotoHandle
+                    : k === 'tweetId' ? setGotoTweetId
+                    : k === 'q' ? setGotoQuery : () => {};
+                  if (k === 'f') return null;   // 搜索模式有默认值,不占一格
+                  return (
+                    <input key={k} className="krig-webc__in" style={{ width: 150 }}
+                      value={val} placeholder={k}
+                      onChange={(e) => set(e.target.value)} />
+                  );
+                })}
                 <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
                   onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数" title="滚动轮数上限" />
                 <input className="krig-webc__in" style={{ width: 72 }} value={acBudget}
@@ -751,10 +766,13 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 <button type="button" className="krig-webc__go" disabled={busy !== null}
                   onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget) },
                     async () => {
+                      // ⭐ 按真表传参 —— 加页面时不用改这里
                       const params: Record<string, string> = {};
-                      if (/^x\.(profile|withReplies|articles)$/.test(acPage)) params.handle = gotoHandle;
-                      if (acPage === 'x.status') params.tweetId = gotoTweetId;
-                      if (acPage === 'x.search') params.q = gotoQuery;
+                      for (const k of pageParams[acPage] ?? []) {
+                        if (k === 'handle') params.handle = gotoHandle;
+                        else if (k === 'tweetId') params.tweetId = gotoTweetId;
+                        else if (k === 'q') params.q = gotoQuery;
+                      }
                       const r = await api()?.autoCollect({
                         page: acPage, params, wcId: wcId(),
                         maxRounds: Number(acRounds) || 30,

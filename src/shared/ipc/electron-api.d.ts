@@ -175,6 +175,8 @@ declare global {
         /** 已注册的语义页面名 —— 下拉读真表,不抄一份 */
         pageNames(): Promise<{
           channelOk: boolean; tables?: Array<{ owner: string; names: string[] }>;
+          /** ⭐ 每页要哪些参数 —— 面板据此渲染输入框,不在面板里写死清单 */
+          paramsOf?: Record<string, readonly string[]>;
         }>;
         anchors(): Promise<{
           channelOk: boolean; owners?: string[];

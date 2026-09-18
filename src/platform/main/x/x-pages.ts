@@ -206,6 +206,37 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
  *
  * ⚠️ 未登记 / 参数不全一律返回 null —— 底座据此 Failed 并列出可用页面名。
  */
+/**
+ * ⭐⭐ 每个语义页面**需要哪些参数** —— 从这里推,不在别处抄清单。
+ *
+ * ── 用户 2026-09-18 实测踩到 ──
+ *
+ * 加了 followers/verifiedFollowers/following 三页之后,在那个页面点采集,
+ * 报错说「未登记的页面名 x.verifiedFollowers」,而**同一句话里的可用清单
+ * 里就有它** —— 自相矛盾。
+ *
+ * 真因:面板有**四处写死的正则** `/^x\.(profile|withReplies|articles)$/`
+ * 决定「要不要显示 handle 输入框、要不要传 handle」。新页面不在里面
+ * → 框不显示 → 参数不传 → resolve 拿到空 handle 返回 null。
+ *
+ * ⚠️ 又是「写死清单不会自己长」(同族第五刀)。
+ * ⭐ 所以这里给出**真表**:面板问它要参数,加页面时只改这一处。
+ */
+export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
+  'x.profile': ['handle'],
+  'x.withReplies': ['handle'],
+  'x.articles': ['handle'],
+  'x.followers': ['handle'],
+  'x.verifiedFollowers': ['handle'],
+  'x.following': ['handle'],
+  'x.status': ['handle', 'tweetId'],
+  'x.search': ['q', 'f'],
+  'x.home': [],
+  'x.notifications': [],
+  'x.compose': [],
+  'x.composeArticles': [],
+};
+
 export class XPageResolver implements PageResolver {
   resolve(name: string, params: Readonly<Record<string, string>> = {}): Resolved | null {
     const build = PAGES[name];

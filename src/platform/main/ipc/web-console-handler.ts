@@ -61,6 +61,7 @@ import { LocalExecutor } from '../executor/local-executor';
 import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
+import { PAGE_PARAMS } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
 
@@ -449,11 +450,20 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_PAGE_NAMES, async () => {
     const t0 = Date.now();
     const tables = listPageNames();
+    /**
+     * ⭐ 连**每页要哪些参数**一起报 —— 面板据此渲染输入框。
+     *
+     * ⚠️ 面板原本有四处写死的正则决定「显示不显示 handle 框」,
+     * 加了新页面就漏(用户 2026-09-18 实测:在 verifiedFollowers 页点采集,
+     * 报「未登记」而同一句的可用清单里就有它 —— 因为 handle 没传)。
+     * 清单不会自己长,所以改成从真表来。
+     */
+    const paramsOf = PAGE_PARAMS;
     const total = tables.reduce((n, t) => n + t.names.length, 0);
     recordRun('pageNames', { total },
       total > 0 ? { status: 'ok' } : { status: 'failed', reason: '语义页面表为空(业务没注册?)' },
       Date.now() - t0);
-    return { channelOk: true, tables };
+    return { channelOk: true, tables, paramsOf };
   });
 
   /**
