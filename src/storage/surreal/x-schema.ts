@@ -1157,3 +1157,50 @@ export async function x_migration_1_2_1(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.2.1'), now: Date.now() },
   );
 }
+
+/**
+ * 1.2.2 —— ⭐ `x_author.location`(2026-09-18)
+ *
+ * ── 为什么补这一列 ──
+ *
+ * 「采人」实测跑通(x.com/otun_myvpn/verified_followers,一次 **241 人**、
+ * 223 人有 bio),而载荷里**自带 location**(`core.location.location` 新形态 /
+ * `legacy.location` 旧形态)—— 解析器已经解出来了,却**没地方存**。
+ *
+ * ⚠️ 当时如实标注「采到了但没地方存」而**没有顺手加 migration** ——
+ * 顺手改 schema 是另一件事(要版本、要回滚考虑),不该混在采集的改动里。
+ * 用户 2026-09-18 明确说「添加吧」,才补这一刀。
+ *
+ * ── 这个字段值得存吗 ──
+ *
+ * 值得:判断「这人是不是目标用户」时,地区是**查证过的事实**,
+ * 而不是模型看正文的猜测(记忆 project-x-reply-decision-trace 记着
+ * 「posterKind 只是模型的猜测非查证事实」)。
+ * ⚠️ 但它是**用户自填的自由文本**(可以写「宇宙」「在路上」),
+ * 不是经过验证的地理位置 —— 用它做判断时要记得这一点。
+ */
+const X_SCHEMA_1_2_2 = `
+DEFINE FIELD IF NOT EXISTS location ON x_author TYPE option<string>;
+`;
+
+export async function x_migration_1_2_2(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_2);
+
+  // fail loud:字段真的加上了吗?(单条 DDL parse error 会让整段被拒收,
+  // 而现象是「启动没报错」—— 本文件头铁律 3)
+  const info = await db.query<[{ tables?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = (info?.[0] as { fields?: Record<string, unknown> } | undefined)?.fields ?? {};
+  if (!('location' in fields)) {
+    throw new Error(
+      '[x-schema 1.2.2] location 字段没加上 —— 采到的地区数据会继续无处可存,'
+      + '而解析器照样解它,表现为「采了但查不到」。',
+    );
+  }
+  console.log('[x-schema 1.2.2] x_author.location 已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.2', appliedAt = $now,
+      description = 'x_author.location (people harvest carries it, had nowhere to store)'`,
+    { rid: new RecordId('schema_version', '1.2.2'), now: Date.now() },
+  );
+}

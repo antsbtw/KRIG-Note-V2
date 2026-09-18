@@ -296,11 +296,8 @@ export async function autoCollect(
         followingCount: person.followingCount,
         tweetCount: person.tweetCount,
         accountCreatedAt: person.accountCreatedAt,
-        /**
-         * ⚠️ `location` **采到了但没地方存** —— AuthorCounts 里没有这个字段,
-         * x_author 表也没这一列。加字段是另一件事(要 migration),
-         * 不在这次顺手做。解析器照样解它,等有地方存时接上即可。
-         */
+        // ⭐ migration 1.2.2 补了这一列(此前采到了没地方存)
+        location: person.location,
       });
       /**
        * ⚠️ 展示名/头像**不在 AuthorCounts 里** —— 那是 registerSeenAuthor 的字段。

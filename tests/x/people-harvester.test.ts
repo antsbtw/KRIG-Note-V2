@@ -13,6 +13,8 @@
  * 钉住两边都能解 —— 真载荷进来时若解不出,这些测试会是排查的起点。
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   extractPeopleFrom, parsePerson, isPeopleOp,
   type HarvestedPerson,
@@ -180,5 +182,42 @@ describe('⭐ 认得出「人的列表」操作名', () => {
     expect(isPeopleOp('HomeTimeline')).toBe(false);
     expect(isPeopleOp('UserTweets')).toBe(false);
     expect(isPeopleOp('TweetDetail')).toBe(false);
+  });
+});
+
+
+describe('⭐⭐ location:采到了要能存、能读回来', () => {
+  /**
+   * ── 用户 2026-09-18:「添加吧」──
+   *
+   * 「采人」实测 241 人入库,而载荷**自带 location**,此前解出来了
+   * 却没地方存(AuthorCounts 无此字段、x_author 无此列)。
+   * migration 1.2.2 补了这一列。
+   *
+   * ⚠️ 补列时差点漏一刀:SELECT 里加了 location,**映射没加** ——
+   * 数据查出来了却在返回那一步被丢掉,**而且不报错**。
+   * 而那段代码上面就写着同样的警告(「漏了会让……静默丢掉」)。
+   */
+  const repo = readFileSync(
+    join(process.cwd(), 'src/platform/main/db/x-author-repo.ts'), 'utf-8',
+  );
+
+  it('⭐⭐ 解析器解得出 location(两种形态)', () => {
+    expect(parsePerson(modern)?.location, '新形态 core.location.location').toBe('上海');
+    expect(parsePerson(legacyShape)?.location, '旧形态 legacy.location').toBe('北京');
+  });
+
+  it('⭐⭐ 写库语句里有 location', () => {
+    expect(repo, 'UPSERT 没写 location —— 采到了也存不进去')
+      .toMatch(/location = \$loc/);
+  });
+
+  it('⭐⭐ 读回来也要有映射(只加 SELECT 不加映射 = 静默丢掉)', () => {
+    const i = repo.indexOf('export async function getAuthorCounts');
+    const body = repo.slice(i, repo.indexOf('\n}', i));
+    expect(body.length, '切出来的 getAuthorCounts 是空的').toBeGreaterThan(300);
+    expect(body, 'SELECT 里没查 location').toMatch(/SELECT[\s\S]*location/);
+    expect(body, 'SELECT 查了但返回映射里没有 —— 数据在这一步被丢掉且不报错')
+      .toMatch(/location:\s*typeof r\.location/);
   });
 });

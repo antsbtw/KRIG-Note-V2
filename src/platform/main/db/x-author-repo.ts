@@ -205,6 +205,17 @@ export interface AuthorCounts {
   xBlocking?: boolean;
   bio?: string;
   isBlueVerified?: boolean;
+  /**
+   * ⭐ 用户自填的地区(migration 1.2.2 加的列)。
+   *
+   * 「采人」的载荷自带(`core.location.location` 新形态 / `legacy.location` 旧形态),
+   * 此前解出来了却没地方存。
+   *
+   * ⚠️ 它是**自由文本**,不是验证过的地理位置 —— 用户可以写「宇宙」「在路上」。
+   * 拿它做判断时要记得这一点(与 posterKind 是模型猜测同理:
+   * 记忆 project-x-reply-decision-trace)。
+   */
+  location?: string;
 }
 
 /**
@@ -234,6 +245,7 @@ export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Pr
     xb: counts.xBlocking ?? undefined,
     bio: counts.bio ?? undefined,
     bv: counts.isBlueVerified ?? undefined,
+    loc: counts.location ?? undefined,
   };
   const existing = await db.query<[AuthorRow[]]>(
     `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
@@ -241,7 +253,7 @@ export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Pr
   const setClause = `tweet_count = $tc, media_count = $mc, followers_count = $fc,
     following_count = $gc, favourites_count = $lc, account_created_at = $ca,
     follows_me = $fm, i_follow = $ifl, x_blocking = $xb,
-    bio = $bio, is_blue_verified = $bv,
+    bio = $bio, is_blue_verified = $bv, location = $loc,
     counts_at = time::now()`;
   if ((existing[0] ?? []).length > 0) {
     await db.query(`UPDATE x_author SET ${setClause} WHERE handle = $handle`, params);
@@ -255,7 +267,7 @@ export async function getAuthorCounts(handle: string): Promise<AuthorCounts & { 
   const h = normalizeHandle(handle);
   const db = getXDB();
   const res = await db.query<[Array<Record<string, unknown>>]>(
-    `SELECT tweet_count, media_count, followers_count, following_count,
+    `SELECT tweet_count, media_count, followers_count, following_count, location,
        favourites_count, account_created_at, follows_me, i_follow, x_blocking,
        bio, is_blue_verified, counts_at FROM x_author WHERE handle = $handle LIMIT 1`,
     { handle: h },
@@ -276,6 +288,9 @@ export async function getAuthorCounts(handle: string): Promise<AuthorCounts & { 
     xBlocking: typeof r.x_blocking === 'boolean' ? r.x_blocking : undefined,
     bio: typeof r.bio === 'string' ? r.bio : undefined,
     isBlueVerified: typeof r.is_blue_verified === 'boolean' ? r.is_blue_verified : undefined,
+    // ⚠️ SELECT 里加了字段就**必须同步加映射** —— 只加 SELECT 不加映射,
+    //    数据查出来了却在这一步被丢掉,而且不报错(上面那段注释警告的正是这个)
+    location: typeof r.location === 'string' ? r.location : undefined,
     countsAt: r.counts_at ? String(r.counts_at) : undefined,
   };
 }
