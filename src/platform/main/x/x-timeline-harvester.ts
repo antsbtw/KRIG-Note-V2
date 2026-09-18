@@ -73,6 +73,50 @@ export interface HarvestedTweet {
   };
   /** 登录用户自己对这条推的状态 —— 登录态 webview 独有,零额外请求 */
   self: { favorited?: boolean; retweeted?: boolean; bookmarked?: boolean };
+
+  /**
+   * ── ⭐ DOM 路独有的字段(载荷里没有)──
+   *
+   * 用户 2026-09-18 实机验证时发现右侧缺这几项。它们**只有 DOM 拿得到**:
+   * 载荷里作者名要另查 user 结构、头像 url 与 media 的实际 url 都是渲染后才定的。
+   * 而「取并集」的要求是 —— **一路独有的也不能丢**。
+   *
+   * ⚠️ 载荷路解出来的对象**不会有**这几项(保持 undefined),
+   * 面板上会标 ⚠️。那是诚实的:这条推来自载荷,本来就没这几项 ——
+   * 不是「漏采」,是「这一路拿不到」。两者必须看得出区别。
+   */
+  /**
+   * ⭐ 蓝V —— 用户 2026-09-18 实机验证时指出缺这项。
+   *
+   * ⚠️ 载荷里**有两个位置**都可能放它(画像那条路 `x-author-profile.ts:93`
+   * 实测过):`result.is_blue_verified` 与 `result.verification.is_blue_verified`。
+   * 只读一个会漏 —— 那正是 x_author 里蓝V只有 2% 的成因之一。
+   */
+  /**
+   * ⭐ 我与这个人的关系 —— 用户 2026-09-18 问「following 能直接拿到吗」。
+   *
+   * ⚠️ **时间线载荷里带不带,要看真实载荷**(面板上「原始载荷」可以翻)。
+   * 悬浮卡上那些(Following 按钮/Follows you/粉丝数)来自**悬停时另发的
+   * UserByScreenName 请求**,时间线载荷未必有。
+   *
+   * 带了就有值,没带就是 undefined —— **不猜、不兜底**:
+   * 「没关注」与「不知道关注没」是两件事,混起来会让追踪名单判错人。
+   *
+   * ⚠️ 与画像路同口径,**两个位置都看**(x-author-profile.ts:95):
+   * `relationship_perspectives.following` 与 `legacy.following`。
+   */
+  iFollow?: boolean;
+  followsMe?: boolean;
+  /** ⭐ iFollow 是靠哪个 testid 判出来的(如 `123-unfollow`)—— 判错要查得到 */
+  followEvidence?: string;
+  isBlueVerified?: boolean;
+  /** ⭐ 蓝V是靠哪一条判出来的 —— 判错了要查得到,不是只给 true/false */
+  verifiedEvidence?: string;
+  authorName?: string;
+  authorAvatar?: string;
+  tweetUrl?: string;
+  media?: Array<{ type: string; url: string; thumbUrl?: string }>;
+
   /**
    * true = 从 DOM 兜底抓的(字段较少:没有会话根/自身互动状态/长推全文)。
    * 用于监视页区分数据来源 —— 载荷是首选,DOM 只补 CDP 没覆盖到的部分。
@@ -159,6 +203,30 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         authorHandle: ucore && typeof ucore.screen_name === 'string'
           ? ucore.screen_name : undefined,
         authorRestId,
+        // ⭐ 关系:两个位置都看(与 x-author-profile.ts:95 同口径)
+        //    ⚠️ 只在**明确为 true/false** 时给值;字段不在就 undefined ——
+        //    「没关注」与「载荷里没这个字段」必须分得开
+        ...(() => {
+          const persp = urr?.relationship_perspectives as Record<string, unknown> | undefined;
+          const ulg = urr?.legacy as Record<string, unknown> | undefined;
+          const pick = (a: unknown, b: unknown): boolean | undefined =>
+            a === true || b === true ? true
+              : a === false || b === false ? false : undefined;
+          return {
+            iFollow: pick(persp?.following, ulg?.following),
+            followsMe: pick(persp?.followed_by, ulg?.followed_by),
+          };
+        })(),
+        // ⭐ 蓝V:两个位置都看(与 x-author-profile.ts:93 同口径,少看一个就会漏)
+        isBlueVerified: (() => {
+          if (!urr) return undefined;
+          if (urr.is_blue_verified === true) return true;
+          const v = urr.verification as Record<string, unknown> | undefined;
+          if (v?.is_blue_verified === true) return true;
+          // ⚠️ 明确的 false 也是事实(「查过了,不是蓝V」),与「没查到」不同
+          if (urr.is_blue_verified === false || v?.is_blue_verified === false) return false;
+          return undefined;
+        })(),
         hasMedia: mediaArr.length > 0,
         mediaTypes: mediaTypes.length ? mediaTypes : undefined,
         text: noteText ?? s('full_text') ?? '',

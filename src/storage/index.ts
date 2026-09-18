@@ -6,9 +6,10 @@
  * - Capability / Platform 层可 import
  * - 业务层通过 capability API 间接访问
  */
-import { initSurrealDB, shutdownSurrealDB, shutdownSurrealDBAsync, getDB, getXDB } from './surreal/client';
+import { initSurrealDB, shutdownSurrealDB, shutdownSurrealDBAsync, getDB, getXDB, getFlowDB } from './surreal/client';
 import { runMigrations } from './migrations/runner';
 import { runXMigrations } from './migrations/x-runner';
+import { runFlowMigrations } from './migrations/flow-runner';
 import { surrealStorage } from './surreal/storage';
 import { runCardinalityCheck } from './health/cardinality-check';
 import { sweepPendingIntents } from './intent-log';
@@ -57,6 +58,31 @@ export async function initStorage(): Promise<void> {
     // 把「X 库坏了」放大成「笔记库的完整性自检没跑」,正好违背上面那句
     // "笔记库不受影响"。X 是独立 database,它的故障不该拖累笔记库的启动步骤。
     // 响 = 上面这条横幅(够显眼);不 = 中断别人的初始化。
+  }
+
+  /**
+   * ⭐ 工作流库(krig_flow)独立 migration 序列 —— 执行记录表。
+   *
+   * ⚠️ 与 X 同款处理:**失败要响,但不 rethrow**(理由见上面那段)。
+   * 差别在于「坏了会怎样」:
+   *  · X 坏 → 采集/收件箱不可用
+   *  · flow 坏 → **所有调用都变成没有来历的孤儿记录**,
+   *    「谁让它跑的、为哪条推跑的」事后**补不回来**。
+   *    采集照样能跑,但跑过的事查不出来 —— 这正是用户要的
+   *    「系统必须有维护能力和追溯能力」那一条的反面。
+   */
+  try {
+    await runFlowMigrations(getFlowDB());
+  } catch (err) {
+    console.error(
+      '\n' + '='.repeat(72) +
+      '\n[storage] ✗✗✗ 工作流库(krig_flow)migration 失败 —— 执行记录不可用 ✗✗✗' +
+      '\n  笔记库 / X 库不受影响(独立 database)。' +
+      '\n  后果:流程照样能跑,但**跑过什么查不出来**(谁调的/为谁跑的/第几步全丢)。' +
+      '\n  排查:curl 问库 `INFO FOR NS` 看 krig_flow 在不在、`INFO FOR DB` 看两张表。' +
+      '\n' + '='.repeat(72) + '\n',
+      err,
+    );
   }
   // SP-3 sweeper:扫未完成 intent 续完/回滚。在 migrations 后(intent 表已建)、
   // cardinality-check 前(半状态可能正是 cardinality 误判源,先清半状态)。

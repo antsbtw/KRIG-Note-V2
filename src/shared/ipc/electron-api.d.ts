@@ -180,6 +180,45 @@ declare global {
           channelOk: boolean; owners?: string[];
           tables?: Array<{ owner: string; names: string[] }>;
         }>;
+        // ── 执行(第四类:对象=模型,不是页面)──
+        /**
+         * ⭐ 跑一次执行者。判据(instruction)与素材(content)都由**调用方给** ——
+         * 主侧不内置任何业务判据,「该不该回」与「该不该点赞」走同一个执行者。
+         * ⚠️ 没有 wcId:执行者不碰浏览器,也**不写库**(所以面板上随便跑都安全)。
+         */
+        execute(args: {
+          model: string; instruction: string;
+          /** 卷宗主体 —— 判的就是它(如推文正文)。空主体是 Failed,不是「缺附件」 */
+          content: string;
+          /** 卷宗附件:键=附件名(推主概况/上下文/会话串…),值=已取到的内容 */
+          attachments?: Record<string, unknown>;
+          /**
+           * ⭐ 没取到的附件名单 —— 执行者据此返回 `degraded`:「判了,但没看全」。
+           * ⚠️ 由**编排**从各取数执行者的失败汇总,不是判断执行者自己去查。
+           */
+          missing?: string[];
+          structured?: boolean; timeoutMs?: number; endpoint?: string;
+        }): Promise<{ channelOk: boolean; error?: string; result?: unknown }>;
+        /**
+         * ⭐ 卷宗盘点 —— 「附件实际能取到多少」用真数字回答(只读不写)。
+         * 用它回答「卷宗能有多厚」,而不是靠读代码推断。
+         */
+        inventory(): Promise<{
+          channelOk: boolean; error?: string;
+          inventory?: {
+            tweets: number; authorsSeen: number; authorRows: number; at: string;
+            attachments: Array<{ name: string; have: number; total: number; rate: number; note: string }>;
+          };
+        }>;
+        /** ⭐ 真页面上量蓝V徽章的 DOM 结构 —— 实测过才写进提取代码,不猜 */
+        readVerified(wcId?: number): Promise<{
+          channelOk: boolean; error?: string;
+          rows?: Array<{ handle?: string; userNameHtml?: string; marks?: unknown[] }>;
+        }>;
+        /** ⭐ 探 X 页面内存里的 user 数据在哪个全局变量下(只探不取) */
+        probeMemory(wcId?: number): Promise<{
+          channelOk: boolean; error?: string; probe?: unknown;
+        }>;
         readTabBar(wcId?: number): Promise<{
           channelOk: boolean; error?: string;
           tabs?: Array<{ testid: string | null; href: string | null; label: string }>;

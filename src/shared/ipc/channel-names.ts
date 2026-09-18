@@ -385,6 +385,13 @@ export const IPC_CHANNELS = {
   WEBC_TRACE:        'webc:trace',         // 输出:读回诊断留痕(内存 + 磁盘两份,对不上说明落盘坏了)
   WEBC_GOTO:         'webc:goto',          // 控制:语义导航(名字 → URL → 导航 → 等到位)
   WEBC_PAGE_NAMES:   'webc:page-names',    // 输出:已注册的语义页面名(下拉用真表,不抄一份)
+  // ── 执行:第四类能力(对象=模型,不是页面)──
+  // ⚠️ 执行者**不写库**,所以面板上跑它是安全的 —— 这正是它与 judgeWithOllama 的分界:
+  //    后者一跑就改你的数据,前者只算不存,落库是编排的事。
+  WEBC_EXECUTE:      'webc:execute',       // 执行:跑一次判断(判据/素材/执行者都由面板给)
+  WEBC_INVENTORY:    'webc:inventory',     // 执行:卷宗盘点(附件实际能取到多少 —— 只读不写)
+  WEBC_READ_VERIFIED:'webc:read-verified', // 输出:真页面上量蓝V徽章的 DOM 结构(不猜 selector)
+  WEBC_PROBE_MEMORY: 'webc:probe-memory',  // 输出:探 X 页面内存里的 user 数据在哪个全局变量下
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
   X_NOTIF_WATCH_START:  'x:notif-watch-start',
   X_NOTIF_WATCH_STOP:   'x:notif-watch-stop',

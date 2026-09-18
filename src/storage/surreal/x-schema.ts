@@ -1053,3 +1053,107 @@ export async function x_migration_1_2_0(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.2.0'), now: Date.now() },
   );
 }
+
+/**
+ * 1.2.1 —— ⭐⭐ 发布闸门(2026-09-15,用户拍板)
+ *
+ * > 「是否关闭由我来定,不是机器来定,设计好开关就好了。」
+ * > 「红线是我来定,不是你来定,撤销它吧。」
+ * > 「同样可以自动,开关由我定就行了。」
+ *
+ * ── 这张表的唯一职责:让「能不能程序点发布」成为**你的配置**,不是我的常量 ──
+ *
+ * 原先 `x-write.ts` 把「绝不 click」硬写在代码里。那是**我替你定了红线**。
+ * 现在改成:闸门关(默认)→ 只定位按钮不点,与今天行为一字不差;
+ *          闸门开 → 走 `web.input.tap`。开关只认你手动改。
+ *
+ * ── 三条不可协商的失效语义(全部回到「关」)──
+ *
+ * ① `enabled` **DEFAULT false,且代码里永不写 true** —— 只有你手动改。
+ *    这不是谨慎,是防「某个分支顺手把它打开了」这类事故:
+ *    全仓搜 `enabled = true` 应当**零命中**(守卫会钉死这条)。
+ * ② `expires_at` 到期即失效 —— 忘了关也会自己关。长期开着必须是**反复的主动选择**。
+ * ③ 超速率 / 连续失败 / 进程重启 —— 一律按关处理(判定在代码层,不改本表)。
+ *
+ * ── 为什么 scenario × lang 两个维度 ──
+ *
+ * 中文可能早就够了、英文还差得远(`getReadiness` 就是分语言算的),
+ * 而「点赞」和「发带正文的回复」风险差一个数量级。合成一个开关
+ * 会让**风险最高的那个**搭上风险最低的那个的便车。
+ *
+ * ⚠️ 外语那条另有记忆在案(`project-x-multilang-reply-risk`):
+ * Gemma 写中文 0 编造,俄语/波斯语会加清单外承诺,而**人读不懂外语
+ * = 人工确认这道闸本就失效**。所以非中英语种此表干脆不给行 —— 没有行 = 关。
+ *
+ * ── x_publish_log:限速记账 + ⭐ 自动样本的唯一来源 ──
+ *
+ * `getReadiness` 的唯一写入口是 IPC `X_REPLY_FEEDBACK`,由 renderer 在**人操作后**发。
+ * 开了自动就没有人 → 没有新行 → `passRate` 冻结在拨开关那天,
+ * 而且**永远好看**(封闭集合的均值)。虚高的通过率比没有更坏:它会被当成证据。
+ * → 自动发布必须在这里自己留一行,`human_reviewed = false`,让两拨样本可分。
+ */
+const X_SCHEMA_1_2_1 = `
+DEFINE TABLE IF NOT EXISTS x_publish_gate SCHEMAFULL;
+-- 'reply' | 'like' | 'bookmark' | 'repost' —— 风险从高到低,不合成一个开关
+DEFINE FIELD IF NOT EXISTS scenario    ON x_publish_gate TYPE string ASSERT $value != '';
+-- 'zh' | 'en' —— 只开这两种;外语人工确认本就失效,不给行 = 关
+DEFINE FIELD IF NOT EXISTS lang        ON x_publish_gate TYPE string ASSERT $value != '';
+-- ⭐ 只认人手动改。代码里永不写 true(守卫钉死)
+DEFINE FIELD IF NOT EXISTS enabled     ON x_publish_gate TYPE bool DEFAULT false;
+-- 每小时上限;超了按关处理,不是排队等下一个钟头
+DEFINE FIELD IF NOT EXISTS rate_per_hour ON x_publish_gate TYPE int DEFAULT 0;
+-- 到期自动关 —— 忘了关也会自己关
+DEFINE FIELD IF NOT EXISTS expires_at  ON x_publish_gate TYPE option<datetime>;
+-- 最后一次改动的人读记录,便于回看「谁在什么时候开的」
+DEFINE FIELD IF NOT EXISTS note        ON x_publish_gate TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS updated_at  ON x_publish_gate TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_gate_key ON x_publish_gate FIELDS scenario, lang UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS x_publish_log SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS scenario    ON x_publish_log TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS lang        ON x_publish_log TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id    ON x_publish_log TYPE string;
+DEFINE FIELD IF NOT EXISTS text        ON x_publish_log TYPE string;
+-- ⭐ 分辨「人读过」与「没人读」两拨样本的唯一依据
+DEFINE FIELD IF NOT EXISTS human_reviewed ON x_publish_log TYPE bool DEFAULT true;
+-- 'ok' | 'failed' —— 连续失败要能被限速器看见
+DEFINE FIELD IF NOT EXISTS outcome     ON x_publish_log TYPE string;
+DEFINE FIELD IF NOT EXISTS error       ON x_publish_log TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id       ON x_publish_log TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at  ON x_publish_log TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_plog_created  ON x_publish_log FIELDS created_at;
+DEFINE INDEX IF NOT EXISTS idx_plog_scenario ON x_publish_log FIELDS scenario;
+`;
+
+export async function x_migration_1_2_1(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_1);
+
+  /**
+   * ⚠️ 不预建任何行 —— **没有行就是关**。
+   *
+   * 预建 `enabled = false` 的行看着更"完整",但它会让「你从没配过」
+   * 和「你配过并关掉了」变得**一模一样**,而这两者在出事复盘时
+   * 是完全不同的事实。要开的时候由 UI 建行,那一刻才有 `updated_at`。
+   */
+
+  // fail loud:表真的建起来了吗?(DDL 单条 parse error 会让整段被拒收,
+  // 而现象是"启动没报错"——本文件头铁律 3 记的就是这个。)
+  const info = await db.query<[{ tables?: Record<string, unknown> }]>('INFO FOR DB');
+  const tables = info?.[0]?.tables ?? {};
+  for (const t of ['x_publish_gate', 'x_publish_log']) {
+    if (!(t in tables)) {
+      throw new Error(
+        `[x-schema 1.2.1] 建表失败:${t} 不在 INFO FOR DB 里 —— `
+        + 'DDL 很可能被整段拒收(单条 parse error 会拖垮整段)。闸门表不存在时,'
+        + '发布路径会读不到闸门 → 必须现在就吼出来,不能等到运行期。',
+      );
+    }
+  }
+  console.log('[x-schema 1.2.1] 发布闸门表已建(无预建行:没有行 = 关)');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.1', appliedAt = $now,
+      description = 'Publish gate (scenario x lang; enabled only ever set by the user)'`,
+    { rid: new RecordId('schema_version', '1.2.1'), now: Date.now() },
+  );
+}

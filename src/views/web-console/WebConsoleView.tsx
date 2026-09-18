@@ -23,7 +23,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import './web-console.css';
 
-type TabId = 'control' | 'input' | 'output';
+type TabId = 'control' | 'input' | 'output' | 'exec' | 'verify';
 
 /** 一次调用的完整记录 —— 入参与返回值都留着 */
 type Run = {
@@ -35,6 +35,34 @@ type Run = {
 };
 
 const api = () => window.electronAPI?.webConsole;
+/** ⚠️ 主侧已有这套(startCaptureMonitor + broadcast),**renderer 侧此前零接收** ——
+ *  广播出去没人听,正是「建好了却点不到」那个形态(feedback-guard-must-pin-live-code)。*/
+const xapi = () => (window.electronAPI as { xTimeline?: {
+  captureStart(wcId?: number): Promise<unknown>;
+  captureStop(): Promise<unknown>;
+  onCaptureUpdate(cb: (s: unknown) => void): () => void;
+} } | undefined)?.xTimeline;
+
+type CapturedTweet = Record<string, unknown> & { tweetId?: string };
+type CaptureSnapshot = {
+  running?: boolean; onScreenCount?: number; captured?: number;
+  seenInDom?: number; skippedAds?: number; payloads?: number; captureRate?: number;
+  recent?: CapturedTweet[];
+  rawPayloads?: Array<{ op: string; url: string; body: string; at: number; bytes: number }>;
+  cdpNote?: string;
+  graphqlSeen?: number;
+  actions?: Array<{ t: number; kind: string; detail: string }>;
+  hoverProfiles?: Record<string, Record<string, unknown>>;
+};
+
+/** 全字段都要列 —— 包括空的。只显示有值的,就看不出少了什么 */
+const VERIFY_FIELDS = [
+  'tweetId', 'authorHandle', 'authorRestId', 'authorName', 'authorAvatar', 'isBlueVerified', 'verifiedEvidence', 'iFollow', 'followEvidence', 'followsMe',
+  'text', 'createdAt', 'lang', 'tweetUrl',
+  'isReply', 'inReplyToStatusId', 'inReplyToScreenName', 'conversationId',
+  'quotedStatusId', 'hasMedia', 'mediaTypes', 'media', 'isLongText',
+  'metrics', 'self', 'fromDom',
+] as const;
 
 
 /**
@@ -98,6 +126,51 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [typeText, setTypeText] = useState('测试文本(不会发布)');
   const [typeCheck, setTypeCheck] = useState('contains');
 
+  // ── 执行(第四类:对象=模型,不是页面)──
+  // ⚠️ 模型名不给默认值以外的猜测:这里填的就是 Ollama 里真实存在的那个
+  // ⚠️ 默认值来自**实测** `ollama /api/tags`(gemma4:31b-it-qat / gemma4:26b-a4b-it-qat),
+  //    不是猜的。初版我写了个不存在的 `gemma3:27b` —— 那会让第一次点击返回
+  //    HTTP 404,看起来像面板坏了,其实是模型名编的。
+  //    选 26b 而非 31b:记忆 project-x-reply-latency 实测 31b 慢 5-8 倍,面板要反复点。
+  const [execModel, setExecModel] = useState('gemma4:26b-a4b-it-qat');
+  const [execInstruction, setExecInstruction] = useState(
+    '判断这条推文是不是在求助「翻墙/VPN 连不上」。只回 JSON:{"worth":true|false,"reason":"一句话"}',
+  );
+  const [execContent, setExecContent] = useState('求推荐一个好用的机场,最近老是连不上');
+  const [execStructured, setExecStructured] = useState(true);
+  /**
+   * ⭐⭐ 卷宗附件 —— **可增删的列表,不是写死的清单**(用户 2026-09-17 订正)。
+   *
+   * > 「这个不应该写死,大概为 bio,和这条推文相关的判断数据-上下文等。」
+   *
+   * ⚠️ 初版我在这里放了四个写死的输入框(推主概况/上下文/会话串/时间线邻近),
+   * 那等于把**我列的示例**变成了**系统的清单**。契约里 `attachments` 本来就是
+   * `Record<string, unknown>` —— 键是什么由调用方决定,附件种类是**编排的参数**,
+   * 不是能力层的常量。
+   *
+   * 下面两行只是**省事的预填**,可以改名、可以删、可以加 —— 不是清单。
+   */
+  const [inv, setInv] = useState<unknown>(null);
+  /**
+   * ⭐⭐ 采集验证(用户 2026-09-18 定的验证方式):
+   *
+   * > 「我在 x 上操作一个界面,你把采集到的数据显示在右侧,
+   * >   列出所有的数据(包括元数据),我核对一遍,如果有漏数据,我会告知你。」
+   *
+   * ⚠️ 这比「两路互比」强在哪:两路可能**一起漏**同一样东西,
+   * 互比出来是「一致」,其实共同盲区。而人眼看得见页面上真有什么 ——
+   * 那才是真值。这正是 AI 验不了、只能靠人的那部分。
+   */
+  const [capSnap, setCapSnap] = useState<CaptureSnapshot | null>(null);
+  const [capOn, setCapOn] = useState(false);
+  const [rawOpen, setRawOpen] = useState<number | null>(null);
+  const [vBadge, setVBadge] = useState<unknown>(null);
+  const [memProbe, setMemProbe] = useState<unknown>(null);
+  const [atts, setAtts] = useState<Array<{ name: string; value: string }>>([
+    { name: 'bio', value: '' },
+    { name: '上下文', value: '' },
+  ]);
+
   // ── 输出 ──
   const [pages, setPages] = useState<unknown>(null);
   const [anchors, setAnchors] = useState<unknown>(null);
@@ -140,6 +213,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
     } finally {
       setBusy(null);
     }
+  }, []);
+
+  /**
+   * ⭐ 订阅采集快照。
+   * ⚠️ 退订必须返回 —— 组件卸载后还收广播会往死组件里 setState
+   * (多窗口下每个 view 实例各收一份,不退订会越积越多)。
+   */
+  useEffect(() => {
+    const off = xapi()?.onCaptureUpdate((snap) => setCapSnap(snap as CaptureSnapshot));
+    return () => { off?.(); };
   }, []);
 
   // 打开就拉一次页面清单 —— 「屏幕上几个页面,这里就该几行」
@@ -187,6 +270,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
           { id: 'control' as const, label: '控制', desc: 'web.page / web.input 的动作' },
           { id: 'input' as const, label: '输入', desc: '往页面里填' },
           { id: 'output' as const, label: '输出', desc: '看得见的事实' },
+          { id: 'exec' as const, label: '执行', desc: '第四类:对象=模型,不是页面' },
+          { id: 'verify' as const, label: '采集验证', desc: '左边操作 X,右边列出采到的一切 —— 你来核对漏没漏' },
         ]).map((t) => (
           <button
             key={t.id}
@@ -438,6 +523,461 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
               </div>
               <pre className="krig-webc__pre">{JSON.stringify(tabBar, null, 2)}</pre>
             </div>
+          </>
+        )}
+
+        {tab === 'exec' && (
+          <>
+            <div className="krig-webc__fn">
+              <div className="krig-webc__fn-head">
+                <span className="krig-webc__fn-name">inventory</span>
+                <span className="krig-webc__fn-sig">卷宗盘点 · 附件实际能取到多少</span>
+              </div>
+              <div className="krig-webc__row">
+                <button type="button" className="krig-webc__go" disabled={busy !== null}
+                  onClick={() => void run('inventory', {}, async () => {
+                    const r = await api()?.inventory(); setInv(r); return r;
+                  })}>盘点</button>
+                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                  ⭐ 只读不写 —— 随便点,不动你的数据
+                </span>
+              </div>
+              <div className="krig-webc__note">
+                ⭐ 回答的是「<b>卷宗能有多厚</b>」:bio / 上下文 / 会话串
+                各自**实际**能取到多少,而不是靠读代码推断。
+                <br />⚠️ 覆盖率的分母是**见过的作者数**(不是 x_author 行数 ——
+                那张表只在「对某人动过作」时才建行,拿它当分母覆盖率会虚高)。
+                <br />⚠️ X 库没初始化时会**照实报错**,不返回一堆 0 假装「库是空的」。
+              </div>
+              {(() => {
+                const r = inv as { inventory?: { tweets: number; authorsSeen: number;
+                  attachments: Array<{ name: string; have: number; total: number; rate: number; note: string }> };
+                  error?: string } | null;
+                if (!r) return null;
+                if (r.error) return <pre className="krig-webc__pre">{r.error}</pre>;
+                const d = r.inventory;
+                if (!d) return null;
+                return (
+                  <div style={{ marginTop: 6 }}>
+                    <div className="krig-webc__note" style={{ margin: '0 0 4px' }}>
+                      推文 <b>{d.tweets}</b> 条 · 见过作者 <b>{d.authorsSeen}</b> 人
+                    </div>
+                    {d.attachments.map((a) => (
+                      <div className="krig-webc__row" key={a.name}>
+                        <span className="krig-webc__note" style={{ margin: 0, width: 140, flexShrink: 0 }}>
+                          {a.have === 0 ? '⚠️' : '✓'} {a.name}
+                        </span>
+                        <span className="krig-webc__note" style={{ margin: 0, width: 92, flexShrink: 0 }}>
+                          {a.have}/{a.total}
+                        </span>
+                        <span className="krig-webc__note" style={{ margin: 0, width: 52, flexShrink: 0 }}>
+                          {(a.rate * 100).toFixed(0)}%
+                        </span>
+                        <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>{a.note}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="krig-webc__fn">
+              <div className="krig-webc__fn-head">
+                <span className="krig-webc__fn-name">execute</span>
+                <span className="krig-webc__fn-sig">判据 + 素材 → 一次判断(三态)</span>
+              </div>
+
+              <div className="krig-webc__row">
+                <input className="krig-webc__in" style={{ flex: 1 }} value={execModel}
+                  onChange={(e) => setExecModel(e.target.value)} placeholder="模型名(如 gemma4:26b-a4b-it-qat)" />
+                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input type="checkbox" checked={execStructured}
+                    onChange={(e) => setExecStructured(e.target.checked)} />
+                  要 JSON
+                </label>
+              </div>
+
+              <div className="krig-webc__row">
+                <textarea className="krig-webc__in" style={{ flex: 1, minHeight: 60 }}
+                  value={execInstruction} onChange={(e) => setExecInstruction(e.target.value)}
+                  placeholder="判据:要它判什么、按什么标准" />
+              </div>
+
+              <div className="krig-webc__row">
+                <textarea className="krig-webc__in" style={{ flex: 1, minHeight: 50 }}
+                  value={execContent} onChange={(e) => setExecContent(e.target.value)}
+                  placeholder="主体:判的就是它(如推文正文)" />
+              </div>
+
+              {/* ── 卷宗附件:名字自己填,留空 = 没取到 → 进 missing ── */}
+              <div className="krig-webc__note" style={{ marginBottom: 4 }}>
+                <b>附件</b>(种类**不写死** —— 名字自己填;内容留空 = 没取到,会进 <code>missing</code>)
+              </div>
+              {atts.map((a, i) => (
+                <div className="krig-webc__row" key={i}>
+                  <span className="krig-webc__note" style={{ margin: 0, width: 18, flexShrink: 0 }}>
+                    {a.value.trim() ? '✓' : '⚠️'}
+                  </span>
+                  <input className="krig-webc__in" style={{ width: 110, flexShrink: 0 }}
+                    value={a.name} placeholder="附件名"
+                    onChange={(e) => setAtts(atts.map((x, j) =>
+                      j === i ? { ...x, name: e.target.value } : x))} />
+                  <input className="krig-webc__in" style={{ flex: 1 }}
+                    value={a.value} placeholder="取到的内容(留空=没取到)"
+                    onChange={(e) => setAtts(atts.map((x, j) =>
+                      j === i ? { ...x, value: e.target.value } : x))} />
+                  <button type="button" className="krig-webc__clear"
+                    onClick={() => setAtts(atts.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+              <div className="krig-webc__row">
+                <button type="button" className="krig-webc__clear"
+                  onClick={() => setAtts([...atts, { name: '', value: '' }])}>+ 加一项附件</button>
+              </div>
+
+              {/* ⭐ 跑之前就把「缺几项」摆出来,不是跑完才发现依据不足 */}
+              <div className="krig-webc__note">
+                {(() => {
+                  const named = atts.filter((a) => a.name.trim());
+                  const miss = named.filter((a) => !a.value.trim()).map((a) => a.name.trim());
+                  if (named.length === 0) return <span>还没有附件 —— 模型只看得见主体</span>;
+                  return miss.length === 0
+                    ? <span>✓ {named.length} 项附件齐全 → 结果应为 <code>ok</code></span>
+                    : <span>⚠️ {named.length} 项附件缺 {miss.length} 项({miss.join('、')})
+                        → 结果应为 <code>degraded</code>,模型判断依据不足</span>;
+                })()}
+              </div>
+
+              <div className="krig-webc__row">
+                <button type="button" className="krig-webc__go" disabled={busy !== null}
+                  onClick={() => void run('execute',
+                    { model: execModel, structured: execStructured },
+                    () => {
+                      // ⭐ 只把**取到了**的放进 attachments;空的进 missing。
+                      //    绝不塞空串占位 —— 那会让模型以为「查过了,是空的」,
+                      //    而事实是「压根没查到」,两者结论方向相反。
+                      const attachments: Record<string, unknown> = {};
+                      const missing: string[] = [];
+                      for (const a of atts) {
+                        const n = a.name.trim();
+                        if (!n) continue;                       // 没名字的行直接跳过
+                        if (a.value.trim()) attachments[n] = a.value.trim();
+                        else missing.push(n);
+                      }
+                      return api()!.execute({
+                        model: execModel,
+                        instruction: execInstruction,
+                        content: execContent,
+                        attachments, missing,
+                        structured: execStructured,
+                      });
+                    })}>执行</button>
+              </div>
+
+              <div className="krig-webc__note">
+                ⭐ 第四类能力:对象是**模型**,不是页面 —— 所以这里没有 wcId,
+                跑它**不需要**先打开什么页面。
+                <br />⭐ 执行者**不写库**,在这里随便跑都不会动你的数据
+                (这正是它与 <code>judgeWithOllama</code> 的分界:后者一跑就改 x_tweet)。
+                <br />⚠️ 「模型说不该回」是 <code>ok</code> 不是 <code>failed</code> ——
+                前者是「判了,结论是否定」,后者是「根本没跑起来」,处置完全相反。
+                <br />⚠️ 判据与素材都由**这里给**:换成「判断这条推该不该点赞」
+                就是另一种判断,<b>执行者一个字都不用改</b>。
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === 'verify' && (
+          <>
+            <div className="krig-webc__fn">
+              <div className="krig-webc__fn-head">
+                <span className="krig-webc__fn-name">采集验证</span>
+                <span className="krig-webc__fn-sig">左边操作 X · 右边列出采到的一切</span>
+              </div>
+              <div className="krig-webc__row">
+                <button type="button" className="krig-webc__go" disabled={busy !== null}
+                  onClick={() => void run(capOn ? 'captureStop' : 'captureStart', {}, async () => {
+                    const r = capOn ? await xapi()?.captureStop() : await xapi()?.captureStart(wcId());
+                    setCapOn(!capOn);
+                    return r;
+                  })}>{capOn ? '停止监测' : '开始监测'}</button>
+                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                  {capSnap?.running
+                    ? `● 监测中 · 屏幕上 ${capSnap.onScreenCount ?? 0} 条 · 累计 ${capSnap.captured ?? 0} · 载荷 ${capSnap.payloads ?? 0}`
+                    : '未开始 —— 点「开始监测」后在左边正常浏览 X'}
+                </span>
+              </div>
+
+              {/**
+                * ⭐⭐ 操作流 × 载荷 —— **按时间交织**,因果一眼可见。
+                *
+                * ── 用户 2026-09-18 ──
+                * > 「我建议你在后台也能够观察到我在 x 上的操作以及操作结果才对呀。
+                * >   否则那叫什么数据采集?」
+                *
+                * ⚠️ 此前监视器完全不知道用户做了什么,于是每次都只能回头问
+                * 「你点了吗」「有没有反应」—— 那正是「靠口头描述」的复发。
+                *
+                * ⭐ 交织显示的价值:「悬停头像 → 后面没有任何请求」
+                * 才**证明得了**「数据本来就在本地」,而不是停留在推测。
+                */}
+              {capSnap?.running && ((capSnap.actions?.length ?? 0) > 0
+                || (capSnap.rawPayloads?.length ?? 0) > 0) && (
+                <div className="krig-webc__fn" style={{ marginTop: 6 }}>
+                  <div className="krig-webc__fn-head">
+                    <span className="krig-webc__fn-name">你的操作 × 网络请求</span>
+                    <span className="krig-webc__fn-sig">按时间交织 —— 哪个动作触发了请求,一眼看见</span>
+                  </div>
+                  {(() => {
+                    type Row = { t: number; kind: string; text: string };
+                    const rows: Row[] = [
+                      ...(capSnap.actions ?? []).map((a) => ({
+                        t: a.t, kind: a.kind, text: a.detail,
+                      })),
+                      ...(capSnap.rawPayloads ?? []).map((r) => ({
+                        t: r.at, kind: 'payload',
+                        text: `${r.op} · ${(r.bytes / 1024).toFixed(0)}KB`,
+                      })),
+                    ].sort((a, b) => b.t - a.t).slice(0, 30);
+
+                    if (rows.length === 0) {
+                      return <div className="krig-webc__note">
+                        还没有记录到操作 —— 在左边点一下、悬停一下试试
+                      </div>;
+                    }
+                    const icon: Record<string, string> = {
+                      click: '👆', hover: '🖱', scroll: '↕', payload: '📦',
+                    };
+                    return rows.map((r, i) => (
+                      <div className="krig-webc__row" key={`${r.t}-${i}`}>
+                        <span className="krig-webc__note" style={{ margin: 0, width: 62, flexShrink: 0 }}>
+                          {new Date(r.t).toLocaleTimeString('zh-CN')}
+                        </span>
+                        <span className="krig-webc__note" style={{ margin: 0, width: 26, flexShrink: 0 }}>
+                          {icon[r.kind] ?? '·'}
+                        </span>
+                        <span className="krig-webc__note" style={{
+                          margin: 0, flex: 1,
+                          color: r.kind === 'payload' ? 'var(--accent, #6af)' : undefined,
+                          fontWeight: r.kind === 'payload' ? 600 : undefined,
+                        }}>
+                          {r.kind === 'payload' ? `载荷 ${r.text}` : r.text}
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
+
+              {/**
+                * ⭐⭐ 悬浮卡白拿的画像 —— 用户 2026-09-18 的洞察:
+                * 「关键这里还有 bio 数据呀?这样就不一定逐个翻页就可以获取 bio 数据了。」
+                */}
+              {Object.keys(capSnap?.hoverProfiles ?? {}).length > 0 && (
+                <div className="krig-webc__fn" style={{ marginTop: 6 }}>
+                  <div className="krig-webc__fn-head">
+                    <span className="krig-webc__fn-name">悬浮卡画像</span>
+                    <span className="krig-webc__fn-sig">
+                      白拿的 bio / 粉丝数 / 关注状态 —— 零网络请求,不用逐个翻主页
+                    </span>
+                  </div>
+                  {Object.entries(capSnap!.hoverProfiles!).map(([h, p]) => (
+                    <div key={h} style={{ marginBottom: 8 }}>
+                      <div className="krig-webc__row">
+                        <span className="krig-webc__note" style={{ margin: 0, width: 150, flexShrink: 0 }}>
+                          <b>@{h}</b>
+                        </span>
+                        <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                          {p.iFollow ? '✓ 我已关注' : '· 未关注'}
+                          {p.isBlueVerified ? ' · 蓝V' : ''}
+                          {p.restId ? ` · id=${String(p.restId)}` : ''}
+                          {p.followingText ? ` · 关注 ${String(p.followingText)}` : ''}
+                          {p.followersText ? ` · 粉丝 ${String(p.followersText)}` : ''}
+                        </span>
+                      </div>
+                      <div className="krig-webc__row">
+                        <span className="krig-webc__note" style={{ margin: 0, width: 150, flexShrink: 0 }}>
+                          {p.bio ? '✓ bio' : '⚠️ bio'}
+                        </span>
+                        <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                          {p.bio ? String(p.bio).slice(0, 200) : '— (没解出来,看下面 rawHtml)'}
+                        </span>
+                      </div>
+                      {!p.bio && typeof p.rawHtml === 'string' && (
+                        <pre className="krig-webc__pre" style={{ maxHeight: 150, overflow: 'auto' }}>
+                          {String(p.rawHtml)}
+                        </pre>
+                      )}
+                    </div>
+                  ))}
+                  <div className="krig-webc__note">
+                    ⭐ 一张卡 ≈ 一次「抓画像」,而后者要**导航到那人主页 + 等 12 秒**。
+                    盘点里 bio 只有 <b>155/8021(2%)</b>,正是因为那条路太贵。
+                    <br />⚠️ 卡片 DOM 结构仓里零记录,所以解不出来时**把 rawHtml 摆出来** ——
+                    量不准时能当场看清该怎么改,不用猜。
+                  </div>
+                </div>
+              )}
+
+              {/**
+                * ⭐⭐ 载荷为 0 时**说清是哪一环断的** —— 这是「载荷 0」唯一有用的诊断。
+                *
+                * ⚠️ 此前 CDP 状态只进 console.log,用户看不见、我也读不到,
+                * 只能靠猜。用户定过:「在后台能 log 这些操作,而不是靠我口头描述」。
+                */}
+              {capSnap?.running && (capSnap.payloads ?? 0) === 0 && (
+                <div className="krig-webc__note" style={{ lineHeight: 1.9 }}>
+                  <div>⚠️ <b>一条载荷都没截到</b> —— 分三种,现在能分清:</div>
+                  <div>· CDP 通道:<b>{capSnap.cdpNote ?? '(未知)'}</b></div>
+                  <div>· 见过的 graphql 请求:<b>{capSnap.graphqlSeen ?? 0}</b> 条</div>
+                  <div>
+                    {(capSnap.graphqlSeen ?? 0) === 0
+                      ? <>→ <b>页面压根没发新请求</b>。
+                          <br />⭐ 这本身就是一个发现:<b>悬停弹卡片没有伴随任何网络请求</b>,
+                          说明那些关注关系数据**本来就在前端内存里** —— 是更早的时间线载荷带来的。
+                          <br />⚠️ 而那次载荷发生在**监测开始之前**,所以我们没截到。
+                          <br /><b>要验证:点一下「Following」再点回「For you」</b> ——
+                          那会让 X 重新拉一次时间线,我们就能截到完整载荷,
+                          当场看清关系字段在不在里面。
+                          <br />(单纯往下滚可能只用缓存,不一定发新请求)</>
+                      : <>→ 请求发生了但 <b>body 取不到</b>(响应体可能已被丢弃)——
+                          这是 CDP 侧的问题,我去查。</>}
+                  </div>
+                </div>
+              )}
+
+              <div className="krig-webc__row" style={{ display: 'none' }}>
+              </div>
+              <div className="krig-webc__row">
+                <button type="button" className="krig-webc__go" disabled={busy !== null}
+                  onClick={() => void run('probeMemory', {}, async () => {
+                    const r = await api()?.probeMemory(wcId()); setMemProbe(r); return r;
+                  })}>探内存里的 user 数据</button>
+                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                  ⭐ 磁盘已排除(IndexedDB 只存 UI 偏好、Cache 里 API 响应 no-store)——
+                  数据在页面 JS 内存里
+                </span>
+              </div>
+              {memProbe != null && (
+                <pre className="krig-webc__pre" style={{ maxHeight: 300, overflow: 'auto' }}>
+                  {JSON.stringify(memProbe, null, 2)}
+                </pre>
+              )}
+
+              <div className="krig-webc__row">
+                <button type="button" className="krig-webc__clear" disabled={busy !== null}
+                  onClick={() => void run('readVerified', {}, async () => {
+                    const r = await api()?.readVerified(wcId()); setVBadge(r); return r;
+                  })}>量一下蓝V结构</button>
+                <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                  ⚠️ 蓝V的 selector 全仓没有实测记录 —— <b>量出来再写</b>,不猜
+                </span>
+              </div>
+              {vBadge != null && (
+                <pre className="krig-webc__pre" style={{ maxHeight: 260, overflow: 'auto' }}>
+                  {JSON.stringify(vBadge, null, 2)}
+                </pre>
+              )}
+
+              <div className="krig-webc__note">
+                ⭐ <b>你核对的是「漏没漏」</b>:左边页面上看得见的东西,右边是不是都列出来了。
+                <br />⚠️ <b>空字段也列出来并标 ⚠️</b> —— 只显示有值的,就看不出少了什么。
+                <br />⭐ 说「这个数据明明有」时,展开<b>原始载荷</b>当场分清:
+                是 X 压根没返回,还是返回了但我们没解出来 —— 两者修法完全相反。
+              </div>
+            </div>
+
+            {(capSnap?.recent ?? []).map((t, i) => (
+              <div className="krig-webc__fn" key={String(t.tweetId ?? i)}>
+                <div className="krig-webc__fn-head">
+                  <span className="krig-webc__fn-name">{String(t.tweetId ?? '(无 id)')}</span>
+                  <span className="krig-webc__fn-sig">
+                    {String(t.authorHandle ?? '?')} · {t.fromDom ? 'DOM 兜底' : '载荷'}
+                  </span>
+                </div>
+                {VERIFY_FIELDS.map((f) => {
+                  const v = t[f];
+                  const empty = v === undefined || v === null || v === ''
+                    || (Array.isArray(v) && v.length === 0);
+                  return (
+                    <div className="krig-webc__row" key={f}>
+                      <span className="krig-webc__note" style={{ margin: 0, width: 150, flexShrink: 0 }}>
+                        {empty ? '⚠️' : '✓'} {f}
+                      </span>
+                      <span className="krig-webc__note" style={{ margin: 0, flex: 1, wordBreak: 'break-all' }}>
+                        {empty ? '—' : (typeof v === 'object' ? JSON.stringify(v) : String(v))}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+
+            {(capSnap?.rawPayloads?.length ?? 0) > 0 && (
+              <div className="krig-webc__fn">
+                <div className="krig-webc__fn-head">
+                  <span className="krig-webc__fn-name">原始载荷</span>
+                  <span className="krig-webc__fn-sig">X 到底给了什么(最近 {capSnap!.rawPayloads!.length} 条)</span>
+                </div>
+                {/**
+                  * ⭐⭐ 自动判读 —— **不用人输任何东西**。
+                  *
+                  * ⚠️ 初版做成「让你输字段名去搜」,那是把我该知道的事甩给用户:
+                  * 用户怎么会知道该输 `relationship_perspectives`?
+                  * 面板的职责是**直接给结论**,不是给个搜索框让人自己查。
+                  */}
+                <div className="krig-webc__note" style={{ lineHeight: 1.9 }}>
+                  <div><b>截到的请求</b>:{
+                    Array.from(new Set(capSnap!.rawPayloads!.map((r) => r.op))).join('、') || '(无)'
+                  }</div>
+                  {(() => {
+                    const all = capSnap!.rawPayloads!;
+                    const has = (k: string) => all.some((r) => r.body.includes(k));
+                    const ops = new Set(all.map((r) => r.op));
+                    const hoverOp = [...ops].some((o) => /UserByScreenName|UserByRestId/i.test(o));
+                    const inTimeline = all
+                      .filter((r) => /Timeline|UserTweets/i.test(r.op))
+                      .some((r) => r.body.includes('relationship_perspectives')
+                        || r.body.includes('"followed_by"'));
+
+                    if (inTimeline) {
+                      return <div>✓ <b>关注关系在时间线载荷里就有</b> —— 你的推断对,
+                        数据早就打包下来了。<b>是我们没解出来</b>,我去修解析器。</div>;
+                    }
+                    if (hoverOp) {
+                      return <div>✓ <b>悬停触发了独立请求</b>(UserByScreenName)——
+                        而我们**已经把它截下来了**,只是解析器只认推文对象、把它整个跳过。
+                        <b>数据在手里,只是没解。</b></div>;
+                    }
+                    if (has('relationship_perspectives') || has('"followed_by"')) {
+                      return <div>✓ 关系字段出现在载荷里(但不在时间线里)—— 我去看是哪条请求带的。</div>;
+                    }
+                    return <div>⚠️ 最近 {all.length} 条载荷里<b>没有任何关系字段</b> ——
+                      要么还没悬停过,要么 X 真没给。
+                      <b>请把鼠标靠近一个头像让卡片弹出来</b>,然后再看这里。</div>;
+                  })()}
+                </div>
+                {capSnap!.rawPayloads!.map((r, i) => (
+                  <div key={`${r.at}-${i}`}>
+                    <div className="krig-webc__row">
+                      <button type="button" className="krig-webc__clear"
+                        onClick={() => setRawOpen(rawOpen === i ? null : i)}>
+                        {rawOpen === i ? '▾' : '▸'} {r.op}
+                      </button>
+                      <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                        {(r.bytes / 1024).toFixed(0)} KB
+                      </span>
+                    </div>
+                    {rawOpen === i && (
+                      <pre className="krig-webc__pre" style={{ maxHeight: 320, overflow: 'auto' }}>
+                        {r.body}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
 

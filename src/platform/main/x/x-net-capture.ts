@@ -27,6 +27,7 @@
 import type { PageId } from '../web-capability/page';
 import { pageRegistry, netBus, bodyProvider, getNetMonitor } from '../web-capability/wiring/runtime';
 import { toPageHost } from '../web-capability/wiring/electron-page-host';
+import { wireWebRequestSide, registerPageIdLookup } from '../web-capability/wiring/webrequest-side';
 import { bindPageHost } from '../web-capability/wiring/page-hosts';
 import type { NetworkEvent } from '../web-capability/net';
 
@@ -60,6 +61,18 @@ export function wsIdOf(wc: Electron.WebContents): string | null {
 }
 
 /** 在 `web.page` 登记这个 X 页面并返回身份;已登记则直接返回 */
+/**
+ * ⭐ 从 `wc.id` 反查已登记的 pageId —— **不新建**。
+ *
+ * webRequest 回调里只有 `webContentsId`(数字),而关联要的是 pageId。
+ * ⚠️ 这里刻意**不调 xPageId**:那会在网络回调里凭空登记页面,
+ * 把「有流量经过」误当成「有个 X 页面开着」。查不到就返回 null,
+ * 调用方据此丢弃 —— 丢的是没登记页面的流量,本来就不该关联。
+ */
+export function lookupPageIdByWcId(wcId: number): PageId | null {
+  return pageIdByWc.get(wcId) ?? null;
+}
+
 export function xPageId(wc: Electron.WebContents): PageId {
   const existing = pageIdByWc.get(wc.id);
   if (existing) {
@@ -123,6 +136,25 @@ export function captureXPayloads(
   options: XCaptureOptions,
 ): () => void {
   const pageId = xPageId(wc);
+
+  /**
+   * ⭐⭐ 把 `web.net` 的 **webRequest 侧**接上(2026-09-18 补)。
+   *
+   * ⚠️ 这一半此前**全仓零监听**,于是 `candidatesFor` 恒空 →
+   * 每条 CDP 载荷都「配不上任何 webRequest 记录」→ `onPayload` **永不触发**
+   * → 抓画像空转 12s。CDP 那一侧一直是好的,少的自始至终只有这一半。
+   *
+   * ⚠️ 挂在**这里**而不是 app 启动时:webRequest 是 session 级的,
+   * 而 session 是 per-ws 的(`persist:webview-${wsId}`)——
+   * 只有拿到具体 wc 才知道该挂哪个 session。`wireWebRequestSide` 幂等,
+   * 同一 partition 重复调只挂一次(Electron 每个 session 只允许一个
+   * onBeforeRequest 监听器,挂两次后挂的会**覆盖**先挂的)。
+   *
+   * ⚠️ 反查用注册而非 import:能力层不认识 X(分层守卫盯着这条)。
+   */
+  registerPageIdLookup(lookupPageIdByWcId);
+  wireWebRequestSide(netBus, readPartition(wc));
+
   const monitor = getNetMonitor(String(pageId));
 
   const unsubscribe = netBus.subscribe(pageId, {}, (event: NetworkEvent) => {

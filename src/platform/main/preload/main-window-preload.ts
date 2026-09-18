@@ -57,6 +57,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     goto: (wcId: number | undefined, name: string, params?: Record<string, string>, timeoutMs?: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_GOTO, { wcId, name, params, timeoutMs }),
     pageNames: () => ipcRenderer.invoke(IPC_CHANNELS.WEBC_PAGE_NAMES),
+    /**
+     * ⭐ 第四类:跑一次执行者(对象=模型,不是页面)。
+     * ⚠️ 没有 wcId —— 执行者不碰浏览器,传页面参数是假字段。
+     */
+    execute: (args: {
+      model: string; instruction: string; content: string;
+      /** 卷宗附件:键=附件名(原样当小标题),值=已取到的内容 */
+      attachments?: Record<string, unknown>;
+      /** ⭐ 没取到的附件名单 —— 执行者据此返回 degraded(判了但没看全) */
+      missing?: string[];
+      structured?: boolean; timeoutMs?: number; endpoint?: string;
+    }) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_EXECUTE, args),
+    /** 卷宗盘点:附件实际能取到多少(只读不写) */
+    inventory: () => ipcRenderer.invoke(IPC_CHANNELS.WEBC_INVENTORY),
+    /** 真页面上量蓝V徽章结构(不猜 selector) */
+    readVerified: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_READ_VERIFIED, { wcId }),
+    /** 探 X 页面内存里的 user 数据在哪 */
+    probeMemory: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_PROBE_MEMORY, { wcId }),
   },
 
   /** 诊断上报(renderer → main) */

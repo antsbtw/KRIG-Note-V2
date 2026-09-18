@@ -27,7 +27,21 @@ export type DegradationCategory =
   | 'systemic';
 
 /** 能力层名。⚠️ 用 `web.*`,**不用 L0/L1**(见 `05` §1 与本层 README) */
-export type CapabilityLayer = 'web.page' | 'web.net' | 'web.dom' | 'web.input' | 'web.trace';
+/**
+ * 能力分层标识。
+ *
+ * ⭐ `exec` 是**第四类**(用户 2026-09-15 定):「在 Gemma 之下都是执行者,
+ * 只是对象不同而已」—— 前五个的对象是**网页**,`exec` 的对象是**模型**
+ * (本地 Ollama / 网页版 AI / 将来的视频等能力)。
+ *
+ * ⚠️ 它故意**不叫** `web.exec`:执行者压根不碰浏览器,挂个 `web.` 前缀
+ * 会让留痕里「这条是页面出的问题还是模型出的问题」再也分不开 ——
+ * 而 `planTrace` 的兜底是 `?? 'web.page'`,不单独立名的话每次执行
+ * 都会被盖上「页面层」的戳,那是本仓库最常见的假字段形态。
+ */
+export type CapabilityLayer =
+  | 'web.page' | 'web.net' | 'web.dom' | 'web.input' | 'web.trace'
+  | 'exec';
 
 /** 可靠性纲领 §3 的 record 结构 */
 export type DegradationRecord = {

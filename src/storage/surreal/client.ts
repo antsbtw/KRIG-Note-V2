@@ -28,12 +28,21 @@ const NOTE_DATABASE = 'krig_note_v2';
  * SurrealDB 层面无法跨库 JOIN。跨库关联(若将来需要)只能落应用层。
  */
 const X_DATABASE = 'krig_x';
+/**
+ * 工作流库 —— getFlowDB() 的目标。第三个独立 database(同 ns)。
+ *
+ * 执行记录是**审计数据**:只增不改、量大、可整批清理 ——
+ * 与笔记本体、与 X 采集数据的生命周期完全不同,混进任何一个
+ * 都会让那边的备份/清理策略变形(设计 Module5-01 §6.1)。
+ */
+const FLOW_DATABASE = 'krig_flow';
 const READY_TIMEOUT = 15000;
 const READY_POLL_INTERVAL = 500;
 const DB_SUBDIR = 'krig-data/surreal';
 
 let db: Surreal | null = null;
 let xdb: Surreal | null = null;
+let flowdb: Surreal | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverPort = DEFAULT_PORT;
 let isReady = false;
@@ -95,6 +104,15 @@ export function getDB(): Surreal {
 export function getXDB(): Surreal {
   if (!xdb) throw new Error('X SurrealDB not initialized; call initSurrealDB() first');
   return xdb;
+}
+
+/**
+ * 工作流库连接。⚠️ 未初始化直接 throw,不返回 null ——
+ * 兜底会让「执行记录没写进去」变成静默失败,而那正是追溯能力的根。
+ */
+export function getFlowDB(): Surreal {
+  if (!flowdb) throw new Error('Flow SurrealDB not initialized; call initSurrealDB() first');
+  return flowdb;
 }
 
 export function isDBReady(): boolean {
@@ -398,6 +416,7 @@ export async function initSurrealDB(): Promise<void> {
   // 那会让 getXDB() 在运行期才 throw,故障点离真因十万八千里。
   db = await connectOne(NOTE_DATABASE);
   xdb = await connectOne(X_DATABASE);
+  flowdb = await connectOne(FLOW_DATABASE);
   isReady = true;
   for (const cb of readyCallbacks) {
     try { cb(); } catch (err) { console.error('[storage/surreal] Ready callback error:', err); }
@@ -437,14 +456,16 @@ async function superviseRestart(): Promise<void> {
       if (shuttingDown) return;
       try {
         // 旧连接已死透,先关掉再重建 —— 否则它们的重连定时器会和新连接抢
-        for (const conn of [db, xdb]) {
+        for (const conn of [db, xdb, flowdb]) {
           if (conn) { try { conn.close(); } catch { /* ignore */ } }
         }
         db = null;
         xdb = null;
+        flowdb = null;
         await startServer();
         db = await connectOne(NOTE_DATABASE);
         xdb = await connectOne(X_DATABASE);
+        flowdb = await connectOne(FLOW_DATABASE);
         isReady = true;
         restartAttempts = 0;             // 成功即清零
         console.log('[storage/surreal] ✓ sidecar 已重启,两条连接均已恢复');
@@ -486,11 +507,12 @@ export function shutdownSurrealDB(): void {
   shuttingDown = true;
   // 所有常驻连接都要有停止调用(memory project-graceful-shutdown):
   // 漏关一条,它的重连定时器会把事件循环吊住,表现成"Ctrl+C 后不退"。
-  for (const conn of [db, xdb]) {
+  for (const conn of [db, xdb, flowdb]) {
     if (conn) { try { conn.close(); } catch { /* ignore */ } }
   }
   db = null;
   xdb = null;
+  flowdb = null;
   if (serverProcess) {
     // detached 后 sidecar 不再随终端信号一起死,必须由我们显式送信号。
     // 这里是**同步**退出路径(before-quit 二次进入后紧接着就 exit),原先那个
@@ -505,11 +527,12 @@ export function shutdownSurrealDB(): void {
 
 /** 异步关闭(等子进程真退出 + 孤儿兜底,用于 reset/restore) */
 export async function shutdownSurrealDBAsync(): Promise<void> {
-  for (const conn of [db, xdb]) {
+  for (const conn of [db, xdb, flowdb]) {
     if (conn) { try { conn.close(); } catch { /* ignore */ } }
   }
   db = null;
   xdb = null;
+  flowdb = null;
   if (serverProcess) {
     const proc = serverProcess;
     await new Promise<void>((resolve) => {

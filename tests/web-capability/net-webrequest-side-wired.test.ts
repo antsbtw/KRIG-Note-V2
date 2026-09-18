@@ -67,8 +67,25 @@ describe('⭐⭐ web.net:两侧都要接线,只有一侧等于整层不工作', 
     ).not.toHaveLength(0);
   });
 
-  it('⭐ CDP 侧(noteProviderRequest)也要有人调用 —— 少哪边都配不上', () => {
-    const callers = productionCallers('noteProviderRequest', 'net/bus.ts');
+  it('⭐ CDP 侧(bindProviderRequest)也要有人调用 —— 少哪边都配不上', () => {
+    /**
+     * ⚠️⚠️ 本条初版钉的是 `noteProviderRequest` —— **全仓不存在这个方法**
+     * (bus.ts 里真正的名字是 `bindProviderRequest`,而 body-provider.ts
+     *  早就在调)。于是这条断言**永远红,且红得没有意义**:
+     * 它报告「CDP 侧没人接」,而事实是 CDP 侧一直接着。
+     *
+     * ⭐ 守卫钉的符号必须是**活的**(记忆 feedback-guard-must-pin-live-code)。
+     * 写守卫时核对一下符号在不在,比事后查「为什么这条一直红」便宜得多。
+     *
+     * ⭐ 反向锁:符号名写错时要能立刻发现 —— 先断言它真的存在于 bus.ts。
+     */
+    const busSrc = readFileSync(resolve(SRC, 'platform/main/web-capability/net/bus.ts'), 'utf-8');
+    expect(
+      busSrc,
+      'bindProviderRequest 不在 bus.ts 里 —— 守卫又钉了个幻影符号',
+    ).toMatch(/\bbindProviderRequest\s*\(/);
+
+    const callers = productionCallers('bindProviderRequest', 'net/bus.ts');
     expect(callers, 'CDP 侧登记没人调,关联同样恒失败').not.toHaveLength(0);
   });
 

@@ -53,6 +53,62 @@ export const TWEET_SCRAPE_FN_BODY = `
       }
     } catch (e) {}
 
+    // ⭐ 蓝V —— 用户 2026-09-18 实机验证指出缺这项
+    //
+    // ⚠️ selector 全仓**没有实测记录**,所以这里用**宽判据**:
+    //    X 的认证徽章在 User-Name 区域里,历史上用过
+    //    data-testid=icon-verified 与带 aria-label 的 svg 两种形态。
+    //    ⚠️ 本注释在模板字符串里,**不能用反引号** —— 会提前闭合模板,整段语法崩。
+    //    两个都试,并且**把实际看到的证据带回来**(verifiedEvidence)——
+    //    这样面板上能看见「是靠哪一条判出来的」,判错了也查得到,
+    //    而不是只给一个 true/false 让人猜。
+    try {
+      var unEl = article.querySelector('[data-testid="User-Name"]');
+      if (unEl) {
+        var byTestid = unEl.querySelector('[data-testid="icon-verified"]');
+        var evidence = null;
+        if (byTestid) {
+          evidence = 'testid:icon-verified';
+        } else {
+          // 回退:找 aria-label 里含 Verified/已认证 的元素
+          var marked = unEl.querySelectorAll('svg[aria-label], [aria-label]');
+          for (var vi = 0; vi < marked.length; vi++) {
+            var al = marked[vi].getAttribute('aria-label') || '';
+            if (/verified|认证/i.test(al)) { evidence = 'aria-label:' + al.slice(0, 40); break; }
+          }
+        }
+        if (evidence) {
+          result.isBlueVerified = true;
+          result.verifiedEvidence = evidence;
+        } else {
+          // ⚠️ 没找到徽章 → false(「看过了,没有」),不是 undefined(「没查」)
+          result.isBlueVerified = false;
+        }
+      }
+    } catch (e) {}
+
+    // ⭐⭐ 关注状态 + 作者数字 id —— **2026-09-18 实机实测得来**
+    //
+    // 来源:用户在采集验证面板上点了「关注/取关」,操作流记下了 testid:
+    //   1640251786476023808-follow     ← 未关注(按钮写 Follow)
+    //   1640251786476023808-unfollow   ← 已关注(按钮写 Following,点了才是取关)
+    // 前缀那串数字就是作者的 rest_id(改名不变,比 handle 稳)。
+    //
+    // ⚠️ 仓里此前**零条**关注按钮的记录 —— 这是第一次有实测依据。
+    // ⚠️ 这个按钮**只在悬浮卡/主页上才有**,时间线推文卡片上没有;
+    //    读不到时保持 undefined(「没看到按钮」),**不要写 false**
+    //    (那是「看到了,是未关注」)—— 两者含义相反。
+    try {
+      var followBtn = article.querySelector('[data-testid$="-follow"], [data-testid$="-unfollow"]');
+      if (followBtn) {
+        var ftid = followBtn.getAttribute('data-testid') || '';
+        result.iFollow = /-unfollow$/.test(ftid);
+        var restId = ftid.replace(/-(un)?follow$/, '');
+        if (/^\d+$/.test(restId)) result.authorRestId = restId;
+        result.followEvidence = ftid;
+      }
+    } catch (e) {}
+
     // 头像
     try {
       var avatarImg = article.querySelector('[data-testid="Tweet-User-Avatar"] img');

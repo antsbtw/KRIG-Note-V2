@@ -130,20 +130,133 @@ describe('⭐⭐ dev-only:两端都要关,只关一端等于没关', () => {
   });
 });
 
-describe('⭐⭐ 按契约三分法分类:控制 / 输入 / 输出', () => {
-  it('⭐⭐ 三个标签页都在', () => {
-    for (const t of ['control', 'input', 'output']) {
-      expect(VIEW_CODE, `缺 ${t} 标签页`).toMatch(new RegExp(`'${t}'`));
+describe('⭐⭐ 按契约分类:控制 / 输入 / 输出 / 执行', () => {
+  it('⭐⭐ 每个 tab 都有 id 与标签文字(清单从**真表**推,不写死)', () => {
+    /**
+     * ⚠️⚠️ 本条前两版都栽了:
+     *  ① 全文件 toMatch —— 删掉整个 tab 按钮仍全绿(名字在别处也出现)
+     *  ② 写死四个名字  —— 加**第五个** tab 照样全绿(清单不会自己长)
+     *
+     * ⭐ 改法:从 tab 数组里**抓出实际有哪些**,再逐个检查它们各自完整
+     * (有 id、有非空 label)。这样新增 tab 自动纳入检查,
+     * 删掉/写残任何一个都会红。
+     */
+    const tabsStart = VIEW_CODE.indexOf('krig-webc__tabs');
+    expect(tabsStart, '找不到 tab 数组 —— 断言会空转').toBeGreaterThan(0);
+    const tabsEnd = VIEW_CODE.indexOf('krig-webc__body', tabsStart);
+    expect(tabsEnd, '找不到 tab 数组结尾').toBeGreaterThan(tabsStart);
+    const tabsBlock = VIEW_CODE.slice(tabsStart, tabsEnd);
+
+    // 真表:{ id: 'xxx' as const, label: '…' } 逐项抓
+    const entries = Array.from(
+      tabsBlock.matchAll(/id:\s*'(\w+)'[^}]*?label:\s*'([^']*)'/g),
+    ).map((m) => ({ id: m[1], label: m[2] }));
+
+    expect(entries.length, 'tab 一个都没抓到 —— 正则失配,断言会空转').toBeGreaterThan(3);
+
+    for (const { id, label } of entries) {
+      expect(label.trim(), `tab「${id}」的标签文字是空的 —— 按钮上什么都不显示`).not.toBe('');
+      // ⭐ 每个 tab 都要有对应的正文块,否则点了是空白
+      expect(
+        VIEW_CODE,
+        `tab「${id}」有按钮但没有正文块 —— 点进去是空白`,
+      ).toMatch(new RegExp(`tab\\s*===\\s*'${id}'`));
     }
-    expect(VIEW).toMatch(/控制/);
-    expect(VIEW).toMatch(/输入/);
-    expect(VIEW).toMatch(/输出/);
+
+    // 契约三分法那三个必须在(它们是能力层的分类,不是随便加的)
+    for (const must of ['control', 'input', 'output']) {
+      expect(entries.some((e) => e.id === must), `契约分类 ${must} 不见了`).toBe(true);
+    }
+  });
+
+  it('⭐⭐ 用户明确要过的 tab 必须在(真表推法回答不了「该有几个」)', () => {
+    /**
+     * ⚠️ 上一条从**真表**推,好处是新增 tab 自动纳入检查;
+     * 但它有个固有盲区:**删掉整个 tab,真表里就没这项,它自然检查不到**。
+     * 实测注入验证过 —— 删掉 verify 按钮,上一条照样全绿。
+     *
+     * ⭐ 所以两条分工:
+     *   上一条(真表)  「存在的每个 tab 都完整」—— 会长
+     *   本条(写死)    「这几个必须存在」—— 不会长,但**故意的**
+     *
+     * 写死的是**用户明确要过的**,不是我随手列的:
+     *  · control/input/output —— 契约三分法(01-contract.md:15)
+     *  · exec                —— 第四类执行者(用户 2026-09-15 定)
+     *  · verify              —— 采集验证(用户 2026-09-18 定:
+     *                            「我在 x 上操作一个界面,你把采集到的数据显示在右侧」)
+     */
+    const tabsStart = VIEW_CODE.indexOf('krig-webc__tabs');
+    const tabsBlock = VIEW_CODE.slice(tabsStart, VIEW_CODE.indexOf('krig-webc__body', tabsStart));
+
+    for (const [id, why] of [
+      ['control', '契约三分法'], ['input', '契约三分法'], ['output', '契约三分法'],
+      ['exec', '第四类执行者'], ['verify', '采集验证(人核对漏没漏)'],
+    ] as const) {
+      expect(tabsBlock, `tab「${id}」不见了 —— ${why}`).toMatch(new RegExp(`id:\\s*'${id}'`));
+    }
   });
 
   it('⭐ 控制页跑的是底座已有的原子能力(不自己再写一份)', () => {
     for (const fn of ['goto', 'ready', 'scrollUntil', 'tap', 'press']) {
       expect(VIEW_CODE, `控制页没有 ${fn}`).toMatch(new RegExp(`api\\(\\)!\\.${fn}\\(`));
     }
+  });
+});
+
+describe('⭐⭐ 素材是卷宗:主体 + 附件 + 缺了什么', () => {
+  /** 切到 exec tab 那段再断言 —— 全文件 toMatch 会被别的能力的同名字眼兜住 */
+  const execBlock = (() => {
+    const i = VIEW_CODE.indexOf("tab === 'exec'");
+    const j = VIEW_CODE.indexOf('krig-webc__runs', i);
+    return i > 0 ? VIEW_CODE.slice(i, j > i ? j : undefined) : '';
+  })();
+
+  it('前提自检:切出了 exec 那段(否则整段空转)', () => {
+    expect(execBlock.length, 'exec 段没切到 —— 下面的断言会恒真').toBeGreaterThan(400);
+  });
+
+  it('⭐⭐ 附件是**可增删的列表**,不是写死的清单', () => {
+    /**
+     * ⚠️⚠️ 用户 2026-09-17 订正:「这个不应该写死,大概为 bio,
+     * 和这条推文相关的判断数据-上下文等。」
+     *
+     * 初版我放了四个写死的输入框(推主概况/上下文/会话串/时间线邻近),
+     * 那是把**我列的示例**当成了**系统的清单**。契约里 attachments 本来就是
+     * 任意键值对 —— 附件种类是编排的参数,不是能力层的常量。
+     *
+     * ⭐ 所以这条钉的是**机制**(能加、能删、名字可填),不是某几个名字 ——
+     * 钉名字就又变成「写死的清单」了(feedback-guard-hardcoded-list-never-grows)。
+     */
+    expect(execBlock, '没有「加一项附件」的入口 —— 附件种类被写死了').toMatch(/加一项附件/);
+    /**
+     * ⚠️ 初版写 `/atts\.filter\(/` —— **把删除按钮掏空仍然全绿**,
+     * 因为缺失预览里也有一个 `atts.filter((a) => a.name.trim())`。
+     * 今天第四次栽在「钉 token 存在」上。钉**按下去真的会删**:
+     * 按索引剔除(`j !== i`)这个形状,预览那处的 filter 没有。
+     */
+    expect(execBlock, '删除按钮没有真的删(按索引剔除)—— 预填项会变成事实上的清单')
+      .toMatch(/setAtts\(\s*atts\.filter\(\([^)]*\)\s*=>\s*j\s*!==\s*i\)/);
+    expect(execBlock, '附件名不可编辑 —— 那还是写死的清单')
+      .toMatch(/placeholder="附件名"/);
+    expect(execBlock, '附件不是按列表渲染的').toMatch(/atts\.map\(/);
+  });
+
+  it('⭐⭐ 空附件进 missing,**绝不**塞空串占位', () => {
+    /**
+     * 塞空串会让模型以为「查过了,是空的」,而事实是「压根没查到」——
+     * 两者结论方向相反(记忆 feedback-check-sample-contains-phenomenon)。
+     */
+    expect(execBlock, '没有把空附件分流进 missing').toMatch(/missing\.push\(/);
+    expect(execBlock, '没有「取到了才放进 attachments」的判断')
+      .toMatch(/if\s*\(\s*a\.value\.trim\(\)\s*\)/);
+    // ⭐ 没名字的行要跳过 —— 否则空行会变成一个叫 '' 的附件
+    expect(execBlock, '没名字的附件行没被跳过').toMatch(/if\s*\(\s*!n\s*\)\s*continue/);
+  });
+
+  it('⭐⭐ 跑之前就告诉人「缺几项 → 会是 degraded」', () => {
+    // 跑完才发现依据不足,等于没提醒
+    expect(execBlock, '没有在跑之前提示缺失项').toContain('degraded');
+    expect(execBlock).toMatch(/缺\s*\{/);
   });
 });
 
@@ -192,12 +305,14 @@ describe('⭐⭐ 红线:不许有「求值任意脚本」的万能通道', () =>
 });
 
 describe('⭐⭐ 四端名字一致(?. 会让不一致静默失败)', () => {
-  it('⭐⭐ 九个通道:channel / preload / d.ts 三处对得上', () => {
+  it('⭐⭐ 每个通道:channel / preload / d.ts 三处对得上', () => {
     const chans = [
       'WEBC_READY', 'WEBC_SCROLL_UNTIL', 'WEBC_TAP', 'WEBC_PRESS', 'WEBC_HOVER',
       'WEBC_TYPE', 'WEBC_PAGES', 'WEBC_ANCHORS', 'WEBC_READ_TABBAR',
       // ⭐ goto 落地时补(2026-09-15)—— 清单漏一个,那个通道的四端不一致就没人发现
       'WEBC_GOTO', 'WEBC_PAGE_NAMES',
+      // ⭐ 第四类执行者落地时补(2026-09-17)
+      'WEBC_EXECUTE',
     ];
     for (const c of chans) {
       expect(CHANNELS, `channel-names 缺 ${c}`).toMatch(new RegExp(`${c}:`));
@@ -208,7 +323,7 @@ describe('⭐⭐ 四端名字一致(?. 会让不一致静默失败)', () => {
 
   it('⭐⭐ preload 的方法名与 d.ts 对得上(面板调的是 d.ts 那份)', () => {
     for (const fn of ['ready', 'scrollUntil', 'tap', 'press', 'hover', 'type',
-      'pages', 'anchors', 'readTabBar', 'goto', 'pageNames']) {
+      'pages', 'anchors', 'readTabBar', 'goto', 'pageNames', 'execute']) {
       expect(PRELOAD, `preload 缺 ${fn}`).toMatch(new RegExp(`\\b${fn}\\s*[:(]`));
       expect(DTS, `d.ts 缺 ${fn}`).toMatch(new RegExp(`\\b${fn}\\s*\\(`));
     }

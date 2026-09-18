@@ -53,10 +53,15 @@ import { traceRecorder as traceRec } from '../web-capability/wiring/runtime';
 import { planTrace, describeWhy, type CapabilityOutcome } from './web-console-classify';
 import { xPageId } from '../x/x-net-capture';
 import { resolveXWebContents } from '../x/x-webcontents';
-import { READ_APP_TAB_BAR } from '../x/x-anchors';
+import { READ_APP_TAB_BAR, READ_VERIFIED_BADGE, PROBE_X_MEMORY } from '../x/x-anchors';
 import type { PageId } from '../web-capability/page/types';
 import type { AnchorName, ScriptId } from '../web-capability/dom/types';
 import type { ReadyCriterion, ScrollStop, ScrollOptions } from '../web-capability/page/control-types';
+import { LocalExecutor } from '../executor/local-executor';
+import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
+import { takeDossierInventory } from '../db/x-dossier-inventory';
+import { recordStep } from '../flow/flow-run-repo';
+import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
 
 /** 解析出「当前这个 X 页面」的 pageId。拿不到就如实说,不猜 */
 function resolvePage(wcId: unknown): { pageId: PageId } | { error: string } {
@@ -94,12 +99,67 @@ const asAnchor = (v: unknown): AnchorName => String(v ?? '') as AnchorName;
  * 而它当时埋在本文件里且没导出,守卫只能 grep 源码文本,**两次假绿**。
  * 现在测试直接调 `planTrace` 断言返回值。
  */
+/**
+ * ⭐ 能力名 → 步骤分类(与 `flow_step_run.step_type` 同一套词)。
+ *
+ * ⚠️ 未登记的**不猜**:返回 undefined,调用方据此不写 flow 记录。
+ * 猜一个分类会让审计数据从一开始就是脏的,而脏在哪儿看不出来。
+ */
+const STEP_TYPE_OF: Readonly<Record<string, StepType>> = {
+  goto: 'act', ready: 'act', scrollUntil: 'act',
+  tap: 'act', press: 'act', hover: 'act', type: 'act',
+  pages: 'fetch', anchors: 'fetch', pageNames: 'fetch',
+  readTabBar: 'fetch', inventory: 'fetch', readVerified: 'fetch', probeMemory: 'fetch',
+  execute: 'judge',
+};
+
+/** 三态 → 步骤状态。⚠️ 能力层只会给三态,skipped/rejected 由编排层写 */
+function toStepStatus(result: CapabilityOutcome): StepStatus {
+  return result.status === 'ok' ? 'ok'
+    : result.status === 'degraded' ? 'degraded' : 'failed';
+}
+
+/**
+ * ⭐⭐ 一次调用同时喂**两套留痕** —— 它们答的不是同一个问题:
+ *
+ *   `web.trace`      「这个**能力**健康吗」—— 按层聚合、算成功率、探测站点改版、滚动丢弃
+ *   `flow_step_run`  「这次**执行**做了什么」—— 一步一行、带来历、只增不改、可回放
+ *
+ * ⚠️ **不合并**:合并会让审计记录跟着 trace 的保留策略被丢掉,
+ * 而审计的意义正在于「过很久还查得到」。
+ *
+ * ⚠️ `ctx` 是**可选**的:面板上手点一个 goto 不属于任何流程,
+ * 这时**不写** flow 记录 —— 硬造一个假 run 会让 flow_run 堆满「一步的流程」,
+ * 把真正的执行淹掉,那等于把追溯能力自己稀释掉。
+ */
 function recordRun(
   fn: string,
   params: unknown,
   result: CapabilityOutcome,
   elapsedMs: number,
+  ctx?: ExecContext & { seq: number; stepId?: string },
 ): void {
+  // ── ② 执行记录(只在属于某次流程时写)──
+  if (ctx) {
+    const stepType = STEP_TYPE_OF[fn];
+    if (!stepType) {
+      // fail loud:新增能力忘了登记分类,审计数据会缺一块
+      console.warn(`[web-console] 能力 ${fn} 没登记 step_type —— 本步不进执行记录`);
+    } else {
+      const step = deriveStep(ctx, {
+        seq: ctx.seq, stepId: ctx.stepId ?? fn, stepType, capability: fn,
+      });
+      void recordStep(step, {
+        status: toStepStatus(result),
+        input: params as Record<string, unknown>,
+        missing: result.status === 'degraded' ? result.missing : undefined,
+        reasoning: result.reason,
+        durationMs: elapsedMs,
+      });
+    }
+  }
+
+  // ── ① 能力健康留痕(照旧,与上面互不影响)──
   const plan = planTrace(fn, params, result, elapsedMs);
   if (plan.kind === 'recovery') {
     traceRecorder.recovery({
@@ -118,6 +178,31 @@ function recordRun(
   });
 }
 
+/**
+ * ⭐⭐ 解析失败**也要落痕** —— 这恰恰是最需要诊断的情况。
+ *
+ * ── 用户 2026-09-18 实测暴露 ──
+ *
+ * 用户点「探内存」按钮,面板没反应,而**留痕里一条记录都没有** ——
+ * 于是我据此断言「你没点」,而用户截图证明按钮就在那儿、也点了。
+ * ⚠️ 我用**有缺陷的观测**去否定用户的**直接陈述**,这是今天最糟的一次。
+ *
+ * 真因:全仓 **10 处**早返回长这样:
+ *   `if ('error' in r) return { channelOk: false, error: r.error };`
+ * —— 解析不到页面就直接返回,**不落痕**。
+ * 所以「点了没反应」这种最该有诊断的情况,偏偏是留痕全空的情况。
+ *
+ * ⚠️ 同族:本会话已栽过一次(bindPageHost 的早返回漏绑)。
+ * 「早返回」是留痕的天然盲区 —— 凡是 return 之前没记的,都查不到。
+ */
+function failFast(fn: string, reason: string, t0: number): { channelOk: false; error: string } {
+  recordRun(fn, {}, { status: 'failed', reason }, Date.now() - t0);
+  return { channelOk: false, error: reason };
+}
+
+/** 注册的通道数 —— 与下面 ipcMain.handle 的条数一致 */
+const WEBC_COUNT = 16;
+
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
     // 生产构建不注册 —— 控制台是排查工具,不是用户功能
@@ -135,7 +220,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_GOTO, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown; name?: unknown; params?: unknown; timeoutMs?: unknown };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('goto', page.error, Date.now());
 
     const name = String(p.name ?? '');
     if (!name) return { channelOk: false, error: '语义页面名必填' };
@@ -164,7 +249,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_READY, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown; criterion?: unknown; timeoutMs?: unknown };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('ready', page.error, Date.now());
 
     const raw = (p.criterion ?? {}) as Record<string, unknown>;
     let criterion: ReadyCriterion;
@@ -202,7 +287,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_SCROLL_UNTIL, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown; stop?: unknown; options?: unknown };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('scrollUntil', page.error, Date.now());
 
     const raw = (p.stop ?? {}) as Record<string, unknown>;
     let stop: ScrollStop;
@@ -229,7 +314,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_TAP, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown; anchor?: unknown; settle?: unknown };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('tap', page.error, Date.now());
 
     const s = (p.settle ?? null) as Record<string, unknown> | null;
     const t0 = Date.now();
@@ -257,7 +342,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_PRESS, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown; key?: unknown };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('press', page.error, Date.now());
     const t0 = Date.now();
     const result = await inputEngine.press(page.pageId, { key: String(p.key ?? '') });
     console.log(`[web-console] press ${String(p.key)} → ${result.status}${describeWhy(result)}`);
@@ -268,7 +353,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_HOVER, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown; anchor?: unknown };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('hover', page.error, Date.now());
     const t0 = Date.now();
     const result = await inputEngine.hover(page.pageId, { anchor: asAnchor(p.anchor) });
     console.log(`[web-console] hover ${String(p.anchor)} → ${result.status}${describeWhy(result)}`);
@@ -292,7 +377,7 @@ export function registerWebConsoleHandlers(): void {
       wcId?: unknown; anchor?: unknown; text?: unknown; check?: unknown;
     };
     const page = resolvePage(p.wcId);
-    if ('error' in page) return { channelOk: false, error: page.error };
+    if ('error' in page) return failFast('type', page.error, Date.now());
 
     const c = (p.check ?? { kind: 'none' }) as Record<string, unknown>;
     const check = c.kind === 'contains'
@@ -379,9 +464,9 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_READ_TABBAR, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { wcId?: unknown };
     const id = typeof p.wcId === 'number' ? p.wcId : undefined;
-    const r = resolveXWebContents(id);
-    if ('error' in r) return { channelOk: false, error: r.error };
     const t0 = Date.now();
+    const r = resolveXWebContents(id);
+    if ('error' in r) return failFast('readTabBar', r.error, t0);
     try {
       const tabs = await r.wc.executeJavaScript(READ_APP_TAB_BAR);
       const list = Array.isArray(tabs) ? tabs as Array<{ testid?: string | null }> : [];
@@ -431,6 +516,165 @@ export function registerWebConsoleHandlers(): void {
    * ⚠️ 同时返回**内存**与**磁盘**两份计数:两者对不上就说明落盘坏了,
    * 而那正是「记录悄悄丢了」最容易发生的地方。
    */
+  /**
+   * ⭐⭐ 第四类:跑一次**执行者**(对象=模型,不是页面)。
+   *
+   * 用户 2026-09-15 定:「在 Gemma 之下都是执行者,只是对象不同而已。」
+   *
+   * ── 为什么这个 handler 长得跟别的不一样 ──
+   *
+   * 别的能力开头都是 `resolvePage(p.wcId)`,返回里带 `pageId`。
+   * 执行者**没有页面** —— 它只算不存、不碰浏览器。硬塞一个 pageId 进来
+   * 会造出一个「永远没有意义的字段」,那是本仓库最常见的假字段形态。
+   *
+   * ⭐ 也正因为它不写库,**在面板上随便跑都不会动你的数据** ——
+   * 这是它与 `judgeWithOllama` 的分界线(后者一跑就改 x_tweet)。
+   *
+   * ⚠️ 判据(instruction)与素材(material)都由**面板给**,
+   * 主侧不内置任何业务判据:「VPN 求助该不该回」与「蓝V该不该点赞」
+   * 走的是同一个执行者,差别全在传进来的参数里。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_EXECUTE, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as {
+      model?: unknown; instruction?: unknown; content?: unknown;
+      structured?: unknown; timeoutMs?: unknown; endpoint?: unknown;
+      attachments?: unknown; missing?: unknown;
+    };
+
+    const model = String(p.model ?? '').trim();
+    if (!model) {
+      // ⚠️ 不给默认模型 —— 默认值会让「跑的是哪个模型」在留痕里永远说不清
+      return { channelOk: false, error: 'model 必填(不给默认值:否则说不清跑的是哪个模型)' };
+    }
+
+    let executor: LocalExecutor;
+    try {
+      executor = new LocalExecutor({
+        model,
+        endpoint: typeof p.endpoint === 'string' && p.endpoint ? p.endpoint : undefined,
+        timeoutMs: typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined,
+      });
+    } catch (err) {
+      return { channelOk: false, error: String((err as Error).message) };
+    }
+
+    const task: ExecuteTask = {
+      kind: 'judge',
+      instruction: String(p.instruction ?? ''),
+      structured: p.structured === true,
+    };
+    /**
+     * ⭐ 卷宗:主体 + 附件 + 缺了什么(用户 2026-09-17 订正的素材形状)。
+     *
+     * ⚠️ 面板给什么就是什么 —— 主侧**不代取附件**。
+     * 取附件是另一类执行者(对象=数据库)的活,取哪几样由编排决定;
+     * 在这里顺手查库会把「判断」和「取数」又焊回一起。
+     */
+    const material: ExecuteMaterial = {
+      content: String(p.content ?? ''),
+      attachments: (p.attachments ?? undefined) as Record<string, unknown> | undefined,
+      missing: Array.isArray(p.missing) ? p.missing.map(String) : undefined,
+    };
+
+    const t0 = Date.now();
+    const result = await executor.execute(task, material);
+    const elapsedMs = Date.now() - t0;
+
+    console.log(`[web-console] execute ${model} -> ${result.status}${describeWhy(result)} ${elapsedMs}ms`);
+    // ⭐ `by` 进 params —— classify 靠它把留痕记到执行者名下,而不是记到 X 头上
+    recordRun('execute', { by: String(executor.name), model, structured: task.structured },
+      result as CapabilityOutcome, elapsedMs);
+
+    return { channelOk: true, result };
+  });
+
+  /**
+   * ⭐ 卷宗盘点 —— 「附件实际能取到多少」用真数字回答。
+   *
+   * ⚠️ **只读不写**(纯 SELECT COUNT),所以面板上随便点都不动你的数据。
+   * ⚠️ 这不是执行者 —— 它不判断任何东西,只是把库里的事实摆出来,
+   *    好让「卷宗能有多厚」这个问题不用靠读代码推断。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_INVENTORY, async () => {
+    const t0 = Date.now();
+    try {
+      const inv = await takeDossierInventory();
+      recordRun('inventory', { tweets: inv.tweets, authors: inv.authorsSeen },
+        { status: 'ok' }, Date.now() - t0);
+      return { channelOk: true, inventory: inv };
+    } catch (err) {
+      // fail loud:X 库没起来时要说清楚,不返回一堆 0 假装「库是空的」
+      const reason = String((err as Error).message ?? err);
+      recordRun('inventory', {}, { status: 'failed', reason }, Date.now() - t0);
+      return { channelOk: false, error: `盘点失败(X 库没初始化?):${reason}` };
+    }
+  });
+
+  /**
+   * ⭐ 在**真页面**上量蓝V徽章的结构 —— 不猜 selector。
+   *
+   * ⚠️ 蓝V的 DOM selector 全仓**没有实测记录**,只有载荷那条路解过。
+   * 与 X 左栏 12 个 tab 同理:凭记忆写会写出「看着对、其实不存在」的东西,
+   * 而且采集恒空且不报错。
+   *
+   * ⚠️⚠️ **结构必须进留痕本身,不能只进 console.log**(readTabBar 那次栽过):
+   * 用户跑完,留痕里只有计数、真正的结构进了 console —— 而 console 我读不到,
+   * 又得回头问人。落痕的意义正是「不用回头问人」。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_READ_VERIFIED, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { wcId?: unknown };
+    const id = typeof p.wcId === 'number' ? p.wcId : undefined;
+    const t0 = Date.now();
+    const r = resolveXWebContents(id);
+    if ('error' in r) return failFast('readVerified', r.error, t0);
+    try {
+      const rows = await r.wc.executeJavaScript(READ_VERIFIED_BADGE);
+      const list = Array.isArray(rows) ? rows as Array<Record<string, unknown>> : [];
+      const withMarks = list.filter((x) => Array.isArray(x.marks) && (x.marks as unknown[]).length > 0).length;
+      // ⭐ 把**真实结构**原样落进留痕,不是只记个数
+      recordRun('readVerified', { rows: list.length, withMarks, sample: list.slice(0, 3) },
+        list.length > 0 ? { status: 'ok' } : { status: 'failed', reason: '页面上没找到 article[data-testid=tweet]' },
+        Date.now() - t0);
+      return { channelOk: true, rows: list };
+    } catch (err) {
+      const reason = String((err as Error).message ?? err);
+      recordRun('readVerified', {}, { status: 'failed', reason }, Date.now() - t0);
+      return { channelOk: false, error: reason };
+    }
+  });
+
+  /**
+   * ⭐⭐ 探 X 页面**内存**里的 user 数据 —— 用户判断「数据缓存在内存或硬盘」。
+   *
+   * 磁盘已实测排除:IndexedDB 存的是 UI 偏好 + 15 万个数字 id(画像字段零命中);
+   * HTTP Cache 里 X 的 API 响应带 no-store,不落盘。
+   * 所以数据在页面 JS 内存里,只能在页面上下文执行 JS 去读。
+   *
+   * ⚠️ **只探不取**:先回答「在哪个全局变量下、结构什么样」,
+   * 拿到真实结构再写提取 —— 与蓝V那次同理,量出来再写,不猜。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_PROBE_MEMORY, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { wcId?: unknown };
+    const id = typeof p.wcId === 'number' ? p.wcId : undefined;
+    const t0 = Date.now();
+    const r = resolveXWebContents(id);
+    if ('error' in r) return failFast('probeMemory', r.error, t0);
+    try {
+      const probe = await r.wc.executeJavaScript(PROBE_X_MEMORY);
+      const found = (probe as { userObjectsFound?: unknown[] })?.userObjectsFound ?? [];
+      // ⭐ 结构原样落痕 —— 不是只记个数(readTabBar 那次栽过)
+      recordRun('probeMemory', { found: found.length, probe },
+        found.length > 0 ? { status: 'ok' }
+          : { status: 'failed', reason: '没在任何全局变量下找到 user 对象' },
+        Date.now() - t0);
+      return { channelOk: true, probe };
+    } catch (err) {
+      const reason = String((err as Error).message ?? err);
+      recordRun('probeMemory', {}, { status: 'failed', reason }, Date.now() - t0);
+      return { channelOk: false, error: reason };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.WEBC_TRACE, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { sinceMs?: unknown };
     const since = typeof p.sinceMs === 'number' ? Date.now() - p.sinceMs : undefined;
@@ -451,5 +695,8 @@ export function registerWebConsoleHandlers(): void {
     };
   });
 
-  console.log('[web-console] dev-only 控制台已注册(10 个通道)');
+  // ⚠️ 这个数必须跟着 ipcMain.handle 的条数改。
+  //    本行曾写「10」而实际注册 12 个 —— 写死的计数会惄惄过期，
+  //    是「说了假话的数字」的小号版。
+  console.log(`[web-console] dev-only 控制台已注册（${WEBC_COUNT} 个通道）`);
 }

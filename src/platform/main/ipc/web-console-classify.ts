@@ -48,7 +48,24 @@ export const LAYER_OF: Readonly<Record<string, CapabilityLayer>> = {
   /** ⚠️ 与 anchors 同类:读的是**注册表**,不是页面 —— 不是 web.page */
   pageNames: 'web.trace',
   readTabBar: 'web.dom',
+  /**
+   * ⭐ 第四类:执行者(对象=模型,不是页面)。
+   * ⚠️ 必须登记 —— 不登记会落进 `?? 'web.page'` 兜底,
+   * 于是每一次模型调用都在留痕里显示成「页面层事件」。
+   */
+  execute: 'exec',
 };
+
+/**
+ * 从执行参数里取执行者名字,作为留痕的 `capability`。
+ *
+ * ⭐ 取不到时返回 `'exec'` 而**不是** `'x'` —— 「不知道是谁执行的」
+ * 与「X 站点出问题了」是两件事,混起来会污染改版探测器。
+ */
+function execCapability(params: unknown): string {
+  const by = (params as { by?: unknown } | null)?.by;
+  return typeof by === 'string' && by.trim() ? by : 'exec';
+}
 
 /** 判断结果:记成一条 recovery,还是一条 degradation */
 export type TracePlan =
@@ -123,7 +140,15 @@ export function planTrace(
   return {
     kind: 'degradation',
     layer,
-    capability: 'x',
+    /**
+     * 站点/能力标识 —— 用于「按站点统计格式外计数」(改版探测器)。
+     *
+     * ⚠️ 原先写死 `'x'`。第四类执行者进来后那就不对了:执行者的对象是**模型**,
+     * 把模型调用失败记到 X 头上,会让「X 改版了吗」这个探测器**说谎**
+     * (记忆 `project-x-inject-template-escape`:假信号引人去改没坏的代码)。
+     * exec 层记执行者名,其余照旧记 'x'。
+     */
+    capability: layer === 'exec' ? execCapability(params) : 'x',
     operation: `console:${fn}`,
     category: isAnchorMiss
       ? 'contract-violation'
