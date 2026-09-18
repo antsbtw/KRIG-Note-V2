@@ -383,11 +383,25 @@ export async function autoCollect(
     const isVerified = /verified/i.test(opts.pageLabel ?? '');
 
     let baseline: number | undefined;
+    /**
+     * ⚠️ 查不到基准有**三种**成因,处置完全不同 ——
+     * 只说「没有基准」等于没说(用户实测 2026-09-18:reconcile 显示 `250/?`,
+     * 而我分不清是没采过主页、还是采了但没存这个字段)。
+     */
+    let why = '';
     if (!isVerified && (isFollowing || isFollowers)) {
       try {
         const counts = await getAuthorCounts(owner);
         baseline = isFollowing ? counts.followingCount : counts.followersCount;
-      } catch { /* 库里没有就没有 */ }
+        if (baseline === undefined) {
+          why = counts.countsAt
+            ? `库里有 @${owner} 的行(${counts.countsAt} 采的)但**没有${isFollowing ? '关注数' : '粉丝数'}** ——`
+              + '多半是采主页时载荷没带 relationship_counts(那是别人看你时才有的视角)'
+            : `库里**没有 @${owner} 这个人** —— 先采一次他的主页(x.profile)`;
+        }
+      } catch (err) {
+        why = `查基准出错:${String(err)}`;
+      }
     }
 
     const got = r.people.length;
@@ -398,11 +412,7 @@ export async function autoCollect(
           + '这一页只能靠游标判断采完没有',
       };
     } else if (baseline === undefined) {
-      reconcile = {
-        got,
-        note: `没有基准可对 —— 库里没存过 @${owner} 的${isFollowing ? '关注数' : '粉丝数'}。`
-          + '先采一次他的主页(x.profile)就有了',
-      };
+      reconcile = { got, note: `没有基准可对:${why || '这个页面没有基准概念'}` };
     } else {
       const rate = baseline > 0 ? got / baseline : 0;
       const pct = (rate * 100).toFixed(0);
