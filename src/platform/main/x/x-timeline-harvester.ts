@@ -107,6 +107,19 @@ export interface HarvestedTweet {
    */
   iFollow?: boolean;
   followsMe?: boolean;
+  /**
+   * ⭐ 作者 bio —— 用户 2026-09-18 问「bio 采集到了吗」,答案曾是**没有**:
+   * 类型里没有、解析器没解、而 `authorsWithBio` 却一直报 0 ——
+   * 那是个**说谎的字段**(看着像「没采到」,其实是「根本没采」)。
+   *
+   * ⚠️ 与蓝V/关系同样是**两个位置**(x-author-profile.ts:89 实测):
+   * `profile_bio.description`(新形态)与 `legacy.description`(旧形态)。
+   *
+   * ⭐ 这一项的价值:盘点实测 bio 覆盖率仅 155/8021 = 2%,
+   * 因为此前只有「导航到那人主页 + 等 12 秒」这一条路。
+   * 时间线载荷里本来就带,等于白拿。
+   */
+  authorBio?: string;
   /** ⭐ iFollow 是靠哪个 testid 判出来的(如 `123-unfollow`)—— 判错要查得到 */
   followEvidence?: string;
   isBlueVerified?: boolean;
@@ -203,6 +216,14 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         authorHandle: ucore && typeof ucore.screen_name === 'string'
           ? ucore.screen_name : undefined,
         authorRestId,
+        // ⭐ bio:两个位置都看(与 x-author-profile.ts:89 同口径)
+        authorBio: (() => {
+          if (!urr) return undefined;
+          const pb = urr.profile_bio as Record<string, unknown> | undefined;
+          const ulg2 = urr.legacy as Record<string, unknown> | undefined;
+          const v = pb?.description ?? ulg2?.description;
+          return typeof v === 'string' && v.trim() ? v : undefined;
+        })(),
         // ⭐ 关系:两个位置都看(与 x-author-profile.ts:95 同口径)
         //    ⚠️ 只在**明确为 true/false** 时给值;字段不在就 undefined ——
         //    「没关注」与「载荷里没这个字段」必须分得开

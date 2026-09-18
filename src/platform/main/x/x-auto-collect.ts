@@ -105,6 +105,7 @@ const FIELD_SPEC: ReadonlyArray<{
   { field: 'isBlueVerified', kind: 'payloadOnly', get: (t) => t.isBlueVerified },
   { field: 'self', kind: 'payloadOnly', get: (t) => t.self && Object.keys(t.self).length > 0 },
   { field: 'metrics.bookmarks', kind: 'payloadOnly', get: (t) => t.metrics?.bookmarks },
+  { field: 'authorBio', kind: 'payloadOnly', get: (t) => t.authorBio },
   // ⚠️ 以下本来就可能没有 —— **不进分母**,否则覆盖率永远上不去而且是假的
   { field: 'inReplyToStatusId', kind: 'conditional', get: (t) => t.inReplyToStatusId },
   { field: 'media', kind: 'conditional', get: (t) => t.media?.length },
@@ -192,15 +193,19 @@ export async function autoCollect(
      * 混起来会让追踪名单判错人(记忆 feedback-check-sample-contains-phenomenon)。
      */
     const hasRelation = t.iFollow !== undefined || t.followsMe !== undefined;
-    if (!hasRelation && t.isBlueVerified === undefined) continue;
+    const hasBio = !!t.authorBio;
+    if (!hasRelation && t.isBlueVerified === undefined && !hasBio) continue;
 
     try {
       await saveAuthorCounts(h, {
         iFollow: t.iFollow,
         followsMe: t.followsMe,
         isBlueVerified: t.isBlueVerified,
+        // ⭐ bio —— 盘点里覆盖率仅 2%,因为此前只有「导航到主页 + 等 12s」一条路
+        bio: t.authorBio,
       });
       if (hasRelation) authorsWithRelation += 1;
+      if (hasBio) authorsWithBio += 1;
     } catch (err) {
       console.warn(`[x-auto-collect] 作者 ${h} 入库失败:`, err);
     }

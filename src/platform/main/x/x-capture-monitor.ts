@@ -461,6 +461,7 @@ function snapshot(extra?: { url?: string; scrollY?: number }): MonitorSnapshot {
     mediaTypes: t.mediaTypes,
     isLongText: t.isLongText,
     isBlueVerified: t.isBlueVerified,
+    authorBio: t.authorBio,
     iFollow: t.iFollow,
     followEvidence: t.followEvidence,
     followsMe: t.followsMe,

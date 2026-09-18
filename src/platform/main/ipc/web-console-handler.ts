@@ -720,9 +720,25 @@ export function registerWebConsoleHandlers(): void {
     if ('error' in r) return failFast('autoCollect', r.error, t0);
 
     // ⭐ 成果原样落痕 —— 「采到多少关系数据」正是这条能力的存在理由
+    /**
+     * ⚠️ **覆盖率必须进留痕** —— 用户跑完后我读留痕,只看到汇总数字,
+     * 而「每条完整吗」正是他要的答案,却只在面板上、我读不到,
+     * 于是又得回头问人。那正是「靠口头描述」的复发(用户定过的那条)。
+     *
+     * ⚠️ 只记**没到 100% 的**字段:全绿的记进去只会淹没真问题。
+     */
+    const gaps = r.coverage
+      .filter((c) => c.total > 0 && c.rate < 1)
+      .map((c) => `${c.field} ${c.have}/${c.total}(${(c.rate * 100).toFixed(0)}%)`);
+    const incomplete = r.sample.filter((x) => x.missing.length > 0).length;
+
     recordRun('autoCollect',
       { page: pageName, url: resolved.url, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
-        authorsWithRelation: r.authorsWithRelation, payloads: r.payloads },
+        authorsWithRelation: r.authorsWithRelation, payloads: r.payloads,
+        // ⭐ 完整性 —— 「每一条都完整吗」的答案
+        coverageGaps: gaps,
+        sampleIncomplete: `${incomplete}/${r.sample.length}`,
+      },
       r.problems.length === 0 ? { status: 'ok' }
         : { status: 'degraded', missing: r.problems },
       r.elapsedMs);

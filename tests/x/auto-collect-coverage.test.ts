@@ -104,3 +104,41 @@ describe('⭐ 明细要真能给人检查', () => {
       .not.toMatch(/\.slice\(/);
   });
 });
+
+
+describe('⭐⭐ 不许有「说谎的字段」', () => {
+  /**
+   * ── 用户 2026-09-18 问「bio 采集到了吗」──
+   *
+   * 答案曾是**没有**,而且是最坏的那种没有:
+   *  · `HarvestedTweet` 里没有 bio 字段
+   *  · 载荷解析器没解 `description`
+   *  · 但 `authorsWithBio` **一直报 0**
+   *
+   * ⭐ 报 0 看着像「采到 0 个」,实际是「根本没采」——
+   * 两者含义完全不同,而报告里长得一模一样。
+   * 这与本仓常见的「类型有 JSON 有、渲染层零消费」的死字段同族,
+   * 只是这次更坏:它**参与了对外报数**。
+   */
+  it('⭐⭐ authorsWithBio 必须真的被累加,不能恒为 0', () => {
+    expect(code, 'authorsWithBio 声明了却从不累加 —— 报告里那个 0 是假的')
+      .toMatch(/authorsWithBio\s*\+=/);
+  });
+
+  it('⭐⭐ bio 必须真的写进库', () => {
+    const i = code.indexOf('saveAuthorCounts(');
+    expect(i, '找不到 saveAuthorCounts 调用').toBeGreaterThan(0);
+    const body = code.slice(i, code.indexOf('}', code.indexOf('{', i)));
+    expect(body, 'saveAuthorCounts 没传 bio —— 采到了也没存').toMatch(/bio:/);
+  });
+
+  it('⭐ 报告里每个计数字段都有对应的累加', () => {
+    // 声明在 AutoCollectReport 里的计数字段,必须都能在代码里找到累加/赋值
+    for (const f of ['authorsWithRelation', 'authorsWithBio', 'saved']) {
+      expect(
+        code,
+        `${f} 只声明不赋值 —— 会变成一个「说谎的数字」`,
+      ).toMatch(new RegExp(`${f}\\s*(\\+=|=\\s*[^;]*\\+)`));
+    }
+  });
+});

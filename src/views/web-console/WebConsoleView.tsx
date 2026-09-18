@@ -57,7 +57,7 @@ type CaptureSnapshot = {
 
 /** 全字段都要列 —— 包括空的。只显示有值的,就看不出少了什么 */
 const VERIFY_FIELDS = [
-  'tweetId', 'authorHandle', 'authorRestId', 'authorName', 'authorAvatar', 'isBlueVerified', 'verifiedEvidence', 'iFollow', 'followEvidence', 'followsMe',
+  'tweetId', 'authorHandle', 'authorRestId', 'authorName', 'authorAvatar', 'isBlueVerified', 'verifiedEvidence', 'authorBio', 'iFollow', 'followEvidence', 'followsMe',
   'text', 'createdAt', 'lang', 'tweetUrl',
   'isReply', 'inReplyToStatusId', 'inReplyToScreenName', 'conversationId',
   'quotedStatusId', 'hasMedia', 'mediaTypes', 'media', 'isLongText',
