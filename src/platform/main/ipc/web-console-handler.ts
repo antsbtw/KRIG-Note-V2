@@ -687,7 +687,8 @@ export function registerWebConsoleHandlers(): void {
    */
   ipcMain.handle(IPC_CHANNELS.WEBC_AUTO_COLLECT, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as {
-      wcId?: unknown; page?: unknown; params?: unknown; maxRounds?: unknown; wsId?: unknown;
+      wcId?: unknown; page?: unknown; params?: unknown;
+      maxRounds?: unknown; budgetMs?: unknown; wsId?: unknown;
     };
     const t0 = Date.now();
     /**
@@ -707,6 +708,12 @@ export function registerWebConsoleHandlers(): void {
       typeof p.wcId === 'number' ? p.wcId : undefined,
       {
         maxRounds: typeof p.maxRounds === 'number' ? p.maxRounds : undefined,
+        /**
+         * ⚠️ 预算必须跟着轮数一起放开 —— 实测 8 轮跑了 24s,
+         * 而默认预算 30s。只调轮数不调预算的话,会在预算到点时停下,
+         * **轮数根本用不完**,人会以为「调了没用」。
+         */
+        budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined,
         wsId: typeof p.wsId === 'string' ? p.wsId : undefined,
       });
 

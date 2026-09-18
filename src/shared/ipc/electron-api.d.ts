@@ -223,7 +223,10 @@ declare global {
           /** ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识 */
           page: string;
           params?: Record<string, string>;
-          wcId?: number; maxRounds?: number; wsId?: string;
+          wcId?: number; maxRounds?: number;
+          /** 时间预算(ms)。⚠️ 调轮数必须一起调它,否则预算先到点,轮数用不完 */
+          budgetMs?: number;
+          wsId?: string;
         }): Promise<{
           channelOk: boolean; error?: string;
           report?: {

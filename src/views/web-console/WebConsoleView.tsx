@@ -172,7 +172,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * 下拉用的是**真表**(pageNames),不在这里抄一份。
    */
   const [acPage, setAcPage] = useState('x.home');
-  const [acRounds, setAcRounds] = useState('8');
+  const [acRounds, setAcRounds] = useState('30');
+  const [acBudget, setAcBudget] = useState('120');
   const [acReport, setAcReport] = useState<unknown>(null);
   const [atts, setAtts] = useState<Array<{ name: string; value: string }>>([
     { name: 'bio', value: '' },
@@ -709,14 +710,17 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   {(pageNames.length > 0 ? pageNames : ['x.home']).map((n) =>
                     <option key={n} value={n}>{n}</option>)}
                 </select>
-                <input className="krig-webc__in" style={{ width: 80 }} value={acRounds}
-                  onChange={(e) => setAcRounds(e.target.value)} placeholder="滚动轮数" />
+                <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
+                  onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数" title="滚动轮数上限" />
+                <input className="krig-webc__in" style={{ width: 72 }} value={acBudget}
+                  onChange={(e) => setAcBudget(e.target.value)} placeholder="秒" title="时间预算(秒)" />
                 <button type="button" className="krig-webc__go" disabled={busy !== null}
-                  onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds) },
+                  onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget) },
                     async () => {
                       const r = await api()?.autoCollect({
                         page: acPage, wcId: wcId(),
-                        maxRounds: Number(acRounds) || 8,
+                        maxRounds: Number(acRounds) || 30,
+                        budgetMs: (Number(acBudget) || 120) * 1000,
                         wsId: workspaceId,
                       });
                       setAcReport(r); return r;
