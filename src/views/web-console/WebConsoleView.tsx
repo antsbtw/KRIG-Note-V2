@@ -166,6 +166,14 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [rawOpen, setRawOpen] = useState<number | null>(null);
   const [vBadge, setVBadge] = useState<unknown>(null);
   const [memProbe, setMemProbe] = useState<unknown>(null);
+  /**
+   * ⚠️ 传**语义页面名**,不是 URL —— 守卫「面板不许构造 x.com URL」刚抓住我。
+   * 那条规矩是对的:URL 是 adapter 的知识,站点改版只改 x-pages.ts 一处。
+   * 下拉用的是**真表**(pageNames),不在这里抄一份。
+   */
+  const [acPage, setAcPage] = useState('x.home');
+  const [acRounds, setAcRounds] = useState('8');
+  const [acReport, setAcReport] = useState<unknown>(null);
   const [atts, setAtts] = useState<Array<{ name: string; value: string }>>([
     { name: 'bio', value: '' },
     { name: '上下文', value: '' },
@@ -690,6 +698,60 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
 
         {tab === 'verify' && (
           <>
+            <div className="krig-webc__fn">
+              <div className="krig-webc__fn-head">
+                <span className="krig-webc__fn-name">无人工采集</span>
+                <span className="krig-webc__fn-sig">导航 + 滚动 + 解析载荷 + 入库 —— 不用你点</span>
+              </div>
+              <div className="krig-webc__row">
+                <select className="krig-webc__in" style={{ flex: 1 }} value={acPage}
+                  onChange={(e) => setAcPage(e.target.value)}>
+                  {(pageNames.length > 0 ? pageNames : ['x.home']).map((n) =>
+                    <option key={n} value={n}>{n}</option>)}
+                </select>
+                <input className="krig-webc__in" style={{ width: 80 }} value={acRounds}
+                  onChange={(e) => setAcRounds(e.target.value)} placeholder="滚动轮数" />
+                <button type="button" className="krig-webc__go" disabled={busy !== null}
+                  onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds) },
+                    async () => {
+                      const r = await api()?.autoCollect({
+                        page: acPage, wcId: wcId(),
+                        maxRounds: Number(acRounds) || 8,
+                        wsId: workspaceId,
+                      });
+                      setAcReport(r); return r;
+                    })}>采集</button>
+              </div>
+              {(() => {
+                const r = acReport as { report?: {
+                  tweets: number; fromPayload: number; saved: number;
+                  authorsWithRelation: number; payloads: number;
+                  problems: string[]; stopReason: string; elapsedMs: number;
+                }; error?: string } | null;
+                if (!r) return null;
+                if (r.error) return <pre className="krig-webc__pre">{r.error}</pre>;
+                const d = r.report;
+                if (!d) return null;
+                return (
+                  <div className="krig-webc__note" style={{ lineHeight: 1.9 }}>
+                    <div>采到 <b>{d.tweets}</b> 条 · 其中载荷来源 <b>{d.fromPayload}</b> 条 ·
+                      入库 <b>{d.saved}</b> 条 · 载荷 <b>{d.payloads}</b> 个 · {(d.elapsedMs / 1000).toFixed(1)}s</div>
+                    <div>⭐ <b>采到关系数据的作者:{d.authorsWithRelation} 人</b>
+                      {d.authorsWithRelation > 0
+                        ? ' —— 不用点击就拿到了'
+                        : ' —— 一个都没有,载荷里可能没带关系字段'}</div>
+                    <div>停止原因:{d.stopReason}
+                      {d.problems.length > 0 && <> · ⚠️ {d.problems.join('、')}</>}</div>
+                  </div>
+                );
+              })()}
+              <div className="krig-webc__note">
+                ⚠️ <b>导航是必须的</b> —— 关系/蓝V 在载荷里就有,但**要有新请求**才截得到;
+                页面早已渲染好的推不会重新请求(实测:悬停弹卡片零网络请求)。
+                <br />⭐ 滚动轮数是**参数不是常量**;采集层**无条件全收**,不在这里过滤。
+              </div>
+            </div>
+
             <div className="krig-webc__fn">
               <div className="krig-webc__fn-head">
                 <span className="krig-webc__fn-name">采集验证</span>

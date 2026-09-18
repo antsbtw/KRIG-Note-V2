@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readVerified: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_READ_VERIFIED, { wcId }),
     /** 探 X 页面内存里的 user 数据在哪 */
     probeMemory: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_PROBE_MEMORY, { wcId }),
+    /** ⭐ 无人工采集:导航+滚动+载荷解析+入库,不用人点 */
+    autoCollect: (args: { page: string; params?: Record<string, string>; wcId?: number; maxRounds?: number; wsId?: string }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_AUTO_COLLECT, args),
   },
 
   /** 诊断上报(renderer → main) */

@@ -179,6 +179,20 @@ export function listPageNames(): Array<{ owner: string; names: string[] }> {
   }));
 }
 
+/**
+ * ⭐ 语义页面名 → URL —— 导出给**需要 URL 而不是导航**的消费者。
+ *
+ * ⚠️ 加这个导出是因为:面板**不许自己拼 x.com URL**(守卫钉着),
+ * 而无人工采集要把 URL 交给 `harvestTimeline`(它自己会导航)。
+ * 没有这个出口,消费者就只能在自己那边抄一份 URL —— 那正是守卫要防的。
+ */
+export function resolveSemanticPage(
+  name: string, params: Readonly<Record<string, string>> = {},
+): { url: string; describe: string } | null {
+  const hit = mergedPages.resolve(name, params);
+  return hit ? { url: hit.url, describe: hit.describe } : null;
+}
+
 const mergedPages: PageResolver = {
   resolve(name, params) {
     for (const t of pageTables.values()) {

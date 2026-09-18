@@ -45,7 +45,7 @@
 import { app, ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import {
-  controlEngine, inputEngine, listAnchorOwners, listAnchorNames, listPageNames,
+  controlEngine, inputEngine, listAnchorOwners, listAnchorNames, listPageNames, resolveSemanticPage,
   traceRecorder, traceSink,
 } from '../web-capability/wiring/runtime';
 import { listBoundPages } from '../web-capability/wiring/page-hosts';
@@ -60,6 +60,7 @@ import type { ReadyCriterion, ScrollStop, ScrollOptions } from '../web-capabilit
 import { LocalExecutor } from '../executor/local-executor';
 import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
+import { autoCollect } from '../x/x-auto-collect';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
 
@@ -110,6 +111,7 @@ const STEP_TYPE_OF: Readonly<Record<string, StepType>> = {
   tap: 'act', press: 'act', hover: 'act', type: 'act',
   pages: 'fetch', anchors: 'fetch', pageNames: 'fetch',
   readTabBar: 'fetch', inventory: 'fetch', readVerified: 'fetch', probeMemory: 'fetch',
+  autoCollect: 'fetch',
   execute: 'judge',
 };
 
@@ -201,7 +203,7 @@ function failFast(fn: string, reason: string, t0: number): { channelOk: false; e
 }
 
 /** 注册的通道数 —— 与下面 ipcMain.handle 的条数一致 */
-const WEBC_COUNT = 16;
+const WEBC_COUNT = 17;
 
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
@@ -673,6 +675,51 @@ export function registerWebConsoleHandlers(): void {
       recordRun('probeMemory', {}, { status: 'failed', reason }, Date.now() - t0);
       return { channelOk: false, error: reason };
     }
+  });
+
+  /**
+   * ⭐⭐ 无人工采集 —— 用户 2026-09-18:
+   * 「不用点击就有办法拿到蓝V关系……而不是我点击推文进来才可以拿。」
+   *
+   * 导航 + 滚动 + 解析载荷 + 入库,一次跑完,零人工操作。
+   * ⚠️ 导航是**必须的** —— 关系/蓝V 在载荷里就有,但要有新请求才截得到;
+   * 页面早已渲染好的推不会重新请求(实测:悬停弹卡片零网络请求)。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_AUTO_COLLECT, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as {
+      wcId?: unknown; page?: unknown; params?: unknown; maxRounds?: unknown; wsId?: unknown;
+    };
+    const t0 = Date.now();
+    /**
+     * ⚠️ 收**语义页面名**,不收 URL —— URL 是 adapter 的知识。
+     * 守卫「面板不许构造 x.com URL」正为此:站点改版只改 x-pages.ts 一处。
+     */
+    const pageName = String(p.page ?? '').trim();
+    if (!pageName) return failFast('autoCollect', 'page 必填(语义页面名,如 x.home)', t0);
+    const resolved = resolveSemanticPage(pageName,
+      typeof p.params === 'object' && p.params ? p.params as Record<string, string> : {});
+    if (!resolved) {
+      return failFast('autoCollect',
+        `未登记的页面名「${pageName}」—— 可用:${listPageNames().flatMap((t) => t.names).join(', ')}`, t0);
+    }
+
+    const r = await autoCollect(resolved.url,
+      typeof p.wcId === 'number' ? p.wcId : undefined,
+      {
+        maxRounds: typeof p.maxRounds === 'number' ? p.maxRounds : undefined,
+        wsId: typeof p.wsId === 'string' ? p.wsId : undefined,
+      });
+
+    if ('error' in r) return failFast('autoCollect', r.error, t0);
+
+    // ⭐ 成果原样落痕 —— 「采到多少关系数据」正是这条能力的存在理由
+    recordRun('autoCollect',
+      { page: pageName, url: resolved.url, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
+        authorsWithRelation: r.authorsWithRelation, payloads: r.payloads },
+      r.problems.length === 0 ? { status: 'ok' }
+        : { status: 'degraded', missing: r.problems },
+      r.elapsedMs);
+    return { channelOk: true, report: r };
   });
 
   ipcMain.handle(IPC_CHANNELS.WEBC_TRACE, async (_e, payload: unknown) => {

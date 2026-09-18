@@ -215,6 +215,23 @@ declare global {
           channelOk: boolean; error?: string;
           rows?: Array<{ handle?: string; userNameHtml?: string; marks?: unknown[] }>;
         }>;
+        /**
+         * ⭐⭐ 无人工采集 —— 导航 + 滚动 + 解析载荷 + 入库,一次跑完。
+         * 关系/蓝V 在载荷里就有,但**要有新请求**才截得到,所以必须主动导航。
+         */
+        autoCollect(args: {
+          /** ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识 */
+          page: string;
+          params?: Record<string, string>;
+          wcId?: number; maxRounds?: number; wsId?: string;
+        }): Promise<{
+          channelOk: boolean; error?: string;
+          report?: {
+            url: string; tweets: number; fromPayload: number; saved: number;
+            authorsWithRelation: number; authorsWithBio: number;
+            payloads: number; problems: string[]; stopReason: string; elapsedMs: number;
+          };
+        }>;
         /** ⭐ 探 X 页面内存里的 user 数据在哪个全局变量下(只探不取) */
         probeMemory(wcId?: number): Promise<{
           channelOk: boolean; error?: string; probe?: unknown;
