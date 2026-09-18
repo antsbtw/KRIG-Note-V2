@@ -108,13 +108,23 @@ export function parsePerson(o: Record<string, unknown>): HarvestedPerson | null 
 }
 
 /**
+ * 一份画像「有多完整」—— 有值字段数。
+ *
+ * ⚠️ 用于**同一个人出现多次时选哪份**:空壳(只有 handle)会被完整版顶掉。
+ * 先到先得会让精简结构挡住后面的 UserByScreenName 完整画像。
+ */
+function score(p: HarvestedPerson): number {
+  return Object.values(p).filter((v) => v !== undefined && v !== '').length;
+}
+
+/**
  * 递归抽取载荷里所有的人。
  *
  * ⚠️ **不写死嵌套路径** —— 按特征找「带 screen_name 的对象」。
  * X 的响应外层结构变过好几次,写死路径会在改版后静默取不到。
  *
  * ⚠️ 按 handle 去重:同一个人可能在载荷里出现多次
- * (如列表项 + 推荐模块),**第一次解到的留下**。
+ * (如列表项 + 推荐模块)—— **谁字段多谁留下**,不是先到先得。
  */
 export function extractPeopleFrom(
   node: unknown,
@@ -150,8 +160,24 @@ export function extractPeopleFrom(
    */
   if (hasName && (o.rest_id || legacy || core)) {
     const p = parsePerson(o);
-    // ⚠️ 已有就不覆盖:第一次解到的通常最完整
-    if (p && !out.has(p.handle)) out.set(p.handle, p);
+    if (p) {
+      /**
+       * ⭐⭐ **谁更完整谁留下**,不是「先到先得」。
+       *
+       * ⚠️ 原来写的是「已有就不覆盖」,理由是「第一次解到的通常最完整」——
+       * 那个假设**不成立**:同一个人可能先在某个精简结构里出现
+       * (只有 handle + 头像),后面才在 `UserByScreenName` 里给出完整画像。
+       * 先到先得会让**空壳挡住真数据**。
+       *
+       * 用户实测 2026-09-18:采完自己主页后,再采 followers 仍显示「没有基准」——
+       * 而 UserByScreenName 载荷确实带 relationship_counts(§2.4 实测记录)。
+       * 这条覆盖规则正是嫌疑之一。
+       *
+       * ⭐ 判据用**有值字段数**:字段多的那份留下。
+       */
+      const prev = out.get(p.handle);
+      if (!prev || score(p) > score(prev)) out.set(p.handle, p);
+    }
     // ⭐ 不 return —— user 对象里可能嵌着别的 user(如「被谁关注」)
   }
 

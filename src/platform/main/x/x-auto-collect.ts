@@ -375,6 +375,8 @@ export async function autoCollect(
    * ⚠️ 分母来自库里存过的 followers_count/following_count ——
    * 拿不到就**不编一个数**,如实说「没有基准」。
    */
+  /** 早于 notes 收集的说明(对账那段之前就要用) */
+  const notesPre: string[] = [];
   let reconcile: AutoCollectReport['reconcile'];
   if (r.people.length > 0 && opts.ownerHandle) {
     const owner = normalizeHandle(opts.ownerHandle);
@@ -426,6 +428,37 @@ export async function autoCollect(
     }
   }
 
+  /**
+   * ⭐ 采**某人主页**时,把这个人自己的基准数报出来 ——
+   * 那正是后续采他的关注者列表时要用的分母。
+   *
+   * ⚠️ 用户实测 2026-09-18:采完自己主页后,再采 followers 仍显示「没有基准」。
+   * 而 `UserByScreenName` 载荷**确实带 relationship_counts**
+   * (x-author-profile.ts:10 记着「能力勘查 §2.4 早已实测记录」),
+   * 解析路径也一致 —— 所以问题在「页面主人到底有没有被采到」。
+   * 与其猜,不如**让采集自己报告**。
+   */
+  if (opts.ownerHandle && r.people.length > 0) {
+    const owner = normalizeHandle(opts.ownerHandle);
+    const self = r.people.find((p) => p.handle === owner);
+    if (!self) {
+      notesPre.push(
+        `⚠️ 采到 ${r.people.length} 人,但**其中没有 @${owner} 本人** —— `
+        + '所以他的粉丝数没能入库,后续采他的关注者列表会没有基准',
+      );
+    } else if (self.followersCount === undefined && self.followingCount === undefined) {
+      notesPre.push(
+        `⚠️ 采到了 @${owner} 本人,但载荷**没带 relationship_counts** —— `
+        + '粉丝/关注数拿不到(可能是「看自己主页」与「看别人主页」的视角差异)',
+      );
+    } else {
+      notesPre.push(
+        `✓ 基准已入库:@${owner} 粉丝 ${self.followersCount ?? '?'} · `
+        + `关注 ${self.followingCount ?? '?'} —— 采他的列表时有分母可对了`,
+      );
+    }
+  }
+
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
   /**
@@ -441,7 +474,7 @@ export async function autoCollect(
    * 而事实是「这一页本来就没有推文,需要的是另一种解析器」。
    * 两者的处置完全不同:前者要修采集,后者要加「采人」能力。
    */
-  const notes: string[] = [];
+  const notes: string[] = [...notesPre];
   /**
    * ⭐ 把「采完没有」说成人话 —— 这是全量/增量的第一个问题。
    * ⚠️ 只报**事实**:X 说还有 / X 说没了。「该不该再采」是分析层的判断。

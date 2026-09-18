@@ -136,14 +136,34 @@ describe('⭐⭐ 递归抽取:不写死嵌套路径', () => {
     expect(out.get('oldstyle')?.followersCount).toBe(300);
   });
 
-  it('⭐ 按 handle 去重,第一次解到的留下', () => {
+  it('⭐⭐ 按 handle 去重 —— **谁字段多谁留下**,不是先到先得', () => {
+    /**
+     * ⚠️ 初版规则是「第一次解到的留下」,而那条测试把 rich 放在前面 ——
+     * **两种规则下都绿**,验不出差别。
+     *
+     * 真正会出问题的是**空壳在前**:同一个人先在精简结构里出现
+     * (只有 handle),后面才在 UserByScreenName 里给出完整画像。
+     * 先到先得会让**空壳挡住真数据** —— 而现象是「采到了这个人,
+     * 但他没有粉丝数/bio」,看着像载荷没带。
+     */
     const rich = { ...modern };
     const poor = { core: { screen_name: 'SomeBody' } };   // 同一个人的空壳
-    const out = new Map<string, HarvestedPerson>();
-    extractPeopleFrom([rich, poor], out);
 
-    expect(out.size).toBe(1);
-    expect(out.get('somebody')?.bio, '被后面的空壳覆盖了').toContain('信息PhD');
+    // 顺序一:完整在前
+    const a = new Map<string, HarvestedPerson>();
+    extractPeopleFrom([rich, poor], a);
+    expect(a.size).toBe(1);
+    expect(a.get('somebody')?.bio, '被后面的空壳覆盖了').toContain('信息PhD');
+
+    // ⭐ 顺序二:**空壳在前** —— 这才是会出问题的那种
+    const b = new Map<string, HarvestedPerson>();
+    extractPeopleFrom([poor, rich], b);
+    expect(b.size).toBe(1);
+    expect(
+      b.get('somebody')?.bio,
+      '空壳挡住了完整画像 —— 现象会是「采到了这个人但没有 bio/粉丝数」',
+    ).toContain('信息PhD');
+    expect(b.get('somebody')?.followersCount, '粉丝数也被挡掉了').toBe(1452);
   });
 
   it('⭐⭐ 光有 screen_name 的引用片段不算人', () => {
