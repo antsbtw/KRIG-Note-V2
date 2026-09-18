@@ -698,7 +698,7 @@ export function registerWebConsoleHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WEBC_AUTO_COLLECT, async (_e, payload: unknown) => {
     const p = (payload ?? {}) as {
       wcId?: unknown; page?: unknown; params?: unknown; current?: unknown;
-      maxRounds?: unknown; budgetMs?: unknown; wsId?: unknown;
+      maxRounds?: unknown; budgetMs?: unknown; pageBudget?: unknown; wsId?: unknown;
     };
     const t0 = Date.now();
     /**
@@ -736,6 +736,7 @@ export function registerWebConsoleHandlers(): void {
       typeof p.wcId === 'number' ? p.wcId : undefined,
       {
         maxRounds: typeof p.maxRounds === 'number' ? p.maxRounds : undefined,
+        pageBudget: typeof p.pageBudget === 'number' ? p.pageBudget : undefined,
         /**
          * ⚠️ 预算必须跟着轮数一起放开 —— 实测 8 轮跑了 24s,
          * 而默认预算 30s。只调轮数不调预算的话,会在预算到点时停下,
@@ -778,11 +779,20 @@ export function registerWebConsoleHandlers(): void {
         sampleIncomplete: `${incomplete}/${r.sample.length}`,
         // ⭐ 事实照录:滚了几轮、日期跨多少天、几处空洞 —— 不解释成「漏没漏」
         rounds: r.rounds,
+        pagedRounds: r.pagedRounds,
         // ⭐ 「采完没有」进留痕 —— 全量/增量的第一个问题
         hasMore: r.paging.hasMore,
         // ⭐ 基准对账 —— 「采够了没有」从猜变成算
+        /**
+         * ⚠️ 别写成 `241/?` —— 那看着像「查不到基准」,
+         * 而 verifiedFollowers 其实是**没有基准概念**(X 不单独报蓝V关注者数)。
+         * 两者处置不同:前者要去补数据,后者什么都不用做。
+         */
         reconcile: r.reconcile
-          ? `${r.reconcile.got}/${r.reconcile.baseline ?? '?'}` : undefined,
+          ? (r.reconcile.baseline !== undefined
+              ? `${r.reconcile.got}/${r.reconcile.baseline}`
+              : `${r.reconcile.got}(无基准:${r.reconcile.note.slice(0, 40)})`)
+          : undefined,
         dateDays: r.dateSpan.days,
         dateGaps: r.dateSpan.gaps.length,
         notes: r.notes,

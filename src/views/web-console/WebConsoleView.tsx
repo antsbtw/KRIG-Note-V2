@@ -98,6 +98,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [readyAnchor, setReadyAnchor] = useState('tweet.article');
   const [readyTimeout, setReadyTimeout] = useState('6000');
   const [scrollKind, setScrollKind] = useState('rounds');
+  /** ⭐ 游标翻页上限 —— 一页 50-100 人,40 页 ≈ 2000-4000 人 */
+  const [acPages, setAcPages] = useState('40');
   const [scrollN, setScrollN] = useState('3');
   const [scrollStuck, setScrollStuck] = useState('3');
   const [tapAnchor, setTapAnchor] = useState('nav.profile');
@@ -763,8 +765,11 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数" title="滚动轮数上限" />
                 <input className="krig-webc__in" style={{ width: 72 }} value={acBudget}
                   onChange={(e) => setAcBudget(e.target.value)} placeholder="秒" title="时间预算(秒)" />
+                <input className="krig-webc__in" style={{ width: 72 }} value={acPages}
+                  onChange={(e) => setAcPages(e.target.value)} placeholder="翻页"
+                  title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍" />
                 <button type="button" className="krig-webc__go" disabled={busy !== null}
-                  onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget) },
+                  onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget), pages: Number(acPages) },
                     async () => {
                       // ⭐ 按真表传参 —— 加页面时不用改这里
                       const params: Record<string, string> = {};
@@ -777,6 +782,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         page: acPage, params, wcId: wcId(),
                         maxRounds: Number(acRounds) || 30,
                         budgetMs: (Number(acBudget) || 120) * 1000,
+                        pageBudget: Number(acPages) || 40,
                         wsId: workspaceId,
                       });
                       setAcReport(r); return r;
@@ -787,6 +793,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
                   people?: number; peopleWithBio?: number; peopleWithRelation?: number;
+                  pagedRounds?: number;
                   paging?: { hasMore: boolean; cursor?: string };
                   reconcile?: { baseline?: number; got: number; rate?: number; note: string };
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
@@ -857,10 +864,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         <b>基准对账</b>:{d.reconcile.note}
                       </div>
                     )}
+                    {(d.pagedRounds ?? 0) > 0 && (
+                      <div>
+                        ⚡ <b>游标翻页</b>:翻了 {d.pagedRounds} 页 —— 不靠滚动,
+                        直接重放 X 自己的请求换游标
+                      </div>
+                    )}
                     {d.paging && (
                       <div>
                         {d.paging.hasMore
-                          ? <>⚠️ <b>还没采完</b> —— X 说还有下一页(游标未耗尽),加大轮数/预算能拿到更多</>
+                          ? <>⚠️ <b>还没采完</b> —— X 说还有下一页(游标未耗尽),加大翻页上限能拿到更多</>
                           : <>✓ <b>已采完</b> —— X 说没有下一页了(不是「滚不动了」,是真到底)</>}
                       </div>
                     )}

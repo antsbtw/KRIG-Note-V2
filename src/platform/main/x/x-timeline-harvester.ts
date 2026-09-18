@@ -33,7 +33,10 @@
  */
 
 import { webContents as allWebContents } from 'electron';
-import { extractPeopleFrom, findPagingCursor, type HarvestedPerson } from './x-people-harvester';
+import {
+  extractPeopleFrom, findPagingCursor, withCursor, buildRefetchScript,
+  type HarvestedPerson,
+} from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
 
@@ -192,6 +195,13 @@ export interface HarvestReport {
    * · `bottom` 的值 → 跨次增量的**断点**(下次从这里接着采)
    */
   paging: { bottom?: string; top?: string; hasMore: boolean };
+  /** 游标翻页的页数;0 = 没翻(不是采人页,或抄不到请求) */
+  pagedRounds: number;
+  /**
+   * ⭐ 最后一个 GraphQL 请求(URL + 头)—— 游标翻页**重发它**,不自己拼。
+   * X 的 queryId/features 会随版本变,复刻必然过期;复用刚发过的那条不会。
+   */
+  lastRequest?: { url: string; headers: Record<string, string> };
   ok: boolean;
   /** 不通过的校验项 —— 空数组才算过关 */
   problems: string[];
@@ -366,6 +376,12 @@ export async function harvestTimeline(
      */
     budgetMs?: number;
     /**
+     * ⭐ 游标翻页的页数上限(默认 40)。一页 50-100 人,
+     * 40 页 ≈ 2000-4000 人 —— 够覆盖大多数账号的关注者。
+     * ⚠️ 这是**闸门不是目标**:X 说没有更多了就会提前停。
+     */
+    pageBudget?: number;
+    /**
      * 提前结束判据。契约 §3.1:「翻到这个人的留言就不用把整个评论区抓完」。
      * 返回 true 即停,stopReason 标 hint。
      */
@@ -389,6 +405,8 @@ export async function harvestTimeline(
   const people = new Map<string, HarvestedPerson>();
   /** ⭐ 最后一次见到的分页游标 —— 「还有没有」由 X 说了算 */
   let paging: { bottom?: string; top?: string; hasMore: boolean } = { hasMore: false };
+  /** ⭐ 最后一个「人的列表」请求 —— 游标翻页靠重发它(不自己拼) */
+  let lastPeopleReq: { url: string; headers: Record<string, string> } | null = null;
   /** 见过的全部操作名 —— 回答「那个请求到底发没发生」 */
   const seenOps: Array<{ op: string; bytes: number }> = [];
   let payloads = 0;
@@ -396,7 +414,22 @@ export async function harvestTimeline(
   const onMessage = (_e: unknown, method: string, params: any): void => {
     if (method === 'Network.requestWillBeSent') {
       const u: string = params?.request?.url ?? '';
-      if (u.includes('/i/api/graphql/')) pending.set(params.requestId, u);
+      if (u.includes('/i/api/graphql/')) {
+        pending.set(params.requestId, u);
+        /**
+         * ⭐⭐ 把**完整请求**留下来 —— 游标翻页要用它重发。
+         *
+         * ⚠️ 不自己拼请求:X 的 GraphQL 要 queryId / features 参数
+         * (`x-article-replies.ts:285` 记着「会随版本变」,那边为此放弃了重发)。
+         * ⭐ 但**复用 X 刚发过的那一条**就不用知道它们是什么 ——
+         * 只把 URL 里的 cursor 换掉,其余原样。
+         *
+         * ⚠️ 请求头(authorization / x-csrf-token)同样原样带走,
+         * 不复刻鉴权逻辑。
+         */
+        const req = params.request as { url?: string; headers?: Record<string, string> };
+        if (req?.headers) lastPeopleReq = { url: u, headers: req.headers };
+      }
       return;
     }
     if (method === 'Network.loadingFinished') {
@@ -534,6 +567,7 @@ export async function harvestTimeline(
   let stuck = 0;
   let rounds = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
+  let emptyPages = 0;
 
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
@@ -618,6 +652,109 @@ export async function harvestTimeline(
     }
   }
 
+  /**
+   * ⭐⭐ **游标翻页** —— 滚动之后接着用,直到 X 说没有了。
+   *
+   * ── 用户 2026-09-18 拍板 ──
+   *
+   * > 「① 用游标直接翻页 —— 不滚动,直接重放 GraphQL 请求带 cursor。
+   * >   快几十倍。可以使用这个方法」
+   *
+   * 实测滚动 30 轮 / 76 秒只拿到 **201/2604 = 7.7%**,且只触发 4 个载荷 ——
+   * 时间全花在滚动动画和虚拟列表渲染上。而 X 的分页本来就是游标式的,
+   * 一次请求给 50-100 人。
+   *
+   * ⭐ **滚动仍然要跑**,它不是被替换掉了 —— 它的作用变成
+   * 「让 X 自己发一次请求,好让我们抄到 URL 和请求头」。
+   * 没有这一步就得复刻 queryId/features(`x-article-replies.ts:285` 的教训),
+   * 那正是我们要绕开的。
+   *
+   * ⚠️ 只在**采人的页面**上翻(paging.bottom 有值 && 采到过人)。
+   * 推文页的游标语义不同,没验证过,不顺手捎带。
+   */
+  let pagedRounds = 0;
+  if (lastPeopleReq && paging.hasMore && paging.bottom && people.size > 0) {
+    /**
+     * ⚠️ **先钉住**这条请求再进循环 —— `lastPeopleReq` 是闭包里被监听器
+     * 改写的变量,循环中途它可能被别的请求覆盖掉,那样翻页就会跑到
+     * 另一个列表上去(而人照样入库,看不出来)。
+     */
+    const baseReq = lastPeopleReq;
+    const budget = opts.pageBudget ?? 40;
+    const seenCursors = new Set<string>();
+    while (pagedRounds < budget && paging.hasMore && paging.bottom) {
+      const cursor = paging.bottom;
+      /**
+       * ⚠️ **游标没变就停**。
+       *
+       * 这是本实现最危险的失败形态:`variables` 换错了、或者 X 忽略了我们的
+       * 游标,响应会是**第 1 页**,于是解析出的还是那批人(Map 去重后 size 不变),
+       * 循环却会一直跑下去 —— 看上去在工作,实际原地打转 40 轮。
+       * 游标重复 = 没翻动,立刻停并**如实记下**。
+       */
+      if (seenCursors.has(cursor)) {
+        stopReason = `游标翻页:游标重复(${cursor.slice(0, 24)}…)—— 没有真的翻动,已停`;
+        break;
+      }
+      seenCursors.add(cursor);
+
+      const nextUrl = withCursor(baseReq.url, cursor);
+      if (!nextUrl) {
+        stopReason = '游标翻页:URL 里的 variables 解不开 —— 没有猜着改,已停';
+        break;
+      }
+
+      let body: string;
+      try {
+        const res = await wc.executeJavaScript(
+          buildRefetchScript(nextUrl, baseReq.headers), true,
+        ) as { __body?: string; __err?: string };
+        if (res?.__err) { stopReason = `游标翻页:请求失败(${res.__err})`; break; }
+        if (!res?.__body) { stopReason = '游标翻页:响应是空的'; break; }
+        body = res.__body;
+      } catch (e) {
+        stopReason = `游标翻页:注入失败(${String(e)})`;
+        break;
+      }
+
+      pagedRounds++;
+      payloads++;
+      const peopleBefore = people.size;
+      try {
+        const parsed = JSON.parse(body);
+        extractPeopleFrom(parsed, people);
+        extractTweetsFrom(parsed, tweets);
+        const cur = findPagingCursor(parsed);
+        // ⚠️ 拿不到新游标就当**到底了**,不拿旧的再试一次(那必然是原地打转)
+        paging = (cur.bottom || cur.top) ? cur : { hasMore: false };
+      } catch {
+        stopReason = '游标翻页:响应不是 JSON';
+        break;
+      }
+      seenOps.push({ op: `翻页#${pagedRounds}`, bytes: body.length });
+
+      /**
+       * ⚠️ 翻了一页但**一个人都没多** —— 可能是这一页全是已见过的人
+       * (正常),也可能是响应根本没人(不正常)。不臆断,继续翻,
+       * 但连着 3 页都没新人就停:再翻也是白费。
+       */
+      if (people.size === peopleBefore) {
+        emptyPages++;
+        if (emptyPages >= 3) {
+          stopReason = `游标翻页:连续 3 页没有新的人(已 ${people.size} 人)`;
+          break;
+        }
+      } else emptyPages = 0;
+
+      if (!paging.hasMore) {
+        stopReason = `游标翻页:X 说没有更多了(共翻 ${pagedRounds} 页,${people.size} 人)`;
+      }
+    }
+    if (paging.hasMore && pagedRounds >= (opts.pageBudget ?? 40)) {
+      stopReason = `游标翻页:达到翻页上限 ${opts.pageBudget ?? 40} 页(${people.size} 人,还有更多)`;
+    }
+  }
+
   wc.debugger.off('message', onMessage);
   if (attached) { try { wc.debugger.detach(); } catch { /* 已 detach */ } }
 
@@ -658,5 +795,9 @@ export async function harvestTimeline(
     unparsedSamples, seenOps,
     people: [...people.values()],
     paging,
+    /** ⭐ 游标翻了几页 —— 0 表示只靠滚动 */
+    pagedRounds,
+    /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */
+    lastRequest: lastPeopleReq ?? undefined,
   };
 }

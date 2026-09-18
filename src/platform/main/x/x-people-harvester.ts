@@ -255,3 +255,68 @@ export function findPagingCursor(node: unknown): {
 
   return { bottom, top, hasMore: !!bottom };
 }
+
+/**
+ * ⭐⭐ **游标翻页** —— 不滚动,直接重发带新游标的请求。
+ *
+ * ── 用户 2026-09-18 实测的效率问题 ──
+ *
+ * 滚动 30 轮 / 76 秒只拿到 **201/2604 = 7.7%**,而且只触发了 **4 个载荷** ——
+ * 时间全花在滚动动画和虚拟列表渲染上。按这速度采全要 ~390 轮、16 分钟。
+ *
+ * ⭐ 而 X 的分页本来就是游标式的:一次请求给 50-100 人。
+ * 30 次请求就能拿 2000+ 人,比滚动快几十倍。
+ *
+ * ── ⚠️ 为什么不自己拼请求 ──
+ *
+ * `x-article-replies.ts:285` 记着教训:
+ * 「重发要复刻 X 的 GraphQL **query id / features 参数(会随版本变)**」——
+ * 那边为此放弃了重发,改成点按钮。
+ *
+ * ⭐ 本实现绕开了这一点:**复用 X 刚发过的那条请求**,
+ * 只把 URL 里的 `cursor` 换掉,queryId/features/请求头**原样带走**。
+ * 我们不需要知道它们是什么,也就不会因为它们变了而失效。
+ *
+ * ⚠️ 在**页面上下文**里 fetch:cookie 与鉴权头自动生效,不复刻登录态。
+ */
+export function withCursor(url: string, cursor: string): string | null {
+  try {
+    const u = new URL(url);
+    const raw = u.searchParams.get('variables');
+    if (!raw) return null;
+    const vars = JSON.parse(raw) as Record<string, unknown>;
+    vars.cursor = cursor;
+    u.searchParams.set('variables', JSON.stringify(vars));
+    return u.toString();
+  } catch {
+    // ⚠️ 解不出 variables 就**返回 null**,不猜着改 URL ——
+    //    改错会请求到别的数据,而那种错在数据里看不出来
+    return null;
+  }
+}
+
+/** 在页面上下文重发请求的脚本 —— 同源 fetch,鉴权自动带 */
+export function buildRefetchScript(url: string, headers: Record<string, string>): string {
+  /**
+   * ⚠️ 只带 X 自己发过的头,不自己加 —— 多余的头可能触发风控。
+   * ⚠️ 排除 `content-length` 等由浏览器自动算的头(手动带会冲突)。
+   */
+  const safe: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (/^(content-length|host|connection|:.*)$/i.test(k)) continue;
+    safe[k] = v;
+  }
+  return `(async function () {
+    try {
+      const r = await fetch(${JSON.stringify(url)}, {
+        method: 'GET',
+        headers: ${JSON.stringify(safe)},
+        credentials: 'include',
+      });
+      if (!r.ok) return { __err: 'HTTP ' + r.status };
+      return { __body: await r.text() };
+    } catch (e) {
+      return { __err: String(e) };
+    }
+  })()`;
+}

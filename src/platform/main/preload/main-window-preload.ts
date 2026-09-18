@@ -78,7 +78,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     /** ⭐ 无人工采集:导航+滚动+载荷解析+入库,不用人点 */
     /** ⭐ 当前页面是哪个语义页面 + 参数 —— 右边跟着左边走 */
     whereAmI: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_WHERE_AM_I, { wcId }),
-    autoCollect: (args: { page?: string; current?: boolean; params?: Record<string, string>; wcId?: number; maxRounds?: number; budgetMs?: number; wsId?: string }) =>
+    autoCollect: (args: { page?: string; current?: boolean; params?: Record<string, string>; wcId?: number; maxRounds?: number; budgetMs?: number; pageBudget?: number; wsId?: string }) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_AUTO_COLLECT, args),
   },
 

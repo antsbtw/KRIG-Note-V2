@@ -100,6 +100,8 @@ export interface AutoCollectReport {
   stopReason: string;
   /** 实际滚了几轮 —— 事实,不判断「够不够」 */
   rounds: number;
+  /** ⭐ 游标翻了几页 —— 0 表示只靠滚动(不是采人页,或抄不到请求) */
+  pagedRounds: number;
   /**
    * ⭐⭐ 采完了没有 —— **X 说的,不是我们猜的**。
    *
@@ -257,7 +259,8 @@ export async function autoCollect(
   url: string,
   targetWcId?: number,
   opts: {
-    maxRounds?: number; budgetMs?: number; wsId?: string; pageLabel?: string;
+    maxRounds?: number; budgetMs?: number; pageBudget?: number;
+    wsId?: string; pageLabel?: string;
     /** ⭐ 这是**谁的**列表 —— 基准对账要查他的 followers_count */
     ownerHandle?: string;
   } = {},
@@ -269,6 +272,7 @@ export async function autoCollect(
   // ⭐ 导航 + 滚动 + 解析载荷,一条龙 —— 现成的,不重写
   const r = await harvestTimeline(url, targetWcId, opts.maxRounds ?? 8, {
     budgetMs: opts.budgetMs ?? 30_000,
+    pageBudget: opts.pageBudget,
   });
   if ('error' in r) return { error: r.error };
 
@@ -438,7 +442,19 @@ export async function autoCollect(
    * 解析路径也一致 —— 所以问题在「页面主人到底有没有被采到」。
    * 与其猜,不如**让采集自己报告**。
    */
-  if (opts.ownerHandle && r.people.length > 0) {
+  /**
+   * ⚠️ 只在采**主页**时检查「本人的基准入库没有」。
+   *
+   * 用户实测 2026-09-18:采 verifiedFollowers 时报
+   * 「采到 241 人但其中没有 @otun_myvpn 本人 —— 所以粉丝数没能入库」,
+   * **那句是错的**:粉丝数上一次采主页时就入库了(2604)。
+   * 它混淆了两件事 ——
+   *  · 这一次有没有采到本人(关注者列表里**本该没有**你自己)
+   *  · 库里有没有基准(有)
+   * 在列表页说这句话纯属误导。
+   */
+  const isProfilePage = /profile/i.test(opts.pageLabel ?? '');
+  if (isProfilePage && opts.ownerHandle && r.people.length > 0) {
     const owner = normalizeHandle(opts.ownerHandle);
     const self = r.people.find((p) => p.handle === owner);
     if (!self) {
@@ -556,6 +572,7 @@ export async function autoCollect(
     peopleWithRelation,
     stopReason: r.stopReason,
     rounds: r.rounds,
+    pagedRounds: r.pagedRounds,
     dateSpan: r.dateSpan,
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
     reconcile,

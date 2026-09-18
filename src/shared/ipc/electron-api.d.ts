@@ -241,6 +241,11 @@ declare global {
           wcId?: number; maxRounds?: number;
           /** 时间预算(ms)。⚠️ 调轮数必须一起调它,否则预算先到点,轮数用不完 */
           budgetMs?: number;
+          /**
+           * ⭐ 游标翻页上限(默认 40)。**采人的页面**用 ——
+           * 滚动只用来抄 X 自己的请求,之后直接换游标重放,快几十倍。
+           */
+          pageBudget?: number;
           wsId?: string;
         }): Promise<{
           channelOk: boolean; error?: string;
@@ -258,6 +263,8 @@ declare global {
             seenOps: Array<{ op: string; bytes: number }>;
             /** 实际滚了几轮 —— 事实 */
             rounds: number;
+            /** ⭐ 游标翻了几页 —— 0 表示只靠滚动(不是采人页,或抄不到请求) */
+            pagedRounds?: number;
             /** ⭐ 采完了没有 —— X 说的(游标耗尽),不是「滚不动了」 */
             paging: { hasMore: boolean; cursor?: string };
             /** ⭐ 基准对账:采到的 vs X 报的总数 */
