@@ -33,7 +33,7 @@
  */
 
 import { webContents as allWebContents } from 'electron';
-import { extractPeopleFrom, type HarvestedPerson } from './x-people-harvester';
+import { extractPeopleFrom, findPagingCursor, type HarvestedPerson } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
 
@@ -181,6 +181,17 @@ export interface HarvestReport {
    * 所以同一次采集**两种都解**:是推就进 tweets,是人就进 people。
    */
   people: HarvestedPerson[];
+  /**
+   * ⭐⭐ 分页游标 —— 回答「**采完了没有**」,不靠猜。
+   *
+   * 此前判「到底了」靠 scrollY 连续 8 轮不变,那是猜;
+   * 而 X 在载荷里**明说**还有没有(TimelineTimelineCursor / cursorType=Bottom)。
+   *
+   * · `hasMore=false` → 真的采完了
+   * · `hasMore=true` + 停在轮次上限 → **还没采完**,加轮数还能拿到更多
+   * · `bottom` 的值 → 跨次增量的**断点**(下次从这里接着采)
+   */
+  paging: { bottom?: string; top?: string; hasMore: boolean };
   ok: boolean;
   /** 不通过的校验项 —— 空数组才算过关 */
   problems: string[];
@@ -376,6 +387,8 @@ export async function harvestTimeline(
   const unparsedSamples: Array<{ op: string; bytes: number; body: string }> = [];
   /** ⭐ 采到的人 —— 与推文并行解,同一次采集两种都要 */
   const people = new Map<string, HarvestedPerson>();
+  /** ⭐ 最后一次见到的分页游标 —— 「还有没有」由 X 说了算 */
+  let paging: { bottom?: string; top?: string; hasMore: boolean } = { hasMore: false };
   /** 见过的全部操作名 —— 回答「那个请求到底发没发生」 */
   const seenOps: Array<{ op: string; bytes: number }> = [];
   let payloads = 0;
@@ -407,6 +420,9 @@ export async function harvestTimeline(
             // ⭐ **人也解一遍** —— 同一个载荷可能既有推也有人
             //    (如时间线里的推荐关注模块);两种都要,不二选一
             extractPeopleFrom(parsed, people);
+            // ⭐ 游标以**最后一个载荷**为准 —— 它反映当前翻到哪儿了
+            const cur = findPagingCursor(parsed);
+            if (cur.bottom || cur.top) paging = cur;
           } catch { /* 非 JSON */ }
           /**
            * ⭐ 这个载荷**一条推都没解出来** → 留个样本给「量结构」用。
@@ -641,5 +657,6 @@ export async function harvestTimeline(
     rounds, payloads, tweets: list, dateSpan, stopReason, trace,
     unparsedSamples, seenOps,
     people: [...people.values()],
+    paging,
   };
 }

@@ -787,6 +787,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
                   people?: number; peopleWithBio?: number; peopleWithRelation?: number;
+                  paging?: { hasMore: boolean; cursor?: string };
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
                   seenOps?: Array<{ op: string; bytes: number }>;
@@ -847,6 +848,13 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                             </pre>
                           </details>
                         ))}
+                      </div>
+                    )}
+                    {d.paging && (
+                      <div>
+                        {d.paging.hasMore
+                          ? <>⚠️ <b>还没采完</b> —— X 说还有下一页(游标未耗尽),加大轮数/预算能拿到更多</>
+                          : <>✓ <b>已采完</b> —— X 说没有下一页了(不是「滚不动了」,是真到底)</>}
                       </div>
                     )}
                     <div>停止原因:{d.stopReason}

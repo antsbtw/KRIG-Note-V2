@@ -258,6 +258,8 @@ declare global {
             seenOps: Array<{ op: string; bytes: number }>;
             /** 实际滚了几轮 —— 事实 */
             rounds: number;
+            /** ⭐ 采完了没有 —— X 说的(游标耗尽),不是「滚不动了」 */
+            paging: { hasMore: boolean; cursor?: string };
             /** ⭐ 日期跨度与空洞 —— **事实**,采集层不解释成「漏采」(首页是算法混排) */
             dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
             /** ⭐ 字段级覆盖率 —— 「每一条数据都是完整的吗」靠它回答,不是靠总数 */

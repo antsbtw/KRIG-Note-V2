@@ -179,3 +179,53 @@ export function extractPeopleFrom(
 export function isPeopleOp(op: string): boolean {
   return /Followers|Following|FollowersYouKnow|Subscriptions/i.test(op);
 }
+
+
+/**
+ * ⭐⭐ 找**分页游标** —— 回答「还有没有」,不靠猜。
+ *
+ * ── 用户 2026-09-18 问全量/增量 ──
+ *
+ * 现在判「采完没有」靠的是 `scrollY` 连续 8 轮不变(滚不动了 ≈ 到底了)——
+ * 那是**猜**。而 X **明确告诉了你**:载荷里带
+ * `{ __typename: 'TimelineTimelineCursor', cursorType: 'Bottom', value: '…' }`。
+ *
+ * ⚠️ 同一个洞在 `x-article-replies.ts:34` 已经认识到了:
+ * 「X 明确告诉了你『还有,拿这个 cursor 来取』,而原先的代码在数
+ *   『连续 4 轮没新增』—— 真源就摆在载荷里,我们没读」。
+ * 那边只找 `ShowMore`(折叠区),**列表分页用的是 `Bottom`** —— 这里补上。
+ *
+ * ── 游标怎么用 ──
+ *
+ * `hasMore=true`  → 还有下一页(继续滚/翻)
+ * `hasMore=false` → **真的采完了**(不是「滚不动了」)
+ * `bottom` 的值   → 跨次增量的**断点**:下次从这里接着采
+ *
+ * ⚠️ 空游标(`value` 为空串)等于没有 —— X 在列表末尾会给一个空游标,
+ * 当成「还有」会让滚动永不停止。
+ */
+export function findPagingCursor(node: unknown): {
+  bottom?: string;
+  top?: string;
+  /** 还有下一页吗 —— **X 说的,不是我们猜的** */
+  hasMore: boolean;
+} {
+  let bottom: string | undefined;
+  let top: string | undefined;
+
+  const walk = (o: unknown, depth: number): void => {
+    if (o === null || typeof o !== 'object' || depth > 24) return;
+    if (Array.isArray(o)) { for (const v of o) walk(v, depth + 1); return; }
+    const r = o as Record<string, unknown>;
+    if (r.__typename === 'TimelineTimelineCursor'
+      && typeof r.value === 'string' && r.value.trim()
+      && typeof r.cursorType === 'string') {
+      if (/^bottom$/i.test(r.cursorType)) bottom = r.value;
+      else if (/^top$/i.test(r.cursorType)) top = r.value;
+    }
+    for (const v of Object.values(r)) walk(v, depth + 1);
+  };
+  walk(node, 0);
+
+  return { bottom, top, hasMore: !!bottom };
+}

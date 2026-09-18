@@ -101,6 +101,18 @@ export interface AutoCollectReport {
   /** 实际滚了几轮 —— 事实,不判断「够不够」 */
   rounds: number;
   /**
+   * ⭐⭐ 采完了没有 —— **X 说的,不是我们猜的**。
+   *
+   * 用户 2026-09-18 问全量/增量。此前判「到底了」靠 scrollY 连续 8 轮不变,
+   * 那是猜;而载荷里带 `TimelineTimelineCursor / cursorType=Bottom`,
+   * X **明说**还有没有。
+   *
+   * · `hasMore=false` → 这一页真的采完了(全量到手)
+   * · `hasMore=true` + 停在轮次上限 → **还没采完**,加轮数/预算能拿到更多
+   * · `cursor` → 跨次增量的断点(⚠️ 目前只报出来,**还没用它做断点续采**)
+   */
+  paging: { hasMore: boolean; cursor?: string };
+  /**
    * ⭐ 抓到的日期跨度与空洞 —— **事实交给分析层,采集层不下判断**。
    *
    * ⚠️ 此前采集层把它解释成「可能漏采」并报成 problem,而那判错了:
@@ -328,6 +340,18 @@ export async function autoCollect(
    * 两者的处置完全不同:前者要修采集,后者要加「采人」能力。
    */
   const notes: string[] = [];
+  /**
+   * ⭐ 把「采完没有」说成人话 —— 这是全量/增量的第一个问题。
+   * ⚠️ 只报**事实**:X 说还有 / X 说没了。「该不该再采」是分析层的判断。
+   */
+  if (r.paging.hasMore) {
+    notes.push(
+      `X 说**还有下一页**(游标未耗尽)—— 本次停在「${r.stopReason}」,`
+      + '加大轮数或预算能拿到更多',
+    );
+  } else if (r.payloads > 0) {
+    notes.push('X 说**没有下一页了** —— 这一页已采完(不是「滚不动了」,是真的到底)');
+  }
   if (r.people.length > 0) {
     notes.push(`这一页采的是**人**不是推:${r.people.length} 人入库(${peopleWithBio} 人有 bio)`);
   }
@@ -398,6 +422,7 @@ export async function autoCollect(
     stopReason: r.stopReason,
     rounds: r.rounds,
     dateSpan: r.dateSpan,
+    paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
     elapsedMs: Date.now() - t0,
     longText: (() => {
       const longs = r.tweets.filter((t) => t.isLongText);

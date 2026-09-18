@@ -773,6 +773,8 @@ export function registerWebConsoleHandlers(): void {
         sampleIncomplete: `${incomplete}/${r.sample.length}`,
         // ⭐ 事实照录:滚了几轮、日期跨多少天、几处空洞 —— 不解释成「漏没漏」
         rounds: r.rounds,
+        // ⭐ 「采完没有」进留痕 —— 全量/增量的第一个问题
+        hasMore: r.paging.hasMore,
         dateDays: r.dateSpan.days,
         dateGaps: r.dateSpan.gaps.length,
         notes: r.notes,
