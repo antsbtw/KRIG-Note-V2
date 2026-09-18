@@ -746,6 +746,8 @@ export function registerWebConsoleHandlers(): void {
         // ⭐ 顺序的归属用**语义页面名 + handle**,比 URL 稳(URL 会带 query)
         pageLabel: current ? '(当前页)'
           : `${pageName}:${(p.params as Record<string, string> | undefined)?.handle ?? ''}`,
+        // ⭐ 基准对账要知道这是**谁的**列表
+        ownerHandle: (p.params as Record<string, string> | undefined)?.handle,
       });
 
     if ('error' in r) return failFast('autoCollect', r.error, t0);
@@ -778,6 +780,9 @@ export function registerWebConsoleHandlers(): void {
         rounds: r.rounds,
         // ⭐ 「采完没有」进留痕 —— 全量/增量的第一个问题
         hasMore: r.paging.hasMore,
+        // ⭐ 基准对账 —— 「采够了没有」从猜变成算
+        reconcile: r.reconcile
+          ? `${r.reconcile.got}/${r.reconcile.baseline ?? '?'}` : undefined,
         dateDays: r.dateSpan.days,
         dateGaps: r.dateSpan.gaps.length,
         notes: r.notes,

@@ -788,6 +788,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   authorsWithRelation: number; payloads: number;
                   people?: number; peopleWithBio?: number; peopleWithRelation?: number;
                   paging?: { hasMore: boolean; cursor?: string };
+                  reconcile?: { baseline?: number; got: number; rate?: number; note: string };
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
                   seenOps?: Array<{ op: string; bytes: number }>;
@@ -848,6 +849,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                             </pre>
                           </details>
                         ))}
+                      </div>
+                    )}
+                    {d.reconcile && (
+                      <div>
+                        {d.reconcile.rate === undefined ? 'ℹ️ ' : d.reconcile.rate >= 0.9 ? '✓ ' : '⚠️ '}
+                        <b>基准对账</b>:{d.reconcile.note}
                       </div>
                     )}
                     {d.paging && (

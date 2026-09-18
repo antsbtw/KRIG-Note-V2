@@ -33,7 +33,7 @@
 
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
 import { upsertTweet } from '../db/tweet-inbox-repo';
-import { saveAuthorCounts, registerSeenAuthor } from '../db/x-author-repo';
+import { saveAuthorCounts, registerSeenAuthor, getAuthorCounts } from '../db/x-author-repo';
 import { normalizeHandle, type TweetInboxRecord } from '@shared/types/x-timeline-types';
 
 export interface AutoCollectReport {
@@ -112,6 +112,35 @@ export interface AutoCollectReport {
    * · `cursor` → 跨次增量的断点(⚠️ 目前只报出来,**还没用它做断点续采**)
    */
   paging: { hasMore: boolean; cursor?: string };
+  /**
+   * ⭐⭐ **基准对账** —— 采到的 vs X 自己报的总数。
+   *
+   * ── 用户 2026-09-18 ──
+   *
+   * > 「首页有一个多少人关注、多少人未关注,这个就是基准,
+   * >   出入不超过 10% 即可。」
+   *
+   * ⭐ 这是把「采够了没有」从猜变成算 —— 与用户 2026-09-02 定的
+   * 「tweet_count 是采集完整度的分母」同一个思路。
+   *
+   * ⚠️ 三件事要说清:
+   * ① **分母未必拿得到** —— 要库里存过这个人的 followers_count。
+   *    拿不到时 `baseline` 为 undefined,**不编一个数**。
+   * ② **Verified Followers 没有分母** —— X 不单独报「多少个蓝V关注者」,
+   *    所以那一页只能靠游标判断采完没有。
+   * ③ **分母是活的** —— 采集这几分钟里就可能有人关注/取关,
+   *    而且 X 自己的计数有延迟。所以是「差不多」不是「精确相等」。
+   */
+  reconcile?: {
+    /** X 报的总数(库里存的) */
+    baseline?: number;
+    /** 实际采到 */
+    got: number;
+    /** got/baseline;baseline 缺失时 undefined */
+    rate?: number;
+    /** 人能读懂的结论 */
+    note: string;
+  };
   /**
    * ⭐ 抓到的日期跨度与空洞 —— **事实交给分析层,采集层不下判断**。
    *
@@ -227,7 +256,11 @@ function toRecord(t: HarvestedTweet, wsId?: string): TweetInboxRecord {
 export async function autoCollect(
   url: string,
   targetWcId?: number,
-  opts: { maxRounds?: number; budgetMs?: number; wsId?: string; pageLabel?: string } = {},
+  opts: {
+    maxRounds?: number; budgetMs?: number; wsId?: string; pageLabel?: string;
+    /** ⭐ 这是**谁的**列表 —— 基准对账要查他的 followers_count */
+    ownerHandle?: string;
+  } = {},
 ): Promise<AutoCollectReport | { error: string }> {
   const t0 = Date.now();
   /** 这批顺序属于哪个列表 —— followers 的第 3 名 ≠ following 的第 3 名 */
@@ -334,6 +367,55 @@ export async function autoCollect(
     }
   }
 
+  /**
+   * ⭐⭐ 基准对账 —— 用户 2026-09-18:「首页有一个多少人关注、多少人未关注,
+   * 这个就是基准,出入不超过 10% 即可。」
+   *
+   * ⚠️ 只在**采人**时才有意义(采推没有这个分母)。
+   * ⚠️ 分母来自库里存过的 followers_count/following_count ——
+   * 拿不到就**不编一个数**,如实说「没有基准」。
+   */
+  let reconcile: AutoCollectReport['reconcile'];
+  if (r.people.length > 0 && opts.ownerHandle) {
+    const owner = normalizeHandle(opts.ownerHandle);
+    const isFollowing = /following/i.test(opts.pageLabel ?? '');
+    const isFollowers = /followers/i.test(opts.pageLabel ?? '');
+    const isVerified = /verified/i.test(opts.pageLabel ?? '');
+
+    let baseline: number | undefined;
+    if (!isVerified && (isFollowing || isFollowers)) {
+      try {
+        const counts = await getAuthorCounts(owner);
+        baseline = isFollowing ? counts.followingCount : counts.followersCount;
+      } catch { /* 库里没有就没有 */ }
+    }
+
+    const got = r.people.length;
+    if (isVerified) {
+      reconcile = {
+        got,
+        note: 'Verified Followers **没有基准** —— X 不单独报「多少个蓝V关注者」,'
+          + '这一页只能靠游标判断采完没有',
+      };
+    } else if (baseline === undefined) {
+      reconcile = {
+        got,
+        note: `没有基准可对 —— 库里没存过 @${owner} 的${isFollowing ? '关注数' : '粉丝数'}。`
+          + '先采一次他的主页(x.profile)就有了',
+      };
+    } else {
+      const rate = baseline > 0 ? got / baseline : 0;
+      const pct = (rate * 100).toFixed(0);
+      reconcile = {
+        baseline, got, rate,
+        note: rate >= 0.9
+          ? `采到 ${got}/${baseline}(${pct}%)—— 够了(基准是活的,采集期间有人关注/取关很正常)`
+          : `⚠️ 采到 ${got}/${baseline}(${pct}%)—— **明显少于基准**,`
+            + `多半没采完(看游标:${r.paging.hasMore ? 'X 说还有下一页' : 'X 说没了'})`,
+      };
+    }
+  }
+
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
   /**
@@ -433,6 +515,7 @@ export async function autoCollect(
     rounds: r.rounds,
     dateSpan: r.dateSpan,
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
+    reconcile,
     elapsedMs: Date.now() - t0,
     longText: (() => {
       const longs = r.tweets.filter((t) => t.isLongText);
