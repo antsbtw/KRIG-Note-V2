@@ -221,3 +221,45 @@ describe('⭐⭐ location:采到了要能存、能读回来', () => {
       .toMatch(/location:\s*typeof r\.location/);
   });
 });
+
+
+describe('⭐⭐ 三个 tab 都能采 —— 解析不按操作名分派', () => {
+  /**
+   * ── 用户 2026-09-18:「采人这里是三个 tab 的都可以执行了吗?」──
+   *
+   * 能。因为解析**每个载荷都试解人**,不看操作名。
+   *
+   * ⚠️ 按操作名分派是个陷阱:
+   *  · 同一个载荷可能既有推也有人(时间线的推荐关注模块)
+   *  · 操作名随 X 改版变 —— 实测就冒出过 `BlueVerifiedFollowers`
+   *    这种我们事先不知道的名字。按名字分派 = 把「认不认识这个名字」
+   *    变成「采不采得到」,而那是**静默失败**
+   */
+  const harvester = readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8',
+  );
+
+  it('⭐⭐ 每个载荷都试解人,不按操作名过滤', () => {
+    const i = harvester.indexOf('extractPeopleFrom(parsed');
+    expect(i, '没有对每个载荷试解人').toBeGreaterThan(0);
+    // 取调用点前后一段,确认没有 isPeopleOp/操作名判断把它包起来
+    const around = harvester.slice(Math.max(0, i - 400), i);
+    expect(around, '解析被操作名判断包住了 —— 认不出的名字会静默采不到')
+      .not.toMatch(/isPeopleOp|op\s*===|\/Followers\//);
+  });
+
+  it('⭐⭐ 任意操作名的载荷,只要有人就解得出', () => {
+    // 模拟三个 tab 各自的载荷:名字不同,结构同类
+    for (const shape of [
+      { data: { user: { result: { timeline: { timeline: { instructions: [
+        { entries: [{ content: { itemContent: { user_results: { result: modern } } } }] },
+      ] } } } } } },
+      { data: { followers: { items: [{ user_results: { result: legacyShape } }] } } },
+      { anything: { at: { all: { user_results: { result: modern } } } } },
+    ]) {
+      const out = new Map<string, HarvestedPerson>();
+      extractPeopleFrom(shape, out);
+      expect(out.size, '这种结构解不出人').toBeGreaterThan(0);
+    }
+  });
+});

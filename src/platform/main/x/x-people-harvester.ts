@@ -158,7 +158,24 @@ export function extractPeopleFrom(
   for (const v of Object.values(o)) extractPeopleFrom(v, out, depth + 1);
 }
 
-/** 这个操作名是不是「人的列表」—— 用于判断该走采人还是采推 */
+/**
+ * 这个操作名是不是「人的列表」。
+ *
+ * ⚠️⚠️ **生产代码不用它,也不该用** —— 记在这里免得有人再写一遍。
+ *
+ * 解析**不按操作名分派**:每个载荷都试解人、也试解推
+ * (`x-timeline-harvester` 里两个 extract 并排调)。理由:
+ *  · 同一个载荷可能**既有推也有人**(时间线里的推荐关注模块)
+ *  · 操作名会随 X 改版变(实测就有 `BlueVerifiedFollowers` 这种
+ *    我们事先不知道的名字)—— 按名字分派等于把「认不认识这个名字」
+ *    变成「采不采得到」,而那是**静默失败**
+ *
+ * ⭐ 所以三个 tab(Verified Followers / Followers / Following)
+ * **都能采**,不取决于我们认不认识它的操作名。
+ *
+ * 保留它只为**诊断展示**(在报告里标注哪些载荷是人的列表)。
+ * ⚠️ 若某天它被用来「决定要不要解析」,那就是退回按名字分派 —— 别这么做。
+ */
 export function isPeopleOp(op: string): boolean {
   return /Followers|Following|FollowersYouKnow|Subscriptions/i.test(op);
 }
