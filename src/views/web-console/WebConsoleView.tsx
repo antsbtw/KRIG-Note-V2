@@ -769,6 +769,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
+                  unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
                   longText?: { count: number; maxChars: number; avgChars: number };
                   coverage?: Array<{ field: string; have: number; total: number; rate: number }>;
                   sample?: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
@@ -788,6 +789,30 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     {(d.notes?.length ?? 0) > 0 && d.notes!.map((n, i) => (
                       <div key={i}>ℹ️ {n}</div>
                     ))}
+
+                    {/**
+                      * ⭐⭐ 解不出推文时,把**原始载荷**摆出来 —— 给「量结构」用。
+                      *
+                      * 用户 2026-09-18 要做「采人」(关注者/关注中列表)。
+                      * 那几页的载荷是 Followers/Following,extractTweetsFrom 不认。
+                      * 要写新解析器,**先看真实结构** —— 与量蓝V那次同理:
+                      * 量出来再写,不猜。
+                      */}
+                    {(d.unparsedSamples?.length ?? 0) > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div><b>没解出推文的载荷</b>(写「采人」解析器前先看这个结构)</div>
+                        {d.unparsedSamples!.map((x, i) => (
+                          <details key={i} style={{ marginTop: 4 }}>
+                            <summary className="krig-webc__note" style={{ cursor: 'pointer' }}>
+                              {x.op} · {(x.bytes / 1024).toFixed(0)}KB(点开看结构)
+                            </summary>
+                            <pre className="krig-webc__pre" style={{ maxHeight: 400, overflow: 'auto' }}>
+                              {x.body}
+                            </pre>
+                          </details>
+                        ))}
+                      </div>
+                    )}
                     <div>停止原因:{d.stopReason}
                       {d.problems.length > 0 && <> · ⚠️ {d.problems.join('、')}</>}</div>
 

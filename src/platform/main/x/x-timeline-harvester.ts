@@ -149,6 +149,20 @@ export interface RoundTrace {
 
 export interface HarvestReport {
   url: string;
+  /**
+   * ⭐⭐ **解不出推文的载荷样本** —— 给「量结构」用。
+   *
+   * ── 用户 2026-09-18 要做「采人」──
+   *
+   * 关注者/关注中页面的载荷是 `Followers`/`Following`(人的列表),
+   * 而 `extractTweetsFrom` 只认推文对象,会整个跳过 → 报 0 条。
+   * 要写「采人」的解析器,得**先看真实结构** —— 与量蓝V那次同理:
+   * **量出来再写,不猜**。
+   *
+   * ⚠️ 只在「这个载荷一条推都没解出来」时才留,且只留前几条、每条截断:
+   * 正常采集时不该把几百 KB 的时间线载荷搬来搬去。
+   */
+  unparsedSamples: Array<{ op: string; bytes: number; body: string }>;
   ok: boolean;
   /** 不通过的校验项 —— 空数组才算过关 */
   problems: string[];
@@ -337,6 +351,11 @@ export async function harvestTimeline(
   const tweets = new Map<string, HarvestedTweet>();
   const trace: RoundTrace[] = [];
   const pending = new Map<string, string>();
+  /**
+   * ⭐ 解不出推文的载荷样本 —— 给「量结构」用(见 HarvestReport.unparsedSamples)。
+   * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把几百 KB 搬进 IPC。
+   */
+  const unparsedSamples: Array<{ op: string; bytes: number; body: string }> = [];
   let payloads = 0;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
@@ -347,12 +366,27 @@ export async function harvestTimeline(
     }
     if (method === 'Network.loadingFinished') {
       if (!pending.has(params.requestId)) return;
+      // ⚠️ 先取再删 —— 取 body 是异步的,那时 pending 里已经没有这条了
+      const reqUrl = pending.get(params.requestId) ?? '';
       pending.delete(params.requestId);
       wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
         .then((r: any) => {
           if (!r?.body) return;
           payloads++;
+          const before = tweets.size;
           try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
+          /**
+           * ⭐ 这个载荷**一条推都没解出来** → 留个样本给「量结构」用。
+           * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把
+           * 几百 KB 的载荷搬进 IPC。
+           */
+          if (tweets.size === before && unparsedSamples.length < 3) {
+            unparsedSamples.push({
+              op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
+              bytes: r.body.length,
+              body: r.body.slice(0, 8000),
+            });
+          }
         })
         .catch(() => { /* 响应体可能已丢弃 */ });
     }
@@ -558,5 +592,6 @@ export async function harvestTimeline(
   return {
     url, ok: problems.length === 0, problems,
     rounds, payloads, tweets: list, dateSpan, stopReason, trace,
+    unparsedSamples,
   };
 }

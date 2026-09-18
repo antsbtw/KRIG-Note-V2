@@ -764,6 +764,9 @@ export function registerWebConsoleHandlers(): void {
         dateDays: r.dateSpan.days,
         dateGaps: r.dateSpan.gaps.length,
         notes: r.notes,
+        // ⚠️ 只记**操作名与大小**,body 不进留痕(几 KB × N 会把留痕撑爆);
+        //    完整 body 在面板上看,那才是量结构的地方
+        unparsed: r.unparsedSamples.map((x) => `${x.op}(${x.bytes}B)`),
       },
       r.problems.length === 0 ? { status: 'ok' }
         : { status: 'degraded', missing: r.problems },

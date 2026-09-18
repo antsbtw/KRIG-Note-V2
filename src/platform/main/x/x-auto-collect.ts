@@ -69,6 +69,14 @@ export interface AutoCollectReport {
    */
   problems: string[];
   /**
+   * ⭐⭐ 解不出推文的载荷样本 —— 给「量结构」用。
+   *
+   * 用户 2026-09-18 要做「采人」:关注者/关注中页面的载荷是
+   * Followers/Following(人的列表),extractTweetsFrom 只认推文对象会跳过。
+   * 要写解析器得**先看真实结构** —— 与量蓝V那次同理:量出来再写,不猜。
+   */
+  unparsedSamples: Array<{ op: string; bytes: number; body: string }>;
+  /**
    * ⭐ 事实性说明(不是故障)—— 如「这一页没有推文」。
    * ⚠️ 与 problems 分开:那是**链路坏了**,这是**如实解释一个数字**。
    */
@@ -322,6 +330,7 @@ export async function autoCollect(
     payloads: r.payloads,
     problems: r.problems,
     notes,
+    unparsedSamples: r.unparsedSamples,
     stopReason: r.stopReason,
     rounds: r.rounds,
     dateSpan: r.dateSpan,
