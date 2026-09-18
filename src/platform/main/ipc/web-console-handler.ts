@@ -777,6 +777,8 @@ export function registerWebConsoleHandlers(): void {
         // ⚠️ 只记**操作名与大小**,body 不进留痕(几 KB × N 会把留痕撑爆);
         //    完整 body 在面板上看,那才是量结构的地方
         unparsed: r.unparsedSamples.map((x) => `${x.op}(${x.bytes}B)`),
+        // ⭐ 全部操作名进留痕 —— 我读得到就不用回头问人「那个请求发没发生」
+        seenOps: r.seenOps.map((x) => `${x.op}:${x.bytes}`),
       },
       r.problems.length === 0 ? { status: 'ok' }
         : { status: 'degraded', missing: r.problems },

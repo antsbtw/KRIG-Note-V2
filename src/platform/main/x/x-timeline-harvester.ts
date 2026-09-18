@@ -163,6 +163,15 @@ export interface HarvestReport {
    * 正常采集时不该把几百 KB 的时间线载荷搬来搬去。
    */
   unparsedSamples: Array<{ op: string; bytes: number; body: string }>;
+  /**
+   * ⭐ 见过的**全部** GraphQL 操作名 + 大小 —— 样本只留 3 条,但你得知道
+   * 「那个带数据的请求到底发没发生」。
+   *
+   * ⚠️ 用户 2026-09-18 实测:截到 18 个载荷,留下的 3 个样本全是 0KB 杂项
+   * (DataSaverMode / ViewerBadgeCounts),看不出 `Followers` 有没有出现。
+   * 只报样本不报全景,就答不了「是没发请求,还是发了但我没留下来」。
+   */
+  seenOps: Array<{ op: string; bytes: number }>;
   ok: boolean;
   /** 不通过的校验项 —— 空数组才算过关 */
   problems: string[];
@@ -356,6 +365,8 @@ export async function harvestTimeline(
    * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把几百 KB 搬进 IPC。
    */
   const unparsedSamples: Array<{ op: string; bytes: number; body: string }> = [];
+  /** 见过的全部操作名 —— 回答「那个请求到底发没发生」 */
+  const seenOps: Array<{ op: string; bytes: number }> = [];
   let payloads = 0;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
@@ -374,18 +385,34 @@ export async function harvestTimeline(
           if (!r?.body) return;
           payloads++;
           const before = tweets.size;
+          seenOps.push({
+            op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
+            bytes: r.body.length,
+          });
           try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
           /**
            * ⭐ 这个载荷**一条推都没解出来** → 留个样本给「量结构」用。
            * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把
            * 几百 KB 的载荷搬进 IPC。
            */
-          if (tweets.size === before && unparsedSamples.length < 3) {
+          if (tweets.size === before) {
+            /**
+             * ⭐ **优先留大的** —— 用户 2026-09-18 实测踩到:
+             *
+             * 只留前 3 条时,拿到的全是 `DataSaverMode` / `ViewerBadgeCounts`
+             * 这类 **0KB 的杂项请求**(它们发生得最早,把名额占满了),
+             * 而真正带人的 `Followers` 载荷反而没留下来。
+             *
+             * 大小是**最好的筛子**:带数据的载荷必然大,杂项必然小。
+             * 故改成:先收着,按 bytes 降序,只保留最大的 3 条。
+             */
             unparsedSamples.push({
               op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
               bytes: r.body.length,
               body: r.body.slice(0, 8000),
             });
+            unparsedSamples.sort((a, b) => b.bytes - a.bytes);
+            if (unparsedSamples.length > 3) unparsedSamples.length = 3;
           }
         })
         .catch(() => { /* 响应体可能已丢弃 */ });
@@ -592,6 +619,6 @@ export async function harvestTimeline(
   return {
     url, ok: problems.length === 0, problems,
     rounds, payloads, tweets: list, dateSpan, stopReason, trace,
-    unparsedSamples,
+    unparsedSamples, seenOps,
   };
 }

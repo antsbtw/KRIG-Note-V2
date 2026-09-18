@@ -76,6 +76,8 @@ export interface AutoCollectReport {
    * 要写解析器得**先看真实结构** —— 与量蓝V那次同理:量出来再写,不猜。
    */
   unparsedSamples: Array<{ op: string; bytes: number; body: string }>;
+  /** ⭐ 见过的全部 GraphQL 操作 —— 回答「那个带数据的请求到底发没发生」 */
+  seenOps: Array<{ op: string; bytes: number }>;
   /**
    * ⭐ 事实性说明(不是故障)—— 如「这一页没有推文」。
    * ⚠️ 与 problems 分开:那是**链路坏了**,这是**如实解释一个数字**。
@@ -331,6 +333,7 @@ export async function autoCollect(
     problems: r.problems,
     notes,
     unparsedSamples: r.unparsedSamples,
+    seenOps: r.seenOps,
     stopReason: r.stopReason,
     rounds: r.rounds,
     dateSpan: r.dateSpan,

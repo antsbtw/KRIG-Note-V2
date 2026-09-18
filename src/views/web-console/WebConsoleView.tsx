@@ -788,6 +788,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   authorsWithRelation: number; payloads: number;
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
+                  seenOps?: Array<{ op: string; bytes: number }>;
                   longText?: { count: number; maxChars: number; avgChars: number };
                   coverage?: Array<{ field: string; have: number; total: number; rate: number }>;
                   sample?: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
@@ -819,6 +820,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     {(d.unparsedSamples?.length ?? 0) > 0 && (
                       <div style={{ marginTop: 8 }}>
                         <div><b>没解出推文的载荷</b>(写「采人」解析器前先看这个结构)</div>
+                        {/* ⭐ 全景:样本只留最大的 3 个,但要看得出「那个请求发没发生」 */}
+                        {(d.seenOps?.length ?? 0) > 0 && (
+                          <div className="krig-webc__note" style={{ margin: '2px 0 6px' }}>
+                            见过的请求:{d.seenOps!
+                              .slice()
+                              .sort((a, b) => b.bytes - a.bytes)
+                              .map((x) => `${x.op}(${(x.bytes / 1024).toFixed(0)}KB)`)
+                              .join('、')}
+                          </div>
+                        )}
                         {d.unparsedSamples!.map((x, i) => (
                           <details key={i} style={{ marginTop: 4 }}>
                             <summary className="krig-webc__note" style={{ cursor: 'pointer' }}>
