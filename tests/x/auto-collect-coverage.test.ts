@@ -142,3 +142,47 @@ describe('⭐⭐ 不许有「说谎的字段」', () => {
     }
   });
 });
+
+
+describe('⭐⭐ 采集层只报事实,不下判断', () => {
+  /**
+   * ── 用户 2026-09-18 定的边界 ──
+   *
+   * > 「我觉得我们应该忠实于页面能够获取的信息,分析数据是另外一个主题了。」
+   *
+   * ⚠️ 此前采集层混进了两条**判断**,其中一条判错了:
+   *  · 「日期有 N 处空洞(**可能漏采**)」—— x.home 实测报出 684 天空洞,
+   *    那不是漏采,是**首页算法混排**(会把两年前的热门推塞进来)。
+   *    空洞检测建立在「时间连续」假设上,首页不满足 → 恒为噪音,还掩盖真问题。
+   *  · 「达到轮次上限仍未滚到底 —— **结果不完整**」—— 「不完整」是判断,
+   *    事实只是「滚了 30 轮、停在轮次上限」,而那本来就在 stopReason 里。
+   *
+   * ⭐ 删判断的同时**必须把事实交出去**,否则就成了丢数据 ——
+   * 所以 dateSpan / rounds 要进报告,让分析层自己判断。
+   */
+  const harvester = strip(
+    readFileSync(join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8'),
+  );
+
+  it('⭐⭐ problems 里不许出现数据质量判断', () => {
+    for (const judgement of ['可能漏采', '结果不完整']) {
+      expect(
+        harvester,
+        `problems 里还有「${judgement}」—— 那是分析层的判断,不是采集层的事实`,
+      ).not.toContain(judgement);
+    }
+  });
+
+  it('⭐⭐ 但链路故障要留着(那是事实,不是判断)', () => {
+    // 滚动没生效 / 零响应 / 零解析 —— 这三条是采集链路真的坏了
+    for (const fact of ['滚动没生效', 'CDP 可能没挂上', '一条推文都没解析出来']) {
+      expect(harvester, `链路故障「${fact}」被误删了 —— 那是真事实`).toContain(fact);
+    }
+  });
+
+  it('⭐⭐ 删了判断就必须把事实交出去,否则是丢数据', () => {
+    expect(code, 'dateSpan 没进报告 —— 判断删了、事实也没了,分析层无从判断')
+      .toMatch(/dateSpan: r\.dateSpan/);
+    expect(code, 'rounds 没进报告').toMatch(/rounds: r\.rounds/);
+  });
+});

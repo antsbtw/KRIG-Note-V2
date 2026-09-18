@@ -233,6 +233,10 @@ declare global {
             url: string; tweets: number; fromPayload: number; saved: number;
             authorsWithRelation: number; authorsWithBio: number;
             payloads: number; problems: string[]; stopReason: string; elapsedMs: number;
+            /** 实际滚了几轮 —— 事实 */
+            rounds: number;
+            /** ⭐ 日期跨度与空洞 —— **事实**,采集层不解释成「漏采」(首页是算法混排) */
+            dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
             /** ⭐ 字段级覆盖率 —— 「每一条数据都是完整的吗」靠它回答,不是靠总数 */
             coverage: Array<{ field: string; have: number; total: number; rate: number }>;
             /** ⭐ 逐条明细(前 40 条)—— 人要能逐条检查 */

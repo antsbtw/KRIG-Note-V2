@@ -50,8 +50,26 @@ export interface AutoCollectReport {
   authorsWithBio: number;
   /** 载荷条数;0 说明导航没触发请求(页面可能用了缓存) */
   payloads: number;
+  /**
+   * ⚠️ 只报**采集链路自身坏了**(滚动没生效 / 零响应 / 零解析),
+   * **不报数据质量** —— 用户 2026-09-18:
+   * 「我们应该忠实于页面能够获取的信息,分析数据是另外一个主题。」
+   */
   problems: string[];
   stopReason: string;
+  /** 实际滚了几轮 —— 事实,不判断「够不够」 */
+  rounds: number;
+  /**
+   * ⭐ 抓到的日期跨度与空洞 —— **事实交给分析层,采集层不下判断**。
+   *
+   * ⚠️ 此前采集层把它解释成「可能漏采」并报成 problem,而那判错了:
+   * x.home 实测报出 684 天空洞,那不是漏采,是**首页算法混排**
+   * (会把两年前的热门推塞进来)。空洞检测建立在「时间连续」假设上,
+   * 首页不满足 → 对首页恒为噪音。
+   * 换成某人主页(真时间序)时,同一份数据才有判断价值 ——
+   * 而**那个判断该由分析层做**,它知道自己在看什么页面。
+   */
+  dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
   elapsedMs: number;
 
   /**
@@ -264,6 +282,8 @@ export async function autoCollect(
     payloads: r.payloads,
     problems: r.problems,
     stopReason: r.stopReason,
+    rounds: r.rounds,
+    dateSpan: r.dateSpan,
     elapsedMs: Date.now() - t0,
     coverage,
     sample,

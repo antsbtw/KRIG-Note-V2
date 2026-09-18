@@ -462,17 +462,32 @@ export async function harvestTimeline(
   const dateSpan = analyseDates(list);
 
   // ── 校验:任何一条不过都记进 problems,不粉饰 ──────────────────
+  /**
+   * ⭐⭐ `problems` 只报**采集链路自身坏了**,不报「数据质量」。
+   *
+   * ── 用户 2026-09-18 定的边界 ──
+   *
+   * > 「我觉得我们应该忠实于页面能够获取的信息,分析数据是另外一个主题了。」
+   *
+   * ⚠️ 此前这里混进了两条**判断**,而且有一条判错了:
+   *
+   *  · 「日期有 N 处空洞(**可能漏采**)」—— 实测 x.home 报出
+   *    `2024-09-18 → 2026-08-03(684天)`。那不是漏采:**首页是算法混排**,
+   *    会把两年前的热门推塞进来。空洞检测建立在「时间连续」假设上,
+   *    而首页根本不满足这个假设 → 对首页恒为噪音,还会掩盖真问题。
+   *
+   *  · 「达到轮次上限仍未滚到底 —— **结果不完整**」—— 「不完整」是判断。
+   *    事实只是「滚了 30 轮,停在轮次上限」,那本来就在 `stopReason` 里。
+   *
+   * ⭐ 采集层的职责:**页面上有什么,忠实地拿下来,并如实说明拿的过程**。
+   * 「够不够、有没有漏」是分析层拿着 `dateSpan`/`stopReason`/`rounds` 自己判断的事。
+   */
   const problems: string[] = [];
   const maxY = Math.max(...trace.map((t) => t.scrollY), 0);
+  // 以下三条都是**采集链路真的坏了**,不是数据质量判断
   if (maxY <= 0) problems.push('页面从未滚动(scrollY 始终为 0)—— 滚动没生效');
   if (payloads === 0) problems.push('没捕获到任何 GraphQL 响应 —— CDP 可能没挂上');
   if (list.length === 0) problems.push('一条推文都没解析出来');
-  if (stuck < 3 && rounds >= maxRounds) {
-    problems.push(`达到轮次上限 ${maxRounds} 仍未滚到底 —— 结果不完整`);
-  }
-  if (dateSpan.gaps.length) {
-    problems.push(`日期有 ${dateSpan.gaps.length} 处空洞(可能漏采):${dateSpan.gaps.slice(0, 3).join(' / ')}`);
-  }
 
   return {
     url, ok: problems.length === 0, problems,

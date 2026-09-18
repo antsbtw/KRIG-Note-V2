@@ -738,6 +738,10 @@ export function registerWebConsoleHandlers(): void {
         // ⭐ 完整性 —— 「每一条都完整吗」的答案
         coverageGaps: gaps,
         sampleIncomplete: `${incomplete}/${r.sample.length}`,
+        // ⭐ 事实照录:滚了几轮、日期跨多少天、几处空洞 —— 不解释成「漏没漏」
+        rounds: r.rounds,
+        dateDays: r.dateSpan.days,
+        dateGaps: r.dateSpan.gaps.length,
       },
       r.problems.length === 0 ? { status: 'ok' }
         : { status: 'degraded', missing: r.problems },
