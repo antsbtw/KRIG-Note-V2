@@ -151,11 +151,50 @@ describe('⭐ 日志后缀要带得出「为什么」', () => {
 });
 
 describe('⭐ 入参摘要有上限(留痕不许把页面正文灌进去)', () => {
-  it('长入参被截断到 200 字以内', () => {
-    const huge = { text: 'x'.repeat(5000) };
+  /**
+   * ⚠️ 上限从 200 放宽到 2000(2026-09-18)。
+   *
+   * 原因:autoCollect 的参数越加越多(page/tweets/saved/coverageGaps/
+   * longText…),200 字符**正好把末尾几项切掉** —— 新加的 longText 统计
+   * 在留痕里根本看不到,而且**不报错**:看起来像「没生成」,实际是「被截了」。
+   *
+   * ⭐ 但**上限本身必须留着**,守卫原来的理由完全成立:
+   * 「留痕不许把页面正文灌进去」—— 某天有人把推文全文当参数传进来,
+   * 留痕会被正文撑爆。2000 字既容得下结构化统计,也挡得住正文。
+   *
+   * ⭐ 而且截断现在**是显式的**(带「已截断,原长 N」),
+   * 不再让人误以为数据没生成 —— 静默截断正是这次栽的坑。
+   */
+  it('⭐ 超长入参仍被截断(挡住把正文灌进留痕)', () => {
+    const huge = { text: 'x'.repeat(50_000) };
     const plan = planTrace('type', huge, { status: 'ok' }, 1);
     if (plan.kind !== 'recovery') throw new Error('应为 recovery');
-    // detail = `${ms}ms ${inputRef}`,inputRef 本身截到 200
-    expect(plan.detail.length).toBeLessThan(260);
+    expect(plan.detail.length, '没截断 —— 页面正文会把留痕撑爆').toBeLessThan(2100);
+  });
+
+  it('⭐⭐ 截断要**明说**,不许静默', () => {
+    // 静默截断会让人以为「这个字段没生成」,而实际是「被切掉了」——
+    // 两者的排查方向完全相反,这次就栽在这上面
+    const huge = { text: 'x'.repeat(50_000) };
+    const plan = planTrace('type', huge, { status: 'ok' }, 1);
+    if (plan.kind !== 'recovery') throw new Error('应为 recovery');
+    expect(plan.detail, '截断了却不说 —— 会被误读成「数据没生成」')
+      .toMatch(/已截断|原长/);
+  });
+
+  it('⭐ 正常大小的结构化入参**不该**被截', () => {
+    // autoCollect 那种十几个字段的报告必须完整留下来
+    const report = {
+      page: 'x.home', tweets: 84, fromPayload: 84, saved: 84,
+      authorsWithRelation: 72, authorsWithBio: 80,
+      longText: { count: 3, maxChars: 1847, avgChars: 156 },
+      payloads: 9, coverageGaps: ['authorBio 80/84(95%)'],
+      sampleIncomplete: '2/40', rounds: 30, dateDays: 684, dateGaps: 7,
+    };
+    const plan = planTrace('autoCollect', report, { status: 'ok' }, 1);
+    if (plan.kind !== 'recovery') throw new Error('应为 recovery');
+    expect(plan.detail, 'longText 被截掉了 —— 那正是要看的数字').toContain('longText');
+    expect(plan.detail, '末尾字段被切').toContain('dateGaps');
+    expect(plan.detail).not.toMatch(/已截断/);
   });
 });

@@ -117,7 +117,20 @@ export function planTrace(
   elapsedMs: number,
 ): TracePlan {
   const layer = LAYER_OF[fn] ?? 'web.page';
-  const inputRef = `${fn}:${JSON.stringify(params).slice(0, 200)}`;
+  /**
+   * ⚠️ 截断长度从 200 提到 2000(2026-09-18 实测踩到)。
+   *
+   * autoCollect 的参数越加越多(page/tweets/saved/coverageGaps/longText…),
+   * 200 字符**正好把末尾几项切掉** —— 于是我新加的 longText 统计
+   * 在留痕里根本看不到,而且**不报错**:看起来像"没生成",实际是"被截了"。
+   *
+   * ⭐ 截断本身是对的(留痕不该无限长),但 200 太短且**是静默的**。
+   * 现在:放宽到 2000,并在真被截时**明确标出来**,不让人误以为数据没生成。
+   */
+  const rawParams = JSON.stringify(params);
+  const inputRef = rawParams.length > 2000
+    ? `${fn}:${rawParams.slice(0, 2000)}…[已截断,原长 ${rawParams.length}]`
+    : `${fn}:${rawParams}`;
   const reason = result.reason ?? '';
 
   if (result.status === 'ok') {

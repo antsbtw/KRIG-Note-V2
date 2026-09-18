@@ -733,8 +733,11 @@ export function registerWebConsoleHandlers(): void {
     const incomplete = r.sample.filter((x) => x.missing.length > 0).length;
 
     recordRun('autoCollect',
-      { page: pageName, url: resolved.url, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
-        authorsWithRelation: r.authorsWithRelation, payloads: r.payloads,
+      { page: pageName, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
+        authorsWithRelation: r.authorsWithRelation, authorsWithBio: r.authorsWithBio,
+        // ⭐ 长推统计排在前面 —— 留痕会截断,要紧的先写
+        longText: r.longText,
+        payloads: r.payloads,
         // ⭐ 完整性 —— 「每一条都完整吗」的答案
         coverageGaps: gaps,
         sampleIncomplete: `${incomplete}/${r.sample.length}`,
