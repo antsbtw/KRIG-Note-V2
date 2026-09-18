@@ -786,6 +786,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 const r = acReport as { report?: {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
+                  people?: number; peopleWithBio?: number; peopleWithRelation?: number;
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
                   seenOps?: Array<{ op: string; bytes: number }>;
@@ -801,6 +802,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   <div className="krig-webc__note" style={{ lineHeight: 1.9 }}>
                     <div>采到 <b>{d.tweets}</b> 条 · 其中载荷来源 <b>{d.fromPayload}</b> 条 ·
                       入库 <b>{d.saved}</b> 条 · 载荷 <b>{d.payloads}</b> 个 · {(d.elapsedMs / 1000).toFixed(1)}s</div>
+                    {(d.people ?? 0) > 0 && (
+                      <div>⭐⭐ <b>采到 {d.people} 人</b> ·
+                        其中 <b>{d.peopleWithBio}</b> 人有 bio ·
+                        <b>{d.peopleWithRelation}</b> 人有关系数据
+                        —— 这一页采的是**人**不是推</div>
+                    )}
                     <div>⭐ <b>采到关系数据的作者:{d.authorsWithRelation} 人</b>
                       {d.authorsWithRelation > 0
                         ? ' —— 不用点击就拿到了'

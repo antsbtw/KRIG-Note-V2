@@ -33,7 +33,7 @@
 
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
 import { upsertTweet } from '../db/tweet-inbox-repo';
-import { saveAuthorCounts } from '../db/x-author-repo';
+import { saveAuthorCounts, registerSeenAuthor } from '../db/x-author-repo';
 import { normalizeHandle, type TweetInboxRecord } from '@shared/types/x-timeline-types';
 
 export interface AutoCollectReport {
@@ -48,6 +48,20 @@ export interface AutoCollectReport {
   authorsWithRelation: number;
   /** 采到 bio 的作者数 */
   authorsWithBio: number;
+  /**
+   * ⭐⭐ 「采人」的产出 —— 关注者/关注中页面采到的**人**。
+   *
+   * 用户 2026-09-18 实测:那几页的载荷是 `BlueVerifiedFollowers`,
+   * 只认推文的解析器会整个跳过 → 报 0 条。现在两种都解。
+   *
+   * ⭐ 这正是盘点缺口的正解:bio 与关系覆盖率此前只有 2%,
+   * 因为唯一的路是「导航到每个人主页 + 等 12 秒」。
+   */
+  people: number;
+  /** 其中带 bio 的 */
+  peopleWithBio: number;
+  /** 其中带关系(iFollow/followsMe)的 */
+  peopleWithRelation: number;
   /**
    * ⭐ 长推(Show more)统计 —— 用户 2026-09-18 问「show more 的内容
    * 是否被取回来?或者漏失了?」
@@ -257,6 +271,50 @@ export async function autoCollect(
     }
   }
 
+  /**
+   * ⭐⭐ **人入库** —— 采到的人写进 x_author。
+   *
+   * ⚠️ 与推文入库同一纪律:单条失败不拦整批,但**不静默**。
+   * ⚠️ 只写**确实取到**的字段,undefined 一律不写 ——
+   * 「载荷没带」与「查过是 false」含义相反。
+   */
+  let peopleWithBio = 0;
+  let peopleWithRelation = 0;
+  for (const person of r.people) {
+    const hasBio = !!person.bio;
+    const hasRel = person.iFollow !== undefined || person.followsMe !== undefined;
+    if (hasBio) peopleWithBio += 1;
+    if (hasRel) peopleWithRelation += 1;
+    try {
+      await saveAuthorCounts(person.handle, {
+        bio: person.bio,
+        isBlueVerified: person.isBlueVerified,
+        iFollow: person.iFollow,
+        followsMe: person.followsMe,
+        xBlocking: person.xBlocking,
+        followersCount: person.followersCount,
+        followingCount: person.followingCount,
+        tweetCount: person.tweetCount,
+        accountCreatedAt: person.accountCreatedAt,
+        /**
+         * ⚠️ `location` **采到了但没地方存** —— AuthorCounts 里没有这个字段,
+         * x_author 表也没这一列。加字段是另一件事(要 migration),
+         * 不在这次顺手做。解析器照样解它,等有地方存时接上即可。
+         */
+      });
+      /**
+       * ⚠️ 展示名/头像**不在 AuthorCounts 里** —— 那是 registerSeenAuthor 的字段。
+       * 两个函数写的是同一张表的不同字段组,别硬塞。
+       */
+      await registerSeenAuthor(person.handle, {
+        displayName: person.displayName,
+        avatar: person.avatar,
+      }).catch((e) => console.warn(`[x-auto-collect] 人 ${person.handle} 登记失败:`, e));
+    } catch (err) {
+      console.warn(`[x-auto-collect] 人 ${person.handle} 入库失败:`, err);
+    }
+  }
+
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
   /**
@@ -273,7 +331,10 @@ export async function autoCollect(
    * 两者的处置完全不同:前者要修采集,后者要加「采人」能力。
    */
   const notes: string[] = [];
-  if (r.tweets.length === 0 && r.payloads > 0) {
+  if (r.people.length > 0) {
+    notes.push(`这一页采的是**人**不是推:${r.people.length} 人入库(${peopleWithBio} 人有 bio)`);
+  }
+  if (r.tweets.length === 0 && r.people.length === 0 && r.payloads > 0) {
     notes.push(
       `截到 ${r.payloads} 个载荷但解出 0 条推 —— `
       + '这一页多半没有推文(如关注者/关注中列表),'
@@ -334,6 +395,9 @@ export async function autoCollect(
     notes,
     unparsedSamples: r.unparsedSamples,
     seenOps: r.seenOps,
+    people: r.people.length,
+    peopleWithBio,
+    peopleWithRelation,
     stopReason: r.stopReason,
     rounds: r.rounds,
     dateSpan: r.dateSpan,

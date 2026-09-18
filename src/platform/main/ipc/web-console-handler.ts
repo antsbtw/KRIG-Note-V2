@@ -763,6 +763,8 @@ export function registerWebConsoleHandlers(): void {
     recordRun('autoCollect',
       { page: current ? '(当前页)' : pageName, tweets: r.tweets, fromPayload: r.fromPayload, saved: r.saved,
         authorsWithRelation: r.authorsWithRelation, authorsWithBio: r.authorsWithBio,
+        // ⭐ 采人的成果 —— 这条能力的存在理由
+        people: r.people, peopleWithBio: r.peopleWithBio, peopleWithRelation: r.peopleWithRelation,
         // ⭐ 长推统计排在前面 —— 留痕会截断,要紧的先写
         longText: r.longText,
         payloads: r.payloads,

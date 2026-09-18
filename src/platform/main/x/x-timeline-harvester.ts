@@ -33,6 +33,7 @@
  */
 
 import { webContents as allWebContents } from 'electron';
+import { extractPeopleFrom, type HarvestedPerson } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
 
@@ -172,6 +173,14 @@ export interface HarvestReport {
    * 只报样本不报全景,就答不了「是没发请求,还是发了但我没留下来」。
    */
   seenOps: Array<{ op: string; bytes: number }>;
+  /**
+   * ⭐⭐ 采到的**人** —— 关注者/关注中/验证关注者页面的产出。
+   *
+   * 用户 2026-09-18 实测:那几页的载荷是 `BlueVerifiedFollowers`
+   * (12 个 × 40KB),`extractTweetsFrom` 只认推文对象会整个跳过。
+   * 所以同一次采集**两种都解**:是推就进 tweets,是人就进 people。
+   */
+  people: HarvestedPerson[];
   ok: boolean;
   /** 不通过的校验项 —— 空数组才算过关 */
   problems: string[];
@@ -365,6 +374,8 @@ export async function harvestTimeline(
    * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把几百 KB 搬进 IPC。
    */
   const unparsedSamples: Array<{ op: string; bytes: number; body: string }> = [];
+  /** ⭐ 采到的人 —— 与推文并行解,同一次采集两种都要 */
+  const people = new Map<string, HarvestedPerson>();
   /** 见过的全部操作名 —— 回答「那个请求到底发没发生」 */
   const seenOps: Array<{ op: string; bytes: number }> = [];
   let payloads = 0;
@@ -385,17 +396,26 @@ export async function harvestTimeline(
           if (!r?.body) return;
           payloads++;
           const before = tweets.size;
+          const peopleBefore = people.size;
           seenOps.push({
             op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
             bytes: r.body.length,
           });
-          try { extractTweetsFrom(JSON.parse(r.body), tweets); } catch { /* 非 JSON */ }
+          try {
+            const parsed = JSON.parse(r.body);
+            extractTweetsFrom(parsed, tweets);
+            // ⭐ **人也解一遍** —— 同一个载荷可能既有推也有人
+            //    (如时间线里的推荐关注模块);两种都要,不二选一
+            extractPeopleFrom(parsed, people);
+          } catch { /* 非 JSON */ }
           /**
            * ⭐ 这个载荷**一条推都没解出来** → 留个样本给「量结构」用。
            * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把
            * 几百 KB 的载荷搬进 IPC。
            */
-          if (tweets.size === before) {
+          // ⚠️ 推**和**人都没解出来才算「没解出来」——
+          //    否则关注者页会被误报成「解析失败」,而它其实采到人了
+          if (tweets.size === before && people.size === peopleBefore) {
             /**
              * ⭐ **优先留大的** —— 用户 2026-09-18 实测踩到:
              *
@@ -620,5 +640,6 @@ export async function harvestTimeline(
     url, ok: problems.length === 0, problems,
     rounds, payloads, tweets: list, dateSpan, stopReason, trace,
     unparsedSamples, seenOps,
+    people: [...people.values()],
   };
 }

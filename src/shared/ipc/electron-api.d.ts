@@ -247,6 +247,8 @@ declare global {
           report?: {
             url: string; tweets: number; fromPayload: number; saved: number;
             authorsWithRelation: number; authorsWithBio: number;
+            /** ⭐ 「采人」产出:关注者/关注中页面采到的人 */
+            people: number; peopleWithBio: number; peopleWithRelation: number;
             payloads: number; problems: string[]; stopReason: string; elapsedMs: number;
             /** ⭐ 事实性说明(如「这一页没有推文」)—— 与 problems(链路坏了)分开 */
             notes: string[];
