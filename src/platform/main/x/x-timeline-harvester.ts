@@ -197,6 +197,8 @@ export interface HarvestReport {
   paging: { bottom?: string; top?: string; hasMore: boolean };
   /** 游标翻页的页数;0 = 没翻(不是采人页,或抄不到请求) */
   pagedRounds: number;
+  /** ⭐ 没翻的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
+  pagingSkipped?: string;
   /**
    * ⭐ 最后一个 GraphQL 请求(URL + 头)—— 游标翻页**重发它**,不自己拼。
    * X 的 queryId/features 会随版本变,复刻必然过期;复用刚发过的那条不会。
@@ -568,6 +570,8 @@ export async function harvestTimeline(
   let rounds = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
   let emptyPages = 0;
+  /** ⭐ 翻页没启动的原因 —— 空表示启动了 */
+  let pagingSkipped: string | undefined;
 
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
@@ -673,13 +677,43 @@ export async function harvestTimeline(
    * 推文页的游标语义不同,没验证过,不顺手捎带。
    */
   let pagedRounds = 0;
-  if (lastPeopleReq && paging.hasMore && paging.bottom && people.size > 0) {
-    /**
-     * ⚠️ **先钉住**这条请求再进循环 —— `lastPeopleReq` 是闭包里被监听器
-     * 改写的变量,循环中途它可能被别的请求覆盖掉,那样翻页就会跑到
-     * 另一个列表上去(而人照样入库,看不出来)。
-     */
-    const baseReq = lastPeopleReq;
+  /**
+   * ⭐⭐ **进不去也要说清是哪一条不成立**。
+   *
+   * ── 用户 2026-09-18 实测 ──
+   *
+   * 翻页上线后实采 314 人 / 2604 基准 = 12%,只比滚动多 113 人 ——
+   * 「快几十倍」没有发生。而四个入口条件写成一个 `if`,
+   * 不成立时**静默跳过**,报告里只剩「采了 314 人然后停了」,
+   * 四种断法长得一模一样,根本无从查起。
+   *
+   * ⚠️ 这正是本仓反复踩的「看着成功实际没有」:
+   * 没翻页和翻完了,在报告里是同一个样子。
+   */
+  /**
+   * ⚠️ **先钉住**这条请求 —— `lastPeopleReq` 是闭包里被监听器改写的变量,
+   * 循环中途可能被别的请求覆盖,那样翻页会跑到另一个列表上去
+   * (而人照样入库,看不出来)。
+   */
+  /**
+   * ⚠️ 经函数读取 —— 直接读 `lastPeopleReq`,TS 的控制流分析会认定它
+   * 「至今仍是 null」(唯一的赋值在监听器回调里,TS 排不出先后)而收窄成
+   * `never`。这不是类型体操,是**它确实无法证明**回调已经跑过。
+   */
+  const baseReq = ((): { url: string; headers: Record<string, string> } | null =>
+    lastPeopleReq)();
+  const gate = {
+    抄到请求: !!baseReq,
+    X说还有下一页: paging.hasMore,
+    有游标: !!paging.bottom,
+    这页采到人: people.size > 0,
+  };
+  const blocked = Object.entries(gate).filter(([, ok]) => !ok).map(([k]) => k);
+  if (blocked.length > 0) {
+    /** ⭐ 如实记下**为什么没翻**,不是不提 */
+    pagingSkipped = `游标翻页没启动 —— ${blocked.join('、')}(不成立)`;
+  }
+  if (baseReq && paging.hasMore && paging.bottom && people.size > 0) {
     const budget = opts.pageBudget ?? 40;
     const seenCursors = new Set<string>();
     while (pagedRounds < budget && paging.hasMore && paging.bottom) {
@@ -797,6 +831,7 @@ export async function harvestTimeline(
     paging,
     /** ⭐ 游标翻了几页 —— 0 表示只靠滚动 */
     pagedRounds,
+    pagingSkipped,
     /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */
     lastRequest: lastPeopleReq ?? undefined,
   };

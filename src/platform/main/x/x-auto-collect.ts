@@ -102,6 +102,8 @@ export interface AutoCollectReport {
   rounds: number;
   /** ⭐ 游标翻了几页 —— 0 表示只靠滚动(不是采人页,或抄不到请求) */
   pagedRounds: number;
+  /** ⭐ 没翻页的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
+  pagingSkipped?: string;
   /**
    * ⭐⭐ 采完了没有 —— **X 说的,不是我们猜的**。
    *
@@ -573,6 +575,7 @@ export async function autoCollect(
     stopReason: r.stopReason,
     rounds: r.rounds,
     pagedRounds: r.pagedRounds,
+    pagingSkipped: r.pagingSkipped,
     dateSpan: r.dateSpan,
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
     reconcile,

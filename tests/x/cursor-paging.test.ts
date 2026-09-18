@@ -131,6 +131,12 @@ describe('⭐⭐ 翻页循环:原地打转必须停下来', () => {
   const src = strip(readFileSync(
     join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8',
   ));
+  /**
+   * ⚠️ 切片起点从 `let pagedRounds` 往前挪到入口闸门 ——
+   * 钉住的 `baseReq` 现在声明在闸门处(为了让「没翻页」也能报原因),
+   * 切晚了就把它切在外面,守卫会误报。
+   * ⭐ 这条是守卫**真的抓到过**我自己的改动(2026-09-18),不是摆设。
+   */
   const i = src.indexOf('let pagedRounds = 0;');
   const loop = src.slice(i, src.indexOf("wc.debugger.off('message'", i));
 
@@ -162,7 +168,7 @@ describe('⭐⭐ 翻页循环:原地打转必须停下来', () => {
   it('⭐⭐ 请求用的是**钉住的**那条,不是会被改写的闭包变量', () => {
     expect(loop, '循环里直接读 lastPeopleReq —— 中途被覆盖会翻到别的列表上去')
       .not.toMatch(/lastPeopleReq\.(url|headers)/);
-    expect(loop, '没有钉住请求').toMatch(/const baseReq = lastPeopleReq/);
+    expect(loop, '没有钉住请求').toMatch(/const baseReq\b/);
   });
 
   it('⭐ 停止原因要如实说明是哪一种,不能含糊成「采完了」', () => {
@@ -197,5 +203,76 @@ describe('⭐⭐ 翻页上限要真的一路传到底', () => {
     const src = read('src/platform/main/x/x-auto-collect.ts');
     expect(src, 'autoCollect 把 pageBudget 写死了 —— 面板的值到不了')
       .toMatch(/pageBudget: opts\.pageBudget/);
+  });
+});
+
+describe('⭐⭐ 没翻页必须说清是哪一条不成立', () => {
+  /**
+   * ── 用户 2026-09-18 实测 ──
+   *
+   * 翻页上线后实采 314 人 / 2604 = 12%,只比滚动多 113 人 ——
+   * 「快几十倍」没发生。而四个入口条件写成一个 `if`,不成立就**静默跳过**,
+   * 报告里只剩「采了 314 人然后停了」。
+   *
+   * ⚠️ 四种断法(抄不到请求 / X 说没下一页 / 没游标 / 没采到人)
+   * 在报告里长得**完全一样**,于是查不下去 —— 这正是本仓反复踩的
+   * 「看着成功实际没有」。
+   */
+  const strip = (s: string) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const src = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8',
+  ));
+
+  it('⭐⭐ 四个入口条件逐条判定,不是一个 if 吞掉', () => {
+    const i = src.indexOf('const gate = {');
+    expect(i, '入口条件没有逐条判定 —— 不成立时查不出是哪一条').toBeGreaterThan(0);
+    const g = src.slice(i, src.indexOf('};', i));
+    expect(g.length, '切出来的 gate 是空的').toBeGreaterThan(40);
+    // 四条缺任何一条,那种断法就会重新变成哑的
+    for (const cond of ['抄到请求', 'paging.hasMore', 'paging.bottom', 'people.size']) {
+      expect(g, `入口条件少了「${cond}」—— 这种断法会查不出来`).toContain(cond);
+    }
+  });
+
+  it('⭐⭐ 不成立要真的写进 pagingSkipped,不能只判定不记录', () => {
+    /**
+     * ⚠️ 光断言「有这行文本」不够:`void 0 && (pagingSkipped = ...)`
+     * 文本在、行为没了,照样全绿(本仓同族第五刀)。
+     * 所以要切出赋值所在的那条语句,钉住它**前面没有短路**。
+     */
+    const i = src.indexOf('pagingSkipped = ');
+    expect(i, '根本没有给 pagingSkipped 赋值 —— 判定了却不记录').toBeGreaterThan(0);
+    const stmtStart = src.lastIndexOf('\n', i);
+    const stmt = src.slice(stmtStart, src.indexOf(';', i));
+    expect(stmt, '赋值被短路掉了 —— 文本在、行为没了').not.toMatch(/(void 0|false)\s*&&/);
+    expect(stmt, '记的不是「哪几条不成立」').toMatch(/blocked\.join/);
+  });
+
+  it('⭐⭐ pagingSkipped 要一路传到报告里', () => {
+    expect(src, 'pagingSkipped 没进 return —— 主进程拿不到').toMatch(/\n\s*pagingSkipped,/);
+    /**
+     * ⚠️ 中间两层用 `r.pagingSkipped` 钉**取值**,不是钉字面量 ——
+     * 只写个类型声明、不真的透传,照样能让 toContain 全绿。
+     */
+    for (const [f, why] of [
+      ['src/platform/main/x/x-auto-collect.ts', 'autoCollect 没透传'],
+      ['src/platform/main/ipc/web-console-handler.ts', 'IPC 没透传'],
+    ] as [string, string][]) {
+      expect(
+        readFileSync(join(process.cwd(), f), 'utf-8'),
+        `${why} —— 人在面板上看不到为什么没翻页`,
+      ).toMatch(/pagingSkipped: r\.pagingSkipped/);
+    }
+    /**
+     * ⚠️ 面板这层**必须钉渲染分支**:删掉整个显示分支后,类型声明里
+     * 还留着一个 `pagingSkipped`,`toContain` 就被它兜住了 ——
+     * 实测 2026-09-18 这条注入全绿,是假守卫(本仓同族第三刀)。
+     */
+    const view = readFileSync(
+      join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8',
+    );
+    expect(view, '面板没有渲染分支 —— 原因拿到了却不显示给人看')
+      .toMatch(/\{d\.pagingSkipped && \(/);
   });
 });

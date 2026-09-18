@@ -793,7 +793,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
                   people?: number; peopleWithBio?: number; peopleWithRelation?: number;
-                  pagedRounds?: number;
+                  pagedRounds?: number; pagingSkipped?: string;
                   paging?: { hasMore: boolean; cursor?: string };
                   reconcile?: { baseline?: number; got: number; rate?: number; note: string };
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
@@ -863,6 +863,9 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         {d.reconcile.rate === undefined ? 'ℹ️ ' : d.reconcile.rate >= 0.9 ? '✓ ' : '⚠️ '}
                         <b>基准对账</b>:{d.reconcile.note}
                       </div>
+                    )}
+                    {d.pagingSkipped && (
+                      <div>⚠️ <b>{d.pagingSkipped}</b> —— 这次只靠滚动</div>
                     )}
                     {(d.pagedRounds ?? 0) > 0 && (
                       <div>
