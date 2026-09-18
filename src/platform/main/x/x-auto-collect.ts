@@ -53,6 +53,71 @@ export interface AutoCollectReport {
   problems: string[];
   stopReason: string;
   elapsedMs: number;
+
+  /**
+   * ⭐⭐ **字段级覆盖率** —— 用户 2026-09-18:
+   * 「我关注的是采集数据的完整性,每一条数据都是完整的吗?」
+   *
+   * ⚠️ 总数不等于完整:77 条里可能条条缺字段,而「采到 77 条」照样好看。
+   * 所以要按**字段**报,不是按条数报。
+   */
+  coverage: Array<{ field: string; have: number; total: number; rate: number }>;
+
+  /**
+   * ⭐ 逐条明细 —— 人要能**逐条检查**,不是只看一个百分比。
+   * ⚠️ 只带回前 N 条(IPC 不适合搬运整批),但覆盖率是**全量**算的。
+   */
+  sample: Array<{
+    tweetId: string;
+    handle?: string;
+    /** 这一条缺了哪些字段 —— 空数组 = 完整 */
+    missing: string[];
+    fromDom: boolean;
+  }>;
+}
+
+/**
+ * 一条推「该有什么」。
+ *
+ * ⚠️ 分三类,因为**缺失的含义不同**:
+ *  · `always` —— 任何推都该有,缺了就是采集坏了
+ *  · `payloadOnly` —— 只有载荷路有;DOM 兜底的推缺了是正常的
+ *  · `conditional` —— 本来就可能没有(不是回复就没有 inReplyTo),
+ *    **不算缺**,所以不进覆盖率分母
+ */
+const FIELD_SPEC: ReadonlyArray<{
+  readonly field: string;
+  readonly kind: 'always' | 'payloadOnly' | 'conditional';
+  readonly get: (t: HarvestedTweet) => unknown;
+}> = [
+  { field: 'tweetId', kind: 'always', get: (t) => t.tweetId },
+  { field: 'text', kind: 'always', get: (t) => t.text },
+  { field: 'authorHandle', kind: 'always', get: (t) => t.authorHandle },
+  { field: 'createdAt', kind: 'always', get: (t) => t.createdAt },
+  { field: 'lang', kind: 'always', get: (t) => t.lang },
+  { field: 'metrics.likes', kind: 'always', get: (t) => t.metrics?.likes },
+  { field: 'metrics.replies', kind: 'always', get: (t) => t.metrics?.replies },
+  { field: 'metrics.views', kind: 'always', get: (t) => t.metrics?.views },
+  { field: 'authorRestId', kind: 'payloadOnly', get: (t) => t.authorRestId },
+  { field: 'conversationId', kind: 'payloadOnly', get: (t) => t.conversationId },
+  { field: 'iFollow', kind: 'payloadOnly', get: (t) => t.iFollow },
+  { field: 'followsMe', kind: 'payloadOnly', get: (t) => t.followsMe },
+  { field: 'isBlueVerified', kind: 'payloadOnly', get: (t) => t.isBlueVerified },
+  { field: 'self', kind: 'payloadOnly', get: (t) => t.self && Object.keys(t.self).length > 0 },
+  { field: 'metrics.bookmarks', kind: 'payloadOnly', get: (t) => t.metrics?.bookmarks },
+  // ⚠️ 以下本来就可能没有 —— **不进分母**,否则覆盖率永远上不去而且是假的
+  { field: 'inReplyToStatusId', kind: 'conditional', get: (t) => t.inReplyToStatusId },
+  { field: 'media', kind: 'conditional', get: (t) => t.media?.length },
+  { field: 'authorName', kind: 'conditional', get: (t) => t.authorName },
+  { field: 'authorAvatar', kind: 'conditional', get: (t) => t.authorAvatar },
+];
+
+/** 有值 = 非 undefined/null/空串/空数组。⚠️ 0 和 false **算有值** */
+function has(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return v.trim() !== '';
+  if (Array.isArray(v)) return v.length > 0;
+  return true;
 }
 
 /** `HarvestedTweet` → 入库记录。⚠️ 载荷字段**一个都不丢** */
@@ -143,6 +208,47 @@ export async function autoCollect(
 
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
+  /**
+   * ⭐⭐ 字段级覆盖率 —— 用户 2026-09-18:「每一条数据都是完整的吗?」
+   *
+   * ⚠️ 分母按字段种类算,**不是一律用总条数**:
+   *  · always     → 分母 = 全部
+   *  · payloadOnly→ 分母 = **载荷来源那些**(DOM 兜底的推本来就没有,
+   *                 算进去会让覆盖率无谓地低,而低得没有信息量)
+   *  · conditional→ **不算覆盖率**(不是回复本来就没 inReplyTo),
+   *                 只报「有几条带了」,避免制造假缺失
+   */
+  const coverage = FIELD_SPEC.map((spec) => {
+    const pool = spec.kind === 'payloadOnly'
+      ? r.tweets.filter((t) => !t.fromDom)
+      : r.tweets;
+    const have = pool.filter((t) => has(spec.get(t))).length;
+    const total = spec.kind === 'conditional' ? 0 : pool.length;
+    return {
+      field: spec.field,
+      have,
+      total,
+      rate: total > 0 ? have / total : 0,
+    };
+  });
+
+  /**
+   * ⭐ 逐条明细 —— 人要能逐条看,不是只看百分比。
+   * ⚠️ `conditional` 不算缺失,否则每条都"缺"一堆本来就不该有的东西。
+   */
+  const sample = r.tweets.slice(0, 40).map((t) => ({
+    tweetId: t.tweetId,
+    handle: t.authorHandle,
+    fromDom: !!t.fromDom,
+    missing: FIELD_SPEC
+      .filter((spec) => {
+        if (spec.kind === 'conditional') return false;
+        if (spec.kind === 'payloadOnly' && t.fromDom) return false;  // DOM 兜底没有是正常的
+        return !has(spec.get(t));
+      })
+      .map((spec) => spec.field),
+  }));
+
   return {
     url: r.url,
     tweets: r.tweets.length,
@@ -154,5 +260,7 @@ export async function autoCollect(
     problems: r.problems,
     stopReason: r.stopReason,
     elapsedMs: Date.now() - t0,
+    coverage,
+    sample,
   };
 }

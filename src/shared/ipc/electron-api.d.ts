@@ -233,6 +233,10 @@ declare global {
             url: string; tweets: number; fromPayload: number; saved: number;
             authorsWithRelation: number; authorsWithBio: number;
             payloads: number; problems: string[]; stopReason: string; elapsedMs: number;
+            /** ⭐ 字段级覆盖率 —— 「每一条数据都是完整的吗」靠它回答,不是靠总数 */
+            coverage: Array<{ field: string; have: number; total: number; rate: number }>;
+            /** ⭐ 逐条明细(前 40 条)—— 人要能逐条检查 */
+            sample: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
           };
         }>;
         /** ⭐ 探 X 页面内存里的 user 数据在哪个全局变量下(只探不取) */

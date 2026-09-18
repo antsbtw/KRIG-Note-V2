@@ -731,6 +731,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   tweets: number; fromPayload: number; saved: number;
                   authorsWithRelation: number; payloads: number;
                   problems: string[]; stopReason: string; elapsedMs: number;
+                  coverage?: Array<{ field: string; have: number; total: number; rate: number }>;
+                  sample?: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
                 }; error?: string } | null;
                 if (!r) return null;
                 if (r.error) return <pre className="krig-webc__pre">{r.error}</pre>;
@@ -746,6 +748,57 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         : ' —— 一个都没有,载荷里可能没带关系字段'}</div>
                     <div>停止原因:{d.stopReason}
                       {d.problems.length > 0 && <> · ⚠️ {d.problems.join('、')}</>}</div>
+
+                    {/**
+                      * ⭐⭐ 字段级覆盖率 —— 用户 2026-09-18:
+                      * 「我关注的是采集数据的完整性,每一条数据都是完整的吗?」
+                      * ⚠️ 总数不等于完整:77 条里可能条条缺字段,而「采到 77 条」照样好看。
+                      */}
+                    {(d.coverage?.length ?? 0) > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div><b>字段完整性</b>(分母按字段种类算,不是一律用总条数)</div>
+                        {d.coverage!.map((c) => (
+                          <div className="krig-webc__row" key={c.field}>
+                            <span className="krig-webc__note" style={{ margin: 0, width: 170, flexShrink: 0 }}>
+                              {c.total === 0 ? '·' : c.rate === 1 ? '✓' : c.rate >= 0.9 ? '⚠️' : '✗'} {c.field}
+                            </span>
+                            <span className="krig-webc__note" style={{ margin: 0, width: 90, flexShrink: 0 }}>
+                              {c.have}{c.total > 0 ? `/${c.total}` : ''}
+                            </span>
+                            <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                              {c.total === 0
+                                ? '(条件字段,不算覆盖率 —— 不是回复本来就没有)'
+                                : `${(c.rate * 100).toFixed(0)}%`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* ⭐ 逐条明细 —— 人要能逐条检查,不是只看百分比 */}
+                    {(d.sample?.length ?? 0) > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div><b>逐条检查</b>(前 {d.sample!.length} 条 ·
+                          完整 {d.sample!.filter((x) => x.missing.length === 0).length} 条 ·
+                          有缺 {d.sample!.filter((x) => x.missing.length > 0).length} 条)</div>
+                        {d.sample!.map((x) => (
+                          <div className="krig-webc__row" key={x.tweetId}>
+                            <span className="krig-webc__note" style={{ margin: 0, width: 24, flexShrink: 0 }}>
+                              {x.missing.length === 0 ? '✓' : '⚠️'}
+                            </span>
+                            <span className="krig-webc__note" style={{ margin: 0, width: 130, flexShrink: 0 }}>
+                              @{x.handle ?? '?'}
+                            </span>
+                            <span className="krig-webc__note" style={{ margin: 0, width: 54, flexShrink: 0 }}>
+                              {x.fromDom ? 'DOM' : '载荷'}
+                            </span>
+                            <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
+                              {x.missing.length === 0 ? '完整' : `缺:${x.missing.join('、')}`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
