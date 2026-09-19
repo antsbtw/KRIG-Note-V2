@@ -1236,6 +1236,55 @@ DEFINE FIELD IF NOT EXISTS list_seen_at  ON x_author TYPE option<datetime>;
 DEFINE INDEX IF NOT EXISTS idx_author_list_seq ON x_author FIELDS list_source, list_seq;
 `;
 
+/**
+ * ⭐⭐ **一个人可以同时在多个名单里** —— 用户 2026-09-18 实测暴露。
+ *
+ * 采完 verifiedFollowers 后,面板上 `x.followers` 从 308 人掉到 **28 人**。
+ * 人没丢,是**被改判了**:`list_source` 是单值字段、无条件覆盖,
+ * 同一个人再出现在别的名单里,前一个来源就没了。
+ *
+ * ⚠️ 这是**证据被覆盖**,不是数据丢失,但后果一样严重:
+ * 「这个人在不在我的关注者里」这个问题,从此只能回答最后采的那次。
+ * 而蓝V关注者本来就是关注者的子集 —— 重叠是常态不是例外。
+ *
+ * ⭐ `list_source`/`list_seq` 的语义**不改**(仍是「最近一次采集」,
+ * 序号只在同一次采集内可比);新增 `list_memberships` **只累加不覆盖**,
+ * 回答「他出现在过哪些名单」。两者各司其职,不互相解释。
+ */
+const X_SCHEMA_1_2_4 = `
+-- 出现过的名单(累加,不覆盖)—— 一个人可以既是 followers 又是 verifiedFollowers
+DEFINE FIELD IF NOT EXISTS list_memberships ON x_author TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS list_memberships.* ON x_author TYPE string;
+`;
+
+export async function x_migration_1_2_4(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_4);
+
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  if (!('list_memberships' in (info?.[0]?.fields ?? {}))) {
+    throw new Error(
+      '[x-schema 1.2.4] list_memberships 没加上 —— '
+      + '同一个人在多个名单里的证据会继续被覆盖。',
+    );
+  }
+
+  /**
+   * ⭐ 存量补齐:已有的 list_source 至少先记进去一条,
+   * 否则这个字段对老数据永远是空的,而空和「只在一个名单里」分不开。
+   */
+  await db.query(
+    `UPDATE x_author SET list_memberships = [list_source]
+     WHERE list_source != NONE AND list_memberships = NONE`,
+  );
+  console.log('[x-schema 1.2.4] list_memberships 已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.4', appliedAt = $now,
+      description = 'x_author list_memberships (a person can be in several lists)'`,
+    { rid: new RecordId('schema_version', '1.2.4'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_3(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_3);
 

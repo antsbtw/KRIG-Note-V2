@@ -263,11 +263,23 @@ export async function saveAuthorCounts(handle: string, counts: AuthorCounts): Pr
   const existing = await db.query<[AuthorRow[]]>(
     `SELECT handle FROM x_author WHERE handle = $handle LIMIT 1`, { handle: h },
   );
+  /**
+   * ⭐⭐ 名单**累加不覆盖** —— 一个人可以既在 followers 又在
+   * verifiedFollowers 里(后者本就是前者的子集,重叠是常态)。
+   *
+   * ⚠️ 用户 2026-09-18 实测:采完蓝V后面板上 x.followers 从 308 掉到 28,
+   * 人没丢、是 `list_source` 被整条改判了 —— 证据被覆盖。
+   *
+   * ⭐ `list_source`/`list_seq` 语义不变(仍是「最近一次采集」,序号只在
+   * 同一次采集内可比);`list_memberships` 只回答「出现过哪些名单」。
+   */
   const setClause = `tweet_count = $tc, media_count = $mc, followers_count = $fc,
     following_count = $gc, favourites_count = $lc, account_created_at = $ca,
     follows_me = $fm, i_follow = $ifl, x_blocking = $xb,
     bio = $bio, is_blue_verified = $bv, location = $loc,
     list_seq = $lseq, list_source = $lsrc,
+    list_memberships = IF $lsrc = NONE THEN list_memberships
+      ELSE array::distinct((list_memberships ?? []) + [$lsrc]) END,
     list_seen_at = IF $lsrc != NONE THEN time::now() ELSE list_seen_at END,
     counts_at = time::now()`;
   if ((existing[0] ?? []).length > 0) {
