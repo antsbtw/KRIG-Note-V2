@@ -456,7 +456,22 @@ export async function harvestTimeline(
          * 但写死意味着哪天它改成 POST,现象会是「404/400」而不是
          * 「方法不对」—— 又一次查不出来。抄下来就不用赌。
          */
-        if (req?.headers && isPeopleOp(op)) {
+        /**
+         * ⚠️⚠️ **留第一条,不是最后一条** —— 用户 2026-09-18 实测踩到:
+         *
+         * 滚动中 X 自己也在翻页,后面那些 `Followers` 请求**本身就带 cursor**
+         * (实测抄到的 variables 里有 `"cursor":"1876625943675867774"`)。
+         * 留最后一条 = 拿一条**已经翻到深处**的请求当模板,它的游标到重放时
+         * 已经过期 → **HTTP 404**。
+         *
+         * ⭐ 判据就在两跑的对比里:成功那跑(verifiedFollowers)抄到的是
+         * `{userId,count,includePromotedContent,withGrokTranslatedBio}` —— **没有 cursor**;
+         * 失败这跑多了个 cursor。差别只有这一个。
+         *
+         * ⭐ 第一条必然是页面刚加载时发的「第一页」形状,最干净。
+         * 抄到之后就不再覆盖(`?? =` 的语义)。
+         */
+        if (req?.headers && isPeopleOp(op) && !lastPeopleReq) {
           lastPeopleReq = { url: u, headers: req.headers, method: req.method ?? 'GET' };
         }
       }

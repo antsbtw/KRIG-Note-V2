@@ -325,3 +325,54 @@ describe('⭐⭐ 抄的必须是「人的列表」那条请求', () => {
     }
   });
 });
+
+describe('⭐⭐ 抄的必须是「第一页」那条请求', () => {
+  /**
+   * ── 用户 2026-09-18 实测,两跑对比给出判据 ──
+   *
+   * verifiedFollowers 跑通了(40 页 1041 人零 404),followers 跑 404。
+   * 面板把「抄到的请求」交出来后,差别只有一个:
+   *
+   *  · 成功:variables = {userId,count,includePromotedContent,withGrokTranslatedBio}
+   *  · 失败:variables 里**多了** "cursor":"1876625943675867774"
+   *
+   * 真因:滚动中 X 自己也在翻页,后面的 `Followers` 请求**本身就带 cursor**。
+   * 留「最后一条」= 拿一条已经翻到深处的请求当模板,它的游标到重放时
+   * 早已过期 → HTTP 404。
+   *
+   * ⚠️ 这个 bug 被 verifiedFollowers 的成功**掩盖过一次** ——
+   * 那页滚动触发的请求恰好没带 cursor,于是看着像「修好了」。
+   * 同一份代码在另一页就 404:**一次成功证明不了链路正确**。
+   */
+  const strip = (s: string) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const src = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8',
+  ));
+
+  it('⭐⭐ 抄到一条之后不再覆盖(留第一条)', () => {
+    const i = src.indexOf('lastPeopleReq = {');
+    expect(i, '找不到抄请求的地方').toBeGreaterThan(0);
+    const branch = src.slice(src.lastIndexOf('if', i), i);
+    expect(
+      branch,
+      '还在「留最后一条」—— 滚动中 X 自己翻页发的请求带 cursor,\n'
+      + '拿它当模板重放必然 404(这正是 followers 页失败的原因)',
+    ).toMatch(/!lastPeopleReq/);
+  });
+
+  it('⭐⭐ 换游标时,模板自带的 cursor 必须被换掉而不是共存', () => {
+    /** 两个 cursor 同时在 URL 里会打架,而现象是「拿到的还是旧页」 */
+    const REAL = 'https://x.com/i/api/graphql/abc/Followers'
+      + '?variables=' + encodeURIComponent(JSON.stringify({
+        userId: '1', count: 20, cursor: 'OLD_STALE_CURSOR',
+      }));
+    const out = withCursor(REAL, 'NEW_CURSOR')!;
+    const vars = JSON.parse(new URL(out).searchParams.get('variables')!);
+    expect(vars.cursor, '自带的旧游标没被换掉').toBe('NEW_CURSOR');
+    expect(
+      out.match(/OLD_STALE_CURSOR/g),
+      '旧游标还残留在 URL 里 —— 会和新游标打架',
+    ).toBeNull();
+  });
+});

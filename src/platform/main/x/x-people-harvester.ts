@@ -280,6 +280,12 @@ export function findPagingCursor(node: unknown): {
  * ⚠️ 在**页面上下文**里 fetch:cookie 与鉴权头自动生效,不复刻登录态。
  */
 export function withCursor(url: string, cursor: string): string | null {
+  /**
+   * ⚠️ 传进来的模板 URL **可能自带 cursor**(X 滚动时自己翻页发的请求就带),
+   * 但这里无条件覆盖成我们要的那个,所以自带的会被换掉 —— 这是对的。
+   * ⭐ 真正的风险在**别的分页参数**:若 X 哪天改用 `cursor2`/`after` 之类,
+   * 旧的那个会留在 URL 里和新游标打架。目前只见过 `cursor` 一个。
+   */
   try {
     const u = new URL(url);
     const raw = u.searchParams.get('variables');
