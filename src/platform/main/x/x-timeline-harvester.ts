@@ -40,6 +40,13 @@ import {
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
 
+/**
+ * ⭐ 连续这么多轮没有新数据就判定「采到底了」。
+ * 实测:X 每页 50 人、约 6-7 轮一页 → 40 轮 ≈ 6 个正常页间隔,不会误停;
+ * 而真到底时实测空转 259 轮,40 足够早地发现。
+ */
+const NO_GAIN_LIMIT = 40;
+
 /** 一条采集到的原始推文(字段照搬 X 载荷,不做业务解释) */
 export interface HarvestedTweet {
   tweetId: string;
@@ -371,7 +378,13 @@ function analyseDates(tweets: HarvestedTweet[]): HarvestReport['dateSpan'] {
 export async function harvestTimeline(
   url: string,
   targetWcId?: number,
-  maxRounds = 1200,
+  /**
+   * ⭐ **安全网,不是目标** —— 正常情况下永远走不到它,
+   * 停止由「连续 N 轮零新增」判据决定(见 NO_GAIN_LIMIT)。
+   * ⚠️ 2026-09-19 之前这个数是**目标值**:填 30 就只采 250 人,
+   * 填多少人就得自己估算多少轮 —— 那是把机器该做的判断推给人。
+   */
+  maxRounds = 5000,
   opts: {
     /**
      * 时间预算(毫秒)。到点就返回已抓到的部分,stopReason 标 budget。
@@ -609,7 +622,15 @@ export async function harvestTimeline(
   }
 
   let lastY = -1;
+  /** ⭐ 位置指纹 = window 位置 + 内层容器位置 —— 任一变化都算「动了」 */
+  let lastPosKey = '';
   let stuck = 0;
+  /**
+   * ⭐ 连续多少轮没有新数据 —— **停止的主判据**(PDCA 的「再判断」)。
+   * ⚠️ 阈值必须远大于「一页的轮间隔」(实测 6-7 轮),否则正常间隔会被误判。
+   */
+  let noGainRounds = 0;
+  let lastPeopleCount = -1;
   let rounds = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
   let emptyPages = 0;
@@ -621,6 +642,7 @@ export async function harvestTimeline(
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
     const before = tweets.size;
+    const peopleBeforeRound = people.size;
 
     // 同步滚动(**不用 smooth**:它是异步的,会让紧接着的回读全是旧值)
     const step = 0.55 + Math.random() * 0.3;
@@ -643,20 +665,73 @@ export async function harvestTimeline(
     await new Promise((r) => setTimeout(r, 1800 + Math.random() * 1500));
 
     // **滚动之后**回读 —— 这才是真实状态
+    /**
+     * ⭐⭐ **回读要看对元素** —— 2026-09-19 用户指出的开环缺陷。
+     *
+     * 原来只数 `article[data-testid="tweet"]`(推文卡片),
+     * 而**采人页用的是 `UserCell`** → 采关注者时这个数**恒为 0**,
+     * 等于「执行了但没在看结果」。
+     *
+     * ⭐ 用户原话:「要把函数做的健壮,就必须是正反馈的 ——
+     * 执行没有?执行结果是什么?能够执行下一步了吗?」
+     * 两种都数,哪种有就用哪种。
+     */
     const st = await wc.executeJavaScript(`(function () {
+      var cells = document.querySelectorAll('[data-testid="UserCell"]').length;
+      var arts = document.querySelectorAll('article[data-testid="tweet"]').length;
       return { y: window.scrollY,
         docH: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-        arts: document.querySelectorAll('article[data-testid="tweet"]').length };
-    })()`).catch(() => null) as { y: number; docH: number; arts: number } | null;
+        arts: arts, cells: cells,
+        /** ⭐ 滚动容器的实际位置 —— X 有时滚的不是 window 而是内层 div */
+        inner: (function () {
+          var all = document.querySelectorAll('div');
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (el.scrollHeight > el.clientHeight + 400) {
+              return { top: el.scrollTop, h: el.scrollHeight };
+            }
+          }
+          return null;
+        })(),
+      };
+    })()`).catch(() => null) as {
+      y: number; docH: number; arts: number; cells: number;
+      inner: { top: number; h: number } | null;
+    } | null;
 
+    /**
+     * ⭐ 「滚动了没有」的判据:**window 或内层容器,任一前进即算前进**。
+     * ⚠️ 只看 window.scrollY 时,X 用内层 div 滚动的页面会被误判成「卡住」。
+     */
     const y = st?.y ?? -1;
-    if (y === lastY) stuck++; else stuck = 0;
+    const innerTop = st?.inner?.top ?? -1;
+    const posKey = `${y}|${innerTop}`;
+    if (posKey === lastPosKey) stuck++; else stuck = 0;
+    lastPosKey = posKey;
     lastY = y;
 
+    const peopleNow = people.size;
     trace.push({
       round: i, scrollY: y, docHeight: st?.docH ?? -1, domArticles: st?.arts ?? -1,
       cumulative: tweets.size, newThisRound: tweets.size - before, stuck,
     });
+    /**
+     * ⭐⭐ **每轮落盘** —— 用户 2026-09-19 指出:
+     * 「究竟滚动没有、滚动多少次你都不知道,这不是一个缺陷吗?」
+     *
+     * trace 只回到面板给人看,排查时查不到 → 我今天为此猜了五次全错。
+     * 落一行到文件,「滚没滚、滚了几轮、每轮有没有收获」变成**可查的事实**。
+     */
+    try {
+      const { appendFileSync: afs } = await import('node:fs');
+      afs('/tmp/x-scroll.log', JSON.stringify({
+        t: new Date().toISOString().slice(11, 19),
+        轮: i, y, 内层: innerTop, 卡住: stuck,
+        DOM卡片: st?.cells ?? -1, DOM推文: st?.arts ?? -1,
+        累计人: peopleNow, 本轮新增人: peopleNow - peopleBeforeRound,
+        累计推: tweets.size,
+      }) + '\n', 'utf8');
+    } catch { /* 诊断不影响主流程 */ }
 
     // 全量回补可能跑 40 分钟 —— 没有进度反馈的长任务等于黑箱,
     // 用户无从判断「还在跑」与「卡死了」。每 5 轮播报一次。
@@ -687,7 +762,70 @@ export async function harvestTimeline(
     if (stuck > 0 && stuck % 3 === 0) {
       await new Promise((r) => setTimeout(r, 3000));   // 卡住时额外等待,催一催懒加载
     }
+    /**
+     * ⭐⭐ **滚不动就换个位置**,不是干等到 8 轮然后放弃。
+     *
+     * ── 用户 2026-09-19 ──
+     * > 「如果校验发现没有滚动就往下一个位置去采集数据。
+     * >   这样才对吧,而不是盲目采集直到出问题都不懂」
+     *
+     * ⚠️ X 的列表是**虚拟列表**:滚过去的 DOM 会被删掉,
+     * 「滚不动」常常不是到底了,而是**新内容还没渲染**。
+     * 原来只会 stuck++ 数到 8 就退出 —— 那正是采到 250 就停的形态。
+     *
+     * ⭐ 换位置用 `scrollIntoView` 跳到**最后一个卡片**:
+     * 这会强制虚拟列表渲染它后面的内容,比盲目 scrollBy 可靠。
+     */
+    if (stuck >= 2) {
+      await wc.executeJavaScript(`(function () {
+        var cells = document.querySelectorAll('[data-testid="UserCell"]');
+        var last = cells[cells.length - 1];
+        if (last && last.scrollIntoView) {
+          last.scrollIntoView({ block: 'end' });
+          return true;
+        }
+        var el = document.scrollingElement || document.documentElement;
+        el.scrollTop = el.scrollHeight;
+        return false;
+      })()`).catch(() => null);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
     if (stuck >= 8) { stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${y} 未变)`; break; }
+
+    /**
+     * ⭐⭐ **采到底就停 —— 由数据说了算,不由人预先猜轮数**。
+     *
+     * ── 用户 2026-09-19 定的原则 ──
+     * > 「这种不智能、没有正反馈、没有验证的方法是不可取的,
+     * >   我们在爬取数据时必须有判断--执行--再判断--再执行这样的 PDCA 环。」
+     *
+     * ── 为什么非改不可(实测)──
+     * · 30 轮 → 250 人;400 轮 → 2462 人;600 轮 → 2484 人
+     * · 600 轮那跑:轮 341 拿到最后 42 人,之后 **259 轮零新增**
+     *   —— **43% 的时间在空转**,而程序毫不知情,傻跑到轮数上限。
+     * · 更糟的是「该填多少轮」要人去查表估算,换个账号/网速就不准。
+     *
+     * ── 判据 ──
+     * X 每页给 50 人,约 6-7 轮触发一次。所以「连续 N 轮零新增」中
+     * **N 必须远大于 7**,否则会在两页之间的正常间隔里误停。
+     * 取 40:约等于 6 个正常页间隔,实测尾部空转 259 轮,不会误判。
+     *
+     * ⚠️ 这条**和 stuck(滚不动)是两回事**:
+     * · stuck    = 位置不动了(页面层面到底)
+     * · 零新增   = 位置在动但 X 不再给数据(数据层面到底)
+     * 实测 600 轮那跑 stuck 一直是 0/1,**只有零新增能发现到底**。
+     */
+    if (peopleNow > 0 && peopleNow === lastPeopleCount) {
+      noGainRounds++;
+      if (noGainRounds >= NO_GAIN_LIMIT) {
+        stopReason = `采到底(连续 ${noGainRounds} 轮没有新数据,共 ${peopleNow} 人,`
+          + `滚了 ${i} 轮)—— X 不再给新内容`;
+        break;
+      }
+    } else {
+      noGainRounds = 0;
+      lastPeopleCount = peopleNow;
+    }
 
     // 时间预算到点:返回已抓到的部分(契约要求宁可 partial 也不干等)
     if (opts.budgetMs && Date.now() - startedAt >= opts.budgetMs) {

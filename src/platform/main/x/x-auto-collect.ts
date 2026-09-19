@@ -274,7 +274,11 @@ export async function autoCollect(
   const pageLabel = opts.pageLabel ?? url;
 
   // ⭐ 导航 + 滚动 + 解析载荷,一条龙 —— 现成的,不重写
-  const r = await harvestTimeline(url, targetWcId, opts.maxRounds ?? 8, {
+  /**
+   * ⭐ 不传轮数 = **采到底为止**(停止由「连续 N 轮零新增」判据决定)。
+   * ⚠️ 原默认 8 轮 —— 那只够采 ~60 人。
+   */
+  const r = await harvestTimeline(url, targetWcId, opts.maxRounds, {
     budgetMs: opts.budgetMs ?? 30_000,
     pageBudget: opts.pageBudget,
   });

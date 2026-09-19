@@ -159,8 +159,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * 下拉用的是**真表**(pageNames),不在这里抄一份。
    */
   const [acPage, setAcPage] = useState('x.home');
-  const [acRounds, setAcRounds] = useState('30');
-  const [acBudget, setAcBudget] = useState('120');
+  const [acRounds, setAcRounds] = useState('');
+  const [acBudget, setAcBudget] = useState('');
   const [acReport, setAcReport] = useState<unknown>(null);
   /**
    * ⭐⭐ 跟着左边走 —— 用户 2026-09-18:
@@ -762,9 +762,9 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   );
                 })}
                 <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
-                  onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数" title="滚动轮数上限" />
+                  onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数(留空)" title="⭐ 留空即可 —— 程序自己采到底(连续 40 轮没新数据就停)。这里填的是**安全网上限**,不是目标" />
                 <input className="krig-webc__in" style={{ width: 72 }} value={acBudget}
-                  onChange={(e) => setAcBudget(e.target.value)} placeholder="秒" title="时间预算(秒)" />
+                  onChange={(e) => setAcBudget(e.target.value)} placeholder="秒(留空)" title="⭐ 留空 = 30 分钟兜底。防跑飞用,不是目标" />
                 <input className="krig-webc__in" style={{ width: 72 }} value={acPages}
                   onChange={(e) => setAcPages(e.target.value)} placeholder="翻页"
                   title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍" />
@@ -780,8 +780,10 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       }
                       const r = await api()?.autoCollect({
                         page: acPage, params, wcId: wcId(),
-                        maxRounds: Number(acRounds) || 30,
-                        budgetMs: (Number(acBudget) || 120) * 1000,
+                        // ⭐ 留空 = 采到底(程序自己判断,不用人估算轮数)
+                        maxRounds: Number(acRounds) || undefined,
+                        // ⭐ 留空 = 30 分钟兜底(防跑飞,不是目标)
+                        budgetMs: (Number(acBudget) || 1800) * 1000,
                         pageBudget: Number(acPages) || 40,
                         wsId: workspaceId,
                       });
