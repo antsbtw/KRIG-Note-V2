@@ -36,7 +36,7 @@ import { upsertTweet } from '../db/tweet-inbox-repo';
 import {
   saveAuthorCounts, registerSeenAuthor, getAuthorCounts,
   saveListSnapshot, recentSnapshotRuns, diffSnapshots, orderingStability,
-  countBlueVerifiedInFollowers,
+  countBlueVerifiedInFollowers, knownHandlesOfLastRun,
 } from '../db/x-author-repo';
 import { normalizeHandle, type TweetInboxRecord } from '@shared/types/x-timeline-types';
 
@@ -111,8 +111,14 @@ export interface AutoCollectReport {
   failedUrl?: string;
   /**
    * ⭐ **增量结果** —— 与上一次快照比,新增/取关了谁。
-   * ⚠️ `ordering` 是回答「X 的列表按什么排序」的实测证据,
-   * 在它给出结论前,**不要**改用「遇到采过的就停」那种策略。
+   *
+   * ⚠️ `ordering` 曾是「X 的列表按什么排序」的**待答问题**,
+   * 2026-09-19 已由它给出结论:**严格按关注时间倒序**
+   * (2770 人实测,相邻逆序对 0 / 2769)。
+   * 「遇到采过的就停」因此解锁 —— 见 `fast`。
+   *
+   * ⭐ 它仍然每次都算:排序是 X 的行为,X 改版就会变,
+   * 而那种变**在数据里看不出来**,只有持续盯着这个指标才发现得了。
    */
   incremental?: {
     firstRun?: boolean;
@@ -128,6 +134,26 @@ export interface AutoCollectReport {
     };
     error?: string;
   } | { error: string };
+  /**
+   * ⭐⭐ **快速增量的成果与边界** —— 只在 `fastIncremental` 模式下有。
+   *
+   * ⚠️ 三件事必须一起说,少一件都会被误读:
+   * ① 新增了谁(它能回答的)
+   * ② **取关看不见**(它答不了的 —— 取关者从名单中间消失)
+   * ③ 距上次全量多久(该不该补一次全量)
+   */
+  fast?: {
+    /** 上次全量的名单有多大 */
+    knownBaseline: number;
+    /** ⭐ 真追上了吗 —— false = 新人可能没翻完,数字不能当全部 */
+    caughtUp: boolean;
+    /** 这次新发现的人(不在上次全量名单里的) */
+    newcomers: string[];
+    /** 上次全量是什么时候 */
+    lastFullRunAt?: string;
+    /** 距上次全量多少天 —— 报告据此提醒「该跑全量了」 */
+    daysSinceFullRun?: number;
+  };
   capturedUrl?: string;
   /**
    * ⭐⭐ 采完了没有 —— **X 说的,不是我们猜的**。
@@ -290,11 +316,47 @@ export async function autoCollect(
     wsId?: string; pageLabel?: string;
     /** ⭐ 这是**谁的**列表 —— 基准对账要查他的 followers_count */
     ownerHandle?: string;
+    /**
+     * ⭐⭐ **快速增量** —— 只翻到「遇见上次采过的人」为止。
+     *
+     * 17 分钟 → 十几秒。安全性来自 2026-09-19 的排序实测:
+     * followers 严格按关注时间倒序,新人只会在最前面
+     * (见 `knownHandlesOfLastRun` 的注释,2770 人相邻逆序对 0)。
+     *
+     * ⚠️ **它看不见取关**,且**不写快照** —— 两条都在下面兑现。
+     */
+    fastIncremental?: boolean;
   } = {},
 ): Promise<AutoCollectReport | { error: string }> {
   const t0 = Date.now();
   /** 这批顺序属于哪个列表 —— followers 的第 3 名 ≠ following 的第 3 名 */
   const pageLabel = opts.pageLabel ?? url;
+
+  /**
+   * ⭐⭐ **快速增量:先取上次全量的名单** —— 没有它就没有「已知」可言。
+   *
+   * ⚠️ **取不到就退回全量**,不是「当成一个人都不认识然后按快速模式跑」——
+   * 后者会在翻满闸门后停下,报出一个**看着像增量、实则是残缺全量**的结果,
+   * 而那正是本仓最常踩的「看着成功实际没有」。
+   * 退回全量慢,但结果是对的;而且报告里会说清为什么退的。
+   */
+  let knownHandles: Set<string> | undefined;
+  let lastFullRunAt: string | undefined;
+  let fastFellBack: string | undefined;
+  if (opts.fastIncremental) {
+    try {
+      const k = await knownHandlesOfLastRun(pageLabel);
+      if (k.handles.size > 0) {
+        knownHandles = k.handles;
+        lastFullRunAt = k.takenAt;
+      } else {
+        fastFellBack = '快速增量退回全量:库里还没有这个列表的全量快照'
+          + '(第一次采这个人?)—— 本次按全量跑,跑完就有基线了';
+      }
+    } catch (e) {
+      fastFellBack = `快速增量退回全量:取上次名单出错(${String(e).slice(0, 120)})`;
+    }
+  }
 
   // ⭐ 导航 + 滚动 + 解析载荷,一条龙 —— 现成的,不重写
   /**
@@ -304,8 +366,12 @@ export async function autoCollect(
   const r = await harvestTimeline(url, targetWcId, opts.maxRounds, {
     budgetMs: opts.budgetMs ?? 30_000,
     pageBudget: opts.pageBudget,
+    knownHandles,
   });
   if ('error' in r) return { error: r.error };
+
+  /** ⭐ 真按快速模式跑了吗 —— 退回全量时它是 false,后面的分支全看它 */
+  const ranFast = !!knownHandles;
 
   let saved = 0;
   let authorsWithRelation = 0;
@@ -419,7 +485,26 @@ export async function autoCollect(
   let incremental: AutoCollectReport['incremental'];
   /** ⭐ 快照失败要进 problems,不能只 console.warn */
   let snapshotProblem: string | undefined;
-  if (r.people.length > 0) {
+  /**
+   * ⭐⭐⭐ **快速增量绝不写快照** —— 这是本次改动最要紧的一条安全约束。
+   *
+   * ── 不加这条会怎样 ──
+   *
+   * 快速增量只翻前一两页(几十人)。若把这几十人存成快照,
+   * **下一次差集**会拿它当基线,于是报出:
+   *   「新增 0 人,**取关 2700 人**」
+   * ——一次快速采集就把 2781 人的基线毁了,而且**在数据里看不出来**
+   * (表里确实有一条完整的快照记录,只是它只有 60 行)。
+   *
+   * ⭐ 所以:基线**只由全量维护**。快速增量照常写 `x_author`
+   * (人的画像该入库还是入库),但**不碰 x_list_snapshot**。
+   *
+   * ⚠️ 判据用 `ranFast`(真按快速模式跑了吗),不是 `opts.fastIncremental`
+   * (人想不想快)—— 退回全量那跑**是**完整列表,它必须写快照,
+   * 否则第一次采一个新账号会永远建不起基线。两者差一个字,行为相反。
+   */
+  const mayWriteSnapshot = !ranFast;
+  if (r.people.length > 0 && mayWriteSnapshot) {
     const scope = pageLabel;
     const runId = new Date().toISOString();
     try {
@@ -540,14 +625,17 @@ export async function autoCollect(
        * > 「我再取一次蓝V的数据,用来比对从 Follower 获取的数据是否准确。
        * >   但是要监控好是否取完整了,因为这里 x 没有给出总数的。」
        *
-       * ⚠️ 这不是真值,是「两个来源一致吗」。followers 列表本身也受
-       * ~2500 天花板限制 —— 两边都可能不全,但**两边接近**就说明
-       * 至少没有一边出大漏子;**差很多**就说明至少一边没采全,
-       * 而**不知道是哪边,数据就不能用**。
+       * ⚠️ 这不是真值,是「两个来源一致吗」。两边都可能不全,
+       * 但**两边接近**就说明至少没有一边出大漏子;**差很多**就说明
+       * 至少一边没采全,而**不知道是哪边,数据就不能用**。
+       *
+       * ⚠️⚠️ 这里原来写着「followers 列表受 ~2500 天花板限制」——
+       * **2026-09-19 已证否**(真因是滚动轮数不够,改 PDCA 后采到 2781)。
        *
        * ⭐ 「采完没有」的真判据仍是**停止原因**:
        * 「X 说没有更多了」才是采完;「连续 N 页零新人」「达到翻页上限」
-       * 都是没采完(前者是 X 的天花板,见 project-x-followers-2500-ceiling)。
+       * 都是**没采完**,要加大闸门重跑
+       * (⚠️ 别再解释成「X 的天花板」—— 那条结论已被证否)。
        */
       let crossNote = '';
       try {
@@ -665,6 +753,60 @@ export async function autoCollect(
   if (r.people.length > 0) {
     notes.push(`这一页采的是**人**不是推:${r.people.length} 人入库(${peopleWithBio} 人有 bio)`);
   }
+
+  /**
+   * ⭐⭐ **快速增量的如实说明** —— 用户 2026-09-19 拍板:
+   * 「如实说明 + 建议全量周期」,不假装它是完整的对账。
+   */
+  let fast: AutoCollectReport['fast'];
+  if (fastFellBack) notes.push(fastFellBack);
+  if (ranFast && r.fastIncremental) {
+    const fi = r.fastIncremental;
+    /** ⭐ 新人 = 这次采到、而上次全量名单里没有的 */
+    const newcomers = r.people
+      .map((p) => normalizeHandle(p.handle))
+      .filter((h) => h !== '' && !knownHandles?.has(h));
+
+    /** 距上次全量多少天 —— run_id 就是 ISO 时间串 */
+    const days = lastFullRunAt
+      ? Math.floor((Date.now() - new Date(lastFullRunAt).getTime()) / 86_400_000)
+      : undefined;
+
+    fast = {
+      knownBaseline: fi.knownBaseline,
+      caughtUp: fi.caughtUp,
+      newcomers,
+      lastFullRunAt,
+      daysSinceFullRun: days,
+    };
+
+    notes.push(
+      `快速增量:翻了 ${r.pagedRounds} 页就追上上次的名单`
+      + `(基线 ${fi.knownBaseline} 人,连续见到 ${fi.knownRun} 个已知的人)`
+      + ` —— 新增 ${newcomers.length} 人`
+      + (newcomers.length > 0 ? `:@${newcomers.slice(0, 20).join(' @')}` : ''),
+    );
+
+    /**
+     * ⭐⭐ **边界必须每次都说** —— 不是「偶尔提醒」。
+     *
+     * 取关者是从名单**中间**消失的(实测那位在 seq 868),
+     * 只翻前几页**永远**发现不了。不说的话,用户会把
+     * 「没报取关」读成「没人取关」—— 而那两件事天差地别。
+     */
+    notes.push(
+      '⚠️ 快速增量**看不见取关** —— 取关的人是从名单中间消失的,'
+      + '只翻前几页发现不了。「谁取关了」只有全量能回答'
+      + (days !== undefined ? `(距上次全量 ${days} 天)` : '')
+      + ';建议每周跑一次全量兜底。',
+    );
+
+    /** ⭐ 快速模式没写快照,要说出来 —— 否则人会以为基线更新了 */
+    notes.push(
+      '⚠️ 本次**没有写快照**(基线仍是上次全量的)—— '
+      + '快速增量只采了前几十人,存成快照会让下次差集把没翻到的人全报成「取关」。',
+    );
+  }
   if (r.tweets.length === 0 && r.people.length === 0 && r.payloads > 0) {
     notes.push(
       `截到 ${r.payloads} 个载荷但解出 0 条推 —— `
@@ -740,6 +882,8 @@ export async function autoCollect(
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
     /** ⭐ 增量:与上次快照的差集 + 排序稳定性证据 */
     incremental,
+    /** ⭐ 快速增量:新增了谁 + 追上了没有 + 距上次全量多久 */
+    fast,
     reconcile,
     elapsedMs: Date.now() - t0,
     longText: (() => {

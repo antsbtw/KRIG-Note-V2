@@ -47,6 +47,23 @@ import { resolveXWebContents } from './x-webcontents';
  */
 const NO_GAIN_LIMIT = 40;
 
+/**
+ * ⭐⭐ **快速增量的停止判据** —— 连续见到这么多**已知的人**就算「追上了」。
+ *
+ * ── 为什么是「连续」不是「累计」──
+ *
+ * 一页 50 人里夹着几个已知的很正常(上次采集与这次之间,X 的分页边界会挪),
+ * 但**连续** 30 个都是已知的,只有一种解释:已经翻进上次采过的区域了。
+ *
+ * ⚠️ 阈值必须**小于一页人数**(实测 50-100/页),否则第一页就翻完了还没触发,
+ * 等于白翻一页;又要**远大于零星交错**。取 30。
+ *
+ * ⭐ 与 `NO_GAIN_LIMIT` 是两回事:
+ * · NO_GAIN_LIMIT = 全量的「X 不再给新数据」(到底了)
+ * · KNOWN_RUN_LIMIT = 增量的「新人已经翻完了」(追上了)
+ */
+const KNOWN_RUN_LIMIT = 30;
+
 /** 一条采集到的原始推文(字段照搬 X 载荷,不做业务解释) */
 export interface HarvestedTweet {
   tweetId: string;
@@ -204,6 +221,23 @@ export interface HarvestReport {
   paging: { bottom?: string; top?: string; hasMore: boolean };
   /** 游标翻页的页数;0 = 没翻(不是采人页,或抄不到请求) */
   pagedRounds: number;
+  /**
+   * ⭐⭐ 快速增量的**闭环回读** —— 「追上了没有」由数据回答,不由页数猜。
+   *
+   * ⚠️ `caughtUp=false` 而又停了,意味着**没追上就停了**(撞上页数闸门/
+   * 请求失败)—— 那时新人可能还没翻完,报告**必须说出来**,
+   * 不能让人以为「就这几个新人」。
+   */
+  fastIncremental?: {
+    /** 已知名单有多大(0 = 没有基线,退回全量) */
+    knownBaseline: number;
+    /** 这次翻到的人里,有多少是已知的 */
+    knownSeen: number;
+    /** 连续见到已知人的最长串 —— 触发停止的那个数 */
+    knownRun: number;
+    /** ⭐ 真追上了吗 —— 这是「能不能相信这次结果」的判据 */
+    caughtUp: boolean;
+  };
   /** ⭐ 没翻的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
   pagingSkipped?: string;
   /** ⭐ 翻页失败时发出去的 URL(诊断用) */
@@ -403,6 +437,21 @@ export async function harvestTimeline(
      * 返回 true 即停,stopReason 标 hint。
      */
     stopWhen?: (t: HarvestedTweet) => boolean;
+    /**
+     * ⭐⭐ **快速增量**:上次全量采到的人。给了它就「翻到已知的人就停」。
+     *
+     * ── 为什么这是安全的(2026-09-19 实测才敢做)──
+     *
+     * 本文件此前**明令禁止**这种早停,理由是「X 按什么排序没有证据」。
+     * 现在有证据了 —— 见 `knownHandlesOfLastRun` 的注释:
+     * 2770 人实测**相邻逆序对 0**、新人全在 seq 0..10、老人整体平移。
+     * **严格按关注时间倒序**,所以新人只会在最前面。
+     *
+     * ⚠️ 它**看不见取关**(取关者从名单中间消失),必须靠周期性全量兜底。
+     * ⚠️ 给了它就**不该写快照** —— 只采了前几十人,存进去会让下次差集
+     *    把没翻到的 2700 人全报成「取关」。这条由调用方(x-auto-collect)把守。
+     */
+    knownHandles?: Set<string>;
   } = {},
 ): Promise<HarvestReport | { error: string }> {
   const resolved = resolveXWebContents(targetWcId);
@@ -634,6 +683,16 @@ export async function harvestTimeline(
   let rounds = 0;
   let stopReason = `达到轮次上限 ${maxRounds}`;
   let emptyPages = 0;
+  /**
+   * ⭐⭐ 快速增量的三个计数 —— 「追上了没有」全靠它们回答。
+   * ⚠️ `knownRun` 记的是**连续**串(见到新人就清零),不是累计:
+   * 一页里夹几个已知的很正常,连续几十个才说明翻进老区了。
+   */
+  const known = opts.knownHandles;
+  const fastMode = !!known && known.size > 0;
+  let knownSeen = 0;
+  let knownRun = 0;
+  let caughtUp = false;
   /** ⭐ 翻页没启动的原因 —— 空表示启动了 */
   let pagingSkipped: string | undefined;
   /** ⭐ 翻页失败时真正发出去的那条 URL —— 不给它就只能猜 */
@@ -732,6 +791,26 @@ export async function harvestTimeline(
         累计推: tweets.size,
       }) + '\n', 'utf8');
     } catch { /* 诊断不影响主流程 */ }
+
+    /**
+     * ⭐⭐ **快速增量:滚到够用就走** —— 不再滚到底。
+     *
+     * ── 滚动在快速模式里的唯一职责 ──
+     *
+     * 让 X **自己发一次 Followers 请求**,好让我们抄到 URL + 请求头
+     * (queryId/features 会随版本变,复刻必然过期 —— 见 withCursor 注释)。
+     * 抄到了,滚动就没用了:后面全靠游标翻页,一页 50-100 人,比滚快几十倍。
+     *
+     * ⚠️ 全量模式**一轮都不能少**(它要靠滚动把整个列表拉出来),
+     * 所以这条只在 `fastMode` 下成立。
+     *
+     * ⭐ 判据是**抄到请求了吗**(数据),不是「滚够 N 轮了吗」(猜)——
+     * 抄不到就继续滚,而不是到点硬走。
+     */
+    if (fastMode && lastPeopleReq && people.size > 0) {
+      stopReason = `快速增量:已抄到请求模板(滚了 ${i} 轮,${people.size} 人),转游标翻页`;
+      break;
+    }
 
     // 全量回补可能跑 40 分钟 —— 没有进度反馈的长任务等于黑箱,
     // 用户无从判断「还在跑」与「卡死了」。每 5 轮播报一次。
@@ -886,6 +965,42 @@ export async function harvestTimeline(
   const baseReq = ((): {
     url: string; headers: Record<string, string>; method?: string;
   } | null => lastPeopleReq)();
+
+  /**
+   * ⭐⭐ **快速增量的「再判断」** —— 每拿到一批人就回读:追上了没有?
+   *
+   * ⚠️ 必须按**列表顺序**逐个看,不能只统计「这批里已知的占比」——
+   * 「连续 30 个已知」与「50 个里散着 30 个已知」含义完全不同:
+   * 前者说明翻进老区了,后者说明还在新旧交界处。
+   *
+   * @param batch 这一批新解出来的人,**按载荷里的出现顺序**
+   * @returns 追上了吗
+   */
+  const measureKnown = (batch: HarvestedPerson[]): boolean => {
+    if (!known) return false;
+    for (const p of batch) {
+      if (known.has(p.handle)) {
+        knownSeen++;
+        knownRun++;
+        if (knownRun >= KNOWN_RUN_LIMIT) { caughtUp = true; return true; }
+      } else {
+        // ⭐ 见到新人就**清零** —— 记的是连续串,不是累计
+        knownRun = 0;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * ⭐ 滚动阶段拿到的第一批人也要过判据 —— 小号(新人少于一页)
+   * 可能**滚动阶段就已经追上**,那时一页都不用翻。
+   */
+  if (fastMode && people.size > 0) {
+    if (measureKnown([...people.values()])) {
+      stopReason = `快速增量:滚动阶段就追上了(连续 ${knownRun} 个已知的人,`
+        + `共 ${people.size} 人)—— 一页都不用翻`;
+    }
+  }
   const gate = {
     抄到请求: !!baseReq,
     X说还有下一页: paging.hasMore,
@@ -897,10 +1012,10 @@ export async function harvestTimeline(
     /** ⭐ 如实记下**为什么没翻**,不是不提 */
     pagingSkipped = `游标翻页没启动 —— ${blocked.join('、')}(不成立)`;
   }
-  if (baseReq && paging.hasMore && paging.bottom && people.size > 0) {
+  if (baseReq && paging.hasMore && paging.bottom && people.size > 0 && !caughtUp) {
     const budget = opts.pageBudget ?? 40;
     const seenCursors = new Set<string>();
-    while (pagedRounds < budget && paging.hasMore && paging.bottom) {
+    while (pagedRounds < budget && paging.hasMore && paging.bottom && !caughtUp) {
       const cursor = paging.bottom;
       /**
        * ⚠️ **游标没变就停**。
@@ -952,6 +1067,21 @@ export async function harvestTimeline(
       const peopleBefore = people.size;
       try {
         const parsed = JSON.parse(body);
+        /**
+         * ⭐⭐ **这一页单独解一份** —— 快速增量的判据要按「这页的顺序」看。
+         *
+         * ⚠️ 不能拿累计的 `people` 算:它是 Map,已见过的人**不会再出现**,
+         * 于是「这页有几个已知的」永远是 0 —— 判据恒不成立,
+         * 快速增量会一路翻到闸门为止(现象:比全量还慢,而且看不出原因)。
+         * 这正是本仓「回读看错元素」那类开环缺陷(采人页数 tweet 恒为 0)。
+         */
+        const pagePeople = new Map<string, HarvestedPerson>();
+        extractPeopleFrom(parsed, pagePeople);
+        if (fastMode && measureKnown([...pagePeople.values()])) {
+          stopReason = `快速增量:追上了(连续 ${knownRun} 个已知的人,`
+            + `翻了 ${pagedRounds} 页,共 ${people.size + pagePeople.size} 人)`;
+        }
+        // ⭐ 再并进累计表(沿用「谁字段多谁留下」的去重规则)
         extractPeopleFrom(parsed, people);
         extractTweetsFrom(parsed, tweets);
         const cur = findPagingCursor(parsed);
@@ -971,7 +1101,16 @@ export async function harvestTimeline(
       if (people.size === peopleBefore) {
         emptyPages++;
         if (emptyPages >= 3) {
-          stopReason = `游标翻页:连续 3 页没有新的人(已 ${people.size} 人)`;
+          /**
+           * ⚠️ 快速增量下**同一个现象含义相反**:整页都是已知的人时
+           * 累计表确实一个都不多,但那是「追上了」(好事),
+           * 不是「X 不给数据了」(坏事)。两者停的理由必须分开写,
+           * 否则报告会把成功说成失败 —— 而人是照着停止原因判断要不要重跑的。
+           */
+          stopReason = fastMode
+            ? `快速增量:连续 3 页全是已知的人(连续 ${knownRun} 个)—— 已在老区,停`
+            : `游标翻页:连续 3 页没有新的人(已 ${people.size} 人)`;
+          if (fastMode) caughtUp = true;
           break;
         }
       } else emptyPages = 0;
@@ -1015,6 +1154,26 @@ export async function harvestTimeline(
   const problems: string[] = [];
   const maxY = Math.max(...trace.map((t) => t.scrollY), 0);
   // 以下三条都是**采集链路真的坏了**,不是数据质量判断
+  /**
+   * ⭐⭐ **没追上就停了 = 采集链路没干完活**,必须报 problems。
+   *
+   * ── 为什么这条必须响 ──
+   *
+   * 快速增量停下来有两种:「追上了」(新人翻完了,结果可信)和
+   * 「撞上闸门/请求失败」(新人可能还没翻完)。两者在报告里
+   * **长得一模一样** —— 都是「采到 N 人」。
+   * 而人会照着这个数字下结论「这段时间就来了 3 个新粉」。
+   *
+   * ⚠️ 这正是本仓反复踩的「看着成功实际没有」形态(邮件模块 5 个 bug
+   * 同一形态、导入空白却谎报成功)。铁律一:失败要响。
+   */
+  if (fastMode && !caughtUp) {
+    problems.push(
+      `快速增量**没追上上次的名单**(连续已知最多 ${knownRun}/${KNOWN_RUN_LIMIT},`
+      + `翻了 ${pagedRounds} 页)—— 新人可能还没翻完,`
+      + `这个数字**不能当成「这段时间的全部新增」**。停止原因:${stopReason}`,
+    );
+  }
   if (maxY <= 0) problems.push('页面从未滚动(scrollY 始终为 0)—— 滚动没生效');
   if (payloads === 0) problems.push('没捕获到任何 GraphQL 响应 —— CDP 可能没挂上');
   if (list.length === 0) problems.push('一条推文都没解析出来');
@@ -1027,6 +1186,10 @@ export async function harvestTimeline(
     paging,
     /** ⭐ 游标翻了几页 —— 0 表示只靠滚动 */
     pagedRounds,
+    /** ⭐ 快速增量的闭环回读 —— 「追上了没有」由数据回答 */
+    fastIncremental: fastMode
+      ? { knownBaseline: known?.size ?? 0, knownSeen, knownRun, caughtUp }
+      : undefined,
     pagingSkipped,
     failedUrl,
     /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */

@@ -26,22 +26,62 @@ describe('⭐⭐ followers 增量采集', () => {
   const bodyStart = collectRaw.lastIndexOf("from '");
   const collect = collectRaw.slice(collectRaw.indexOf('\n', bodyStart));
 
-  it('⭐⭐ 用差集,不用「遇到采过的就停」', () => {
+  it('⭐⭐ 全量仍然用差集 —— 「谁取关了」只有它答得出', () => {
     /**
-     * 「遇到采过的就停」只在列表**严格按关注时间倒序**时成立,
-     * 而 X 按什么排序我们**没有证据**(载荷里没有「何时关注」字段)。
-     * 排序若不是时间序,新粉可能在任何位置,提前停会漏人 ——
-     * 而那种漏**在数据里看不出来**。
+     * ⚠️ 这条**原来是「禁止一切早停」**,理由是「X 按什么排序没有证据」。
+     * 2026-09-19 证据有了(见下一条),禁令因此**改成了限定**:
+     * 快速增量可以早停,但**全量必须照旧走差集** ——
+     * 取关者是从名单中间消失的,只有采全了比差集才发现得了。
      */
     expect(repo, '没有差集函数').toMatch(/export async function diffSnapshots/);
     expect(collect, '采集流程没调差集').toMatch(/diffSnapshots\(/);
-    // 采集器里不该出现「见到已知的人就 break」那种早停
-    const harvester = strip(readFileSync(
-      join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8'));
+  });
+
+  it('⭐⭐⭐ 快速增量**绝不写快照** —— 写了会把基线毁掉', () => {
+    /**
+     * ── 不加这条会怎样(本次改动最危险的失败形态)──
+     *
+     * 快速增量只翻前一两页(几十人)。若把这几十人存成快照,
+     * **下一次差集**会拿它当基线,报出「新增 0 人、**取关 2700 人**」——
+     * 一次快速采集就毁掉 2781 人的基线,而且**在数据里看不出来**
+     * (表里确实有一条完整记录,只是它只有 60 行)。
+     *
+     * ⚠️ 钉**写快照那个 if 的条件**,不是「文件里出现过 mayWriteSnapshot」——
+     * 声明处和注释都有这个名字,整文件 toMatch 会被兜住
+     * (本仓「假绿」已栽过五次,见 feedback-guard-scope-to-the-branch)。
+     */
+    const i = collect.indexOf('saveListSnapshot(scope, runId');
+    expect(i, '找不到快照写入调用').toBeGreaterThan(0);
+
+    /** 往前找**包住它**的那个 if —— 快照写入必须在守卫之内 */
+    const guardIdx = collect.lastIndexOf('if (r.people.length > 0', i);
+    expect(guardIdx, '快照写入不在任何 if 之内').toBeGreaterThan(0);
+    const cond = collect.slice(guardIdx, collect.indexOf('{', guardIdx));
     expect(
-      harvester,
-      '出现了「已知就停」的早停 —— 排序没证据前这会静默漏人',
-    ).not.toMatch(/knownHandles|stopOnKnown|alreadySeen/);
+      cond,
+      '写快照的条件里没有「非快速模式」这一项 —— 快速增量会把几十人存成基线,'
+      + '下次差集报「2700 人取关」',
+    ).toMatch(/mayWriteSnapshot/);
+
+    /**
+     * ⚠️ 判据必须是**真跑了快速模式**(ranFast),不是**人想快**
+     * (opts.fastIncremental)—— 退回全量那跑是完整列表,必须写快照,
+     * 否则第一次采新账号永远建不起基线。两者差一个字,行为相反。
+     */
+    const assign = collect.match(/const mayWriteSnapshot\s*=\s*([^;]+);/)?.[1] ?? '';
+    expect(assign, '找不到 mayWriteSnapshot 的赋值').toBeTruthy();
+    expect(
+      assign,
+      'mayWriteSnapshot 不是从 ranFast 算的 —— 用 opts.fastIncremental 会让'
+      + '「退回全量」那跑也不写快照,基线永远建不起来',
+    ).toMatch(/ranFast/);
+
+    const rf = collect.match(/const ranFast\s*=\s*([^;]+);/)?.[1] ?? '';
+    expect(rf, '找不到 ranFast 的赋值').toBeTruthy();
+    expect(
+      rf,
+      'ranFast 不是从「真拿到了已知名单」算的 —— 名单取不到时该退回全量',
+    ).toMatch(/knownHandles/);
   });
 
   it('⭐⭐ 0 人那跑不能存快照 —— 否则下次会误判成「全员取关」', () => {

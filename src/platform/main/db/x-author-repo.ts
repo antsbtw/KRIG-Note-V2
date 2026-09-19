@@ -780,9 +780,14 @@ export async function orderingStability(
  * · verifiedFollowers 列表实际采到的人数
  * 两者接近 → 两边都可信;差很多 → 至少一边没采全,**不知道哪边就不能用**。
  *
- * ⚠️ 这不是「真值」,只是另一个观测 —— followers 列表本身也受
- * ~2500 天花板限制(见 project-x-followers-2500-ceiling)。
+ * ⚠️ 这不是「真值」,只是另一个观测 —— 两边都可能没采全。
  * 它回答的是「两个来源一致吗」,不是「到底有多少蓝V」。
+ *
+ * ⚠️⚠️ 这里原来写着「followers 列表本身也受 ~2500 天花板限制」——
+ * **那条结论 2026-09-19 已被证否**:所谓天花板真因是**滚动轮数不够**
+ * (当时轮数是人填的目标值,两个账号都停在 2500 只因用的同一个上限)。
+ * 改成 PDCA 闭环、不填轮数后实采 **2781/2782 零失败**。
+ * ⭐ 教训:把「我自己设的闸门」当成了「平台的限制」。
  */
 export async function countBlueVerifiedInFollowers(ownerHandle: string): Promise<{
   blueInFollowers?: number;
@@ -805,4 +810,67 @@ export async function countBlueVerifiedInFollowers(ownerHandle: string): Promise
     followersTotal: res[1]?.[0]?.c,
     scope: `x.followers:${owner}`,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ⭐⭐ 快速增量 —— 「遇到已知的人就停」的地基
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * ⭐⭐ 取上一次**全量**快照的全部 handle —— 快速增量的「已知名单」。
+ *
+ * ── 为什么现在能做,以前不能 ──
+ *
+ * `diffSnapshots` 的注释里写着「不用『遇到采过的就停』,因为 **X 按什么排序
+ * 我们没有证据**」。那句话在 2026-09-19 之前是对的,现在**有证据了**:
+ *
+ * 拿 2026-09-19 两跑真实快照(2771 → 2781)实测:
+ * · 11 个新人全部落在 **seq 0..10**,连续、无一散落
+ * · 2770 个老人位移**全体 +10 或 +11**(整体平移,不是乱跳)
+ * · 相邻逆序对 **0 / 2769** —— 相对顺序一个都没颠倒
+ * · 唯一那个取关者在上次的 seq=868,恰好是位移从 +11 变 +10 的切换点
+ *   —— 模型**分毫不差**地解释了全部 2770 个位移
+ *
+ * 结论:**followers 列表严格按关注时间倒序**。新人只会出现在最前面,
+ * 所以「翻到已知的人就停」不会漏掉新人。
+ *
+ * ── ⚠️ 它看不见什么 ──
+ *
+ * **取关看不见**。取关者是从名单**中间**消失的(上面那位就在 seq 868),
+ * 只翻前几页永远发现不了。这是方法的边界,不是实现缺陷 ——
+ * 所以快速增量的报告必须**如实说明**,并靠周期性全量兜底。
+ *
+ * ⚠️ 只取**全量**批次:快速增量那跑压根不写快照(它只采前几十人,
+ * 存进去会让下一次差集报「2700 人取关了」)。
+ */
+export async function knownHandlesOfLastRun(scope: string): Promise<{
+  handles: Set<string>;
+  runId?: string;
+  /** ⭐ 上次全量是什么时候 —— 报告要据此提醒「该跑全量了」 */
+  takenAt?: string;
+}> {
+  const db = getXDB();
+  const runs = await recentSnapshotRuns(scope, 1);
+  const runId = runs[0];
+  if (!runId) return { handles: new Set() };
+
+  /**
+   * ⚠️ 分页取 —— 一次 SELECT 几千行没问题,但 SurrealDB 默认不分页,
+   * 将来 14 万粉的账号(fang_danie121)会把响应撑到几十 MB。
+   * 一页 5000,取到空为止。
+   */
+  const handles = new Set<string>();
+  const PAGE = 5000;
+  for (let start = 0; ; start += PAGE) {
+    const res = await db.query<[Array<{ handle: string }>]>(
+      `SELECT handle FROM x_list_snapshot WHERE scope = $scope AND run_id = $runId
+         LIMIT $page START $start`,
+      { scope, runId, page: PAGE, start },
+    );
+    const rows = res[0] ?? [];
+    for (const r of rows) handles.add(r.handle);
+    if (rows.length < PAGE) break;
+  }
+
+  return { handles, runId, takenAt: runId };
 }

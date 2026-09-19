@@ -699,6 +699,7 @@ export function registerWebConsoleHandlers(): void {
     const p = (payload ?? {}) as {
       wcId?: unknown; page?: unknown; params?: unknown; current?: unknown;
       maxRounds?: unknown; budgetMs?: unknown; pageBudget?: unknown; wsId?: unknown;
+      fastIncremental?: unknown;
     };
     const t0 = Date.now();
     /**
@@ -749,6 +750,12 @@ export function registerWebConsoleHandlers(): void {
           : `${pageName}:${(p.params as Record<string, string> | undefined)?.handle ?? ''}`,
         // ⭐ 基准对账要知道这是**谁的**列表
         ownerHandle: (p.params as Record<string, string> | undefined)?.handle,
+        /**
+         * ⭐⭐ 快速增量 —— 「翻到遇见已知的人就停」。
+         * ⚠️ 只认**显式的 true**:传别的类型不该被 truthy 蒙混成开启,
+         * 那会让一次全量悄悄变成快速增量(而且不写快照)。
+         */
+        fastIncremental: p.fastIncremental === true,
       });
 
     if ('error' in r) return failFast('autoCollect', r.error, t0);
@@ -785,6 +792,16 @@ export function registerWebConsoleHandlers(): void {
         capturedUrl: r.capturedUrl,
         // ⭐ 「采完没有」进留痕 —— 全量/增量的第一个问题
         hasMore: r.paging.hasMore,
+        /**
+         * ⭐⭐ 快速增量进留痕 —— **`caughtUp` 是能不能信这个数的判据**。
+         * ⚠️ 没追上却只留个「新增 3 人」,日后回看会把残缺当成事实。
+         */
+        fast: r.fast
+          ? `新增${r.fast.newcomers.length}`
+            + `(基线${r.fast.knownBaseline}`
+            + `,${r.fast.caughtUp ? '已追上' : '**没追上**'}`
+            + `,距上次全量${r.fast.daysSinceFullRun ?? '?'}天)`
+          : undefined,
         // ⭐ 基准对账 —— 「采够了没有」从猜变成算
         /**
          * ⚠️ 别写成 `241/?` —— 那看着像「查不到基准」,

@@ -247,6 +247,13 @@ declare global {
            */
           pageBudget?: number;
           wsId?: string;
+          /**
+           * ⭐⭐ **快速增量** —— 只翻到「遇见上次全量采过的人」为止。
+           * 17 分钟 → 十几秒。依据是 2026-09-19 实测的排序证据
+           * (followers 严格按关注时间倒序,新人只在最前面)。
+           * ⚠️ 它**看不见取关**,且**不写快照**(基线只由全量维护)。
+           */
+          fastIncremental?: boolean;
         }): Promise<{
           channelOk: boolean; error?: string;
           report?: {
@@ -273,6 +280,15 @@ declare global {
             paging: { hasMore: boolean; cursor?: string };
             /** ⭐ 基准对账:采到的 vs X 报的总数 */
             reconcile?: { baseline?: number; got: number; rate?: number; note: string };
+            /**
+             * ⭐⭐ 快速增量的成果与边界。
+             * ⚠️ `caughtUp=false` = **没追上**,新人可能没翻完,
+             * 这时 `newcomers` 不能当成「这段时间的全部新增」。
+             */
+            fast?: {
+              knownBaseline: number; caughtUp: boolean; newcomers: string[];
+              lastFullRunAt?: string; daysSinceFullRun?: number;
+            };
             /** ⭐ 日期跨度与空洞 —— **事实**,采集层不解释成「漏采」(首页是算法混排) */
             dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
             /** ⭐ 字段级覆盖率 —— 「每一条数据都是完整的吗」靠它回答,不是靠总数 */

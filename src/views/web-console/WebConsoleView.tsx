@@ -768,8 +768,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 <input className="krig-webc__in" style={{ width: 72 }} value={acPages}
                   onChange={(e) => setAcPages(e.target.value)} placeholder="翻页"
                   title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍" />
-                <button type="button" className="krig-webc__go" disabled={busy !== null}
-                  onClick={() => void run('autoCollect', { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget), pages: Number(acPages) },
+                {/**
+                  * ⭐⭐ 两个按钮走**同一条链路**,只差 `fastIncremental` 一个参数 ——
+                  * 不是两套流程。写成两份会漂,而漂的表现是
+                  * 「全量修好了、快速的还是老样子」。
+                  */}
+                {(() => {
+                  const collect = (fast: boolean) => void run(
+                    'autoCollect',
+                    { page: acPage, maxRounds: Number(acRounds), budgetSec: Number(acBudget),
+                      pages: Number(acPages), fast },
                     async () => {
                       // ⭐ 按真表传参 —— 加页面时不用改这里
                       const params: Record<string, string> = {};
@@ -786,9 +794,21 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         budgetMs: (Number(acBudget) || 1800) * 1000,
                         pageBudget: Number(acPages) || 40,
                         wsId: workspaceId,
+                        fastIncremental: fast,
                       });
                       setAcReport(r); return r;
-                    })}>采集</button>
+                    });
+                  return (
+                    <>
+                      <button type="button" className="krig-webc__go" disabled={busy !== null}
+                        onClick={() => collect(false)}
+                        title="全量:采到底(约 17 分钟 / 2700 人)。⭐ 基线只由它维护,「谁取关了」也只有它答得出">采集</button>
+                      <button type="button" className="krig-webc__go" disabled={busy !== null}
+                        onClick={() => collect(true)}
+                        title="快速增量:翻到遇见上次采过的人就停(十几秒)。⚠️ 只答「谁新来」,看不见取关;不写快照">快速增量</button>
+                    </>
+                  );
+                })()}
               </div>
               {(() => {
                 const r = acReport as { report?: {
@@ -799,6 +819,10 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   failedUrl?: string; capturedUrl?: string;
                   paging?: { hasMore: boolean; cursor?: string };
                   reconcile?: { baseline?: number; got: number; rate?: number; note: string };
+                  fast?: {
+                    knownBaseline: number; caughtUp: boolean; newcomers: string[];
+                    lastFullRunAt?: string; daysSinceFullRun?: number;
+                  };
                   incremental?: {
                     firstRun?: boolean; added?: number; removed?: number; kept?: number;
                     addedSample?: string[]; removedSample?: string[]; error?: string;
@@ -875,6 +899,36 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         <b>基准对账</b>:{d.reconcile.note}
                       </div>
                     )}
+                    {d.fast && (
+                      <div>
+                        <div>
+                          {d.fast.caughtUp ? '⚡ ' : '⚠️ '}
+                          <b>快速增量</b>:新增 <b>{d.fast.newcomers.length}</b> 人 ·
+                          基线 {d.fast.knownBaseline} 人 ·
+                          {d.fast.caughtUp
+                            ? ' 已追上上次的名单'
+                            : <b> 没追上 —— 新人可能还没翻完,这个数字不能当成全部</b>}
+                        </div>
+                        {d.fast.newcomers.length > 0 && (
+                          <div style={{ opacity: 0.85 }}>
+                            ➕ {d.fast.newcomers.slice(0, 30).map((h) => `@${h}`).join('、')}
+                            {d.fast.newcomers.length > 30 ? ' …' : ''}
+                          </div>
+                        )}
+                        {/**
+                          * ⭐⭐ **边界每次都说** —— 取关者从名单中间消失,
+                          * 只翻前几页永远发现不了。不说的话「没报取关」
+                          * 会被读成「没人取关」,而那两件事天差地别。
+                          */}
+                        <div style={{ opacity: 0.85 }}>
+                          ⚠️ 本模式**看不见取关**,也**没写快照**(基线仍是上次全量的)
+                          {d.fast.daysSinceFullRun !== undefined
+                            && <> —— 距上次全量 <b>{d.fast.daysSinceFullRun}</b> 天
+                              {d.fast.daysSinceFullRun >= 7
+                                && <b>,建议补一次全量</b>}</>}
+                        </div>
+                      </div>
+                    )}
                     {d.incremental && (() => {
                       const inc = d.incremental!;
                       if (inc.error) return <div>⚠️ <b>增量</b>:快照失败 —— {inc.error}</div>;
@@ -904,19 +958,36 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                               {(inc.removed ?? 0) > inc.removedSample.length ? ' …' : ''}
                             </div>
                           )}
-                          {o && (
-                            <div style={{ opacity: 0.85 }}>
-                              📐 <b>排序证据</b>:两次都在的 {o.common} 人 ·
-                              名次位移 中位 {o.medianShift} / 最大 {o.maxShift} ·
-                              新人排在前 10% 的 {o.newcomersAtFront}/{o.newcomersTotal}
-                              {o.newcomersTotal > 0 && o.newcomersAtFront === o.newcomersTotal
-                                && o.medianShift <= 5
-                                ? ' → ✓ 像**时间倒序**(新人都在最前、老人几乎没动)'
-                                : o.medianShift > 50
-                                  ? ' → ⚠️ 名次乱跳,**不是时间序**,每次必须采全'
-                                  : ' → 证据还不够,再采几次看趋势'}
-                            </div>
-                          )}
+                          {o && (() => {
+                            /**
+                             * ⭐⭐ **判据是「位移 ≈ 净增」,不是「位移要小」**。
+                             *
+                             * ⚠️ 原来写的是 `medianShift <= 5`,而 2026-09-19 实测
+                             * 那一跑 **medianShift = 10**(净增正好 10)——
+                             * 用旧判据会把**教科书级的时间倒序**判成「证据还不够」。
+                             * 时间倒序下老人是**整体平移**,平移量就等于净增人数,
+                             * 所以「位移小」本来就不该成立。
+                             *
+                             * ⭐ 正确期望:① 新人全在最前 ② 位移 ≈ 净增(整体平移)
+                             */
+                            const net = (inc.added ?? 0) - (inc.removed ?? 0);
+                            const shiftMatchesNet = Math.abs(o.medianShift - net) <= 2;
+                            const allNewcomersAtFront = o.newcomersTotal > 0
+                              && o.newcomersAtFront === o.newcomersTotal;
+                            return (
+                              <div style={{ opacity: 0.85 }}>
+                                📐 <b>排序证据</b>:两次都在的 {o.common} 人 ·
+                                名次位移 中位 {o.medianShift} / 最大 {o.maxShift}
+                                (净增 {net},时间倒序下两者应当相等)·
+                                新人排在前 10% 的 {o.newcomersAtFront}/{o.newcomersTotal}
+                                {allNewcomersAtFront && shiftMatchesNet
+                                  ? ' → ✓ **时间倒序**(新人全在最前、老人整体平移 ≈ 净增)—— 快速增量安全'
+                                  : !allNewcomersAtFront
+                                    ? ' → ⚠️ 有新人**没排在最前** —— 不是纯时间序,快速增量会漏人,请用全量'
+                                    : ' → ⚠️ 位移与净增对不上 —— 名次被重排过,快速增量不可靠,请用全量'}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
