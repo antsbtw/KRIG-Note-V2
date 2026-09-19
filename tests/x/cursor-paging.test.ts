@@ -16,7 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { withCursor, buildRefetchScript } from '@platform/main/x/x-people-harvester';
+import { withCursor, buildRefetchScript, isPeopleOp } from '@platform/main/x/x-people-harvester';
 
 /** 真实形状:X 的 Followers 请求(queryId 与 features 都在 URL 里) */
 const REAL = 'https://x.com/i/api/graphql/rRXFSG5vR6drKr5M37YOTw/Followers'
@@ -274,5 +274,54 @@ describe('⭐⭐ 没翻页必须说清是哪一条不成立', () => {
     );
     expect(view, '面板没有渲染分支 —— 原因拿到了却不显示给人看')
       .toMatch(/\{d\.pagingSkipped && \(/);
+  });
+});
+
+describe('⭐⭐ 抄的必须是「人的列表」那条请求', () => {
+  /**
+   * ── 用户 2026-09-18 实测,面板原话 ──
+   *
+   * > `⚡ 游标翻页:翻了 1 页` + `停止原因:游标翻页:请求失败(HTTP 404)`
+   * > 见过的请求:Followers(98KB)、…、翻页#1(96KB)、ViewerBadgeCounts(0KB)、
+   * >   ViewerBadgeCounts(0KB)、CreatorStudioTabBarItemQuery(0KB)、DataSaverMode(0KB)
+   *
+   * 真因:抄请求时**不挑操作名**,任何 `/i/api/graphql/` 都抄 ——
+   * 而 `ViewerBadgeCounts` / `DataSaverMode` 这些杂项**发生得最晚**,
+   * 把 `Followers` 覆盖掉了。翻页于是拿着 Followers 的游标去请求
+   * ViewerBadgeCounts → 404。
+   *
+   * ⚠️ **第 1 页当时是成功的**(96KB 真载荷),因为 X 自己刚发的游标还新鲜;
+   * 第 2 页才暴露 —— 所以「第一页成功」绝不能当作链路正确的证据。
+   */
+  const strip = (s: string) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const src = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8',
+  ));
+
+  it('⭐⭐ 抄请求要挑操作名,不是见 graphql 就抄', () => {
+    const i = src.indexOf('lastPeopleReq = {');
+    expect(i, '找不到抄请求的地方').toBeGreaterThan(0);
+    // 切出这条赋值所在的分支
+    const stmtStart = src.lastIndexOf('\n', src.lastIndexOf('if', i));
+    const branch = src.slice(stmtStart, i + 60);
+    expect(branch.length, '切出来的分支是空的').toBeGreaterThan(20);
+    expect(
+      branch,
+      '抄请求不挑操作名 —— ViewerBadgeCounts/DataSaverMode 会覆盖掉 Followers,\n'
+      + '翻页拿着 Followers 的游标请求杂项接口 → HTTP 404',
+    ).toMatch(/isPeopleOp\(/);
+  });
+
+  it('⭐ 杂项操作名不能被 isPeopleOp 认成人的列表', () => {
+    for (const junk of ['ViewerBadgeCounts', 'DataSaverMode', 'CreatorStudioTabBarItemQuery']) {
+      expect(isPeopleOp(junk), `${junk} 被当成了人的列表 —— 会被抄去重发`).toBe(false);
+    }
+  });
+
+  it('⭐ 真正的人列表操作要认得出', () => {
+    for (const real of ['Followers', 'Following', 'BlueVerifiedFollowers']) {
+      expect(isPeopleOp(real), `${real} 没被认出来 —— 抄不到请求,翻页启动不了`).toBe(true);
+    }
   });
 });

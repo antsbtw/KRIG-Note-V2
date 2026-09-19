@@ -34,7 +34,7 @@
 
 import { webContents as allWebContents } from 'electron';
 import {
-  extractPeopleFrom, findPagingCursor, withCursor, buildRefetchScript,
+  extractPeopleFrom, findPagingCursor, withCursor, buildRefetchScript, isPeopleOp,
   type HarvestedPerson,
 } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
@@ -429,8 +429,23 @@ export async function harvestTimeline(
          * ⚠️ 请求头(authorization / x-csrf-token)同样原样带走,
          * 不复刻鉴权逻辑。
          */
+        /**
+         * ⚠️⚠️ **只抄人的列表那条** —— 用户 2026-09-18 实测踩到:
+         *
+         * 原来「任何 graphql 请求都抄」,而 `ViewerBadgeCounts`(0KB)、
+         * `DataSaverMode`(0KB) 这类杂项**发生得最晚**,把 `Followers`
+         * 覆盖掉了。于是翻页拿着 Followers 的游标去请求 ViewerBadgeCounts
+         * → **HTTP 404**,一页就停(报告里正是「翻了 1 页 · 请求失败(404)」)。
+         *
+         * ⚠️ 第 1 页当时能成,掩盖了这个 bug:X 自己刚发的那条游标还新鲜,
+         * 是**第 2 页**才暴露 —— 所以「第一页成功」不能当作链路正确的证据。
+         *
+         * ⭐ 这里用 `isPeopleOp` 是**选重发哪条请求**,不是「决定要不要解析」——
+         * 解析仍然无条件全收(见 isPeopleOp 注释里那条禁令)。
+         */
+        const op = u.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '';
         const req = params.request as { url?: string; headers?: Record<string, string> };
-        if (req?.headers) lastPeopleReq = { url: u, headers: req.headers };
+        if (req?.headers && isPeopleOp(op)) lastPeopleReq = { url: u, headers: req.headers };
       }
       return;
     }
