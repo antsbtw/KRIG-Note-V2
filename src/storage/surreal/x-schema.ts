@@ -1285,6 +1285,60 @@ export async function x_migration_1_2_4(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * ⭐⭐ **列表快照** —— 每次采集留一份「谁在第几位」,用于两件事:
+ *
+ * ① **增量采集**:与上次快照求差集 → 新增了谁、谁取关了
+ * ② **回答「X 的列表按什么排序」** —— 这个问题 2026-09-18 立项时就提出了,
+ *    但 `x_author.list_seq` 是**覆盖写**(只留最近一次),
+ *    没有两份快照就永远对照不出来。
+ *
+ * ⚠️ 与 `x_author.list_seq` 的分工:
+ * · `x_author.list_seq` = 「此人**最近一次**排第几」(覆盖,查人用)
+ * · 本表           = 「**某次采集**的完整名次表」(不覆盖,对照用)
+ *
+ * 数据模型总纲:这是**可重算的派生数据**(丢了重采即可),
+ * 与 x_author(真源)分开存,清空不影响业务。
+ */
+const X_SCHEMA_1_2_5 = `
+DEFINE TABLE IF NOT EXISTS x_list_snapshot SCHEMAFULL;
+-- 哪个列表:'x.followers:OTun_MyVPN'
+DEFINE FIELD IF NOT EXISTS scope    ON x_list_snapshot TYPE string ASSERT $value != '';
+-- 这一次采集的批次标识(同一次采集的所有行共享)—— 用它分组对照
+DEFINE FIELD IF NOT EXISTS run_id   ON x_list_snapshot TYPE string ASSERT $value != '';
+-- 归一化 handle(与 x_author.handle 同规格,便于 join)
+DEFINE FIELD IF NOT EXISTS handle   ON x_list_snapshot TYPE string ASSERT $value != '';
+-- 在这一次采集里排第几(0 起)
+DEFINE FIELD IF NOT EXISTS seq      ON x_list_snapshot TYPE int;
+DEFINE FIELD IF NOT EXISTS taken_at ON x_list_snapshot TYPE datetime;
+-- 同一批次里一个人只占一位
+DEFINE INDEX IF NOT EXISTS idx_snap_unique ON x_list_snapshot FIELDS run_id, handle UNIQUE;
+-- 按 scope 取最近几批 / 按批次取名次表
+DEFINE INDEX IF NOT EXISTS idx_snap_scope  ON x_list_snapshot FIELDS scope, run_id;
+`;
+
+export async function x_migration_1_2_5(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_5);
+
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_list_snapshot');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['scope', 'run_id', 'handle', 'seq']) {
+    if (!(f in fields)) {
+      throw new Error(
+        `[x-schema 1.2.5] ${f} 没加上 —— 列表快照存不下来,`
+        + '增量采集与「列表按什么排序」都无从谈起。',
+      );
+    }
+  }
+  console.log('[x-schema 1.2.5] 列表快照表已建');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.5', appliedAt = $now,
+      description = 'x_list_snapshot (per-run ordering snapshot for incremental + ordering evidence)'`,
+    { rid: new RecordId('schema_version', '1.2.5'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_3(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_3);
 

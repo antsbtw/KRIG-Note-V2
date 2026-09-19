@@ -615,3 +615,194 @@ export async function watchAllAccepted(): Promise<{ added: number; skipped: numb
   console.log(`[x-author-repo] 已确认作者建立追踪:新增 ${added},跳过 ${authors.length - todo.length}`);
   return { added, skipped: authors.length - todo.length };
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// ⭐⭐ 列表快照 —— 增量采集的地基(migration 1.2.5)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * 存一批名次快照。
+ *
+ * ⚠️ 分批写(每 500 条一句)—— 2500 人一条 INSERT 会把语句撑到几百 KB,
+ * SurrealDB 解析大语句明显变慢,而且一条失败整批回滚。
+ */
+export async function saveListSnapshot(
+  scope: string, runId: string,
+  rows: Array<{ handle: string; seq: number }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const db = getXDB();
+  /**
+   * ⚠️⚠️ **一条语句失败不能拖垮整批** —— 2026-09-19 实测:
+   * 采到 2772 人,快照只写进 **2493**(seq 0..2492 连续、之后齐刷刷没有)。
+   * 原来 500 条塞进一条 `FOR` 语句里 —— **第 6 批整批失败**,
+   * 而外层只 `console.warn`,面板上看不出来(铁律一:失败要响)。
+   *
+   * ⭐ 改成小批(50)+ 每批独立 try:
+   * · 一批失败只损失那 50 条,不是 500
+   * · 失败原因**收集起来抛给调用方**,不静默吞掉
+   * ⚠️ 唯一索引 (run_id, handle) 冲突时 CREATE 会抛 —— 同一个人
+   *   在载荷里出现两次就会撞上,那属于正常数据,不该让整批陪葬。
+   */
+  const CHUNK = 50;
+  const failures: string[] = [];
+  let written = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    try {
+      await db.query(
+        `FOR $r IN $rows {
+           CREATE x_list_snapshot SET scope = $scope, run_id = $runId,
+             handle = $r.handle, seq = $r.seq, taken_at = time::now();
+         }`,
+        { scope, runId, rows: chunk },
+      );
+      written += chunk.length;
+    } catch (e) {
+      /** ⭐ 整批失败时逐条重试 —— 只丢真正有问题的那条 */
+      for (const r of chunk) {
+        try {
+          await db.query(
+            `CREATE x_list_snapshot SET scope = $scope, run_id = $runId,
+               handle = $h, seq = $q, taken_at = time::now()`,
+            { scope, runId, h: r.handle, q: r.seq },
+          );
+          written += 1;
+        } catch (e2) {
+          failures.push(`seq=${r.seq} @${r.handle}: ${String(e2).slice(0, 120)}`);
+        }
+      }
+    }
+  }
+  if (failures.length > 0) {
+    /**
+     * ⭐ **失败要响**(铁律一):抛给调用方,由它记进报告。
+     * ⚠️ 但已写进去的部分是有效的 —— 消息里说清写了多少,别让人以为全丢了。
+     */
+    throw new Error(
+      `列表快照:${rows.length} 条里 ${failures.length} 条写失败`
+      + `(已写入 ${written} 条)。前 3 条原因:${failures.slice(0, 3).join(' | ')}`,
+    );
+  }
+}
+
+/** 某个列表最近 N 次采集的批次号(新到旧) */
+export async function recentSnapshotRuns(scope: string, limit = 5): Promise<string[]> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ run_id: string }>]>(
+    `SELECT run_id FROM x_list_snapshot WHERE scope = $scope
+       GROUP BY run_id ORDER BY run_id DESC LIMIT $limit`,
+    { scope, limit },
+  );
+  return (res[0] ?? []).map((r) => r.run_id);
+}
+
+/**
+ * ⭐⭐ **增量差集** —— 拿本次快照和上一次比,回答三个问题。
+ *
+ * ⚠️ 用「差集」而**不是**「遇到采过的就停」:
+ * 后者只在列表**严格按关注时间倒序**时成立,而 **X 按什么排序我们没有证据**
+ * (载荷里没有「何时关注」字段)。排序若不是时间序,新粉可能出现在任何位置,
+ * 提前停就会漏人 —— 那种漏在数据里**看不出来**。
+ *
+ * 差集不依赖任何排序假设:采完再比,谁新来、谁走了,一目了然。
+ */
+export async function diffSnapshots(
+  scope: string, currRunId: string, prevRunId: string,
+): Promise<{ added: string[]; removed: string[]; kept: number }> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ handle: string }>, Array<{ handle: string }>]>(
+    `SELECT handle FROM x_list_snapshot WHERE scope = $scope AND run_id = $curr;
+     SELECT handle FROM x_list_snapshot WHERE scope = $scope AND run_id = $prev;`,
+    { scope, curr: currRunId, prev: prevRunId },
+  );
+  const curr = new Set((res[0] ?? []).map((r) => r.handle));
+  const prev = new Set((res[1] ?? []).map((r) => r.handle));
+  const added = [...curr].filter((h) => !prev.has(h));
+  const removed = [...prev].filter((h) => !curr.has(h));
+  return { added, removed, kept: curr.size - added.length };
+}
+
+/**
+ * ⭐ **排序稳不稳** —— 回答「X 的列表按什么排序」的实测判据。
+ *
+ * 两次快照里都在的人,名次变了多少?
+ * · 新增的人**都在前面** + 老人名次整体后移 → **按关注时间倒序**,
+ *   那样「遇到采过的就停」才安全
+ * · 名次乱跳 → 不是时间序,**只能每次采全**
+ */
+export async function orderingStability(
+  scope: string, currRunId: string, prevRunId: string,
+): Promise<{
+  common: number; maxShift: number; medianShift: number;
+  newcomersAtFront: number; newcomersTotal: number;
+}> {
+  const db = getXDB();
+  const res = await db.query<[Array<{ handle: string; seq: number }>, Array<{ handle: string; seq: number }>]>(
+    `SELECT handle, seq FROM x_list_snapshot WHERE scope = $scope AND run_id = $curr;
+     SELECT handle, seq FROM x_list_snapshot WHERE scope = $scope AND run_id = $prev;`,
+    { scope, curr: currRunId, prev: prevRunId },
+  );
+  const currMap = new Map((res[0] ?? []).map((r) => [r.handle, r.seq]));
+  const prevMap = new Map((res[1] ?? []).map((r) => [r.handle, r.seq]));
+
+  const shifts: number[] = [];
+  for (const [h, cs] of currMap) {
+    const ps = prevMap.get(h);
+    if (ps !== undefined) shifts.push(Math.abs(cs - ps));
+  }
+  shifts.sort((a, b) => a - b);
+
+  /** 新人里有多少排在前 10% —— 时间倒序的话新人应当扎堆在最前面 */
+  const newcomers = [...currMap].filter(([h]) => !prevMap.has(h));
+  const frontline = Math.max(1, Math.floor(currMap.size * 0.1));
+  const atFront = newcomers.filter(([, seq]) => seq < frontline).length;
+
+  return {
+    common: shifts.length,
+    maxShift: shifts.length ? shifts[shifts.length - 1] : 0,
+    medianShift: shifts.length ? shifts[Math.floor(shifts.length / 2)] : 0,
+    newcomersAtFront: atFront,
+    newcomersTotal: newcomers.length,
+  };
+}
+
+/**
+ * ⭐⭐ **交叉基准** —— Verified Followers 页没有分母时,拿 followers 列表
+ * 里标了蓝V的人数当参照。
+ *
+ * ── 用户 2026-09-19 ──
+ * > 「我再取一次蓝V的数据,用来比对从 Follower 获取的数据是否准确。
+ * >   但是要监控好是否取完整了,因为这里 x 没有给出总数的。」
+ *
+ * ⭐ 两个**独立来源**互相验证:
+ * · followers 列表里 `is_blue_verified = true` 的人数
+ * · verifiedFollowers 列表实际采到的人数
+ * 两者接近 → 两边都可信;差很多 → 至少一边没采全,**不知道哪边就不能用**。
+ *
+ * ⚠️ 这不是「真值」,只是另一个观测 —— followers 列表本身也受
+ * ~2500 天花板限制(见 project-x-followers-2500-ceiling)。
+ * 它回答的是「两个来源一致吗」,不是「到底有多少蓝V」。
+ */
+export async function countBlueVerifiedInFollowers(ownerHandle: string): Promise<{
+  blueInFollowers?: number;
+  followersTotal?: number;
+  scope: string;
+}> {
+  const owner = normalizeHandle(ownerHandle);
+  // ⚠️ list_source 存的是原始大小写的 handle,这里两种都试
+  const db = getXDB();
+  const res = await db.query<[Array<{ c: number }>, Array<{ c: number }>]>(
+    `SELECT count() AS c FROM x_author
+       WHERE string::lowercase(list_source) CONTAINS $needle
+         AND is_blue_verified = true GROUP ALL;
+     SELECT count() AS c FROM x_author
+       WHERE string::lowercase(list_source) CONTAINS $needle GROUP ALL;`,
+    { needle: `x.followers:${owner}` },
+  );
+  return {
+    blueInFollowers: res[0]?.[0]?.c,
+    followersTotal: res[1]?.[0]?.c,
+    scope: `x.followers:${owner}`,
+  };
+}

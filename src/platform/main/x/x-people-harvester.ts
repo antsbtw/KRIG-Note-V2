@@ -235,14 +235,38 @@ export function findPagingCursor(node: unknown): {
   top?: string;
   /** 还有下一页吗 —— **X 说的,不是我们猜的** */
   hasMore: boolean;
+  /** ⭐ X 明说「这个方向到此为止」(TimelineTerminateTimeline) */
+  terminated?: boolean;
 } {
   let bottom: string | undefined;
   let top: string | undefined;
+  /**
+   * ⭐⭐ **X 会明说「到底了」** —— 2026-09-19 读到真实响应体才发现。
+   *
+   * 翻到底后 X 返回的载荷只有 634 字节,第一条指令就是:
+   *   {"direction":"Bottom","type":"TimelineTerminateTimeline"}
+   * 意思是「Bottom 方向到此为止」。**它仍然附带一个 Bottom 游标**
+   * (值形如 `0|2101249894198015158`,而且每次还倒着减 2),
+   * 于是 hasMore 恒为 true,我们拿着空游标又翻了 50 页。
+   *
+   * ⚠️ 全仓**从没读过这条指令** —— 现象是「翻页从第一页起就没加过新人」,
+   * 而我先后怪过:平台天花板、游标选错(试了两种改法,都把结果从 2691 弄成 250)。
+   * 真相是 X 一直在明说,我们没听。
+   *
+   * ⭐ 本仓判据一直是「**还有没有由 X 说了算**」—— 这条指令正是 X 说的话。
+   */
+  let terminated = false;
 
   const walk = (o: unknown, depth: number): void => {
     if (o === null || typeof o !== 'object' || depth > 24) return;
     if (Array.isArray(o)) { for (const v of o) walk(v, depth + 1); return; }
     const r = o as Record<string, unknown>;
+    /** ⭐ X 说「Bottom 方向到此为止」—— 那就是真到底了 */
+    if (r.type === 'TimelineTerminateTimeline'
+      && typeof r.direction === 'string'
+      && /^bottom$/i.test(r.direction)) {
+      terminated = true;
+    }
     if (r.__typename === 'TimelineTimelineCursor'
       && typeof r.value === 'string' && r.value.trim()
       && typeof r.cursorType === 'string') {
@@ -253,7 +277,11 @@ export function findPagingCursor(node: unknown): {
   };
   walk(node, 0);
 
-  return { bottom, top, hasMore: !!bottom };
+  /**
+   * ⚠️ `terminated` **压过游标** —— X 到底时照样给游标(而且值在倒退),
+   * 只看「有没有游标」会永远以为还有下一页。
+   */
+  return { bottom, top, hasMore: !!bottom && !terminated, terminated };
 }
 
 /**

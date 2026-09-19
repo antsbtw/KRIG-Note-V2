@@ -33,7 +33,11 @@
 
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
 import { upsertTweet } from '../db/tweet-inbox-repo';
-import { saveAuthorCounts, registerSeenAuthor, getAuthorCounts } from '../db/x-author-repo';
+import {
+  saveAuthorCounts, registerSeenAuthor, getAuthorCounts,
+  saveListSnapshot, recentSnapshotRuns, diffSnapshots, orderingStability,
+  countBlueVerifiedInFollowers,
+} from '../db/x-author-repo';
 import { normalizeHandle, type TweetInboxRecord } from '@shared/types/x-timeline-types';
 
 export interface AutoCollectReport {
@@ -105,6 +109,25 @@ export interface AutoCollectReport {
   /** ⭐ 没翻页的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
   pagingSkipped?: string;
   failedUrl?: string;
+  /**
+   * ⭐ **增量结果** —— 与上一次快照比,新增/取关了谁。
+   * ⚠️ `ordering` 是回答「X 的列表按什么排序」的实测证据,
+   * 在它给出结论前,**不要**改用「遇到采过的就停」那种策略。
+   */
+  incremental?: {
+    firstRun?: boolean;
+    prevRunId?: string;
+    added: number;
+    removed: number;
+    kept: number;
+    addedSample?: string[];
+    removedSample?: string[];
+    ordering?: {
+      common: number; maxShift: number; medianShift: number;
+      newcomersAtFront: number; newcomersTotal: number;
+    };
+    error?: string;
+  } | { error: string };
   capturedUrl?: string;
   /**
    * ⭐⭐ 采完了没有 —— **X 说的,不是我们猜的**。
@@ -380,6 +403,95 @@ export async function autoCollect(
   }
 
   /**
+   * ⭐⭐ **列表快照 + 增量差集**(migration 1.2.5)
+   *
+   * ── 用户 2026-09-19 ──
+   * > 「完成 follower 的增量采集吧。我自己的粉也增加到 2690 了。」
+   *
+   * ⭐ 用**差集**而不是「遇到采过的就停」:后者只在列表**严格按关注时间倒序**
+   * 时成立,而 **X 按什么排序我们没有证据**(载荷里没有「何时关注」字段)。
+   * 排序若不是时间序,新粉可能出现在任何位置,提前停会漏人 ——
+   * 而那种漏在数据里**看不出来**。差集不依赖任何排序假设。
+   *
+   * ⚠️ 只在**采到人**时存快照。0 人那跑(比如被限流/页面没加载)若也存,
+   * 下次对照会把「这次没采到」误判成「所有人都取关了」。
+   */
+  let incremental: AutoCollectReport['incremental'];
+  /** ⭐ 快照失败要进 problems,不能只 console.warn */
+  let snapshotProblem: string | undefined;
+  if (r.people.length > 0) {
+    const scope = pageLabel;
+    const runId = new Date().toISOString();
+    try {
+      /** 上一次的批次 —— 要在写入本次之前取,否则取到的就是自己 */
+      const prevRuns = await recentSnapshotRuns(scope, 1);
+      const prev = prevRuns[0];
+
+      /**
+       * ⭐⭐ **空 handle 必须先滤掉** —— 2026-09-19 实测真因。
+       *
+       * 现象:采到 2753 人,快照**三跑都只写进 2493**(seq 0..2492,断点分毫不差),
+       * 而把批大小从 500 改到 50 **断点纹丝不动** —— 说明不是批量大小的事。
+       *
+       * 真因:schema 上 `handle` 带 `ASSERT $value != ''`,
+       * 而 `FOR` 里**一条 ASSERT 失败会让整批写入 0 条**(已实测:
+       * 3 条里夹 1 条空 handle → 整批写进 0 条)。
+       * `normalizeHandle` 对异常数据会返回空串,那一批就全灭了。
+       *
+       * ⭐ 先滤 + 记数:滤掉多少要**说出来**,不能静默少写
+       * (铁律四:成功要对账)。
+       */
+      const snapRows = r.people
+        .map((pp, i) => ({ handle: normalizeHandle(pp.handle), seq: i }))
+        .filter((x) => x.handle !== '');
+      const dropped = r.people.length - snapRows.length;
+      await saveListSnapshot(scope, runId, snapRows);
+      if (dropped > 0) {
+        snapshotProblem = `列表快照:${dropped} 人的 handle 为空已跳过`
+          + `(采到 ${r.people.length},写入 ${snapRows.length})`;
+      }
+
+      if (prev) {
+        const d = await diffSnapshots(scope, runId, prev);
+        const ord = await orderingStability(scope, runId, prev);
+        incremental = {
+          prevRunId: prev,
+          added: d.added.length,
+          removed: d.removed.length,
+          kept: d.kept,
+          addedSample: d.added.slice(0, 20),
+          removedSample: d.removed.slice(0, 20),
+          /**
+           * ⭐ 排序证据 —— 「X 按什么排序」第一次有实测数据。
+           * 新人都在最前 + 老人位移小 → 时间倒序(增量可以只翻前几页)
+           * 位移乱跳 → 不是时间序(每次必须采全)
+           */
+          ordering: {
+            common: ord.common,
+            maxShift: ord.maxShift,
+            medianShift: ord.medianShift,
+            newcomersAtFront: ord.newcomersAtFront,
+            newcomersTotal: ord.newcomersTotal,
+          },
+        };
+      } else {
+        incremental = { firstRun: true, added: r.people.length, removed: 0, kept: 0 };
+      }
+    } catch (e) {
+      /** ⚠️ 快照失败不影响采集结果,但要说出来 —— 静默坍缩是红线 */
+      console.warn('[x-auto-collect] 列表快照/差集失败:', e);
+      incremental = { error: String(e) };
+      /**
+       * ⭐ **进 problems** —— 只放进 incremental.error 还不够醒目。
+       * 实测 2026-09-19:采到 2772 人、快照只写进 2493,
+       * 而面板上看不出任何异常 —— 用户是靠「感觉数字有点问题」发现的。
+       * 铁律一(失败要响)+ 铁律四(成功要对账)。
+       */
+      snapshotProblem = `列表快照没写全 —— ${String(e).slice(0, 200)}`;
+    }
+  }
+
+  /**
    * ⭐⭐ 基准对账 —— 用户 2026-09-18:「首页有一个多少人关注、多少人未关注,
    * 这个就是基准,出入不超过 10% 即可。」
    *
@@ -420,10 +532,49 @@ export async function autoCollect(
 
     const got = r.people.length;
     if (isVerified) {
+      /**
+       * ⭐⭐ **交叉基准** —— X 不报蓝V关注者总数,但 followers 列表里
+       * 标了蓝V的人数是另一个**独立观测**,拿来互相验证。
+       *
+       * ── 用户 2026-09-19 ──
+       * > 「我再取一次蓝V的数据,用来比对从 Follower 获取的数据是否准确。
+       * >   但是要监控好是否取完整了,因为这里 x 没有给出总数的。」
+       *
+       * ⚠️ 这不是真值,是「两个来源一致吗」。followers 列表本身也受
+       * ~2500 天花板限制 —— 两边都可能不全,但**两边接近**就说明
+       * 至少没有一边出大漏子;**差很多**就说明至少一边没采全,
+       * 而**不知道是哪边,数据就不能用**。
+       *
+       * ⭐ 「采完没有」的真判据仍是**停止原因**:
+       * 「X 说没有更多了」才是采完;「连续 N 页零新人」「达到翻页上限」
+       * 都是没采完(前者是 X 的天花板,见 project-x-followers-2500-ceiling)。
+       */
+      let crossNote = '';
+      try {
+        const x = await countBlueVerifiedInFollowers(owner);
+        if (x.blueInFollowers !== undefined) {
+          const diff = got - x.blueInFollowers;
+          const pct = x.blueInFollowers > 0
+            ? ((got / x.blueInFollowers) * 100).toFixed(0) : '?';
+          crossNote = `；交叉基准:followers 列表里标蓝V的有 ${x.blueInFollowers} 人`
+            + `(共 ${x.followersTotal ?? '?'} 人),这次采到 ${got}(${pct}%)`
+            + (Math.abs(diff) <= Math.max(20, x.blueInFollowers * 0.05)
+              ? ' —— ✓ 两个来源**基本一致**,可以互相印证'
+              : ` —— ⚠️ 相差 ${diff > 0 ? '+' : ''}${diff} 人,**至少一边没采全**`
+                + '(不知道是哪边,这份数据先别用来下结论)');
+        }
+      } catch (e) {
+        crossNote = `；交叉基准查询失败:${String(e)}`;
+      }
+      /** ⭐ 采完没有 —— 只认 X 的话,别的都是「没采完」 */
+      const doneByCursor = !r.paging.hasMore;
       reconcile = {
         got,
-        note: 'Verified Followers **没有基准** —— X 不单独报「多少个蓝V关注者」,'
-          + '这一页只能靠游标判断采完没有',
+        note: 'Verified Followers **没有总数** —— X 不报「多少个蓝V关注者」。'
+          + `采完判据看游标:${doneByCursor
+            ? '✓ **X 说没有更多了** —— 这一页采完了'
+            : '⚠️ **X 说还有下一页** —— 没采完'}`
+          + crossNote,
       };
     } else if (baseline === undefined) {
       reconcile = { got, note: `没有基准可对:${why || '这个页面没有基准概念'}` };
@@ -571,7 +722,7 @@ export async function autoCollect(
     authorsWithRelation,
     authorsWithBio,
     payloads: r.payloads,
-    problems: r.problems,
+    problems: snapshotProblem ? [...r.problems, snapshotProblem] : r.problems,
     notes,
     unparsedSamples: r.unparsedSamples,
     seenOps: r.seenOps,
@@ -587,6 +738,8 @@ export async function autoCollect(
     capturedUrl: r.lastRequest?.url,
     dateSpan: r.dateSpan,
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
+    /** ⭐ 增量:与上次快照的差集 + 排序稳定性证据 */
+    incremental,
     reconcile,
     elapsedMs: Date.now() - t0,
     longText: (() => {

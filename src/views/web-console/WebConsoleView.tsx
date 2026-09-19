@@ -799,6 +799,14 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   failedUrl?: string; capturedUrl?: string;
                   paging?: { hasMore: boolean; cursor?: string };
                   reconcile?: { baseline?: number; got: number; rate?: number; note: string };
+                  incremental?: {
+                    firstRun?: boolean; added?: number; removed?: number; kept?: number;
+                    addedSample?: string[]; removedSample?: string[]; error?: string;
+                    ordering?: {
+                      common: number; maxShift: number; medianShift: number;
+                      newcomersAtFront: number; newcomersTotal: number;
+                    };
+                  };
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
                   seenOps?: Array<{ op: string; bytes: number }>;
@@ -867,6 +875,51 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         <b>基准对账</b>:{d.reconcile.note}
                       </div>
                     )}
+                    {d.incremental && (() => {
+                      const inc = d.incremental!;
+                      if (inc.error) return <div>⚠️ <b>增量</b>:快照失败 —— {inc.error}</div>;
+                      if (inc.firstRun) {
+                        return (
+                          <div>ℹ️ <b>增量</b>:这是**第一次**快照({inc.added} 人)——
+                            下次采集就能对照出新增/取关了
+                          </div>
+                        );
+                      }
+                      const o = inc.ordering;
+                      return (
+                        <div>
+                          <div>
+                            🔄 <b>增量</b>:新增 <b>{inc.added}</b> 人 ·
+                            取关 <b>{inc.removed}</b> 人 · 仍在 {inc.kept} 人
+                          </div>
+                          {!!inc.addedSample?.length && (
+                            <div style={{ opacity: 0.85 }}>
+                              ➕ 新增:{inc.addedSample.map((h) => `@${h}`).join('、')}
+                              {(inc.added ?? 0) > inc.addedSample.length ? ' …' : ''}
+                            </div>
+                          )}
+                          {!!inc.removedSample?.length && (
+                            <div style={{ opacity: 0.85 }}>
+                              ➖ 取关:{inc.removedSample.map((h) => `@${h}`).join('、')}
+                              {(inc.removed ?? 0) > inc.removedSample.length ? ' …' : ''}
+                            </div>
+                          )}
+                          {o && (
+                            <div style={{ opacity: 0.85 }}>
+                              📐 <b>排序证据</b>:两次都在的 {o.common} 人 ·
+                              名次位移 中位 {o.medianShift} / 最大 {o.maxShift} ·
+                              新人排在前 10% 的 {o.newcomersAtFront}/{o.newcomersTotal}
+                              {o.newcomersTotal > 0 && o.newcomersAtFront === o.newcomersTotal
+                                && o.medianShift <= 5
+                                ? ' → ✓ 像**时间倒序**(新人都在最前、老人几乎没动)'
+                                : o.medianShift > 50
+                                  ? ' → ⚠️ 名次乱跳,**不是时间序**,每次必须采全'
+                                  : ' → 证据还不够,再采几次看趋势'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {(d.capturedUrl || d.failedUrl) && (
                       <div style={{ wordBreak: 'break-all', opacity: 0.85 }}>
                         {d.capturedUrl && <div>📋 <b>抄到的请求</b>:{d.capturedUrl}</div>}
