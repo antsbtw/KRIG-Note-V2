@@ -104,6 +104,8 @@ export interface AutoCollectReport {
   pagedRounds: number;
   /** ⭐ 没翻页的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
   pagingSkipped?: string;
+  failedUrl?: string;
+  capturedUrl?: string;
   /**
    * ⭐⭐ 采完了没有 —— **X 说的,不是我们猜的**。
    *
@@ -576,6 +578,9 @@ export async function autoCollect(
     rounds: r.rounds,
     pagedRounds: r.pagedRounds,
     pagingSkipped: r.pagingSkipped,
+    failedUrl: r.failedUrl,
+    /** ⭐ 抄到的那条请求 —— 只带 URL,请求头含鉴权不外传 */
+    capturedUrl: r.lastRequest?.url,
     dateSpan: r.dateSpan,
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
     reconcile,

@@ -781,6 +781,8 @@ export function registerWebConsoleHandlers(): void {
         rounds: r.rounds,
         pagedRounds: r.pagedRounds,
         pagingSkipped: r.pagingSkipped,
+        failedUrl: r.failedUrl,
+        capturedUrl: r.capturedUrl,
         // ⭐ 「采完没有」进留痕 —— 全量/增量的第一个问题
         hasMore: r.paging.hasMore,
         // ⭐ 基准对账 —— 「采够了没有」从猜变成算

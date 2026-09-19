@@ -267,6 +267,8 @@ declare global {
             pagedRounds?: number;
             /** ⭐ 没翻页的话是哪一条入口条件不成立 —— 四种断法必须分得开 */
             pagingSkipped?: string;
+            failedUrl?: string;
+            capturedUrl?: string;
             /** ⭐ 采完了没有 —— X 说的(游标耗尽),不是「滚不动了」 */
             paging: { hasMore: boolean; cursor?: string };
             /** ⭐ 基准对账:采到的 vs X 报的总数 */

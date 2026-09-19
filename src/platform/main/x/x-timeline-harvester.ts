@@ -199,11 +199,13 @@ export interface HarvestReport {
   pagedRounds: number;
   /** ⭐ 没翻的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
   pagingSkipped?: string;
+  /** ⭐ 翻页失败时发出去的 URL(诊断用) */
+  failedUrl?: string;
   /**
    * ⭐ 最后一个 GraphQL 请求(URL + 头)—— 游标翻页**重发它**,不自己拼。
    * X 的 queryId/features 会随版本变,复刻必然过期;复用刚发过的那条不会。
    */
-  lastRequest?: { url: string; headers: Record<string, string> };
+  lastRequest?: { url: string; headers: Record<string, string>; method?: string };
   ok: boolean;
   /** 不通过的校验项 —— 空数组才算过关 */
   problems: string[];
@@ -408,7 +410,9 @@ export async function harvestTimeline(
   /** ⭐ 最后一次见到的分页游标 —— 「还有没有」由 X 说了算 */
   let paging: { bottom?: string; top?: string; hasMore: boolean } = { hasMore: false };
   /** ⭐ 最后一个「人的列表」请求 —— 游标翻页靠重发它(不自己拼) */
-  let lastPeopleReq: { url: string; headers: Record<string, string> } | null = null;
+  let lastPeopleReq: {
+    url: string; headers: Record<string, string>; method?: string;
+  } | null = null;
   /** 见过的全部操作名 —— 回答「那个请求到底发没发生」 */
   const seenOps: Array<{ op: string; bytes: number }> = [];
   let payloads = 0;
@@ -444,8 +448,17 @@ export async function harvestTimeline(
          * 解析仍然无条件全收(见 isPeopleOp 注释里那条禁令)。
          */
         const op = u.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '';
-        const req = params.request as { url?: string; headers?: Record<string, string> };
-        if (req?.headers && isPeopleOp(op)) lastPeopleReq = { url: u, headers: req.headers };
+        const req = params.request as {
+          url?: string; headers?: Record<string, string>; method?: string;
+        };
+        /**
+         * ⚠️ **method 也要抄** —— 原来写死 GET。X 目前的 Followers 是 GET,
+         * 但写死意味着哪天它改成 POST,现象会是「404/400」而不是
+         * 「方法不对」—— 又一次查不出来。抄下来就不用赌。
+         */
+        if (req?.headers && isPeopleOp(op)) {
+          lastPeopleReq = { url: u, headers: req.headers, method: req.method ?? 'GET' };
+        }
       }
       return;
     }
@@ -587,6 +600,8 @@ export async function harvestTimeline(
   let emptyPages = 0;
   /** ⭐ 翻页没启动的原因 —— 空表示启动了 */
   let pagingSkipped: string | undefined;
+  /** ⭐ 翻页失败时真正发出去的那条 URL —— 不给它就只能猜 */
+  let failedUrl: string | undefined;
 
   for (let i = 1; i <= maxRounds; i++) {
     rounds = i;
@@ -715,8 +730,9 @@ export async function harvestTimeline(
    * 「至今仍是 null」(唯一的赋值在监听器回调里,TS 排不出先后)而收窄成
    * `never`。这不是类型体操,是**它确实无法证明**回调已经跑过。
    */
-  const baseReq = ((): { url: string; headers: Record<string, string> } | null =>
-    lastPeopleReq)();
+  const baseReq = ((): {
+    url: string; headers: Record<string, string>; method?: string;
+  } | null => lastPeopleReq)();
   const gate = {
     抄到请求: !!baseReq,
     X说还有下一页: paging.hasMore,
@@ -756,9 +772,21 @@ export async function harvestTimeline(
       let body: string;
       try {
         const res = await wc.executeJavaScript(
-          buildRefetchScript(nextUrl, baseReq.headers), true,
+          buildRefetchScript(nextUrl, baseReq.headers, baseReq.method), true,
         ) as { __body?: string; __err?: string };
-        if (res?.__err) { stopReason = `游标翻页:请求失败(${res.__err})`; break; }
+        if (res?.__err) {
+          /**
+           * ⭐⭐ 404 时**把真正发出去的 URL 交出来**。
+           *
+           * ⚠️ 用户 2026-09-18 连着两跑都是 404,而我两次都在**猜**是哪一环 ——
+           * 因为报告里只有「请求失败(404)」,没有那条 URL。
+           * 抄错了请求、游标换坏了、queryId 过期,三种成因在这句话里
+           * 长得一模一样,**不给 URL 就查不下去**(别猜、看真实数据)。
+           */
+          failedUrl = nextUrl;
+          stopReason = `游标翻页:请求失败(${res.__err})`;
+          break;
+        }
         if (!res?.__body) { stopReason = '游标翻页:响应是空的'; break; }
         body = res.__body;
       } catch (e) {
@@ -847,6 +875,7 @@ export async function harvestTimeline(
     /** ⭐ 游标翻了几页 —— 0 表示只靠滚动 */
     pagedRounds,
     pagingSkipped,
+    failedUrl,
     /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */
     lastRequest: lastPeopleReq ?? undefined,
   };

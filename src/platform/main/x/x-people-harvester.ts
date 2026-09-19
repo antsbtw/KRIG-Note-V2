@@ -296,7 +296,9 @@ export function withCursor(url: string, cursor: string): string | null {
 }
 
 /** 在页面上下文重发请求的脚本 —— 同源 fetch,鉴权自动带 */
-export function buildRefetchScript(url: string, headers: Record<string, string>): string {
+export function buildRefetchScript(
+  url: string, headers: Record<string, string>, method = 'GET',
+): string {
   /**
    * ⚠️ 只带 X 自己发过的头,不自己加 —— 多余的头可能触发风控。
    * ⚠️ 排除 `content-length` 等由浏览器自动算的头(手动带会冲突)。
@@ -309,7 +311,7 @@ export function buildRefetchScript(url: string, headers: Record<string, string>)
   return `(async function () {
     try {
       const r = await fetch(${JSON.stringify(url)}, {
-        method: 'GET',
+        method: ${JSON.stringify(method)},
         headers: ${JSON.stringify(safe)},
         credentials: 'include',
       });
