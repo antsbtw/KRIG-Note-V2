@@ -35,6 +35,7 @@
 import { webContents as allWebContents } from 'electron';
 import {
   extractPeopleFrom, findPagingCursor, withCursor, buildRefetchScript, isPeopleOp,
+  countTimelineEntries,
   type HarvestedPerson,
 } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
@@ -221,6 +222,25 @@ export interface HarvestReport {
   paging: { bottom?: string; top?: string; hasMore: boolean };
   /** 游标翻页的页数;0 = 没翻(不是采人页,或抄不到请求) */
   pagedRounds: number;
+  /**
+   * ⭐⭐ **解析率** —— 「X 给的我都接住了吗」。
+   *
+   * ⚠️ 它与游标回答的是**两个不同的问题**,缺一不可:
+   * · 游标(paging.hasMore)= **X 那边还有没有**
+   * · 解析率(这里)        = **我这边接没接住**
+   *
+   * 两者都过才叫「完整」:X 说没有更多了(采到头)且解析率 100%(没漏)。
+   * ⭐ 对 notifications/search/home 这些**没有外部分母**的页面,
+   * 这是唯一自给自足的完整性判据。
+   */
+  parseRate: {
+    /** X 在载荷里给了多少条目(游标条目不算) */
+    entries: number;
+    /** 我解出了多少(推 + 人) */
+    parsed: number;
+    /** parsed / entries;entries=0 时为 undefined(不编数) */
+    rate?: number;
+  };
   /**
    * ⭐⭐ 快速增量的**闭环回读** —— 「追上了没有」由数据回答,不由页数猜。
    *
@@ -467,6 +487,15 @@ export async function harvestTimeline(
    * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把几百 KB 搬进 IPC。
    */
   const unparsedSamples: Array<{ op: string; bytes: number; body: string }> = [];
+  /**
+   * ⭐⭐ **解析率的分母** —— X 在载荷里给了多少条目。
+   *
+   * 用户 2026-09-20:「每个页面都能够正确、完整的提取数据」。
+   * 有四个页面(notifications/search/home/articles)**没有外部分母**,
+   * 对它们「完整」只能问:**X 给的我都接住了吗**。
+   * 这个判据自给自足 —— 分母就在载荷里。
+   */
+  let entriesSeen = 0;
   /** ⭐ 采到的人 —— 与推文并行解,同一次采集两种都要 */
   const people = new Map<string, HarvestedPerson>();
   /** ⭐ 最后一次见到的分页游标 —— 「还有没有」由 X 说了算 */
@@ -556,6 +585,8 @@ export async function harvestTimeline(
           });
           try {
             const parsed = JSON.parse(r.body);
+            // ⭐ 先数 X 给了多少条目(解析率的分母),再解析
+            entriesSeen += countTimelineEntries(parsed);
             extractTweetsFrom(parsed, tweets);
             // ⭐ **人也解一遍** —— 同一个载荷可能既有推也有人
             //    (如时间线里的推荐关注模块);两种都要,不二选一
@@ -1075,6 +1106,7 @@ export async function harvestTimeline(
          * 快速增量会一路翻到闸门为止(现象:比全量还慢,而且看不出原因)。
          * 这正是本仓「回读看错元素」那类开环缺陷(采人页数 tweet 恒为 0)。
          */
+        entriesSeen += countTimelineEntries(parsed);
         const pagePeople = new Map<string, HarvestedPerson>();
         extractPeopleFrom(parsed, pagePeople);
         if (fastMode && measureKnown([...pagePeople.values()])) {
@@ -1186,6 +1218,19 @@ export async function harvestTimeline(
     paging,
     /** ⭐ 游标翻了几页 —— 0 表示只靠滚动 */
     pagedRounds,
+    /**
+     * ⭐⭐ 解析率 —— 分子是**去重后**的推 + 人。
+     *
+     * ⚠️ 去重后的数**可能小于条目数**,而那是正常的:
+     * 同一个人/同一条推在多个载荷里重复出现(滚动时 X 会重发前面的内容)。
+     * 所以 rate < 1 **不一定是漏**,要结合 stopReason 一起看 ——
+     * 这条在报告的判词里说清楚,不让人误读成「漏了 N 条」。
+     */
+    parseRate: {
+      entries: entriesSeen,
+      parsed: tweets.size + people.size,
+      rate: entriesSeen > 0 ? (tweets.size + people.size) / entriesSeen : undefined,
+    },
     /** ⭐ 快速增量的闭环回读 —— 「追上了没有」由数据回答 */
     fastIncremental: fastMode
       ? { knownBaseline: known?.size ?? 0, knownSeen, knownRun, caughtUp }

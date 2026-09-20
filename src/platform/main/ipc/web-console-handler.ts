@@ -745,9 +745,23 @@ export function registerWebConsoleHandlers(): void {
          */
         budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined,
         wsId: typeof p.wsId === 'string' ? p.wsId : undefined,
-        // ⭐ 顺序的归属用**语义页面名 + handle**,比 URL 稳(URL 会带 query)
-        pageLabel: current ? '(当前页)'
-          : `${pageName}:${(p.params as Record<string, string> | undefined)?.handle ?? ''}`,
+        /**
+         * ⭐ 顺序的归属用**语义页面名 + handle**,比 URL 稳(URL 会带 query)。
+         *
+         * ⚠️ **没有 handle 的页面不要留空尾巴** —— 2026-09-20 实测:
+         * 采通知页存出来的 list_source 是 `x.notifications:`(冒号后面空的),
+         * 因为通知页不带 handle 参数,而这里无条件拼 `:${handle ?? ''}`。
+         *
+         * ⭐ 通知页的归属**不是 URL 参数里的谁**,而是**该 ws 登录的账号** ——
+         * 多账号时两个 ws 的通知人会混进同一个 scope,**分不开**。
+         * 所以没有 handle 时退而用 wsId 标识,至少不同 ws 分得开。
+         */
+        pageLabel: current ? '(当前页)' : (() => {
+          const h = (p.params as Record<string, string> | undefined)?.handle;
+          if (h) return `${pageName}:${h}`;
+          const ws = typeof p.wsId === 'string' ? p.wsId : '';
+          return ws ? `${pageName}@${ws}` : pageName;
+        })(),
         // ⭐ 基准对账要知道这是**谁的**列表
         ownerHandle: (p.params as Record<string, string> | undefined)?.handle,
         /**
@@ -788,6 +802,11 @@ export function registerWebConsoleHandlers(): void {
         rounds: r.rounds,
         pagedRounds: r.pagedRounds,
         pagingSkipped: r.pagingSkipped,
+        /** ⭐ 解析率进留痕 —— 「X 给的接住了吗」日后回看要查得到 */
+        parseRate: r.parseRate
+          ? `${r.parseRate.parsed}/${r.parseRate.entries}`
+            + `(${r.parseRate.rate !== undefined ? (r.parseRate.rate * 100).toFixed(0) : '?'}%)`
+          : undefined,
         failedUrl: r.failedUrl,
         capturedUrl: r.capturedUrl,
         // ⭐ 「采完没有」进留痕 —— 全量/增量的第一个问题

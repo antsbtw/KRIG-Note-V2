@@ -816,6 +816,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   authorsWithRelation: number; payloads: number;
                   people?: number; peopleWithBio?: number; peopleWithRelation?: number;
                   pagedRounds?: number; pagingSkipped?: string;
+                  parseRate?: { entries: number; parsed: number; rate?: number };
                   failedUrl?: string; capturedUrl?: string;
                   paging?: { hasMore: boolean; cursor?: string };
                   reconcile?: { baseline?: number; got: number; rate?: number; note: string };
@@ -995,6 +996,18 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       <div style={{ wordBreak: 'break-all', opacity: 0.85 }}>
                         {d.capturedUrl && <div>📋 <b>抄到的请求</b>:{d.capturedUrl}</div>}
                         {d.failedUrl && <div>❌ <b>失败的请求</b>:{d.failedUrl}</div>}
+                      </div>
+                    )}
+                    {d.parseRate && d.parseRate.entries > 0 && (
+                      <div>
+                        🧮 <b>解析率</b>:X 给了 {d.parseRate.entries} 个条目,
+                        解出 <b>{d.parseRate.parsed}</b> 条
+                        {d.parseRate.rate !== undefined
+                          && <>({(d.parseRate.rate * 100).toFixed(0)}%)</>}
+                        <div style={{ opacity: 0.85 }}>
+                          ⚠️ 载荷会重发前面的内容,去重后小于条目数是正常的 ——
+                          **低比例不等于漏**;真要判漏看有没有整类结构没认出来
+                        </div>
                       </div>
                     )}
                     {d.pagingSkipped && (

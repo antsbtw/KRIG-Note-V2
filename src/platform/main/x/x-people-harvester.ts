@@ -356,3 +356,73 @@ export function buildRefetchScript(
     }
   })()`;
 }
+
+/**
+ * ⭐⭐ **数载荷里有多少个「条目」** —— 解析率的分母。
+ *
+ * ── 为什么每个页面都需要它(用户 2026-09-20:「每个页面都能够正确、
+ *    完整的提取数据」)──
+ *
+ * 有四个页面**根本没有外部分母**:notifications / search / home / articles
+ * —— X 不报「你收到过多少互动」「搜索结果共多少条」。
+ * 对它们,「采全了没有」只能问另一个问题:
+ *
+ *   **这个载荷里 X 给了我 M 条,我解出了 N 条?**
+ *
+ * 这个判据**自给自足**:分母来自载荷本身,不依赖任何外部计数。
+ * · N = M → 给什么解什么,解析器没漏
+ * · N < M → **有条目被丢弃**,要么是判据太严,要么是结构没认出来
+ *
+ * ⚠️ 它回答的**不是**「X 给全了吗」(那要靠游标),
+ * 而是「**X 给的我都接住了吗**」—— 两个问题都要答,缺一不可:
+ * · 游标说「还有没有」  → X 那边还有没有
+ * · 解析率说「漏没漏」  → 我这边接没接住
+ *
+ * ⭐ 实测(2026-09-06 真实通知载荷):39 个条目 → 解出 39,100%。
+ *
+ * ── 什么算一个「条目」──
+ *
+ * X 的时间线用 `entryId` 标识每一条(推文/通知/用户/游标/模块)。
+ * ⚠️ **游标条目不算** —— 它是分页控制,不是数据。
+ * ⚠️ **模块容器不重复计** —— 只数叶子条目。
+ */
+export function countTimelineEntries(node: unknown, depth = 0): number {
+  if (node === null || typeof node !== 'object' || depth > 24) return 0;
+  if (Array.isArray(node)) {
+    let n = 0;
+    for (const it of node) n += countTimelineEntries(it, depth + 1);
+    return n;
+  }
+  const o = node as Record<string, unknown>;
+
+  /**
+   * ⚠️ 只数**带 entryId 的叶子**,且排除游标。
+   * 游标的 entryId 形如 `cursor-bottom-…` / `cursor-top-…`,
+   * 把它算进分母会让解析率永远差那么一两条 ——
+   * 而「永远差一点」比「明显差很多」更难排查(看着像正常损耗)。
+   */
+  const eid = typeof o.entryId === 'string' ? o.entryId : undefined;
+  if (eid) {
+    if (/^cursor-/i.test(eid)) return 0;
+    /**
+     * ⭐ 模块条目(如「推荐关注」)里嵌着多个叶子,要数里面的。
+     * 判据:content.items 存在 = 这是个容器。
+     */
+    const content = o.content as Record<string, unknown> | undefined;
+    const items = content?.items;
+    if (Array.isArray(items)) {
+      let n = 0;
+      for (const it of items) {
+        const ie = (it as Record<string, unknown>)?.entryId;
+        if (typeof ie === 'string' && /^cursor-/i.test(ie)) continue;
+        n += 1;
+      }
+      return n;
+    }
+    return 1;
+  }
+
+  let n = 0;
+  for (const v of Object.values(o)) n += countTimelineEntries(v, depth + 1);
+  return n;
+}

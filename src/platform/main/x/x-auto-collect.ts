@@ -108,6 +108,14 @@ export interface AutoCollectReport {
   pagedRounds: number;
   /** ⭐ 没翻页的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
   pagingSkipped?: string;
+  /**
+   * ⭐⭐ **解析率** —— 「X 给的我都接住了吗」(用户 2026-09-20 的要求:
+   * 每个页面都要正确、完整地提取)。
+   *
+   * ⚠️ 与游标是**两个问题**:游标答「X 那边还有没有」,
+   * 这个答「我这边接没接住」。两者都过才叫完整。
+   */
+  parseRate?: { entries: number; parsed: number; rate?: number };
   failedUrl?: string;
   /**
    * ⭐ **增量结果** —— 与上一次快照比,新增/取关了谁。
@@ -503,7 +511,29 @@ export async function autoCollect(
    * (人想不想快)—— 退回全量那跑**是**完整列表,它必须写快照,
    * 否则第一次采一个新账号会永远建不起基线。两者差一个字,行为相反。
    */
-  const mayWriteSnapshot = !ranFast;
+  /**
+   * ⭐⭐ **只有「稳定名单」页才该写快照** —— 2026-09-20 实测暴露。
+   *
+   * ── 现象 ──
+   *
+   * 采通知页(x.notifications)采到 374 人,**也写进了快照表**。
+   * 但通知页的人**不是一个名单**:今天谁给你点赞就是谁,明天换一批。
+   * 拿它做差集会报出「373 人取关」这种毫无意义的结果 ——
+   * 而那种数字看起来像结论,会误导判断。
+   *
+   * ── 判据:这一页的人构成一个「名单」吗 ──
+   *
+   * · followers/following/verifiedFollowers → **是**。成员进出有意义,
+   *   「谁新来、谁走了」正是差集要回答的。
+   * · notifications/search/home/profile     → **否**。那是流水或单个人,
+   *   两次采集之间的差额只反映「这次刷到了谁」,不是关系变化。
+   *
+   * ⚠️ 用**白名单**不是黑名单:将来加新页面时,默认**不写**快照
+   * 才是安全的 —— 写错了要靠人看出「这个差集没意义」,
+   * 而不写最多是少个功能,不会产出假结论。
+   */
+  const isListPage = /^x\.(followers|following|verifiedFollowers)\b/i.test(pageLabel);
+  const mayWriteSnapshot = !ranFast && isListPage;
   if (r.people.length > 0 && mayWriteSnapshot) {
     const scope = pageLabel;
     const runId = new Date().toISOString();
@@ -834,6 +864,27 @@ export async function autoCollect(
   }
 
   /**
+   * ⭐⭐ **解析率进 notes** —— 每个页面都要能回答「完整吗」。
+   *
+   * ⚠️ 它是 note(事实说明)**不是 problem**(链路坏了):
+   * 去重后的数本来就可能小于条目数(滚动时 X 会重发前面的内容),
+   * 所以低比例**不等于漏** —— 判词里必须说清,否则人会去修没坏的东西。
+   * 这与采推那条「低比例不等于采漏」是同一个纪律。
+   */
+  if (r.parseRate && r.parseRate.entries > 0) {
+    const { entries, parsed, rate } = r.parseRate;
+    const pct = rate !== undefined ? (rate * 100).toFixed(0) : '?';
+    notes.push(
+      `解析率:X 给了 ${entries} 个条目,解出 ${parsed} 条(${pct}%)`
+      + '。⚠️ 载荷会重发前面的内容,去重后小于条目数是正常的 —— '
+      + '**低比例不等于漏**;真要判漏看「有没有整类结构没认出来」'
+      + (r.unparsedSamples.length > 0
+        ? `(本次有 ${r.unparsedSamples.length} 个载荷一条都没解出来,见样本)`
+        : '(本次没有「一条都没解出来」的载荷)'),
+    );
+  }
+
+  /**
    * ⭐⭐ **快速增量的如实说明** —— 用户 2026-09-19 拍板:
    * 「如实说明 + 建议全量周期」,不假装它是完整的对账。
    */
@@ -954,6 +1005,8 @@ export async function autoCollect(
     rounds: r.rounds,
     pagedRounds: r.pagedRounds,
     pagingSkipped: r.pagingSkipped,
+    /** ⭐ 解析率 —— 每个页面都有,包括没有外部分母的那些 */
+    parseRate: r.parseRate,
     failedUrl: r.failedUrl,
     /** ⭐ 抄到的那条请求 —— 只带 URL,请求头含鉴权不外传 */
     capturedUrl: r.lastRequest?.url,
