@@ -587,7 +587,29 @@ export async function autoCollect(
   /** 早于 notes 收集的说明(对账那段之前就要用) */
   const notesPre: string[] = [];
   let reconcile: AutoCollectReport['reconcile'];
-  if (r.people.length > 0 && opts.ownerHandle) {
+  /**
+   * ⭐⭐ **采推也要对账** —— 2026-09-20 用户指出的缺口。
+   *
+   * ── 这个门槛原来把采推整个挡在外面 ──
+   *
+   * 条件写的是 `r.people.length > 0`,而**采推那跑 people 恒为 0** →
+   * 对账段永远进不去 → 报告里只有 `coverage`(每条完整吗),
+   * 没有任何「**该采的都采到了吗**」。
+   *
+   * ⚠️ 这正是 followers 踩过的坑的翻版:「采到 250 人且条条字段齐全」
+   * 看着很好,实际漏了 2500 人。**完整 ≠ 齐全**:
+   * · coverage  = 采到的每条，字段全不全
+   * · reconcile = 该采的，采到了几成
+   * 实测 2026-09-20:自己的主页采到 476 条,而 X 报 4938 条 = **9.6%**,
+   * 而报告里**一个字都没提**。
+   *
+   * ⭐ 分母现成:`tweet_count` 就在人的画像里(getAuthorCounts 已经返回)。
+   */
+  const isProfile = /profile/i.test(opts.pageLabel ?? '');
+  const isWithReplies = /withreplies/i.test(opts.pageLabel ?? '');
+  /** 采推的页面:主页 / with_replies —— 它们有 tweet_count 这个分母 */
+  const tweetPageWithBaseline = (isProfile || isWithReplies) && r.tweets.length > 0;
+  if ((r.people.length > 0 || tweetPageWithBaseline) && opts.ownerHandle) {
     const owner = normalizeHandle(opts.ownerHandle);
     const isFollowing = /following/i.test(opts.pageLabel ?? '');
     const isFollowers = /followers/i.test(opts.pageLabel ?? '');
@@ -614,8 +636,46 @@ export async function autoCollect(
         why = `查基准出错:${String(err)}`;
       }
     }
+    /**
+     * ⭐⭐ **采推的分母 = tweet_count**(用户 2026-09-02 定的:
+     * 「tweet_count 是采集完整度的分母」)。
+     *
+     * ⚠️ 分母要**优先用这一跑刚采到的**,而不是库里的旧值 ——
+     * 主页载荷里就带着本人的 tweet_count,那是**与采集同一时刻**的数。
+     * 用库里的旧值会引入时间差:实测 following 那次,分母是两天前的 2553、
+     * 采集是两天后的 2884,差出来的 91 人**分不清是时间差还是真漏**。
+     * 同时刻取分母,这条歧义就没有了。
+     */
+    if (tweetPageWithBaseline) {
+      const selfInPayload = r.people.find((p) => p.handle === owner);
+      if (selfInPayload?.tweetCount !== undefined) {
+        baseline = selfInPayload.tweetCount;
+        why = '';
+      } else {
+        try {
+          const counts = await getAuthorCounts(owner);
+          baseline = counts.tweetCount;
+          if (baseline === undefined) {
+            why = counts.countsAt
+              ? `库里有 @${owner} 的行(${counts.countsAt} 采的)但**没有发推数**`
+              : `库里**没有 @${owner} 这个人** —— 先采一次他的主页(x.profile)`;
+          } else {
+            /** ⚠️ 用了旧分母就**说出来** —— 时间差会让对账出现说不清的尾巴 */
+            why = `分母取自库里 ${counts.countsAt ?? '?'} 的快照,`
+              + '不是这一跑同时刻的数 —— 期间新发的推会让比例偏低';
+          }
+        } catch (err) {
+          why = `查基准出错:${String(err)}`;
+        }
+      }
+    }
 
-    const got = r.people.length;
+    /**
+     * ⭐ 分子:采人那跑数人,采推那跑数推 —— **对账的两边必须是同一种东西**。
+     * ⚠️ 写死 `r.people.length` 会让采推那跑的分子恒为 0(人本来就是 0),
+     * 对账结果恒为「0%」—— 那比不对账更糟,因为它看起来像个结论。
+     */
+    const got = tweetPageWithBaseline ? r.tweets.length : r.people.length;
     if (isVerified) {
       /**
        * ⭐⭐ **交叉基准** —— X 不报蓝V关注者总数,但 followers 列表里
@@ -669,12 +729,31 @@ export async function autoCollect(
     } else {
       const rate = baseline > 0 ? got / baseline : 0;
       const pct = (rate * 100).toFixed(0);
+      const unit = tweetPageWithBaseline ? '条推' : '人';
+      /**
+       * ⚠️ 采推的**分母语义和采人不一样**,判词必须跟着变:
+       * · 采人:followers_count 就是这个列表该有的人数,**可以直接比**
+       * · 采推:tweet_count 是**这个人发过的全部推**,而主页时间线
+       *   **本来就不给你全部** —— X 只给最近的一段,越往前越稀疏,
+       *   而且转推/回复算不算进 tweet_count 各页口径还不一样。
+       * 所以采推比例低**不能直接判成「没采完」** —— 那会把「X 就是不给」
+       * 说成「我们采漏了」,指向完全错误的修法。
+       */
       reconcile = {
         baseline, got, rate,
-        note: rate >= 0.9
-          ? `采到 ${got}/${baseline}(${pct}%)—— 够了(基准是活的,采集期间有人关注/取关很正常)`
-          : `⚠️ 采到 ${got}/${baseline}(${pct}%)—— **明显少于基准**,`
-            + `多半没采完(看游标:${r.paging.hasMore ? 'X 说还有下一页' : 'X 说没了'})`,
+        note: tweetPageWithBaseline
+          ? `采到 ${got}/${baseline} ${unit}(${pct}%)`
+            + `${why ? `;⚠️ ${why}` : ''}`
+            + `;停止原因:${r.stopReason}`
+            + '。⚠️ **低比例不等于采漏** —— 主页时间线本就不给全部历史'
+            + '(X 越往前越稀疏,且转推/回复是否计入 tweet_count 口径不一)。'
+            + `真判据仍是游标:${r.paging.hasMore
+              ? '**X 说还有下一页** —— 加大轮数/预算还能拿到更多'
+              : '**X 说没有更多了** —— 这一页给到头了'}`
+          : rate >= 0.9
+            ? `采到 ${got}/${baseline}(${pct}%)—— 够了(基准是活的,采集期间有人关注/取关很正常)`
+            : `⚠️ 采到 ${got}/${baseline}(${pct}%)—— **明显少于基准**,`
+              + `多半没采完(看游标:${r.paging.hasMore ? 'X 说还有下一页' : 'X 说没了'})`,
       };
     }
   }
