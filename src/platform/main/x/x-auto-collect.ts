@@ -987,12 +987,36 @@ export async function autoCollect(
           'text', 'author_handle', 'created_at', 'lang', 'metrics',
           'tweet_url', 'author_avatar', 'author_name_at_post', 'conversation_id',
         ] as const;
+        /**
+         * ⭐⭐ 「空」的判据 —— **回读是验证工具本身,它误判比采集出错更坏**。
+         *
+         * ── 用户 2026-09-21 实测踩到(x.home 那跑)──
+         *
+         * 报告红着脸说「created_at 整片为空(抽查 20 条全空)」,
+         * 而库里查出来是 **1785/1785 全有值**。工具谎报,不是采集丢了。
+         *
+         * 真因:`created_at` 在库里是 **datetime**(写入处 `new Date(...)`),
+         * SDK 读回来是 `Date` 实例 —— 而 `Object.keys(new Date())` 是 `[]`,
+         * 于是「空对象」那一条把**每一个合法时间**都判成了空。
+         *
+         * ⚠️ 「空对象」这条规则本身是**给 `metrics` 用的**(真的 `{}` 才算空),
+         * 不能套到所有 object 上:Date / 将来的 RecordId / Uuid 都是 object
+         * 但都不是「空」。所以只对**普通对象**适用。
+         *
+         * ⭐ 与本仓库既有的一条教训同形:报告自述与库里事实不一致时,
+         * **先怀疑观测工具**,别急着改被观测的代码(差点就去改采集了)。
+         */
+        const isEmptyValue = (v: unknown): boolean => {
+          if (v === undefined || v === null || v === '') return true;
+          if (typeof v !== 'object') return false;
+          // ⚠️ Date 等内建对象没有自有可枚举键,但有值 —— 只判普通对象
+          const proto = Object.getPrototypeOf(v);
+          const isPlain = proto === Object.prototype || proto === null;
+          if (!isPlain) return false;
+          return Object.keys(v as object).length === 0;
+        };
         const gaps = OWNED.map((f) => {
-          const empty = stored.filter((row) => {
-            const v = (row as Record<string, unknown>)[f];
-            return v === undefined || v === null || v === ''
-              || (typeof v === 'object' && Object.keys(v as object).length === 0);
-          }).length;
+          const empty = stored.filter((row) => isEmptyValue((row as Record<string, unknown>)[f])).length;
           return { field: f, empty, of: stored.length };
         }).filter((g) => g.empty > 0);
         dbCheck = {
