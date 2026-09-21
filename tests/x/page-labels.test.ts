@@ -81,6 +81,55 @@ describe('⭐⭐ 页面下拉的可读性与双向导航', () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
+  it('⭐⭐⭐ **手动选页面/改参数**必须关掉自动跟随(否则选了会跳回去)', () => {
+    /**
+     * ⚠️⚠️ 用户 2026-09-20 实测:「选择任何选项都自动跳回 x.home」。
+     *
+     * `acFollow` 每 1.5 秒把左边的当前页写回右边。人在左边停在 x.home 时,
+     * 下拉无论选什么都会在 1.5 秒内**被覆盖回去** ——
+     * 现象是「下拉点了没用」,而人只会以为控件坏了。
+     *
+     * ⭐ 判据:**人手动选了 = 明确表达意图**,自动跟随是便利,不该压过它。
+     * ⚠️ 下拉和参数框**两个都要**:只修下拉的话,填 handle 填一半
+     * 仍会被清掉,而那个更难查(以为是自己手滑)。
+     */
+    const ui = strip(readFileSync(
+      join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'));
+
+    /** ① 采集页下拉的 onChange 必须关掉跟随 */
+    const selIdx = ui.indexOf('value={acPage}');
+    expect(selIdx, '找不到采集页的下拉').toBeGreaterThan(0);
+    const sel = ui.slice(selIdx, selIdx + 240);
+    expect(
+      sel,
+      '手动选页面没关掉「跟着左边走」—— 1.5 秒后会被左边的页面覆盖回去,'
+      + '现象是「下拉点了没用」',
+    ).toMatch(/setAcFollow\(false\)/);
+
+    /** ② 参数框的 onChange 同样要关 */
+    const inpIdx = ui.indexOf('placeholder={k}');
+    expect(inpIdx, '找不到参数输入框').toBeGreaterThan(0);
+    const inp = ui.slice(inpIdx, inpIdx + 200);
+    expect(
+      inp,
+      '手动改参数没关掉「跟着左边走」—— handle 填一半会被清掉',
+    ).toMatch(/setAcFollow\(false\)/);
+  });
+
+  it('⭐⭐ 关掉自动跟随后要说清「现在什么状态、怎么恢复」', () => {
+    /**
+     * ⚠️ 只是不跟了、却不说,人只知道「它不动了」,
+     * 不知道为什么、也不知道怎么回去 —— 那是另一种静默。
+     */
+    const ui = strip(readFileSync(
+      join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'));
+    const i = ui.indexOf('{!acFollow');
+    expect(i, '关掉跟随后没有任何状态提示').toBeGreaterThan(0);
+    const blk = ui.slice(i, i + 500);
+    expect(blk, '没说清当前选的是哪一页').toMatch(/acPage/);
+    expect(blk, '没告诉人怎么恢复自动跟随').toMatch(/恢复|勾上/);
+  });
+
   it('⭐⭐⭐ 「跳过去」必须先关掉「跟着左边走」(否则选择被覆盖)', () => {
     /**
      * ⚠️ acFollow 每 1.5 秒把左边的当前页写回右边。

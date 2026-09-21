@@ -736,17 +736,37 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     onChange={(e) => setAcFollow(e.target.checked)} />
                   跟着左边走
                 </label>
+                {/**
+                  * ⭐ 关掉之后要**说清现在是什么状态、怎么回去** ——
+                  * 否则人只知道「它不跟了」,不知道为什么、也不知道怎么恢复。
+                  */}
                 <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                  {acCurrent?.name
-                    ? <>左边现在在 <b>{acCurrent.name}</b> —— 下拉与参数已自动填好,点采集即可</>
-                    : acCurrent?.url
-                      ? <>⚠️ 认不出左边这个页面({String(acCurrent.url).slice(0, 60)})—— 请手动选</>
-                      : '(还没读到左边的页面)'}
+                  {!acFollow
+                    ? <>✋ <b>手动模式</b> —— 你选的是 <b>{pageLabels[acPage] ?? acPage}</b>,
+                      左边在 {acCurrent?.name ?? '?'}。
+                      点「← 跳过去」让左边跟过来;勾上「跟着左边走」可恢复自动</>
+                    : acCurrent?.name
+                      ? <>左边现在在 <b>{pageLabels[acCurrent.name] ?? acCurrent.name}</b> —— 下拉与参数已自动填好,点采集即可</>
+                      : acCurrent?.url
+                        ? <>⚠️ 认不出左边这个页面({String(acCurrent.url).slice(0, 60)})—— 请手动选</>
+                        : '(还没读到左边的页面)'}
                 </span>
               </div>
               <div className="krig-webc__row">
+                {/**
+                  * ⭐⭐ **手动选页面 = 关掉自动跟随**(用户 2026-09-20 实测:
+                  * 「选择任何选项都自动跳回 x.home」)。
+                  *
+                  * ⚠️ `acFollow` 每 1.5 秒把左边的当前页写回这里。人在左边停在
+                  * x.home 时,无论选什么都会在 1.5 秒内**被覆盖回去** ——
+                  * 现象是「下拉点了没用」,而人只会以为是控件坏了。
+                  *
+                  * ⭐ 判据:**人手动选了,就是明确表达「我要采这个」** ——
+                  * 自动跟随是便利,不该压过人的明确意图。
+                  * (「跳过去」那条也是同一个道理,已经关了。)
+                  */}
                 <select className="krig-webc__in" style={{ flex: 1 }} value={acPage}
-                  onChange={(e) => setAcPage(e.target.value)}>
+                  onChange={(e) => { setAcFollow(false); setAcPage(e.target.value); }}>
                   {/**
                     * ⭐ 显示**人话 + 代码名** —— 用户 2026-09-20 问「哪个是 status?」。
                     * ⚠️ 两个都给:人话让人能选,代码名让编排/排查对得上。
@@ -772,9 +792,13 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     : k === 'q' ? setGotoQuery : () => {};
                   if (k === 'f') return null;   // 搜索模式有默认值,不占一格
                   return (
+                    /**
+                     * ⚠️ 参数框同理:手动填了 handle/tweetId 也不该被
+                     * 自动跟随覆盖回去 —— 否则填一半就被清掉,查不出原因。
+                     */
                     <input key={k} className="krig-webc__in" style={{ width: 150 }}
                       value={val} placeholder={k}
-                      onChange={(e) => set(e.target.value)} />
+                      onChange={(e) => { setAcFollow(false); set(e.target.value); }} />
                   );
                 })}
                 <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
