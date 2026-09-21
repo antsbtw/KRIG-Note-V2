@@ -729,8 +729,38 @@ export function registerWebConsoleHandlers(): void {
       const resolved = resolveSemanticPage(pageName,
       typeof p.params === 'object' && p.params ? p.params as Record<string, string> : {});
       if (!resolved) {
+        /**
+         * ⭐⭐ **解析不出来有两种原因,处置完全相反** —— 用户 2026-09-20 实测。
+         *
+         * 现象:选 x.status 没填 tweetId,报
+         *   「未登记的页面名『x.status』—— 可用:…, x.status, …」
+         * **同一句话里说它未登记、又把它列在可用清单里** ——
+         * 而真因是「参数不全」,不是「名字不认识」。
+         *
+         * ⚠️ 同一个坑 2026-09-18 踩过一次(verifiedFollowers 没传 handle,
+         * 报的也是「未登记」),那次只修了参数框渲染、**没修这条消息本身**,
+         * 于是换个页面又踩一遍。
+         *
+         * ⭐ 判据:**页面名在不在真表里** ——
+         * 在 → 是参数问题,告诉他缺哪个;不在 → 才是名字问题。
+         */
+        const known = listPageNames().flatMap((t) => t.names);
+        if (known.includes(pageName)) {
+          const need = PAGE_PARAMS[pageName] ?? [];
+          const got = (typeof p.params === 'object' && p.params
+            ? p.params as Record<string, string> : {});
+          const missing = need.filter((k) => !String(got[k] ?? '').trim());
+          return failFast('autoCollect',
+            `「${pageName}」的参数不全 —— 需要 ${need.join('、') || '(无)'},`
+            + `缺:${missing.join('、') || '(参数都有,但值不合法)'}。`
+            + (missing.includes('tweetId')
+              ? '⭐ tweetId 是推文链接 /status/ 后面那串数字'
+              : missing.includes('handle')
+                ? '⭐ handle 填账号名(不带 @)'
+                : ''), t0);
+        }
         return failFast('autoCollect',
-          `未登记的页面名「${pageName}」—— 可用:${listPageNames().flatMap((t) => t.names).join(', ')}`, t0);
+          `未登记的页面名「${pageName}」—— 可用:${known.join(', ')}`, t0);
       }
       url = resolved.url;
     }

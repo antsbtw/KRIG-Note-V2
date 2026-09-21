@@ -861,17 +861,38 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     void run('goto', { name: acPage, params },
                       () => api()!.goto(wcId(), acPage, params));
                   };
+                  /**
+                   * ⭐⭐ **参数没填就别让点** —— 用户 2026-09-20 实测:
+                   * 选了 x.status 没填 tweetId,点采集才报错,
+                   * 而报的还是「未登记的页面名」(误导)。
+                   * ⭐ 缺什么当场说,比点完再报错强。
+                   */
+                  const need = pageParams[acPage] ?? [];
+                  const valOf = (k: string) => k === 'handle' ? gotoHandle
+                    : k === 'tweetId' ? gotoTweetId
+                    : k === 'q' ? gotoQuery : 'x';   // 'f' 有默认值,不算缺
+                  const missing = need.filter((k) => k !== 'f' && !valOf(k).trim());
+                  const blocked = missing.length > 0;
                   return (
                     <>
-                      <button type="button" className="krig-webc__in" disabled={busy !== null}
+                      {blocked && (
+                        <span className="krig-webc__note" style={{ margin: 0, color: '#e8a33d' }}>
+                          ⚠️ 还缺:<b>{missing.join('、')}</b>
+                          {missing.includes('tweetId') && '(推文链接 /status/ 后面那串数字)'}
+                        </span>
+                      )}
+                      <button type="button" className="krig-webc__in"
+                        disabled={busy !== null || blocked}
                         onClick={jump}
                         title="按右边选的页面+参数,把左边浏览器跳过去 —— 先看到页面,再决定采不采。⚠️ 会关掉「跟着左边走」,否则选择会被覆盖回去">
                         ← 跳过去
                       </button>
-                      <button type="button" className="krig-webc__go" disabled={busy !== null}
+                      <button type="button" className="krig-webc__go"
+                        disabled={busy !== null || blocked}
                         onClick={() => collect(false)}
                         title="全量:采到底(约 17 分钟 / 2700 人)。⭐ 基线只由它维护,「谁取关了」也只有它答得出">采集</button>
-                      <button type="button" className="krig-webc__go" disabled={busy !== null}
+                      <button type="button" className="krig-webc__go"
+                        disabled={busy !== null || blocked}
                         onClick={() => collect(true)}
                         title="快速增量:翻到遇见上次采过的人就停(十几秒)。⚠️ 只答「谁新来」,看不见取关;不写快照">快速增量</button>
                     </>

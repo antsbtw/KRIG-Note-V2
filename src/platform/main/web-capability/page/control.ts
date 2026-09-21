@@ -149,7 +149,27 @@ export class ControlEngine {
       if (!hit) {
         // ⚠️ fail loud:不兜底、不猜 —— 兜底会导航到别的页面,
         //    而那正是「把首页当搜索结果」的成因
-        const known = this.pages.names?.().join(', ') ?? '(表未提供 names())';
+        const names = this.pages.names?.() ?? [];
+        const known = names.length ? names.join(', ') : '(表未提供 names())';
+        /**
+         * ⭐⭐ **解析失败有两种原因,别都说成「未登记」**。
+         *
+         * 用户 2026-09-20 实测:选 x.status 没填 tweetId,报
+         * 「未登记的语义页面: x.status(可用: …, x.status, …)」——
+         * **同一句话说它未登记、又把它列进可用清单**,自相矛盾。
+         * 真因是参数不全。两者处置相反:一个要换名字,一个要填参数。
+         *
+         * ⚠️ 这一层不认识各站的参数表(那是 adapter 的知识),
+         * 但「名字在不在表里」它答得了 —— 足够把两种原因分开。
+         */
+        if (names.includes(target.name)) {
+          const given = Object.entries(target.params ?? {})
+            .map(([k, v]) => `${k}=${String(v ?? '') || '(空)'}`).join('、');
+          return failed(
+            `「${target.name}」是登记过的页面,但**这组参数解析不出 URL**`
+            + `(传入:${given || '(没传参数)'})—— 多半是必填参数缺了或值不合法,`
+            + '不是页面名的问题', false);
+        }
         return failed(`未登记的语义页面: ${target.name}(可用: ${known})`, false);
       }
       url = hit.url;
