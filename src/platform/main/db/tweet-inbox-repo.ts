@@ -43,6 +43,7 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       created_at: $created_at,
       in_reply_to: $in_reply_to,
       in_reply_to_user: $in_reply_to_user,
+      conversation_id: $conversation_id,
       expires_at: $expires_at,
       source: $source,
       search_recipe: $search_recipe,
@@ -64,7 +65,8 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       tweet_id: record.tweet_id,
       text: record.text,
       // 发推当时的展示名快照(与 x_author.display_name 语义不同 —— 后者是当前名,会变)
-      author_name_at_post: record.author_name || undefined,
+      /** ⚠️ 两个来源都认:toRecord 走 author_name_at_post,别的路径走 author_name */
+      author_name_at_post: record.author_name_at_post || record.author_name || undefined,
       author_handle: record.author_handle,
       author_avatar: record.author_avatar ?? undefined,
       tweet_url: record.tweet_url ?? undefined,
@@ -75,6 +77,17 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       created_at: record.created_at ? new Date(record.created_at) : undefined,
       in_reply_to: record.in_reply_to ?? undefined,
       in_reply_to_user: record.in_reply_to_user ?? undefined,
+      /**
+       * ⭐⭐ **会话根** —— 2026-09-21 实测:这个字段在 schema(带索引)、
+       * 解析器、TweetInboxRecord 类型、toRecord 里**都补齐了**,
+       * 唯独**这条写库语句**(第四处)没跟上 → 库里仍然恒空。
+       *
+       * ⚠️ 现象极具迷惑性:同一批里 tweet_url / author_avatar 都写进去了,
+       * 只有它是空的 —— 因为那两个在这张清单里,它不在。
+       * ⭐ 「清单不会自己长」在这里是**第四刀**:一个字段要在四处都登记
+       * (schema / 类型 / toRecord / 本语句),漏任何一处都**静默丢失**。
+       */
+      conversation_id: record.conversation_id ?? undefined,
       // ⚠️ undefined → NONE(永久保留);绝不写 null —— option<T> 只认 NONE,NULL 会被拒
       expires_at: record.expires_at ? new Date(record.expires_at) : undefined,
       source: record.source,

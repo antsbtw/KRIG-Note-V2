@@ -154,6 +154,78 @@ describe('⭐⭐ 单条推文的完整性', () => {
     ).not.toMatch(/accepted|replied|ai_verdict|filter_score/);
   });
 
+  it('⭐⭐⭐ 一个字段要在**四处**都登记,漏一处就静默丢失', () => {
+    /**
+     * ⚠️⚠️ 2026-09-21 实测(这是同族**第四刀**):
+     *
+     * `conversation_id` 我在 schema(早就有,带索引)、解析器、
+     * `TweetInboxRecord` 类型、`toRecord` 四处里补了**三处**,
+     * 唯独漏了 **`upsertTweet` 的写库语句** —— 那条 SQL 把字段
+     * **逐个写死**在 SET 子句和参数对象里。
+     *
+     * 结果:同一批 12 条推,`tweet_url`/`author_avatar` 都进库了,
+     * **只有 conversation_id 全空** —— 因为那两个在清单里,它不在。
+     * 现象极具迷惑性:看起来像「这个字段解析不出来」,实则是登记漏了。
+     *
+     * ⭐ 判据:**凡是 toRecord 写的字段,写库语句里必须都有** ——
+     * 不是钉某一个字段(那样加新字段又会漏),而是**两张清单对照**。
+     */
+    const repo = strip(readFileSync(
+      join(process.cwd(), 'src/platform/main/db/tweet-inbox-repo.ts'), 'utf-8'));
+
+    /** toRecord 里写了哪些列 */
+    const ti = collect.indexOf('function toRecord');
+    const tbody = collect.slice(ti, collect.indexOf('\n}', ti));
+    const written = [...tbody.matchAll(/^\s{4}(\w+):/gm)].map((m) => m[1]);
+    expect(written.length, 'toRecord 里一个字段都没解析出来(守卫锚点失效?)')
+      .toBeGreaterThan(8);
+
+    /** upsertTweet 的 SET 子句里有哪些列 */
+    const ui = repo.indexOf('export async function upsertTweet');
+    expect(ui, '找不到 upsertTweet').toBeGreaterThan(0);
+    const ubody = repo.slice(ui, ui + 4000);
+    const inSql = new Set([...ubody.matchAll(/(\w+):\s*\$\w+/g)].map((m) => m[1]));
+
+    /**
+     * ⚠️ 白名单 —— **只放「本来就不该有对应库列」的**,别拿它掩盖真丢失。
+     *
+     * · expires_at / filter_reason:写库时自己算,不从 record 来
+     * · author_name:**内存字段,不是库列** —— 库里那列叫 `author_name_at_post`。
+     *   它有别的消费者(registerSeenAuthor 的 displayName、收件箱显示),
+     *   所以 toRecord 两个都赋值是对的,不是重复。
+     *   ⚠️ 加新条目前先问:**这个字段真的不该进库吗?**
+     *   —— conversation_id 当初要是被图省事加进白名单,这个 bug 就永远查不出来了。
+     */
+    const NOT_FROM_RECORD = new Set(['expires_at', 'filter_reason', 'author_name']);
+    const missing = written.filter((f) => !inSql.has(f) && !NOT_FROM_RECORD.has(f));
+    expect(
+      missing,
+      `toRecord 写了这些字段,但 upsertTweet 的 SQL 里没有 —— **会静默丢失**:`
+      + `${missing.join('、')}`,
+    ).toEqual([]);
+
+    /**
+     * ⭐⭐ **SET 子句引用的每个变量,参数对象里必须真的传值**。
+     *
+     * ⚠️ 实测假绿(本轮注入②):SET 里写着 `conversation_id: $conversation_id`、
+     * 参数对象里却没有 `conversation_id:` —— SQL 引用了一个**不存在的变量**,
+     * 而上面那条检查只扫 SET 子句,照样全绿。
+     * ⭐ 登记一个字段要**两处都到位**:声明用哪个变量 + 真的给那个变量赋值。
+     */
+    const paramsStart = ubody.indexOf('}`,');
+    expect(paramsStart, '找不到参数对象的起点').toBeGreaterThan(0);
+    const paramsBlk = ubody.slice(paramsStart);
+    const bound = new Set(
+      [...paramsBlk.matchAll(/^\s{6}(\w+):/gm)].map((m) => m[1]));
+    const declaredVars = [...ubody.slice(0, paramsStart)
+      .matchAll(/(\w+):\s*\$(\w+)/g)].map((m) => m[2]);
+    const unbound = [...new Set(declaredVars)].filter((v) => !bound.has(v));
+    expect(
+      unbound,
+      `SQL 里用了这些 $变量,参数对象却没给值 —— 写进去的会是空:${unbound.join('、')}`,
+    ).toEqual([]);
+  });
+
   it('⭐⭐ 整片为空要**报出来**,不是只记个数', () => {
     /**
      * ⚠️ 「某字段抽查 20 条全空」= 采集链路真的断了(解析没取/没写库/类型没声明),
