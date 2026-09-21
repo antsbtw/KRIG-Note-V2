@@ -724,13 +724,6 @@ export async function autoCollect(
    * 守卫当时只钉了「status 的条件里不能有 ownerHandle」,
    * 没钉「它会不会被前一条吃掉」—— 那是守卫的盲区。
    */
-  /** ⚠️ 临时诊断(2026-09-20 查「withReplies 没出对账」)—— 定位后删 */
-  console.log('[对账诊断]', JSON.stringify({
-    pageLabel: opts.pageLabel, ownerHandle: opts.ownerHandle,
-    people: r.people.length, tweets: r.tweets.length,
-    isStatus, tweetPageWithBaseline,
-    willEnter: !isStatus && (r.people.length > 0 || tweetPageWithBaseline) && !!opts.ownerHandle,
-  }));
   if (!isStatus && (r.people.length > 0 || tweetPageWithBaseline) && opts.ownerHandle) {
     const owner = normalizeHandle(opts.ownerHandle);
     const isFollowing = /following/i.test(opts.pageLabel ?? '');
