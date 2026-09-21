@@ -109,3 +109,59 @@ describe('长文正文不能丢', () => {
     expect(t.isLongText).toBe(true);
   });
 });
+
+/**
+ * ⭐⭐ 列表页(UserArticlesTweets)的载荷 —— **与单篇页不是一回事**
+ *
+ * 2026-09-21 实测量过 72 条,`article_results.result` 的键**恒定**是:
+ * `cover_media / id / lifecycle_state / metadata / preview_text / rest_id / title`
+ * —— **没有 `content_state`**(72/72 条 hasContentState:false)。
+ *
+ * 所以「列表页取不到正文」**不是 bug**,是 X 的设计;
+ * 但 `preview_text` 在载荷里,不取就是白丢。
+ */
+describe('长文列表页:只有标题+摘要', () => {
+  /** 真实形状(取自 [🔬article量结构] 日志,72/72 条一致) */
+  function listPagePayload() {
+    return {
+      data: { x: { result: {
+        __typename: 'Tweet',
+        rest_id: '2098551151192866818',
+        core: { user_results: { result: {
+          rest_id: '222', core: { screen_name: 'KA594594', name: '艾地声Edysen' },
+        } } },
+        legacy: {
+          id_str: '2098551151192866818',
+          full_text: 'https://t.co/abcd1234',
+          created_at: 'Sat Sep 06 10:00:00 +0000 2026',
+          lang: 'zh',
+        },
+        article: { article_results: { result: {
+          // ⚠️ 真实键:没有 content_state
+          id: 'x', rest_id: 'y', lifecycle_state: {}, cover_media: {}, metadata: {},
+          title: '乡村文化人记忆',
+          preview_text: '现代人的自由,很大程度上是一部"逃离共同体"的历史。逃离宗族,逃离村社,逃离等级身份。',
+        } } },
+      } } },
+    };
+  }
+
+  it('⭐ 摘要不能丢 —— 载荷里有 preview_text 就要收', () => {
+    const t = parseOne(listPagePayload());
+    expect(t.text).toContain('乡村文化人记忆');
+    expect(t.text).toContain('逃离共同体');
+  });
+
+  it('⭐ 没有 content_state 时不能退化成 t.co 短链', () => {
+    const t = parseOne(listPagePayload());
+    expect(t.text).not.toBe('https://t.co/abcd1234');
+  });
+
+  it('⚠️ 摘要不是正文:isLongText 必须为假,否则报告谎报「全文已取回」', () => {
+    expect(parseOne(listPagePayload()).isLongText).toBeFalsy();
+  });
+
+  it('⭐ 单篇页有正文时,isLongText 才为真(对照)', () => {
+    expect(parseOne(realArticlePayload()).isLongText).toBe(true);
+  });
+});

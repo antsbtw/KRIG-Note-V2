@@ -337,6 +337,8 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
      * 要还原样式得再引一层格式模型 —— 采集层的职责是**不丢字**,
      * 富文本还原是消费侧的事(与既有「采集层无条件全收、不做判断」一致)。
      */
+    /** ⚠️ 真正的**正文**(不含标题/摘要)—— 只有它才算「长文全文取回」 */
+    let articleBody = '';
     const articleText = ((): string | undefined => {
       const art = o.article as Record<string, unknown> | undefined;
       const ares = (art?.article_results as Record<string, unknown> | undefined)
@@ -365,8 +367,28 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         || pick(meta?.title)
         || pick((meta?.title as Record<string, unknown> | undefined)?.text)
         || pick(cs?.title);
-      const full = title && body ? `${title}\n\n${body}` : (title || body);
-      return full || undefined;
+      /**
+       * ⭐⭐ **列表页只有标题 + 摘要,没有正文** —— 2026-09-21 实测量过 72 条。
+       *
+       * `UserArticlesTweets` 载荷里 `article_results.result` 的键**恒定**是:
+       * `cover_media / id / lifecycle_state / metadata / preview_text / rest_id / title`
+       * —— **没有 `content_state`**(72/72 条 `hasContentState:false`)。
+       *
+       * ⭐ 正文只在**单篇页**(`TweetDetail`)的载荷里才有 —— 同一个 `article`
+       * 字段,两个页面给的深度不同。所以「列表页取不到正文」**不是 bug**,
+       * 想要正文得逐篇进详情页(另一个立项)。
+       *
+       * ⚠️ 但 `preview_text` **就在载荷里,不取就是白丢** ——
+       * 卡片上显示的那段摘要正是它。只存标题的话,库里就是
+       * 「乡村文化人记忆」这样 7 个字,检索和判断都用不上。
+       *
+       * ⚠️ 摘要**不是正文**,不能假装是:所以 `isLongText` 不因它为真
+       * (见下面 `!!articleBody`),否则报告会把 7 字标题算成「全文已取回」。
+       */
+      articleBody = body;
+      const preview = pick(ares.preview_text);
+      const parts = [title, body || preview].filter((x) => x.length > 0);
+      return parts.length ? parts.join('\n\n') : undefined;
     })();
 
     // ⚠️ views.count 是**字符串**,且 state=Enabled 时没有数字
@@ -467,7 +489,7 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         inReplyToScreenName: s('in_reply_to_screen_name'),
         conversationId: s('conversation_id_str'),
         quotedStatusId: s('quoted_status_id_str'),
-        isLongText: !!noteText || !!articleText,
+        isLongText: !!noteText || !!articleBody,
         metrics: {
           likes: n('favorite_count'), retweets: n('retweet_count'),
           replies: n('reply_count'), quotes: n('quote_count'),
