@@ -30,7 +30,28 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
     avatar: record.author_avatar,
   }).catch((e) => console.warn('[tweet-inbox-repo] 作者登记失败(不拦入库):', e));
   await db.query(
-    `INSERT IGNORE INTO x_tweet {
+    /**
+     * ⭐⭐⭐ **INSERT IGNORE + ON DUPLICATE** —— 2026-09-21 实测揪出的真 bug。
+     *
+     * ── 现象 ──
+     * 函数名叫 `upsertTweet`,行为却是**纯 insert-ignore**:
+     * `tweet_id` 已存在就整条跳过,**一个字段都不更新**,而且**不抛错**
+     * → 调用方 `saved += 1` 照加 → 报告显示「入库 50 条」,库里纹丝不动。
+     *
+     * 实测坐实(直接对库跑):先 INSERT 一条 text='原始',
+     * 再 INSERT IGNORE 同 id 且 text='改过了' + conversation_id='NEW'
+     * → 读回来仍是 `text:'原始'`、`conversation_id:None`。
+     *
+     * ⚠️ 后果远不止这次:用户说「老数据等再次采集时补上」——
+     * 按原实现**永远补不上**,重采多少次都跳过。
+     * 全库 conversation_id 卡在 9%、tweet_url 卡在 75% 正是这么来的。
+     *
+     * ⭐ 但 IGNORE 原本**确实在保护**东西:`accepted` / `ai_verdict` /
+     * `replied` / `translation` 这些是**业务后填的**,无脑覆盖会全部清掉。
+     * 所以不能简单改成 UPSERT 全覆盖 ——
+     * **已存在时只更新「采集该负责」的字段,业务字段一律不碰。**
+     */
+    `INSERT INTO x_tweet {
       tweet_id: $tweet_id,
       text: $text,
       author_name_at_post: $author_name_at_post,
@@ -60,7 +81,20 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       replied_at: $replied_at,
       reply_draft: $reply_draft,
       backfilled: $backfilled
-    }`,
+    }
+    ON DUPLICATE KEY UPDATE
+      text = $text,
+      author_name_at_post = $author_name_at_post,
+      author_handle = $author_handle,
+      author_avatar = $author_avatar,
+      tweet_url = $tweet_url,
+      lang = $lang,
+      metrics = $metrics,
+      fetched_at = $fetched_at,
+      created_at = $created_at,
+      in_reply_to = $in_reply_to,
+      in_reply_to_user = $in_reply_to_user,
+      conversation_id = $conversation_id`,
     {
       tweet_id: record.tweet_id,
       text: record.text,
