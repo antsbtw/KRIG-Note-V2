@@ -671,7 +671,21 @@ export async function autoCollect(
     : undefined;
   const statusBaseline = rootTweet?.metrics?.replies;
 
-  if ((r.people.length > 0 || tweetPageWithBaseline) && opts.ownerHandle) {
+  /**
+   * ⚠️⚠️ **排除 status** —— 2026-09-20 实测踩到:
+   *
+   * status 的对账原本写成 `} else if (isStatus …)`,挂在这个 if 的 else 上。
+   * 而详情页**也会采到人**(推文作者,报告里「采到 1 人」),
+   * 于是 `r.people.length > 0 && ownerHandle` **成立**,
+   * 走进了上面这条(按「人」对账)→ 报出「没有基准可对:这个页面没有基准概念」,
+   * **status 那条分支永远轮不到**。
+   *
+   * ⭐ 教训:`else if` 意味着「前面都不成立才轮到我」——
+   * 而这里两条分支的触发条件**本来就会同时成立**。
+   * 守卫当时只钉了「status 的条件里不能有 ownerHandle」,
+   * 没钉「它会不会被前一条吃掉」—— 那是守卫的盲区。
+   */
+  if (!isStatus && (r.people.length > 0 || tweetPageWithBaseline) && opts.ownerHandle) {
     const owner = normalizeHandle(opts.ownerHandle);
     const isFollowing = /following/i.test(opts.pageLabel ?? '');
     const isFollowers = /followers/i.test(opts.pageLabel ?? '');
@@ -818,7 +832,9 @@ export async function autoCollect(
               + `多半没采完(看游标:${r.paging.hasMore ? 'X 说还有下一页' : 'X 说没了'})`,
       };
     }
-  } else if (isStatus && r.tweets.length > 0) {
+  }
+  /** ⭐ **独立 if,不是 else if** —— 见上面那段:挂 else 会被「采到人」吃掉 */
+  if (isStatus && r.tweets.length > 0) {
     /**
      * ⭐⭐ **单条推详情页的对账**(独立分支,不走上面那条)。
      *
@@ -950,6 +966,10 @@ export async function autoCollect(
     const pct = rate !== undefined ? (rate * 100).toFixed(0) : '?';
     notes.push(
       `解析率:X 给了 ${entries} 个条目,解出 ${parsed} 条(${pct}%)`
+      + (rate !== undefined && rate > 1.2
+        ? '。⚠️ **超过 100%** —— 一个条目里嵌了多个对象(如引用推),'
+          + '或者分母没数全,这个数**先别当准**'
+        : '')
       + '。⚠️ 载荷会重发前面的内容,去重后小于条目数是正常的 —— '
       + '**低比例不等于漏**;真要判漏看「有没有整类结构没认出来」'
       + (r.unparsedSamples.length > 0

@@ -103,7 +103,8 @@ describe('⭐⭐ 解析率(每个页面都要能答「完整吗」)', () => {
      * 「没有数据」与「0%」含义相反:前者是没得算,后者是全漏了。
      * 本仓纪律:拿不到就**如实说没有**,不编数。
      */
-    const assign = harvester.match(/rate: entriesSeen > 0[^,]*/)?.[0] ?? '';
+    /** ⚠️ 锚点随实现变过一次(分子从相加改成取较大值)—— 用更稳的形状 */
+    const assign = harvester.match(/rate: entriesSeen > 0[\s\S]{0,120}/)?.[0] ?? '';
     expect(assign, '找不到 rate 的计算').toBeTruthy();
     expect(
       assign,

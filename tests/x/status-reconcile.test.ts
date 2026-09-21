@@ -27,7 +27,7 @@ describe('⭐⭐ x.status 的完整性对账', () => {
      * 挂在 `&& opts.ownerHandle` 那条里 = 没传 handle 时**静默无对账**,
      * 而现象是「报告里就是没有那一行」—— 最难发现的一类。
      */
-    const i = src.indexOf('} else if (isStatus');
+    const i = src.indexOf('if (isStatus && r.tweets.length');
     expect(
       i,
       'status 没有独立分支 —— 挂在 ownerHandle 门槛里时,没传 handle 就永远不对账',
@@ -35,6 +35,26 @@ describe('⭐⭐ x.status 的完整性对账', () => {
     /** 钉这条分支的条件:必须只看 isStatus + 有没有推,不看 ownerHandle */
     const cond = src.slice(i, src.indexOf('{', i));
     expect(cond, 'status 分支的条件里混进了 ownerHandle').not.toMatch(/ownerHandle/);
+
+    /**
+     * ⭐⭐⭐ **不能是 `else if`** —— 2026-09-20 实测踩到的真 bug:
+     * 详情页**也会采到人**(推文作者),于是前一条
+     * `r.people.length > 0 && ownerHandle` 成立,把 status 这条**吃掉了**,
+     * 报出「没有基准可对:这个页面没有基准概念」。
+     * ⚠️ 当时守卫只钉了「条件里不能有 ownerHandle」,
+     * **没钉「会不会被前一条吃掉」** —— 那是守卫的盲区。
+     */
+    expect(
+      src.slice(Math.max(0, i - 80), i),
+      'status 挂成了 else if —— 详情页也采到人时会被前一条分支吃掉',
+    ).not.toMatch(/\}\s*else\s*$/);
+    /** ⭐ 前一条必须显式排除 status,否则两条都会进(后写的覆盖先写的) */
+    const prev = src.indexOf('r.people.length > 0 || tweetPageWithBaseline');
+    expect(prev, '找不到按人对账的分支').toBeGreaterThan(0);
+    expect(
+      src.slice(Math.max(0, prev - 60), prev + 80),
+      '按人对账那条没排除 status —— 两条分支会同时成立',
+    ).toMatch(/!isStatus/);
   });
 
   it('⭐⭐⭐ 根推按 reply_count 最大认,不是「第一条」', () => {
@@ -56,7 +76,7 @@ describe('⭐⭐ x.status 的完整性对账', () => {
   });
 
   it('⭐⭐ 分子要**排除根推自己** —— 根推不是自己的回复', () => {
-    const i = src.indexOf('} else if (isStatus');
+    const i = src.indexOf('if (isStatus && r.tweets.length');
     const blk = src.slice(i, i + 900);
     const assign = blk.match(/const replies\s*=\s*([^;]+);/)?.[1] ?? '';
     expect(assign, '找不到 replies 的赋值').toBeTruthy();
@@ -74,7 +94,7 @@ describe('⭐⭐ x.status 的完整性对账', () => {
      * 判成「没采完」会让人去加轮数改滚动,而那是 X 的分页设计,不是漏。
      * 与采推那条「低比例不等于采漏」同一个纪律。
      */
-    const i = src.indexOf('} else if (isStatus');
+    const i = src.indexOf('if (isStatus && r.tweets.length');
     const blk = src.slice(i, i + 2200);
     expect(
       blk,
@@ -85,7 +105,7 @@ describe('⭐⭐ x.status 的完整性对账', () => {
   });
 
   it('⭐⭐ 拿不到 reply_count 时**不编分母**', () => {
-    const i = src.indexOf('} else if (isStatus');
+    const i = src.indexOf('if (isStatus && r.tweets.length');
     const blk = src.slice(i, i + 900);
     expect(
       blk,

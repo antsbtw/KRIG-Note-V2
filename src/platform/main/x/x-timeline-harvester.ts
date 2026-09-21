@@ -1226,10 +1226,28 @@ export async function harvestTimeline(
      * 所以 rate < 1 **不一定是漏**,要结合 stopReason 一起看 ——
      * 这条在报告的判词里说清楚,不让人误读成「漏了 N 条」。
      */
+    /**
+     * ⭐⭐ 解析率 —— **分子分母必须同口径**。
+     *
+     * ⚠️⚠️ 2026-09-20 实测暴露:原来分子写 `tweets.size + people.size`,
+     * 而分母数的是「条目」—— 一条推的 entry 里,**推算一次、它的作者又算一次**,
+     * 于是详情页报出 **200%**。比例超过 100% 本身就荒谬,
+     * 说明这个指标当时**设计就是错的**,不是数值偏差。
+     *
+     * ⭐ 改法:分子取**两者的较大值**,不是相加 ——
+     * 一个条目产出「一条推」或「一个人」,推文页的作者是那条推的附属,
+     * 不该再算一个条目。
+     * · 人的列表页:people 大 → 分子 = 人数
+     * · 推文页    :tweets 大 → 分子 = 推数(作者不重复计)
+     *
+     * ⚠️ 仍可能 >100%(同一条目里嵌了多个对象,如引用推),
+     * 但那是少数;而原来的相加是**系统性**翻倍。
+     */
     parseRate: {
       entries: entriesSeen,
-      parsed: tweets.size + people.size,
-      rate: entriesSeen > 0 ? (tweets.size + people.size) / entriesSeen : undefined,
+      parsed: Math.max(tweets.size, people.size),
+      rate: entriesSeen > 0
+        ? Math.max(tweets.size, people.size) / entriesSeen : undefined,
     },
     /** ⭐ 快速增量的闭环回读 —— 「追上了没有」由数据回答 */
     fastIncremental: fastMode
