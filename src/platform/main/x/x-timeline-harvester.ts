@@ -311,6 +311,64 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
       ?.result as Record<string, unknown> | undefined;
     const noteText = nres && typeof nres.text === 'string' ? nres.text : undefined;
 
+    /**
+     * ⭐⭐ **长文(Article)正文** —— 与长推是**两回事**,别混。
+     *
+     * ── 用户 2026-09-21 实测发现 ──
+     *
+     * 同一次采集、同一页,长推取到 957 字,两篇**长文各只存进 23 字**:
+     * `text = 'https://t.co/e5H5321Vh9'` —— 标题和几千字正文全丢。
+     *
+     * 真因:长文的 `legacy.full_text` **就只有一个 t.co 短链**,
+     * 正文在 `article.article_results.result.content_state` 里(DraftJS 格式),
+     * 而这里原本只走 `note_tweet ?? full_text` 两条路,`article` 零处理。
+     *
+     * ⚠️ 报告里「长推(Show more) ✓ 全文已取回」量的是 note_tweet,
+     * **不量长文** —— 又一次「不量的字段永远是 100%」。
+     *
+     * ── 结构(实测载荷)──
+     *
+     * `content_state.blocks[]`,每块 `{ text, type }`:
+     *  · `unstyled`    正文段
+     *  · `header-two`  小标题
+     *  · `atomic`      媒体占位 —— ⚠️ text 是**单个空格**,拼进去会留孤立空行
+     *
+     * ⭐ 只取纯文本:`inlineStyleRanges`(粗体等)按偏移量描述,
+     * 要还原样式得再引一层格式模型 —— 采集层的职责是**不丢字**,
+     * 富文本还原是消费侧的事(与既有「采集层无条件全收、不做判断」一致)。
+     */
+    const articleText = ((): string | undefined => {
+      const art = o.article as Record<string, unknown> | undefined;
+      const ares = (art?.article_results as Record<string, unknown> | undefined)
+        ?.result as Record<string, unknown> | undefined;
+      if (!ares) return undefined;
+      const cs = ares.content_state as Record<string, unknown> | undefined;
+      const blocks = Array.isArray(cs?.blocks) ? cs!.blocks as Array<Record<string, unknown>> : [];
+      const body = blocks
+        .map((b) => (typeof b.text === 'string' ? b.text : ''))
+        // ⚠️ atomic 的单空格要滤掉,否则正文里全是孤立空行
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+        .join('\n\n');
+      /**
+       * ⭐ 标题拼在正文前 —— 它**不在 blocks 里**。
+       *
+       * ⚠️ 诊断日志截断在 4000 字,**没看到 title 到底挂哪一层**。
+       * 与其猜一处写死(猜错就是静默丢标题,而正文在、没人会发现),
+       * 不如**按已知的几处依次找**,并且找不到也不失败(正文仍然保住)。
+       * ⭐ 真实结构确认后可以收窄成一处。
+       */
+      const pick = (v: unknown): string => (typeof v === 'string' && v.trim() ? v.trim() : '');
+      const meta = ares.metadata as Record<string, unknown> | undefined;
+      const title = pick(ares.title)
+        || pick((ares.title as Record<string, unknown> | undefined)?.text)
+        || pick(meta?.title)
+        || pick((meta?.title as Record<string, unknown> | undefined)?.text)
+        || pick(cs?.title);
+      const full = title && body ? `${title}\n\n${body}` : (title || body);
+      return full || undefined;
+    })();
+
     // ⚠️ views.count 是**字符串**,且 state=Enabled 时没有数字
     const views = o.views as Record<string, unknown> | undefined;
     const viewCount = views && typeof views.count === 'string'
@@ -402,14 +460,14 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         })(),
         hasMedia: mediaArr.length > 0,
         mediaTypes: mediaTypes.length ? mediaTypes : undefined,
-        text: noteText ?? s('full_text') ?? '',
+        text: articleText ?? noteText ?? s('full_text') ?? '',
         createdAt: s('created_at'),
         lang: s('lang'),
         inReplyToStatusId: s('in_reply_to_status_id_str'),
         inReplyToScreenName: s('in_reply_to_screen_name'),
         conversationId: s('conversation_id_str'),
         quotedStatusId: s('quoted_status_id_str'),
-        isLongText: !!noteText,
+        isLongText: !!noteText || !!articleText,
         metrics: {
           likes: n('favorite_count'), retweets: n('retweet_count'),
           replies: n('reply_count'), quotes: n('quote_count'),
