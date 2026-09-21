@@ -639,6 +639,38 @@ export async function autoCollect(
   const isWithReplies = /withreplies/i.test(opts.pageLabel ?? '');
   /** 采推的页面:主页 / with_replies —— 它们有 tweet_count 这个分母 */
   const tweetPageWithBaseline = (isProfile || isWithReplies) && r.tweets.length > 0;
+
+  /**
+   * ⭐⭐ **单条推详情页(x.status)的对账** —— 分母是**根推自己的 reply_count**。
+   *
+   * ── 为什么它要单独一条分支 ──
+   *
+   * ① **分母不在「某个人」身上,在那条推身上** —— 所以它**不需要 ownerHandle**
+   *    (x.status 的 handle 可以是 `i`,X 会自己跳转)。挂在上面那个
+   *    `&& opts.ownerHandle` 的门槛里会**永远进不去**。
+   * ② 分母**就在这一跑的载荷里**(根推的 metrics.replies),
+   *    不用查库、不用担心时间差 —— 这是所有页面里分母最干净的一个。
+   *
+   * ── ⚠️ 这个比例天生对不齐,而且不是漏采 ──
+   *
+   * `reply_count` 是**整棵树**的总回复数(含回复的回复),而详情页一次
+   * 加载只给**直接回复 + 部分展开**。所以采到的数**天然小于**它,
+   * 这是**结构性**的,不是漏。判词必须说清 ——
+   * 否则会把「X 的分页设计」误读成「我们采漏了」。
+   */
+  const isStatus = /status/i.test(opts.pageLabel ?? '');
+  /**
+   * ⭐ 根推 = 这一跑里**被回复得最多的那条**。
+   * ⚠️ 不按「第一条」认:载荷里的顺序不保证根推在前
+   * (X 有时先给热门回复)。用 reply_count 最大的那条最稳 ——
+   * 一棵树里根推的回复数必然 ≥ 任何一条回复的回复数。
+   */
+  const rootTweet = isStatus && r.tweets.length > 0
+    ? r.tweets.reduce((a, b) =>
+      ((b.metrics?.replies ?? -1) > (a.metrics?.replies ?? -1) ? b : a))
+    : undefined;
+  const statusBaseline = rootTweet?.metrics?.replies;
+
   if ((r.people.length > 0 || tweetPageWithBaseline) && opts.ownerHandle) {
     const owner = normalizeHandle(opts.ownerHandle);
     const isFollowing = /following/i.test(opts.pageLabel ?? '');
@@ -784,6 +816,48 @@ export async function autoCollect(
             ? `采到 ${got}/${baseline}(${pct}%)—— 够了(基准是活的,采集期间有人关注/取关很正常)`
             : `⚠️ 采到 ${got}/${baseline}(${pct}%)—— **明显少于基准**,`
               + `多半没采完(看游标:${r.paging.hasMore ? 'X 说还有下一页' : 'X 说没了'})`,
+      };
+    }
+  } else if (isStatus && r.tweets.length > 0) {
+    /**
+     * ⭐⭐ **单条推详情页的对账**(独立分支,不走上面那条)。
+     *
+     * ⚠️ 上面那条挂着 `&& opts.ownerHandle`,而 x.status **可以没有 handle**
+     * (X 接受 `/i/status/<id>` 并自己跳转)—— 挂在那里会永远进不去。
+     *
+     * ⭐ 分子 = 这次采到的推里**除根推以外**的(那些就是回复);
+     *    分母 = 根推自己的 reply_count。两个数**都在这一跑的载荷里**,
+     *    不查库、无时间差 —— 所有页面里最干净的一个分母。
+     */
+    const replies = Math.max(0, r.tweets.length - 1);
+    if (statusBaseline === undefined) {
+      reconcile = {
+        got: replies,
+        note: '这条推**没拿到 reply_count** —— 根推的 metrics 没解出来,'
+          + `所以没有分母(采到 ${r.tweets.length} 条推)。`
+          + `采完判据只能看游标:${r.paging.hasMore ? '⚠️ X 说还有下一页' : '✓ X 说没有更多了'}`,
+      };
+    } else {
+      const rate = statusBaseline > 0 ? replies / statusBaseline : 0;
+      const pct = (rate * 100).toFixed(0);
+      /**
+       * ⚠️⚠️ **这个比例天生对不齐,而且不是漏采**:
+       * `reply_count` 是**整棵树**的总数(含回复的回复),
+       * 而详情页一次加载只给**直接回复 + 部分展开**。
+       * 把它判成「没采完」会指向错误的修法 —— 那是 X 的分页设计,不是我们的漏。
+       *
+       * ⭐ 真判据仍是游标 + 「还有没有 ShowMore 折叠区没展开」。
+       */
+      reconcile = {
+        baseline: statusBaseline, got: replies, rate,
+        note: `采到 ${replies} 条回复 / 根推报 ${statusBaseline} 条(${pct}%)`
+          + `;根推 ${rootTweet?.tweetId ?? '?'}`
+          + '。⚠️ **对不齐是正常的** —— reply_count 是**整棵树**的总数'
+          + '(含回复的回复),而详情页一次只给直接回复 + 部分展开,'
+          + '**不是我们采漏了**。'
+          + `真判据看游标:${r.paging.hasMore
+            ? '⚠️ **X 说还有下一页** —— 加大轮数还能拿到更多'
+            : '✓ **X 说没有更多了** —— 这一页给到头了'}`,
       };
     }
   }
