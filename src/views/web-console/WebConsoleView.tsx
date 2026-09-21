@@ -17,7 +17,7 @@
  * ⚠️ 三态要看得见:`ok` / `failed` / **`degraded`**。
  * `degraded` = 做了但不完整,当成功会掩盖漏采,当失败会丢掉已有进度。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
@@ -234,6 +234,27 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * ⚠️ 只在跟随开着、且**不在跑**的时候填 —— 采集途中页面会变(它自己导航),
    * 那时覆盖输入框会让人以为自己选的被改掉了。
    */
+  /**
+   * ⭐⭐ **左边真的换页了才同步** —— 用户 2026-09-20:
+   * 「我的要求是左边操作,右边能够获取需要采集的参数…这样搞对称的,
+   *   怎么只有一个单向的功能呢?」
+   *
+   * ── 我之前把对称砍成了单向 ──
+   *
+   * `acFollow` 原来是**一刀切**:开着就每 1.5 秒无条件覆盖右边。
+   * 于是「手动选了又被跳回 x.home」,我为了修它,在下拉/参数框上
+   * 加了 `setAcFollow(false)` —— **把「左→右」这半边关掉了**。
+   * 结果:修好了一个方向,砍掉了另一个方向,而那个方向
+   * (Followers 时就有的)正是用户要的。
+   *
+   * ⭐ 真解法不是开关,是**判据**:比对「左边这一刻在哪一页」与
+   * 「上一次看到的是哪一页」——
+   * · 左边**真的导航了**(URL 变了)→ 同步到右边(左→右成立)
+   * · 左边**没动**            → 一个字都不碰(右边手选不会被吃掉)
+   *
+   * 两个方向因此可以同时成立,不用二选一。
+   */
+  const lastSeenUrl = useRef<string | undefined>(undefined);
   useEffect(() => {
     const timer = setInterval(() => {
       if (!acFollow || busy !== null) return;
@@ -241,6 +262,14 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
         const r = await api()?.whereAmI(wcId());
         const page = r?.page ?? null;
         setAcCurrent({ url: r?.url, name: page?.name });
+        /**
+         * ⚠️ **只在左边换了页时才写右边**。
+         * 原来每轮无条件写,于是右边手选的值会在 1.5 秒内被抹掉 ——
+         * 那正是「选了又跳回 x.home」的成因。
+         */
+        const url = r?.url;
+        if (url === lastSeenUrl.current) return;   // 左边没动 → 不碰右边
+        lastSeenUrl.current = url;
         if (!page) return;
         setAcPage(page.name);
         if (page.params.handle) setGotoHandle(page.params.handle);
@@ -740,16 +769,28 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   * ⭐ 关掉之后要**说清现在是什么状态、怎么回去** ——
                   * 否则人只知道「它不跟了」,不知道为什么、也不知道怎么恢复。
                   */}
+                {/**
+                  * ⭐⭐ **两个方向都要说清** —— 用户要的是对称:
+                  * 左边点 → 右边跟(自动填参数);右边选 → 点「跳过去」左边跟。
+                  * ⚠️ 右边选的与左边不一致时要**明确提示**,
+                  * 否则人不知道「点采集到底采哪一页」。
+                  */}
                 <span className="krig-webc__note" style={{ margin: 0, flex: 1 }}>
-                  {!acFollow
-                    ? <>✋ <b>手动模式</b> —— 你选的是 <b>{pageLabels[acPage] ?? acPage}</b>,
-                      左边在 {acCurrent?.name ?? '?'}。
-                      点「← 跳过去」让左边跟过来;勾上「跟着左边走」可恢复自动</>
-                    : acCurrent?.name
-                      ? <>左边现在在 <b>{pageLabels[acCurrent.name] ?? acCurrent.name}</b> —— 下拉与参数已自动填好,点采集即可</>
-                      : acCurrent?.url
-                        ? <>⚠️ 认不出左边这个页面({String(acCurrent.url).slice(0, 60)})—— 请手动选</>
-                        : '(还没读到左边的页面)'}
+                  {(() => {
+                    const here = acCurrent?.name;
+                    if (!here) {
+                      return acCurrent?.url
+                        ? <>⚠️ 认不出左边这个页面({String(acCurrent.url).slice(0, 60)})—— 请在右边手动选</>
+                        : '(还没读到左边的页面)';
+                    }
+                    const sameSide = here === acPage;
+                    return sameSide
+                      ? <>✓ 左右一致:<b>{pageLabels[here] ?? here}</b>
+                        {acFollow ? ' —— 左边换页时参数会自动跟过来' : ''},点采集即可</>
+                      : <>↔ 左边在 <b>{pageLabels[here] ?? here}</b>,
+                        右边选的是 <b>{pageLabels[acPage] ?? acPage}</b> ——
+                        点「← 跳过去」让左边跟过来,或在左边点到目标页让右边跟过来</>;
+                  })()}
                 </span>
               </div>
               <div className="krig-webc__row">
@@ -765,8 +806,14 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   * 自动跟随是便利,不该压过人的明确意图。
                   * (「跳过去」那条也是同一个道理,已经关了。)
                   */}
+                {/**
+                  * ⭐ 手选**不再需要关掉跟随** —— 同步已改成「左边换页才写」,
+                  * 左边不动时右边怎么选都不会被覆盖。**两个方向同时成立**。
+                  * ⚠️ 原来这里 `setAcFollow(false)` 是把「左→右」砍掉去修
+                  * 「选了被覆盖」—— 治标且伤了对称,已撤。
+                  */}
                 <select className="krig-webc__in" style={{ flex: 1 }} value={acPage}
-                  onChange={(e) => { setAcFollow(false); setAcPage(e.target.value); }}>
+                  onChange={(e) => setAcPage(e.target.value)}>
                   {/**
                     * ⭐ 显示**人话 + 代码名** —— 用户 2026-09-20 问「哪个是 status?」。
                     * ⚠️ 两个都给:人话让人能选,代码名让编排/排查对得上。
@@ -811,7 +858,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         } : null),
                       }}
                       value={val} placeholder={`${k} *必填`}
-                      onChange={(e) => { setAcFollow(false); set(e.target.value); }} />
+                      onChange={(e) => set(e.target.value)} />
                   );
                 })}
                 <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
@@ -870,7 +917,10 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       else if (k === 'tweetId') params.tweetId = gotoTweetId;
                       else if (k === 'q') params.q = gotoQuery;
                     }
-                    setAcFollow(false);
+                    /**
+                     * ⭐ 不关跟随 —— 「跳过去」的目的就是让左边跟过来,
+                     * 跳完左边确实换页了,同步回右边是**对的**(值一样,无副作用)。
+                     */
                     void run('goto', { name: acPage, params },
                       () => api()!.goto(wcId(), acPage, params));
                   };

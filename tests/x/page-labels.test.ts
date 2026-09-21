@@ -81,85 +81,88 @@ describe('⭐⭐ 页面下拉的可读性与双向导航', () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  it('⭐⭐⭐ **手动选页面/改参数**必须关掉自动跟随(否则选了会跳回去)', () => {
+  it('⭐⭐⭐ 自动同步只在**左边真的换页**时写右边(双向对称的地基)', () => {
     /**
-     * ⚠️⚠️ 用户 2026-09-20 实测:「选择任何选项都自动跳回 x.home」。
+     * ⭐⭐ 用户 2026-09-20:「我的要求是左边操作,右边能够获取需要采集的参数…
+     *    这样搞对称的,怎么只有一个单向的功能呢?」
      *
-     * `acFollow` 每 1.5 秒把左边的当前页写回右边。人在左边停在 x.home 时,
-     * 下拉无论选什么都会在 1.5 秒内**被覆盖回去** ——
-     * 现象是「下拉点了没用」,而人只会以为控件坏了。
+     * ── 两个方向必须同时成立 ──
+     * · 左边导航到某页 → 右边自动填参数(Followers 时就有的)
+     * · 右边选好参数   → 点「跳过去」左边跟过来
      *
-     * ⭐ 判据:**人手动选了 = 明确表达意图**,自动跟随是便利,不该压过它。
-     * ⚠️ 下拉和参数框**两个都要**:只修下拉的话,填 handle 填一半
-     * 仍会被清掉,而那个更难查(以为是自己手滑)。
+     * ── 我曾把对称砍成单向(别再犯)──
+     * 原来同步是**一刀切**:跟随开着就每 1.5 秒无条件覆盖右边,
+     * 于是「手选了又被跳回 x.home」。我的修法是在下拉/参数框上
+     * `setAcFollow(false)` —— **把「左→右」那半边关掉了**,
+     * 修好一个方向、砍掉另一个方向。
+     *
+     * ⭐ 真正的不变量:**左边没动时,右边手选的值不许被碰**。
+     * 判据是「URL 变没变」,不是「开关开没开」。
      */
     const ui = strip(readFileSync(
       join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'));
+    const i = ui.indexOf('whereAmI(wcId())');
+    expect(i, '找不到「左边在哪一页」的轮询').toBeGreaterThan(0);
+    const blk = ui.slice(i, i + 900);
 
-    /** ① 采集页下拉的 onChange 必须关掉跟随 */
+    expect(
+      blk,
+      '同步没有比对上次的 URL —— 只能一刀切地无条件覆盖,'
+      + '于是右边手选的值会被抹掉(那正是「选了又跳回 x.home」的成因)',
+    ).toMatch(/lastSeenUrl/);
+
+    const guard = blk.match(/if \(url === lastSeenUrl\.current\)[^\n]*/)?.[0] ?? '';
+    expect(guard, '找不到「URL 没变就跳过」的判断').toBeTruthy();
+    expect(
+      guard,
+      'URL 没变时没有 return —— 仍会往下写右边的下拉和参数',
+    ).toMatch(/return/);
+
+    expect(
+      blk.indexOf('lastSeenUrl.current') < blk.indexOf('setAcPage('),
+      '写右边发生在「变没变」判断之前 —— 判断等于没做',
+    ).toBe(true);
+  });
+
+  it('⭐⭐ 手选不再需要关掉跟随(否则又砍成单向)', () => {
+    /**
+     * ⚠️ 反向锁:同步已改成「换页才写」,手选就**不该**再关跟随 ——
+     * 关了就等于把「左→右」那半边又砍掉,回到单向。
+     */
+    const ui = strip(readFileSync(
+      join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'));
     const selIdx = ui.indexOf('value={acPage}');
-    expect(selIdx, '找不到采集页的下拉').toBeGreaterThan(0);
-    const sel = ui.slice(selIdx, selIdx + 240);
+    const sel = ui.slice(selIdx, selIdx + 200);
     expect(
       sel,
-      '手动选页面没关掉「跟着左边走」—— 1.5 秒后会被左边的页面覆盖回去,'
-      + '现象是「下拉点了没用」',
-    ).toMatch(/setAcFollow\(false\)/);
-
-    /**
-     * ② 参数框的 onChange 同样要关。
-     * ⚠️ 锚点别用 placeholder 的字面量 —— 它会随文案改动(实测:
-     * 加了「*必填」就把守卫锚断了)。改锚在**不会随文案变**的 set 调用上。
-     */
-    const inpIdx = ui.indexOf('set(e.target.value)');
-    expect(inpIdx, '找不到参数输入框的 onChange').toBeGreaterThan(0);
-    const inp = ui.slice(Math.max(0, inpIdx - 120), inpIdx + 60);
-    expect(
-      inp,
-      '手动改参数没关掉「跟着左边走」—— handle 填一半会被清掉',
-    ).toMatch(/setAcFollow\(false\)/);
+      '下拉又去关跟随了 —— 那会把「左边点、右边跟」这半边砍掉,回到单向',
+    ).not.toMatch(/setAcFollow\(false\)/);
   });
 
-  it('⭐⭐ 关掉自动跟随后要说清「现在什么状态、怎么恢复」', () => {
+  it('⭐⭐ 左右不一致时要**明确提示**采的是哪一页', () => {
     /**
-     * ⚠️ 只是不跟了、却不说,人只知道「它不动了」,
-     * 不知道为什么、也不知道怎么回去 —— 那是另一种静默。
+     * ⚠️ 右边选的和左边不一样时,人不知道「点采集到底采哪一页」——
+     * 而那会导致采错页面还以为采对了。
      */
     const ui = strip(readFileSync(
       join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'));
-    const i = ui.indexOf('{!acFollow');
-    expect(i, '关掉跟随后没有任何状态提示').toBeGreaterThan(0);
-    const blk = ui.slice(i, i + 500);
-    expect(blk, '没说清当前选的是哪一页').toMatch(/acPage/);
-    expect(blk, '没告诉人怎么恢复自动跟随').toMatch(/恢复|勾上/);
-  });
+    const i = ui.indexOf('const sameSide');
+    expect(i, '没有「左右一致吗」的判断 —— 采错页面看不出来').toBeGreaterThan(0);
 
-  it('⭐⭐⭐ 「跳过去」必须先关掉「跟着左边走」(否则选择被覆盖)', () => {
     /**
-     * ⚠️ acFollow 每 1.5 秒把左边的当前页写回右边。
-     * 跳转后若不关掉它,右边的选择会在 1.5 秒内**被覆盖回去** ——
-     * 现象是「点了跳过去,参数自己变了」,而人会以为是自己点错了。
+     * ⚠️ 实测假绿:把 `sameSide` 改成写死 `true`,不一致那个分支的文本
+     * **还在**(只是永远走不到),守卫照样全绿 ——
+     * 同族:feedback-source-scan-cant-see-execution。
+     * ⭐ 钉**赋值本身**:必须真的比对左右两边。
      */
-    const ui = strip(readFileSync(
-      join(process.cwd(), 'src/views/web-console/WebConsoleView.tsx'), 'utf-8'));
-    const i = ui.indexOf('const jump =');
-    expect(i, '找不到「跳过去」的实现').toBeGreaterThan(0);
-    /**
-     * ⚠️ 实测:函数体里有嵌套的 `}` ,按第一个 `};` 切会**切太短**
-     * (切在 for 循环那里),守卫假红。切到 goto 调用之后再收尾。
-     */
-    const gi = ui.indexOf('goto(', i);
-    expect(gi, '「跳过去」里没有 goto 调用').toBeGreaterThan(i);
-    const body = ui.slice(i, gi + 120);
+    const assign = ui.match(/const sameSide\s*=\s*([^;]+);/)?.[1] ?? '';
+    expect(assign, '找不到 sameSide 的赋值').toBeTruthy();
     expect(
-      body,
-      '跳转前没关掉「跟着左边走」—— 1.5 秒后右边的选择会被左边覆盖回去',
-    ).toMatch(/setAcFollow\(false\)/);
-    expect(body, '跳转没复用现成的 goto 能力').toMatch(/goto\(/);
-    /** ⚠️ 关闭必须在 goto **之前**,否则仍有一个同步周期的竞态 */
-    expect(
-      body.indexOf('setAcFollow(false)') < body.indexOf('goto('),
-      '关闭「跟着左边走」在 goto 之后 —— 中间那一下仍可能被覆盖',
-    ).toBe(true);
+      assign,
+      'sameSide 不是真比出来的 —— 左右不一致会被当成一致,采错页面看不出来',
+    ).toMatch(/here === acPage|acPage === here/);
+
+    const blk = ui.slice(i, i + 700);
+    expect(blk, '不一致时没告诉人怎么办').toMatch(/跳过去/);
   });
 });
