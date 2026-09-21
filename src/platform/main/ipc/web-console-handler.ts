@@ -198,8 +198,21 @@ function recordRun(
  * ⚠️ 同族:本会话已栽过一次(bindPageHost 的早返回漏绑)。
  * 「早返回」是留痕的天然盲区 —— 凡是 return 之前没记的,都查不到。
  */
-function failFast(fn: string, reason: string, t0: number): { channelOk: false; error: string } {
-  recordRun(fn, {}, { status: 'failed', reason }, Date.now() - t0);
+/**
+ * ⭐⭐ 快速失败 —— **入参要落痕**。
+ *
+ * ⚠️ 原来第二个参数写死 `{}`,于是**失败那次的入参查不到** ——
+ * 用户 2026-09-20 实测:x.status 报「参数不全」,而留痕里
+ * 只有 `{page, maxRounds, …}` 没有 params,我据此推断「参数没传到后端」,
+ * **那个推断是错的** —— 参数传了,只是 failFast 不记。
+ *
+ * ⭐ 最需要诊断的恰恰是失败那次,而它偏偏是留痕最空的一次。
+ * 这与本文件下面那段注释说的「早返回是留痕的天然盲区」是同一件事。
+ */
+function failFast(
+  fn: string, reason: string, t0: number, input?: unknown,
+): { channelOk: false; error: string } {
+  recordRun(fn, input ?? {}, { status: 'failed', reason }, Date.now() - t0);
   return { channelOk: false, error: reason };
 }
 
@@ -721,7 +734,8 @@ export function registerWebConsoleHandlers(): void {
     const current = p.current === true;
     const pageName = String(p.page ?? '').trim();
     if (!current && !pageName) {
-      return failFast('autoCollect', 'page 必填(语义页面名),或传 current:true 采当前页', t0);
+      return failFast('autoCollect', 'page 必填(语义页面名),或传 current:true 采当前页',
+        t0, { page: p.page, current: p.current, params: p.params });
     }
 
     let url = '';
@@ -750,17 +764,34 @@ export function registerWebConsoleHandlers(): void {
           const got = (typeof p.params === 'object' && p.params
             ? p.params as Record<string, string> : {});
           const missing = need.filter((k) => !String(got[k] ?? '').trim());
+          /**
+           * ⭐⭐ **把收到的实际值交出来** —— 用户 2026-09-20 实测踩到:
+           *
+           * 报「参数都有,但值不合法」却**不说是哪个值、长什么样** ——
+           * 于是我连着查了解析器、preload、面板传参四处,全是对的,
+           * 因为**真值根本没进过视野**。
+           *
+           * ⚠️ 这正是本仓「别猜、看真实数据」那条:
+           * 诊断消息不带真值,等于把排查者推回去猜。
+           * ⭐ 带上 JSON.stringify:空串、纯空格、零宽字符、类型不对
+           * (数字而非字符串)这几种在肉眼下长得一模一样,只有 repr 分得开。
+           */
+          const shown = need.map((k) => `${k}=${JSON.stringify(got[k])}`).join('、');
           return failFast('autoCollect',
-            `「${pageName}」的参数不全 —— 需要 ${need.join('、') || '(无)'},`
-            + `缺:${missing.join('、') || '(参数都有,但值不合法)'}。`
+            `「${pageName}」的参数解析不出 URL —— 需要 ${need.join('、') || '(无)'};`
+            + `**收到的值**:${shown || '(没传 params)'};`
+            + `缺(空值):${missing.join('、') || '(都非空)'}。`
             + (missing.includes('tweetId')
               ? '⭐ tweetId 是推文链接 /status/ 后面那串数字'
               : missing.includes('handle')
                 ? '⭐ handle 填账号名(不带 @)'
-                : ''), t0);
+                : '⚠️ 值都非空却仍解析不出 —— 多半是格式不合法'
+                  + '(tweetId 必须是纯数字,不能带 http/斜杠/零宽字符)'),
+            t0, { page: pageName, params: got });
         }
         return failFast('autoCollect',
-          `未登记的页面名「${pageName}」—— 可用:${known.join(', ')}`, t0);
+          `未登记的页面名「${pageName}」—— 可用:${known.join(', ')}`,
+          t0, { page: pageName, params: p.params });
       }
       url = resolved.url;
     }

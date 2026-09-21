@@ -80,3 +80,49 @@ describe('⭐⭐ 参数不全 vs 页面名不认识:两种原因要分开', () =
     ).toMatch(/'f'/);
   });
 });
+
+/**
+ * ⭐⭐ 失败那次的入参必须查得到 —— 最需要诊断的偏偏是它。
+ */
+describe('⭐⭐ 失败路径的可诊断性', () => {
+  const handler = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/ipc/web-console-handler.ts'), 'utf-8'));
+
+  it('⭐⭐⭐ failFast 必须能记入参(写死 {} 会让失败那次查不到)', () => {
+    /**
+     * ⚠️ 用户 2026-09-20 实测:x.status 报「参数不全」,留痕里却没有 params,
+     * 我据此推断「参数没传到后端」—— **那个推断是错的**,参数传了,
+     * 只是 failFast 把入参写死成 `{}`。
+     * ⭐ 最需要诊断的恰恰是失败那次,而它偏偏留痕最空。
+     */
+    const i = handler.indexOf('function failFast');
+    expect(i, '找不到 failFast').toBeGreaterThan(0);
+    const sig = handler.slice(i, handler.indexOf('{', handler.indexOf(')', i)));
+    expect(
+      sig,
+      'failFast 没有入参形参 —— 失败那次的入参永远查不到',
+    ).toMatch(/input/);
+    const body = handler.slice(i, i + 500);
+    expect(
+      body,
+      'failFast 仍把入参写死成 {} —— 等于没记',
+    ).toMatch(/recordRun\(fn, input/);
+  });
+
+  it('⭐⭐⭐ 参数解析失败要交出**收到的实际值**,不能只说「不合法」', () => {
+    /**
+     * ⚠️ 报「参数都有,但值不合法」却不说是哪个值、长什么样 ——
+     * 排查者只能回去猜(我为此查了解析器/preload/面板传参四处,全是对的,
+     * 因为真值根本没进视野)。
+     * ⭐ 必须用 JSON.stringify:空串/纯空格/零宽字符/类型不对
+     * 在肉眼下长得一模一样,只有 repr 分得开。
+     */
+    const i = handler.indexOf('const shown =');
+    expect(i, '诊断消息没有交出实际收到的值').toBeGreaterThan(0);
+    const line = handler.slice(i, i + 200);
+    expect(
+      line,
+      '实际值没有用 JSON.stringify —— 空串/空格/零宽字符肉眼分不出',
+    ).toMatch(/JSON\.stringify/);
+  });
+});
