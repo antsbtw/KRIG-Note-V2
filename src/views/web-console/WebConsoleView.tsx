@@ -796,8 +796,21 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                      * ⚠️ 参数框同理:手动填了 handle/tweetId 也不该被
                      * 自动跟随覆盖回去 —— 否则填一半就被清掉,查不出原因。
                      */
-                    <input key={k} className="krig-webc__in" style={{ width: 150 }}
-                      value={val} placeholder={k}
+                    <input key={k} className="krig-webc__in"
+                      style={{
+                        width: 150,
+                        /**
+                         * ⭐⭐ **缺的框自己高亮** —— 用户 2026-09-20 实测:
+                         * 原来把「还缺 handle、tweetId」写成一段文字挤在按钮中间,
+                         * 人要**跨行**把「缺什么」和「在哪填」对上。
+                         * ⭐ 让框自己说话,所见即所得。
+                         */
+                        ...(!val.trim() ? {
+                          borderColor: '#e8a33d',
+                          boxShadow: '0 0 0 1px rgba(232,163,61,.35)',
+                        } : null),
+                      }}
+                      value={val} placeholder={`${k} *必填`}
                       onChange={(e) => { setAcFollow(false); set(e.target.value); }} />
                   );
                 })}
@@ -875,12 +888,6 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   const blocked = missing.length > 0;
                   return (
                     <>
-                      {blocked && (
-                        <span className="krig-webc__note" style={{ margin: 0, color: '#e8a33d' }}>
-                          ⚠️ 还缺:<b>{missing.join('、')}</b>
-                          {missing.includes('tweetId') && '(推文链接 /status/ 后面那串数字)'}
-                        </span>
-                      )}
                       <button type="button" className="krig-webc__in"
                         disabled={busy !== null || blocked}
                         onClick={jump}
@@ -899,6 +906,28 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   );
                 })()}
               </div>
+              {/**
+                * ⭐ 缺参数的提示**单独一行** —— 用户 2026-09-20 实测:
+                * 原来塞在按钮组里,挤在「40」和「跳过去」之间,
+                * 而输入框在上一行 —— 人要跨行把「缺什么」和「在哪填」对上。
+                * ⚠️ 框本身已经高亮了(所见即所得),这里只补「是什么」。
+                */}
+              {(() => {
+                const need = pageParams[acPage] ?? [];
+                const valOf = (k: string) => k === 'handle' ? gotoHandle
+                  : k === 'tweetId' ? gotoTweetId
+                  : k === 'q' ? gotoQuery : 'x';
+                const missing = need.filter((k) => k !== 'f' && !valOf(k).trim());
+                if (missing.length === 0) return null;
+                return (
+                  <div className="krig-webc__note" style={{ color: '#e8a33d' }}>
+                    ⚠️ 上面高亮的框还没填:<b>{missing.join('、')}</b>
+                    {missing.includes('tweetId')
+                      && ' —— tweetId 是推文链接 /status/ 后面那串数字'}
+                    {missing.includes('handle') && ' —— handle 填账号名(不带 @)'}
+                  </div>
+                );
+              })()}
               {(() => {
                 const r = acReport as { report?: {
                   tweets: number; fromPayload: number; saved: number;

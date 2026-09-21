@@ -106,10 +106,14 @@ describe('⭐⭐ 页面下拉的可读性与双向导航', () => {
       + '现象是「下拉点了没用」',
     ).toMatch(/setAcFollow\(false\)/);
 
-    /** ② 参数框的 onChange 同样要关 */
-    const inpIdx = ui.indexOf('placeholder={k}');
-    expect(inpIdx, '找不到参数输入框').toBeGreaterThan(0);
-    const inp = ui.slice(inpIdx, inpIdx + 200);
+    /**
+     * ② 参数框的 onChange 同样要关。
+     * ⚠️ 锚点别用 placeholder 的字面量 —— 它会随文案改动(实测:
+     * 加了「*必填」就把守卫锚断了)。改锚在**不会随文案变**的 set 调用上。
+     */
+    const inpIdx = ui.indexOf('set(e.target.value)');
+    expect(inpIdx, '找不到参数输入框的 onChange').toBeGreaterThan(0);
+    const inp = ui.slice(Math.max(0, inpIdx - 120), inpIdx + 60);
     expect(
       inp,
       '手动改参数没关掉「跟着左边走」—— handle 填一半会被清掉',
