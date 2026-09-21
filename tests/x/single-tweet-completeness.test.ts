@@ -212,8 +212,16 @@ describe('⭐⭐ 单条推文的完整性', () => {
      * 而上面那条检查只扫 SET 子句,照样全绿。
      * ⭐ 登记一个字段要**两处都到位**:声明用哪个变量 + 真的给那个变量赋值。
      */
-    const paramsStart = ubody.indexOf('}`,');
-    expect(paramsStart, '找不到参数对象的起点').toBeGreaterThan(0);
+    /**
+     * ⚠️ 锚点别用 SQL 的收尾形状 —— 实测:把结尾从 `}\`,` 改成
+     * `conversation_id = $conversation_id\`,` 就锚不到了(守卫假红)。
+     * ⭐ 改锚在**参数对象的第一个字段**上,它不随 SQL 写法变。
+     */
+    const firstParam = ubody.indexOf('tweet_id: record.tweet_id');
+    expect(firstParam, '找不到参数对象(应含 tweet_id: record.tweet_id)').toBeGreaterThan(0);
+    /** ⚠️ 要从**第一个字段之前**切起,否则 tweet_id 自己会被算成「没绑值」 */
+    const paramsStart = ubody.lastIndexOf('{', firstParam);
+    expect(paramsStart, '找不到参数对象的左括号').toBeGreaterThan(0);
     const paramsBlk = ubody.slice(paramsStart);
     const bound = new Set(
       [...paramsBlk.matchAll(/^\s{6}(\w+):/gm)].map((m) => m[1]));
