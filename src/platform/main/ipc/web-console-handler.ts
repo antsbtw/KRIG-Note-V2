@@ -61,7 +61,7 @@ import { LocalExecutor } from '../executor/local-executor';
 import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
-import { PAGE_PARAMS } from '../x/x-pages';
+import { PAGE_PARAMS, PAGE_LABELS } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
 
@@ -459,11 +459,13 @@ export function registerWebConsoleHandlers(): void {
      * 清单不会自己长,所以改成从真表来。
      */
     const paramsOf = PAGE_PARAMS;
+    /** ⭐ 人话页名 —— 下拉里显示「单条推文详情(含回复)」而不是 `x.status` */
+    const labelsOf = PAGE_LABELS;
     const total = tables.reduce((n, t) => n + t.names.length, 0);
     recordRun('pageNames', { total },
       total > 0 ? { status: 'ok' } : { status: 'failed', reason: '语义页面表为空(业务没注册?)' },
       Date.now() - t0);
-    return { channelOk: true, tables, paramsOf };
+    return { channelOk: true, tables, paramsOf, labelsOf };
   });
 
   /**

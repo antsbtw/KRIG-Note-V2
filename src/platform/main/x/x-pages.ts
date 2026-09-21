@@ -237,6 +237,37 @@ export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'x.composeArticles': [],
 };
 
+/**
+ * ⭐⭐ **人话页名** —— 下拉里给人看的,不是给代码看的。
+ *
+ * ── 用户 2026-09-20 ──
+ * > 「哪个是 status?」
+ *
+ * `x.status` 是**代码里的语义名**,对人没有意义。人想的是
+ * 「单条推文详情页」。下拉里只给代码名 = 每次都要猜、或者来问。
+ *
+ * ⚠️ 与 `PAGE_PARAMS` 一样,这是**真表** —— 面板从这里读,不许抄一份
+ * (抄的那份不会跟着新页面长,而漏了也不报错,只表现为下拉里缺一项)。
+ * ⚠️ 加新页面时这里**也要加**:守卫钉了「两张表的键必须一致」。
+ *
+ * ⭐ `describe` 那个字段解决不了这件事:它是 resolve **之后**才有的
+ * (要先有参数才能说「@xxx 的关注者」),而下拉在**选参数之前**就要显示。
+ */
+export const PAGE_LABELS: Readonly<Record<string, string>> = {
+  'x.profile': '某人主页(只看推文)',
+  'x.withReplies': '某人主页 + 回复',
+  'x.articles': '某人的长文',
+  'x.followers': '某人的关注者(谁关注他)',
+  'x.verifiedFollowers': '某人的蓝V关注者',
+  'x.following': '某人关注的人',
+  'x.status': '单条推文详情(含回复)',
+  'x.search': '搜索结果',
+  'x.home': '首页时间线',
+  'x.notifications': '通知页',
+  'x.compose': '发推弹窗',
+  'x.composeArticles': '长文编辑器',
+};
+
 export class XPageResolver implements PageResolver {
   resolve(name: string, params: Readonly<Record<string, string>> = {}): Resolved | null {
     const build = PAGES[name];

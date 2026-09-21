@@ -177,6 +177,8 @@ declare global {
           channelOk: boolean; tables?: Array<{ owner: string; names: string[] }>;
           /** ⭐ 每页要哪些参数 —— 面板据此渲染输入框,不在面板里写死清单 */
           paramsOf?: Record<string, readonly string[]>;
+          /** ⭐ 人话页名 —— 下拉显示「单条推文详情(含回复)」而不是 `x.status` */
+          labelsOf?: Record<string, string>;
         }>;
         anchors(): Promise<{
           channelOk: boolean; owners?: string[];

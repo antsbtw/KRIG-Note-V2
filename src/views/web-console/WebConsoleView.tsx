@@ -92,6 +92,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * 清单不会自己长 —— 所以改成问主侧要。
    */
   const [pageParams, setPageParams] = useState<Record<string, readonly string[]>>({});
+  /** ⭐ 人话页名 —— 读真表,不在面板写死(用户 2026-09-20:「哪个是 status?」) */
+  const [pageLabels, setPageLabels] = useState<Record<string, string>>({});
   const [readyKind, setReadyKind] = useState('urlIncludes');
   /** ⚠️ URL 片段与锚点名**分开存** —— 共用一个格子就是那个 bug 的根源 */
   const [readyValue, setReadyValue] = useState('/home');
@@ -262,6 +264,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       setPageNames(tabs.flatMap((t) => t.names));
       const po = (pn as { paramsOf?: Record<string, readonly string[]> } | undefined)?.paramsOf;
       if (po) setPageParams(po);
+      const lo = (pn as { labelsOf?: Record<string, string> } | undefined)?.labelsOf;
+      if (lo) setPageLabels(lo);
     })();
   }, []);
 
@@ -328,7 +332,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 ) : (
                   <select className="krig-webc__in" style={{ flex: 1 }}
                     value={gotoName} onChange={(e) => setGotoName(e.target.value)}>
-                    {pageNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    {/* ⭐ goto 的下拉同样给人话名 —— 两处下拉要一致,不然一边看得懂一边看不懂 */}
+                    {pageNames.map((n) => (
+                      <option key={n} value={n}>
+                        {pageLabels[n] ? `${pageLabels[n]} — ${n}` : n}
+                      </option>
+                    ))}
                   </select>
                 )}
                 {/^x\.(profile|withReplies|articles)$/.test(gotoName) && (
@@ -738,8 +747,15 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
               <div className="krig-webc__row">
                 <select className="krig-webc__in" style={{ flex: 1 }} value={acPage}
                   onChange={(e) => setAcPage(e.target.value)}>
+                  {/**
+                    * ⭐ 显示**人话 + 代码名** —— 用户 2026-09-20 问「哪个是 status?」。
+                    * ⚠️ 两个都给:人话让人能选,代码名让编排/排查对得上。
+                    * 人话读真表(labelsOf),表里没有就退回代码名 —— 不写死清单。
+                    */}
                   {(pageNames.length > 0 ? pageNames : ['x.home']).map((n) =>
-                    <option key={n} value={n}>{n}</option>)}
+                    <option key={n} value={n}>
+                      {pageLabels[n] ? `${pageLabels[n]} — ${n}` : n}
+                    </option>)}
                 </select>
                 {/**
                   * ⭐ 带参数的页面要能填参数 —— 否则选了 x.profile 点采集会直接失败。
@@ -798,8 +814,36 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       });
                       setAcReport(r); return r;
                     });
+                  /**
+                   * ⭐⭐ **右边选参数 → 左边跳过去**(用户 2026-09-20 提的另一个方向)。
+                   *
+                   * 「跟着左边走」已经有了(左→右),但反过来没有:
+                   * 在右边选好页面和参数后,得自己去左边手动导航到那一页,
+                   * 否则点采集会先跳转、再采,看不到「要采哪一页」。
+                   *
+                   * ⚠️ 复用现成的 `goto` 能力,不新造一条 ——
+                   * 导航的落地校验(到没到那一页)都在它里面。
+                   * ⚠️ 跳之前**关掉「跟着左边走」**:否则 1.5 秒后
+                   * 左边的页面又把右边的选择覆盖回去,等于白选。
+                   */
+                  const jump = () => {
+                    const params: Record<string, string> = {};
+                    for (const k of pageParams[acPage] ?? []) {
+                      if (k === 'handle') params.handle = gotoHandle;
+                      else if (k === 'tweetId') params.tweetId = gotoTweetId;
+                      else if (k === 'q') params.q = gotoQuery;
+                    }
+                    setAcFollow(false);
+                    void run('goto', { name: acPage, params },
+                      () => api()!.goto(wcId(), acPage, params));
+                  };
                   return (
                     <>
+                      <button type="button" className="krig-webc__in" disabled={busy !== null}
+                        onClick={jump}
+                        title="按右边选的页面+参数,把左边浏览器跳过去 —— 先看到页面,再决定采不采。⚠️ 会关掉「跟着左边走」,否则选择会被覆盖回去">
+                        ← 跳过去
+                      </button>
                       <button type="button" className="krig-webc__go" disabled={busy !== null}
                         onClick={() => collect(false)}
                         title="全量:采到底(约 17 分钟 / 2700 人)。⭐ 基线只由它维护,「谁取关了」也只有它答得出">采集</button>
