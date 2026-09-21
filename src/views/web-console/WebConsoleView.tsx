@@ -985,6 +985,10 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   people?: number; peopleWithBio?: number; peopleWithRelation?: number;
                   pagedRounds?: number; pagingSkipped?: string;
                   parseRate?: { entries: number; parsed: number; rate?: number };
+                  dbCheck?: {
+                    sampled: number; asked: number; error?: string;
+                    gaps: Array<{ field: string; empty: number; of: number }>;
+                  };
                   failedUrl?: string; capturedUrl?: string;
                   paging?: { hasMore: boolean; cursor?: string };
                   reconcile?: { baseline?: number; got: number; rate?: number; note: string };
@@ -1164,6 +1168,34 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       <div style={{ wordBreak: 'break-all', opacity: 0.85 }}>
                         {d.capturedUrl && <div>📋 <b>抄到的请求</b>:{d.capturedUrl}</div>}
                         {d.failedUrl && <div>❌ <b>失败的请求</b>:{d.failedUrl}</div>}
+                      </div>
+                    )}
+                    {/**
+                      * ⭐⭐⭐ **入库回读** —— 用户 2026-09-21 的要求:
+                      * 「先观察单条推文的完整性,然后才是 item 的条数」。
+                      * ⚠️ 它和「字段完整性」是两件事:那个量解析结果,
+                      * 这个量**真的进库了吗**(中间隔着 toRecord 转换)。
+                      */}
+                    {d.dbCheck && (
+                      <div>
+                        {d.dbCheck.error
+                          ? <>⚠️ <b>入库回读失败</b>:{d.dbCheck.error}</>
+                          : d.dbCheck.gaps.length === 0 && d.dbCheck.sampled === d.dbCheck.asked
+                            ? <>✓ <b>入库回读</b>:抽查 {d.dbCheck.sampled} 条,
+                              采集该给的字段**都在库里**</>
+                            : <>
+                              ⚠️ <b>入库回读</b>:抽查 {d.dbCheck.sampled}/{d.dbCheck.asked} 条
+                              {d.dbCheck.sampled < d.dbCheck.asked
+                                && <b> —— 有 {d.dbCheck.asked - d.dbCheck.sampled} 条没写进库</b>}
+                              {d.dbCheck.gaps.length > 0 && (
+                                <div style={{ opacity: 0.85 }}>
+                                  库里为空:{d.dbCheck.gaps.map((g) =>
+                                    `${g.field} ${g.empty}/${g.of}`).join('、')}
+                                  {d.dbCheck.gaps.some((g) => g.empty === g.of)
+                                    && <b> —— 整片为空的多半是解析没取/没写库/类型没声明</b>}
+                                </div>
+                              )}
+                            </>}
                       </div>
                     )}
                     {d.parseRate && d.parseRate.entries > 0 && (

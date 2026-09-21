@@ -607,3 +607,33 @@ export async function setParentContext(
     { id: tweetId, t: parentText.trim().slice(0, 1000), h: parentHandle ?? undefined },
   );
 }
+
+/**
+ * ⭐⭐ **回读刚写进去的推** —— 「成功要对账」(可靠性纲领铁律四)。
+ *
+ * ── 为什么需要它 ──
+ *
+ * 采集报告里的 `coverage` 量的是**解析出来的内存对象**,
+ * 而入库要经过 `toRecord()` 转换 —— **解析对了不代表存对了**。
+ *
+ * 实测 2026-09-21:`conversation_id` 在 schema 里有列(还带索引)、
+ * 解析器也解出了值,唯独 `TweetInboxRecord` 类型没声明 → 写不进去 →
+ * 库里那一列**恒空**。三处各自看都正常,只有端到端回读才看得出来。
+ *
+ * ⚠️ 只按 tweet_id 取需要的列,不 `SELECT *`:
+ * 回读是诊断,不该把几千条完整行搬进内存。
+ */
+export async function readBackTweets(
+  tweetIds: string[],
+): Promise<Array<Record<string, unknown>>> {
+  if (tweetIds.length === 0) return [];
+  const db = getXDB();
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT tweet_id, text, author_handle, author_avatar, author_name_at_post,
+            tweet_url, created_at, lang, metrics, conversation_id,
+            in_reply_to, in_reply_to_user
+       FROM x_tweet WHERE tweet_id IN $ids`,
+    { ids: tweetIds },
+  );
+  return res[0] ?? [];
+}

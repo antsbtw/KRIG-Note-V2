@@ -177,6 +177,18 @@ export interface TweetInboxRecord {
   reply_draft?: string;
   author_name_at_post?: string;  // 发推当时的展示名快照
   backfilled?: boolean;          // true = 存量回填,非实时采集
+  /**
+   * ⭐⭐ **会话根** —— 这条推属于哪个会话(= 哪篇文章下面的)。
+   *
+   * ⚠️ 2026-09-21 实测暴露:schema 里**早就有这一列**(还带索引
+   * `idx_tweet_conversation`),解析器也解出来了(`HarvestedTweet.conversationId`),
+   * 唯独**这个类型没声明** → `toRecord` 写不进去 → 库里这一列恒空。
+   * 现象:想把回复归到根推上时,发现库里根本没法关联。
+   *
+   * ⭐ 「schema 有、解析有、类型没有」是最难发现的一种丢失:
+   * 三处各自看都正常,只有端到端对照才看得出来。
+   */
+  conversation_id?: string;
 }
 
 /** 默认过滤配置（初期硬编码，后期可做 UI 配置） */

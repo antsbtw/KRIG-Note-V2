@@ -328,11 +328,45 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
       .filter((t): t is string => !!t);
 
     const id = lg.id_str as string;
+    /**
+     * ⭐⭐ **显示名 / 头像 / 推文 URL** —— 2026-09-21 用户提出「先看单条完整性」时
+     * 实测暴露:这三个字段**载荷路径从来没赋过值**,只有 DOM 路径产出。
+     *
+     * 后果:库里 400 条抽样中 `tweet_url` 77% 空、`author_avatar` 80% 空、
+     * `author_name_at_post` 78% 空 —— 而 `coverage` **不量这三项**,
+     * 所以报告一直显示「15/16 项 100%」。
+     *
+     * ⚠️ 这正是记忆里那条的复发:x-capture-monitor 因「载荷首选、DOM 兜底」
+     * 把 DOM 独有字段(authorName/avatar/tweetUrl)全丢了。**同一个坑,另一条路径。**
+     *
+     * ⭐ 数据其实**就在载荷里**(实测 2026-09-02 真实载荷):
+     * · 显示名 `core.name`(新)/ `legacy.name`(旧)
+     * · 头像   `avatar.image_url`(新)/ `legacy.profile_image_url_https`(旧)
+     * 只有 URL 载荷不直接给 —— 但 handle + id 拼得出,那是**确定的规则**不是猜。
+     */
+    const uavatar = urr?.avatar as Record<string, unknown> | undefined;
+    const ulegacy = urr?.legacy as Record<string, unknown> | undefined;
+    const handle = ucore && typeof ucore.screen_name === 'string'
+      ? ucore.screen_name
+      : (ulegacy && typeof ulegacy.screen_name === 'string' ? ulegacy.screen_name : undefined);
+    const authorName = (() => {
+      const v = ucore?.name ?? ulegacy?.name;
+      return typeof v === 'string' && v.trim() ? v : undefined;
+    })();
+    const authorAvatar = (() => {
+      const v = uavatar?.image_url ?? ulegacy?.profile_image_url_https;
+      return typeof v === 'string' && v.trim() ? v : undefined;
+    })();
+    /** ⚠️ 没有 handle 就**不拼** —— 拼出 `x.com/undefined/status/…` 比没有更糟 */
+    const tweetUrl = handle ? `https://x.com/${handle}/status/${id}` : undefined;
+
     if (!out.has(id)) {
       out.set(id, {
         tweetId: id,
-        authorHandle: ucore && typeof ucore.screen_name === 'string'
-          ? ucore.screen_name : undefined,
+        authorHandle: handle,
+        authorName,
+        authorAvatar,
+        tweetUrl,
         authorRestId,
         // ⭐ bio:两个位置都看(与 x-author-profile.ts:89 同口径)
         authorBio: (() => {

@@ -32,7 +32,7 @@
  */
 
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
-import { upsertTweet } from '../db/tweet-inbox-repo';
+import { upsertTweet, readBackTweets } from '../db/tweet-inbox-repo';
 import {
   saveAuthorCounts, registerSeenAuthor, getAuthorCounts,
   saveListSnapshot, recentSnapshotRuns, diffSnapshots, orderingStability,
@@ -116,6 +116,23 @@ export interface AutoCollectReport {
    * 这个答「我这边接没接住」。两者都过才叫完整。
    */
   parseRate?: { entries: number; parsed: number; rate?: number };
+  /**
+   * ⭐⭐⭐ **入库回读** —— 「存对了吗」,不是「解析对了吗」。
+   *
+   * ⚠️ 与 `coverage` 是两件事:
+   * · coverage = 解析出来的内存对象,字段全不全
+   * · dbCheck  = **真的写进库了吗**(中间隔着 toRecord 转换)
+   * 实测 conversation_id 就是「解析有值、类型没声明、库里恒空」。
+   */
+  dbCheck?: {
+    /** 抽查了几条 */
+    sampled: number;
+    /** 本来要查几条(sampled < asked = 有的没写进去) */
+    asked: number;
+    /** 哪些字段在库里是空的 —— 只算**采集该负责**的,业务后填的不算 */
+    gaps: Array<{ field: string; empty: number; of: number }>;
+    error?: string;
+  };
   failedUrl?: string;
   /**
    * ⭐ **增量结果** —— 与上一次快照比,新增/取关了谁。
@@ -269,6 +286,21 @@ const FIELD_SPEC: ReadonlyArray<{
   { field: 'self', kind: 'payloadOnly', get: (t) => t.self && Object.keys(t.self).length > 0 },
   { field: 'metrics.bookmarks', kind: 'payloadOnly', get: (t) => t.metrics?.bookmarks },
   { field: 'authorBio', kind: 'payloadOnly', get: (t) => t.authorBio },
+  /**
+   * ⭐⭐ **这三项此前压根没量** —— 2026-09-21 用户提「先看单条完整性」时实测暴露:
+   * 库里 400 条抽样 `tweet_url` 77% 空、`author_avatar` 80% 空、
+   * `author_name_at_post` 78% 空,而报告显示「15/16 项 100%」——
+   * **因为表里根本没有它们**。
+   *
+   * ⚠️ 不量的字段永远是 100%。「清单不会自己长」在覆盖率这里同样成立:
+   * 加了字段不加进这张表,等于没采也看不出来。
+   *
+   * ⭐ 它们是 `always`(不是 payloadOnly):载荷路径现在也产出了
+   * (2026-09-21 补的取值 + URL 按 handle+id 拼),两条路径都该有。
+   */
+  { field: 'authorName', kind: 'always', get: (t) => t.authorName },
+  { field: 'authorAvatar', kind: 'always', get: (t) => t.authorAvatar },
+  { field: 'tweetUrl', kind: 'always', get: (t) => t.tweetUrl },
   // ⚠️ 以下本来就可能没有 —— **不进分母**,否则覆盖率永远上不去而且是假的
   { field: 'inReplyToStatusId', kind: 'conditional', get: (t) => t.inReplyToStatusId },
   { field: 'media', kind: 'conditional', get: (t) => t.media?.length },
@@ -293,7 +325,14 @@ function toRecord(t: HarvestedTweet, wsId?: string): TweetInboxRecord {
     // ⚠️ 存归一化形态 —— 与 x_author.handle 一致,漂移会让关联恒查不到且不报错
     author_handle: normalizeHandle(t.authorHandle ?? ''),
     author_avatar: t.authorAvatar,
+    /** ⭐ 发推当时的展示名快照 —— 人会改名,存下来才知道当时叫什么 */
+    author_name_at_post: t.authorName,
     tweet_url: t.tweetUrl,
+    /**
+     * ⭐⭐ **会话根必须写** —— 2026-09-21 实测:schema 有这一列(带索引)、
+     * 解析器也解出来了,唯独这里没写 → 库里恒空 → 回复归不到根推上。
+     */
+    conversation_id: t.conversationId,
     lang: t.lang,
     metrics: t.metrics ?? {},
     fetched_at: new Date().toISOString(),
@@ -685,6 +724,13 @@ export async function autoCollect(
    * 守卫当时只钉了「status 的条件里不能有 ownerHandle」,
    * 没钉「它会不会被前一条吃掉」—— 那是守卫的盲区。
    */
+  /** ⚠️ 临时诊断(2026-09-20 查「withReplies 没出对账」)—— 定位后删 */
+  console.log('[对账诊断]', JSON.stringify({
+    pageLabel: opts.pageLabel, ownerHandle: opts.ownerHandle,
+    people: r.people.length, tweets: r.tweets.length,
+    isStatus, tweetPageWithBaseline,
+    willEnter: !isStatus && (r.people.length > 0 || tweetPageWithBaseline) && !!opts.ownerHandle,
+  }));
   if (!isStatus && (r.people.length > 0 || tweetPageWithBaseline) && opts.ownerHandle) {
     const owner = normalizeHandle(opts.ownerHandle);
     const isFollowing = /following/i.test(opts.pageLabel ?? '');
@@ -936,6 +982,38 @@ export async function autoCollect(
    * 而事实是「这一页本来就没有推文,需要的是另一种解析器」。
    * 两者的处置完全不同:前者要修采集,后者要加「采人」能力。
    */
+  let dbCheck: AutoCollectReport['dbCheck'];
+  if (saved > 0) {
+    const SAMPLE = 20;
+    const ids = r.tweets.slice(0, SAMPLE).map((t) => t.tweetId).filter(Boolean);
+    if (ids.length > 0) {
+      try {
+        const stored = await readBackTweets(ids);
+        /** ⭐ 只查**采集该负责**的字段 —— 业务后填的(accepted/replied/ai_verdict)不算 */
+        const OWNED = [
+          'text', 'author_handle', 'created_at', 'lang', 'metrics',
+          'tweet_url', 'author_avatar', 'author_name_at_post', 'conversation_id',
+        ] as const;
+        const gaps = OWNED.map((f) => {
+          const empty = stored.filter((row) => {
+            const v = (row as Record<string, unknown>)[f];
+            return v === undefined || v === null || v === ''
+              || (typeof v === 'object' && Object.keys(v as object).length === 0);
+          }).length;
+          return { field: f, empty, of: stored.length };
+        }).filter((g) => g.empty > 0);
+        dbCheck = {
+          sampled: stored.length,
+          asked: ids.length,
+          gaps,
+        };
+      } catch (e) {
+        dbCheck = { sampled: 0, asked: ids.length, gaps: [], error: String(e).slice(0, 200) };
+      }
+    }
+  }
+
+
   const notes: string[] = [...notesPre];
   /**
    * ⭐ 把「采完没有」说成人话 —— 这是全量/增量的第一个问题。
@@ -976,6 +1054,47 @@ export async function autoCollect(
         ? `(本次有 ${r.unparsedSamples.length} 个载荷一条都没解出来,见样本)`
         : '(本次没有「一条都没解出来」的载荷)'),
     );
+  }
+
+  /**
+   * ⭐⭐⭐ **入库回读进 notes** —— 「存对了吗」要说出来。
+   *
+   * ⚠️ 字段在库里整片为空 = **采集链路真的坏了**(而不是数据质量),
+   * 所以进 problems 不只是 notes:铁律一「失败要响」。
+   * 但**抽样里恰好都没有**(如没人转发过的推没有 quoted)不该报 ——
+   * 只报那些「采集该负责、却整片空」的。
+   */
+  if (dbCheck) {
+    if (dbCheck.error) {
+      notes.push(`入库回读失败:${dbCheck.error} —— 不能确认存对了没有`);
+    } else {
+      const missed = dbCheck.asked - dbCheck.sampled;
+      if (missed > 0) {
+        notes.push(
+          `⚠️ 入库回读:查 ${dbCheck.asked} 条只读回 ${dbCheck.sampled} 条`
+          + ` —— **有 ${missed} 条没写进库**(报告说入库成功,库里却没有)`,
+        );
+      }
+      if (dbCheck.gaps.length > 0) {
+        const all = dbCheck.gaps.filter((g) => g.empty === g.of);
+        const some = dbCheck.gaps.filter((g) => g.empty < g.of);
+        if (all.length > 0) {
+          notes.push(
+            `⚠️⚠️ 入库回读:这些字段**整片为空**(抽查 ${dbCheck.sampled} 条全空)`
+            + `:${all.map((g) => g.field).join('、')}`
+            + ' —— 多半是解析没取、或 toRecord 没写、或类型没声明这一列',
+          );
+        }
+        if (some.length > 0) {
+          notes.push(
+            `入库回读:部分为空 —— ${some.map((g) => `${g.field} ${g.empty}/${g.of}`).join('、')}`
+            + '(可能是这些推本来就没有,不一定是漏)',
+          );
+        }
+      } else {
+        notes.push(`✓ 入库回读:抽查 ${dbCheck.sampled} 条,采集该给的字段**都在库里**`);
+      }
+    }
   }
 
   /**
@@ -1064,6 +1183,25 @@ export async function autoCollect(
   });
 
   /**
+   * ⭐⭐⭐ **回读库里那几条** —— 「解析对了」≠「存对了」。
+   *
+   * ── 用户 2026-09-21 ──
+   * > 「我觉得先观察单条推文的完整性,然后才是 item 的条数」
+   *
+   * ⚠️ 上面的 `coverage` 量的是 **`HarvestedTweet`**(内存里解析出来的),
+   * 而两者之间隔着 `toRecord()` 转换 —— **解析对了不代表存对了**。
+   * 实测 2026-09-21:`conversation_id` schema 有列、解析器有值,
+   * 唯独 `TweetInboxRecord` 类型没声明 → 写不进去 → 库里恒空。
+   * 三处各自看都正常,**只有端到端对照才看得出来**。
+   *
+   * ⭐ 这正是可靠性纲领的**铁律四:成功要对账** ——
+   * 写完回读,而不是「没抛异常就当成了」。
+   *
+   * ⚠️ 只抽查前 N 条:全量回读几千条会把一次采集拖慢很多,
+   * 而抽样足以发现「整个字段没写进去」这类问题(那才是要防的),
+   * 单条偶发缺失本来就该由 coverage 那边看。
+   */
+  /**
    * ⭐ 逐条明细 —— 人要能逐条看,不是只看百分比。
    * ⚠️ `conditional` 不算缺失,否则每条都"缺"一堆本来就不该有的东西。
    */
@@ -1101,6 +1239,8 @@ export async function autoCollect(
     pagingSkipped: r.pagingSkipped,
     /** ⭐ 解析率 —— 每个页面都有,包括没有外部分母的那些 */
     parseRate: r.parseRate,
+    /** ⭐ 入库回读 —— 「存对了吗」 */
+    dbCheck,
     failedUrl: r.failedUrl,
     /** ⭐ 抄到的那条请求 —— 只带 URL,请求头含鉴权不外传 */
     capturedUrl: r.lastRequest?.url,
