@@ -3,8 +3,14 @@
 > 2026-09-21 立项 → 9-22 上午一度误判「前提被证否」→ **9-22 下午实采证实:立项成立**。
 > 由 `docs/handoff/x-page-collection-verification.md`「剩下的活」第一条转来。
 >
-> ⭐ **现状:方向已确认,未开工。** 详情页(`TweetDetail`)确实给正文,
-> 实测同一账号三个入口对照,只有详情页带正文。
+> ⭐⭐ **2026-09-22 已实施(commit `adcbd7cd`,分支 main)—— 但尚未真机验收。**
+> 代码落地:`src/platform/main/x/x-article-backfill.ts` + `is_article`(migration 1.2.7)
+> + 面板按钮「补长文正文」+ 留痕 `backfill-*.json` + 守卫 17 条(7 个违规注入全红)。
+>
+> ⚠️ **还没在真机上跑过一篇** —— 改的是主进程代码,必须重启 app。
+> 验收判据见本文末「验收」一节。
+>
+> 下面几节保留的是**立项依据**(三入口实测对照仍然有效)。
 >
 > ⚠️ 下面「好消息」「实施顺序」几节是立项当天写的,**部分已过时**
 > (尤其别照搬 `fetchArticleReplies` 的滚动逻辑,见「代价」一节)。
@@ -153,3 +159,84 @@ x_tweet 9678 行,text 超过 2000 字的:0 行
 | `src/platform/main/db/tweet-inbox-repo.ts` | `upsertTweet`(只更新采集字段) |
 | `tests/x/article-body-not-lost.test.ts` | 长文正文守卫(11 条,真实载荷驱动) |
 | `docs/handoff/x-page-collection-verification.md` | 采集验证全貌 + 七个 bug |
+
+
+---
+
+## ✅ 实施记录(2026-09-22,commit `adcbd7cd`)
+
+### 最后的实现与立项当天的设想差在哪
+
+| 立项当天以为要做的 | 实际做的 |
+|---|---|
+| 抽「进详情页 + 捕 TweetDetail」共用底座 | **不用抽**。`x.status` 入口早就存在且跑通(`x-pages.ts:109`),`autoCollect` 那条链路本身就是导航+捕包+解析+入库 |
+| 可能要改解析器 | **一个字没改**。留痕坐实 `TweetDetail` 的 `articlesWithBody:1` |
+| 自己写「拿到就停」 | **`harvestTimeline` 早就有 `stopWhen`**(`:600`),直接用 |
+
+⭐ 所以真正的工作量不在「跑通」,而在**「哪些行是长文」库里答不出来**。
+
+### ⚠️ 新增 `is_article`(migration 1.2.7)—— 本次最大的一块
+
+x_tweet 的 33 列里**没有任何一列**能回答「哪些行是长文」。
+解析器(`HarvestedTweet.isArticle`)一直就有,只是四处登记里另外三处都没跟上。
+
+判据选择:
+- ⚠️ **不能用字数** —— 库里 10056 行,超过 2000 字的只有 3 行;
+  而正文被摘要顶掉的长文只有 267 字,**和普通推长得一模一样**。
+- ⚠️ **不复用 `backfilled`** —— 它已有语义(存量回填 ≠ 实时采集,637 行在用)。
+- ⚠️ 用 `isArticle`(有没有 article 结构)而**不是** `isLongText`(有没有真拿到正文)——
+  要找的正是「是长文**但**正文还没取回」那一类,用后者会把它们恰好漏掉。
+
+### 节流:手动触发 + 小批上限(用户拍板)
+
+面板上独立一个按钮「补长文正文」,一次 10 篇(上限 50),篇与篇之间随机 2.5~4.5s。
+⚠️ **不跟在采集后面自动跑** —— 两件事缠在一起,出事时分不清是谁的问题。
+⚠️ 候选来自**库**,与面板上选的页面/参数无关(按钮的 title 里写明了)。
+
+### 留痕
+
+`~/Library/Application Support/KRIG Note V2/x-collect-journal/backfill-<ISO>.json`,
+每篇记 `lenBefore → lenAfter` + `gotBody` / `saved`(**两者分开**:采到了但写库炸了
+必须看得见)。面板同时显示同一份内容。
+⭐ 顺手修掉 `pruneJournal` 只清 `collect-` 前缀的洞 —— `backfill-` 那一半会无限堆积。
+
+### ⚠️ 这一轮踩到的坑(都是「看着没问题」那一类)
+
+1. **模板字面量里的注释不能带反引号**。给写库 SQL 加注释时写了 `` `??` ``,
+   反引号**提前终止了字符串**,后面的 SQL 被当 TS 解析(报 `Cannot find name 'NONE'`)。
+   ⭐ **注释把它所注释的 SQL 弄坏了。**
+2. **新增的 `it` 落到 `describe` 外面 → 整个文件报「no tests」而不报错**。
+   假绿的又一种形态:不是断言没红,是**测试压根没注册**。
+   → 加完测试要看**条数**对不对,别只看「绿」。
+3. **`WEBC_COUNT` 写死在源码里**(18→19)。它只出现在启动日志里,漂了不报错,
+   日志就开始说假话。守卫当场抓到 —— 这条守卫是对的。
+4. **手写 handle 归一化**。我写了 `.replace(/^@/,'').toLowerCase()`,
+   共用的 `normalizeHandle` 还会 trim 空白、剥多个 `@`。
+   漂移的后果是**恒查不到且不报错** —— 表现为「一篇候选都没有」,
+   与「真的都补全了」长得一模一样。已改回共用函数并加守卫。
+
+### 守卫(`tests/x/article-body-backfill.test.ts`,17 条)
+
+7 个违规注入**全部确认变红**:删 INSERT 段字段(bug ⑥ 形态)/ 无条件覆盖(bug ② 形态)/
+`stopWhen` 丢 tweetId / `toRecord` 用 `isLongText` / 候选退回用字数 / 删掉留痕 /
+手写 handle 归一化。
+⭐ 删 INSERT 段那条变红时,**ON DUPLICATE 那条仍然绿** —— 证明两段是真的分开断言的
+(bug ⑥ 的教训:19 条守卫全钉在 ON DUPLICATE 上,没有一条看 INSERT 段)。
+
+---
+
+## ⚠️ 验收(还没做)
+
+**必须重启 app** —— 改的是主进程代码,否则跑的是旧编译产物。
+判据:`ps -o lstart=` 看进程启动时间 vs commit 时间,再 grep `.vite/build/*.js`。
+
+1. migration 1.2.7 跑没跑:`INFO FOR TABLE x_tweet` 里有没有 `is_article`
+2. 采一次长文(`x.articles` 或 `x.profile` @0xEgorAI)→ 新行 `is_article=true`
+3. 点「补长文正文」→ 看逐篇 **字数前→后**
+   - ⭐ 成功判据:某篇从几百字涨到几千字
+   - ⭐ 单篇耗时应从 76.7 秒压到**几秒**(这是 `stopWhen` 有没有生效的判据)
+4. 留痕文件 `backfill-*.json` 落盘了没有
+
+⚠️ **「候选 0 篇」不等于「都补全了」** —— `is_article` 是 1.2.7 才加的,
+**存量老行标不上**,所以第一次点很可能是 0 篇。要先采一次长文才有候选。
+(代码里这条已经写进 `notes`,面板上会显示。)
