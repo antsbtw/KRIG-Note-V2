@@ -814,8 +814,15 @@ export async function harvestTimeline(
       const nowUrl = wc.getURL();
       // ⚠️ 只比 path,不比 query/hash —— X 会往 URL 上挂 ?src= 之类,
       //    比全等会让「明明已经在这页」误判成「不在」,白跳一次
-      const a = new URL(url).pathname.replace(/\/$/, '');
-      const b = new URL(nowUrl).pathname.replace(/\/$/, '');
+      /**
+       * ⚠️ **要忽略大小写** —— X 的 handle 大小写不敏感:
+       * 面板填 `0xegorai`,而页面 URL 是 `/0xEgorAI`。
+       * 区分大小写会把「已经在这页」误判成「不在」→ 白跳一次、冲掉滚动位置。
+       * ⭐ 下面的落地校验本来就 `.toLowerCase()` 了,两处判据必须一致,
+       * 否则「判不在 → 跳 → 落地判在」这种自相矛盾很难查。
+       */
+      const a = new URL(url).pathname.replace(/\/$/, '').toLowerCase();
+      const b = new URL(nowUrl).pathname.replace(/\/$/, '').toLowerCase();
       return a === b;
     } catch { return false; }
   })();

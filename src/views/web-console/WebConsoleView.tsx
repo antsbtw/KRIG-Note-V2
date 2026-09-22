@@ -269,7 +269,23 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
          */
         const url = r?.url;
         if (url === lastSeenUrl.current) return;   // 左边没动 → 不碰右边
+        /**
+         * ⚠️⚠️ **首次读到不算「左边导航了」** —— 2026-09-22 实测事故。
+         *
+         * 现象:用户在右边选好 x.profile+handle,左边还停在首页,
+         * 1.5 秒后这里把右边**改写成 x.home**,于是「采集」采的是首页
+         * (无限流 → 永远不停 → 用户看到「一直在跑也不停止」),
+         * 而且采回来的是**用户自己的 For you**,却标着目标 handle 的归属。
+         *
+         * 根因:`lastSeenUrl` 初值是 undefined,第一次读到任何 URL 都
+         * 「!== undefined」→ 被当成「左边刚导航过去」→ 覆盖右边。
+         * ⭐ 但那其实是**左边一直就在那**,人没动过它。
+         *
+         * 修法:第一次只记录、不覆盖。真正的导航(第二次起 URL 变了)才同步。
+         */
+        const first = lastSeenUrl.current === undefined;
         lastSeenUrl.current = url;
+        if (first) return;
         if (!page) return;
         setAcPage(page.name);
         if (page.params.handle) setGotoHandle(page.params.handle);
@@ -861,13 +877,32 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       onChange={(e) => set(e.target.value)} />
                   );
                 })}
-                <input className="krig-webc__in" style={{ width: 72 }} value={acRounds}
-                  onChange={(e) => setAcRounds(e.target.value)} placeholder="轮数(留空)" title="⭐ 留空即可 —— 程序自己采到底(连续 40 轮没新数据就停)。这里填的是**安全网上限**,不是目标" />
-                <input className="krig-webc__in" style={{ width: 72 }} value={acBudget}
-                  onChange={(e) => setAcBudget(e.target.value)} placeholder="秒(留空)" title="⭐ 留空 = 30 分钟兜底。防跑飞用,不是目标" />
-                <input className="krig-webc__in" style={{ width: 72 }} value={acPages}
-                  onChange={(e) => setAcPages(e.target.value)} placeholder="翻页"
-                  title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍" />
+                {/**
+                  * ⭐⭐ **三个框必须带可见标签** —— 2026-09-22 实测坑到用户。
+                  *
+                  * 原来三个框长得一模一样、只靠 placeholder 区分,
+                  * 于是「轮数填 30」被填进了第三个框(翻页),
+                  * 轮数其实一直是空的(=5000 轮上限)→ 现象是「说好 30 轮却一直跑」。
+                  * ⚠️ placeholder 在**填了字之后就消失**,正是填完最需要确认的时候。
+                  */}
+                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                  title="⭐ 留空即可 —— 程序自己采到底(连续 40 轮没新数据就停)。这里填的是**安全网上限**,不是目标">
+                  轮数
+                  <input className="krig-webc__in" style={{ width: 56 }} value={acRounds}
+                    onChange={(e) => setAcRounds(e.target.value)} placeholder="留空" />
+                </label>
+                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                  title="⭐ 留空 = 30 分钟兜底。防跑飞用,不是目标">
+                  秒
+                  <input className="krig-webc__in" style={{ width: 56 }} value={acBudget}
+                    onChange={(e) => setAcBudget(e.target.value)} placeholder="留空" />
+                </label>
+                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                  title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍。⚠️ 这不是轮数">
+                  翻页
+                  <input className="krig-webc__in" style={{ width: 56 }} value={acPages}
+                    onChange={(e) => setAcPages(e.target.value)} placeholder="留空" />
+                </label>
                 {/**
                   * ⭐⭐ 两个按钮走**同一条链路**,只差 `fastIncremental` 一个参数 ——
                   * 不是两套流程。写成两份会漂,而漂的表现是
