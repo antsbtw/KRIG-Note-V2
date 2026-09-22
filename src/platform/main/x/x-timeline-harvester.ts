@@ -34,7 +34,7 @@
 
 import { webContents as allWebContents } from 'electron';
 import {
-  extractPeopleFrom, findPagingCursor, withCursor, buildRefetchScript, isPeopleOp,
+  extractPeopleFrom, findPagingCursor, withCursor, buildRefetchScript, isPeopleOp, isPageDataOp,
   countTimelineEntries,
   type HarvestedPerson,
 } from './x-people-harvester';
@@ -703,7 +703,17 @@ export async function harvestTimeline(
          * ⭐ 第一条必然是页面刚加载时发的「第一页」形状,最干净。
          * 抄到之后就不再覆盖(`?? =` 的语义)。
          */
-        if (req?.headers && isPeopleOp(op) && !lastPeopleReq) {
+        /**
+         * ⚠️⚠️ **判据是「主数据接口」,不是「人的列表」** —— 2026-09-22 用户追出来的。
+         *
+         * 原来写 `isPeopleOp(op)`,于是 `UserArticlesTweets`(长文页)不在名单里
+         * → 请求从没抄下来 → 游标翻页永远不启动 → 长文页只能靠滚动,
+         * 滚不动就停在 4 篇,而 X 明说 `hasMore: true`。
+         * ⚠️ 而且 `isPeopleOp` 自己的注释里就写着
+         * 「⚠️⚠️ 生产代码不用它,也不该用」「按名字分派 = 静默失败」——
+         * 这条禁令被违反了,没人发现,因为现象是「采不全」不是「报错」。
+         */
+        if (req?.headers && isPageDataOp(op, u) && !lastPeopleReq) {
           lastPeopleReq = { url: u, headers: req.headers, method: req.method ?? 'GET' };
         }
       }
@@ -1198,18 +1208,27 @@ export async function harvestTimeline(
         + `共 ${people.size} 人)—— 一页都不用翻`;
     }
   }
+  /**
+   * ⚠️⚠️ **判据是「这页采到数据」,不是「这页采到人」** —— 2026-09-22 同一刀的第二处。
+   *
+   * 原来写 `people.size > 0`,那是「只在采人的页面翻页」留下的假设。
+   * 长文页那趟**碰巧**成立(采到 1 个人 = 作者本人),纯推文页就会卡死 ——
+   * 而且卡得毫无道理:明明采到了 50 条推,却因为「没采到人」不给翻页。
+   * ⭐ 翻页要的是「这一页确实有数据、值得往下翻」,人和推都算数。
+   */
+  const gotData = people.size > 0 || tweets.size > 0;
   const gate = {
     抄到请求: !!baseReq,
     X说还有下一页: paging.hasMore,
     有游标: !!paging.bottom,
-    这页采到人: people.size > 0,
+    这页采到数据: gotData,
   };
   const blocked = Object.entries(gate).filter(([, ok]) => !ok).map(([k]) => k);
   if (blocked.length > 0) {
     /** ⭐ 如实记下**为什么没翻**,不是不提 */
     pagingSkipped = `游标翻页没启动 —— ${blocked.join('、')}(不成立)`;
   }
-  if (baseReq && paging.hasMore && paging.bottom && people.size > 0 && !caughtUp) {
+  if (baseReq && paging.hasMore && paging.bottom && gotData && !caughtUp) {
     const budget = opts.pageBudget ?? 40;
     const seenCursors = new Set<string>();
     while (pagedRounds < budget && paging.hasMore && paging.bottom && !caughtUp) {
@@ -1262,6 +1281,13 @@ export async function harvestTimeline(
       pagedRounds++;
       payloads++;
       const peopleBefore = people.size;
+      /**
+       * ⚠️⚠️ **推文数也要记** —— 2026-09-22 同一刀的第三处。
+       * 下面的「连续 3 页没收获就停」原来**只数人**,那是「只给采人页翻页」
+       * 留下的假设。长文/推文页每页的作者是同一个人,人数根本不会涨 →
+       * **翻 3 页必停**,而推文其实一直在增加。
+       */
+      const tweetsBefore = tweets.size;
       try {
         const parsed = JSON.parse(body);
         /**
@@ -1296,7 +1322,7 @@ export async function harvestTimeline(
        * (正常),也可能是响应根本没人(不正常)。不臆断,继续翻,
        * 但连着 3 页都没新人就停:再翻也是白费。
        */
-      if (people.size === peopleBefore) {
+      if (people.size === peopleBefore && tweets.size === tweetsBefore) {
         emptyPages++;
         if (emptyPages >= 3) {
           /**
@@ -1307,18 +1333,20 @@ export async function harvestTimeline(
            */
           stopReason = fastMode
             ? `快速增量:连续 3 页全是已知的人(连续 ${knownRun} 个)—— 已在老区,停`
-            : `游标翻页:连续 3 页没有新的人(已 ${people.size} 人)`;
+            : `游标翻页:连续 3 页没有新数据(已 ${people.size} 人 / ${tweets.size} 条推)`;
           if (fastMode) caughtUp = true;
           break;
         }
       } else emptyPages = 0;
 
       if (!paging.hasMore) {
-        stopReason = `游标翻页:X 说没有更多了(共翻 ${pagedRounds} 页,${people.size} 人)`;
+        stopReason = `游标翻页:X 说没有更多了(共翻 ${pagedRounds} 页,`
+          + `${people.size} 人 / ${tweets.size} 条推)`;
       }
     }
     if (paging.hasMore && pagedRounds >= (opts.pageBudget ?? 40)) {
-      stopReason = `游标翻页:达到翻页上限 ${opts.pageBudget ?? 40} 页(${people.size} 人,还有更多)`;
+      stopReason = `游标翻页:达到翻页上限 ${opts.pageBudget ?? 40} 页(`
+        + `${people.size} 人 / ${tweets.size} 条推,还有更多)`;
     }
   }
 

@@ -206,6 +206,51 @@ export function isPeopleOp(op: string): boolean {
   return /Followers|Following|FollowersYouKnow|Subscriptions/i.test(op);
 }
 
+/**
+ * ⭐⭐ **这条 GraphQL 请求是不是「这一页的主数据接口」** —— 翻页要重放的就是它。
+ *
+ * ── 为什么不能用 `isPeopleOp` 当这个判据(2026-09-22 用户实测追出来)──
+ *
+ * 抄请求那处原来写 `isPeopleOp(op)`,于是 `UserArticlesTweets`(长文页)
+ * 不在名单里 → **请求从没被抄下来** → 游标翻页永远不启动 →
+ * 长文页只能靠滚动,滚不动就停。
+ * 现象:X 明说 `hasMore: true`,我们却只拿到 4 篇,而且「加大轮数」根本没用。
+ *
+ * ⚠️ 这正是 `isPeopleOp` 自己的注释警告过的形态:
+ * 「按名字分派等于把『认不认识这个名字』变成『采不采得到』,而那是**静默失败**」。
+ * 它本来只该用于诊断展示,却被拿来当了闸门。
+ *
+ * ── 那 `isPeopleOp` 当初是在挡什么 ──
+ *
+ * 挡的是**杂项接口**:`ViewerBadgeCounts` / `DataSaverMode` 这类 0KB 的,
+ * 它们**发生得最晚**,会把真正的数据请求覆盖掉 →
+ * 拿着数据接口的游标去请求 ViewerBadgeCounts → **HTTP 404**,一页就停。
+ * ⭐ 所以真正要的判据是「**这条是不是主数据接口**」,
+ * 而「是不是人的列表」只是它的一个**过窄的近似**。
+ *
+ * ── 判据 ──
+ * ① 明确排除已知杂项(它们的名字很稳定,而且个个是 0KB 的旁路)
+ * ② 请求里必须带 `variables` —— 翻页靠 `withCursor` 往 variables 塞游标,
+ *    没有 variables 的请求**根本不可能翻页**,抄了也是白抄
+ *
+ * ⚠️ 用**黑名单 + 结构判据**而不是白名单:X 改版加了新的时间线接口时,
+ * 白名单会把它挡在外面(静默失败),而黑名单最多是多抄一条、下一条覆盖掉。
+ */
+const JUNK_OPS = /^(ViewerBadgeCounts|DataSaverMode|CreatorStudioTabBarItemQuery|getAltTextPromptPreference|ProfileSpotlightsQuery|ProfileTeamRoster|ProfileSeasonSchedule|UserByScreenName|TopicToFollowSidebar|ExploreSidebar)$/i;
+
+export function isPageDataOp(op: string, url: string): boolean {
+  if (!op || JUNK_OPS.test(op)) return false;
+  /**
+   * ⚠️ 没有 `variables` 就翻不了页(withCursor 解不出来会返回 null)——
+   * 抄它只会把真正能翻页的那条覆盖掉。
+   */
+  try {
+    return !!new URL(url).searchParams.get('variables');
+  } catch {
+    return false;
+  }
+}
+
 
 /**
  * ⭐⭐ 找**分页游标** —— 回答「还有没有」,不靠猜。

@@ -229,8 +229,13 @@ describe('⭐⭐ 没翻页必须说清是哪一条不成立', () => {
     expect(i, '入口条件没有逐条判定 —— 不成立时查不出是哪一条').toBeGreaterThan(0);
     const g = src.slice(i, src.indexOf('};', i));
     expect(g.length, '切出来的 gate 是空的').toBeGreaterThan(40);
-    // 四条缺任何一条,那种断法就会重新变成哑的
-    for (const cond of ['抄到请求', 'paging.hasMore', 'paging.bottom', 'people.size']) {
+    /**
+     * 四条缺任何一条,那种断法就会重新变成哑的。
+     * ⚠️ 第四条 2026-09-22 从 `people.size` 改成 `gotData`(人**或**推):
+     * 原判据是「只给采人页翻页」的残留,纯推文页恒不成立 → 永远翻不了页,
+     * 而长文页那趟碰巧采到 1 个人(作者本人)才蒙混过关。
+     */
+    for (const cond of ['抄到请求', 'paging.hasMore', 'paging.bottom', 'gotData']) {
       expect(g, `入口条件少了「${cond}」—— 这种断法会查不出来`).toContain(cond);
     }
   });
@@ -306,11 +311,23 @@ describe('⭐⭐ 抄的必须是「人的列表」那条请求', () => {
     const stmtStart = src.lastIndexOf('\n', src.lastIndexOf('if', i));
     const branch = src.slice(stmtStart, i + 60);
     expect(branch.length, '切出来的分支是空的').toBeGreaterThan(20);
+    /**
+     * ⚠️⚠️ **钉的是「挑不挑」,不是「用哪个函数挑」** —— 2026-09-22 改过一次。
+     *
+     * 原来写死 `.toMatch(/isPeopleOp\(/)`,于是这条守卫把
+     * **「只给采人页翻页」这个 bug 锁住了**:长文页(UserArticlesTweets)
+     * 不在 isPeopleOp 名单里 → 请求抄不下来 → 翻页永不启动 → 长文只采到第一屏;
+     * 而任何人想修都会撞红这条守卫,然后以为是自己错了。
+     *
+     * ⭐ 这条守卫真正要防的是「**见 graphql 就抄**」(杂项覆盖真请求 → 404),
+     * 那个意图现在由 `isPageDataOp` 承担(它黑名单挡杂项 + 要求带 variables),
+     * 行为守卫在 tests/x/paging-not-people-only.test.ts 里逐条钉。
+     */
     expect(
       branch,
-      '抄请求不挑操作名 —— ViewerBadgeCounts/DataSaverMode 会覆盖掉 Followers,\n'
-      + '翻页拿着 Followers 的游标请求杂项接口 → HTTP 404',
-    ).toMatch(/isPeopleOp\(/);
+      '抄请求不挑操作名 —— ViewerBadgeCounts/DataSaverMode 会覆盖掉真请求,\n'
+      + '翻页拿着真请求的游标去请求杂项接口 → HTTP 404',
+    ).toMatch(/isPageDataOp\(|isPeopleOp\(/);
   });
 
   it('⭐ 杂项操作名不能被 isPeopleOp 认成人的列表', () => {
