@@ -106,15 +106,22 @@ cover_media / id / lifecycle_state / metadata / preview_text / rest_id / title
 hasContentState: false   ← 72/72 全都没有 content_state
 ```
 
-⚠️⚠️ **2026-09-22 更正:原文这里写「正文只在单篇页(`TweetDetail`)才有」,
-错了** —— 那是拿 `/articles` 标签页的实测结果**反面推论**出来的,没验过。
-Spike 已证否:长文正文**在普通时间线载荷里就有**(@0xEgorAI 那两条
-16081 / 6812 字走的是 `source=watchlist` 的时间线采集,不是详情页)。
+⭐⭐ **2026-09-22 实采定案:原文这句是对的** —— 正文确实只在单篇详情页的载荷里。
 
-⭐ 正确的说法:**`UserArticlesTweets`(`/articles` 标签页专用接口)给得浅**,
-只有 `title` + `preview_text`;同一篇长文换普通时间线接口就带 `content_state`。
-所以这不是「X 的设计使然、必须逐篇进详情页」,而是**换个入口就有**。
-详见 `docs/handoff/x-article-body-backfill.md`。
+⚠️ 中间绕过一个弯:9-22 上午我曾宣布「已证否、换个入口就有」,**那是错的**。
+依据是备份里 @0xegorai 的长文标着 `source='watchlist'`,我据此推断「来自普通时间线」——
+但 `source` 是**写死值**(`x-auto-collect.ts:352`),**根本推不出接口**。
+
+✅ 当天下午同一账号 `@0xEgorAI` 跑三个入口对照,结论干净:
+
+| 入口 | 接口 | 长文 | 带正文 |
+|---|---|---|---|
+| `x.status` | `TweetDetail` / `TweetResultByRestId` | 1 | **1 ✅** |
+| `x.articles` | `UserArticlesTweets` | 4 | 0 |
+| `x.profile` | `UserOriginalsTimeline` | 3 | 0 |
+
+所以「列表页取不到正文」**不是 bug,是 X 的设计**;要正文得逐篇进详情页。
+详见 `docs/handoff/x-article-body-backfill.md`(立项成立,未开工)。
 
 ⚠️ 但量出来一个**真缺口**:`preview_text` **就在载荷里却没取**,
 库里只存进 7 个字的标题(如「乡村文化人记忆」),检索和判断都用不上。
@@ -355,7 +362,7 @@ curl -s -X POST http://localhost:8533/sql -u "$U:$P" -H "Accept: application/jso
 
 | 事项 | 说明 |
 |---|---|
-| ~~列表页正文靠逐篇进详情页补~~ | 🔴 **已作废**(2026-09-22 Spike 证否,见 `docs/handoff/x-article-body-backfill.md`)。长文正文**在普通时间线载荷里就有** —— @0xEgorAI 那两条 16081/6812 字正是 `source=watchlist` 采到的。浅的只有 `/articles` 标签页那个接口(`UserArticlesTweets`)。⭐ 所以本文档「⭐⭐ 列表页载荷没有正文」那节的结论**推广过头了**,要按接口名限定,别写成「列表页都没有」 |
+| **列表页正文靠逐篇进详情页补** | ✅ **立项成立**(2026-09-22 实采证实,见 `docs/handoff/x-article-body-backfill.md`),**未开工**。同一账号三入口对照:只有 `x.status`(`TweetDetail`)带正文,`x.articles`/`x.profile` 都是 0。⚠️ 别照搬 `fetchArticleReplies`——它为「翻完回复」设计,实测一篇 77 秒;补正文只要**第一个 TweetDetail 响应**,拿到就停 |
 | **长文 `title` 收窄成一处** | ⚠️ **原文划掉了这条,划早了**:已确认的是**结构**(`article_results.result.title`,键恒定),**代码没动** —— 仍是 5 路依次探查,4 条是死分支且无守卫。收窄 + 补一条守卫才算完 |
 | ~~`x.articles` 真正验一次~~ | ✅ 已完成(换 `@KA594594` 跑通 72 条) |
 | ~~报告口径拆「长推/长文」~~ | ✅ 已完成(`313fb351`),顺带修了分子分母不对齐 |
