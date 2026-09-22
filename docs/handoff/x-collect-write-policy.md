@@ -15,6 +15,10 @@
 `tests/x/` **899 条全绿**,工作区干净,HEAD = `bf387566`。
 本轮共修 **6 个真 bug**,新增 **4 份守卫** + **1 套留痕**。
 
+> ⚠️ **上面是 9-22 上午收口时的数字,已过期**:之后又做了长文正文逐篇补全
+> (`adcbd7cd`),现在 `tests/x/` 是 **916 条**,HEAD 见 `git log`。
+> ⭐ 这正是本文档自己警告过的「过期的自述」—— 读任何数字先核一遍。
+
 ⭐ 核心变化:**写库从「无条件覆盖」变成「有策略的合并」**,
 并且**采集报告会落盘**,不再只活在面板上一次渲染里。
 
@@ -144,8 +148,8 @@
 
 ⭐ **正文只在详情页的载荷里。** 列表页和主页都只给标题+摘要 —— 这是 X 的设计,不是 bug。
 
-⚠️ 但**「逐篇补正文」这件事还没做**,只是方向确认了。详见
-`docs/handoff/x-article-body-backfill.md`(立项成立,未开工)。
+⭐ **「逐篇补正文」2026-09-22 已实施**(commit `adcbd7cd`),**但尚未真机验收**。详见
+`docs/handoff/x-article-body-backfill.md` 的「实施记录」与「验收」两节。
 
 ---
 
@@ -250,5 +254,7 @@ bug ⑥ 最能说明问题:我**昨天刚写完**「加字段要登记四处」�
 | `tests/x/upsert-never-shrinks-text.test.ts` | text 只许变长(7 条) |
 | `tests/x/collect-journal.test.ts` | 留痕聚合(5 条) |
 | `tests/x/collect-panel-safety.test.ts` | 面板三坑(5 条) |
+| `src/platform/main/x/x-article-backfill.ts` | **长文正文逐篇补全**(`stopWhen` 拿到正文就停) |
+| `tests/x/article-body-backfill.test.ts` | 长文补全守卫(17 条,7 个违规注入全红) |
 
-改动前先跑 `npx vitest run tests/x/`(**899 条**)。
+改动前先跑 `npx vitest run tests/x/`(**916 条** —— 899 + 长文补全守卫 17)。
