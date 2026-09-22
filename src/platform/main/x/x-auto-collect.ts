@@ -1042,6 +1042,15 @@ export async function autoCollect(
    * 先把「到底缺多少」从猜变成数,再决定要不要改采集底座。
    * ⚠️ 长文正文那一类上面刚补过,所以这里统计的是**补完之后仍然缺的**。
    */
+  /**
+   * ⭐ 「像人一样把折叠点开」有没有真的发生 —— 用户 2026-09-22 的原则。
+   * ⚠️ 展开 0 个**不一定是好事**:可能这页没折叠的,也可能按钮没找到。
+   * 所以与「没拿全的条数」放在一起说,两个数才判得出。
+   */
+  if (r.domExpanded && r.domExpanded > 0) {
+    notesPre.push(`✓ 展开了 ${r.domExpanded} 条折叠的推(Show more)—— 正文按展开后的全文存`);
+  }
+
   const stillIncomplete = r.tweets.filter((t) => t.incomplete);
   if (stillIncomplete.length > 0) {
     const truncated = stillIncomplete.filter((t) => t.incomplete === 'text-truncated').length;
@@ -1358,6 +1367,7 @@ export async function autoCollect(
     hasMore: r.paging.hasMore,
     pagedRounds: r.pagedRounds,
     pagingSkipped: r.pagingSkipped,
+    domExpanded: r.domExpanded,
     elapsedMs: Date.now() - t0,
     parseRate: r.parseRate,
     ops: aggregateOps(r.seenOps),

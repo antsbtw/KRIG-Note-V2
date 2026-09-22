@@ -40,6 +40,8 @@ import {
 } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
+/** ⭐ DOM 抽取与「点开 Show more」—— 与右键提取、tweet-fetcher 共用同一套选择器 */
+import { TWEET_SCRAPE_FN_BODY } from '../tweet-fetcher/extract-script';
 
 /**
  * ⭐ 连续这么多轮没有新数据就判定「采到底了」。
@@ -298,6 +300,12 @@ export interface HarvestReport {
   };
   /** ⭐ 没翻的话,是四个入口条件里哪一条不成立 —— 四种断法必须分得开 */
   pagingSkipped?: string;
+  /**
+   * ⭐ 这一趟点开了几个「Show more」(折叠的推)。
+   * ⚠️ 0 有两义:本来就没折叠的,或**按钮没找到**(X 改了结构)——
+   * 与 incomplete 一起看才判得出是哪种。
+   */
+  domExpanded?: number;
   /** ⭐ 翻页失败时发出去的 URL(诊断用) */
   failedUrl?: string;
   /**
@@ -346,6 +354,70 @@ export interface HarvestReport {
  * ⚠️ **不**用「长度接近 280」当判据 —— 正好写满 280 字的推是完整的,
  *    那样会把一大批完整短推错报成截断。
  */
+/**
+ * ⭐⭐ **把 DOM 读到的推合并进累计表** —— 载荷与 DOM 互补,不是二选一。
+ *
+ * ── 两边各有对方没有的东西(2026-09-22 实测)──
+ * · 载荷独有:`conversation_id` / `in_reply_to_status_id` / 长文 `content_state`
+ * · **DOM 独有**:页面已加载时载荷根本不发(实测同一 URL 采到 0 条),
+ *   以及**展开后的全文**(折叠时正文压根没进载荷也没进 DOM)
+ *
+ * ── 合并规则 ──
+ * ① `text` **只许变长** —— 与写库那层同一条底线(2026-09-22 的数据损坏就是它防住的)。
+ *    展开后的 DOM 全文会顶掉载荷的截断版;反过来载荷的长文正文也不会被 DOM 摘要顶掉。
+ * ② 其余字段**空值不许覆盖非空**。
+ * ③ ⚠️ 新条目标 `fromDom`,已有条目**不改这个标记**:
+ *    它是「这条的 has_media 可不可信」的依据(DOM 分不清用户上传的图与外链预览卡),
+ *    被 DOM 补过字段不等于整条都来自 DOM。
+ */
+export function mergeDomTweets(
+  items: ReadonlyArray<Record<string, unknown>>,
+  out: Map<string, HarvestedTweet>,
+): void {
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+  for (const it of items) {
+    const id = str(it.tweetId);
+    if (!id) continue;
+    const prev = out.get(id);
+    if (!prev) {
+      out.set(id, {
+        tweetId: id,
+        authorHandle: str(it.authorHandle),
+        authorName: str(it.authorName) || undefined,
+        authorAvatar: str(it.authorAvatar) || undefined,
+        text: str(it.text),
+        createdAt: str(it.createdAt) || undefined,
+        lang: str(it.lang) || undefined,
+        tweetUrl: str(it.tweetUrl) || undefined,
+        inReplyToScreenName: str(it.inReplyToScreenName) || undefined,
+        metrics: (it.metrics ?? {}) as HarvestedTweet['metrics'],
+        self: {},
+        hasMedia: it.hasMedia === true,
+        /** ⚠️ 纯 DOM 来源 —— has_media 不可信,下游据此不发奖励 */
+        fromDom: true,
+        isLongText: false,
+        isArticle: false,
+      } as HarvestedTweet);
+      continue;
+    }
+    /**
+     * ⚠️⚠️ **text 只许变长** —— 展开后的全文可以顶掉截断版,
+     * 但**绝不许**用 DOM 的摘要盖掉载荷里的长文正文(16081 → 267 那次事故的形态)。
+     */
+    const t = str(it.text);
+    if (t.length > (prev.text ?? '').length) prev.text = t;
+    /** 其余字段只补空,不覆盖 */
+    if (!prev.tweetUrl && str(it.tweetUrl)) prev.tweetUrl = str(it.tweetUrl);
+    if (!prev.authorAvatar && str(it.authorAvatar)) prev.authorAvatar = str(it.authorAvatar);
+    if (!prev.authorName && str(it.authorName)) prev.authorName = str(it.authorName);
+    if (!prev.createdAt && str(it.createdAt)) prev.createdAt = str(it.createdAt);
+    if (!prev.lang && str(it.lang)) prev.lang = str(it.lang);
+    if (!prev.inReplyToScreenName && str(it.inReplyToScreenName)) {
+      prev.inReplyToScreenName = str(it.inReplyToScreenName);
+    }
+  }
+}
+
 export function detectIncomplete(o: {
   articleBody: string;
   noteText?: string;
@@ -972,6 +1044,12 @@ export async function harvestTimeline(
   let caughtUp = false;
   /** ⭐ 翻页没启动的原因 —— 空表示启动了 */
   let pagingSkipped: string | undefined;
+  /**
+   * ⭐ 这一趟点开了几个「Show more」—— 进报告,让「有没有真的展开」看得见。
+   * ⚠️ 0 有两种含义:这一页本来就没有折叠的,或者**按钮没找到**(X 改了结构)。
+   * 两者要靠「有没有 incomplete」区分,所以两个数都要报。
+   */
+  let domExpanded = 0;
   /** ⭐ 翻页失败时真正发出去的那条 URL —— 不给它就只能猜 */
   let failedUrl: string | undefined;
 
@@ -999,6 +1077,71 @@ export async function harvestTimeline(
 
     // 随机停顿:匀速请求是风控最容易识别的特征
     await new Promise((r) => setTimeout(r, 1800 + Math.random() * 1500));
+
+    /**
+     * ⭐⭐⭐ **像人一样把这一屏读完** —— 用户 2026-09-22 定的原则:
+     *
+     * > 「不管长文短文,如果折叠起来就应该 show all,然后获取完整的内容,就像人一样,
+     * >   但是现在却是分的零碎,却无法获取完整的内容。」
+     *
+     * ── 为什么非有这一步不可(两个实测) ──
+     *
+     * ① **折叠的推只渲染开头**:`[data-testid="tweetText"]` 里剩下的正文
+     *    **压根没进 DOM**,不点开就永远只拿到截断版。
+     * ② **页面已加载就没有载荷可截**:2026-09-22 实测同一个 URL 采到 **0 条** ——
+     *    前两趟有 10 个载荷(新导航触发),这趟只有 2 个杂项载荷,
+     *    而页面上 4 篇长文卡片**明明就摆在那儿**。
+     *    ⚠️ 只截网络请求 = 只看得见「这一刻飞过什么」,看不见「页面上有什么」。
+     *
+     * ⭐ 所以:**先点开折叠,再从 DOM 读**。载荷仍然照收(它有 DOM 拿不到的字段:
+     * conversation_id / in_reply_to 等),两边合并 —— 谁字段多谁留下。
+     *
+     * ⚠️ DOM 读出来的标 `fromDom`,下游据此知道「has_media 之类不可信」
+     * (见 x-article-replies 的 toContractItems)。
+     */
+    const domRead = await wc.executeJavaScript(`(function () {
+      ${TWEET_SCRAPE_FN_BODY}
+      var out = [];
+      var expanded = 0;
+      var arts = document.querySelectorAll('article[data-testid="tweet"]');
+      for (var i = 0; i < arts.length; i++) {
+        var art = arts[i];
+        // ⭐ 先展开再读 —— 顺序反了就还是读到截断版
+        try { expanded += expandTweetText(art); } catch (e) {}
+        var t = art.querySelector('time');
+        var a = t && t.closest('a[href*="/status/"]');
+        if (!a) continue;
+        var m = (a.getAttribute('href') || '').match(/status\\/(\\d+)/);
+        if (!m) continue;
+        var d = {};
+        try { d = scrapeTweetArticle(art) || {}; } catch (e) { continue; }
+        out.push({
+          tweetId: m[1],
+          authorHandle: d.authorHandle || '',
+          authorName: d.authorName || '',
+          authorAvatar: d.authorAvatar || '',
+          /** ⚠️ **不截断** —— 展开之后 textContent 就是全文 */
+          text: d.text || '',
+          createdAt: d.createdAt || (t ? (t.getAttribute('datetime') || '') : ''),
+          lang: d.lang || '',
+          tweetUrl: d.tweetUrl || '',
+          inReplyToScreenName: d.inReplyToUser || '',
+          metrics: d.metrics || {},
+          hasMedia: !!(d.media && d.media.length)
+        });
+      }
+      return { items: out, expanded: expanded };
+    })()`).catch(() => ({ items: [], expanded: 0 }));
+
+    /**
+     * ⚠️ 展开会触发 X 重新渲染/发请求,给它一点时间落地 ——
+     * 不等的话这一轮读到的仍是旧内容(下一轮才对,等于白展开一轮)。
+     */
+    if (domRead?.expanded > 0) {
+      domExpanded += domRead.expanded;
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    mergeDomTweets(domRead?.items ?? [], tweets);
 
     // **滚动之后**回读 —— 这才是真实状态
     /**
@@ -1518,6 +1661,7 @@ export async function harvestTimeline(
       ? { knownBaseline: known?.size ?? 0, knownSeen, knownRun, caughtUp }
       : undefined,
     pagingSkipped,
+    domExpanded,
     failedUrl,
     /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */
     lastRequest: lastPeopleReq ?? undefined,

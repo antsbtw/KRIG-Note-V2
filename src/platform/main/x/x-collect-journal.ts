@@ -60,6 +60,8 @@ export interface CollectJournalEntry {
    * ⭐ 「四种断法长得一模一样」正是它存在的理由,它自己却没留下来。
    */
   pagingSkipped?: string;
+  /** ⭐ 点开了几个「Show more」—— 「像人一样读完」有没有真发生 */
+  domExpanded?: number;
   elapsedMs: number;
   /** 解析率:X 给了多少条目、解出多少 */
   parseRate?: unknown;

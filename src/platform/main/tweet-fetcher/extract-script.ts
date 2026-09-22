@@ -26,6 +26,43 @@
  * 这样同一套字段选择器既服务「页面首个 article」也服务「坐标命中的 article」。
  */
 export const TWEET_SCRAPE_FN_BODY = `
+  /**
+   * ⭐⭐ 把这条推里的「Show more」点开 —— 用户 2026-09-22 定的原则:
+   *
+   * > 「不管长文短文,如果折叠起来就应该 show all,然后获取完整的内容,就像人一样」
+   *
+   * ⚠️ 为什么非点不可:折叠时 [data-testid="tweetText"] 里**只有开头**,
+   * 剩下的正文根本不在 DOM 里(不是 display:none,是压根没渲染)。
+   * 所以「读 textContent」拿到的必然是截断版 —— 这是采集一直「零碎」的真因之一。
+   *
+   * ⚠️ 只点**站内展开**,绝不点外链/媒体:
+   * X 的展开按钮是 <button data-testid="tweet-text-show-more-link">,
+   * 兜底才按文案找,且**必须排除 a 标签**(那些是外链,点了会导航走)。
+   *
+   * @returns 点开了几个(0 = 这条本来就是全的)
+   */
+  function expandTweetText(article) {
+    if (!article) return 0;
+    var n = 0;
+    try {
+      // ① X 的正式按钮 —— 有 testid,最稳
+      var btns = article.querySelectorAll('button[data-testid="tweet-text-show-more-link"]');
+      for (var i = 0; i < btns.length; i++) { btns[i].click(); n++; }
+      if (n > 0) return n;
+      // ② 兜底:按文案找**按钮**(绝不匹配 a —— 那是外链,点了会离开页面)
+      var cands = article.querySelectorAll('button, [role="button"]');
+      for (var j = 0; j < cands.length; j++) {
+        var el = cands[j];
+        if (el.tagName === 'A' || el.closest('a')) continue;
+        var txt = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (/^(Show more|显示更多|さらに表示|더 보기|Показать ещё)$/i.test(txt)) {
+          el.click(); n++;
+        }
+      }
+    } catch (e) {}
+    return n;
+  }
+
   function parseMetricNumber(s) {
     if (!s) return 0;
     s = s.replace(/,/g, '');
