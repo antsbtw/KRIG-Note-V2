@@ -60,6 +60,13 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       tweet_url: $tweet_url,
       lang: $lang,
       metrics: $metrics,
+      /**
+       * ⚠️ **新行也要写 metrics_at** —— 2026-09-22 实测漏掉过:
+       * 只加在 ON DUPLICATE 子句里,于是**新插入的行永远是 NONE**
+       * (一趟采 22 条新行,metrics_at 全空)。
+       * ⭐ 与「x_tweet 加字段要登记四处」同族:INSERT 段是**独立的一份清单**。
+       */
+      metrics_at: $metrics_at,
       fetched_at: $fetched_at,
       created_at: $created_at,
       in_reply_to: $in_reply_to,
@@ -168,6 +175,13 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       tweet_url: record.tweet_url ?? undefined,
       lang: record.lang ?? undefined,
       metrics: record.metrics,
+      /**
+       * ⭐ 只有**真拿到了 metrics** 才给观测时刻 ——
+       * 空 metrics 配一个时刻 = 谎报「这组数字是刚看到的」。
+       * ⚠️ 传 undefined 而非 null:option 字段只认 NONE(见 surreal-none-vs-null)。
+       */
+      metrics_at: record.metrics && Object.keys(record.metrics).length > 0
+        ? new Date(record.fetched_at) : undefined,
       fetched_at: new Date(record.fetched_at),
       // A':extract 早就提取了这两个字段,只是组装记录时没带上
       created_at: record.created_at ? new Date(record.created_at) : undefined,

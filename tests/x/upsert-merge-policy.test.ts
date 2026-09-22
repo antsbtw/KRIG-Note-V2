@@ -83,6 +83,29 @@ describe('② 会变的现状:要更新,但空值不许覆盖非空', () => {
 });
 
 describe('③ metrics_at:没有观测时刻的计数不可比', () => {
+  /**
+   * ⚠️⚠️ **INSERT 段是独立的一份清单** —— 2026-09-22 实测漏掉过:
+   * metrics_at 只加在 ON DUPLICATE 子句里,于是**新插入的行永远是 NONE**
+   * (一趟采 22 条新行,metrics_at 全空,而守卫全绿)。
+   * ⭐ 与「x_tweet 加字段要登记四处」同族;这条钉的正是「只登记了一半」。
+   */
+  it('⚠️⚠️ 新行也要写 metrics_at(不能只加在 UPDATE 子句)', () => {
+    const ins = (() => {
+      const i = repo.indexOf('INSERT INTO x_tweet');
+      expect(i, '找不到 INSERT 段').toBeGreaterThan(0);
+      return repo.slice(i, repo.indexOf('ON DUPLICATE KEY UPDATE', i));
+    })();
+    expect(ins.length).toBeGreaterThan(200);
+    expect(ins, 'INSERT 段没有 metrics_at —— 新行的观测时刻会永远为空')
+      .toMatch(/metrics_at\s*:/);
+  });
+
+  it('⚠️ metrics_at 必须真的绑了值(SQL 用了 $metrics_at,参数里要给)', () => {
+    const params = repo.slice(repo.indexOf('tweet_id: record.tweet_id'));
+    expect(params, '参数对象里没有 metrics_at —— 写进去的会是空')
+      .toMatch(/metrics_at\s*:/);
+  });
+
   it('⭐ 必须有 metrics_at', () => {
     expect(onDup, '没有 metrics_at —— 「发出10分钟的500阅读」与「半年的500阅读」在库里一样')
       .toMatch(/metrics_at\s*=/);
