@@ -132,17 +132,32 @@ describe('⚠️ 按钮只在「它真起作用」的页面露出来(2026-09-22 
       .not.toMatch(/'x\.followers'/);
   });
 
-  it('⚠️ 补长文正文是**补漏**不是主路径 —— 采集时已当场补过', () => {
-    const i = view.indexOf('backfillArticles');
-    expect(i, '找不到补长文正文按钮').toBeGreaterThan(0);
-    const blk = view.slice(Math.max(0, i - 1200), i + 600);
-    expect(blk.length, '切出来是空的').toBeGreaterThan(200);
+  it('⭐⭐ 「补长文正文」按钮必须彻底不存在 —— 采集时一次采全,没有「补」这个动作', () => {
     /**
-     * ⚠️ 它与「采集」同样醒目(krig-webc__go)时,人会以为是三选一;
-     * 而实际上采集已经当场补过了,平时根本不用点它。
+     * ── 用户 2026-09-22 两句话定的 ──
+     * > 「补长正文这个 button 才是没必要的吧?」
+     * > 「长正文就不应该补,应该一次采集完毕。」
+     *
+     * ⭐ 实测印证:那个按钮的候选**恒为 0** —— 不是碰巧,是结构决定的。
+     * `is_article` 只有采集时才写,而同一趟采集当场就把正文补了,
+     * 「标了长文却缺正文」这种行几乎不可能存在。
+     * 它是两步式方案的残骸,连同 IPC 通道与查库一起删了。
      */
-    expect(blk, '补长文正文用了主按钮样式 —— 会被当成主路径(采集时已经当场补过)')
-      .not.toMatch(/className="krig-webc__go"[\s\S]{0,200}backfillArticles/);
-    expect(blk, '按钮文案没标明这是补漏').toMatch(/补漏/);
+    expect(view, '面板又出现了补长文正文按钮 —— 采集已经一次采全,不该有「补」这个动作')
+      .not.toMatch(/backfillArticles/);
+    expect(handler, 'handler 又注册了补长文正文通道')
+      .not.toMatch(/BACKFILL_ARTICLES/);
+  });
+
+  it('⚠️ WEBC_COUNT 要跟着通道数走(删通道也要改)', () => {
+    /**
+     * ⚠️ 它只出现在启动日志里,漂了**不会报错**,日志就开始说假话。
+     * 加通道时栽过一次(18→19),删通道同样要改回来。
+     */
+    const n = Number(handler.match(/WEBC_COUNT = (\d+)/)?.[1] ?? 0);
+    expect(n, '找不到 WEBC_COUNT').toBeGreaterThan(0);
+    const registered = (handler.match(/ipcMain\.handle\(/g) ?? []).length;
+    expect(n, `WEBC_COUNT=${n} 但实际注册 ${registered} 个 —— 启动日志在说假话`)
+      .toBe(registered);
   });
 });

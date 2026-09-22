@@ -31,9 +31,8 @@
  */
 
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
-import { upsertTweet, listArticlesMissingBody } from '../db/tweet-inbox-repo';
+import { upsertTweet } from '../db/tweet-inbox-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
-import { writeBackfillJournal } from './x-collect-journal';
 
 /**
  * 判定「这篇算拿到正文了吗」。
@@ -68,22 +67,6 @@ export interface BackfillItem {
   problem?: string;
 }
 
-export interface BackfillReport {
-  /** 候选总数(库里 is_article=true 且没正文的) */
-  candidates: number;
-  /** 本批实际尝试几篇 */
-  attempted: number;
-  /** 拿到正文的篇数 */
-  withBody: number;
-  /** 真写进库的篇数 */
-  saved: number;
-  items: BackfillItem[];
-  elapsedMs: number;
-  problems: string[];
-  notes: string[];
-  /** 留痕文件路径 —— 「下次验证不靠人」 */
-  journalPath?: string;
-}
 
 /**
  * ⭐ 一篇长文的正文补全。
@@ -127,129 +110,6 @@ export async function backfillOne(
 
   const mine = r.tweets.find((t) => t.tweetId === tweetId);
   return { tweet: mine, stopReason: r.stopReason, elapsedMs: Date.now() - t0 };
-}
-
-/**
- * ⭐ 一批长文的正文补全(手动触发,小批上限)。
- *
- * ── 为什么是手动 + 小批(用户 2026-09-22 拍板)──
- * 逐篇进详情页 = 每篇一次导航,X 会限流。所以:
- *  · **不**跟在采集后面自动跑 —— 两件事缠在一起,出事时难定位
- *  · 一次只跑 `limit` 篇,篇与篇之间**随机间隔**
- *
- * ⚠️ 单篇失败**不拦整批**,但也**不静默** —— 每篇的结果都进 `items`。
- */
-export async function backfillArticleBodies(
-  targetWcId?: number,
-  opts: { limit?: number; wsId?: string; budgetMs?: number; handle?: string } = {},
-): Promise<BackfillReport> {
-  const t0 = Date.now();
-  const limit = Math.max(1, Math.min(opts.limit ?? 10, 50));
-  const problems: string[] = [];
-  const notes: string[] = [];
-  const items: BackfillItem[] = [];
-
-  const all = await listArticlesMissingBody({ handle: opts.handle });
-  const batch = all.slice(0, limit);
-
-  if (all.length === 0) {
-    /**
-     * ⚠️ 「一篇候选都没有」有**两种**成因,报告里必须分开说,
-     * 否则「功能没生效」会被当成「没什么要补的」(本仓反复踩的「看着成功实际没有」)。
-     */
-    notes.push('库里没有「是长文但缺正文」的行 —— ⚠️ 注意 `is_article` 是 1.2.7 才加的,'
-      + '**存量老行标不上**(采的时候没这个字段),所以这里为 0 也可能只是'
-      + '「还没有用新版采过长文」,不等于「都补全了」');
-  }
-
-  let withBody = 0;
-  let saved = 0;
-
-  for (let i = 0; i < batch.length; i++) {
-    const c = batch[i];
-    const r = await backfillOne(c.tweet_id, c.author_handle, targetWcId, {
-      wsId: opts.wsId, budgetMs: opts.budgetMs,
-    });
-
-    const item: BackfillItem = {
-      tweetId: c.tweet_id,
-      authorHandle: c.author_handle,
-      lenBefore: c.len,
-      gotBody: false,
-      saved: false,
-      elapsedMs: r.elapsedMs,
-      stopReason: r.stopReason,
-    };
-
-    if (r.error) {
-      item.problem = `采集失败:${r.error}`;
-      problems.push(`${c.tweet_id}: ${r.error}`);
-    } else if (!r.tweet) {
-      /**
-       * ⚠️ 「详情页打开了,但这一篇没解出来」≠「这篇没正文」——
-       * 可能是被删/不可见/登录态失效。必须如实区分,别记成「补过了」。
-       */
-      item.problem = '详情页没解出这条推(可能已删除/不可见/登录态失效)';
-      problems.push(`${c.tweet_id}: 详情页没解出这条推`);
-    } else {
-      item.lenAfter = (r.tweet.text ?? '').length;
-      item.gotBody = gotBody(r.tweet);
-      if (item.gotBody) withBody += 1;
-      else item.problem = '详情页也没给正文(载荷里没有 content_state)';
-
-      try {
-        /**
-         * ⭐ 走**同一个** `upsertTweet` —— 合并策略(text 只许变长、空值不覆盖非空)
-         * 全在那里,这里绝不另写一条写库语句。
-         */
-        await upsertTweet(toBackfillRecord(r.tweet, opts.wsId));
-        item.saved = true;
-        saved += 1;
-      } catch (err) {
-        item.problem = `入库失败:${String(err).slice(0, 160)}`;
-        problems.push(`${c.tweet_id}: 入库失败 ${String(err).slice(0, 120)}`);
-      }
-    }
-
-    items.push(item);
-
-    /**
-     * ⚠️ 篇与篇之间随机间隔 —— 逐篇导航是最容易被限流的形态。
-     * 最后一篇之后不用等。
-     */
-    if (i < batch.length - 1) {
-      await new Promise((res) => setTimeout(res, 2500 + Math.random() * 2000));
-    }
-  }
-
-  const shrunk = items.filter((i) => i.lenAfter != null && i.lenAfter < i.lenBefore);
-  if (shrunk.length > 0) {
-    /**
-     * ⭐ 采回来的比库里短是**正常的**(详情页没给正文时只有标题+摘要),
-     * 关键是 `upsertTweet` 的 `text` 只许变长 —— 库里那份不会被写短。
-     * 如实记下来,免得下次看见「采回来 267 字」以为数据被毁了。
-     */
-    notes.push(`${shrunk.length} 篇这趟采回来的比库里短 —— **库里那份没被改短**`
-      + '(upsertTweet 的 text 只许变长),属正常,不是数据损坏');
-  }
-
-  const report: BackfillReport = {
-    candidates: all.length,
-    attempted: batch.length,
-    withBody,
-    saved,
-    items,
-    elapsedMs: Date.now() - t0,
-    problems,
-    notes,
-  };
-
-  if (all.length > batch.length) {
-    notes.push(`还有 ${all.length - batch.length} 篇候选没补 —— 小批上限 ${limit} 篇,再点一次继续`);
-  }
-
-  report.journalPath = writeBackfillJournal(report);
-  return report;
 }
 
 /**
@@ -313,19 +173,28 @@ export async function backfillArticlesInline(
   tweets: ReadonlyArray<HarvestedTweet>,
   targetWcId?: number,
   wsId?: string,
-  opts: { limit?: number } = {},
 ): Promise<{ note: string; problems: string[]; saved: number; items: BackfillItem[] } | undefined> {
   /** ⚠️ 只要「是长文」且「没拿到正文」的 —— 详情页来的已经有了,不重复跑 */
   const need = tweets.filter((t) => t.isArticle && !gotBody(t) && t.tweetId);
   if (need.length === 0) return undefined;
 
   /**
-   * ⚠️ 上限兜底 —— 逐篇导航是最容易被限流的形态,
-   * 一趟采到 72 篇长文就打 72 次详情页是不行的。
-   * ⭐ 超出的部分**如实说出来**,不假装补全了。
+   * ⭐⭐ **这一页有几篇就采几篇 —— 没有上限。**
+   *
+   * ── 用户 2026-09-22 定的 ──
+   * > 「长正文就不应该补,应该一次采集完毕。」
+   *
+   * 原来设了单趟 10 篇上限,超出的留给一个「补漏」按钮。
+   * ⚠️ 那是**把半成品留给人去收尾** —— 而且正因为有上限,
+   * 才需要那个按钮、才需要「从库里查候选」那一整套。
+   * 用户点破后连按钮带查库一起删了:**采集就该一次采全**。
+   *
+   * ⚠️ 限流的风险靠**篇与篇之间的随机间隔**压,不靠少采 ——
+   * 少采换来的是「看着成功实际没采全」,那是本仓最忌的形态。
+   * ⚠️ 真出问题时:单篇失败不拦后面的,每篇都进 items 和 problems,
+   * 报告里看得见是哪一篇、为什么。
    */
-  const limit = opts.limit ?? 10;
-  const batch = need.slice(0, limit);
+  const batch = need;
 
   const problems: string[] = [];
   const items: BackfillItem[] = [];
@@ -389,13 +258,15 @@ export async function backfillArticlesInline(
    * ⭐ 这句话要能**单独回答「补上了没有」** —— 报告会截断,要紧的写在前面。
    * ⚠️ 「试了几篇」与「拿到正文几篇」分开说:两者相等才是全成。
    */
-  let note = `长文正文:这一页有 ${need.length} 篇长文缺正文,`
-    + `逐篇进详情页补了 ${batch.length} 篇,**拿到正文 ${withBody} 篇**`
-    + (lens ? `(字数 ${lens})` : '');
-  if (need.length > batch.length) {
-    note += ` ⚠️ 还有 ${need.length - batch.length} 篇没补(单趟上限 ${limit} 篇,`
-      + '逐篇导航会撞限流)—— **本页长文正文并未全补**';
-  }
+  /**
+   * ⭐ 「几篇缺正文」与「拿到几篇」必须分开说 —— 两者相等才是全成。
+   * ⚠️ 不相等时 problems 里有逐篇原因,别只看这一句。
+   */
+  const note = `长文正文:这一页 ${need.length} 篇长文缺正文,`
+    + `逐篇进详情页取回 **${withBody}/${need.length} 篇**`
+    + (lens ? `(字数 ${lens})` : '')
+    + (withBody < need.length ? ' ⚠️ **没取全,见 problems**' : '');
+
 
   return { note, problems, saved, items };
 }

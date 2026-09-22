@@ -393,8 +393,6 @@ export const IPC_CHANNELS = {
   WEBC_READ_VERIFIED:'webc:read-verified', // 输出:真页面上量蓝V徽章的 DOM 结构(不猜 selector)
   WEBC_PROBE_MEMORY: 'webc:probe-memory',  // 输出:探 X 页面内存里的 user 数据在哪个全局变量下
   WEBC_AUTO_COLLECT: 'webc:auto-collect',  // 执行:无人工采集(导航+滚动+载荷解析+入库,不用人点)
-  // 执行:长文正文逐篇补全(正文只在详情页载荷里,列表页只给标题+摘要)
-  WEBC_BACKFILL_ARTICLES: 'webc:backfill-articles',
   WEBC_WHERE_AM_I:   'webc:where-am-i',    // 输出:当前页面是哪个语义页面 + 参数(右边自动填充用)
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
   X_NOTIF_WATCH_START:  'x:notif-watch-start',

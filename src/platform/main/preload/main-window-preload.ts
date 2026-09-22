@@ -80,9 +80,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     whereAmI: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_WHERE_AM_I, { wcId }),
     autoCollect: (args: { page?: string; current?: boolean; params?: Record<string, string>; wcId?: number; maxRounds?: number; budgetMs?: number; pageBudget?: number; wsId?: string; fastIncremental?: boolean }) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_AUTO_COLLECT, args),
-    // ⭐ 长文正文逐篇补全 —— 正文只在详情页载荷里,列表页只给标题+摘要
-    backfillArticles: (args: { wcId?: number; limit?: number; wsId?: string; budgetMs?: number; handle?: string }) =>
-      ipcRenderer.invoke(IPC_CHANNELS.WEBC_BACKFILL_ARTICLES, args),
   },
 
   /** 诊断上报(renderer → main) */

@@ -174,52 +174,8 @@ describe('④ 写库必须走同一个 upsertTweet(合并策略全在那)', () =
   });
 });
 
-describe('⑤ 候选查询:不能用字数当长文判据', () => {
-  it('⚠️⚠️ 必须靠 is_article,不能只看字数', () => {
-    const a = repo.indexOf('export async function listArticlesMissingBody');
-    expect(a, '找不到 listArticlesMissingBody').toBeGreaterThan(0);
-    const seg = repo.slice(a, a + 2000);
-    expect(seg.length, '候选查询切出来是空的').toBeGreaterThan(200);
-    /**
-     * ⚠️ 实测 10056 行里超过 2000 字的只有 3 行,
-     * 而正文被摘要顶掉的长文只有 267 字 —— 与普通推**长得一模一样**。
-     * 光用字数根本分不出「短推」和「被截断的长文」。
-     */
-    expect(seg, '候选查询没用 is_article —— 字数分不出「短推」和「被截断的长文」')
-      .toMatch(/is_article\s*=\s*true/);
-    /**
-     * ⚠️ `string::len(NONE)` 会**抛错**(实测 "Expected string but found NONE"),
-     * 整条查询失败 —— 老行 text 可能是 NONE,`?? ''` 不能省。
-     */
-    expect(seg, "string::len 没有 ?? '' 兜底 —— 老行 text 是 NONE 时整条查询会抛错")
-      .toMatch(/string::len\(text\s*\?\?\s*''\)/);
-  });
-
-  it('⚠️ handle 必须走共用的 normalizeHandle,不许手写一套', () => {
-    const a = repo.indexOf('export async function listArticlesMissingBody');
-    expect(a, '找不到 listArticlesMissingBody').toBeGreaterThan(0);
-    const seg = repo.slice(a, a + 2000);
-    expect(seg.length, '候选查询切出来是空的').toBeGreaterThan(200);
-    /**
-     * ⚠️ 库里 author_handle 存的是归一化形态。写入端与比对端一旦漂移
-     * (共用版会 trim 空白、剥多个 @,手写 `.replace(/^@/,'')` 两样都没有),
-     * 结果是**恒查不到且不报错** —— 表现为「一篇候选都没有」,
-     * 与「真的都补全了」长得一模一样。
-     */
-    expect(seg, '候选查询手写了 handle 归一化 —— 与写入端漂移会让筛选恒不命中且不报错')
-      .toMatch(/normalizeHandle\(/);
-    expect(seg, '候选查询手写了 .replace(/^@/) —— 必须用共用的 normalizeHandle')
-      .not.toMatch(/replace\(\/\^@/);
-  });
-});
-
 describe('⑥ 留痕:成功路径的判断依据也要留下', () => {
-  it('⭐⭐ 必须落盘 —— 「下次验证能不能不靠人」', () => {
-    expect(backfill, '补正文没有留痕 —— 关掉面板就查不到补了什么')
-      .toMatch(/writeBackfillJournal/);
-  });
-
-  it('⚠️ 每篇要记「字数前→后」,不能只报总数', () => {
+  it('⭐⭐ 每篇要记「字数前→后」,不能只报总数', () => {
     expect(backfill, 'BackfillItem 没有 lenBefore').toMatch(/lenBefore/);
     expect(backfill, 'BackfillItem 没有 lenAfter').toMatch(/lenAfter/);
     /** ⚠️ 「采到了」与「写库了」分开 —— 采到但写库炸了必须看得见 */
@@ -228,14 +184,18 @@ describe('⑥ 留痕:成功路径的判断依据也要留下', () => {
     expect(backfill, 'gotBody 与 saved 没分开').toMatch(/saved:\s*boolean/);
   });
 
-  it('⚠️ 留痕清理要认 backfill- 前缀(否则这一半无限堆积)', () => {
-    const journal = read('src/platform/main/x/x-collect-journal.ts');
-    const a = journal.indexOf('function pruneJournal');
-    expect(a, '找不到 pruneJournal').toBeGreaterThan(0);
-    const seg = journal.slice(a, a + 800);
-    expect(seg.length, 'pruneJournal 切出来是空的').toBeGreaterThan(100);
-    expect(seg, "pruneJournal 只清 collect-,backfill- 的留痕会无限堆积")
-      .toMatch(/backfill-/);
+  it('⭐⭐ 逐篇字数必须进 note —— 它会跟着采集留痕落盘', () => {
+    /**
+     * ⭐ 补正文没有自己的留痕文件了(那是两步式方案的产物)——
+     * 它的 note 并进**采集留痕**(collect-*.json 的 notes),
+     * 因为现在它就是采集的一部分,本来就该记在同一份里。
+     */
+    const a = backfill.indexOf('const lens =');
+    expect(a, '找不到逐篇字数的拼装').toBeGreaterThan(0);
+    const seg = backfill.slice(a, a + 900);
+    expect(seg, '逐篇字数没进 note —— 「补上了没有」就只剩一个总数')
+      .toMatch(/lenBefore\}→\$\{i\.lenAfter/);
+    expect(backfill, 'note 没有并进采集的 notes').toMatch(/note/);
   });
 });
 
@@ -281,14 +241,45 @@ describe('⑦ 采集时当场补全(用户 2026-09-22 拍板改掉的两步)', (
       .toMatch(/articleBackfill\?\.problems/);
   });
 
-  it('⚠️ 单趟要有上限,且超出部分必须如实说「没全补」', () => {
+  it('⭐⭐ 没有单趟上限 —— 用户:「长正文就不应该补,应该一次采集完毕」', () => {
     const a = backfill.indexOf('export async function backfillArticlesInline');
-    const seg = backfill.slice(a, a + 6000);
+    expect(a, '找不到 backfillArticlesInline').toBeGreaterThan(0);
+    const seg = backfill.slice(a, a + 3000);
     expect(seg.length, '切出来是空的').toBeGreaterThan(500);
-    expect(seg, '没有上限 —— 一趟 72 篇长文会打 72 次详情页,必撞限流')
-      .toMatch(/slice\(0,\s*limit\)/);
-    /** ⚠️ 「补了 10 篇」与「这页长文都补全了」不是一回事,差额必须说出来 */
-    expect(seg, '超出上限没说「并未全补」—— 会被当成补全了')
-      .toMatch(/并未全补/);
+    /**
+     * ⚠️ 上限是「补」这个概念存在的**唯一理由**:有上限才有漏、
+     * 有漏才需要「补漏」按钮、才需要「从库里查候选」那一整套。
+     * ⭐ 用户 2026-09-22 拍板去掉:采集就该一次采全,
+     * 限流靠**随机间隔**压,不靠少采(少采换来的是「看着成功实际没采全」)。
+     */
+    expect(seg, '又加回了单趟上限 —— 那会留下没采全的长文,逼人回头「补漏」')
+      .not.toMatch(/need\.slice\(0,/);
+    expect(seg, '不是「有几篇采几篇」').toMatch(/const batch = need;/);
+    /** ⭐ 少采的风险改由随机间隔承担,这条必须还在 */
+    expect(seg, '去掉上限却没有随机间隔 —— 逐篇导航会撞限流')
+      .toMatch(/Math\.random\(\)/);
+  });
+
+  it('⚠️ 没取全时必须说出来(不许拿「补了几篇」冒充「采全了」)', () => {
+    const a = backfill.indexOf('const note =');
+    expect(a, '找不到 note 的拼装').toBeGreaterThan(0);
+    const seg = backfill.slice(a, a + 700);
+    expect(seg, 'note 没把「缺几篇」与「取回几篇」分开说')
+      .toMatch(/withBody\}\/\$\{need\.length\}/);
+    expect(seg, '没取全时没有警示 —— 会被当成采全了')
+      .toMatch(/没取全/);
+  });
+
+  it('⚠️ 两步式那一套必须删干净(按钮/IPC/查库)', () => {
+    /**
+     * ⭐ 用户 2026-09-22:候选实测 0 篇,而且是**结构决定**的 ——
+     * is_article 只有采集时才写,而同一趟采集当场就把正文补了,
+     * 所以「标了长文却缺正文」这种行几乎不可能存在。
+     * 那个按钮是上一版两步式方案的残骸,连同查库一起删。
+     */
+    expect(backfill, 'backfillArticleBodies 没删干净')
+      .not.toMatch(/export async function backfillArticleBodies/);
+    expect(repo, 'listArticlesMissingBody 没删干净')
+      .not.toMatch(/listArticlesMissingBody/);
   });
 });

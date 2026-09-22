@@ -237,40 +237,6 @@ declare global {
           channelOk: boolean; error?: string; url?: string;
           page?: { name: string; params: Record<string, string> } | null;
         }>;
-        /**
-         * ⭐⭐ **长文正文逐篇补全** —— 把「只有标题+摘要」的长文补成全文。
-         *
-         * 正文**只在单篇详情页**(TweetDetail)的载荷里,列表页与主页都只给标题+摘要
-         * (2026-09-22 同账号三入口实测)。所以要全文必须逐篇进详情页。
-         *
-         * ⚠️ **手动触发、小批上限** —— 逐篇导航最容易被限流,
-         * 不跟在采集后面自动跑(缠在一起出事时分不清是谁的问题)。
-         */
-        backfillArticles(args: {
-          wcId?: number;
-          /** 本批最多补几篇(默认 10,上限 50)。剩下的再点一次继续 */
-          limit?: number;
-          wsId?: string;
-          /** 单篇时间闸门(ms)。⭐ 正文在第一个响应里,正常几秒就够 */
-          budgetMs?: number;
-          /** 只补某个账号的 */
-          handle?: string;
-        }): Promise<{
-          channelOk: boolean; error?: string;
-          report?: {
-            candidates: number; attempted: number; withBody: number; saved: number;
-            items: Array<{
-              tweetId: string; authorHandle?: string;
-              lenBefore: number; lenAfter?: number;
-              /** ⚠️ 与 saved 分开:采到了但写库炸了也要看得见 */
-              gotBody: boolean; saved: boolean;
-              elapsedMs: number; stopReason?: string; problem?: string;
-            }>;
-            elapsedMs: number; problems: string[]; notes: string[];
-            /** 留痕文件路径 —— 「下次验证不靠人」 */
-            journalPath?: string;
-          };
-        }>;
         autoCollect(args: {
           /**
            * ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识。

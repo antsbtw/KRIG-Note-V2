@@ -170,10 +170,6 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [acRounds, setAcRounds] = useState('');
   const [acBudget, setAcBudget] = useState('');
   const [acReport, setAcReport] = useState<unknown>(null);
-  /** ⭐ 长文正文补全的结果 —— 与采集报告分开存,免得两趟输出糊在一起 */
-  const [bfReport, setBfReport] = useState<unknown>(null);
-  /** 本批补几篇 —— 逐篇导航会被限流,默认小批 */
-  const [bfLimit, setBfLimit] = useState('10');
   /**
    * ⭐⭐ 跟着左边走 —— 用户 2026-09-18:
    * 「点击左边时,右边自动填充变量,点击采集,即可采集。」
@@ -1012,32 +1008,6 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                           onClick={() => collect(true)}
                           title="快速增量:翻到遇见上次采过的人就停(十几秒)。⚠️ 只答「谁新来」,看不见取关;不写快照">快速增量</button>
                       ) : null}
-                      {/**
-                        * ⭐⭐ **补长文正文 = 补漏入口,不是主路径。**
-                        *
-                        * 采集时**已经当场补过**(autoCollect → backfillArticlesInline),
-                        * 所以平时根本不用点这个。它只在两种情况下有用:
-                        * 上次撞到单趟上限、或当时详情页没打开。
-                        *
-                        * ⚠️ 用户 2026-09-22 看着三个并排的按钮问「这里不用三个 button 了吧?」
-                        * —— 对:主路径只有「采集」一个。这个降成次要样式(krig-webc__in)
-                        * 并挪出主按钮组,免得看着像三选一。
-                        * ⭐ 不删:存量老行、以及超上限的部分仍然要有地方补。
-                        */}
-                      <button type="button" className="krig-webc__in"
-                        style={{ opacity: 0.75 }}
-                        disabled={busy !== null}
-                        onClick={() => void run(
-                          'backfillArticles', { limit: Number(bfLimit) || 10 },
-                          async () => {
-                            const r = await api()?.backfillArticles({
-                              wcId: wcId(), limit: Number(bfLimit) || 10, wsId: workspaceId,
-                            });
-                            setBfReport(r); return r;
-                          })}
-                        title="⭐ 平时不用点 —— 采集时已经当场补过了。这个按钮是补漏:把库里「标了 is_article 但仍缺正文」的行再补一次(比如上次补到单趟上限、或当时详情页没打开)。⚠️ 候选来自库,与上面选的页面无关">
-                        补长文正文(补漏)
-                      </button>
                     </>
                   );
                 })()}
@@ -1061,57 +1031,6 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     {missing.includes('tweetId')
                       && ' —— tweetId 是推文链接 /status/ 后面那串数字'}
                     {missing.includes('handle') && ' —— handle 填账号名(不带 @)'}
-                  </div>
-                );
-              })()}
-              {/**
-                * ⭐⭐ **补长文正文的结果** —— 每篇都给 `字数前→后`。
-                *
-                * 用户点破过:「面板的内容你不记录,如何做验证?」
-                * 所以这里不只报「补了 N 篇」:**逐篇字数变化**才是成败判据,
-                * 而且同一份内容已经落盘(journalPath),关掉面板也查得到。
-                */}
-              {(() => {
-                const b = bfReport as { report?: {
-                  candidates: number; attempted: number; withBody: number; saved: number;
-                  items: Array<{
-                    tweetId: string; authorHandle?: string;
-                    lenBefore: number; lenAfter?: number;
-                    gotBody: boolean; saved: boolean; elapsedMs: number; problem?: string;
-                  }>;
-                  elapsedMs: number; problems: string[]; notes: string[]; journalPath?: string;
-                }; error?: string } | null;
-                if (!b?.report && !b?.error) return null;
-                if (b.error) {
-                  return <div className="krig-webc__note" style={{ color: '#e05555' }}>
-                    ⚠️ 补长文正文失败:{b.error}
-                  </div>;
-                }
-                const rp = b.report!;
-                return (
-                  <div className="krig-webc__note">
-                    <div>
-                      <b>补长文正文</b>:候选 {rp.candidates} 篇 · 本批试 {rp.attempted} 篇 ·
-                      {' '}拿到正文 <b>{rp.withBody}</b> · 入库 <b>{rp.saved}</b> ·
-                      {' '}{(rp.elapsedMs / 1000).toFixed(1)}s
-                    </div>
-                    {/* ⭐ 逐篇字数变化 —— 「补上了没有」只有这一行答得出 */}
-                    {rp.items.map((i) => (
-                      <div key={i.tweetId} style={{ opacity: 0.9 }}>
-                        {i.gotBody ? '✓' : '✗'} {i.tweetId}
-                        {i.authorHandle ? ` @${i.authorHandle}` : ''}
-                        {' '}<b>{i.lenBefore} → {i.lenAfter ?? '?'}</b> 字
-                        {' '}({(i.elapsedMs / 1000).toFixed(1)}s)
-                        {i.problem ? <span style={{ color: '#e8a33d' }}> —— {i.problem}</span> : null}
-                      </div>
-                    ))}
-                    {rp.notes.map((n, k) => (
-                      <div key={k} style={{ color: '#e8a33d' }}>⚠️ {n}</div>
-                    ))}
-                    {/* ⭐ 留痕路径 —— 关掉面板之后靠它回溯,不用回头问人要截图 */}
-                    {rp.journalPath
-                      ? <div style={{ opacity: 0.7 }}>留痕:{rp.journalPath}</div>
-                      : <div style={{ color: '#e8a33d' }}>⚠️ 留痕没写成(结果仍有效,但关掉就查不到了)</div>}
                   </div>
                 );
               })()}
