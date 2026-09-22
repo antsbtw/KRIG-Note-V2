@@ -83,7 +83,33 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       backfilled: $backfilled
     }
     ON DUPLICATE KEY UPDATE
-      text = $text,
+      /**
+       * ⚠️⚠️ **text 只许变长,不许变短** —— 2026-09-22 实测的数据损坏。
+       *
+       * ── 现象 ──
+       * 重采 @0xEgorAI 一次,两条长文的正文**被覆盖成标题+摘要**:
+       *   2099916828529082572: 16081 字 → 267 字(断在句中)
+       *   2102084427903860755:  6812 字 → 295 字
+       * 同批的长推(957 字)和普通推(241 字)毫发无伤 —— 只有长文中招。
+       *
+       * ── 真因 ──
+       * 主页时间线(「UserOriginalsTimeline「)给的长文**只有 title + preview_text**,
+       * 而这里 「text = $text「 是**无条件覆盖** → **浅数据盖掉深数据**。
+       *
+       * ⭐⭐ 这是 2026-09-21 修 bug ④(「INSERT IGNORE「 → 「ON DUPLICATE「)
+       * **换来的副作用**:那次只想到「补全(空→有)」,没想到「降级(深→浅)」。
+       * ⚠️ 「INSERT IGNORE「 时代反而不会丢 —— 修一个 bug 开了另一个洞。
+       *
+       * ── 为什么判据是「长度」而不是「是不是长文」──
+       * 采集侧分不清「这次拿到的是全文还是摘要」(同一个 「article「 字段,
+       * 不同接口深度不同,见 x-collect-journal 的实测)。
+       * **长度是唯一不依赖接口语义的判据**:更长 = 信息更多,永远不亏。
+       *
+       * ⚠️ 「?? ''「 不能省:老行 「text「 可能是 NONE,
+       * 「string::len(NONE)「 会**抛错**(实测 "Expected string but found NONE"),
+       * 整条 upsert 会失败。
+       */
+      text = IF string::len($text ?? '') > string::len(text ?? '') THEN $text ELSE text END,
       author_name_at_post = $author_name_at_post,
       author_handle = $author_handle,
       author_avatar = $author_avatar,
