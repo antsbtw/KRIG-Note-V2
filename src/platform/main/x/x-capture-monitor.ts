@@ -688,6 +688,10 @@ export async function startCaptureMonitor(
               text: it.text,
               createdAt: it.createdAt || undefined,
               isLongText: false,
+              // ⚠️ DOM 路径**判不出长文**:页面上长文卡片与普通推的 DOM 一样,
+              //    article 结构只在载荷里。与 has_media 同理,宁可报 false
+              //    也不猜 —— 统计宁可少算,不可虚报。
+              isArticle: false,
               // ⚠️ DOM 兜底**不判 has_media**:页面上分不清「用户上传的图」与
               // 「外链预览卡」,而契约明确预览卡不算。宽了会误发活动奖励,
               // 故一律 false —— 活动核验只采信载荷路径(fromDom=false)。

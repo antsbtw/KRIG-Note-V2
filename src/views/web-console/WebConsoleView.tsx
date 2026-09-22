@@ -1007,7 +1007,16 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
                   seenOps?: Array<{ op: string; bytes: number }>;
-                  longText?: { count: number; maxChars: number; avgChars: number };
+                  /**
+                   * ⚠️ 这是 `AutoCollectReport.longText` 的**第二份声明** ——
+                   * 主进程加了 `articles` 一栏,这里不跟就 tsc 报错(2026-09-21 踩到)。
+                   * ⭐ 与「x_tweet 加字段要登记四处」同族:**同一个形状写在两处必然漂**。
+                   * 这里没直接 import 主进程类型(跨进程边界),故留此注释标明同源。
+                   */
+                  longText?: {
+                    count: number; maxChars: number; avgChars: number;
+                    articles?: { count: number; maxChars: number; avgChars: number; withBody: number };
+                  };
                   coverage?: Array<{ field: string; have: number; total: number; rate: number }>;
                   sample?: Array<{ tweetId: string; handle?: string; missing: string[]; fromDom: boolean }>;
                 }; error?: string } | null;
@@ -1252,13 +1261,31 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                               ⚠️ <b>{c.field}</b> {c.have}/{c.total}({(c.rate * 100).toFixed(0)}%)
                             </div>
                           ))}
-                          {lt && (
+                          {lt && lt.count > 0 && (
                             <div>
                               <b>长推(Show more)</b>:{lt.count} 条 ·
                               最长 <b>{lt.maxChars}</b> 字 · 平均 {lt.avgChars} 字
-                              {lt.count > 0 && lt.maxChars <= 290
+                              {lt.maxChars <= 290
                                 ? ' ⚠️ 最长只有 ~280 字,疑似被截断'
-                                : lt.count > 0 ? ' ✓ 全文已取回' : ''}
+                                : ' ✓ 全文已取回'}
+                            </div>
+                          )}
+                          {/*
+                            ⭐ 长文单独一行 —— 用户 2026-09-21 实测:72 篇长文被算进
+                            「长推」,还报「最长 48 字,疑似被截断」,而 48 字是标题的
+                            正常长度。⚠️ 长文没正文**不是故障**:列表页载荷本就只给
+                            标题+摘要(实测 72/72 无 content_state),正文只在单篇页。
+                          */}
+                          {lt?.articles && lt.articles.count > 0 && (
+                            <div>
+                              <b>长文(Article)</b>:{lt.articles.count} 篇 ·
+                              其中 <b>{lt.articles.withBody}</b> 篇有正文 ·
+                              最长 {lt.articles.maxChars} 字
+                              {lt.articles.withBody === 0
+                                ? ' ℹ️ 这一页只给标题+摘要(列表页如此),正文要进单篇页'
+                                : lt.articles.withBody === lt.articles.count
+                                  ? ' ✓ 正文都取回了'
+                                  : ' ℹ️ 部分有正文'}
                             </div>
                           )}
                         </div>

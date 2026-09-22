@@ -77,7 +77,16 @@ export interface AutoCollectReport {
    *
    * ⚠️ 若 `longText > 0` 而 `maxChars` 只有 280 上下,那就是**真截断了**。
    */
-  longText: { count: number; maxChars: number; avgChars: number };
+  /**
+   * ⚠️ 长推(note_tweet 的 Show more)统计 —— **不含长文**,长文见 `articles`。
+   * ⚠️ `maxChars`/`avgChars` 只拿**长推自己**算(2026-09-21 修:原来拿全部推算,
+   *    被短推拉低后会平白报「疑似被截断」)。
+   */
+  longText: {
+    count: number; maxChars: number; avgChars: number;
+    /** ⭐ 长文(Article)单独一栏 —— `withBody` = 其中几篇真拿到了正文 */
+    articles: { count: number; maxChars: number; avgChars: number; withBody: number };
+  };
   /** 载荷条数;0 说明导航没触发请求(页面可能用了缓存) */
   payloads: number;
   /**
@@ -1270,12 +1279,40 @@ export async function autoCollect(
     reconcile,
     elapsedMs: Date.now() - t0,
     longText: (() => {
-      const longs = r.tweets.filter((t) => t.isLongText);
-      const lens = r.tweets.map((t) => (t.text ?? '').length);
+      /**
+       * ⚠️⚠️ **分子分母要对齐** —— 2026-09-21 修:
+       * 原来 `count` 数的是长推,而 `maxChars`/`avgChars` 却是**全部推**算的。
+       * 于是一页里几条长推 + 几十条短推,平均值被短推拉下去,
+       * 面板那句「⚠️ 疑似被截断」**平白无故地报**。
+       * ⭐ 统计口径的铁律:**说的是谁,就只拿谁来算**。
+       */
+      const stat = (arr: typeof r.tweets) => {
+        const lens = arr.map((t) => (t.text ?? '').length);
+        return {
+          count: arr.length,
+          maxChars: lens.length ? Math.max(...lens) : 0,
+          avgChars: lens.length ? Math.round(lens.reduce((a, b) => a + b, 0) / lens.length) : 0,
+        };
+      };
+      /**
+       * ⭐ 长推与长文**分开数** —— 用户 2026-09-21 实测踩到:
+       * 72 篇长文被算进「长推(Show more)」,还报「最长 48 字,疑似被截断」,
+       * 而 48 字是**标题的正常长度**。下一个人会去查一个不存在的 bug。
+       */
+      const articles = r.tweets.filter((t) => t.isArticle);
+      // ⚠️ 长推 = 拿到全文**且不是长文**,否则长文会被两边各数一次
+      const notes = r.tweets.filter((t) => t.isLongText && !t.isArticle);
       return {
-        count: longs.length,
-        maxChars: lens.length ? Math.max(...lens) : 0,
-        avgChars: lens.length ? Math.round(lens.reduce((a, b) => a + b, 0) / lens.length) : 0,
+        ...stat(notes),
+        /**
+         * ⭐ 长文单独一栏。`withBody` 回答那个**真问题**:
+         * 「有几篇长文,其中几篇真拿到了正文」——
+         * 列表页只有标题+摘要(X 的设计),单篇页才有正文。
+         */
+        articles: {
+          ...stat(articles),
+          withBody: articles.filter((t) => t.isLongText).length,
+        },
       };
     })(),
     coverage,

@@ -95,7 +95,19 @@ export interface HarvestedTweet {
   inReplyToScreenName?: string;
   conversationId?: string;
   quotedStatusId?: string;
+  /** ⚠️ 长推(note_tweet 的 Show more)**或**长文正文 —— 两者都算「拿到了全文」 */
   isLongText: boolean;
+  /**
+   * ⭐ 这条是**长文(Article)**吗 —— 与长推**分开统计**。
+   *
+   * ⚠️ 用户 2026-09-21 实测踩到:报告把 72 篇长文算进「长推(Show more)」,
+   * 还报「最长 48 字 ⚠️ 疑似被截断」—— 48 字是**标题的正常长度**,
+   * 根本没截断。下一个人会去查一个不存在的 bug。
+   *
+   * ⭐ 只要载荷里有 article 结构就为真(**不论是否拿到正文**):
+   * 列表页只给标题+摘要也是长文,这样才能如实说「有几篇长文、其中几篇有正文」。
+   */
+  isArticle: boolean;
   metrics: {
     likes?: number; retweets?: number; replies?: number;
     quotes?: number; bookmarks?: number; views?: number;
@@ -490,6 +502,10 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         conversationId: s('conversation_id_str'),
         quotedStatusId: s('quoted_status_id_str'),
         isLongText: !!noteText || !!articleBody,
+        // ⚠️ 用「载荷里有没有 article 结构」判定,不用「有没有正文」——
+        //    列表页没正文的那 72 条也是长文,漏掉它们统计就又不诚实了
+        isArticle: !!(o.article as Record<string, unknown> | undefined)
+          ?.article_results,
         metrics: {
           likes: n('favorite_count'), retweets: n('retweet_count'),
           replies: n('reply_count'), quotes: n('quote_count'),
