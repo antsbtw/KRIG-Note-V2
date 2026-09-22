@@ -87,6 +87,17 @@ export interface AutoCollectReport {
    */
   longText: {
     count: number; maxChars: number; avgChars: number;
+    /**
+     * ⭐⭐ **这一页有几条没拿全** —— 用户 2026-09-22:
+     * 「如果折叠起来就应该 show all…但是现在却是分的零碎」。
+     * ⚠️ 「没拿全」与「本来就这么短」在库里长得一模一样,
+     * 不量它就永远是 100%(本仓踩过多次的形态)。
+     */
+    incomplete: number;
+    /** 长推被截断(载荷没给 note_tweet,存的是带省略号的开头) */
+    incompleteTruncated: number;
+    /** 长文没正文(补正文也没成功) */
+    incompleteNoBody: number;
     /** ⭐ 长文(Article)单独一栏 —— `withBody` = 其中几篇真拿到了正文 */
     articles: { count: number; maxChars: number; avgChars: number; withBody: number };
   };
@@ -1017,6 +1028,35 @@ export async function autoCollect(
     saved += articleBackfill.saved;
   }
 
+  /**
+   * ⭐⭐ **「这一页有没有没拿全的」必须说出来** —— 用户 2026-09-22 点破:
+   *
+   * > 「不管长文短文,如果折叠起来就应该 show all,然后获取完整的内容,
+   * >   就像人一样,但是现在却是分的零碎,却无法获取完整的内容。」
+   *
+   * ⚠️ 采集一直是「载荷给什么存什么」:X 不给 note_tweet 时,
+   * 截断的 full_text 就被当成全文存下来 —— **而且没人知道**。
+   * 于是「没拿全」和「本来就这么短」在库里长得一模一样。
+   *
+   * ⭐ 这一步只**如实报数**,不擅自去补:
+   * 先把「到底缺多少」从猜变成数,再决定要不要改采集底座。
+   * ⚠️ 长文正文那一类上面刚补过,所以这里统计的是**补完之后仍然缺的**。
+   */
+  const stillIncomplete = r.tweets.filter((t) => t.incomplete);
+  if (stillIncomplete.length > 0) {
+    const truncated = stillIncomplete.filter((t) => t.incomplete === 'text-truncated').length;
+    const noBody = stillIncomplete.filter((t) => t.incomplete === 'article-no-body').length;
+    notesPre.push(
+      `⚠️ **这一页有 ${stillIncomplete.length} 条没拿全**`
+      + `(共采到 ${r.tweets.length} 条):`
+      + [
+        truncated ? `${truncated} 条长推被截断(载荷没给 note_tweet,存的是带省略号的开头)` : '',
+        noBody ? `${noBody} 篇长文没正文(补正文没成功,见 problems)` : '',
+      ].filter(Boolean).join(' · ')
+      + ' —— **它们在库里和「本来就这么短」长得一样**,别当成完整数据用',
+    );
+  }
+
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
   /**
@@ -1402,7 +1442,15 @@ export async function autoCollect(
       const articles = r.tweets.filter((t) => t.isArticle);
       // ⚠️ 长推 = 拿到全文**且不是长文**,否则长文会被两边各数一次
       const notes = r.tweets.filter((t) => t.isLongText && !t.isArticle);
+      /**
+       * ⭐ 「没拿全的有几条」进报告 —— 不量的字段永远是 100%,
+       * 这一栏就是为了让它**量得到**。
+       */
+      const incomplete = r.tweets.filter((t) => t.incomplete);
       return {
+        incomplete: incomplete.length,
+        incompleteTruncated: incomplete.filter((t) => t.incomplete === 'text-truncated').length,
+        incompleteNoBody: incomplete.filter((t) => t.incomplete === 'article-no-body').length,
         ...stat(notes),
         /**
          * ⭐ 长文单独一栏。`withBody` 回答那个**真问题**:

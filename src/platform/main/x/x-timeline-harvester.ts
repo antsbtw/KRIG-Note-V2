@@ -108,6 +108,21 @@ export interface HarvestedTweet {
    * 列表页只给标题+摘要也是长文,这样才能如实说「有几篇长文、其中几篇有正文」。
    */
   isArticle: boolean;
+  /**
+   * ⭐⭐ **这条没拿全**,以及为什么 —— 空 = 拿全了。
+   *
+   * ── 用户 2026-09-22 点破 ──
+   * > 「不管长文短文,如果折叠起来就应该 show all,然后获取完整的内容,
+   * >   就像人一样,但是现在却是分的零碎,却无法获取完整的内容。」
+   *
+   * ⚠️ 此前采集是「**载荷给什么存什么**」:X 给了 note_tweet 就有全文,
+   * 没给就把**截断的 `legacy.full_text` 当成全文存下来,而且毫不知情**。
+   * 于是「没拿全」和「本来就这么短」在库里长得一模一样。
+   *
+   * ⭐ 这个字段只做一件事:**把缺口说出来**。
+   * 采不采得回来是下一步的事,但**不知道自己少了**是最坏的状态。
+   */
+  incomplete?: 'text-truncated' | 'article-no-body';
   metrics: {
     likes?: number; retweets?: number; replies?: number;
     quotes?: number; bookmarks?: number; views?: number;
@@ -307,6 +322,50 @@ export interface HarvestReport {
  * 导出给 x-capture-monitor 复用:**同一份抽取逻辑**,避免两处实现漂移
  * (滚动逻辑散成三份、同一 bug 修三遍的教训就在眼前)。
  */
+/**
+ * ⭐⭐ **这条推拿全了吗** —— 拿不全就说出来,别让它和「本来就这么短」长一样。
+ *
+ * ── 为什么需要它(用户 2026-09-22)──
+ * > 「如果折叠起来就应该 show all,然后获取完整的内容,就像人一样,
+ * >   但是现在却是分的零碎,却无法获取完整的内容。」
+ *
+ * 采集一直是「载荷给什么存什么」:
+ *  · 长推:全文在 `note_tweet`,X 不给时 `legacy.full_text` 是**截断**的
+ *  · 长文:正文在 `article_results.result.content_state`,**列表页不给**
+ * 两种情况下我们都存了个残缺版,**而且不知道**。
+ *
+ * ── 判据 ──
+ * ① `article-no-body`:载荷里有 article 结构却没解出正文 —— 确定没拿全
+ * ② `text-truncated` :没有 note_tweet,而 full_text 带**截断特征**
+ *
+ * ⚠️ 截断特征必须**保守**:宁可漏报也不能错报。
+ * 错报会让人去补一条本来就完整的推(白跑一趟详情页,还看不出错);
+ * 漏报只是维持现状。所以只认 X 自己留下的确定标记:
+ *  · 结尾是 `…` / `...`(X 截断时加的省略号)
+ *  · 结尾是 `… https://t.co/xxx`(截断 + 自链)
+ * ⚠️ **不**用「长度接近 280」当判据 —— 正好写满 280 字的推是完整的,
+ *    那样会把一大批完整短推错报成截断。
+ */
+export function detectIncomplete(o: {
+  articleBody: string;
+  noteText?: string;
+  fullText?: string;
+  isArticle: boolean;
+}): 'text-truncated' | 'article-no-body' | undefined {
+  // ① 长文没正文 —— 这个最确定:有 article 结构,却一个字正文都没解出来
+  if (o.isArticle && !o.articleBody) return 'article-no-body';
+  // ② 长推被截断 —— 有 note_tweet 就说明拿到全文了,不用判
+  if (o.noteText) return undefined;
+  const t = (o.fullText ?? '').trimEnd();
+  if (!t) return undefined;
+  /**
+   * ⚠️ 只认**确定**的截断标记:省略号收尾(可能后面跟着自链)。
+   * X 截断长推时就是这个形态;完整推不会以省略号结尾。
+   */
+  if (/(…|\.\.\.)(\s+https:\/\/t\.co\/\w+)?$/.test(t)) return 'text-truncated';
+  return undefined;
+}
+
 export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet>): void {
   if (node === null || typeof node !== 'object') return;
   if (Array.isArray(node)) {
@@ -513,6 +572,17 @@ export function extractTweetsFrom(node: unknown, out: Map<string, HarvestedTweet
         conversationId: s('conversation_id_str'),
         quotedStatusId: s('quoted_status_id_str'),
         isLongText: !!noteText || !!articleBody,
+        /**
+         * ⭐⭐ **没拿全的两种形态**,如实标注(判定逻辑见 detectIncomplete)。
+         * ⚠️ 只标注、不修改 text —— 采集层的职责是不丢字 + 不谎报,
+         *    「怎么补回来」是编排层的事。
+         */
+        incomplete: detectIncomplete({
+          articleBody,
+          noteText,
+          fullText: s('full_text'),
+          isArticle: !!(o.article as Record<string, unknown> | undefined)?.article_results,
+        }),
         // ⚠️ 用「载荷里有没有 article 结构」判定,不用「有没有正文」——
         //    列表页没正文的那 72 条也是长文,漏掉它们统计就又不诚实了
         isArticle: !!(o.article as Record<string, unknown> | undefined)
