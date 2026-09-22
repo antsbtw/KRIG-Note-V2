@@ -32,6 +32,7 @@
  */
 
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
+import { writeJournal, aggregateOps } from './x-collect-journal';
 import { upsertTweet, readBackTweets } from '../db/tweet-inbox-repo';
 import {
   saveAuthorCounts, registerSeenAuthor, getAuthorCounts,
@@ -1251,6 +1252,36 @@ export async function autoCollect(
       })
       .map((spec) => spec.field),
   }));
+
+  /**
+   * ⭐⭐ **留痕** —— 用户 2026-09-22:「面板的内容你不记录,如何做验证?」
+   *
+   * 面板上那一屏判断依据(接口名/长文深度/解析率/停止原因)原来**只渲染一次**,
+   * 关掉就没了,核对时只能反过来要用户截图。
+   * ⚠️ 与纲领铁律③的区别:这趟采集**成功**,依据照样蒸发 ——
+   * **成功路径也要留痕**。
+   *
+   * ⚠️ 只存元数据、不存正文(正文在 x_tweet 里);写盘失败只 warn 不上抛。
+   */
+  writeJournal({
+    at: new Date().toISOString(),
+    pageLabel: opts.pageLabel,
+    url: r.url,
+    ownerHandle: opts.ownerHandle,
+    wsId: opts.wsId,
+    tweets: r.tweets.length,
+    saved,
+    payloads: r.payloads,
+    people: r.people.length,
+    stopReason: r.stopReason,
+    rounds: r.rounds,
+    elapsedMs: Date.now() - t0,
+    parseRate: r.parseRate,
+    ops: aggregateOps(r.seenOps),
+    coverage,
+    problems: snapshotProblem ? [...r.problems, snapshotProblem] : r.problems,
+    notes,
+  });
 
   return {
     url: r.url,

@@ -1055,24 +1055,39 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       * 这个事实一直没进过视野,被反推成「只有详情页才有正文」。
                       * ⭐ 现在只要这一趟见过长文,就**无条件**列出来。
                       */}
-                    {(d.seenOps ?? []).some((x) => (x.articles ?? 0) > 0) && (
-                      <div style={{ marginTop: 6 }}>
-                        <div><b>长文深度(按接口)</b> —— 同一篇长文,不同接口给的深度不同</div>
-                        {d.seenOps!
-                          .filter((x) => (x.articles ?? 0) > 0)
-                          .map((x, i) => {
-                            const withBody = x.articlesWithBody ?? 0;
-                            const shallow = withBody === 0;
+                    {(() => {
+                      /**
+                       * ⚠️ **按接口聚合** —— 原来每个载荷一行,同一个
+                       * `UserOriginalsTimeline` 刷四行(用户 2026-09-22 截图)。
+                       * 而真正要比的是**接口之间**的深度差,不聚合就读不出来。
+                       */
+                      const agg = new Map<string, { op: string; count: number; articles: number; withBody: number }>();
+                      for (const x of d.seenOps ?? []) {
+                        if ((x.articles ?? 0) <= 0) continue;
+                        const cur = agg.get(x.op) ?? { op: x.op, count: 0, articles: 0, withBody: 0 };
+                        cur.count += 1;
+                        cur.articles += x.articles ?? 0;
+                        cur.withBody += x.articlesWithBody ?? 0;
+                        agg.set(x.op, cur);
+                      }
+                      if (agg.size === 0) return null;
+                      return (
+                        <div style={{ marginTop: 6 }}>
+                          <div><b>长文深度(按接口)</b> —— 同一篇长文,不同接口给的深度不同</div>
+                          {[...agg.values()].map((x, i) => {
+                            const shallow = x.withBody === 0;
                             return (
                               <div key={i}>
-                                {shallow ? '⚠️' : '✓'} <code>{x.op}</code>:
-                                长文 <b>{x.articles}</b> 篇 · 带正文 <b>{withBody}</b> 篇
-                                {shallow && ' —— 这个接口只给标题+摘要,换普通时间线入口才有正文'}
+                                {shallow ? '⚠️' : '✓'} <code>{x.op}</code>
+                                <span> ×{x.count}</span>:
+                                长文 <b>{x.articles}</b> 篇 · 带正文 <b>{x.withBody}</b> 篇
+                                {shallow && ' —— 这个接口只给标题+摘要,没有正文'}
                               </div>
                             );
                           })}
-                      </div>
-                    )}
+                        </div>
+                      );
+                    })()}
 
                     {/**
                       * ⭐⭐ 解不出推文时,把**原始载荷**摆出来 —— 给「量结构」用。
