@@ -13,6 +13,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { aggregateOps } from '../../src/platform/main/x/x-collect-journal';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** 实测形状:x.profile 一趟里 UserOriginalsTimeline 出现四次,各 19/20/20/20 篇长文、带正文全 0 */
 const realProfileRun = [
@@ -58,4 +60,32 @@ describe('采集留痕:按接口聚合', () => {
     expect(shallow.articlesWithBody).toBe(0);
     expect(deep.articlesWithBody).toBe(2);
   });
+});
+
+describe('⚠️ 翻页证据必须进留痕(2026-09-22 实测漏掉)', () => {
+  const collect = readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-auto-collect.ts'), 'utf-8');
+
+  /** ⚠️ 切到**写留痕**那一处再断言 —— 返回值里也有同名字段,整文件 toMatch 会假绿 */
+  const journalCall = (() => {
+    const i = collect.indexOf('writeJournal({');
+    expect(i, '找不到 writeJournal 调用').toBeGreaterThan(0);
+    const seg = collect.slice(i, collect.indexOf('});', i));
+    expect(seg.length, '切出来是空的').toBeGreaterThan(200);
+    return seg;
+  })();
+
+  for (const f of ['hasMore', 'pagedRounds', 'pagingSkipped']) {
+    it(`⭐⭐ ${f} 必须写进留痕 —— 面板有、留痕没有 = 关掉就查不到`, () => {
+      /**
+       * ⚠️ 这三样原来**只在面板和返回值里**,留痕里没有。
+       * 后果实测过:我要判「这一页翻没翻页」,只能去读代码推断 ——
+       * 而且推错了(以为推文页不会翻页,实际闸门恰好成立)。
+       * ⭐ 「四种断法长得一模一样」正是 pagingSkipped 存在的理由,
+       * 它自己却没留下来。
+       */
+      expect(journalCall, `留痕里没有 ${f} —— 「采完没有/翻没翻页」关掉面板就查不到`)
+        .toMatch(new RegExp(`${f}:`));
+    });
+  }
 });

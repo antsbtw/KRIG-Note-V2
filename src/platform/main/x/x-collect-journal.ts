@@ -43,6 +43,23 @@ export interface CollectJournalEntry {
   /** 停止原因 —— 「为什么不采了」 */
   stopReason: string;
   rounds: number;
+  /**
+   * ⭐⭐ **采完没有** —— 「这一页还有没有下一页」。
+   * ⚠️ 与 stopReason 分开:stopReason 说的是「我为什么停」,
+   * 这个说的是「X 那边还有没有」。两者都要有才判得出「停得对不对」。
+   */
+  hasMore?: boolean;
+  /** 游标翻页翻了几页(0 = 没翻) */
+  pagedRounds?: number;
+  /**
+   * ⭐⭐ **没翻页的话,是哪一条闸门不成立**。
+   *
+   * ⚠️ 2026-09-22 实测漏掉过:面板和报告里都有它,**唯独留痕没有** ——
+   * 于是「这页到底翻没翻页」关掉面板就查不到,只能靠读代码推断
+   * (我推断成「推文页不会翻页」,而实际闸门恰好成立了,推错了)。
+   * ⭐ 「四种断法长得一模一样」正是它存在的理由,它自己却没留下来。
+   */
+  pagingSkipped?: string;
   elapsedMs: number;
   /** 解析率:X 给了多少条目、解出多少 */
   parseRate?: unknown;

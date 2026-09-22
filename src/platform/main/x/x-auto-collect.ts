@@ -1314,6 +1314,10 @@ export async function autoCollect(
     people: r.people.length,
     stopReason: r.stopReason,
     rounds: r.rounds,
+    /** ⭐ 采完没有 / 翻了几页 / 没翻是哪条闸门不成立 —— 三样都要留痕 */
+    hasMore: r.paging.hasMore,
+    pagedRounds: r.pagedRounds,
+    pagingSkipped: r.pagingSkipped,
     elapsedMs: Date.now() - t0,
     parseRate: r.parseRate,
     ops: aggregateOps(r.seenOps),
