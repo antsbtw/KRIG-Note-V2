@@ -198,10 +198,22 @@ describe('⭐⭐ followers 增量采集', () => {
       cblk,
       '快照失败没赋给 snapshotProblem —— 只有 console.warn,用户看不见(铁律一)',
     ).toMatch(/snapshotProblem\s*=/);
+    /**
+     * ⚠️ 钉的是**「它有没有进 problems 数组」这个行为**,不是某一种写法。
+     * 2026-09-22 栽过一次:原来写死 `...r.problems, snapshotProblem` 这个字面量,
+     * 后来 problems 改成展开式数组(多并了补正文的 problems),
+     * **行为没变而守卫变红** —— 那是**假红**,会逼人去改没坏的代码。
+     * ⭐ 改成:只要 problems 的构造里出现 snapshotProblem 就算数。
+     */
+    const pi = collect.indexOf('problems: [');
+    expect(pi, '找不到 problems 的数组构造(注意别锚到接口声明 problems: string[] 上)')
+      .toBeGreaterThan(0);
+    const pblk = collect.slice(pi, pi + 400);
+    expect(pblk.length, 'problems 构造切出来是空的').toBeGreaterThan(50);
     expect(
-      collect,
+      pblk,
       'snapshotProblem 没并进 problems —— 赋了值也传不出去',
-    ).toMatch(/\.\.\.r\.problems,\s*snapshotProblem/);
+    ).toMatch(/snapshotProblem/);
   });
 
   it('⭐ 快照分批写 —— 2500 人一条语句会把 SQL 撑爆', () => {

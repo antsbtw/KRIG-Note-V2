@@ -34,6 +34,8 @@
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
 import { writeJournal, aggregateOps } from './x-collect-journal';
 import { upsertTweet, readBackTweets } from '../db/tweet-inbox-repo';
+/** ⭐ 长文正文当场补全 —— 采到长文却只有标题+摘要时,顺手逐篇进详情页取正文 */
+import { backfillArticlesInline } from './x-article-backfill';
 import {
   saveAuthorCounts, registerSeenAuthor, getAuthorCounts,
   saveListSnapshot, recentSnapshotRuns, diffSnapshots, orderingStability,
@@ -988,6 +990,33 @@ export async function autoCollect(
     }
   }
 
+  /**
+   * ⭐⭐ **长文正文当场补全** —— 采到长文却只有标题+摘要时,顺手逐篇进详情页取正文。
+   *
+   * ── 为什么放在这里(用户 2026-09-22 拍板)──
+   *
+   * 正文**只在单篇详情页**(`TweetDetail`)的载荷里,列表页(`UserArticlesTweets`)
+   * 和主页(`UserOriginalsTimeline`)都只给标题+摘要 —— 这是 X 的设计,不是 bug。
+   *
+   * ⚠️ 此前做成了「先采一次标记 is_article、再点另一个按钮从库里找候选」两步。
+   * 用户点破:**那一步是在伺候实现,不是在完成目标** ——
+   * 它既不给正文、也不是人想做的事,而且**存量老行永远补不上**
+   * (标记是新字段,老行标不上)。
+   * ⭐ 改成当场补:**采到就补齐**,不经过库里的标记,存量行重采一次也能补上。
+   *
+   * ⚠️ 只补**这一趟真采到、且确实缺正文**的长文 ——
+   * `isArticle && !isLongText`。`isLongText` 为真表示解析器真解出了
+   * `content_state`(摘要不算),所以详情页来的、或长推,都不会白跑一趟。
+   *
+   * ⚠️ **失败不拦采集**:推文已经入库了,补正文是**增量**。
+   * 这里出错只记 problems,绝不让整趟采集翻案 —— 那正是「降级要局部」。
+   */
+  const articleBackfill = await backfillArticlesInline(r.tweets, targetWcId, opts.wsId);
+  if (articleBackfill) {
+    notesPre.push(articleBackfill.note);
+    saved += articleBackfill.saved;
+  }
+
   const fromPayload = r.tweets.filter((t) => !t.fromDom).length;
 
   /**
@@ -1289,7 +1318,16 @@ export async function autoCollect(
     parseRate: r.parseRate,
     ops: aggregateOps(r.seenOps),
     coverage,
-    problems: snapshotProblem ? [...r.problems, snapshotProblem] : r.problems,
+    /**
+     * ⚠️ 补正文的问题要**并进 problems** —— 只放 notes 不够醒目(铁律一「失败要响」)。
+     * ⚠️ 但它**不让整趟采集翻案**:推文早已入库,补正文是增量。
+     * ⚠️ 本行在**留痕与返回值两处各有一份**,改要一起改。
+     */
+    problems: [
+      ...r.problems,
+      ...(snapshotProblem ? [snapshotProblem] : []),
+      ...(articleBackfill?.problems ?? []),
+    ],
     notes,
   });
 
@@ -1301,7 +1339,16 @@ export async function autoCollect(
     authorsWithRelation,
     authorsWithBio,
     payloads: r.payloads,
-    problems: snapshotProblem ? [...r.problems, snapshotProblem] : r.problems,
+    /**
+     * ⚠️ 补正文的问题要**并进 problems** —— 只放 notes 不够醒目(铁律一「失败要响」)。
+     * ⚠️ 但它**不让整趟采集翻案**:推文早已入库,补正文是增量。
+     * ⚠️ 本行在**留痕与返回值两处各有一份**,改要一起改。
+     */
+    problems: [
+      ...r.problems,
+      ...(snapshotProblem ? [snapshotProblem] : []),
+      ...(articleBackfill?.problems ?? []),
+    ],
     notes,
     unparsedSamples: r.unparsedSamples,
     seenOps: r.seenOps,

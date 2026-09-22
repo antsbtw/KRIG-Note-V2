@@ -238,3 +238,57 @@ describe('⑥ 留痕:成功路径的判断依据也要留下', () => {
       .toMatch(/backfill-/);
   });
 });
+
+describe('⑦ 采集时当场补全(用户 2026-09-22 拍板改掉的两步)', () => {
+  it('⭐⭐ autoCollect 必须调用 backfillArticlesInline —— 否则又退回「采完还要再点一次」', () => {
+    expect(autoCollect, 'autoCollect 没有当场补正文 —— 人又要多点一步,且存量老行永远补不上')
+      .toMatch(/backfillArticlesInline\(/);
+  });
+
+  it('⚠️ 判据必须是「是长文 && 没正文」,不能靠库里的 is_article 标记', () => {
+    const a = backfill.indexOf('export async function backfillArticlesInline');
+    expect(a, '找不到 backfillArticlesInline').toBeGreaterThan(0);
+    const seg = backfill.slice(a, a + 1500);
+    expect(seg.length, '切出来是空的').toBeGreaterThan(200);
+    /**
+     * ⭐ 当场补的**全部意义**就在这里:判据来自**这一趟采到的数据**
+     * (`t.isArticle`),不来自库里的标记 —— 所以存量老行重采一次也能补上。
+     * ⚠️ 如果这里退回查库(listArticlesMissingBody),就又回到「先采一次标记」的两步。
+     */
+    expect(seg, '当场补却去查库找候选 —— 那就又变回两步了')
+      .not.toMatch(/listArticlesMissingBody/);
+    expect(seg, '判据没用 isArticle').toMatch(/t\.isArticle/);
+    expect(seg, '判据没排除「已经有正文的」—— 会对详情页来的推白跑一趟')
+      .toMatch(/!gotBody\(t\)/);
+  });
+
+  it('⚠️⚠️ 补正文失败绝不能拦住采集(推文已入库,补正文是增量)', () => {
+    const a = autoCollect.indexOf('backfillArticlesInline(');
+    expect(a, '找不到调用点').toBeGreaterThan(0);
+    const seg = autoCollect.slice(Math.max(0, a - 200), a + 400);
+    expect(seg.length, '切出来是空的').toBeGreaterThan(100);
+    /**
+     * ⚠️ 写成 `const x = await f()` 之后只读返回值是安全的;
+     * 但**绝不能**让它 throw 冲掉整趟采集 —— 函数内部已全程 try/catch,
+     * 这里再钉一道:调用点不许把它塞进会上抛的位置。
+     */
+    expect(seg, '补正文的调用没有承接返回值 —— 它的 problems/note 会丢')
+      .toMatch(/const\s+articleBackfill\s*=\s*await\s+backfillArticlesInline/);
+  });
+
+  it('⚠️ 补正文的 problems 要并进报告(只放 notes 不够醒目)', () => {
+    expect(autoCollect, '补正文的 problems 没并进报告 —— 失败会被 notes 淹掉')
+      .toMatch(/articleBackfill\?\.problems/);
+  });
+
+  it('⚠️ 单趟要有上限,且超出部分必须如实说「没全补」', () => {
+    const a = backfill.indexOf('export async function backfillArticlesInline');
+    const seg = backfill.slice(a, a + 6000);
+    expect(seg.length, '切出来是空的').toBeGreaterThan(500);
+    expect(seg, '没有上限 —— 一趟 72 篇长文会打 72 次详情页,必撞限流')
+      .toMatch(/slice\(0,\s*limit\)/);
+    /** ⚠️ 「补了 10 篇」与「这页长文都补全了」不是一回事,差额必须说出来 */
+    expect(seg, '超出上限没说「并未全补」—— 会被当成补全了')
+      .toMatch(/并未全补/);
+  });
+});

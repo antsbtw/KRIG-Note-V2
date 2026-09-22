@@ -286,3 +286,116 @@ function toBackfillRecord(
     status: 'pending',
   };
 }
+
+/**
+ * ⭐⭐ **采集时当场补全长文正文** —— 由 `autoCollect` 在推文入库后直接调用。
+ *
+ * ── 为什么是这个形态(用户 2026-09-22 拍板)──
+ *
+ * 此前做成了「先采一次标记 `is_article` → 再点另一个按钮从库里找候选」两步。
+ * 用户问「为什么要操作两步,你的目的是什么」,一句点破:
+ * **那一步是在伺候实现,不是在完成目标** —— 它既不给正文、也不是人想做的事,
+ * 纯粹是为了喂饱「从库里查候选」这个设计;而且**存量老行永远补不上**
+ * (`is_article` 是新字段,老行标不上)。
+ *
+ * ⭐ 当场补就没有这个问题:**采到哪篇就补哪篇**,不经过库里的标记,
+ * 存量行重采一次照样补得上。
+ *
+ * ⚠️ 判据是 `isArticle && !gotBody` —— 只补**这一趟真采到、且确实缺正文**的。
+ * 详情页来的、以及长推(note_tweet),`isLongText` 本来就为真,不会白跑一趟。
+ *
+ * ⚠️ **绝不上抛**:推文已经入库了,补正文是**增量**。
+ * 这里出错只记 problems,不让整趟采集翻案(纲领铁律②「降级要局部」)。
+ *
+ * @returns 没有要补的返回 undefined(⭐ 与「补了但全失败」区分开)
+ */
+export async function backfillArticlesInline(
+  tweets: ReadonlyArray<HarvestedTweet>,
+  targetWcId?: number,
+  wsId?: string,
+  opts: { limit?: number } = {},
+): Promise<{ note: string; problems: string[]; saved: number; items: BackfillItem[] } | undefined> {
+  /** ⚠️ 只要「是长文」且「没拿到正文」的 —— 详情页来的已经有了,不重复跑 */
+  const need = tweets.filter((t) => t.isArticle && !gotBody(t) && t.tweetId);
+  if (need.length === 0) return undefined;
+
+  /**
+   * ⚠️ 上限兜底 —— 逐篇导航是最容易被限流的形态,
+   * 一趟采到 72 篇长文就打 72 次详情页是不行的。
+   * ⭐ 超出的部分**如实说出来**,不假装补全了。
+   */
+  const limit = opts.limit ?? 10;
+  const batch = need.slice(0, limit);
+
+  const problems: string[] = [];
+  const items: BackfillItem[] = [];
+  let saved = 0;
+  let withBody = 0;
+
+  for (let i = 0; i < batch.length; i++) {
+    const t = batch[i];
+    const lenBefore = (t.text ?? '').length;
+    const item: BackfillItem = {
+      tweetId: t.tweetId,
+      authorHandle: t.authorHandle,
+      lenBefore,
+      gotBody: false,
+      saved: false,
+      elapsedMs: 0,
+    };
+
+    try {
+      const r = await backfillOne(t.tweetId, t.authorHandle, targetWcId, { wsId });
+      item.elapsedMs = r.elapsedMs;
+      item.stopReason = r.stopReason;
+
+      if (r.error) {
+        item.problem = `补正文失败:${r.error}`;
+        problems.push(`长文 ${t.tweetId} 补正文失败:${r.error}`);
+      } else if (!r.tweet) {
+        item.problem = '详情页没解出这条推(可能已删除/不可见/登录态失效)';
+        problems.push(`长文 ${t.tweetId}:详情页没解出这条推`);
+      } else {
+        item.lenAfter = (r.tweet.text ?? '').length;
+        item.gotBody = gotBody(r.tweet);
+        if (item.gotBody) withBody += 1;
+        /**
+         * ⭐ 走同一个 `upsertTweet` —— `text` 只许变长的合并策略全在那里。
+         * 所以即便这趟没拿到正文,也**不可能**把已有全文写短。
+         */
+        await upsertTweet(toBackfillRecord(r.tweet, wsId));
+        item.saved = true;
+        saved += 1;
+      }
+    } catch (err) {
+      /** ⚠️ 单篇炸了不拦后面的,也不拦采集 —— 但不静默 */
+      item.problem = `补正文异常:${String(err).slice(0, 160)}`;
+      problems.push(`长文 ${t.tweetId} 补正文异常:${String(err).slice(0, 120)}`);
+    }
+
+    items.push(item);
+    /** ⚠️ 篇与篇之间随机间隔 —— 逐篇导航最容易撞限流 */
+    if (i < batch.length - 1) {
+      await new Promise((res) => setTimeout(res, 2500 + Math.random() * 2000));
+    }
+  }
+
+  const lens = items
+    .filter((i) => i.lenAfter != null)
+    .map((i) => `${i.lenBefore}→${i.lenAfter}${i.gotBody ? '✓' : '✗'}`)
+    .join(' · ');
+
+  /**
+   * ⭐ 这句话要能**单独回答「补上了没有」** —— 报告会截断,要紧的写在前面。
+   * ⚠️ 「试了几篇」与「拿到正文几篇」分开说:两者相等才是全成。
+   */
+  let note = `长文正文:这一页有 ${need.length} 篇长文缺正文,`
+    + `逐篇进详情页补了 ${batch.length} 篇,**拿到正文 ${withBody} 篇**`
+    + (lens ? `(字数 ${lens})` : '');
+  if (need.length > batch.length) {
+    note += ` ⚠️ 还有 ${need.length - batch.length} 篇没补(单趟上限 ${limit} 篇,`
+      + '逐篇导航会撞限流)—— **本页长文正文并未全补**';
+  }
+
+  return { note, problems, saved, items };
+}

@@ -1009,8 +1009,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                             });
                             setBfReport(r); return r;
                           })}
-                        title="把库里「是长文但只有标题+摘要」的行逐篇进详情页补成全文。⚠️ 候选来自库,与上面选的页面无关;逐篇导航会被限流,所以一次只补一小批">
-                        补长文正文
+                        title="⭐ 平时不用点 —— 采集时已经当场补过了。这个按钮是补漏:把库里「标了 is_article 但仍缺正文」的行再补一次(比如上次补到单趟上限、或当时详情页没打开)。⚠️ 候选来自库,与上面选的页面无关">
+                        补长文正文(补漏)
                       </button>
                     </>
                   );
