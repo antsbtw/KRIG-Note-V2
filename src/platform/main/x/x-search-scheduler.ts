@@ -116,6 +116,38 @@ async function buildFilterConfig(): Promise<TimelineFilterConfig> {
 }
 
 /**
+ * ⚠️ **空转刹车**(2026-09-21):drain 连续「跑了却一条没判成」时逐步退避。
+ *
+ * 原先的形态:本 timer 每 2 分钟无条件重启 drain,而 drain 自己连续失败 3 次
+ * 就停 —— 于是「停 → 2 分钟后原样再来 → 再停」**永远循环**,日志被刷屏,
+ * 积压一条不动。刹车在 drain 里,油门在这儿,两边互不知道。
+ *
+ * 现在:drain 判成了 → 清零;一条没判成 → 退避翻倍(2→4→8…最多 30 分钟)。
+ * ⚠️ 退避只压**重试频率**,不压错误本身 —— 失败照常 console.error 留痕
+ * (「不刷屏」不等于「不报错」,后者是把故障藏起来)。
+ */
+const MAX_BACKOFF_MS = 30 * 60_000;
+let drainBackoffMs = 0;
+let drainNextAllowedAt = 0;
+
+/** drain 结束时回调:判成了就解除退避,零产出就翻倍。 */
+function noteDrainOutcome(judged: number): void {
+  if (judged > 0) {
+    if (drainBackoffMs > 0) {
+      console.log('[x-search-scheduler] drain 恢复正常,解除退避');
+    }
+    drainBackoffMs = 0;
+    drainNextAllowedAt = 0;
+    return;
+  }
+  drainBackoffMs = drainBackoffMs === 0 ? 2 * 60_000 : Math.min(drainBackoffMs * 2, MAX_BACKOFF_MS);
+  drainNextAllowedAt = Date.now() + drainBackoffMs;
+  console.warn(
+    `[x-search-scheduler] drain 零产出,退避 ${Math.round(drainBackoffMs / 60_000)} 分钟后再试`,
+  );
+}
+
+/**
  * 清理**存量积压** —— 与采集完全解耦。
  *
  * ⚠️ 2026-09-03 两次实机观察踩到的坑,记下来别再犯:
@@ -128,6 +160,7 @@ async function buildFilterConfig(): Promise<TimelineFilterConfig> {
  * 采集才需要浏览器。把两者绑在一起是我的错误,现已拆开独立调度。
  */
 async function drainBacklog(): Promise<void> {
+  if (drainNextAllowedAt > 0 && Date.now() < drainNextAllowedAt) return;  // 退避中,安静跳过
   // 没有 ws 上下文时用 undefined 查全局积压(queryPending/countPending 的 wsId 可选)
   const wsIds = activeXWcMap.size > 0 ? [...activeXWcMap.keys()] : [undefined];
   for (const wsId of wsIds) {
@@ -136,7 +169,7 @@ async function drainBacklog(): Promise<void> {
       if (backlog > 0) {
         console.log(`[x-search-scheduler] 存量积压 ${backlog} 条`
           + `${wsId ? `(ws=${wsId})` : '(全局)'},启动 drain`);
-        startJudgeDrain(judgeConfig, wsId ?? '');
+        startJudgeDrain(judgeConfig, wsId ?? '', noteDrainOutcome);
       }
     } catch (err) {
       console.error('[x-search-scheduler] 查积压失败:', err);

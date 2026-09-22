@@ -43,23 +43,21 @@ const SYSTEM_PROMPT = `你是 OTun VPN 产品的推文筛选助手。
 - 翻墙周边疑问但没有找工具的意图（如"挂着梯子微信会不会被封"、账号封禁申诉、换区教程求助）
 - 与翻墙/VPN 无关的内容
 
-每次输入是一个推文 JSON 数组，每条推文包含 tweetId、text 和 lang。
+每次输入是**一条**推文的 JSON 对象，包含 tweetId、text 和 lang。
 - 如果 lang 不是 "zh"，必须在输出中加入 "translation" 字段，将推文内容翻译成中文（一句话，保留原意）。
 - 如果 lang 是 "zh" 或者推文本身已是中文，translation 字段留空字符串 ""。
 
-输出必须是 JSON 数组，每条对应一个判断结果，格式：
-[
-  {
-    "tweetId": "...",
-    "worth": true,
-    "confidence": 0.9,
-    "reason": "用户明确求助找翻墙工具",
-    "tags": ["VPN求助", "潜在用户"],
-    "suggestReply": true,
-    "translation": "我需要一个好用的VPN"
-  }
-]
-不要输出除 JSON 数组之外的任何文字。`;
+输出必须是**单个 JSON 对象**（不是数组），格式：
+{
+  "tweetId": "...",
+  "worth": true,
+  "confidence": 0.9,
+  "reason": "用户明确求助找翻墙工具",
+  "tags": ["VPN求助", "潜在用户"],
+  "suggestReply": true,
+  "translation": "我需要一个好用的VPN"
+}
+不要输出除该 JSON 对象之外的任何文字。`;
 
 interface RawVerdictItem {
   tweetId?: string;
@@ -168,24 +166,62 @@ export async function judgeWithOllama(
   const tweetIds = batch.map((t) => t.tweet_id);
   await markAiJudging(tweetIds);
 
-  const userContent = JSON.stringify(
-    batch.map((t) => ({ tweetId: t.tweet_id, text: t.text, lang: t.lang ?? 'unknown' })),
-  );
-
-  let verdictMap: Map<string, AIVerdict>;
+  /**
+   * ⭐⭐ **逐条问,不再一次问一批**(2026-09-21)。
+   *
+   * 症状:drain 反复刷「no verdict array」「judged 0」,积压 3300 条清不动。
+   * 真因**不是** Ollama 挂了(实测 /api/tags 200、模型已加载、HTTP 全程 200、
+   * finish_reason=stop) —— 是**数组契约下模型只答第一条就收尾**:
+   *   实测同一份真实 pending 数据
+   *     25 条 → 0 条判断(completion_tokens 83,只答了第一条的裸对象)
+   *     10 条 → 0 条(ctok 89)
+   *     15 条 → 15 条(ctok 1552)   ← 时好时坏,**不是**规模阈值
+   *      5 条 → 四个切片里 2 个 0 条
+   *   也就是说「批小一点」救不了 —— 我一开始就是这么误判的(5 条那次纯属运气)。
+   * 改成单条对象契约后,**同一个 0/5 的切片变成 5/5**。
+   *
+   * ⚠️ 这与 x-reply-planner 早就写下的结论同源:
+   *   「契约是**对象**不是数组(实测数组 grammar 慢 2-5× 且方差极大)」。
+   *   判断层是最后一处还在用数组契约的地方,现已对齐。
+   *
+   * ⭐ 附带收益:一条答坏只赔一条,不再整批回退 —— 原先 25 条里坏一条,
+   *   25 条全退 pending,下一轮原样再来一遍,这正是空转的燃料。
+   */
+  const verdictMap = new Map<string, AIVerdict>();
+  const failures: string[] = [];
   try {
-    const response = await callOllama({
-      model: config.model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userContent },
-      ],
-      endpoint: config.ollamaEndpoint,
-      timeoutMs: config.timeoutMs,
-      temperature: 0.2,
-      responseFormat: 'json_object',
-    });
-    verdictMap = parseVerdicts(response.content);
+    for (const t of batch) {
+      const userContent = JSON.stringify({
+        tweetId: t.tweet_id, text: t.text, lang: t.lang ?? 'unknown',
+      });
+      try {
+        const response = await callOllama({
+          model: config.model,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: userContent },
+          ],
+          endpoint: config.ollamaEndpoint,
+          timeoutMs: config.timeoutMs,
+          temperature: 0.2,
+          responseFormat: 'json_object',
+        });
+        // 单条契约下模型偶尔仍会回数组/包一层 —— parseVerdicts 两种都认。
+        for (const [id, v] of parseVerdicts(response.content)) verdictMap.set(id, v);
+      } catch (err) {
+        // ⚠️ 单条失败**不**中断整批:记下来继续,让好的那些能落库。
+        //    只有「一条都没成」才当作整体失败上抛(见下)。
+        failures.push(`${t.tweet_id}: ${(err as Error).message}`);
+      }
+    }
+    if (verdictMap.size === 0) {
+      throw new Error(
+        `本批 ${batch.length} 条逐条判断全部失败,首个原因:${failures[0] ?? '(无)'}`,
+      );
+    }
+    if (failures.length > 0) {
+      console.warn(`[x-ai-judge] 本批 ${failures.length}/${batch.length} 条判断失败(已回退 pending)`);
+    }
   } catch (err) {
     console.error('[x-ai-judge] Ollama call failed:', (err as Error).message);
     /**
@@ -260,7 +296,16 @@ export function isDraining(wsId: string): boolean {
   return drainingWs.has(wsId);
 }
 
-export function startJudgeDrain(config: JudgeConfig, wsId: string): void {
+export function startJudgeDrain(
+  config: JudgeConfig,
+  wsId: string,
+  /**
+   * drain 收工时回调,带上本轮判成的总条数。
+   * ⚠️ 调度器用它决定要不要退避 —— 没有这个回调,「drain 停了」与
+   * 「drain 判完了」在外面长得一模一样,于是 2 分钟后原样重启,空转成环。
+   */
+  onFinish?: (judged: number) => void,
+): void {
   if (drainingWs.has(wsId)) {
     console.log(`[x-ai-judge] drain already running for ws=${wsId}, skip`);
     return;
@@ -305,6 +350,9 @@ export function startJudgeDrain(config: JudgeConfig, wsId: string): void {
       console.error(`[x-ai-judge] drain ws=${wsId} stopped on error after ${total} judged:`, (err as Error).message);
     } finally {
       drainingWs.delete(wsId);
+      // ⚠️ 必须在 finally:正常收工和出错停止**都**要告诉调度器,
+      //    否则出错那条路径不退避,又回到「停了就立刻重启」的老形态。
+      onFinish?.(total);
     }
   })();
 }
