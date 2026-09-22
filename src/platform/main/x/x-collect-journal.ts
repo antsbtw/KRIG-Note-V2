@@ -124,10 +124,41 @@ export function writeJournal(entry: CollectJournalEntry): string | undefined {
 const KEEP = 200;
 function pruneJournal(dir: string): void {
   try {
+    /**
+     * ⚠️ 前缀要**两种都算** —— 补正文的留痕叫 `backfill-*`。
+     * 只清 `collect-*` 的话另一半会无限堆积(而且从目录里看不出来)。
+     */
     const files = readdirSync(dir)
-      .filter((f) => f.startsWith('collect-') && f.endsWith('.json'))
+      .filter((f) => (f.startsWith('collect-') || f.startsWith('backfill-')) && f.endsWith('.json'))
       .map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t);
     for (const { f } of files.slice(KEEP)) unlinkSync(join(dir, f));
   } catch { /* 清理失败无所谓,不能影响采集 */ }
+}
+
+/**
+ * ⭐ 长文正文补全的留痕。
+ *
+ * 用户点破过:「面板的内容你不记录,如何做验证?」——
+ * 判断依据只渲染一次、关掉就没了,核对时只能反过来找人要截图。
+ * ⚠️ 与纲领铁律③的区别:**成功路径的判断依据同样要留痕**,不只失败。
+ *
+ * 这里每篇都记 `lenBefore → lenAfter` 与 `gotBody`,
+ * 就是为了回答「下次验证能不能不靠人、只靠留下的东西说清楚?」
+ *
+ * ⚠️ 写盘失败只 warn,绝不上抛 —— 补正文成功了就是成功了,不能因为记不下来而翻案。
+ */
+export function writeBackfillJournal(report: unknown): string | undefined {
+  try {
+    const dir = journalDir();
+    mkdirSync(dir, { recursive: true });
+    const at = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = join(dir, `backfill-${at}.json`);
+    writeFileSync(path, JSON.stringify({ at: new Date().toISOString(), ...(report as object) }, null, 2), 'utf-8');
+    pruneJournal(dir);
+    return path;
+  } catch (err) {
+    console.warn('[x-collect-journal] 补正文留痕失败(不影响补全):', err);
+    return undefined;
+  }
 }

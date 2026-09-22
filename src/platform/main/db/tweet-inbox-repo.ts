@@ -17,6 +17,7 @@
 import { getXDB } from '@storage/surreal/client';
 import { registerSeenAuthor } from './x-author-repo';
 import type { TweetInboxRecord, AIVerdict, TweetInboxStatus, TweetFeedback, FeedbackVerdict } from '@shared/types/x-timeline-types';
+import { normalizeHandle } from '@shared/types/x-timeline-types';
 import { DEFAULT_TASK_ID } from '@shared/types/x-timeline-types';
 
 /** 写入或忽略（tweet_id 唯一索引冲突 = 重复，直接跳过） */
@@ -87,7 +88,13 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       replied: $replied,
       replied_at: $replied_at,
       reply_draft: $reply_draft,
-      backfilled: $backfilled
+      backfilled: $backfilled,
+      /**
+       * ⚠️ **INSERT 段是独立的一份清单** —— bug ⑥(metrics_at 只登记了一半)
+       * 就栽在漏了这一段:新插入的行永远是 NONE,而 UPDATE 子句看着好好的。
+       * 加字段必须**四处都登记**:schema / 类型 / toRecord / 本语句(SET+参数两处)。
+       */
+      is_article: $is_article
     }
     ON DUPLICATE KEY UPDATE
       /**
@@ -163,7 +170,20 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
       created_at = created_at ?? $created_at,
       in_reply_to = IF in_reply_to != NONE AND in_reply_to != '' THEN in_reply_to ELSE $in_reply_to END,
       in_reply_to_user = IF in_reply_to_user != NONE AND in_reply_to_user != '' THEN in_reply_to_user ELSE $in_reply_to_user END,
-      conversation_id = IF conversation_id != NONE AND conversation_id != '' THEN conversation_id ELSE $conversation_id END`,
+      conversation_id = IF conversation_id != NONE AND conversation_id != '' THEN conversation_id ELSE $conversation_id END,
+      /**
+       * ⭐ 长文标记:**只补不抹**(属「不可变事实」那一类 —— 一条推是不是长文,
+       * 发出来就定了)。
+       *
+       * ⚠️ 为什么不能无条件覆盖:DOM 兜底路径**根本不产出这个字段**
+       * (与 tweet_url / author_avatar / conversation_id 同一批),
+       * 一趟浅采就会把已经标好的长文抹回 NONE —— 那正是 bug ② 的形态。
+       * ⚠️ 也不能用 ?? :它把 false 当成有值,但这里 false 与「没采到」
+       * 语义不同,故显式判 != NONE。
+       * ⚠️ 本注释在**模板字面量内部**,绝不能出现反引号 —— 它会提前终止字符串,
+       *    后面的 SQL 会被当成 TS 解析(实测 "Cannot find name 'NONE'")。
+       */
+      is_article = IF $is_article != NONE THEN $is_article ELSE is_article END`,
     {
       tweet_id: record.tweet_id,
       text: record.text,
@@ -198,6 +218,12 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
        * (schema / 类型 / toRecord / 本语句),漏任何一处都**静默丢失**。
        */
       conversation_id: record.conversation_id ?? undefined,
+      /**
+       * ⚠️ SQL 里写了 `$is_article` 就**必须在这里绑值** —— 「每个 $ 变量都要真绑值」
+       * 是 bug ⑥ 的第二半:少了这一行,SurrealDB 拿不到参数,字段静默为空。
+       * ⚠️ 传 undefined 而非 null:option 字段只认 NONE(surreal-none-vs-null)。
+       */
+      is_article: record.is_article ?? undefined,
       // ⚠️ undefined → NONE(永久保留);绝不写 null —— option<T> 只认 NONE,NULL 会被拒
       expires_at: record.expires_at ? new Date(record.expires_at) : undefined,
       source: record.source,
@@ -757,6 +783,51 @@ export async function readBackTweets(
             in_reply_to, in_reply_to_user
        FROM x_tweet WHERE tweet_id IN $ids`,
     { ids: tweetIds },
+  );
+  return res[0] ?? [];
+}
+
+/**
+ * ⭐ 找出「是长文,但正文还没取回」的行 —— 长文正文补全的候选来源。
+ *
+ * ── 判据为什么是这两条 ──
+ *  ① `is_article = true` —— 载荷里有 article 结构(migration 1.2.7)。
+ *     ⚠️ **不能用字数**当判据:实测 10056 行里超过 2000 字的只有 3 行,
+ *     而一篇正文被摘要顶掉的长文只有 267 字,和普通推**长得一模一样** ——
+ *     长度分不出「短推」和「被截断的长文」,而后者正是要找的那一类。
+ *  ② `string::len(text) < $minLen` —— 还只有标题+摘要。
+ *     实测列表页给的长文是 267 / 295 字这个量级,真正文是几千字,
+ *     中间隔着一个数量级,`800` 取在空档里。
+ *
+ * ⚠️ `string::len(text ?? '')` 的 `?? ''` 不能省:老行 text 可能是 NONE,
+ * `string::len(NONE)` 会**抛错**(实测 "Expected string but found NONE"),
+ * 整条查询失败。
+ *
+ * ⚠️ **存量老行天然查不出来** —— `is_article` 是 1.2.7 才加的,
+ * 那之前采的行这一列是 NONE。这与立项定位一致:
+ * **不是回填老数据,而是下次采长文时顺手把正文取全。**
+ */
+export async function listArticlesMissingBody(
+  opts: { handle?: string; minLen?: number } = {},
+): Promise<Array<{ tweet_id: string; author_handle?: string; len: number }>> {
+  const db = getXDB();
+  const minLen = opts.minLen ?? 800;
+  /**
+   * ⚠️ **必须用共用的 normalizeHandle**,别在这里手写一套 ——
+   * 库里 author_handle 存的是归一化形态,写入端与比对端一旦漂移
+   * (它 trim 空白、剥 `@+` 多个,手写版两样都没有),
+   * 结果是**恒查不到且不报错**:这里表现为「一篇候选都没有」,
+   * 与「真的都补全了」长得一模一样。
+   */
+  const h = opts.handle ? normalizeHandle(opts.handle) : undefined;
+  const res = await db.query<[Array<{ tweet_id: string; author_handle?: string; len: number }>]>(
+    `SELECT tweet_id, author_handle, string::len(text ?? '') AS len
+       FROM x_tweet
+      WHERE is_article = true
+        AND string::len(text ?? '') < $minLen
+        ${h ? 'AND author_handle = $handle' : ''}
+      ORDER BY len ASC`,
+    h ? { minLen, handle: h } : { minLen },
   );
   return res[0] ?? [];
 }

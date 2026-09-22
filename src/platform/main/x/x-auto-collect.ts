@@ -351,6 +351,16 @@ function toRecord(t: HarvestedTweet, wsId?: string): TweetInboxRecord {
      * 解析器也解出来了,唯独这里没写 → 库里恒空 → 回复归不到根推上。
      */
     conversation_id: t.conversationId,
+    /**
+     * ⭐ 长文标记 —— 解析器早就算出来了(载荷里有 article_results 就是真),
+     * 此前**只活在解析器里**:类型没声明、这里不写、写库语句也没有,
+     * 于是库里根本回答不了「哪些行是长文」。
+     *
+     * ⚠️ 用 `isArticle`(有没有 article 结构)而**不是** `isLongText`
+     * (有没有真拿到正文)—— 要找的正是「是长文**但**正文还没取回」那一类,
+     * 用后者当标记会把它们恰好漏掉。
+     */
+    is_article: t.isArticle,
     lang: t.lang,
     metrics: t.metrics ?? {},
     fetched_at: new Date().toISOString(),

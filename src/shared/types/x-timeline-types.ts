@@ -178,6 +178,19 @@ export interface TweetInboxRecord {
   author_name_at_post?: string;  // 发推当时的展示名快照
   backfilled?: boolean;          // true = 存量回填,非实时采集
   /**
+   * ⭐ **这是一篇长文(Article)吗** —— 判据是载荷里有没有 `article_results` 结构。
+   *
+   * ⚠️ 与「**正文拿到了没有**」是两回事,别当成同一件事用:
+   * 列表页(`UserArticlesTweets`)和主页(`UserOriginalsTimeline`)给的长文
+   * 同样 `is_article=true`,但 `text` 里**只有标题+摘要**;
+   * 正文只在单篇详情页(`TweetDetail`)的载荷里 —— 2026-09-22 同账号三入口实测。
+   * ⭐ 正因如此才需要这个字段:「哪些行是长文但正文还没取回」得先查得出来。
+   *
+   * ⚠️ 解析器(`HarvestedTweet.isArticle`)**一直就有**,只是四处登记里
+   * 另外三处都没跟上 —— 与 conversation_id 那次同一形态,只是缺的那头不同。
+   */
+  is_article?: boolean;
+  /**
    * ⭐⭐ **会话根** —— 这条推属于哪个会话(= 哪篇文章下面的)。
    *
    * ⚠️ 2026-09-21 实测暴露:schema 里**早就有这一列**(还带索引

@@ -108,11 +108,15 @@ DEFINE FIELD IF NOT EXISTS task_id             ON x_tweet TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS ws_id               ON x_tweet TYPE option<string>;
 -- Q1:存量回填的行标 true,与真实采集区分开
 DEFINE FIELD IF NOT EXISTS backfilled          ON x_tweet TYPE bool DEFAULT false;
+-- 载荷里带 article 结构 = 长文。⚠️ ≠「拿到正文了」:列表页的长文也是 true,
+-- 但只有标题+摘要 —— 正文只在单篇详情页(migration 1.2.7)
+DEFINE FIELD IF NOT EXISTS is_article          ON x_tweet TYPE option<bool>;
 DEFINE INDEX IF NOT EXISTS idx_tweet_id        ON x_tweet FIELDS tweet_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_tweet_status    ON x_tweet FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_tweet_expires   ON x_tweet FIELDS expires_at;
 DEFINE INDEX IF NOT EXISTS idx_tweet_author    ON x_tweet FIELDS author_handle;
 DEFINE INDEX IF NOT EXISTS idx_tweet_accepted  ON x_tweet FIELDS accepted;
+DEFINE INDEX IF NOT EXISTS idx_tweet_is_article ON x_tweet FIELDS is_article;
 
 -- ═══════════════════════════════════════════════════════════════
 -- 运行表 —— 0 期原样搬过来,结构不动(重整放 A 期)
@@ -1370,6 +1374,49 @@ export async function x_migration_1_2_6(db: Surreal): Promise<void> {
     `UPSERT $rid SET version = '1.2.6', appliedAt = $now,
       description = 'x_tweet.metrics_at (observation time for metrics — counts without a timestamp are not comparable)'`,
     { rid: new RecordId('schema_version', '1.2.6'), now: Date.now() },
+  );
+}
+
+/**
+ * 1.2.7 —— 「这条是不是长文」(2026-09-22)
+ *
+ * ── 为什么非加不可 ──
+ * 长文正文**只在单篇详情页**的载荷里(2026-09-22 同账号三入口实测:
+ * TweetDetail 带正文,UserArticlesTweets / UserOriginalsTimeline 只给标题+摘要)。
+ * 于是要「把缺正文的长文逐篇补回来」,第一步就是**找出哪些行是长文**——
+ * 而 x_tweet 的 33 列里**没有任何一列**能回答这个问题。
+ *
+ * ⚠️ 解析器其实**早就算出来了**(HarvestedTweet.isArticle,
+ * 判据是载荷里有没有 article_results 结构),只是从来没往下传:
+ * 类型没声明 → toRecord 不写 → 库里没有。
+ * ⭐ 与 conversation_id 那次(「schema 有、解析有、类型没有」)是**同一形态**,
+ * 只是这次缺的是另一头:**解析有、其余三处都没有**。
+ *
+ * ── 为什么不用长度当判据 ──
+ * 实测库里 10056 行,超过 2000 字的只有 3 行。
+ * 一篇**正文被摘要顶掉**的长文只有 267 字,和普通推**长得一模一样** ——
+ * 长度分不出「短推」和「被截断的长文」,而这恰恰是要找的那一类。
+ *
+ * ⚠️ 不复用 `backfilled`:那个字段已有语义(存量回填 ≠ 实时采集,637 行在用),
+ * 借来表示别的意思会让两边都读不准。
+ *
+ * ⭐ 存量老行标不上(采的时候没这个字段),只能随后续采集慢慢涨 ——
+ * 这与立项定位一致:**不是回填老数据,而是下次采长文时顺手把正文取全。**
+ */
+const X_SCHEMA_1_2_7 = `
+-- 载荷里带 article 结构 = 这是一篇长文(Article)。
+-- ⚠️ 与「拿到正文了没有」是两回事:列表页给的长文同样 is_article=true,
+--    但正文只有标题+摘要 —— 正是这一类需要逐篇进详情页补全。
+DEFINE FIELD IF NOT EXISTS is_article ON x_tweet TYPE option<bool>;
+DEFINE INDEX IF NOT EXISTS idx_tweet_is_article ON x_tweet FIELDS is_article;
+`;
+
+export async function x_migration_1_2_7(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_7);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.7', appliedAt = $now,
+      description = 'x_tweet.is_article (long-form flag — article bodies live only on the detail page)'`,
+    { rid: new RecordId('schema_version', '1.2.7'), now: Date.now() },
   );
 }
 

@@ -61,6 +61,7 @@ import { LocalExecutor } from '../executor/local-executor';
 import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
+import { backfillArticleBodies } from '../x/x-article-backfill';
 import { PAGE_PARAMS, PAGE_LABELS } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
@@ -112,7 +113,7 @@ const STEP_TYPE_OF: Readonly<Record<string, StepType>> = {
   tap: 'act', press: 'act', hover: 'act', type: 'act',
   pages: 'fetch', anchors: 'fetch', pageNames: 'fetch',
   readTabBar: 'fetch', inventory: 'fetch', readVerified: 'fetch', probeMemory: 'fetch',
-  autoCollect: 'fetch', whereAmI: 'fetch',
+  autoCollect: 'fetch', whereAmI: 'fetch', backfillArticles: 'fetch',
   execute: 'judge',
 };
 
@@ -216,8 +217,14 @@ function failFast(
   return { channelOk: false, error: reason };
 }
 
-/** 注册的通道数 —— 与下面 ipcMain.handle 的条数一致 */
-const WEBC_COUNT = 18;
+/**
+ * 注册的通道数 —— 与下面 ipcMain.handle 的条数一致。
+ *
+ * ⚠️ **加通道必须改这个数**(守卫 web-console-wiring-complete 会当场抓)——
+ * 它只出现在启动日志里,漂了不会有任何报错,日志就开始说假话。
+ * 2026-09-22 加「补长文正文」时 18 → 19。
+ */
+const WEBC_COUNT = 19;
 
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
@@ -908,6 +915,57 @@ export function registerWebConsoleHandlers(): void {
         : { status: 'degraded', missing: r.problems },
       r.elapsedMs);
     return { channelOk: true, report: r };
+  });
+
+  /**
+   * ⭐⭐ 长文正文逐篇补全 —— 把「只有标题+摘要」的长文补成全文。
+   *
+   * ── 依据(2026-09-22 同账号三入口实测)──
+   * 正文**只在单篇详情页**(`TweetDetail`)的载荷里;
+   * 列表页(`UserArticlesTweets`)和主页(`UserOriginalsTimeline`)都只给标题+摘要。
+   * 这是 X 的设计,不是 bug —— 要全文就必须逐篇进详情页。
+   *
+   * ⚠️ **手动触发、小批上限**(用户 2026-09-22 拍板):
+   * 逐篇导航最容易被限流,所以**不**跟在采集后面自动跑 ——
+   * 两件事缠在一起,出事时分不清是谁的问题。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_BACKFILL_ARTICLES, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as {
+      wcId?: unknown; limit?: unknown; wsId?: unknown; budgetMs?: unknown; handle?: unknown;
+    };
+    const t0 = Date.now();
+    try {
+      const r = await backfillArticleBodies(
+        typeof p.wcId === 'number' ? p.wcId : undefined,
+        {
+          limit: typeof p.limit === 'number' ? p.limit : undefined,
+          wsId: typeof p.wsId === 'string' ? p.wsId : undefined,
+          budgetMs: typeof p.budgetMs === 'number' ? p.budgetMs : undefined,
+          handle: typeof p.handle === 'string' ? p.handle : undefined,
+        },
+      );
+      /**
+       * ⭐ 成果落痕 —— 每篇的 `字数前→后` 是这条能力唯一的成败判据。
+       * ⚠️ 「尝试了 N 篇」不等于「补上了 N 篇」:`withBody` 与 `saved` 分开记,
+       *    采到了但写库炸了必须看得出来。
+       */
+      recordRun('backfillArticles',
+        {
+          candidates: r.candidates, attempted: r.attempted,
+          withBody: r.withBody, saved: r.saved,
+          /** ⭐ 逐篇字数变化 —— 「下次验证不靠人」靠的就是这一行 */
+          lens: r.items.map((i) => `${i.tweetId}:${i.lenBefore}→${i.lenAfter ?? '?'}`
+            + (i.gotBody ? '✓' : '✗')),
+          journalPath: r.journalPath,
+          notes: r.notes,
+        },
+        r.problems.length === 0 ? { status: 'ok' }
+          : { status: 'degraded', missing: r.problems },
+        r.elapsedMs);
+      return { channelOk: true, report: r };
+    } catch (err) {
+      return failFast('backfillArticles', String(err), t0);
+    }
   });
 
   /**
