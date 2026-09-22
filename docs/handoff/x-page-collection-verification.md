@@ -349,7 +349,7 @@ curl -s -X POST http://localhost:8533/sql -u "$U:$P" -H "Accept: application/jso
 
 | 事项 | 说明 |
 |---|---|
-| **列表页正文靠逐篇进详情页补** | 列表页载荷确认没有正文(X 的设计);要全文得拿 id 逐篇采 —— 独立立项。⭐ 不用从零搭:`x-article-replies.ts` **已经会跳详情页并捕 `TweetDetail` 载荷**(2026-09-06 真机坐实过结构),它只是现在只取回复、不取 `content_state` |
+| **列表页正文靠逐篇进详情页补** | ⭐ **已立项:`docs/handoff/x-article-body-backfill.md`**。不用从零搭(`x-article-replies.ts` 已会跳详情页并捕 `TweetDetail`),但 ⚠️ **前提还没被证实** —— 「正文在详情页载荷里」是列表页的反面推论、不是实测,归档里一份真 `TweetDetail` 都没有。**第一步是 Spike,不是写代码** |
 | **长文 `title` 收窄成一处** | ⚠️ **原文划掉了这条,划早了**:已确认的是**结构**(`article_results.result.title`,键恒定),**代码没动** —— 仍是 5 路依次探查,4 条是死分支且无守卫。收窄 + 补一条守卫才算完 |
 | ~~`x.articles` 真正验一次~~ | ✅ 已完成(换 `@KA594594` 跑通 72 条) |
 | ~~报告口径拆「长推/长文」~~ | ✅ 已完成(`313fb351`),顺带修了分子分母不对齐 |
