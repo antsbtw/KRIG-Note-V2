@@ -1006,7 +1006,11 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   };
                   problems: string[]; notes?: string[]; stopReason: string; elapsedMs: number;
                   unparsedSamples?: Array<{ op: string; bytes: number; body: string }>;
-                  seenOps?: Array<{ op: string; bytes: number }>;
+                  /**
+                   * ⚠️ `AutoCollectReport.seenOps` 的**第二份声明**(同 longText 那条)。
+                   * ⭐ `articles`/`articlesWithBody` = 该接口给的长文深不深。
+                   */
+                  seenOps?: Array<{ op: string; bytes: number; articles?: number; articlesWithBody?: number }>;
                   /**
                    * ⚠️ 这是 `AutoCollectReport.longText` 的**第二份声明** ——
                    * 主进程加了 `articles` 一栏,这里不跟就 tsc 报错(2026-09-21 踩到)。
@@ -1041,6 +1045,34 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     {(d.notes?.length ?? 0) > 0 && d.notes!.map((n, i) => (
                       <div key={i}>ℹ️ {n}</div>
                     ))}
+
+                    {/**
+                      * ⭐⭐ **长文深度按接口分开摆** —— 2026-09-22 加。
+                      *
+                      * ⚠️ 原来 `seenOps` 只在「没解出推文」那个分支里渲染,
+                      * 也就是**解析成功时根本看不到是哪个接口给的数据**。
+                      * 于是「`/articles` 标签页给的浅、普通时间线给的深」
+                      * 这个事实一直没进过视野,被反推成「只有详情页才有正文」。
+                      * ⭐ 现在只要这一趟见过长文,就**无条件**列出来。
+                      */}
+                    {(d.seenOps ?? []).some((x) => (x.articles ?? 0) > 0) && (
+                      <div style={{ marginTop: 6 }}>
+                        <div><b>长文深度(按接口)</b> —— 同一篇长文,不同接口给的深度不同</div>
+                        {d.seenOps!
+                          .filter((x) => (x.articles ?? 0) > 0)
+                          .map((x, i) => {
+                            const withBody = x.articlesWithBody ?? 0;
+                            const shallow = withBody === 0;
+                            return (
+                              <div key={i}>
+                                {shallow ? '⚠️' : '✓'} <code>{x.op}</code>:
+                                长文 <b>{x.articles}</b> 篇 · 带正文 <b>{withBody}</b> 篇
+                                {shallow && ' —— 这个接口只给标题+摘要,换普通时间线入口才有正文'}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
 
                     {/**
                       * ⭐⭐ 解不出推文时,把**原始载荷**摆出来 —— 给「量结构」用。

@@ -212,7 +212,18 @@ export interface HarvestReport {
    * (DataSaverMode / ViewerBadgeCounts),看不出 `Followers` 有没有出现。
    * 只报样本不报全景,就答不了「是没发请求,还是发了但我没留下来」。
    */
-  seenOps: Array<{ op: string; bytes: number }>;
+  /**
+   * 本次见过的 GraphQL 操作。
+   *
+   * ⭐⭐ `articles` / `articlesWithBody` = **这个接口给的长文深不深**。
+   * 2026-09-22 血的教训:`UserArticlesTweets`(`/articles` 标签页)只给
+   * `title` + `preview_text`,而**普通时间线接口给的同一篇长文带正文**
+   * (@0xEgorAI 那两条 16081/6812 字就是时间线采到的)。
+   * 此前报告只汇总「几篇长文、几篇有正文」,**不分接口** → 于是
+   * 「哪个入口给得浅」看不出来,被反推成「只有详情页才有正文」,
+   * 白立了一个项。**按接口分开记,差异才看得见。**
+   */
+  seenOps: Array<{ op: string; bytes: number; articles?: number; articlesWithBody?: number }>;
   /**
    * ⭐⭐ 采到的**人** —— 关注者/关注中/验证关注者页面的产出。
    *
@@ -635,7 +646,7 @@ export async function harvestTimeline(
     url: string; headers: Record<string, string>; method?: string;
   } | null = null;
   /** 见过的全部操作名 —— 回答「那个请求到底发没发生」 */
-  const seenOps: Array<{ op: string; bytes: number }> = [];
+  const seenOps: Array<{ op: string; bytes: number; articles?: number; articlesWithBody?: number }> = [];
   let payloads = 0;
 
   const onMessage = (_e: unknown, method: string, params: any): void => {
@@ -709,12 +720,30 @@ export async function harvestTimeline(
           payloads++;
           const before = tweets.size;
           const peopleBefore = people.size;
-          seenOps.push({
+          /**
+           * ⚠️ 先占位、后面回填 `articles` —— 深度要**按这一个载荷**量,
+           * 不能拿累计 `tweets` 算(累计里混着别的接口的长文,
+           * 每个接口都会显示同一个总数,差异就被抹平了)。
+           */
+          const opEntry: { op: string; bytes: number; articles?: number; articlesWithBody?: number } = {
             op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
             bytes: r.body.length,
-          });
+          };
+          seenOps.push(opEntry);
           try {
             const parsed = JSON.parse(r.body);
+            /**
+             * ⭐ **这一个载荷**里的长文有多少、其中几篇带正文。
+             * 单独解到一个临时 Map,避免与累计结果互相污染。
+             */
+            const solo = new Map<string, HarvestedTweet>();
+            extractTweetsFrom(parsed, solo);
+            const soloArticles = [...solo.values()].filter((t) => t.isArticle);
+            if (soloArticles.length > 0) {
+              opEntry.articles = soloArticles.length;
+              // isLongText 对长文 = 真拿到了正文(摘要不算,见 articleBody)
+              opEntry.articlesWithBody = soloArticles.filter((t) => t.isLongText).length;
+            }
             // ⭐ 先数 X 给了多少条目(解析率的分母),再解析
             entriesSeen += countTimelineEntries(parsed);
             extractTweetsFrom(parsed, tweets);

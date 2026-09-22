@@ -103,8 +103,16 @@ export interface AutoCollectReport {
    * 要写解析器得**先看真实结构** —— 与量蓝V那次同理:量出来再写,不猜。
    */
   unparsedSamples: Array<{ op: string; bytes: number; body: string }>;
-  /** ⭐ 见过的全部 GraphQL 操作 —— 回答「那个带数据的请求到底发没发生」 */
-  seenOps: Array<{ op: string; bytes: number }>;
+  /**
+   * ⭐ 见过的全部 GraphQL 操作 —— 回答「那个带数据的请求到底发没发生」。
+   *
+   * ⭐⭐ `articles`/`articlesWithBody` 按**接口**分开记长文深度:
+   * `UserArticlesTweets`(`/articles` 标签页)只给标题+摘要,
+   * 普通时间线接口给的同一篇长文**带正文**。不分接口就看不出这个差异
+   * —— 2026-09-22 正因为看不出,才把「换个入口就有」误判成
+   * 「只有详情页才有」。
+   */
+  seenOps: Array<{ op: string; bytes: number; articles?: number; articlesWithBody?: number }>;
   /**
    * ⭐ 事实性说明(不是故障)—— 如「这一页没有推文」。
    * ⚠️ 与 problems 分开:那是**链路坏了**,这是**如实解释一个数字**。
