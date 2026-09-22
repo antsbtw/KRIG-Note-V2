@@ -62,7 +62,7 @@ import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
 import { backfillArticleBodies } from '../x/x-article-backfill';
-import { PAGE_PARAMS, PAGE_LABELS } from '../x/x-pages';
+import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
 
@@ -485,7 +485,11 @@ export function registerWebConsoleHandlers(): void {
     recordRun('pageNames', { total },
       total > 0 ? { status: 'ok' } : { status: 'failed', reason: '语义页面表为空(业务没注册?)' },
       Date.now() - t0);
-    return { channelOk: true, tables, paramsOf, labelsOf };
+    /**
+     * ⭐ 哪些页面是**采人**的 —— 面板据此决定「快速增量」露不露。
+     * ⚠️ 同样**从真表来**,不让面板自己写一份(那份会悄悄过期)。
+     */
+    return { channelOk: true, tables, paramsOf, labelsOf, peoplePages: PEOPLE_PAGE_NAMES };
   });
 
   /**

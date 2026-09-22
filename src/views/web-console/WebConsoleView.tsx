@@ -94,6 +94,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [pageParams, setPageParams] = useState<Record<string, readonly string[]>>({});
   /** ⭐ 人话页名 —— 读真表,不在面板写死(用户 2026-09-20:「哪个是 status?」) */
   const [pageLabels, setPageLabels] = useState<Record<string, string>>({});
+  /**
+   * ⭐ 采人的页面(从真表来,面板不写死)—— 决定「快速增量」露不露。
+   * ⚠️ 取不到时**当成空集**:宁可少露一个按钮,也不要在不采人的页面上
+   * 给一个「点了等于没点」的选择。
+   */
+  const [peoplePages, setPeoplePages] = useState<readonly string[]>([]);
   const [readyKind, setReadyKind] = useState('urlIncludes');
   /** ⚠️ URL 片段与锚点名**分开存** —— 共用一个格子就是那个 bug 的根源 */
   const [readyValue, setReadyValue] = useState('/home');
@@ -315,6 +321,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       if (po) setPageParams(po);
       const lo = (pn as { labelsOf?: Record<string, string> } | undefined)?.labelsOf;
       if (lo) setPageLabels(lo);
+      const pp = (pn as { peoplePages?: readonly string[] } | undefined)?.peoplePages;
+      if (pp) setPeoplePages(pp);
     })();
   }, []);
 
@@ -987,19 +995,37 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         disabled={busy !== null || blocked}
                         onClick={() => collect(false)}
                         title="全量:采到底(约 17 分钟 / 2700 人)。⭐ 基线只由它维护,「谁取关了」也只有它答得出">采集</button>
-                      <button type="button" className="krig-webc__go"
-                        disabled={busy !== null || blocked}
-                        onClick={() => collect(true)}
-                        title="快速增量:翻到遇见上次采过的人就停(十几秒)。⚠️ 只答「谁新来」,看不见取关;不写快照">快速增量</button>
                       {/**
-                        * ⭐⭐ **补长文正文** —— 与采集**分开一个按钮**(用户 2026-09-22 拍板)。
+                        * ⭐⭐ **快速增量只在「采人」的页面出现** —— 用户 2026-09-22 指出
+                        * 「这里不用三个 button 了吧?」(截图是 x.status 单条推详情页)。
                         *
-                        * 正文只在单篇详情页的载荷里,列表页只给标题+摘要,
-                        * 所以要全文必须逐篇进详情页 —— 那是**另一件事**,
-                        * 不跟在采集后面自动跑(缠在一起出事时分不清是谁的问题),
-                        * 也不受上面那些页面参数影响(它的候选来自库,不来自当前页)。
+                        * ⚠️ 它靠 `knownHandles`(上次全量采到的**人**)判「翻到老人就停」,
+                        * 12 个页面里只有 3 个采人(followers/verifiedFollowers/following)。
+                        * 在别的页面上点它,`autoCollect` 会**静默退回全量** ——
+                        * 也就是「按钮长得像个选择,其实什么都没变」,
+                        * 正是本仓最忌的「看着成功实际没有」。
+                        * ⭐ 不删功能,只在**它真的起作用的页面**露出来。
                         */}
-                      <button type="button" className="krig-webc__go"
+                      {peoplePages.includes(acPage) ? (
+                        <button type="button" className="krig-webc__go"
+                          disabled={busy !== null || blocked}
+                          onClick={() => collect(true)}
+                          title="快速增量:翻到遇见上次采过的人就停(十几秒)。⚠️ 只答「谁新来」,看不见取关;不写快照">快速增量</button>
+                      ) : null}
+                      {/**
+                        * ⭐⭐ **补长文正文 = 补漏入口,不是主路径。**
+                        *
+                        * 采集时**已经当场补过**(autoCollect → backfillArticlesInline),
+                        * 所以平时根本不用点这个。它只在两种情况下有用:
+                        * 上次撞到单趟上限、或当时详情页没打开。
+                        *
+                        * ⚠️ 用户 2026-09-22 看着三个并排的按钮问「这里不用三个 button 了吧?」
+                        * —— 对:主路径只有「采集」一个。这个降成次要样式(krig-webc__in)
+                        * 并挪出主按钮组,免得看着像三选一。
+                        * ⭐ 不删:存量老行、以及超上限的部分仍然要有地方补。
+                        */}
+                      <button type="button" className="krig-webc__in"
+                        style={{ opacity: 0.75 }}
                         disabled={busy !== null}
                         onClick={() => void run(
                           'backfillArticles', { limit: Number(bfLimit) || 10 },

@@ -93,3 +93,56 @@ describe('⭐ 「已在目标页」与「落地校验」两处判据必须一致
       .toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('⚠️ 按钮只在「它真起作用」的页面露出来(2026-09-22 用户:「不用三个 button 了吧?」)', () => {
+  const pages = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-pages.ts'), 'utf-8'));
+  const handler = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/ipc/web-console-handler.ts'), 'utf-8'));
+
+  it('⭐⭐ 快速增量必须按页面门控 —— 不采人的页面点它等于没点', () => {
+    const i = view.indexOf('collect(true)');
+    expect(i, '找不到快速增量的调用').toBeGreaterThan(0);
+    /**
+     * ⚠️ 往前切,看它有没有被条件包住。
+     * `fastIncremental` 靠 knownHandles(上次采到的**人**)判早停,
+     * 12 个页面里只有 3 个采人;在别的页面上 autoCollect **静默退回全量** ——
+     * 按钮长得像个选择,其实什么都没变。
+     */
+    const before = view.slice(Math.max(0, i - 600), i);
+    expect(before, '快速增量没有页面门控 —— 在不采人的页面上点了等于没点')
+      .toMatch(/peoplePages\.includes\(acPage\)/);
+  });
+
+  it('⚠️⚠️ 采人页面的清单必须来自真表,面板不许自己写一份', () => {
+    /**
+     * ⭐ 「清单不会自己长」是本仓栽过五次的形态:
+     * 面板抄一份 ['x.followers', …],加新的采人页面时那份**天然在视野外**。
+     * → 清单定义在 x-pages(页面的真源),经 IPC 下发。
+     */
+    expect(pages, 'x-pages 没有导出采人页面清单')
+      .toMatch(/export const PEOPLE_PAGE_NAMES/);
+    expect(handler, 'pageNames 没有把采人清单下发给面板')
+      .toMatch(/peoplePages:\s*PEOPLE_PAGE_NAMES/);
+    /** ⚠️ 面板里**不许**出现写死的页面名清单 */
+    const i = view.indexOf('peoplePages.includes(acPage)');
+    expect(i, '找不到门控').toBeGreaterThan(0);
+    const blk = view.slice(Math.max(0, i - 1200), i);
+    expect(blk, '面板自己写死了采人页面清单 —— 加新页面时它不会自己长')
+      .not.toMatch(/'x\.followers'/);
+  });
+
+  it('⚠️ 补长文正文是**补漏**不是主路径 —— 采集时已当场补过', () => {
+    const i = view.indexOf('backfillArticles');
+    expect(i, '找不到补长文正文按钮').toBeGreaterThan(0);
+    const blk = view.slice(Math.max(0, i - 1200), i + 600);
+    expect(blk.length, '切出来是空的').toBeGreaterThan(200);
+    /**
+     * ⚠️ 它与「采集」同样醒目(krig-webc__go)时,人会以为是三选一;
+     * 而实际上采集已经当场补过了,平时根本不用点它。
+     */
+    expect(blk, '补长文正文用了主按钮样式 —— 会被当成主路径(采集时已经当场补过)')
+      .not.toMatch(/className="krig-webc__go"[\s\S]{0,200}backfillArticles/);
+    expect(blk, '按钮文案没标明这是补漏').toMatch(/补漏/);
+  });
+});

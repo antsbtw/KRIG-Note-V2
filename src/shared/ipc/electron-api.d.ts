@@ -179,6 +179,12 @@ declare global {
           paramsOf?: Record<string, readonly string[]>;
           /** ⭐ 人话页名 —— 下拉显示「单条推文详情(含回复)」而不是 `x.status` */
           labelsOf?: Record<string, string>;
+          /**
+           * ⭐ 哪些页面是**采人**的(followers/following 那几页)。
+           * 面板据此决定「快速增量」露不露 —— 它靠「上次采过的人」判早停,
+           * 在不采人的页面上会静默退回全量(按钮像个选择,其实没变)。
+           */
+          peoplePages?: readonly string[];
         }>;
         anchors(): Promise<{
           channelOk: boolean; owners?: string[];

@@ -253,6 +253,23 @@ export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
  * ⭐ `describe` 那个字段解决不了这件事:它是 resolve **之后**才有的
  * (要先有参数才能说「@xxx 的关注者」),而下拉在**选参数之前**就要显示。
  */
+/**
+ * ⭐⭐ **「采人」的页面** —— 这几页的载荷是人的列表(`Followers`/`Following`),
+ * 不是推文。
+ *
+ * ── 为什么要单独列出来 ──
+ * 「快速增量」靠 `knownHandles`(上次全量采到的**人**)判「翻到老人就停」,
+ * 因此**只在这几页有意义**。在别的页面上它会**静默退回全量** ——
+ * 按钮长得像个选择,其实什么都没变(本仓最忌的「看着成功实际没有」)。
+ *
+ * ⚠️ 加新的「采人」页面时**必须往这里加一行**,否则快速增量在新页面上不露出来。
+ * ⭐ 定义在这里(页面的真源)而不是面板里 —— 面板那份会悄悄过期
+ * (记忆 feedback-guard-hardcoded-list-never-grows)。
+ */
+export const PEOPLE_PAGE_NAMES: readonly string[] = [
+  'x.followers', 'x.verifiedFollowers', 'x.following',
+];
+
 export const PAGE_LABELS: Readonly<Record<string, string>> = {
   'x.profile': '某人主页(只看推文)',
   'x.withReplies': '某人主页 + 回复',
