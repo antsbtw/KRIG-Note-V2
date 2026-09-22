@@ -110,17 +110,53 @@ export async function upsertTweet(record: TweetInboxRecord): Promise<void> {
        * 整条 upsert 会失败。
        */
       text = IF string::len($text ?? '') > string::len(text ?? '') THEN $text ELSE text END,
-      author_name_at_post = $author_name_at_post,
-      author_handle = $author_handle,
-      author_avatar = $author_avatar,
-      tweet_url = $tweet_url,
-      lang = $lang,
-      metrics = $metrics,
+      /**
+       * ⭐⭐⭐ **合并策略:空值永远不许覆盖非空值** —— 2026-09-22 用户定的基准:
+       *
+       * > 「采集是基础,保证数据的完整性,是采集的基本任务。」
+       *
+       * ── 为什么必须有这条 ──
+       * 同一条推会被**不同深度的路径**反复采到:
+       *  · 载荷路径产出 tweet_url / author_avatar / conversation_id
+       *  · **DOM 兜底路径这三样根本没有**(x-capture-monitor:685,它们只在载荷里)
+       * 无条件覆盖 = 后来那趟浅的把先前采全的字段**抹成 NONE**。
+       * ⚠️ 实测验证过:模拟「这趟没取到」再写,两个字段直接变 NONE。
+       *
+       * ⭐ 这与 text 那个 bug 是**同一类**(2026-09-22 实测 16081 字被覆盖成 267 字),
+       * 当时只修了撞见的 text,没往上想一层 —— 这里补上通用底线。
+       *
+       * ── 字段按「会不会变」分两类,策略不同 ──
+       *  ① **不可变事实**(发出来就定了):created_at / tweet_url /
+       *     conversation_id / in_reply_to / in_reply_to_user / author_name_at_post
+       *     → 只补不覆盖:老值非空就一个字都不动。
+       *  ② **会变的现状**(本来就该更新):metrics / author_avatar / lang /
+       *     author_handle(会改名)
+       *     → 有新值就更新,但**空值不许覆盖非空**。
+       *     用户 2026-09-22:「要完整的画像,当然要更新这些数据,
+       *     我们有时候要从这些数据中寻找规律的。」
+       *
+       * ⚠️ metrics 是 object,判空不能用 string::len ——
+       * 空对象 {} 与 NONE 都算「没拿到」,故用 object::len(… ?? {}) > 0。
+       *
+       * ⚠️⚠️ **不能用 ?? 判空** —— 实测:SurrealDB 的 ?? 把**空串当成有值**,
+       * 于是 tweet_url = tweet_url ?? $tweet_url 在老值是空串时**永远补不上**。
+       * (今天库里恰好 0 行空串,但写入侧随时可能产生一行 —— 不能靠运气。)
+       * 故一律写成 IF x != NONE AND x != '' THEN … ELSE … END。
+       * created_at 是 datetime 不会是空串,保留 ?? 即可。
+       */
+      author_name_at_post = IF $author_name_at_post != NONE AND $author_name_at_post != '' THEN $author_name_at_post ELSE author_name_at_post END,
+      author_handle = IF $author_handle != NONE AND $author_handle != '' THEN $author_handle ELSE author_handle END,
+      author_avatar = IF $author_avatar != NONE AND $author_avatar != '' THEN $author_avatar ELSE author_avatar END,
+      tweet_url = IF tweet_url != NONE AND tweet_url != '' THEN tweet_url ELSE $tweet_url END,
+      lang = IF $lang != NONE AND $lang != '' THEN $lang ELSE lang END,
+      metrics = IF object::len($metrics ?? {}) > 0 THEN $metrics ELSE metrics END,
+      /** ⭐ 观测时刻只在**真的更新了 metrics 时**才推进,否则它会谎报新鲜度 */
+      metrics_at = IF object::len($metrics ?? {}) > 0 THEN $fetched_at ELSE metrics_at END,
       fetched_at = $fetched_at,
-      created_at = $created_at,
-      in_reply_to = $in_reply_to,
-      in_reply_to_user = $in_reply_to_user,
-      conversation_id = $conversation_id`,
+      created_at = created_at ?? $created_at,
+      in_reply_to = IF in_reply_to != NONE AND in_reply_to != '' THEN in_reply_to ELSE $in_reply_to END,
+      in_reply_to_user = IF in_reply_to_user != NONE AND in_reply_to_user != '' THEN in_reply_to_user ELSE $in_reply_to_user END,
+      conversation_id = IF conversation_id != NONE AND conversation_id != '' THEN conversation_id ELSE $conversation_id END`,
     {
       tweet_id: record.tweet_id,
       text: record.text,

@@ -183,7 +183,16 @@ describe('⭐⭐ 单条推文的完整性', () => {
     /** upsertTweet 的 SET 子句里有哪些列 */
     const ui = repo.indexOf('export async function upsertTweet');
     expect(ui, '找不到 upsertTweet').toBeGreaterThan(0);
-    const ubody = repo.slice(ui, ui + 4000);
+    /**
+     * ⚠️⚠️ **不许用固定字数切** —— 2026-09-22 实测假红:
+     * 给 SQL 加了合并策略的注释后,函数变长,参数对象被 4000 字窗口**切掉一半**,
+     * 于是 reply_draft / backfilled 被报成「没绑值」——
+     * 而它们明明就在下面两行绑着。
+     * ⭐ 改切到**函数真正的结尾**(与上面 toRecord 同法),长度就不再是变量。
+     */
+    const uEnd = repo.indexOf('\n}', ui);
+    expect(uEnd, '找不到 upsertTweet 的结尾').toBeGreaterThan(ui);
+    const ubody = repo.slice(ui, uEnd);
     const inSql = new Set([...ubody.matchAll(/(\w+):\s*\$\w+/g)].map((m) => m[1]));
 
     /**

@@ -1339,6 +1339,40 @@ export async function x_migration_1_2_5(db: Surreal): Promise<void> {
   );
 }
 
+/**
+ * 1.2.6 —— metrics 的观测时刻(2026-09-22)
+ *
+ * 用户:「要完整的画像,当然要更新这些数据,我们有时候要从这些数据中寻找规律的。」
+ * 并定下基准:「采集是基础,保证数据的完整性,是采集的基本任务。」
+ *
+ * ── 为什么光有 metrics 不够 ──
+ * 实测 2000 条带 views 的推,**采集时距发推的时长**:
+ *   最小 0 小时 · 中位 2.8 小时 · 最大 12633 小时(约 18 个月),31% 不足 1 小时。
+ * 于是「发出 10 分钟拿到 500 阅读」和「发出半年拿到 500 阅读」
+ * 在库里**长得一模一样** —— 要从数字里找规律,这两条根本不能放在一起比。
+ *
+ * ⭐ x_author 早就做对了(1.0.4 的 counts_at:「没有时刻的计数无法判断新鲜度」),
+ * 而 x_tweet 的 metrics 一直没有对应的时刻字段。这里补上,口径一致。
+ *
+ * ⚠️ 为什么不复用 fetched_at:它是「最后一次碰这行」——
+ * text 回灌、字段补全都会更新它,**不专指「这组数字是何时看到的」**。
+ * 两者语义不同,合用会让「这组数字多新鲜」再次变成猜的。
+ */
+const X_SCHEMA_1_2_6 = `
+-- metrics 这组数字的观测时刻。⚠️ 与 fetched_at 语义不同:
+-- fetched_at = 最后一次碰这行;metrics_at = 这组计数是何时看到的。
+DEFINE FIELD IF NOT EXISTS metrics_at ON x_tweet TYPE option<datetime>;
+`;
+
+export async function x_migration_1_2_6(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_6);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.6', appliedAt = $now,
+      description = 'x_tweet.metrics_at (observation time for metrics — counts without a timestamp are not comparable)'`,
+    { rid: new RecordId('schema_version', '1.2.6'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_3(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_3);
 

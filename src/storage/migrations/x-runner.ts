@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -147,6 +147,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.2.5',
     description: 'x_list_snapshot —— 每次采集的名次快照(增量采集 + 排序证据)',
     up: x_migration_1_2_5,
+  },
+  {
+    version: '1.2.6',
+    description: 'x_tweet.metrics_at —— metrics 的观测时刻(没有时刻的计数不可比)',
+    up: x_migration_1_2_6,
   },
 ];
 
