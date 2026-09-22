@@ -12,9 +12,9 @@
 顺序 —— **「先观察单条推文的完整性,然后才是 item 的条数」**。
 
 12 个语义页面:**8 页已实采验过**(全部待验页已收口),4 页非采集页。
-**累计揪出 6 个真 bug + 1 个白丢的字段**,全部已修 + 有守卫。
+**累计揪出 7 个真 bug + 1 个白丢的字段**,全部已修 + 有守卫。
 
-`tests/x/` **842 条全绿**,工作区干净。最新 commit `8fd26db3`。
+`tests/x/` **857 条全绿**,工作区干净。最新 commit `313fb351`。
 
 ---
 
@@ -121,7 +121,7 @@ hasContentState: false   ← 72/72 全都没有 content_state
 
 ---
 
-## ⚠️ 六个 bug(理解代码现状必读)
+## ⚠️ 七个 bug(理解代码现状必读)
 
 **全都只有实采才能发现** —— 单测/类型/schema 全正常。
 
@@ -243,6 +243,47 @@ curl -s -X POST http://localhost:8533/sql -u "$U:$P" -H "Accept: application/jso
 
 ---
 
+### ⑦ ⭐ 报告把长文算进长推 + 分子分母不对齐(`313fb351`)
+
+报告说 `长推(Show more):72 条 · 最长 48 字 ⚠️ 疑似被截断` —— 那 72 条
+**全是长文**,48 字是**标题的正常长度**,根本没截断。
+下一个人会照着这句去查一个**不存在的截断 bug**。
+
+⚠️ 顺带查出**第二个缺陷**(比命名更实):`count` 数的是长推,而
+`maxChars`/`avgChars` 却拿**全部推**算 —— 一页里几条长推加几十条短推,
+平均被拉低 → 那句「疑似被截断」**平白无故地报**。
+⭐ **统计口径的铁律:说的是谁,就只拿谁来算。**
+
+改法:`HarvestedTweet` 加 `isArticle`(判据 = 载荷里有没有 `article` 结构,
+**不是**有没有正文 —— 列表页那 72 条没正文也是长文);
+长推 = `isLongText && !isArticle`;长文单独一栏并给出 `withBody`
+(「有几篇长文、其中几篇真拿到正文」才是那个真问题)。
+
+⚠️ **tsc 顺带逼出另外两处登记**(与「x_tweet 加字段要登记四处」同族):
+- `x-capture-monitor` 的 DOM 路径要补 `isArticle`(DOM 判不出长文,故恒
+  `false` —— **宁可少算不可虚报**,与 `has_media` 同一取舍)
+- `WebConsoleView` 里有 `AutoCollectReport.longText` 的**第二份内联声明**,
+  同一形状写两处必然漂
+
+---
+
+## 📎 并行线(另一会话):判断层空转已修(`d756cc05`)
+
+⚠️ **与采集无关**,但本轮日志里一直在刷,记一笔免得下次又当成采集问题:
+
+`x-ai-judge` 反复报 `fetch failed / no verdict array`、积压 3300 条清不动。
+**真因不是 Ollama 挂了**(实测 `/api/tags` 200、HTTP 全程 200、
+`finish_reason=stop`),是**数组契约下 Gemma 只答第一条就收尾**。
+
+⭐ 判据很漂亮:25 条 → 0 条、15 条 → 15 条、5 条 → 时好时坏 ——
+**不是规模阈值**,所以「把 batchSize 调小」救不了。
+改单条对象契约后同一切片 0/5 → 5/5。
+
+⭐ 与 `x-reply-planner` 早就写下的结论同源:「契约是对象不是数组」。
+附带修了空转成环的另一半(刹车在 drain、油门在 scheduler,两边互不知道)。
+
+---
+
 ## 🔴 给接手者的工作方法提醒
 
 1. **别用间接观测否定直接事实**。上一轮拿「库里总数没变」「进程 CPU 低」断言
@@ -267,9 +308,9 @@ curl -s -X POST http://localhost:8533/sql -u "$U:$P" -H "Accept: application/jso
 | 事项 | 说明 |
 |---|---|
 | **列表页正文靠逐篇进详情页补** | 列表页载荷确认没有正文(X 的设计);要全文得拿 id 逐篇采 —— 独立立项 |
-| 报告口径拆「长推/长文」 | 数据对、名字不准(长文仍被算进「长推(Show more)」统计) |
 | ~~`x.articles` 真正验一次~~ | ✅ 已完成(换 `@KA594594` 跑通 72 条) |
 | ~~长文 `title` 层级收窄~~ | ✅ 已确认:`article_results.result.title`,键恒定 |
+| ~~报告口径拆「长推/长文」~~ | ✅ 已完成(`313fb351`),顺带修了分子分母不对齐 |
 
 ---
 
@@ -283,7 +324,8 @@ curl -s -X POST http://localhost:8533/sql -u "$U:$P" -H "Accept: application/jso
 | `src/platform/main/x/x-pages.ts` | 语义页面真表 + `PAGE_LABELS` + `identify()` 反向识别 |
 | `tests/x/article-body-not-lost.test.ts` | **长文正文守卫**(真实载荷驱动) |
 | `tests/x/readback-empty-predicate.test.ts` | **回读判空守卫**(Date 不是空) |
+| `tests/x/longtext-stats-split.test.ts` | **长推/长文统计口径守卫**(bug ⑦) |
 | `tests/x/single-tweet-completeness.test.ts` | 单条完整性(含四处登记对照) |
 | `tests/x/upsert-actually-updates.test.ts` | upsert 语义守卫(bug ④ 的锁) |
 
-改动前先跑 `npx vitest run tests/x/`(**842 条**)。
+改动前先跑 `npx vitest run tests/x/`(**857 条**)。
