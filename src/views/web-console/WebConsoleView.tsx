@@ -905,12 +905,24 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   <input className="krig-webc__in" style={{ width: 56 }} value={acBudget}
                     onChange={(e) => setAcBudget(e.target.value)} placeholder="留空" />
                 </label>
-                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
-                  title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍。⚠️ 这不是轮数">
-                  翻页
-                  <input className="krig-webc__in" style={{ width: 56 }} value={acPages}
-                    onChange={(e) => setAcPages(e.target.value)} placeholder="留空" />
-                </label>
+                {/**
+                  * ⭐⭐ **「翻页」只在采人的页面显示** —— 用户 2026-09-22:
+                  * 「10 页这个参数不生效,就不应该列出来」。
+                  *
+                  * ⚠️ 实测踩到:在 x.profile 上填「翻页 10」跑了 30+ 分钟,
+                  * 人以为设的是「只取 10 页」,而这个参数对推文页**根本不生效**
+                  * (游标翻页只在采人页启动),真正的耗时是逐篇补长文正文 ——
+                  * **那件事面板上连个框都没有**。
+                  * ⭐ 一个框对应一件事;不生效的不显示,比显示了不起作用强。
+                  */}
+                {peoplePages.includes(acPage) ? (
+                  <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                    title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍。⚠️ 这不是轮数">
+                    翻页
+                    <input className="krig-webc__in" style={{ width: 56 }} value={acPages}
+                      onChange={(e) => setAcPages(e.target.value)} placeholder="留空" />
+                  </label>
+                ) : null}
                 {/**
                   * ⭐⭐ 两个按钮走**同一条链路**,只差 `fastIncremental` 一个参数 ——
                   * 不是两套流程。写成两份会漂,而漂的表现是
@@ -991,6 +1003,22 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         disabled={busy !== null || blocked}
                         onClick={() => collect(false)}
                         title="全量:采到底(约 17 分钟 / 2700 人)。⭐ 基线只由它维护,「谁取关了」也只有它答得出">采集</button>
+                      {/**
+                        * ⭐⭐ **停止** —— 用户 2026-09-22:「是否有一个暂停操作键?」
+                        *
+                        * 实测 @KA594594:287 条推里 261 篇长文,逐篇补正文要 **43 分钟**,
+                        * 而这期间**没有任何办法停下来**,只能关掉 app
+                        * (那样留痕还不落盘,跑到哪儿了全部丢失)。
+                        *
+                        * ⭐ 只在**正在跑**的时候出现 —— 不跑时显示一个按不动的按钮是噪音。
+                        */}
+                      {busy !== null ? (
+                        <button type="button" className="krig-webc__in"
+                          onClick={() => { void api()?.stopCollect({ wsId: workspaceId }); }}
+                          title="停止这一趟采集 —— 已采到的照常入库并落留痕,报告里会写明「是人停的,不是采完了」。⚠️ 协作式:采集循环跑到下一个检查点才真的停(补正文时约 10 秒内)">
+                          ⏸ 停止
+                        </button>
+                      ) : null}
                       {/**
                         * ⭐⭐ **快速增量只在「采人」的页面出现** —— 用户 2026-09-22 指出
                         * 「这里不用三个 button 了吧?」(截图是 x.status 单条推详情页)。

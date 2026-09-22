@@ -36,6 +36,8 @@ import { writeJournal, aggregateOps } from './x-collect-journal';
 import { upsertTweet, readBackTweets } from '../db/tweet-inbox-repo';
 /** ⭐ 长文正文当场补全 —— 采到长文却只有标题+摘要时,顺手逐篇进详情页取正文 */
 import { backfillArticlesInline } from './x-article-backfill';
+/** ⭐ 暂停键 —— 每趟开始清标志,循环里检查 */
+import { clearAbort } from './x-collect-abort';
 import {
   saveAuthorCounts, registerSeenAuthor, getAuthorCounts,
   saveListSnapshot, recentSnapshotRuns, diffSnapshots, orderingStability,
@@ -417,6 +419,12 @@ export async function autoCollect(
   } = {},
 ): Promise<AutoCollectReport | { error: string }> {
   const t0 = Date.now();
+  /**
+   * ⚠️⚠️ **每趟开始必须清掉上一趟的停止标志**。
+   * 不清的话:上次按过停,这次点采集会**立刻结束、什么也不采**,
+   * 而报告说「已停止」—— 人会以为自己又按到了什么(排查起来极难)。
+   */
+  clearAbort(opts.wsId);
   /** 这批顺序属于哪个列表 —— followers 的第 3 名 ≠ following 的第 3 名 */
   const pageLabel = opts.pageLabel ?? url;
 
@@ -455,6 +463,8 @@ export async function autoCollect(
     budgetMs: opts.budgetMs ?? 30_000,
     pageBudget: opts.pageBudget,
     knownHandles,
+    /** ⭐ 暂停键要认得出是哪个 ws 在采 */
+    wsId: opts.wsId,
   });
   if ('error' in r) return { error: r.error };
 

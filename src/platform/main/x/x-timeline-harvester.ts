@@ -40,6 +40,8 @@ import {
 } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
+/** ⭐ 暂停键 —— 滚动可能跑 5000 轮,必须有出口 */
+import { isAborted } from './x-collect-abort';
 /** ⭐ DOM 抽取与「点开 Show more」—— 与右键提取、tweet-fetcher 共用同一套选择器 */
 import { TWEET_SCRAPE_FN_BODY } from '../tweet-fetcher/extract-script';
 
@@ -755,6 +757,11 @@ export async function harvestTimeline(
      *    把没翻到的 2700 人全报成「取关」。这条由调用方(x-auto-collect)把守。
      */
     knownHandles?: Set<string>;
+    /**
+     * ⭐ 哪个 workspace 在采 —— **暂停键按 ws 分**。
+     * ⚠️ 全局一个布尔会让「停 A」把 B 也停掉,现象是「B 莫名其妙不采了」。
+     */
+    wsId?: string;
   } = {},
 ): Promise<HarvestReport | { error: string }> {
   const resolved = resolveXWebContents(targetWcId);
@@ -1054,6 +1061,16 @@ export async function harvestTimeline(
   let failedUrl: string | undefined;
 
   for (let i = 1; i <= maxRounds; i++) {
+    /**
+     * ⚠️⚠️ **人按了停** —— 用户 2026-09-22:「是否有一个暂停操作键?」
+     * ⭐ 停 = 「到此为止,把已有的收好」:已采到的照常入库、照常落留痕,
+     *    但 stopReason 必须写明**是人停的**,不能和「采完了」长得一样。
+     */
+    if (isAborted(opts.wsId)) {
+      stopReason = `⏸ 人工停止(滚了 ${rounds} 轮,已采 ${tweets.size} 条 / ${people.size} 人)`
+        + ' —— **不是采完了**';
+      break;
+    }
     rounds = i;
     const before = tweets.size;
     const peopleBeforeRound = people.size;
@@ -1445,6 +1462,12 @@ export async function harvestTimeline(
     const budget = opts.pageBudget ?? 40;
     const seenCursors = new Set<string>();
     while (pagedRounds < budget && paging.hasMore && paging.bottom && !caughtUp) {
+      /** ⚠️ 翻页同样要能停 —— 一页 50-100 条,翻满 40 页也是好几分钟 */
+      if (isAborted(opts.wsId)) {
+        stopReason = `⏸ 人工停止(翻了 ${pagedRounds} 页,已采 ${tweets.size} 条 / `
+          + `${people.size} 人)—— **不是采完了**`;
+        break;
+      }
       const cursor = paging.bottom;
       /**
        * ⚠️ **游标没变就停**。

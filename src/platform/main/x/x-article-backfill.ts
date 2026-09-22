@@ -33,6 +33,7 @@
 import { harvestTimeline, type HarvestedTweet } from './x-timeline-harvester';
 import { upsertTweet } from '../db/tweet-inbox-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
+import { isAborted } from './x-collect-abort';
 
 /**
  * 判定「这篇算拿到正文了吗」。
@@ -201,7 +202,16 @@ export async function backfillArticlesInline(
   let saved = 0;
   let withBody = 0;
 
+  /** ⭐ 人按了停 —— 如实记下停在第几篇,不假装补完了 */
+  let abortedAtIndex: number | undefined;
+
   for (let i = 0; i < batch.length; i++) {
+    /**
+     * ⚠️⚠️ **每一篇之前都要问一次** —— 用户 2026-09-22 提的暂停键。
+     * 只在整批开始时问一次等于没有暂停:实测 261 篇要跑 43 分钟,
+     * 人按了停却还要等半小时,那个按钮就是摆设。
+     */
+    if (isAborted(wsId)) { abortedAtIndex = i; break; }
     const t = batch[i];
     const lenBefore = (t.text ?? '').length;
     const item: BackfillItem = {
@@ -249,6 +259,15 @@ export async function backfillArticlesInline(
     }
   }
 
+  /**
+   * ⚠️⚠️ 「人停的」与「补完了」**绝不能长得一样** ——
+   * 否则报告会把「才补了 80/261」说成「这一页补完了」。
+   */
+  if (abortedAtIndex !== undefined) {
+    problems.push(`⏸ 补长文正文**被人停下**:补了 ${abortedAtIndex}/${batch.length} 篇,`
+      + `**剩下 ${batch.length - abortedAtIndex} 篇没补** —— 不是补完了`);
+  }
+
   const lens = items
     .filter((i) => i.lenAfter != null)
     .map((i) => `${i.lenBefore}→${i.lenAfter}${i.gotBody ? '✓' : '✗'}`)
@@ -265,7 +284,9 @@ export async function backfillArticlesInline(
   const note = `长文正文:这一页 ${need.length} 篇长文缺正文,`
     + `逐篇进详情页取回 **${withBody}/${need.length} 篇**`
     + (lens ? `(字数 ${lens})` : '')
-    + (withBody < need.length ? ' ⚠️ **没取全,见 problems**' : '');
+    + (abortedAtIndex !== undefined
+      ? ` ⏸ **被人停下**(剩 ${batch.length - abortedAtIndex} 篇没补)`
+      : withBody < need.length ? ' ⚠️ **没取全,见 problems**' : '');
 
 
   return { note, problems, saved, items };

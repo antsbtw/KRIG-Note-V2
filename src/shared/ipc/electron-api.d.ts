@@ -237,6 +237,13 @@ declare global {
           channelOk: boolean; error?: string; url?: string;
           page?: { name: string; params: Record<string, string> } | null;
         }>;
+        /**
+         * ⭐⭐ **停止正在跑的采集** —— 协作式:置标志,循环到下一个检查点自己退出。
+         * 已采到的**照常入库+落留痕**,报告里写明「是人停的,不是采完了」。
+         */
+        stopCollect(args: { wsId?: string }): Promise<{
+          channelOk: boolean; error?: string; stopping?: boolean;
+        }>;
         autoCollect(args: {
           /**
            * ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识。

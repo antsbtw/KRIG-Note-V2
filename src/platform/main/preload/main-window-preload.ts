@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     whereAmI: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.WEBC_WHERE_AM_I, { wcId }),
     autoCollect: (args: { page?: string; current?: boolean; params?: Record<string, string>; wcId?: number; maxRounds?: number; budgetMs?: number; pageBudget?: number; wsId?: string; fastIncremental?: boolean }) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_AUTO_COLLECT, args),
+    // ⭐ 停止正在跑的采集 —— 已采到的照常入库+留痕,报告写明「是人停的」
+    stopCollect: (args: { wsId?: string }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_STOP_COLLECT, args),
   },
 
   /** 诊断上报(renderer → main) */

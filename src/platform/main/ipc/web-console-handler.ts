@@ -61,6 +61,7 @@ import { LocalExecutor } from '../executor/local-executor';
 import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
+import { requestAbort } from '../x/x-collect-abort';
 import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
@@ -112,7 +113,7 @@ const STEP_TYPE_OF: Readonly<Record<string, StepType>> = {
   tap: 'act', press: 'act', hover: 'act', type: 'act',
   pages: 'fetch', anchors: 'fetch', pageNames: 'fetch',
   readTabBar: 'fetch', inventory: 'fetch', readVerified: 'fetch', probeMemory: 'fetch',
-  autoCollect: 'fetch', whereAmI: 'fetch',
+  autoCollect: 'fetch', whereAmI: 'fetch', stopCollect: 'act',
   execute: 'judge',
 };
 
@@ -221,10 +222,10 @@ function failFast(
  *
  * ⚠️ **加通道必须改这个数**(守卫 web-console-wiring-complete 会当场抓)——
  * 它只出现在启动日志里,漂了不会有任何报错,日志就开始说假话。
- * 2026-09-22 加「补长文正文」18→19,同日删掉它 19→18
+ * 2026-09-22 加「补长文正文」18→19,同日删掉它 19→18,加「停止采集」18→19
  * (长文正文改成采集时一次采全,不再有「补」这个动作)。
  */
-const WEBC_COUNT = 18;
+const WEBC_COUNT = 19;
 
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
@@ -919,6 +920,27 @@ export function registerWebConsoleHandlers(): void {
         : { status: 'degraded', missing: r.problems },
       r.elapsedMs);
     return { channelOk: true, report: r };
+  });
+
+  /**
+   * ⭐⭐ **停止正在跑的采集** —— 用户 2026-09-22:「是否有一个暂停操作键?」
+   *
+   * 实测采 @KA594594 主页:287 条推里 **261 篇长文**,逐篇进详情页补正文
+   * 每篇约 10 秒 → **43 分钟**,而这期间**没有任何办法停下来**。
+   *
+   * ⭐ 语义是「到此为止,把已有的收好」:
+   * 已入库的推**不回滚**(采集是增量的,回滚反而丢数据),
+   * 停下来之后**照常落留痕**,并写明「是人停的,不是采完了」。
+   * ⚠️ 协作式:只置标志,由采集循环在下一个检查点自己退出 ——
+   * 强行中断会让写库写到一半,留下半条记录。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_STOP_COLLECT, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { wsId?: unknown };
+    const t0 = Date.now();
+    const wsId = typeof p.wsId === 'string' ? p.wsId : undefined;
+    requestAbort(wsId);
+    recordRun('stopCollect', { wsId: wsId ?? '(全局)' }, { status: 'ok' }, Date.now() - t0);
+    return { channelOk: true, stopping: true };
   });
 
   /**
