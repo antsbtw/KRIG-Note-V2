@@ -1,0 +1,67 @@
+/**
+ * ⭐⭐ **X 的编排档** —— 第一份真实流程,用来试颗粒度。
+ *
+ * ── 用户 2026-09-23 ──
+ * > 「下一步做一个任务编排试试,这样逐步的拆解抽象。」
+ * > 「四步:再加拟回复」「直接做成可配置的编排档」
+ *
+ * ⚠️ 这份是**默认档**,不是写死的流程 ——
+ * 编排档是数据(`FlowRecipe`),调用方可以传自己的。
+ * ⭐ 放在这里只为「面板上点一下就能跑」,免得第一次试还要先造数据。
+ *
+ * ── 为什么这四步 ──
+ * 四步**各有独立的失败形态**,所以人一眼能看出该查什么:
+ *  · goto      → 页面没到位(登录态失效?URL 拼错?)
+ *  · collect   → 采不到数据(载荷没截到?页面太短?)
+ *  · judge     → 模型不答(Ollama 没起来?契约不对?)
+ *  · planReply → 没有候选(judge 判出来的 worth 是 0?)
+ * ⭐ 这正是「一步 = 一个已单独验证过的能力」这个颗粒度的由来。
+ */
+
+import type { FlowRecipe } from '@shared/types/flow-recipe-types';
+
+/**
+ * 默认档:搜索 → 采集 → 判断 → 拟回复。
+ *
+ * ⚠️ 搜索词故意**留在 params 里**而不写死在代码里 ——
+ * 换个关键词就是换个参数,不用改代码(这就是「可配置」的意思)。
+ * ⚠️ `q` 会经 `normalizeSearchQuery` 规范成 X 的语法
+ * (2026-09-23 实测:填 `VPN,翻墙` 会采回一堆不相干的)。
+ */
+export const DEFAULT_X_FLOW: FlowRecipe = {
+  recipeId: 'x-search-judge-reply',
+  name: 'X:搜索 → 采集 → 判断 → 拟回复',
+  description: '第一份编排档 —— 四步各有独立失败形态,用来验证颗粒度',
+  steps: [
+    {
+      id: 'goto',
+      kind: 'goto',
+      label: '导航到搜索页',
+      params: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' } },
+    },
+    {
+      id: 'collect',
+      kind: 'collect',
+      label: '采集搜索结果',
+      /**
+       * ⚠️ 与上一步**同一套参数** —— 采集自己也会导航(已在目标页就不跳),
+       * 所以 goto 那步是「先看见页面」,不是采集的前置条件。
+       * ⭐ 翻页给 3:第一次试别跑太久(实测翻 10 页 + 补长文正文要 40 分钟)。
+       */
+      params: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' }, pageBudget: 3 },
+    },
+    {
+      id: 'judge',
+      kind: 'judge',
+      label: 'AI 判断哪些值得回复',
+      /** ⚠️ 一批 10 条约 3 分钟(实测 17.6s/条)—— 第一次试给小批 */
+      params: { batchSize: 10 },
+    },
+    {
+      id: 'planReply',
+      kind: 'planReply',
+      label: '拟回复草稿(只填不发)',
+      params: { limit: 10, ref: 'flow' },
+    },
+  ],
+};

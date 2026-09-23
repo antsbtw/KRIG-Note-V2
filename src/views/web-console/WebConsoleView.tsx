@@ -1060,6 +1060,24 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         *
                         * ⭐ 只在**正在跑**的时候出现 —— 不跑时显示一个按不动的按钮是噪音。
                         */}
+                      {/**
+                        * ⭐⭐⭐ **跑编排档** —— 用户 2026-09-23:「做一个任务编排试试」。
+                        *
+                        * ⚠️ 这一版**刻意做得最土**(一个按钮 + 原样返回值):
+                        * 编排器刚写完、一次没真跑过,`flow_step_run` 还是 0 行。
+                        * 面板上该显示什么(进度?产出?失败在哪?)——
+                        * **等看见真实的记录再定**。
+                        * ⭐ 这几轮凭空定形态的东西(两步式补正文、藏翻页框)最后全推翻了,
+                        *   这次先接线、后做面板。
+                        */}
+                      <button type="button" className="krig-webc__go"
+                        disabled={busy !== null}
+                        onClick={() => void run(
+                          'runFlow', { flow: '默认四步档' },
+                          () => api()!.runFlow({ wsId: workspaceId }))}
+                        title="跑默认编排档:搜索 → 采集 → 判断 → 拟回复。⚠️ 四步串跑,每步落一条执行记录;一步失败就停,后面标 skipped。拟回复只填不发">
+                        ▶ 跑编排
+                      </button>
                       {busy !== null ? (
                         <button type="button" className="krig-webc__in"
                           onClick={() => { void api()?.stopCollect({ wsId: workspaceId }); }}

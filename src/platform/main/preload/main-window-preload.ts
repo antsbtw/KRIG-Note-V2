@@ -83,6 +83,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // ⭐ 停止正在跑的采集 —— 已采到的照常入库+留痕,报告写明「是人停的」
     stopCollect: (args: { wsId?: string }) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_STOP_COLLECT, args),
+    // ⭐ 跑一份编排档(不传 recipe = 用默认的四步档)
+    runFlow: (args: { wsId?: string; recipe?: unknown }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.WEBC_RUN_FLOW, args),
   },
 
   /** 诊断上报(renderer → main) */

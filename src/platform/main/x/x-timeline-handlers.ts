@@ -54,6 +54,57 @@ import { getAuthorCounts } from '../db/x-author-repo';
 import { DEFAULT_FILTER_CONFIG, normalizeHandle } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } from '@shared/types/x-timeline-types';
 
+/**
+ * ⭐⭐ **拟回复一批** —— 准备候选 + 上下文,再调 planReplies。
+ *
+ * ⚠️ 2026-09-23 从 `X_PLAN_REPLIES` handler 里**原样抽出来**,
+ * 为的是让**编排器也能调**(它要把「判断→拟回复」串起来)。
+ * ⭐ 绝不让编排器抄一份:候选池/已回记录/指纹计数/账号这几样缺一个,
+ * 拟出来的回复就会重复打扰人 —— 而那种错在结果里看不出来。
+ *
+ * ⚠️ 逻辑一个字没改,只是换了个地方 —— handler 现在也调它。
+ */
+export async function planReplyBatch(
+  wsId: string,
+  opts: { tweetIds?: string[]; limit?: number; ref?: string } = {},
+): Promise<{ drafts: unknown[]; skips: unknown[]; scanned: number }> {
+  const wanted = Array.isArray(opts.tweetIds) ? new Set(opts.tweetIds) : null;
+  const pool = await queryInbox({
+    status: 'worth', wsId, replied: false, limit: opts.limit ?? 30,
+  });
+  const batch = wanted ? pool.filter((t) => wanted.has(t.tweet_id)) : pool;
+  if (batch.length === 0) return { drafts: [], skips: [], scanned: 0 };
+
+  // 上下文:已回过的推 / 近期回过的作者 —— 供前置规则挡掉重复打扰。
+  // ⚠️ 不限 wsId:同一个人在别的 ws 被回过,也算回过。骚扰是按人算的,不按 ws 算。
+  const replied = await queryInbox({ replied: true, limit: 5000 });
+  const alreadyRepliedTweetIds = new Set(replied.map((t) => t.tweet_id));
+  const recentlyRepliedAuthors = new Map<string, string>();
+  for (const t of replied) {
+    const h = normalizeHandle(t.author_handle ?? '');
+    if (!h) continue;
+    const at = t.fetched_at;
+    const prev = recentlyRepliedAuthors.get(h);
+    if (!prev || (at && at > prev)) recentlyRepliedAuthors.set(h, at);
+  }
+
+  // 文本指纹计数:识别「同一句话反复出现」的模板刷屏。
+  const corpus = await queryInbox({ wsId, limit: 5000 });
+  const fingerprintCounts = new Map<string, number>();
+  for (const t of corpus) {
+    const fp = textFingerprint(t.text);
+    if (fp) fingerprintCounts.set(fp, (fingerprintCounts.get(fp) ?? 0) + 1);
+  }
+
+  // 「我是谁」只认 x_ws_account —— 绝不回落全局 is_self(多 ws 下必然漂移)
+  const acc = await getWsAccount(wsId).catch(() => null);
+  const r = await planReplies(batch, getJudgeConfig(), {
+    alreadyRepliedTweetIds, recentlyRepliedAuthors, fingerprintCounts,
+    selfHandle: acc?.handle, ref: opts.ref,
+  });
+  return { drafts: r.drafts, skips: r.skips, scanned: batch.length };
+}
+
 export function registerXTimelineHandlers(): void {
   /**
    * ⭐ 把 X 的锚点表推给底座(依赖方向:业务 → 底座)。
@@ -152,52 +203,14 @@ export function registerXTimelineHandlers(): void {
       return { success: false, error: 'wsId required' };
     }
     try {
-      // 候选:本 ws 里 Gemma judge 认为值得(worth)、且**还没回复过**的
-      const wanted = Array.isArray(p.tweetIds)
-        ? new Set(p.tweetIds.filter((x): x is string => typeof x === 'string'))
-        : null;
-      const pool = await queryInbox({
-        status: 'worth', wsId: p.wsId, replied: false,
-        limit: typeof p.limit === 'number' ? p.limit : 30,
-      });
-      const batch = wanted ? pool.filter((t) => wanted.has(t.tweet_id)) : pool;
-      if (batch.length === 0) {
-        return { success: true, drafts: [], skips: [], scanned: 0 };
-      }
-
-      // 上下文:已回过的推 / 近期回过的作者 —— 供前置规则挡掉重复打扰。
-      // ⚠️ 不限 wsId:同一个人在别的 ws 被回过,也算回过。骚扰是按人算的,不按 ws 算。
-      const replied = await queryInbox({ replied: true, limit: 5000 });
-      const alreadyRepliedTweetIds = new Set(replied.map((t) => t.tweet_id));
-      const recentlyRepliedAuthors = new Map<string, string>();
-      for (const t of replied) {
-        const h = normalizeHandle(t.author_handle ?? '');
-        if (!h) continue;
-        const at = t.fetched_at;
-        const prev = recentlyRepliedAuthors.get(h);
-        if (!prev || (at && at > prev)) recentlyRepliedAuthors.set(h, at);
-      }
-
-      // 文本指纹计数:识别「同一句话反复出现」的模板刷屏。
-      // 单条文本判不出刷屏(模型一次只看一条),必须跨条统计 —— 2026-09-04
-      // 评测里唯一残留的假阳正是此类(同一句在库里一字不差出现 3 次)。
-      const corpus = await queryInbox({ wsId: p.wsId, limit: 5000 });
-      const fingerprintCounts = new Map<string, number>();
-      for (const t of corpus) {
-        const fp = textFingerprint(t.text);
-        if (fp) fingerprintCounts.set(fp, (fingerprintCounts.get(fp) ?? 0) + 1);
-      }
-
-      // 「我是谁」只认 x_ws_account —— 绝不回落全局 is_self(多 ws 下必然漂移,
-      // 2026-09-04 两账号混淆就是这么来的)。取不到就让 buildRef 用默认值,
-      // 不因此拦住整批(ref 错了是统计粒度问题,不是安全问题)。
-      const acc = await getWsAccount(p.wsId).catch(() => null);
-      const r = await planReplies(batch, getJudgeConfig(), {
-        alreadyRepliedTweetIds, recentlyRepliedAuthors, fingerprintCounts,
-        selfHandle: acc?.handle,
+      /** ⭐ 与编排器共用同一个实现 —— 绝不各写一份(两份必漂) */
+      const r = await planReplyBatch(p.wsId, {
+        tweetIds: Array.isArray(p.tweetIds)
+          ? p.tweetIds.filter((x): x is string => typeof x === 'string') : undefined,
+        limit: typeof p.limit === 'number' ? p.limit : undefined,
         ref: typeof (p as { ref?: unknown }).ref === 'string' ? (p as { ref: string }).ref : undefined,
       });
-      return { success: true, drafts: r.drafts, skips: r.skips, scanned: batch.length };
+      return { success: true, drafts: r.drafts, skips: r.skips, scanned: r.scanned };
     } catch (err) {
       // fail loud:解析失败/Ollama 挂了都会到这里,绝不返回空草稿装作「没什么可回的」
       console.error('[x-timeline-handlers] X_PLAN_REPLIES failed:', (err as Error).message);

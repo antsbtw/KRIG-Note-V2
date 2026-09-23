@@ -61,7 +61,10 @@ import { LocalExecutor } from '../executor/local-executor';
 import type { ExecuteTask, ExecuteMaterial } from '../executor/executor-types';
 import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
-import { requestAbort } from '../x/x-collect-abort';
+import { requestAbort, isAborted } from '../x/x-collect-abort';
+import { runFlow } from '../flow/flow-runner';
+import { makeXFlowCapabilities } from '../x/x-flow-capabilities';
+import { DEFAULT_X_FLOW } from '../x/x-flow-recipes';
 import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
@@ -113,7 +116,7 @@ const STEP_TYPE_OF: Readonly<Record<string, StepType>> = {
   tap: 'act', press: 'act', hover: 'act', type: 'act',
   pages: 'fetch', anchors: 'fetch', pageNames: 'fetch',
   readTabBar: 'fetch', inventory: 'fetch', readVerified: 'fetch', probeMemory: 'fetch',
-  autoCollect: 'fetch', whereAmI: 'fetch', stopCollect: 'act',
+  autoCollect: 'fetch', whereAmI: 'fetch', stopCollect: 'act', runFlow: 'act',
   execute: 'judge',
 };
 
@@ -222,10 +225,11 @@ function failFast(
  *
  * ⚠️ **加通道必须改这个数**(守卫 web-console-wiring-complete 会当场抓)——
  * 它只出现在启动日志里,漂了不会有任何报错,日志就开始说假话。
- * 2026-09-22 加「补长文正文」18→19,同日删掉它 19→18,加「停止采集」18→19
+ * 2026-09-22 加「补长文正文」18→19,同日删掉它 19→18,加「停止采集」18→19;
+ * 2026-09-23 加「跑编排档」19→20
  * (长文正文改成采集时一次采全,不再有「补」这个动作)。
  */
-const WEBC_COUNT = 19;
+const WEBC_COUNT = 20;
 
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
@@ -941,6 +945,37 @@ export function registerWebConsoleHandlers(): void {
     requestAbort(wsId);
     recordRun('stopCollect', { wsId: wsId ?? '(全局)' }, { status: 'ok' }, Date.now() - t0);
     return { channelOk: true, stopping: true };
+  });
+
+  /**
+   * ⭐⭐⭐ **跑一份编排档** —— 用户 2026-09-23:「做一个任务编排试试」。
+   *
+   * ⚠️ 这里**只做接线**:编排器负责顺序与记录,X 适配器负责调真能力,
+   * handler 自己不写任何业务逻辑。
+   * ⭐ 跑完 `flow_step_run` 会第一次长出真实的行 ——
+   *   面板长什么样,等看见这些行再定(先接线后做面板,免得又凭空设计)。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEBC_RUN_FLOW, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { recipe?: unknown; wsId?: unknown };
+    const t0 = Date.now();
+    const wsId = typeof p.wsId === 'string' ? p.wsId : undefined;
+    const recipe = (p.recipe && typeof p.recipe === 'object')
+      ? p.recipe as Parameters<typeof runFlow>[0]
+      : DEFAULT_X_FLOW;
+    try {
+      const r = await runFlow(recipe, makeXFlowCapabilities(), {
+        wsId,
+        /** ⭐ 复用采集那套暂停键 —— 不另起一套停止语义 */
+        isAborted: () => isAborted(wsId),
+      });
+      recordRun('runFlow',
+        { flow: recipe.name, steps: recipe.steps.length },
+        r.ok ? { status: 'ok' } : { status: 'failed', reason: `断在「${r.failedAt}」` },
+        Date.now() - t0);
+      return { channelOk: true, report: r };
+    } catch (err) {
+      return failFast('runFlow', String(err), t0);
+    }
   });
 
   /**

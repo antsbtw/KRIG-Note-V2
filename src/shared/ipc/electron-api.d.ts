@@ -244,6 +244,26 @@ declare global {
         stopCollect(args: { wsId?: string }): Promise<{
           channelOk: boolean; error?: string; stopping?: boolean;
         }>;
+        /**
+         * ⭐⭐ **跑一份编排档** —— 四步串起来,每步落一条 flow_step_run。
+         * ⚠️ 不传 recipe = 用默认的四步档(搜索→采集→判断→拟回复)。
+         */
+        runFlow(args: { wsId?: string; recipe?: unknown }): Promise<{
+          channelOk: boolean; error?: string;
+          report?: {
+            runId: string; flowName: string; ok: boolean;
+            /** 哪一步断的 —— 空 = 全跑完了 */
+            failedAt?: string; elapsedMs: number;
+            steps: Array<{
+              id: string; kind: string; label: string;
+              /** ⚠️ skipped 要看 note 才知道是「前面断了」「人停的」还是「档里关掉」 */
+              status: 'ok' | 'failed' | 'skipped';
+              /** ⭐ 与 status 分开:产出 0 不等于失败 */
+              produced: number;
+              error?: string; note?: string; elapsedMs: number;
+            }>;
+          };
+        }>;
         autoCollect(args: {
           /**
            * ⚠️ 传**语义页面名**(如 x.home),不传 URL —— URL 是 adapter 的知识。

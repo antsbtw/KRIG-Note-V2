@@ -11,7 +11,9 @@
  * ⚠️ 不拆更细:采集内部那几件事(滚动/展开/解析/入库/补正文)**必须一起发生**
  * 才有意义,拆开后每步都"成功"而合起来什么也没采到 —— 本仓反复踩的形态。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runFlow, type FlowCapabilities } from '../../src/platform/main/flow/flow-runner';
 import type { FlowRecipe, FlowStepOutcome } from '../../src/shared/types/flow-recipe-types';
 
@@ -132,5 +134,55 @@ describe('⭐ 人按了停 / 档里关掉,与失败分得开', () => {
     expect(r.steps[1].status).toBe('skipped');
     expect(r.steps[1].note, '没说清是配置关掉的还是故障').toContain('关掉');
     expect(c.judge, '关掉的步骤还是跑了').not.toHaveBeenCalled();
+  });
+});
+
+describe('⚠️ 接线:适配器只做转换,不写业务逻辑', () => {
+  const strip = (x: string) =>
+    x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const read = (f: string) => strip(readFileSync(join(process.cwd(), f), 'utf-8'));
+  const caps = read('src/platform/main/x/x-flow-capabilities.ts');
+  const handlers = read('src/platform/main/x/x-timeline-handlers.ts');
+
+  it('⭐⭐ 拟回复必须调共用函数,不许抄一份候选逻辑', () => {
+    /**
+     * ⚠️ 候选池/已回记录/指纹计数/账号 —— 缺一个,拟出来的回复就会重复打扰人,
+     * 而且**在结果里看不出来**。抄一份必漂。
+     */
+    expect(caps, '适配器没调 planReplyBatch').toMatch(/planReplyBatch\(/);
+    expect(caps, '适配器自己查候选池了 —— 那是第二份实现')
+      .not.toMatch(/queryInbox\(/);
+    expect(caps, '适配器自己算指纹了 —— 那是第二份实现')
+      .not.toMatch(/textFingerprint/);
+  });
+
+  it('⭐ handler 与编排器共用同一个 planReplyBatch', () => {
+    expect(handlers, 'planReplyBatch 没导出 —— 编排器就只能抄一份')
+      .toMatch(/export async function planReplyBatch/);
+    expect(handlers, 'handler 没改成调它 —— 两份实现会漂')
+      .toMatch(/await planReplyBatch\(/);
+  });
+
+  it('⚠️⚠️ judge:「取到了却一条没判成」必须报失败,不能混进「队列空」', () => {
+    const i = caps.indexOf('async judge(');
+    expect(i, '找不到 judge 适配器').toBeGreaterThan(0);
+    const blk = caps.slice(i, i + 900);
+    /** ⚠️ 两种 judged===0 含义相反:队列空是正常,取到没判成是模型故障 */
+    expect(blk, '没区分两种 judged===0 —— 模型坏了会被当成「队列空」')
+      .toMatch(/fetched > 0 && r\.judged === 0/);
+  });
+
+  it('⚠️ 采到 0 条不算失败,但要带上「为什么停」', () => {
+    const i = caps.indexOf('async collect(');
+    const blk = caps.slice(i, i + 1400);
+    expect(blk, 'collect 把 0 条当成失败了').toMatch(/ok: true, produced: r\.saved/);
+    expect(blk, '没带停止原因 —— 人看到 0 只能猜').toMatch(/stopReason/);
+  });
+
+  it('⭐ 拟回复红线:适配器绝不碰发布', () => {
+    for (const forbidden of ['replyTweet', 'postReply', 'markReplied']) {
+      expect(caps, `适配器调了 ${forbidden} —— 拟回复只填不发是红线`)
+        .not.toMatch(new RegExp(forbidden));
+    }
   });
 });
