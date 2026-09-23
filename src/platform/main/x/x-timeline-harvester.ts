@@ -372,6 +372,34 @@ export interface HarvestReport {
  *    它是「这条的 has_media 可不可信」的依据(DOM 分不清用户上传的图与外链预览卡),
  *    被 DOM 补过字段不等于整条都来自 DOM。
  */
+/**
+ * ⚠️⚠️ **DOM 上这条推「读到东西了」吗** —— 2026-09-23 实测揪出的空壳行。
+ *
+ * ── 现象 ──
+ * 采 @KA594594 主页,20 条里 **19 条 `text` 是空的**(0 字),
+ * 而 `tweet_url` / `created_at` / `metrics` 都有 —— 看着像采到了,其实正文全空。
+ *
+ * ── 真因 ──
+ * 抽取器只认 `[data-testid="tweetText"]`,而**长文(Article)卡片没有这个 testid**
+ * (它显示的是封面图 + 标题),于是 `querySelector` 返回 null,
+ * `text` 和 `lang` 双双留空 —— 而其余字段照常取到,所以**不像坏了**。
+ *
+ * ── 为什么要拦在入库之前 ──
+ * ⭐ 长文的正文本来就**只能从详情页取**(列表页 X 根本不给),
+ * 所以这里入一条空壳行**没有任何价值**,只会:
+ *  · 让「采到 20 条」这个数字虚高(实际只有 1 条有内容)
+ *  · 在库里留下和「本来就这么短」分不清的垃圾行
+ * ⚠️ 而且它**挡不住**后续补正文 —— 补正文的候选来自这一趟采到的
+ *   `isArticle` 标记,不来自库。
+ *
+ * ⭐ 判据:**正文为空就不算采到**。宁可报「这一页 DOM 只读到 1 条」,
+ * 也不要报「采到 20 条」而其中 19 条是空的 —— 后者正是本仓最忌的
+ * 「看着成功实际没有」。
+ */
+function domItemHasContent(it: Record<string, unknown>): boolean {
+  return typeof it.text === 'string' && it.text.trim().length > 0;
+}
+
 export function mergeDomTweets(
   items: ReadonlyArray<Record<string, unknown>>,
   out: Map<string, HarvestedTweet>,
@@ -380,6 +408,48 @@ export function mergeDomTweets(
   for (const it of items) {
     const id = str(it.tweetId);
     if (!id) continue;
+    /**
+     * ⚠️⚠️ **空正文不入库** —— 长文卡片没有 `tweetText`,读出来是空字符串。
+     * 已有条目照样跳过:空值本来就不该覆盖非空(下面的合并规则也会挡,
+     * 但在这里挡掉更早、更省事,而且「采到几条」的计数才是诚实的)。
+     */
+    /**
+     * ⚠️⚠️ **空正文只拦「新建行」** —— 2026-09-23 守卫抓到我下手太重:
+     * 第一版对**已有行**也整条跳过,于是「这次 DOM 没读到正文」会连带
+     * 放弃补它的 tweet_url / created_at 等字段 —— 那些本来是补得上的。
+     * ⭐ 空壳的害处在于**凭空造出一条没内容的行**;
+     *   给已有行补字段不会造成空壳,照常做。
+     */
+    if (!domItemHasContent(it) && !out.has(id)) {
+      /**
+       * ⭐⭐ **长文是例外:没正文也要留下标记**。
+       * 长文卡片天然没有 `tweetText`(正文只在详情页),
+       * 但**必须让它进表并标 `isArticle`** —— 否则紧接着的「补正文」
+       * 拿不到候选,这篇就永远补不上了(而现象是「这篇没采到」)。
+       * ⚠️ 只补标记,`text` 留空由详情页填。
+       */
+      if (it.isArticle === true) {
+        const cur = out.get(id);
+        if (cur) cur.isArticle = true;
+        else {
+          out.set(id, {
+            tweetId: id,
+            authorHandle: str(it.authorHandle),
+            authorName: str(it.authorName) || undefined,
+            tweetUrl: str(it.tweetUrl) || undefined,
+            createdAt: str(it.createdAt) || undefined,
+            text: '',
+            metrics: (it.metrics ?? {}) as HarvestedTweet['metrics'],
+            self: {},
+            hasMedia: it.hasMedia === true,
+            fromDom: true,
+            isLongText: false,
+            isArticle: true,
+          } as HarvestedTweet);
+        }
+      }
+      continue;
+    }
     const prev = out.get(id);
     if (!prev) {
       out.set(id, {
@@ -408,6 +478,11 @@ export function mergeDomTweets(
      */
     const t = str(it.text);
     if (t.length > (prev.text ?? '').length) prev.text = t;
+    /**
+     * ⭐ 长文标记**只补不抹**:DOM 认出是长文就标上,
+     * 但 DOM 没认出来**不代表它不是**(载荷可能已经标过了)。
+     */
+    if (it.isArticle === true) prev.isArticle = true;
     /** 其余字段只补空,不覆盖 */
     if (!prev.tweetUrl && str(it.tweetUrl)) prev.tweetUrl = str(it.tweetUrl);
     if (!prev.authorAvatar && str(it.authorAvatar)) prev.authorAvatar = str(it.authorAvatar);
@@ -1144,7 +1219,21 @@ export async function harvestTimeline(
           tweetUrl: d.tweetUrl || '',
           inReplyToScreenName: d.inReplyToUser || '',
           metrics: d.metrics || {},
-          hasMedia: !!(d.media && d.media.length)
+          hasMedia: !!(d.media && d.media.length),
+          /**
+           * ⭐⭐ **这张卡片是长文(Article)吗** —— 2026-09-23 加。
+           *
+           * ⚠️ 长文卡片**没有 tweetText 这个 testid**(显示的是封面图 + 标题),
+           * 所以正文必然读不到 —— 但**必须认出它是长文**,
+           * 否则补正文那一步拿不到候选,这篇就永远补不上了。
+           *
+           * ⭐ 判据用 X 自己的结构:长文卡片里有指向 /i/article/ 的链接。
+           * **不认标题文字**(会随语言变)。
+           * ⚠️ 本注释在**模板字面量内部**,绝不能出现反引号 —— 它会提前终止字符串
+           * (2026-09-22 在 tweet-inbox-repo 栽过同一个坑)。
+           */
+          isArticle: !!(art.querySelector('a[href*="/i/article/"]')
+            || art.querySelector('[data-testid="card.layoutLarge.media"] + div a[href*="/status/"][role="link"] span'))
         });
       }
       return { items: out, expanded: expanded };

@@ -81,6 +81,56 @@ describe('⭐⭐ 合并:text 只许变长(这条防的是真实发生过的数�
   });
 });
 
+describe('⚠️⚠️ 空正文不许入库(2026-09-23 实测 19/20 条是空壳)', () => {
+  it('⭐⭐ 正文为空的普通推直接丢掉', () => {
+    /**
+     * ── 实测 ──
+     * 采 @KA594594 主页 20 条,**19 条 text 是空的**,
+     * 而 tweet_url / created_at / metrics 都有 —— 看着像采到了,其实全空。
+     * ⚠️ 真因:抽取器只认 [data-testid="tweetText"],而长文卡片没有它。
+     * ⭐ 报「采到 20 条」而 19 条是空的,正是本仓最忌的「看着成功实际没有」。
+     */
+    const out = new Map<string, HarvestedTweet>();
+    mergeDomTweets([{ tweetId: 't1', text: '' }, { tweetId: 't2', text: '   ' }], out);
+    expect(out.size, '空正文的行进了库 —— 「采到 N 条」会虚高,库里全是空壳').toBe(0);
+  });
+
+  it('⭐⭐ 但长文卡片是例外:没正文也要留下 isArticle 标记', () => {
+    /**
+     * ⚠️ 长文卡片天然没有正文(只在详情页),但**必须认出它是长文** ——
+     * 否则紧接着的「补正文」拿不到候选,这篇就永远补不上,
+     * 而现象是「这篇没采到」(查不出原因)。
+     */
+    const out = new Map<string, HarvestedTweet>();
+    mergeDomTweets([{ tweetId: 'a1', text: '', isArticle: true }], out);
+    expect(out.size, '长文卡片被整条丢掉 —— 补正文拿不到候选,永远补不上').toBe(1);
+    expect(out.get('a1')!.isArticle, '没标 isArticle').toBe(true);
+    expect(out.get('a1')!.text, '长文的 text 应留空,由详情页填').toBe('');
+  });
+
+  it('⚠️ 已有条目遇到长文空卡片,只补标记不动正文', () => {
+    const out = new Map([['a1', mk({ text: '已经补到的几千字正文'.repeat(50) })]]);
+    mergeDomTweets([{ tweetId: 'a1', text: '', isArticle: true }], out);
+    expect(out.get('a1')!.isArticle, '没补上长文标记').toBe(true);
+    expect(out.get('a1')!.text.length, '空卡片把已有正文清掉了').toBeGreaterThan(100);
+  });
+
+  it('⚠️ DOM 脚本要认得长文卡片(否则标记从源头就没有)', () => {
+    const strip = (x: string) =>
+      x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const h = strip(readFileSync(
+      join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8'));
+    const i = h.indexOf('scrapeTweetArticle(art)');
+    expect(i, '找不到 DOM 读取脚本').toBeGreaterThan(0);
+    const blk = h.slice(i, i + 1600);
+    expect(blk, 'DOM 脚本没产出 isArticle —— 长文卡片会被当成普通空推丢掉')
+      .toMatch(/isArticle:/);
+    /** ⭐ 认 X 的结构(/i/article/ 链接),不认标题文字(会随语言变) */
+    expect(blk, '长文判据靠文字而不是结构 —— 换个语言就失效')
+      .toMatch(/i\/article\//);
+  });
+});
+
 describe('⚠️ 接线:展开必须真的发生,且顺序不能反', () => {
   const strip = (s: string) =>
     s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
