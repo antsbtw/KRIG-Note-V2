@@ -62,6 +62,15 @@ export interface CollectJournalEntry {
   pagingSkipped?: string;
   /** ⭐ 点开了几个「Show more」—— 「像人一样读完」有没有真发生 */
   domExpanded?: number;
+  /**
+   * ⭐⭐ **翻页失败时真正发出去的那条 URL** —— 不给它就只能猜。
+   *
+   * ⚠️ 2026-09-23 实测漏掉过:搜索页翻页第 2 页 HTTP 404,
+   * 而 `failedUrl` 只在报告里、**留痕没有** —— 关掉面板就查不到发的是什么,
+   * 只能靠猜「是 cursor 过期还是 URL 拼错」。
+   * ⭐ 与 pagingSkipped 同一个洞(昨天补了那个,没连带补这个)。
+   */
+  failedUrl?: string;
   elapsedMs: number;
   /** 解析率:X 给了多少条目、解出多少 */
   parseRate?: unknown;

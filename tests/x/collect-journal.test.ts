@@ -75,7 +75,14 @@ describe('⚠️ 翻页证据必须进留痕(2026-09-22 实测漏掉)', () => {
     return seg;
   })();
 
-  for (const f of ['hasMore', 'pagedRounds', 'pagingSkipped']) {
+  /**
+   * ⚠️⚠️ **这张清单不会自己长** —— 2026-09-23 实测踩到:
+   * 昨天补了 hasMore/pagedRounds/pagingSkipped,**没连带补 failedUrl**,
+   * 于是搜索页翻页 404 时,「发的是哪条 URL」关掉面板就查不到 ——
+   * 只能猜「是 cursor 过期还是 URL 拼错」。
+   * ⭐ 判据:凡是**报告里有、用来判断「为什么没采全」**的字段,留痕都要有。
+   */
+  for (const f of ['hasMore', 'pagedRounds', 'pagingSkipped', 'failedUrl']) {
     it(`⭐⭐ ${f} 必须写进留痕 —— 面板有、留痕没有 = 关掉就查不到`, () => {
       /**
        * ⚠️ 这三样原来**只在面板和返回值里**,留痕里没有。
