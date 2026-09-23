@@ -100,6 +100,41 @@ export function computeScrollDepthMs(recipe: SearchRecipe, bufferHours = 2): num
  * 钉住。删了它,那几条实测血泪(filter:replies / since: 从 lastRunAt 推)
  * 就只剩一份实现,再没有第二份可以对照。
  */
+/**
+ * ⭐⭐ **把「人随手填的几个词」规范成 X 的搜索语法** —— 2026-09-23 用户实测踩到。
+ *
+ * ── 现象 ──
+ * 面板搜索框里填 `VPN,翻墙`,采回来 94 条**全是不相干的**
+ * (孙大午、「po文合集」垃圾推),一条 VPN 相关的都没有。
+ *
+ * ── 真因 ──
+ * X 的搜索语法里**逗号不是「或」**:`VPN,翻墙` 被当成**一个短语**去匹配,
+ * 几乎匹配不到东西。而 X **不报错**,只是返回一堆不相干的结果 ——
+ * 于是「搜的不是你想搜的」和「这个词真没人发」长得一模一样。
+ *
+ * ⭐ 而配方跑的时候**一直是对的**(`buildSearchUrl` 拼的是 `("VPN" OR "翻墙")`)——
+ * 手填这条路径绕开了那套语法,两边**同一件事两种写法**,这才是根子。
+ *
+ * ── 规则 ──
+ * · 已经带 X 高级语法的(OR / from: / filter: / 括号 / 引号)→ **原样不动**
+ *   ⚠️ 人想用高级语法时不能被我们改写,否则「我明明写对了它却改掉」更难查
+ * · 否则按逗号/空格/顿号切成词,拼成 `("a" OR "b")`
+ * · 单个词直接加引号,不套括号(干净)
+ */
+export function normalizeSearchQuery(raw: string): string {
+  const q = (raw ?? '').trim();
+  if (!q) return '';
+  /**
+   * ⚠️ 认到任一高级语法就原样放行 —— 判据保守:
+   * 宁可少规范化,也不能把人写对的查询改坏。
+   */
+  if (/\bOR\b|\bAND\b|from:|to:|filter:|since:|until:|lang:|["()]/.test(q)) return q;
+  const words = q.split(/[,，、\s]+/).map((w) => w.trim()).filter(Boolean);
+  if (words.length === 0) return '';
+  if (words.length === 1) return `"${words[0]}"`;
+  return `(${words.map((w) => `"${w}"`).join(' OR ')})`;
+}
+
 export function buildSearchUrl(recipe: SearchRecipe): string {
   const parts: string[] = [];
 

@@ -81,6 +81,11 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [gotoHandle, setGotoHandle] = useState('');
   const [gotoTweetId, setGotoTweetId] = useState('');
   const [gotoQuery, setGotoQuery] = useState('');
+  /**
+   * ⭐ 搜索配方 —— 右边选一个就把整套关键词填进搜索框。
+   * ⚠️ 只读**真表**(库里的 search_recipes),面板不自己维护一份关键词清单。
+   */
+  const [recipes, setRecipes] = useState<Array<{ id: string; name: string; keywords?: string[] }>>([]);
   const [pageNames, setPageNames] = useState<string[]>([]);
   /**
    * ⭐ 每页要哪些参数 —— **从真表来**,不在面板里写死。
@@ -319,6 +324,17 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       if (lo) setPageLabels(lo);
       const pp = (pn as { peoplePages?: readonly string[] } | undefined)?.peoplePages;
       if (pp) setPeoplePages(pp);
+      /** ⭐ 配方清单 —— 拿不到就是空数组(下拉不显示配方,手填照常可用) */
+      try {
+        /** ⚠️ 配方在 xTimeline 命名空间下,不在 webConsole(api())里 */
+        const rr = await window.electronAPI?.xTimeline?.listRecipes?.();
+        const list = (rr as { recipes?: Array<{ recipeId?: string; id?: string; name?: string; keywords?: string[] }> } | undefined)?.recipes;
+        if (Array.isArray(list)) {
+          setRecipes(list
+            .filter((x) => x?.name)
+            .map((x) => ({ id: String(x.recipeId ?? x.id ?? x.name), name: String(x.name), keywords: x.keywords })));
+        }
+      } catch { /* 配方拉不到不影响手填 */ }
     })();
   }, []);
 
@@ -885,6 +901,34 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       onChange={(e) => set(e.target.value)} />
                   );
                 })}
+                {/**
+                  * ⭐⭐ **配方下拉** —— 用户 2026-09-23:
+                  * 「右边下拉配方或填入关键词,左边出现」。
+                  *
+                  * ── 为什么要它 ──
+                  * 实测填 `VPN,翻墙` 采回 94 条**全不相干** ——
+                  * X 把逗号串当成一个短语,而且**不报错**。
+                  * ⭐ 配方里存的是**整套关键词**(VPN/翻墙/科学上网/梯子/clash…),
+                  * 选一下就填进去,既不用记 X 的语法,也不会漏词。
+                  *
+                  * ⚠️ 只在搜索页出现 —— 别的页面它没有意义。
+                  */}
+                {acPage === 'x.search' ? (
+                  <select className="krig-webc__in" style={{ width: 150 }}
+                    value=""
+                    title="选一个配方,把它的整套关键词填进搜索框(与定时扫描跑的是同一套词)"
+                    onChange={(e) => {
+                      const r = recipes.find((x) => x.id === e.target.value);
+                      if (r?.keywords?.length) setGotoQuery(r.keywords.join(', '));
+                    }}>
+                    <option value="">用配方填词…</option>
+                    {recipes.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}({r.keywords?.length ?? 0} 词)
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 {/**
                   * ⭐⭐ **三个框必须带可见标签** —— 2026-09-22 实测坑到用户。
                   *

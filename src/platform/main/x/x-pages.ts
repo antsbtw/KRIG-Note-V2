@@ -20,6 +20,8 @@
 
 import type { PageResolver, ReadyCriterion, AnchorName } from '../web-capability/page/control-types';
 import { X_SERVICE_PROFILES } from '@shared/types/x-service-types';
+/** ⭐ 与配方跑的时候同一套搜索语法 —— 手填不能绕开它(2026-09-23 实测踩到) */
+import { normalizeSearchQuery } from './x-timeline-scan';
 
 const X_PROFILE = X_SERVICE_PROFILES[0];
 
@@ -119,13 +121,25 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
 
   /** 搜索结果 */
   'x.search': (p) => {
-    const q = (p.q ?? '').trim();
+    const raw = (p.q ?? '').trim();
+    if (!raw) return null;
+    /**
+     * ⭐⭐ **规范成 X 的搜索语法** —— 2026-09-23 用户实测踩到:
+     * 填 `VPN,翻墙` 采回 94 条**全不相干**,因为 X 把逗号串当成**一个短语**,
+     * 而且**不报错** —— 「搜的不是你想搜的」与「这个词真没人发」长得一样。
+     *
+     * ⭐ 与配方跑的时候**同一套语法**(`buildSearchUrl` 拼 `("a" OR "b")`)——
+     * 手填这条路径原来绕开了它,同一件事两种写法才是根子。
+     * ⚠️ 已带高级语法的原样放行(见 normalizeSearchQuery)。
+     */
+    const q = normalizeSearchQuery(raw);
     if (!q) return null;
     const f = p.f === 'top' ? 'top' : 'live';
     return {
       url: `${X_PROFILE.baseUrl}/search?q=${encodeURIComponent(q)}&f=${f}`,
       arrival: byUrl('/search'),
-      describe: `搜索「${q}」(${f})`,
+      /** ⚠️ 描述里显示**规范化之后**的串 —— 人要看得见我们真正搜的是什么 */
+      describe: `搜索 ${q}(${f})`,
     };
   },
 
