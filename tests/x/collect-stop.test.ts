@@ -104,25 +104,82 @@ describe('⚠️⚠️ 接线:每个长循环都要能停(只在开头问一次 
   });
 });
 
-describe('⚠️ 不生效的参数不该显示(用户:「10 页这个参数不生效,就不应该列出来」)', () => {
+describe('⚠️⚠️ 实例没了要能自救(实测连败 32 篇)', () => {
+  const backfill = read('src/platform/main/x/x-article-backfill.ts');
+
+  it('⭐⭐ 连续失败要提前停,别白跑几十篇', () => {
+    /**
+     * ── 2026-09-22 实测 ──
+     * 补正文跑到一半 wc#4 被销毁(人切了 tab),于是**连着 32 篇**
+     * 全报「指定的 X 实例不存在或已销毁」,每篇还照样等 2.5~4.5 秒。
+     */
+    expect(backfill, '没有连续失败计数 —— 链路断了会一路白跑到底')
+      .toMatch(/consecutiveFailures/);
+    const i = backfill.indexOf('consecutiveFailures >= 3');
+    expect(i, '没有「连续失败就停」的判据').toBeGreaterThan(0);
+  });
+
+  it('⚠️⚠️ 判据必须是「连续」不是「累计」—— 成功一篇要清零', () => {
+    /** ⚠️ 用累计的话,一趟里零星失败几篇也会误停(而链路明明是好的) */
+    expect(backfill, '成功后没有清零 —— 零星失败会被误判成链路断了')
+      .toMatch(/if \(item\.saved\) consecutiveFailures = 0;/);
+  });
+
+  it('⭐⭐ 失败后要重新找一个实例(页面还在就能接着跑)', () => {
+    const i = backfill.indexOf('backfillOne(t.tweetId');
+    expect(i, '找不到补正文调用').toBeGreaterThan(0);
+    const blk = backfill.slice(i, i + 700);
+    /** ⭐ resolveXWebContents(undefined) 会自己找一个还活着的 X 实例 */
+    expect(blk, '实例失效后没重试 —— 人切个 tab 就全线失败')
+      .toMatch(/backfillOne\(t\.tweetId, t\.authorHandle, undefined/);
+  });
+
+  it('⚠️ 重试失败要保留**原始**错误,别把真因换掉', () => {
+    const i = backfill.indexOf('const retry = await backfillOne');
+    expect(i, '找不到重试').toBeGreaterThan(0);
+    const blk = backfill.slice(i, i + 300);
+    expect(blk, '无条件用重试结果覆盖 —— 真因会被换成重试的错误')
+      .toMatch(/if \(!retry\.error\) r = retry;/);
+  });
+
+  it('⭐⭐ 三种停法在报告里必须分得开', () => {
+    /**
+     * ⚠️ 「人停的」「链路断了」「补完了」—— 三者长得一样的话,
+     * 人会把「才补了 80/262」当成「这一页补完了」。
+     */
+    for (const [k, why] of [
+      ['被人停下', '人停的'],
+      ['链路断了提前停', '链路断了'],
+    ] as const) {
+      expect(backfill, `报告里分不出「${why}」这种停法`).toContain(k);
+    }
+  });
+});
+
+describe('⚠️⚠️ 「翻页」框:实测生效,不许再藏起来', () => {
   const view = read('src/views/web-console/WebConsoleView.tsx');
 
-  it('⭐⭐ 「翻页」框只在采人的页面显示', () => {
+  it('⭐⭐ 翻页框必须显示 —— 它对推文页同样生效(实测 pagedRounds=10)', () => {
     /**
-     * ⚠️ 实测踩到:在 x.profile 填「翻页 10」跑了 30+ 分钟,
-     * 人以为设的是「只取 10 页」,而它对推文页**根本不生效**
-     * (游标翻页只在采人页启动)。
-     */
-    /**
-     * ⚠️⚠️ 锚点不能用 `setAcPages` —— 它**第一处出现是 useState 声明**
-     * (文件开头),切出来的是一段无关代码,守卫会假红/假绿。
-     * ⭐ 用 `onChange={(e) => setAcPages` —— 它只在输入框那一段出现。
-     * (今天第三次栽在 indexOf 命中错位置上,见 feedback-guard-scope-to-the-branch)
+     * ── 我在这件事上判断错了,记下来免得再犯 ──
+     *
+     * 用户说「10 页这个参数不生效,就不应该列出来」,我照办**把它藏了**。
+     * ⚠️ 但同日实测采 @KA594594 主页(x.profile):
+     *   `pagedRounds: 10` / `pagingSkipped: null`,
+     *   停止原因明写「游标翻页:达到翻页上限 10 页」
+     * —— **它就是靠这个参数停的**,藏错了。
+     *
+     * ⭐ 真因:我当天刚把翻页闸门从 `people.size > 0` 改成 `gotData`,
+     * 推文页从此也能翻页了,而我**没意识到自己已经修好了**,
+     * 还拿修好之前的认知去改 UI。
+     *
+     * ⭐⭐ 教训:**「这个参数生不生效」看留痕的 pagedRounds,别靠读代码推断** ——
+     * 我连着推断错两次,两次都是留痕一查就打脸。
      */
     const i = view.indexOf('setAcPages(e.target.value)');
-    expect(i, '找不到翻页输入框').toBeGreaterThan(0);
-    const blk = view.slice(Math.max(0, i - 900), i);
-    expect(blk, '翻页框没有页面门控 —— 在不生效的页面上显示会误导人设错预期')
-      .toMatch(/peoplePages\.includes\(acPage\)/);
+    expect(i, '找不到翻页输入框 —— 它被删掉或藏起来了?').toBeGreaterThan(0);
+    const blk = view.slice(Math.max(0, i - 1200), i);
+    expect(blk, '翻页框又被按页面门控藏起来了 —— 实测它在推文页生效(pagedRounds=10)')
+      .not.toMatch(/peoplePages\.includes\(acPage\) \? \(\s*<label/);
   });
 });

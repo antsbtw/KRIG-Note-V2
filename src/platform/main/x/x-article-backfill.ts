@@ -204,6 +204,18 @@ export async function backfillArticlesInline(
 
   /** ⭐ 人按了停 —— 如实记下停在第几篇,不假装补完了 */
   let abortedAtIndex: number | undefined;
+  /**
+   * ⭐⭐ **连续失败计数** —— 2026-09-22 实测:补到一半 webContents 没了
+   * (人切了 tab / X 页面被卸载),于是**连着 32 篇全部失败**,
+   * 每篇还照样等 2.5~4.5 秒,白跑好几分钟。
+   *
+   * ⚠️ 「链路断了」与「某一篇恰好取不到」是两回事:
+   * 前者再试多少篇都一样,后者是个例。判据用**连续**不用累计 ——
+   * 成功一篇就清零,否则一趟里零星失败几篇也会误停。
+   */
+  let consecutiveFailures = 0;
+  /** ⭐ 因链路断了提前停 —— 与「人停的」「补完了」三者必须分得开 */
+  let bailedAtIndex: number | undefined;
 
   for (let i = 0; i < batch.length; i++) {
     /**
@@ -224,7 +236,22 @@ export async function backfillArticlesInline(
     };
 
     try {
-      const r = await backfillOne(t.tweetId, t.authorHandle, targetWcId, { wsId });
+      /**
+       * ⭐⭐ **实例没了就重新找一个** —— 2026-09-22 实测:
+       * 补到一半 wc#4 被销毁(人切了 tab / X 页面被卸载),
+       * 于是**连着 32 篇**全报「指定的 X 实例不存在或已销毁」。
+       *
+       * ⭐ 而 `resolveXWebContents(undefined)` 会**自己找一个还活着的 X 实例** ——
+       * 页面只要还在(哪怕换了个 tab),补正文就能接着跑。
+       * ⚠️ 只在**上一篇刚失败**时才重试,不是每篇都绕一圈:
+       * 正常情况下钉住调用方给的那个实例最稳(别在多 ws 之间乱跳)。
+       */
+      let r = await backfillOne(t.tweetId, t.authorHandle, targetWcId, { wsId });
+      if (r.error && consecutiveFailures > 0) {
+        const retry = await backfillOne(t.tweetId, t.authorHandle, undefined, { wsId });
+        /** ⚠️ 重试成功才认;失败就保留**原始**错误,别把真因换成重试的错误 */
+        if (!retry.error) r = retry;
+      }
       item.elapsedMs = r.elapsedMs;
       item.stopReason = r.stopReason;
 
@@ -250,6 +277,27 @@ export async function backfillArticlesInline(
       /** ⚠️ 单篇炸了不拦后面的,也不拦采集 —— 但不静默 */
       item.problem = `补正文异常:${String(err).slice(0, 160)}`;
       problems.push(`长文 ${t.tweetId} 补正文异常:${String(err).slice(0, 120)}`);
+      consecutiveFailures += 1;
+    }
+
+    /**
+     * ⭐ 成功一篇就清零 —— 记的是**连续**串,不是累计。
+     * 累计的话一趟里零星失败几篇也会误停(而链路明明是好的)。
+     */
+    if (item.saved) consecutiveFailures = 0;
+
+    /**
+     * ⚠️⚠️ **连续 3 篇失败 = 链路断了,别再白跑** —— 2026-09-22 实测连败 32 篇
+     * (补到一半 X 页面被关掉/切走),每篇还照样等 2.5~4.5 秒。
+     * ⭐ 如实标注是「链路断了提前停」,与「人停的」「补完了」三者分得开。
+     */
+    if (consecutiveFailures >= 3) {
+      bailedAtIndex = i + 1;
+      problems.push(`⛔ 连续 ${consecutiveFailures} 篇补正文失败 —— **判定链路已断**`
+        + `(多半是 X 页面被关掉或切走),提前停在第 ${bailedAtIndex}/${batch.length} 篇,`
+        + `**剩下 ${batch.length - bailedAtIndex} 篇没补** —— 重新打开 X 页面后再采一次即可`);
+      items.push(item);
+      break;
     }
 
     items.push(item);
@@ -286,7 +334,10 @@ export async function backfillArticlesInline(
     + (lens ? `(字数 ${lens})` : '')
     + (abortedAtIndex !== undefined
       ? ` ⏸ **被人停下**(剩 ${batch.length - abortedAtIndex} 篇没补)`
-      : withBody < need.length ? ' ⚠️ **没取全,见 problems**' : '');
+      : bailedAtIndex !== undefined
+        ? ` ⛔ **链路断了提前停**(剩 ${batch.length - bailedAtIndex} 篇没补,`
+          + '多半是 X 页面被关掉 —— 重开页面再采一次即可)'
+        : withBody < need.length ? ' ⚠️ **没取全,见 problems**' : '');
 
 
   return { note, problems, saved, items };

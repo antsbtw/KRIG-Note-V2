@@ -906,23 +906,27 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     onChange={(e) => setAcBudget(e.target.value)} placeholder="留空" />
                 </label>
                 {/**
-                  * ⭐⭐ **「翻页」只在采人的页面显示** —— 用户 2026-09-22:
-                  * 「10 页这个参数不生效,就不应该列出来」。
+                  * ⭐⭐ **「翻页」= 游标翻页上限,所有页面都生效**。
                   *
-                  * ⚠️ 实测踩到:在 x.profile 上填「翻页 10」跑了 30+ 分钟,
-                  * 人以为设的是「只取 10 页」,而这个参数对推文页**根本不生效**
-                  * (游标翻页只在采人页启动),真正的耗时是逐篇补长文正文 ——
-                  * **那件事面板上连个框都没有**。
-                  * ⭐ 一个框对应一件事;不生效的不显示,比显示了不起作用强。
+                  * ⚠️⚠️ 2026-09-22 我一度**把它藏了起来**,理由是「推文页不走游标翻页」——
+                  * **判断错了**。同日实测采 @KA594594 主页(x.profile):
+                  * `pagedRounds: 10`、`pagingSkipped: null`,停止原因明写
+                  * 「游标翻页:达到翻页上限 10 页」—— 它**就是靠这个参数停的**。
+                  *
+                  * ⭐ 真因:我当天刚修过翻页闸门(`people.size > 0` → `gotData`),
+                  * 推文页从此也能翻页了,而我**没意识到自己已经修好了**,
+                  * 还拿修好之前的认知去藏 UI。
+                  *
+                  * ⭐⭐ 判据留在这里:**「这个参数生不生效」要看留痕的 pagedRounds,
+                  * 别靠读代码推断** —— 我连着推断错两次(先说闸门是 people.size,
+                  * 再说推文页不翻页),两次都是留痕一查就打脸。
                   */}
-                {peoplePages.includes(acPage) ? (
-                  <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
-                    title="游标翻页上限(采人页用)—— 一页 50-100 人,比滚动快几十倍。⚠️ 这不是轮数">
-                    翻页
-                    <input className="krig-webc__in" style={{ width: 56 }} value={acPages}
-                      onChange={(e) => setAcPages(e.target.value)} placeholder="留空" />
-                  </label>
-                ) : null}
+                <label className="krig-webc__note" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3 }}
+                  title="游标翻页上限 —— 翻满这么多页就停(留空 = 40)。一页 50-100 条,比滚动快几十倍。⚠️ 这不是轮数,也不是总条数">
+                  翻页
+                  <input className="krig-webc__in" style={{ width: 56 }} value={acPages}
+                    onChange={(e) => setAcPages(e.target.value)} placeholder="留空" />
+                </label>
                 {/**
                   * ⭐⭐ 两个按钮走**同一条链路**,只差 `fastIncremental` 一个参数 ——
                   * 不是两套流程。写成两份会漂,而漂的表现是
