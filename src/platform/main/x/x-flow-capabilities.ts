@@ -161,12 +161,32 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         .sort((a2, b2) => b2[1] - a2[1])
         .map(([k, n]) => `${k}×${n}`)
         .join(' · ');
+      /**
+       * ⚠️⚠️ **草稿目前没有落库** —— 2026-09-24 编排实跑查实。
+       *
+       * `planReplies` 只**返回**草稿,全仓没有任何地方把它写进库:
+       *  · `reply_draft` 字段定义在 **tweet_inbox**(已知死表),
+       *    `x_tweet` 上**根本没有这个字段** —— 实测往 x_tweet 写它
+       *    直接报 `Found field 'reply_draft', but no such field exists`,
+       *    **整条 upsert 失败**(不是静默丢弃)
+       *  · UI 那条路径把草稿放在 `useState` 里,关掉就没
+       *
+       * ⭐ 手点「✎拟回复」时人当场看得见,所以这个洞一直没暴露;
+       *   **编排跑完没人看,草稿直接蒸发** —— 是编排把它逼出来的。
+       *
+       * ⚠️ 这里**如实报出来**,不假装成功:
+       *   「拟出 N 条」而 N 条查无实据,正是本仓最忌的「看着成功实际没有」。
+       */
+      const note0 = r.drafts.length > 0
+        ? ' ⚠️ **草稿只在返回值里,没有落库**(x_tweet 无 reply_draft 字段)—— 关掉就没'
+        : '';
       return {
         ok: true, produced: r.drafts.length,
         note: r.scanned === 0
           ? '没有「值得回复且还没回过」的候选(不是故障)'
           : `扫了 ${r.scanned} 条,拟出 ${r.drafts.length} 条草稿`
-            + (r.skips.length ? `,跳过 ${r.skips.length} 条(${reasons})` : ''),
+            + (r.skips.length ? `,跳过 ${r.skips.length} 条(${reasons})` : '')
+            + note0,
         elapsedMs: Date.now() - t0,
       };
     },

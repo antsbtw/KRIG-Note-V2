@@ -392,3 +392,39 @@ describe('⭐⭐ 进度广播:长任务不能是黑箱', () => {
     expect(h, '没接 onProgress').toMatch(/onProgress:/);
   });
 });
+
+describe('⚠️⚠️ 草稿没落库这件事必须说出来(2026-09-24 编排实跑查实)', () => {
+  const strip2 = (x: string) =>
+    x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const caps2 = strip2(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-flow-capabilities.ts'), 'utf-8'));
+  const xschema = readFileSync(
+    join(process.cwd(), 'src/storage/surreal/x-schema.ts'), 'utf-8');
+
+  it('⭐⭐ 拟出草稿时要如实标注「没落库」', () => {
+    /**
+     * ── 查实的事 ──
+     * `planReplies` 只**返回**草稿,全仓没有任何地方写进库:
+     *  · `reply_draft` 定义在 **tweet_inbox**(已知死表),x_tweet 上没有
+     *  · 实测往 x_tweet 写它直接报错、**整条 upsert 失败**(不是静默丢弃)
+     *  · UI 把草稿放 useState,关掉就没
+     * ⭐ 手点时人当场看得见,所以一直没暴露;编排跑完没人看 → 草稿蒸发。
+     * ⚠️ 报「拟出 N 条」而 N 条查无实据 = 本仓最忌的「看着成功实际没有」。
+     */
+    const i = caps2.indexOf('async planReply(');
+    expect(i, '找不到 planReply 适配器').toBeGreaterThan(0);
+    const blk = caps2.slice(i, i + 2600);
+    expect(blk, '拟出草稿却不说「没落库」—— 人会以为存下来了')
+      .toMatch(/没有落库|没落库/);
+  });
+
+  it('⚠️ x_tweet 确实没有 reply_draft 字段(这条断言是上面那句话的依据)', () => {
+    /**
+     * ⭐ 把「依据」也钉住:哪天真给 x_tweet 加了这个字段并落库,
+     * 这条会红 —— 提醒把上面那句警示一起去掉,别留下过期的话。
+     */
+    const xt = xschema.split('tweet_inbox')[0];
+    expect(xt, 'x_tweet 上出现了 reply_draft —— 若已落库,请同时删掉「没落库」的警示')
+      .not.toMatch(/reply_draft\s+ON x_tweet/);
+  });
+});
