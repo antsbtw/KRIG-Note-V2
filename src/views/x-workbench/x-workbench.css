@@ -241,6 +241,16 @@
 }
 .krig-xwb__input:focus { border-color: var(--xwb-blue); }
 
+/**
+ * 一行提示 —— 编排的总结句(「✓ 四步全通 · 6.2s」「⚠️ 断在「goto」」)。
+ * ⚠️ 2026-09-24 加:原来直接用了这个 class 却没定义,样式会静默失效。
+ */
+.krig-xwb__hint {
+  font-size: 12px;
+  opacity: 0.85;
+  padding: 4px 0;
+}
+
 .krig-xwb__empty {
   color: var(--xwb-dim);
   text-align: center;

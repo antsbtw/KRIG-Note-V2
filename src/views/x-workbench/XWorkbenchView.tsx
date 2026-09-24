@@ -69,9 +69,36 @@ interface WatchProfile {
 
 type PaneId = 'watch' | 'tasks';
 
+/** 面板上的一步 —— ⚠️ 形状跟着 FlowProgress 走,面板不自己拼一份 */
+interface FlowStepView {
+  seq: number;
+  stepId: string;
+  label: string;
+  status: 'idle' | 'running' | 'ok' | 'failed' | 'skipped';
+  produced?: number;
+  note?: string;
+  error?: string;
+  elapsedMs?: number;
+  /** 这一步开始的时刻 —— 用来算「已经跑了多久」 */
+  startedAt?: number;
+}
+
 export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
   const [pane, setPane] = useState<PaneId>('watch');
   const [msg, setMsg] = useState('');
+
+  /**
+   * ── 编排执行(用户 2026-09-24 的分层:编排=定义,工作台=执行与观察)──
+   *
+   * ⚠️ 这里**只执行与观察**,不编辑编排档 —— 改步骤顺序/参数是「编排视图」的事。
+   * ⭐ 分开的好处:将来编排视图升级成画布,这里**完全不用动**
+   *   (它只读 flow_run,不关心档是怎么画出来的)。
+   */
+  const [flowSteps, setFlowSteps] = useState<FlowStepView[]>([]);
+  const [flowRunning, setFlowRunning] = useState(false);
+  const [flowMsg, setFlowMsg] = useState('');
+  /** ⭐ 正在跑的那一步从什么时候开始 —— 用来显示「已经跑了 N 秒」 */
+  const [tickAt, setTickAt] = useState(0);
 
   // ── 盯人 ──
   const [watchHandle, setWatchHandle] = useState('');
@@ -98,6 +125,49 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
     return () => { if (off) off(); };
   }, []);
 
+  /**
+   * ⭐⭐ **订阅编排进度** —— 用户 2026-09-24 那句「没有任何反应」的解药。
+   *
+   * 实测四步耗时 0.1s / 30.8s / **330.8s** / 0.5s —— 差 3000 倍。
+   * 没有逐步进度的话,判断那 5.5 分钟里面板什么都不动。
+   *
+   * ⚠️⚠️ **必须核对 wsId** —— 广播是发给**所有 renderer** 的,
+   * 多窗口下不核对就会「别的窗口的进度显示在这里」
+   * (记忆:宿主广播×多ws扇出)。
+   */
+  useEffect(() => {
+    const off = window.electronAPI?.webConsole?.onFlowProgress?.((p) => {
+      if (p.wsId && p.wsId !== workspaceId) return;   // ⚠️ 不是我这个 ws 的,丢掉
+      setFlowSteps((prev) => {
+        const next = [...prev];
+        /** ⭐ 第一次收到就按 total 铺满 —— 否则后面的步骤在跑完前不显示 */
+        while (next.length < p.total) {
+          next.push({ seq: next.length + 1, stepId: `step${next.length + 1}`, label: '…', status: 'idle' });
+        }
+        const i = p.seq - 1;
+        next[i] = {
+          seq: p.seq, stepId: p.stepId, label: p.label,
+          status: p.status,
+          produced: p.produced, note: p.note, error: p.error, elapsedMs: p.elapsedMs,
+          startedAt: p.status === 'running' ? Date.now() : next[i]?.startedAt,
+        };
+        return next;
+      });
+    });
+    return () => { if (off) off(); };
+  }, [workspaceId]);
+
+  /**
+   * ⭐ 正在跑的那一步,每秒刷一次「已用时」。
+   * ⚠️ 只在**真的有步骤在跑**时开定时器 —— 常驻 timer 是本仓的已知坑
+   * (记忆:常驻 timer 必须在 before-quit 有停止调用)。
+   */
+  useEffect(() => {
+    if (!flowSteps.some((x) => x.status === 'running')) return;
+    const t = setInterval(() => setTickAt(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [flowSteps]);
+
   const wcId = useCallback((): number | undefined => {
     try {
       const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
@@ -106,6 +176,40 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
       return undefined;
     }
   }, [workspaceId]);
+
+  /** ⭐ 跑编排 —— 进度靠广播实时来,这里只等最终结果 */
+  const runFlow = async () => {
+    setFlowRunning(true);
+    setFlowSteps([]);
+    setFlowMsg('启动中…');
+    try {
+      const r = await window.electronAPI?.webConsole?.runFlow?.({
+        wsId: workspaceId, wcId: wcId(),
+      });
+      const rep = r?.report;
+      if (!r?.channelOk) {
+        setFlowMsg(`⚠️ 启动失败:${r?.error ?? '通道没注册?'}`);
+      } else if (rep) {
+        /**
+         * ⚠️ 「断在哪一步」要说出来 —— 光说「失败」人还得自己去找。
+         * ⭐ 而每一步的详情已经由广播填进 flowSteps 了,这里只补一句总结。
+         */
+        setFlowMsg(rep.ok
+          ? `✓ 四步全通 · ${(rep.elapsedMs / 1000).toFixed(1)}s`
+          : `⚠️ 断在「${rep.failedAt}」· ${(rep.elapsedMs / 1000).toFixed(1)}s`);
+      }
+    } catch (e) {
+      setFlowMsg(`⚠️ ${String(e)}`);
+    } finally {
+      setFlowRunning(false);
+    }
+  };
+
+  /** ⭐ 停 —— 复用采集那套暂停键(协作式,到下一个检查点才真停) */
+  const stopFlow = () => {
+    void window.electronAPI?.webConsole?.stopCollect?.({ wsId: workspaceId });
+    setFlowMsg('已请求停止 —— 跑到下一个检查点才会停(补正文时约 10 秒内)');
+  };
 
   const fetchProfile = async () => {
     if (!target) { setMsg('先填要盯的账号'); return; }
@@ -178,12 +282,73 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
         {/* ── 右:详情 ── */}
         <div className="krig-xwb__right">
           {pane === 'tasks' ? (
-            <div className="krig-xwb__empty">
-              采集任务列表还没接上 —— 任务已经在库里(`x_task`,4 条),
-              <br />但 renderer 侧还缺一条取任务的 IPC 通道。
-              <br /><br />
-              ⚠️ 这里**故意留空**而不是塞假数据:
-              <br />「看着有、实际没有」比「明说没有」更难查。
+            /**
+             * ⭐⭐⭐ **编排执行与观察** —— 用户 2026-09-24 的分层:
+             * 「编排完毕,交给工作台执行和观察」。
+             *
+             * ⚠️ 这里**只跑与看**,不编辑编排档 ——
+             * 改步骤顺序/参数是「编排视图」的事(还没做)。
+             */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <b style={{ flex: 1 }}>X:搜索 → 采集 → 判断 → 拟回复</b>
+                <button
+                  type="button"
+                  className="krig-xwb__btn"
+                  disabled={flowRunning}
+                  onClick={() => void runFlow()}
+                  title="按编排档依次跑四步。⚠️ 一步失败就停,后面标「跳过」;拟回复只填不发"
+                >
+                  {flowRunning ? '跑着…' : '▶ 开始'}
+                </button>
+                {/** ⭐ 只在跑的时候露出来 —— 不跑时按不动的按钮是噪音 */}
+                {flowRunning ? (
+                  <button type="button" className="krig-xwb__btn" onClick={stopFlow}
+                    title="停 —— 已跑完的步骤不回滚,报告里会写明「是人停的,不是跑完了」">
+                    ⏸ 停止
+                  </button>
+                ) : null}
+              </div>
+
+              {flowMsg ? <div className="krig-xwb__hint">{flowMsg}</div> : null}
+
+              {flowSteps.length === 0 ? (
+                <div className="krig-xwb__empty">
+                  还没跑过 —— 点「▶ 开始」。
+                  <br /><br />
+                  ⚠️ 判断那步一批 10 条约 3~5 分钟,
+                  <br />跑起来后这里会**逐步显示进度**(不是卡住)。
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {flowSteps.map((st) => {
+                    /** ⭐ 正在跑的显示「已用时」—— 这是长步骤唯一的反馈 */
+                    const live = st.status === 'running' && st.startedAt
+                      ? Math.max(0, Math.round((tickAt - st.startedAt) / 1000))
+                      : undefined;
+                    const icon = st.status === 'ok' ? '✓'
+                      : st.status === 'failed' ? '✗'
+                        : st.status === 'skipped' ? '–'
+                          : st.status === 'running' ? '◐' : '○';
+                    return (
+                      <div key={st.seq} className="krig-xwb__card"
+                        style={{ opacity: st.status === 'idle' || st.status === 'skipped' ? 0.6 : 1 }}>
+                        <div>
+                          <b>{icon} {st.seq}. {st.label}</b>
+                          {st.status === 'ok' && st.produced !== undefined
+                            ? <span> · 产出 {st.produced}</span> : null}
+                          {live !== undefined ? <span> · 已跑 {live}s</span> : null}
+                          {st.elapsedMs ? <span> · {(st.elapsedMs / 1000).toFixed(1)}s</span> : null}
+                        </div>
+                        {/** ⚠️ 「为什么」比数字要紧 —— note 里带着跳过原因/停止原因 */}
+                        {st.error
+                          ? <div style={{ color: '#e05555' }}>{st.error}</div>
+                          : st.note ? <div style={{ opacity: 0.85 }}>{st.note}</div> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : (
             <>
