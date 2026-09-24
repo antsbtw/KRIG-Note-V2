@@ -145,7 +145,12 @@ export async function runFlow(
     const s0 = Date.now();
     let out: FlowStepOutcome;
     try {
-      out = await fn(step.params ?? {}, wsId);
+      /**
+       * ⭐ 档级共享参数 + 步骤参数 —— **步骤自己写的优先**。
+       * ⚠️ 2026-09-24 实测:搜索词原来在档里写两遍,改一个忘另一个
+       * 就会「导航到 A 页、采集却采 B 页」,而且不报错。
+       */
+      out = await fn({ ...(recipe.shared ?? {}), ...(step.params ?? {}) }, wsId);
     } catch (e) {
       /** ⚠️ 能力抛异常也要落记录 —— 否则这一步在 flow_step_run 里根本不存在 */
       out = { ok: false, produced: 0, error: String(e).slice(0, 300), elapsedMs: Date.now() - s0 };

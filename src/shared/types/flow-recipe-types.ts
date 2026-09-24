@@ -74,6 +74,21 @@ export interface FlowStep {
 export interface FlowRecipe {
   recipeId: string;
   name: string;
+  /**
+   * ⭐⭐ **档级共享参数** —— 多个步骤都要用的东西放这里,**只写一遍**。
+   *
+   * ── 为什么非有不可(2026-09-24 实测的坑)──
+   * 搜索词原来在档里**写了两遍**(goto 一遍、collect 一遍)。
+   * 改一个忘另一个,两步就会**搜不同的词** —— 而且**不报错**:
+   * 导航到 A 页、采集却去采 B 页,结果看着正常,数据却对不上。
+   *
+   * ⭐ 合并规则:`{ ...shared, ...step.params }` —— **步骤自己写的优先**,
+   * 所以想让某一步用别的词,在那一步覆盖即可。
+   *
+   * ⚠️ 只放**业务参数**。运行时的东西(wcId 这种页面重开就变的)
+   * 由调用方注入,不进档 —— 写进去会立刻过期。
+   */
+  shared?: Record<string, unknown>;
   /** 这套流程是干什么的 —— 进 flow_run.flow_name,回看时要认得出 */
   description?: string;
   steps: FlowStep[];

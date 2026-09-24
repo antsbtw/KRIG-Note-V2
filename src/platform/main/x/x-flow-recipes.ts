@@ -32,23 +32,28 @@ export const DEFAULT_X_FLOW: FlowRecipe = {
   recipeId: 'x-search-judge-reply',
   name: 'X:搜索 → 采集 → 判断 → 拟回复',
   description: '第一份编排档 —— 四步各有独立失败形态,用来验证颗粒度',
+  /**
+   * ⭐⭐ **搜索词只写一遍** —— 2026-09-24 修掉的坑:
+   * 原来 goto 和 collect **各写了一份**,改一个忘另一个就会
+   * 「导航到 A 页、采集却采 B 页」,而且**不报错**。
+   */
+  shared: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' } },
   steps: [
     {
       id: 'goto',
       kind: 'goto',
       label: '导航到搜索页',
-      params: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' } },
+      /** ⚠️ 参数来自 shared —— 这里不再重复写 */
     },
     {
       id: 'collect',
       kind: 'collect',
       label: '采集搜索结果',
       /**
-       * ⚠️ 与上一步**同一套参数** —— 采集自己也会导航(已在目标页就不跳),
-       * 所以 goto 那步是「先看见页面」,不是采集的前置条件。
-       * ⭐ 翻页给 3:第一次试别跑太久(实测翻 10 页 + 补长文正文要 40 分钟)。
+       * ⭐ page/q 来自 shared,这里只写**这一步独有**的:
+       * 翻页给 3 —— 第一次试别跑太久(实测翻 10 页 + 补长文正文要 40 分钟)。
        */
-      params: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' }, pageBudget: 3 },
+      params: { pageBudget: 3 },
     },
     {
       id: 'judge',

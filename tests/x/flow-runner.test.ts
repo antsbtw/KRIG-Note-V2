@@ -275,3 +275,53 @@ describe('⚠️⚠️ 收 run 必须真的收掉(2026-09-24 实测:两次运行
       .toMatch(/skipReason/);
   });
 });
+
+describe('⭐⭐ 档级共享参数:只写一遍,步骤可覆盖', () => {
+  it('⚠️⚠️ shared 的参数要传给每一步(搜索词原来写了两遍)', async () => {
+    /**
+     * ── 2026-09-24 修掉的坑 ──
+     * 搜索词在档里 goto 一遍、collect 一遍。改一个忘另一个就会
+     * 「导航到 A 页、采集却采 B 页」—— 而且**不报错**,结果看着正常。
+     */
+    const c = caps();
+    await runFlow({
+      recipeId: 'r', name: 'n',
+      shared: { page: 'x.search', params: { q: 'VPN' } },
+      steps: [{ id: 's1', kind: 'goto' }, { id: 's2', kind: 'collect' }],
+    }, c);
+    expect(c.goto, 'shared 没传给 goto').toHaveBeenCalledWith(
+      { page: 'x.search', params: { q: 'VPN' } }, undefined);
+    expect(c.collect, 'shared 没传给 collect —— 两步会跑不同的词').toHaveBeenCalledWith(
+      { page: 'x.search', params: { q: 'VPN' } }, undefined);
+  });
+
+  it('⭐ 步骤自己写的**优先**于 shared', async () => {
+    const c = caps();
+    await runFlow({
+      recipeId: 'r', name: 'n',
+      shared: { page: 'x.search', pageBudget: 40 },
+      steps: [{ id: 's', kind: 'collect', params: { pageBudget: 3 } }],
+    }, c);
+    expect(c.collect, '步骤参数被 shared 覆盖了 —— 改不动单步设置')
+      .toHaveBeenCalledWith({ page: 'x.search', pageBudget: 3 }, undefined);
+  });
+
+  it('⭐ 没有 shared 时照常工作(不许因此报错)', async () => {
+    const c = caps();
+    const r = await runFlow({
+      recipeId: 'r', name: 'n', steps: [{ id: 's', kind: 'judge', params: { batchSize: 5 } }],
+    }, c);
+    expect(r.ok).toBe(true);
+    expect(c.judge).toHaveBeenCalledWith({ batchSize: 5 }, undefined);
+  });
+
+  it('⚠️ 默认档里搜索词只出现一次(不许再写两遍)', () => {
+    const strip2 = (x: string) =>
+      x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const src = strip2(readFileSync(
+      join(process.cwd(), 'src/platform/main/x/x-flow-recipes.ts'), 'utf-8'));
+    const hits = (src.match(/科学上网/g) ?? []).length;
+    expect(hits, `搜索词在档里出现 ${hits} 次 —— 写多遍就会「改一个忘另一个」`)
+      .toBeLessThanOrEqual(1);
+  });
+});
