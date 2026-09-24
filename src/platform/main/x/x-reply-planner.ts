@@ -320,11 +320,34 @@ export async function planReplies(
   const blocked = new Set((await getBlockedHandleSet()).map(normalizeHandle));
 
   // ── ① 前置规则过滤(不问模型)────────────────────────────────
-  // 本批内部的指纹计数,与历史计数合并 —— 同一批里重复出现的也要能识别
+  /**
+   * ⚠️⚠️ **本批的条目已经在语料里数过了,不许再数一遍** ——
+   * 2026-09-24 实测揪出的双重计数 bug。
+   *
+   * ── 现象 ──
+   * 编排跑完报「拟出 0 条,跳过 10 条(duplicate_text×10)」,
+   * 而那 10 条**内容各不相同**(日语/中文/西语/马其顿语都有),全被判「模板刷屏」。
+   *
+   * ── 真因 ──
+   * 调用方的 `fingerprintCounts` 是从**全库语料**(queryInbox limit 5000)统计的,
+   * 而候选这一批**本身就在那 5000 条里面**。
+   * 于是每条的计数 = 1(语料里的自己) + 1(这里再数的自己) = **2**,
+   * 正好撞上 `DUPLICATE_FINGERPRINT_THRESHOLD = 2` ——
+   * ⭐ **每一条都会中招,与内容无关**。
+   *
+   * ── 修法 ──
+   * 只补**语料里没有**的条目(通常是调用方没传 fingerprintCounts 的场景,
+   * 那时要靠本批内部比对才能识别「同一批里重复出现」)。
+   * ⚠️ 语料里已经有计数的,**原样用**,不叠加。
+   */
   const fpCounts = new Map(ctx.fingerprintCounts ?? []);
   for (const t of batch) {
     const fp = textFingerprint(t.text);
-    if (fp) fpCounts.set(fp, (fpCounts.get(fp) ?? 0) + 1);
+    if (!fp) continue;
+    /** ⭐ 语料里已经数过这个指纹 → 不动;没数过 → 本批内部自己数 */
+    if (!ctx.fingerprintCounts?.has(fp)) {
+      fpCounts.set(fp, (fpCounts.get(fp) ?? 0) + 1);
+    }
   }
 
   const candidates: TweetInboxRecord[] = [];
