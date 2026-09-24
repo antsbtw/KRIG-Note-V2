@@ -208,6 +208,15 @@ export interface ReplyDecision {
 /** 不予回复的原因 —— 用于 UI 显示与对账,区分「模型说不」和「被前置规则挡掉」 */
 export type ReplySkipReason =
   | 'ai_declined'        // 模型判定不值得回
+  /**
+   * ⚠️⚠️ **模型没返回这条** —— 与 `ai_declined` **必须分开**。
+   *
+   * 2026-09-24 编排实跑暴露:报告只给 `ai_declined×10`,分不出是
+   *  · 模型**没覆盖**这条 → **故障**(契约不对/漏答),**重跑可能就好了**
+   *  · 模型**说不该回**   → **判断**,重跑也一样
+   * ⭐ 混成一种,人就得再去查一次 —— 与 duplicate_text 那次同一形态。
+   */
+  | 'ai_no_answer'       // 模型未返回该条判断(可重跑)
   | 'low_confidence'     // 置信度不足阈值
   | 'duplicate_text'     // 近期出现过高度相同的推文(模板刷屏)
   | 'author_recent'      // 同一作者近期已回过

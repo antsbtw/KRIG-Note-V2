@@ -410,9 +410,17 @@ export async function planReplies(
     const d = decisions.get(t.tweet_id);
     if (!d) {
       // 模型没覆盖这条 —— 留痕,不当成「不该回」
+      /**
+       * ⚠️⚠️ **「模型没返回」与「模型说不该回」是两回事** —— 2026-09-24 编排实跑暴露:
+       * 报告只给一个 `ai_declined×10`,**分不出是哪种**:
+       *  · 模型没覆盖 → **故障**(契约不对/模型漏答),**可重跑**
+       *  · 模型说不该回 → **判断**,重跑也一样
+       * ⭐ 与上次 `duplicate_text` 同一形态:不说清原因,人还得再查一次。
+       * 所以这里用**独立的 skipReason**,不再混进 ai_declined。
+       */
       skips.push({
         tweetId: t.tweet_id, authorHandle: handle,
-        skipReason: 'ai_declined', detail: '模型未返回该条判断(可重跑)',
+        skipReason: 'ai_no_answer', detail: '模型未返回该条判断(可重跑)',
       });
       continue;
     }

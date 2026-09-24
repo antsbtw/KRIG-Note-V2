@@ -39,6 +39,8 @@ const POSTER_COLOR: Record<PosterKind, string> = {
 
 const SKIP_LABEL: Record<ReplySkipReason, string> = {
   ai_declined:     'AI 判定这条不值得回',
+  /** ⚠️ 与 ai_declined 分开:模型**没答**这条(故障,可重跑),不是「说不该回」 */
+  ai_no_answer: '模型没答(可重跑)',
   low_confidence:  'AI 置信度不足',
   duplicate_text:  '模板刷屏(同一句话反复出现)',
   author_recent:   '该作者近期已回过',

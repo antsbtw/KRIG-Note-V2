@@ -32,6 +32,8 @@ vi.mock('../../src/platform/main/local-llm/ollama-client', () => ({
   })),
 }));
 import { planReplies, textFingerprint, DUPLICATE_FINGERPRINT_THRESHOLD } from '../../src/platform/main/x/x-reply-planner';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const cfg = { model: 'm', endpoint: 'e' } as never;
 const rec = (id: string, text: string) =>
@@ -80,5 +82,35 @@ describe('⭐⭐ 语料里已有的计数不许再叠加', () => {
      * 错的是**把自己数了两遍**。记在这里免得下次有人去调阈值掩盖问题。
      */
     expect(DUPLICATE_FINGERPRINT_THRESHOLD).toBe(2);
+  });
+});
+
+describe('⚠️⚠️ 「模型没答」与「模型说不该回」必须分开', () => {
+  /**
+   * ── 2026-09-24 编排实跑暴露 ──
+   * 报告只给 `ai_declined×10`,**分不出是哪种**:
+   *  · 模型**没覆盖**这条 → **故障**(契约不对/漏答),**重跑可能就好**
+   *  · 模型**说不该回**   → **判断**,重跑也一样
+   * ⭐ 与上次 duplicate_text 同一形态:不说清原因,人还得再查一次。
+   */
+  it('⭐⭐ 模型没返回这条 → ai_no_answer(不是 ai_declined)', async () => {
+    const r = await planReplies([rec('t9', '谁有稳定的梯子推荐一下')], cfg, {
+      selfHandle: 'me',
+    });
+    const first = r.skips[0] as { skipReason?: string; detail?: string } | undefined;
+    expect(first?.skipReason,
+      '模型没答被混进了 ai_declined —— 故障与判断分不开,人还得再查一次')
+      .toBe('ai_no_answer');
+    expect(first?.detail, '没说可重跑').toMatch(/重跑/);
+  });
+
+  it('⭐ 两个原因都要有人话标签(UI 上不能显示裸 key)', () => {
+    /** ⭐ Record<ReplySkipReason,string> 会让漏写的编译不过 —— 这里再钉一道 */
+    const compose = readFileSync(
+      join(process.cwd(), 'src/views/x-inbox/ReplyComposeDialog.tsx'), 'utf-8');
+    expect(compose, 'ReplyComposeDialog 没给 ai_no_answer 标签').toMatch(/ai_no_answer:/);
+    const drafts = readFileSync(
+      join(process.cwd(), 'src/views/x-inbox/ReplyDraftsView.tsx'), 'utf-8');
+    expect(drafts, 'ReplyDraftsView 没给 ai_no_answer 标签').toMatch(/ai_no_answer:/);
   });
 });
