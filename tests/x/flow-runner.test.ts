@@ -186,3 +186,45 @@ describe('⚠️ 接线:适配器只做转换,不写业务逻辑', () => {
     }
   });
 });
+
+describe('⚠️⚠️ wcId 必须一路传到每一步(2026-09-24 实测:漏了就四步全废)', () => {
+  const strip = (x: string) =>
+    x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const read = (f: string) => strip(readFileSync(join(process.cwd(), f), 'utf-8'));
+  const handler = read('src/platform/main/ipc/web-console-handler.ts');
+  const view = read('src/views/web-console/WebConsoleView.tsx');
+
+  it('⭐⭐ 面板调 runFlow 时要带 wcId', () => {
+    /**
+     * ── 实测 ──
+     * 第一次跑编排:第一步 goto 就报「X 实例未就绪(未登记 wc id)」,
+     * 后三步连带 skipped —— 四步全废,而用户看到的是「没有任何反应」。
+     * ⚠️ 采集按钮一直传 `wcId: wcId()`,编排这条新路径漏了。
+     */
+    const i = view.indexOf('api()!.runFlow(');
+    expect(i, '找不到 runFlow 调用').toBeGreaterThan(0);
+    const blk = view.slice(i, i + 160);
+    expect(blk, 'runFlow 没带 wcId —— 第一步就会报「X 实例未就绪」')
+      .toMatch(/wcId:\s*wcId\(\)/);
+  });
+
+  it('⭐⭐ handler 把 wcId 注入每一步的 params(而不是写进编排档)', () => {
+    const i = handler.indexOf('WEBC_RUN_FLOW');
+    expect(i, '找不到 runFlow handler').toBeGreaterThan(0);
+    const blk = handler.slice(i, i + 1800);
+    expect(blk, 'wcId 没注入步骤参数 —— 适配器拿不到实例')
+      .toMatch(/params:\s*\{\s*wcId/);
+    /**
+     * ⚠️ 档里已写的优先:`{ wcId, ...st.params }` 而不是 `{ ...st.params, wcId }` ——
+     * 后者会把调用方显式指定的值覆盖掉。
+     */
+    expect(blk, '注入顺序反了 —— 会覆盖编排档里显式指定的 wcId')
+      .toMatch(/wcId,\s*\.\.\.\(st\.params/);
+  });
+
+  it('⭐ 编排结果要在面板上逐步显示(否则跑了像没跑)', () => {
+    expect(view, '编排结果没渲染 —— 用户会以为「没有任何反应」')
+      .toMatch(/rep\.steps\.map/);
+    expect(view, '没显示断在哪一步').toMatch(/failedAt/);
+  });
+});

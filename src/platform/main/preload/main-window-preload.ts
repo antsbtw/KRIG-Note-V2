@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopCollect: (args: { wsId?: string }) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_STOP_COLLECT, args),
     // ⭐ 跑一份编排档(不传 recipe = 用默认的四步档)
-    runFlow: (args: { wsId?: string; recipe?: unknown }) =>
+    runFlow: (args: { wsId?: string; wcId?: number; recipe?: unknown }) =>
       ipcRenderer.invoke(IPC_CHANNELS.WEBC_RUN_FLOW, args),
   },
 

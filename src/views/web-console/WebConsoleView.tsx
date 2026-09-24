@@ -1074,10 +1074,25 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         disabled={busy !== null}
                         onClick={() => void run(
                           'runFlow', { flow: '默认四步档' },
-                          () => api()!.runFlow({ wsId: workspaceId }))}
+                          /**
+                           * ⚠️ **wcId 必须传** —— 2026-09-24 实测:只传 wsId 时
+                           * 第一步 goto 就报「X 实例未就绪(未登记 wc id)」,
+                           * 四步全废。采集按钮一直传的是 wcId(),这里漏了。
+                           */
+                          () => api()!.runFlow({ wsId: workspaceId, wcId: wcId() }))}
                         title="跑默认编排档:搜索 → 采集 → 判断 → 拟回复。⚠️ 四步串跑,每步落一条执行记录;一步失败就停,后面标 skipped。拟回复只填不发">
                         ▶ 跑编排
                       </button>
+                      {/**
+                        * ⭐⭐ **编排结果要一眼看得出** —— 用户 2026-09-24:
+                        * 「已经点击了一个词跑编排了,没有任何反应?」
+                        *
+                        * ⚠️ 其实它**跑了**(flow_step_run 落了 4 行),
+                        * 只是第一步 0ms 就失败、返回值埋在一堆 JSON 里,
+                        * 看着就像「没反应」。
+                        * ⭐ 逐步列出来:哪步成了、哪步断了、为什么 ——
+                        *   这正是编排相对「手点一堆按钮」的价值所在。
+                        */}
                       {busy !== null ? (
                         <button type="button" className="krig-webc__in"
                           onClick={() => { void api()?.stopCollect({ wsId: workspaceId }); }}
@@ -1125,6 +1140,34 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                     {missing.includes('tweetId')
                       && ' —— tweetId 是推文链接 /status/ 后面那串数字'}
                     {missing.includes('handle') && ' —— handle 填账号名(不带 @)'}
+                  </div>
+                );
+              })()}
+              {(() => {
+                const fr = runs.find((x) => x.fn === 'runFlow');
+                const rep = (fr?.output as { report?: {
+                  runId: string; flowName: string; ok: boolean; failedAt?: string; elapsedMs: number;
+                  steps: Array<{ id: string; label: string; status: string; produced: number; error?: string; note?: string; elapsedMs: number }>;
+                } } | undefined)?.report;
+                if (!rep) return null;
+                return (
+                  <div className="krig-webc__note" style={{ marginTop: 6 }}>
+                    <div>
+                      <b>{rep.ok ? '✓' : '⚠️'} {rep.flowName}</b>
+                      {' '}· {(rep.elapsedMs / 1000).toFixed(1)}s
+                      {rep.failedAt ? <span style={{ color: '#e05555' }}> · 断在「{rep.failedAt}」</span> : null}
+                    </div>
+                    {rep.steps.map((st) => (
+                      <div key={st.id} style={{ opacity: st.status === 'skipped' ? 0.6 : 1 }}>
+                        {st.status === 'ok' ? '✓' : st.status === 'failed' ? '✗' : '–'}
+                        {' '}{st.label}
+                        {st.status === 'ok' ? ` · 产出 ${st.produced}` : ''}
+                        {st.elapsedMs > 0 ? ` · ${(st.elapsedMs / 1000).toFixed(1)}s` : ''}
+                        {st.error ? <span style={{ color: '#e05555' }}> —— {st.error}</span> : null}
+                        {st.note && !st.error ? <span style={{ opacity: 0.8 }}> —— {st.note}</span> : null}
+                      </div>
+                    ))}
+                    <div style={{ opacity: 0.6 }}>runId: {rep.runId}</div>
                   </div>
                 );
               })()}

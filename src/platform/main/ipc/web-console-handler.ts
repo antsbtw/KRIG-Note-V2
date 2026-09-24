@@ -956,12 +956,31 @@ export function registerWebConsoleHandlers(): void {
    *   面板长什么样,等看见这些行再定(先接线后做面板,免得又凭空设计)。
    */
   ipcMain.handle(IPC_CHANNELS.WEBC_RUN_FLOW, async (_e, payload: unknown) => {
-    const p = (payload ?? {}) as { recipe?: unknown; wsId?: unknown };
+    const p = (payload ?? {}) as { recipe?: unknown; wsId?: unknown; wcId?: unknown };
     const t0 = Date.now();
     const wsId = typeof p.wsId === 'string' ? p.wsId : undefined;
-    const recipe = (p.recipe && typeof p.recipe === 'object')
+    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
+    const base = (p.recipe && typeof p.recipe === 'object')
       ? p.recipe as Parameters<typeof runFlow>[0]
       : DEFAULT_X_FLOW;
+    /**
+     * ⭐⭐ **wcId 注入每一步的 params** —— 2026-09-24 实测踩到:
+     * 第一次跑编排,第一步 goto 就报「X 实例未就绪(未登记 wc id)」,
+     * 后三步连带 skipped,四步全废。
+     *
+     * ⚠️ 真因:面板只传了 wsId,而适配器要的是 wcId
+     * (采集按钮一直传 `wcId: wcId()`,编排这条新路径漏了)。
+     * ⭐ 在这里注入而**不写进编排档**:wcId 是**运行时的东西**
+     * (页面重开就变),写进档里会立刻过期 —— 档里只该有业务参数。
+     * ⚠️ 档里已经写了 wcId 的话不覆盖(调用方显式指定优先)。
+     */
+    const recipe = wcId === undefined ? base : {
+      ...base,
+      steps: base.steps.map((st) => ({
+        ...st,
+        params: { wcId, ...(st.params ?? {}) },
+      })),
+    };
     try {
       const r = await runFlow(recipe, makeXFlowCapabilities(), {
         wsId,

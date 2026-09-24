@@ -248,7 +248,7 @@ declare global {
          * ⭐⭐ **跑一份编排档** —— 四步串起来,每步落一条 flow_step_run。
          * ⚠️ 不传 recipe = 用默认的四步档(搜索→采集→判断→拟回复)。
          */
-        runFlow(args: { wsId?: string; recipe?: unknown }): Promise<{
+        runFlow(args: { wsId?: string; wcId?: number; recipe?: unknown }): Promise<{
           channelOk: boolean; error?: string;
           report?: {
             runId: string; flowName: string; ok: boolean;
