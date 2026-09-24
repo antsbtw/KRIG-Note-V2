@@ -98,15 +98,33 @@ export async function endRun(
   error?: string,
 ): Promise<void> {
   try {
-    await getFlowDB().query(
+    /**
+     * ⚠️⚠️ **duration 必须用 `duration::millis()`** —— 2026-09-24 实测揪出:
+     * 原来写 `math::floor((time::now() - started_at) / 1ms)`,算出来是 **NaN**,
+     * 被 schema 拒收(`Expected none | int but found NaN`)→ **整条 UPDATE 失败**
+     * → run **永远停在 running**。
+     *
+     * ⚠️ 而下面的 catch 把它吞成了 warn,于是**两次运行都卡在 running 也没人发现** ——
+     * 「跑到一半崩了」与「跑完了」在记录里长得一模一样,正是本仓最忌的形态。
+     */
+    const res = await getFlowDB().query<[unknown]>(
       `UPDATE flow_run SET
          status = $status, ended_at = time::now(), error = $error,
-         duration_ms = math::floor((time::now() - started_at) / 1ms)
+         duration_ms = duration::millis(time::now() - started_at)
        WHERE run_id = $runId`,
       { runId, status, error: error ?? undefined },
     );
+    /**
+     * ⭐ **写了但一行都没更新**也要响 —— runId 对不上时 UPDATE 不报错、
+     * 只是影响 0 行,而记录照样停在 running。
+     */
+    const rows = Array.isArray(res?.[0]) ? (res[0] as unknown[]).length : 0;
+    if (rows === 0) {
+      console.warn(`[flow-repo] ⚠️ endRun 没更新到任何行(run_id=${runId})—— 记录会停在 running`);
+    }
   } catch (err) {
-    console.warn(`[flow-repo] 收 run 失败(记录会停在 running):${String(err)}`);
+    /** ⚠️ 不静默:收不了 run 就是「这次执行没有结局」,必须看得见 */
+    console.error(`[flow-repo] ⚠️⚠️ 收 run 失败,记录会停在 running(run_id=${runId}):${String(err)}`);
   }
 }
 

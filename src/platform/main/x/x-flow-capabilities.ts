@@ -142,11 +142,31 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         limit: num(params.limit),
         ref: str(params.ref),
       });
+      /**
+       * ⭐⭐ **跳过的理由要分类报出来** —— 2026-09-24 实测:
+       * 编排报「扫了 10 条,拟出 0 条,跳过 10 条」,而**为什么跳**一个字没有。
+       * 于是「模型都说不值得回」和「这 10 条早就回过了」长得一模一样,
+       * 只能再去翻代码/查库才知道 —— 那正是编排该消灭的东西。
+       *
+       * ⚠️ 用 `skipReason` 聚合(already_replied / blocked_author /
+       * duplicate / ai_declined / low_confidence …),不列具体条目:
+       * 编排报告是给人看「这一步发生了什么」,不是给人看全量数据。
+       */
+      const byReason = new Map<string, number>();
+      for (const sk of r.skips as Array<{ skipReason?: string }>) {
+        const k = sk?.skipReason ?? 'unknown';
+        byReason.set(k, (byReason.get(k) ?? 0) + 1);
+      }
+      const reasons = [...byReason.entries()]
+        .sort((a2, b2) => b2[1] - a2[1])
+        .map(([k, n]) => `${k}×${n}`)
+        .join(' · ');
       return {
         ok: true, produced: r.drafts.length,
         note: r.scanned === 0
           ? '没有「值得回复且还没回过」的候选(不是故障)'
-          : `扫了 ${r.scanned} 条,拟出 ${r.drafts.length} 条草稿,跳过 ${r.skips.length} 条`,
+          : `扫了 ${r.scanned} 条,拟出 ${r.drafts.length} 条草稿`
+            + (r.skips.length ? `,跳过 ${r.skips.length} 条(${reasons})` : ''),
         elapsedMs: Date.now() - t0,
       };
     },

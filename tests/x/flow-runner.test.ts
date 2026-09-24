@@ -228,3 +228,50 @@ describe('⚠️⚠️ wcId 必须一路传到每一步(2026-09-24 实测:漏了
     expect(view, '没显示断在哪一步').toMatch(/failedAt/);
   });
 });
+
+describe('⚠️⚠️ 收 run 必须真的收掉(2026-09-24 实测:两次运行都卡在 running)', () => {
+  const strip = (x: string) =>
+    x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const repo = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/flow/flow-run-repo.ts'), 'utf-8'));
+  const caps = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-flow-capabilities.ts'), 'utf-8'));
+
+  it('⭐⭐ duration 必须用 duration::millis(),不能自己除', () => {
+    /**
+     * ── 实测真因 ──
+     * `math::floor((time::now() - started_at) / 1ms)` 算出来是 **NaN**,
+     * 被 schema 拒收(Expected none | int but found NaN)→ **整条 UPDATE 失败**
+     * → run 永远停在 running。
+     * ⚠️ 而 catch 把它吞成 warn,于是**两次运行都卡住也没人发现** ——
+     * 「跑到一半崩了」与「跑完了」在记录里长得一模一样。
+     */
+    expect(repo, 'duration 又改回自己除了 —— 会算出 NaN,整条 UPDATE 被拒')
+      .not.toMatch(/\/ 1ms\)/);
+    expect(repo, '没用 duration::millis()').toMatch(/duration::millis\(/);
+  });
+
+  it('⚠️⚠️ 收 run 失败要响,不能静默 warn', () => {
+    const i = repo.indexOf('export async function endRun');
+    expect(i, '找不到 endRun').toBeGreaterThan(0);
+    const blk = repo.slice(i, i + 1600);
+    expect(blk, '收 run 失败还是静默 warn —— 这次执行「没有结局」却没人知道')
+      .toMatch(/console\.error/);
+    /** ⭐ 写了但 0 行也要响:runId 对不上时 UPDATE 不报错,只是影响 0 行 */
+    expect(blk, '没检查「更新了几行」—— runId 对不上时照样停在 running')
+      .toMatch(/rows === 0/);
+  });
+
+  it('⭐⭐ planReply 要报**为什么**跳过,不能只报总数', () => {
+    /**
+     * ⚠️ 实测编排报「扫了 10 条,拟出 0 条,跳过 10 条」而**为什么跳一个字没有** ——
+     * 「模型都说不值得回」和「这 10 条早就回过了」长得一模一样,
+     * 还得再去查库才知道。那正是编排该消灭的东西。
+     */
+    const i = caps.indexOf('async planReply(');
+    expect(i, '找不到 planReply 适配器').toBeGreaterThan(0);
+    const blk = caps.slice(i, i + 1800);
+    expect(blk, '跳过原因没有分类聚合 —— 人看不出是哪种跳过')
+      .toMatch(/skipReason/);
+  });
+});
