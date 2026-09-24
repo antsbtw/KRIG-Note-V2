@@ -51,7 +51,24 @@ describe('⭐⭐ 控制台四处接线齐全', () => {
   });
 
   it('⭐⭐ 每个频道都有主侧 handler(否则 invoke 必 reject)', () => {
-    const missing = WEBC_CHANNELS.filter(
+    /**
+     * ⚠️⚠️ **广播频道不该有 handler** —— 2026-09-24 加 WEBC_FLOW_PROGRESS 时撞红。
+     *
+     * 它是 **main → renderer 单向推送**(`wc.send`),不是 invoke ——
+     * 给它注册 `ipcMain.handle` 反而是错的。
+     * ⭐ 所以这条守卫要**区分两类频道**,而不是放宽成「有些可以没有」:
+     * 放宽的话,真正漏了 handler 的 invoke 频道也会被放过。
+     *
+     * 判据:频道**名字**里带 PROGRESS/UPDATE/EVENT 的是广播
+     * (与 X_CAPTURE_UPDATE / X_HARVEST_PROGRESS 同一套命名习惯)。
+     * ⚠️ 加新的广播频道时按这个命名,否则这里会误报。
+     */
+    const isBroadcast = (c: string) => /_(PROGRESS|UPDATE|EVENT)$/.test(c);
+    const invokeChannels = WEBC_CHANNELS.filter((c) => !isBroadcast(c));
+    /** ⭐ 前提自检:别把所有频道都当成广播而空转 */
+    expect(invokeChannels.length, 'invoke 型频道一个都没剩 —— 守卫在空转')
+      .toBeGreaterThan(10);
+    const missing = invokeChannels.filter(
       (c) => !new RegExp(`ipcMain\\.handle\\(\\s*IPC_CHANNELS\\.${c}\\b`).test(handler),
     );
     expect(
