@@ -162,24 +162,19 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         .map(([k, n]) => `${k}×${n}`)
         .join(' · ');
       /**
-       * ⚠️⚠️ **草稿目前没有落库** —— 2026-09-24 编排实跑查实。
+       * ⭐⭐ **落库结果要如实报** —— 2026-09-24 用户拍板落库
+       * (「这是未来AI学习和优化的环节」)。
        *
-       * `planReplies` 只**返回**草稿,全仓没有任何地方把它写进库:
-       *  · `reply_draft` 字段定义在 **tweet_inbox**(已知死表),
-       *    `x_tweet` 上**根本没有这个字段** —— 实测往 x_tweet 写它
-       *    直接报 `Found field 'reply_draft', but no such field exists`,
-       *    **整条 upsert 失败**(不是静默丢弃)
-       *  · UI 那条路径把草稿放在 `useState` 里,关掉就没
-       *
-       * ⭐ 手点「✎拟回复」时人当场看得见,所以这个洞一直没暴露;
-       *   **编排跑完没人看,草稿直接蒸发** —— 是编排把它逼出来的。
-       *
-       * ⚠️ 这里**如实报出来**,不假装成功:
-       *   「拟出 N 条」而 N 条查无实据,正是本仓最忌的「看着成功实际没有」。
+       * ⚠️ 「拟出 N 条」与「存进去 N 条」**必须分开报**:
+       * 之前报「拟出 6 条」而库里一条都没有,正是本仓最忌的「看着成功实际没有」。
+       * ⭐ 两个数相等才算真成;不等就把失败条数摆出来。
        */
-      const note0 = r.drafts.length > 0
-        ? ' ⚠️ **草稿只在返回值里,没有落库**(x_tweet 无 reply_draft 字段)—— 关掉就没'
-        : '';
+      const pst = r.persisted;
+      const note0 = !pst || r.drafts.length === 0
+        ? ''
+        : pst.failed > 0
+          ? ` ⚠️ **${pst.failed} 条没存进库**(${pst.errors[0] ?? ''})`
+          : ` · 已落库 ${pst.saved} 条`;
       return {
         ok: true, produced: r.drafts.length,
         note: r.scanned === 0

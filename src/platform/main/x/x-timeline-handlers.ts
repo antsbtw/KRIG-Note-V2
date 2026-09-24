@@ -25,6 +25,8 @@ import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
+/** ⭐ 草稿落库 —— AI 学习的训练信号(migration 1.2.8) */
+import { insertReplyDrafts, resolveReplyDraft } from '../db/x-reply-draft-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import { fetchParentTweet } from './x-parent-tweet';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
@@ -66,8 +68,12 @@ import type { TweetInboxStatus, TweetFeedback, FeedbackVerdict, SearchRecipe } f
  */
 export async function planReplyBatch(
   wsId: string,
-  opts: { tweetIds?: string[]; limit?: number; ref?: string } = {},
-): Promise<{ drafts: unknown[]; skips: unknown[]; scanned: number }> {
+  opts: { tweetIds?: string[]; limit?: number; ref?: string; runId?: string } = {},
+): Promise<{
+  drafts: unknown[]; skips: unknown[]; scanned: number;
+  /** ⭐ 真写进库几条 —— ⚠️ 与 drafts.length 不等就是有失败,必须报出来 */
+  persisted?: { saved: number; failed: number; errors: string[] };
+}> {
   const wanted = Array.isArray(opts.tweetIds) ? new Set(opts.tweetIds) : null;
   const pool = await queryInbox({
     status: 'worth', wsId, replied: false, limit: opts.limit ?? 30,
@@ -102,7 +108,26 @@ export async function planReplyBatch(
     alreadyRepliedTweetIds, recentlyRepliedAuthors, fingerprintCounts,
     selfHandle: acc?.handle, ref: opts.ref,
   });
-  return { drafts: r.drafts, skips: r.skips, scanned: batch.length };
+  /**
+   * ⭐⭐ **草稿落库** —— 用户 2026-09-24:「落库,这是未来AI学习和优化的环节吧?」
+   *
+   * ⚠️ 2026-09-24 编排实跑查实:`planReplies` 只**返回**草稿,
+   * 全仓**没有任何地方**写进库;UI 那条路径放 `useState`,关掉就没。
+   * 手点时人当场看得见所以一直没暴露,**编排跑完没人看 → 草稿蒸发**。
+   *
+   * ⚠️ **落库失败不拦返回** —— 草稿已经拟出来了,不能因为存不下而当没拟;
+   * 但**不静默**:失败条数带回去,由调用方如实报出来。
+   */
+  const tweetTextById = new Map(batch.map((t) => [t.tweet_id, t.text ?? '']));
+  const persisted = await insertReplyDrafts(r.drafts, {
+    wsId, runId: opts.runId,
+    tweetTextOf: (id) => tweetTextById.get(id),
+  }).catch((e) => {
+    console.warn('[x-timeline-handlers] 草稿批量入库失败(不拦返回):', e);
+    return { saved: 0, failed: r.drafts.length, errors: [String(e).slice(0, 200)] };
+  });
+
+  return { drafts: r.drafts, skips: r.skips, scanned: batch.length, persisted };
 }
 
 export function registerXTimelineHandlers(): void {
@@ -1042,6 +1067,16 @@ export function registerXTimelineHandlers(): void {
         await watchAuthor(p.author_handle, { source: 'replied', depth: 1 })
           .catch((e: unknown) => console.warn('[x-timeline-handlers] 自动入列失败:', e));
       }
+
+      /**
+       * ⭐⭐ **人表态时,草稿那张表也要收口** —— 否则 pending 永远堆着,
+       * 「还有多少没处理」这个数就永远是错的。
+       * ⚠️ 两张表**各记各的**,不互相替代:
+       *   x_reply_draft = AI 产出了什么(流水) / x_reply_feedback = 人怎么表态(结论)
+       * ⚠️ 失败不拦反馈落库 —— 反馈比状态收口重要(降级要局部)。
+       */
+      await resolveReplyDraft(p.tweet_id, p.action === 'dismissed' ? 'dismissed' : 'filled')
+        .catch((e: unknown) => console.warn('[x-timeline-handlers] 草稿状态收口失败:', e));
 
       await insertReplyFeedback({
         tweet_id:   p.tweet_id,

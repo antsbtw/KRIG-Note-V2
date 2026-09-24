@@ -393,38 +393,35 @@ describe('⭐⭐ 进度广播:长任务不能是黑箱', () => {
   });
 });
 
-describe('⚠️⚠️ 草稿没落库这件事必须说出来(2026-09-24 编排实跑查实)', () => {
+describe('⭐⭐ 草稿落库:拟出几条与存进几条必须分开报', () => {
+  /**
+   * ⚠️⚠️ **这组守卫的使命变了,不是放宽** —— 2026-09-24 当天两次改动:
+   *
+   * 上午:查实草稿**没有落库**(planReplies 只返回、x_tweet 无 reply_draft 字段、
+   *      UI 放 useState),于是要求适配器**如实标注「没落库」**。
+   * 下午:用户拍板「落库,这是未来AI学习和优化的环节吧?」→ 建了 x_reply_draft
+   *      (migration 1.2.8),草稿真的存下来了。
+   *
+   * ⭐ 此时再要求代码说「没落库」就成了**要求代码说谎** ——
+   *   保留**意图**(不许「报 N 条而查无实据」),换掉**手段**。
+   * ⭐ 写上一版时就留了后手:另一条守卫钉住「x_tweet 上没有 reply_draft」这个依据,
+   *   正是它提醒了这次该一起改。
+   */
   const strip2 = (x: string) =>
     x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   const caps2 = strip2(readFileSync(
     join(process.cwd(), 'src/platform/main/x/x-flow-capabilities.ts'), 'utf-8'));
-  const xschema = readFileSync(
-    join(process.cwd(), 'src/storage/surreal/x-schema.ts'), 'utf-8');
 
-  it('⭐⭐ 拟出草稿时要如实标注「没落库」', () => {
+  it('⭐⭐ 拟出草稿时要报**落库结果**,不能只报拟了几条', () => {
     /**
-     * ── 查实的事 ──
-     * `planReplies` 只**返回**草稿,全仓没有任何地方写进库:
-     *  · `reply_draft` 定义在 **tweet_inbox**(已知死表),x_tweet 上没有
-     *  · 实测往 x_tweet 写它直接报错、**整条 upsert 失败**(不是静默丢弃)
-     *  · UI 把草稿放 useState,关掉就没
-     * ⭐ 手点时人当场看得见,所以一直没暴露;编排跑完没人看 → 草稿蒸发。
-     * ⚠️ 报「拟出 N 条」而 N 条查无实据 = 本仓最忌的「看着成功实际没有」。
+     * ⚠️ 「拟出 6 条」而库里一条都没有 —— 那是本仓最忌的「看着成功实际没有」。
+     * ⭐ 两个数都报,相等才算真成。
      */
-    const i = caps2.indexOf('async planReply(');
-    expect(i, '找不到 planReply 适配器').toBeGreaterThan(0);
-    const blk = caps2.slice(i, i + 2600);
-    expect(blk, '拟出草稿却不说「没落库」—— 人会以为存下来了')
-      .toMatch(/没有落库|没落库/);
-  });
-
-  it('⚠️ x_tweet 确实没有 reply_draft 字段(这条断言是上面那句话的依据)', () => {
-    /**
-     * ⭐ 把「依据」也钉住:哪天真给 x_tweet 加了这个字段并落库,
-     * 这条会红 —— 提醒把上面那句警示一起去掉,别留下过期的话。
-     */
-    const xt = xschema.split('tweet_inbox')[0];
-    expect(xt, 'x_tweet 上出现了 reply_draft —— 若已落库,请同时删掉「没落库」的警示')
-      .not.toMatch(/reply_draft\s+ON x_tweet/);
+    const i2 = caps2.indexOf('async planReply(');
+    expect(i2, '找不到 planReply 适配器').toBeGreaterThan(0);
+    const blk = caps2.slice(i2, i2 + 2600);
+    expect(blk, '没报落库结果 —— 人无法判断草稿是否真的存下来了')
+      .toMatch(/persisted|已落库/);
+    expect(blk, '落库失败时没把失败条数报出来').toMatch(/failed/);
   });
 });

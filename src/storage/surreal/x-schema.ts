@@ -1411,6 +1411,83 @@ DEFINE FIELD IF NOT EXISTS is_article ON x_tweet TYPE option<bool>;
 DEFINE INDEX IF NOT EXISTS idx_tweet_is_article ON x_tweet FIELDS is_article;
 `;
 
+/**
+ * 1.2.8 —— 拟出来的回复草稿落库(2026-09-24)
+ *
+ * ── 用户拍板 ──
+ * > 「落库,这是未来AI学习和优化的环节吧?」
+ *
+ * ⭐ 对:草稿 + 人改成什么 + 发没发 = **「AI 写的 vs 人要的」差集**,
+ *   那才是训练信号。不落库就没有这个差集。
+ *
+ * ── 为什么非建这张表不可(2026-09-24 编排实跑查实)──
+ *
+ * 编排报「拟出 6 条草稿」,而库里**一条都查不到**:
+ *  · `planReplies` 只**返回**草稿,全仓没有任何地方写进库
+ *  · `reply_draft` 字段定义在 **tweet_inbox**(已知死表),
+ *    `x_tweet` 上**根本没有** —— 实测往 x_tweet 写它直接报
+ *    `Found field 'reply_draft', but no such field exists`,**整条 upsert 失败**
+ *  · UI 那条路径把草稿放在 `useState` 里,关掉就没
+ * ⭐ 手点「✎拟回复」时人当场看得见,所以这个洞一直没暴露;
+ *   编排跑完没人看 → 草稿直接蒸发。
+ *
+ * ── 与 `x_reply_feedback` 的分工(⚠️ 别混)──
+ *
+ * | | 这张表 | x_reply_feedback |
+ * |---|---|---|
+ * | 记什么 | **AI 产出了什么**(流水) | **人最终怎么表态**(结论) |
+ * | 何时写 | 拟出来就写 | 人点了「填进X/忽略」才写 |
+ * | 有没有人参与 | 没有也照样有行 | 必须有人 |
+ *
+ * ⚠️ 不复用 x_reply_feedback 加个 pending 态:那张表现有 425 行的语义是
+ * 「人的反馈」,混进未表态的行会让旧统计口径(采纳率/edited 率)静默变化。
+ *
+ * ── 状态流转 ──
+ * `pending`(刚拟出) → `filled`(人填进X) / `dismissed`(人否决) / `expired`(没处理)
+ * ⚠️ 状态**只增不改语义**:人表态时更新本行 + 照旧写 x_reply_feedback,
+ *   两张表**各记各的**,不互相替代。
+ */
+const X_SCHEMA_1_2_8 = `
+DEFINE TABLE IF NOT EXISTS x_reply_draft SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS tweet_id    ON x_reply_draft TYPE string ASSERT $value != '';
+-- 拟稿当时的推文正文快照 —— ⚠️ 不 join x_tweet:那边有 TTL,过期后回看就没上下文了
+DEFINE FIELD IF NOT EXISTS tweet_text  ON x_reply_draft TYPE string;
+DEFINE FIELD IF NOT EXISTS author_handle ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS lang        ON x_reply_draft TYPE string;   -- zh | en
+-- AI 写的正文(回落模板时是模板正文)
+DEFINE FIELD IF NOT EXISTS ai_text     ON x_reply_draft TYPE string;
+DEFINE FIELD IF NOT EXISTS source      ON x_reply_draft TYPE string;   -- generated | template
+DEFINE FIELD IF NOT EXISTS confidence  ON x_reply_draft TYPE option<float>;
+-- ⭐ 推断链留档 —— 「为什么这么写」,回归分析要用
+DEFINE FIELD IF NOT EXISTS poster_kind ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS poster_read ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS trigger     ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ai_reason   ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS in_thread   ON x_reply_draft TYPE option<bool>;
+-- pending | filled | dismissed | expired
+DEFINE FIELD IF NOT EXISTS status      ON x_reply_draft TYPE string DEFAULT 'pending';
+-- ⭐ 哪次编排拟的 —— 没有它就说不清「这批草稿是哪一跑的产物」
+DEFINE FIELD IF NOT EXISTS run_id      ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ref         ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id       ON x_reply_draft TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at  ON x_reply_draft TYPE datetime;
+DEFINE FIELD IF NOT EXISTS resolved_at ON x_reply_draft TYPE option<datetime>;
+-- ⚠️ 同一条推可能被多次拟稿(重跑/改配方),所以**不做 tweet_id 唯一索引**
+DEFINE INDEX IF NOT EXISTS idx_rdft_tweet   ON x_reply_draft FIELDS tweet_id;
+DEFINE INDEX IF NOT EXISTS idx_rdft_status  ON x_reply_draft FIELDS status;
+DEFINE INDEX IF NOT EXISTS idx_rdft_run     ON x_reply_draft FIELDS run_id;
+DEFINE INDEX IF NOT EXISTS idx_rdft_created ON x_reply_draft FIELDS created_at;
+`;
+
+export async function x_migration_1_2_8(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_8);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.8', appliedAt = $now,
+      description = 'x_reply_draft (AI drafts persisted — training signal for reply quality)'`,
+    { rid: new RecordId('schema_version', '1.2.8'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_7(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_7);
   await db.query(
