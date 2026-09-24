@@ -64,6 +64,37 @@ export interface FlowRunResult {
 export type AbortCheck = () => boolean;
 
 /**
+ * ⭐⭐ **每一步的实时状态** —— 用户 2026-09-24 那句「没有任何反应」的解药。
+ *
+ * ── 为什么非有不可(实测数据)──
+ * 四步耗时 **0.1s / 30.8s / 330.8s / 0.5s** —— 差 3000 倍。
+ * 而 `runFlow` 是**一个 invoke 等到底**:判断那步 5.5 分钟里
+ * renderer **什么都收不到**,人只能看着它转,以为死了。
+ *
+ * ⚠️ 光加 UI 解决不了 —— 数据根本没送出去。
+ */
+export interface FlowProgress {
+  runId: string;
+  /** ⚠️⚠️ **必须带 wsId,接收方必须核对** —— 广播是发给所有 renderer 的,
+   *  不核对就会「A 窗口的进度显示在 B 窗口」(记忆:宿主广播×多ws扇出) */
+  wsId?: string;
+  flowName: string;
+  seq: number;
+  stepId: string;
+  label: string;
+  /** running = 刚开始这一步(此时还没有结果) */
+  status: 'running' | 'ok' | 'failed' | 'skipped';
+  /** 总共几步 —— 面板要显示「3/4」 */
+  total: number;
+  produced?: number;
+  note?: string;
+  error?: string;
+  elapsedMs?: number;
+}
+
+export type ProgressSink = (p: FlowProgress) => void;
+
+/**
  * 跑一份编排档。
  *
  * @param recipe 编排档(步骤序列)
@@ -73,7 +104,11 @@ export type AbortCheck = () => boolean;
 export async function runFlow(
   recipe: FlowRecipe,
   caps: FlowCapabilities,
-  opts: { wsId?: string; trigger?: 'manual' | 'schedule'; isAborted?: AbortCheck } = {},
+  opts: {
+    wsId?: string; trigger?: 'manual' | 'schedule'; isAborted?: AbortCheck;
+    /** ⭐ 每步开始/结束各回调一次 —— ⚠️ 回调抛错**不许拦执行**(降级要局部) */
+    onProgress?: ProgressSink;
+  } = {},
 ): Promise<FlowRunResult> {
   const t0 = Date.now();
   const runId = newRunId();
@@ -100,6 +135,18 @@ export async function runFlow(
   const steps: FlowRunResult['steps'] = [];
   let failedAt: string | undefined;
   let seq = 0;
+  const total = recipe.steps.length;
+  /**
+   * ⚠️ 进度**发不出去不能拦执行** —— 与留痕同一纪律:降级要局部。
+   * 采集跑成了就是跑成了,不能因为面板没收到而翻案。
+   */
+  const emit = (p: Omit<FlowProgress, 'runId' | 'wsId' | 'flowName' | 'total'>): void => {
+    try {
+      opts.onProgress?.({ runId, wsId, flowName: recipe.name, total, ...p });
+    } catch (e) {
+      console.warn('[flow-runner] 进度广播失败(不拦执行):', e);
+    }
+  };
 
   for (const step of recipe.steps) {
     seq += 1;
@@ -125,6 +172,7 @@ export async function runFlow(
           : undefined;
 
     if (skipReason) {
+      emit({ seq, stepId: step.id, label, status: 'skipped', note: skipReason, elapsedMs: 0 });
       steps.push({ id: step.id, kind: step.kind, label, status: 'skipped', produced: 0, note: skipReason, elapsedMs: 0 });
       await recordStep(stepCtx, {
         status: 'skipped', input: step.params, reasoning: skipReason, durationMs: 0,
@@ -142,6 +190,8 @@ export async function runFlow(
       continue;
     }
 
+    /** ⭐ 开始就发一次 —— 这是「判断那步跑 5 分钟」时唯一的反馈 */
+    emit({ seq, stepId: step.id, label, status: 'running' });
     const s0 = Date.now();
     let out: FlowStepOutcome;
     try {
@@ -157,6 +207,11 @@ export async function runFlow(
     }
 
     if (!out.ok) failedAt = step.id;
+    emit({
+      seq, stepId: step.id, label,
+      status: out.ok ? 'ok' : 'failed',
+      produced: out.produced, note: out.note, error: out.error, elapsedMs: out.elapsedMs,
+    });
     steps.push({
       id: step.id, kind: step.kind, label,
       status: out.ok ? 'ok' : 'failed',

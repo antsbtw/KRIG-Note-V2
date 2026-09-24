@@ -397,6 +397,8 @@ export const IPC_CHANNELS = {
   WEBC_STOP_COLLECT: 'webc:stop-collect',
   // 执行:跑一份编排档(四步串起来,每步落 flow_step_run)
   WEBC_RUN_FLOW: 'webc:run-flow',
+  // main → renderer 广播:编排每一步的实时状态(⚠️ 带 wsId,接收方必须核对)
+  WEBC_FLOW_PROGRESS: 'webc:flow-progress',
   WEBC_WHERE_AM_I:   'webc:where-am-i',    // 输出:当前页面是哪个语义页面 + 参数(右边自动填充用)
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
   X_NOTIF_WATCH_START:  'x:notif-watch-start',

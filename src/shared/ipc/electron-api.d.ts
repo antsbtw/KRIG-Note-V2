@@ -248,6 +248,18 @@ declare global {
          * ⭐⭐ **跑一份编排档** —— 四步串起来,每步落一条 flow_step_run。
          * ⚠️ 不传 recipe = 用默认的四步档(搜索→采集→判断→拟回复)。
          */
+        /**
+         * ⭐ 订阅编排进度 —— 每步**开始**和**结束**各回调一次。
+         * ⚠️⚠️ 回调里必须核对 `wsId`:广播发给所有 renderer,
+         * 不核对会「A 窗口的进度显示在 B 窗口」。
+         * @returns 取消订阅的函数
+         */
+        onFlowProgress(cb: (p: {
+          runId: string; wsId?: string; flowName: string;
+          seq: number; total: number; stepId: string; label: string;
+          status: 'running' | 'ok' | 'failed' | 'skipped';
+          produced?: number; note?: string; error?: string; elapsedMs?: number;
+        }) => void): () => void;
         runFlow(args: { wsId?: string; wcId?: number; recipe?: unknown }): Promise<{
           channelOk: boolean; error?: string;
           report?: {

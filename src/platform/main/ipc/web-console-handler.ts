@@ -63,6 +63,7 @@ import { takeDossierInventory } from '../db/x-dossier-inventory';
 import { autoCollect } from '../x/x-auto-collect';
 import { requestAbort, isAborted } from '../x/x-collect-abort';
 import { runFlow } from '../flow/flow-runner';
+import { webContents as allWebContents } from 'electron';
 import { makeXFlowCapabilities } from '../x/x-flow-capabilities';
 import { DEFAULT_X_FLOW } from '../x/x-flow-recipes';
 import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES } from '../x/x-pages';
@@ -986,6 +987,18 @@ export function registerWebConsoleHandlers(): void {
         wsId,
         /** ⭐ 复用采集那套暂停键 —— 不另起一套停止语义 */
         isAborted: () => isAborted(wsId),
+        /**
+         * ⭐⭐ **逐步广播** —— 用户 2026-09-24 那句「没有任何反应」的解药。
+         * 四步耗时 0.1s~330s 差 3000 倍,一个 invoke 等到底的话
+         * 判断那 5.5 分钟里 renderer 什么都收不到。
+         * ⚠️ 广播带 wsId,**接收方必须核对**(多窗口下每个 renderer 都会收到)。
+         */
+        onProgress: (p) => {
+          for (const wc of allWebContents.getAllWebContents()) {
+            if (wc.isDestroyed()) continue;
+            try { wc.send(IPC_CHANNELS.WEBC_FLOW_PROGRESS, p); } catch { /* 已销毁 */ }
+          }
+        },
       });
       recordRun('runFlow',
         { flow: recipe.name, steps: recipe.steps.length },

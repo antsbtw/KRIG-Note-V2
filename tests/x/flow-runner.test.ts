@@ -325,3 +325,70 @@ describe('⭐⭐ 档级共享参数:只写一遍,步骤可覆盖', () => {
       .toBeLessThanOrEqual(1);
   });
 });
+
+describe('⭐⭐ 进度广播:长任务不能是黑箱', () => {
+  it('⚠️⚠️ 每步**开始**就要发一次(判断那步 5.5 分钟的唯一反馈)', async () => {
+    /**
+     * ── 实测 ──
+     * 四步耗时 0.1s / 30.8s / **330.8s** / 0.5s —— 差 3000 倍。
+     * 而 runFlow 是一个 invoke 等到底,判断那 5.5 分钟里 renderer 什么都收不到,
+     * 用户看到的就是「没有任何反应」。
+     * ⭐ 所以**开始时**就得发,不能只在结束时发。
+     */
+    const seen: Array<{ seq: number; status: string }> = [];
+    await runFlow(recipe([
+      { id: 's1', kind: 'collect' }, { id: 's2', kind: 'judge' },
+    ]), caps(), { onProgress: (p) => seen.push({ seq: p.seq, status: p.status }) });
+
+    const running = seen.filter((x) => x.status === 'running');
+    expect(running.length, '没有 running 事件 —— 长步骤跑起来仍是黑箱').toBe(2);
+    /** ⭐ 顺序必须是 开始→结束,不能只有结束 */
+    expect(seen[0]).toEqual({ seq: 1, status: 'running' });
+    expect(seen[1]).toEqual({ seq: 1, status: 'ok' });
+  });
+
+  it('⚠️⚠️ 进度里必须带 wsId(多窗口下不带就会串台)', async () => {
+    /** ⚠️ 广播发给所有 renderer,不带 wsId 接收方无从核对 */
+    const seen: Array<{ wsId?: string }> = [];
+    await runFlow(recipe([{ id: 's', kind: 'collect' }]), caps(),
+      { wsId: 'ws-2', onProgress: (p) => seen.push({ wsId: p.wsId }) });
+    expect(seen.every((x) => x.wsId === 'ws-2'), '进度没带 wsId —— A 窗口的进度会显示在 B 窗口')
+      .toBe(true);
+  });
+
+  it('⭐ 要带总步数(面板要显示「3/4」)', async () => {
+    const seen: number[] = [];
+    await runFlow(recipe(FOUR), caps(), { onProgress: (p) => seen.push(p.total) });
+    expect(seen.every((t) => t === 4), '总步数不对 —— 面板显示不出进度').toBe(true);
+  });
+
+  it('⚠️⚠️ 进度回调抛错**不许拦执行**(降级要局部)', async () => {
+    /**
+     * ⚠️ 面板没收到进度 ≠ 采集失败。
+     * 让广播失败拖垮执行,等于「因为记不下来而把成功翻案」。
+     */
+    const r = await runFlow(recipe(FOUR), caps(), {
+      onProgress: () => { throw new Error('renderer 没了'); },
+    });
+    expect(r.ok, '进度回调抛错把整条 run 弄失败了').toBe(true);
+    expect(r.steps.every((x) => x.status === 'ok')).toBe(true);
+  });
+
+  it('⭐ 跳过的步骤也要发进度(否则面板上那几行永远停在「未开始」)', async () => {
+    const seen: Array<{ stepId: string; status: string }> = [];
+    await runFlow(recipe(FOUR), caps({ collect: vi.fn(async () => fail('x')) }),
+      { onProgress: (p) => seen.push({ stepId: p.stepId, status: p.status }) });
+    const skipped = seen.filter((x) => x.status === 'skipped');
+    expect(skipped.length, '跳过的步骤没发进度 —— 面板上会一直显示「未开始」').toBe(2);
+  });
+
+  it('⚠️ handler 广播时要核对 —— 带 wsId 发出去', () => {
+    const strip2 = (x: string) =>
+      x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const h = strip2(readFileSync(
+      join(process.cwd(), 'src/platform/main/ipc/web-console-handler.ts'), 'utf-8'));
+    expect(h, 'handler 没把进度广播出去 —— 面板订阅了也收不到')
+      .toMatch(/WEBC_FLOW_PROGRESS/);
+    expect(h, '没接 onProgress').toMatch(/onProgress:/);
+  });
+});
