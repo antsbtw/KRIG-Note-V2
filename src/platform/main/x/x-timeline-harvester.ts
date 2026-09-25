@@ -311,6 +311,11 @@ export interface HarvestReport {
   /** ⭐ 翻页失败时发出去的 URL(诊断用) */
   failedUrl?: string;
   /**
+   * ⭐ 翻页失败的判据 —— status / content-type / 实际 method / 响应体开头。
+   * ⚠️ 与 failedUrl 一起看才分得出三种成因(见失败分支的注释)。
+   */
+  failedProbe?: { status?: number; ctype?: string; method?: string; bodyHead?: string };
+  /**
    * ⭐ 最后一个 GraphQL 请求(URL + 头)—— 游标翻页**重发它**,不自己拼。
    * X 的 queryId/features 会随版本变,复刻必然过期;复用刚发过的那条不会。
    */
@@ -1134,6 +1139,14 @@ export async function harvestTimeline(
   let domExpanded = 0;
   /** ⭐ 翻页失败时真正发出去的那条 URL —— 不给它就只能猜 */
   let failedUrl: string | undefined;
+  /**
+   * ⭐⭐ 翻页失败的**判据**:status / content-type / 实际 method / 响应体开头。
+   * ⚠️ 只有 URL 还不够 —— 「抄错请求 / 游标换坏 / queryId 过期」三种成因
+   * 要靠 content-type 与 body 才分得开(实测:404+非JSON = 没进 handler)。
+   */
+  let failedProbe: {
+    status?: number; ctype?: string; method?: string; bodyHead?: string;
+  } | undefined;
 
   for (let i = 1; i <= maxRounds; i++) {
     /**
@@ -1582,7 +1595,10 @@ export async function harvestTimeline(
       try {
         const res = await wc.executeJavaScript(
           buildRefetchScript(nextUrl, baseReq.headers, baseReq.method), true,
-        ) as { __body?: string; __err?: string };
+        ) as {
+          __body?: string; __err?: string;
+          __status?: number; __ctype?: string; __bodyHead?: string; __method?: string;
+        };
         if (res?.__err) {
           /**
            * ⭐⭐ 404 时**把真正发出去的 URL 交出来**。
@@ -1593,7 +1609,27 @@ export async function harvestTimeline(
            * 长得一模一样,**不给 URL 就查不下去**(别猜、看真实数据)。
            */
           failedUrl = nextUrl;
-          stopReason = `游标翻页:请求失败(${res.__err})`;
+          /**
+           * ⭐⭐ **把三种成因的判据写进停止原因** —— 2026-09-25 补。
+           *
+           * ⚠️ 只说「请求失败(404)」时,「抄错请求 / 游标换坏 / queryId 过期」
+           * 三种成因**长得一模一样**(下面那段注释早就写着),查不下去。
+           * ⭐ 判据(实测出来的,见 project-x-cursor-paging):
+           *  · **404 + 非 JSON + 空 body** = 请求根本没进 GraphQL handler
+           *    → 多半是 **method 不对**(followers 那次真因就是必须用 POST)
+           *  · 404 + JSON(带 errors[]) = 进了 handler,是业务错误(游标/queryId)
+           */
+          failedProbe = {
+            status: res.__status, ctype: res.__ctype,
+            method: res.__method, bodyHead: res.__bodyHead,
+          };
+          const looksUnrouted = !!res.__ctype && !/json/i.test(res.__ctype);
+          stopReason = `游标翻页:请求失败(${res.__err}`
+            + `,method=${res.__method ?? '?'},content-type=${res.__ctype ?? '?'}`
+            + (looksUnrouted
+              ? ' —— **非 JSON,请求多半没进 GraphQL handler(先查 method)**'
+              : '')
+            + ')';
           break;
         }
         if (!res?.__body) { stopReason = '游标翻页:响应是空的'; break; }
@@ -1775,6 +1811,7 @@ export async function harvestTimeline(
     pagingSkipped,
     domExpanded,
     failedUrl,
+    failedProbe,
     /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */
     lastRequest: lastPeopleReq ?? undefined,
   };

@@ -1380,6 +1380,8 @@ export async function autoCollect(
     domExpanded: r.domExpanded,
     /** ⭐ 翻页失败发的是哪条 URL —— 不进留痕就只能猜(2026-09-23 实测漏掉) */
     failedUrl: r.failedUrl,
+    /** ⭐ 与 failedUrl 一起进留痕 —— 只有 URL 分不出三种成因 */
+    failedProbe: r.failedProbe,
     elapsedMs: Date.now() - t0,
     parseRate: r.parseRate,
     ops: aggregateOps(r.seenOps),

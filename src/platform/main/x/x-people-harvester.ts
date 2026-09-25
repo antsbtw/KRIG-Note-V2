@@ -394,7 +394,30 @@ export function buildRefetchScript(
         headers: ${JSON.stringify(safe)},
         credentials: 'include',
       });
-      if (!r.ok) return { __err: 'HTTP ' + r.status };
+      if (!r.ok) {
+        /**
+         * ⭐⭐ **失败时把判据一起交出来** —— 2026-09-25 查翻页 404 时发现缺的正是这些。
+         *
+         * ⚠️ 只报 'HTTP 404' 的话,三种成因**长得一模一样**
+         * (注释在 x-timeline-harvester 的失败分支里早就写着):
+         *  · 抄错了请求 / 游标换坏了 / queryId 过期
+         *
+         * ⭐ 判据(记忆 project-x-cursor-paging 实测出来的):
+         *  · **content-type** —— 「404 + 空 body + 非 JSON」是指纹:
+         *    请求**根本没进 GraphQL handler**(followers 那次真因是必须用 POST)
+         *  · **响应体开头** —— X 真正的业务错误会返回 JSON 带 errors[]
+         *  · **实际用的 method** —— 抄到的 method 会骗人,得看发出去的是什么
+         */
+        let head = '';
+        try { head = (await r.text()).slice(0, 200); } catch (e) { head = '(读不出 body)'; }
+        return {
+          __err: 'HTTP ' + r.status,
+          __status: r.status,
+          __ctype: r.headers.get('content-type') || '(无)',
+          __bodyHead: head,
+          __method: ${JSON.stringify(method)},
+        };
+      }
       return { __body: await r.text() };
     } catch (e) {
       return { __err: String(e) };

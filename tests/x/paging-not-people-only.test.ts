@@ -118,3 +118,35 @@ describe('⚠️ 源码:三处「只给采人页」的假设不许回来', () =>
       .toMatch(/extractTweetsFrom\(parsed, tweets\)/);
   });
 });
+
+describe('⚠️⚠️ 翻页失败要给判据,不能只报「HTTP 404」', () => {
+  const people = strip(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-people-harvester.ts'), 'utf-8'));
+
+  it('⭐⭐ 失败时必须带 content-type —— 它是区分三种成因的判据', () => {
+    /**
+     * ── 2026-09-25 查翻页 404 时发现缺的正是这些 ──
+     * 只报 `HTTP 404` 的话,三种成因**长得一模一样**
+     * (x-timeline-harvester 的失败分支注释早就写着):
+     *  · 抄错了请求 / 游标换坏了 / queryId 过期
+     *
+     * ⭐ 实测判据(记忆 project-x-cursor-paging):
+     *  **404 + 非 JSON + 空 body** = 请求根本没进 GraphQL handler
+     *  → 多半是 method 不对(followers 那次真因就是必须用 POST)
+     */
+    const i = people.indexOf('if (!r.ok)');
+    expect(i, '找不到失败分支').toBeGreaterThan(0);
+    const blk = people.slice(i, i + 900);
+    expect(blk, '失败时没带 content-type —— 分不出「没进 handler」还是「业务错误」')
+      .toMatch(/__ctype/);
+    expect(blk, '失败时没带响应体开头 —— X 的业务错误 JSON 看不到')
+      .toMatch(/__bodyHead/);
+    expect(blk, '失败时没带实际 method —— 抄到的 method 会骗人')
+      .toMatch(/__method/);
+  });
+
+  it('⭐ 「非 JSON」要在停止原因里直接说出来(别让人自己推)', () => {
+    expect(harvester, '没把「没进 GraphQL handler」这个判断写进停止原因')
+      .toMatch(/没进 GraphQL handler/);
+  });
+});

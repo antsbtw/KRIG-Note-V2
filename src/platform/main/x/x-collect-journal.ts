@@ -71,6 +71,12 @@ export interface CollectJournalEntry {
    * ⭐ 与 pagingSkipped 同一个洞(昨天补了那个,没连带补这个)。
    */
   failedUrl?: string;
+  /**
+   * ⭐⭐ 翻页失败的**判据** —— 2026-09-25 补。
+   * ⚠️ 光有 failedUrl 仍分不出「抄错请求 / 游标换坏 / queryId 过期」;
+   * **404 + 非 JSON** = 请求根本没进 GraphQL handler(先查 method)。
+   */
+  failedProbe?: { status?: number; ctype?: string; method?: string; bodyHead?: string };
   elapsedMs: number;
   /** 解析率:X 给了多少条目、解出多少 */
   parseRate?: unknown;

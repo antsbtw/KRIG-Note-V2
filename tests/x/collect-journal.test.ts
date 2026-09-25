@@ -82,7 +82,14 @@ describe('⚠️ 翻页证据必须进留痕(2026-09-22 实测漏掉)', () => {
    * 只能猜「是 cursor 过期还是 URL 拼错」。
    * ⭐ 判据:凡是**报告里有、用来判断「为什么没采全」**的字段,留痕都要有。
    */
-  for (const f of ['hasMore', 'pagedRounds', 'pagingSkipped', 'failedUrl']) {
+  /**
+   * ⚠️⚠️ 2026-09-25 又加一项 `failedProbe` —— 「清单不会自己长」的第三次:
+   * 上次补了 failedUrl,但只有 URL **仍然分不出**三种成因
+   * (抄错请求 / 游标换坏 / queryId 过期)——
+   * 要靠 **content-type + 响应体** 才分得开:
+   * 「404 + 非 JSON」= 请求根本没进 GraphQL handler(先查 method)。
+   */
+  for (const f of ['hasMore', 'pagedRounds', 'pagingSkipped', 'failedUrl', 'failedProbe']) {
     it(`⭐⭐ ${f} 必须写进留痕 —— 面板有、留痕没有 = 关掉就查不到`, () => {
       /**
        * ⚠️ 这三样原来**只在面板和返回值里**,留痕里没有。
