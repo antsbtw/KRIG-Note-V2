@@ -121,6 +121,39 @@ export function computeScrollDepthMs(recipe: SearchRecipe, bufferHours = 2): num
  * · 否则按逗号/空格/顿号切成词,拼成 `("a" OR "b")`
  * · 单个词直接加引号,不套括号(干净)
  */
+/**
+ * ⭐⭐ **给手填的搜索加时间窗** —— 用户 2026-09-25:
+ *
+ * > 「查询采集,建议一次不要超过 24 小时的帖子,除非有特殊约定」
+ *
+ * ── 为什么需要(查证)──
+ * **配方跑的时候一直有** `since:`(`buildSearchUrl` 里),而**手填这条路完全没有**
+ * —— 面板/编排档搜的是**全部历史**。
+ * ⭐ 与「逗号当成短语」那次同一形态:**同一件事两套实现,手填那套绕开了规则**。
+ *
+ * ── ⚠️ 为什么默认 2 天而不是 24 小时(用户拍板) ──
+ *  · X 的 `since:` **只精确到天**(语法限制,见 computeSinceDate 的注释)——
+ *    填「今天」会漏掉昨晚发的
+ *  · X 的**搜索索引有延迟**,刚发的推可能几小时后才进 since: 的结果
+ *  · ⭐ 配方那边甚至故意多抓 **48 小时重叠**,理由写着「**宁可重复,不可遗漏**」
+ *    (重复的靠 tweet_id 去重,成本只是多滚几屏)
+ *
+ * ── 逃生口 ──
+ * ⚠️ `days <= 0` → **不加**(要搜全部历史时用);
+ * ⚠️ 查询里**自带 since:/until:** → 原样放行,不叠加
+ *   (人显式写了时间条件,我们再塞一个会互相打架,而且**不报错**)
+ */
+export function withSinceWindow(query: string, days = 2): string {
+  const q = (query ?? '').trim();
+  if (!q) return q;
+  /** ⭐ 人自己写了时间条件 → 他说了算 */
+  if (/\bsince:|\buntil:|\bsince_time:|\buntil_time:/i.test(q)) return q;
+  if (!Number.isFinite(days) || days <= 0) return q;
+  const since = new Date(Date.now() - days * 86_400_000)
+    .toISOString().split('T')[0];
+  return `${q} since:${since}`;
+}
+
 export function normalizeSearchQuery(raw: string): string {
   const q = (raw ?? '').trim();
   if (!q) return '';

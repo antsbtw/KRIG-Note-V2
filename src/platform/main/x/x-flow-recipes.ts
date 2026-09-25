@@ -37,7 +37,13 @@ export const DEFAULT_X_FLOW: FlowRecipe = {
    * 原来 goto 和 collect **各写了一份**,改一个忘另一个就会
    * 「导航到 A 页、采集却采 B 页」,而且**不报错**。
    */
-  shared: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' } },
+  /**
+   * ⭐ `days` = 只看最近几天(用户 2026-09-25:「一次不要超过 24 小时的帖子」)。
+   * ⚠️ 写 2 不写 1:X 的 `since:` **只精确到天** + 搜索索引有延迟,
+   *    填 1 会漏掉昨晚发的(配方那边甚至叠 48h 重叠,「宁可重复不可遗漏」)。
+   * ⚠️ 填 0 = 搜全部历史(特殊约定时用)。
+   */
+  shared: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live', days: '2' } },
   steps: [
     {
       id: 'goto',

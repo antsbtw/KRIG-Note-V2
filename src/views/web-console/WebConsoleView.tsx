@@ -82,6 +82,12 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
   const [gotoTweetId, setGotoTweetId] = useState('');
   const [gotoQuery, setGotoQuery] = useState('');
   /**
+   * ⭐ 搜索只看最近几天 —— 用户 2026-09-25:「一次不要超过 24 小时的帖子」。
+   * ⚠️ 留空 = 默认 2 天(`since:` 只到天级 + 索引延迟,填 1 会漏昨晚的);
+   *    填 0 = 搜全部历史。
+   */
+  const [searchDays, setSearchDays] = useState('');
+  /**
    * ⭐ 搜索配方 —— 右边选一个就把整套关键词填进搜索框。
    * ⚠️ 只读**真表**(库里的 search_recipes),面板不自己维护一份关键词清单。
    */
@@ -105,6 +111,11 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
    * 给一个「点了等于没点」的选择。
    */
   const [peoplePages, setPeoplePages] = useState<readonly string[]>([]);
+  /**
+   * ⭐ 哪些参数是**可选**的(有默认值,不填也能跑)—— 从真表来,面板不写死。
+   * ⚠️ 原来写死成只有 `'f'`,新增 `days` 会被当成必填 → 不填就禁用采集按钮。
+   */
+  const [optionalParams, setOptionalParams] = useState<readonly string[]>(['f']);
   const [readyKind, setReadyKind] = useState('urlIncludes');
   /** ⚠️ URL 片段与锚点名**分开存** —— 共用一个格子就是那个 bug 的根源 */
   const [readyValue, setReadyValue] = useState('/home');
@@ -324,6 +335,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
       if (lo) setPageLabels(lo);
       const pp = (pn as { peoplePages?: readonly string[] } | undefined)?.peoplePages;
       if (pp) setPeoplePages(pp);
+      const op = (pn as { optionalParams?: readonly string[] } | undefined)?.optionalParams;
+      if (op) setOptionalParams(op);
       /** ⭐ 配方清单 —— 拿不到就是空数组(下拉不显示配方,手填照常可用) */
       try {
         /** ⚠️ 配方在 xTimeline 命名空间下,不在 webConsole(api())里 */
@@ -873,11 +886,14 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 {(pageParams[acPage] ?? []).map((k) => {
                   const val = k === 'handle' ? gotoHandle
                     : k === 'tweetId' ? gotoTweetId
-                    : k === 'q' ? gotoQuery : '';
+                    : k === 'q' ? gotoQuery
+                    : k === 'days' ? searchDays : '';
                   const set = k === 'handle' ? setGotoHandle
                     : k === 'tweetId' ? setGotoTweetId
-                    : k === 'q' ? setGotoQuery : () => {};
-                  if (k === 'f') return null;   // 搜索模式有默认值,不占一格
+                    : k === 'q' ? setGotoQuery
+                    : k === 'days' ? setSearchDays : () => {};
+                  /** ⚠️ `f`(搜索模式)有默认值且极少改,不占一格;`days` 要显示 —— 人得看得见时间窗 */
+                  if (k === 'f') return null;
                   return (
                     /**
                      * ⚠️ 参数框同理:手动填了 handle/tweetId 也不该被
@@ -988,6 +1004,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                         if (k === 'handle') params.handle = gotoHandle;
                         else if (k === 'tweetId') params.tweetId = gotoTweetId;
                         else if (k === 'q') params.q = gotoQuery;
+                        /** ⭐ 时间窗:留空就不传,由解析层用默认值(2 天) */
+                        else if (k === 'days' && searchDays.trim()) params.days = searchDays.trim();
                       }
                       const r = await api()?.autoCollect({
                         page: acPage, params, wcId: wcId(),
@@ -1019,6 +1037,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                       if (k === 'handle') params.handle = gotoHandle;
                       else if (k === 'tweetId') params.tweetId = gotoTweetId;
                       else if (k === 'q') params.q = gotoQuery;
+                      /** ⭐ 时间窗:留空就不传,由解析层用默认值(2 天) */
+                      else if (k === 'days' && searchDays.trim()) params.days = searchDays.trim();
                     }
                     /**
                      * ⭐ 不关跟随 —— 「跳过去」的目的就是让左边跟过来,
@@ -1037,7 +1057,8 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                   const valOf = (k: string) => k === 'handle' ? gotoHandle
                     : k === 'tweetId' ? gotoTweetId
                     : k === 'q' ? gotoQuery : 'x';   // 'f' 有默认值,不算缺
-                  const missing = need.filter((k) => k !== 'f' && !valOf(k).trim());
+                  /** ⚠️ 可选参数不算「缺」—— 清单从真表来,加新参数不用改这里 */
+                  const missing = need.filter((k) => !optionalParams.includes(k) && !valOf(k).trim());
                   const blocked = missing.length > 0;
                   return (
                     <>
@@ -1132,7 +1153,7 @@ export function WebConsoleView({ workspaceId }: { workspaceId: string }) {
                 const valOf = (k: string) => k === 'handle' ? gotoHandle
                   : k === 'tweetId' ? gotoTweetId
                   : k === 'q' ? gotoQuery : 'x';
-                const missing = need.filter((k) => k !== 'f' && !valOf(k).trim());
+                const missing = need.filter((k) => !optionalParams.includes(k) && !valOf(k).trim());
                 if (missing.length === 0) return null;
                 return (
                   <div className="krig-webc__note" style={{ color: '#e8a33d' }}>

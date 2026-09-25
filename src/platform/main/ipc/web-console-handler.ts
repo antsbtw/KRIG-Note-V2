@@ -66,7 +66,7 @@ import { runFlow } from '../flow/flow-runner';
 import { webContents as allWebContents } from 'electron';
 import { makeXFlowCapabilities } from '../x/x-flow-capabilities';
 import { DEFAULT_X_FLOW } from '../x/x-flow-recipes';
-import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES } from '../x/x-pages';
+import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES, OPTIONAL_PAGE_PARAMS } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
 
@@ -495,7 +495,15 @@ export function registerWebConsoleHandlers(): void {
      * ⭐ 哪些页面是**采人**的 —— 面板据此决定「快速增量」露不露。
      * ⚠️ 同样**从真表来**,不让面板自己写一份(那份会悄悄过期)。
      */
-    return { channelOk: true, tables, paramsOf, labelsOf, peoplePages: PEOPLE_PAGE_NAMES };
+    /**
+     * ⭐ 可选参数清单也从真表下发 —— 面板不抄一份
+     * (抄的那份不会跟着新参数长,现象是「新参数被当成必填」)。
+     */
+    return {
+      channelOk: true, tables, paramsOf, labelsOf,
+      peoplePages: PEOPLE_PAGE_NAMES,
+      optionalParams: OPTIONAL_PAGE_PARAMS,
+    };
   });
 
   /**

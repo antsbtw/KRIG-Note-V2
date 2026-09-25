@@ -21,7 +21,23 @@
 import type { PageResolver, ReadyCriterion, AnchorName } from '../web-capability/page/control-types';
 import { X_SERVICE_PROFILES } from '@shared/types/x-service-types';
 /** ⭐ 与配方跑的时候同一套搜索语法 —— 手填不能绕开它(2026-09-23 实测踩到) */
-import { normalizeSearchQuery } from './x-timeline-scan';
+import { normalizeSearchQuery, withSinceWindow } from './x-timeline-scan';
+
+/**
+ * ⭐ 手填搜索默认只看最近几天 —— 用户 2026-09-25 拍板。
+ * ⚠️ 2 天不是 24 小时:`since:` 只到天级 + 索引有延迟,填 1 会漏掉昨晚的。
+ */
+export const DEFAULT_SEARCH_DAYS = 2;
+
+/**
+ * ⭐⭐ **有默认值、不填也能跑的参数** —— 面板据此判断「缺不缺」。
+ *
+ * ⚠️ 面板原来把这个清单**写死成只有 `'f'`**,于是新增可选参数(如 `days`)
+ * 会被当成必填 → 不填就禁用「采集」按钮,而人根本不知道该填什么。
+ * ⭐ 「清单不会自己长」在本仓栽过多次 —— 放在**页面表这边**(真源),
+ *   加可选参数时与 PAGE_PARAMS 一起改,面板不抄一份。
+ */
+export const OPTIONAL_PAGE_PARAMS: readonly string[] = ['f', 'days'];
 
 const X_PROFILE = X_SERVICE_PROFILES[0];
 
@@ -132,13 +148,29 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
      * 手填这条路径原来绕开了它,同一件事两种写法才是根子。
      * ⚠️ 已带高级语法的原样放行(见 normalizeSearchQuery)。
      */
-    const q = normalizeSearchQuery(raw);
-    if (!q) return null;
+    const normalized = normalizeSearchQuery(raw);
+    if (!normalized) return null;
+    /**
+     * ⭐⭐ **默认只搜最近 2 天** —— 用户 2026-09-25:
+     * 「查询采集,建议一次不要超过 24 小时的帖子,除非有特殊约定」。
+     *
+     * ⚠️ 配方跑的时候一直有 `since:`,而**手填这条路原来完全没有**(搜全部历史)
+     * —— 与「逗号当成短语」同一形态:同一件事两套实现,手填那套绕开了规则。
+     *
+     * ⚠️ 为什么是 2 天不是 24 小时:X 的 `since:` **只精确到天**,
+     * 且搜索索引有延迟 —— 填 1 天会漏掉昨晚的
+     * (配方那边甚至故意叠 48h 重叠,「宁可重复不可遗漏」)。
+     *
+     * ⭐ 逃生口:`days` 填 0 = 搜全部历史;查询里自带 since:/until: 则原样放行。
+     */
+    const days = p.days !== undefined && p.days !== ''
+      ? Number(p.days) : DEFAULT_SEARCH_DAYS;
+    const q = withSinceWindow(normalized, Number.isFinite(days) ? days : DEFAULT_SEARCH_DAYS);
     const f = p.f === 'top' ? 'top' : 'live';
     return {
       url: `${X_PROFILE.baseUrl}/search?q=${encodeURIComponent(q)}&f=${f}`,
       arrival: byUrl('/search'),
-      /** ⚠️ 描述里显示**规范化之后**的串 —— 人要看得见我们真正搜的是什么 */
+      /** ⚠️ 描述里显示**最终发出去**的串 —— 人要看得见我们真正搜的是什么 */
       describe: `搜索 ${q}(${f})`,
     };
   },
@@ -244,7 +276,8 @@ export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'x.verifiedFollowers': ['handle'],
   'x.following': ['handle'],
   'x.status': ['handle', 'tweetId'],
-  'x.search': ['q', 'f'],
+  /** ⚠️ days 可选(不填用默认 2 天);面板据此渲染输入框 */
+  'x.search': ['q', 'f', 'days'],
   'x.home': [],
   'x.notifications': [],
   'x.compose': [],
