@@ -200,7 +200,22 @@ export async function runFlow(
        * ⚠️ 2026-09-24 实测:搜索词原来在档里写两遍,改一个忘另一个
        * 就会「导航到 A 页、采集却采 B 页」,而且不报错。
        */
-      out = await fn({ ...(recipe.shared ?? {}), ...(step.params ?? {}) }, wsId);
+      /**
+       * ⭐⭐ **runId 注入每步参数** —— 2026-09-24 实测:草稿落库了但 `run_id` 是 None。
+       *
+       * ⚠️ 真因:`planReplyBatch` 能收 runId,而**适配器拿不到**(签名里没有)——
+       * 典型的「类型有、字段有、消费端零传递」死字段。
+       * 后果:库里的草稿说不清「这批是哪一跑的产物」,
+       * 而那正是回头对账「哪次编排产出质量好」的唯一线索。
+       *
+       * ⭐ 在这里注入而不改签名:与 handler 注入 wcId 同一套做法 ——
+       * 运行时的东西由执行层给,能力层只管用。
+       * ⚠️ 顺序 `{ runId, ...params }`:编排档里显式写了的优先(与 wcId 一致)。
+       */
+      out = await fn(
+        { __runId: runId, ...(recipe.shared ?? {}), ...(step.params ?? {}) },
+        wsId,
+      );
     } catch (e) {
       /** ⚠️ 能力抛异常也要落记录 —— 否则这一步在 flow_step_run 里根本不存在 */
       out = { ok: false, produced: 0, error: String(e).slice(0, 300), elapsedMs: Date.now() - s0 };

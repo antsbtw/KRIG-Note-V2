@@ -141,6 +141,12 @@ export function makeXFlowCapabilities(): FlowCapabilities {
       const r = await planReplyBatch(wsId, {
         limit: num(params.limit),
         ref: str(params.ref),
+        /**
+         * ⭐ 哪一跑拟的 —— 由编排器注入(`__runId`)。
+         * ⚠️ 没有它,库里的草稿说不清「这批是哪次编排的产物」,
+         * 回头对账「哪次质量好」就无从查起(2026-09-24 实测漏掉过)。
+         */
+        runId: str(params.__runId),
       });
       /**
        * ⭐⭐ **跳过的理由要分类报出来** —— 2026-09-24 实测:

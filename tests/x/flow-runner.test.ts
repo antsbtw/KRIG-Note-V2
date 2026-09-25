@@ -58,11 +58,31 @@ describe('⭐⭐ 四步串起来,每步都有结果', () => {
     expect(r.runId, '没有 runId —— 记录串不起来').toMatch(/^run_/);
   });
 
-  it('⭐⭐ 参数原样透传给能力(编排层不解释它)', async () => {
+  it('⭐⭐ 业务参数原样透传(编排层不解释、不改写)', async () => {
+    /**
+     * ⚠️⚠️ 2026-09-24 这条**从精确匹配改成包含匹配**,而且是有原因的:
+     *
+     * 编排器现在会注入**运行时元数据**(`__runId`,与 handler 注入 `wcId` 同一类),
+     * 精确匹配会把它当成「擅自改写」而红。
+     * ⭐ 但**放宽不等于取消** —— 区分两类:
+     *  · **业务参数**(page/q/pageBudget…):编排层**一个字都不许改**
+     *  · **运行时元数据**(`__runId`/`wcId`):由执行层注入,用 `__` 前缀标明
+     * ⚠️ 所以这里改成:业务参数必须原样在(objectContaining),
+     *   同时**钉死编排层没动过它们的值**。
+     */
     const c = caps();
     await runFlow(recipe([{ id: 's', kind: 'collect', params: { page: 'x.search', q: 'VPN' } }]), c, { wsId: 'ws-1' });
-    expect(c.collect, '参数没透传 —— 编排层擅自改写会与能力层漂')
-      .toHaveBeenCalledWith({ page: 'x.search', q: 'VPN' }, 'ws-1');
+    expect(c.collect, '业务参数没透传 —— 编排层擅自改写会与能力层漂')
+      .toHaveBeenCalledWith(
+        expect.objectContaining({ page: 'x.search', q: 'VPN' }),
+        'ws-1',
+      );
+    /** ⚠️ 注入的只许是带 `__` 前缀的元数据,别的一律不许加 */
+    const passed = (c.collect as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0] as Record<string, unknown>;
+    const extras = Object.keys(passed).filter((k) => !['page', 'q'].includes(k));
+    expect(extras.every((k) => k.startsWith('__')),
+      `编排层往参数里塞了业务字段:${extras.filter((k) => !k.startsWith('__')).join(', ')}`)
+      .toBe(true);
   });
 });
 
@@ -289,10 +309,11 @@ describe('⭐⭐ 档级共享参数:只写一遍,步骤可覆盖', () => {
       shared: { page: 'x.search', params: { q: 'VPN' } },
       steps: [{ id: 's1', kind: 'goto' }, { id: 's2', kind: 'collect' }],
     }, c);
+    /** ⚠️ 包含匹配 —— 编排器会注入 `__runId` 这类运行时元数据(见上面那条的说明) */
     expect(c.goto, 'shared 没传给 goto').toHaveBeenCalledWith(
-      { page: 'x.search', params: { q: 'VPN' } }, undefined);
+      expect.objectContaining({ page: 'x.search', params: { q: 'VPN' } }), undefined);
     expect(c.collect, 'shared 没传给 collect —— 两步会跑不同的词').toHaveBeenCalledWith(
-      { page: 'x.search', params: { q: 'VPN' } }, undefined);
+      expect.objectContaining({ page: 'x.search', params: { q: 'VPN' } }), undefined);
   });
 
   it('⭐ 步骤自己写的**优先**于 shared', async () => {
@@ -303,7 +324,7 @@ describe('⭐⭐ 档级共享参数:只写一遍,步骤可覆盖', () => {
       steps: [{ id: 's', kind: 'collect', params: { pageBudget: 3 } }],
     }, c);
     expect(c.collect, '步骤参数被 shared 覆盖了 —— 改不动单步设置')
-      .toHaveBeenCalledWith({ page: 'x.search', pageBudget: 3 }, undefined);
+      .toHaveBeenCalledWith(expect.objectContaining({ page: 'x.search', pageBudget: 3 }), undefined);
   });
 
   it('⭐ 没有 shared 时照常工作(不许因此报错)', async () => {
@@ -312,7 +333,7 @@ describe('⭐⭐ 档级共享参数:只写一遍,步骤可覆盖', () => {
       recipeId: 'r', name: 'n', steps: [{ id: 's', kind: 'judge', params: { batchSize: 5 } }],
     }, c);
     expect(r.ok).toBe(true);
-    expect(c.judge).toHaveBeenCalledWith({ batchSize: 5 }, undefined);
+    expect(c.judge).toHaveBeenCalledWith(expect.objectContaining({ batchSize: 5 }), undefined);
   });
 
   it('⚠️ 默认档里搜索词只出现一次(不许再写两遍)', () => {
@@ -423,5 +444,46 @@ describe('⭐⭐ 草稿落库:拟出几条与存进几条必须分开报', () =>
     expect(blk, '没报落库结果 —— 人无法判断草稿是否真的存下来了')
       .toMatch(/persisted|已落库/);
     expect(blk, '落库失败时没把失败条数报出来').toMatch(/failed/);
+  });
+});
+
+describe('⚠️⚠️ runId 要传到每一步(2026-09-24 实测:草稿落库了但 run_id 是 None)', () => {
+  it('⭐⭐ 步骤参数里必须带 __runId', async () => {
+    /**
+     * ── 实测 ──
+     * 草稿真的落库了,但 `run_id` 是 **None**。
+     * 真因:`planReplyBatch` 能收 runId,而**适配器拿不到**(签名里没有)——
+     * 典型的「类型有、字段有、消费端零传递」死字段。
+     * ⭐ 后果:库里的草稿说不清「这批是哪一跑的产物」,
+     *   回头对账「哪次编排质量好」就无从查起。
+     */
+    const c = caps();
+    const r = await runFlow(recipe([{ id: 's', kind: 'planReply' }]), c);
+    expect(c.planReply, 'runId 没注入步骤参数 —— 草稿存进库也说不清是哪一跑的')
+      .toHaveBeenCalledWith(
+        expect.objectContaining({ __runId: r.runId }),
+        undefined,
+      );
+  });
+
+  it('⭐ 编排档里显式写的参数优先于注入(与 wcId 同一套顺序)', async () => {
+    const c = caps();
+    await runFlow(recipe([
+      { id: 's', kind: 'collect', params: { __runId: 'explicit' } },
+    ]), c);
+    expect(c.collect, '注入把档里显式写的值覆盖了')
+      .toHaveBeenCalledWith(expect.objectContaining({ __runId: 'explicit' }), undefined);
+  });
+
+  it('⚠️ 适配器要把 __runId 真的传给 planReplyBatch(不能只收不用)', () => {
+    const strip3 = (x: string) =>
+      x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const caps3 = strip3(readFileSync(
+      join(process.cwd(), 'src/platform/main/x/x-flow-capabilities.ts'), 'utf-8'));
+    const i = caps3.indexOf('planReplyBatch(wsId');
+    expect(i, '找不到 planReplyBatch 调用').toBeGreaterThan(0);
+    const blk = caps3.slice(i, i + 400);
+    expect(blk, '适配器收了 __runId 却没往下传 —— 库里 run_id 还是空')
+      .toMatch(/runId: str\(params\.__runId\)/);
   });
 });
