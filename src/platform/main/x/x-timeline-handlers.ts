@@ -25,6 +25,7 @@ import { scanRecipe, abortScan } from './x-timeline-scan';
 import { runJudgeBatch, startJudgeDrain, getJudgeConfig } from './x-ai-judge';
 import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
+import type { ReplyDismissReason } from '@shared/types/x-reply-types';
 /** ⭐ 草稿落库 —— AI 学习的训练信号(migration 1.2.8) */
 import { insertReplyDrafts, resolveReplyDraft } from '../db/x-reply-draft-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
@@ -1097,6 +1098,15 @@ export function registerXTimelineHandlers(): void {
         poster_read: typeof p.poster_read === 'string' ? p.poster_read : undefined,
         trigger:     typeof p.trigger === 'string' ? p.trigger : undefined,
         ai_reason:   typeof p.ai_reason === 'string' ? p.ai_reason : undefined,
+        /**
+         * ⭐ 否决原因 —— 学习信号第一层(2026-09-24 用户拍板)。
+         * ⚠️ **只在 dismissed 时才收**:filled 时传来也忽略,
+         *    否则「为什么否决」这一列会混进采用的行,统计立刻失真。
+         */
+        dismiss_reason: p.action === 'dismissed' && typeof p.dismiss_reason === 'string'
+          ? (p.dismiss_reason as ReplyDismissReason) : undefined,
+        dismiss_note: p.action === 'dismissed' && typeof p.dismiss_note === 'string'
+          ? p.dismiss_note : undefined,
         in_thread:   p.in_thread === true,
         created_at: new Date().toISOString(),
       });

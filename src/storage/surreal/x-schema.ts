@@ -1479,6 +1479,49 @@ DEFINE INDEX IF NOT EXISTS idx_rdft_run     ON x_reply_draft FIELDS run_id;
 DEFINE INDEX IF NOT EXISTS idx_rdft_created ON x_reply_draft FIELDS created_at;
 `;
 
+/**
+ * 1.2.9 —— 否决原因(2026-09-24)
+ *
+ * ── 用户拍板「新的学习方法」的第一层 ──
+ * > 「我是第一次接触学习,你的建议是什么请给出理由」→ 选了「① 否决时问原因」
+ *
+ * ── 为什么先做这一层(实测数据支撑)──
+ *
+ * `x_reply_feedback` 425 行里:
+ *  · `action='filled'` **424** 条,`dismissed` **1** 条
+ *  · `edited` **425/425 全是 false** —— 人一字没改
+ *
+ * ⭐ 也就是说现在的学习信号只有「采用/否决」两态,而且**几乎全是采用** ——
+ *   模型只知道「这些被接受了」,**学不到「哪里不好」**。
+ *
+ * ⭐⭐ 正因为否决只占 1/425,**每一条否决都金贵**;
+ *   而问一句「为什么不用」的成本,一年也就几十次 —— 收益/成本比最高。
+ *
+ * ⚠️ **只在否决时问**:采用是常态(424/425),弹窗会打断人的正常节奏。
+ *
+ * ── 取值 ──
+ * off_topic(答非所问) / too_salesy(太硬广) / wrong_tone(语气不对)
+ * / factual_error(事实错误) / should_not_reply(不该回这条) / other
+ * ⚠️ 用**枚举不用自由文本**:自由文本统计不了,而这层的目的正是「统计出规律」。
+ *   `other` 配一个可选的自由说明,兜住枚举没覆盖的。
+ */
+const X_SCHEMA_1_2_9 = `
+-- 否决原因 —— ⚠️ 只有 action='dismissed' 时才有值
+DEFINE FIELD IF NOT EXISTS dismiss_reason ON x_reply_feedback TYPE option<string>;
+-- other 时的自由说明(枚举没覆盖的情况)
+DEFINE FIELD IF NOT EXISTS dismiss_note   ON x_reply_feedback TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_rfb_dismiss ON x_reply_feedback FIELDS dismiss_reason;
+`;
+
+export async function x_migration_1_2_9(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_9);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.9', appliedAt = $now,
+      description = 'x_reply_feedback.dismiss_reason (why the human rejected — the scarce signal)'`,
+    { rid: new RecordId('schema_version', '1.2.9'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_8(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_8);
   await db.query(

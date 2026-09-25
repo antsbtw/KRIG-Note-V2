@@ -12,7 +12,7 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
-import type { ReplyLang, ReplySource, PosterKind } from '@shared/types/x-reply-types';
+import type { ReplyLang, ReplySource, PosterKind, ReplyDismissReason } from '@shared/types/x-reply-types';
 
 export interface ReplyFeedback {
   tweet_id: string;
@@ -26,6 +26,13 @@ export interface ReplyFeedback {
   /** final_text !== ai_text */
   edited: boolean;
   action: 'filled' | 'dismissed';
+  /**
+   * ⭐ 为什么否决 —— ⚠️ 只在 action='dismissed' 时有值。
+   * 实测否决只占 1/425,**每一条都金贵**,这是目前最强的「哪里不好」信号。
+   */
+  dismiss_reason?: ReplyDismissReason;
+  /** other 时的自由说明 */
+  dismiss_note?: string;
   confidence?: number;
   ref?: string;
   ws_id?: string;
@@ -51,7 +58,12 @@ export async function insertReplyFeedback(fb: ReplyFeedback): Promise<void> {
       edited: $edited, action: $action, confidence: $confidence,
       ref: $ref, ws_id: $ws_id, created_at: $created_at,
       poster_kind: $poster_kind, poster_read: $poster_read,
-      trigger: $trigger, ai_reason: $ai_reason, in_thread: $in_thread
+      trigger: $trigger, ai_reason: $ai_reason, in_thread: $in_thread,
+      /**
+       * ⚠️ **SQL 与参数两处都要登记** —— 本仓「加字段要登记四处」栽过多次:
+       * 漏 SQL 这一处 → 字段静默恒空,而类型和 UI 看着都对。
+       */
+      dismiss_reason: $dismiss_reason, dismiss_note: $dismiss_note
     }`,
     {
       ...fb,
@@ -63,6 +75,9 @@ export async function insertReplyFeedback(fb: ReplyFeedback): Promise<void> {
       trigger: fb.trigger ?? undefined,
       ai_reason: fb.ai_reason ?? undefined,
       in_thread: fb.in_thread ?? false,
+      /** ⚠️ option 字段传 undefined 不传 null(SurrealDB 的 NONE ≠ NULL) */
+      dismiss_reason: fb.dismiss_reason ?? undefined,
+      dismiss_note: fb.dismiss_note ?? undefined,
       created_at: new Date(fb.created_at),
     },
   );

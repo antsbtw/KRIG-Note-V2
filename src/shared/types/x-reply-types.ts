@@ -313,6 +313,32 @@ export interface ReplyDraft {
   createdAt: string;
 }
 
+/**
+ * ⭐⭐ **否决原因** —— 学习信号的第一层(2026-09-24 用户拍板)。
+ *
+ * ── 为什么要它(实测)──
+ * x_reply_feedback 425 行里 `filled` **424**、`dismissed` **1**,
+ * `edited` **425/425 全 false` —— 学习信号只有「采用/否决」两态且几乎全是采用,
+ * 模型**学不到「哪里不好」**。
+ * ⭐ 正因否决只占 1/425,**每一条否决都金贵**,值得多问一句。
+ *
+ * ⚠️ 用**枚举不用自由文本**:自由文本统计不出规律,而这层的目的正是统计。
+ *   `other` 配自由说明兜底。
+ */
+export type ReplyDismissReason =
+  /** 答非所问 —— 没接住对方在问什么 */
+  | 'off_topic'
+  /** 太硬广 —— 像推销,不像帮忙 */
+  | 'too_salesy'
+  /** 语气不对 —— 太生硬/太谄媚/不合语境 */
+  | 'wrong_tone'
+  /** 事实错误 —— 说了产品做不到的事(⚠️ 这类最危险,见外语回复编造承诺那条) */
+  | 'factual_error'
+  /** 这条本来就不该回(判断层的问题,不是写作的问题) */
+  | 'should_not_reply'
+  /** 枚举没覆盖 —— 必须配自由说明 */
+  | 'other';
+
 export interface ReplySkip {
   tweetId: string;
   authorHandle: string;

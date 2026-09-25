@@ -19,7 +19,7 @@ import { useEffect, useState } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { XExtractionApi } from '@capabilities/x-extraction';
 import type { TweetInboxRecord } from '@shared/types/x-timeline-types';
-import type { ReplyDraft, ReplySkip, ReplySkipReason, PosterKind } from '@shared/types/x-reply-types';
+import type { ReplyDraft, ReplySkip, ReplySkipReason, PosterKind, ReplyDismissReason } from '@shared/types/x-reply-types';
 
 const api = () => window.electronAPI?.xTimeline;
 
@@ -35,6 +35,20 @@ const POSTER_COLOR: Record<PosterKind, string> = {
   promoter: '#b45309',
   bot:      '#7f1d1d',
   unclear:  '#57534e',
+};
+
+/**
+ * ⭐ 否决原因的人话标签。
+ * ⚠️ 用枚举不用自由文本:自由文本统计不出规律,而这层的目的正是统计。
+ * ⚠️ `Record<ReplyDismissReason, string>` —— 加了新原因忘写标签会**编译不过**。
+ */
+const DISMISS_LABEL: Record<ReplyDismissReason, string> = {
+  off_topic: '答非所问',
+  too_salesy: '太像广告',
+  wrong_tone: '语气不对',
+  factual_error: '事实错误',
+  should_not_reply: '这条不该回',
+  other: '其他',
 };
 
 const SKIP_LABEL: Record<ReplySkipReason, string> = {
@@ -63,6 +77,18 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('AI 正在为这条写回复…');
   const [filled, setFilled] = useState(false);
+  /**
+   * ⭐⭐ **否决原因** —— 学习信号第一层(2026-09-24 用户拍板)。
+   *
+   * ── 为什么只在否决时问 ──
+   * 实测 425 条反馈里 `filled` **424**、`dismissed` **1**,
+   * `edited` **425/425 全 false` —— 学习信号几乎只有「采用」,
+   * 模型**学不到「哪里不好」**。
+   * ⭐ 正因否决只占 1/425,**每一条都金贵**,值得多问一句;
+   *   而采用是常态,弹窗会打断人的正常节奏 —— 所以**只在否决时问**。
+   */
+  const [askingWhy, setAskingWhy] = useState(false);
+  const [whyNote, setWhyNote] = useState('');
 
   const xApi = requireCapabilityApi<XExtractionApi>('x-extraction');
 
@@ -123,7 +149,11 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
   }, [tweet.tweet_id, workspaceId]);
 
   /** 记学习期反馈 —— 填入与跳过都记,后者说明「这条不该回」 */
-  const recordFeedback = async (action: 'filled' | 'dismissed', finalText: string) => {
+  const recordFeedback = async (
+    action: 'filled' | 'dismissed',
+    finalText: string,
+    extra: { dismiss_reason?: ReplyDismissReason; dismiss_note?: string } = {},
+  ) => {
     if (!draft) return;
     await api()?.submitReplyFeedback({
       tweet_id:   tweet.tweet_id,
@@ -133,6 +163,7 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
       source:     draft.source,
       final_text: finalText,
       action,
+      ...extra,
       confidence: draft.confidence,
       ref:        draft.ref,
       wsId:       workspaceId,
@@ -168,8 +199,21 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
     }
   };
 
-  const dismiss = async () => {
-    if (draft) await recordFeedback('dismissed', text);
+  /**
+   * ⭐ 点「跳过」先问为什么 —— ⚠️ 没有草稿时(模型没给)直接关,没什么可问的。
+   */
+  const dismiss = () => {
+    if (!draft) { onClose(); return; }
+    setAskingWhy(true);
+  };
+
+  /** 选了原因才真正落库 */
+  const dismissWith = async (reason: ReplyDismissReason) => {
+    await recordFeedback('dismissed', text, {
+      dismiss_reason: reason,
+      /** ⚠️ 只有 other 才带自由说明 —— 别的原因带上会让统计混入噪音 */
+      dismiss_note: reason === 'other' ? whyNote.trim() || undefined : undefined,
+    });
     onClose();
   };
 
@@ -350,13 +394,48 @@ export function ReplyComposeDialog({ tweet, workspaceId, onClose, onFilled }: Pr
               发布请在 X 页面上自己点。
             </div>
 
-            <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}>
-              <Btn primary onClick={fillIntoX} disabled={!text.trim()}>
-                {filled ? '↗ 再填一次' : '填入 X'}
-              </Btn>
-              <Btn onClick={dismiss}>跳过这条</Btn>
-              <Btn onClick={onClose} style={{ marginLeft: 'auto' }}>关闭</Btn>
-            </div>
+            {/**
+              * ⭐⭐ **否决时问一句为什么** —— 学习信号第一层。
+              * 实测 425 条里否决只有 1 条,**每一条都金贵**;
+              * 而采用是常态(424/425),所以**只在这里问**,不打断正常节奏。
+              */}
+            {askingWhy ? (
+              <div style={{ marginTop: 10, padding: 10, border: '1px solid #444', borderRadius: 6 }}>
+                <div style={{ marginBottom: 8 }}>
+                  <b>这条为什么不用?</b>
+                  <span style={{ opacity: 0.7, fontSize: 12 }}>
+                    {' '}—— 否决很少见,你的理由是目前最有用的改进依据
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {(Object.entries(DISMISS_LABEL) as Array<[ReplyDismissReason, string]>)
+                    .map(([k, label]) => (
+                      <Btn key={k} onClick={() => void dismissWith(k)}>{label}</Btn>
+                    ))}
+                </div>
+                <input
+                  value={whyNote}
+                  onChange={(e) => setWhyNote(e.target.value)}
+                  placeholder="选「其他」时请简单说明(可留空)"
+                  style={{
+                    width: '100%', marginTop: 8, padding: '6px 8px',
+                    background: '#1a1a1a', border: '1px solid #444',
+                    borderRadius: 4, color: 'inherit',
+                  }}
+                />
+                <div style={{ marginTop: 8 }}>
+                  <Btn onClick={() => setAskingWhy(false)}>← 返回</Btn>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}>
+                <Btn primary onClick={fillIntoX} disabled={!text.trim()}>
+                  {filled ? '↗ 再填一次' : '填入 X'}
+                </Btn>
+                <Btn onClick={dismiss}>跳过这条</Btn>
+                <Btn onClick={onClose} style={{ marginLeft: 'auto' }}>关闭</Btn>
+              </div>
+            )}
           </>
         )}
 
