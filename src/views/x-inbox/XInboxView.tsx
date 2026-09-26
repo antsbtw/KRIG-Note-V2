@@ -286,6 +286,39 @@ function RecipeEditModal({ initial, onSave, onDelete, onCancel }: RecipeEditModa
           </Field>
         </div>
 
+        {/**
+          * ⭐⭐ **自动回复开关** —— 用户 2026-09-26:
+          * > 「当用户对目前这批配方及答复满意后，打开开关，Gemma自动选定回复数据。」
+          * > 「这个是针对某一个配方来自动回复，而不是任意所有的配方吧？」
+          *
+          * ⭐ **按配方**的理由很硬:实测不同配方精确率差一个数量级
+          * (英文 blocked 4% / censorship 0%，泛词改词组后 62%)——
+          * 全局开关会把「已调准的」和「还在 4% 的」绑死。
+          *
+          * ⚠️ 措辞必须说清**自动到哪一步**:只填进回复框，发布仍然是人点。
+          * 写含糊了人会以为它会替自己发推。
+          */}
+        <Field label="自动回复">
+          <label style={{
+            display: 'flex', alignItems: 'flex-start', gap: 6,
+            cursor: 'pointer', fontSize: 12, color: 'var(--text)',
+          }}>
+            <input
+              type="checkbox"
+              checked={draft.autoReply === true}
+              onChange={(e) => set('autoReply', e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              让 Gemma 自动挑这个配方下值得回的推、写好正文并<b>填进回复框</b>
+              <span style={{ display: 'block', color: 'var(--text-muted)', marginTop: 2 }}>
+                ⚠️ <b>不会替你发布</b> —— 填好之后仍然由你在 X 页面上点「回复」。
+                {' '}只对<b>这一个配方</b>生效；非中英文的推不会自动。
+              </span>
+            </span>
+          </label>
+        </Field>
+
         {/* 结果类型 */}
         <Field label="结果类型">
           <div style={{ display: 'flex', gap: 14 }}>
@@ -443,6 +476,15 @@ function RecipeManagerView({ workspaceId, onBack, onRefreshRecipes }: RecipeMana
                 {recipe.lastRunAt && <span>上次: {timeAgo(recipe.lastRunAt)}</span>}
                 {nextRunAt && <span>下次: {timeFromNow(nextRunAt)}</span>}
                 {!recipe.lastRunAt && <span style={{ color: 'var(--text-faint)' }}>尚未运行</span>}
+                {/**
+                  * ⭐ 开着自动的要**在列表上看得见** —— 不然开了哪几个只能逐个点进去查。
+                  * ⚠️ 这是会影响对外发言的设置，藏在编辑页里不合适。
+                  */}
+                {recipe.autoReply === true && (
+                  <span style={{ color: '#fbbf24' }} title="Gemma 会自动挑这个配方下的推、写好正文填进回复框（发布仍由你点）">
+                    ⚡ 自动填回复
+                  </span>
+                )}
               </div>
 
               {/* 统计行 */}

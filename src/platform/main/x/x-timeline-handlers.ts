@@ -29,6 +29,7 @@ import type { ReplyDismissReason } from '@shared/types/x-reply-types';
 import { insertReplyDrafts, reviewReplyDraft, listDraftsForReview } from '../db/x-reply-draft-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import { prefetchReplyContext } from './x-prefetch-context';
+import { canAutoReply } from './x-auto-reply-gate';
 import { getProductFacts, saveProductFacts } from '../db/x-product-facts-repo';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
@@ -74,6 +75,11 @@ export async function planReplyBatch(
   drafts: unknown[]; skips: unknown[]; scanned: number;
   /** ⭐ 真写进库几条 —— ⚠️ 与 drafts.length 不等就是有失败,必须报出来 */
   persisted?: { saved: number; failed: number; errors: string[] };
+  /**
+   * ⭐ 自动回复闸门的判定 —— 哪些可以自动填,其余为什么不行。
+   * ⚠️ **两样都给**:只给「可以的」的话,「这条为什么没自动」又要靠猜。
+   */
+  auto?: Array<{ tweetId: string; allowed: boolean; reason?: string; detail?: string }>;
 }> {
   const wanted = Array.isArray(opts.tweetIds) ? new Set(opts.tweetIds) : null;
   const pool = await queryInbox({
@@ -161,7 +167,49 @@ export async function planReplyBatch(
     return { saved: 0, failed: r.drafts.length, errors: [String(e).slice(0, 200)] };
   });
 
-  return { drafts: r.drafts, skips: r.skips, scanned: batch.length, persisted };
+  /**
+   * ⭐⭐ **过自动回复闸门** —— 用户 2026-09-26 定的第 ⑥ 步。
+   *
+   * ⚠️ 闸门**只标记不动手**:它回答「这条能不能自动填」,
+   * 真正去填是调用方的事,而**发布永远是人点**(红线不因开关松动)。
+   *
+   * ⭐ 按**配方**判:`x_tweet.search_recipe` 记着这条推是哪个配方采来的。
+   * 实测不同配方精确率差一个数量级,全局开关会把已调准的和还在 4% 的绑死。
+   *
+   * ⚠️ 闸门失败**不拦草稿返回** —— 拟出来的照样给人看,
+   * 只是不标成可自动(降级要局部)。
+   */
+  const recipeByTweet = new Map(batch.map((t) => [t.tweet_id, t.search_recipe]));
+  const auto = await Promise.all(r.drafts.map(async (d) => {
+    const gate = await canAutoReply({
+      recipeId: recipeByTweet.get(d.tweetId),
+      lang: d.lang,
+      text: d.text,
+      /**
+       * ⚠️⚠️ 校验用**草稿正文里那条真链接**,不另拼一份。
+       *
+       * 拼法一旦漂了(ref 取值、lang/v 参数),`verifyGeneratedReply`
+       * 会把每条都判成 `link_altered` —— 现象是「开关打开了但一条都不自动」,
+       * 而且**毫无线索**。从正文里取就不可能漂。
+       * ⚠️ 取不到链接说明这条本来就没带链接,闸门那边会判 link_missing。
+       */
+      link: d.text.match(/https?:\/\/\S+/)?.[0] ?? '',
+    }).catch((e) => ({
+      allowed: false as const,
+      reason: 'verify_failed' as const,
+      detail: `闸门出错:${String(e).slice(0, 80)}`,
+    }));
+    return { tweetId: d.tweetId, ...gate };
+  }));
+
+  return {
+    drafts: r.drafts, skips: r.skips, scanned: batch.length, persisted,
+    /**
+     * ⭐ 哪些可以自动、其余为什么不行 —— **两样都给**。
+     * ⚠️ 只给「可以的」的话,「为什么这条没自动」又要靠猜。
+     */
+    auto,
+  };
 }
 
 export function registerXTimelineHandlers(): void {

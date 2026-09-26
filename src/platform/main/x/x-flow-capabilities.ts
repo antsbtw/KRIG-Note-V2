@@ -332,13 +332,40 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         : pst.failed > 0
           ? ` ⚠️ **${pst.failed} 条没存进库**(${pst.errors[0] ?? ''})`
           : ` · 已落库 ${pst.saved} 条`;
+      /**
+       * ⭐⭐ **自动回复闸门的判定要报出来** —— 用户 2026-09-26 的第 ⑥ 步。
+       *
+       * ⚠️ 只报「N 条可自动」不够:**其余为什么不行**同样要报,
+       * 否则「我明明开了开关,怎么一条都不自动」只能靠猜。
+       * ⭐ 最常见的两种(配方没开 / 正文没过校验)长得完全不一样,
+       * 混成一句「0 条可自动」等于什么都没说。
+       */
+      const autoList = r.auto ?? [];
+      const okAuto = autoList.filter((a) => a.allowed).length;
+      const blocked = new Map<string, number>();
+      for (const a of autoList) {
+        if (a.allowed) continue;
+        blocked.set(a.reason ?? 'unknown', (blocked.get(a.reason ?? 'unknown') ?? 0) + 1);
+      }
+      const autoNote = autoList.length === 0
+        ? ''
+        : ` · ⚡ 可自动填 ${okAuto}/${autoList.length}`
+          + (blocked.size > 0
+            ? `(其余:${[...blocked.entries()].map(([k, n]) => `${k}×${n}`).join('、')})`
+            : '');
+
       return {
         ok: true, produced: r.drafts.length,
         note: r.scanned === 0
           ? '没有「值得回复且还没回过」的候选(不是故障)'
           : `扫了 ${r.scanned} 条,拟出 ${r.drafts.length} 条草稿`
             + (r.skips.length ? `,跳过 ${r.skips.length} 条(${reasons})` : '')
-            + note0,
+            + note0 + autoNote,
+        /**
+         * ⭐ 观察点:逐条的闸门判定。
+         * ⚠️ 「为什么没自动」是会反复被问的问题,只记汇总不够。
+         */
+        evidence: { items: autoList },
         elapsedMs: Date.now() - t0,
       };
     },
