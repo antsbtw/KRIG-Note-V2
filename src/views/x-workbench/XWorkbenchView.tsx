@@ -67,7 +67,33 @@ interface WatchProfile {
   fetchedAt?: string;
 }
 
-type PaneId = 'watch' | 'tasks';
+type PaneId = 'watch' | 'tasks' | 'facts';
+
+/** 产品事实清单 —— 与 `x_product_facts` 一一对应 */
+interface ProductFactsView {
+  productName: string;
+  direction: string;
+  trial: string;
+  platforms: string;
+  accountSharing: string;
+  paymentNote: string;
+  forbidden: string[];
+  updatedAt?: string;
+  /** ⭐ 'default' = 还没设过,用的是代码默认值 */
+  source?: 'db' | 'default';
+}
+
+/** 清单里每一项的说明 —— ⚠️ 写清楚「这会进 prompt 的哪里」,别让人猜 */
+const FACT_FIELDS: Array<{
+  key: keyof ProductFactsView; label: string; hint: string; multiline?: boolean;
+}> = [
+  { key: 'productName', label: '产品名', hint: '进 prompt 第一行。留空模型会自己脑补一个名字' },
+  { key: 'direction', label: '服务方向', hint: '⚠️ 双向都要写。只写一边会让 AI 答不到点上（实测：希腊看英超那条因为不知道有英国节点，只能泛泛推销）', multiline: true },
+  { key: 'trial', label: '试用', hint: '如「注册即得 7 天 10GB 测试流量」' },
+  { key: 'platforms', label: '支持平台', hint: '如「iOS / Android / macOS / Windows / Google TV」' },
+  { key: 'accountSharing', label: '账号共享', hint: '如「一个账号可多客户端共享」' },
+  { key: 'paymentNote', label: '支付方式', hint: '⭐ 写清楚**不支持**什么。实测 AI 会主动先说不支持微信支付，这正是模板做不到的' },
+];
 
 /** 面板上的一步 —— ⚠️ 形状跟着 FlowProgress 走,面板不自己拼一份 */
 interface FlowStepView {
@@ -100,6 +126,42 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
   /** ⭐ 正在跑的那一步从什么时候开始 —— 用来显示「已经跑了 N 秒」 */
   const [tickAt, setTickAt] = useState(0);
 
+  /**
+   * ── 产品事实清单(用户 2026-09-26)──
+   * > 「这个需要增加，而且产品描述给好格式，我要及时更新的。」
+   *
+   * ⚠️ 原来写死在 `x-reply-facts.ts`,改一次要重新编译打包。
+   * ⭐ 这里改完**当场生效**:拟回复每次都从库里读。
+   */
+  const [facts, setFacts] = useState<ProductFactsView | null>(null);
+  const [factsDirty, setFactsDirty] = useState(false);
+  const [factsMsg, setFactsMsg] = useState('');
+  const [savingFacts, setSavingFacts] = useState(false);
+
+  /**
+   * 保存口径。
+   *
+   * ⚠️ **回读确认**(可靠性纲领铁律四:成功要对账)——
+   * 只报「保存成功」而不回读,用户会以为改好了,
+   * 而模型还在用旧口径(「看着成功实际没有」那一类)。
+   */
+  const saveFacts = async () => {
+    if (!facts) return;
+    setSavingFacts(true);
+    try {
+      const r = await api()?.saveProductFacts?.(facts as never);
+      if (!r?.success) { setFactsMsg(`保存失败：${r?.error ?? '未知'}`); return; }
+      /** ⭐ 用回读结果覆盖本地,而不是保留用户输入 —— 两者不一致要看得出来 */
+      if (r.facts) setFacts(r.facts as ProductFactsView);
+      setFactsDirty(false);
+      setFactsMsg(`✓ 已保存并回读确认（${new Date().toLocaleTimeString()}）—— 下一次拟回复就用新口径`);
+    } catch (err) {
+      setFactsMsg(`保存失败：${String(err)}`);
+    } finally {
+      setSavingFacts(false);
+    }
+  };
+
   // ── 盯人 ──
   const [watchHandle, setWatchHandle] = useState('');
   const [profile, setProfile] = useState<WatchProfile | null>(null);
@@ -124,6 +186,26 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
     const off = api()?.onCaptureUpdate?.((s) => setSnap(s as CaptureSnap));
     return () => { if (off) off(); };
   }, []);
+
+  /**
+   * ⭐ 进「产品口径」页时载入当前清单。
+   * ⚠️ **已改未存时不覆盖**(factsDirty)—— 否则切走再切回来,改的字全没了。
+   */
+  useEffect(() => {
+    if (pane !== 'facts' || factsDirty) return;
+    void (async () => {
+      const r = await api()?.getProductFacts?.();
+      if (r?.success && r.facts) {
+        setFacts(r.facts as ProductFactsView);
+        setFactsMsg(r.facts.source === 'default'
+          ? '当前用的是代码里的默认口径（还没改过）—— 改完保存即生效'
+          : `上次更新：${r.facts.updatedAt ? new Date(r.facts.updatedAt).toLocaleString() : '未知'}`);
+      } else {
+        /** ⚠️ 读不到要说出来,别留一张空表单让人以为清单是空的 */
+        setFactsMsg(`读取失败：${r?.error ?? '未知'} —— 别在这个状态下保存，会覆盖掉现有口径`);
+      }
+    })();
+  }, [pane, factsDirty]);
 
   /**
    * ⭐⭐ **订阅编排进度** —— 用户 2026-09-24 那句「没有任何反应」的解药。
@@ -267,6 +349,7 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
           {([
             { id: 'watch' as const, label: '盯人对照', icon: '🎯' },
             { id: 'tasks' as const, label: '采集任务', icon: '▶' },
+            { id: 'facts' as const, label: '产品口径', icon: '📋' },
           ]).map((p) => (
             <div
               key={p.id}
@@ -281,7 +364,84 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
 
         {/* ── 右:详情 ── */}
         <div className="krig-xwb__right">
-          {pane === 'tasks' ? (
+          {pane === 'facts' ? (
+            /**
+             * ⭐⭐ **产品口径** —— 用户 2026-09-26:
+             * > 「这个需要增加，而且产品描述给好格式，我要及时更新的。」
+             *
+             * ⚠️ 这份清单是**模型唯一能引用的信源**:改它等于改所有回复的对外承诺。
+             * ⭐ 刻意做成一眼能核对全部承诺的清单,而不是散落的设置项。
+             */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 720 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <b style={{ flex: 1 }}>产品事实清单</b>
+                <button
+                  type="button"
+                  className="krig-xwb__btn"
+                  disabled={!facts || savingFacts || !factsDirty}
+                  onClick={() => void saveFacts()}
+                  title="保存后当场生效 —— 下一次拟回复就用新口径"
+                >{savingFacts ? '保存中…' : '保存'}</button>
+              </div>
+
+              <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.6 }}>
+                AI 写回复时<b>只能用这里的内容</b>，清单外的一律不许说。
+                {' '}改完保存即生效，不用重启。
+              </div>
+
+              {facts ? (
+                <>
+                  {FACT_FIELDS.map((f) => (
+                    <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{f.label}</span>
+                      {f.multiline ? (
+                        <textarea
+                          className="krig-xwb__input"
+                          rows={3}
+                          value={String(facts[f.key] ?? '')}
+                          onChange={(e) => {
+                            setFacts({ ...facts, [f.key]: e.target.value });
+                            setFactsDirty(true);
+                          }}
+                        />
+                      ) : (
+                        <input
+                          className="krig-xwb__input"
+                          value={String(facts[f.key] ?? '')}
+                          onChange={(e) => {
+                            setFacts({ ...facts, [f.key]: e.target.value });
+                            setFactsDirty(true);
+                          }}
+                        />
+                      )}
+                      <span style={{ fontSize: 11, opacity: 0.6 }}>{f.hint}</span>
+                    </label>
+                  ))}
+
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>严禁提及（一行一个）</span>
+                    <textarea
+                      className="krig-xwb__input"
+                      rows={4}
+                      value={(facts.forbidden ?? []).join('\n')}
+                      onChange={(e) => {
+                        setFacts({ ...facts, forbidden: e.target.value.split('\n') });
+                        setFactsDirty(true);
+                      }}
+                    />
+                    <span style={{ fontSize: 11, opacity: 0.6 }}>
+                      ⭐ 显式列出比「不要瞎说」有效得多（实测：7 个诱导问题 0 编造）。
+                      {' '}价格、速度数字、节点数量这类<b>会变或说不准</b>的，都该列进来。
+                    </span>
+                  </label>
+                </>
+              ) : <div style={{ opacity: 0.6 }}>载入中…</div>}
+
+              {factsMsg ? (
+                <div style={{ fontSize: 12, opacity: 0.8, whiteSpace: 'pre-wrap' }}>{factsMsg}</div>
+              ) : null}
+            </div>
+          ) : pane === 'tasks' ? (
             /**
              * ⭐⭐⭐ **编排执行与观察** —— 用户 2026-09-24 的分层:
              * 「编排完毕,交给工作台执行和观察」。

@@ -338,6 +338,9 @@ export const IPC_CHANNELS = {
   X_WATCHLIST:       'x:watchlist',        // renderer → main invoke：追踪名单增删查（≠ X 的关注）
   X_PREFETCH_CONTEXT: 'x:prefetch-context',   // renderer → main invoke：给建议名单批量预抓上文
   X_PREFETCH_PROFILES: 'x:prefetch-profiles', // renderer → main invoke：给建议名单批量预采画像
+  // ⭐ 产品事实清单 —— 用户要能随时改口径(2026-09-26)
+  X_GET_PRODUCT_FACTS: 'x:get-product-facts',   // renderer → main invoke：读当前口径
+  X_SAVE_PRODUCT_FACTS: 'x:save-product-facts', // renderer → main invoke：存新口径
   X_PLAN_ONE_REPLY:  'x:plan-one-reply',   // renderer → main invoke：为单条推文现写回复（卡片弹窗用）
   X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
   X_INVALIDATE_WC:   'x:invalidate-wc',   // renderer → main：强制 guest 全量重绘(见 x-timeline-handlers)

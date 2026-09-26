@@ -1170,6 +1170,24 @@ declare global {
           mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
           error?: string;
         }>;
+        /** ⭐ 产品事实清单 —— 模型唯一能引用的信源,用户可随时改 */
+        getProductFacts(): Promise<{
+          success: boolean;
+          facts?: import('@shared/types/x-reply-facts').ProductFacts & {
+            updatedAt?: string;
+            /** ⭐ 'default' = 还没设过,用的是代码默认值 */
+            source: 'db' | 'default';
+          };
+          error?: string;
+        }>;
+        saveProductFacts(facts: import('@shared/types/x-reply-facts').ProductFacts): Promise<{
+          success: boolean;
+          /** ⭐ 存完回读的结果 —— 「成功要对账」,不是只报一句成功 */
+          facts?: import('@shared/types/x-reply-facts').ProductFacts & {
+            updatedAt?: string; source: 'db' | 'default';
+          };
+          error?: string;
+        }>;
         submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
         queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
         upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;

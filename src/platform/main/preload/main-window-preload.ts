@@ -1228,6 +1228,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES,
         { wsId, wcId, limit, offset, status, humanReviewed, statuses });
     },
+    /** ⭐ 产品事实清单 —— 模型唯一能引用的信源,用户可随时改 */
+    getProductFacts: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_PRODUCT_FACTS),
+    saveProductFacts: (facts: unknown) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_SAVE_PRODUCT_FACTS, { facts }),
     submitFeedback: (payload: unknown) =>
       ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
     queryFeedback: (payload: unknown) =>

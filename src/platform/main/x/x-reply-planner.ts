@@ -20,6 +20,11 @@ import { getBlockedHandleSet } from '../db/x-author-repo';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { JudgeConfig, TweetInboxRecord } from '@shared/types/x-timeline-types';
 import { buildGenerationPrompt, buildSingleReplyPrompt, verifyGeneratedReply } from '@shared/types/x-reply-facts';
+/**
+ * ⭐ 产品事实清单从**库里**读(用户可在面板改,2026-09-26)。
+ * ⚠️ 读失败会回落到代码默认值 —— 不会因为配置读不到就拦住拟回复。
+ */
+import { getProductFacts } from '../db/x-product-facts-repo';
 import type { PosterFacts } from '@shared/types/x-reply-facts';
 import {
   REPLY_TEMPLATES, REPLY_CONFIDENCE_FLOOR, SAME_AUTHOR_COOLDOWN_HOURS,
@@ -220,6 +225,11 @@ async function generateReplies(
 ): Promise<{ texts: Map<string, string>; rejects: Map<string, string> }> {
   const texts = new Map<string, string>();
   const rejects = new Map<string, string>();
+  /**
+   * ⭐ 取一次口径给整批用 —— 不在循环里反复读库。
+   * ⚠️ 读失败内部已回落默认值并 warn,这里不用再兜。
+   */
+  const pf = await getProductFacts();
   // 按语言分组:事实清单与语气要求都是分语言的,混在一次请求里会串味
   for (const lang of ['zh', 'en'] as const) {
     const group = items.filter((it) => it.lang === lang);
@@ -230,7 +240,7 @@ async function generateReplies(
       const res = await callOllama({
         model: config.model,
         messages: [
-          { role: 'system', content: buildGenerationPrompt(lang, theLink, examples) },
+          { role: 'system', content: buildGenerationPrompt(lang, theLink, examples, pf) },
           { role: 'user', content: JSON.stringify(group.map((g) => ({ tweetId: g.tweetId, text: g.text }))) },
         ],
         endpoint: config.ollamaEndpoint,
@@ -548,6 +558,8 @@ export async function planOneReply(
     posterKind?: string; posterRead?: string; trigger?: string;
     threadTopic?: string; threadRelevant?: boolean;
   };
+  /** ⭐ 用户在面板里改过的产品口径(读失败已回落默认值) */
+  const pf = await getProductFacts();
   try {
     const res = await callOllama({
       model: config.model,
@@ -557,6 +569,8 @@ export async function planOneReply(
           content: buildSingleReplyPrompt(
             lang, link, ctx.approvedExamples ?? [], ctx.posterFacts,
             ctx.parentTweet, isInThread(tweet),
+            /** ⭐ 用户在面板里改过的口径 */
+            pf,
           ),
         },
         { role: 'user', content: tweet.text },

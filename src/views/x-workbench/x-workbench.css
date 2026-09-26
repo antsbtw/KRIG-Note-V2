@@ -240,6 +240,15 @@
   outline: none;
 }
 .krig-xwb__input:focus { border-color: var(--xwb-blue); }
+/**
+ * ⚠️ textarea 不继承 font-family —— 不写会掉回衬线默认字体,
+ * 和旁边的 input 明显不是一套。产品口径那页全是多行框,很显眼。
+ */
+textarea.krig-xwb__input {
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
 
 /**
  * 一行提示 —— 编排的总结句(「✓ 四步全通 · 6.2s」「⚠️ 断在「goto」」)。

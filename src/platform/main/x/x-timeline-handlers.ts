@@ -29,6 +29,7 @@ import type { ReplyDismissReason } from '@shared/types/x-reply-types';
 import { insertReplyDrafts, resolveReplyDraft } from '../db/x-reply-draft-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import { prefetchReplyContext } from './x-prefetch-context';
+import { getProductFacts, saveProductFacts } from '../db/x-product-facts-repo';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
@@ -1197,6 +1198,40 @@ export function registerXTimelineHandlers(): void {
      * (用户 2026-09-07 撞上过)。⭐ 编排那边相反,它传 filterByWs: true。
      */
     filterByWs: false,
+  });
+
+  /**
+   * ⭐⭐ 产品事实清单 —— 用户 2026-09-26:
+   * > 「这个需要增加，而且产品描述给好格式，我要及时更新的。」
+   *
+   * ⚠️ 原来写死在代码里,改一次要重新编译打包。
+   */
+  ipcMain.handle(IPC_CHANNELS.X_GET_PRODUCT_FACTS, async () => {
+    try {
+      return { success: true, facts: await getProductFacts() };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_SAVE_PRODUCT_FACTS, async (_e, payload: unknown) => {
+    try {
+      const p = payload as { facts?: unknown } | null;
+      if (!p?.facts || typeof p.facts !== 'object') {
+        return { success: false, error: '缺 facts' };
+      }
+      /**
+       * ⚠️ **存完回读**(可靠性纲领铁律四:成功要对账)——
+       * 只报「保存成功」而不回读,用户会以为改好了,
+       * 而模型还在用旧口径(「看着成功实际没有」那一类)。
+       */
+      await saveProductFacts(p.facts as never);
+      return { success: true, facts: await getProductFacts() };
+    } catch (err) {
+      /** ⚠️ 写失败必须让用户知道 —— 与读不同,读可以静默回落 */
+      console.error('[x-timeline-handlers] X_SAVE_PRODUCT_FACTS failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_CONTEXT, async (_e, payload: unknown) => {

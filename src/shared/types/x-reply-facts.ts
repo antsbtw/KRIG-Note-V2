@@ -65,8 +65,13 @@ export const PRODUCT_FACTS: ProductFacts = {
 };
 
 /** 事实清单渲染成 prompt 片段(中/英两版,与回复语言一致) */
-function factsBlock(lang: ReplyLang, link: string): string {
-  const f = PRODUCT_FACTS;
+function factsBlock(lang: ReplyLang, link: string, facts?: ProductFacts): string {
+  /**
+   * ⚠️ 默认回落 `PRODUCT_FACTS` —— 它现在是**默认值不是唯一来源**
+   * (2026-09-26 起清单可由用户在面板里改,存 `x_product_facts`)。
+   * ⭐ 回落必须留着:空清单会让模型**无约束自由发挥**,比写死还危险。
+   */
+  const f = facts ?? PRODUCT_FACTS;
   if (lang === 'zh') {
     return `【可用事实 —— 只能用这里的内容，不得添加任何其他承诺】
 - 产品名：${f.productName}
@@ -81,15 +86,13 @@ function factsBlock(lang: ReplyLang, link: string): string {
   }
   return `FACTS — use ONLY what is listed here, never add any other promise:
 - Product: ${f.productName}
-- Works BOTH ways: into China (use Chinese apps/shopping/streaming via a China residential
-  network) and out of restricted networks (UK and other overseas nodes available)
-- Trial: free 7-day 10GB trial on signup
+- Direction: ${f.direction}
+- Trial: ${f.trial}
 - Platforms: ${f.platforms}
-- One account works across multiple devices
-- Payment: no WeChat / Alipay
+- ${f.accountSharing}
+- Payment: ${f.paymentNote}
 - Signup link: ${link}
-NEVER invent prices, speed numbers, server counts, promotions, refund terms,
-or performance comparisons with other products.
+NEVER invent any of: ${f.forbidden.join(', ')} — or anything not listed above.
 NEVER promise stability or speed ("rock solid", "fastest"), and never use
 superlatives like "best" or "#1".`;
 }
@@ -107,8 +110,11 @@ export function buildGenerationPrompt(
   lang: ReplyLang,
   link: string,
   examples: Array<{ tweet: string; reply: string }> = [],
+  /** ⭐ 用户在面板里改过的口径;不传就用代码默认值 */
+  productFacts?: ProductFacts,
 ): string {
-  const facts = factsBlock(lang, link);
+  const pf = productFacts ?? PRODUCT_FACTS;
+  const facts = factsBlock(lang, link, pf);
   const shots = examples.length > 0
     ? (lang === 'zh'
         ? `\n\n【你以往认可的回复风格 —— 照这个口气写】\n${
@@ -118,7 +124,7 @@ export function buildGenerationPrompt(
     : '';
 
   if (lang === 'zh') {
-    return `你是 ${PRODUCT_FACTS.productName} 的社区回复助手，代表官方账号在 X 上回复求助的用户。
+    return `你是 ${pf.productName} 的社区回复助手，代表官方账号在 X 上回复求助的用户。
 
 ${facts}
 
@@ -136,7 +142,7 @@ ${facts}
 不要输出 JSON 之外的任何文字。`;
   }
 
-  return `You reply for ${PRODUCT_FACTS.productName} on X, on behalf of the official account,
+  return `You reply for ${pf.productName} on X, on behalf of the official account,
 to users asking for help getting past network blocks.
 
 ${facts}
@@ -316,8 +322,11 @@ export function buildSingleReplyPrompt(
   posterFacts?: PosterFacts,
   parent?: { text: string; authorHandle?: string },
   isReply?: boolean,
+  /** ⭐ 用户在面板里改过的口径;不传就用代码默认值 */
+  productFacts?: ProductFacts,
 ): string {
-  const facts = factsBlock(lang, link) + posterBlock(lang, posterFacts)
+  const pf = productFacts ?? PRODUCT_FACTS;
+  const facts = factsBlock(lang, link, pf) + posterBlock(lang, posterFacts)
     + contextBlock(lang, parent, isReply);
   const shots = examples.length > 0
     ? (lang === 'zh'
@@ -328,7 +337,7 @@ export function buildSingleReplyPrompt(
     : '';
 
   if (lang === 'zh') {
-    return `你是 ${PRODUCT_FACTS.productName} 的社区回复助手，代表官方账号在 X 上回复求助的用户。
+    return `你是 ${pf.productName} 的社区回复助手，代表官方账号在 X 上回复求助的用户。
 
 ${facts}
 
@@ -360,7 +369,7 @@ ${facts}
 不要输出 JSON 之外的任何文字。`;
   }
 
-  return `You reply for ${PRODUCT_FACTS.productName} on X, on behalf of the official account.
+  return `You reply for ${pf.productName} on X, on behalf of the official account.
 
 ${facts}
 

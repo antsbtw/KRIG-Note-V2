@@ -1513,6 +1513,48 @@ DEFINE FIELD IF NOT EXISTS dismiss_note   ON x_reply_feedback TYPE option<string
 DEFINE INDEX IF NOT EXISTS idx_rfb_dismiss ON x_reply_feedback FIELDS dismiss_reason;
 `;
 
+/**
+ * 1.2.10 —— 产品事实清单可编辑(2026-09-26)
+ *
+ * ── 用户拍板 ──
+ * > 「这个需要增加，而且产品描述给好格式，我要及时更新的。」
+ *
+ * ⚠️ 事实清单原来写死在 `src/shared/types/x-reply-facts.ts` 的 `PRODUCT_FACTS` 里,
+ * 改一次要**重新编译打包** —— 产品调整了(试用 7 天改 14 天之类)用户自己改不了。
+ *
+ * ⭐ 落库 + 应用内面板编辑,改完当场生效。
+ *
+ * ⚠️⚠️ **单行表**(`x_product_facts:current`):这是**一份**对外口径,
+ * 不是每个 ws 一份 —— 产品事实与 workspace 无关(同 `x_author` 不带 ws_id 的道理)。
+ *
+ * ⭐ 带 `updated_at`:改过什么、什么时候改的要查得到。
+ * ⚠️ 代码里的 `PRODUCT_FACTS` **保留为默认值**:库里没有行时回落到它,
+ * 这样新装的 app 开箱就有一份能用的口径,而不是空清单
+ * (空清单会让模型**无约束自由发挥** —— 比写死还危险)。
+ */
+const X_SCHEMA_1_2_10 = `
+DEFINE TABLE IF NOT EXISTS x_product_facts SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS product_name    ON x_product_facts TYPE string;
+-- 服务方向 —— ⚠️ 双向,别只写一边(2026-09-07 用户订正过一次)
+DEFINE FIELD IF NOT EXISTS direction       ON x_product_facts TYPE string;
+DEFINE FIELD IF NOT EXISTS trial           ON x_product_facts TYPE string;
+DEFINE FIELD IF NOT EXISTS platforms       ON x_product_facts TYPE string;
+DEFINE FIELD IF NOT EXISTS account_sharing ON x_product_facts TYPE string;
+DEFINE FIELD IF NOT EXISTS payment_note    ON x_product_facts TYPE string;
+-- 禁止提及 —— 显式列出比「不要瞎说」有效得多(实测)
+DEFINE FIELD IF NOT EXISTS forbidden       ON x_product_facts TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS updated_at      ON x_product_facts TYPE datetime;
+`;
+
+export async function x_migration_1_2_10(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_10);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.10', appliedAt = $now,
+      description = 'x_product_facts (editable product facts — the only source models may cite)'`,
+    { rid: new RecordId('schema_version', '1.2.10'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_9(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_9);
   await db.query(
