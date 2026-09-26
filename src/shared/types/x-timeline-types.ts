@@ -32,6 +32,21 @@ export interface SearchRecipe {
   includeReplies?: boolean;
   intervalMinutes: number;
   lastRunAt?: string;            // ISO datetime
+  /**
+   * ⭐⭐ **自动回复开关** —— 用户 2026-09-26:
+   * > 「当用户对目前这批配方及答复满意后，打开开关，Gemma自动选定回复数据。」
+   * > 「这个是针对某一个配方来自动回复，而不是任意所有的配方吧？」
+   *
+   * ⭐ **按配方不是全局**:实测不同配方精确率差一个数量级
+   * (英文 blocked 4% / censorship 0%,而泛词改词组后 62%)——
+   * 全局开关会把「已调准的」和「还在 4% 的」绑死。
+   *
+   * ⚠️ **自动只到「填进回复框」为止,发布仍然是人点** ——
+   * 红线不因这个开关松动。省掉的是「挑哪条 + 写正文」,不是「要不要发」。
+   */
+  autoReply?: boolean;
+  /** 开关什么时候打开的 —— 「这条是开关打开后产出的吗」要靠它 */
+  autoReplyAt?: string;
 }
 
 /**

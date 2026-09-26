@@ -25,6 +25,9 @@ interface RecipeRow {
   result_type: string;
   interval_minutes: number;
   last_run_at: string | null;
+  /** ⭐ 自动回复开关 —— **按配方**(老行没有这个字段,故可空) */
+  auto_reply?: boolean | null;
+  auto_reply_at?: string | null;
 }
 
 function rowToRecipe(row: RecipeRow): SearchRecipe {
@@ -43,6 +46,13 @@ function rowToRecipe(row: RecipeRow): SearchRecipe {
     resultType: row.result_type as SearchRecipe['resultType'],
     intervalMinutes: row.interval_minutes,
     lastRunAt: row.last_run_at != null ? String(row.last_run_at) : undefined,
+    /**
+     * ⭐ 自动回复开关。⚠️ **缺省是 false 不是 undefined** ——
+     * 老配方没有这个字段,读成 undefined 再传给闸门会走进
+     * 「没表态」分支;这里当场归一成 false,**默认关**。
+     */
+    autoReply: row.auto_reply === true,
+    autoReplyAt: row.auto_reply_at != null ? String(row.auto_reply_at) : undefined,
   };
 }
 
@@ -185,6 +195,8 @@ export async function upsertRecipe(
     since_hours: recipe.sinceHours ?? 24,
     result_type: recipe.resultType,
     interval_minutes: recipe.intervalMinutes,
+    /** ⚠️ 默认关 —— 自动回复必须是明确打开的,不能因为字段缺失而默认开 */
+    auto_reply: recipe.autoReply === true,
   };
 
   if (recipe.id) {
@@ -193,7 +205,16 @@ export async function upsertRecipe(
         name = $name, enabled = $enabled, template = $template,
         keywords = $keywords, from_accounts = $from_accounts, help_signals = $help_signals,
         min_likes = $min_likes, min_retweets = $min_retweets, lang = $lang,
-        since_hours = $since_hours, result_type = $result_type, interval_minutes = $interval_minutes
+        since_hours = $since_hours, result_type = $result_type, interval_minutes = $interval_minutes,
+        /**
+         * ⚠️ **SQL 与参数两处都要登记** —— 本仓「加字段要登记四处」栽过多次:
+         * 漏 SQL 这一处 → 开关点了没反应,而类型和 UI 看着都对。
+         * ⚠️ 只在**从关变开**时写时间戳,重复保存不刷新
+         * (否则「开关是什么时候打开的」每存一次就变一次)。
+         */
+        auto_reply = $auto_reply,
+        auto_reply_at = IF $auto_reply = true AND auto_reply != true
+          THEN time::now() ELSE auto_reply_at END
        WHERE recipe_id = $recipe_id`,
       { ...params, recipe_id: recipe.id },
     );
@@ -205,6 +226,12 @@ export async function upsertRecipe(
         keywords: $keywords, from_accounts: $from_accounts, help_signals: $help_signals,
         min_likes: $min_likes, min_retweets: $min_retweets, lang: $lang,
         since_hours: $since_hours, result_type: $result_type, interval_minutes: $interval_minutes,
+        /**
+         * ⚠️ 新建分支也要登记 —— 漏了的话「新建时就打开自动」会静默丢失。
+         * ⭐ 新建即打开的话,时间戳当场写(与 UPDATE 分支同一语义)。
+         */
+        auto_reply: $auto_reply,
+        auto_reply_at: IF $auto_reply = true THEN time::now() ELSE NONE END,
         last_run_at: NONE
       }`,
       { ...params, recipe_id: id },

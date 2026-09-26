@@ -1593,6 +1593,50 @@ DEFINE FIELD IF NOT EXISTS review_count     ON x_reply_draft TYPE option<int>;
 DEFINE INDEX IF NOT EXISTS idx_draft_reviewed ON x_reply_draft FIELDS reviewed_at;
 `;
 
+/**
+ * 1.2.12 —— 自动回复开关(**按配方**,2026-09-26)
+ *
+ * ── 用户拍板 ──
+ * > 「设置Gemma开关，当用户对目前这批配方及答复满意后，打开开关，
+ * >   Gemma自动选定回复数据。」
+ * > 「这个是针对某一个配方来自动回复，而不是任意所有的配方吧？」
+ *
+ * ⭐⭐ **按配方,不是全局** —— 用户订正的,而且理由很硬:
+ * 实测(记忆 project-x-keyword-precision)不同配方的精确率差一个数量级:
+ * 英文 `blocked` **4%**、`censorship` **0%**,而泛词改词组后能到 **62%**。
+ * 全局开关会把「中文配方已调准」和「英文配方还在 4%」绑死 ——
+ * 要么不敢开,要么开了就出事。
+ *
+ * ⭐ 链路本来就通:`x_tweet.search_recipe` 记着每条推是哪个配方采来的,
+ * 所以「只对某配方自动」是**能真正执行的**,不是摆设。
+ *
+ * ── ⚠️ 自动到哪一步(用户 2026-09-26 定)──
+ * **自动填进回复框,发布仍然是人点** ——
+ * 红线「绝不程序点发布」不因为这个开关而松动。
+ * 用户省掉的是「挑哪条 + 写正文」,不是「要不要发」。
+ *
+ * ⚠️ `auto_reply_at` 记**什么时候打开的**:
+ * 回头看「这条是开关打开之后产出的吗」要靠它,
+ * 光有一个布尔值说不清时间边界。
+ */
+const X_SCHEMA_1_2_12 = `
+-- ⭐⭐ 自动回复开关 —— **按配方**,默认关
+DEFINE FIELD IF NOT EXISTS auto_reply    ON search_recipes TYPE option<bool>;
+-- 什么时候打开的 —— 「这条是开关打开后产出的吗」要靠它
+DEFINE FIELD IF NOT EXISTS auto_reply_at ON search_recipes TYPE option<datetime>;
+-- ⭐ 这条草稿是不是自动路径产出的(点评列表要标出来)
+DEFINE FIELD IF NOT EXISTS auto          ON x_reply_draft TYPE option<bool>;
+`;
+
+export async function x_migration_1_2_12(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_12);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.12', appliedAt = $now,
+      description = 'per-recipe auto_reply switch (+ x_reply_draft.auto marker)'`,
+    { rid: new RecordId('schema_version', '1.2.12'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_11(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_11);
   await db.query(
