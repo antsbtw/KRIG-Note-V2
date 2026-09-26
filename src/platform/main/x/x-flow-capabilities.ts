@@ -19,6 +19,7 @@ import type { FlowStepOutcome } from '@shared/types/flow-recipe-types';
 import { autoCollect } from './x-auto-collect';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { planReplyBatch } from './x-timeline-handlers';
+import { prefetchReplyContext } from './x-prefetch-context';
 import { XPageResolver } from './x-pages';
 import { resolveXWebContents } from './x-webcontents';
 
@@ -141,6 +142,56 @@ export function makeXFlowCapabilities(): FlowCapabilities {
          * (别现在就把整批推文塞进来 —— flow_step_run 会被撑爆)。
          */
         evidence: { items: [{ fetched: r.fetched, judged: r.judged, worth: r.worth }] },
+        elapsedMs: Date.now() - t0,
+      };
+    },
+
+    /**
+     * ③ 备料 —— 给这一批候选补齐「作者 bio」与「这一楼的上文」。
+     *
+     * ── 用户 2026-09-26 ──
+     * > 「针对目标数据，获取对应的 bio-上下文--打包」
+     * > 「这一步应该是先查询数据库，有就即可获取，没有再从 x 上定位获取。」
+     *
+     * ⚠️ 这一步原来**根本不在编排里** —— 两个预取只挂在收件箱面板的按钮上。
+     * 手点时人就是那根接线;编排一跑,拟回复拿到的推**没 bio 也没上文**。
+     */
+    async prefetch(params, wsId): Promise<FlowStepOutcome> {
+      const t0 = Date.now();
+      const r = await prefetchReplyContext({
+        wsId,
+        wcId: wcOf(params),
+        limit: num(params.limit),
+        status: str(params.status) as never,
+        replied: false,
+        /** ⭐ 上文深度是变量 —— 编排档里可调 */
+        contextDepth: num(params.contextDepth),
+      });
+
+      /**
+       * ⚠️ **机制可疑要报失败**:采不到单个账号是常事,
+       * 但连着一串都采不到多半是采集机制坏了(X 改版让载荷截不到)。
+       * 那时继续往下拟回复,用户会在毫不知情下拿到一堆「只读正文」的建议。
+       */
+      const ok = !r.mechanismSuspect;
+      return {
+        ok,
+        /** 产出 = 这一步真的补上了多少样东西(bio + 上文) */
+        produced: r.bio.fetched + r.context.fetched,
+        error: ok ? undefined
+          : `连续采不到 —— 疑似采集机制坏了(${r.errors.slice(0, 2).join('; ')})`,
+        note: `备料 ${r.scanned} 条:bio ${r.bio.cached} 条库里有/`
+          + `${r.bio.fetched} 条现采(共 ${r.bio.authors} 人)· `
+          + `上文 ${r.context.cached} 条库里有/${r.context.fetched} 条现采`
+          + (r.context.fetched > 0 ? `(平均 ${r.context.avgDepth.toFixed(1)} 条/楼)` : '')
+          + (r.context.failed > 0 ? ` · ⚠️ ${r.context.failed} 条没抓到` : ''),
+        /**
+         * ⚠️ **备料不当闸门**:没料也能拟回复(只是质量差),
+         * 不像判断那样「没候选就无事可做」。所以这里**不表态**。
+         */
+        payload: { scanned: r.scanned },
+        /** ⭐ 观察点:「先查库」到底省了多少、现采成功率多少 */
+        evidence: { items: [{ bio: r.bio, context: r.context, errors: r.errors }] },
         elapsedMs: Date.now() - t0,
       };
     },

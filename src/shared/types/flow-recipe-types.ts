@@ -40,6 +40,11 @@ export type FlowStepKind =
   | 'collect'
   /** AI 判断哪些值得回复(judge) */
   | 'judge'
+  /**
+   * ⭐ 备料:给候选补齐作者 bio 与这一楼的上文(fetch)。
+   * ⚠️ **先查库,缺了才去 X 取**(用户 2026-09-26 定)。
+   */
+  | 'prefetch'
   /** 拟回复草稿 —— ⚠️ **只填不发**(用户定的红线) */
   | 'planReply';
 

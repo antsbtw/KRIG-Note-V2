@@ -43,6 +43,8 @@ export interface FlowCapabilities {
   goto(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
   collect(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
   judge(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
+  /** ⭐ 备料:bio + 上文(先查库,缺了才去 X 取) */
+  prefetch(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
   planReply(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
 }
 
@@ -301,6 +303,7 @@ export async function runFlow(
 const STEP_TYPE_BY_KIND: Readonly<Record<FlowStepKind, StepType>> = {
   goto: 'act',
   collect: 'fetch',
+  prefetch: 'fetch',
   judge: 'judge',
   planReply: 'judge',
 };

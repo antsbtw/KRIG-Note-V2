@@ -1,0 +1,177 @@
+/**
+ * ⭐⭐ **备料** —— 给一批推补齐「作者 bio」与「这一楼的上文」。
+ *
+ * ── 用户 2026-09-26 定的流水线第 ③ 步 ──
+ * > 「针对目标数据，获取对应的 bio-上下文--打包」
+ * > 「这一步应该是先查询数据库，有就即可获取，没有再从 x 上定位获取。」
+ *
+ * ⚠️ **为什么抽成共用函数**(与 `planReplyBatch` 同一个理由):
+ * 这两件事原本只活在 `X_PREFETCH_PROFILES` / `X_PREFETCH_CONTEXT`
+ * 两个 IPC handler 里 —— **只有人点按钮才跑**。
+ * 编排一跑就没有这一环,于是拟回复拿到的推**没有 bio 也没有上文**。
+ *
+ * ⭐ 这正是用户说的「你割裂了流程了」:
+ * **能力一直都在,只是挂在各自的手点按钮上**。手点时人就是那根接线;
+ * 编排一跑,接线断了。
+ *
+ * ⚠️ 抽出来**不是复制一份**:handler 与编排能力都调这里,
+ * 两份实现必漂,而漂的表现是「手点能跑、编排跑出来的不一样」,极难查。
+ */
+
+import { queryInbox, setParentContext } from '../db/tweet-inbox-repo';
+import { getAuthorCounts } from '../db/x-author-repo';
+import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
+import { fetchParentTweet, DEFAULT_CONTEXT_DEPTH } from './x-parent-tweet';
+import { normalizeHandle } from '@shared/types/x-timeline-types';
+import type { TweetInboxStatus } from '@shared/types/x-timeline-types';
+
+export interface PrefetchOptions {
+  wsId?: string;
+  wcId?: number;
+  /** 取哪一页的候选 —— ⚠️ 口径要与调用方看到的一致 */
+  status?: TweetInboxStatus;
+  statuses?: TweetInboxStatus[];
+  limit?: number;
+  offset?: number;
+  replied?: boolean;
+  /**
+   * ⭐ 上文取几条 —— **变量**(用户 2026-09-26:「是否做变量---届时该起来容易」)。
+   * ⚠️ 判断层要 1 条就够,拟回复要的是整楼语境 —— 深度归调用方定。
+   */
+  contextDepth?: number;
+}
+
+export interface PrefetchReport {
+  /** 这一页扫了多少条 */
+  scanned: number;
+  bio: {
+    /** 这一页涉及多少个作者(去重后) */
+    authors: number;
+    /** ⭐ 库里就有、没去 X 跑 —— 「先查库」省下来的 */
+    cached: number;
+    /** 现去 X 采回来的 */
+    fetched: number;
+    failed: number;
+  };
+  context: {
+    /** 真的是回复、值得抓上文的条数 */
+    attempted: number;
+    /** ⭐ 库里已有上文,跳过 */
+    cached: number;
+    fetched: number;
+    failed: number;
+    /** 抓回来的上文平均多少条 —— 深度变量有没有生效,看这个 */
+    avgDepth: number;
+  };
+  /**
+   * ⚠️ **连续失败 = 机制层面的怀疑**,不是个别账号的问题。
+   * 采不到单个账号是常事(私密号/已注销),但连着一串都采不到
+   * 多半是采集机制坏了(如 X 改版让载荷截不到)。
+   */
+  mechanismSuspect: boolean;
+  errors: string[];
+}
+
+/**
+ * 判断一条推是不是「回复」—— 只有回复才有上文可抓。
+ *
+ * ⚠️ 对独立求助推白跑一次导航是**纯浪费**:
+ * 实测 60 条 worth 样本里 **39 条是孤立原创推**(天生没有上下文)。
+ */
+function isReply(t: { in_reply_to_user?: string; text?: string }): boolean {
+  return !!t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? '');
+}
+
+/**
+ * 给一批推备料。
+ *
+ * ⚠️ **先查库,缺了才去 X 取**(用户明确要求)——
+ * bio 看 `PROFILE_STALE_HOURS` 内是否新鲜,上文看 `parent_text` 有没有值。
+ *
+ * ⚠️ 失败**不拦整批**:采不到某个人的 bio,别的推照样备料。
+ * 但失败要**记下来并报出去**,不能静默(否则「备齐了」是谎报)。
+ */
+export async function prefetchReplyContext(
+  opts: PrefetchOptions = {},
+): Promise<PrefetchReport> {
+  const depth = Math.max(1, Math.floor(opts.contextDepth ?? DEFAULT_CONTEXT_DEPTH));
+  const pool = await queryInbox({
+    ...(opts.statuses && opts.statuses.length
+      ? { statuses: opts.statuses }
+      : { status: opts.status ?? 'worth' }),
+    ...(opts.wsId ? { wsId: opts.wsId } : {}),
+    ...(typeof opts.replied === 'boolean' ? { replied: opts.replied } : {}),
+    limit: opts.limit ?? 20,
+    offset: opts.offset ?? 0,
+  });
+
+  const errors: string[] = [];
+  let consecutiveFail = 0;
+  let maxConsecutive = 0;
+  const noteFail = (msg: string): void => {
+    consecutiveFail += 1;
+    maxConsecutive = Math.max(maxConsecutive, consecutiveFail);
+    if (errors.length < 5) errors.push(msg);
+  };
+
+  // ── ① bio ──
+  /**
+   * ⚠️ **handle 必须归一化**:`x_tweet` 存 `@Xxx`(带 @ 保留大小写),
+   * `x_author` 存归一化小写。写入端与比对端不共用 `normalizeHandle()`
+   * 就会**永远命中不上且不报错**。
+   */
+  const handles = [...new Set(pool.map((t) => normalizeHandle(t.author_handle ?? '')).filter(Boolean))];
+  let bioCached = 0; let bioFetched = 0; let bioFailed = 0;
+  for (const h of handles) {
+    const have = await getAuthorCounts(h).catch(() => null);
+    const fresh = have?.countsAt
+      && (Date.now() - new Date(have.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
+    if (fresh) { bioCached += 1; consecutiveFail = 0; continue; }
+
+    const got = await harvestAuthorProfile(h, opts.wcId, 12_000)
+      .catch((e) => ({ error: String(e) }));
+    if ('error' in got) { bioFailed += 1; noteFail(`bio @${h}: ${got.error}`); }
+    else { bioFetched += 1; consecutiveFail = 0; }
+  }
+
+  // ── ② 上文 ──
+  const replies = pool.filter(isReply);
+  const needContext = replies.filter((t) => !t.parent_text);
+  let ctxCached = replies.length - needContext.length;
+  let ctxFetched = 0; let ctxFailed = 0;
+  let depthSum = 0;
+  for (const t of needContext) {
+    const got = await fetchParentTweet(
+      t.tweet_url || `https://x.com/i/status/${t.tweet_id}`, opts.wcId, 10_000, depth,
+    ).catch(() => null);
+    if (!got) { ctxFailed += 1; noteFail(`上文 ${t.tweet_id}: 没抓到`); continue; }
+    /**
+     * ⚠️ 落库仍只存紧邻那条(`parent_text` 字段的语义没变)。
+     * ⭐ 整段 `context` 现在只在**本次返回值**里往下传 ——
+     * 存不存整段是数据模型的事(见设计文档 §6 `context_snapshot`),
+     * 不在这一步偷偷扩字段。
+     */
+    await setParentContext(t.tweet_id, got.text, got.authorHandle).catch((e) => {
+      noteFail(`上文入库 ${t.tweet_id}: ${String(e).slice(0, 80)}`);
+    });
+    ctxFetched += 1;
+    depthSum += got.context.length;
+    consecutiveFail = 0;
+  }
+
+  return {
+    scanned: pool.length,
+    bio: { authors: handles.length, cached: bioCached, fetched: bioFetched, failed: bioFailed },
+    context: {
+      attempted: needContext.length,
+      cached: ctxCached,
+      fetched: ctxFetched,
+      failed: ctxFailed,
+      /** ⭐ 深度变量有没有真的生效,看这个数 —— 恒为 1 就是没生效 */
+      avgDepth: ctxFetched > 0 ? depthSum / ctxFetched : 0,
+    },
+    /** 连续 5 个失败 = 机制层面的怀疑 */
+    mechanismSuspect: maxConsecutive >= 5,
+    errors,
+  };
+}

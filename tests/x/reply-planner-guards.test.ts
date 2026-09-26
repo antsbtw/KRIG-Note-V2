@@ -878,9 +878,32 @@ describe('① 上文闸门(链条第一步)', () => {
   });
 
   it('⭐ 抓不到父推返回 null,不返回空壳', () => {
+    /**
+     * ⚠️ 2026-09-26 改:原来钉的是**字面量** `if (!text) return null`。
+     * 那种钉法有两个毛病:
+     *  ① 换个等价写法就假红(本次 depth 变量改动就撞上了)
+     *  ② 真正该钉的是**行为**——「拿不到就返回 null」,
+     *    而字面量在时也可能是**进不去的分支**(源码扫描看不见会不会执行)。
+     * ⭐ 改成钉 return 语句本身:必须有一条「空 → return null」的早返回,
+     * 且**绝不构造空壳对象**。
+     */
     const pt = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-parent-tweet.ts'), 'utf-8');
-    expect(pt).toMatch(/if \(!text\) return null/);
+    const code = stripComments(pt);
+    /**
+     * ⚠️ 锚点要钉**函数真正的返回**,不是注入脚本里的 —— 那段浏览器脚本里
+     * 也有 `return {`(readOne 的),`indexOf` 会先命中它
+     * (本仓「indexOf 锚错位置」踩过多次)。判据:真返回带 `via:`。
+     */
+    const i = code.indexOf("via: 'thread-page',");
+    expect(i, '找不到函数真正的返回值(带 via 的那个)').toBeGreaterThan(0);
+    /** 构造返回值**之前**必须先有一道空判早返回 */
+    const before = code.slice(0, i);
+    expect(
+      before,
+      '拿不到上文却不早返回 —— 会返回一个 text 为空的壳,\n'
+      + '模型读到的是「上文是空的」而不是「没拿到」,两者意思完全不同',
+    ).toMatch(/(length === 0|!text)[\s\S]{0,40}return null/);
   });
 
   it('⭐ DOM 提取器不许再用 socialContext 当回复关系', () => {

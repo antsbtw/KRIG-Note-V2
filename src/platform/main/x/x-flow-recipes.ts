@@ -69,6 +69,21 @@ export const DEFAULT_X_FLOW: FlowRecipe = {
       params: { batchSize: 10 },
     },
     {
+      id: 'prefetch',
+      kind: 'prefetch',
+      label: '备料(作者 bio + 这一楼的上文)',
+      /**
+       * ⭐ 用户 2026-09-26 定的第 ③ 步:「先查询数据库，有就即可获取，
+       * 没有再从 x 上定位获取。」
+       *
+       * ⚠️ `contextDepth` 是**变量**:判断层 1 条就够,
+       * 拟回复要的是整楼语境。这里先给 10 ——
+       * ⚠️ 逐条要进详情页,10 条候选 ≈ 1~2 分钟(用户已确认可接受:
+       * 「这个本来就是必须的——模拟人的操作也是对的」)。
+       */
+      params: { limit: 10, contextDepth: 10 },
+    },
+    {
       id: 'planReply',
       kind: 'planReply',
       label: '拟回复草稿(只填不发)',
