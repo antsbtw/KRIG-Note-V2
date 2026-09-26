@@ -20,6 +20,7 @@ import { autoCollect } from './x-auto-collect';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { planReplyBatch } from './x-timeline-handlers';
 import { prefetchReplyContext } from './x-prefetch-context';
+import { askClaudeForAdvice } from './x-ask-advice';
 import { XPageResolver } from './x-pages';
 import { resolveXWebContents } from './x-webcontents';
 
@@ -203,7 +204,84 @@ export function makeXFlowCapabilities(): FlowCapabilities {
     },
 
     /**
-     * ④ 拟回复草稿 —— ⚠️ **只填不发**(用户定的红线,这里不碰发布)。
+     * ④ 送 Claude 取回复建议 —— 用户 2026-09-26 定的流水线第 ④ 步。
+     *
+     * > 「上传 claude，请求答复」「下载答复并整理呈现给用户点评」
+     *
+     * ⚠️ **只取建议,不发推**。`askAI` 内部的 clickSendButton 是
+     * **发给 Claude**,与发推无关 —— 别混。
+     *
+     * ⚠️ 需要**前台 AI webview 开着**(claude.ai 已加载)。
+     * 没开的话 `askAI` 会 fail loud 说清楚,不静默。
+     */
+    async askAdvice(params, wsId): Promise<FlowStepOutcome> {
+      const t0 = Date.now();
+      if (!wsId) {
+        return {
+          ok: false, produced: 0,
+          error: 'askAdvice 需要 wsId(否则会跨 ws 混批)',
+          elapsedMs: Date.now() - t0,
+        };
+      }
+      const r = await askClaudeForAdvice({
+        wsId,
+        wcId: num(params.wcId),
+        limit: num(params.limit),
+        ref: str(params.ref),
+        timeoutMs: num(params.timeoutMs),
+      });
+
+      if (r.error) {
+        return {
+          ok: false, produced: 0,
+          error: `${r.error}`
+            + '（⚠️ askAI 在本仓长期无人调用，第一次真跑失败先怀疑它：'
+            + '要么 AI 视图没开着，要么粘贴/等回复那条链路已腐坏）',
+          elapsedMs: Date.now() - t0,
+        };
+      }
+
+      /**
+       * ⚠️ **送了却一条都没解析出来 = 真故障**,不能报成功。
+       * Claude 改了排版的现象正是这个 —— 报成功的话没人会发现。
+       */
+      const stuck = r.sent > 0 && r.parsed === 0;
+      return {
+        ok: !stuck,
+        produced: r.recommended,
+        error: stuck
+          ? `送了 ${r.sent} 条,一条建议都没解析出来 —— 多半是 Claude 改了回答格式`
+            + (r.unparsed[0] ? `(开头:${r.unparsed[0].slice(0, 80)})` : '')
+          : undefined,
+        note: r.sent === 0
+          ? '没有待建议的候选(不是故障)'
+          : `送 ${r.sent} 条 · 解析出 ${r.parsed} 条 · 建议回复 ${r.recommended} 条`
+            + (r.rejected.length > 0 ? ` · ⚠️ ${r.rejected.length} 条没过校验` : '')
+            + (r.unparsed.length > 0 ? ` · ${r.unparsed.length} 段没解析` : ''),
+        /** ⭐ 建议往下传给点评步 —— 不落地、不从库里再捞一次 */
+        payload: { advices: r.advices, summary: r.summary },
+        /**
+         * ⚠️ 没有一条建议「回复」就别往下走了 ——
+         * 与判断步同一个道理:没候选就无事可做。
+         */
+        hasCandidates: r.recommended > 0,
+        /**
+         * ⭐ 观察点:**校验拦了什么**最值得记 ——
+         * 「Claude 改了链接」这种事发出去看不出来,只能靠这里留痕。
+         */
+        evidence: {
+          items: [{
+            sent: r.sent, parsed: r.parsed, recommended: r.recommended,
+            rejected: r.rejected, unparsedCount: r.unparsed.length,
+            summary: r.summary,
+          }],
+        },
+        elapsedMs: Date.now() - t0,
+      };
+    },
+
+    /**
+     * ⑤ 拟回复草稿 —— ⚠️ **只填不发**(用户定的红线,这里不碰发布)。
      */
     async planReply(params, wsId): Promise<FlowStepOutcome> {
       const t0 = Date.now();

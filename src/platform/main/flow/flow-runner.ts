@@ -45,6 +45,8 @@ export interface FlowCapabilities {
   judge(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
   /** ⭐ 备料:bio + 上文(先查库,缺了才去 X 取) */
   prefetch(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
+  /** ⭐ 送 Claude 取回复建议 —— ⚠️ 只取建议,不发 */
+  askAdvice(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
   planReply(params: Record<string, unknown>, wsId?: string): Promise<FlowStepOutcome>;
 }
 
@@ -304,6 +306,8 @@ const STEP_TYPE_BY_KIND: Readonly<Record<FlowStepKind, StepType>> = {
   goto: 'act',
   collect: 'fetch',
   prefetch: 'fetch',
+  /** ⚠️ 问模型要结论 —— 与 judge 同类(不是 fetch:它产出的是判断不是事实) */
+  askAdvice: 'judge',
   judge: 'judge',
   planReply: 'judge',
 };

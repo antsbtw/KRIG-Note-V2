@@ -84,6 +84,22 @@ export const DEFAULT_X_FLOW: FlowRecipe = {
       params: { limit: 10, contextDepth: 10 },
     },
     {
+      id: 'askAdvice',
+      kind: 'askAdvice',
+      label: '送 Claude 取建议（只取建议，不发）',
+      /**
+       * ⭐ 用户 2026-09-26 定的第 ④ 步:「上传 claude，请求答复」。
+       *
+       * ⚠️⚠️ **默认关掉** —— 两个原因:
+       *  ① 它要**前台 AI 视图开着**(claude.ai 已加载),编排自己开不了;
+       *  ② `askAI` 在本仓长期无人调用,**尚未真机验证过**。
+       * ⭐ 想跑时在编排档里把 enabled 打开 —— 这正是 enabled 字段存在的理由
+       *   (「关掉这一步但不删」)。
+       */
+      enabled: false,
+      params: { limit: 10, ref: 'flow', timeoutMs: 180_000 },
+    },
+    {
       id: 'planReply',
       kind: 'planReply',
       label: '拟回复草稿(只填不发)',

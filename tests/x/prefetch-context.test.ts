@@ -141,9 +141,15 @@ describe('⭐⭐ prefetch 接进了编排(不是只挂在手点按钮上)', () =
      */
     const caps = read('src/platform/main/x/x-flow-capabilities.ts');
     const i = caps.indexOf('async prefetch(');
-    const j = caps.indexOf('async planReply(');
+    /**
+     * ⚠️ 2026-09-26 改锚点:原来切到 `async planReply(`,
+     * 而 `askAdvice` 插在 prefetch 与 planReply **之间**,
+     * 它**该**表态 hasCandidates(没建议就无事可做)——
+     * 于是这条守卫开始假红。⭐ 切到**下一个能力**为止,不是切到某个固定能力。
+     */
+    const j = caps.indexOf('async askAdvice(');
     expect(i, '找不到 prefetch').toBeGreaterThan(0);
-    expect(j, '找不到 planReply').toBeGreaterThan(i);
+    expect(j, '找不到 prefetch 后面那个能力').toBeGreaterThan(i);
     const body = caps.slice(i, j);
     expect(body.length, 'slice 空转').toBeGreaterThan(100);
     expect(

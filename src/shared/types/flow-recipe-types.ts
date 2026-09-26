@@ -45,6 +45,11 @@ export type FlowStepKind =
    * ⚠️ **先查库,缺了才去 X 取**(用户 2026-09-26 定)。
    */
   | 'prefetch'
+  /**
+   * ⭐ 送 Claude 取回复建议(judge)。
+   * ⚠️ **只取建议**,发不发是人点的 —— 与 planReply 的红线一致。
+   */
+  | 'askAdvice'
   /** 拟回复草稿 —— ⚠️ **只填不发**(用户定的红线) */
   | 'planReply';
 
