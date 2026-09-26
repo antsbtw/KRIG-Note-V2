@@ -17,7 +17,6 @@ import { registerAnchorTable, registerPageTable } from '../web-capability/wiring
 import { XAnchorResolver } from './x-anchors';
 import { XPageResolver } from './x-pages';
 import { getRecipeById, listAllRecipes, upsertRecipe, deleteRecipe, getRecipeStats } from '../db/search-recipe-repo';
-import { setParentContext } from '../db/tweet-inbox-repo';
 import { queryInbox, countInbox, insertFeedback, queryFeedbackSamples, applyHumanVerdict, queryMissingTranslation, setTranslation, getGenuineAiVerdict, getFeedbackStats, markReplied } from '../db/tweet-inbox-repo';
 import type { InboxFilter } from '../db/tweet-inbox-repo';
 import { googleTranslate, translateCircuitOpen } from './google-translate';
@@ -29,7 +28,7 @@ import type { ReplyDismissReason } from '@shared/types/x-reply-types';
 /** ⭐ 草稿落库 —— AI 学习的训练信号(migration 1.2.8) */
 import { insertReplyDrafts, resolveReplyDraft } from '../db/x-reply-draft-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
-import { fetchParentTweet } from './x-parent-tweet';
+import { prefetchReplyContext } from './x-prefetch-context';
 import type { ReplyFeedback } from '../db/x-reply-feedback-repo';
 import { setActiveXWcId, getActiveWcId } from './x-search-scheduler';
 import { blockAuthor, unblockAuthor, listBlocked, getBlockedHandleSet, setSelfAuthor, getSelfHandle,
@@ -1164,67 +1163,59 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
-  // X_PREFETCH_CONTEXT — 给「Gemma 建议采纳」的推批量预抓上文。
-  //
-  // ⭐ 用户 2026-09-06:「从 Gemma4 的建议名单中获取,因为每一个它建议的,
-  //   都应该获取上下文。」——对。上文是①闸门的输入,等点开弹窗才抓
-  //   意味着每条都要现等 10s;而建议名单是可预知的,可以提前批量抓好。
-  //
-  // ⚠️ 只抓**真是回复**的:独立求助推没有上文,白跑导航纯浪费。
-  // ⚠️ 抓不到不算失败 —— 记下来让调用方知道哪些没拿到,不静默。
+  /**
+   * X_PREFETCH_CONTEXT / X_PREFETCH_PROFILES —— 给这一页的候选备料。
+   *
+   * ⭐⭐ **2026-09-26 起两个 handler 都走 `prefetchReplyContext`**
+   * (用户:「不要使用这些旧的函数了，要使用新的重构后的函数。」)。
+   *
+   * ── 为什么必须合一 ──
+   * 原来这里各有一份 for 循环,而编排走的是新抽出来的共用函数 ——
+   * **两份实现必漂**,漂的表现是「手点能跑、编排跑出来的不一样」,极难查。
+   * (本仓同形教训:`planReplyBatch` 当初就是为这个从 handler 里抽出来的。)
+   *
+   * ⚠️ **两个通道保留不合并**:UI 是「先采画像、若机制可疑就**中止不抓上文**」
+   * 的两段式(画像影响「该不该回」,比上文更基础)。合成一个通道会让
+   * 「画像坏了还继续抓上文」——那是 UI 的判断,不该被这次重构改掉。
+   * ⭐ 于是两个通道各调一次共用函数,各取自己那半份报告。
+   */
+  const prefetchArgs = (p: {
+    wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown;
+    status?: unknown; statuses?: unknown; humanReviewed?: unknown;
+  }): Parameters<typeof prefetchReplyContext>[0] => ({
+    wsId: typeof p.wsId === 'string' ? p.wsId : undefined,
+    wcId: typeof p.wcId === 'number' ? p.wcId : undefined,
+    limit: typeof p.limit === 'number' ? p.limit : 20,
+    offset: typeof p.offset === 'number' ? p.offset : 0,
+    ...(Array.isArray(p.statuses) && p.statuses.length
+      ? { statuses: p.statuses as TweetInboxStatus[] }
+      : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
+    humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
+    /**
+     * ⚠️ **收件箱面板不按 wsId 过滤** —— 列表本身就不过滤,侧栏计数也不。
+     * 过滤会出现「屏幕上明明有 67 条,预取却说没有可预抓的」
+     * (用户 2026-09-07 撞上过)。⭐ 编排那边相反,它传 filterByWs: true。
+     */
+    filterByWs: false,
+  });
+
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_CONTEXT, async (_e, payload: unknown) => {
-    const p = payload as
-      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown;
-        status?: unknown; statuses?: unknown; humanReviewed?: unknown } | null;
+    const p = payload as { wsId?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };
     }
     try {
-      // ⚠️ **不加 humanReviewed 过滤**:2026-09-06 实测,ws-1 的 18 条 worth
-      //    全都 reason='human:accept'(用户已表态),原本写 humanReviewed:false
-      //    → 匹配 0 条 → 预抓静默什么都不做。
-      //    而且方向本就反了:用户已确认要回的那些**更需要**上文,不是更不需要。
-      // 同画像:**按当前页取**(操作纪律:处理一页时先把这页的资料备齐)。
-      // 已抓过的跳过,不重抓。
-      // 同画像:跟随调用方的视图,不写死 'worth'
-      const pool = await queryInbox({
-        ...(Array.isArray(p.statuses) && p.statuses.length
-          ? { statuses: p.statuses as TweetInboxStatus[] }
-          : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
-        humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
-        // 同上:与列表口径一致,不按 wsId 过滤
-        limit: typeof p.limit === 'number' ? p.limit : 20,
-        offset: typeof p.offset === 'number' ? p.offset : 0,
-      });
-      const targets = pool
-        .filter((t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''))
-        .filter((t) => !t.parent_text);
-      const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
-
-      let ok = 0;
-      const missed: string[] = [];
-      for (const t of targets) {
-        const got = await fetchParentTweet(
-          t.tweet_url || `https://x.com/i/status/${t.tweet_id}`, wcId, 10_000,
-        ).catch(() => null);
-        if (got) {
-          await setParentContext(t.tweet_id, got.text, got.authorHandle);
-          ok += 1;
-        } else {
-          missed.push(t.tweet_id);
-        }
-      }
-      const allReplies = pool.filter(
-        (t) => t.in_reply_to_user || /^\s*@\w+/.test(t.text ?? ''));
+      /** ⚠️ 这个通道只要上文 —— bio 由 PROFILES 通道先跑过了,那边会命中缓存 */
+      const r = await prefetchReplyContext(prefetchArgs(p as never));
       return {
         success: true,
-        scanned: pool.length,
-        isReply: allReplies.length,
-        attempted: targets.length,
-        fetched: ok,
-        missed: missed.length,
-        // 本页还差多少 —— 「这页备齐了没有」的判据
-        remaining: missed.length,
+        scanned: r.scanned,
+        isReply: r.context.isReply,
+        attempted: r.context.attempted,
+        fetched: r.context.fetched,
+        missed: r.context.failed,
+        /** 本页还差多少 —— 「这页备齐了没有」的判据 */
+        remaining: r.context.failed,
       };
     } catch (err) {
       console.error('[x-timeline-handlers] X_PREFETCH_CONTEXT failed:', (err as Error).message);
@@ -1232,89 +1223,23 @@ export function registerXTimelineHandlers(): void {
     }
   });
 
-  // X_PREFETCH_PROFILES — 给建议名单里的作者批量预采画像。
-  //
-  // ⭐ 用户 2026-09-06:「如果数据不齐备,应该主动去切换 X 的页面来获取
-  //   足够的数据才回复」——方向对。现在是点开某条时**现采**(每条等 12s);
-  //   批量预采后点开即有,不用每条现等。
-  //
-  // ⚠️ 连续失败要告警:采不到单个账号是常事(私密号/已注销),
-  //    但**连着一串都采不到**多半是采集机制坏了(如 X 改版让载荷截不到)。
-  //    那时继续默默出草稿,用户会在毫不知情下连发一堆「只读正文」的判断。
   ipcMain.handle(IPC_CHANNELS.X_PREFETCH_PROFILES, async (_e, payload: unknown) => {
-    const p = payload as
-      { wsId?: unknown; wcId?: unknown; limit?: unknown; offset?: unknown;
-        status?: unknown; statuses?: unknown; humanReviewed?: unknown } | null;
+    const p = payload as { wsId?: unknown } | null;
     if (!p || typeof p.wsId !== 'string' || !p.wsId) {
       return { success: false, error: 'wsId required' };
     }
-    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
     try {
-      // ⭐ **按当前页取**(用户 2026-09-06 定的操作纪律):
-      //   「在处理一页时先采集,完毕再回复,这样可靠性更高。」
-      //   —— 这不是"少点几次"的问题,是**批次完整性**:
-      //   你正在看的这一页,资料要么齐、要么明确知道缺哪几个,
-      //   而不是边回边采、每条碰运气。将来交给 AI 自动跑也该守这个纪律。
-      //
-      //   我曾改成「一次扫全部、不按页」——那是把用户的问题理解成
-      //   "怎么少点几次"了,方向反了。
-      const offset = typeof p.offset === 'number' ? p.offset : 0;
-      const pageSize = typeof p.limit === 'number' ? p.limit : 20;
-      // ⚠️ **跟随调用方的视图**,不写死 'worth':
-      //    用户 2026-09-06 发现矛盾 —— 侧栏说「本页资料已备齐」(那是 Gemma建议 页),
-      //    而他在「漏判抽查」(status='skip',3292 条)里打开一条,弹窗说「还没采过画像」。
-      //    两句都没说谎,但预取根本没覆盖他正在看的那一页。
-      const pool = await queryInbox({
-        // 「全部」视图用的是 statuses(复数);只认 status 会静默退回 'worth',
-        // 于是那个视图永远备不上料 —— 与写死 'worth' 同款的坑
-        ...(Array.isArray(p.statuses) && p.statuses.length
-          ? { statuses: p.statuses as TweetInboxStatus[] }
-          : { status: (typeof p.status === 'string' ? p.status : 'worth') as TweetInboxStatus }),
-        humanReviewed: typeof p.humanReviewed === 'boolean' ? p.humanReviewed : undefined,
-        // ⚠️ **不按 wsId 过滤** —— 收件箱列表本身就不按 ws 过滤
-        //    (loadPage 的 queryInbox 没传 wsId,侧栏计数也没传)。
-        //    预取若按 ws 过滤,就会「屏幕上明明有 67 条,预取却说没有可预抓的」
-        //    —— 用户 2026-09-07 就是这么撞上的。
-        //    口径必须与用户看到的一致:他在这一页看到谁,就给谁备料。
-        limit: pageSize, offset,
-      });
-      const handles = [...new Set(pool
-        .map((t) => normalizeHandle(t.author_handle ?? ''))
-        .filter(Boolean))];
-      // 本页的人全部采完 —— 不设预算上限,否则「先采完再回复」就不成立
-      const budget = handles.length;
-
-      let fetched = 0; let cached = 0; let failed = 0;
-      let consecutiveFail = 0; let maxConsecutive = 0;
-      const errors: string[] = [];
-      for (const h of handles) {
-        // 采够本次预算就收工 —— 剩下的下次继续(断点续采)
-        if (fetched + failed >= budget) break;
-        const have = await getAuthorCounts(h).catch(() => null);
-        const fresh = have?.countsAt
-          && (Date.now() - new Date(have.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
-        if (fresh) { cached += 1; consecutiveFail = 0; continue; }
-
-        const got = await harvestAuthorProfile(h, wcId, 12_000)
-          .catch((e) => ({ error: String(e) }));
-        if ('error' in got) {
-          failed += 1;
-          consecutiveFail += 1;
-          maxConsecutive = Math.max(maxConsecutive, consecutiveFail);
-          if (errors.length < 3) errors.push(`@${h}: ${got.error}`);
-        } else {
-          fetched += 1;
-          consecutiveFail = 0;
-        }
-      }
-      // 连续 5 个失败 = 机制层面的怀疑,不是个别账号的问题
-      const mechanismSuspect = maxConsecutive >= 5;
-      // 还差多少没采 —— 让用户知道要不要再点一次,而不是猜
-      const remaining = handles.length - cached - fetched - failed;
+      const r = await prefetchReplyContext(prefetchArgs(p as never));
       return {
         success: true,
-        authors: handles.length, fetched, cached, failed, remaining,
-        mechanismSuspect, maxConsecutive, errors,
+        authors: r.bio.authors,
+        fetched: r.bio.fetched,
+        cached: r.bio.cached,
+        failed: r.bio.failed,
+        remaining: r.bio.authors - r.bio.cached - r.bio.fetched - r.bio.failed,
+        mechanismSuspect: r.mechanismSuspect,
+        maxConsecutive: r.maxConsecutive,
+        errors: r.errors,
       };
     } catch (err) {
       console.error('[x-timeline-handlers] X_PREFETCH_PROFILES failed:', (err as Error).message);

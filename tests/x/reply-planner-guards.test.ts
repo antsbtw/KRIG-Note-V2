@@ -346,9 +346,10 @@ describe('追踪名单 UI', () => {
     const h = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
     expect(h).toMatch(/X_PREFETCH_CONTEXT/);
-    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'));
-    // 只抓真是回复的,独立推别白跑
-    expect(seg.slice(0, 1600)).toMatch(/in_reply_to_user \|\|/);
+    /** ⭐ 实现已搬到共用函数:只抓真是回复的,独立推别白跑 */
+    const pre = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-prefetch-context.ts'), 'utf-8');
+    expect(pre, '不筛回复了 —— 会给独立求助推白跳详情页').toMatch(/in_reply_to_user/);
   });
 
   it('⭐ humanReviewed 只能来自视图,不许写死', () => {
@@ -660,6 +661,13 @@ describe('ref 归因不许猜', () => {
 });
 
 describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
+  /**
+   * ⭐ 2026-09-26 起备料的实现在**共用函数**里,不在 handler 里
+   * (用户:「不要使用这些旧的函数了，要使用新的重构后的函数。」)。
+   * 下面这些守卫钉的**行为没变**,只是换了钉的位置。
+   */
+  const PRE = readFileSync(
+    resolve(__dirname, '../../src/platform/main/x/x-prefetch-context.ts'), 'utf-8');
   const H2 = readFileSync(
     resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
   const V2 = readFileSync(
@@ -697,8 +705,8 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
   it('⭐ 连续采不到要告警(机制坏了 vs 个别账号)', () => {
     // 连着一串失败多半是 X 改版让载荷截不到,
     // 这时继续默默出草稿,用户会毫不知情地连发一堆弱判断
-    expect(H2).toMatch(/mechanismSuspect/);
-    expect(H2).toMatch(/maxConsecutive >= 5/);
+    expect(PRE).toMatch(/mechanismSuspect/);
+    expect(PRE).toMatch(/maxConsecutive >= 5/);
     expect(V2).toMatch(/画像采集可能已失效/);
   });
 
@@ -736,9 +744,9 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
     // 我曾改成「一次扫全部不按页」——把他的问题误解成"怎么少点几次",方向反了
     // ⚠️ 只看代码:注释里正解释着 offset,别自己撞上(踩过一次:
     //    注入「不按页」后守卫居然全绿,就是因为匹配到了注释)
-    const seg = stripComments(
-      H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE')));
-    expect(seg, '画像预取没按页取').toMatch(/limit: pageSize, offset/);
+    const seg = stripComments(PRE);
+    expect(seg, '备料没按页取(limit/offset 没传给 queryInbox)')
+      .toMatch(/limit: opts\.limit[\s\S]{0,120}offset: opts\.offset/);
     expect(
       /limit: 5000/.test(seg),
       '又改成一次扫全部了 —— 那样「先把这页备齐」就不成立',
@@ -748,14 +756,25 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
 
   it('⭐ 本页的人要全部采完,不能设预算上限', () => {
     // 设了上限「先采完再回复」就不成立了
-    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_SEARCH_SYNTAX_SPIKE'));
-    expect(seg).toMatch(/const budget = handles\.length/);
+    /**
+     * ⭐ 共用函数里**根本没有预算这个概念** —— 直接 for 完整页的 handles。
+     * ⚠️ 所以判据反过来钉:不许出现任何「采够 N 个就 break」。
+     */
+    const seg = stripComments(PRE);
+    const i = seg.indexOf('for (const h of handles)');
+    expect(i, '找不到遍历本页作者的循环').toBeGreaterThan(0);
+    const body = seg.slice(i, seg.indexOf('// ── ② 上文 ──') > 0
+      ? seg.indexOf('// ── ② 上文 ──') : i + 900);
+    expect(body.length, 'slice 空转').toBeGreaterThan(100);
+    expect(
+      /break/.test(body),
+      '又给本页的人设上限了 —— 「先采完再回复」就不成立',
+    ).toBe(false);
   });
 
   it('⭐ 上文预抓同样按页,且不重抓已有的', () => {
-    const seg = H2.slice(H2.indexOf('X_PREFETCH_CONTEXT'), H2.indexOf('X_PREFETCH_PROFILES'));
-    expect(seg).toMatch(/offset:/);
-    expect(seg).toMatch(/!t\.parent_text/);
+    expect(PRE).toMatch(/offset:/);
+    expect(PRE, '又会重抓已有上文的推了').toMatch(/!t\.parent_text/);
   });
 
   it('⭐ 完成后要明确报「本页备齐了没有」', () => {
@@ -765,8 +784,8 @@ describe('资料不齐时:标注 + 可重试 + 机制失效告警', () => {
   });
 
   it('⭐ 已有新鲜画像的不重复采(别白跑导航)', () => {
-    const seg = H2.slice(H2.indexOf('X_PREFETCH_PROFILES'), H2.indexOf('X_UPSERT_RECIPE'));
-    expect(seg).toMatch(/if \(fresh\) \{ cached \+= 1/);
+    expect(PRE, '新鲜的画像又会被重采 —— 白跑导航')
+      .toMatch(/if \(fresh\) \{ bioCached \+= 1;[\s\S]{0,40}continue/);
   });
 });
 
@@ -781,16 +800,20 @@ describe('驱动 webview 的路径都要显式传 wcId', () => {
 
   it('⭐ 预取路径必须用调用方传的 wcId,不能传 undefined', () => {
     // 不传 → 回退到只在 X 视图挂载时才有值的登记表 → 静默失败
-    expect(H).toMatch(/harvestAuthorProfile\(h, wcId/);
+    const pre = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-prefetch-context.ts'), 'utf-8');
+    expect(pre).toMatch(/harvestAuthorProfile\(h, opts\.wcId/);
     expect(
-      /harvestAuthorProfile\([^,)]+,\s*undefined/.test(stripComments(H)),
+      /harvestAuthorProfile\([^,)]+,\s*undefined/.test(stripComments(pre)),
       '画像采集又传 undefined 了 —— 会静默采不到',
     ).toBe(false);
   });
 
   it('⭐ 预取抓父推同样要传 wcId', () => {
-    const seg = H.slice(H.indexOf('X_PREFETCH_CONTEXT'), H.indexOf('X_PREFETCH_PROFILES'));
-    expect(seg).toMatch(/wcId, 10_000/);
+    const pre = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-prefetch-context.ts'), 'utf-8');
+    expect(pre, '抓父推没传 wcId —— 会回退到登记表,静默采不到')
+      .toMatch(/opts\.wcId, 10_000/);
   });
 
   it('⭐ 弹窗必须把 wcId 传下去', () => {
@@ -867,8 +890,10 @@ describe('① 上文闸门(链条第一步)', () => {
   it('⭐ 预取只对真的是回复的推抓上文(独立推别白跑导航)', () => {
     const h = readFileSync(
       resolve(__dirname, '../../src/platform/main/x/x-timeline-handlers.ts'), 'utf-8');
-    const seg = h.slice(h.indexOf('X_PREFETCH_CONTEXT'), h.indexOf('X_PREFETCH_PROFILES'));
-    expect(seg).toMatch(/in_reply_to_user \|\|/);
+    const pre = readFileSync(
+      resolve(__dirname, '../../src/platform/main/x/x-prefetch-context.ts'), 'utf-8');
+    expect(pre, '不筛回复了 —— 独立求助推会被白跳详情页')
+      .toMatch(/pool\.filter\(isReply\)/);
   });
 
   it('⭐ 抓父推只读,不点任何东西', () => {

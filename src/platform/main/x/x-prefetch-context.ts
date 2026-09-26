@@ -34,6 +34,18 @@ export interface PrefetchOptions {
   limit?: number;
   offset?: number;
   replied?: boolean;
+  /** ⚠️ 跟随调用方的视图 —— 收件箱的「漏判抽查」等视图要用 */
+  humanReviewed?: boolean;
+  /**
+   * ⚠️⚠️ **按不按 wsId 过滤,两个调用方口径不同** ——
+   * · 收件箱面板:**不过滤**(列表本身就不按 ws 过滤,侧栏计数也不;
+   *   过滤会出现「屏幕上明明有 67 条,预取却说没有可预抓的」——
+   *   用户 2026-09-07 撞上过)
+   * · 编排:**要过滤**(planReplyBatch 就是按 wsId 取候选的,
+   *   不过滤会给别的 ws 的推白备料)
+   * ⭐ 所以这里**由调用方决定**,不在函数里替它定。
+   */
+  filterByWs?: boolean;
   /**
    * ⭐ 上文取几条 —— **变量**(用户 2026-09-26:「是否做变量---届时该起来容易」)。
    * ⚠️ 判断层要 1 条就够,拟回复要的是整楼语境 —— 深度归调用方定。
@@ -54,7 +66,9 @@ export interface PrefetchReport {
     failed: number;
   };
   context: {
-    /** 真的是回复、值得抓上文的条数 */
+    /** ⭐ 这一页里有多少条是回复 —— UI 要用它区分「没抓到」与「本来就没有回复串」 */
+    isReply: number;
+    /** 真的是回复、值得抓上文的条数(= isReply 里还没有上文的) */
     attempted: number;
     /** ⭐ 库里已有上文,跳过 */
     cached: number;
@@ -69,6 +83,8 @@ export interface PrefetchReport {
    * 多半是采集机制坏了(如 X 改版让载荷截不到)。
    */
   mechanismSuspect: boolean;
+  /** ⭐ 最长连续失败次数 —— UI 报「连续 N 个账号采不到」要用 */
+  maxConsecutive: number;
   errors: string[];
 }
 
@@ -99,7 +115,8 @@ export async function prefetchReplyContext(
     ...(opts.statuses && opts.statuses.length
       ? { statuses: opts.statuses }
       : { status: opts.status ?? 'worth' }),
-    ...(opts.wsId ? { wsId: opts.wsId } : {}),
+    ...(opts.filterByWs && opts.wsId ? { wsId: opts.wsId } : {}),
+    ...(typeof opts.humanReviewed === 'boolean' ? { humanReviewed: opts.humanReviewed } : {}),
     ...(typeof opts.replied === 'boolean' ? { replied: opts.replied } : {}),
     limit: opts.limit ?? 20,
     offset: opts.offset ?? 0,
@@ -163,6 +180,7 @@ export async function prefetchReplyContext(
     scanned: pool.length,
     bio: { authors: handles.length, cached: bioCached, fetched: bioFetched, failed: bioFailed },
     context: {
+      isReply: replies.length,
       attempted: needContext.length,
       cached: ctxCached,
       fetched: ctxFetched,
@@ -172,6 +190,7 @@ export async function prefetchReplyContext(
     },
     /** 连续 5 个失败 = 机制层面的怀疑 */
     mechanismSuspect: maxConsecutive >= 5,
+    maxConsecutive,
     errors,
   };
 }

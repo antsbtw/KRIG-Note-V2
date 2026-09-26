@@ -160,3 +160,61 @@ describe('⭐⭐ prefetch 接进了编排(不是只挂在手点按钮上)', () =
       .toMatch(/evidence: \{ items:/);
   });
 });
+
+/**
+ * ⭐⭐ **只有一份实现** —— 用户 2026-09-26:
+ * > 「不要使用这些旧的函数了，要使用新的重构后的函数。」
+ *
+ * ⚠️ 重构最危险的收尾形态是**新旧并存**:新函数写好了,老 handler 还是老实现。
+ * 两份必漂,而漂的表现是「手点能跑、编排跑出来的不一样」,极难查。
+ * (本仓同形教训:`planReplyBatch` 当初就是为这个从 handler 里抽出来的。)
+ */
+describe('⭐⭐ 备料只有一份实现(新旧不并存)', () => {
+  const handlers = strip(read('src/platform/main/x/x-timeline-handlers.ts'));
+
+  it('⭐⭐ 两个 handler 都调共用函数', () => {
+    const i = handlers.indexOf('X_PREFETCH_CONTEXT, async');
+    const j = handlers.indexOf('X_PREFETCH_PROFILES, async');
+    expect(i, '找不到 X_PREFETCH_CONTEXT 的 handler').toBeGreaterThan(0);
+    expect(j, '找不到 X_PREFETCH_PROFILES 的 handler').toBeGreaterThan(i);
+    /** ⚠️ 切到各自的函数体再断言,别整文件 toMatch(同名 token 会假绿) */
+    const ctxBody = handlers.slice(i, j);
+    const profBody = handlers.slice(j, j + 1200);
+    expect(ctxBody.length, 'slice 空转').toBeGreaterThan(100);
+    expect(ctxBody, '上文 handler 没走共用函数').toMatch(/prefetchReplyContext\(/);
+    expect(profBody, '画像 handler 没走共用函数').toMatch(/prefetchReplyContext\(/);
+  });
+
+  it('⭐⭐ handler 里不许再有自己的备料循环', () => {
+    /**
+     * ⚠️ 钉的是**老实现的特征**:
+     * 直接调 `harvestAuthorProfile` / `fetchParentTweet` 并自己 for 循环。
+     * 它俩在别处还有用(单条现采),所以不能整文件禁用 ——
+     * 只禁在这两个 handler 的范围内。
+     */
+    const i = handlers.indexOf('X_PREFETCH_CONTEXT, async');
+    const seg = handlers.slice(i, handlers.indexOf('X_UPSERT_RECIPE'));
+    expect(seg.length, 'slice 空转').toBeGreaterThan(200);
+    expect(
+      /fetchParentTweet\(/.test(seg),
+      '备料 handler 里又出现了自己抓上文的实现 —— 两份必漂',
+    ).toBe(false);
+    expect(
+      /harvestAuthorProfile\(/.test(seg),
+      '备料 handler 里又出现了自己采画像的实现 —— 两份必漂',
+    ).toBe(false);
+  });
+
+  it('⚠️ 两个调用方的 wsId 口径相反,都要说清楚', () => {
+    /**
+     * ⚠️ 收件箱**不按 wsId 过滤**(列表本身不过滤,过滤会出现
+     * 「屏幕上明明有 67 条,预取却说没有可预抓的」);
+     * 编排**要过滤**(planReplyBatch 按 wsId 取候选)。
+     * ⭐ 口径由调用方给,函数里不替它定 —— 少给一个就会静默按错的口径跑。
+     */
+    expect(handlers, '收件箱这边没显式给 filterByWs').toMatch(/filterByWs: false/);
+    const caps = strip(read('src/platform/main/x/x-flow-capabilities.ts'));
+    expect(caps, '编排这边没显式给 filterByWs —— 会给别的 ws 的推白备料')
+      .toMatch(/filterByWs: true/);
+  });
+});

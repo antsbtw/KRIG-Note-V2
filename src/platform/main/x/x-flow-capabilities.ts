@@ -164,6 +164,12 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         limit: num(params.limit),
         status: str(params.status) as never,
         replied: false,
+        /**
+         * ⚠️ 编排**要按 wsId 过滤** —— `planReplyBatch` 就是按 wsId 取候选的,
+         * 不过滤会给别的 ws 的推白备料(而且白跳详情页)。
+         * ⚠️ 与收件箱面板口径相反,那边**不过滤**(见 PrefetchOptions 注释)。
+         */
+        filterByWs: true,
         /** ⭐ 上文深度是变量 —— 编排档里可调 */
         contextDepth: num(params.contextDepth),
       });
