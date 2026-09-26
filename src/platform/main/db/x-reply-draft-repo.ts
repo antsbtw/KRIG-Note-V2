@@ -31,6 +31,17 @@ export interface InsertDraftOptions {
   runId?: string;
   /** 拟稿当时的推文正文 —— ⚠️ 必须快照,x_tweet 有 TTL,过期后回看就没上下文 */
   tweetTextOf?: (tweetId: string) => string | undefined;
+  /**
+   * ⭐⭐ 拟稿当时看到的**全部语境**(bio / 账号资料 / 这一楼的上文)。
+   *
+   * ⚠️ 与 `tweetTextOf` 同一个理由:**必须快照不能 join**,
+   * `x_tweet` 有 TTL,过期后回看就不知道当时看到的是什么了。
+   * ⭐ 没有它这批数据**教不了任何人** —— 模型学不到
+   * 「在这种语境下该这么答」,只能学到「照抄这句话」。
+   */
+  contextOf?: (tweetId: string) => Record<string, unknown> | undefined;
+  /** Claude/模型给的建议原文(人改之前的) */
+  adviceRawOf?: (tweetId: string) => string | undefined;
 }
 
 /**
@@ -60,7 +71,13 @@ export async function insertReplyDrafts(
            poster_kind = $posterKind, poster_read = $posterRead,
            trigger = $trigger, ai_reason = $aiReason, in_thread = $inThread,
            status = 'pending', run_id = $runId, ref = $ref, ws_id = $wsId,
-           created_at = $createdAt`,
+           created_at = $createdAt,
+           /**
+            * ⚠️ **SQL 与参数两处都要登记** —— 本仓「加字段要登记四处」栽过多次:
+            * 漏 SQL 这一处 → 字段静默恒空,而类型和 UI 看着都对。
+            */
+           context_snapshot = $contextSnapshot, advice_raw = $adviceRaw,
+           review_count = 0`,
         {
           tweetId: d.tweetId,
           /** ⚠️ 快照,不 join —— x_tweet 有 TTL */
@@ -80,6 +97,9 @@ export async function insertReplyDrafts(
           ref: d.ref || undefined,
           wsId: opts.wsId,
           createdAt: d.createdAt ? new Date(d.createdAt) : new Date(),
+          /** ⚠️ option 字段传 undefined 不传 null(SurrealDB 的 NONE ≠ NULL) */
+          contextSnapshot: opts.contextOf?.(d.tweetId) ?? undefined,
+          adviceRaw: opts.adviceRawOf?.(d.tweetId) ?? undefined,
         },
       );
       saved += 1;
@@ -109,6 +129,70 @@ export async function resolveReplyDraft(
        WHERE tweet_id = $tweetId AND status = 'pending'`,
     { tweetId, status },
   );
+}
+
+/**
+ * ⭐⭐ **人点评** —— 用户 2026-09-26 定的学习环节。
+ *
+ * > 「用户确定并发送，数据记录并进入学习环节」
+ * > 「后期用户可以对已经发送的数据继续点评纠正，这样迭代工作。」
+ *
+ * ⚠️⚠️ **可以重复点评**,`status` 是什么都行(包括已发送的)——
+ * 这正是用户要的「迭代」。所以:
+ *  · **不加 `status = 'pending'` 条件**(那会让已发送的改不了)
+ *  · `review_count` 累加 —— 「改过几轮」本身是信号
+ *  · `reviewed_at` 每次覆盖成最新
+ *
+ * ⭐ 学习不是「攒够就毕业」,是一直开着的 —— 这条记在数据模型里,
+ * 不是 UI 的附加功能。
+ *
+ * @param finalText 人最终定的正文。与 `ai_text` 不同就说明人改过了。
+ */
+export async function reviewReplyDraft(
+  tweetId: string,
+  opts: {
+    finalText?: string;
+    note?: string;
+    /** 改成什么状态;不传就只记点评不改状态(「发完之后回头补一句评价」) */
+    status?: Exclude<ReplyDraftStatus, 'pending'>;
+  } = {},
+): Promise<{ updated: number }> {
+  const db = getXDB();
+  /**
+   * ⭐ diff 由**写入端算**,不存两份正文让读的人自己比 ——
+   * 比法一旦不一致(有人 trim 有人不 trim),统计就全废了。
+   * ⚠️ 只记「改没改、改成什么」,不做字符级 diff:
+   * 那需要额外依赖,而回归分析看的是**最终形态**不是编辑过程。
+   */
+  const res = await db.query<[Array<{ ai_text?: string }>]>(
+    `SELECT ai_text FROM x_reply_draft WHERE tweet_id = $tweetId
+       ORDER BY created_at DESC LIMIT 1`,
+    { tweetId },
+  );
+  const aiText = res?.[0]?.[0]?.ai_text ?? '';
+  const final = (opts.finalText ?? '').trim();
+  /** ⚠️ 没传 finalText = 只补点评,不动 diff(别把它清空) */
+  const diff = opts.finalText === undefined
+    ? undefined
+    : (final === aiText.trim() ? '' : final);
+
+  const out = await db.query<[Array<unknown>]>(
+    `UPDATE x_reply_draft SET
+       review_count = (review_count ?? 0) + 1,
+       reviewed_at = time::now(),
+       user_edit_diff = $diff ?? user_edit_diff,
+       review_note = $note ?? review_note,
+       status = $status ?? status
+     WHERE tweet_id = $tweetId`,
+    {
+      tweetId,
+      /** ⚠️ option 字段传 undefined 不传 null */
+      diff,
+      note: opts.note?.trim() || undefined,
+      status: opts.status ?? undefined,
+    },
+  );
+  return { updated: (out?.[0] ?? []).length };
 }
 
 /** 查还没处置的草稿 —— 编排跑完之后「回头挑着发」用 */

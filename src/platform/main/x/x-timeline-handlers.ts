@@ -120,9 +120,42 @@ export async function planReplyBatch(
    * 但**不静默**:失败条数带回去,由调用方如实报出来。
    */
   const tweetTextById = new Map(batch.map((t) => [t.tweet_id, t.text ?? '']));
+  /**
+   * ⭐⭐ **语境快照** —— 用户 2026-09-26:「记录下来的目的是未来人工点评和优化。」
+   *
+   * ⚠️ 只存「人最终发了什么」**教不了任何人**:模型学不到
+   * 「在这种语境下该这么答」,只能学到「照抄这句话」。
+   * ⭐ 真正的训练信号是**差集**:AI 当时看到什么 → 写了什么 → 人改成什么。
+   *
+   * ⚠️ **必须快照不能 join**:`x_tweet` 有 TTL,过期后回看就没有语境了。
+   */
+  /**
+   * ⚠️ bio 不在推文行上(它在 `x_author`,全局一份)——
+   * 这里一次取齐本批作者的 bio,**不在循环里逐条查库**。
+   * ⚠️ 取不到就是 undefined:快照里如实缺着,别填空串
+   * (空串会让回看的人以为「这人当时没写简介」)。
+   */
+  const bioByHandle = new Map<string, string | undefined>();
+  for (const h of new Set(batch.map((t) => normalizeHandle(t.author_handle ?? '')).filter(Boolean))) {
+    const a = await getAuthorCounts(h).catch(() => null);
+    bioByHandle.set(h, a?.bio?.trim() || undefined);
+  }
+  const contextById = new Map(batch.map((t) => [t.tweet_id, {
+    bio: bioByHandle.get(normalizeHandle(t.author_handle ?? '')),
+    parentText: t.parent_text ?? undefined,
+    parentHandle: t.parent_handle ?? undefined,
+    inReplyToUser: t.in_reply_to_user ?? undefined,
+    conversationId: t.conversation_id ?? undefined,
+    /** ⭐ 前一步为什么挑中它 —— 回归分析要能分清是判断层还是生成层的问题 */
+    aiReason: t.ai_verdict?.reason ?? undefined,
+    aiConfidence: t.ai_verdict?.confidence ?? undefined,
+    /** ⚠️ 记下**当时**的口径:清单改过之后回看,才知道那条是按哪版写的 */
+    snapshotAt: new Date().toISOString(),
+  }]));
   const persisted = await insertReplyDrafts(r.drafts, {
     wsId, runId: opts.runId,
     tweetTextOf: (id) => tweetTextById.get(id),
+    contextOf: (id) => contextById.get(id),
   }).catch((e) => {
     console.warn('[x-timeline-handlers] 草稿批量入库失败(不拦返回):', e);
     return { saved: 0, failed: r.drafts.length, errors: [String(e).slice(0, 200)] };

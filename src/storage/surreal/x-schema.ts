@@ -1546,6 +1546,62 @@ DEFINE FIELD IF NOT EXISTS forbidden       ON x_product_facts TYPE array<string>
 DEFINE FIELD IF NOT EXISTS updated_at      ON x_product_facts TYPE datetime;
 `;
 
+/**
+ * 1.2.11 —— 学习环节的地基:语境快照 + 建议原文 + 人改了什么(2026-09-26)
+ *
+ * ── 用户拍板 ──
+ * > 「用户确定并发送，数据记录并进入学习环节」
+ * > 「记录下来的目的是未来人工点评和优化。」
+ * > 「后期用户可以对已经发送的数据继续点评纠正，这样迭代工作。」
+ *
+ * ── ⚠️ 为什么非有不可 ──
+ *
+ * 只存「人最终发了什么」**教不了任何人**:模型学不到
+ * 「在这种语境下该这么答」,只能学到「照抄这句话」。
+ * ⭐ 真正的训练信号是**差集**:AI 当时看到什么 → 写了什么 → 人改成什么。
+ * 缺任何一环,这条记录的价值就掉一大截。
+ *
+ * ⚠️ 本仓已经踩过同形的坑(`project-x-reply-decision-trace`):
+ * 推断链记了,但回头做回归分析时发现**依据不足**。
+ *
+ * ── 字段 ──
+ * · `context_snapshot` —— ⭐⭐ 拟稿当时看到的 bio + 上文。
+ *   ⚠️ **必须快照不能 join**:`x_tweet` 有 TTL,过期后回看就没有语境了。
+ * · `advice_raw`       —— Claude 给的建议原文(人改之前的)
+ * · `user_edit_diff`   —— ⭐ 人改了什么。**diff 本身就是最强学习信号**,
+ *   不用人额外打字说明。
+ * · `review_note`      —— 可选的「为什么这么改」
+ * · `reviewed_at`      —— ⚠️ **可多次更新**:已发送的仍可回头改点评
+ *   (用户明确要求「后期可以对已经发送的数据继续点评纠正」)。
+ *   ⭐ 所以学习不是「攒够就毕业」,是一直开着的。
+ *
+ * ⚠️ 全部 `option<>`:9 条存量草稿没有这些值,不能让它们变成非法行。
+ */
+const X_SCHEMA_1_2_11 = `
+-- ⭐⭐ 拟稿当时的全部语境 —— 快照,不 join(x_tweet 有 TTL)
+DEFINE FIELD IF NOT EXISTS context_snapshot ON x_reply_draft TYPE option<object> FLEXIBLE;
+-- Claude/模型给的建议原文(人改之前)
+DEFINE FIELD IF NOT EXISTS advice_raw       ON x_reply_draft TYPE option<string>;
+-- ⭐ 人把它改成了什么 —— 最强学习信号,不用人额外打字
+DEFINE FIELD IF NOT EXISTS user_edit_diff   ON x_reply_draft TYPE option<string>;
+-- 可选的「为什么这么改」
+DEFINE FIELD IF NOT EXISTS review_note      ON x_reply_draft TYPE option<string>;
+-- ⚠️ 可多次更新:已发送的仍可回头改点评
+DEFINE FIELD IF NOT EXISTS reviewed_at      ON x_reply_draft TYPE option<datetime>;
+-- 人点评过几次 —— 「改过几轮」本身是信号
+DEFINE FIELD IF NOT EXISTS review_count     ON x_reply_draft TYPE option<int>;
+DEFINE INDEX IF NOT EXISTS idx_draft_reviewed ON x_reply_draft FIELDS reviewed_at;
+`;
+
+export async function x_migration_1_2_11(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_11);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.11', appliedAt = $now,
+      description = 'x_reply_draft context/advice/diff (the learning signal: what AI saw, wrote, and how the human changed it)'`,
+    { rid: new RecordId('schema_version', '1.2.11'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_10(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_10);
   await db.query(

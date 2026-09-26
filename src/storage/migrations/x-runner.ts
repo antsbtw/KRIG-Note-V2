@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -172,6 +172,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.2.10',
     description: 'x_product_facts —— 产品事实清单可编辑(用户要能随时改口径)',
     up: x_migration_1_2_10,
+  },
+  {
+    version: '1.2.11',
+    description: 'x_reply_draft 语境快照/建议原文/人改了什么 —— 学习环节的地基',
+    up: x_migration_1_2_11,
   },
 ];
 
