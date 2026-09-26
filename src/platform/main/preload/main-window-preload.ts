@@ -1228,6 +1228,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES,
         { wsId, wcId, limit, offset, status, humanReviewed, statuses });
     },
+    /** ⭐ 回看草稿(含已处置的)—— 「回头改点评」用 */
+    listDrafts: (wsId?: string, status?: string, limit?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_DRAFTS, { wsId, status, limit }),
+    /** ⭐ 补/改点评 —— ⚠️ 不改状态,已发送的照样能补 */
+    reviewDraft: (tweetId: string, note?: string, finalText?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.X_REVIEW_DRAFT, { tweetId, note, finalText }),
     /** ⭐ 产品事实清单 —— 模型唯一能引用的信源,用户可随时改 */
     getProductFacts: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_PRODUCT_FACTS),
     saveProductFacts: (facts: unknown) =>

@@ -341,6 +341,9 @@ export const IPC_CHANNELS = {
   // ⭐ 产品事实清单 —— 用户要能随时改口径(2026-09-26)
   X_GET_PRODUCT_FACTS: 'x:get-product-facts',   // renderer → main invoke：读当前口径
   X_SAVE_PRODUCT_FACTS: 'x:save-product-facts', // renderer → main invoke：存新口径
+  // ⭐ 回看草稿并点评 —— 已发送的也能回头改（用户 2026-09-26 的「迭代」）
+  X_LIST_DRAFTS: 'x:list-drafts',     // renderer → main invoke：回看草稿（含已处置的）
+  X_REVIEW_DRAFT: 'x:review-draft',   // renderer → main invoke：补/改点评
   X_PLAN_ONE_REPLY:  'x:plan-one-reply',   // renderer → main invoke：为单条推文现写回复（卡片弹窗用）
   X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
   X_INVALIDATE_WC:   'x:invalidate-wc',   // renderer → main：强制 guest 全量重绘(见 x-timeline-handlers)

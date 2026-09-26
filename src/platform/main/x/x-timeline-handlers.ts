@@ -26,7 +26,7 @@ import { planReplies, planOneReply, textFingerprint } from './x-reply-planner';
 import { insertReplyFeedback, getReadiness, getApprovedExamples } from '../db/x-reply-feedback-repo';
 import type { ReplyDismissReason } from '@shared/types/x-reply-types';
 /** ⭐ 草稿落库 —— AI 学习的训练信号(migration 1.2.8) */
-import { insertReplyDrafts, resolveReplyDraft } from '../db/x-reply-draft-repo';
+import { insertReplyDrafts, reviewReplyDraft, listDraftsForReview } from '../db/x-reply-draft-repo';
 import { harvestAuthorProfile, PROFILE_STALE_HOURS } from './x-author-profile';
 import { prefetchReplyContext } from './x-prefetch-context';
 import { getProductFacts, saveProductFacts } from '../db/x-product-facts-repo';
@@ -1109,8 +1109,23 @@ export function registerXTimelineHandlers(): void {
        *   x_reply_draft = AI 产出了什么(流水) / x_reply_feedback = 人怎么表态(结论)
        * ⚠️ 失败不拦反馈落库 —— 反馈比状态收口重要(降级要局部)。
        */
-      await resolveReplyDraft(p.tweet_id, p.action === 'dismissed' ? 'dismissed' : 'filled')
-        .catch((e: unknown) => console.warn('[x-timeline-handlers] 草稿状态收口失败:', e));
+      /**
+       * ⭐⭐ 顺手把**人改了什么**记进草稿(2026-09-26,学习环节)。
+       *
+       * ⚠️ 原来只调 `resolveReplyDraft` 改个状态,而
+       * 「AI 写了什么 → 人改成什么」这个**差集**没人记 ——
+       * 那正是唯一真正能教会模型的东西。
+       * ⭐ `reviewReplyDraft` 一次做两件:收状态 + 算 diff,
+       * 不用在这里比正文(比法不一致会让统计全废)。
+       */
+      await reviewReplyDraft(p.tweet_id, {
+        finalText: p.final_text,
+        status: p.action === 'dismissed' ? 'dismissed' : 'filled',
+        /** ⚠️ 只有否决时才有原因,填入是常态不问(424/425) */
+        note: p.action === 'dismissed'
+          ? [p.dismiss_reason, p.dismiss_note].filter(Boolean).join(' / ') || undefined
+          : undefined,
+      }).catch((e: unknown) => console.warn('[x-timeline-handlers] 草稿点评落库失败:', e));
 
       await insertReplyFeedback({
         tweet_id:   p.tweet_id,
@@ -1239,6 +1254,52 @@ export function registerXTimelineHandlers(): void {
    *
    * ⚠️ 原来写死在代码里,改一次要重新编译打包。
    */
+  /**
+   * ⭐⭐ 回看草稿 + 补点评 —— 用户 2026-09-26:
+   * > 「后期用户可以对已经发送的数据继续点评纠正，这样迭代工作。」
+   *
+   * ⚠️ 原来 `listPendingDrafts` **全仓没有任何调用方** ——
+   * 草稿落了库却没有任何地方看得到,等于存了个寂寞。
+   */
+  ipcMain.handle(IPC_CHANNELS.X_LIST_DRAFTS, async (_e, payload: unknown) => {
+    try {
+      const p = (payload ?? {}) as { wsId?: unknown; status?: unknown; limit?: unknown };
+      const rows = await listDraftsForReview({
+        wsId: typeof p.wsId === 'string' && p.wsId ? p.wsId : undefined,
+        status: typeof p.status === 'string' ? p.status as never : 'all',
+        limit: typeof p.limit === 'number' ? p.limit : 50,
+      });
+      return { success: true, drafts: rows };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.X_REVIEW_DRAFT, async (_e, payload: unknown) => {
+    try {
+      const p = payload as { tweetId?: unknown; note?: unknown; finalText?: unknown } | null;
+      if (!p || typeof p.tweetId !== 'string' || !p.tweetId) {
+        return { success: false, error: '缺 tweetId' };
+      }
+      /**
+       * ⚠️ **不传 status** —— 这是「回头补一句评价」,
+       * 不该顺手把已发送的改成别的状态。
+       */
+      const r = await reviewReplyDraft(p.tweetId, {
+        note: typeof p.note === 'string' ? p.note : undefined,
+        finalText: typeof p.finalText === 'string' ? p.finalText : undefined,
+      });
+      /** ⚠️ 一行都没更新要说出来 —— 否则用户以为记上了 */
+      if (r.updated === 0) {
+        return { success: false, error: '没有找到这条草稿(它可能是手点拟的，没落过库)' };
+      }
+      return { success: true, updated: r.updated };
+    } catch (err) {
+      console.error('[x-timeline-handlers] X_REVIEW_DRAFT failed:', (err as Error).message);
+      return { success: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.X_GET_PRODUCT_FACTS, async () => {
     try {
       return { success: true, facts: await getProductFacts() };

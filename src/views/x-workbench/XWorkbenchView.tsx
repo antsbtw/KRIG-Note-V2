@@ -67,7 +67,28 @@ interface WatchProfile {
   fetchedAt?: string;
 }
 
-type PaneId = 'watch' | 'tasks' | 'facts';
+type PaneId = 'watch' | 'tasks' | 'facts' | 'review';
+
+/**
+ * 一条草稿 —— 与 `x_reply_draft` 对应。
+ * ⭐ 带 `context_snapshot`:点评时要能看到「AI 当时看到的是什么」,
+ * 否则人只凭正文判断,与模型当时的处境不同 —— 那样的点评不公平。
+ */
+interface DraftRow {
+  tweet_id: string;
+  tweet_text?: string;
+  author_handle?: string;
+  ai_text?: string;
+  ai_reason?: string;
+  status?: string;
+  source?: string;
+  user_edit_diff?: string;
+  review_note?: string;
+  review_count?: number;
+  reviewed_at?: string;
+  created_at?: string;
+  context_snapshot?: Record<string, unknown>;
+}
 
 /** 产品事实清单 —— 与 `x_product_facts` 一一对应 */
 interface ProductFactsView {
@@ -127,6 +148,18 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
   const [tickAt, setTickAt] = useState(0);
 
   /**
+   * ── 草稿点评(用户 2026-09-26)──
+   * > 「后期用户可以对已经发送的数据继续点评纠正，这样迭代工作。」
+   *
+   * ⚠️ 所以这里**不限 pending** —— 已填入/已否决的照样列出来,
+   * 否则「回头改点评」根本无从下手。
+   */
+  const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [draftMsg, setDraftMsg] = useState('');
+  /** 正在写的点评:tweetId → 文字 */
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  /**
    * ── 产品事实清单(用户 2026-09-26)──
    * > 「这个需要增加，而且产品描述给好格式，我要及时更新的。」
    *
@@ -137,6 +170,44 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
   const [factsDirty, setFactsDirty] = useState(false);
   const [factsMsg, setFactsMsg] = useState('');
   const [savingFacts, setSavingFacts] = useState(false);
+
+  /** 载入草稿 —— ⚠️ 不限 status,已处置的也要看得到 */
+  const loadDrafts = async () => {
+    const r = await api()?.listDrafts?.(workspaceId, 'all', 50);
+    if (!r?.success) { setDraftMsg(`读取失败：${r?.error ?? '未知'}`); return; }
+    const rows = (r.drafts ?? []) as unknown as DraftRow[];
+    setDrafts(rows);
+    setDraftMsg(rows.length === 0
+      ? '这个工作区还没有落库的草稿 —— 跑一次编排的「拟回复」就会有'
+      : `共 ${rows.length} 条（已点评 ${rows.filter((d) => d.review_count).length} 条）`);
+  };
+
+  useEffect(() => {
+    if (pane !== 'review') return;
+    /** ⚠️ 进这一页时拉一次;切 ws 也要重拉(草稿是按 ws 分的) */
+    void loadDrafts();
+    /**
+     * ⚠️ 依赖只列 pane / workspaceId —— `loadDrafts` 每次渲染都是新函数,
+     * 列进去会**每渲染一次就查一次库**。
+     */
+  }, [pane, workspaceId]);
+
+  /**
+   * 补一条点评。
+   *
+   * ⚠️ **不传 status** —— 这是「回头补评价」,不该顺手改掉已发送的状态。
+   * ⭐ 可以反复补:review_count 会累加,「改过几轮」本身是信号。
+   */
+  const submitNote = async (tweetId: string) => {
+    const note = (notes[tweetId] ?? '').trim();
+    if (!note) return;
+    const r = await api()?.reviewDraft?.(tweetId, note);
+    if (!r?.success) { setDraftMsg(`记点评失败：${r?.error ?? '未知'}`); return; }
+    setNotes((m) => ({ ...m, [tweetId]: '' }));
+    setDraftMsg(`✓ 已记下（${new Date().toLocaleTimeString()}）`);
+    /** ⭐ 回读:让 review_count 当场变,而不是只弹一句「成功」 */
+    await loadDrafts();
+  };
 
   /**
    * 保存口径。
@@ -350,6 +421,7 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
             { id: 'watch' as const, label: '盯人对照', icon: '🎯' },
             { id: 'tasks' as const, label: '采集任务', icon: '▶' },
             { id: 'facts' as const, label: '产品口径', icon: '📋' },
+            { id: 'review' as const, label: '草稿点评', icon: '✍' },
           ]).map((p) => (
             <div
               key={p.id}
@@ -364,7 +436,86 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
 
         {/* ── 右:详情 ── */}
         <div className="krig-xwb__right">
-          {pane === 'facts' ? (
+          {pane === 'review' ? (
+            /**
+             * ⭐⭐ **草稿点评** —— 用户 2026-09-26 定的学习环节。
+             *
+             * ⚠️ 这里看的是**已落库的草稿**(含已填入/已否决的),
+             * 不是待发列表 —— 「回头改点评」正是要对着已处置的做。
+             */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <b style={{ flex: 1 }}>草稿点评</b>
+                <button type="button" className="krig-xwb__btn"
+                  onClick={() => void loadDrafts()}>刷新</button>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.6 }}>
+                这里记的是<b>「AI 当时看到什么 → 写了什么 → 人改成什么」</b>。
+                {' '}已发出去的也能回头补评价，补几次都行。
+              </div>
+              {draftMsg ? (
+                <div style={{ fontSize: 12, opacity: 0.8 }}>{draftMsg}</div>
+              ) : null}
+
+              {drafts.map((d) => {
+                const ctx = d.context_snapshot ?? {};
+                return (
+                  <div key={d.tweet_id} style={{
+                    border: '1px solid var(--xwb-line)', borderRadius: 10,
+                    padding: 10, display: 'flex', flexDirection: 'column', gap: 6,
+                  }}>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>
+                      @{d.author_handle ?? '?'} · {d.status ?? '?'}
+                      {d.review_count ? ` · 已点评 ${d.review_count} 次` : ''}
+                      {d.source ? ` · ${d.source}` : ''}
+                    </div>
+                    <div style={{ fontSize: 13 }}>
+                      <b>原推：</b>{(d.tweet_text ?? '').slice(0, 220) || '（没快照到正文）'}
+                    </div>
+                    {/* ⭐ AI 当时看到的语境 —— 没有它，点评是不公平的 */}
+                    {(ctx.bio || ctx.parentText) ? (
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>
+                        {ctx.bio ? <div><b>作者简介：</b>{String(ctx.bio).slice(0, 160)}</div> : null}
+                        {ctx.parentText ? <div><b>上文：</b>{String(ctx.parentText).slice(0, 200)}</div> : null}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, opacity: 0.55 }}>
+                        ⚠️ 拟稿时<b>没有语境</b>（bio/上文都没采到）—— 评判时请把这点算进去
+                      </div>
+                    )}
+                    {d.ai_reason ? (
+                      <div style={{ fontSize: 12, opacity: 0.7 }}><b>判断理由：</b>{d.ai_reason}</div>
+                    ) : null}
+                    <div style={{ fontSize: 13 }}><b>AI 写的：</b>{d.ai_text ?? ''}</div>
+                    {/* ⭐ 人改了什么 —— 最强学习信号 */}
+                    {d.user_edit_diff ? (
+                      <div style={{ fontSize: 13, color: 'var(--xwb-blue)' }}>
+                        <b>人改成：</b>{d.user_edit_diff}
+                      </div>
+                    ) : d.review_count ? (
+                      <div style={{ fontSize: 12, opacity: 0.6 }}>（人没改，原样通过）</div>
+                    ) : null}
+                    {d.review_note ? (
+                      <div style={{ fontSize: 12, opacity: 0.8 }}><b>已记的点评：</b>{d.review_note}</div>
+                    ) : null}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        className="krig-xwb__input"
+                        style={{ flex: 1 }}
+                        placeholder="这条写得怎么样？哪里不好？（补几次都行）"
+                        value={notes[d.tweet_id] ?? ''}
+                        onChange={(e) => setNotes((m) => ({ ...m, [d.tweet_id]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void submitNote(d.tweet_id); }}
+                      />
+                      <button type="button" className="krig-xwb__btn"
+                        disabled={!(notes[d.tweet_id] ?? '').trim()}
+                        onClick={() => void submitNote(d.tweet_id)}>记下</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : pane === 'facts' ? (
             /**
              * ⭐⭐ **产品口径** —— 用户 2026-09-26:
              * > 「这个需要增加，而且产品描述给好格式，我要及时更新的。」

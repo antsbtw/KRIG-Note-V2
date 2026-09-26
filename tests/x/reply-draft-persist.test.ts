@@ -68,8 +68,21 @@ describe('⭐⭐ 接线:拟出来就写,人表态就收口', () => {
   });
 
   it('⭐⭐ 人表态时要收口 pending,否则「还有多少没处理」永远是错的', () => {
-    expect(handlers, '人表态后没更新草稿状态 —— pending 会永远堆着')
-      .toMatch(/resolveReplyDraft\(/);
+    /**
+     * ⚠️ 2026-09-26 改:原来钉 `resolveReplyDraft(`,而它已被
+     * `reviewReplyDraft(` 取代 —— 后者**一次做两件**:收状态 + 记 diff。
+     * ⭐ 钉新的那个,并**连 status 一起钉**:光调用不传 status
+     * 等于没收口(pending 照样堆着),而那种错在数据里看不出来。
+     */
+    const i = handlers.indexOf('reviewReplyDraft(');
+    expect(i, '人表态后没更新草稿状态 —— pending 会永远堆着').toBeGreaterThan(0);
+    const blk = handlers.slice(i, i + 500);
+    expect(blk.length, 'slice 空转').toBeGreaterThan(50);
+    expect(blk, '调了但没传 status —— 等于没收口').toMatch(/status:/);
+    expect(
+      blk,
+      '⭐ 顺手把「人改成什么」也记下来 —— 那才是真正能教模型的差集',
+    ).toMatch(/finalText:/);
   });
 
   it('⚠️ 落库失败**不许拦返回**,但要带回失败数', () => {
@@ -105,7 +118,7 @@ describe('⚠️ 两张表分工:各记各的,不互相替代', () => {
      * x_reply_feedback = 人最终怎么表态(结论,必须有人)
      * ⚠️ 只写一张会丢掉另一半:没人看的草稿,或者人的修改记录。
      */
-    const i = handlers.indexOf('resolveReplyDraft(');
+    const i = handlers.indexOf('reviewReplyDraft(');
     expect(i, '找不到收口调用').toBeGreaterThan(0);
     const blk = handlers.slice(i, i + 900);
     expect(blk, '收口了却不写反馈表 —— 人的表态丢了')

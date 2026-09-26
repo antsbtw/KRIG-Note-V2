@@ -1170,6 +1170,14 @@ declare global {
           mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
           error?: string;
         }>;
+        /** ⭐ 回看草稿(含已处置的)—— 「回头改点评」用 */
+        listDrafts(wsId?: string, status?: string, limit?: number): Promise<{
+          success: boolean; drafts?: Array<Record<string, unknown>>; error?: string;
+        }>;
+        /** ⭐ 补/改点评 —— ⚠️ 不改状态,已发送的照样能补 */
+        reviewDraft(tweetId: string, note?: string, finalText?: string): Promise<{
+          success: boolean; updated?: number; error?: string;
+        }>;
         /** ⭐ 产品事实清单 —— 模型唯一能引用的信源,用户可随时改 */
         getProductFacts(): Promise<{
           success: boolean;

@@ -195,6 +195,41 @@ export async function reviewReplyDraft(
   return { updated: (out?.[0] ?? []).length };
 }
 
+/**
+ * ⭐⭐ **回看草稿** —— 用户 2026-09-26:
+ * > 「后期用户可以对已经发送的数据继续点评纠正，这样迭代工作。」
+ *
+ * ⚠️ 与 `listPendingDrafts` 的区别:**不只看 pending**。
+ * 已填入/已否决的照样要看得到,否则「回头改点评」根本无从下手。
+ *
+ * ⭐ 连 `context_snapshot` 一起取回:点评时要能看到
+ * 「AI 当时看到的是什么」,否则人只能凭正文判断,
+ * 与模型当时的处境不同 —— 那样的点评是不公平的。
+ */
+export async function listDraftsForReview(
+  opts: { wsId?: string; status?: ReplyDraftStatus | 'all'; limit?: number } = {},
+): Promise<Array<Record<string, unknown>>> {
+  const db = getXDB();
+  const conds: string[] = [];
+  if (opts.wsId) conds.push('ws_id = $wsId');
+  if (opts.status && opts.status !== 'all') conds.push('status = $status');
+  const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+  const res = await db.query<[Array<Record<string, unknown>>]>(
+    /**
+     * ⚠️ ORDER BY 的字段**必须出现在 SELECT 里**(SurrealDB 3.x),
+     * 否则 parse error —— 本仓踩过,而且错误会被 catch 吞掉。
+     */
+    `SELECT tweet_id, tweet_text, author_handle, lang, ai_text, source,
+            confidence, ai_reason, run_id, status, ref,
+            context_snapshot, advice_raw, user_edit_diff, review_note,
+            review_count, reviewed_at, created_at
+       FROM x_reply_draft ${where}
+      ORDER BY created_at DESC LIMIT $limit`,
+    { wsId: opts.wsId, status: opts.status, limit: opts.limit ?? 50 },
+  );
+  return res[0] ?? [];
+}
+
 /** 查还没处置的草稿 —— 编排跑完之后「回头挑着发」用 */
 export async function listPendingDrafts(
   opts: { wsId?: string; limit?: number } = {},
