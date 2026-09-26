@@ -16,7 +16,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { withCursor, buildRefetchScript, isPeopleOp } from '@platform/main/x/x-people-harvester';
+import {
+  withCursor, buildRefetchScript, isPeopleOp, toPostShape,
+} from '@platform/main/x/x-people-harvester';
 
 /** 真实形状:X 的 Followers 请求(queryId 与 features 都在 URL 里) */
 const REAL = 'https://x.com/i/api/graphql/rRXFSG5vR6drKr5M37YOTw/Followers'
@@ -391,5 +393,140 @@ describe('⭐⭐ 抄的必须是「第一页」那条请求', () => {
       out.match(/OLD_STALE_CURSOR/g),
       '旧游标还残留在 URL 里 —— 会和新游标打架',
     ).toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐ **GET 被 404 挡下要能改 POST 形状** —— 2026-09-25 搜索翻页采不到第二页。
+ *
+ * ── 症状 ──
+ * 搜索页每跑只拿一页(65 条),留痕里 X 明说 `hasMore: true`,
+ * 而翻页第一发就 `404 / content-type=(无) / body 空`。
+ *
+ * ── 社区已有结论(本仓「卡两轮就去搜社区」)──
+ * X 改成**只用 POST** 提供 SearchTimeline 这类接口,GET 一律 404 + 空 body;
+ * 空 body 正是让人误判成「queryId 过期」的原因。
+ * (RSSHub #23359 / gallery-dl #9275 / XActions #42 —— 后者就是上次 followers 那条)
+ *
+ * ── ⚠️ 为什么不直接写死 POST ──
+ * 本机留痕显示 **X 自己用的就是 GET 且成功**(SearchTimeline count=3,277KB)。
+ * 写死 POST = 拿别人的 issue 覆盖本机实测。所以做成「**先按抄到的发,
+ * 404-未路由才换形状**」,并把「换了形状才成」记进留痕。
+ *
+ * ⭐ 这里钉三件事:
+ *  ① 参数**真的搬进了 body**(只改 method 而参数留在 URL,X 同样不认)
+ *  ② `queryId` 从**路径**里取(它随版本变,写死必然过期)
+ *  ③ 只在 404-非JSON 这个指纹上重试(业务错误重发一次还是错)
+ */
+describe('⭐⭐ GET 404 时改 POST 形状', () => {
+  it('① 参数搬进 JSON body,URL 上不留查询串', () => {
+    const post = toPostShape(REAL)!;
+    expect(post, 'REAL 这种标准形状必须能改写').not.toBeNull();
+    expect(
+      new URL(post.url).search,
+      'POST 时查询串还留在 URL 上 —— 两处都带会冲突',
+    ).toBe('');
+    const body = JSON.parse(post.body);
+    expect(body.variables.userId, 'variables 没搬进 body').toBe('1234567890');
+    expect(
+      body.features?.rweb_tipjar_consumption_enabled,
+      'features 没搬进 body —— X 会因缺 feature flag 报错',
+    ).toBe(true);
+  });
+
+  it('⭐ ② queryId 从路径里取,不是写死的', () => {
+    const post = toPostShape(REAL)!;
+    expect(
+      JSON.parse(post.body).queryId,
+      'queryId 不对 —— 它随 X 版本变,必须从路径现取',
+    ).toBe('rRXFSG5vR6drKr5M37YOTw');
+  });
+
+  it('⚠️ 改写不了就返回 null,不猜着拼', () => {
+    expect(
+      toPostShape('https://x.com/i/api/graphql/abc/Foo'),
+      '没有 variables 也硬拼 —— 会请求到别的数据,而那种错在数据里看不出来',
+    ).toBeNull();
+    expect(
+      toPostShape('https://x.com/nope?variables=%7B%7D'),
+      '路径里没有 queryId 也硬拼',
+    ).toBeNull();
+  });
+
+  it('⭐⭐ ③ 重试只认「404 + 非 JSON」这个指纹', () => {
+    const script = buildRefetchScript(REAL, { authorization: 'Bearer x' }, 'GET');
+    /** ⚠️ 钉的是**判据本身**,不是「出现过 POST 这个词」 */
+    const i = script.indexOf('unrouted');
+    expect(i, '脚本里找不到 unrouted 判据').toBeGreaterThan(0);
+    const decl = script.slice(i, script.indexOf(';', i));
+    expect(decl, '不是空的').not.toBe('');
+    expect(decl, '没判 404 —— 别的状态码也重试会把真正的错误盖掉').toMatch(/404/);
+    expect(decl, '没判 content-type 非 JSON —— 带 errors[] 的业务错误不该重试')
+      .toMatch(/json/i);
+  });
+
+  it('⭐ 换形状成功要**说出来**(成功路径也要留痕)', () => {
+    const script = buildRefetchScript(REAL, { authorization: 'Bearer x' }, 'GET');
+    expect(
+      script,
+      '换了 POST 才成功却不记 —— 现象只是「翻页好了」,\n'
+      + '而「X 的 GET 已不认」这个外部事实会随这一跑消失',
+    ).toMatch(/__shapeSwitched/);
+  });
+
+  it('⚠️ 两种形状都失败时,两份判据都要交出来', () => {
+    const script = buildRefetchScript(REAL, { authorization: 'Bearer x' }, 'GET');
+    expect(
+      script,
+      '只报后一种 —— 会丢掉「GET 当时是什么错」,下次查不下去',
+    ).toMatch(/POST 重试也失败/);
+  });
+});
+
+/**
+ * ⭐⭐ **注入脚本必须真能 parse** —— 记忆 project-x-inject-template-escape 的同族坑:
+ * 模板字面量里的转义被求值吃掉 → 浏览器收到非法语法 → **整段解析失败**,
+ * 而 tsc 与单测全绿(现象是「采集恒 0」,毫无线索)。
+ * ⭐ 所以这里**真 parse** 生成出来的脚本,不是扫字符串。
+ */
+describe('⭐⭐ 生成的注入脚本真能 parse', () => {
+  const cases: Array<[string, string]> = [
+    ['可改 POST 形状', REAL],
+    ['改不成 POST 形状(走另一条分支)', 'https://x.com/i/api/graphql/abc/Foo'],
+  ];
+  for (const [name, url] of cases) {
+    it(`${name}`, () => {
+      const s = buildRefetchScript(url, { authorization: 'Bearer x' }, 'GET');
+      expect(
+        () => new Function(`return ${s}`),
+        '生成的脚本是非法 JS —— 浏览器会整段解析失败,现象是「采集恒 0」',
+      ).not.toThrow();
+    });
+  }
+
+  /**
+   * ⭐⭐ **转义真的活着吗** —— 2026-09-25 实测踩到,记在这里免得再踩。
+   *
+   * 给这段脚本注入一个非法正则 `/^\/;` 想验证 parse 守卫会不会红,
+   * 结果**守卫全绿** —— 因为模板字面量把 `\/` 吃掉了,
+   * 到浏览器手里变成合法的 `/^/;`。
+   * ⚠️ 也就是说 project-x-inject-template-escape 那个坑**在本文件是活的**:
+   * 这里但凡要往脚本里写带反斜杠的正则,就可能被静默改写。
+   *
+   * ⭐ 所以钉住**生成物里的那个正则**:判 content-type 用的 `/json/i`
+   * 必须原样出现在脚本里。它要是被吃成别的样子,
+   * 「只在 404-非JSON 上重试」这条判据就悄悄失效了。
+   */
+  it('⭐⭐ content-type 判据的正则没被模板字面量吃掉', () => {
+    const s = buildRefetchScript(REAL, {}, 'GET');
+    const i = s.indexOf('unrouted');
+    expect(i, '脚本里找不到 unrouted').toBeGreaterThan(0);
+    const decl = s.slice(i, s.indexOf(';', i));
+    expect(decl, '不是空的').not.toBe('');
+    expect(
+      decl,
+      '判 content-type 的正则不见了或被改写 —— \n'
+      + '转义一旦被吃,「只在 404-非JSON 上重试」这条判据会**静默失效**',
+    ).toMatch(/\/json\/i/);
   });
 });

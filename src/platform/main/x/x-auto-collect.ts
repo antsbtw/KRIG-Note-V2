@@ -1163,6 +1163,18 @@ export async function autoCollect(
   if (r.people.length > 0) {
     notes.push(`这一页采的是**人**不是推:${r.people.length} 人入库(${peopleWithBio} 人有 bio)`);
   }
+  /**
+   * ⭐⭐ **成功路径也要留痕** —— 翻页靠换形状才成的,得说出来。
+   *
+   * ⚠️ 不说的话面板上只会显示「翻了 N 页」,和「一直都好好的」长得一样;
+   * 而「X 的 GET 已经不认了」是**会变的外部事实**,下次变回去要有据可查。
+   */
+  if (r.shapeSwitched) {
+    notes.push(
+      '⚠️ 翻页时 **GET 被 X 挡下(404,空 body)**,改成 POST 形状(参数放进 JSON body)才成功'
+      + ' —— 说明 X 已不再用 GET 提供这个接口;这是外部变化,记下来备查',
+    );
+  }
 
   /**
    * ⭐⭐ **解析率进 notes** —— 每个页面都要能回答「完整吗」。
@@ -1382,6 +1394,8 @@ export async function autoCollect(
     failedUrl: r.failedUrl,
     /** ⭐ 与 failedUrl 一起进留痕 —— 只有 URL 分不出三种成因 */
     failedProbe: r.failedProbe,
+    /** ⭐ 成功路径的判据:翻页是不是靠改 POST 形状才成的 */
+    shapeSwitched: r.shapeSwitched,
     elapsedMs: Date.now() - t0,
     parseRate: r.parseRate,
     ops: aggregateOps(r.seenOps),

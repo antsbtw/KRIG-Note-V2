@@ -316,6 +316,12 @@ export interface HarvestReport {
    */
   failedProbe?: { status?: number; ctype?: string; method?: string; bodyHead?: string };
   /**
+   * ⭐ 翻页是不是**靠改 POST 形状才成功的**(GET 被 404-未路由挡下)。
+   * ⚠️ **成功路径的判据**:不记的话「X 的 GET 已不认」这个外部事实
+   * 会随这一跑消失,下次又要从 404 从头查一遍。
+   */
+  shapeSwitched?: boolean;
+  /**
    * ⭐ 最后一个 GraphQL 请求(URL + 头)—— 游标翻页**重发它**,不自己拼。
    * X 的 queryId/features 会随版本变,复刻必然过期;复用刚发过的那条不会。
    */
@@ -1147,6 +1153,14 @@ export async function harvestTimeline(
   let failedProbe: {
     status?: number; ctype?: string; method?: string; bodyHead?: string;
   } | undefined;
+  /**
+   * ⭐ 这一趟翻页是不是**靠改 POST 形状才成功的**。
+   *
+   * ⚠️ 这是**成功路径的判据**:不记的话现象只是「翻页好了」,
+   * 而「GET 现在不行了」这个事实会随着这一跑一起消失 ——
+   * 下次 X 再动接口,又得从 404 从头查一遍。
+   */
+  let shapeSwitched = false;
 
   for (let i = 1; i <= maxRounds; i++) {
     /**
@@ -1598,7 +1612,20 @@ export async function harvestTimeline(
         ) as {
           __body?: string; __err?: string;
           __status?: number; __ctype?: string; __bodyHead?: string; __method?: string;
+          /** ⭐ GET 被 404-未路由挡下、改 POST 形状救回来了 */
+          __shapeSwitched?: boolean;
         };
+        /**
+         * ⭐⭐ **「换了形状才成功」要留痕** —— 成功路径也要留痕(铁律,
+         * 见记忆 feedback-maintainability-over-feature-completion)。
+         *
+         * ⚠️ 不留的话现象是「翻页好了」,而**为什么好的没人知道**:
+         * 下次 X 再改回去,又要从头查一遍 404。
+         */
+        if (res?.__shapeSwitched && !shapeSwitched) {
+          shapeSwitched = true;
+          console.info('[x-timeline-harvester] 游标翻页:GET 被 404 挡下,改 POST 形状成功');
+        }
         if (res?.__err) {
           /**
            * ⭐⭐ 404 时**把真正发出去的 URL 交出来**。
@@ -1812,6 +1839,8 @@ export async function harvestTimeline(
     domExpanded,
     failedUrl,
     failedProbe,
+    /** ⭐ 成功路径的判据:翻页是不是靠改 POST 形状才成的 */
+    shapeSwitched,
     /** ⭐ 供游标翻页重发用 —— 复用 X 刚发过的请求,不自己拼 */
     lastRequest: lastPeopleReq ?? undefined,
   };

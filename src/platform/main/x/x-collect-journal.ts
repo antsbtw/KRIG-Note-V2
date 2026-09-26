@@ -77,6 +77,12 @@ export interface CollectJournalEntry {
    * **404 + 非 JSON** = 请求根本没进 GraphQL handler(先查 method)。
    */
   failedProbe?: { status?: number; ctype?: string; method?: string; bodyHead?: string };
+  /**
+   * ⭐ 翻页是不是**靠改 POST 形状才成功的** —— 成功路径的判据。
+   * ⚠️ 不记的话「GET 已经不行了」这个事实会随这一跑消失,
+   * 下次 X 再动接口又要从 404 从头查(2026-09-25 查了一整轮)。
+   */
+  shapeSwitched?: boolean;
   elapsedMs: number;
   /** 解析率:X 给了多少条目、解出多少 */
   parseRate?: unknown;

@@ -374,7 +374,61 @@ export function withCursor(url: string, cursor: string): string | null {
   }
 }
 
-/** 在页面上下文重发请求的脚本 —— 同源 fetch,鉴权自动带 */
+/**
+ * ⭐⭐ 把 GET 形状的 GraphQL URL 改写成 **POST 形状**。
+ *
+ * ── 为什么需要它(2026-09-25 查搜索翻页 404)──
+ *
+ * X 的 GraphQL 有两种调用形状:
+ *  · GET  —— `?variables=…&features=…`(URL 里)
+ *  · POST —— `{ variables, features, queryId }`(JSON body 里)
+ *
+ * ⚠️ **参数要搬家,不是只换 method** —— 社区(RSSHub #23359 / gallery-dl #9275 /
+ * XActions #42)一致的结论是:X 对 SearchTimeline 这类接口的 GET **直接 404 +
+ * 空 body**,而空 body 会让人误判成「queryId 过期」。
+ * 光把 `method` 改成 POST 而参数仍留在 URL 里,X 同样不认。
+ *
+ * ⭐ `queryId` 在**路径里**(`/graphql/<queryId>/SearchTimeline`),
+ * POST body 要求把它显式带上 —— 从路径里取,**不写死**(它随版本变)。
+ *
+ * @returns 改写不了就返回 null —— **不猜着拼**(拼错会请求到别的数据,
+ *          而那种错在数据里看不出来)
+ */
+export function toPostShape(url: string): { url: string; body: string } | null {
+  try {
+    const u = new URL(url);
+    const variables = u.searchParams.get('variables');
+    if (!variables) return null;
+    /** ⭐ queryId 来自路径 —— `/i/api/graphql/<queryId>/<OpName>` */
+    const queryId = u.pathname.match(/\/graphql\/([^/]+)\//)?.[1];
+    if (!queryId) return null;
+
+    const payload: Record<string, unknown> = { queryId };
+    payload.variables = JSON.parse(variables);
+    const features = u.searchParams.get('features');
+    if (features) payload.features = JSON.parse(features);
+    const fieldToggles = u.searchParams.get('fieldToggles');
+    if (fieldToggles) payload.fieldToggles = JSON.parse(fieldToggles);
+
+    /** ⚠️ POST 时 URL 上**不留查询串** —— 两处都带会冲突 */
+    u.search = '';
+    return { url: u.toString(), body: JSON.stringify(payload) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 在页面上下文重发请求的脚本 —— 同源 fetch,鉴权自动带。
+ *
+ * ⭐⭐ **两种形状依次试** —— 抄到的那种先试,404-未路由就改 POST 重试。
+ *
+ * ⚠️ 为什么不直接写死 POST:**X 自己用的就是 GET 且成功**
+ * (本次留痕:`SearchTimeline` count=3,277KB 全是 GET 拿回来的)。
+ * 写死 POST 等于拿社区结论覆盖本机实测 —— 那是猜。
+ * ⭐ 让它**自己试出来**,并把「哪种形状成功了」记进结果:
+ * 下次就有实测依据,不必再从别人的 issue 里推断。
+ */
 export function buildRefetchScript(
   url: string, headers: Record<string, string>, method = 'GET',
 ): string {
@@ -387,27 +441,32 @@ export function buildRefetchScript(
     if (/^(content-length|host|connection|:.*)$/i.test(k)) continue;
     safe[k] = v;
   }
+  const post = toPostShape(url);
   return `(async function () {
-    try {
-      const r = await fetch(${JSON.stringify(url)}, {
-        method: ${JSON.stringify(method)},
-        headers: ${JSON.stringify(safe)},
+    /**
+     * 发一次,把判据一起带回来。
+     *
+     * ⭐⭐ **失败时把判据一起交出来** —— 2026-09-25 查翻页 404 时发现缺的正是这些。
+     *
+     * ⚠️ 只报 'HTTP 404' 的话,三种成因**长得一模一样**
+     * (注释在 x-timeline-harvester 的失败分支里早就写着):
+     *  · 抄错了请求 / 游标换坏了 / queryId 过期
+     *
+     * ⭐ 判据(记忆 project-x-cursor-paging 实测出来的):
+     *  · **content-type** —— 「404 + 空 body + 非 JSON」是指纹:
+     *    请求**根本没进 GraphQL handler**(followers 那次真因是必须用 POST)
+     *  · **响应体开头** —— X 真正的业务错误会返回 JSON 带 errors[]
+     *  · **实际用的 method** —— 抄到的 method 会骗人,得看发出去的是什么
+     */
+    async function send(u, m, body, extraHeaders) {
+      const h = Object.assign({}, ${JSON.stringify(safe)}, extraHeaders || {});
+      const r = await fetch(u, {
+        method: m,
+        headers: h,
         credentials: 'include',
+        body: body === null ? undefined : body,
       });
       if (!r.ok) {
-        /**
-         * ⭐⭐ **失败时把判据一起交出来** —— 2026-09-25 查翻页 404 时发现缺的正是这些。
-         *
-         * ⚠️ 只报 'HTTP 404' 的话,三种成因**长得一模一样**
-         * (注释在 x-timeline-harvester 的失败分支里早就写着):
-         *  · 抄错了请求 / 游标换坏了 / queryId 过期
-         *
-         * ⭐ 判据(记忆 project-x-cursor-paging 实测出来的):
-         *  · **content-type** —— 「404 + 空 body + 非 JSON」是指纹:
-         *    请求**根本没进 GraphQL handler**(followers 那次真因是必须用 POST)
-         *  · **响应体开头** —— X 真正的业务错误会返回 JSON 带 errors[]
-         *  · **实际用的 method** —— 抄到的 method 会骗人,得看发出去的是什么
-         */
         let head = '';
         try { head = (await r.text()).slice(0, 200); } catch (e) { head = '(读不出 body)'; }
         return {
@@ -415,10 +474,49 @@ export function buildRefetchScript(
           __status: r.status,
           __ctype: r.headers.get('content-type') || '(无)',
           __bodyHead: head,
-          __method: ${JSON.stringify(method)},
+          __method: m,
         };
       }
-      return { __body: await r.text() };
+      return { __body: await r.text(), __method: m };
+    }
+
+    try {
+      const first = await send(${JSON.stringify(url)}, ${JSON.stringify(method)}, null, null);
+      if (first.__body !== undefined) return first;
+
+      /**
+       * ⭐ 只在「**404 + 非 JSON**」这个指纹上改形状重试。
+       * ⚠️ 别无条件重试:业务错误(带 errors[] 的 JSON)重发一次还是错,
+       * 白白多打一次接口、还会把真正的错误信息盖掉。
+       */
+      const unrouted = first.__status === 404
+        && !/json/i.test(first.__ctype || '');
+      ${post ? `
+      if (unrouted) {
+        const second = await send(
+          ${JSON.stringify(post.url)}, 'POST', ${JSON.stringify(post.body)},
+          { 'content-type': 'application/json' },
+        );
+        /** ⭐ 记下「换形状救回来了」—— 下次不必再从别人的 issue 里推断 */
+        if (second.__body !== undefined) {
+          return { __body: second.__body, __method: 'POST', __shapeSwitched: true };
+        }
+        /** ⚠️ 两种都失败:把**两份**判据都交出来,别只报后一种 */
+        return {
+          __err: first.__err + ' / POST 重试也失败:' + second.__err,
+          __status: second.__status,
+          __ctype: second.__ctype,
+          __bodyHead: second.__bodyHead,
+          __method: 'GET→POST 都试过',
+        };
+      }` : `
+      /** ⚠️ 这条 URL 改写不成 POST 形状(没有 variables 或取不到 queryId)—— 如实说 */
+      if (unrouted) {
+        return Object.assign({}, first, {
+          __err: first.__err + '(改不成 POST 形状:URL 里没有 variables 或 queryId)',
+        });
+      }`}
+      return first;
     } catch (e) {
       return { __err: String(e) };
     }
