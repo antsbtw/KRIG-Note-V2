@@ -129,6 +129,53 @@
 
 ---
 
+## 4.5 ⭐⭐ 疑点已验证（2026-09-26）—— 两条都**不是** bug
+
+⚠️⚠️ **本节是给后来人（含我自己）的防重演记录**：
+下面两条我都先断言"功能坏了"，两次都是**我查询口径用错**，代码是好的。
+**差点让用户去改没坏的代码**（记忆 `project-x-readback-lies` 那条的自造版本）。
+
+### 疑点 A：`parent_text` 不是坏的 —— 样本取偏了
+
+- 实况：135 条有 `parent_text`，**最新是 2026-09-25 抓的**，内容是真父推正文
+  （韩语求助 / 法国看 Paramount+ / 巴西 Spotify…）。机制活着。
+- 我量出 `0/60` 的原因：样本**特意排除了 `human:accept`**（想看"真 AI 判的"），
+  而 **74 条有 parent_text 的全都是 `human:accept`**。
+  ⭐ 我排除掉了唯一含有该现象的那部分，然后说"一条都没有"。
+  → 正是 `feedback-check-sample-contains-phenomenon` 的原样重演。
+
+⭐ 反过来这恰恰**印证了 §2.1**：`parent_text` 只在**用户手点过的推**上有值 ——
+能力挂在手点按钮上，编排跑出来的推没有上下文。
+
+- ⭐ 真实缺口：**5564 条是回复但没抓过父推** —— 不是抓不到，是**没跑**。
+
+### 疑点 B：`planReply` 一直在记 —— 我把分类字段当身份字段
+
+- 实况：9 次 run，**每一跑四步全都落库**
+  （`1:goto | 2:collect | 3:judge | 4:planReply`）。
+- 我断言"planReply 一条没有"的原因：按 **`step_type`** 分组，
+  只看到 `act/fetch/judge` 三类 —— 而 `planReply` 的 `step_type` **就是 `judge`**
+  （`kindToStepType`：`judge` 和 `planReply` 都映射成 `judge`）。
+  16+2=18 ＝ 9 judge + 9 planReply，两者被归成一类。
+- ⚠️ **`step_id` 才是身份，`step_type` 是三选一的粗分类**。查步骤用 `step_id`。
+
+### ⭐ 但"观察点"这件事仍然成立，只是要害变了
+
+不是"缺观察点"，是**粒度不对**：
+
+1. ⚠️ **`step_type` 三分类不够用**，且 `kindToStepType` 末尾是
+   `return 'fetch'` **兜底** —— 流水线要加的 ③④ 两步会**默认变成 fetch**，
+   又一次混进去看不出来。
+   → 与 `feedback-guard-hardcoded-list-never-grows` 同形：**新增项天然在视野外**。
+2. ⚠️ **`output` 只有 `{produced, note}`**，没有"凭什么"：
+   判断步记了"判了 10 条"，但**哪 10 条、每条什么理由**都不在。
+   要追溯"Gemma 为什么判错"得去 `x_tweet` 反查，**而那张表有 TTL**。
+3. ⚠️ **三处留痕互不相通**：采集→journal 文件、编排→`flow_step_run`（krig_flow）、
+   判断结果→`x_tweet.ai_verdict`（krig_x）。**跨库不能 join**，
+   问"昨天那跑发生了什么"要手工拼。
+
+---
+
 ## 5. 抽象建议（用户要求：「对历史的函数如果有抽象不够的，可以提出建议」）
 
 ⚠️ **本节只提建议，不在本次动手** —— 抽象有代价，且本仓有「先复用后抽象」的既定决策。
@@ -167,8 +214,31 @@ interface FlowStepOutcome {
   payload?: unknown;
   /** ⭐ 有没有候选；false = 后续步骤跳过（不是失败） */
   hasCandidates?: boolean;
+  /**
+   * ⭐⭐ 观察点 —— 用户 2026-09-26：「每一个环节都应该有观察点，
+   * 这样才可以真正追溯效果。」
+   */
+  evidence?: {
+    /** 关键判据：判断=每条 verdict+理由 / 取数=命中缓存还是现取 / 送Claude=prompt多长、回多少字 */
+    items?: unknown[];
+    /** ⭐ 跨库的锚 —— 采集 journal 的文件名等。跨库不能 join，就存路径 */
+    journalRef?: string;
+  };
 }
 ```
+
+**观察点的三条设计约束**：
+
+1. ⭐ **`evidence` 由 runner 统一落库**，不靠各步自觉写 ——
+   ⚠️ 靠自觉的话新步骤天然在视野外（同 `feedback-guard-hardcoded-list-never-grows`）。
+2. ⭐ **成功路径也要记** —— 用户已立的铁律：「这次采集完全成功，依据照样蒸发」。
+   判断对了也要知道**凭什么对**，否则没法回归分析。
+3. ⭐ **跨库用锚不用 join** —— journal 文件名存进 `flow_step_run`，要看时按名取。
+
+⚠️ **另需修掉 `kindToStepType` 的兜底**（`flow-runner.ts:260`）：
+末尾 `return 'fetch'` 会让**新增的 ③④ 两步默认变成 fetch**，
+和现在 `planReply` 被归进 `judge` 同一个毛病。
+→ 要么按 `step_id` 存真身份，要么**新增步骤时强制指定**，不许兜底。
 
 跳过时状态标 `skipped`、措辞写明「上一步没产出候选」——
 ⚠️ 必须与「出错了」**分得开**（现在两者在面板上都长得像「跑完了」）。
@@ -254,24 +324,45 @@ interface FlowStepOutcome {
 
 ## 8. 待用户拍板
 
-| # | 问题 | 选项 |
+✅ **2026-09-26 用户已全部拍板**：
+
+| # | 问题 | 决定 |
 |---|---|---|
-| A | 上下文要几条？ | 1 条（现成）/ 10～20 条（要改 `fetchParentTweet`） |
-| B | 建议 5.1 选 A 还是 B？ | 倾向 **B**（加 `payload` + `hasCandidates`） |
-| C | 判断慢（37s/条）先测负载还是直接换模型？ | 倾向**先测** —— 9/21 实测同代码 17.6s/条，差一倍多很可能是负载 |
+| A | 上下文要几条？ | ⭐ **做成变量** —— 「是否做变量---届时该起来容易」 |
+| B | 建议 5.1 选 A 还是 B？ | ✅ **B**（加 `payload` + `hasCandidates`） |
+| C | 判断慢先测负载还是换模型？ | ✅ **先测负载** |
+
+### A 的实现注意（⚠️ 别做成「填了不生效」）
+
+⚠️ `fetchParentTweet` **当前只能取紧邻 1 条** —— 不是参数没开，
+是**实现只读那一条**。所以「做成变量」≠ 加个参数就完事，
+必须同时把实现改成「能往上翻 N 条」，否则就是本仓最常见的死参数形态
+（`ArrowStyle`/`slack` 那一类：类型有、JSON 有、消费层零消费）。
+
+⭐ 代价不大：它已经在详情页了，X 的 status 页**本来就把整条会话链渲染出来**，
+多读几条是同一次导航里的事，**不用多跳页**。
+
+⚠️ 守卫要求：参数必须**真的改变行为** —— 传 1 和传 10 取回的条数不同，
+不能只断言「参数传下去了」（源码扫描看不见「会不会执行」）。
 
 ## 9. 开工顺序（定稿后）
 
 ```
-0. 验疑点 B（askAI 还活着吗）—— 单独验，不在流水线里首验
-0. 验疑点 A（parent_text 为什么 0/60）—— 真机跑一次 X_PREFETCH_CONTEXT
-1. 扩 FlowStepOutcome 契约（建议 5.1-B）
+✅ 疑点 A 已验证 —— parent_text 机制是好的（见 §4.5），不用再验
+⬜ 疑点 B（askAI 还活着吗）—— ⚠️ 仍必须单独验，不在流水线里首验
+
+1. 扩 FlowStepOutcome 契约（payload + hasCandidates + evidence）
+   └ 同时修 kindToStepType 的 'fetch' 兜底
 2. ③ 接线：prefetchContext / prefetchProfiles → flow capability
+   └ fetchParentTweet 改成可取 N 条（变量，见 §8-A）
 3. x-reply-prompt.ts（纯函数，可单测）
 4. ④ 接线：askAdvice → flow capability
 5. 补字段（四处登记）
 6. ⑤ 点评 UI + diff 自动存
 7. ⑥ Gemma 开关（手动）+ 已发送可回头改点评
 ```
+
+⭐ **1 是所有后续的前提**：②③④ 都要靠 `payload` 往下传东西、靠 `evidence` 留痕。
+先做 1，后面每接一步都自带观察点，不用回头补。
 
 ⚠️ 每步守本仓守卫纪律：**注入真违规验证守卫会红**，且**看注册条数**别只看绿。
