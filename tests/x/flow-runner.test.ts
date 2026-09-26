@@ -487,3 +487,143 @@ describe('⚠️⚠️ runId 要传到每一步(2026-09-24 实测:草稿落库�
       .toMatch(/runId: str\(params\.__runId\)/);
   });
 });
+/**
+ * ⭐⭐ **没有候选就别往下跑** —— 用户 2026-09-26 点破的:
+ *
+ * > 「既然值得回复是零条,为什么第四步还需要跑呢?」
+ *
+ * 真因不是第 4 步的 bug,是**契约缺了一格**:
+ * 判断步的 `produced: 10` 是「判了 10 条」,而真正该当闸门的
+ * 「值得回复 0 条」**只写在给人看的 note 里,编排读不到** → 第 4 步空转 125 秒。
+ */
+describe('⭐⭐ hasCandidates:没有候选就跳过后续', () => {
+  const judged10worth0 = (): FlowStepOutcome => ({
+    ok: true, produced: 10, hasCandidates: false,
+    note: '判了 10/10 条,其中值得回复 0 条', elapsedMs: 1,
+  });
+
+  it('⭐⭐ 判断说没候选 → 第 4 步**真的没被调用**', async () => {
+    const c = caps({ judge: vi.fn(async () => judged10worth0()) });
+    const r = await runFlow(recipe(FOUR), c);
+    /** ⚠️ 行为断言:光看状态不够,要确认那个函数**压根没被调** */
+    expect(c.planReply, '第 4 步还是被调用了 —— 闸门没生效,又会空转 125 秒')
+      .not.toHaveBeenCalled();
+    expect(r.steps[3].status).toBe('skipped');
+  });
+
+  it('⭐ 跳过的理由要与「失败/人停/档里关掉」分得开', async () => {
+    const r = await runFlow(
+      recipe(FOUR), caps({ judge: vi.fn(async () => judged10worth0()) }));
+    const note = r.steps[3].note ?? '';
+    expect(note, '没说是哪一步没产出候选').toContain('s3');
+    expect(note, '没说清是「没东西可做」').toMatch(/没有产出候选/);
+    /** ⚠️ 这不是故障:整条 run 仍是 ok,且没有 failedAt */
+    expect(r.ok, '没候选被当成了失败 —— 那是两回事').toBe(true);
+    expect(r.failedAt, '没候选不该记成「断在这一步」').toBeUndefined();
+  });
+
+  it('⚠️ produced=0 但没表态(undefined)→ 照跑,不误刹', async () => {
+    /**
+     * ⚠️ 判据必须是 `=== false` 不是 falsy:
+     * 老能力不写这个字段,不能因为加了字段就被误刹。
+     */
+    const c = caps({ judge: vi.fn(async () => ({ ok: true, produced: 0, elapsedMs: 1 })) });
+    await runFlow(recipe(FOUR), c);
+    expect(c.planReply, '没表态却被刹住了 —— 老能力会全部失灵')
+      .toHaveBeenCalled();
+  });
+
+  it('⭐ hasCandidates=true 时照常往下跑', async () => {
+    const c = caps({
+      judge: vi.fn(async () => ({ ok: true, produced: 10, hasCandidates: true, elapsedMs: 1 })),
+    });
+    await runFlow(recipe(FOUR), c);
+    expect(c.planReply, '有候选反而不跑了').toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⭐⭐ **观察点** —— 用户 2026-09-26:
+ * > 「每一个环节都应该有观察点,这样才可以真正追溯效果。」
+ *
+ * ⚠️ 要害不是「有没有记」(flow_step_run 底座早就有),是**记了什么**:
+ * 原来 `output` 只有 `{produced, note}`,要追溯「Gemma 为什么判错」
+ * 得去 `x_tweet` 反查 —— **而那张表有 TTL**。
+ */
+describe('⭐⭐ evidence 观察点进留痕', () => {
+  it('⭐⭐ evidence 真的进了 recordStep 的 output(不是只在类型里)', async () => {
+    const { recordStep } = await import('../../src/platform/main/flow/flow-run-repo');
+    vi.mocked(recordStep).mockClear();
+    const ev = { items: [{ fetched: 10, judged: 10, worth: 0 }] };
+    await runFlow(recipe([{ id: 's3', kind: 'judge' }]), caps({
+      judge: vi.fn(async () => ({ ok: true, produced: 10, evidence: ev, elapsedMs: 1 })),
+    }));
+    const calls = vi.mocked(recordStep).mock.calls;
+    expect(calls.length, 'recordStep 压根没被调').toBeGreaterThan(0);
+    const out = calls[calls.length - 1][1].output as Record<string, unknown>;
+    expect(out.evidence, 'evidence 没落库 —— 观察点白设了').toEqual(ev);
+  });
+
+  it('⭐ 成功路径也要记 evidence(不只失败)', async () => {
+    /**
+     * ⚠️ 用户已立的铁律:「这次采集完全成功,依据照样蒸发」。
+     * 判断对了也要知道**凭什么对**,否则没法回归分析。
+     */
+    const { recordStep } = await import('../../src/platform/main/flow/flow-run-repo');
+    vi.mocked(recordStep).mockClear();
+    await runFlow(recipe([{ id: 's3', kind: 'judge' }]), caps({
+      judge: vi.fn(async () => ({
+        ok: true, produced: 5, evidence: { items: [{ worth: 5 }] }, elapsedMs: 1,
+      })),
+    }));
+    const c = vi.mocked(recordStep).mock.calls;
+    const rec = c[c.length - 1][1];
+    expect(rec.status, '这是成功路径').toBe('ok');
+    expect((rec.output as Record<string, unknown>).evidence, '成功时 evidence 被丢了')
+      .toBeDefined();
+  });
+
+  it('⭐ hasCandidates 也要进留痕 —— 「为什么后面没跑」要查得到', async () => {
+    const { recordStep } = await import('../../src/platform/main/flow/flow-run-repo');
+    vi.mocked(recordStep).mockClear();
+    await runFlow(recipe([{ id: 's3', kind: 'judge' }]), caps({
+      judge: vi.fn(async () => ({ ok: true, produced: 10, hasCandidates: false, elapsedMs: 1 })),
+    }));
+    const c = vi.mocked(recordStep).mock.calls;
+    const out = c[c.length - 1][1].output as Record<string, unknown>;
+    expect(out.hasCandidates, 'hasCandidates 没落库').toBe(false);
+  });
+});
+
+/**
+ * ⭐⭐ **step_type 不许兜底** —— 2026-09-26。
+ *
+ * 原来 `kindToStepType` 末尾是 `return 'fetch'`,新增的步骤会**默认变成 fetch**,
+ * 按 step_type 统计时看不出来。
+ * ⚠️ 现存一例:`planReply` 的 step_type 是 `judge`,与真判断步归成一类
+ * (16+2=18 ＝ 9 judge + 9 planReply)—— 我据此误判过「planReply 一条记录都没有」。
+ * → 与 feedback-guard-hardcoded-list-never-grows 同形:**兜底 = 新增项天然在视野外**。
+ */
+describe('⭐⭐ step_type 登记表不许兜底', () => {
+  it('⭐⭐ 没登记的 kind → step_type 是 unknown,不是静默的 fetch', async () => {
+    const { recordStep } = await import('../../src/platform/main/flow/flow-run-repo');
+    vi.mocked(recordStep).mockClear();
+    /** 一个不存在的 kind:下面那道「没有对应能力」的闸会接住它 */
+    await runFlow(
+      recipe([{ id: 'sX', kind: 'brandNew' as never }]), caps());
+    const c = vi.mocked(recordStep).mock.calls;
+    expect(c.length, 'recordStep 没被调').toBeGreaterThan(0);
+    expect(
+      c[0][0].stepType,
+      '新 kind 被静默归成了 fetch —— 统计里混进取数那一类就再也看不出来',
+    ).toBe('unknown');
+  });
+
+  it('⚠️ 已登记的四个 kind 各归各类,planReply 仍是 judge(如实记录现状)', async () => {
+    const { recordStep } = await import('../../src/platform/main/flow/flow-run-repo');
+    vi.mocked(recordStep).mockClear();
+    await runFlow(recipe(FOUR), caps());
+    const types = vi.mocked(recordStep).mock.calls.map((c) => c[0].stepType);
+    expect(types).toEqual(['act', 'fetch', 'judge', 'judge']);
+  });
+});

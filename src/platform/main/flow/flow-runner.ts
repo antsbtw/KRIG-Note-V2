@@ -27,8 +27,9 @@
 import { newRunId, deriveStep, type ExecContext } from './exec-context';
 import { startRun, recordStep, endRun } from './flow-run-repo';
 import type {
-  FlowRecipe, FlowStep, FlowStepOutcome,
+  FlowRecipe, FlowStep, FlowStepOutcome, FlowStepKind,
 } from '@shared/types/flow-recipe-types';
+import type { StepType } from './exec-context';
 
 /**
  * 能力适配器 —— 由调用方注入。
@@ -134,6 +135,12 @@ export async function runFlow(
 
   const steps: FlowRunResult['steps'] = [];
   let failedAt: string | undefined;
+  /**
+   * ⭐ 哪一步说了「没有候选」—— 后续步骤据此跳过。
+   * ⚠️ 记的是**步骤 id 不是布尔值**:跳过的理由里要说清楚是**谁**没产出,
+   * 否则面板上只会写「没有候选」,而人要的是「哪一步没产出」。
+   */
+  let noCandidatesFrom: string | undefined;
   let seq = 0;
   const total = recipe.steps.length;
   /**
@@ -169,7 +176,17 @@ export async function runFlow(
         ? '人工停止'
         : step.enabled === false
           ? '编排档里关掉了这一步'
-          : undefined;
+          /**
+           * ⭐⭐ **上一步没产出候选** —— 用户 2026-09-26:
+           * 「既然值得回复是零条,为什么第四步还需要跑呢?」
+           *
+           * ⚠️ 措辞必须与上面三种**分得开**:这**不是故障、不是人停、不是配置**,
+           * 是「没东西可做」。四种合成一个 skipped 的话,
+           * 回看时「这一步为什么没跑」又要靠猜。
+           */
+          : noCandidatesFrom
+            ? `上一步「${noCandidatesFrom}」没有产出候选,本步无事可做`
+            : undefined;
 
     if (skipReason) {
       emit({ seq, stepId: step.id, label, status: 'skipped', note: skipReason, elapsedMs: 0 });
@@ -222,6 +239,17 @@ export async function runFlow(
     }
 
     if (!out.ok) failedAt = step.id;
+    /**
+     * ⭐⭐ **没产出候选就让后面停** —— 刹车与油门要接线(本仓已有同族教训:
+     * drain 连失败就停而 timer 无条件重启,两边互不知道 → 永远空转)。
+     *
+     * ⚠️ 判据是 `=== false` **不是 falsy**:`undefined` 表示
+     * 「这个能力没表态」,老能力不写它就维持原状照跑,
+     * 不能因为加了字段而被误刹。
+     */
+    if (out.ok && out.hasCandidates === false && !noCandidatesFrom) {
+      noCandidatesFrom = step.id;
+    }
     emit({
       seq, stepId: step.id, label,
       status: out.ok ? 'ok' : 'failed',
@@ -235,8 +263,21 @@ export async function runFlow(
     await recordStep(stepCtx, {
       status: out.ok ? 'ok' : 'failed',
       input: step.params,
-      /** ⭐ 产出数进 output —— 「跑了但产出 0」日后回看要查得到 */
-      output: { produced: out.produced, note: out.note },
+      /**
+       * ⭐ 产出数进 output —— 「跑了但产出 0」日后回看要查得到。
+       *
+       * ⭐⭐ **观察点由 runner 统一落库**(用户 2026-09-26 定的
+       * 「每一个环节都应该有观察点」)——
+       * ⚠️ **不靠各步自觉写**:靠自觉的话新加的步骤天然在视野外
+       * (同 feedback-guard-hardcoded-list-never-grows 的形态)。
+       * ⚠️ **成功路径也要记**:判断对了也要知道凭什么对,否则没法回归分析。
+       */
+      output: {
+        produced: out.produced,
+        note: out.note,
+        hasCandidates: out.hasCandidates,
+        evidence: out.evidence,
+      },
       reasoning: out.error,
       durationMs: out.elapsedMs,
     }).catch(() => {});
@@ -257,8 +298,39 @@ export async function runFlow(
  * ⚠️ 与能力层的 `STEP_TYPE_OF` **同一套词**(act/fetch/judge)——
  * 另起一套会让两边的审计数据对不上,而那种错在数据里看不出来。
  */
-function kindToStepType(kind: string): 'act' | 'fetch' | 'judge' {
-  if (kind === 'goto') return 'act';
-  if (kind === 'judge' || kind === 'planReply') return 'judge';
-  return 'fetch';
+const STEP_TYPE_BY_KIND: Readonly<Record<FlowStepKind, StepType>> = {
+  goto: 'act',
+  collect: 'fetch',
+  judge: 'judge',
+  planReply: 'judge',
+};
+
+function kindToStepType(kind: string): StepType {
+  /**
+   * ⚠️⚠️ **不许兜底** —— 2026-09-26 改。
+   *
+   * 原来末尾是 `return 'fetch'`,于是**新增的步骤会默认变成 fetch**,
+   * 混进取数那一类里,按 step_type 统计时看不出来。
+   * ⭐ 同一个毛病现在就有一例:`planReply` 的 step_type 是 `judge`,
+   * 与真正的判断步归成一类(16+2=18 ＝ 9 judge + 9 planReply)——
+   * 我据此误判过「planReply 一条记录都没有」。
+   *
+   * ⚠️ 这与 feedback-guard-hardcoded-list-never-grows 同形:
+   * **兜底 = 新增项天然在视野外**。改成登记表 + fail loud:
+   * 加了 kind 却忘了登记,**当场就知道**,不会静默归错类。
+   *
+   * ⚠️ 但这里**不抛异常**:本函数在 try 之外被调用(派生 stepCtx 时),
+   * 抛出会让**整条 run 崩掉且不留任何记录**。
+   * 而「kind 不认识」下面那道闸(`没有对应能力`)已经会 fail loud 并落库 ——
+   * 这里只要**别静默归错类**就够了,用 'unknown' 让它在统计里显形。
+   */
+  const t = STEP_TYPE_BY_KIND[kind as FlowStepKind];
+  if (!t) {
+    console.error(
+      `[flow-runner] 步骤类型「${kind}」没在 STEP_TYPE_BY_KIND 登记 ——`
+      + ' 新增能力要同时登记它的 StepType(别让它静默变成 fetch)',
+    );
+    return 'unknown';
+  }
+  return t;
 }

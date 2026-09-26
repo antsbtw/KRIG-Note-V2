@@ -100,7 +100,17 @@ export type StepType =
   /** 写回:结论 → 自己的库。只写 */
   | 'write'
   /** 人决:把控制权交回给人,等点头 */
-  | 'human';
+  | 'human'
+  /**
+   * ⚠️ **不是一种真分类,是个显形标记** —— 2026-09-26 加。
+   *
+   * 新增了 kind 却忘了登记 StepType 时用它,**代替原来的 `fetch` 兜底**:
+   * 兜底会让新步骤静默混进取数那一类,按 step_type 统计时看不出来
+   * (现存一例:`planReply` 的 step_type 是 `judge`,与真判断步归成一类,
+   *  我据此误判过「planReply 一条记录都没有」)。
+   * ⭐ 用它的话,统计里会**直接冒出一个 unknown**,当场就知道漏登记了。
+   */
+  | 'unknown';
 
 /** 一步跑完的结果状态 —— 三态 + 两种「没跑」 */
 export type StepStatus =

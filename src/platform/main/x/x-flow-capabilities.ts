@@ -125,6 +125,22 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         note: r.fetched === 0
           ? '待判队列是空的(不是故障)'
           : `判了 ${r.judged}/${r.fetched} 条,其中值得回复 ${r.worth} 条`,
+        /**
+         * ⭐⭐ **闸门在这里** —— 用户 2026-09-26:
+         * 「既然值得回复是零条,为什么第四步还需要跑呢?」
+         *
+         * ⚠️ 闸门是 `worth` **不是 `produced`**:`produced` 是「判了几条」,
+         * 判了 10 条而 worth=0 时照样该刹车。
+         * 这个数**一直都算出来了**,只是原来只写进给人看的 note,编排读不到。
+         */
+        hasCandidates: r.worth > 0,
+        /**
+         * ⭐ 观察点:判断步的判据 = 这批的三个数。
+         * ⚠️ 逐条的 verdict+理由在 `x_tweet.ai_verdict`,那张表**有 TTL**;
+         * 这里先记汇总,逐条留痕等 §5.3 的 evidence.items 落地再补
+         * (别现在就把整批推文塞进来 —— flow_step_run 会被撑爆)。
+         */
+        evidence: { items: [{ fetched: r.fetched, judged: r.judged, worth: r.worth }] },
         elapsedMs: Date.now() - t0,
       };
     },
