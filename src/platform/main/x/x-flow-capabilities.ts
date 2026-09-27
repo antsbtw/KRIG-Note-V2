@@ -20,6 +20,14 @@ import { autoCollect } from './x-auto-collect';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { planReplyBatch } from './x-timeline-handlers';
 import { prefetchReplyContext } from './x-prefetch-context';
+/**
+ * ⭐ 搜索水位 —— 按搜索词记「采到的最新一条是什么时候发的」。
+ * ⚠️ **读在 goto、写在 collect**:只有采完才知道最新一条是什么时候。
+ */
+import {
+  getSearchWatermark, computeSinceDate, bumpSearchWatermark,
+} from '../db/x-search-watermark-repo';
+import { normalizeSearchQuery } from './x-timeline-scan';
 import { askClaudeForAdvice } from './x-ask-advice';
 import { XPageResolver } from './x-pages';
 import { resolveXWebContents } from './x-webcontents';
@@ -45,7 +53,33 @@ export function makeXFlowCapabilities(): FlowCapabilities {
       if (!page) {
         return { ok: false, produced: 0, error: 'goto 缺 page(语义页面名)', elapsedMs: Date.now() - t0 };
       }
-      const resolved = resolver.resolve(page, (params.params ?? {}) as Record<string, string>);
+      /**
+       * ⭐⭐ **水位决定采集窗口**(用户 2026-09-27:
+       * 「按上一次采集时间倒推 12 小时，这样比较准确，而不重复采集数据」)。
+       *
+       * ⚠️ **只在 goto 这一步算** —— 「去哪一页」是这一步的职责。
+       * collect 采的是**当前页**,不再自己算 URL(否则两次算的窗口可能不同,
+       * 而 autoCollect「不在这一页就跳过去」会把页面跳走)。
+       *
+       * ⚠️ 只对**搜索页**生效:别的页面(主页/某人主页)没有搜索词,
+       * 也就没有水位这回事。
+       */
+      const pageParams = { ...((params.params ?? {}) as Record<string, string>) };
+      let waterNote = '';
+      if (page === 'x.search' && pageParams.q && !pageParams.since) {
+        const q = normalizeSearchQuery(pageParams.q);
+        const wm = await getSearchWatermark(q);
+        const { since, basis } = computeSinceDate(wm);
+        pageParams.since = since;
+        /**
+         * ⭐ 报清楚**凭什么是这个窗口** —— 「采少了」在数据里看不出来,
+         * 只能靠这句话回溯。
+         */
+        waterNote = basis === 'watermark'
+          ? ` · 增量(上次采到 ${wm?.newestAt?.slice(0, 16) ?? '?'},回退 12h)`
+          : ' · 首次采这个词(冷启动窗口)';
+      }
+      const resolved = resolver.resolve(page, pageParams);
       if (!resolved) {
         /** ⚠️ fail loud:参数不全时说清楚是哪一页,别让人去猜 */
         return {
@@ -60,7 +94,9 @@ export function makeXFlowCapabilities(): FlowCapabilities {
       }
       await wc.wc.loadURL(resolved.url);
       return {
-        ok: true, produced: 1, note: `已到 ${resolved.describe}`, elapsedMs: Date.now() - t0,
+        ok: true, produced: 1,
+        note: `已到 ${resolved.describe}${waterNote}`,
+        elapsedMs: Date.now() - t0,
       };
     },
 
@@ -75,15 +111,28 @@ export function makeXFlowCapabilities(): FlowCapabilities {
       if (!page) {
         return { ok: false, produced: 0, error: 'collect 缺 page(语义页面名)', elapsedMs: Date.now() - t0 };
       }
-      const resolved = resolver.resolve(page, (params.params ?? {}) as Record<string, string>);
-      if (!resolved) {
-        return {
-          ok: false, produced: 0,
-          error: `页面「${page}」的参数解析不出 URL(参数不全?)`,
-          elapsedMs: Date.now() - t0,
-        };
-      }
-      const r = await autoCollect(resolved.url, wcOf(params), {
+      /**
+       * ⭐⭐ **采当前页,不自己算 URL**(用户 2026-09-27 订正)。
+       *
+       * > 「goto 后就是滚动当前 goto 的页面，然后自动收集了，
+       * >   收集是 goto 到哪里就收集哪里，是一个分离的动作」
+       *
+       * ── 原来的毛病 ──
+       * `goto` 和 `collect` **各 resolve 一次**同一份参数。
+       * 两次结果一样纯属巧合 —— 而 `autoCollect` 的行为是
+       * **「不在这一页就跳过去」**,所以一旦两次算出的 URL 有差异
+       * (比如加了水位之后,两次算 since 跨了午夜零点),
+       * collect 会**把页面跳走**,采的就不是 goto 带你去的那一页了。
+       * ⚠️ 而那种错的现象是「采到的数据不对」,极难联想到是两次 resolve。
+       *
+       * ⭐ 传空串 = 采当前页(autoCollect 本来就支持,
+       * 见其 `@param url`:「传空串 = 采当前页」)。
+       * 「确保在目标页」是 **goto 那一步**的职责,不是这一步的。
+       *
+       * ⚠️ `page` 仍然要收 —— 它用作 `pageLabel`(留痕里标明采的是哪类页面),
+       * 以及取 `handle` 参数。但**不再用它算 URL**。
+       */
+      const r = await autoCollect('', wcOf(params), {
         wsId,
         maxRounds: num(params.maxRounds),
         budgetMs: num(params.budgetMs),
@@ -95,12 +144,32 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         return { ok: false, produced: 0, error: r.error, elapsedMs: Date.now() - t0 };
       }
       /**
+       * ⭐⭐ **采完推水位** —— 记「这一趟采到的**最新一条推**是什么时候发的」。
+       *
+       * ⚠️ 记推文时间**不是跑的时间**:X 搜索索引有延迟,刚跑完可能还没
+       * 索引到最近几小时的推。记跑的时间会让中间那段**永远漏掉**,
+       * 而且漏了在数据里看不出来。
+       *
+       * ⚠️ `dateSpan.newest` 是采集本来就算好的,不另造一份。
+       * ⚠️ 没采到东西(newest 为空)时 `bumpSearchWatermark` 只记「跑过一次」,
+       * **不动水位** —— 推到「现在」会让下次跳过这段,而这段其实没采到。
+       * ⚠️ 推水位失败不影响本次采集(内部已 catch + warn)。
+       */
+      const qRaw = (params.params as Record<string, string> | undefined)?.q;
+      if (page === 'x.search' && qRaw) {
+        await bumpSearchWatermark(
+          normalizeSearchQuery(qRaw), r.dateSpan?.newest, { seen: r.saved },
+        );
+      }
+
+      /**
        * ⚠️ **采到 0 条不算失败** —— 可能这一页真没有(如搜索词冷门)。
        * 但要把「为什么停」带上,否则人看到 0 只能猜。
        */
       return {
         ok: true, produced: r.saved,
-        note: `采 ${r.tweets} 条 / 入库 ${r.saved} 条 · ${r.stopReason}`,
+        note: `采 ${r.tweets} 条 / 入库 ${r.saved} 条 · ${r.stopReason}`
+          + (r.dateSpan?.newest ? ` · 最新一条 ${r.dateSpan.newest.slice(0, 16)}` : ''),
         elapsedMs: Date.now() - t0,
       };
     },

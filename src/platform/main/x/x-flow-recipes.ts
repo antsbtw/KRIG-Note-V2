@@ -43,7 +43,15 @@ export const DEFAULT_X_FLOW: FlowRecipe = {
    *    填 1 会漏掉昨晚发的(配方那边甚至叠 48h 重叠,「宁可重复不可遗漏」)。
    * ⚠️ 填 0 = 搜全部历史(特殊约定时用)。
    */
-  shared: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live', days: '2' } },
+  /**
+   * ⚠️ **不写 days** —— 窗口由**水位**决定(用户 2026-09-27:
+   * 「按上一次采集时间倒推 12 小时，这样比较准确，而不重复采集数据」)。
+   * ⭐ goto 那一步会查这个词的水位、算出 since 传给 resolver;
+   * 查不到水位(首次搜这个词)才回落固定天数。
+   * ⚠️ 这里写死 days 会**盖过水位**(resolver 里 since 优先,但 days 仍是
+   * 冷启动的回落值)—— 留空让水位说了算。
+   */
+  shared: { page: 'x.search', params: { q: 'VPN, 翻墙, 科学上网', f: 'live' } },
   steps: [
     {
       id: 'goto',
