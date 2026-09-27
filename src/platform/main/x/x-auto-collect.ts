@@ -265,6 +265,12 @@ export interface AutoCollectReport {
    * 而**那个判断该由分析层做**,它知道自己在看什么页面。
    */
   dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
+  /**
+   * ⭐⭐ 最新一条推的**精确发布时间**(ISO)——搜索水位用。
+   * ⚠️ 别用 `dateSpan.newest`:那是按天聚合的,拿去当时间戳会把
+   * 「20:38:55」变成「00:00:00」,下次增量窗口平白多退一整天。
+   */
+  newestAt?: string;
   elapsedMs: number;
 
   /**
@@ -1449,6 +1455,8 @@ export async function autoCollect(
     /** ⭐ 抄到的那条请求 —— 只带 URL,请求头含鉴权不外传 */
     capturedUrl: r.lastRequest?.url,
     dateSpan: r.dateSpan,
+    /** ⭐ 最新一条的**精确时间**(搜索水位用)—— 与按天聚合的 dateSpan 分开 */
+    newestAt: r.newestAt,
     paging: { hasMore: r.paging.hasMore, cursor: r.paging.bottom },
     /** ⭐ 增量:与上次快照的差集 + 排序稳定性证据 */
     incremental,

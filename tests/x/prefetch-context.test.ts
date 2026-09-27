@@ -314,3 +314,54 @@ describe('⭐⭐ 内部处理步骤不设安全限额', () => {
     ).toMatch(/技术限制/);
   });
 });
+
+/**
+ * ⭐⭐ **连续失败就不再白等** —— 2026-09-27 真机止血。
+ *
+ * 实测代价:那一趟 192 人里 **159 次全失败**，每次硬等满 12s
+ * = **32 分钟纯浪费**（整个备料步 2129s，绝大部分耗在这里）。
+ * ⚠️ 而失败原因是**同一个**（「期间一条 GraphQL 载荷都没看见」）——
+ * 既然是机制坏了，后面 159 次不可能突然好。
+ */
+describe('⭐⭐ bio 连续失败要止损', () => {
+  const SRC = strip(read('src/platform/main/x/x-prefetch-context.ts'));
+
+  it('⭐⭐ 连续失败达阈值就停，不再逐个白等 12 秒', () => {
+    const i = SRC.indexOf('for (const h of handles)');
+    expect(i, '找不到 bio 循环').toBeGreaterThan(0);
+    const body = SRC.slice(i, SRC.indexOf('const replies = pool.filter', i));
+    expect(body.length, 'slice 空转').toBeGreaterThan(100);
+    expect(body, '没有放弃标记 —— 会一直白等到最后一个').toMatch(/bioGaveUp = true/);
+    expect(body, '放弃了却没跳过后面的').toMatch(/if \(bioGaveUp\)/);
+  });
+
+  it('⭐ 判据是**连续**失败不是累计（个别采不到是常事）', () => {
+    const i = SRC.indexOf('for (const h of handles)');
+    const body = SRC.slice(i, SRC.indexOf('const replies = pool.filter', i));
+    expect(body, '不是按连续失败判').toMatch(/consecutiveFail >= BIO_GIVE_UP_AFTER/);
+    expect(body, '成功后没清零 —— 零星失败也会累积到阈值')
+      .toMatch(/bioFetched \+= 1; consecutiveFail = 0/);
+  });
+
+  it('⭐⭐ 「跳过」与「试了没成」要分开报（否则「备齐了」是谎报）', () => {
+    expect(SRC, '没有 skipped 字段 —— 人会以为全试过了').toMatch(/skipped: bioSkipped/);
+    expect(SRC, '没报是否中途放弃').toMatch(/gaveUp: bioGaveUp/);
+    const caps = read('src/platform/main/x/x-flow-capabilities.ts');
+    expect(caps, '面板上不说「还剩多少没试」').toMatch(/还剩 \$\{r\.bio\.skipped\} 人没试/);
+  });
+
+  it('⚠️ 放弃 bio **不算整步失败**（上文那一半还是好的）', () => {
+    /**
+     * ⚠️ 实测同一趟里上文成功 75/83 —— 因为 bio 采不到就把整步判失败，
+     * 会把好的那一半也一起否掉，而且 ⑤⑥ 会被连带跳过。
+     */
+    const caps = read('src/platform/main/x/x-flow-capabilities.ts');
+    const i = caps.indexOf('async prefetch(');
+    const body = strip(caps.slice(i, caps.indexOf('async askAdvice(')));
+    expect(body.length, 'slice 空转').toBeGreaterThan(100);
+    expect(
+      /gaveUp[\s\S]{0,80}ok: false/.test(body),
+      'bio 放弃被当成整步失败 —— 上文那一半的成果会被一起否掉',
+    ).toBe(false);
+  });
+});

@@ -25,6 +25,13 @@ import { fetchParentTweet, DEFAULT_CONTEXT_DEPTH } from './x-parent-tweet';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { TweetInboxStatus } from '@shared/types/x-timeline-types';
 
+/**
+ * ⭐ 连续失败多少次就放弃这一趟的 bio 采集。
+ * ⚠️ 与 `mechanismSuspect` 的阈值保持一致 —— 两个数分开会让
+ * 「报了可疑却还在跑」或「停了却不报可疑」,两种都让人看不懂。
+ */
+export const BIO_GIVE_UP_AFTER = 5;
+
 export interface PrefetchOptions {
   wsId?: string;
   wcId?: number;
@@ -64,6 +71,13 @@ export interface PrefetchReport {
     /** 现去 X 采回来的 */
     fetched: number;
     failed: number;
+    /**
+     * ⭐ 因为**连续失败而跳过**的 —— ⚠️ 与 `failed` 分开:
+     * 「试了没成」和「压根没试」是两回事,混在一起会让人以为全试过了。
+     */
+    skipped: number;
+    /** 这一趟是不是中途放弃了 bio */
+    gaveUp: boolean;
   };
   context: {
     /** ⭐ 这一页里有多少条是回复 —— UI 要用它区分「没抓到」与「本来就没有回复串」 */
@@ -139,7 +153,23 @@ export async function prefetchReplyContext(
    */
   const handles = [...new Set(pool.map((t) => normalizeHandle(t.author_handle ?? '')).filter(Boolean))];
   let bioCached = 0; let bioFetched = 0; let bioFailed = 0;
+  /**
+   * ⭐⭐ **连续失败就不再白等**(2026-09-27 真机止血)。
+   *
+   * 实测:那一趟 192 人里 **159 次全失败**,每次硬等满 12s = **32 分钟纯浪费**
+   * (整个备料步 2129s,绝大部分耗在这里)。
+   * ⚠️ 失败原因是**同一个**(「期间一条 GraphQL 载荷都没看见」)——
+   * 既然是机制坏了,后面 159 次不可能突然好。
+   *
+   * ⭐ 判据用**连续**失败不是累计:个别账号采不到是常事(私密号/已注销),
+   * 连着一串才说明机制坏了;成功一次就清零。
+   * ⚠️ 放弃 bio **不算整步失败**:上文那一半还是好的(实测 75/83 成功)。
+   */
+  let bioSkipped = 0;
+  let bioGaveUp = false;
   for (const h of handles) {
+    if (bioGaveUp) { bioSkipped += 1; continue; }
+
     const have = await getAuthorCounts(h).catch(() => null);
     const fresh = have?.countsAt
       && (Date.now() - new Date(have.countsAt).getTime()) < PROFILE_STALE_HOURS * 3_600_000;
@@ -147,8 +177,12 @@ export async function prefetchReplyContext(
 
     const got = await harvestAuthorProfile(h, opts.wcId, 12_000)
       .catch((e) => ({ error: String(e) }));
-    if ('error' in got) { bioFailed += 1; noteFail(`bio @${h}: ${got.error}`); }
-    else { bioFetched += 1; consecutiveFail = 0; }
+    if ('error' in got) {
+      bioFailed += 1;
+      noteFail(`bio @${h}: ${got.error}`);
+      /** ⚠️ 阈值与 mechanismSuspect 同一个数 —— 让那条判据真的止损,不只报一句 */
+      if (consecutiveFail >= BIO_GIVE_UP_AFTER) bioGaveUp = true;
+    } else { bioFetched += 1; consecutiveFail = 0; }
   }
 
   // ── ② 上文 ──
@@ -178,7 +212,10 @@ export async function prefetchReplyContext(
 
   return {
     scanned: pool.length,
-    bio: { authors: handles.length, cached: bioCached, fetched: bioFetched, failed: bioFailed },
+    bio: {
+      authors: handles.length, cached: bioCached, fetched: bioFetched,
+      failed: bioFailed, skipped: bioSkipped, gaveUp: bioGaveUp,
+    },
     context: {
       isReply: replies.length,
       attempted: needContext.length,

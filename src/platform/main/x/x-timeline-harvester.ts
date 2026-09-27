@@ -332,8 +332,21 @@ export interface HarvestReport {
   rounds: number;
   payloads: number;
   tweets: HarvestedTweet[];
-  /** 抓到的日期跨度与空洞 */
+  /**
+   * 抓到的日期跨度与空洞。
+   * ⚠️⚠️ `oldest`/`newest` 是**按天聚合**的(`YYYY-MM-DD`),给人看跨度用 ——
+   * **不要拿它当时间戳**。2026-09-27 实测踩到:搜索水位复用了它,
+   * 于是「最新一条 20:38:55」被存成了「00:00:00」,
+   * 下次算增量窗口会平白多退一整天(现象是「每次都重采一大段」)。
+   * ⭐ 要精确时间用下面的 `newestAt`。
+   */
   dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
+  /**
+   * ⭐⭐ 这一趟采到的**最新一条推的精确发布时间**(ISO)。
+   * 搜索水位用它 —— 与 `dateSpan.newest`(按天)**刻意分开**:
+   * 一个给人看跨度,一个给程序算窗口,语义不同不该复用同一个字段。
+   */
+  newestAt?: string;
   stopReason: string;
   trace: RoundTrace[];
 }
@@ -1792,9 +1805,20 @@ export async function harvestTimeline(
   if (payloads === 0) problems.push('没捕获到任何 GraphQL 响应 —— CDP 可能没挂上');
   if (list.length === 0) problems.push('一条推文都没解析出来');
 
+  /**
+   * ⭐⭐ 最新一条的**精确时间** —— 搜索水位用。
+   * ⚠️ 不能用 `dateSpan.newest`,那个是按天聚合的(实测踩过:
+   * 20:38:55 被存成 00:00:00,下次窗口平白多退一整天)。
+   */
+  const newestAt = list
+    .map((t) => t.createdAt).filter(Boolean)
+    .reduce<string | undefined>(
+      (max, d) => (!max || String(d) > max ? String(d) : max), undefined,
+    );
+
   return {
     url, ok: problems.length === 0, problems,
-    rounds, payloads, tweets: list, dateSpan, stopReason, trace,
+    rounds, payloads, tweets: list, dateSpan, newestAt, stopReason, trace,
     unparsedSamples, seenOps,
     people: [...people.values()],
     paging,

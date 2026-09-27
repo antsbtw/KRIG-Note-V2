@@ -19,7 +19,7 @@ import type { FlowStepOutcome } from '@shared/types/flow-recipe-types';
 import { autoCollect } from './x-auto-collect';
 import { runJudgeBatch, getJudgeConfig } from './x-ai-judge';
 import { planReplyBatch } from './x-timeline-handlers';
-import { prefetchReplyContext } from './x-prefetch-context';
+import { prefetchReplyContext, BIO_GIVE_UP_AFTER } from './x-prefetch-context';
 /**
  * ⭐ 搜索水位 —— 按搜索词记「采到的最新一条是什么时候发的」。
  * ⚠️ **读在 goto、写在 collect**:只有采完才知道最新一条是什么时候。
@@ -150,7 +150,10 @@ export function makeXFlowCapabilities(): FlowCapabilities {
        * 索引到最近几小时的推。记跑的时间会让中间那段**永远漏掉**,
        * 而且漏了在数据里看不出来。
        *
-       * ⚠️ `dateSpan.newest` 是采集本来就算好的,不另造一份。
+       * ⚠️⚠️ 用 `newestAt`(**精确时间**)不是 `dateSpan.newest`(**按天聚合**)——
+       * 2026-09-27 实测踩到:真实最新一条 20:38:55 被存成 00:00:00,
+       * 下次算窗口会平白多退一整天(现象是「每次都重采一大段」,
+       * 而且**看着像正常工作**)。
        * ⚠️ 没采到东西(newest 为空)时 `bumpSearchWatermark` 只记「跑过一次」,
        * **不动水位** —— 推到「现在」会让下次跳过这段,而这段其实没采到。
        * ⚠️ 推水位失败不影响本次采集(内部已 catch + warn)。
@@ -158,7 +161,7 @@ export function makeXFlowCapabilities(): FlowCapabilities {
       const qRaw = (params.params as Record<string, string> | undefined)?.q;
       if (page === 'x.search' && qRaw) {
         await bumpSearchWatermark(
-          normalizeSearchQuery(qRaw), r.dateSpan?.newest, { seen: r.saved },
+          normalizeSearchQuery(qRaw), r.newestAt, { seen: r.saved },
         );
       }
 
@@ -169,7 +172,7 @@ export function makeXFlowCapabilities(): FlowCapabilities {
       return {
         ok: true, produced: r.saved,
         note: `采 ${r.tweets} 条 / 入库 ${r.saved} 条 · ${r.stopReason}`
-          + (r.dateSpan?.newest ? ` · 最新一条 ${r.dateSpan.newest.slice(0, 16)}` : ''),
+          + (r.newestAt ? ` · 最新一条 ${r.newestAt.slice(0, 16)}` : ''),
         elapsedMs: Date.now() - t0,
       };
     },
@@ -257,7 +260,17 @@ export function makeXFlowCapabilities(): FlowCapabilities {
         error: ok ? undefined
           : `连续采不到 —— 疑似采集机制坏了(${r.errors.slice(0, 2).join('; ')})`,
         note: `备料 ${r.scanned} 条:bio ${r.bio.cached} 条库里有/`
-          + `${r.bio.fetched} 条现采(共 ${r.bio.authors} 人)· `
+          + `${r.bio.fetched} 条现采(共 ${r.bio.authors} 人)`
+          /**
+           * ⚠️ **「跳过」必须说出来** —— 它和「试了没成」是两回事。
+           * 不说的话「备齐了」就是谎报:人以为 192 个都试过了,
+           * 实际只试了 5 个就放弃了剩下 187 个。
+           */
+          + (r.bio.gaveUp
+            ? `⚠️ **连续 ${BIO_GIVE_UP_AFTER} 个采不到,已放弃本趟 bio**`
+              + `(还剩 ${r.bio.skipped} 人没试)`
+            : '')
+          + ' · '
           + `上文 ${r.context.cached} 条库里有/${r.context.fetched} 条现采`
           + (r.context.fetched > 0 ? `(平均 ${r.context.avgDepth.toFixed(1)} 条/楼)` : '')
           + (r.context.failed > 0 ? ` · ⚠️ ${r.context.failed} 条没抓到` : ''),

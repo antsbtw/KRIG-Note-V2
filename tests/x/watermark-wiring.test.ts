@@ -79,7 +79,17 @@ describe('⭐⭐ 水位:读在 goto、写在 collect', () => {
     const body = strip(capBody('collect', 'judge'));
     const i = body.indexOf('bumpSearchWatermark(');
     const call = body.slice(i, body.indexOf(');', i));
-    expect(call, '推的不是采到的最新一条推的时间').toMatch(/dateSpan\?\.newest/);
+    expect(call, '推的不是采到的最新一条推的时间').toMatch(/r\.newestAt/);
+    /**
+     * ⚠️⚠️ **不许用 `dateSpan.newest`** —— 2026-09-27 真机踩到:
+     * 那个字段是**按天聚合**的(`YYYY-MM-DD`),拿去当时间戳会把
+     * 「20:38:55」存成「00:00:00」→ 下次窗口平白多退一整天。
+     * ⭐ 现象是「每次都重采一大段」,而且**看着像正常工作** —— 极难发现。
+     */
+    expect(
+      /dateSpan/.test(call),
+      '又用了按天聚合的 dateSpan —— 时间会被截断到 00:00:00',
+    ).toBe(false);
     expect(
       /Date\.now\(\)|new Date\(\)/.test(call),
       '推的是「现在」—— 那是跑的时间不是推文时间',
