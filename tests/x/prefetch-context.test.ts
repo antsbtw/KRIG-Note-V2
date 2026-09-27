@@ -256,3 +256,61 @@ describe('⭐⭐ 备料在配方里标了 readsFromStore', () => {
     ).toBe(false);
   });
 });
+
+/**
+ * ⭐⭐ **限额只加在「产生对外动作」那一刻** —— 用户 2026-09-26 订正两次:
+ *
+ * > 「我们只需要限定自动回复的地方，你每个地方都限定是什么意思呢？」
+ * > 「拟回复都不应该限定，因为这是一个处理过程，
+ * >   真正担心封控和回复质量是真正回复的时候做限定就够了。」
+ *
+ * ⚠️ 我当初在采集/判断/备料/拟回复**四处**都填了 10 ——
+ * 而这四步全是只读或只写自己的库，**不产生任何对外影响**。
+ * 该限的那一步（自动填入 X 回复框）反而还没写。
+ */
+describe('⭐⭐ 内部处理步骤不设安全限额', () => {
+  const REC = read('src/platform/main/x/x-flow-recipes.ts');
+  /** 切出某一步的对象体 —— ⚠️ 别整文件 toMatch（同名 token 会假绿） */
+  const stepOf = (id: string): string => {
+    const i = REC.indexOf(`id: '${id}'`);
+    expect(i, `配方里找不到步骤 ${id}`).toBeGreaterThan(0);
+    const next = REC.indexOf('    {\n      id:', i);
+    const body = REC.slice(i, next > i ? next : REC.length);
+    expect(body.length, `${id} 的 slice 空转`).toBeGreaterThan(30);
+    return body;
+  };
+
+  it('⭐⭐ 采集不写 pageBudget（翻到 X 说没有为止）', () => {
+    expect(
+      /pageBudget:/.test(stepOf('collect')),
+      '采集又被限页数了 —— 它只写自己的库，不产生对外动作',
+    ).toBe(false);
+  });
+
+  it('⭐⭐ 判断不写 batchSize（沿用实测出来的默认 25）', () => {
+    expect(
+      /batchSize:/.test(stepOf('judge')),
+      '判断又被填了批量 —— 默认 25 是按「开销摊薄 vs 超时重来」实测权衡的，别覆盖',
+    ).toBe(false);
+  });
+
+  it('⚠️ 备料/拟回复的 limit 是**分批批量**，不能小于默认值', () => {
+    /**
+     * ⚠️ 这两处**留空反而更小**:
+     * 备料默认 20、拟回复默认 30，而库里各有 1080 / 1109 条待处理。
+     * ⭐ 所以要显式写大，写的是「一趟处理多少」不是「最多允许多少」。
+     */
+    const pre = stepOf('prefetch').match(/limit:\s*(\d+)/)?.[1];
+    const plan = stepOf('planReply').match(/limit:\s*(\d+)/)?.[1];
+    expect(Number(pre), '备料 limit 比默认 20 还小 —— 留空都比这强').toBeGreaterThan(20);
+    expect(Number(plan), '拟回复 limit 比默认 30 还小 —— 留空都比这强').toBeGreaterThan(30);
+  });
+
+  it('⭐ 送 Claude 的 limit 是**技术限制**不是安全闸（要有说明）', () => {
+    /** ⚠️ 整批打包发，条数太多会超单条输入上限 —— 与安全限额是两回事 */
+    expect(
+      stepOf('askAdvice'),
+      '保留了 limit 却没说清为什么 —— 会被当成又一个「随手填的谨慎数」',
+    ).toMatch(/技术限制/);
+  });
+});
