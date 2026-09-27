@@ -188,7 +188,15 @@ export async function runFlow(
            * 是「没东西可做」。四种合成一个 skipped 的话,
            * 回看时「这一步为什么没跑」又要靠猜。
            */
-          : noCandidatesFrom
+          /**
+           * ⚠️⚠️ **自己去库里取输入的步骤不受这条闸门约束**(2026-09-26 真机修)。
+           *
+           * 实跑撞到:判断判了 10 条、0 条值得回 → 备料整步被跳过,
+           * 而备料 `queryInbox` 自己去库里取,当时库里有 **1075 条**
+           * worth 候选等着补 bio/上文,被一起放弃了。
+           * ⭐ 「没有新候选」该挡的是**拟回复**,不该挡**备料**。
+           */
+          : (noCandidatesFrom && !step.readsFromStore)
             ? `上一步「${noCandidatesFrom}」没有产出候选,本步无事可做`
             : undefined;
 

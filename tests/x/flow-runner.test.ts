@@ -32,6 +32,14 @@ function caps(over: Partial<FlowCapabilities> = {}): FlowCapabilities {
     goto: vi.fn(async () => ok()),
     collect: vi.fn(async () => ok(10)),
     judge: vi.fn(async () => ok(5)),
+    /**
+     * ⚠️ 2026-09-26 补:新增能力要同步加进这个假 caps ——
+     * 漏了的话 `c.prefetch` 是 undefined,断言会报
+     * 「undefined is not a spy」而不是「这一步没被调用」,
+     * 排查方向完全被带偏(本仓「守卫写死的清单不会自己长」同形)。
+     */
+    prefetch: vi.fn(async () => ok(3)),
+    askAdvice: vi.fn(async () => ok(1)),
     planReply: vi.fn(async () => ok(2)),
     ...over,
   };
@@ -625,5 +633,80 @@ describe('⭐⭐ step_type 登记表不许兜底', () => {
     await runFlow(recipe(FOUR), caps());
     const types = vi.mocked(recordStep).mock.calls.map((c) => c[0].stepType);
     expect(types).toEqual(['act', 'fetch', 'judge', 'judge']);
+  });
+});
+
+/**
+ * ⭐⭐ **自己去库里取输入的步骤，不该被上一步的「没候选」挡住**。
+ *
+ * ── 2026-09-26 真机跑出来的 ──
+ * 判断步判了 10 条、**0 条值得回** → 备料整步被跳过。
+ * 而备料 `queryInbox` **自己去库里取**，当时库里有 **1075 条** worth 候选
+ * 等着补 bio 和上文，却因为「这一批没判出新候选」被一起放弃了。
+ *
+ * ⭐ 「没有新候选」该挡的是**拟回复**（没新的当然没什么可拟），
+ * 不该挡**备料**（它的输入是库里存量，与这一批判没判出东西无关）。
+ */
+describe('⭐⭐ readsFromStore:自己取输入的步骤不受闸门约束', () => {
+  const judged0 = (): FlowStepOutcome => ({
+    ok: true, produced: 10, hasCandidates: false,
+    note: '判了 10/10 条，其中值得回复 0 条', elapsedMs: 1,
+  });
+
+  /** 判断 → 备料(自取) → 拟回复(吃上一步) */
+  const THREE: FlowRecipe['steps'] = [
+    { id: 'judge', kind: 'judge' },
+    { id: 'prefetch', kind: 'prefetch', readsFromStore: true },
+    { id: 'planReply', kind: 'planReply' },
+  ];
+
+  it('⭐⭐ 判断说没候选，备料**照样跑**（它自己去库里取）', async () => {
+    const c = caps({ judge: vi.fn(async () => judged0()) });
+    const r = await runFlow(recipe(THREE), c);
+    /** ⚠️ 行为断言:光看状态不够，要确认那个函数**真的被调了** */
+    expect(
+      c.prefetch,
+      '备料被上一步的「没候选」挡住了 —— 库里 1075 条待备料的会被一起放弃',
+    ).toHaveBeenCalled();
+    expect(r.steps[1].status).toBe('ok');
+  });
+
+  it('⭐⭐ 同一趟里，拟回复**仍然被挡**（它吃上一步的产出）', async () => {
+    /**
+     * ⭐ 这条是本次修复的**核心证据**:
+     * 同一次运行里两步待遇必须不同 —— 否则要么全挡(老 bug)、
+     * 要么全不挡(把闸门整个废掉，又回到空转 125 秒)。
+     */
+    const c = caps({ judge: vi.fn(async () => judged0()) });
+    const r = await runFlow(recipe(THREE), c);
+    expect(c.planReply, '没新候选还去拟回复 —— 又会空转').not.toHaveBeenCalled();
+    expect(r.steps[2].status).toBe('skipped');
+  });
+
+  it('⚠️ 默认不标 = 照旧被挡（默认值要偏安全的一侧）', async () => {
+    /**
+     * ⚠️ 漏标的现象是「多跑一步」，错标的现象是「明明没输入还硬跑」——
+     * 后者更糟，所以默认 false。
+     */
+    const c = caps({ judge: vi.fn(async () => judged0()) });
+    await runFlow(recipe([
+      { id: 'judge', kind: 'judge' },
+      { id: 'prefetch', kind: 'prefetch' },   // 没标 readsFromStore
+    ]), c);
+    expect(c.prefetch, '没标却照跑 —— 默认值偏到了危险那一侧').not.toHaveBeenCalled();
+  });
+
+  it('⚠️ 前一步**失败**时，自取的步骤照样要停', async () => {
+    /**
+     * ⚠️ 「没有候选」与「上一步炸了」是两回事:
+     * 前者是正常结果，后者说明链路坏了 —— 坏了就该停，
+     * 不能因为「我自己去库里取」就无视故障。
+     */
+    const c = caps({ judge: vi.fn(async () => fail('模型没响应')) });
+    await runFlow(recipe(THREE), c);
+    expect(
+      c.prefetch,
+      '上一步失败了还往下跑 —— 故障会被一路掩盖',
+    ).not.toHaveBeenCalled();
   });
 });

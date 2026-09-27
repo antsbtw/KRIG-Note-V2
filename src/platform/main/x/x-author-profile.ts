@@ -125,6 +125,22 @@ export async function harvestAuthorProfile(
   // 而那个 detach 会在「本函数先 attach、别人后共用」时把别人一起掐掉
   // (见 x-net-capture.ts 的顺序依赖说明)。现在业务方**没有 detach 这个动作**。
   let channelFault: string | null = null;
+  /**
+   * 🔍 **一次性诊断**(2026-09-26,查「bio 采不到」)——
+   * 现在的报错只说「没截到 UserByScreenName」,**没说截到了什么**。
+   * 两种成因修法完全不同,而现在分不出来:
+   *  · 一条载荷都没看见 → 通道/导航的问题
+   *  · 看见别的但没有 UserByScreenName → X 改了接口名(像 followers 那次)
+   * ⚠️ 定位后删掉。
+   */
+  const seenOps: string[] = [];
+  const diagUnsub = captureXPayloads(wc, {
+    urlIncludes: ['/i/api/graphql/'],
+    onPayload: ({ url }) => {
+      const op = url.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? url.slice(0, 60);
+      if (!seenOps.includes(op)) seenOps.push(op);
+    },
+  });
   const unsubscribe = captureXPayloads(wc, {
     urlIncludes: ['/i/api/graphql/', 'UserByScreenName'],
     onPayload: ({ body }) => {
@@ -147,14 +163,22 @@ export async function harvestAuthorProfile(
   } finally {
     // ⭐ 只退订,不 detach —— 通道由底座独占,别的模块不受影响
     unsubscribe();
+    diagUnsub();
   }
+  /** 🔍 诊断:这 12 秒里到底看见了哪些 GraphQL 接口 */
+  console.log(`[🔍profile] @${h} 期间看见的接口(${seenOps.length}):`,
+    seenOps.join(', ') || '(一条都没有)');
 
   if (!profile) {
     return {
       error: channelFault
         // ⚠️ 通道坏了和"没截到"是两回事,旧实现分不出来 —— 现在分得出
         ? `未截获 @${h} 的账号载荷:CDP 通道故障 —— ${channelFault}`
-        : `未截获 @${h} 的账号载荷(${budgetMs}ms 内)—— 可能未登录、页面没加载完、或该账号不存在`,
+        /** 🔍 把看见的接口一并报出来 —— 「没截到」与「截到了别的」是两回事 */
+        : `未截获 @${h} 的账号载荷(${budgetMs}ms 内)`
+          + (seenOps.length > 0
+            ? ` —— 期间看见了 ${seenOps.length} 个接口:${seenOps.slice(0, 6).join('、')}`
+            : ' —— **期间一条 GraphQL 载荷都没看见**(导航或通道的问题)'),
     };
   }
   // 关系视角一并落库 —— 载荷自带、零额外请求,但此前只在内存里没存

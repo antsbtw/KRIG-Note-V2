@@ -224,3 +224,35 @@ describe('⭐⭐ 备料只有一份实现(新旧不并存)', () => {
       .toMatch(/filterByWs: true/);
   });
 });
+
+/**
+ * ⭐⭐ **配方里要真的标上** —— 2026-09-26 真机修。
+ * ⚠️ 契约改了、runner 改了，配方漏标的话**一切照旧**:
+ * 判断没判出 worth → 备料照样被跳过，库里存量候选照样被放弃。
+ */
+describe('⭐⭐ 备料在配方里标了 readsFromStore', () => {
+  it('⭐⭐ 默认配方的 prefetch 那步标了', () => {
+    const rec = read('src/platform/main/x/x-flow-recipes.ts');
+    const i = rec.indexOf("kind: 'prefetch'");
+    expect(i, '默认配方里没有 prefetch 这一步').toBeGreaterThan(0);
+    /** ⚠️ 切到这一步的对象里再断言，别整文件 toMatch（同名 token 会假绿） */
+    const blk = rec.slice(i, rec.indexOf("id: 'askAdvice'", i));
+    expect(blk.length, 'slice 空转').toBeGreaterThan(50);
+    expect(
+      blk,
+      '备料没标 readsFromStore —— 判断没判出 worth 时它还是会被跳过，\n'
+      + '而库里 1075 条待备料的候选会被一起放弃',
+    ).toMatch(/readsFromStore: true/);
+  });
+
+  it('⚠️ 拟回复**不该**标（它吃上一步的产出）', () => {
+    const rec = read('src/platform/main/x/x-flow-recipes.ts');
+    const i = rec.indexOf("kind: 'planReply'");
+    expect(i, '找不到 planReply 步骤').toBeGreaterThan(0);
+    const blk = rec.slice(i, rec.length);
+    expect(
+      /readsFromStore/.test(blk),
+      '拟回复也标了自取 —— 没新候选时又会空转（回到 125 秒那个 bug）',
+    ).toBe(false);
+  });
+});
