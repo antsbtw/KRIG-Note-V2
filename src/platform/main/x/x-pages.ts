@@ -37,7 +37,11 @@ export const DEFAULT_SEARCH_DAYS = 2;
  * ⭐ 「清单不会自己长」在本仓栽过多次 —— 放在**页面表这边**(真源),
  *   加可选参数时与 PAGE_PARAMS 一起改,面板不抄一份。
  */
-export const OPTIONAL_PAGE_PARAMS: readonly string[] = ['f', 'days'];
+/**
+ * ⚠️ `since` 要登记在这里,否则**参数校验会把它当未知参数丢掉** ——
+ * 现象是「水位算出来了但窗口没变」,而且不报错。
+ */
+export const OPTIONAL_PAGE_PARAMS: readonly string[] = ['f', 'days', 'since'];
 
 const X_PROFILE = X_SERVICE_PROFILES[0];
 
@@ -163,9 +167,22 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
      *
      * ⭐ 逃生口:`days` 填 0 = 搜全部历史;查询里自带 since:/until: 则原样放行。
      */
+    /**
+     * ⭐⭐ **水位优先**(用户 2026-09-27:「按上一次采集时间倒推 12 小时」)。
+     *
+     * ⚠️ 本函数是**同步**的,而水位要查库 —— 所以由**调用方**先查好、
+     * 用 `since` 参数传进来。这里只负责用,不负责查。
+     * ⭐ 这样解析器保持纯函数(可单测、不碰库),水位逻辑集中在一处。
+     *
+     * ⚠️ `since` 一旦给了就**盖过 days** —— 两个都算的话会互相打架,
+     * 而打架的表现是「窗口比预期窄」,**在数据里看不出来**。
+     */
+    const explicitSince = typeof p.since === 'string' ? p.since.trim() : '';
     const days = p.days !== undefined && p.days !== ''
       ? Number(p.days) : DEFAULT_SEARCH_DAYS;
-    const q = withSinceWindow(normalized, Number.isFinite(days) ? days : DEFAULT_SEARCH_DAYS);
+    const q = explicitSince
+      ? `${normalized} since:${explicitSince}`
+      : withSinceWindow(normalized, Number.isFinite(days) ? days : DEFAULT_SEARCH_DAYS);
     const f = p.f === 'top' ? 'top' : 'live';
     return {
       url: `${X_PROFILE.baseUrl}/search?q=${encodeURIComponent(q)}&f=${f}`,

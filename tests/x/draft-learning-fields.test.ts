@@ -31,7 +31,8 @@ describe('⭐⭐ 加字段要登记四处（漏一处就静默丢失）', () => 
   it('⭐⭐ schema 里四个字段都定义了', () => {
     const i = SCHEMA.indexOf('X_SCHEMA_1_2_11');
     expect(i, '找不到 1.2.11 的 DDL').toBeGreaterThan(0);
-    const ddl = SCHEMA.slice(i, SCHEMA.indexOf('x_migration_1_2_11'));
+    /** ⚠️ 切到本段 DDL 结尾，别跨到后面新加的 migration(见下条注释) */
+    const ddl = SCHEMA.slice(i, SCHEMA.indexOf('`;', i));
     expect(ddl.length, 'slice 空转').toBeGreaterThan(100);
     for (const f of LEARNING_FIELDS) {
       expect(ddl, `schema 里没定义 ${f}`).toContain(f);
@@ -41,7 +42,14 @@ describe('⭐⭐ 加字段要登记四处（漏一处就静默丢失）', () => 
   it('⭐⭐ 存量行不能变非法：全部 option<>', () => {
     /** ⚠️ 库里已有 9 条草稿，加成非 option 会让它们整批读不出来 */
     const i = SCHEMA.indexOf('X_SCHEMA_1_2_11');
-    const ddl = SCHEMA.slice(i, SCHEMA.indexOf('x_migration_1_2_11'));
+    /**
+     * ⚠️ 2026-09-27 改锚点:原来切到 `x_migration_1_2_11`，
+     * 而新加的 migration 常插在**两者之间** → slice 会吃进别的表的 DDL，
+     * 那些表本来就不该全是 option → **假红**。
+     * ⭐ 切到这段 DDL 自己的反引号结尾为止，不跨到别的定义。
+     */
+    const ddl = SCHEMA.slice(i, SCHEMA.indexOf('`;', i));
+    expect(ddl, 'slice 越界或空转').toContain('x_reply_draft');
     const defs = ddl.split('\n').filter((l) => l.includes('DEFINE FIELD'));
     expect(defs.length, '一条字段定义都没找到').toBeGreaterThan(3);
     for (const d of defs) {

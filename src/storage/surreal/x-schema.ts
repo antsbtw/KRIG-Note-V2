@@ -1628,6 +1628,63 @@ DEFINE FIELD IF NOT EXISTS auto_reply_at ON search_recipes TYPE option<datetime>
 DEFINE FIELD IF NOT EXISTS auto          ON x_reply_draft TYPE option<bool>;
 `;
 
+/**
+ * 1.2.13 —— 搜索水位:按**搜索词**记「采到最新一条是什么时候发的」(2026-09-27)
+ *
+ * ── 用户拍板 ──
+ * > 「应该为上一次采集时间是什么时候，倒推12小时好了。
+ * >   这样比较准确，而不重复采集数据」
+ * > 「针对提取的配方来计算时间，全局，无论从哪个 ws 都应该一样，
+ * >   取下来是共用的，对吗？」→ 对,推文本来就是全局的(同一 tweet_id 只有一行)
+ *
+ * ── ⚠️ 为什么键是**搜索词**不是配方 id ──
+ *
+ * 查证:`search_recipe` **只在配方调度那条路赋值**(x-timeline-scan),
+ * 而编排/手填走的是 `autoCollect`,**从不写这个字段** ——
+ * ws-2 那 302 条编排采的推 `search_recipe` 全是 NONE。
+ * ⭐ 按配方记的话,编排这条路**永远记不上**,而我们现在跑的全是编排。
+ * 搜索词是**三条路都有**的东西,故用它当键。
+ * ⚠️ 换一个词 = 换一个口径 = 从头采,这是对的不是缺陷。
+ *
+ * ── ⚠️ 为什么不复用 `x_collect_cursor` ──
+ *
+ * 那张表的 `oldest_at` 是「**往回挖到哪了**」(回复关系采集在用),
+ * 方向与本表相反(本表要的是「**采到的最新一条**」)。
+ * 混用会让两边互相覆盖,而那种错在数据里看不出来。
+ *
+ * ── ⚠️ 为什么记「推文时间」不是「跑的时间」 ──
+ *
+ * X 的**搜索索引有延迟**,刚跑完可能还没索引到最近几小时的推。
+ * 记跑的时间 → 下次从那里往后采 → **中间那段永远漏掉**。
+ * ⭐ 记「这次采到的最新一条是什么时候发的」,下次从它往前退一段重叠,
+ * 漏掉的自然会被重新覆盖(重复的靠 tweet_id 去重,成本只是多滚几屏)。
+ *
+ * ⚠️ 全局单行/词:**不带 ws_id**。推文是全局的(同一 tweet_id 一行),
+ * 按 ws 分会让 ws-2 把 ws-1 采过的时间段重采一遍 —— 纯浪费。
+ */
+const X_SCHEMA_1_2_13 = `
+DEFINE TABLE IF NOT EXISTS x_search_watermark SCHEMAFULL;
+-- 归一化后的搜索词 —— ⭐ 三条采集路径(配方/编排/手填)都有它
+DEFINE FIELD IF NOT EXISTS query        ON x_search_watermark TYPE string ASSERT $value != '';
+-- ⭐⭐ 这个词下**采到的最新一条推是什么时候发的**(不是跑的时间)
+DEFINE FIELD IF NOT EXISTS newest_at    ON x_search_watermark TYPE datetime;
+-- 上次跑的时间 —— 只做展示/排查,**不参与算窗口**
+DEFINE FIELD IF NOT EXISTS last_run_at  ON x_search_watermark TYPE option<datetime>;
+-- 这个词累计采过多少条 —— 「这个口径有没有量」的判据
+DEFINE FIELD IF NOT EXISTS total_seen   ON x_search_watermark TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS updated_at   ON x_search_watermark TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_watermark_query ON x_search_watermark FIELDS query UNIQUE;
+`;
+
+export async function x_migration_1_2_13(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_13);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.13', appliedAt = $now,
+      description = 'x_search_watermark (per-query high-water mark: newest tweet seen, global across ws)'`,
+    { rid: new RecordId('schema_version', '1.2.13'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_12(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_12);
   await db.query(
