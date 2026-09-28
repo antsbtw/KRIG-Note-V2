@@ -24,6 +24,14 @@ vi.mock('electron', () => ({
       return {
         webRequest: {
           onBeforeRequest: (fn: (d: unknown, cb: unknown) => void) => { listeners.before = fn; },
+          /**
+           * ⚠️ 2026-09-27 补:接线新挂了 `onSendHeaders`(唯一拿得到请求头的钩子)。
+           * 假 session 漏了它 → `not a function` → **8 条全红**,
+           * 而且报的是 TypeError 不是「行为不对」,排查方向会被带偏。
+           * ⭐ 这正是「假的那一半也要跟着长」——
+           * 同 feedback-guard-hardcoded-list-never-grows。
+           */
+          onSendHeaders: (fn: (d: unknown) => void) => { listeners.sendHeaders = fn; },
           onCompleted: (fn: (d: unknown) => void) => { listeners.completed = fn; },
         },
       };

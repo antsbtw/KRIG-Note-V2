@@ -80,6 +80,31 @@ export function wireWebRequestSide(bus: NetworkEventBus, partition: string): voi
     callback({});
   });
 
+  /**
+   * ⭐⭐ **请求头只有这一个钩子拿得到**(2026-09-27 补)。
+   *
+   * ── 为什么非补不可 ──
+   * `NetworkRecord.requestHeaders` 这个字段**声明了但从没人写** ——
+   * 又一例「类型有、字段有、生产端零写入」。
+   * 而 X 的游标翻页要**复用 X 刚发过的那条请求**(带 authorization /
+   * x-csrf-token 原样重发),没有请求头就只能自己拼鉴权 —— 那条路已被否决。
+   *
+   * ⚠️ `onBeforeRequest` **拿不到请求头**(Electron 的 details 里没有),
+   * 所以上面那个钩子只能填 method。头要等到 `onSendHeaders`。
+   *
+   * ⭐ 再调一次 `recordRequestStart` 是安全的:它按 `requestId` 去重
+   * (bus.ts 里 `filter(r => r.requestId !== record.requestId)` 再 append),
+   * 所以这是**补齐同一条记录**,不会变成两条。
+   */
+  sess.webRequest.onSendHeaders((details) => {
+    try {
+      recordHeaders(bus, details);
+    } catch (err) {
+      /** ⚠️ 留痕出错绝不能影响真实请求 —— 这个钩子没有 callback,更要自己兜住 */
+      console.warn('[web.net] webRequest 请求头记录失败:', err);
+    }
+  });
+
   sess.webRequest.onCompleted((details) => {
     try {
       recordDone(bus, details);
@@ -114,6 +139,31 @@ function recordStart(
     method: details.method,
     resourceType: details.resourceType?.toLowerCase(),
     startedAt: new Date(details.timestamp).toISOString(),
+  });
+}
+
+/**
+ * 补上请求头 —— ⚠️ 与 `recordStart` **是同一条记录**,靠 requestId 合并。
+ *
+ * ⚠️ 只在**映射得到已登记页面**时记,与 recordStart 同口径:
+ * 猜一个 pageId 会把别的页面的流量关联过来,而那种错在数据里看不出来。
+ */
+function recordHeaders(
+  bus: NetworkEventBus,
+  details: Electron.OnSendHeadersListenerDetails,
+): void {
+  const pageId = pageOf(details.webContentsId);
+  if (!pageId) return;
+
+  bus.recordRequestStart({
+    requestId: String(details.id),
+    pageId,
+    url: details.url,
+    method: details.method,
+    resourceType: details.resourceType?.toLowerCase(),
+    startedAt: new Date(details.timestamp).toISOString(),
+    /** ⭐ 这一趟的全部价值就在这一行 */
+    requestHeaders: details.requestHeaders as Readonly<Record<string, string>>,
   });
 }
 

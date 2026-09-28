@@ -111,6 +111,19 @@ export type XPayload = {
   readonly url: string;
   readonly requestId: string;
   readonly body: string;
+  /**
+   * ⭐⭐ **发出去的那条请求本身**(method + 请求头)。
+   *
+   * ⚠️ 游标翻页要**复用 X 刚发过的请求**、只换 cursor ——
+   * 不自己拼 queryId/features(会随 X 版本变),也不复刻鉴权
+   * (authorization / x-csrf-token 原样带走)。没有这两样就做不到。
+   *
+   * ⚠️ 可能为空:`requestHeaders` 要 `onSendHeaders` 才有,
+   * 而那是**另一个钩子**(`onBeforeRequest` 拿不到头)。
+   * 拿不到就是拿不到,调用方据此决定要不要翻页 —— **绝不编一个空头**。
+   */
+  readonly method?: string;
+  readonly requestHeaders?: Readonly<Record<string, string>>;
 };
 
 export type XCaptureOptions = {
@@ -184,6 +197,9 @@ export function captureXPayloads(
       url: record.url,
       requestId: record.requestId,
       body: new TextDecoder().decode(body.value),
+      /** ⭐ 请求本身一并给出 —— 游标翻页要复用它 */
+      method: record.method,
+      requestHeaders: record.requestHeaders,
     });
   });
 

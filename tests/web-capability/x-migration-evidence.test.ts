@@ -48,7 +48,21 @@ describe('⭐⭐ 已迁模块:零 debugger,走 web.net', () => {
     // 旧实现两种情况给同一句错误话术,排查时分不出来
     const code = src('x-author-profile.ts');
     expect(code).toMatch(/通道故障/);
-    expect(code).toMatch(/可能未登录、页面没加载完/);
+    /**
+     * ⚠️ 2026-09-27 改:原来钉的是**那句话的字面量**
+     * (「可能未登录、页面没加载完」)。而 2026-09-26 加诊断后，
+     * 那句猜测性的话被换成了**实据**(「期间看见了 N 个接口」/
+     * 「一条载荷都没看见」)—— 比原来更能区分成因，守卫却因此假红。
+     * ⭐ 改成钉**行为**:两条分支给的话必须不同，而不是钉某一句的措辞。
+     */
+    const i = code.indexOf('if (!profile)');
+    expect(i, '找不到「没截到」的分支').toBeGreaterThan(0);
+    const branch = code.slice(i, code.indexOf('await saveAuthorCounts', i));
+    expect(branch.length, 'slice 空转').toBeGreaterThan(100);
+    expect(branch, '通道坏了与没截到给的是同一句话 —— 排查时分不出来')
+      .toMatch(/channelFault[\s\S]{0,200}\?[\s\S]{0,400}:/);
+    expect(branch, '「没截到」那条没给出期间看见了什么 —— 分不出是没发请求还是接口改名')
+      .toMatch(/期间/);
   });
 
   it('⭐ notification-watch 通道聋了会告警(常驻监听最怕静默失聪)', () => {
