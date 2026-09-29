@@ -202,8 +202,7 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
               <span>{item.name}</span>
             </button>
           ))}
-          {/* ⭐ X 工作台(2026-09-15 重构中):采集/分析/回复的新面板。
-              ⚠️ 与 Inbox 并存 —— 收件箱/拟回复/标注还在旧面板,迁完才撤。 */}
+          {/* ⭐ X 工作台(2026-09-15 重构中):采集/分析/回复的新面板。 */}
           <button
             type="button"
             className="krig-social-view__tab krig-social-view__tab--inbox"
@@ -216,18 +215,8 @@ export function SocialView({ workspaceId, payload }: SocialViewProps) {
             <span>🛠</span>
             <span>工作台</span>
           </button>
-          <button
-            type="button"
-            className="krig-social-view__tab krig-social-view__tab--inbox"
-            onClick={() => {
-              const bus = workspaceManager.getBus(workspaceId);
-              bus?.slot.openRight('x-inbox-view');
-            }}
-            title="X Inbox — 打开智能筛选面板"
-          >
-            <span>📥</span>
-            <span>Inbox</span>
-          </button>
+          {/** ⚠️ Inbox 入口已随 x-inbox 视图一并移除(2026-09-29 用户定)——
+            * 连按钮一起删,留一个点了没反应的按钮比没有按钮更糟(本仓踩过多次)。 */}
           {/* ⭐ 能力控制台(dev-only,2026-09-15):逐个原子能力单独跑、看原样返回值。
               ⚠️ Vite 在 prod build 会把整段 dead-code 掉 —— 用户看不到这个按钮。 */}
           {import.meta.env.DEV && (

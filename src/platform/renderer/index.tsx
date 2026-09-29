@@ -90,7 +90,8 @@ import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab �
 import '@views/x';      // X 集成:注册 X 提取命令
 import '@views/social'; // Social View self-register(NavSide tab 💬 order=6;含 X 平台)
 import '@views/mail';   // Mail View self-register(NavSide tab 📧 order=7;网页版邮箱)
-import '@views/x-inbox'; // X Inbox View self-register(right slot，从 SocialView tabbar 触发)
+/** ⚠️ x-inbox 视图已移除(2026-09-29 用户定:先删 Inbox)——
+ * 底层能力(采集/判断/备料)不在这里,工作台那条编排链不受影响。 */
 import '@views/x-workbench'; // X 工作台 self-register(重构中的新面板;旧面板并存直到迁移完毕)
 import '@views/web-console'; // ⭐ 能力控制台 self-register(dev-only;index.ts 内部按 import.meta.env.DEV 决定注不注册)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)

@@ -98,9 +98,16 @@ describe('⭐⭐ 进得去:注册 → import → 入口', () => {
       .toContain(`openRight('${VIEW_ID}')`);
   });
 
-  it('⭐ 入口与另外两个按钮并存(工作台 / Inbox 不许被挤掉)', () => {
+  it('⭐ 入口与工作台按钮并存(不许互相挤掉)', () => {
+    /**
+     * ⚠️ 2026-09-29:Inbox 那条已删 —— x-inbox 视图整体移除(用户定)。
+     * ⭐ 规则没变(入口不许被挤掉),只是少了一个并存对象。
+     */
     expect(SOCIAL).toContain("openRight('x-workbench-view')");
-    expect(SOCIAL).toContain("openRight('x-inbox-view')");
+    expect(
+      SOCIAL.includes("openRight('x-inbox-view')"),
+      'x-inbox 已移除,不该再有指向它的入口(点了没反应的按钮比没有更糟)',
+    ).toBe(false);
   });
 
   it('⭐⭐ main 侧 handler 真的在 ipc-bus 里注册了', () => {

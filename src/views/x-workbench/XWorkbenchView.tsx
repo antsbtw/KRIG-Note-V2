@@ -7,7 +7,7 @@
  *  3. 底色线条与 X 统一(见 `x-workbench.css`,不改全局 token)
  *
  * ⚠️ **第一版只做三样**:任务列表 / 执行与进度 / 盯人对照。
- * 收件箱 5 切片、✎拟回复、人工标注**不搬** —— 顶栏「旧版」按钮切回去用。
+ * ⚠️ 2026-09-29:x-inbox 已整体移除(用户定),「旧版」按钮一并撤掉。
  * 用户:「保留一个旧界面的切换 button,这样就不会中断原来的一些操作」。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -395,10 +395,7 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
     setMsg('已停止');
   };
 
-  /** ⭐ 切回旧面板 —— 迁移完成前不中断原有操作(用户明确要求) */
-  const openLegacy = () => {
-    workspaceManager.getBus(workspaceId)?.slot.openRight('x-inbox-view');
-  };
+  /** ⚠️ 「旧版」按钮已随 x-inbox 一并移除(2026-09-29 用户定) */
 
   return (
     <div className="krig-xwb">
@@ -408,9 +405,6 @@ export function XWorkbenchView({ workspaceId }: { workspaceId: string }) {
         <div className="krig-xwb__spacer" />
         {msg && <span style={{ fontSize: 11, color: 'var(--xwb-dim)' }}>{msg}</span>}
         {/* ⚠️ 旧面板入口:收件箱/拟回复/标注还在那边,别断了日常操作 */}
-        <button type="button" className="krig-xwb__btn" onClick={openLegacy} title="收件箱 / 拟回复 / 标注仍在旧面板">
-          旧版
-        </button>
       </div>
 
       <div className="krig-xwb__body">
