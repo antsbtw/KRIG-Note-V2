@@ -45,6 +45,7 @@ import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 import { ToolbarFrame } from '../toolbar-frame/ToolbarFrame';
 import { setActiveSlot, useActiveSlot } from '../../workspace-state/active-slot';
 import { setSlotVisible } from '../../workspace-state/slot-visibility';
+import { workspaceManager } from '../../workspace-state/workspace-manager';
 import type { SlotBinding } from '../../workspace-state/workspace-state';
 import './slot-area.css';
 
@@ -140,6 +141,36 @@ export function SlotArea({ workspaceId, slotBinding, dividerRatio, onDividerChan
       setSlotVisible(workspaceId, entry.slice(0, idx), entry.slice(idx + 1) === '1');
     }
   }, [workspaceId, visibilitySignature]);
+
+  /**
+   * ⭐⭐ **指向已删视图的 slot 绑定要自愈**(2026-09-29)。
+   *
+   * ── 实况 ──
+   * X 模块推倒后,某个 ws 的 `slotBinding.right` 还存着 `x-workbench-view`,
+   * 而那个视图已经不存在 → 右栏渲染成
+   * 「Right: x-workbench-view (待 L5 component)」的**残影**。
+   *
+   * ⚠️ 那句兜底文案本来是给「view 还没实现」用的,
+   * 而这里是「**view 被删了**」—— 两者含义不同:
+   * 前者等实现,后者该**当场清掉**,否则用户面对一个永远不会好的占位符。
+   *
+   * ⭐ 这正是「装卸不干净」的症状:代码删了,**状态残留在别处**。
+   * 自愈放在渲染侧,因为只有这里同时知道「绑的是谁」和「它还在不在」。
+   */
+  useEffect(() => {
+    const views = viewTypeRegistry.getAll();
+    const gone = (id: string | null | undefined): boolean =>
+      !!id && views.find((v) => v.id === id) === undefined;
+    const bus = workspaceManager.getBus(workspaceId);
+    if (gone(slotBinding.right)) {
+      console.warn(`[slot] 右栏绑的 ${slotBinding.right} 已不存在 —— 自动清掉`);
+      bus?.slot.closeRight();
+    }
+    if (gone(slotBinding.left)) {
+      console.warn(`[slot] 左栏绑的 ${slotBinding.left} 已不存在 —— 自动清掉`);
+      bus?.slot.closeLeft();
+    }
+  }, [workspaceId, slotBinding.left, slotBinding.right]);
 
   // grid-template-columns 按 ratio 分配。
   // 用 fr 分配剩余空间(扣掉 4px divider 后),避免 `r*100% 4px (1-r)*100%`
