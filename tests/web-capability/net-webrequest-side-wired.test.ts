@@ -94,6 +94,23 @@ describe('⭐⭐ web.net:两侧都要接线,只有一侧等于整层不工作', 
     const consumers = FILES.filter((f) =>
       /captureXPayloads\s*\(/.test(strip(readFileSync(f, 'utf-8'))) &&
       !f.endsWith('x-net-capture.ts'));
-    expect(consumers.length, '消费者清单变了,重新确认受影响范围').toBeGreaterThan(0);
+    /**
+     * ⚠️ 2026-09-29 改:X 业务层整体移除后,`captureXPayloads` **暂时零消费者**。
+     * ⭐ 原来断言「> 0」是把「现在有几个用它」当成了不变量 ——
+     * 那不是规则,是当时的现状。
+     *
+     * ⭐ **真正的规则**:只要有人用它,webRequest 侧就必须接线
+     * (空着的话消费者会**静默超时**,而不是报错 —— 本仓 bio 采集
+     *  0/192 就是这么来的)。零消费者时这条自然成立。
+     */
+    if (consumers.length > 0) {
+      const wiring = strip(readFileSync(
+        'src/platform/main/web-capability/wiring/webrequest-side.ts', 'utf-8'));
+      expect(
+        wiring,
+        `有 ${consumers.length} 个模块靠 captureXPayloads 取数,`
+        + 'webRequest 侧却没挂监听 —— 它们会静默超时,不报错',
+      ).toMatch(/webRequest\.onBeforeRequest\(/);
+    }
   });
 });

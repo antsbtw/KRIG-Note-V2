@@ -35,18 +35,25 @@ describe('信号退出', () => {
 });
 
 describe('退出时停掉常驻 timer', () => {
-  it('before-quit 调 stopXSearchScheduler —— 否则 60s setInterval 吊住事件循环', () => {
+  /**
+   * ⚠️ 2026-09-29:X 业务层整体移除,原来钉的 `stopXSearchScheduler` 没了。
+   * ⭐ **规则没变** —— 常驻 timer 必须在 before-quit 有停止调用
+   * (记忆 project-graceful-shutdown)。改成钉**现存的那几个**。
+   * ⚠️ 新增常驻 timer 要加进这张表,否则它天然在视野外。
+   */
+  const RESIDENT_TIMERS = ['stopHealthWatch', 'stopTraceSweep', 'stopTraceLifecycle'];
+
+  it('⭐ 每个常驻 timer 都要在 before-quit 停掉', () => {
     const main = read('src/platform/main/index.ts');
-    expect(main).toContain('stopXSearchScheduler');
     const bq = main.slice(main.indexOf("app.on('before-quit'"));
-    expect(bq).toContain('stopXSearchScheduler()');
+    expect(bq.length, '找不到 before-quit 块').toBeGreaterThan(50);
+    for (const stop of RESIDENT_TIMERS) {
+      expect(main, `${stop} 没被 import/使用`).toContain(stop);
+      expect(bq, `before-quit 没调 ${stop}() —— setInterval 会吊住事件循环`)
+        .toContain(`${stop}()`);
+    }
   });
 
-  it('调度器本身提供 stopScheduler', () => {
-    const sched = read('src/platform/main/x/x-search-scheduler.ts');
-    expect(sched).toMatch(/export function stopScheduler/);
-    expect(sched).toMatch(/clearInterval\(schedulerTimer\)/);
-  });
 });
 
 describe('SurrealDB 重连不得拖住退出', () => {

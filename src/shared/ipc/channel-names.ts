@@ -402,7 +402,8 @@ export const IPC_CHANNELS = {
   // 执行:停止正在跑的采集(协作式 —— 循环到下一个检查点自己退出,已采到的照常入库+留痕)
   WEBC_STOP_COLLECT: 'webc:stop-collect',
   // 执行:跑一份编排档(四步串起来,每步落 flow_step_run)
-  WEBC_RUN_FLOW: 'webc:run-flow',
+  /** ⚠️ WEBC_RUN_FLOW 已随「跑编排」一并摘掉(2026-09-29)——
+   * 通道声明了却没 handler = 点下去必 reject,守卫盯着这条。 */
   // main → renderer 广播:编排每一步的实时状态(⚠️ 带 wsId,接收方必须核对)
   WEBC_FLOW_PROGRESS: 'webc:flow-progress',
   WEBC_WHERE_AM_I:   'webc:where-am-i',    // 输出:当前页面是哪个语义页面 + 参数(右边自动填充用)

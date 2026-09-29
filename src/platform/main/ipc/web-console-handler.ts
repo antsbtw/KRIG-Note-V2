@@ -64,8 +64,6 @@ import { autoCollect } from '../x/x-auto-collect';
 import { requestAbort, isAborted } from '../x/x-collect-abort';
 import { runFlow } from '../flow/flow-runner';
 import { webContents as allWebContents } from 'electron';
-import { makeXFlowCapabilities } from '../x/x-flow-capabilities';
-import { DEFAULT_X_FLOW } from '../x/x-flow-recipes';
 import { PAGE_PARAMS, PAGE_LABELS, PEOPLE_PAGE_NAMES, OPTIONAL_PAGE_PARAMS } from '../x/x-pages';
 import { recordStep } from '../flow/flow-run-repo';
 import { deriveStep, type ExecContext, type StepType, type StepStatus } from '../flow/exec-context';
@@ -230,7 +228,7 @@ function failFast(
  * 2026-09-23 加「跑编排档」19→20
  * (长文正文改成采集时一次采全,不再有「补」这个动作)。
  */
-const WEBC_COUNT = 20;
+const WEBC_COUNT = 19;
 
 export function registerWebConsoleHandlers(): void {
   if (app.isPackaged) {
@@ -957,66 +955,13 @@ export function registerWebConsoleHandlers(): void {
   });
 
   /**
-   * ⭐⭐⭐ **跑一份编排档** —— 用户 2026-09-23:「做一个任务编排试试」。
+   * ⚠️ **「跑编排」已摘掉**(2026-09-29 用户定 A 方案)。
    *
-   * ⚠️ 这里**只做接线**:编排器负责顺序与记录,X 适配器负责调真能力,
-   * handler 自己不写任何业务逻辑。
-   * ⭐ 跑完 `flow_step_run` 会第一次长出真实的行 ——
-   *   面板长什么样,等看见这些行再定(先接线后做面板,免得又凭空设计)。
+   * 编排(`x-flow-capabilities`)import 了那个 **1516 行的巨型 handler**,
+   * 一根线把整个 X 业务层焊回来 —— 正是本次推倒要消除的东西。
+   * ⭐ 控制台的本意是「逐个原语单独验证」,编排是上层的事,
+   * 等它按新设计重建好再接回来,**别把旧的焊回去**。
    */
-  ipcMain.handle(IPC_CHANNELS.WEBC_RUN_FLOW, async (_e, payload: unknown) => {
-    const p = (payload ?? {}) as { recipe?: unknown; wsId?: unknown; wcId?: unknown };
-    const t0 = Date.now();
-    const wsId = typeof p.wsId === 'string' ? p.wsId : undefined;
-    const wcId = typeof p.wcId === 'number' ? p.wcId : undefined;
-    const base = (p.recipe && typeof p.recipe === 'object')
-      ? p.recipe as Parameters<typeof runFlow>[0]
-      : DEFAULT_X_FLOW;
-    /**
-     * ⭐⭐ **wcId 注入每一步的 params** —— 2026-09-24 实测踩到:
-     * 第一次跑编排,第一步 goto 就报「X 实例未就绪(未登记 wc id)」,
-     * 后三步连带 skipped,四步全废。
-     *
-     * ⚠️ 真因:面板只传了 wsId,而适配器要的是 wcId
-     * (采集按钮一直传 `wcId: wcId()`,编排这条新路径漏了)。
-     * ⭐ 在这里注入而**不写进编排档**:wcId 是**运行时的东西**
-     * (页面重开就变),写进档里会立刻过期 —— 档里只该有业务参数。
-     * ⚠️ 档里已经写了 wcId 的话不覆盖(调用方显式指定优先)。
-     */
-    const recipe = wcId === undefined ? base : {
-      ...base,
-      steps: base.steps.map((st) => ({
-        ...st,
-        params: { wcId, ...(st.params ?? {}) },
-      })),
-    };
-    try {
-      const r = await runFlow(recipe, makeXFlowCapabilities(), {
-        wsId,
-        /** ⭐ 复用采集那套暂停键 —— 不另起一套停止语义 */
-        isAborted: () => isAborted(wsId),
-        /**
-         * ⭐⭐ **逐步广播** —— 用户 2026-09-24 那句「没有任何反应」的解药。
-         * 四步耗时 0.1s~330s 差 3000 倍,一个 invoke 等到底的话
-         * 判断那 5.5 分钟里 renderer 什么都收不到。
-         * ⚠️ 广播带 wsId,**接收方必须核对**(多窗口下每个 renderer 都会收到)。
-         */
-        onProgress: (p) => {
-          for (const wc of allWebContents.getAllWebContents()) {
-            if (wc.isDestroyed()) continue;
-            try { wc.send(IPC_CHANNELS.WEBC_FLOW_PROGRESS, p); } catch { /* 已销毁 */ }
-          }
-        },
-      });
-      recordRun('runFlow',
-        { flow: recipe.name, steps: recipe.steps.length },
-        r.ok ? { status: 'ok' } : { status: 'failed', reason: `断在「${r.failedAt}」` },
-        Date.now() - t0);
-      return { channelOk: true, report: r };
-    } catch (err) {
-      return failFast('runFlow', String(err), t0);
-    }
-  });
 
   /**
    * ⭐ 当前页面是哪个语义页面 —— 让右边**跟着左边走**。
