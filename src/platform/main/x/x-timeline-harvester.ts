@@ -40,6 +40,11 @@ import {
 } from './x-people-harvester';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { resolveXWebContents } from './x-webcontents';
+/**
+ * ⭐ 载荷捕获走 `web.net`(2026-09-27 迁移)——
+ * 本模块**不再碰 debugger**,也就掐不断别的订阅者(如抓 bio)。
+ */
+import { captureXPayloads, type XPayload } from './x-net-capture';
 /** ⭐ 暂停键 —— 滚动可能跑 5000 轮,必须有出口 */
 import { isAborted } from './x-collect-abort';
 /** ⭐ DOM 抽取与「点开 Show more」—— 与右键提取、tweet-fetcher 共用同一套选择器 */
@@ -870,7 +875,6 @@ export async function harvestTimeline(
   const startedAt = Date.now();
   const tweets = new Map<string, HarvestedTweet>();
   const trace: RoundTrace[] = [];
-  const pending = new Map<string, string>();
   /**
    * ⭐ 解不出推文的载荷样本 —— 给「量结构」用(见 HarvestReport.unparsedSamples)。
    * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把几百 KB 搬进 IPC。
@@ -897,157 +901,124 @@ export async function harvestTimeline(
   const seenOps: Array<{ op: string; bytes: number; articles?: number; articlesWithBody?: number }> = [];
   let payloads = 0;
 
-  const onMessage = (_e: unknown, method: string, params: any): void => {
-    if (method === 'Network.requestWillBeSent') {
-      const u: string = params?.request?.url ?? '';
-      if (u.includes('/i/api/graphql/')) {
-        pending.set(params.requestId, u);
-        /**
-         * ⭐⭐ 把**完整请求**留下来 —— 游标翻页要用它重发。
-         *
-         * ⚠️ 不自己拼请求:X 的 GraphQL 要 queryId / features 参数
-         * (`x-article-replies.ts:285` 记着「会随版本变」,那边为此放弃了重发)。
-         * ⭐ 但**复用 X 刚发过的那一条**就不用知道它们是什么 ——
-         * 只把 URL 里的 cursor 换掉,其余原样。
-         *
-         * ⚠️ 请求头(authorization / x-csrf-token)同样原样带走,
-         * 不复刻鉴权逻辑。
-         */
-        /**
-         * ⚠️⚠️ **只抄人的列表那条** —— 用户 2026-09-18 实测踩到:
-         *
-         * 原来「任何 graphql 请求都抄」,而 `ViewerBadgeCounts`(0KB)、
-         * `DataSaverMode`(0KB) 这类杂项**发生得最晚**,把 `Followers`
-         * 覆盖掉了。于是翻页拿着 Followers 的游标去请求 ViewerBadgeCounts
-         * → **HTTP 404**,一页就停(报告里正是「翻了 1 页 · 请求失败(404)」)。
-         *
-         * ⚠️ 第 1 页当时能成,掩盖了这个 bug:X 自己刚发的那条游标还新鲜,
-         * 是**第 2 页**才暴露 —— 所以「第一页成功」不能当作链路正确的证据。
-         *
-         * ⭐ 这里用 `isPeopleOp` 是**选重发哪条请求**,不是「决定要不要解析」——
-         * 解析仍然无条件全收(见 isPeopleOp 注释里那条禁令)。
-         */
-        const op = u.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '';
-        const req = params.request as {
-          url?: string; headers?: Record<string, string>; method?: string;
-        };
-        /**
-         * ⚠️ **method 也要抄** —— 原来写死 GET。X 目前的 Followers 是 GET,
-         * 但写死意味着哪天它改成 POST,现象会是「404/400」而不是
-         * 「方法不对」—— 又一次查不出来。抄下来就不用赌。
-         */
-        /**
-         * ⚠️⚠️ **留第一条,不是最后一条** —— 用户 2026-09-18 实测踩到:
-         *
-         * 滚动中 X 自己也在翻页,后面那些 `Followers` 请求**本身就带 cursor**
-         * (实测抄到的 variables 里有 `"cursor":"1876625943675867774"`)。
-         * 留最后一条 = 拿一条**已经翻到深处**的请求当模板,它的游标到重放时
-         * 已经过期 → **HTTP 404**。
-         *
-         * ⭐ 判据就在两跑的对比里:成功那跑(verifiedFollowers)抄到的是
-         * `{userId,count,includePromotedContent,withGrokTranslatedBio}` —— **没有 cursor**;
-         * 失败这跑多了个 cursor。差别只有这一个。
-         *
-         * ⭐ 第一条必然是页面刚加载时发的「第一页」形状,最干净。
-         * 抄到之后就不再覆盖(`?? =` 的语义)。
-         */
-        /**
-         * ⚠️⚠️ **判据是「主数据接口」,不是「人的列表」** —— 2026-09-22 用户追出来的。
-         *
-         * 原来写 `isPeopleOp(op)`,于是 `UserArticlesTweets`(长文页)不在名单里
-         * → 请求从没抄下来 → 游标翻页永远不启动 → 长文页只能靠滚动,
-         * 滚不动就停在 4 篇,而 X 明说 `hasMore: true`。
-         * ⚠️ 而且 `isPeopleOp` 自己的注释里就写着
-         * 「⚠️⚠️ 生产代码不用它,也不该用」「按名字分派 = 静默失败」——
-         * 这条禁令被违反了,没人发现,因为现象是「采不全」不是「报错」。
-         */
-        if (req?.headers && isPageDataOp(op, u) && !lastPeopleReq) {
-          lastPeopleReq = { url: u, headers: req.headers, method: req.method ?? 'GET' };
-        }
-      }
-      return;
+  /**
+   * ⭐⭐ **一条载荷进来** —— 迁到 `web.net` 之后的入口(2026-09-27)。
+   *
+   * ── 为什么迁(真机实测)──
+   * 原来这里自己 `debugger.attach → on(message) → detach`。
+   * 而 `x-author-profile`(抓 bio)已经迁到 `web.net`,**只订阅没有 detach**。
+   * 编排的顺序是**先采集、后备料** —— 采集结束时那句 `detach()`
+   * 把备料的订阅**一起掐掉**,于是 bio 采集 192 人里 **159 次**
+   * 报「期间一条 GraphQL 载荷都没看见」。
+   *
+   * ⚠️ 这不是新 bug:`47582b72` 那次迁移就预言了
+   * 「A 先 → B 共用,A 走时真的 detach,B 静默失聪」,
+   * 只是它**只迁了 2 个模块就叫停**,采集正是没迁的那 5 个之一。
+   * ⭐ 编排把那个「难复现」的场景变成了**每次必现**。
+   *
+   * ⭐ 迁完之后本模块**没有 detach 这个动作**(接口上就没有),
+   * 「谁先谁后」不再是变量 —— bug 在结构上消失,而不是被小心避开。
+   */
+  const onXPayload = (payload: XPayload): void => {
+    const reqUrl = payload.url;
+    /**
+     * ⭐⭐ 把**完整请求**留下来 —— 游标翻页要用它重发。
+     *
+     * ⚠️ 不自己拼请求:X 的 GraphQL 要 queryId / features 参数(会随版本变)。
+     * 复用 X 刚发过的那一条就不用知道它们是什么 —— 只把 URL 里的 cursor 换掉。
+     * ⚠️ 请求头(authorization / x-csrf-token)同样原样带走,不复刻鉴权。
+     *
+     * ⚠️⚠️ **留第一条,不是最后一条**(用户 2026-09-18 实测):
+     * 滚动中 X 自己也在翻页,后面那些请求**本身就带 cursor** ——
+     * 拿一条已经翻到深处的当模板,重放时游标早已过期 → **HTTP 404**。
+     * 第一条必然是页面刚加载时的「第一页」形状,最干净。
+     *
+     * ⚠️⚠️ 判据是「**主数据接口**」不是「人的列表」(2026-09-22 用户追出来):
+     * 原来写 `isPeopleOp(op)`,于是 `UserArticlesTweets` 不在名单里 →
+     * 请求从没抄下来 → 翻页永远不启动 → 长文页停在 4 篇而 X 明说还有。
+     *
+     * ⚠️ 迁移后 `requestHeaders` 来自 `onSendHeaders`(见 webrequest-side),
+     * **可能为空** —— 空就别抄,抄了个空头去重放会报 404,把人带去查错方向。
+     */
+    const op = reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '';
+    if (payload.requestHeaders && isPageDataOp(op, reqUrl) && !lastPeopleReq) {
+      lastPeopleReq = {
+        url: reqUrl,
+        headers: payload.requestHeaders as Record<string, string>,
+        method: payload.method ?? 'GET',
+      };
     }
-    if (method === 'Network.loadingFinished') {
-      if (!pending.has(params.requestId)) return;
-      // ⚠️ 先取再删 —— 取 body 是异步的,那时 pending 里已经没有这条了
-      const reqUrl = pending.get(params.requestId) ?? '';
-      pending.delete(params.requestId);
-      wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
-        .then((r: any) => {
-          if (!r?.body) return;
-          payloads++;
-          const before = tweets.size;
-          const peopleBefore = people.size;
-          /**
-           * ⚠️ 先占位、后面回填 `articles` —— 深度要**按这一个载荷**量,
-           * 不能拿累计 `tweets` 算(累计里混着别的接口的长文,
-           * 每个接口都会显示同一个总数,差异就被抹平了)。
-           */
-          const opEntry: { op: string; bytes: number; articles?: number; articlesWithBody?: number } = {
-            op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
-            bytes: r.body.length,
-          };
-          seenOps.push(opEntry);
-          try {
-            const parsed = JSON.parse(r.body);
-            /**
-             * ⭐ **这一个载荷**里的长文有多少、其中几篇带正文。
-             * 单独解到一个临时 Map,避免与累计结果互相污染。
-             */
-            const solo = new Map<string, HarvestedTweet>();
-            extractTweetsFrom(parsed, solo);
-            const soloArticles = [...solo.values()].filter((t) => t.isArticle);
-            if (soloArticles.length > 0) {
-              opEntry.articles = soloArticles.length;
-              // isLongText 对长文 = 真拿到了正文(摘要不算,见 articleBody)
-              opEntry.articlesWithBody = soloArticles.filter((t) => t.isLongText).length;
-            }
-            // ⭐ 先数 X 给了多少条目(解析率的分母),再解析
-            entriesSeen += countTimelineEntries(parsed);
-            extractTweetsFrom(parsed, tweets);
-            // ⭐ **人也解一遍** —— 同一个载荷可能既有推也有人
-            //    (如时间线里的推荐关注模块);两种都要,不二选一
-            extractPeopleFrom(parsed, people);
-            // ⭐ 游标以**最后一个载荷**为准 —— 它反映当前翻到哪儿了
-            const cur = findPagingCursor(parsed);
-            if (cur.bottom || cur.top) paging = cur;
-          } catch { /* 非 JSON */ }
-          /**
-           * ⭐ 这个载荷**一条推都没解出来** → 留个样本给「量结构」用。
-           * ⚠️ 只留前 3 条、每条截 8000 字:够看清结构,又不至于把
-           * 几百 KB 的载荷搬进 IPC。
-           */
-          // ⚠️ 推**和**人都没解出来才算「没解出来」——
-          //    否则关注者页会被误报成「解析失败」,而它其实采到人了
-          if (tweets.size === before && people.size === peopleBefore) {
-            /**
-             * ⭐ **优先留大的** —— 用户 2026-09-18 实测踩到:
-             *
-             * 只留前 3 条时,拿到的全是 `DataSaverMode` / `ViewerBadgeCounts`
-             * 这类 **0KB 的杂项请求**(它们发生得最早,把名额占满了),
-             * 而真正带人的 `Followers` 载荷反而没留下来。
-             *
-             * 大小是**最好的筛子**:带数据的载荷必然大,杂项必然小。
-             * 故改成:先收着,按 bytes 降序,只保留最大的 3 条。
-             */
-            unparsedSamples.push({
-              op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
-              bytes: r.body.length,
-              body: r.body.slice(0, 8000),
-            });
-            unparsedSamples.sort((a, b) => b.bytes - a.bytes);
-            if (unparsedSamples.length > 3) unparsedSamples.length = 3;
-          }
-        })
-        .catch(() => { /* 响应体可能已丢弃 */ });
+
+    payloads++;
+    const before = tweets.size;
+    const peopleBefore = people.size;
+    /**
+     * ⚠️ 先占位、后面回填 `articles` —— 深度要**按这一个载荷**量,
+     * 不能拿累计 `tweets` 算(累计里混着别的接口的长文,
+     * 每个接口都会显示同一个总数,差异就被抹平了)。
+     */
+    const opEntry: { op: string; bytes: number; articles?: number; articlesWithBody?: number } = {
+      op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
+      bytes: payload.body.length,
+    };
+    seenOps.push(opEntry);
+    try {
+      const parsed = JSON.parse(payload.body);
+      /**
+       * ⭐ **这一个载荷**里的长文有多少、其中几篇带正文。
+       * 单独解到一个临时 Map,避免与累计结果互相污染。
+       */
+      const solo = new Map<string, HarvestedTweet>();
+      extractTweetsFrom(parsed, solo);
+      const soloArticles = [...solo.values()].filter((t) => t.isArticle);
+      if (soloArticles.length > 0) {
+        opEntry.articles = soloArticles.length;
+        // isLongText 对长文 = 真拿到了正文(摘要不算,见 articleBody)
+        opEntry.articlesWithBody = soloArticles.filter((t) => t.isLongText).length;
+      }
+      // ⭐ 先数 X 给了多少条目(解析率的分母),再解析
+      entriesSeen += countTimelineEntries(parsed);
+      extractTweetsFrom(parsed, tweets);
+      // ⭐ **人也解一遍** —— 同一个载荷可能既有推也有人
+      //    (如时间线里的推荐关注模块);两种都要,不二选一
+      extractPeopleFrom(parsed, people);
+      // ⭐ 游标以**最后一个载荷**为准 —— 它反映当前翻到哪儿了
+      const cur = findPagingCursor(parsed);
+      if (cur.bottom || cur.top) paging = cur;
+    } catch { /* 非 JSON */ }
+    /**
+     * ⭐ 这个载荷**一条推都没解出来** → 留个样本给「量结构」用。
+     * ⚠️ 推**和**人都没解出来才算「没解出来」——
+     *    否则关注者页会被误报成「解析失败」,而它其实采到人了
+     * ⚠️ **优先留大的**(用户 2026-09-18 实测):只留前 3 条时拿到的全是
+     *    `DataSaverMode` 这类 0KB 杂项(发生得最早,把名额占满了),
+     *    而真正带人的载荷反而没留下。大小是最好的筛子。
+     */
+    if (tweets.size === before && people.size === peopleBefore) {
+      unparsedSamples.push({
+        op: reqUrl.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知操作)',
+        bytes: payload.body.length,
+        body: payload.body.slice(0, 8000),
+      });
+      unparsedSamples.sort((a, b) => b.bytes - a.bytes);
+      if (unparsedSamples.length > 3) unparsedSamples.length = 3;
     }
   };
 
-  let attached = false;
-  try { wc.debugger.attach('1.3'); attached = true; }
-  catch { /* 已被 attach,共用即可 */ }
-  wc.debugger.on('message', onMessage);
-  await wc.debugger.sendCommand('Network.enable').catch(() => {});
+  /**
+   * ⭐⭐ **只订阅,没有 detach** —— 通道由底座独占(`web.net`)。
+   * ⚠️ 本模块从此**碰不到 debugger**,也就掐不断任何别的订阅者。
+   */
+  let channelFault: string | null = null;
+  const unsubscribe = captureXPayloads(wc, {
+    urlIncludes: ['/i/api/graphql/'],
+    onPayload: onXPayload,
+    /**
+     * ⚠️ 通道坏了要**看得见** —— 旧实现 attach 失败只 catch 一下就继续,
+     * 订阅者安静等一个永不来的载荷,现象是「采集突然变 0」。
+     */
+    onChannelFault: (reason: string) => { channelFault ??= reason; },
+  });
 
   /**
    * ⭐⭐ 「确保在目标页」是**一个步骤**,不是两个流程。
@@ -1751,9 +1722,8 @@ export async function harvestTimeline(
     }
   }
 
-  wc.debugger.off('message', onMessage);
-  if (attached) { try { wc.debugger.detach(); } catch { /* 已 detach */ } }
-
+  /** ⭐ 只退订 —— **绝不 detach**,别的模块(如抓 bio)还在用同一条通道 */
+  unsubscribe();
   const list = [...tweets.values()];
   const dateSpan = analyseDates(list);
 
@@ -1779,6 +1749,12 @@ export async function harvestTimeline(
    * 「够不够、有没有漏」是分析层拿着 `dateSpan`/`stopReason`/`rounds` 自己判断的事。
    */
   const problems: string[] = [];
+  /**
+   * ⚠️ **通道故障要进 problems** —— 它与「这页真没数据」是两回事。
+   * 旧实现 attach 失败只 catch 一下就继续,订阅者安静等一个永不来的载荷,
+   * 现象是「采集突然变 0」而**不报错**。
+   */
+  if (channelFault) problems.push(`CDP 通道故障:${channelFault} —— 采到的数据可能不全`);
   const maxY = Math.max(...trace.map((t) => t.scrollY), 0);
   // 以下三条都是**采集链路真的坏了**,不是数据质量判断
   /**

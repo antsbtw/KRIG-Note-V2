@@ -19,7 +19,16 @@ function stripComments(code: string): string {
 }
 
 /** 本步已迁的模块 —— 每迁一个就加进来 */
-const MIGRATED = ['x-author-profile.ts', 'x-notification-watch.ts'];
+const MIGRATED = [
+  'x-author-profile.ts', 'x-notification-watch.ts',
+  /**
+   * ⭐ 2026-09-27 迁入 —— **它正是那个肇事者**:
+   * 编排「先采集、后备料」，采集结束时的 `detach()` 把备料的订阅一起掐掉，
+   * 于是 bio 采集 192 人里 159 次报「期间一条 GraphQL 载荷都没看见」。
+   * `47582b72` 那次迁移就预言了这个形态，只是它叫停时没迁到这一个。
+   */
+  'x-timeline-harvester.ts',
+];
 
 describe('⭐⭐ 已迁模块:零 debugger,走 web.net', () => {
   for (const file of MIGRATED) {
@@ -115,7 +124,6 @@ describe('⚠️ 尚未迁移的模块(清单只减不增)', () => {
     'x-capture-monitor.ts',
     'x-notifications.ts',
     'x-payload-inspector.ts',
-    'x-timeline-harvester.ts',
   ];
 
   it('⭐ 清单里的模块确实还在用 debugger(修好了就要删掉)', () => {
@@ -130,5 +138,63 @@ describe('⚠️ 尚未迁移的模块(清单只减不增)', () => {
 
   it('⭐ 已迁的不许出现在待迁清单里', () => {
     for (const m of MIGRATED) expect(NOT_YET_MIGRATED).not.toContain(m);
+  });
+});
+
+/**
+ * ⭐⭐ **采集掐不断别人** —— 2026-09-27 真机 bug 的守卫。
+ *
+ * ── 病是怎么发作的 ──
+ * 编排的顺序是**先采集、后备料**。采集(未迁)结束时 `detach()`，
+ * 把备料(已迁，只订阅)的通道**一起掐掉** ——
+ * bio 采集 192 人里 **159 次**报「期间一条 GraphQL 载荷都没看见」，
+ * 每次白等 12s，共 32 分钟。
+ *
+ * ⚠️ `47582b72` 那次迁移**就预言了这个形态**
+ * (「A 先 → B 共用，A 走时真的 detach，B 静默失聪」)，
+ * 只是它**只迁了 2 个就叫停**，采集正是漏下的 5 个之一。
+ * ⭐ 编排把那个「难复现」的场景变成了**每次必现**。
+ */
+describe('⭐⭐ 采集不得掐断别的订阅者', () => {
+  const src = stripComments(readFileSync(
+    join(process.cwd(), 'src/platform/main/x/x-timeline-harvester.ts'), 'utf-8'));
+
+  it('⭐⭐ 采集里零 debugger（碰不到就掐不断）', () => {
+    /**
+     * ⚠️ 钉 `wc.debugger` 而不是 `detach` ——
+     * 只禁 detach 的话，「自己 attach 但不 detach」会漏网，
+     * 而那样仍然会与底座抢通道。
+     */
+    expect(
+      /wc\.debugger/.test(src),
+      '采集又碰 debugger 了 —— 它一 detach 就会把抓 bio 的订阅掐掉',
+    ).toBe(false);
+  });
+
+  it('⭐⭐ 走 captureXPayloads，且收尾只退订', () => {
+    expect(src, '没走 web.net').toMatch(/captureXPayloads\(/);
+    expect(src, '收尾没有退订 —— 订阅会泄漏').toMatch(/unsubscribe\(\)/);
+  });
+
+  it('⭐ 通道故障要进 problems（静默失聪是这类 bug 的本体）', () => {
+    /**
+     * ⚠️ 旧实现 attach 失败只 catch 一下就继续，订阅者安静等一个永不来的载荷 ——
+     * 现象是「采集突然变 0」而**不报错**。
+     */
+    expect(src, '没接通道故障回调').toMatch(/onChannelFault/);
+    expect(src, '通道坏了却不进 problems —— 人看到的会是「这页没数据」')
+      .toMatch(/problems\.push\(`CDP 通道故障/);
+  });
+
+  it('⚠️ 翻页模板:拿不到请求头就不抄（别抄个空头去重放）', () => {
+    /**
+     * ⚠️ `requestHeaders` 来自 `onSendHeaders`，**可能为空**。
+     * 抄个空头去重放 → X 拒收 → 报 404 → 把人带去查「翻页坏了」，
+     * 而真因是「头没拿到」。
+     */
+    const i = src.indexOf('lastPeopleReq = {');
+    expect(i, '找不到抄请求的地方').toBeGreaterThan(0);
+    const guard = src.slice(Math.max(0, i - 200), i);
+    expect(guard, '没判请求头是否存在就抄').toMatch(/payload\.requestHeaders &&/);
   });
 });
