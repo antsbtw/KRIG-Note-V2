@@ -50,13 +50,11 @@ import { registerFrameworkMenus } from './menu/framework-menus';
 import { registerMarkdownImport } from './markdown-import';
 import { registerWordImport } from './word-import';
 import { registerImportCacheIpc } from './word-import/import-cache';
-import { registerXPlanCacheIpc } from './x/x-plan-cache';
 import { registerProgressBridge } from './window/progress-bridge';
 import { registerBackupMenu } from './backup';
 import { mediaStore } from './media/media-store-impl';
 import { registerWebviewExtractionHook } from './extraction/handlers';
 import { registerAIWebviewHook } from './ai';
-import { registerXWebviewHook } from './x';
 import { registerMailWebviewHook } from './mail';
 import { registerWebContextMenuHook } from './web-context-menu/handler';
 import { registerWebShortcutsHook } from './web-shortcuts/handler';
@@ -73,14 +71,10 @@ import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
 import { runMigration023IfNeeded } from '@storage/migrations/023-note-title-cache';
 import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure-attrs';
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
-import { seedRecipes } from './db/search-recipe-repo';
-import { recoverStuckAiJudging } from './db/tweet-inbox-repo';
 // ⭐ 步 3:web.net 健康巡检 —— 探针是拉取式的,必须有人定期查,否则通道哑了没人知道
 import { startHealthWatch, stopHealthWatch, startTraceSweep, stopTraceSweep } from './web-capability/wiring/health-watch';
 import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
-import { startXSearchScheduler, stopXSearchScheduler,
-  startCampaignServer, stopCampaignServer,
-  startCampaignLoop, stopCampaignLoop } from './x';
+/** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
 // - standard: true     让 URL 解析按 http 同款规则(host / path / origin)
@@ -228,21 +222,8 @@ app.whenReady().then(async () => {
     console.error('[migration/073] 执行失败,启动下次会重试:', err);
   }
 
-  // X 时间线智能筛选 Phase 1 — 种子配方 + 调度器（必须在 migration_1_8_0 之后）
-  await seedRecipes().catch((err) => {
-    console.error('[x-timeline] seedRecipes failed:', err);
-  });
-  // 启动自愈:上次运行被打断而卡在 ai_judging 的推文退回 pending,下轮重判。
-  // 必须在 startXSearchScheduler 之前 —— 否则调度器可能先跑一轮,
-  // 那些行还是 ai_judging,又被漏掉一次。
-  await recoverStuckAiJudging()
-    .then((n) => {
-      if (n > 0) console.log(`[x-timeline] 自愈:${n} 条卡在 ai_judging 的推文已退回 pending`);
-    })
-    .catch((err) => {
-      console.error('[x-timeline] ai_judging 自愈失败:', err);
-    });
-  startXSearchScheduler();
+  /** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
+
   // ⭐ 步 3:启动 web.net 健康巡检(60s 一轮,只在健康状态翻转时发声,不刷屏)。
   // 停止调用在下面的 before-quit —— 常驻 timer 必须有停止调用(记忆 project-graceful-shutdown)。
   startHealthWatch();
@@ -250,22 +231,6 @@ app.whenReady().then(async () => {
   startTraceSweep();
   // ⭐ 「当时在哪个页面」—— pageRegistry 一直在发事件,此前零订阅者
   startTraceLifecycle();
-
-  // 活动契约接口 B(POST /refresh + GET /health)。
-  // 未配置密钥/地址时**静默跳过**——这是可选能力,没配就是没启用,不是错误。
-  // ⚠️ 长期部署在 Windows:监听 tailnet IP 而非 127.0.0.1,并阻止休眠(见该模块)。
-  startCampaignServer()
-    .then((r) => {
-      if ('error' in r) console.log(`[campaign-server] 未启动:${r.error}`);
-    })
-    .catch((err) => console.error('[campaign-server] 启动异常:', err));
-
-  // 活动主循环:**通知页驱动**(用户拍板)——「谁点赞、谁转发」一页覆盖,
-  // 且 target 带完整推文对象(conversation_id + has_media),契约要素一次全给。
-  // 延迟 20s 启动:给 storage / webview 留出就绪时间。
-  setTimeout(() => {
-    startCampaignLoop().catch((err) => console.error('[campaign-loop] 启动异常:', err));
-  }, 20_000);
 
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
   // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。
@@ -284,7 +249,6 @@ app.whenReady().then(async () => {
   registerMarkdownImport();
   registerWordImport();
   registerImportCacheIpc(); // 接收 renderer 的诊断落盘(chunk/PM)
-  registerXPlanCacheIpc(); // 接收 renderer 的 X 发布中间态(ArticlePlan)落盘,诊断用
   registerProgressBridge(); // 接收 renderer 驱动的进度事件,回推 overlay
   registerBackupMenu();
   registerFrameworkMenus();
@@ -307,7 +271,6 @@ app.whenReady().then(async () => {
     // 并挂原生右键菜单「📥 提取此对话到笔记」(复用 web-service-base 底座)。
     registerAIWebviewHook(win);
     // X 集成 阶段 0/1:X Host webview 注册 + 原生右键「提取此推文到笔记」(同 AI 底座)。
-    registerXWebviewHook(win);
     // 邮箱 阶段 0:Mail Host webview 注册 + 原生右键「提取此邮件到笔记」(同 AI/X 底座)。
     registerMailWebviewHook(win);
     // web view 原生右键菜单(Phase 2 根治 HTML 菜单被 webview OS 层遮挡)— 只接管普通浏览 webview
@@ -390,13 +353,10 @@ app.on('before-quit', (event) => {
   markAppQuitting();
   // 停掉 X 调度器的 60s 轮询 —— 活着的 setInterval 会吊住事件循环让进程不肯退,
   // 且退出途中继续跑配方毫无意义(日志刷 `no active X webContents, skip`)。
-  stopXSearchScheduler();
   // ⭐ 步 3:停 web.net 健康巡检(与上面同理:活着的 setInterval 会吊住事件循环)
   stopHealthWatch();
   stopTraceSweep();
   stopTraceLifecycle();
-  stopCampaignServer().catch(() => { /* 退出中,忽略 */ });
-  stopCampaignLoop().catch(() => { /* 退出中,忽略 */ });
   if (reconciled) {
     shutdownStorageSync();
     return;

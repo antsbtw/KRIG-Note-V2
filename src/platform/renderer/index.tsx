@@ -40,8 +40,7 @@ import { registerWebCommands } from '@views/web/web-commands';
 import { registerWebBookmarkCommands } from '@views/web/web-bookmark-commands';
 import { registerEBookCommands } from '@views/ebook/bookshelf-commands';
 import { registerAICommands } from '@views/ai/ai-commands';
-import { registerXCommands } from '@views/x/x-commands';
-import { registerXTestCommands } from '@views/x/x-test-commands';
+/** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
 import { registerMailCommands } from '@views/mail/mail-commands';
 import { registerGraphCanvasCommands } from '@views/graph-canvas-view/canvas-commands';
 import { registerThoughtCommands } from '@views/thought/thought-commands';
@@ -74,7 +73,6 @@ import '@capabilities/note';                // L7-sub2 新增(note CRUD via IPC 
 import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IPC bridge,decision 012)
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)
 import '@capabilities/ai-extraction';       // feature/ai-view:V1 web-bridge AI 自动化 → V2 横切 capability(原 ai-conversation,2026-05-19 改名)
-import '@capabilities/x-extraction';        // X 集成 阶段 0/1:嵌 x.com webview + 右键提取推文 → tweetBlock(铁律 3 独立 capability)
 import '@capabilities/mail-service';        // 邮箱 阶段 0:嵌网页版邮箱 webview + 右键提取单封邮件(独立 capability)
 import '@capabilities/import-orchestrator'; // 阶段 C:统一批量落库编排(markdown/PDF/剪藏三处 view 走 importDraftsToNotes)
 import '@capabilities/content-extraction';  // 网页剪藏(Defuddle → Note);模块 load 即订阅 WEB_CLIP_RESULT 跑 import-pipeline
@@ -87,12 +85,9 @@ import '@views/web';    // L5-B4:WebView self-register
 import '@views/web/translate-view'; // L5-B4.2:TranslateWebView self-register(隐式 view,通过 WebToolbar 翻译按钮触发)
 import '@views/ebook';  // L5-C1:EBookView self-register
 import '@views/ai';     // feature/ai-view:AI View self-register(NavSide tab 🤖 order=4)
-import '@views/x';      // X 集成:注册 X 提取命令
-import '@views/social'; // Social View self-register(NavSide tab 💬 order=6;含 X 平台)
 import '@views/mail';   // Mail View self-register(NavSide tab 📧 order=7;网页版邮箱)
 /** ⚠️ x-inbox 视图已移除(2026-09-29 用户定:先删 Inbox)——
  * 底层能力(采集/判断/备料)不在这里,工作台那条编排链不受影响。 */
-import '@views/x-workbench'; // X 工作台 self-register(重构中的新面板;旧面板并存直到迁移完毕)
 import '@views/web-console'; // ⭐ 能力控制台 self-register(dev-only;index.ts 内部按 import.meta.env.DEV 决定注不注册)
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
@@ -113,8 +108,6 @@ onMyWsIdReady((rendererWsId) => {
   registerWebBookmarkCommands(rendererWsId);
   registerEBookCommands(rendererWsId);
   registerAICommands(rendererWsId);
-  registerXCommands(rendererWsId);
-  registerXTestCommands(rendererWsId);
   registerMailCommands(rendererWsId);
   registerGraphCanvasCommands(rendererWsId);
   registerThoughtCommands(rendererWsId);
