@@ -143,8 +143,7 @@ describe('slot-resource 守卫 — 禁止靠 slotBinding 反推「我在哪一�
       'ensureNoteViewActive:查「note-view 是否已在任一槽」,不在才装 left。问的是在场性。',
     'src/views/web/web-commands.ts':
       'web view 已在任一槽就复用那一栏(否则会挤成分栏);pin-left 搬栏。问的是在场性与目标布局。',
-    'src/views/x/x-commands.ts':
-      'noteIsOpen:查「有没有 Note 在场」作为提取落点的前置条件。问的是在场性。',
+    /** ⚠️ 2026-09-29 已随 X 模块一并移除 —— 白名单同步减一(条目腐烂会让守卫静默放行) */
     'src/views/mail/mail-commands.ts':
       'mail-view.pin-left:提取后把 mail 搬到 left 腾出 right 给 note(对照布局),' +
       '与 web-commands 的 pin-left 同款。问的是「mail-view 这个 view 现在占哪个槽」' +
@@ -176,7 +175,7 @@ describe('slot-resource 守卫 — 禁止靠 slotBinding 反推「我在哪一�
    * 修法见 memory `project-dont-guess-own-slot`:槽由上层显式传入,view 用 slot prop。
    */
   const KNOWN_DEBT: readonly string[] = [
-    'src/views/social/SocialView.tsx:55', // isInRightSlot:双开时两个实例都会认领
+    /** ⚠️ 2026-09-29 已随 social 视图一并移除 —— 债只减不增,这条真的减掉了 */
     'src/views/web/WebView.tsx:94', // isTranslateMode
     // 'src/views/web/WebView.tsx:429' handleClose —— 已修(2026-08-08):
     // WebView 接了 slot prop,✕ 按槽关。这是本清单第一条被销掉的债,

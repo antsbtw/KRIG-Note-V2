@@ -31,7 +31,7 @@ import { registerAIHandlers } from '../ai';
 import { registerMailHandlers, registerMailSyncHandlers } from '../mail';
 import { registerAuthHandlers } from './auth-handler';
 import { registerWorkspaceHandlers } from './workspace-handler';
-import { registerWebConsoleHandlers } from './web-console-handler';
+/** ⚠️ X 模块已彻底归零(2026-09-29 用户定)—— 接线一并摘掉,重建时重新接 */
 
 export function initIpcBus(): void {
   registerHealthCheckHandlers();
@@ -61,5 +61,4 @@ export function initIpcBus(): void {
   registerMailSyncHandlers();       // 邮箱 阶段 1:账号配置 + IMAP 增量同步
   registerAuthHandlers();           // 账号登录 + 归因(authorization-management-design.md;本期不做授权)
   registerWorkspaceHandlers();      // S3-a:Workspace 楼长 IPC(create/close/remove/open/rename/setActive/getState)
-  registerWebConsoleHandlers();     // ⭐ Web 能力层控制台(dev-only;app.isPackaged 时内部直接 return 不注册)
 }
