@@ -74,6 +74,8 @@ import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-
 // ⭐ 步 3:web.net 健康巡检 —— 探针是拉取式的,必须有人定期查,否则通道哑了没人知道
 import { startHealthWatch, stopHealthWatch, startTraceSweep, stopTraceSweep } from './web-capability/wiring/health-watch';
 import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
+/** ⭐ X 把自己的锚点表/页面表推给底座(业务 → 底座,底座不 import X) */
+import { registerXTables } from './x/x-register-tables';
 /** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
 
 // L5-B3.5:把 media: 注册为"特权协议"(必须在 app ready 之前调)
@@ -226,6 +228,14 @@ app.whenReady().then(async () => {
 
   // ⭐ 步 3:启动 web.net 健康巡检(60s 一轮,只在健康状态翻转时发声,不刷屏)。
   // 停止调用在下面的 before-quit —— 常驻 timer 必须有停止调用(记忆 project-graceful-shutdown)。
+  /**
+   * ⭐⭐ X 的两张表要在**任何 goto/tap 之前**注册好。
+   * ⚠️ 没有它:控制台报「语义页面表还没读到」「锚点表还没读到」,
+   * 而 tap 会表现成「未找到可点的元素」—— 与「元素真不在页面上」
+   * 长得一模一样,排查方向完全相反。
+   */
+  registerXTables();
+
   startHealthWatch();
   // ⭐ 诊断留痕的老化 —— 停止调用在下面的 before-quit(常驻 timer 铁律)
   startTraceSweep();
