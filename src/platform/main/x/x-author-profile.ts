@@ -134,11 +134,31 @@ export async function harvestAuthorProfile(
    * ⚠️ 定位后删掉。
    */
   const seenOps: string[] = [];
+  /**
+   * 🔍 **第二版诊断**(2026-09-27)—— 上一版**自己也有缺陷**:
+   * 它只订 `/i/api/graphql/`,于是「X 没发 GraphQL」和
+   * 「捕获层这一页一条都没送过来」**长得一模一样**,
+   * 我据此推断「X 不发那个请求了」—— ⚠️ 那是推断不是证据。
+   *
+   * ⭐ 这一版订**全部流量**(`urlIncludes: []` = 不过滤),三种成因才分得开:
+   *  · 一条都没有        → 捕获层对这个页面没工作(pageId/接线的问题)
+   *  · 有流量但无 graphql → X 真的没发(那时才该考虑改读 DOM)
+   *  · 有 graphql 但无 UserByScreenName → X 改了接口名
+   */
+  const seenAll: string[] = [];
   const diagUnsub = captureXPayloads(wc, {
-    urlIncludes: ['/i/api/graphql/'],
+    urlIncludes: [],
     onPayload: ({ url }) => {
-      const op = url.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? url.slice(0, 60);
-      if (!seenOps.includes(op)) seenOps.push(op);
+      if (url.includes('/i/api/graphql/')) {
+        const op = url.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? url.slice(0, 60);
+        if (!seenOps.includes(op)) seenOps.push(op);
+      }
+      /** ⚠️ 只留域名+路径头,别把整条 URL(带 token)写进日志 */
+      try {
+        const u = new URL(url);
+        const key = `${u.hostname}${u.pathname.slice(0, 40)}`;
+        if (!seenAll.includes(key) && seenAll.length < 25) seenAll.push(key);
+      } catch { /* 非法 URL,忽略 */ }
     },
   });
   const unsubscribe = captureXPayloads(wc, {
@@ -166,8 +186,11 @@ export async function harvestAuthorProfile(
     diagUnsub();
   }
   /** 🔍 诊断:这 12 秒里到底看见了哪些 GraphQL 接口 */
-  console.log(`[🔍profile] @${h} 期间看见的接口(${seenOps.length}):`,
-    seenOps.join(', ') || '(一条都没有)');
+  console.log(
+    `[🔍profile] @${h} 12s 内:GraphQL ${seenOps.length} 个 / 全部请求 ${seenAll.length} 条`
+    + `\n  graphql: ${seenOps.join(', ') || '(无)'}`
+    + `\n  all    : ${seenAll.slice(0, 15).join(' | ') || '(⚠️ 一条都没有 —— 捕获层没工作)'}`,
+  );
 
   if (!profile) {
     return {
@@ -176,9 +199,17 @@ export async function harvestAuthorProfile(
         ? `未截获 @${h} 的账号载荷:CDP 通道故障 —— ${channelFault}`
         /** 🔍 把看见的接口一并报出来 —— 「没截到」与「截到了别的」是两回事 */
         : `未截获 @${h} 的账号载荷(${budgetMs}ms 内)`
+          /**
+           * 🔍 三种成因的判据 —— ⚠️ 「没 GraphQL」与「一条流量都没有」
+           * 是**两回事**,上一版混在一起,害我推断成「X 不发请求了」。
+           */
           + (seenOps.length > 0
-            ? ` —— 期间看见了 ${seenOps.length} 个接口:${seenOps.slice(0, 6).join('、')}`
-            : ' —— **期间一条 GraphQL 载荷都没看见**(导航或通道的问题)'),
+            ? ` —— 期间看见 ${seenOps.length} 个 GraphQL 接口:${seenOps.slice(0, 6).join('、')}`
+              + '(⚠️ 有 graphql 却没有 UserByScreenName —— 多半是 X 改了接口名)'
+            : seenAll.length > 0
+              ? ` —— 期间有 ${seenAll.length} 条流量但**零个 GraphQL**`
+                + `(${seenAll.slice(0, 5).join(' | ')})`
+              : ' —— **12s 内一条流量都没捕到**(捕获层对这个页面没工作,不是 X 的问题)'),
     };
   }
   // 关系视角一并落库 —— 载荷自带、零额外请求,但此前只在内存里没存
