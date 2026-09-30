@@ -8,3 +8,4 @@ export * from './types';
 export * from './web-dom';
 export { ScriptRegistry } from './script-registry';
 export { AI_SCRIPTS, AI_SCRIPT_DEFINITIONS, registerAIScripts } from './ai-scripts';
+export { LOCATE_SCRIPTS, LOCATE_SCRIPT_DEFINITIONS, registerLocateScripts } from './locate-scripts';

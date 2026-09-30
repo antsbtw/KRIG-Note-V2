@@ -14,46 +14,26 @@ import type { WebContents } from 'electron';
 import type { ExtractedSingleTurn } from './claude-extract-turn';
 import { fetchGeminiConversation } from './gemini-conversation-query';
 import { geminiTurnMarkdown } from './gemini-full-extraction';
+import { locateOrdinalByPoint } from './locate-ordinal';
 
 const GEMINI_ASSISTANT_SELECTOR = '.response-container';
 
 /**
- * 在 guest 页用 (x,y) 定位被右键的 AI 回复块,返回它在所有 .response-container 中的序号。
- * 命中即用,miss 时按 y 距离就近匹配。返 -1 表示不在任何回复内。
+ * 在 guest 页用 (x,y) 定位被右键的 AI 回复块,返回它在所有 `.response-container` 中的序号。
+ * 返 -1 表示不在任何回复内。
+ *
+ * ⭐ 2026-09-30 收口:脚本本体搬进 `web.dom` 的预注册表
+ * (`dom/locate-scripts.ts`),与 ChatGPT / Claude 共用同一份。
+ * ⚠️ 原实现是那两家的简化版(少了多候选 selector 合并),收口后一并获得该能力 ——
+ * Gemini 目前只有单个 selector,行为不变。
  */
 async function resolveResponseOrdinal(
   wc: WebContents,
   x: number,
   y: number,
 ): Promise<number> {
-  const script = `(function() {
-    var sel = ${JSON.stringify(GEMINI_ASSISTANT_SELECTOR)};
-    var list = Array.prototype.slice.call(document.querySelectorAll(sel));
-    if (list.length === 0) return -1;
-    var el = document.elementFromPoint(${x}, ${y});
-    var hit = el && el.closest ? el.closest(sel) : null;
-    if (!hit) {
-      var best = null;
-      for (var n = 0; n < list.length; n++) {
-        var rect = list[n].getBoundingClientRect();
-        var dy = 0;
-        if (${y} < rect.top) dy = rect.top - ${y};
-        else if (${y} > rect.bottom) dy = ${y} - rect.bottom;
-        var insideBand = ${y} >= rect.top - 24 && ${y} <= rect.bottom + 24;
-        if (!insideBand && dy > 240) continue;
-        if (!best || dy < best.dy) best = { node: list[n], dy: dy };
-      }
-      hit = best ? best.node : null;
-    }
-    if (!hit) return -1;
-    return list.indexOf(hit);
-  })()`;
-  try {
-    const r = await wc.executeJavaScript(script);
-    return typeof r === 'number' ? r : -1;
-  } catch {
-    return -1;
-  }
+  const { ordinal } = await locateOrdinalByPoint(wc, x, y, GEMINI_ASSISTANT_SELECTOR);
+  return ordinal;
 }
 
 /** 右键单条提取入口(Gemini)。*/

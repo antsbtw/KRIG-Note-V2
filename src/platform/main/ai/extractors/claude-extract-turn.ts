@@ -24,6 +24,7 @@
 import type { WebContents } from 'electron';
 import { mediaStore } from '../../media/media-store-impl';
 import { fetchClaudeConversationRaw } from './claude-api-extractor';
+import { locateOrdinalByPoint } from './locate-ordinal';
 import {
   getConversationData,
   type ConversationData,
@@ -482,72 +483,19 @@ type ResolvedTarget = {
 };
 
 /**
- * 在 guest 页里用 (x,y) 定位被右键的 assistant 回复,返回 { ordinal, preview }。
+ * 在 guest 页用 (x,y) 定位被右键的 assistant 回复块,返 { ordinal, preview }。
  *
- * 定位策略(V1 字面):
- *   1. elementFromPoint(x,y).closest(selector) 命中即用
- *   2. miss 时(点在回复之间的留白)按 y 距离就近匹配最近的回复块
- * ordinal=-1 表示点击不在任何 assistant 回复内(或附近)。
+ * ⭐ 2026-09-30 收口:脚本本体搬进 `web.dom` 的预注册表
+ * (`dom/locate-scripts.ts`),与 Claude / Gemini 共用同一份 ——
+ * 收口前这里与 claude-extract-turn 是**逐字节相同**的两份,
+ * 且都把坐标直接插进脚本文本(project-x-inject-template-escape 那一类)。
  */
 async function resolveAssistantTarget(
   wc: WebContents,
   x: number,
   y: number,
 ): Promise<ResolvedTarget> {
-  const script = `(function() {
-    var sel = ${JSON.stringify(CLAUDE_ASSISTANT_SELECTOR)};
-    var parts = sel.split(',').map(function(s){ return s.trim(); });
-    // 主选择器匹配优先,次选择器只补不与主匹配重叠(祖先/后代)的节点,按 DOM 顺序插入
-    var list = Array.prototype.slice.call(document.querySelectorAll(parts[0]));
-    for (var j = 1; j < parts.length; j++) {
-      var extra = document.querySelectorAll(parts[j]);
-      for (var k = 0; k < extra.length; k++) {
-        var dup = false;
-        for (var p = 0; p < list.length; p++) {
-          if (list[p].contains(extra[k]) || extra[k].contains(list[p])) { dup = true; break; }
-        }
-        if (dup) continue;
-        var inserted = false;
-        for (var p2 = 0; p2 < list.length; p2++) {
-          if (list[p2].compareDocumentPosition(extra[k]) & Node.DOCUMENT_POSITION_PRECEDING) {
-            list.splice(p2, 0, extra[k]); inserted = true; break;
-          }
-        }
-        if (!inserted) list.push(extra[k]);
-      }
-    }
-    if (list.length === 0) return { ordinal: -1, preview: '' };
-    var el = document.elementFromPoint(${x}, ${y});
-    var hit = null;
-    for (var i = 0; i < parts.length && !hit; i++) {
-      hit = el && el.closest ? el.closest(parts[i]) : null;
-    }
-    if (!hit) {
-      var best = null;
-      for (var n = 0; n < list.length; n++) {
-        var rect = list[n].getBoundingClientRect();
-        var dy = 0;
-        if (${y} < rect.top) dy = rect.top - ${y};
-        else if (${y} > rect.bottom) dy = ${y} - rect.bottom;
-        var insideBand = ${y} >= rect.top - 24 && ${y} <= rect.bottom + 24;
-        if (!insideBand && dy > 240) continue;
-        if (!best || dy < best.dy) best = { node: list[n], dy: dy };
-      }
-      hit = best ? best.node : null;
-    }
-    if (!hit) return { ordinal: -1, preview: '' };
-    var text = (hit.innerText || hit.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    return { ordinal: list.indexOf(hit), preview: text };
-  })()`;
-  try {
-    const r = await wc.executeJavaScript(script);
-    if (r && typeof r.ordinal === 'number') {
-      return { ordinal: r.ordinal, preview: typeof r.preview === 'string' ? r.preview : '' };
-    }
-    return { ordinal: -1, preview: '' };
-  } catch {
-    return { ordinal: -1, preview: '' };
-  }
+  return locateOrdinalByPoint(wc, x, y, CLAUDE_ASSISTANT_SELECTOR);
 }
 
 /**

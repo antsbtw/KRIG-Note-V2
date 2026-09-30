@@ -92,14 +92,20 @@ describe('⭐ 脚本文本只在 inject-scripts/ 里(不许在业务代码现拼
    */
   const KNOWN_DEBT = [
     'src/platform/main/ai/ai-sync-orchestrator.ts',
-    'src/platform/main/ai/extractors/chatgpt-extract-turn.ts',
     'src/platform/main/ai/extractors/claude-api-extractor.ts',
-    'src/platform/main/ai/extractors/claude-extract-turn.ts',
     'src/platform/main/ai/extractors/gemini-conversation-query.ts',
-    'src/platform/main/ai/extractors/gemini-extract-turn.ts',
     'src/platform/main/ai/extractors/gemini-full-extraction.ts',
     'src/platform/main/ai/writer.ts',
   ];
+  /**
+   * ⭐ 2026-09-30 **还掉三条**(L2 收口第 2 批):
+   * `chatgpt-extract-turn` / `claude-extract-turn` / `gemini-extract-turn`
+   * 的「按坐标定位第几条」已收进 `web.dom` 预注册表(`dom/locate-scripts.ts`),
+   * 三份实现合一(前两份原本**逐字节相同**,只差 selector 常量)。
+   *
+   * ⭐ 是本守卫**自己发现**它们已修好并要求删的 ——
+   * 「只减不增」这条规则在这次真正起了作用,不是摆设。
+   */
 
   /** 现在还在现拼脚本的文件 */
   function currentOffenders(): string[] {
