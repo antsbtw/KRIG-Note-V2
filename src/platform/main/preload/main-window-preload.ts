@@ -22,7 +22,6 @@ import type {
   ProgressDrivePayload,
 } from '@shared/ipc/backup-types';
 import type { FolderViewType } from '@capabilities/folder/types';
-import type { XPlanCacheEnvelope } from '@shared/ipc/x-types';
 import type {
   AuthState,
   AuthSendCodeInput,
@@ -632,9 +631,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send(IPC_CHANNELS.IMPORT_CACHE_RECORD_STAGE, args);
   },
   /** X 发布中间态(ArticlePlan + 渲图结果)落盘缓存,fire-and-forget,诊断用。 */
-  xPlanCacheDump(env: XPlanCacheEnvelope): void {
-    ipcRenderer.send(IPC_CHANNELS.X_PLAN_CACHE_DUMP, env);
-  },
 
   /**
    * 驱动全屏进度 overlay(renderer → main → overlay)。
@@ -937,20 +933,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.AI_SYNC_APPEND_TURN, handler);
   },
 
-  // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
   /** 按坐标定位 + 抽该条推文(返 { success, data?, error? });targetWcId 按活跃 ws 定向 */
-  xExtractTweet(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_EXTRACT_TWEET, { serviceId, x, y, targetWcId });
-  },
   /** 订阅 X webview 原生右键「提取此推文」点击(main 推 guest 坐标);返 unsubscribe */
-  onXExtractTweetRequest(
-    callback: (payload: { serviceId: string; x: number; y: number }) => void,
-  ): () => void {
-    const handler = (_event: unknown, payload: unknown): void =>
-      callback(payload as { serviceId: string; x: number; y: number });
-    ipcRenderer.on(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, handler);
-    return () => ipcRenderer.off(IPC_CHANNELS.X_EXTRACT_TWEET_REQUEST, handler);
-  },
   /** 订阅:宿主页内 iframe(tweet block 嵌入卡片)弹 x.com 链接 → 改在 X webview 打开 */
   onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void {
     const handler = (_event: unknown, payload: unknown): void =>
@@ -1008,43 +992,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke(IPC_CHANNELS.MAIL_GET, mailId);
   },
 
-  // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布) ──
   /** 发推:把纯文本填进 X compose 框(targetWcId:指定注入目标 guest wc,本活跃 ws 的 X)。
    *  mediaUrls(阶段 2.5-b,路线 B):note 图的 media:// 数组,main 侧解析磁盘路径后先喂图再填字。
    *  videoUrls(阶段 2.5-b 视频):note 视频源(media:// / 绝对路径),main 侧解析后走视频喂文件(转码 poll)。*/
-  xPasteTweet(serviceId: string, text: string, targetWcId?: number, mediaUrls?: string[], videoUrls?: string[]): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_TWEET, { serviceId, text, targetWcId, mediaUrls, videoUrls });
-  },
   /** 回复:导航到目标推 + 把纯文本填进 reply 框(targetWcId:指定注入目标 guest wc)。
    *  mediaUrls / videoUrls(阶段 2.5-b):同 xPasteTweet。*/
-  xPasteReply(serviceId: string, tweetUrl: string, text: string, targetWcId?: number, mediaUrls?: string[], videoUrls?: string[]): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_PASTE_REPLY, { serviceId, tweetUrl, text, targetWcId, mediaUrls, videoUrls });
-  },
   /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
    *  ⚠️ 写方向红线:只插内容,绝不程序点 Publish。 */
-  xDriveArticle(serviceId: string, plan: unknown, targetWcId?: number, taskId?: string): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_DRIVE_ARTICLE, { serviceId, plan, targetWcId, taskId });
-  },
   /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。 */
-  xTestDriveStep(serviceId: string, step: unknown, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, step, targetWcId });
-  },
   /** 连续驱动多块(诊断块边界,如 media 后紧跟标题的重复/失格;dev 用)。 */
-  xTestDriveSequence(serviceId: string, steps: unknown[], targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_TEST_DRIVE_STEP, { serviceId, steps, targetWcId });
-  },
   /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
-  xDragArm(targetWcId: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_ARM, { targetWcId });
-  },
   /** 拖拽:松手,读回最后坐标 + 解析落点 */
-  xDragResolve(serviceId: string, targetWcId: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_RESOLVE, { serviceId, targetWcId });
-  },
   /** 拖拽落推文:就地点该推回复按钮弹 reply 框(不跳详情页)*/
-  xDragReplyHere(serviceId: string, targetWcId: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_DRAG_REPLY_HERE, { serviceId, targetWcId });
-  },
   // ── Workspace 楼长 IPC（S3-a）──
   workspaceCreate(label?: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_CREATE, label);
@@ -1158,157 +1117,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off(IPC_CHANNELS.PROGRESS_DONE, handler);
   },
 
-  // ── X 时间线智能筛选 Review Queue（Phase 2）──
-  xTimeline: {
-    queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_QUERY, opts);
-    },
-    /** 侧栏徽章:一次问完各视图条数（只回整数，不拉行） */
-    countInbox(slices: Array<{ key: string; filter: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; excludeHidden?: boolean; replied?: boolean } }>) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_INBOX_COUNTS, { slices });
-    },
-    runRecipe(recipeId: string, wsId: string, targetWcId: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_RUN_RECIPE, { recipeId, wsId, targetWcId });
-    },
-    pauseScan(wsId: string) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_SCAN_PAUSE, { wsId });
-    },
-    judgeNow(wsId: string) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_AI_JUDGE_BATCH, { wsId });
-    },
-    listRecipes() {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_LIST_RECIPES);
-    },
-    getActiveWcId(wsId: string) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_GET_ACTIVE_WC, { wsId });
-    },
-
-    /** 强制指定 guest 全量重绘(解 display:none 复出后带旧帧的问题)*/
-    invalidateWc(wcId: number): Promise<{ success: boolean; error?: string }> {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_INVALIDATE_WC, { wcId });
-    },
-    replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_TWEET, { tweetUrl, tweetId, wsId, wcId });
-    },
-    /** 规划回复草稿(只产草稿,不发布 —— 填进 X 仍走 pasteReply,发布永远由用户点) */
-    planReplies(wsId: string, tweetIds?: string[], limit?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_REPLIES, { wsId, tweetIds, limit });
-    },
-    /** 回放:拿历史人工标注样本跑规划器(只算不发、不写库,附与人工的一致率) */
-    replayReplies(wsId: string, accept?: number, reject?: number, lang?: string) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLAY_REPLIES, { wsId, accept, reject, lang });
-    },
-    /** 为单条推文现写回复(卡片弹窗;只产草稿,发布永远由用户点) */
-    planOneReply(wsId: string, tweetId: string, wcId?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PLAN_ONE_REPLY, { wsId, tweetId, wcId });
-    },
-    /** 记学习期反馈(AI 原文 vs 用户最终发的) */
-    submitReplyFeedback(payload: unknown) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_FEEDBACK, payload);
-    },
-    /** 分语言原样通过率(放手自动的判据) */
-    replyReadiness() {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_REPLY_READINESS);
-    },
-    /** 追踪名单增删查(≠ X 的关注) */
-    watchlist(op: 'list' | 'add' | 'remove', handle?: string, note?: string) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST, { op, handle, note });
-    },
-    /** 给「Gemma 建议采纳」的推批量预抓上文(①闸门的输入) */
-    prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number,
-                    status?: string, humanReviewed?: boolean, statuses?: string[]) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_CONTEXT,
-        { wsId, wcId, limit, offset, status, humanReviewed, statuses });
-    },
-    /** 给建议名单批量预采账号画像(②活跃度的事实来源) */
-    prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number,
-                     status?: string, humanReviewed?: boolean, statuses?: string[]) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_PREFETCH_PROFILES,
-        { wsId, wcId, limit, offset, status, humanReviewed, statuses });
-    },
-    /** ⭐ 回看草稿(含已处置的)—— 「回头改点评」用 */
-    listDrafts: (wsId?: string, status?: string, limit?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_DRAFTS, { wsId, status, limit }),
-    /** ⭐ 补/改点评 —— ⚠️ 不改状态,已发送的照样能补 */
-    reviewDraft: (tweetId: string, note?: string, finalText?: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_REVIEW_DRAFT, { tweetId, note, finalText }),
-    /** ⭐ 产品事实清单 —— 模型唯一能引用的信源,用户可随时改 */
-    getProductFacts: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_PRODUCT_FACTS),
-    saveProductFacts: (facts: unknown) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_SAVE_PRODUCT_FACTS, { facts }),
-    submitFeedback: (payload: unknown) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_SUBMIT_FEEDBACK, payload),
-    queryFeedback: (payload: unknown) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_QUERY_FEEDBACK, payload),
-    upsertRecipe: (payload: unknown) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_UPSERT_RECIPE, payload),
-    deleteRecipe: (recipeId: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_DELETE_RECIPE, { recipeId }),
-    getRecipeStats: (recipeId: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_GET_RECIPE_STATS, { recipeId }),
-    feedbackStats: () =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_FEEDBACK_STATS),
-    markReplied: (tweetId: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_MARK_REPLIED, { tweetId }),
-    // 屏蔽名单（B 期）——「不再爬他的新推」，已抓历史保留
-    blockAuthor: (handle: string, reason?: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_BLOCK_AUTHOR, { handle, reason }),
-    unblockAuthor: (handle: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_UNBLOCK_AUTHOR, { handle }),
-    listBlocked: () =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_BLOCKED),
-    // per-ws 角色配置(活动契约)—— 用户在 UI 里自己设定
-    getWsRoles: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_WS_ROLES),
-    setWsRole: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.X_SET_WS_ROLE, payload),
-    listArticles: (wcId?: number, wsId?: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_LIST_ARTICLES, { wcId, wsId }),
-    fetchArticleReplies: (payload: unknown) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_ARTICLE_REPLIES, payload),
-    harvestNotifications: (wsId: string, wcId?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST_NOTIFICATIONS, { wsId, wcId }),
-    campaignStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAMPAIGN_STATUS),
-    startNotifWatch: (wsId: string, wcId?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_NOTIF_WATCH_START, { wsId, wcId }),
-    stopNotifWatch: () => ipcRenderer.invoke(IPC_CHANNELS.X_NOTIF_WATCH_STOP),
-    onNotifWatchUpdate: (cb: (snap: unknown) => void) => {
-      const h = (_e: unknown, snap: unknown) => cb(snap);
-      ipcRenderer.on(IPC_CHANNELS.X_NOTIF_WATCH_UPDATE, h);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.X_NOTIF_WATCH_UPDATE, h);
-    },
-    /** 探测当前登录的 X 账号并标记 is_self(自己发的推不进面板) */
-    detectSelf: (wcId?: number, wsId?: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_DETECT_SELF, { wcId, wsId }),
-    getSelf: () =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_GET_SELF),
-    /** 采集回复关系并回填 replied(主线第一环) */
-    /** 被动采集监视:开始/停止 + 实时快照订阅 */
-    captureStart: (wcId?: number) => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_START, { wcId }),
-    captureStop: () => ipcRenderer.invoke(IPC_CHANNELS.X_CAPTURE_STOP),
-    /** 抓单个账号画像(盯人面板的 bio 卡片)。⚠️ 会导航,故由人手动触发 */
-    fetchAuthorProfile(handle: string, wcId?: number) {
-      return ipcRenderer.invoke(IPC_CHANNELS.X_FETCH_PROFILE, { handle, wcId });
-    },
-    onCaptureUpdate: (cb: (snap: unknown) => void) => {
-      const h = (_e: unknown, snap: unknown): void => cb(snap);
-      ipcRenderer.on(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
-      return () => ipcRenderer.off(IPC_CHANNELS.X_CAPTURE_UPDATE, h);
-    },
-    /** 订阅全量采集进度(长任务不能是黑箱) */
-    onHarvestProgress: (cb: (p: unknown) => void) => {
-      const h = (_e: unknown, p: unknown): void => cb(p);
-      ipcRenderer.on(IPC_CHANNELS.X_HARVEST_PROGRESS, h);
-      return () => ipcRenderer.off(IPC_CHANNELS.X_HARVEST_PROGRESS, h);
-    },
-    /** 通用时间线采集(滚到底 + 自校验);只读不落库 */
-    harvest: (url: string, wcId?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_HARVEST, { url, wcId }),
-    collectReplies: (handle: string, wcId?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_COLLECT_REPLIES, { handle, wcId }),
-    /** 勘查 X GraphQL 原始载荷字段(能力边界的真实依据);只读不落库 */
-    payloadSurvey: (wcId?: number, seconds?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_PAYLOAD_SURVEY, { wcId, seconds }),
-    /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
-    watchlistSpike: (handle: string, wcId?: number, maxRounds?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.X_WATCHLIST_SPIKE, { handle, wcId, maxRounds }),
-  },
 });

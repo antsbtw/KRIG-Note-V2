@@ -22,7 +22,6 @@ import type {
   CreateNoteBatchResult,
 } from './note-batch-types';
 import type { PmAtomInfo, PmDocEnvelope } from './pm-content-types';
-import type { XPlanCacheEnvelope } from './x-types';
 import type { ThoughtInfo, ThoughtAnchor, ThoughtSource } from './thought-types';
 import type {
   AIAskOptions,
@@ -698,8 +697,6 @@ declare global {
         elapsedMs?: number;
         meta?: Record<string, unknown>;
       }): void;
-      /** X 发布中间态(ArticlePlan + 渲图结果)落盘缓存,fire-and-forget,诊断用。 */
-      xPlanCacheDump(env: XPlanCacheEnvelope): void;
 
       /** 驱动全屏进度 overlay(renderer 端长任务复用,fire-and-forget)*/
       driveProgress(payload: ProgressDrivePayload): void;
@@ -904,35 +901,6 @@ declare global {
       /** main → renderer 推送:某 turn 完成,view 端追加到当前右槽 Note;返 unsubscribe */
       onAISyncAppendTurn(callback: (payload: AISyncAppendTurnPayload) => void): () => void;
 
-      // ── X(Twitter)集成(阶段 1:右键 X webview 提取推文 → tweetBlock 落 Note) ──
-      /** 按 guest viewport 坐标定位 + 抽该条推文 */
-      xExtractTweet(
-        serviceId: XServiceId,
-        x: number,
-        y: number,
-        targetWcId?: number,
-      ): Promise<{
-        success: boolean;
-        data?: {
-          authorName?: string;
-          authorHandle?: string;
-          authorAvatar?: string;
-          text?: string;
-          createdAt?: string;
-          lang?: string;
-          media?: Array<{ type: 'image' | 'video'; url: string; thumbUrl?: string }>;
-          metrics?: { replies?: number; retweets?: number; likes?: number; views?: number };
-          quotedTweet?: string;
-          inReplyTo?: string;
-          tweetUrl?: string;
-          tweetId?: string;
-        };
-        error?: string;
-      }>;
-      /** main → renderer 推送:X webview 原生右键「提取此推文」点击,带 guest 坐标;返 unsubscribe */
-      onXExtractTweetRequest(
-        callback: (payload: { serviceId: XServiceId; x: number; y: number }) => void,
-      ): () => void;
       /** main → renderer 推送:宿主 iframe(tweet 卡片)弹 x.com 链接 → 改在 X webview 打开;返 unsubscribe */
       onXOpenTweetRequest(callback: (payload: { url: string }) => void): () => void;
 
@@ -990,64 +958,13 @@ declare global {
       /** 取单封全文 */
       mailGet(mailId: string): Promise<MailRecord | null>;
 
-      // ── X 集成 阶段 2(写方向:发推 / 回复 — 填充内容,用户点发布,绝不程序自动发布) ──
       /** 发推:把纯文本填进 X compose 框(返 success / publishReady,不代表已发布)。
        *  mediaUrls(阶段 2.5-b):note 图 media:// 数组,main 侧解析路径后先喂图再填字;
        *  mediaWarning 非空 = 文字落地但图没带上(fail loud 降级提示)。 */
-      xPasteTweet(
-        serviceId: XServiceId,
-        text: string,
-        targetWcId?: number,
-        mediaUrls?: string[],
-        videoUrls?: string[],
-      ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
       /** 回复:导航到目标推 + 把纯文本填进 reply 框(返 success / publishReady,不代表已发布)。
        *  mediaUrls / videoUrls(阶段 2.5-b):同 xPasteTweet。 */
-      xPasteReply(
-        serviceId: XServiceId,
-        tweetUrl: string,
-        text: string,
-        targetWcId?: number,
-        mediaUrls?: string[],
-        videoUrls?: string[],
-      ): Promise<{ success: boolean; error?: string; publishReady?: boolean; mediaWarning?: string }>;
       /** 发长文:驱动 X 原生 Insert(终态,2026-06-13)。plan = renderer buildArticlePlan 产物。
        *  ⚠️ 只插内容,绝不程序点 Publish。warnings 非空 = 部分块降级/失败(fail loud,用户手动补)。 */
-      xDriveArticle(
-        serviceId: XServiceId,
-        plan: ArticlePlan,
-        targetWcId?: number,
-        taskId?: string,
-      ): Promise<{ success: boolean; error?: string; drivenSteps?: number; warnings?: string[] }>;
-      /** 逐块底层测试:独立驱动一个块 + 验证完整落定(dev 用)。media 的 mediaUrl 可传磁盘绝对路径。 */
-      xTestDriveStep(
-        serviceId: XServiceId,
-        step: ArticleInsertStep,
-        targetWcId?: number,
-      ): Promise<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string; error?: string }>;
-      /** 连续驱动多块(诊断块边界,如 media 后紧跟标题的重复/失格;dev 用)。 */
-      xTestDriveSequence(
-        serviceId: XServiceId,
-        steps: ArticleInsertStep[],
-        targetWcId?: number,
-      ): Promise<{ error?: string; results: Array<{ ok: boolean; blockDelta: number; landed: boolean; contentOk: boolean; warning?: string }>; finalBlockCount: number }>;
-      /** 拖拽:note 拖起,往指定 X guest 装 mousemove 监听(记录最后坐标)*/
-      xDragArm(targetWcId: number): Promise<{ ok: boolean }>;
-      /** 拖拽:松手,读回最后坐标 + 解析落点(compose / tweet / other / none)*/
-      xDragResolve(
-        serviceId: XServiceId,
-        targetWcId: number,
-      ): Promise<
-        | { kind: 'compose' }
-        | { kind: 'tweet'; author: string | null; statusHref: string | null; hasReplyButton: boolean }
-        | { kind: 'other' }
-        | { kind: 'none' }
-      >;
-      /** 拖拽落推文:就地点该推回复按钮弹 reply 框(不跳详情页)*/
-      xDragReplyHere(
-        serviceId: XServiceId,
-        targetWcId: number,
-      ): Promise<{ ok: boolean; error?: string }>;
 
       // ── 账号登录 + 归因(本期不做授权) ──
       // renderer 永远只拿 public AuthState(不含 token);邮箱注册两步(先 authSendCode 拿码)。
@@ -1095,236 +1012,6 @@ declare global {
       /** main → renderer 广播：ws 状态变化；返 unsubscribe */
       onWorkspaceStateChanged(callback: (state: unknown) => void): () => void;
 
-      // ── X 时间线智能筛选 Review Queue（Phase 2）──
-      xTimeline: {
-        queryInbox(opts: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; orderBy?: string; limit?: number; offset?: number; excludeHidden?: boolean; replied?: boolean }): Promise<{ success: boolean; records: import('@shared/types/x-timeline-types').TweetInboxRecord[]; error?: string }>;
-        /** 侧栏徽章:一次问完各视图条数（只回整数，不拉行） */
-        countInbox(slices: Array<{ key: string; filter: { status?: string; statuses?: string[]; wsId?: string; lang?: string; searchRecipe?: string; taskId?: string; humanReviewed?: boolean; excludeHidden?: boolean; replied?: boolean } }>): Promise<{ success: boolean; counts: Record<string, number>; error?: string }>;
-        runRecipe(recipeId: string, wsId: string, targetWcId: number): Promise<{ success: boolean; fetched?: number; saved?: number; filteredOut?: number; error?: string }>;
-        pauseScan(wsId: string): Promise<void>;
-        judgeNow(wsId: string): Promise<{ success: boolean; judged?: number; worth?: number; remaining?: number; draining?: boolean; error?: string }>;
-        listRecipes(): Promise<{ success: boolean; recipes: import('@shared/types/x-timeline-types').SearchRecipe[]; error?: string }>;
-        getActiveWcId(wsId: string): Promise<{ wcId: number | null }>;
-        /** 强制 guest 全量重绘(display:none 复出后带旧帧) */
-        invalidateWc(wcId: number): Promise<{ success: boolean; error?: string }>;
-        replyToTweet(tweetUrl: string, tweetId: string, wsId: string, wcId?: number): Promise<{ success: boolean; error?: string }>;
-        /** 规划回复草稿(只产草稿,不发布) */
-        planReplies(wsId: string, tweetIds?: string[], limit?: number): Promise<{
-          success: boolean;
-          drafts?: import('@shared/types/x-reply-types').ReplyDraft[];
-          skips?: import('@shared/types/x-reply-types').ReplySkip[];
-          scanned?: number;
-          error?: string;
-        }>;
-        /** 回放历史标注样本(只算不发、不写库);score = 与人工判断的对账 */
-        replayReplies(wsId: string, accept?: number, reject?: number, lang?: string): Promise<{
-          success: boolean;
-          drafts?: import('@shared/types/x-reply-types').ReplyDraft[];
-          skips?: import('@shared/types/x-reply-types').ReplySkip[];
-          scanned?: number;
-          score?: { tp: number; fp: number; tn: number; fn: number; precision: number | null; recall: number | null };
-          error?: string;
-        }>;
-        /** 为单条推文现写回复(只产草稿) */
-        planOneReply(wsId: string, tweetId: string, wcId?: number): Promise<{
-          success: boolean;
-          draft?: import('@shared/types/x-reply-types').ReplyDraft | null;
-          skip?: import('@shared/types/x-reply-types').ReplySkip | null;
-          error?: string;
-        }>;
-        /** 记学习期反馈 */
-        submitReplyFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
-        /** 分语言原样通过率 */
-        replyReadiness(): Promise<{
-          success: boolean;
-          readiness?: Array<{ lang: 'zh' | 'en'; filled: number; unedited: number; passRate: number; ready: boolean }>;
-          error?: string;
-        }>;
-        /** 追踪名单增删查(≠ X 的关注) */
-        watchlist(op: 'list' | 'add' | 'remove' | 'candidates' | 'watch-accepted', handle?: string, note?: string): Promise<{
-          success: boolean;
-          watched?: Array<{
-            handle: string; watchedAt?: string; watchSource?: string;
-            watchDepth: number; note?: string;
-            stats?: { seenTweets: number; repliedCount: number; acceptedCount: number;
-                      firstSeen?: string; lastSeen?: string } | null;
-          }>;
-          /** op='candidates' 时返回:从已有数据里挑的候选(按回过次数排) */
-          candidates?: Array<{ handle: string; repliedCount: number; seenTweets: number }>;
-          /** op='watch-accepted' 时返回 */
-          bulk?: { added: number; skipped: number };
-          error?: string;
-        }>;
-        /** 给建议名单批量预抓上文 */
-        prefetchContext(wsId: string, wcId?: number, limit?: number, offset?: number,
-                        status?: string, humanReviewed?: boolean, statuses?: string[]): Promise<{
-          success: boolean;
-          scanned?: number; isReply?: number; attempted?: number; fetched?: number; missed?: number; remaining?: number;
-          error?: string;
-        }>;
-        /** 给建议名单批量预采画像 */
-        prefetchProfiles(wsId: string, wcId?: number, limit?: number, offset?: number,
-                         status?: string, humanReviewed?: boolean, statuses?: string[]): Promise<{
-          success: boolean;
-          authors?: number; fetched?: number; cached?: number; failed?: number; remaining?: number;
-          mechanismSuspect?: boolean; maxConsecutive?: number; errors?: string[];
-          error?: string;
-        }>;
-        /** ⭐ 回看草稿(含已处置的)—— 「回头改点评」用 */
-        listDrafts(wsId?: string, status?: string, limit?: number): Promise<{
-          success: boolean; drafts?: Array<Record<string, unknown>>; error?: string;
-        }>;
-        /** ⭐ 补/改点评 —— ⚠️ 不改状态,已发送的照样能补 */
-        reviewDraft(tweetId: string, note?: string, finalText?: string): Promise<{
-          success: boolean; updated?: number; error?: string;
-        }>;
-        /** ⭐ 产品事实清单 —— 模型唯一能引用的信源,用户可随时改 */
-        getProductFacts(): Promise<{
-          success: boolean;
-          facts?: import('@shared/types/x-reply-facts').ProductFacts & {
-            updatedAt?: string;
-            /** ⭐ 'default' = 还没设过,用的是代码默认值 */
-            source: 'db' | 'default';
-          };
-          error?: string;
-        }>;
-        saveProductFacts(facts: import('@shared/types/x-reply-facts').ProductFacts): Promise<{
-          success: boolean;
-          /** ⭐ 存完回读的结果 —— 「成功要对账」,不是只报一句成功 */
-          facts?: import('@shared/types/x-reply-facts').ProductFacts & {
-            updatedAt?: string; source: 'db' | 'default';
-          };
-          error?: string;
-        }>;
-        submitFeedback(payload: unknown): Promise<{ success: boolean; error?: string }>;
-        queryFeedback(payload: unknown): Promise<{ success: boolean; samples: import('@shared/types/x-timeline-types').TweetFeedback[]; error?: string }>;
-        upsertRecipe(payload: Partial<import('@shared/types/x-timeline-types').SearchRecipe> & { id?: string }): Promise<{ success: boolean; recipe: import('@shared/types/x-timeline-types').SearchRecipe; error?: string }>;
-        deleteRecipe(recipeId: string): Promise<{ success: boolean; error?: string }>;
-        getRecipeStats(recipeId: string): Promise<{ success: boolean; stats: { recipeId: string; total: number; gemmaPass: number; adopted: number; rejected: number; adoptRate: number }; error?: string }>;
-        feedbackStats(): Promise<{ success: boolean; stats: { suggestedTotal: number; suggestedAccepted: number; rescuedFn: number } | null; error?: string }>;
-        markReplied(tweetId: string): Promise<{ success: boolean; error?: string }>;
-        /** 屏蔽某作者：只约束未来采集，已抓的历史推文保留 */
-        blockAuthor(handle: string, reason?: string): Promise<{ success: boolean; error?: string }>;
-        unblockAuthor(handle: string): Promise<{ success: boolean; error?: string }>;
-        detectSelf(wcId?: number, wsId?: string): Promise<{ success: boolean; error?: string; handle?: string; via?: string | null; tried?: string[] }>;
-        getSelf(): Promise<{ success: boolean; error?: string; handle: string | null }>;
-        /** 采集回复关系并回填 replied(主线第一环) */
-        captureStart(wcId?: number): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
-        captureStop(): Promise<{ success: boolean; error?: string; snapshot?: XCaptureSnapshot }>;
-        onCaptureUpdate(cb: (snap: XCaptureSnapshot) => void): () => void;
-        /**
-         * 抓单个账号的画像（盯人面板顶部的 bio 卡片）。
-         * ⚠️ 会导航到 /{handle}，打断左侧当前浏览 —— 故由人手动触发，不自动跑。
-         */
-        fetchAuthorProfile(handle: string, wcId?: number): Promise<{
-          success: boolean;
-          error?: string;
-          profile?: {
-            handle: string; displayName?: string; bio?: string;
-            location?: string; website?: string; isBlueVerified?: boolean;
-            followersCount?: number; followingCount?: number; tweetCount?: number;
-            iFollow?: boolean; followsMe?: boolean; blocking?: boolean;
-          };
-        }>;
-        onHarvestProgress(cb: (p: { url: string; round: number; maxRounds: number; captured: number; payloads: number; scrollY: number; stuck: number; oldest?: string }) => void): () => void;
-        harvest(url: string, wcId?: number): Promise<{
-          success: boolean; error?: string;
-          report?: {
-            url: string; ok: boolean; problems: string[];
-            rounds: number; payloads: number; tweets: number;
-            dateSpan: { oldest?: string; newest?: string; days: number; gaps: string[] };
-            stopReason: string;
-            sample: Array<{ tweetId: string; authorHandle?: string; text: string; createdAt?: string }>;
-            trace: Array<{ round: number; scrollY: number; docHeight: number; domArticles: number; cumulative: number; newThisRound: number; stuck: number }>;
-          };
-        }>;
-        collectReplies(handle: string, wcId?: number): Promise<{
-          success: boolean; error?: string;
-          result?: {
-            rounds: number; payloads: number; relations: number; savedOnReplies: number;
-            ownReplies: number; ownSaved: { inserted: number; skipped: number };
-            stopReason: string; problems: string[];
-            oldestDays: number | null; dumpPath?: string;
-            backfill: { received: number; markedReplied: number; amongAccepted: number; parentNotInDb: number };
-          };
-          stats?: { repliedAccepted: number; totalAccepted: number };
-          coverage?: { count: number; posts: number; replies: number; oldest: string | null; newest: string | null; spanDays: number | null };
-          baseline?: { tweetCount?: number; mediaCount?: number; followersCount?: number; followingCount?: number; favouritesCount?: number; countsAt?: string };
-        }>;
-        /** 勘查 X GraphQL 原始载荷字段;只读不落库 */
-        payloadSurvey(wcId?: number, seconds?: number): Promise<{
-          success: boolean; error?: string;
-          result?: {
-            reportPath: string; rawPath: string;
-            totalPayloads: number; note: string;
-            operations: Array<{ name: string; count: number; bytes: number }>;
-            fields: Array<{ path: string; count: number; sample: string }>;
-            relationFields: Array<{ path: string; count: number; sample: string }>;
-          };
-        }>;
-        /** 「取某账号全部发言」实机诊断(画像基础方法);只读不落库 */
-        watchlistSpike(handle: string, wcId?: number, maxRounds?: number): Promise<{
-          success: boolean; error?: string;
-          result?: {
-            relationProbe: Array<{ tweetId: string; replyingTo: string | null; parentId: string | null }>;
-            handle: string; url: string; stopReason: string;
-            totalItems: number; selfItems: number; replyItems: number; threadLineItems: number; socialItems: number;
-            rounds: Array<{ round: number; domCount: number; cumulative: number; newIds: number; oldest: string | null; spanDays: number | null }>;
-            adjacency: { checked: number; precededByOther: number; precededBySelf: number; atTop: number };
-            samples: Array<{ idx: number; tweetId: string | null; handle: string; isSelf: boolean; createdAt: string | null; replyingTo: string | null; relSignals: { articleAttrs?: Record<string, string>; ancestorAttrs?: Array<Record<string, string>>; statusLinks?: string[]; err?: string }; ariaReply: string | null; social: string | null; text: string }>;
-          };
-        }>;
-        getWsRoles(): Promise<{
-          success: boolean; error?: string;
-          roles: Array<{ wsId: string; role: string; articleId?: string;
-            servesRefresh?: boolean; intervalMinutes?: number }>;
-          accounts?: Array<{ wsId: string; handle: string; restId?: string; detectedAt?: string }>;
-        }>;
-        setWsRole(payload: { wsId: string; role: string; articleId?: string;
-          servesRefresh?: boolean; intervalMinutes?: number }): Promise<{ success: boolean; error?: string }>;
-        listArticles(wcId?: number, wsId?: string): Promise<{
-          success: boolean; error?: string;
-          articles?: Array<{ tweetId: string; text: string; createdAt?: string }>;
-        }>;
-        fetchArticleReplies(payload: { wsId?: string; articleId: string; wcId?: number; budgetMs?: number }): Promise<{
-          success: boolean; error?: string;
-          saved?: { inserted: number; changed: number; unchanged: number };
-          markedDeleted?: number;
-          stats?: { total: number; withMedia: number; unpushed: number; deleted: number };
-          result?: {
-            articleId: string; fetched: number; hintFound: boolean; partial: boolean;
-            elapsedMs: number; problems: string[];
-            items: Array<{ tweet_id: string; kind: string; x_uid?: string; username: string;
-              has_media: boolean; created_at: string; in_reply_to_tweet_id?: string; text_excerpt?: string }>;
-          };
-        }>;
-        harvestNotifications(wsId: string, wcId?: number): Promise<{
-          success: boolean; error?: string; owner?: string;
-          saved?: { inserted: number; existing: number };
-          stats?: Record<string, number>;
-          verify?: {
-            articleId: string; excluded: number;
-            like: VerifyRow[]; retweet: VerifyRow[]; reply: VerifyRow[]; quote: VerifyRow[];
-          };
-          result?: { payloads: number; rounds: number; problems: string[];
-            interactions: Array<{ kind: string; actorUid: string; actorHandle?: string;
-              targetId: string; notifiedAt?: string; message?: string }> };
-        }>;
-        startNotifWatch(wsId: string, wcId?: number): Promise<{
-          success: boolean; error?: string; snapshot?: NotifWatchSnapshot }>;
-        stopNotifWatch(): Promise<{ success: boolean; error?: string; snapshot?: NotifWatchSnapshot }>;
-        onNotifWatchUpdate(cb: (snap: NotifWatchSnapshot) => void): () => void;
-        campaignStatus(): Promise<{
-          success: boolean; error?: string; serverRunning?: boolean;
-          config?: { configured: boolean; importUrl?: string; hasSecret: boolean;
-            refreshBind: string; refreshPort: number; filePath: string };
-        }>;
-        listBlocked(): Promise<{
-          success: boolean;
-          error?: string;
-          authors: Array<{ handle: string; displayName?: string; blockedAt?: string; blockedReason?: string }>;
-        }>;
-      };
     };
   }
 }

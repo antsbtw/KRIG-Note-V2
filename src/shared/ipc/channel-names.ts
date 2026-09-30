@@ -263,21 +263,15 @@ export const IPC_CHANNELS = {
   AI_SYNC_STOP: 'ai-sync.stop',                     // renderer → main:停止 ai-sync(serviceId)
   AI_SYNC_APPEND_TURN: 'ai-sync.append-turn',       // main → renderer 推送一个新完成的 turn
 
-  // X(Twitter)集成(阶段 0/1)— X = AI view「左 note / 右 slot」模式里的一个新服务,
-  // 复用 web-service-base 底座,走独立 X 代码路径(铁律 1/3)。
-  X_EXTRACT_TWEET: 'x.extract-tweet',               // renderer → main:按坐标定位 + 抽该条推文(返 tweet 字段)
-  X_EXTRACT_TWEET_REQUEST: 'x.extract-tweet-request', // main → renderer 推送:X webview 原生右键点击,带 guest 坐标 {x,y}
+  /**
+   * ⭐ 名字带 X,但**不属于 X 模块** —— 别当漏删的残留删掉(2026-09-30)。
+   *
+   * 它是 **note 的 tweet block** 的能力:note 里嵌的官方推文卡片
+   * (platform.twitter.com iframe)点「Read replies」时,window.open 冒到宿主
+   * webContents,Electron 默认会开一个无登录态的裸 BrowserWindow 飞出工作空间。
+   * 见 `window/main-window.ts:94`。X 模块卸载后这条依然要在。
+   */
   X_OPEN_TWEET_REQUEST: 'x.open-tweet-request',      // main → renderer 推送:宿主页内 iframe(tweet block 嵌入)弹 x.com 链接,改在 X webview 打开
-  // X 集成 阶段 2(写方向)— 注入「填充内容,用户点发布」(绝不程序点发布)
-  X_PASTE_TWEET: 'x.paste-tweet',                   // renderer → main:把纯文本填进 X compose 框(发推)
-  X_PASTE_REPLY: 'x.paste-reply',                   // renderer → main:导航到目标推 + 把纯文本填进 reply 框(回复)
-  X_DRIVE_ARTICLE: 'x.drive-article',               // renderer → main:驱动 X 原生 Insert 发长文(终态,2026-06-13;只插内容绝不点 Publish)
-  X_PLAN_CACHE_DUMP: 'x-plan-cache.dump',           // renderer → main:发布中间态(ArticlePlan+渲图结果)落盘缓存,fire-and-forget,诊断用
-  X_TEST_DRIVE_STEP: 'x.test-drive-step',           // renderer → main:逐块底层测试(独立驱动一个块 + 验证完整落定),dev 用
-  // 拖拽落点(拖 note block 到 X)— renderer → main
-  X_DRAG_ARM: 'x.drag-arm',                          // note 拖起:往 X guest 装 mousemove 监听记录最后坐标
-  X_DRAG_RESOLVE: 'x.drag-resolve',                  // 松手:读回最后坐标 + 解析落点(compose/tweet/...)
-  X_DRAG_REPLY_HERE: 'x.drag-reply-here',            // 落推文:就地点该推回复按钮弹 reply 框(不跳详情页)
 
   // 邮箱模块(阶段 0:webview 薄壳)— 内嵌网页版邮箱 + 右键提取单封邮件到 note。
   // 数据层(IMAP/SMTP → SurrealDB)是阶段 1,不走这些通道。
@@ -323,59 +317,6 @@ export const IPC_CHANNELS = {
   // main → renderer 广播（create/update/delete 后）
   PROFILE_LIST_CHANGED: 'profile.list-changed',
 
-  // X 时间线智能筛选（Phase 1 + Phase 2）— 搜索配方驱动采集 + AI 判断 + Review Queue
-  X_RUN_RECIPE:      'x:run-recipe',       // renderer → main invoke：手动触发指定配方（recipeId + wsId）
-  X_SCAN_PAUSE:      'x:scan-pause',       // renderer → main invoke：暂停指定 ws 扫描（Phase 2: 改为 invoke + wsId）
-  X_AI_JUDGE_BATCH:  'x:ai-judge-batch',  // renderer → main invoke / main 内部触发批判断
-  X_INBOX_QUERY:     'x:inbox-query',      // renderer → main invoke：查询 tweet_inbox（支持 wsId 过滤）
-  X_INBOX_COUNTS:    'x:inbox-counts',     // renderer → main invoke：批量数各视图条数（侧栏徽章，只回整数不回行）
-  X_LIST_RECIPES:    'x:list-recipes',     // renderer → main invoke：取所有配方
-  X_REPLY_TWEET:     'x:reply-tweet',      // renderer → main invoke：导航 X webview 到目标推文（wsId + tweetUrl）
-  X_PLAN_REPLIES:    'x:plan-replies',     // renderer → main invoke：给一批推文规划回复草稿（只产草稿，不发布）
-  X_REPLAY_REPLIES:  'x:replay-replies',   // renderer → main invoke：拿历史标注样本回放规划器（只算不发，不写库）
-  X_REPLY_FEEDBACK:  'x:reply-feedback',   // renderer → main invoke：记学习期反馈（AI 原文 vs 用户改成什么）
-  X_REPLY_READINESS: 'x:reply-readiness',  // renderer → main invoke：分语言原样通过率（放手自动的判据）
-  X_WATCHLIST:       'x:watchlist',        // renderer → main invoke：追踪名单增删查（≠ X 的关注）
-  X_PREFETCH_CONTEXT: 'x:prefetch-context',   // renderer → main invoke：给建议名单批量预抓上文
-  X_PREFETCH_PROFILES: 'x:prefetch-profiles', // renderer → main invoke：给建议名单批量预采画像
-  // ⭐ 产品事实清单 —— 用户要能随时改口径(2026-09-26)
-  X_GET_PRODUCT_FACTS: 'x:get-product-facts',   // renderer → main invoke：读当前口径
-  X_SAVE_PRODUCT_FACTS: 'x:save-product-facts', // renderer → main invoke：存新口径
-  // ⭐ 回看草稿并点评 —— 已发送的也能回头改（用户 2026-09-26 的「迭代」）
-  X_LIST_DRAFTS: 'x:list-drafts',     // renderer → main invoke：回看草稿（含已处置的）
-  X_REVIEW_DRAFT: 'x:review-draft',   // renderer → main invoke：补/改点评
-  X_PLAN_ONE_REPLY:  'x:plan-one-reply',   // renderer → main invoke：为单条推文现写回复（卡片弹窗用）
-  X_GET_ACTIVE_WC:   'x:get-active-wc',   // renderer → main invoke：取指定 ws 当前活跃 wcId
-  X_INVALIDATE_WC:   'x:invalidate-wc',   // renderer → main：强制 guest 全量重绘(见 x-timeline-handlers)
-  X_SUBMIT_FEEDBACK: 'x:submit-feedback', // renderer → main invoke：写入人工 verdict
-  X_QUERY_FEEDBACK:  'x:query-feedback',  // renderer → main invoke：查询 feedback 样本（Phase 3b 用）
-  X_UPSERT_RECIPE:   'x:upsert-recipe',   // renderer → main invoke：新建或更新配方
-  X_DELETE_RECIPE:   'x:delete-recipe',   // renderer → main invoke：删除配方
-  X_GET_RECIPE_STATS:'x:get-recipe-stats',// renderer → main invoke：查配方采纳率统计
-  X_FEEDBACK_STATS:  'x:feedback-stats',  // renderer → main invoke：近7天 Gemma建议采纳率/捞回漏判数
-  X_MARK_REPLIED:    'x:mark-replied',    // renderer → main invoke：标记推文已回复（已确认视图清场）
-  // 屏蔽名单（B 期）—— 屏蔽只约束未来采集，不抹除已抓的历史数据
-  X_BLOCK_AUTHOR:    'x:block-author',    // renderer → main invoke：屏蔽某作者（handle）
-  X_UNBLOCK_AUTHOR:  'x:unblock-author',  // renderer → main invoke：解除屏蔽（handle）
-  X_LIST_BLOCKED:    'x:list-blocked',    // renderer → main invoke：取屏蔽名单
-  // per-ws 角色配置（活动契约）—— 用户自己在 UI 里设定，不由代码写死
-  X_GET_WS_ROLES:    'x:get-ws-roles',    // renderer → main invoke：列出所有 ws 角色
-  X_SET_WS_ROLE:     'x:set-ws-role',     // renderer → main invoke：设定某 ws 的角色/文章/触发口
-  X_LIST_ARTICLES:   'x:list-articles',   // renderer → main invoke：探测本账号的 Article 供下拉选
-  X_FETCH_ARTICLE_REPLIES: 'x:fetch-article-replies', // renderer → main invoke：试抓一篇文章的回复
-  X_HARVEST_NOTIFICATIONS: 'x:harvest-notifications', // renderer → main invoke：抓通知页(谁赞/转/回了我)
-  X_CAMPAIGN_STATUS:       'x:campaign-status',       // renderer → main invoke：契约配置与服务状态
-  X_DETECT_SELF:     'x:detect-self',     // renderer → main invoke：探测当前登录的 X 账号并标记 is_self
-  X_GET_SELF:        'x:get-self',        // renderer → main invoke：取已标记的「我自己」handle
-  X_WATCHLIST_SPIKE: 'x:watchlist-spike', // renderer → main invoke：B' 期一次性诊断（搜索语法/回复判定实机对照）
-  X_PAYLOAD_SURVEY:  'x:payload-survey', // renderer → main invoke：勘查 X GraphQL 原始载荷字段（能力边界的真实依据）
-  X_COLLECT_REPLIES: 'x:collect-replies', // renderer → main invoke：采集回复关系并回填 replied
-  X_HARVEST:         'x:harvest',        // renderer → main invoke：通用时间线采集（滚到底 + 自校验）
-  X_CAPTURE_START:   'x:capture-start',  // renderer → main invoke：开始被动监视采集
-  X_CAPTURE_STOP:    'x:capture-stop',   // renderer → main invoke：停止监视并取最终统计
-  X_CAPTURE_UPDATE:  'x:capture-update', // main → renderer 广播：实时采集快照
-  X_FETCH_PROFILE:   'x:fetch-profile',  // renderer → main invoke：抓单个账号画像（盯人面板的 bio 卡片）
-
   // ── Web 能力层控制台(dev-only)—— 逐个原子能力单独跑、看原样返回值 ──
   // ⚠️ 刻意**一能力一通道**,不做「求值任意脚本」的万能通道:
   //    那等于把 web.dom 费力关掉的注入口重新打开。
@@ -408,10 +349,6 @@ export const IPC_CHANNELS = {
   WEBC_FLOW_PROGRESS: 'webc:flow-progress',
   WEBC_WHERE_AM_I:   'webc:where-am-i',    // 输出:当前页面是哪个语义页面 + 参数(右边自动填充用)
   // 通知实时监听（给人核对用：来了什么、解成了什么、算不算这篇文章的）
-  X_NOTIF_WATCH_START:  'x:notif-watch-start',
-  X_NOTIF_WATCH_STOP:   'x:notif-watch-stop',
-  X_NOTIF_WATCH_UPDATE: 'x:notif-watch-update', // main → renderer 广播
-  X_HARVEST_PROGRESS:'x:harvest-progress',// main → renderer 广播：全量采集进度（长任务不能是黑箱）
 
   // 系统主题（nativeTheme）— main → renderer 广播
   NATIVE_THEME_CHANGED: 'native-theme.changed',  // main → renderer: { dark: boolean }
