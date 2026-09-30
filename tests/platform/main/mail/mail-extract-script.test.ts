@@ -18,6 +18,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildExtractScript } from '@platform/main/mail/mail-extract';
+import { el, makeDom, evalInDom } from '../../../web-capability/helpers/fake-dom';
 
 const build = (x = 100, y = 200, sel = '.zA', body = '.a3s', subj = '.hP'): string =>
   buildExtractScript(x, y, sel, body, subj);
@@ -91,83 +92,62 @@ describe('⭐ mail 提取脚本', () => {
 });
 
 /**
- * ⭐⭐ 行为测试 —— 造一个假 DOM,**真的跑**生成的脚本
+ * ⭐⭐ 行为测试 —— 用仓里的 `fake-dom` **真的跑**生成的脚本
  *
- * ── 为什么必须有这一段 ──
+ * ── 为什么必须有这一段,且必须用 fake-dom ──
  *
- * 2026-09-30 独立复核实测:上面那些「源码文本断言」漏掉了三类破坏,
- * 改完**全绿**:
- *   ① 坐标从绑定退回裸拼(数字两种写法产出文本一模一样,文本断言分不出)
- *   ② 加一行「带外找不到就拿第一封」(`box = best || list[0]`)
- *   ③ `if (false && !box)` 让「没点中」那句永远不执行
+ * 2026-09-30 两轮独立复核,抓出的都是「文本断言零区分力」:
  *
- * ⭐ ②③ 的共同点:**脚本文本仍然长得对,行为已经变了** ——
- * 正是 `feedback-source-scan-cant-see-execution` 那一刀。
- * 结构用源码扫描,**「会不会那样做」必须真的跑一遍**。
+ * 第一轮:只断言脚本文本,三种破坏全绿 ——
+ *   `box = best || list[0]`(带外兜底拿第一封)/ `if (false && !box)`(掐掉 __noMail)
+ *   / 掐掉 NaN 校验
+ *
+ * 第二轮:我改用**手写假 DOM**,仍然全绿 ——
+ *   ⚠️ 因为我那个假 DOM 让 `elementFromPoint` 返回**预先指定的下标**,
+ *   于是它既不看 selector 也不看坐标。三种破坏测不出来:
+ *   closest 传错 selector / 带内回退永远取第一封 / 把页面空白元素当邮件。
+ *
+ * ⭐ 结论:**别手写假 DOM。** `tests/web-capability/helpers/fake-dom.ts`
+ * 真按 selector 匹配、`elementFromPoint` 真按矩形命中、
+ * 遇到不支持的选择器写法会**抛错**而不是静默返回空。
+ * 本轮给它补了 `elementFromPoint` / `closest` / `innerText` / per-element rect。
  */
-describe('⭐⭐ 真跑脚本:行为不许漂', () => {
-  /** 一个够用的假 DOM:三个矩形容器纵向排列 */
-  function runScript(
-    script: string,
-    boxes: Array<{ top: number; bottom: number; left?: number; text?: string }>,
-    pointAt: { el: number | null },
-  ): Record<string, unknown> {
-    const nodes = boxes.map((b, i) => {
-      const node: Record<string, unknown> = {
-        getBoundingClientRect: () => ({
-          top: b.top, bottom: b.bottom, left: b.left ?? 0, right: 100,
-        }),
-        innerText: b.text ?? `mail-${i}`,
-        textContent: b.text ?? `mail-${i}`,
-        getAttribute: () => null,
-        querySelector: () => null,
-      };
-      node.closest = () => node;         // 命中自己
-      return node;
-    });
-    const doc = {
-      elementFromPoint: (): unknown => (pointAt.el === null ? null : nodes[pointAt.el]),
-      querySelectorAll: (): unknown[] => nodes,
-      querySelector: (): unknown => null,
-    };
-    /**
-     * ⚠️⚠️ **脚本必须用括号包住** —— 它以换行开头,
-     * 写成 `return ${script}` 会被 ASI 切成 `return;` + 一条孤立表达式,
-     * 于是**恒返回 undefined**,而且不报错。
-     *
-     * ⭐ 我第一版就是这么写的,四条行为测试全挂在这上面 ——
-     * 而上面那条「能被真正解析」的断言用的也是同一个写法:
-     * 它只验证了**文本能 parse**,并没有验证**求值出东西** ——
-     * 「能解析」与「跑得出结果」是两件事。
-     */
-    const fn = new Function('document', 'location', `return (${script});`);
-    return fn(doc, { href: 'https://mail.test/x' }) as Record<string, unknown>;
-  }
-
+describe('⭐⭐ 真跑脚本:行为不许漂(用 fake-dom)', () => {
   const SEL = '.zA';
 
+  /** 造一封邮件容器:class=zA,带矩形,内含正文节点 */
+  const mail = (top: number, height: number, text: string) =>
+    el('div', { class: 'zA' }, { textContent: text, rect: { left: 0, top, width: 200, height } });
+
+  /** 页面上的非邮件元素(空白区) —— 用来验「点中了东西但不是邮件」 */
+  const filler = (top: number, height: number) =>
+    el('div', { class: 'spacer' }, { textContent: 'not-a-mail', rect: { left: 0, top, width: 200, height } });
+
+  function run(x: number, y: number, nodes: ReturnType<typeof el>[]): Record<string, unknown> {
+    const dom = makeDom(nodes);
+    return evalInDom(dom, buildExtractScript(x, y, SEL, '', '')) as Record<string, unknown>;
+  }
+
   it('⭐ 命中容器时,取的是被点的那一个', () => {
-    const script = buildExtractScript(50, 150, SEL, '', '');
-    // elementFromPoint 命中第 1 个(index 1)
-    const r = runScript(script, [
-      { top: 0, bottom: 100, text: 'A' },
-      { top: 100, bottom: 200, text: 'B' },
-      { top: 200, bottom: 300, text: 'C' },
-    ], { el: 1 });
+    const r = run(50, 150, [mail(0, 100, 'A'), mail(100, 100, 'B'), mail(200, 100, 'C')]);
     expect(r.__noMail, '命中了却报没点中').toBeUndefined();
     expect(r.bodyText, '取错了容器').toBe('B');
   });
 
-  it('⭐⭐ 带外点击必须报 __noMail —— 不许兜底拿第一封', () => {
+  it('⭐⭐ 点中非邮件元素时必须报 __noMail —— 不许把空白当邮件', () => {
     /**
-     * ⚠️ 这条就是假绿②要防的:`box = best || list[0]` 会让
-     * 「点在空白处」变成「悄悄提取第一封」,而文本断言看不出来。
+     * ⚠️ 复核抓到的第三种破坏:`el.closest(sel) || el` 会把命中的
+     * 任意元素当成邮件容器。手写假 DOM 测不出来,因为它不区分元素类型。
      */
-    const script = buildExtractScript(50, 9999, SEL, '', '');
-    const r = runScript(script, [
-      { top: 0, bottom: 100, text: 'A' },
-      { top: 100, bottom: 200, text: 'B' },
-    ], { el: null });   // 没命中任何容器,且 9999 远在 ±24 带外
+    const r = run(50, 250, [mail(0, 100, 'A'), filler(200, 100)]);
+    expect(
+      r.__noMail,
+      '点在非邮件元素上却没报 __noMail —— 多半写了 `closest(sel) || el` 之类的兜底',
+    ).toBe(true);
+  });
+
+  it('⭐⭐ 带外点击必须报 __noMail —— 不许兜底拿第一封', () => {
+    const r = run(50, 9999, [mail(0, 100, 'A'), mail(100, 100, 'B')]);
     expect(
       r.__noMail,
       '带外点击没报 __noMail —— 多半加了「找不到就拿第一封」的兜底,\n'
@@ -176,47 +156,54 @@ describe('⭐⭐ 真跑脚本:行为不许漂', () => {
     expect(r.bodyText, '带外点击竟然取到了内容').toBeUndefined();
   });
 
-  it('⭐⭐ `if (false)` 掐掉 __noMail 这条路要被抓到', () => {
+  it('⭐⭐ 间隙回退取「中心距最近」,不是「边缘距最近」', () => {
     /**
-     * 假绿③:把那句改成 `if (false && !box)` 后文本仍在、行为没了。
-     * 上一条已经覆盖它 —— 这里显式再钉一次「返回值里真的有这个标记」,
-     * 而不是「源码里有这行字」。
+     * ⭐ 复核给的用例(我原来那个两候选距离打平,区分不了规则):
+     *   A=[0,100] B=[120,130] y=108
+     *   · 按**边缘距**:A 距 8、B 距 12 → 选 A
+     *   · 按**中心距**:A 中心 50 距 58、B 中心 125 距 17 → 选 B
+     * mail 的语义是中心距,所以断言必须是 **B**。
      */
-    const script = buildExtractScript(50, 9999, SEL, '', '');
-    const r = runScript(script, [{ top: 0, bottom: 100 }], { el: null });
-    expect(Object.keys(r), '返回的不是 __noMail 信封').toContain('__noMail');
+    const r = run(50, 108, [mail(0, 100, 'A'), mail(120, 10, 'B')]);
+    expect(r.__noMail, '带内间隙点击被判成没点中').toBeUndefined();
+    expect(
+      r.bodyText,
+      '回退规则漂了:取到 A 说明用的是「边缘距最近」,而 mail 的语义是「中心距最近」',
+    ).toBe('B');
   });
 
-  it('⭐ 间隙点击(±24 带内)回退到最近的那个', () => {
-    // y=112 落在两个容器之间的 12px 间隙里,带内 → 应回退到中心距更近的
-    const script = buildExtractScript(50, 112, SEL, '', '');
-    const r = runScript(script, [
-      { top: 0, bottom: 100, text: 'A' },     // 中心 50,距 62
-      { top: 124, bottom: 224, text: 'B' },   // 中心 174,距 62 —— 打平,取先命中的
-    ], { el: null });
-    expect(r.__noMail, '带内间隙点击被判成没点中').toBeUndefined();
-    expect(['A', 'B'], '回退取到了预期外的容器').toContain(r.bodyText);
+  it('⭐⭐ closest 必须用对 selector —— 用「回退会取到另一封」的布局区分', () => {
+    /**
+     * ⚠️ 我第一版这条是**假绿**:用例里被点那封总在 ±24 带内,
+     * 于是 closest 传错 selector 时,带内回退照样命中同一封 → 测不出来。
+     * (复核预言了这一点,实测 `closest('.WRONG')` 仍全绿)
+     *
+     * ⭐ 修法:造一个「closest 对」与「回退」结论**不同**的布局:
+     *   A=[0,200] 含 y=190 → closest 应命中 A
+     *   B=[210,230] 中心 220,距 190 = 30;A 中心 100,距 190 = 90
+     * → closest 正确取 A;closest 坏掉则回退取中心距更近的 **B**。
+     * 断言 A,于是 closest 一坏就红。
+     */
+    const r = run(50, 190, [mail(0, 200, 'A'), mail(210, 20, 'B')]);
+    expect(
+      r.bodyText,
+      'closest 没按 selector 命中被点的那封 —— 取到 B 说明落到了带内回退,\n'
+      + '也就是 closest 那一步实际上没起作用(selector 传错了?)',
+    ).toBe('A');
   });
 
   it('⭐⭐ NaN / Infinity 坐标必须**抛**,不许静默取第一封', () => {
     /**
-     * ⚠️⚠️ 2026-09-30 复核抓到的**真回归**:
-     * 我把坐标改成 `JSON.stringify(x)` 绑定,而
-     * `JSON.stringify(NaN)` === `'null'`,浏览器把 `elementFromPoint(null, null)`
-     * 当成 `(0,0)` → **悄悄提取最左边那封,不报任何错**。
-     * 改之前 NaN 原样进脚本,浏览器当场报错,用户看得见失败。
-     *
-     * ⭐ 教训:**`JSON.stringify` 对数字不是安全网**,挡坏数字只能靠校验。
+     * ⚠️⚠️ 这是我引入的真回归(复核抓到):
+     * `JSON.stringify(NaN)` === `'null'`,浏览器把
+     * `elementFromPoint(null, null)` 当 `(0,0)` → 悄悄提取最左那封,不报错。
+     * ⭐ `JSON.stringify` 对数字**不是安全网**,挡坏数字只能靠校验。
      */
     for (const bad of [NaN, Infinity, -Infinity]) {
-      expect(
-        () => buildExtractScript(bad, 100, SEL, '', ''),
-        `x=${String(bad)} 没被拒绝 —— 会静默提取错的那封`,
-      ).toThrow(/有限数字/);
-      expect(
-        () => buildExtractScript(100, bad, SEL, '', ''),
-        `y=${String(bad)} 没被拒绝`,
-      ).toThrow(/有限数字/);
+      expect(() => buildExtractScript(bad, 100, SEL, '', ''),
+        `x=${String(bad)} 没被拒绝 —— 会静默提取错的那封`).toThrow(/有限数字/);
+      expect(() => buildExtractScript(100, bad, SEL, '', ''),
+        `y=${String(bad)} 没被拒绝`).toThrow(/有限数字/);
     }
   });
 });

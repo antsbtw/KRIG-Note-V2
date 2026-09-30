@@ -29,7 +29,14 @@ export type FakeEl = {
   getAttribute(name: string): string | null;
   querySelector(sel: string): FakeEl | null;
   querySelectorAll(sel: string): FakeEl[];
-  getBoundingClientRect(): { left: number; top: number; width: number; height: number };
+  getBoundingClientRect(): {
+    left: number; top: number; width: number; height: number;
+    right: number; bottom: number;
+  };
+  /** 最近的匹配祖先(含自身)。⚠️ 真 DOM 语义:自身也算 */
+  closest(sel: string): FakeEl | null;
+  /** 渲染后文本。假 DOM 里等同 textContent,供脚本两种取法都能拿到 */
+  innerText: string;
   focus(): void;
   click(): void;
   scrollIntoView(): void;
@@ -37,10 +44,13 @@ export type FakeEl = {
 };
 
 /** 建一个元素。`props` 里可给 textContent / value / contentEditable */
+/** 元素矩形 —— 给 `elementFromPoint` 命中判定用。不给则退默认值 */
+export type FakeRect = { left: number; top: number; width: number; height: number };
+
 export function el(
   tagName: string,
   attrs: Record<string, string> = {},
-  props: Partial<Pick<FakeEl, 'textContent' | 'value' | 'contentEditable'>> = {},
+  props: Partial<Pick<FakeEl, 'textContent' | 'value' | 'contentEditable'>> & { rect?: FakeRect } = {},
   children: FakeEl[] = [],
 ): FakeEl {
   const node: FakeEl = {
@@ -63,7 +73,23 @@ export function el(
       return querySelectorAllIn(descendants(this), sel);
     },
     getBoundingClientRect() {
-      return { left: 0, top: 0, width: 100, height: 20 };
+      const r = props.rect ?? { left: 0, top: 0, width: 100, height: 20 };
+      // ⚠️ right/bottom 必须算出来 —— 被测脚本普遍用它们做纵向邻域判定
+      return { ...r, right: r.left + r.width, bottom: r.top + r.height };
+    },
+    /**
+     * ⭐ 真 DOM 语义:**从自身开始**向上找第一个匹配的,找不到返回 null。
+     * ⚠️ 不许"自身不算" —— 被测脚本依赖 `el.closest(sel)` 在点中容器本体时命中。
+     */
+    closest(sel) {
+      let cur: FakeEl | null = this;
+      while (cur) {
+        for (const part of sel.split(',').map((x) => x.trim()).filter(Boolean)) {
+          if (matchesSimple(cur, part)) return cur;
+        }
+        cur = cur.parentElement;
+      }
+      return null;
     },
     focus() {
       this.focused = true;
@@ -80,6 +106,11 @@ export function el(
       return true;
     },
   };
+  // innerText 与 textContent 同源 —— 脚本常写 `innerText || textContent`,两者都要有
+  Object.defineProperty(node, 'innerText', {
+    get() { return node.textContent; },
+    configurable: true,
+  });
   for (const c of children) c.parentElement = node;
   // textContent 未显式给时,由子孙拼出来(贴近真 DOM,contains 校验要用)
   if (props.textContent === undefined && children.length > 0) {
@@ -115,12 +146,21 @@ function matchesSimple(node: FakeEl, part: string): boolean {
     } else if (t.startsWith('#')) {
       if (node.attrs['id'] !== t.slice(1)) return false;
     } else if (t.startsWith('[')) {
-      const m = t.match(/^\[([\w-]+)(?:=["']?([^\]"']*)["']?)?\]$/);
+      /**
+       * 属性 selector。⭐ 2026-09-30 补上 `*=` / `^=` / `$=` 三个算子 ——
+       * mail 提取脚本用到 `span[title*="@"]` 与 `a[href^="mailto:"]`,
+       * 原来只认 `=`,于是**整段脚本抛错**(而它抛得对:静默返回空会让测试假绿)。
+       */
+      const m = t.match(/^\[([\w-]+)(?:([*^$]?=)["']?([^\]"']*)["']?)?\]$/);
       if (!m) throw new Error(`[fake-dom] 不支持的属性 selector: ${t}`);
-      const [, name, want] = m;
+      const [, name, op, want] = m;
       const got = node.attrs[name];
-      if (got === undefined) return false;
-      if (want !== undefined && got !== want) return false;
+      if (got === undefined) return false;     // 属性不存在 → 不匹配
+      if (op === undefined) continue;           // `[attr]` 只要求存在
+      if (op === '=' && got !== want) return false;
+      if (op === '*=' && !got.includes(want)) return false;
+      if (op === '^=' && !got.startsWith(want)) return false;
+      if (op === '$=' && !got.endsWith(want)) return false;
     } else {
       if (node.tagName !== t.toUpperCase()) return false;
     }
@@ -128,8 +168,25 @@ function matchesSimple(node: FakeEl, part: string): boolean {
   return true;
 }
 
-/** 在给定候选集合里跑一个(可能带后代空格的)selector */
+/**
+ * 在给定候选集合里跑一个 selector。
+ *
+ * ⭐ 2026-09-30 补上**逗号分隔多候选** —— 原来只拆空格(后代),
+ * 于是 `'[email], [data-hovercard-id]'` 被当成**一整个片段**送去匹配,
+ * 当场抛「不支持的 selector 片段」。
+ * ⚠️ 这个抛是**对的**(静默返回空会让测试假绿),缺的是能力不是约束。
+ */
 function querySelectorAllIn(pool: FakeEl[], sel: string): FakeEl[] {
+  if (sel.includes(',')) {
+    const out: FakeEl[] = [];
+    for (const one of sel.split(',').map((x) => x.trim()).filter(Boolean)) {
+      for (const hit of querySelectorAllIn(pool, one)) {
+        if (!out.includes(hit)) out.push(hit);
+      }
+    }
+    // ⚠️ 真 DOM 的 querySelectorAll 按**文档顺序**返回,不按 selector 顺序
+    return pool.filter((n) => out.includes(n));
+  }
   const parts = sel.trim().split(/\s+/);
   let current = pool;
   for (let i = 0; i < parts.length; i++) {
@@ -158,6 +215,8 @@ export type FakeDom = {
   window: Record<string, unknown>;
   /** `document.execCommand` 被调用的记录 —— 兜底路径的证据 */
   execCommands: Array<{ name: string; value: unknown }>;
+  /** 脚本里的 `location` —— 提取类脚本常把 `location.href` 写进结果做留痕 */
+  location: { href: string };
   activeElement: FakeEl | null;
 };
 
@@ -173,6 +232,7 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
     activeElement: null,
     document: {},
     window: {},
+    location: { href: 'https://fake.test/page' },
   };
 
   dom.document = {
@@ -185,6 +245,28 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
     },
     querySelectorAll(sel: string) {
       return querySelectorAllIn(all(), sel);
+    },
+    /**
+     * ⭐ 按矩形真做命中判定 —— 不是「返回预先塞好的那个」。
+     *
+     * ⚠️ 手写假 DOM 的教训(2026-09-30 独立复核抓到):
+     * 我第一版让 `elementFromPoint` 返回一个**预先指定的下标**,
+     * 于是它既不看 selector 也不看坐标 ——
+     * 「closest 传错 selector」「带内回退永远取第一封」
+     * 「把页面空白元素当成邮件」三种破坏**全都测不出来**。
+     *
+     * 真语义:命中点上**最靠后(最上层)**的那个元素;没有则 null。
+     */
+    elementFromPoint(x: number, y: number) {
+      let hit: FakeEl | null = null;
+      for (const n of all()) {
+        if (n === root) continue;
+        const r = n.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          hit = n;        // 后来的覆盖先前的 —— 近似「上层胜出」
+        }
+      }
+      return hit;
     },
     createRange() {
       return { selectNodeContents() {}, collapse() {} };
@@ -225,6 +307,7 @@ export function evalInDom(dom: FakeDom, script: string): unknown {
   const fn = new Function(
     'document',
     'window',
+    'location',
     'DataTransfer',
     'ClipboardEvent',
     'Event',
@@ -240,6 +323,7 @@ export function evalInDom(dom: FakeDom, script: string): unknown {
   return fn(
     dom.document,
     dom.window,
+    dom.location,
     FakeDataTransfer,
     FakeClipboardEvent,
     FakeEvent,
