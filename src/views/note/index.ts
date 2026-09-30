@@ -18,8 +18,11 @@ import { registerContextMenu } from './context-menu-content';
 import { registerLinkClickIntegration } from './link-click-integration';
 import { registerAskAIPopup } from './ask-ai-popup';
 import { registerAISyncIntegration } from './ai-sync-integration';
+import { registerNoteCommands } from './note-commands';
 
 registerView({
+  /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
+  commands: registerNoteCommands,
   id: 'note-view',
   install: [
     // W5 严格收尾:install 严格 capability-only(0 driver id)

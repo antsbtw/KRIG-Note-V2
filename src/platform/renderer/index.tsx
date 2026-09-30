@@ -23,6 +23,7 @@ import { reportInstallCoverage } from '@slot/diagnostics/install-coverage';
 import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import { getActiveWorkspaceIdSync, onMyWsIdReady } from '@workspace/workspace-instance/use-workspace';
+import { runViewCommandRegistrars } from '@slot/view-type-registry/view-type-registry';
 import { initNoteBaseSnapshotSync } from '@views/note/data-model';
 
 // ── 系统主题同步（跟随 nativeTheme）──
@@ -35,15 +36,6 @@ function applyTheme(dark: boolean): void {
 applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
 window.electronAPI?.getNativeTheme().then(({ dark }) => applyTheme(dark)).catch(() => {/* ignore */});
 window.electronAPI?.onNativeThemeChanged(({ dark }) => applyTheme(dark));
-import { registerNoteCommands } from '@views/note/note-commands';
-import { registerWebCommands } from '@views/web/web-commands';
-import { registerWebBookmarkCommands } from '@views/web/web-bookmark-commands';
-import { registerEBookCommands } from '@views/ebook/bookshelf-commands';
-import { registerAICommands } from '@views/ai/ai-commands';
-/** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
-import { registerMailCommands } from '@views/mail/mail-commands';
-import { registerGraphCanvasCommands } from '@views/graph-canvas-view/canvas-commands';
-import { registerThoughtCommands } from '@views/thought/thought-commands';
 // W5:capability 显式 side-effect import — 触发各 capability 的
 // capabilityRegistry.register 副作用(原本由 L5-alive 直 import 触发,L5-alive
 // 改 getCapabilityApi 后 import 链断,需要在 renderer 显式拉)
@@ -105,14 +97,10 @@ initNoteBaseSnapshotSync();
 // 用 onMyWsIdReady 订阅——仅在本窗口 IPC 确认的 wsId 就绪后触发一次，
 // 避免新窗口用 snapshot.activeId（ws-1）注册命令。
 onMyWsIdReady((rendererWsId) => {
-  registerNoteCommands(rendererWsId);
-  registerWebCommands(rendererWsId);
-  registerWebBookmarkCommands(rendererWsId);
-  registerEBookCommands(rendererWsId);
-  registerAICommands(rendererWsId);
-  registerMailCommands(rendererWsId);
-  registerGraphCanvasCommands(rendererWsId);
-  registerThoughtCommands(rendererWsId);
+  // ⭐ 各 view 在自己的 self-register 里填了 `commands` 字段,registry 收着,
+  // 这里一次性跑掉 —— 卸载一个模块只需删上面那一行 `import '@views/xxx'`。
+  // (2026-09-30 之前:每个模块要在本文件占两行,8 个模块共 16 行接线)
+  runViewCommandRegistrars(rendererWsId);
   // L3.5 bus 初始化(首次 wsId 就绪时补一次,确保 alive 计数 >= 1)
   workspaceManager.getBus(rendererWsId);
 });

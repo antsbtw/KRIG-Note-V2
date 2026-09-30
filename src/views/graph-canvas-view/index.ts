@@ -38,6 +38,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { GraphCanvasView } from './GraphCanvasView';
 import { filterSlashItemsToRenderable } from './slash-render-gate';
+import { registerGraphCanvasCommands } from './canvas-commands';
 import {
   registerNavSide,
   registerFolderTreeContextMenu,
@@ -46,6 +47,8 @@ import {
 const VIEW = 'graph-canvas-view';
 
 registerView({
+  /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
+  commands: registerGraphCanvasCommands,
   id: VIEW,
   install: [
     'graph-library-store', // ✅ L5-G1:画板 + 文件夹 + CRUD(JSON 起步)
