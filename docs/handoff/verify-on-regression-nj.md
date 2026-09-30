@@ -126,8 +126,11 @@ X 把未登录页面的 `data-testid` **全部去掉了**（真机探针实测�
 
 打开 DevTools Console，应看到
 ```
-[tweetBlock] fetch failed: 等待判据 anchorAppears(tweetArticle) 超时(10000ms);最后一次注入异常: ...
+[tweetBlock] fetch failed: 等待判据 anchorAppears:tweetArticle 超时(10000ms)
 ```
+（若等待期间注入抛过异常，末尾还会带「;最后一次注入异常: ...」；
+没带 = 每轮脚本都跑通了、只是元素始终没出现 —— 正是 testid 被去掉的形态）
+
 而**不是**旧版那句 `Tweet page did not render in time`
 （旧话术把「X 改版」说成「页面没渲染好」，把人指向完全错误的方向）。
 
@@ -140,6 +143,64 @@ X 把未登录页面的 `data-testid` **全部去掉了**（真机探针实测�
 - ⭐ 三家都要试：chatgpt 与 claude 走合并后的同一份代码；
   gemini 原本是简化版，收口后多获得了「多候选 selector 合并」能力
   （它目前只有单个 selector，理论上行为不变，但这正是该验的地方）
+
+---
+
+## 四½、验证结果（2026-09-30，独立复核）
+
+### ①② 自动化部分
+
+- `tsc --noEmit`：**0 错**
+- 五个针对性守卫文件：**65/65 全绿**
+- 全量单测：本机 Mac **1768 passed / 6 加载失败**（与预期一致）。
+  regression-nj 上是 **1740 / 7** —— ⚠️ **环境问题不是回归**：那台的 `node_modules/electron`
+  装了一半（缺 `path.txt`），`import 'electron'` 直接抛，7 个全是这一个错。
+  多出来的是 `tests/ai/claude-extract-turn-pure.test.ts`：名叫 pure，却经 `locate-ordinal`
+  间接加载 electron；在 Mac 上能过只因 `require('electron')` 返回路径字符串。
+
+### ③ 注入验证：§三 的 5 条全部按预期变红
+
+| # | 结果 | 变红的正是 |
+|---|---|---|
+| 1 `\\s+`→`\s+` | ✅ | 「`\s+` 求值后仍是 `\s+`」 |
+| 2 selector 裸拼 | ✅ | 「selector 里的引号/反斜杠不会破坏脚本」 |
+| 3 删 bindPageHost | ✅ | 「register 与 bindPageHost 必须成对」 |
+| 4 `!== 'ok'` | ✅ | 「degraded 不许当失败」 |
+| 5 调 feedFilesToInput | ✅ | 「退役的前提是真的没人用」 |
+
+注入脚本会先断言替换恰好命中 1 次（防「没改成却以为守卫绿」）。
+
+### ⚠️ 复核中发现的同类假绿（均实测：注入后仍全绿）—— 待修
+
+| | 注入 | 为什么没红 | 同族 |
+|---|---|---|---|
+| **D** ⭐ 最优先 | 同一行先写 `'https://…'` 再调 `feedFilesToInput(…)` / 在 interceptor 调 `executeJavaScript` / 在非债文件现拼 IIFE | `input-boundary-guard.test.ts:34` 与 `dom-boundary-guard.test.ts:27` 剥注释用 `\/\/.*$`，**吃掉 URL 及其后整行**。三条都做了去掉 URL 的对照，对照组都变红 | `feedback-guard-stripper-eats-urls` 原样重犯。修法 `(^|[^:])\/\/.*$` + 给 strip 加带 URL 的自检 |
+| **A** | `${JSON.stringify(x)}`→裸 `${x}`；selector→`"${selector}"` | `dom-locate-scripts.test.ts:42-58` 注释说「已改成钉性质」，**代码仍是 `toContain('var X = 100;')`**；selector 那句对 `"article"` 两种写法文本相同 | 字面量断言分不出。#2 能红全靠另一条「引号」用例 |
+| **B** | `void 0 && bindPageHost(…)`；`bindPageHost('wrong', …)` | 「成对」守卫只查全文件有无 `bindPageHost(` | 第三刀（没缩到分支）+ 第五刀（看不见执行） |
+| **C** | `status === 'failed' \|\| status === 'degraded'` | 只禁了 `!== 'ok'` 这一种写法，同义改写全绿 | 钉写法不钉性质 |
+
+### GUI（2026-09-30，在本机 MacBook 上做）
+
+- **第 1 批 tweet-fetcher：✅ 通过**。Console 实见
+  `[tweetBlock] fetch failed: 等待判据 anchorAppears:tweetArticle 超时(10000ms)`，
+  不带注入异常 = 脚本每轮都跑通、元素始终不出现，与「testid 被去掉」吻合；新话术指对了方向。
+- **第 2 批 AI 单条提取：**
+  - Claude：提取成功；⏳ 待补测「点**中间**某条」（点最后一条测不出错位）
+  - ChatGPT / Gemini：⏳ 待测，**用纯文字对话**（避开下面那个发现）
+
+### ⭐ 新发现（不在 L2 范围，押后按 AI 逐家单独调试）
+
+**ChatGPT 提取丢图片**：纯图片回复整轮丢失（笔记里只剩问题），用户上传的附图也丢。
+
+- 可疑点（**读代码推断，未验证**）：图片 bytes 唯一来源是注入 fetch hook 缓存的
+  `/backend-api/estuary/content`（`chatgpt-full-extraction.ts:192-203`）。
+  若页面用 `<img src>` 直接加载而不走 `fetch`，hook 根本看不到 → fileMap 空 →
+  纯图片回复 body 为空 → 被当空消息过滤。
+- ⚠️ 连带风险：数据侧丢掉图片轮而 DOM 仍在数它 → 两边轮数错位；图片回复文字少于 12 字，
+  预览匹配失效 → 退回 ordinal → **单条提取取到相邻那轮**。
+- 下一步：先在 `loadChatGPTConversation` 加临时诊断（fileRefs 数 / estuary 缓存命中数 /
+  每条 body 长度），真机提一次看数，**别靠猜**。与第 2 批的改动无关（它只管「点中第几条」）。
+- Claude / Gemini 的图片机制各不相同，调试时逐家单独查。
 
 ---
 
