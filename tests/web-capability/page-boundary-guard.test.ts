@@ -15,6 +15,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from '../helpers/source-scan';
+// ⚠️ 剥注释一律用共享的字符状态机版(tests/helpers/source-scan.ts)。
+// 本文件原先手写 `.replace(/\/\/.*$/gm, '')`:遇到 `'https://…'` 会把 URL 连同
+// 同一行后面的真代码一起吃掉 → 违规藏在那一行就查不到(2026-09-30 注入实测全绿)。
 
 const SRC_DIR = join(process.cwd(), 'src/platform/main/web-capability');
 
@@ -34,11 +38,6 @@ function listSources(dir: string): string[] {
  * ⚠️ 简易实现:不处理「字符串里含 // 」的情况。本层源码里没有那种写法,
  * 且下面有一条自检用例专门验证剥注释真的在工作(剥错了它会红)。
  */
-function stripComments(code: string): string {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '');   // 行尾注释也要剥 —— 只剥整行注释会漏掉 `const a = 1; // wcId`
-}
 
 /**
  * ⭐ `wiring/` 是**唯一**允许碰 Electron 的目录(步 3 接线时引入)。
@@ -74,6 +73,8 @@ describe('守卫自检 —— 先证明剥注释真的在工作', () => {
     expect(stripComments('const a = 1; // wcId\n')).not.toContain('wcId');
     expect(stripComments('/* wcId */ const a = 1;')).not.toContain('wcId');
     expect(stripComments('const wcId = 1;')).toContain('wcId');
+    // 字符串里的 // (URL)后面的真代码必须留下 —— 正则版在这里会把它吃掉
+    expect(stripComments("const u = 'https://x.com'; wcId();")).toContain('wcId();');
   });
 
   it('剥完注释后源码非空(没把整个文件剥没)', () => {

@@ -174,10 +174,18 @@ X 把未登录页面的 `data-testid` **全部去掉了**（真机探针实测�
 
 | | 注入 | 为什么没红 | 同族 |
 |---|---|---|---|
-| **D** ⭐ 最优先 | 同一行先写 `'https://…'` 再调 `feedFilesToInput(…)` / 在 interceptor 调 `executeJavaScript` / 在非债文件现拼 IIFE | `input-boundary-guard.test.ts:34` 与 `dom-boundary-guard.test.ts:27` 剥注释用 `\/\/.*$`，**吃掉 URL 及其后整行**。三条都做了去掉 URL 的对照，对照组都变红 | `feedback-guard-stripper-eats-urls` 原样重犯。修法 `(^|[^:])\/\/.*$` + 给 strip 加带 URL 的自检 |
+| **D** ✅ 已修 | 同一行先写 `'https://…'` 再调 `feedFilesToInput(…)` / 在 interceptor 调 `executeJavaScript` / 在非债文件现拼 IIFE | `input-boundary-guard.test.ts:34` 与 `dom-boundary-guard.test.ts:27` 剥注释用 `\/\/.*$`，**吃掉 URL 及其后整行**。三条都做了去掉 URL 的对照，对照组都变红 | `feedback-guard-stripper-eats-urls` 原样重犯。修法 `(^|[^:])\/\/.*$` + 给 strip 加带 URL 的自检 |
 | **A** | `${JSON.stringify(x)}`→裸 `${x}`；selector→`"${selector}"` | `dom-locate-scripts.test.ts:42-58` 注释说「已改成钉性质」，**代码仍是 `toContain('var X = 100;')`**；selector 那句对 `"article"` 两种写法文本相同 | 字面量断言分不出。#2 能红全靠另一条「引号」用例 |
 | **B** | `void 0 && bindPageHost(…)`；`bindPageHost('wrong', …)` | 「成对」守卫只查全文件有无 `bindPageHost(` | 第三刀（没缩到分支）+ 第五刀（看不见执行） |
 | **C** | `status === 'failed' \|\| status === 'degraded'` | 只禁了 `!== 'ok'` 这一种写法，同义改写全绿 | 钉写法不钉性质 |
+
+**D 的修法**（不是补正则）：仓里早有正确的共享版 `tests/helpers/source-scan.ts`
+（字符状态机，文件头就写着这个坑），但 web-capability 的**四个**边界守卫（net/page/input/dom）
+都各自手写了坏的正则版 —— net/page 也有同样的洞，只是还没踩到。
+四个全部改为 import 共享版，并在各自的剥注释自检里加一条 URL 用例。
+复验：E/F/H 三条原先全绿的注入**现在都变红**，对照组照旧；
+反向攻击（把正则版写回 dom 守卫）→ 新自检变红。
+⚠️ A/B/C 仍待修（钉字面量/钉写法的问题，不是剥注释）。
 
 ### GUI（2026-09-30，在本机 MacBook 上做）
 

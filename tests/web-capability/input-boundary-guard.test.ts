@@ -14,6 +14,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from '../helpers/source-scan';
+// ⚠️ 剥注释一律用共享的字符状态机版(tests/helpers/source-scan.ts)。
+// 本文件原先手写 `.replace(/\/\/.*$/gm, '')`:遇到 `'https://…'` 会把 URL 连同
+// 同一行后面的真代码一起吃掉 → 违规藏在那一行就查不到(2026-09-30 注入实测全绿)。
 import {
   buildAnchorExistsScript,
   buildContainsScript,
@@ -27,12 +31,6 @@ import {
 } from '@platform/main/web-capability/input';
 
 const INPUT_DIR = join(process.cwd(), 'src/platform/main/web-capability/input');
-
-function stripComments(code: string): string {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, ''); // 行尾注释也剥 —— 只剥整行会漏掉 `const a = 1; // WebContents`
-}
 
 const sources = readdirSync(INPUT_DIR)
   .filter((n) => n.endsWith('.ts'))
@@ -76,6 +74,8 @@ describe('守卫自检 —— 先证明剥注释真的在工作', () => {
     expect(stripComments('const a = 1; // clipboard\n')).not.toContain('clipboard');
     expect(stripComments('/* clipboard */ const a = 1;')).not.toContain('clipboard');
     expect(stripComments('const clipboard = 1;')).toContain('clipboard');
+    // 字符串里的 // (URL)后面的真代码必须留下 —— 正则版在这里会把它吃掉
+    expect(stripComments("const u = 'https://x.com'; clipboard();")).toContain('clipboard();');
   });
 
   it('剥完注释后每个文件都非空(没把整个文件剥没)', () => {

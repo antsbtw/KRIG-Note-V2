@@ -12,6 +12,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from '../helpers/source-scan';
+// ⚠️ 剥注释一律用共享的字符状态机版(tests/helpers/source-scan.ts)。
+// 本文件原先手写 `.replace(/\/\/.*$/gm, '')`:遇到 `'https://…'` 会把 URL 连同
+// 同一行后面的真代码一起吃掉 → 违规藏在那一行就查不到(2026-09-30 注入实测全绿)。
 
 function listTs(dir: string): string[] {
   const out: string[] = [];
@@ -21,10 +25,6 @@ function listTs(dir: string): string[] {
     else if (entry.name.endsWith('.ts')) out.push(full);
   }
   return out;
-}
-
-function stripComments(code: string): string {
-  return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
 const AI_DIR = join(process.cwd(), 'src/platform/main/ai');
@@ -43,6 +43,8 @@ describe('守卫自检 —— 先证明剥注释真的在工作', () => {
     expect(stripComments('a(); // executeJavaScript')).not.toContain('executeJavaScript');
     expect(stripComments('/* executeJavaScript */ a();')).not.toContain('executeJavaScript');
     expect(stripComments('wc.executeJavaScript(x);')).toContain('executeJavaScript');
+    // 字符串里的 // (URL)后面的真代码必须留下 —— 正则版在这里会把它吃掉
+    expect(stripComments("const u = 'https://x.com'; executeJavaScript();")).toContain('executeJavaScript();');
   });
 });
 
