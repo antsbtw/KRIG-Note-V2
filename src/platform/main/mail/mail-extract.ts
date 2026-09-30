@@ -58,7 +58,7 @@ export interface MailExtractResult {
  * - { __noMail: true }  点中位置向上找不到邮件容器
  * - 字段对象           命中容器,字段尽力抓(可能部分为空)
  */
-function buildExtractScript(
+export function buildExtractScript(
   x: number,
   y: number,
   mailSelector: string,
@@ -68,23 +68,39 @@ function buildExtractScript(
   const sel = JSON.stringify(mailSelector);
   const bodySel = JSON.stringify(bodySelector ?? '');
   const subjSel = JSON.stringify(subjectSelector ?? '');
+  /**
+   * ⭐ 2026-09-30:坐标改走**绑定值**(L2 收口第 3 批)。
+   *
+   * 原来是 `elementFromPoint(${'${x}'}, ${'${y}'})` —— 裸插进脚本文本,
+   * 与 `project-x-inject-template-escape` 同族(求值后的样子与源码所见不同,
+   * 而 tsc 与单测都发现不了)。selector 三个本来就 stringify 过,坐标漏了。
+   *
+   * ⚠️ **只改绑定,不改逻辑** —— ① 段的回退语义(只在 ±24 带内找、
+   * 取「中心距最近」)与 `web.dom` 的 `ordinal-by-point`
+   * (带外也找、取「边缘距最近」+ maxDy 240)**不一样**,
+   * 合并会改行为。收口批次不许顺手改语义,否则出问题分不清是谁带来的。
+   */
+  const bindX = JSON.stringify(x);
+  const bindY = JSON.stringify(y);
   return `
 (function() {
   try {
     var sel = ${sel};
     var bodySel = ${bodySel};
     var subjSel = ${subjSel};
+    var X = ${bindX};
+    var Y = ${bindY};
 
     // ① 坐标 → 邮件容器(命中优先,间隙回退纵向 ±24px 最近的)
-    var el = document.elementFromPoint(${x}, ${y});
+    var el = document.elementFromPoint(X, Y);
     var box = el && el.closest ? el.closest(sel) : null;
     if (!box) {
       var list = Array.prototype.slice.call(document.querySelectorAll(sel));
       var best = null, bestDist = Infinity;
       for (var i = 0; i < list.length; i++) {
         var r = list[i].getBoundingClientRect();
-        if (${y} >= r.top - 24 && ${y} <= r.bottom + 24) {
-          var d = Math.abs((r.top + r.bottom) / 2 - ${y});
+        if (Y >= r.top - 24 && Y <= r.bottom + 24) {
+          var d = Math.abs((r.top + r.bottom) / 2 - Y);
           if (d < bestDist) { bestDist = d; best = list[i]; }
         }
       }
