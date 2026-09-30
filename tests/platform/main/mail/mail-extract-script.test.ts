@@ -123,9 +123,15 @@ describe('⭐⭐ 真跑脚本:行为不许漂(用 fake-dom)', () => {
   const filler = (top: number, height: number) =>
     el('div', { class: 'spacer' }, { textContent: 'not-a-mail', rect: { left: 0, top, width: 200, height } });
 
-  function run(x: number, y: number, nodes: ReturnType<typeof el>[]): Record<string, unknown> {
+  function run(
+    x: number,
+    y: number,
+    nodes: ReturnType<typeof el>[],
+    bodySel = '',
+    subjSel = '',
+  ): Record<string, unknown> {
     const dom = makeDom(nodes);
-    return evalInDom(dom, buildExtractScript(x, y, SEL, '', '')) as Record<string, unknown>;
+    return evalInDom(dom, buildExtractScript(x, y, SEL, bodySel, subjSel)) as Record<string, unknown>;
   }
 
   it('⭐ 命中容器时,取的是被点的那一个', () => {
@@ -205,5 +211,51 @@ describe('⭐⭐ 真跑脚本:行为不许漂(用 fake-dom)', () => {
       expect(() => buildExtractScript(100, bad, SEL, '', ''),
         `y=${String(bad)} 没被拒绝`).toThrow(/有限数字/);
     }
+  });
+
+  it('⭐⭐ body 与 subject 用各自的 selector —— 不许互换', () => {
+    /**
+     * ⚠️ 复核抓到的盲区:我原来所有用例都传空串 selector,
+     * 于是把 `pick(box, bodySel)` 改成 `pick(box, subjSel)` **仍然全绿** ——
+     * 两个空串当然分不出来。
+     *
+     * ⭐ 修法:给两个**不同**的 selector,各自有可区分的文字。
+     */
+    const box = el('div', { class: 'zA' }, { rect: { left: 0, top: 0, width: 200, height: 100 } }, [
+      el('div', { class: 'body' }, { textContent: 'BODY-TEXT' }),
+      el('div', { class: 'subj' }, { textContent: 'SUBJ-TEXT' }),
+    ]);
+    const r = run(50, 50, [box], '.body', '.subj');
+    expect(r.bodyText, '正文取错了 selector(可能与 subject 互换了)').toBe('BODY-TEXT');
+    expect(r.subject, '主题取错了 selector(可能与 body 互换了)').toBe('SUBJ-TEXT');
+  });
+
+  it('⭐⭐ X 坐标必须起作用 —— 左右并排时取被点的那一列', () => {
+    /**
+     * ⚠️ 复核抓到的第二个盲区:我所有用例都是纵向排列,
+     * **X 坐标从来没起过作用** —— 把 `elementFromPoint(X, Y)` 写成
+     * `elementFromPoint(0, Y)` 也测不出来。
+     *
+     * ⭐ 修法:左右并排两封,同一个 Y,只靠 X 区分。
+     */
+    const left = el('div', { class: 'zA' },
+      { textContent: 'LEFT', rect: { left: 0, top: 0, width: 100, height: 100 } });
+    const right = el('div', { class: 'zA' },
+      { textContent: 'RIGHT', rect: { left: 200, top: 0, width: 100, height: 100 } });
+    expect(run(250, 50, [left, right]).bodyText, 'X 坐标没起作用 —— 点右列却取到左列').toBe('RIGHT');
+    expect(run(50, 50, [left, right]).bodyText, 'X 坐标没起作用 —— 点左列却取到右列').toBe('LEFT');
+  });
+
+  it('⭐ 没给 rect 的元素不可命中(假 DOM 不许比真浏览器宽松)', () => {
+    /**
+     * ⚠️ 复核抓到的 fake-dom 语义错:原来没给 rect 的元素默认占 (0,0,100,20),
+     * 于是**每个未布局元素都在左上角形成幻影命中区** ——
+     * 点 (50,10) 会提取到一封声明在别处的邮件,而真浏览器该报 __noMail。
+     * ⚠️ 第一次修成 (0,0,0,0) 仍不够:±24 邻域回退把原点附近的它捞了回来。
+     * 现在用远在坐标系外的哨兵矩形。
+     */
+    const noRect = el('div', { class: 'zA' }, { textContent: 'PHANTOM' });
+    const r = run(50, 10, [noRect]);
+    expect(r.__noMail, '未布局元素被命中了 —— 假 DOM 比真浏览器宽松,测试失去区分力').toBe(true);
   });
 });

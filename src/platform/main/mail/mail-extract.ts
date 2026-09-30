@@ -133,6 +133,24 @@ export function buildExtractScript(
     }
     // selector 支持逗号分隔多候选,querySelector 本身即按文档顺序返回首个匹配,
     // 故顺序命中是天然的(与 web-service-base/webview-input 同约定)。
+    /**
+     * ⚠️⚠️ **已知风险,刻意未改(2026-09-30 复核提出,待单独立项)**
+     *
+     * root.querySelector(s) || document.querySelector(s) —— 容器内找不到就
+     * **退到整页找**。在 Gmail 会话视图(一屏多封展开)里,这可能取到
+     * **别封邮件的正文**,而且**不报错**:结果看起来完整,内容是错的。
+     *
+     * ⚠️ 注意本注释**在模板字面量内部** —— 不许写反引号,
+     * 否则会提前终止字符串、把后面的 JS 当 TS 解析
+     * (feedback-comment-breaks-what-it-documents:注释弄坏它所注释的代码)。
+     *
+     * ⭐ 为什么不顺手修:改掉它会**改变提取行为**(某些邮箱可能正依赖这条兜底
+     * 才能拿到正文),要真机逐家验证(Gmail/Outlook/QQ/163)才能定。
+     * 本批次是「收口注入 + 补守卫」,不含行为变更 —— 混在一起出问题分不清来源。
+     *
+     * 立项时的判据:Gmail 会话视图展开两封,右键第二封,
+     * 取到的正文必须是第二封的。
+     */
     function pick(root, s) {
       if (!s) return null;
       try { return root.querySelector(s) || document.querySelector(s); }

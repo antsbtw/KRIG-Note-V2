@@ -44,8 +44,16 @@ export type FakeEl = {
 };
 
 /** 建一个元素。`props` 里可给 textContent / value / contentEditable */
-/** 元素矩形 —— 给 `elementFromPoint` 命中判定用。不给则退默认值 */
+/** 元素矩形 —— 给 `elementFromPoint` 命中判定用。**不给则不可命中**(见下) */
 export type FakeRect = { left: number; top: number; width: number; height: number };
+
+/**
+ * ⭐ 「没有布局」的哨兵矩形 —— 远在坐标系之外且 0 面积。
+ *
+ * 任何正常坐标都命中不了它,任何合理的邻域回退(本仓脚本用 ±24 / ±240)
+ * 也捞不到它。⚠️ 别改成 (0,0,*) 之类:那会在原点形成幻影命中区。
+ */
+const UNPOSITIONED_RECT: FakeRect = { left: -1e6, top: -1e6, width: 0, height: 0 };
 
 export function el(
   tagName: string,
@@ -73,7 +81,21 @@ export function el(
       return querySelectorAllIn(descendants(this), sel);
     },
     getBoundingClientRect() {
-      const r = props.rect ?? { left: 0, top: 0, width: 100, height: 20 };
+      /**
+       * ⚠️⚠️ **没给 rect 的元素必须不可命中** —— 2026-09-30 复核抓到:
+       * 原来默认 `(0,0,100,20)`,于是**每个没给矩形的元素都在左上角形成幻影命中区**。
+       * 实测点 `(50,10)` 会提取到一封声明在 `y=300` 的邮件,
+       * 而真浏览器该报 `__noMail`。假 DOM 比被测代码更宽松 = 测试失去区分力。
+       *
+       * ⚠️ 第一次修成 `(0,0,0,0)` **仍然不够**:`elementFromPoint` 确实挡住了,
+       * 但被测脚本的「±24px 纵向邻域回退」把坐标 (0,0) 附近的它**捞了回来**
+       * (`y=10` 落在 `[0-24, 0+24]` 内)。0 面积 ≠ 不可达。
+       *
+       * ⭐ 改用一个**远在坐标系之外**的哨兵矩形:既不可能被 elementFromPoint 命中,
+       * 也不可能落进任何合理的邻域回退。要参与命中的元素**必须显式给 rect** ——
+       * 这正是我们要的:布局是测试的输入,不该由假 DOM 替你猜。
+       */
+      const r = props.rect ?? UNPOSITIONED_RECT;
       // ⚠️ right/bottom 必须算出来 —— 被测脚本普遍用它们做纵向邻域判定
       return { ...r, right: r.left + r.width, bottom: r.top + r.height };
     },
@@ -112,11 +134,18 @@ export function el(
     configurable: true,
   });
   for (const c of children) c.parentElement = node;
-  // textContent 未显式给时,由子孙拼出来(贴近真 DOM,contains 校验要用)
+  /**
+   * textContent 未显式给时,由**子节点的 textContent** 拼出来。
+   *
+   * ⚠️⚠️ 原实现读的是 `n.attrs['__text']` —— 而**全仓没有任何地方写这个属性**
+   * (自 5ca8e99f 起的旧债,2026-09-30 复核抓到)。于是:
+   * 「有子元素的节点」`textContent` **恒为空串**,新加的 `innerText` 同源也恒空。
+   * ⭐ 后果:任何「取容器文字」的断言都在拿空串比空串 —— 绿得毫无意义。
+   */
   if (props.textContent === undefined && children.length > 0) {
     Object.defineProperty(node, 'textContent', {
       get() {
-        return descendants(node).filter((n) => n !== node).map((n) => n.attrs['__text'] ?? '').join('');
+        return node.children.map((c) => c.textContent).join('');
       },
       configurable: true,
     });
@@ -158,7 +187,9 @@ function matchesSimple(node: FakeEl, part: string): boolean {
       if (got === undefined) return false;     // 属性不存在 → 不匹配
       if (op === undefined) continue;           // `[attr]` 只要求存在
       if (op === '=' && got !== want) return false;
-      if (op === '*=' && !got.includes(want)) return false;
+      // ⚠️ 真 DOM:`[attr*=""]` 匹配**零个**元素(空串不是有效子串匹配)。
+      // `''.includes('')` 为 true,照写会变成"全匹配",与真 DOM 相反。
+      if (op === '*=' && (want === '' || !got.includes(want))) return false;
       if (op === '^=' && !got.startsWith(want)) return false;
       if (op === '$=' && !got.endsWith(want)) return false;
     } else {
@@ -266,7 +297,14 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
           hit = n;        // 后来的覆盖先前的 —— 近似「上层胜出」
         }
       }
-      return hit;
+      /**
+       * ⭐ 点在空白处时真 DOM 返回 **`<body>`** 而不是 `null`
+       * (只有点在视口外才是 null)。这个差异是有意义的:
+       * 被测脚本写 `el && el.closest ? el.closest(sel) : null` ——
+       * 返回 body 会走进 `closest` 分支(并正确地找不到),
+       * 返回 null 则整个分支被跳过。两条路径不同,假 DOM 不该抹平它。
+       */
+      return hit ?? root;
     },
     createRange() {
       return { selectNodeContents() {}, collapse() {} };
