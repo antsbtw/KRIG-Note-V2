@@ -4,39 +4,85 @@
 > 「首先做好底座，也就是为 x 单独开浏览器的变种。
 > 　也就是说 x 优先继承浏览器的功能，对吗？」
 
-⭐ **对，方向完全对。** 但落地前必须先解决一件事：
-**仓里有两个「浏览器底座」，它们的能力互补、且新的那个刻意修了旧的一个缺陷。**
+⭐ **对，方向完全对。** 但「浏览器底座」在仓里不是一个东西，也不是两个并列的东西 ——
+它是**一套 L0–L6 分层模型**，目前由两段代码分别占着不同的层，另有第三段是给人用的浏览器。
 不说清楚就动手，等于随机挑一个 —— 那正是 X 当年脆弱的来源。
 
 ---
 
-## 一、两个底座实测对照（2026-09-30）
+## 一、⭐⭐ 更正：不是「两个底座」，是**一个分层模型的两段**
 
-| | `web-capability/` | `web-service-base/` |
-|---|---|---|
-| 行数 | 6683 | 908 |
-| 定位 | **能力层**：page/input/net/dom/raw/trace | **服务生命周期层**：webview 挂载与识别 |
-| 依赖 | 只 `electron`/`node:*`，业务零引用 | 只 `electron` |
-| 现有消费者 | （X 拆掉后）AI 的注入脚本登记 | **AI · Mail 在用** |
-| 谁引用谁 | —— | **互不引用，是平行关系，不是上下层** |
+⚠️ 我最初说它们是「平行关系，不是上下层」—— **这个说法错了**。
+证据只是「grep 不到互相 import」，那只证明**当前没接线**，不证明没有分层关系。
 
-### 各自独有的能力（互补，不是替代）
+仓里有**设计文档明确写下的答案**（`09-history.md` §5.2，2026-09 决策）：
+
+> | 现有底座 | 对应层 |
+> |---|---|
+> | `resolveWsWebContents` / registry | **L0** Session/Lifecycle |
+> | `buildHitTestScript` | **L2** Page Runtime |
+> | `pasteTextToWebview` / `feedFilesToInput` / `locateSendButton` | **L4** Interaction |
+>
+> **它不是竞品，是 L0+L2+L4 的一部分，而且质量不错。**
+> 缺的是 **L1（网络捕获）**—— 全仓最大的重复源，和 **L3/L5/L6**。
+> 所以整合方向明确：**保留并扩充 `web-service-base`，先补 L1，不推倒重来。**
+
+### ⭐ 所以真实关系是这样
 
 ```
-只有 web-capability 有：      只有 web-service-base 有：
-  page.goto / ready             attachWebviewContextMenu   原生右键 + 坐标上送
-  page.scrollUntil              resolveWsWebContents       按 guest wcId 精确定位
-  net 载荷捕获（CDP+webRequest）  buildHitTestScript         坐标 → DOM 元素定位
-  raw 原始留痕                   focusInputBox / pasteText  发布原语
-  trace 诊断                     feedFilesToInput           喂真实文件给 <input file>
-  page 租约 / 身份
+        L0  Session / Lifecycle   ← web-service-base（registry / resolve）
+        L1  Network 网络捕获       ← web-capability（net / raw）★ 原本是空的
+        L2  Page Runtime          ← 两边都有（service-base 的 hit-test；capability 的 dom/page）
+        L3  Render                ← 还没做
+        L4  Interaction 交互       ← web-service-base（paste / feedFiles / locateSend）
+                                     + web-capability/input（收编了它的浏览器知识）
+        L5  Artifact              ← 还没做
+        L6  Persistence 落库       ← 还没做
 ```
 
-⭐ **所以不是「二选一」，是「各取所需」** ——
-X 的采集要 `web-capability`（滚动 + 载荷），
-X 的右键提取 / 填回复框要 `web-service-base`（坐标定位 + 合成 paste + 喂文件）。
+**一套分层模型，两段代码分别占了不同的层。**
+`web-capability` 是后建的，专门补 **L1** 这个最大的空洞（当时全仓 9 处 CDP 重复）。
+
+### ⚠️ 为什么它们现在互不引用
+
+`web-capability/index.ts` 自己写着：
+
+> 新层独立建，**谁也不依赖它**，旧代码一行不动 —— 见 `08-migration-strategy.md` §1.1
+
+⭐ 这是**刻意的施工策略**（「只加不改」），不是架构判断：
+新层先独立建好、不动任何在跑的代码，等验证完再接线。
+所以「互不引用」是**施工中途的状态**，不是终态设计。
 
 ---
+
+## 一之二、回答你的两个猜测
+
+### ❓「一个面向人的浏览，一个面向机器的控制输入输出？」
+
+⚠️ **不是。** 实测 `web-service-base` 全部 7 个文件**都是机器控制**：
+按坐标定位元素、注册活跃 webContents、原生右键上送坐标、
+focus 输入框 + 粘贴、喂文件给 `<input type=file>`。
+一个「面向人的浏览」功能都没有。
+
+⭐ **面向人的浏览确实存在，但在第三个地方**（都不在这两者里）：
+
+```
+src/views/web/          WebTabBar · WebToolbar · WebFindBar · web-history · 书签
+src/platform/main/web-download/   下载
+```
+
+→ 所以是**三样东西**，你的直觉「有一个面向人的」是对的，只是它不是这两个中的任何一个。
+
+### ❓「它们没有上下继承关系吗？」
+
+⭐ **有分层关系，但不是「继承」** ——
+是**同一个 L0–L6 模型里的不同层**，靠注册表和接口对接，不是父类子类。
+
+| 你的问法 | 实际 |
+|---|---|
+| 上下继承 | ❌ 没有 class 继承 |
+| 上下分层 | ✅ **有**，L0/L2/L4 vs L1，见上表 |
+| 平行无关 | ❌ 我最初说错了 |
 
 ## 二、⚠️ 一个必须知道的缺陷差异
 
@@ -64,19 +110,30 @@ X 的右键提取 / 填回复框要 `web-service-base`（坐标定位 + 合成 p
 
 ## 三、建议的继承形态
 
+⭐ 按分层模型画（不是「两个并列的底座」）：
+
 ```
-        src/modules/x/                    ← X 自己的地盘
-        ├─ x-pages.ts      语义页面表（x.home / x.profile / x.status / x.articles）
-        ├─ x-payload/      X GraphQL 字段路径解析
-        ├─ ...
-        └─ index.ts        ⭐ 一行 self-register
-             │
-      ┌──────┴───────────────────┐
-      ↓ 采集/滚动/载荷            ↓ 挂载/右键/填框/喂文件
-  web-capability              web-service-base
-  （page·net·raw·trace）       （registry·菜单·hit-test·paste）
-        └────────── 都不认识 X ──────────┘
+   ┌───────────────────────────────────────────────┐
+   │  src/modules/x/          ← X 自己的地盘        │
+   │  · 语义页面表  · GraphQL 字段路径  · 库表流程   │
+   │  └─ index.ts             ⭐ 一行 self-register │
+   └───────────────────────┬───────────────────────┘
+                           │ 只往下用，不被任何人 import
+   ─────────────────────── ↓ ───────────────────────
+    L6  Persistence 落库        ← 还没做
+    L5  Artifact                ← 还没做
+    L4  Interaction 交互         ← web-service-base（paste/feedFiles/locateSend）
+                                  + web-capability/input（收编其浏览器知识）
+    L3  Render                  ← 还没做
+    L2  Page Runtime            ← service-base（hit-test）+ capability（dom/page）
+    L1  Network 网络捕获  ★      ← web-capability（net/raw）—— 后建，补最大空洞
+    L0  Session/Lifecycle       ← web-service-base（registry / resolveWsWebContents）
+   ─────────────────────────────────────────────────
+            ⭐ 每一层都不认识 X（注册表模式）
 ```
+
+⚠️ 图里两段代码**不是并列关系**，是**各占其层**：
+`web-service-base` 占 L0/L2/L4，`web-capability` 补 L1 并在 L2/L4 上收编了浏览器知识。
 
 **X 特有的只有三件**（判据：换成另一个网站会不会失效）：
 1. 语义页面表 —— `x.home` / `x.profile` / `x.status` / `x.articles` 怎么拼 URL
