@@ -175,7 +175,7 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
     expect(box.querySelectorAll('.same'), 'querySelectorAll 含了自身').toEqual([inner]);
   });
 
-  it('⭐ `^=""` / `$=""` 也匹配零个(与 `*=""` 同理)', () => {
+  it('⭐ `*=""` / `^=""` / `$=""` 匹配零个', () => {
     const n = el('a', { href: 'mailto:x' });
     const doc = makeDom([n]).document as { querySelectorAll(s: string): unknown[] };
     for (const op of ['*', '^', '$']) {
@@ -184,6 +184,46 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
         `[href${op}=""] 匹配了元素 —— 真 DOM 匹配零个`,
       ).toEqual([]);
     }
+  });
+
+  it('⭐⭐ 但 `[attr=""]` 匹配「值恰为空」的元素(不许一起毙掉)', () => {
+    /**
+     * ⚠️ 我上一轮写 `if (want === '') return false` **不分算子**,
+     * 把 `=` 也毙了(第四轮复核抓到的回归 R1)。
+     * 真 DOM:`[title=""]` 选中 title 恰为空串的元素。
+     */
+    const empty = el('span', { title: '' }, { textContent: 'E' });
+    const full = el('span', { title: 'x' }, { textContent: 'F' });
+    const doc = makeDom([empty, full]).document as { querySelectorAll(s: string): Array<{ textContent: string }> };
+    expect(
+      doc.querySelectorAll('[title=""]').map((n) => n.textContent),
+      '`[attr=""]` 没选中「值恰为空」的元素',
+    ).toEqual(['E']);
+  });
+
+  it('⭐⭐ 后代组合 selector 的**祖先部分可以是容器自身**(Gmail 真实写法)', () => {
+    /**
+     * ⚠️ 第四轮复核抓到的回归 R2:我改用 `descendantsOnly` 时让
+     * **整段 selector** 都在后代里跑,于是
+     * `box.querySelector('div[data-message-id] div.ii')` 返回 null。
+     *
+     * ⭐ 而这正是 **Gmail 的 mailBody**(`mail-service-types.ts:141`:
+     * `'div.a3s, div[data-message-id] div.ii'`)—— 踩中真实业务路径。
+     *
+     * 真 DOM 语义:只要求**最终选中的元素**是后代,祖先部分可以是容器自身。
+     */
+    const body = el('div', { class: 'ii' }, { textContent: 'BODY' });
+    const box = el('div', { 'data-message-id': 'm1' }, {}, [body]);
+    makeDom([box]);
+    expect(
+      box.querySelector('div[data-message-id] div.ii')?.textContent,
+      '祖先部分不许限制在后代里 —— 这条是 Gmail 的 mailBody selector',
+    ).toBe('BODY');
+    // ⚠️ 同时:自身仍然不许被返回
+    expect(
+      box.querySelector('div[data-message-id]'),
+      'querySelector 返回了自身',
+    ).toBeNull();
   });
 
   it('⭐⭐ 不支持的 selector 语法必须**抛错**,不许静默返回空', () => {

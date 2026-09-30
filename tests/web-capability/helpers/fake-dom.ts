@@ -100,10 +100,10 @@ export function el(
      * 假 DOM 比真浏览器**宽松**,被测代码的错会被兜住。
      */
     querySelector(sel) {
-      return querySelectorAllIn(descendantsOnly(this), sel)[0] ?? null;
+      return queryWithin(this, sel)[0] ?? null;
     },
     querySelectorAll(sel) {
-      return querySelectorAllIn(descendantsOnly(this), sel);
+      return queryWithin(this, sel);
     },
     getBoundingClientRect() {
       /**
@@ -192,6 +192,23 @@ function descendantsOnly(root: FakeEl): FakeEl[] {
 }
 
 /**
+ * ⭐⭐ `Element.querySelector` 的正确语义:**最终选中的元素**必须是后代,
+ * 但**后代组合 selector 的祖先部分可以是容器自身**。
+ *
+ * ⚠️ 我上一轮改成「整段 selector 都在 descendantsOnly 里跑」是**回归**
+ * (2026-09-30 第四轮复核抓到):于是
+ * `box.querySelector('div[data-message-id] div.ii')` 返回 null ——
+ * 而那正是 **Gmail 真实的 mailBody selector**
+ * (`mail-service-types.ts:141`),踩中了真实业务路径。
+ *
+ * ⭐ 做法:整棵子树(含自身)参与祖先匹配,**最后再筛掉自身**。
+ */
+function queryWithin(root: FakeEl, sel: string): FakeEl[] {
+  const inside = new Set(descendantsOnly(root));
+  return querySelectorAllIn(descendants(root), sel).filter((n) => inside.has(n));
+}
+
+/**
  * 极简 selector 匹配。⚠️ 不支持的语法**抛错** —— 静默返回空会让测试假绿。
  */
 function matchesSimple(node: FakeEl, part: string): boolean {
@@ -220,12 +237,16 @@ function matchesSimple(node: FakeEl, part: string): boolean {
       if (op === undefined) continue;           // `[attr]` 只要求存在
       if (op === '=' && got !== want) return false;
       /**
-       * ⚠️ 真 DOM:`[attr*=""]` / `[attr^=""]` / `[attr$=""]` 都匹配**零个**
-       * (空串不是有效的子串/前缀/后缀匹配)。
-       * 而 JS 里 `''.includes('')` / `.startsWith('')` / `.endsWith('')` 全为 true,
+       * ⚠️ 真 DOM:`[attr*=""]` / `[attr^=""]` / `[attr$=""]` 匹配**零个**
+       * (空串不是有效的子串/前缀/后缀匹配),而 JS 里
+       * `''.includes('')` / `.startsWith('')` / `.endsWith('')` 全为 true ——
        * 照写会变成**全匹配**,与真 DOM 恰好相反。
+       *
+       * ⚠️⚠️ 但 **`[attr=""]` 不同**:它匹配「属性值恰为空串」的元素。
+       * 我上一轮写成 `if (want === '') return false` **不分算子**,
+       * 把 `=` 也一起毙了(2026-09-30 第四轮复核抓到,是我引入的回归)。
        */
-      if (want === '') return false;
+      if (want === '' && op !== '=') return false;
       if (op === '*=' && !got.includes(want)) return false;
       if (op === '^=' && !got.startsWith(want)) return false;
       if (op === '$=' && !got.endsWith(want)) return false;
