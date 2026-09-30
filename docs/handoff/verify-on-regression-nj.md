@@ -345,6 +345,34 @@ X 把未登录页面的 `data-testid` **全部去掉了**（真机探针实测�
 - `^=""` / `$=""` 仍匹配全部（只修了 `*=`）
 - `elementFromPoint` 视口外也返回 body；真 DOM 视口外返回 null（低危，fake-dom 没有视口概念）
 
+## 四⅞+++、复核 `3cb0363d`（fake-dom 第四轮）+ 是否继续加固的判断
+
+### 修复 —— 成立
+- 上轮四处（`^=`/`$=` 缺反例、`closest` 不拆逗号、`__text` 回归）重新注入 → **全红** ✅
+- 「读几何即抛」落地，且当场暴露两处依赖旧行为的用例 —— 方向对了的证据
+
+### ⚠️ 本轮新引入的两处语义错（实测）
+- **R1**：`if (want === '') return false` 排在 `=` 判定**之后**、不分算子 →
+  `[title=""]` 也匹配零个；真 DOM 匹配 title **恰为空**的元素（`=` 与 `*=/^=/$=` 语义不同）
+- **R2**：改成 `descendantsOnly` 后，后代组合 selector 的**祖先部分**也只能在后代里找 →
+  `box.querySelector('div[data-message-id] div.ii')`（box 自己带 data-message-id）返回 **null**，真 DOM 返回 `div.ii`。
+  ⚠️ 这正是 **Gmail 真实 mailBody** 的写法；真 DOM 规则是「被选中的元素须是后代，但祖先匹配可以是自身甚至在外面」
+
+### 边界开闭：不建议立项
+脚本里 `Y >= r.top - 24 && Y <= r.bottom + 24` 是**脚本自己定义的带宽**，与浏览器命中语义无关；
+差异只在假 `elementFromPoint`，已记档即可。
+
+### ⭐ 判断：剩余风险是「还有语义错」，但不该再手工加固一轮
+- 四轮的错**全部出在手写的 selector 引擎/树遍历**（逗号、算子、空值、自身、后代组合、textContent），
+  且**每轮的修复都在引入下一轮的错**（R1、R2 都是本轮修复带来的）—— 这是在手写一个 CSS 引擎，收敛不了
+- 而**几何/命中那一半**（rect、`elementFromPoint`、读几何即抛）现在是对的、有自检、范围小
+- ⭐ **jsdom 24 已在 node_modules**（defuddle / vitest 传递依赖），仓里已有 5 个测试用 `@vitest-environment jsdom`
+- 建议**一步收尾**：树与 selector 交给 jsdom（真 CSS 引擎、`closest`、作用域、`textContent` 全真），
+  fake-dom 只保留**几何 shim**（rect 表 + `elementFromPoint` + 读几何即抛）和**事件记录**；
+  现有 14+ 条自检原样当验收。⚠️ jsdom **不实现 `innerText`** 与布局，这两样仍由 shim 补；
+  ⚠️ 要把 jsdom 加进 devDependencies，别靠传递依赖
+- 若决定直接回主线：只修 R1/R2（各一两行），并在 fake-dom 头注释写明「selector 引擎手写、只支持子集，复杂 selector 用 jsdom」后冻结
+
 ## 五、背景：为什么在做这件事
 
 用户 2026-09-30 拍板：**先把底座做完，再建 X**。原话：
