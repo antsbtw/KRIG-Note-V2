@@ -95,7 +95,38 @@ registerEBookCommands(rendererWsId);
 ⭐ 判据不是「目录长什么样」，而是**「删掉它要动几处」**。
 目录结构是手段，装卸性才是目的 —— 现在手段已经基本达标了。
 
-### ✅ 建议做（收益高、代价小）
+### ✅ 已做完（2026-09-30）
+
+**① commands 改自注册**（commit 9156164f）
+`ViewDefinition` 加 `commands?: (wsId) => void`，registry **只收不跑**，
+renderer 在 `onMyWsIdReady` 里调一次 `runViewCommandRegistrars(wsId)`。
+
+⚠️ 它当初没跟 view 一起自注册**不是疏忽**：命令注册要本窗口真 wsId，
+多窗口下不能用 `snapshot.activeId` 顶替（新窗口会拿到 ws-1，命令注册到别人头上）。
+所以做成「登记与执行分开」，而不是纯副作用 import。
+
+⭐⭐ 两种注册顺序都不漏：wsId 先到时，晚注册的 view 当场补跑 ——
+因为 `onMyWsIdReady` 是**一次性**的（`use-workspace.ts:41`），
+只在那一刻跑一遍的话，之后注册的 view 命令会**静默没有**且不报错。
+
+**② 守卫泛化到 7 个模块**（commit 8fa6daef）
+`tests/modules/module-detachable.test.ts`，判据：目录之外认识它 ≤ 1。
+顺带把 note 最后一处接线（`initNoteBaseSnapshotSync`）收回自注册。
+
+### ⭐ 结果：7 个模块全部 = 1 处
+
+| 模块 | 被外部认识 | 引用别的 view |
+|---|---|---|
+| note · web · ebook · ai · mail · graph-canvas-view · thought | **各 1 处**（renderer 的 self-register） | **0** |
+
+非破坏性验证（以 mail 为例）：入 1 处、出 0 处。
+
+⭐⭐ 守卫第二条断言「那一处必须是 renderer」**不是多余的**：
+实测注入「把 thought 的 self-register 从 renderer 挪到 note/index.ts」，
+**总数仍是 1**、第一条照样绿，只有这条红 ——
+**数字达标不代表没耦合，得看耦在谁身上。**
+
+### ⏸️ 原建议做（已完成，保留原文供对照）
 
 1. **commands 改自注册** —— 让「删一行」对所有模块都成立（现在只有 view 成立）
 2. **把可装卸守卫泛化** —— 现在 `x-module-detachable.test.ts` 只钉 X，
