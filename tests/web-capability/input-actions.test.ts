@@ -267,7 +267,12 @@ describe('press / hover / focus', () => {
   });
 
   it('hover 派发完整鼠标进入序列(X 表格网格按钮需要它)', async () => {
-    const btn = el('button', { id: 'update' }, {});
+    /**
+     * ⚠️ 必须给 rect:hover 要算元素中心再派发鼠标序列。
+     * 2026-09-30 起 fake-dom 对「没给 rect 却读几何」**直接抛错** ——
+     * 原来它会编造一个 (0,0,100,20),那正是「幻影命中区」的由来。
+     */
+    const btn = el('button', { id: 'update' }, { rect: { left: 10, top: 20, width: 80, height: 30 } });
     const dom = makeDom([btn]);
     const engine = new InputEngine(new FakeInputHost(dom), new MapAnchorResolver(ANCHORS));
     const r = await engine.hover(PAGE, { anchor: 'updateButton' });

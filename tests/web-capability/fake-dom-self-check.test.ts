@@ -25,27 +25,49 @@ import { el, makeDom, evalInDom } from './helpers/fake-dom';
 const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height });
 
 describe('⭐⭐ fake-dom 自检:布局与命中', () => {
-  it('⭐⭐ 没给 rect 的元素**不可命中**(不许有幻影命中区)', () => {
+  it('⭐⭐ 没给 rect 的元素:读几何必须**抛错**(不许编造矩形)', () => {
+    /**
+     * ⚠️ 这条原来是「抽查 4 个坐标都不命中」—— 复核指出那是**假绿**:
+     * 把幻影区挪到 y≥30 就躲过了抽查(全靠 mail 测试偶然兜住)。
+     * ⭐ 改成钉**不变量本身**:没给 rect 就不许有几何 —— 坐标抽查不了它。
+     */
     const ghost = el('div', { id: 'ghost' }, { textContent: 'G' });
-    const dom = makeDom([ghost]);
-    const doc = dom.document as { elementFromPoint(x: number, y: number): unknown };
-    // 原点附近、以及任意常见坐标,都不该命中它
-    for (const [x, y] of [[0, 0], [50, 10], [1, 1], [99, 19]]) {
-      expect(
-        doc.elementFromPoint(x, y),
-        `未布局元素在 (${x},${y}) 被命中了 —— 幻影命中区会让被测脚本的错被兜住`,
-      ).not.toBe(ghost);
+    makeDom([ghost]);
+    expect(
+      () => ghost.getBoundingClientRect(),
+      '没给 rect 却能读出几何 —— 假 DOM 在编造矩形,会形成幻影命中区',
+    ).toThrow(/没有 rect/);
+  });
+
+  it('⭐⭐ elementFromPoint 只考虑显式给了 rect 的元素(任意坐标都不命中未布局元素)', () => {
+    const ghost = el('div', { id: 'ghost' }, { textContent: 'G' });
+    const real = el('div', { id: 'real' }, { rect: rect(0, 500, 100, 50) });
+    const dom = makeDom([ghost, real]);
+    const doc = dom.document as { elementFromPoint(x: number, y: number): unknown; body: unknown };
+    // ⭐ 不抽查固定几点 —— 扫一片,任何一点命中 ghost 都算违规
+    for (let x = 0; x <= 200; x += 25) {
+      for (let y = 0; y <= 200; y += 25) {
+        expect(doc.elementFromPoint(x, y), `(${x},${y}) 命中了未布局元素`).not.toBe(ghost);
+      }
     }
+    expect(doc.elementFromPoint(50, 520), '给了 rect 的反而没命中').toBe(real);
   });
 
   it('⭐ 给了 rect 的元素按矩形命中,边界含端点', () => {
     const box = el('div', {}, { rect: rect(10, 20, 100, 50) });
     const doc = makeDom([box]).document as { elementFromPoint(x: number, y: number): unknown };
     expect(doc.elementFromPoint(60, 40), '矩形内没命中').toBe(box);
-    expect(doc.elementFromPoint(10, 20), '左上角端点没命中').toBe(box);
-    expect(doc.elementFromPoint(110, 70), '右下角端点没命中').toBe(box);
+    expect(doc.elementFromPoint(10, 20), '左上角端点没命中(真 DOM 左/上边界是闭的)').toBe(box);
     expect(doc.elementFromPoint(9, 40), '矩形左外侧竟然命中').not.toBe(box);
     expect(doc.elementFromPoint(60, 71), '矩形下外侧竟然命中').not.toBe(box);
+    /**
+     * ⚠️ 复核指正:真 DOM 的**右/下边界是开的**(`[left,right)` / `[top,bottom)`),
+     * 我原来钉「右下角端点也命中」是**非真实语义**。
+     * ⭐ 但本仓被测脚本都用 `<=` 做邻域判定,改成开区间会与它们不一致 ——
+     * 故这里**如实记下差异**并只钉「不比真 DOM 宽松的那一侧」:
+     * 左/上闭合必须成立;右/下是否闭合不钉(当前实现是闭的,偏宽松 1px,
+     * 不影响任何现有判定,真要对齐需连同被测脚本一起改)。
+     */
   });
 
   it('⭐ 点在空白处返回 body(真 DOM 语义),不是 null', () => {
@@ -107,6 +129,12 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
     expect(doc.querySelector('[href^="mailto:"]'), '^= 不对').toBe(n);
     expect(doc.querySelector('[href$=".com"]'), '$= 不对').toBe(n);
     expect(doc.querySelector('[title*="nope"]'), '*= 误匹配').toBeNull();
+    /**
+     * ⚠️ 复核指出原来缺**反例**:删掉 `^=` 或 `$=` 的判断照样全绿
+     * (因为只有正例,而正例在"算子被忽略"时也能过)。补上。
+     */
+    expect(doc.querySelector('[href^="http"]'), '^= 误匹配了不以 http 开头的').toBeNull();
+    expect(doc.querySelector('[href$=".org"]'), '$= 误匹配了不以 .org 结尾的').toBeNull();
   });
 
   it('⭐ `[attr*=""]` 匹配**零个**(真 DOM 语义,不是全匹配)', () => {
@@ -125,6 +153,37 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
     expect(child.closest('.leaf'), 'closest 没把自身算进去').toBe(child);
     expect(child.closest('.box'), 'closest 没向上找到祖先').toBe(parent);
     expect(child.closest('.nope'), 'closest 找不到时该返回 null').toBeNull();
+    /**
+     * ⚠️ 复核指出:`closest` 不按逗号拆分也全绿 ——
+     * 因为真实 mail selector 都带逗号、总有一个分支命中。补一条只靠拆分才能过的。
+     */
+    expect(child.closest('.nope, .box'), 'closest 没按逗号拆多候选').toBe(parent);
+    expect(child.closest('.box, .nope'), 'closest 多候选顺序无关性不成立').toBe(parent);
+  });
+
+  it('⭐⭐ el.querySelector 只找**后代**,不含自身(真 DOM 语义)', () => {
+    /**
+     * ⚠️ 2026-09-30 复核抓到:原来用 `descendants(this)` 而它**包含 root**,
+     * 于是 `box.querySelector('.zA')` 返回 box 自己。
+     * ⭐ mail 的 `pick(box, bodySel)` 正踩在这上面:bodySelector 若也匹配容器,
+     * 真浏览器会往里找,假 DOM 却把容器当正文 —— 假 DOM 比真的宽松。
+     */
+    const inner = el('div', { class: 'same' }, { textContent: 'INNER' });
+    const box = el('div', { class: 'same' }, { textContent: undefined }, [inner]);
+    makeDom([box]);
+    expect(box.querySelector('.same'), 'querySelector 返回了自身').toBe(inner);
+    expect(box.querySelectorAll('.same'), 'querySelectorAll 含了自身').toEqual([inner]);
+  });
+
+  it('⭐ `^=""` / `$=""` 也匹配零个(与 `*=""` 同理)', () => {
+    const n = el('a', { href: 'mailto:x' });
+    const doc = makeDom([n]).document as { querySelectorAll(s: string): unknown[] };
+    for (const op of ['*', '^', '$']) {
+      expect(
+        doc.querySelectorAll(`[href${op}=""]`),
+        `[href${op}=""] 匹配了元素 —— 真 DOM 匹配零个`,
+      ).toEqual([]);
+    }
   });
 
   it('⭐⭐ 不支持的 selector 语法必须**抛错**,不许静默返回空', () => {

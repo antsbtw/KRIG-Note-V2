@@ -37,6 +37,8 @@ export type FakeEl = {
   closest(sel: string): FakeEl | null;
   /** 渲染后文本。假 DOM 里等同 textContent,供脚本两种取法都能拿到 */
   innerText: string;
+  /** ⭐ 是否显式给了 rect —— `elementFromPoint` 只考虑给了的 */
+  readonly hasRect: boolean;
   focus(): void;
   click(): void;
   scrollIntoView(): void;
@@ -48,12 +50,26 @@ export type FakeEl = {
 export type FakeRect = { left: number; top: number; width: number; height: number };
 
 /**
- * ⭐ 「没有布局」的哨兵矩形 —— 远在坐标系之外且 0 面积。
+ * ⭐⭐ 没给 `rect` 的元素:**读几何直接抛**,而不是给一个编造的矩形。
  *
- * 任何正常坐标都命中不了它,任何合理的邻域回退(本仓脚本用 ±24 / ±240)
- * 也捞不到它。⚠️ 别改成 (0,0,*) 之类:那会在原点形成幻影命中区。
+ * ── 演进过程(三轮复核,记下来免得有人改回去)──
+ *  · 初版 `(0,0,100,20)` → **幻影命中区**:未布局元素都挤在左上角,
+ *    实测点 (50,10) 提取到了声明在别处的邮件
+ *  · 改 `(0,0,0,0)` → 仍不够:被测脚本的 ±24px 邻域回退把原点附近的它捞回来
+ *    (0 面积 ≠ 不可达)
+ *  · 改远处哨兵 `(-1e6,…)` → 当下无假阴,但复核指出**以后会出问题**:
+ *    「按 top 升序取第一个」「取最上方」「top<0 判断」这些写法都会被它带偏
+ *  · ⭐ 终版:**抛错**。符合本文件的既有原则 ——
+ *    「支持不了的写法会抛错,不会静默返回空;静默会让测试绿得毫无意义」。
+ *    要参与几何的元素**必须显式给 rect**:布局是测试的输入,不该由假 DOM 替你猜。
  */
-const UNPOSITIONED_RECT: FakeRect = { left: -1e6, top: -1e6, width: 0, height: 0 };
+function noRectError(tag: string): never {
+  throw new Error(
+    `[fake-dom] <${tag}> 没有 rect 却被读取几何 —— 要参与命中/布局判定的元素`
+    + '必须显式传 `{ rect: { left, top, width, height } }`。'
+    + '(编造一个默认矩形会形成幻影命中区,曾让「点空白处」误提取到别的元素)',
+  );
+}
 
 export function el(
   tagName: string,
@@ -71,14 +87,23 @@ export function el(
     contentEditable: props.contentEditable,
     events: [],
     clicked: 0,
+    hasRect: props.rect !== undefined,
     getAttribute(name) {
       return name in this.attrs ? this.attrs[name] : null;
     },
+    /**
+     * ⚠️⚠️ **只找后代,不含自身** —— 真 DOM 语义(2026-09-30 复核抓到)。
+     * 原来用 `descendants(this)`,而它**包含 root**,于是
+     * `box.querySelector('.zA')` 会返回 box 自己。
+     * ⭐ mail 的 `pick(box, bodySel)` 正踩在这上面:若 bodySelector 恰好
+     * 也匹配容器,真浏览器会往里找,假 DOM 却把容器本身当正文 ——
+     * 假 DOM 比真浏览器**宽松**,被测代码的错会被兜住。
+     */
     querySelector(sel) {
-      return querySelectorAllIn(descendants(this), sel)[0] ?? null;
+      return querySelectorAllIn(descendantsOnly(this), sel)[0] ?? null;
     },
     querySelectorAll(sel) {
-      return querySelectorAllIn(descendants(this), sel);
+      return querySelectorAllIn(descendantsOnly(this), sel);
     },
     getBoundingClientRect() {
       /**
@@ -95,7 +120,7 @@ export function el(
        * 也不可能落进任何合理的邻域回退。要参与命中的元素**必须显式给 rect** ——
        * 这正是我们要的:布局是测试的输入,不该由假 DOM 替你猜。
        */
-      const r = props.rect ?? UNPOSITIONED_RECT;
+      const r = props.rect ?? noRectError(tagName);
       // ⚠️ right/bottom 必须算出来 —— 被测脚本普遍用它们做纵向邻域判定
       return { ...r, right: r.left + r.width, bottom: r.top + r.height };
     },
@@ -159,6 +184,13 @@ function descendants(root: FakeEl): FakeEl[] {
   return out;
 }
 
+/** ⭐ 真后代(**不含自身**)—— `Element.querySelector` 的正确搜索域 */
+function descendantsOnly(root: FakeEl): FakeEl[] {
+  const out: FakeEl[] = [];
+  for (const c of root.children) out.push(...descendants(c));
+  return out;
+}
+
 /**
  * 极简 selector 匹配。⚠️ 不支持的语法**抛错** —— 静默返回空会让测试假绿。
  */
@@ -187,9 +219,14 @@ function matchesSimple(node: FakeEl, part: string): boolean {
       if (got === undefined) return false;     // 属性不存在 → 不匹配
       if (op === undefined) continue;           // `[attr]` 只要求存在
       if (op === '=' && got !== want) return false;
-      // ⚠️ 真 DOM:`[attr*=""]` 匹配**零个**元素(空串不是有效子串匹配)。
-      // `''.includes('')` 为 true,照写会变成"全匹配",与真 DOM 相反。
-      if (op === '*=' && (want === '' || !got.includes(want))) return false;
+      /**
+       * ⚠️ 真 DOM:`[attr*=""]` / `[attr^=""]` / `[attr$=""]` 都匹配**零个**
+       * (空串不是有效的子串/前缀/后缀匹配)。
+       * 而 JS 里 `''.includes('')` / `.startsWith('')` / `.endsWith('')` 全为 true,
+       * 照写会变成**全匹配**,与真 DOM 恰好相反。
+       */
+      if (want === '') return false;
+      if (op === '*=' && !got.includes(want)) return false;
       if (op === '^=' && !got.startsWith(want)) return false;
       if (op === '$=' && !got.endsWith(want)) return false;
     } else {
@@ -292,6 +329,9 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
       let hit: FakeEl | null = null;
       for (const n of all()) {
         if (n === root) continue;
+        // ⭐ **只考虑显式给了 rect 的元素** —— 没给的直接跳过,
+        // 既不编造矩形(幻影命中区),也不因为读几何而抛错。
+        if (!n.hasRect) continue;
         const r = n.getBoundingClientRect();
         if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
           hit = n;        // 后来的覆盖先前的 —— 近似「上层胜出」
