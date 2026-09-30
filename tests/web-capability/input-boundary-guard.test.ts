@@ -12,7 +12,7 @@
  * 剥错了(把字符串也当注释)会**永远绿**。故第一组用例专门自检剥注释真的在工作。
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildAnchorExistsScript,
@@ -37,6 +37,30 @@ function stripComments(code: string): string {
 const sources = readdirSync(INPUT_DIR)
   .filter((n) => n.endsWith('.ts'))
   .map((n) => ({ path: `input/${n}`, code: stripComments(readFileSync(join(INPUT_DIR, n), 'utf-8')) }));
+
+/**
+ * 全仓源码(给「已退役原语不许复活」那条用)。
+ * ⚠️ 剥注释:注释里提到退役原语的名字是**正常的**(本文件自己就提了好几次),
+ * 只有真调用才算违规。
+ */
+function allRepoSources(): { path: string; code: string }[] {
+  const out: { path: string; code: string }[] = [];
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(e.name)) {
+        out.push({
+          path: full.replace(process.cwd() + '/', ''),
+          code: stripComments(readFileSync(full, 'utf-8')),
+        });
+      }
+    }
+  };
+  walk(join(process.cwd(), 'src'));
+  return out;
+}
 
 describe('守卫自检 —— 先证明剥注释真的在工作', () => {
   it('本层源码里确实存在只出现在注释中的敏感词(否则守卫是空转的)', () => {
@@ -207,19 +231,57 @@ describe('🚦 底座不做判断(§2 / §10.3)', () => {
   });
 });
 
-describe('⭐ 只加不改 —— 旧的 web-service-base 一个字没动', () => {
-  it('webview-input.ts / webview-file-input.ts 仍是三家在用的原件', () => {
-    // 「收编」是搬移,不是改造。旧文件现在有 AI / X 发推 / X 长文三家在用,
-    // 动它就等于在没有安全网的情况下改三条产线。
+describe('⭐ 旧的 web-service-base:仍在服役的原样保留,零消费者的已退役', () => {
+  /**
+   * ⚠️ 本段的前提 2026-09-30 变了,连同断言一起改 —— **不是放宽,是对齐现实**。
+   *
+   * 原文写「三家在用(AI / X 发推 / X 长文),动它就等于在没有安全网的情况下改三条产线」。
+   * X 推倒后(6234646e)那两家没了,于是五个原语分成两拨:
+   *
+   *  · `focusInputBox` / `pasteTextToWebview` —— **AI 还在用**(`ai/writer.ts`),原样保留
+   *  · `locateSendButton` / `feedFilesToInput` / `feedVideoToInput` —— **零消费者**,已退役
+   *
+   * ⭐ 退役而不是留着,依据用户 2026-09-30 定的「一层算完成」硬规矩之二:
+   * **旧实现当场删或降级为带守卫的死代码;留着两份平行实现 = 下次有人改错那份。**
+   * 能力没丢:`web-capability` 的 `input.feed()` + `check:{kind:'anchorAppears'}`
+   * 覆盖同一件事,连「已 attach 就复用且末尾不 detach」那条约束一起搬了。
+   */
+  it('仍在服役的两个原语原样导出(AI 在用,不许动)', () => {
     const base = join(process.cwd(), 'src/platform/main/web-service-base');
     const oldInput = readFileSync(join(base, 'webview-input.ts'), 'utf-8');
-    const oldFile = readFileSync(join(base, 'webview-file-input.ts'), 'utf-8');
-    // 三个被收编的原语仍原样导出 —— 它们还在服役
     expect(oldInput).toContain('export async function focusInputBox');
     expect(oldInput).toContain('export async function pasteTextToWebview');
-    expect(oldInput).toContain('export async function locateSendButton');
-    expect(oldFile).toContain('export async function feedFilesToInput');
-    expect(oldFile).toContain('export async function feedVideoToInput');
+  });
+
+  it('⭐ 已退役的三个原语真的不在了(否则就是两份平行实现)', () => {
+    const base = join(process.cwd(), 'src/platform/main/web-service-base');
+    expect(
+      existsSync(join(base, 'webview-file-input.ts')),
+      'webview-file-input.ts 又回来了 —— 它的能力已由 web-capability 的 input.feed() 承接',
+    ).toBe(false);
+    const oldInput = readFileSync(join(base, 'webview-input.ts'), 'utf-8');
+    expect(oldInput, 'locateSendButton 又出现了 —— 零消费者的原语不该复活').not.toContain(
+      'export async function locateSendButton',
+    );
+  });
+
+  it('⭐⭐ 退役的前提是「真的没人用」—— 一旦有人用就必须先把它接回底座', () => {
+    /**
+     * ⚠️ 这条守的是**将来**:若哪天有人写了 `feedFilesToInput(...)`,
+     * 说明他需要这个能力却找不到新的入口(`input.feed()`)——
+     * 那是文档/发现性的问题,不该靠重新长出一份旧实现来解决。
+     */
+    const offenders: string[] = [];
+    for (const { path, code } of allRepoSources()) {
+      if (/\b(feedFilesToInput|feedVideoToInput|locateSendButton)\s*\(/.test(code)) {
+        offenders.push(path);
+      }
+    }
+    expect(
+      offenders,
+      '有人在调用已退役的原语 —— 请改用 web-capability 的 input.feed()/tap():\n  '
+      + offenders.join('\n  '),
+    ).toEqual([]);
   });
 
   it('新层零处 import 旧的 web-service-base(是搬移,不是包装)', () => {

@@ -57,13 +57,42 @@ describe('⭐⭐ 新链路真的接上了(不是形式上接了)', () => {
     expect(body).toMatch(/unsubscribeNet/);
   });
 
-  it('⭐ 旧 CDP 实现保留但**零调用方**(`08` §1.2 不删旧实现)', () => {
-    // 保留是为了出问题能对照,不是为了兜底。零调用 = 它不可能悄悄接管。
-    expect(codeNoComments).toMatch(/private startGeminiCDPLegacy\(/);
-    // 除定义外不许出现调用(定义那行是 `private startGeminiCDPLegacy(`)
-    const calls = codeNoComments.match(/startGeminiCDPLegacy\s*\(/g) ?? [];
-    expect(calls, '旧实现必须零调用方,否则可能悄悄兜底').toHaveLength(1);
-    expect(codeNoComments).not.toMatch(/this\.startGeminiCDPLegacy\(/);
+  it('⭐⭐ 旧 CDP 实现已**删除**(2026-09-30 —— 从「保留对照」升级为「不留平行实现」)', () => {
+    /**
+     * ⚠️ 本条的规则变了,连同断言一起改 —— **不是放宽,是收紧**。
+     *
+     * 原规则(`08` §1.2):旧实现保留但零调用,"为了出问题能对照"。
+     * 当时合理:迁移刚做完,新路径还没被真机验证过。
+     *
+     * 新规则(用户 2026-09-30 定的「一层算完成」硬规矩之二):
+     * **旧实现当场删或降级为带守卫的死代码;留着两份平行实现 = 下次有人改错那份。**
+     * 新路径已服役数月(`netBus` / `bodyProvider`),对照的价值没了,
+     * 而"还有一份看起来能用的旧实现"的风险还在 —— git 历史才是对照的正确位置。
+     *
+     * ⭐ 同批退役的还有 `web-service-base` 的三个零消费者原语
+     * (`locateSendButton` / `feedFilesToInput` / `feedVideoToInput`)。
+     */
+    expect(
+      codeNoComments,
+      '旧 CDP 实现又回来了 —— 对照请查 git 历史,不要在仓里留第二份能跑的实现',
+    ).not.toMatch(/startGeminiCDPLegacy/);
+  });
+
+  it('⭐⭐ 删旧实现之后,本文件里**不许**再出现裸 CDP 网络抓取', () => {
+    /**
+     * ⭐ 这才是删旧实现真正要守住的东西:
+     * 「没有第二份实现」不等于「没人再写一份」。
+     * L1 收口的判据是 **CDP 网络抓取只有 web-capability 一个入口**。
+     *
+     * ⚠️ 只禁网络抓取三件套,不禁 `debugger` 全部 ——
+     * 将来若有正当的非网络 CDP 用法(如 Input 域),不该被这条误伤。
+     */
+    for (const bad of ['Network.enable', 'Network.getResponseBody', "debugger.on('message'"]) {
+      expect(
+        codeNoComments,
+        `裸 CDP 网络抓取又出现了(${bad})—— 载荷捕获只能走 web-capability 的 netBus`,
+      ).not.toContain(bad);
+    }
   });
 
   it('⭐ 对外接口一字未动(A 方案的边界)', () => {
