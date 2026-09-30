@@ -19,6 +19,7 @@ import { registerLinkClickIntegration } from './link-click-integration';
 import { registerAskAIPopup } from './ask-ai-popup';
 import { registerAISyncIntegration } from './ai-sync-integration';
 import { registerNoteCommands } from './note-commands';
+import { initNoteBaseSnapshotSync } from './data-model';
 
 registerView({
   /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
@@ -84,3 +85,8 @@ registerLinkClickIntegration();
 registerAskAIPopup();
 // ai-sync feature:左 ai-view + 右 note-view 槽组合下,AI 回复完成自动追加到 Note 末尾
 registerAISyncIntegration();
+
+// Phase 1 多窗口 merge:订阅其他窗口写成功后的 blockHashes 基线广播(全局一次性)。
+// ⭐ 2026-09-30 从 renderer/index.tsx 收进来 —— 它是无 wsId 依赖的全局副作用,
+// 留在 renderer 会让 note 多占一行接线(卸载 note 就要删两处)。
+initNoteBaseSnapshotSync();

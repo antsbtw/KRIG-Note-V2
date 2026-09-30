@@ -24,7 +24,6 @@ import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import { getActiveWorkspaceIdSync, onMyWsIdReady } from '@workspace/workspace-instance/use-workspace';
 import { runViewCommandRegistrars } from '@slot/view-type-registry/view-type-registry';
-import { initNoteBaseSnapshotSync } from '@views/note/data-model';
 
 // ── 系统主题同步（跟随 nativeTheme）──
 // 初始用 matchMedia 快速设一次，再用主进程权威值覆盖（避免 Chromium matchMedia 与
@@ -89,9 +88,6 @@ import './app.css';
 
 // S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。
 // 此处仍保留 getBus 初始化供 L3.5 alive 计数。
-
-// Phase 1 多窗口 merge:订阅其他窗口写成功后的 blockHashes 基线广播（全局一次性）
-initNoteBaseSnapshotSync();
 
 // U1-c1-batch + 多窗口(S3-b):命令注册必须在本窗口 myWsId 确定后才能执行。
 // 用 onMyWsIdReady 订阅——仅在本窗口 IPC 确认的 wsId 就绪后触发一次，
