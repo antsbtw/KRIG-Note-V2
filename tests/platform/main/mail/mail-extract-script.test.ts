@@ -89,3 +89,134 @@ describe('⭐ mail 提取脚本', () => {
     expect(build(), '异常没带回原因').toContain('__error');
   });
 });
+
+/**
+ * ⭐⭐ 行为测试 —— 造一个假 DOM,**真的跑**生成的脚本
+ *
+ * ── 为什么必须有这一段 ──
+ *
+ * 2026-09-30 独立复核实测:上面那些「源码文本断言」漏掉了三类破坏,
+ * 改完**全绿**:
+ *   ① 坐标从绑定退回裸拼(数字两种写法产出文本一模一样,文本断言分不出)
+ *   ② 加一行「带外找不到就拿第一封」(`box = best || list[0]`)
+ *   ③ `if (false && !box)` 让「没点中」那句永远不执行
+ *
+ * ⭐ ②③ 的共同点:**脚本文本仍然长得对,行为已经变了** ——
+ * 正是 `feedback-source-scan-cant-see-execution` 那一刀。
+ * 结构用源码扫描,**「会不会那样做」必须真的跑一遍**。
+ */
+describe('⭐⭐ 真跑脚本:行为不许漂', () => {
+  /** 一个够用的假 DOM:三个矩形容器纵向排列 */
+  function runScript(
+    script: string,
+    boxes: Array<{ top: number; bottom: number; left?: number; text?: string }>,
+    pointAt: { el: number | null },
+  ): Record<string, unknown> {
+    const nodes = boxes.map((b, i) => {
+      const node: Record<string, unknown> = {
+        getBoundingClientRect: () => ({
+          top: b.top, bottom: b.bottom, left: b.left ?? 0, right: 100,
+        }),
+        innerText: b.text ?? `mail-${i}`,
+        textContent: b.text ?? `mail-${i}`,
+        getAttribute: () => null,
+        querySelector: () => null,
+      };
+      node.closest = () => node;         // 命中自己
+      return node;
+    });
+    const doc = {
+      elementFromPoint: (): unknown => (pointAt.el === null ? null : nodes[pointAt.el]),
+      querySelectorAll: (): unknown[] => nodes,
+      querySelector: (): unknown => null,
+    };
+    /**
+     * ⚠️⚠️ **脚本必须用括号包住** —— 它以换行开头,
+     * 写成 `return ${script}` 会被 ASI 切成 `return;` + 一条孤立表达式,
+     * 于是**恒返回 undefined**,而且不报错。
+     *
+     * ⭐ 我第一版就是这么写的,四条行为测试全挂在这上面 ——
+     * 而上面那条「能被真正解析」的断言用的也是同一个写法:
+     * 它只验证了**文本能 parse**,并没有验证**求值出东西** ——
+     * 「能解析」与「跑得出结果」是两件事。
+     */
+    const fn = new Function('document', 'location', `return (${script});`);
+    return fn(doc, { href: 'https://mail.test/x' }) as Record<string, unknown>;
+  }
+
+  const SEL = '.zA';
+
+  it('⭐ 命中容器时,取的是被点的那一个', () => {
+    const script = buildExtractScript(50, 150, SEL, '', '');
+    // elementFromPoint 命中第 1 个(index 1)
+    const r = runScript(script, [
+      { top: 0, bottom: 100, text: 'A' },
+      { top: 100, bottom: 200, text: 'B' },
+      { top: 200, bottom: 300, text: 'C' },
+    ], { el: 1 });
+    expect(r.__noMail, '命中了却报没点中').toBeUndefined();
+    expect(r.bodyText, '取错了容器').toBe('B');
+  });
+
+  it('⭐⭐ 带外点击必须报 __noMail —— 不许兜底拿第一封', () => {
+    /**
+     * ⚠️ 这条就是假绿②要防的:`box = best || list[0]` 会让
+     * 「点在空白处」变成「悄悄提取第一封」,而文本断言看不出来。
+     */
+    const script = buildExtractScript(50, 9999, SEL, '', '');
+    const r = runScript(script, [
+      { top: 0, bottom: 100, text: 'A' },
+      { top: 100, bottom: 200, text: 'B' },
+    ], { el: null });   // 没命中任何容器,且 9999 远在 ±24 带外
+    expect(
+      r.__noMail,
+      '带外点击没报 __noMail —— 多半加了「找不到就拿第一封」的兜底,\n'
+      + '那会把「点在空白处」变成「悄悄提取了第一封」',
+    ).toBe(true);
+    expect(r.bodyText, '带外点击竟然取到了内容').toBeUndefined();
+  });
+
+  it('⭐⭐ `if (false)` 掐掉 __noMail 这条路要被抓到', () => {
+    /**
+     * 假绿③:把那句改成 `if (false && !box)` 后文本仍在、行为没了。
+     * 上一条已经覆盖它 —— 这里显式再钉一次「返回值里真的有这个标记」,
+     * 而不是「源码里有这行字」。
+     */
+    const script = buildExtractScript(50, 9999, SEL, '', '');
+    const r = runScript(script, [{ top: 0, bottom: 100 }], { el: null });
+    expect(Object.keys(r), '返回的不是 __noMail 信封').toContain('__noMail');
+  });
+
+  it('⭐ 间隙点击(±24 带内)回退到最近的那个', () => {
+    // y=112 落在两个容器之间的 12px 间隙里,带内 → 应回退到中心距更近的
+    const script = buildExtractScript(50, 112, SEL, '', '');
+    const r = runScript(script, [
+      { top: 0, bottom: 100, text: 'A' },     // 中心 50,距 62
+      { top: 124, bottom: 224, text: 'B' },   // 中心 174,距 62 —— 打平,取先命中的
+    ], { el: null });
+    expect(r.__noMail, '带内间隙点击被判成没点中').toBeUndefined();
+    expect(['A', 'B'], '回退取到了预期外的容器').toContain(r.bodyText);
+  });
+
+  it('⭐⭐ NaN / Infinity 坐标必须**抛**,不许静默取第一封', () => {
+    /**
+     * ⚠️⚠️ 2026-09-30 复核抓到的**真回归**:
+     * 我把坐标改成 `JSON.stringify(x)` 绑定,而
+     * `JSON.stringify(NaN)` === `'null'`,浏览器把 `elementFromPoint(null, null)`
+     * 当成 `(0,0)` → **悄悄提取最左边那封,不报任何错**。
+     * 改之前 NaN 原样进脚本,浏览器当场报错,用户看得见失败。
+     *
+     * ⭐ 教训:**`JSON.stringify` 对数字不是安全网**,挡坏数字只能靠校验。
+     */
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(
+        () => buildExtractScript(bad, 100, SEL, '', ''),
+        `x=${String(bad)} 没被拒绝 —— 会静默提取错的那封`,
+      ).toThrow(/有限数字/);
+      expect(
+        () => buildExtractScript(100, bad, SEL, '', ''),
+        `y=${String(bad)} 没被拒绝`,
+      ).toThrow(/有限数字/);
+    }
+  });
+});

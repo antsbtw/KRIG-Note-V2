@@ -29,8 +29,20 @@ export function registerMailHandlers(): void {
       if (typeof p.serviceId !== 'string' || !p.serviceId) {
         return { success: false, error: 'MAIL_EXTRACT 缺少 serviceId' };
       }
-      if (typeof p.x !== 'number' || typeof p.y !== 'number') {
-        return { success: false, error: 'MAIL_EXTRACT 坐标非法' };
+      /**
+       * ⚠️ `typeof === 'number'` **放行 NaN** —— 而 NaN 经 JSON.stringify
+       * 变 `null`、浏览器把它当 `0` → 静默提取最左边那封邮件,不报错。
+       * 2026-09-30 复核实测出来的回归,必须用 isFinite 收口。
+       *
+       * ⚠️ typeof 那一步仍要留:它负责把 unknown **收窄**成 number,
+       * isFinite 只负责排除 NaN/Infinity。两者缺一不可。
+       */
+      if (typeof p.x !== 'number' || typeof p.y !== 'number'
+          || !Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+        return {
+          success: false,
+          error: `MAIL_EXTRACT 坐标非法(x=${String(p.x)} y=${String(p.y)})`,
+        };
       }
       const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : null;
 

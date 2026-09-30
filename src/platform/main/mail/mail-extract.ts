@@ -80,6 +80,24 @@ export function buildExtractScript(
    * (带外也找、取「边缘距最近」+ maxDy 240)**不一样**,
    * 合并会改行为。收口批次不许顺手改语义,否则出问题分不清是谁带来的。
    */
+  /**
+   * ⚠️⚠️ **`JSON.stringify` 不是坏数字的安全网** —— 2026-09-30 复核实测:
+   * `JSON.stringify(NaN)` / `JSON.stringify(Infinity)` 都给 **`null`**,
+   * 而浏览器把 `elementFromPoint(null, null)` 当成 `(0, 0)` ——
+   * 于是**悄悄提取最左边那封邮件,不报任何错**。
+   *
+   * ⭐ 这是我这次改绑定**引入的回归**:改之前 NaN 原样进脚本、
+   * 浏览器当场报错、用户看得见失败。「从报错变成静默取错」比原来更坏。
+   *
+   * ⭐ 挡坏数字只能靠**校验**,不能靠序列化。同 `dom/locate-scripts.ts`
+   * 的 `requireNumber`。
+   */
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error(
+      `[mail-extract] 坐标必须是有限数字,收到 x=${String(x)} y=${String(y)}`
+      + ' —— 拒绝构造脚本(NaN/Infinity 会被浏览器当成 0,静默提取错的那封)',
+    );
+  }
   const bindX = JSON.stringify(x);
   const bindY = JSON.stringify(y);
   return `
@@ -189,13 +207,19 @@ export async function extractMail(
     return { success: false, error: `未知邮箱服务:${serviceId}` };
   }
 
-  const script = buildExtractScript(
-    x,
-    y,
-    profile.selectors.mailElement,
-    profile.selectors.mailBody,
-    profile.selectors.mailSubject,
-  );
+  let script: string;
+  try {
+    script = buildExtractScript(
+      x,
+      y,
+      profile.selectors.mailElement,
+      profile.selectors.mailBody,
+      profile.selectors.mailSubject,
+    );
+  } catch (e) {
+    // ⭐ 坐标非法在这里变成一个**说得出原因**的失败,而不是静默取错那封
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
 
   let raw: unknown;
   try {
